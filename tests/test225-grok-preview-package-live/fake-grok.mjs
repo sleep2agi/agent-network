@@ -70,13 +70,14 @@ if (argv.includes("--help")) {
     "--resume",
     "--cwd",
     "--sandbox",
+    "--agent",
     "--deny",
-    "--disallowed-tools",
     "--permission-mode",
     "--output-format",
     "--prompt-json",
-    "--tools",
+    "--disable-web-search",
     "--no-subagents",
+    "--no-memory",
   ].join("\n") + "\n");
   process.exit(0);
 }
@@ -87,6 +88,12 @@ if (argv[0] === "inspect" && argv.includes("--json")) {
     hooks: [],
     plugins: [],
     mcpServers: [],
+    lspServers: [],
+    agents: [
+      { name: "general-purpose", source: { type: "builtin" } },
+      { name: "explore", source: { type: "builtin" } },
+      { name: "plan", source: { type: "builtin" } },
+    ],
     permissionMode: "default",
     permissions: {
       sources: [],
@@ -114,6 +121,70 @@ const sessionId = resume
   : sessionIndex >= 0 ? argv[sessionIndex + 1] : "";
 const grokHome = process.env.GROK_HOME || process.env.HOME || os.homedir();
 const trustStorePath = path.join(grokHome, "trusted_folders.toml");
+const sandboxStorePath = path.join(grokHome, "sandbox.toml");
+const expectedAgentProfilePath = path.join(grokHome, "anet-copresence-preview.md");
+const expectedAgentProfile = [
+  "---",
+  "name: anet-copresence-preview",
+  "description: Fixed text-only Agent Network co-presence preview profile",
+  "injectDefaultTools: false",
+  "discoverSkills: false",
+  "inheritSkills: false",
+  "tools:",
+  "  - todo_write",
+  "disallowedTools:",
+  "  - search_tool",
+  "  - use_tool",
+  "---",
+  "ANET_COPRESENCE_PROFILE_V1: Answer the current user directly. Do not claim filesystem, shell, network, media, MCP, or subagent access.",
+  "",
+].join("\n");
+
+function verifyAgentProfile() {
+  const selected = valueAfter("--agent");
+  try {
+    const stat = fs.lstatSync(selected);
+    return selected === expectedAgentProfilePath
+      && path.isAbsolute(selected)
+      && !stat.isSymbolicLink()
+      && stat.isFile()
+      && stat.nlink === 1
+      && (stat.mode & 0o777) === 0o600
+      && fs.realpathSync(selected) === selected
+      && fs.readFileSync(selected, "utf8") === expectedAgentProfile;
+  } catch {
+    return false;
+  }
+}
+
+function selectedSandboxObservation() {
+  const authPath = process.env.GROK_AUTH_PATH || "";
+  const selectedProfile = valueAfter("--sandbox");
+  if (!authPath || !selectedProfile) return { profileMatched: false, authPathDenied: true };
+  try {
+    const lines = fs.readFileSync(sandboxStorePath, "utf8").split("\n");
+    const header = `[profiles.${JSON.stringify(selectedProfile)}]`;
+    const start = lines.indexOf(header);
+    if (start < 0) return { profileMatched: false, authPathDenied: true };
+    const endOffset = lines.slice(start + 1).findIndex((line) => line.startsWith("[profiles."));
+    const end = endOffset < 0 ? lines.length : start + 1 + endOffset;
+    const denyLine = lines.slice(start + 1, end).find((line) => line.startsWith("deny = ["));
+    if (!denyLine?.endsWith("]")) return { profileMatched: false, authPathDenied: true };
+    const denyPaths = JSON.parse(denyLine.slice("deny = ".length));
+    if (!Array.isArray(denyPaths) || !denyPaths.every((item) => typeof item === "string")) {
+      return { profileMatched: false, authPathDenied: true };
+    }
+    const denied = denyPaths.some((denyPath) => {
+      const relativePath = path.relative(path.resolve(denyPath), path.resolve(authPath));
+      return relativePath === ""
+        || (relativePath !== ".." && !relativePath.startsWith(`..${path.sep}`)
+          && !path.isAbsolute(relativePath));
+    });
+    return { profileMatched: true, authPathDenied: denied };
+  } catch {
+    return { profileMatched: false, authPathDenied: true };
+  }
+}
 
 function verifyExactFolderTrust() {
   let content = "";
@@ -139,6 +210,23 @@ function verifyExactFolderTrust() {
 }
 
 const trustObservation = verifyExactFolderTrust();
+const sandboxObservation = selectedSandboxObservation();
+const authPathSandboxDenied = sandboxObservation.authPathDenied;
+const deniedTools = argv.flatMap((value, index) => argv[index - 1] === "--deny" ? [value] : []);
+const requiredDenyToolsPresent = ["Bash", "Write", "MCPTool", "WebFetch"]
+  .every((tool) => deniedTools.includes(tool));
+const agentProfileExact = verifyAgentProfile();
+const tuiFlagsExact = ["--no-auto-update", "--disable-web-search", "--no-subagents", "--no-memory"]
+  .every((flag) => argv.includes(flag))
+  && !argv.includes("--tools")
+  && !argv.includes("--disallowed-tools")
+  && !argv.includes("--max-turns");
+const authSourceHome = path.dirname(path.resolve(process.env.GROK_AUTH_PATH || "/missing/auth.json"));
+const requiredProtectedPathDeniesPresent = [path.resolve(grokHome), authSourceHome].every((root) =>
+  ["Read", "Grep", "Edit"].every((tool) =>
+    deniedTools.includes(`${tool}(${root})`) && deniedTools.includes(`${tool}(${root}/**)`),
+  ),
+);
 
 if (!argv.includes("--leader") || !leaderSocket || !sessionId) {
   process.stderr.write("fake grok: main TUI requires --leader, leader socket, and session id\n");
@@ -147,6 +235,22 @@ if (!argv.includes("--leader") || !leaderSocket || !sessionId) {
 if (!trustObservation.exact) {
   process.stderr.write("fake grok: exact owner-only folder trust was not prepared\n");
   process.exit(65);
+}
+if (authPathSandboxDenied) {
+  process.stderr.write("fake grok: GROK_AUTH_PATH would be bind-blocked before the first turn\n");
+  process.exit(66);
+}
+if (!requiredDenyToolsPresent) {
+  process.stderr.write("fake grok: shared TUI must hard-deny Bash and Write\n");
+  process.exit(67);
+}
+if (!requiredProtectedPathDeniesPresent) {
+  process.stderr.write("fake grok: shared TUI must protect source and state homes from model file tools\n");
+  process.exit(68);
+}
+if (!agentProfileExact || !tuiFlagsExact) {
+  process.stderr.write("fake grok: shared TUI fixed agent profile or effective flags are invalid\n");
+  process.exit(69);
 }
 
 const sessionDir = path.join(
@@ -173,6 +277,12 @@ recordEnvironment("spawn", {
   folderTrustExact: trustObservation.exact,
   folderTrustMode: trustObservation.mode,
   folderTrustCount: trustObservation.folderCount,
+  selectedSandboxProfileMatched: sandboxObservation.profileMatched,
+  authPathSandboxDenied,
+  requiredDenyToolsPresent,
+  requiredProtectedPathDeniesPresent,
+  agentProfileExact,
+  tuiFlagsExact,
   ...readDerivedProcessEnvironment(expectedParentPid),
 });
 

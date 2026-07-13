@@ -22,6 +22,10 @@ import {
 import { basename, dirname, isAbsolute, join, relative, resolve } from "path";
 import { homedir } from "os";
 import { buildGrokHelperEnv } from "./grok-child-env";
+import {
+  GROK_COPRESENCE_AGENT_FILE,
+  renderGrokCopresenceAgentProfile,
+} from "./grok-copresence/policy";
 
 export interface PrepareGrokCliHomeOptions {
   sourceHome: string;
@@ -40,6 +44,8 @@ export interface GrokCliHome {
   oidcClientId?: string;
   readOnlyProfile: string;
   workspaceProfile: string;
+  /** Absolute runtime-owned profile passed through the TUI-effective --agent flag. */
+  copresenceAgentProfile?: string;
 }
 
 export interface GrokProjectTurnLock {
@@ -541,6 +547,7 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
   const stateRoot = resolve(opts.stateRoot);
   const stateHome = resolve(opts.stateHome);
   const authPath = join(sourceHome, "auth.json");
+  const resolvedDenyPaths = [...new Set(opts.denyPaths.filter(Boolean).map((path) => resolve(path)))];
   const sourceHomeStat = lstatIfPresent(sourceHome);
   if (!sourceHomeStat || sourceHomeStat.isSymbolicLink() || !sourceHomeStat.isDirectory()) {
     throw new Error("grok-build-cli source GROK_HOME must be an existing real directory");
@@ -565,6 +572,11 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
   if (opts.useLeader === true && !opts.projectCwd) {
     throw new Error("grok-build-cli shared TUI requires an explicit project cwd for folder trust");
   }
+  if (opts.useLeader === true && resolvedDenyPaths.some((path) => pathContains(path, authPath))) {
+    throw new Error(
+      "grok-build-cli shared TUI auth path overlaps a required sandbox deny; choose a separate GROK_HOME",
+    );
+  }
   // Validate project trust before creating, deleting, or rewriting any state.
   const projectCwd = opts.projectCwd
     ? (opts.useLeader === true
@@ -588,6 +600,12 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
     "hooks",
     "hooks-paths",
     "plugins",
+    "agents",
+    "skills",
+    "commands",
+    "lsp",
+    "lsp-servers",
+    "lsp.json",
     "settings.json",
     "managed_config.toml",
     "requirements.toml",
@@ -604,9 +622,7 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
 
   const readOnlyProfile = `${profileId}-read-only`;
   const workspaceProfile = `${profileId}-workspace`;
-  const existingSecretPaths = opts.denyPaths
-    .filter((path) => path && existsSync(path))
-    .map((path) => resolve(path));
+  const existingSecretPaths = resolvedDenyPaths.filter((path) => existsSync(path));
   if (!existingSecretPaths.length) {
     throw new Error("grok-build-cli cannot create a sandbox without an existing secret path to deny");
   }
@@ -614,8 +630,14 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
   // workspace turn could create `.grok`, `.claude`, or `.mcp.json` and have a
   // restarted TUI load executable hooks/MCPs or preauthorization state.
   const requestedDenyPaths = [...new Set([
-    ...opts.denyPaths.filter(Boolean).map((path) => resolve(path)),
-    authPath,
+    ...resolvedDenyPaths,
+    // Pinned 0.2.93 re-execs the shared TUI through this custom sandbox and
+    // lazily loads GROK_AUTH_PATH on its first turn. Bind-blocking that path
+    // leaves the Leader/TUI apparently healthy but makes every real turn fail.
+    // The co-presence argv hard-denies Bash and separately denies Read/Grep/
+    // Edit over sourceHome, so keep the shared owner-only auth/refresh lock
+    // reachable by the process without exposing it as a model tool path.
+    ...(opts.useLeader === true ? [] : [authPath]),
     ...(opts.projectCwd ? grokProjectPolicyPaths(opts.projectCwd) : []),
   ])];
   const denyPaths = requestedDenyPaths.filter((candidate) => !requestedDenyPaths.some((parent) => {
@@ -681,6 +703,13 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
     removeGeneratedFile(trustStorePath);
   }
 
+  const copresenceAgentProfile = join(stateHome, GROK_COPRESENCE_AGENT_FILE);
+  if (opts.useLeader === true) {
+    writeGeneratedFile(copresenceAgentProfile, renderGrokCopresenceAgentProfile());
+  } else {
+    removeGeneratedFile(copresenceAgentProfile);
+  }
+
   if (opts.useLeader === true) {
     // Defense in depth and forward compatibility. The PTY arbiter remains the
     // actual enforcement boundary because 0.2.93 applies this lock reliably
@@ -724,5 +753,6 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
     ...(oidcIssuer && oidcClientId ? { oidcIssuer, oidcClientId } : {}),
     readOnlyProfile,
     workspaceProfile,
+    ...(opts.useLeader === true ? { copresenceAgentProfile } : {}),
   };
 }

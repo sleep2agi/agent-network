@@ -58,7 +58,7 @@ CLI flags:
 | `codex-sdk` | [@openai/codex-sdk](https://www.npmjs.com/package/@openai/codex-sdk) | unverified end-to-end | unit tests pass, no full E2E with real codex auth |
 | `claude-code-cli` | local `claude` CLI | unverified end-to-end | runs locally for Claude Pro subscribers (v0.8.2 fixed the session-resume default-loss bug; see [changelog](https://anet.sh/en/changelog)) |
 | `grok-build-acp` | local `grok agent stdio` | stable runtime, native MCP injection boundary remains preview | requires Grok Build CLI login; stable for receive/reply, session persistence, and explicit CommHub delegation handled by agent-node |
-| `grok-build-cli` | local Grok TUI or process-per-turn Grok CLI | dangerous experimental preview | defaults to shared-TUI co-presence when created by `anet`; Linux and exact Grok `0.2.93 (f00f96316d)` required; trusted tasks only |
+| `grok-build-cli` | local Grok TUI or process-per-turn Grok CLI | dangerous experimental preview | shared TUI is text-only with fixed `[todo_write]`; Linux and exact Grok `0.2.93 (f00f96316d)` required; trusted tasks only |
 | `http-api` | OpenAI/Anthropic-compatible HTTP | experimental | reads `ANTHROPIC_*`, `OPENAI_*`, or `MINIMAX_CODING_API_KEY` environment variables |
 
 Runtimes are loaded lazily — picking one doesn't pull the others' dependencies. `claude-code-cli` adds zero extra SDK weight.
@@ -97,7 +97,7 @@ Known boundary:
 The preview is currently supported only on Linux with procfs mounted at `/proc` (including `/proc/self/fd`) and is pinned to build `grok 0.2.93 (f00f96316d)`; the known stable installer prints the same build with an optional trailing ` [stable]`. Install and authenticate that Grok CLI build as the same operating-system user that runs the node:
 
 ```bash
-grok auth login
+grok login
 grok --version
 ```
 
@@ -116,7 +116,14 @@ anet grok attach grok-shared
 
 `anet node start` owns the Grok PTY and the local attach socket. `anet grok attach` relays that same terminal and detaches on `Ctrl-]`. A task delivered by CommHub is submitted into the visible shared session, and the completed answer is routed back to the originating task.
 
-If no compatible global `agent-node` is installed, `anet` uses `npx -y @sleep2agi/agent-node@preview` to fetch and resolve the package, verifies preview metadata plus the machine-readable `ANET_CAPABILITY_GROK_COPRESENCE_V1` marker, and then launches the resolved entrypoint directly so stop signals reach the real runtime. An older headless-only package that merely lists `grok-build-cli` does not pass this check. First start therefore needs npm registry access or an already populated npm cache. An incompatible global package is not silently allowed to select another runtime.
+For credential isolation, this preview selects a runtime-owned TUI agent
+profile with the exact model-tool inventory `[todo_write]`. Filesystem, shell,
+network, media, MCP, scheduler, and subagent tools are unavailable. Generic
+`tools` and `maxTurns` settings are rejected in co-presence because pinned
+Grok ignores those CLI flags in interactive mode. This is a text-only shared
+conversation preview, not a coding runtime.
+
+If no compatible global `agent-node` is installed, `anet` uses `npx -y @sleep2agi/agent-node@preview` to fetch and resolve the package, verifies preview metadata plus the machine-readable `ANET_CAPABILITY_GROK_COPRESENCE_V2` marker, and then launches the resolved entrypoint directly so stop signals reach the real runtime. An older headless-only or V1 co-presence package does not pass this check. First start therefore needs npm registry access or an already populated npm cache. An incompatible global package is not silently allowed to select another runtime.
 
 This preview supports the CommHub inbox lane used by `anet node start`.
 Feishu configuration is rejected for `grok-build-cli`: its forked worker log

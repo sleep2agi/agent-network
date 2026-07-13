@@ -131,6 +131,8 @@ node -e '
   || fail "candidate package metadata does not force the preview dist-tag"
 grep -aFq 'grok-build-cli' "$EXTRACTED/agent-node/package/dist/cli.js" \
   || fail "agent-node candidate lacks grok-build-cli runtime"
+grep -aFq 'ANET_CAPABILITY_GROK_COPRESENCE_V2' "$EXTRACTED/agent-node/package/dist/cli.js" \
+  || fail "agent-node candidate lacks the fixed-profile co-presence capability marker"
 grep -aFq 'grok-build-cli preview currently refuses Feishu channels' \
   "$EXTRACTED/agent-node/package/dist/cli.js" \
   || fail "agent-node candidate lacks the Grok-preview Feishu fail-closed gate"

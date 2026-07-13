@@ -37,6 +37,10 @@ export const GROK_CHILD_CONTROLLED_ENV_KEYS = [
   "GROK_CURSOR_HOOKS_ENABLED",
   "GROK_FOLDER_TRUST",
   "GROK_DEFAULT_SELECTED_PERMISSION",
+  "GROK_DISABLE_AUTOUPDATER",
+  "GROK_SUBAGENTS",
+  "GROK_WEB_FETCH",
+  "GROK_MEMORY",
   "ANET_EXPECTED_PARENT_PID",
 ] as const;
 
@@ -98,6 +102,12 @@ export function buildGrokChildEnv(opts: BuildGrokChildEnvOptions): NodeJS.Proces
   env.GROK_CLAUDE_HOOKS_ENABLED = "false";
   env.GROK_CURSOR_HOOKS_ENABLED = "false";
   env.GROK_FOLDER_TRUST = "1";
+  // The preview pins one audited binary and one fixed no-I/O agent profile.
+  // Keep the same posture across every preflight, Leader and recovery spawn.
+  env.GROK_DISABLE_AUTOUPDATER = "1";
+  env.GROK_SUBAGENTS = "0";
+  env.GROK_WEB_FETCH = "0";
+  env.GROK_MEMORY = "0";
   if (opts.oidcIssuer) env.GROK_OIDC_ISSUER = opts.oidcIssuer;
   if (opts.oidcClientId) env.GROK_OIDC_CLIENT_ID = opts.oidcClientId;
   if (opts.expectedParentPid !== undefined) {

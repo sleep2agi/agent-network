@@ -61,6 +61,9 @@ describe("Grok copresence profile defaults", () => {
   test("does not mistake an old headless-only agent-node for co-presence support", () => {
     expect(agentNodeHelpSupportsGrokCopresence("grok-build-cli — Grok Build CLI headless")).toBe(false);
     expect(agentNodeHelpSupportsGrokCopresence(
+      "grok-build-cli — ANET_CAPABILITY_GROK_COPRESENCE_V1 legacy preview",
+    )).toBe(false);
+    expect(agentNodeHelpSupportsGrokCopresence(
       `grok-build-cli — ${GROK_COPRESENCE_CAPABILITY_MARKER} 模式`,
     )).toBe(true);
   });

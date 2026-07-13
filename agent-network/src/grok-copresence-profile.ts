@@ -14,7 +14,10 @@ import {
 import { isAbsolute, join } from "path";
 
 export const GROK_UNIX_SOCKET_PATH_MAX_BYTES = 100;
-export const GROK_COPRESENCE_CAPABILITY_MARKER = "ANET_CAPABILITY_GROK_COPRESENCE_V1";
+// V2 means the child uses the runtime-owned fixed no-I/O profile. V1 previews
+// used TUI-ignored --tools flags and must never shadow this package via a
+// pre-existing global agent-node installation.
+export const GROK_COPRESENCE_CAPABILITY_MARKER = "ANET_CAPABILITY_GROK_COPRESENCE_V2";
 export const GROK_PREVIEW_RESOLVER_INHERITED_ENV_KEYS = [
   "PATH", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "LC_CTYPE", "TZ",
 ] as const;

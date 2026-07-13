@@ -20,6 +20,7 @@ import {
   grokCliStateKey,
   prepareGrokCliHome,
 } from "./grok-build-cli-home";
+import { assertGrokCopresenceAgentProfile } from "./grok-copresence/policy";
 
 const roots: string[] = [];
 
@@ -63,6 +64,8 @@ describe("prepareGrokCliHome", () => {
     expect(config).toContain("[session]\nload_envrc = false");
     expect(existsSync(join(stateHome, "requirements.toml"))).toBe(false);
     expect(existsSync(join(stateHome, "trusted_folders.toml"))).toBe(false);
+    expect(first.copresenceAgentProfile).toBeUndefined();
+    expect(existsSync(join(stateHome, "anet-copresence-preview.md"))).toBe(false);
     const sandbox = readFileSync(join(stateHome, "sandbox.toml"), "utf8");
     expect(sandbox).toContain(secretDir);
     expect(sandbox).toContain(join(sourceHome, "auth.json"));
@@ -175,8 +178,15 @@ describe("prepareGrokCliHome", () => {
     const secretDir = join(root, "project", ".anet");
     mkdirSync(sourceHome, { recursive: true });
     mkdirSync(secretDir, { recursive: true });
+    const sourceAuth = join(sourceHome, "auth.json");
+    writeFileSync(sourceAuth, "{}\n", { mode: 0o600 });
+    for (const extensionDir of ["agents", "skills", "commands", "lsp", "lsp-servers"]) {
+      mkdirSync(join(stateHome, extensionDir), { recursive: true });
+      writeFileSync(join(stateHome, extensionDir, "stale"), "must be removed\n");
+    }
+    writeFileSync(join(stateHome, "lsp.json"), "{}\n");
 
-    prepareGrokCliHome({
+    const prepared = prepareGrokCliHome({
       sourceHome,
       stateRoot: dirname(stateHome),
       stateHome,
@@ -201,6 +211,70 @@ describe("prepareGrokCliHome", () => {
     expect(sandbox).toContain(join(root, "project", ".grok"));
     expect(sandbox).toContain(join(root, "project", ".claude"));
     expect(sandbox).toContain(join(root, "project", ".mcp.json"));
+    expect(sandbox).not.toContain(sourceAuth);
+    for (const extensionDir of ["agents", "skills", "commands", "lsp", "lsp-servers"]) {
+      expect(existsSync(join(stateHome, extensionDir))).toBe(false);
+    }
+    expect(existsSync(join(stateHome, "lsp.json"))).toBe(false);
+    expect(prepared.copresenceAgentProfile).toBe(join(stateHome, "anet-copresence-preview.md"));
+    const agentProfile = readFileSync(prepared.copresenceAgentProfile!, "utf8");
+    expect(agentProfile).toContain("injectDefaultTools: false");
+    expect(agentProfile).toContain("discoverSkills: false");
+    expect(agentProfile).toContain("inheritSkills: false");
+    expect(agentProfile).toContain("ANET_COPRESENCE_PROFILE_V1");
+    expect(agentProfile).toContain("tools:\n  - todo_write\n");
+    expect(agentProfile).toContain("disallowedTools:\n  - search_tool\n  - use_tool\n");
+    expect(agentProfile).not.toMatch(/^  - (?:read_file|search_replace|run_terminal|web_|image_|video_)/m);
+    expect(statSync(prepared.copresenceAgentProfile!).mode & 0o777).toBe(0o600);
+    expect(() => assertGrokCopresenceAgentProfile(prepared.copresenceAgentProfile!, stateHome))
+      .not.toThrow();
+    chmodSync(prepared.copresenceAgentProfile!, 0o666);
+    expect(() => assertGrokCopresenceAgentProfile(prepared.copresenceAgentProfile!, stateHome))
+      .toThrow("owner-only regular file");
+    prepareGrokCliHome({
+      sourceHome,
+      stateRoot: dirname(stateHome),
+      stateHome,
+      denyPaths: [secretDir],
+      projectCwd: join(root, "project"),
+      useLeader: true,
+    });
+    writeFileSync(prepared.copresenceAgentProfile!, "---\nname: changed\n---\n", { mode: 0o600 });
+    expect(() => assertGrokCopresenceAgentProfile(prepared.copresenceAgentProfile!, stateHome))
+      .toThrow("differs from the fixed preview policy");
+    prepareGrokCliHome({
+      sourceHome,
+      stateRoot: dirname(stateHome),
+      stateHome,
+      denyPaths: [secretDir],
+      projectCwd: join(root, "project"),
+      useLeader: true,
+    });
+    expect(() => assertGrokCopresenceAgentProfile(prepared.copresenceAgentProfile!, stateHome))
+      .not.toThrow();
+    const externalProfile = join(root, "external-agent.md");
+    writeFileSync(externalProfile, "external\n", { mode: 0o644 });
+    rmSync(prepared.copresenceAgentProfile!);
+    symlinkSync(externalProfile, prepared.copresenceAgentProfile!);
+    expect(() => prepareGrokCliHome({
+      sourceHome,
+      stateRoot: dirname(stateHome),
+      stateHome,
+      denyPaths: [secretDir],
+      projectCwd: join(root, "project"),
+      useLeader: true,
+    })).toThrow("expected a regular file");
+    expect(readFileSync(externalProfile, "utf8")).toBe("external\n");
+    expect(statSync(externalProfile).mode & 0o777).toBe(0o644);
+    rmSync(prepared.copresenceAgentProfile!);
+    prepareGrokCliHome({
+      sourceHome,
+      stateRoot: dirname(stateHome),
+      stateHome,
+      denyPaths: [secretDir],
+      projectCwd: join(root, "project"),
+      useLeader: true,
+    });
 
     prepareGrokCliHome({
       sourceHome,
@@ -212,8 +286,33 @@ describe("prepareGrokCliHome", () => {
     });
     expect(existsSync(join(stateHome, "requirements.toml"))).toBe(false);
     expect(existsSync(trustStore)).toBe(false);
+    expect(existsSync(join(stateHome, "anet-copresence-preview.md"))).toBe(false);
     expect(readFileSync(join(stateHome, "config.toml"), "utf8"))
       .not.toContain("default_selected_permission");
+    expect(readFileSync(join(stateHome, "sandbox.toml"), "utf8")).toContain(sourceAuth);
+  });
+
+  it("rejects a shared auth path covered by a required sandbox deny before state mutation", () => {
+    const root = mkdtempSync(join(tmpdir(), "grok-cli-home-auth-overlap-"));
+    roots.push(root);
+    const protectedRoot = join(root, "protected");
+    const sourceHome = join(protectedRoot, "source");
+    const stateRoot = join(root, "state-root");
+    const stateHome = join(stateRoot, "node");
+    const project = join(root, "project");
+    mkdirSync(sourceHome, { recursive: true });
+    mkdirSync(project, { recursive: true });
+    writeFileSync(join(sourceHome, "auth.json"), "{}\n", { mode: 0o600 });
+
+    expect(() => prepareGrokCliHome({
+      sourceHome,
+      stateRoot,
+      stateHome,
+      denyPaths: [protectedRoot],
+      projectCwd: project,
+      useLeader: true,
+    })).toThrow("auth path overlaps a required sandbox deny");
+    expect(existsSync(stateRoot)).toBe(false);
   });
 
   it("refuses to claim sandbox isolation when no deny target exists", () => {

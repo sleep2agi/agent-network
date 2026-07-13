@@ -28,6 +28,12 @@ describe("Grok child environment boundary", () => {
       COMMHUB_TOKEN: "ntok_private",
       COMMHUB_AUTH_TOKEN: "utok_private",
       CURRENT_TASK_ID: "task-private",
+      GROK_AGENT: "/tmp/unreviewed-agent.md",
+      GROK_SANDBOX: "off",
+      GROK_DISABLE_AUTOUPDATER: "0",
+      GROK_SUBAGENTS: "1",
+      GROK_WEB_FETCH: "1",
+      GROK_MEMORY: "1",
     };
 
     const actual = buildGrokChildEnv({
@@ -55,6 +61,10 @@ describe("Grok child environment boundary", () => {
       GROK_CLAUDE_HOOKS_ENABLED: "false",
       GROK_CURSOR_HOOKS_ENABLED: "false",
       GROK_FOLDER_TRUST: "1",
+      GROK_DISABLE_AUTOUPDATER: "1",
+      GROK_SUBAGENTS: "0",
+      GROK_WEB_FETCH: "0",
+      GROK_MEMORY: "0",
       GROK_OIDC_ISSUER: "https://accounts.example.invalid",
       GROK_OIDC_CLIENT_ID: "reviewed-public-client-id",
       ANET_EXPECTED_PARENT_PID: "4321",
@@ -68,10 +78,14 @@ describe("Grok child environment boundary", () => {
       "GROK_CURSOR_HOOKS_ENABLED",
       "GROK_CURSOR_MCPS_ENABLED",
       "GROK_DEFAULT_SELECTED_PERMISSION",
+      "GROK_DISABLE_AUTOUPDATER",
       "GROK_FOLDER_TRUST",
       "GROK_HOME",
+      "GROK_MEMORY",
       "GROK_OIDC_CLIENT_ID",
       "GROK_OIDC_ISSUER",
+      "GROK_SUBAGENTS",
+      "GROK_WEB_FETCH",
       "HOME",
       "LANG",
       "PATH",
@@ -79,6 +93,8 @@ describe("Grok child environment boundary", () => {
       "TERM",
       "TMPDIR",
     ]);
+    expect(actual.GROK_AGENT).toBeUndefined();
+    expect(actual.GROK_SANDBOX).toBeUndefined();
   });
 
   it("re-projects a beforeSpawn result instead of trusting arbitrary keys", () => {
@@ -126,6 +142,15 @@ describe("Grok child environment boundary", () => {
     }, baseline)).toThrow("GROK_DEFAULT_SELECTED_PERMISSION");
     expect(() => projectGrokChildEnv({
       ...baseline,
+      GROK_SUBAGENTS: "1",
+    }, baseline)).toThrow("GROK_SUBAGENTS");
+    expect(projectGrokChildEnv({
+      ...baseline,
+      GROK_AGENT: "/tmp/unreviewed-agent.md",
+      GROK_SANDBOX: "off",
+    }, baseline)).toEqual(baseline);
+    expect(() => projectGrokChildEnv({
+      ...baseline,
       PATH: "/tmp/unreviewed-bin:/bin",
     }, baseline)).toThrow("PATH");
     expect(() => projectGrokChildEnv({
@@ -158,6 +183,10 @@ describe("Grok child environment boundary", () => {
       GROK_CLAUDE_HOOKS_ENABLED: "false",
       GROK_CURSOR_HOOKS_ENABLED: "false",
       GROK_FOLDER_TRUST: "1",
+      GROK_DISABLE_AUTOUPDATER: "1",
+      GROK_SUBAGENTS: "0",
+      GROK_WEB_FETCH: "0",
+      GROK_MEMORY: "0",
       PWD: "/workspace/project",
       TERM: "xterm-256color",
     });

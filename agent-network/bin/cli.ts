@@ -957,7 +957,7 @@ async function setupCommand() {
     console.log(`  ⚠ codex 需要登录: codex auth login`);
   }
   if (runtimeSelections.includes("grok-build-acp") || runtimeSelections.includes("grok-build-cli")) {
-    console.log(`  ⚠ grok 需要安装并登录: grok auth login 或 x.ai CLI 认证缓存`);
+    console.log(`  ⚠ grok 需要安装并登录: grok login`);
   }
   if (runtimeSelections.includes("grok-build-cli")) {
     console.warn(`  ⚠ EXPERIMENTAL/DANGEROUS: 网络任务会驱动同一个 Grok TUI；审批归属未完成硬化。`);
@@ -1122,7 +1122,7 @@ function resolveGrokAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
       probeEnv: resolverEnv,
     };
     if (!planSupportsRuntime(plan, "grok-build-cli")) {
-      throw new Error("ANET_AGENT_NODE_BIN does not advertise grok-build-cli; refusing a runtime fallback");
+      throw new Error("ANET_AGENT_NODE_BIN lacks the required Grok co-presence capability; refusing a runtime fallback");
     }
     grokAgentNodeLaunchPlan = plan;
     return plan;
@@ -1140,7 +1140,7 @@ function resolveGrokAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
       grokAgentNodeLaunchPlan = globalPlan;
       return globalPlan;
     }
-    console.warn(`[anet] installed agent-node does not advertise grok-build-cli; using @sleep2agi/agent-node@preview instead.`);
+    console.warn(`[anet] installed agent-node lacks the required Grok co-presence capability; using @sleep2agi/agent-node@preview instead.`);
   } else {
     console.log(`[anet] agent-node is not installed globally; fetching @sleep2agi/agent-node@preview.`);
   }
@@ -1153,7 +1153,7 @@ function resolveGrokAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
     probeEnv: resolverEnv,
   };
   if (!planSupportsRuntime(previewPlan, "grok-build-cli")) {
-    throw new Error("@sleep2agi/agent-node@preview does not advertise grok-build-cli; refusing a runtime fallback");
+    throw new Error("@sleep2agi/agent-node@preview lacks the required Grok co-presence capability; refusing a runtime fallback");
   }
   grokAgentNodeLaunchPlan = previewPlan;
   return previewPlan;
@@ -1232,6 +1232,7 @@ function printClaudeCodeNotice() {
 function printGrokCopresenceWarning(nodeRef?: string) {
   console.warn(`[anet] ⚠ EXPERIMENTAL/DANGEROUS Grok co-presence preview.`);
   console.warn(`[anet]   Network tasks drive the same Grok TUI; approval ownership is not fully hardened.`);
+  console.warn(`[anet]   Fixed text-only model tools: [todo_write]; no filesystem, shell, network, media, MCP, or subagents.`);
   console.warn(`[anet]   Use only with trusted tasks and a trusted network. Do not use in production.`);
   if (nodeRef) console.warn(`[anet]   Attach from another terminal: anet grok attach ${nodeRef}`);
 }
@@ -2331,7 +2332,7 @@ This wizard creates one agent node for this project:
     console.log(`[anet] 接管已有 codex 会话：在 config.json 里设 codexAppServerUrl + codexThreadId`);
   } else if (pickedRuntime === "grok-build-acp" || pickedRuntime === "grok-build-cli") {
     opts.runtime = pickedRuntime;
-    console.log(`[anet] 请确保已安装并登录 Grok Build CLI: grok auth login`);
+    console.log(`[anet] 请确保已安装并登录 Grok Build CLI: grok login`);
     if (pickedRuntime === "grok-build-cli") printGrokCopresenceWarning(id);
   } else if (pickedRuntime === "opencode-cli") {
     opts.runtime = "opencode-cli";
@@ -2562,7 +2563,7 @@ async function createCommand(idOverride?: string) {
   } else if (opts.runtime === "codex-sdk") {
     console.log("[anet] 请确保已执行: codex auth login");
   } else if (opts.runtime === "grok-build-acp" || opts.runtime === "grok-build-cli") {
-    console.log("[anet] 请确保已安装并登录 Grok Build CLI: grok auth login");
+    console.log("[anet] 请确保已安装并登录 Grok Build CLI: grok login");
     if (opts.runtime === "grok-build-cli") printGrokCopresenceWarning(id);
   } else {
     // Either claude-agent-sdk (explicit / picker-default) or undefined runtime
@@ -10197,11 +10198,13 @@ async function infoCommand() {
   console.log(`  model:    ${profile.model || "(default)"}`);
   console.log(`  hub:      ${profile.hub || loadGlobal().hub || "-"}`);
   console.log(`  channels: ${profile.channels?.join(", ") || "(none)"}`);
-  // #101 user warning — make the effective toolset explicit. Empty / missing
-  // tools means the runtime gets the full Claude Code preset; this is shown as
-  // "all (preset)" so users don't mistake it for "no tools".
+  // The co-presence preview uses a fixed runtime-owned TUI profile. Generic
+  // node tools are unsupported because pinned Grok ignores --tools in TUI.
   const toolsArr = Array.isArray(profile.tools) ? profile.tools : [];
-  console.log(`  tools:    ${toolsArr.length ? `[${toolsArr.join(", ")}]` : "all (Claude Code preset)"}`);
+  const requestedTools = toolsArr.length ? `[${toolsArr.join(", ")}]` : "all (Claude Code preset)";
+  console.log(`  tools:    ${profile.grokCopresence === true
+    ? "fixed preview profile [todo_write] (text-only; no filesystem/shell/network/media/MCP/subagents)"
+    : requestedTools}`);
   // Flags worth surfacing — dangerouslySkipPermissions is the one most likely
   // to surprise users in retrospect, so list it first.
   const flags = (profile as any).flags || {};

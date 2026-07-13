@@ -20,6 +20,7 @@ import {
 } from "../../agent-node/src/runtime/grok-child-env";
 import { buildGrokAgentNodeEnv } from "../../agent-network/src/grok-copresence-profile";
 import { prepareGrokCliHome } from "../../agent-node/src/runtime/grok-build-cli-home";
+import { buildGrokCopresenceArgs } from "../../agent-node/src/runtime/grok-copresence/runtime";
 import {
   CREDENTIAL_REDACTION,
   createCredentialRedactor,
@@ -122,6 +123,10 @@ describe("test224 exact Grok child environment", () => {
       GROK_CLAUDE_HOOKS_ENABLED: "false",
       GROK_CURSOR_HOOKS_ENABLED: "false",
       GROK_FOLDER_TRUST: "1",
+      GROK_DISABLE_AUTOUPDATER: "1",
+      GROK_SUBAGENTS: "0",
+      GROK_WEB_FETCH: "0",
+      GROK_MEMORY: "0",
       GROK_OIDC_ISSUER: "https://accounts.example.invalid",
       GROK_OIDC_CLIENT_ID: "reviewed-public-client",
       ANET_EXPECTED_PARENT_PID: "4242",
@@ -326,6 +331,8 @@ describe("test224 durable text boundaries", () => {
     const sessionDir = join(stateHome, "sessions", "%2Fworkspace", "session-preview");
     mkdirSync(sourceHome, { recursive: true });
     mkdirSync(join(project, ".anet"), { recursive: true });
+    const sourceAuth = join(sourceHome, "auth.json");
+    writeFileSync(sourceAuth, "{}\n", { mode: 0o600 });
     mkdirSync(join(sessionDir, "tool-logs"), { recursive: true, mode: 0o777 });
     writeFileSync(join(sessionDir, "chat_history.jsonl"), "synthetic task material\n", { mode: 0o666 });
     writeFileSync(join(sessionDir, "tool-logs", "result.log"), "synthetic reply material\n", { mode: 0o666 });
@@ -357,6 +364,7 @@ describe("test224 durable text boundaries", () => {
       join(stateHome, "sandbox.toml"),
       join(stateHome, "requirements.toml"),
       join(stateHome, "trusted_folders.toml"),
+      join(stateHome, "anet-copresence-preview.md"),
       join(sessionDir, "chat_history.jsonl"),
       join(sessionDir, "tool-logs", "result.log"),
     ]) {
@@ -370,6 +378,33 @@ describe("test224 durable text boundaries", () => {
     expect(Object.keys(parsed.folders)).toEqual([project]);
     expect(parsed.folders[project]?.trusted).toBe(true);
     expect(Number.isSafeInteger(parsed.folders[project]?.decided_at)).toBe(true);
+
+    // The pinned shared TUI lazily reads its owner-only auth after sandbox
+    // re-exec. Keep that process path usable, while hard-denying every model
+    // route that could read it or run a shell.
+    expect(readFileSync(join(stateHome, "sandbox.toml"), "utf8")).not.toContain(sourceAuth);
+    const args = buildGrokCopresenceArgs({
+      cwd: project,
+      sessionId: "123e4567-e89b-42d3-a456-426614174000",
+      resume: false,
+      leaderSocket: join(root, "leader.sock"),
+      agentProfile: join(stateHome, "anet-copresence-preview.md"),
+      sandboxProfile: "test224-workspace",
+      protectedPaths: [sourceHome],
+    });
+    const denied = args.flatMap((value, index) => args[index - 1] === "--deny" ? [value] : []);
+    expect(denied).toContain("Bash");
+    expect(denied).toContain("Write");
+    expect(denied).toContain("WebFetch");
+    expect(args).toContain("--agent");
+    expect(args).toContain(join(stateHome, "anet-copresence-preview.md"));
+    expect(args).not.toContain("--tools");
+    expect(args).not.toContain("--disallowed-tools");
+    expect(readFileSync(join(stateHome, "anet-copresence-preview.md"), "utf8"))
+      .toContain("tools:\n  - todo_write\n");
+    expect(denied).toContain(`Read(${sourceHome})`);
+    expect(denied).toContain(`Grep(${sourceHome})`);
+    expect(denied).toContain(`Edit(${sourceHome})`);
   });
 
   test("agent-node wiring uses the shared redactor for logs and pending queue", () => {

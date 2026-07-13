@@ -12,6 +12,8 @@ Unix attach relay, and tmux TTY. It covers:
 - first `anet node start` resolving the unpublished candidate through a local
   npm registry and the documented `@preview` fallback, then launching its
   entrypoint directly (no `ANET_AGENT_NODE_BIN` or repository import);
+- a global test double that advertises only the older V1 capability being
+  probed but never launched, followed by fallback to the exact candidate;
 - an offline second start selecting a global install of that exact tarball,
   with no surviving npm wrapper;
 - registration, Hub task delivery, true tmux `anet grok attach` rendering,
@@ -51,6 +53,13 @@ login. Mount the binary and auth read-only; raw auth and tmux captures remain
 under `/tmp` and are destroyed rather than copied into artifacts. The second
 turn must recall a fresh benign nonce from the first turn after stop/start, so
 the gate proves actual session continuity rather than two independent calls:
+
+Before the cached login is copied, this layer also points the pinned binary at
+a container-local, non-billing model stub. Fresh and resumed real TUI requests
+must carry `ANET_COPRESENCE_PROFILE_V1` and expose exactly `[todo_write]`;
+default-tool and `read_file` profile mutations must turn the gate red. The
+separate `session_title` request is classified as auxiliary rather than being
+mixed into the model-tool inventory.
 
 ```bash
 sg docker -c 'docker run --rm \

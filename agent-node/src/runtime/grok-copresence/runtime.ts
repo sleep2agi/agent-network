@@ -36,8 +36,11 @@ import {
   type GrokCopresenceNetworkTask,
   type GrokCopresenceState,
 } from "./state";
-import { normalizeGrokCliTools } from "../grok-build-cli";
 import { buildGrokHelperEnv, buildGrokPtyEnv, projectGrokChildEnv } from "../grok-child-env";
+import {
+  assertGrokCopresenceAgentProfile,
+  GROK_COPRESENCE_EFFECTIVE_TOOLS,
+} from "./policy";
 
 // Keep enough headroom for Grok's XML wrapper plus JSON string escaping; the
 // reducer's hard JSONL line cap is 1 MiB.
@@ -133,6 +136,7 @@ export interface GrokCopresenceOpenOptions {
   attachSocket: string;
   alias: string;
   model?: string;
+  agentProfile: string;
   maxTurns?: number;
   alwaysApprove?: boolean;
   toolAllowlist?: readonly string[];
@@ -181,6 +185,7 @@ export interface BuildGrokCopresenceArgsOptions {
   resume: boolean;
   leaderSocket: string;
   model?: string;
+  agentProfile: string;
   maxTurns?: number;
   alwaysApprove?: boolean;
   toolAllowlist?: readonly string[];
@@ -192,6 +197,9 @@ export interface BuildGrokCopresenceArgsOptions {
 export function buildGrokCopresenceArgs(opts: BuildGrokCopresenceArgsOptions): string[] {
   assertSessionId(opts.sessionId);
   assertSocketPath(opts.leaderSocket, "leader");
+  if (!isAbsolute(opts.agentProfile) || opts.agentProfile.includes("\0")) {
+    throw new Error("grok copresence requires an absolute runtime-owned agent profile");
+  }
   const args = [
     // Hidden in 0.2.93 help but required by the captured live TUI path:
     // --leader-socket alone merely names a socket and does not join/spawn the
@@ -200,13 +208,15 @@ export function buildGrokCopresenceArgs(opts: BuildGrokCopresenceArgsOptions): s
     "--leader-socket", opts.leaderSocket,
     "--cwd", opts.cwd,
     opts.resume ? "--resume" : "--session-id", opts.sessionId,
+    // Unlike --tools, this flag is honored by the pinned interactive TUI.
+    "--agent", opts.agentProfile,
     // Reset a resumed process to the interactive approval policy. The PTY
     // proxy separately blocks every TUI route that could turn YOLO back on.
     "--permission-mode", "default",
   ];
   if (opts.model) args.push("--model", opts.model);
-  if (Number.isFinite(opts.maxTurns) && (opts.maxTurns ?? 0) > 0) {
-    args.push("--max-turns", String(Math.floor(opts.maxTurns!)));
+  if (opts.maxTurns !== undefined) {
+    throw new Error("grok copresence does not support maxTurns; Grok 0.2.93 ignores it in interactive TUI mode");
   }
 
   if (opts.alwaysApprove) {
@@ -214,23 +224,36 @@ export function buildGrokCopresenceArgs(opts: BuildGrokCopresenceArgsOptions): s
       "grok copresence forbids dangerouslySkipPermissions; approvals must be owned by the human TUI",
     );
   }
-  const configuredTools = opts.toolAllowlist
-    ? normalizeGrokCliTools(opts.toolAllowlist)
-    : undefined;
-  if (configuredTools) {
-    if (!configuredTools.length) throw new Error("grok copresence configured tool allowlist is empty");
-    args.push("--tools", configuredTools.join(","));
+  if (opts.toolAllowlist !== undefined) {
+    throw new Error(
+      `grok copresence uses a fixed preview tool profile (${GROK_COPRESENCE_EFFECTIVE_TOOLS.join(",")}); custom tools are unsupported`,
+    );
   }
-  // Interactive coding tools are permitted, but every privileged action stays
-  // on Grok's normal approval path and is answered only from the human TUI.
-  args.push("--sandbox", opts.sandboxProfile, "--no-subagents");
+  args.push(
+    "--sandbox", opts.sandboxProfile,
+    "--no-auto-update",
+    "--disable-web-search",
+    "--no-subagents",
+    "--no-memory",
+  );
 
   // A2 trust boundary: the TUI never receives the node bearer token and is
   // never allowed to call a discovered MCP tool. Human delegation is parsed
   // from chat_history by agent-node instead.
-  args.push("--disallowed-tools", "search_tool,use_tool", "--deny", "MCPTool");
+  args.push(
+    // The shared process must read its owner-only GROK_AUTH_PATH after its
+    // sandbox re-exec. Shell access would bypass path-specific Read/Grep/Edit
+    // rules, so the experimental preview gives up terminal tools entirely.
+    "--deny", "Bash",
+    "--deny", "Write",
+    "--deny", "MCPTool",
+    "--deny", "WebFetch",
+  );
   for (const path of opts.protectedPaths ?? []) {
     if (path) {
+      if (!isAbsolute(path) || /[\0\r\n\\*?()[\]{},]/.test(path)) {
+        throw new Error("grok copresence protected path cannot be represented safely as a permission rule");
+      }
       args.push(
         "--deny", `Read(${path})`,
         "--deny", `Read(${path}/**)`,
@@ -247,7 +270,8 @@ export function buildGrokCopresenceArgs(opts: BuildGrokCopresenceArgsOptions): s
 export function assertGrokCopresenceFeatures(help: string): void {
   const required = [
     "--leader-socket", "--session-id", "--resume", "--cwd", "--sandbox",
-    "--deny", "--disallowed-tools", "--permission-mode",
+    "--agent", "--deny", "--permission-mode",
+    "--disable-web-search", "--no-subagents", "--no-memory",
   ];
   const missing = required.filter((flag) => !help.includes(flag));
   if (missing.length) throw new Error(`Grok CLI is too old for copresence; missing: ${missing.join(", ")}`);
@@ -323,6 +347,20 @@ export function assertGrokCopresenceApprovalOwnership(
   }
   if (!Array.isArray(inspection.mcpServers) || inspection.mcpServers.length !== 0) {
     throw new Error("grok copresence refuses discovered MCP servers; A2 keeps MCP outside the TUI");
+  }
+  if (!Array.isArray(inspection.lspServers) || inspection.lspServers.length !== 0) {
+    throw new Error("grok copresence refuses discovered LSP servers");
+  }
+  if (!Array.isArray(inspection.plugins) || inspection.plugins.length !== 0) {
+    throw new Error("grok copresence refuses discovered plugins");
+  }
+  if (!Array.isArray(inspection.agents) || inspection.agents.some((agent) => {
+    if (!agent || typeof agent !== "object" || Array.isArray(agent)) return true;
+    const source = (agent as Record<string, unknown>).source;
+    return !source || typeof source !== "object" || Array.isArray(source)
+      || (source as Record<string, unknown>).type !== "builtin";
+  })) {
+    throw new Error("grok copresence refuses discovered non-builtin agents");
   }
   const modeValues = [
     inspection.permissionMode,
@@ -720,6 +758,11 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     ) {
       throw new GrokSpawnAuditError("grok copresence spawn audit returned an unexpected HOME/GROK_HOME");
     }
+    try {
+      assertGrokCopresenceAgentProfile(this.opts.agentProfile, this.opts.grokHome);
+    } catch (error) {
+      throw new GrokSpawnAuditError(`grok copresence agent profile audit failed: ${errorMessage(error)}`);
+    }
     const generation = ++this.ptyGeneration;
     this.tuiReady = false;
     this.tuiReadinessBuffer = "";
@@ -730,6 +773,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       resume,
       leaderSocket: this.leaderSocket,
       model: this.opts.model,
+      agentProfile: this.opts.agentProfile,
       maxTurns: this.opts.maxTurns,
       alwaysApprove: this.opts.alwaysApprove,
       toolAllowlist: this.opts.toolAllowlist,

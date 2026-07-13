@@ -158,7 +158,7 @@ Do not expose the hub directly to the public internet without a reverse proxy, H
 | `claude-agent-sdk` | You want Anthropic-compatible API providers | Good default for provider presets |
 | `codex-sdk` | You want Codex-backed nodes | Useful as a backup runtime when Claude quota is constrained |
 | `grok-build-acp` | You want Grok Build through `grok agent stdio` | Requires Grok Build CLI auth; stable for receive/reply, session persistence, and explicit `send_task` delegation |
-| `grok-build-cli` | You want one human-visible Grok TUI shared with trusted network tasks | **Experimental preview only.** Linux and an exact Grok CLI build are required; approval ownership is not fully hardened |
+| `grok-build-cli` | You want one human-visible, text-only Grok TUI shared with trusted network tasks | **Experimental preview only.** Fixed `[todo_write]` tool profile; Linux and an exact Grok CLI build are required; approval ownership is not fully hardened |
 
 ### Grok Build ACP
 
@@ -207,7 +207,7 @@ Details: `docs/grok-build-runtime.md`.
 The co-presence candidate is currently pinned to Linux with procfs mounted at `/proc` (including `/proc/self/fd`) and the exact Grok CLI build reported as `grok 0.2.93 (f00f96316d)` (the stable installer may append ` [stable]`). Install that build and log in as the same operating-system user that will run `anet`:
 
 ```bash
-grok auth login
+grok login
 grok --version
 ```
 
@@ -226,7 +226,12 @@ anet grok attach grok-shared
 
 Press `Ctrl-]` to detach. While attached, a CommHub task sent to `grok-shared` is submitted to this same TUI, rendered in the visible session, and its completed answer is routed back to the originating task. This shared-session behavior is the reason untrusted tasks must not be connected.
 
-`anet node start` capability-checks a compatible global `agent-node` if one exists. It requires the machine-readable `ANET_CAPABILITY_GROK_COPRESENCE_V1` marker, so an older headless-only binary that merely lists `grok-build-cli` cannot shadow the preview. A global install is not required: when it is absent or incompatible, `anet` uses `npx -y @sleep2agi/agent-node@preview` to fetch and resolve the preview package, verifies its metadata/capability, then launches the resolved `agent-node` entrypoint directly. Direct launch lets `anet node stop` signal the real runtime instead of an installer wrapper. The fallback therefore needs npm registry access or an already populated npm cache on first start.
+This preview selects a runtime-owned TUI agent profile whose exact model-tool
+inventory is `[todo_write]`. Filesystem, shell, network, media, MCP, scheduler,
+and subagent tools are unavailable; custom `tools`/`maxTurns` are unsupported
+in co-presence. It is a text-only co-presence preview, not a coding profile.
+
+`anet node start` capability-checks a compatible global `agent-node` if one exists. It requires the machine-readable `ANET_CAPABILITY_GROK_COPRESENCE_V2` marker, so an older headless-only or V1 co-presence binary cannot shadow the fixed-profile preview. A global install is not required: when it is absent or incompatible, `anet` uses `npx -y @sleep2agi/agent-node@preview` to fetch and resolve the preview package, verifies its metadata/capability, then launches the resolved `agent-node` entrypoint directly. Direct launch lets `anet node stop` signal the real runtime instead of an installer wrapper. The fallback therefore needs npm registry access or an already populated npm cache on first start.
 
 The preview E2E covers the CommHub inbox path. `grok-build-cli` currently
 refuses Feishu channels because that forked worker does not yet share the

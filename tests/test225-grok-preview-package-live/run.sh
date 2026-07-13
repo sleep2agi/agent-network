@@ -43,6 +43,9 @@ REGISTER_LOG=/tmp/test225-register.raw.log
 CREATE_LOG=/tmp/test225-create.raw.log
 HEADLESS_CREATE_LOG=/tmp/test225-headless-create.raw.log
 REAL_CREATE_LOG=/tmp/test225-real-create.raw.log
+INFO_LOG=/tmp/test225-info.raw.log
+STOP_LOG_DIR=/tmp/test225-stop-logs
+TUI_INVENTORY_LOG=/tmp/test225-tui-inventory.raw.log
 
 # The package gate must observe native shared-TUI rendering. It may not make a
 # trust prompt or network turn pass by typing into tmux on the user's behalf.
@@ -57,8 +60,35 @@ export COMMHUB_DB=/tmp/test225-commhub.db
 export HOST=127.0.0.1
 export PORT="$HUB_PORT"
 
-mkdir -p "$ARTIFACT_DIR" "$HOME/.grok" "$WORK"
-chmod 700 "$HOME" "$HOME/.grok" "$WORK"
+# Cleanup removes every /tmp/test225-* private path. Evidence must live on a
+# separately mounted root so neither a success nor a failure can erase it.
+ARTIFACT_ABS=$(realpath -m "$ARTIFACT_DIR")
+REPORT_ABS=$(realpath -m "$REPORT")
+HOME_ABS=$(realpath -m "$HOME")
+WORK_ABS=$(realpath -m "$WORK")
+case "$ARTIFACT_ABS" in
+  "$HOME_ABS"|"$HOME_ABS"/*|"$WORK_ABS"|"$WORK_ABS"/*|/tmp/test225-*)
+    printf 'FAIL: artifact directory overlaps test225 private cleanup roots\n' >&2
+    exit 1
+    ;;
+esac
+case "$REPORT_ABS" in
+  "$HOME_ABS"|"$HOME_ABS"/*|"$WORK_ABS"|"$WORK_ABS"/*|/tmp/test225-*)
+    printf 'FAIL: report path overlaps test225 private cleanup roots\n' >&2
+    exit 1
+    ;;
+esac
+PRIVATE_SENTINEL_ABS=/tmp/test225-private-sentinel
+if [ "$ARTIFACT_ABS" = / ] \
+  || [[ "$HOME_ABS" == "$ARTIFACT_ABS/"* ]] \
+  || [[ "$WORK_ABS" == "$ARTIFACT_ABS/"* ]] \
+  || [[ "$PRIVATE_SENTINEL_ABS" == "$ARTIFACT_ABS/"* ]]; then
+  printf 'FAIL: artifact directory is an ancestor of test225 private cleanup roots\n' >&2
+  exit 1
+fi
+
+mkdir -p "$ARTIFACT_DIR" "$HOME/.grok" "$WORK" "$STOP_LOG_DIR"
+chmod 700 "$HOME" "$HOME/.grok" "$WORK" "$STOP_LOG_DIR"
 [ ! -e "$HOME/.grok/auth.json" ] \
   || { printf 'FAIL: deterministic test home unexpectedly contains auth state\n' >&2; exit 1; }
 : >"$REPORT"
@@ -261,6 +291,12 @@ assert_fake_observations_exact() {
           and .folderTrustExact == true
           and .folderTrustMode == 384
           and .folderTrustCount == 1
+          and .selectedSandboxProfileMatched == true
+          and .authPathSandboxDenied == false
+          and .requiredDenyToolsPresent == true
+          and .requiredProtectedPathDeniesPresent == true
+          and .agentProfileExact == true
+          and .tuiFlagsExact == true
           and .parentEnvKeys == $expectedParent[0]
           and (.parentForbiddenKeys | length) == 0
           and .parentMarkerValueObserved == false
@@ -276,7 +312,8 @@ assert_fake_observations_exact() {
     --slurpfile expectedParent "$EXPECTED_AGENT_NODE_ENV_KEYS" \
     'map(. as $row | (if .kind == "spawn" then $expectedPty[0] else $expected[0] end) as $want
       | {kind,missing:($want - .envKeys),extra:(.envKeys - $want),forbiddenKeys,markerValueObserved,
-          terminalEnvExpected,parentPidMatches,
+          terminalEnvExpected,parentPidMatches,selectedSandboxProfileMatched,authPathSandboxDenied,
+          requiredDenyToolsPresent,requiredProtectedPathDeniesPresent,agentProfileExact,tuiFlagsExact,
           parentMissing:($expectedParent[0] - (.parentEnvKeys // [])),
           parentExtra:((.parentEnvKeys // []) - $expectedParent[0]),
           parentForbiddenKeys,parentMarkerValueObserved})' \
@@ -302,25 +339,77 @@ file_mode() {
 }
 
 scan_fixed_file() {
-  local patterns=$1
+  local patterns=$1 rc
   shift
   [ -s "$patterns" ] || return 0
   for target in "$@"; do
     [ -e "$target" ] || continue
     if [ -d "$target" ]; then
-      if grep -R -F -f "$patterns" "$target" >/dev/null 2>&1; then return 1; fi
+      if grep -R -F -f "$patterns" "$target" >/dev/null 2>&1; then
+        return 1
+      else
+        rc=$?
+        [ "$rc" -eq 1 ] || return 2
+      fi
     elif grep -F -f "$patterns" "$target" >/dev/null 2>&1; then
       return 1
+    else
+      rc=$?
+      [ "$rc" -eq 1 ] || return 2
     fi
   done
   return 0
+}
+
+refresh_real_auth_patterns() {
+  local auth_path=$1 candidate=/tmp/test225-real-patterns.candidate
+  local merged=/tmp/test225-real-patterns.merged
+  [ -r "$auth_path" ] || fail "real auth scalar refresh source is not readable"
+  # Capture scalar values rather than relying on schema-specific key names.
+  # These owner-only files are scan inputs only and are deleted by cleanup.
+  jq -r '.. | strings | select(length >= 12)' "$auth_path" | sort -u >"$candidate" \
+    || fail "could not derive real auth scalar scan patterns"
+  [ -s "$candidate" ] || fail "real auth scalar scan pattern set is empty"
+  if [ -s /tmp/test225-real-patterns ]; then
+    sort -u /tmp/test225-real-patterns "$candidate" >"$merged"
+    mv "$merged" /tmp/test225-real-patterns
+  else
+    mv "$candidate" /tmp/test225-real-patterns
+  fi
+  rm -f "$candidate" "$merged"
+  chmod 600 /tmp/test225-real-patterns
+}
+
+fail_if_task_terminal_error() {
+  local label=$1 task_id=$2 row=$3 status result category bytes
+  status=$(jq -r '.status // ""' <<<"$row")
+  case "$status" in
+    failed|cancelled|expired) ;;
+    *) return 0 ;;
+  esac
+  # Keep the raw Hub result in shell memory only. Reports get a closed set of
+  # value-free categories, never model/vendor text or credential material.
+  result=$(jq -r '.result // "" | if type == "string" then . else tojson end' <<<"$row")
+  case "$result" in
+    *"trusted network"*|*"correlation"*) category=trusted_correlation ;;
+    *"timed out"*) category=runtime_timeout ;;
+    *"Not authenticated"*|*"not authenticated"*|*"auth token"*|*"re-authenticate"*|*"401"*|*"403"*)
+      category=authentication_unavailable ;;
+    *"quota"*|*"rate limit"*|*"429"*|*"usage limit"*) category=service_capacity ;;
+    *"turn failed"*|*"turn cancelled"*|*"turn error"*) category=native_turn_outcome ;;
+    *) category=unclassified_runtime_failure ;;
+  esac
+  bytes=$(LC_ALL=C printf '%s' "$result" | wc -c | tr -d ' ')
+  result=""
+  log "diagnostic: $label terminal_status=$status category=$category result_bytes=$bytes task_prefix=${task_id:0:8} detail_withheld=true"
+  fail "$label reached a terminal error before a valid reply"
 }
 
 stop_node_checked() {
   local alias label output
   alias=$1
   label=$2
-  output="/tmp/test225-${label}-stop.raw.log"
+  output="$STOP_LOG_DIR/${label}.raw.log"
   if ! anet node stop "$alias" >"$output" 2>&1; then
     fail_with_private_log "node stop failed for $label" "$output"
   fi
@@ -330,39 +419,244 @@ stop_node_checked() {
     || fail "node stop output exposed a Hub credential for $label"
   scan_fixed_file /tmp/test225-real-patterns "$output" \
     || fail "node stop output exposed a real auth scalar for $label"
-  rm -f "$output"
 }
 
 NODE_PROCESS_PID=""
+HEADLESS_PID=""
 SERVER_PID=""
 REGISTRY_PID=""
 cleanup() {
+  local original_rc=$? cleanup_failed=0 pid start state ppid alias config path
+  local identity_before identity_after matched real_bin job_identity job_ppid job_state job_start
+  local pid_set=/tmp/test225-cleanup-pids
+  local fresh_set=/tmp/test225-cleanup-fresh
+  trap - EXIT
   set +e
-  for session in test225-attach test225-resume-attach test225-real-attach test225-real-resume-attach; do
-    tmux kill-session -t "$session" 2>/dev/null || true
+  : >"$pid_set"
+
+  # One stat read yields a coherent ppid/state/starttime tuple. A second read
+  # around cmdline access prevents PID-reuse splicing.
+  proc_identity() {
+    local candidate=$1 raw tail
+    [ -r "/proc/$candidate/stat" ] || return 1
+    raw=$(<"/proc/$candidate/stat")
+    tail=${raw##*) }
+    set -- $tail
+    [ "$#" -ge 20 ] || return 1
+    printf '%s %s %s\n' "$2" "$1" "${20}"
+  }
+
+  append_cleanup_identity() {
+    local candidate=$1 identity=${2:-} candidate_ppid candidate_state candidate_start
+    [[ "$candidate" =~ ^[0-9]+$ ]] || return 0
+    [ "$candidate" -gt 1 ] || return 0
+    [ "$candidate" -ne "$$" ] || return 0
+    [ -n "$identity" ] || identity=$(proc_identity "$candidate" 2>/dev/null) || return 0
+    read -r candidate_ppid candidate_state candidate_start <<<"$identity"
+    [[ "$candidate_start" =~ ^[0-9]+$ ]] || return 0
+    grep -Fqx "$candidate $candidate_start" "$pid_set" 2>/dev/null \
+      || printf '%s %s\n' "$candidate" "$candidate_start" >>"$pid_set"
+  }
+
+  proc_argv_has_token() {
+    local candidate=$1 expected=$2 arg
+    while IFS= read -r -d '' arg; do
+      [ "$arg" = "$expected" ] && return 0
+    done <"/proc/$candidate/cmdline" 2>/dev/null
+    return 1
+  }
+
+  proc_argv_has_pair() {
+    local candidate=$1 expected_flag=$2 expected_value=$3 previous= arg
+    while IFS= read -r -d '' arg; do
+      if [ "$previous" = "$expected_flag" ] && [ "$arg" = "$expected_value" ]; then
+        return 0
+      fi
+      previous=$arg
+    done <"/proc/$candidate/cmdline" 2>/dev/null
+    return 1
+  }
+
+  proc_argv_has_private_path() {
+    local candidate=$1 arg canonical
+    while IFS= read -r -d '' arg; do
+      case "$arg" in
+        "$HOME"|"$HOME"/*|"$WORK"|"$WORK"/*) return 0 ;;
+      esac
+      # Some launchers embed an exact private path after a key/value separator.
+      # Only accept a canonical absolute suffix, never a substring match.
+      case "$arg" in
+        *=/*)
+          canonical=${arg#*=}
+          case "$canonical" in
+            "$HOME"|"$HOME"/*|"$WORK"|"$WORK"/*) return 0 ;;
+          esac
+          ;;
+      esac
+    done <"/proc/$candidate/cmdline" 2>/dev/null
+    return 1
+  }
+
+  collect_cleanup_descendants() {
+    local changed parent parent_start round identity
+    for round in $(seq 1 32); do
+      changed=0
+      for path in /proc/[0-9]*; do
+        pid=${path##*/}
+        identity=$(proc_identity "$pid" 2>/dev/null) || continue
+        read -r ppid state start <<<"$identity"
+        while read -r parent parent_start; do
+          cleanup_identity_active "$parent" "$parent_start" || continue
+          [ "$ppid" = "$parent" ] || continue
+          if ! grep -Fqx "$pid $start" "$pid_set" 2>/dev/null; then
+            printf '%s %s\n' "$pid" "$start" >>"$pid_set"
+            changed=1
+          fi
+          break
+        done <"$pid_set"
+      done
+      [ "$changed" -eq 0 ] && return 0
+    done
+    printf 'test225 cleanup: descendant expansion exceeded its bound\n' >&2
+    cleanup_failed=1
+  }
+
+  collect_test225_producers() {
+    local raw_pid node_alias identity
+    for pid in $(jobs -pr 2>/dev/null); do
+      job_identity=$(proc_identity "$pid" 2>/dev/null) || continue
+      read -r job_ppid job_state job_start <<<"$job_identity"
+      [ "$job_ppid" = "$$" ] || continue
+      append_cleanup_identity "$pid" "$job_identity"
+    done
+    for path in "$WORK"/.anet/nodes/*/.pid; do
+      [ -r "$path" ] || continue
+      raw_pid=$(<"$path")
+      [[ "$raw_pid" =~ ^[0-9]+$ ]] || continue
+      node_alias=$(basename "$(dirname "$path")")
+      identity_before=$(proc_identity "$raw_pid" 2>/dev/null) || continue
+      proc_argv_has_pair "$raw_pid" "--alias" "$node_alias" || continue
+      identity_after=$(proc_identity "$raw_pid" 2>/dev/null) || continue
+      [ "$identity_before" = "$identity_after" ] || continue
+      append_cleanup_identity "$raw_pid" "$identity_after"
+    done
+    for alias in test225-attach test225-resume-attach test225-real-attach test225-real-resume-attach; do
+      pid=$(tmux display-message -p -t "$alias":0.0 '#{pane_pid}' 2>/dev/null)
+      [ -n "$pid" ] && append_cleanup_identity "$pid"
+    done
+    real_bin=${TEST225_REAL_GROK_BIN:-/host-grok/bin/grok-0.2.93}
+    for path in /proc/[0-9]*; do
+      [ -r "$path/cmdline" ] || continue
+      pid=${path##*/}
+      [ "$pid" -ne "$$" ] || continue
+      identity_before=$(proc_identity "$pid" 2>/dev/null) || continue
+      matched=0
+      proc_argv_has_token "$pid" "/test225/fake-grok.mjs" && matched=1
+      proc_argv_has_token "$pid" "/test225/local-registry.mjs" && matched=1
+      proc_argv_has_token "$pid" "@sleep2agi/agent-node@preview" && matched=1
+      proc_argv_has_token "$pid" "process.stdout.write('LOCKED\\n');process.stdin.resume()" && matched=1
+      proc_argv_has_pair "$pid" "--db" "$COMMHUB_DB" && matched=1
+      proc_argv_has_private_path "$pid" && matched=1
+      [ -n "$real_bin" ] && proc_argv_has_token "$pid" "$real_bin" && matched=1
+      [ "$matched" -eq 1 ] || continue
+      identity_after=$(proc_identity "$pid" 2>/dev/null) || continue
+      [ "$identity_before" = "$identity_after" ] || continue
+      [ "$matched" -eq 1 ] && append_cleanup_identity "$pid" "$identity_after"
+    done
+    collect_cleanup_descendants
+  }
+
+  cleanup_identity_active() {
+    local candidate=$1 expected_start=$2 identity current_ppid current_state current_start
+    identity=$(proc_identity "$candidate" 2>/dev/null) || return 1
+    read -r current_ppid current_state current_start <<<"$identity"
+    [ "$current_start" = "$expected_start" ] || return 1
+    case "$current_state" in Z|X|x) return 1 ;; esac
+    return 0
+  }
+
+  cleanup_set_has_live() {
+    local recorded_pid recorded_start
+    while read -r recorded_pid recorded_start; do
+      cleanup_identity_active "$recorded_pid" "$recorded_start" && return 0
+    done <"$pid_set"
+    return 1
+  }
+
+  signal_cleanup_set() {
+    local signal=$1 recorded_pid recorded_start
+    while read -r recorded_pid recorded_start; do
+      cleanup_identity_active "$recorded_pid" "$recorded_start" || continue
+      kill -s "$signal" "$recorded_pid" 2>/dev/null || true
+    done <"$pid_set"
+  }
+
+  wait_cleanup_set() {
+    local attempts=$1
+    for _ in $(seq 1 "$attempts"); do
+      cleanup_set_has_live || return 0
+      sleep 0.1
+    done
+    return 1
+  }
+
+  # Snapshot every currently-owned tree before stop removes .pid files or
+  # tmux removes pane identities. Later collections append; they never erase
+  # the pre-stop generation bindings.
+  collect_test225_producers
+  for config in "$WORK"/.anet/nodes/*/config.json; do
+    [ -f "$config" ] || continue
+    alias=$(basename "$(dirname "$config")")
+    timeout --kill-after=2s 10s anet node stop "$alias" >/dev/null 2>&1 || true
   done
-  if [ -n "$NODE_PROCESS_PID" ]; then kill "$NODE_PROCESS_PID" 2>/dev/null || true; fi
-  if [ -n "$SERVER_PID" ]; then kill "$SERVER_PID" 2>/dev/null || true; fi
-  if [ -n "$REGISTRY_PID" ]; then kill "$REGISTRY_PID" 2>/dev/null || true; fi
-  pkill -f '/test225/fake-grok.mjs' 2>/dev/null || true
-  rm -f \
-    "$SERVER_LOG" "$START_LOG" "$RELOAD_LOG" "$RESUME_LOG" \
-    "$ATTACH_CAPTURE" "$RELOAD_CAPTURE" "$RESUME_CAPTURE" \
-    "$REAL_START_LOG" "$REAL_RESUME_LOG" "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" \
-    "$REGISTER_LOG" "$CREATE_LOG" "$HEADLESS_CREATE_LOG" "$REAL_CREATE_LOG" \
-    "$GLOBAL_INSTALL_LOG" \
-    /tmp/test225-*-stop.raw.log \
-    /tmp/test225-markers /tmp/test225-live-credentials \
-    /tmp/test225-real-patterns /tmp/test225-real-hub-rows /tmp/test225-hub-results \
-    /tmp/test225-headless.raw.log \
-    /tmp/test225-candidate-agent-node-package.json \
-    "$EXPECTED_GROK_ENV_KEYS" "$EXPECTED_GROK_PTY_ENV_KEYS" "$EXPECTED_AGENT_NODE_ENV_KEYS" \
-    "$EXPECTED_HELPER_ENV" \
-    "$EXPECTED_NPX_ENV_KEYS" "$NPX_ENV_OBSERVATION" \
-    "$FALLBACK_PID_SNAPSHOT" \
-    "$FAKE_OBSERVATIONS" "$FAKE_READINESS_OBSERVATIONS" \
-    "$GLOBAL_OBSERVATIONS" "$GLOBAL_READINESS_OBSERVATIONS" "$LOCAL_REGISTRY_LOG"
-  rm -rf /tmp/test225-candidate-extracted /tmp/test225-real-auth /tmp/test225-bin
+  for alias in test225-attach test225-resume-attach test225-real-attach test225-real-resume-attach; do
+    tmux kill-session -t "$alias" 2>/dev/null || true
+  done
+  collect_test225_producers
+  signal_cleanup_set TERM
+  wait_cleanup_set 50 || true
+  collect_test225_producers
+  signal_cleanup_set KILL
+  if ! wait_cleanup_set 50; then
+    printf 'test225 cleanup: producer shutdown did not quiesce\n' >&2
+    cleanup_failed=1
+  fi
+  collect_test225_producers
+  if cleanup_set_has_live; then
+    printf 'test225 cleanup: live producer remained after kill fence\n' >&2
+    cleanup_failed=1
+  fi
+
+  # Producers are fenced before any credential/session/database path is gone.
+  rm -rf "$HOME" "$WORK"
+  for path in /tmp/test225-*; do
+    [ -e "$path" ] || [ -L "$path" ] || continue
+    rm -rf -- "$path"
+  done
+  if [ -e "$HOME" ] || [ -L "$HOME" ] || [ -e "$WORK" ] || [ -L "$WORK" ]; then
+    printf 'test225 cleanup: private roots remained after deletion\n' >&2
+    cleanup_failed=1
+  fi
+
+  # A new, empty registry proves no producer survived/reappeared; historical
+  # dead/zombie identities are intentionally not treated as writers.
+  pid_set=$fresh_set
+  : >"$pid_set"
+  NODE_PROCESS_PID="" HEADLESS_PID="" SERVER_PID="" REGISTRY_PID=""
+  collect_test225_producers
+  if cleanup_set_has_live; then
+    printf 'test225 cleanup: producer reappeared after private-root deletion\n' >&2
+    cleanup_failed=1
+  fi
+  rm -f "$fresh_set"
+  for path in /tmp/test225-*; do
+    [ -e "$path" ] || [ -L "$path" ] || continue
+    printf 'test225 cleanup: private temporary path remained\n' >&2
+    cleanup_failed=1
+    break
+  done
+  [ "$cleanup_failed" -eq 0 ] || original_rc=1
+  exit "$original_rc"
 }
 trap cleanup EXIT
 
@@ -447,7 +741,12 @@ ATTACH_SOCKET=$(jq -r '.grokAttachSocket' "$CONFIG")
 LEADER_SOCKET=$(jq -r '.grokLeaderSocket' "$CONFIG")
 scan_fixed_file /tmp/test225-live-credentials "$REGISTER_LOG" "$CREATE_LOG" \
   || fail "register/create console output exposed a persisted Hub credential"
-rm -f "$REGISTER_LOG" "$CREATE_LOG"
+anet info "$ALIAS" >"$INFO_LOG" 2>&1
+grep -Fq 'fixed preview profile [todo_write] (text-only; no filesystem/shell/network/media/MCP/subagents)' "$INFO_LOG" \
+  || fail "anet info misreported the shared TUI effective tool boundary"
+scan_fixed_file /tmp/test225-live-credentials "$INFO_LOG" \
+  || fail "anet info exposed a Hub credential"
+rm -f "$REGISTER_LOG" "$CREATE_LOG" "$INFO_LOG"
 pass "anet create selected grok-build-cli and persisted owner-only credentials"
 
 # Persisted profile decisions must beat stale ambient mode/socket variables.
@@ -481,6 +780,33 @@ TEST225_UTOK_CANARY_a1dd60
 EOF_MARKERS
 chmod 600 /tmp/test225-markers
 
+# Negative controls: a scanner read error is a gate error, not a clean result,
+# and auth refresh extends (rather than replaces) the private scan set.
+SCAN_ERROR_DIR=/tmp/test225-scan-error
+mkdir -p "$SCAN_ERROR_DIR"
+ln -s "$SCAN_ERROR_DIR/missing" "$SCAN_ERROR_DIR/dangling"
+if scan_fixed_file /tmp/test225-markers "$SCAN_ERROR_DIR"; then
+  fail "credential scanner accepted an unreadable directory tree"
+else
+  SCAN_ERROR_RC=$?
+fi
+[ "$SCAN_ERROR_RC" -eq 2 ] || fail "credential scanner did not distinguish a read error"
+rm -rf "$SCAN_ERROR_DIR"
+cat > /tmp/test225-refresh-auth.json <<'EOF_REFRESH_AUTH_1'
+{"value":"TEST225_REFRESH_SCAN_OLD_0123456789"}
+EOF_REFRESH_AUTH_1
+chmod 600 /tmp/test225-refresh-auth.json
+refresh_real_auth_patterns /tmp/test225-refresh-auth.json
+cat > /tmp/test225-refresh-auth.json <<'EOF_REFRESH_AUTH_2'
+{"value":"TEST225_REFRESH_SCAN_NEW_0123456789"}
+EOF_REFRESH_AUTH_2
+refresh_real_auth_patterns /tmp/test225-refresh-auth.json
+grep -Fxq 'TEST225_REFRESH_SCAN_OLD_0123456789' /tmp/test225-real-patterns \
+  || fail "auth refresh scan set dropped the prior scalar"
+grep -Fxq 'TEST225_REFRESH_SCAN_NEW_0123456789' /tmp/test225-real-patterns \
+  || fail "auth refresh scan set omitted the new scalar"
+rm -f /tmp/test225-refresh-auth.json /tmp/test225-real-patterns
+
 # Seed a pre-boundary ordinary log with broad permissions and a synthetic
 # credential. Startup must scrub it and repair both directory/file modes
 # before appending the first runtime line.
@@ -498,7 +824,8 @@ chmod 644 "$LEGACY_DAILY_LOG"
     HOME PWD GROK_HOME GROK_AUTH_PATH ANET_EXPECTED_PARENT_PID \
     GROK_CLAUDE_MCPS_ENABLED GROK_CURSOR_MCPS_ENABLED \
     GROK_CLAUDE_HOOKS_ENABLED GROK_CURSOR_HOOKS_ENABLED \
-    GROK_FOLDER_TRUST GROK_DEFAULT_SELECTED_PERMISSION
+    GROK_FOLDER_TRUST GROK_DEFAULT_SELECTED_PERMISSION \
+    GROK_DISABLE_AUTOUPDATER GROK_SUBAGENTS GROK_WEB_FETCH GROK_MEMORY
 } | sort -u | jq -Rsc 'split("\n") | map(select(length > 0))' > "$EXPECTED_GROK_ENV_KEYS"
 jq -c '. + ["TERM"] | unique | sort' "$EXPECTED_GROK_ENV_KEYS" \
   > "$EXPECTED_GROK_PTY_ENV_KEYS"
@@ -594,6 +921,8 @@ wait_file "$ATTACH_SOCKET" 600 \
   || fail_with_private_log "attach socket did not appear through npx preview fallback" "$START_LOG"
 grep -Fq 'agent-node is not installed globally; fetching @sleep2agi/agent-node@preview' "$START_LOG" \
   || fail "clean start did not exercise the documented npx preview fallback"
+grep -Fq 'fixed preview profile [todo_write] (text-only; no filesystem/shell/network/media/MCP/subagents)' "$START_LOG" \
+  || fail "agent-node startup misreported the shared TUI effective tool boundary"
 start_attach test225-attach
 wait_pane test225-attach 'attached to Grok TUI' "$ATTACH_CAPTURE" 200 \
   || fail "real tmux TTY did not attach through anet grok attach"
@@ -673,9 +1002,15 @@ while IFS= read -r -d '' lock_path; do
     || fail "lifetime lock remained held after fallback stop"
 done < <(find "$HOME/.anet-grok" "$(dirname "$LEADER_SOCKET")" -type f -name '*.lock' -print0)
 [ "$LOCK_COUNT" -eq 3 ] || fail "fallback stop proof did not find exactly three lifetime lock files"
+ln -sf /test225/old-v1-agent-node.mjs /tmp/test225-bin/agent-node
 start_fake_node "$RELOAD_LOG"
 wait_file "$ATTACH_SOCKET" 600 \
   || fail_with_private_log "attach socket did not return for legacy-goal reload" "$RELOAD_LOG"
+grep -Fq 'installed agent-node lacks the required Grok co-presence capability; using @sleep2agi/agent-node@preview instead' "$RELOAD_LOG" \
+  || fail "old V1-only global agent-node did not trigger the candidate preview fallback"
+[ ! -e /tmp/test225-old-v1-agent-node-launched ] \
+  || fail "old V1-only global agent-node was launched instead of only capability-probed"
+rm -f /tmp/test225-bin/agent-node
 start_attach test225-attach
 wait_pane test225-attach 'attached to Grok TUI' "$RELOAD_CAPTURE" 200 \
   || fail "real tmux TTY did not reattach after legacy-goal reload"
@@ -724,6 +1059,13 @@ wait_pane test225-attach 'GROK_PREVIEW_LIVE_225_A' "$RELOAD_CAPTURE" 100 \
 wait_pane test225-attach 'GROK_PREVIEW_FAKE_REPLY_OK' "$RELOAD_CAPTURE" 100 \
   || fail "attached human TUI did not live-render the Grok reply"
 pass "create -> start -> register -> Hub task -> real tmux attach live render -> reply"
+STATUS_ROW=$(curl -fsS "$HUB/api/status?network_id=$NETWORK_ID" \
+  -H "Authorization: Bearer $USER_TOKEN" \
+  | jq -c --arg alias "$ALIAS" '.[]? | select(.alias == $alias)' || true)
+jq -e '.agent == "agent-node:grok-build-cli" and (.status == "online" or .status == "working")' \
+  <<<"$STATUS_ROW" >/dev/null \
+  || fail "Hub session did not retain the registered grok-build-cli agent identity"
+pass "Hub session registration reports agent-node:grok-build-cli"
 
 log "[L3] exact child-env and persisted-output checks"
 grep -Fq "CANDIDATE_PACKUMENT version=$AGENT_NODE_VERSION" "$LOCAL_REGISTRY_LOG" \
@@ -838,7 +1180,7 @@ if ! npm install -g --include=optional "$NODE_TGZ" >"$GLOBAL_INSTALL_LOG" 2>&1; 
   fail_with_private_log "global candidate agent-node install failed" "$GLOBAL_INSTALL_LOG"
 fi
 command -v agent-node >/dev/null || fail "candidate agent-node global binary is missing"
-agent-node --help | grep -Fq 'ANET_CAPABILITY_GROK_COPRESENCE_V1' \
+agent-node --help | grep -Fq 'ANET_CAPABILITY_GROK_COPRESENCE_V2' \
   || fail "global candidate agent-node lacks the co-presence capability marker"
 node -e '
   const root = "/usr/local/lib/node_modules/@sleep2agi/agent-node";
@@ -904,6 +1246,7 @@ scan_fixed_file /tmp/test225-live-credentials "$HEADLESS_LOG" \
   || fail "headless start output exposed a Hub credential"
 stop_node_checked "$HEADLESS_ALIAS" headless
 wait "$HEADLESS_PID" 2>/dev/null || true
+HEADLESS_PID=""
 rm -f "$HEADLESS_LOG"
 pass "persisted co-presence true/false and socket identities override stale ambient env"
 
@@ -1036,6 +1379,9 @@ run_real_gate() {
   local real_config="$WORK/.anet/nodes/$real_alias/config.json"
   local real_socket real_leader real_session first_id first_row second_id second_row continuity_nonce
   local real_log_dir="$WORK/.anet/nodes/$real_alias/logs"
+  local real_pending="$WORK/.anet/nodes/$real_alias/pending-replies.json"
+  local profile_fixture
+  local -a profile_candidates=()
   continuity_nonce="GROK_PREVIEW_CONTEXT_225_$(tr -d '-' </proc/sys/kernel/random/uuid)"
 
   [ -x "$real_bin" ] || fail "RUN_REAL_GROK=1 but real Grok binary is not executable: $real_bin"
@@ -1043,16 +1389,30 @@ run_real_gate() {
   [[ "$($real_bin --version)" =~ ^grok\ 0\.2\.93\ \(f00f96316d\)(\ \[stable\])?$ ]] \
     || fail "optional live gate requires exact Grok 0.2.93"
 
+  mapfile -d '' profile_candidates \
+    < <(find "$GROK_STATE" -type f -name 'anet-copresence-preview.md' -print0)
+  [ "${#profile_candidates[@]}" -eq 1 ] \
+    || fail "package gate did not produce exactly one runtime-owned co-presence profile"
+  profile_fixture=${profile_candidates[0]}
+  [ "$(file_mode "$profile_fixture")" = 600 ] \
+    || fail "runtime-owned co-presence profile is not mode 0600"
+  if ! node /test225/tui-tool-inventory-probe.mjs "$real_bin" "$profile_fixture" \
+    >"$TUI_INVENTORY_LOG" 2>&1; then
+    fail_with_private_log "pinned Grok TUI did not enforce the fixed preview tool inventory" "$TUI_INVENTORY_LOG"
+  fi
+  grep -Fqx 'PASS: pinned TUI fresh/resume inventory=[todo_write]; profile mutations rejected' "$TUI_INVENTORY_LOG" \
+    || fail_with_private_log "pinned Grok TUI inventory proof was incomplete" "$TUI_INVENTORY_LOG"
+  rm -f "$TUI_INVENTORY_LOG"
+  pass "pinned Grok TUI fresh/resume requests expose only todo_write; unsafe profile mutations turn red"
+
   mkdir -p "$HOME/.grok" /tmp/test225-real-auth
   cp "$real_auth" "$HOME/.grok/auth.json"
   chmod 600 "$HOME/.grok/auth.json"
   [ ! -r /host-grok/agent_id ] || cp /host-grok/agent_id "$HOME/.grok/agent_id"
-  # Treat every nontrivial auth string as private. Do not assume credentials
+  # Treat every nontrivial auth scalar value as private. Do not assume values
   # live under a token/key/secret-shaped field name; upstream schemas may use
   # generic value/content fields.
-  jq -r '.. | strings | select(length >= 12)' "$HOME/.grok/auth.json" \
-    | sort -u > /tmp/test225-real-patterns
-  chmod 600 /tmp/test225-real-patterns
+  refresh_real_auth_patterns "$HOME/.grok/auth.json"
 
   anet node create "$real_alias" --runtime grok-build-cli >"$REAL_CREATE_LOG" 2>&1
   grep -Fq 'EXPERIMENTAL/DANGEROUS' "$REAL_CREATE_LOG" \
@@ -1088,6 +1448,7 @@ run_real_gate() {
     first_row=$(curl -fsS "$HUB/api/tasks?limit=80&network_id=$NETWORK_ID" \
       -H "Authorization: Bearer $USER_TOKEN" \
       | jq -c --arg id "$first_id" '.tasks[]? | select(.task_id == $id)' || true)
+    fail_if_task_terminal_error "optional real Grok first task" "$first_id" "$first_row"
     jq -e '.status == "replied" and (.result | contains("GROK_PREVIEW_REAL_225_A"))' \
       <<<"$first_row" >/dev/null 2>&1 && break
     sleep 0.2
@@ -1110,6 +1471,11 @@ run_real_gate() {
     || fail "optional real first stop left an agent-node or lock-holder process"
   [ "$(matching_process_count "$real_bin")" -eq 0 ] \
     || fail "optional real first stop left a Grok process"
+  refresh_real_auth_patterns "$HOME/.grok/auth.json"
+  scan_fixed_file /tmp/test225-real-patterns \
+    "$REAL_START_LOG" "$REAL_CAPTURE" "$SERVER_LOG" "$real_log_dir" \
+    "$GROK_STATE" "$real_pending" "$STOP_LOG_DIR" \
+    || fail "refreshed real auth scalar reached first-turn evidence"
 
   env -u ANET_AGENT_NODE_BIN GROK_BINARY="$real_bin" npm_config_offline=true \
     anet node start "$real_alias" >"$REAL_RESUME_LOG" 2>&1 &
@@ -1131,6 +1497,7 @@ run_real_gate() {
     second_row=$(curl -fsS "$HUB/api/tasks?limit=80&network_id=$NETWORK_ID" \
       -H "Authorization: Bearer $USER_TOKEN" \
       | jq -c --arg id "$second_id" '.tasks[]? | select(.task_id == $id)' || true)
+    fail_if_task_terminal_error "optional real Grok resume task" "$second_id" "$second_row"
     jq -e --arg nonce "$continuity_nonce" \
       '.status == "replied" and (.result | contains($nonce))' \
       <<<"$second_row" >/dev/null 2>&1 && break
@@ -1157,7 +1524,6 @@ run_real_gate() {
     || fail "real Grok auth scalar reached a tarball/report/log/live capture"
   scan_fixed_file /tmp/test225-real-patterns "$GROK_STATE" \
     || fail "real Grok auth scalar reached generated state"
-  local real_pending="$WORK/.anet/nodes/$real_alias/pending-replies.json"
   scan_fixed_file /tmp/test225-real-patterns "$real_pending" \
     || fail "real Grok auth scalar reached pending replies"
   scan_fixed_file /tmp/test225-live-credentials \
@@ -1181,9 +1547,11 @@ run_real_gate() {
     || fail "optional real resume stop left an agent-node or lock-holder process"
   [ "$(matching_process_count "$real_bin")" -eq 0 ] \
     || fail "optional real resume stop left a Grok process"
+  refresh_real_auth_patterns "$HOME/.grok/auth.json"
   scan_fixed_file /tmp/test225-real-patterns \
     "$REPORT" "$REAL_START_LOG" "$REAL_RESUME_LOG" "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" \
-    "$SERVER_LOG" "$real_log_dir" "$GROK_STATE" "$real_pending" /tmp/test225-real-hub-rows \
+    "$SERVER_LOG" "$real_log_dir" "$GROK_STATE" "$real_pending" "$STOP_LOG_DIR" \
+    /tmp/test225-real-hub-rows \
     || fail "real Grok auth scalar reached an evidence artifact during shutdown"
   scan_fixed_file /tmp/test225-live-credentials \
     "$REAL_START_LOG" "$REAL_RESUME_LOG" "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" \
@@ -1198,7 +1566,6 @@ run_real_gate() {
   if find "$real_log_dir" -type f ! -perm 0600 -print -quit | grep -q .; then
     fail "real node durable log directory contains a non-0600 file"
   fi
-  rm -f "$HOME/.grok/auth.json" "$HOME/.grok/agent_id"
 }
 
 log "[L5] optional authenticated real Grok gate"
@@ -1225,7 +1592,7 @@ scan_fixed_file /tmp/test225-markers \
   /tmp/test225-candidate-extracted "$REPORT" "$SERVER_LOG" "$START_LOG" "$RELOAD_LOG" "$RESUME_LOG" \
   "$REAL_START_LOG" "$REAL_RESUME_LOG" "$ATTACH_CAPTURE" "$RELOAD_CAPTURE" "$RESUME_CAPTURE" \
   "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" "$GROK_STATE" "$PENDING" \
-  "$WORK/.anet/nodes/$ALIAS" /tmp/test225-hub-results \
+  "$WORK/.anet/nodes/$ALIAS" "$STOP_LOG_DIR" /tmp/test225-hub-results \
   "$LOCAL_REGISTRY_LOG" "$NPX_ENV_OBSERVATION" \
   || fail "final synthetic credential scan failed"
 scan_fixed_file /tmp/test225-live-credentials \
@@ -1234,13 +1601,14 @@ scan_fixed_file /tmp/test225-live-credentials \
   "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" "$GROK_STATE" "$PENDING" "$REPORT" \
   "$NODE_LOG_DIR" "$WORK/.anet/nodes/preview-grok-real-225/logs" \
   "$WORK/.anet/nodes/preview-grok-real-225/pending-replies.json" \
-  /tmp/test225-hub-results /tmp/test225-real-hub-rows "$LOCAL_REGISTRY_LOG" "$NPX_ENV_OBSERVATION" \
+  "$STOP_LOG_DIR" /tmp/test225-hub-results /tmp/test225-real-hub-rows \
+  "$LOCAL_REGISTRY_LOG" "$NPX_ENV_OBSERVATION" \
   || fail "final test Hub credential scan failed"
 scan_fixed_file /tmp/test225-real-patterns \
   /tmp/test225-candidate-extracted "$SERVER_LOG" "$START_LOG" "$RELOAD_LOG" "$RESUME_LOG" \
   "$REAL_START_LOG" "$REAL_RESUME_LOG" "$ATTACH_CAPTURE" "$RELOAD_CAPTURE" \
   "$RESUME_CAPTURE" "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" "$GROK_STATE" "$PENDING" \
-  "$WORK/.anet" /tmp/test225-hub-results /tmp/test225-real-hub-rows "$REPORT" \
+  "$WORK/.anet" "$STOP_LOG_DIR" /tmp/test225-hub-results /tmp/test225-real-hub-rows "$REPORT" \
   "$LOCAL_REGISTRY_LOG" "$NPX_ENV_OBSERVATION" \
   || fail "final real-auth scalar scan failed after every producer stopped"
 

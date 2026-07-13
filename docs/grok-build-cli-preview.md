@@ -22,7 +22,7 @@ The formal native Leader/Policy Gateway runtime is a separate, stricter track. I
 Verify Grok before creating the node:
 
 ```bash
-grok auth login
+grok login
 grok --version
 ```
 
@@ -53,6 +53,16 @@ Press `Ctrl-]` to detach without stopping the node.
 
 The default `grok-build-cli` profile created by `anet` enables co-presence. `anet node start` owns one Grok PTY and exposes a local, same-user attach socket. The attached terminal renders that TUI. A network task sent to `grok-shared` is submitted into the same session, appears in the TUI, and its completed answer is routed to the original CommHub task.
 
+The preview uses one runtime-owned, mode-`0600` agent profile selected with
+the TUI-effective `--agent` flag. Its exact model-tool inventory is
+`[todo_write]`: filesystem, shell, network, media, MCP, scheduler, and
+subagent tools are unavailable. Generic `tools` and `maxTurns` settings are
+rejected in co-presence because Grok 0.2.93 ignores their corresponding CLI
+flags in interactive mode. This deliberate text-only restriction lets the
+pinned CLI read its existing owner-only login after sandbox re-exec without
+giving a network prompt a model-tool route to that file. Use another runtime
+when code inspection/editing, shell execution, or web/media access is needed.
+
 The runtime prepares Grok's owner-only folder-trust store non-interactively,
 but grants trust to the exact canonical working directory only. It first
 refuses project MCP, LSP, hook, plugin, permission/sandbox configuration, and
@@ -69,7 +79,7 @@ There is no separate `--copresence` flag: co-presence is the default for a newly
 
 ## Agent-node package resolution
 
-A global `agent-node` install is optional. Before starting `grok-build-cli`, `anet` checks for the machine-readable `ANET_CAPABILITY_GROK_COPRESENCE_V1` marker; merely advertising the older headless `grok-build-cli` name is not sufficient. If the installed binary is absent or incompatible, `anet` uses:
+A global `agent-node` install is optional. Before starting `grok-build-cli`, `anet` checks for the machine-readable `ANET_CAPABILITY_GROK_COPRESENCE_V2` marker; merely advertising `grok-build-cli` or the older V1 co-presence marker is not sufficient. If the installed binary is absent or incompatible, `anet` uses:
 
 ```bash
 npx -y @sleep2agi/agent-node@preview
@@ -116,13 +126,14 @@ This launches `grok agent stdio` and uses ACP session handling. It is not an ali
 
 ## Preview safety rules
 
-- Use only trusted task senders. A network task can influence the same model and workspace visible in the human TUI.
+- Use only trusted task senders. A network task influences the same model and conversation visible in the human TUI.
 - Do not use this runtime for production work or connect it to a public/untrusted Hub.
 - Do not enable permission bypass for the co-presence profile.
 - Treat every approval prompt as human-visible experimental behavior, not as proof of production-grade owner or lease enforcement.
 - Grok children and runtime lock helpers receive exact, from-empty environment allowlists. CommHub/cloud credentials are not inherited by those processes.
+- The shared-TUI preview has the exact fixed tool inventory `[todo_write]`; do not treat it as a filesystem-, network-, media-, MCP-, subagent-, or shell-capable coding runtime.
 - Folder trust is runtime-owned, mode `0600`, and contains exactly the current canonical working directory; project executable configuration is a startup error rather than implicitly trusted code.
-- Network task text and outbound replies are scrubbed before ordinary logs, status, pending replies, and external delivery. The isolated Grok conversation transcript is the only owner-only raw transcript store: its directories are `0700` and regular files are `0600`; do not copy it into reports or support bundles.
+- Known values loaded by the process and recognized credential shapes/assignments in network task text or replies are scrubbed before ordinary logs, status, pending replies, and external delivery. This is not a universal classifier for arbitrary opaque text: do not paste credentials into the shared conversation or TUI. The isolated Grok conversation transcript is the only owner-only raw transcript store: its directories are `0700` and regular files are `0600`; do not copy it into reports or support bundles.
 - Do not infer `latest` support from this document. Promotion requires a separate review and release decision.
 
 ## Common errors

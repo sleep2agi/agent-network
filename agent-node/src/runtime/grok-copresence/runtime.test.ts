@@ -27,6 +27,7 @@ import {
   type GrokPtyLike,
   type GrokPtySpawn,
 } from "./runtime";
+import { renderGrokCopresenceAgentProfile } from "./policy";
 
 const SESSION = "11111111-1111-4111-8111-111111111111";
 const SESSION_2 = "22222222-2222-4222-8222-222222222222";
@@ -47,33 +48,71 @@ describe("Grok copresence launch and injection policy", () => {
       .toThrow("requires exactly grok 0.2.93");
   });
 
-  test("uses interactive workspace tools without automatic approval", () => {
+  test("pins one TUI-effective no-I/O agent profile and hard-denies fallback routes", () => {
     const args = buildGrokCopresenceArgs({
       cwd: "/workspace",
       sessionId: SESSION,
       resume: false,
       leaderSocket: "/tmp/grok-copres-test/leader.sock",
-      toolAllowlist: ["Bash", "Edit", "Read"],
+      agentProfile: "/isolated/anet-copresence-preview.md",
       sandboxProfile: "anet-workspace",
       protectedPaths: ["/workspace/.grok"],
     });
     expect(args).toContain("--leader");
     expect(args).toContain("--session-id");
-    expect(args).toContain("run_terminal_cmd,search_replace,read_file");
+    expect(args).toContain("--agent");
+    expect(args).toContain("/isolated/anet-copresence-preview.md");
+    expect(args).not.toContain("--tools");
+    expect(args).not.toContain("--disallowed-tools");
+    expect(args).toContain("--no-auto-update");
+    expect(args).toContain("--disable-web-search");
+    expect(args).toContain("--no-memory");
     expect(args).toContain("anet-workspace");
     expect(args).toContain("--permission-mode");
     expect(args).toContain("default");
     expect(args).not.toContain("--always-approve");
     expect(args).toContain("MCPTool");
+    const denied = args.flatMap((value, index) => args[index - 1] === "--deny" ? [value] : []);
+    expect(denied).toContain("Bash");
+    expect(denied).toContain("Write");
+    expect(denied).toContain("WebFetch");
     expect(args).toContain("Edit(/workspace/.grok)");
     expect(() => buildGrokCopresenceArgs({
       cwd: "/workspace",
       sessionId: SESSION,
       resume: false,
       leaderSocket: "/tmp/grok-copres-test/leader.sock",
+      agentProfile: "/isolated/anet-copresence-preview.md",
       sandboxProfile: "anet-workspace",
       alwaysApprove: true,
     })).toThrow("approvals must be owned by the human TUI");
+    expect(() => buildGrokCopresenceArgs({
+      cwd: "/workspace",
+      sessionId: SESSION,
+      resume: false,
+      leaderSocket: "/tmp/grok-copres-test/leader.sock",
+      agentProfile: "/isolated/anet-copresence-preview.md",
+      sandboxProfile: "anet-workspace",
+      toolAllowlist: ["Read"],
+    })).toThrow("fixed preview tool profile");
+    expect(() => buildGrokCopresenceArgs({
+      cwd: "/workspace",
+      sessionId: SESSION,
+      resume: false,
+      leaderSocket: "/tmp/grok-copres-test/leader.sock",
+      agentProfile: "/isolated/anet-copresence-preview.md",
+      sandboxProfile: "anet-workspace",
+      maxTurns: 5,
+    })).toThrow("does not support maxTurns");
+    expect(() => buildGrokCopresenceArgs({
+      cwd: "/workspace",
+      sessionId: SESSION,
+      resume: false,
+      leaderSocket: "/tmp/grok-copres-test/leader.sock",
+      agentProfile: "/isolated/anet-copresence-preview.md",
+      sandboxProfile: "anet-workspace",
+      protectedPaths: ["/workspace/unsafe(path"],
+    })).toThrow("cannot be represented safely");
   });
 
   test("rejects terminal escape injection and reserved origin markup", () => {
@@ -115,6 +154,13 @@ describe("Grok copresence launch and injection policy", () => {
         mode: "default",
       },
       mcpServers: [],
+      lspServers: [],
+      plugins: [],
+      agents: [
+        { name: "general-purpose", source: { type: "builtin" } },
+        { name: "explore", source: { type: "builtin" } },
+        { name: "plan", source: { type: "builtin" } },
+      ],
     };
     expect(() => assertGrokCopresenceApprovalOwnership(JSON.stringify({
       ...cleanInspection,
@@ -146,6 +192,14 @@ describe("Grok copresence launch and injection policy", () => {
       ...cleanInspection,
       mcpServers: [{ name: "project-server" }],
     }), home)).toThrow("discovered MCP servers");
+    expect(() => assertGrokCopresenceApprovalOwnership(JSON.stringify({
+      ...cleanInspection,
+      lspServers: [{ name: "project-lsp" }],
+    }), home)).toThrow("discovered LSP servers");
+    expect(() => assertGrokCopresenceApprovalOwnership(JSON.stringify({
+      ...cleanInspection,
+      agents: [...cleanInspection.agents, { name: "alternate", source: { type: "user" } }],
+    }), home)).toThrow("non-builtin agents");
   });
 });
 
@@ -197,6 +251,10 @@ describe("Grok copresence runtime integration", () => {
         GROK_CURSOR_HOOKS_ENABLED: "false",
         GROK_FOLDER_TRUST: "1",
         GROK_DEFAULT_SELECTED_PERMISSION: "allow_once",
+        GROK_DISABLE_AUTOUPDATER: "1",
+        GROK_SUBAGENTS: "0",
+        GROK_WEB_FETCH: "0",
+        GROK_MEMORY: "0",
         PWD: fixture.cwd,
         TERM: "xterm-256color",
       });
@@ -235,13 +293,20 @@ describe("Grok copresence runtime integration", () => {
       input.write("/always-approve\r");
       input.write("/auto\n\x03");
       input.write("/auto\x01\x04\r");
+      input.write("/agents\r");
+      input.write("/config-agents\r");
+      input.write(Buffer.from("\x1b[200~/agents\x1b[201~\r"));
+      input.write("\x18\t");
       input.write(`/yolo${" ".repeat(8_300)}\r`);
       await Bun.sleep(50);
       expect(fixture.humanPrompts).not.toContain("/always-approve");
       expect(fixture.humanPrompts).not.toContain("/auto");
+      expect(fixture.humanPrompts).not.toContain("/agents");
+      expect(fixture.humanPrompts).not.toContain("/config-agents");
       expect(fixture.writes.join("")).not.toContain("\x1b[Z");
       expect(fixture.writes.join("")).not.toContain("\x1b[111;5u");
       expect(fixture.writes.join("")).not.toContain("\x1b[47u");
+      expect(fixture.writes.join("")).not.toContain("\x18");
 
       input.write(Buffer.from("\x1b[200~first\rsecond\x1b[201~"));
       await waitFor(() => runtime!.state.phase === "human_editing");
@@ -680,6 +745,11 @@ class RuntimeFixture {
   constructor() {
     mkdirSync(this.cwd, { recursive: true, mode: 0o700 });
     mkdirSync(this.grokHome, { recursive: true, mode: 0o700 });
+    writeFileSync(
+      join(this.grokHome, "anet-copresence-preview.md"),
+      renderGrokCopresenceAgentProfile(),
+      { mode: 0o600 },
+    );
   }
 
   options(sessionId = SESSION) {
@@ -699,6 +769,10 @@ class RuntimeFixture {
         GROK_CURSOR_HOOKS_ENABLED: "false",
         GROK_FOLDER_TRUST: "1",
         GROK_DEFAULT_SELECTED_PERMISSION: "allow_once",
+        GROK_DISABLE_AUTOUPDATER: "1",
+        GROK_SUBAGENTS: "0",
+        GROK_WEB_FETCH: "0",
+        GROK_MEMORY: "0",
         DATABASE_URL: "postgres://private",
         AWS_ACCESS_KEY_ID: "AKIA_PRIVATE",
         AWS_SECRET_ACCESS_KEY: "aws-private",
@@ -715,6 +789,7 @@ class RuntimeFixture {
       leaderSocket: this.leaderSocket,
       attachSocket: this.attachSocket,
       alias: "grok-test",
+      agentProfile: join(this.grokHome, "anet-copresence-preview.md"),
       alwaysApprove: false,
       sandboxProfile: "workspace",
       pollIntervalMs: this.pollIntervalMs,
@@ -735,6 +810,10 @@ class RuntimeFixture {
           GROK_CURSOR_HOOKS_ENABLED: "false",
           GROK_FOLDER_TRUST: "1",
           GROK_DEFAULT_SELECTED_PERMISSION: "allow_once",
+          GROK_DISABLE_AUTOUPDATER: "1",
+          GROK_SUBAGENTS: "0",
+          GROK_WEB_FETCH: "0",
+          GROK_MEMORY: "0",
           DATABASE_URL: "postgres://private",
           AWS_SESSION_TOKEN: "aws-private",
           ARBITRARY_TOKEN: "token-private",

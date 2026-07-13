@@ -151,7 +151,7 @@ Runtime:
   grok-build-acp    Grok Build ACP — xAI Grok Build via "grok agent stdio"
   grok-build-cli    Grok Build CLI — headless 或 grokCopresence 共存 TUI 模式
 
-Capabilities: ANET_CAPABILITY_GROK_COPRESENCE_V1
+Capabilities: ANET_CAPABILITY_GROK_COPRESENCE_V2
 `);
     process.exit(0);
   }
@@ -3171,6 +3171,20 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
         + "approval decisions must remain owned by the attached human TUI",
       );
     }
+    if (opts.tools !== undefined || fileConfig.tools !== undefined) {
+      throw new Error(
+        "grok copresence preview uses one fixed text-only tool profile; remove custom tools from the node config",
+      );
+    }
+    if (
+      MAX_TURNS_CLI !== undefined
+      || fileConfig.flags?.maxTurns !== undefined
+      || fileConfig.maxTurns !== undefined
+    ) {
+      throw new Error(
+        "grok copresence preview does not support maxTurns because pinned Grok ignores it in interactive TUI mode",
+      );
+    }
 
     const grokBinary = process.env.GROK_BINARY || "grok";
     const grokCwd = process.cwd();
@@ -3313,6 +3327,9 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
     };
 
     const { grokCliHome, env } = prepareRuntime();
+    if (!grokCliHome.copresenceAgentProfile) {
+      throw new Error("grok copresence safety audit did not produce its runtime-owned agent profile");
+    }
     const session = await openGrokCopresenceRuntime({
       binary: grokBinary,
       cwd: grokCwd,
@@ -3324,16 +3341,15 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
       attachSocket,
       alias: currentAlias(),
       model: MODEL || undefined,
-      maxTurns: currentMaxTurns(),
+      agentProfile: grokCliHome.copresenceAgentProfile,
       alwaysApprove: false,
-      toolAllowlist: Array.isArray(TOOLS) ? TOOLS : undefined,
       // Workspace capability is still mediated by Grok's interactive
       // permission UI. `alwaysApprove:false` is invariant, so only the human
       // attached to this PTY may approve a mutating tool call.
       sandboxProfile: grokCliHome.workspaceProfile,
       protectedPaths: [
         grokCliHome.home,
-        sourceGrokHome,
+        dirname(grokCliHome.authPath),
         join(grokCwd, ".anet"),
         join(home, ".anet"),
         ...grokProjectPolicyPaths(grokCwd),
@@ -5062,14 +5078,15 @@ if (AUTH_TOKEN) {
   warn(`  未配置 token — agent 数据不隔离。运行: anet login`);
 }
 
-// #101 fix: log resolved toolset shape — explicit list shows entries, preset
-// surfaces as "all (Claude Code preset)" so users can tell at a glance their
-// agent has the full built-in set vs a restricted allowlist.
-log(`  tools:   ${
+// #101 fix: log resolved toolset shape. Co-presence ignores the generic tool
+// config and uses the one runtime-owned profile verified for the pinned TUI.
+const requestedToolsSummary =
   Array.isArray(TOOLS)
     ? (TOOLS.length ? `[${TOOLS.join(",")}]` : "(none)")
-    : "all (Claude Code preset — built-in: WebFetch/WebSearch/Bash/Read/Write/Edit/Glob/Grep/Task/...)"
-}`);
+    : "all (Claude Code preset — built-in: WebFetch/WebSearch/Bash/Read/Write/Edit/Glob/Grep/Task/...)";
+log(`  tools:   ${GROK_COPRESENCE
+  ? "fixed preview profile [todo_write] (text-only; no filesystem/shell/network/media/MCP/subagents)"
+  : requestedToolsSummary}`);
 log(`  channels:${[
   TELEGRAM_CHANNELS.length ? `telegram(${TELEGRAM_CHANNELS.map(ch => ch.dir).join(",")})` : "",
   FEISHU_CHANNELS.length ? `feishu(${FEISHU_CHANNELS.map(ch => ch.dir).join(",")})` : "",

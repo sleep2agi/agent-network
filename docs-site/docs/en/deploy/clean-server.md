@@ -173,7 +173,7 @@ node-name → runtime → (only if claude-agent-sdk) vendor → model → API ke
 | **`claude-code-cli`** (recommended for first-time users) | ⭐ | You already use Claude Code, want to reuse the subscription | Skips vendor + model, uses your local `claude` login | `claude auth login` already done |
 | `claude-agent-sdk` | ⭐⭐ | Programmatic access to any Anthropic-compatible API (MiniMax / 书生 / 小米 MiMo / domestic models go here) | **Pops a vendor submenu** → pick vendor → pick model → enter API key | API key |
 | `codex-sdk` | ⭐⭐⭐ | Writing code / running commands via OpenAI Codex | Skips vendor, uses codex's own auth | agent-node + codex CLI + `codex auth login` |
-| `grok-build-acp` | ⭐⭐⭐ | Running tasks via xAI Grok Build | Skips vendor, uses grok's own auth + `XAI_API_KEY` | grok CLI + `grok auth login` + `XAI_API_KEY` |
+| `grok-build-acp` | ⭐⭐⭐ | Running tasks via xAI Grok Build | Skips vendor, uses grok's own auth + `XAI_API_KEY` | grok CLI + `grok login` + `XAI_API_KEY` |
 
 ::: warning Watch out for the default runtime
 The wizard **defaults the first option** (currently `claude-agent-sdk`); a new user pressing Enter all the way lands on the vendor + API-key path. **Manually pick `claude-code-cli`** for the smoothest first-time experience ([#237 坑 3](https://github.com/sleep2agi/agent-network/issues/237), known UX pain — the wizard default will change later).

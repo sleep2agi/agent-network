@@ -46,7 +46,7 @@ RUN npm install -g /candidate/sleep2agi-agent-network-*.tgz \
   && commhub-server --help >/dev/null
 
 COPY tests/test225-grok-preview-package-live /test225
-RUN chmod 755 /test225/run.sh /test225/fake-grok.mjs /test225/local-registry.mjs /test225/npx-env-wrapper.mjs
+RUN chmod 755 /test225/run.sh /test225/fake-grok.mjs /test225/local-registry.mjs /test225/npx-env-wrapper.mjs /test225/old-v1-agent-node.mjs /test225/tui-tool-inventory-probe.mjs
 
 WORKDIR /test225-work
 ENTRYPOINT ["bash", "/test225/run.sh"]
