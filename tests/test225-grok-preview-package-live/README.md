@@ -17,8 +17,8 @@ Unix attach relay, and tmux TTY. It covers:
 - registration, Hub task delivery, true tmux `anet grok attach` rendering,
   reply, stop, and same-session resume;
 - exact resolver/agent-node/Grok/PTY/helper environment checks and synthetic
-credential scans over logs, Grok state, goal state, pending replies,
-candidate tarballs, captures, and the report.
+  credential scans over logs, Grok state, goal state, pending replies,
+  candidate tarballs, captures, and the report.
 
 Both the deterministic fake and the authenticated run require a mode-0600
 `trusted_folders.toml` containing exactly the canonical test working
@@ -36,13 +36,15 @@ network-disabled package/security gate.
 Run the deterministic layer from the repository root:
 
 ```bash
-sg docker -c 'docker build -f tests/test225-grok-preview-package-live/Dockerfile -t test225-grok-preview .'
+sg docker -c 'docker build --build-arg SOURCE_COMMIT=$(git rev-parse HEAD) -f tests/test225-grok-preview-package-live/Dockerfile -t test225-grok-preview .'
 sg docker -c 'docker run --rm -v "$PWD/docs/tests:/artifacts" test225-grok-preview'
 ```
 
 The authenticated live layer is opt-in because it consumes a real cached Grok
 login. Mount the binary and auth read-only; raw auth and tmux captures remain
-under `/tmp` and are destroyed rather than copied into artifacts:
+under `/tmp` and are destroyed rather than copied into artifacts. The second
+turn must recall a fresh benign nonce from the first turn after stop/start, so
+the gate proves actual session continuity rather than two independent calls:
 
 ```bash
 sg docker -c 'docker run --rm \

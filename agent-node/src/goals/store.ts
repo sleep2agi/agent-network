@@ -173,6 +173,18 @@ export class GoalStore {
       return { ok: true };
     }
 
+    // Repair legacy broad modes before the bytes are parsed or migrated.  A
+    // Grok preview node must never leave a previously-created goals file
+    // world/group-readable while startup is doing the redaction rewrite.
+    if (this.options.redactor) {
+      try {
+        chmodSync(this.filePath, 0o600);
+      } catch (e: any) {
+        this.loaded = true;
+        return { ok: false, error: `permission repair failed: ${e?.message || e}` };
+      }
+    }
+
     let raw: string;
     try {
       raw = readFileSync(this.filePath, "utf-8");
@@ -193,7 +205,7 @@ export class GoalStore {
 
     const file = parsed as GoalsFile | null;
     if (!file || file.version !== GOALS_SCHEMA_VERSION || !Array.isArray(file.goals)) {
-      const backup = this._preserveCorrupt(raw);
+      const backup = this._preserveCorrupt(raw, parsed);
       this.loaded = true;
       if (this.options.redactor) await this._flush();
       return {
@@ -220,17 +232,24 @@ export class GoalStore {
     return { ok: true };
   }
 
-  private _preserveCorrupt(raw: string): string | undefined {
+  private _preserveCorrupt(raw: string, parsed?: unknown): string | undefined {
     try {
       const ts = new Date().toISOString().replace(/[:.]/g, "-");
       const backup = `${this.filePath}.corrupt.${ts}`;
       if (this.options.redactor) {
-        const safe = this.options.redactor.redactText(raw).text;
+        // Malformed JSON has no trustworthy structure, so redact its raw
+        // text.  A parseable-but-unsupported schema can and should cross the
+        // recursive object boundary before it is retained for diagnostics.
+        const safe = parsed === undefined
+          ? this.options.redactor.redactText(raw).text
+          : JSON.stringify(this.options.redactor.redactValue(parsed), null, 2) + "\n";
         writeFileSync(backup, safe, { mode: 0o600, flag: "wx" });
       } else {
         copyFileSync(this.filePath, backup);
-        chmodSync(backup, 0o600);
       }
+      // Reinforce the postcondition instead of relying solely on the create
+      // mode or copy implementation.
+      chmodSync(backup, 0o600);
       return backup;
     } catch {
       return undefined;
@@ -298,8 +317,8 @@ export class GoalStore {
           });
         } else {
           copyFileSync(this.filePath, backup);
-          chmodSync(backup, 0o600);
         }
+        chmodSync(backup, 0o600);
       }
       this.goals.clear();
       await this._flush();
@@ -378,6 +397,7 @@ export class GoalStore {
     // silently grow the directory.
     try {
       writeFileSync(tmp, JSON.stringify(payload, null, 2) + "\n", { mode: 0o600, flag: "wx" });
+      chmodSync(tmp, 0o600);
       renameSync(tmp, this.filePath);
       chmodSync(this.filePath, 0o600);
     } catch (e) {

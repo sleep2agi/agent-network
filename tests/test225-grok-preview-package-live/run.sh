@@ -20,6 +20,7 @@ FAKE_OBSERVATIONS=/tmp/test225-fake-observations.jsonl
 FAKE_READINESS_OBSERVATIONS=/tmp/test225-fake-readiness.jsonl
 EXPECTED_GROK_ENV_KEYS=/tmp/test225-expected-grok-env-keys.json
 EXPECTED_GROK_PTY_ENV_KEYS=/tmp/test225-expected-grok-pty-env-keys.json
+EXPECTED_HELPER_ENV=/tmp/test225-expected-helper-env.json
 EXPECTED_AGENT_NODE_ENV_KEYS=/tmp/test225-expected-agent-node-env-keys.json
 EXPECTED_NPX_ENV_KEYS=/tmp/test225-expected-npx-env-keys.json
 NPX_ENV_OBSERVATION=/tmp/test225-npx-env.json
@@ -63,6 +64,10 @@ chmod 700 "$HOME" "$HOME/.grok" "$WORK"
 log() { printf '%s\n' "$*" | tee -a "$REPORT"; }
 fail() { log "FAIL: $*"; exit 1; }
 pass() { log "PASS: $*"; }
+
+SOURCE_COMMIT=${TEST225_SOURCE_COMMIT:-}
+[[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] \
+  || fail "SOURCE_COMMIT must bind this gate to one full lowercase Git SHA"
 fail_with_private_log() {
   local message=$1 path=$2
   local bytes=0 mode=missing
@@ -181,6 +186,53 @@ assert_snapshot_gone() {
   done <"$input"
 }
 
+assert_lock_holder_envs_exact() {
+  local input=$1 pid start kind current
+  while read -r pid start kind; do
+    [ "$kind" = lock-holder ] || continue
+    current=$(process_starttime "$pid" 2>/dev/null || true)
+    [ -n "$current" ] && [ "$current" = "$start" ] \
+      || fail "lock-holder disappeared before its environment was verified"
+    node - "$pid" "$EXPECTED_HELPER_ENV" <<'NODE' \
+      || fail "lock-holder environment differs from the exact reviewed object"
+const fs = require("node:fs");
+const pid = process.argv[2];
+const expected = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+const actual = {};
+for (const entry of fs.readFileSync(`/proc/${pid}/environ`, "utf8").split("\0")) {
+  if (!entry) continue;
+  const separator = entry.indexOf("=");
+  if (separator < 1) process.exit(2);
+  actual[entry.slice(0, separator)] = entry.slice(separator + 1);
+}
+const canonical = (value) => JSON.stringify(Object.fromEntries(
+  Object.entries(value).sort(([left], [right]) => left.localeCompare(right)),
+));
+if (canonical(actual) !== canonical(expected)) process.exit(1);
+NODE
+  done <"$input"
+}
+
+assert_installed_candidate_runtime() {
+  local alias=$1 label=$2 output=$3 pid_file pid
+  local -a argv=()
+  pid_file="$WORK/.anet/nodes/$alias/.pid"
+  [ -f "$pid_file" ] || fail "$label start did not record a runtime PID"
+  pid=$(<"$pid_file")
+  while IFS= read -r -d '' arg; do argv+=("$arg"); done <"/proc/$pid/cmdline"
+  [ "${#argv[@]}" -ge 2 ] || fail "$label pidfile has no executable argv"
+  [ "$(readlink -f "${argv[0]}")" = "$(readlink -f "$(command -v node)")" ] \
+    || fail "$label pidfile identifies a wrapper instead of Node"
+  [ "$(readlink -f "${argv[1]}")" = "/usr/local/lib/node_modules/@sleep2agi/agent-node/dist/cli.js" ] \
+    || fail "$label did not launch the installed candidate entrypoint"
+  [ "$(matching_process_count 'npm exec @sleep2agi/agent-node@preview')" -eq 0 ] \
+    || fail "$label left an npm resolver wrapper running"
+  grep -Fq '[anet] using installed agent-node with Grok co-presence capability.' "$output" \
+    || fail "$label did not report the installed candidate"
+  grep -Eq 'fetching @sleep2agi/agent-node@preview|using @sleep2agi/agent-node@preview instead' "$output" \
+    && fail "$label unexpectedly used an npx preview fallback"
+}
+
 file_mode() {
   stat -c '%a' "$1"
 }
@@ -243,6 +295,7 @@ cleanup() {
     /tmp/test225-headless.raw.log \
     /tmp/test225-candidate-agent-node-package.json \
     "$EXPECTED_GROK_ENV_KEYS" "$EXPECTED_GROK_PTY_ENV_KEYS" "$EXPECTED_AGENT_NODE_ENV_KEYS" \
+    "$EXPECTED_HELPER_ENV" \
     "$EXPECTED_NPX_ENV_KEYS" "$NPX_ENV_OBSERVATION" \
     "$FALLBACK_PID_SNAPSHOT" \
     "$FAKE_OBSERVATIONS" "$FAKE_READINESS_OBSERVATIONS" "$LOCAL_REGISTRY_LOG"
@@ -252,7 +305,7 @@ trap cleanup EXIT
 
 log "# test225 — Grok preview candidate tarball + live co-presence"
 log "date: $(date -Is)"
-log "source_commit=${TEST225_SOURCE_COMMIT:-uncommitted}"
+log "source_commit=$SOURCE_COMMIT"
 log "network=container-local Hub; outbound npm only for initial candidate dependency resolution"
 
 log "[L0] clean candidate package image"
@@ -378,6 +431,18 @@ chmod 600 /tmp/test225-assistant-marker
 } | sort -u | jq -Rsc 'split("\n") | map(select(length > 0))' > "$EXPECTED_GROK_ENV_KEYS"
 jq -c '. + ["PWD", "TERM"] | unique | sort' "$EXPECTED_GROK_ENV_KEYS" \
   > "$EXPECTED_GROK_PTY_ENV_KEYS"
+
+node - <<'NODE' > "$EXPECTED_HELPER_ENV"
+const keys = ["PATH", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "LC_CTYPE", "TZ"];
+const expected = {};
+for (const key of keys) {
+  const value = process.env[key];
+  if (value !== undefined && value !== "") expected[key] = value;
+}
+if (!expected.PATH) expected.PATH = "/usr/local/bin:/usr/bin:/bin";
+process.stdout.write(`${JSON.stringify(expected)}\n`);
+NODE
+chmod 600 "$EXPECTED_HELPER_ENV"
 
 {
   for key in PATH HOME TMPDIR TMP TEMP LANG LC_ALL LC_CTYPE TZ SHELL USER LOGNAME TERM COLORTERM NO_COLOR; do
@@ -516,6 +581,7 @@ snapshot_fallback_runtime "$FALLBACK_PID_SNAPSHOT"
   || fail "fallback snapshot does not contain exactly one Grok PTY process"
 [ "$(awk '$3 == "lock-holder" {n++} END {print n+0}' "$FALLBACK_PID_SNAPSHOT")" -eq 3 ] \
   || fail "fallback snapshot does not contain the three lifetime lock holders"
+assert_lock_holder_envs_exact "$FALLBACK_PID_SNAPSHOT"
 
 stop_node_checked "$ALIAS" legacy-reload
 [ ! -e "$ATTACH_SOCKET" ] || fail "node stop returned before removing the attach socket"
@@ -584,8 +650,6 @@ wait_pane test225-attach 'GROK_PREVIEW_LIVE_225_A' "$RELOAD_CAPTURE" 100 \
   || fail "attached human TUI did not live-render the Hub task"
 wait_pane test225-attach 'GROK_PREVIEW_FAKE_REPLY_OK' "$RELOAD_CAPTURE" 100 \
   || fail "attached human TUI did not live-render the Grok reply"
-grep -Fq 'TEST225_ASSISTANT_SECRET_CANARY_b682a1' "$RELOAD_CAPTURE" \
-  || fail "owner-only TUI proof did not contain the assistant-generated marker"
 pass "create -> start -> register -> Hub task -> real tmux attach live render -> reply"
 
 log "[L3] exact child-env and persisted-output checks"
@@ -670,12 +734,9 @@ GROK_STATE="$HOME/.anet-grok"
 if scan_fixed_file /tmp/test225-markers "$GROK_STATE"; then :; else
   fail "synthetic credential reached Grok session or generated state"
 fi
-# Grok owns its live transcript and may persist model output before the
-# bridge can scrub it. That explicitly accepted preview exception is confined
-# to this owner-only store/TUI; the marker must still be absent from Hub
-# replies, ordinary logs, pending replies, reports, and tarballs.
-grep -R -Fq 'TEST225_ASSISTANT_SECRET_CANARY_b682a1' "$GROK_STATE" \
-  || fail "owner-only Grok transcript proof did not contain the assistant-generated marker"
+# The native TUI/transcript is part of the captured evidence boundary.  Live
+# rendering is proved with a benign marker above; credential canaries must be
+# absent here just like they are from ordinary logs and reports.
 if find "$GROK_STATE" -type d -perm /077 -print -quit | grep -q .; then
   fail "Grok state contains a directory accessible to group/other"
 fi
@@ -692,9 +753,17 @@ scan_fixed_file /tmp/test225-markers /tmp/test225-candidate-extracted "$REPORT" 
 scan_fixed_file /tmp/test225-markers "$WORK/.anet/nodes/$ALIAS" \
   || fail "synthetic credential reached node-local durable state"
 scan_fixed_file /tmp/test225-assistant-marker \
-  /tmp/test225-candidate-extracted "$START_LOG" "$RELOAD_LOG" "$PENDING" "$REPORT" \
+  /tmp/test225-candidate-extracted "$START_LOG" "$RELOAD_LOG" \
+  "$ATTACH_CAPTURE" "$RELOAD_CAPTURE" "$GROK_STATE" "$PENDING" "$REPORT" \
   /tmp/test225-hub-results \
-  || fail "assistant-generated credential shape reached ordinary log/pending/tarball/report"
+  || fail "assistant credential canary reached TUI/state/log/pending/tarball/report"
+NODE_LOG_DIR="$WORK/.anet/nodes/$ALIAS/logs"
+scan_fixed_file /tmp/test225-markers "$NODE_LOG_DIR" \
+  || fail "synthetic credential reached the durable agent log directory"
+scan_fixed_file /tmp/test225-assistant-marker "$NODE_LOG_DIR" \
+  || fail "assistant credential canary reached the durable agent log directory"
+scan_fixed_file /tmp/test225-live-credentials "$NODE_LOG_DIR" \
+  || fail "Hub credential reached the durable agent log directory"
 scan_fixed_file /tmp/test225-live-credentials \
   /tmp/test225-candidate-extracted "$SERVER_LOG" "$START_LOG" "$ATTACH_CAPTURE" \
   "$RELOAD_LOG" "$RELOAD_CAPTURE" "$GROK_STATE" "$PENDING" "$REPORT" \
@@ -898,7 +967,9 @@ run_real_gate() {
   local real_auth=${TEST225_REAL_GROK_AUTH:-/host-grok/auth.json}
   local real_alias=preview-grok-real-225
   local real_config="$WORK/.anet/nodes/$real_alias/config.json"
-  local real_socket real_session first_id first_row second_id second_row
+  local real_socket real_session first_id first_row second_id second_row continuity_nonce
+  local real_log_dir="$WORK/.anet/nodes/$real_alias/logs"
+  continuity_nonce="GROK_PREVIEW_CONTEXT_225_$(tr -d '-' </proc/sys/kernel/random/uuid)"
 
   [ -x "$real_bin" ] || fail "RUN_REAL_GROK=1 but real Grok binary is not executable: $real_bin"
   [ -r "$real_auth" ] || fail "RUN_REAL_GROK=1 but real Grok auth is not readable: $real_auth"
@@ -932,6 +1003,7 @@ run_real_gate() {
   NODE_PROCESS_PID=$!
   wait_file "$real_socket" 600 \
     || fail_with_private_log "real Grok attach socket did not appear" "$REAL_START_LOG"
+  assert_installed_candidate_runtime "$real_alias" "real first" "$REAL_START_LOG"
   tmux new-session -d -s test225-real-attach \
     "cd '$WORK' && env -u ANET_AGENT_NODE_BIN HOME='$HOME' PATH='$PATH' anet grok attach '$real_alias'"
   wait_pane test225-real-attach 'attached to Grok TUI' "$REAL_CAPTURE" 300 \
@@ -940,7 +1012,8 @@ run_real_gate() {
   first_id=$(curl -fsS -X POST "$HUB/api/task" \
     -H "Authorization: Bearer $USER_TOKEN" -H 'Content-Type: application/json' \
     --data "$(jq -nc --arg alias "$real_alias" --arg network "$NETWORK_ID" \
-      '{alias:$alias,task:"Reply with exactly GROK_PREVIEW_REAL_225_A and nothing else.",from:"test225-driver",priority:"high",network_id:$network}')" \
+      --arg nonce "$continuity_nonce" \
+      '{alias:$alias,task:("Remember this nonce for my next turn: " + $nonce + ". Reply with exactly GROK_PREVIEW_REAL_225_A and nothing else."),from:"test225-driver",priority:"high",network_id:$network}')" \
     | jq -r '.task_id // .message_id // empty')
   for _ in $(seq 1 1800); do
     first_row=$(curl -fsS "$HUB/api/tasks?limit=80&network_id=$NETWORK_ID" \
@@ -967,6 +1040,7 @@ run_real_gate() {
     anet node start "$real_alias" >"$REAL_RESUME_LOG" 2>&1 &
   NODE_PROCESS_PID=$!
   wait_file "$real_socket" 600 || fail "optional real attach socket did not return"
+  assert_installed_candidate_runtime "$real_alias" "real resume" "$REAL_RESUME_LOG"
   tmux new-session -d -s test225-real-resume-attach \
     "cd '$WORK' && env -u ANET_AGENT_NODE_BIN HOME='$HOME' PATH='$PATH' anet grok attach '$real_alias'"
   wait_pane test225-real-resume-attach 'attached to Grok TUI' "$REAL_RESUME_CAPTURE" 300 \
@@ -975,20 +1049,23 @@ run_real_gate() {
   second_id=$(curl -fsS -X POST "$HUB/api/task" \
     -H "Authorization: Bearer $USER_TOKEN" -H 'Content-Type: application/json' \
     --data "$(jq -nc --arg alias "$real_alias" --arg network "$NETWORK_ID" \
-      '{alias:$alias,task:"Reply with exactly GROK_PREVIEW_REAL_225_B and nothing else.",from:"test225-driver",priority:"high",network_id:$network}')" \
+      '{alias:$alias,task:"What nonce did I ask you to remember in the previous turn? Reply with exactly that nonce and nothing else.",from:"test225-driver",priority:"high",network_id:$network}')" \
     | jq -r '.task_id // .message_id // empty')
   for _ in $(seq 1 1800); do
     second_row=$(curl -fsS "$HUB/api/tasks?limit=80&network_id=$NETWORK_ID" \
       -H "Authorization: Bearer $USER_TOKEN" \
       | jq -c --arg id "$second_id" '.tasks[]? | select(.task_id == $id)' || true)
-    jq -e '.status == "replied" and (.result | contains("GROK_PREVIEW_REAL_225_B"))' \
+    jq -e --arg nonce "$continuity_nonce" \
+      '.status == "replied" and (.result | contains($nonce))' \
       <<<"$second_row" >/dev/null 2>&1 && break
     sleep 0.2
   done
-  jq -e '.status == "replied" and (.result | contains("GROK_PREVIEW_REAL_225_B"))' \
-    <<<"$second_row" >/dev/null 2>&1 || fail "optional real Grok resume task did not reply"
-  wait_pane test225-real-resume-attach 'GROK_PREVIEW_REAL_225_B' "$REAL_RESUME_CAPTURE" 300 \
-    || fail "optional real TUI did not live-render resume marker"
+  jq -e --arg nonce "$continuity_nonce" \
+    '.status == "replied" and (.result | contains($nonce))' \
+    <<<"$second_row" >/dev/null 2>&1 \
+    || fail "optional real Grok resume did not recall the prior-turn nonce"
+  wait_pane test225-real-resume-attach "$continuity_nonce" "$REAL_RESUME_CAPTURE" 300 \
+    || fail "optional real TUI did not live-render the recalled prior-turn nonce"
   [ "$(jq -r '.grokCliSession' "$real_config")" = "$real_session" ] \
     || fail "optional real stop/resume changed session"
 
@@ -999,13 +1076,26 @@ run_real_gate() {
 
   scan_fixed_file /tmp/test225-real-patterns \
     /tmp/test225-candidate-extracted "$REPORT" "$REAL_START_LOG" "$REAL_RESUME_LOG" \
-    "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" "$SERVER_LOG" /tmp/test225-real-hub-rows \
+    "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" "$SERVER_LOG" "$real_log_dir" \
+    /tmp/test225-real-hub-rows \
     || fail "real Grok auth scalar reached a tarball/report/log/live capture"
   scan_fixed_file /tmp/test225-real-patterns "$GROK_STATE" \
     || fail "real Grok auth scalar reached generated state"
   local real_pending="$WORK/.anet/nodes/$real_alias/pending-replies.json"
   scan_fixed_file /tmp/test225-real-patterns "$real_pending" \
     || fail "real Grok auth scalar reached pending replies"
+  scan_fixed_file /tmp/test225-live-credentials \
+    "$REAL_START_LOG" "$REAL_RESUME_LOG" "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" \
+    "$real_log_dir" "$GROK_STATE" "$real_pending" "$REPORT" /tmp/test225-real-hub-rows \
+    || fail "Hub credential reached a real-node log, capture, state, pending row, or report"
+  scan_fixed_file /tmp/test225-markers \
+    "$REAL_START_LOG" "$REAL_RESUME_LOG" "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" \
+    "$real_log_dir" "$GROK_STATE" "$real_pending" "$REPORT" /tmp/test225-real-hub-rows \
+    || fail "synthetic credential reached a real-node log, capture, state, pending row, or report"
+  scan_fixed_file /tmp/test225-assistant-marker \
+    "$REAL_START_LOG" "$REAL_RESUME_LOG" "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" \
+    "$real_log_dir" "$GROK_STATE" "$real_pending" "$REPORT" /tmp/test225-real-hub-rows \
+    || fail "assistant credential canary reached a real-node evidence artifact"
   pass "optional authenticated real Grok package E2E: live render, reply, stop/resume, auth scan"
 
   stop_node_checked "$real_alias" real-resumed
@@ -1034,12 +1124,13 @@ scan_fixed_file /tmp/test225-markers \
 scan_fixed_file /tmp/test225-live-credentials \
   /tmp/test225-candidate-extracted "$SERVER_LOG" "$START_LOG" "$RELOAD_LOG" "$RESUME_LOG" \
   "$ATTACH_CAPTURE" "$RELOAD_CAPTURE" "$RESUME_CAPTURE" "$GROK_STATE" "$PENDING" "$REPORT" \
-  /tmp/test225-hub-results "$LOCAL_REGISTRY_LOG" "$NPX_ENV_OBSERVATION" \
+  "$NODE_LOG_DIR" /tmp/test225-hub-results "$LOCAL_REGISTRY_LOG" "$NPX_ENV_OBSERVATION" \
   || fail "final test Hub credential scan failed"
 scan_fixed_file /tmp/test225-assistant-marker \
   /tmp/test225-candidate-extracted "$SERVER_LOG" "$START_LOG" "$RELOAD_LOG" "$RESUME_LOG" \
-  "$PENDING" "$REPORT" /tmp/test225-hub-results "$LOCAL_REGISTRY_LOG" \
-  || fail "final assistant-generated credential scan failed"
+  "$ATTACH_CAPTURE" "$RELOAD_CAPTURE" "$RESUME_CAPTURE" "$GROK_STATE" \
+  "$PENDING" "$REPORT" "$NODE_LOG_DIR" /tmp/test225-hub-results "$LOCAL_REGISTRY_LOG" \
+  || fail "final assistant credential-canary scan failed"
 
 log ""
 log "Summary: PASS"

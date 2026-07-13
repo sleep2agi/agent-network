@@ -234,8 +234,9 @@ function handlePrompt(prompt) {
   // the network envelope and its benign marker, not merely an SSE observer.
   process.stdout.write(`\r\n[FAKE LIVE NETWORK TURN] ${prompt}\r\n`);
 
-  const reply = `GROK_PREVIEW_FAKE_REPLY_OK ${benignMarker} `
-    + "PARTNER_SECRET=TEST225_ASSISTANT_SECRET_CANARY_b682a1";
+  // The live-render proof uses a benign marker.  Test artifacts, including
+  // tmux captures, must never require a credential-shaped value to appear.
+  const reply = `GROK_PREVIEW_FAKE_REPLY_OK ${benignMarker}`;
   setTimeout(() => {
     appendJson(chatPath, { type: "assistant", content: reply });
     appendJson(eventsPath, { type: "turn_ended", outcome: "completed", turn_number: turn });

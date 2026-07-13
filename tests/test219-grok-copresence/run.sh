@@ -12,9 +12,13 @@ log() { printf '%s\n' "$*" | tee -a "$REPORT"; }
 fail() { log "FAIL: $*"; exit 1; }
 pass() { log "PASS: $*"; }
 
+SOURCE_COMMIT=${TEST219_SOURCE_COMMIT:-}
+[[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] \
+  || fail "SOURCE_COMMIT must bind this gate to one full lowercase Git SHA"
+
 log "# test219 — Grok co-presence TUI runtime"
 log "date: $(date -Is)"
-log "source_commit=${TEST219_SOURCE_COMMIT:-uncommitted}"
+log "source_commit=$SOURCE_COMMIT"
 
 log "[L0] isolated environment"
 [ ! -e "$ROOT/.git" ] || fail "Docker image contains host .git"

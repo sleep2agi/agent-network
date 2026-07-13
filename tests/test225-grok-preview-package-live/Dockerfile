@@ -1,4 +1,4 @@
-ARG SOURCE_COMMIT=uncommitted
+ARG SOURCE_COMMIT
 
 FROM node:22-bookworm-slim AS packer
 
