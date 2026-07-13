@@ -1,0 +1,178 @@
+{
+  "schema": "test223-protocol-allowlist/v1",
+  "methods": [
+    "_x.ai/announcements/update",
+    "_x.ai/billing",
+    "_x.ai/bundle/status",
+    "_x.ai/log",
+    "_x.ai/marketplace/list",
+    "_x.ai/mcp/servers_updated",
+    "_x.ai/models/update",
+    "_x.ai/prompt_history",
+    "_x.ai/queue/changed",
+    "_x.ai/session/info",
+    "_x.ai/session/prompt_complete",
+    "_x.ai/session/update",
+    "_x.ai/session_notification",
+    "_x.ai/sessions/changed",
+    "_x.ai/settings/update",
+    "authenticate",
+    "initialize",
+    "session/load",
+    "session/new",
+    "session/prompt",
+    "session/request_permission",
+    "session/update",
+    "x.ai/config_changed"
+  ],
+  "jsonFields": [
+    "_meta", "account", "accountId", "action_registered", "active", "activity",
+    "agentCapabilities", "agentId", "agentInstanceId", "agentName", "agentProfile",
+    "agentResult", "agentTimestampMs", "agentType", "agentVersion", "agents", "allow_access",
+    "amount", "announcements", "ansiSplitSecret", "apiBackend", "apiKey", "argv", "audio",
+    "authMethods", "auth_mode", "autoCompactThresholdPercent", "autoMode", "auto_mode",
+    "auto_permission_mode_enabled", "availableCommands", "availableModels", "billing",
+    "billingPeriodEnd", "billingPeriodStart", "blockingEvents", "body", "cachedReadTokens",
+    "cancelRewind", "capabilities", "category", "changes", "chunkId", "client",
+    "clientCapabilities", "clientId", "clientInfo", "clientType", "clientVersion", "client_id",
+    "client_type", "client_version", "code_nav_enabled", "codebaseIndexed",
+    "coding_data_retention_opt_out", "command", "commandsCount", "compactionCount", "config",
+    "content", "context", "controlSplitSecret", "control_v1", "cookie", "creditUsagePercent",
+    "cta", "ctx", "currency", "currentModelId", "currentPeriod", "currentWorkingDirectory",
+    "cwd", "decisions", "default", "defaultAuthMethodId", "default_model", "description",
+    "dismissible", "elapsed_ms", "email", "embeddedContext", "enabled", "encrypted_content",
+    "end", "entries", "error", "eventId", "expires_at", "feedbackEnabled",
+    "filter_session_id", "first_method", "fork_secondary_model", "freeTokens", "fs", "fs_read",
+    "fs_write", "gate", "gate_label", "gate_message", "gate_url", "gen", "generation",
+    "gitRoot", "grokShell", "group_tool_verbs", "hasCache", "hasInputs", "hasOutputs",
+    "headless", "hint", "history", "hostname", "http", "id", "identityProbe", "image",
+    "input", "inputTokens", "isGitRepo", "isReplay", "isUnifiedBillingUser", "isWorktree",
+    "is_zdr", "jsonrpc", "kind", "label", "lastChangeUnixMs", "leader_binary_version",
+    "leader_capabilities", "leader_protocol_version", "loadSession", "logs", "lvl", "machineId",
+    "machineName", "mcpApps", "mcpCapabilities", "mcpServers", "message", "messageCount",
+    "messageTokens", "meta", "metadata", "method", "methodId", "method_id", "methods_count",
+    "mode", "model", "modelDisplayName", "modelFingerprint", "modelId", "modelState", "model_id",
+    "models", "msg", "name", "nested", "nodeId", "nodeName", "nonce", "note", "onDemandCap",
+    "onDemandUsed", "options", "optionId", "origin", "outcome", "output", "outputTokens", "params", "password", "path",
+    "payload", "persistent", "personaDetails", "personas", "pid", "plugins", "position",
+    "preferred_cached_token", "prepaidBalance", "profile_formats", "prompt", "promptCapabilities",
+    "promptId", "promptIndex", "prompt_id", "prompts", "protocolVersion", "rawInput", "rawUuid",
+    "readTextFile", "ready", "reasoning", "reasoningEffort", "reasoningEfforts", "reasoningTokens",
+    "reasoning_effort", "relaunch_v1", "removed", "requestId", "resident", "resolvedModelId",
+    "result", "roleDetails", "roles", "runningPromptId", "runtime_cpu_profile", "scope", "section",
+    "selected", "sessionId", "sessionRecap", "sessionUpdate", "session_picker_grouped",
+    "session_summary", "severity", "sharing_enabled", "shortcut", "showModelFingerprint",
+    "showNonGitWarning", "show_resolved_model", "sid", "skills", "slash_command", "source",
+    "sourceKind", "sourceName", "sourceUrlOrPath", "sources", "src", "sse", "start",
+    "stopReason", "stop_reason", "streamStartMs", "structuralAllowlistProbe",
+    "subscription_tier", "subscription_tier_display", "subscription_watch_interval_secs",
+    "supportsReasoningEffort", "systemPromptTokens", "teamId", "team_id", "team_name", "team_role",
+    "terminal", "text", "theme", "tips", "title", "token", "toolCall", "toolCallCount", "toolCallId",
+    "toolDefinitionsCount", "toolDefinitionsTokens", "tools", "total", "totalContextTokens",
+    "totalTokens", "ts", "turnCount", "turnIndex", "turnStartMs", "turns", "type",
+    "ui_config_field", "unicodeEmail", "unicodePath", "update", "updateParams", "updateType",
+    "updated_at", "upserted", "usagePct", "used", "user", "userId", "userName", "val", "value",
+    "ver", "version", "workspace_exposure", "writeTextFile", "x.ai/bashOutputNoColor",
+    "x.ai/fs_notify", "x.ai/gitHeadChanged", "x.ai/hooks", "x.ai/hunkTracker",
+    "x.ai/incrementalBashOutput", "x.ai/leaderClientId", "x.ai/mcp/sdk", "x.ai/pluginDirs",
+    "x.ai/sessionConfig", "x.ai/sessionDetail", "x.ai/tool", "yolo", "yoloMode", "yolo_mode"
+  ],
+  "metadata": {
+    "keys": [
+      "boundary", "bytesBase64", "capture", "connection", "direction", "encoding", "generation",
+      "grokBuild", "grokVersion", "leader", "monoNs", "originalByteLength", "pid", "role", "sanitization",
+      "sanitizedByteLength", "sanitizedBytesSha256", "scenario", "schema", "seq", "stream",
+      "transport", "unsafeNativeTailOmitted"
+    ],
+    "values": {
+      "schema": ["grok-wire-byte-record/v1"],
+      "capture": ["harness-canary", "leader-native-tui", "live-frame-aware-admission", "live-approval-owner-matrix", "live-serve-auth"],
+      "role": [
+        "acp-submitter", "correct-bearer", "correct-query", "correct-query-wrong-bearer",
+        "correct-x-server-key", "missing", "native-gateway", "observer", "real-tui", "submitter",
+        "synthetic-attacker", "synthetic-client", "synthetic-gateway", "synthetic-grok",
+        "synthetic-tui", "synthetic-ws-client", "wrong-bearer", "wrong-query",
+        "wrong-query-correct-bearer", "tui-leader-facing-tap", "acp-leader-facing-tap",
+        "real-shared-leader", "tui-gateway", "acp-gateway", "real-tui-client",
+        "real-acp-client", "shared-leader", "acp-stdio-client", "policy-owner-acp",
+        "passive-acp", "disconnect-owner-acp", "real-grok-tui", "native-policy-gateway"
+      ],
+      "transport": [
+        "acp-stdio", "leader-native-ipc", "serve-http-upgrade", "serve-websocket-acp",
+        "serve-websocket-upgrade"
+      ],
+      "connection": [
+        "acp-submitter-1", "correct-bearer", "correct-query", "correct-query-wrong-bearer",
+        "correct-x-server-key", "missing", "native-1", "native-2", "native-oversized", "observer", "real-tui-1",
+        "stdio-1", "submitter", "ws-1", "wrong-bearer", "wrong-query",
+        "wrong-query-correct-bearer", "tui-leader-tap-1", "acp-leader-tap-1",
+        "tui-native-1", "acp-native-1", "acp-stdio-1", "policy-owner-acp-1",
+        "passive-acp-1", "disconnect-owner-acp-1", "real-tui-native-1"
+      ],
+      "stream": [
+        "front-socket", "leader-socket", "socket", "stdin", "stdout", "websocket-message",
+        "real-leader-facing", "gateway-facing", "leader-facing", "client-facing", "tui-facing"
+      ],
+      "direction": [
+        "acp-submitter_to_gateway", "client_to_gateway", "client_to_grok", "client_to_serve",
+        "gateway_to_acp-submitter", "gateway_to_leader", "gateway_to_real-tui", "gateway_to_tui",
+        "grok_to_client", "leader_to_gateway", "real-tui_to_gateway", "serve_to_client",
+        "tui_to_gateway", "tap_to_real_leader", "tap_to_gateway", "gateway_to_tap",
+        "real_leader_to_tap", "gateway_to_client"
+      ],
+      "boundary": ["eof", "message", "read", "write"],
+      "encoding": ["base64"],
+      "sanitization": [
+        "json-structural-allowlist-v2", "native-structural-allowlist-v2",
+        "opaque-body-omitted-v2"
+      ]
+    }
+  },
+  "enums": {
+    "type": [
+      "USAGE_PERIOD_TYPE_WEEKLY", "acp", "audio", "image", "ping", "pong", "register",
+      "registered", "resource", "text", "tool_call", "tool_call_update"
+    ],
+    "kind": [
+      "allow_always", "allow_once", "build", "edit", "local", "prompt", "reject_always", "reject_once"
+    ],
+    "role": ["agent", "assistant", "human", "system", "tool", "user"],
+    "status": ["cancelled", "completed", "failed", "idle", "pending", "running"],
+    "outcome": ["approved", "cancelled", "completed", "failed", "rejected", "selected"],
+    "stopReason": ["cancelled", "end_turn", "error", "interrupted"],
+    "stop_reason": ["cancelled", "end_turn", "error", "interrupted"],
+    "sessionUpdate": [
+      "agent_message_chunk", "agent_thought_chunk", "available_commands_update", "interaction_resolved",
+      "model_changed", "pending_interaction", "session_summary_generated", "tool_call", "tool_call_update", "turn_completed",
+      "user_message_chunk"
+    ],
+    "session_update": [
+      "agent_message_chunk", "agent_thought_chunk", "available_commands_update", "interaction_resolved",
+      "model_changed", "pending_interaction", "session_summary_generated", "tool_call", "tool_call_update", "turn_completed",
+      "user_message_chunk"
+    ],
+    "updateType": ["AgentMessageChunk", "AgentThoughtChunk", "AvailableCommandsUpdate"],
+    "update_type": ["AgentMessageChunk", "AgentThoughtChunk", "AvailableCommandsUpdate"],
+    "mode": ["agent_only", "default", "headless", "stdio"],
+    "severity": ["error", "info", "warning"]
+  },
+  "correlations": {
+    "jsonRpcIdLabel": "JSONRPC_ID",
+    "keys": {
+      "clientId": "CLIENT_ID",
+      "client_id": "CLIENT_ID",
+      "pid": "PID",
+      "x.ai/leaderClientId": "LEADER_CLIENT_ID"
+    }
+  },
+  "childEnv": {
+    "exactKeys": [
+      "COLUMNS", "GROK_AUTH_PATH", "GROK_CLAUDE_HOOKS_ENABLED", "GROK_CLAUDE_MCPS_ENABLED",
+      "GROK_CURSOR_HOOKS_ENABLED", "GROK_CURSOR_MCPS_ENABLED", "GROK_FOLDER_TRUST", "GROK_HOME",
+      "HOME", "LINES", "PATH", "TERM"
+    ],
+    "forbiddenExact": ["DATABASE_URL"],
+    "forbiddenPrefixes": ["AWS_", "COMMHUB_"],
+    "forbiddenSuffixes": ["_KEY", "_SECRET", "_TOKEN"]
+  }
+}

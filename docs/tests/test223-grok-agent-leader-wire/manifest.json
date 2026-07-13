@@ -1,0 +1,258 @@
+{
+  "schema": "grok-agent-leader-wire-manifest/v1",
+  "status": "owner_live_native_capture_pending_independent_review",
+  "protocolFreeze": false,
+  "protocolAllowlistSha256": "5353574f10700796b3cdc0ed23098d61bec333c990be0dd9feec03ecf41c7d61",
+  "targetProductBaseline": "grok 0.2.93 (f00f96316d)",
+  "grok": {
+    "supplied": true,
+    "versionRawBase64": "Z3JvayAwLjIuOTMgKGYwMGY5NjMxNmQpCg==",
+    "normalizedVersion": {
+      "semver": "0.2.93",
+      "build": "f00f96316d"
+    },
+    "binarySha256": "4e0738d3b5550f3c842bc0ae69f468815c6329c008a110d0c27a694dc3401135"
+  },
+  "capturePolicy": {
+    "unredactedStorage": "tmpfs-only",
+    "persistedBytes": "sanitized-transport-bytes",
+    "projectionProducer": "independent-process",
+    "envKeyNames": [
+      "COLUMNS",
+      "GROK_AUTH_PATH",
+      "GROK_CLAUDE_HOOKS_ENABLED",
+      "GROK_CLAUDE_MCPS_ENABLED",
+      "GROK_CURSOR_HOOKS_ENABLED",
+      "GROK_CURSOR_MCPS_ENABLED",
+      "GROK_FOLDER_TRUST",
+      "GROK_HOME",
+      "HOME",
+      "LINES",
+      "PATH",
+      "TERM"
+    ],
+    "envEvidence": {
+      "applicable": true,
+      "source": "leader-native-tui.summary.json:childEnvKeyNames"
+    },
+    "stablePlaceholders": [
+      "TOKEN",
+      "BEARER",
+      "SECRET",
+      "JWT",
+      "ACCOUNT",
+      "PATH",
+      "BODY",
+      "REASONING",
+      "SESSION",
+      "PROMPT_ID",
+      "REQUEST_ID",
+      "EVENT_ID",
+      "TOOL_CALL_ID",
+      "AGENT_ID",
+      "AGENT_INSTANCE_ID",
+      "AGENT_NAME",
+      "HOST",
+      "TEAM_ID",
+      "TEAM_NAME",
+      "NODE_ID",
+      "USER_ID",
+      "ACCOUNT_ID",
+      "MACHINE_ID",
+      "COMMAND",
+      "STRING",
+      "METHOD",
+      "META",
+      "BILLING"
+    ],
+    "correlationRemap": "exact-label, stable, contiguous per-connection namespace; numeric type and equality retained"
+  },
+  "captureInvocation": {
+    "argv": [
+      "node",
+      "<SUITE>/scripts/live-native-capture.mjs"
+    ],
+    "cwd": "<ISOLATED_PROOF_CWD>",
+    "rawOutput": "<RAW_TMPFS>/leader-native-tui.raw.ndjson",
+    "scenario": "real TUI + ACP submitter through two gateway-owned native proxy listeners"
+  },
+  "additionalCaptureInvocations": [
+    {
+      "argv": [
+        "node",
+        "<SUITE>/scripts/live-frame-aware-admission-capture.mjs"
+      ],
+      "rawOutput": "<RAW_TMPFS>/frame-aware-admission.raw.ndjson",
+      "summary": "frame-aware-admission.summary.json",
+      "scenario": "two gateway listeners + independent Leader taps + true TUI Busy recovery"
+    },
+    {
+      "argv": [
+        "node",
+        "<SUITE>/scripts/live-approval-owner-matrix-capture.mjs"
+      ],
+      "rawOutput": "<RAW_TMPFS>/live-approval-owner-matrix.raw.ndjson",
+      "summary": "live-approval-owner-matrix.summary.json",
+      "scenario": "policy owner + passive ACP + true TUI permission fanout and fail-closed owner loss"
+    }
+  ],
+  "nativeLeaderIpcCandidate": {
+    "frozen": false,
+    "lengthPrefix": "uint32-be",
+    "payload": "utf8-outer-json",
+    "acpPayload": "inner-json-rpc",
+    "observedSampleMaxFrameBytes": 2614,
+    "safetyMaximumFrameBytes": 1048576,
+    "safetyMaximumIsVendorLimit": false,
+    "outerTypesReserved": [
+      "register",
+      "registered",
+      "acp",
+      "ping",
+      "pong"
+    ]
+  },
+  "fixtureFiles": [
+    {
+      "path": "frame-aware-admission.bytes.ndjson",
+      "sha256": "3205b4e8c7e9f824ab68195f9679f0bfea7693ab9f2819a32e725e5566fc0f37"
+    },
+    {
+      "path": "frame-aware-admission.projection.ndjson",
+      "sha256": "a27cd9f7b2cd3a967f28042081fad16bcd46b8fa5fd2744767012af4e66f1afe"
+    },
+    {
+      "path": "frame-aware-admission.summary.json",
+      "sha256": "75ddb9f51071087453626a384097995c1d37a7490bc30863bf879c5b58bf3754"
+    },
+    {
+      "path": "harness-canary.bytes.ndjson",
+      "sha256": "c3a7bd4b914ce4e174cd0a031a83a021d713ebd37ca8cc6ad68a42e98c502a76"
+    },
+    {
+      "path": "harness-canary.projection.ndjson",
+      "sha256": "bd73486ecd32874465221d3e6c6555e1c6aa6a4c5afb70a5f2976837fa2b725d"
+    },
+    {
+      "path": "leader-native-tui.bytes.ndjson",
+      "sha256": "557eb9f35b17a0e73d8a02595ce598cc4b1857045659c8bbbf128a69652c1720"
+    },
+    {
+      "path": "leader-native-tui.projection.ndjson",
+      "sha256": "2c91307fb3e58875fb108550acf9de20d879496a858ced3eb1729cd65b6147ce"
+    },
+    {
+      "path": "leader-native-tui.summary.json",
+      "sha256": "0475635398bb9876c7d82827da93982d0c76edada8b9445bc3e0e4f83c326908"
+    },
+    {
+      "path": "live-approval-owner-matrix.bytes.ndjson",
+      "sha256": "b5e90b1e031cac3e5c43ecf3b13808b46ff9d1a81fb7dde1e1a4bc9ca341e6e9"
+    },
+    {
+      "path": "live-approval-owner-matrix.projection.ndjson",
+      "sha256": "8d3bb72c28b2c2273502ff5bf78d127245781d5630ba38b600e1344a65899a88"
+    },
+    {
+      "path": "live-approval-owner-matrix.summary.json",
+      "sha256": "dd766648e7533f8752922b3cbfb4ebcd8a21eff14b7acb68a9039cf4f69035ca"
+    }
+  ],
+  "harnessSourceFiles": [
+    {
+      "path": "Dockerfile",
+      "sha256": "9481ba0955a66b66636cf9137b2827068ad4f9c2edcb85915c04f4eebf37021f"
+    },
+    {
+      "path": "lib/byte-recorder.mjs",
+      "sha256": "a2e27fa517992aa1c75cc2eb15ad208b05757ff577fdf44d42fbae85a6f1c7f3"
+    },
+    {
+      "path": "protocol-allowlist.json",
+      "sha256": "5353574f10700796b3cdc0ed23098d61bec333c990be0dd9feec03ecf41c7d61"
+    },
+    {
+      "path": "run.sh",
+      "sha256": "42c6f14837de30200321c5c248d046a939a5349e647b4b9c35567d5aca31b7fc"
+    },
+    {
+      "path": "scripts/live-approval-capture.mjs",
+      "sha256": "f3f0838e30488121f922a1e5a02173ca13bbc2fcb397e2ec6b2ca6cce5a084c6"
+    },
+    {
+      "path": "scripts/live-approval-owner-matrix-capture.mjs",
+      "sha256": "1c298b54a8c8147e86256dae8fdc224c7da1a882439fa0b492b8e817febbfb94"
+    },
+    {
+      "path": "scripts/live-bounded-frame-transport-capture.mjs",
+      "sha256": "08bdeaa5bbde5bfd884b68bad68e5a438a7e1d58be2f85ed0cef8d5ced3cc2f5"
+    },
+    {
+      "path": "scripts/live-frame-aware-admission-capture.mjs",
+      "sha256": "13c2c663e15985b3e1e776caf37a383bf99107e4c633a391bb8193fcc946220c"
+    },
+    {
+      "path": "scripts/live-native-capture.mjs",
+      "sha256": "e182a9aa295c15a187ac3bce71eba46e85fb34896f255db076f1c92651134cad"
+    },
+    {
+      "path": "scripts/live-race-matrix-capture.mjs",
+      "sha256": "9a66e11512bb59ff1edc59148a9aef9d54ced76a9d9968f25fea5b9c109b0587"
+    },
+    {
+      "path": "scripts/live-serve-auth-capture.mjs",
+      "sha256": "ba47b6313c58b46c1c30277aa94959d06efe99e796173efe8de77d76c94d4ca5"
+    },
+    {
+      "path": "scripts/live-serve-remaining-capture.mjs",
+      "sha256": "322d08a2b8ecb703ce3d08be72fffc0fd13ecc845a29f69111d224dc7842df7d"
+    },
+    {
+      "path": "scripts/live-transport-recovery-capture.mjs",
+      "sha256": "d941c4a8972b11f2afa6d7cb085c532a3630c4f7ac66fb77f6b7922d6b8b4ca9"
+    },
+    {
+      "path": "scripts/manifest.mjs",
+      "sha256": "5f6ae0307be7d4fbb7e9e0388c44bf0d3ec3429c56d813ff2a745dd40894eaf3"
+    },
+    {
+      "path": "scripts/mutate-artifact.mjs",
+      "sha256": "ca354321ef11d3a9b7eea09617cf13d88ff3c101bb4b87b9276665bdaf429fef"
+    },
+    {
+      "path": "scripts/mutate-binding-artifact.mjs",
+      "sha256": "70d4984f14387f0bba53a7934b32d34ca35187b7e6d142723a22a38de1220186"
+    },
+    {
+      "path": "scripts/project.mjs",
+      "sha256": "639a3ef8acbd363316250625164f972073341b2410970b7b7620524b9edad789"
+    },
+    {
+      "path": "scripts/sanitize.mjs",
+      "sha256": "d931c3b81cbe09b58bc6bdc86f572add6a7bbcdb211b56c9fd3c574151aca03b"
+    },
+    {
+      "path": "scripts/selftest-capture.mjs",
+      "sha256": "0cc93966e06259835486f14cfc4dd4fef354f67a31ae6376a72506fd65de26b5"
+    },
+    {
+      "path": "scripts/verify-live-approval-owner.mjs",
+      "sha256": "ee15b30f4e39555a209990af07c06a50ce627154fa9b793a4eff404acf8ac2e5"
+    },
+    {
+      "path": "scripts/verify-live-frame-aware.mjs",
+      "sha256": "908bace403b96f8368e46d51439c58e98aef508ae0f2936e87b8d5c12b56d1df"
+    },
+    {
+      "path": "scripts/verify-live-native.mjs",
+      "sha256": "941c2e77e1d3630525782e944e8cc49de4f8d0aee2288e1e67b3c1ed3d65649d"
+    },
+    {
+      "path": "scripts/verify.mjs",
+      "sha256": "b4dc58aca6dff6bbea42cd37ddab2f5ab273cd011cead3c86fd19d2190ca5820"
+    }
+  ],
+  "redactionToolSha256": "d931c3b81cbe09b58bc6bdc86f572add6a7bbcdb211b56c9fd3c574151aca03b",
+  "projectorSha256": "639a3ef8acbd363316250625164f972073341b2410970b7b7620524b9edad789",
+  "verifierSha256": "b4dc58aca6dff6bbea42cd37ddab2f5ab273cd011cead3c86fd19d2190ca5820"
+}
