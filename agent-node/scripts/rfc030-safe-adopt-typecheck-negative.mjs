@@ -42,22 +42,28 @@ const FIXTURES = [
     basename: "safe-adopt-negative-async.ts.fixture",
     kind: "negative",
     expectedCode: /TS234[25]/,
-    // 副指挥 fb2ec49a corrective: bind diag to the target line —
-    // the `safeAdoptConsume(...)` call using an async callback.
+    // 副指挥 fb2ec49a: target-line binding.
     targetLineRegex: /safeAdoptConsume\(Promise\.resolve\(\),\s*async\s*\(/,
+    // 副指挥 7535c7cb: bind to the CONTRACT-VIOLATION sub-message
+    // "Type 'Promise<void>' is not assignable to type 'undefined'".
+    // parseTscDiagnostics captures multi-line messages so this
+    // sub-line is visible. Contravariance / wrong-arg-count
+    // errors on the same line do NOT include this sub-message.
+    expectedMessageRegex: /Type 'Promise<void>' is not assignable to type 'undefined'/,
   },
   {
     basename: "safe-adopt-negative-promise-return.ts.fixture",
     kind: "negative",
     expectedCode: /TS234[25]/,
     targetLineRegex: /safeAdoptConsume\(Promise\.resolve\(\),\s*\(_v\)\s*=>\s*Promise\.resolve\(\)/,
+    expectedMessageRegex: /Type 'Promise<void>' is not assignable to type 'undefined'/,
   },
   {
     basename: "safe-adopt-negative-return-mistyped.ts.fixture",
     kind: "negative",
     expectedCode: /TS2322/,
-    // Target the `const _p: Promise<unknown> = safeAdoptConsume(...)` line.
     targetLineRegex: /const\s+_p:\s*Promise<unknown>\s*=\s*safeAdoptConsume/,
+    expectedMessageRegex: /is not assignable to type 'Promise<unknown>'|Type 'void' is not assignable to type 'Promise<unknown>'/,
   },
   {
     basename: "safe-adopt-positive-baseline.ts.fixture",
@@ -123,11 +129,34 @@ function runTsc(tsconfigPath) {
 }
 
 function parseTscDiagnostics(output) {
+  // 副指挥 7535c7cb: capture MULTI-LINE tsc messages. Header
+  // is `file(line,col): error TSNNNN: <headline>`; sub-messages
+  // are subsequent lines beginning with whitespace. Message
+  // binding needs full text so a sub-line like
+  //   "Type 'Promise<void>' is not assignable to type 'undefined'."
+  // is distinguishable from a header that merely quotes the
+  // type in its parameter stringification.
   const diags = [];
-  for (const line of output.split(/\r?\n/)) {
+  const lines = output.split(/\r?\n/);
+  let cur = null;
+  const flush = () => {
+    if (cur) {
+      diags.push(cur);
+      cur = null;
+    }
+  };
+  for (const line of lines) {
     const m = line.match(/^(.+?)\((\d+),(\d+)\):\s+error\s+TS(\d+):\s+(.+)$/);
-    if (m) diags.push({ file: m[1], line: Number(m[2]), code: `TS${m[4]}`, message: m[5] });
+    if (m) {
+      flush();
+      cur = { file: m[1], line: Number(m[2]), code: `TS${m[4]}`, message: m[5] };
+    } else if (cur && /^\s+\S/.test(line)) {
+      cur.message += " " + line.trim();
+    } else if (/^\S/.test(line)) {
+      flush();
+    }
   }
+  flush();
   return diags;
 }
 
@@ -157,33 +186,30 @@ for (const fx of FIXTURES) {
       if (fixDiags.length === 0) {
         fail(label, "no diagnostics on fixture file");
       } else {
-        // 副指挥 fb2ec49a corrective: precise target-line
-        // binding. Read the fixture source, find the diag's
-        // reported line, and assert it matches the fixture's
-        // `targetLineRegex`. A fixture that emitted the
-        // expected TS code but on the wrong line (e.g. an
-        // unrelated same-code error) is rejected.
+        // 副指挥 fb2ec49a + 7535c7cb: match code + target line
+        // + MESSAGE. Rejects a fixture that emits an unrelated
+        // same-code error on the target line pattern.
         const src = fs.readFileSync(fixTs, "utf8").split(/\r?\n/);
         let matched = false;
         for (const d of fixDiags) {
           if (!fx.expectedCode.test(d.code)) continue;
           const lineContent = src[d.line - 1] ?? "";
-          if (fx.targetLineRegex.test(lineContent)) {
-            matched = true;
-            break;
-          }
+          if (!fx.targetLineRegex.test(lineContent)) continue;
+          if (fx.expectedMessageRegex && !fx.expectedMessageRegex.test(d.message)) continue;
+          matched = true;
+          break;
         }
         if (!matched) {
           const summary = fixDiags.map((d) => {
             const lineContent = (src[d.line - 1] ?? "").trim();
-            return `${d.code}@line${d.line}: ${lineContent.slice(0, 80)}`;
+            return `${d.code}@line${d.line}: ${lineContent.slice(0, 60)} :: ${d.message.slice(0, 60)}`;
           }).join(" | ");
           fail(
             label,
-            `no diag matches expected code ${fx.expectedCode} AND target line regex ${fx.targetLineRegex}; got: ${summary}`,
+            `no diag matches code ${fx.expectedCode} AND target-line ${fx.targetLineRegex} AND message ${fx.expectedMessageRegex}; got: ${summary}`,
           );
         } else {
-          ok(`${label} rejected with expected TS code on the target line`);
+          ok(`${label} rejected with expected TS code + target line + message`);
         }
       }
     }
@@ -234,15 +260,39 @@ for (const fx of FIXTURES) {
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
 }
 
-// Meta-mutation B: valid safeAdoptConsume call + unrelated
-// TS2322 elsewhere. Even sharper than mutation A because the
-// legitimate call is present but the diag is not on it.
+// Meta-mutation B (副指挥 7535c7cb corrective): the previous
+// `"bad" as unknown as number` variant was type-legal — the
+// cast made `toFixed` accept the string at compile time, so
+// tsc exit=0 and the harness treated "no diag" as pass. That
+// hid the mutation. New meta-B:
+//
+//   Append an EXTRA `safeAdoptConsume(...)` call whose 4th arg
+//   (`onCallbackError`) has a `number`-return type instead of
+//   `undefined`. That is a REAL contract violation → TS2345
+//   emitted on the appended call line. But the appended line
+//   contains a plain (non-async, non-Promise-returning)
+//   fulfilled callback — so it matches NEITHER the async
+//   fixture's `targetLineRegex` NOR the promise-return
+//   fixture's regex NOR the return-mistyped fixture's regex.
+//   The message binding is also different.
+//
+//   Filter MUST reject; harness MUST see a real diag; exit=0
+//   is a HARD FAIL.
 {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rfc030-safe-adopt-meta-valid-plus-"));
   const fixTs = copyFixture("safe-adopt-positive-baseline.ts.fixture", tmp, (content) => {
-    // Insert an unrelated same-code error (TS2345 — a legit
-    // wrong-arg-count call to a stdlib function).
-    return content + `\n// unrelated TS2345 — Number.prototype.toFixed takes an optional number\nvoid Number(0).toFixed("bad" as unknown as number);\n`;
+    // Real TS2345: 4th arg has `number` return instead of `undefined`.
+    return content + `
+// meta-B mutation: same TS code as the async-fixture target
+// (TS2345) but on an unrelated same-line pattern with an
+// UNRELATED message. Must NOT slip past the negative filters.
+void safeAdoptConsume(
+  Promise.resolve("val"),
+  (_v) => undefined,
+  (_r) => undefined,
+  (_r): number => 42,
+);
+`;
   });
   const tsconfig = makeTsconfig(fixTs, tmp);
   const { exitCode, output } = runTsc(tsconfig);
@@ -251,27 +301,128 @@ for (const fx of FIXTURES) {
   const fixDiags = diags.filter((d) => {
     try { return fs.realpathSync(d.file) === fixPath; } catch { return false; }
   });
-  const src = fs.readFileSync(fixTs, "utf8").split(/\r?\n/);
-  const negativeFixtures = FIXTURES.filter((f) => f.kind === "negative");
-  const anyMatched = negativeFixtures.some((fx) => {
-    return fixDiags.some((d) => {
-      if (!fx.expectedCode.test(d.code)) return false;
-      const lineContent = src[d.line - 1] ?? "";
-      return fx.targetLineRegex.test(lineContent);
-    });
-  });
-  if (exitCode === 0) {
-    // No diag emitted — mutation didn't produce an error. That
-    // undermines the meta test but doesn't indicate a filter
-    // bug either. Note but pass.
-    notes.push("meta-sanity B: mutation produced no diag (unexpected; still passing)");
-    ok(`meta-sanity B: valid-call + unrelated-error mutation (exit=${exitCode}) does not pass negative filters`);
-  } else if (anyMatched) {
-    fail("meta-sanity B: unrelated same-code error slipped past filter", "");
-    notes.push("---- meta-sanity B output ----");
+  if (exitCode === 0 || fixDiags.length === 0) {
+    // 副指挥 7535c7cb corrective: NO more "unexpected; still
+    // passing" — that was the exact loophole that let the
+    // cast-trick mutation silently pass. Hard FAIL.
+    fail(
+      "meta-sanity B",
+      `mutation produced no diag (exit=${exitCode}, ${fixDiags.length} fixture diags) — evidence gate has no signal`,
+    );
+    notes.push("---- meta-sanity B raw tsc output ----");
     notes.push(output.slice(0, 1500));
   } else {
-    ok(`meta-sanity B: valid safeAdoptConsume call + unrelated same-code error (exit=${exitCode}) rejected by target-line filters`);
+    const src = fs.readFileSync(fixTs, "utf8").split(/\r?\n/);
+    const negativeFixtures = FIXTURES.filter((f) => f.kind === "negative");
+    // Apply the FULL current filter (code + target line +
+    // expectedMessageRegex). None of the negative fixtures
+    // should accept this mutation.
+    const anyMatched = negativeFixtures.some((fx) => {
+      return fixDiags.some((d) => {
+        if (!fx.expectedCode.test(d.code)) return false;
+        const lineContent = src[d.line - 1] ?? "";
+        if (!fx.targetLineRegex.test(lineContent)) return false;
+        if (fx.expectedMessageRegex && !fx.expectedMessageRegex.test(d.message)) return false;
+        return true;
+      });
+    });
+    if (anyMatched) {
+      fail("meta-sanity B: unrelated same-code error on similar line slipped past filter", "");
+      notes.push("---- meta-sanity B raw tsc output ----");
+      notes.push(output.slice(0, 1500));
+    } else {
+      const summary = fixDiags.map((d) => `${d.code}@line${d.line}`).join(",");
+      ok(`meta-sanity B: real diag emitted (${summary}, exit=${exitCode}) — rejected by ALL negative-fixture filters (code + target-line + message)`);
+    }
+  }
+  try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+}
+
+// Meta-mutation C (副指挥 7535c7cb): temporarily weakened
+// helper contract + same-target-line SAME-CODE error must
+// STILL be rejected by the message-binding filter. Copies
+// safe-adopt.ts to a temp path, mutates the callback return
+// type from `=> undefined` to `=> void` (weakening), imports
+// that weakened copy from the fixture, and asserts the
+// harness catches this via the message regex — a same-code
+// diag with an unrelated message on the SAME target line
+// must not pass.
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rfc030-safe-adopt-meta-weakened-"));
+  // Weakened helper copy — undefined → void on all three
+  // callback types.
+  const helperSrc = fs.readFileSync(safeAdoptSrc, "utf8");
+  const weakenedHelper = helperSrc
+    .replace(/export type SafeAdoptFulfilledCallback = \(value: unknown\) => undefined;/, "export type SafeAdoptFulfilledCallback = (value: unknown) => void;")
+    .replace(/export type SafeAdoptRejectedCallback = \(reason: unknown\) => undefined;/, "export type SafeAdoptRejectedCallback = (reason: unknown) => void;")
+    .replace(/export type SafeAdoptCallbackErrorCallback = \(reason: unknown\) => undefined;/, "export type SafeAdoptCallbackErrorCallback = (reason: unknown) => void;");
+  const weakenedPath = path.join(tmp, "safe-adopt.ts");
+  fs.writeFileSync(weakenedPath, weakenedHelper, "utf8");
+  // Fixture imports from the LOCAL weakened copy AND uses the
+  // async-callback shape (which would be legal under the
+  // weakened contract). Then it introduces an UNRELATED
+  // TS2345 on the exact same target line: too many arguments.
+  const fixTs = path.join(tmp, "safe-adopt-negative-async-under-weakened.ts");
+  fs.writeFileSync(
+    fixTs,
+    [
+      `// Meta-mutation C — weakened contract (undefined→void) +`,
+      `// same-target-line same-CODE UNRELATED error via contravariance.`,
+      `// Under weakened contract, an async callback returning`,
+      `// Promise<void> is legal (void accepts Promise), so the`,
+      `// ORIGINAL contract-violation diag disappears. But we pass a`,
+      `// callback whose parameter type is NARROWER (string) than the`,
+      `// callback contract's (unknown) → strictFunctionTypes rejects`,
+      `// with TS2345 on the SAME target line, but the message is about`,
+      `// parameter contravariance ("Type 'unknown' is not assignable to`,
+      `// type 'string'."), NOT about the return type. The async-fixture`,
+      `// filter's expectedMessageRegex requires "Promise<void>" or`,
+      `// "assignable to undefined" — this must NOT match.`,
+      `import { safeAdoptConsume } from "./safe-adopt";`,
+      `void safeAdoptConsume(Promise.resolve(), async (_v: string) => {});`,
+    ].join("\n") + "\n",
+    "utf8",
+  );
+  // tsconfig: fixture only (relative import will resolve to
+  // the sibling weakened helper). Bring the whole runtime dir
+  // via typeRoots to keep DOM/node types available.
+  const tsconfig = makeTsconfig(fixTs, tmp);
+  const { exitCode, output } = runTsc(tsconfig);
+  const diags = parseTscDiagnostics(output);
+  const fixPath = fs.realpathSync(fixTs);
+  const fixDiags = diags.filter((d) => {
+    try { return fs.realpathSync(d.file) === fixPath; } catch { return false; }
+  });
+  if (exitCode === 0 || fixDiags.length === 0) {
+    fail(
+      "meta-sanity C",
+      `weakened-contract mutation produced no fixture diag (exit=${exitCode}, ${fixDiags.length} diags) — signal missing`,
+    );
+    notes.push("---- meta-sanity C raw tsc output ----");
+    notes.push(output.slice(0, 1500));
+  } else {
+    const src = fs.readFileSync(fixTs, "utf8").split(/\r?\n/);
+    // Apply the async fixture's FULL filter — code + target
+    // line + expectedMessageRegex. Even though the diag is on
+    // (roughly) the same-shape target line, its MESSAGE will
+    // NOT match `Promise<void>|assignable to undefined`
+    // because the error is about a non-callable second arg.
+    const asyncFx = FIXTURES.find((f) => f.basename === "safe-adopt-negative-async.ts.fixture");
+    const matched = fixDiags.some((d) => {
+      if (!asyncFx.expectedCode.test(d.code)) return false;
+      const lineContent = src[d.line - 1] ?? "";
+      if (!asyncFx.targetLineRegex.test(lineContent)) return false;
+      if (asyncFx.expectedMessageRegex && !asyncFx.expectedMessageRegex.test(d.message)) return false;
+      return true;
+    });
+    if (matched) {
+      fail("meta-sanity C: weakened contract + unrelated same-code same-line error slipped past filter", "");
+      notes.push("---- meta-sanity C raw tsc output ----");
+      notes.push(output.slice(0, 1500));
+    } else {
+      const summary = fixDiags.map((d) => `${d.code}@line${d.line}:${d.message.slice(0, 60)}`).join(" | ");
+      ok(`meta-sanity C: weakened contract + same-line same-code UNRELATED error (${summary}) rejected by message-bound async-fixture filter`);
+    }
   }
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
 }

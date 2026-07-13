@@ -127,25 +127,20 @@ describe("safeAdopt — shape checks", () => {
     expect((rejReason as Error).message).toMatch(/not an ordinary same-realm base native Promise/);
   });
 
-  test("Proxy over a real Promise (default handlers) → contract reject at final brand attach", async () => {
-    // 副指挥 fb2ec49a corrective: load-bearing assertions on
-    // the Proxy case. A Proxy passes the shape prefilter
-    // (default getPrototypeOf forwards to the target →
-    // Promise.prototype; no own constructor descriptor), so
-    // safeAdopt reaches the captured-intrinsic attach. The
-    // attach uses `Reflect.apply(NativeThen, proxy, [...])`,
-    // which invokes native `.then` with `proxy` as `this`.
-    // Native `.then` accesses the internal `[[PromiseState]]`
-    // slot on `this`; a Proxy does not have that slot →
-    // `TypeError` → safeAdopt's outer try/catch converts to
-    // a synthetic-Error rejection.
+  test("Proxy over a real Promise (default handlers) → contract reject at FINAL BRAND attach (not early shape)", async () => {
+    // 副指挥 fb2ec49a + 7535c7cb corrective: the title claims
+    // FINAL BRAND branch (i.e. shape prefilter passes → captured
+    // NativeThen throws on the Proxy because it lacks the
+    // [[PromiseState]] slot). Accept ONLY that specific message
+    // — a fall-through to the early shape-reject branch would
+    // be a behavior change and must fail the test loudly.
     const realP = Promise.resolve("underlying");
     const proxied = new Proxy(realP, {});
     const adopted = safeAdopt(proxied);
     let rejReason: unknown = null;
     try { await adopted; } catch (e) { rejReason = e; }
     expect(rejReason).toBeInstanceOf(Error);
-    expect((rejReason as Error).message).toMatch(/intrinsic attach failed|not an ordinary same-realm base native Promise/);
+    expect((rejReason as Error).message).toMatch(/intrinsic attach failed — value is not a base native Promise/);
     // Sanity: the underlying real Promise still resolves cleanly
     // through the direct-adopt path.
     await expect(safeAdopt<string>(realP)).resolves.toBe("underlying");
@@ -251,37 +246,42 @@ describe("safeAdoptConsume — returns void", () => {
 });
 
 describe("safeAdoptConsume — callback-error coverage (NOT attach-error)", () => {
-  test("onFulfilled sync throw → onCallbackError called; safeAdoptConsume returns void", async () => {
+  test("onFulfilled sync throw → onCallbackError called with SAME Error identity; returns void", async () => {
+    // 副指挥 7535c7cb corrective: preserve the thrown Error
+    // reference and assert `toBe` (identity), not just message
+    // equality. Identity is the honest claim; message-only
+    // equality would allow the wrapper to silently synthesize
+    // a new Error and pass this test.
     let cbErrCalls = 0;
     let seenErr: unknown = null;
     const cbErr = (reason: unknown): undefined => {
       cbErrCalls++; seenErr = reason; return undefined;
     };
+    const thrownErr = new Error("onFulfilled_sync_throw");
     const throwingFul = (_v: unknown): undefined => {
-      throw new Error("onFulfilled_sync_throw");
+      throw thrownErr;
     };
     const ret: unknown = safeAdoptConsume(Promise.resolve("v"), throwingFul, undefined, cbErr);
     expect(ret).toBeUndefined();
     await waitMs(10);
     expect(cbErrCalls).toBe(1);
-    expect(seenErr).toBeInstanceOf(Error);
-    expect((seenErr as Error).message).toBe("onFulfilled_sync_throw");
+    expect(seenErr).toBe(thrownErr); // SAME identity, not just same message
   });
 
-  test("onRejected sync throw → onCallbackError called", async () => {
+  test("onRejected sync throw → onCallbackError called with SAME Error identity", async () => {
     let cbErrCalls = 0;
     let seenErr: unknown = null;
     const cbErr = (reason: unknown): undefined => {
       cbErrCalls++; seenErr = reason; return undefined;
     };
+    const thrownErr = new Error("onRejected_sync_throw");
     const throwingRej = (_r: unknown): undefined => {
-      throw new Error("onRejected_sync_throw");
+      throw thrownErr;
     };
     safeAdoptConsume(Promise.reject(new Error("underlying")), undefined, throwingRej, cbErr);
     await waitMs(10);
     expect(cbErrCalls).toBe(1);
-    expect(seenErr).toBeInstanceOf(Error);
-    expect((seenErr as Error).message).toBe("onRejected_sync_throw");
+    expect(seenErr).toBe(thrownErr); // SAME identity
   });
 
   test("onCallbackError itself throws → both callbacks fire once; both throws absorbed; returns undefined", async () => {
@@ -297,9 +297,13 @@ describe("safeAdoptConsume — callback-error coverage (NOT attach-error)", () =
       seenCbErrReason = r;
       throw new Error("cbErr_itself_throws");
     };
+    // 副指挥 7535c7cb corrective: preserve the thrown Error
+    // reference so we can assert IDENTITY (`toBe`), not just
+    // message equality.
+    const fulErr = new Error("onFulfilled_sync_throw");
     const throwingFul = (_v: unknown): undefined => {
       fulCalls++;
-      throw new Error("onFulfilled_sync_throw");
+      throw fulErr;
     };
     const ret: unknown = safeAdoptConsume(
       Promise.resolve("v"),
@@ -311,8 +315,8 @@ describe("safeAdoptConsume — callback-error coverage (NOT attach-error)", () =
     // double invocation from swallowing the sink throw.
     expect(fulCalls).toBe(1);
     expect(cbErrCalls).toBe(1);
-    // The reason routed into the sink IS the fulfilled-callback throw.
-    expect(seenCbErrReason).toBeInstanceOf(Error);
-    expect((seenCbErrReason as Error).message).toBe("onFulfilled_sync_throw");
+    // The reason routed into the sink IS the fulfilled-callback
+    // throw — SAME identity, not just same message.
+    expect(seenCbErrReason).toBe(fulErr);
   });
 });

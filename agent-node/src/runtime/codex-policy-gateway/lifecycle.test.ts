@@ -3105,7 +3105,13 @@ describe("Commit 2 corrective round 10 — lifecycle close/abort routed through 
     const { diagnostics } = collectDiagnostics();
     // Make close() return a REAL native Promise that eventually
     // rejects, but poison its OWN `.then` getter.
+    // 副指挥 7535c7cb corrective: lock a getter-read counter
+    // (must stay 0) and preserve the underlying Error identity
+    // so ledger can be asserted `toBe(underlying)` — not just
+    // "not null".
     let closeRejecter: ((reason?: unknown) => void) | null = null;
+    let closeThenGetterReads = 0;
+    const closeUnderlyingErr = new Error("underlying_close_reject");
     class PoisonedCloseThenTransport implements UpstreamTransport {
       closeCalls = 0;
       abortCalls = 0;
@@ -3116,7 +3122,7 @@ describe("Commit 2 corrective round 10 — lifecycle close/abort routed through 
         this.closeCalls++;
         const p = new Promise<void>((_res, rej) => { closeRejecter = rej; });
         Object.defineProperty(p, "then", {
-          get() { throw new Error("close_then_getter_boom"); },
+          get() { closeThenGetterReads++; throw new Error("close_then_getter_boom"); },
           configurable: true,
         });
         return p;
@@ -3140,10 +3146,18 @@ describe("Commit 2 corrective round 10 — lifecycle close/abort routed through 
       // Also reject the underlying Promise after adoption to
       // prove the late reject is consumed by our attach — NOT
       // by an instance getter read.
-      setTimeout(() => closeRejecter?.(new Error("underlying_close_reject")), 20);
+      setTimeout(() => closeRejecter?.(closeUnderlyingErr), 20);
       await stopP;
       await new Promise((r) => setTimeout(r, 100));
       expect(unhandledCount).toBe(0);
+      // 副指挥 7535c7cb corrective: EXACT counter — captured
+      // NativeThen via `Reflect.apply` reads internal slots, so
+      // the OWN poisoned `.then` getter is NEVER read. If safe-
+      // adopt regressed to reading `value.then`, this counter
+      // would be non-zero and the poisoned getter would throw,
+      // producing an intrinsic-attach-failed synthetic Error
+      // instead of routing the underlying reject through.
+      expect(closeThenGetterReads).toBe(0);
       // close threw at adopt attach; safeAdopt's captured attach
       // NEVER read the poisoned .then getter — value's shape
       // check succeeded but `Reflect.apply(NativeThen, value, ...)`
@@ -3153,6 +3167,11 @@ describe("Commit 2 corrective round 10 — lifecycle close/abort routed through 
       expect(lifecycle.currentState()).toBe("stop_failed");
       const closeLedger = lifecycle.stopFailureLedger().upstreamClose;
       expect(closeLedger).not.toBeNull();
+      // 副指挥 7535c7cb corrective: ledger MUST === underlying
+      // Error identity — proves toError does NOT wrap when
+      // reason is already Error, and safeAdopt propagates
+      // verbatim.
+      expect(closeLedger).toBe(closeUnderlyingErr);
       expect(transport.closeCalls).toBe(1);
     } finally {
       process.off("unhandledRejection", listener);
@@ -3167,6 +3186,8 @@ describe("Commit 2 corrective round 10 — lifecycle close/abort routed through 
     const paths = pathsFor();
     const { diagnostics } = collectDiagnostics();
     let abortRejecter: ((reason?: unknown) => void) | null = null;
+    let abortThenGetterReads = 0;
+    const abortUnderlyingErr = new Error("underlying_abort_reject");
     class PoisonedAbortThenTransport implements UpstreamTransport {
       closeCalls = 0;
       abortCalls = 0;
@@ -3182,7 +3203,7 @@ describe("Commit 2 corrective round 10 — lifecycle close/abort routed through 
         this.abortCalls++;
         const p = new Promise<void>((_res, rej) => { abortRejecter = rej; });
         Object.defineProperty(p, "then", {
-          get() { throw new Error("abort_then_getter_boom"); },
+          get() { abortThenGetterReads++; throw new Error("abort_then_getter_boom"); },
           configurable: true,
         });
         return p;
@@ -3202,13 +3223,23 @@ describe("Commit 2 corrective round 10 — lifecycle close/abort routed through 
     try {
       await lifecycle.start();
       const stopP = lifecycle.stop();
-      setTimeout(() => abortRejecter?.(new Error("underlying_abort_reject")), 20);
+      setTimeout(() => abortRejecter?.(abortUnderlyingErr), 20);
       await stopP;
       await new Promise((r) => setTimeout(r, 100));
       expect(unhandledCount).toBe(0);
+      // 副指挥 7535c7cb corrective: getter-read counter = 0
+      // proves safeAdopt captured-intrinsic attach never reads
+      // the OWN poisoned `.then` getter on abort's returned
+      // Promise either.
+      expect(abortThenGetterReads).toBe(0);
       expect(lifecycle.currentState()).toBe("stop_failed");
       expect(transport.closeCalls).toBe(1);
       expect(transport.abortCalls).toBe(1);
+      // 副指挥 7535c7cb corrective: abort ledger MUST ===
+      // underlying Error identity.
+      const abortLedger = lifecycle.stopFailureLedger().upstreamAbort;
+      expect(abortLedger).not.toBeNull();
+      expect(abortLedger).toBe(abortUnderlyingErr);
     } finally {
       process.off("unhandledRejection", listener);
       try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}

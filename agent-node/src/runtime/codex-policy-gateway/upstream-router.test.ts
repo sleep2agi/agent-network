@@ -341,7 +341,15 @@ describe("UpstreamRouter — round 10 corrective (副指挥 fb2ec49a)", () => {
     router.unsubscribe();
   });
 
-  test("firePreActiveTerminal exactly-once: close then overflow → onPreActiveClose callback count = 1", async () => {
+  test("firePreActiveTerminal exactly-once: close, then POST-CLOSE flood → guard drops frames without entering overflow", async () => {
+    // 副指挥 7535c7cb corrective: the earlier title
+    // "close then overflow" over-claimed. In this ordering,
+    // subsequent frames NEVER enter the overflow branch — they
+    // hit the pre-active `receivedCloseBeforeActive` guard and
+    // are dropped immediately. Rename to "POST-CLOSE flood" and
+    // assert `bufferOverflowedFlag() === false` so the honest
+    // invariant is locked: after close, a subsequent flood does
+    // NOT overflow AND onPreActiveClose does NOT re-fire.
     let onPreActiveCloseCalls = 0;
     const f = makeFixture();
     const router = new UpstreamRouter({
@@ -360,14 +368,14 @@ describe("UpstreamRouter — round 10 corrective (副指挥 fb2ec49a)", () => {
     // Close first.
     f.upstream.emitClose();
     expect(onPreActiveCloseCalls).toBe(1);
-    // Overflow after close — helper still does NOT re-fire.
-    // (In this order, subsequent frames are dropped at the
-    // `receivedCloseBeforeActive` guard before reaching the
-    // overflow branch. Still assert.)
+    expect(router.bufferOverflowedFlag()).toBe(false);
+    // Post-close flood: guard drops frames. NO overflow, NO
+    // second onPreActiveClose call.
     for (let i = 0; i < 300; i++) {
       f.upstream.emitFrame({ jsonrpc: "2.0", method: "notif", params: { i } });
     }
     expect(onPreActiveCloseCalls).toBe(1);
+    expect(router.bufferOverflowedFlag()).toBe(false);
     router.unsubscribe();
   });
 });
