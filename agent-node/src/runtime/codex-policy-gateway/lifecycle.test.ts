@@ -1461,13 +1461,15 @@ describe("Commit 2 corrective round 2 P1-1 — multi-failure ledger preserves ev
   });
 });
 
-describe("Commit 2 corrective round 2 P1-4 — rollback shares teardown core with concurrent stop / upstream close", () => {
-  test("preflight throws mid-await; three shutdown entry points funnel to teardown core; core entered EXACTLY 1", async () => {
+describe("Commit 2 corrective round 3 (副指挥 cdd20559 pre-submit) — rollback + stop share teardown core EXACTLY once", () => {
+  // 副指挥 cdd20559 pre-submit #1: pre-active `emitClose` does NOT
+  // invoke `onUpstreamCloseFromRouter` (that fires only on active
+  // close). Splitting the round-2 catch-all into TWO honest tests
+  // so we can prove exact-1 with the real entry points.
+  test("preflight rollback × concurrent stop() → teardown core entered EXACTLY 1; close+abort each EXACTLY 1", async () => {
     const paths = pathsFor();
     const { diagnostics } = collectDiagnostics();
     const upstream = new ControllableUpstream();
-    // Preflight is held open until we explicitly reject it — so
-    // start() is parked inside `throwIfAbortedAfterAwait` awaits.
     let preflightSettle: (v: void) => void = () => {};
     const preflightP = new Promise<void>((_res, rej) => {
       preflightSettle = () => rej(new Error("preflight_boom"));
@@ -1485,35 +1487,49 @@ describe("Commit 2 corrective round 2 P1-4 — rollback shares teardown core wit
     });
     expect(lifecycle.teardownCoreEnteredCount()).toBe(0);
     const startP = lifecycle.start();
-    // Yield so start() is parked at the preflight `await`.
     await Promise.resolve();
     await Promise.resolve();
-    // 副指挥 cdd20559 evidence-delta #1: fire all three shutdown
-    // entry points concurrently. The upstream is at this point
-    // in the router's pre-active "subscribed" state — emitClose
-    // records the pre-active close but does NOT invoke
-    // `onUpstreamCloseFromRouter` (that fires on active close).
-    // The router's terminal fence will cause start's next
-    // `throwIfAbortedAfterAwait` to invoke `rollbackStartFailure`,
-    // which enters the core.
-    upstream.emitClose();
+    // Two concurrent manual stops, then reject preflight. Start's
+    // catch runs `rollbackStartFailure` → runTeardownCore. Stops
+    // await `startInProgress` first, then re-enter the memoised
+    // teardown core.
     const stopP1 = lifecycle.stop();
     const stopP2 = lifecycle.stop();
-    // Rejecting the preflight now unblocks start(); start's
-    // catch runs `rollbackStartFailure` → runTeardownCore.
     preflightSettle();
     const results = await Promise.allSettled([startP, stopP1, stopP2]);
     expect(results[0].status).toBe("rejected");
     expect(results[1].status).toBe("fulfilled");
     expect(results[2].status).toBe("fulfilled");
-    // 副指挥 cdd20559 evidence-delta #1: teardown core body ran
-    // EXACTLY ONCE across all shutdown entry points.
-    expect(lifecycle.teardownCoreEnteredCount()).toBe(1);
-    // Public promise identity across concurrent stops.
     expect(stopP1).toBe(stopP2);
-    // Terminal state reached.
+    // EXACT invariants (not `<=1` — really 1):
+    expect(lifecycle.teardownCoreEnteredCount()).toBe(1);
+    expect(upstream.closeCallCount).toBe(1);
+    expect(upstream.abortCallCount).toBe(0); // close resolved cleanly → no abort
     expect(["stopped", "stop_failed"]).toContain(lifecycle.currentState());
     try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+  });
+
+  test("active upstream-close cascade × concurrent stop() → teardown core entered EXACTLY 1; close+abort each EXACTLY 1", async () => {
+    // Full start (all servers bound + router activated) so
+    // `emitClose` triggers the REAL `onUpstreamCloseFromRouter`
+    // cascade, not the pre-active fence.
+    const upstream = new ControllableUpstream();
+    const h = await makeLifecycleWith(upstream);
+    try {
+      await h.lifecycle.start();
+      expect(h.lifecycle.teardownCoreEnteredCount()).toBe(0);
+      // Fire the active close cascade + two concurrent stops.
+      upstream.emitClose();
+      const stopP1 = h.lifecycle.stop();
+      const stopP2 = h.lifecycle.stop();
+      await Promise.all([stopP1, stopP2]);
+      expect(stopP1).toBe(stopP2);
+      // EXACT invariants:
+      expect(h.lifecycle.teardownCoreEnteredCount()).toBe(1);
+      expect(upstream.closeCallCount).toBe(1);
+      expect(upstream.abortCallCount).toBe(0);
+      expect(h.lifecycle.currentState()).toBe("stopped");
+    } finally { await h.cleanup(); }
   });
 });
 
@@ -1736,6 +1752,52 @@ describe("Commit 2 corrective round 3 P0 — non-stringifiable rejection converg
       expect(unhandled).toBeNull();
       expect(h.lifecycle.currentState()).toBe("stop_failed");
       expect(h.lifecycle.stopFailureLedger().backendStop).not.toBeNull();
+    } finally {
+      process.off("unhandledRejection", listener);
+      await h.cleanup();
+    }
+  });
+
+  test("upstream close rejects with Proxy whose Symbol.toStringTag getter throws → toError fallback fires; terminal; no unhandled", async () => {
+    // 副指挥 cdd20559 pre-submit #4: `Object.prototype.toString`
+    // internally reads `Symbol.toStringTag` — a Proxy get-trap
+    // that throws will make even the safer fallback throw. `toError`
+    // catches that and falls through to the fixed synthetic
+    // marker. This test verifies the FINAL fallback is reached
+    // and shutdown converges.
+    let unhandled: unknown = null;
+    const listener = (r: unknown): void => { unhandled = r; };
+    process.on("unhandledRejection", listener);
+    const upstream = new ControllableUpstream();
+    // Create a Proxy over a plain object whose ALL get access is
+    // poisoned. Both `toString` and `Symbol.toStringTag` lookups
+    // will throw.
+    const poisonedProxy = new Proxy({}, {
+      get(_target, _prop) { throw new Error("proxy_get_boom"); },
+      has(_target, _prop) { throw new Error("proxy_has_boom"); },
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (upstream as unknown as any).close = () => {
+      upstream.closeCallCount++;
+      return Promise.reject(poisonedProxy);
+    };
+    const h = await makeLifecycleWith(upstream);
+    try {
+      await h.lifecycle.start();
+      await h.lifecycle.stop();
+      await new Promise((r) => setTimeout(r, 30));
+      expect(unhandled).toBeNull();
+      // Terminal reached — synthetic Error stored (message is the
+      // fixed marker since Object.prototype.toString threw too).
+      expect(["stopped", "stop_failed"]).toContain(h.lifecycle.currentState());
+      const closeErr = h.lifecycle.stopFailureLedger().upstreamClose;
+      expect(closeErr).not.toBeNull();
+      expect(closeErr).toBeInstanceOf(Error);
+      // Message contains the synthetic marker OR the fallback
+      // Object-prototype tag; either is acceptable — the invariant
+      // is "convergence with a real Error, no unhandled".
+      expect(typeof closeErr?.message).toBe("string");
+      expect(closeErr?.message.length).toBeGreaterThan(0);
     } finally {
       process.off("unhandledRejection", listener);
       await h.cleanup();

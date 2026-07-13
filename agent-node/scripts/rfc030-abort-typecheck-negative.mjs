@@ -246,10 +246,15 @@ for (const nf of NEGATIVE_FIXTURES) {
   if (exitCode !== 0 && verdict.ok === false) {
     ok(`meta-sanity #2: bad NON-abort property (close) rejected by precise abort-line filter (${verdict.reason})`);
   } else if (exitCode === 0) {
-    // Unexpected: our mutation didn't actually cause a diag. The
-    // meta-sanity intent is moot; treat as skipped-with-note.
-    notes.push("meta-sanity #2: mutation did NOT cause a tsc diag; skipping");
-    ok("meta-sanity #2: skipped (mutation was type-compatible; no diag to filter)");
+    // 副指挥 cdd20559 pre-submit #3: mutation MUST cause a diag —
+    // otherwise the meta test has no signal. This is a HARD FAIL,
+    // not a "skipped PASS".
+    fail(
+      "meta-sanity #2: mutation did NOT cause a tsc diag; meta test has no signal",
+      "the `close(): void {}` mutation was expected to produce TS2416 but tsc exited 0",
+    );
+    notes.push("---- meta-sanity #2 output ----");
+    notes.push(output.slice(0, 1500));
   } else {
     fail(
       "meta-sanity #2: bad non-abort property slipped past filter",

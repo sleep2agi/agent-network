@@ -704,12 +704,18 @@ export class GatewayLifecycle {
   }
 
   /**
-   * 副指挥 cdd20559 evidence-delta #1: test-only observable
-   * count of first-time entries into the teardown core. All three
-   * shutdown entry points (public stop, upstream close cascade,
-   * start rollback) share the memoised `teardownCorePromise`, so
-   * this counter is exactly 1 after any teardown that ran, and 0
+   * @internal — TEST-ONLY seam, not a public capability.
+   *
+   * 副指挥 cdd20559 evidence-delta #1: observable count of
+   * first-time entries into the teardown core. All three shutdown
+   * entry points (public stop, upstream close cascade, start
+   * rollback) share the memoised `teardownCorePromise`, so this
+   * counter is exactly 1 after any teardown that ran, and 0
    * before any teardown started.
+   *
+   * Not exported from `integration-entry.ts`; not part of the
+   * production API contract. Removing this method would not be a
+   * breaking change.
    */
   teardownCoreEnteredCount(): number { return this.teardownCoreEnteredCountValue; }
 
