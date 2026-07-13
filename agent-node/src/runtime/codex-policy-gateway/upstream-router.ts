@@ -88,6 +88,20 @@ export interface UpstreamRouterOptions {
    * lifecycle uses this to cascade shutdown. Called AT MOST ONCE.
    */
   readonly onUpstreamClose: () => void;
+  /**
+   * 副指挥 ef331a80 Round 8: called when the transport fires
+   * close DURING the pre-active `subscribed` state (before
+   * `activate()`). Prior behaviour only set an internal
+   * `receivedCloseBeforeActive` flag that lifecycle polled via
+   * `throwIfAbortedAfterAwait` after each preflight/bind await —
+   * a never-resolving preflight never reached the poll, so a
+   * pre-active close could not wake the shutdown race.
+   *
+   * Lifecycle wires this to fire its shutdown signal so the
+   * `Promise.race([preflight, shutdownSignal])` unblocks
+   * immediately. Called AT MOST ONCE per router instance.
+   */
+  readonly onPreActiveClose?: () => void;
 }
 
 /**
@@ -232,10 +246,18 @@ export class UpstreamRouter {
   /** Test-only: was the pre-active buffer cap hit? */
   bufferOverflowedFlag(): boolean { return this.bufferOverflowed; }
 
+  private preActiveCloseFired = false;
   private onClose(): void {
     if (this.state === "terminal") return;
     if (this.state === "subscribed") {
       this.receivedCloseBeforeActive = true;
+      // 副指挥 ef331a80 Round 8: notify lifecycle so the shutdown
+      // signal fires — otherwise a never-resolving preflight leaves
+      // the race unresolvable. Called AT MOST ONCE.
+      if (!this.preActiveCloseFired) {
+        this.preActiveCloseFired = true;
+        try { this.opts.onPreActiveClose?.(); } catch { /* silent */ }
+      }
       return;
     }
     this.doClose();

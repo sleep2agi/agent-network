@@ -596,6 +596,12 @@ export class GatewayLifecycle {
       diagnostics,
       tuiForward,
       onUpstreamClose: () => this.onUpstreamCloseFromRouter(),
+      // 副指挥 ef331a80 Round 8: pre-active close bubbles to the
+      // shutdown signal so a `Promise.race([preflight, signal])`
+      // is unblocked even if no external `stop()` fires. Bumps the
+      // epoch monotonically so post-subscribe continuations refuse
+      // to advance.
+      onPreActiveClose: () => this.applySyncAdmissionFence(),
     });
     // 副指挥 06e92ef7 P0-5: subscribe is atomic — if the second
     // subscription throws, subscribe() itself rolls back the first
@@ -607,6 +613,29 @@ export class GatewayLifecycle {
     } catch (e) {
       await this.rollbackStartFailure();
       throw e;
+    }
+    // 副指挥 cb54a10e Round 8: subscribe→preflight CAS fence.
+    // `onFrame` registration inside `router.subscribe()` can
+    // synchronously fire a handler that calls `stop()` (or
+    // synchronously delivers a close that fires
+    // `onPreActiveClose`). Both bump the epoch. Without an
+    // immediate post-subscribe check, `preflight.run()` would
+    // still be called (preflightCalls=1) AND its handler could
+    // write a frame to the upstream (writes=1) before the fence
+    // in `throwIfAbortedAfterAwait` after the preflight settle.
+    // Refuse to advance if the epoch shifted OR shutdown intent
+    // has fired OR router saw a pre-active close.
+    const preActiveClosePre = this.upstreamRouter.wasCloseBeforeActive();
+    if (
+      startEpoch !== this.lifecycleEpoch
+      || this.stopRequested
+      || preActiveClosePre
+    ) {
+      // Capture message BEFORE rollback so a nulled `upstreamRouter`
+      // after `runTeardownCore()` doesn't crash the error format.
+      const msg = `start aborted before preflight: shutdown intent during subscribe (epoch=${startEpoch}/${this.lifecycleEpoch}, stopRequested=${this.stopRequested}, preActiveClose=${preActiveClosePre})`;
+      await this.rollbackStartFailure();
+      throw new Error(msg);
     }
 
     // 副指挥 e8cdc302 Round 7: epoch fence. EVERY continuation
@@ -631,19 +660,23 @@ export class GatewayLifecycle {
       }
     };
 
-    // 副指挥 b65ebc50 Round 7: race preflight against the
-    // shutdown signal. A never-resolving preflight cannot wedge
-    // stop() — the signal resolves inside
-    // `applySyncAdmissionFence`. Late resolves/rejects of the
-    // preflight promise are safely consumed by the `.catch`
-    // attached below so they cannot surface as unhandled.
+    // 副指挥 b65ebc50 + cb54a10e Round 8: race preflight against
+    // the shutdown signal via SAFE adoption. `preflight.run()`
+    // returns a caller-provided Promise-like whose own
+    // `.then/.catch` may be poisoned. Never touch instance
+    // getters — adopt into a native Promise via
+    // `Promise.resolve(preflightP)`, which uses the native
+    // adoption path (any getter throw becomes a rejection of the
+    // adopted Promise instead of throwing out of the attach). No
+    // separate `.catch()` consumer is attached: `Promise.race`
+    // already attaches its own resolver via the native `.then`
+    // machinery, so a late rejection of `preflightP` has a
+    // handler and cannot surface as `unhandledRejection`.
     const preflightP = this.opts.preflight.run();
-    // Safe-consume: if preflight later rejects AFTER we've moved
-    // on, the rejection must not surface as unhandled.
-    preflightP.catch(() => { /* handled */ });
+    const safePreflightP = Promise.resolve(preflightP);
     try {
       await Promise.race([
-        preflightP,
+        safePreflightP,
         this.shutdownSignalPromise.then(() => {
           throw new Error("start aborted: shutdown signalled during preflight");
         }),

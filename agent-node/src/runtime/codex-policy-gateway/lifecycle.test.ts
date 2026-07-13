@@ -2527,3 +2527,279 @@ describe("Commit 2 corrective round 7 — start memo prepublish + shutdown signa
     try { fs.rmSync(paths2.socketDir, { recursive: true, force: true }); } catch {}
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// Round 8 — pre-active close signal + subscribe→preflight fence +
+// safe adoption of user-provided promises (副指挥 ef331a80 + cb54a10e)
+// ─────────────────────────────────────────────────────────────────────
+
+describe("Commit 2 corrective round 8 — pre-active close + subscribe fence + safe adoption", () => {
+  test("subscribe sync-close + NEVER preflight → preflight NOT called; start rejects; handlers=0; close=1; bounded settle", async () => {
+    // 副指挥 ef331a80 P0-1 case: transport.onFrame handler
+    // synchronously fires a close event during subscribe. Router
+    // records `receivedCloseBeforeActive` AND invokes
+    // `onPreActiveClose`, which fires the shutdown signal +
+    // bumps the epoch. Then subscribe returns. The Round-8
+    // subscribe→preflight fence catches the epoch bump and
+    // rolls back BEFORE calling `preflight.run()`.
+    const paths = pathsFor();
+    const { diagnostics } = collectDiagnostics();
+    let preflightCalls = 0;
+    class SyncCloseOnRegisterTransport implements UpstreamTransport {
+      frameHandlers: Array<(raw: unknown) => void> = [];
+      closeHandlers: Array<() => void> = [];
+      closeCalls = 0;
+      async writeFrame(_f: JsonRpcRequestFrame | JsonRpcResponseFrame | JsonRpcNotificationFrame): Promise<void> {}
+      onFrame(h: (raw: unknown) => void): () => void {
+        this.frameHandlers.push(h);
+        return () => { this.frameHandlers = this.frameHandlers.filter((x) => x !== h); };
+      }
+      onClose(h: () => void): () => void {
+        this.closeHandlers.push(h);
+        // Sync-fire close inside onClose registration so the
+        // router sees it in `subscribed` state.
+        h();
+        return () => { this.closeHandlers = this.closeHandlers.filter((x) => x !== h); };
+      }
+      async close(): Promise<void> { this.closeCalls++; }
+      async abort(): Promise<void> {}
+    }
+    const transport = new SyncCloseOnRegisterTransport();
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight: {
+        run: () => { preflightCalls++; return new Promise<void>(() => {}); },
+      },
+      backend: makeBackend(),
+      upstreamTransport: transport,
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    let startErr = "";
+    const startResult = await Promise.race([
+      lifecycle.start().then(() => "resolved", (e: Error) => { startErr = e.message; return "rejected"; }),
+      new Promise<string>((_r, rej) => setTimeout(() => rej(new Error("start_wedged")), 800)),
+    ]);
+    expect(startResult).toBe("rejected");
+    // Load-bearing: preflight was NEVER called because the fence
+    // caught the epoch bump / preActiveClose flag first.
+    expect(preflightCalls).toBe(0);
+    expect(startErr).toMatch(/start aborted before preflight/);
+    expect(lifecycle.currentState()).toBe("stopped");
+    // Router unsubscribed both handler slots. close() called
+    // exactly once (during teardown; the sync-fire during onClose
+    // registration did NOT go through transport.close()).
+    expect(transport.frameHandlers.length).toBe(0);
+    expect(transport.closeHandlers.length).toBe(0);
+    expect(transport.closeCalls).toBe(1);
+    try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+  });
+
+  test("pre-active close during HELD never-preflight → race unblocks; preflight has been called once but NOT waited on; start rejects; bounded", async () => {
+    // 副指挥 ef331a80 P0-1 case: preflight is already running
+    // (never resolves). Transport delivers close AFTER subscribe
+    // has returned. Router records `receivedCloseBeforeActive`
+    // AND fires `onPreActiveClose` → lifecycle shutdown signal
+    // fires → `Promise.race([preflight, shutdownSignal])` throws
+    // → doStart rolls back. No external stop() needed.
+    const paths = pathsFor();
+    const { diagnostics } = collectDiagnostics();
+    let preflightCalls = 0;
+    let scheduledClose: (() => void) | null = null;
+    class DeferredCloseTransport implements UpstreamTransport {
+      frameHandlers: Array<(raw: unknown) => void> = [];
+      closeHandlers: Array<() => void> = [];
+      closeCalls = 0;
+      async writeFrame(_f: JsonRpcRequestFrame | JsonRpcResponseFrame | JsonRpcNotificationFrame): Promise<void> {}
+      onFrame(h: (raw: unknown) => void): () => void {
+        this.frameHandlers.push(h);
+        return () => { this.frameHandlers = this.frameHandlers.filter((x) => x !== h); };
+      }
+      onClose(h: () => void): () => void {
+        this.closeHandlers.push(h);
+        scheduledClose = () => h();
+        return () => { this.closeHandlers = this.closeHandlers.filter((x) => x !== h); };
+      }
+      async close(): Promise<void> { this.closeCalls++; }
+      async abort(): Promise<void> {}
+    }
+    const transport = new DeferredCloseTransport();
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight: {
+        run: () => { preflightCalls++; return new Promise<void>(() => {}); },
+      },
+      backend: makeBackend(),
+      upstreamTransport: transport,
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    const startP = lifecycle.start();
+    // Yield so start reaches the preflight race.
+    await Promise.resolve(); await Promise.resolve();
+    expect(preflightCalls).toBe(1);
+    // Deliver the pre-active close ASYNC.
+    setTimeout(() => scheduledClose?.(), 10);
+    let startErr = "";
+    const startResult = await Promise.race([
+      startP.then(() => "resolved", (e: Error) => { startErr = e.message; return "rejected"; }),
+      new Promise<string>((_r, rej) => setTimeout(() => rej(new Error("start_wedged")), 600)),
+    ]);
+    expect(startResult).toBe("rejected");
+    expect(startErr).toMatch(/start aborted/);
+    expect(lifecycle.currentState()).toBe("stopped");
+    expect(transport.frameHandlers.length).toBe(0);
+    expect(transport.closeHandlers.length).toBe(0);
+    try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+  });
+
+  test("preflight promise with poisoned `.catch` getter → race unblocks safely; late reject → 0 unhandledRejection", async () => {
+    // 副指挥 cb54a10e safe-adoption case: preflight.run() returns
+    // a real Promise whose OWN `.catch` property has a throwing
+    // getter. Round-7 code did `preflightP.catch(() => {})` at
+    // attach → threw synchronously. Round-8 removed that attach
+    // and uses `Promise.resolve(preflightP)` for safe adoption —
+    // Promise.race's own `.then` handler consumes any late
+    // rejection.
+    const paths = pathsFor();
+    const { diagnostics } = collectDiagnostics();
+    let poisonedGetterReads = 0;
+    // Build a real Promise, then poison its instance `.catch`.
+    let rejectPreflight: (reason?: unknown) => void = () => {};
+    const preflightPromise = new Promise<void>((_res, rej) => { rejectPreflight = rej; });
+    Object.defineProperty(preflightPromise, "catch", {
+      get() { poisonedGetterReads++; throw new Error("poisoned_catch_getter"); },
+      configurable: true,
+    });
+    let unhandledCount = 0;
+    const listener = (): void => { unhandledCount++; };
+    process.on("unhandledRejection", listener);
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight: { run: () => preflightPromise },
+      backend: makeBackend(),
+      upstreamTransport: new ControllableUpstream(),
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    try {
+      const startP = lifecycle.start();
+      // Give race a chance to attach.
+      await Promise.resolve(); await Promise.resolve();
+      // Trigger shutdown via external stop, unblocking the race
+      // via the shutdown signal.
+      const stopP = lifecycle.stop();
+      // Now reject the preflight LATE — a late unhandled rejection
+      // WOULD surface if the safe-adoption path had touched the
+      // poisoned `.catch` and Promise.race had failed to attach.
+      setTimeout(() => rejectPreflight(new Error("late_preflight_reject")), 20);
+      let startErr = "";
+      try { await startP; } catch (e) { startErr = (e as Error).message; }
+      await stopP;
+      await new Promise((r) => setTimeout(r, 100));
+      // The Round-7 code read `preflightP.catch(...)` — the
+      // poisoned getter would have thrown; Round-8 never reads it
+      // (we use Promise.resolve()), so the getter is NEVER hit
+      // by the lifecycle. Any getter read (e.g., by a debugger or
+      // unrelated tooling) is fine; the load-bearing count is 0
+      // reads from the lifecycle path.
+      expect(poisonedGetterReads).toBe(0);
+      expect(unhandledCount).toBe(0);
+      expect(startErr).toMatch(/start aborted/);
+      expect(lifecycle.currentState()).toBe("stopped");
+    } finally {
+      process.off("unhandledRejection", listener);
+      try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+    }
+  });
+
+  test("deterministic activate CAS red — pre-buffered notification + sink sync-stop during activate → no revive; write=0; handlers=0; terminal", async () => {
+    // 副指挥 ef331a80 Round 8: rewrite the activate CAS test to
+    // deterministically hit the activate() code path. Router is
+    // held in pre-active `subscribed` state until preflight
+    // resolves. We manually push a notification frame into the
+    // router's buffer, then release preflight. Activate then
+    // drains the buffer synchronously — the notification's
+    // "upstream_notification_dropped_phase1" diagnostic reaches
+    // the sink, which sync-calls stop(). CAS gate refuses admission.
+    const paths = pathsFor();
+    let sink: GatewayLifecycle | null = null;
+    let sinkFired = false;
+    const sinkDiag: ProtocolDiagnostics = {
+      newCorrelationId: () => "cid",
+      reportInternalError: () => {
+        if (!sinkFired && sink !== null) {
+          sinkFired = true;
+          void sink.stop().catch(() => {});
+        }
+      },
+    };
+    let deliverFrame: ((raw: unknown) => void) | null = null;
+    let releasePreflight: () => void = () => {};
+    const preflightP = new Promise<void>((res) => { releasePreflight = res; });
+    class BufferInjectTransport implements UpstreamTransport {
+      frameHandlers: Array<(raw: unknown) => void> = [];
+      closeHandlers: Array<() => void> = [];
+      writesCount = 0;
+      async writeFrame(_f: JsonRpcRequestFrame | JsonRpcResponseFrame | JsonRpcNotificationFrame): Promise<void> {
+        this.writesCount++;
+      }
+      onFrame(h: (raw: unknown) => void): () => void {
+        this.frameHandlers.push(h);
+        deliverFrame = h;
+        return () => { this.frameHandlers = this.frameHandlers.filter((x) => x !== h); };
+      }
+      onClose(h: () => void): () => void {
+        this.closeHandlers.push(h);
+        return () => { this.closeHandlers = this.closeHandlers.filter((x) => x !== h); };
+      }
+      async close(): Promise<void> {}
+      async abort(): Promise<void> {}
+    }
+    const transport = new BufferInjectTransport();
+    const lc = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight: { run: () => preflightP },
+      backend: makeBackend(),
+      upstreamTransport: transport,
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: sinkDiag,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    sink = lc;
+    const startP = lc.start();
+    // Yield so start reaches the preflight race, router is now
+    // subscribed and buffering. Push a notification frame.
+    await Promise.resolve(); await Promise.resolve();
+    deliverFrame?.({ jsonrpc: "2.0", method: "buffered/notification", params: {} });
+    // Release preflight → doStart continues past preflight →
+    // backendServer.start / tuiServer.start / activate. During
+    // activate the buffered notification drains → sink fires →
+    // sync stop → epoch bumps → post-activate CAS refuses admission.
+    releasePreflight();
+    let startErr = "";
+    let startFulfilled = false;
+    try { await startP; startFulfilled = true; } catch (e) { startErr = (e as Error).message; }
+    // NEVER revives to running.
+    expect(lc.currentState()).not.toBe("running");
+    // sink fired → shutdown intent registered.
+    expect(sinkFired).toBe(true);
+    // Either start rejected via CAS OR resolved AND state now stopped.
+    // Load-bearing: no upstream write happened.
+    expect(transport.writesCount).toBe(0);
+    // Terminal reached; handlers cleaned.
+    await lc.stop();
+    expect(["stopped", "stop_failed"]).toContain(lc.currentState());
+    expect(transport.frameHandlers.length).toBe(0);
+    expect(transport.closeHandlers.length).toBe(0);
+    void startErr; void startFulfilled;
+    try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+  });
+});
