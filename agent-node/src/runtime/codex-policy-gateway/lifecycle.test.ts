@@ -1856,13 +1856,16 @@ describe("Commit 2 corrective round 4 — doStart full-body catch converges cons
     try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
   });
 
-  test("UpstreamRouter constructor throws (synthetic transport onFrame throw) → start rejects; terminal; no leaks", async () => {
+  test("UpstreamRouter.subscribe() throws (transport onFrame throw) → start rejects; terminal; no leaks", async () => {
+    // 副指挥 64fad5de evidence: `onFrame` is called INSIDE
+    // `UpstreamRouter.subscribe()`, not the router constructor.
+    // Renamed for accuracy.
     const paths = pathsFor();
     const { diagnostics } = collectDiagnostics();
-    class ConstructThrowTransport implements UpstreamTransport {
+    class SubscribeThrowTransport implements UpstreamTransport {
       async writeFrame(_f: JsonRpcRequestFrame | JsonRpcResponseFrame | JsonRpcNotificationFrame): Promise<void> {}
       onFrame(_h: (raw: unknown) => void): () => void {
-        throw new Error("synthetic_router_construction_throw");
+        throw new Error("synthetic_router_subscribe_throw");
       }
       onClose(_h: () => void): () => void { return () => {}; }
       async close(): Promise<void> {}
@@ -1873,12 +1876,12 @@ describe("Commit 2 corrective round 4 — doStart full-body catch converges cons
       socketDir: paths.socketDir,
       preflight: { async run() {} },
       backend: makeBackend(),
-      upstreamTransport: new ConstructThrowTransport(),
+      upstreamTransport: new SubscribeThrowTransport(),
       initSnapshotSource: { currentSnapshot: () => ({}) },
       diagnosticsSink: diagnostics,
       backendCapability: TEST_BACKEND_CAP,
     });
-    await expect(lifecycle.start()).rejects.toThrow(/synthetic_router_construction_throw/);
+    await expect(lifecycle.start()).rejects.toThrow(/synthetic_router_subscribe_throw/);
     expect(lifecycle.currentState()).toBe("stopped");
     expect(lifecycle.takeTuiBearerPlaintextForLauncher()).toBeNull();
     expect(fs.existsSync(paths.backendSocketPath)).toBe(false);
@@ -1916,12 +1919,145 @@ describe("Commit 2 corrective round 4 — doStart full-body catch converges cons
     let rejectMsg = "";
     try { await startP; } catch (e) { rejectMsg = (e as Error).message; }
     expect(rejectMsg).toMatch(/synthetic_activate_throw/);
-    // Terminal reached; socket cleaned up by the async rollback.
-    expect(["stopped", "stop_failed"]).toContain(lifecycle.currentState());
+    // 副指挥 64fad5de evidence: activate-throw with a clean
+    // rollback (backend/tui stop resolved cleanly, upstream close
+    // resolved cleanly, abort not called) → EXACTLY `stopped` +
+    // four-ledger-null. Not the loose ["stopped","stop_failed"]
+    // from round-4.
+    expect(lifecycle.currentState()).toBe("stopped");
+    expect(lifecycle.stopFailureLedger().backendStop).toBeNull();
+    expect(lifecycle.stopFailureLedger().tuiStop).toBeNull();
+    expect(lifecycle.stopFailureLedger().upstreamClose).toBeNull();
+    expect(lifecycle.stopFailureLedger().upstreamAbort).toBeNull();
+    // Full cleanup: bearer unclaimable, socket unlinked, refs null.
+    expect(lifecycle.takeTuiBearerPlaintextForLauncher()).toBeNull();
     expect(fs.existsSync(paths.backendSocketPath)).toBe(false);
     expect(
       (lifecycle as unknown as { teardownCoreEnteredCountValue: number }).teardownCoreEnteredCountValue,
     ).toBe(1);
+    try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Round 5 — reentrant shutdown single-flight (副指挥 64fad5de)
+//
+// Prior `stop()` and `runTeardownCore()` assigned the memoised
+// promise AFTER calling the async body — the body's synchronous
+// prefix (before its first await) ran while the memo was still
+// null. If that prefix synchronously triggered a reentrant `stop()`
+// (via `router.unsubscribe()` → sync close handler →
+// `onUpstreamCloseFromRouter` → `void this.stop()`), the reentrance
+// saw a null memo and started a SECOND teardown core.
+//
+// Fix: `this.shutdownPromise = Promise.resolve().then(() => this
+// .doOuterStop())`. The body runs on a microtask so the memo
+// assignment is observable before any body code runs. Same pattern
+// applied to `runTeardownCore`.
+// ─────────────────────────────────────────────────────────────────────
+
+class SyncCloseOnUnsubscribeTransport implements UpstreamTransport {
+  written: Array<JsonRpcRequestFrame | JsonRpcResponseFrame | JsonRpcNotificationFrame> = [];
+  private frameHandlers: Array<(raw: unknown) => void> = [];
+  private closeHandlers: Array<() => void> = [];
+  closeCallCount = 0;
+  abortCallCount = 0;
+  private closeBehaviour: { kind: "resolve" } | { kind: "throw"; error: Error } = { kind: "resolve" };
+  setClose(b: SyncCloseOnUnsubscribeTransport["closeBehaviour"]): void { this.closeBehaviour = b; }
+  async writeFrame(f: JsonRpcRequestFrame | JsonRpcResponseFrame | JsonRpcNotificationFrame): Promise<void> {
+    this.written.push(f);
+  }
+  onFrame(h: (raw: unknown) => void): () => void {
+    this.frameHandlers.push(h);
+    return () => {
+      // Sync-fire close handlers when frame subscription is torn
+      // down. This puts a reentrant `stop()` call INSIDE
+      // `router.unsubscribe()` inside `doTeardownCore()`'s
+      // synchronous prefix.
+      this.frameHandlers = this.frameHandlers.filter((x) => x !== h);
+      for (const ch of [...this.closeHandlers]) {
+        try { ch(); } catch { /* silent */ }
+      }
+    };
+  }
+  onClose(h: () => void): () => void {
+    this.closeHandlers.push(h);
+    return () => { this.closeHandlers = this.closeHandlers.filter((x) => x !== h); };
+  }
+  async close(): Promise<void> {
+    this.closeCallCount++;
+    switch (this.closeBehaviour.kind) {
+      case "resolve": return;
+      case "throw": throw this.closeBehaviour.error;
+    }
+  }
+  async abort(): Promise<void> { this.abortCallCount++; }
+}
+
+describe("Commit 2 corrective round 5 (副指挥 64fad5de) — reentrant shutdown single-flight", () => {
+  test("sync unsubscribe → sync close handler → reentrant stop() → core=1, close=1, outer===reentrant Promise", async () => {
+    const paths = pathsFor();
+    const { diagnostics } = collectDiagnostics();
+    const transport = new SyncCloseOnUnsubscribeTransport();
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight: { async run() {} },
+      backend: makeBackend(),
+      upstreamTransport: transport,
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    await lifecycle.start();
+    const outerP = lifecycle.stop();
+    await outerP;
+    const followUpP = lifecycle.stop();
+    expect(followUpP).toBe(outerP);
+    expect(
+      (lifecycle as unknown as { teardownCoreEnteredCountValue: number }).teardownCoreEnteredCountValue,
+    ).toBe(1);
+    expect(transport.closeCallCount).toBe(1);
+    expect(lifecycle.currentState()).toBe("stopped");
+    try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+  });
+
+  test("first close rejects; reentrant path would-be clean → ONE core / ONE close; primary Error preserved; state does NOT drift after await", async () => {
+    const paths = pathsFor();
+    const { diagnostics } = collectDiagnostics();
+    const transport = new SyncCloseOnUnsubscribeTransport();
+    const firstCloseErr = new Error("first_close_reject_preserved");
+    transport.setClose({ kind: "throw", error: firstCloseErr });
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight: { async run() {} },
+      backend: makeBackend(),
+      upstreamTransport: transport,
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    await lifecycle.start();
+    const outerP = lifecycle.stop();
+    await outerP;
+    const stateAtStopReturn = lifecycle.currentState();
+    const primaryAtStopReturn = lifecycle.stopFailure();
+    const ledgerCloseAtStopReturn = lifecycle.stopFailureLedger().upstreamClose;
+    // Wait longer than any hypothetical second-teardown latency
+    // (round-4 verdict quoted ~120 ms drift).
+    await new Promise((r) => setTimeout(r, 300));
+    expect(
+      (lifecycle as unknown as { teardownCoreEnteredCountValue: number }).teardownCoreEnteredCountValue,
+    ).toBe(1);
+    expect(transport.closeCallCount).toBe(1);
+    expect(stateAtStopReturn).toBe("stop_failed");
+    expect(primaryAtStopReturn).toBe(firstCloseErr);
+    expect(ledgerCloseAtStopReturn).toBe(firstCloseErr);
+    // State + primary + ledger are STABLE — no post-await drift.
+    expect(lifecycle.currentState()).toBe(stateAtStopReturn);
+    expect(lifecycle.stopFailure()).toBe(primaryAtStopReturn);
+    expect(lifecycle.stopFailureLedger().upstreamClose).toBe(ledgerCloseAtStopReturn);
     try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
   });
 });

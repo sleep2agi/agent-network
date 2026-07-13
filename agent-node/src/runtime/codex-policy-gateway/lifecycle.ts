@@ -385,12 +385,13 @@ export class GatewayLifecycle {
    */
   private teardownCorePromise: Promise<TeardownOutcome> | null = null;
   /**
-   * 副指挥 cdd20559 evidence-delta #1: observable counter for
-   * how many times `doTeardownCore` was actually entered. The
-   * memoised promise guarantees at most ONE entry across the
-   * three shutdown entry points (public `stop()`, upstream
-   * close cascade, start rollback). Test seam accessor:
-   * `teardownCoreEnteredCount()`.
+   * @internal Test-only counter. Reachable via cast
+   * `(lifecycle as unknown as { teardownCoreEnteredCountValue: number })`.
+   * Increments exactly once per successful teardown regardless of
+   * how many shutdown entry points raced (public `stop()`, upstream
+   * close cascade, start rollback). No public accessor —
+   * `GatewayLifecycle` is exported from `integration-entry.ts`
+   * so a public method would be part of the production API.
    */
   private teardownCoreEnteredCountValue = 0;
   /**
@@ -449,20 +450,20 @@ export class GatewayLifecycle {
   }
 
   /**
-   * Start ordering:
-   *   1. transition created → starting.
-   *   2. run injected preflight. Throw on failure BEFORE any socket
-   *      touches disk. No cleanup needed: nothing was created.
-   *   3. instantiate the frozen mux + reverse namespace SINGLE
-   *      instances.
-   *   4. wrap the injected provider / diagnostics into no-throw
-   *      helpers.
-   *   5. construct HumanOwnerCoordinator (owns the reverse ns).
-   *   6. construct + start GatewayServer (owns the sockets).
-   *   7. transition starting → running.
+   * Start ordering (副指挥 dd12966c):
+   *   `doStart()` wraps ALL of `doStartInner()` in a unified
+   *   try/catch. Any throw from construction (mux / reverseNs /
+   *   coordinator / bearer / BackendUdsServer / TuiWsServer /
+   *   UpstreamRouter constructor), subscribe, preflight, bind, or
+   *   activate funnels through `rollbackStartFailure()` → the
+   *   memoised teardown core. Terminal state is `stopped` on a
+   *   clean rollback; `stop_failed` if any teardown stage itself
+   *   surfaced an error.
    *
-   * If step 6 throws, we mark stopped and rethrow. GatewayServer's
-   * rollbackStart is responsible for unlinking anything it made.
+   *   The per-phase try/catch blocks inside `doStartInner()` are
+   *   retained as defence-in-depth but are structurally redundant
+   *   under the outer wrapper — all failure paths reach the same
+   *   memoised core exactly once.
    */
   async start(): Promise<void> {
     if (this.state !== "created") {
@@ -692,7 +693,18 @@ export class GatewayLifecycle {
   stop(): Promise<void> {
     if (this.shutdownPromise !== null) return this.shutdownPromise;
     this.stopRequested = true;
-    this.shutdownPromise = this.doOuterStop();
+    // 副指挥 64fad5de: assign the memo BEFORE the body runs. A
+    // naive `this.shutdownPromise = this.doOuterStop()` calls
+    // `doOuterStop()` first — its async body runs synchronously
+    // up to the first await. If that synchronous prefix triggers
+    // a reentrant `stop()` (e.g. via `router.unsubscribe()` →
+    // sync close handler → `onUpstreamCloseFromRouter` →
+    // `void this.stop()`), the reentrance sees `shutdownPromise
+    // === null` and starts a SECOND teardown. Wrapping in
+    // `Promise.resolve().then(() => body())` delays the body to
+    // a microtask, so the memo assignment BELOW is observable
+    // before any body code can reenter.
+    this.shutdownPromise = Promise.resolve().then(() => this.doOuterStop());
     return this.shutdownPromise;
   }
 
@@ -717,7 +729,15 @@ export class GatewayLifecycle {
   private runTeardownCore(): Promise<TeardownOutcome> {
     if (this.teardownCorePromise !== null) return this.teardownCorePromise;
     this.teardownCoreEnteredCountValue++;
-    this.teardownCorePromise = this.doTeardownCore();
+    // 副指挥 64fad5de: same reentrance-safety pattern as `stop()`.
+    // `doTeardownCore()`'s first synchronous step is
+    // `router.unsubscribe()`. If the transport's frame-unsubscribe
+    // synchronously fires close handlers, the resulting
+    // `onUpstreamCloseFromRouter → stop() → runTeardownCore()`
+    // reentrance must see `teardownCorePromise !== null`. Wrap
+    // the body in `Promise.resolve().then(...)` so the memo
+    // assignment below is observable before any body code runs.
+    this.teardownCorePromise = Promise.resolve().then(() => this.doTeardownCore());
     return this.teardownCorePromise;
   }
 
