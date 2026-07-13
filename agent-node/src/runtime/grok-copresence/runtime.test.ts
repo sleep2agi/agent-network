@@ -2,12 +2,15 @@ import {
   appendFileSync,
   chmodSync,
   existsSync,
+  fstatSync,
+  linkSync,
   mkdirSync,
   readFileSync,
   readdirSync,
   renameSync,
   rmSync,
   symlinkSync,
+  truncateSync,
   writeFileSync,
 } from "fs";
 import { PassThrough } from "stream";
@@ -363,6 +366,28 @@ describe("Grok copresence runtime integration", () => {
           renameSync(replacement, path);
         },
       },
+      {
+        name: "chat multiply-linked replacement",
+        source: "chat_history" as const,
+        expected: "chat.stat.non_regular",
+        mutate(path: string) {
+          const source = `${path}.hardlink-source`;
+          const replacement = `${path}.replacement`;
+          writeFileSync(source, "", { mode: 0o600 });
+          linkSync(source, replacement);
+          renameSync(replacement, path);
+        },
+      },
+      {
+        name: "chat broadly-readable replacement",
+        source: "chat_history" as const,
+        expected: "chat.stat.non_regular",
+        mutate(path: string) {
+          const replacement = `${path}.replacement`;
+          writeFileSync(replacement, "", { mode: 0o644 });
+          renameSync(replacement, path);
+        },
+      },
     ];
 
     for (const item of cases) {
@@ -403,6 +428,283 @@ describe("Grok copresence runtime integration", () => {
     }
   }, 20_000);
 
+  test("continues exactly once across prefix-preserving atomic chat rewrites", async () => {
+    const fixture = new RuntimeFixture();
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      const sessionDir = grokSessionDirectory(fixture.grokHome, fixture.cwd, SESSION);
+      mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
+      writeFileSync(join(sessionDir, "chat_history.jsonl"), "", { mode: 0o600 });
+      writeFileSync(join(sessionDir, "events.jsonl"), "", { mode: 0o600 });
+      runtime = await fixture.open();
+      const internals = runtime as unknown as {
+        chatTail: { fd: number | null; dispose(): void } | null;
+        eventsTail: { fd: number | null; dispose(): void } | null;
+      };
+      const tails = [internals.chatTail, internals.eventsTail];
+      expect(tails.every(Boolean)).toBe(true);
+
+      const first = await runtime.submit({
+        taskId: "atomic-first",
+        from: "reviewer",
+        text: "ATOMIC_REWRITE",
+        timeoutMs: 3_000,
+      });
+      expect(first.replyText).toBe("FINAL atomic-first");
+
+      const second = await runtime.submit({
+        taskId: "atomic-second",
+        from: "reviewer",
+        text: "ATOMIC_REWRITE",
+        timeoutMs: 3_000,
+      });
+      expect(second.replyText).toBe("FINAL atomic-second");
+
+      const partial = await runtime.submit({
+        taskId: "atomic-partial",
+        from: "reviewer",
+        text: "PARTIAL_ATOMIC_REWRITE",
+        timeoutMs: 3_000,
+      });
+      expect(partial.replyText).toBe("FINAL atomic-partial");
+
+      expect(internals.chatTail).toBe(tails[0]);
+      expect(internals.eventsTail).toBe(tails[1]);
+      const tailFds = tails.map((tail) => tail!.fd);
+      expect(tailFds.every((fd) => Number.isInteger(fd))).toBe(true);
+      const tailBindings = tailFds.map((fd) => {
+        const stat = fstatSync(fd!);
+        return { fd: fd!, dev: stat.dev, ino: stat.ino };
+      });
+      await runtime.close();
+      runtime = undefined;
+      expect(internals.chatTail).toBeNull();
+      expect(internals.eventsTail).toBeNull();
+      expect(tails.every((tail) => tail!.fd === null)).toBe(true);
+      for (const binding of tailBindings) expectDescriptorReleased(binding);
+      for (const tail of tails) expect(() => tail?.dispose()).not.toThrow();
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 12_000);
+
+  test("rejects an atomic replacement that preserves only the consumed prefix", async () => {
+    const fixture = new RuntimeFixture();
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      const sessionDir = grokSessionDirectory(fixture.grokHome, fixture.cwd, SESSION);
+      mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
+      writeFileSync(join(sessionDir, "chat_history.jsonl"), "", { mode: 0o600 });
+      writeFileSync(join(sessionDir, "events.jsonl"), "", { mode: 0o600 });
+      runtime = await fixture.open();
+      let failure: unknown;
+      try {
+        await runtime.submit({
+          taskId: "atomic-changed-unread",
+          from: "reviewer",
+          text: "ATOMIC_REWRITE_CHANGED_UNREAD",
+          timeoutMs: 3_000,
+        });
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(Error);
+      expect(grokCopresenceFailureCode(failure)).toBe("jsonl_tail");
+      expect(grokCopresenceFailureSubcode(failure)).toBe("chat.stat.identity_changed");
+      await waitFor(() => !runtime!.isRunning);
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 8_000);
+
+  test("rejects a same-inode shrink below the highest observed size even when offset remains valid", async () => {
+    const fixture = new RuntimeFixture();
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      const sessionDir = grokSessionDirectory(fixture.grokHome, fixture.cwd, SESSION);
+      mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
+      writeFileSync(join(sessionDir, "chat_history.jsonl"), "", { mode: 0o600 });
+      writeFileSync(join(sessionDir, "events.jsonl"), "", { mode: 0o600 });
+      runtime = await fixture.open();
+      const chatPath = join(sessionDir, "chat_history.jsonl");
+      const internals = runtime as unknown as {
+        pollTimer: ReturnType<typeof setInterval> | null;
+        chatTail: {
+          fd: number | null;
+          offset: number;
+          observedSizeFloor: number;
+          poll(onChunk: (chunk: string) => void): void;
+        } | null;
+      };
+      if (internals.pollTimer) clearInterval(internals.pollTimer);
+      internals.pollTimer = null;
+      await waitFor(() => existsSync(chatPath));
+      const tail = internals.chatTail!;
+      tail.poll(() => {});
+
+      appendFileSync(chatPath, Buffer.alloc((4 * 1024 * 1024) + 4096, 0x78), { mode: 0o600 });
+      tail.poll(() => {});
+      expect(tail.offset).toBeGreaterThan(0);
+      expect(tail.offset).toBeLessThan(tail.observedSizeFloor);
+      truncateSync(chatPath, tail.offset);
+
+      let failure: unknown;
+      try { tail.poll(() => {}); } catch (error) { failure = error; }
+      expect((failure as Error | undefined)?.name).toBe("GrokJsonlTailBoundaryError");
+      expect((failure as { failureSubcode?: string } | undefined)?.failureSubcode)
+        .toBe("chat.stat.size_regressed");
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 8_000);
+
+  test("does not expose an intermediate atomic generation before its successor preserves it", async () => {
+    for (const cumulative of [true, false]) {
+      const fixture = new RuntimeFixture();
+      let runtime: GrokCopresenceRuntimeSession | undefined;
+      try {
+        const sessionDir = grokSessionDirectory(fixture.grokHome, fixture.cwd, SESSION);
+        mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
+        writeFileSync(join(sessionDir, "chat_history.jsonl"), "", { mode: 0o600 });
+        writeFileSync(join(sessionDir, "events.jsonl"), "", { mode: 0o600 });
+        runtime = await fixture.open();
+        const chatPath = join(sessionDir, "chat_history.jsonl");
+        type TailProbe = {
+          fd: number | null;
+          offset: number;
+          poll(onChunk: (chunk: string) => void): void;
+          readExactAt(fd: number, buffer: Buffer, length: number, position: number): void;
+        };
+        const internals = runtime as unknown as {
+          pollTimer: ReturnType<typeof setInterval> | null;
+          chatTail: TailProbe | null;
+        };
+        if (internals.pollTimer) clearInterval(internals.pollTimer);
+        internals.pollTimer = null;
+        await waitFor(() => existsSync(chatPath));
+        const tail = internals.chatTail!;
+        tail.poll(() => {});
+        expect(tail.offset).toBe(0);
+
+        const base = Buffer.from("BASE\n");
+        const ephemeral = Buffer.from("EPHEMERAL_FINAL_MUST_NOT_ESCAPE\n");
+        const committed = Buffer.from("COMMITTED_SUCCESSOR\n");
+        writeFileSync(chatPath, base, { mode: 0o600 });
+        atomicReplaceRaw(chatPath, Buffer.concat([base, ephemeral]));
+
+        const originalReadExactAt = tail.readExactAt.bind(tail);
+        let advanced = false;
+        tail.readExactAt = (fd, buffer, length, position) => {
+          originalReadExactAt(fd, buffer, length, position);
+          if (!advanced && fd !== tail.fd) {
+            advanced = true;
+            atomicReplaceRaw(
+              chatPath,
+              cumulative
+                ? Buffer.concat([base, ephemeral, committed])
+                : Buffer.concat([base, committed]),
+            );
+          }
+        };
+
+        const chunks: string[] = [];
+        tail.poll((chunk) => chunks.push(chunk));
+        expect(advanced).toBe(true);
+        expect(chunks).toEqual([]);
+        tail.readExactAt = originalReadExactAt;
+
+        if (cumulative) {
+          tail.poll((chunk) => chunks.push(chunk));
+          expect(chunks.join("")).toBe(Buffer.concat([base, ephemeral, committed]).toString("utf8"));
+        } else {
+          let failure: unknown;
+          try { tail.poll((chunk) => chunks.push(chunk)); } catch (error) { failure = error; }
+          expect((failure as Error | undefined)?.name).toBe("GrokJsonlTailBoundaryError");
+          expect((failure as { failureSubcode?: string } | undefined)?.failureSubcode)
+            .toBe("chat.stat.identity_changed");
+          expect(chunks).toEqual([]);
+        }
+      } finally {
+        await runtime?.close();
+        await fixture.close();
+      }
+    }
+  }, 12_000);
+
+  test("does not expose a pinned generation unlinked between path check and read", async () => {
+    for (const cumulative of [true, false]) {
+      const fixture = new RuntimeFixture();
+      let runtime: GrokCopresenceRuntimeSession | undefined;
+      try {
+        const sessionDir = grokSessionDirectory(fixture.grokHome, fixture.cwd, SESSION);
+        mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
+        writeFileSync(join(sessionDir, "chat_history.jsonl"), "", { mode: 0o600 });
+        writeFileSync(join(sessionDir, "events.jsonl"), "", { mode: 0o600 });
+        runtime = await fixture.open();
+        const chatPath = join(sessionDir, "chat_history.jsonl");
+        type TailProbe = {
+          fd: number | null;
+          offset: number;
+          poll(onChunk: (chunk: string) => void): void;
+          safeFstat(fd: number): ReturnType<typeof fstatSync>;
+        };
+        const internals = runtime as unknown as {
+          pollTimer: ReturnType<typeof setInterval> | null;
+          chatTail: TailProbe | null;
+        };
+        if (internals.pollTimer) clearInterval(internals.pollTimer);
+        internals.pollTimer = null;
+        const tail = internals.chatTail!;
+        tail.poll(() => {});
+        expect(tail.offset).toBe(0);
+
+        const base = Buffer.from("BASE\n");
+        const ephemeral = Buffer.from("EPHEMERAL_READ_MUST_NOT_ESCAPE\n");
+        const committed = Buffer.from("COMMITTED_AFTER_READ_RACE\n");
+        writeFileSync(chatPath, Buffer.concat([base, ephemeral]), { mode: 0o600 });
+
+        const originalSafeFstat = tail.safeFstat.bind(tail);
+        let rotated = false;
+        tail.safeFstat = (fd) => {
+          if (!rotated && fd === tail.fd) {
+            rotated = true;
+            atomicReplaceRaw(
+              chatPath,
+              cumulative
+                ? Buffer.concat([base, ephemeral, committed])
+                : Buffer.concat([base, committed]),
+            );
+          }
+          return originalSafeFstat(fd);
+        };
+
+        const chunks: string[] = [];
+        tail.poll((chunk) => chunks.push(chunk));
+        expect(rotated).toBe(true);
+        expect(chunks).toEqual([]);
+        tail.safeFstat = originalSafeFstat;
+
+        if (cumulative) {
+          tail.poll((chunk) => chunks.push(chunk));
+          expect(chunks.join("")).toBe(Buffer.concat([base, ephemeral, committed]).toString("utf8"));
+        } else {
+          let failure: unknown;
+          try { tail.poll((chunk) => chunks.push(chunk)); } catch (error) { failure = error; }
+          expect((failure as Error | undefined)?.name).toBe("GrokJsonlTailBoundaryError");
+          expect((failure as { failureSubcode?: string } | undefined)?.failureSubcode)
+            .toBe("chat.stat.identity_changed");
+          expect(chunks).toEqual([]);
+        }
+      } finally {
+        await runtime?.close();
+        await fixture.close();
+      }
+    }
+  }, 12_000);
+
   test("maps chat and events reset callback failures and stops polling after fatal", async () => {
     const cases = [
       {
@@ -424,6 +726,7 @@ describe("Grok copresence runtime integration", () => {
     ];
 
     type TailProbe = {
+      fd: number | null;
       poll(onChunk: (chunk: string) => void, onReset?: () => void): void;
       recoveryPosition(): { caughtUp: boolean };
     };
@@ -464,6 +767,13 @@ describe("Grok copresence runtime integration", () => {
           return !!chat?.caughtUp && !!events?.caughtUp;
         });
 
+        const cachedTails = [internals.chatTail!, internals.eventsTail!];
+        const tailBindings = cachedTails.map((candidate) => {
+          const fd = candidate.fd!;
+          const stat = fstatSync(fd);
+          return { fd, dev: stat.dev, ino: stat.ino };
+        });
+
         const tail = item.source === "chat_history" ? internals.chatTail : internals.eventsTail;
         expect(tail).not.toBeNull();
         const originalPoll = tail!.poll.bind(tail);
@@ -482,6 +792,10 @@ describe("Grok copresence runtime integration", () => {
         expect(grokCopresenceFailureSubcode(failure), item.name).toBe(item.expected);
         expect(runtime.isRunning, item.name).toBe(false);
         expect(internals.pollTimer, item.name).toBeNull();
+        expect(internals.chatTail, item.name).toBeNull();
+        expect(internals.eventsTail, item.name).toBeNull();
+        expect(cachedTails.every((candidate) => candidate.fd === null), item.name).toBe(true);
+        for (const binding of tailBindings) expectDescriptorReleased(binding);
         expect(pollCalls, item.name).toBeGreaterThan(0);
         const callsAtFatal = pollCalls;
         await Bun.sleep(150);
@@ -1475,6 +1789,67 @@ class FakePty implements GrokPtyLike {
     if (!match) throw new Error(`bad network envelope: ${JSON.stringify(prompt)}`);
     const [, from, taskId, message] = match;
     mkdirSync(this.sessionDir, { recursive: true, mode: 0o700 });
+    const chatPath = join(this.sessionDir, "chat_history.jsonl");
+    const eventsPath = join(this.sessionDir, "events.jsonl");
+    if (message === "ATOMIC_REWRITE") {
+      appendJson(chatPath, {
+        type: "user",
+        content: `<user_query>[Agent Network/from=${from}/task=${taskId}] ${message}</user_query>`,
+      });
+      atomicAppendJson(chatPath, { type: "assistant", content: `FINAL ${taskId}` });
+      appendJson(eventsPath, { type: "turn_started", turn_number: 21 });
+      appendJson(eventsPath, { type: "turn_ended", outcome: "completed" });
+      return;
+    }
+    if (message === "ATOMIC_REWRITE_CHANGED_UNREAD") {
+      appendJson(chatPath, {
+        type: "user",
+        content: `<user_query>[Agent Network/from=${from}/task=${taskId}] ${message}</user_query>`,
+      });
+      appendJson(eventsPath, { type: "turn_started", turn_number: 22 });
+      // Give the tail time to consume the user line, then add a line to the
+      // pinned generation and replace it in the same event-loop turn. The
+      // replacement preserves [0, offset) and changes only the unread suffix.
+      setTimeout(() => {
+        const consumed = Buffer.from(readFileSync(chatPath));
+        const unread = Buffer.from(`${JSON.stringify({
+          type: "reasoning",
+          content: "OLD_UNREAD_SUFFIX",
+        })}\n`);
+        appendFileSync(chatPath, unread, { mode: 0o600 });
+        const changedUnread = Buffer.from(`${JSON.stringify({
+          type: "reasoning",
+          content: "NEW_UNREAD_SUFFIX",
+        })}\n`);
+        atomicReplaceRaw(chatPath, Buffer.concat([
+          consumed,
+          changedUnread,
+          Buffer.from(`${JSON.stringify({ type: "assistant", content: `FINAL ${taskId}` })}\n`),
+        ]));
+        appendJson(eventsPath, { type: "turn_ended", outcome: "completed" });
+      }, 120);
+      return;
+    }
+    if (message === "PARTIAL_ATOMIC_REWRITE") {
+      const userLine = Buffer.from(`${JSON.stringify({
+        type: "user",
+        content: `<user_query>[Agent Network/from=${from}/task=${taskId}] ${message} 尾</user_query>`,
+      })}\n`);
+      const multibyte = Buffer.from("尾");
+      const marker = userLine.indexOf(multibyte);
+      if (marker < 0) throw new Error("partial rewrite fixture lost its multibyte marker");
+      const split = marker + 1;
+      appendFileSync(chatPath, userLine.subarray(0, split), { mode: 0o600 });
+      appendJson(eventsPath, { type: "turn_started", turn_number: 23 });
+      setTimeout(() => {
+        atomicAppendRaw(chatPath, Buffer.concat([
+          userLine.subarray(split),
+          Buffer.from(`${JSON.stringify({ type: "assistant", content: `FINAL ${taskId}` })}\n`),
+        ]));
+        appendJson(eventsPath, { type: "turn_ended", outcome: "completed" });
+      }, 100);
+      return;
+    }
     if (message === "CRASH_ACTIVE") {
       appendJson(join(this.sessionDir, "chat_history.jsonl"), {
         type: "user",
@@ -1659,6 +2034,30 @@ class FakePty implements GrokPtyLike {
 
 function appendJson(path: string, value: unknown): void {
   appendFileSync(path, `${JSON.stringify(value)}\n`, { encoding: "utf8", mode: 0o600 });
+}
+
+function atomicAppendJson(path: string, value: unknown): void {
+  atomicAppendRaw(path, Buffer.from(`${JSON.stringify(value)}\n`));
+}
+
+function atomicAppendRaw(path: string, suffix: Buffer): void {
+  const current = existsSync(path) ? readFileSync(path) : Buffer.alloc(0);
+  atomicReplaceRaw(path, Buffer.concat([current, suffix]));
+}
+
+function atomicReplaceRaw(path: string, content: Buffer): void {
+  const replacement = `${path}.atomic-replacement`;
+  writeFileSync(replacement, content, { mode: 0o600 });
+  renameSync(replacement, path);
+}
+
+function expectDescriptorReleased(binding: { fd: number; dev: number; ino: number }): void {
+  try {
+    const current = fstatSync(binding.fd);
+    expect(`${current.dev}:${current.ino}`).not.toBe(`${binding.dev}:${binding.ino}`);
+  } catch (error) {
+    expect((error as NodeJS.ErrnoException).code).toBe("EBADF");
+  }
 }
 
 async function waitFor(predicate: () => boolean, timeoutMs = 3_000): Promise<void> {

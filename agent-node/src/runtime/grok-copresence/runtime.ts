@@ -917,6 +917,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     await this.attach?.close().catch(() => {});
     this.attach = null;
     await this.recoveryPromise?.catch(() => {});
+    this.disposeJsonlTails();
     const pty = this.pty;
     const ptyExit = this.ptyExit;
     this.pty = null;
@@ -1175,8 +1176,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     this.opened = false;
     if (this.pollTimer) clearInterval(this.pollTimer);
     this.pollTimer = null;
-    this.chatTail = null;
-    this.eventsTail = null;
+    this.disposeJsonlTails();
     this.attach?.broadcastStatus({ ...this.attachStatus(), fatal: error.message });
     for (const taskId of [...this.pending.keys()]) this.failPending(taskId, error);
     this.fatalShutdownPromise = (async () => {
@@ -1201,6 +1201,17 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       }
     })();
     return this.fatalShutdownPromise;
+  }
+
+  private disposeJsonlTails(): void {
+    const tails = [this.chatTail, this.eventsTail];
+    this.chatTail = null;
+    this.eventsTail = null;
+    for (const tail of tails) {
+      try { tail?.dispose(); } catch (error) {
+        this.warn(`[grok-copresence] JSONL tail close failed: ${errorMessage(error)}`);
+      }
+    }
   }
 
   private async bindSpawnedLeader(): Promise<void> {
@@ -2169,7 +2180,12 @@ function safeJsonlTailFailureSubcode(
 
 class SafeJsonlTail {
   private identity: { dev: number; ino: number } | null = null;
+  private fd: number | null = null;
   private offset = 0;
+  // Highest size observed for the currently pinned inode. A same-inode
+  // shrink must never be hidden in the gap between replacement validation
+  // and the next read.
+  private observedSizeFloor = 0;
   private readonly uid = process.getuid?.();
   private decoder = new StringDecoder("utf8");
 
@@ -2180,17 +2196,36 @@ class SafeJsonlTail {
   ) {}
 
   arm(requireExisting = false): void {
-    const stat = this.safeStat();
-    if (!stat) {
-      if (requireExisting) throw new Error(`cannot resume without Grok ${this.source} JSONL`);
+    if (this.identity || this.fd !== null) {
+      throw new Error(`Grok ${this.source} JSONL tail was armed twice`);
+    }
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const stat = this.safeStat();
+      if (!stat) {
+        if (requireExisting) throw new Error(`cannot resume without Grok ${this.source} JSONL`);
+        return;
+      }
+      const opened = this.openMatching(stat);
+      if (!opened) continue;
+      this.fd = opened.fd;
+      this.identity = { dev: opened.stat.dev, ino: opened.stat.ino };
+      this.offset = this.startAtEnd ? opened.stat.size : 0;
+      this.observedSizeFloor = opened.stat.size;
       return;
     }
-    this.identity = { dev: stat.dev, ino: stat.ino };
-    this.offset = this.startAtEnd ? stat.size : 0;
+    throw this.identityChanged("changed repeatedly while arming");
   }
 
   poll(onChunk: (chunk: string) => void, onReset?: () => void): void {
-    const stat = this.safeStat();
+    const observeForRead = (value: Stats, allowUnlinked = false): void => {
+      try {
+        this.observeBoundSize(value, allowUnlinked);
+      } catch (error) {
+        onReset?.();
+        throw error;
+      }
+    };
+    let stat = this.safeStat();
     if (!stat) {
       if (this.identity) {
         throw jsonlTailBoundaryError(
@@ -2201,74 +2236,67 @@ class SafeJsonlTail {
       return;
     }
     if (!this.identity) {
-      this.identity = { dev: stat.dev, ino: stat.ino };
-      this.offset = this.startAtEnd ? stat.size : 0;
+      const opened = this.openMatching(stat);
+      if (!opened) return;
+      this.fd = opened.fd;
+      this.identity = { dev: opened.stat.dev, ino: opened.stat.ino };
+      this.offset = this.startAtEnd ? opened.stat.size : 0;
+      this.observedSizeFloor = opened.stat.size;
       if (this.startAtEnd) return;
+      stat = opened.stat;
     }
     if (stat.dev !== this.identity.dev || stat.ino !== this.identity.ino) {
-      onReset?.();
-      throw jsonlTailBoundaryError(
-        safeJsonlTailFailureSubcode(this.source, "statIdentityChanged"),
-        new Error(`Grok ${this.source} JSONL was rotated or truncated`),
-      );
+      try {
+        const rebound = this.rebindPrefixPreservingReplacement(stat);
+        if (!rebound || rebound === "racing") return;
+      } catch (error) {
+        onReset?.();
+        throw error;
+      }
+    } else {
+      // Bind the trusted path observation into the per-inode size floor before
+      // the following descriptor check. Otherwise an in-place append+shrink
+      // between lstat and fstat could disappear back to the old floor.
+      observeForRead(stat);
     }
-    if (stat.size < this.offset) {
+    const fd = this.requireFd();
+    const opened = this.safeFstat(fd);
+    // A second atomic publication can unlink the pinned inode immediately
+    // after the path check. Reading that still-pinned generation is safe; the
+    // next poll must prove the complete prefix before moving to the new path.
+    observeForRead(opened, true);
+    if (opened.nlink === 0) return;
+    if (opened.size < this.offset) {
       onReset?.();
       throw jsonlTailBoundaryError(
         safeJsonlTailFailureSubcode(this.source, "statSizeRegressed"),
         new Error(`Grok ${this.source} JSONL was rotated or truncated`),
       );
     }
-    const available = stat.size - this.offset;
+    const available = opened.size - this.offset;
     if (available <= 0) return;
     const length = Math.min(available, MAX_TAIL_READ_BYTES);
-    let fd: number;
-    try {
-      fd = openSync(this.path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
-    } catch (error) {
-      // Atomic rotation can remove the inode between lstat and open. Re-poll;
-      // every other open error breaks the trusted tail and is fatal upstream.
-      if (isErrno(error, "ENOENT")) return;
-      throw jsonlTailBoundaryError(
-        safeJsonlTailFailureSubcode(this.source, "openIoOther"),
-        error,
+    const bytes = Buffer.allocUnsafe(length);
+    this.readExactAt(fd, bytes, length, this.offset);
+    const read = length;
+    // Validate the same pinned inode again before exposing bytes to the
+    // reducer. This turns a truncate between fstat/read into a closed failure
+    // instead of accepting a short read from a regressed generation.
+    const afterRead = this.safeFstat(fd);
+    observeForRead(afterRead, true);
+    if (afterRead.nlink === 0) return;
+    if (read > 0) {
+      this.offset += read;
+      const chunk = atJsonlTailBoundary(
+        safeJsonlTailFailureSubcode(this.source, "readStateInvariant"),
+        () => this.decoder.write(bytes.subarray(0, read)),
       );
-    }
-    try {
-      const opened = atJsonlTailBoundary(
-        safeJsonlTailFailureSubcode(this.source, "fstatIoOther"),
-        () => fstatSync(fd),
-      );
-      if (!opened.isFile()) {
-        throw jsonlTailBoundaryError(
-          safeJsonlTailFailureSubcode(this.source, "fstatNonRegular"),
-          new Error(`unsafe Grok JSONL file: ${this.path}`),
-        );
-      }
-      if (opened.dev !== stat.dev || opened.ino !== stat.ino) return;
-      const bytes = Buffer.allocUnsafe(length);
-      const read = atJsonlTailBoundary(
-        safeJsonlTailFailureSubcode(this.source, "readIoOther"),
-        () => readSync(fd, bytes, 0, length, this.offset),
-      );
-      if (read > 0) {
-        this.offset += read;
-        const chunk = atJsonlTailBoundary(
-          safeJsonlTailFailureSubcode(this.source, "readStateInvariant"),
-          () => this.decoder.write(bytes.subarray(0, read)),
-        );
-        if (chunk) onChunk(chunk);
-      }
-    } finally {
-      atJsonlTailBoundary(
-        safeJsonlTailFailureSubcode(this.source, "closeIoOther"),
-        () => closeSync(fd),
-      );
+      if (chunk) onChunk(chunk);
     }
   }
 
   recoveryPosition(): { key: string; caughtUp: boolean } {
-    const stat = this.safeStat();
+    let stat = this.safeStat();
     if (!stat) {
       if (this.identity) {
         throw jsonlTailBoundaryError(
@@ -2278,9 +2306,35 @@ class SafeJsonlTail {
       }
       return { key: "missing", caughtUp: true };
     }
+    if (!this.identity) {
+      const opened = this.openMatching(stat);
+      if (!opened) return { key: "racing", caughtUp: false };
+      this.fd = opened.fd;
+      this.identity = { dev: opened.stat.dev, ino: opened.stat.ino };
+      this.offset = this.startAtEnd ? opened.stat.size : 0;
+      this.observedSizeFloor = opened.stat.size;
+      stat = opened.stat;
+    } else if (stat.dev !== this.identity.dev || stat.ino !== this.identity.ino) {
+      const rebound = this.rebindPrefixPreservingReplacement(stat);
+      if (!rebound || rebound === "racing") {
+        return { key: "racing", caughtUp: false };
+      }
+    } else {
+      this.observeBoundSize(stat);
+    }
+    const opened = this.safeFstat(this.requireFd());
+    this.observeBoundSize(opened, true);
+    if (opened.size < this.offset) {
+      throw jsonlTailBoundaryError(
+        safeJsonlTailFailureSubcode(this.source, "statSizeRegressed"),
+        new Error(`Grok ${this.source} JSONL was rotated or truncated during recovery`),
+      );
+    }
     return {
-      key: `${stat.dev}:${stat.ino}:${this.offset}:${stat.size}`,
-      caughtUp: this.offset === stat.size,
+      key: `${opened.dev}:${opened.ino}:${opened.nlink}:${this.offset}:${opened.size}`,
+      // An unlinked pinned generation can never establish joint stability;
+      // the next loop must rebind to the current path first.
+      caughtUp: opened.nlink === 1 && this.offset === opened.size,
     };
   }
 
@@ -2293,6 +2347,246 @@ class SafeJsonlTail {
     if (trailing) onChunk(trailing);
   }
 
+  dispose(): void {
+    const fd = this.fd;
+    this.fd = null;
+    this.identity = null;
+    this.observedSizeFloor = 0;
+    if (fd !== null) this.closeFd(fd);
+  }
+
+  private rebindPrefixPreservingReplacement(expected: Stats): "ready" | "racing" | false {
+    const oldFd = this.requireFd();
+    const oldIdentity = this.identity;
+    if (!oldIdentity) throw this.identityChanged("lost its pinned identity");
+    const candidate = this.openMatching(expected);
+    if (!candidate) return false;
+    let accepted = false;
+    try {
+      const oldBefore = this.safeFstat(oldFd);
+      this.observeBoundSize(oldBefore, true);
+      const stableSize = oldBefore.size;
+      const candidateSize = candidate.stat.size;
+      if (!Number.isSafeInteger(stableSize) || stableSize < 0) {
+        throw this.identityChanged("has an invalid stable prefix size");
+      }
+      if (candidateSize < stableSize) {
+        throw this.identityChanged("replacement omitted bytes from the pinned file");
+      }
+      this.assertEqualPrefix(oldFd, candidate.fd, stableSize);
+
+      const oldAfter = this.safeFstat(oldFd);
+      const newAfter = this.safeFstat(candidate.fd);
+      this.observeBoundSize(oldAfter, true);
+      this.assertTrustedOpened(newAfter, true);
+      const candidateStableSize = Math.max(candidateSize, newAfter.size);
+      const pathAfter = this.safeStat();
+      if (
+        oldAfter.dev !== oldIdentity.dev
+        || oldAfter.ino !== oldIdentity.ino
+        || oldAfter.size !== stableSize
+        || newAfter.dev !== candidate.stat.dev
+        || newAfter.ino !== candidate.stat.ino
+        || newAfter.size < candidateSize
+      ) {
+        throw this.identityChanged("changed while verifying an atomic replacement");
+      }
+      if (!pathAfter) {
+        throw this.identityChanged("path disappeared while verifying an atomic replacement");
+      }
+
+      const adoptCandidate = (sizeFloor: number, outcome: "ready" | "racing"): "ready" | "racing" => {
+        this.closeFd(oldFd);
+        this.fd = candidate.fd;
+        this.identity = { dev: candidate.stat.dev, ino: candidate.stat.ino };
+        this.observedSizeFloor = sizeFloor;
+        accepted = true;
+        return outcome;
+      };
+
+      // A second cumulative atomic publication may replace the candidate
+      // while its prefix is being checked. Pinning that now-unlinked,
+      // completely verified intermediate generation preserves its full size;
+      // the next poll then proves the next generation against it. Rejecting
+      // this normal race would make rapid Grok publications spuriously fatal,
+      // while skipping the intermediate would lose its unread suffix.
+      if (newAfter.nlink === 0) {
+        if (pathAfter.dev === candidate.stat.dev && pathAfter.ino === candidate.stat.ino) {
+          throw this.identityChanged("unlinked replacement still appeared at the session path");
+        }
+        // Do not expose bytes from an intermediate generation until its
+        // current successor has itself proved the complete prefix. This
+        // prevents a transient, later-discarded assistant line from causing a
+        // reply before the non-cumulative successor is rejected.
+        return adoptCandidate(candidateStableSize, "racing");
+      }
+      if (
+        pathAfter.dev !== candidate.stat.dev
+        || pathAfter.ino !== candidate.stat.ino
+        || pathAfter.size < candidateStableSize
+      ) {
+        throw this.identityChanged("changed while verifying an atomic replacement");
+      }
+      const finalBinding = this.openMatching(pathAfter);
+      if (!finalBinding) {
+        const candidateNow = this.safeFstat(candidate.fd);
+        this.assertTrustedOpened(candidateNow, true);
+        if (
+          candidateNow.dev === candidate.stat.dev
+          && candidateNow.ino === candidate.stat.ino
+          && candidateNow.nlink === 0
+          && candidateNow.size >= candidateStableSize
+        ) {
+          const currentPath = this.safeStat();
+          if (
+            currentPath
+            && (currentPath.dev !== candidate.stat.dev || currentPath.ino !== candidate.stat.ino)
+          ) {
+            return adoptCandidate(
+              Math.max(candidateStableSize, candidateNow.size),
+              "racing",
+            );
+          }
+        }
+        throw this.identityChanged("path changed after verifying an atomic replacement");
+      }
+      const finalSizeFloor = Math.max(candidateStableSize, pathAfter.size);
+      const finalMatches = finalBinding.stat.dev === candidate.stat.dev
+        && finalBinding.stat.ino === candidate.stat.ino
+        && finalBinding.stat.size >= finalSizeFloor;
+      this.closeFd(finalBinding.fd);
+      if (!finalMatches) {
+        throw this.identityChanged("path changed after verifying an atomic replacement");
+      }
+      return adoptCandidate(Math.max(finalSizeFloor, finalBinding.stat.size), "ready");
+    } finally {
+      if (!accepted) {
+        try { this.closeFd(candidate.fd); } catch {}
+      }
+    }
+  }
+
+  private assertEqualPrefix(oldFd: number, newFd: number, length: number): void {
+    const oldBytes = Buffer.allocUnsafe(Math.min(256 * 1024, Math.max(1, length)));
+    const newBytes = Buffer.allocUnsafe(oldBytes.length);
+    let offset = 0;
+    while (offset < length) {
+      const wanted = Math.min(oldBytes.length, length - offset);
+      this.readExactAt(oldFd, oldBytes, wanted, offset);
+      this.readExactAt(newFd, newBytes, wanted, offset);
+      if (!oldBytes.subarray(0, wanted).equals(newBytes.subarray(0, wanted))) {
+        throw this.identityChanged("replacement did not preserve the pinned file prefix");
+      }
+      offset += wanted;
+    }
+  }
+
+  private readExactAt(fd: number, buffer: Buffer, length: number, position: number): void {
+    let total = 0;
+    while (total < length) {
+      const read = atJsonlTailBoundary(
+        safeJsonlTailFailureSubcode(this.source, "readIoOther"),
+        () => readSync(fd, buffer, total, length - total, position + total),
+      );
+      if (read <= 0) {
+        throw this.identityChanged("replacement prefix ended before its stable size");
+      }
+      total += read;
+    }
+  }
+
+  private openMatching(expected: Stats): { fd: number; stat: Stats } | null {
+    let fd: number;
+    try {
+      fd = openSync(
+        this.path,
+        constants.O_RDONLY | (constants.O_NOFOLLOW || 0) | (constants.O_NONBLOCK || 0),
+      );
+    } catch (error) {
+      if (isErrno(error, "ENOENT")) return null;
+      throw jsonlTailBoundaryError(
+        safeJsonlTailFailureSubcode(this.source, "openIoOther"),
+        error,
+      );
+    }
+    try {
+      const opened = this.safeFstat(fd);
+      this.assertTrustedOpened(opened);
+      if (opened.dev !== expected.dev || opened.ino !== expected.ino) {
+        this.closeFd(fd);
+        return null;
+      }
+      if (opened.size < expected.size) {
+        throw jsonlTailBoundaryError(
+          safeJsonlTailFailureSubcode(this.source, "statSizeRegressed"),
+          new Error(`Grok ${this.source} JSONL shrank between path and descriptor checks`),
+        );
+      }
+      return { fd, stat: opened };
+    } catch (error) {
+      try { this.closeFd(fd); } catch {}
+      throw error;
+    }
+  }
+
+  private safeFstat(fd: number): Stats {
+    return atJsonlTailBoundary(
+      safeJsonlTailFailureSubcode(this.source, "fstatIoOther"),
+      () => fstatSync(fd),
+    );
+  }
+
+  private assertTrustedOpened(stat: Stats, allowUnlinked = false): void {
+    if (
+      !stat.isFile()
+      || (allowUnlinked ? stat.nlink > 1 : stat.nlink !== 1)
+      || (stat.mode & 0o077) !== 0
+      || (this.uid !== undefined && stat.uid !== this.uid)
+    ) {
+      throw jsonlTailBoundaryError(
+        safeJsonlTailFailureSubcode(this.source, "fstatNonRegular"),
+        new Error(`unsafe Grok JSONL file: ${this.path}`),
+      );
+    }
+  }
+
+  private assertBoundIdentity(stat: Stats, allowUnlinked = false): void {
+    this.assertTrustedOpened(stat, allowUnlinked);
+    if (!this.identity || stat.dev !== this.identity.dev || stat.ino !== this.identity.ino) {
+      throw this.identityChanged("lost its pinned file descriptor identity");
+    }
+  }
+
+  private observeBoundSize(stat: Stats, allowUnlinked = false): void {
+    this.assertBoundIdentity(stat, allowUnlinked);
+    if (stat.size < this.observedSizeFloor) {
+      throw jsonlTailBoundaryError(
+        safeJsonlTailFailureSubcode(this.source, "statSizeRegressed"),
+        new Error(`Grok ${this.source} JSONL regressed below its observed size`),
+      );
+    }
+    this.observedSizeFloor = Math.max(this.observedSizeFloor, stat.size);
+  }
+
+  private requireFd(): number {
+    if (this.fd === null) throw this.identityChanged("lost its pinned file descriptor");
+    return this.fd;
+  }
+
+  private closeFd(fd: number): void {
+    atJsonlTailBoundary(
+      safeJsonlTailFailureSubcode(this.source, "closeIoOther"),
+      () => closeSync(fd),
+    );
+  }
+
+  private identityChanged(detail: string): GrokJsonlTailBoundaryError {
+    return jsonlTailBoundaryError(
+      safeJsonlTailFailureSubcode(this.source, "statIdentityChanged"),
+      new Error(`Grok ${this.source} JSONL ${detail}`),
+    );
+  }
+
   private safeStat(): Stats | null {
     let stat: Stats;
     try { stat = lstatSync(this.path); } catch (error) {
@@ -2302,7 +2596,12 @@ class SafeJsonlTail {
         error,
       );
     }
-    if (stat.isSymbolicLink() || !stat.isFile()) {
+    if (
+      stat.isSymbolicLink()
+      || !stat.isFile()
+      || stat.nlink !== 1
+      || (stat.mode & 0o077) !== 0
+    ) {
       throw jsonlTailBoundaryError(
         safeJsonlTailFailureSubcode(this.source, "statNonRegular"),
         new Error(`Grok JSONL path is not a regular file: ${this.path}`),

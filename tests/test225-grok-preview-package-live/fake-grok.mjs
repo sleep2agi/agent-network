@@ -4,8 +4,9 @@
  *
  * It deliberately implements the black-box seams consumed by the preview
  * runtime: version/help/inspect, creation of the leader Unix socket, PTY
- * rendering, and append-only chat_history/events JSONL.  It never imports
- * repository source and never talks to a model or external network.
+ * rendering, prefix-preserving atomic chat_history publication, and
+ * append-only events JSONL. It never imports repository source and never
+ * talks to a model or external network.
  */
 import fs from "node:fs";
 import net from "node:net";
@@ -380,6 +381,14 @@ function appendJson(file, value) {
   fs.appendFileSync(file, JSON.stringify(value) + "\n", { mode: 0o600 });
 }
 
+function atomicAppendJson(file, value) {
+  const replacement = `${file}.atomic-${process.pid}`;
+  const current = fs.readFileSync(file);
+  const suffix = Buffer.from(JSON.stringify(value) + "\n");
+  fs.writeFileSync(replacement, Buffer.concat([current, suffix]), { mode: 0o600 });
+  fs.renameSync(replacement, file);
+}
+
 function handlePrompt(prompt) {
   if (!tuiReady) {
     preReadyNetworkWrites += 1;
@@ -402,7 +411,10 @@ function handlePrompt(prompt) {
   // tmux captures, must never require a credential-shaped value to appear.
   const reply = `GROK_PREVIEW_FAKE_REPLY_OK ${benignMarker}`;
   setTimeout(() => {
-    appendJson(chatPath, { type: "assistant", content: reply });
+    // Grok 0.2.93 publishes chat_history through a prefix-preserving atomic
+    // replacement. Keep the package E2E faithful to that inode transition;
+    // an append-only fake would miss the live tail rebind boundary.
+    atomicAppendJson(chatPath, { type: "assistant", content: reply });
     appendJson(eventsPath, { type: "turn_ended", outcome: "completed", turn_number: turn });
     process.stdout.write(`${reply}\r\nTurn completed\r\n`);
   }, 75);
