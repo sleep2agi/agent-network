@@ -17,7 +17,8 @@
     "test:rfc030-node-integration": "npm run build:rfc030-integration && node scripts/rfc030-node-integration.mjs",
     "test:rfc030-real-cli-smoke": "npm run build:rfc030-integration && node scripts/rfc030-real-cli-e2e.mjs",
     "typecheck:rfc030": "tsc --project src/runtime/codex-policy-gateway/tsconfig.json",
-    "typecheck:rfc030-abort-negative": "node scripts/rfc030-abort-typecheck-negative.mjs"
+    "typecheck:rfc030-abort-negative": "node scripts/rfc030-abort-typecheck-negative.mjs",
+    "typecheck:rfc030-safe-adopt-negative": "node scripts/rfc030-safe-adopt-typecheck-negative.mjs"
   },
   "keywords": [
     "agent",

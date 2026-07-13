@@ -123,7 +123,11 @@ export interface InternalOrigin {
   readonly kind: "internal";
   readonly label: string;
   resolve(value: unknown): void;
-  reject(err: Error): void;
+  // 副指挥 9a9a198d Round 10: reason is `unknown` and passed
+  // VERBATIM through the pending-entry wrappers; the router /
+  // safeAdoptConsume never coerce it. Callers that need Error
+  // semantics coerce at their own layer via `toError`.
+  reject(reason: unknown): void;
 }
 
 interface InternalPendingEntry {
@@ -616,7 +620,11 @@ export class BackendUdsServer {
    */
   private buildInternalPendingEntry(
     outerResolve: (v: unknown) => void,
-    outerReject: (e: Error) => void,
+    // 副指挥 9a9a198d Round 10: reason is `unknown` verbatim.
+    // Full chain (send Promise reject → outerReject → origin.reject
+    // → failCleanup) propagates the caller's reason without ANY
+    // coercion.
+    outerReject: (reason: unknown) => void,
     label: string,
   ): { origin: InternalOrigin; entry: InternalPendingEntry } {
     const entry: InternalPendingEntry = { upstreamId: -1, origin: null as unknown as InternalOrigin, settled: false };
@@ -629,11 +637,11 @@ export class BackendUdsServer {
         this.internalPending.delete(entry.upstreamId);
         outerResolve(v);
       },
-      reject: (e) => {
+      reject: (reason) => {
         if (entry.settled) return;
         entry.settled = true;
         this.internalPending.delete(entry.upstreamId);
-        outerReject(e);
+        outerReject(reason);
       },
     };
     entry.origin = origin;
@@ -647,37 +655,32 @@ export class BackendUdsServer {
         reject(new Error("gateway_stopping"));
         return;
       }
-      // Allocate a placeholder id via the mux; the origin registered
-      // there routes response dispatch through the wrapped
-      // resolve/reject so the internal pending entry is settled
-      // exactly once.
       const { origin, entry } = this.buildInternalPendingEntry(
         (v) => resolve(v as T),
-        (e) => reject(e),
+        (reason) => reject(reason),
         label,
       );
       const alloc = this.opts.mux.allocateForInternalScheduler(origin);
-      // Write the REAL id into the entry box so the wrapper's
-      // resolve/reject deletes the correct pending map key.
       entry.upstreamId = alloc.upstreamId;
       this.internalPending.set(alloc.upstreamId, entry);
       const frame: JsonRpcRequestFrame = {
         jsonrpc: "2.0", id: alloc.upstreamId, method,
         ...(params !== undefined ? { params } : {}),
       };
-      // 副指挥 e85ade40 P1-1: transport.writeFrame() may throw
-      // SYNCHRONOUSLY (unhealthy transport, invalid frame
-      // construction, socket already destroyed). A bare `.catch`
-      // only handles async rejections — a sync throw would leak the
-      // mux slot AND the internalPending entry (both leaked at 1
-      // in the repro). Funnel BOTH sync + async paths through a
-      // single cleanup closure so muxPending and internalPending
-      // both return to 0.
-      const failCleanup = (e: unknown): void => {
-        // Release the mux slot (no-op if the router already consumed
-        // it; explicit call guarantees release on write-fail path).
-        this.opts.mux.consumeUpstreamResponse(alloc.upstreamId);
-        origin.reject(e instanceof Error ? e : new Error(String(e)));
+      // 副指挥 9a9a198d Round 10 failCleanup:
+      //   1. Mux release FIRST — guaranteed by an inner try/catch
+      //      so it happens regardless of whether origin.reject
+      //      later throws.
+      //   2. origin.reject(reason) with VERBATIM reason — no
+      //      instanceof / String / coerce.
+      //   3. Outer try/catch around origin.reject so a caller-
+      //      side bug in the wrapped resolve/reject cannot escape.
+      const failCleanup = (reason: unknown): undefined => {
+        try { this.opts.mux.consumeUpstreamResponse(alloc.upstreamId); }
+        catch { /* silent — mux release is best-effort */ }
+        try { origin.reject(reason); }
+        catch { /* silent — origin's own bug */ }
+        return undefined;
       };
       // 副指挥 ff8edc19 Round 9: transport `writeFrame` is
       // caller-provided. A real non-async impl may return a
@@ -690,9 +693,23 @@ export class BackendUdsServer {
       // `safeAdoptConsume`: `safeAdopt` reads `.then` exactly
       // once inside a protected scope; the fresh Promise's
       // rejection handler is `failCleanup`.
+      // 副指挥 9a9a198d Round 10: production callsite MUST pass
+      // diagnostics as onCallbackError so a callback-error
+      // (e.g. failCleanup itself misbehaving in some future
+      // refactor) is not absorbed silently.
+      const onCallbackError = (reason: unknown): undefined => {
+        try {
+          this.opts.diagnostics.reportInternalError({
+            correlationId: this.opts.diagnostics.newCorrelationId(),
+            operation: "send_internal_callback_error",
+            error: reason,
+          });
+        } catch { /* diagnostics sink self-throw is absorbed */ }
+        return undefined;
+      };
       try {
         const writeResult = this.opts.upstreamTransport.writeFrame(frame);
-        safeAdoptConsume(writeResult, undefined, failCleanup);
+        safeAdoptConsume(writeResult, undefined, failCleanup, onCallbackError);
       } catch (e) {
         failCleanup(e);
       }

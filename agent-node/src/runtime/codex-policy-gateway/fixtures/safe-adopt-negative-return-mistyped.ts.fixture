@@ -1,0 +1,13 @@
+// RFC-030 Wave 1A P0.2 Commit 2 corrective round 10 (副指挥
+// 9a9a198d). Type-negative fixture: capturing the return value
+// of `safeAdoptConsume` as `Promise<unknown>`. Must fail
+// `tsc --strict` — the production signature returns `void`.
+
+import { safeAdoptConsume } from "../safe-adopt";
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const use = (): void => {
+  // TS2322: Type 'void' is not assignable to Promise<unknown>.
+  const _p: Promise<unknown> = safeAdoptConsume(Promise.resolve());
+  void _p;
+};

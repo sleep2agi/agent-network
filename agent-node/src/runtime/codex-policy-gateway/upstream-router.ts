@@ -247,8 +247,10 @@ export class UpstreamRouter {
 
   /** Test-only: was the pre-active buffer cap hit? */
   bufferOverflowedFlag(): boolean { return this.bufferOverflowed; }
-  /** Test-only: has `firePreActiveTerminal` fired? */
-  preActiveTerminalFiredForTest(): boolean { return this.preActiveTerminalFired; }
+  // 副指挥 9a9a198d Round 10: removed unused public
+  // `preActiveTerminalFiredForTest()` accessor. Overflow-ordering
+  // tests use the caller-provided `onPreActiveClose` callback
+  // counter instead.
 
   /**
    * 副指挥 7d061fcd Round 9: single once-only helper that BOTH
@@ -375,10 +377,24 @@ export class UpstreamRouter {
         this.report("upstream_reject_write_failed");
         return;
       }
-      // Fire-and-forget with safe consumption.
-      safeAdoptConsume(writeResult, undefined, () => {
-        this.report("upstream_reject_write_failed");
-      });
+      // 副指挥 9a9a198d Round 10: production callsite passes
+      // diagnostics via `onCallbackError` so a callback-error
+      // (e.g. `this.report` self-throw in some refactor) is
+      // still observable via the sink rather than absorbed.
+      safeAdoptConsume(
+        writeResult,
+        undefined,
+        (_reason: unknown): undefined => {
+          try { this.report("upstream_reject_write_failed"); }
+          catch { /* absorbed */ }
+          return undefined;
+        },
+        (_cbErr: unknown): undefined => {
+          try { this.report("upstream_reject_callback_error"); }
+          catch { /* absorbed */ }
+          return undefined;
+        },
+      );
       return;
     }
     // Phase 1 approvalMode="never" never emits forward_tui, but if
