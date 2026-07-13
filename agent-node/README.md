@@ -44,7 +44,7 @@ CLI flags:
 |---|---|---|
 | `--alias` | required | unique name in the hub |
 | `--hub` | `http://127.0.0.1:9200` | CommHub URL |
-| `--runtime` | `claude-agent-sdk` | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` / `grok-build-acp` / `http-api` |
+| `--runtime` | `claude-agent-sdk` | `claude-agent-sdk` / `codex-sdk` / `codex-app-server` / `claude-code-cli` / `grok-build-acp` / `http-api` |
 | `--model` | runtime default | passed through to the SDK |
 | `--tools` | (none) | `all` or comma-separated list |
 | `--max-turns` | `50` | upper bound per task |
@@ -56,6 +56,7 @@ CLI flags:
 |---|---|---|---|
 | `claude-agent-sdk` | [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) | verified | Anthropic-compatible API; works with MiniMax, DeepSeek, GLM, Kimi, Anthropic, OpenRouter, or custom endpoints |
 | `codex-sdk` | [@openai/codex-sdk](https://www.npmjs.com/package/@openai/codex-sdk) | unverified end-to-end | unit tests pass, no full E2E with real codex auth |
+| `codex-app-server` | local `codex app-server` + TUI bridge | preview; production locked | canonical RFC-030 runtime. The current CLI entry starts the Phase-0 direct path; Policy Gateway, §8 review, merge and production approval remain locked |
 | `claude-code-cli` | local `claude` CLI | unverified end-to-end | runs locally for Claude Pro subscribers (v0.8.2 fixed the session-resume default-loss bug; see [changelog](https://anet.sh/en/changelog)) |
 | `grok-build-acp` | local `grok agent stdio` | stable runtime, native MCP injection boundary remains preview | requires Grok Build CLI login; stable for receive/reply, session persistence, and explicit CommHub delegation handled by agent-node |
 | `http-api` | OpenAI/Anthropic-compatible HTTP | experimental | reads `ANTHROPIC_*`, `OPENAI_*`, or `MINIMAX_CODING_API_KEY` environment variables |

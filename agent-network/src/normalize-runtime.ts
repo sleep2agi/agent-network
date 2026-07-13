@@ -22,6 +22,23 @@ export type RuntimeName =
 /** Operator-facing default for any runtime slot that comes in empty / missing / unrecognized. */
 export const DEFAULT_RUNTIME: RuntimeName = "claude-agent-sdk";
 
+/**
+ * Runtimes launched through the agent-node supervisor rather than by spawning
+ * the Claude Code CLI directly. Keep this predicate exhaustive so adding a
+ * runtime cannot silently fall into the Claude launcher branch.
+ */
+export function runtimeUsesAgentNode(runtime: RuntimeName): boolean {
+  return runtime !== "claude-code-cli";
+}
+
+/** Runtimes whose explicit CLI choice must bypass the API-vendor picker. */
+export function runtimeSkipsCreateVendorPicker(runtime: RuntimeName): boolean {
+  return runtime === "claude-code-cli"
+    || runtime === "codex-sdk"
+    || runtime === "codex-app-server"
+    || runtime === "grok-build-acp";
+}
+
 // Subset of Profile fields this helper inspects. Keeping it narrow so
 // the test fixture doesn't need the full Profile shape and so callers
 // (bin/cli.ts uses the full Profile) can pass anything structurally

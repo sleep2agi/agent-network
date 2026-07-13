@@ -321,7 +321,12 @@ interface Profile {
 
 // Re-export from the pure helper module (src/normalize-runtime.ts) so
 // unit tests can import without dragging in CLI side-effects.
-import { normalizeRuntime, type RuntimeName } from "../src/normalize-runtime";
+import {
+  normalizeRuntime,
+  runtimeSkipsCreateVendorPicker,
+  runtimeUsesAgentNode,
+  type RuntimeName,
+} from "../src/normalize-runtime";
 import { findEnvironAliasMatches } from "../src/environ-alias";
 export { normalizeRuntime, type RuntimeName };
 
@@ -1099,6 +1104,7 @@ anet — AI Agent Network CLI (V2)
 
 Node Management:
   anet node create <name>        Create a new agent node
+  --runtime <type>               claude-agent-sdk | claude-code-cli | codex-sdk | codex-app-server | grok-build-acp | opencode-cli
   anet node start <name>         Start a node
   anet node start --all          Start every node in cwd (= anet project up)
   anet node stop <name>          Stop a running node
@@ -2045,7 +2051,7 @@ async function createInteractiveCommand() {
 
 This wizard creates one agent node for this project:
   - node config: .anet/nodes/<node-name>/config.json
-  - runtime: claude-code-cli / codex-sdk / claude-agent-sdk / grok-build-acp
+  - runtime: claude-code-cli / codex-sdk / codex-app-server / claude-agent-sdk / grok-build-acp / opencode-cli
   - optional Telegram channel: text + images from an allowlist user
 `);
 
@@ -2246,7 +2252,7 @@ async function createCommand(idOverride?: string) {
   const id = idOverride || args[1];
   if (!id) return createInteractiveCommand();
   if (id.startsWith("--")) {
-    console.error("Usage: anet node create <node-name> [--runtime claude-code-cli|codex-sdk|claude-agent-sdk|grok-build-acp] [--model ...] [--tools ...]");
+    console.error("Usage: anet node create <node-name> [--runtime claude-code-cli|codex-sdk|codex-app-server|claude-agent-sdk|grok-build-acp|opencode-cli] [--model ...] [--tools ...]");
     console.error("Or run fully interactive: anet node create");
     process.exit(1);
   }
@@ -2291,7 +2297,7 @@ async function createCommand(idOverride?: string) {
   const credAlreadyProvided = !!process.env.ANTHROPIC_AUTH_TOKEN
     || !!process.env.ANTHROPIC_API_KEY || envFlagHasAuth;
   const explicitRuntime = opts.runtime ? normalizeRuntime(opts.runtime) : undefined;
-  const runtimeAlreadyExplicit = explicitRuntime === "codex-sdk" || explicitRuntime === "claude-code-cli" || explicitRuntime === "grok-build-acp";
+  const runtimeAlreadyExplicit = explicitRuntime ? runtimeSkipsCreateVendorPicker(explicitRuntime) : false;
   const skipInteractive = credAlreadyProvided || runtimeAlreadyExplicit;
 
   // #133 selectRuntime — runtime-first, exported as a helper so create paths
@@ -2305,6 +2311,7 @@ async function createCommand(idOverride?: string) {
           { value: "claude-agent-sdk", name: "claude-agent-sdk — 任意 OpenAI/Anthropic-compat vendor (intern / MiniMax / Claude / GLM / ...)" },
           { value: "claude-code-cli",  name: "claude-code-cli  — Anthropic Claude (Max/Pro plan), 复用 `claude` CLI 登录态" },
           { value: "codex-sdk",        name: "codex-sdk        — OpenAI Codex, 复用 `codex auth login` 登录态" },
+          { value: "codex-app-server", name: "codex-app-server — OpenAI Codex TUI runtime (RFC-030 preview; production locked)" },
           { value: "grok-build-acp",   name: "grok-build-acp   — Grok Build ACP, 复用 `grok` CLI 登录态" },
         ],
       });
@@ -2327,6 +2334,8 @@ async function createCommand(idOverride?: string) {
     console.log("[anet] 请确保已安装 Claude Code CLI 并登录: claude auth login");
   } else if (opts.runtime === "codex-sdk") {
     console.log("[anet] 请确保已执行: codex auth login");
+  } else if (opts.runtime === "codex-app-server") {
+    console.log("[anet] 请确保已执行: codex auth login（RFC-030 preview；生产门仍锁定）");
   } else if (opts.runtime === "grok-build-acp") {
     console.log("[anet] 请确保已安装并登录 Grok Build CLI: grok auth login");
   } else {
@@ -2854,12 +2863,7 @@ async function launchAgent(id: string, forceNewSession = false) {
     }
   } catch {}
 
-  if (
-    runtime === "codex-sdk" ||
-    runtime === "claude-agent-sdk" ||
-    runtime === "grok-build-acp" ||
-    runtime === "opencode-cli"
-  ) {
+  if (runtimeUsesAgentNode(runtime)) {
     // spawn agent-node
     const agentArgs = [
       "--config", join(nodesDir(), nodeId, "config.json"),

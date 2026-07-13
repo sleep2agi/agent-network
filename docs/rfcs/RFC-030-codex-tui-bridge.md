@@ -658,7 +658,11 @@ Hub 必须先在 loopback 完成管理员初始化，再置于 TLS 反向代理�
 
 ## 11. 启动与绑定 UX
 
-以下命令是拟议产品 UX，当前主干尚未实现：
+> **历史方案，禁止复制。** 本节的 `codex-sdk --codex-transport
+> app-server` 形态已被 Vincent 2026-07-10 的独立 runtime 决策取代。
+> 当前 canonical CLI 见 §18.1a；生产门状态见文首与配套设计 §8。
+
+以下命令仅保留为被取代的设计记录：
 
 ```bash
 # 创建一个普通 codex-sdk 节点，但选择共享 app-server transport
@@ -869,6 +873,27 @@ codex app-server generate-json-schema --out ./schemas
 | `codex-app-server` runtime（`runtime.ts` + `cli.ts` 接线）| ✅ Phase 0A | 741 全量测试 + 真节点 e2e |
 | 网络闭环：`send_task` → 桥 → 真 codex → `send_task` 回 | ✅ | 隔离 hub 真节点 e2e PASS |
 | `anet node create --runtime codex-app-server` | ✅ | 隔离 hub 真建节点，config 写 `runtime:"codex-app-server"` |
+
+### 18.1a Canonical `anet` CLI（preview 路径）
+
+Canonical runtime 值是 **`codex-app-server`**，不是 `codex-sdk`。完成
+`codex auth login` 后，可复制粘贴：
+
+```bash
+anet node create codex-human --runtime codex-app-server && anet node start codex-human
+```
+
+等价的分步命令是：
+
+```bash
+anet node create codex-human --runtime codex-app-server
+anet node start codex-human
+```
+
+`node create` 将 canonical 值写入节点配置；`node start` 通过
+`agent-node --runtime codex-app-server` 启动该 runtime。当前这条入口只启动
+§18 记录的 Phase-0 direct preview path；它**不代表** Policy Gateway、Wave 2、
+§8、merge、production 或 `latest` 已解锁。
 
 ### 18.1b 明确**未**落地（生产前置, 设计文档 §3.2/§4/§8）
 

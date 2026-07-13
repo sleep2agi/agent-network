@@ -5,6 +5,7 @@
  * Runtime:
  *   --runtime claude-agent-sdk  → Claude Agent SDK (Claude/MiniMax)
  *   --runtime codex-sdk         → Codex SDK (GPT-5.4)
+ *   --runtime codex-app-server  → Codex app-server/TUI runtime (RFC-030 preview)
  *   --runtime grok-build-acp    → Grok Build ACP (xAI)
  *
  * 配置加载: --config > CLI args > env > .anet/nodes/<name>/config.json > ~/.anet/config.json > defaults
@@ -115,7 +116,7 @@ for (let i = 0; i < argv.length; i++) {
 选项:
   --config <path>     配置文件 (.anet/nodes/<name>/config.json)
   --alias <name>      Agent 别名 / CommHub alias (必需)
-  --runtime <type>    claude-agent-sdk (default) | codex-sdk | grok-build-acp
+  --runtime <type>    claude-agent-sdk (default) | codex-sdk | codex-app-server | grok-build-acp
   --model <name>      AI 模型 (codex 默认: gpt-5.5, claude-agent-sdk 默认: claude-sonnet-4-6)
   --hub <url>         CommHub URL
   --tools <list>      工具列表，逗号分隔 ("all" = 全部)
@@ -131,6 +132,7 @@ for (let i = 0; i < argv.length; i++) {
 Runtime:
   claude-agent-sdk  Claude Agent SDK — Claude/MiniMax/Anthropic 兼容 API
   codex-sdk         Codex SDK — GPT-5.4，复用 codex 登录态
+  codex-app-server  Codex app-server/TUI runtime — RFC-030 preview（生产门锁定）
   grok-build-acp    Grok Build ACP — xAI Grok Build via "grok agent stdio"
 `);
     process.exit(0);

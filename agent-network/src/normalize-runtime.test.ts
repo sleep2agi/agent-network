@@ -8,7 +8,11 @@
 // Explicit `claude-code-cli` choice still works.
 
 import { describe, expect, test } from "bun:test";
-import { normalizeRuntime } from "./normalize-runtime";
+import {
+  normalizeRuntime,
+  runtimeSkipsCreateVendorPicker,
+  runtimeUsesAgentNode,
+} from "./normalize-runtime";
 
 describe("normalizeRuntime — fallback default is claude-agent-sdk (Vincent no-Max)", () => {
   test("unknown string → claude-agent-sdk (was claude-code-cli pre-2026-06-28)", () => {
@@ -135,5 +139,37 @@ describe("normalizeRuntime — profile object paths", () => {
 
   test("profile with unknown runtime string → claude-agent-sdk (fallback)", () => {
     expect(normalizeRuntime({ runtime: "bogus-runtime-name" } as any)).toBe("claude-agent-sdk");
+  });
+});
+
+describe("runtimeUsesAgentNode — launcher routing", () => {
+  test("codex-app-server uses agent-node, never the Claude CLI branch", () => {
+    expect(runtimeUsesAgentNode("codex-app-server")).toBe(true);
+  });
+
+  test("all non-Claude-Code runtimes use agent-node", () => {
+    for (const runtime of [
+      "claude-agent-sdk",
+      "codex-sdk",
+      "codex-app-server",
+      "grok-build-acp",
+      "opencode-cli",
+    ] as const) {
+      expect(runtimeUsesAgentNode(runtime)).toBe(true);
+    }
+  });
+
+  test("claude-code-cli keeps its dedicated launcher", () => {
+    expect(runtimeUsesAgentNode("claude-code-cli")).toBe(false);
+  });
+});
+
+describe("runtimeSkipsCreateVendorPicker — explicit create flag", () => {
+  test("codex-app-server remains explicit in a TTY", () => {
+    expect(runtimeSkipsCreateVendorPicker("codex-app-server")).toBe(true);
+  });
+
+  test("claude-agent-sdk still enters its provider picker", () => {
+    expect(runtimeSkipsCreateVendorPicker("claude-agent-sdk")).toBe(false);
   });
 });
