@@ -335,6 +335,10 @@ export class GatewayLifecycle {
       authorizer,
       initProvider,
       diagnostics,
+      // 副指挥 3ed5c004 P0-1: the WS face is the sole upstream
+      // frame router for reverse requests. Share the injected
+      // transport with the backend UDS face.
+      upstreamTransport: this.opts.upstreamTransport,
     });
 
     // P0 fence #2 — stop requested before we bind sockets.

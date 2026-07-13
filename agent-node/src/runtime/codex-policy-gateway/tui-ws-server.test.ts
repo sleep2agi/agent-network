@@ -114,8 +114,17 @@ function makeMinimalOpts(): TuiWsServerOptions & { bearerPlaintext: string } {
       };
     },
   };
+  // Minimal fake upstream — no-op transport (unit tests here don't
+  // drive reverse-request wire behaviour; that's the Node integration).
+  const upstreamTransport = {
+    async writeFrame() { return; },
+    onFrame(_h: (raw: unknown) => void) { return () => {}; },
+    onClose(_h: () => void) { return () => {}; },
+    async close() { return; },
+  };
   return {
     bearer, humanOwner, authorizer, initProvider, diagnostics,
+    upstreamTransport,
     bearerPlaintext,
   } as unknown as TuiWsServerOptions & { bearerPlaintext: string };
 }
@@ -129,7 +138,8 @@ describe("TuiWsServer — construction + bind + stop", () => {
       const port = server.boundPortActual();
       expect(port).toBeGreaterThan(0);
       expect(server.ownerSlotState()).toBe("empty");
-      expect(server.currentLease()).toBeNull();
+      // 副指挥 3ed5c004 P1-4: currentLease() accessor removed; owner
+      // state is observable only via ownerSlotState().
     } finally {
       await server.stop();
     }

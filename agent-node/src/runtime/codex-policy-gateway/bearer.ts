@@ -1,37 +1,18 @@
-// RFC-030 Wave 1A P0.2 Commit 1 corrective — bearer.ts
+// RFC-030 Wave 1A P0.2 Commit 1 corrective (round 2) — bearer.ts
 //
-// Single-use bearer for the native Codex TUI WebSocket Upgrade.
-//
-// Corrective changes vs 9e6706c (副指挥 a1ed1589):
-//   - Plaintext + digest are non-enumerable + non-writable so
-//     `JSON.stringify` / `Object.keys` / `util.inspect` / spread do
-//     NOT expose them. `toJSON` returns a stable safe view.
-//   - Every terminal transition (consumed, TTL-expired, rotated)
-//     atomically clears the plaintext buffer. `takePlaintextForLauncher`
-//     after terminal returns `null`.
-//   - Production `mint()` accepts NO configuration. Length is a hard
-//     32 bytes; TTL is a hard 30 s. Tests use `_mintForTest` which is
-//     `@internal` — kept out of the public documented API surface.
-//   - `SecretRedactor.wipe()` clears the held tail and zeros the
-//     secret bytes. After wipe, `push()` returns the input verbatim
-//     BUT still clears its internal tail so no partial secret is
-//     retained. A new call to `push` after `wipe` cannot reassemble
-//     an incomplete secret because the secret bytes are gone.
-//   - `finish()` returns any residual tail exactly ONCE, then the
-//     redactor becomes an idempotent pass-through. Prevents the
-//     "wipe -> push cross-chunk -> tail concatenates with new bytes"
-//     class of leak.
+// 副指挥 3ed5c004 P0-3: pending TuiBearer + SecretRedactor state was
+// still observable / mutable via `util.inspect(showHidden:true)` and
+// through the `Symbol`-keyed slots' writable descriptors. This
+// revision moves ALL private state OUT of the instance and into a
+// module-level `WeakMap`. Instances have zero own properties. There
+// is no descriptor to redefine; no Symbol key to enumerate; no hidden
+// slot to inspect. `util.inspect(bearer, {showHidden:true})` sees an
+// empty object.
 
 import * as crypto from "node:crypto";
 
-/** Production TTL. Non-configurable (副指挥 a1ed1589 item #6). */
 export const BEARER_TTL_MS = 30_000;
-
-/** Production entropy width. Non-configurable. */
 export const BEARER_BYTES = 32;
-
-/** Domain-separation label for the bearer digest — makes the digest
- *  unequal to any other 32-byte SHA-256 in the codebase. */
 export const BEARER_DIGEST_DOMAIN = "rfc030-tui-bearer:";
 
 export type BearerState = "pending" | "consumed" | "rotated_out";
@@ -47,93 +28,91 @@ export type PresentBearerOutcome =
   | { readonly kind: "ok" }
   | { readonly kind: "reject"; readonly reason: BearerRejectReason };
 
-// Internal-only slot for the plaintext buffer + digest. Kept OFF the
-// TuiBearer instance's own-property list via `defineProperty`.
-const PLAINTEXT = Symbol("bearer.plaintext");
-const DIGEST = Symbol("bearer.digest");
-const NOW_FN = Symbol("bearer.now");
-const TTL_MS = Symbol("bearer.ttl");
-const MINTED_AT_MS = Symbol("bearer.mintedAt");
+// Module-private state map. NOT exported. Not reachable from an
+// instance; util.inspect / Object.keys / Object.getOwnPropertyDescriptors
+// on a bearer see nothing. The WeakMap keeps entries alive only as long
+// as the TuiBearer instance itself is alive.
+interface BearerInternalState {
+  plaintext: Buffer;
+  digest: Buffer;
+  state: BearerState;
+  nowFn: () => number;
+  ttlMs: number;
+  mintedAtMs: number;
+}
+
+const BEARER_STATE = new WeakMap<TuiBearer, BearerInternalState>();
 
 /**
- * One-shot bearer. Public API surface:
+ * One-shot bearer. All private state lives in a module-level WeakMap
+ * so no instance-level property (own or inherited, enumerable or not,
+ * Symbol-keyed or string-keyed) exposes plaintext or digest.
+ *
+ * Public API:
  *   - `mint()` (production; no options)
- *   - `takePlaintextForLauncher()` (one-shot)
- *   - `presentBearer(value)` (constant-time compare)
+ *   - `takePlaintextForLauncher()`
+ *   - `presentBearer(value)`
  *   - `rotate()`
  *   - `currentState()`
- *   - `toJSON()` (safe: never exposes plaintext or digest)
+ *   - `toJSON()` returns `{state}` only
  *
- * `@internal` API (used by tests only, not part of the documented
- * surface; the docstring on `_mintForTest` warns):
+ * `@internal`:
  *   - `_mintForTest(nowFn, ttlMs)`
  */
 export class TuiBearer {
-  private state: BearerState = "pending";
-
-  private constructor(plaintext: string, digest: Buffer, nowFn: () => number, ttlMs: number) {
-    // Non-enumerable + non-writable slots — JSON.stringify /
-    // Object.keys / spread all skip these. `configurable: false`
-    // so a hostile caller can't redefine to expose them.
-    Object.defineProperty(this, PLAINTEXT, {
-      value: Buffer.from(plaintext, "utf8"),
-      writable: true,
-      configurable: false,
-      enumerable: false,
-    });
-    Object.defineProperty(this, DIGEST, {
-      value: digest,
-      writable: true,
-      configurable: false,
-      enumerable: false,
-    });
-    Object.defineProperty(this, NOW_FN, { value: nowFn, writable: false, configurable: false, enumerable: false });
-    Object.defineProperty(this, TTL_MS, { value: ttlMs, writable: false, configurable: false, enumerable: false });
-    Object.defineProperty(this, MINTED_AT_MS, { value: nowFn(), writable: false, configurable: false, enumerable: false });
+  private constructor() {
+    // Deliberately empty. State is registered by the mint helpers.
   }
 
   static mint(): TuiBearer {
-    const bytes = crypto.randomBytes(BEARER_BYTES);
-    const plaintext = bytes.toString("base64url");
-    const digest = computeBearerDigest(plaintext);
-    bytes.fill(0);
-    return new TuiBearer(plaintext, digest, Date.now, BEARER_TTL_MS);
+    return TuiBearer._mintCore(Date.now, BEARER_TTL_MS);
   }
 
   /**
    * @internal Test helper. NOT part of the documented public API.
-   * Injects a fake now() + custom TTL so tests advance the TTL clock
-   * cheaply. Production code MUST use `mint()`.
+   * Production callers MUST use `mint()`.
    */
   static _mintForTest(nowFn: () => number, ttlMs = BEARER_TTL_MS): TuiBearer {
+    return TuiBearer._mintCore(nowFn, ttlMs);
+  }
+
+  private static _mintCore(nowFn: () => number, ttlMs: number): TuiBearer {
     const bytes = crypto.randomBytes(BEARER_BYTES);
     const plaintext = bytes.toString("base64url");
     const digest = computeBearerDigest(plaintext);
     bytes.fill(0);
-    return new TuiBearer(plaintext, digest, nowFn, ttlMs);
+    const b = new TuiBearer();
+    BEARER_STATE.set(b, {
+      plaintext: Buffer.from(plaintext, "utf8"),
+      digest,
+      state: "pending",
+      nowFn,
+      ttlMs,
+      mintedAtMs: nowFn(),
+    });
+    return b;
   }
 
-  /**
-   * Return the plaintext once, then clear the internal buffer. Second
-   * call returns `null`. Also returns `null` if the bearer has moved
-   * to any terminal state (`consumed` / `rotated_out`).
-   */
   takePlaintextForLauncher(): string | null {
-    if (this.state !== "pending") return null;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const buf: Buffer | null = (this as any)[PLAINTEXT];
-    if (buf === null || buf.length === 0) return null;
-    const p = buf.toString("utf8");
-    this.wipePlaintext();
+    const s = BEARER_STATE.get(this);
+    if (s === undefined) return null;
+    if (s.state !== "pending") return null;
+    if (s.plaintext.length === 0) return null;
+    const p = s.plaintext.toString("utf8");
+    // Zero + shrink the plaintext buffer. Digest stays; presentBearer
+    // still works.
+    s.plaintext.fill(0);
+    s.plaintext = Buffer.alloc(0);
     return p;
   }
 
   presentBearer(presented: string | undefined | null): PresentBearerOutcome {
-    if (this.state === "consumed") return { kind: "reject", reason: "bearer_already_consumed" };
-    if (this.state === "rotated_out") return { kind: "reject", reason: "bearer_rotated_out" };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    if ((this as any)[NOW_FN]() - (this as any)[MINTED_AT_MS] > (this as any)[TTL_MS]) {
-      this.transitionTo("rotated_out");
+    const s = BEARER_STATE.get(this);
+    if (s === undefined) return { kind: "reject", reason: "bearer_rotated_out" };
+    if (s.state === "consumed") return { kind: "reject", reason: "bearer_already_consumed" };
+    if (s.state === "rotated_out") return { kind: "reject", reason: "bearer_rotated_out" };
+    if (s.nowFn() - s.mintedAtMs > s.ttlMs) {
+      transitionTerminal(s, "rotated_out");
       return { kind: "reject", reason: "bearer_ttl_expired" };
     }
     if (typeof presented !== "string" || presented.length === 0) {
@@ -142,47 +121,38 @@ export class TuiBearer {
     const presentedDigest = computeBearerDigest(presented);
     let ok: boolean;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ok = crypto.timingSafeEqual(presentedDigest, (this as any)[DIGEST]);
-    } catch {
-      ok = false;
-    }
+      ok = crypto.timingSafeEqual(presentedDigest, s.digest);
+    } catch { ok = false; }
     if (!ok) return { kind: "reject", reason: "bearer_invalid" };
-    this.transitionTo("consumed");
+    transitionTerminal(s, "consumed");
     return { kind: "ok" };
   }
 
   rotate(): void {
-    if (this.state === "pending") this.transitionTo("rotated_out");
+    const s = BEARER_STATE.get(this);
+    if (s === undefined) return;
+    if (s.state === "pending") transitionTerminal(s, "rotated_out");
   }
 
   currentState(): BearerState {
-    return this.state;
+    const s = BEARER_STATE.get(this);
+    return s === undefined ? "rotated_out" : s.state;
   }
 
-  /**
-   * Safe view. Never exposes plaintext or digest. Only the current
-   * lifecycle state is public. Callers that stringify a TuiBearer
-   * for a log line always get exactly this shape.
-   */
   toJSON(): { readonly state: BearerState } {
-    return { state: this.state };
+    return { state: this.currentState() };
   }
+}
 
-  private transitionTo(next: Exclude<BearerState, "pending">): void {
-    this.state = next;
-    this.wipePlaintext();
-  }
-
-  private wipePlaintext(): void {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const buf: Buffer | null = (this as any)[PLAINTEXT];
-    if (buf !== null && buf.length > 0) {
-      buf.fill(0);
-    }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (this as any)[PLAINTEXT] = Buffer.alloc(0);
-  }
+function transitionTerminal(s: BearerInternalState, next: Exclude<BearerState, "pending">): void {
+  s.state = next;
+  // Zero + shrink plaintext + digest. After a terminal transition,
+  // any further presentBearer sees state != pending and takes the
+  // early-out path (which does not touch these buffers).
+  if (s.plaintext.length > 0) s.plaintext.fill(0);
+  s.plaintext = Buffer.alloc(0);
+  if (s.digest.length > 0) s.digest.fill(0);
+  s.digest = Buffer.alloc(0);
 }
 
 function computeBearerDigest(plaintext: string): Buffer {
@@ -196,84 +166,92 @@ function computeBearerDigest(plaintext: string): Buffer {
 // SecretRedactor
 // ────────────────────────────────────────────────────────────────────────
 
+interface RedactorInternalState {
+  secret: Buffer;
+  tail: Buffer;
+  marker: string;
+  wiped: boolean;
+  finished: boolean;
+}
+
+const REDACTOR_STATE = new WeakMap<SecretRedactor, RedactorInternalState>();
+
 /**
- * Exact-secret cross-chunk redactor. Replaces every occurrence of a
- * caller-provided secret in a byte stream with a fixed marker, so a
- * secret straddling two `push()` calls is still caught.
- *
- * Corrective (副指挥 a1ed1589 item #7):
- *   - `wipe()` zeroes the held tail AND the secret bytes. After
- *     wipe, `push()` returns its input verbatim, but does NOT
- *     retain a tail — the "wipe -> push cross-chunk -> tail
- *     reassembles with new bytes" leak class is gone.
- *   - `finish()` returns any residual tail exactly ONCE, then the
- *     redactor is a total pass-through. Callers use `finish()` at
- *     stream end.
+ * Exact-secret cross-chunk redactor. All state lives in a module-level
+ * WeakMap. The instance has zero own properties, so
+ * `JSON.stringify(redactor)` returns `"{}"`, `util.inspect(redactor)`
+ * shows an empty class instance, and there is no descriptor to
+ * redefine. `finish()` auto-clears the tail; `wipe()` also zeros the
+ * secret + tail and marks the redactor pass-through.
  */
 export class SecretRedactor {
-  private secretBuf: Buffer;
-  private readonly marker: string;
-  private tail: Buffer = Buffer.alloc(0);
-  private wiped = false;
-  private finished = false;
-
   constructor(secret: string, marker = "[REDACTED bearer]") {
     if (typeof secret !== "string" || secret.length === 0) {
       throw new Error("SecretRedactor requires a non-empty secret");
     }
-    this.secretBuf = Buffer.from(secret, "utf8");
-    this.marker = marker;
+    REDACTOR_STATE.set(this, {
+      secret: Buffer.from(secret, "utf8"),
+      tail: Buffer.alloc(0),
+      marker,
+      wiped: false,
+      finished: false,
+    });
   }
 
   push(chunk: Buffer): Buffer {
-    if (this.finished) return chunk;
-    if (this.wiped) {
-      // Pass through, but do NOT retain a tail. This is the fix for
-      // the "wipe leaves partial tail that later reassembles" hole.
-      return chunk;
-    }
-    const window = this.tail.length === 0 ? chunk : Buffer.concat([this.tail, chunk]);
-    const sLen = this.secretBuf.length;
+    const s = REDACTOR_STATE.get(this);
+    if (s === undefined) return chunk;
+    if (s.finished) return chunk;
+    if (s.wiped) return chunk;
+    const window = s.tail.length === 0 ? chunk : Buffer.concat([s.tail, chunk]);
+    const sLen = s.secret.length;
     let scanStart = 0;
     const out: Buffer[] = [];
     while (scanStart <= window.length - sLen) {
-      const idx = window.indexOf(this.secretBuf, scanStart);
+      const idx = window.indexOf(s.secret, scanStart);
       if (idx === -1) break;
       out.push(window.subarray(scanStart, idx));
-      out.push(Buffer.from(this.marker, "utf8"));
+      out.push(Buffer.from(s.marker, "utf8"));
       scanStart = idx + sLen;
     }
     const consumedUpTo = Math.max(scanStart, window.length - (sLen - 1));
     const safeStart = Math.min(consumedUpTo, window.length);
     out.push(window.subarray(scanStart, safeStart));
-    this.tail = window.subarray(safeStart);
+    s.tail = window.subarray(safeStart);
     return Buffer.concat(out);
   }
 
   /**
-   * Return residual tail bytes exactly once and mark the redactor
-   * finished. Subsequent `push()` calls pass through with no
-   * further tail retention.
+   * Return residual tail exactly once. On finish() the redactor also
+   * ZEROES the tail buffer and the secret bytes. Subsequent `push()`
+   * calls pass through untouched (secret is gone; there is no way to
+   * match anymore).
    */
   finish(): Buffer {
-    if (this.finished) return Buffer.alloc(0);
-    const t = this.tail;
-    this.tail = Buffer.alloc(0);
-    this.finished = true;
-    return t;
+    const s = REDACTOR_STATE.get(this);
+    if (s === undefined) return Buffer.alloc(0);
+    if (s.finished) return Buffer.alloc(0);
+    const t = s.tail;
+    // Copy the tail bytes to a fresh buffer so we can zero the
+    // internal one without corrupting the returned value.
+    const returned = Buffer.from(t);
+    s.tail.fill(0);
+    s.tail = Buffer.alloc(0);
+    s.secret.fill(0);
+    s.secret = Buffer.alloc(0);
+    s.finished = true;
+    return returned;
   }
 
-  /**
-   * Zero the held tail AND the secret bytes. After wipe, `push()`
-   * is a total pass-through with NO tail buffering. Idempotent.
-   */
   wipe(): void {
-    if (this.wiped) return;
-    this.wiped = true;
-    this.finished = true;
-    this.tail.fill(0);
-    this.tail = Buffer.alloc(0);
-    this.secretBuf.fill(0);
-    this.secretBuf = Buffer.alloc(0);
+    const s = REDACTOR_STATE.get(this);
+    if (s === undefined) return;
+    if (s.wiped) return;
+    s.wiped = true;
+    s.finished = true;
+    s.tail.fill(0);
+    s.tail = Buffer.alloc(0);
+    s.secret.fill(0);
+    s.secret = Buffer.alloc(0);
   }
 }

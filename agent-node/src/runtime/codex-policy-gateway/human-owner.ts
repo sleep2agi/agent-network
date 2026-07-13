@@ -146,12 +146,12 @@ export class HumanOwnerCoordinator {
    * hard-1 via the owner-slot reserve before calling us; a
    * double-attach here is a defense-in-depth signal).
    */
-  attachTui(leaseId: OwnerLeaseId): void {
+  attachTui(leaseId: OwnerLeaseId): { kind: "ok" } | { kind: "refused"; reason: "already_held" } {
     if (this.activeLease !== null) {
       // Belt-and-braces: coordinator side won't clobber an incumbent
-      // lease. WS server side is required to gate this via owner-
-      // slot reserve; a repeat here means the caller broke the
-      // hard-1 contract.
+      // lease. Return a TYPED refusal so the caller can react
+      // deterministically without probing internal state (副指挥
+      // 3ed5c004 P1-4: lifecycle should not read raw lease).
       try {
         this.opts.diagnostics.reportInternalError({
           correlationId: this.opts.diagnostics.newCorrelationId(),
@@ -159,10 +159,11 @@ export class HumanOwnerCoordinator {
           error: new Error("attachTui called with lease already active"),
         });
       } catch { /* silent */ }
-      return;
+      return { kind: "refused", reason: "already_held" };
     }
     this.activeLease = leaseId;
     this.tuiAttached = true;
+    return { kind: "ok" };
   }
 
   /**

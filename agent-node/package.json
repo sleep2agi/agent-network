@@ -12,7 +12,10 @@
   ],
   "scripts": {
     "build": "bun build src/cli.ts --outdir dist --entry-naming cli.js --target node --minify --external @anthropic-ai/claude-agent-sdk --external '@anthropic-ai/claude-agent-sdk-*' --external @openai/codex-sdk",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "build:rfc030-integration": "bun build --target=node --format=esm --outfile=dist/rfc030-integration.mjs src/runtime/codex-policy-gateway/integration-entry.ts",
+    "test:rfc030-node-integration": "npm run build:rfc030-integration && node scripts/rfc030-node-integration.mjs",
+    "test:rfc030-real-cli-smoke": "npm run build:rfc030-integration && node scripts/rfc030-real-cli-e2e.mjs"
   },
   "keywords": [
     "agent",

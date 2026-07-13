@@ -1,12 +1,22 @@
-// RFC-030 Wave 1A P0.2 Commit 1 corrective — real codex 0.144.0 CLI E2E.
+// RFC-030 Wave 1A P0.2 Commit 1 corrective round 2 — real codex 0.144.0
+// **bootstrap smoke**.
 //
-// Spawns the actual `codex` binary in remote-attach mode against our
-// production-shape TuiWsServer. Corrective changes vs 9e6706c:
-//   - Bundle path resolves RELATIVE to this script — no /tmp hardcoded
-//   - All child stdout/stderr flows through `SecretRedactor` before
-//     any printing / caching (副指挥 a1ed1589 item #8)
-//   - If `script(1)` is available (util-linux), we allocate a real
-//     PTY and re-run under the PTY (副指挥 a1ed1589 item #15)
+// This script is a bootstrap smoke, not a full E2E. Honest scope
+// (副指挥 3ed5c004 evidence item #2):
+//   - PTY-attaches to codex-cli 0.144.0 and observes the FIRST
+//     authorizer call (`account/read`).
+//   - Does NOT observe the full four-read startup sequence, does NOT
+//     observe normal CLI exit — the harness SIGKILLs after the
+//     account/read arrives because we don't ship the full read-set
+//     responses in this fake authorizer.
+//
+// Hard-fail behaviour (副指挥 3ed5c004 evidence item #2):
+//   - If codex-cli is missing or version != 0.144.0 → HARD FAIL, non-
+//     zero exit. No "PASS: skipped".
+//   - If util-linux `script(1)` is missing → HARD FAIL. Codex requires
+//     a TTY; without `script(1)` we cannot honestly claim we drove it.
+//
+// Bundle path resolves RELATIVE to this script — no /tmp hardcoded.
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -57,11 +67,17 @@ function haveScriptPty() {
 }
 
 if (!haveCodex()) {
-  console.log("RFC-030 real CLI E2E — SKIPPED");
+  console.log("RFC-030 real CLI bootstrap smoke — FAIL: codex-cli 0.144.0 not on PATH");
   for (const n of notes) console.log("  note:", n);
   console.log("");
-  console.log("real CLI command PASS: skipped (env has no codex-cli 0.144.0)");
-  process.exit(0);
+  console.log("real CLI bootstrap smoke PASS: 0/1 (env missing codex-cli 0.144.0)");
+  process.exit(1);
+}
+if (!haveScriptPty()) {
+  console.log("RFC-030 real CLI bootstrap smoke — FAIL: util-linux script(1) not on PATH");
+  console.log("");
+  console.log("real CLI bootstrap smoke PASS: 0/1 (env missing PTY tool)");
+  process.exit(1);
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -84,6 +100,13 @@ async function startServer() {
   const bearer = TuiBearer.mint();
   const plaintext = bearer.takePlaintextForLauncher();
   const authorizerCalls = [];
+  const upstream = {
+    written: [],
+    async writeFrame(f) { this.written.push(f); },
+    onFrame(_h) { return () => {}; },
+    onClose(_h) { return () => {}; },
+    async close() {},
+  };
   const server = new TuiWsServer({
     bearer,
     humanOwner: coord,
@@ -99,6 +122,7 @@ async function startServer() {
       currentSnapshot: () => ({ serverInfo: { name: "codex", version: "0.144.0" }, capabilities: {} }),
     },
     diagnostics: diag,
+    upstreamTransport: upstream,
   });
   await server.start();
   return { server, bearer, plaintext, coord, diag, authorizerCalls };
@@ -148,7 +172,7 @@ async function spawnCodex(plaintext, port, underPty) {
 }
 
 async function main() {
-  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective — real codex 0.144.0 CLI E2E");
+  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 2 — real codex 0.144.0 bootstrap smoke");
   const { server, plaintext, authorizerCalls } = await startServer();
 
   // Env allowlist audit — no CommHub token slots.
@@ -162,12 +186,9 @@ async function main() {
   }
   ok("env allowlist audit (see spawnCodex `env` construction)");
 
-  const underPty = haveScriptPty();
-  if (!underPty) {
-    notes.push("util-linux `script` not available; running without PTY (Codex hard-requires TTY)");
-  }
+  // PTY guaranteed by early hard-fail check above.
   const { child, outChunks, errChunks, cleanup } = await spawnCodex(
-    plaintext, server.boundPortActual(), underPty,
+    plaintext, server.boundPortActual(), true,
   );
 
   // Wait EITHER for the authorizer to see at least one read call
@@ -198,23 +219,23 @@ async function main() {
   if (opened) {
     ok("Codex CLI opened the WS Upgrade");
     if (authorizerCalls.length > 0) {
-      const hit = authorizerCalls.find((m) => READ_ALLOWLIST.includes(m));
-      if (hit) ok(`Codex asked for a canonical startup read: ${hit}`);
-      else notes.push(`Codex first authorizer call was: ${authorizerCalls[0]}`);
+      // Honest claim: we only observe the FIRST authorizer call.
+      // The subsequent reads (hooks/list / configRequirements/read /
+      // model/list) require Codex to receive proper responses to
+      // its earlier reads; this bootstrap smoke doesn't emulate the
+      // full read set.
+      const first = authorizerCalls[0];
+      if (READ_ALLOWLIST.includes(first)) {
+        ok(`Codex first authorizer call is in the allowlist: ${first}`);
+      } else {
+        fail("Codex first authorizer call", `expected one of ${READ_ALLOWLIST.join(",")}, got ${first}`);
+      }
     } else {
       notes.push("owner slot became held but authorizer wasn't invoked in the smoke window");
     }
   } else {
-    // If we ran without PTY and Codex printed the "stdin is not a
-    // terminal" error, that's a clear env-limitation signal — mark
-    // as skipped (not a failure) per 副指挥 item #13's two-line
-    // reporting rule.
-    if (!underPty && /stdin is not a terminal/i.test(stderr)) {
-      notes.push("Codex CLI requires a TTY; no PTY available in this env");
-    } else {
-      const preview = stderr.slice(0, 300) + stdout.slice(0, 200);
-      fail("Codex CLI Upgrade", `owner slot never held; authorizer calls=${authorizerCalls.length}; child preview: ${JSON.stringify(preview)}`);
-    }
+    const preview = stderr.slice(0, 300) + stdout.slice(0, 200);
+    fail("Codex CLI Upgrade", `owner slot never held; authorizer calls=${authorizerCalls.length}; child preview: ${JSON.stringify(preview)}`);
   }
 
   await server.stop();
@@ -222,11 +243,11 @@ async function main() {
   console.log("");
   for (const n of notes) console.log("  note:", n);
   console.log("");
-  console.log(`real CLI command PASS: ${passed}/${passed + failed}`);
+  console.log(`real CLI bootstrap smoke PASS: ${passed}/${passed + failed}`);
   if (failed > 0) process.exit(1);
 }
 
 main().catch((e) => {
-  console.error("real-cli-e2e harness crash:", e);
+  console.error("real-cli bootstrap smoke crash:", e);
   process.exit(2);
 });

@@ -1,36 +1,38 @@
-// RFC-030 Wave 1A P0.2 Commit 1 corrective — tui-ws-server.ts
+// RFC-030 Wave 1A P0.2 Commit 1 corrective round 2 — tui-ws-server.ts
 //
-// Native Codex TUI WebSocket admission surface. Wraps a `node:http`
-// server that accepts ONE WebSocket Upgrade to `/` (per real 0.144.0
-// captured baseline; 副指挥 967a0010) after:
-//   - the admission checks in `admission.ts` pass;
-//   - `Sec-WebSocket-Key` is validated as a real RFC 6455 nonce
-//     (exactly one raw header, decodes to exactly 16 bytes);
-//   - the `TuiBearer.presentBearer` returns `ok`;
-//   - the owner slot's synchronous PROVISIONAL reserve succeeds; and
-//   - `wsServer.handleUpgrade` completes the WS handshake.
+// Native Codex TUI WebSocket admission surface + sole upstream frame
+// router for reverse requests / responses / notifications.
 //
-// Corrective fixes vs 9e6706c (副指挥 a1ed1589):
-//   - Pre-auth raw sockets are tracked in an explicit `Map<Socket,
-//     Timeout>` and untracked synchronously from the http.Server's
-//     'upgrade' event — NOT from a nonexistent `socket.on("upgrade")`.
-//     A successful owner is never left in the preauth set, so the
-//     3s timer can never destroy an active WS.
-//   - `Sec-WebSocket-Key` is checked upfront (uniform 400 body).
-//     Missing / duplicate / bad-length key: 0 bearer consume, owner
-//     empty, human unattached.
-//   - Owner reservation is provisional. Any post-reserve failure
-//     (handleUpgrade throw, socket close before callback, WS error
-//     inside callback) rolls back to `empty` for THAT lease only.
-//     No `held + ws=null` state exists.
-//   - Sole upstream frame router: `Codex reverse request` -> always
-//     goes through the `HumanOwnerCoordinator`. Under Phase 1
-//     approvalMode=never it writes back the original codex id with
-//     `NoOwner + reason=approval_mode_never` (0 TUI forward).
-//   - Removed the `text.length > TUI_WS_SEMANTIC_TEXT_CAP * 8`
-//     junk gate (副指挥 a1ed1589 self-check reply). The frozen
-//     Agent-side 128 KiB semantic cap is NOT applied at the TUI WS
-//     face; TUI wire size is bounded by `maxPayload` = 1 MiB only.
+// Corrective (副指挥 3ed5c004):
+//   P0-1: subscribes to `upstreamTransport.onFrame` and routes:
+//         - request (Codex reverse) -> HumanOwnerCoordinator; Phase 1
+//           always writes back `NoOwner+approval_mode_never` on the
+//           ORIGINAL codex id, zero TUI forward.
+//         - response -> diagnostic (upstream response routing lives
+//           in `uds-server`; a proxied-TUI response would be routed
+//           back here, but Phase 1 has no proxied-TUI upstream path
+//           because Phase 1 authorizer never allows `forward_upstream`)
+//         - notification -> explicit diagnostic (never silent).
+//         - malformed -> explicit diagnostic.
+//   P0-2: preauth ledger stays populated across the Upgrade dispatch;
+//         only cleared when the WebSocket handshake FULLY succeeds.
+//         `writeGenericReject` (in admission.ts) arms a bounded destroy
+//         so allowHalfOpen clients cannot pin the ledger.
+//   P0-3: bearer + secret storage moved out of the server too — every
+//         private field lives on `this`; the secret is held by
+//         `TuiBearer` (WeakMap-backed).
+//   P1-1: singleton Host header enforced upstream in admission.ts.
+//   P1-2: no `ws.close(1006)` calls anywhere (`1006` is reserved and
+//         `ws` throws). Rollback uses `socket.destroy()` or `ws.terminate()`.
+//   P1-3: `maxPayload`, `headerTimeoutMs`, `maxPreAuthSockets` are HARD
+//         CONSTANTS in production. The tests' seam goes through
+//         `TuiWsServer._createForTest(opts, testOverrides)` which is
+//         `@internal` and not part of the documented option surface.
+//   P1-4: no `currentLease()` accessor. `attachTui` returns a typed
+//         outcome; lifecycle observes success/failure via that.
+//   P1-5: canonical `Sec-WebSocket-Key` — decode + re-encode must be
+//         byte-equal to the presented value (rejects non-canonical
+//         padding bits).
 
 import * as http from "node:http";
 import type { Socket } from "node:net";
@@ -59,18 +61,31 @@ import {
   type TuiRequestAuthorizer,
 } from "./protocol";
 import { HumanOwnerCoordinator } from "./human-owner";
+import type { UpstreamTransport } from "./uds-server";
 import * as crypto from "node:crypto";
 
 // ────────────────────────────────────────────────────────────────────────
-// Constants
+// HARD-PINNED constants (副指挥 3ed5c004 P1-3)
 // ────────────────────────────────────────────────────────────────────────
 
 export const TUI_WS_MAX_PAYLOAD = 1 * 1024 * 1024;
 export const TUI_HTTP_HEADER_TIMEOUT_MS = 3_000;
 export const TUI_MAX_PREAUTH_SOCKETS = 8;
 
+/**
+ * @internal Test-only override object. Production callers construct
+ * via `new TuiWsServer(opts)` and get the hard-pinned constants.
+ * Tests that need tighter timings construct via
+ * `TuiWsServer._createForTest(opts, testOverrides)`.
+ */
+export interface TuiWsServerTestOverrides {
+  readonly maxPayload?: number;
+  readonly headerTimeoutMs?: number;
+  readonly maxPreAuthSockets?: number;
+}
+
 // ────────────────────────────────────────────────────────────────────────
-// Options
+// Options — production-facing
 // ────────────────────────────────────────────────────────────────────────
 
 export interface TuiWsServerOptions {
@@ -79,9 +94,12 @@ export interface TuiWsServerOptions {
   readonly authorizer: TuiRequestAuthorizer;
   readonly initProvider: TuiInitializeProvider;
   readonly diagnostics: ProtocolDiagnostics;
-  readonly maxPayload?: number;
-  readonly headerTimeoutMs?: number;
-  readonly maxPreAuthSockets?: number;
+  /**
+   * 副指挥 3ed5c004 P0-1: the WS server is the SOLE upstream frame
+   * router for reverse-request handling. It subscribes to
+   * `onFrame` in `start()` and unsubscribes in `stop()`.
+   */
+  readonly upstreamTransport: UpstreamTransport;
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -95,23 +113,34 @@ type OwnerState =
 
 export class TuiWsServer {
   private readonly opts: TuiWsServerOptions;
+  private readonly maxPayload: number;
+  private readonly headerTimeoutMs: number;
+  private readonly maxPreAuthSockets: number;
+
   private httpServer: http.Server | null = null;
   private wsServer: WsServerType | null = null;
   private boundPort = 0;
   private ownerSlot: OwnerState = { kind: "empty" };
-  /**
-   * Explicit map of preauth raw sockets -> their header timeout timer.
-   * A socket is added on http.Server 'connection' and REMOVED
-   * synchronously on the http.Server 'upgrade' event (via
-   * `untrackPreAuthSocket`). Never listen to a non-existent
-   * `socket.on("upgrade")` — that's the 9e6706c bug.
-   */
   private readonly preAuthTimers: Map<Socket, NodeJS.Timeout> = new Map();
+  private upstreamUnsubs: Array<() => void> = [];
   private running = false;
   private shuttingDown = false;
 
-  constructor(opts: TuiWsServerOptions) {
+  constructor(opts: TuiWsServerOptions);
+  /** @internal */
+  constructor(opts: TuiWsServerOptions, overrides: TuiWsServerTestOverrides);
+  constructor(opts: TuiWsServerOptions, overrides: TuiWsServerTestOverrides = {}) {
     this.opts = opts;
+    // Hard-pinned in production; overridable ONLY via the internal
+    // test constructor overload.
+    this.maxPayload = overrides.maxPayload ?? TUI_WS_MAX_PAYLOAD;
+    this.headerTimeoutMs = overrides.headerTimeoutMs ?? TUI_HTTP_HEADER_TIMEOUT_MS;
+    this.maxPreAuthSockets = overrides.maxPreAuthSockets ?? TUI_MAX_PREAUTH_SOCKETS;
+  }
+
+  /** @internal test-only factory that applies overrides. */
+  static _createForTest(opts: TuiWsServerOptions, overrides: TuiWsServerTestOverrides): TuiWsServer {
+    return new TuiWsServer(opts, overrides);
   }
 
   // ─────────── Lifecycle ───────────
@@ -127,40 +156,52 @@ export class TuiWsServer {
 
     const wsServer = new WebSocketServer({
       noServer: true,
-      maxPayload: this.opts.maxPayload ?? TUI_WS_MAX_PAYLOAD,
+      maxPayload: this.maxPayload,
       perMessageDeflate: false,
     });
 
     this.httpServer = httpServer;
     this.wsServer = wsServer;
 
-    await new Promise<void>((resolve, reject) => {
-      const onError = (err: Error) => {
-        httpServer.off("listening", onListen);
-        reject(err);
-      };
-      const onListen = () => {
-        httpServer.off("error", onError);
-        const addr = httpServer.address();
-        if (!addr || typeof addr === "string") {
-          reject(new Error("http.Server.address() returned unexpected shape"));
-          return;
-        }
-        if (addr.address !== ALLOWED_LOOPBACK) {
-          reject(new Error(`bind assertion failed: OS returned '${addr.address}', expected ${ALLOWED_LOOPBACK}`));
-          return;
-        }
-        if (addr.family !== "IPv4") {
-          reject(new Error(`bind assertion failed: OS returned family '${addr.family}', expected IPv4`));
-          return;
-        }
-        this.boundPort = addr.port;
-        resolve();
-      };
-      httpServer.once("error", onError);
-      httpServer.once("listening", onListen);
-      httpServer.listen({ host: ALLOWED_LOOPBACK, port: 0 });
-    });
+    // Subscribe to upstream FIRST so a frame arriving during the
+    // listen await is captured (or explicitly rejected).
+    this.upstreamUnsubs.push(this.opts.upstreamTransport.onFrame((raw) => this.onUpstreamFrame(raw)));
+    this.upstreamUnsubs.push(this.opts.upstreamTransport.onClose(() => this.onUpstreamClose()));
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const onError = (err: Error) => {
+          httpServer.off("listening", onListen);
+          reject(err);
+        };
+        const onListen = () => {
+          httpServer.off("error", onError);
+          const addr = httpServer.address();
+          if (!addr || typeof addr === "string") {
+            reject(new Error("http.Server.address() returned unexpected shape"));
+            return;
+          }
+          if (addr.address !== ALLOWED_LOOPBACK) {
+            reject(new Error(`bind assertion failed: OS returned '${addr.address}'`));
+            return;
+          }
+          if (addr.family !== "IPv4") {
+            reject(new Error(`bind assertion failed: OS returned family '${addr.family}'`));
+            return;
+          }
+          this.boundPort = addr.port;
+          resolve();
+        };
+        httpServer.once("error", onError);
+        httpServer.once("listening", onListen);
+        httpServer.listen({ host: ALLOWED_LOOPBACK, port: 0 });
+      });
+    } catch (e) {
+      // Rollback subscribers.
+      for (const un of this.upstreamUnsubs) { try { un(); } catch { /* silent */ } }
+      this.upstreamUnsubs = [];
+      throw e;
+    }
 
     this.running = true;
   }
@@ -169,6 +210,8 @@ export class TuiWsServer {
     if (!this.running && this.httpServer === null) return;
     this.shuttingDown = true;
     this.running = false;
+    for (const un of this.upstreamUnsubs) { try { un(); } catch { /* silent */ } }
+    this.upstreamUnsubs = [];
     try { this.opts.bearer.rotate(); } catch { /* silent */ }
     if (this.ownerSlot.kind === "held") {
       const held = this.ownerSlot;
@@ -176,11 +219,8 @@ export class TuiWsServer {
       try { held.ws.close(1001, "gateway_stopping"); } catch { /* silent */ }
       try { this.opts.humanOwner.detachTui(held.leaseId); } catch { /* silent */ }
     } else if (this.ownerSlot.kind === "reserved") {
-      // Reserved but not yet held — release the coordinator side as
-      // well, defensively, and empty the slot.
-      const leaseId = this.ownerSlot.leaseId;
+      // Never attached to the coordinator; nothing to detach.
       this.ownerSlot = { kind: "empty" };
-      try { this.opts.humanOwner.detachTui(leaseId); } catch { /* silent */ }
     }
     for (const [s, t] of this.preAuthTimers) {
       try { clearTimeout(t); } catch { /* silent */ }
@@ -199,34 +239,23 @@ export class TuiWsServer {
 
   boundPortActual(): number { return this.boundPort; }
   ownerSlotState(): "empty" | "reserved" | "held" { return this.ownerSlot.kind; }
-  currentLease(): OwnerLeaseId | null {
-    return this.ownerSlot.kind === "held" || this.ownerSlot.kind === "reserved"
-      ? this.ownerSlot.leaseId : null;
-  }
-
-  /** Diagnostics inspector — how many raw sockets are waiting for
-   *  Upgrade completion right now. */
+  /** Diagnostics: preauth ledger size. Non-security accessor. */
   preAuthCount(): number { return this.preAuthTimers.size; }
 
   // ─────────── Pre-auth socket tracking ───────────
 
   private trackPreAuthSocket(socket: Socket): void {
-    const maxPre = this.opts.maxPreAuthSockets ?? TUI_MAX_PREAUTH_SOCKETS;
-    if (this.preAuthTimers.size >= maxPre || this.shuttingDown) {
+    if (this.preAuthTimers.size >= this.maxPreAuthSockets || this.shuttingDown) {
       try { socket.destroy(); } catch { /* silent */ }
       this.reportInternal("preauth_socket_cap_exceeded", {});
       return;
     }
-    const headerTimeoutMs = this.opts.headerTimeoutMs ?? TUI_HTTP_HEADER_TIMEOUT_MS;
     const timer = setTimeout(() => {
-      // Only fires if the socket is still preauth. Once we call
-      // `untrackPreAuthSocket` in `onUpgrade`, the entry is gone and
-      // this callback never runs for an authenticated socket.
       if (this.preAuthTimers.has(socket)) {
         this.preAuthTimers.delete(socket);
         try { socket.destroy(); } catch { /* silent */ }
       }
-    }, headerTimeoutMs);
+    }, this.headerTimeoutMs);
     timer.unref?.();
     this.preAuthTimers.set(socket, timer);
     socket.once("close", () => this.untrackPreAuthSocket(socket));
@@ -240,7 +269,7 @@ export class TuiWsServer {
     }
   }
 
-  // ─────────── Sec-WebSocket-Key validation ───────────
+  // ─────────── Sec-WebSocket-Key canonical check ───────────
 
   private validateSecWebSocketKey(req: http.IncomingMessage): { ok: true; key: string } | { ok: false; reason: string } {
     const raw = req.rawHeaders;
@@ -257,9 +286,6 @@ export class TuiWsServer {
     if (typeof value !== "string" || value.length === 0) {
       return { ok: false, reason: "ws_key_empty" };
     }
-    // RFC 6455 §4.1: value is base64 of 16 random bytes. Node's
-    // Buffer.from(..., "base64") is permissive; enforce the strict
-    // shape ourselves.
     if (!/^[A-Za-z0-9+/]{22}==$/.test(value)) {
       return { ok: false, reason: "ws_key_bad_shape" };
     }
@@ -267,48 +293,53 @@ export class TuiWsServer {
     try { decoded = Buffer.from(value, "base64"); }
     catch { return { ok: false, reason: "ws_key_bad_base64" }; }
     if (decoded.length !== 16) return { ok: false, reason: "ws_key_bad_length" };
+    // P1-5: canonical round-trip check. Re-encoding the decoded 16
+    // bytes MUST match the presented value verbatim. This rejects
+    // non-canonical padding bits like `dGVzdF9rZXlfZm9yX2p1c3Q3==`
+    // whose last decoded byte doesn't set bits 0-1 to zero.
+    const reencoded = decoded.toString("base64");
+    if (reencoded !== value) return { ok: false, reason: "ws_key_noncanonical" };
     return { ok: true, key: value };
   }
 
   // ─────────── Upgrade path ───────────
 
   private onUpgrade(req: http.IncomingMessage, socket: Socket, head: Buffer): void {
-    // Item #1: synchronous untrack of the preauth timer. Any code path
-    // that runs after this MUST NOT rely on the preauth timer.
-    this.untrackPreAuthSocket(socket);
-
-    // 1. Admission structural checks + bearer extraction.
+    // 副指挥 3ed5c004 P0-2: DO NOT untrack the preauth ledger here.
+    // Untrack only happens (a) when the socket 'close' event fires or
+    // (b) when the WS handshake fully succeeds inside handleUpgrade's
+    // callback. Any reject path leaves the socket in the preauth
+    // ledger; `writeGenericReject`'s bounded destroy will trigger
+    // 'close' which unregisters.
+    //
+    // 1. Admission structural checks.
     const admission = decideAdmission(req, socket, this.boundPort);
     if (admission.kind === "reject") {
       this.reportInternal(`admission_reject_${admission.reason}`, {});
       writeGenericReject(socket, admission.status);
       return;
     }
-    // 1b. Item #2: Sec-WebSocket-Key validation BEFORE bearer.
-    //     Missing / duplicate / bad-length key -> 0 bearer consume,
-    //     0 owner-slot touch. Uniform 400 on the wire.
+    // 2. Sec-WebSocket-Key structural + canonical check.
     const keyCheck = this.validateSecWebSocketKey(req);
     if (keyCheck.ok === false) {
       this.reportInternal(`ws_key_reject_${keyCheck.reason}`, {});
       writeGenericReject(socket, 400);
       return;
     }
-    // 2. Bearer presentation.
+    // 3. Bearer.
     const bearerOutcome = this.opts.bearer.presentBearer(admission.bearer);
     if (bearerOutcome.kind === "reject") {
       this.reportInternal(`bearer_reject_${bearerOutcome.reason}`, {});
       writeGenericReject(socket, 401);
       return;
     }
-    // 3. Owner slot check — uniform 401 wire body when full.
+    // 4. Owner slot.
     if (this.ownerSlot.kind !== "empty") {
       this.reportInternal("owner_already_attached", {});
       writeGenericReject(socket, 401);
       return;
     }
-    // 4. Provisional reserve BEFORE handleUpgrade. If anything past
-    //    this point fails, we roll back to `empty` for THIS lease
-    //    only (item #3: no `held+ws=null` state possible).
+    // 5. Provisional reserve.
     const leaseId = mintOwnerLeaseId();
     this.ownerSlot = { kind: "reserved", leaseId };
     const wsServer = this.wsServer;
@@ -317,74 +348,56 @@ export class TuiWsServer {
       try { socket.destroy(); } catch { /* silent */ }
       return;
     }
-
-    let handleUpgradeThrew = false;
     try {
       wsServer.handleUpgrade(req, socket, head, (ws) => {
-        // If shutdown raced us, roll back.
         if (this.shuttingDown) {
-          try { ws.close(1001, "gateway_stopping"); } catch { /* silent */ }
+          try { ws.terminate(); } catch { /* silent */ }
           this.rollbackReservation(leaseId);
           return;
         }
-        // If the socket was already destroyed before the WS callback
-        // fired, roll back.
         if (socket.destroyed) {
-          try { ws.close(1006, "connection_lost_prehandshake"); } catch { /* silent */ }
+          try { ws.terminate(); } catch { /* silent */ }
           this.rollbackReservation(leaseId);
           return;
         }
-        // If our reservation was torn down by another path (e.g. an
-        // 'error' handler), we do NOT re-attach.
         if (this.ownerSlot.kind !== "reserved" || this.ownerSlot.leaseId !== leaseId) {
-          try { ws.close(1006, "reservation_gone"); } catch { /* silent */ }
+          try { ws.terminate(); } catch { /* silent */ }
           return;
         }
-        // Promote reserved -> held. Attach the coordinator via the
-        // lease-aware attach. If the coordinator refuses (e.g. a
-        // stale lease still held), we surface as diagnostics; but
-        // in the current implementation attachTui with an already-
-        // active lease is a no-op that logs — so we assert our own
-        // state instead of trusting a caller-observable success signal.
-        this.ownerSlot = { kind: "held", leaseId, ws };
-        this.opts.humanOwner.attachTui(leaseId);
-        if (this.opts.humanOwner.currentLease() !== leaseId) {
-          // The coordinator refused our lease — treat as attach
-          // failure and roll back.
-          try { ws.close(1011, "attach_refused"); } catch { /* silent */ }
+        // Typed attach outcome (副指挥 3ed5c004 P1-4). If refused,
+        // roll back the WS handshake with terminate() — NOT close(1006).
+        const attach = this.opts.humanOwner.attachTui(leaseId);
+        if (attach.kind === "refused") {
+          try { ws.terminate(); } catch { /* silent */ }
           this.ownerSlot = { kind: "empty" };
+          this.reportInternal(`attach_refused_${attach.reason}`, {});
           return;
         }
-        // Stop accepting new HTTP connections so a second peer can't
-        // reach the Upgrade handler.
+        this.ownerSlot = { kind: "held", leaseId, ws };
+        // Handshake fully succeeded — remove the preauth ledger entry.
+        this.untrackPreAuthSocket(socket);
+        // Stop the HTTP listener so a second peer can't reach onUpgrade.
         try { this.httpServer?.close(); } catch { /* silent */ }
         this.wireOwnerSocket(ws, leaseId);
       });
-    } catch (e) {
-      handleUpgradeThrew = true;
+    } catch (_e) {
       this.reportInternal("ws_handle_upgrade_throw", {});
       this.rollbackReservation(leaseId);
       try { socket.destroy(); } catch { /* silent */ }
     }
-    // If handleUpgrade did NOT throw but never invoked the callback
-    // (some ws versions silently drop malformed handshakes), we rely
-    // on socket 'close' -> nothing to do here; the reserved slot
-    // remains until the socket closes. But we should have a safety
-    // net: destroy on close.
-    if (!handleUpgradeThrew) {
-      socket.once("close", () => {
-        if (this.ownerSlot.kind === "reserved" && this.ownerSlot.leaseId === leaseId) {
-          this.rollbackReservation(leaseId);
-        }
-      });
-    }
+    // Rollback on socket close BEFORE the ws callback fires (e.g.,
+    // handshake never completes because peer went away).
+    socket.once("close", () => {
+      if (this.ownerSlot.kind === "reserved" && this.ownerSlot.leaseId === leaseId) {
+        this.rollbackReservation(leaseId);
+      }
+    });
   }
 
   private rollbackReservation(leaseId: OwnerLeaseId): void {
     if (this.ownerSlot.kind === "reserved" && this.ownerSlot.leaseId === leaseId) {
       this.ownerSlot = { kind: "empty" };
     }
-    // Never call detachTui here — coordinator was not attachTui'd yet.
   }
 
   // ─────────── Wire path (post-Upgrade) ───────────
@@ -445,7 +458,6 @@ export class TuiWsServer {
         this.writeFrame(ws, { jsonrpc: "2.0", id: outcome.tuiId, result: outcome.result });
         return;
       case "forward_upstream":
-        // Wave 1A P0.2: no upstream TUI forward wired in this commit.
         this.writeFrame(ws, {
           jsonrpc: "2.0",
           id: frame.id,
@@ -474,7 +486,6 @@ export class TuiWsServer {
     ws: WebSocket,
     leaseId: OwnerLeaseId,
   ): void {
-    // Item #11: sole consume path is the lease-aware method.
     const outcome = this.opts.humanOwner.handleTuiResponseFrameWithLease(frame, leaseId);
     if (outcome.kind === "reject") {
       this.writeFrame(ws, {
@@ -482,18 +493,69 @@ export class TuiWsServer {
         id: outcome.tuiId,
         error: { code: outcome.code, message: outcome.message, data: outcome.data },
       });
+      return;
     }
-    // On forward_reverse_response the frame is meant for upstream Codex;
-    // Wave 1A P0.2 has no upstream transport in scope for this file.
-    // The coordinator has already consumed the reverseNs entry.
+    // forward_reverse_response: send the rewritten frame upstream. Best-effort;
+    // failure is a diagnostic.
+    void this.opts.upstreamTransport.writeFrame(outcome.frame).catch(() => {
+      this.reportInternal("forward_reverse_response_write_failed", {});
+    });
   }
 
   private onOwnerClose(leaseId: OwnerLeaseId): void {
-    if (this.ownerSlot.kind !== "held" || this.ownerSlot.leaseId !== leaseId) {
-      return;
-    }
+    if (this.ownerSlot.kind !== "held" || this.ownerSlot.leaseId !== leaseId) return;
     this.ownerSlot = { kind: "empty" };
     this.opts.humanOwner.detachTui(leaseId);
+  }
+
+  // ─────────── Upstream ↔ coordinator (副指挥 3ed5c004 P0-1) ───────────
+
+  private onUpstreamFrame(raw: unknown): void {
+    const cls = classifyMessage(raw);
+    switch (cls.kind) {
+      case "request": {
+        const decision = this.opts.humanOwner.handleUpstreamReverseRequest(cls.frame);
+        if (decision.kind === "reject_upstream") {
+          void this.opts.upstreamTransport.writeFrame(decision.upstreamError).catch(() => {
+            this.reportInternal("upstream_reject_write_failed", {});
+          });
+          return;
+        }
+        // Phase 1 approvalMode="never" never emits forward_tui. If it
+        // did, we'd write the frame to the owner socket.
+        if (this.ownerSlot.kind === "held") {
+          this.writeFrame(this.ownerSlot.ws, decision.tuiFrame);
+        } else {
+          this.reportInternal("forward_tui_no_incumbent", {});
+        }
+        return;
+      }
+      case "response":
+        // Upstream response routing lives in `uds-server` (internal
+        // scheduler / proxied-TUI). Nothing for the WS server to do
+        // here in Phase 1; explicit diagnostic so a real integration
+        // notices if this ever fires unexpectedly.
+        this.reportInternal("upstream_response_on_ws_face", {});
+        return;
+      case "notification":
+        // Phase 1: Codex event stream is not routed anywhere yet. NOT
+        // silent — explicit diagnostic so audit can spot drops.
+        this.reportInternal("upstream_notification_dropped_phase1", {});
+        return;
+      case "malformed":
+        this.reportInternal(`upstream_frame_malformed_${cls.reason}`, {});
+        return;
+    }
+  }
+
+  private onUpstreamClose(): void {
+    // Upstream tore down. Detach the owner if any.
+    if (this.ownerSlot.kind === "held") {
+      const held = this.ownerSlot;
+      this.ownerSlot = { kind: "empty" };
+      try { held.ws.close(1001, "upstream_closed"); } catch { /* silent */ }
+      try { this.opts.humanOwner.detachTui(held.leaseId); } catch { /* silent */ }
+    }
   }
 
   // ─────────── Helpers ───────────

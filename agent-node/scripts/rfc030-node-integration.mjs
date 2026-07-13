@@ -54,11 +54,23 @@ function makeCoord() {
   return { coord, mux, reverseNs, diag };
 }
 
+class FakeUpstream {
+  written = [];
+  frameHandlers = [];
+  closeHandlers = [];
+  async writeFrame(f) { this.written.push(f); }
+  onFrame(h) { this.frameHandlers.push(h); return () => { this.frameHandlers = this.frameHandlers.filter((x) => x !== h); }; }
+  onClose(h) { this.closeHandlers.push(h); return () => {}; }
+  async close() {}
+  emitFrame(raw) { for (const h of [...this.frameHandlers]) h(raw); }
+}
+
 async function harness(overrides = {}) {
   const { coord, diag } = makeCoord();
   const bearer = TuiBearer.mint();
   const plaintext = bearer.takePlaintextForLauncher();
-  const server = new TuiWsServer({
+  const upstream = new FakeUpstream();
+  const constructorOpts = {
     bearer,
     humanOwner: coord,
     authorizer: {
@@ -73,10 +85,15 @@ async function harness(overrides = {}) {
       newCorrelationId: () => "cid",
       reportInternalError: (e) => { diag.entries.push(e); },
     },
-    ...overrides,
-  });
+    upstreamTransport: upstream,
+  };
+  // Use the @internal test factory when overrides for maxPayload /
+  // headerTimeoutMs / maxPreAuthSockets are provided.
+  const server = (overrides && Object.keys(overrides).length > 0)
+    ? TuiWsServer._createForTest(constructorOpts, overrides)
+    : new TuiWsServer(constructorOpts);
   await server.start();
-  return { server, bearer, plaintext, coord, diag };
+  return { server, bearer, plaintext, coord, diag, upstream };
 }
 
 function rawHttp(port, lines) {
@@ -488,11 +505,122 @@ async function test_real_close_codes() {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// P0-1 upstream reverse-request routing
+// ─────────────────────────────────────────────────────────────────────
+
+async function test_upstream_reverse_phase1_noowner() {
+  const h = await harness();
+  try {
+    const before = h.upstream.written.length;
+    h.upstream.emitFrame({ jsonrpc: "2.0", id: "cx_reverse_1", method: "approval/request" });
+    // Give the async event loop a beat.
+    await new Promise((r) => setTimeout(r, 20));
+    if (h.upstream.written.length <= before) {
+      fail("P0-1 upstream reverse -> writes back", "no frame written back to upstream");
+      return;
+    }
+    const written = h.upstream.written[before];
+    assertEq("P0-1 reverse id preserved", written.id, "cx_reverse_1");
+    if (!("error" in written)) { fail("P0-1 reverse has error", "no error field"); return; }
+    // Under Phase 1 approvalMode=never, coordinator returns NoOwner
+    // with reason=approval_mode_never.
+    assertEq("P0-1 reverse code=NoOwner (-32052)", written.error.code, -32052);
+    assertEq("P0-1 reverse reason=approval_mode_never",
+      written.error.data.reason, "approval_mode_never");
+  } finally { await h.server.stop(); }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// P0-2 half-open reject: peer keeps socket alive; ledger drops
+// ─────────────────────────────────────────────────────────────────────
+
+async function test_half_open_reject_ledger_drops() {
+  const h = await harness({ headerTimeoutMs: 300 });
+  try {
+    const port = h.server.boundPortActual();
+    // Send a request that will be rejected (no Authorization) via a
+    // socket with allowHalfOpen — we do NOT close our own write side.
+    const s = net.createConnection({ port, host: ALLOWED_LOOPBACK, allowHalfOpen: true });
+    await new Promise((r) => s.once("connect", r));
+    const before = h.server.preAuthCount();
+    s.write([
+      "GET / HTTP/1.1",
+      `Host: ${ALLOWED_LOOPBACK}:${port}`,
+      "Upgrade: websocket",
+      "Connection: Upgrade",
+      "Sec-WebSocket-Version: 13",
+      "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+      "", "",
+    ].join("\r\n"));
+    // Wait past the reject bounded-destroy timeout (200 ms).
+    await new Promise((r) => setTimeout(r, 500));
+    if (h.server.preAuthCount() === 0) {
+      ok("P0-2 half-open reject: preauth ledger drops to 0");
+    } else {
+      fail("P0-2 half-open reject", `ledger still at ${h.server.preAuthCount()}`);
+    }
+    // stop() must return promptly.
+    const stopStart = Date.now();
+    await h.server.stop();
+    const stopMs = Date.now() - stopStart;
+    if (stopMs < 300) ok(`P0-2 stop bounded (${stopMs} ms)`);
+    else fail("P0-2 stop bounded", `stop took ${stopMs} ms`);
+    try { s.destroy(); } catch {}
+  } finally { try { await h.server.stop(); } catch {} }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// P1-5 non-canonical Sec-WebSocket-Key rejected
+// ─────────────────────────────────────────────────────────────────────
+
+async function test_noncanonical_ws_key() {
+  const h = await harness();
+  try {
+    // The 22-char base64 + `==` shape below has non-zero padding
+    // bits in the last decoded byte. Canonical round-trip must reject.
+    const nonCanonical = "AAAAAAAAAAAAAAAAAAAABB=="; // "B" high bits are set; re-encode !=
+    const { status } = await rawHttp(h.server.boundPortActual(), [
+      "GET / HTTP/1.1",
+      `Host: ${ALLOWED_LOOPBACK}:${h.server.boundPortActual()}`,
+      "Upgrade: websocket",
+      "Connection: Upgrade",
+      "Sec-WebSocket-Version: 13",
+      `Sec-WebSocket-Key: ${nonCanonical}`,
+      `Authorization: Bearer ${h.plaintext}`,
+      "",
+    ]);
+    assertEq("P1-5 non-canonical WS key -> 400", status, 400);
+  } finally { await h.server.stop(); }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// P1-1 duplicate Host rejected
+// ─────────────────────────────────────────────────────────────────────
+
+async function test_duplicate_host_rejected() {
+  const h = await harness();
+  try {
+    const { status } = await rawHttp(h.server.boundPortActual(), [
+      "GET / HTTP/1.1",
+      `Host: ${ALLOWED_LOOPBACK}:${h.server.boundPortActual()}`,
+      "Host: attacker.example.com:80",
+      "Upgrade: websocket",
+      "Connection: Upgrade",
+      "Sec-WebSocket-Version: 13",
+      "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+      `Authorization: Bearer ${h.plaintext}`,
+      "",
+    ]);
+    assertEq("P1-1 duplicate Host -> 400", status, 400);
+  } finally { await h.server.stop(); }
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective — Node integration");
+  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 2 — Node integration");
   await test_happy();
   await test_slow_header();
   await test_missing_bearer();
@@ -506,6 +634,10 @@ async function main() {
   test_cross_lease();
   await test_concurrent_upgrades_exactly_one_owner();
   await test_real_close_codes();
+  await test_upstream_reverse_phase1_noowner();
+  await test_half_open_reject_ledger_drops();
+  await test_noncanonical_ws_key();
+  await test_duplicate_host_rejected();
   console.log("");
   console.log(`real integration PASS: ${passed}/${passed + failed}`);
   if (failed > 0) {

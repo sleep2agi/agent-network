@@ -120,7 +120,7 @@ async function makeLifecycle(overrides?: Partial<GatewayLifecycleOptions>): Prom
   const preflight: PreflightRunner = { async run() { /* ok */ } };
   const opts: GatewayLifecycleOptions = {
     backendSocketPath: paths.backendSocketPath,
-    
+
     socketDir: paths.socketDir,
     preflight,
     backend: makeBackend(),
@@ -153,7 +153,7 @@ describe("preflight ordering (副指挥 Segment C narrowing)", () => {
     const preflight: PreflightRunner = { async run() { throw new Error("baseline mismatch (fake)"); } };
     const lifecycle = new GatewayLifecycle({
       backendSocketPath: paths.backendSocketPath,
-      
+
       socketDir: paths.socketDir,
       preflight,
       backend: makeBackend(),
@@ -186,7 +186,7 @@ describe("preflight ordering (副指挥 Segment C narrowing)", () => {
     const { diagnostics } = collectDiagnostics();
     const lifecycle = new GatewayLifecycle({
       backendSocketPath: paths.backendSocketPath,
-      
+
       socketDir: paths.socketDir,
       preflight,
       backend: makeBackend(),
@@ -204,7 +204,7 @@ describe("preflight ordering (副指挥 Segment C narrowing)", () => {
       expect(sawSocketsDuringPreflight.dir).toBe(false);
       // After start, they do exist.
       expect(fs.existsSync(paths.backendSocketPath)).toBe(true);
-      
+
     } finally {
       await lifecycle.stop();
       fs.rmSync(paths.socketDir, { recursive: true, force: true });
@@ -401,7 +401,7 @@ describe("shutdown drain semantics", () => {
     const { diagnostics } = collectDiagnostics();
     const lifecycle = new GatewayLifecycle({
       backendSocketPath: paths.backendSocketPath,
-      
+
       socketDir: paths.socketDir,
       preflight: { async run() {} },
       backend: makeBackend(),
@@ -467,7 +467,7 @@ describe("P0#6 stop-during-preflight epoch fence", () => {
     };
     const lifecycle = new GatewayLifecycle({
       backendSocketPath: paths.backendSocketPath,
-      
+
       socketDir: paths.socketDir,
       preflight,
       backend: makeBackend(),
@@ -511,7 +511,7 @@ describe("P0#6 stop-during-preflight epoch fence", () => {
     };
     const lifecycle = new GatewayLifecycle({
       backendSocketPath: paths.backendSocketPath,
-      
+
       socketDir: paths.socketDir,
       preflight,
       backend: makeBackend(),

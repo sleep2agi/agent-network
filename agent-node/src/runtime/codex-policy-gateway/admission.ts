@@ -48,6 +48,8 @@ export type AdmissionRejectReason =
   | "http_extensions_present"
   | "http_host_missing"
   | "http_host_wrong"
+  | "http_host_multi_header"
+  | "http_header_multi"
   | "http_content_length_present"
   | "http_transfer_encoding_present"
   // Loopback rejections (surface: 400)
@@ -113,22 +115,36 @@ export const ALLOWED_LOOPBACK = "127.0.0.1";
 // ────────────────────────────────────────────────────────────────────────
 
 /**
- * Return the count of Authorization headers on the request, sourced
- * from `req.rawHeaders`. `req.headers.authorization` in Node combines
- * duplicates with a comma, which would let a hostile client smuggle
- * `Authorization: Bearer X, Authorization: Bearer Y` under one merged
- * key.
- *
- * `rawHeaders` is a flat `[name0, value0, name1, value1, ...]` array
- * preserving occurrences.
+ * Return the count of a named header (case-insensitive) on the raw
+ * header list. `req.headers[x]` combines duplicates with a comma
+ * which would let a hostile client smuggle two values under one
+ * merged key.
  */
-function countAuthorizationHeaders(req: IncomingMessage): number {
+function countRawHeader(req: IncomingMessage, name: string): number {
   const raw = req.rawHeaders;
+  const target = name.toLowerCase();
   let n = 0;
   for (let i = 0; i < raw.length; i += 2) {
-    if (raw[i]?.toLowerCase() === "authorization") n++;
+    if (raw[i]?.toLowerCase() === target) n++;
   }
   return n;
+}
+
+function countAuthorizationHeaders(req: IncomingMessage): number {
+  return countRawHeader(req, "authorization");
+}
+
+/**
+ * Read the FIRST raw value for a header from `rawHeaders`. Used only
+ * after we've asserted the header appears exactly once.
+ */
+function firstRawHeader(req: IncomingMessage, name: string): string | undefined {
+  const raw = req.rawHeaders;
+  const target = name.toLowerCase();
+  for (let i = 0; i < raw.length; i += 2) {
+    if (raw[i]?.toLowerCase() === target) return raw[i + 1];
+  }
+  return undefined;
 }
 
 function extractAuthorizationRaw(req: IncomingMessage): string | undefined {
@@ -187,11 +203,11 @@ function validateHttpStructure(
   if (!isStrictIpv4Loopback(socket.remoteAddress)) {
     return { ok: false, status: 400, reason: "remote_not_loopback" };
   }
-  // Host header MUST be present and MUST be exactly `127.0.0.1:<port>`.
-  const hostHeader = req.headers.host;
-  if (typeof hostHeader !== "string" || hostHeader.length === 0) {
-    return { ok: false, status: 400, reason: "http_host_missing" };
-  }
+  // Singleton Host header via rawHeaders (副指挥 3ed5c004 P1-1).
+  const hostCount = countRawHeader(req, "host");
+  if (hostCount === 0) return { ok: false, status: 400, reason: "http_host_missing" };
+  if (hostCount > 1) return { ok: false, status: 400, reason: "http_host_multi_header" };
+  const hostHeader = firstRawHeader(req, "host");
   const expectedHost = `${ALLOWED_LOOPBACK}:${actualBoundPort}`;
   if (hostHeader !== expectedHost) {
     return { ok: false, status: 400, reason: "http_host_wrong" };
@@ -203,24 +219,29 @@ function validateHttpStructure(
   if (req.headers["transfer-encoding"] !== undefined) {
     return { ok: false, status: 400, reason: "http_transfer_encoding_present" };
   }
-  const upgrade = (req.headers.upgrade ?? "").toString().toLowerCase();
-  const connection = (req.headers.connection ?? "").toString().toLowerCase();
+  // Singleton Upgrade / Connection / Sec-WebSocket-Version (副指挥
+  // 3ed5c004 P1-1). Duplicate occurrences of any of these are treated
+  // the same way as the corresponding "malformed" case — 400.
+  for (const name of ["upgrade", "connection", "sec-websocket-version"]) {
+    const c = countRawHeader(req, name);
+    if (c > 1) return { ok: false, status: 400, reason: "http_header_multi" };
+  }
+  const upgrade = (firstRawHeader(req, "upgrade") ?? "").toLowerCase();
+  const connection = (firstRawHeader(req, "connection") ?? "").toLowerCase();
   if (upgrade !== "websocket") {
     return { ok: false, status: 400, reason: "http_missing_upgrade_header" };
   }
-  // Some clients send `Connection: keep-alive, Upgrade`. Accept either
-  // exact `upgrade` or a comma-separated token list containing it.
   const connectionTokens = connection.split(",").map((s) => s.trim());
   if (!connectionTokens.includes("upgrade")) {
     return { ok: false, status: 400, reason: "http_missing_connection_header" };
   }
-  if (req.headers["sec-websocket-version"] !== TUI_WS_VERSION) {
+  if (firstRawHeader(req, "sec-websocket-version") !== TUI_WS_VERSION) {
     return { ok: false, status: 426, reason: "http_bad_ws_version" };
   }
-  if (req.headers["sec-websocket-protocol"] !== undefined) {
+  if (countRawHeader(req, "sec-websocket-protocol") > 0) {
     return { ok: false, status: 400, reason: "http_subprotocol_present" };
   }
-  if (req.headers["sec-websocket-extensions"] !== undefined) {
+  if (countRawHeader(req, "sec-websocket-extensions") > 0) {
     return { ok: false, status: 400, reason: "http_extensions_present" };
   }
   return { ok: true };
@@ -311,18 +332,25 @@ export function writeGenericReject(socket: Socket, status: number): void {
     "",
     body,
   ].join("\r\n");
-  // Write + FIN. Under real Node, `socket.end(payload)` writes then
-  // half-closes the connection cleanly, giving the peer time to read.
-  // Bun's `node:http` upgrade shim currently swallows bytes written to
-  // the upgrade socket; the Node E2E test file drives the actual wire
-  // path (bun-test suite covers the class-level behaviour via mocks).
+  // 副指挥 3ed5c004 P0-2: `socket.end()` on an allowHalfOpen peer
+  // does NOT destroy the underlying TCP connection when the peer
+  // ignores the FIN. Arm a bounded destroy so the reject path
+  // cannot pin the admission ledger.
   try {
     const payload = Buffer.from(headers, "utf8");
     socket.end(payload);
+    const bound = setTimeout(() => {
+      try { if (!socket.destroyed) socket.destroy(); } catch { /* silent */ }
+    }, REJECT_DESTROY_TIMEOUT_MS);
+    bound.unref?.();
   } catch {
     /* silent */
   }
 }
+
+/** Bounded timeout after which `writeGenericReject` force-destroys a
+ *  socket that hasn't fully closed. Hard-pinned; not configurable. */
+export const REJECT_DESTROY_TIMEOUT_MS = 200;
 
 const STATUS_TEXT: Record<number, string> = {
   400: "Bad Request",
