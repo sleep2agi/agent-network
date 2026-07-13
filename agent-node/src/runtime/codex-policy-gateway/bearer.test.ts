@@ -320,6 +320,46 @@ describe("SecretRedactor.finish() — partial-secret prefix -> marker (副指挥
     const out = r.finish();
     expect(out.length).toBe(0);
   });
+
+  // 副指挥 06e92ef7 P0-3 explicit repro: "x" + credential-prefix.
+  // The previous round only handled whole-tail-is-prefix. This
+  // round searches for the longest suffix of tail matching a
+  // prefix of secret and redacts THAT.
+  test("leading normal byte + credential prefix -> leading byte kept, prefix redacted", () => {
+    // Use a bearer whose bytes are unique and don't appear in the
+    // marker text (`[REDACTED bearer]`). We pick digits so we can
+    // assert `output.contains(prefix)` cleanly.
+    const bearer = "1234567890abcdef" + "!@#$%^&*()".repeat(3); // 46 chars, mixes; no overlap with marker letters
+    // Ensure our bearer prefix chars don't accidentally appear in
+    // the marker.
+    const marker = "[[REDACTED_ZZZ]]";
+    for (let n = 2; n <= 20; n++) {
+      const r = new SecretRedactor(bearer, marker);
+      const prefix = bearer.slice(0, n);
+      const injected = "AA" + prefix;
+      r.push(Buffer.from(injected));
+      const out = r.finish().toString("utf8");
+      // Prefix bytes MUST NOT appear contiguous anywhere in output.
+      expect(out).not.toContain(prefix);
+      // Marker MUST be present.
+      expect(out).toContain(marker);
+      // Leading innocent bytes preserved.
+      expect(out.startsWith("AA")).toBe(true);
+    }
+  });
+
+  test("multi-byte leading + prefix: leading bytes preserved, tail-suffix marker", () => {
+    // "XYZ" (innocent, non-overlapping with SECRET or MARK) +
+    // secret-prefix-of-length-10.
+    const r = new SecretRedactor(SECRET, "[REDACTED_ZZ]");
+    const innocent = "PPP";
+    const prefix = SECRET.slice(0, 10);
+    r.push(Buffer.from(innocent + prefix));
+    const out = r.finish().toString("utf8");
+    expect(out).not.toContain(prefix);
+    expect(out.startsWith(innocent)).toBe(true);
+    expect(out.endsWith("[REDACTED_ZZ]")).toBe(true);
+  });
 });
 
 describe("SecretRedactor — caller-buffer backing invariant", () => {

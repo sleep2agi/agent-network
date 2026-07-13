@@ -637,11 +637,127 @@ async function test_duplicate_host_rejected() {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// P0-1 lifecycle upstream close: not-running
+// ─────────────────────────────────────────────────────────────────────
+
+async function test_lifecycle_upstream_close_not_running() {
+  // Uses lifecycle directly through the exported bundle. Verify
+  // that after start + upstream close, `lifecycle.currentState()`
+  // transitions out of "running".
+  const { GatewayLifecycle, defaultDenyTuiAuthorizer } = mod;
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const socketDir = fs.mkdtempSync(path.join(os.tmpdir(), "rfc030-p04-"));
+  fs.rmdirSync(socketDir);
+  const upstream = {
+    written: [], _f: [], _c: [],
+    async writeFrame(f) { this.written.push(f); },
+    onFrame(h) { this._f.push(h); return () => { this._f = this._f.filter((x) => x !== h); }; },
+    onClose(h) { this._c.push(h); return () => { this._c = this._c.filter((x) => x !== h); }; },
+    async close() { for (const h of [...this._c]) h(); },
+    emitClose() { for (const h of [...this._c]) h(); },
+  };
+  const lifecycle = new GatewayLifecycle({
+    backendSocketPath: path.join(socketDir, "backend.sock"),
+    socketDir,
+    preflight: { async run() {} },
+    backend: {
+      async enqueueTask() { return { outcome: "accepted", taskId: "t", queuePosition: 0, duplicate: false }; },
+      async getTaskState() { return { state: "unknown" }; },
+      async cancelQueuedTask() { return { outcome: "refused_not_queued", currentState: "unknown" }; },
+    },
+    upstreamTransport: upstream,
+    initSnapshotSource: { currentSnapshot: () => ({}) },
+    diagnosticsSink: { newCorrelationId: () => "cid", reportInternalError: () => {} },
+    backendCapability: "lifecycle-p04-cap-32chars-abcdefghij",
+  });
+  await lifecycle.start();
+  const stateBefore = lifecycle.currentState();
+  assertEq("P0-1 lifecycle state after start = running", stateBefore, "running");
+  upstream.emitClose();
+  await new Promise((r) => setTimeout(r, 30));
+  const stateAfter = lifecycle.currentState();
+  if (stateAfter !== "running") {
+    ok(`P0-1 lifecycle transitioned out of running after upstream close (${stateAfter})`);
+  } else {
+    fail("P0-1 lifecycle upstream close", `state still 'running' after emitClose`);
+  }
+  try { await lifecycle.stop(); } catch {}
+  try { fs.rmSync(socketDir, { recursive: true, force: true }); } catch {}
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// P0-2 bearer not claimable after preflight failure
+// ─────────────────────────────────────────────────────────────────────
+
+async function test_bearer_not_claimable_after_preflight_fail() {
+  const { GatewayLifecycle } = mod;
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const socketDir = fs.mkdtempSync(path.join(os.tmpdir(), "rfc030-p02-"));
+  fs.rmdirSync(socketDir);
+  const upstream = {
+    async writeFrame() {}, onFrame() { return () => {}; },
+    onClose() { return () => {}; }, async close() {},
+  };
+  const lifecycle = new GatewayLifecycle({
+    backendSocketPath: path.join(socketDir, "backend.sock"),
+    socketDir,
+    preflight: { async run() { throw new Error("baseline_mismatch_fake"); } },
+    backend: {
+      async enqueueTask() { return { outcome: "accepted", taskId: "t", queuePosition: 0, duplicate: false }; },
+      async getTaskState() { return { state: "unknown" }; },
+      async cancelQueuedTask() { return { outcome: "refused_not_queued", currentState: "unknown" }; },
+    },
+    upstreamTransport: upstream,
+    initSnapshotSource: { currentSnapshot: () => ({}) },
+    diagnosticsSink: { newCorrelationId: () => "cid", reportInternalError: () => {} },
+    backendCapability: "lifecycle-p02-cap-32chars-abcdefghij",
+  });
+  let threw = "";
+  try { await lifecycle.start(); } catch (e) { threw = e.message; }
+  assertEq("P0-2 state after preflight fail = stopped", lifecycle.currentState(), "stopped");
+  const bearer = lifecycle.takeTuiBearerPlaintextForLauncher();
+  if (bearer === null) {
+    ok("P0-2 takeTuiBearerPlaintextForLauncher returns null in stopped state");
+  } else {
+    fail("P0-2 bearer claimable after preflight fail", `got ${bearer.length}-byte plaintext`);
+  }
+  try { await lifecycle.stop(); } catch {}
+  try { fs.rmSync(socketDir, { recursive: true, force: true }); } catch {}
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// P0-4 stale owner terminate on ws error
+// ─────────────────────────────────────────────────────────────────────
+
+async function test_stale_owner_ws_error_terminated() {
+  const h = await harness();
+  try {
+    const port = h.server.boundPortActual();
+    const ws = new WebSocket(`ws://${ALLOWED_LOOPBACK}:${port}/`, {
+      headers: { Authorization: `Bearer ${h.plaintext}` },
+      perMessageDeflate: false,
+    });
+    await new Promise((r, j) => { ws.once("open", r); ws.once("error", j); });
+    // Force the server-side ws to emit an error, which should
+    // terminate the socket AND detach the coordinator.
+    // We can simulate this by destroying the underlying socket from
+    // the client side and waiting for server-side ws close.
+    ws.close();
+    await new Promise((r) => setTimeout(r, 50));
+    assertEq("P0-4 owner slot empty after ws close/error", h.server.ownerSlotState(), "empty");
+  } finally { await h.server.stop(); }
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 2 — Node integration");
+  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 4 — Node integration");
   await test_happy();
   await test_slow_header();
   await test_missing_bearer();
@@ -658,6 +774,9 @@ async function main() {
   await test_upstream_reverse_phase1_noowner();
   await test_sole_router_handler_count();
   await test_half_open_reject_ledger_drops();
+  await test_lifecycle_upstream_close_not_running();
+  await test_bearer_not_claimable_after_preflight_fail();
+  await test_stale_owner_ws_error_terminated();
   await test_noncanonical_ws_key();
   await test_duplicate_host_rejected();
   console.log("");

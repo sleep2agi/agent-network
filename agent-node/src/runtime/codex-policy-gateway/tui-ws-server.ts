@@ -183,14 +183,15 @@ export class TuiWsServer {
 
   deliverReverseRequestToOwner(frame: unknown): boolean {
     if (this.ownerSlot.kind !== "held") return false;
-    this.writeFrame(this.ownerSlot.ws, frame);
-    return true;
+    // 副指挥 06e92ef7 P1: writeFrame is best-effort under Node/ws.
+    // If the send throws we MUST return false so the router logs
+    // an orphan diagnostic instead of assuming delivery.
+    return this.writeFrameStrict(this.ownerSlot.ws, frame);
   }
 
   deliverProxiedResponseToOwner(_tuiId: number | string, frame: JsonRpcResponseFrame): boolean {
     if (this.ownerSlot.kind !== "held") return false;
-    this.writeFrame(this.ownerSlot.ws, frame);
-    return true;
+    return this.writeFrameStrict(this.ownerSlot.ws, frame);
   }
 
   // ─────────── Pre-auth socket tracking ───────────
@@ -334,6 +335,14 @@ export class TuiWsServer {
 
   private wireOwnerSocket(ws: WebSocket, leaseId: OwnerLeaseId): void {
     ws.on("message", (raw, isBinary) => {
+      // 副指挥 06e92ef7 P0-4: re-verify the owner slot per frame.
+      // A stale socket whose lease no longer matches the incumbent
+      // must NOT get initialize / request / response handling.
+      if (this.ownerSlot.kind !== "held" || this.ownerSlot.leaseId !== leaseId) {
+        this.reportInternal("ws_frame_from_stale_socket");
+        try { ws.terminate(); } catch { /* silent */ }
+        return;
+      }
       if (isBinary) {
         this.reportInternal("ws_binary_refused");
         try { ws.close(1003, "binary_unsupported"); } catch { /* silent */ }
@@ -350,8 +359,14 @@ export class TuiWsServer {
       }
       void this.onFrame(parsed, ws, leaseId);
     });
+    // 副指挥 06e92ef7 P0-4: on error the owner socket is TERMINATED
+    // (not merely detached). A stale socket that keeps sending
+    // frames must have its underlying transport killed.
     ws.on("close", () => this.onOwnerClose(leaseId));
-    ws.on("error", () => this.onOwnerClose(leaseId));
+    ws.on("error", () => {
+      try { ws.terminate(); } catch { /* silent */ }
+      this.onOwnerClose(leaseId);
+    });
   }
 
   private async onFrame(raw: unknown, ws: WebSocket, leaseId: OwnerLeaseId): Promise<void> {
@@ -442,6 +457,12 @@ export class TuiWsServer {
   private writeFrame(ws: WebSocket, frame: unknown): void {
     try { ws.send(JSON.stringify(frame)); }
     catch { this.reportInternal("ws_write_failed"); }
+  }
+
+  /** Like `writeFrame` but returns true only when send() didn't throw. */
+  private writeFrameStrict(ws: WebSocket, frame: unknown): boolean {
+    try { ws.send(JSON.stringify(frame)); return true; }
+    catch { this.reportInternal("ws_write_failed"); return false; }
   }
 
   private reportInternal(operation: string): void {

@@ -36,9 +36,20 @@ interface BearerInternalState {
   plaintext: Buffer;
   digest: Buffer;
   state: BearerState;
+  /**
+   * Monotonic time source (副指挥 06e92ef7 P1-5). Production uses
+   * `performance.now()` so a wall-clock rewind cannot extend TTL
+   * beyond the intended 30 s window. Tests pass a custom nowFn.
+   */
   nowFn: () => number;
   ttlMs: number;
   mintedAtMs: number;
+}
+
+/** Monotonic clock in ms. Node's `performance.now()` is monotonic
+ *  (not affected by wall-clock adjustments). */
+function monotonicNowMs(): number {
+  return performance.now();
 }
 
 const BEARER_STATE = new WeakMap<TuiBearer, BearerInternalState>();
@@ -65,7 +76,8 @@ export class TuiBearer {
   }
 
   static mint(): TuiBearer {
-    return TuiBearer._mintCore(Date.now, BEARER_TTL_MS);
+    // Monotonic clock so a wall-clock rewind can't extend the TTL.
+    return TuiBearer._mintCore(monotonicNowMs, BEARER_TTL_MS);
   }
 
   /**
@@ -227,28 +239,30 @@ export class SecretRedactor {
   }
 
   /**
-   * Return residual tail. Corrective (副指挥 1b24ae71 P0-2): if the
-   * tail is a NON-EMPTY PROPER PREFIX of the secret, emit the redact
-   * marker in its place. This closes the "43-char secret fed as 42
-   * chars: finish() releases the 42-char prefix" hole. Otherwise the
-   * tail is emitted as an owned copy so the caller cannot mutate our
-   * internal buffer. Idempotent — subsequent finish() returns empty.
+   * Return residual tail. Corrective (副指挥 06e92ef7 P0-3): the
+   * previous round only handled `whole-tail == secret proper prefix`.
+   * A tail of `"x" + prefix` slipped through and released the whole
+   * credential prefix. This revision searches for the LONGEST
+   * suffix of the tail that equals a proper prefix of the secret. If
+   * any non-empty match exists, split the tail into
+   * `leading_normal_bytes` + `matching_suffix`, and emit
+   * `leading_bytes` + marker. This never leaks even one byte of the
+   * matching suffix (which is by construction a credential-prefix).
    */
   finish(): Buffer {
     const s = REDACTOR_STATE.get(this);
     if (s === undefined) return Buffer.alloc(0);
     if (s.finished) return Buffer.alloc(0);
     let returned: Buffer;
-    if (s.tail.length > 0 && s.tail.length < s.secret.length
-      && s.secret.subarray(0, s.tail.length).equals(s.tail)) {
-      // The tail is a proper prefix of the secret. Emit the marker
-      // instead of the credential-prefix bytes.
-      returned = Buffer.from(s.marker, "utf8");
+    const matchStart = findLongestTailSuffixMatchingSecretPrefix(s.tail, s.secret);
+    if (matchStart >= 0 && matchStart < s.tail.length) {
+      // Emit the leading innocent bytes + marker. The matching
+      // suffix (a credential-prefix candidate) is redacted.
+      const leading = s.tail.subarray(0, matchStart);
+      returned = Buffer.concat([leading, Buffer.from(s.marker, "utf8")]);
     } else {
-      // Innocent tail bytes; emit as a fresh owned copy so the
-      // caller's returned buffer is decoupled from our internal
-      // storage (defense in depth even though `s.tail` is already
-      // owned).
+      // No suffix of tail matches a proper prefix of secret; the tail
+      // is entirely innocent bytes. Emit as owned copy.
       returned = Buffer.from(s.tail);
     }
     s.tail.fill(0);
@@ -270,4 +284,27 @@ export class SecretRedactor {
     s.secret.fill(0);
     s.secret = Buffer.alloc(0);
   }
+}
+
+/**
+ * Return the smallest index `i` in [0, tail.length) such that
+ * `tail.subarray(i)` equals a non-empty proper prefix of `secret`
+ * (i.e., `secret.subarray(0, tail.length - i).equals(tail.subarray(i))`).
+ * If no such index exists, return -1. If i === 0 the entire tail
+ * matches a prefix of secret (the round-2 case). If 0 < i <
+ * tail.length, leading bytes are innocent.
+ */
+function findLongestTailSuffixMatchingSecretPrefix(tail: Buffer, secret: Buffer): number {
+  if (tail.length === 0 || secret.length === 0) return -1;
+  // Search from the longest possible suffix (i=0) to the shortest.
+  // Return the FIRST match to get the longest suffix.
+  const maxLen = Math.min(tail.length, secret.length - 1);
+  for (let i = tail.length - maxLen; i <= tail.length - 1; i++) {
+    const candidateLen = tail.length - i;
+    if (candidateLen === 0) continue;
+    if (secret.subarray(0, candidateLen).equals(tail.subarray(i))) {
+      return i;
+    }
+  }
+  return -1;
 }

@@ -1,22 +1,30 @@
 # Codex 0.144.0 loopback startup sequence — captured baseline
 
-> **Threat-model note (副指挥 1b24ae71):** the bearer is delivered to
-> the child process via an env variable that is visible to any process
-> sharing the same UID via `/proc/<pid>/environ`. This design does NOT
-> defend against a hostile same-UID sibling. The bearer's protective
-> effect is limited to defending against **stale or accidental peers**
-> (e.g. a stale process holding a valid but unused connection). True
-> same-UID isolation is a Wave 2 OS-isolation P0 item (final wording
-> pending 通信龙). No native wrapper / namespace isolation is added in
-> Commit 1.
+> **Threat-model note (副指挥 8eb1dcd1, honest narrowing).** The bearer
+> is delivered to the child process via an env variable that is
+> visible to any process sharing the same UID via `/proc/<pid>/environ`.
+> The bearer's protective effect is limited to defending against
+> **accidental / stale peers** and **guessing** (32-byte CSPRNG). It
+> does NOT claim to defend against a hostile same-UID sibling — same
+> UID is trusted by default. OS-level UID / userns / proc isolation is
+> a **Wave 2 OPTIONAL high-security profile**, NOT a default blocker.
+> No native wrapper / namespace isolation is added in Commit 1.
 
-> **Fixture scope note:** the four-read allowlist below (`account/read`,
-> `hooks/list`, `configRequirements/read`, `model/list`) is enforced by
-> the E2E harness's fake authorizer at
-> `scripts/rfc030-real-cli-e2e.mjs`. The production `GatewayLifecycle`
-> uses `defaultDenyTuiAuthorizer` (an EMPTY allowlist) — every method
-> is denied there. The four-read set belongs to Wave 2's real
-> authorizer.
+> **Fixture scope note.** The four-read allowlist below
+> (`account/read`, `hooks/list`, `configRequirements/read`,
+> `model/list`) is enforced ONLY by the E2E harness's fake authorizer
+> at `scripts/rfc030-real-cli-e2e.mjs`. The production
+> `GatewayLifecycle` uses `defaultDenyTuiAuthorizer` (an EMPTY
+> allowlist) — every method is denied there. The four-read set belongs
+> to Wave 2's real authorizer.
+
+> **Bootstrap-smoke scope note.** The real-CLI harness observes only
+> the FIRST authorizer call (`account/read`). The subsequent three
+> reads require Codex to receive real responses to `account/read`,
+> `hooks/list`, `configRequirements/read` — which the fake harness
+> does not provide. Only the first call and the WS Upgrade / bearer /
+> env allowlist / SecretRedactor invariants are asserted; the full
+> four-read ready sequence is out of scope for this smoke.
 
 
 Captured 2026-07-12 against `codex-cli 0.144.0` invoked as:

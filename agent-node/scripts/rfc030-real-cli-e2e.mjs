@@ -47,12 +47,11 @@ function fail(name, why) { failed++; console.log(`  FAIL ${name}: ${why}`); }
 // Env detection
 // ─────────────────────────────────────────────────────────────────────
 
-// 副指挥 1b24ae71 P1: version check and spawn MUST use the SAME
-// absolute path. Explicit RFC030_CODEX_BIN env override + resolution
-// via `command -v codex` so the harness is auditable and no PATH
-// re-resolution can slip a different binary in between.
+// 副指挥 06e92ef7 P1: absolute REALPATH — resolve symlinks so the
+// version check and spawn use the same on-disk binary. Exact version
+// match (`= 0.144.0`), NOT prefix.
 function resolveCodexBin() {
-  if (process.env.RFC030_CODEX_BIN) return process.env.RFC030_CODEX_BIN;
+  if (process.env.RFC030_CODEX_BIN) return path.resolve(process.env.RFC030_CODEX_BIN);
   try {
     return execSync("command -v codex", { encoding: "utf8", shell: "/bin/sh" }).trim();
   } catch { return null; }
@@ -61,21 +60,30 @@ function resolveCodexBin() {
 let CODEX_BIN = null;
 
 function haveCodex() {
-  const bin = resolveCodexBin();
-  if (bin === null || bin.length === 0) {
+  const rawBin = resolveCodexBin();
+  if (rawBin === null || rawBin.length === 0) {
     notes.push("codex binary not on PATH");
     return false;
   }
+  // Resolve symlinks so we're auditing the same inode we'll spawn.
+  let realBin;
   try {
-    const out = execSync(`${JSON.stringify(bin)} --version 2>&1`, { encoding: "utf8", shell: "/bin/sh" }).trim();
-    if (!/^codex-cli 0\.144\.0/.test(out)) {
-      notes.push(`resolved bin=${bin} but version ${out} != 0.144.0`);
+    realBin = fs.realpathSync(rawBin);
+  } catch {
+    notes.push(`realpath failed for ${rawBin}`);
+    return false;
+  }
+  try {
+    const out = execSync(`${JSON.stringify(realBin)} --version 2>&1`, { encoding: "utf8", shell: "/bin/sh" }).trim();
+    // Exact match, not prefix: reject 0.144.0-rc.1 etc.
+    if (out !== "codex-cli 0.144.0") {
+      notes.push(`resolved realpath=${realBin} but version '${out}' != 'codex-cli 0.144.0' exact`);
       return false;
     }
-    CODEX_BIN = bin;
-    notes.push(`using codex binary: ${bin}`);
+    CODEX_BIN = realBin;
+    notes.push(`using codex binary (realpath): ${realBin}`);
     return true;
-  } catch { notes.push(`codex --version failed for bin=${bin}`); return false; }
+  } catch { notes.push(`codex --version failed for realpath=${realBin}`); return false; }
 }
 
 function haveScriptPty() {
@@ -195,19 +203,34 @@ async function spawnCodex(plaintext, port, underPty) {
 }
 
 async function main() {
-  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 3 — real codex 0.144.0 bootstrap smoke");
+  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 4 — real codex 0.144.0 bootstrap smoke");
   const { server, plaintext, authorizerCalls } = await startServer();
 
-  // Env allowlist audit — no CommHub token slots.
-  for (const bad of ["ANET_CODEX_COMMHUB_TOKEN", "COMMHUB_TOKEN", "COMMHUB_AUTH_TOKEN",
-    "ANET_HUB_TOKEN", "DATABASE_URL", "AWS_ACCESS_KEY_ID", "NTOK_x1", "UTOK_admin"]) {
-    if (bad in process.env) {
-      // Not a fail — we just want to be sure we DON'T pass it through.
-      // The buildAllowlistEnv would reject it; here we spawn with a
-      // hand-crafted env and audit it explicitly.
-    }
+  // 副指挥 06e92ef7 P1: assert the child env exact-set is exactly
+  // the allowlist. Bad-key mutation attempts must FAIL loudly.
+  const expectedEnvKeys = ["PATH", "HOME", "TMPDIR", "CODEX_HOME", "ANET_CODEX_TUI_BEARER"].sort();
+  const childEnv = {
+    PATH: process.env.PATH ?? "/usr/bin:/bin",
+    HOME: os.tmpdir(),
+    TMPDIR: os.tmpdir(),
+    CODEX_HOME: os.tmpdir(),
+    ANET_CODEX_TUI_BEARER: plaintext,
+  };
+  const actualEnvKeys = Object.keys(childEnv).sort();
+  if (JSON.stringify(actualEnvKeys) === JSON.stringify(expectedEnvKeys)) {
+    ok(`child env exact-set matches allowlist: [${actualEnvKeys.join(",")}]`);
+  } else {
+    fail("env allowlist exact-set", `expected [${expectedEnvKeys.join(",")}] got [${actualEnvKeys.join(",")}]`);
   }
-  ok("env allowlist audit (see spawnCodex `env` construction)");
+  // Mutation red: attempting to add a CommHub-shape key must throw.
+  const { buildAllowlistEnv } = mod;
+  let mutationRefused = false;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    buildAllowlistEnv("b", { COMMHUB_TOKEN: "leak" });
+  } catch { mutationRefused = true; }
+  if (mutationRefused) ok("mutation red: COMMHUB_TOKEN refused by buildAllowlistEnv");
+  else fail("env mutation red", "COMMHUB_TOKEN went through buildAllowlistEnv");
 
   const { child, outChunks, errChunks, cleanup } = await spawnCodex(
     plaintext, server.boundPortActual(), true,

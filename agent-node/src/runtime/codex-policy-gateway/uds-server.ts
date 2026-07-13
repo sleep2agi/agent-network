@@ -512,31 +512,34 @@ export class BackendUdsServer {
 
   /**
    * Wrap the raw `InternalOrigin` so that the router's response
-   * dispatch settles the pending Promise exactly once. The router
-   * calls `origin.resolve/reject` directly; the wrapper enforces the
-   * `settled` gate and removes the entry from the internalPending
-   * map so `handleUpstreamClose` does not double-reject.
+   * dispatch settles the pending Promise exactly once. Uses
+   * `entry.upstreamId` (mutable box) so the cleanup path deletes
+   * the REAL id after allocation, not the placeholder that was
+   * present at closure-capture time.
+   *
+   * 副指挥 06e92ef7 P1-1: prior version captured `upstreamId=0` in
+   * the closure and always called `delete(0)`. Response bookkeeping
+   * accumulated map entries under real ids that never got cleaned.
    */
   private buildInternalPendingEntry(
-    upstreamId: number,
     outerResolve: (v: unknown) => void,
     outerReject: (e: Error) => void,
     label: string,
   ): { origin: InternalOrigin; entry: InternalPendingEntry } {
-    const entry: InternalPendingEntry = { upstreamId, origin: null as unknown as InternalOrigin, settled: false };
+    const entry: InternalPendingEntry = { upstreamId: -1, origin: null as unknown as InternalOrigin, settled: false };
     const origin: InternalOrigin = {
       kind: "internal",
       label,
       resolve: (v) => {
         if (entry.settled) return;
         entry.settled = true;
-        this.internalPending.delete(upstreamId);
+        this.internalPending.delete(entry.upstreamId);
         outerResolve(v);
       },
       reject: (e) => {
         if (entry.settled) return;
         entry.settled = true;
-        this.internalPending.delete(upstreamId);
+        this.internalPending.delete(entry.upstreamId);
         outerReject(e);
       },
     };
@@ -555,30 +558,29 @@ export class BackendUdsServer {
       // there routes response dispatch through the wrapped
       // resolve/reject so the internal pending entry is settled
       // exactly once.
-      let allocatedId = -1;
       const { origin, entry } = this.buildInternalPendingEntry(
-        0, // upstreamId filled below
         (v) => resolve(v as T),
         (e) => reject(e),
         label,
       );
       const alloc = this.opts.mux.allocateForInternalScheduler(origin);
-      allocatedId = alloc.upstreamId;
-      // Fix up the placeholder id in the pending map.
-      (entry as { upstreamId: number }).upstreamId = allocatedId;
-      this.internalPending.set(allocatedId, entry);
+      // Write the REAL id into the entry box so the wrapper's
+      // resolve/reject deletes the correct pending map key.
+      entry.upstreamId = alloc.upstreamId;
+      this.internalPending.set(alloc.upstreamId, entry);
       const frame: JsonRpcRequestFrame = {
-        jsonrpc: "2.0", id: allocatedId, method,
+        jsonrpc: "2.0", id: alloc.upstreamId, method,
         ...(params !== undefined ? { params } : {}),
       };
       this.opts.upstreamTransport.writeFrame(frame).catch((e: unknown) => {
-        // Reject via the origin so the pending map is cleaned up
-        // atomically with the outer Promise settlement.
+        // 副指挥 06e92ef7 P1-1: release the mux slot AND settle the
+        // outer Promise via the wrapped origin.reject so the pending
+        // map (keyed on the real upstream id) is cleaned up
+        // atomically. The mux consume here is a no-op if the router
+        // has already consumed the id, but calling it explicitly
+        // guarantees the mux frees the slot on write-fail.
+        this.opts.mux.consumeUpstreamResponse(alloc.upstreamId);
         origin.reject(e instanceof Error ? e : new Error(String(e)));
-        // The mux slot is now permanently allocated but never
-        // consumed. Since the router won't see a response for this
-        // id (transport rejected the write), it stays orphan until
-        // `drainAll` on stop.
       });
     });
   }

@@ -330,8 +330,6 @@ export class GatewayLifecycle {
       diagnostics,
     });
 
-    // Sole upstream router. Constructed + subscribed BEFORE preflight
-    // so nothing is dropped in the pre-active window.
     const tuiForward: TuiForwardSeam = {
       deliverReverseRequestToOwner: (frame) => this.tuiServer!.deliverReverseRequestToOwner(frame),
       deliverProxiedResponseToOwner: (tuiId, frame) => this.tuiServer!.deliverProxiedResponseToOwner(tuiId, frame),
@@ -344,94 +342,122 @@ export class GatewayLifecycle {
       tuiForward,
       onUpstreamClose: () => this.onUpstreamCloseFromRouter(),
     });
-    this.upstreamRouter.subscribe();
+    // 副指挥 06e92ef7 P0-5: subscribe is atomic — if the second
+    // subscription throws, subscribe() itself rolls back the first
+    // handler internally (see upstream-router.ts). At this level we
+    // additionally wrap the whole init in a try/catch so any
+    // constructor / subscribe throw lands cleanly in stopped.
+    try {
+      this.upstreamRouter.subscribe();
+    } catch (e) {
+      this.rollbackStartFailure();
+      throw e;
+    }
+
+    // Helper that checks the terminal fence + stop request AFTER
+    // every await and rolls back cleanly.
+    const throwIfAbortedAfterAwait = (label: string): void => {
+      if (this.upstreamRouter?.wasCloseBeforeActive() || this.upstreamRouter?.currentState() === "terminal") {
+        this.rollbackStartFailure();
+        throw new Error(`start aborted: upstream closed (${label})`);
+      }
+      if (this.stopRequested) {
+        this.rollbackStartFailure();
+        throw new Error(`start aborted by concurrent stop (${label})`);
+      }
+    };
 
     try {
       await this.opts.preflight.run();
     } catch (e) {
-      // Preflight failure: unsubscribe + roll back everything.
-      this.upstreamRouter?.unsubscribe();
-      this.upstreamRouter = null;
-      this.backendServer = null;
-      this.tuiServer = null;
-      this.humanOwner = null;
-      this.mux = null;
-      this.reverseNs = null;
-      this.state = "stopped";
+      this.rollbackStartFailure();
       throw e;
     }
-    // P0 fence #1 — stop requested during preflight.
-    if (this.stopRequested) {
-      this.upstreamRouter?.unsubscribe();
-      this.upstreamRouter = null;
-      this.state = "stopped";
-      throw new Error("start aborted by concurrent stop (preflight)");
-    }
-    // 副指挥 1b24ae71 P0-1: if upstream fired close during preflight,
-    // abort start cleanly.
-    if (this.upstreamRouter.wasCloseBeforeActive()) {
-      this.upstreamRouter.unsubscribe();
-      this.upstreamRouter = null;
-      this.state = "stopped";
-      throw new Error("start aborted: upstream closed during preflight");
-    }
-
-    // P0 fence #2 — stop requested before we bind sockets.
-    if (this.stopRequested) {
-      this.state = "stopped";
-      this.backendServer = null;
-      this.tuiServer = null;
-      this.humanOwner = null;
-      this.mux = null;
-      this.reverseNs = null;
-      throw new Error("start aborted by concurrent stop (pre-listen)");
-    }
+    throwIfAbortedAfterAwait("preflight");
 
     try {
       await this.backendServer.start();
-      await this.tuiServer.start();
     } catch (e) {
-      try { await this.backendServer?.stop(); } catch { /* silent */ }
-      try { await this.tuiServer?.stop(); } catch { /* silent */ }
-      this.upstreamRouter?.unsubscribe();
-      this.upstreamRouter = null;
-      this.state = "stopped";
-      this.backendServer = null;
-      this.tuiServer = null;
-      this.humanOwner = null;
-      this.mux = null;
-      this.reverseNs = null;
+      this.rollbackStartFailure();
       throw e;
     }
-    // Activate the router — servers are up, drain buffered frames.
-    this.upstreamRouter.activate();
+    throwIfAbortedAfterAwait("backend_start");
 
-    // P0 fence #3 — stop requested during server.start.
-    if (this.stopRequested) {
+    try {
+      await this.tuiServer.start();
+    } catch (e) {
+      try { await this.backendServer.stop(); } catch { /* silent */ }
+      this.rollbackStartFailure();
+      throw e;
+    }
+    throwIfAbortedAfterAwait("tui_start");
+
+    // Activate the router only when it is still healthy. If a close
+    // arrived earlier, `wasCloseBeforeActive` would have made
+    // `throwIfAbortedAfterAwait` fire already.
+    this.upstreamRouter.activate();
+    // After activate() the router transitions to `terminal` if a
+    // close was buffered. Re-check.
+    if (this.upstreamRouter.currentState() === "terminal") {
       try { await this.backendServer.stop(); } catch { /* silent */ }
       try { await this.tuiServer.stop(); } catch { /* silent */ }
-      this.state = "stopped";
-      this.backendServer = null;
-      this.tuiServer = null;
-      this.humanOwner = null;
-      this.mux = null;
-      this.reverseNs = null;
-      throw new Error("start aborted by concurrent stop (post-listen)");
+      this.rollbackStartFailure();
+      throw new Error("start aborted: upstream closed during activate");
     }
 
     this.state = "running";
   }
 
   /**
+   * 副指挥 06e92ef7 P0-1 / P0-2: unified rollback used on any failure
+   * inside `doStart`. Rotates the bearer to `rotated_out` and nulls
+   * every reference; the `takeTuiBearerPlaintextForLauncher` accessor
+   * refuses in non-running state.
+   */
+  private rollbackStartFailure(): void {
+    try { this.upstreamRouter?.unsubscribe(); } catch { /* silent */ }
+    this.upstreamRouter = null;
+    if (this.tuiBearer !== null) {
+      try { this.tuiBearer.rotate(); } catch { /* silent */ }
+      this.tuiBearer = null;
+    }
+    this.backendServer = null;
+    this.tuiServer = null;
+    this.humanOwner = null;
+    this.mux = null;
+    this.reverseNs = null;
+    this.state = "stopped";
+  }
+
+  /**
    * Callback the sole `UpstreamRouter` invokes when the injected
    * transport signals close. Cascades shutdown of the backend and TUI
-   * faces so no local writer thinks it still has an upstream.
+   * faces so no local writer thinks it still has an upstream, and
+   * transitions the lifecycle out of `running` immediately.
    */
   private onUpstreamCloseFromRouter(): void {
+    // 副指挥 06e92ef7 P0-1: lifecycle must transition out of running
+    // as soon as the upstream closes. This includes closing local
+    // faces so new connections cannot arrive.
+    if (this.state === "running") {
+      this.state = "stopping";
+    }
     try { this.backendServer?.handleUpstreamClose(); } catch { /* silent */ }
-    // TUI face: rotate bearer + detach owner via its own stop path.
-    // We do NOT call full stop() here (that would double-close the
-    // http server); instead we drop the owner if any.
+    // Detach owner if any; force-close local faces.
+    if (this.tuiServer !== null) {
+      // Best-effort close of the TUI face — a full stop() will run
+      // when the caller invokes `lifecycle.stop()`.
+      void this.tuiServer.stop().catch(() => {});
+    }
+    if (this.backendServer !== null) {
+      void this.backendServer.stop().catch(() => {});
+    }
+    // TUI bearer rotated so any half-consumed launcher path is refused.
+    if (this.tuiBearer !== null) {
+      try { this.tuiBearer.rotate(); } catch { /* silent */ }
+    }
+    // Do NOT null the fields here — `stop()` may still be called
+    // externally and expects to no-op on already-empty resources.
     if (this.tuiServer !== null) {
       // The WS server's onUpstreamClose semantics live inside stop()
       // for shutdown; for a lifecycle-mid close we don't need the
@@ -514,6 +540,10 @@ export class GatewayLifecycle {
    *  bearer has been claimed (either via presentBearer on the WS
    *  admission path or via this method being called by the launcher). */
   takeTuiBearerPlaintextForLauncher(): string | null {
+    // 副指挥 06e92ef7 P0-2: refuse in non-running state so a fail-
+    // closed / stop-during-preflight caller cannot claim a bearer
+    // for a lifecycle that never opened its sockets.
+    if (this.state !== "running") return null;
     if (this.tuiBearer === null) return null;
     return this.tuiBearer.takePlaintextForLauncher();
   }

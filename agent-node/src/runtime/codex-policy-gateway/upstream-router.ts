@@ -88,6 +88,13 @@ export class UpstreamRouter {
   private receivedCloseBeforeActive = false;
   /** Diagnostics inspector: how many pre-activation frames were buffered. */
   private bufferedFramesCounter = 0;
+  /**
+   * 副指挥 06e92ef7 P1-2: hard cap on pre-active buffered frames.
+   * If a hostile upstream floods during preflight, we drop the
+   * excess and fail-close the router. Not configurable in production.
+   */
+  private static readonly PRE_ACTIVE_BUFFER_CAP = 256;
+  private bufferOverflowed = false;
 
   constructor(opts: UpstreamRouterOptions) {
     this.opts = opts;
@@ -101,11 +108,28 @@ export class UpstreamRouter {
    * returns true.
    */
   subscribe(): void {
-    if (this.frameUnsub !== null) {
+    if (this.frameUnsub !== null || this.closeUnsub !== null) {
       throw new Error("UpstreamRouter: subscribe() called twice");
     }
-    this.frameUnsub = this.opts.upstreamTransport.onFrame((raw) => this.onFrame(raw));
-    this.closeUnsub = this.opts.upstreamTransport.onClose(() => this.onClose());
+    // 副指挥 06e92ef7 P0-5: atomic subscribe. If the second
+    // subscription throws, roll back the first so no dangling
+    // handler leaks into the transport.
+    let frameUnsub: (() => void) | null = null;
+    try {
+      frameUnsub = this.opts.upstreamTransport.onFrame((raw) => this.onFrame(raw));
+    } catch (e) {
+      throw e;
+    }
+    let closeUnsub: (() => void) | null = null;
+    try {
+      closeUnsub = this.opts.upstreamTransport.onClose(() => this.onClose());
+    } catch (e) {
+      // Roll back the frame subscription.
+      try { frameUnsub(); } catch { /* silent */ }
+      throw e;
+    }
+    this.frameUnsub = frameUnsub;
+    this.closeUnsub = closeUnsub;
   }
 
   /**
@@ -158,12 +182,24 @@ export class UpstreamRouter {
   private onFrame(raw: unknown): void {
     if (this.state === "terminal") return;
     if (this.state === "subscribed") {
+      if (this.buffered.length >= UpstreamRouter.PRE_ACTIVE_BUFFER_CAP) {
+        // Fail-closed: drop the frame and mark the router terminal
+        // so activate() will short-circuit start().
+        this.bufferOverflowed = true;
+        this.report("pre_active_buffer_overflow");
+        this.state = "terminal";
+        this.receivedCloseBeforeActive = true; // treat as close-before-active
+        return;
+      }
       this.buffered.push(raw);
       this.bufferedFramesCounter++;
       return;
     }
     this.dispatchFrame(raw);
   }
+
+  /** Test-only: was the pre-active buffer cap hit? */
+  bufferOverflowedFlag(): boolean { return this.bufferOverflowed; }
 
   private onClose(): void {
     if (this.state === "terminal") return;

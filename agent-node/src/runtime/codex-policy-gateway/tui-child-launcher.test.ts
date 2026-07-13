@@ -94,6 +94,24 @@ describe("buildAllowlistEnv — narrow typed allowlist", () => {
     expect(env.PATH).toBe("/usr/bin");
   });
 
+  test("accessor descriptor refused (副指挥 06e92ef7 P1-4 TOCTOU)", () => {
+    // A hostile caller with an accessor getter could return one
+    // value on the validation read and a different value on the
+    // copy read. We refuse any accessor descriptor to close this.
+    const trap: Record<string, string> = {};
+    let reads = 0;
+    Object.defineProperty(trap, "PATH", {
+      get() { reads++; return reads === 1 ? "/usr/bin" : "INJECTED_SECOND_READ"; },
+      enumerable: true,
+      configurable: true,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(() => buildAllowlistEnv("b", trap as any)).toThrow(/accessor descriptors/);
+    // The getter is not called during rejection (only descriptor
+    // shape is examined).
+    expect(reads).toBe(0);
+  });
+
   test("only OWN properties are inspected; hostile prototype-chain keys ignored", () => {
     // A hostile prototype chain wants us to leak "LEAK".
     // Since we only read OWN properties, prototype keys are invisible

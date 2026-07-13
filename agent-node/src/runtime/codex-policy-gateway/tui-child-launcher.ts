@@ -98,18 +98,26 @@ export function buildAllowlistEnv(
   if (env === null || typeof env !== "object") {
     throw new Error("env must be an object");
   }
-  // 副指挥 1b24ae71 P1: only inspect OWN properties. A hostile caller
-  // could set a prototype whose enumerable keys leak into a
-  // permissive `for..in` — using `Object.hasOwn` bypasses that. Also
-  // reject any custom prototype so the caller can't ship a class
-  // instance in place of a plain object.
   const proto = Object.getPrototypeOf(env);
   if (proto !== Object.prototype && proto !== null) {
     throw new Error("env must be a plain object or null-prototype object");
   }
-  const ownKeys = Object.getOwnPropertyNames(env as object);
-  const asRecord = env as unknown as Record<string, unknown>;
-  for (const k of ownKeys) {
+  // 副指挥 06e92ef7 P1-4: TOCTOU defence. A hostile caller could
+  // install an accessor getter that returns two different values
+  // on two reads (one to pass validation, one to leak). Take a
+  // SINGLE snapshot via descriptors (each descriptor `.value` is
+  // read exactly once here), validate that snapshot, and build the
+  // output from the same snapshot. No subsequent property access
+  // on the input `env` can influence what lands on the wire.
+  const descriptors = Object.getOwnPropertyDescriptors(env as object);
+  const snapshot: Record<string, string> = Object.create(null);
+  for (const k of Object.keys(descriptors)) {
+    const d = descriptors[k];
+    // Refuse accessor descriptors — they can return different values
+    // on repeated reads, so treat them as unsafe input.
+    if ("get" in d || "set" in d) {
+      throw new Error(`env key ${JSON.stringify(k)}: accessor descriptors not allowed`);
+    }
     if (k === "__proto__" || k === "constructor" || k === "prototype") {
       throw new Error(`env key ${JSON.stringify(k)} is not allowed`);
     }
@@ -119,17 +127,19 @@ export function buildAllowlistEnv(
     if (k === TUI_BEARER_ENV_NAME) {
       throw new Error(`env key ${TUI_BEARER_ENV_NAME} is reserved; supply bearer via the first arg`);
     }
-    if (typeof asRecord[k] !== "string") {
+    if (typeof d.value !== "string") {
       throw new Error(`env value for ${JSON.stringify(k)} must be a string`);
     }
+    snapshot[k] = d.value;
   }
-  // Null-prototype output — no chance of prototype pollution being
-  // observed by the child launcher's `for..in` / spread.
+  // Build the output ONLY from the snapshot. No second read of the
+  // input can slip in different bytes here.
   const out: Record<string, string> = Object.create(null);
   for (const k of ALLOWED_ENV_KEYS) {
     if (k === TUI_BEARER_ENV_NAME) continue;
-    const v = asRecord[k];
-    if (typeof v === "string") out[k] = v;
+    if (Object.prototype.hasOwnProperty.call(snapshot, k)) {
+      out[k] = snapshot[k];
+    }
   }
   out[TUI_BEARER_ENV_NAME] = bearerValue;
   return Object.freeze(out);
