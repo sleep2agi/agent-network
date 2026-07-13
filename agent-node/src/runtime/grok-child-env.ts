@@ -60,7 +60,7 @@ export const GROK_HELPER_INHERITED_ENV_KEYS = [
   "TZ",
 ] as const;
 
-export const GROK_PTY_CONTROLLED_ENV_KEYS = ["TERM"] as const;
+export const GROK_PTY_CONTROLLED_ENV_KEYS = ["TERM", "GROK_SANDBOX"] as const;
 
 const GROK_CHILD_ENV_KEYS = new Set<string>([
   ...GROK_CHILD_INHERITED_ENV_KEYS,
@@ -167,22 +167,37 @@ export function projectGrokChildEnv(
 
 /**
  * Final environment handed to node-pty. PWD is already fixed in the common
- * child set because the headless shell exports it; only TERM is added here.
- * The cwd equality check prevents the PTY lane from silently changing PWD.
+ * child set because the headless shell exports it. TERM and the reviewed
+ * sandbox profile are added here; the latter is required so the auto-spawned
+ * shared Leader inherits the same profile as the TUI argv. The cwd equality
+ * check prevents the PTY lane from silently changing PWD.
  */
 export function buildGrokPtyEnv(
   candidate: NodeJS.ProcessEnv,
   expectedEnv: NodeJS.ProcessEnv,
   cwd: string,
   terminalName = "xterm-256color",
+  sandboxProfile: string,
 ): Record<string, string> {
-  if (!cwd || cwd.includes("\0") || !terminalName || terminalName.includes("\0")) {
-    throw new Error("Grok PTY environment requires a valid cwd and terminal name");
+  if (
+    !cwd
+    || cwd.includes("\0")
+    || !terminalName
+    || terminalName.includes("\0")
+    || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(sandboxProfile)
+  ) {
+    throw new Error("Grok PTY environment requires a valid cwd, terminal name, and sandbox profile");
   }
   const env = projectGrokChildEnv(candidate, expectedEnv);
   if (env.PWD !== cwd) {
     throw new Error("Grok PTY cwd differs from the reviewed child environment");
   }
   env.TERM = terminalName;
+  // Grok 0.2.93 auto-spawns the shared Leader from the interactive client,
+  // but does not forward the client's --sandbox argv to that child. The
+  // documented environment form is inherited by the Leader and is therefore
+  // required in addition to the same explicit argv value. This is a reviewed
+  // runtime value, never inherited from the parent environment.
+  env.GROK_SANDBOX = sandboxProfile;
   return env;
 }

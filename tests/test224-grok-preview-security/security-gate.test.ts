@@ -170,8 +170,23 @@ describe("test224 exact Grok child environment", () => {
       expect(Object.values(observed)).not.toContain(value);
     }
 
-    const ptyEnv = buildGrokPtyEnv(finalEnv, baseline, "/workspace/project");
-    expect(ptyEnv).toEqual({ ...expected, PWD: "/workspace/project", TERM: "xterm-256color" });
+    const ptyEnv = buildGrokPtyEnv(
+      { ...finalEnv, GROK_SANDBOX: "off" },
+      baseline,
+      "/workspace/project",
+      "xterm-256color",
+      "anet-reviewed-workspace",
+    );
+    expect(ptyEnv).toEqual({
+      ...expected,
+      PWD: "/workspace/project",
+      TERM: "xterm-256color",
+      GROK_SANDBOX: "anet-reviewed-workspace",
+    });
+    expect(Object.keys(ptyEnv).sort()).toEqual([
+      ...Object.keys(expected),
+      "GROK_SANDBOX",
+    ].sort());
   });
 
   test("production-shaped setpriv/sh launcher preserves the exact final object", async () => {

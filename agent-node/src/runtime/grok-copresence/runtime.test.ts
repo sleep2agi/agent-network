@@ -257,6 +257,7 @@ describe("Grok copresence runtime integration", () => {
         GROK_MEMORY: "0",
         PWD: fixture.cwd,
         TERM: "xterm-256color",
+        GROK_SANDBOX: "workspace",
       });
       const first = await runtime.submit({
         taskId: "network-1",
@@ -773,6 +774,7 @@ class RuntimeFixture {
         GROK_SUBAGENTS: "0",
         GROK_WEB_FETCH: "0",
         GROK_MEMORY: "0",
+        GROK_SANDBOX: "off",
         DATABASE_URL: "postgres://private",
         AWS_ACCESS_KEY_ID: "AKIA_PRIVATE",
         AWS_SECRET_ACCESS_KEY: "aws-private",
@@ -814,6 +816,7 @@ class RuntimeFixture {
           GROK_SUBAGENTS: "0",
           GROK_WEB_FETCH: "0",
           GROK_MEMORY: "0",
+          GROK_SANDBOX: "off",
           DATABASE_URL: "postgres://private",
           AWS_SESSION_TOKEN: "aws-private",
           ARBITRARY_TOKEN: "token-private",

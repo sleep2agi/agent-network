@@ -294,6 +294,7 @@ assert_fake_observations_exact() {
           and .folderTrustMode == 384
           and .folderTrustCount == 1
           and .selectedSandboxProfileMatched == true
+          and .sandboxEnvMatchesArgv == true
           and .authPathSandboxDenied == false
           and .requiredDenyToolsPresent == true
           and .requiredProtectedPathDeniesPresent == true
@@ -314,7 +315,7 @@ assert_fake_observations_exact() {
     --slurpfile expectedParent "$EXPECTED_AGENT_NODE_ENV_KEYS" \
     'map(. as $row | (if .kind == "spawn" then $expectedPty[0] else $expected[0] end) as $want
       | {kind,missing:($want - .envKeys),extra:(.envKeys - $want),forbiddenKeys,markerValueObserved,
-          terminalEnvExpected,parentPidMatches,selectedSandboxProfileMatched,authPathSandboxDenied,
+          terminalEnvExpected,parentPidMatches,selectedSandboxProfileMatched,sandboxEnvMatchesArgv,authPathSandboxDenied,
           requiredDenyToolsPresent,requiredProtectedPathDeniesPresent,agentProfileExact,tuiFlagsExact,
           parentMissing:($expectedParent[0] - (.parentEnvKeys // [])),
           parentExtra:((.parentEnvKeys // []) - $expectedParent[0]),
@@ -954,7 +955,7 @@ chmod 644 "$LEGACY_DAILY_LOG"
     GROK_FOLDER_TRUST GROK_DEFAULT_SELECTED_PERMISSION \
     GROK_DISABLE_AUTOUPDATER GROK_SUBAGENTS GROK_WEB_FETCH GROK_MEMORY
 } | sort -u | jq -Rsc 'split("\n") | map(select(length > 0))' > "$EXPECTED_GROK_ENV_KEYS"
-jq -c '. + ["TERM"] | unique | sort' "$EXPECTED_GROK_ENV_KEYS" \
+jq -c '. + ["TERM", "GROK_SANDBOX"] | unique | sort' "$EXPECTED_GROK_ENV_KEYS" \
   > "$EXPECTED_GROK_PTY_ENV_KEYS"
 
 node - <<'NODE' > "$EXPECTED_HELPER_ENV"

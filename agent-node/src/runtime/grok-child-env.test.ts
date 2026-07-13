@@ -166,14 +166,20 @@ describe("Grok child environment boundary", () => {
     ]);
   });
 
-  it("keeps PTY PWD equal to the base child cwd and adds only reviewed TERM", () => {
+  it("keeps PTY PWD equal and adds only reviewed terminal/sandbox controls", () => {
     const baseline = buildGrokChildEnv({
       parentEnv: { PATH: "/bin", TERM: "ambient-term", DATABASE_URL: "private" },
       cwd: "/workspace/project",
       home: "/runtime/home",
       authPath: "/runtime/home/auth.json",
     });
-    expect(buildGrokPtyEnv(baseline, baseline, "/workspace/project")).toEqual({
+    expect(buildGrokPtyEnv(
+      { ...baseline, GROK_SANDBOX: "off" },
+      baseline,
+      "/workspace/project",
+      "xterm-256color",
+      "anet-workspace",
+    )).toEqual({
       PATH: "/bin",
       HOME: "/runtime/home",
       GROK_HOME: "/runtime/home",
@@ -189,8 +195,16 @@ describe("Grok child environment boundary", () => {
       GROK_MEMORY: "0",
       PWD: "/workspace/project",
       TERM: "xterm-256color",
+      GROK_SANDBOX: "anet-workspace",
     });
-    expect(GROK_PTY_CONTROLLED_ENV_KEYS).toEqual(["TERM"]);
+    expect(GROK_PTY_CONTROLLED_ENV_KEYS).toEqual(["TERM", "GROK_SANDBOX"]);
+    expect(() => buildGrokPtyEnv(
+      baseline,
+      baseline,
+      "/workspace/project",
+      "xterm-256color",
+      "off\nDATABASE_URL=private",
+    )).toThrow("valid cwd, terminal name, and sandbox profile");
   });
 
   it("builds the narrower helper environment from an empty object", () => {

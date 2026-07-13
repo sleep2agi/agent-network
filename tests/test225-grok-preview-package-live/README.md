@@ -58,13 +58,22 @@ turn must recall a fresh benign nonce from the first turn after stop/start, so
 the gate proves actual session continuity rather than two independent calls:
 
 Before the cached login is copied, this layer also points the pinned binary at
-a container-local, non-billing model stub. Fresh and resumed real TUI requests
-must carry `ANET_COPRESENCE_PROFILE_V1` and expose exactly `[todo_write]`;
-default-tool and `read_file` profile mutations must turn the gate red. The
-separate `session_title` request is classified as auxiliary rather than being
-mixed into the model-tool inventory.
+a container-local, non-billing model stub. Every fresh, resume, and mutation
+client uses the production-shaped `--leader --leader-socket` auto-Leader path.
+The reviewed profile is carried both as `--sandbox` and as the controlled
+`GROK_SANDBOX` PTY variable because pinned 0.2.93 does not forward the client
+argv value to its auto-spawned Leader; ambient `GROK_SANDBOX` is discarded.
+The fresh client is stopped only after `updates.jsonl` and `summary.json` reach
+the same-session completed-turn/count/sandbox fence. This sub-gate proves only
+that every real TUI client carries `ANET_COPRESENCE_PROFILE_V1` and exposes
+exactly `[todo_write]`; the authenticated package E2E below remains the sole
+full create/task/live-render/stop/resume product proof. Default-tool and
+`read_file` profile mutations must turn the gate red. The separate
+`session_title` request is classified as auxiliary rather than being mixed
+into the model-tool inventory.
 
-The inventory probe never retains stdout/stderr. On failure it writes only a
+The inventory probe keeps at most 64 KiB of stdout/stderr in memory for a
+closed error classification and never persists that text. On failure it writes only a
 mode-0600, closed-schema diagnostic (`phase`, enumerated `category`, booleans,
 and bounded counts) to `/artifacts/test225-tui-inventory-diagnostic.json`
 after synthetic, Hub, and real-auth scalar scans. A successful run removes any

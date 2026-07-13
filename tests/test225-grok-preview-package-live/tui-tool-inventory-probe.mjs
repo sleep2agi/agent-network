@@ -3,12 +3,14 @@ import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import {
   chmodSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import http from "node:http";
@@ -126,6 +128,20 @@ async function terminateGroup(child) {
   }
 }
 
+async function terminateTuiClient(child) {
+  if (child.exitCode === null && child.signalCode === null) {
+    child.stdin?.end();
+    await Promise.race([
+      new Promise((resolve) => child.once("exit", resolve)),
+      new Promise((resolve) => setTimeout(resolve, 2_000)),
+    ]);
+  }
+  if (child.exitCode === null && child.signalCode === null) {
+    await terminateGroup(child);
+  }
+  child.stdin?.destroy();
+}
+
 function procStarttime(pid) {
   try {
     const raw = readFileSync(`/proc/${pid}/stat`, "utf8");
@@ -186,6 +202,98 @@ function readJsonLines(filePath) {
   } catch {
     return [];
   }
+}
+
+function regularPrivateFile(filePath) {
+  try {
+    const stat = lstatSync(filePath);
+    const uid = process.getuid?.();
+    return stat.isFile()
+      && !stat.isSymbolicLink()
+      && stat.nlink === 1
+      && (stat.mode & 0o777) === 0o600
+      && (uid === undefined || stat.uid === uid);
+  } catch {
+    return false;
+  }
+}
+
+function resumeReadySnapshot(sessionId, nonce) {
+  const sessionDir = findDirectoryNamed(path.join(home, "sessions"), sessionId);
+  if (!sessionDir) return "";
+  const chatPath = path.join(sessionDir, "chat_history.jsonl");
+  const eventsPath = path.join(sessionDir, "events.jsonl");
+  const updatesPath = path.join(sessionDir, "updates.jsonl");
+  const summaryPath = path.join(sessionDir, "summary.json");
+  const files = [chatPath, eventsPath, updatesPath, summaryPath];
+  if (!files.every(regularPrivateFile)) return "";
+  const chat = readJsonLines(chatPath);
+  const events = readJsonLines(eventsPath);
+  const updates = readJsonLines(updatesPath);
+  let summary;
+  try {
+    summary = JSON.parse(readFileSync(summaryPath, "utf8"));
+  } catch {
+    return "";
+  }
+  const nonceIndex = updates.findIndex((entry) =>
+    entry?.method === "session/update"
+      && entry?.params?.sessionId === sessionId
+      && entry?.params?.update?.sessionUpdate === "user_message_chunk"
+      && JSON.stringify(entry.params.update).includes(nonce));
+  const assistantIndex = nonceIndex < 0 ? -1 : updates.findIndex((entry, index) =>
+    index > nonceIndex
+      && entry?.method === "session/update"
+      && entry?.params?.sessionId === sessionId
+      && entry?.params?.update?.sessionUpdate === "agent_message_chunk");
+  const completedIndex = assistantIndex < 0 ? -1 : updates.findIndex((entry, index) =>
+    index > assistantIndex
+      && entry?.method === "_x.ai/session/update"
+      && entry?.params?.sessionId === sessionId
+      && entry?.params?.update?.sessionUpdate === "turn_completed"
+      && entry?.params?.update?.stop_reason === "end_turn");
+  if (nonceIndex < 0 || assistantIndex < 0 || completedIndex < 0
+    || summary?.info?.id !== sessionId
+    || summary?.info?.cwd !== realpathSync(project)
+    || summary?.sandbox_profile !== "anet-probe-workspace"
+    || summary?.num_chat_messages !== chat.length
+    || summary?.num_messages !== updates.length
+    || !events.some((event) => event?.type === "turn_ended" && event?.outcome === "completed")) {
+    return "";
+  }
+  return JSON.stringify({
+    chatLines: chat.length,
+    eventLines: events.length,
+    updateLines: updates.length,
+    summaryMessages: summary.num_messages,
+    summaryChatMessages: summary.num_chat_messages,
+    files: files.map((filePath) => {
+      const stat = statSync(filePath);
+      return [stat.size, stat.mtimeMs];
+    }),
+  });
+}
+
+async function waitForResumeReady(sessionId, nonce) {
+  const deadline = Date.now() + 15_000;
+  let prior = "";
+  let stableSamples = 0;
+  while (Date.now() < deadline) {
+    const snapshot = resumeReadySnapshot(sessionId, nonce);
+    const leaderGone = ownedLeaderIdentities().length === 0;
+    if (snapshot && snapshot === prior && leaderGone) {
+      stableSamples += 1;
+      if (stableSamples >= 3) return;
+    } else {
+      prior = snapshot;
+      stableSamples = snapshot && leaderGone ? 1 : 0;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new ProbeFailure("resume", "persistence_timeout", {
+    spawned: true,
+    leaderObserved: ownedLeaderIdentities().length > 0,
+  });
 }
 
 function sessionBaseline(sessionId) {
@@ -253,6 +361,22 @@ function signalCategory(signal) {
   return "other";
 }
 
+function preModelExitCategory(phase, processText) {
+  if (phase !== "resume") return "process_exit";
+  const normalized = String(processText).replaceAll("\0", "").slice(0, 65_536);
+  if (/session already exists/i.test(normalized)) return "resume_session_exists";
+  if (/session not found|parent session not found|could not find session/i.test(normalized)) {
+    return "resume_session_missing";
+  }
+  if (/unexpected argument|invalid value|invalid argument|usage:/i.test(normalized)) {
+    return "resume_bootstrap_rejected";
+  }
+  if (/cannot resume this session under sandbox profile/i.test(normalized)) {
+    return "resume_sandbox_mismatch";
+  }
+  return "process_exit";
+}
+
 function factsForRows(rows, {
   spawned = false,
   exited = false,
@@ -296,6 +420,7 @@ async function runTui(label, sessionId, resume) {
   currentPhase = phaseForRun(label);
   activeRun = label;
   activeNonce = `TEST225_INVENTORY_${label}_${randomUUID()}`;
+  const turnNonce = activeNonce;
   const before = observations.length;
   const baseline = sessionBaseline(sessionId);
   const sessionFlag = resume ? "--resume" : "--session-id";
@@ -306,9 +431,12 @@ async function runTui(label, sessionId, resume) {
     "LANG=C.UTF-8",
     "LC_ALL=C.UTF-8",
     "TERM=xterm-256color",
+    "COLUMNS=120",
+    "LINES=36",
     `HOME=${shellQuote(home)}`,
     `PWD=${shellQuote(project)}`,
     `GROK_HOME=${shellQuote(home)}`,
+    "GROK_SANDBOX=anet-probe-workspace",
     "GROK_FOLDER_TRUST=1",
     "GROK_DEFAULT_SELECTED_PERMISSION=allow_once",
     "GROK_CLAUDE_MCPS_ENABLED=false",
@@ -348,16 +476,24 @@ async function runTui(label, sessionId, resume) {
     "--no-alt-screen",
     shellQuote(activeNonce),
   ].join(" ");
-  const child = spawn("script", ["-q", "-e", "-c", command, "/dev/null"], {
+  const child = spawn("script", [
+    "-q", "-e", "-c", `stty rows 36 cols 120 && exec ${command}`, "/dev/null",
+  ], {
     detached: true,
     // `script` treats /dev/null stdin as an immediate interactive disconnect.
     // Keep the pipe open through the completion fence and close it only after
     // bounded process-group termination.
-    stdio: ["pipe", "ignore", "ignore"],
+    stdio: ["pipe", "pipe", "pipe"],
     env: { PATH: "/usr/bin:/bin" },
   });
   let exited = false;
   let leaderObserved = false;
+  let processText = "";
+  const observeProcessText = (chunk) => {
+    if (processText.length < 65_536) processText += String(chunk).slice(0, 65_536 - processText.length);
+  };
+  child.stdout?.on("data", observeProcessText);
+  child.stderr?.on("data", observeProcessText);
   let fence = turnFenceAfterBaseline(sessionId, activeNonce, baseline);
   child.once("error", () => { exited = true; });
   try {
@@ -385,7 +521,7 @@ async function runTui(label, sessionId, resume) {
       const rows = observations.slice(before);
       throw new ProbeFailure(
         currentPhase,
-        exited ? "process_exit" : "persistence_timeout",
+        exited ? preModelExitCategory(currentPhase, processText) : "persistence_timeout",
         factsForRows(rows, {
           spawned: Boolean(child.pid),
           exited,
@@ -411,15 +547,31 @@ async function runTui(label, sessionId, resume) {
         }),
       );
     }
+    if (child.exitCode !== null || child.signalCode !== null) {
+      exited = true;
+      const rows = observations.slice(before);
+      throw new ProbeFailure(
+        currentPhase,
+        preModelExitCategory(currentPhase, processText),
+        factsForRows(rows, {
+          spawned: Boolean(child.pid),
+          exited,
+          leaderObserved,
+          ...fence,
+          exitCode: child.exitCode,
+          childSignal: child.signalCode,
+        }),
+      );
+    }
   } finally {
-    await terminateGroup(child);
-    child.stdin?.destroy();
+    await terminateTuiClient(child);
     await terminateOwnedLeaders();
     activeRun = "";
     activeNonce = "";
   }
   const rows = observations.slice(before);
   return {
+    nonce: turnNonce,
     rows,
     facts: factsForRows(rows, {
       spawned: Boolean(child.pid),
@@ -554,6 +706,8 @@ async function runProbe() {
   if (!passesFixedGate(fresh.rows)) {
     throw new ProbeFailure("fresh", "inventory_mismatch", fresh.facts);
   }
+
+  await waitForResumeReady(sessionId, fresh.nonce);
 
   const resumed = await runTui("resume", sessionId, true);
   results.push(resumed);

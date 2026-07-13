@@ -791,6 +791,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         this.controlledSpawnEnv,
         this.opts.cwd,
         "xterm-256color",
+        this.opts.sandboxProfile,
       ),
     });
     let resolveExit!: () => void;

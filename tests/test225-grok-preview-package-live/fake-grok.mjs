@@ -211,6 +211,7 @@ function verifyExactFolderTrust() {
 
 const trustObservation = verifyExactFolderTrust();
 const sandboxObservation = selectedSandboxObservation();
+const sandboxEnvMatchesArgv = process.env.GROK_SANDBOX === valueAfter("--sandbox");
 const authPathSandboxDenied = sandboxObservation.authPathDenied;
 const deniedTools = argv.flatMap((value, index) => argv[index - 1] === "--deny" ? [value] : []);
 const requiredDenyToolsPresent = ["Bash", "Write", "MCPTool", "WebFetch"]
@@ -248,7 +249,7 @@ if (!requiredProtectedPathDeniesPresent) {
   process.stderr.write("fake grok: shared TUI must protect source and state homes from model file tools\n");
   process.exit(68);
 }
-if (!agentProfileExact || !tuiFlagsExact) {
+if (!agentProfileExact || !tuiFlagsExact || !sandboxEnvMatchesArgv) {
   process.stderr.write("fake grok: shared TUI fixed agent profile or effective flags are invalid\n");
   process.exit(69);
 }
@@ -278,6 +279,7 @@ recordEnvironment("spawn", {
   folderTrustMode: trustObservation.mode,
   folderTrustCount: trustObservation.folderCount,
   selectedSandboxProfileMatched: sandboxObservation.profileMatched,
+  sandboxEnvMatchesArgv,
   authPathSandboxDenied,
   requiredDenyToolsPresent,
   requiredProtectedPathDeniesPresent,
