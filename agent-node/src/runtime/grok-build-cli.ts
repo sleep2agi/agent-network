@@ -194,6 +194,12 @@ export async function runGrokCliTurn(opts: GrokCliTurnOptions): Promise<GrokCliT
   const binary = opts.binary || "grok";
   const idleTimeoutMs = opts.idleTimeoutMs ?? 300_000;
   if (opts.signal?.aborted) throw new Error("grok CLI turn was aborted");
+  // Validate the final projected environment before persisting the prompt.
+  // A launcher policy failure must not leave task text behind in /tmp.
+  const childEnv = projectGrokChildEnv(opts.env || {});
+  if (opts.launcher && childEnv.PWD !== opts.cwd) {
+    throw new Error("headless Grok launcher requires an exact PWD matching cwd");
+  }
 
   // Do not expose task/system-prompt contents in argv (`ps`, `/proc/*/cmdline`).
   // The per-turn directory and prompt file are owner-only and removed once
@@ -218,15 +224,22 @@ export async function runGrokCliTurn(opts: GrokCliTurnOptions): Promise<GrokCliT
     const childArgs = opts.launcher
       ? [...opts.launcher.args, "--", binary, ...args]
       : args;
-    const child = spawn(childBinary, childArgs, {
-      cwd: opts.cwd,
-      env: projectGrokChildEnv(opts.env || {}),
-      stdio: opts.lockFd === undefined
-        ? ["ignore", "pipe", "pipe"]
-        : ["ignore", "pipe", "pipe", opts.lockFd],
-      shell: false,
-      detached: process.platform !== "win32",
-    });
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(childBinary, childArgs, {
+        cwd: opts.cwd,
+        env: childEnv,
+        stdio: opts.lockFd === undefined
+          ? ["ignore", "pipe", "pipe"]
+          : ["ignore", "pipe", "pipe", opts.lockFd],
+        shell: false,
+        detached: process.platform !== "win32",
+      });
+    } catch (error) {
+      cleanupPrompt();
+      reject(error);
+      return;
+    }
 
     let stdoutBuffer = "";
     let stderrBuffer = "";

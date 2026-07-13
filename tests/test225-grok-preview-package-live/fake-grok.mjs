@@ -166,6 +166,8 @@ const expectedParentPid = Number(process.env.ANET_EXPECTED_PARENT_PID || 0);
 recordEnvironment("spawn", {
   sessionId,
   resume,
+  parentPid: process.ppid,
+  expectedParentPid,
   terminalEnvExpected: process.env.PWD === cwd && process.env.TERM === "xterm-256color",
   parentPidMatches: expectedParentPid > 1 && expectedParentPid === process.ppid,
   folderTrustExact: trustObservation.exact,

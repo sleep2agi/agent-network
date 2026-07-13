@@ -26,6 +26,7 @@ export const GROK_CHILD_INHERITED_ENV_KEYS = [
 
 export const GROK_CHILD_CONTROLLED_ENV_KEYS = [
   "HOME",
+  "PWD",
   "GROK_HOME",
   "GROK_AUTH_PATH",
   "GROK_OIDC_ISSUER",
@@ -55,7 +56,7 @@ export const GROK_HELPER_INHERITED_ENV_KEYS = [
   "TZ",
 ] as const;
 
-export const GROK_PTY_CONTROLLED_ENV_KEYS = ["PWD", "TERM"] as const;
+export const GROK_PTY_CONTROLLED_ENV_KEYS = ["TERM"] as const;
 
 const GROK_CHILD_ENV_KEYS = new Set<string>([
   ...GROK_CHILD_INHERITED_ENV_KEYS,
@@ -65,6 +66,7 @@ const GROK_CHILD_ENV_KEYS = new Set<string>([
 export interface BuildGrokChildEnvOptions {
   /** Read only the exact inherited-key list above; every other key is ignored. */
   parentEnv: NodeJS.ProcessEnv;
+  cwd: string;
   home: string;
   authPath: string;
   oidcIssuer?: string;
@@ -75,6 +77,9 @@ export interface BuildGrokChildEnvOptions {
 
 /** Construct a Grok child environment from an empty object. */
 export function buildGrokChildEnv(opts: BuildGrokChildEnvOptions): NodeJS.ProcessEnv {
+  if (!opts.cwd || opts.cwd.includes("\0") || !opts.cwd.startsWith("/")) {
+    throw new Error("Grok child environment requires an absolute cwd");
+  }
   const env: NodeJS.ProcessEnv = {};
   for (const key of GROK_CHILD_INHERITED_ENV_KEYS) {
     const value = opts.parentEnv[key];
@@ -82,6 +87,10 @@ export function buildGrokChildEnv(opts: BuildGrokChildEnvOptions): NodeJS.Proces
   }
 
   env.HOME = opts.home;
+  // dash exports PWD when the headless launcher enters /bin/sh. Seed the
+  // exact expected value so that wrapper behavior cannot silently widen the
+  // final child environment.
+  env.PWD = opts.cwd;
   env.GROK_HOME = opts.home;
   env.GROK_AUTH_PATH = opts.authPath;
   env.GROK_CLAUDE_MCPS_ENABLED = "false";
@@ -147,9 +156,9 @@ export function projectGrokChildEnv(
 }
 
 /**
- * Final environment handed to node-pty. node-pty itself materializes PWD and
- * TERM; set both explicitly so the actual TUI child environment remains a
- * reviewed exact set instead of relying on undocumented implicit additions.
+ * Final environment handed to node-pty. PWD is already fixed in the common
+ * child set because the headless shell exports it; only TERM is added here.
+ * The cwd equality check prevents the PTY lane from silently changing PWD.
  */
 export function buildGrokPtyEnv(
   candidate: NodeJS.ProcessEnv,
@@ -161,7 +170,9 @@ export function buildGrokPtyEnv(
     throw new Error("Grok PTY environment requires a valid cwd and terminal name");
   }
   const env = projectGrokChildEnv(candidate, expectedEnv);
-  env.PWD = cwd;
+  if (env.PWD !== cwd) {
+    throw new Error("Grok PTY cwd differs from the reviewed child environment");
+  }
   env.TERM = terminalName;
   return env;
 }

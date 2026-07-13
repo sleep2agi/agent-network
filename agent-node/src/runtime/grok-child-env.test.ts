@@ -32,6 +32,7 @@ describe("Grok child environment boundary", () => {
 
     const actual = buildGrokChildEnv({
       parentEnv,
+      cwd: "/workspace/project",
       home: "/runtime/grok-home",
       authPath: "/runtime/grok-home/auth.json",
       oidcIssuer: "https://accounts.example.invalid",
@@ -46,6 +47,7 @@ describe("Grok child environment boundary", () => {
       LANG: "C.UTF-8",
       TERM: "xterm-256color",
       HOME: "/runtime/grok-home",
+      PWD: "/workspace/project",
       GROK_HOME: "/runtime/grok-home",
       GROK_AUTH_PATH: "/runtime/grok-home/auth.json",
       GROK_CLAUDE_MCPS_ENABLED: "false",
@@ -73,6 +75,7 @@ describe("Grok child environment boundary", () => {
       "HOME",
       "LANG",
       "PATH",
+      "PWD",
       "TERM",
       "TMPDIR",
     ]);
@@ -104,6 +107,7 @@ describe("Grok child environment boundary", () => {
   it("rejects a beforeSpawn callback that changes a controlled value", () => {
     const baseline = buildGrokChildEnv({
       parentEnv: { PATH: "/bin" },
+      cwd: "/workspace/project",
       home: "/runtime/home",
       authPath: "/runtime/home/auth.json",
       defaultSelectedPermission: "allow_once",
@@ -137,9 +141,10 @@ describe("Grok child environment boundary", () => {
     ]);
   });
 
-  it("makes node-pty PWD and TERM explicit without widening the base child set", () => {
+  it("keeps PTY PWD equal to the base child cwd and adds only reviewed TERM", () => {
     const baseline = buildGrokChildEnv({
       parentEnv: { PATH: "/bin", TERM: "ambient-term", DATABASE_URL: "private" },
+      cwd: "/workspace/project",
       home: "/runtime/home",
       authPath: "/runtime/home/auth.json",
     });
@@ -156,7 +161,7 @@ describe("Grok child environment boundary", () => {
       PWD: "/workspace/project",
       TERM: "xterm-256color",
     });
-    expect(GROK_PTY_CONTROLLED_ENV_KEYS).toEqual(["PWD", "TERM"]);
+    expect(GROK_PTY_CONTROLLED_ENV_KEYS).toEqual(["TERM"]);
   });
 
   it("builds the narrower helper environment from an empty object", () => {

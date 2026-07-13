@@ -204,7 +204,7 @@ Details: `docs/grok-build-runtime.md`.
 
 > **Dangerous experimental feature:** network tasks drive the same Grok TUI and share its conversation context. Approval ownership is not fully hardened. Use only with trusted tasks on a trusted network. This runtime is not supported for production and is not part of the `latest` release channel.
 
-The co-presence candidate is currently pinned to Linux and the exact Grok CLI build reported as `grok 0.2.93 (f00f96316d)` (the stable installer may append ` [stable]`). Install that build and log in as the same operating-system user that will run `anet`:
+The co-presence candidate is currently pinned to Linux with procfs mounted at `/proc` (including `/proc/self/fd`) and the exact Grok CLI build reported as `grok 0.2.93 (f00f96316d)` (the stable installer may append ` [stable]`). Install that build and log in as the same operating-system user that will run `anet`:
 
 ```bash
 grok auth login

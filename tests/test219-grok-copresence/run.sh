@@ -37,6 +37,7 @@ bun test \
   src/runtime/grok-build-cli.test.ts \
   src/runtime/grok-build-cli-home.test.ts \
   src/credential-redaction.test.ts \
+  src/private-log.test.ts \
   src/reply-reliability.test.ts \
   src/goals/store.test.ts \
   src/runtime/grok-copresence/state.test.ts \

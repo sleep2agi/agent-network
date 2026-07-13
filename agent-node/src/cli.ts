@@ -87,6 +87,7 @@ import {
   createCredentialRedactor,
   type CredentialRedactor,
 } from "./credential-redaction";
+import { appendPrivateLogLine, preparePrivateLogDirectory } from "./private-log";
 
 const home = homedir();
 
@@ -380,6 +381,10 @@ const GROK_EXECUTION_MODE: "acp" | "cli" =
 // the PTY child are created. Existing credential stores are separately
 // validated/repaired by their boundary-specific writers.
 if (GROK_EXECUTION_MODE === "cli") process.umask(0o077);
+if (GROK_EXECUTION_MODE === "cli" && (process.platform !== "linux" || !existsSync("/proc/self/fd"))) {
+  console.error("[agent-node] grok-build-cli preview requires Linux with procfs mounted at /proc");
+  process.exit(1);
+}
 const rawGrokCopresence = opts["grok-copresence"]
   ?? fileConfig.grokCopresence
   ?? fileConfig.flags?.grokCopresence
@@ -828,8 +833,13 @@ if (TELEGRAM_CHANNELS.length > 0 && RUNTIME !== "codex" && RUNTIME !== "codex-ap
 }
 
 // ── 日志：终端 + 文件 ──
-import { mkdirSync, appendFileSync } from "fs";
-try { mkdirSync(LOG_DIR, { recursive: true }); } catch {}
+import { appendFileSync, mkdirSync } from "fs";
+const PRIVATE_LOG_DIR = GROK_EXECUTION_MODE === "cli"
+  ? preparePrivateLogDirectory(LOG_DIR, persistenceRedactorHandle)
+  : LOG_DIR;
+if (GROK_EXECUTION_MODE !== "cli") {
+  try { mkdirSync(LOG_DIR, { recursive: true }); } catch {}
+}
 
 function _log(level: string, levelNum: number, msg: string) {
   if (levelNum < LOG_LEVEL) return;
@@ -840,7 +850,11 @@ function _log(level: string, levelNum: number, msg: string) {
   console.log(line);
   try {
     const date = new Date().toISOString().slice(0, 10);
-    appendFileSync(join(LOG_DIR, `${date}.log`), line + "\n");
+    if (GROK_EXECUTION_MODE === "cli") {
+      appendPrivateLogLine(PRIVATE_LOG_DIR, `${date}.log`, line + "\n", persistenceRedactorHandle);
+    } else {
+      appendFileSync(join(LOG_DIR, `${date}.log`), line + "\n");
+    }
   } catch {}
 }
 const log = (msg: string) => _log("info", 1, msg);
@@ -3130,8 +3144,10 @@ async function handleGrokCopresenceHumanPrompt(prompt: string): Promise<void> {
   }
   const result = await tryHandleExplicitDelegation(redacted.text, "human:grok-tui", null, true);
   if (result) {
-    const safeResult = persistenceRedactor.redactText(result).text;
-    log(`[grok-copresence] A2 human delegation completed: ${safeResult.replace(/\s+/g, " ").slice(0, 300)}`);
+    // Delegation results can contain third-party credentials that were not in
+    // this process's known-value set. Keep content out of ordinary logs
+    // altogether; completion metadata is sufficient for operator diagnostics.
+    log(`[grok-copresence] A2 human delegation completed (${result.length} chars)`);
   }
 }
 
@@ -3213,6 +3229,7 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
       });
       const env = buildGrokChildEnv({
         parentEnv: process.env,
+        cwd: grokCwd,
         home: grokCliHome.home,
         authPath: grokCliHome.authPath,
         oidcIssuer: grokCliHome.oidcIssuer,
@@ -3439,6 +3456,7 @@ async function processWithGrokCli(task: string, from: string, images?: string[])
     // routing state, arbitrary config envRef values, or ambient cloud creds.
     const env = buildGrokChildEnv({
       parentEnv: process.env,
+      cwd: grokCwd,
       home: grokCliHome.home,
       authPath: grokCliHome.authPath,
       oidcIssuer: grokCliHome.oidcIssuer,
@@ -3802,7 +3820,10 @@ async function processTask(task: string, from: string, taskId: string | null = n
   if (redactedTask.redactions > 0) {
     warn(`[grok-preview] masked ${redactedTask.redactions} credential value(s) before the shared TUI session`);
   }
-  log(`→ processing [${RUNTIME}]${images?.length ? ` +${images.length} image(s)` : ""}: ${runtimeTask.slice(0, 80)}`);
+  const taskLogSuffix = GROK_EXECUTION_MODE === "cli"
+    ? ` (${runtimeTask.length} chars; content withheld)`
+    : `: ${runtimeTask.slice(0, 80)}`;
+  log(`→ processing [${RUNTIME}]${images?.length ? ` +${images.length} image(s)` : ""}${taskLogSuffix}`);
   await reportStatus("working", runtimeTask.slice(0, 200)).catch(() => {});
 
   // RFC-025 M1c P0b — context injection.
@@ -4015,7 +4036,10 @@ async function processInbox() {
       const content = msg.content as string;
       const msgType = msg.type || "task";
       const images = await extractImagePaths(msg);
-      log(`← [${from}] (${msgType}/${msg.priority || "normal"})${images.length ? ` +${images.length} image(s)` : ""} ${content.slice(0, 100)}`);
+      const inboundLogSuffix = GROK_EXECUTION_MODE === "cli"
+        ? ` (${content.length} chars; content withheld)`
+        : ` ${content.slice(0, 100)}`;
+      log(`← [${from}] (${msgType}/${msg.priority || "normal"})${images.length ? ` +${images.length} image(s)` : ""}${inboundLogSuffix}`);
 
       // Non-task / non-broadcast: ack and move on, nothing to reply to.
       if (msgType !== "task" && msgType !== "broadcast") {
@@ -4061,14 +4085,20 @@ async function processInbox() {
 
       // (3b) Run the LLM turn.
       const { text: result, failed } = await processTask(content, from, msg.id, images);
-      log(`processTask returned: "${result.slice(0, 80)}" (${result.length} chars, failed=${failed})`);
+      if (GROK_EXECUTION_MODE === "cli") {
+        log(`processTask returned (${result.length} chars, content withheld, failed=${failed})`);
+      } else {
+        log(`processTask returned: "${result.slice(0, 80)}" (${result.length} chars, failed=${failed})`);
+      }
 
       // Low-value successful replies are dropped (preserve previous
       // behaviour — codex / claude often emit "done." / "✅" for trivial
       // confirmations). Failures ALWAYS surface so the dispatcher sees
       // the real error instead of silence.
       if (!failed && isLowValueText(result, true)) {
-        log(`skip reply: low-value (${result.slice(0, 30)})`);
+        log(GROK_EXECUTION_MODE === "cli"
+          ? `skip reply: low-value (${result.length} chars; content withheld)`
+          : `skip reply: low-value (${result.slice(0, 30)})`);
         await ackMessage(msg.id).catch((e: any) => warn(`ack failed for low-value ${msg.id.slice(0, 8)}: ${e.message}`));
         continue;
       }

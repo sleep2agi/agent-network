@@ -94,7 +94,7 @@ Known boundary:
 
 > **Not production-ready:** network tasks drive the same TUI and share its conversation context. Approval ownership is not fully hardened. Use only with trusted tasks on a trusted network. This path belongs to the npm `preview` channel and is not a capability claim for `latest`.
 
-The preview is currently supported only on Linux and is pinned to build `grok 0.2.93 (f00f96316d)`; the known stable installer prints the same build with an optional trailing ` [stable]`. Install and authenticate that Grok CLI build as the same operating-system user that runs the node:
+The preview is currently supported only on Linux with procfs mounted at `/proc` (including `/proc/self/fd`) and is pinned to build `grok 0.2.93 (f00f96316d)`; the known stable installer prints the same build with an optional trailing ` [stable]`. Install and authenticate that Grok CLI build as the same operating-system user that runs the node:
 
 ```bash
 grok auth login

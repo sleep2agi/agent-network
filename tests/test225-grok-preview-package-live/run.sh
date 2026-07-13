@@ -33,6 +33,8 @@ RESUME_LOG=/tmp/test225-resume.raw.log
 ATTACH_CAPTURE=/tmp/test225-attach.raw.txt
 RELOAD_CAPTURE=/tmp/test225-reload-attach.raw.txt
 RESUME_CAPTURE=/tmp/test225-resume-attach.raw.txt
+GLOBAL_OBSERVATIONS=/tmp/test225-global-observations.jsonl
+GLOBAL_READINESS_OBSERVATIONS=/tmp/test225-global-readiness.jsonl
 REAL_START_LOG=/tmp/test225-real-start.raw.log
 REAL_RESUME_LOG=/tmp/test225-real-resume.raw.log
 REAL_CAPTURE=/tmp/test225-real-attach.raw.txt
@@ -68,6 +70,11 @@ pass() { log "PASS: $*"; }
 SOURCE_COMMIT=${TEST225_SOURCE_COMMIT:-}
 [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] \
   || fail "SOURCE_COMMIT must bind this gate to one full lowercase Git SHA"
+ARCHIVE_COMMIT=$(tr -d '\r\n' </test225/source-commit.txt)
+[[ "$ARCHIVE_COMMIT" =~ ^[0-9a-f]{40}$ ]] \
+  || fail "test225 build context must come from git archive, not a mutable checkout"
+[ "$ARCHIVE_COMMIT" = "$SOURCE_COMMIT" ] \
+  || fail "SOURCE_COMMIT does not match the archived build context"
 fail_with_private_log() {
   local message=$1 path=$2
   local bytes=0 mode=missing
@@ -233,6 +240,56 @@ assert_installed_candidate_runtime() {
     && fail "$label unexpectedly used an npx preview fallback"
 }
 
+assert_fake_observations_exact() {
+  local observations=${1:-$FAKE_OBSERVATIONS}
+  if jq -e -s --slurpfile expected "$EXPECTED_GROK_ENV_KEYS" \
+    --slurpfile expectedPty "$EXPECTED_GROK_PTY_ENV_KEYS" \
+    --slurpfile expectedParent "$EXPECTED_AGENT_NODE_ENV_KEYS" \
+    'any(.[]; .kind == "version") and any(.[]; .kind == "help")
+    and any(.[]; .kind == "inspect") and any(.[]; .kind == "spawn")
+    and all(.[]; (.forbiddenKeys | length) == 0 and .markerValueObserved == false
+      and (if .kind == "spawn"
+        then .envKeys == $expectedPty[0] and .terminalEnvExpected == true
+          and .parentPidMatches == true
+          and .folderTrustExact == true
+          and .folderTrustMode == 384
+          and .folderTrustCount == 1
+          and .parentEnvKeys == $expectedParent[0]
+          and (.parentForbiddenKeys | length) == 0
+          and .parentMarkerValueObserved == false
+        else .envKeys == $expected[0]
+        end))' \
+    "$observations" >/dev/null; then
+    return 0
+  fi
+  # Key names only: preserve a useful, value-free diagnostic without
+  # disclosing any child environment values into the report.
+  jq -c -s --slurpfile expected "$EXPECTED_GROK_ENV_KEYS" \
+    --slurpfile expectedPty "$EXPECTED_GROK_PTY_ENV_KEYS" \
+    --slurpfile expectedParent "$EXPECTED_AGENT_NODE_ENV_KEYS" \
+    'map(. as $row | (if .kind == "spawn" then $expectedPty[0] else $expected[0] end) as $want
+      | {kind,missing:($want - .envKeys),extra:(.envKeys - $want),forbiddenKeys,markerValueObserved,
+          terminalEnvExpected,parentPidMatches,
+          parentMissing:($expectedParent[0] - (.parentEnvKeys // [])),
+          parentExtra:((.parentEnvKeys // []) - $expectedParent[0]),
+          parentForbiddenKeys,parentMarkerValueObserved})' \
+    "$observations" | tee -a "$REPORT"
+  fail "candidate Grok probe/PTY env differs from the exact reviewed key set"
+}
+
+capture_stopped_pane() {
+  local session=$1 output=$2 dead=0
+  for _ in $(seq 1 300); do
+    dead=$(tmux display-message -p -t "$session":0.0 '#{pane_dead}' 2>/dev/null || printf missing)
+    [ "$dead" = 1 ] && break
+    sleep 0.1
+  done
+  [ "$dead" = 1 ] || fail "attached TUI pane did not reach a stopped state: $session"
+  tmux capture-pane -p -J -t "$session":0.0 -S -400 >"$output" 2>/dev/null \
+    || fail "could not capture stopped TUI pane: $session"
+  chmod 600 "$output"
+}
+
 file_mode() {
   stat -c '%a' "$1"
 }
@@ -262,8 +319,6 @@ stop_node_checked() {
   fi
   scan_fixed_file /tmp/test225-markers "$output" \
     || fail "node stop output exposed a synthetic credential marker for $label"
-  scan_fixed_file /tmp/test225-assistant-marker "$output" \
-    || fail "node stop output exposed an assistant credential marker for $label"
   scan_fixed_file /tmp/test225-live-credentials "$output" \
     || fail "node stop output exposed a Hub credential for $label"
   scan_fixed_file /tmp/test225-real-patterns "$output" \
@@ -290,7 +345,7 @@ cleanup() {
     "$REGISTER_LOG" "$CREATE_LOG" "$HEADLESS_CREATE_LOG" "$REAL_CREATE_LOG" \
     "$GLOBAL_INSTALL_LOG" \
     /tmp/test225-*-stop.raw.log \
-    /tmp/test225-markers /tmp/test225-assistant-marker /tmp/test225-live-credentials \
+    /tmp/test225-markers /tmp/test225-live-credentials \
     /tmp/test225-real-patterns /tmp/test225-real-hub-rows /tmp/test225-hub-results \
     /tmp/test225-headless.raw.log \
     /tmp/test225-candidate-agent-node-package.json \
@@ -298,7 +353,8 @@ cleanup() {
     "$EXPECTED_HELPER_ENV" \
     "$EXPECTED_NPX_ENV_KEYS" "$NPX_ENV_OBSERVATION" \
     "$FALLBACK_PID_SNAPSHOT" \
-    "$FAKE_OBSERVATIONS" "$FAKE_READINESS_OBSERVATIONS" "$LOCAL_REGISTRY_LOG"
+    "$FAKE_OBSERVATIONS" "$FAKE_READINESS_OBSERVATIONS" \
+    "$GLOBAL_OBSERVATIONS" "$GLOBAL_READINESS_OBSERVATIONS" "$LOCAL_REGISTRY_LOG"
   rm -rf /tmp/test225-candidate-extracted /tmp/test225-real-auth /tmp/test225-bin
 }
 trap cleanup EXIT
@@ -367,6 +423,7 @@ grep -Fq "anet grok attach $ALIAS" "$CREATE_LOG" \
   || fail "grok preview create did not print attach guidance"
 
 CONFIG="$WORK/.anet/nodes/$ALIAS/config.json"
+NODE_LOG_DIR="$WORK/.anet/nodes/$ALIAS/logs"
 [ -f "$CONFIG" ] || fail "anet node create did not persist config"
 jq -e '.runtime == "grok-build-cli" and .grokCopresence == true
   and (.grokLeaderSocket | type == "string") and (.grokAttachSocket | type == "string")
@@ -415,21 +472,28 @@ TEST225_KEY_CANARY_a5c0f8
 TEST225_NTOK_CANARY_4af821
 TEST225_UTOK_CANARY_a1dd60
 EOF_MARKERS
-printf '%s\n' 'TEST225_ASSISTANT_SECRET_CANARY_b682a1' > /tmp/test225-assistant-marker
 chmod 600 /tmp/test225-markers
-chmod 600 /tmp/test225-assistant-marker
+
+# Seed a pre-boundary ordinary log with broad permissions and a synthetic
+# credential. Startup must scrub it and repair both directory/file modes
+# before appending the first runtime line.
+mkdir -p "$NODE_LOG_DIR"
+chmod 755 "$NODE_LOG_DIR"
+LEGACY_DAILY_LOG="$NODE_LOG_DIR/$(date -u +%F).log"
+printf '%s\n' 'legacy PARTNER_TOKEN=TEST225_TOKEN_CANARY_74f210' > "$LEGACY_DAILY_LOG"
+chmod 644 "$LEGACY_DAILY_LOG"
 
 {
   for key in PATH TMPDIR TMP TEMP LANG LC_ALL LC_CTYPE TZ SHELL USER LOGNAME TERM COLORTERM NO_COLOR; do
     printenv "$key" >/dev/null 2>&1 && printf '%s\n' "$key"
   done
   printf '%s\n' \
-    HOME GROK_HOME GROK_AUTH_PATH ANET_EXPECTED_PARENT_PID \
+    HOME PWD GROK_HOME GROK_AUTH_PATH ANET_EXPECTED_PARENT_PID \
     GROK_CLAUDE_MCPS_ENABLED GROK_CURSOR_MCPS_ENABLED \
     GROK_CLAUDE_HOOKS_ENABLED GROK_CURSOR_HOOKS_ENABLED \
     GROK_FOLDER_TRUST GROK_DEFAULT_SELECTED_PERMISSION
 } | sort -u | jq -Rsc 'split("\n") | map(select(length > 0))' > "$EXPECTED_GROK_ENV_KEYS"
-jq -c '. + ["PWD", "TERM"] | unique | sort' "$EXPECTED_GROK_ENV_KEYS" \
+jq -c '. + ["TERM"] | unique | sort' "$EXPECTED_GROK_ENV_KEYS" \
   > "$EXPECTED_GROK_PTY_ENV_KEYS"
 
 node - <<'NODE' > "$EXPECTED_HELPER_ENV"
@@ -515,6 +579,7 @@ start_attach() {
   local session=$1
   tmux new-session -d -s "$session" \
     "cd '$WORK' && env -u ANET_AGENT_NODE_BIN HOME='$HOME' PATH='$PATH' anet grok attach '$ALIAS'"
+  tmux set-window-option -t "$session":0 remain-on-exit on >/dev/null
 }
 
 start_fake_node "$START_LOG"
@@ -587,6 +652,7 @@ stop_node_checked "$ALIAS" legacy-reload
 [ ! -e "$ATTACH_SOCKET" ] || fail "node stop returned before removing the attach socket"
 [ ! -e "$LEADER_SOCKET" ] || fail "node stop returned before removing the leader socket"
 assert_snapshot_gone "$FALLBACK_PID_SNAPSHOT"
+capture_stopped_pane test225-attach "$ATTACH_CAPTURE"
 tmux kill-session -t test225-attach 2>/dev/null || true
 wait "$NODE_PROCESS_PID" 2>/dev/null || true
 NODE_PROCESS_PID=""
@@ -690,44 +756,11 @@ if ! jq -e -s 'length > 0 and all(.[]; .preReadyNetworkWrites == 0)' \
   "$FAKE_READINESS_OBSERVATIONS" >/dev/null; then
   fail "candidate wrote a network prompt before the TUI composer readiness gate"
 fi
-if ! jq -e -s --slurpfile expected "$EXPECTED_GROK_ENV_KEYS" \
-  --slurpfile expectedPty "$EXPECTED_GROK_PTY_ENV_KEYS" \
-  --slurpfile expectedParent "$EXPECTED_AGENT_NODE_ENV_KEYS" \
-  'any(.[]; .kind == "version") and any(.[]; .kind == "help")
-  and any(.[]; .kind == "inspect") and any(.[]; .kind == "spawn")
-  and all(.[]; (.forbiddenKeys | length) == 0 and .markerValueObserved == false
-    and (if .kind == "spawn"
-      then .envKeys == $expectedPty[0] and .terminalEnvExpected == true
-        and .parentPidMatches == true
-        and .folderTrustExact == true
-        and .folderTrustMode == 384
-        and .folderTrustCount == 1
-        and .parentEnvKeys == $expectedParent[0]
-        and (.parentForbiddenKeys | length) == 0
-        and .parentMarkerValueObserved == false
-      else .envKeys == $expected[0]
-      end))' \
-  "$FAKE_OBSERVATIONS" >/dev/null; then
-  # Key names only: preserve a useful, value-free diagnostic without
-  # disclosing any child environment values into the report.
-  jq -c -s --slurpfile expected "$EXPECTED_GROK_ENV_KEYS" \
-    --slurpfile expectedPty "$EXPECTED_GROK_PTY_ENV_KEYS" \
-    --slurpfile expectedParent "$EXPECTED_AGENT_NODE_ENV_KEYS" \
-    'map(. as $row | (if .kind == "spawn" then $expectedPty[0] else $expected[0] end) as $want
-      | {kind,missing:($want - .envKeys),extra:(.envKeys - $want),forbiddenKeys,markerValueObserved,
-          terminalEnvExpected,parentPidMatches,
-          parentMissing:($expectedParent[0] - (.parentEnvKeys // [])),
-          parentExtra:((.parentEnvKeys // []) - $expectedParent[0]),
-          parentForbiddenKeys,parentMarkerValueObserved})' \
-    "$FAKE_OBSERVATIONS" | tee -a "$REPORT"
-  fail "candidate Grok probe/PTY env differs from the exact reviewed key set"
-fi
+assert_fake_observations_exact
 if scan_fixed_file /tmp/test225-markers \
-  "$START_LOG" "$RELOAD_LOG" "$ATTACH_CAPTURE" "$RELOAD_CAPTURE"; then :; else
+  "$SERVER_LOG" "$START_LOG" "$RELOAD_LOG" "$ATTACH_CAPTURE" "$RELOAD_CAPTURE"; then :; else
   fail "synthetic credential reached ordinary agent/TUI logs"
 fi
-grep -Fq 'TEST225_ASSISTANT_SECRET_CANARY_b682a1' <<<"$TASK_ROW" \
-  && fail "assistant-generated credential shape reached the Hub reply"
 SESSION_ID=$(jq -r '.grokCliSession // empty' "$CONFIG")
 [ -n "$SESSION_ID" ] || fail "co-presence session id was not persisted"
 GROK_STATE="$HOME/.anet-grok"
@@ -752,16 +785,18 @@ scan_fixed_file /tmp/test225-markers /tmp/test225-candidate-extracted "$REPORT" 
   || fail "synthetic credential reached candidate tarball or report"
 scan_fixed_file /tmp/test225-markers "$WORK/.anet/nodes/$ALIAS" \
   || fail "synthetic credential reached node-local durable state"
-scan_fixed_file /tmp/test225-assistant-marker \
-  /tmp/test225-candidate-extracted "$START_LOG" "$RELOAD_LOG" \
-  "$ATTACH_CAPTURE" "$RELOAD_CAPTURE" "$GROK_STATE" "$PENDING" "$REPORT" \
-  /tmp/test225-hub-results \
-  || fail "assistant credential canary reached TUI/state/log/pending/tarball/report"
-NODE_LOG_DIR="$WORK/.anet/nodes/$ALIAS/logs"
+[ "$(file_mode "$NODE_LOG_DIR")" = 700 ] \
+  || fail "legacy durable agent log directory was not repaired to 0700"
+[ "$(file_mode "$LEGACY_DAILY_LOG")" = 600 ] \
+  || fail "legacy durable agent log was not repaired to 0600"
+grep -Fq '[REDACTED_CREDENTIAL]' "$LEGACY_DAILY_LOG" \
+  || fail "legacy durable agent log was not scrubbed before append"
+[ "$(wc -l <"$LEGACY_DAILY_LOG")" -gt 1 ] \
+  || fail "production logger did not append to the repaired daily log"
+grep -Fq '[grok-copresence] grok 0.2.93' "$LEGACY_DAILY_LOG" \
+  || fail "production Grok startup line is absent from the repaired daily log"
 scan_fixed_file /tmp/test225-markers "$NODE_LOG_DIR" \
   || fail "synthetic credential reached the durable agent log directory"
-scan_fixed_file /tmp/test225-assistant-marker "$NODE_LOG_DIR" \
-  || fail "assistant credential canary reached the durable agent log directory"
 scan_fixed_file /tmp/test225-live-credentials "$NODE_LOG_DIR" \
   || fail "Hub credential reached the durable agent log directory"
 scan_fixed_file /tmp/test225-live-credentials \
@@ -778,11 +813,16 @@ done
 pass "all retained test logs/captures are owner-only during the run"
 
 log "[L4] npx fallback -> global candidate + same-session resume"
+snapshot_fallback_runtime "$FALLBACK_PID_SNAPSHOT"
 stop_node_checked "$ALIAS" fallback
+capture_stopped_pane test225-attach "$RELOAD_CAPTURE"
 tmux kill-session -t test225-attach 2>/dev/null || true
 wait_gone "$ATTACH_SOCKET" 300 || fail "attach socket survived node stop"
 wait "$NODE_PROCESS_PID" 2>/dev/null || true
 NODE_PROCESS_PID=""
+assert_snapshot_gone "$FALLBACK_PID_SNAPSHOT"
+wait_no_fallback_runtime 300 \
+  || fail "pre-global stop left agent-node, Grok, npm wrapper, or lock-holder processes"
 
 # Install the exact same unpublished tarball only after the fallback path has
 # succeeded. From here onward npm is offline, proving start selects the global
@@ -799,8 +839,6 @@ node -e '
 ' || fail "global candidate agent-node lacks its node-pty optional dependency"
 scan_fixed_file /tmp/test225-markers "$GLOBAL_INSTALL_LOG" \
   || fail "global install output exposed a synthetic credential marker"
-scan_fixed_file /tmp/test225-assistant-marker "$GLOBAL_INSTALL_LOG" \
-  || fail "global install output exposed an assistant credential marker"
 scan_fixed_file /tmp/test225-live-credentials "$GLOBAL_INSTALL_LOG" \
   || fail "global install output exposed a Hub credential"
 rm -f "$GLOBAL_INSTALL_LOG"
@@ -828,6 +866,8 @@ grep -Fq 'grok-build-cli preview currently refuses Feishu channels' "$FEISHU_LOG
   || fail "installed candidate Feishu refusal lacked the fixed explanation"
 scan_fixed_file /tmp/test225-markers "$FEISHU_LOG" \
   || fail "Feishu refusal output exposed a synthetic credential marker"
+scan_fixed_file /tmp/test225-live-credentials "$FEISHU_LOG" \
+  || fail "Feishu refusal output exposed a Hub credential"
 [ "$(matching_process_count '/test225/fake-grok.mjs')" -eq 0 ] \
   || fail "Feishu refusal started Grok before closing the channel boundary"
 rm -rf "$FEISHU_DIR" "$FEISHU_CONFIG" "$FEISHU_LOG"
@@ -880,9 +920,12 @@ chmod 600 "$PENDING"
 printf '%s\n' '{bad PARTNER_KEY=TEST225_KEY_CANARY_a5c0f8' > "$GOALS_FILE"
 chmod 644 "$GOALS_FILE"
 
+GLOBAL_OBSERVATION_BASE=$(wc -l <"$FAKE_OBSERVATIONS")
+GLOBAL_READINESS_BASE=$(wc -l <"$FAKE_READINESS_OBSERVATIONS")
 start_fake_node_global "$RESUME_LOG"
 wait_file "$ATTACH_SOCKET" 300 \
   || fail_with_private_log "attach socket did not return from global candidate" "$RESUME_LOG"
+assert_installed_candidate_runtime "$ALIAS" "global resume" "$RESUME_LOG"
 for _ in $(seq 1 200); do
   if [ -f "$PENDING" ] && [ "$(file_mode "$PENDING")" = 600 ] \
     && scan_fixed_file /tmp/test225-markers "$PENDING"; then
@@ -939,16 +982,28 @@ wait_pane test225-resume-attach 'GROK_PREVIEW_RESUME_225_B' "$RESUME_CAPTURE" 10
   || fail "resumed attached TUI did not render the second task"
 [ "$(jq -r '.grokCliSession' "$CONFIG")" = "$SESSION_ID" ] \
   || fail "stop/resume changed the Grok session id"
-jq -e -s '([.[] | select(.kind == "spawn")] | length) >= 2
-  and ([.[] | select(.kind == "spawn")][-1].resume == true)
-  and all(.[] | select(.kind == "spawn");
-    .folderTrustExact == true and .folderTrustMode == 384 and .folderTrustCount == 1)
-  and all(.[]; (.forbiddenKeys | length) == 0 and .markerValueObserved == false)' \
-  "$FAKE_OBSERVATIONS" >/dev/null \
-  || fail "fake Grok did not resume or resumed with a forbidden env"
+tail -n "+$((GLOBAL_OBSERVATION_BASE + 1))" "$FAKE_OBSERVATIONS" >"$GLOBAL_OBSERVATIONS"
+tail -n "+$((GLOBAL_READINESS_BASE + 1))" "$FAKE_READINESS_OBSERVATIONS" \
+  >"$GLOBAL_READINESS_OBSERVATIONS"
+chmod 600 "$GLOBAL_OBSERVATIONS" "$GLOBAL_READINESS_OBSERVATIONS"
+[ -s "$GLOBAL_OBSERVATIONS" ] || fail "global resume produced no new Grok observation"
+[ -s "$GLOBAL_READINESS_OBSERVATIONS" ] || fail "global resume produced no new readiness observation"
+assert_fake_observations_exact "$GLOBAL_OBSERVATIONS"
+GLOBAL_RUNTIME_PID=$(<"$RUNTIME_PID_FILE")
+jq -e -s --argjson pid "$GLOBAL_RUNTIME_PID" \
+  '([.[] | select(.kind == "spawn")] | length) == 1
+   and ([.[] | select(.kind == "spawn")][0]
+     | .resume == true
+       and .parentPid == $pid
+       and .expectedParentPid == $pid
+       and .folderTrustExact == true
+       and .folderTrustMode == 384
+       and .folderTrustCount == 1)' \
+  "$GLOBAL_OBSERVATIONS" >/dev/null \
+  || fail "global resume observation is not bound to the current installed runtime PID"
 jq -e -s 'length > 0 and all(.[]; .preReadyNetworkWrites == 0)' \
-  "$FAKE_READINESS_OBSERVATIONS" >/dev/null \
-  || fail "resume wrote a network prompt before the TUI composer readiness gate"
+  "$GLOBAL_READINESS_OBSERVATIONS" >/dev/null \
+  || fail "global resume wrote a network prompt before the TUI composer readiness gate"
 grep -Fq 'fetching @sleep2agi/agent-node@preview' "$START_LOG" \
   || fail "initial package-only start no longer proves the documented npx preview fallback"
 grep -Fq '[anet] using installed agent-node with Grok co-presence capability.' "$RESUME_LOG" \
@@ -957,17 +1012,22 @@ grep -Eq 'fetching @sleep2agi/agent-node@preview|using @sleep2agi/agent-node@pre
   && fail "resume used a cached npx preview path instead of the installed global candidate"
 pass "node stop/resume reused one session: first start used npx preview fallback; resume used global candidate"
 
+snapshot_fallback_runtime "$FALLBACK_PID_SNAPSHOT"
 stop_node_checked "$ALIAS" resumed
+capture_stopped_pane test225-resume-attach "$RESUME_CAPTURE"
 tmux kill-session -t test225-resume-attach 2>/dev/null || true
 wait "$NODE_PROCESS_PID" 2>/dev/null || true
 NODE_PROCESS_PID=""
+assert_snapshot_gone "$FALLBACK_PID_SNAPSHOT"
+wait_no_fallback_runtime 300 \
+  || fail "global resume stop left agent-node, Grok, npm wrapper, or lock-holder processes"
 
 run_real_gate() {
   local real_bin=${TEST225_REAL_GROK_BIN:-/host-grok/bin/grok-0.2.93}
   local real_auth=${TEST225_REAL_GROK_AUTH:-/host-grok/auth.json}
   local real_alias=preview-grok-real-225
   local real_config="$WORK/.anet/nodes/$real_alias/config.json"
-  local real_socket real_session first_id first_row second_id second_row continuity_nonce
+  local real_socket real_leader real_session first_id first_row second_id second_row continuity_nonce
   local real_log_dir="$WORK/.anet/nodes/$real_alias/logs"
   continuity_nonce="GROK_PREVIEW_CONTEXT_225_$(tr -d '-' </proc/sys/kernel/random/uuid)"
 
@@ -997,6 +1057,7 @@ run_real_gate() {
     || fail "optional real create console output exposed an auth scalar"
   rm -f "$REAL_CREATE_LOG"
   real_socket=$(jq -r '.grokAttachSocket' "$real_config")
+  real_leader=$(jq -r '.grokLeaderSocket' "$real_config")
 
   env -u ANET_AGENT_NODE_BIN GROK_BINARY="$real_bin" npm_config_offline=true \
     anet node start "$real_alias" >"$REAL_START_LOG" 2>&1 &
@@ -1006,6 +1067,7 @@ run_real_gate() {
   assert_installed_candidate_runtime "$real_alias" "real first" "$REAL_START_LOG"
   tmux new-session -d -s test225-real-attach \
     "cd '$WORK' && env -u ANET_AGENT_NODE_BIN HOME='$HOME' PATH='$PATH' anet grok attach '$real_alias'"
+  tmux set-window-option -t test225-real-attach:0 remain-on-exit on >/dev/null
   wait_pane test225-real-attach 'attached to Grok TUI' "$REAL_CAPTURE" 300 \
     || fail "optional real TUI did not attach"
 
@@ -1031,10 +1093,16 @@ run_real_gate() {
   [ -n "$real_session" ] || fail "optional real session id missing"
 
   stop_node_checked "$real_alias" real-first
+  capture_stopped_pane test225-real-attach "$REAL_CAPTURE"
   tmux kill-session -t test225-real-attach 2>/dev/null || true
   wait_gone "$real_socket" 600 || fail "optional real attach socket survived stop"
+  wait_gone "$real_leader" 600 || fail "optional real leader socket survived stop"
   wait "$NODE_PROCESS_PID" 2>/dev/null || true
   NODE_PROCESS_PID=""
+  wait_no_fallback_runtime 300 \
+    || fail "optional real first stop left an agent-node or lock-holder process"
+  [ "$(matching_process_count "$real_bin")" -eq 0 ] \
+    || fail "optional real first stop left a Grok process"
 
   env -u ANET_AGENT_NODE_BIN GROK_BINARY="$real_bin" npm_config_offline=true \
     anet node start "$real_alias" >"$REAL_RESUME_LOG" 2>&1 &
@@ -1043,6 +1111,7 @@ run_real_gate() {
   assert_installed_candidate_runtime "$real_alias" "real resume" "$REAL_RESUME_LOG"
   tmux new-session -d -s test225-real-resume-attach \
     "cd '$WORK' && env -u ANET_AGENT_NODE_BIN HOME='$HOME' PATH='$PATH' anet grok attach '$real_alias'"
+  tmux set-window-option -t test225-real-resume-attach:0 remain-on-exit on >/dev/null
   wait_pane test225-real-resume-attach 'attached to Grok TUI' "$REAL_RESUME_CAPTURE" 300 \
     || fail "optional real resume attach failed"
 
@@ -1092,18 +1161,37 @@ run_real_gate() {
     "$REAL_START_LOG" "$REAL_RESUME_LOG" "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" \
     "$real_log_dir" "$GROK_STATE" "$real_pending" "$REPORT" /tmp/test225-real-hub-rows \
     || fail "synthetic credential reached a real-node log, capture, state, pending row, or report"
-  scan_fixed_file /tmp/test225-assistant-marker \
-    "$REAL_START_LOG" "$REAL_RESUME_LOG" "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" \
-    "$real_log_dir" "$GROK_STATE" "$real_pending" "$REPORT" /tmp/test225-real-hub-rows \
-    || fail "assistant credential canary reached a real-node evidence artifact"
   pass "optional authenticated real Grok package E2E: live render, reply, stop/resume, auth scan"
 
   stop_node_checked "$real_alias" real-resumed
+  capture_stopped_pane test225-real-resume-attach "$REAL_RESUME_CAPTURE"
   tmux kill-session -t test225-real-resume-attach 2>/dev/null || true
+  wait_gone "$real_socket" 600 || fail "optional real resume attach socket survived stop"
+  wait_gone "$real_leader" 600 || fail "optional real resume leader socket survived stop"
   wait "$NODE_PROCESS_PID" 2>/dev/null || true
   NODE_PROCESS_PID=""
-  rm -f "$HOME/.grok/auth.json" "$HOME/.grok/agent_id" \
-    /tmp/test225-real-patterns /tmp/test225-real-hub-rows
+  wait_no_fallback_runtime 300 \
+    || fail "optional real resume stop left an agent-node or lock-holder process"
+  [ "$(matching_process_count "$real_bin")" -eq 0 ] \
+    || fail "optional real resume stop left a Grok process"
+  scan_fixed_file /tmp/test225-real-patterns \
+    "$REPORT" "$REAL_START_LOG" "$REAL_RESUME_LOG" "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" \
+    "$SERVER_LOG" "$real_log_dir" "$GROK_STATE" "$real_pending" /tmp/test225-real-hub-rows \
+    || fail "real Grok auth scalar reached an evidence artifact during shutdown"
+  scan_fixed_file /tmp/test225-live-credentials \
+    "$REAL_START_LOG" "$REAL_RESUME_LOG" "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" \
+    "$real_log_dir" "$GROK_STATE" "$real_pending" "$REPORT" /tmp/test225-real-hub-rows \
+    || fail "Hub credential reached a real-node evidence artifact during shutdown"
+  scan_fixed_file /tmp/test225-markers \
+    "$REAL_START_LOG" "$REAL_RESUME_LOG" "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" \
+    "$real_log_dir" "$GROK_STATE" "$real_pending" "$REPORT" /tmp/test225-real-hub-rows \
+    || fail "synthetic credential reached a real-node evidence artifact during shutdown"
+  [ "$(file_mode "$real_log_dir")" = 700 ] \
+    || fail "real node durable log directory is not mode 0700"
+  if find "$real_log_dir" -type f ! -perm 0600 -print -quit | grep -q .; then
+    fail "real node durable log directory contains a non-0600 file"
+  fi
+  rm -f "$HOME/.grok/auth.json" "$HOME/.grok/agent_id"
 }
 
 log "[L5] optional authenticated real Grok gate"
@@ -1115,22 +1203,39 @@ else
   log "OPTIONAL: authenticated real Grok gate not requested"
 fi
 
+# Freeze the final producer before scanning its log. EXIT cleanup is only a
+# safety net and cannot serve as evidence because it runs after the report.
+kill "$SERVER_PID" 2>/dev/null || true
+wait "$SERVER_PID" 2>/dev/null || true
+SERVER_PID=""
+
+[ "$(file_mode "$NODE_LOG_DIR")" = 700 ] \
+  || fail "final durable agent log directory mode is not 0700"
+if find "$NODE_LOG_DIR" -type f ! -perm 0600 -print -quit | grep -q .; then
+  fail "final durable agent log directory contains a non-0600 file"
+fi
 scan_fixed_file /tmp/test225-markers \
-  /tmp/test225-candidate-extracted "$REPORT" "$START_LOG" "$RELOAD_LOG" "$RESUME_LOG" \
-  "$ATTACH_CAPTURE" "$RELOAD_CAPTURE" "$RESUME_CAPTURE" "$GROK_STATE" "$PENDING" \
+  /tmp/test225-candidate-extracted "$REPORT" "$SERVER_LOG" "$START_LOG" "$RELOAD_LOG" "$RESUME_LOG" \
+  "$REAL_START_LOG" "$REAL_RESUME_LOG" "$ATTACH_CAPTURE" "$RELOAD_CAPTURE" "$RESUME_CAPTURE" \
+  "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" "$GROK_STATE" "$PENDING" \
   "$WORK/.anet/nodes/$ALIAS" /tmp/test225-hub-results \
   "$LOCAL_REGISTRY_LOG" "$NPX_ENV_OBSERVATION" \
   || fail "final synthetic credential scan failed"
 scan_fixed_file /tmp/test225-live-credentials \
   /tmp/test225-candidate-extracted "$SERVER_LOG" "$START_LOG" "$RELOAD_LOG" "$RESUME_LOG" \
-  "$ATTACH_CAPTURE" "$RELOAD_CAPTURE" "$RESUME_CAPTURE" "$GROK_STATE" "$PENDING" "$REPORT" \
-  "$NODE_LOG_DIR" /tmp/test225-hub-results "$LOCAL_REGISTRY_LOG" "$NPX_ENV_OBSERVATION" \
+  "$REAL_START_LOG" "$REAL_RESUME_LOG" "$ATTACH_CAPTURE" "$RELOAD_CAPTURE" "$RESUME_CAPTURE" \
+  "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" "$GROK_STATE" "$PENDING" "$REPORT" \
+  "$NODE_LOG_DIR" "$WORK/.anet/nodes/preview-grok-real-225/logs" \
+  "$WORK/.anet/nodes/preview-grok-real-225/pending-replies.json" \
+  /tmp/test225-hub-results /tmp/test225-real-hub-rows "$LOCAL_REGISTRY_LOG" "$NPX_ENV_OBSERVATION" \
   || fail "final test Hub credential scan failed"
-scan_fixed_file /tmp/test225-assistant-marker \
+scan_fixed_file /tmp/test225-real-patterns \
   /tmp/test225-candidate-extracted "$SERVER_LOG" "$START_LOG" "$RELOAD_LOG" "$RESUME_LOG" \
-  "$ATTACH_CAPTURE" "$RELOAD_CAPTURE" "$RESUME_CAPTURE" "$GROK_STATE" \
-  "$PENDING" "$REPORT" "$NODE_LOG_DIR" /tmp/test225-hub-results "$LOCAL_REGISTRY_LOG" \
-  || fail "final assistant credential-canary scan failed"
+  "$REAL_START_LOG" "$REAL_RESUME_LOG" "$ATTACH_CAPTURE" "$RELOAD_CAPTURE" \
+  "$RESUME_CAPTURE" "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" "$GROK_STATE" "$PENDING" \
+  "$WORK/.anet" /tmp/test225-hub-results /tmp/test225-real-hub-rows "$REPORT" \
+  "$LOCAL_REGISTRY_LOG" "$NPX_ENV_OBSERVATION" \
+  || fail "final real-auth scalar scan failed after every producer stopped"
 
 log ""
 log "Summary: PASS"

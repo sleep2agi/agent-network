@@ -4,7 +4,7 @@ ARG SOURCE_COMMIT
 ENV TEST224_SOURCE_COMMIT=$SOURCE_COMMIT
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates nodejs npm tar \
+  && apt-get install -y --no-install-recommends ca-certificates nodejs npm tar util-linux \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace

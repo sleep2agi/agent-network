@@ -1,6 +1,6 @@
 # test225 — Grok preview candidate package/live gate
 
-This suite builds candidate npm tarballs from the current checkout, installs
+This suite builds candidate npm tarballs from one exact Git commit archive, installs
 them globally into a second clean Docker stage, and runs the CLI only from
 those installed packages. It never publishes a package.
 
@@ -33,10 +33,16 @@ local registry is stopped and the resume gate runs with npm offline. Do not
 run the deterministic command with `--network none`; test224 is the separate
 network-disabled package/security gate.
 
-Run the deterministic layer from the repository root:
+Run the deterministic layer from the repository root. The archive step is a
+hard provenance gate: uncommitted files are excluded, and an export-substituted
+commit marker inside the image must equal `SOURCE_COMMIT`.
 
 ```bash
-sg docker -c 'docker build --build-arg SOURCE_COMMIT=$(git rev-parse HEAD) -f tests/test225-grok-preview-package-live/Dockerfile -t test225-grok-preview .'
+SOURCE_COMMIT=$(git rev-parse HEAD)
+CONTEXT=$(mktemp -d)
+git archive "$SOURCE_COMMIT" | tar -x -C "$CONTEXT"
+sg docker -c "docker build --build-arg SOURCE_COMMIT=$SOURCE_COMMIT -f '$CONTEXT/tests/test225-grok-preview-package-live/Dockerfile' -t test225-grok-preview '$CONTEXT'"
+rm -rf "$CONTEXT"
 sg docker -c 'docker run --rm -v "$PWD/docs/tests:/artifacts" test225-grok-preview'
 ```
 

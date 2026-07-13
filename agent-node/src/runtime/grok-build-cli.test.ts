@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { chmodSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { assertGrokCliFeatures, assertGrokCliVersion, buildGrokCliArgs, normalizeGrokCliTools, runGrokCliTurn } from "./grok-build-cli";
+import { buildGrokChildEnv } from "./grok-child-env";
 
 const roots: string[] = [];
 
@@ -14,7 +15,7 @@ function fakeGrok(source: string): { root: string; binary: string } {
   const root = mkdtempSync(join(tmpdir(), "grok-cli-runtime-"));
   roots.push(root);
   const binary = join(root, "grok");
-  writeFileSync(binary, `#!/usr/bin/env node\n${source}\n`);
+  writeFileSync(binary, `#!${process.execPath}\n${source}\n`);
   chmodSync(binary, 0o755);
   return { root, binary };
 }
@@ -177,6 +178,69 @@ describe("runGrokCliTurn", () => {
       GROK_CURSOR_HOOKS_ENABLED: "false",
       GROK_FOLDER_TRUST: "1",
     });
+  });
+
+  it("keeps the production-shaped setpriv/sh launcher on the exact PWD-bound env", async () => {
+    const { root, binary } = fakeGrok(`
+      process.stdout.write(JSON.stringify({type:"text",data:JSON.stringify(process.env)}) + "\\n");
+      process.stdout.write(JSON.stringify({type:"end",stopReason:"EndTurn",sessionId:"session-wrapper"}) + "\\n");
+    `);
+    const env = buildGrokChildEnv({
+      parentEnv: { PATH: "/usr/local/bin:/usr/bin:/bin", LANG: "C.UTF-8" },
+      cwd: root,
+      home: "/runtime/home",
+      authPath: "/runtime/home/auth.json",
+      expectedParentPid: process.pid,
+    }) as Record<string, string>;
+    const result = await runGrokCliTurn({
+      prompt: "inspect wrapper env",
+      cwd: root,
+      binary,
+      idleTimeoutMs: 1_000,
+      env,
+      launcher: {
+        binary: "/usr/bin/setpriv",
+        args: [
+          "--pdeathsig", "SIGKILL",
+          "--",
+          "/bin/sh", "-c",
+          '[ "$PPID" -eq "$ANET_EXPECTED_PARENT_PID" ] || exit 125; exec "$@"',
+          "anet-grok-supervisor",
+          "/usr/bin/env",
+        ],
+      },
+    });
+    expect(JSON.parse(result.replyText)).toEqual(env);
+  });
+
+  it("refuses a shell launcher when PWD is missing from the reviewed env", async () => {
+    const { root, binary } = fakeGrok("");
+    const before = readdirSync(tmpdir()).filter((name) => name.startsWith(".anet-grok-prompt-")).sort();
+    await expect(runGrokCliTurn({
+      prompt: "must-not-persist-before-env-validation",
+      cwd: root,
+      binary,
+      idleTimeoutMs: 1_000,
+      env: { PATH: "/usr/bin:/bin" },
+      launcher: { binary: "/bin/sh", args: ["-c", 'exec "$@"', "test"] },
+    })).rejects.toThrow("exact PWD");
+    const after = readdirSync(tmpdir()).filter((name) => name.startsWith(".anet-grok-prompt-")).sort();
+    expect(after).toEqual(before);
+  });
+
+  it("removes the prompt when spawn rejects a malformed allowed env value", async () => {
+    const { root, binary } = fakeGrok("");
+    const before = readdirSync(tmpdir()).filter((name) => name.startsWith(".anet-grok-prompt-")).sort();
+    await expect(runGrokCliTurn({
+      prompt: "must-not-survive-a-synchronous-spawn-rejection",
+      cwd: root,
+      binary,
+      idleTimeoutMs: 1_000,
+      env: { PATH: "/usr/bin:/bin\0invalid", PWD: root },
+      launcher: { binary: "/bin/sh", args: ["-c", 'exec "$@"', "test"] },
+    })).rejects.toThrow();
+    const after = readdirSync(tmpdir()).filter((name) => name.startsWith(".anet-grok-prompt-")).sort();
+    expect(after).toEqual(before);
   });
 
   it("surfaces non-zero exits and stderr", async () => {

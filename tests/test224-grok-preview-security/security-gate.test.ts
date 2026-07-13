@@ -100,6 +100,7 @@ describe("test224 exact Grok child environment", () => {
 
     const baseline = buildGrokChildEnv({
       parentEnv,
+      cwd: "/workspace/project",
       home: "/tmp/test224-grok-home",
       authPath: "/tmp/test224-grok-home/auth.json",
       oidcIssuer: "https://accounts.example.invalid",
@@ -113,6 +114,7 @@ describe("test224 exact Grok child environment", () => {
       LANG: "C.UTF-8",
       TERM: "xterm-256color",
       HOME: "/tmp/test224-grok-home",
+      PWD: "/workspace/project",
       GROK_HOME: "/tmp/test224-grok-home",
       GROK_AUTH_PATH: "/tmp/test224-grok-home/auth.json",
       GROK_CLAUDE_MCPS_ENABLED: "false",
@@ -166,6 +168,43 @@ describe("test224 exact Grok child environment", () => {
     const ptyEnv = buildGrokPtyEnv(finalEnv, baseline, "/workspace/project");
     expect(ptyEnv).toEqual({ ...expected, PWD: "/workspace/project", TERM: "xterm-256color" });
   });
+
+  test("production-shaped setpriv/sh launcher preserves the exact final object", async () => {
+    const cwd = ROOT;
+    const expected = buildGrokChildEnv({
+      parentEnv: {
+        PATH: "/usr/local/bin:/usr/bin:/bin",
+        LANG: "C.UTF-8",
+        DATABASE_URL: markers().DATABASE_URL,
+      },
+      cwd,
+      home: "/tmp/test224-wrapper-home",
+      authPath: "/tmp/test224-wrapper-home/auth.json",
+      expectedParentPid: process.pid,
+    }) as Record<string, string>;
+    const child = Bun.spawn([
+      "/usr/bin/setpriv",
+      "--pdeathsig", "SIGKILL",
+      "--",
+      "/bin/sh", "-c",
+      '[ "$PPID" -eq "$ANET_EXPECTED_PARENT_PID" ] || exit 125; exec "$@"',
+      "anet-grok-supervisor",
+      "/usr/bin/env", "--", "/usr/bin/env", "-0",
+    ], {
+      cwd,
+      env: expected,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(child.stdout).bytes(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ]);
+    expect(code).toBe(0);
+    expect(stderr).toBe("");
+    expect(parseNulEnv(stdout)).toEqual(expected);
+  });
 });
 
 describe("test224 durable text boundaries", () => {
@@ -179,7 +218,7 @@ describe("test224 durable text boundaries", () => {
     if (dir) rmSync(dir, { recursive: true, force: true });
   });
 
-  test("ordinary log text and pending replies contain no synthetic credential value", () => {
+  test("inbound and assistant-shaped log/pending text contain no synthetic credential value", () => {
     const injected = markers();
     const rawValues = Object.values(injected);
     const redactor = createCredentialRedactor({ knownValues: rawValues });
@@ -197,6 +236,10 @@ describe("test224 durable text boundaries", () => {
     const safeLogLine = redactor.redactText(message).text;
     writeFileSync(logPath, safeLogLine + "\n", { mode: 0o600 });
     appendFileSync(logPath, redactor.redactText(`retry ${message}`).text + "\n");
+    appendFileSync(
+      logPath,
+      redactor.redactText(`assistant reply PARTNER_SECRET=${injected.ARBITRARY_SECRET}`).text + "\n",
+    );
     const logBytes = readFileSync(logPath, "utf8");
     for (const value of rawValues) expect(logBytes).not.toContain(value);
     expect(logBytes).toContain(CREDENTIAL_REDACTION);
@@ -338,6 +381,8 @@ describe("test224 durable text boundaries", () => {
     expect(source).toContain("await sendReply(target, safeBody, taskId, failed);");
     expect(source).toMatch(/if \(GROK_EXECUTION_MODE === "cli"\) \{\s*replyText = persistenceRedactor\.redactText\(replyText\)\.text;/);
     expect(source).toMatch(/new GoalStore\(GOALS_PATH, GROK_EXECUTION_MODE === "cli"[\s\S]*?redactor: persistenceRedactorHandle/);
+    expect(source).toContain("preparePrivateLogDirectory(LOG_DIR, persistenceRedactorHandle)");
+    expect(source).toContain("appendPrivateLogLine(PRIVATE_LOG_DIR");
     expect(source).toContain("grok-build-cli preview currently refuses Feishu channels");
   });
 

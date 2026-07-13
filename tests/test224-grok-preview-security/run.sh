@@ -81,7 +81,10 @@ pass "targeted Docker context contains no host auth/config state"
 
 log "[L1] exact child environment + durable text boundaries"
 cd "$ROOT"
-if ! bun test tests/test224-grok-preview-security/security-gate.test.ts >"$RAW/security-tests.log" 2>&1; then
+if ! bun test \
+  tests/test224-grok-preview-security/security-gate.test.ts \
+  agent-node/src/private-log.test.ts \
+  >"$RAW/security-tests.log" 2>&1; then
   fail "security gate unit/integration tests failed"
 fi
 scan_file_for_markers "$RAW/security-tests.log" "security test output"

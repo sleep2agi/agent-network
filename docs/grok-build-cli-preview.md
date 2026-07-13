@@ -12,7 +12,7 @@ The formal native Leader/Policy Gateway runtime is a separate, stricter track. I
 
 ## Requirements
 
-- Linux.
+- Linux with procfs mounted at `/proc` (including `/proc/self/fd`).
 - `@sleep2agi/agent-network` from the `preview` channel once the candidate is published.
 - The exact Grok CLI build `grok 0.2.93 (f00f96316d)`; the known stable installer may append ` [stable]` to that output.
 - A completed Grok CLI login for the same operating-system user that runs `anet`.

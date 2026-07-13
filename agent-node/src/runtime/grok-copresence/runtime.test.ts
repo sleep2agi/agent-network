@@ -690,6 +690,7 @@ class RuntimeFixture {
       env: {
         PATH: "/usr/local/bin:/usr/bin:/bin",
         HOME: this.grokHome,
+        PWD: this.cwd,
         GROK_HOME: this.grokHome,
         GROK_AUTH_PATH: this.authPath,
         GROK_CLAUDE_MCPS_ENABLED: "false",
@@ -725,6 +726,7 @@ class RuntimeFixture {
         return {
           PATH: "/usr/local/bin:/usr/bin:/bin",
           HOME: this.grokHome,
+          PWD: this.cwd,
           GROK_HOME: this.grokHome,
           GROK_AUTH_PATH: this.authPath,
           GROK_CLAUDE_MCPS_ENABLED: "false",
