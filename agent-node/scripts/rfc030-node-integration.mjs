@@ -92,8 +92,9 @@ async function harness() {
   await server.start();
   // Wire an UpstreamRouter under the same shared mux so the Node
   // integration reflects production topology: router owns upstream
-  // subscription, TuiWsServer receives reverse-request delivery via
-  // the TuiForwardSeam.
+  // subscription, TuiWsServer receives the reverse-request via the
+  // TuiForwardSeam accept-for-send handoff (accept != wire delivery
+  // — see the seam's JSDoc for the honest semantics).
   const tuiForward = {
     acceptReverseRequestForSend: (f) => server.acceptReverseRequestForSend(f),
     acceptProxiedResponseForSend: (tuiId, f) => server.acceptProxiedResponseForSend(tuiId, f),
@@ -753,14 +754,15 @@ async function test_ordinary_owner_close_detaches() {
 }
 
 // 副指挥 ab7d7682 evidence P3 rename: this case only proves that
-// an ABRUPT client-side disconnect (TCP RST via
-// `_socket.destroy(new Error)`) releases the owner slot. On the
-// server side the ws typically fires `close(1006)` — the ordinary
-// close handler and the `error` handler both call `onOwnerClose`,
-// so this test cannot distinguish which branch ran. It is a real
-// abnormal-close reproducer, NOT an assertion about the server
-// ws `error` code path. That branch has its own deterministic
-// test below.
+// an ABRUPT client-side socket disconnect (via
+// `_socket.destroy(new Error)`) releases the owner slot. We do NOT
+// guarantee this produces a TCP RST at the wire — TCP behaviour
+// depends on the kernel, buffered data, and OS. What we do
+// observe: the server-side ws fires either `close(1006)` or
+// `error`, and BOTH handlers call `onOwnerClose`, so this case
+// cannot distinguish which branch ran. It is an abrupt/abnormal
+// socket disconnect reproducer only. The deterministic
+// server-side `error` branch has its own test below.
 async function test_abrupt_disconnect_releases_owner() {
   const h = await harness();
   try {
@@ -771,8 +773,8 @@ async function test_abrupt_disconnect_releases_owner() {
     });
     await new Promise((r, j) => { ws.once("open", r); ws.once("error", j); });
     assertEq("owner attached before abrupt disconnect", h.server.ownerSlotState(), "held");
-    ws.on("error", () => {}); // swallow client-side RST noise
-    if (ws._socket) ws._socket.destroy(new Error("simulated abrupt RST"));
+    ws.on("error", () => {}); // swallow client-side disconnect noise
+    if (ws._socket) ws._socket.destroy(new Error("simulated abrupt disconnect"));
     else ws.terminate();
     await new Promise((r) => setTimeout(r, 50));
     assertEq(
@@ -858,10 +860,17 @@ async function test_server_side_ws_error_terminate_before_detach() {
         `owner slot at terminate call was ${terminateEvt.ownerSlotAtCall}, expected 'held'`,
       );
     }
+    // NB: `detachEvt.t` is the moment the OUTER POLL noticed
+    // ownerSlot transitioned to "empty" — not the exact
+    // `detachTui` call site. The core assertion for
+    // terminate-before-detach ordering is `ownerSlotAtCall ===
+    // "held"` above (that snapshot IS taken inside the terminate
+    // spy, before any handler returns). The timestamp below is a
+    // secondary consistency check on the poll interval.
     if (terminateEvt.t <= detachEvt.t) {
-      ok(`server-side ws error: timestamps confirm terminate(${terminateEvt.t.toFixed(2)}) <= detach(${detachEvt.t.toFixed(2)})`);
+      ok(`server-side ws error: terminate spy(${terminateEvt.t.toFixed(2)}) precedes owner-empty poll(${detachEvt.t.toFixed(2)})`);
     } else {
-      fail("server-side ws error: timestamp order", `terminate=${terminateEvt.t} > detach=${detachEvt.t}`);
+      fail("server-side ws error: timestamp order", `terminate=${terminateEvt.t} > owner-empty-observed=${detachEvt.t}`);
     }
     assertEq("server-side ws error: owner slot cleared", h.server.ownerSlotState(), "empty");
   } finally { await h.server.stop(); }
@@ -1013,7 +1022,7 @@ async function test_sync_write_throw_cleanup() {
 // ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 7 — Node integration");
+  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 8 — Node integration");
   await test_happy();
   await test_slow_header();
   await test_missing_bearer();

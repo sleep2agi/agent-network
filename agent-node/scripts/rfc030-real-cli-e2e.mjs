@@ -1,4 +1,4 @@
-// RFC-030 Wave 1A P0.2 Commit 1 corrective round 7 — real codex 0.144.0
+// RFC-030 Wave 1A P0.2 Commit 1 corrective round 8 — real codex 0.144.0
 // **bootstrap smoke**.
 //
 // This script is a bootstrap smoke, not a full E2E. Honest scope
@@ -281,26 +281,64 @@ async function spawnCodex(plaintext, port, underPty) {
  * have 6 keys (the extra `PWD` sh injects) — proving the
  * `unset PWD;` prefix is the load-bearing guard.
  */
-// 副指挥 ab7d7682 evidence P1: probe MUST NOT touch the real bearer.
-// Uses a fixed non-sensitive canary; child pipes `env` through
-// `cut -d= -f1 | sort -u` so bytes emitted are ONLY key names —
-// values never leave the child; parent never stores/returns/prints
-// raw values. Failure diagnostics carry exit code + parsed keys
-// only. A mutation-red probe forces the child to fail and asserts
-// the canary value never appears in captured output or the fail
-// string. Real Codex spawn continues to use the real bearer +
+// 副指挥 ab7d7682 / b2b22ae6 evidence P1: probe MUST NOT touch the
+// real bearer, AND the canary-scrub detector MUST bind to the
+// probe's SAME raw stdout+stderr chunk streams — not to derived
+// fields. If a future edit reintroduces a `raw` cache, the
+// stream-bound detector still fires because it observes the
+// bytes as they arrive from the child, before any parsing.
+//
+// Round-7 detector searched only `{note, keys}` — a raw cache
+// added later would slip past. Round-8 rewires the detector to
+// the actual `stdout.on('data') / stderr.on('data')` chunk feed
+// with chunk-boundary tail retention. Verified against a
+// controlled unsafe mode below that intentionally emits the
+// canary from the child; the detector MUST fire, or the whole
+// evidence gate is a lie.
+//
+// Real Codex spawn continues to use the real bearer +
 // SecretRedactor — the two paths do NOT share plaintext.
 const PROBE_CANARY_BEARER = "probe-canary-NOT-A-REAL-BEARER-abcdefghij";
 
 /**
- * Return `{code, keys, note}`. `keys` is a sorted, deduped array
- * of key names extracted by the CHILD (via `env | cut | sort -u`);
- * `raw`/values never enter the parent. `note` is a short
- * diagnostic string safe to log (exit code + first line of stderr
- * with values stripped — since the child emits only keys, no
- * values can appear here either).
+ * Streaming canary detector. Feeds byte chunks; on each chunk it
+ * concatenates a rolling tail of `canary.length - 1` bytes from
+ * the previous chunk so the canary is detected even when it lands
+ * on a chunk boundary. Never buffers the whole stream.
  */
-async function probeChildEnvKeysUnderPty(unsetPwd) {
+function makeCanaryDetector(canary) {
+  const target = Buffer.from(canary, "utf8");
+  let tail = Buffer.alloc(0);
+  let hit = false;
+  return {
+    feed(chunk) {
+      if (hit) return;
+      const buf = tail.length > 0 ? Buffer.concat([tail, chunk]) : chunk;
+      if (buf.indexOf(target) >= 0) { hit = true; return; }
+      const keep = Math.min(buf.length, target.length - 1);
+      tail = keep > 0 ? buf.slice(buf.length - keep) : Buffer.alloc(0);
+    },
+    detected() { return hit; },
+  };
+}
+
+/**
+ * Single production probe. Runs the SAME capture path in both
+ * modes: raw stdout/stderr chunks feed the canary detector,
+ * stdout also feeds a line-splitting parser that extracts key
+ * names only. Return object contains ONLY {code, keys,
+ * canaryDetected, note} — NO raw byte field, NO value strings.
+ *
+ * mode.dumpValues:
+ *   false (safe) — child pipeline strips values BEFORE emit:
+ *     `env | cut -d= -f1 | grep ... | sort -u`
+ *     Detector MUST NOT fire in this mode.
+ *   true  (unsafe/mutation-red) — child pipeline emits `env`
+ *     verbatim so values (including canary) surface on stdout.
+ *     Detector MUST fire; if it doesn't, the detector is dead
+ *     code and the whole safe-mode PASS is meaningless.
+ */
+async function probeChildEnvKeysUnderPty(unsetPwd, { dumpValues = false } = {}) {
   const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), "rfc030-envprobe-"));
   const env = buildAllowlistEnv(PROBE_CANARY_BEARER, {
     PATH: process.env.PATH ?? "/usr/bin:/bin",
@@ -308,22 +346,24 @@ async function probeChildEnvKeysUnderPty(unsetPwd) {
     TMPDIR: os.tmpdir(),
     CODEX_HOME: codexHome,
   });
-  // Child pipeline strips values BEFORE bytes leave the child.
-  // Also filter out empty lines defensively; `sort -u` dedups.
-  const childPipeline = "env | cut -d= -f1 | grep -E '^[A-Za-z_][A-Za-z0-9_]*$' | sort -u";
+  const childPipeline = dumpValues
+    // Unsafe: emit `env` verbatim so values (canary) hit stdout.
+    ? "env"
+    // Safe: strip values inside child.
+    : "env | cut -d= -f1 | grep -E '^[A-Za-z_][A-Za-z0-9_]*$' | sort -u";
   const prefix = unsetPwd ? "unset PWD; " : "";
   const shellCmd = `${prefix}${childPipeline}`;
   const child = spawn("script", ["-qec", shellCmd, "/dev/null"], {
     env, stdio: ["pipe", "pipe", "pipe"],
   });
+  const detector = makeCanaryDetector(PROBE_CANARY_BEARER);
   const outLines = [];
   let stderrBytes = 0;
-  // Streaming parse: bytes → lines → validate key shape → collect
-  // key strings. We NEVER store buffers of raw child output; a
-  // regex extract per line (values already stripped by the child
-  // pipeline) is the only surface that touches child stdout.
   let stdoutTail = "";
+  // Detector taps the RAW byte chunks BEFORE the line splitter —
+  // reordering / rewrapping the parse layer cannot deceive it.
   child.stdout.on("data", (c) => {
+    detector.feed(c);
     stdoutTail += c.toString("utf8");
     let idx;
     while ((idx = stdoutTail.indexOf("\n")) >= 0) {
@@ -333,11 +373,13 @@ async function probeChildEnvKeysUnderPty(unsetPwd) {
       if (m) outLines.push(m[1]);
     }
   });
-  child.stderr.on("data", (c) => { stderrBytes += c.length; });
+  child.stderr.on("data", (c) => {
+    detector.feed(c);
+    stderrBytes += c.length;
+  });
   const [code] = await new Promise((r) => {
     child.on("exit", (c, s) => r([c, s]));
   });
-  // Sweep tail (in case last line had no newline).
   if (stdoutTail.trim()) {
     const m = stdoutTail.trim().match(/^([A-Za-z_][A-Za-z0-9_]*)$/);
     if (m) outLines.push(m[1]);
@@ -346,11 +388,11 @@ async function probeChildEnvKeysUnderPty(unsetPwd) {
   const keys = [...new Set(outLines)].sort();
   // `note` never contains values — only exit code + counters.
   const note = `exit=${code} stderr_bytes=${stderrBytes} lines=${outLines.length}`;
-  return { code, keys, note };
+  return { code, keys, canaryDetected: detector.detected(), note };
 }
 
 async function main() {
-  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 7 — real codex 0.144.0 bootstrap smoke");
+  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 8 — real codex 0.144.0 bootstrap smoke");
   const { server, plaintext, authorizerCalls } = await startServer();
 
   // 副指挥 e85ade40 evidence-gate P3: mutation red must run BEFORE
@@ -362,10 +404,11 @@ async function main() {
   if (mutationRefused) ok("mutation red: COMMHUB_TOKEN refused by buildAllowlistEnv");
   else fail("env mutation red", "COMMHUB_TOKEN went through buildAllowlistEnv");
 
-  // 副指挥 ab7d7682 evidence P1: probe uses a FIXED CANARY bearer,
-  // never the real plaintext. Child emits only key names. Parent
-  // never stores/returns/prints raw values. Failure notes carry
-  // exit code + line counts only.
+  // 副指挥 ab7d7682 / b2b22ae6 evidence P1: probe uses a FIXED
+  // CANARY bearer, never the real plaintext. Child emits only key
+  // names in safe mode. Parent never stores/returns/prints raw
+  // values. Detector taps the SAME raw stdout+stderr chunk streams
+  // the probe uses (chunk-boundary safe).
   const expectedEnvKeys = ["PATH", "HOME", "TMPDIR", "CODEX_HOME", TUI_BEARER_ENV_NAME].sort();
   const withGuard = await probeChildEnvKeysUnderPty(true);
   if (withGuard.code !== 0) {
@@ -390,22 +433,44 @@ async function main() {
       `keys=[${withoutGuard.keys.join(",")}] (expected exactly one extra key PWD)`,
     );
   }
-  // Mutation red 2 — canary bytes must NOT appear in any captured
-  // string produced by the probe path. This is a self-consistency
-  // gate on the harness: if the probe were ever reworked to pass
-  // values back to the parent, the canary would surface in the
-  // OK/FAIL log strings and this check would turn red.
-  const canaryFragment = PROBE_CANARY_BEARER.slice(0, 24);
-  const probeSurface = [
-    withGuard.note ?? "",
-    JSON.stringify(withGuard.keys ?? []),
-    withoutGuard.note ?? "",
-    JSON.stringify(withoutGuard.keys ?? []),
-  ].join(" || ");
-  if (!probeSurface.includes(canaryFragment) && !probeSurface.includes(PROBE_CANARY_BEARER)) {
-    ok("canary scrub: probe surface does NOT include canary bearer value");
+  // 副指挥 b2b22ae6 P1 hard-red: canary detector is bound to the
+  // probe's REAL stdout/stderr byte chunks. We run the SAME probe
+  // function in an `unsafe/dumpValues` mode where the child pipes
+  // out `env` verbatim — values (including the canary bearer) do
+  // land on stdout. If the detector is real, it MUST fire; if not,
+  // safe-mode PASS is meaningless.
+  const unsafeDump = await probeChildEnvKeysUnderPty(true, { dumpValues: true });
+  if (unsafeDump.canaryDetected === true) {
+    ok("canary detector — unsafe mode: canary in child stdout was DETECTED (detector proven live)");
   } else {
-    fail("canary scrub", "canary bearer value leaked into probe surface");
+    fail(
+      "canary detector — unsafe mode",
+      `expected canaryDetected=true when child pipes value stream; got false (${unsafeDump.note})`,
+    );
+  }
+  // Safe mode invariant: detector MUST NOT fire under production
+  // capture — values are stripped in the child.
+  if (withGuard.canaryDetected === false && withoutGuard.canaryDetected === false) {
+    ok("canary detector — safe mode: withGuard + withoutGuard both scanned clean (0 hits)");
+  } else {
+    fail(
+      "canary detector — safe mode",
+      `withGuard.canaryDetected=${withGuard.canaryDetected} withoutGuard.canaryDetected=${withoutGuard.canaryDetected} (expected both false)`,
+    );
+  }
+  // Return-shape gate: probe return objects contain ONLY the
+  // whitelisted fields — never a raw string, never a value.
+  const allowedFields = new Set(["code", "keys", "canaryDetected", "note"]);
+  const shapeOk = [withGuard, withoutGuard, unsafeDump].every(
+    (r) => Object.keys(r).every((k) => allowedFields.has(k)),
+  );
+  if (shapeOk) {
+    ok("probe return shape: only {code, keys, canaryDetected, note} exposed");
+  } else {
+    const extras = [withGuard, withoutGuard, unsafeDump]
+      .flatMap((r) => Object.keys(r))
+      .filter((k) => !allowedFields.has(k));
+    fail("probe return shape", `extra fields leaked: [${[...new Set(extras)].join(",")}]`);
   }
 
   const { child, outChunks, errChunks, cleanup, env: spawnedEnv } = await spawnCodex(
