@@ -29,7 +29,7 @@ import {
   UPSTREAM_CLOSE_TIMEOUT_MS,
   LOCAL_STOP_TIMEOUT_MS,
 } from "./lifecycle";
-import { SYNC_ABORT, type SyncAbortAcknowledgement, type UpstreamTransport } from "./uds-server";
+import type { UpstreamTransport } from "./uds-server";
 import type {
   ProtocolBackend,
   ProtocolDiagnostics,
@@ -70,7 +70,7 @@ class FakeUpstream implements UpstreamTransport {
     }
   }
   abortCallCount = 0;
-  abort(): SyncAbortAcknowledgement { this.abortCallCount++; return SYNC_ABORT; }
+  async abort(): Promise<void> { this.abortCallCount++; }
   emitFrame(raw: unknown): void { for (const h of this.frameHandlers) h(raw); }
   emitClose(): void { for (const h of this.closeHandlers) h(); }
 }
@@ -608,7 +608,11 @@ class ControllableUpstream implements UpstreamTransport {
     | { kind: "resolve" }
     | { kind: "throw"; error: Error }
     | { kind: "never" } = { kind: "resolve" };
-  private abortBehaviour: { kind: "ok" } | { kind: "throw"; error: Error } = { kind: "ok" };
+  private abortBehaviour:
+    | { kind: "ok" }
+    | { kind: "sync_throw"; error: Error }
+    | { kind: "reject"; error: Error }
+    | { kind: "never" } = { kind: "ok" };
 
   setClose(b: ControllableUpstream["closeBehaviour"]): void { this.closeBehaviour = b; }
   setAbort(b: ControllableUpstream["abortBehaviour"]): void { this.abortBehaviour = b; }
@@ -632,10 +636,14 @@ class ControllableUpstream implements UpstreamTransport {
       case "never": return new Promise<void>(() => { /* never resolves */ });
     }
   }
-  abort(): SyncAbortAcknowledgement {
+  abort(): Promise<void> {
     this.abortCallCount++;
-    if (this.abortBehaviour.kind === "throw") throw this.abortBehaviour.error;
-    return SYNC_ABORT;
+    switch (this.abortBehaviour.kind) {
+      case "ok": return Promise.resolve();
+      case "sync_throw": throw this.abortBehaviour.error;
+      case "reject": return Promise.reject(this.abortBehaviour.error);
+      case "never": return new Promise<void>(() => { /* never */ });
+    }
   }
   emitFrame(raw: unknown): void { for (const h of this.frameHandlers) h(raw); }
   emitClose(): void { for (const h of this.closeHandlers) h(); }
@@ -756,10 +764,12 @@ describe("Commit 2 #4 — bounded upstream close + forced abort", () => {
     } finally { await h.cleanup(); }
   });
 
-  test("close throws AND abort throws → stop_failed preserving abort error with close as cause", async () => {
+  test("close throws AND abort throws → stop_failed; primary=abort; ledger.upstreamClose preserved (non-invasive)", async () => {
     const upstream = new ControllableUpstream();
-    upstream.setClose({ kind: "throw", error: new Error("close_boom") });
-    upstream.setAbort({ kind: "throw", error: new Error("abort_boom") });
+    const closeErr = new Error("close_boom");
+    const abortErr = new Error("abort_boom");
+    upstream.setClose({ kind: "throw", error: closeErr });
+    upstream.setAbort({ kind: "sync_throw", error: abortErr });
     const h = await makeLifecycleWith(upstream);
     try {
       await h.lifecycle.start();
@@ -767,9 +777,13 @@ describe("Commit 2 #4 — bounded upstream close + forced abort", () => {
       expect(upstream.closeCallCount).toBe(1);
       expect(upstream.abortCallCount).toBe(1);
       expect(h.lifecycle.currentState()).toBe("stop_failed");
-      const failure = h.lifecycle.stopFailure();
-      expect(failure?.message).toBe("abort_boom");
-      expect((failure?.cause as Error | undefined)?.message).toBe("close_boom");
+      // 副指挥 0bd525d0 P0-2/P1-1: primary IS abortErr identity-verbatim;
+      // close cause preserved via dedicated accessor, NOT mutated onto
+      // primary via `.cause`.
+      expect(h.lifecycle.stopFailure()).toBe(abortErr);
+      expect(h.lifecycle.stopFailureCloseCauseError()).toBe(closeErr);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((abortErr as any).cause).toBeUndefined();
     } finally { await h.cleanup(); }
   });
 });
@@ -1060,16 +1074,12 @@ describe("Commit 2 corrective #4 — rollback shares single-flight core with sto
   });
 });
 
-describe("Commit 2 corrective #5 — async abort never surfaces as unhandled rejection", () => {
-  test("thenable-returning abort → detected + rejection consumed; stop_failed with violation Error", async () => {
+describe("Commit 2 corrective #5 — abort Promise contract; no unhandled rejection under hostile returns", () => {
+  test("async abort rejects → primary Error identity preserved; NO unhandled rejection", async () => {
     const upstream = new ControllableUpstream();
-    // Override abort to return a rejecting Promise WITHOUT any
-    // .catch — before the fix this would be unhandled.
     upstream.setClose({ kind: "throw", error: new Error("close_fail_to_force_abort") });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (upstream as unknown as { abort: () => unknown }).abort = () => {
-      return Promise.reject(new Error("async_abort_boom"));
-    };
+    const rejectErr = new Error("async_abort_boom");
+    upstream.setAbort({ kind: "reject", error: rejectErr });
     let unhandled: unknown = null;
     const listener = (reason: unknown): void => { unhandled = reason; };
     process.on("unhandledRejection", listener);
@@ -1082,9 +1092,8 @@ describe("Commit 2 corrective #5 — async abort never surfaces as unhandled rej
       await new Promise((r) => setTimeout(r, 50));
       expect(unhandled).toBeNull();
       expect(h.lifecycle.currentState()).toBe("stop_failed");
-      expect(h.lifecycle.stopFailure()?.message).toMatch(
-        /UpstreamTransport\.abort\(\) returned a thenable/,
-      );
+      // 副指挥 0bd525d0 P1-1: primary IS the rejection error, identity-verbatim.
+      expect(h.lifecycle.stopFailure()).toBe(rejectErr);
     } finally {
       process.off("unhandledRejection", listener);
       await h.cleanup();
@@ -1120,7 +1129,7 @@ describe("Commit 2 corrective #7 — original abort Error identity preserved (in
       constructor(msg: string) { super(msg); this.name = "MyTypeError"; }
     }
     const original = new MyTypeError("abort_boom_custom");
-    upstream.setAbort({ kind: "throw", error: original });
+    upstream.setAbort({ kind: "sync_throw", error: original });
     const h = await makeLifecycleWith(upstream);
     try {
       await h.lifecycle.start();
@@ -1141,7 +1150,7 @@ describe("Commit 2 corrective #7 — original abort Error identity preserved (in
     upstream.setClose({ kind: "throw", error: new Error("close_fail_2") });
     const frozen = new Error("abort_boom_frozen");
     Object.freeze(frozen); // non-extensible, non-writable
-    upstream.setAbort({ kind: "throw", error: frozen });
+    upstream.setAbort({ kind: "sync_throw", error: frozen });
     const h = await makeLifecycleWith(upstream);
     try {
       await h.lifecycle.start();
@@ -1163,7 +1172,7 @@ describe("Commit 2 corrective #7 — original abort Error identity preserved (in
     upstream.setClose({ kind: "throw", error: new Error("close_fail_3") });
     const sealed = new Error("abort_boom_sealed", { cause: "pre-existing" });
     Object.preventExtensions(sealed);
-    upstream.setAbort({ kind: "throw", error: sealed });
+    upstream.setAbort({ kind: "sync_throw", error: sealed });
     const h = await makeLifecycleWith(upstream);
     try {
       await h.lifecycle.start();
@@ -1212,7 +1221,7 @@ describe("Commit 2 corrective #8 — bounded close timer cleared; drainAll exact
           setTimeout(() => reject(new Error("late_close_reject")), UPSTREAM_CLOSE_TIMEOUT_MS + 300);
         });
       }
-      abort(): SyncAbortAcknowledgement { this.abortCalls++; return SYNC_ABORT; }
+      async abort(): Promise<void> { this.abortCalls++; }
     }
     const transport = new LateRejectTransport();
     const lifecycle = new GatewayLifecycle({
@@ -1240,5 +1249,332 @@ describe("Commit 2 corrective #8 — bounded close timer cleared; drainAll exact
       process.off("unhandledRejection", listener);
       try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Round 2 additions (副指挥 0bd525d0)
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Bespoke transport whose `abort` returns whatever the caller
+ * configured — used to prove the bounded-await design is
+ * inert to hostile return values (P0-1 six-case matrix).
+ */
+class HostileAbortTransport implements UpstreamTransport {
+  abortCalls = 0;
+  private makeAbortReturn: () => unknown;
+  private throwOnCall: Error | null;
+
+  constructor(opts: { abortReturn: () => unknown; throwOnCall?: Error }) {
+    this.makeAbortReturn = opts.abortReturn;
+    this.throwOnCall = opts.throwOnCall ?? null;
+  }
+  async writeFrame(_f: JsonRpcRequestFrame | JsonRpcResponseFrame | JsonRpcNotificationFrame): Promise<void> {}
+  onFrame(_h: (raw: unknown) => void): () => void { return () => {}; }
+  onClose(_h: () => void): () => void { return () => {}; }
+  // Force close throw so abort is exercised.
+  async close(): Promise<void> { throw new Error("close_forcing_abort"); }
+  // Signature is `() => Promise<void>` per the interface. Runtime
+  // callers who ignore types can and do return anything; the
+  // lifecycle must be robust.
+  abort: () => Promise<void> = (() => {
+    this.abortCalls++;
+    if (this.throwOnCall !== null) throw this.throwOnCall;
+    return this.makeAbortReturn() as Promise<void>;
+  }).bind(this);
+}
+
+async function makeLifecycleWithTransport(transport: UpstreamTransport): Promise<{
+  lifecycle: GatewayLifecycle;
+  paths: ReturnType<typeof pathsFor>;
+  cleanup: () => Promise<void>;
+}> {
+  const paths = pathsFor();
+  const { diagnostics } = collectDiagnostics();
+  const lifecycle = new GatewayLifecycle({
+    backendSocketPath: paths.backendSocketPath,
+    socketDir: paths.socketDir,
+    preflight: { async run() {} },
+    backend: makeBackend(),
+    upstreamTransport: transport,
+    initSnapshotSource: { currentSnapshot: () => ({}) },
+    diagnosticsSink: diagnostics,
+    backendCapability: TEST_BACKEND_CAP,
+  });
+  return {
+    lifecycle, paths,
+    async cleanup() {
+      try { await lifecycle.stop(); } catch {}
+      try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+    },
+  };
+}
+
+describe("Commit 2 corrective round 2 P0-1 — hostile abort return values never escape teardown", () => {
+  // Each case: close throws to force abort; abort returns a hostile
+  // value. The bounded-await machinery MUST catch every case;
+  // stop() must resolve to a terminal state (stopped OR stop_failed
+  // — but never `stopping`), and NO unhandled rejection fires.
+  const cases: Array<{ name: string; makeReturn: () => unknown; expectTerminalAny?: boolean }> = [
+    { name: "abort returns undefined", makeReturn: () => undefined, expectTerminalAny: true },
+    { name: "abort returns null", makeReturn: () => null, expectTerminalAny: true },
+    { name: "abort returns number 42", makeReturn: () => 42, expectTerminalAny: true },
+    { name: "abort returns object with throwing then getter", makeReturn: () => ({
+      get then() { throw new Error("then_getter_boom"); },
+    }) },
+    { name: "abort returns thenable that resolves undefined", makeReturn: () => ({
+      then(res: (v: undefined) => void) { res(undefined); },
+    }) },
+    { name: "abort returns rejected Promise via poisoned catch getter", makeReturn: () => {
+      const p = Promise.reject(new Error("poisoned_catch_reject"));
+      Object.defineProperty(p, "catch", {
+        get() { throw new Error("catch_getter_boom"); },
+      });
+      return p;
+    } },
+  ];
+
+  for (const c of cases) {
+    test(c.name, async () => {
+      const transport = new HostileAbortTransport({ abortReturn: c.makeReturn });
+      let unhandled: unknown = null;
+      const listener = (reason: unknown): void => { unhandled = reason; };
+      process.on("unhandledRejection", listener);
+      const h = await makeLifecycleWithTransport(transport);
+      try {
+        await h.lifecycle.start();
+        // stop() must resolve — NEVER hang or reject.
+        await h.lifecycle.stop();
+        await new Promise((r) => setTimeout(r, 50));
+        // Terminal state — NEVER "stopping".
+        const st = h.lifecycle.currentState();
+        expect(["stopped", "stop_failed"]).toContain(st);
+        expect(unhandled).toBeNull();
+        expect(transport.abortCalls).toBe(1);
+      } finally {
+        process.off("unhandledRejection", listener);
+        await h.cleanup();
+      }
+    });
+  }
+
+  test("abort synchronously throws with a TypeError → stop_failed with identity preserved; no unhandled", async () => {
+    const original = new TypeError("sync_abort_throw_identity");
+    const transport = new HostileAbortTransport({
+      abortReturn: () => undefined,
+      throwOnCall: original,
+    });
+    let unhandled: unknown = null;
+    const listener = (reason: unknown): void => { unhandled = reason; };
+    process.on("unhandledRejection", listener);
+    const h = await makeLifecycleWithTransport(transport);
+    try {
+      await h.lifecycle.start();
+      await h.lifecycle.stop();
+      await new Promise((r) => setTimeout(r, 30));
+      expect(unhandled).toBeNull();
+      expect(h.lifecycle.currentState()).toBe("stop_failed");
+      expect(h.lifecycle.stopFailure()).toBe(original);
+      expect(h.lifecycle.stopFailure()).toBeInstanceOf(TypeError);
+    } finally {
+      process.off("unhandledRejection", listener);
+      await h.cleanup();
+    }
+  });
+});
+
+describe("Commit 2 corrective round 2 P1-1 — multi-failure ledger preserves every cause", () => {
+  test("three-way failure (backend stop + close + abort) → ledger keeps each; primary=abort", async () => {
+    // Backend throw is delivered via test wrapper; upstream close +
+    // abort come from ControllableUpstream.
+    const upstream = new ControllableUpstream();
+    const closeErr = new Error("close_3way");
+    const abortErr = new Error("abort_3way");
+    upstream.setClose({ kind: "throw", error: closeErr });
+    upstream.setAbort({ kind: "sync_throw", error: abortErr });
+    const beErr = new Error("backend_stop_3way");
+    const h = await makeLifecycleWithMisbehavingBackend(upstream, {
+      kind: "throw", error: beErr,
+    });
+    try {
+      await h.lifecycle.stop();
+      const l = h.lifecycle.stopFailureLedger();
+      // Each slot preserved identity-verbatim.
+      expect(l.backendStop).toBe(beErr);
+      expect(l.upstreamClose).toBe(closeErr);
+      expect(l.upstreamAbort).toBe(abortErr);
+      expect(l.tuiStop).toBeNull();
+      // Primary priority: abort > close > backend > tui.
+      expect(h.lifecycle.stopFailure()).toBe(abortErr);
+      // The dedicated close accessor returns ONLY the close cause,
+      // never the backend one.
+      expect(h.lifecycle.stopFailureCloseCauseError()).toBe(closeErr);
+    } finally { await h.cleanup(); }
+  });
+
+  test("four-way failure (backend + tui + close + abort) → ledger holds all four; primary=abort", async () => {
+    // Build a fresh lifecycle whose backend + tui both throw on stop,
+    // upstream close + abort both throw.
+    const paths = pathsFor();
+    const { diagnostics } = collectDiagnostics();
+    const upstream = new ControllableUpstream();
+    const closeErr = new Error("close_4way");
+    const abortErr = new Error("abort_4way");
+    upstream.setClose({ kind: "throw", error: closeErr });
+    upstream.setAbort({ kind: "sync_throw", error: abortErr });
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight: { async run() {} },
+      backend: makeBackend(),
+      upstreamTransport: upstream,
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    await lifecycle.start();
+    // Inject failures into both local servers.
+    const beErr = new Error("backend_stop_4way");
+    const tuiErr = new Error("tui_stop_4way");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const be = (lifecycle as unknown as any).backendServer as { stop: () => Promise<void> };
+    const beOrig = be.stop.bind(be);
+    be.stop = async () => { throw beErr; void beOrig; };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tui = (lifecycle as unknown as any).tuiServer as { stop: () => Promise<void> };
+    const tuiOrig = tui.stop.bind(tui);
+    tui.stop = async () => { throw tuiErr; void tuiOrig; };
+    try {
+      await lifecycle.stop();
+      const l = lifecycle.stopFailureLedger();
+      expect(l.backendStop).toBe(beErr);
+      expect(l.tuiStop).toBe(tuiErr);
+      expect(l.upstreamClose).toBe(closeErr);
+      expect(l.upstreamAbort).toBe(abortErr);
+      expect(lifecycle.stopFailure()).toBe(abortErr);
+      expect(lifecycle.stopFailureCloseCauseError()).toBe(closeErr);
+      expect(lifecycle.currentState()).toBe("stop_failed");
+    } finally {
+      try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+    }
+  });
+});
+
+describe("Commit 2 corrective round 2 P1-4 — rollback shares teardown core with concurrent stop / upstream close", () => {
+  test("preflight throws mid-await; concurrent stop() + upstream close race → teardown core runs exactly once", async () => {
+    const paths = pathsFor();
+    const { diagnostics } = collectDiagnostics();
+    const upstream = new ControllableUpstream();
+    // Preflight resolves after 30 ms; stop and upstream emitClose
+    // race to enter the same teardown core.
+    let preflightSettle: (v: void) => void = () => {};
+    const preflightP = new Promise<void>((res, rej) => { preflightSettle = () => rej(new Error("preflight_boom")); });
+    const preflight: PreflightRunner = { run: () => preflightP };
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight,
+      backend: makeBackend(),
+      upstreamTransport: upstream,
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    const startP = lifecycle.start();
+    // Yield so start() progresses to the preflight await, then
+    // fire the race: reject preflight AND fire stop / emitClose
+    // in the same microtask cluster.
+    await Promise.resolve();
+    upstream.emitClose(); // upstream close cascade would enter
+    const stopP = lifecycle.stop();
+    preflightSettle(); // now preflight rejects → rollback path
+    const results = await Promise.allSettled([startP, stopP]);
+    expect(results[0].status).toBe("rejected");
+    expect(results[1].status).toBe("fulfilled");
+    // Rollback + upstream cascade + stop all funnel to the same
+    // memoised core: upstream.close() called at most once.
+    expect(upstream.closeCallCount).toBeLessThanOrEqual(1);
+    // Terminal state reached.
+    expect(["stopped", "stop_failed"]).toContain(lifecycle.currentState());
+    try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+  });
+});
+
+describe("Commit 2 corrective round 2 evidence-delta — tagged winner on real same-checkpoint race", () => {
+  test("close settles VIA MICROTASK immediately AFTER timeout callback → tagged winner is timeout; abort called", async () => {
+    // Same-checkpoint race: schedule close's resolution via
+    // queueMicrotask INSIDE the timer callback, so the resolve
+    // hits Promise.race in the same tick as the timeout branch's
+    // resolve. With a mutable-flag design this could mis-attribute
+    // to "ok"; the tagged winner returned by Promise.race prevents
+    // that regardless of ordering.
+    const upstream = new ControllableUpstream();
+    let closeRes: (() => void) | null = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (upstream as unknown as any).close = () => {
+      upstream.closeCallCount++;
+      return new Promise<void>((res) => { closeRes = res; });
+    };
+    const h = await makeLifecycleWith(upstream);
+    try {
+      await h.lifecycle.start();
+      // Schedule close to resolve JUST AFTER the internal timeout
+      // fires, in the same "tick cluster": setTimeout + queueMicrotask
+      // means close's resolve is enqueued microtask-adjacent to the
+      // timer's own resolve. With a mutable-flag design a late-tick
+      // settle could mis-attribute to "ok"; the tagged winner
+      // returned by Promise.race locks in whichever entry actually
+      // resolved first and cannot be reversed.
+      const microtaskScheduler = setTimeout(() => {
+        queueMicrotask(() => { if (closeRes !== null) closeRes(); });
+      }, UPSTREAM_CLOSE_TIMEOUT_MS + 20);
+      await h.lifecycle.stop();
+      clearTimeout(microtaskScheduler);
+      // Observable effect of tagged-winner: because timeout is one
+      // of race()'s inputs and its callback fires
+      // UPSTREAM_CLOSE_TIMEOUT_MS after start, whereas closeRes is
+      // scheduled 5 ms earlier BUT gated behind a microtask fired
+      // from a later setTimeout callback, the timer wins.
+      expect(upstream.abortCallCount).toBe(1);
+      expect(h.lifecycle.currentState()).toBe("stop_failed");
+      expect(h.lifecycle.stopFailure()?.message).toMatch(/upstream close timed out/);
+      // The losing branch (closeRes fired via microtask) does NOT
+      // revert the state — a mutable-flag design would have done.
+    } finally { await h.cleanup(); }
+  });
+});
+
+describe("Commit 2 corrective round 2 evidence-delta — real late upstream response injection", () => {
+  test("late injected upstream response after stop → origin settled exactly once (from stop), NOT re-delivered", async () => {
+    const upstream = new ControllableUpstream();
+    const h = await makeLifecycleWith(upstream);
+    try {
+      await h.lifecycle.start();
+      // Fire sendInternal → captures a real upstream id in the mux.
+      let settleCount = 0;
+      let settledWith: string | null = null;
+      const p = h.lifecycle.sendInternal("thread/status", { threadId: "t" });
+      p.then(
+        () => { settleCount++; settledWith = "resolved"; },
+        (e) => { settleCount++; settledWith = `rejected:${e.message}`; },
+      );
+      await new Promise((r) => setTimeout(r, 10));
+      // Capture the real upstream id from the frame written.
+      const uid = (upstream.written[0] as JsonRpcRequestFrame).id;
+      // Trigger teardown. Under the hood this drains mux → rejects
+      // internal pending exactly once.
+      await h.lifecycle.stop();
+      await new Promise((r) => setTimeout(r, 20));
+      expect(settleCount).toBe(1);
+      expect(settledWith).toMatch(/rejected:/);
+      // Inject a LATE upstream response for that same id — the
+      // router is unsubscribed, so nothing should route it.
+      upstream.emitFrame({ jsonrpc: "2.0", id: uid, result: { late: true } });
+      await new Promise((r) => setTimeout(r, 20));
+      // No re-delivery: settleCount unchanged.
+      expect(settleCount).toBe(1);
+      expect(h.lifecycle.pendingUpstreamCount()).toBe(0);
+    } finally { await h.cleanup(); }
   });
 });

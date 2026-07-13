@@ -61,20 +61,18 @@ export const GATEWAY_HELLO_METHOD = "gateway.hello";
 // ────────────────────────────────────────────────────────────────────────
 
 /**
- * Sync-enforced acknowledgement returned by `UpstreamTransport.abort()`.
+ * 副指挥 0bd525d0 P1-2 (option A): `abort()` returns `Promise<void>`.
+ * Lifecycle bounded-awaits it. Rejection / timeout / synchronous
+ * throw all land the lifecycle in `stop_failed` with the ORIGINAL
+ * Error identity preserved. No symbol brand: adopting the Promise
+ * removes the "detached rejection escaping the runtime guard"
+ * failure mode of the prior `SyncAbortAcknowledgement` design.
  *
- * 副指挥 d53209eb #3: `abort(): void` was TS-erasable — an async
- * implementation could be assigned to it (TS's bivariant void hole)
- * and its rejection would surface as an unhandled promise. This
- * symbol brand forces the return type to be a specific value; an
- * `async` implementation returns `Promise<typeof SYNC_ABORT>`
- * which is NOT assignable to `SyncAbortAcknowledgement`, so
- * `tsc --noEmit` rejects it at type-check time. The runtime guard
- * inside the lifecycle ALSO checks `.then` in case a dynamic
- * caller bypasses the type system.
+ * The type is expressed as a FUNCTION PROPERTY (not a method
+ * signature) so `strictFunctionTypes` engages fully — TypeScript's
+ * method-signature bivariance hole would otherwise allow
+ * `abort(): void {}` to slip past the strict check.
  */
-export const SYNC_ABORT: unique symbol = Symbol("RFC030-Wave1A-Commit2-SyncAbort");
-export type SyncAbortAcknowledgement = typeof SYNC_ABORT;
 
 export interface UpstreamTransport {
   writeFrame(frame: JsonRpcRequestFrame | JsonRpcResponseFrame | JsonRpcNotificationFrame): Promise<void>;
@@ -82,39 +80,42 @@ export interface UpstreamTransport {
   onClose(handler: () => void): () => void;
   /**
    * Graceful close. Lifecycle awaits this during shutdown but bounds
-   * the wait — see `abort()`. Idempotent; a second call may resolve
+   * the wait — see `abort`. Idempotent; a second call may resolve
    * immediately if the transport is already closed. May reject if
    * the transport cannot close cleanly; lifecycle treats a rejection
-   * as a failed close and escalates to `abort()`.
+   * as a failed close and escalates to `abort`.
    *
    * 副指挥 3cb7ba9b Commit 2 #4: `close()` alone is NOT sufficient —
    * a hostile / hung transport can leave `close()` unresolved
    * forever. Lifecycle races this promise against a bounded timeout
-   * and falls back to `abort()`.
+   * and falls back to `abort`.
    */
   close(): Promise<void>;
   /**
    * REQUIRED force-terminate contract (副指挥 3cb7ba9b Commit 2 #3 +
-   * d53209eb #3 sync-enforced).
+   * 0bd525d0 P1-2 option A).
    *
    * Semantics:
-   *   - Synchronous side-effects only. MUST return the exported
-   *     `SYNC_ABORT` symbol; a Promise-returning implementation is
-   *     rejected at type-check (see `SyncAbortAcknowledgement`) AND
-   *     at runtime (`.then` guard). Any rejection of an async
-   *     implementation is consumed by the lifecycle so it never
-   *     surfaces as an unhandled promise.
-   *   - Must NOT throw for the ordinary "already terminated" case
-   *     (idempotent). May throw only on genuinely unexpected native
-   *     failure; lifecycle catches the throw and transitions to a
-   *     truthful `stop_failed` terminal state (Commit 2 #5). The
-   *     ORIGINAL thrown Error identity — `TypeError` subclass,
-   *     `.code`, `.stack` — is preserved by
-   *     `GatewayLifecycle.stopFailure()`.
-   *   - After abort, `close()` MAY still resolve or reject; the
-   *     lifecycle no longer waits on it once abort has fired.
+   *   - Returns `Promise<void>`. Lifecycle awaits it, bounded by
+   *     `UPSTREAM_ABORT_TIMEOUT_MS`. On resolve, the transport IS
+   *     force-terminated; on reject/timeout the lifecycle enters
+   *     `stop_failed` with the reject error (or timeout Error) as
+   *     the primary identity.
+   *   - Idempotent for the ordinary "already terminated" case;
+   *     may still resolve if invoked twice.
+   *   - Synchronous throw from `abort()` is caught by the lifecycle
+   *     and treated identically to a Promise rejection — primary
+   *     Error identity is preserved.
+   *   - Detached / uncaught rejections spawned INSIDE the abort
+   *     body (e.g. `void Promise.reject(...)`) are a
+   *     production-transport bug not a type-contract issue and are
+   *     reviewed under §8 real-transport wiring.
+   *
+   * Declared as a function property (not a method) so TypeScript's
+   * `strictFunctionTypes` catches `abort: () => void` in
+   * implementations.
    */
-  abort(): SyncAbortAcknowledgement;
+  abort: () => Promise<void>;
 }
 
 export interface InternalOrigin {

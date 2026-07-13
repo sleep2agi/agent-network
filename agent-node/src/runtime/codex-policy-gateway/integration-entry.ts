@@ -11,4 +11,3 @@ export { asOwnerLeaseId } from "./contract";
 export { UpstreamRouter, type TuiForwardSeam } from "./upstream-router";
 export { buildAllowlistEnv, NoopTuiChildLauncher, TUI_BEARER_ENV_NAME } from "./tui-child-launcher";
 export { GatewayLifecycle, defaultDenyTuiAuthorizer } from "./lifecycle";
-export { SYNC_ABORT } from "./uds-server";

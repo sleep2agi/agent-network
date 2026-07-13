@@ -51,7 +51,6 @@ const {
   TuiWsServer, TuiBearer, HumanOwnerCoordinator,
   UpstreamRequestMux, ReverseRequestNamespace,
   SecretRedactor, buildAllowlistEnv, TUI_BEARER_ENV_NAME,
-  SYNC_ABORT,
 } = mod;
 
 const ALLOWED_LOOPBACK = "127.0.0.1";
@@ -160,7 +159,7 @@ async function startServer() {
     onFrame(_h) { return () => {}; },
     onClose(_h) { return () => {}; },
     async close() {},
-    abort() { return SYNC_ABORT; },
+    async abort() {},
   };
   const server = new TuiWsServer({
     bearer,
