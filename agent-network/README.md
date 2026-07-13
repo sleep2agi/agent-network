@@ -49,14 +49,17 @@ npm install -g @sleep2agi/agent-network@preview
 anet -v
 ```
 
-Current npm dist-tags verified on 2026-05-28 (v0.10.11 stable):
+Npm dist-tags move independently. Query the registry instead of relying on a
+version table embedded in this source tree:
 
-| Package | latest | preview |
-|---|---:|---:|
-| `@sleep2agi/agent-network` | `2.2.10` | `2.2.10-preview.3` |
-| `@sleep2agi/commhub-server` | `0.8.4` | `0.8.4-preview.1` |
-| `@sleep2agi/agent-network-dashboard` | `0.5.6` | `0.5.7-preview.2` |
-| `@sleep2agi/agent-node` | `2.4.7` | `2.4.8-preview.0` |
+```bash
+npm view @sleep2agi/agent-network dist-tags --json
+npm view @sleep2agi/agent-node dist-tags --json
+npm view @sleep2agi/commhub-server dist-tags --json
+```
+
+The Grok co-presence text below describes candidate source only until a
+reviewed package is explicitly published to `preview`.
 
 ## 5-Minute Quick Start
 
@@ -98,8 +101,8 @@ anet node start my-bot
 
 `anet node create` walks you through:
 
-1. Runtime: `claude-code-cli`, `claude-agent-sdk`, `codex-sdk`, or `grok-build-acp`.
-2. Provider preset: Anthropic, MiniMax, InternLM, Xiaomi MiMo, or `custom` (any Anthropic-compatible endpoint — used for DeepSeek / GLM / Kimi / OpenRouter etc.; codex-sdk for OpenAI Codex; grok-build-acp for xAI Grok).
+1. Runtime: `claude-code-cli`, `claude-agent-sdk`, `codex-sdk`, `grok-build-acp`, or the experimental preview-only `grok-build-cli` co-presence runtime.
+2. Provider preset: Anthropic, MiniMax, InternLM, Xiaomi MiMo, or `custom` (any Anthropic-compatible endpoint — used for DeepSeek / GLM / Kimi / OpenRouter etc.; codex-sdk for OpenAI Codex; Grok runtimes reuse the local Grok CLI login).
 3. API key and model settings.
 
 When the node starts successfully, look for:
@@ -155,6 +158,7 @@ Do not expose the hub directly to the public internet without a reverse proxy, H
 | `claude-agent-sdk` | You want Anthropic-compatible API providers | Good default for provider presets |
 | `codex-sdk` | You want Codex-backed nodes | Useful as a backup runtime when Claude quota is constrained |
 | `grok-build-acp` | You want Grok Build through `grok agent stdio` | Requires Grok Build CLI auth; stable for receive/reply, session persistence, and explicit `send_task` delegation |
+| `grok-build-cli` | You want one human-visible Grok TUI shared with trusted network tasks | **Experimental preview only.** Linux and an exact Grok CLI build are required; approval ownership is not fully hardened |
 
 ### Grok Build ACP
 
@@ -196,6 +200,56 @@ Current boundary:
 
 Details: `docs/grok-build-runtime.md`.
 
+### Grok Co-Presence TUI — Experimental Preview
+
+> **Dangerous experimental feature:** network tasks drive the same Grok TUI and share its conversation context. Approval ownership is not fully hardened. Use only with trusted tasks on a trusted network. This runtime is not supported for production and is not part of the `latest` release channel.
+
+The co-presence candidate is currently pinned to Linux and the exact Grok CLI build reported as `grok 0.2.93 (f00f96316d)` (the stable installer may append ` [stable]`). Install that build and log in as the same operating-system user that will run `anet`:
+
+```bash
+grok auth login
+grok --version
+```
+
+Create the shared-TUI node and start its bridge in the first terminal:
+
+```bash
+anet node create grok-shared --runtime grok-build-cli
+anet node start grok-shared
+```
+
+Attach an interactive terminal to the same TUI from a second terminal on the same machine and user account:
+
+```bash
+anet grok attach grok-shared
+```
+
+Press `Ctrl-]` to detach. While attached, a CommHub task sent to `grok-shared` is submitted to this same TUI, rendered in the visible session, and its completed answer is routed back to the originating task. This shared-session behavior is the reason untrusted tasks must not be connected.
+
+`anet node start` capability-checks a compatible global `agent-node` if one exists. It requires the machine-readable `ANET_CAPABILITY_GROK_COPRESENCE_V1` marker, so an older headless-only binary that merely lists `grok-build-cli` cannot shadow the preview. A global install is not required: when it is absent or incompatible, `anet` uses `npx -y @sleep2agi/agent-node@preview` to fetch and resolve the preview package, verifies its metadata/capability, then launches the resolved `agent-node` entrypoint directly. Direct launch lets `anet node stop` signal the real runtime instead of an installer wrapper. The fallback therefore needs npm registry access or an already populated npm cache on first start.
+
+The preview E2E covers the CommHub inbox path. `grok-build-cli` currently
+refuses Feishu channels because that forked worker does not yet share the
+credential-isolated log boundary; run Feishu on a separate non-Grok node.
+
+For the older process-per-turn Grok CLI lane, opt out of co-presence explicitly:
+
+```bash
+anet node create grok-turn --runtime grok-build-cli --grok-headless
+anet node start grok-turn
+```
+
+`anet grok attach` intentionally refuses a headless node. The separate ACP runtime remains available as:
+
+```bash
+anet node create grok-acp --runtime grok-build-acp
+anet node start grok-acp
+```
+
+`grok-build-acp` uses `grok agent stdio`; it is not the same execution path as `grok-build-cli --grok-headless`.
+
+This preview does **not** claim completion of the formal native Leader/Policy Gateway runtime. Its Phase 0 protocol freeze, Phase 1A implementation gate, production-grade approval ownership, and `latest` release gate remain locked. See the [Grok co-presence preview guide](../docs/grok-build-cli-preview.md) for the exact boundary.
+
 ## Provider Presets
 
 `anet node create` writes the correct provider environment into `.anet/nodes/<name>/config.json`.
@@ -235,6 +289,11 @@ anet node delete <name>
 anet node ls
 anet info <name>
 anet logs <name>
+
+# Grok co-presence (experimental preview; trusted tasks only)
+anet node create grok-shared --runtime grok-build-cli
+anet node start grok-shared
+anet grok attach grok-shared
 
 # Network status and repair
 anet status

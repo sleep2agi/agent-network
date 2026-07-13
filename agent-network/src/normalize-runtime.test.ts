@@ -71,6 +71,13 @@ describe("normalizeRuntime — explicit choices are preserved", () => {
     expect(normalizeRuntime("grok-build-acp")).toBe("grok-build-acp");
   });
 
+  test("explicit Grok co-presence names → grok-build-cli", () => {
+    expect(normalizeRuntime("grok-build-cli")).toBe("grok-build-cli");
+    expect(normalizeRuntime("grok-cli")).toBe("grok-build-cli");
+    expect(normalizeRuntime("grok-tui")).toBe("grok-build-cli");
+    expect(normalizeRuntime({ runtime: "grok-build-cli" } as any)).toBe("grok-build-cli");
+  });
+
   // RFC-029 — public sst/opencode CLI runtime. Both the canonical name
   // (`opencode-cli`, matching claude-code-cli precedent) and the short
   // alias `opencode` resolve to the same bucket. Explicit choice is

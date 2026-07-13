@@ -1,7 +1,7 @@
 {
   "name": "@sleep2agi/agent-node",
-  "version": "2.5.0-preview.20",
-  "description": "AI Agent runtime for CommHub networks. Supports 4 runtimes: Claude Code CLI, Claude Agent SDK, Codex SDK, and Grok Build ACP.",
+  "version": "2.5.0-preview.21",
+  "description": "AI Agent runtime for CommHub networks, including Grok ACP and an experimental preview-only Grok co-presence TUI.",
   "bin": {
     "agent-node": "dist/cli.js"
   },
@@ -11,7 +11,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "bun build src/cli.ts --outdir dist --entry-naming cli.js --target node --minify --external @anthropic-ai/claude-agent-sdk --external '@anthropic-ai/claude-agent-sdk-*' --external @openai/codex-sdk",
+    "build": "bun build src/cli.ts --outdir dist --entry-naming cli.js --target node --minify --external @anthropic-ai/claude-agent-sdk --external '@anthropic-ai/claude-agent-sdk-*' --external @openai/codex-sdk --external node-pty",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -24,6 +24,8 @@
     "gpt5",
     "grok",
     "xai",
+    "grok-build-cli",
+    "copresence",
     "acp",
     "sdk",
     "minimax",
@@ -41,7 +43,8 @@
     "directory": "agent-node"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "tag": "preview"
   },
   "bugs": {
     "url": "https://github.com/sleep2agi/agent-network/issues"
@@ -56,6 +59,7 @@
   },
   "optionalDependencies": {
     "@openai/codex": "^0.133.0",
-    "@openai/codex-sdk": "^0.133.0"
+    "@openai/codex-sdk": "^0.133.0",
+    "node-pty": "^1.1.0"
   }
 }

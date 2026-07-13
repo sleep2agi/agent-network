@@ -6,7 +6,7 @@
 // concurrent upserts (#1+#3).
 
 import { expect, test, describe, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, readdirSync } from "fs";
+import { chmodSync, mkdtempSync, rmSync, existsSync, readFileSync, statSync, writeFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import {
@@ -17,6 +17,7 @@ import {
   decideStartupAction,
 } from "./store";
 import type { AgentGoal } from "./types";
+import { createCredentialRedactor } from "../credential-redaction";
 
 function tmpPath(): { dir: string; path: string } {
   const dir = mkdtempSync(join(tmpdir(), "anet-goals-test-"));
@@ -174,6 +175,50 @@ describe("GoalStore — corruption recovery (#2)", () => {
   });
 });
 
+describe("GoalStore — Grok preview persistence boundary", () => {
+  let dir: string, path: string;
+  const marker = "TEST_GOAL_SECRET_CANARY_8b2d";
+  const redactor = createCredentialRedactor();
+  beforeEach(() => { ({ dir, path } = tmpPath()); });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  test("rewrites a valid legacy file through the redactor and owner-only mode", async () => {
+    const goal = newGoal({
+      text: `audit PARTNER_SECRET=${marker}`,
+      interval_ms: 60_000,
+      runtime: "grok-build-cli",
+    });
+    writeFileSync(path, JSON.stringify({ version: 1, goals: [goal] }), { mode: 0o644 });
+    chmodSync(path, 0o644);
+
+    const store = new GoalStore(path, { redactor });
+    expect((await store.load()).ok).toBe(true);
+    const persisted = readFileSync(path, "utf8");
+    expect(persisted).not.toContain(marker);
+    expect(persisted).toContain("[REDACTED_CREDENTIAL]");
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+
+    const archive = await store.archiveAndClear("runtime switch");
+    expect(archive).toBeDefined();
+    expect(readFileSync(archive!, "utf8")).not.toContain(marker);
+    expect(statSync(archive!).mode & 0o777).toBe(0o600);
+  });
+
+  test("scrubs a corrupt backup and replaces the live file with an empty safe store", async () => {
+    writeFileSync(path, `{bad PARTNER_TOKEN=${marker}`, { mode: 0o644 });
+    chmodSync(path, 0o644);
+    const store = new GoalStore(path, { redactor });
+    const result = await store.load();
+    expect(result.ok).toBe(false);
+    expect(result.recovered).toBeDefined();
+    expect(readFileSync(result.recovered!, "utf8")).not.toContain(marker);
+    expect(statSync(result.recovered!).mode & 0o777).toBe(0o600);
+    expect(readFileSync(path, "utf8")).not.toContain(marker);
+    expect(JSON.parse(readFileSync(path, "utf8")).goals).toEqual([]);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────────
 // P0 /loop SDK runtime gate (v0.4 §3.4) — the heart of "claude hands-off".
 // ─────────────────────────────────────────────────────────────────────
@@ -198,6 +243,9 @@ describe("P0 runtime gate — name resolution", () => {
     expect(runtimeBucket("codex")).toBe("codex");
     expect(runtimeBucket("grok-build-acp")).toBe("grok");
     expect(runtimeBucket("grok-build")).toBe("grok");
+    expect(runtimeBucket("grok-build-cli")).toBe("grok");
+    expect(runtimeBucket("grok-cli")).toBe("grok");
+    expect(runtimeBucket("grok-tui")).toBe("grok");
     expect(runtimeBucket("grok")).toBe("grok");
     // RFC-029 — opencode CLI bucket.
     expect(runtimeBucket("opencode-cli")).toBe("opencode");

@@ -1,7 +1,7 @@
 {
   "name": "@sleep2agi/agent-network",
-  "version": "2.3.0-preview.17",
-  "description": "AI Agent Network CLI — Local-first multi-agent orchestration across 4 runtimes (Claude Code CLI / Claude Agent SDK / Codex SDK / Grok Build ACP) and 8+ LLM providers (Anthropic / OpenAI / xAI Grok / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter). Apache 2.0.",
+  "version": "2.3.0-preview.23",
+  "description": "AI Agent Network CLI — Local-first multi-agent orchestration across Claude, Codex, Grok (ACP plus experimental co-presence TUI), and OpenCode runtimes. Apache 2.0.",
   "type": "module",
   "main": "dist/src/client.js",
   "types": "dist/client.d.ts",
@@ -36,6 +36,9 @@
     "grok",
     "xai",
     "grok-build-acp",
+    "grok-build-cli",
+    "grok-tui",
+    "copresence",
     "acp",
     "minimax",
     "mimo",
@@ -54,7 +57,8 @@
     "directory": "agent-network"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "tag": "preview"
   },
   "bugs": {
     "url": "https://github.com/sleep2agi/agent-network/issues"

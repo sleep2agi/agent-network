@@ -16,6 +16,7 @@ export type RuntimeName =
   | "codex-sdk"
   | "claude-agent-sdk"
   | "grok-build-acp"
+  | "grok-build-cli"
   | "opencode-cli"
   | "codex-app-server";
 
@@ -47,6 +48,13 @@ export function normalizeRuntime(profileOrRuntime?: ProfileLike | string): Runti
       profileOrRuntime === "grok-build" ||
       profileOrRuntime === "grok-build-acp"
     ) return "grok-build-acp";
+    // Experimental Grok co-presence lane. Keep the legacy `grok` aliases on
+    // ACP so an existing profile can never silently change execution mode.
+    if (
+      profileOrRuntime === "grok-build-cli" ||
+      profileOrRuntime === "grok-cli" ||
+      profileOrRuntime === "grok-tui"
+    ) return "grok-build-cli";
     if (
       profileOrRuntime === "claude" ||
       profileOrRuntime === "claude-sdk" ||

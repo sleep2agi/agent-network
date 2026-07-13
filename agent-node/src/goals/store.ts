@@ -14,7 +14,16 @@
 //      serialises mutating callers so the scheduler tick (Phase 2) cannot
 //      race with `/goal cancel` / `/goal complete` from the inbox loop.
 
-import { readFileSync, writeFileSync, renameSync, existsSync, copyFileSync, mkdirSync, unlinkSync } from "fs";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "fs";
 import { dirname } from "path";
 import { randomUUID } from "crypto";
 import type { AgentGoal, GoalStatus, GoalsFile } from "./types";
@@ -65,6 +74,9 @@ const GROK_RUNTIME_NAMES = new Set([
   "grok",
   "grok-build-acp",
   "grok-build",
+  "grok-build-cli",
+  "grok-cli",
+  "grok-tui",
 ]);
 
 // RFC-029 — public sst/opencode CLI. `opencode-cli` is the canonical
@@ -116,12 +128,25 @@ export interface LoadResult {
   error?: string;
 }
 
+export interface GoalStoreRedactor {
+  redactText(text: unknown): { text: string; redactions: number };
+  redactValue<T>(value: T): T;
+}
+
+export interface GoalStoreOptions {
+  /** Final persistence boundary used by the credential-isolated Grok preview. */
+  redactor?: GoalStoreRedactor;
+}
+
 export class GoalStore {
   private goals: Map<string, AgentGoal> = new Map();
   private mutex = new Mutex();
   private loaded = false;
 
-  constructor(private readonly filePath: string) {}
+  constructor(
+    private readonly filePath: string,
+    private readonly options: GoalStoreOptions = {},
+  ) {}
 
   /** Path the store reads from / writes to (for diagnostics). */
   get path(): string {
@@ -137,10 +162,10 @@ export class GoalStore {
    * store in an empty state so the host process can continue.
    */
   async load(): Promise<LoadResult> {
-    return this.mutex.lock(() => this._loadSync());
+    return this.mutex.lock(() => this._load());
   }
 
-  private _loadSync(): LoadResult {
+  private async _load(): Promise<LoadResult> {
     if (this.loaded) return { ok: true };
 
     if (!existsSync(this.filePath)) {
@@ -162,6 +187,7 @@ export class GoalStore {
     } catch (e: any) {
       const backup = this._preserveCorrupt(raw);
       this.loaded = true;
+      if (this.options.redactor) await this._flush();
       return { ok: false, recovered: backup, error: `invalid JSON: ${e?.message || e}` };
     }
 
@@ -169,6 +195,7 @@ export class GoalStore {
     if (!file || file.version !== GOALS_SCHEMA_VERSION || !Array.isArray(file.goals)) {
       const backup = this._preserveCorrupt(raw);
       this.loaded = true;
+      if (this.options.redactor) await this._flush();
       return {
         ok: false,
         recovered: backup,
@@ -176,20 +203,34 @@ export class GoalStore {
       };
     }
 
-    for (const g of file.goals) {
+    const safeFile = this.options.redactor
+      ? this.options.redactor.redactValue(file)
+      : file;
+    for (const g of safeFile.goals) {
       if (g && typeof g.goal_id === "string") this.goals.set(g.goal_id, g);
     }
     this.loaded = true;
+    // A valid legacy file may still contain task text written before the
+    // preview persistence boundary. Rewrite the redacted projection and
+    // owner-only mode before any caller can observe a successful load.
+    if (this.options.redactor) await this._flush();
+    else {
+      try { chmodSync(this.filePath, 0o600); } catch {}
+    }
     return { ok: true };
   }
 
-  private _preserveCorrupt(_raw: string): string | undefined {
-    // We re-read from disk via copy rather than re-write the buffer so the
-    // bytes match exactly (no JSON re-stringify, no encoding round-trip).
+  private _preserveCorrupt(raw: string): string | undefined {
     try {
       const ts = new Date().toISOString().replace(/[:.]/g, "-");
       const backup = `${this.filePath}.corrupt.${ts}`;
-      copyFileSync(this.filePath, backup);
+      if (this.options.redactor) {
+        const safe = this.options.redactor.redactText(raw).text;
+        writeFileSync(backup, safe, { mode: 0o600, flag: "wx" });
+      } else {
+        copyFileSync(this.filePath, backup);
+        chmodSync(backup, 0o600);
+      }
       return backup;
     } catch {
       return undefined;
@@ -246,7 +287,19 @@ export class GoalStore {
       if (existsSync(this.filePath)) {
         const ts = new Date().toISOString().replace(/[:.]/g, "-");
         backup = `${this.filePath}.runtime-switched.${ts}`;
-        copyFileSync(this.filePath, backup);
+        if (this.options.redactor) {
+          const payload = this.options.redactor.redactValue({
+            version: GOALS_SCHEMA_VERSION,
+            goals: Array.from(this.goals.values()),
+          } satisfies GoalsFile);
+          writeFileSync(backup, JSON.stringify(payload, null, 2) + "\n", {
+            mode: 0o600,
+            flag: "wx",
+          });
+        } else {
+          copyFileSync(this.filePath, backup);
+          chmodSync(backup, 0o600);
+        }
       }
       this.goals.clear();
       await this._flush();
@@ -308,12 +361,15 @@ export class GoalStore {
   // only protects within-process concurrency).
   private async _flush(): Promise<void> {
     if (!this.loaded) throw new Error("GoalStore not loaded — call load() first");
-    const payload: GoalsFile = {
+    const rawPayload: GoalsFile = {
       version: GOALS_SCHEMA_VERSION,
       goals: Array.from(this.goals.values()),
     };
+    const payload = this.options.redactor
+      ? this.options.redactor.redactValue(rawPayload)
+      : rawPayload;
     const dir = dirname(this.filePath);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
     const tmp = `${this.filePath}.tmp.${process.pid}.${randomUUID()}`;
     // If renameSync throws (cross-filesystem, EACCES on dest, etc.) the
     // tmp file would otherwise be left behind — uuid in the name keeps
@@ -321,8 +377,9 @@ export class GoalStore {
     // forever. Best-effort unlink on failure so a broken flush doesn't
     // silently grow the directory.
     try {
-      writeFileSync(tmp, JSON.stringify(payload, null, 2) + "\n");
+      writeFileSync(tmp, JSON.stringify(payload, null, 2) + "\n", { mode: 0o600, flag: "wx" });
       renameSync(tmp, this.filePath);
+      chmodSync(this.filePath, 0o600);
     } catch (e) {
       try { unlinkSync(tmp); } catch { /* ignore — tmp may not exist if writeFileSync threw */ }
       throw e;

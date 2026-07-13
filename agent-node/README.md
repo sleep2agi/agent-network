@@ -11,7 +11,7 @@ The supported entry point is the `anet` CLI from `@sleep2agi/agent-network`, whi
 
 ## Install
 
-You usually don't install this package directly — `anet node create` and `anet node start` use it via `npx`. To pin it:
+You usually don't install this package directly — `anet node create` and `anet node start` launch it for you. For the experimental `grok-build-cli` co-presence runtime, `anet` capability-checks any global `agent-node` and otherwise runs `npx -y @sleep2agi/agent-node@preview`; no global `agent-node` install is required. To pin the stable package for other runtimes:
 
 ```bash
 npm install -g @sleep2agi/agent-node
@@ -44,7 +44,7 @@ CLI flags:
 |---|---|---|
 | `--alias` | required | unique name in the hub |
 | `--hub` | `http://127.0.0.1:9200` | CommHub URL |
-| `--runtime` | `claude-agent-sdk` | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` / `grok-build-acp` / `http-api` |
+| `--runtime` | `claude-agent-sdk` | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` / `grok-build-acp` / `grok-build-cli` / `http-api` |
 | `--model` | runtime default | passed through to the SDK |
 | `--tools` | (none) | `all` or comma-separated list |
 | `--max-turns` | `50` | upper bound per task |
@@ -58,6 +58,7 @@ CLI flags:
 | `codex-sdk` | [@openai/codex-sdk](https://www.npmjs.com/package/@openai/codex-sdk) | unverified end-to-end | unit tests pass, no full E2E with real codex auth |
 | `claude-code-cli` | local `claude` CLI | unverified end-to-end | runs locally for Claude Pro subscribers (v0.8.2 fixed the session-resume default-loss bug; see [changelog](https://anet.sh/en/changelog)) |
 | `grok-build-acp` | local `grok agent stdio` | stable runtime, native MCP injection boundary remains preview | requires Grok Build CLI login; stable for receive/reply, session persistence, and explicit CommHub delegation handled by agent-node |
+| `grok-build-cli` | local Grok TUI or process-per-turn Grok CLI | dangerous experimental preview | defaults to shared-TUI co-presence when created by `anet`; Linux and exact Grok `0.2.93 (f00f96316d)` required; trusted tasks only |
 | `http-api` | OpenAI/Anthropic-compatible HTTP | experimental | reads `ANTHROPIC_*`, `OPENAI_*`, or `MINIMAX_CODING_API_KEY` environment variables |
 
 Runtimes are loaded lazily — picking one doesn't pull the others' dependencies. `claude-code-cli` adds zero extra SDK weight.
@@ -88,6 +89,59 @@ Known boundary:
 - Image attachments are currently text-only because the captured Grok ACP capability reports `promptCapabilities.image=false`.
 - `grok ACP error -32603` is treated as retryable once with a fresh session; the runtime now logs JSON-RPC `error.data` when Grok provides it.
 - Grok tool-state boilerplate such as "Do not attempt to use tools from these servers yet" is stripped from final CommHub replies so users see the actual task answer.
+
+## Grok shared TUI — experimental preview
+
+> **Not production-ready:** network tasks drive the same TUI and share its conversation context. Approval ownership is not fully hardened. Use only with trusted tasks on a trusted network. This path belongs to the npm `preview` channel and is not a capability claim for `latest`.
+
+The preview is currently supported only on Linux and is pinned to build `grok 0.2.93 (f00f96316d)`; the known stable installer prints the same build with an optional trailing ` [stable]`. Install and authenticate that Grok CLI build as the same operating-system user that runs the node:
+
+```bash
+grok auth login
+grok --version
+```
+
+Use the supported `anet` entry point. In terminal 1:
+
+```bash
+anet node create grok-shared --runtime grok-build-cli
+anet node start grok-shared
+```
+
+In terminal 2 on the same machine and user account:
+
+```bash
+anet grok attach grok-shared
+```
+
+`anet node start` owns the Grok PTY and the local attach socket. `anet grok attach` relays that same terminal and detaches on `Ctrl-]`. A task delivered by CommHub is submitted into the visible shared session, and the completed answer is routed back to the originating task.
+
+If no compatible global `agent-node` is installed, `anet` uses `npx -y @sleep2agi/agent-node@preview` to fetch and resolve the package, verifies preview metadata plus the machine-readable `ANET_CAPABILITY_GROK_COPRESENCE_V1` marker, and then launches the resolved entrypoint directly so stop signals reach the real runtime. An older headless-only package that merely lists `grok-build-cli` does not pass this check. First start therefore needs npm registry access or an already populated npm cache. An incompatible global package is not silently allowed to select another runtime.
+
+This preview supports the CommHub inbox lane used by `anet node start`.
+Feishu configuration is rejected for `grok-build-cli`: its forked worker log
+path is not yet inside this runtime's credential-isolated boundary. The npm
+resolver, agent-node parent, Grok probes, PTY, and helper processes each use
+an exact from-empty environment; durable pending replies and goal state are
+redacted and owner-only. Same-UID host processes remain trusted.
+
+The legacy process-per-turn Grok CLI path uses the same runtime name with an explicit creation flag:
+
+```bash
+anet node create grok-turn --runtime grok-build-cli --grok-headless
+anet node start grok-turn
+```
+
+This headless node cannot be used with `anet grok attach`. It is also distinct from ACP headless mode:
+
+```bash
+anet node create grok-acp --runtime grok-build-acp
+anet node start grok-acp
+```
+
+`grok-build-acp` launches `grok agent stdio`; `grok-build-cli --grok-headless` launches one streaming-JSON Grok CLI turn per task.
+
+The formal native Leader/Policy Gateway design is not shipped by this experimental path. Its Phase 0 protocol freeze, Phase 1A gate, production-grade approval ownership, and `latest` release gate remain locked. See the [Grok co-presence preview guide](../docs/grok-build-cli-preview.md).
 
 ## Provider presets (claude-agent-sdk)
 
