@@ -38,7 +38,16 @@
 
 ---
 
-## 30-second quickstart
+## Quick Start
+
+Requirements: Node.js >= 22.13.0, npm >= 10, and Bun >= 1.2.0. The Hub uses
+`Bun.serve` / `bun:sqlite`, so Bun is required rather than optional:
+
+```bash
+curl -fsSL https://bun.sh/install | bash
+# Open a new shell, then verify:
+bun --version && bunx --version
+```
 
 ```bash
 # Install one global package
@@ -70,7 +79,7 @@ anet project restart    # restart cwd nodes against the new version
 
 Full cross-version migration reference: [Upgrade Guide](https://anet.sh/en/guide/upgrade).
 
-<sub>Prereq: Node.js ≥ 22.13.0 (required by `@inquirer/prompts` and friends; older versions trip `EBADENGINE` warnings during install but still work).</sub>
+<sub>On the first `anet node start`, the CLI fetches `agent-node` through `npx` when no global binary exists; a second global install is not required. SDK runtimes that require an API key block create/start when the key is blank, avoiding nodes that look online but cannot execute a task.</sub>
 
 ---
 
@@ -131,7 +140,7 @@ flowchart LR
     H -.- DB[(SQLite<br/>~/.commhub)]
 ```
 
-Node onboarding flow (0 to online in 30 seconds):
+Node onboarding flow (elapsed time depends on first-run downloads and network speed):
 
 ```mermaid
 flowchart LR
@@ -214,7 +223,7 @@ Apache-2.0, published to npm. `anet upgrade` bumps all four to `latest`.
 | [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | MCP + REST + SSE hub (SQLite-backed) |
 | [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | Web Dashboard — Next.js 16, 7 panels |
 
-The CLI auto-fetches the hub and node packages on first use via `bunx` / `npx`; you only ever globally install one. The Dashboard lives in a separate repo: [sleep2agi/agent-network-dashboard](https://github.com/sleep2agi/agent-network-dashboard).
+The CLI fetches the hub and node packages on first use via `bunx` / `npx`. You only globally install `agent-network`, but Bun itself must already be installed because it is the Hub runtime and is not installed automatically. The Dashboard lives in a separate repo: [sleep2agi/agent-network-dashboard](https://github.com/sleep2agi/agent-network-dashboard).
 
 ---
 
@@ -278,7 +287,7 @@ All four packages Apache 2.0, **Stable on npm `latest`**. Release cadence and fu
 
 PRs welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, branch naming, and the test matrix layout. By contributing you agree to the [Code of Conduct](./CODE_OF_CONDUCT.md).
 
-The fastest way to help right now: try the [30-second quickstart](#30-second-quickstart) and file anything that surprised you in [Discussions](https://github.com/sleep2agi/agent-network/discussions) or [Issues](https://github.com/sleep2agi/agent-network/issues).
+The fastest way to help right now: try the [Quick Start](#quick-start) and file anything that surprised you in [Discussions](https://github.com/sleep2agi/agent-network/discussions) or [Issues](https://github.com/sleep2agi/agent-network/issues).
 
 ---
 

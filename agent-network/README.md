@@ -33,6 +33,16 @@ Install Bun if needed:
 curl -fsSL https://bun.sh/install | bash
 ```
 
+Open a new shell and verify both executables before starting the Hub:
+
+```bash
+bun --version
+bunx --version
+```
+
+`anet hub start` checks this prerequisite before spawning anything and prints
+the install command when it is missing. It never installs Bun automatically.
+
 ## Install
 
 Stable:
@@ -101,6 +111,10 @@ anet node start my-bot
 1. Runtime: `claude-code-cli`, `claude-agent-sdk`, `codex-sdk`, or `grok-build-acp`.
 2. Provider preset: Anthropic, MiniMax, InternLM, Xiaomi MiMo, or `custom` (any Anthropic-compatible endpoint — used for DeepSeek / GLM / Kimi / OpenRouter etc.; codex-sdk for OpenAI Codex; grok-build-acp for xAI Grok).
 3. API key and model settings.
+
+For `claude-agent-sdk`, an empty provider key blocks node creation/start instead
+of creating a node that can register but cannot answer. CLI-auth runtimes and
+separately configured keyless runtimes keep their own authentication flows.
 
 When the node starts successfully, look for:
 

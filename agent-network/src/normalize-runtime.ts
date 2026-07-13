@@ -22,6 +22,35 @@ export type RuntimeName =
 /** Operator-facing default for any runtime slot that comes in empty / missing / unrecognized. */
 export const DEFAULT_RUNTIME: RuntimeName = "claude-agent-sdk";
 
+/**
+ * Parse an operator-supplied runtime without applying a default.
+ *
+ * `normalizeRuntime` intentionally remains tolerant for old profiles with a
+ * missing runtime. CLI flags and persisted non-empty runtime fields are a
+ * different trust boundary: silently mapping a typo to another runtime can
+ * launch the wrong executable, so callers must reject `null`.
+ */
+export function parseExplicitRuntime(runtime: string): RuntimeName | null {
+  if (
+    runtime === "codex-app-server" ||
+    runtime === "codex-appserver" ||
+    runtime === "codex-tui"
+  ) return "codex-app-server";
+  if (runtime === "codex" || runtime === "codex-sdk") return "codex-sdk";
+  if (runtime === "grok" || runtime === "grok-build" || runtime === "grok-build-acp") {
+    return "grok-build-acp";
+  }
+  if (
+    runtime === "claude" ||
+    runtime === "claude-sdk" ||
+    runtime === "claude-agent-sdk" ||
+    runtime === "agent-sdk"
+  ) return "claude-agent-sdk";
+  if (runtime === "claude-code-cli") return "claude-code-cli";
+  if (runtime === "opencode" || runtime === "opencode-cli") return "opencode-cli";
+  return null;
+}
+
 // Subset of Profile fields this helper inspects. Keeping it narrow so
 // the test fixture doesn't need the full Profile shape and so callers
 // (bin/cli.ts uses the full Profile) can pass anything structurally
@@ -33,34 +62,7 @@ type ProfileLike = {
 
 export function normalizeRuntime(profileOrRuntime?: ProfileLike | string): RuntimeName {
   if (typeof profileOrRuntime === "string") {
-    // RFC-030 — codex TUI bridge (standalone `codex app-server`). Aliases:
-    // `codex-tui` / `codex-app-server` / `codex-appserver`. Checked BEFORE
-    // the `codex`/`codex-sdk` branch so the more specific names win.
-    if (
-      profileOrRuntime === "codex-app-server" ||
-      profileOrRuntime === "codex-appserver" ||
-      profileOrRuntime === "codex-tui"
-    ) return "codex-app-server";
-    if (profileOrRuntime === "codex" || profileOrRuntime === "codex-sdk") return "codex-sdk";
-    if (
-      profileOrRuntime === "grok" ||
-      profileOrRuntime === "grok-build" ||
-      profileOrRuntime === "grok-build-acp"
-    ) return "grok-build-acp";
-    if (
-      profileOrRuntime === "claude" ||
-      profileOrRuntime === "claude-sdk" ||
-      profileOrRuntime === "claude-agent-sdk"
-    ) return "claude-agent-sdk";
-    if (profileOrRuntime === "agent-sdk") return "claude-agent-sdk";
-    // Preserve EXPLICIT `claude-code-cli` choice — operators who
-    // actually want CC-CLI still get it.
-    if (profileOrRuntime === "claude-code-cli") return "claude-code-cli";
-    // RFC-029 — opencode CLI runtime (public sst/opencode). Aliases:
-    // `opencode` (short), `opencode-cli` (canonical, matches
-    // claude-code-cli precedent).
-    if (profileOrRuntime === "opencode" || profileOrRuntime === "opencode-cli") return "opencode-cli";
-    return DEFAULT_RUNTIME;
+    return parseExplicitRuntime(profileOrRuntime) ?? DEFAULT_RUNTIME;
   }
   const p = profileOrRuntime;
   if (!p) return DEFAULT_RUNTIME;

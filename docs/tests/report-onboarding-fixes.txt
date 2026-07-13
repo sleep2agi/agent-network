@@ -1,0 +1,81 @@
+Agent Network onboarding corrective smoke — isolated candidate evidence
+Date: 2026-07-13 (Asia/Shanghai)
+Candidate: agent/onboarding-fixes, based on origin/main d4188621
+Verdict: PARTIAL PASS — the four scoped guards work; this is not a release verdict.
+
+Isolation
+---------
+- Fresh node:22.13.1-bookworm-slim container, no host config mounts, no
+  published ports, and no production Hub URL or credential.
+- Candidate installed from a locally built npm tarball. Public npm stable was
+  not modified and this test is not evidence about a released version.
+- Network access was used only for Debian packages, Bun, npm runtime packages,
+  and the loopback-only throwaway Hub inside the container.
+- The container had no global agent-node binary at the time the node came
+  online. No real provider credential or task inference was attempted.
+
+Successful path and timing
+--------------------------
+The clean Node-only image needed seven load-bearing shell invocations:
+
+1. Install curl/unzip OS prerequisites: 10 s.
+2. Install Bun using the public command: 3 s.
+3. Install the local candidate tarball: 10 s.
+4. Start the loopback Hub: 4 s.
+5. Register a throwaway local account/network: 1 s.
+6. Create a claude-agent-sdk node with a non-empty test-only placeholder: <1 s.
+7. Start the node: strict online criterion reached in 20 s.
+
+Measured command-runtime sum: about 48 s. Strict online meant all of:
+- agent-node emitted "SSE connected";
+- anet status showed one idle node and one SSE connection;
+- Hub health reported ok=true, sessions_count=1, sse_connections=1.
+
+This improves on the earlier stable-package capture (11 invocations, 2m49s),
+but the runs used different package candidates and network/cache conditions;
+the comparison is directional, not a performance benchmark. It is also not a
+"zero-step" result: Bun remains an explicit prerequisite.
+
+Scoped corrective evidence
+--------------------------
+1. Bun prerequisite
+   - With bunx absent, `anet hub start` exited 1 before spawn.
+   - stderr named Bun >=1.2.0 and printed the public install command.
+   - README (Chinese/English) and package README now declare Bun before the
+     quick-start commands. `anet --version` / setup-facing output also reports
+     the missing prerequisite. Bun is never auto-installed.
+
+2. agent-node first-start path
+   - The candidate reached strict online with no global agent-node command.
+   - The real launch selected `npx -y @sleep2agi/agent-node@preview`.
+   - A subprocess regression test uses a controlled npx executable and asserts
+     the actual argv, so the prior "lazy" label cannot pass without a launch.
+
+3. Blank provider key
+   - claude-agent-sdk create with no key exited 1, printed an actionable
+     provider-credential error, and wrote no node config.
+   - Existing config with a blank key also exited before agent-node/npx spawn.
+   - CLI-auth runtimes and separately configured keyless runtimes are excluded
+     from this provider-key guard; this change does not impose a global key.
+
+4. Unknown runtime
+   - `--runtime not-a-runtime` exited 2 before Hub access, printed the accepted
+     values, and wrote no node config.
+   - A persisted unknown non-empty runtime is rejected on start rather than
+     normalized to claude-agent-sdk/claude-code-cli.
+
+Residual limits / merge ordering
+--------------------------------
+- This smoke proves registration/SSE presence, not a usable model response;
+  the placeholder key was never sent to a provider.
+- The current candidate Hub bootstrap did not accept the historical default
+  admin password in this fresh container, so the successful path used
+  `anet register`. README bootstrap wording needs a separate product/security
+  alignment; this tranche does not restore a fixed default password.
+- codex-app-server is a recognized runtime, not an "unknown runtime" case.
+  Its TTY create/start wiring remains owned by draft PR #441 and was not
+  cherry-picked here. This branch must not be used to claim that RFC-030 is
+  production-ready, and release integration must preserve #441's reviewed
+  runtime routing before promoting that runtime.
+- No merge, deploy, npm publication, latest-tag change, or production state
+  change was performed.

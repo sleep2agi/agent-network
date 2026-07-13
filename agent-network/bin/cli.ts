@@ -321,9 +321,31 @@ interface Profile {
 
 // Re-export from the pure helper module (src/normalize-runtime.ts) so
 // unit tests can import without dragging in CLI side-effects.
-import { normalizeRuntime, type RuntimeName } from "../src/normalize-runtime";
+import { normalizeRuntime, parseExplicitRuntime, type RuntimeName } from "../src/normalize-runtime";
+import {
+  bunHubPrerequisiteIssue,
+  providerCredentialIssue,
+  resolveAgentNodeLaunch,
+} from "../src/onboarding-guards";
 import { findEnvironAliasMatches } from "../src/environ-alias";
 export { normalizeRuntime, type RuntimeName };
+
+function explicitRuntimeOrExit(raw: string, source: string): RuntimeName {
+  const runtime = parseExplicitRuntime(raw);
+  if (runtime) return runtime;
+  console.error(`[anet] ❌ Unsupported runtime "${raw}" from ${source}.`);
+  console.error(`[anet]    Supported: claude-agent-sdk, claude-code-cli, codex-sdk, codex-app-server, grok-build-acp, opencode-cli`);
+  process.exit(2);
+}
+
+function assertProviderCredential(runtime: RuntimeName, env: Record<string, string | undefined>, phase: "create" | "start"): void {
+  const issue = providerCredentialIssue(runtime, env);
+  if (!issue) return;
+  console.error(`[anet] ❌ ${issue}.`);
+  console.error(`[anet]    ${phase === "create" ? "Provide a non-empty key in the wizard or pass --env ANTHROPIC_AUTH_TOKEN=<value>." : "Set it in the node config/.env or export it before start."}`);
+  console.error(`[anet]    CLI-auth and separately configured keyless runtimes are not affected by this check.`);
+  process.exit(1);
+}
 
 function nodeDisplayName(id: string, profile?: Profile | null): string {
   return profile?.node_name || profile?.name || profile?.alias || id;
@@ -780,6 +802,13 @@ function printVersionReport() {
   const versions = detectInstalledPackages();
   console.log(`anet v${versions.anet.version}\n`);
 
+  if (commandExists("bunx")) {
+    console.log("Hub runtime: bunx available ✓");
+  } else {
+    console.log("Hub runtime: Bun/bunx missing — required before `anet hub start`");
+    console.log("  Install: curl -fsSL https://bun.sh/install | bash\n");
+  }
+
   console.log("Components (auto-fetched on first use, you don't need to install them manually):");
   console.log(`  ${formatLazyComponent(versions.agentNode)}`);
   if (versions.agentNode.state === "ok") {
@@ -815,6 +844,7 @@ function installGlobalPackage(pkgName: string) {
 function printDetectedPackagesForSetup() {
   const versions = detectInstalledPackages();
   console.log(`检测已安装的包...`);
+  console.log(`  ${commandExists("bunx") ? "✅ Bun/bunx（Hub runtime）" : "❌ Bun/bunx 未安装（anet hub start 必需；安装: curl -fsSL https://bun.sh/install | bash）"}`);
   console.log(`  ✅ anet v${versions.anet.version}`);
   console.log(`  ${isInstalled(versions.agentNode) ? "✅" : "❌"} ${formatDetectedVersion(versions.agentNode)}`);
   console.log(`  ${isInstalled(versions.claude) ? "✅" : "❌"} ${formatDetectedVersion(versions.claude)}`);
@@ -1380,7 +1410,9 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
   // Default to claude-agent-sdk — works with any Anthropic-compatible API
   // (MiniMax/DeepSeek/GLM/Kimi/Anthropic). claude-code-cli only works for Max/Pro
   // subscribers and was a poor default that left non-subscribers with broken nodes.
-  const runtime = normalizeRuntime(opts.runtime || "claude-agent-sdk");
+  const runtime = opts.runtime
+    ? explicitRuntimeOrExit(opts.runtime, "--runtime")
+    : normalizeRuntime("claude-agent-sdk");
   const defaultModel =
     runtime === "codex-sdk" || runtime === "codex-app-server" ? "gpt-5.5" : undefined;
 
@@ -1426,6 +1458,7 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
     },
     ...(opts.session || runtime === "claude-code-cli" ? { session: opts.session || randomUUID() } : {}),
   };
+  assertProviderCredential(runtime, { ...process.env, ...envMap }, "create");
   return profile;
 }
 
@@ -2258,6 +2291,9 @@ async function createCommand(idOverride?: string) {
   }
 
   const opts = parseOpts();
+  // Validate an explicit flag before touching Hub state or opening a picker.
+  // A typo must never be normalized into a different executable.
+  if (opts.runtime) explicitRuntimeOrExit(opts.runtime, "--runtime");
   const gc = loadGlobal();
 
   // ── Check hub connection BEFORE asking for model/key ──
@@ -2290,7 +2326,7 @@ async function createCommand(idOverride?: string) {
   );
   const credAlreadyProvided = !!process.env.ANTHROPIC_AUTH_TOKEN
     || !!process.env.ANTHROPIC_API_KEY || envFlagHasAuth;
-  const explicitRuntime = opts.runtime ? normalizeRuntime(opts.runtime) : undefined;
+  const explicitRuntime = opts.runtime ? explicitRuntimeOrExit(opts.runtime, "--runtime") : undefined;
   const runtimeAlreadyExplicit = explicitRuntime === "codex-sdk" || explicitRuntime === "claude-code-cli" || explicitRuntime === "grok-build-acp";
   const skipInteractive = credAlreadyProvided || runtimeAlreadyExplicit;
 
@@ -2804,7 +2840,9 @@ async function launchAgent(id: string, forceNewSession = false) {
   }
   const { id: nodeId, profile } = resolved;
 
-  const runtime = normalizeRuntime(profile);
+  const runtime = profile.runtime
+    ? explicitRuntimeOrExit(profile.runtime, `node config for "${nodeDisplayName(nodeId, profile)}"`)
+    : normalizeRuntime(profile);
   const displayName = nodeDisplayName(nodeId, profile);
   const session = profileSession(profile);
   const willResume = !!session && !forceNewSession;
@@ -2936,14 +2974,12 @@ async function launchAgent(id: string, forceNewSession = false) {
       console.log(`[anet] loaded ${Object.keys(_dotenvSDK).length} key(s) from .anet/nodes/${nodeId}/.env`);
     }
     Object.assign(env, resolveProfileEnv(profile.env as any, home, _dotenvSDK));
+    assertProviderCredential(runtime, env, "start");
 
     // Try agent-node from PATH, fallback to npx
-    let cmd = "agent-node";
-    let commandArgs = agentArgs;
-    try { execSync("which agent-node", { stdio: "pipe" }); } catch {
-      cmd = "npx";
-      commandArgs = ["-y", "@sleep2agi/agent-node@preview", ...agentArgs];
-    }
+    const launch = resolveAgentNodeLaunch(commandExists("agent-node"), agentArgs);
+    const cmd = launch.command;
+    const commandArgs = launch.args;
     // W1 supervisor wrap (RFC-024, #284 superviseChild) — handle the
     // sentinel exit code 75 (BSD EX_TEMPFAIL, agent-node's "config-apply
     // says please respawn me with the new config" signal) by re-spawning
@@ -3607,8 +3643,9 @@ async function serverCommand() {
       // The post-spawn 15s /health poll then a Bun-missing check (see
       // ~30 lines down) cannot rescue this — spawn ENOENT throws before
       // the poll loop ever runs.
-      if (!commandExists("bunx") && !commandExists("bun")) {
-        console.error(`\n  ❌ anet hub start requires the Bun runtime (commhub-server is bun-only — uses Bun.serve + bun:sqlite, no Node fallback).`);
+      const bunIssue = bunHubPrerequisiteIssue(commandExists("bunx"));
+      if (bunIssue) {
+        console.error(`\n  ❌ ${bunIssue} (commhub-server is bun-only — uses Bun.serve + bun:sqlite, no Node fallback).`);
         console.error(`\n     Install Bun first:`);
         console.error(`       curl -fsSL https://bun.sh/install | bash`);
         console.error(`       # restart your shell so PATH picks up ~/.bun/bin`);

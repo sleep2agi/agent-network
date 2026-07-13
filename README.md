@@ -38,7 +38,16 @@
 
 ---
 
-## 30 秒上手
+## 快速上手
+
+前置：Node.js >= 22.13.0、npm >= 10、Bun >= 1.2.0。Hub 使用
+`Bun.serve` / `bun:sqlite`，所以 Bun 不是可选项：
+
+```bash
+curl -fsSL https://bun.sh/install | bash
+# 重开终端后确认
+bun --version && bunx --version
+```
 
 ```bash
 # 装一个全局包
@@ -70,7 +79,7 @@ anet project restart    # 重启 cwd 节点接新版
 
 完整跨版本迁移参考 [升级指南](https://anet.sh/guide/upgrade)。
 
-<sub>前置：Node.js ≥ 22.13.0（`@inquirer/prompts` 等依赖要求；老版本会触发 `EBADENGINE` warnings，不影响安装）。</sub>
+<sub>首次 `anet node start` 会在没有全局 `agent-node` 时通过 `npx` 拉取它；不需要手动安装第二个全局包。需要 API key 的 SDK runtime 会在 key 为空时阻止创建/启动，避免出现“在线但不能执行任务”的节点。</sub>
 
 ---
 
@@ -131,7 +140,7 @@ flowchart LR
     H -.- DB[(SQLite<br/>~/.commhub)]
 ```
 
-节点接入流程（从 0 到上线 30 秒）：
+节点接入流程（实际耗时取决于首次下载和本机网络）：
 
 ```mermaid
 flowchart LR
@@ -214,7 +223,7 @@ Apache-2.0，已发 npm。`anet upgrade` 一键全升 `latest`。
 | [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | MCP + REST + SSE 通信中枢（SQLite 持久化） |
 | [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | Web Dashboard —— Next.js 16，7 大面板 |
 
-CLI 第一次用到 hub 和 node 时会自动用 `bunx` / `npx` 拉对应包，全局只需装一个 `agent-network`。Dashboard 是独立 repo：[sleep2agi/agent-network-dashboard](https://github.com/sleep2agi/agent-network-dashboard)。
+CLI 第一次用到 hub 和 node 时会用 `bunx` / `npx` 拉对应包；全局只需安装 `agent-network`，但本机必须预装 Bun（Hub 的运行时，不会自动安装）。Dashboard 是独立 repo：[sleep2agi/agent-network-dashboard](https://github.com/sleep2agi/agent-network-dashboard)。
 
 ---
 
@@ -278,7 +287,7 @@ tests/           Docker 测试矩阵
 
 欢迎 PR。环境搭建、分支命名、测试矩阵详见 [CONTRIBUTING.md](./CONTRIBUTING.md)。提交即代表同意 [Code of Conduct](./CODE_OF_CONDUCT.md)。
 
-最快帮上忙的方式：跑一遍上面的 [30 秒上手](#30-秒上手)，把任何"咦？"的地方发到 [Discussions](https://github.com/sleep2agi/agent-network/discussions) 或 [Issues](https://github.com/sleep2agi/agent-network/issues)。
+最快帮上忙的方式：跑一遍上面的 [快速上手](#快速上手)，把任何"咦？"的地方发到 [Discussions](https://github.com/sleep2agi/agent-network/discussions) 或 [Issues](https://github.com/sleep2agi/agent-network/issues)。
 
 ---
 

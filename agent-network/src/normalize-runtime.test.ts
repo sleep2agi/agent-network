@@ -8,7 +8,21 @@
 // Explicit `claude-code-cli` choice still works.
 
 import { describe, expect, test } from "bun:test";
-import { normalizeRuntime } from "./normalize-runtime";
+import { normalizeRuntime, parseExplicitRuntime } from "./normalize-runtime";
+
+describe("parseExplicitRuntime — explicit CLI/config input fails closed", () => {
+  test("unknown and blank values are rejected instead of defaulted", () => {
+    expect(parseExplicitRuntime("totally-unknown-runtime")).toBeNull();
+    expect(parseExplicitRuntime("")).toBeNull();
+  });
+
+  test("canonical values and documented aliases are accepted", () => {
+    expect(parseExplicitRuntime("claude-agent-sdk")).toBe("claude-agent-sdk");
+    expect(parseExplicitRuntime("agent-sdk")).toBe("claude-agent-sdk");
+    expect(parseExplicitRuntime("codex-app-server")).toBe("codex-app-server");
+    expect(parseExplicitRuntime("opencode")).toBe("opencode-cli");
+  });
+});
 
 describe("normalizeRuntime — fallback default is claude-agent-sdk (Vincent no-Max)", () => {
   test("unknown string → claude-agent-sdk (was claude-code-cli pre-2026-06-28)", () => {
