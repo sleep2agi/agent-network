@@ -96,6 +96,14 @@ environment-inheritance boundary, not isolation from another process already
 running as the same operating-system user; same-UID processes remain inside
 the preview's trusted host boundary.
 
+The preview binds the auto-spawned Leader to its Unix listener, process start
+time, executable, isolated environment, and a per-spawn generation marker
+before stopping it. Node does not expose Linux `pidfd_send_signal`, so the
+final signal uses a numeric PID after revalidation. This leaves a syscall-sized
+PID-reuse race with another same-UID process; it is part of the same trusted-
+host limitation and is not a production isolation claim. The `latest` channel
+remains separately blocked on its full native gateway and lifecycle review.
+
 ## Headless choices
 
 There are two distinct headless paths.

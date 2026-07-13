@@ -176,15 +176,18 @@ describe("test224 exact Grok child environment", () => {
       "/workspace/project",
       "xterm-256color",
       "anet-reviewed-workspace",
+      "12345678-1234-4123-8123-123456789abc",
     );
     expect(ptyEnv).toEqual({
       ...expected,
       PWD: "/workspace/project",
       TERM: "xterm-256color",
       GROK_SANDBOX: "anet-reviewed-workspace",
+      ANET_GROK_LEADER_OWNER: "12345678-1234-4123-8123-123456789abc",
     });
     expect(Object.keys(ptyEnv).sort()).toEqual([
       ...Object.keys(expected),
+      "ANET_GROK_LEADER_OWNER",
       "GROK_SANDBOX",
     ].sort());
   });

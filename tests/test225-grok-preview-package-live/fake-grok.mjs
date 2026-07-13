@@ -11,6 +11,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { spawn } from "node:child_process";
 
 const argv = process.argv.slice(2);
 const observationsPath = "/tmp/test225-fake-observations.jsonl";
@@ -109,6 +110,35 @@ if (argv[0] === "inspect" && argv.includes("--json")) {
 function valueAfter(flag) {
   const index = argv.indexOf(flag);
   return index >= 0 ? argv[index + 1] : "";
+}
+
+if (argv[0] === "agent" && argv[1] === "leader") {
+  const socket = valueAfter("--leader-socket") || process.env.GROK_LEADER_SOCKET || "";
+  const ownerMarkerValid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    .test(process.env.ANET_GROK_LEADER_OWNER || "");
+  recordEnvironment("leader", {
+    ownerMarkerValid,
+    socketEnvExact: process.env.GROK_LEADER_SOCKET === socket,
+  });
+  if (
+    !socket
+    || !ownerMarkerValid
+    || !argv.includes("--no-exit-on-disconnect")
+    || !argv.includes("--relay-on-demand")
+    || fs.existsSync(socket)
+  ) {
+    process.exit(70);
+  }
+  fs.mkdirSync(path.dirname(socket), { recursive: true, mode: 0o700 });
+  const leaderServer = net.createServer((client) => client.on("error", () => {}));
+  leaderServer.listen(socket, () => {
+    try { fs.chmodSync(socket, 0o600); } catch {}
+  });
+  // Match the pinned native Leader: termination closes the listener but may
+  // leave the filesystem socket pathname for its exact owner to clean up.
+  process.on("SIGTERM", () => process.exit(0));
+  process.on("SIGINT", () => process.exit(0));
+  await new Promise(() => {});
 }
 
 const leaderSocket = valueAfter("--leader-socket");
@@ -288,9 +318,6 @@ recordEnvironment("spawn", {
   ...readDerivedProcessEnvironment(expectedParentPid),
 });
 
-try { fs.unlinkSync(leaderSocket); } catch {}
-fs.mkdirSync(path.dirname(leaderSocket), { recursive: true, mode: 0o700 });
-const server = net.createServer((socket) => socket.on("error", () => {}));
 let tuiReady = false;
 let preReadyNetworkWrites = 0;
 
@@ -301,7 +328,30 @@ function recordReadiness(event) {
   }) + "\n", { mode: 0o600 });
 }
 
-server.listen(leaderSocket, () => {
+const autoLeader = spawn(process.execPath, [
+  process.argv[1],
+  "agent",
+  "leader",
+  "--no-exit-on-disconnect",
+  "--relay-on-demand",
+], {
+  cwd,
+  env: {
+    ...process.env,
+    GROK_LEADER_SOCKET: leaderSocket,
+  },
+  detached: true,
+  stdio: "ignore",
+});
+autoLeader.unref();
+
+const leaderDeadline = Date.now() + 5_000;
+const leaderReadyTimer = setInterval(() => {
+  if (!fs.existsSync(leaderSocket)) {
+    if (Date.now() >= leaderDeadline) process.exit(71);
+    return;
+  }
+  clearInterval(leaderReadyTimer);
   try { fs.chmodSync(leaderSocket, 0o600); } catch {}
   process.stdout.write(
     `\u001b[2J\u001b[HFAKE_GROK_TUI_SPLASH session=${sessionId.slice(0, 8)} mode=${resume ? "resume" : "new"}\r\n`,
@@ -318,7 +368,7 @@ server.listen(leaderSocket, () => {
     process.stdout.write("shortcuts\r\n");
     recordReadiness("ready");
   }, 1_050);
-});
+}, 20);
 
 try { process.stdin.setRawMode?.(true); } catch {}
 process.stdin.resume();
@@ -391,11 +441,7 @@ function shutdown(code = 0) {
   if (stopped) return;
   stopped = true;
   recordReadiness("shutdown");
-  server.close(() => {
-    try { fs.unlinkSync(leaderSocket); } catch {}
-    process.exit(code);
-  });
-  setTimeout(() => process.exit(code), 750).unref();
+  process.exit(code);
 }
 
 process.on("SIGTERM", () => shutdown(0));

@@ -50,7 +50,10 @@ bun test \
 pass "state machine + JSONL reducer + local attach protocol"
 
 log "[L2] single-PTY runtime integration"
-bun test src/runtime/grok-copresence/runtime.test.ts >>"$REPORT" 2>&1 \
+bun test \
+  src/runtime/grok-copresence/runtime.test.ts \
+  src/runtime/grok-copresence/leader-lifecycle.test.ts \
+  >>"$REPORT" 2>&1 \
   || fail "runtime integration tests"
 pass "FIFO/human arbitration + final reply + approval + reconnect + single bridge"
 

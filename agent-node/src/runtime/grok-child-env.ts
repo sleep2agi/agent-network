@@ -60,7 +60,11 @@ export const GROK_HELPER_INHERITED_ENV_KEYS = [
   "TZ",
 ] as const;
 
-export const GROK_PTY_CONTROLLED_ENV_KEYS = ["TERM", "GROK_SANDBOX"] as const;
+export const GROK_PTY_CONTROLLED_ENV_KEYS = [
+  "TERM",
+  "GROK_SANDBOX",
+  "ANET_GROK_LEADER_OWNER",
+] as const;
 
 const GROK_CHILD_ENV_KEYS = new Set<string>([
   ...GROK_CHILD_INHERITED_ENV_KEYS,
@@ -178,6 +182,7 @@ export function buildGrokPtyEnv(
   cwd: string,
   terminalName = "xterm-256color",
   sandboxProfile: string,
+  leaderOwner: string,
 ): Record<string, string> {
   if (
     !cwd
@@ -185,8 +190,9 @@ export function buildGrokPtyEnv(
     || !terminalName
     || terminalName.includes("\0")
     || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(sandboxProfile)
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(leaderOwner)
   ) {
-    throw new Error("Grok PTY environment requires a valid cwd, terminal name, and sandbox profile");
+    throw new Error("Grok PTY environment requires a valid cwd, terminal name, sandbox profile, and Leader owner");
   }
   const env = projectGrokChildEnv(candidate, expectedEnv);
   if (env.PWD !== cwd) {
@@ -199,5 +205,9 @@ export function buildGrokPtyEnv(
   // required in addition to the same explicit argv value. This is a reviewed
   // runtime value, never inherited from the parent environment.
   env.GROK_SANDBOX = sandboxProfile;
+  // This non-secret, per-spawn generation marker is inherited by Grok's
+  // auto-spawned Leader. It lets lifecycle cleanup bind the listener process
+  // to the exact TUI generation instead of trusting a reusable numeric PID.
+  env.ANET_GROK_LEADER_OWNER = leaderOwner;
   return env;
 }

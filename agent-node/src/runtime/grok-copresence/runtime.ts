@@ -41,6 +41,11 @@ import {
   assertGrokCopresenceAgentProfile,
   GROK_COPRESENCE_EFFECTIVE_TOOLS,
 } from "./policy";
+import {
+  captureOwnedGrokLeader,
+  terminateOwnedGrokLeader,
+  type OwnedGrokLeaderIdentity,
+} from "./leader-lifecycle";
 
 // Keep enough headroom for Grok's XML wrapper plus JSON string escaping; the
 // reducer's hard JSONL line cap is 1 MiB.
@@ -494,7 +499,9 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   private fatalError: Error | null = null;
   private fatalShutdownPromise: Promise<void> | null = null;
   private retainLocksForUnconfirmedPty = false;
-  private ownedLeaderObserved = false;
+  private ownedLeader: OwnedGrokLeaderIdentity | null = null;
+  private leaderTeardownPromise: Promise<void> | null = null;
+  private leaderOwnerNonce = "";
   private quarantinedNetworkTaskId = "";
   private approvalDecisionDispatched = false;
   private activePermissionRequestId: string | null = null;
@@ -595,7 +602,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       }
       await this.spawnTui(resume);
       await waitForOwnedUnixSocket(this.leaderSocket, 10_000);
-      this.ownedLeaderObserved = true;
+      await this.bindSpawnedLeader();
 
       // New sessions start at byte zero. Resume tails were already armed at
       // the pre-spawn EOF above, so startup writes remain unread and visible.
@@ -730,12 +737,10 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       this.retainLocksForUnconfirmedPty = true;
       this.warn(`[grok-copresence] PTY termination failed: ${errorMessage(error)}`);
     });
-    if (this.ownedLeaderObserved) {
-      await waitForSocketGone(this.leaderSocket, 2_000).catch((error) => {
-        this.retainLocksForUnconfirmedPty = true;
-        this.warn(`[grok-copresence] retaining locks: ${errorMessage(error)}`);
-      });
-    }
+    await this.teardownOwnedLeader().catch((error) => {
+      this.retainLocksForUnconfirmedPty = true;
+      this.warn(`[grok-copresence] retaining locks: ${errorMessage(error)}`);
+    });
     if (!this.retainLocksForUnconfirmedPty) {
       for (const lock of this.locks.reverse()) await lock.release().catch(() => {});
       this.locks = [];
@@ -764,6 +769,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       throw new GrokSpawnAuditError(`grok copresence agent profile audit failed: ${errorMessage(error)}`);
     }
     const generation = ++this.ptyGeneration;
+    this.leaderOwnerNonce = randomUUID();
     this.tuiReady = false;
     this.tuiReadinessBuffer = "";
     const binary = this.opts.binary ?? "grok";
@@ -792,6 +798,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         this.opts.cwd,
         "xterm-256color",
         this.opts.sandboxProfile,
+        this.leaderOwnerNonce,
       ),
     });
     let resolveExit!: () => void;
@@ -835,15 +842,32 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       ));
       return;
     }
+    try {
+      // Grok 0.2.93 deliberately keeps its auto-Leader alive after the PTY
+      // disconnects. A recovery generation must never attach to or race that
+      // ambiguous backend: terminate only the identity bound at startup, then
+      // resume the same on-disk session through a fresh Leader generation.
+      await this.teardownOwnedLeader();
+    } catch (error) {
+      this.retainLocksForUnconfirmedPty = true;
+      await this.failFatal(new Error(
+        `Grok Leader death was not confirmed; refusing recovery: ${errorMessage(error)}`,
+      ));
+      return;
+    }
     const attempts = Math.max(1, this.opts.reconnectAttempts ?? 3);
     let lastError: unknown;
     for (let attempt = 1; attempt <= attempts && !this.closing; attempt++) {
       try {
-        await waitForSocketGone(this.leaderSocket, 5_000);
         if (this.closing) return;
         await delay(Math.min(1_000, attempt * 250));
         if (this.closing) return;
         await this.spawnTui(true);
+        // Bind the generation before consulting `closing`. close() waits for
+        // this recovery promise; returning with an unbound auto-Leader would
+        // otherwise leave no exact identity for the stop path to terminate.
+        await waitForOwnedUnixSocket(this.leaderSocket, 10_000);
+        await this.bindSpawnedLeader();
         if (this.closing) {
           const closingPty = this.pty;
           const closingExit = this.ptyExit;
@@ -851,10 +875,9 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           this.ptyExit = null;
           this.ptyGeneration += 1;
           await terminateOwnedPty(closingPty, closingExit);
+          await this.teardownOwnedLeader();
           return;
         }
-        await waitForOwnedUnixSocket(this.leaderSocket, 10_000);
-        this.ownedLeaderObserved = true;
         // No routing is allowed across a PTY generation boundary. Drain any
         // late records from the dead writer and resume-startup chatter to a
         // stable EOF, then reset all semantic correlation before scheduling.
@@ -924,7 +947,15 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           ));
           return;
         }
-        try { await waitForSocketGone(this.leaderSocket, 2_000); } catch {}
+        try {
+          await this.teardownOwnedLeader();
+        } catch (terminationError) {
+          this.retainLocksForUnconfirmedPty = true;
+          await this.failFatal(new Error(
+            `Grok Leader death was not confirmed; refusing another TUI spawn: ${errorMessage(terminationError)}`,
+          ));
+          return;
+        }
         if (error instanceof GrokSpawnAuditError || error instanceof GrokUnsafeRecoveryApprovalError) {
           await this.failFatal(asError(error));
           return;
@@ -960,11 +991,9 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       await terminateOwnedPty(pty, ptyExit).catch(() => {
         this.retainLocksForUnconfirmedPty = true;
       });
-      if (this.ownedLeaderObserved) {
-        await waitForSocketGone(this.leaderSocket, 2_000).catch(() => {
-          this.retainLocksForUnconfirmedPty = true;
-        });
-      }
+      await this.teardownOwnedLeader().catch(() => {
+        this.retainLocksForUnconfirmedPty = true;
+      });
       await this.attach?.close().catch(() => {});
       this.attach = null;
       if (!this.retainLocksForUnconfirmedPty) {
@@ -973,6 +1002,46 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       }
     })();
     return this.fatalShutdownPromise;
+  }
+
+  private async bindSpawnedLeader(): Promise<void> {
+    if (!this.leaderOwnerNonce) {
+      this.retainLocksForUnconfirmedPty = true;
+      throw new Error("Grok Leader generation marker was not initialized");
+    }
+    try {
+      this.ownedLeader = await captureOwnedGrokLeader({
+        generation: this.ptyGeneration,
+        binary: this.opts.binary ?? "grok",
+        binaryPathEnv: String(this.spawnEnv.PATH || "/usr/local/bin:/usr/bin:/bin"),
+        leaderSocket: this.leaderSocket,
+        grokHome: this.opts.grokHome,
+        sandboxProfile: this.opts.sandboxProfile,
+        ownerNonce: this.leaderOwnerNonce,
+        expectedParentPid: String(this.controlledSpawnEnv.ANET_EXPECTED_PARENT_PID || ""),
+      });
+    } catch (error) {
+      // The socket exists but could not be bound to exactly one process. Do
+      // not guess which PID to terminate or release the lifetime locks.
+      this.retainLocksForUnconfirmedPty = true;
+      throw error;
+    }
+  }
+
+  private teardownOwnedLeader(): Promise<void> {
+    if (this.leaderTeardownPromise) return this.leaderTeardownPromise;
+    const identity = this.ownedLeader;
+    if (!identity) return Promise.resolve();
+    const teardown = terminateOwnedGrokLeader(identity).then(() => {
+      if (this.ownedLeader === identity) this.ownedLeader = null;
+      if (this.leaderOwnerNonce === identity.ownerNonce) this.leaderOwnerNonce = "";
+    });
+    let finalized!: Promise<void>;
+    finalized = teardown.finally(() => {
+      if (this.leaderTeardownPromise === finalized) this.leaderTeardownPromise = null;
+    });
+    this.leaderTeardownPromise = finalized;
+    return this.leaderTeardownPromise;
   }
 
   private onHumanInput(data: Buffer): void {
@@ -2088,18 +2157,6 @@ async function waitForOwnedUnixSocket(path: string, timeoutMs: number): Promise<
     await delay(50);
   }
   throw new Error(`Grok TUI did not create leader socket within ${timeoutMs}ms: ${path}`);
-}
-
-async function waitForSocketGone(path: string, timeoutMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try { lstatSync(path); } catch (error) {
-      if (isErrno(error, "ENOENT")) return;
-      throw error;
-    }
-    await delay(50);
-  }
-  throw new Error(`Grok leader socket remained after TUI exit; refusing to unlink or kill it: ${path}`);
 }
 
 function assertSocketPath(path: string, label: string): void {

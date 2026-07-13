@@ -8,7 +8,6 @@ import {
   rmSync,
   writeFileSync,
 } from "fs";
-import { createServer, type Server } from "net";
 import { PassThrough } from "stream";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
@@ -204,6 +203,26 @@ describe("Grok copresence launch and injection policy", () => {
 });
 
 describe("Grok copresence runtime integration", () => {
+  test("terminates the independently persistent auto-Leader and its unchanged stale socket", async () => {
+    const fixture = new RuntimeFixture();
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await fixture.open();
+      const leaderPid = fixture.currentLeaderPid();
+      expect(leaderPid).toBeGreaterThan(1);
+      expect(existsSync(`/proc/${leaderPid}`)).toBe(true);
+      expect(existsSync(fixture.leaderSocket)).toBe(true);
+
+      await runtime.close();
+      runtime = undefined;
+      expect(existsSync(`/proc/${leaderPid}`)).toBe(false);
+      expect(existsSync(fixture.leaderSocket)).toBe(false);
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 8_000);
+
   test("queues network input until the pinned TUI composer is ready", async () => {
     const fixture = new RuntimeFixture();
     fixture.autoTuiReady = false;
@@ -235,11 +254,43 @@ describe("Grok copresence runtime integration", () => {
     }
   }, 8_000);
 
+  test("close waits for and tears down a Leader spawned by in-flight recovery", async () => {
+    const fixture = new RuntimeFixture();
+    fixture.blockRecoverySpawn = true;
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await fixture.open();
+      const firstLeader = fixture.currentLeaderPid();
+      await fixture.crashCurrent();
+      await waitFor(() => fixture.recoverySpawnBlocked, 5_000);
+      const secondLeader = fixture.currentLeaderPid();
+      expect(secondLeader).not.toBe(firstLeader);
+      expect(existsSync(`/proc/${secondLeader}`)).toBe(true);
+
+      const closing = runtime.close();
+      fixture.releaseRecoverySpawn();
+      await closing;
+      runtime = undefined;
+
+      expect(existsSync(`/proc/${firstLeader}`)).toBe(false);
+      expect(existsSync(`/proc/${secondLeader}`)).toBe(false);
+      expect(existsSync(fixture.leaderSocket)).toBe(false);
+    } finally {
+      fixture.releaseRecoverySpawn();
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 10_000);
+
   test("arbitrates a live PTY, settles final JSONL, attaches once, and resumes", async () => {
     const fixture = new RuntimeFixture();
     let runtime: GrokCopresenceRuntimeSession | undefined;
     try {
       runtime = await fixture.open();
+      const leaderOwner = fixture.spawnedEnvs[0]?.ANET_GROK_LEADER_OWNER;
+      expect(leaderOwner).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      );
       expect(fixture.spawnedEnvs[0]).toEqual({
         PATH: "/usr/local/bin:/usr/bin:/bin",
         HOME: fixture.grokHome,
@@ -255,9 +306,11 @@ describe("Grok copresence runtime integration", () => {
         GROK_SUBAGENTS: "0",
         GROK_WEB_FETCH: "0",
         GROK_MEMORY: "0",
+        ANET_EXPECTED_PARENT_PID: String(process.pid),
         PWD: fixture.cwd,
         TERM: "xterm-256color",
         GROK_SANDBOX: "workspace",
+        ANET_GROK_LEADER_OWNER: leaderOwner,
       });
       const first = await runtime.submit({
         taskId: "network-1",
@@ -725,6 +778,7 @@ class RuntimeFixture {
   readonly authPath = join(this.grokHome, "auth.json");
   readonly leaderSocket = join(this.root, "leader.sock");
   readonly attachSocket = join(this.root, "attach.sock");
+  readonly fakeGrokBinary = join(this.root, "fake-grok.mjs");
   readonly writes: string[] = [];
   readonly spawnedArgs: string[][] = [];
   readonly spawnedEnvs: Array<Record<string, string>> = [];
@@ -741,6 +795,9 @@ class RuntimeFixture {
   controlledEnvOverride: NodeJS.ProcessEnv = {};
   flockBinary: string | undefined;
   autoTuiReady = true;
+  blockRecoverySpawn = false;
+  recoverySpawnBlocked = false;
+  private recoverySpawnRelease: (() => void) | null = null;
   private ptys: FakePty[] = [];
 
   constructor() {
@@ -751,11 +808,28 @@ class RuntimeFixture {
       renderGrokCopresenceAgentProfile(),
       { mode: 0o600 },
     );
+    writeFileSync(this.fakeGrokBinary, [
+      "#!/usr/bin/env node",
+      'import fs from "node:fs";',
+      'import net from "node:net";',
+      'const args = process.argv.slice(2);',
+      'if (args[0] !== "agent" || args[1] !== "leader") process.exit(64);',
+      'const socket = process.env.GROK_LEADER_SOCKET || "";',
+      'if (!socket || fs.existsSync(socket)) process.exit(65);',
+      'const server = net.createServer((client) => client.destroy());',
+      'server.listen(socket, () => { try { fs.chmodSync(socket, 0o600); } catch {} });',
+      '// Deliberately leave the pathname behind, matching Grok 0.2.93.',
+      'process.on("SIGTERM", () => process.exit(0));',
+      'process.on("SIGINT", () => process.exit(0));',
+      'setInterval(() => {}, 1000);',
+      "",
+    ].join("\n"), { mode: 0o700 });
+    chmodSync(this.fakeGrokBinary, 0o700);
   }
 
   options(sessionId = SESSION) {
     return {
-      binary: "fake-grok",
+      binary: this.fakeGrokBinary,
       cwd: this.cwd,
       grokHome: this.grokHome,
       env: {
@@ -774,6 +848,7 @@ class RuntimeFixture {
         GROK_SUBAGENTS: "0",
         GROK_WEB_FETCH: "0",
         GROK_MEMORY: "0",
+        ANET_EXPECTED_PARENT_PID: String(process.pid),
         GROK_SANDBOX: "off",
         DATABASE_URL: "postgres://private",
         AWS_ACCESS_KEY_ID: "AKIA_PRIVATE",
@@ -816,6 +891,7 @@ class RuntimeFixture {
           GROK_SUBAGENTS: "0",
           GROK_WEB_FETCH: "0",
           GROK_MEMORY: "0",
+          ANET_EXPECTED_PARENT_PID: String(process.pid),
           GROK_SANDBOX: "off",
           DATABASE_URL: "postgres://private",
           AWS_SESSION_TOKEN: "aws-private",
@@ -837,9 +913,13 @@ class RuntimeFixture {
   }
 
   private readonly spawn: GrokPtySpawn = async (_binary, args, options) => {
+    const recoverySpawn = this.ptys.length > 0;
     this.spawnedArgs.push([...args]);
     this.spawnedEnvs.push({ ...options.env });
     const pty = new FakePty(
+      _binary,
+      options.cwd,
+      options.env,
       this.leaderSocket,
       grokSessionDirectory(this.grokHome, this.cwd, SESSION),
       this.writes,
@@ -850,6 +930,12 @@ class RuntimeFixture {
     );
     await pty.start();
     this.ptys.push(pty);
+    if (recoverySpawn && this.blockRecoverySpawn) {
+      this.recoverySpawnBlocked = true;
+      await new Promise<void>((resolve) => { this.recoverySpawnRelease = resolve; });
+      this.recoverySpawnBlocked = false;
+      this.recoverySpawnRelease = null;
+    }
     return pty;
   };
 
@@ -863,6 +949,14 @@ class RuntimeFixture {
 
   approvalDecisionCount(): number {
     return this.ptys.at(-1)?.approvalDecisionWrites ?? 0;
+  }
+
+  currentLeaderPid(): number {
+    return this.ptys.at(-1)?.leaderPid() ?? 0;
+  }
+
+  releaseRecoverySpawn(): void {
+    this.recoverySpawnRelease?.();
   }
 
   emitUnsafeApprovalMode(): void {
@@ -914,7 +1008,7 @@ function parseNulEnvironment(raw: Buffer): Record<string, string> {
 
 class FakePty implements GrokPtyLike {
   readonly pid = 42;
-  private server: Server | null = null;
+  private leaderChild: ReturnType<typeof Bun.spawn> | null = null;
   private dataListeners: Array<(data: string) => void> = [];
   private exitListeners: Array<(event: { exitCode: number; signal?: number }) => void> = [];
   private composer = "";
@@ -928,6 +1022,9 @@ class FakePty implements GrokPtyLike {
   private delayedWrites: Array<ReturnType<typeof setTimeout>> = [];
 
   constructor(
+    private readonly binary: string,
+    private readonly cwd: string,
+    private readonly env: Record<string, string>,
     private readonly socket: string,
     private readonly sessionDir: string,
     private readonly writes: string[],
@@ -938,11 +1035,24 @@ class FakePty implements GrokPtyLike {
   ) {}
 
   async start(): Promise<void> {
-    this.server = createServer();
-    await new Promise<void>((resolveStart, rejectStart) => {
-      this.server!.once("error", rejectStart);
-      this.server!.listen(this.socket, () => resolveStart());
+    this.leaderChild = Bun.spawn([
+      process.execPath,
+      this.binary,
+      "agent",
+      "leader",
+      "--no-exit-on-disconnect",
+      "--relay-on-demand",
+    ], {
+      cwd: this.cwd,
+      env: {
+        ...this.env,
+        GROK_LEADER_SOCKET: this.socket,
+      },
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
     });
+    await waitFor(() => existsSync(this.socket));
     if (this.startupRawEvents || this.startupEvents.length) {
       mkdirSync(this.sessionDir, { recursive: true, mode: 0o700 });
     }
@@ -968,6 +1078,10 @@ class FakePty implements GrokPtyLike {
     }
   }
 
+  leaderPid(): number {
+    return this.leaderChild?.pid ?? 0;
+  }
+
   emitTuiData(data: string): void {
     this.emitData(data);
   }
@@ -984,7 +1098,7 @@ class FakePty implements GrokPtyLike {
   resize(): void {}
 
   kill(): void {
-    void this.closeServer().then(() => this.emitExit({ exitCode: 0, signal: 15 }));
+    this.emitExit({ exitCode: 0, signal: 15 });
   }
 
   onData(listener: (data: string) => void): { dispose(): void } {
@@ -1002,7 +1116,6 @@ class FakePty implements GrokPtyLike {
     this.delayedWrites = [];
     if (this.approvalResolutionTimer) clearTimeout(this.approvalResolutionTimer);
     this.approvalResolutionTimer = null;
-    await this.closeServer();
     this.emitExit({ exitCode: 7 });
     if (this.lateCrashTask) {
       const taskId = this.lateCrashTask;
@@ -1033,7 +1146,11 @@ class FakePty implements GrokPtyLike {
     this.delayedWrites = [];
     if (this.approvalResolutionTimer) clearTimeout(this.approvalResolutionTimer);
     this.approvalResolutionTimer = null;
-    await this.closeServer();
+    try { this.leaderChild?.kill("SIGKILL"); } catch {}
+    await Promise.race([
+      this.leaderChild?.exited.catch(() => undefined) ?? Promise.resolve(),
+      Bun.sleep(500),
+    ]);
   }
 
   private handleNetwork(wire: string): void {
@@ -1214,12 +1331,6 @@ class FakePty implements GrokPtyLike {
     for (const listener of this.exitListeners) listener(event);
   }
 
-  private async closeServer(): Promise<void> {
-    const server = this.server;
-    this.server = null;
-    if (!server?.listening) return;
-    await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
-  }
 }
 
 function appendJson(path: string, value: unknown): void {

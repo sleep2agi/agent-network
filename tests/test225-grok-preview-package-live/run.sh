@@ -20,6 +20,7 @@ FAKE_OBSERVATIONS=/tmp/test225-fake-observations.jsonl
 FAKE_READINESS_OBSERVATIONS=/tmp/test225-fake-readiness.jsonl
 EXPECTED_GROK_ENV_KEYS=/tmp/test225-expected-grok-env-keys.json
 EXPECTED_GROK_PTY_ENV_KEYS=/tmp/test225-expected-grok-pty-env-keys.json
+EXPECTED_GROK_LEADER_ENV_KEYS=/tmp/test225-expected-grok-leader-env-keys.json
 EXPECTED_HELPER_ENV=/tmp/test225-expected-helper-env.json
 EXPECTED_AGENT_NODE_ENV_KEYS=/tmp/test225-expected-agent-node-env-keys.json
 EXPECTED_NPX_ENV_KEYS=/tmp/test225-expected-npx-env-keys.json
@@ -145,6 +146,75 @@ wait_gone() {
     sleep 0.1
   done
   return 1
+}
+
+assert_no_unix_listener() {
+  local socket_path=$1
+  node - "$socket_path" <<'NODE'
+const fs = require("node:fs");
+const wanted = process.argv[2];
+const active = fs.readFileSync("/proc/net/unix", "utf8").split("\n").slice(1).some((line) => {
+  const match = line.match(/^\s*\S+:\s+\S+\s+\S+\s+(\S+)\s+(\S+)\s+(\S+)\s+(\d+)(?:\s+(.*))?$/);
+  return match && match[1] === "00010000" && match[2] === "0001"
+    && match[3] === "01" && (match[5] || "") === wanted;
+});
+process.exit(active ? 1 : 0);
+NODE
+}
+
+snapshot_unix_listener_owner() {
+  local socket_path=$1 output=$2
+  node - "$socket_path" "$output" <<'NODE'
+const fs = require("node:fs");
+const socketPath = process.argv[2];
+const output = process.argv[3];
+const rows = fs.readFileSync("/proc/net/unix", "utf8").split("\n").slice(1)
+  .map((line) => line.match(/^\s*\S+:\s+\S+\s+\S+\s+(\S+)\s+(\S+)\s+(\S+)\s+(\d+)(?:\s+(.*))?$/))
+  .filter((match) => match && match[1] === "00010000" && match[2] === "0001"
+    && match[3] === "01" && (match[5] || "") === socketPath);
+if (rows.length !== 1) process.exit(2);
+const inode = rows[0][4];
+const target = `socket:[${inode}]`;
+const holders = [];
+for (const entry of fs.readdirSync("/proc", {withFileTypes: true})) {
+  if (!entry.isDirectory() || !/^\d+$/.test(entry.name)) continue;
+  let fds;
+  try { fds = fs.readdirSync(`/proc/${entry.name}/fd`); } catch { continue; }
+  if (fds.some((fd) => {
+    try { return fs.readlinkSync(`/proc/${entry.name}/fd/${fd}`) === target; } catch { return false; }
+  })) holders.push(Number(entry.name));
+}
+if (holders.length !== 1) process.exit(3);
+const pid = holders[0];
+const raw = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+const close = raw.lastIndexOf(")");
+const fields = raw.slice(close + 2).trim().split(/\s+/);
+const startTime = fields[19];
+if (!/^\d+$/.test(startTime || "")) process.exit(4);
+fs.writeFileSync(output, JSON.stringify({pid,startTime,inode}) + "\n", {mode: 0o600});
+fs.chmodSync(output, 0o600);
+NODE
+}
+
+assert_unix_listener_owner_gone() {
+  local identity_file=$1 socket_path=$2
+  node - "$identity_file" "$socket_path" <<'NODE'
+const fs = require("node:fs");
+const identity = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const socketPath = process.argv[3];
+let sameGeneration = false;
+try {
+  const raw = fs.readFileSync(`/proc/${identity.pid}/stat`, "utf8");
+  const close = raw.lastIndexOf(")");
+  sameGeneration = raw.slice(close + 2).trim().split(/\s+/)[19] === identity.startTime;
+} catch {}
+const listenerRemains = fs.readFileSync("/proc/net/unix", "utf8").split("\n").slice(1).some((line) => {
+  const match = line.match(/^\s*\S+:\s+\S+\s+\S+\s+(\S+)\s+(\S+)\s+(\S+)\s+(\d+)(?:\s+(.*))?$/);
+  return match && match[1] === "00010000" && match[2] === "0001" && match[3] === "01"
+    && (match[4] === identity.inode || (match[5] || "") === socketPath);
+});
+process.exit(sameGeneration || listenerRemains ? 1 : 0);
+NODE
 }
 
 wait_pane() {
@@ -283,11 +353,17 @@ assert_fake_observations_exact() {
   local observations=${1:-$FAKE_OBSERVATIONS}
   if jq -e -s --slurpfile expected "$EXPECTED_GROK_ENV_KEYS" \
     --slurpfile expectedPty "$EXPECTED_GROK_PTY_ENV_KEYS" \
+    --slurpfile expectedLeader "$EXPECTED_GROK_LEADER_ENV_KEYS" \
     --slurpfile expectedParent "$EXPECTED_AGENT_NODE_ENV_KEYS" \
     'any(.[]; .kind == "version") and any(.[]; .kind == "help")
     and any(.[]; .kind == "inspect") and any(.[]; .kind == "spawn")
+    and any(.[]; .kind == "leader")
     and all(.[]; (.forbiddenKeys | length) == 0 and .markerValueObserved == false
-      and (if .kind == "spawn"
+      and (if .kind == "leader"
+        then .envKeys == $expectedLeader[0]
+          and .ownerMarkerValid == true
+          and .socketEnvExact == true
+        elif .kind == "spawn"
         then .envKeys == $expectedPty[0] and .terminalEnvExpected == true
           and .parentPidMatches == true
           and .folderTrustExact == true
@@ -312,10 +388,12 @@ assert_fake_observations_exact() {
   # disclosing any child environment values into the report.
   jq -c -s --slurpfile expected "$EXPECTED_GROK_ENV_KEYS" \
     --slurpfile expectedPty "$EXPECTED_GROK_PTY_ENV_KEYS" \
+    --slurpfile expectedLeader "$EXPECTED_GROK_LEADER_ENV_KEYS" \
     --slurpfile expectedParent "$EXPECTED_AGENT_NODE_ENV_KEYS" \
-    'map(. as $row | (if .kind == "spawn" then $expectedPty[0] else $expected[0] end) as $want
+    'map(. as $row | (if .kind == "leader" then $expectedLeader[0]
+        elif .kind == "spawn" then $expectedPty[0] else $expected[0] end) as $want
       | {kind,missing:($want - .envKeys),extra:(.envKeys - $want),forbiddenKeys,markerValueObserved,
-          terminalEnvExpected,parentPidMatches,selectedSandboxProfileMatched,sandboxEnvMatchesArgv,authPathSandboxDenied,
+          ownerMarkerValid,socketEnvExact,terminalEnvExpected,parentPidMatches,selectedSandboxProfileMatched,sandboxEnvMatchesArgv,authPathSandboxDenied,
           requiredDenyToolsPresent,requiredProtectedPathDeniesPresent,agentProfileExact,tuiFlagsExact,
           parentMissing:($expectedParent[0] - (.parentEnvKeys // [])),
           parentExtra:((.parentEnvKeys // []) - $expectedParent[0]),
@@ -955,8 +1033,10 @@ chmod 644 "$LEGACY_DAILY_LOG"
     GROK_FOLDER_TRUST GROK_DEFAULT_SELECTED_PERMISSION \
     GROK_DISABLE_AUTOUPDATER GROK_SUBAGENTS GROK_WEB_FETCH GROK_MEMORY
 } | sort -u | jq -Rsc 'split("\n") | map(select(length > 0))' > "$EXPECTED_GROK_ENV_KEYS"
-jq -c '. + ["TERM", "GROK_SANDBOX"] | unique | sort' "$EXPECTED_GROK_ENV_KEYS" \
+jq -c '. + ["TERM", "GROK_SANDBOX", "ANET_GROK_LEADER_OWNER"] | unique | sort' "$EXPECTED_GROK_ENV_KEYS" \
   > "$EXPECTED_GROK_PTY_ENV_KEYS"
+jq -c '. + ["GROK_LEADER_SOCKET"] | unique | sort' "$EXPECTED_GROK_PTY_ENV_KEYS" \
+  > "$EXPECTED_GROK_LEADER_ENV_KEYS"
 
 node - <<'NODE' > "$EXPECTED_HELPER_ENV"
 const keys = ["PATH", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "LC_CTYPE", "TZ"];
@@ -1106,8 +1186,8 @@ esac
 snapshot_fallback_runtime "$FALLBACK_PID_SNAPSHOT"
 [ "$(awk '$3 == "agent-node" {n++} END {print n+0}' "$FALLBACK_PID_SNAPSHOT")" -eq 1 ] \
   || fail "fallback snapshot does not contain exactly one direct agent-node"
-[ "$(awk '$3 == "grok" {n++} END {print n+0}' "$FALLBACK_PID_SNAPSHOT")" -eq 1 ] \
-  || fail "fallback snapshot does not contain exactly one Grok PTY process"
+[ "$(awk '$3 == "grok" {n++} END {print n+0}' "$FALLBACK_PID_SNAPSHOT")" -eq 2 ] \
+  || fail "fallback snapshot does not contain one Grok PTY and one independent Leader"
 [ "$(awk '$3 == "lock-holder" {n++} END {print n+0}' "$FALLBACK_PID_SNAPSHOT")" -eq 3 ] \
   || fail "fallback snapshot does not contain the three lifetime lock holders"
 assert_lock_holder_envs_exact "$FALLBACK_PID_SNAPSHOT"
@@ -1115,6 +1195,8 @@ assert_lock_holder_envs_exact "$FALLBACK_PID_SNAPSHOT"
 stop_node_checked "$ALIAS" legacy-reload
 [ ! -e "$ATTACH_SOCKET" ] || fail "node stop returned before removing the attach socket"
 [ ! -e "$LEADER_SOCKET" ] || fail "node stop returned before removing the leader socket"
+assert_no_unix_listener "$LEADER_SOCKET" \
+  || fail "node stop left a Leader listener after removing its pathname"
 assert_snapshot_gone "$FALLBACK_PID_SNAPSHOT"
 capture_stopped_pane test225-attach "$ATTACH_CAPTURE"
 tmux kill-session -t test225-attach 2>/dev/null || true
@@ -1295,6 +1377,8 @@ stop_node_checked "$ALIAS" fallback
 capture_stopped_pane test225-attach "$RELOAD_CAPTURE"
 tmux kill-session -t test225-attach 2>/dev/null || true
 wait_gone "$ATTACH_SOCKET" 300 || fail "attach socket survived node stop"
+wait_gone "$LEADER_SOCKET" 300 || fail "leader socket survived node stop"
+assert_no_unix_listener "$LEADER_SOCKET" || fail "Leader listener survived node stop"
 wait "$NODE_PROCESS_PID" 2>/dev/null || true
 NODE_PROCESS_PID=""
 assert_snapshot_gone "$FALLBACK_PID_SNAPSHOT"
@@ -1499,6 +1583,9 @@ snapshot_fallback_runtime "$FALLBACK_PID_SNAPSHOT"
 stop_node_checked "$ALIAS" resumed
 capture_stopped_pane test225-resume-attach "$RESUME_CAPTURE"
 tmux kill-session -t test225-resume-attach 2>/dev/null || true
+wait_gone "$ATTACH_SOCKET" 300 || fail "resumed attach socket survived node stop"
+wait_gone "$LEADER_SOCKET" 300 || fail "resumed leader socket survived node stop"
+assert_no_unix_listener "$LEADER_SOCKET" || fail "resumed Leader listener survived node stop"
 wait "$NODE_PROCESS_PID" 2>/dev/null || true
 NODE_PROCESS_PID=""
 assert_snapshot_gone "$FALLBACK_PID_SNAPSHOT"
@@ -1587,11 +1674,17 @@ run_real_gate() {
   real_session=$(jq -r '.grokCliSession // empty' "$real_config")
   [ -n "$real_session" ] || fail "optional real session id missing"
 
+  real_first_leader_identity=/tmp/test225-real-first-leader.identity
+  snapshot_unix_listener_owner "$real_leader" "$real_first_leader_identity" \
+    || fail "optional real first Leader identity was not uniquely observable"
   stop_node_checked "$real_alias" real-first
   capture_stopped_pane test225-real-attach "$REAL_CAPTURE"
   tmux kill-session -t test225-real-attach 2>/dev/null || true
   wait_gone "$real_socket" 600 || fail "optional real attach socket survived stop"
   wait_gone "$real_leader" 600 || fail "optional real leader socket survived stop"
+  assert_no_unix_listener "$real_leader" || fail "optional real Leader listener survived stop"
+  assert_unix_listener_owner_gone "$real_first_leader_identity" "$real_leader" \
+    || fail "optional real first Leader PID generation survived stop"
   wait "$NODE_PROCESS_PID" 2>/dev/null || true
   NODE_PROCESS_PID=""
   wait_no_fallback_runtime 300 \
@@ -1663,11 +1756,17 @@ run_real_gate() {
     || fail "synthetic credential reached a real-node log, capture, state, pending row, or report"
   pass "optional authenticated real Grok package E2E: live render, reply, stop/resume, auth scan"
 
+  real_resume_leader_identity=/tmp/test225-real-resume-leader.identity
+  snapshot_unix_listener_owner "$real_leader" "$real_resume_leader_identity" \
+    || fail "optional real resumed Leader identity was not uniquely observable"
   stop_node_checked "$real_alias" real-resumed
   capture_stopped_pane test225-real-resume-attach "$REAL_RESUME_CAPTURE"
   tmux kill-session -t test225-real-resume-attach 2>/dev/null || true
   wait_gone "$real_socket" 600 || fail "optional real resume attach socket survived stop"
   wait_gone "$real_leader" 600 || fail "optional real resume leader socket survived stop"
+  assert_no_unix_listener "$real_leader" || fail "optional real resume Leader listener survived stop"
+  assert_unix_listener_owner_gone "$real_resume_leader_identity" "$real_leader" \
+    || fail "optional real resumed Leader PID generation survived stop"
   wait "$NODE_PROCESS_PID" 2>/dev/null || true
   NODE_PROCESS_PID=""
   wait_no_fallback_runtime 300 \

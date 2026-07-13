@@ -179,6 +179,7 @@ describe("Grok child environment boundary", () => {
       "/workspace/project",
       "xterm-256color",
       "anet-workspace",
+      "12345678-1234-4123-8123-123456789abc",
     )).toEqual({
       PATH: "/bin",
       HOME: "/runtime/home",
@@ -196,15 +197,19 @@ describe("Grok child environment boundary", () => {
       PWD: "/workspace/project",
       TERM: "xterm-256color",
       GROK_SANDBOX: "anet-workspace",
+      ANET_GROK_LEADER_OWNER: "12345678-1234-4123-8123-123456789abc",
     });
-    expect(GROK_PTY_CONTROLLED_ENV_KEYS).toEqual(["TERM", "GROK_SANDBOX"]);
+    expect(GROK_PTY_CONTROLLED_ENV_KEYS).toEqual([
+      "TERM", "GROK_SANDBOX", "ANET_GROK_LEADER_OWNER",
+    ]);
     expect(() => buildGrokPtyEnv(
       baseline,
       baseline,
       "/workspace/project",
       "xterm-256color",
       "off\nDATABASE_URL=private",
-    )).toThrow("valid cwd, terminal name, and sandbox profile");
+      "12345678-1234-4123-8123-123456789abc",
+    )).toThrow("valid cwd, terminal name, sandbox profile, and Leader owner");
   });
 
   it("builds the narrower helper environment from an empty object", () => {
