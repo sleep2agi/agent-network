@@ -228,7 +228,11 @@ assert_installed_candidate_runtime() {
   pid=$(<"$pid_file")
   while IFS= read -r -d '' arg; do argv+=("$arg"); done <"/proc/$pid/cmdline"
   [ "${#argv[@]}" -ge 2 ] || fail "$label pidfile has no executable argv"
-  [ "$(readlink -f "${argv[0]}")" = "$(readlink -f "$(command -v node)")" ] \
+  # npm's generated bin shim invokes `node` through PATH, so argv[0] may be
+  # the bare word "node" rather than an absolute path.  Bind the recorded PID
+  # to the executable the kernel actually runs instead of resolving argv[0]
+  # relative to the test working directory.
+  [ "$(readlink -f "/proc/$pid/exe")" = "$(readlink -f "$(command -v node)")" ] \
     || fail "$label pidfile identifies a wrapper instead of Node"
   [ "$(readlink -f "${argv[1]}")" = "/usr/local/lib/node_modules/@sleep2agi/agent-node/dist/cli.js" ] \
     || fail "$label did not launch the installed candidate entrypoint"
@@ -631,7 +635,7 @@ RUNTIME_PID=$(<"$RUNTIME_PID_FILE")
 RUNTIME_ARGV=()
 while IFS= read -r -d '' arg; do RUNTIME_ARGV+=("$arg"); done <"/proc/$RUNTIME_PID/cmdline"
 [ "${#RUNTIME_ARGV[@]}" -ge 2 ] || fail "npx fallback pidfile has no executable argv"
-[ "$(readlink -f "${RUNTIME_ARGV[0]}")" = "$(readlink -f "$(command -v node)")" ] \
+[ "$(readlink -f "/proc/$RUNTIME_PID/exe")" = "$(readlink -f "$(command -v node)")" ] \
   || fail "npx fallback pidfile identifies a wrapper instead of Node"
 case "${RUNTIME_ARGV[1]}" in
   *"/node_modules/@sleep2agi/agent-node/dist/cli.js") ;;
