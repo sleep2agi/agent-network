@@ -1,7 +1,19 @@
 Agent Network onboarding corrective smoke — isolated candidate evidence
 Date: 2026-07-13 (Asia/Shanghai)
 Candidate: agent/onboarding-fixes, based on origin/main d4188621
-Verdict: PARTIAL PASS — the four scoped guards work; this is not a release verdict.
+Round 2 implementation commit: 6808046
+Verdict: AUTHOR EVIDENCE GREEN; independent review pending. This is not a
+release verdict.
+
+Review history
+--------------
+- Round 1 commit 98a33b04: REQUEST CHANGES. The first candidate incorrectly
+  blocked a keyless host_supervisor daemon, did not preserve the legacy
+  agent-sdk/codex stored profile at the strict launch boundary, still routed
+  codex-app-server into the Claude launcher branch, and left the batch
+  __custom__ prompt on tolerant runtime normalization.
+- Round 2 commit 6808046: implements those four corrections. The evidence
+  below is author-generated and must not substitute for independent review.
 
 Isolation
 ---------
@@ -47,7 +59,9 @@ Scoped corrective evidence
 
 2. agent-node first-start path
    - The candidate reached strict online with no global agent-node command.
-   - The real launch selected `npx -y @sleep2agi/agent-node@preview`.
+   - The real launch selected `npx -y @sleep2agi/agent-node@preview`. `preview`
+     is a moving npm dist-tag, not a version pin. Round 1 did not record the
+     exact resolved version; that evidence gap is corrected in Round 2 below.
    - A subprocess regression test uses a controlled npx executable and asserts
      the actual argv, so the prior "lazy" label cannot pass without a launch.
 
@@ -64,6 +78,53 @@ Scoped corrective evidence
    - A persisted unknown non-empty runtime is rejected on start rather than
      normalized to claude-agent-sdk/claude-code-cli.
 
+Round 2 corrective evidence
+---------------------------
+Clean-container evidence was generated from a git archive of commit 6808046
+inside a fresh node:22.13.1-bookworm-slim container. No host configuration,
+credential, Hub state, or production endpoint was mounted into the container.
+
+- Toolchain: Node v22.13.1; Bun 1.3.14.
+- `bun test src`: 146 pass / 0 fail / 283 expect calls (9 files).
+- `npm run typecheck`: exit 0.
+- `npm run build`: exit 0 (CLI/client/node-server/worker bundles built).
+- At this smoke timestamp, the registry's moving
+  `@sleep2agi/agent-node@preview` tag resolved to exactly
+  `2.5.0-preview.20`; a separate fresh container ran
+  `npx -y @sleep2agi/agent-node@preview --version` and printed
+  `agent-node v2.5.0-preview.20`. This is time-of-test evidence only and does
+  not make the preview tag immutable.
+
+True CLI-entry regressions (controlled executables, no external Hub):
+
+1. Keyless daemon intent
+   - Both `anet daemon start test-node` and `anet daemon up test-node` on an
+     existing role=host_supervisor profile reached the actual launcher seam
+     and invoked the controlled npx executable without a provider key.
+   - An ordinary/member claude-agent-sdk start still fails early without a
+     non-empty provider credential. The exemption is limited to node-start +
+     profileRole=host_supervisor; create-time/ordinary profiles are not exempt.
+
+2. Stored runtime identity
+   - Legacy `{runtime:"agent-sdk", codexRuntime:"codex"}` launched npx with
+     `--runtime codex-sdk` and left config.json byte-for-byte unchanged.
+   - An unknown non-empty stored runtime exited 2, invoked neither npx nor
+     Claude, and left config.json byte-for-byte unchanged.
+
+3. codex-app-server preview routing
+   - Explicit create recognizes codex-app-server without entering the SDK
+     credential path.
+   - Start invoked npx/agent-node with `--runtime codex-app-server`; the
+     controlled Claude executable was never invoked.
+   - The CLI labels this path RFC-030 preview / production locked. This is
+     launcher-routing evidence only, not Policy Gateway, production, or
+     release evidence.
+
+4. Batch custom strictness
+   - Both `--preset __custom__ --runtime private-runtime` and the interactive
+     __custom__ prompt value `private-runtime` exited 2.
+   - Both paths wrote zero project config and invoked zero runtime process.
+
 Residual limits / merge ordering
 --------------------------------
 - This smoke proves registration/SSE presence, not a usable model response;
@@ -72,10 +133,9 @@ Residual limits / merge ordering
   admin password in this fresh container, so the successful path used
   `anet register`. README bootstrap wording needs a separate product/security
   alignment; this tranche does not restore a fixed default password.
-- codex-app-server is a recognized runtime, not an "unknown runtime" case.
-  Its TTY create/start wiring remains owned by draft PR #441 and was not
-  cherry-picked here. This branch must not be used to claim that RFC-030 is
-  production-ready, and release integration must preserve #441's reviewed
-  runtime routing before promoting that runtime.
+- codex-app-server routing here reuses the reviewed #441 launcher policy but
+  does not merge #441 wholesale. This branch must not be used to claim that
+  RFC-030 is production-ready; the Policy Gateway, safety review, merge,
+  deployment, production, and latest-tag gates remain locked.
 - No merge, deploy, npm publication, latest-tag change, or production state
   change was performed.
