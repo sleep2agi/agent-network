@@ -1,4 +1,4 @@
-// RFC-030 Wave 1A P0.2 Commit 1 corrective round 3 — upstream-router tests.
+// RFC-030 Wave 1A P0.2 Commit 1 corrective round 5 — upstream-router tests.
 
 import { describe, expect, test } from "bun:test";
 import { UpstreamRouter, type TuiForwardSeam } from "./upstream-router";
@@ -142,6 +142,35 @@ describe("UpstreamRouter — pre-active buffering", () => {
     f.router.activate();
     expect(f.router.currentState()).toBe("terminal");
     expect(f.closeCallCount()).toBe(1);
+  });
+
+  // 副指挥 e85ade40 P0-2 regression: prior to round 5, a frame that
+  // arrived AFTER emitClose but BEFORE activate() was still buffered
+  // and then dispatched on activate() — producing a NoOwner
+  // response for an id that arrived after the transport was gone.
+  test("post-close pre-active frames drop; activate() never dispatches them", () => {
+    const f = makeFixture();
+    f.router.subscribe();
+    // (A) pre-close frame — legal to buffer.
+    f.upstream.emitFrame({ jsonrpc: "2.0", id: "cx_before_close", method: "approval/request" });
+    // Close arrives.
+    f.upstream.emitClose();
+    // (B) post-close frame — MUST drop.
+    f.upstream.emitFrame({ jsonrpc: "2.0", id: "cx_after_close", method: "approval/request" });
+    // Nothing dispatched yet (still pre-active).
+    expect(f.upstream.written).toHaveLength(0);
+    // Activate — pre-close frame drains; post-close frame is gone.
+    f.router.activate();
+    const forAfter = f.upstream.written.filter(
+      (w) => "id" in w && (w as JsonRpcResponseFrame).id === "cx_after_close",
+    );
+    expect(forAfter).toHaveLength(0);
+    // The router did surface a diagnostic for the dropped post-close frame.
+    const dropDiag = f.diagnosticsEntries.filter(
+      (e) => e.operation === "upstream_frame_dropped_after_pre_active_close",
+    );
+    expect(dropDiag).toHaveLength(1);
+    expect(f.router.currentState()).toBe("terminal");
   });
 });
 

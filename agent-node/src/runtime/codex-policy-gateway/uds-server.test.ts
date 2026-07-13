@@ -290,4 +290,57 @@ describe("BackendUdsServer — sendInternal + reject once (router-driven)", () =
       expect(res.v).toBe("ok");
     } finally { await h.cleanup(); }
   });
+
+  // 副指挥 e85ade40 P1-1 regression: transport.writeFrame() may throw
+  // SYNCHRONOUSLY. A prior `.catch`-only handler leaked both the mux
+  // slot and internalPending. Reproducer must show pending counts
+  // return to 0.
+  test("sync writeFrame throw → Promise rejects; mux+internalPending both clean to 0", async () => {
+    const socketDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "rfc030-be-syncthrow-"));
+    await fs.promises.rmdir(socketDir);
+    const socketPath = path.join(socketDir, "backend.sock");
+    const mux = new UpstreamRequestMux<InternalOrigin>();
+    class SyncThrowUpstream implements UpstreamTransport {
+      writeFrame(): Promise<void> { throw new Error("sync write throw"); }
+      onFrame(): () => void { return () => {}; }
+      onClose(): () => void { return () => {}; }
+      async close(): Promise<void> {}
+    }
+    const upstream = new SyncThrowUpstream();
+    const diagEntries: InternalErrorEntry[] = [];
+    const diag: ProtocolDiagnostics = {
+      newCorrelationId: () => "cid",
+      reportInternalError: (e) => { diagEntries.push(e); },
+    };
+    const backend: ProtocolBackend = {
+      async enqueueTask() { return { outcome: "accepted", taskId: "t", queuePosition: 0, duplicate: false }; },
+      async getTaskState() { return { state: "unknown" }; },
+      async cancelQueuedTask() { return { outcome: "refused_not_queued", currentState: "unknown" }; },
+    };
+    const server = new BackendUdsServer({
+      socketPath, socketDir, mux, upstreamTransport: upstream,
+      diagnostics: diag, backend,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    await server.start();
+    try {
+      const p = server.sendInternal("thread/status", { threadId: "t" });
+      let msg = "";
+      try { await p; } catch (e) { msg = (e as Error).message; }
+      expect(msg).toBe("sync write throw");
+      // Both maps must return to 0 — no leak.
+      expect(mux.pendingCount()).toBe(0);
+      // internalPending is private; assert indirectly by re-sending
+      // and confirming no duplicate-id error and that the second
+      // send also rejects cleanly.
+      const p2 = server.sendInternal("thread/status", { threadId: "t2" });
+      let msg2 = "";
+      try { await p2; } catch (e) { msg2 = (e as Error).message; }
+      expect(msg2).toBe("sync write throw");
+      expect(mux.pendingCount()).toBe(0);
+    } finally {
+      await server.stop();
+      try { fs.rmSync(socketDir, { recursive: true, force: true }); } catch {}
+    }
+  });
 });

@@ -1,4 +1,4 @@
-// RFC-030 Wave 1A P0.2 Commit 1 corrective round 2 — bearer.ts tests.
+// RFC-030 Wave 1A P0.2 Commit 1 corrective round 5 — bearer.ts tests.
 //
 // Corrective (副指挥 3ed5c004 P0-3): the previous test pass took the
 // plaintext FIRST, then inspected the bearer. That missed the real

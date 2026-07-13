@@ -1,4 +1,4 @@
-// RFC-030 Wave 1A P0.2 Commit 1 corrective round 2 — real codex 0.144.0
+// RFC-030 Wave 1A P0.2 Commit 1 corrective round 5 — real codex 0.144.0
 // **bootstrap smoke**.
 //
 // This script is a bootstrap smoke, not a full E2E. Honest scope
@@ -15,6 +15,23 @@
 //     zero exit. No "PASS: skipped".
 //   - If util-linux `script(1)` is missing → HARD FAIL. Codex requires
 //     a TTY; without `script(1)` we cannot honestly claim we drove it.
+//
+// 副指挥 e85ade40 evidence-gate: the child env exact-set assertion
+// + mutation-red drive `buildAllowlistEnv` DIRECTLY and pass the
+// frozen result to `spawn`. Prior version audited a hand-built
+// object while `spawnCodex` built its OWN env — the two could
+// diverge silently. Now the child env IS the frozen output of
+// `buildAllowlistEnv`; nothing else may be injected. A hostile
+// caller adding a foreign key must fail loudly before spawn.
+//
+// Reproducibility: use
+//   RFC030_CODEX_BIN=<path> npm run test:rfc030-real-cli-smoke
+// (the npm script runs `bun run build` first and passes the bundle
+// path through `RFC030_BUNDLE`). Direct
+// `node scripts/rfc030-real-cli-e2e.mjs` requires
+// `agent-node/dist/rfc030-integration.mjs` to exist; `dist/` is
+// gitignored so a clean checkout fails with ERR_MODULE_NOT_FOUND
+// — do not report a raw `node ...` command as the reproducer.
 //
 // Bundle path resolves RELATIVE to this script — no /tmp hardcoded.
 
@@ -33,7 +50,7 @@ const mod = await import(url.pathToFileURL(BUNDLE).href);
 const {
   TuiWsServer, TuiBearer, HumanOwnerCoordinator,
   UpstreamRequestMux, ReverseRequestNamespace,
-  SecretRedactor,
+  SecretRedactor, buildAllowlistEnv, TUI_BEARER_ENV_NAME,
 } = mod;
 
 const ALLOWED_LOOPBACK = "127.0.0.1";
@@ -47,9 +64,14 @@ function fail(name, why) { failed++; console.log(`  FAIL ${name}: ${why}`); }
 // Env detection
 // ─────────────────────────────────────────────────────────────────────
 
-// 副指挥 06e92ef7 P1: absolute REALPATH — resolve symlinks so the
-// version check and spawn use the same on-disk binary. Exact version
-// match (`= 0.144.0`), NOT prefix.
+// 副指挥 06e92ef7 P1 + e85ade40: absolute REALPATH — resolve
+// symlinks so the version check and spawn use the SAME canonical
+// path. Exact version match (`= 0.144.0`), NOT prefix.
+// Narrowed claim: `realpath` fixes the canonical path; it does NOT
+// prove same-inode over time (an unlink+rename between --version
+// and spawn could still swap the file). Both operations resolve
+// the same captured path; that captured path is used verbatim in
+// spawn (no PATH re-lookup).
 function resolveCodexBin() {
   if (process.env.RFC030_CODEX_BIN) return path.resolve(process.env.RFC030_CODEX_BIN);
   try {
@@ -166,16 +188,21 @@ async function startServer() {
  */
 async function spawnCodex(plaintext, port, underPty) {
   const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), "rfc030-codex-home-"));
-  const env = {
+  // 副指挥 e85ade40 evidence-gate P3: unify the real spawn env with
+  // `buildAllowlistEnv`. Prior rounds built two separate objects —
+  // the assertion audited one; the child inherited the other. Now
+  // the child env IS the frozen output of buildAllowlistEnv, so any
+  // divergence between audited-set and actual-child-env is
+  // impossible.
+  const env = buildAllowlistEnv(plaintext, {
     PATH: process.env.PATH ?? "/usr/bin:/bin",
     HOME: codexHome,
     TMPDIR: os.tmpdir(),
     CODEX_HOME: codexHome,
-    ANET_CODEX_TUI_BEARER: plaintext,
-  };
+  });
   const codexArgs = [
     "--remote", `ws://${ALLOWED_LOOPBACK}:${port}`,
-    "--remote-auth-token-env", "ANET_CODEX_TUI_BEARER",
+    "--remote-auth-token-env", TUI_BEARER_ENV_NAME,
     "-c", "check_for_update_on_startup=false",
   ];
   // Version-checked bin used verbatim in spawn so no PATH re-lookup
@@ -185,7 +212,11 @@ async function spawnCodex(plaintext, port, underPty) {
     ? ["-qec", `${JSON.stringify(codexBin)} ${codexArgs.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ")}`, "/dev/null"]
     : codexArgs;
   const cmd = underPty ? "script" : codexBin;
-  const child = spawn(cmd, argv, { env, stdio: ["pipe", "pipe", "pipe"] });
+  // env is the frozen buildAllowlistEnv output — the spread copies
+  // enumerable string keys into the plain env object `spawn` needs.
+  // Return the built env so main() can assert on the SAME object
+  // that reaches spawn (not a hand-built lookalike).
+  const child = spawn(cmd, argv, { env: { ...env }, stdio: ["pipe", "pipe", "pipe"] });
   const outRedactor = new SecretRedactor(plaintext, "[REDACTED bearer]");
   const errRedactor = new SecretRedactor(plaintext, "[REDACTED bearer]");
   const outChunks = [];
@@ -199,42 +230,38 @@ async function spawnCodex(plaintext, port, underPty) {
     errRedactor.wipe();
     try { fs.rmSync(codexHome, { recursive: true, force: true }); } catch {}
   };
-  return { child, outChunks, errChunks, cleanup };
+  return { child, outChunks, errChunks, cleanup, env };
 }
 
 async function main() {
-  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 4 — real codex 0.144.0 bootstrap smoke");
+  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 5 — real codex 0.144.0 bootstrap smoke");
   const { server, plaintext, authorizerCalls } = await startServer();
 
-  // 副指挥 06e92ef7 P1: assert the child env exact-set is exactly
-  // the allowlist. Bad-key mutation attempts must FAIL loudly.
-  const expectedEnvKeys = ["PATH", "HOME", "TMPDIR", "CODEX_HOME", "ANET_CODEX_TUI_BEARER"].sort();
-  const childEnv = {
-    PATH: process.env.PATH ?? "/usr/bin:/bin",
-    HOME: os.tmpdir(),
-    TMPDIR: os.tmpdir(),
-    CODEX_HOME: os.tmpdir(),
-    ANET_CODEX_TUI_BEARER: plaintext,
-  };
-  const actualEnvKeys = Object.keys(childEnv).sort();
-  if (JSON.stringify(actualEnvKeys) === JSON.stringify(expectedEnvKeys)) {
-    ok(`child env exact-set matches allowlist: [${actualEnvKeys.join(",")}]`);
-  } else {
-    fail("env allowlist exact-set", `expected [${expectedEnvKeys.join(",")}] got [${actualEnvKeys.join(",")}]`);
-  }
-  // Mutation red: attempting to add a CommHub-shape key must throw.
-  const { buildAllowlistEnv } = mod;
+  // 副指挥 e85ade40 evidence-gate P3: mutation red must run BEFORE
+  // spawn so a lookalike-CommHub-key never reaches the child.
   let mutationRefused = false;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     buildAllowlistEnv("b", { COMMHUB_TOKEN: "leak" });
   } catch { mutationRefused = true; }
   if (mutationRefused) ok("mutation red: COMMHUB_TOKEN refused by buildAllowlistEnv");
   else fail("env mutation red", "COMMHUB_TOKEN went through buildAllowlistEnv");
 
-  const { child, outChunks, errChunks, cleanup } = await spawnCodex(
+  const { child, outChunks, errChunks, cleanup, env: spawnedEnv } = await spawnCodex(
     plaintext, server.boundPortActual(), true,
   );
+
+  // 副指挥 e85ade40 evidence-gate P3: assert on the SAME env object
+  // that was passed to spawn. `spawnedEnv` came out of
+  // `buildAllowlistEnv` inside spawnCodex; auditing it here means
+  // any divergence between "what we spawn with" and "what we
+  // asserted" is impossible by construction.
+  const expectedEnvKeys = ["PATH", "HOME", "TMPDIR", "CODEX_HOME", TUI_BEARER_ENV_NAME].sort();
+  const actualEnvKeys = Object.keys(spawnedEnv).sort();
+  if (JSON.stringify(actualEnvKeys) === JSON.stringify(expectedEnvKeys)) {
+    ok(`child env exact-set matches allowlist: [${actualEnvKeys.join(",")}]`);
+  } else {
+    fail("env allowlist exact-set", `expected [${expectedEnvKeys.join(",")}] got [${actualEnvKeys.join(",")}]`);
+  }
 
   // 副指挥 1b24ae71 P1: wait strictly for an authorizer call OR a
   // hard timeout. `ownerSlotState === "held"` alone is NOT a pass

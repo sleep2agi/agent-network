@@ -76,17 +76,33 @@ Environment: `CODEX_HOME=<tempdir>`,
 
        {"id":"<uuid>","method":"model/list"}
 
-## Read-only allowlist (Phase 1)
+## Startup reads observed by 0.144.0 (informational)
 
-These four methods are the ONLY upstream reads Codex 0.144.0
-performs before the interactive TUI is ready. Under Phase 1 policy
-(`read-only` + `approval=never`), the fake TUI authorizer in
-`lifecycle.ts` uses this exact set:
+The four request methods above (`account/read`, `hooks/list`,
+`configRequirements/read`, `model/list`) are what Codex 0.144.0
+emits before the interactive TUI reaches ready-state — captured for
+future reference.
 
-    account/read
-    hooks/list
-    configRequirements/read
-    model/list
+Enforcement scope is deliberately narrow (副指挥 e85ade40 evidence
+gate — no more inline "allowlist" wording that contradicts the top
+note):
+
+  - `lifecycle.ts` uses `defaultDenyTuiAuthorizer` — the allowlist
+    is EXPLICITLY EMPTY (`DEFAULT_DENY_ALLOWLIST.size === 0`). No
+    method is permitted by the production authorizer wired into the
+    lifecycle. Wave 2's real authorizer will decide which reads are
+    permitted.
+  - The four-read set above is enforced ONLY by the fake authorizer
+    inside `scripts/rfc030-real-cli-e2e.mjs`, and even then only as
+    a bootstrap-smoke aid so the smoke can observe the FIRST
+    `account/read`. The subsequent three reads require Codex to
+    receive real responses to `account/read`, `hooks/list`,
+    `configRequirements/read` — which the fake harness does not
+    provide. The smoke asserts only the first call.
+
+Do NOT read this section as "the lifecycle permits these four
+methods." It does not. The Phase-1 production posture is
+default-deny.
 
 ## Capture notes
 

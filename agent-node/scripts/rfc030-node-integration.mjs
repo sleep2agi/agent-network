@@ -753,11 +753,152 @@ async function test_stale_owner_ws_error_terminated() {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// P0-1 async rollback: stop-during-start → socket actually gone
+// ─────────────────────────────────────────────────────────────────────
+
+async function test_async_rollback_socket_gone() {
+  const { GatewayLifecycle } = mod;
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const socketDir = fs.mkdtempSync(path.join(os.tmpdir(), "rfc030-rollback-"));
+  fs.rmdirSync(socketDir);
+  const socketPath = path.join(socketDir, "backend.sock");
+  const upstream = {
+    async writeFrame() {}, onFrame() { return () => {}; },
+    onClose() { return () => {}; }, async close() {},
+  };
+  const lifecycle = new GatewayLifecycle({
+    backendSocketPath: socketPath,
+    socketDir,
+    preflight: { async run() { /* ok */ } },
+    backend: {
+      async enqueueTask() { return { outcome: "accepted", taskId: "t", queuePosition: 0, duplicate: false }; },
+      async getTaskState() { return { state: "unknown" }; },
+      async cancelQueuedTask() { return { outcome: "refused_not_queued", currentState: "unknown" }; },
+    },
+    upstreamTransport: upstream,
+    initSnapshotSource: { currentSnapshot: () => ({}) },
+    diagnosticsSink: { newCorrelationId: () => "cid", reportInternalError: () => {} },
+    backendCapability: "rollback-p01-cap-32chars-abcdefghij",
+  });
+  const startP = lifecycle.start();
+  await Promise.resolve(); // let start progress past construction
+  const stopP = lifecycle.stop();
+  let startResult = "resolved";
+  try { await startP; } catch (e) { startResult = `rejected:${e.message}`; }
+  await stopP;
+  // Invariant: state == stopped AND socket does NOT exist.
+  assertEq("P0-1 async rollback state = stopped", lifecycle.currentState(), "stopped");
+  if (!fs.existsSync(socketPath)) {
+    ok(`P0-1 async rollback socket unlinked (startResult=${startResult})`);
+  } else {
+    fail("P0-1 async rollback socket alive", `${socketPath} still exists after rollback`);
+  }
+  try { fs.rmSync(socketDir, { recursive: true, force: true }); } catch {}
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// P0-2 router: post-close pre-active frames drop
+// ─────────────────────────────────────────────────────────────────────
+
+async function test_router_post_close_drops() {
+  const { UpstreamRouter, UpstreamRequestMux, ReverseRequestNamespace, HumanOwnerCoordinator } = mod;
+  const mux = new UpstreamRequestMux();
+  const reverseNs = new ReverseRequestNamespace();
+  const diagEntries = [];
+  const diag = { newCorrelationId: () => "cid", reportInternalError: (e) => diagEntries.push(e) };
+  const coord = new HumanOwnerCoordinator({ mux, reverseNs, diagnostics: diag, approvalMode: "never" });
+  let frames = [], closes = [];
+  const upstream = {
+    written: [],
+    async writeFrame(f) { this.written.push(f); },
+    onFrame(h) { frames.push(h); return () => {}; },
+    onClose(h) { closes.push(h); return () => {}; },
+    async close() {},
+    emit(raw) { for (const h of [...frames]) h(raw); },
+    close_() { for (const h of [...closes]) h(); },
+  };
+  const router = new UpstreamRouter({
+    mux, humanOwner: coord, upstreamTransport: upstream, diagnostics: diag,
+    tuiForward: { deliverReverseRequestToOwner: () => true, deliverProxiedResponseToOwner: () => true },
+    onUpstreamClose: () => {},
+  });
+  router.subscribe();
+  // pre-close frame: reverse request, buffered
+  upstream.emit({ jsonrpc: "2.0", id: "cx_pre", method: "approval/request" });
+  // close fires — router marks receivedCloseBeforeActive
+  upstream.close_();
+  // post-close frame: MUST drop (not buffer)
+  upstream.emit({ jsonrpc: "2.0", id: "cx_after", method: "approval/request" });
+  router.activate();
+  // Only pre-close should have been dispatched → NoOwner response for cx_pre.
+  const forAfter = upstream.written.filter((w) => w.id === "cx_after");
+  if (forAfter.length === 0) {
+    ok("P0-2 router dropped post-close pre-active frame (0 responses for cx_after)");
+  } else {
+    fail("P0-2 router leaked post-close frame", `${forAfter.length} response(s) for cx_after`);
+  }
+  const drops = diagEntries.filter((e) => e.operation === "upstream_frame_dropped_after_pre_active_close");
+  assertEq("P0-2 router surfaced drop diagnostic exactly once", drops.length, 1);
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// P1-1 sync writeFrame throw: mux + internalPending both clean to 0
+// ─────────────────────────────────────────────────────────────────────
+
+async function test_sync_write_throw_cleanup() {
+  // Uses BackendUdsServer indirectly via GatewayLifecycle's sendInternal.
+  // A transport that throws sync on writeFrame should surface reject,
+  // AND the mux pending count should return to 0 (no leak).
+  const { GatewayLifecycle } = mod;
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const socketDir = fs.mkdtempSync(path.join(os.tmpdir(), "rfc030-syncthrow-"));
+  fs.rmdirSync(socketDir);
+  const upstream = {
+    writeFrame() { throw new Error("sync write throw"); },
+    onFrame() { return () => {}; },
+    onClose() { return () => {}; },
+    async close() {},
+  };
+  const lifecycle = new GatewayLifecycle({
+    backendSocketPath: path.join(socketDir, "backend.sock"),
+    socketDir,
+    preflight: { async run() {} },
+    backend: {
+      async enqueueTask() { return { outcome: "accepted", taskId: "t", queuePosition: 0, duplicate: false }; },
+      async getTaskState() { return { state: "unknown" }; },
+      async cancelQueuedTask() { return { outcome: "refused_not_queued", currentState: "unknown" }; },
+    },
+    upstreamTransport: upstream,
+    initSnapshotSource: { currentSnapshot: () => ({}) },
+    diagnosticsSink: { newCorrelationId: () => "cid", reportInternalError: () => {} },
+    backendCapability: "syncthrow-p11-cap-32chars-abcdefg",
+  });
+  await lifecycle.start();
+  let msg = "";
+  try { await lifecycle.sendInternal("thread/status", { threadId: "t" }); }
+  catch (e) { msg = e.message; }
+  assertEq("P1-1 sync throw surfaced reject", msg, "sync write throw");
+  assertEq("P1-1 mux pending count after reject = 0", lifecycle.pendingUpstreamCount(), 0);
+  // Second call must still work (no leaked id).
+  let msg2 = "";
+  try { await lifecycle.sendInternal("thread/status", { threadId: "t2" }); }
+  catch (e) { msg2 = e.message; }
+  assertEq("P1-1 second sync throw also surfaced reject", msg2, "sync write throw");
+  assertEq("P1-1 mux pending count after 2nd reject = 0", lifecycle.pendingUpstreamCount(), 0);
+  await lifecycle.stop();
+  try { fs.rmSync(socketDir, { recursive: true, force: true }); } catch {}
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 4 — Node integration");
+  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 5 — Node integration");
   await test_happy();
   await test_slow_header();
   await test_missing_bearer();
@@ -779,6 +920,9 @@ async function main() {
   await test_stale_owner_ws_error_terminated();
   await test_noncanonical_ws_key();
   await test_duplicate_host_rejected();
+  await test_async_rollback_socket_gone();
+  await test_router_post_close_drops();
+  await test_sync_write_throw_cleanup();
   console.log("");
   console.log(`real integration PASS: ${passed}/${passed + failed}`);
   if (failed > 0) {

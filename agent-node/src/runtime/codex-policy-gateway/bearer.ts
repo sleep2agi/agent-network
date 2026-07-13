@@ -1,4 +1,4 @@
-// RFC-030 Wave 1A P0.2 Commit 1 corrective (round 2) — bearer.ts
+// RFC-030 Wave 1A P0.2 Commit 1 corrective round 5 — bearer.ts
 //
 // 副指挥 3ed5c004 P0-3: pending TuiBearer + SecretRedactor state was
 // still observable / mutable via `util.inspect(showHidden:true)` and

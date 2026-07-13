@@ -1,4 +1,4 @@
-// RFC-030 Wave 1A P0.2 Commit 1 corrective round 3 — tui-ws-server.ts
+// RFC-030 Wave 1A P0.2 Commit 1 corrective round 5 — tui-ws-server.ts
 //
 // Native Codex TUI WebSocket admission surface. Corrective vs 3e62297
 // (副指挥 1b24ae71):
@@ -459,10 +459,39 @@ export class TuiWsServer {
     catch { this.reportInternal("ws_write_failed"); }
   }
 
-  /** Like `writeFrame` but returns true only when send() didn't throw. */
+  /**
+   * Truthful send: returns true ONLY when the send call plausibly
+   * reached the wire on an OPEN socket.
+   *
+   * 副指挥 e85ade40 P1-2: prior version only caught sync throw. A
+   * ws in CLOSING / CLOSED state may not throw on `send()` — it
+   * silently drops or errors via a callback that we weren't
+   * consuming. That let `deliverProxiedResponseToOwner` report
+   * `true` for a frame that never left the process. We now:
+   *   1. Refuse non-OPEN readyState synchronously → return false so
+   *      the router logs an orphan diagnostic.
+   *   2. Pass a completion callback to ws.send() so async transport
+   *      failures surface via the diagnostics sink as
+   *      `ws_write_async_error` (post-hoc observability — the
+   *      caller's return-value contract stays synchronous).
+   */
   private writeFrameStrict(ws: WebSocket, frame: unknown): boolean {
-    try { ws.send(JSON.stringify(frame)); return true; }
-    catch { this.reportInternal("ws_write_failed"); return false; }
+    if (ws.readyState !== ws.OPEN) {
+      this.reportInternal("ws_write_not_open");
+      return false;
+    }
+    let payload: string;
+    try { payload = JSON.stringify(frame); }
+    catch { this.reportInternal("ws_write_stringify_failed"); return false; }
+    try {
+      ws.send(payload, (err) => {
+        if (err) this.reportInternal("ws_write_async_error");
+      });
+      return true;
+    } catch {
+      this.reportInternal("ws_write_failed");
+      return false;
+    }
   }
 
   private reportInternal(operation: string): void {

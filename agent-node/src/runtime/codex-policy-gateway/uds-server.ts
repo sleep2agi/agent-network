@@ -572,16 +572,28 @@ export class BackendUdsServer {
         jsonrpc: "2.0", id: alloc.upstreamId, method,
         ...(params !== undefined ? { params } : {}),
       };
-      this.opts.upstreamTransport.writeFrame(frame).catch((e: unknown) => {
-        // 副指挥 06e92ef7 P1-1: release the mux slot AND settle the
-        // outer Promise via the wrapped origin.reject so the pending
-        // map (keyed on the real upstream id) is cleaned up
-        // atomically. The mux consume here is a no-op if the router
-        // has already consumed the id, but calling it explicitly
-        // guarantees the mux frees the slot on write-fail.
+      // 副指挥 e85ade40 P1-1: transport.writeFrame() may throw
+      // SYNCHRONOUSLY (unhealthy transport, invalid frame
+      // construction, socket already destroyed). A bare `.catch`
+      // only handles async rejections — a sync throw would leak the
+      // mux slot AND the internalPending entry (both leaked at 1
+      // in the repro). Funnel BOTH sync + async paths through a
+      // single cleanup closure so muxPending and internalPending
+      // both return to 0.
+      const failCleanup = (e: unknown): void => {
+        // Release the mux slot (no-op if the router already consumed
+        // it; explicit call guarantees release on write-fail path).
         this.opts.mux.consumeUpstreamResponse(alloc.upstreamId);
         origin.reject(e instanceof Error ? e : new Error(String(e)));
-      });
+      };
+      try {
+        const writeResult = this.opts.upstreamTransport.writeFrame(frame);
+        if (writeResult && typeof (writeResult as Promise<unknown>).catch === "function") {
+          (writeResult as Promise<unknown>).catch(failCleanup);
+        }
+      } catch (e) {
+        failCleanup(e);
+      }
     });
   }
 

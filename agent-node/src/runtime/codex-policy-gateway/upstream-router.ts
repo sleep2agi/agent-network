@@ -1,4 +1,4 @@
-// RFC-030 Wave 1A P0.2 Commit 1 corrective round 3 — upstream-router.ts
+// RFC-030 Wave 1A P0.2 Commit 1 corrective round 5 — upstream-router.ts
 //
 // The SOLE upstream frame router. Lifecycle owns exactly one instance
 // and subscribes it to `upstreamTransport.onFrame` / `onClose` BEFORE
@@ -182,6 +182,17 @@ export class UpstreamRouter {
   private onFrame(raw: unknown): void {
     if (this.state === "terminal") return;
     if (this.state === "subscribed") {
+      // 副指挥 e85ade40 P0-2: after `onClose` fires in pre-active
+      // state, subsequent frames are DROPPED — activate() never
+      // dispatches them. Only pre-close frames stay in the buffer.
+      // Previously post-close pre-active frames were still buffered
+      // and then delivered on activate → the router produced a
+      // NoOwner response for an id that arrived AFTER the transport
+      // was gone.
+      if (this.receivedCloseBeforeActive) {
+        this.report("upstream_frame_dropped_after_pre_active_close");
+        return;
+      }
       if (this.buffered.length >= UpstreamRouter.PRE_ACTIVE_BUFFER_CAP) {
         // Fail-closed: drop the frame and mark the router terminal
         // so activate() will short-circuit start().

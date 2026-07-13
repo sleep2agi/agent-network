@@ -211,6 +211,54 @@ describe("preflight ordering (副指挥 Segment C narrowing)", () => {
     }
   });
 
+  // 副指挥 e85ade40 P0-1 regression: prior to round 5, a stop() that
+  // landed during the backend.start await window returned state
+  // "stopped" while the UDS listener was still bound + accepting.
+  // The fix routes rollback through async awaits so listeners close
+  // BEFORE state=stopped is exposed.
+  test("stop-during-start → state=stopped AND socket unlinked (no live listener)", async () => {
+    const paths = pathsFor();
+    const upstream = new FakeUpstream();
+    const { diagnostics } = collectDiagnostics();
+    // Preflight resolves immediately. We stop() right after start()
+    // begins so the fence lands DURING backend_start's await window.
+    const preflight: PreflightRunner = { async run() { /* ok */ } };
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight,
+      backend: makeBackend(),
+      upstreamTransport: upstream,
+      initSnapshotSource: { currentSnapshot: () => ({ ok: true }) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    // Fire start; on the next microtask fire stop concurrently.
+    const startP = lifecycle.start();
+    // Yield so start() progresses past construction into the awaits.
+    await Promise.resolve();
+    const stopP = lifecycle.stop();
+    let startResult = "resolved";
+    try { await startP; } catch (e) { startResult = `rejected:${(e as Error).message}`; }
+    await stopP;
+    expect(lifecycle.currentState()).toBe("stopped");
+    // Socket path MUST not exist any more.
+    expect(fs.existsSync(paths.backendSocketPath)).toBe(false);
+    // If the socket does exist, this connection would succeed — the
+    // repro that failed round-4 was `socketAccepts:true`. We check
+    // the file first (unlink is the reliable signal); a live-connect
+    // probe is racy vs event-loop scheduling.
+    if (fs.existsSync(paths.socketDir)) {
+      try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+    }
+    // start rejected with the fence error OR completed silently if
+    // the timing didn't hit the fence — the invariant we test is
+    // "state=stopped + socket absent", not "always rejected".
+    if (startResult.startsWith("rejected:")) {
+      expect(startResult).toMatch(/start aborted by concurrent stop|start aborted: upstream closed/);
+    }
+  });
+
   test("preflight resolves → state transitions created→running", async () => {
     const h = await makeLifecycle();
     try {

@@ -243,6 +243,16 @@ export class GatewayLifecycle {
   /** Promise that resolves once a concurrent start() settles.
    *  `stop()` awaits it so ordering is deterministic. */
   private startInProgress: Promise<void> | null = null;
+  /**
+   * 副指挥 e85ade40 P0-1: track which servers have actually bound
+   * their listeners so async rollback awaits the correct stop()
+   * calls. A synchronous rollback that nulls refs while a UDS
+   * listener is still bound would report `stopped` while the socket
+   * path remained connectable (repro:
+   * `{"state":"stopped","socketExists":true,"socketAccepts":true}`).
+   */
+  private backendStarted = false;
+  private tuiStarted = false;
 
   constructor(opts: GatewayLifecycleOptions) {
     this.opts = opts;
@@ -350,19 +360,21 @@ export class GatewayLifecycle {
     try {
       this.upstreamRouter.subscribe();
     } catch (e) {
-      this.rollbackStartFailure();
+      await this.rollbackStartFailure();
       throw e;
     }
 
-    // Helper that checks the terminal fence + stop request AFTER
-    // every await and rolls back cleanly.
-    const throwIfAbortedAfterAwait = (label: string): void => {
+    // 副指挥 e85ade40 P0-1: async fence. AWAITS the rollback so any
+    // partially-bound listener is stopped BEFORE state=stopped is
+    // set and refs are nulled. Prior sync fence returned `stopped`
+    // while the UDS listener was still accepting.
+    const throwIfAbortedAfterAwait = async (label: string): Promise<void> => {
       if (this.upstreamRouter?.wasCloseBeforeActive() || this.upstreamRouter?.currentState() === "terminal") {
-        this.rollbackStartFailure();
+        await this.rollbackStartFailure();
         throw new Error(`start aborted: upstream closed (${label})`);
       }
       if (this.stopRequested) {
-        this.rollbackStartFailure();
+        await this.rollbackStartFailure();
         throw new Error(`start aborted by concurrent stop (${label})`);
       }
     };
@@ -370,38 +382,43 @@ export class GatewayLifecycle {
     try {
       await this.opts.preflight.run();
     } catch (e) {
-      this.rollbackStartFailure();
+      await this.rollbackStartFailure();
       throw e;
     }
-    throwIfAbortedAfterAwait("preflight");
+    await throwIfAbortedAfterAwait("preflight");
 
     try {
       await this.backendServer.start();
+      this.backendStarted = true;
     } catch (e) {
-      this.rollbackStartFailure();
+      // 副指挥 e85ade40 P0-1: defensive — mark started so rollback
+      // awaits stop() even if start() rejected after a partial bind.
+      // BackendUdsServer.start() sets `this.running = true` before
+      // returning; a mid-start throw between bind and running=true
+      // is the rare case, but stop() is a no-op on !running so this
+      // is safe.
+      this.backendStarted = true;
+      await this.rollbackStartFailure();
       throw e;
     }
-    throwIfAbortedAfterAwait("backend_start");
+    await throwIfAbortedAfterAwait("backend_start");
 
     try {
       await this.tuiServer.start();
+      this.tuiStarted = true;
     } catch (e) {
-      try { await this.backendServer.stop(); } catch { /* silent */ }
-      this.rollbackStartFailure();
+      this.tuiStarted = true; // defensive: partial bind → stop() anyway
+      await this.rollbackStartFailure();
       throw e;
     }
-    throwIfAbortedAfterAwait("tui_start");
+    await throwIfAbortedAfterAwait("tui_start");
 
     // Activate the router only when it is still healthy. If a close
     // arrived earlier, `wasCloseBeforeActive` would have made
     // `throwIfAbortedAfterAwait` fire already.
     this.upstreamRouter.activate();
-    // After activate() the router transitions to `terminal` if a
-    // close was buffered. Re-check.
     if (this.upstreamRouter.currentState() === "terminal") {
-      try { await this.backendServer.stop(); } catch { /* silent */ }
-      try { await this.tuiServer.stop(); } catch { /* silent */ }
-      this.rollbackStartFailure();
+      await this.rollbackStartFailure();
       throw new Error("start aborted: upstream closed during activate");
     }
 
@@ -409,23 +426,48 @@ export class GatewayLifecycle {
   }
 
   /**
-   * 副指挥 06e92ef7 P0-1 / P0-2: unified rollback used on any failure
-   * inside `doStart`. Rotates the bearer to `rotated_out` and nulls
-   * every reference; the `takeTuiBearerPlaintextForLauncher` accessor
-   * refuses in non-running state.
+   * 副指挥 e85ade40 P0-1: rollback is now ASYNC. If a server has
+   * bound its listener (`backendStarted` / `tuiStarted`), we AWAIT
+   * its `stop()` BEFORE nulling refs and setting `state="stopped"`.
+   * Otherwise a caller reading `currentState()` would see
+   * `"stopped"` while the UDS socket path still accepts connections
+   * (repro: {startResult:"rejected:start aborted by concurrent stop
+   * (backend_start)", state:"stopped", socketExists:true,
+   * socketAccepts:true}).
+   *
+   * Ordering:
+   *   1. unsubscribe the router (idempotent) — no new frames route.
+   *   2. AWAIT tuiServer.stop() if started (WS listener close).
+   *   3. AWAIT backendServer.stop() if started (UDS unlink + socket
+   *      cleanup + created-paths sweep — write-path critical to the
+   *      P0-1 repro).
+   *   4. AWAIT upstreamTransport.close() best-effort so a mid-
+   *      preflight transport does not leak.
+   *   5. Rotate bearer + null every ref.
+   *   6. drainAll mux + reverseNs so any registered origins release.
+   *   7. state = "stopped".
    */
-  private rollbackStartFailure(): void {
+  private async rollbackStartFailure(): Promise<void> {
     try { this.upstreamRouter?.unsubscribe(); } catch { /* silent */ }
-    this.upstreamRouter = null;
+    if (this.tuiStarted && this.tuiServer !== null) {
+      try { await this.tuiServer.stop(); } catch { /* silent */ }
+    }
+    if (this.backendStarted && this.backendServer !== null) {
+      try { await this.backendServer.stop(); } catch { /* silent */ }
+    }
+    try { await this.opts.upstreamTransport.close(); } catch { /* silent */ }
     if (this.tuiBearer !== null) {
       try { this.tuiBearer.rotate(); } catch { /* silent */ }
       this.tuiBearer = null;
     }
+    this.upstreamRouter = null;
     this.backendServer = null;
     this.tuiServer = null;
     this.humanOwner = null;
-    this.mux = null;
-    this.reverseNs = null;
+    if (this.mux !== null) { try { this.mux.drainAll(); } catch { /* silent */ } this.mux = null; }
+    if (this.reverseNs !== null) { try { this.reverseNs.drainAll(); } catch { /* silent */ } this.reverseNs = null; }
+    this.backendStarted = false;
+    this.tuiStarted = false;
     this.state = "stopped";
   }
 
@@ -513,6 +555,8 @@ export class GatewayLifecycle {
       try { await this.tuiServer.stop(); } catch { /* best-effort */ }
       this.tuiServer = null;
     }
+    this.backendStarted = false;
+    this.tuiStarted = false;
     // Rotate the TUI bearer so no in-flight upgrade can consume it.
     if (this.tuiBearer !== null) {
       try { this.tuiBearer.rotate(); } catch { /* silent */ }
