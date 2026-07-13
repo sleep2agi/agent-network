@@ -523,11 +523,13 @@ select_unique_status_row() {
 }
 
 assert_status_selector_accepts() {
-  local label=$1 payload=$2 output=/tmp/test225-status-selector-output
+  local label=$1 payload=$2 expected_status=${3:-idle}
+  local output=/tmp/test225-status-selector-output
   rm -f -- "$output"
   printf '%s' "$payload" | select_unique_status_row selector-target >"$output" 2>/dev/null \
     || fail "status selector rejected $label"
-  jq -e '.alias == "selector-target" and .status == "online"' "$output" >/dev/null \
+  jq -e --arg status "$expected_status" \
+    '.alias == "selector-target" and .status == $status' "$output" >/dev/null \
     || fail "status selector returned the wrong row for $label"
   rm -f -- "$output"
 }
@@ -1052,7 +1054,7 @@ node --test /test225/failure-diagnostic.test.mjs \
   || fail "agent-node candidate tarball identity changed during contract validation"
 rm -f /tmp/test225-failure-diagnostic-test.log
 
-STATUS_SELECTOR_ROW='{"alias":"selector-target","status":"online","agent":"agent-node:grok-build-cli"}'
+STATUS_SELECTOR_ROW='{"alias":"selector-target","status":"idle","agent":"agent-node:grok-build-cli"}'
 assert_status_selector_accepts legacy-array "[$STATUS_SELECTOR_ROW]"
 assert_status_selector_accepts current-wrapper \
   "{\"ok\":true,\"sessions\":[$STATUS_SELECTOR_ROW],\"summary\":{\"idle\":1,\"working\":0,\"offline\":0,\"total\":1}}"
@@ -1489,9 +1491,11 @@ if ! STATUS_ROW=$(curl -fsS "$HUB/api/status?network_id=$NETWORK_ID" \
   | select_unique_status_row "$ALIAS"); then
   fail "Hub status payload was invalid or alias cardinality was not exactly one"
 fi
-jq -e '.agent == "agent-node:grok-build-cli" and (.status == "online" or .status == "working")' \
+jq -e '.agent == "agent-node:grok-build-cli"' \
   <<<"$STATUS_ROW" >/dev/null \
   || fail "Hub session did not retain the registered grok-build-cli agent identity"
+jq -e '.status == "idle"' <<<"$STATUS_ROW" >/dev/null \
+  || fail "Hub session was not idle after the replied task"
 pass "Hub session registration reports agent-node:grok-build-cli"
 
 log "[L3] exact child-env and persisted-output checks"
