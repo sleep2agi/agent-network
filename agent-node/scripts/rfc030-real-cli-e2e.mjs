@@ -1,4 +1,4 @@
-// RFC-030 Wave 1A P0.2 Commit 1 corrective round 6 — real codex 0.144.0
+// RFC-030 Wave 1A P0.2 Commit 1 corrective round 7 — real codex 0.144.0
 // **bootstrap smoke**.
 //
 // This script is a bootstrap smoke, not a full E2E. Honest scope
@@ -281,42 +281,76 @@ async function spawnCodex(plaintext, port, underPty) {
  * have 6 keys (the extra `PWD` sh injects) — proving the
  * `unset PWD;` prefix is the load-bearing guard.
  */
-async function probeChildEnvKeysUnderPty(plaintext, unsetPwd) {
+// 副指挥 ab7d7682 evidence P1: probe MUST NOT touch the real bearer.
+// Uses a fixed non-sensitive canary; child pipes `env` through
+// `cut -d= -f1 | sort -u` so bytes emitted are ONLY key names —
+// values never leave the child; parent never stores/returns/prints
+// raw values. Failure diagnostics carry exit code + parsed keys
+// only. A mutation-red probe forces the child to fail and asserts
+// the canary value never appears in captured output or the fail
+// string. Real Codex spawn continues to use the real bearer +
+// SecretRedactor — the two paths do NOT share plaintext.
+const PROBE_CANARY_BEARER = "probe-canary-NOT-A-REAL-BEARER-abcdefghij";
+
+/**
+ * Return `{code, keys, note}`. `keys` is a sorted, deduped array
+ * of key names extracted by the CHILD (via `env | cut | sort -u`);
+ * `raw`/values never enter the parent. `note` is a short
+ * diagnostic string safe to log (exit code + first line of stderr
+ * with values stripped — since the child emits only keys, no
+ * values can appear here either).
+ */
+async function probeChildEnvKeysUnderPty(unsetPwd) {
   const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), "rfc030-envprobe-"));
-  const env = buildAllowlistEnv(plaintext, {
+  const env = buildAllowlistEnv(PROBE_CANARY_BEARER, {
     PATH: process.env.PATH ?? "/usr/bin:/bin",
     HOME: codexHome,
     TMPDIR: os.tmpdir(),
     CODEX_HOME: codexHome,
   });
-  const dumpArgs = []; // no args — `env` alone dumps
-  // Reuse the same builder so the shell layer is identical to the
-  // real spawn. Just swap `codexBin` → `env`.
-  const shellCmd = buildPtyShellCommand(unsetPwd, "env", dumpArgs);
+  // Child pipeline strips values BEFORE bytes leave the child.
+  // Also filter out empty lines defensively; `sort -u` dedups.
+  const childPipeline = "env | cut -d= -f1 | grep -E '^[A-Za-z_][A-Za-z0-9_]*$' | sort -u";
+  const prefix = unsetPwd ? "unset PWD; " : "";
+  const shellCmd = `${prefix}${childPipeline}`;
   const child = spawn("script", ["-qec", shellCmd, "/dev/null"], {
     env, stdio: ["pipe", "pipe", "pipe"],
   });
-  const chunks = [];
-  child.stdout.on("data", (c) => chunks.push(c));
-  child.stderr.on("data", (c) => chunks.push(c));
+  const outLines = [];
+  let stderrBytes = 0;
+  // Streaming parse: bytes → lines → validate key shape → collect
+  // key strings. We NEVER store buffers of raw child output; a
+  // regex extract per line (values already stripped by the child
+  // pipeline) is the only surface that touches child stdout.
+  let stdoutTail = "";
+  child.stdout.on("data", (c) => {
+    stdoutTail += c.toString("utf8");
+    let idx;
+    while ((idx = stdoutTail.indexOf("\n")) >= 0) {
+      const line = stdoutTail.slice(0, idx).trim();
+      stdoutTail = stdoutTail.slice(idx + 1);
+      const m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)$/);
+      if (m) outLines.push(m[1]);
+    }
+  });
+  child.stderr.on("data", (c) => { stderrBytes += c.length; });
   const [code] = await new Promise((r) => {
     child.on("exit", (c, s) => r([c, s]));
   });
+  // Sweep tail (in case last line had no newline).
+  if (stdoutTail.trim()) {
+    const m = stdoutTail.trim().match(/^([A-Za-z_][A-Za-z0-9_]*)$/);
+    if (m) outLines.push(m[1]);
+  }
   try { fs.rmSync(codexHome, { recursive: true, force: true }); } catch {}
-  if (code !== 0) return { code, keys: null, raw: Buffer.concat(chunks).toString("utf8") };
-  const raw = Buffer.concat(chunks).toString("utf8");
-  // `env` output is `KEY=VALUE\n` per line. Extract keys.
-  const keys = raw.split(/\r?\n/)
-    .map((line) => line.match(/^([A-Za-z_][A-Za-z0-9_]*)=/)?.[1])
-    .filter((k) => typeof k === "string")
-    .sort();
-  // Deduplicate (some shells emit `_` twice under PTY).
-  const uniq = [...new Set(keys)];
-  return { code, keys: uniq, raw };
+  const keys = [...new Set(outLines)].sort();
+  // `note` never contains values — only exit code + counters.
+  const note = `exit=${code} stderr_bytes=${stderrBytes} lines=${outLines.length}`;
+  return { code, keys, note };
 }
 
 async function main() {
-  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 6 — real codex 0.144.0 bootstrap smoke");
+  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 7 — real codex 0.144.0 bootstrap smoke");
   const { server, plaintext, authorizerCalls } = await startServer();
 
   // 副指挥 e85ade40 evidence-gate P3: mutation red must run BEFORE
@@ -328,26 +362,26 @@ async function main() {
   if (mutationRefused) ok("mutation red: COMMHUB_TOKEN refused by buildAllowlistEnv");
   else fail("env mutation red", "COMMHUB_TOKEN went through buildAllowlistEnv");
 
-  // 副指挥 db0bbe13 evidence P1: probe the REAL child env under
-  // the SAME PTY chain by swapping codex → env. Assert exact 5-key
-  // set. The parallel red run OMITS `unset PWD;` and MUST surface
-  // 6 keys (including PWD) — proving the guard is load-bearing.
+  // 副指挥 ab7d7682 evidence P1: probe uses a FIXED CANARY bearer,
+  // never the real plaintext. Child emits only key names. Parent
+  // never stores/returns/prints raw values. Failure notes carry
+  // exit code + line counts only.
   const expectedEnvKeys = ["PATH", "HOME", "TMPDIR", "CODEX_HOME", TUI_BEARER_ENV_NAME].sort();
-  const withGuard = await probeChildEnvKeysUnderPty(plaintext, true);
-  if (withGuard.keys === null) {
-    fail("child-env probe exit=0", `env-probe exited code=${withGuard.code}, raw=${JSON.stringify(withGuard.raw).slice(0, 200)}`);
+  const withGuard = await probeChildEnvKeysUnderPty(true);
+  if (withGuard.code !== 0) {
+    fail("child-env probe exit=0", `env-probe failed ${withGuard.note}`);
   } else if (JSON.stringify(withGuard.keys) === JSON.stringify(expectedEnvKeys)) {
-    ok(`child env exact-set (probed under PTY): [${withGuard.keys.join(",")}]`);
+    ok(`child env exact-set (probed under PTY, canary bearer): [${withGuard.keys.join(",")}]`);
   } else {
     fail(
       "child env exact-set (probed under PTY)",
-      `expected [${expectedEnvKeys.join(",")}] got [${withGuard.keys.join(",")}]`,
+      `expected [${expectedEnvKeys.join(",")}] got [${withGuard.keys.join(",")}] (${withGuard.note})`,
     );
   }
-  // Mutation red — omit unset. Must show PWD → 6 keys.
-  const withoutGuard = await probeChildEnvKeysUnderPty(plaintext, false);
-  if (withoutGuard.keys === null) {
-    fail("mutation-red child-env probe (no unset PWD) exit=0", `code=${withoutGuard.code}`);
+  // Mutation red 1 — omit unset PWD. Must show PWD → 6 keys.
+  const withoutGuard = await probeChildEnvKeysUnderPty(false);
+  if (withoutGuard.code !== 0) {
+    fail("mutation-red no-unset-PWD probe exit=0", `probe failed ${withoutGuard.note}`);
   } else if (withoutGuard.keys.includes("PWD") && withoutGuard.keys.length === expectedEnvKeys.length + 1) {
     ok(`mutation red: without unset PWD the PTY child sees ${withoutGuard.keys.length} keys (includes PWD) — guard is load-bearing`);
   } else {
@@ -355,6 +389,23 @@ async function main() {
       "mutation-red: missing PWD or unexpected key set",
       `keys=[${withoutGuard.keys.join(",")}] (expected exactly one extra key PWD)`,
     );
+  }
+  // Mutation red 2 — canary bytes must NOT appear in any captured
+  // string produced by the probe path. This is a self-consistency
+  // gate on the harness: if the probe were ever reworked to pass
+  // values back to the parent, the canary would surface in the
+  // OK/FAIL log strings and this check would turn red.
+  const canaryFragment = PROBE_CANARY_BEARER.slice(0, 24);
+  const probeSurface = [
+    withGuard.note ?? "",
+    JSON.stringify(withGuard.keys ?? []),
+    withoutGuard.note ?? "",
+    JSON.stringify(withoutGuard.keys ?? []),
+  ].join(" || ");
+  if (!probeSurface.includes(canaryFragment) && !probeSurface.includes(PROBE_CANARY_BEARER)) {
+    ok("canary scrub: probe surface does NOT include canary bearer value");
+  } else {
+    fail("canary scrub", "canary bearer value leaked into probe surface");
   }
 
   const { child, outChunks, errChunks, cleanup, env: spawnedEnv } = await spawnCodex(

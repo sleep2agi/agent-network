@@ -752,12 +752,16 @@ async function test_ordinary_owner_close_detaches() {
   } finally { await h.server.stop(); }
 }
 
-// 副指挥 db0bbe13 evidence P2 add: real server-side "error" event
-// reproducer. Force an abrupt TCP RST by destroying the underlying
-// socket from the client side without a graceful close handshake.
-// The server-side `ws` fires an `error` event, which the P0-4 fix
-// handles: `ws.terminate()` FIRST, then detach the coordinator.
-async function test_stale_owner_server_error_terminates() {
+// 副指挥 ab7d7682 evidence P3 rename: this case only proves that
+// an ABRUPT client-side disconnect (TCP RST via
+// `_socket.destroy(new Error)`) releases the owner slot. On the
+// server side the ws typically fires `close(1006)` — the ordinary
+// close handler and the `error` handler both call `onOwnerClose`,
+// so this test cannot distinguish which branch ran. It is a real
+// abnormal-close reproducer, NOT an assertion about the server
+// ws `error` code path. That branch has its own deterministic
+// test below.
+async function test_abrupt_disconnect_releases_owner() {
   const h = await harness();
   try {
     const port = h.server.boundPortActual();
@@ -766,26 +770,100 @@ async function test_stale_owner_server_error_terminates() {
       perMessageDeflate: false,
     });
     await new Promise((r, j) => { ws.once("open", r); ws.once("error", j); });
-    assertEq("owner attached before error", h.server.ownerSlotState(), "held");
-    // Abrupt socket destroy — TCP RST, no ws close frame. The
-    // server-side ws sees a socket error, not a normal close.
-    // `ws._socket` is the underlying `net.Socket`.
-    if (ws._socket) {
-      // 'error' handler on client swallows the RST so this side's
-      // promise doesn't reject noisily.
-      ws.on("error", () => {});
-      ws._socket.destroy(new Error("simulated abrupt RST"));
-    } else {
-      // Fallback: terminate() sends close frame; not the exact repro
-      // but preserves gate behaviour.
-      ws.terminate();
-    }
+    assertEq("owner attached before abrupt disconnect", h.server.ownerSlotState(), "held");
+    ws.on("error", () => {}); // swallow client-side RST noise
+    if (ws._socket) ws._socket.destroy(new Error("simulated abrupt RST"));
+    else ws.terminate();
     await new Promise((r) => setTimeout(r, 50));
     assertEq(
-      "P0-4 owner slot empty after server-side RST/error",
+      "abrupt disconnect: owner slot empty",
       h.server.ownerSlotState(),
       "empty",
     );
+  } finally { await h.server.stop(); }
+}
+
+// 副指挥 ab7d7682 evidence P3 add: deterministic server-side ws
+// error branch reproducer. We reach the server-side ws instance
+// via `wsServer.clients` (the WebSocketServer's live Set), install
+// a spy on `terminate()` that captures call order, then emit
+// `error` directly. Asserts:
+//   1. server-side ws.terminate() WAS called (proves the error
+//      handler ran the "terminate-first" branch — the code path
+//      the abrupt-disconnect test cannot distinguish).
+//   2. terminate ran BEFORE the owner slot went empty (order
+//      captured via timestamped hooks).
+//   3. owner slot is empty afterwards.
+async function test_server_side_ws_error_terminate_before_detach() {
+  const h = await harness();
+  try {
+    const port = h.server.boundPortActual();
+    const ws = new WebSocket(`ws://${ALLOWED_LOOPBACK}:${port}/`, {
+      headers: { Authorization: `Bearer ${h.plaintext}` },
+      perMessageDeflate: false,
+    });
+    await new Promise((r, j) => { ws.once("open", r); ws.once("error", j); });
+    ws.on("error", () => {});
+    // TS `private` compiles away — the WebSocketServer instance is
+    // reachable in JS at runtime and exposes its `clients` Set.
+    const wsServer = h.server.wsServer;
+    if (!wsServer || !wsServer.clients || wsServer.clients.size === 0) {
+      fail("server-side ws error: harness access", `wsServer.clients unavailable (size=${wsServer?.clients?.size ?? "n/a"})`);
+      return;
+    }
+    // Exactly one owner ws by hard-1 invariant.
+    const serverWs = [...wsServer.clients][0];
+    const order = [];
+    const origTerminate = serverWs.terminate.bind(serverWs);
+    serverWs.terminate = () => {
+      order.push({ event: "terminate", t: performance.now(), ownerSlotAtCall: h.server.ownerSlotState() });
+      return origTerminate();
+    };
+    // Watch owner-empty transition by polling ownerSlotState.
+    const startTs = performance.now();
+    const emptyPromise = (async () => {
+      const deadline = startTs + 1000;
+      while (performance.now() < deadline) {
+        if (h.server.ownerSlotState() === "empty") {
+          order.push({ event: "detach", t: performance.now(), ownerSlotAtCall: "empty" });
+          return true;
+        }
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      return false;
+    })();
+    // Deterministically drive the error branch: emit synthetically.
+    serverWs.emit("error", new Error("synthetic-server-side-error"));
+    const wentEmpty = await emptyPromise;
+    if (!wentEmpty) {
+      fail("server-side ws error: owner went empty", `ownerSlotState still ${h.server.ownerSlotState()}`);
+      return;
+    }
+    const terminateEvt = order.find((e) => e.event === "terminate");
+    const detachEvt = order.find((e) => e.event === "detach");
+    if (!terminateEvt) {
+      fail("server-side ws error: terminate spy fired", "terminate() never called on server-side ws");
+      return;
+    }
+    // The terminate spy captured owner slot AT the moment terminate
+    // was called; the P0-4 code path is: terminate() FIRST → then
+    // onOwnerClose. The captured slot must still be "held" at
+    // terminate time. Detach is the subsequent transition.
+    ok("server-side ws error: terminate() called");
+    if (terminateEvt.ownerSlotAtCall === "held") {
+      ok("server-side ws error: terminate ran BEFORE detach (owner still held at terminate call)");
+    } else {
+      fail(
+        "server-side ws error: terminate-before-detach ordering",
+        `owner slot at terminate call was ${terminateEvt.ownerSlotAtCall}, expected 'held'`,
+      );
+    }
+    if (terminateEvt.t <= detachEvt.t) {
+      ok(`server-side ws error: timestamps confirm terminate(${terminateEvt.t.toFixed(2)}) <= detach(${detachEvt.t.toFixed(2)})`);
+    } else {
+      fail("server-side ws error: timestamp order", `terminate=${terminateEvt.t} > detach=${detachEvt.t}`);
+    }
+    assertEq("server-side ws error: owner slot cleared", h.server.ownerSlotState(), "empty");
   } finally { await h.server.stop(); }
 }
 
@@ -935,7 +1013,7 @@ async function test_sync_write_throw_cleanup() {
 // ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 6 — Node integration");
+  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 7 — Node integration");
   await test_happy();
   await test_slow_header();
   await test_missing_bearer();
@@ -955,7 +1033,8 @@ async function main() {
   await test_lifecycle_upstream_close_not_running();
   await test_bearer_not_claimable_after_preflight_fail();
   await test_ordinary_owner_close_detaches();
-  await test_stale_owner_server_error_terminates();
+  await test_abrupt_disconnect_releases_owner();
+  await test_server_side_ws_error_terminate_before_detach();
   await test_noncanonical_ws_key();
   await test_duplicate_host_rejected();
   await test_async_rollback_socket_gone();

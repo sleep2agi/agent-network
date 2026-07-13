@@ -40,7 +40,7 @@ import type { InternalOrigin, UpstreamTransport } from "./uds-server";
 // ────────────────────────────────────────────────────────────────────────
 
 /**
- * Narrow delivery seam the router uses to hand a Codex reverse request
+ * Narrow accept-for-send seam the router uses to hand a Codex reverse request
  * to the TUI face. The router calls this after
  * `HumanOwnerCoordinator.handleUpstreamReverseRequest(frame)` has
  * returned `forward_tui`. Under Phase 1 (`approvalMode="never"`) this
@@ -206,7 +206,7 @@ export class UpstreamRouter {
       // state, subsequent frames are DROPPED — activate() never
       // dispatches them. Only pre-close frames stay in the buffer.
       // Previously post-close pre-active frames were still buffered
-      // and then delivered on activate → the router produced a
+      // and then dispatched on activate → the router produced a
       // NoOwner response for an id that arrived AFTER the transport
       // was gone.
       if (this.receivedCloseBeforeActive) {

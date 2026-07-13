@@ -51,11 +51,11 @@ function makeFixture(overrides?: { approvalMode?: "never" | "passthrough" }) {
     approvalMode: overrides?.approvalMode ?? "never",
   });
   const upstream = new FakeUpstream();
-  const reverseDelivered: unknown[] = [];
-  const proxiedDelivered: Array<{ tuiId: number | string; frame: JsonRpcResponseFrame }> = [];
+  const reverseAccepted: unknown[] = [];
+  const proxiedAccepted: Array<{ tuiId: number | string; frame: JsonRpcResponseFrame }> = [];
   const tuiForward: TuiForwardSeam = {
-    acceptReverseRequestForSend(frame) { reverseDelivered.push(frame); return true; },
-    acceptProxiedResponseForSend(tuiId, frame) { proxiedDelivered.push({ tuiId, frame }); return true; },
+    acceptReverseRequestForSend(frame) { reverseAccepted.push(frame); return true; },
+    acceptProxiedResponseForSend(tuiId, frame) { proxiedAccepted.push({ tuiId, frame }); return true; },
   };
   let closeCallCount = 0;
   const router = new UpstreamRouter({
@@ -65,7 +65,7 @@ function makeFixture(overrides?: { approvalMode?: "never" | "passthrough" }) {
   });
   return {
     router, mux, reverseNs, humanOwner, upstream, diagnosticsEntries,
-    reverseDelivered, proxiedDelivered,
+    reverseAccepted, proxiedAccepted,
     closeCallCount: () => closeCallCount,
   };
 }
@@ -210,25 +210,25 @@ describe("UpstreamRouter — active dispatch", () => {
     expect(bad).toBeUndefined();
   });
 
-  test("proxied_tui response → delivered exactly ONCE to the owner via TuiForwardSeam", () => {
+  test("proxied_tui response → acceptedForSend exactly ONCE via TuiForwardSeam (accept != wire delivery)", () => {
     const f = makeFixture();
     f.router.subscribe();
     f.router.activate();
     const alloc = f.mux.allocateForProxiedTui(42);
     f.upstream.emitFrame({ jsonrpc: "2.0", id: alloc.upstreamId, result: { ok: true } });
-    expect(f.proxiedDelivered).toHaveLength(1);
-    expect(f.proxiedDelivered[0].tuiId).toBe(42);
+    expect(f.proxiedAccepted).toHaveLength(1);
+    expect(f.proxiedAccepted[0].tuiId).toBe(42);
     // Rewritten to TUI id.
-    const frame = f.proxiedDelivered[0].frame as { id: number };
+    const frame = f.proxiedAccepted[0].frame as { id: number };
     expect(frame.id).toBe(42);
   });
 
-  test("orphan response → single diagnostic, no delivery", () => {
+  test("orphan response → single diagnostic, no accept", () => {
     const f = makeFixture();
     f.router.subscribe();
     f.router.activate();
     f.upstream.emitFrame({ jsonrpc: "2.0", id: 9999, result: {} });
-    expect(f.proxiedDelivered).toHaveLength(0);
+    expect(f.proxiedAccepted).toHaveLength(0);
     const orphan = f.diagnosticsEntries.find((e) => e.operation === "upstream_response_orphan");
     expect(orphan).toBeDefined();
   });
