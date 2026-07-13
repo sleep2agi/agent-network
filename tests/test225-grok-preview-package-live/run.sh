@@ -17,6 +17,7 @@ ALIAS=preview-grok-225
 TEST_PASSWORD='Test225-Pass-123!'
 FAKE_GROK=/test225/fake-grok.mjs
 FAKE_OBSERVATIONS=/tmp/test225-fake-observations.jsonl
+FAKE_READINESS_OBSERVATIONS=/tmp/test225-fake-readiness.jsonl
 EXPECTED_GROK_ENV_KEYS=/tmp/test225-expected-grok-env-keys.json
 EXPECTED_GROK_PTY_ENV_KEYS=/tmp/test225-expected-grok-pty-env-keys.json
 EXPECTED_AGENT_NODE_ENV_KEYS=/tmp/test225-expected-agent-node-env-keys.json
@@ -235,7 +236,7 @@ cleanup() {
     "$EXPECTED_GROK_ENV_KEYS" "$EXPECTED_GROK_PTY_ENV_KEYS" "$EXPECTED_AGENT_NODE_ENV_KEYS" \
     "$EXPECTED_NPX_ENV_KEYS" "$NPX_ENV_OBSERVATION" \
     "$FALLBACK_PID_SNAPSHOT" \
-    "$FAKE_OBSERVATIONS" "$LOCAL_REGISTRY_LOG"
+    "$FAKE_OBSERVATIONS" "$FAKE_READINESS_OBSERVATIONS" "$LOCAL_REGISTRY_LOG"
   rm -rf /tmp/test225-candidate-extracted /tmp/test225-real-auth /tmp/test225-bin
 }
 trap cleanup EXIT
@@ -610,6 +611,12 @@ scan_fixed_file /tmp/test225-markers "$NPX_ENV_OBSERVATION" \
 scan_fixed_file /tmp/test225-live-credentials "$NPX_ENV_OBSERVATION" \
   || fail "npx resolver inherited a Hub credential"
 wait_file "$FAKE_OBSERVATIONS" 100 || fail "fake Grok did not write derived env observation"
+wait_file "$FAKE_READINESS_OBSERVATIONS" 100 \
+  || fail "fake Grok did not write a derived TUI readiness observation"
+if ! jq -e -s 'length > 0 and all(.[]; .preReadyNetworkWrites == 0)' \
+  "$FAKE_READINESS_OBSERVATIONS" >/dev/null; then
+  fail "candidate wrote a network prompt before the TUI composer readiness gate"
+fi
 if ! jq -e -s --slurpfile expected "$EXPECTED_GROK_ENV_KEYS" \
   --slurpfile expectedPty "$EXPECTED_GROK_PTY_ENV_KEYS" \
   --slurpfile expectedParent "$EXPECTED_AGENT_NODE_ENV_KEYS" \
@@ -856,6 +863,9 @@ jq -e -s '([.[] | select(.kind == "spawn")] | length) >= 2
   and all(.[]; (.forbiddenKeys | length) == 0 and .markerValueObserved == false)' \
   "$FAKE_OBSERVATIONS" >/dev/null \
   || fail "fake Grok did not resume or resumed with a forbidden env"
+jq -e -s 'length > 0 and all(.[]; .preReadyNetworkWrites == 0)' \
+  "$FAKE_READINESS_OBSERVATIONS" >/dev/null \
+  || fail "resume wrote a network prompt before the TUI composer readiness gate"
 grep -Fq 'fetching @sleep2agi/agent-node@preview' "$START_LOG" \
   || fail "initial package-only start no longer proves the documented npx preview fallback"
 grep -Fq '[anet] using installed agent-node with Grok co-presence capability.' "$RESUME_LOG" \

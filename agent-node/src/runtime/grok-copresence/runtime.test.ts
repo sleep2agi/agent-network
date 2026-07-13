@@ -21,6 +21,7 @@ import {
   buildGrokCopresenceArgs,
   formatNetworkTuiInput,
   grokSessionDirectory,
+  hasGrokTuiReadyMarker,
   openGrokCopresenceRuntime,
   type GrokCopresenceRuntimeSession,
   type GrokPtyLike,
@@ -88,6 +89,20 @@ describe("Grok copresence launch and injection policy", () => {
     })).toThrow("reserved Grok user_query markup");
   });
 
+  test("recognizes the pinned TUI composer footer across ANSI fragments", () => {
+    expect(hasGrokTuiReadyMarker("leader socket ready")).toBe(false);
+    expect(hasGrokTuiReadyMarker("Shift+\x1b[31mTab\x1b[0m:mo\x1b[2Kde")).toBe(false);
+    expect(hasGrokTuiReadyMarker(
+      "Shift+\x1b[31mTab\x1b[0m:mode  │  Ctrl+x:\x1b[2Kshortcuts",
+    )).toBe(true);
+    expect(hasGrokTuiReadyMarker(
+      "\x1b]0;Shift+Tab:mode  Ctrl+x:shortcuts\x07splash",
+    )).toBe(false);
+    expect(hasGrokTuiReadyMarker(
+      "\x1bPShift+Tab:mode  Ctrl+x:shortcuts",
+    )).toBe(false);
+  });
+
   test("rejects external permission sources and noninteractive modes", () => {
     const home = "/tmp/isolated-grok";
     const cleanInspection = {
@@ -135,6 +150,37 @@ describe("Grok copresence launch and injection policy", () => {
 });
 
 describe("Grok copresence runtime integration", () => {
+  test("queues network input until the pinned TUI composer is ready", async () => {
+    const fixture = new RuntimeFixture();
+    fixture.autoTuiReady = false;
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await fixture.open();
+      const pending = runtime.submit({
+        taskId: "readiness-gated",
+        from: "reviewer",
+        text: "wait for composer",
+        timeoutMs: 3_000,
+      });
+      await Bun.sleep(50);
+      expect(fixture.writes.join("")).not.toContain("[Agent Network/");
+      expect(runtime.state.queue.map((task) => task.taskId)).toEqual(["readiness-gated"]);
+
+      fixture.emitTuiData("Shift+");
+      fixture.emitTuiData("\x1b[31mTab\x1b[0m:mo");
+      await Bun.sleep(25);
+      expect(fixture.writes.join("")).not.toContain("[Agent Network/");
+      fixture.emitTuiData("de  │  Ctrl+x:shortcuts\r\n");
+
+      const result = await pending;
+      expect(result.replyText).toBe("FINAL readiness-gated");
+      expect(fixture.writes.join("")).toContain("[Agent Network/from=reviewer/task=readiness-gated]");
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 8_000);
+
   test("arbitrates a live PTY, settles final JSONL, attaches once, and resumes", async () => {
     const fixture = new RuntimeFixture();
     let runtime: GrokCopresenceRuntimeSession | undefined;
@@ -628,6 +674,7 @@ class RuntimeFixture {
   recoveryWrites: FakeDelayedWrite[] = [];
   controlledEnvOverride: NodeJS.ProcessEnv = {};
   flockBinary: string | undefined;
+  autoTuiReady = true;
   private ptys: FakePty[] = [];
 
   constructor() {
@@ -715,6 +762,7 @@ class RuntimeFixture {
       this.spawnEvents,
       this.spawnRawEvents,
       this.ptys.length > 0 ? this.recoveryWrites : [],
+      this.autoTuiReady,
     );
     await pty.start();
     this.ptys.push(pty);
@@ -723,6 +771,10 @@ class RuntimeFixture {
 
   async crashCurrent(): Promise<void> {
     await this.ptys.at(-1)?.crash(this.unsafeModeOnCrash);
+  }
+
+  emitTuiData(data: string): void {
+    this.ptys.at(-1)?.emitTuiData(data);
   }
 
   approvalDecisionCount(): number {
@@ -798,6 +850,7 @@ class FakePty implements GrokPtyLike {
     private readonly startupEvents: readonly unknown[],
     private readonly startupRawEvents: string,
     private readonly scheduledWrites: readonly FakeDelayedWrite[],
+    private readonly autoTuiReady: boolean,
   ) {}
 
   async start(): Promise<void> {
@@ -824,7 +877,15 @@ class FakePty implements GrokPtyLike {
         appendJson(join(this.sessionDir, `${write.source}.jsonl`), write.value);
       }, write.delayMs));
     }
-    this.emitData("\x1b[2Jfake Grok TUI ready\r\n");
+    if (this.autoTuiReady) {
+      setImmediate(() => this.emitData(
+        "\x1b[2JShift+\x1b[32mTab\x1b[0m:mode  │  Ctrl+x:shortcuts\r\n",
+      ));
+    }
+  }
+
+  emitTuiData(data: string): void {
+    this.emitData(data);
   }
 
   write(data: string): void {

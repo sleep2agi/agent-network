@@ -41,6 +41,9 @@ under `/tmp` and are destroyed rather than copied into artifacts:
 
 ```bash
 sg docker -c 'docker run --rm \
+  --cap-add SYS_ADMIN \
+  --security-opt seccomp=unconfined \
+  --security-opt apparmor=unconfined \
   -e RUN_REAL_GROK=1 \
   -e TEST225_REAL_GROK_BIN=/host-grok/bin/grok-0.2.93 \
   -e TEST225_REAL_GROK_AUTH=/host-grok/auth.json \
@@ -49,6 +52,14 @@ sg docker -c 'docker run --rm \
   -v "$PWD/docs/tests:/artifacts" \
   test225-grok-preview'
 ```
+
+The three Docker security options are required only by the authenticated
+layer because Grok 0.2.93 launches its configured workspace sandbox through
+Bubblewrap. Keep the host mounts read-only and limited to the pinned binary,
+`auth.json`, and optional `agent_id`; the test otherwise uses an isolated
+HOME, Hub, working directory, and session. A default Docker profile blocks
+Bubblewrap before the Leader socket is created and is therefore not a valid
+runtime result.
 
 The suite is a preview gate only. It does not claim the formal native Leader
 protocol freeze or approval-owner completion required for `latest`.

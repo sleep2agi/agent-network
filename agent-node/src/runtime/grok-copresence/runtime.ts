@@ -43,10 +43,62 @@ import { buildGrokHelperEnv, buildGrokPtyEnv, projectGrokChildEnv } from "../gro
 // reducer's hard JSONL line cap is 1 MiB.
 const MAX_NETWORK_PROMPT_BYTES = 384 * 1024;
 const MAX_DEFERRED_HUMAN_BYTES = 128 * 1024;
+const MAX_TUI_READINESS_BUFFER = 128 * 1024;
 const MAX_TAIL_READ_BYTES = 4 * 1024 * 1024;
 const MAX_LIFECYCLE_LINE_BYTES = 256 * 1024;
 const MAX_RESUME_AUDIT_BYTES = 64 * 1024 * 1024;
 const UNIX_SOCKET_PATH_MAX_BYTES = 100;
+const GROK_TUI_READY_TEXT = "Shift+Tab:mode";
+const GROK_TUI_SHORTCUTS_TEXT = "Ctrl+x:shortcuts";
+
+/**
+ * Grok 0.2.93 creates its Leader socket before the interactive editor has
+ * finished terminal negotiation. Input written in that window is silently
+ * discarded. The pinned TUI renders this footer only after its composer is
+ * accepting input. Strip terminal control framing so ANSI fragmentation
+ * cannot hide a marker that spans multiple PTY chunks.
+ */
+export function hasGrokTuiReadyMarker(raw: string): boolean {
+  let visible = "";
+  let state: "text" | "escape" | "csi" | "osc" | "control-string" = "text";
+  for (let index = 0; index < raw.length; index += 1) {
+    const code = raw.charCodeAt(index);
+    const char = raw[index];
+    if (state === "text") {
+      if (code === 0x1b) state = "escape";
+      else if (code === 0x9b) state = "csi";
+      else if (code === 0x9d) state = "osc";
+      else if (code === 0x90 || code === 0x98 || code === 0x9e || code === 0x9f) {
+        state = "control-string";
+      } else if (code >= 0x20 && code !== 0x7f && !(code >= 0x80 && code <= 0x9f)) {
+        visible += char;
+      }
+      continue;
+    }
+    if (state === "escape") {
+      if (char === "[") state = "csi";
+      else if (char === "]") state = "osc";
+      else if (char === "P" || char === "X" || char === "^" || char === "_") {
+        state = "control-string";
+      } else state = "text";
+      continue;
+    }
+    if (state === "csi") {
+      if (code >= 0x40 && code <= 0x7e) state = "text";
+      continue;
+    }
+    if (state === "osc" && code === 0x07) {
+      state = "text";
+      continue;
+    }
+    if (code === 0x1b && raw[index + 1] === "\\") {
+      index += 1;
+      state = "text";
+    }
+  }
+  return visible.includes(GROK_TUI_READY_TEXT)
+    && visible.includes(GROK_TUI_SHORTCUTS_TEXT);
+}
 const COMPLETION_CHAT_SETTLE_MS = 500;
 
 export interface GrokPtyLike {
@@ -415,6 +467,8 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
 
   private readonly log: (message: string) => void;
   private readonly warn: (message: string) => void;
+  private tuiReadinessBuffer = "";
+  private tuiReady = false;
 
   constructor(private readonly opts: GrokCopresenceOpenOptions) {
     this.sessionId = opts.sessionId || randomUUID();
@@ -631,6 +685,8 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     const ptyExit = this.ptyExit;
     this.pty = null;
     this.ptyExit = null;
+    this.tuiReady = false;
+    this.tuiReadinessBuffer = "";
     this.ptyGeneration += 1;
     await terminateOwnedPty(pty, ptyExit).catch((error) => {
       this.retainLocksForUnconfirmedPty = true;
@@ -665,6 +721,8 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       throw new GrokSpawnAuditError("grok copresence spawn audit returned an unexpected HOME/GROK_HOME");
     }
     const generation = ++this.ptyGeneration;
+    this.tuiReady = false;
+    this.tuiReadinessBuffer = "";
     const binary = this.opts.binary ?? "grok";
     const args = buildGrokCopresenceArgs({
       cwd: this.opts.cwd,
@@ -697,11 +755,14 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     this.ptyExit = exitPromise;
     pty.onData((data) => {
       if (generation !== this.ptyGeneration || this.closing) return;
+      this.observeTuiReadiness(generation, data);
       this.attach?.broadcastOutput(data);
     });
     pty.onExit((event) => {
       resolveExit();
       if (generation !== this.ptyGeneration || this.closing) return;
+      this.tuiReady = false;
+      this.tuiReadinessBuffer = "";
       this.pty = null;
       this.ptyExit = null;
       const recovery = this.recoverFromExit(event);
@@ -848,6 +909,8 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       const ptyExit = this.ptyExit;
       this.pty = null;
       this.ptyExit = null;
+      this.tuiReady = false;
+      this.tuiReadinessBuffer = "";
       this.ptyGeneration += 1;
       await terminateOwnedPty(pty, ptyExit).catch(() => {
         this.retainLocksForUnconfirmedPty = true;
@@ -1163,8 +1226,21 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     if (this.arbitration.phase === "idle") this.scheduleNetworkIfIdle();
   }
 
+  private observeTuiReadiness(generation: number, data: string): void {
+    if (generation !== this.ptyGeneration || this.tuiReady || this.closing) return;
+    this.tuiReadinessBuffer = `${this.tuiReadinessBuffer}${data}`
+      .slice(-MAX_TUI_READINESS_BUFFER);
+    if (!hasGrokTuiReadyMarker(this.tuiReadinessBuffer)) return;
+
+    this.tuiReady = true;
+    this.tuiReadinessBuffer = "";
+    this.log(`[grok-copresence] TUI input ready generation=${generation}`);
+    this.broadcastState();
+    if (!this.recovering) setImmediate(() => this.scheduleNetworkIfIdle());
+  }
+
   private scheduleNetworkIfIdle(): void {
-    if (!this.pty || this.recovering || this.closing) return;
+    if (!this.pty || !this.tuiReady || this.recovering || this.closing) return;
     const transition = this.transition({ type: "schedule_network" });
     for (const effect of transition.effects) {
       if (effect.type !== "inject_network_task") continue;
@@ -1528,6 +1604,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       phase: this.arbitration.phase,
       revision: this.arbitration.revision,
       waitingHuman: this.arbitration.waitingHuman,
+      tuiReady: this.tuiReady,
       queueLength: this.arbitration.queue.length,
       queuedTaskIds: this.arbitration.queue.slice(0, 16).map((task) => task.taskId),
       active: active?.owner === "network"

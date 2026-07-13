@@ -14,6 +14,7 @@ import path from "node:path";
 
 const argv = process.argv.slice(2);
 const observationsPath = "/tmp/test225-fake-observations.jsonl";
+const readinessObservationsPath = "/tmp/test225-fake-readiness.jsonl";
 const forbiddenName = /^(?:DATABASE_URL|ntok|utok)$|^AWS_|(?:_TOKEN|_SECRET|_KEY)$/i;
 const forbiddenMarker = /TEST225_(?:DB|AWS|TOKEN|SECRET|KEY|NTOK|UTOK)_CANARY/;
 
@@ -143,11 +144,33 @@ recordEnvironment("spawn", {
 try { fs.unlinkSync(leaderSocket); } catch {}
 fs.mkdirSync(path.dirname(leaderSocket), { recursive: true, mode: 0o700 });
 const server = net.createServer((socket) => socket.on("error", () => {}));
+let tuiReady = false;
+let preReadyNetworkWrites = 0;
+
+function recordReadiness(event) {
+  fs.appendFileSync(readinessObservationsPath, JSON.stringify({
+    event,
+    preReadyNetworkWrites,
+  }) + "\n", { mode: 0o600 });
+}
+
 server.listen(leaderSocket, () => {
   try { fs.chmodSync(leaderSocket, 0o600); } catch {}
   process.stdout.write(
-    `\u001b[2J\u001b[HFAKE_GROK_TUI_READY session=${sessionId.slice(0, 8)} mode=${resume ? "resume" : "new"}\r\n`,
+    `\u001b[2J\u001b[HFAKE_GROK_TUI_SPLASH session=${sessionId.slice(0, 8)} mode=${resume ? "resume" : "new"}\r\n`,
   );
+  // Deliberately split the real 0.2.93 footer after the Leader socket is
+  // visible. A socket-only admission bug will write a network prompt during
+  // this window and the fake records/drops it, exactly like the real TUI.
+  setTimeout(() => process.stdout.write("Shift+\u001b[32mTab\u001b[0m:mo"), 350);
+  setTimeout(() => {
+    process.stdout.write("de  │  Ctrl+x:");
+  }, 700);
+  setTimeout(() => {
+    tuiReady = true;
+    process.stdout.write("shortcuts\r\n");
+    recordReadiness("ready");
+  }, 1_050);
 });
 
 try { process.stdin.setRawMode?.(true); } catch {}
@@ -161,6 +184,11 @@ function appendJson(file, value) {
 }
 
 function handlePrompt(prompt) {
+  if (!tuiReady) {
+    preReadyNetworkWrites += 1;
+    recordReadiness("dropped-before-ready");
+    return;
+  }
   turn += 1;
   const benignMarker = prompt.match(/GROK_PREVIEW_(?:LIVE|RESUME|REAL)_[A-Z0-9_-]+/)?.[0]
     || `GROK_PREVIEW_TURN_${turn}`;
@@ -214,6 +242,7 @@ process.stdin.on("data", (chunk) => {
 function shutdown(code = 0) {
   if (stopped) return;
   stopped = true;
+  recordReadiness("shutdown");
   server.close(() => {
     try { fs.unlinkSync(leaderSocket); } catch {}
     process.exit(code);
