@@ -488,6 +488,64 @@ inventory_result_metadata_valid() {
   [ "$mode" = 600 ] && [ "$links" = 1 ] && [ "$owner" = "$(id -u)" ]
 }
 
+select_unique_status_row() {
+  local alias=$1
+  jq -ce --arg alias "$alias" '
+    def current_wrapper:
+      type == "object"
+      and ((keys | sort) == ["ok","sessions","summary"])
+      and .ok == true
+      and (.sessions | type == "array")
+      and (.summary
+        | type == "object"
+        and ((keys | sort) == ["idle","offline","total","working"])
+        and all(.[]; type == "number" and . >= 0 and floor == .));
+    def status_rows:
+      if type == "array" then .
+      elif current_wrapper then .sessions
+      else error("unexpected /api/status payload")
+      end;
+    status_rows
+    | if all(.[];
+        type == "object"
+        and (.alias | type == "string")
+        and (.status | type == "string")
+        and (.agent == null or (.agent | type == "string")))
+      then .
+      else error("invalid /api/status session row")
+      end
+    | map(select(.alias == $alias))
+    | if length == 1 then .[0]
+      elif length == 0 then error("status alias missing")
+      else error("status alias duplicated")
+      end
+  '
+}
+
+assert_status_selector_accepts() {
+  local label=$1 payload=$2 output=/tmp/test225-status-selector-output
+  rm -f -- "$output"
+  printf '%s' "$payload" | select_unique_status_row selector-target >"$output" 2>/dev/null \
+    || fail "status selector rejected $label"
+  jq -e '.alias == "selector-target" and .status == "online"' "$output" >/dev/null \
+    || fail "status selector returned the wrong row for $label"
+  rm -f -- "$output"
+}
+
+assert_status_selector_rejects() {
+  local label=$1 payload=$2 output=/tmp/test225-status-selector-output
+  rm -f -- "$output"
+  if printf '%s' "$payload" | select_unique_status_row selector-target >"$output" 2>/dev/null; then
+    rm -f -- "$output"
+    fail "status selector accepted $label"
+  fi
+  [ ! -s "$output" ] || {
+    rm -f -- "$output"
+    fail "status selector emitted partial output for $label"
+  }
+  rm -f -- "$output"
+}
+
 inventory_result_valid() {
   local candidate=$1 expected_status=$2
   inventory_result_metadata_valid "$candidate" || return 1
@@ -603,7 +661,7 @@ run_tui_inventory_gate() {
 
 fail_if_task_terminal_error() {
   local label=$1 row=$2 phase=$3 started_ms=$4
-  local status category bytes elapsed_ms temporary
+  local status category subcategory size_bucket elapsed_ms temporary
   status=$(jq -r '.status // ""' <<<"$row")
   case "$status" in
     failed|cancelled|expired) ;;
@@ -627,8 +685,8 @@ fail_if_task_terminal_error() {
     fail "$label produced turn diagnostic with invalid private-file metadata"
   }
   jq -e '
-    (keys | sort) == ["elapsedBucket","failureCode","phase","resultBytes","status","v"]
-    and .v == 1
+    (keys | sort) == ["elapsedBucket","failureCode","failureSubcode","phase","resultSizeBucket","status","v"]
+    and .v == 2
     and (.phase == "first_task" or .phase == "resume_task")
     and (.status == "failed" or .status == "cancelled" or .status == "expired")
     and (.failureCode | IN(
@@ -636,7 +694,27 @@ fail_if_task_terminal_error() {
       "leader_lifecycle","native_outcome","runtime_closed","service_or_model",
       "spawn_audit","timeout","tui_exit","unknown"
     ))
-    and (.resultBytes | type == "number" and . >= 0 and . <= 2048)
+    and (.failureSubcode | IN(
+      "none","unknown",
+      "chat.stat.missing_after_arm","chat.stat.identity_changed",
+      "chat.stat.size_regressed","chat.stat.non_regular","chat.stat.owner_mismatch",
+      "chat.stat.io_other","chat.open.io_other","chat.fstat.non_regular",
+      "chat.fstat.io_other","chat.read.io_other","chat.read.state_invariant",
+      "chat.close.io_other","chat.reduce.state_invariant",
+      "events.stat.missing_after_arm","events.stat.identity_changed",
+      "events.stat.size_regressed","events.stat.non_regular","events.stat.owner_mismatch",
+      "events.stat.io_other","events.open.io_other","events.fstat.non_regular",
+      "events.fstat.io_other","events.read.io_other","events.read.state_invariant",
+      "events.close.io_other","events.reduce.state_invariant",
+      "events.lifecycle.state_invariant","combined.flush.state_invariant"
+    ))
+    and (
+      if .failureCode == "jsonl_tail" then .failureSubcode != "none"
+      elif .failureCode == "unknown" then .failureSubcode == "unknown"
+      else .failureSubcode == "none"
+      end
+    )
+    and (.resultSizeBucket | IN("empty","lt_256","lt_1024","lt_2049"))
     and (.elapsedBucket | IN("lt_30s","lt_120s","lt_600s","gte_600s"))
   ' "$temporary" >/dev/null || {
     rm -f -- "$temporary"
@@ -665,8 +743,9 @@ fail_if_task_terminal_error() {
   scan_fixed_file /tmp/test225-real-patterns "$REAL_TURN_DIAGNOSTIC" \
     || fail "$label persisted diagnostic retained an auth scalar"
   category=$(jq -r '.failureCode' "$REAL_TURN_DIAGNOSTIC")
-  bytes=$(jq -r '.resultBytes' "$REAL_TURN_DIAGNOSTIC")
-  log "diagnostic: $label terminal_status=$status category=$category result_bytes=$bytes artifact=$(basename "$REAL_TURN_DIAGNOSTIC") detail_withheld=true"
+  subcategory=$(jq -r '.failureSubcode' "$REAL_TURN_DIAGNOSTIC")
+  size_bucket=$(jq -r '.resultSizeBucket' "$REAL_TURN_DIAGNOSTIC")
+  log "diagnostic: $label terminal_status=$status category=$category subcategory=$subcategory result_size_bucket=$size_bucket artifact=$(basename "$REAL_TURN_DIAGNOSTIC") detail_withheld=true"
   fail "$label reached a terminal error before a valid reply"
 }
 
@@ -944,6 +1023,21 @@ node --test /test225/failure-diagnostic.test.mjs \
   >/tmp/test225-failure-diagnostic-test.log 2>&1 \
   || fail_with_private_log "closed turn diagnostic unit tests failed" /tmp/test225-failure-diagnostic-test.log
 rm -f /tmp/test225-failure-diagnostic-test.log
+
+STATUS_SELECTOR_ROW='{"alias":"selector-target","status":"online","agent":"agent-node:grok-build-cli"}'
+assert_status_selector_accepts legacy-array "[$STATUS_SELECTOR_ROW]"
+assert_status_selector_accepts current-wrapper \
+  "{\"ok\":true,\"sessions\":[$STATUS_SELECTOR_ROW],\"summary\":{\"idle\":1,\"working\":0,\"offline\":0,\"total\":1}}"
+assert_status_selector_rejects top-level-boolean 'true'
+assert_status_selector_rejects unknown-wrapper \
+  "{\"ok\":true,\"agents\":[$STATUS_SELECTOR_ROW]}"
+assert_status_selector_rejects mixed-array "[$STATUS_SELECTOR_ROW,true]"
+assert_status_selector_rejects duplicate-alias "[$STATUS_SELECTOR_ROW,$STATUS_SELECTOR_ROW]"
+assert_status_selector_rejects missing-alias \
+  '[{"alias":"other","status":"online","agent":null}]'
+assert_status_selector_rejects invalid-row \
+  '[{"alias":false,"status":"online","agent":null}]'
+unset STATUS_SELECTOR_ROW
 
 ANET_VERSION=$(node -p 'require("/usr/local/lib/node_modules/@sleep2agi/agent-network/package.json").version')
 NODE_TGZ=$(find /candidate -maxdepth 1 -type f -name 'sleep2agi-agent-node-*.tgz' -print -quit)
@@ -1364,9 +1458,11 @@ wait_pane test225-attach 'GROK_PREVIEW_LIVE_225_A' "$RELOAD_CAPTURE" 100 \
 wait_pane test225-attach 'GROK_PREVIEW_FAKE_REPLY_OK' "$RELOAD_CAPTURE" 100 \
   || fail "attached human TUI did not live-render the Grok reply"
 pass "create -> start -> register -> Hub task -> real tmux attach live render -> reply"
-STATUS_ROW=$(curl -fsS "$HUB/api/status?network_id=$NETWORK_ID" \
+if ! STATUS_ROW=$(curl -fsS "$HUB/api/status?network_id=$NETWORK_ID" \
   -H "Authorization: Bearer $USER_TOKEN" \
-  | jq -c --arg alias "$ALIAS" '.[]? | select(.alias == $alias)' || true)
+  | select_unique_status_row "$ALIAS"); then
+  fail "Hub status payload was invalid or alias cardinality was not exactly one"
+fi
 jq -e '.agent == "agent-node:grok-build-cli" and (.status == "online" or .status == "working")' \
   <<<"$STATUS_ROW" >/dev/null \
   || fail "Hub session did not retain the registered grok-build-cli agent identity"

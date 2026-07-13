@@ -3391,10 +3391,80 @@ const GROK_COPRESENCE_FAILURE_CODE_SET = new Set([
   "unknown",
 ]);
 
+// This is deliberately a direct list of reviewed runtime outputs, not a
+// source/stage/reason cartesian product.  The CLI is a separate persistence
+// boundary from the runtime module, so it revalidates the non-enumerable
+// property before placing the value-free marker in a Hub reply.
+const GROK_COPRESENCE_JSONL_FAILURE_SUBCODE_SET = new Set([
+  "unknown",
+  "chat.stat.missing_after_arm",
+  "chat.stat.identity_changed",
+  "chat.stat.size_regressed",
+  "chat.stat.non_regular",
+  "chat.stat.owner_mismatch",
+  "chat.stat.io_other",
+  "chat.open.io_other",
+  "chat.fstat.non_regular",
+  "chat.fstat.io_other",
+  "chat.read.io_other",
+  "chat.read.state_invariant",
+  "chat.close.io_other",
+  "chat.reduce.state_invariant",
+  "events.stat.missing_after_arm",
+  "events.stat.identity_changed",
+  "events.stat.size_regressed",
+  "events.stat.non_regular",
+  "events.stat.owner_mismatch",
+  "events.stat.io_other",
+  "events.open.io_other",
+  "events.fstat.non_regular",
+  "events.fstat.io_other",
+  "events.read.io_other",
+  "events.read.state_invariant",
+  "events.close.io_other",
+  "events.reduce.state_invariant",
+  "events.lifecycle.state_invariant",
+  "combined.flush.state_invariant",
+]);
+
+type ReviewedGrokFailure = {
+  code: string;
+  subcode: string;
+};
+
 function reviewedGrokCopresenceFailureCode(value: unknown): string | null {
   return typeof value === "string" && GROK_COPRESENCE_FAILURE_CODE_SET.has(value)
     ? value
     : null;
+}
+
+function reviewedGrokCopresenceFailure(
+  codeValue: unknown,
+  subcodeValue: unknown,
+): ReviewedGrokFailure {
+  const code = reviewedGrokCopresenceFailureCode(codeValue);
+  if (!code || code === "unknown") {
+    return { code: "unknown", subcode: "unknown" };
+  }
+  if (code === "jsonl_tail") {
+    return {
+      code,
+      subcode: typeof subcodeValue === "string"
+        && GROK_COPRESENCE_JSONL_FAILURE_SUBCODE_SET.has(subcodeValue)
+        ? subcodeValue
+        : "unknown",
+    };
+  }
+  return subcodeValue === "none"
+    ? { code, subcode: "none" }
+    : { code: "unknown", subcode: "unknown" };
+}
+
+function withoutGrokFailureMarkers(value: string): string {
+  return value.replace(
+    /\[grok_(?:failure|subcode):[^\]\r\n]*\]/g,
+    "[grok_diagnostic_marker_withheld]",
+  );
 }
 
 async function processWithGrokCopresence(
@@ -3422,12 +3492,22 @@ async function processWithGrokCopresence(
     });
     return sanitizeGrokCommhubLeak(result.replyText || "（无回复）");
   } catch (error) {
-    const { grokCopresenceFailureCode } = await import("./runtime/grok-copresence/runtime");
+    const {
+      grokCopresenceFailureCode,
+      grokCopresenceFailureSubcode,
+    } = await import("./runtime/grok-copresence/runtime");
     const failureCode = grokCopresenceFailureCode(error);
+    const failureSubcode = grokCopresenceFailureSubcode(error);
     const message = error instanceof Error ? error.message : String(error || "unknown error");
     const wrapped = new Error(message);
     Object.defineProperty(wrapped, "grokFailureCode", {
       value: failureCode,
+      enumerable: false,
+      configurable: false,
+      writable: false,
+    });
+    Object.defineProperty(wrapped, "grokFailureSubcode", {
+      value: failureSubcode,
       enumerable: false,
       configurable: false,
       writable: false,
@@ -3908,6 +3988,7 @@ async function processTask(task: string, from: string, taskId: string | null = n
   let text: string;
   let failed = false;
   let grokFailureCode: string | null = null;
+  let grokFailureSubcode: string | null = null;
   try {
     // Every inbound network task must be visible in the shared Grok TUI. A2
     // delegation is intentionally human-only, so the legacy network-side
@@ -3918,7 +3999,12 @@ async function processTask(task: string, from: string, taskId: string | null = n
     text = `${RUNTIME} 错误: ${err.message}`;
     failed = true;
     if (GROK_COPRESENCE) {
-      grokFailureCode = reviewedGrokCopresenceFailureCode(err?.grokFailureCode) || "unknown";
+      const reviewed = reviewedGrokCopresenceFailure(
+        err?.grokFailureCode,
+        err?.grokFailureSubcode,
+      );
+      grokFailureCode = reviewed.code;
+      grokFailureSubcode = reviewed.subcode;
     }
     error(`✗ ${err.message}`);
   } finally {
@@ -3932,7 +4018,10 @@ async function processTask(task: string, from: string, taskId: string | null = n
   // "may not have access" / "may not exist").
   if (!failed && /(API 错误|API error|需要设置.*KEY|missing.*key|issue with the selected model|may not have access|may not exist|model.+not.+(found|available))/i.test(text)) {
     failed = true;
-    if (GROK_COPRESENCE) grokFailureCode = "service_or_model";
+    if (GROK_COPRESENCE) {
+      grokFailureCode = "service_or_model";
+      grokFailureSubcode = "none";
+    }
   }
 
   // Vendor-error transient retry (Vincent 2026-06-29 UAT — 通信龙 65e59373):
@@ -3966,7 +4055,10 @@ async function processTask(task: string, from: string, taskId: string | null = n
       const retried = await think(augmentedTask, from, taskId, images);
       text = retried;
       failed = false;
-      if (GROK_COPRESENCE) grokFailureCode = null;
+      if (GROK_COPRESENCE) {
+        grokFailureCode = null;
+        grokFailureSubcode = null;
+      }
       // Re-apply the API-error detection on the retry result (consistency
       // with the first-attempt path; without this a retried "API error"
       // message would slip through as `failed=false`).
@@ -3976,13 +4068,21 @@ async function processTask(task: string, from: string, taskId: string | null = n
         )
       ) {
         failed = true;
-        if (GROK_COPRESENCE) grokFailureCode = "service_or_model";
+        if (GROK_COPRESENCE) {
+          grokFailureCode = "service_or_model";
+          grokFailureSubcode = "none";
+        }
       }
     } catch (err: any) {
       text = `${RUNTIME} 错误: ${err.message}`;
       failed = true;
       if (GROK_COPRESENCE) {
-        grokFailureCode = reviewedGrokCopresenceFailureCode(err?.grokFailureCode) || "unknown";
+        const reviewed = reviewedGrokCopresenceFailure(
+          err?.grokFailureCode,
+          err?.grokFailureSubcode,
+        );
+        grokFailureCode = reviewed.code;
+        grokFailureSubcode = reviewed.subcode;
       }
       warn(`[vendor-retry] retry attempt ${retryAttempt} threw: ${err?.message ?? err}`);
     }
@@ -4005,7 +4105,10 @@ async function processTask(task: string, from: string, taskId: string | null = n
   if (text && isVendorErrorForUser(text, failed)) {
     const raw = text;
     text = VENDOR_ERROR_REPLACEMENT;
-    if (GROK_COPRESENCE && !grokFailureCode) grokFailureCode = "service_or_model";
+    if (GROK_COPRESENCE && !grokFailureCode) {
+      grokFailureCode = "service_or_model";
+      grokFailureSubcode = "none";
+    }
     failed = true;
     const safeRaw = persistenceRedactor.redactText(raw.slice(0, 400).replace(/\n/g, " ")).text;
     process.stderr.write(
@@ -4013,7 +4116,11 @@ async function processTask(task: string, from: string, taskId: string | null = n
     );
   }
   if (GROK_COPRESENCE && failed) {
-    text = `[grok_failure:${grokFailureCode || "unknown"}] ${text}`;
+    const reviewed = reviewedGrokCopresenceFailure(
+      grokFailureCode || "unknown",
+      grokFailureSubcode || "unknown",
+    );
+    text = `[grok_failure:${reviewed.code}] [grok_subcode:${reviewed.subcode}] ${withoutGrokFailureMarkers(text)}`;
   }
   if (GROK_EXECUTION_MODE === "cli") {
     text = persistenceRedactor.redactText(text).text;

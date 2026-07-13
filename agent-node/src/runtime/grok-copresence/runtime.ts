@@ -193,8 +193,61 @@ export type GrokCopresenceFailureCode = typeof GROK_COPRESENCE_FAILURE_CODES[num
 
 const GROK_COPRESENCE_FAILURE_CODE_SET = new Set<string>(GROK_COPRESENCE_FAILURE_CODES);
 
+/**
+ * Direct allowlist of actual synchronous JSONL boundaries. Do not generalize
+ * this into a source/stage/reason cartesian product: accepting combinations
+ * which no reviewed path emits would turn a mutated value into a valid one.
+ * No literal may contain a path, errno body, byte count, cursor/file identity,
+ * or process/session/task identifier.
+ */
+export const GROK_JSONL_TAIL_FAILURE_SUBCODES = Object.freeze([
+  "unknown",
+  "chat.stat.missing_after_arm",
+  "chat.stat.identity_changed",
+  "chat.stat.size_regressed",
+  "chat.stat.non_regular",
+  "chat.stat.owner_mismatch",
+  "chat.stat.io_other",
+  "chat.open.io_other",
+  "chat.fstat.non_regular",
+  "chat.fstat.io_other",
+  "chat.read.io_other",
+  "chat.read.state_invariant",
+  "chat.close.io_other",
+  "chat.reduce.state_invariant",
+  "events.stat.missing_after_arm",
+  "events.stat.identity_changed",
+  "events.stat.size_regressed",
+  "events.stat.non_regular",
+  "events.stat.owner_mismatch",
+  "events.stat.io_other",
+  "events.open.io_other",
+  "events.fstat.non_regular",
+  "events.fstat.io_other",
+  "events.read.io_other",
+  "events.read.state_invariant",
+  "events.close.io_other",
+  "events.reduce.state_invariant",
+  "events.lifecycle.state_invariant",
+  "combined.flush.state_invariant",
+] as const);
+
+export type GrokJsonlTailFailureSubcode = typeof GROK_JSONL_TAIL_FAILURE_SUBCODES[number];
+export type GrokCopresenceFailureSubcode = "none" | GrokJsonlTailFailureSubcode;
+type GrokJsonlTailBoundarySubcode = Exclude<GrokJsonlTailFailureSubcode, "unknown">;
+
+const GROK_JSONL_TAIL_FAILURE_SUBCODE_SET = new Set<string>(
+  GROK_JSONL_TAIL_FAILURE_SUBCODES,
+);
+
 function isGrokCopresenceFailureCode(value: unknown): value is GrokCopresenceFailureCode {
   return typeof value === "string" && GROK_COPRESENCE_FAILURE_CODE_SET.has(value);
+}
+
+function reviewedGrokJsonlTailFailureSubcode(value: unknown): GrokJsonlTailFailureSubcode {
+  return typeof value === "string" && GROK_JSONL_TAIL_FAILURE_SUBCODE_SET.has(value)
+    ? value as GrokJsonlTailFailureSubcode
+    : "unknown";
 }
 
 /**
@@ -207,14 +260,30 @@ function isGrokCopresenceFailureCode(value: unknown): value is GrokCopresenceFai
  */
 export class GrokCopresenceFailure extends Error {
   readonly failureCode: GrokCopresenceFailureCode;
+  readonly failureSubcode!: GrokCopresenceFailureSubcode;
 
-  constructor(failureCode: GrokCopresenceFailureCode, message: string) {
+  constructor(
+    failureCode: GrokCopresenceFailureCode,
+    message: string,
+    failureSubcode: unknown = "unknown",
+  ) {
     if (!isGrokCopresenceFailureCode(failureCode)) {
       throw new Error("invalid Grok copresence failure code");
     }
     super(message);
     this.name = "GrokCopresenceFailure";
     this.failureCode = failureCode;
+    // Keep the subcode out of ordinary Error enumeration. The explicit
+    // accessor below revalidates it at every egress, including after a test or
+    // caller mutates the JavaScript field despite TypeScript's readonly type.
+    Object.defineProperty(this, "failureSubcode", {
+      value: failureCode === "jsonl_tail"
+        ? reviewedGrokJsonlTailFailureSubcode(failureSubcode)
+        : "none",
+      enumerable: false,
+      configurable: false,
+      writable: true,
+    });
   }
 }
 
@@ -223,6 +292,48 @@ export function grokCopresenceFailureCode(error: unknown): GrokCopresenceFailure
     && isGrokCopresenceFailureCode(error.failureCode)
     ? error.failureCode
     : "unknown";
+}
+
+export function grokCopresenceFailureSubcode(error: unknown): GrokCopresenceFailureSubcode {
+  if (!(error instanceof GrokCopresenceFailure) || !isGrokCopresenceFailureCode(error.failureCode)) {
+    return "unknown";
+  }
+  if (error.failureCode === "jsonl_tail") {
+    return reviewedGrokJsonlTailFailureSubcode(error.failureSubcode);
+  }
+  return error.failureSubcode === "none" ? "none" : "unknown";
+}
+
+class GrokJsonlTailBoundaryError extends Error {
+  readonly failureSubcode: GrokJsonlTailBoundarySubcode;
+
+  constructor(
+    failureSubcode: GrokJsonlTailBoundarySubcode,
+    cause: unknown,
+  ) {
+    super(errorMessage(cause));
+    this.name = "GrokJsonlTailBoundaryError";
+    this.failureSubcode = failureSubcode;
+  }
+}
+
+function jsonlTailBoundaryError(
+  failureSubcode: GrokJsonlTailBoundarySubcode,
+  cause: unknown,
+): GrokJsonlTailBoundaryError {
+  return new GrokJsonlTailBoundaryError(failureSubcode, cause);
+}
+
+function atJsonlTailBoundary<T>(
+  failureSubcode: GrokJsonlTailBoundarySubcode,
+  operation: () => T,
+): T {
+  try {
+    return operation();
+  } catch (error) {
+    if (error instanceof GrokJsonlTailBoundaryError) throw error;
+    throw jsonlTailBoundaryError(failureSubcode, error);
+  }
 }
 
 export interface GrokCopresenceRuntimeSession {
@@ -1480,18 +1591,40 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       // Always consume chat first. If events wins a filesystem flush race,
       // the reducer retains pending completion until the next assistant line.
       this.chatTail?.poll(
-        (chunk) => this.reduceLogChunk("chat_history", chunk),
-        () => this.resetLogFraming("chat_history"),
+        (chunk) => atJsonlTailBoundary(
+          "chat.reduce.state_invariant",
+          () => this.reduceLogChunk("chat_history", chunk),
+        ),
+        () => atJsonlTailBoundary(
+          "chat.reduce.state_invariant",
+          () => this.resetLogFraming("chat_history"),
+        ),
       );
       this.eventsTail?.poll((chunk) => {
-        this.reduceLogChunk("events", chunk);
-        this.reduceLifecycleChunk(chunk);
-      }, () => this.resetLogFraming("events"));
-      this.flushSettledCompletion();
+        atJsonlTailBoundary(
+          "events.reduce.state_invariant",
+          () => this.reduceLogChunk("events", chunk),
+        );
+        atJsonlTailBoundary(
+          "events.lifecycle.state_invariant",
+          () => this.reduceLifecycleChunk(chunk),
+        );
+      }, () => atJsonlTailBoundary(
+        "events.reduce.state_invariant",
+        () => this.resetLogFraming("events"),
+      ));
+      atJsonlTailBoundary(
+        "combined.flush.state_invariant",
+        () => this.flushSettledCompletion(),
+      );
     } catch (error) {
+      const failureSubcode = error instanceof GrokJsonlTailBoundaryError
+        ? reviewedGrokJsonlTailFailureSubcode(error.failureSubcode)
+        : "unknown";
       const fatal = new GrokCopresenceFailure(
         "jsonl_tail",
         `grok copresence lost its trusted JSONL tail: ${errorMessage(error)}`,
+        failureSubcode,
       );
       this.warn(`[grok-copresence] ${fatal.message}`);
       void this.failFatal(fatal);
@@ -1979,6 +2112,61 @@ function assertTrustedResumeFile(
   }
 }
 
+type SafeJsonlTailFailureKey =
+  | "statMissingAfterArm"
+  | "statIdentityChanged"
+  | "statSizeRegressed"
+  | "statNonRegular"
+  | "statOwnerMismatch"
+  | "statIoOther"
+  | "openIoOther"
+  | "fstatNonRegular"
+  | "fstatIoOther"
+  | "readIoOther"
+  | "readStateInvariant"
+  | "closeIoOther";
+
+const SAFE_JSONL_TAIL_FAILURE_SUBCODES = Object.freeze({
+  chat_history: Object.freeze({
+    statMissingAfterArm: "chat.stat.missing_after_arm",
+    statIdentityChanged: "chat.stat.identity_changed",
+    statSizeRegressed: "chat.stat.size_regressed",
+    statNonRegular: "chat.stat.non_regular",
+    statOwnerMismatch: "chat.stat.owner_mismatch",
+    statIoOther: "chat.stat.io_other",
+    openIoOther: "chat.open.io_other",
+    fstatNonRegular: "chat.fstat.non_regular",
+    fstatIoOther: "chat.fstat.io_other",
+    readIoOther: "chat.read.io_other",
+    readStateInvariant: "chat.read.state_invariant",
+    closeIoOther: "chat.close.io_other",
+  }),
+  events: Object.freeze({
+    statMissingAfterArm: "events.stat.missing_after_arm",
+    statIdentityChanged: "events.stat.identity_changed",
+    statSizeRegressed: "events.stat.size_regressed",
+    statNonRegular: "events.stat.non_regular",
+    statOwnerMismatch: "events.stat.owner_mismatch",
+    statIoOther: "events.stat.io_other",
+    openIoOther: "events.open.io_other",
+    fstatNonRegular: "events.fstat.non_regular",
+    fstatIoOther: "events.fstat.io_other",
+    readIoOther: "events.read.io_other",
+    readStateInvariant: "events.read.state_invariant",
+    closeIoOther: "events.close.io_other",
+  }),
+} as const satisfies Record<
+  GrokJsonlSource,
+  Record<SafeJsonlTailFailureKey, GrokJsonlTailBoundarySubcode>
+>);
+
+function safeJsonlTailFailureSubcode(
+  source: GrokJsonlSource,
+  key: SafeJsonlTailFailureKey,
+): GrokJsonlTailBoundarySubcode {
+  return SAFE_JSONL_TAIL_FAILURE_SUBCODES[source][key];
+}
+
 class SafeJsonlTail {
   private identity: { dev: number; ino: number } | null = null;
   private offset = 0;
@@ -2004,7 +2192,12 @@ class SafeJsonlTail {
   poll(onChunk: (chunk: string) => void, onReset?: () => void): void {
     const stat = this.safeStat();
     if (!stat) {
-      if (this.identity) throw new Error(`Grok ${this.source} JSONL disappeared`);
+      if (this.identity) {
+        throw jsonlTailBoundaryError(
+          safeJsonlTailFailureSubcode(this.source, "statMissingAfterArm"),
+          new Error(`Grok ${this.source} JSONL disappeared`),
+        );
+      }
       return;
     }
     if (!this.identity) {
@@ -2012,9 +2205,19 @@ class SafeJsonlTail {
       this.offset = this.startAtEnd ? stat.size : 0;
       if (this.startAtEnd) return;
     }
-    if (stat.dev !== this.identity.dev || stat.ino !== this.identity.ino || stat.size < this.offset) {
+    if (stat.dev !== this.identity.dev || stat.ino !== this.identity.ino) {
       onReset?.();
-      throw new Error(`Grok ${this.source} JSONL was rotated or truncated`);
+      throw jsonlTailBoundaryError(
+        safeJsonlTailFailureSubcode(this.source, "statIdentityChanged"),
+        new Error(`Grok ${this.source} JSONL was rotated or truncated`),
+      );
+    }
+    if (stat.size < this.offset) {
+      onReset?.();
+      throw jsonlTailBoundaryError(
+        safeJsonlTailFailureSubcode(this.source, "statSizeRegressed"),
+        new Error(`Grok ${this.source} JSONL was rotated or truncated`),
+      );
     }
     const available = stat.size - this.offset;
     if (available <= 0) return;
@@ -2026,28 +2229,53 @@ class SafeJsonlTail {
       // Atomic rotation can remove the inode between lstat and open. Re-poll;
       // every other open error breaks the trusted tail and is fatal upstream.
       if (isErrno(error, "ENOENT")) return;
-      throw error;
+      throw jsonlTailBoundaryError(
+        safeJsonlTailFailureSubcode(this.source, "openIoOther"),
+        error,
+      );
     }
     try {
-      const opened = fstatSync(fd);
-      if (!opened.isFile()) throw new Error(`unsafe Grok JSONL file: ${this.path}`);
+      const opened = atJsonlTailBoundary(
+        safeJsonlTailFailureSubcode(this.source, "fstatIoOther"),
+        () => fstatSync(fd),
+      );
+      if (!opened.isFile()) {
+        throw jsonlTailBoundaryError(
+          safeJsonlTailFailureSubcode(this.source, "fstatNonRegular"),
+          new Error(`unsafe Grok JSONL file: ${this.path}`),
+        );
+      }
       if (opened.dev !== stat.dev || opened.ino !== stat.ino) return;
       const bytes = Buffer.allocUnsafe(length);
-      const read = readSync(fd, bytes, 0, length, this.offset);
+      const read = atJsonlTailBoundary(
+        safeJsonlTailFailureSubcode(this.source, "readIoOther"),
+        () => readSync(fd, bytes, 0, length, this.offset),
+      );
       if (read > 0) {
         this.offset += read;
-        const chunk = this.decoder.write(bytes.subarray(0, read));
+        const chunk = atJsonlTailBoundary(
+          safeJsonlTailFailureSubcode(this.source, "readStateInvariant"),
+          () => this.decoder.write(bytes.subarray(0, read)),
+        );
         if (chunk) onChunk(chunk);
       }
     } finally {
-      closeSync(fd);
+      atJsonlTailBoundary(
+        safeJsonlTailFailureSubcode(this.source, "closeIoOther"),
+        () => closeSync(fd),
+      );
     }
   }
 
   recoveryPosition(): { key: string; caughtUp: boolean } {
     const stat = this.safeStat();
     if (!stat) {
-      if (this.identity) throw new Error(`Grok ${this.source} JSONL disappeared during recovery`);
+      if (this.identity) {
+        throw jsonlTailBoundaryError(
+          safeJsonlTailFailureSubcode(this.source, "statMissingAfterArm"),
+          new Error(`Grok ${this.source} JSONL disappeared during recovery`),
+        );
+      }
       return { key: "missing", caughtUp: true };
     }
     return {
@@ -2057,7 +2285,10 @@ class SafeJsonlTail {
   }
 
   finishDiscard(onChunk: (chunk: string) => void = () => {}): void {
-    const trailing = this.decoder.end();
+    const trailing = atJsonlTailBoundary(
+      safeJsonlTailFailureSubcode(this.source, "readStateInvariant"),
+      () => this.decoder.end(),
+    );
     this.decoder = new StringDecoder("utf8");
     if (trailing) onChunk(trailing);
   }
@@ -2066,10 +2297,23 @@ class SafeJsonlTail {
     let stat: Stats;
     try { stat = lstatSync(this.path); } catch (error) {
       if (isErrno(error, "ENOENT")) return null;
-      throw error;
+      throw jsonlTailBoundaryError(
+        safeJsonlTailFailureSubcode(this.source, "statIoOther"),
+        error,
+      );
     }
-    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`Grok JSONL path is not a regular file: ${this.path}`);
-    if (this.uid !== undefined && stat.uid !== this.uid) throw new Error(`Grok JSONL owner mismatch: ${this.path}`);
+    if (stat.isSymbolicLink() || !stat.isFile()) {
+      throw jsonlTailBoundaryError(
+        safeJsonlTailFailureSubcode(this.source, "statNonRegular"),
+        new Error(`Grok JSONL path is not a regular file: ${this.path}`),
+      );
+    }
+    if (this.uid !== undefined && stat.uid !== this.uid) {
+      throw jsonlTailBoundaryError(
+        safeJsonlTailFailureSubcode(this.source, "statOwnerMismatch"),
+        new Error(`Grok JSONL owner mismatch: ${this.path}`),
+      );
+    }
     return stat;
   }
 }

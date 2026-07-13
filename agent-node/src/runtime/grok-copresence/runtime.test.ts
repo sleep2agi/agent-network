@@ -5,7 +5,9 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "fs";
 import { PassThrough } from "stream";
@@ -19,8 +21,10 @@ import {
   assertGrokCopresenceVersion,
   buildGrokCopresenceArgs,
   formatNetworkTuiInput,
+  GROK_JSONL_TAIL_FAILURE_SUBCODES,
   GrokCopresenceFailure,
   grokCopresenceFailureCode,
+  grokCopresenceFailureSubcode,
   grokSessionDirectory,
   hasGrokTuiReadyMarker,
   openGrokCopresenceRuntime,
@@ -40,11 +44,25 @@ type FakeDelayedWrite = {
 };
 
 describe("Grok copresence launch and injection policy", () => {
-  test("exposes only a reviewed value-free task failure code", () => {
-    const tagged = new GrokCopresenceFailure("jsonl_tail", "private runtime detail");
+  test("exposes only reviewed value-free task failure codes and exact JSONL subcodes", () => {
+    const tagged = new GrokCopresenceFailure(
+      "jsonl_tail",
+      "private runtime detail",
+      "chat.stat.size_regressed",
+    );
     expect(grokCopresenceFailureCode(tagged)).toBe("jsonl_tail");
+    expect(grokCopresenceFailureSubcode(tagged)).toBe("chat.stat.size_regressed");
     expect(grokCopresenceFailureCode(new Error("private runtime detail"))).toBe("unknown");
+    expect(grokCopresenceFailureSubcode(new Error("private runtime detail"))).toBe("unknown");
     expect(Object.keys(tagged).sort()).toEqual(["failureCode", "name"]);
+    expect(grokCopresenceFailureSubcode(
+      new GrokCopresenceFailure("timeout", "private runtime detail", "chat.stat.io_other"),
+    )).toBe("none");
+    expect(grokCopresenceFailureSubcode(
+      new GrokCopresenceFailure("jsonl_tail", "private runtime detail", "chat.stat.io_other.suffix"),
+    )).toBe("unknown");
+    (tagged as unknown as { failureSubcode: string }).failureSubcode = "CHAT.stat.size_regressed";
+    expect(grokCopresenceFailureSubcode(tagged)).toBe("unknown");
     expect(() => new GrokCopresenceFailure(
       "not_reviewed" as never,
       "private runtime detail",
@@ -55,6 +73,44 @@ describe("Grok copresence launch and injection policy", () => {
       name: "GrokCopresenceFailure",
       failureCode: "jsonl_tail",
     })).toBe("unknown");
+  });
+
+  test("keeps the JSONL subcode allowlist direct, frozen, and actual-path-only", () => {
+    expect(Object.isFrozen(GROK_JSONL_TAIL_FAILURE_SUBCODES)).toBe(true);
+    expect(GROK_JSONL_TAIL_FAILURE_SUBCODES).toEqual([
+      "unknown",
+      "chat.stat.missing_after_arm",
+      "chat.stat.identity_changed",
+      "chat.stat.size_regressed",
+      "chat.stat.non_regular",
+      "chat.stat.owner_mismatch",
+      "chat.stat.io_other",
+      "chat.open.io_other",
+      "chat.fstat.non_regular",
+      "chat.fstat.io_other",
+      "chat.read.io_other",
+      "chat.read.state_invariant",
+      "chat.close.io_other",
+      "chat.reduce.state_invariant",
+      "events.stat.missing_after_arm",
+      "events.stat.identity_changed",
+      "events.stat.size_regressed",
+      "events.stat.non_regular",
+      "events.stat.owner_mismatch",
+      "events.stat.io_other",
+      "events.open.io_other",
+      "events.fstat.non_regular",
+      "events.fstat.io_other",
+      "events.read.io_other",
+      "events.read.state_invariant",
+      "events.close.io_other",
+      "events.reduce.state_invariant",
+      "events.lifecycle.state_invariant",
+      "combined.flush.state_invariant",
+    ]);
+    for (const value of GROK_JSONL_TAIL_FAILURE_SUBCODES) {
+      expect(value).not.toMatch(/[\\/:=\s@\[\]<>]|\d|pid|task|session|offset|inode|errno|path/i);
+    }
   });
 
   test("locks the probed Grok TUI build exactly", () => {
@@ -273,38 +329,246 @@ describe("Grok copresence runtime integration", () => {
     }
   }, 8_000);
 
-  test("tags a trusted chat tail identity failure without persisting its detail", async () => {
-    const fixture = new RuntimeFixture();
-    let runtime: GrokCopresenceRuntimeSession | undefined;
-    try {
-      runtime = await fixture.open();
-      const pending = runtime.submit({
-        taskId: "tail-identity",
-        from: "reviewer",
-        text: "HOLD_OPEN",
-        timeoutMs: 3_000,
-      });
-      const chat = join(
-        grokSessionDirectory(fixture.grokHome, fixture.cwd, SESSION),
-        "chat_history.jsonl",
-      );
-      await waitFor(() => existsSync(chat) && readFileSync(chat).length > 0);
-      await Bun.sleep(75);
-      writeFileSync(chat, "", { mode: 0o600 });
+  test("maps keyless fake-writer file mutations to exact value-free tail subcodes", async () => {
+    const cases = [
+      {
+        name: "chat size regression",
+        source: "chat_history" as const,
+        expected: "chat.stat.size_regressed",
+        mutate(path: string) { writeFileSync(path, "", { mode: 0o600 }); },
+      },
+      {
+        name: "events disappearance",
+        source: "events" as const,
+        expected: "events.stat.missing_after_arm",
+        mutate(path: string) { rmSync(path); },
+      },
+      {
+        name: "chat identity replacement",
+        source: "chat_history" as const,
+        expected: "chat.stat.identity_changed",
+        mutate(path: string) {
+          const replacement = `${path}.replacement`;
+          writeFileSync(replacement, "", { mode: 0o600 });
+          renameSync(replacement, path);
+        },
+      },
+      {
+        name: "events non-regular replacement",
+        source: "events" as const,
+        expected: "events.stat.non_regular",
+        mutate(path: string) {
+          const replacement = `${path}.replacement`;
+          symlinkSync(`${path}.missing-target`, replacement);
+          renameSync(replacement, path);
+        },
+      },
+    ];
 
+    for (const item of cases) {
+      const fixture = new RuntimeFixture();
+      let runtime: GrokCopresenceRuntimeSession | undefined;
       try {
-        await pending;
-        throw new Error("tail identity failure unexpectedly resolved");
-      } catch (error) {
-        expect(grokCopresenceFailureCode(error)).toBe("jsonl_tail");
-        expect(String((error as Error).message)).toContain("lost its trusted JSONL tail");
+        runtime = await fixture.open();
+        const pending = runtime.submit({
+          taskId: `tail-${item.source}`,
+          from: "reviewer",
+          text: "HOLD_OPEN",
+          timeoutMs: 3_000,
+        });
+        const path = join(
+          grokSessionDirectory(fixture.grokHome, fixture.cwd, SESSION),
+          `${item.source}.jsonl`,
+        );
+        await waitFor(() => existsSync(path) && readFileSync(path).length > 0);
+        await Bun.sleep(75);
+        item.mutate(path);
+
+        let failure: unknown;
+        try {
+          await pending;
+        } catch (error) {
+          failure = error;
+        }
+        expect(failure, item.name).toBeInstanceOf(Error);
+        expect(grokCopresenceFailureCode(failure), item.name).toBe("jsonl_tail");
+        expect(grokCopresenceFailureSubcode(failure), item.name).toBe(item.expected);
+        expect(String((failure as Error).message), item.name)
+          .toContain("lost its trusted JSONL tail");
+        await waitFor(() => !runtime!.isRunning);
+      } finally {
+        await runtime?.close();
+        await fixture.close();
       }
-      await waitFor(() => !runtime!.isRunning);
-    } finally {
-      await runtime?.close();
-      await fixture.close();
     }
-  }, 8_000);
+  }, 20_000);
+
+  test("maps chat and events reset callback failures and stops polling after fatal", async () => {
+    const cases = [
+      {
+        name: "chat-reset",
+        source: "chat_history" as const,
+        expected: "chat.reduce.state_invariant",
+        mutate(path: string) { writeFileSync(path, "", { mode: 0o600 }); },
+      },
+      {
+        name: "events-reset",
+        source: "events" as const,
+        expected: "events.reduce.state_invariant",
+        mutate(path: string) {
+          const replacement = `${path}.reset-replacement`;
+          writeFileSync(replacement, "", { mode: 0o600 });
+          renameSync(replacement, path);
+        },
+      },
+    ];
+
+    type TailProbe = {
+      poll(onChunk: (chunk: string) => void, onReset?: () => void): void;
+      recoveryPosition(): { caughtUp: boolean };
+    };
+
+    for (const item of cases) {
+      const fixture = new RuntimeFixture();
+      let runtime: GrokCopresenceRuntimeSession | undefined;
+      try {
+        runtime = await fixture.open();
+        const pending = runtime.submit({
+          taskId: item.name,
+          from: "reviewer",
+          text: "HOLD_OPEN",
+          timeoutMs: 3_000,
+        });
+        const pendingOutcome = pending.then(
+          () => ({ failure: undefined as unknown }),
+          (failure: unknown) => ({ failure }),
+        );
+        const sessionDir = grokSessionDirectory(fixture.grokHome, fixture.cwd, SESSION);
+        const path = join(sessionDir, `${item.source}.jsonl`);
+        const chatPath = join(sessionDir, "chat_history.jsonl");
+        const eventsPath = join(sessionDir, "events.jsonl");
+        const internals = runtime as unknown as {
+          chatTail: TailProbe | null;
+          eventsTail: TailProbe | null;
+          logState: { partialLines: unknown };
+          pollTimer: unknown;
+        };
+        await waitFor(() =>
+          existsSync(chatPath)
+          && existsSync(eventsPath)
+          && readFileSync(chatPath).length > 0
+          && readFileSync(eventsPath).length > 0);
+        await waitFor(() => {
+          const chat = internals.chatTail?.recoveryPosition();
+          const events = internals.eventsTail?.recoveryPosition();
+          return !!chat?.caughtUp && !!events?.caughtUp;
+        });
+
+        const tail = item.source === "chat_history" ? internals.chatTail : internals.eventsTail;
+        expect(tail).not.toBeNull();
+        const originalPoll = tail!.poll.bind(tail);
+        let pollCalls = 0;
+        tail!.poll = (onChunk, onReset) => {
+          pollCalls += 1;
+          originalPoll(onChunk, onReset);
+        };
+        // The physical mutation reaches onReset; the invalid reducer framing
+        // state then proves that callback is inside the reviewed boundary.
+        internals.logState.partialLines = null;
+        item.mutate(path);
+
+        const { failure } = await pendingOutcome;
+        expect(grokCopresenceFailureCode(failure), item.name).toBe("jsonl_tail");
+        expect(grokCopresenceFailureSubcode(failure), item.name).toBe(item.expected);
+        expect(runtime.isRunning, item.name).toBe(false);
+        expect(internals.pollTimer, item.name).toBeNull();
+        expect(pollCalls, item.name).toBeGreaterThan(0);
+        const callsAtFatal = pollCalls;
+        await Bun.sleep(150);
+        expect(pollCalls, item.name).toBe(callsAtFatal);
+      } finally {
+        await runtime?.close();
+        await fixture.close();
+      }
+    }
+  }, 15_000);
+
+  test("maps keyless reducer, lifecycle, and combined flush invariants at their boundaries", async () => {
+    const runCase = async (
+      name: string,
+      expected: string,
+      trigger: (
+        runtime: GrokCopresenceRuntimeSession,
+        sessionDir: string,
+      ) => void | Promise<void>,
+    ) => {
+      const fixture = new RuntimeFixture();
+      let runtime: GrokCopresenceRuntimeSession | undefined;
+      try {
+        runtime = await fixture.open();
+        const pending = runtime.submit({
+          taskId: `boundary-${name}`,
+          from: "reviewer",
+          text: "HOLD_OPEN",
+          timeoutMs: 3_000,
+        });
+        const sessionDir = grokSessionDirectory(fixture.grokHome, fixture.cwd, SESSION);
+        await waitFor(() => existsSync(join(sessionDir, "events.jsonl")));
+        await Bun.sleep(75);
+        await trigger(runtime, sessionDir);
+
+        let failure: unknown;
+        try {
+          await pending;
+        } catch (error) {
+          failure = error;
+        }
+        expect(grokCopresenceFailureCode(failure), name).toBe("jsonl_tail");
+        expect(grokCopresenceFailureSubcode(failure), name).toBe(expected);
+        await waitFor(() => !runtime!.isRunning);
+      } finally {
+        await runtime?.close();
+        await fixture.close();
+      }
+    };
+
+    await runCase("chat-reduce", "chat.reduce.state_invariant", (runtime, sessionDir) => {
+      const internals = runtime as unknown as {
+        logState: { ownedNetworkTasks: unknown };
+      };
+      internals.logState.ownedNetworkTasks = null;
+      appendJson(join(sessionDir, "chat_history.jsonl"), {
+        type: "user",
+        content: "<user_query>[Agent Network/from=reviewer/task=boundary-chat-reduce] keyless reducer counterexample</user_query>",
+      });
+    });
+
+    await runCase("events-lifecycle", "events.lifecycle.state_invariant", (runtime, sessionDir) => {
+      const internals = runtime as unknown as { arbitration: { revision: number } };
+      internals.arbitration.revision = -1;
+      appendJson(join(sessionDir, "events.jsonl"), {
+        type: "permission_requested",
+        request_id: "keyless-boundary",
+      });
+    });
+
+    await runCase("combined-flush", "combined.flush.state_invariant", async (runtime, sessionDir) => {
+      appendJson(join(sessionDir, "chat_history.jsonl"), {
+        type: "assistant",
+        content: "keyless final",
+      });
+      appendJson(join(sessionDir, "events.jsonl"), {
+        type: "turn_ended",
+        outcome: "completed",
+      });
+      const internals = runtime as unknown as {
+        arbitration: { revision: number };
+        completionPendingSince: number;
+      };
+      await waitFor(() => internals.completionPendingSince > 0);
+      internals.arbitration.revision = -1;
+    });
+  }, 20_000);
 
   test("close waits for and tears down a Leader spawned by in-flight recovery", async () => {
     const fixture = new RuntimeFixture();

@@ -112,7 +112,13 @@ protocol freeze or approval-owner completion required for `latest`.
 If a real first/resume task reaches a terminal failure, the harness destroys
 the raw Hub/TUI material and retains only
 `test225-real-turn-diagnostic.json`: a mode-0600 closed schema containing a
-runtime-origin failure enum, result byte count, and coarse elapsed-time
-bucket. It never stores the error/model text, a digest of that text, paths,
-PIDs, task/session IDs, or model/account fields. An `unknown` code remains a
-failed gate and must not be treated as evidence for any inferred root cause.
+runtime-origin failure enum, a reviewed value-free failure subcode, and coarse
+result-size/elapsed-time buckets. Version 2 contains exactly `v`, `phase`,
+`status`, `failureCode`, `failureSubcode`, `resultSizeBucket`, and
+`elapsedBucket`; it never stores the exact byte count, error/model text, a
+digest of that text, paths, PIDs, task/session IDs, or model/account fields.
+Only `jsonl_tail` may carry one of the exact reviewed JSONL boundary subcodes;
+other reviewed failures carry `none`, while an unknown top-level failure is
+the pair `unknown`/`unknown`. A forged, duplicated, unknown, or mismatched
+marker pair collapses to `unknown`/`unknown`. That pair remains a failed gate
+and must not be treated as evidence for any inferred root cause.
