@@ -34,6 +34,7 @@ import {
 } from "./protocol";
 import { HumanOwnerCoordinator } from "./human-owner";
 import type { InternalOrigin, UpstreamTransport } from "./uds-server";
+import { safeAdoptConsume } from "./safe-adopt";
 
 // ────────────────────────────────────────────────────────────────────────
 // Router surface
@@ -219,21 +220,22 @@ export class UpstreamRouter {
       // 副指挥 e85ade40 P0-2: after `onClose` fires in pre-active
       // state, subsequent frames are DROPPED — activate() never
       // dispatches them. Only pre-close frames stay in the buffer.
-      // Previously post-close pre-active frames were still buffered
-      // and then dispatched on activate → the router produced a
-      // NoOwner response for an id that arrived AFTER the transport
-      // was gone.
       if (this.receivedCloseBeforeActive) {
         this.report("upstream_frame_dropped_after_pre_active_close");
         return;
       }
       if (this.buffered.length >= UpstreamRouter.PRE_ACTIVE_BUFFER_CAP) {
-        // Fail-closed: drop the frame and mark the router terminal
-        // so activate() will short-circuit start().
+        // 副指挥 7d061fcd Round 9: overflow now goes through the
+        // SAME once-only pre-active-terminal helper as close, so
+        // the lifecycle shutdown signal fires here too. Previously
+        // overflow set `receivedCloseBeforeActive` locally but did
+        // NOT invoke `onPreActiveClose` → a never-resolving
+        // preflight left `Promise.race([preflight, signal])`
+        // unresolvable.
         this.bufferOverflowed = true;
         this.report("pre_active_buffer_overflow");
         this.state = "terminal";
-        this.receivedCloseBeforeActive = true; // treat as close-before-active
+        this.firePreActiveTerminal();
         return;
       }
       this.buffered.push(raw);
@@ -245,18 +247,35 @@ export class UpstreamRouter {
 
   /** Test-only: was the pre-active buffer cap hit? */
   bufferOverflowedFlag(): boolean { return this.bufferOverflowed; }
+  /** Test-only: has `firePreActiveTerminal` fired? */
+  preActiveTerminalFiredForTest(): boolean { return this.preActiveTerminalFired; }
 
-  private preActiveCloseFired = false;
+  /**
+   * 副指挥 7d061fcd Round 9: single once-only helper that BOTH
+   * the close path AND the buffer-overflow path funnel through.
+   * Sets `receivedCloseBeforeActive`, invokes the lifecycle
+   * `onPreActiveClose` callback (which fires the shutdown
+   * signal + bumps the epoch). Exactly-one invariant enforced
+   * by `preActiveTerminalFired` guard.
+   */
+  private preActiveTerminalFired = false;
+  private firePreActiveTerminal(): void {
+    if (this.preActiveTerminalFired) return;
+    this.preActiveTerminalFired = true;
+    this.receivedCloseBeforeActive = true;
+    try { this.opts.onPreActiveClose?.(); } catch { /* silent */ }
+  }
+
   private onClose(): void {
     if (this.state === "terminal") return;
     if (this.state === "subscribed") {
-      this.receivedCloseBeforeActive = true;
-      // 副指挥 ef331a80 Round 8: notify lifecycle so the shutdown
-      // signal fires — otherwise a never-resolving preflight leaves
-      // the race unresolvable. Called AT MOST ONCE.
-      if (!this.preActiveCloseFired) {
-        this.preActiveCloseFired = true;
-        try { this.opts.onPreActiveClose?.(); } catch { /* silent */ }
+      // Same once-only helper — close and overflow are unified.
+      if (!this.preActiveTerminalFired) {
+        this.firePreActiveTerminal();
+      } else {
+        // Helper already fired (e.g. by overflow); still record
+        // that close was observed.
+        this.receivedCloseBeforeActive = true;
       }
       return;
     }
@@ -340,7 +359,24 @@ export class UpstreamRouter {
   private dispatchReverseRequest(frame: import("./protocol").JsonRpcRequestFrame): void {
     const decision = this.opts.humanOwner.handleUpstreamReverseRequest(frame);
     if (decision.kind === "reject_upstream") {
-      void this.opts.upstreamTransport.writeFrame(decision.upstreamError).catch(() => {
+      // 副指挥 ff8edc19 Round 9: transport is caller-provided; a
+      // non-async implementation may return a real Promise with
+      // an OWN poisoned `.then/.catch` getter. Wrap the
+      // writeFrame result via `safeAdoptConsume` so the getter
+      // is read inside a protected scope and the (fresh) adopted
+      // promise's rejection is consumed via an intrinsic-safe
+      // attach — no unhandled rejection, no synchronous escape.
+      // A single "upstream_reject_write_failed" diagnostic fires
+      // regardless of failure mode.
+      let writeResult: unknown;
+      try {
+        writeResult = this.opts.upstreamTransport.writeFrame(decision.upstreamError);
+      } catch {
+        this.report("upstream_reject_write_failed");
+        return;
+      }
+      // Fire-and-forget with safe consumption.
+      safeAdoptConsume(writeResult, undefined, () => {
         this.report("upstream_reject_write_failed");
       });
       return;

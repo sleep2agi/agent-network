@@ -49,6 +49,7 @@ import {
   type InternalOrigin,
   type UpstreamTransport,
 } from "./uds-server";
+import { safeAdopt } from "./safe-adopt";
 import { HumanOwnerCoordinator } from "./human-owner";
 import { TuiWsServer } from "./tui-ws-server";
 import { TuiBearer } from "./bearer";
@@ -115,6 +116,11 @@ function toError(value: unknown): Error {
   }
   return new Error(tag);
 }
+
+// 副指挥 7d061fcd + ff8edc19 Round 9: `safeAdopt` lives in
+// `safe-adopt.ts` and is shared across the gateway (lifecycle,
+// upstream-router, uds-server) so every caller-provided
+// Promise adoption goes through the same intrinsic-safe path.
 
 /**
  * Wrap a `TuiInitializeProvider` so that a throw inside
@@ -660,20 +666,19 @@ export class GatewayLifecycle {
       }
     };
 
-    // 副指挥 b65ebc50 + cb54a10e Round 8: race preflight against
-    // the shutdown signal via SAFE adoption. `preflight.run()`
-    // returns a caller-provided Promise-like whose own
-    // `.then/.catch` may be poisoned. Never touch instance
-    // getters — adopt into a native Promise via
-    // `Promise.resolve(preflightP)`, which uses the native
-    // adoption path (any getter throw becomes a rejection of the
-    // adopted Promise instead of throwing out of the attach). No
-    // separate `.catch()` consumer is attached: `Promise.race`
-    // already attaches its own resolver via the native `.then`
-    // machinery, so a late rejection of `preflightP` has a
-    // handler and cannot surface as `unhandledRejection`.
+    // 副指挥 7d061fcd Round 9: race preflight against the
+    // shutdown signal via a FRESH native Promise. `Promise
+    // .resolve(sameRealmNativePromise)` returns the same
+    // reference — passing that to `Promise.race` still causes
+    // race to read `.then` off the caller's instance. A poisoned
+    // getter would throw at race attach AND orphan the shutdown
+    // branch. `safeAdopt` creates a fresh native Promise via
+    // `Promise.prototype.then.call` wrapped in try/catch —
+    // instance getters are read exactly once in a protected
+    // scope; downstream `Promise.race` sees only the fresh
+    // native.
     const preflightP = this.opts.preflight.run();
-    const safePreflightP = Promise.resolve(preflightP);
+    const safePreflightP = safeAdopt<void>(preflightP);
     try {
       await Promise.race([
         safePreflightP,

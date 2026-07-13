@@ -2796,10 +2796,290 @@ describe("Commit 2 corrective round 8 — pre-active close + subscribe fence + s
     expect(transport.writesCount).toBe(0);
     // Terminal reached; handlers cleaned.
     await lc.stop();
-    expect(["stopped", "stop_failed"]).toContain(lc.currentState());
+    // 副指挥 7d061fcd evidence: tighten to EXACT terminal.
+    // Clean rollback in this scenario → `stopped`.
+    expect(lc.currentState()).toBe("stopped");
     expect(transport.frameHandlers.length).toBe(0);
     expect(transport.closeHandlers.length).toBe(0);
-    void startErr; void startFulfilled;
+    // Start MUST have rejected (activate ran but CAS blocked
+    // commit). A silent resolve is green-wash.
+    expect(startFulfilled).toBe(false);
+    expect(startErr).toMatch(/start aborted/);
     try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Round 9 — pre-active overflow signal unification + safeAdopt primitive
+// across preflight / router writeFrame / backend writeFrame
+// (副指挥 7d061fcd + ff8edc19)
+// ─────────────────────────────────────────────────────────────────────
+
+describe("Commit 2 corrective round 9 — unified pre-active terminal + safeAdopt primitive", () => {
+  test("held never-preflight + async overflow (257 frames) → start rejects bounded; handlers=0; close=1; terminal EXACT stopped", async () => {
+    const paths = pathsFor();
+    const { diagnostics } = collectDiagnostics();
+    let deliverFrame: ((raw: unknown) => void) | null = null;
+    class DeliverableTransport implements UpstreamTransport {
+      frameHandlers: Array<(raw: unknown) => void> = [];
+      closeHandlers: Array<() => void> = [];
+      closeCalls = 0;
+      async writeFrame(_f: JsonRpcRequestFrame | JsonRpcResponseFrame | JsonRpcNotificationFrame): Promise<void> {}
+      onFrame(h: (raw: unknown) => void): () => void {
+        this.frameHandlers.push(h);
+        deliverFrame = h;
+        return () => { this.frameHandlers = this.frameHandlers.filter((x) => x !== h); };
+      }
+      onClose(h: () => void): () => void {
+        this.closeHandlers.push(h);
+        return () => { this.closeHandlers = this.closeHandlers.filter((x) => x !== h); };
+      }
+      async close(): Promise<void> { this.closeCalls++; }
+      async abort(): Promise<void> {}
+    }
+    const transport = new DeliverableTransport();
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight: { run: () => new Promise<void>(() => {}) },
+      backend: makeBackend(),
+      upstreamTransport: transport,
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    const startP = lifecycle.start();
+    await Promise.resolve(); await Promise.resolve();
+    for (let i = 0; i < 257; i++) {
+      deliverFrame?.({ jsonrpc: "2.0", method: "notif", params: { i } });
+    }
+    let startErr = "";
+    const raced = await Promise.race([
+      startP.then(() => "resolved", (e: Error) => { startErr = e.message; return "rejected"; }),
+      new Promise<string>((_r, rej) => setTimeout(() => rej(new Error("start_wedged_after_overflow")), 800)),
+    ]);
+    expect(raced).toBe("rejected");
+    expect(startErr).toMatch(/start aborted/);
+    expect(lifecycle.currentState()).toBe("stopped");
+    expect(transport.frameHandlers.length).toBe(0);
+    expect(transport.closeHandlers.length).toBe(0);
+    expect(transport.closeCalls).toBe(1);
+    try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+  });
+
+  test("subscribe registration sync overflow → preflightCalls=0; start rejects; handlers=0/0", async () => {
+    const paths = pathsFor();
+    const { diagnostics } = collectDiagnostics();
+    let preflightCalls = 0;
+    class SyncOverflowTransport implements UpstreamTransport {
+      frameHandlers: Array<(raw: unknown) => void> = [];
+      closeHandlers: Array<() => void> = [];
+      floodedOnce = false;
+      async writeFrame(_f: JsonRpcRequestFrame | JsonRpcResponseFrame | JsonRpcNotificationFrame): Promise<void> {}
+      onFrame(h: (raw: unknown) => void): () => void {
+        this.frameHandlers.push(h);
+        if (!this.floodedOnce) {
+          this.floodedOnce = true;
+          for (let i = 0; i < 257; i++) {
+            h({ jsonrpc: "2.0", method: "notif", params: { i } });
+          }
+        }
+        return () => { this.frameHandlers = this.frameHandlers.filter((x) => x !== h); };
+      }
+      onClose(h: () => void): () => void {
+        this.closeHandlers.push(h);
+        return () => { this.closeHandlers = this.closeHandlers.filter((x) => x !== h); };
+      }
+      async close(): Promise<void> {}
+      async abort(): Promise<void> {}
+    }
+    const transport = new SyncOverflowTransport();
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight: { run: () => { preflightCalls++; return Promise.resolve(); } },
+      backend: makeBackend(),
+      upstreamTransport: transport,
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    let startErr = "";
+    const raced = await Promise.race([
+      lifecycle.start().then(() => "resolved", (e: Error) => { startErr = e.message; return "rejected"; }),
+      new Promise<string>((_r, rej) => setTimeout(() => rej(new Error("start_wedged")), 800)),
+    ]);
+    expect(raced).toBe("rejected");
+    expect(startErr).toMatch(/start aborted before preflight/);
+    expect(preflightCalls).toBe(0);
+    expect(lifecycle.currentState()).toBe("stopped");
+    expect(transport.frameHandlers.length).toBe(0);
+    expect(transport.closeHandlers.length).toBe(0);
+    try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+  });
+
+  test("safeAdopt vs poisoned .then getter: native Promise fast path → getterReads=0; late reject → 0 unhandled; start rejects; stopped", async () => {
+    const paths = pathsFor();
+    const { diagnostics } = collectDiagnostics();
+    let rejectPreflight: (reason?: unknown) => void = () => {};
+    const preflightPromise = new Promise<void>((_res, rej) => { rejectPreflight = rej; });
+    let thenGetterReads = 0;
+    Object.defineProperty(preflightPromise, "then", {
+      get() { thenGetterReads++; throw new Error("poisoned_then_getter"); },
+      configurable: true,
+    });
+    let unhandledCount = 0;
+    const listener = (): void => { unhandledCount++; };
+    process.on("unhandledRejection", listener);
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight: { run: () => preflightPromise },
+      backend: makeBackend(),
+      upstreamTransport: new ControllableUpstream(),
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    try {
+      const startP = lifecycle.start();
+      await Promise.resolve(); await Promise.resolve();
+      const readsAfterAttach = thenGetterReads;
+      const stopP = lifecycle.stop();
+      setTimeout(() => rejectPreflight(new Error("late_preflight_reject")), 20);
+      let startErr = "";
+      try { await startP; } catch (e) { startErr = (e as Error).message; }
+      await stopP;
+      await new Promise((r) => setTimeout(r, 100));
+      // Native Promise fast path: safeAdopt uses
+      // `Promise.prototype.then.call(preflightPromise, res, rej)`
+      // — the internal `[[PromiseState]]` slot is read directly,
+      // NEVER touching the caller's OWN poisoned `.then` getter.
+      // Load-bearing: getterReads stays at 0 across attach AND
+      // the late-reject settle.
+      expect(readsAfterAttach).toBe(0);
+      expect(thenGetterReads).toBe(0);
+      expect(unhandledCount).toBe(0);
+      expect(startErr).toMatch(/start aborted/);
+      expect(lifecycle.currentState()).toBe("stopped");
+    } finally {
+      process.off("unhandledRejection", listener);
+      try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+    }
+  });
+
+  test("safeAdopt: poisoned .then + concurrent stop + late reject → no unhandled; stopped; handlers=0; ledger stable", async () => {
+    const paths = pathsFor();
+    const { diagnostics } = collectDiagnostics();
+    let rejectPreflight: (reason?: unknown) => void = () => {};
+    const preflightPromise = new Promise<void>((_res, rej) => { rejectPreflight = rej; });
+    Object.defineProperty(preflightPromise, "then", {
+      get() { throw new Error("poisoned_then_getter"); },
+      configurable: true,
+    });
+    let unhandledCount = 0;
+    const listener = (): void => { unhandledCount++; };
+    process.on("unhandledRejection", listener);
+    const upstream = new ControllableUpstream();
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight: { run: () => preflightPromise },
+      backend: makeBackend(),
+      upstreamTransport: upstream,
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    try {
+      const startP = lifecycle.start();
+      await Promise.resolve();
+      const stopP = lifecycle.stop();
+      setTimeout(() => rejectPreflight(new Error("late_preflight_reject")), 20);
+      let startErr = "";
+      try { await startP; } catch (e) { startErr = (e as Error).message; }
+      await stopP;
+      await new Promise((r) => setTimeout(r, 100));
+      expect(unhandledCount).toBe(0);
+      expect(startErr).toMatch(/start aborted/);
+      expect(lifecycle.currentState()).toBe("stopped");
+      expect(upstream.closeCallCount).toBe(1);
+      // Ledger stable — no failure recorded (poisoned .then
+      // rejected the safeAdopt fresh promise → race → rollback,
+      // but that's an aborted-start throw, not a teardown-stage
+      // failure).
+      const ledger = lifecycle.stopFailureLedger();
+      expect(ledger.backendStop).toBeNull();
+      expect(ledger.tuiStop).toBeNull();
+      expect(ledger.upstreamClose).toBeNull();
+      expect(ledger.upstreamAbort).toBeNull();
+    } finally {
+      process.off("unhandledRejection", listener);
+      try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+    }
+  });
+
+  test("safeAdoptConsume — backend sendInternal writeFrame with poisoned .then + underlying reject → sendInternal rejects with underlying error; mux pending back to 0; 0 unhandled", async () => {
+    // uds-server.ts uses safeAdoptConsume around
+    // upstreamTransport.writeFrame(). A caller-provided Promise
+    // with poisoned OWN `.then` getter is adopted via
+    // `Promise.prototype.then.call` (native, uses internal
+    // slot) — the poisoned instance getter is NEVER touched. On
+    // the underlying rejection, safeAdopt's fresh promise
+    // rejects → safeAdoptConsume calls failCleanup → mux slot
+    // released + origin.reject fired.
+    let unhandledCount = 0;
+    const listener = (): void => { unhandledCount++; };
+    process.on("unhandledRejection", listener);
+    try {
+      const paths = pathsFor();
+      const { diagnostics } = collectDiagnostics();
+      let poisonedThenReads = 0;
+      let makeRejectingPoisoned: () => Promise<void> = () => {
+        const underlying = new Promise<void>((_res, rej) => {
+          setTimeout(() => rej(new Error("underlying_write_reject")), 10);
+        });
+        Object.defineProperty(underlying, "then", {
+          get() { poisonedThenReads++; throw new Error("poisoned_then_backend"); },
+          configurable: true,
+        });
+        return underlying;
+      };
+      class PoisonedThenTransport implements UpstreamTransport {
+        writeFrame(_f: JsonRpcRequestFrame | JsonRpcResponseFrame | JsonRpcNotificationFrame): Promise<void> {
+          return makeRejectingPoisoned();
+        }
+        onFrame(_h: (raw: unknown) => void): () => void { return () => {}; }
+        onClose(_h: () => void): () => void { return () => {}; }
+        async close(): Promise<void> {}
+        async abort(): Promise<void> {}
+      }
+      const lifecycle = new GatewayLifecycle({
+        backendSocketPath: paths.backendSocketPath,
+        socketDir: paths.socketDir,
+        preflight: { async run() {} },
+        backend: makeBackend(),
+        upstreamTransport: new PoisonedThenTransport(),
+        initSnapshotSource: { currentSnapshot: () => ({}) },
+        diagnosticsSink: diagnostics,
+        backendCapability: TEST_BACKEND_CAP,
+      });
+      await lifecycle.start();
+      let sendReason = "";
+      const p = lifecycle.sendInternal("thread/status", { threadId: "t" });
+      p.catch((e: Error) => { sendReason = e.message; });
+      await new Promise((r) => setTimeout(r, 100));
+      // Poisoned .then getter NEVER read (native Promise fast path).
+      expect(poisonedThenReads).toBe(0);
+      expect(unhandledCount).toBe(0);
+      // sendInternal rejected with the underlying reject error.
+      expect(sendReason).toBe("underlying_write_reject");
+      // Mux slot cleaned up.
+      expect(lifecycle.pendingUpstreamCount()).toBe(0);
+      await lifecycle.stop();
+      try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+    } finally {
+      process.off("unhandledRejection", listener);
+    }
   });
 });

@@ -26,6 +26,7 @@ import * as net from "node:net";
 import * as fs from "node:fs";
 import { Buffer } from "node:buffer";
 import * as crypto from "node:crypto";
+import { safeAdoptConsume } from "./safe-adopt";
 import {
   classifyMessage,
   dispatchAgentRequest,
@@ -678,11 +679,20 @@ export class BackendUdsServer {
         this.opts.mux.consumeUpstreamResponse(alloc.upstreamId);
         origin.reject(e instanceof Error ? e : new Error(String(e)));
       };
+      // 副指挥 ff8edc19 Round 9: transport `writeFrame` is
+      // caller-provided. A real non-async impl may return a
+      // native Promise with an OWN poisoned `.catch/.then`
+      // getter. Prior code read `writeResult.catch` at the
+      // property level (poisoned getter throws), then reached
+      // the outer try/catch which called `failCleanup` — but
+      // the ORIGINAL promise still had no rejection handler →
+      // late rejection would surface as unhandled. Route via
+      // `safeAdoptConsume`: `safeAdopt` reads `.then` exactly
+      // once inside a protected scope; the fresh Promise's
+      // rejection handler is `failCleanup`.
       try {
         const writeResult = this.opts.upstreamTransport.writeFrame(frame);
-        if (writeResult && typeof (writeResult as Promise<unknown>).catch === "function") {
-          (writeResult as Promise<unknown>).catch(failCleanup);
-        }
+        safeAdoptConsume(writeResult, undefined, failCleanup);
       } catch (e) {
         failCleanup(e);
       }
