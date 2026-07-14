@@ -26,6 +26,10 @@ explicitly narrows an ambiguous sentence:
    those fields.
 4. Child output is an attachment delivered to the delegating consumer. It
    never recursively terminalizes a parent task.
+5. Retry never reopens a terminal task. The retry rules in §7.1
+   **normatively replace** the H0 §5 `Retry` paragraph: a retry creates a new
+   logical task, delivery, and assignment while the source task and its
+   assignment remain byte-stable.
 
 Nothing here weakens the H0 requirements for server-resolved principals,
 opaque leases, exact principal/token/epoch predicates, one real SQLite
@@ -269,6 +273,38 @@ as a substitute for reply. A terminal task's status, result, and completion
 time are immutable; only an identical durable idempotency replay may return
 the already stored response without writing.
 
+### 7.1 Retry preserves terminal immutability
+
+Retry is a control operation over an exact terminal H1 source attempt; it is
+not a transition that reopens that task. These rules normatively replace the
+H0 §5 `Retry` paragraph:
+
+- The source task, result, completion timestamp, delivery, and assignment are
+  byte-stable. Retry does not increment the source assignment epoch, change
+  its target, clear its result, or move it back to a non-terminal state.
+- A successful retry creates a new server-minted logical task ID, delivery ID,
+  and assignment. The new task starts as an independent pending attempt with
+  no inherited result or lease.
+- Before creating anything, the service resolves one exact terminal source
+  delivery and its exact immutable H1 assignment. The source task projection
+  alone is never authority. The assignment epoch must equal the delivery's
+  assignment generation. The source producer is read only from that H1
+  delivery/assignment pair.
+- With no explicit retry target, the new target is the immutable consumer node
+  from the exact source H1 assignment. `tasks.to_node_id`, aliases, and other
+  mutable legacy projection fields are never fallback authority. An explicit
+  target is resolved server-side to one current node in the same network.
+- The server records the exact source task ID in retry audit/idempotency
+  provenance only after resolving that source pair. This provenance grants no
+  lineage, parent/child, autoroute, claim, lease, attachment, or old-result
+  authority. It cannot make the old result claimable by a new or rotated token
+  and is never emitted in a node doorbell.
+- An identical retry `operation_id` returns the same newly created task
+  read-only. A changed request under that operation ID, a non-terminal or
+  mismatched H1 source attempt, or a source selected only through legacy
+  projection fails before task, delivery, assignment, audit, idempotency, or
+  doorbell creation.
+
 ## 8. Delegation and lineage isolation
 
 Caller-supplied `parent_task_id`, “most recent parent,” alias matching, or
@@ -405,7 +441,8 @@ required.
 | `report_completion` | cannot complete a bound H1 delivery by alias/content/task lookup; bound consumer must use lease reply/dead-letter |
 | task expiry/re-dispatch worker | uses the generation-guarded queue transaction/outbox in §9; no pre-check/then-push split |
 | `chainReplyToParent` | removed from H1 completion; replaced by attachment-only immutable delegation edges |
-| `retry_task`, `cancel_task`, `reassign_task` | delegate to control/producer-principal queue service with operation ID |
+| `retry_task` | delegates to the control-principal queue service with operation ID and follows §7.1: exact terminal H1 source, new logical task, immutable source assignment, and no lineage authority |
+| `cancel_task`, `reassign_task` | delegate to control/producer-principal queue service with operation ID |
 | `send_task`, `send_message`, `broadcast`, REST task enqueue | delegate to atomic producer service; immutable target resolution before insert |
 | agent-node codex `REPLY_VIA_SEND_TASK` | removed; completion uses the original delivery lease reply and never spawns a child answer task |
 | retention sweeper | follows joint retention rules in §10 |
@@ -433,6 +470,7 @@ from a failed H1 CAS to alias/content matching.
 | Atomic terminal reply via raw `/mcp` | outbox commits on task CAS miss; original stays running/null result; codex answer creates child task | original task terminal/result/completed, reply/event/audit/idempotency/outbox in one tx, zero child task |
 | Post-projection failure | injected event/audit/idempotency/outbox fault leaves terminal task or reply | byte-for-byte pre-call snapshot, generic error, zero doorbell |
 | Terminal immutability | late/sibling result overwrites terminal result | first terminal CAS wins; changed replay byte-zero; identical operation replay read-only |
+| Retry authority and immutability | mutable `tasks.to_node_id` redirects a retry, the source task/assignment reopens, or `sourceTaskId` grants lineage/claim access | exact terminal H1 source pair supplies immutable producer/default target; a new task/delivery/assignment is created; source bytes remain unchanged; provenance is audit/idempotency-only |
 | Lineage isolation | unrelated result appends through recent parent or recursive chain | only server edge attachment; parent unchanged; sibling attachments isolated |
 | Attachment delivery | child result becomes a task/LLM input or aliases to a recipient | ordinary `reply` resource with null task, no-response, exact delegator; ack -> consumed and zero autoreply/delegation |
 | Parent changes during child | cancel/reassign/new epoch redirects attachment or mutates/cascades child/parent | child terminals itself; parent byte-stable; stale edge suppresses attachment+doorbell under explicit C1 policy |
