@@ -914,6 +914,22 @@ function findDirectoryNamed(rootPath, name) {
   return "";
 }
 
+function containsEntryNamed(rootPath, name) {
+  let entries;
+  try {
+    entries = readdirSync(rootPath, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  for (const entry of entries) {
+    if (entry.name === name) return true;
+    if (entry.isDirectory() && containsEntryNamed(path.join(rootPath, entry.name), name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function readJsonLines(filePath) {
   try {
     return readFileSync(filePath, "utf8")
@@ -1402,6 +1418,7 @@ async function runTui(state, label, sessionId, resume, {
     "GROK_CURSOR_HOOKS_ENABLED=false",
     `GROK_AUTH_PATH=${shellQuote(state.authPath)}`,
     "GROK_DISABLE_AUTOUPDATER=1",
+    "GROK_LEADER_LOG=/dev/null",
     "GROK_SUBAGENTS=0",
     "GROK_WEB_FETCH=0",
     "GROK_MEMORY=0",
@@ -1604,6 +1621,9 @@ async function runTui(state, label, sessionId, resume, {
   }
   } finally {
     await cleanupActiveRun(runRecord);
+  }
+  if (containsEntryNamed(root, "leader.log")) {
+    throw new ProbeFailure("cleanup", "leader_cleanup");
   }
   if (invalidRequestObserved(rows)) {
     throw new ProbeFailure(

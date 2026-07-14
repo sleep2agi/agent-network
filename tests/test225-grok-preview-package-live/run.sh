@@ -377,6 +377,7 @@ assert_fake_observations_exact() {
     and any(.[]; .kind == "inspect") and any(.[]; .kind == "spawn")
     and any(.[]; .kind == "leader")
     and all(.[]; (.forbiddenKeys | length) == 0 and .markerValueObserved == false
+      and .leaderLogSinkExact == true
       and (if .kind == "leader"
         then .envKeys == $expectedLeader[0]
           and .ownerMarkerValid == true
@@ -1468,7 +1469,7 @@ chmod 644 "$LEGACY_DAILY_LOG"
     GROK_CLAUDE_MCPS_ENABLED GROK_CURSOR_MCPS_ENABLED \
     GROK_CLAUDE_HOOKS_ENABLED GROK_CURSOR_HOOKS_ENABLED \
     GROK_FOLDER_TRUST GROK_DEFAULT_SELECTED_PERMISSION \
-    GROK_DISABLE_AUTOUPDATER GROK_SUBAGENTS GROK_WEB_FETCH GROK_MEMORY
+    GROK_DISABLE_AUTOUPDATER GROK_LEADER_LOG GROK_SUBAGENTS GROK_WEB_FETCH GROK_MEMORY
 } | sort -u | jq -Rsc 'split("\n") | map(select(length > 0))' > "$EXPECTED_GROK_ENV_KEYS"
 jq -c '. + ["TERM", "GROK_SANDBOX", "ANET_GROK_LEADER_OWNER"] | unique | sort' "$EXPECTED_GROK_ENV_KEYS" \
   > "$EXPECTED_GROK_PTY_ENV_KEYS"

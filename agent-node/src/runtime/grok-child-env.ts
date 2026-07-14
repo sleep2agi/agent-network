@@ -38,6 +38,7 @@ export const GROK_CHILD_CONTROLLED_ENV_KEYS = [
   "GROK_FOLDER_TRUST",
   "GROK_DEFAULT_SELECTED_PERMISSION",
   "GROK_DISABLE_AUTOUPDATER",
+  "GROK_LEADER_LOG",
   "GROK_SUBAGENTS",
   "GROK_WEB_FETCH",
   "GROK_MEMORY",
@@ -109,6 +110,11 @@ export function buildGrokChildEnv(opts: BuildGrokChildEnvOptions): NodeJS.Proces
   // The preview pins one audited binary and one fixed no-I/O agent profile.
   // Keep the same posture across every preflight, Leader and recovery spawn.
   env.GROK_DISABLE_AUTOUPDATER = "1";
+  // Grok 0.2.93 otherwise creates a persistent leader.log containing the
+  // native Leader's stderr. Keep that diagnostic stream out of the isolated
+  // state boundary instead of classifying an unbounded prompt/identity log as
+  // benign. This preview is Linux-only, so /dev/null is a fixed reviewed sink.
+  env.GROK_LEADER_LOG = "/dev/null";
   env.GROK_SUBAGENTS = "0";
   env.GROK_WEB_FETCH = "0";
   env.GROK_MEMORY = "0";
