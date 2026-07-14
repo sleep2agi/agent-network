@@ -104,8 +104,8 @@ function stateFixture(label = "state") {
   const pattern = path.join(root, "patterns");
   const metadataManifest = path.join(root, "auth-metadata-manifest.json");
   const identity = path.join(root, "agent_id");
-  const leader = path.join(run, "leader.sock");
-  const attach = path.join(run, "attach.sock");
+  const leader = path.join(run, "l.sock");
+  const attach = path.join(run, "a.sock");
   const cwd = path.join(root, "workspace");
   const sessionId = TEST_SESSION_ID;
   const session = path.join(home, "sessions", encodeURIComponent(cwd), sessionId);
@@ -736,7 +736,10 @@ test("production pinned vendor policy equals the audited observed inventory", ()
   assert.deepEqual(PINNED_VENDOR_STATE_POLICY, {
     stateFiles: OBSERVED_PINNED_STATE_FILES,
     stateDirectories: OBSERVED_PINNED_STATE_DIRECTORIES,
-    runtimeFiles: ["leader.lock"],
+    nativeLeaderLockBinding: {
+      source: "expectedLeaderSocket",
+      replaceExtension: ".lock",
+    },
   });
 });
 
@@ -775,7 +778,7 @@ function installObservedPinnedVendorState(fixture) {
   for (const basename of OBSERVED_PINNED_STATE_FILES) {
     writeFileSync(path.join(fixture.home, basename), "clean\n", { mode: 0o600 });
   }
-  writeFileSync(path.join(fixture.run, "leader.lock"), "1\n", { mode: 0o600 });
+  writeFileSync(path.join(fixture.run, "l.lock"), "1\n", { mode: 0o600 });
 }
 
 test("scans only the observed pinned vendor state without structural false positives", () => {
@@ -818,12 +821,12 @@ for (const directory of OBSERVED_PINNED_STATE_DIRECTORIES) {
   });
 }
 
-test("rejects an auth pattern inside observed native leader.lock", () => {
+test("rejects an auth pattern inside the native lock derived from l.sock", () => {
   const fixture = stateFixture("pinned-runtime-leader-lock");
   try {
     installObservedPinnedVendorState(fixture);
     assertCleanStateFixture(fixture);
-    writeFileSync(path.join(fixture.run, "leader.lock"),
+    writeFileSync(path.join(fixture.run, "l.lock"),
       "PRIVATE_AUTH_SCALAR_0123456789\n", { mode: 0o600 });
     assertExactStatePatternMatch(fixture, "grok_runtime_directory_other_state");
   } finally {
@@ -906,15 +909,37 @@ test("exact sandbox placeholder stays red when non-empty cleanup is bypassed", (
   }
 });
 
-test("native leader.lock must be hardened from its observed 0644 mode", () => {
+test("native l.lock must be hardened from its observed 0644 mode", () => {
   const fixture = stateFixture("runtime-leader-lock-mode");
-  const leaderLock = path.join(fixture.run, "leader.lock");
+  const leaderLock = path.join(fixture.run, "l.lock");
   try {
     writeFileSync(leaderLock, "1\n", { mode: 0o644 });
     chmodSync(leaderLock, 0o644);
     assert.deepEqual(scanStateFixture(fixture).errorRoles, ["grok_runtime_directory_scan"]);
     chmodSync(leaderLock, 0o600);
     assertCleanStateFixture(fixture);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("rejects a legacy leader.lock sibling when the exact socket derives l.lock", () => {
+  const fixture = stateFixture("runtime-native-lock-wrong-name");
+  const nativeLock = path.join(fixture.run, "l.lock");
+  const wrongLock = path.join(fixture.run, "leader.lock");
+  try {
+    writeFileSync(nativeLock, "1\n", { mode: 0o600 });
+    writeFileSync(wrongLock, "clean\n", { mode: 0o600 });
+    let result = scanStateFixture(fixture);
+    assert.equal(result.scanOutcome, "scan_error");
+    assert.deepEqual(result.matchedRoles, []);
+    assert.deepEqual(result.errorRoles, ["grok_runtime_directory_scan"]);
+
+    writeFileSync(wrongLock, "PRIVATE_AUTH_SCALAR_0123456789\n", { mode: 0o600 });
+    result = scanStateFixture(fixture);
+    assert.equal(result.scanOutcome, "mixed");
+    assert.deepEqual(result.matchedRoles, ["grok_runtime_directory_other_state"]);
+    assert.deepEqual(result.errorRoles, ["grok_runtime_directory_scan"]);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }

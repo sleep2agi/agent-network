@@ -183,7 +183,10 @@ describe("prepareGrokCliHome", () => {
       cwdSessionFiles: ["prompt_history.jsonl"],
       sessionRootFiles: ["session_search.sqlite"],
       emptyStateDirectories: ["sandbox-blocked-dir.15"],
-      runtimeFilesToHarden: ["leader.lock"],
+      nativeLeaderLockBinding: {
+        source: "leaderSocket",
+        replaceExtension: ".lock",
+      },
     });
   });
 
@@ -211,7 +214,7 @@ describe("prepareGrokCliHome", () => {
     writeFileSync(join(stateHome, "logs", "unified.jsonl"), "retained log\n", { mode: 0o644 });
     writeFileSync(join(stateHome, "docs", "guide.md"), "static guide\n", { mode: 0o644 });
     writeFileSync(join(stateHome, "unknown-future-state"), "leave for scanner\n", { mode: 0o644 });
-    writeFileSync(join(runtime, "leader.lock"), "1\n", { mode: 0o644 });
+    writeFileSync(join(runtime, "l.lock"), "1\n", { mode: 0o644 });
     writeFileSync(identity, "identity\n", { mode: 0o644 });
     symlinkSync(identity, join(stateHome, "agent_id"));
     const blocked = join(stateHome, "sandbox-blocked-dir.15");
@@ -221,7 +224,7 @@ describe("prepareGrokCliHome", () => {
     cleanupGrokCliPostStopState({
       stateHome,
       projectCwd: cwd,
-      leaderSocket: join(runtime, "leader.sock"),
+      leaderSocket: join(runtime, "l.sock"),
     });
 
     for (const name of [
@@ -236,7 +239,7 @@ describe("prepareGrokCliHome", () => {
       join(stateHome, "logs", "unified.jsonl"),
       join(stateHome, "docs", "guide.md"),
       join(stateHome, "unknown-future-state"),
-      join(runtime, "leader.lock"),
+      join(runtime, "l.lock"),
     ]) expect(statSync(file).mode & 0o777, file).toBe(0o600);
     for (const directory of [stateHome, join(stateHome, "sessions"), cwdSessions, session,
       join(stateHome, "logs"), join(stateHome, "docs")]) {
@@ -247,6 +250,28 @@ describe("prepareGrokCliHome", () => {
     expect(statSync(identity).mode & 0o777).toBe(0o644);
     expect(readFileSync(join(stateHome, "unknown-future-state"), "utf8"))
       .toBe("leave for scanner\n");
+  });
+
+  it("hardens only the native lock derived from the exact leader socket", () => {
+    const root = mkdtempSync(join(tmpdir(), "grok-cli-post-stop-native-lock-"));
+    roots.push(root);
+    const stateHome = join(root, "state");
+    const runtime = join(root, "runtime");
+    const cwd = join(root, "project");
+    for (const directory of [stateHome, runtime, cwd]) mkdirSync(directory, { mode: 0o700 });
+    const nativeLock = join(runtime, "l.lock");
+    const unknownSibling = join(runtime, "leader.lock");
+    writeFileSync(nativeLock, "1\n", { mode: 0o644 });
+    writeFileSync(unknownSibling, "unknown\n", { mode: 0o644 });
+
+    cleanupGrokCliPostStopState({
+      stateHome,
+      projectCwd: cwd,
+      leaderSocket: join(runtime, "l.sock"),
+    });
+
+    expect(statSync(nativeLock).mode & 0o777).toBe(0o600);
+    expect(statSync(unknownSibling).mode & 0o777).toBe(0o644);
   });
 
   it("retains a non-empty leader log and rejects post-stop link attacks", () => {

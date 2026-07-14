@@ -988,10 +988,8 @@ const PINNED_STATE_FILE_NAMES = Object.freeze([
   "models_cache.json",
 ]);
 const PINNED_STATE_DIRECTORY_NAMES = Object.freeze(["docs", "skills"]);
-const PINNED_RUNTIME_FILE_NAMES = Object.freeze(["leader.lock"]);
 const PINNED_STATE_FILES = new Set(PINNED_STATE_FILE_NAMES);
 const PINNED_STATE_DIRECTORIES = new Set(PINNED_STATE_DIRECTORY_NAMES);
-const PINNED_RUNTIME_FILES = new Set(PINNED_RUNTIME_FILE_NAMES);
 
 // This read-only snapshot keeps the audited test inventory tied exactly to the
 // production classifier. Adding a new admit must therefore add a named
@@ -999,7 +997,10 @@ const PINNED_RUNTIME_FILES = new Set(PINNED_RUNTIME_FILE_NAMES);
 export const PINNED_VENDOR_STATE_POLICY = Object.freeze({
   stateFiles: PINNED_STATE_FILE_NAMES,
   stateDirectories: PINNED_STATE_DIRECTORY_NAMES,
-  runtimeFiles: PINNED_RUNTIME_FILE_NAMES,
+  nativeLeaderLockBinding: Object.freeze({
+    source: "expectedLeaderSocket",
+    replaceExtension: ".lock",
+  }),
 });
 
 const STATE_HOME_NAME = /^node-[0-9a-f]{24}$/;
@@ -1102,7 +1103,9 @@ function deriveStateBindings(
     leaderLock: `.leader-${leaderHash}.lock`,
     bridgeLock: `.bridge-${leaderHash}-${expectedSessionId}.lock`,
   };
-  if (new Set(Object.values(runtimeNames)).size !== 4) return null;
+  const leaderSocketParts = path.parse(leaderSocket);
+  const nativeLeaderLock = `${leaderSocketParts.name}.lock`;
+  if (new Set([...Object.values(runtimeNames), nativeLeaderLock]).size !== 5) return null;
   return {
     root,
     home,
@@ -1113,6 +1116,7 @@ function deriveStateBindings(
     sessionPrefix: ["sessions", encodeURIComponent(expectedCwd), expectedSessionId],
     sessionLockRelative,
     runtimeNames,
+    nativeLeaderLock,
   };
 }
 
@@ -1617,7 +1621,7 @@ function scanRuntimeDirectory(bindings, patterns, matchedRoles, errorRoles, comm
   ]);
   for (const entry of snapshot.entries) {
     const entryPath = path.join(bindings.runtimeDirectory, entry.name);
-    if (PINNED_RUNTIME_FILES.has(entry.name)) {
+    if (entry.name === bindings.nativeLeaderLock) {
       recordScanResult(
         scanRegularFile(entryPath, patterns, commitChecks, "grok_runtime_directory_scan", {
           requirePrivateState: true,

@@ -20,7 +20,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "fs";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "path";
+import { basename, dirname, isAbsolute, join, parse, relative, resolve } from "path";
 import { homedir } from "os";
 import { buildGrokHelperEnv } from "./grok-child-env";
 import {
@@ -69,7 +69,10 @@ export const GROK_POST_STOP_CLEANUP_POLICY = Object.freeze({
   cwdSessionFiles: Object.freeze(["prompt_history.jsonl"]),
   sessionRootFiles: Object.freeze(["session_search.sqlite"]),
   emptyStateDirectories: Object.freeze(["sandbox-blocked-dir.15"]),
-  runtimeFilesToHarden: Object.freeze(["leader.lock"]),
+  nativeLeaderLockBinding: Object.freeze({
+    source: "leaderSocket",
+    replaceExtension: ".lock",
+  }),
 });
 
 export interface GrokProjectTurnLock {
@@ -319,6 +322,11 @@ function hardenExactPostStopFile(path: string): void {
   }
 }
 
+function nativeLeaderLockPath(leaderSocket: string): string {
+  const parsed = parse(leaderSocket);
+  return join(parsed.dir, `${parsed.name}.lock`);
+}
+
 function removeExactEmptyPostStopDirectory(path: string): void {
   const before = lstatIfPresent(path);
   if (!before) return;
@@ -408,9 +416,7 @@ export function cleanupGrokCliPostStopState(opts: CleanupGrokCliPostStopOptions)
   // umask. Preserve exact unknown entries for the scanner, but make every
   // real retained file/directory owner-only before it is inspected.
   hardenPostStopTree(stateHome);
-  for (const name of GROK_POST_STOP_CLEANUP_POLICY.runtimeFilesToHarden) {
-    hardenExactPostStopFile(join(runtimeDirectory, name));
-  }
+  hardenExactPostStopFile(nativeLeaderLockPath(leaderSocket));
 }
 
 function ensureCredentialLink(sourceHome: string, stateHome: string, name: string) {
