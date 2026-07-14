@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
+  chmodSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -82,10 +84,10 @@ function scanFixture(fixture) {
 
 test("preview warning policy is a closed exact role and latest/prod stay strict", () => {
   assert.deepEqual(AUTH_EVIDENCE_GATE_CHANNELS, ["preview", "latest", "prod"]);
-  assert.deepEqual(PREVIEW_STRUCTURE_WARNING_ROLES, ["grok_current_state_structure"]);
+  assert.deepEqual(PREVIEW_STRUCTURE_WARNING_ROLES, ["grok_current_state_completeness"]);
   const structural = makeAuthEvidenceDiagnostic({
     phase: "first_turn_post_stop",
-    errorRoles: ["grok_current_state_structure"],
+    errorRoles: ["grok_current_state_completeness"],
   });
   assert.equal(classifyAuthEvidenceGate("preview", structural), "warning");
   assert.equal(classifyAuthEvidenceGate("latest", structural), "fatal");
@@ -99,7 +101,8 @@ test("preview remains fatal for boundary errors, extra errors, and every credent
   for (const errorRoles of [
     ["scan_boundary"],
     ["grok_runtime_directory_scan"],
-    ["grok_current_state_structure", "grok_state_root_structure"],
+    ["grok_current_state_completeness", "grok_current_state_structure"],
+    ["grok_current_state_completeness", "grok_state_root_structure"],
   ]) {
     assert.equal(classifyAuthEvidenceGate("preview", makeAuthEvidenceDiagnostic({
       phase: "first_turn_post_stop",
@@ -113,7 +116,7 @@ test("preview remains fatal for boundary errors, extra errors, and every credent
     assert.equal(classifyAuthEvidenceGate("preview", makeAuthEvidenceDiagnostic({
       phase: "first_turn_post_stop",
       matchedRoles,
-      errorRoles: ["grok_current_state_structure"],
+      errorRoles: ["grok_current_state_completeness"],
     })), "fatal");
   }
   assert.throws(() => classifyAuthEvidenceGate("unknown", makeAuthEvidenceDiagnostic({
@@ -129,7 +132,7 @@ test("raw state credential mutation changes preview structure warning to fatal",
     const cleanUnknown = scanFixture(fixture);
     assert.equal(cleanUnknown.scanOutcome, "scan_error");
     assert.deepEqual(cleanUnknown.matchedRoles, []);
-    assert.deepEqual(cleanUnknown.errorRoles, ["grok_current_state_structure"]);
+    assert.deepEqual(cleanUnknown.errorRoles, ["grok_current_state_completeness"]);
     assert.equal(classifyAuthEvidenceGate("preview", cleanUnknown), "warning");
 
     // The mutation enters at the raw on-disk state boundary. The unchanged
@@ -140,9 +143,43 @@ test("raw state credential mutation changes preview structure warning to fatal",
     const leaked = scanFixture(fixture);
     assert.equal(leaked.scanOutcome, "mixed");
     assert.deepEqual(leaked.matchedRoles, ["grok_current_home_other_state"]);
-    assert.deepEqual(leaked.errorRoles, ["grok_current_state_structure"]);
+    assert.deepEqual(leaked.errorRoles, ["grok_current_state_completeness"]);
     assert.equal(classifyAuthEvidenceGate("preview", leaked), "fatal");
   } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("raw mode-000 state cannot use the completeness warning to hide a credential", () => {
+  const fixture = stateFixture();
+  const blocked = path.join(fixture.home, "sandbox-blocked.3308");
+  try {
+    writeFileSync(blocked, "", { mode: 0o600 });
+    chmodSync(blocked, 0o000);
+    const emptySentinel = scanFixture(fixture);
+    assert.equal(emptySentinel.scanOutcome, "scan_error");
+    assert.deepEqual(emptySentinel.matchedRoles, []);
+    assert.deepEqual(emptySentinel.errorRoles, ["grok_current_state_completeness"]);
+    assert.equal(classifyAuthEvidenceGate("preview", emptySentinel), "warning");
+
+    chmodSync(blocked, 0o600);
+    writeFileSync(blocked, `${PRIVATE_SCALAR}\n`);
+    chmodSync(blocked, 0o000);
+    const unreadableLeak = scanFixture(fixture);
+    assert.equal(unreadableLeak.scanOutcome, "scan_error");
+    assert.deepEqual(unreadableLeak.matchedRoles, []);
+    assert.deepEqual(unreadableLeak.errorRoles, ["grok_current_state_structure"]);
+    assert.equal(classifyAuthEvidenceGate("preview", unreadableLeak), "fatal");
+
+    chmodSync(blocked, 0o600);
+    writeFileSync(blocked, "");
+    chmodSync(blocked, 0o000);
+    linkSync(blocked, path.join(fixture.root, "sandbox-hardlink"));
+    const linkedSentinel = scanFixture(fixture);
+    assert.deepEqual(linkedSentinel.errorRoles, ["grok_current_state_structure"]);
+    assert.equal(classifyAuthEvidenceGate("preview", linkedSentinel), "fatal");
+  } finally {
+    chmodSync(blocked, 0o600);
     rmSync(fixture.root, { recursive: true, force: true });
   }
 });
