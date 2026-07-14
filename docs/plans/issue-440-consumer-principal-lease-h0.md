@@ -129,7 +129,7 @@ H1 requirements:
 - Missing or dropped SSE is recovered by polling `claim`; SSE delivery is not
   part of the queue transaction's success condition.
 
-The baseline has **17 production `pushEvent` callsites**. They currently pass
+The baseline has **20 production `pushEvent` callsites**. They currently pass
 rich objects to an alias-addressed channel and therefore must be inventoried,
 not assumed to be payload-free:
 
@@ -152,11 +152,17 @@ not assumed to be payload-free:
 | `index.ts:1725` | `new_task` | `inbox_count`, `priority`, `from`, `renamed_from?` | same principal-bound wake-only rule as the MCP producer path |
 | `index.ts:1789` | `broadcast` | `inbox_count` | authorize each immutable recipient; wake-only after its durable enqueue |
 | `index.ts:1977` | `node_deleted` | `node_id`, `node_name`, `alias`, `network_id` | separate control-plane authorization; never a queue-consumer event |
+| `rename.ts:209` | `node.renamed` to old-alias stream | `txn_id`, `node_id`, `old_alias`, `new_alias` (plus rename metadata) | resolve the affected node and old-alias recipient server-side; authorize a rename control channel or emit a non-oracular wake-only event; never trust the stream alias as authority |
+| `rename.ts:210` | `node.renamed` to new-alias stream | `txn_id`, `node_id`, `old_alias`, `new_alias` (plus rename metadata) | resolve the affected node and new-alias recipient server-side; authorize a rename control channel or emit a non-oracular wake-only event; never trust the stream alias as authority |
+| `rename.ts:218` | `node.renamed` to each network-member user stream | `txn_id`, `node_id`, `old_alias`, `new_alias` (plus rename metadata) | derive each recipient from current server-side network membership and an explicit control-plane visibility policy; no network-wide fan-out based only on caller input |
 
 In particular, existing identifier fields `message_id`, `in_reply_to`,
 `parent_task_id`, `child_task_id`, `child_alias`, `update_id`, `request_id`,
-and `probe_id` are not permitted on the H1 node-consumer queue channel. Every
-one of the 17 callsites must either (a) use an independently authorized
+and `probe_id` are not permitted on the H1 node-consumer queue channel. Rename
+identifiers `txn_id`, `node_id`, `old_alias`, and `new_alias` likewise reveal
+node existence/history and must be stripped from wake-only events unless an
+independently authorized control-plane read policy permits them. Every one of
+the 20 callsites must either (a) use an independently authorized
 control/daemon channel or (b) emit the principal-bound wake-only queue
 doorbell. No callsite may treat the target alias passed to `pushEvent` as the
 authorization decision.
@@ -442,7 +448,8 @@ split as follows:
 | `server/src/consumer-queue.ts` (new) | implement all operation state machines, CAS predicates, idempotency, audit-in-transaction, and stable errors |
 | `server/src/db-adapter.ts` | expose explicit same-connection immediate-transaction capability; SQLite implements it; PostgreSQL reports unavailable |
 | `server/src/db.ts` | idempotent migration for immutable token binding, delivery attempts/lease hashes/epochs, task assignment epoch, and operation idempotency; no plaintext lease column |
-| `server/src/push.ts` | emit payload-free principal-bound doorbells only after commit; require every one of the 17 tools/index callsites to choose an authorized control/daemon channel or the wake-only queue channel |
+| `server/src/push.ts` | emit payload-free principal-bound doorbells only after commit; require every one of the 20 tools/index/rename callsites to choose an authorized control/daemon channel or the wake-only queue channel |
+| `server/src/rename.ts` | derive old-alias, new-alias, and network-member recipients entirely from the committed rename plus current server-side identity/membership; authorize each recipient under a separate control-plane policy; strip `txn_id`, node/alias history, and other identifiers from any wake-only surface |
 | `agent-node/src/cli.ts`, `agent-network/src/client.ts`, `agent-network/src/node-server.ts`, `channel/commhub-channel.ts` | replace get/ack polling with claim lease tuples, renew while running, and supply lease+epoch+operation ID to ack/reply/dead-letter; update their existing unit tests |
 | `agent-node/tests/rfc-030-commhub-e2e.ts`, `agent-node/tests/rfc-030-real-node-e2e.ts` | update the real Hub bridge fixtures to use lease-bearing responses without changing frozen gateway protocol files |
 
@@ -472,7 +479,8 @@ Required H1 tests:
    `/api/messages`, `/api/tasks`, `/api/task_events`, `/api/audit-log`, or
    subscribe to `/events/B`; B's own SSE doorbell contains no content, row ID,
    lease, `message_id`, `in_reply_to`, parent/child IDs or aliases,
-   `update_id`, `request_id`, or `probe_id`. Exercise all 17 current
+   `update_id`, `request_id`, `probe_id`, rename `txn_id`, `node_id`,
+   `old_alias`, or `new_alias`. Exercise all 20 current
    `pushEvent` callsites and prove each uses an authorized non-consumer channel
    or the wake-only consumer shape.
 9. `consumer-queue-producer-binding.test.ts`: `send_task`, `send_message`, and
