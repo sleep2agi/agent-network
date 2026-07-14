@@ -667,6 +667,9 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   private quarantinedNetworkTaskId = "";
   private approvalDecisionDispatched = false;
   private activePermissionRequestId: string | null = null;
+  private activePermissionIsExactPreviewTodo = false;
+  private previewTodoAutomaticResolutionConsumed = false;
+  private activeTurnTerminalEventSeen = false;
   private spawnEnv: NodeJS.ProcessEnv;
   private readonly controlledSpawnEnv: NodeJS.ProcessEnv;
   private ptyGeneration = 0;
@@ -1099,6 +1102,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         this.lifecycleBuffer = "";
         this.approvalDecisionDispatched = false;
         this.activePermissionRequestId = null;
+        this.activePermissionIsExactPreviewTodo = false;
         this.resetHumanComposerAudit();
         this.completionPendingSince = 0;
         this.lastChatActivityAt = 0;
@@ -1612,14 +1616,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         ),
       );
       this.eventsTail?.poll((chunk) => {
-        atJsonlTailBoundary(
-          "events.reduce.state_invariant",
-          () => this.reduceLogChunk("events", chunk),
-        );
-        atJsonlTailBoundary(
-          "events.lifecycle.state_invariant",
-          () => this.reduceLifecycleChunk(chunk),
-        );
+        this.reduceEventsChunkInOrder(chunk);
       }, () => atJsonlTailBoundary(
         "events.reduce.state_invariant",
         () => this.resetLogFraming("events"),
@@ -1656,6 +1653,29 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     const result = reduceGrokJsonlChunk(this.logState, source, chunk);
     this.logState = result.state;
     for (const event of result.events) this.handleLogEvent(event);
+  }
+
+  private reduceEventsChunkInOrder(chunk: string): void {
+    // Preserve native append order while letting both reducers retain their
+    // own cross-chunk partial-line state. A whole-chunk lifecycle pass would
+    // incorrectly reorder request -> turn_ended -> resolution into
+    // request -> resolution -> turn_ended.
+    let offset = 0;
+    while (offset < chunk.length && !this.closing) {
+      const newline = chunk.indexOf("\n", offset);
+      const end = newline < 0 ? chunk.length : newline + 1;
+      const fragment = chunk.slice(offset, end);
+      atJsonlTailBoundary(
+        "events.lifecycle.state_invariant",
+        () => this.reduceLifecycleChunk(fragment),
+      );
+      if (this.closing) return;
+      atJsonlTailBoundary(
+        "events.reduce.state_invariant",
+        () => this.reduceLogChunk("events", fragment),
+      );
+      offset = end;
+    }
   }
 
   private flushSettledCompletion(): void {
@@ -1726,6 +1746,9 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         return;
 
       case "turn_completed":
+        if (event.origin === "network" && event.status === "completed") {
+          this.activeTurnTerminalEventSeen = true;
+        }
         if (event.status === "completed" && this.hasUnresolvedApproval()) {
           void this.failFatal(new GrokCopresenceFailure(
             "approval_boundary",
@@ -1767,6 +1790,14 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         return;
 
       case "completion_pending_reply":
+        this.activeTurnTerminalEventSeen = true;
+        if (this.hasUnresolvedApproval()) {
+          void this.failFatal(new GrokCopresenceFailure(
+            "approval_boundary",
+            "grok copresence turn completed while a human approval was still unresolved",
+          ));
+          return;
+        }
         this.completionPendingSince ||= Date.now();
         return;
     }
@@ -1784,6 +1815,9 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         type?: unknown;
         enabled?: unknown;
         phase?: unknown;
+        decision?: unknown;
+        ts?: unknown;
+        wait_ms?: unknown;
         request_id?: unknown;
         requestId?: unknown;
         tool_name?: unknown;
@@ -1795,6 +1829,13 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         continue;
       }
       if (event?.type === "permission_requested") {
+        if (this.activeTurnTerminalEventSeen) {
+          void this.failFatal(new GrokCopresenceFailure(
+            "approval_boundary",
+            "grok copresence observed a permission request after the terminal turn event",
+          ));
+          return;
+        }
         const requestId = lifecyclePermissionIdentity(event);
         if (!requestId) {
           void this.failFatal(new GrokCopresenceFailure(
@@ -1804,6 +1845,13 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           return;
         }
         if (this.activePermissionRequestId) {
+          if (this.activePermissionIsExactPreviewTodo) {
+            void this.failFatal(new GrokCopresenceFailure(
+              "approval_boundary",
+              "grok copresence observed a duplicate preview todo permission request",
+            ));
+            return;
+          }
           if (this.activePermissionRequestId !== requestId) {
             void this.failFatal(new GrokCopresenceFailure(
               "approval_boundary",
@@ -1815,6 +1863,18 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           // gate after an Enter/Ctrl-C decision has already been dispatched.
           continue;
         }
+        const exactPreviewTodo = isExactPreviewTodoPermissionRequest(event);
+        if (
+          exactPreviewTodo
+          && this.arbitration.activeTurn?.owner === "network"
+          && this.previewTodoAutomaticResolutionConsumed
+        ) {
+          void this.failFatal(new GrokCopresenceFailure(
+            "approval_boundary",
+            "grok copresence observed more than one preview todo permission lifecycle in a turn",
+          ));
+          return;
+        }
         const transition = this.transition({ type: "approval_requested" });
         if (!transition.accepted) {
           void this.failFatal(new GrokCopresenceFailure(
@@ -1824,6 +1884,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           return;
         }
         this.activePermissionRequestId = requestId;
+        this.activePermissionIsExactPreviewTodo = exactPreviewTodo;
         this.approvalDecisionDispatched = false;
         if (this.deferredHuman.length) {
           // Pre-approval keystrokes are never consent. Drop them instead of
@@ -1838,6 +1899,28 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         }
       } else if (event?.type === "permission_resolved") {
         const requestId = lifecyclePermissionIdentity(event);
+        if (isGrokPreviewTodoAutomaticResolution({
+          requestWasExact: this.activePermissionIsExactPreviewTodo,
+          activeRequestId: this.activePermissionRequestId,
+          humanDecisionDispatched: this.approvalDecisionDispatched,
+          waitingHuman: this.arbitration.waitingHuman,
+          turnOwner: this.arbitration.activeTurn?.owner ?? null,
+          alreadyConsumed: this.previewTodoAutomaticResolutionConsumed,
+          terminalEventSeen: this.activeTurnTerminalEventSeen,
+          event,
+        })) {
+          // Keyless black-box evidence for the pinned 0.2.93 build shows that
+          // the fixed preview profile's sole session-local tool emits
+          // requested(tool_name=todo_write) -> resolved(decision=allow)
+          // without reading TUI input.  Treat only that exact tuple as a
+          // preview-local completion.  Do not derive this exception from the
+          // profile array: adding a future tool must never grant it the same
+          // behavior accidentally.
+          this.previewTodoAutomaticResolutionConsumed = true;
+          this.clearApprovalCorrelation();
+          this.transition({ type: "preview_todo_resolved_automatically" });
+          continue;
+        }
         if (
           !requestId
           || requestId !== this.activePermissionRequestId
@@ -1958,6 +2041,12 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   private transition(event: GrokCopresenceEvent) {
     const result = reduceGrokCopresenceState(this.arbitration, event);
     this.arbitration = result.state;
+    if (result.accepted && event.type === "schedule_network") {
+      this.previewTodoAutomaticResolutionConsumed = false;
+      this.activeTurnTerminalEventSeen = false;
+    } else if (result.accepted && event.type === "human_input_submitted") {
+      this.activeTurnTerminalEventSeen = false;
+    }
     if (result.accepted && event.type === "turn_completed") this.clearApprovalCorrelation(true);
     if (result.accepted) this.broadcastState();
     return result;
@@ -1965,6 +2054,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
 
   private clearApprovalCorrelation(_clearSettled = false): void {
     this.activePermissionRequestId = null;
+    this.activePermissionIsExactPreviewTodo = false;
     this.approvalDecisionDispatched = false;
   }
 
@@ -2868,6 +2958,90 @@ function lifecyclePermissionIdentity(event: {
       ? event.toolName
       : "";
   return toolName && Buffer.byteLength(toolName, "utf8") <= 512 ? `tool:${toolName}` : null;
+}
+
+function isExactPreviewTodoPermissionRequest(event: {
+  type?: unknown;
+  ts?: unknown;
+  request_id?: unknown;
+  requestId?: unknown;
+  tool_name?: unknown;
+  toolName?: unknown;
+}): boolean {
+  return exactObjectKeys(event, ["tool_name", "ts", "type"])
+    && event.type === "permission_requested"
+    && isBoundedLifecycleShapeString(event.ts)
+    && event.request_id === undefined
+    && event.requestId === undefined
+    && event.tool_name === "todo_write"
+    && event.toolName === undefined;
+}
+
+function isExactPreviewTodoPermissionResolution(event: {
+  type?: unknown;
+  decision?: unknown;
+  ts?: unknown;
+  wait_ms?: unknown;
+  request_id?: unknown;
+  requestId?: unknown;
+  tool_name?: unknown;
+  toolName?: unknown;
+}): boolean {
+  return exactObjectKeys(event, ["decision", "tool_name", "ts", "type", "wait_ms"])
+    && event.type === "permission_resolved"
+    && isBoundedLifecycleShapeString(event.ts)
+    && typeof event.wait_ms === "number"
+    && Number.isSafeInteger(event.wait_ms)
+    && event.wait_ms >= 0
+    && event.request_id === undefined
+    && event.requestId === undefined
+    && event.tool_name === "todo_write"
+    && event.toolName === undefined
+    && event.decision === "allow";
+}
+
+/** Exact preview exception; exported so every rejected dimension has a pure mutation test. */
+export function isGrokPreviewTodoAutomaticResolution(input: {
+  requestWasExact: boolean;
+  activeRequestId: string | null;
+  humanDecisionDispatched: boolean;
+  waitingHuman: boolean;
+  turnOwner: "human" | "network" | null;
+  alreadyConsumed: boolean;
+  terminalEventSeen: boolean;
+  event: {
+    type?: unknown;
+    decision?: unknown;
+    ts?: unknown;
+    wait_ms?: unknown;
+    request_id?: unknown;
+    requestId?: unknown;
+    tool_name?: unknown;
+    toolName?: unknown;
+  };
+}): boolean {
+  const requestId = lifecyclePermissionIdentity(input.event);
+  return input.requestWasExact
+    && input.activeRequestId === "tool:todo_write"
+    && requestId === input.activeRequestId
+    && !input.humanDecisionDispatched
+    && input.waitingHuman
+    && input.turnOwner === "network"
+    && !input.alreadyConsumed
+    && !input.terminalEventSeen
+    && isExactPreviewTodoPermissionResolution(input.event);
+}
+
+function exactObjectKeys(value: object, expected: readonly string[]): boolean {
+  const actual = Object.keys(value).sort();
+  return actual.length === expected.length
+    && actual.every((key, index) => key === expected[index]);
+}
+
+function isBoundedLifecycleShapeString(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && Buffer.byteLength(value, "utf8") <= 256;
 }
 
 function isUnsafeApprovalLifecycleEvent(event: {

@@ -63,6 +63,17 @@ pinned CLI read its existing owner-only login after sandbox re-exec without
 giving a network prompt a model-tool route to that file. Use another runtime
 when code inspection/editing, shell execution, or web/media access is needed.
 
+Pinned Grok 0.2.93 wraps `todo_write` in a permission lifecycle but resolves
+that session-local helper without reading human input. For preview network
+turns only, the runtime accepts the exact observed tuple: no request ID,
+`tool_name=todo_write`, `decision=allow`, one active network turn, and no
+human decision already dispatched. At most one such lifecycle is accepted per
+network turn. The helper's state stays in the owner-only
+Grok session. Any different tool, decision, identity shape, overlap, mode
+change, or unresolved completion still closes the runtime. This narrow
+preview exception is not production-grade approval ownership and is not a
+capability claim for `latest`.
+
 The runtime prepares Grok's owner-only folder-trust store non-interactively,
 but grants trust to the exact canonical working directory only. It first
 refuses project MCP, LSP, hook, plugin, permission/sandbox configuration, and
@@ -138,6 +149,7 @@ This launches `grok agent stdio` and uses ACP session handling. It is not an ali
 - Do not use this runtime for production work or connect it to a public/untrusted Hub.
 - Do not enable permission bypass for the co-presence profile.
 - Treat every approval prompt as human-visible experimental behavior, not as proof of production-grade owner or lease enforcement.
+- The pinned TUI auto-resolves only the fixed session-local `todo_write` helper during an active network turn; this explicit preview exception is why untrusted tasks remain forbidden.
 - Grok children and runtime lock helpers receive exact, from-empty environment allowlists. CommHub/cloud credentials are not inherited by those processes.
 - The shared-TUI preview has the exact fixed tool inventory `[todo_write]`; do not treat it as a filesystem-, network-, media-, MCP-, subagent-, or shell-capable coding runtime.
 - Folder trust is runtime-owned, mode `0600`, and contains exactly the current canonical working directory; project executable configuration is a startup error rather than implicitly trusted code.

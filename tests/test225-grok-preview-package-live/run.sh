@@ -1843,7 +1843,7 @@ run_real_gate() {
   [ "$(file_mode "$profile_fixture")" = 600 ] \
     || fail "runtime-owned co-presence profile is not mode 0600"
   run_tui_inventory_gate "$real_bin" "$profile_fixture" "$real_auth"
-  pass "pinned Grok TUI fresh/resume requests expose only todo_write; unsafe profile mutations turn red"
+  pass "pinned Grok TUI inventory, unsafe mutations, and exact keyless todo lifecycle gate"
 
   mkdir -p "$HOME/.grok" /tmp/test225-real-auth
   cp "$real_auth" "$HOME/.grok/auth.json"

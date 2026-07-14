@@ -59,7 +59,8 @@ export type GrokCopresenceEvent =
   | { type: "disconnected" }
   | { type: "reconnected" }
   | { type: "approval_requested" }
-  | { type: "approval_resolved_by_human" };
+  | { type: "approval_resolved_by_human" }
+  | { type: "preview_todo_resolved_automatically" };
 
 export type GrokCopresenceEffect =
   | { type: "inject_network_task"; task: GrokCopresenceNetworkTask }
@@ -189,6 +190,19 @@ export function reduceGrokCopresenceState(
 
     case "approval_resolved_by_human":
       if (!state.waitingHuman) return ignored(state);
+      return changed(state, { waitingHuman: false });
+
+    // Grok 0.2.93 emits the ordinary permission lifecycle around its
+    // session-local todo_write helper even though the TUI resolves that
+    // helper without asking the human.  The runtime admits only that exact,
+    // separately checked preview case; all other automatic resolutions stay
+    // on the fail-closed approval path.
+    case "preview_todo_resolved_automatically":
+      if (
+        !state.waitingHuman
+        || state.phase !== "network_turn"
+        || state.activeTurn?.owner !== "network"
+      ) return ignored(state);
       return changed(state, { waitingHuman: false });
   }
 }

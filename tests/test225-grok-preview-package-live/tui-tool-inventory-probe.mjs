@@ -61,6 +61,9 @@ class ProbeFailure extends Error {
 
 function phaseForRun(label) {
   if (label === "fresh" || label === "resume") return label;
+  // Keep the persisted diagnostic schema closed while the independent
+  // keyless todo lifecycle remains part of the positive fresh-session gate.
+  if (label === "todo-lifecycle") return "fresh";
   if (label === "mutation-defaults") return "mutation_defaults";
   if (label === "mutation-read") return "mutation_read";
   return "bootstrap";
@@ -94,6 +97,75 @@ function streamText(response, content, onFinished) {
   response.write(`data: ${JSON.stringify(chunk({ role: "assistant", content }))}\n\n`);
   response.write(`data: ${JSON.stringify(chunk({}, "stop"))}\n\n`);
   response.end("data: [DONE]\n\n");
+}
+
+function sampleToolArgument(schema, key = "") {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return null;
+  if (Array.isArray(schema.enum) && schema.enum.length > 0) return schema.enum[0];
+  if (schema.type === "string") {
+    if (key === "status") return "pending";
+    if (key === "activeForm") return "Running bounded probe";
+    return "Bounded keyless probe";
+  }
+  if (schema.type === "boolean") return false;
+  if (schema.type === "integer" || schema.type === "number") return 1;
+  if (schema.type === "array") return [sampleToolArgument(schema.items, key)];
+  const properties = schema.properties && typeof schema.properties === "object"
+    ? schema.properties
+    : {};
+  const required = Array.isArray(schema.required) ? schema.required : Object.keys(properties);
+  const value = {};
+  for (const name of required) value[name] = sampleToolArgument(properties[name], name);
+  return value;
+}
+
+function streamTodoWrite(response, todoTool, onFinished) {
+  response.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache",
+    connection: "close",
+  });
+  response.once("finish", onFinished);
+  const parameters = todoTool?.function?.parameters ?? todoTool?.parameters;
+  const args = JSON.stringify(sampleToolArgument(parameters));
+  const chunk = (delta, finishReason = null) => ({
+    id: "test225-todo-lifecycle",
+    object: "chat.completion.chunk",
+    created: 1,
+    model: "anet-probe",
+    choices: [{ index: 0, delta, finish_reason: finishReason }],
+  });
+  response.write(`data: ${JSON.stringify(chunk({ role: "assistant" }))}\n\n`);
+  response.write(`data: ${JSON.stringify(chunk({
+    tool_calls: [{
+      index: 0,
+      id: "call_test225_todo",
+      type: "function",
+      function: { name: "todo_write", arguments: args },
+    }],
+  }))}\n\n`);
+  response.write(`data: ${JSON.stringify(chunk({}, "tool_calls"))}\n\n`);
+  response.end("data: [DONE]\n\n");
+}
+
+function hasStructuredToolResult(value) {
+  const pending = [{ value, depth: 0 }];
+  let visited = 0;
+  while (pending.length > 0 && visited < 65_536) {
+    const current = pending.pop();
+    visited += 1;
+    if (current.depth > 64 || current.value === null || typeof current.value !== "object") {
+      continue;
+    }
+    if (!Array.isArray(current.value)
+      && (current.value.role === "tool" || current.value.type === "tool_result")) return true;
+    for (const child of Array.isArray(current.value)
+      ? current.value
+      : Object.values(current.value)) {
+      pending.push({ value: child, depth: current.depth + 1 });
+    }
+  }
+  return false;
 }
 
 function shellQuote(value) {
@@ -174,6 +246,7 @@ async function openModelServer(run, nonce, rows) {
   });
   let activeRequestBodies = 0;
   let aggregateRequestBodyBytes = 0;
+  let todoResponseSent = false;
   const modelServer = http.createServer((request, response) => {
     let body = "";
     let bodyBytes = 0;
@@ -268,21 +341,38 @@ async function openModelServer(run, nonce, rows) {
         return;
       }
       releaseBodySlot();
+      const todoTool = parsed.tools.find((tool) =>
+        (tool?.function?.name ?? tool?.name) === "todo_write");
+      const toolResultObserved = hasStructuredToolResult(parsed.messages);
+      const markerObserved = messageBytes.includes(marker);
+      const nonceObserved = messageBytes.includes(nonce);
+      const emitTodo = run === "todo-lifecycle"
+        && markerObserved
+        && nonceObserved
+        && todoTool
+        && !todoResponseSent;
       const row = {
         run,
         names,
-        marker: messageBytes.includes(marker),
-        promptNonce: messageBytes.includes(nonce),
+        marker: markerObserved,
+        promptNonce: nonceObserved,
         skillsReminder: messageBytes.includes("The following skills are available for use"),
+        toolResultObserved,
+        stubResponse: emitTodo ? "todo_write" : "text",
         responseFinished: false,
         invalidRequest: false,
       };
       recordRow(row);
-      streamText(
-        response,
-        names.length === 1 && names[0] === "session_title" ? "probe" : "PROBE_REPLY",
-        () => { row.responseFinished = true; },
-      );
+      if (emitTodo) {
+        todoResponseSent = true;
+        streamTodoWrite(response, todoTool, () => { row.responseFinished = true; });
+      } else {
+        streamText(
+          response,
+          names.length === 1 && names[0] === "session_title" ? "probe" : "PROBE_REPLY",
+          () => { row.responseFinished = true; },
+        );
+      }
     });
   });
   bindInventorySocketBudget(modelServer, recordInvalidTransport);
@@ -833,6 +923,139 @@ function readJsonLines(filePath) {
   } catch {
     return [];
   }
+}
+
+function hasExactKeys(value, expected) {
+  return value !== null
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...expected].sort());
+}
+
+function boundedLifecycleString(value) {
+  return typeof value === "string"
+    && value.length > 0
+    && Buffer.byteLength(value, "utf8") <= 256;
+}
+
+function isExactTodoLifecycle(lifecycle) {
+  if (!Array.isArray(lifecycle)
+    || JSON.stringify(lifecycle.map((event) => event?.type)) !== JSON.stringify([
+      "turn_started",
+      "permission_requested",
+      "permission_resolved",
+      "turn_ended",
+    ])) return false;
+  const requested = lifecycle[1];
+  const resolved = lifecycle[2];
+  const ended = lifecycle[3];
+  return hasExactKeys(requested, ["tool_name", "ts", "type"])
+    && requested.type === "permission_requested"
+    && requested.tool_name === "todo_write"
+    && boundedLifecycleString(requested.ts)
+    && hasExactKeys(resolved, ["decision", "tool_name", "ts", "type", "wait_ms"])
+    && resolved.type === "permission_resolved"
+    && resolved.tool_name === "todo_write"
+    && resolved.decision === "allow"
+    && boundedLifecycleString(resolved.ts)
+    && Number.isSafeInteger(resolved.wait_ms)
+    && resolved.wait_ms >= 0
+    && ended?.outcome === "completed";
+}
+
+function assertTodoLifecycleClassifier() {
+  const exact = [
+    { type: "turn_started" },
+    { type: "permission_requested", tool_name: "todo_write", ts: "timestamp" },
+    {
+      type: "permission_resolved",
+      tool_name: "todo_write",
+      decision: "allow",
+      ts: "timestamp",
+      wait_ms: 0,
+    },
+    { type: "turn_ended", outcome: "completed" },
+  ];
+  const copy = () => JSON.parse(JSON.stringify(exact));
+  const mutations = [];
+  {
+    const candidate = copy();
+    candidate[1].request_id = "unexpected";
+    mutations.push(candidate);
+  }
+  {
+    const candidate = copy();
+    candidate[2].extra = true;
+    mutations.push(candidate);
+  }
+  {
+    const candidate = copy();
+    candidate[2].tool_name = "read_file";
+    mutations.push(candidate);
+  }
+  {
+    const candidate = copy();
+    candidate[2].decision = "deny";
+    mutations.push(candidate);
+  }
+  {
+    const candidate = copy();
+    delete candidate[2].wait_ms;
+    mutations.push(candidate);
+  }
+  {
+    const candidate = copy();
+    [candidate[1], candidate[2]] = [candidate[2], candidate[1]];
+    mutations.push(candidate);
+  }
+  {
+    const candidate = copy();
+    candidate.splice(2, 0, { ...candidate[1] });
+    mutations.push(candidate);
+  }
+  if (!isExactTodoLifecycle(exact)
+    || mutations.some((candidate) => isExactTodoLifecycle(candidate))) {
+    throw new Error("todo lifecycle structural classifier self-check failed");
+  }
+}
+
+function passesTodoLifecycleGate(state, sessionId, result) {
+  const sessionDir = findDirectoryNamed(path.join(state.home, "sessions"), sessionId);
+  if (!sessionDir) return false;
+  const chatPath = path.join(sessionDir, "chat_history.jsonl");
+  const eventsPath = path.join(sessionDir, "events.jsonl");
+  if (!regularPrivateFile(chatPath) || !regularPrivateFile(eventsPath)) return false;
+  const chat = readJsonLines(chatPath);
+  const events = readJsonLines(eventsPath);
+  const lifecycleTypes = new Set([
+    "turn_started",
+    "permission_requested",
+    "permission_resolved",
+    "permission_rejected",
+    "permission_cancelled",
+    "turn_ended",
+  ]);
+  const lifecycle = events.filter((event) => lifecycleTypes.has(event?.type));
+  if (!isExactTodoLifecycle(lifecycle) || result.facts.completedTurn !== true) return false;
+
+  const main = currentMainRows(result.rows);
+  if (!passesFixedGate(result.rows)
+    || main.length !== 2
+    || main[0].stubResponse !== "todo_write"
+    || main[0].toolResultObserved !== false
+    || main[1].stubResponse !== "text"
+    || main[1].toolResultObserved !== true) {
+    return false;
+  }
+  const toolCalls = chat.flatMap((entry) =>
+    entry?.type === "assistant" && Array.isArray(entry.tool_calls) ? entry.tool_calls : []);
+  if (toolCalls.length !== 1 || toolCalls[0]?.name !== "todo_write") return false;
+  const toolResultIndexes = chat.flatMap((entry, index) =>
+    entry?.type === "tool_result" ? [index] : []);
+  if (toolResultIndexes.length !== 1) return false;
+  return chat.slice(toolResultIndexes[0] + 1).some((entry) =>
+    entry?.type === "assistant"
+      && (!Array.isArray(entry.tool_calls) || entry.tool_calls.length === 0));
 }
 
 function regularPrivateFile(filePath) {
@@ -1441,6 +1664,7 @@ function combineFacts(results) {
 }
 
 async function runProbe() {
+  assertTodoLifecycleClassifier();
   if (!binary || !fixedProfileSource || !resultPath) {
     throw new ProbeFailure("bootstrap", "profile_invalid");
   }
@@ -1531,6 +1755,25 @@ async function runProbe() {
   }
   if (passesFixedGate(readMutation.rows)) {
     throw new ProbeFailure("mutation_read", "mutation_not_red", readMutation.facts);
+  }
+
+  // Exercise the only model tool that the preview intentionally exposes.
+  // This is a separate session so the fresh/resume continuity proof above
+  // remains unchanged and no lifecycle record can be inherited from it.
+  const todoState = createProbeState("todo-lifecycle");
+  const todoSessionId = randomUUID();
+  writeFileSync(todoState.profilePath, fixedProfile, { mode: 0o600 });
+  chmodSync(todoState.profilePath, 0o600);
+  const todoLifecycle = await runTui(
+    todoState,
+    "todo-lifecycle",
+    todoSessionId,
+    false,
+    { mode: "todo" },
+  );
+  results.push(todoLifecycle);
+  if (!passesTodoLifecycleGate(todoState, todoSessionId, todoLifecycle)) {
+    throw new ProbeFailure("fresh", "inventory_mismatch", todoLifecycle.facts);
   }
   return combineFacts(results);
 }

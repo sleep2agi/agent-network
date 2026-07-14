@@ -30,6 +30,7 @@ import {
   grokCopresenceFailureSubcode,
   grokSessionDirectory,
   hasGrokTuiReadyMarker,
+  isGrokPreviewTodoAutomaticResolution,
   openGrokCopresenceRuntime,
   type GrokCopresenceRuntimeSession,
   type GrokPtyLike,
@@ -47,6 +48,45 @@ type FakeDelayedWrite = {
 };
 
 describe("Grok copresence launch and injection policy", () => {
+  test("keeps the preview todo auto-resolution exception exact and network-turn-only", () => {
+    const exact = {
+      requestWasExact: true,
+      activeRequestId: "tool:todo_write",
+      humanDecisionDispatched: false,
+      waitingHuman: true,
+      turnOwner: "network" as const,
+      alreadyConsumed: false,
+      terminalEventSeen: false,
+      event: {
+        type: "permission_resolved",
+        tool_name: "todo_write",
+        decision: "allow",
+        ts: "reviewed-timestamp-shape",
+        wait_ms: 0,
+      },
+    };
+    expect(isGrokPreviewTodoAutomaticResolution(exact)).toBe(true);
+    for (const mutation of [
+      { ...exact, requestWasExact: false },
+      { ...exact, activeRequestId: "tool:read_file" },
+      { ...exact, humanDecisionDispatched: true },
+      { ...exact, waitingHuman: false },
+      { ...exact, turnOwner: "human" as const },
+      { ...exact, turnOwner: null },
+      { ...exact, alreadyConsumed: true },
+      { ...exact, terminalEventSeen: true },
+      { ...exact, event: { ...exact.event, decision: "allow_once" } },
+      { ...exact, event: { ...exact.event, request_id: "mutated" } },
+      { ...exact, event: { ...exact.event, toolName: "todo_write" } },
+      { ...exact, event: { ...exact.event, wait_ms: "0" } },
+      { ...exact, event: { ...exact.event, wait_ms: -1 } },
+      { ...exact, event: { ...exact.event, ts: "" } },
+      { ...exact, event: { ...exact.event, extra: "mutated" } },
+    ]) {
+      expect(isGrokPreviewTodoAutomaticResolution(mutation)).toBe(false);
+    }
+  });
+
   test("exposes only reviewed value-free task failure codes and exact JSONL subcodes", () => {
     const tagged = new GrokCopresenceFailure(
       "jsonl_tail",
@@ -1107,6 +1147,110 @@ describe("Grok copresence runtime integration", () => {
     }
   }, 8_000);
 
+  test("accepts only the pinned preview todo_write automatic resolution tuple", async () => {
+    const fixture = new RuntimeFixture();
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await fixture.open();
+      const result = await runtime.submit({
+        taskId: "preview-todo-resolution",
+        from: "reviewer",
+        text: "AUTO_RESOLVE_TODO",
+        timeoutMs: 3_000,
+      });
+      expect(result.replyText).toBe("TODO preview-todo-resolution");
+      expect(runtime.state.waitingHuman).toBe(false);
+      expect(fixture.approvalDecisionCount()).toBe(0);
+      expect(runtime.isRunning).toBe(true);
+
+      const next = await runtime.submit({
+        taskId: "preview-todo-resolution-next-turn",
+        from: "reviewer",
+        text: "AUTO_RESOLVE_TODO",
+        timeoutMs: 3_000,
+      });
+      expect(next.replyText).toBe("TODO preview-todo-resolution-next-turn");
+      expect(runtime.isRunning).toBe(true);
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 8_000);
+
+  test("rejects every mutated preview todo_write automatic resolution tuple", async () => {
+    for (const mutation of [
+      "WRONG_DECISION",
+      "REQUEST_ID",
+      "CAMEL_CASE",
+      "CHANGED_DUPLICATE",
+      "DUPLICATE",
+      "EXTRA_FIELD",
+      "MISSING_WAIT",
+    ]) {
+      const fixture = new RuntimeFixture();
+      let runtime: GrokCopresenceRuntimeSession | undefined;
+      try {
+        runtime = await fixture.open();
+        await expect(runtime.submit({
+          taskId: `preview-todo-${mutation.toLowerCase()}`,
+          from: "reviewer",
+          text: `AUTO_RESOLVE_TODO_${mutation}`,
+          timeoutMs: 3_000,
+        }), mutation).rejects.toThrow(/permission request|automatically resolved/);
+        await waitFor(() => !runtime!.isRunning);
+      } finally {
+        await runtime?.close();
+        await fixture.close();
+      }
+    }
+  }, 16_000);
+
+  test("preserves exact permission lifecycle order across coalesced and split event reads", async () => {
+    for (const shape of ["COALESCED", "FRAGMENTED"]) {
+      const fixture = new RuntimeFixture();
+      let runtime: GrokCopresenceRuntimeSession | undefined;
+      try {
+        runtime = await fixture.open();
+        const result = await runtime.submit({
+          taskId: `preview-todo-${shape.toLowerCase()}`,
+          from: "reviewer",
+          text: `AUTO_RESOLVE_TODO_${shape}`,
+          timeoutMs: 3_000,
+        });
+        expect(result.replyText).toBe(`TODO preview-todo-${shape.toLowerCase()}`);
+        expect(runtime.isRunning).toBe(true);
+      } finally {
+        await runtime?.close();
+        await fixture.close();
+      }
+    }
+  }, 12_000);
+
+  test("rejects terminal reordering and a second todo lifecycle in one network turn", async () => {
+    for (const mutation of [
+      "END_BEFORE_RESOLUTION",
+      "END_BEFORE_REQUEST",
+      "EVENTS_FIRST",
+      "TWICE",
+    ]) {
+      const fixture = new RuntimeFixture();
+      let runtime: GrokCopresenceRuntimeSession | undefined;
+      try {
+        runtime = await fixture.open();
+        await expect(runtime.submit({
+          taskId: `preview-todo-order-${mutation.toLowerCase()}`,
+          from: "reviewer",
+          text: `AUTO_RESOLVE_TODO_${mutation}`,
+          timeoutMs: 3_000,
+        }), mutation).rejects.toThrow(/approval|permission|terminal turn event|more than one/);
+        await waitFor(() => !runtime!.isRunning);
+      } finally {
+        await runtime?.close();
+        await fixture.close();
+      }
+    }
+  }, 12_000);
+
   test("never replies with a tool-bearing assistant when the final log is delayed past settling", async () => {
     const fixture = new RuntimeFixture();
     let runtime: GrokCopresenceRuntimeSession | undefined;
@@ -1895,6 +2039,177 @@ class FakePty implements GrokPtyLike {
         tool_name: "run_terminal_command",
         decision: "allow",
       });
+      return;
+    }
+    if (message === "AUTO_RESOLVE_TODO") {
+      appendJson(join(this.sessionDir, "chat_history.jsonl"), {
+        type: "user",
+        content: `<user_query>[Agent Network/from=${from}/task=${taskId}] ${message}</user_query>`,
+      });
+      appendJson(join(this.sessionDir, "events.jsonl"), { type: "turn_started", turn_number: 12 });
+      appendJson(join(this.sessionDir, "events.jsonl"), {
+        type: "permission_requested",
+        tool_name: "todo_write",
+        ts: "preview-todo-requested",
+      });
+      appendJson(join(this.sessionDir, "chat_history.jsonl"), {
+        type: "assistant",
+        content: "",
+        tool_calls: [{ id: "call-todo", name: "todo_write", arguments: "{}" }],
+      });
+      appendJson(join(this.sessionDir, "chat_history.jsonl"), {
+        type: "tool_result",
+        content: "ok",
+      });
+      setTimeout(() => {
+        appendJson(join(this.sessionDir, "events.jsonl"), {
+          type: "permission_resolved",
+          tool_name: "todo_write",
+          decision: "allow",
+          ts: "preview-todo-resolved",
+          wait_ms: 0,
+        });
+        appendJson(join(this.sessionDir, "chat_history.jsonl"), {
+          type: "assistant",
+          content: `TODO ${taskId}`,
+        });
+        appendJson(join(this.sessionDir, "events.jsonl"), { type: "turn_ended", outcome: "completed" });
+      }, 150);
+      return;
+    }
+    if (
+      message === "AUTO_RESOLVE_TODO_COALESCED"
+      || message === "AUTO_RESOLVE_TODO_FRAGMENTED"
+      || message === "AUTO_RESOLVE_TODO_END_BEFORE_RESOLUTION"
+      || message === "AUTO_RESOLVE_TODO_END_BEFORE_REQUEST"
+      || message === "AUTO_RESOLVE_TODO_EVENTS_FIRST"
+      || message === "AUTO_RESOLVE_TODO_TWICE"
+    ) {
+      const userRecord = {
+        type: "user",
+        content: `<user_query>[Agent Network/from=${from}/task=${taskId}] ${message}</user_query>`,
+      };
+      if (!message.endsWith("EVENTS_FIRST")) {
+        appendJson(join(this.sessionDir, "chat_history.jsonl"), userRecord);
+      }
+      const eventsPath = join(this.sessionDir, "events.jsonl");
+      const request = {
+        type: "permission_requested",
+        tool_name: "todo_write",
+        ts: "preview-todo-requested",
+      };
+      const resolution = {
+        type: "permission_resolved",
+        tool_name: "todo_write",
+        decision: "allow",
+        ts: "preview-todo-resolved",
+        wait_ms: 0,
+      };
+      const terminal = { type: "turn_ended", outcome: "completed" };
+      appendJson(eventsPath, { type: "turn_started", turn_number: 14 });
+
+      if (message.endsWith("FRAGMENTED")) {
+        const requestLine = `${JSON.stringify(request)}\n`;
+        const requestSplit = Math.floor(requestLine.length / 2);
+        appendFileSync(eventsPath, requestLine.slice(0, requestSplit), { mode: 0o600 });
+        this.delayedWrites.push(setTimeout(() => {
+          appendFileSync(eventsPath, requestLine.slice(requestSplit), { mode: 0o600 });
+          const resolutionLine = `${JSON.stringify(resolution)}\n`;
+          const resolutionSplit = Math.floor(resolutionLine.length / 2);
+          appendFileSync(eventsPath, resolutionLine.slice(0, resolutionSplit), { mode: 0o600 });
+          this.delayedWrites.push(setTimeout(() => {
+            appendFileSync(eventsPath, resolutionLine.slice(resolutionSplit), { mode: 0o600 });
+            appendJson(join(this.sessionDir, "chat_history.jsonl"), {
+              type: "assistant",
+              content: `TODO ${taskId}`,
+            });
+            appendJson(eventsPath, terminal);
+          }, 80));
+        }, 80));
+        return;
+      }
+
+      const ordered = message.endsWith("END_BEFORE_RESOLUTION")
+        ? [request, terminal, resolution]
+        : message.endsWith("END_BEFORE_REQUEST") || message.endsWith("EVENTS_FIRST")
+          ? [terminal, request, resolution]
+          : message.endsWith("TWICE")
+            ? [request, resolution, request, resolution]
+            : [request, resolution];
+      for (const event of ordered) appendJson(eventsPath, event);
+      if (message.endsWith("EVENTS_FIRST")) {
+        this.delayedWrites.push(setTimeout(() => {
+          appendJson(join(this.sessionDir, "chat_history.jsonl"), userRecord);
+        }, 100));
+      }
+      if (message.endsWith("COALESCED")) {
+        appendJson(join(this.sessionDir, "chat_history.jsonl"), {
+          type: "assistant",
+          content: `TODO ${taskId}`,
+        });
+        appendJson(eventsPath, terminal);
+      }
+      return;
+    }
+    if (message.startsWith("AUTO_RESOLVE_TODO_")) {
+      appendJson(join(this.sessionDir, "chat_history.jsonl"), {
+        type: "user",
+        content: `<user_query>[Agent Network/from=${from}/task=${taskId}] ${message}</user_query>`,
+      });
+      appendJson(join(this.sessionDir, "events.jsonl"), { type: "turn_started", turn_number: 13 });
+      const request = message.endsWith("CAMEL_CASE")
+        ? { type: "permission_requested", toolName: "todo_write" }
+        : message.endsWith("REQUEST_ID")
+          ? { type: "permission_requested", request_id: "preview-todo-request", tool_name: "todo_write" }
+          : message.endsWith("EXTRA_FIELD")
+            ? {
+                type: "permission_requested",
+                tool_name: "todo_write",
+                ts: "preview-todo-requested",
+                extra: "not-reviewed",
+              }
+            : {
+              type: "permission_requested",
+              tool_name: "todo_write",
+              ts: "preview-todo-requested",
+            };
+      appendJson(join(this.sessionDir, "events.jsonl"), request);
+      if (message.endsWith("CHANGED_DUPLICATE") || message.endsWith("_DUPLICATE")) {
+        appendJson(join(this.sessionDir, "events.jsonl"), {
+          type: "permission_requested",
+          ...(message.endsWith("CHANGED_DUPLICATE")
+            ? { toolName: "todo_write" }
+            : {
+                tool_name: "todo_write",
+                ts: "preview-todo-requested-duplicate",
+              }),
+        });
+        return;
+      }
+      const resolved = message.endsWith("CAMEL_CASE")
+        ? { type: "permission_resolved", toolName: "todo_write", decision: "allow" }
+        : message.endsWith("REQUEST_ID")
+          ? {
+              type: "permission_resolved",
+              request_id: "preview-todo-request",
+              tool_name: "todo_write",
+              decision: "allow",
+            }
+          : message.endsWith("MISSING_WAIT")
+            ? {
+                type: "permission_resolved",
+                tool_name: "todo_write",
+                decision: "allow",
+                ts: "preview-todo-resolved",
+              }
+            : {
+              type: "permission_resolved",
+              tool_name: "todo_write",
+              decision: "deny",
+              ts: "preview-todo-resolved",
+              wait_ms: 0,
+            };
+      appendJson(join(this.sessionDir, "events.jsonl"), resolved);
       return;
     }
     if (message === "AUTO_COMPLETE_NO_RESOLVE") {

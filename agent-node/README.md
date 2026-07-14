@@ -123,6 +123,14 @@ network, media, MCP, scheduler, and subagent tools are unavailable. Generic
 Grok ignores those CLI flags in interactive mode. This is a text-only shared
 conversation preview, not a coding runtime.
 
+Grok 0.2.93 automatically resolves the fixed session-local `todo_write`
+helper. The preview accepts at most one exact observed no-request-ID
+`permission_requested` → `permission_resolved(decision=allow)` lifecycle
+during each active network turn and only when no human decision was sent. Every
+other automatic, mismatched, overlapping, or unfinished permission lifecycle
+still fails closed. This exception is preview-only and does not satisfy the
+approval-owner gate required for `latest`.
+
 If no compatible global `agent-node` is installed, `anet` uses `npx -y @sleep2agi/agent-node@preview` to fetch and resolve the package, verifies preview metadata plus the machine-readable `ANET_CAPABILITY_GROK_COPRESENCE_V2` marker, and then launches the resolved entrypoint directly so stop signals reach the real runtime. An older headless-only or V1 co-presence package does not pass this check. First start therefore needs npm registry access or an already populated npm cache. An incompatible global package is not silently allowed to select another runtime.
 
 This preview supports the CommHub inbox lane used by `anet node start`.

@@ -231,6 +231,13 @@ inventory is `[todo_write]`. Filesystem, shell, network, media, MCP, scheduler,
 and subagent tools are unavailable; custom `tools`/`maxTurns` are unsupported
 in co-presence. It is a text-only co-presence preview, not a coding profile.
 
+The pinned 0.2.93 TUI resolves its session-local `todo_write` helper without
+human input. During an active network turn the preview admits only that exact
+no-request-ID lifecycle with `decision=allow`, at most once per turn; every other tool, identity,
+decision, overlap, mode transition, or unresolved completion remains closed.
+This deliberately narrow preview exception is not production approval-owner
+enforcement and is another reason to connect trusted tasks only.
+
 `anet node start` capability-checks a compatible global `agent-node` if one exists. It requires the machine-readable `ANET_CAPABILITY_GROK_COPRESENCE_V2` marker, so an older headless-only or V1 co-presence binary cannot shadow the fixed-profile preview. A global install is not required: when it is absent or incompatible, `anet` uses `npx -y @sleep2agi/agent-node@preview` to fetch and resolve the preview package, verifies its metadata/capability, then launches the resolved `agent-node` entrypoint directly. Direct launch lets `anet node stop` signal the real runtime instead of an installer wrapper. The fallback therefore needs npm registry access or an already populated npm cache on first start.
 
 The preview E2E covers the CommHub inbox path. `grok-build-cli` currently

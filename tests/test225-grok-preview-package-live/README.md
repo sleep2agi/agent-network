@@ -95,6 +95,26 @@ as a persistence failure. The authenticated package E2E below remains the sole
 full create/task/live-render/stop/resume product proof. The separate
 `session_title` request is auxiliary and never satisfies main-request readiness.
 
+After those four phases, an independent keyless session exercises the one
+allowed tool. Its local model stub emits exactly one `todo_write` call and then
+a text response. The gate requires two exact `[todo_write]` main requests, a
+persisted tool call/result, a completed final assistant turn, and the exact
+observed 0.2.93 lifecycle:
+`turn_started → permission_requested → permission_resolved → turn_ended`.
+The request must contain exactly `{type:string, tool_name:string, ts:string}`;
+the resolution exactly
+`{type:string, tool_name:string, decision:string, ts:string, wait_ms:number}`;
+their reviewed literals are `todo_write` and `decision=allow`. Request IDs
+must be absent; `wait_ms` must be a safe nonnegative integer. Extra fields,
+rejection/cancellation, another turn, a different inventory, or an incomplete
+turn all fail closed. The runtime accepts at most one such lifecycle per
+network turn. Raw model requests, event values, and
+session files remain inside the disposable probe root and are not copied to
+the diagnostic artifact. Before spawning Grok, the pure structural classifier
+self-checks one accepted fixture plus request-ID, extra-key, wrong-tool,
+wrong-decision, missing-wait, reordered, and duplicate-event mutations; every
+mutation must remain rejected.
+
 The inventory probe keeps at most 64 KiB of stdout/stderr in memory for a
 closed error classification and never persists that text. Its loopback stub
 accepts at most 16 simultaneous request bodies and 2 MiB of aggregate buffered
