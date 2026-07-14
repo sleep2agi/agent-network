@@ -718,6 +718,46 @@ test("binds the exact current home and accepts only its two owner-bound runtime 
   }
 });
 
+test("scans exact pinned vendor state and native leader files without structural false positives", () => {
+  const fixture = stateFixture("pinned-vendor-state");
+  try {
+    for (const directory of ["docs", "skills"]) {
+      const nested = path.join(fixture.home, directory, "nested");
+      mkdirSync(nested, { recursive: true, mode: 0o700 });
+      writeFileSync(path.join(nested, "clean"), "clean\n", { mode: 0o600 });
+    }
+    for (const basename of [
+      ".metadata_version",
+      "active_sessions.json",
+      "active_sessions.lock",
+      "managed_config.lock",
+      "models_cache.json",
+      "prompt_history.jsonl",
+      "session_search.sqlite",
+      "tip_cursor.json",
+      "worktrees.db",
+    ]) {
+      writeFileSync(path.join(fixture.home, basename), "clean\n", { mode: 0o600 });
+    }
+    writeFileSync(path.join(fixture.run, "leader.lock"), "1\n", { mode: 0o600 });
+    writeFileSync(path.join(fixture.run, "leader.log"), "clean\n", { mode: 0o600 });
+
+    assert.equal(scanStateFixture(fixture).scanOutcome, "clean");
+
+    writeFileSync(path.join(fixture.home, "docs", "nested", "clean"),
+      "PRIVATE_AUTH_SCALAR_0123456789\n", { mode: 0o600 });
+    assert.deepEqual(scanStateFixture(fixture).matchedRoles,
+      ["grok_current_home_other_state"]);
+    writeFileSync(path.join(fixture.home, "docs", "nested", "clean"), "clean\n", { mode: 0o600 });
+    writeFileSync(path.join(fixture.run, "leader.log"),
+      "PRIVATE_AUTH_SCALAR_0123456789\n", { mode: 0o600 });
+    assert.deepEqual(scanStateFixture(fixture).matchedRoles,
+      ["grok_runtime_directory_other_state"]);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("requires a direct real current home and exact socket paths in both API and CLI", () => {
   const fixture = stateFixture("expected-home");
   const output = path.join(fixture.root, "cli-result.json");

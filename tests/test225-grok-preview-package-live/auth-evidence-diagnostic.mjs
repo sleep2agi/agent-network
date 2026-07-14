@@ -975,6 +975,25 @@ const GENERATED_POLICY_FILES = new Set([
   "sandbox.toml",
 ]);
 
+// Exact top-level state created by pinned Grok 0.2.93 itself. These entries
+// are not metadata exemptions: every regular file below them is still scanned
+// byte-for-byte, and a matched auth scalar remains red. Naming the observed
+// roots only prevents ordinary vendor state from being mistaken for a scan
+// failure before its contents are checked.
+const PINNED_STATE_FILES = new Set([
+  ".metadata_version",
+  "active_sessions.json",
+  "active_sessions.lock",
+  "managed_config.lock",
+  "models_cache.json",
+  "prompt_history.jsonl",
+  "session_search.sqlite",
+  "tip_cursor.json",
+  "worktrees.db",
+]);
+const PINNED_STATE_DIRECTORIES = new Set(["docs", "skills"]);
+const PINNED_RUNTIME_FILES = new Set(["leader.lock", "leader.log"]);
+
 const STATE_HOME_NAME = /^node-[0-9a-f]{24}$/;
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SESSION_FILES = new Map([
@@ -1155,6 +1174,20 @@ function currentStateDescriptor(parts, bindings) {
   if (parts.length === 1 && GENERATED_POLICY_FILES.has(parts[0])) {
     return { kind: "file", matchRole: "grok_generated_policy_state", errorRole: "grok_current_state_structure" };
   }
+  if (parts.length === 1 && PINNED_STATE_FILES.has(parts[0])) {
+    return {
+      kind: "pinned_file",
+      matchRole: "grok_current_home_other_state",
+      errorRole: "grok_current_state_structure",
+    };
+  }
+  if (PINNED_STATE_DIRECTORIES.has(parts[0])) {
+    return {
+      kind: parts.length === 1 ? "pinned_directory" : "pinned_entry",
+      matchRole: "grok_current_home_other_state",
+      errorRole: "grok_current_state_structure",
+    };
+  }
   return {
     kind: "unknown",
     matchRole: "grok_current_home_other_state",
@@ -1311,7 +1344,7 @@ function scanCurrentStateEntry(
       return;
     }
     if (descriptor.kind === "directory" || descriptor.kind === "lock_directory"
-      || descriptor.kind === "log_directory") {
+      || descriptor.kind === "log_directory" || descriptor.kind === "pinned_directory") {
       errorRoles.add(descriptor.errorRole);
     }
     if (descriptor.kind === "identity" || descriptor.kind === "unknown"
@@ -1329,7 +1362,7 @@ function scanCurrentStateEntry(
     return;
   }
   if (!ownerOnlyDirectory(stat)) errorRoles.add(descriptor.errorRole);
-  if (descriptor.kind === "file" || descriptor.kind === "identity"
+  if (descriptor.kind === "file" || descriptor.kind === "pinned_file" || descriptor.kind === "identity"
     || descriptor.kind === "unified_log"
     || descriptor.kind === "lock" || descriptor.kind === "socket") {
     errorRoles.add(descriptor.errorRole);
@@ -1576,6 +1609,18 @@ function scanRuntimeDirectory(bindings, patterns, matchedRoles, errorRoles, comm
   ]);
   for (const entry of snapshot.entries) {
     const entryPath = path.join(bindings.runtimeDirectory, entry.name);
+    if (PINNED_RUNTIME_FILES.has(entry.name)) {
+      recordScanResult(
+        scanRegularFile(entryPath, patterns, commitChecks, "grok_runtime_directory_scan", {
+          requirePrivateState: true,
+        }),
+        "grok_runtime_directory_other_state",
+        "grok_runtime_directory_scan",
+        matchedRoles,
+        errorRoles,
+      );
+      continue;
+    }
     const kind = Object.entries(bindings.runtimeNames)
       .find(([, expectedName]) => expectedName === entry.name)?.[0];
     if (!kind) {
