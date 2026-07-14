@@ -1628,6 +1628,24 @@ async function runTui(state, label, sessionId, resume, {
         }),
       );
     }
+    // Close the final readiness-to-write window with a fresh ownership sample;
+    // a socket seen before the last polling delay cannot authorize this write.
+    observeLeaderGeneration();
+    if (child.exitCode !== null || child.signalCode !== null) {
+      exited = true;
+      throw new ProbeFailure(
+        currentPhase,
+        preModelExitCategory(currentPhase, processText),
+        factsForRows(rows, {
+          spawned: Boolean(child.pid),
+          exited,
+          leaderObserved,
+          ...fence,
+          exitCode: child.exitCode,
+          childSignal: child.signalCode,
+        }),
+      );
+    }
     try {
       await new Promise((resolve, reject) => {
         const input = child.stdin;
