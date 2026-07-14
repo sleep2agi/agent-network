@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   realpathSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -181,6 +182,39 @@ test("raw mode-000 state cannot use the completeness warning to hide a credentia
     assert.equal(classifyAuthEvidenceGate("preview", linkedSentinel), "fatal");
   } finally {
     chmodSync(blocked, 0o600);
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("raw unknown path names cannot use the completeness warning to hide a credential", () => {
+  const fixture = stateFixture();
+  const cleanPath = path.join(fixture.home, "unreviewed-name");
+  const leakedPath = path.join(fixture.home, PRIVATE_SCALAR);
+  try {
+    writeFileSync(cleanPath, "clean\n", { mode: 0o600 });
+    const cleanUnknown = scanFixture(fixture);
+    assert.deepEqual(cleanUnknown.matchedRoles, []);
+    assert.deepEqual(cleanUnknown.errorRoles, ["grok_current_state_completeness"]);
+    assert.equal(classifyAuthEvidenceGate("preview", cleanUnknown), "warning");
+
+    // This mutation enters through the raw filesystem path boundary. A secret
+    // in the basename must be a credential match even when the file contents
+    // are clean and fully readable.
+    renameSync(cleanPath, leakedPath);
+    const leakedFileName = scanFixture(fixture);
+    assert.equal(leakedFileName.scanOutcome, "mixed");
+    assert.deepEqual(leakedFileName.matchedRoles, ["grok_current_home_other_state"]);
+    assert.deepEqual(leakedFileName.errorRoles, ["grok_current_state_completeness"]);
+    assert.equal(classifyAuthEvidenceGate("preview", leakedFileName), "fatal");
+
+    rmSync(leakedPath);
+    mkdirSync(leakedPath, { mode: 0o700 });
+    const leakedDirectoryName = scanFixture(fixture);
+    assert.equal(leakedDirectoryName.scanOutcome, "mixed");
+    assert.deepEqual(leakedDirectoryName.matchedRoles, ["grok_current_home_other_state"]);
+    assert.deepEqual(leakedDirectoryName.errorRoles, ["grok_current_state_completeness"]);
+    assert.equal(classifyAuthEvidenceGate("preview", leakedDirectoryName), "fatal");
+  } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
 });
