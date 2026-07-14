@@ -41,6 +41,8 @@ test("recognizes only the visible pinned TUI composer footer", () => {
     hasGrokTuiReadyMarker("Shift+\x1b[31mTab\x1b[0m:mo\x1b[2Kde"),
     false,
   );
+  assert.equal(hasGrokTuiReadyMarker("Shift+Tab:mode"), false);
+  assert.equal(hasGrokTuiReadyMarker("Ctrl+x:shortcuts"), false);
   assert.equal(hasGrokTuiReadyMarker(
     "Shift+\x1b[31mTab\x1b[0m:mode  |  Ctrl+x:\x1b[2Kshortcuts",
   ), true);
@@ -48,7 +50,13 @@ test("recognizes only the visible pinned TUI composer footer", () => {
     "\x1b]0;Shift+Tab:mode  Ctrl+x:shortcuts\x07splash",
   ), false);
   assert.equal(hasGrokTuiReadyMarker(
+    "\x1b]0;Shift+Tab:mode  Ctrl+x:shortcuts\x1b\\splash",
+  ), false);
+  assert.equal(hasGrokTuiReadyMarker(
     "\x1bPShift+Tab:mode  Ctrl+x:shortcuts",
+  ), false);
+  assert.equal(hasGrokTuiReadyMarker(
+    "\x1bPShift+Tab:mode  Ctrl+x:shortcuts\x1b\\splash",
   ), false);
 });
 

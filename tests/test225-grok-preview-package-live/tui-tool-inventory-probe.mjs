@@ -1527,6 +1527,8 @@ async function runTui(state, label, sessionId, resume, {
   let processText = "";
   let tuiReadinessBuffer = "";
   let composerReady = false;
+  let stdinWriteFailed = false;
+  let pendingStdinFailure = null;
   const observeProcessText = (chunk) => {
     if (processText.length < 65_536) processText += String(chunk).slice(0, 65_536 - processText.length);
   };
@@ -1540,6 +1542,12 @@ async function runTui(state, label, sessionId, resume, {
     tuiReadinessBuffer = "";
   };
   child.once("error", () => { exited = true; });
+  // Keep a value-free listener for the lifetime of the child so a late EPIPE
+  // cannot escape the closed probe result as an unhandled stream error.
+  child.stdin?.on("error", () => {
+    stdinWriteFailed = true;
+    pendingStdinFailure?.();
+  });
   child.stdout?.on("data", observeStdout);
   child.stderr?.on("data", observeProcessText);
   const wrapper = await observeWrapperIdentity(child);
@@ -1623,21 +1631,30 @@ async function runTui(state, label, sessionId, resume, {
     try {
       await new Promise((resolve, reject) => {
         const input = child.stdin;
-        if (!input || !input.writable || input.destroyed) {
+        if (!input || !input.writable || input.destroyed || stdinWriteFailed) {
           reject(new Error("stdin unavailable"));
           return;
         }
         let settled = false;
+        let timeout;
         const finish = (error) => {
           if (settled) return;
           settled = true;
-          input.off("error", onError);
+          if (timeout) clearTimeout(timeout);
+          pendingStdinFailure = null;
           if (error) reject(error);
           else resolve();
         };
-        const onError = () => finish(new Error("stdin write failed"));
-        input.once("error", onError);
-        input.write(`\u001b[200~${turnNonce}\u001b[201~\r`, finish);
+        pendingStdinFailure = () => finish(new Error("stdin write failed"));
+        timeout = setTimeout(
+          () => finish(new Error("stdin write timeout")),
+          5_000,
+        );
+        try {
+          input.write(`\u001b[200~${turnNonce}\u001b[201~\r`, finish);
+        } catch {
+          finish(new Error("stdin write failed"));
+        }
       });
     } catch {
       throw new ProbeFailure(
