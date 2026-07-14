@@ -64,6 +64,8 @@ Queue and task surfaces currently registered in `server/src/tools.ts`:
 | `reassign_task(task_id, new_alias)` (`:1374`) | any writer in the network | task+old/new inbox transaction; event outside | control principal only; target resolved to immutable node; new attempt+epoch |
 | `get_task` / `list_tasks` (`:1277`, `:1300`) | network-readable | read only | node tokens see only their producer/consumer rows; dashboard control policy remains separate |
 | `send_task` (`:800`) | network writer | creates task+inbox | producer operation; target resolves to immutable node before enqueue |
+| `send_message` (`:997`) | network writer; caller supplies an alias and `resolveDeliveryTarget` may leave `node_id` null | creates one inbox row | producer operation; resolve alias to one live same-network immutable node before enqueue; never persist an alias-only/null consumer binding |
+| `broadcast` (`:1426`) | network writer; recipients come from mutable session aliases and nullable `node_id` values | creates one inbox row per selected session | producer operation; resolve every recipient to one exact immutable node and deterministically skip/reject unbound or ambiguous recipients; no alias-only row |
 
 There is no claim operation, lease renewal, lease epoch, or dead-letter tool in
 the H0 baseline. `acked` is a Boolean delivery flag, not a lease protocol.
@@ -79,12 +81,33 @@ Relevant current endpoints in `server/src/index.ts` are:
 - `GET /api/messages` (`:1847`) returns inbox content at network scope.
 - `GET /api/task/:id`, `GET /api/tasks/:id`, and `GET /api/tasks`
   (`:2207-2254`) return task content at network scope.
+- `GET /api/task_events` (`:1937`) applies only network scope, so an `ntok_`
+  can currently enumerate events for another same-network producer/consumer.
+- `GET /api/audit-log` (`:1916`) filters non-admin users by `user_id`, not by
+  a node consumer principal or exact task ownership; its rows may contain
+  queue target identifiers and details.
 
 There is no REST claim/renew/ack/dead-letter endpoint. In H1, `ntok_` requests
 must not use dashboard/control-plane reads as an alternate way to read another
 consumer's payload. User-token dashboard policy is a separate
 `QueueControlPrincipal` decision and must not be conflated with node-consumer
 authority.
+
+H1 must close the two secondary read surfaces as part of the same visibility
+gate:
+
+- An `ntok_` may read task events only for a task whose immutable producer or
+  consumer node matches its `NodeConsumerPrincipal`. A caller-supplied
+  `task_id` never widens that selection and a foreign task uses the same
+  non-oracular empty/refusal shape.
+- Queue security audit reads are not a node-consumer back door. Node tokens do
+  not receive another consumer's audit rows, target identifiers, delivery
+  identifiers, lease hashes, or idempotency material. Dashboard audit reads
+  require an exact-network `QueueControlPrincipal`; any narrower self-audit
+  policy remains separate from queue consumption.
+- Required claim/renew/ack/reply/dead-letter/cancel/reassign/retry audit writes
+  are part of the queue transaction. Audit failure rolls the mutation back;
+  the read endpoint's policy cannot weaken that durability requirement.
 
 ### 2.3 SSE
 
@@ -105,6 +128,38 @@ H1 requirements:
   content, lease ID, bearer, task result, or foreign row identifier.
 - Missing or dropped SSE is recovered by polling `claim`; SSE delivery is not
   part of the queue transaction's success condition.
+
+The baseline has **17 production `pushEvent` callsites**. They currently pass
+rich objects to an alias-addressed channel and therefore must be inventoried,
+not assumed to be payload-free:
+
+| Callsite | Current event | Current payload fields | H1 disposition |
+| --- | --- | --- | --- |
+| `tools.ts:478` | `status_update` | `alias`, `renamed_from?`, `status`, `progress`, `host`, `process_telemetry` | separate control/telemetry authorization; never a queue-consumer event |
+| `tools.ts:638` | `chained_reply` | `parent_task_id`, `child_task_id`, `child_alias` | exact recipient authorization, then wake-only; strip all three identifiers |
+| `tools.ts:959` | `new_task` | `inbox_count`, `priority`, `from`, `renamed_from?` | principal-bound queue doorbell; reduce to `queue_changed` plus optional count |
+| `tools.ts:1026` | `new_message` | `from`, `message_id`, `renamed_from?` | principal-bound queue doorbell; strip `message_id` and sender/alias metadata |
+| `tools.ts:1177` | `chained_reply` | `parent_task_id`, `child_task_id`, `child_alias` | exact recipient authorization, then wake-only; strip all three identifiers |
+| `tools.ts:1187` | `new_reply` | `from`, `message_id`, `in_reply_to`, `status` | principal-bound queue doorbell; strip reply/message identifiers and content metadata |
+| `tools.ts:1269` | `new_task` | `inbox_count`, `priority`, `from` | principal-bound queue doorbell; reduce to wake-only |
+| `tools.ts:1421` | `new_task` | `inbox_count`, `priority`, `from`, `renamed_from?` | principal-bound queue doorbell; reduce to wake-only |
+| `tools.ts:1465` | `broadcast` | `inbox_count` | authorize each immutable recipient; wake-only after its durable enqueue |
+| `tools.ts:1763` | `config_update` | `update_id` | daemon/control channel only; authorize exact node and strip ID from any consumer channel |
+| `tools.ts:1951` | `restart` | `update_id` | daemon/control channel only; authorize exact node and strip ID from any consumer channel |
+| `tools.ts:2292` | `create_node` | `request_id` | daemon/control channel only; authorize exact daemon; doorbell triggers an authorized pull |
+| `tools.ts:2728` | `stop_node` | `request_id` | daemon/control channel only; authorize exact daemon; doorbell triggers an authorized pull |
+| `tools.ts:3344` | `probe_provider` | `probe_id` | daemon/control channel only; authorize exact daemon; doorbell triggers an authorized pull |
+| `index.ts:1725` | `new_task` | `inbox_count`, `priority`, `from`, `renamed_from?` | same principal-bound wake-only rule as the MCP producer path |
+| `index.ts:1789` | `broadcast` | `inbox_count` | authorize each immutable recipient; wake-only after its durable enqueue |
+| `index.ts:1977` | `node_deleted` | `node_id`, `node_name`, `alias`, `network_id` | separate control-plane authorization; never a queue-consumer event |
+
+In particular, existing identifier fields `message_id`, `in_reply_to`,
+`parent_task_id`, `child_task_id`, `child_alias`, `update_id`, `request_id`,
+and `probe_id` are not permitted on the H1 node-consumer queue channel. Every
+one of the 17 callsites must either (a) use an independently authorized
+control/daemon channel or (b) emit the principal-bound wake-only queue
+doorbell. No callsite may treat the target alias passed to `pushEvent` as the
+authorization decision.
 
 ### 2.4 Database and transaction adapter
 
@@ -365,6 +420,14 @@ H0 baseline result: **expected non-zero, 1 pass / 2 fail**.
 The sanitized raw response and before/after snapshots are recorded in
 `docs/tests/report-issue-440-h0-raw-mcp-red.txt`.
 
+The H0 test starts the module-singleton production server on a fixed-for-that-
+process randomly selected port. That is sufficient for this isolated RED, but
+it is **not aggregate-runner safe**: module caching, shared environment, and a
+port collision can interfere when server tests share one process. Until the
+server exposes a testable `bootServer({ port: 0 })` handle, this file belongs
+in the explicit isolated-test list governed by issue #434. Neither the random
+port nor an isolated pass may be represented as aggregate coverage.
+
 ## 8. H1 exact file and test plan
 
 No H1 file is modified by this commit. After independent H0 acceptance, H1 is
@@ -373,13 +436,13 @@ split as follows:
 | File | Exact H1 responsibility |
 | --- | --- |
 | `server/src/auth.ts` | return token scope and immutable node binding; mint/rotate node tokens with `node_id`; reject alias-only consumer resolution |
-| `server/src/index.ts` | parse strict header bearer for consumer operations; construct one structured request principal; restrict ntok SSE to its resolved node; keep REST control principal separate |
-| `server/src/tools.ts` | replace positional auth inputs with structured context; delegate queue tools to the service; add claim/renew/dead-letter; remove alias authority from get/ack/reply; gate cancel/reassign/retry |
+| `server/src/index.ts` | parse strict header bearer for consumer operations; construct one structured request principal; restrict ntok SSE to its resolved node; principal-filter `/api/task_events`; apply explicit control-principal policy to `/api/audit-log`; keep REST control principal separate |
+| `server/src/tools.ts` | replace positional auth inputs with structured context; delegate queue tools to the service; add claim/renew/dead-letter; remove alias authority from get/ack/reply; gate cancel/reassign/retry; resolve `send_message` and every `broadcast` recipient to an immutable node before enqueue |
 | `server/src/node-consumer-principal.ts` (new) | define and resolve/revalidate `NodeConsumerPrincipal` and `QueueControlPrincipal` |
 | `server/src/consumer-queue.ts` (new) | implement all operation state machines, CAS predicates, idempotency, audit-in-transaction, and stable errors |
 | `server/src/db-adapter.ts` | expose explicit same-connection immediate-transaction capability; SQLite implements it; PostgreSQL reports unavailable |
 | `server/src/db.ts` | idempotent migration for immutable token binding, delivery attempts/lease hashes/epochs, task assignment epoch, and operation idempotency; no plaintext lease column |
-| `server/src/push.ts` | emit payload-free principal-bound doorbells only after commit |
+| `server/src/push.ts` | emit payload-free principal-bound doorbells only after commit; require every one of the 17 tools/index callsites to choose an authorized control/daemon channel or the wake-only queue channel |
 | `agent-node/src/cli.ts`, `agent-network/src/client.ts`, `agent-network/src/node-server.ts`, `channel/commhub-channel.ts` | replace get/ack polling with claim lease tuples, renew while running, and supply lease+epoch+operation ID to ack/reply/dead-letter; update their existing unit tests |
 | `agent-node/tests/rfc-030-commhub-e2e.ts`, `agent-node/tests/rfc-030-real-node-e2e.ts` | update the real Hub bridge fixtures to use lease-bearing responses without changing frozen gateway protocol files |
 
@@ -406,12 +469,25 @@ Required H1 tests:
    the stable unavailable error and zero queue SQL before a real atomic adapter
    exists.
 8. `consumer-queue-rest-sse-boundary.test.ts`: an ntok cannot read B via
-   `/api/messages`, `/api/tasks`, or subscribe to `/events/B`; B's own SSE
-   doorbell contains no content/row ID/lease.
-9. `consumer-queue-migration.test.ts`: legacy rows migrate deterministically;
+   `/api/messages`, `/api/tasks`, `/api/task_events`, `/api/audit-log`, or
+   subscribe to `/events/B`; B's own SSE doorbell contains no content, row ID,
+   lease, `message_id`, `in_reply_to`, parent/child IDs or aliases,
+   `update_id`, `request_id`, or `probe_id`. Exercise all 17 current
+   `pushEvent` callsites and prove each uses an authorized non-consumer channel
+   or the wake-only consumer shape.
+9. `consumer-queue-producer-binding.test.ts`: `send_task`, `send_message`, and
+   every broadcast recipient resolve alias to one same-network immutable node;
+   missing, ambiguous, stale, or null-node targets create zero inbox rows and
+   zero doorbells.
+10. `consumer-queue-migration.test.ts`: legacy rows migrate deterministically;
    ambiguous token/alias rows remain non-consumable; no lease plaintext exists.
-10. Aggregate server suite must execute every new file (no isolated-only or
-    skipped security test), followed by a clean Docker/network-none rerun.
+11. Runner isolation is explicit. The current module-singleton real-entry H0
+    RED, and its H1 green replacement until server boot is refactored, run in
+    the issue #434 isolated list and must be reported as isolated. A future
+    `bootServer({ port: 0 })` handle may make that test aggregate-safe. All
+    other new H1 unit/integration files must run in the aggregate server suite;
+    both groups are then rerun in clean Docker/network-none, with neither a
+    skipped test nor an isolated result mislabeled as aggregate coverage.
 
 ## 9. Explicit non-goals for H0
 
