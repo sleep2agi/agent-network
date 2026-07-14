@@ -1,0 +1,75 @@
+Issue #440 H0 raw /mcp consumer-principal RED
+================================================
+
+Baseline
+  git: d4188621c0d9bf5f95e9b1ac9b5d0aafea91c6e3 (origin/main)
+  runtime: Bun 1.3.14
+  database: throwaway SQLite under /tmp
+  server entry: production server/src/index.ts (Bun.serve side effect)
+  transport: raw POST /mcp, JSON-RPC tools/call, Authorization: Bearer
+  tokens: two distinct server-minted ntok values in one network (never printed)
+  nodes: A and B registered through raw /mcp report_status with distinct node_id values
+
+Command
+  cd server
+  bun test src/hub-440-consumer-principal-h0-red.test.ts
+
+Observed summary
+  1 pass
+  2 fail
+  6 expect() calls
+  process exit: 1 (EXPECTED RED)
+
+Positive control — B bearer reads B row
+  PASS
+
+Raw A-as-B get_inbox envelope (generated network/timestamp normalized)
+  HTTP 200
+  Content-Type: text/event-stream; charset=utf-8
+  {
+    "result": {
+      "content": [{
+        "type": "text",
+        "text": "{\"ok\":true,\"messages\":[{\"id\":\"h440-row-owned-by-consumer-b\",\"type\":\"task\",\"priority\":\"normal\",\"content\":\"H440_B_ROW_CANARY_NOT_SECRET\",\"from_session\":\"fixture-sender\",\"network_id\":\"<generated-network-id>\"}]}"
+      }]
+    },
+    "jsonrpc": "2.0",
+    "id": 44001
+  }
+  DB before: {"acked":0}
+  DB after:  {"acked":0}
+  EXPECTED: A response contains no B-owned row.
+  ACTUAL:   A response contains B row ID and content.
+
+Raw A-as-B ack_inbox envelope
+  HTTP 200
+  Content-Type: text/event-stream; charset=utf-8
+  {
+    "result": {
+      "content": [{"type":"text","text":"{\"ok\":true}"}]
+    },
+    "jsonrpc": "2.0",
+    "id": 44002
+  }
+  DB before:
+    inbox      {"acked":0}
+    task       {"status":"delivered"}
+    taskEvents {"count":0}
+    auditRows  {"count":0}
+  DB after:
+    inbox      {"acked":1}
+    task       {"status":"acked"}
+    taskEvents {"count":1}
+    auditRows  {"count":0}
+  EXPECTED: generic refusal and all four DB observations unchanged.
+  ACTUAL:   ok=true; B inbox/task/event state changed by A.
+
+Interpretation
+  Authentication and network scoping succeeded, but consumer ownership did
+  not. The caller-controlled alias selected the victim row. This is a genuine
+  production-entry RED: the test does not call registerTools or any handler
+  directly and does not pass positional auth arguments itself.
+
+Authorizing status
+  EXPECTED RED / H0 ONLY. This report does not claim a fix and does not
+  authorize H1, merge, deploy, preview, production, or release.
