@@ -25,7 +25,10 @@ COPY tests/test225-grok-preview-package-live ./tests/test225-grok-preview-packag
 # Prove the three source boundaries agree before the source tree is discarded.
 RUN TEST225_FAILURE_CONTRACT_MODE=source \
   TEST225_SOURCE_COMMIT="$SOURCE_COMMIT" \
-  node --test ./tests/test225-grok-preview-package-live/failure-diagnostic.test.mjs
+  node --test \
+    ./tests/test225-grok-preview-package-live/failure-diagnostic.test.mjs \
+    ./tests/test225-grok-preview-package-live/inventory-gate.test.mjs \
+    ./tests/test225-grok-preview-package-live/inventory-diagnostic.test.mjs
 
 RUN mkdir -p /candidate \
   && cd /build/agent-node \

@@ -37,6 +37,7 @@ const passing = () => makeInventoryDiagnostic({
 test("closed schema rejects arbitrary strings, keys, enums, and ranges", () => {
   const base = passing();
   const mutations = [
+    { ...base, schemaVersion: 1 },
     { ...base, raw: "PARTNER_TOKEN=TEST225_TOKEN_CANARY" },
     { ...base, category: "PRIVATE_CUSTOMER_CATEGORY" },
     { ...base, phase: "PRIVATE_PHASE" },
@@ -50,8 +51,34 @@ test("closed schema rejects arbitrary strings, keys, enums, and ranges", () => {
     { ...base, facts: { ...base.facts, totalRequests: base.facts.totalRequests + 1 } },
     { ...base, facts: { ...base.facts, unsafeMutationRequests: 0 } },
     { ...base, facts: { ...base.facts, completedTurn: false } },
+    { ...base, status: "failed", phase: "fresh", category: "client_cleanup" },
+    { ...base, status: "failed", phase: "cleanup", category: "request_timeout" },
   ];
   for (const mutation of mutations) assert.equal(validateInventoryDiagnostic(mutation), false);
+});
+
+test("keeps transport and cleanup failures as value-free fail-closed categories", () => {
+  for (const category of [
+    "request_timeout",
+    "response_timeout",
+    "leader_readiness",
+    "client_cleanup",
+    "listener_cleanup",
+    "server_cleanup",
+  ]) {
+    const diagnostic = makeInventoryDiagnostic({
+      status: "failed",
+      phase: category.endsWith("_cleanup") ? "cleanup" : "mutation_read",
+      category,
+      facts: {
+        spawned: true,
+        leaderObserved: category !== "leader_readiness",
+      },
+    });
+    assert.equal(validateInventoryDiagnostic(diagnostic), true);
+    assert.equal(diagnostic.schemaVersion, 2);
+    assert.equal(JSON.stringify(diagnostic).includes("PRIVATE"), false);
+  }
 });
 
 test("unknown error content cannot enter a fallback diagnostic", () => {

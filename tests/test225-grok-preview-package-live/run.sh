@@ -1047,7 +1047,10 @@ FAILURE_CONTRACT=/candidate/test225-grok-failure-contract.v1.json
 TEST225_FAILURE_CONTRACT_MODE=package \
 TEST225_FAILURE_CONTRACT="$FAILURE_CONTRACT" \
 TEST225_AGENT_NODE_TARBALL="$NODE_TGZ" \
-node --test /test225/failure-diagnostic.test.mjs \
+node --test \
+  /test225/failure-diagnostic.test.mjs \
+  /test225/inventory-gate.test.mjs \
+  /test225/inventory-diagnostic.test.mjs \
   >/tmp/test225-failure-diagnostic-test.log 2>&1 \
   || fail_with_private_log "closed turn diagnostic unit tests failed" /tmp/test225-failure-diagnostic-test.log
 [ "$(stat -c '%d:%i:%s:%Y' -- "$NODE_TGZ")" = "$NODE_TGZ_IDENTITY" ] \

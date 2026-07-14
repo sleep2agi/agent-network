@@ -69,30 +69,49 @@ turn must recall a fresh benign nonce from the first turn after stop/start, so
 the gate proves actual session continuity rather than two independent calls:
 
 Before the cached login is copied, this layer also points the pinned binary at
-a container-local, non-billing model stub. Every fresh, resume, and mutation
-client uses the production-shaped `--leader --leader-socket` auto-Leader path.
+a container-local, non-billing model stub. Fresh/resume share one isolated
+HOME, cwd, and session; each mutation has a separate HOME, cwd, model endpoint,
+and Leader generation. Every client uses the production-shaped
+`--leader --leader-socket` auto-Leader path. A generation is accepted only when
+the pinned executable, exact HOME/GROK_HOME, owner-bound socket beneath the
+mode-0700 probe root, per-run marker, listener FD, PID, and process start time
+agree, and the next phase cannot start until the prior client, Leader, listener,
+and socket are gone.
 The reviewed profile is carried both as `--sandbox` and as the controlled
 `GROK_SANDBOX` PTY variable because pinned 0.2.93 does not forward the client
 argv value to its auto-spawned Leader; ambient `GROK_SANDBOX` is discarded.
-The fresh client is stopped only after `updates.jsonl` and `summary.json` reach
-the same-session completed-turn/count/sandbox fence. This sub-gate proves only
-that every real TUI client carries `ANET_COPRESENCE_PROFILE_V1` and exposes
-exactly `[todo_write]`; the authenticated package E2E below remains the sole
-full create/task/live-render/stop/resume product proof. Default-tool and
-`read_file` profile mutations must turn the gate red. The separate
-`session_title` request is classified as auxiliary rather than being mixed
-into the model-tool inventory.
+The fresh and resume clients stop after chat, events, and updates reach the
+same-session ordered completed-turn fence. After shutdown and before the next
+phase, summary/count/sandbox metadata must also remain consistent for three
+consecutive samples while the prior Leader stays absent.
+Each mutation closes after the loopback endpoint receives the complete
+marker+nonce request, observes the forbidden inventory, and finishes its SSE
+response; it does not claim a persisted mutation turn. This sub-gate proves
+only that positive TUI clients carry `ANET_COPRESENCE_PROFILE_V1` and expose
+exactly `[todo_write]`, while default-tool and `read_file` mutations cross the
+inventory boundary and turn the fixed gate red. A client that stays alive but
+emits no matching main request fails as `request_timeout` and is not reclassified
+as a persistence failure. The authenticated package E2E below remains the sole
+full create/task/live-render/stop/resume product proof. The separate
+`session_title` request is auxiliary and never satisfies main-request readiness.
 
 The inventory probe keeps at most 64 KiB of stdout/stderr in memory for a
-closed error classification and never persists that text. On failure it writes only a
-mode-0600, closed-schema diagnostic (`phase`, enumerated `category`, booleans,
-and bounded counts) to `/artifacts/test225-tui-inventory-diagnostic.json`
+closed error classification and never persists that text. Its loopback stub
+accepts at most 16 simultaneous request bodies and 2 MiB of aggregate buffered
+body data; each body is capped at 1 MiB, each inventory at 128 tool names, and
+each name at 256 bytes. Retained inventory evidence is independently capped at
+256 rows and 1 MiB, with overflow represented by one fixed invalid sentinel.
+On failure it writes only a mode-0600, closed-schema diagnostic (`phase`,
+enumerated `category`, booleans, and bounded counts) to
+`/artifacts/test225-tui-inventory-diagnostic.json`
 after synthetic, Hub, and real-auth scalar scans. A successful run removes any
 stale diagnostic. The schema and atomic writer have a keyless local negative
 test:
 
 ```bash
-node --test tests/test225-grok-preview-package-live/inventory-diagnostic.test.mjs
+node --test \
+  tests/test225-grok-preview-package-live/inventory-gate.test.mjs \
+  tests/test225-grok-preview-package-live/inventory-diagnostic.test.mjs
 ```
 
 ```bash

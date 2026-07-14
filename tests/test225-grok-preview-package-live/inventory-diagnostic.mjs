@@ -31,11 +31,17 @@ export const DIAGNOSTIC_CATEGORIES = Object.freeze([
   "resume_session_missing",
   "resume_sandbox_mismatch",
   "resume_bootstrap_rejected",
+  "request_timeout",
+  "response_timeout",
   "persistence_timeout",
+  "leader_readiness",
   "inventory_mismatch",
   "mutation_not_observed",
   "mutation_not_red",
+  "client_cleanup",
   "leader_cleanup",
+  "listener_cleanup",
+  "server_cleanup",
   "internal",
   "invalid_or_missing_result",
   "diagnostic_rejected",
@@ -65,6 +71,12 @@ const FACT_KEYS = Object.freeze([
 
 const TOP_KEYS = Object.freeze(["category", "facts", "gate", "phase", "schemaVersion", "status"]);
 const MAX_COUNT = 4096;
+const CLEANUP_CATEGORIES = new Set([
+  "client_cleanup",
+  "leader_cleanup",
+  "listener_cleanup",
+  "server_cleanup",
+]);
 
 function exactKeys(value, expected) {
   return value !== null
@@ -103,7 +115,7 @@ export function emptyDiagnosticFacts(overrides = {}) {
 
 export function makeInventoryDiagnostic({ status, phase, category, facts = {} }) {
   const diagnostic = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     gate: "grok_tui_inventory",
     status,
     phase,
@@ -131,10 +143,12 @@ export function fallbackInventoryDiagnostic(category = "invalid_or_missing_resul
 
 export function validateInventoryDiagnostic(value) {
   if (!exactKeys(value, TOP_KEYS)) return false;
-  if (value.schemaVersion !== 1 || value.gate !== "grok_tui_inventory") return false;
+  if (value.schemaVersion !== 2 || value.gate !== "grok_tui_inventory") return false;
   if (value.status !== "passed" && value.status !== "failed") return false;
   if (!DIAGNOSTIC_PHASES.includes(value.phase)) return false;
   if (!DIAGNOSTIC_CATEGORIES.includes(value.category)) return false;
+  if ((value.phase === "cleanup") !== CLEANUP_CATEGORIES.has(value.category)
+    && value.category !== "internal") return false;
   if (!exactKeys(value.facts, FACT_KEYS)) return false;
   for (const key of FACT_KEYS.slice(0, 8)) {
     if (!boundedInteger(value.facts[key])) return false;
