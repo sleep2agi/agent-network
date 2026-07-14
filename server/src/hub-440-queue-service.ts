@@ -52,6 +52,7 @@ const EXACT_RESOURCE_D = `
          WHERE a.task_id=d.task_id AND a.network_id=d.network_id
            AND a.consumer_node_id=d.consumer_node_id AND a.delivery_id=d.delivery_id
            AND a.producer_node_id IS d.producer_node_id
+           AND CAST(a.assignment_epoch AS TEXT)=CAST(d.assignment_generation AS TEXT)
       )
     )
   )`;
@@ -224,6 +225,17 @@ export class H1QueueService {
 
   private producerAlias(principal: QueuePrincipal): string {
     return principal.kind === "node_consumer" ? principal.aliasSnapshot : "hub";
+  }
+
+  private immutableProducerAlias(networkId: string, producerNodeId: string | null): string {
+    if (producerNodeId === null) return "hub";
+    const row = this.db.get<{ alias_snapshot: string }>(
+      `SELECT COALESCE(alias, node_name) AS alias_snapshot
+         FROM nodes WHERE node_id=?1 AND network_id=?2 LIMIT 1`,
+      producerNodeId,
+      networkId,
+    );
+    return row?.alias_snapshot ?? "node";
   }
 
   private insertDoorbell(deliveryId: string, consumerNodeId: string, epoch: string, state: DeliveryState): void {
@@ -651,6 +663,25 @@ export class H1QueueService {
       `SELECT d.delivery_id
          FROM h1_queue_deliveries d
          JOIN tasks t ON t.task_id=?1 AND t.task_id=d.task_id AND t.network_id=d.network_id
+         JOIN api_tokens lease_token
+           ON lease_token.token_id=d.lease_owner_token_id
+          AND lease_token.network_id=d.network_id
+          AND lease_token.scope='network'
+          AND lease_token.revoked_at IS NULL
+          AND (lease_token.expires_at IS NULL OR lease_token.expires_at > datetime('now'))
+         JOIN h1_node_token_bindings lease_binding
+           ON lease_binding.token_id=lease_token.token_id
+          AND lease_binding.user_id=lease_token.user_id
+          AND lease_binding.network_id=d.network_id
+          AND lease_binding.node_id=d.consumer_node_id
+          AND lease_binding.provenance='server_registration'
+         JOIN network_members lease_member
+           ON lease_member.network_id=d.network_id
+          AND lease_member.user_id=lease_token.user_id
+         JOIN nodes lease_node
+           ON lease_node.node_id=d.consumer_node_id
+          AND lease_node.network_id=d.network_id
+          AND COALESCE(lease_node.lifecycle_state, 'active')='active'
         WHERE d.delivery_id=?2 AND d.network_id=?3
           AND d.consumer_node_id=?4 AND CAST(d.epoch AS TEXT)=?5
           AND d.state='running' AND d.lease_expires_at_ms > ?6
@@ -869,11 +900,11 @@ export class H1QueueService {
       const replay = this.replay<EnqueueResult>(principal, input.operationId, "retry", digest);
       if (replay) return replay;
       const old = this.db.get<{
-        content: string; priority: string; to_node_id: string; status: string;
-        producer_node_id: string | null; from_name: string;
+        content: string; priority: string; assigned_consumer_node_id: string; status: string;
+        producer_node_id: string | null;
       }>(
-        `SELECT t.content, t.priority, t.to_node_id, t.status,
-                a.producer_node_id, t.from_name
+        `SELECT t.content, t.priority, a.consumer_node_id AS assigned_consumer_node_id,
+                t.status, a.producer_node_id
            FROM tasks t
            JOIN h1_task_assignments a
              ON a.task_id=t.task_id AND a.network_id=t.network_id
@@ -881,6 +912,7 @@ export class H1QueueService {
              ON d.delivery_id=a.delivery_id AND d.task_id=t.task_id
             AND d.network_id=t.network_id AND d.consumer_node_id=a.consumer_node_id
             AND d.producer_node_id IS a.producer_node_id
+            AND CAST(d.assignment_generation AS TEXT)=CAST(a.assignment_epoch AS TEXT)
           WHERE t.task_id=?1 AND t.network_id=?2
             AND ((t.status='failed' AND d.state='dead_lettered')
               OR (t.status='cancelled' AND d.state='cancelled')
@@ -889,7 +921,10 @@ export class H1QueueService {
         input.taskId, principal.networkId,
       );
       if (!old) throw new QueueServiceError("queue_transition_conflict");
-      const target = this.targetNode(principal.networkId, input.targetNodeId ?? old.to_node_id);
+      const target = this.targetNode(
+        principal.networkId,
+        input.targetNodeId ?? old.assigned_consumer_node_id,
+      );
       // Retry creates a new logical task. The original terminal task/result is immutable.
       const result = this.enqueueTaskRows(
         principal,
@@ -897,7 +932,10 @@ export class H1QueueService {
         old.content,
         old.priority,
         null,
-        { nodeId: old.producer_node_id, alias: old.from_name },
+        {
+          nodeId: old.producer_node_id,
+          alias: this.immutableProducerAlias(principal.networkId, old.producer_node_id),
+        },
       );
       this.audit(principal, "task_retried", result.taskId, result.deliveryId, { sourceTaskId: input.taskId });
       this.storeReplay(principal, input.operationId, "retry", digest, result, result.taskId, result.deliveryId);

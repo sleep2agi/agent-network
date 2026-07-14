@@ -74,6 +74,7 @@ describe("#440 H1 control mutations", () => {
     h.service.acknowledge(h.principalB, { ...oldLease, operationId: "ack" });
     h.db.run("UPDATE tasks SET from_node_id='node-c', from_name='alias-c' WHERE task_id=?1", [task.taskId]);
     h.raw.exec(`UPDATE h1_task_assignments SET assignment_epoch=9007199254740993 WHERE task_id='${task.taskId}'`);
+    h.raw.exec(`UPDATE h1_queue_deliveries SET assignment_generation=9007199254740993 WHERE delivery_id='${oldLease.deliveryId}'`);
     const reassigned = h.service.reassign(h.control, { taskId: task.taskId!, targetNodeId: "node-c", operationId: "reassign" });
     expect(() => h.service.reply(h.principalB, { ...oldLease, operationId: "stale", result: "bad" })).toThrow("lease_invalid_or_not_owned");
     const assignment = h.raw.query(`SELECT CAST(a.assignment_epoch AS TEXT) AS assignment_epoch,
@@ -108,6 +109,33 @@ describe("#440 H1 control mutations", () => {
     expect(() => h.service.retry(h.control, { taskId: task.taskId!, operationId: "must-not-retry" }))
       .toThrow("queue_transition_conflict");
     expect(tableSnapshot(h.raw, CONTROL_TABLES)).toBe(before);
+  });
+
+  test("retry default target comes from immutable H1 assignment, not mutable task projection", () => {
+    const h = createQueueTestHarness(); cleanups.push(h.close);
+    const task = h.service.enqueueTask(h.principalA, {
+      operationId: "immutable-retry-target", targetNodeId: "node-b", content: "work",
+    });
+    const lease = h.service.claim(h.principalB, { limit: 1 })[0]!;
+    h.service.deadLetter(h.principalB, { ...lease, operationId: "terminal", reasonCode: "bounded_failure" });
+    h.db.run("UPDATE tasks SET to_node_id='node-c', to_name='alias-c' WHERE task_id=?1", [task.taskId]);
+
+    const retried = h.service.retry(h.control, { taskId: task.taskId!, operationId: "retry-default" });
+    expect(h.raw.query(
+      `SELECT d.consumer_node_id, t.to_node_id, t.from_node_id, t.from_name
+         FROM h1_queue_deliveries d JOIN tasks t ON t.task_id=d.task_id
+        WHERE d.delivery_id=?1`,
+    ).get(retried.deliveryId)).toEqual({
+      consumer_node_id: "node-b", to_node_id: "node-b",
+      from_node_id: "node-a", from_name: "alias-a",
+    });
+
+    const explicitlyRetried = h.service.retry(h.control, {
+      taskId: task.taskId!, operationId: "retry-explicit", targetNodeId: "node-c",
+    });
+    expect(h.raw.query(
+      "SELECT consumer_node_id FROM h1_queue_deliveries WHERE delivery_id=?1",
+    ).get(explicitlyRetried.deliveryId)).toEqual({ consumer_node_id: "node-c" });
   });
 
   test("retry creates a new task and preserves original terminal producer/result bytes", () => {

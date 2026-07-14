@@ -171,6 +171,42 @@ describe("#440 H1 terminal transaction atomicity", () => {
 });
 
 describe("#440 H1 attachment-only lineage", () => {
+  for (const invalidation of ["revoked_token", "lost_binding"] as const) {
+    test(`child completion suppresses attachment after parent ${invalidation}`, () => {
+      const h = createQueueTestHarness(); cleanups.push(h.close);
+      h.service.enqueueTask(h.principalA, {
+        operationId: `parent-${invalidation}`, targetNodeId: "node-b", content: "parent",
+      });
+      const parentLease = h.service.claim(h.principalB, { limit: 1 })[0]!;
+      h.service.acknowledge(h.principalB, { ...parentLease, operationId: `parent-ack-${invalidation}` });
+      h.service.delegateTask(h.principalB, {
+        parentDeliveryId: parentLease.deliveryId,
+        parentLeaseId: parentLease.leaseId,
+        parentEpoch: parentLease.epoch,
+        operationId: `delegate-${invalidation}`,
+        targetNodeId: "node-c",
+        content: "child",
+      });
+      const childLease = h.service.claim(h.principalC, { limit: 1 })[0]!;
+      h.service.acknowledge(h.principalC, { ...childLease, operationId: `child-ack-${invalidation}` });
+      if (invalidation === "revoked_token") {
+        h.db.run("UPDATE api_tokens SET revoked_at='2026-07-14T08:00:00.000Z' WHERE token_id='tok-b'");
+      } else {
+        h.db.run("DELETE FROM h1_node_token_bindings WHERE token_id='tok-b'");
+      }
+      const outboxBefore = h.raw.query("SELECT COUNT(*) AS n FROM h1_queue_doorbell_outbox").get() as { n: number };
+
+      expect(h.service.reply(h.principalC, {
+        ...childLease, operationId: `child-reply-${invalidation}`, result: "child result",
+      }).state).toBe("replied");
+      expect(h.raw.query("SELECT COUNT(*) AS n FROM h1_reply_attachments").get()).toEqual({ n: 0 });
+      expect(h.raw.query("SELECT COUNT(*) AS n FROM h1_queue_doorbell_outbox").get()).toEqual(outboxBefore);
+      expect(h.raw.query(
+        "SELECT COUNT(*) AS n FROM h1_queue_security_audit WHERE action='attachment_suppressed_stale_parent'",
+      ).get()).toEqual({ n: 1 });
+    });
+  }
+
   test("terminal parent projection rejects delegation before child or edge creation", () => {
     const h = createQueueTestHarness(); cleanups.push(h.close);
     h.service.enqueueTask(h.principalA, { operationId: "parent", targetNodeId: "node-b", content: "parent" });

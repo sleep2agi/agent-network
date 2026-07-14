@@ -20,6 +20,7 @@ type MutableRetentionResult = {
 
 type RetentionDelivery = {
   delivery_id: string;
+  resource_kind: string;
   resource_id: string;
   task_id: string | null;
   state: DeliveryState;
@@ -146,7 +147,7 @@ function sweepLineageComponent(
     ? `d.task_id IN (${taskIn})`
     : `d.task_id IN (${taskIn}) OR d.delivery_id IN (${placeholders(attachmentDeliveries.length, component.taskIds.length + 1)})`;
   const deliveries = db.all<RetentionDelivery>(
-    `SELECT d.delivery_id, d.resource_id, d.task_id, d.state, d.terminal_at_ms
+    `SELECT d.delivery_id, d.resource_kind, d.resource_id, d.task_id, d.state, d.terminal_at_ms
        FROM h1_queue_deliveries d WHERE ${deliveryWhere}`,
     ...deliveryParams,
   );
@@ -206,6 +207,100 @@ function sweepLineageComponent(
   return true;
 }
 
+function sweepStandaloneTaskSet(
+  db: DbAdapter,
+  taskId: string,
+  terminalBeforeMs: number,
+  counts: MutableRetentionResult,
+  faultAt?: (stage: QueueFaultStage) => void,
+): boolean {
+  const deliveries = db.all<RetentionDelivery>(
+    `SELECT delivery_id, resource_kind, resource_id, task_id, state, terminal_at_ms
+       FROM h1_queue_deliveries WHERE task_id=?1 ORDER BY delivery_id`,
+    taskId,
+  );
+  if (deliveries.length === 0) return false;
+  if (deliveries.some((row) => row.resource_kind !== "task" || row.task_id !== taskId
+      || !TERMINAL_DELIVERY_STATES.has(row.state)
+      || row.terminal_at_ms === null || row.terminal_at_ms > terminalBeforeMs)) return false;
+
+  const task = db.get<{ status: string }>(
+    "SELECT status FROM tasks WHERE task_id=?1",
+    taskId,
+  );
+  if (!task || !TERMINAL_TASK_STATES.has(task.status)) return false;
+
+  const deliveryIds = distinct(deliveries.map((row) => row.delivery_id));
+  const resourceIds = distinct(deliveries.map((row) => row.resource_id));
+  const deliveryIn = placeholders(deliveryIds.length, 2);
+  const assignment = db.get<{ delivery_id: string }>(
+    "SELECT delivery_id FROM h1_task_assignments WHERE task_id=?1",
+    taskId,
+  );
+  if (!assignment || !deliveryIds.includes(assignment.delivery_id)) return false;
+
+  const lineageReference = db.get<{ one: number }>(
+    `SELECT 1 AS one FROM h1_delegation_edges
+      WHERE parent_task_id=?1 OR child_task_id=?1
+     UNION ALL
+     SELECT 1 AS one FROM h1_reply_attachments
+      WHERE child_task_id=?1
+         OR parent_delivery_id IN (${deliveryIn})
+         OR child_terminal_delivery_id IN (${deliveryIn})
+         OR attachment_delivery_id IN (${deliveryIn})
+     LIMIT 1`,
+    taskId,
+    ...deliveryIds,
+  );
+  if (lineageReference) return false;
+
+  const pendingDoorbell = db.get<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM h1_queue_doorbell_outbox
+      WHERE expected_delivery_id IN (${placeholders(deliveryIds.length)}) AND status='pending'`,
+    ...deliveryIds,
+  )?.n ?? 0;
+  if (pendingDoorbell !== 0) return false;
+
+  counts.doorbells += db.run(
+    `DELETE FROM h1_queue_doorbell_outbox
+      WHERE expected_delivery_id IN (${placeholders(deliveryIds.length)})`,
+    [...deliveryIds],
+  ).changes;
+  faultAt?.("retention_after_first_delete");
+  counts.idempotency += deleteIdempotencyForDeliveries(db, deliveryIds);
+  counts.audits += db.run(
+    `DELETE FROM h1_queue_security_audit
+      WHERE task_id=?1 OR delivery_id IN (${deliveryIn})`,
+    [taskId, ...deliveryIds],
+  ).changes;
+  counts.events += db.run("DELETE FROM task_events WHERE task_id=?1", [taskId]).changes;
+
+  const assignmentsDeleted = db.run(
+    "DELETE FROM h1_task_assignments WHERE task_id=?1 AND delivery_id IN (" + deliveryIn + ")",
+    [taskId, ...deliveryIds],
+  ).changes;
+  if (assignmentsDeleted !== 1) throw new Error("retention_task_assignment_set_changed");
+  const deliveriesDeleted = db.run(
+    `DELETE FROM h1_queue_deliveries WHERE delivery_id IN (${placeholders(deliveryIds.length)})`,
+    [...deliveryIds],
+  ).changes;
+  if (deliveriesDeleted !== deliveryIds.length) throw new Error("retention_task_delivery_set_changed");
+  counts.deliveries += deliveriesDeleted;
+  const resourcesDeleted = db.run(
+    `DELETE FROM inbox WHERE id IN (${placeholders(resourceIds.length)})`,
+    [...resourceIds],
+  ).changes;
+  if (resourcesDeleted !== resourceIds.length) throw new Error("retention_task_resource_set_changed");
+  counts.resources += resourcesDeleted;
+  const tasksDeleted = db.run(
+    "DELETE FROM tasks WHERE task_id=?1 AND status IN ('replied','failed','cancelled','expired')",
+    [taskId],
+  ).changes;
+  if (tasksDeleted !== 1) throw new Error("retention_task_projection_changed");
+  counts.tasks += tasksDeleted;
+  return true;
+}
+
 /**
  * Delete complete H1 retention sets or none. The caller supplies the
  * already-computed longest horizon. Active attempts and incomplete lineage
@@ -231,10 +326,19 @@ export function sweepH1QueueRetention(
       sweepLineageComponent(db, component, input.terminalBeforeMs, counts, input.faultAt);
     }
 
+    const taskIds = db.all<{ task_id: string }>(
+      `SELECT DISTINCT task_id FROM h1_queue_deliveries
+        WHERE task_id IS NOT NULL ORDER BY task_id`,
+    );
+    for (const row of taskIds) {
+      sweepStandaloneTaskSet(db, row.task_id, input.terminalBeforeMs, counts, input.faultAt);
+    }
+
     const eligible = db.all<RetentionDelivery>(
-      `SELECT d.delivery_id, d.resource_id, d.task_id, d.state, d.terminal_at_ms
+      `SELECT d.delivery_id, d.resource_kind, d.resource_id, d.task_id, d.state, d.terminal_at_ms
          FROM h1_queue_deliveries d
-        WHERE d.state IN ('consumed','replied','dead_lettered','cancelled','superseded')
+        WHERE d.task_id IS NULL
+          AND d.state IN ('consumed','replied','dead_lettered','cancelled','superseded')
           AND d.terminal_at_ms IS NOT NULL AND d.terminal_at_ms <= ?1
           AND NOT EXISTS (
             SELECT 1 FROM h1_queue_doorbell_outbox o
@@ -249,20 +353,6 @@ export function sweepH1QueueRetention(
              WHERE a.attachment_delivery_id=d.delivery_id
                 OR a.child_terminal_delivery_id=d.delivery_id
                 OR a.parent_delivery_id=d.delivery_id
-          )
-          AND (
-            d.task_id IS NULL OR (
-              EXISTS (
-                SELECT 1 FROM tasks t WHERE t.task_id=d.task_id
-                  AND t.status IN ('replied','failed','cancelled','expired')
-              )
-              AND NOT EXISTS (
-                SELECT 1 FROM h1_queue_deliveries other
-                 WHERE other.task_id=d.task_id AND other.delivery_id!=d.delivery_id
-                   AND (other.state IN ('pending','leased','running')
-                     OR other.terminal_at_ms IS NULL OR other.terminal_at_ms > ?1)
-              )
-            )
           )
         ORDER BY d.terminal_at_ms, d.delivery_id`,
       input.terminalBeforeMs,
@@ -279,24 +369,8 @@ export function sweepH1QueueRetention(
         "DELETE FROM h1_queue_security_audit WHERE delivery_id=?1 OR task_id=?2",
         [row.delivery_id, row.task_id],
       ).changes;
-      if (row.task_id) {
-        counts.events += db.run("DELETE FROM task_events WHERE task_id=?1", [row.task_id]).changes;
-        db.run("DELETE FROM h1_task_assignments WHERE task_id=?1 AND delivery_id=?2", [row.task_id, row.delivery_id]);
-      }
       counts.deliveries += db.run("DELETE FROM h1_queue_deliveries WHERE delivery_id=?1", [row.delivery_id]).changes;
       counts.resources += db.run("DELETE FROM inbox WHERE id=?1", [row.resource_id]).changes;
-      if (row.task_id) {
-        const otherDelivery = db.get<{ one: number }>(
-          "SELECT 1 AS one FROM h1_queue_deliveries WHERE task_id=?1 LIMIT 1",
-          row.task_id,
-        );
-        if (!otherDelivery) {
-          counts.tasks += db.run(
-            "DELETE FROM tasks WHERE task_id=?1 AND status IN ('replied','failed','cancelled','expired')",
-            [row.task_id],
-          ).changes;
-        }
-      }
     }
     return counts;
   });

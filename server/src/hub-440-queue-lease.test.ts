@@ -10,6 +10,42 @@ const LEASE_TABLES = [
 ] as const;
 
 describe("#440 H1 lease admission", () => {
+  test("assignment generation mismatch blocks claim and suppresses its stale doorbell", () => {
+    const h = createQueueTestHarness(); cleanups.push(h.close);
+    const queued = h.service.enqueueTask(h.principalA, {
+      operationId: "assignment-mismatch-claim", targetNodeId: "node-b", content: "work",
+    });
+    h.db.run("UPDATE h1_task_assignments SET assignment_epoch=assignment_epoch+1 WHERE task_id=?1", [queued.taskId]);
+    const beforeClaim = tableSnapshot(h.raw, LEASE_TABLES);
+    const mints = h.leaseMintCount();
+    expect(h.service.claim(h.principalB, { limit: 1 })).toEqual([]);
+    expect(h.leaseMintCount()).toBe(mints);
+    expect(tableSnapshot(h.raw, LEASE_TABLES)).toBe(beforeClaim);
+
+    expect(h.service.listReadyDoorbells()).toEqual([]);
+    expect(h.raw.query("SELECT status FROM h1_queue_doorbell_outbox WHERE expected_delivery_id=?1").get(queued.deliveryId))
+      .toEqual({ status: "suppressed" });
+  });
+
+  test("assignment generation mismatch invalidates renew and active-lease mutation", () => {
+    const h = createQueueTestHarness(); cleanups.push(h.close);
+    const queued = h.service.enqueueTask(h.principalA, {
+      operationId: "assignment-mismatch-active", targetNodeId: "node-b", content: "work",
+    });
+    const lease = h.service.claim(h.principalB, { limit: 1 })[0]!;
+    h.db.run("UPDATE h1_task_assignments SET assignment_epoch=assignment_epoch+1 WHERE task_id=?1", [queued.taskId]);
+    const before = tableSnapshot(h.raw, LEASE_TABLES);
+    expect(() => h.service.renew(h.principalB, lease)).toThrow("lease_invalid_or_not_owned");
+    for (const call of [
+      () => h.service.acknowledge(h.principalB, { ...lease, operationId: "mismatch-ack" }),
+      () => h.service.reply(h.principalB, { ...lease, operationId: "mismatch-reply", result: "must not persist" }),
+      () => h.service.deadLetter(h.principalB, { ...lease, operationId: "mismatch-dead", reasonCode: "mismatch" }),
+    ]) {
+      expect(call).toThrow("lease_invalid_or_not_owned");
+      expect(tableSnapshot(h.raw, LEASE_TABLES)).toBe(before);
+    }
+  });
+
   test("claim rejects a delivery whose exact inbox recipient was changed", () => {
     const h = createQueueTestHarness(); cleanups.push(h.close);
     const queued = h.service.enqueueMessage(h.principalA, {

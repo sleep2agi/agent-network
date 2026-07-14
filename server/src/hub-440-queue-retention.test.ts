@@ -32,6 +32,36 @@ describe("#440 H1 queue-aware retention", () => {
     expect((h.raw.query("SELECT COUNT(*) AS n FROM tasks").get() as any).n).toBe(1);
   });
 
+  test("one ineligible sibling outbox keeps the entire terminal task attempt set byte-stable", () => {
+    const h = createQueueTestHarness(); cleanups.push(h.close);
+    const first = h.service.enqueueTask(h.principalA, {
+      operationId: "task-set", targetNodeId: "node-b", content: "work",
+    });
+    const second = h.service.reassign(h.control, {
+      taskId: first.taskId!, targetNodeId: "node-c", operationId: "reassign-set",
+    });
+    // Suppress only the superseded attempt's wakeup. The current attempt's
+    // wakeup remains pending, then becomes a terminal-but-unswept sibling.
+    expect(h.service.listReadyDoorbells().map((row) => row.outboxId)).toHaveLength(1);
+    h.service.cancel(h.principalA, { taskId: first.taskId!, operationId: "cancel-set" });
+    expect(h.raw.query(
+      "SELECT status FROM h1_queue_doorbell_outbox WHERE expected_delivery_id=?1",
+    ).get(second.deliveryId)).toEqual({ status: "pending" });
+    const before = tableSnapshot(h.raw, RETENTION_TABLES);
+
+    expect(sweepH1QueueRetention(h.db, { terminalBeforeMs: h.nowMs() + 1 })).toEqual({
+      deliveries: 0, resources: 0, tasks: 0, events: 0,
+      audits: 0, idempotency: 0, doorbells: 0,
+    });
+    expect(tableSnapshot(h.raw, RETENTION_TABLES)).toBe(before);
+
+    h.service.listReadyDoorbells();
+    const swept = sweepH1QueueRetention(h.db, { terminalBeforeMs: h.nowMs() + 1 });
+    expect(swept.deliveries).toBe(2);
+    expect(swept.resources).toBe(2);
+    expect(swept.tasks).toBe(1);
+  });
+
   test("multi-recipient broadcast keeps explicit idempotency refs until the last resource is swept", () => {
     const h = createQueueTestHarness(); cleanups.push(h.close);
     const rows = h.service.enqueueBroadcast(h.principalA, {
