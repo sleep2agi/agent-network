@@ -523,7 +523,7 @@ persist_auth_evidence_diagnostic() {
 
 run_real_auth_evidence_gate() {
   local phase=$1 expected_state_home=$2 expected_session_id=$3 expected_cwd=$4
-  local expected_leader=$5 expected_attach=$6 outcome temporary
+  local expected_leader=$5 expected_attach=$6 decision outcome temporary
   local -a scan_args=()
   shift 6
   [ $(( $# % 2 )) -eq 0 ] || fail "auth evidence gate received an incomplete role/target pair"
@@ -547,13 +547,24 @@ run_real_auth_evidence_gate() {
   node /test225/auth-evidence-diagnostic.mjs validate "$temporary" \
     || { rm -f -- "$temporary"; fail "auth evidence target classification is not closed"; }
   outcome=$(jq -r '.scanOutcome' "$temporary")
+  decision=$(node /test225/auth-evidence-gate-policy.mjs classify preview "$temporary") \
+    || { rm -f -- "$temporary"; fail "auth evidence release policy rejected its closed input"; }
   real_turn_scan_inputs_valid \
     || { rm -f -- "$temporary"; fail "auth evidence gate scan inputs changed during classification"; }
-  if [ "$outcome" = clean ]; then
+  if [ "$decision" = pass ]; then
+    [ "$outcome" = clean ] \
+      || { rm -f -- "$temporary"; fail "auth evidence release policy passed a non-clean scan"; }
     log "PASS: auth_evidence phase=$phase scanOutcome:clean"
     rm -f -- "$temporary" "$AUTH_EVIDENCE_DIAGNOSTIC"
     return 0
   fi
+  if [ "$decision" = warning ]; then
+    persist_auth_evidence_diagnostic "$temporary"
+    log "WARNING: auth_evidence phase=$phase scanOutcome:$outcome preview_structure_warning=true"
+    return 0
+  fi
+  [ "$decision" = fatal ] \
+    || { rm -f -- "$temporary"; fail "auth evidence release policy returned an unknown decision"; }
   persist_auth_evidence_diagnostic "$temporary"
   fail "real auth evidence scan failed; closed target-role diagnostic retained"
 }
@@ -1165,6 +1176,7 @@ TEST225_FAILURE_CONTRACT="$FAILURE_CONTRACT" \
 TEST225_AGENT_NODE_TARBALL="$NODE_TGZ" \
 node --test \
   /test225/auth-evidence-diagnostic.test.mjs \
+  /test225/auth-evidence-gate-policy.test.mjs \
   /test225/failure-diagnostic.test.mjs \
   /test225/inventory-gate.test.mjs \
   /test225/inventory-diagnostic.test.mjs \
@@ -1436,19 +1448,54 @@ node /test225/auth-evidence-diagnostic.mjs validate "$AUTH_EVIDENCE_DIAGNOSTIC" 
 jq -e '
   .scanOutcome == "mixed"
   and .matchedRoles == ["grok_identity_state","grok_session_chat","grok_current_home_other_state","grok_prior_node_state"]
-  and .errorRoles == ["runtime_log_store","grok_current_state_structure","grok_prior_node_structure"]
+  and .errorRoles == ["runtime_log_store","grok_current_state_completeness","grok_current_state_structure","grok_prior_node_structure"]
 ' "$AUTH_EVIDENCE_DIAGNOSTIC" >/dev/null \
   || fail "auth evidence role classifier did not bind the exact expected roles"
 scan_fixed_file /tmp/test225-real-patterns "$AUTH_EVIDENCE_DIAGNOSTIC" \
   "$AUTH_ROLE_OUTPUT" "$REPORT" \
   || fail "auth evidence role persistence retained its private marker"
-rm -rf "$AUTH_ROLE_SELFTEST" "$AUTH_ROLE_OUTPUT" "$REAL_AUTH_PATTERNS" \
+
+# Prove the production preview branch accepts only the scan-complete structural
+# role. The same raw fixture above is reduced to one clean, unknown regular file;
+# latest/prod strictness is pinned independently by the policy unit test.
+AUTH_ROLE_WARNING_OUTPUT=/tmp/test225-auth-role-warning-output
+printf '%s\n' clean >"$AUTH_ROLE_SELFTEST/home/.grok/agent_id"
+printf '%s\n' clean >"$AUTH_ROLE_SESSION_DIR/chat_history.jsonl"
+printf '%s\n' clean >"$AUTH_ROLE_CURRENT_HOME/unreviewed.data"
+rm -rf "$AUTH_ROLE_PRIOR_HOME"
+rm -f "$AUTH_ROLE_SESSION_DIR/agent_id" "$AUTH_ROLE_CURRENT_HOME/unreviewed.link"
+if ! (trap - EXIT; HOME="$AUTH_ROLE_SELFTEST/home"; export HOME; \
+  run_real_auth_evidence_gate final_scan \
+  "$AUTH_ROLE_CURRENT_HOME" "$AUTH_ROLE_SESSION_ID" "$AUTH_ROLE_CWD" \
+  "$AUTH_ROLE_LEADER" "$AUTH_ROLE_ATTACH" \
+  __grok_state__ "$AUTH_ROLE_SELFTEST/state") \
+  >"$AUTH_ROLE_WARNING_OUTPUT" 2>&1; then
+  fail "auth evidence preview gate rejected its scan-complete structural warning"
+fi
+chmod 600 "$AUTH_ROLE_WARNING_OUTPUT"
+node /test225/auth-evidence-diagnostic.mjs validate "$AUTH_EVIDENCE_DIAGNOSTIC" \
+  || fail "auth evidence preview warning did not persist a closed artifact"
+jq -e '
+  .scanOutcome == "scan_error"
+  and .matchedRoles == []
+  and .errorRoles == ["grok_current_state_completeness"]
+' "$AUTH_EVIDENCE_DIAGNOSTIC" >/dev/null \
+  || fail "auth evidence preview warning escaped its exact completeness role"
+grep -Fq 'WARNING: auth_evidence phase=final_scan scanOutcome:scan_error preview_structure_warning=true' \
+  "$AUTH_ROLE_WARNING_OUTPUT" \
+  || fail "auth evidence preview warning branch did not emit its fixed audit marker"
+scan_fixed_file /tmp/test225-real-patterns "$AUTH_EVIDENCE_DIAGNOSTIC" \
+  "$AUTH_ROLE_WARNING_OUTPUT" "$REPORT" \
+  || fail "auth evidence preview warning retained its private marker"
+
+rm -rf "$AUTH_ROLE_SELFTEST" "$AUTH_ROLE_OUTPUT" "$AUTH_ROLE_WARNING_OUTPUT" \
+  "$REAL_AUTH_PATTERNS" \
   "$REAL_AUTH_UNSAFE_PATTERNS" "$REAL_AUTH_METADATA_MANIFEST"
 rm -f -- "$AUTH_EVIDENCE_DIAGNOSTIC"
 unset AUTH_ROLE_GATE_RC AUTH_ROLE_CURRENT_HOME AUTH_ROLE_PRIOR_HOME \
   AUTH_ROLE_SESSION_ID AUTH_ROLE_CWD AUTH_ROLE_SESSION_DIR \
   AUTH_ROLE_RUNTIME AUTH_ROLE_LOCK_DIR AUTH_ROLE_LEADER AUTH_ROLE_ATTACH \
-  AUTH_ROLE_LEADER_KEY AUTH_ROLE_SESSION_KEY
+  AUTH_ROLE_LEADER_KEY AUTH_ROLE_SESSION_KEY AUTH_ROLE_WARNING_OUTPUT
 pass "auth evidence scanner emits only closed target-role diagnostics"
 
 # Seed a pre-boundary ordinary log with broad permissions and a synthetic

@@ -101,6 +101,7 @@ test("preview remains fatal for boundary errors, extra errors, and every credent
   for (const errorRoles of [
     ["scan_boundary"],
     ["grok_runtime_directory_scan"],
+    ["grok_current_state_structure"],
     ["grok_current_state_completeness", "grok_current_state_structure"],
     ["grok_current_state_completeness", "grok_state_root_structure"],
   ]) {

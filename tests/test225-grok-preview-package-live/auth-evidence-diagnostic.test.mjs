@@ -397,6 +397,7 @@ test("emits only canonical reviewed phases and target-role enums", () => {
         "grok_runtime_lock_scan",
         "grok_runtime_directory_scan",
         "grok_unified_log_scan",
+        "grok_current_state_completeness",
         "grok_current_state_structure",
         "grok_current_home_snapshot",
         "grok_prior_node_structure",
@@ -848,12 +849,12 @@ for (const basename of [
       writeFileSync(candidate, "clean\n", { mode: 0o600 });
       let result = scanStateFixture(fixture);
       assert.deepEqual(result.matchedRoles, []);
-      assert.deepEqual(result.errorRoles, ["grok_current_state_structure"]);
+      assert.deepEqual(result.errorRoles, ["grok_current_state_completeness"]);
       writeFileSync(candidate, "PRIVATE_AUTH_SCALAR_0123456789\n", { mode: 0o600 });
       result = scanStateFixture(fixture);
       assert.equal(result.scanOutcome, "mixed");
       assert.deepEqual(result.matchedRoles, ["grok_current_home_other_state"]);
-      assert.deepEqual(result.errorRoles, ["grok_current_state_structure"]);
+      assert.deepEqual(result.errorRoles, ["grok_current_state_completeness"]);
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }
@@ -903,7 +904,7 @@ test("observed PID-bound sandbox placeholder stays red when cleanup is bypassed"
     const result = scanStateFixture(fixture);
     assert.equal(result.scanOutcome, "mixed");
     assert.deepEqual(result.matchedRoles, ["grok_current_home_other_state"]);
-    assert.deepEqual(result.errorRoles, ["grok_current_state_structure"]);
+    assert.deepEqual(result.errorRoles, ["grok_current_state_completeness"]);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -1042,7 +1043,7 @@ test("separates current summary, unknown current state, and prior-node matches",
         "grok_current_home_other_state",
         "grok_prior_node_state",
       ],
-      errorRoles: ["grok_current_state_structure"],
+      errorRoles: ["grok_current_state_completeness"],
       detailWithheld: true,
     });
   } finally {
@@ -1056,12 +1057,15 @@ test("fails closed on an unknown current regular file even when it is clean", ()
     writeFileSync(path.join(fixture.home, "new-vendor-state"), "clean\n", { mode: 0o600 });
     const result = scanStateFixture(fixture);
     assert.deepEqual(result.matchedRoles, []);
-    assert.deepEqual(result.errorRoles, ["grok_current_state_structure"]);
+    assert.deepEqual(result.errorRoles, ["grok_current_state_completeness"]);
 
     const outside = path.join(fixture.root, "outside");
     writeFileSync(outside, "clean\n", { mode: 0o600 });
     symlinkSync(outside, path.join(fixture.home, "unknown-link"));
-    assert.deepEqual(scanStateFixture(fixture).errorRoles, ["grok_current_state_structure"]);
+    assert.deepEqual(scanStateFixture(fixture).errorRoles, [
+      "grok_current_state_completeness",
+      "grok_current_state_structure",
+    ]);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }

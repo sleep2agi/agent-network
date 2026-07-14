@@ -52,6 +52,7 @@ export const AUTH_EVIDENCE_ROLES = Object.freeze([
   "grok_runtime_directory_other_state",
   "grok_runtime_directory_scan",
   "grok_current_home_other_state",
+  "grok_current_state_completeness",
   "grok_current_state_structure",
   "grok_current_home_snapshot",
   "grok_prior_node_state",
@@ -92,6 +93,7 @@ const ERROR_ONLY_ROLES = new Set([
   "grok_runtime_lock_scan",
   "grok_runtime_directory_scan",
   "grok_unified_log_scan",
+  "grok_current_state_completeness",
   "grok_current_state_structure",
   "grok_current_home_snapshot",
   "grok_prior_node_structure",
@@ -872,6 +874,10 @@ function validateCommitChecks(commitChecks, errorRoles) {
           || (check.expectedSize !== undefined && stat.size !== check.expectedSize)) {
           errorRoles.add(check.role);
         }
+      } else if (check.kind === "empty_mode_zero_regular") {
+        const stat = lstatSync(check.path, { bigint: true });
+        if (!ownedSingleLinkEmptyModeZeroRegular(stat)
+          || !sameStableMetadata(check.stat, stat)) errorRoles.add(check.role);
       } else if (check.kind === "directory") {
         if (!directorySnapshotUnchanged(check.path, check.snapshot)) errorRoles.add(check.role);
       } else if (check.kind === "identity") {
@@ -1035,6 +1041,16 @@ function ownerOnlySingleLinkRegular(stat) {
     && !stat.isSymbolicLink()
     && scalarEquals(stat.nlink, 1)
     && permissionBits(stat) === (typeof stat.mode === "bigint" ? 0o600n : 0o600)
+    && (uid === undefined || stat.uid === (typeof stat.uid === "bigint" ? BigInt(uid) : uid));
+}
+
+function ownedSingleLinkEmptyModeZeroRegular(stat) {
+  const uid = process.getuid?.();
+  return stat.isFile()
+    && !stat.isSymbolicLink()
+    && scalarEquals(stat.nlink, 1)
+    && scalarEquals(stat.size, 0)
+    && permissionBits(stat) === (typeof stat.mode === "bigint" ? 0n : 0)
     && (uid === undefined || stat.uid === (typeof stat.uid === "bigint" ? BigInt(uid) : uid));
 }
 
@@ -1355,12 +1371,43 @@ function scanCurrentStateEntry(
         matchedRoles, errorRoles, commitChecks);
       return;
     }
+    if (descriptor.kind === "unknown") {
+      if (ownerOnlySingleLinkRegular(stat)) {
+        const result = scanRegularFile(
+          entryPath,
+          patterns,
+          commitChecks,
+          "grok_current_state_structure",
+          { requirePrivateState: true },
+        );
+        recordScanResult(
+          result,
+          descriptor.matchRole,
+          "grok_current_state_structure",
+          matchedRoles,
+          errorRoles,
+        );
+        if (result === "clean" || result === "match") {
+          errorRoles.add("grok_current_state_completeness");
+        }
+      } else if (ownedSingleLinkEmptyModeZeroRegular(stat)) {
+        commitChecks.push({
+          kind: "empty_mode_zero_regular",
+          path: entryPath,
+          role: "grok_current_state_structure",
+          stat,
+        });
+        errorRoles.add("grok_current_state_completeness");
+      } else {
+        errorRoles.add("grok_current_state_structure");
+      }
+      return;
+    }
     if (descriptor.kind === "directory" || descriptor.kind === "lock_directory"
       || descriptor.kind === "log_directory" || descriptor.kind === "pinned_directory") {
       errorRoles.add(descriptor.errorRole);
     }
-    if (descriptor.kind === "identity" || descriptor.kind === "unknown"
-      || descriptor.kind === "session_other") {
+    if (descriptor.kind === "identity" || descriptor.kind === "session_other") {
       errorRoles.add("grok_current_state_structure");
     }
     if (descriptor.kind === "log_unknown") errorRoles.add(descriptor.errorRole);
@@ -1379,8 +1426,8 @@ function scanCurrentStateEntry(
     || descriptor.kind === "lock" || descriptor.kind === "socket") {
     errorRoles.add(descriptor.errorRole);
   }
-  if (descriptor.kind === "unknown" || descriptor.kind === "session_other"
-    || descriptor.kind === "lock_unknown" || descriptor.kind === "log_unknown") {
+  if (descriptor.kind === "session_other" || descriptor.kind === "lock_unknown"
+    || descriptor.kind === "log_unknown") {
     errorRoles.add(descriptor.errorRole);
   }
   let snapshot;
@@ -1412,7 +1459,12 @@ function scanCurrentStateEntry(
       ? "grok_unified_log_scan"
       : "grok_current_state_structure";
   if (!directorySnapshotUnchanged(entryPath, snapshot)) errorRoles.add(snapshotRole);
-  else commitChecks.push({ kind: "directory", path: entryPath, role: snapshotRole, snapshot });
+  else {
+    commitChecks.push({ kind: "directory", path: entryPath, role: snapshotRole, snapshot });
+    if (descriptor.kind === "unknown") {
+      errorRoles.add("grok_current_state_completeness");
+    }
+  }
 }
 
 function scanPriorNodeEntry(
