@@ -24,9 +24,11 @@ import {
   writeInventoryDiagnosticAtomic,
 } from "./inventory-diagnostic.mjs";
 import {
+  MAX_TUI_READINESS_BYTES,
   bindInventorySocketBudget,
   childExitProven,
   currentMainRows,
+  hasGrokTuiReadyMarker,
   invalidRequestObserved,
   makeBoundedRowRecorder,
   matchedMutationRows,
@@ -1508,7 +1510,6 @@ async function runTui(state, label, sessionId, resume, {
       "--deny", shellQuote(`Edit(${protectedPath}/**)`),
     ]),
     "--no-alt-screen",
-    shellQuote(turnNonce),
   ].join(" ");
   child = spawn("script", [
     "-q", "-e", "-c", `stty rows 36 cols 120 && exec ${command}`, "/dev/null",
@@ -1524,11 +1525,22 @@ async function runTui(state, label, sessionId, resume, {
   let leaderIdentity;
   let leaderSocketInode = "";
   let processText = "";
+  let tuiReadinessBuffer = "";
+  let composerReady = false;
   const observeProcessText = (chunk) => {
     if (processText.length < 65_536) processText += String(chunk).slice(0, 65_536 - processText.length);
   };
+  const observeStdout = (chunk) => {
+    observeProcessText(chunk);
+    if (composerReady) return;
+    tuiReadinessBuffer = `${tuiReadinessBuffer}${String(chunk)}`
+      .slice(-MAX_TUI_READINESS_BYTES);
+    if (!hasGrokTuiReadyMarker(tuiReadinessBuffer)) return;
+    composerReady = true;
+    tuiReadinessBuffer = "";
+  };
   child.once("error", () => { exited = true; });
-  child.stdout?.on("data", observeProcessText);
+  child.stdout?.on("data", observeStdout);
   child.stderr?.on("data", observeProcessText);
   const wrapper = await observeWrapperIdentity(child);
   const wrapperIdentity = wrapper.identity;
@@ -1573,6 +1585,72 @@ async function runTui(state, label, sessionId, resume, {
     // delayed traffic from another generation cannot satisfy readiness.
     const mainRows = () => currentMainRows(rows);
     const mutationRows = () => matchedMutationRows(rows, mutationPredicate);
+
+    // The pinned Leader listener comes up before its composer accepts input.
+    // Wait for both exact generation ownership and the visible TUI footer,
+    // then submit this run's nonce once through the raw PTY input path.
+    const readinessDeadline = Date.now() + 60_000;
+    while (Date.now() < readinessDeadline && !(leaderObserved && composerReady)) {
+      observeLeaderGeneration();
+      if (invalidRequestObserved(rows)) break;
+      if (child.exitCode !== null || child.signalCode !== null) {
+        exited = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    if (invalidRequestObserved(rows)) {
+      throw new ProbeFailure(
+        currentPhase,
+        "inventory_mismatch",
+        factsForRows(rows, { spawned: Boolean(child.pid), exited, leaderObserved, ...fence }),
+      );
+    }
+    if (!(leaderObserved && composerReady)) {
+      throw new ProbeFailure(
+        currentPhase,
+        exited ? preModelExitCategory(currentPhase, processText) : "leader_readiness",
+        factsForRows(rows, {
+          spawned: Boolean(child.pid),
+          exited,
+          leaderObserved,
+          ...fence,
+          exitCode: exited ? child.exitCode : 256,
+          childSignal: exited ? child.signalCode : null,
+        }),
+      );
+    }
+    try {
+      await new Promise((resolve, reject) => {
+        const input = child.stdin;
+        if (!input || !input.writable || input.destroyed) {
+          reject(new Error("stdin unavailable"));
+          return;
+        }
+        let settled = false;
+        const finish = (error) => {
+          if (settled) return;
+          settled = true;
+          input.off("error", onError);
+          if (error) reject(error);
+          else resolve();
+        };
+        const onError = () => finish(new Error("stdin write failed"));
+        input.once("error", onError);
+        input.write(`\u001b[200~${turnNonce}\u001b[201~\r`, finish);
+      });
+    } catch {
+      throw new ProbeFailure(
+        currentPhase,
+        "request_timeout",
+        factsForRows(rows, {
+          spawned: Boolean(child.pid), exited, leaderObserved, ...fence,
+          exitCode: exited ? child.exitCode : 256,
+          childSignal: exited ? child.signalCode : null,
+        }),
+      );
+    }
+
     const requestDeadline = Date.now() + 60_000;
     while (Date.now() < requestDeadline) {
       observeLeaderGeneration();

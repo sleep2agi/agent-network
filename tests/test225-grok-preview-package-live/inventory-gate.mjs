@@ -2,6 +2,56 @@ export const MAX_INVENTORY_ROWS = 256;
 export const MAX_INVENTORY_EVIDENCE_BYTES = 1_048_576;
 export const MAX_INVENTORY_TOOLS = 128;
 export const MAX_INVENTORY_TOOL_NAME_BYTES = 256;
+export const MAX_TUI_READINESS_BYTES = 128 * 1024;
+
+const GROK_TUI_READY_TEXT = "Shift+Tab:mode";
+const GROK_TUI_SHORTCUTS_TEXT = "Ctrl+x:shortcuts";
+
+// Keep the keyless inventory client on the same pinned 0.2.93 readiness
+// boundary as production. The Leader socket appears before the composer is
+// accepting input, and terminal control strings must not be able to forge the
+// two visible footer markers.
+export function hasGrokTuiReadyMarker(raw) {
+  let visible = "";
+  let state = "text";
+  for (let index = 0; index < raw.length; index += 1) {
+    const code = raw.charCodeAt(index);
+    const char = raw[index];
+    if (state === "text") {
+      if (code === 0x1b) state = "escape";
+      else if (code === 0x9b) state = "csi";
+      else if (code === 0x9d) state = "osc";
+      else if (code === 0x90 || code === 0x98 || code === 0x9e || code === 0x9f) {
+        state = "control-string";
+      } else if (code >= 0x20 && code !== 0x7f && !(code >= 0x80 && code <= 0x9f)) {
+        visible += char;
+      }
+      continue;
+    }
+    if (state === "escape") {
+      if (char === "[") state = "csi";
+      else if (char === "]") state = "osc";
+      else if (char === "P" || char === "X" || char === "^" || char === "_") {
+        state = "control-string";
+      } else state = "text";
+      continue;
+    }
+    if (state === "csi") {
+      if (code >= 0x40 && code <= 0x7e) state = "text";
+      continue;
+    }
+    if (state === "osc" && code === 0x07) {
+      state = "text";
+      continue;
+    }
+    if (code === 0x1b && raw[index + 1] === "\\") {
+      index += 1;
+      state = "text";
+    }
+  }
+  return visible.includes(GROK_TUI_READY_TEXT)
+    && visible.includes(GROK_TUI_SHORTCUTS_TEXT);
+}
 
 export function normalizeInventoryTools(tools) {
   if (!Array.isArray(tools) || tools.length > MAX_INVENTORY_TOOLS) return null;

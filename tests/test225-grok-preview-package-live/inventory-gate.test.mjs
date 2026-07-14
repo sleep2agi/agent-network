@@ -7,9 +7,11 @@ import {
   MAX_INVENTORY_ROWS,
   MAX_INVENTORY_TOOL_NAME_BYTES,
   MAX_INVENTORY_TOOLS,
+  MAX_TUI_READINESS_BYTES,
   bindInventorySocketBudget,
   childExitProven,
   currentMainRows,
+  hasGrokTuiReadyMarker,
   invalidRequestObserved,
   makeBoundedRowRecorder,
   matchedMutationRows,
@@ -30,6 +32,24 @@ const row = (overrides = {}) => ({
   responseFinished: true,
   invalidRequest: false,
   ...overrides,
+});
+
+test("recognizes only the visible pinned TUI composer footer", () => {
+  assert.equal(MAX_TUI_READINESS_BYTES, 128 * 1024);
+  assert.equal(hasGrokTuiReadyMarker("leader socket ready"), false);
+  assert.equal(
+    hasGrokTuiReadyMarker("Shift+\x1b[31mTab\x1b[0m:mo\x1b[2Kde"),
+    false,
+  );
+  assert.equal(hasGrokTuiReadyMarker(
+    "Shift+\x1b[31mTab\x1b[0m:mode  |  Ctrl+x:\x1b[2Kshortcuts",
+  ), true);
+  assert.equal(hasGrokTuiReadyMarker(
+    "\x1b]0;Shift+Tab:mode  Ctrl+x:shortcuts\x07splash",
+  ), false);
+  assert.equal(hasGrokTuiReadyMarker(
+    "\x1bPShift+Tab:mode  Ctrl+x:shortcuts",
+  ), false);
 });
 
 test("binds readiness to the current marker and nonce", () => {
