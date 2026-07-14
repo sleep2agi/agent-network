@@ -49,6 +49,7 @@ REAL_CREATE_LOG=/tmp/test225-real-create.raw.log
 INFO_LOG=/tmp/test225-info.raw.log
 STOP_LOG_DIR=/tmp/test225-stop-logs
 TUI_INVENTORY_DIAGNOSTIC="$ARTIFACT_DIR/test225-tui-inventory-diagnostic.json"
+TUI_INVENTORY_EVIDENCE="$ARTIFACT_DIR/test225-tui-inventory-evidence.json"
 REAL_TURN_DIAGNOSTIC="$ARTIFACT_DIR/test225-real-turn-diagnostic.json"
 
 # The package gate must observe native shared-TUI rendering. It may not make a
@@ -91,13 +92,17 @@ if [ "$ARTIFACT_ABS" = / ] \
   exit 1
 fi
 
+# Remove stale optional evidence at the first safe point, before report
+# creation or any executable gate. A nonzero EXIT also removes a newly written
+# success artifact so an incomplete overall run cannot leave it unbound.
+rm -f -- "$TUI_INVENTORY_DIAGNOSTIC" "$TUI_INVENTORY_EVIDENCE" "$REAL_TURN_DIAGNOSTIC"
+
 mkdir -p "$ARTIFACT_DIR" "$HOME/.grok" "$WORK" "$STOP_LOG_DIR"
 chmod 700 "$HOME" "$HOME/.grok" "$WORK" "$STOP_LOG_DIR"
 [ ! -e "$HOME/.grok/auth.json" ] \
   || { printf 'FAIL: deterministic test home unexpectedly contains auth state\n' >&2; exit 1; }
 node /test225/artifact-report.mjs "$REPORT" \
   || { printf 'FAIL: could not atomically create a private report\n' >&2; exit 1; }
-rm -f -- "$TUI_INVENTORY_DIAGNOSTIC" "$REAL_TURN_DIAGNOSTIC"
 
 log() { printf '%s\n' "$*" | tee -a "$REPORT"; }
 fail() { log "FAIL: $*"; exit 1; }
@@ -595,11 +600,11 @@ persist_inventory_diagnostic() {
 }
 
 run_tui_inventory_gate() {
-  local real_bin=$1 profile_fixture=$2 real_auth=$3
+  local real_bin=$1 profile_fixture=$2
   local result_dir result_file fallback_file probe_rc expected_status=failed
   local candidate_valid=0 scan_rc=12 fallback_category selected phase category
 
-  rm -f -- "$TUI_INVENTORY_DIAGNOSTIC"
+  rm -f -- "$TUI_INVENTORY_DIAGNOSTIC" "$TUI_INVENTORY_EVIDENCE"
   result_dir=$(mktemp -d /tmp/test225-tui-inventory-result.XXXXXX) \
     || fail "could not create private TUI inventory result directory"
   chmod 700 "$result_dir"
@@ -610,9 +615,15 @@ run_tui_inventory_gate() {
   result_file="$result_dir/result.json"
   fallback_file="$result_dir/fallback.json"
 
-  # Build the real-auth scan set from the read-only source before the keyless
-  # inventory probe runs. The source is never copied into the probe HOME.
-  refresh_real_auth_patterns "$real_auth"
+  # This boundary is strictly keyless. Only the already-validated synthetic
+  # and Hub scan sets may exist; real-auth scalar derivation belongs solely to
+  # run_real_gate after its read-only auth precondition.
+  scan_pattern_file_valid /tmp/test225-markers \
+    || fail "keyless inventory gate lacks its owner-only synthetic scan set"
+  scan_pattern_file_valid /tmp/test225-live-credentials \
+    || fail "keyless inventory gate lacks its owner-only Hub scan set"
+  [ ! -e /tmp/test225-real-patterns ] \
+    || fail "keyless inventory gate unexpectedly observed a real-auth scan set"
   if node /test225/tui-tool-inventory-probe.mjs \
     "$real_bin" "$profile_fixture" "$result_file" >/dev/null 2>&1; then
     probe_rc=0
@@ -627,8 +638,12 @@ run_tui_inventory_gate() {
   fi
 
   if [ "$probe_rc" -eq 0 ] && [ "$candidate_valid" -eq 1 ] && [ "$scan_rc" -eq 0 ]; then
+    persist_inventory_diagnostic "$result_file" "$TUI_INVENTORY_EVIDENCE" \
+      || fail "could not persist the closed keyless inventory evidence"
     rm -rf -- "$result_dir"
     rm -f -- "$TUI_INVENTORY_DIAGNOSTIC"
+    inventory_result_valid "$TUI_INVENTORY_EVIDENCE" passed \
+      || fail "persisted keyless inventory evidence failed closed-schema validation"
     return 0
   fi
 
@@ -655,6 +670,7 @@ run_tui_inventory_gate() {
 
   persist_inventory_diagnostic "$selected" "$TUI_INVENTORY_DIAGNOSTIC" \
     || fail "could not persist the closed TUI inventory diagnostic"
+  rm -f -- "$TUI_INVENTORY_EVIDENCE"
   phase=$(jq -r '.phase' "$TUI_INVENTORY_DIAGNOSTIC")
   category=$(jq -r '.category' "$TUI_INVENTORY_DIAGNOSTIC")
   rm -rf -- "$result_dir"
@@ -1003,6 +1019,9 @@ cleanup() {
     break
   done
   [ "$cleanup_failed" -eq 0 ] || original_rc=1
+  if [ "$original_rc" -ne 0 ]; then
+    rm -f -- "$TUI_INVENTORY_EVIDENCE"
+  fi
   exit "$original_rc"
 }
 trap cleanup EXIT
@@ -1817,6 +1836,26 @@ assert_snapshot_gone "$FALLBACK_PID_SNAPSHOT"
 wait_no_fallback_runtime 300 \
   || fail "global resume stop left agent-node, Grok, npm wrapper, or lock-holder processes"
 
+run_keyless_gate() {
+  local real_bin=${TEST225_REAL_GROK_BIN:-/host-grok/bin/grok-0.2.93}
+  local profile_fixture
+  local -a profile_candidates=()
+
+  [ -x "$real_bin" ] \
+    || fail "RUN_KEYLESS_GROK_GATE=1 but pinned Grok binary is not executable: $real_bin"
+  [[ "$("$real_bin" --version)" =~ ^grok\ 0\.2\.93\ \(f00f96316d\)(\ \[stable\])?$ ]] \
+    || fail "keyless live gate requires exact Grok 0.2.93"
+  mapfile -d '' profile_candidates \
+    < <(find "$GROK_STATE" -type f -name 'anet-copresence-preview.md' -print0)
+  [ "${#profile_candidates[@]}" -eq 1 ] \
+    || fail "package gate did not produce exactly one runtime-owned co-presence profile"
+  profile_fixture=${profile_candidates[0]}
+  [ "$(file_mode "$profile_fixture")" = 600 ] \
+    || fail "runtime-owned co-presence profile is not mode 0600"
+  run_tui_inventory_gate "$real_bin" "$profile_fixture"
+  pass "pinned Grok TUI inventory, unsafe mutations, and exact keyless todo lifecycle gate"
+}
+
 run_real_gate() {
   local real_bin=${TEST225_REAL_GROK_BIN:-/host-grok/bin/grok-0.2.93}
   local real_auth=${TEST225_REAL_GROK_AUTH:-/host-grok/auth.json}
@@ -1826,8 +1865,6 @@ run_real_gate() {
   local first_task_started_ms second_task_started_ms
   local real_log_dir="$WORK/.anet/nodes/$real_alias/logs"
   local real_pending="$WORK/.anet/nodes/$real_alias/pending-replies.json"
-  local profile_fixture
-  local -a profile_candidates=()
   continuity_nonce="GROK_PREVIEW_CONTEXT_225_$(tr -d '-' </proc/sys/kernel/random/uuid)"
 
   [ -x "$real_bin" ] || fail "RUN_REAL_GROK=1 but real Grok binary is not executable: $real_bin"
@@ -1835,15 +1872,8 @@ run_real_gate() {
   [[ "$($real_bin --version)" =~ ^grok\ 0\.2\.93\ \(f00f96316d\)(\ \[stable\])?$ ]] \
     || fail "optional live gate requires exact Grok 0.2.93"
 
-  mapfile -d '' profile_candidates \
-    < <(find "$GROK_STATE" -type f -name 'anet-copresence-preview.md' -print0)
-  [ "${#profile_candidates[@]}" -eq 1 ] \
-    || fail "package gate did not produce exactly one runtime-owned co-presence profile"
-  profile_fixture=${profile_candidates[0]}
-  [ "$(file_mode "$profile_fixture")" = 600 ] \
-    || fail "runtime-owned co-presence profile is not mode 0600"
-  run_tui_inventory_gate "$real_bin" "$profile_fixture" "$real_auth"
-  pass "pinned Grok TUI inventory, unsafe mutations, and exact keyless todo lifecycle gate"
+  [ "$KEYLESS_STATUS" = PASS ] \
+    || fail "authenticated gate requires the pinned keyless live gate to pass first"
 
   mkdir -p "$HOME/.grok" /tmp/test225-real-auth
   cp "$real_auth" "$HOME/.grok/auth.json"
@@ -2024,7 +2054,16 @@ run_real_gate() {
   fi
 }
 
-log "[L5] optional authenticated real Grok gate"
+log "[L5] optional pinned keyless Grok gate"
+if [ "${RUN_KEYLESS_GROK_GATE:-0}" = 1 ] || [ "${RUN_REAL_GROK:-0}" = 1 ]; then
+  run_keyless_gate
+  KEYLESS_STATUS=PASS
+else
+  KEYLESS_STATUS=NOT_RUN
+  log "OPTIONAL: pinned keyless Grok gate not requested"
+fi
+
+log "[L6] optional authenticated real Grok gate"
 if [ "${RUN_REAL_GROK:-0}" = 1 ]; then
   run_real_gate
   REAL_STATUS=PASS
@@ -2050,6 +2089,7 @@ scan_fixed_file /tmp/test225-markers \
   "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" "$GROK_STATE" "$PENDING" \
   "$WORK/.anet/nodes/$ALIAS" "$STOP_LOG_DIR" /tmp/test225-hub-results \
   "$LOCAL_REGISTRY_LOG" "$NPX_ENV_OBSERVATION" \
+  "$TUI_INVENTORY_EVIDENCE" "$TUI_INVENTORY_DIAGNOSTIC" \
   || fail "final synthetic credential scan failed"
 scan_fixed_file /tmp/test225-live-credentials \
   /tmp/test225-candidate-extracted "$SERVER_LOG" "$START_LOG" "$RELOAD_LOG" "$RESUME_LOG" \
@@ -2059,6 +2099,7 @@ scan_fixed_file /tmp/test225-live-credentials \
   "$WORK/.anet/nodes/preview-grok-real-225/pending-replies.json" \
   "$STOP_LOG_DIR" /tmp/test225-hub-results /tmp/test225-real-hub-rows \
   "$LOCAL_REGISTRY_LOG" "$NPX_ENV_OBSERVATION" \
+  "$TUI_INVENTORY_EVIDENCE" "$TUI_INVENTORY_DIAGNOSTIC" \
   || fail "final test Hub credential scan failed"
 scan_fixed_file /tmp/test225-real-patterns \
   /tmp/test225-candidate-extracted "$SERVER_LOG" "$START_LOG" "$RELOAD_LOG" "$RESUME_LOG" \
@@ -2066,11 +2107,18 @@ scan_fixed_file /tmp/test225-real-patterns \
   "$RESUME_CAPTURE" "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" "$GROK_STATE" "$PENDING" \
   "$WORK/.anet" "$STOP_LOG_DIR" /tmp/test225-hub-results /tmp/test225-real-hub-rows "$REPORT" \
   "$LOCAL_REGISTRY_LOG" "$NPX_ENV_OBSERVATION" \
+  "$TUI_INVENTORY_EVIDENCE" "$TUI_INVENTORY_DIAGNOSTIC" \
   || fail "final real-auth scalar scan failed after every producer stopped"
 
 log ""
 log "Summary: PASS"
 log "package_e2e=PASS"
+log "pinned_keyless_live=$KEYLESS_STATUS"
+if [ "$KEYLESS_STATUS" = PASS ]; then
+  inventory_result_valid "$TUI_INVENTORY_EVIDENCE" passed \
+    || fail "keyless evidence changed before report binding"
+  log "pinned_keyless_artifact_sha256=$(sha256sum "$TUI_INVENTORY_EVIDENCE" | awk '{print $1}') file=$(basename "$TUI_INVENTORY_EVIDENCE")"
+fi
 log "real_authenticated_live=$REAL_STATUS"
 log "source_escape_hatches=0"
 log "npx_preview_fallback=PASS"

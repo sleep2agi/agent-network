@@ -62,11 +62,35 @@ rm -rf "$CONTEXT"
 sg docker -c 'docker run --rm -v "$PWD/docs/tests:/artifacts" test225-grok-preview'
 ```
 
-The authenticated live layer is opt-in because it consumes a real cached Grok
-login. Mount the binary and auth read-only; raw auth and tmux captures remain
-under `/tmp` and are destroyed rather than copied into artifacts. The second
-turn must recall a fresh benign nonce from the first turn after stop/start, so
-the gate proves actual session continuity rather than two independent calls:
+The pinned keyless live layer is opt-in and requires only the reviewed Grok
+0.2.93 executable. It runs the real TUI against container-local model stubs,
+including the exact `todo_write` permission lifecycle, without mounting or
+reading cached authentication. Run it after the deterministic layer with:
+
+```bash
+sg docker -c 'docker run --rm \
+  --cap-add SYS_ADMIN \
+  --security-opt seccomp=unconfined \
+  --security-opt apparmor=unconfined \
+  -e RUN_KEYLESS_GROK_GATE=1 \
+  -e TEST225_REAL_GROK_BIN=/host-grok/bin/grok-0.2.93 \
+  -v /path/to/grok-0.2.93:/host-grok/bin/grok-0.2.93:ro \
+  -v "$PWD/docs/tests:/artifacts" \
+  test225-grok-preview'
+```
+
+The report binds success explicitly as `pinned_keyless_live=PASS` and records
+the SHA-256 of one mode-0600 closed-schema evidence file. That file contains
+only bounded counts and booleans; probe HOME, model requests, native events,
+and session files stay under disposable `/tmp` roots. On failure, the success
+evidence is removed and only the corresponding closed diagnostic may survive.
+
+The authenticated live layer is separately opt-in because it consumes a real
+cached Grok login. Mount the binary and auth read-only; raw auth and tmux
+captures remain under `/tmp` and are destroyed rather than copied into
+artifacts. It always runs the pinned keyless gate first. The second turn must
+recall a fresh benign nonce from the first turn after stop/start, so the gate
+proves actual session continuity rather than two independent calls:
 
 Before the cached login is copied, this layer also points the pinned binary at
 a container-local, non-billing model stub. Fresh/resume share one isolated
@@ -123,10 +147,12 @@ each name at 256 bytes. Retained inventory evidence is independently capped at
 256 rows and 1 MiB, with overflow represented by one fixed invalid sentinel.
 On failure it writes only a mode-0600, closed-schema diagnostic (`phase`,
 enumerated `category`, booleans, and bounded counts) to
-`/artifacts/test225-tui-inventory-diagnostic.json`
-after synthetic, Hub, and real-auth scalar scans. A successful run removes any
-stale diagnostic. The schema and atomic writer have a keyless local negative
-test:
+`/artifacts/test225-tui-inventory-diagnostic.json` after synthetic and Hub
+scalar scans. A successful run removes any stale diagnostic and writes the
+same closed schema with `status=passed` to
+`/artifacts/test225-tui-inventory-evidence.json`; the authenticated layer also
+scans that evidence against its privately derived auth scalar set. The schema
+and atomic writer have a keyless local negative test:
 
 ```bash
 node --test \
@@ -148,13 +174,13 @@ sg docker -c 'docker run --rm \
   test225-grok-preview'
 ```
 
-The three Docker security options are required only by the authenticated
-layer because Grok 0.2.93 launches its configured workspace sandbox through
-Bubblewrap. Keep the host mounts read-only and limited to the pinned binary,
-`auth.json`, and optional `agent_id`; the test otherwise uses an isolated
-HOME, Hub, working directory, and session. A default Docker profile blocks
-Bubblewrap before the Leader socket is created and is therefore not a valid
-runtime result.
+The three Docker security options are required by both pinned real-TUI layers
+because Grok 0.2.93 launches its configured workspace sandbox through
+Bubblewrap. Keep host mounts read-only: binary-only for the keyless layer, and
+the pinned binary plus `auth.json` and optional `agent_id` for the authenticated
+layer. The test otherwise uses an isolated HOME, Hub, working directory, and
+session. A default Docker profile blocks Bubblewrap before the Leader socket
+is created and is therefore not a valid runtime result.
 
 The suite is a preview gate only. It does not claim the formal native Leader
 protocol freeze or approval-owner completion required for `latest`.
