@@ -676,6 +676,17 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
     "[session]",
     "load_envrc = false",
     "",
+    // A network worker must not enqueue session traces or product analytics
+    // containing prompts, account identifiers, or auth-adjacent metadata.
+    // Keep both switches explicit: 0.2.93 otherwise inherits trace uploads
+    // from the telemetry master toggle and can persist a retry queue.
+    "[features]",
+    "telemetry = false",
+    "",
+    "[telemetry]",
+    "mixpanel_enabled = false",
+    "trace_upload = false",
+    "",
     // Grok 0.2.93 defaults auto_background_on_timeout=true, but a safe
     // allowlist without the background task tools derives
     // enabled_background=false. That combination is rejected while the agent

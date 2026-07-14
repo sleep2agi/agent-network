@@ -62,6 +62,8 @@ describe("prepareGrokCliHome", () => {
     expect(config).not.toContain("default_selected_permission");
     expect(config).toContain("[toolset.bash]\nauto_background_on_timeout = false");
     expect(config).toContain("[session]\nload_envrc = false");
+    expect(config).toContain("[features]\ntelemetry = false");
+    expect(config).toContain("[telemetry]\nmixpanel_enabled = false\ntrace_upload = false");
     expect(existsSync(join(stateHome, "requirements.toml"))).toBe(false);
     expect(existsSync(join(stateHome, "trusted_folders.toml"))).toBe(false);
     expect(first.copresenceAgentProfile).toBeUndefined();
