@@ -28,8 +28,14 @@ import type {
   TaskState,
   CancelQueuedTaskResult,
   TaskId,
+  AuthenticatedSender,
 } from "./contract";
-import type { GatewayLedger, LedgerRow } from "./ledger";
+import {
+  DELIVERY,
+  completedDelivery,
+  type GatewayLedger,
+  type LedgerRow,
+} from "./ledger";
 
 // ────────────────────────────────────────────────────────────────────────
 // Dispatcher interface (implemented by bridge-adapter)
@@ -58,8 +64,34 @@ export interface TurnDispatcher {
     text: string;
     fromAlias: string;
     clientUserMessageId: string;
+    /** B-only metadata used for the human-visible origin prefix. */
+    sourceType?: InboundSourceType;
+    sourceId?: string;
   }): Promise<DispatchOutcome>;
 }
+
+export type OrdinaryInboxType = "message" | "reply" | "chained_reply" | "broadcast";
+export type InboundSourceType = "task" | OrdinaryInboxType;
+const ORDINARY_INBOX_TYPES: ReadonlySet<string> = new Set([
+  "message",
+  "reply",
+  "chained_reply",
+  "broadcast",
+]);
+
+export interface InjectMessageArgs {
+  readonly messageId: string;
+  readonly authenticatedSender: AuthenticatedSender;
+  readonly type: OrdinaryInboxType;
+  readonly text: string;
+}
+
+export type InjectMessageResult =
+  | { readonly outcome: "accepted"; readonly queuePosition: number | null; readonly duplicate: boolean }
+  | { readonly outcome: "refused_queue_full"; readonly queueDepth: number; readonly limit: number }
+  | { readonly outcome: "refused_no_owner" }
+  | { readonly outcome: "refused_shutting_down" }
+  | { readonly outcome: "refused_invalid_arg"; readonly field: string; readonly reason: string };
 
 export type ReservationOwner = "none" | "human" | "agent";
 
@@ -96,6 +128,9 @@ interface QueueEntry {
   fromAlias: string;
   text: string;
   clientUserMessageId: string;
+  sourceType: InboundSourceType;
+  sourceId: string;
+  expectsReply: boolean;
 }
 
 export class GatewayScheduler {
@@ -116,6 +151,7 @@ export class GatewayScheduler {
   private tasksSeen = 0;
   private ambiguousCount = 0;
   private failedCount = 0;
+  private unexpectedDispatchFailureCounter = 0;
   private listeners = new Set<() => void>();
 
   constructor(opts: SchedulerOptions) {
@@ -175,13 +211,25 @@ export class GatewayScheduler {
           duplicate: true,
         };
       }
+      if (latest.expectsReply && latest.outboundDelivery !== "delivered") {
+        // A canonical failure outcome still owns task closure. Starting a
+        // retry before that durable outcome reaches H1 races two terminal
+        // mutations against the same Hub task, so the redelivery dedups.
+        return {
+          outcome: "accepted",
+          taskId: args.taskId,
+          queuePosition: null,
+          duplicate: true,
+        };
+      }
       // else: terminal failure → fall through, new attempt row below.
     }
 
-    if (this.queue.length >= this.queueLimit) {
+    const formalQueueDepth = this.queue.filter((entry) => entry.expectsReply).length;
+    if (formalQueueDepth >= this.queueLimit) {
       return {
         outcome: "refused_queue_full",
-        queueDepth: this.queue.length,
+        queueDepth: formalQueueDepth,
         limit: this.queueLimit,
       };
     }
@@ -195,6 +243,9 @@ export class GatewayScheduler {
       origin: "agent",
       taskId: String(args.taskId),
       fromAlias: args.authenticatedSender.alias,
+      requestText: args.text,
+      inboundType: "task",
+      expectsReply: true,
       clientUserMessageId: cumid,
     });
     this.ledger.transition(submissionId, "queued");
@@ -206,6 +257,9 @@ export class GatewayScheduler {
       fromAlias: args.authenticatedSender.alias,
       text: args.text,
       clientUserMessageId: cumid,
+      sourceType: "task",
+      sourceId: String(args.taskId),
+      expectsReply: true,
     };
     this.queue.push(entry);
     this.notify();
@@ -216,7 +270,7 @@ export class GatewayScheduler {
     // the position AFTER the kick fixes the 副指挥-audited race where an
     // idle enqueue reported queuePosition=0 instead of null.
     void this.pump();
-    const idx = this.queue.indexOf(entry);
+    const idx = this.queue.filter((queued) => queued.expectsReply).indexOf(entry);
 
     return {
       outcome: "accepted",
@@ -226,20 +280,93 @@ export class GatewayScheduler {
     };
   }
 
+  /**
+   * Queue a non-task CommHub row as its own turn on the SAME scheduler.
+   * These rows are durable-before-ACK but never create a CommHub reply.
+   */
+  async injectMessage(args: InjectMessageArgs): Promise<InjectMessageResult> {
+    if (this.isShuttingDown()) return { outcome: "refused_shutting_down" };
+    if (!this.ownerAttached()) return { outcome: "refused_no_owner" };
+    if (typeof args.messageId !== "string" || args.messageId.length === 0) {
+      return { outcome: "refused_invalid_arg", field: "messageId", reason: "empty" };
+    }
+    if (typeof args.text !== "string" || args.text.length === 0) {
+      return { outcome: "refused_invalid_arg", field: "text", reason: "empty" };
+    }
+    if (!ORDINARY_INBOX_TYPES.has(args.type)) {
+      return { outcome: "refused_invalid_arg", field: "type", reason: "unsupported" };
+    }
+
+    const cumid = `anet:${args.messageId}`;
+    const existing = this.ledger.getByClientUserMessageId(cumid);
+    if (existing) {
+      return { outcome: "accepted", queuePosition: null, duplicate: true };
+    }
+    const ordinaryQueueDepth = this.queue.filter((entry) => !entry.expectsReply).length;
+    if (ordinaryQueueDepth >= this.queueLimit) {
+      return {
+        outcome: "refused_queue_full",
+        queueDepth: ordinaryQueueDepth,
+        limit: this.queueLimit,
+      };
+    }
+
+    const submissionId = args.messageId;
+    this.ledger.record({
+      submissionId,
+      origin: "agent",
+      taskId: null,
+      fromAlias: args.authenticatedSender.alias,
+      requestText: args.text,
+      inboundType: args.type,
+      expectsReply: false,
+      clientUserMessageId: cumid,
+    });
+    this.ledger.transition(submissionId, "queued");
+
+    const entry: QueueEntry = {
+      submissionId,
+      taskId: args.messageId,
+      fromAlias: args.authenticatedSender.alias,
+      text: args.text,
+      clientUserMessageId: cumid,
+      sourceType: args.type,
+      sourceId: args.messageId,
+      expectsReply: false,
+    };
+    this.queue.push(entry);
+    this.notify();
+    void this.pump();
+    const idx = this.queue.indexOf(entry);
+    return {
+      outcome: "accepted",
+      queuePosition: idx === -1 ? null : idx,
+      duplicate: false,
+    };
+  }
+
   async getTaskState(taskId: TaskId): Promise<TaskState> {
     // Logical-task view: the LATEST attempt row answers for the taskId
     // (freeze semantics — same taskId spans retry attempts).
-    const row =
-      this.ledger.getLatestByTaskId(String(taskId)) ?? this.ledger.get(String(taskId));
+    const latest = this.ledger.getLatestByTaskId(String(taskId));
+    const legacy = latest === null ? this.ledger.get(String(taskId)) : null;
+    const row = latest ?? (
+      legacy?.expectsReply && legacy.taskId === String(taskId) ? legacy : null
+    );
     if (!row) return { state: "unknown" };
     return ledgerRowToTaskState(row, this.queuePositionOf(String(taskId)));
   }
 
   async cancelQueuedTask(taskId: TaskId): Promise<CancelQueuedTaskResult> {
-    const idx = this.queue.findIndex((e) => e.taskId === String(taskId));
+    const idx = this.queue.findIndex(
+      (e) => e.expectsReply && e.taskId === String(taskId),
+    );
     if (idx === -1) {
-      const row =
-        this.ledger.getLatestByTaskId(String(taskId)) ?? this.ledger.get(String(taskId));
+      const latest = this.ledger.getLatestByTaskId(String(taskId));
+      const legacy = latest === null ? this.ledger.get(String(taskId)) : null;
+      const row = latest ?? (
+        legacy?.expectsReply && legacy.taskId === String(taskId) ? legacy : null
+      );
       const current = row ? ledgerRowToTaskState(row, null).state : "unknown";
       return { outcome: "refused_not_queued", currentState: current };
     }
@@ -247,7 +374,9 @@ export class GatewayScheduler {
     // Contract roundtrip (副指挥 P1): outcome 'cancelled' must be what a
     // subsequent getTaskState reads back — dedicated ledger state, not a
     // 'failed' masquerade.
-    this.ledger.transition(entry.submissionId, "cancelled");
+    this.ledger.transition(entry.submissionId, "cancelled", {
+      ...(entry.expectsReply ? { outbound: DELIVERY.cancelled } : {}),
+    });
     this.notify();
     return { outcome: "cancelled", cancelledAtMs: Date.now() };
   }
@@ -296,10 +425,36 @@ export class GatewayScheduler {
       return;
     }
     if (result.ok) {
-      this.ledger.transition(submissionId, "completed", { replyText: result.replyText });
-      this.ledger.transition(submissionId, "reply_pending");
+      const row = this.ledger.get(submissionId);
+      const completion = completedDelivery(result.replyText);
+      if (!completion.ok) {
+        this.ledger.transition(submissionId, "failed", {
+          error: completion.delivery.text,
+          ...(row?.expectsReply ? { outbound: completion.delivery } : {}),
+        });
+        this.failedCount += 1;
+      } else if (row?.expectsReply) {
+        this.ledger.transition(submissionId, "completed", {
+          replyText: completion.delivery.text,
+        });
+        this.ledger.transition(submissionId, "reply_pending", {
+          outbound: completion.delivery,
+        });
+      } else {
+        // Ordinary inbox turns are terminal locally; no send_reply is emitted.
+        this.ledger.transition(submissionId, "completed", {
+          replyText: completion.delivery.text,
+        });
+        this.ledger.transition(submissionId, "replied");
+      }
     } else {
-      this.ledger.transition(submissionId, "failed", { error: result.error });
+      const row = this.ledger.get(submissionId);
+      this.ledger.transition(submissionId, "failed", {
+        // Never persist the dispatcher-provided string. It is a trust
+        // boundary and may contain raw upstream error.message/data.
+        error: DELIVERY.turnFailed.text,
+        ...(row?.expectsReply ? { outbound: DELIVERY.turnFailed } : {}),
+      });
       this.failedCount += 1;
     }
     this.releaseAgentReservation();
@@ -316,26 +471,33 @@ export class GatewayScheduler {
       this.log(`[scheduler] stray interrupt for ${submissionId} (active=${this.activeSubmissionId})`);
       return;
     }
+    const row = this.ledger.get(submissionId);
     this.ledger.transition(submissionId, "interrupted_by_human", {
       error: "human owner interrupted the running agent turn via TUI (no auto-replay)",
+      ...(row?.expectsReply ? { outbound: DELIVERY.interrupted } : {}),
     });
     this.releaseAgentReservation();
   }
 
   /** The reply was delivered back to CommHub — final ledger state. */
   markReplied(submissionId: string): void {
-    this.ledger.transition(submissionId, "replied");
+    this.ledger.markOutboundDelivered(submissionId);
     this.notify();
   }
 
   snapshot(): SchedulerSnapshot {
     return {
-      queueDepth: this.queue.length,
+      queueDepth: this.queue.filter((entry) => entry.expectsReply).length,
       tasksSeen: this.tasksSeen,
       activeReservationOwner: this.reservation,
       ambiguousCount: this.ambiguousCount,
       failedCount: this.failedCount,
     };
+  }
+
+  /** B-only heartbeat probe; includes ordinary turns without changing A metrics. */
+  hasPendingWork(): boolean {
+    return this.reservation !== "none" || this.queue.length > 0;
   }
 
   /** Subscribe to snapshot-worthy changes (runtime.ts fans out). */
@@ -350,6 +512,48 @@ export class GatewayScheduler {
    * pump so queued entries resume dispatching.
    */
   onOwnerAttachmentChanged(): void {
+    void this.pump();
+  }
+
+  /**
+   * Rehydrate boot-time rows proven never to have reached `turn/start`.
+   * Missing payloads belong to pre-recovery-schema ledgers and fail closed;
+   * they are never guessed or silently left in a permanent queued state.
+   */
+  restoreRecoveredQueue(rows: readonly LedgerRow[]): void {
+    for (const row of rows) {
+      if (
+        row.state !== "queued" ||
+        row.clientUserMessageId === null ||
+        row.requestText === null ||
+        row.requestText.length === 0 ||
+        (row.expectsReply && (row.taskId === null || row.inboundType !== "task")) ||
+        (!row.expectsReply && !ORDINARY_INBOX_TYPES.has(row.inboundType))
+      ) {
+        if (row.state === "queued") {
+          this.ledger.transition(row.submissionId, "failed", {
+            error: DELIVERY.recoveryInvalid.text,
+            ...(row.expectsReply ? { outbound: DELIVERY.recoveryInvalid } : {}),
+          });
+          this.failedCount += 1;
+        }
+        this.log(`[scheduler] recovery rejected submission=${row.submissionId}`);
+        continue;
+      }
+      if (this.queue.some((entry) => entry.submissionId === row.submissionId)) continue;
+      this.queue.push({
+        submissionId: row.submissionId,
+        taskId: row.taskId ?? row.submissionId,
+        fromAlias: row.fromAlias ?? "(unknown)",
+        text: row.requestText,
+        clientUserMessageId: row.clientUserMessageId,
+        sourceType: row.inboundType,
+        sourceId: row.taskId ?? row.submissionId,
+        expectsReply: row.expectsReply,
+      });
+      if (row.expectsReply) this.tasksSeen += 1;
+    }
+    this.notify();
     void this.pump();
   }
 
@@ -388,9 +592,15 @@ export class GatewayScheduler {
         text: entry.text,
         fromAlias: entry.fromAlias,
         clientUserMessageId: entry.clientUserMessageId,
+        sourceType: entry.sourceType,
+        sourceId: entry.sourceId,
       });
-    } catch (e) {
-      outcome = { kind: "failed", error: (e as Error)?.message ?? String(e) };
+    } catch {
+      // R2: an unexpected dispatcher throw may carry an upstream-controlled
+      // message. Persist only a stable correlation reference.
+      const ref = `sched-${++this.unexpectedDispatchFailureCounter}`;
+      this.log(`[scheduler] dispatch threw ref=${ref}`);
+      outcome = { kind: "failed", error: `upstream dispatch failed (ref ${ref})` };
     }
 
     switch (outcome.kind) {
@@ -400,17 +610,24 @@ export class GatewayScheduler {
         // Reservation stays held until onAgentTurnFinished.
         return;
       case "failed":
-        this.ledger.transition(entry.submissionId, "failed", { error: outcome.error });
+        this.ledger.transition(entry.submissionId, "failed", {
+          // Ignore arbitrary dispatcher text at the persistence boundary.
+          error: DELIVERY.dispatchFailed.text,
+          ...(entry.expectsReply ? { outbound: DELIVERY.dispatchFailed } : {}),
+        });
         this.failedCount += 1;
         this.releaseAgentReservation();
         return;
       case "ambiguous":
         // Response lost, reconcile failed. Do NOT resend (duplicate-turn
         // risk). Terminal; requires human/ops attention.
-        this.ledger.transition(entry.submissionId, "ambiguous", { error: outcome.detail });
+        this.ledger.transition(entry.submissionId, "ambiguous", {
+          error: DELIVERY.dispatchUnknown.text,
+          ...(entry.expectsReply ? { outbound: DELIVERY.dispatchUnknown } : {}),
+        });
         this.ambiguousCount += 1;
         this.log(
-          `[scheduler] submission ${entry.submissionId} AMBIGUOUS — dispatch response lost, not resending: ${outcome.detail}`,
+          `[scheduler] submission ${entry.submissionId} AMBIGUOUS — dispatch response lost, not resending`,
         );
         this.releaseAgentReservation();
         return;
@@ -425,7 +642,8 @@ export class GatewayScheduler {
   }
 
   private queuePositionOf(taskId: string): number | null {
-    const idx = this.queue.findIndex((e) => e.taskId === taskId);
+    const formalQueue = this.queue.filter((entry) => entry.expectsReply);
+    const idx = formalQueue.findIndex((entry) => entry.taskId === taskId);
     return idx === -1 ? null : idx;
   }
 
@@ -460,33 +678,33 @@ export function ledgerRowToTaskState(row: LedgerRow, queuePosition: number | nul
       return {
         state: "completed",
         startedAtMs: row.createdAt,
-        completedAtMs: row.updatedAt,
+        completedAtMs: row.terminalAt ?? row.updatedAt,
         replyText: row.replyText ?? "",
       };
     case "failed":
       return {
         state: "failed",
         startedAtMs: row.createdAt,
-        failedAtMs: row.updatedAt,
+        failedAtMs: row.terminalAt ?? row.updatedAt,
         errorSummary: row.error ?? "unknown error",
       };
     case "ambiguous":
       return {
         state: "failed",
         startedAtMs: row.createdAt,
-        failedAtMs: row.updatedAt,
+        failedAtMs: row.terminalAt ?? row.updatedAt,
         errorSummary: `ambiguous: ${row.error ?? "dispatch response lost"}`,
       };
     case "interrupted_by_human":
       return {
         state: "cancelled",
-        cancelledAtMs: row.updatedAt,
+        cancelledAtMs: row.terminalAt ?? row.updatedAt,
         cancelledBy: "owner",
       };
     case "cancelled":
       return {
         state: "cancelled",
-        cancelledAtMs: row.updatedAt,
+        cancelledAtMs: row.terminalAt ?? row.updatedAt,
         cancelledBy: "agent",
       };
   }

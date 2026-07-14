@@ -476,11 +476,22 @@ describe("sanitizeDisplayAlias — single line, capped, display-only", () => {
 });
 
 describe("upstream error generalization — raw detail never reaches wire/state", () => {
-  test("non-timeout dispatch failure → generalized summary + full raw in diagnostics sink", async () => {
-    const sink: Array<{ correlationId: string; operation: string; error: unknown }> = [];
+  test("non-timeout dispatch failure → generalized summary + sanitized diagnostics", async () => {
+    const sink: Array<{
+      correlationId: string;
+      operation: string;
+      error: {
+        name: "RedactedUpstreamFailure";
+        classification: "upstream_request_failed" | "upstream_turn_failed";
+        redacted: true;
+      };
+    }> = [];
+    const canary = "RAW upstream detail: /home/vansin/.secret ntok_deadbeef01 stack";
     const fakeClient = Object.assign(new (await import("events")).EventEmitter(), {
       request: async () => {
-        throw new Error("RAW upstream detail: /home/vansin/.secret ntok_deadbeef01 stack");
+        const error = new Error(canary) as Error & { data?: unknown };
+        error.data = { secret: canary };
+        throw error;
       },
     });
     const adapter = new BridgeAdapter({
@@ -507,11 +518,18 @@ describe("upstream error generalization — raw detail never reaches wire/state"
       expect(outcome.error).not.toContain("/home/");
       expect(outcome.error).not.toContain("RAW upstream detail");
     }
-    // The FULL raw error landed in the internal sink under the same id.
+    // R2: even the diagnostic sink receives classification only. It is a
+    // log surface, so neither error.message nor error.data may reach it.
     expect(sink).toHaveLength(1);
     expect(sink[0].correlationId).toBe("cx-test-1");
     expect(sink[0].operation).toBe("turn/start");
-    expect((sink[0].error as Error).message).toContain("ntok_deadbeef01");
+    expect(sink[0].error).toEqual({
+      name: "RedactedUpstreamFailure",
+      classification: "upstream_request_failed",
+      redacted: true,
+    });
+    expect(JSON.stringify(sink)).not.toContain(canary);
+    expect(JSON.stringify(sink)).not.toContain("ntok_deadbeef01");
   });
 });
 

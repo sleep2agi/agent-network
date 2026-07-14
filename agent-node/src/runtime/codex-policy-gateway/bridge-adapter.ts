@@ -10,9 +10,10 @@
 //   - policy-checked `turn/start` per submission (NEVER steer),
 //   - turn event routing: our turns → scheduler.onAgentTurnFinished;
 //     any turn we did not start → human reservation signals,
-//   - dispatch-response-loss handling: on request timeout, watch the
-//     thread for `turn/started` carrying our clientUserMessageId within a
-//     reconcile window; found → accepted, else → ambiguous (no resend),
+//   - dispatch-response-loss handling: on request timeout, only the legacy
+//     extension carrying clientUserMessageId can reconcile exactly; the
+//     pinned Codex 0.144 wire has no such field, so loss stays ambiguous
+//     (and is never resent),
 //   - reverse requests: observed, logged, NEVER answered (they belong to
 //     the human TUI; additionally Phase 1 runs approval_policy=never so
 //     these should not occur at all — seeing one is itself an anomaly),
@@ -22,26 +23,71 @@
 
 import { EventEmitter } from "events";
 import { evaluateUpstreamCall } from "./policy";
-import type { DispatchOutcome, GatewayScheduler, TurnDispatcher } from "./scheduler";
+import type {
+  DispatchOutcome,
+  GatewayScheduler,
+  InboundSourceType,
+  TurnDispatcher,
+} from "./scheduler";
 import type { AuthenticatedSender } from "./contract";
+import {
+  MAX_HUB_REPLY_TEXT_LENGTH,
+  TRUNCATED_REPLY_MARKER,
+  boundHubReplyText,
+} from "./ledger";
 
 /**
- * L2 (副指挥 P1, aligned with A's ProtocolDiagnostics): raw upstream
- * errors NEVER cross into the Agent wire / task state. The full exception
- * goes to this sink with a correlationId; the wire/state only ever sees a
- * stable generalized summary carrying the same id, so an operator can
- * match a support report to the internal log line.
+ * R2: raw upstream error.message/error.data NEVER cross into any adapter
+ * surface, including the diagnostic sink. Diagnostics receive only a
+ * stable failure classification plus a correlation id; client, ledger,
+ * and log surfaces receive the same correlation id but no upstream detail.
  */
 export interface AdapterDiagnostics {
   newCorrelationId(): string;
   reportInternalError(entry: {
     correlationId: string;
     operation: string;
-    error: unknown;
+    /** Sanitized marker only; never the thrown upstream value. */
+    error: {
+      readonly name: "RedactedUpstreamFailure";
+      readonly classification: "upstream_request_failed" | "upstream_turn_failed";
+      readonly redacted: true;
+    };
   }): void;
 }
 
 const MAX_ALIAS_DISPLAY = 64;
+
+type UnknownRecord = Record<string, unknown>;
+
+function asRecord(value: unknown): UnknownRecord | null {
+  return typeof value === "object" && value !== null
+    ? (value as UnknownRecord)
+    : null;
+}
+
+/** Pinned Codex 0.144 uses `{ turn: { id } }`; flat turnId is legacy-only. */
+function extractTurnId(value: unknown): string | null {
+  const root = asRecord(value);
+  if (!root) return null;
+  if ("turn" in root) {
+    const turn = asRecord(root.turn);
+    return turn && typeof turn.id === "string" && turn.id.length > 0
+      ? turn.id
+      : null;
+  }
+  return typeof root.turnId === "string" && root.turnId.length > 0
+    ? root.turnId
+    : null;
+}
+
+function isDispatchTimeout(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const code = (error as Error & { code?: unknown }).code;
+  if (code === "ETIMEDOUT" || code === "ERR_REQUEST_TIMEOUT") return true;
+  // CodexAppServerClient's bounded request timer uses this exact wording.
+  return /^codex request 'turn\/start' \(id=\d+\) timed out after \d+ms$/.test(error.message);
+}
 
 /**
  * L2 (副指挥 P1): the visible task prefix interpolates a caller-
@@ -55,6 +101,11 @@ export function sanitizeDisplayAlias(raw: string): string {
   const oneLine = raw.replace(/[\u0000-\u001f\u007f]+/g, " ").trim();
   const capped = oneLine.slice(0, MAX_ALIAS_DISPLAY).trim();
   return capped.length > 0 ? capped : "(unknown)";
+}
+
+function sanitizeDisplayIdentifier(raw: string): string {
+  const safe = raw.replace(/[^A-Za-z0-9._:-]/g, "?").slice(0, 200);
+  return safe.length > 0 ? safe : "(unknown)";
 }
 
 /**
@@ -84,7 +135,11 @@ export interface BridgeAdapterOptions {
 interface TrackedTurn {
   submissionId: string;
   taskId: string;
-  chunks: string[];
+  /** Bounded fallback accumulator; never grows beyond the Hub reply limit. */
+  text: string;
+  textTruncated: boolean;
+  /** Authoritative final answer from item/completed phase=final_answer. */
+  finalText?: string;
   /**
    * True once startTurn's outcome has been returned to the scheduler (so
    * the ledger row is `accepted`). A turn/completed observed BEFORE that
@@ -95,6 +150,22 @@ interface TrackedTurn {
    */
   settled: boolean;
   pendingCompletion?: { ok: true; replyText: string } | { ok: false; error: string };
+}
+
+function appendBoundedText(tracked: TrackedTurn, chunk: string): void {
+  if (tracked.textTruncated || chunk.length === 0) return;
+  if (tracked.text.length + chunk.length <= MAX_HUB_REPLY_TEXT_LENGTH) {
+    tracked.text += chunk;
+    return;
+  }
+  const prefixLimit = MAX_HUB_REPLY_TEXT_LENGTH - TRUNCATED_REPLY_MARKER.length;
+  if (tracked.text.length > prefixLimit) {
+    tracked.text = tracked.text.slice(0, prefixLimit);
+  } else if (tracked.text.length < prefixLimit) {
+    tracked.text += chunk.slice(0, prefixLimit - tracked.text.length);
+  }
+  tracked.text += TRUNCATED_REPLY_MARKER;
+  tracked.textTruncated = true;
 }
 
 export class BridgeAdapter extends EventEmitter implements TurnDispatcher {
@@ -142,19 +213,44 @@ export class BridgeAdapter extends EventEmitter implements TurnDispatcher {
     return {
       newCorrelationId: () => `cx-${++this.correlationCounter}`,
       reportInternalError: (entry) => {
-        // Internal log only — full detail, capped, never on the wire.
-        const raw = entry.error instanceof Error ? entry.error.message : String(entry.error);
         this.log(
-          `[adapter] internal error ${entry.correlationId} op=${entry.operation}: ${raw.slice(0, 300)}`,
+          `[adapter] upstream failure ${entry.correlationId} op=${entry.operation} class=${entry.error.classification}`,
         );
       },
     };
   }
 
-  /** Report the raw error internally, return the generalized wire summary. */
-  private generalizeError(operation: string, error: unknown): string {
-    const correlationId = this.diagnostics.newCorrelationId();
-    this.diagnostics.reportInternalError({ correlationId, operation, error });
+  /**
+   * Return a stable failure summary without ever handing the raw upstream
+   * error (including `.message` / `.data`) to a logger or injected sink.
+   */
+  private generalizeError(
+    operation: string,
+    classification: "upstream_request_failed" | "upstream_turn_failed",
+  ): string {
+    let correlationId: string;
+    try {
+      const candidate = this.diagnostics.newCorrelationId();
+      correlationId = /^[A-Za-z0-9._:-]{1,64}$/.test(candidate)
+        ? candidate
+        : `cx-local-${++this.correlationCounter}`;
+    } catch {
+      correlationId = `cx-local-${++this.correlationCounter}`;
+    }
+    try {
+      this.diagnostics.reportInternalError({
+        correlationId,
+        operation,
+        error: {
+          name: "RedactedUpstreamFailure",
+          classification,
+          redacted: true,
+        },
+      });
+    } catch {
+      // Diagnostics are observational. A broken sink must not expose the
+      // raw error or change the scheduler-visible failure classification.
+    }
     return `upstream ${operation} failed (ref ${correlationId})`;
   }
 
@@ -187,7 +283,12 @@ export class BridgeAdapter extends EventEmitter implements TurnDispatcher {
     text: string;
     fromAlias: string;
     clientUserMessageId: string;
+    sourceType?: InboundSourceType;
+    sourceId?: string;
   }): Promise<DispatchOutcome> {
+    const sourceType = input.sourceType ?? "task";
+    const sourceId = sanitizeDisplayIdentifier(input.sourceId ?? input.taskId);
+    const idLabel = sourceType === "task" ? "task_id" : "message_id";
     const params = {
       threadId: this.threadId,
       clientUserMessageId: input.clientUserMessageId,
@@ -196,7 +297,7 @@ export class BridgeAdapter extends EventEmitter implements TurnDispatcher {
           type: "text",
           // RFC-030 §6.4 visible origin prefix — the human in the TUI can
           // always tell which turns came from the Agent Network.
-          text: `[Agent Network]\nfrom: ${sanitizeDisplayAlias(input.fromAlias)}\ntype: task\ntask_id: ${input.taskId}\n\n${input.text}`,
+          text: `[Agent Network]\nfrom: ${sanitizeDisplayAlias(input.fromAlias)}\ntype: ${sourceType}\n${idLabel}: ${sourceId}\n\n${input.text}`,
         },
       ],
     };
@@ -214,21 +315,20 @@ export class BridgeAdapter extends EventEmitter implements TurnDispatcher {
     });
 
     try {
-      const resp = await this.client.request<{ turnId?: string }>(
+      const resp = await this.client.request<unknown>(
         "turn/start",
         params,
         this.dispatchTimeoutMs,
       );
-      const turnId = typeof resp?.turnId === "string" ? resp.turnId : null;
+      const turnId = extractTurnId(resp);
       if (!turnId) {
-        this.awaitingAcceptance.delete(input.clientUserMessageId);
-        return { kind: "failed", error: "turn/start response missing turnId" };
+        this.abandonPending(input);
+        return { kind: "failed", error: "turn/start response missing turn.id" };
       }
       this.adoptTurn(turnId, input);
       return this.settleAccepted(turnId);
     } catch (e) {
-      const msg = (e as Error)?.message ?? String(e);
-      if (/timed out/.test(msg)) {
+      if (isDispatchTimeout(e)) {
         // Response lost. The server may or may not have started the turn.
         // Watch for a reconciling turn/started with our cumid; do NOT
         // resend either way.
@@ -240,16 +340,17 @@ export class BridgeAdapter extends EventEmitter implements TurnDispatcher {
           );
           return this.settleAccepted(turnId);
         }
-        this.awaitingAcceptance.delete(input.clientUserMessageId);
+        this.abandonPending(input);
         return {
           kind: "ambiguous",
           detail: `turn/start response lost (${this.dispatchTimeoutMs}ms) and no matching turn/started observed within ${this.reconcileWindowMs}ms`,
         };
       }
-      this.awaitingAcceptance.delete(input.clientUserMessageId);
-      // Raw upstream message goes to diagnostics ONLY; wire/state gets a
-      // stable generalized summary with the correlation ref.
-      return { kind: "failed", error: this.generalizeError("turn/start", e) };
+      this.abandonPending(input);
+      return {
+        kind: "failed",
+        error: this.generalizeError("turn/start", "upstream_request_failed"),
+      };
     }
   }
 
@@ -289,73 +390,129 @@ export class BridgeAdapter extends EventEmitter implements TurnDispatcher {
   private attach(): void {
     this.client.on("turn/started", (params: unknown) => this.onTurnStarted(params));
     this.client.on("item/agentMessage/delta", (params: unknown) => this.onDelta(params));
+    this.client.on("item/completed", (params: unknown) => this.onItemCompleted(params));
     this.client.on("turn/completed", (params: unknown) => this.onTurnCompleted(params));
     this.client.on(
       "reverse_request",
-      (rr: { id: number; method: string; params: unknown }) => {
+      (value: unknown) => {
         // Phase 1 runs approval_policy=never — a reverse request should not
         // happen. If one does, we record + surface but NEVER answer.
+        const rr = asRecord(value);
+        if (!rr || typeof rr.id !== "number" || typeof rr.method !== "string") {
+          this.log("[adapter] ANOMALY: malformed reverse request under approval=never — not answering");
+          this.emit("reverse_request_anomaly", { malformed: true });
+          return;
+        }
+        const methodForLog = rr.method.replace(/[^A-Za-z0-9_./:-]/g, "?").slice(0, 96);
         this.log(
-          `[adapter] ANOMALY: reverse request ${rr.method} (id=${rr.id}) under approval=never — not answering`,
+          `[adapter] ANOMALY: reverse request ${methodForLog} (id=${rr.id}) under approval=never — not answering`,
         );
-        this.emit("reverse_request_anomaly", rr);
+        this.emit("reverse_request_anomaly", {
+          id: rr.id,
+          method: rr.method,
+        });
       },
     );
   }
 
   private onTurnStarted(params: unknown): void {
-    const p = params as {
-      threadId?: string;
-      turnId?: string;
-      clientUserMessageId?: string;
-    };
-    if (!p || p.threadId !== this.threadId || !p.turnId) return;
+    const p = asRecord(params);
+    if (!p || p.threadId !== this.threadId) return;
+    const turnId = extractTurnId(p);
+    if (!turnId) return;
+    const legacyCumid =
+      typeof p.clientUserMessageId === "string" ? p.clientUserMessageId : null;
 
-    // A turn whose cumid matches an in-flight dispatch is OURS — adopt it
-    // immediately (early-adopt) so deltas/completions that arrive before
-    // the (possibly delayed/lost) turn/start response are captured instead
-    // of being misread as an unknown turn. The completion is buffered
-    // until startTurn settles (see TrackedTurn.settled).
-    if (p.clientUserMessageId && this.awaitingAcceptance.has(p.clientUserMessageId)) {
-      const pending = this.awaitingAcceptance.get(p.clientUserMessageId)!;
-      if (!this.myTurns.has(p.turnId)) {
-        this.myTurns.set(p.turnId, {
+    // Legacy extension only: an exact clientUserMessageId can reconcile a
+    // lost response. The pinned 0.144 TurnStartedNotification does not
+    // contain this field, so real-wire response loss remains ambiguous.
+    if (legacyCumid && this.awaitingAcceptance.has(legacyCumid)) {
+      const pending = this.awaitingAcceptance.get(legacyCumid)!;
+      if (!this.myTurns.has(turnId)) {
+        this.myTurns.set(turnId, {
           submissionId: pending.submissionId,
           taskId: pending.taskId,
-          chunks: [],
+          text: "",
+          textTruncated: false,
           settled: false,
         });
       }
-      this.reconciledTurnByCumid.set(p.clientUserMessageId, p.turnId);
-      this.emit(`reconcile:${p.clientUserMessageId}`, p.turnId);
+      this.reconciledTurnByCumid.set(legacyCumid, turnId);
+      this.emit(`reconcile:${legacyCumid}`, turnId);
       return;
     }
     // Already-adopted turn (normal path) → nothing to do.
-    if (this.myTurns.has(p.turnId)) return;
+    if (this.myTurns.has(turnId)) return;
+
+    // Real 0.144 notifications may race ahead of the turn/start response.
+    // The scheduler permits one dispatch at a time, so while exactly one
+    // acceptance is pending we can buffer that turn's events. This is NOT
+    // response-loss reconciliation: only the later response's turn.id can
+    // settle accepted; a timeout still becomes ambiguous/no-resend.
+    if (this.awaitingAcceptance.size === 1) {
+      const pending = this.awaitingAcceptance.values().next().value as
+        | { submissionId: string; taskId: string }
+        | undefined;
+      if (pending) {
+        this.myTurns.set(turnId, {
+          submissionId: pending.submissionId,
+          taskId: pending.taskId,
+          text: "",
+          textTruncated: false,
+          settled: false,
+        });
+        return;
+      }
+    }
 
     // Not ours → human took the thread.
-    this.humanTurns.add(p.turnId);
-    this.scheduler?.onHumanTurnStarted(p.turnId);
+    this.humanTurns.add(turnId);
+    this.scheduler?.onHumanTurnStarted(turnId);
   }
 
   private onDelta(params: unknown): void {
-    const p = params as { threadId?: string; turnId?: string; delta?: { text?: string } };
-    if (!p || p.threadId !== this.threadId || !p.turnId) return;
-    const tracked = this.myTurns.get(p.turnId);
+    const p = asRecord(params);
+    if (!p || p.threadId !== this.threadId) return;
+    const turnId = extractTurnId(p);
+    if (!turnId) return;
+    const tracked = this.myTurns.get(turnId);
     if (!tracked) return; // human turn deltas are none of our business
-    if (typeof p.delta?.text === "string") tracked.chunks.push(p.delta.text);
+    // Pinned 0.144: delta is a plain string. Keep the old `{text}` form as
+    // a narrow compatibility fallback for pre-0.144 fixtures.
+    if (typeof p.delta === "string") {
+      appendBoundedText(tracked, p.delta);
+      return;
+    }
+    const legacyDelta = asRecord(p.delta);
+    if (legacyDelta && typeof legacyDelta.text === "string") {
+      appendBoundedText(tracked, legacyDelta.text);
+    }
+  }
+
+  private onItemCompleted(params: unknown): void {
+    const p = asRecord(params);
+    if (!p || p.threadId !== this.threadId) return;
+    const turnId = extractTurnId(p);
+    if (!turnId) return;
+    const tracked = this.myTurns.get(turnId);
+    if (!tracked) return;
+    const item = asRecord(p.item);
+    if (
+      item?.type === "agentMessage" &&
+      item.phase === "final_answer" &&
+      typeof item.text === "string"
+    ) {
+      tracked.finalText = boundHubReplyText(item.text);
+    }
   }
 
   private onTurnCompleted(params: unknown): void {
-    const p = params as {
-      threadId?: string;
-      turnId?: string;
-      finalText?: string;
-      error?: { message?: string };
-    };
-    if (!p || p.threadId !== this.threadId || !p.turnId) return;
+    const p = asRecord(params);
+    if (!p || p.threadId !== this.threadId) return;
+    const turnId = extractTurnId(p);
+    if (!turnId) return;
 
-    const tracked = this.myTurns.get(p.turnId);
+    const tracked = this.myTurns.get(turnId);
     if (tracked) {
       // L3-R8: a human interrupt forwarded while THIS agent turn was live
       // wins over completed/failed — the abort-completion the upstream
@@ -364,7 +521,7 @@ export class BridgeAdapter extends EventEmitter implements TurnDispatcher {
       if (this.humanInterruptPending) {
         this.humanInterruptPending = false;
         if (tracked.settled) {
-          this.myTurns.delete(p.turnId);
+          this.myTurns.delete(turnId);
           this.scheduler?.onAgentTurnInterrupted(tracked.submissionId);
           return;
         }
@@ -373,33 +530,48 @@ export class BridgeAdapter extends EventEmitter implements TurnDispatcher {
         tracked.pendingCompletion = { ok: false, error: "__interrupted_by_human__" };
         return;
       }
-      const result: { ok: true; replyText: string } | { ok: false; error: string } =
-        p.error?.message
-          ? { ok: false, error: this.generalizeError("turn/completed", p.error.message) }
-          : {
-              ok: true,
-              replyText:
-                typeof p.finalText === "string" && p.finalText.length > 0
-                  ? p.finalText
-                  : tracked.chunks.join(""),
-            };
+      const realTurn = asRecord(p.turn);
+      const legacyError = p.error;
+      // A real turn/completed is successful only for status=completed and
+      // error=null. Missing/unknown terminal status fails closed. Legacy
+      // flat fixtures have no nested turn and retain their old error test.
+      const failed = realTurn
+        ? realTurn.status !== "completed" || realTurn.error != null
+        : legacyError != null;
+      const legacyFinalText = typeof p.finalText === "string"
+        ? boundHubReplyText(p.finalText)
+        : undefined;
+      const result: { ok: true; replyText: string } | { ok: false; error: string } = failed
+        ? {
+            ok: false,
+            error: this.generalizeError("turn/completed", "upstream_turn_failed"),
+          }
+        : {
+            ok: true,
+            replyText:
+              tracked.finalText && tracked.finalText.length > 0
+                ? tracked.finalText
+                : legacyFinalText && legacyFinalText.length > 0
+                  ? legacyFinalText
+                  : tracked.text,
+          };
       if (!tracked.settled) {
         // Completion raced ahead of the dispatch response — buffer it;
         // settleAccepted() flushes once the scheduler holds `accepted`.
         tracked.pendingCompletion = result;
         return;
       }
-      this.myTurns.delete(p.turnId);
+      this.myTurns.delete(turnId);
       this.scheduler?.onAgentTurnFinished(tracked.submissionId, result);
       return;
     }
 
-    if (this.humanTurns.delete(p.turnId)) {
-      this.scheduler?.onHumanTurnFinished(p.turnId);
+    if (this.humanTurns.delete(turnId)) {
+      this.scheduler?.onHumanTurnFinished(turnId);
       return;
     }
     // Unknown turn completing — cross-boot leftovers etc.; surface only.
-    this.emit("unknown_turn_completed", p.turnId);
+    this.emit("unknown_turn_completed", turnId);
   }
 
   // ──────────────────────────────────────────────────────────────────
@@ -412,15 +584,31 @@ export class BridgeAdapter extends EventEmitter implements TurnDispatcher {
   ): void {
     this.awaitingAcceptance.delete(input.clientUserMessageId);
     this.reconciledTurnByCumid.delete(input.clientUserMessageId);
+    this.humanTurns.delete(turnId);
     // Early-adopt may have created the entry already (with buffered
     // deltas/completion) — keep it rather than clobbering the buffers.
     if (!this.myTurns.has(turnId)) {
       this.myTurns.set(turnId, {
         submissionId: input.submissionId,
         taskId: input.taskId,
-        chunks: [],
+        text: "",
+        textTruncated: false,
         settled: false,
       });
+    }
+  }
+
+  /** Drop provisional event buffers when dispatch did not settle accepted. */
+  private abandonPending(input: {
+    submissionId: string;
+    clientUserMessageId: string;
+  }): void {
+    this.awaitingAcceptance.delete(input.clientUserMessageId);
+    this.reconciledTurnByCumid.delete(input.clientUserMessageId);
+    for (const [turnId, tracked] of this.myTurns) {
+      if (tracked.submissionId === input.submissionId && !tracked.settled) {
+        this.myTurns.delete(turnId);
+      }
     }
   }
 
@@ -467,7 +655,8 @@ export interface InboxRowLike {
 // rows that can't be classified stay null-stamped and are refused here.
 // Exhaustive TYPED map (副指挥 f5e0f585): keyed on the frozen contract
 // union, so adding/removing a role in A's contract makes this fail to
-// compile instead of silently drifting. Runtime check is a plain `in`.
+// compile instead of silently drifting. Runtime uses an own-property check
+// so Object.prototype names cannot masquerade as frozen roles.
 const VALID_ROLES: Readonly<Record<AuthenticatedSender["role"], true>> = {
   admin: true,
   owner: true,
@@ -489,7 +678,10 @@ export function senderFromInboxRow(row: InboxRowLike): AuthenticatedSender | nul
   const role = row.sender_role;
   const networkId = row.network_id;
   if (typeof tokenId !== "string" || tokenId.length === 0) return null;
-  if (typeof role !== "string" || !(role in VALID_ROLES)) return null;
+  if (
+    typeof role !== "string" ||
+    !Object.prototype.hasOwnProperty.call(VALID_ROLES, role)
+  ) return null;
   if (typeof networkId !== "string" || networkId.length === 0) return null;
   return {
     alias: typeof row.from_session === "string" && row.from_session.length > 0 ? row.from_session : "(unknown)",

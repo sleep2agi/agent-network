@@ -34,6 +34,7 @@ import {
   GATEWAY_ERROR_DATA_CODE,
   GatewayErrorCode,
   type GatewayErrorData,
+  type OwnerLeaseId,
 } from "./contract";
 
 // ────────────────────────────────────────────────────────────────────────
@@ -104,6 +105,30 @@ export interface HumanOwnerCoordinatorOptions {
 export class HumanOwnerCoordinator {
   private readonly opts: HumanOwnerCoordinatorOptions;
   private tuiAttached = false;
+  /**
+   * The currently-active owner lease, or `null` when no owner is
+   * attached. Minted upstream (WS server side) on successful
+   * capability check + owner-slot reservation. The coordinator stores
+   * a reference so `attachTui(leaseId)` / `detachTui(leaseId)` can
+   * verify that a detach call belongs to the incumbent.
+   *
+   * P0.2 fix (副指挥 7034c5ce item #11): a stale socket's async
+   * `close` event arriving after a fresh owner attached MUST NOT
+   * drain the incumbent's state.
+   */
+  private activeLease: OwnerLeaseId | null = null;
+
+  /**
+   * Side map from `tuiId` (the freshly-allocated reverse-namespace id)
+   * to the lease that owned the socket at allocation time. Used by
+   * `handleTuiResponseFrameWithLease` to verify the response is
+   * arriving from the SAME lease that received the reverse request
+   * — a fresh-lease reconnect cannot cross-answer.
+   *
+   * Frozen `ReverseRequestNamespace` is NOT modified. This side map
+   * lives entirely inside the coordinator (副指挥 7034c5ce item #2).
+   */
+  private readonly tuiIdLeases = new Map<string, OwnerLeaseId>();
 
   constructor(opts: HumanOwnerCoordinatorOptions) {
     this.opts = opts;
@@ -112,33 +137,77 @@ export class HumanOwnerCoordinator {
   // ─────────── TUI lifecycle ───────────
 
   /**
-   * Called by the transport when a TUI socket connects. Idempotent —
-   * repeat calls do not leak state. Enforcement of at-most-one-TUI
-   * is the transport layer's job (uds-server rejects the second
-   * connection at accept time via the connection cap).
+   * Called by the transport when a TUI socket completes admission and
+   * the owner slot is reserved. `leaseId` is the newly-minted opaque
+   * lease.
+   *
+   * If a lease is already active, this call is refused via a
+   * diagnostics-only log (the caller is expected to have enforced
+   * hard-1 via the owner-slot reserve before calling us; a
+   * double-attach here is a defense-in-depth signal).
    */
-  attachTui(): void {
+  attachTui(leaseId: OwnerLeaseId): { kind: "ok" } | { kind: "refused"; reason: "already_held" } {
+    if (this.activeLease !== null) {
+      // Belt-and-braces: coordinator side won't clobber an incumbent
+      // lease. Return a TYPED refusal so the caller can react
+      // deterministically without probing internal state (副指挥
+      // 3ed5c004 P1-4: lifecycle should not read raw lease).
+      try {
+        this.opts.diagnostics.reportInternalError({
+          correlationId: this.opts.diagnostics.newCorrelationId(),
+          operation: "attach_tui_when_already_held",
+          error: new Error("attachTui called with lease already active"),
+        });
+      } catch { /* silent */ }
+      return { kind: "refused", reason: "already_held" };
+    }
+    this.activeLease = leaseId;
     this.tuiAttached = true;
+    return { kind: "ok" };
   }
 
   /**
-   * Called by the transport when the TUI socket disconnects. Drains
-   * BOTH the reverse namespace and the proxied-TUI half of the mux.
-   * Internal scheduler Promises are untouched — a TUI disconnect
-   * MUST NOT lose long-running Agent work (Δ11).
+   * Called by the transport when the TUI socket disconnects. `leaseId`
+   * is the lease the disconnecting socket held. Only matching leases
+   * drain state; a stale socket's late `close` event whose lease no
+   * longer matches the incumbent is a NO-OP.
    *
-   * Reconnect does not replay any prior reverse request; drained
-   * ids can never be re-approved (see the reverse namespace's
-   * drainAll contract).
+   * On matching detach, drains BOTH the reverse namespace and the
+   * proxied-TUI half of the mux, plus the internal `tuiIdLeases` side
+   * map. Internal scheduler Promises are untouched — a TUI disconnect
+   * MUST NOT lose long-running Agent work (Δ11).
    */
-  detachTui(): void {
+  detachTui(leaseId: OwnerLeaseId): void {
+    if (this.activeLease === null || this.activeLease !== leaseId) {
+      // Stale detach: no-op. Only diagnostics record it.
+      try {
+        this.opts.diagnostics.reportInternalError({
+          correlationId: this.opts.diagnostics.newCorrelationId(),
+          operation: "detach_tui_stale_lease",
+          error: new Error("detachTui called with mismatched lease"),
+        });
+      } catch { /* silent */ }
+      return;
+    }
+    this.activeLease = null;
     this.tuiAttached = false;
     this.opts.mux.drainProxiedTui();
     this.opts.reverseNs.drainAll();
+    this.tuiIdLeases.clear();
   }
 
   isTuiAttached(): boolean {
     return this.tuiAttached;
+  }
+
+  /**
+   * P0.2 round 3 (副指挥 1b24ae71 P1): raw lease read surface REMOVED.
+   * Callers observe attach outcomes via the typed `attachTui` return.
+   * Tests read `attachSnapshot()` for a redacted `{attached: boolean}`
+   * view; no lease bytes exit the coordinator.
+   */
+  attachSnapshot(): { readonly attached: boolean } {
+    return { attached: this.tuiAttached };
   }
 
   // ─────────── Upstream reverse request → decision ───────────
@@ -198,6 +267,11 @@ export class HumanOwnerCoordinator {
         ),
       };
     }
+    // Stamp the tuiId with the CURRENT lease. On response consume the
+    // caller MUST present a matching lease.
+    if (this.activeLease !== null) {
+      this.tuiIdLeases.set(idKey(alloc.tuiId), this.activeLease);
+    }
     const tuiFrame: JsonRpcRequestFrame = {
       jsonrpc: "2.0",
       id: alloc.tuiId,
@@ -210,12 +284,56 @@ export class HumanOwnerCoordinator {
   // ─────────── TUI response frame → decision ───────────
 
   /**
-   * Consume a TUI response frame — this is the approval-response
-   * path. Delegates to the frozen `handleTuiResponseFrame` in
-   * protocol.ts. Unknown / duplicate reverse id fails closed with
-   * a stable rejection; approval-spoof cannot re-approve.
+   * P0.2 Commit 1 corrective (副指挥 a1ed1589 item #11): the
+   * no-lease `handleTuiResponseFrame` overload has been REMOVED. The
+   * only consume path is `handleTuiResponseFrameWithLease` below. A
+   * caller that reaches here without a lease is a bug at the wire
+   * layer — the WS server tags every inbound frame with the owning
+   * socket's lease before delegation.
    */
-  handleTuiResponseFrame(frame: JsonRpcResponseFrame): TuiResponseHandling {
+
+  /**
+   * P0.2 lease-aware consume path (副指挥 7034c5ce item #2 / #11).
+   *
+   * The WS server passes the lease that owned the socket the frame
+   * arrived on. This method:
+   *   1. Looks up the stored lease for `frame.id` in the internal
+   *      side map.
+   *   2. If the presented lease doesn't match the stored one, returns
+   *      a `reject` outcome with `reason=lease_mismatch` — the frozen
+   *      `ReverseRequestNamespace` is NEVER consumed.
+   *   3. On match, consumes via the frozen namespace and clears the
+   *      side-map entry.
+   *
+   * The frozen `handleTuiResponseFrame` from `protocol.ts` is called
+   * exactly ONCE per successful lease match. Under mismatch (fresh
+   * socket + fresh lease, stale reverse-id from a previous lease's
+   * request), the frozen namespace entry stays live for whoever the
+   * legitimate lease actually is — but since detach drains the whole
+   * namespace, in practice mismatch means the previous lease already
+   * closed. Either way, the frozen adapter runs on the SAME inputs it
+   * would have with the untouched behavior, so freeze integrity is
+   * preserved.
+   */
+  handleTuiResponseFrameWithLease(
+    frame: JsonRpcResponseFrame,
+    presentedLease: OwnerLeaseId,
+  ): TuiResponseHandling {
+    const storedLease = this.tuiIdLeases.get(idKey(frame.id));
+    if (storedLease === undefined || storedLease !== presentedLease) {
+      return {
+        kind: "reject",
+        tuiId: frame.id,
+        code: GatewayErrorCode.InvalidArg,
+        message: "reverse-response cross-lease refused",
+        data: {
+          code: GATEWAY_ERROR_DATA_CODE[GatewayErrorCode.InvalidArg],
+          reason: "lease_mismatch",
+        },
+      };
+    }
+    // Legitimate consume path.
+    this.tuiIdLeases.delete(idKey(frame.id));
     return handleTuiResponseFrame(frame, this.opts.reverseNs);
   }
 
@@ -244,4 +362,10 @@ export class HumanOwnerCoordinator {
       error: { code, message, data },
     };
   }
+}
+
+/** Stable string key so the side map treats numeric `1` and string
+ *  `"1"` as distinct — matches how the frozen namespace does it. */
+function idKey(id: JsonRpcRequestId): string {
+  return typeof id === "number" ? `n:${id}` : `s:${id}`;
 }

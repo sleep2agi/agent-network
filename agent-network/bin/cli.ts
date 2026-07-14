@@ -10,7 +10,7 @@
  * anet run                     独立 SSE Agent
  */
 
-import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync, rmSync, cpSync } from "fs";
+import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync, rmSync, cpSync, realpathSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { spawn, execSync, execFileSync } from "child_process";
@@ -131,6 +131,73 @@ function codexSdkYoloFlags(noYolo?: boolean): Record<string, string | boolean> {
     sandboxMode: "danger-full-access",
     skipGitRepoCheck: true,
   };
+}
+
+// RFC-030 Stage 2 Phase-1 is deliberately NOT the codex-sdk yolo profile.
+// New gateway nodes persist the fixed boot contract so an operator can see
+// why workspace-write / danger-full-access and approval prompts are refused.
+function codexAppServerPhase1Flags(): Record<string, string> {
+  return {
+    approvalPolicy: "never",
+    sandboxMode: "read-only",
+  };
+}
+
+const RFC030_STAGE2_AGENT_NODE_CAPABILITY = "rfc030-stage2-ab-v1";
+let verifiedCodexGatewayAgentNode: {
+  path: string;
+  dev: bigint;
+  ino: bigint;
+} | null = null;
+
+function resolveCommandRealpath(name: string): string {
+  const located = execFileSync(
+    "/bin/sh",
+    ["-c", "command -v -- \"$1\"", "sh", name],
+    { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] },
+  ).trim();
+  if (!located) throw new Error("command not found");
+  return realpathSync(located);
+}
+
+function assertCodexGatewayAgentNodeCapability(): void {
+  try {
+    const path = resolveCommandRealpath("agent-node");
+    const identity = statSync(path, { bigint: true });
+    const capability = execFileSync(
+      path,
+      ["--print-rfc030-stage2-capability"],
+      { encoding: "utf-8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] },
+    ).trim();
+    const after = statSync(path, { bigint: true });
+    if (
+      capability !== RFC030_STAGE2_AGENT_NODE_CAPABILITY ||
+      identity.dev !== after.dev ||
+      identity.ino !== after.ino
+    ) {
+      throw new Error("capability mismatch");
+    }
+    verifiedCodexGatewayAgentNode = {
+      path,
+      dev: after.dev,
+      ino: after.ino,
+    };
+  } catch {
+    console.error(`[anet] RFC-030 Stage 2 requires a locally installed candidate-capable agent-node.`);
+    console.error(`[anet] Refusing the @preview fallback; build/install this candidate explicitly, then retry.`);
+    process.exit(1);
+  }
+}
+
+function codexGatewayAgentNodeIdentityStillMatches(): boolean {
+  const verified = verifiedCodexGatewayAgentNode;
+  if (verified === null) return false;
+  try {
+    const current = statSync(verified.path, { bigint: true });
+    return current.dev === verified.dev && current.ino === verified.ino;
+  } catch {
+    return false;
+  }
 }
 
 // Scan ~/.claude/projects/<cwd-key>/*.jsonl — the Claude Code sessions that
@@ -839,6 +906,10 @@ async function setupCommand() {
         value: "codex-sdk",
       },
       {
+        name: "codex-app-server — RFC-030 Stage2（需要 local candidate agent-node + exact Codex 0.144.0）",
+        value: "codex-app-server",
+      },
+      {
         name: `grok-build-acp — Grok Build ACP${isInstalled(versions.agentNode) ? "（需要 agent-node + grok CLI）" : "（需要安装 agent-node + grok CLI）"}`,
         value: "grok-build-acp",
       },
@@ -865,6 +936,10 @@ async function setupCommand() {
   if (runtimeSelections.includes("codex-sdk")) {
     if (!isInstalled(versions.agentNode)) addPackage("@sleep2agi/agent-node");
     if (!isInstalled(versions.codex)) addPackage("@openai/codex");
+  }
+  if (runtimeSelections.includes("codex-app-server")) {
+    if (!isInstalled(versions.agentNode)) addPackage("@sleep2agi/agent-node");
+    addPackage("@openai/codex@0.144.0");
   }
   if (runtimeSelections.includes("grok-build-acp") && !isInstalled(versions.agentNode)) {
     addPackage("@sleep2agi/agent-node");
@@ -979,6 +1054,23 @@ function opencodeUsePinSource(): string {
   return "~/.anet/opencode-pin.json override";
 }
 
+const CODEX_APP_SERVER_PIN = "0.144.0";
+
+function checkCodexAppServerPin(): { ok: true } | { ok: false; found: string | null } {
+  try {
+    const output = execFileSync("codex", ["--version"], {
+      encoding: "utf8",
+      timeout: 5_000,
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    const match = /^codex-cli\s+(\d+\.\d+\.\d+)$/.exec(output);
+    const found = match?.[1] ?? null;
+    return found === CODEX_APP_SERVER_PIN ? { ok: true } : { ok: false, found };
+  } catch {
+    return { ok: false, found: null };
+  }
+}
+
 function assertStartCompatibility(runtime: RuntimeName) {
   // RFC-029 — opencode CLI's Zed ACP surface is the only integration
   // point, and its message-schema stability across upstream releases
@@ -989,6 +1081,20 @@ function assertStartCompatibility(runtime: RuntimeName) {
     if (!check.ok) {
       console.error(`[anet] Incompatible opencode-ai runtime.`);
       console.error(`[anet] ${check.hint}`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (runtime === "codex-app-server") {
+    assertCodexGatewayAgentNodeCapability();
+    const pin = checkCodexAppServerPin();
+    if (!pin.ok) {
+      console.error("[anet] Incompatible codex-app-server runtime.");
+      console.error(
+        `[anet] Expected codex-cli ${CODEX_APP_SERVER_PIN}; found ${pin.found ?? "missing/unrecognized"}.`,
+      );
+      console.error(`[anet] Install exact: npm install -g @openai/codex@${CODEX_APP_SERVER_PIN}`);
       process.exit(1);
     }
     return;
@@ -1052,7 +1158,11 @@ function checkRuntimeDependency(runtime: RuntimeName, phase: "create" | "start")
   // setup is broken. Suppress for first-time scenarios and only emit a
   // neutral nudge when start phase actually runs without it cached.
   if (phase === "start" && !commandExists("agent-node")) {
-    console.log(`[anet] note: agent-node will be lazy-fetched via npx on first start (this is normal).`);
+    if (runtime === "codex-app-server") {
+      console.error(`[anet] RFC-030 Stage 2 requires the local candidate agent-node; preview fallback is disabled.`);
+    } else {
+      console.log(`[anet] note: agent-node will be lazy-fetched via npx on first start (this is normal).`);
+    }
   }
   if (runtime === "grok-build-acp" && !commandExists("grok")) {
     console.warn(`[anet] Warning: grok CLI not found in PATH.`);
@@ -1064,13 +1174,12 @@ function checkRuntimeDependency(runtime: RuntimeName, phase: "create" | "start")
     console.warn(`[anet] Warning: opencode CLI not found in PATH.`);
     console.warn(`[anet] Install (exact): npm install -g opencode-ai@${OPENCODE_PINNED_VERSION}`);
   }
-  // RFC-030 — codex-app-server (codex TUI bridge) runs a standalone
-  // `codex app-server`, so it needs the `codex` CLI on PATH (same binary
-  // as codex-sdk, but the app-server subcommand). agent-node itself is
-  // lazy-fetched via npx like the other runtimes.
+  // RFC-030 Stage 2 owns a standalone, exact-baseline `codex app-server`.
+  // The runtime performs the authoritative version + schema gate at boot;
+  // this create/start check is only an early actionable dependency hint.
   if (runtime === "codex-app-server" && !commandExists("codex")) {
     console.warn(`[anet] Warning: codex CLI not found in PATH.`);
-    console.warn(`[anet] Install/login codex first: https://developers.openai.com/codex/cli`);
+    console.warn(`[anet] Install/login exact codex-cli 0.144.0 first: https://developers.openai.com/codex/cli`);
   }
 }
 
@@ -1409,7 +1518,9 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
       //     consumers may read it).
       ...(runtime === "claude-agent-sdk"
         ? { permissionMode: "auto" }
-        : { dangerouslySkipPermissions: true }),
+        : runtime === "codex-app-server"
+          ? {}
+          : { dangerouslySkipPermissions: true }),
       // #259 Y (2026-06-25): plumb vendor-known image capability down so
       // agent-node's claude-agent-sdk runtime can pick the structured-prompt
       // path. Only written when the chosen model is explicitly verified
@@ -1423,6 +1534,7 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
       // #149/#156 — codex-sdk fast/yolo flags via shared helper (was inline
       // here only; #156 batch path missed it because of duplication).
       ...(runtime === "codex-sdk" ? codexSdkYoloFlags(opts["no-yolo"] === "true") : {}),
+      ...(runtime === "codex-app-server" ? codexAppServerPhase1Flags() : {}),
     },
     ...(opts.session || runtime === "claude-code-cli" ? { session: opts.session || randomUUID() } : {}),
   };
@@ -2077,7 +2189,7 @@ This wizard creates one agent node for this project:
         { value: "claude-agent-sdk", name: "claude-agent-sdk — 任意 OpenAI/Anthropic-compat vendor (intern / MiniMax / Claude / GLM / ...)" },
         { value: "claude-code-cli",  name: "claude-code-cli  — Anthropic Claude (Max/Pro plan), 复用 `claude` CLI 登录态" },
         { value: "codex-sdk",        name: "codex-sdk        — OpenAI Codex, 复用 `codex auth login` 登录态" },
-        { value: "codex-app-server", name: "codex-app-server — OpenAI Codex TUI 桥 (RFC-030), 独立 `codex app-server`, 可接管已有 codex 会话" },
+        { value: "codex-app-server", name: "codex-app-server — RFC-030 Policy Gateway（owned Codex 0.144.0）" },
         { value: "grok-build-acp",   name: "grok-build-acp   — Grok Build ACP, 复用 `grok` CLI 登录态" },
         // RFC-029 — public sst/opencode CLI (multi-vendor front-end
         // with unified session + auth abstraction). Runtime not yet
@@ -2099,8 +2211,8 @@ This wizard creates one agent node for this project:
     console.log(`[anet] 请确保已执行: codex auth login`);
   } else if (pickedRuntime === "codex-app-server") {
     opts.runtime = "codex-app-server";
-    console.log(`[anet] 请确保已执行: codex auth login （codex-app-server 需要 codex CLI）`);
-    console.log(`[anet] 接管已有 codex 会话：在 config.json 里设 codexAppServerUrl + codexThreadId`);
+    console.log(`[anet] 请确保已安装并登录 exact codex-cli 0.144.0: codex auth login`);
+    console.log(`[anet] Stage 2 使用 owned app-server + read-only/approval=never；共享 codexAppServerUrl 会 fail-closed。`);
   } else if (pickedRuntime === "grok-build-acp") {
     opts.runtime = "grok-build-acp";
     console.log(`[anet] 请确保已安装并登录 Grok Build CLI: grok auth login`);
@@ -2246,7 +2358,7 @@ async function createCommand(idOverride?: string) {
   const id = idOverride || args[1];
   if (!id) return createInteractiveCommand();
   if (id.startsWith("--")) {
-    console.error("Usage: anet node create <node-name> [--runtime claude-code-cli|codex-sdk|claude-agent-sdk|grok-build-acp] [--model ...] [--tools ...]");
+    console.error("Usage: anet node create <node-name> [--runtime claude-code-cli|codex-sdk|codex-app-server|claude-agent-sdk|grok-build-acp|opencode-cli] [--model ...] [--tools ...]");
     console.error("Or run fully interactive: anet node create");
     process.exit(1);
   }
@@ -2291,7 +2403,12 @@ async function createCommand(idOverride?: string) {
   const credAlreadyProvided = !!process.env.ANTHROPIC_AUTH_TOKEN
     || !!process.env.ANTHROPIC_API_KEY || envFlagHasAuth;
   const explicitRuntime = opts.runtime ? normalizeRuntime(opts.runtime) : undefined;
-  const runtimeAlreadyExplicit = explicitRuntime === "codex-sdk" || explicitRuntime === "claude-code-cli" || explicitRuntime === "grok-build-acp";
+  const runtimeAlreadyExplicit =
+    explicitRuntime === "codex-sdk" ||
+    explicitRuntime === "codex-app-server" ||
+    explicitRuntime === "claude-code-cli" ||
+    explicitRuntime === "grok-build-acp" ||
+    explicitRuntime === "opencode-cli";
   const skipInteractive = credAlreadyProvided || runtimeAlreadyExplicit;
 
   // #133 selectRuntime — runtime-first, exported as a helper so create paths
@@ -2305,7 +2422,9 @@ async function createCommand(idOverride?: string) {
           { value: "claude-agent-sdk", name: "claude-agent-sdk — 任意 OpenAI/Anthropic-compat vendor (intern / MiniMax / Claude / GLM / ...)" },
           { value: "claude-code-cli",  name: "claude-code-cli  — Anthropic Claude (Max/Pro plan), 复用 `claude` CLI 登录态" },
           { value: "codex-sdk",        name: "codex-sdk        — OpenAI Codex, 复用 `codex auth login` 登录态" },
+          { value: "codex-app-server", name: "codex-app-server — RFC-030 Policy Gateway（owned Codex 0.144.0）" },
           { value: "grok-build-acp",   name: "grok-build-acp   — Grok Build ACP, 复用 `grok` CLI 登录态" },
+          { value: "opencode-cli",     name: "opencode-cli     — 公版 sst/opencode CLI（exact pin）" },
         ],
       });
       return picked as any;
@@ -2327,8 +2446,14 @@ async function createCommand(idOverride?: string) {
     console.log("[anet] 请确保已安装 Claude Code CLI 并登录: claude auth login");
   } else if (opts.runtime === "codex-sdk") {
     console.log("[anet] 请确保已执行: codex auth login");
+  } else if (opts.runtime === "codex-app-server") {
+    console.log("[anet] 请确保已安装并登录 exact codex-cli 0.144.0: codex auth login");
+    console.log("[anet] Stage 2 使用 owned app-server + read-only/approval=never；共享 codexAppServerUrl 会 fail-closed。");
   } else if (opts.runtime === "grok-build-acp") {
     console.log("[anet] 请确保已安装并登录 Grok Build CLI: grok auth login");
+  } else if (opts.runtime === "opencode-cli") {
+    const currentPin = readEffectivePin();
+    console.log(`[anet] 请确保已安装 opencode CLI (exact): npm install -g opencode-ai@${currentPin.version}`);
   } else {
     // Either claude-agent-sdk (explicit / picker-default) or undefined runtime
     // — fall through to vendor selection. credAlreadyProvided also skips since
@@ -2856,6 +2981,7 @@ async function launchAgent(id: string, forceNewSession = false) {
 
   if (
     runtime === "codex-sdk" ||
+    runtime === "codex-app-server" ||
     runtime === "claude-agent-sdk" ||
     runtime === "grok-build-acp" ||
     runtime === "opencode-cli"
@@ -2937,12 +3063,17 @@ async function launchAgent(id: string, forceNewSession = false) {
     }
     Object.assign(env, resolveProfileEnv(profile.env as any, home, _dotenvSDK));
 
-    // Try agent-node from PATH, fallback to npx
-    let cmd = "agent-node";
+    // Stage 2 must execute the exact capability-probed local candidate.
+    // Other runtimes retain their historical preview fallback.
+    let cmd = runtime === "codex-app-server"
+      ? verifiedCodexGatewayAgentNode!.path
+      : "agent-node";
     let commandArgs = agentArgs;
-    try { execSync("which agent-node", { stdio: "pipe" }); } catch {
-      cmd = "npx";
-      commandArgs = ["-y", "@sleep2agi/agent-node@preview", ...agentArgs];
+    if (runtime !== "codex-app-server") {
+      try { execSync("which agent-node", { stdio: "pipe" }); } catch {
+        cmd = "npx";
+        commandArgs = ["-y", "@sleep2agi/agent-node@preview", ...agentArgs];
+      }
     }
     // W1 supervisor wrap (RFC-024, #284 superviseChild) — handle the
     // sentinel exit code 75 (BSD EX_TEMPFAIL, agent-node's "config-apply
@@ -2980,6 +3111,14 @@ async function launchAgent(id: string, forceNewSession = false) {
       baseDelayMs: 500,
       maxDelayMs: 5_000,
       runOnce: async (ctrl) => {
+        if (
+          runtime === "codex-app-server" &&
+          !codexGatewayAgentNodeIdentityStillMatches()
+        ) {
+          console.error(`[anet] RFC-030 Stage 2 agent-node identity changed after capability verification; refusing spawn.`);
+          lastNonRestartCode = 1;
+          return;
+        }
         // Stable timer — child survives 30s → reset backoff to base.
         // Mirrors the connectFeishu supervisor pattern from PR #263.
         const stableTimer = setTimeout(() => ctrl.markStable(), 30_000);
@@ -9272,7 +9411,9 @@ async function createBatch(opts: BatchOptions): Promise<BatchResult> {
         channels: ["server:commhub"],
         env: envMap,
         flags: {
-          dangerouslySkipPermissions: true,
+          ...(opts.runtime === "codex-app-server"
+            ? codexAppServerPhase1Flags()
+            : { dangerouslySkipPermissions: true }),
           // #156 (Vincent 5531) — same codex-sdk yolo posture as single-node
           // (createProfileFromOpts). Helper is the source of truth, shared
           // between the two paths to prevent the v0.10.6 1/4-vs-4/4 drift.

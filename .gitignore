@@ -37,3 +37,6 @@ docs/dashboard-screenshots/
 
 # RFC-030 live demo (hub db + node config w/ ntok — never commit)
 .demo/
+
+# RFC-030 P0.2 integration bundle output (built via bun build)
+agent-node/dist/rfc030-integration.mjs

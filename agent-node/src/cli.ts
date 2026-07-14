@@ -80,6 +80,7 @@ import {
   type ConfigPatch,
 } from "./runtime/config-apply";
 import { resolveTelegramAccess, buildEmptyAllowlistWarn, loadTelegramAccess } from "./util/access-resolve";
+import { injectOrdinaryInboxRow } from "./runtime/codex-policy-gateway/inbox-pump";
 
 const home = homedir();
 
@@ -87,6 +88,7 @@ const home = homedir();
 const argv = process.argv.slice(2);
 const opts: Record<string, string> = {};
 const cliChannels: string[] = [];
+export const RFC030_STAGE2_AGENT_NODE_CAPABILITY = "rfc030-stage2-ab-v1";
 
 let PKG_VERSION = "2.1.0";
 try {
@@ -101,6 +103,10 @@ try {
 } catch {}
 
 for (let i = 0; i < argv.length; i++) {
+  if (argv[i] === "--print-rfc030-stage2-capability") {
+    console.log(RFC030_STAGE2_AGENT_NODE_CAPABILITY);
+    process.exit(0);
+  }
   if (argv[i] === "--version" || argv[i] === "-v") {
     console.log(`agent-node v${PKG_VERSION}`);
     process.exit(0);
@@ -115,7 +121,7 @@ for (let i = 0; i < argv.length; i++) {
 选项:
   --config <path>     配置文件 (.anet/nodes/<name>/config.json)
   --alias <name>      Agent 别名 / CommHub alias (必需)
-  --runtime <type>    claude-agent-sdk (default) | codex-sdk | grok-build-acp
+  --runtime <type>    claude-agent-sdk (default) | codex-sdk | codex-app-server | grok-build-acp
   --model <name>      AI 模型 (codex 默认: gpt-5.5, claude-agent-sdk 默认: claude-sonnet-4-6)
   --hub <url>         CommHub URL
   --tools <list>      工具列表，逗号分隔 ("all" = 全部)
@@ -131,6 +137,7 @@ for (let i = 0; i < argv.length; i++) {
 Runtime:
   claude-agent-sdk  Claude Agent SDK — Claude/MiniMax/Anthropic 兼容 API
   codex-sdk         Codex SDK — GPT-5.4，复用 codex 登录态
+  codex-app-server  RFC-030 Stage 2 Policy Gateway（owned Codex 0.144.0）
   grok-build-acp    Grok Build ACP — xAI Grok Build via "grok agent stdio"
 `);
     process.exit(0);
@@ -339,11 +346,10 @@ const RUNTIME_MAP: Record<string, string> = {
 const RUNTIME = (RUNTIME_MAP[rawRuntime] || "claude") as "claude" | "codex" | "grok" | "opencode" | "codex-app-server";
 const RUNTIME_LABEL = rawRuntime; // 日志用原始名
 
-// RFC-030 — codex-app-server nodes reply to dispatched tasks with send_task
-// (immediate SSE wake + actionable) instead of send_reply (inbox-only, no
-// wake for the immediate originator). See sendReply() for the empirical
-// rationale. Other runtimes keep the send_reply task-lifecycle-close path.
-const REPLY_VIA_SEND_TASK = RUNTIME === "codex-app-server";
+// RFC-030 Stage 2: formal codex-app-server tasks close their canonical
+// task through the gateway reply drainer (`send_reply`). They must never
+// be re-emitted as a fresh `send_task`, which loses lifecycle identity.
+const REPLY_VIA_SEND_TASK = false;
 
 const COMMHUB_URL = opts.url || opts.hub || process.env.COMMHUB_URL || fileConfig.hub || "http://127.0.0.1:9200";
 const MODEL = opts.model || process.env.MODEL || fileConfig.model;
@@ -1447,17 +1453,9 @@ let grokSessionId: string | undefined = RUNTIME === "grok" ? (SESSION_ID || unde
 let opencodeSessionId: string | undefined = RUNTIME === "opencode" ? (SESSION_ID || undefined) : undefined;
 let opencodeRuntimeSession: import("./runtime/opencode-acp/runtime").OpencodeRuntimeSession | null = null;
 
-// RFC-030 — codex-app-server runtime state.
-// `codexAppServerThreadId` is the persisted codex thread this node binds
-// to (config `codexThreadId`, or the generic `session` field as a
-// fallback). Empty → the bridge creates a fresh thread on first turn and
-// we write the adopted id back. `codexAppServerUrl` (config
-// `codexAppServerUrl` / env ANET_CODEX_APP_SERVER_URL) opts into the
-// shared-server topology: attach to an already-running `codex app-server`
-// (e.g. a human `codex --remote` TUI's) instead of spawning our own —
-// this is how an EXISTING codex session becomes a network node. The
-// runtime session is opened lazily and reused for the node lifetime; a
-// child-exit resets the holder so the next turn respawns.
+// RFC-030 Stage 2 — eager Policy Gateway runtime state.
+// The production holder is assembled once at node boot, before any inbox
+// task is consumed. No legacy CodexAppServerBridge session is created.
 let codexAppServerThreadId: string | undefined =
   RUNTIME === "codex-app-server"
     ? ((fileConfig as { codexThreadId?: string }).codexThreadId || SESSION_ID || undefined)
@@ -1466,8 +1464,45 @@ const codexAppServerUrl: string | undefined =
   (fileConfig as { codexAppServerUrl?: string }).codexAppServerUrl ||
   process.env.ANET_CODEX_APP_SERVER_URL ||
   undefined;
-let codexAppServerRuntimeSession:
-  import("./runtime/codex-app-server/runtime").CodexAppServerRuntimeSession | null = null;
+let codexGatewayHandle:
+  import("./runtime/codex-policy-gateway/gateway-assembly").CodexGatewayHandle | null = null;
+let codexGatewayInboxCycle: Promise<void> | null = null;
+let codexGatewayReplyDrain: Promise<void> | null = null;
+let codexGatewayOwnerPoll: ReturnType<typeof setInterval> | null = null;
+let codexGatewaySchedulerUnsubscribe: (() => void) | null = null;
+let nodeShuttingDown = false;
+let nodeShutdownPromise: Promise<void> | null = null;
+let nodeShutdownExitCode = 0;
+let codexGatewayIoAbort = new AbortController();
+
+/**
+ * #440 H1 owns consumer-principal/lease and canonical reply routing. This
+ * interface is intentionally translation-only: no alias authorization or
+ * CommHub SQL can be implemented by the gateway. The pre-H1 intermediate
+ * leaves it null and therefore does not consume or reply.
+ */
+interface CodexGatewayH1Adapter {
+  readInbox(signal: AbortSignal): Promise<import("./runtime/codex-policy-gateway/inbox-pump").PumpRow[]>;
+  ack(messageId: string, signal: AbortSignal): Promise<void>;
+  deadLetter(
+    request: import("./runtime/codex-policy-gateway/inbox-pump").DeadLetterRequest,
+    signal: AbortSignal,
+  ): Promise<import("./runtime/codex-policy-gateway/inbox-pump").DeadLetterResult>;
+  quarantineOrdinary(
+    request: import("./runtime/codex-policy-gateway/inbox-pump").OrdinaryQuarantineRequest,
+    signal: AbortSignal,
+  ): Promise<import("./runtime/codex-policy-gateway/inbox-pump").DeadLetterResult>;
+  deliverOutcome(
+    outcome: import("./runtime/codex-policy-gateway/gateway-assembly").PendingGatewayOutcome,
+    signal: AbortSignal,
+  ): Promise<import("./runtime/codex-policy-gateway/gateway-assembly").GatewayOutcomeDeliveryResult>;
+  /** Stop lease renewal and release the server-owned consumer lease. */
+  close(signal: AbortSignal): Promise<void>;
+}
+
+// Hard-fail-closed until #440 supplies the real server-owned adapter.
+let codexGatewayH1Adapter: CodexGatewayH1Adapter | null = null;
+let codexGatewayH1BlockedLogged = false;
 
 // #213 — track whether the current process resumed a pre-existing grok
 // session (truthy SESSION_ID at boot) so we can prepend the un-closed-loop
@@ -2647,66 +2682,18 @@ async function processWithOpencode(task: string, _from: string, _images?: string
   return outcome.replyText || "（无回复）";
 }
 
-// RFC-030 — codex-app-server runtime turn.
-//
-// Inbound task → bridge.submitTask → one codex turn on the bound thread →
-// final answer returned here. The reply then goes back out through the
-// node's normal CommHub `sendReply`/`send_task` path (cli.ts inbox handler),
-// exactly like every other runtime — the bridge only wraps "run one turn".
-// A second concurrent task queues FIFO inside the bridge and is drained when
-// the in-flight turn (ours OR a human TUI's) completes.
-async function processWithCodexAppServer(task: string, _from: string, taskId: string | null): Promise<string> {
-  const { openCodexAppServerRuntime, codexAppServerThink } =
-    await import("./runtime/codex-app-server/runtime");
-
-  // Reset the holder if the app-server child has exited — the next call
-  // reopens (spawns fresh / re-attaches) and resumes the persisted thread.
-  if (codexAppServerRuntimeSession && !codexAppServerRuntimeSession.isRunning) {
-    log(`[codex-app-server] previous session not running — reopening on this turn`);
-    codexAppServerRuntimeSession = null;
-  }
-
-  if (!codexAppServerRuntimeSession) {
-    codexAppServerRuntimeSession = await openCodexAppServerRuntime({
-      serverUrl: codexAppServerUrl,
-      threadId: codexAppServerThreadId,
-      // Auto-approve posture (RFC-030): the bridge never answers approvals,
-      // so an unattended node that must run write/command tasks needs
-      // approval_policy=never on its OWNED app-server. Driven by node config
-      // flags (approvalPolicy / sandboxMode); default codex behavior when
-      // unset. Ignored for the shared-server (adopt) topology.
-      approvalPolicy: (fileConfig.flags as { approvalPolicy?: string } | undefined)?.approvalPolicy,
-      sandboxMode: (fileConfig.flags as { sandboxMode?: string } | undefined)?.sandboxMode,
-      // RFC-030 Wave 1B (item 5): the CommHub native-MCP token injection is
-      // REMOVED — no ntok may enter the codex app-server process (env, argv
-      // or config). CommHub access for codex goes through the gateway tool
-      // proxy with short-lived capabilities in a later wave.
-      onThread: (threadId) => writebackCodexThread(threadId),
-      onExit: (info) => {
-        warn(`[codex-app-server] app-server exited code=${info.code} signal=${info.signal}; next turn will reopen`);
-        codexAppServerRuntimeSession = null;
-      },
-      log,
-      warn,
-    });
-    // A freshly-created thread is written back via onThread; make sure the
-    // in-memory var tracks it even when resuming (idempotent).
-    writebackCodexThread(codexAppServerRuntimeSession.threadId);
-  }
-
-  const outcome = await codexAppServerThink(codexAppServerRuntimeSession, {
-    taskId: taskId || `local-${Date.now()}`,
-    text: task,
-    from: _from,
-    log,
-  });
-
-  if (outcome.failed) {
-    // Surface as a runtime error string; processTask's failure detector
-    // treats the "错误:" marker as failed=true (dashboard shows real fail).
-    return outcome.replyText;
-  }
-  return outcome.replyText || "（无回复）";
+// RFC-030 Stage 2: there is deliberately no direct `think()` bridge for
+// this runtime. Formal inbox tasks enter `runGatewayInboxCycle` and then
+// scheduler → mux → adapter. Any accidental legacy/direct call fails
+// closed, proving all three runtime aliases cannot reopen Phase-0A.
+async function processWithCodexAppServer(
+  _task: string,
+  _from: string,
+  _taskId: string | null,
+): Promise<string> {
+  throw new Error(
+    "codex-app-server direct runtime is disabled; task must enter the RFC-030 Policy Gateway ingress",
+  );
 }
 
 async function processWithGrok(task: string, from: string, images?: string[]): Promise<string> {
@@ -3335,7 +3322,188 @@ function shouldSkipMessage(from: string, content: string, msgType?: string): str
 //         failure, leave queued for the next drain. On app-level
 //         rejection (e.g. target offline, task closed), drop with a
 //         loud warn — retrying would not help.
+async function startCodexGatewayProduction(): Promise<void> {
+  if (RUNTIME !== "codex-app-server" || codexGatewayHandle !== null) return;
+  if (codexAppServerUrl) {
+    throw new Error(
+      "codex gateway Phase 1 refuses a shared app-server: its read-only/never profile cannot be verified",
+    );
+  }
+  if (codexGatewayIoAbort.signal.aborted) codexGatewayIoAbort = new AbortController();
+
+  const flags = (fileConfig.flags ?? {}) as Record<string, unknown>;
+  const configuredApproval = flags.approvalPolicy;
+  const configuredSandbox = flags.sandboxMode;
+  if (configuredApproval !== undefined && configuredApproval !== "never") {
+    throw new Error("codex gateway Phase 1 requires approval_policy=never");
+  }
+  if (configuredSandbox !== undefined && configuredSandbox !== "read-only") {
+    throw new Error("codex gateway Phase 1 requires sandbox_mode=read-only");
+  }
+
+  const gatewayDir = join(NODE_DIR, "rfc030-gateway");
+  mkdirSync(gatewayDir, { recursive: true, mode: 0o700 });
+  chmodSync(gatewayDir, 0o700);
+  const binary =
+    typeof flags.codexBinary === "string" && flags.codexBinary.length > 0
+      ? flags.codexBinary
+      : "codex";
+  const { assembleCodexGateway } = await import(
+    "./runtime/codex-policy-gateway/gateway-assembly"
+  );
+  const handle = await assembleCodexGateway({
+    binary,
+    threadId: codexAppServerThreadId,
+    socketDir: gatewayDir,
+    backendSocketPath: join(gatewayDir, "agent.sock"),
+    sqlitePath: join(gatewayDir, "ledger.sqlite3"),
+    workDir: process.cwd(),
+    tuiEnv: {
+      ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
+      ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
+      ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}),
+      ...(process.env.CODEX_HOME ? { CODEX_HOME: process.env.CODEX_HOME } : {}),
+    },
+    onThread: (threadId) => writebackCodexThread(threadId),
+    log: (message) => log(message),
+  });
+  codexGatewayHandle = handle;
+  codexAppServerThreadId = handle.threadId;
+  void handle.upstreamClosed.then(() => {
+    if (nodeShuttingDown) return;
+    warn("[gateway] upstream closed; fencing ingress and requesting supervised restart");
+    void shutdown(RESTART_SENTINEL);
+  });
+  if (handle.tuiClosed !== null) {
+    void handle.tuiClosed.then(
+      () => {
+        if (nodeShuttingDown) return;
+        warn("[gateway] TUI process group exited; fencing ingress and requesting supervised restart");
+        void shutdown(RESTART_SENTINEL);
+      },
+      () => {
+        if (nodeShuttingDown) return;
+        warn("[gateway] TUI process-group cleanup failed; requesting supervised restart");
+        void shutdown(RESTART_SENTINEL);
+      },
+    );
+  }
+  codexGatewaySchedulerUnsubscribe = handle.scheduler.onChange(() => {
+    void scheduleCodexGatewayReplyDrain();
+  });
+  codexGatewayOwnerPoll = setInterval(() => {
+    void processGatewayInboxWindow();
+  }, 1_000);
+  codexGatewayOwnerPoll.unref?.();
+  log(
+    `[gateway] production assembly active (thread=${handle.threadId.slice(0, 12)}...); ingress fenced pending #440 H1`,
+  );
+}
+
+async function handleGatewayOrdinaryInboxRow(
+  row: import("./runtime/codex-policy-gateway/inbox-pump").PumpRow,
+  handle: import("./runtime/codex-policy-gateway/gateway-assembly").CodexGatewayHandle,
+  adapter: CodexGatewayH1Adapter,
+): Promise<void> {
+  const rowType = typeof row.type === "string" ? row.type : "unknown";
+  const signal = codexGatewayIoAbort.signal;
+  const disposition = await injectOrdinaryInboxRow(row, handle.scheduler, {
+    ack: (messageId) => adapter.ack(messageId, signal),
+    quarantine: (request) => adapter.quarantineOrdinary(request, signal),
+  });
+  log(
+    `[gateway] ordinary inbox type=${rowType} id=${row.id.slice(0, 12)} outcome=${disposition.outcome}`,
+  );
+}
+
+function scheduleCodexGatewayReplyDrain(): Promise<void> {
+  if (codexGatewayReplyDrain !== null) return codexGatewayReplyDrain;
+  const handle = codexGatewayHandle;
+  const adapter = codexGatewayH1Adapter;
+  if (handle === null || adapter === null || nodeShuttingDown) {
+    if (handle !== null && adapter === null && !codexGatewayH1BlockedLogged) {
+      codexGatewayH1BlockedLogged = true;
+      warn("[gateway] #440 H1 adapter unavailable; inbox and replies remain durably fenced");
+    }
+    return Promise.resolve();
+  }
+
+  codexGatewayReplyDrain = new Promise<void>((resolve) => {
+    void handle.drainReplies((reply) =>
+      adapter.deliverOutcome(reply, codexGatewayIoAbort.signal)
+    ).then(
+      (report) => {
+        if (
+          report.delivered.length > 0 ||
+          report.deferred.length > 0 ||
+          report.quarantined.length > 0 ||
+          report.invalid.length > 0
+        ) {
+          log(
+            `[gateway] outcome drain delivered=${report.delivered.length} deferred=${report.deferred.length} quarantined=${report.quarantined.length} invalid=${report.invalid.length}`,
+          );
+        }
+        resolve();
+      },
+      () => {
+        warn("[gateway] reply drain failed (details redacted)");
+        resolve();
+      },
+    ).finally(() => {
+      codexGatewayReplyDrain = null;
+    });
+  });
+  return codexGatewayReplyDrain;
+}
+
+function processGatewayInboxWindow(): Promise<void> {
+  if (codexGatewayInboxCycle !== null) return codexGatewayInboxCycle;
+  const handle = codexGatewayHandle;
+  const adapter = codexGatewayH1Adapter;
+  if (handle === null || adapter === null || nodeShuttingDown) {
+    if (handle !== null && adapter === null && !codexGatewayH1BlockedLogged) {
+      codexGatewayH1BlockedLogged = true;
+      warn("[gateway] #440 H1 adapter unavailable; inbox and replies remain durably fenced");
+    }
+    return Promise.resolve();
+  }
+
+  codexGatewayInboxCycle = new Promise<void>((resolve) => {
+    void (async () => {
+      await scheduleCodexGatewayReplyDrain();
+      const signal = codexGatewayIoAbort.signal;
+      const rows = await adapter.readInbox(signal);
+      if (rows.length === 0) return;
+      const report = await handle.runInboxCycle(
+        rows,
+        {
+          ack: (messageId) => adapter.ack(messageId, signal),
+          deadLetter: (request) => adapter.deadLetter(request, signal),
+        },
+        (row) => handleGatewayOrdinaryInboxRow(row, handle, adapter),
+      );
+      log(
+        `[gateway] inbox cycle accepted=${report.enqueued.length} duplicate=${report.duplicates.length} deferred=${report.deferred.length} dead_lettered=${report.deadLettered.length} ordinary=${report.ordinaryDelivered}`,
+      );
+      await scheduleCodexGatewayReplyDrain();
+    })().then(
+      resolve,
+      () => {
+        warn("[gateway] inbox cycle failed (details redacted)");
+        resolve();
+      },
+    ).finally(() => {
+      codexGatewayInboxCycle = null;
+    });
+  });
+  return codexGatewayInboxCycle;
+}
+
 async function processInbox() {
+  if (RUNTIME === "codex-app-server") {
+    await processGatewayInboxWindow();
+    return;
+  }
   // (1) Drain leftovers from previous runs.
   await drainPendingReplies();
 
@@ -4147,7 +4315,7 @@ async function connectSSE() {
 
   await superviseChild({
     label: "sse",
-    shutdownGate: () => false,  // no in-process shutdown gate for SSE; abandon-after-1h is the bail
+    shutdownGate: () => nodeShuttingDown,
     abandonAfterMs: ABANDON_AFTER_MS,
     onAbandon: () =>
       error(`SSE 连续 >1h 连不上 hub (${COMMHUB_URL}) — 放弃自动重连。运行 \`anet node start ${ALIAS}\` 手动恢复。`),
@@ -4201,7 +4369,10 @@ async function connectSSE() {
               firstConnect = false;
               continue;
             }
-            if (["new_task", "broadcast"].includes(ev.type)) {
+            const gatewayInboxDoorbell =
+              RUNTIME === "codex-app-server" &&
+              ["new_message", "new_reply", "chained_reply"].includes(ev.type);
+            if (["new_task", "broadcast"].includes(ev.type) || gatewayInboxDoorbell) {
               log(`← SSE ${ev.type}`);
               await processInbox();
             }
@@ -4396,6 +4567,12 @@ switch (startupAction.kind) {
   }
 }
 
+if (RUNTIME === "codex-app-server") {
+  // Eager, fail-closed production wiring: no inbox/SSE path can consume a
+  // formal task until the complete gateway assembly and real TUI launcher
+  // are alive. A boot failure exits through the top-level rejection.
+  await startCodexGatewayProduction();
+}
 await register();
 log("已注册到 CommHub");
 processInbox().catch((e: any) => warn(`initial inbox scan failed: ${e.message}`));
@@ -4406,8 +4583,19 @@ processInbox().catch((e: any) => warn(`initial inbox scan failed: ${e.message}`)
 // `finalizePendingMatchingUpdates` — without this immediate post-
 // register report, dashboard would see `restarting` for up to 3min
 // after a restart instead of ✓ within a few seconds.
-reportStatus("idle").catch((e: any) => warn(`initial reportStatus failed: ${e?.message || e}`));
-setInterval(() => reportStatus("idle").catch(() => {}), 3 * 60 * 1000);
+const heartbeatRuntimeStatus = (): "working" | "idle" => {
+  if (RUNTIME === "codex-app-server" && codexGatewayHandle?.scheduler.hasPendingWork()) {
+    return "working";
+  }
+  return "idle";
+};
+reportStatus(heartbeatRuntimeStatus()).catch((e: any) =>
+  warn(`initial reportStatus failed: ${e?.message || e}`),
+);
+setInterval(
+  () => reportStatus(heartbeatRuntimeStatus()).catch(() => {}),
+  3 * 60 * 1000,
+);
 
 // RFC-027 §2.5 / §4.4 D7 — 30d backup sweeper, host_supervisor only.
 // Runs once at boot (catches accumulated junk from long down-periods),
@@ -4508,31 +4696,97 @@ if (RUNTIME === "codex" || RUNTIME === "grok" || RUNTIME === "codex-app-server")
   }
 }
 
-const shutdown = async () => {
-  log("shutting down...");
-  // #261 P0-1 — gate the feishu supervisor loop so it stops re-forking
-  // on the soon-to-arrive child exit. SIGTERM each tracked worker (give
-  // it 500 ms to exit gracefully), then SIGKILL holdouts. Without this,
-  // workers either keep running orphaned OR the supervisor races a
-  // re-fork between our exit and Docker's container teardown — both
-  // produce zombie processes / double-WS / double-reply.
+function shutdown(exitCode = 0): Promise<void> {
+  if (exitCode !== 0) nodeShutdownExitCode = exitCode;
+  if (nodeShutdownPromise !== null) return nodeShutdownPromise;
+  // Fence every producer synchronously, before the first await.
+  nodeShuttingDown = true;
+  codexGatewayIoAbort.abort();
   feishuShuttingDown = true;
-  for (const ch of feishuChildren) {
-    try { ch.kill("SIGTERM"); } catch { /* already dead */ }
+  if (codexGatewayOwnerPoll !== null) {
+    clearInterval(codexGatewayOwnerPoll);
+    codexGatewayOwnerPoll = null;
   }
-  setTimeout(() => {
+  codexGatewaySchedulerUnsubscribe?.();
+  codexGatewaySchedulerUnsubscribe = null;
+
+  nodeShutdownPromise = (async () => {
+    log("shutting down...");
+    const gateway = codexGatewayHandle;
+    const h1Adapter = codexGatewayH1Adapter;
+    const leaseCloseAbort = new AbortController();
+    const leaseCloseTimer = setTimeout(() => leaseCloseAbort.abort(), 2_000);
+    leaseCloseTimer.unref?.();
+    const leaseClose = h1Adapter === null
+      ? Promise.resolve()
+      : Promise.resolve().then(() => h1Adapter.close(leaseCloseAbort.signal));
+
+    const forceOwnedBounded = async (): Promise<void> => {
+      if (gateway === null) return;
+      const completed = await new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => resolve(false), 5_000);
+        gateway.forceStopOwned().then(
+          () => { clearTimeout(timer); resolve(true); },
+          () => { clearTimeout(timer); resolve(false); },
+        );
+      });
+      if (!completed) warn("[gateway] owned-resource force stop did not complete cleanly");
+    };
+    // #261 P0-1 — gate the feishu supervisor loop so it stops re-forking
+    // on the soon-to-arrive child exit. SIGTERM each tracked worker (give
+    // it 500 ms to exit gracefully), then SIGKILL holdouts.
     for (const ch of feishuChildren) {
-      try { ch.kill("SIGKILL"); } catch { /* already dead */ }
+      try { ch.kill("SIGTERM"); } catch { /* already dead */ }
     }
-  }, 500);
-  // M2 — close loops HTTP MCP server (release port + token state).
-  // Synchronous; fast.
-  try { await loopsHttpServerHandle?.close(); } catch { /* already closed */ }
-  await reportStatus("offline").catch(() => {});
-  process.exit(0);
-};
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+    setTimeout(() => {
+      for (const ch of feishuChildren) {
+        try { ch.kill("SIGKILL"); } catch { /* already dead */ }
+      }
+    }, 500).unref?.();
+
+    // Let an already-started ingress/drain operation settle before closing
+    // SQLite. New operations are fenced by nodeShuttingDown above.
+    const gatewayWork = Promise.allSettled([
+      codexGatewayInboxCycle ?? Promise.resolve(),
+      codexGatewayReplyDrain ?? Promise.resolve(),
+      leaseClose,
+    ]);
+    const gatewayWorkSettled = await new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => resolve(false), 3_000);
+      gatewayWork.then(() => {
+        clearTimeout(timer);
+        resolve(true);
+      });
+    });
+    if (!gatewayWorkSettled) {
+      warn("[gateway] aborted H1 I/O did not settle within 3s; killing owned groups before process boundary");
+      await forceOwnedBounded();
+      process.exit(nodeShutdownExitCode || 1);
+    }
+    clearTimeout(leaseCloseTimer);
+    codexGatewayHandle = null;
+    if (gateway !== null) {
+      const stopped = await new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => resolve(false), 10_000);
+        gateway.stop().then(
+          () => { clearTimeout(timer); resolve(true); },
+          () => { clearTimeout(timer); resolve(false); },
+        );
+      });
+      if (!stopped) {
+        warn("[gateway] bounded teardown did not complete cleanly; forcing owned groups down");
+        await forceOwnedBounded();
+      }
+    }
+
+    try { await loopsHttpServerHandle?.close(); } catch { /* already closed */ }
+    await reportStatus("offline").catch(() => {});
+    process.exit(nodeShutdownExitCode);
+  })();
+  return nodeShutdownPromise;
+}
+process.on("SIGINT", () => { void shutdown(0); });
+process.on("SIGTERM", () => { void shutdown(0); });
 for (const channel of TELEGRAM_CHANNELS) connectTelegram(channel);
 for (const channel of FEISHU_CHANNELS) void connectFeishu(channel);
 connectSSE();

@@ -11,8 +11,14 @@
     "README.md"
   ],
   "scripts": {
-    "build": "bun build src/cli.ts --outdir dist --entry-naming cli.js --target node --minify --external @anthropic-ai/claude-agent-sdk --external '@anthropic-ai/claude-agent-sdk-*' --external @openai/codex-sdk",
-    "prepublishOnly": "npm run build"
+    "build": "bun build src/cli.ts --outdir dist --entry-naming cli.js --target node --minify --external @anthropic-ai/claude-agent-sdk --external '@anthropic-ai/claude-agent-sdk-*' --external @openai/codex-sdk --external better-sqlite3",
+    "prepublishOnly": "npm run build",
+    "build:rfc030-integration": "bun build --target=node --format=esm --external better-sqlite3 --outfile=dist/rfc030-integration.mjs src/runtime/codex-policy-gateway/integration-entry.ts",
+    "test:rfc030-node-integration": "npm run build:rfc030-integration && node scripts/rfc030-node-integration.mjs",
+    "test:rfc030-real-cli-smoke": "npm run build:rfc030-integration && node scripts/rfc030-real-cli-e2e.mjs",
+    "typecheck:rfc030": "tsc --project src/runtime/codex-policy-gateway/tsconfig.json",
+    "typecheck:rfc030-abort-negative": "node scripts/rfc030-abort-typecheck-negative.mjs",
+    "typecheck:rfc030-safe-adopt-negative": "node scripts/rfc030-safe-adopt-typecheck-negative.mjs"
   },
   "keywords": [
     "agent",
@@ -52,10 +58,17 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.140",
     "undici": "^6.27.0",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "ws": "8.21.0"
   },
   "optionalDependencies": {
-    "@openai/codex": "^0.133.0",
-    "@openai/codex-sdk": "^0.133.0"
+    "@openai/codex": "0.144.0",
+    "@openai/codex-sdk": "^0.133.0",
+    "better-sqlite3": "12.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.43",
+    "@types/ws": "8.18.1",
+    "typescript": "5.5.4"
   }
 }

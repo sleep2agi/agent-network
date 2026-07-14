@@ -1,0 +1,196 @@
+# test384-rfc030-stage2-wiring
+
+date: 2026-07-14T03:01:03+00:00
+bun: 1.3.1
+layer: 1 (must pass before test385)
+
+## S1 frozen digests
+agent-node/src/runtime/codex-policy-gateway/contract.ts: OK
+agent-node/src/runtime/codex-policy-gateway/protocol.ts: OK
+
+## S2 compile and production bundles
+$ tsc --project src/runtime/codex-policy-gateway/tsconfig.json
+$ bun build --target=node --format=esm --external better-sqlite3 --outfile=dist/rfc030-integration.mjs src/runtime/codex-policy-gateway/integration-entry.ts
+Bundled 26 modules in 18ms
+
+  rfc030-integration.mjs  184.99 KB  (entry point)
+
+$ bun build src/cli.ts --outdir dist --entry-naming cli.js --target node --minify --external @anthropic-ai/claude-agent-sdk --external '@anthropic-ai/claude-agent-sdk-*' --external @openai/codex-sdk --external better-sqlite3
+Bundled 266 modules in 104ms
+
+  cli.js  1.0 MB  (entry point)
+
+agent-node capability probe: rfc030-stage2-ab-v1
+
+## S2b anet CLI production-profile entry compiles
+Bundled 85 modules in 75ms
+
+  anet-cli.js  0.89 MB  (entry point)
+
+
+## S3 production entry/static negatives + mixed-window behavior
+ok 1: contract.ts stays at final-A frozen digest
+ok 2: protocol.ts stays at final-A frozen digest
+ok 3: section start exists: async function processWithCodexAppServer(
+ok 4: section end follows: async function processWithGrok(
+ok 5: legacy direct runtime fails closed
+ok 6: legacy function cannot open an upstream session
+ok 7: legacy function cannot dispatch a task
+ok 8: section start exists: async function startCodexGatewayProduction()
+ok 9: section end follows: async function handleGatewayOrdinaryInboxRow(
+ok 10: production starter imports assembly
+ok 11: production starter awaits assembly
+ok 12: production starter retains gateway handle
+ok 13: non-never approval is refused
+ok 14: non-read-only sandbox is refused
+ok 15: anet CLI creates codex-app-server nodes with the fixed Phase-1 profile
+ok 16: agent-node supplies the exact production Codex baseline
+ok 17: anet start fails early unless the exact Codex baseline is present
+ok 18: explicit and interactive create paths retain codex-app-server runtime
+ok 19: anet CLI no longer advertises unverifiable shared-app-server adoption
+ok 20: anet and agent-node share an exact Stage2 capability handshake
+ok 21: section start exists: async function launchAgent(id: string, forceNewSession = false)
+ok 22: section end follows: // ── start (new session) ──
+ok 23: anet node start routes codex-app-server through the agent-node branch
+ok 24: Stage2 executes the capability-probed local agent-node and cannot use preview fallback
+ok 25: section start exists: async function processInbox()
+ok 26: section end follows: async function connectSSE()
+ok 27: processInbox routes gateway runtime to real cycle
+ok 28: gateway returns before legacy direct task flow
+ok 29: section start exists: function processGatewayInboxWindow()
+ok 30: section end follows: async function processInbox()
+ok 31: cycle consumes the H1 lease adapter inbox
+ok 32: cycle uses mixed-window demux, not task-only pump
+ok 33: invalid formal rows delegate to server-owned H1 dead-letter
+ok 34: cycle drains durable replies
+ok 35: section start exists: async function handleGatewayOrdinaryInboxRow(
+ok 36: section end follows: function scheduleCodexGatewayReplyDrain()
+ok 37: ordinary message/reply/broadcast enters the same durable scheduler
+ok 38: ordinary invalid rows use audit-only H1 quarantine, never task dead-letter
+ok 39: section start exists: function scheduleCodexGatewayReplyDrain()
+ok 40: section end follows: function processGatewayInboxWindow()
+ok 41: reply_pending rows use assembly drain
+ok 42: outcome routing delegates only to the canonical H1 adapter
+ok 43: display alias cannot route a gateway reply
+ok 44: pre-H1 gateway has no alias-based reply fallback
+ok 45: pre-H1 production ingress/reply stays explicitly fail-closed
+ok 46: section start exists: if (RUNTIME === "codex-app-server") {
+  // Eager
+ok 47: section end follows: // RFC-027 §2.5
+ok 48: assembly is eager before registration and initial consumption
+ok 49: CLI initial scan reaches production inbox entry
+ok 50: section start exists: async function connectSSE()
+ok 51: section end follows: // ── 启动 ──
+ok 52: SSE doorbell recognizes formal task events
+ok 53: SSE doorbell recognizes ordinary gateway ingress events
+ok 54: SSE doorbell enters the same production cycle
+ok 55: section start exists: const getInbox = async () =>
+ok 56: section end follows: const ackMessage = async
+ok 57: inbox uses existing CommHub MCP client
+ok 58: section start exists: async function callCommHub(
+ok 59: section end follows: // #146 PR-4
+ok 60: CommHub client uses the real MCP HTTP endpoint
+ok 61: section start exists: function shutdown(exitCode = 0): Promise<void>
+ok 62: section end follows: process.on("SIGINT"
+ok 63: shutdown fences new gateway work synchronously
+ok 64: fatal gateway terminal can request supervisor restart
+ok 65: shutdown awaits retained assembly handle
+ok 66: shutdown timeout kills owned process groups before exit
+ok 67: assembly owns a spawn-only provider
+ok 68: assembly owns one real transport
+ok 69: provider and TUI share one canonical binary identity
+ok 70: assembly exposes mixed-window ingress
+ok 71: assembly drains success/failure/cancel outbox state
+ok 72: assembly classifies durable rows before ingress
+ok 73: safe queued rows return to the scheduler without resend ambiguity
+ok 74: assembly exposes no display-alias reply route
+ok 75: mixed inbox preserves server FIFO while visiting every row
+ok 76: ordinary row delivered exactly once
+ok 77: stamped task enqueued with canonical id
+ok 78: only durable accepted task ACKed by gateway hook
+ok 79: alias-only forged principal fails closed
+wiring probe PASS: 79/79
+
+## S4 A+B assembly on final-A WS plus real Codex 0.144 wire shapes
+bun test v1.3.1 (89fa0f34)
+
+src/runtime/codex-policy-gateway/gateway-unit.test.ts:
+(pass) sqlite-driver — runtime gate (A′ decision) > version parse handles v-prefix and junk
+(pass) sqlite-driver — runtime gate (A′ decision) > node:sqlite support boundary is exactly 22.13
+(pass) sqlite-driver — runtime gate (A′ decision) > flavor precedence is Bun, unflagged node:sqlite, then synchronous fallback [1.00ms]
+(pass) sqlite-driver — runtime gate (A′ decision) > Node-20 fallback package is exact-pinned, optional, and external to native bundles
+(pass) sqlite-driver — runtime gate (A′ decision) > under Bun, resolveSqliteDriver picks bun:sqlite [5.00ms]
+(pass) sqlite-driver — runtime gate (A′ decision) > fail-closed error carries the stable Wave-2 error code
+(pass) GatewayLedger — state machine > happy path walks received→queued→dispatching→accepted→completed→reply_pending→replied [4.00ms]
+(pass) GatewayLedger — state machine > illegal transitions throw (queued→accepted skips dispatching) [4.00ms]
+(pass) GatewayLedger — state machine > terminal states accept nothing further [2.00ms]
+(pass) GatewayLedger — state machine > duplicate submissionId insert throws [1.00ms]
+(pass) GatewayLedger — state machine > recover(): dispatching row WITH matching observed turn → accepted (reconciled) [3.00ms]
+(pass) GatewayLedger — state machine > recover(): dispatching row WITHOUT matching turn → ambiguous, dispatchAttempts unchanged (no resend) [3.00ms]
+(pass) GatewayLedger — state machine > recover(): queued rows are reported requeued and left dispatchable [2.00ms]
+(pass) GatewayLedger — state machine > recover(): accepted becomes ambiguous/no-resend and completed resumes reply_pending [5.00ms]
+(pass) gateway policy — deny-by-default upstream allowlist > turn/start on the bound thread is allowed [1.00ms]
+(pass) gateway policy — deny-by-default upstream allowlist > turn/start on a DIFFERENT thread is denied (thread_not_bound)
+(pass) gateway policy — deny-by-default upstream allowlist > non-allowlisted method turn/steer denied
+(pass) gateway policy — deny-by-default upstream allowlist > non-allowlisted method thread/list denied
+(pass) gateway policy — deny-by-default upstream allowlist > non-allowlisted method thread/archive denied
+(pass) gateway policy — deny-by-default upstream allowlist > non-allowlisted method some/random/method denied
+(pass) gateway policy — deny-by-default upstream allowlist > non-allowlisted method rawJsonRpcPassthrough denied
+(pass) gateway policy — deny-by-default upstream allowlist > dangerous method item/tool/requestApproval/respond denied with code approval_response_attempt
+(pass) gateway policy — deny-by-default upstream allowlist > dangerous method serverRequest/respond denied with code approval_response_attempt
+(pass) gateway policy — deny-by-default upstream allowlist > dangerous method item/tool/requestUserInput denied with code approval_response_attempt
+(pass) gateway policy — deny-by-default upstream allowlist > dangerous method shellCommand/execute denied with code method_not_allowlisted
+(pass) gateway policy — deny-by-default upstream allowlist > dangerous method fs/readFile denied with code method_not_allowlisted
+(pass) gateway policy — deny-by-default upstream allowlist > dangerous method fs/writeFile denied with code method_not_allowlisted
+(pass) gateway policy — deny-by-default upstream allowlist > dangerous method applyPatch denied with code method_not_allowlisted
+(pass) gateway policy — deny-by-default upstream allowlist > dangerous method config/set denied with code config_override_attempt
+(pass) gateway policy — deny-by-default upstream allowlist > dangerous method auth/login denied with code config_override_attempt
+(pass) gateway policy — deny-by-default upstream allowlist > dangerous method account/switch denied with code config_override_attempt
+(pass) gateway policy — deny-by-default upstream allowlist > dangerous method model/override denied with code config_override_attempt
+(pass) gateway policy — deny-by-default upstream allowlist > dangerous method sandbox/set denied with code config_override_attempt
+(pass) gateway policy — deny-by-default upstream allowlist > dangerous method execpolicy/amend denied with code config_override_attempt
+(pass) gateway policy — deny-by-default upstream allowlist > deny rules outrank the allowlist (defense in depth)
+(pass) gateway policy — deny-by-default upstream allowlist > thread/start (fresh binding) allowed without bound-thread match
+(pass) gateway policy — Phase-1 fixed profile > read-only/never passes
+(pass) gateway policy — Phase-1 fixed profile > any deviation fails closed: {"sandboxMode":"workspace-write","approvalPolicy":"never"}
+(pass) gateway policy — Phase-1 fixed profile > any deviation fails closed: {"sandboxMode":"danger-full-access","approvalPolicy":"never"}
+(pass) gateway policy — Phase-1 fixed profile > any deviation fails closed: {"sandboxMode":"read-only","approvalPolicy":"on-request"}
+(pass) gateway policy — Phase-1 fixed profile > any deviation fails closed: {"sandboxMode":"read-only","approvalPolicy":"untrusted"}
+(pass) R3 — (taskId,messageId) pair semantics > same (taskId,messageId) resubmitted → duplicate, dispatched exactly once [28.00ms]
+(pass) R3 — (taskId,messageId) pair semantics > same taskId + NEW messageId while the attempt is LIVE → duplicate, never double-runs [48.00ms]
+(pass) R3 — (taskId,messageId) pair semantics > same taskId + NEW messageId retries only after the prior terminal outbox is delivered [55.00ms]
+(pass) R4 — cancelled roundtrip + queuePosition immediate-start > cancelQueuedTask → outcome cancelled AND getTaskState reads back cancelled/by agent [2.00ms]
+(pass) R4 — cancelled roundtrip + queuePosition immediate-start > idle enqueue starts immediately → queuePosition null (副指挥 P1 race fixed) [2.00ms]
+(pass) R4 — cancelled roundtrip + queuePosition immediate-start > enqueue behind a live reservation → real queue position [2.00ms]
+(pass) Stage2 durable scheduler recovery > a queued row restores its durable payload and dispatches only after owner reattaches [14.00ms]
+(pass) Stage2 durable scheduler recovery > legacy queued row without payload fails closed instead of fake-live [2.00ms]
+(pass) Stage2 ordinary inbox scheduling > prototype-property sender roles fail closed [1.00ms]
+(pass) Stage2 ordinary inbox scheduling > ordinary rows share the task FIFO and finish locally without an outbound reply [33.00ms]
+(pass) Stage2 ordinary inbox scheduling > ordinary invalid/unsupported quarantine never forwards a row-supplied canonical task id [1.00ms]
+(pass) Stage2 terminal outcome outbox > success is durable reply_pending until delivery is acknowledged [12.00ms]
+(pass) Stage2 terminal outcome outbox > dispatch failure and turn failure persist stable failed outcomes [19.00ms]
+(pass) Stage2 terminal outcome outbox > ambiguous dispatch persists a no-replay failed outcome [11.00ms]
+(pass) Stage2 terminal outcome outbox > owner interrupt persists a cancelled outcome [8.00ms]
+(pass) Stage2 terminal outcome outbox > queued agent cancellation persists a cancelled outcome [1.00ms]
+(pass) Stage2 terminal outcome outbox > empty, 10000, and 10001-character answers obey the exact Hub boundary [11.00ms]
+(pass) Stage2 terminal outcome outbox > terminal and delivered timestamps remain stable across attempts and duplicate delivery [3.00ms]
+(pass) Stage2 terminal outcome outbox > recovery preserves an existing pending outcome and reconstructs legacy terminal pending metadata [4.00ms]
+
+src/runtime/codex-policy-gateway/gateway-assembly.test.ts:
+(pass) L3-R6 gateway assembly — one socket, one mux, A orchestration + B policy > full path: assemble → owner gate → enqueue → turn via A-mux → completion via transport notifications → ledger [123.01ms]
+(pass) L3-R6 gateway assembly — one socket, one mux, A orchestration + B policy > sqlite gate fails closed BEFORE any spawn/socket
+(pass) L3-R6 gateway assembly — one socket, one mux, A orchestration + B policy > R2: bootstrap upstream error.message is redacted before the assembly boundary [15.00ms]
+(pass) L3-R6 gateway assembly — one socket, one mux, A orchestration + B policy > persisted thread resume failure is fail-closed and never creates/rebinds a fresh thread [28.00ms]
+
+src/runtime/codex-policy-gateway/bridge-adapter-real-wire.test.ts:
+(pass) BridgeAdapter — real Codex 0.144 wire > nested response + early real notifications preserve final_answer [4.00ms]
+(pass) BridgeAdapter — real Codex 0.144 wire > plain-string deltas are the fallback when no final_answer item arrives
+(pass) BridgeAdapter — real Codex 0.144 wire > malformed nested response fails closed instead of trusting a flat fallback [1.00ms]
+(pass) BridgeAdapter — real Codex 0.144 wire > R2 canary: turn error detail reaches neither log, ledger, nor client state [4.00ms]
+
+ 68 pass
+ 0 fail
+ 226 expect() calls
+Ran 68 tests across 3 files. [601.00ms]
+
+OVERALL: PASS

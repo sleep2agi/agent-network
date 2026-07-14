@@ -25,17 +25,19 @@
 //
 // ── Single production demux caller (#3) ────────────────────────────────
 // Production consumes ONE mixed get_inbox window per cycle via
-// `runGatewayInboxCycle`: type='task' rows go through the pump; every
-// other type (message/reply/broadcast/…) is handed VERBATIM to the
-// ordinary runtime handler which owns its own ack — the gateway neither
-// acks nor drops them. Because the gateway acks/dead-letters every task
-// row it consumes and ordinary rows are delivered out in the same cycle,
-// a window full of non-task rows cannot starve tasks and vice versa
-// (proven by the mixed-window test).
+// `runGatewayInboxCycle`, preserving the server's row order. type='task'
+// rows go through the formal pump; every other row goes to the ordinary
+// handler, which durably injects supported content into the SAME scheduler.
+// A deferred row never prevents later rows in the finite window from being
+// classified, so neither class can starve the other.
 
 import type { AgentTypedContract } from "./contract";
 import { asMessageId, asTaskId } from "./contract";
 import { senderFromInboxRow, type InboxRowLike } from "./bridge-adapter";
+import type {
+  GatewayScheduler,
+  OrdinaryInboxType,
+} from "./scheduler";
 
 export interface DeadLetterRequest {
   readonly messageId: string;
@@ -74,9 +76,83 @@ export interface PumpBatchReport {
 }
 
 const PHASE1_TYPE_ALLOWLIST: ReadonlySet<string> = new Set(["task"]);
+const ORDINARY_TURN_TYPES: ReadonlySet<string> = new Set([
+  "message",
+  "reply",
+  "chained_reply",
+  "broadcast",
+]);
 
 export interface PumpRow extends InboxRowLike {
   content?: string | null;
+}
+
+export interface OrdinaryQuarantineRequest {
+  readonly messageId: string;
+  readonly reason: "invalid_principal" | "refused_invalid_arg";
+}
+
+export interface OrdinaryInboxHooks {
+  ack(messageId: string): void | Promise<void>;
+  /** H1 audit-only disposition; it MUST NEVER mutate a canonical task. */
+  quarantine(
+    request: OrdinaryQuarantineRequest,
+  ): DeadLetterResult | Promise<DeadLetterResult>;
+}
+
+export type OrdinaryInboxDisposition =
+  | { readonly outcome: "accepted" | "duplicate" }
+  | { readonly outcome: "deferred"; readonly reason: DeferredReason }
+  | { readonly outcome: "quarantined"; readonly result: DeadLetterResult };
+
+/**
+ * Durable non-task ingress used by the production ordinary handler.
+ * Known content types enter the same scheduler as formal tasks and ACK only
+ * after the ledger write. Invalid/unsupported rows use the server-owned
+ * quarantine operation with no canonical/network/alias claim, so this path
+ * can never fail or route an unrelated Hub task from row-supplied metadata.
+ */
+export async function injectOrdinaryInboxRow(
+  row: PumpRow,
+  gateway: Pick<GatewayScheduler, "injectMessage">,
+  hooks: OrdinaryInboxHooks,
+): Promise<OrdinaryInboxDisposition> {
+  const quarantine = async (
+    reason: DeadLetterRequest["reason"],
+  ): Promise<OrdinaryInboxDisposition> => {
+    const result = await hooks.quarantine({
+      messageId: row.id,
+      reason,
+    });
+    return { outcome: "quarantined", result };
+  };
+
+  const rowType = typeof row.type === "string" ? row.type : "";
+  if (!ORDINARY_TURN_TYPES.has(rowType)) {
+    return quarantine("refused_invalid_arg");
+  }
+  const sender = senderFromInboxRow(row);
+  if (sender === null) return quarantine("invalid_principal");
+
+  const result = await gateway.injectMessage({
+    messageId: row.id,
+    authenticatedSender: sender,
+    type: rowType as OrdinaryInboxType,
+    text: typeof row.content === "string" ? row.content : "",
+  });
+  switch (result.outcome) {
+    case "accepted":
+      await hooks.ack(row.id);
+      return { outcome: result.duplicate ? "duplicate" : "accepted" };
+    case "refused_queue_full":
+      return { outcome: "deferred", reason: "queue_full" };
+    case "refused_no_owner":
+      return { outcome: "deferred", reason: "no_owner" };
+    case "refused_shutting_down":
+      return { outcome: "deferred", reason: "shutting_down" };
+    case "refused_invalid_arg":
+      return quarantine("refused_invalid_arg");
+  }
 }
 
 /**
@@ -181,10 +257,9 @@ export interface GatewayInboxCycleReport extends PumpBatchReport {
  *   message/reply/broadcast/etc. → `ordinaryHandler` verbatim, which owns
  *                                  its own ack — the gateway must neither
  *                                  ack nor drop rows it does not consume.
- * Starvation-freedom: the pump resolves EVERY task row in the window
- * (ack/dead-letter) except explicit deferrals, and ordinary rows leave
- * via the handler in the same cycle — neither class can pin the LIMIT
- * window against the other.
+ * The loop preserves CommHub FIFO across task/message/reply/broadcast while
+ * still visiting later rows after a defer. Each individual row owns its
+ * durable ACK/dead-letter decision before the loop advances.
  */
 export async function runGatewayInboxCycle(
   rows: readonly PumpRow[],
@@ -192,20 +267,25 @@ export async function runGatewayInboxCycle(
   hooks: InboxPumpHooks,
   ordinaryHandler: (row: PumpRow) => void | Promise<void>,
 ): Promise<GatewayInboxCycleReport> {
-  const taskRows: PumpRow[] = [];
-  const ordinaryRows: PumpRow[] = [];
+  const report: GatewayInboxCycleReport = {
+    enqueued: [],
+    duplicates: [],
+    deferred: [],
+    deadLettered: [],
+    skippedNonTask: 0,
+    ordinaryDelivered: 0,
+  };
   for (const row of rows) {
-    (typeof row.type === "string" && PHASE1_TYPE_ALLOWLIST.has(row.type)
-      ? taskRows
-      : ordinaryRows
-    ).push(row);
-  }
-
-  // Ordinary rows first — they exit the window regardless of how many
-  // task rows defer (and vice versa the pump acks its own rows).
-  for (const row of ordinaryRows) {
+    if (typeof row.type === "string" && PHASE1_TYPE_ALLOWLIST.has(row.type)) {
+      const one = await pumpInboxBatch([row], gateway, hooks);
+      report.enqueued.push(...one.enqueued);
+      report.duplicates.push(...one.duplicates);
+      report.deferred.push(...one.deferred);
+      report.deadLettered.push(...one.deadLettered);
+      continue;
+    }
     await ordinaryHandler(row);
+    report.ordinaryDelivered += 1;
   }
-  const pumpReport = await pumpInboxBatch(taskRows, gateway, hooks);
-  return { ...pumpReport, ordinaryDelivered: ordinaryRows.length };
+  return report;
 }

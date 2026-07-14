@@ -1,0 +1,25 @@
+// RFC-030 Wave 1A P0.2 Commit 2 corrective round 2 (副指挥 0bd525d0
+// P1-3). Per-fixture typecheck-negative: `abort: () => symbol` in
+// a class implementing `UpstreamTransport` (i.e. someone reverting
+// to the round-1 SYNC_ABORT symbol) must fail tsc --strict.
+
+import type { UpstreamTransport } from "../uds-server";
+import type {
+  JsonRpcNotificationFrame,
+  JsonRpcRequestFrame,
+  JsonRpcResponseFrame,
+} from "../protocol";
+
+const REVERTED_SYNC_ABORT: unique symbol = Symbol("Reverted");
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+class BadSyncSymbolAbort implements UpstreamTransport {
+  async writeFrame(_f: JsonRpcRequestFrame | JsonRpcResponseFrame | JsonRpcNotificationFrame): Promise<void> {}
+  onFrame(_h: (raw: unknown) => void): () => void { return () => {}; }
+  onClose(_h: () => void): () => void { return () => {}; }
+  async close(): Promise<void> {}
+  // TS: () => unique symbol is NOT assignable to () => Promise<void>.
+  abort: () => typeof REVERTED_SYNC_ABORT = () => REVERTED_SYNC_ABORT;
+}
+
+export const _ = { BadSyncSymbolAbort };
