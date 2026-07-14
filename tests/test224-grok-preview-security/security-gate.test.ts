@@ -124,6 +124,8 @@ describe("test224 exact Grok child environment", () => {
       GROK_CURSOR_HOOKS_ENABLED: "false",
       GROK_FOLDER_TRUST: "1",
       GROK_DISABLE_AUTOUPDATER: "1",
+      GROK_CHANGELOG_OFFLINE: "1",
+      GROK_LEADER_LOG: "off",
       GROK_SUBAGENTS: "0",
       GROK_WEB_FETCH: "0",
       GROK_MEMORY: "0",
