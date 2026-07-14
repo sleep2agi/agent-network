@@ -170,9 +170,13 @@ function metadataStateFixture(label = "metadata") {
 }
 
 function writeUnifiedFrames(fixture, frames) {
+  writeRawUnifiedFrames(fixture, frames.map((frame) => JSON.stringify(frame)));
+}
+
+function writeRawUnifiedFrames(fixture, rawFrames) {
   writeFileSync(
     fixture.unified,
-    `${frames.map((frame) => JSON.stringify(frame)).join("\n")}\n`,
+    Buffer.from(`${rawFrames.join("\n")}\n`, "utf8"),
     { mode: 0o600 },
   );
 }
@@ -933,16 +937,18 @@ test("exact unified-log path, fields, and observed metadata values produce clean
   }
 });
 
-test("raw unified frames reject unknown path, field, value, and role", () => {
-  const cases = [
-    ["unknown_path", { ctx: { nested: { user_id: AUTH_METADATA_FIXTURE.userId } } }],
-    ["unknown_field", { ctx: { account_id: AUTH_METADATA_FIXTURE.userId } }],
-    ["unknown_value", { ctx: { user_id: "TEST225_USER_ID_UNKNOWN_0123456789" } }],
-  ];
-  for (const [label, frame] of cases) {
+for (const [label, rawFrame] of [
+  ["unknown path", `{"ctx":{"nested":{"user_id":${JSON.stringify(AUTH_METADATA_FIXTURE.userId)}}}}`],
+  ["unknown field", `{"ctx":{"account_id":${JSON.stringify(AUTH_METADATA_FIXTURE.userId)}}}`],
+  ["unknown value", '{"ctx":{"user_id":"TEST225_USER_ID_UNKNOWN_0123456789"}}'],
+]) {
+  test(`raw-frame mutation: ${label} -> grok_unified_log_state match`, () => {
     const fixture = metadataStateFixture(`metadata-${label}`);
     try {
-      writeUnifiedFrames(fixture, [frame]);
+      // The mutation enters through the exact on-disk producer boundary. The
+      // scanner must read these bytes, decode/parse them, project exact paths,
+      // and verify the scope-bound tuple; no sanitized object is injected.
+      writeRawUnifiedFrames(fixture, [rawFrame]);
       const result = scanStateFixture(fixture);
       assert.equal(result.status, "failed", label);
       assert.equal(result.scanOutcome, "match", label);
@@ -951,11 +957,13 @@ test("raw unified frames reject unknown path, field, value, and role", () => {
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }
-  }
+  });
+}
 
+test("raw-frame mutation: unknown role -> scan_boundary scan_error", () => {
   const fixture = metadataStateFixture("metadata-unknown-role");
   try {
-    writeUnifiedFrames(fixture, knownMetadataFrames());
+    writeRawUnifiedFrames(fixture, knownMetadataFrames().map((frame) => JSON.stringify(frame)));
     const result = scanAuthEvidenceTargets({
       phase: "first_turn_post_stop",
       patternPath: fixture.pattern,
