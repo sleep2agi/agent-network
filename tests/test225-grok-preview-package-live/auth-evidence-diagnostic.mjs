@@ -980,19 +980,27 @@ const GENERATED_POLICY_FILES = new Set([
 // byte-for-byte, and a matched auth scalar remains red. Naming the observed
 // roots only prevents ordinary vendor state from being mistaken for a scan
 // failure before its contents are checked.
-const PINNED_STATE_FILES = new Set([
+const PINNED_STATE_FILE_NAMES = Object.freeze([
   ".metadata_version",
   "active_sessions.json",
   "active_sessions.lock",
   "managed_config.lock",
   "models_cache.json",
-  "prompt_history.jsonl",
-  "session_search.sqlite",
-  "tip_cursor.json",
-  "worktrees.db",
 ]);
-const PINNED_STATE_DIRECTORIES = new Set(["docs", "skills"]);
-const PINNED_RUNTIME_FILES = new Set(["leader.lock", "leader.log"]);
+const PINNED_STATE_DIRECTORY_NAMES = Object.freeze(["docs", "skills"]);
+const PINNED_RUNTIME_FILE_NAMES = Object.freeze(["leader.lock"]);
+const PINNED_STATE_FILES = new Set(PINNED_STATE_FILE_NAMES);
+const PINNED_STATE_DIRECTORIES = new Set(PINNED_STATE_DIRECTORY_NAMES);
+const PINNED_RUNTIME_FILES = new Set(PINNED_RUNTIME_FILE_NAMES);
+
+// This read-only snapshot keeps the audited test inventory tied exactly to the
+// production classifier. Adding a new admit must therefore add a named
+// clean-to-red mutation instead of silently widening only the scanner.
+export const PINNED_VENDOR_STATE_POLICY = Object.freeze({
+  stateFiles: PINNED_STATE_FILE_NAMES,
+  stateDirectories: PINNED_STATE_DIRECTORY_NAMES,
+  runtimeFiles: PINNED_RUNTIME_FILE_NAMES,
+});
 
 const STATE_HOME_NAME = /^node-[0-9a-f]{24}$/;
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;

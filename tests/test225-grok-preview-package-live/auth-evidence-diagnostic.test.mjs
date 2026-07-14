@@ -23,6 +23,7 @@ import test from "node:test";
 import {
   AUTH_EVIDENCE_PHASES,
   AUTH_EVIDENCE_ROLES,
+  PINNED_VENDOR_STATE_POLICY,
   makeAuthEvidenceDiagnostic,
   readAndValidateAuthEvidenceDiagnostic,
   refreshAuthPatternFiles,
@@ -722,41 +723,109 @@ test("binds the exact current home and accepts only its two owner-bound runtime 
   }
 });
 
-test("scans exact pinned vendor state and native leader files without structural false positives", () => {
+const OBSERVED_PINNED_STATE_FILES = Object.freeze([
+  ".metadata_version",
+  "active_sessions.json",
+  "active_sessions.lock",
+  "managed_config.lock",
+  "models_cache.json",
+]);
+const OBSERVED_PINNED_STATE_DIRECTORIES = Object.freeze(["docs", "skills"]);
+
+test("production pinned vendor policy equals the audited observed inventory", () => {
+  assert.deepEqual(PINNED_VENDOR_STATE_POLICY, {
+    stateFiles: OBSERVED_PINNED_STATE_FILES,
+    stateDirectories: OBSERVED_PINNED_STATE_DIRECTORIES,
+    runtimeFiles: ["leader.lock"],
+  });
+});
+
+function assertCleanStateFixture(fixture) {
+  assert.deepEqual(scanStateFixture(fixture), {
+    v: 2,
+    gate: "real_auth_evidence_scan",
+    status: "passed",
+    phase: "first_turn_post_stop",
+    scanOutcome: "clean",
+    matchedRoles: [],
+    errorRoles: [],
+    detailWithheld: true,
+  });
+}
+
+function assertExactStatePatternMatch(fixture, role) {
+  assert.deepEqual(scanStateFixture(fixture), {
+    v: 2,
+    gate: "real_auth_evidence_scan",
+    status: "failed",
+    phase: "first_turn_post_stop",
+    scanOutcome: "match",
+    matchedRoles: [role],
+    errorRoles: [],
+    detailWithheld: true,
+  });
+}
+
+function installObservedPinnedVendorState(fixture) {
+  for (const directory of OBSERVED_PINNED_STATE_DIRECTORIES) {
+    const nested = path.join(fixture.home, directory, "nested");
+    mkdirSync(nested, { recursive: true, mode: 0o700 });
+    writeFileSync(path.join(nested, "clean"), "clean\n", { mode: 0o600 });
+  }
+  for (const basename of OBSERVED_PINNED_STATE_FILES) {
+    writeFileSync(path.join(fixture.home, basename), "clean\n", { mode: 0o600 });
+  }
+  writeFileSync(path.join(fixture.run, "leader.lock"), "1\n", { mode: 0o600 });
+}
+
+test("scans only the observed pinned vendor state without structural false positives", () => {
   const fixture = stateFixture("pinned-vendor-state");
   try {
-    for (const directory of ["docs", "skills"]) {
-      const nested = path.join(fixture.home, directory, "nested");
-      mkdirSync(nested, { recursive: true, mode: 0o700 });
-      writeFileSync(path.join(nested, "clean"), "clean\n", { mode: 0o600 });
-    }
-    for (const basename of [
-      ".metadata_version",
-      "active_sessions.json",
-      "active_sessions.lock",
-      "managed_config.lock",
-      "models_cache.json",
-      "prompt_history.jsonl",
-      "session_search.sqlite",
-      "tip_cursor.json",
-      "worktrees.db",
-    ]) {
-      writeFileSync(path.join(fixture.home, basename), "clean\n", { mode: 0o600 });
-    }
-    writeFileSync(path.join(fixture.run, "leader.lock"), "1\n", { mode: 0o600 });
-    writeFileSync(path.join(fixture.run, "leader.log"), "clean\n", { mode: 0o600 });
+    installObservedPinnedVendorState(fixture);
+    assertCleanStateFixture(fixture);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
 
-    assert.equal(scanStateFixture(fixture).scanOutcome, "clean");
+for (const basename of OBSERVED_PINNED_STATE_FILES) {
+  test(`rejects an auth pattern inside observed pinned state file ${basename}`, () => {
+    const fixture = stateFixture(`pinned-file-${basename.replaceAll(".", "-")}`);
+    try {
+      installObservedPinnedVendorState(fixture);
+      assertCleanStateFixture(fixture);
+      writeFileSync(path.join(fixture.home, basename),
+        "PRIVATE_AUTH_SCALAR_0123456789\n", { mode: 0o600 });
+      assertExactStatePatternMatch(fixture, "grok_current_home_other_state");
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+}
 
-    writeFileSync(path.join(fixture.home, "docs", "nested", "clean"),
+for (const directory of OBSERVED_PINNED_STATE_DIRECTORIES) {
+  test(`rejects an auth pattern inside observed pinned state directory ${directory}`, () => {
+    const fixture = stateFixture(`pinned-directory-${directory}`);
+    try {
+      installObservedPinnedVendorState(fixture);
+      assertCleanStateFixture(fixture);
+      writeFileSync(path.join(fixture.home, directory, "nested", "clean"),
+        "PRIVATE_AUTH_SCALAR_0123456789\n", { mode: 0o600 });
+      assertExactStatePatternMatch(fixture, "grok_current_home_other_state");
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("rejects an auth pattern inside observed native leader.lock", () => {
+  const fixture = stateFixture("pinned-runtime-leader-lock");
+  try {
+    installObservedPinnedVendorState(fixture);
+    assertCleanStateFixture(fixture);
+    writeFileSync(path.join(fixture.run, "leader.lock"),
       "PRIVATE_AUTH_SCALAR_0123456789\n", { mode: 0o600 });
-    assert.deepEqual(scanStateFixture(fixture).matchedRoles,
-      ["grok_current_home_other_state"]);
-    writeFileSync(path.join(fixture.home, "docs", "nested", "clean"), "clean\n", { mode: 0o600 });
-    writeFileSync(path.join(fixture.run, "leader.log"),
-      "PRIVATE_AUTH_SCALAR_0123456789\n", { mode: 0o600 });
-    assert.deepEqual(scanStateFixture(fixture).matchedRoles,
-      ["grok_runtime_directory_other_state"]);
+    assertExactStatePatternMatch(fixture, "grok_runtime_directory_other_state");
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
