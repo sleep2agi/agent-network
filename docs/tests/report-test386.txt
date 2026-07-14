@@ -1,0 +1,66 @@
+# test386-rfc030-stage2-r2-launcher
+
+date: 2026-07-14T03:58:26+00:00
+node: v20.20.0
+ws: 8.21.0
+better-sqlite3: 12.9.0
+script: script from util-linux 2.38.1
+layer: 3 (run only after test385 passes)
+
+ok 1: adapter turns raw upstream rejection into stable failure
+ok 2: client surface: upstream detail absent
+ok 3: adapter log surface: upstream detail absent
+ok 4: adapter diagnostic surface: upstream detail absent
+ok 5: diagnostic keeps a redacted classification and local correlation
+ok 6: scheduler accepts stamped R2 probe task
+ok 7: unexpected dispatcher throw reaches terminal failed state
+ok 8: ledger API surface: upstream detail absent
+ok 9: scheduler log surface: upstream detail absent
+ok 10: SQLite persisted bytes: upstream detail absent
+ok 11: invalid-version error frame is dropped, never repaired into a live response
+ok 12: invalid error frame surface: upstream detail absent
+ok 13: transport response/client surface: upstream detail absent
+ok 14: transport redacts upstream error message/data before final-A routing
+ok 15: closed transport fails client operation
+ok 16: transport client surface: upstream detail absent
+ok 17: transport log surface: upstream detail absent
+ok 18: oversized upstream frame closes at the fixed payload bound
+ok 19: oversized upstream payload is absent from diagnostics
+ok 20: production launcher allowlist is the exact five-key set
+ok 21: launcher TERM grace is pinned to one second
+ok 22: launch request contains exactly the five allowed environment keys
+ok 23: foreign environment slot is rejected before spawn
+ok 24: non-strict-loopback remote is rejected before PTY spawn
+ok 25: fixed PTY wrapper launches with a PATH shadow present
+ok 26: PATH-shadowed script never executes or receives the bearer
+ok 27: real util-linux PTY child reports spawned
+ok 28: fake Codex observed the real PTY exec boundary
+ok 29: PTY argv pins strict loopback remote
+ok 30: production PTY path resumes the assembly-bound thread
+ok 31: PTY argv references only the pinned bearer environment name
+ok 32: PTY argv pins approval=never
+ok 33: PTY argv pins read-only sandbox
+ok 34: bearer plaintext is absent from argv/key-only capture
+ok 35: PTY child receives allowlisted ANET_CODEX_TUI_BEARER
+ok 36: PTY child receives allowlisted CODEX_HOME
+ok 37: PTY child receives allowlisted HOME
+ok 38: PTY child receives allowlisted PATH
+ok 39: PTY child receives allowlisted TMPDIR
+ok 40: real PTY child environment is exactly the five-key allowlist
+ok 41: PTY child does not inherit COMMHUB_TOKEN
+ok 42: PTY child does not inherit AWS_SECRET_ACCESS_KEY
+ok 43: PTY child does not inherit DATABASE_URL
+ok 44: PTY child does not inherit ANET_HUB_TOKEN
+ok 45: launcher log surface: upstream detail absent
+ok 46: launcher logs contain no bearer plaintext
+ok 47: PTY output contains no bearer plaintext
+ok 48: PTY process PID/PPID/PGID/SID/starttime captured
+ok 49: PTY payload is the starttime-pinned leader of its own process group/session
+ok 50: util-linux wrapper is independently starttime-pinned as its group/session leader
+ok 51: wrapper PGID differs from the real PTY Codex PGID
+ok 52: TERM/KILL teardown stays within the two fixed bounds
+ok 53: bounded teardown leaves no real Codex PTY process group
+ok 54: bounded teardown leaves no util-linux wrapper process group
+R2 + real PTY launcher probe PASS: 54/54
+
+OVERALL: PASS

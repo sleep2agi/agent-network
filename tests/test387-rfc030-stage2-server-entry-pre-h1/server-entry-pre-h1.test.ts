@@ -250,7 +250,11 @@ describe("RFC-030 Stage2 real server entries (pre-#440 H1)", () => {
     expect(invalidSent.ok).toBe(true);
     const invalidId = String(invalidSent.message_id);
 
-    const ordinarySent = await callTool(user, "send_message", {
+    // send_message intentionally has no network_id argument, so its caller
+    // must already be bound to NET. The rogue node is also the pre-H1 lease
+    // boundary probe above and gives this ordinary message a real server-
+    // stamped node principal for the mixed-window ingress path.
+    const ordinarySent = await callTool(rogue, "send_message", {
       alias: GATEWAY,
       message: "ordinary mixed-window message",
     });
@@ -362,22 +366,30 @@ describe("RFC-030 Stage2 real server entries (pre-#440 H1)", () => {
 
     // Drain the remaining shared FIFO before closing the SQLite driver; a
     // live scheduler must never retain a DB handle across the reopen proof.
-    for (let attempt = 0; attempt < 50 && ledger.get(restId)?.state !== "accepted"; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, 2));
+    // CommHub orders equal-priority, same-second rows by fields that do not
+    // provide a total tie-break, so observe the scheduler's actual next row
+    // rather than inventing a REST-before-ordinary ordering guarantee.
+    const remaining = new Set([restId, ordinaryId]);
+    while (remaining.size > 0) {
+      let next: string | null = null;
+      for (let attempt = 0; attempt < 50; attempt++) {
+        if (
+          remaining.has(activeSubmission) &&
+          ledger.get(activeSubmission)?.state === "accepted"
+        ) {
+          next = activeSubmission;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2));
+      }
+      if (next === null) throw new Error("remaining mixed FIFO row was not dispatched");
+      scheduler.onAgentTurnFinished(next, {
+        ok: true,
+        replyText: next === ordinaryId ? "ordinary row consumed" : "secondary durable reply",
+      });
+      remaining.delete(next);
     }
-    expect(ledger.get(restId)!.state).toBe("accepted");
-    scheduler.onAgentTurnFinished(restId, {
-      ok: true,
-      replyText: "secondary durable reply",
-    });
-    for (let attempt = 0; attempt < 50 && ledger.get(ordinaryId)?.state !== "accepted"; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, 2));
-    }
-    expect(ledger.get(ordinaryId)!.state).toBe("accepted");
-    scheduler.onAgentTurnFinished(ordinaryId, {
-      ok: true,
-      replyText: "ordinary row consumed",
-    });
+    expect(ledger.get(restId)!.state).toBe("reply_pending");
     expect(ledger.get(ordinaryId)).toMatchObject({
       state: "replied",
       outboundDelivery: "none",

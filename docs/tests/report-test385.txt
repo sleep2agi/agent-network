@@ -1,0 +1,66 @@
+# test385-rfc030-stage2-r1-node20
+
+date: 2026-07-14T03:56:58+00:00
+node: v20.20.0
+better-sqlite3: 12.9.0
+layer: 2 (run only after test384 passes)
+
+ok 1: runtime is exact Node 20.20.x line
+ok 2: better-sqlite3 fallback is exact pinned 12.9.0
+ok 3: Node 20 selects synchronous better-sqlite3 fallback
+ok 4: SQLite write survives close and reopen
+ok 5: owned provider spawn: Promise.prototype
+ok 6: owned provider spawn: base constructor
+ok 7: owned provider spawn: Promise.resolve identity
+ok 8: owned provider spawn: no decorated own then
+ok 9: owned provider spawn: safeAdopt returns base Promise
+ok 10: owned provider exposes strict loopback URL
+ok 11: owned provider graceful shutdown: Promise.prototype
+ok 12: owned provider graceful shutdown: base constructor
+ok 13: owned provider graceful shutdown: Promise.resolve identity
+ok 14: owned provider graceful shutdown: no decorated own then
+ok 15: owned provider graceful shutdown: safeAdopt returns base Promise
+ok 16: owned provider second spawn: Promise.prototype
+ok 17: owned provider second spawn: base constructor
+ok 18: owned provider second spawn: Promise.resolve identity
+ok 19: owned provider second spawn: no decorated own then
+ok 20: owned provider second spawn: safeAdopt returns base Promise
+ok 21: owned provider force abort: Promise.prototype
+ok 22: owned provider force abort: base constructor
+ok 23: owned provider force abort: Promise.resolve identity
+ok 24: owned provider force abort: no decorated own then
+ok 25: owned provider force abort: safeAdopt returns base Promise
+ok 26: transport connect: Promise.prototype
+ok 27: transport connect: base constructor
+ok 28: transport connect: Promise.resolve identity
+ok 29: transport connect: no decorated own then
+ok 30: transport connect: safeAdopt returns base Promise
+ok 31: transport readiness probe: Promise.prototype
+ok 32: transport readiness probe: base constructor
+ok 33: transport readiness probe: Promise.resolve identity
+ok 34: transport readiness probe: no decorated own then
+ok 35: transport readiness probe: safeAdopt returns base Promise
+ok 36: transport writeFrame: Promise.prototype
+ok 37: transport writeFrame: base constructor
+ok 38: transport writeFrame: Promise.resolve identity
+ok 39: transport writeFrame: no decorated own then
+ok 40: transport writeFrame: safeAdopt returns base Promise
+ok 41: real WebSocket received serialized frame
+ok 42: transport graceful close: Promise.prototype
+ok 43: transport graceful close: base constructor
+ok 44: transport graceful close: Promise.resolve identity
+ok 45: transport graceful close: no decorated own then
+ok 46: transport graceful close: safeAdopt returns base Promise
+ok 47: abort transport connect: Promise.prototype
+ok 48: abort transport connect: base constructor
+ok 49: abort transport connect: Promise.resolve identity
+ok 50: abort transport connect: no decorated own then
+ok 51: abort transport connect: safeAdopt returns base Promise
+ok 52: transport force abort: Promise.prototype
+ok 53: transport force abort: base constructor
+ok 54: transport force abort: Promise.resolve identity
+ok 55: transport force abort: no decorated own then
+ok 56: transport force abort: safeAdopt returns base Promise
+R1 + Node20.20 probe PASS: 56/56
+
+OVERALL: PASS

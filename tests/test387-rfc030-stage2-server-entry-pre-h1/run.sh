@@ -6,7 +6,28 @@ set -euo pipefail
 REPORT="${REPORT:-/repo/docs/tests/report-test387.txt}"
 mkdir -p "$(dirname "$REPORT")"
 : > "$REPORT"
-exec > >(tee -a "$REPORT") 2>&1
+exec 3>&1 4>&2
+exec > >(tee -a "$REPORT" >&3) 2>&1
+tee_pid=$!
+overall_emitted=0
+
+finish_report() {
+  local status=$?
+  local tee_status
+  trap - EXIT
+  set +e
+  if [[ "$status" -ne 0 && "$overall_emitted" -eq 0 ]]; then
+    echo
+    echo "OVERALL: FAIL (exit $status)"
+  fi
+  exec 1>&3 2>&4
+  wait "$tee_pid"
+  tee_status=$?
+  exec 3>&- 4>&-
+  if [[ "$status" -eq 0 && "$tee_status" -ne 0 ]]; then status=$tee_status; fi
+  exit "$status"
+}
+trap finish_report EXIT
 
 echo "# test387-rfc030-stage2-server-entry-pre-h1"
 echo
@@ -34,3 +55,4 @@ echo
 echo "BOUNDARY: PRE_H1_CONFIRMED — a second network-bound node principal can still read the gateway alias inbox; no #440 consumer lease was forged."
 echo "QUALIFICATION: PRE-H1 ONLY; this is not a final Stage2 H1 acceptance."
 echo "OVERALL: PASS"
+overall_emitted=1

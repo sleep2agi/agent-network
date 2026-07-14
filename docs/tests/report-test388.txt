@@ -1,0 +1,42 @@
+# test388-rfc030-real-codex-node20
+
+date: 2026-07-14T04:09:20+00:00
+node: v20.20.0
+script: script from util-linux 2.38.1
+layer: 5 (run only after test384 -> test385 -> test386 -> test387 pass)
+
+## S0 prerequisite reports (strict order)
+test384: PASS evidence present
+test385: PASS evidence present
+test386: PASS evidence present
+test387: PASS evidence present
+
+## S1 exact container/runtime/package versions
+@openai/codex package: 0.144.0 (exact)
+codex binary: codex-cli 0.144.0 (exact)
+
+## S2 production dual baseline gate
+assertCodexBaseline: PASS version=codex-cli 0.144.0
+generated-schema gate: PASS sha256=03b6fa7416bfadf8874662770f0d30ef950f4eb9b7352f033b144d1065eb839f
+
+## S3 real PTY/Upgrade/bearer/account-read bootstrap + env mutation-red
+RFC-030 Wave 1A P0.2 Commit 1 corrective round 9 — real codex 0.144.0 bootstrap smoke
+  ok  mutation red: COMMHUB_TOKEN refused by buildAllowlistEnv
+  ok  detector interleave case A: stdout prefix + stderr noise + stdout suffix ⇒ detected=true (contiguous within stdout stream)
+  ok  detector interleave case B: stdout prefix + stderr suffix ⇒ detected=false (no cross-stream fusion)
+  ok  child env exact-set (probed under PTY, canary bearer): [ANET_CODEX_TUI_BEARER,CODEX_HOME,HOME,PATH,TMPDIR]
+  ok  mutation red: without unset PWD the PTY child sees 6 keys (includes PWD) — guard is load-bearing
+  ok  canary detector — unsafe mode: canary in child stdout was DETECTED (detector proven live)
+  ok  canary detector — safe mode: withGuard + withoutGuard both scanned clean (0 hits)
+  ok  probe return shape: only {code, keys, canaryDetected, note} exposed
+  ok  parent-side env reference exact-set matches allowlist: [ANET_CODEX_TUI_BEARER,CODEX_HOME,HOME,PATH,TMPDIR]
+  ok  SecretRedactor covers child output (no plaintext in captured out+err)
+  ok  Codex authorizer invoked (1 call)
+  ok  Codex first authorizer call is exactly account/read
+
+  note: using codex binary (realpath): /opt/rfc030-real-codex/node_modules/@openai/codex/bin/codex.js
+
+real CLI bootstrap smoke PASS: 12/12
+real PTY + HTTP Upgrade + bearer acceptance: PASS (account/read reached the authorizer)
+
+OVERALL: PASS

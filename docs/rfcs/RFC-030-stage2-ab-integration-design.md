@@ -161,8 +161,9 @@ The test does not print the sentinel into its own report.
 ## 6. Real launcher boundary
 
 The production launcher uses a real PTY (fixed `/usr/bin/script`, canonical
-identity rechecked before spawn) and a detached
-process group. Its child environment is an exact allowlist:
+identity rechecked before spawn) and retains both the detached wrapper and
+the PTY payload ownership identities. Its child environment is an exact
+allowlist:
 
 ```text
 PATH
@@ -179,10 +180,24 @@ strict `ws://127.0.0.1:<port>` remote, `approval_policy=never`, and
 `sandbox_mode=read-only`. Because `script -c` invokes a shell which otherwise
 synthesizes `PWD`, the exec command first runs `unset PWD`; the Docker probe
 asserts the environment observed by the executable, not merely the parent
-spawn options. Teardown sends `SIGTERM` to the process group,
-waits a fixed grace period, then sends `SIGKILL` and waits a second fixed
-period. The launcher and assembly retain the handles until this sequence
-settles.
+spawn options.
+
+On Linux, util-linux `script` and its forkpty payload lead distinct process
+groups. Before Codex can exec, the PTY shell reports its `/proc` identity over
+a private pipe and blocks on a second pipe. The parent validates PID,
+starttime, parent ancestry, PGID, SID, and independent group/session
+leadership before sending the fixed `go` acknowledgement. A missing,
+oversized, changed, or non-descendant identity closes the acknowledgement
+pipe, so the unverified payload never execs. Teardown revalidates the
+starttime-pinned owners, sends `SIGTERM` then `SIGKILL` to the real Codex
+group first, leaves the wrapper available to reap it, and only then closes
+the wrapper group. Each signal phase has a fixed one-second bound; `exited`
+settles only after both groups and the wrapper terminal event are observed.
+The launcher and assembly retain these handles until the single-flight
+sequence settles. Node exposes neither pidfd nor cgroup ownership here, so a
+kernel-atomic PID-reuse proof would require a future pidfd/cgroup primitive;
+identity mismatch currently fails closed without signalling an unproven
+group.
 
 The frozen final-A server is a hard interactive blocker: its TUI server
 returns `wave1a_no_tui_forward` for every otherwise-authorized upstream

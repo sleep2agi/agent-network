@@ -7,7 +7,32 @@ REPORT="${REPORT:-/repo/docs/tests/report-test388.txt}"
 PREREQ_REPORT_DIR="${PREREQ_REPORT_DIR:-/repo/docs/tests}"
 mkdir -p "$(dirname "$REPORT")"
 : > "$REPORT"
-exec > >(tee -a "$REPORT") 2>&1
+exec 3>&1 4>&2
+exec > >(tee -a "$REPORT" >&3) 2>&1
+tee_pid=$!
+overall_emitted=0
+smoke_evidence=""
+
+finish_report() {
+  local status=$?
+  local tee_status
+  trap - EXIT
+  set +e
+  if [[ -n "$smoke_evidence" ]]; then
+    rm -f "$smoke_evidence"
+  fi
+  if [[ "$status" -ne 0 && "$overall_emitted" -eq 0 ]]; then
+    echo
+    echo "OVERALL: FAIL (exit $status)"
+  fi
+  exec 1>&3 2>&4
+  wait "$tee_pid"
+  tee_status=$?
+  exec 3>&- 4>&-
+  if [[ "$status" -eq 0 && "$tee_status" -ne 0 ]]; then status=$tee_status; fi
+  exit "$status"
+}
+trap finish_report EXIT
 
 echo "# test388-rfc030-real-codex-node20"
 echo
@@ -58,7 +83,6 @@ echo
 echo "## S3 real PTY/Upgrade/bearer/account-read bootstrap + env mutation-red"
 cd /repo/agent-node
 smoke_evidence="$(mktemp /tmp/rfc030-real-codex-smoke.XXXXXX)"
-trap 'rm -f "$smoke_evidence"' EXIT
 node scripts/rfc030-real-cli-e2e.mjs | tee "$smoke_evidence"
 grep -q '^  ok  child env exact-set (probed under PTY' "$smoke_evidence"
 grep -q '^  ok  mutation red: COMMHUB_TOKEN refused by buildAllowlistEnv$' "$smoke_evidence"
@@ -66,7 +90,8 @@ grep -q '^  ok  Codex first authorizer call is exactly account/read$' "$smoke_ev
 grep -q '^real CLI bootstrap smoke PASS: 12/12$' "$smoke_evidence"
 echo "real PTY + HTTP Upgrade + bearer acceptance: PASS (account/read reached the authorizer)"
 rm -f "$smoke_evidence"
-trap - EXIT
+smoke_evidence=""
 
 echo
 echo "OVERALL: PASS"
+overall_emitted=1

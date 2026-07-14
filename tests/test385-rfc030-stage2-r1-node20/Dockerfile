@@ -10,6 +10,7 @@ RUN cd /repo/agent-node \
       --target=node \
       --format=esm \
       --external better-sqlite3 \
+      --external ws \
       --outfile=/out/r1-node20-probe.mjs \
       /repo/tests/test385-rfc030-stage2-r1-node20/r1-node20-probe.ts
 
@@ -21,7 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /harness
 RUN npm init -y >/dev/null \
-    && npm install --save-exact --omit=dev better-sqlite3@12.9.0 >/dev/null
+    && npm install --save-exact --omit=dev better-sqlite3@12.9.0 ws@8.21.0 >/dev/null
 COPY --from=build /out/r1-node20-probe.mjs /harness/r1-node20-probe.mjs
 COPY tests/test385-rfc030-stage2-r1-node20/fake-owned-upstream.mjs /harness/fake-owned-upstream.mjs
 COPY tests/test385-rfc030-stage2-r1-node20/run.sh /harness/run.sh

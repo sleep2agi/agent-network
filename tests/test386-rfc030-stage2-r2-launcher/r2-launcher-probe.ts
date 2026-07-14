@@ -358,8 +358,32 @@ check(!launcherLogs.join("\n").includes(bearer), "launcher logs contain no beare
 check(!Buffer.concat(launcherOutput).toString("utf8").includes(bearer), "PTY output contains no bearer plaintext");
 
 const pid = Number(/^PID=(\d+)$/m.exec(capture)?.[1]);
+const ppid = Number(/^PPID=(\d+)$/m.exec(capture)?.[1]);
 const pgid = Number(/^PGID=(\d+)$/m.exec(capture)?.[1]);
-check(Number.isInteger(pid) && pid > 1 && Number.isInteger(pgid) && pgid > 1, "PTY process and group ids captured");
+const sid = Number(/^SID=(\d+)$/m.exec(capture)?.[1]);
+const startTime = /^STARTTIME=(\d+)$/m.exec(capture)?.[1];
+const wrapperPid = Number(/^WRAPPER_PID=(\d+)$/m.exec(capture)?.[1]);
+const wrapperPgid = Number(/^WRAPPER_PGID=(\d+)$/m.exec(capture)?.[1]);
+const wrapperSid = Number(/^WRAPPER_SID=(\d+)$/m.exec(capture)?.[1]);
+const wrapperStartTime = /^WRAPPER_STARTTIME=(\d+)$/m.exec(capture)?.[1];
+check(
+  Number.isInteger(pid) && pid > 1 &&
+    Number.isInteger(ppid) && ppid > 1 &&
+    Number.isInteger(pgid) && pgid > 1 &&
+    Number.isInteger(sid) && sid > 1 &&
+    typeof startTime === "string",
+  "PTY process PID/PPID/PGID/SID/starttime captured",
+);
+check(
+  pid === pgid && pid === sid,
+  "PTY payload is the starttime-pinned leader of its own process group/session",
+);
+check(
+  wrapperPid === ppid && wrapperPid === wrapperPgid && wrapperPid === wrapperSid &&
+    typeof wrapperStartTime === "string",
+  "util-linux wrapper is independently starttime-pinned as its group/session leader",
+);
+check(wrapperPgid !== pgid, "wrapper PGID differs from the real PTY Codex PGID");
 const teardownStarted = Date.now();
 await launcher.terminate();
 const teardownMs = Date.now() - teardownStarted;
@@ -375,6 +399,18 @@ for (let i = 0; i < 50 && !groupGone; i++) {
     else throw error;
   }
 }
-check(groupGone, "bounded teardown leaves no PTY process group");
+check(groupGone, "bounded teardown leaves no real Codex PTY process group");
+
+let wrapperGroupGone = false;
+for (let i = 0; i < 50 && !wrapperGroupGone; i++) {
+  try {
+    process.kill(-wrapperPgid, 0);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") wrapperGroupGone = true;
+    else throw error;
+  }
+}
+check(wrapperGroupGone, "bounded teardown leaves no util-linux wrapper process group");
 
 console.log(`R2 + real PTY launcher probe PASS: ${passed}/${passed}`);

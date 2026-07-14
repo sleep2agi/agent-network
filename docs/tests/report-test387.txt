@@ -1,0 +1,177 @@
+# test387-rfc030-stage2-server-entry-pre-h1
+
+date: 2026-07-14T04:06:41+00:00
+bun: 1.3.1
+layer: 4 (run only after test384, test385, and test386 pass)
+scope: pre-H1 evidence; #440 consumer-principal/lease is intentionally not emulated
+
+## S1 existing server authority and reply-lifecycle suites
+bun test v1.3.1 (89fa0f34)
+
+server/src/rfc030-principal-handler.test.ts:
+[commhub] database: /tmp/rfc030-handler-ISKVTP/test.db
+[commhub] 🎉 14-day free trial started!
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+[04:06:42] 指挥室 → send_task → stamp-target: stamp-mx-1
+[04:06:42] 指挥室 → send_task → stamp-target: stamp-mx-2
+(pass) L1F #5 — role authority, same-source authCtx (falsifiable) > utok member/owner: stamp equals the TOKEN's network role; forged from_session cannot shift it [124.01ms]
+(pass) L1F #5 — role authority, same-source authCtx (falsifiable) > utok viewer: MCP send_task REFUSED (canWrite), zero insert [27.00ms]
+(pass) L1F #5 — role authority, same-source authCtx (falsifiable) > global admin WITHOUT membership: MCP send_task REFUSED (cross-network admin power is REST-only) [25.00ms]
+(pass) L1F #5 — role authority, same-source authCtx (falsifiable) > utok outsider: REFUSED, zero insert [23.00ms]
+[04:06:42] stamp-caller → send_task → stamp-target: stamp-mx-6
+(pass) L1F #5 — role authority, same-source authCtx (falsifiable) > plain ntok (owner's token): stamps 'node', NEVER the owner's network role [21.00ms]
+(pass) L1F #5 — role authority, same-source authCtx (falsifiable) > ntok forged from_session (≠ bound alias): REFUSED, zero insert [23.00ms]
+[04:06:42] stamp-caller → send_task → stamp-target: stamp-mx-8
+(pass) L1F #5 — role authority, same-source authCtx (falsifiable) > RFC-026 child token → 'child' [21.00ms]
+[04:06:42] stamp-owner → send_task → stamp-target: stamp-mx-9
+[04:06:42] hub → send_task → stamp-target: stamp-mx-10
+(pass) L1F #5 — role authority, same-source authCtx (falsifiable) > legacy 'full' token / no token → NULL principal; gateway alone refuses [44.00ms]
+(pass) L1F #5 — role authority, same-source authCtx (falsifiable) > #1 node/child tokens are principals ONLY in their bound network
+(pass) L1F #5 — role authority, same-source authCtx (falsifiable) > bogus/unknown role values in the column are refused by the gateway parser
+[04:06:42] stamp-director → send_task → stamp-target: stamp-mx-11
+[04:06:43] stamp-caller → retry_task → 6cd74271
+(pass) L1F — origin/canonical + #6 all-attempts cleanup + #8 DB write-once > retry INHERITS origin; initial→retry leaves EXACTLY ONE pending attempt [48.00ms]
+[04:06:43] stamp-director → send_task → stamp-target: stamp-mx-12
+[04:06:43] stamp-caller → retry_task → 12acb180
+[04:06:43] stamp-caller → reassign_task → 12acb180 → stamp-director
+(pass) L1F — origin/canonical + #6 all-attempts cleanup + #8 DB write-once > retry→reassign: ALL prior attempts acked, single fresh attempt for the new alias [61.00ms]
+[04:06:43] stamp-director → send_task → stamp-target: stamp-mx-13
+[04:06:43] stamp-caller → retry_task → 77c3d187
+[04:06:43] stamp-caller → cancel_task → 77c3d187
+(pass) L1F — origin/canonical + #6 all-attempts cleanup + #8 DB write-once > retry→cancel: ZERO pending attempts remain [50.00ms]
+[04:06:43] stamp-director → send_task → stamp-target: stamp-mx-14
+(pass) L1F — origin/canonical + #6 all-attempts cleanup + #8 DB write-once > #8 DB trigger: origin principal is write-once (mutation aborts; NULL→value backfill allowed) [32.00ms]
+[04:06:43] stamp-caller → send_message → stamp-target: hi-stamp
+(pass) L1F #7 — real-entry stamping for the remaining write sites > send_message: operator stamp via real handler (node caller) [20.00ms]
+[04:06:43] hub → broadcast: bc-stamp [net=net_stamp_h]
+(pass) L1F #7 — real-entry stamping for the remaining write sites > broadcast: every recipient row stamped with the operator [28.00ms]
+[04:06:43] stamp-director → send_task → stamp-target: p-work
+[04:06:43] stamp-target → send_task → stamp-caller: c-work
+[04:06:43] stamp-caller → report_completion: c-work [net]
+(pass) L1F #7 — real-entry stamping for the remaining write sites > report_completion → auto-chain: notify row inherits the REPORTER's principal [64.00ms]
+[04:06:43] stamp-director → send_task → pump-target: pump-acc-1
+[04:06:43] stamp-director → send_task → pump-target: pump-acc-2
+(pass) L1F #2/#3/#4 — pump state machine, server dead-letter, demux > accepted → durable-then-ACK; duplicate → ACK; window drains [53.00ms]
+[04:06:43] stamp-director → send_task → pump-target: pump-defer-1
+(pass) L1F #2/#3/#4 — pump state machine, server dead-letter, demux > queue_full / no_owner / shutting_down → NOT acked, reported deferred (backoff signal) [30.00ms]
+[04:06:43] stamp-director → send_task → pump-target: pump-invalidarg-1
+(pass) L1F #2/#3/#4 — pump state machine, server dead-letter, demux > refused_invalid_arg → SERVER-side conditional dead-letter (verified mapping: atomic ack+fail+audit) [28.00ms]
+[04:06:43] stamp-director → send_task → pump-target: pump-victim-1
+[04:06:43] 指挥室 → send_task → pump-target: poison-claim
+(pass) L1F #2/#3/#4 — pump state machine, server dead-letter, demux > #4 falsifiability: a LYING canonical claim is quarantined (audit-only), never fails the claimed task [63.00ms]
+[04:06:43] stamp-director → send_task → pump-target: pump-foreign-1
+(pass) L1F #2/#3/#4 — pump state machine, server dead-letter, demux > #4 cross-network: a gateway cannot ack/fail rows of a foreign network (no-op) [23.00ms]
+[04:06:43] stamp-caller → send_message → pump-target: ord-0
+[04:06:43] stamp-caller → send_message → pump-target: ord-1
+[04:06:43] stamp-caller → send_message → pump-target: ord-2
+[04:06:43] stamp-director → send_task → pump-target: demux-good
+[04:06:43] 指挥室 → send_task → pump-target: demux-bad
+(pass) L1F #2/#3/#4 — pump state machine, server dead-letter, demux > #3 demux cycle: mixed window — ordinary rows delivered un-acked, tasks pumped; neither starves [69.00ms]
+
+ 23 pass
+ 0 fail
+ 115 expect() calls
+Ran 23 tests across 1 file. [1.66s]
+bun test v1.3.1 (89fa0f34)
+
+server/src/rfc030-principal-rest.test.ts:
+[commhub] database: /tmp/rfc030-rest-B0y4UI/test.db
+[commhub] 🎉 14-day free trial started!
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+
+╔══════════════════════════════════════════════════╗
+║   CommHub MCP Server v0.9.0-preview.13                     ║
+║   Transport: Streamable HTTP (Bun native)         ║
+║   Security: 🔒 secured                       ║
+║   Tmux: DISABLED (set COMMHUB_ENABLE_TMUX=1)  ║
+║                                                   ║
+║   MCP:    http://127.0.0.1:20143/mcp                 ║
+║   REST:   http://127.0.0.1:20143/api                 ║
+║   Health: http://127.0.0.1:20143/health               ║
+╚══════════════════════════════════════════════════╝
+
+[rfc-028 vault] master key not set + no vault rows — vault gating is lazy; boot OK. Set ANET_HUB_SECRET_VAULT_KEY when enabling provider/secret features.
+(pass) REST /api/task — production entry principal stamp > real HTTP + real utok: forged `from` (the REAL production field) lands as display only; principal is the token's [44.00ms]
+(pass) REST /api/task — production entry principal stamp > negative control: `from_session` is NOT a REST field — Zod strips it, display falls back to the token default [5.00ms]
+(pass) REST /api/task — production entry principal stamp > unauthenticated REST dispatch (open-dev/no token) → NULL principal [1.00ms]
+(pass) REST /api/broadcast — production entry principal stamp > broadcast rows stamped with the operator's principal [4.00ms]
+
+ 4 pass
+ 0 fail
+ 16 expect() calls
+Ran 4 tests across 1 file. [618.00ms]
+bun test v1.3.1 (89fa0f34)
+
+server/src/rfc030-reply-lifecycle-e2e.test.ts:
+[commhub] database: /tmp/rfc030-reply-e2e-uWlOfp/test.db
+[commhub] 🎉 14-day free trial started!
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+
+╔══════════════════════════════════════════════════╗
+║   CommHub MCP Server v0.9.0-preview.13                     ║
+║   Transport: Streamable HTTP (Bun native)         ║
+║   Security: 🔒 secured                       ║
+║   Tmux: DISABLED (set COMMHUB_ENABLE_TMUX=1)  ║
+║                                                   ║
+║   MCP:    http://127.0.0.1:21043/mcp                 ║
+║   REST:   http://127.0.0.1:21043/api                 ║
+║   Health: http://127.0.0.1:21043/health               ║
+╚══════════════════════════════════════════════════╝
+
+[rfc-028 vault] master key not set + no vault rows — vault gating is lazy; boot OK. Set ANET_HUB_SECRET_VAULT_KEY when enabling provider/secret features.
+[04:06:44] reply-director → send_task → reply-gateway-node: produce the quarterly summary
+[04:06:44] reply-gateway-node → send_reply (failed) → reply-director: first attempt exploded
+[04:06:44] reply-ops → retry_task → bdaf2874
+[04:06:45] SSE ← net_reply_e2e:reply-director connected (1 clients)
+[04:06:45] reply-gateway-node → send_reply (replied) → reply-director: quarterly summary attached
+(pass) L3-R7 reply lifecycle E2E — retry → pump(sender_*) → send_reply → canonical task + SSE wake > hard acceptance ①②: canonical hit after retry, pump consumes principal, owner sees replied + SSE new_reply [284.01ms]
+
+ 1 pass
+ 0 fail
+ 17 expect() calls
+Ran 1 test across 1 file. [938.00ms]
+
+## S2 same-DB real MCP + REST + SSE + mixed gateway cycle
+bun test v1.3.1 (89fa0f34)
+
+tests/test387-rfc030-stage2-server-entry-pre-h1/server-entry-pre-h1.test.ts:
+[commhub] database: /tmp/rfc030-entry-pre-h1-BGhKcu/commhub.db
+[commhub] 🎉 14-day free trial started!
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+
+╔══════════════════════════════════════════════════╗
+║   CommHub MCP Server v0.9.0-preview.13                     ║
+║   Transport: Streamable HTTP (Bun native)         ║
+║   Security: 🔒 secured                       ║
+║   Tmux: DISABLED (set COMMHUB_ENABLE_TMUX=1)  ║
+║                                                   ║
+║   MCP:    http://127.0.0.1:23241/mcp                 ║
+║   REST:   http://127.0.0.1:23241/api                 ║
+║   Health: http://127.0.0.1:23241/health               ║
+╚══════════════════════════════════════════════════╝
+
+[rfc-028 vault] master key not set + no vault rows — vault gating is lazy; boot OK. Set ANET_HUB_SECRET_VAULT_KEY when enabling provider/secret features.
+[04:06:46] SSE ← net_stage2_entry:stage2-gateway connected (1 clients)
+[04:06:46] stage2-entry-user → send_task → stage2-gateway: mcp canonical task [HIGH]
+[04:06:46] stage2-gateway → get_inbox: 2 pending messages
+[04:06:46] stage2-gateway → get_inbox: 2 pending messages
+PRE_H1_BOUNDARY: second network-bound node principal read gateway inbox without consumer lease
+[04:06:46] stage2-entry-user → send_task → stage2-gateway: invalid task for atomic dead-letter
+[04:06:46] stage2-other-node → send_message → stage2-gateway: ordinary mixed-window message
+[04:06:46] stage2-gateway → get_inbox: 4 pending messages
+[04:06:46] stage2-gateway → ack_inbox: 6e5a7839
+[04:06:46] stage2-gateway → ack_inbox: f578c22f
+[04:06:46] stage2-gateway → ack_inbox: 7c438c8c
+[04:06:46] stage2-gateway → gateway_dead_letter → c2593191: dead_lettered
+[04:06:46] stage2-gateway → send_reply (replied) → stage2-entry-user: must not mark replied
+[04:06:46] stage2-gateway → send_reply (replied) → stage2-entry-user: durable stage2 reply
+(pass) RFC-030 Stage2 real server entries (pre-#440 H1) > MCP + REST stamp one canonical inbox; SSE is only a doorbell; mixed cycle closes a durable reply [970.04ms]
+
+ 1 pass
+ 0 fail
+ 58 expect() calls
+Ran 1 test across 1 file. [1.69s]
+
+BOUNDARY: PRE_H1_CONFIRMED — a second network-bound node principal can still read the gateway alias inbox; no #440 consumer lease was forged.
+QUALIFICATION: PRE-H1 ONLY; this is not a final Stage2 H1 acceptance.
+OVERALL: PASS

@@ -8,6 +8,8 @@
 // exact five-key allowlist before spawning.
 
 import { spawn, type ChildProcess } from "node:child_process";
+import { readFileSync, readdirSync } from "node:fs";
+import type { Writable } from "node:stream";
 import {
   SecretRedactor,
 } from "./bearer";
@@ -98,6 +100,186 @@ function buildCodexTuiArgs(req: LaunchRequest, threadId?: string): string[] {
 
 const GROUP_POLL_MS = 25;
 
+interface LinuxProcessIdentity {
+  readonly pid: number;
+  readonly ppid: number;
+  readonly pgid: number;
+  readonly sid: number;
+  readonly startTime: string;
+}
+
+interface OwnedProcessGroup {
+  readonly pgid: number;
+  readonly sid: number;
+  readonly members: Map<string, LinuxProcessIdentity>;
+}
+
+function parseLinuxProcessStat(stat: string): LinuxProcessIdentity | null {
+  const open = stat.indexOf("(");
+  const close = stat.lastIndexOf(")");
+  if (open <= 0 || close <= open) return null;
+  const pid = Number(stat.slice(0, open).trim());
+  const fields = stat.slice(close + 1).trim().split(/\s+/);
+  // fields starts at proc(5) field 3 (state); starttime is field 22.
+  const ppid = Number(fields[1]);
+  const pgid = Number(fields[2]);
+  const sid = Number(fields[3]);
+  const startTime = fields[19];
+  if (
+    !Number.isSafeInteger(pid) || pid <= 1 ||
+    !Number.isSafeInteger(ppid) || ppid < 0 ||
+    !Number.isSafeInteger(pgid) || pgid <= 1 ||
+    !Number.isSafeInteger(sid) || sid <= 1 ||
+    typeof startTime !== "string" || !/^\d+$/.test(startTime)
+  ) {
+    return null;
+  }
+  return { pid, ppid, pgid, sid, startTime };
+}
+
+function readLinuxProcessIdentity(pid: number): LinuxProcessIdentity | null {
+  if (process.platform !== "linux" || !Number.isSafeInteger(pid) || pid <= 1) {
+    return null;
+  }
+  try {
+    const identity = parseLinuxProcessStat(readFileSync(`/proc/${pid}/stat`, "utf8"));
+    return identity?.pid === pid ? identity : null;
+  } catch {
+    return null;
+  }
+}
+
+function sameProcessIdentity(
+  expected: LinuxProcessIdentity,
+  actual: LinuxProcessIdentity | null,
+): boolean {
+  return actual !== null &&
+    actual.pid === expected.pid &&
+    actual.startTime === expected.startTime;
+}
+
+function isLinuxDescendantOf(
+  candidate: LinuxProcessIdentity,
+  ancestor: LinuxProcessIdentity,
+): boolean {
+  let current: LinuxProcessIdentity | null = candidate;
+  const visited = new Set<number>();
+  while (current !== null && !visited.has(current.pid)) {
+    if (sameProcessIdentity(ancestor, current)) return true;
+    visited.add(current.pid);
+    if (current.ppid <= 1) return false;
+    current = readLinuxProcessIdentity(current.ppid);
+  }
+  return false;
+}
+
+function validateLinuxOwnershipHandshake(
+  statLine: string,
+  wrapper: LinuxProcessIdentity,
+): LinuxProcessIdentity {
+  const reported = parseLinuxProcessStat(statLine);
+  if (reported === null || reported.pid === wrapper.pid) {
+    throw stableLauncherError("tui_codex_identity_invalid");
+  }
+  const current = readLinuxProcessIdentity(reported.pid);
+  if (
+    current === null ||
+    !sameProcessIdentity(reported, current) ||
+    current.ppid !== reported.ppid ||
+    current.pgid !== reported.pgid ||
+    current.sid !== reported.sid ||
+    current.pgid !== current.pid ||
+    current.sid !== current.pid
+  ) {
+    throw stableLauncherError("tui_codex_identity_changed");
+  }
+  if (!isLinuxDescendantOf(current, wrapper)) {
+    throw stableLauncherError("tui_codex_identity_not_descendant");
+  }
+  return current;
+}
+
+function processIdentityKey(identity: LinuxProcessIdentity): string {
+  return `${identity.pid}:${identity.startTime}`;
+}
+
+function createOwnedProcessGroup(identity: LinuxProcessIdentity): OwnedProcessGroup {
+  return {
+    pgid: identity.pgid,
+    sid: identity.sid,
+    members: new Map([[processIdentityKey(identity), identity]]),
+  };
+}
+
+function sameOwnedGroupMember(
+  expected: LinuxProcessIdentity,
+  actual: LinuxProcessIdentity | null,
+  group: Pick<OwnedProcessGroup, "pgid" | "sid">,
+): boolean {
+  return sameProcessIdentity(expected, actual) &&
+    actual?.pgid === group.pgid && actual.sid === group.sid;
+}
+
+function listLinuxProcessIdentities(): LinuxProcessIdentity[] {
+  if (process.platform !== "linux") return [];
+  let names: string[];
+  try {
+    names = readdirSync("/proc");
+  } catch {
+    return [];
+  }
+  const identities: LinuxProcessIdentity[] = [];
+  for (const name of names) {
+    if (!/^\d+$/.test(name)) continue;
+    const identity = readLinuxProcessIdentity(Number(name));
+    if (identity !== null) identities.push(identity);
+  }
+  return identities;
+}
+
+/**
+ * Refresh only while at least one starttime-pinned member is still live.
+ * This prevents a recycled PGID/SID from being adopted after the owned group
+ * has disappeared, while still capturing every same-group descendant before
+ * TERM/KILL is sent.
+ */
+function refreshOwnedProcessGroup(group: OwnedProcessGroup): boolean {
+  const hasPinnedLiveMember = [...group.members.values()].some((member) => {
+    const current = readLinuxProcessIdentity(member.pid);
+    return sameOwnedGroupMember(member, current, group);
+  });
+  if (!hasPinnedLiveMember) return false;
+
+  for (const identity of listLinuxProcessIdentities()) {
+    if (identity.pgid === group.pgid && identity.sid === group.sid) {
+      group.members.set(processIdentityKey(identity), identity);
+    }
+  }
+  return true;
+}
+
+function ownedProcessGroupGone(group: OwnedProcessGroup): boolean {
+  refreshOwnedProcessGroup(group);
+  return ![...group.members.values()].some((member) => {
+    const current = readLinuxProcessIdentity(member.pid);
+    return sameOwnedGroupMember(member, current, group);
+  });
+}
+
+function signalOwnedProcessGroup(
+  group: OwnedProcessGroup,
+  signal: NodeJS.Signals,
+): void {
+  if (!refreshOwnedProcessGroup(group)) return;
+  const failure = signal === "SIGTERM" ? "tui_term_failed" : "tui_kill_failed";
+  try {
+    process.kill(-group.pgid, signal);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ESRCH") return;
+    throw stableLauncherError(failure);
+  }
+}
+
 function groupExists(pid: number): boolean {
   if (process.platform === "win32") return true;
   try {
@@ -143,6 +325,16 @@ async function waitForProcessGroupGone(
   return processGroupGone(child, terminalObserved());
 }
 
+async function waitUntil(deadline: number, predicate: () => boolean): Promise<boolean> {
+  while (Date.now() < deadline) {
+    if (predicate()) return true;
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, Math.min(GROUP_POLL_MS, Math.max(1, deadline - Date.now())));
+    });
+  }
+  return predicate();
+}
+
 /**
  * Real launcher retained by the gateway handle until bounded teardown.
  * `launch` and `terminate` deliberately construct fresh base-realm native
@@ -153,10 +345,13 @@ export class ProductionTuiLauncher implements TuiChildLauncher {
   private terminalObserved = false;
   private launchStarted = false;
   private groupCleanupPromise: Promise<void> | null = null;
+  private wrapperIdentity: LinuxProcessIdentity | null = null;
+  private codexIdentity: LinuxProcessIdentity | null = null;
   private readonly log: (message: string) => void;
   private readonly resolveExited: () => void;
   private readonly rejectExited: (reason: Error) => void;
   private exitedSettled = false;
+  private terminalFailure: Error | null = null;
 
   /**
    * Same-realm terminal fence.  It settles only after the wrapper has exited
@@ -197,35 +392,106 @@ export class ProductionTuiLauncher implements TuiChildLauncher {
     if (this.groupCleanupPromise !== null) return this.groupCleanupPromise;
     this.groupCleanupPromise = (async (): Promise<void> => {
       if (child === null || child.pid === undefined) return;
-      if (processGroupGone(child, this.terminalObserved)) return;
-
-      signalProcessGroup(child, "SIGTERM");
-      if (
-        await waitForProcessGroupGone(
+      if (process.platform === "linux" && this.wrapperIdentity === null) {
+        // Identity acquisition failed before any validated payload exec. Kill
+        // only the ChildProcess handle we created; never guess at a PGID.
+        try {
+          child.kill("SIGTERM");
+        } catch {
+          throw stableLauncherError("tui_term_failed");
+        }
+        if (await waitUntil(
+          Date.now() + TUI_TERM_GRACE_MS,
+          () => this.terminalObserved,
+        )) return;
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          throw stableLauncherError("tui_kill_failed");
+        }
+        if (await waitUntil(
+          Date.now() + TUI_TERM_GRACE_MS,
+          () => this.terminalObserved,
+        )) return;
+        throw stableLauncherError("tui_kill_timeout");
+      }
+      if (process.platform !== "linux") {
+        if (processGroupGone(child, this.terminalObserved)) return;
+        signalProcessGroup(child, "SIGTERM");
+        if (await waitForProcessGroupGone(
           child,
           () => this.terminalObserved,
           TUI_TERM_GRACE_MS,
-        )
-      ) {
-        return;
-      }
-
-      signalProcessGroup(child, "SIGKILL");
-      if (
-        await waitForProcessGroupGone(
+        )) return;
+        signalProcessGroup(child, "SIGKILL");
+        if (await waitForProcessGroupGone(
           child,
           () => this.terminalObserved,
           TUI_TERM_GRACE_MS,
-        )
-      ) {
-        return;
+        )) return;
+        throw stableLauncherError("tui_kill_timeout");
       }
+
+      const wrapperGroup = this.wrapperIdentity === null
+        ? null
+        : createOwnedProcessGroup(this.wrapperIdentity);
+      const codexGroup = this.codexIdentity === null
+        ? null
+        : createOwnedProcessGroup(this.codexIdentity);
+      const codexGone = (): boolean => codexGroup === null || ownedProcessGroupGone(codexGroup);
+      const wrapperGone = (): boolean =>
+        wrapperGroup === null || ownedProcessGroupGone(wrapperGroup);
+      const allGone = (): boolean =>
+        codexGone() && wrapperGone() && this.terminalObserved;
+
+      // The PTY-side Codex is in a different process group from util-linux
+      // `script`.  Always stop that real group first so `script` can reap its
+      // child; killing the wrapper first can orphan an unkillable zombie.
+      if (codexGroup !== null && !codexGone()) {
+        signalOwnedProcessGroup(codexGroup, "SIGTERM");
+      }
+      let wrapperTermSentAt: number | null = null;
+      const termDeadline = Date.now() + TUI_TERM_GRACE_MS;
+      if (await waitUntil(termDeadline, () => {
+        if (codexGone() && !wrapperGone() && wrapperGroup !== null) {
+          if (wrapperTermSentAt === null) {
+            signalOwnedProcessGroup(wrapperGroup, "SIGTERM");
+            wrapperTermSentAt = Date.now();
+          }
+        }
+        return allGone();
+      })) return;
+
+      if (codexGroup !== null && !codexGone()) {
+        signalOwnedProcessGroup(codexGroup, "SIGKILL");
+      }
+      const killDeadline = Date.now() + TUI_TERM_GRACE_MS;
+      let wrapperKillSent = false;
+      if (await waitUntil(killDeadline, () => {
+        if (codexGone() && !wrapperGone() && wrapperGroup !== null) {
+          if (wrapperTermSentAt === null) {
+            signalOwnedProcessGroup(wrapperGroup, "SIGTERM");
+            wrapperTermSentAt = Date.now();
+          }
+          // Natural util-linux reap is normally immediate. Keep a small
+          // bounded window for it, then reserve the rest of phase two for
+          // the wrapper's final KILL/reap observation.
+          if (
+            !wrapperKillSent &&
+            Date.now() >= Math.min(wrapperTermSentAt + 100, killDeadline - 250)
+          ) {
+            signalOwnedProcessGroup(wrapperGroup, "SIGKILL");
+            wrapperKillSent = true;
+          }
+        }
+        return allGone();
+      })) return;
       throw stableLauncherError("tui_kill_timeout");
     })();
     this.groupCleanupPromise.then(
       () => {
         this.child = null;
-        this.settleExited();
+        this.settleExited(this.terminalFailure ?? undefined);
       },
       (error) => {
         this.settleExited(
@@ -271,7 +537,19 @@ export class ProductionTuiLauncher implements TuiChildLauncher {
       // when the parent env is exact-allowlisted. Remove it inside that
       // shell before exec so the real Codex child still sees exactly the
       // five frozen keys (the four optional runtime keys + bearer).
-      const command = `unset PWD; exec ${[identity.path, ...codexArgs].map(shellQuote).join(" ")}`;
+      // On Linux the PTY shell reports its kernel identity over private fd 3
+      // before exec. It uses shell builtins only, then closes the fd and
+      // removes its temporary/PWD variables so the Codex env stays exact.
+      const ownershipPrefix = process.platform === "linux"
+        ? "IFS= read -r ANET_TUI_STAT < \"/proc/$$/stat\" || exit 125; " +
+          "printf '%s\\n' \"$ANET_TUI_STAT\" >&3 || exit 125; " +
+          "exec 3>&-; IFS= read -r ANET_TUI_GO <&4 || exit 125; " +
+          "[ \"$ANET_TUI_GO\" = go ] || exit 125; " +
+          "unset ANET_TUI_GO ANET_TUI_STAT PWD; exec 4<&-; "
+        : "unset PWD; ";
+      const command = `${ownershipPrefix}exec ${
+        [identity.path, ...codexArgs].map(shellQuote).join(" ")
+      }`;
       // The bearer is inherited by the PTY wrapper, so production must not
       // resolve that wrapper through caller-controlled PATH. Tests may inject
       // an explicit fixture; the default is the fixed util-linux location.
@@ -307,7 +585,7 @@ export class ProductionTuiLauncher implements TuiChildLauncher {
           cwd: this.opts.cwd,
           env: { ...req.env },
           detached: true,
-          stdio: ["inherit", "pipe", "pipe"],
+          stdio: ["inherit", "pipe", "pipe", "pipe", "pipe"],
         });
       } catch {
         stdoutRedactor.wipe();
@@ -319,6 +597,86 @@ export class ProductionTuiLauncher implements TuiChildLauncher {
       }
 
       this.child = child;
+      const ownershipStream = child.stdio[3];
+      const ownershipAck = child.stdio[4] as Writable | null | undefined;
+      let launchSettled = false;
+      let handshakeTimer: NodeJS.Timeout | null = null;
+      const rejectLaunch = (code: string): void => {
+        if (launchSettled) return;
+        launchSettled = true;
+        if (handshakeTimer !== null) clearTimeout(handshakeTimer);
+        ownershipStream?.destroy();
+        ownershipAck?.end();
+        const error = stableLauncherError(code);
+        this.terminalFailure = error;
+        reject(error);
+        void this.ensureGroupCleanup(child).catch(() => {});
+      };
+      const resolveLaunch = (): void => {
+        if (launchSettled) return;
+        launchSettled = true;
+        if (handshakeTimer !== null) clearTimeout(handshakeTimer);
+        this.log("[gateway] TUI child launched via PTY (approval=never; env allowlist enforced)");
+        resolve({ spawned: true });
+      };
+
+      if (process.platform === "linux") {
+        const wrapperIdentity = child.pid === undefined
+          ? null
+          : readLinuxProcessIdentity(child.pid);
+        if (
+          wrapperIdentity === null ||
+          wrapperIdentity.pgid !== wrapperIdentity.pid ||
+          wrapperIdentity.sid !== wrapperIdentity.pid
+        ) {
+          rejectLaunch("tui_wrapper_identity_invalid");
+        } else {
+          this.wrapperIdentity = wrapperIdentity;
+          if (ownershipStream == null || ownershipAck == null) {
+            rejectLaunch("tui_codex_identity_channel_missing");
+          } else {
+            let ownershipBytes = Buffer.alloc(0);
+            ownershipStream.on("data", (chunk: Buffer | string) => {
+              if (launchSettled) return;
+              const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+              ownershipBytes = Buffer.concat([ownershipBytes, bytes]);
+              if (ownershipBytes.length > 1_024) {
+                rejectLaunch("tui_codex_identity_oversized");
+                return;
+              }
+              const newline = ownershipBytes.indexOf(0x0a);
+              if (newline < 0) return;
+              if (ownershipBytes.subarray(newline + 1).some((byte) => byte !== 0x0a)) {
+                rejectLaunch("tui_codex_identity_trailing_data");
+                return;
+              }
+              try {
+                this.codexIdentity = validateLinuxOwnershipHandshake(
+                  ownershipBytes.subarray(0, newline).toString("utf8"),
+                  wrapperIdentity,
+                );
+              } catch (error) {
+                rejectLaunch(
+                  (error as Error & { code?: string })?.code ?? "tui_codex_identity_invalid",
+                );
+                return;
+              }
+              ownershipStream.destroy();
+              ownershipBytes.fill(0);
+              ownershipAck.end("go\n", () => resolveLaunch());
+            });
+            ownershipStream.once("error", () => {
+              rejectLaunch("tui_codex_identity_channel_failed");
+            });
+            ownershipAck.once("error", () => {
+              rejectLaunch("tui_codex_identity_ack_failed");
+            });
+            handshakeTimer = setTimeout(() => {
+              rejectLaunch("tui_codex_identity_timeout");
+            }, TUI_TERM_GRACE_MS);
+          }
+        }
+      }
       const writeOut = this.opts.writeStdout ?? ((chunk: Buffer) => process.stdout.write(chunk));
       const writeErr = this.opts.writeStderr ?? ((chunk: Buffer) => process.stderr.write(chunk));
       child.stdout?.on("data", (chunk: Buffer | string) => {
@@ -329,6 +687,9 @@ export class ProductionTuiLauncher implements TuiChildLauncher {
       });
       child.once("exit", () => {
         this.terminalObserved = true;
+        if (process.platform === "linux" && !launchSettled) {
+          rejectLaunch("tui_codex_identity_missing");
+        }
         // The wrapper can exit before a same-group Codex/descendant.  Start
         // the single-flight group cleanup immediately; never equate this
         // event with terminal ownership.
@@ -344,23 +705,29 @@ export class ProductionTuiLauncher implements TuiChildLauncher {
       child.once("error", () => {
         stdoutRedactor.wipe();
         stderrRedactor.wipe();
+        if (!launchSettled) rejectLaunch("tui_pty_spawn_error");
         if (child.pid === undefined) {
           this.terminalObserved = true;
           this.child = null;
-          this.settleExited();
-          reject(stableLauncherError("tui_pty_spawn_error"));
+          if (this.terminalFailure === null) {
+            this.terminalFailure = stableLauncherError("tui_pty_spawn_error");
+          }
+          void this.ensureGroupCleanup(child).catch(() => {});
         }
       });
       child.once("spawn", () => {
-        this.log("[gateway] TUI child launched via PTY (approval=never; env allowlist enforced)");
-        resolve({ spawned: true });
+        if (process.platform !== "linux") {
+          ownershipStream?.destroy();
+          ownershipAck?.end();
+          resolveLaunch();
+        }
       });
     });
   }
 
   terminate(): Promise<void> {
     if (this.child === null) {
-      this.settleExited();
+      this.settleExited(this.terminalFailure ?? undefined);
       return new Promise<void>((resolve) => resolve());
     }
     return this.ensureGroupCleanup();
@@ -370,7 +737,14 @@ export class ProductionTuiLauncher implements TuiChildLauncher {
 export const __test = {
   buildCodexTuiArgs,
   groupExists,
+  isLinuxDescendantOf,
+  ownedProcessGroupGone,
+  parseLinuxProcessStat,
   processGroupGone,
+  readLinuxProcessIdentity,
+  sameOwnedGroupMember,
+  sameProcessIdentity,
   shellQuote,
   validateLaunchRequest,
+  validateLinuxOwnershipHandshake,
 };

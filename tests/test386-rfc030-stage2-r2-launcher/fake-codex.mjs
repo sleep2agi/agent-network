@@ -9,13 +9,27 @@ import { readFileSync, writeFileSync } from "node:fs";
 const CAPTURE = "/tmp/rfc030-tui-capture.txt";
 const stat = readFileSync("/proc/self/stat", "utf8");
 const afterComm = stat.slice(stat.lastIndexOf(")") + 2).trim().split(/\s+/);
-// /proc/<pid>/stat fields after comm begin at field 3 (state); pgrp is field
-// 5, therefore index 2 in this sliced array.
+const wrapperStat = readFileSync(`/proc/${process.ppid}/stat`, "utf8");
+const wrapperAfterComm = wrapperStat
+  .slice(wrapperStat.lastIndexOf(")") + 2)
+  .trim()
+  .split(/\s+/);
+// /proc/<pid>/stat fields after comm begin at field 3 (state): ppid/pgrp/sid
+// are indexes 1/2/3 and starttime (field 22) is index 19.
+const parentPid = Number(afterComm[1]);
 const processGroupId = Number(afterComm[2]);
+const sessionId = Number(afterComm[3]);
 
 const lines = [
   `PID=${process.pid}`,
+  `PPID=${parentPid}`,
   `PGID=${processGroupId}`,
+  `SID=${sessionId}`,
+  `STARTTIME=${afterComm[19]}`,
+  `WRAPPER_PID=${parentPid}`,
+  `WRAPPER_PGID=${wrapperAfterComm[2]}`,
+  `WRAPPER_SID=${wrapperAfterComm[3]}`,
+  `WRAPPER_STARTTIME=${wrapperAfterComm[19]}`,
   ...process.argv.slice(2).map((arg) => `ARG=${arg}`),
   ...Object.keys(process.env).sort().map((key) => `ENV_KEY=${key}`),
 ];

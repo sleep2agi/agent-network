@@ -6,7 +6,28 @@ set -euo pipefail
 REPORT="${REPORT:-/repo/docs/tests/report-test384.txt}"
 mkdir -p "$(dirname "$REPORT")"
 : > "$REPORT"
-exec > >(tee -a "$REPORT") 2>&1
+exec 3>&1 4>&2
+exec > >(tee -a "$REPORT" >&3) 2>&1
+tee_pid=$!
+overall_emitted=0
+
+finish_report() {
+  local status=$?
+  local tee_status
+  trap - EXIT
+  set +e
+  if [[ "$status" -ne 0 && "$overall_emitted" -eq 0 ]]; then
+    echo
+    echo "OVERALL: FAIL (exit $status)"
+  fi
+  exec 1>&3 2>&4
+  wait "$tee_pid"
+  tee_status=$?
+  exec 3>&- 4>&-
+  if [[ "$status" -eq 0 && "$tee_status" -ne 0 ]]; then status=$tee_status; fi
+  exit "$status"
+}
+trap finish_report EXIT
 
 echo "# test384-rfc030-stage2-wiring"
 echo
@@ -55,7 +76,9 @@ cd /repo/agent-node
 bun test \
   src/runtime/codex-policy-gateway/gateway-unit.test.ts \
   src/runtime/codex-policy-gateway/gateway-assembly.test.ts \
+  src/runtime/codex-policy-gateway/production-tui-launcher.test.ts \
   src/runtime/codex-policy-gateway/bridge-adapter-real-wire.test.ts
 
 echo
 echo "OVERALL: PASS"
+overall_emitted=1
