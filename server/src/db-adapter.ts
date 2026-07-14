@@ -18,6 +18,20 @@ export interface QueryResult {
   changes: number;
 }
 
+export const ATOMIC_QUEUE_TRANSACTIONS_UNAVAILABLE =
+  "atomic_queue_transactions_unavailable" as const;
+
+/** Raised before queue SQL when the adapter cannot pin one immediate transaction. */
+export class AtomicQueueTransactionsUnavailableError extends Error {
+  readonly code = ATOMIC_QUEUE_TRANSACTIONS_UNAVAILABLE;
+  readonly httpStatus = 503;
+
+  constructor() {
+    super(ATOMIC_QUEUE_TRANSACTIONS_UNAVAILABLE);
+    this.name = "AtomicQueueTransactionsUnavailableError";
+  }
+}
+
 export interface DbAdapter {
   /** Execute a write query (INSERT/UPDATE/DELETE) */
   run(sql: string, params?: any[]): QueryResult;
@@ -34,6 +48,12 @@ export interface DbAdapter {
   /** Run a function inside a transaction */
   transaction<T>(fn: () => T): T;
 
+  /** Queue mutations require this exact capability before their first SQL. */
+  readonly atomicQueueTransactions: "same_connection_immediate" | "unavailable";
+
+  /** Acquire the SQLite write lock before the transaction's first read. */
+  immediateTransaction<T>(fn: () => T): T;
+
   /** Close connection */
   close(): void;
 
@@ -47,6 +67,7 @@ export interface DbAdapter {
 
 export class SQLiteAdapter implements DbAdapter {
   readonly dialect = "sqlite" as const;
+  readonly atomicQueueTransactions = "same_connection_immediate" as const;
   constructor(private readonly rawDb: Database) {}
 
   run(sql: string, params?: any[]): QueryResult {
@@ -67,6 +88,10 @@ export class SQLiteAdapter implements DbAdapter {
 
   transaction<T>(fn: () => T): T {
     return this.rawDb.transaction(fn)();
+  }
+
+  immediateTransaction<T>(fn: () => T): T {
+    return this.rawDb.transaction(fn).immediate();
   }
 
   close(): void {
@@ -120,6 +145,7 @@ export function sqliteToPostgres(sql: string): string {
  */
 export class PgAdapter implements DbAdapter {
   readonly dialect = "postgres" as const;
+  readonly atomicQueueTransactions = "unavailable" as const;
   private connString: string;
 
   constructor(connectionString: string) {
@@ -203,6 +229,12 @@ export class PgAdapter implements DbAdapter {
       try { this.querySync("ROLLBACK"); } catch {}
       throw e;
     }
+  }
+
+  immediateTransaction<T>(_fn: () => T): T {
+    // The subprocess bridge uses a different PostgreSQL connection per query.
+    // Refuse before invoking fn, hence before any queue SQL can occur.
+    throw new AtomicQueueTransactionsUnavailableError();
   }
 
   close(): void {}
