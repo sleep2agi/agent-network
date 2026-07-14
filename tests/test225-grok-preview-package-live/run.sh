@@ -52,6 +52,14 @@ TUI_INVENTORY_DIAGNOSTIC="$ARTIFACT_DIR/test225-tui-inventory-diagnostic.json"
 TUI_INVENTORY_EVIDENCE="$ARTIFACT_DIR/test225-tui-inventory-evidence.json"
 REAL_TURN_DIAGNOSTIC="$ARTIFACT_DIR/test225-real-turn-diagnostic.json"
 AUTH_EVIDENCE_DIAGNOSTIC="$ARTIFACT_DIR/test225-auth-evidence-diagnostic.json"
+REAL_AUTH_PATTERNS=/tmp/test225-real-patterns
+REAL_AUTH_UNSAFE_PATTERNS=/tmp/test225-real-unsafe-patterns
+REAL_AUTH_METADATA_MANIFEST=/tmp/test225-real-auth-metadata.json
+REAL_STATE_HOME=""
+REAL_LEADER_SOCKET=""
+REAL_ATTACH_SOCKET=""
+REAL_SESSION_ID=""
+REAL_CWD=""
 
 # The package gate must observe native shared-TUI rendering. It may not make a
 # trust prompt or network turn pass by typing into tmux on the user's behalf.
@@ -463,28 +471,24 @@ scan_pattern_file_valid() {
 
 real_turn_scan_inputs_valid() {
   local patterns
-  for patterns in /tmp/test225-markers /tmp/test225-live-credentials /tmp/test225-real-patterns; do
+  for patterns in /tmp/test225-markers /tmp/test225-live-credentials \
+    "$REAL_AUTH_PATTERNS" "$REAL_AUTH_UNSAFE_PATTERNS" \
+    "$REAL_AUTH_METADATA_MANIFEST"; do
     scan_pattern_file_valid "$patterns" || return 1
   done
 }
 
 refresh_real_auth_patterns() {
-  local auth_path=$1 candidate=/tmp/test225-real-patterns.candidate
-  local merged=/tmp/test225-real-patterns.merged
+  local auth_path=$1
   [ -r "$auth_path" ] || fail "real auth scalar refresh source is not readable"
-  # Capture scalar values rather than relying on schema-specific key names.
-  # These owner-only files are scan inputs only and are deleted by cleanup.
-  jq -r '.. | strings | select(length >= 12)' "$auth_path" | sort -u >"$candidate" \
+  # One stable private-file read derives both the full deny set and an exact
+  # scope-bound metadata manifest. The manifest is never persisted as evidence.
+  node /test225/auth-evidence-diagnostic.mjs refresh-patterns \
+    "$auth_path" "$REAL_AUTH_PATTERNS" "$REAL_AUTH_UNSAFE_PATTERNS" \
+    "$REAL_AUTH_METADATA_MANIFEST" \
     || fail "could not derive real auth scalar scan patterns"
-  [ -s "$candidate" ] || fail "real auth scalar scan pattern set is empty"
-  if [ -s /tmp/test225-real-patterns ]; then
-    sort -u /tmp/test225-real-patterns "$candidate" >"$merged"
-    mv "$merged" /tmp/test225-real-patterns
-  else
-    mv "$candidate" /tmp/test225-real-patterns
-  fi
-  rm -f "$candidate" "$merged"
-  chmod 600 /tmp/test225-real-patterns
+  real_turn_scan_inputs_valid \
+    || fail "derived real auth scan inputs are not closed owner-only files"
 }
 
 persist_auth_evidence_diagnostic() {
@@ -517,10 +521,10 @@ persist_auth_evidence_diagnostic() {
 }
 
 run_real_auth_evidence_gate() {
-  local phase=$1 outcome temporary
-  local expected_leader=${real_leader:--} expected_attach=${real_socket:--}
+  local phase=$1 expected_state_home=$2 expected_session_id=$3 expected_cwd=$4
+  local expected_leader=$5 expected_attach=$6 outcome temporary
   local -a scan_args=()
-  shift
+  shift 6
   [ $(( $# % 2 )) -eq 0 ] || fail "auth evidence gate received an incomplete role/target pair"
   while [ "$#" -gt 0 ]; do
     scan_args+=("$1" "$2")
@@ -535,7 +539,8 @@ run_real_auth_evidence_gate() {
   temporary="$ARTIFACT_DIR/.test225-auth-evidence-diagnostic.tmp.$$.$RANDOM"
   rm -f -- "$temporary" "$AUTH_EVIDENCE_DIAGNOSTIC"
   node /test225/auth-evidence-diagnostic.mjs scan "$temporary" "$phase" \
-    /tmp/test225-real-patterns "$HOME/.grok/agent_id" \
+    "$REAL_AUTH_PATTERNS" "$REAL_AUTH_METADATA_MANIFEST" "$HOME/.grok/agent_id" \
+    "$expected_state_home" "$expected_session_id" "$expected_cwd" \
     "$expected_leader" "$expected_attach" "${scan_args[@]}" \
     || fail "could not build closed auth evidence target classification"
   node /test225/auth-evidence-diagnostic.mjs validate "$temporary" \
@@ -543,7 +548,8 @@ run_real_auth_evidence_gate() {
   outcome=$(jq -r '.scanOutcome' "$temporary")
   real_turn_scan_inputs_valid \
     || { rm -f -- "$temporary"; fail "auth evidence gate scan inputs changed during classification"; }
-  if [ "$outcome" = unclassified ]; then
+  if [ "$outcome" = clean ]; then
+    log "PASS: auth_evidence phase=$phase scanOutcome:clean"
     rm -f -- "$temporary" "$AUTH_EVIDENCE_DIAGNOSTIC"
     return 0
   fi
@@ -688,7 +694,9 @@ run_tui_inventory_gate() {
     || fail "keyless inventory gate lacks its owner-only synthetic scan set"
   scan_pattern_file_valid /tmp/test225-live-credentials \
     || fail "keyless inventory gate lacks its owner-only Hub scan set"
-  [ ! -e /tmp/test225-real-patterns ] \
+  [ ! -e "$REAL_AUTH_PATTERNS" ] \
+    && [ ! -e "$REAL_AUTH_UNSAFE_PATTERNS" ] \
+    && [ ! -e "$REAL_AUTH_METADATA_MANIFEST" ] \
     || fail "keyless inventory gate unexpectedly observed a real-auth scan set"
   if node /test225/tui-tool-inventory-probe.mjs \
     "$real_bin" "$profile_fixture" "$result_file" >/dev/null 2>&1; then
@@ -1345,7 +1353,8 @@ grep -Fxq 'TEST225_REFRESH_SCAN_OLD_0123456789' /tmp/test225-real-patterns \
   || fail "auth refresh scan set dropped the prior scalar"
 grep -Fxq 'TEST225_REFRESH_SCAN_NEW_0123456789' /tmp/test225-real-patterns \
   || fail "auth refresh scan set omitted the new scalar"
-rm -f /tmp/test225-refresh-auth.json /tmp/test225-real-patterns
+rm -f /tmp/test225-refresh-auth.json "$REAL_AUTH_PATTERNS" \
+  "$REAL_AUTH_UNSAFE_PATTERNS" "$REAL_AUTH_METADATA_MANIFEST"
 
 # Exercise aggregate-independent structural classification and the actual
 # closed persistence function. Correct identity, wrong identity, deep
@@ -1353,41 +1362,64 @@ rm -f /tmp/test225-refresh-auth.json /tmp/test225-real-patterns
 # distinguishable without retaining the marker or any path.
 AUTH_ROLE_SELFTEST=/tmp/test225-auth-role-selftest
 AUTH_ROLE_OUTPUT=/tmp/test225-auth-role-output
+AUTH_ROLE_CURRENT_HOME="$AUTH_ROLE_SELFTEST/state/node-aaaaaaaaaaaaaaaaaaaaaaaa"
+AUTH_ROLE_PRIOR_HOME="$AUTH_ROLE_SELFTEST/state/node-bbbbbbbbbbbbbbbbbbbbbbbb"
+AUTH_ROLE_SESSION_ID=11111111-1111-4111-8111-111111111111
+AUTH_ROLE_CWD=/synthetic-work
+AUTH_ROLE_SESSION_DIR="$AUTH_ROLE_CURRENT_HOME/sessions/%2Fsynthetic-work/$AUTH_ROLE_SESSION_ID"
+AUTH_ROLE_RUNTIME="$AUTH_ROLE_SELFTEST/runtime"
+AUTH_ROLE_LOCK_DIR="$AUTH_ROLE_CURRENT_HOME/copresence-locks"
+AUTH_ROLE_LEADER="$AUTH_ROLE_RUNTIME/l.sock"
+AUTH_ROLE_ATTACH="$AUTH_ROLE_RUNTIME/a.sock"
 mkdir -p "$AUTH_ROLE_SELFTEST/source" \
   "$AUTH_ROLE_SELFTEST/home/.grok" \
-  "$AUTH_ROLE_SELFTEST/state/node/sessions/cwd/session" \
-  "$AUTH_ROLE_SELFTEST/state/wrong-node"
+  "$AUTH_ROLE_SESSION_DIR" "$AUTH_ROLE_RUNTIME" "$AUTH_ROLE_LOCK_DIR" \
+  "$AUTH_ROLE_PRIOR_HOME"
 chmod 700 "$AUTH_ROLE_SELFTEST" "$AUTH_ROLE_SELFTEST/source" \
   "$AUTH_ROLE_SELFTEST/home" "$AUTH_ROLE_SELFTEST/home/.grok" \
-  "$AUTH_ROLE_SELFTEST/state" "$AUTH_ROLE_SELFTEST/state/node" \
-  "$AUTH_ROLE_SELFTEST/state/node/sessions" \
-  "$AUTH_ROLE_SELFTEST/state/node/sessions/cwd" \
-  "$AUTH_ROLE_SELFTEST/state/node/sessions/cwd/session" \
-  "$AUTH_ROLE_SELFTEST/state/wrong-node"
+  "$AUTH_ROLE_SELFTEST/state" "$AUTH_ROLE_CURRENT_HOME" \
+  "$AUTH_ROLE_CURRENT_HOME/sessions" \
+  "$AUTH_ROLE_CURRENT_HOME/sessions/%2Fsynthetic-work" \
+  "$AUTH_ROLE_SESSION_DIR" "$AUTH_ROLE_RUNTIME" "$AUTH_ROLE_LOCK_DIR" \
+  "$AUTH_ROLE_PRIOR_HOME"
 printf '%s\n' TEST225_AUTH_ROLE_PRIVATE_0123456789 \
   >"$AUTH_ROLE_SELFTEST/home/.grok/agent_id"
 printf '%s\n' clean >"$AUTH_ROLE_SELFTEST/source/other-agent-id"
 printf '%s\n' clean >"$AUTH_ROLE_SELFTEST/source/direct-clean"
 printf '%s\n' TEST225_AUTH_ROLE_PRIVATE_0123456789 \
-  >"$AUTH_ROLE_SELFTEST/state/node/sessions/cwd/session/chat_history.jsonl"
-printf '%s\n' clean >"$AUTH_ROLE_SELFTEST/state/node/config.toml"
+  >"$AUTH_ROLE_SESSION_DIR/chat_history.jsonl"
+printf '%s\n' clean >"$AUTH_ROLE_CURRENT_HOME/config.toml"
 printf '%s\n' TEST225_AUTH_ROLE_PRIVATE_0123456789 \
-  >"$AUTH_ROLE_SELFTEST/state/node/unreviewed.data"
+  >"$AUTH_ROLE_CURRENT_HOME/unreviewed.data"
+printf '%s\n' TEST225_AUTH_ROLE_PRIVATE_0123456789 \
+  >"$AUTH_ROLE_PRIOR_HOME/prior.data"
 ln -s "$AUTH_ROLE_SELFTEST/home/.grok/agent_id" \
-  "$AUTH_ROLE_SELFTEST/state/node/agent_id"
+  "$AUTH_ROLE_CURRENT_HOME/agent_id"
 ln -s "$AUTH_ROLE_SELFTEST/source/other-agent-id" \
-  "$AUTH_ROLE_SELFTEST/state/wrong-node/agent_id"
+  "$AUTH_ROLE_PRIOR_HOME/agent_id"
 ln -s "$AUTH_ROLE_SELFTEST/source/other-agent-id" \
-  "$AUTH_ROLE_SELFTEST/state/node/sessions/cwd/session/agent_id"
-ln -s "$AUTH_ROLE_SELFTEST/source/missing" "$AUTH_ROLE_SELFTEST/state/node/unreviewed.link"
+  "$AUTH_ROLE_SESSION_DIR/agent_id"
+ln -s "$AUTH_ROLE_SELFTEST/source/missing" "$AUTH_ROLE_CURRENT_HOME/unreviewed.link"
 ln -s "$AUTH_ROLE_SELFTEST/source/direct-clean" "$AUTH_ROLE_SELFTEST/direct-clean-link"
+AUTH_ROLE_LEADER_KEY=$(printf '%s' "$AUTH_ROLE_LEADER" | sha256sum | cut -c1-20)
+AUTH_ROLE_SESSION_KEY=$(printf '%s\0%s\0%s' \
+  "$AUTH_ROLE_CURRENT_HOME" "$AUTH_ROLE_CWD" "$AUTH_ROLE_SESSION_ID" \
+  | sha256sum | cut -c1-24)
+: >"$AUTH_ROLE_RUNTIME/.leader-$AUTH_ROLE_LEADER_KEY.lock"
+: >"$AUTH_ROLE_RUNTIME/.bridge-$AUTH_ROLE_LEADER_KEY-$AUTH_ROLE_SESSION_ID.lock"
+: >"$AUTH_ROLE_LOCK_DIR/.session-$AUTH_ROLE_SESSION_KEY.lock"
 find "$AUTH_ROLE_SELFTEST" -type f -exec chmod 600 {} +
-printf '%s\n' TEST225_AUTH_ROLE_PRIVATE_0123456789 >/tmp/test225-real-patterns
-chmod 600 /tmp/test225-real-patterns
+printf '%s\n' TEST225_AUTH_ROLE_PRIVATE_0123456789 >"$REAL_AUTH_PATTERNS"
+printf '%s\n' TEST225_AUTH_ROLE_PRIVATE_0123456789 >"$REAL_AUTH_UNSAFE_PATTERNS"
+printf '%s\n' '{"v":1,"tuples":[]}' >"$REAL_AUTH_METADATA_MANIFEST"
+chmod 600 "$REAL_AUTH_PATTERNS" "$REAL_AUTH_UNSAFE_PATTERNS" \
+  "$REAL_AUTH_METADATA_MANIFEST"
 real_turn_scan_inputs_valid \
   || fail "auth evidence role self-test scan inputs are not owner-only"
 if (trap - EXIT; HOME="$AUTH_ROLE_SELFTEST/home"; export HOME; \
   run_real_auth_evidence_gate final_scan \
+  "$AUTH_ROLE_CURRENT_HOME" "$AUTH_ROLE_SESSION_ID" "$AUTH_ROLE_CWD" \
+  "$AUTH_ROLE_LEADER" "$AUTH_ROLE_ATTACH" \
   __grok_state__ "$AUTH_ROLE_SELFTEST/state" \
   runtime_log_store "$AUTH_ROLE_SELFTEST/direct-clean-link") \
   >"$AUTH_ROLE_OUTPUT" 2>&1; then
@@ -1402,16 +1434,20 @@ node /test225/auth-evidence-diagnostic.mjs validate "$AUTH_EVIDENCE_DIAGNOSTIC" 
   || fail "auth evidence production gate did not persist a closed artifact"
 jq -e '
   .scanOutcome == "mixed"
-  and .matchedRoles == ["grok_identity_state","grok_session_chat","grok_unclassified_state"]
-  and .errorRoles == ["runtime_log_store","grok_identity_state","grok_session_other","grok_unclassified_state"]
+  and .matchedRoles == ["grok_identity_state","grok_session_chat","grok_current_home_other_state","grok_prior_node_state"]
+  and .errorRoles == ["runtime_log_store","grok_current_state_structure","grok_prior_node_structure"]
 ' "$AUTH_EVIDENCE_DIAGNOSTIC" >/dev/null \
   || fail "auth evidence role classifier did not bind the exact expected roles"
 scan_fixed_file /tmp/test225-real-patterns "$AUTH_EVIDENCE_DIAGNOSTIC" \
   "$AUTH_ROLE_OUTPUT" "$REPORT" \
   || fail "auth evidence role persistence retained its private marker"
-rm -rf "$AUTH_ROLE_SELFTEST" "$AUTH_ROLE_OUTPUT" /tmp/test225-real-patterns
+rm -rf "$AUTH_ROLE_SELFTEST" "$AUTH_ROLE_OUTPUT" "$REAL_AUTH_PATTERNS" \
+  "$REAL_AUTH_UNSAFE_PATTERNS" "$REAL_AUTH_METADATA_MANIFEST"
 rm -f -- "$AUTH_EVIDENCE_DIAGNOSTIC"
-unset AUTH_ROLE_GATE_RC
+unset AUTH_ROLE_GATE_RC AUTH_ROLE_CURRENT_HOME AUTH_ROLE_PRIOR_HOME \
+  AUTH_ROLE_SESSION_ID AUTH_ROLE_CWD AUTH_ROLE_SESSION_DIR \
+  AUTH_ROLE_RUNTIME AUTH_ROLE_LOCK_DIR AUTH_ROLE_LEADER AUTH_ROLE_ATTACH \
+  AUTH_ROLE_LEADER_KEY AUTH_ROLE_SESSION_KEY
 pass "auth evidence scanner emits only closed target-role diagnostics"
 
 # Seed a pre-boundary ordinary log with broad permissions and a synthetic
@@ -2022,7 +2058,7 @@ run_real_gate() {
   local real_auth=${TEST225_REAL_GROK_AUTH:-/host-grok/auth.json}
   local real_alias=preview-grok-real-225
   local real_config="$WORK/.anet/nodes/$real_alias/config.json"
-  local real_socket real_leader real_session first_id first_row second_id second_row continuity_nonce
+  local real_socket real_leader real_state_home real_node_id real_session first_id first_row second_id second_row continuity_nonce
   local first_task_started_ms second_task_started_ms
   local real_log_dir="$WORK/.anet/nodes/$real_alias/logs"
   local real_pending="$WORK/.anet/nodes/$real_alias/pending-replies.json"
@@ -2056,6 +2092,19 @@ run_real_gate() {
   rm -f "$REAL_CREATE_LOG"
   real_socket=$(jq -r '.grokAttachSocket' "$real_config")
   real_leader=$(jq -r '.grokLeaderSocket' "$real_config")
+  real_node_id=$(jq -r '.node_id // empty' "$real_config")
+  [ -n "$real_node_id" ] || fail "real Grok config omitted its immutable node id"
+  real_state_home=$(realpath -m "$GROK_STATE/node-$(printf '%s' "$real_node_id" | sha256sum | cut -c1-24)")
+  [ "$(realpath -m "$(dirname "$real_state_home")")" = "$(realpath -m "$GROK_STATE")" ] \
+    && [ "$(realpath -m "$real_leader")" = "$real_leader" ] \
+    && [ "$(realpath -m "$real_socket")" = "$real_socket" ] \
+    && [ "$(dirname "$real_leader")" = "$(dirname "$real_socket")" ] \
+    && [ "$real_leader" != "$real_socket" ] \
+    || fail "real Grok state/socket identity is not an exact owner-bound profile"
+  REAL_STATE_HOME=$real_state_home
+  REAL_LEADER_SOCKET=$real_leader
+  REAL_ATTACH_SOCKET=$real_socket
+  REAL_CWD=$WORK
 
   env -u ANET_AGENT_NODE_BIN GROK_BINARY="$real_bin" npm_config_offline=true \
     anet node start "$real_alias" >"$REAL_START_LOG" 2>&1 &
@@ -2092,6 +2141,7 @@ run_real_gate() {
     || fail "optional real TUI did not live-render first marker"
   real_session=$(jq -r '.grokCliSession // empty' "$real_config")
   [ -n "$real_session" ] || fail "optional real session id missing"
+  REAL_SESSION_ID=$real_session
 
   real_first_leader_identity=/tmp/test225-real-first-leader.identity
   snapshot_unix_listener_owner "$real_leader" "$real_first_leader_identity" \
@@ -2112,6 +2162,7 @@ run_real_gate() {
     || fail "optional real first stop left a Grok process"
   refresh_real_auth_patterns "$HOME/.grok/auth.json"
   run_real_auth_evidence_gate first_turn_post_stop \
+    "$real_state_home" "$real_session" "$WORK" "$real_leader" "$real_socket" \
     first_start_output "$REAL_START_LOG" \
     first_tui_capture "$REAL_CAPTURE" \
     hub_server_output "$SERVER_LOG" \
@@ -2163,6 +2214,7 @@ run_real_gate() {
   jq -r '.result // ""' <<<"$second_row" >> /tmp/test225-hub-results
 
   run_real_auth_evidence_gate resume_turn_pre_stop \
+    "$real_state_home" "$real_session" "$WORK" "$real_leader" "$real_socket" \
     candidate_package /tmp/test225-candidate-extracted \
     gate_report "$REPORT" \
     first_start_output "$REAL_START_LOG" \
@@ -2203,6 +2255,7 @@ run_real_gate() {
     || fail "optional real resume stop left a Grok process"
   refresh_real_auth_patterns "$HOME/.grok/auth.json"
   run_real_auth_evidence_gate final_shutdown \
+    "$real_state_home" "$real_session" "$WORK" "$real_leader" "$real_socket" \
     gate_report "$REPORT" \
     first_start_output "$REAL_START_LOG" \
     resume_start_output "$REAL_RESUME_LOG" \
@@ -2277,6 +2330,8 @@ scan_fixed_file /tmp/test225-live-credentials \
   "$TUI_INVENTORY_EVIDENCE" "$TUI_INVENTORY_DIAGNOSTIC" "$AUTH_EVIDENCE_DIAGNOSTIC" \
   || fail "final test Hub credential scan failed"
 run_real_auth_evidence_gate final_scan \
+  "${REAL_STATE_HOME:--}" "${REAL_SESSION_ID:--}" "${REAL_CWD:--}" \
+  "${REAL_LEADER_SOCKET:--}" "${REAL_ATTACH_SOCKET:--}" \
   candidate_package /tmp/test225-candidate-extracted \
   hub_server_output "$SERVER_LOG" \
   deterministic_artifact "$START_LOG" \
