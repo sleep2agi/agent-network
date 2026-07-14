@@ -674,6 +674,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   private spawnEnv: NodeJS.ProcessEnv;
   private readonly controlledSpawnEnv: NodeJS.ProcessEnv;
   private ptyGeneration = 0;
+  private readonly spawnedTuiProcessIds = new Set<number>();
   private recoveryPromise: Promise<void> | null = null;
 
   private readonly log: (message: string) => void;
@@ -999,6 +1000,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     });
     let resolveExit!: () => void;
     const exitPromise = new Promise<void>((resolvePtyExit) => { resolveExit = resolvePtyExit; });
+    this.spawnedTuiProcessIds.add(pty.pid);
     this.pty = pty;
     this.ptyExit = exitPromise;
     pty.onData((data) => {
@@ -1223,6 +1225,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         stateHome: this.opts.grokHome,
         projectCwd: this.opts.cwd,
         leaderSocket: this.leaderSocket,
+        tuiProcessIds: [...this.spawnedTuiProcessIds],
       });
     } catch (error) {
       // Keep lifetime locks held until process exit if the containment state

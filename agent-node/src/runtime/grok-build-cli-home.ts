@@ -53,6 +53,8 @@ export interface CleanupGrokCliPostStopOptions {
   stateHome: string;
   projectCwd: string;
   leaderSocket: string;
+  /** Exact PIDs returned by node-pty for every confirmed-stopped TUI generation. */
+  tuiProcessIds: readonly number[];
 }
 
 // Exact pinned 0.2.93 state removed only after the PTY and its owned Leader
@@ -68,7 +70,10 @@ export const GROK_POST_STOP_CLEANUP_POLICY = Object.freeze({
   emptyStateFiles: Object.freeze(["leader.log"]),
   cwdSessionFiles: Object.freeze(["prompt_history.jsonl"]),
   sessionRootFiles: Object.freeze(["session_search.sqlite"]),
-  emptyStateDirectories: Object.freeze(["sandbox-blocked-dir.15"]),
+  sandboxBlockedDirectoryBinding: Object.freeze({
+    source: "confirmedTuiProcessIds",
+    prefix: "sandbox-blocked-dir.",
+  }),
   nativeLeaderLockBinding: Object.freeze({
     source: "leaderSocket",
     replaceExtension: ".lock",
@@ -327,6 +332,13 @@ function nativeLeaderLockPath(leaderSocket: string): string {
   return join(parsed.dir, `${parsed.name}.lock`);
 }
 
+function sandboxBlockedDirectoryPath(stateHome: string, tuiProcessId: number): string {
+  if (!Number.isSafeInteger(tuiProcessId) || tuiProcessId <= 0) {
+    throw new Error("grok-build-cli post-stop cleanup requires positive integer TUI process ids");
+  }
+  return join(stateHome, `sandbox-blocked-dir.${tuiProcessId}`);
+}
+
 function removeExactEmptyPostStopDirectory(path: string): void {
   const before = lstatIfPresent(path);
   if (!before) return;
@@ -381,6 +393,11 @@ export function cleanupGrokCliPostStopState(opts: CleanupGrokCliPostStopOptions)
   if (opts.stateHome !== stateHome || opts.projectCwd !== projectCwd || opts.leaderSocket !== leaderSocket) {
     throw new Error("grok-build-cli post-stop cleanup requires canonical absolute paths");
   }
+  if (!Array.isArray(opts.tuiProcessIds) || new Set(opts.tuiProcessIds).size !== opts.tuiProcessIds.length) {
+    throw new Error("grok-build-cli post-stop cleanup requires unique TUI process ids");
+  }
+  const sandboxBlockedDirectories = opts.tuiProcessIds.map((tuiProcessId) =>
+    sandboxBlockedDirectoryPath(stateHome, tuiProcessId));
   assertOwnedDirectoryForPostStop(stateHome, "post-stop state home");
   const runtimeDirectory = dirname(leaderSocket);
   assertOwnedDirectoryForPostStop(runtimeDirectory, "post-stop runtime directory");
@@ -408,8 +425,8 @@ export function cleanupGrokCliPostStopState(opts: CleanupGrokCliPostStopOptions)
   for (const name of GROK_POST_STOP_CLEANUP_POLICY.sessionRootFiles) {
     removeExactPostStopFile(join(sessionsRoot, name));
   }
-  for (const name of GROK_POST_STOP_CLEANUP_POLICY.emptyStateDirectories) {
-    removeExactEmptyPostStopDirectory(join(stateHome, name));
+  for (const directory of sandboxBlockedDirectories) {
+    removeExactEmptyPostStopDirectory(directory);
   }
 
   // Grok writes retained state with 0644/0755 even under the parent 0077

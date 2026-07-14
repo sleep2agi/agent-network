@@ -893,9 +893,9 @@ for (const [label, candidatePath] of [
   });
 }
 
-test("exact sandbox placeholder stays red when non-empty cleanup is bypassed", () => {
+test("observed PID-bound sandbox placeholder stays red when cleanup is bypassed", () => {
   const fixture = stateFixture("suppressed-sandbox-placeholder");
-  const blocked = path.join(fixture.home, "sandbox-blocked-dir.15");
+  const blocked = path.join(fixture.home, "sandbox-blocked-dir.3308");
   try {
     mkdirSync(blocked, { mode: 0o700 });
     writeFileSync(path.join(blocked, "unknown"),

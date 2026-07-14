@@ -1608,7 +1608,9 @@ function seedPostStopFootprint(fixture: RuntimeFixture): {
   const coreSession = grokSessionDirectory(fixture.grokHome, fixture.cwd, SESSION);
   mkdirSync(coreSession, { recursive: true, mode: 0o755 });
   writeFileSync(join(coreSession, "updates.jsonl"), "authoritative state\n", { mode: 0o644 });
-  const blocked = join(fixture.grokHome, "sandbox-blocked-dir.15");
+  // FakePty.pid is 42; production derives this exact transient path from the
+  // owned node-pty generation instead of scanning a numeric filename shape.
+  const blocked = join(fixture.grokHome, "sandbox-blocked-dir.42");
   mkdirSync(blocked, { mode: 0o700 });
   chmodSync(blocked, 0o000);
   const leaderLock = join(fixture.root, "leader.lock");
