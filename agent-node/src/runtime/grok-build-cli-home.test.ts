@@ -20,6 +20,7 @@ import {
   acquireGrokProjectTurnLock,
   assertNoDiscoveredGrokHooks,
   cleanupGrokCliPostStopState,
+  cleanupGrokCliStoppedTuiGeneration,
   grokCliStateKey,
   GROK_POST_STOP_CLEANUP_POLICY,
   prepareGrokCliHome,
@@ -374,23 +375,22 @@ describe("prepareGrokCliHome", () => {
     })).toThrow("positive integer TUI process ids");
     expect(existsSync(leaderLog)).toBe(true);
     expect(existsSync(blocked)).toBe(true);
+    cleanupGrokCliStoppedTuiGeneration({ stateHome, tuiProcessId: TUI_PID });
+    expect(existsSync(blocked)).toBe(false);
+    expect(existsSync(leaderLog)).toBe(true);
 
     const linkRoot = mkdtempSync(join(tmpdir(), "grok-cli-post-stop-pid-link-"));
     roots.push(linkRoot);
     const linkHome = join(linkRoot, "state");
-    const linkRuntime = join(linkRoot, "runtime");
-    const linkCwd = join(linkRoot, "project");
     const external = join(linkRoot, "external");
-    for (const directory of [linkHome, linkRuntime, linkCwd, external]) {
+    for (const directory of [linkHome, external]) {
       mkdirSync(directory, { mode: 0o700 });
     }
     writeFileSync(join(external, "keep"), "unchanged\n", { mode: 0o600 });
     symlinkSync(external, join(linkHome, `sandbox-blocked-dir.${TUI_PID}`), "dir");
-    expect(() => cleanupGrokCliPostStopState({
+    expect(() => cleanupGrokCliStoppedTuiGeneration({
       stateHome: linkHome,
-      projectCwd: linkCwd,
-      leaderSocket: join(linkRuntime, "leader.sock"),
-      tuiProcessIds: [TUI_PID],
+      tuiProcessId: TUI_PID,
     })).toThrow("expected an empty real directory");
     expect(readFileSync(join(external, "keep"), "utf8")).toBe("unchanged\n");
   });

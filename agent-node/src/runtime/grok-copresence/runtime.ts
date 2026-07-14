@@ -37,7 +37,10 @@ import {
   type GrokCopresenceState,
 } from "./state";
 import { buildGrokHelperEnv, buildGrokPtyEnv, projectGrokChildEnv } from "../grok-child-env";
-import { cleanupGrokCliPostStopState } from "../grok-build-cli-home";
+import {
+  cleanupGrokCliPostStopState,
+  cleanupGrokCliStoppedTuiGeneration,
+} from "../grok-build-cli-home";
 import {
   assertGrokCopresenceAgentProfile,
   GROK_COPRESENCE_EFFECTIVE_TOOLS,
@@ -674,7 +677,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   private spawnEnv: NodeJS.ProcessEnv;
   private readonly controlledSpawnEnv: NodeJS.ProcessEnv;
   private ptyGeneration = 0;
-  private readonly spawnedTuiProcessIds = new Set<number>();
+  private readonly pendingTuiProcessIds = new Set<number>();
   private recoveryPromise: Promise<void> | null = null;
 
   private readonly log: (message: string) => void;
@@ -1000,7 +1003,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     });
     let resolveExit!: () => void;
     const exitPromise = new Promise<void>((resolvePtyExit) => { resolveExit = resolvePtyExit; });
-    this.spawnedTuiProcessIds.add(pty.pid);
+    this.pendingTuiProcessIds.add(pty.pid);
     this.pty = pty;
     this.ptyExit = exitPromise;
     pty.onData((data) => {
@@ -1015,7 +1018,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       this.tuiReadinessBuffer = "";
       this.pty = null;
       this.ptyExit = null;
-      const recovery = this.recoverFromExit(event);
+      const recovery = this.recoverFromExit(event, pty.pid);
       this.recoveryPromise = recovery;
       const clearRecovery = () => {
         if (this.recoveryPromise === recovery) this.recoveryPromise = null;
@@ -1027,7 +1030,10 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     });
   }
 
-  private async recoverFromExit(event: { exitCode: number; signal?: number }): Promise<void> {
+  private async recoverFromExit(
+    event: { exitCode: number; signal?: number },
+    stoppedTuiProcessId: number,
+  ): Promise<void> {
     if (this.recovering || this.closing) return;
     this.recovering = true;
     if (this.pollTimer) clearInterval(this.pollTimer);
@@ -1052,6 +1058,16 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       await this.failFatal(new GrokCopresenceFailure(
         "leader_lifecycle",
         `Grok Leader death was not confirmed; refusing recovery: ${errorMessage(error)}`,
+      ));
+      return;
+    }
+    try {
+      this.cleanupConfirmedTuiGeneration(stoppedTuiProcessId);
+    } catch {
+      this.retainLocksForUnconfirmedPty = true;
+      await this.failFatal(new GrokCopresenceFailure(
+        "tui_exit",
+        "Grok stopped-generation containment cleanup failed; refusing recovery",
       ));
       return;
     }
@@ -1160,6 +1176,18 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           ));
           return;
         }
+        if (failedPty) {
+          try {
+            this.cleanupConfirmedTuiGeneration(failedPty.pid);
+          } catch {
+            this.retainLocksForUnconfirmedPty = true;
+            await this.failFatal(new GrokCopresenceFailure(
+              "tui_exit",
+              "Grok failed recovery generation could not be contained",
+            ));
+            return;
+          }
+        }
         if (error instanceof GrokSpawnAuditError || error instanceof GrokUnsafeRecoveryApprovalError) {
           await this.failFatal(asError(error));
           return;
@@ -1225,7 +1253,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         stateHome: this.opts.grokHome,
         projectCwd: this.opts.cwd,
         leaderSocket: this.leaderSocket,
-        tuiProcessIds: [...this.spawnedTuiProcessIds],
+        tuiProcessIds: [...this.pendingTuiProcessIds],
       });
     } catch (error) {
       // Keep lifetime locks held until process exit if the containment state
@@ -1234,8 +1262,20 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       this.retainLocksForUnconfirmedPty = true;
       throw new Error(`grok post-stop containment cleanup failed: ${errorMessage(error)}`);
     }
+    this.pendingTuiProcessIds.clear();
     for (const lock of this.locks.reverse()) await lock.release().catch(() => {});
     this.locks = [];
+  }
+
+  private cleanupConfirmedTuiGeneration(tuiProcessId: number): void {
+    if (!this.pendingTuiProcessIds.has(tuiProcessId)) {
+      throw new Error("Grok stopped-generation PID was not bound to this runtime");
+    }
+    cleanupGrokCliStoppedTuiGeneration({
+      stateHome: this.opts.grokHome,
+      tuiProcessId,
+    });
+    this.pendingTuiProcessIds.delete(tuiProcessId);
   }
 
   private async bindSpawnedLeader(): Promise<void> {

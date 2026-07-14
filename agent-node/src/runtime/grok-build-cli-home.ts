@@ -57,6 +57,12 @@ export interface CleanupGrokCliPostStopOptions {
   tuiProcessIds: readonly number[];
 }
 
+export interface CleanupGrokCliStoppedTuiGenerationOptions {
+  stateHome: string;
+  /** Exact PID returned by node-pty for the generation whose exit is confirmed. */
+  tuiProcessId: number;
+}
+
 // Exact pinned 0.2.93 state removed only after the PTY and its owned Leader
 // are both confirmed stopped. Unknown siblings are deliberately preserved so
 // the containment scanner still rejects them.
@@ -359,6 +365,19 @@ function removeExactEmptyPostStopDirectory(path: string): void {
     }
     throw error;
   }
+}
+
+/** Remove only one confirmed-stopped TUI generation's exact sandbox placeholder. */
+export function cleanupGrokCliStoppedTuiGeneration(
+  opts: CleanupGrokCliStoppedTuiGenerationOptions,
+): void {
+  const stateHome = resolve(opts.stateHome);
+  if (opts.stateHome !== stateHome) {
+    throw new Error("grok-build-cli stopped-generation cleanup requires a canonical absolute state home");
+  }
+  const blockedDirectory = sandboxBlockedDirectoryPath(stateHome, opts.tuiProcessId);
+  assertOwnedDirectoryForPostStop(stateHome, "stopped-generation state home");
+  removeExactEmptyPostStopDirectory(blockedDirectory);
 }
 
 function hardenPostStopTree(path: string, relativePath = ""): void {

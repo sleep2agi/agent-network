@@ -369,6 +369,56 @@ describe("Grok copresence runtime integration", () => {
     }
   }, 8_000);
 
+  test("cleans each exact sandbox placeholder at its confirmed recovery boundary", async () => {
+    const fixture = new RuntimeFixture();
+    fixture.tuiProcessIds = [42, 43];
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await fixture.open();
+      const first = join(fixture.grokHome, "sandbox-blocked-dir.42");
+      const second = join(fixture.grokHome, "sandbox-blocked-dir.43");
+      const unknown = join(fixture.grokHome, "sandbox-blocked-dir.44");
+      mkdirSync(first, { mode: 0o000 });
+      mkdirSync(unknown, { mode: 0o700 });
+
+      await fixture.crashCurrent();
+      await waitFor(() => fixture.spawnedArgs.length === 2, 5_000);
+      expect(existsSync(first)).toBe(false);
+      expect(existsSync(unknown)).toBe(true);
+
+      mkdirSync(second, { mode: 0o000 });
+      await runtime.close();
+      runtime = undefined;
+      expect(existsSync(second)).toBe(false);
+      expect(existsSync(unknown)).toBe(true);
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 10_000);
+
+  test("removes an old placeholder before a recovery generation reuses its PID", async () => {
+    const fixture = new RuntimeFixture();
+    fixture.tuiProcessIds = [42, 42];
+    fixture.blockRecoverySpawn = true;
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await fixture.open();
+      const blocked = join(fixture.grokHome, "sandbox-blocked-dir.42");
+      mkdirSync(blocked, { mode: 0o000 });
+
+      await fixture.crashCurrent();
+      await waitFor(() => fixture.recoverySpawnBlocked, 5_000);
+      expect(existsSync(blocked)).toBe(false);
+      fixture.releaseRecoverySpawn();
+      await waitFor(() => runtime?.isRunning === true, 5_000);
+    } finally {
+      fixture.releaseRecoverySpawn();
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 10_000);
+
   test("queues network input until the pinned TUI composer is ready", async () => {
     const fixture = new RuntimeFixture();
     fixture.autoTuiReady = false;
@@ -1643,6 +1693,7 @@ class RuntimeFixture {
   spawnEvents: unknown[] = [];
   spawnRawEvents = "";
   recoveryWrites: FakeDelayedWrite[] = [];
+  tuiProcessIds: number[] = [42];
   controlledEnvOverride: NodeJS.ProcessEnv = {};
   flockBinary: string | undefined;
   autoTuiReady = true;
@@ -1772,6 +1823,7 @@ class RuntimeFixture {
     this.spawnedArgs.push([...args]);
     this.spawnedEnvs.push({ ...options.env });
     const pty = new FakePty(
+      this.tuiProcessIds[this.ptys.length] ?? 42 + this.ptys.length,
       _binary,
       options.cwd,
       options.env,
@@ -1862,7 +1914,6 @@ function parseNulEnvironment(raw: Buffer): Record<string, string> {
 }
 
 class FakePty implements GrokPtyLike {
-  readonly pid = 42;
   private leaderChild: ReturnType<typeof Bun.spawn> | null = null;
   private dataListeners: Array<(data: string) => void> = [];
   private exitListeners: Array<(event: { exitCode: number; signal?: number }) => void> = [];
@@ -1877,6 +1928,7 @@ class FakePty implements GrokPtyLike {
   private delayedWrites: Array<ReturnType<typeof setTimeout>> = [];
 
   constructor(
+    readonly pid: number,
     private readonly binary: string,
     private readonly cwd: string,
     private readonly env: Record<string, string>,
