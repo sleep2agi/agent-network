@@ -252,7 +252,7 @@ function readLeaderProcess(
     GROK_HOME: expected.grokHome,
     GROK_SANDBOX: expected.sandboxProfile,
     GROK_LEADER_SOCKET: expected.leaderSocket,
-    GROK_LEADER_LOG: "/dev/null",
+    GROK_LEADER_LOG: "off",
     ANET_EXPECTED_PARENT_PID: expected.expectedParentPid,
   };
   for (const [key, value] of Object.entries(required)) {

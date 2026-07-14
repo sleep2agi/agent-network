@@ -63,7 +63,7 @@ describe("Grok child environment boundary", () => {
       GROK_CURSOR_HOOKS_ENABLED: "false",
       GROK_FOLDER_TRUST: "1",
       GROK_DISABLE_AUTOUPDATER: "1",
-      GROK_LEADER_LOG: "/dev/null",
+      GROK_LEADER_LOG: "off",
       GROK_SUBAGENTS: "0",
       GROK_WEB_FETCH: "0",
       GROK_MEMORY: "0",
@@ -98,6 +98,7 @@ describe("Grok child environment boundary", () => {
     ]);
     expect(actual.GROK_AGENT).toBeUndefined();
     expect(actual.GROK_SANDBOX).toBeUndefined();
+    expect(actual.GROK_LEADER_LOG).toBe("off");
   });
 
   it("re-projects a beforeSpawn result instead of trusting arbitrary keys", () => {
@@ -194,7 +195,7 @@ describe("Grok child environment boundary", () => {
       GROK_CURSOR_HOOKS_ENABLED: "false",
       GROK_FOLDER_TRUST: "1",
       GROK_DISABLE_AUTOUPDATER: "1",
-      GROK_LEADER_LOG: "/dev/null",
+      GROK_LEADER_LOG: "off",
       GROK_SUBAGENTS: "0",
       GROK_WEB_FETCH: "0",
       GROK_MEMORY: "0",

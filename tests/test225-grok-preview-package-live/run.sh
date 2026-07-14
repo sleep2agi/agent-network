@@ -377,7 +377,7 @@ assert_fake_observations_exact() {
     and any(.[]; .kind == "inspect") and any(.[]; .kind == "spawn")
     and any(.[]; .kind == "leader")
     and all(.[]; (.forbiddenKeys | length) == 0 and .markerValueObserved == false
-      and .leaderLogSinkExact == true
+      and .leaderLogDisabledExact == true
       and (if .kind == "leader"
         then .envKeys == $expectedLeader[0]
           and .ownerMarkerValid == true

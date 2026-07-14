@@ -28,7 +28,7 @@ function recordEnvironment(kind, extra = {}) {
     envKeys,
     forbiddenKeys: envKeys.filter((key) => forbiddenName.test(key)),
     markerValueObserved: Object.values(process.env).some((value) => forbiddenMarker.test(String(value))),
-    leaderLogSinkExact: process.env.GROK_LEADER_LOG === "/dev/null",
+    leaderLogDisabledExact: process.env.GROK_LEADER_LOG === "off",
     ...extra,
   };
   fs.appendFileSync(observationsPath, JSON.stringify(observation) + "\n", { mode: 0o600 });

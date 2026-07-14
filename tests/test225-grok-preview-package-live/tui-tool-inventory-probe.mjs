@@ -1418,7 +1418,7 @@ async function runTui(state, label, sessionId, resume, {
     "GROK_CURSOR_HOOKS_ENABLED=false",
     `GROK_AUTH_PATH=${shellQuote(state.authPath)}`,
     "GROK_DISABLE_AUTOUPDATER=1",
-    "GROK_LEADER_LOG=/dev/null",
+    "GROK_LEADER_LOG=off",
     "GROK_SUBAGENTS=0",
     "GROK_WEB_FETCH=0",
     "GROK_MEMORY=0",
