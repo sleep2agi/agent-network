@@ -9,6 +9,7 @@ import {
   readdirSync,
   renameSync,
   rmSync,
+  statSync,
   symlinkSync,
   truncateSync,
   writeFileSync,
@@ -335,6 +336,33 @@ describe("Grok copresence runtime integration", () => {
       runtime = undefined;
       expect(existsSync(`/proc/${leaderPid}`)).toBe(false);
       expect(existsSync(fixture.leaderSocket)).toBe(false);
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 8_000);
+
+  test("cleans and hardens the exact pinned footprint only after confirmed close", async () => {
+    const fixture = new RuntimeFixture();
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await fixture.open();
+      const footprint = seedPostStopFootprint(fixture);
+      const unknown = join(fixture.grokHome, "unknown-future-state");
+      writeFileSync(unknown, "leave for scanner\n", { mode: 0o644 });
+
+      await runtime.close();
+      runtime = undefined;
+
+      for (const path of footprint.removedPaths) expect(existsSync(path), path).toBe(false);
+      expect(existsSync(unknown)).toBe(true);
+      expect(readFileSync(unknown, "utf8")).toBe("leave for scanner\n");
+      expect(statSync(unknown).mode & 0o777).toBe(0o600);
+      expect(statSync(footprint.leaderLock).mode & 0o777).toBe(0o600);
+      expect(existsSync(join(
+        grokSessionDirectory(fixture.grokHome, fixture.cwd, SESSION),
+        "updates.jsonl",
+      ))).toBe(true);
     } finally {
       await runtime?.close();
       await fixture.close();
@@ -776,6 +804,7 @@ describe("Grok copresence runtime integration", () => {
       let runtime: GrokCopresenceRuntimeSession | undefined;
       try {
         runtime = await fixture.open();
+        const footprint = seedPostStopFootprint(fixture);
         const pending = runtime.submit({
           taskId: item.name,
           from: "reviewer",
@@ -795,6 +824,7 @@ describe("Grok copresence runtime integration", () => {
           eventsTail: TailProbe | null;
           logState: { partialLines: unknown };
           pollTimer: unknown;
+          fatalShutdownPromise: Promise<void> | null;
         };
         await waitFor(() =>
           existsSync(chatPath)
@@ -828,6 +858,8 @@ describe("Grok copresence runtime integration", () => {
         item.mutate(path);
 
         const { failure } = await pendingOutcome;
+        await waitFor(() => internals.fatalShutdownPromise !== null);
+        await internals.fatalShutdownPromise;
         expect(grokCopresenceFailureCode(failure), item.name).toBe("jsonl_tail");
         expect(grokCopresenceFailureSubcode(failure), item.name).toBe(item.expected);
         expect(runtime.isRunning, item.name).toBe(false);
@@ -837,6 +869,8 @@ describe("Grok copresence runtime integration", () => {
         expect(cachedTails.every((candidate) => candidate.fd === null), item.name).toBe(true);
         for (const binding of tailBindings) expectDescriptorReleased(binding);
         expect(pollCalls, item.name).toBeGreaterThan(0);
+        for (const path of footprint.removedPaths) expect(existsSync(path), path).toBe(false);
+        expect(statSync(footprint.leaderLock).mode & 0o777).toBe(0o600);
         const callsAtFatal = pollCalls;
         await Bun.sleep(150);
         expect(pollCalls, item.name).toBe(callsAtFatal);
@@ -930,9 +964,11 @@ describe("Grok copresence runtime integration", () => {
     let runtime: GrokCopresenceRuntimeSession | undefined;
     try {
       runtime = await fixture.open();
+      const footprint = seedPostStopFootprint(fixture);
       const firstLeader = fixture.currentLeaderPid();
       await fixture.crashCurrent();
       await waitFor(() => fixture.recoverySpawnBlocked, 5_000);
+      expect(existsSync(footprint.promptHistory)).toBe(true);
       const secondLeader = fixture.currentLeaderPid();
       expect(secondLeader).not.toBe(firstLeader);
       expect(existsSync(`/proc/${secondLeader}`)).toBe(true);
@@ -941,6 +977,8 @@ describe("Grok copresence runtime integration", () => {
       fixture.releaseRecoverySpawn();
       await closing;
       runtime = undefined;
+
+      for (const path of footprint.removedPaths) expect(existsSync(path), path).toBe(false);
 
       expect(existsSync(`/proc/${firstLeader}`)).toBe(false);
       expect(existsSync(`/proc/${secondLeader}`)).toBe(false);
@@ -1546,6 +1584,41 @@ describe("Grok copresence runtime integration", () => {
     }
   });
 });
+
+function seedPostStopFootprint(fixture: RuntimeFixture): {
+  removedPaths: string[];
+  promptHistory: string;
+  leaderLock: string;
+} {
+  const cwdSessions = join(fixture.grokHome, "sessions", encodeURIComponent(fixture.cwd));
+  mkdirSync(cwdSessions, { recursive: true, mode: 0o755 });
+  const stateFiles = [
+    "CHANGELOG.json",
+    "CHANGELOG.md",
+    "README.md",
+    "sandbox-events.jsonl",
+  ].map((name) => join(fixture.grokHome, name));
+  for (const path of stateFiles) writeFileSync(path, "pinned transient state\n", { mode: 0o644 });
+  const leaderLog = join(fixture.grokHome, "leader.log");
+  writeFileSync(leaderLog, "", { mode: 0o644 });
+  const promptHistory = join(cwdSessions, "prompt_history.jsonl");
+  writeFileSync(promptHistory, "raw prompt\n", { mode: 0o644 });
+  const searchIndex = join(fixture.grokHome, "sessions", "session_search.sqlite");
+  writeFileSync(searchIndex, "derived search index\n", { mode: 0o644 });
+  const coreSession = grokSessionDirectory(fixture.grokHome, fixture.cwd, SESSION);
+  mkdirSync(coreSession, { recursive: true, mode: 0o755 });
+  writeFileSync(join(coreSession, "updates.jsonl"), "authoritative state\n", { mode: 0o644 });
+  const blocked = join(fixture.grokHome, "sandbox-blocked-dir.15");
+  mkdirSync(blocked, { mode: 0o700 });
+  chmodSync(blocked, 0o000);
+  const leaderLock = join(fixture.root, "leader.lock");
+  writeFileSync(leaderLock, "1\n", { mode: 0o644 });
+  return {
+    removedPaths: [...stateFiles, leaderLog, promptHistory, searchIndex, blocked],
+    promptHistory,
+    leaderLock,
+  };
+}
 
 class RuntimeFixture {
   readonly root = mkdtempSync(join(tmpdir(), "grok-copres-runtime-"));

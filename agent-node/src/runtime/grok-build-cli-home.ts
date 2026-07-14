@@ -14,6 +14,7 @@ import {
   readlinkSync,
   realpathSync,
   renameSync,
+  rmdirSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -47,6 +48,29 @@ export interface GrokCliHome {
   /** Absolute runtime-owned profile passed through the TUI-effective --agent flag. */
   copresenceAgentProfile?: string;
 }
+
+export interface CleanupGrokCliPostStopOptions {
+  stateHome: string;
+  projectCwd: string;
+  leaderSocket: string;
+}
+
+// Exact pinned 0.2.93 state removed only after the PTY and its owned Leader
+// are both confirmed stopped. Unknown siblings are deliberately preserved so
+// the containment scanner still rejects them.
+export const GROK_POST_STOP_CLEANUP_POLICY = Object.freeze({
+  stateFiles: Object.freeze([
+    "CHANGELOG.json",
+    "CHANGELOG.md",
+    "README.md",
+    "sandbox-events.jsonl",
+  ]),
+  emptyStateFiles: Object.freeze(["leader.log"]),
+  cwdSessionFiles: Object.freeze(["prompt_history.jsonl"]),
+  sessionRootFiles: Object.freeze(["session_search.sqlite"]),
+  emptyStateDirectories: Object.freeze(["sandbox-blocked-dir.15"]),
+  runtimeFilesToHarden: Object.freeze(["leader.lock"]),
+});
 
 export interface GrokProjectTurnLock {
   /** Parent fd for the already-locked open-file-description. Pass to turn. */
@@ -208,6 +232,185 @@ function removeGeneratedFile(path: string): void {
   if (!stat) return;
   assertGeneratedTarget(path);
   rmSync(path, { force: true });
+}
+
+function sameFileIdentity(
+  left: { dev: number; ino: number },
+  right: { dev: number; ino: number },
+): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function assertOwnedDirectoryForPostStop(path: string, label: string): void {
+  const expected = resolve(path);
+  if (path !== expected) {
+    throw new Error(`grok-build-cli refuses ${label}: path is not canonical`);
+  }
+  let fd: number | undefined;
+  try {
+    fd = openSync(
+      expected,
+      constants.O_RDONLY | (constants.O_DIRECTORY || 0) | (constants.O_NOFOLLOW || 0),
+    );
+    const stat = fstatSync(fd);
+    if (!stat.isDirectory() || realpathSync(expected) !== expected) {
+      throw new Error(`grok-build-cli refuses ${label}: expected a real directory`);
+    }
+    const uid = process.getuid?.();
+    if (uid !== undefined) assertCurrentOwner(expected, uid, stat.uid);
+    fchmodSync(fd, 0o700);
+  } catch (error: any) {
+    if (error?.code === "ELOOP" || error?.code === "ENOTDIR") {
+      throw new Error(`grok-build-cli refuses ${label}: expected a real directory`);
+    }
+    throw error;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+function openOwnedSingleLinkFileForPostStop(path: string): { fd: number; stat: ReturnType<typeof fstatSync> } {
+  const before = lstatSync(path);
+  const uid = process.getuid?.();
+  if (before.isSymbolicLink() || !before.isFile() || before.nlink !== 1) {
+    throw new Error(`grok-build-cli refuses post-stop state at ${path}: expected a single-link regular file`);
+  }
+  if (uid !== undefined) assertCurrentOwner(path, uid, before.uid);
+  let fd: number | undefined;
+  try {
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+    const opened = fstatSync(fd);
+    if (!opened.isFile() || opened.nlink !== 1 || !sameFileIdentity(before, opened)) {
+      throw new Error(`grok-build-cli refuses post-stop state at ${path}: file changed during validation`);
+    }
+    if (uid !== undefined) assertCurrentOwner(path, uid, opened.uid);
+    return { fd, stat: opened };
+  } catch (error) {
+    if (fd !== undefined) closeSync(fd);
+    throw error;
+  }
+}
+
+function removeExactPostStopFile(path: string, expectedSize?: number): void {
+  const present = lstatIfPresent(path);
+  if (!present) return;
+  const opened = openOwnedSingleLinkFileForPostStop(path);
+  try {
+    if (expectedSize !== undefined && opened.stat.size !== expectedSize) {
+      throw new Error(`grok-build-cli refuses post-stop state at ${path}: expected size ${expectedSize}`);
+    }
+    const current = lstatSync(path);
+    if (!sameFileIdentity(opened.stat, current)) {
+      throw new Error(`grok-build-cli refuses post-stop state at ${path}: file changed before removal`);
+    }
+    rmSync(path);
+  } finally {
+    closeSync(opened.fd);
+  }
+}
+
+function hardenExactPostStopFile(path: string): void {
+  if (!lstatIfPresent(path)) return;
+  const opened = openOwnedSingleLinkFileForPostStop(path);
+  try {
+    fchmodSync(opened.fd, 0o600);
+  } finally {
+    closeSync(opened.fd);
+  }
+}
+
+function removeExactEmptyPostStopDirectory(path: string): void {
+  const before = lstatIfPresent(path);
+  if (!before) return;
+  if (before.isSymbolicLink() || !before.isDirectory()) {
+    throw new Error(`grok-build-cli refuses post-stop state at ${path}: expected an empty real directory`);
+  }
+  const uid = process.getuid?.();
+  if (uid !== undefined) assertCurrentOwner(path, uid, before.uid);
+  const current = lstatSync(path);
+  if (!sameFileIdentity(before, current)) {
+    throw new Error(`grok-build-cli refuses post-stop state at ${path}: directory changed before removal`);
+  }
+  try {
+    rmdirSync(path);
+  } catch (error: any) {
+    if (error?.code === "ENOTEMPTY" || error?.code === "EEXIST") {
+      throw new Error(`grok-build-cli refuses post-stop state at ${path}: expected an empty real directory`);
+    }
+    throw error;
+  }
+}
+
+function hardenPostStopTree(path: string, relativePath = ""): void {
+  const stat = lstatSync(path);
+  if (stat.isSymbolicLink()) {
+    if (relativePath === "agent_id") return;
+    throw new Error(`grok-build-cli refuses symlink in post-stop state: ${path}`);
+  }
+  const uid = process.getuid?.();
+  if (uid !== undefined) assertCurrentOwner(path, uid, stat.uid);
+  if (stat.isDirectory()) {
+    assertOwnedDirectoryForPostStop(path, `post-stop directory ${path}`);
+    for (const entry of readdirSync(path)) {
+      hardenPostStopTree(join(path, entry), relativePath ? join(relativePath, entry) : entry);
+    }
+    return;
+  }
+  if (!stat.isFile() || stat.nlink !== 1) {
+    throw new Error(`grok-build-cli refuses non-private post-stop state: ${path}`);
+  }
+  hardenExactPostStopFile(path);
+}
+
+/**
+ * Remove prompt-bearing/diagnostic vendor caches and repair the retained
+ * pinned state only after every writer for this generation is gone.
+ */
+export function cleanupGrokCliPostStopState(opts: CleanupGrokCliPostStopOptions): void {
+  const stateHome = resolve(opts.stateHome);
+  const projectCwd = resolve(opts.projectCwd);
+  const leaderSocket = resolve(opts.leaderSocket);
+  if (opts.stateHome !== stateHome || opts.projectCwd !== projectCwd || opts.leaderSocket !== leaderSocket) {
+    throw new Error("grok-build-cli post-stop cleanup requires canonical absolute paths");
+  }
+  assertOwnedDirectoryForPostStop(stateHome, "post-stop state home");
+  const runtimeDirectory = dirname(leaderSocket);
+  assertOwnedDirectoryForPostStop(runtimeDirectory, "post-stop runtime directory");
+
+  // Check the strongest invariant first: `off` must leave the native stderr
+  // sink empty. A non-empty log is retained for the scanner and turns red.
+  for (const name of GROK_POST_STOP_CLEANUP_POLICY.emptyStateFiles) {
+    removeExactPostStopFile(join(stateHome, name), 0);
+  }
+  for (const name of GROK_POST_STOP_CLEANUP_POLICY.stateFiles) {
+    removeExactPostStopFile(join(stateHome, name));
+  }
+  const sessionsRoot = join(stateHome, "sessions");
+  if (lstatIfPresent(sessionsRoot)) {
+    assertOwnedDirectoryForPostStop(sessionsRoot, "post-stop sessions directory");
+  }
+  const encodedCwd = encodeURIComponent(projectCwd);
+  const cwdSessionRoot = join(sessionsRoot, encodedCwd);
+  if (lstatIfPresent(cwdSessionRoot)) {
+    assertOwnedDirectoryForPostStop(cwdSessionRoot, "post-stop cwd session directory");
+  }
+  for (const name of GROK_POST_STOP_CLEANUP_POLICY.cwdSessionFiles) {
+    removeExactPostStopFile(join(cwdSessionRoot, name));
+  }
+  for (const name of GROK_POST_STOP_CLEANUP_POLICY.sessionRootFiles) {
+    removeExactPostStopFile(join(sessionsRoot, name));
+  }
+  for (const name of GROK_POST_STOP_CLEANUP_POLICY.emptyStateDirectories) {
+    removeExactEmptyPostStopDirectory(join(stateHome, name));
+  }
+
+  // Grok writes retained state with 0644/0755 even under the parent 0077
+  // umask. Preserve exact unknown entries for the scanner, but make every
+  // real retained file/directory owner-only before it is inspected.
+  hardenPostStopTree(stateHome);
+  for (const name of GROK_POST_STOP_CLEANUP_POLICY.runtimeFilesToHarden) {
+    hardenExactPostStopFile(join(runtimeDirectory, name));
+  }
 }
 
 function ensureCredentialLink(sourceHome: string, stateHome: string, name: string) {

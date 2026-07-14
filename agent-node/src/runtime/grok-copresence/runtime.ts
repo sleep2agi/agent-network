@@ -37,6 +37,7 @@ import {
   type GrokCopresenceState,
 } from "./state";
 import { buildGrokHelperEnv, buildGrokPtyEnv, projectGrokChildEnv } from "../grok-child-env";
+import { cleanupGrokCliPostStopState } from "../grok-build-cli-home";
 import {
   assertGrokCopresenceAgentProfile,
   GROK_COPRESENCE_EFFECTIVE_TOOLS,
@@ -936,11 +937,11 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       this.retainLocksForUnconfirmedPty = true;
       this.warn(`[grok-copresence] retaining locks: ${errorMessage(error)}`);
     });
-    if (!this.retainLocksForUnconfirmedPty) {
-      for (const lock of this.locks.reverse()) await lock.release().catch(() => {});
-      this.locks = [];
+    try {
+      await this.finalizeStoppedState();
+    } finally {
+      this.opened = false;
     }
-    this.opened = false;
   }
 
   private async spawnTui(resume: boolean): Promise<void> {
@@ -1199,10 +1200,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       });
       await this.attach?.close().catch(() => {});
       this.attach = null;
-      if (!this.retainLocksForUnconfirmedPty) {
-        for (const lock of this.locks.reverse()) await lock.release().catch(() => {});
-        this.locks = [];
-      }
+      await this.finalizeStoppedState();
     })();
     return this.fatalShutdownPromise;
   }
@@ -1216,6 +1214,25 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         this.warn(`[grok-copresence] JSONL tail close failed: ${errorMessage(error)}`);
       }
     }
+  }
+
+  private async finalizeStoppedState(): Promise<void> {
+    if (this.retainLocksForUnconfirmedPty) return;
+    try {
+      cleanupGrokCliPostStopState({
+        stateHome: this.opts.grokHome,
+        projectCwd: this.opts.cwd,
+        leaderSocket: this.leaderSocket,
+      });
+    } catch (error) {
+      // Keep lifetime locks held until process exit if the containment state
+      // cannot be inspected or repaired exactly. The external scanner then
+      // observes the untouched counterexample and remains fail-closed.
+      this.retainLocksForUnconfirmedPty = true;
+      throw new Error(`grok post-stop containment cleanup failed: ${errorMessage(error)}`);
+    }
+    for (const lock of this.locks.reverse()) await lock.release().catch(() => {});
+    this.locks = [];
   }
 
   private async bindSpawnedLeader(): Promise<void> {

@@ -831,6 +831,115 @@ test("rejects an auth pattern inside observed native leader.lock", () => {
   }
 });
 
+for (const basename of [
+  "CHANGELOG.json",
+  "CHANGELOG.md",
+  "README.md",
+  "leader.log",
+  "sandbox-events.jsonl",
+]) {
+  test(`suppressed post-stop file ${basename} stays red if cleanup is bypassed`, () => {
+    const fixture = stateFixture(`suppressed-${basename.replaceAll(".", "-")}`);
+    const candidate = path.join(fixture.home, basename);
+    try {
+      writeFileSync(candidate, "clean\n", { mode: 0o600 });
+      let result = scanStateFixture(fixture);
+      assert.deepEqual(result.matchedRoles, []);
+      assert.deepEqual(result.errorRoles, ["grok_current_state_structure"]);
+      writeFileSync(candidate, "PRIVATE_AUTH_SCALAR_0123456789\n", { mode: 0o600 });
+      result = scanStateFixture(fixture);
+      assert.equal(result.scanOutcome, "mixed");
+      assert.deepEqual(result.matchedRoles, ["grok_current_home_other_state"]);
+      assert.deepEqual(result.errorRoles, ["grok_current_state_structure"]);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const [label, candidatePath] of [
+  ["prompt_history.jsonl", (fixture) => path.join(
+    fixture.home,
+    "sessions",
+    encodeURIComponent(fixture.cwd),
+    "prompt_history.jsonl",
+  )],
+  ["session_search.sqlite", (fixture) => path.join(
+    fixture.home,
+    "sessions",
+    "session_search.sqlite",
+  )],
+]) {
+  test(`prompt-bearing cache ${label} stays red if cleanup is bypassed`, () => {
+    const fixture = stateFixture(`suppressed-${label.replaceAll(".", "-")}`);
+    const candidate = candidatePath(fixture);
+    try {
+      mkdirSync(path.dirname(candidate), { recursive: true, mode: 0o700 });
+      writeFileSync(candidate, "clean\n", { mode: 0o600 });
+      let result = scanStateFixture(fixture);
+      assert.deepEqual(result.matchedRoles, []);
+      assert.deepEqual(result.errorRoles, ["grok_current_state_structure"]);
+      writeFileSync(candidate, "PRIVATE_AUTH_SCALAR_0123456789\n", { mode: 0o600 });
+      result = scanStateFixture(fixture);
+      assert.equal(result.scanOutcome, "mixed");
+      assert.deepEqual(result.matchedRoles, ["grok_session_other"]);
+      assert.deepEqual(result.errorRoles, ["grok_current_state_structure"]);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("exact sandbox placeholder stays red when non-empty cleanup is bypassed", () => {
+  const fixture = stateFixture("suppressed-sandbox-placeholder");
+  const blocked = path.join(fixture.home, "sandbox-blocked-dir.15");
+  try {
+    mkdirSync(blocked, { mode: 0o700 });
+    writeFileSync(path.join(blocked, "unknown"),
+      "PRIVATE_AUTH_SCALAR_0123456789\n", { mode: 0o600 });
+    const result = scanStateFixture(fixture);
+    assert.equal(result.scanOutcome, "mixed");
+    assert.deepEqual(result.matchedRoles, ["grok_current_home_other_state"]);
+    assert.deepEqual(result.errorRoles, ["grok_current_state_structure"]);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("native leader.lock must be hardened from its observed 0644 mode", () => {
+  const fixture = stateFixture("runtime-leader-lock-mode");
+  const leaderLock = path.join(fixture.run, "leader.lock");
+  try {
+    writeFileSync(leaderLock, "1\n", { mode: 0o644 });
+    chmodSync(leaderLock, 0o644);
+    assert.deepEqual(scanStateFixture(fixture).errorRoles, ["grok_runtime_directory_scan"]);
+    chmodSync(leaderLock, 0o600);
+    assertCleanStateFixture(fixture);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("pinned vendor directories must be hardened from observed public modes", () => {
+  const fixture = stateFixture("pinned-vendor-modes");
+  try {
+    installObservedPinnedVendorState(fixture);
+    const docs = path.join(fixture.home, "docs");
+    const nested = path.join(docs, "nested");
+    const file = path.join(nested, "clean");
+    chmodSync(docs, 0o755);
+    chmodSync(nested, 0o755);
+    chmodSync(file, 0o644);
+    assert.deepEqual(scanStateFixture(fixture).errorRoles, ["grok_current_state_structure"]);
+    chmodSync(docs, 0o700);
+    chmodSync(nested, 0o700);
+    chmodSync(file, 0o600);
+    assertCleanStateFixture(fixture);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("requires a direct real current home and exact socket paths in both API and CLI", () => {
   const fixture = stateFixture("expected-home");
   const output = path.join(fixture.root, "cli-result.json");

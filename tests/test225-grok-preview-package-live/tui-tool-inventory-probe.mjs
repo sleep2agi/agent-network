@@ -11,6 +11,7 @@ import {
   readlinkSync,
   realpathSync,
   rmSync,
+  rmdirSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -914,7 +915,7 @@ function findDirectoryNamed(rootPath, name) {
   return "";
 }
 
-function containsEntryNamed(rootPath, name) {
+function containsInvalidLeaderLog(rootPath) {
   let entries;
   try {
     entries = readdirSync(rootPath, { withFileTypes: true });
@@ -922,12 +923,70 @@ function containsEntryNamed(rootPath, name) {
     return false;
   }
   for (const entry of entries) {
-    if (entry.name === name) return true;
-    if (entry.isDirectory() && containsEntryNamed(path.join(rootPath, entry.name), name)) {
+    const candidate = path.join(rootPath, entry.name);
+    if (entry.name === "leader.log") {
+      const stat = lstatSync(candidate);
+      const uid = process.getuid?.();
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size !== 0
+        || (uid !== undefined && stat.uid !== uid)) return true;
+    }
+    if (entry.isDirectory() && containsInvalidLeaderLog(candidate)) {
       return true;
     }
   }
   return false;
+}
+
+function removeExactOwnedProbeFile(candidate, expectedSize) {
+  let stat;
+  try {
+    stat = lstatSync(candidate);
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw new ProbeFailure("cleanup", "leader_cleanup");
+  }
+  const uid = process.getuid?.();
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1
+    || (uid !== undefined && stat.uid !== uid)
+    || (expectedSize !== undefined && stat.size !== expectedSize)) {
+    throw new ProbeFailure("cleanup", "leader_cleanup");
+  }
+  rmSync(candidate);
+}
+
+// Mirror the product's exact post-stop suppression set between the two real
+// pinned TUI turns. This proves the caches are derived rather than required
+// for same-UUID resume; authoritative per-session JSONL is left untouched.
+function removeKeylessPostStopStateForResume(state) {
+  for (const name of [
+    "CHANGELOG.json",
+    "CHANGELOG.md",
+    "README.md",
+    "sandbox-events.jsonl",
+  ]) removeExactOwnedProbeFile(path.join(state.home, name));
+  removeExactOwnedProbeFile(path.join(state.home, "leader.log"), 0);
+  const cwdSessions = path.join(
+    state.home,
+    "sessions",
+    encodeURIComponent(realpathSync(state.project)),
+  );
+  removeExactOwnedProbeFile(path.join(cwdSessions, "prompt_history.jsonl"));
+  removeExactOwnedProbeFile(path.join(state.home, "sessions", "session_search.sqlite"));
+  const blocked = path.join(state.home, "sandbox-blocked-dir.15");
+  try {
+    const stat = lstatSync(blocked);
+    const uid = process.getuid?.();
+    if (!stat.isDirectory() || stat.isSymbolicLink()
+      || (uid !== undefined && stat.uid !== uid)) {
+      throw new ProbeFailure("cleanup", "leader_cleanup");
+    }
+    rmdirSync(blocked);
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      if (error instanceof ProbeFailure) throw error;
+      throw new ProbeFailure("cleanup", "leader_cleanup");
+    }
+  }
 }
 
 function readJsonLines(filePath) {
@@ -1623,7 +1682,7 @@ async function runTui(state, label, sessionId, resume, {
   } finally {
     await cleanupActiveRun(runRecord);
   }
-  if (containsEntryNamed(root, "leader.log")) {
+  if (containsInvalidLeaderLog(root)) {
     throw new ProbeFailure("cleanup", "leader_cleanup");
   }
   if (invalidRequestObserved(rows)) {
@@ -1712,6 +1771,7 @@ async function runProbe() {
   }
 
   await waitForResumeReady(positiveState, sessionId, fresh.nonce);
+  removeKeylessPostStopStateForResume(positiveState);
 
   const resumed = await runTui(positiveState, "resume", sessionId, true);
   results.push(resumed);

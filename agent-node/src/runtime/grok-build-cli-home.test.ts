@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it } from "bun:test";
 import {
   chmodSync,
   existsSync,
+  linkSync,
+  lstatSync,
   mkdtempSync,
   mkdirSync,
   readdirSync,
@@ -17,7 +19,9 @@ import { dirname, join, resolve } from "path";
 import {
   acquireGrokProjectTurnLock,
   assertNoDiscoveredGrokHooks,
+  cleanupGrokCliPostStopState,
   grokCliStateKey,
+  GROK_POST_STOP_CLEANUP_POLICY,
   prepareGrokCliHome,
 } from "./grok-build-cli-home";
 import { assertGrokCopresenceAgentProfile } from "./grok-copresence/policy";
@@ -170,6 +174,146 @@ describe("prepareGrokCliHome", () => {
     })).toThrow("symlink in isolated session store");
     expect(readFileSync(join(external, "keep"), "utf8")).toBe("unchanged");
     expect(statSync(join(external, "keep")).mode & 0o777).toBe(0o644);
+  });
+
+  it("keeps the post-stop cleanup policy exact and reviewable", () => {
+    expect(GROK_POST_STOP_CLEANUP_POLICY).toEqual({
+      stateFiles: ["CHANGELOG.json", "CHANGELOG.md", "README.md", "sandbox-events.jsonl"],
+      emptyStateFiles: ["leader.log"],
+      cwdSessionFiles: ["prompt_history.jsonl"],
+      sessionRootFiles: ["session_search.sqlite"],
+      emptyStateDirectories: ["sandbox-blocked-dir.15"],
+      runtimeFilesToHarden: ["leader.lock"],
+    });
+  });
+
+  it("removes only exact transient state and hardens retained post-stop state", () => {
+    const root = mkdtempSync(join(tmpdir(), "grok-cli-post-stop-"));
+    roots.push(root);
+    const stateHome = join(root, "state");
+    const runtime = join(root, "runtime");
+    const cwd = join(root, "project");
+    const encodedCwd = encodeURIComponent(cwd);
+    const cwdSessions = join(stateHome, "sessions", encodedCwd);
+    const session = join(cwdSessions, "11111111-1111-4111-8111-111111111111");
+    const identity = join(root, "identity");
+    for (const directory of [stateHome, runtime, cwd, session, join(stateHome, "logs"), join(stateHome, "docs")]) {
+      mkdirSync(directory, { recursive: true, mode: 0o755 });
+      chmodSync(directory, directory === stateHome || directory === runtime || directory === cwd ? 0o700 : 0o755);
+    }
+    for (const name of GROK_POST_STOP_CLEANUP_POLICY.stateFiles) {
+      writeFileSync(join(stateHome, name), "pinned vendor state\n", { mode: 0o644 });
+    }
+    writeFileSync(join(stateHome, "leader.log"), "", { mode: 0o644 });
+    writeFileSync(join(cwdSessions, "prompt_history.jsonl"), "raw prompt\n", { mode: 0o644 });
+    writeFileSync(join(stateHome, "sessions", "session_search.sqlite"), "search index\n", { mode: 0o644 });
+    writeFileSync(join(session, "updates.jsonl"), "authoritative state\n", { mode: 0o644 });
+    writeFileSync(join(stateHome, "logs", "unified.jsonl"), "retained log\n", { mode: 0o644 });
+    writeFileSync(join(stateHome, "docs", "guide.md"), "static guide\n", { mode: 0o644 });
+    writeFileSync(join(stateHome, "unknown-future-state"), "leave for scanner\n", { mode: 0o644 });
+    writeFileSync(join(runtime, "leader.lock"), "1\n", { mode: 0o644 });
+    writeFileSync(identity, "identity\n", { mode: 0o644 });
+    symlinkSync(identity, join(stateHome, "agent_id"));
+    const blocked = join(stateHome, "sandbox-blocked-dir.15");
+    mkdirSync(blocked, { mode: 0o700 });
+    chmodSync(blocked, 0o000);
+
+    cleanupGrokCliPostStopState({
+      stateHome,
+      projectCwd: cwd,
+      leaderSocket: join(runtime, "leader.sock"),
+    });
+
+    for (const name of [
+      ...GROK_POST_STOP_CLEANUP_POLICY.stateFiles,
+      ...GROK_POST_STOP_CLEANUP_POLICY.emptyStateFiles,
+    ]) expect(existsSync(join(stateHome, name)), name).toBe(false);
+    expect(existsSync(join(cwdSessions, "prompt_history.jsonl"))).toBe(false);
+    expect(existsSync(join(stateHome, "sessions", "session_search.sqlite"))).toBe(false);
+    expect(existsSync(blocked)).toBe(false);
+    for (const file of [
+      join(session, "updates.jsonl"),
+      join(stateHome, "logs", "unified.jsonl"),
+      join(stateHome, "docs", "guide.md"),
+      join(stateHome, "unknown-future-state"),
+      join(runtime, "leader.lock"),
+    ]) expect(statSync(file).mode & 0o777, file).toBe(0o600);
+    for (const directory of [stateHome, join(stateHome, "sessions"), cwdSessions, session,
+      join(stateHome, "logs"), join(stateHome, "docs")]) {
+      expect(statSync(directory).mode & 0o777, directory).toBe(0o700);
+    }
+    expect(lstatSync(join(stateHome, "agent_id")).isSymbolicLink()).toBe(true);
+    expect(readFileSync(identity, "utf8")).toBe("identity\n");
+    expect(statSync(identity).mode & 0o777).toBe(0o644);
+    expect(readFileSync(join(stateHome, "unknown-future-state"), "utf8"))
+      .toBe("leave for scanner\n");
+  });
+
+  it("retains a non-empty leader log and rejects post-stop link attacks", () => {
+    const nonemptyRoot = mkdtempSync(join(tmpdir(), "grok-cli-post-stop-log-"));
+    roots.push(nonemptyRoot);
+    const nonemptyHome = join(nonemptyRoot, "state");
+    const nonemptyRuntime = join(nonemptyRoot, "runtime");
+    const nonemptyCwd = join(nonemptyRoot, "project");
+    for (const directory of [nonemptyHome, nonemptyRuntime, nonemptyCwd]) {
+      mkdirSync(directory, { mode: 0o700 });
+    }
+    const leaderLog = join(nonemptyHome, "leader.log");
+    writeFileSync(leaderLog, "must remain visible to scanner\n", { mode: 0o644 });
+    expect(() => cleanupGrokCliPostStopState({
+      stateHome: nonemptyHome,
+      projectCwd: nonemptyCwd,
+      leaderSocket: join(nonemptyRuntime, "leader.sock"),
+    })).toThrow("expected size 0");
+    expect(readFileSync(leaderLog, "utf8")).toBe("must remain visible to scanner\n");
+
+    const linkRoot = mkdtempSync(join(tmpdir(), "grok-cli-post-stop-link-"));
+    roots.push(linkRoot);
+    const linkHome = join(linkRoot, "state");
+    const linkRuntime = join(linkRoot, "runtime");
+    const linkCwd = join(linkRoot, "project");
+    const cwdSessions = join(linkHome, "sessions", encodeURIComponent(linkCwd));
+    const external = join(linkRoot, "external-prompt");
+    mkdirSync(cwdSessions, { recursive: true, mode: 0o700 });
+    mkdirSync(linkRuntime, { mode: 0o700 });
+    mkdirSync(linkCwd, { mode: 0o700 });
+    writeFileSync(external, "external stays\n", { mode: 0o644 });
+    symlinkSync(external, join(cwdSessions, "prompt_history.jsonl"));
+    expect(() => cleanupGrokCliPostStopState({
+      stateHome: linkHome,
+      projectCwd: linkCwd,
+      leaderSocket: join(linkRuntime, "leader.sock"),
+    })).toThrow("single-link regular file");
+    expect(readFileSync(external, "utf8")).toBe("external stays\n");
+    expect(statSync(external).mode & 0o777).toBe(0o644);
+
+    rmSync(join(cwdSessions, "prompt_history.jsonl"));
+    linkSync(external, join(cwdSessions, "prompt_history.jsonl"));
+    expect(() => cleanupGrokCliPostStopState({
+      stateHome: linkHome,
+      projectCwd: linkCwd,
+      leaderSocket: join(linkRuntime, "leader.sock"),
+    })).toThrow("single-link regular file");
+    expect(readFileSync(external, "utf8")).toBe("external stays\n");
+  });
+
+  it("refuses a non-empty exact sandbox placeholder", () => {
+    const root = mkdtempSync(join(tmpdir(), "grok-cli-post-stop-blocked-"));
+    roots.push(root);
+    const stateHome = join(root, "state");
+    const runtime = join(root, "runtime");
+    const cwd = join(root, "project");
+    const blocked = join(stateHome, "sandbox-blocked-dir.15");
+    mkdirSync(blocked, { recursive: true, mode: 0o700 });
+    mkdirSync(runtime, { mode: 0o700 });
+    mkdirSync(cwd, { mode: 0o700 });
+    writeFileSync(join(blocked, "unknown"), "counterexample\n", { mode: 0o600 });
+    expect(() => cleanupGrokCliPostStopState({
+      stateHome,
+      projectCwd: cwd,
+      leaderSocket: join(runtime, "leader.sock"),
+    })).toThrow("expected an empty real directory");
+    expect(readFileSync(join(blocked, "unknown"), "utf8")).toBe("counterexample\n");
   });
 
   it("enables the single TUI leader only for explicit copresence mode", () => {
