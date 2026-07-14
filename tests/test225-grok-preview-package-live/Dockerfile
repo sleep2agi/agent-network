@@ -22,6 +22,8 @@ COPY agent-node ./agent-node
 COPY agent-network ./agent-network
 COPY tests/test225-grok-preview-package-live ./tests/test225-grok-preview-package-live
 
+RUN node --test ./tests/test225-grok-preview-package-live/artifact-report.test.mjs
+
 # Prove the three source boundaries agree before the source tree is discarded.
 RUN TEST225_FAILURE_CONTRACT_MODE=source \
   TEST225_SOURCE_COMMIT="$SOURCE_COMMIT" \

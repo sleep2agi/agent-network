@@ -95,7 +95,8 @@ mkdir -p "$ARTIFACT_DIR" "$HOME/.grok" "$WORK" "$STOP_LOG_DIR"
 chmod 700 "$HOME" "$HOME/.grok" "$WORK" "$STOP_LOG_DIR"
 [ ! -e "$HOME/.grok/auth.json" ] \
   || { printf 'FAIL: deterministic test home unexpectedly contains auth state\n' >&2; exit 1; }
-: >"$REPORT"
+node /test225/artifact-report.mjs "$REPORT" \
+  || { printf 'FAIL: could not atomically create a private report\n' >&2; exit 1; }
 rm -f -- "$TUI_INVENTORY_DIAGNOSTIC" "$REAL_TURN_DIAGNOSTIC"
 
 log() { printf '%s\n' "$*" | tee -a "$REPORT"; }
