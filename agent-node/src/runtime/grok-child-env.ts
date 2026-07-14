@@ -38,6 +38,7 @@ export const GROK_CHILD_CONTROLLED_ENV_KEYS = [
   "GROK_FOLDER_TRUST",
   "GROK_DEFAULT_SELECTED_PERMISSION",
   "GROK_DISABLE_AUTOUPDATER",
+  "GROK_CHANGELOG_OFFLINE",
   "GROK_LEADER_LOG",
   "GROK_SUBAGENTS",
   "GROK_WEB_FETCH",
@@ -110,6 +111,9 @@ export function buildGrokChildEnv(opts: BuildGrokChildEnvOptions): NodeJS.Proces
   // The preview pins one audited binary and one fixed no-I/O agent profile.
   // Keep the same posture across every preflight, Leader and recovery spawn.
   env.GROK_DISABLE_AUTOUPDATER = "1";
+  // Authenticated 0.2.93 sessions can otherwise fetch and persist a remote
+  // changelog cache. Keep the isolated preview on its pinned embedded bundle.
+  env.GROK_CHANGELOG_OFFLINE = "1";
   // In pinned Grok 0.2.93 this is a tracing-filter value, not a destination
   // path. The exact `off` directive keeps the unavoidable leader.log empty;
   // values such as `/dev/null` instead enable the persistent stderr log.

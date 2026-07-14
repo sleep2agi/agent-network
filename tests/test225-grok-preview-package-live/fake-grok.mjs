@@ -28,6 +28,7 @@ function recordEnvironment(kind, extra = {}) {
     envKeys,
     forbiddenKeys: envKeys.filter((key) => forbiddenName.test(key)),
     markerValueObserved: Object.values(process.env).some((value) => forbiddenMarker.test(String(value))),
+    changelogOfflineExact: process.env.GROK_CHANGELOG_OFFLINE === "1",
     leaderLogDisabledExact: process.env.GROK_LEADER_LOG === "off",
     ...extra,
   };
