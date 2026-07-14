@@ -1040,6 +1040,85 @@ describe("Grok copresence runtime integration", () => {
     }
   }, 10_000);
 
+  test("retains containment and lifetime locks when a closing recovery PTY will not stop", async () => {
+    const fixture = new RuntimeFixture();
+    fixture.tuiProcessIds = [42, 43];
+    fixture.stubbornTuiSpawns.add(2);
+    fixture.blockTuiSpawns.add(2);
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    let retainedLocks: Array<{ release(): Promise<void> }> = [];
+    try {
+      runtime = await fixture.open();
+      await fixture.crashCurrent();
+      await waitFor(() => fixture.blockedTuiSpawnNumber === 2, 5_000);
+      const blocked = join(fixture.grokHome, "sandbox-blocked-dir.43");
+      mkdirSync(blocked, { mode: 0o000 });
+
+      const closing = runtime.close();
+      fixture.releaseRecoverySpawn();
+      await closing;
+
+      const internals = runtime as unknown as {
+        locks: Array<{ release(): Promise<void> }>;
+        retainLocksForUnconfirmedPty: boolean;
+      };
+      retainedLocks = [...internals.locks];
+      expect(internals.retainLocksForUnconfirmedPty).toBe(true);
+      expect(retainedLocks.length).toBeGreaterThan(0);
+      expect(existsSync(blocked)).toBe(true);
+
+      let contenderSpawned = false;
+      await expect(openGrokCopresenceRuntime({
+        ...fixture.options(),
+        leaderSocket: join(fixture.root, "contender-leader.sock"),
+        attachSocket: join(fixture.root, "contender-attach.sock"),
+        ptySpawn: async () => {
+          contenderSpawned = true;
+          throw new Error("retained session lock must reject before spawn");
+        },
+      })).rejects.toThrow("already owns this socket/session");
+      expect(contenderSpawned).toBe(false);
+      expect(existsSync(blocked)).toBe(true);
+    } finally {
+      fixture.releaseRecoverySpawn();
+      await runtime?.close();
+      await fixture.close();
+      for (const lock of retainedLocks.reverse()) await lock.release().catch(() => {});
+    }
+  }, 15_000);
+
+  test("contains an exited recovery generation before reusing its PID", async () => {
+    const fixture = new RuntimeFixture();
+    fixture.reconnectAttempts = 2;
+    fixture.tuiProcessIds = [42, 43, 43];
+    fixture.createSandboxPlaceholderTuiSpawns.add(2);
+    fixture.exitOnSubscriptionTuiSpawns.add(2);
+    fixture.blockTuiSpawns.add(3);
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await fixture.open();
+      await fixture.crashCurrent();
+      await waitFor(() => fixture.blockedTuiSpawnNumber === 3, 10_000);
+
+      expect(fixture.spawnedArgs).toHaveLength(3);
+      expect(fixture.placeholderPresentAtSpawn[2]).toBe(false);
+      const internals = runtime as unknown as {
+        recovering: boolean;
+        recoveryPromise: Promise<void> | null;
+      };
+      expect(internals.recovering).toBe(true);
+      expect(internals.recoveryPromise).not.toBeNull();
+      expect(existsSync(join(fixture.grokHome, "sandbox-blocked-dir.43"))).toBe(false);
+
+      fixture.releaseRecoverySpawn();
+      await waitFor(() => runtime?.isRunning === true, 5_000);
+    } finally {
+      fixture.releaseRecoverySpawn();
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 15_000);
+
   test("arbitrates a live PTY, settles final JSONL, attaches once, and resumes", async () => {
     const fixture = new RuntimeFixture();
     let runtime: GrokCopresenceRuntimeSession | undefined;
@@ -1694,11 +1773,18 @@ class RuntimeFixture {
   spawnRawEvents = "";
   recoveryWrites: FakeDelayedWrite[] = [];
   tuiProcessIds: number[] = [42];
+  reconnectAttempts = 1;
+  readonly stubbornTuiSpawns = new Set<number>();
+  readonly exitOnSubscriptionTuiSpawns = new Set<number>();
+  readonly createSandboxPlaceholderTuiSpawns = new Set<number>();
+  readonly blockTuiSpawns = new Set<number>();
+  readonly placeholderPresentAtSpawn: boolean[] = [];
   controlledEnvOverride: NodeJS.ProcessEnv = {};
   flockBinary: string | undefined;
   autoTuiReady = true;
   blockRecoverySpawn = false;
   recoverySpawnBlocked = false;
+  blockedTuiSpawnNumber = 0;
   private recoverySpawnRelease: (() => void) | null = null;
   private ptys: FakePty[] = [];
 
@@ -1774,7 +1860,7 @@ class RuntimeFixture {
       alwaysApprove: false,
       sandboxProfile: "workspace",
       pollIntervalMs: this.pollIntervalMs,
-      reconnectAttempts: 1,
+      reconnectAttempts: this.reconnectAttempts,
       flockBinary: this.flockBinary,
       beforeSpawn: () => {
         this.spawnGateCalls += 1;
@@ -1820,10 +1906,14 @@ class RuntimeFixture {
 
   private readonly spawn: GrokPtySpawn = async (_binary, args, options) => {
     const recoverySpawn = this.ptys.length > 0;
+    const spawnNumber = this.ptys.length + 1;
+    const tuiProcessId = this.tuiProcessIds[this.ptys.length] ?? 42 + this.ptys.length;
+    const sandboxPlaceholder = join(this.grokHome, `sandbox-blocked-dir.${tuiProcessId}`);
+    this.placeholderPresentAtSpawn.push(existsSync(sandboxPlaceholder));
     this.spawnedArgs.push([...args]);
     this.spawnedEnvs.push({ ...options.env });
     const pty = new FakePty(
-      this.tuiProcessIds[this.ptys.length] ?? 42 + this.ptys.length,
+      tuiProcessId,
       _binary,
       options.cwd,
       options.env,
@@ -1834,13 +1924,20 @@ class RuntimeFixture {
       this.spawnRawEvents,
       this.ptys.length > 0 ? this.recoveryWrites : [],
       this.autoTuiReady,
+      this.stubbornTuiSpawns.has(spawnNumber),
+      this.exitOnSubscriptionTuiSpawns.has(spawnNumber),
     );
     await pty.start();
     this.ptys.push(pty);
-    if (recoverySpawn && this.blockRecoverySpawn) {
+    if (this.createSandboxPlaceholderTuiSpawns.has(spawnNumber)) {
+      mkdirSync(sandboxPlaceholder, { mode: 0o000 });
+    }
+    if ((recoverySpawn && this.blockRecoverySpawn) || this.blockTuiSpawns.has(spawnNumber)) {
       this.recoverySpawnBlocked = true;
+      this.blockedTuiSpawnNumber = spawnNumber;
       await new Promise<void>((resolve) => { this.recoverySpawnRelease = resolve; });
       this.recoverySpawnBlocked = false;
+      this.blockedTuiSpawnNumber = 0;
       this.recoverySpawnRelease = null;
     }
     return pty;
@@ -1939,6 +2036,8 @@ class FakePty implements GrokPtyLike {
     private readonly startupRawEvents: string,
     private readonly scheduledWrites: readonly FakeDelayedWrite[],
     private readonly autoTuiReady: boolean,
+    private readonly ignoreKill: boolean,
+    private readonly exitOnSubscription: boolean,
   ) {}
 
   async start(): Promise<void> {
@@ -2005,6 +2104,7 @@ class FakePty implements GrokPtyLike {
   resize(): void {}
 
   kill(): void {
+    if (this.ignoreKill) return;
     this.emitExit({ exitCode: 0, signal: 15 });
   }
 
@@ -2015,6 +2115,9 @@ class FakePty implements GrokPtyLike {
 
   onExit(listener: (event: { exitCode: number; signal?: number }) => void): { dispose(): void } {
     this.exitListeners.push(listener);
+    if (this.exitOnSubscription) {
+      queueMicrotask(() => this.emitExit({ exitCode: 7 }));
+    }
     return { dispose: () => { this.exitListeners = this.exitListeners.filter((item) => item !== listener); } };
   }
 

@@ -122,6 +122,13 @@ export interface GrokPtyLike {
   onExit(listener: (event: { exitCode: number; signal?: number }) => void): { dispose(): void };
 }
 
+interface GrokTuiGeneration {
+  readonly generation: number;
+  readonly pty: GrokPtyLike;
+  readonly exit: Promise<void>;
+  exited: boolean;
+}
+
 export type GrokPtySpawn = (
   binary: string,
   args: string[],
@@ -637,7 +644,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   private arbitration = newGrokCopresenceState();
   private logState: GrokJsonlState = newGrokJsonlState();
   private pty: GrokPtyLike | null = null;
-  private ptyExit: Promise<void> | null = null;
+  private activeTui: GrokTuiGeneration | null = null;
   private attach: GrokAttachServer | null = null;
   private locks: LifetimeLock[] = [];
   private chatTail: SafeJsonlTail | null = null;
@@ -926,14 +933,10 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     this.attach = null;
     await this.recoveryPromise?.catch(() => {});
     this.disposeJsonlTails();
-    const pty = this.pty;
-    const ptyExit = this.ptyExit;
-    this.pty = null;
-    this.ptyExit = null;
-    this.tuiReady = false;
-    this.tuiReadinessBuffer = "";
-    this.ptyGeneration += 1;
-    await terminateOwnedPty(pty, ptyExit).catch((error) => {
+    const tui = this.activeTui;
+    await terminateOwnedPty(tui?.pty ?? null, tui?.exit ?? null).then(() => {
+      this.detachTuiGeneration(tui);
+    }).catch((error) => {
       this.retainLocksForUnconfirmedPty = true;
       this.warn(`[grok-copresence] PTY termination failed: ${errorMessage(error)}`);
     });
@@ -948,7 +951,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     }
   }
 
-  private async spawnTui(resume: boolean): Promise<void> {
+  private async spawnTui(resume: boolean): Promise<GrokTuiGeneration> {
     try {
       const refreshedEnv = await this.opts.beforeSpawn?.({ resume });
       if (refreshedEnv) {
@@ -1003,21 +1006,32 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     });
     let resolveExit!: () => void;
     const exitPromise = new Promise<void>((resolvePtyExit) => { resolveExit = resolvePtyExit; });
+    const tui: GrokTuiGeneration = {
+      generation,
+      pty,
+      exit: exitPromise,
+      exited: false,
+    };
     this.pendingTuiProcessIds.add(pty.pid);
     this.pty = pty;
-    this.ptyExit = exitPromise;
+    this.activeTui = tui;
     pty.onData((data) => {
-      if (generation !== this.ptyGeneration || this.closing) return;
+      if (this.activeTui !== tui || generation !== this.ptyGeneration || this.closing) return;
       this.observeTuiReadiness(generation, data);
       this.attach?.broadcastOutput(data);
     });
     pty.onExit((event) => {
+      tui.exited = true;
       resolveExit();
-      if (generation !== this.ptyGeneration || this.closing) return;
+      if (this.activeTui !== tui || generation !== this.ptyGeneration || this.closing) return;
       this.tuiReady = false;
       this.tuiReadinessBuffer = "";
+      // The outer recovery attempt owns this generation until it either
+      // reconnects or confirms teardown. Replacing recoveryPromise here would
+      // let close() stop awaiting that owner and could skip exact PID cleanup.
+      if (this.recovering) return;
       this.pty = null;
-      this.ptyExit = null;
+      this.activeTui = null;
       const recovery = this.recoverFromExit(event, pty.pid);
       this.recoveryPromise = recovery;
       const clearRecovery = () => {
@@ -1028,6 +1042,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         this.warn(`[grok-copresence] recovery failed: ${errorMessage(error)}`);
       });
     });
+    return tui;
   }
 
   private async recoverFromExit(
@@ -1074,26 +1089,25 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     const attempts = Math.max(1, this.opts.reconnectAttempts ?? 3);
     let lastError: unknown;
     for (let attempt = 1; attempt <= attempts && !this.closing; attempt++) {
+      let attemptedTui: GrokTuiGeneration | null = null;
       try {
         if (this.closing) return;
         await delay(Math.min(1_000, attempt * 250));
         if (this.closing) return;
-        await this.spawnTui(true);
+        attemptedTui = await this.spawnTui(true);
+        this.assertOwnedTuiGeneration(attemptedTui, "spawn");
         // Bind the generation before consulting `closing`. close() waits for
-        // this recovery promise; returning with an unbound auto-Leader would
-        // otherwise leave no exact identity for the stop path to terminate.
+        // this recovery promise. Even an already-exited recovery TUI can have
+        // left its auto-Leader alive, so liveness is checked only after that
+        // Leader has been captured by its exact generation marker.
         await waitForOwnedUnixSocket(this.leaderSocket, 10_000);
+        this.assertOwnedTuiGeneration(attemptedTui, "leader socket");
         await this.bindSpawnedLeader();
-        if (this.closing) {
-          const closingPty = this.pty;
-          const closingExit = this.ptyExit;
-          this.pty = null;
-          this.ptyExit = null;
-          this.ptyGeneration += 1;
-          await terminateOwnedPty(closingPty, closingExit);
-          await this.teardownOwnedLeader();
-          return;
-        }
+        this.assertLiveTuiGeneration(attemptedTui, "leader bind");
+        // close() owns all termination once closing is latched. It awaits this
+        // outer recovery promise, then uses the still-bound generation handle;
+        // recovery must not race it or discard that handle first.
+        if (this.closing) return;
         // No routing is allowed across a PTY generation boundary. Drain any
         // late records from the dead writer and resume-startup chatter to a
         // stable EOF, then reset all semantic correlation before scheduling.
@@ -1107,6 +1121,8 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           this.eventsTail,
           (chunk) => this.auditRecoveryLifecycleChunk(chunk),
         );
+        this.assertLiveTuiGeneration(attemptedTui, "recovery drain");
+        if (this.closing) return;
         if (this.recoveryLifecycleBuffer.trim()) {
           throw new GrokUnsafeRecoveryApprovalError(
             "Grok events JSONL ended with an incomplete lifecycle record during recovery",
@@ -1151,13 +1167,12 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         return;
       } catch (error) {
         lastError = error;
-        const failedPty = this.pty;
-        const failedExit = this.ptyExit;
-        this.pty = null;
-        this.ptyExit = null;
-        this.ptyGeneration += 1;
+        // Once close() is waiting on this outer promise, leave every owned
+        // handle intact for its single ordered PTY -> Leader -> cleanup path.
+        if (this.closing) return;
+        const failedTui = attemptedTui ?? this.activeTui;
         try {
-          await terminateOwnedPty(failedPty, failedExit);
+          await terminateOwnedPty(failedTui?.pty ?? null, failedTui?.exit ?? null);
         } catch (terminationError) {
           this.retainLocksForUnconfirmedPty = true;
           await this.failFatal(new GrokCopresenceFailure(
@@ -1166,6 +1181,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           ));
           return;
         }
+        this.detachTuiGeneration(failedTui);
         try {
           await this.teardownOwnedLeader();
         } catch (terminationError) {
@@ -1176,9 +1192,9 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           ));
           return;
         }
-        if (failedPty) {
+        if (failedTui) {
           try {
-            this.cleanupConfirmedTuiGeneration(failedPty.pid);
+            this.cleanupConfirmedTuiGeneration(failedTui.pty.pid);
           } catch {
             this.retainLocksForUnconfirmedPty = true;
             await this.failFatal(new GrokCopresenceFailure(
@@ -1215,14 +1231,10 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     this.attach?.broadcastStatus({ ...this.attachStatus(), fatal: error.message });
     for (const taskId of [...this.pending.keys()]) this.failPending(taskId, error);
     this.fatalShutdownPromise = (async () => {
-      const pty = this.pty;
-      const ptyExit = this.ptyExit;
-      this.pty = null;
-      this.ptyExit = null;
-      this.tuiReady = false;
-      this.tuiReadinessBuffer = "";
-      this.ptyGeneration += 1;
-      await terminateOwnedPty(pty, ptyExit).catch(() => {
+      const tui = this.activeTui;
+      await terminateOwnedPty(tui?.pty ?? null, tui?.exit ?? null).then(() => {
+        this.detachTuiGeneration(tui);
+      }).catch(() => {
         this.retainLocksForUnconfirmedPty = true;
       });
       await this.teardownOwnedLeader().catch(() => {
@@ -1265,6 +1277,30 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     this.pendingTuiProcessIds.clear();
     for (const lock of this.locks.reverse()) await lock.release().catch(() => {});
     this.locks = [];
+  }
+
+  private assertOwnedTuiGeneration(tui: GrokTuiGeneration, boundary: string): void {
+    if (
+      this.activeTui !== tui
+      || this.pty !== tui.pty
+      || this.ptyGeneration !== tui.generation
+    ) {
+      throw new Error(`Grok recovery TUI ownership changed before ${boundary}`);
+    }
+  }
+
+  private assertLiveTuiGeneration(tui: GrokTuiGeneration, boundary: string): void {
+    this.assertOwnedTuiGeneration(tui, boundary);
+    if (tui.exited) throw new Error(`Grok recovery TUI exited before ${boundary}`);
+  }
+
+  private detachTuiGeneration(tui: GrokTuiGeneration | null): void {
+    if (!tui || this.activeTui !== tui) return;
+    this.activeTui = null;
+    this.pty = null;
+    this.tuiReady = false;
+    this.tuiReadinessBuffer = "";
+    if (this.ptyGeneration === tui.generation) this.ptyGeneration += 1;
   }
 
   private cleanupConfirmedTuiGeneration(tuiProcessId: number): void {
