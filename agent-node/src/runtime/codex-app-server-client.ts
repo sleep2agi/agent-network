@@ -98,6 +98,16 @@ type IncomingMsg =
   | JsonRpcNotification
   | JsonRpcReverseRequest;
 
+// RFC-030 Wave 1B L3: the shared upstream id allocator is A's frozen
+// one-shot UpstreamRequestMux (protocol.ts @ 90d1e58) — the ONLY id
+// namespace on the socket. The client allocates every internal request id
+// via allocateForInternalScheduler and routes every inbound response
+// through consumeUpstreamResponse (one-shot: duplicates and unknown ids
+// come back null and are surfaced as orphan_response, never resolved).
+// TUI-proxied responses are emitted as `tui_response` with the ORIGINAL
+// tui id restored so A's proxy can write it back to the TUI socket.
+import type { UpstreamRequestMux } from "./codex-policy-gateway/protocol";
+
 export interface CodexAppServerClientOptions {
   /** Full URL: `ws://127.0.0.1:4500` or `wss://…`. Loopback only in Phase 0. */
   url: string;
@@ -107,6 +117,13 @@ export interface CodexAppServerClientOptions {
   defaultTimeoutMs?: number;
   /** Debug label for logs / errors. */
   clientLabel?: string;
+  /**
+   * Shared upstream id mux (gateway mode) — A's one-shot
+   * UpstreamRequestMux. Standalone/Phase-0 usage may omit it — the client
+   * falls back to its private counter, which is safe only when it is the
+   * sole writer on the socket.
+   */
+  mux?: UpstreamRequestMux<unknown>;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -187,7 +204,11 @@ export class CodexAppServerClient extends EventEmitter {
       this.ws!.addEventListener("close", (ev: CloseEvent) => {
         this.closed = true;
         this.emit("close", { code: ev.code, reason: ev.reason });
-        for (const [, p] of this.pending) {
+        for (const [id, p] of this.pending) {
+          // Free the mux slots for OUR ids only. Full drainAll on upstream
+          // shutdown is the lifecycle layer's call, not the client's —
+          // proxied-TUI origins are not ours to drop.
+          this.opts.mux?.consumeUpstreamResponse(id);
           p.reject(new Error(`codex app-server closed (code=${ev.code} reason=${ev.reason})`));
         }
         this.pending.clear();
@@ -207,7 +228,12 @@ export class CodexAppServerClient extends EventEmitter {
     if (!this.ws || this.closed) {
       throw new Error("CodexAppServerClient not connected or already closed");
     }
-    const id = this.nextId++;
+    // Gateway mode: allocate through the shared mux so ids can never
+    // collide with TUI-proxied requests on the same socket. Standalone
+    // mode keeps the private counter.
+    const id = this.opts.mux
+      ? this.opts.mux.allocateForInternalScheduler({ method }).upstreamId
+      : this.nextId++;
     const payload: JsonRpcRequest<P> = {
       jsonrpc: "2.0",
       id,
@@ -218,6 +244,9 @@ export class CodexAppServerClient extends EventEmitter {
     return new Promise<R>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
+        // One-shot consume frees the mux slot; a LATE response for this id
+        // then consumes null and orphans — never resolves a stale pending.
+        this.opts.mux?.consumeUpstreamResponse(id);
         reject(new Error(`codex request '${method}' (id=${id}) timed out after ${to}ms`));
       }, to);
       this.pending.set(id, {
@@ -235,6 +264,7 @@ export class CodexAppServerClient extends EventEmitter {
         this.ws!.send(JSON.stringify(payload));
       } catch (e) {
         this.pending.delete(id);
+        this.opts.mux?.consumeUpstreamResponse(id);
         clearTimeout(timer);
         reject(e instanceof Error ? e : new Error(String(e)));
       }
@@ -340,6 +370,22 @@ export class CodexAppServerClient extends EventEmitter {
     if (hasId) {
       // Response.
       const id = idField as number;
+      if (this.opts.mux) {
+        // Gateway mode: A's mux is the single source of truth. One-shot
+        // consume — an unknown id OR a duplicate response for an already-
+        // consumed id both come back null and orphan (fail closed).
+        const origin = this.opts.mux.consumeUpstreamResponse(id);
+        if (origin === null) {
+          this.emit("orphan_response", msg);
+          return;
+        }
+        if (origin.kind === "proxied_tui") {
+          // Restore the ORIGINAL tui id for A's proxy to write back.
+          this.emit("tui_response", { tuiId: origin.tuiId, msg });
+          return;
+        }
+        // kind === "internal" → fall through to the pending map.
+      }
       const pending = this.pending.get(id);
       if (!pending) {
         this.emit("orphan_response", msg);

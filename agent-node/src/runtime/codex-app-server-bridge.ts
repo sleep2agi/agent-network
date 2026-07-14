@@ -53,6 +53,12 @@ export interface PendingTurn {
   submittedAt: number;
   turnId?: string;
   agentTextChunks: string[];
+  /**
+   * The canonical `final_answer` text captured from
+   * `item/agentMessage/{...phase:"final_answer"}`. Preferred over
+   * `agentTextChunks.join("")` when present.
+   */
+  finalText?: string;
 }
 
 export interface WaitingApproval {

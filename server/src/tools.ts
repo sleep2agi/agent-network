@@ -54,6 +54,8 @@ import {
   isAllowedToChangeFlag,
 } from "./config-apply-validate.js";
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
+import { resolveSenderPrincipal } from "./principal.js";
+import { gatewayDeadLetterInboxRow } from "./gateway-ops.js";
 
 function ts(): string {
   return new Date().toTimeString().slice(0, 8);
@@ -75,6 +77,23 @@ function normalizeMetaJson(meta: unknown): string | null {
 }
 
 export function registerTools(server: McpServer, clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false, callerTokenId?: string | null) {
+  // ── RFC-030 Wave 1B L1 — server-stamped sender principal ─────────────
+  // Resolved PER CALL (the target network matters for utok role lookup)
+  // from the caller's bearer via the SHARED principal.ts resolver — the
+  // REST layer imports the same function, no site re-implements it.
+  // Deliberately ignores any client-supplied field (from_session / args /
+  // meta): the display alias can never influence the principal.
+  // INVARIANT (批准条件 + 拍板): the principal comes ONLY from the auth
+  // layer. Role union owner/admin/member/viewer/node/child; ntok never
+  // inherits its owner's network role; unresolvable → null — the columns
+  // stay null and the Gateway (alone) fail-closes; legacy inbox consumers
+  // are unaffected.
+  const principalFor = (effectiveNetId: string | null | undefined) =>
+    resolveSenderPrincipal(db, {
+      callerTokenId: callerTokenId ?? null,
+      effectiveNetId: effectiveNetId ?? null,
+    });
+
   // Default from_session for outbound tools — extracted from the calling
   // token's binding (ntok_ → node alias, utok_ → username). Without this,
   // an agent's send_task call always claimed from='hub' and peer agents
@@ -623,7 +642,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // the chain didn't actually write.
       if (updatedTaskId) {
         try {
-          const chainResult = chainReplyToParent(updatedTaskId, result, "replied", 5, effectiveNetId);
+          // L1: chain inherits the reporting agent's authenticated principal.
+          const chainResult = chainReplyToParent(updatedTaskId, result, "replied", 5, effectiveNetId, principalFor(effectiveNetId));
           if (chainResult.chained) {
             const parentChain = db.get<{ parent_task_id: string | null }>(
               "SELECT parent_task_id FROM tasks WHERE task_id = ?1",
@@ -666,7 +686,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const rows0 = db.get<{ cnt: number }>(countSql, ...countParams);
       console.log(`[${ts()}] ${alias} → get_inbox: ${rows0?.cnt ?? 0} pending messages`);
       const rowsParams: any[] = [alias];
-      let rowsSql = `SELECT id, type, priority, content, context, from_session, created_at, network_id, meta_json
+      let rowsSql = `SELECT id, type, priority, content, context, from_session, created_at, network_id, meta_json, sender_token_id, sender_role, canonical_task_id
          FROM inbox WHERE session_name = ?1 AND acked = 0`;
       rowsSql = addReadScope(rowsSql, rowsParams, readScope);
       rowsSql += ` ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, created_at
@@ -922,16 +942,21 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // dashboard 在派任务一刻就反映出"任务已下发"，不再等 agent 的
       // report_status 心跳；status 字段交给 agent，避免与 working/idle
       // 报告冲突）。
+      // L1 principal stamp: resolved per call against the network this
+      // write lands in. canonical_task_id: initial dispatch → the task's
+      // own id (inbox.id == tasks.task_id here). tasks origin_* is the
+      // write-once immutable origin principal retry/reassign inherit.
+      const senderPrincipal = principalFor(effectiveNetId);
       db.transaction(() => {
         db.run(
-          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, context, from_session, requires_response, network_id, meta_json)
-           VALUES (?1, ?2, ?3, 'task', ?4, ?5, ?6, ?7, 'reply', ?8, ?9)`,
-          [id, targetAlias, targetNodeId, priority, task, context ?? null, from_session, effectiveNetId ?? null, metaJson]
+          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, context, from_session, requires_response, network_id, meta_json, sender_token_id, sender_role, canonical_task_id)
+           VALUES (?1, ?2, ?3, 'task', ?4, ?5, ?6, ?7, 'reply', ?8, ?9, ?10, ?11, ?12)`,
+          [id, targetAlias, targetNodeId, priority, task, context ?? null, from_session, effectiveNetId ?? null, metaJson, senderPrincipal?.tokenId ?? null, senderPrincipal?.role ?? null, id]
         );
         db.run(
-          `INSERT INTO tasks (task_id, from_node_id, from_name, to_node_id, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at, network_id, parent_task_id, meta_json)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'delivered', ?7, 'reply', datetime('now'), datetime('now'), datetime('now', ?8), ?9, ?10, ?11)`,
-          [id, fromNodeId, from_session, targetNodeId, targetAlias, priority, task, `+${ttl_seconds || 3600} seconds`, effectiveNetId ?? null, parentTaskId, metaJson]
+          `INSERT INTO tasks (task_id, from_node_id, from_name, to_node_id, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at, network_id, parent_task_id, meta_json, origin_sender_token_id, origin_sender_role)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'delivered', ?7, 'reply', datetime('now'), datetime('now'), datetime('now', ?8), ?9, ?10, ?11, ?12, ?13)`,
+          [id, fromNodeId, from_session, targetNodeId, targetAlias, priority, task, `+${ttl_seconds || 3600} seconds`, effectiveNetId ?? null, parentTaskId, metaJson, senderPrincipal?.tokenId ?? null, senderPrincipal?.role ?? null]
         );
         const touchParams: any[] = [task.slice(0, 200), targetAlias];
         let touchSql = "UPDATE sessions SET task = ?1, updated_at = datetime('now') WHERE alias = ?2";
@@ -1016,10 +1041,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
       console.log(`[${ts()}] ${from_session} → send_message → ${targetAlias}: ${message.slice(0, 60)}${canonical.renamed ? ` [renamed from ${alias}]` : ""}`);
       const id = uuidv4();
+      // L1 stamp (matrix: send_message = current operator; type=message is
+      // outside the Phase-1 gateway allowlist but stamps for consistency).
+      const msgPrincipal = principalFor(effectiveNetId);
       db.run(
-        `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, network_id)
-         VALUES (?1, ?2, ?3, 'message', 'normal', ?4, ?5, ?6)`,
-        [id, targetAlias, target.session?.node_id ?? null, message, from_session, effectiveNetId ?? null]
+        `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, network_id, sender_token_id, sender_role)
+         VALUES (?1, ?2, ?3, 'message', 'normal', ?4, ?5, ?6, ?7, ?8)`,
+        [id, targetAlias, target.session?.node_id ?? null, message, from_session, effectiveNetId ?? null, msgPrincipal?.tokenId ?? null, msgPrincipal?.role ?? null]
       );
 
       if (target.state === "online") {
@@ -1111,10 +1139,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         if (!lc.ok) return { content: [{ type: "text" as const, text: JSON.stringify(lc) }] };
       }
       const replyLogged = db.transaction(() => {
+        // L1 stamp (matrix: send_reply = the REPLIER's authenticated
+        // principal; canonical_task_id = the task this reply closes so
+        // the gateway's reply lifecycle can hit the original task).
+        const replyPrincipal = principalFor(effectiveNetId);
         db.run(
-          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, in_reply_to, requires_response, network_id)
-           VALUES (?1, ?2, ?3, 'reply', 'normal', ?4, ?5, ?6, 'none', ?7)`,
-          [id, alias, replyTargetNodeId, text, from_session, in_reply_to ?? null, effectiveNetId ?? null]
+          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, in_reply_to, requires_response, network_id, sender_token_id, sender_role, canonical_task_id)
+           VALUES (?1, ?2, ?3, 'reply', 'normal', ?4, ?5, ?6, 'none', ?7, ?8, ?9, ?10)`,
+          [id, alias, replyTargetNodeId, text, from_session, in_reply_to ?? null, effectiveNetId ?? null, replyPrincipal?.tokenId ?? null, replyPrincipal?.role ?? null, in_reply_to ?? null]
         );
 
         // 更新 tasks 表
@@ -1162,7 +1194,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // full reasoning — same leak, same gate.
       if (replyLogged && in_reply_to) {
         try {
-          const chainResult = chainReplyToParent(in_reply_to, text, replyStatus, 5, effectiveNetId);
+          // L1: the auto-chain inherits the TRIGGERING replier's principal.
+          const chainResult = chainReplyToParent(in_reply_to, text, replyStatus, 5, effectiveNetId, principalFor(effectiveNetId));
           if (chainResult.chained) {
             const parentChain = db.get<{ parent_task_id: string | null; from_name: string }>(
               "SELECT parent_task_id, from_name FROM tasks WHERE task_id = ?1",
@@ -1221,6 +1254,37 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     }
   );
 
+  // ── RFC-030 L1-followup #4: gateway dead-letter (server-side atomic) ──
+  server.tool(
+    "gateway_dead_letter",
+    "Codex gateway ONLY: atomically dead-letter an invalid inbox row (server-side conditional verify of message/canonical/network mapping; ack+fail+audit in one transaction, or quarantine audit-only). Never replies to the display alias.",
+    {
+      message_id: z.string().min(1).max(200).describe("Inbox row id (the delivery-attempt messageId)"),
+      canonical_task_id: z.string().max(200).optional().describe("The pump's canonical claim — re-verified server-side, never trusted"),
+      reason: z.string().min(1).max(300).describe("Structured reason, e.g. codex_gateway_invalid_principal"),
+    },
+    async ({ message_id, canonical_task_id, reason }) => {
+      const effectiveNetId = getNetworkId(null);
+      // Network-bound gateway nodes only: the op is scoped to the
+      // caller's OWN network (foreign rows are no-ops inside the txn),
+      // and an unscoped caller has no network to scope to.
+      if (!callerTokenIsNetwork || !effectiveNetId) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "gateway_dead_letter requires a network-bound node token" }) }] };
+      }
+      if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
+      const actor = defaultFrom(undefined);
+      const result = gatewayDeadLetterInboxRow({
+        messageId: message_id,
+        canonicalTaskId: canonical_task_id ?? null,
+        networkId: effectiveNetId,
+        reason,
+        actor,
+      });
+      console.log(`[${ts()}] ${actor} → gateway_dead_letter → ${message_id.slice(0, 8)}: ${result.outcome}`);
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, ...result }) }] };
+    }
+  );
+
   // ── V2: retry_task (重新投递失败/过期任务) ──
   server.tool(
     "retry_task",
@@ -1250,18 +1314,30 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         if (!lc.ok) return { content: [{ type: "text" as const, text: JSON.stringify(lc) }] };
       }
       db.transaction(() => {
+        // L1-followup #6: before creating a fresh delivery attempt, ack
+        // every STALE pending attempt of this canonical — a dangling old
+        // row would otherwise leave two live attempts of one task.
+        const staleParams: any[] = [task_id];
+        let staleSql = "UPDATE inbox SET acked = 1 WHERE (id = ?1 OR canonical_task_id = ?1) AND acked = 0";
+        staleSql = addScope(staleSql, staleParams, effectiveNetId);
+        db.run(staleSql, staleParams);
         // Reset task status
         const updateParams: any[] = [task_id];
         let updateSql = `UPDATE tasks SET status = 'delivered', result = NULL, completed_at = NULL, started_at = NULL, delivered_at = datetime('now'), expires_at = datetime('now', '+1 hour')
            WHERE task_id = ?1`;
         updateSql = addScope(updateSql, updateParams, effectiveNetId);
         db.run(updateSql, updateParams);
-        // Re-queue in inbox with new ID (original ID may already exist)
+        // Re-queue in inbox with new ID (original ID may already exist).
+        // L1 (拍板): retry INHERITS the task's immutable origin principal —
+        // the retry operator's identity does not rewrite whose task this
+        // is. canonical_task_id keeps the ORIGINAL tasks.task_id while the
+        // fresh inbox id is the new delivery-attempt messageId, so the
+        // gateway's send_reply still hits the original task.
         const retryInboxId = uuidv4();
         db.run(
-          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, requires_response, network_id)
-           VALUES (?1, ?2, ?3, 'task', ?4, ?5, ?6, 'reply', ?7)`,
-          [retryInboxId, task.to_name, task.to_node_id ?? resolveNodeIdForAlias(task.to_name, effectiveNetId ?? task.network_id ?? null), task.priority, task.content, from_session, effectiveNetId ?? task.network_id ?? null]
+          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, requires_response, network_id, sender_token_id, sender_role, canonical_task_id)
+           VALUES (?1, ?2, ?3, 'task', ?4, ?5, ?6, 'reply', ?7, ?8, ?9, ?10)`,
+          [retryInboxId, task.to_name, task.to_node_id ?? resolveNodeIdForAlias(task.to_name, effectiveNetId ?? task.network_id ?? null), task.priority, task.content, from_session, effectiveNetId ?? task.network_id ?? null, task.origin_sender_token_id ?? null, task.origin_sender_role ?? null, task_id]
         );
       });
       logTaskEvent(task_id, task.status, "delivered", from_session, "retry");
@@ -1356,10 +1432,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
          WHERE task_id = ?2 AND status IN ('created', 'delivered', 'acked', 'running')`;
       updateSql = addScope(updateSql, updateParams, effectiveNetId);
       const result = db.run(updateSql, updateParams);
-      // Also ack the inbox entry to prevent agent from picking it up
+      // Also ack the inbox entries to prevent agents from picking them up.
+      // L1-followup #6: ALL pending delivery attempts of this canonical
+      // (initial + retries), plus the legacy id==task_id row.
       if (result.changes > 0) {
         const inboxParams: any[] = [task_id];
-        let inboxSql = "UPDATE inbox SET acked = 1 WHERE id = ?1 AND acked = 0";
+        let inboxSql = "UPDATE inbox SET acked = 1 WHERE (id = ?1 OR canonical_task_id = ?1) AND acked = 0";
         inboxSql = addScope(inboxSql, inboxParams, effectiveNetId);
         db.run(inboxSql, inboxParams);
         logTaskEvent(task_id, null, "cancelled", from_session, reason || undefined);
@@ -1402,9 +1480,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         if (!lc.ok) return { content: [{ type: "text" as const, text: JSON.stringify(lc) }] };
       }
       db.transaction(() => {
-        // Ack old inbox to prevent original agent from picking it up
+        // Ack old inbox to prevent original agent from picking it up.
+        // L1-followup #6: ALL pending delivery attempts of this canonical.
         const inboxParams: any[] = [task_id];
-        let inboxSql = "UPDATE inbox SET acked = 1 WHERE id = ?1 AND acked = 0";
+        let inboxSql = "UPDATE inbox SET acked = 1 WHERE (id = ?1 OR canonical_task_id = ?1) AND acked = 0";
         inboxSql = addScope(inboxSql, inboxParams, effectiveNetId);
         db.run(inboxSql, inboxParams);
 
@@ -1413,9 +1492,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         updateSql = addScope(updateSql, updateParams, effectiveNetId);
         db.run(updateSql, updateParams);
 
+        // L1 (拍板): reassign INHERITS the immutable origin principal +
+        // canonical_task_id (same semantics as retry_task above).
         const newInboxId = uuidv4();
-        db.run("INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, requires_response, network_id) VALUES (?1, ?2, ?3, 'task', ?4, ?5, ?6, 'reply', ?7)",
-          [newInboxId, reassignedAlias, newNodeId, task.priority, task.content, from_session, effectiveNetId ?? task.network_id ?? null]);
+        db.run("INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, requires_response, network_id, sender_token_id, sender_role, canonical_task_id) VALUES (?1, ?2, ?3, 'task', ?4, ?5, ?6, 'reply', ?7, ?8, ?9, ?10)",
+          [newInboxId, reassignedAlias, newNodeId, task.priority, task.content, from_session, effectiveNetId ?? task.network_id ?? null, task.origin_sender_token_id ?? null, task.origin_sender_role ?? null, task_id]);
       });
       logTaskEvent(task_id, task.status, "delivered", from_session, `reassign: ${oldAlias} → ${reassignedAlias}`);
       pushEvent(reassignedAlias, { type: "new_task", inbox_count: 1, priority: task.priority, from: from_session, ...(canonical.renamed ? { renamed_from: new_alias } : {}) }, effectiveNetId ?? task.network_id ?? null);
@@ -1445,6 +1526,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const targets = db.all<{ alias: string; node_id: string | null; network_id: string | null }>(sql, ...params);
       const ids: string[] = [];
 
+      // L1 stamp (matrix: broadcast = current operator re-auth; type=
+      // broadcast is outside the Phase-1 gateway allowlist).
+      const bcPrincipal = principalFor(effectiveNetId);
       for (const t of targets) {
         // RFC-027 §2.3 inbox-enqueue lifecycle guard (PR1.1 site 6/6).
         // Broadcast skips non-active recipients silently rather than
@@ -1454,9 +1538,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         if (!lc.ok) continue;
         const id = uuidv4();
         db.run(
-          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, network_id)
-           VALUES (?1, ?2, ?3, 'broadcast', 'normal', ?4, 'hub', ?5)`,
-          [id, t.alias, t.node_id ?? null, message, effectiveNetId ?? t.network_id ?? null]
+          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, network_id, sender_token_id, sender_role)
+           VALUES (?1, ?2, ?3, 'broadcast', 'normal', ?4, 'hub', ?5, ?6, ?7)`,
+          [id, t.alias, t.node_id ?? null, message, effectiveNetId ?? t.network_id ?? null, bcPrincipal?.tokenId ?? null, bcPrincipal?.role ?? null]
         );
         ids.push(id);
       }

@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "exclude": [
+    "src/rfc030-principal-stamp.test.ts",
+    "src/rfc030-principal-handler.test.ts",
+    "src/rfc030-principal-rest.test.ts",
+    "src/rfc030-reply-lifecycle-e2e.test.ts"
+  ]
+}

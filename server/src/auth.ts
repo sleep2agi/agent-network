@@ -205,7 +205,7 @@ export function createNetworkTokenForNode(userId: string, networkId: string, nod
   return { ok: true, token };
 }
 
-export function resolveToken(token: string): { user: AuthUser; networkId: string | null; tokenName: string | null; tokenId: string | null } | null {
+export function resolveToken(token: string): { user: AuthUser; networkId: string | null; tokenName: string | null; tokenId: string | null; scope: string | null } | null {
   const tHash = hashToken(token);
   const row = db.get<any>(
     `SELECT t.token_id, t.user_id, t.network_id, t.scope, t.name AS token_name,
@@ -225,6 +225,10 @@ export function resolveToken(token: string): { user: AuthUser; networkId: string
     user: { user_id: row.user_id, username: row.username, display_name: row.display_name, email: row.email, role: row.role },
     networkId: row.network_id,
     tokenId: row.token_id || null,
+    // RFC-030 L1-followup (副指挥 #4): the token KIND is server-resolved
+    // from api_tokens.scope — callers must never sniff the raw token
+    // prefix ("ntok_"/"utok_") to classify identity.
+    scope: (row.scope as string | null) ?? null,
     // tokenName carries the binding identity. For node-scoped ntok_, it's
     // 'node:<alias>'; we strip the prefix and use it as the default
     // from_session for any MCP send_task / send_message / etc, so peer

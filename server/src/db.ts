@@ -162,6 +162,20 @@ for (const col of [
   { name: "scope", def: "TEXT DEFAULT 'single'" },
   { name: "meta_json", def: "TEXT" },
   { name: "node_id", def: "TEXT" },
+  // RFC-030 Wave 1B principal stamp (approved <2h scope exception):
+  // server-stamped sender principal, resolved from the caller's auth
+  // context (api_tokens row), NEVER from client-supplied fields. Nullable
+  // + additive: legacy rows and non-token senders stay null; ONLY the
+  // codex gateway treats null as refuse — every other consumer of
+  // get_inbox is unaffected.
+  { name: "sender_token_id", def: "TEXT" },
+  { name: "sender_role", def: "TEXT" },
+  // RFC-030 Wave 1B L1 (副指挥拍板): the STABLE task identity this inbox
+  // row belongs to. Initial dispatch: equals the tasks.task_id (== this
+  // row's id). retry/reassign re-queues: keeps the ORIGINAL tasks.task_id
+  // while the new inbox row id serves as the messageId — so the gateway's
+  // send_reply can always hit the original task. Nullable + additive.
+  { name: "canonical_task_id", def: "TEXT" },
 ]) {
   try { db.exec(`ALTER TABLE inbox ADD COLUMN ${col.name} ${col.def}`); } catch {}
 }
@@ -987,6 +1001,29 @@ try { db.exec("CREATE INDEX IF NOT EXISTS idx_completions_network ON completions
 // admin to see the answer even if 指挥室's own session has died. The hub forwards
 // the reply up the chain via parent_task_id.
 try { db.exec("ALTER TABLE tasks ADD COLUMN parent_task_id TEXT"); } catch {}
+
+// ── RFC-030 Wave 1B L1 (副指挥拍板): IMMUTABLE origin principal on tasks.
+// Written EXACTLY ONCE at task creation from the creator's authenticated
+// principal (see principal.ts); retry_task / reassign_task INHERIT it into
+// the re-queued inbox rows and never rewrite it — the re-queue operator's
+// identity does not change whose task this is. Nullable + additive:
+// legacy tasks stay null and only the codex gateway refuses null.
+try { db.exec("ALTER TABLE tasks ADD COLUMN origin_sender_token_id TEXT"); } catch {}
+try { db.exec("ALTER TABLE tasks ADD COLUMN origin_sender_role TEXT"); } catch {}
+// L1-followup #8 (副指挥): write-once is a DATABASE invariant, not a
+// grep-the-current-UPDATEs promise. Once a non-null origin principal is
+// set it can never be mutated or nulled; the only legal transition is
+// NULL → value (legacy row backfill). Any other UPDATE aborts.
+try {
+  db.exec(`CREATE TRIGGER IF NOT EXISTS trg_tasks_origin_write_once
+    BEFORE UPDATE OF origin_sender_token_id, origin_sender_role ON tasks
+    WHEN OLD.origin_sender_token_id IS NOT NULL
+      AND (NEW.origin_sender_token_id IS NOT OLD.origin_sender_token_id
+        OR NEW.origin_sender_role IS NOT OLD.origin_sender_role)
+    BEGIN
+      SELECT RAISE(ABORT, 'tasks.origin_sender_* is write-once');
+    END`);
+} catch {}
 try { db.exec("ALTER TABLE tasks ADD COLUMN meta_json TEXT"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id)"); } catch {}
 
@@ -1253,6 +1290,13 @@ export function chainReplyToParent(
   replyStatus: "replied" | "failed" | "cancelled" = "replied",
   maxDepth = 5,
   callerNetId?: string | null,
+  // RFC-030 Wave 1B L1 (副指挥拍板): the auto-chain notification INHERITS
+  // the authenticated principal of the send_reply/report_completion caller
+  // that TRIGGERED the chain (the server has no operator of its own here).
+  // Resolved by the MCP/REST caller via principal.ts and passed down —
+  // never derived from from_session. Null → notify rows stay unstamped
+  // (legacy consumers fine, gateway fail-closed).
+  triggerPrincipal?: { tokenId: string; role: string } | null,
 ): ChainReplyResult {
   let currentChildId: string | null = childTaskId;
   let currentReply = replyText;
@@ -1322,9 +1366,9 @@ export function chainReplyToParent(
           [parent.from_name, parent.network_id ?? null]
         );
         db.run(
-          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, in_reply_to, requires_response, network_id)
-           VALUES (?1, ?2, ?3, 'reply', 'normal', ?4, ?5, ?6, 'none', ?7)`,
-          [notifyId, parent.from_name, notifyNode?.node_id ?? null, `[${childAlias} 子任务完成]\n${currentReply.slice(0, 4000)}`, parent.to_name, parent.task_id, parent.network_id ?? null]
+          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, in_reply_to, requires_response, network_id, sender_token_id, sender_role, canonical_task_id)
+           VALUES (?1, ?2, ?3, 'reply', 'normal', ?4, ?5, ?6, 'none', ?7, ?8, ?9, ?10)`,
+          [notifyId, parent.from_name, notifyNode?.node_id ?? null, `[${childAlias} 子任务完成]\n${currentReply.slice(0, 4000)}`, parent.to_name, parent.task_id, parent.network_id ?? null, triggerPrincipal?.tokenId ?? null, triggerPrincipal?.role ?? null, parent.task_id]
         );
       } catch {}
     }
