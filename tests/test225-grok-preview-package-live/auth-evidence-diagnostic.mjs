@@ -777,6 +777,11 @@ function recordScanResult(result, matchRole, errorRole, matchedRoles, errorRoles
   if (result === "error" || result === "match_error") errorRoles.add(errorRole);
 }
 
+function statePathMatchesPatterns(parts, patterns) {
+  const relativeBytes = Buffer.from(parts.join("/"), "utf8");
+  return patterns.some((pattern) => relativeBytes.indexOf(pattern) !== -1);
+}
+
 function beginDirectorySnapshot(directoryPath, { requirePrivateState = false } = {}) {
   const stat = lstatSync(directoryPath, { bigint: true });
   if (!stat.isDirectory()
@@ -1292,6 +1297,9 @@ function scanCurrentStateEntry(
   commitChecks,
 ) {
   const descriptor = currentStateDescriptor(parts, bindings);
+  if (descriptor.kind === "unknown" && statePathMatchesPatterns(parts, patterns)) {
+    matchedRoles.add(descriptor.matchRole);
+  }
   if (descriptor.lockKind) {
     lockCounts.set(descriptor.lockKind, (lockCounts.get(descriptor.lockKind) || 0) + 1);
   }
