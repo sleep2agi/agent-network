@@ -51,6 +51,7 @@ STOP_LOG_DIR=/tmp/test225-stop-logs
 TUI_INVENTORY_DIAGNOSTIC="$ARTIFACT_DIR/test225-tui-inventory-diagnostic.json"
 TUI_INVENTORY_EVIDENCE="$ARTIFACT_DIR/test225-tui-inventory-evidence.json"
 REAL_TURN_DIAGNOSTIC="$ARTIFACT_DIR/test225-real-turn-diagnostic.json"
+AUTH_EVIDENCE_DIAGNOSTIC="$ARTIFACT_DIR/test225-auth-evidence-diagnostic.json"
 
 # The package gate must observe native shared-TUI rendering. It may not make a
 # trust prompt or network turn pass by typing into tmux on the user's behalf.
@@ -95,7 +96,8 @@ fi
 # Remove stale optional evidence at the first safe point, before report
 # creation or any executable gate. A nonzero EXIT also removes a newly written
 # success artifact so an incomplete overall run cannot leave it unbound.
-rm -f -- "$TUI_INVENTORY_DIAGNOSTIC" "$TUI_INVENTORY_EVIDENCE" "$REAL_TURN_DIAGNOSTIC"
+rm -f -- "$TUI_INVENTORY_DIAGNOSTIC" "$TUI_INVENTORY_EVIDENCE" \
+  "$REAL_TURN_DIAGNOSTIC" "$AUTH_EVIDENCE_DIAGNOSTIC"
 
 mkdir -p "$ARTIFACT_DIR" "$HOME/.grok" "$WORK" "$STOP_LOG_DIR"
 chmod 700 "$HOME" "$HOME/.grok" "$WORK" "$STOP_LOG_DIR"
@@ -432,7 +434,7 @@ scan_fixed_file() {
   shift
   [ -s "$patterns" ] || return 0
   for target in "$@"; do
-    [ -e "$target" ] || continue
+    [ -e "$target" ] || [ -L "$target" ] || continue
     if [ -d "$target" ]; then
       if grep -R -F -f "$patterns" "$target" >/dev/null 2>&1; then
         return 1
@@ -483,6 +485,70 @@ refresh_real_auth_patterns() {
   fi
   rm -f "$candidate" "$merged"
   chmod 600 /tmp/test225-real-patterns
+}
+
+persist_auth_evidence_diagnostic() {
+  local temporary=$1
+  real_turn_scan_inputs_valid \
+    || { rm -f -- "$temporary"; fail "auth evidence diagnostic scan inputs are not owner-only"; }
+  node /test225/auth-evidence-diagnostic.mjs validate "$temporary" \
+    || { rm -f -- "$temporary"; fail "auth evidence diagnostic failed closed-schema validation"; }
+  scan_fixed_file /tmp/test225-markers "$temporary" \
+    || { rm -f -- "$temporary"; fail "auth evidence diagnostic retained a synthetic marker"; }
+  scan_fixed_file /tmp/test225-live-credentials "$temporary" \
+    || { rm -f -- "$temporary"; fail "auth evidence diagnostic retained a Hub credential"; }
+  scan_fixed_file /tmp/test225-real-patterns "$temporary" \
+    || { rm -f -- "$temporary"; fail "auth evidence diagnostic retained an auth scalar"; }
+  real_turn_scan_inputs_valid \
+    || { rm -f -- "$temporary"; fail "auth evidence diagnostic scan inputs changed before persistence"; }
+  mv -f -- "$temporary" "$AUTH_EVIDENCE_DIAGNOSTIC"
+  chmod 600 "$AUTH_EVIDENCE_DIAGNOSTIC"
+  node /test225/auth-evidence-diagnostic.mjs validate "$AUTH_EVIDENCE_DIAGNOSTIC" \
+    || fail "persisted auth evidence diagnostic is not closed and owner-only"
+  scan_fixed_file /tmp/test225-markers "$AUTH_EVIDENCE_DIAGNOSTIC" \
+    || fail "persisted auth evidence diagnostic retained a synthetic marker"
+  scan_fixed_file /tmp/test225-live-credentials "$AUTH_EVIDENCE_DIAGNOSTIC" \
+    || fail "persisted auth evidence diagnostic retained a Hub credential"
+  scan_fixed_file /tmp/test225-real-patterns "$AUTH_EVIDENCE_DIAGNOSTIC" \
+    || fail "persisted auth evidence diagnostic retained an auth scalar"
+  real_turn_scan_inputs_valid \
+    || fail "auth evidence diagnostic scan inputs changed after persistence"
+  log "diagnostic: auth_evidence phase=$(jq -r '.phase' "$AUTH_EVIDENCE_DIAGNOSTIC") outcome=$(jq -r '.scanOutcome' "$AUTH_EVIDENCE_DIAGNOSTIC") artifact=$(basename "$AUTH_EVIDENCE_DIAGNOSTIC") detail_withheld=true"
+}
+
+run_real_auth_evidence_gate() {
+  local phase=$1 outcome temporary
+  local expected_leader=${real_leader:--} expected_attach=${real_socket:--}
+  local -a scan_args=()
+  shift
+  [ $(( $# % 2 )) -eq 0 ] || fail "auth evidence gate received an incomplete role/target pair"
+  while [ "$#" -gt 0 ]; do
+    scan_args+=("$1" "$2")
+    shift 2
+  done
+  if [ ! -s /tmp/test225-real-patterns ] && [ "${RUN_REAL_GROK:-0}" != 1 ]; then
+    rm -f -- "$AUTH_EVIDENCE_DIAGNOSTIC"
+    return 0
+  fi
+  real_turn_scan_inputs_valid \
+    || fail "auth evidence gate scan inputs are missing, empty, or not owner-only"
+  temporary="$ARTIFACT_DIR/.test225-auth-evidence-diagnostic.tmp.$$.$RANDOM"
+  rm -f -- "$temporary" "$AUTH_EVIDENCE_DIAGNOSTIC"
+  node /test225/auth-evidence-diagnostic.mjs scan "$temporary" "$phase" \
+    /tmp/test225-real-patterns "$HOME/.grok/agent_id" \
+    "$expected_leader" "$expected_attach" "${scan_args[@]}" \
+    || fail "could not build closed auth evidence target classification"
+  node /test225/auth-evidence-diagnostic.mjs validate "$temporary" \
+    || { rm -f -- "$temporary"; fail "auth evidence target classification is not closed"; }
+  outcome=$(jq -r '.scanOutcome' "$temporary")
+  real_turn_scan_inputs_valid \
+    || { rm -f -- "$temporary"; fail "auth evidence gate scan inputs changed during classification"; }
+  if [ "$outcome" = unclassified ]; then
+    rm -f -- "$temporary" "$AUTH_EVIDENCE_DIAGNOSTIC"
+    return 0
+  fi
+  persist_auth_evidence_diagnostic "$temporary"
+  fail "real auth evidence scan failed; closed target-role diagnostic retained"
 }
 
 inventory_result_metadata_valid() {
@@ -789,7 +855,7 @@ HEADLESS_PID=""
 SERVER_PID=""
 REGISTRY_PID=""
 cleanup() {
-  local original_rc=$? cleanup_failed=0 pid start state ppid alias config path
+  local original_rc=$? cleanup_failed=0 auth_diagnostic_valid=1 pid start state ppid alias config path
   local identity_before identity_after matched real_bin job_identity job_ppid job_state job_start
   local pid_set=/tmp/test225-cleanup-pids
   local fresh_set=/tmp/test225-cleanup-fresh
@@ -990,6 +1056,27 @@ cleanup() {
     cleanup_failed=1
   fi
 
+  if [ -e "$AUTH_EVIDENCE_DIAGNOSTIC" ] || [ -L "$AUTH_EVIDENCE_DIAGNOSTIC" ]; then
+    node /test225/auth-evidence-diagnostic.mjs validate "$AUTH_EVIDENCE_DIAGNOSTIC" \
+      >/dev/null 2>&1 || {
+        printf 'test225 cleanup: auth evidence diagnostic lost closed metadata\n' >&2
+        auth_diagnostic_valid=0
+      }
+    real_turn_scan_inputs_valid || auth_diagnostic_valid=0
+    if [ "$auth_diagnostic_valid" -eq 1 ]; then
+      scan_fixed_file /tmp/test225-markers "$AUTH_EVIDENCE_DIAGNOSTIC" \
+        >/dev/null 2>&1 || auth_diagnostic_valid=0
+      scan_fixed_file /tmp/test225-live-credentials "$AUTH_EVIDENCE_DIAGNOSTIC" \
+        >/dev/null 2>&1 || auth_diagnostic_valid=0
+      scan_fixed_file /tmp/test225-real-patterns "$AUTH_EVIDENCE_DIAGNOSTIC" \
+        >/dev/null 2>&1 || auth_diagnostic_valid=0
+    fi
+    if [ "$auth_diagnostic_valid" -ne 1 ]; then
+      rm -rf -- "$AUTH_EVIDENCE_DIAGNOSTIC"
+      cleanup_failed=1
+    fi
+  fi
+
   # Producers are fenced before any credential/session/database path is gone.
   rm -rf "$HOME" "$WORK"
   for path in /tmp/test225-*; do
@@ -1068,6 +1155,7 @@ TEST225_FAILURE_CONTRACT_MODE=package \
 TEST225_FAILURE_CONTRACT="$FAILURE_CONTRACT" \
 TEST225_AGENT_NODE_TARBALL="$NODE_TGZ" \
 node --test \
+  /test225/auth-evidence-diagnostic.test.mjs \
   /test225/failure-diagnostic.test.mjs \
   /test225/inventory-gate.test.mjs \
   /test225/inventory-diagnostic.test.mjs \
@@ -1237,6 +1325,12 @@ else
   SCAN_ERROR_RC=$?
 fi
 [ "$SCAN_ERROR_RC" -eq 2 ] || fail "credential scanner did not distinguish a read error"
+if scan_fixed_file /tmp/test225-markers "$SCAN_ERROR_DIR/dangling"; then
+  fail "credential scanner accepted a direct dangling target"
+else
+  SCAN_ERROR_RC=$?
+fi
+[ "$SCAN_ERROR_RC" -eq 2 ] || fail "credential scanner skipped a direct dangling target"
 rm -rf "$SCAN_ERROR_DIR"
 cat > /tmp/test225-refresh-auth.json <<'EOF_REFRESH_AUTH_1'
 {"value":"TEST225_REFRESH_SCAN_OLD_0123456789"}
@@ -1252,6 +1346,73 @@ grep -Fxq 'TEST225_REFRESH_SCAN_OLD_0123456789' /tmp/test225-real-patterns \
 grep -Fxq 'TEST225_REFRESH_SCAN_NEW_0123456789' /tmp/test225-real-patterns \
   || fail "auth refresh scan set omitted the new scalar"
 rm -f /tmp/test225-refresh-auth.json /tmp/test225-real-patterns
+
+# Exercise aggregate-independent structural classification and the actual
+# closed persistence function. Correct identity, wrong identity, deep
+# session/agent_id, direct clean symlink, match, and dangling cases must stay
+# distinguishable without retaining the marker or any path.
+AUTH_ROLE_SELFTEST=/tmp/test225-auth-role-selftest
+AUTH_ROLE_OUTPUT=/tmp/test225-auth-role-output
+mkdir -p "$AUTH_ROLE_SELFTEST/source" \
+  "$AUTH_ROLE_SELFTEST/home/.grok" \
+  "$AUTH_ROLE_SELFTEST/state/node/sessions/cwd/session" \
+  "$AUTH_ROLE_SELFTEST/state/wrong-node"
+chmod 700 "$AUTH_ROLE_SELFTEST" "$AUTH_ROLE_SELFTEST/source" \
+  "$AUTH_ROLE_SELFTEST/home" "$AUTH_ROLE_SELFTEST/home/.grok" \
+  "$AUTH_ROLE_SELFTEST/state" "$AUTH_ROLE_SELFTEST/state/node" \
+  "$AUTH_ROLE_SELFTEST/state/node/sessions" \
+  "$AUTH_ROLE_SELFTEST/state/node/sessions/cwd" \
+  "$AUTH_ROLE_SELFTEST/state/node/sessions/cwd/session" \
+  "$AUTH_ROLE_SELFTEST/state/wrong-node"
+printf '%s\n' TEST225_AUTH_ROLE_PRIVATE_0123456789 \
+  >"$AUTH_ROLE_SELFTEST/home/.grok/agent_id"
+printf '%s\n' clean >"$AUTH_ROLE_SELFTEST/source/other-agent-id"
+printf '%s\n' clean >"$AUTH_ROLE_SELFTEST/source/direct-clean"
+printf '%s\n' TEST225_AUTH_ROLE_PRIVATE_0123456789 \
+  >"$AUTH_ROLE_SELFTEST/state/node/sessions/cwd/session/chat_history.jsonl"
+printf '%s\n' clean >"$AUTH_ROLE_SELFTEST/state/node/config.toml"
+printf '%s\n' TEST225_AUTH_ROLE_PRIVATE_0123456789 \
+  >"$AUTH_ROLE_SELFTEST/state/node/unreviewed.data"
+ln -s "$AUTH_ROLE_SELFTEST/home/.grok/agent_id" \
+  "$AUTH_ROLE_SELFTEST/state/node/agent_id"
+ln -s "$AUTH_ROLE_SELFTEST/source/other-agent-id" \
+  "$AUTH_ROLE_SELFTEST/state/wrong-node/agent_id"
+ln -s "$AUTH_ROLE_SELFTEST/source/other-agent-id" \
+  "$AUTH_ROLE_SELFTEST/state/node/sessions/cwd/session/agent_id"
+ln -s "$AUTH_ROLE_SELFTEST/source/missing" "$AUTH_ROLE_SELFTEST/state/node/unreviewed.link"
+ln -s "$AUTH_ROLE_SELFTEST/source/direct-clean" "$AUTH_ROLE_SELFTEST/direct-clean-link"
+find "$AUTH_ROLE_SELFTEST" -type f -exec chmod 600 {} +
+printf '%s\n' TEST225_AUTH_ROLE_PRIVATE_0123456789 >/tmp/test225-real-patterns
+chmod 600 /tmp/test225-real-patterns
+real_turn_scan_inputs_valid \
+  || fail "auth evidence role self-test scan inputs are not owner-only"
+if (trap - EXIT; HOME="$AUTH_ROLE_SELFTEST/home"; export HOME; \
+  run_real_auth_evidence_gate final_scan \
+  __grok_state__ "$AUTH_ROLE_SELFTEST/state" \
+  runtime_log_store "$AUTH_ROLE_SELFTEST/direct-clean-link") \
+  >"$AUTH_ROLE_OUTPUT" 2>&1; then
+  fail "auth evidence production gate accepted a synthetic containment failure"
+else
+  AUTH_ROLE_GATE_RC=$?
+fi
+chmod 600 "$AUTH_ROLE_OUTPUT"
+[ "$AUTH_ROLE_GATE_RC" -eq 1 ] \
+  || fail "auth evidence production gate returned an unexpected failure status"
+node /test225/auth-evidence-diagnostic.mjs validate "$AUTH_EVIDENCE_DIAGNOSTIC" \
+  || fail "auth evidence production gate did not persist a closed artifact"
+jq -e '
+  .scanOutcome == "mixed"
+  and .matchedRoles == ["grok_identity_state","grok_session_chat","grok_unclassified_state"]
+  and .errorRoles == ["runtime_log_store","grok_identity_state","grok_session_other","grok_unclassified_state"]
+' "$AUTH_EVIDENCE_DIAGNOSTIC" >/dev/null \
+  || fail "auth evidence role classifier did not bind the exact expected roles"
+scan_fixed_file /tmp/test225-real-patterns "$AUTH_EVIDENCE_DIAGNOSTIC" \
+  "$AUTH_ROLE_OUTPUT" "$REPORT" \
+  || fail "auth evidence role persistence retained its private marker"
+rm -rf "$AUTH_ROLE_SELFTEST" "$AUTH_ROLE_OUTPUT" /tmp/test225-real-patterns
+rm -f -- "$AUTH_EVIDENCE_DIAGNOSTIC"
+unset AUTH_ROLE_GATE_RC
+pass "auth evidence scanner emits only closed target-role diagnostics"
 
 # Seed a pre-boundary ordinary log with broad permissions and a synthetic
 # credential. Startup must scrub it and repair both directory/file modes
@@ -1950,10 +2111,14 @@ run_real_gate() {
   [ "$(matching_process_count "$real_bin")" -eq 0 ] \
     || fail "optional real first stop left a Grok process"
   refresh_real_auth_patterns "$HOME/.grok/auth.json"
-  scan_fixed_file /tmp/test225-real-patterns \
-    "$REAL_START_LOG" "$REAL_CAPTURE" "$SERVER_LOG" "$real_log_dir" \
-    "$GROK_STATE" "$real_pending" "$STOP_LOG_DIR" \
-    || fail "refreshed real auth scalar reached first-turn evidence"
+  run_real_auth_evidence_gate first_turn_post_stop \
+    first_start_output "$REAL_START_LOG" \
+    first_tui_capture "$REAL_CAPTURE" \
+    hub_server_output "$SERVER_LOG" \
+    runtime_log_store "$real_log_dir" \
+    __grok_state__ "$GROK_STATE" \
+    pending_reply_store "$real_pending" \
+    stop_output_store "$STOP_LOG_DIR"
 
   env -u ANET_AGENT_NODE_BIN GROK_BINARY="$real_bin" npm_config_offline=true \
     anet node start "$real_alias" >"$REAL_RESUME_LOG" 2>&1 &
@@ -1997,15 +2162,18 @@ run_real_gate() {
   jq -r '.result // ""' <<<"$first_row" >> /tmp/test225-hub-results
   jq -r '.result // ""' <<<"$second_row" >> /tmp/test225-hub-results
 
-  scan_fixed_file /tmp/test225-real-patterns \
-    /tmp/test225-candidate-extracted "$REPORT" "$REAL_START_LOG" "$REAL_RESUME_LOG" \
-    "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" "$SERVER_LOG" "$real_log_dir" \
-    /tmp/test225-real-hub-rows \
-    || fail "real Grok auth scalar reached a tarball/report/log/live capture"
-  scan_fixed_file /tmp/test225-real-patterns "$GROK_STATE" \
-    || fail "real Grok auth scalar reached generated state"
-  scan_fixed_file /tmp/test225-real-patterns "$real_pending" \
-    || fail "real Grok auth scalar reached pending replies"
+  run_real_auth_evidence_gate resume_turn_pre_stop \
+    candidate_package /tmp/test225-candidate-extracted \
+    gate_report "$REPORT" \
+    first_start_output "$REAL_START_LOG" \
+    resume_start_output "$REAL_RESUME_LOG" \
+    first_tui_capture "$REAL_CAPTURE" \
+    resume_tui_capture "$REAL_RESUME_CAPTURE" \
+    hub_server_output "$SERVER_LOG" \
+    runtime_log_store "$real_log_dir" \
+    hub_task_snapshot /tmp/test225-real-hub-rows \
+    __grok_state__ "$GROK_STATE" \
+    pending_reply_store "$real_pending"
   scan_fixed_file /tmp/test225-live-credentials \
     "$REAL_START_LOG" "$REAL_RESUME_LOG" "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" \
     "$real_log_dir" "$GROK_STATE" "$real_pending" "$REPORT" /tmp/test225-real-hub-rows \
@@ -2034,11 +2202,18 @@ run_real_gate() {
   [ "$(matching_process_count "$real_bin")" -eq 0 ] \
     || fail "optional real resume stop left a Grok process"
   refresh_real_auth_patterns "$HOME/.grok/auth.json"
-  scan_fixed_file /tmp/test225-real-patterns \
-    "$REPORT" "$REAL_START_LOG" "$REAL_RESUME_LOG" "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" \
-    "$SERVER_LOG" "$real_log_dir" "$GROK_STATE" "$real_pending" "$STOP_LOG_DIR" \
-    /tmp/test225-real-hub-rows \
-    || fail "real Grok auth scalar reached an evidence artifact during shutdown"
+  run_real_auth_evidence_gate final_shutdown \
+    gate_report "$REPORT" \
+    first_start_output "$REAL_START_LOG" \
+    resume_start_output "$REAL_RESUME_LOG" \
+    first_tui_capture "$REAL_CAPTURE" \
+    resume_tui_capture "$REAL_RESUME_CAPTURE" \
+    hub_server_output "$SERVER_LOG" \
+    runtime_log_store "$real_log_dir" \
+    __grok_state__ "$GROK_STATE" \
+    pending_reply_store "$real_pending" \
+    stop_output_store "$STOP_LOG_DIR" \
+    hub_task_snapshot /tmp/test225-real-hub-rows
   scan_fixed_file /tmp/test225-live-credentials \
     "$REAL_START_LOG" "$REAL_RESUME_LOG" "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" \
     "$real_log_dir" "$GROK_STATE" "$real_pending" "$REPORT" /tmp/test225-real-hub-rows \
@@ -2089,7 +2264,7 @@ scan_fixed_file /tmp/test225-markers \
   "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" "$GROK_STATE" "$PENDING" \
   "$WORK/.anet/nodes/$ALIAS" "$STOP_LOG_DIR" /tmp/test225-hub-results \
   "$LOCAL_REGISTRY_LOG" "$NPX_ENV_OBSERVATION" \
-  "$TUI_INVENTORY_EVIDENCE" "$TUI_INVENTORY_DIAGNOSTIC" \
+  "$TUI_INVENTORY_EVIDENCE" "$TUI_INVENTORY_DIAGNOSTIC" "$AUTH_EVIDENCE_DIAGNOSTIC" \
   || fail "final synthetic credential scan failed"
 scan_fixed_file /tmp/test225-live-credentials \
   /tmp/test225-candidate-extracted "$SERVER_LOG" "$START_LOG" "$RELOAD_LOG" "$RESUME_LOG" \
@@ -2099,16 +2274,32 @@ scan_fixed_file /tmp/test225-live-credentials \
   "$WORK/.anet/nodes/preview-grok-real-225/pending-replies.json" \
   "$STOP_LOG_DIR" /tmp/test225-hub-results /tmp/test225-real-hub-rows \
   "$LOCAL_REGISTRY_LOG" "$NPX_ENV_OBSERVATION" \
-  "$TUI_INVENTORY_EVIDENCE" "$TUI_INVENTORY_DIAGNOSTIC" \
+  "$TUI_INVENTORY_EVIDENCE" "$TUI_INVENTORY_DIAGNOSTIC" "$AUTH_EVIDENCE_DIAGNOSTIC" \
   || fail "final test Hub credential scan failed"
-scan_fixed_file /tmp/test225-real-patterns \
-  /tmp/test225-candidate-extracted "$SERVER_LOG" "$START_LOG" "$RELOAD_LOG" "$RESUME_LOG" \
-  "$REAL_START_LOG" "$REAL_RESUME_LOG" "$ATTACH_CAPTURE" "$RELOAD_CAPTURE" \
-  "$RESUME_CAPTURE" "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" "$GROK_STATE" "$PENDING" \
-  "$WORK/.anet" "$STOP_LOG_DIR" /tmp/test225-hub-results /tmp/test225-real-hub-rows "$REPORT" \
-  "$LOCAL_REGISTRY_LOG" "$NPX_ENV_OBSERVATION" \
-  "$TUI_INVENTORY_EVIDENCE" "$TUI_INVENTORY_DIAGNOSTIC" \
-  || fail "final real-auth scalar scan failed after every producer stopped"
+run_real_auth_evidence_gate final_scan \
+  candidate_package /tmp/test225-candidate-extracted \
+  hub_server_output "$SERVER_LOG" \
+  deterministic_artifact "$START_LOG" \
+  deterministic_artifact "$RELOAD_LOG" \
+  deterministic_artifact "$RESUME_LOG" \
+  first_start_output "$REAL_START_LOG" \
+  resume_start_output "$REAL_RESUME_LOG" \
+  deterministic_artifact "$ATTACH_CAPTURE" \
+  deterministic_artifact "$RELOAD_CAPTURE" \
+  deterministic_artifact "$RESUME_CAPTURE" \
+  first_tui_capture "$REAL_CAPTURE" \
+  resume_tui_capture "$REAL_RESUME_CAPTURE" \
+  __grok_state__ "$GROK_STATE" \
+  deterministic_artifact "$PENDING" \
+  deterministic_artifact "$WORK/.anet" \
+  stop_output_store "$STOP_LOG_DIR" \
+  deterministic_artifact /tmp/test225-hub-results \
+  hub_task_snapshot /tmp/test225-real-hub-rows \
+  gate_report "$REPORT" \
+  local_registry_output "$LOCAL_REGISTRY_LOG" \
+  environment_observation "$NPX_ENV_OBSERVATION" \
+  deterministic_artifact "$TUI_INVENTORY_EVIDENCE" \
+  deterministic_artifact "$TUI_INVENTORY_DIAGNOSTIC"
 
 log ""
 log "Summary: PASS"

@@ -28,6 +28,7 @@ RUN node --test ./tests/test225-grok-preview-package-live/artifact-report.test.m
 RUN TEST225_FAILURE_CONTRACT_MODE=source \
   TEST225_SOURCE_COMMIT="$SOURCE_COMMIT" \
   node --test \
+    ./tests/test225-grok-preview-package-live/auth-evidence-diagnostic.test.mjs \
     ./tests/test225-grok-preview-package-live/failure-diagnostic.test.mjs \
     ./tests/test225-grok-preview-package-live/inventory-gate.test.mjs \
     ./tests/test225-grok-preview-package-live/inventory-diagnostic.test.mjs

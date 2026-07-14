@@ -198,3 +198,31 @@ other reviewed failures carry `none`, while an unknown top-level failure is
 the pair `unknown`/`unknown`. A forged, duplicated, unknown, or mismatched
 marker pair collapses to `unknown`/`unknown`. That pair remains a failed gate
 and must not be treated as evidence for any inferred root cause.
+
+If the task itself completes but the real-auth scalar containment scan fails,
+the run also fails closed and, besides the mode-0600 report, retains only
+`test225-auth-evidence-diagnostic.json`. This mode-0600 atomic artifact has a
+closed version-1 schema: one reviewed phase, `status=failed`, a relationship-
+checked `match`/`scan_error`/`mixed`/`unclassified` outcome, sorted fixed
+storage-role enums (plus one fixed scanner-boundary enum), and
+`detailWithheld=true`. The verifier requires exact canonical JSON bytes and
+rejects duplicated/reordered keys, unknown or reordered role values, links,
+multiple links, non-owner files, and any mode other than exact `0600`. It never stores the matched
+value, filename/path, exact count or byte size, hash, PID, model/account text,
+task/session ID, or scanner output. Grok state is split into fixed identity,
+chat/events/updates/other-session, generated-policy, and unclassified roles;
+the sole accepted identity link is bound to the expected one-level source
+file identity, while every other link is an error role and is not traversed.
+Every scanned regular file, accepted identity link, runtime socket, and
+directory retains a metadata commit token until the whole target set has been
+walked. A late append/truncate/overwrite, same-name replacement, nested
+add/delete/rename, or directory ABA therefore converts the fixed role to a
+scan error instead of allowing an earlier clean observation to stand.
+An initially absent target also carries a negative-existence token bound to
+its nearest existing parent directory, so a late create, create/delete ABA,
+or parent replacement fails closed.
+The no-follow, identity-bound scanner is the containment authority; it scans
+opened regular-file identities and never invokes the legacy recursive grep
+after a structural rejection. Missing, empty, aliased, multiply-linked, non-owner,
+or non-`0600` pattern inputs also fail. Raw logs, captures, state, and private pattern files
+remain in disposable roots and are removed after producers are fenced.
