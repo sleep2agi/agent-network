@@ -62,6 +62,40 @@ type DurableDelivery = Readonly<{
 }>;
 ```
 
+For H1, the following definition **normatively replaces** the H0
+`ConsumerLease` DTO:
+
+```ts
+type ConsumerLease = Readonly<{
+  deliveryId: string;
+  resourceKind: DeliveryResourceKind;
+  resourceId: string;
+  taskId: string | null;
+  leaseId: string;       // 32 random bytes, base64url; returned once
+  epoch: string;         // canonical decimal int64 string
+  expiresAt: string;     // server clock, UTC
+}>;
+```
+
+The pair is an invariant, not a presentation hint:
+
+```text
+resourceKind === "task"  iff  taskId !== null
+```
+
+In H1 C1, every task delivery has `requires_response=true`. Every message,
+broadcast, and inbound reply has `requires_response=false`. A malformed
+kind/task pair, empty `resource_id`, or mismatched durable row fails closed
+with the same generic delivery-unavailable shape before lease or resource
+mutation.
+
+| `resourceKind` | `taskId` | `requiresResponse` | Ack transition / downstream behavior |
+| --- | --- | --- | --- |
+| `task` | exact non-null task ID | `true` | `leased -> running`; exact task projection; explicit lease reply/dead-letter required |
+| `message` | `null` | `false` | `leased -> consumed`; no task, LLM, outbox, lineage, or autoreply |
+| `broadcast` | `null` | `false` | `leased -> consumed`; exact-recipient instance only; no task, LLM, outbox, lineage, or autoreply |
+| `reply` | `null` | `false` | `leased -> consumed`; attachment/data only; no task, LLM, outbox, lineage, or autoreply |
+
 Rules:
 
 - `resource_id` is always non-empty. It identifies the exact durable inbox
@@ -84,6 +118,13 @@ Rules:
 - `consumed`, `replied`, `dead_lettered`, `cancelled`, and `superseded` are
   terminal for that delivery ID. No later operation can rewrite its result or
   reopen it.
+- `consumed` is terminal-immutable and non-oracular. An absent delivery, a
+  delivery owned by another principal/token, and an already-consumed delivery
+  return the same generic `lease_invalid_or_not_owned` shape with byte-zero
+  mutation. The only exception is an identical `operation_id` replay by the
+  same exact principal/token: it returns the stored consume result read-only.
+  A different operation ID cannot use the terminal row to learn why it is
+  unavailable.
 
 ## 3. Claim and renew are lease-control exceptions
 
@@ -99,10 +140,17 @@ one-shot, non-idempotent lease mint:
 - If the response is lost, the caller waits for the 30-second lease to expire.
   A later successful claim increments the epoch in SQL and mints a new lease.
   The old lease never becomes valid again.
+- A lost-response lease is a stranded but still exclusive admission. Until
+  its TTL expires, the same resource has exactly one delivery attempt and one
+  active lease hash. The server must not create a second delivery row, admit a
+  second worker, or mint/return a replacement lease for that resource.
 - Per `(network_id, consumer_node_id, token_id)`, at most 10 non-expired
   `leased|running` deliveries may exist. The cap is checked and claimed in the
-  same immediate transaction. A request limit is further bounded by the
-  remaining capacity.
+  same immediate transaction. When the count is already 10, claim returns a
+  stable `consumer_inflight_limit` failure **before candidate selection or
+  lease mint**. It does not silently return success/empty, evict a row,
+  invalidate or rotate a lease, or shorten an expiry. Below 10, the requested
+  limit may be bounded by the remaining capacity.
 - Concurrent claims use an immediate transaction plus conditional update;
   exactly one caller may change a candidate row.
 
@@ -254,7 +302,18 @@ type DelegationEdge = Readonly<{
   enqueue transaction, requires the parent task/delivery still be
   non-terminal, and stores the server-minted edge.
 - A child result terminalizes only the child task/delivery. It creates an
-  attachment addressed to the exact delegator from the edge.
+  attachment addressed to the exact delegator from the edge. The attachment
+  is an ordinary delivery with `resourceKind="reply"`,
+  `resourceId=attachmentId`, `taskId=null`, and
+  `requiresResponse=false`; its exact recipient is `delegatorNodeId` from the
+  server-minted edge, never an alias or caller-supplied target. The durable
+  attachment also records the immutable source `edgeId`, `childTaskId`,
+  `parentDeliveryId`, and `parentEpoch`; a unique edge/child-terminal key
+  prevents duplicate attachments. Those linkage fields are internal
+  authorization/audit data and are not exposed in the node doorbell.
+- Attachment acknowledgement follows the ordinary no-response rule:
+  `leased -> consumed`, then terminal-immutable. It never enters an LLM,
+  automatic reply, delegation, or task-terminalization path.
 - The attachment never appends to, overwrites, or terminalizes the parent.
   The parent consumer must explicitly complete its parent task under its own
   still-valid lease.
@@ -266,6 +325,21 @@ type DelegationEdge = Readonly<{
   request under the same operation ID rejects.
 - Multiple siblings produce separate immutable attachments. Concurrent
   sibling completion cannot overwrite another attachment or parent result.
+- A child already in flight remains independently completable if its parent is
+  later cancelled, reassigned, terminalized, reclaimed under a new epoch, or
+  loses its lease. The child terminalizes only itself; the parent remains
+  byte-stable. At child completion, C1 creates the attachment only if the edge
+  still names the exact current `parentDeliveryId`, `parentEpoch`,
+  `delegatorNodeId`, non-terminal parent state, and unexpired parent lease.
+  Otherwise it suppresses the attachment and records only a bounded
+  `attachment_suppressed_stale_parent` audit on the child transaction. C1 has
+  no policy that retains or redirects a stale attachment to a new principal.
+  It is never delivered through an alias, stale lease, previous epoch, or
+  reassigned consumer.
+- A valid attachment commit produces at most the one ordinary payload-free
+  `queue_changed` wakeup for its exact recipient. Suppression produces no
+  attachment doorbell, and consuming the attachment produces no recursive
+  lineage doorbell.
 - A no-response message/reply/broadcast cannot create a delegation edge or
   spawn a reply task.
 - An auto-route/final-output attempt against a replied, failed, cancelled,
@@ -345,10 +419,13 @@ from a failed H1 CAS to alias/content matching.
 | Gate | RED required before implementation | Green requirement |
 | --- | --- | --- |
 | Resource-kind matrix | message/broadcast/reply enters LLM or auto-reply, or ack uses `replied` | only task can require response; no-response ack -> `consumed`, zero task/outbox/lineage writes |
+| Lease DTO invariant | kind/task pairing is malformed or a legacy DTO omits resource identity | all four kinds carry exact delivery/resource fields; task iff non-null taskId; malformed pair fails closed before mutation |
+| Consumed non-oracle | absent, foreign, and already-consumed rows return distinguishable results or terminal row mutates | same generic refusal and byte-zero state; only identical op-id replay by exact principal is read-only success |
 | Recipient binding | alias/null-node/ambiguous legacy row can be claimed | only exact new immutable consumer binding is selectable |
 | Claim race | two claimers receive one delivery | one CAS winner, one lease, one epoch increment, one claim audit |
 | Lost claim response | second claim rotates/reissues active lease | active row absent from claim; after TTL new SQL epoch+new lease; old lease invalid |
-| In-flight cap | principal/token can hold 11 active leases | cap 10 is enforced in the same immediate transaction |
+| Stranded admission | lost response permits a second delivery/worker before TTL | one exclusive delivery+lease until TTL; no replacement or second admission |
+| In-flight cap | principal/token at 10 receives success/empty, or an old lease is evicted/rotated/shortened | fail before selection/mint with stable cap error and byte-zero existing leases; below cap bounds by remaining capacity |
 | Renew | renew changes epoch/hash/attempt or shortens/stacks expiry | those fields byte-stable; monotonic expiry; each accepted renew audited |
 | Int64 epoch | value above `MAX_SAFE_INTEGER` is rounded | decimal text round-trip and SQL-side increment are exact |
 | Lease matrix | wrong consumer/token/hash/epoch/expired lease changes any row | generic refusal and byte-zero mutation |
@@ -357,6 +434,8 @@ from a failed H1 CAS to alias/content matching.
 | Post-projection failure | injected event/audit/idempotency/outbox fault leaves terminal task or reply | byte-for-byte pre-call snapshot, generic error, zero doorbell |
 | Terminal immutability | late/sibling result overwrites terminal result | first terminal CAS wins; changed replay byte-zero; identical operation replay read-only |
 | Lineage isolation | unrelated result appends through recent parent or recursive chain | only server edge attachment; parent unchanged; sibling attachments isolated |
+| Attachment delivery | child result becomes a task/LLM input or aliases to a recipient | ordinary `reply` resource with null task, no-response, exact delegator; ack -> consumed and zero autoreply/delegation |
+| Parent changes during child | cancel/reassign/new epoch redirects attachment or mutates/cascades child/parent | child terminals itself; parent byte-stable; stale edge suppresses attachment+doorbell under explicit C1 policy |
 | Lineage cycle/depth/replay | self/cycle/depth overflow or changed replay creates tasks | rejected atomically; identical replay returns one child/edge |
 | No-response loop | reply-to-no-reply spawns a task/ping-pong | zero task, LLM, outbox, lineage, or doorbell side effect beyond consumed audit |
 | Terminal-parent auto-route | runtime final text targets a cancelled/terminal parent and creates another child | producer refuses before any child/inbox/idempotency/doorbell write; parent stays byte-identical |
