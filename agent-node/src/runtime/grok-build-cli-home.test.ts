@@ -184,6 +184,12 @@ describe("prepareGrokCliHome", () => {
       emptyStateFiles: ["leader.log"],
       cwdSessionFiles: ["prompt_history.jsonl"],
       sessionRootFiles: ["session_search.sqlite"],
+      projectSandboxPlaceholders: {
+        basenames: [".grok", ".claude", ".cursor", ".mcp.json", ".envrc"],
+        type: "single-link-empty-regular-file",
+        mode: "0444",
+        owner: "currentUid",
+      },
       sandboxBlockedDirectoryBinding: {
         source: "confirmedTuiProcessIds",
         prefix: "sandbox-blocked-dir.",

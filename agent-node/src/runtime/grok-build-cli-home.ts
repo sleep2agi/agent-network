@@ -19,6 +19,7 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "fs";
 import { basename, dirname, isAbsolute, join, parse, relative, resolve } from "path";
@@ -77,6 +78,12 @@ export const GROK_POST_STOP_CLEANUP_POLICY = Object.freeze({
   emptyStateFiles: Object.freeze(["leader.log"]),
   cwdSessionFiles: Object.freeze(["prompt_history.jsonl"]),
   sessionRootFiles: Object.freeze(["session_search.sqlite"]),
+  projectSandboxPlaceholders: Object.freeze({
+    basenames: Object.freeze([".grok", ".claude", ".cursor", ".mcp.json", ".envrc"]),
+    type: "single-link-empty-regular-file",
+    mode: "0444",
+    owner: "currentUid",
+  }),
   sandboxBlockedDirectoryBinding: Object.freeze({
     source: "confirmedTuiProcessIds",
     prefix: "sandbox-blocked-dir.",
@@ -324,6 +331,158 @@ function removeExactPostStopFile(path: string, expectedSize?: number): void {
   }
 }
 
+interface OpenProjectSandboxPlaceholder {
+  path: string;
+  fd: number;
+  stat: ReturnType<typeof fstatSync>;
+}
+
+const EMPTY_PROJECT_POLICY_DIRECTORIES = new Set([".grok", ".claude", ".cursor"]);
+
+function openOwnedProjectDirectoryForPostStop(path: string): {
+  fd: number;
+  stat: ReturnType<typeof fstatSync>;
+  uid: number;
+} {
+  const uid = process.getuid?.();
+  if (uid === undefined) {
+    throw new Error("grok-build-cli cannot prove project placeholder ownership on this platform");
+  }
+  let fd: number | undefined;
+  try {
+    fd = openSync(
+      path,
+      constants.O_RDONLY | (constants.O_DIRECTORY || 0) | (constants.O_NOFOLLOW || 0),
+    );
+    const stat = fstatSync(fd);
+    const current = lstatSync(path);
+    if (!stat.isDirectory()
+      || current.isSymbolicLink()
+      || !current.isDirectory()
+      || !sameFileIdentity(stat, current)
+      || realpathSync(path) !== path) {
+      throw new Error("grok-build-cli refuses post-stop project cleanup: expected the canonical real project cwd");
+    }
+    assertCurrentOwner(path, uid, stat.uid);
+    return { fd, stat, uid };
+  } catch (error: any) {
+    if (fd !== undefined) closeSync(fd);
+    if (error?.code === "ELOOP" || error?.code === "ENOTDIR") {
+      throw new Error("grok-build-cli refuses post-stop project cleanup: expected the canonical real project cwd");
+    }
+    throw error;
+  }
+}
+
+function assertExactProjectSandboxPlaceholder(
+  path: string,
+  stat: ReturnType<typeof lstatSync>,
+  uid: number,
+  expectedIdentity?: { dev: number; ino: number },
+): void {
+  if (stat.isSymbolicLink()
+    || !stat.isFile()
+    || stat.nlink !== 1
+    || stat.size !== 0
+    || (stat.mode & 0o7777) !== 0o444) {
+    throw new Error(
+      `grok-build-cli refuses post-stop project placeholder at ${path}: `
+      + "expected an empty owner-held single-link regular file with mode 0444",
+    );
+  }
+  assertCurrentOwner(path, uid, stat.uid);
+  if (expectedIdentity && !sameFileIdentity(stat, expectedIdentity)) {
+    throw new Error(
+      `grok-build-cli refuses post-stop project placeholder at ${path}: file changed during validation`,
+    );
+  }
+}
+
+function openExactProjectSandboxPlaceholder(
+  projectCwd: string,
+  basename: string,
+  uid: number,
+): OpenProjectSandboxPlaceholder | undefined {
+  const path = join(projectCwd, basename);
+  const before = lstatIfPresent(path);
+  if (!before) return undefined;
+  // Empty real extension directories are valid pre-existing project state and
+  // are deliberately left to the unchanged folder-trust admission boundary.
+  if (EMPTY_PROJECT_POLICY_DIRECTORIES.has(basename)
+    && !before.isSymbolicLink()
+    && before.isDirectory()) {
+    return undefined;
+  }
+  assertExactProjectSandboxPlaceholder(path, before, uid);
+  let fd: number | undefined;
+  try {
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+    const opened = fstatSync(fd);
+    assertExactProjectSandboxPlaceholder(path, opened, uid, before);
+    return { path, fd, stat: opened };
+  } catch (error) {
+    if (fd !== undefined) closeSync(fd);
+    throw error;
+  }
+}
+
+function assertProjectDirectoryIdentity(
+  path: string,
+  expected: ReturnType<typeof fstatSync>,
+  uid: number,
+): void {
+  const current = lstatSync(path);
+  if (current.isSymbolicLink()
+    || !current.isDirectory()
+    || !sameFileIdentity(current, expected)
+    || realpathSync(path) !== path) {
+    throw new Error("grok-build-cli refuses post-stop project cleanup: project cwd changed during validation");
+  }
+  assertCurrentOwner(path, uid, current.uid);
+}
+
+/**
+ * Remove only the exact empty read-deny files planted by pinned Grok 0.2.93.
+ * Validation of every present candidate completes before the first unlink, so
+ * a static executable source or link attack cannot cause partial cleanup.
+ */
+function removeExactProjectSandboxPlaceholders(projectCwd: string): void {
+  const project = openOwnedProjectDirectoryForPostStop(projectCwd);
+  const opened: OpenProjectSandboxPlaceholder[] = [];
+  try {
+    for (const name of GROK_POST_STOP_CLEANUP_POLICY.projectSandboxPlaceholders.basenames) {
+      const placeholder = openExactProjectSandboxPlaceholder(projectCwd, name, project.uid);
+      if (placeholder) opened.push(placeholder);
+    }
+
+    assertProjectDirectoryIdentity(projectCwd, project.stat, project.uid);
+    for (const placeholder of opened) {
+      const current = lstatSync(placeholder.path);
+      assertExactProjectSandboxPlaceholder(
+        placeholder.path,
+        current,
+        project.uid,
+        placeholder.stat,
+      );
+    }
+
+    for (const placeholder of opened) {
+      assertProjectDirectoryIdentity(projectCwd, project.stat, project.uid);
+      const current = lstatSync(placeholder.path);
+      assertExactProjectSandboxPlaceholder(
+        placeholder.path,
+        current,
+        project.uid,
+        placeholder.stat,
+      );
+      unlinkSync(placeholder.path);
+    }
+  } finally {
+    for (const placeholder of opened) closeSync(placeholder.fd);
+    closeSync(project.fd);
+  }
+}
+
 function hardenExactPostStopFile(path: string): void {
   if (!lstatIfPresent(path)) return;
   const opened = openOwnedSingleLinkFileForPostStop(path);
@@ -561,6 +720,11 @@ export function cleanupGrokCliPostStopState(opts: CleanupGrokCliPostStopOptions)
   for (const directory of sandboxBlockedDirectories) {
     removeExactEmptyPostStopDirectory(directory);
   }
+
+  // Pinned Grok creates empty read-deny placeholder files for these exact
+  // project policy paths. Reclaim them only after every TUI/Leader writer has
+  // stopped; the next prepare must still reject any real executable source.
+  removeExactProjectSandboxPlaceholders(projectCwd);
 
   // Grok writes retained state with 0644/0755 even under the parent 0077
   // umask. Preserve exact unknown entries for the scanner, but make every
