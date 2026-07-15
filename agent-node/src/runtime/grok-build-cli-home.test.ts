@@ -252,6 +252,151 @@ describe("prepareGrokCliHome", () => {
     expect(existsSync(resumedStateHome)).toBe(false);
   });
 
+  it("validates every exact project placeholder before unlinking any sibling", () => {
+    const root = mkdtempSync(join(tmpdir(), "grok-cli-project-placeholders-batch-"));
+    roots.push(root);
+    const stateHome = join(root, "state");
+    const runtime = join(root, "runtime");
+    const project = join(root, "project");
+    for (const directory of [stateHome, runtime, project]) mkdirSync(directory, { mode: 0o700 });
+    for (const name of [".grok", ".claude"]) {
+      writeFileSync(join(project, name), "", { mode: 0o444 });
+      chmodSync(join(project, name), 0o444);
+    }
+    const wrongMode = join(project, ".cursor");
+    writeFileSync(wrongMode, "", { mode: 0o644 });
+    chmodSync(wrongMode, 0o644);
+
+    expect(() => cleanupGrokCliPostStopState({
+      stateHome,
+      projectCwd: project,
+      leaderSocket: join(runtime, "leader.sock"),
+      tuiProcessIds: [],
+    })).toThrow("mode 0444");
+
+    for (const name of [".grok", ".claude", ".cursor"]) {
+      expect(lstatSync(join(project, name)).isFile(), name).toBe(true);
+    }
+    expect(statSync(join(project, ".grok")).mode & 0o7777).toBe(0o444);
+    expect(statSync(join(project, ".claude")).mode & 0o7777).toBe(0o444);
+    expect(statSync(wrongMode).mode & 0o7777).toBe(0o644);
+  });
+
+  it("preserves nonempty, linked, wrong-mode, and wrong-type project counterexamples", () => {
+    const cases: Array<{
+      label: string;
+      basename: string;
+      seed(path: string, root: string): void;
+    }> = [
+      {
+        label: "nonempty",
+        basename: ".grok",
+        seed(path) {
+          writeFileSync(path, "executable source\n", { mode: 0o444 });
+          chmodSync(path, 0o444);
+        },
+      },
+      {
+        label: "symlink",
+        basename: ".claude",
+        seed(path, root) {
+          const external = join(root, "external-symlink-target");
+          writeFileSync(external, "external stays\n", { mode: 0o600 });
+          symlinkSync(external, path);
+        },
+      },
+      {
+        label: "hardlink",
+        basename: ".cursor",
+        seed(path, root) {
+          const external = join(root, "external-hardlink-target");
+          writeFileSync(external, "", { mode: 0o444 });
+          chmodSync(external, 0o444);
+          linkSync(external, path);
+        },
+      },
+      {
+        label: "wrong-mode",
+        basename: ".mcp.json",
+        seed(path) {
+          writeFileSync(path, "", { mode: 0o444 });
+          chmodSync(path, 0o400);
+        },
+      },
+      {
+        label: "directory",
+        basename: ".envrc",
+        seed(path) {
+          mkdirSync(path, { mode: 0o700 });
+        },
+      },
+    ];
+
+    for (const scenario of cases) {
+      const root = mkdtempSync(join(tmpdir(), `grok-cli-project-placeholder-${scenario.label}-`));
+      roots.push(root);
+      const stateHome = join(root, "state");
+      const runtime = join(root, "runtime");
+      const project = join(root, "project");
+      for (const directory of [stateHome, runtime, project]) mkdirSync(directory, { mode: 0o700 });
+      const candidate = join(project, scenario.basename);
+      scenario.seed(candidate, root);
+      const before = lstatSync(candidate);
+
+      expect(() => cleanupGrokCliPostStopState({
+        stateHome,
+        projectCwd: project,
+        leaderSocket: join(runtime, "leader.sock"),
+        tuiProcessIds: [],
+      }), scenario.label).toThrow("expected an empty owner-held single-link regular file with mode 0444");
+
+      const after = lstatSync(candidate);
+      expect(after.dev, scenario.label).toBe(before.dev);
+      expect(after.ino, scenario.label).toBe(before.ino);
+    }
+  });
+
+  it("preserves real project extension directories and still rejects executable contents on resume", () => {
+    const root = mkdtempSync(join(tmpdir(), "grok-cli-project-real-extension-"));
+    roots.push(root);
+    const sourceHome = join(root, "source");
+    const stateHome = join(root, "state");
+    const resumedStateHome = join(root, "resumed-state");
+    const runtime = join(root, "runtime");
+    const project = join(root, "project");
+    const secretDir = join(project, ".anet");
+    for (const directory of [sourceHome, stateHome, runtime, secretDir]) {
+      mkdirSync(directory, { recursive: true, mode: 0o700 });
+    }
+    for (const name of [".grok", ".claude", ".cursor"]) {
+      mkdirSync(join(project, name), { mode: 0o700 });
+    }
+    const hook = join(project, ".grok", "hooks", "hook.json");
+    mkdirSync(dirname(hook), { recursive: true, mode: 0o700 });
+    writeFileSync(hook, "{\"command\":\"tripwire\"}\n", { mode: 0o600 });
+
+    cleanupGrokCliPostStopState({
+      stateHome,
+      projectCwd: project,
+      leaderSocket: join(runtime, "leader.sock"),
+      tuiProcessIds: [],
+    });
+
+    expect(readFileSync(hook, "utf8")).toBe("{\"command\":\"tripwire\"}\n");
+    for (const name of [".grok", ".claude", ".cursor"]) {
+      expect(lstatSync(join(project, name)).isDirectory(), name).toBe(true);
+    }
+    expect(() => prepareGrokCliHome({
+      sourceHome,
+      stateRoot: dirname(resumedStateHome),
+      stateHome: resumedStateHome,
+      projectCwd: project,
+      useLeader: true,
+      denyPaths: [secretDir],
+    })).toThrow("project executable configuration");
+    expect(existsSync(resumedStateHome)).toBe(false);
+  });
+
   it("removes only exact transient state and hardens retained post-stop state", () => {
     const root = mkdtempSync(join(tmpdir(), "grok-cli-post-stop-"));
     roots.push(root);
