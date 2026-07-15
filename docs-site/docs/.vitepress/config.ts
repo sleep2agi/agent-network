@@ -64,6 +64,7 @@ export default withMermaid(defineConfig({
             items: [
               { text: '5 分钟懂 anet', link: '/guide/introduction' },
               { text: '30 秒上手', link: '/guide/getting-started' },
+              { text: 'Windows 上手', link: '/guide/windows' },
               { text: '架构概览', link: '/guide/architecture' },
             ]
           },
@@ -159,6 +160,7 @@ export default withMermaid(defineConfig({
             items: [
               { text: '5-Minute Intro to anet', link: '/en/guide/introduction' },
               { text: '30-Second Quickstart', link: '/en/guide/getting-started' },
+              { text: 'Windows Setup', link: '/en/guide/windows' },
               { text: 'Architecture', link: '/en/guide/architecture' },
             ]
           },
