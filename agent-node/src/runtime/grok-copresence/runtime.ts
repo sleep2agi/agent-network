@@ -1260,21 +1260,28 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
 
   private async finalizeStoppedState(): Promise<void> {
     if (this.retainLocksForUnconfirmedPty) return;
-    try {
-      cleanupGrokCliPostStopState({
-        stateHome: this.opts.grokHome,
-        projectCwd: this.opts.cwd,
-        leaderSocket: this.leaderSocket,
-        tuiProcessIds: [...this.pendingTuiProcessIds],
-      });
-    } catch (error) {
-      // Keep lifetime locks held until process exit if the containment state
-      // cannot be inspected or repaired exactly. The external scanner then
-      // observes the untouched counterexample and remains fail-closed.
-      this.retainLocksForUnconfirmedPty = true;
-      throw new Error(`grok post-stop containment cleanup failed: ${errorMessage(error)}`);
+    // A contender can fail while acquiring the first lifetime lock and still
+    // enter close() through open()'s catch path. It never owned a TUI writer and
+    // must not mutate another runtime's post-stop state. Only a PID registered
+    // immediately after a successful PTY spawn proves this runtime owned a
+    // generation whose death can authorize cleanup.
+    if (this.pendingTuiProcessIds.size > 0) {
+      try {
+        cleanupGrokCliPostStopState({
+          stateHome: this.opts.grokHome,
+          projectCwd: this.opts.cwd,
+          leaderSocket: this.leaderSocket,
+          tuiProcessIds: [...this.pendingTuiProcessIds],
+        });
+      } catch (error) {
+        // Keep lifetime locks held until process exit if the containment state
+        // cannot be inspected or repaired exactly. The external scanner then
+        // observes the untouched counterexample and remains fail-closed.
+        this.retainLocksForUnconfirmedPty = true;
+        throw new Error(`grok post-stop containment cleanup failed: ${errorMessage(error)}`);
+      }
+      this.pendingTuiProcessIds.clear();
     }
-    this.pendingTuiProcessIds.clear();
     for (const lock of this.locks.reverse()) await lock.release().catch(() => {});
     this.locks = [];
   }

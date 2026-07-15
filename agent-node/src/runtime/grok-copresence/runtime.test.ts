@@ -390,7 +390,9 @@ describe("Grok copresence runtime integration", () => {
       await runtime.close();
       runtime = undefined;
       expect(existsSync(second)).toBe(false);
-      expect(existsSync(unknown)).toBe(true);
+      // Final close also reclaims pinned Grok's owner-held empty marker under
+      // its own (non node-pty) pid; recovery cleanup remains exact-PID-bound.
+      expect(existsSync(unknown)).toBe(false);
     } finally {
       await runtime?.close();
       await fixture.close();
