@@ -77,15 +77,15 @@ The backup directory contains your Tokens, node configurations, and session reco
 # Dry run: print the plan only (4 packages × current→target × action badge)
 anet upgrade --dry-run
 
-# Real run (default = print the manual npm commands, does not touch global install; channel is auto-detected: prerelease tag → preview, otherwise latest)
+# Real run (default = auto-installs each out-of-date package + auto-detaches a self-upgrade of anet itself, since v0.10.6 #154; channel is auto-detected: prerelease tag → preview, otherwise latest)
 anet upgrade
 
 # Force a channel (overrides auto-detect)
 anet upgrade --channel preview
 anet upgrade --channel latest
 
-# Self-upgrade anet itself (opt-in detached spawn; stderr is captured to /tmp/anet-self-upgrade.err; without this flag the default prints the manual command to avoid replacing the running process)
-anet upgrade --self
+# Opt out of anet self-upgrade (anet auto-self-upgrades via detached spawn by default since v0.10.6 #154; pass this for CI/scripted use to get the manual command instead; stderr → /tmp/anet-self-upgrade.err)
+anet upgrade --no-auto-self
 ```
 
 **Reading the plan**: one row per package with `current → target` and an action badge:
@@ -95,7 +95,7 @@ anet upgrade --self
 | `upgrade` | current < target, install the new version |
 | `up-to-date` | already at target, skipped |
 | `lazy via npx skip` | not globally installed; anet fetches on demand via `bunx/npx`, no global upgrade needed |
-| `self skip` | anet does not self-upgrade by default (pass `--self`) |
+| `self skip` | you opted out of anet self-upgrade via `--no-auto-self` (self-upgrade is the default since v0.10.6 #154) |
 | `lookup failed` | npm registry lookup failed — network / package name issue |
 
 **Note on `commhub-server`**: that row shows the current `PINNED_SERVER_VERSION` (`0.8.4` on current stable; historical chain detail in the [changelog](/en/changelog) `commhub-server` rows). `anet hub start` runs that pinned version regardless of what's globally installed (to avoid server-breaking churn). So even if you upgrade the global `commhub-server`, it doesn't change what your hub actually runs.

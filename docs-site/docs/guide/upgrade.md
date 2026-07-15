@@ -81,15 +81,15 @@ cp -r .anet .anet.backup
 # 干跑：只打印 plan，不真升（4 包 × current→target × action badge）
 anet upgrade --dry-run
 
-# 实际跑（默认 print 手动 npm 命令，不自动改全局；channel 由 anet 当前版本自动判 prerelease→preview / 否则 latest）
+# 实际跑（默认自动装各过时包 + 自动 detached 自升 anet 本身，v0.10.6 #154 起；channel 由 anet 当前版本自动判 prerelease→preview / 否则 latest）
 anet upgrade
 
 # 强制选通道（覆盖 auto-detect）
 anet upgrade --channel preview
 anet upgrade --channel latest
 
-# 自升 anet 本身（opt-in detached spawn，stderr 落 /tmp/anet-self-upgrade.err；不加这个 flag 默认 print 手动命令避免升级时替换运行中进程）
-anet upgrade --self
+# 关掉 anet 自升（v0.10.6 #154 起默认就会 detached spawn 自动自升 anet 本身；CI/脚本场景加此 flag 改回打印手动命令，stderr 落 /tmp/anet-self-upgrade.err）
+anet upgrade --no-auto-self
 ```
 
 **计划行解读**：每行一个包 + `current → target` + 一个 action badge —
@@ -99,7 +99,7 @@ anet upgrade --self
 | `upgrade` | 该包 current < target，需要装新版 |
 | `up-to-date` | 已经是 target，跳过 |
 | `lazy via npx skip` | 全局没装 + anet `bunx/npx` 按需拉取，不用全局升 |
-| `self skip` | 默认不自升 anet 本身（要加 `--self`）|
+| `self skip` | 你用 `--no-auto-self` 关掉了 anet 自升（默认自升，v0.10.6 #154 起）|
 | `lookup failed` | npm registry 查不到 latest，网络/包名问题 |
 
 **特别提示 `commhub-server`**：这行显示当前 `PINNED_SERVER_VERSION`（v0.10.15 stable 是 `0.8.4`，历史 chain 见 [changelog](/changelog) `commhub-server` 段）—— `anet hub start` 不管全局装的是什么版本都跑这个 pinned 版（避免 server breaking 风险）。所以即使全局 `commhub-server` 升了也没影响 hub 实际运行。
