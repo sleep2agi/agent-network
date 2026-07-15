@@ -155,6 +155,52 @@ See [grok-build-runtime.md Known Limits](https://github.com/sleep2agi/agent-netw
 :::
 :::
 
+### opencode-cli (preview)
+
+> ⚠️ **Preview channel only**: npm latest does not include it yet — the `anet node create` picker on latest won't show it (see the [runtimes table](/en/guide/runtimes)). It lands in latest once RFC-029 stabilizes.
+
+Integrates the [public sst/opencode](https://github.com/sst/opencode) CLI (RFC-029). opencode is a multi-vendor front-end (unified UI + session + auth abstraction); anet runs a long-lived `opencode acp` (stdio JSON-RPC) subprocess to do think().
+
+| Property | Notes |
+|------|------|
+| **Prereq** | Install `opencode-ai` at the exact pinned version; export the vendor API key to env (`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`) |
+| **Traits** | Multi-vendor presets (Anthropic native + OpenAI to start); per-node isolated auth.json (mode 0o600); long-lived ACP subprocess, no cold-start; same transport layer as grok-build-acp |
+| **Tools** | opencode built-ins; under a Feishu channel the commhub MCP is always denied (same as grok / claude-code-cli) |
+
+```bash
+# 1. Install the pinned version
+npm install -g opencode-ai@1.17.13
+
+# 2. Export the env var for your chosen preset
+export ANTHROPIC_API_KEY=sk-...    # for the anthropic preset
+# or
+export OPENAI_API_KEY=sk-...       # for the openai preset
+
+# 3. Create the node via the wizard (asks for preset + auto-writes auth.json into the node HOME)
+anet node create my-opencode --runtime opencode-cli
+anet node start my-opencode
+```
+
+::: tip Version pin + upgrade
+opencode iterates fast upstream (npm `latest` moves daily), so every `anet node start` hard-checks the exact version and rejects any mismatch.
+
+- To upgrade: `anet opencode upgrade-pin <version>` — the command will:
+  1. `npm install -g opencode-ai@<version>`
+  2. Start `opencode acp` for a smoke test (initialize + session/new)
+  3. **Only if the smoke passes**, write `~/.anet/opencode-pin.json` (with version + smokePassedAt)
+  4. The next `anet node start` accepts the new version
+
+- The pin state is per-machine; in team setups each machine upgrades + smokes on its own.
+:::
+
+::: tip Bearer-only vendor limitation (RFC-029 §8 D3)
+opencode's built-in anthropic client hardcodes `x-api-key`. Bearer-only compatible gateways (Kimi coding, etc.) return 401 out of the box. Presets support Anthropic native + OpenAI to start; Bearer vendors need an opencode plugin that controls the auth path (backlog).
+:::
+
+::: warning auth.json is a sensitive path
+opencode's `auth.json` holds the vendor API key. agent-node's read-denylist blocks a running opencode agent from Read-ing / exfiltrating its own auth.json (same defense as Feishu's access.json).
+:::
+
 ### claude-agent-sdk + Domestic Models
 
 Routes claude-agent-sdk requests to domestic model APIs via `ANTHROPIC_BASE_URL`, ideal for low-cost scenarios.
