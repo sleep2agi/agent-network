@@ -1085,7 +1085,7 @@ describe("Grok copresence runtime integration", () => {
           contenderSpawned = true;
           throw new Error("retained session lock must reject before spawn");
         },
-      })).rejects.toThrow("already owns this socket/session");
+      })).rejects.toThrow("grok-build-cli project is busy; concurrent turns are refused");
       expect(contenderSpawned).toBe(false);
       expect(existsSync(blocked)).toBe(true);
     } finally {
@@ -1344,7 +1344,7 @@ describe("Grok copresence runtime integration", () => {
           secondSpawnCalled = true;
           throw new Error("must not spawn");
         },
-      })).rejects.toThrow("already owns this socket/session");
+      })).rejects.toThrow("grok-build-cli project is busy; concurrent turns are refused");
       expect(secondSpawnCalled).toBe(false);
 
       let alternateSocketSpawnCalled = false;
@@ -1356,7 +1356,7 @@ describe("Grok copresence runtime integration", () => {
           alternateSocketSpawnCalled = true;
           throw new Error("must not spawn same session twice");
         },
-      })).rejects.toThrow("already owns this socket/session");
+      })).rejects.toThrow("grok-build-cli project is busy; concurrent turns are refused");
       expect(alternateSocketSpawnCalled).toBe(false);
 
       attached.detach();
