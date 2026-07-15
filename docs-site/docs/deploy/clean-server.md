@@ -77,7 +77,7 @@ Docs: https://anet.sh/guide/getting-started
 
 ## 2. 起 Hub（推荐 tmux 挂着）
 
-CommHub 是常驻进程，**关终端就停**。生产场景配 systemd（[§7 持久化](#_7-持久化-systemd-tmux)），快速验证用 tmux：
+CommHub 是常驻进程，**关终端就停**。生产场景配 systemd（[§7 持久化](#_8-持久化-systemd-tmux)），快速验证用 tmux：
 
 ```bash
 # 装 tmux（如果没装）
@@ -351,7 +351,7 @@ sudo systemctl status anet-hub anet-node@my-bot
 
 - `ExecStart` 必须填 `anet` 的**绝对路径**（`which anet`），systemd 不会读 nvm `~/.bashrc`
 - `User=` 用你日常装 anet 的那个用户，不要用 `root`
-- `claude-code-cli` runtime 首次跑会弹 dev-channels 确认框（[§5.5 兜底](#_5-5-claude-code-cli-runtime-的-dev-channels-确认框)），systemd 接管前先 tmux 前台跑一次按掉
+- `claude-code-cli` runtime 首次跑会弹 dev-channels 确认框（[见 §7 启动节点里的 dev-channels 确认框](#_7-启动节点)），systemd 接管前先 tmux 前台跑一次按掉
 - 想官方 unit / 改进上面这份？欢迎 PR 或来 [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) 提
 
 ## 故障排查表（8 坑 mapping）

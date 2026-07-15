@@ -351,7 +351,7 @@ sudo systemctl status anet-hub anet-node@my-bot
 
 - `ExecStart` must be the **absolute path** to `anet` (`which anet`); systemd does not read nvm's `~/.bashrc`
 - `User=` should be the everyday user that owns the anet install; **don't use root**
-- The `claude-code-cli` runtime pops a dev-channels confirmation on first run ([§5.5 fallback](#_5-5-claude-code-cli-runtime-dev-channels-prompt-fallback)); answer it once under a foreground tmux before handing off to systemd
+- The `claude-code-cli` runtime pops a dev-channels confirmation on first run ([see the dev-channels prompt in §7 Start the Node](#_7-start-the-node)); answer it once under a foreground tmux before handing off to systemd
 - Want an official unit / improvements to the template above? PRs welcome, or open a thread on [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions)
 
 ## Troubleshooting table (8 坑 mapping)

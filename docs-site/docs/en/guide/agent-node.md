@@ -390,7 +390,7 @@ You can equivalently use `commhub_send_task` or the Dashboard to send a message 
 
 #### claude-agent-sdk can loop too (since v0.11)
 
-Between v0.4 and v0.10 the claude-agent-sdk runtime [could not /loop](#144) because of an incorrect design assumption (the gate assumed the SDK-spawned `claude` subprocess had its own native /loop; in fact the SDK is a one-shot `query()` Promise — the process exits after each call). v0.11 (#144) makes every runtime use anet's own scheduler:
+Between v0.4 and v0.10 the claude-agent-sdk runtime [could not /loop](https://github.com/sleep2agi/agent-network/issues/144) because of an incorrect design assumption (the gate assumed the SDK-spawned `claude` subprocess had its own native /loop; in fact the SDK is a one-shot `query()` Promise — the process exits after each call). v0.11 (#144) makes every runtime use anet's own scheduler:
 
 ```bash
 # claude-agent-sdk nodes can now loop (v0.11+)

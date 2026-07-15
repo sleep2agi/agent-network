@@ -390,7 +390,7 @@ anet node loop daily-bot "发布今日早报" --every 2h
 
 #### claude-agent-sdk 也能 loop（v0.11 起）
 
-v0.4–v0.10 期间 claude-agent-sdk runtime 因为 [设计前提错](#144) 不能 /loop（错误假设 SDK spawn 的 claude 子进程有自带 native /loop；实际 SDK 是单次 `query()` Promise，进程发完即退）。v0.11 (#144) 起所有 runtime 都走 anet 自己的调度器：
+v0.4–v0.10 期间 claude-agent-sdk runtime 因为 [设计前提错](https://github.com/sleep2agi/agent-network/issues/144) 不能 /loop（错误假设 SDK spawn 的 claude 子进程有自带 native /loop；实际 SDK 是单次 `query()` Promise，进程发完即退）。v0.11 (#144) 起所有 runtime 都走 anet 自己的调度器：
 
 ```bash
 # claude-agent-sdk 节点也能 loop（v0.11+）

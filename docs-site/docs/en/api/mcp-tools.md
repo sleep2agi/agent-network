@@ -129,7 +129,7 @@ report_completion({
 - **chained_reply auto-propagation**: if the task has a `parent_task_id`, the parent's originator gets a `chained_reply` SSE event ([`tools.ts:271-291`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L271); used so subtask replies bubble up to the parent — see [`task-lifecycle` dual-write](/en/concepts/task-lifecycle#dual-write-mechanism))
 - **`task_events` log**: a `replied` event is logged ([`tools.ts:270`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L270))
 
-Compared to [`send_reply`](#send_reply): `send_reply` is a hub tool that requires an explicit `task_id`; `report_completion` is an agent tool that can fall back by content match.
+Compared to [`send_reply`](#send-reply): `send_reply` is a hub tool that requires an explicit `task_id`; `report_completion` is an agent tool that can fall back by content match.
 :::
 
 ---
@@ -183,7 +183,7 @@ Acknowledge message receipt. After ACK, the message won't be returned by `get_in
 |------|------|:----:|------|
 | `alias` | string | &check; | Session alias |
 | `message_id` | string | &check; | Message ID |
-| `response` | string | | **Currently a no-op**: the handler accepts this parameter but never writes it to the database ([`tools.ts:337-360`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L337) never references `response`). The schema is kept for forward-compat / to avoid breaking existing callers; if you want to actually reply, use [`send_reply`](#send_reply). |
+| `response` | string | | **Currently a no-op**: the handler accepts this parameter but never writes it to the database ([`tools.ts:337-360`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L337) never references `response`). The schema is kept for forward-compat / to avoid breaking existing callers; if you want to actually reply, use [`send_reply`](#send-reply). |
 
 **Response**:
 
@@ -194,7 +194,7 @@ Acknowledge message receipt. After ACK, the message won't be returned by `get_in
 **Error**: `message_id` not found or not owned by this alias → `{ok: false, error: "message not found or not yours"}`.
 
 ::: tip Side effect: tasks-table state machine
-A successful ack also UPDATEs the `tasks` row where `task_id = message_id` from `status='delivered'` to `'acked'` ([`tools.ts:354`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L354); **only** transitions from `delivered`, unlike the hub-side [`send_ack`](#send_ack) which also accepts `created` — see [Task lifecycle — the `created` state](/en/concepts/task-lifecycle#state-machine)).
+A successful ack also UPDATEs the `tasks` row where `task_id = message_id` from `status='delivered'` to `'acked'` ([`tools.ts:354`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L354); **only** transitions from `delivered`, unlike the hub-side [`send_ack`](#send-ack) which also accepts `created` — see [Task lifecycle — the `created` state](/en/concepts/task-lifecycle#state-machine)).
 :::
 
 ---
@@ -420,7 +420,7 @@ Reassign a task to another agent.
 - Reassign works only on **non-terminal** tasks: `created` / `delivered` / `acked` / `running` ([`tools.ts:853`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L853) rejects `replied` / `failed` / `cancelled` / `expired` with `{ok: false, error: "task is terminal (<status>)"}`)
 - The old alias's inbox row is `acked=1` ([`tools.ts:858`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L858)) so the original agent will not pick it up
 - Task status resets to `delivered`, `started_at` clears, `delivered_at` refreshes to now ([`tools.ts:863`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L863)) — a `running` task is interrupted
-- TTL (`expires_at`) is **not modified** (unlike [`retry_task`](#retry_task) which forces `+1 hour`); the task keeps its remaining time
+- TTL (`expires_at`) is **not modified** (unlike [`retry_task`](#retry-task) which forces `+1 hour`); the task keeps its remaining time
 - The new alias receives a fresh-UUID inbox row + a `new_task` SSE event
 :::
 
@@ -511,7 +511,7 @@ Query task list with multi-dimensional filtering.
 ```
 
 ::: tip `list_tasks` rows are a subset of `get_task`
-Each `list_tasks` row SELECTs only **9 columns** ([`tools.ts:776`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L776)): `task_id` / `from_name` / `to_name` / `priority` / `status` / `content` / `result` / `created_at` / `completed_at`. It does **not** include `delivered_at` / `started_at` / `expires_at` / `network_id` / `requires_response` / `parent_task_id` — use [`get_task`](#get_task) (`SELECT *`) for those. `count` is the number of rows returned this call (≤ `limit`); `stats` is the status-grouped count for the **entire scope** (not affected by the filters).
+Each `list_tasks` row SELECTs only **9 columns** ([`tools.ts:776`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L776)): `task_id` / `from_name` / `to_name` / `priority` / `status` / `content` / `result` / `created_at` / `completed_at`. It does **not** include `delivered_at` / `started_at` / `expires_at` / `network_id` / `requires_response` / `parent_task_id` — use [`get_task`](#get-task) (`SELECT *`) for those. `count` is the number of rows returned this call (≤ `limit`); `stats` is the status-grouped count for the **entire scope** (not affected by the filters).
 :::
 
 ---
@@ -600,7 +600,7 @@ Get detailed status of a single session, including pending inbox count and recen
 ```
 
 ::: tip Response shape
-- `session` is `SELECT * FROM sessions` ([`tools.ts:423`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L423)) — the full sessions row (same as [`get_all_status`](#get_all_status)'s session row, **including the `model` column** — see the get_all_status note); if the alias doesn't exist `session` is `null` but `ok` is still `true`
+- `session` is `SELECT * FROM sessions` ([`tools.ts:423`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L423)) — the full sessions row (same as [`get_all_status`](#get-all-status)'s session row, **including the `model` column** — see the get_all_status note); if the alias doesn't exist `session` is `null` but `ok` is still `true`
 - `recent_completions` is `SELECT * FROM completions ... LIMIT 5` ([`tools.ts:433-435`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L433)) — the full 9-column completion row (`id` / `session_name` / `task` / `result` / `artifacts` / `score` / `duration_minutes` / `network_id` / `completed_at`), ordered by `completed_at` DESC, max 5
 :::
 

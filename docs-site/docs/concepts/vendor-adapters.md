@@ -5,7 +5,7 @@
 ::: warning ⏳ Interim workaround，非永久方案
 **本 adapter 是 interim 补丁，不是 anet 的 vendor-specific lock-in 路线**。anet 已联系 InternLM 团队推上游修复 —— 等 intern-s2-preview endpoint 默认 emit 标准 Anthropic `tool_use` content blocks 后，这一层 adapter 就**可以下线**。
 
-加这层是为了**立即 unblock** 用户跑 intern + 多 Agent 协作（v0.9.0 promote 前 intern tool calling 完全卡死），不是 anet 愿意长期承担「贴近某家厂商行为」这种维护成本。Upstream coordination 进度见 [§5 Future polish — Upstream coordination status](#future-polish未完成-gap)。
+加这层是为了**立即 unblock** 用户跑 intern + 多 Agent 协作（v0.9.0 promote 前 intern tool calling 完全卡死），不是 anet 愿意长期承担「贴近某家厂商行为」这种维护成本。Upstream coordination 进度见 [§5 Future polish — Upstream coordination status](#future-polish-未完成-gap)。
 :::
 
 agent-node 的 `claude-agent-sdk` runtime 是 Anthropic Messages API 客户端，**理论上**任何 Anthropic 兼容 endpoint（书生 / DeepSeek / GLM / Kimi / MiniMax / OpenRouter / 自部署 lmdeploy 等）都能跑。但**实际上**各厂商的 RLHF 微调路径不一样，同样的 Anthropic 协议 payload 在不同厂商端会有**行为分歧**：

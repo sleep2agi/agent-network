@@ -129,7 +129,7 @@ report_completion({
 - **chained_reply 自动传播**：如果该任务有 `parent_task_id`，会给父任务发起者 SSE 推 `chained_reply` event（[`tools.ts:271-291`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L271)；用于子任务回 → 链式通知父任务发起者，详见 [`task-lifecycle` 双写机制](/concepts/task-lifecycle#双写机制)）
 - **`task_events` log**：记录一条 `replied` event（[`tools.ts:270`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L270)）
 
-跟 [`send_reply`](#send_reply) 比较：`send_reply` 是 hub 工具，需要显式 `task_id` 参数；`report_completion` 是 agent 工具，可 fallback by content。
+跟 [`send_reply`](#send-reply) 比较：`send_reply` 是 hub 工具，需要显式 `task_id` 参数；`report_completion` 是 agent 工具，可 fallback by content。
 :::
 
 ---
@@ -183,7 +183,7 @@ report_completion({
 |------|------|:----:|------|
 | `alias` | string | &check; | Session 别名 |
 | `message_id` | string | &check; | 消息 ID |
-| `response` | string | | **当前 no-op**：handler 接受这个参数但不写库（[`tools.ts:337-360`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L337) 整段没有引用 `response`）。schema 保留是为了 forward-compat / 不破坏现有调用方；想真正回复用 [`send_reply`](#send_reply) |
+| `response` | string | | **当前 no-op**：handler 接受这个参数但不写库（[`tools.ts:337-360`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L337) 整段没有引用 `response`）。schema 保留是为了 forward-compat / 不破坏现有调用方；想真正回复用 [`send_reply`](#send-reply) |
 
 **返回值**：
 
@@ -194,7 +194,7 @@ report_completion({
 **错误**：`message_id` 不存在或不属于该 alias → `{ok: false, error: "message not found or not yours"}`。
 
 ::: tip 副作用：tasks 表状态机
-ack 成功还会把 `tasks` 表里 `task_id = message_id` 的行从 `status='delivered'` UPDATE 到 `'acked'`（[`tools.ts:354`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L354)；**仅** `delivered` 起跳，跟 hub 端 [`send_ack`](#send_ack)（接受 `created` / `delivered`）不同 —— 详见 [Task 生命周期 — `created` 状态](/concepts/task-lifecycle#状态机)）。
+ack 成功还会把 `tasks` 表里 `task_id = message_id` 的行从 `status='delivered'` UPDATE 到 `'acked'`（[`tools.ts:354`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L354)；**仅** `delivered` 起跳，跟 hub 端 [`send_ack`](#send-ack)（接受 `created` / `delivered`）不同 —— 详见 [Task 生命周期 — `created` 状态](/concepts/task-lifecycle#状态机)）。
 :::
 
 ---
@@ -420,7 +420,7 @@ send_task({
 - 只能 reassign **非终态**任务：`created` / `delivered` / `acked` / `running`（[`tools.ts:853`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L853) 反向拒掉 `replied` / `failed` / `cancelled` / `expired`，返回 `{ok: false, error: "task is terminal (<status>)"}`）
 - 旧 alias 的 inbox row 被 `acked=1`（[`tools.ts:858`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L858)），原 agent 不会再 pick up
 - 任务 status reset 到 `delivered`，`started_at` 清空，`delivered_at` 刷新到当前 time（[`tools.ts:863`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L863)）—— 正在 `running` 的任务会被中断
-- TTL（`expires_at`）**不改**（跟 [`retry_task`](#retry_task) 的「固定 +1h」不同）；用原任务剩余时间
+- TTL（`expires_at`）**不改**（跟 [`retry_task`](#retry-task) 的「固定 +1h」不同）；用原任务剩余时间
 - 新 alias 拿到新 UUID 的 inbox row + `new_task` SSE 事件
 :::
 
@@ -511,7 +511,7 @@ send_task({
 ```
 
 ::: tip `list_tasks` 的行是 `get_task` 的子集
-`list_tasks` 每行只 SELECT **9 列**（[`tools.ts:776`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L776)）：`task_id` / `from_name` / `to_name` / `priority` / `status` / `content` / `result` / `created_at` / `completed_at`。**不含** `delivered_at` / `started_at` / `expires_at` / `network_id` / `requires_response` / `parent_task_id` —— 要这些字段用 [`get_task`](#get_task)（`SELECT *`）。`count` 是本次返回的行数（≤ `limit`），`stats` 是**整个 scope 内**按 status 分组的计数（不受 filter 影响）。
+`list_tasks` 每行只 SELECT **9 列**（[`tools.ts:776`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L776)）：`task_id` / `from_name` / `to_name` / `priority` / `status` / `content` / `result` / `created_at` / `completed_at`。**不含** `delivered_at` / `started_at` / `expires_at` / `network_id` / `requires_response` / `parent_task_id` —— 要这些字段用 [`get_task`](#get-task)（`SELECT *`）。`count` 是本次返回的行数（≤ `limit`），`stats` 是**整个 scope 内**按 status 分组的计数（不受 filter 影响）。
 :::
 
 ---
@@ -600,7 +600,7 @@ send_task({
 ```
 
 ::: tip 返回值形状
-- `session` 走 `SELECT * FROM sessions`（[`tools.ts:423`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L423)），完整 sessions 行（同 [`get_all_status`](#get_all_status) 的 session 行，**含 `model` 列** —— 见 get_all_status 说明）；alias 不存在时 `session` 为 `null` 但 `ok` 仍为 `true`
+- `session` 走 `SELECT * FROM sessions`（[`tools.ts:423`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L423)），完整 sessions 行（同 [`get_all_status`](#get-all-status) 的 session 行，**含 `model` 列** —— 见 get_all_status 说明）；alias 不存在时 `session` 为 `null` 但 `ok` 仍为 `true`
 - `recent_completions` 走 `SELECT * FROM completions ... LIMIT 5`（[`tools.ts:433-435`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L433)），完整 9 列 completion 行（`id` / `session_name` / `task` / `result` / `artifacts` / `score` / `duration_minutes` / `network_id` / `completed_at`），按 `completed_at` 倒序最多 5 条
 :::
 
