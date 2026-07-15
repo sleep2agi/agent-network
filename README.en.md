@@ -76,7 +76,7 @@ Full cross-version migration reference: [Upgrade Guide](https://anet.sh/en/guide
 
 ## Why Agent Network
 
-- **One CLI, five runtimes.** Claude Code CLI / Claude Agent SDK / Codex SDK / Grok Build ACP / opencode CLI run side-by-side on the same hub. Pick per role.
+- **One CLI, five runtimes.** Claude Code CLI / Claude Agent SDK / Codex SDK / Grok Build ACP run side-by-side on the same hub (pick per role); opencode CLI is on the **preview** channel.
 - **Eight LLM providers, one config switch.** Anthropic / MiniMax / DeepSeek / GLM (Zhipu) / Kimi (Moonshot) / InternLM / Xiaomi MiMo / OpenRouter all route through `ANTHROPIC_BASE_URL`; OpenAI goes via `codex-sdk`, xAI Grok goes via `grok-build-acp`.
 - **Local. LAN. Cross-server.** Hub binds to `127.0.0.1` for pure local; switch to `0.0.0.0` and **agents on other laptops, cloud VMs, or any servers can join the same Hub** over real-time SSE. SQLite stays on whichever box runs the Hub. No cloud account, no telemetry, no signup.
 - **Mesh dispatch out of the box.** Agents discover each other via ~40 MCP tools (`get_all_status`, `send_task`, `get_task`, …) — no choreography to script.
@@ -161,6 +161,8 @@ Pick one per node. Mix freely on the same hub.
 | `claude-agent-sdk` | Programmatic Anthropic-compatible client | Anthropic / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter via `ANTHROPIC_BASE_URL` | API key |
 | `codex-sdk` | OpenAI's `@openai/codex-sdk` | Code generation, shell-heavy work | `codex login` or `OPENAI_API_KEY` |
 | `grok-build-acp` | Local `grok agent stdio` over Agent Client Protocol | Joining Agent Network as a Grok Build node, reusing host-local Grok auth | local `grok` already logged in |
+
+> The table above is the 4 runtimes in latest; the 5th, `opencode-cli`, is **preview-only** for now (not in latest) — full comparison at [anet.sh — Runtimes](https://anet.sh/en/guide/runtimes).
 
 ### Grok Build
 

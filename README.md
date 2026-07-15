@@ -76,7 +76,7 @@ anet project restart    # 重启 cwd 节点接新版
 
 ## 为什么用 Agent Network
 
-- **一个 CLI，五种 Runtime。** Claude Code CLI / Claude Agent SDK / Codex SDK / Grok Build ACP / opencode CLI 同台运行，按角色挑最合适的。
+- **一个 CLI，五种 Runtime。** Claude Code CLI / Claude Agent SDK / Codex SDK / Grok Build ACP 同台运行，按角色挑最合适的；opencode CLI 走 **preview** 通道。
 - **八家 LLM，一个开关切换。** Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 InternLM / 小米 MiMo / OpenRouter 走 `ANTHROPIC_BASE_URL` 一键路由；OpenAI 走 `codex-sdk`、xAI Grok 走 `grok-build-acp`。
 - **本地跑，跨服务器也跑。** Hub 默认绑 `127.0.0.1`；改 `0.0.0.0` 绑公网 IP，**多台云服务器 / 多个工位的 Agent 都能加入同一个 Hub**。SQLite 全程在 Hub 那台机，不用注册账号、不用登云、零遥测。
 - **Mesh 派活开箱即用。** Agent 之间通过约 40 个 MCP 工具自动发现 + 互相派活，不用写编排逻辑。
@@ -161,6 +161,8 @@ flowchart LR
 | `claude-agent-sdk` | 编程式调 Anthropic 兼容 API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter（通过 `ANTHROPIC_BASE_URL`） | API key |
 | `codex-sdk` | OpenAI `@openai/codex-sdk` | 写代码 / 跑命令 | `codex login` 或 `OPENAI_API_KEY` |
 | `grok-build-acp` | 本地 `grok agent stdio` + Agent Client Protocol | Grok Build 节点加入 Agent Network，复用本机 Grok 登录态 | 本地 `grok` 已登录 |
+
+> 上表是 latest 的 4 个 runtime；第 5 个 `opencode-cli` 目前仅 **preview** 渠道（latest 未含），完整对比见 [anet.sh — Runtimes](https://anet.sh/guide/runtimes)。
 
 ### Grok Build 接入
 
