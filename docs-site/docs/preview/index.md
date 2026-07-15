@@ -36,7 +36,7 @@ npm install -g @sleep2agi/commhub-server@preview
 启动：
 
 ```bash
-anet --version              # → 2.3.0-preview.1
+anet --version              # → 2.3.0-preview.N（N=当前 preview 号）
 anet hub start              # 拉起 pinned hub :9200
 anet init                   # 全局配 hub URL
 anet init project           # 当前项目 .anet/ 初始化（自动加 .anet/ 到 .gitignore — v0.11 安全）
@@ -65,7 +65,7 @@ anet node start <alias>
 
 ```bash
 anet upgrade --channel preview                              # 1. 升级到 preview 通道
-anet --version                                              # 2. 确认 2.3.0-preview.1
+anet --version                                              # 2. 确认 2.3.0-preview.N（当前 preview）
 anet node start <alias>                                     # 3. 确保节点在线
 anet node loop <alias> "报一下现在几点" --every 5m          # 4. 下循环任务（5 分钟一次）
 
@@ -128,7 +128,7 @@ anet node loop daily-bot "发布今日早报" --every 2h
 
 ## latest vs preview 对照
 
-| 功能 | latest (npm `latest`) | preview (`2.3.0-preview.1`) |
+| 功能 | latest (npm `latest`) | preview (`2.3.0-preview.N`) |
 |---|---|---|
 | `/loop` 调度 | 仅 `claude-code-cli` runtime | **所有 4 runtime** |
 | `anet node loop` CLI | ❌ | ✅ |

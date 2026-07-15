@@ -36,7 +36,7 @@ npm install -g @sleep2agi/commhub-server@preview
 Bootstrap:
 
 ```bash
-anet --version              # → 2.3.0-preview.1
+anet --version              # → 2.3.0-preview.N (N = current preview number)
 anet hub start              # spawns the pinned hub on :9200
 anet init                   # configures the hub URL globally
 anet init project           # writes .anet/ in the current project (auto-adds .anet/ to .gitignore — v0.11 security)
@@ -65,7 +65,7 @@ Want to try the headline preview2 feature (`/loop` works for every runtime) righ
 
 ```bash
 anet upgrade --channel preview                              # 1. Upgrade to the preview channel
-anet --version                                              # 2. Confirm 2.3.0-preview.1
+anet --version                                              # 2. Confirm 2.3.0-preview.N (current preview)
 anet node start <alias>                                     # 3. Make sure the node is online
 anet node loop <alias> "what time is it now" --every 5m     # 4. Schedule a recurring task (every 5 min)
 
@@ -128,7 +128,7 @@ Four cross-tenant / data-integrity gaps closed for public-hub multi-user / multi
 
 ## latest vs preview comparison
 
-| Feature | latest (npm `latest`) | preview (`2.3.0-preview.1`) |
+| Feature | latest (npm `latest`) | preview (`2.3.0-preview.N`) |
 |---|---|---|
 | `/loop` scheduler | `claude-code-cli` only | **All 4 runtimes** |
 | `anet node loop` CLI | ❌ | ✅ |

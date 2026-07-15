@@ -305,7 +305,7 @@ Try it:
 ```bash
 # Upgrade CLI to preview
 npm i -g @sleep2agi/agent-network@preview
-anet -v                                    # should show 2.2.x or 2.2.x-preview.N (when preview channel tracks latest you'll see 2.2.10 stable)
+anet -v                                    # should show 2.3.0-preview.N (current preview channel; latest stable is 2.2.x)
 anet hub dashboard                          # npx auto-pulls the current preview version
 ```
 
