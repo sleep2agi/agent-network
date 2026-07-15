@@ -7,7 +7,7 @@ Installing and deploying Agent Network via npm is the simplest approach.
 | Package | CLI command | Purpose | Notes |
 |------|---------|------|------|
 | `@sleep2agi/agent-network` | `anet` | CLI management + Client SDK | `dist/` ships `bin/cli.js` + `src/client.js` + `src/node-server.js` (3 entries, minified + obfuscator; for exact byte size, see the [npm package page](https://www.npmjs.com/package/@sleep2agi/agent-network)) |
-| `@sleep2agi/agent-node` | `agent-node` | Agent runtime — drives the **2 SDK runtimes**: `claude-agent-sdk` / `codex-sdk` (the `claude-code-cli` runtime does NOT go through agent-node — it spawns the local `claude` binary directly) | `@anthropic-ai/claude-agent-sdk` regular dep; `@openai/codex-sdk` optional peerDep  |
+| `@sleep2agi/agent-node` | `agent-node` | Agent runtime — drives the **2 SDK runtimes**: `claude-agent-sdk` / `codex-sdk` (the `claude-code-cli` runtime does NOT go through agent-node — it spawns the local `claude` binary directly) | `@anthropic-ai/claude-agent-sdk` regular dep; `@openai/codex-sdk` optionalDependency  |
 | `@sleep2agi/commhub-server` | `commhub-server` | CommHub backend (Bun required; pulled in by `anet hub start` via bunx at a pinned version) | Bun-only runtime (`engines.bun: ">=1.2.0"`) |
 | `@sleep2agi/agent-network-dashboard` | - | Next.js web UI | `anet hub dashboard` pulls it via npx (version comes from `dashboardReleaseTag()`: defaults to the `@preview` tag, overridable via the `ANET_DASHBOARD_VERSION` env var — not a hardcoded pin, see [dashboard.md](/en/guide/dashboard)); can also be deployed standalone |
 

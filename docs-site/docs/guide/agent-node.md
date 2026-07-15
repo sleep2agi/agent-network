@@ -113,7 +113,7 @@ npx @sleep2agi/agent-node \
 ```
 
 ::: details 你需要准备
-- [ ] 安装 codex CLI：`npm install -g @openai/codex`（`@openai/codex-sdk` 在 `@sleep2agi/agent-node` 的 optional `peerDependencies` 里，npm 7+ 默认会随 agent-node 一起拉；但 SDK 实际要 spawn `codex` 二进制；详见 [runtimes / codex-sdk 前置](/guide/runtimes#codex-sdk)）
+- [ ] 安装 codex CLI：`npm install -g @openai/codex`（`@openai/codex-sdk` 在 `@sleep2agi/agent-node` 的 `optionalDependencies` 里，npm 7+ 默认会随 agent-node 一起拉；但 SDK 实际要 spawn `codex` 二进制；详见 [runtimes / codex-sdk 前置](/guide/runtimes#codex-sdk)）
 - [ ] 跑 `codex auth login` 完成 OpenAI 登录（或 `export OPENAI_API_KEY=sk-xxx`）
 - [ ] CommHub Server 已启动
 :::

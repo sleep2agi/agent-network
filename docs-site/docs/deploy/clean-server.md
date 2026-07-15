@@ -280,7 +280,7 @@ anet node start my-bot
 
 按 `Ctrl+B D` 把 tmux 断开保活。
 
-## 7. 持久化（systemd / tmux）
+## 8. 持久化（systemd / tmux）
 
 anet 暂未 ship 官方 `--daemon` flag，下面给两条可选路径：tmux 临时挂、systemd 单元长期跑。
 

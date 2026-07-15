@@ -79,7 +79,7 @@ DNS 解析到你的服务器 IP，Caddy 会自动签发 Let's Encrypt 证书。
 
 ### 5. 确认 tmux 控制面已关闭
 
-**v0.8 起 tmux 控制面默认关闭**，verify [`server/src/index.ts:14`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L14) `TMUX_ENABLED = process.env.COMMHUB_ENABLE_TMUX === "1"` —— **只有显式 `=1` 才开启**，`=0` / `=true` / 不设 都是关。
+**v0.8 起 tmux 控制面默认关闭**，verify [`server/src/index.ts:32`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L32) `TMUX_ENABLED = process.env.COMMHUB_ENABLE_TMUX === "1"` —— **只有显式 `=1` 才开启**，`=0` / `=true` / 不设 都是关。
 
 所以你只要**不主动设** `COMMHUB_ENABLE_TMUX=1`，就已经是关闭状态：
 
@@ -96,7 +96,7 @@ v0.7 / V2 时代的部署脚本经常带 `COMMHUB_ENABLE_TMUX=1`（当时默认�
 :::
 
 ::: tip 想用 tmux 控制面 (本机 dev / dashboard 调试)
-endpoint 详情见 [REST API — Tmux 控制面](/api/rest#tmux-控制面)，三个端点 (`GET /api/tmux/list` / `GET /api/tmux/:name` / `WebSocket /api/tmux/:name/stream`) 共用同一 auth 门控 (`COMMHUB_ENABLE_TMUX=1` + `COMMHUB_TMUX_ALLOWLIST` IP 白名单 + `users.role='admin'`)。
+endpoint 详情见 [REST API — Tmux 控制面](/api/rest#tmux-控制面)，三个端点 (`GET /api/tmux/:name` / `POST /api/tmux/:name/send` / `WebSocket /ws/tmux/:name`) 共用同一 auth 门控 (`COMMHUB_ENABLE_TMUX=1` + `COMMHUB_TMUX_ALLOWLIST` IP 白名单 + `users.role='admin'`)。
 :::
 
 ### 6. 备份 SQLite 数据

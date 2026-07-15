@@ -66,7 +66,7 @@ Keep the security group / firewall locked down to **22(SSH) + 80 + 443**. Don't 
 
 ### 5. Verify the tmux control plane is off
 
-**Since v0.8, the tmux control plane is disabled by default.** Verified at [`server/src/index.ts:14`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L14): `TMUX_ENABLED = process.env.COMMHUB_ENABLE_TMUX === "1"` — **only an explicit `=1` enables it**; `=0` / `=true` / unset all leave it off.
+**Since v0.8, the tmux control plane is disabled by default.** Verified at [`server/src/index.ts:32`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L32): `TMUX_ENABLED = process.env.COMMHUB_ENABLE_TMUX === "1"` — **only an explicit `=1` enables it**; `=0` / `=true` / unset all leave it off.
 
 So as long as you do **not** actively set `COMMHUB_ENABLE_TMUX=1`, it's already off:
 
@@ -83,7 +83,7 @@ v0.7 / V2-era deployment scripts often passed `COMMHUB_ENABLE_TMUX=1` (when it w
 :::
 
 ::: tip Want to use the tmux control plane (for local dev / Dashboard debugging)
-Endpoint details: [REST API — Tmux control plane](/en/api/rest#tmux). All three endpoints (`GET /api/tmux/list` / `GET /api/tmux/:name` / `WebSocket /api/tmux/:name/stream`) share the same auth gate (`COMMHUB_ENABLE_TMUX=1` + `COMMHUB_TMUX_ALLOWLIST` IP allowlist + `users.role='admin'`).
+Endpoint details: [REST API — Tmux control plane](/en/api/rest#tmux). All three endpoints (`GET /api/tmux/:name` / `POST /api/tmux/:name/send` / `WebSocket /ws/tmux/:name`) share the same auth gate (`COMMHUB_ENABLE_TMUX=1` + `COMMHUB_TMUX_ALLOWLIST` IP allowlist + `users.role='admin'`).
 :::
 
 ### 6. Back up the SQLite database

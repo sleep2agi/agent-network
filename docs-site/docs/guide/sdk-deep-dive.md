@@ -6,7 +6,7 @@
 anet 当前内置四个 Runtime，其中两个是 SDK adapter；其他两个（`claude-code-cli` spawn 本机 `claude` 二进制；`grok-build-acp` spawn 本机 `grok` ACP server）都是 spawn 子进程路线，不在本页 SDK adapter 对比范围内：
 
 - `claude-agent-sdk` — `@anthropic-ai/claude-agent-sdk` 官方 SDK，在 [`@sleep2agi/agent-node` 的 regular `dependencies`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json) 里（不是打进 dist；build flag `--external`，npm 安装时作为 sub-dep 自动拉）
-- `codex-sdk` — `@openai/codex-sdk` 官方 SDK，列为 **optional peerDependency**（npm 7+ 默认会拉，若没拉用户 `npm install -g @openai/codex-sdk` + `@openai/codex` 二进制全局）
+- `codex-sdk` — `@openai/codex-sdk` 官方 SDK，列为 **`optionalDependencies`**（npm 7+ 默认会拉，若没拉用户 `npm install -g @openai/codex-sdk` + `@openai/codex` 二进制全局）
 
 两家 SDK 接入语义、能力边界、session 处理、tool 注册、streaming、token 计费、错误处理差别都不小。anet 的 wrapper 用 `processWithClaude()` / `processWithCodex()` 两个分支 + 一个统一的 `think()` 调度器抹平这些差异。本文系统梳理这 11 个维度，并给出"想加 gemini-cli / qwen-code 等新 runtime 应该怎么照葫芦画瓢"的指引。
 
@@ -20,7 +20,7 @@ anet 当前内置四个 Runtime，其中两个是 SDK adapter；其他两个（`
 
 | 维度 | `claude-agent-sdk` | `codex-sdk` |
 |---|---|---|
-| **package / 版本** | `@anthropic-ai/claude-agent-sdk` ^0.2.140（regular dep；以 [agent-node/package.json](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json) 为准） | `@openai/codex-sdk` >=0.130.0（optional peerDep；同上） |
+| **package / 版本** | `@anthropic-ai/claude-agent-sdk` ^0.2.140（regular dep；以 [agent-node/package.json](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json) 为准） | `@openai/codex-sdk` >=0.130.0（`optionalDependencies`；同上） |
 | **API entry** | `query({ prompt, options })` → `AsyncGenerator<SDKMessage>` | `new Codex({...}).startThread(opts)` / `.resumeThread(id, opts)` → `Thread`；`Thread.run()` / `Thread.runStreamed()` |
 | **Session 语义** | `SDKSystemMessage{subtype:'init'}.session_id` 第一帧拿到；resume 用 `Options.resume` 或 `Options.continue`；落盘 `~/.claude/projects/<cwd>/<uuid>.jsonl` | `Thread.id` 首次 turn 启动后才有；resume 用 `codex.resumeThread(id, opts)`；落盘 `~/.codex/sessions/` |
 | **Tool 注册** | `tools: string[]` 内置 + `mcpServers: Record<string, McpServerConfig>` 多协议（stdio / http / sse）；可定义 subagent | 工具集**不可剥离**（Codex CLI 内置 Read/Write/Edit/Bash/Grep/Glob/WebSearch 全套）；MCP 通过 Codex CLI 全局 `config.toml` 注入 |
@@ -76,7 +76,7 @@ for await (const message of query({ prompt, options })) {
 - `Codex({config: {model_auto_compact_token_limit: 200000}})` 让 long-running thread 自动压缩历史，不用 wrapper 手动 truncate
 
 **坑**
-- **要 spawn 全局 `codex` 二进制**：peerDependency optional，用户必须 `npm install -g @openai/codex` 才能跑；找不到时 wrapper 抛 `@openai/codex-sdk not installed` 明确报错（cli.ts L684）。
+- **要 spawn 全局 `codex` 二进制**：`@openai/codex` 走 `optionalDependencies`（不强制安装），用户必须 `npm install -g @openai/codex` 才能跑；找不到时 wrapper 抛 `@openai/codex-sdk not installed` 明确报错（cli.ts L684）。
 - **PATH 注入**：wrapper 早在 [cli.ts L670-677](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) `which codex` 后把目录前置到 `process.env.PATH`，避免子进程 spawn 时找不到。
 - **Thread 坏掉后整体重建**：单 turn 报错走 catch 分支重 `codex.startThread()` + `thread.run()`（cli.ts L741-750），意味着原 thread 的 history 在错误后就**断了**。
 - **Token 计费要自己算**：`usage` 只给 token 数没给美金。如果要做预算控制，得维护一张 model→price 表。当前 anet **没**实现 codex 侧的 `maxBudgetUsd` 强制。
@@ -191,9 +191,9 @@ async function processWithGemini(task: string, from: string): Promise<string> {
 if (RUNTIME === "gemini") return await processWithGemini(task, from);
 ```
 
-### Step 4：peerDependency 声明
+### Step 4：optionalDependency 声明
 
-`agent-node/package.json` `peerDependenciesMeta` 把新 SDK 标 optional（参考 codex-sdk 的写法），避免 npm install 时强拉。
+`agent-node/package.json` 用 `optionalDependencies` 声明新 SDK（参考 `@openai/codex-sdk` 的写法），避免 npm install 时强拉。
 
 ### Step 5：写文档
 

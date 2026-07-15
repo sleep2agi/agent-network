@@ -235,7 +235,7 @@ OpenAI **Codex CLI** runtime — best for writing code and running shell command
 
 ### Prerequisites
 
-`@openai/codex-sdk` lives in [`@sleep2agi/agent-node`'s optional `peerDependencies`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json) (not regular `dependencies`) — npm 7+ pulls it in alongside agent-node by default, **but the SDK spawns a `codex` binary under the hood**, so you still have to install the codex CLI globally. If `anet node start` throws `Cannot find module '@openai/codex-sdk'`, install it manually: `npm install -g @openai/codex-sdk`.
+`@openai/codex-sdk` lives in [`@sleep2agi/agent-node`'s `optionalDependencies`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json) (not regular `dependencies`) — npm 7+ pulls it in alongside agent-node by default, **but the SDK spawns a `codex` binary under the hood**, so you still have to install the codex CLI globally. If `anet node start` throws `Cannot find module '@openai/codex-sdk'`, install it manually: `npm install -g @openai/codex-sdk`.
 
 **1. Install codex CLI** (npm global):
 

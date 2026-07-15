@@ -247,7 +247,7 @@ anet node create translator \
 
 ### 前置
 
-`@openai/codex-sdk` 在 [`@sleep2agi/agent-node` 的 optional `peerDependencies`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json) 里（不是常规 deps）—— npm 7+ 默认会跟着 agent-node 一起拉下来，**但 SDK 本身要 spawn 一个 `codex` 二进制**，所以你还得把 codex CLI 全局装一遍。如果 `anet node start` 抛 `Cannot find module '@openai/codex-sdk'`，手动补一下：`npm install -g @openai/codex-sdk`。
+`@openai/codex-sdk` 在 [`@sleep2agi/agent-node` 的 `optionalDependencies`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json) 里（不是常规 deps）—— npm 7+ 默认会跟着 agent-node 一起拉下来，**但 SDK 本身要 spawn 一个 `codex` 二进制**，所以你还得把 codex CLI 全局装一遍。如果 `anet node start` 抛 `Cannot find module '@openai/codex-sdk'`，手动补一下：`npm install -g @openai/codex-sdk`。
 
 **1. 安装 codex CLI**（npm 全局包）：
 

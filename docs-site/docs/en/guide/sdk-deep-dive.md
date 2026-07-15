@@ -6,7 +6,7 @@
 anet ships four runtimes today. Two are SDK adapters; the other two (`claude-code-cli` spawns the local `claude` binary; `grok-build-acp` spawns the local `grok` ACP server) follow the spawn-subprocess pattern and are out of scope for this SDK-adapter comparison:
 
 - `claude-agent-sdk` — official `@anthropic-ai/claude-agent-sdk`, listed in [`@sleep2agi/agent-node`'s regular `dependencies`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json) (not baked into the dist — the build flag is `--external` — but npm resolves it as a sub-dependency at install time)
-- `codex-sdk` — official `@openai/codex-sdk`, listed as an **optional peerDependency** (npm 7+ pulls it in by default; if it's missing, run `npm install -g @openai/codex-sdk` plus install the `@openai/codex` binary globally)
+- `codex-sdk` — official `@openai/codex-sdk`, listed as an **`optionalDependencies`** (npm 7+ pulls it in by default; if it's missing, run `npm install -g @openai/codex-sdk` plus install the `@openai/codex` binary globally)
 
 The two SDKs differ substantially across API entry, session semantics, tool registration, streaming, token accounting and error handling. The anet wrapper reconciles them with two branches (`processWithClaude()` / `processWithCodex()`) plus a single `think()` scheduler. This document walks through 11 dimensions side-by-side and ends with "how to plug in a new runtime (gemini-cli / qwen-code / …) by copying the pattern."
 
@@ -20,7 +20,7 @@ All `agent-node/src/cli.ts:NNN` line numbers below are calibrated against GitHub
 
 | Dimension | `claude-agent-sdk` | `codex-sdk` |
 |---|---|---|
-| **Package / version** | `@anthropic-ai/claude-agent-sdk` ^0.2.140 (regular dep — see [agent-node/package.json](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json) for the source of truth) | `@openai/codex-sdk` >=0.130.0 (optional peerDep — same source) |
+| **Package / version** | `@anthropic-ai/claude-agent-sdk` ^0.2.140 (regular dep — see [agent-node/package.json](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json) for the source of truth) | `@openai/codex-sdk` >=0.130.0 (`optionalDependencies` — same source) |
 | **API entry** | `query({ prompt, options })` → `AsyncGenerator<SDKMessage>` | `new Codex({...}).startThread(opts)` / `.resumeThread(id, opts)` → `Thread`; then `Thread.run()` / `Thread.runStreamed()` |
 | **Session semantics** | `SDKSystemMessage{subtype:'init'}.session_id` arrives in the first frame; resume via `Options.resume` or `Options.continue`; on-disk under `~/.claude/projects/<cwd>/<uuid>.jsonl` | `Thread.id` is only populated after the first turn starts; resume via `codex.resumeThread(id, opts)`; on-disk under `~/.codex/sessions/` |
 | **Tool registration** | `tools: string[]` for built-ins + `mcpServers: Record<string, McpServerConfig>` (stdio / http / sse); subagents definable | Toolset is **not detachable** — Codex CLI's full kit (Read/Write/Edit/Bash/Grep/Glob/WebSearch) is baked in; MCP is wired through Codex CLI's global `config.toml` |
@@ -76,7 +76,7 @@ On the next call to `processWithClaude()`, the module-level `claudeSessionId` is
 - `Codex({config: {model_auto_compact_token_limit: 200000}})` auto-compacts long-running threads; the wrapper doesn't need to truncate history manually.
 
 **Pitfalls**
-- **Requires the global `codex` binary**: the peerDependency is optional, so users must `npm install -g @openai/codex` to run; the wrapper raises an explicit `@openai/codex-sdk not installed` error when missing (cli.ts L684).
+- **Requires the global `codex` binary**: `@openai/codex` lives under `optionalDependencies` (not force-installed), so users must `npm install -g @openai/codex` to run; the wrapper raises an explicit `@openai/codex-sdk not installed` error when missing (cli.ts L684).
 - **PATH injection**: the wrapper does `which codex` first and prepends its directory to `process.env.PATH` at [cli.ts L670-677](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) to keep subprocess spawns reliable.
 - **Bad threads rebuild from scratch**: a single failed turn drops into a catch branch that re-`startThread()` and runs once more (cli.ts L741-750) — i.e. the original thread's history is **lost** on the failure path.
 - **Token cost is DIY**: `usage` only reports token counts, not USD. To enforce a budget you need a model→price table; anet currently has **no** `maxBudgetUsd` enforcement on the codex branch.
@@ -191,9 +191,9 @@ async function processWithGemini(task: string, from: string): Promise<string> {
 if (RUNTIME === "gemini") return await processWithGemini(task, from);
 ```
 
-### Step 4: peerDependency
+### Step 4: optionalDependency
 
-In `agent-node/package.json`, mark the new SDK as an optional peerDep under `peerDependenciesMeta` (follow the codex-sdk pattern) so a plain `npm install` doesn't drag it in.
+In `agent-node/package.json`, declare the new SDK under `optionalDependencies` (follow the `@openai/codex-sdk` pattern) so a plain `npm install` doesn't drag it in.
 
 ### Step 5: docs
 
