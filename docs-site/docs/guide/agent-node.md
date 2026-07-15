@@ -130,7 +130,7 @@ npx @sleep2agi/agent-node \
 
 | 属性 | 说明 |
 |------|------|
-| **前置** | `grok` CLI 已 auth + `XAI_API_KEY` env |
+| **前置** | `grok` CLI 已 auth + `GROK_CODE_XAI_API_KEY` env |
 | **特点** | xAI Grok Build 模型, ACP 协议跨 agent 协作 |
 | **工具** | Grok ACP 内置, 不接受 `--tools` 自定义 |
 

@@ -113,7 +113,7 @@ anet passwd                       # 交互式：输旧密码 → 输新密码 �
 **Hub 主机的 `~/.anet/server/admin-utok.json`**（边界 case）
 - bootstrap 时写的 admin `utok_` 也被一并 revoke
 - 该文件**内容不会自动同步**为新 utok_
-- 如果你之后用 `anet hub admin reset-user <other>` 这种本机命令读 admin-utok.json → **会拿 401**
+- 如果你之后用 `anet hub admin reset-user --username <other>` 这种本机命令读 admin-utok.json → **会拿 401**
 - 当前的兜底：手动跑 `anet login --username admin --password <新密码>`，刷新 `~/.anet/config.json`；admin-utok.json 是 bootstrap 一次性凭证，长期使用以 config.json 为准。**v0.9.x / v0.10.x 整条 stable 线都未触碰**（每个 release 的具体改动见 [changelog](/changelog)），完整修复（passwd 后自动 refresh `admin-utok.json`）排到 v0.11+ / 未排期。
 
 **审计日志**
@@ -122,7 +122,7 @@ anet passwd                       # 交互式：输旧密码 → 输新密码 �
 
 **忘记旧密码怎么办？**
 - 不能用 `anet passwd`（要求输旧密码）
-- 在 Hub 主机跑 `anet hub admin reset-user <username>` 强制重置（owner 本机权限即可，绕过 HTTP 校验，详见 [FAQ Q17b](/faq#_17b-忘密码怎么办-v0-8)）
+- 在 Hub 主机跑 `anet hub admin reset-user --username <username>` 强制重置（owner 本机权限即可，绕过 HTTP 校验，详见 [FAQ Q17b](/faq#_17b-忘密码怎么办-v0-8)）
 
 更深入：[Token 体系](/concepts/tokens) / [安全设计 — 密码安全](/concepts/security)
 :::

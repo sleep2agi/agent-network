@@ -112,7 +112,7 @@ Common question ([#17](https://github.com/sleep2agi/agent-network/issues/17)). F
 **Hub host's `~/.anet/server/admin-utok.json`** (edge case)
 - The admin `utok_` written there at bootstrap time is also revoked
 - The file **content is not auto-rotated** to the new utok_
-- Subsequent local commands (e.g. `anet hub admin reset-user <other>`) that read admin-utok.json will hit 401
+- Subsequent local commands (e.g. `anet hub admin reset-user --username <other>`) that read admin-utok.json will hit 401
 - Workaround for now: re-run `anet login --username admin --password <new-password>` to refresh `~/.anet/config.json`; admin-utok.json is a one-time bootstrap credential — `config.json` is the authoritative source going forward. **No v0.9.x / v0.10.x stable release addressed this** (per-release detail in the [changelog](/en/changelog)); a proper auto-sync fix (passwd-time refresh of `admin-utok.json`) is queued for v0.11+ / unscheduled.
 
 **Audit log**
@@ -121,7 +121,7 @@ Common question ([#17](https://github.com/sleep2agi/agent-network/issues/17)). F
 
 **Forgot the old password?**
 - Can't use `anet passwd` (requires old password)
-- On the Hub machine, run `anet hub admin reset-user <username>` to force-reset (local owner permission, bypasses the HTTP check; see [FAQ Q17b](/en/faq))
+- On the Hub machine, run `anet hub admin reset-user --username <username>` to force-reset (local owner permission, bypasses the HTTP check; see [FAQ Q17b](/en/faq))
 
 Deeper: [Token system](/en/concepts/tokens) / [Security design — Password security](/en/concepts/security)
 :::

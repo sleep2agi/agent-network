@@ -130,7 +130,7 @@ Integrates with [xAI Grok Build ACP (Agent Communication Protocol)](https://docs
 
 | Field | Description |
 |------|------|
-| **Prerequisites** | `grok` CLI already authenticated + `XAI_API_KEY` env |
+| **Prerequisites** | `grok` CLI already authenticated + `GROK_CODE_XAI_API_KEY` env |
 | **Strengths** | xAI Grok Build models, ACP-protocol cross-agent collaboration |
 | **Tools** | Bundled with Grok ACP, **does not accept `--tools`** |
 

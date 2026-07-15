@@ -318,7 +318,7 @@ anet node create <name> [options]
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `--runtime` | 不传则走交互式 **runtime-first wizard** ([#133](https://github.com/sleep2agi/agent-network/issues/133) v0.9.2 起): 4-way 选 `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`. **只有 `claude-agent-sdk` 才继续走 vendor picker + model 选择 + API Key**; 其他三个 runtime print 对应 CLI 的 auth login hint 然后跳过 vendor (`claude-code-cli` 提示 `claude auth login` / `codex-sdk` 提示 `codex auth login` / `grok-build-acp` 提示 `grok auth login` (该 runtime 另需 `XAI_API_KEY` env, 详见 [runtimes](/guide/runtimes))). 详细 wizard 顺序见 [上手指南 §5](/guide/getting-started#_5-创建-agent-节点). | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` / `grok-build-acp` |
+| `--runtime` | 不传则走交互式 **runtime-first wizard** ([#133](https://github.com/sleep2agi/agent-network/issues/133) v0.9.2 起): 4-way 选 `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`. **只有 `claude-agent-sdk` 才继续走 vendor picker + model 选择 + API Key**; 其他三个 runtime print 对应 CLI 的 auth login hint 然后跳过 vendor (`claude-code-cli` 提示 `claude auth login` / `codex-sdk` 提示 `codex auth login` / `grok-build-acp` 提示 `grok login` (该 runtime 另需 `GROK_CODE_XAI_API_KEY` env, 详见 [runtimes](/guide/runtimes))). 详细 wizard 顺序见 [上手指南 §5](/guide/getting-started#_5-创建-agent-节点). | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` / `grok-build-acp` |
 | `--model` | (按 runtime 默认) | 模型名称 |
 
 **示例**：
