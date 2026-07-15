@@ -522,7 +522,7 @@ agent-network/        # 仓库根 (github.com/sleep2agi/agent-network) —— mo
 ├── server/            # CommHub Server (Bun + SQLite) → 跑在服务器
 │   └── src/
 │       ├── index.ts          # HTTP 路由 + MCP + SSE
-│       ├── tools.ts          # 17 个 MCP Tools
+│       ├── tools.ts          # 约 40 个 MCP Tools
 │       ├── auth.ts           # 认证 + 权限 + 网络管理
 │       ├── db.ts             # 数据库 + 表定义
 │       ├── db-adapter.ts     # 数据库适配层（SQLite + 抽象接口）

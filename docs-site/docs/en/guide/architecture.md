@@ -522,7 +522,7 @@ agent-network/        # repo root (github.com/sleep2agi/agent-network) — monor
 ├── server/            # CommHub Server (Bun + SQLite) → runs on Server
 │   └── src/
 │       ├── index.ts          # HTTP routing + MCP + SSE
-│       ├── tools.ts          # 17 MCP Tools
+│       ├── tools.ts          # ~40 MCP Tools
 │       ├── auth.ts           # Auth + permissions + network management
 │       ├── db.ts             # Database + table definitions
 │       ├── db-adapter.ts     # DB adapter layer (SQLite + abstract interface)

@@ -17,7 +17,7 @@ Agent Network 就是为了解决这些问题而生的。
 
 ### 通信中枢（CommHub）
 
-所有 Agent 通过一个中心化的通信服务器（CommHub Server）收发消息。CommHub 基于 [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) 标准协议，提供 17 个 MCP Tools，支持 Streamable HTTP + SSE 实时推送。
+所有 Agent 通过一个中心化的通信服务器（CommHub Server）收发消息。CommHub 基于 [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) 标准协议，提供约 40 个 MCP Tools（17 个核心协作工具），支持 Streamable HTTP + SSE 实时推送。
 
 ```mermaid
 sequenceDiagram

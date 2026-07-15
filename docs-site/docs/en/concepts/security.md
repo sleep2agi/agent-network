@@ -438,7 +438,7 @@ Since [#101](https://github.com/sleep2agi/agent-network/issues/101) Option B (an
 - Network: `WebFetch` / `WebSearch`
 - Subtasks: `Task` / `NotebookEdit` / ...
 
-Plus the 17 MCP tools on the hub side (`commhub_send_task` / `commhub_reply` / ...).
+Plus the ~40 MCP tools on the hub side (`commhub_send_task` / `commhub_reply` / ...).
 
 **Why the default changed to preset**: [#101 root cause](https://github.com/sleep2agi/agent-network/issues/101) — when `config.json` had no `tools` field, agent-node set the SDK's `options.tools = undefined`, which the SDK reads as "zero built-in tools". Agents could only call MCP tools and hallucinated "network restricted" when asked for `WebFetch` / `Bash` / `Read`. Option B forces the fallback to the SDK `{ type: 'preset', preset: 'claude_code' }` sentinel — per the SDK type definitions this is the right way to say "give me the full Claude Code toolset".
 

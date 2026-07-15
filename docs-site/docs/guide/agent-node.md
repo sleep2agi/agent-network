@@ -478,7 +478,7 @@ Agent Node 只对 `task` 类型消息触发 AI 处理：
 - 网络：`WebFetch` / `WebSearch`
 - 子任务 / 笔记本：`Task` / `NotebookEdit` / ...
 
-加上 hub 端 17 个 MCP 工具（`commhub_send_task` / `commhub_reply` / ...）。
+加上 hub 端约 40 个 MCP 工具（`commhub_send_task` / `commhub_reply` / ...）。
 
 > **Root cause** ([#101](https://github.com/sleep2agi/agent-network/issues/101))：老版本 `config.json` 无 `tools` 字段时 agent-node 传 SDK `options.tools = undefined`，SDK 解读为「零内建工具」，agent 只能调 MCP 工具，被问 WebFetch / Bash / Read 时会幻觉「网络受限」。Option B 强制 fallback 到 SDK `{ type: 'preset', preset: 'claude_code' }` sentinel —— SDK 类型定义里这是「给我全套 Claude Code 工具」的标准表达（`sdk.d.ts:1229-1238`）。
 
