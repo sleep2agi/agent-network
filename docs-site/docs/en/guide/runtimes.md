@@ -19,12 +19,13 @@ Every Agent Node has a **Runtime** (engine kernel) that decides how the node cal
 - **Writing code / running commands** → `codex-sdk`
 - **Using xAI Grok Build** → `grok-build-acp` ([detailed runtime guide ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md))
 - **Human + agent sharing one Grok TUI (co-presence, attach to the live Grok session)** → `grok-build-cli` ([Grok Co-presence TUI · preview](/en/guide/grok-copresence))
+- **Use the public sst/opencode CLI as a multi-vendor front-end (unified session/auth)** → `opencode-cli` (needs the local `opencode` CLI + an Anthropic/OpenAI env key, [RFC-029](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md))
 - **Reach a vendor that's NOT in the built-in list** (DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / Qwen ...) → `claude-agent-sdk` + pick `custom` in the vendor submenu + `ANTHROPIC_BASE_URL`
 - **Mix and match (recommended)** → run all four on one Hub, pick the best engine per role
 :::
 
 ::: tip Wizard order at a glance
-The real wizard order: `node-name → runtime → (only if claude-agent-sdk) vendor → model → API key / auth`. The 4-way runtime menu **defaults the highlight to `claude-agent-sdk`** (the most complex path: vendor + key required); first-time users should manually pick `claude-code-cli`. Full step-by-step at [Getting Started §5](/en/guide/getting-started#_5-create-an-agent).
+The real wizard order: `node-name → runtime → (only if claude-agent-sdk) vendor → model → API key / auth`. The runtime menu **defaults the highlight to `claude-agent-sdk`** (the most complex path: vendor + key required); first-time users should manually pick `claude-code-cli`. Full step-by-step at [Getting Started §5](/en/guide/getting-started#_5-create-an-agent).
 :::
 
 ---
