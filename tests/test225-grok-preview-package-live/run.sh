@@ -2276,29 +2276,6 @@ run_real_gate() {
   jq -r '.result // ""' <<<"$first_row" >> /tmp/test225-hub-results
   jq -r '.result // ""' <<<"$second_row" >> /tmp/test225-hub-results
 
-  run_real_auth_evidence_gate resume_turn_pre_stop \
-    "$real_state_home" "$real_session" "$WORK" "$real_leader" "$real_socket" \
-    candidate_package /tmp/test225-candidate-extracted \
-    gate_report "$REPORT" \
-    first_start_output "$REAL_START_LOG" \
-    resume_start_output "$REAL_RESUME_LOG" \
-    first_tui_capture "$REAL_CAPTURE" \
-    resume_tui_capture "$REAL_RESUME_CAPTURE" \
-    hub_server_output "$SERVER_LOG" \
-    runtime_log_store "$real_log_dir" \
-    hub_task_snapshot /tmp/test225-real-hub-rows \
-    __grok_state__ "$GROK_STATE" \
-    pending_reply_store "$real_pending"
-  scan_fixed_file /tmp/test225-live-credentials \
-    "$REAL_START_LOG" "$REAL_RESUME_LOG" "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" \
-    "$real_log_dir" "$GROK_STATE" "$real_pending" "$REPORT" /tmp/test225-real-hub-rows \
-    || fail "Hub credential reached a real-node log, capture, state, pending row, or report"
-  scan_fixed_file /tmp/test225-markers \
-    "$REAL_START_LOG" "$REAL_RESUME_LOG" "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" \
-    "$real_log_dir" "$GROK_STATE" "$real_pending" "$REPORT" /tmp/test225-real-hub-rows \
-    || fail "synthetic credential reached a real-node log, capture, state, pending row, or report"
-  pass "optional authenticated real Grok package E2E: live render, reply, stop/resume, auth scan"
-
   real_resume_leader_identity=/tmp/test225-real-resume-leader.identity
   snapshot_unix_listener_owner "$real_leader" "$real_resume_leader_identity" \
     || fail "optional real resumed Leader identity was not uniquely observable"
@@ -2339,6 +2316,7 @@ run_real_gate() {
     "$REAL_START_LOG" "$REAL_RESUME_LOG" "$REAL_CAPTURE" "$REAL_RESUME_CAPTURE" \
     "$real_log_dir" "$GROK_STATE" "$real_pending" "$REPORT" /tmp/test225-real-hub-rows \
     || fail "synthetic credential reached a real-node evidence artifact during shutdown"
+  pass "optional authenticated real Grok package E2E: live render, reply, stop/resume, auth scan"
   [ "$(file_mode "$real_log_dir")" = 700 ] \
     || fail "real node durable log directory is not mode 0700"
   if find "$real_log_dir" -type f ! -perm 0600 -print -quit | grep -q .; then
