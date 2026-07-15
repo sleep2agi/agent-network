@@ -916,10 +916,10 @@ async function setupCommand() {
   }
 
   if (runtimeSelections.includes("codex-sdk")) {
-    console.log(`  ⚠ codex 需要登录: codex auth login`);
+    console.log(`  ⚠ codex 需要登录: codex login`);
   }
   if (runtimeSelections.includes("grok-build-acp")) {
-    console.log(`  ⚠ grok 需要安装并登录: grok auth login 或 x.ai CLI 认证缓存`);
+    console.log(`  ⚠ grok 需要安装并登录: grok login 或 x.ai CLI 认证缓存`);
   }
   if (runtimeSelections.includes("claude-code-cli")) {
     console.log(`  ⚠ claude 需要登录: claude auth login`);
@@ -1883,7 +1883,7 @@ const VENDORS: Vendor[] = [
     ],
   },
   {
-    key: "codex", label: "Codex / GPT (海外，需 codex auth login)",
+    key: "codex", label: "Codex / GPT (海外，需 codex login)",
     runtime: "codex-sdk", requiresAuth: "codex",
     models: [
       { id: "gpt-5.5", default: true },
@@ -2076,7 +2076,7 @@ This wizard creates one agent node for this project:
       choices: [
         { value: "claude-agent-sdk", name: "claude-agent-sdk — 任意 OpenAI/Anthropic-compat vendor (intern / MiniMax / Claude / GLM / ...)" },
         { value: "claude-code-cli",  name: "claude-code-cli  — Anthropic Claude (Max/Pro plan), 复用 `claude` CLI 登录态" },
-        { value: "codex-sdk",        name: "codex-sdk        — OpenAI Codex, 复用 `codex auth login` 登录态" },
+        { value: "codex-sdk",        name: "codex-sdk        — OpenAI Codex, 复用 `codex login` 登录态" },
         { value: "codex-app-server", name: "codex-app-server — OpenAI Codex TUI 桥 (RFC-030), 独立 `codex app-server`, 可接管已有 codex 会话" },
         { value: "grok-build-acp",   name: "grok-build-acp   — Grok Build ACP, 复用 `grok` CLI 登录态" },
         // RFC-029 — public sst/opencode CLI (multi-vendor front-end
@@ -2096,14 +2096,14 @@ This wizard creates one agent node for this project:
     console.log(`[anet] 请确保已安装 Claude Code CLI 并登录: claude auth login`);
   } else if (pickedRuntime === "codex-sdk") {
     opts.runtime = "codex-sdk";
-    console.log(`[anet] 请确保已执行: codex auth login`);
+    console.log(`[anet] 请确保已执行: codex login`);
   } else if (pickedRuntime === "codex-app-server") {
     opts.runtime = "codex-app-server";
-    console.log(`[anet] 请确保已执行: codex auth login （codex-app-server 需要 codex CLI）`);
+    console.log(`[anet] 请确保已执行: codex login （codex-app-server 需要 codex CLI）`);
     console.log(`[anet] 接管已有 codex 会话：在 config.json 里设 codexAppServerUrl + codexThreadId`);
   } else if (pickedRuntime === "grok-build-acp") {
     opts.runtime = "grok-build-acp";
-    console.log(`[anet] 请确保已安装并登录 Grok Build CLI: grok auth login`);
+    console.log(`[anet] 请确保已安装并登录 Grok Build CLI: grok login`);
   } else if (pickedRuntime === "opencode-cli") {
     opts.runtime = "opencode-cli";
     // RFC-029 PR③ — pin note + vendor preset selector. The preset
@@ -2154,7 +2154,7 @@ API key:
         if (token) opts._envs.push(`${sel.envKey}=${token}`);
       }
       if (sel.requiresAuth === "codex") {
-        console.log(`[anet] 请确保已执行: codex auth login`);
+        console.log(`[anet] 请确保已执行: codex login`);
       } else if (sel.requiresAuth === "claude") {
         console.log(`[anet] 请确保已安装 Claude Code CLI 并登录: claude auth login`);
       }
@@ -2304,7 +2304,7 @@ async function createCommand(idOverride?: string) {
         choices: [
           { value: "claude-agent-sdk", name: "claude-agent-sdk — 任意 OpenAI/Anthropic-compat vendor (intern / MiniMax / Claude / GLM / ...)" },
           { value: "claude-code-cli",  name: "claude-code-cli  — Anthropic Claude (Max/Pro plan), 复用 `claude` CLI 登录态" },
-          { value: "codex-sdk",        name: "codex-sdk        — OpenAI Codex, 复用 `codex auth login` 登录态" },
+          { value: "codex-sdk",        name: "codex-sdk        — OpenAI Codex, 复用 `codex login` 登录态" },
           { value: "grok-build-acp",   name: "grok-build-acp   — Grok Build ACP, 复用 `grok` CLI 登录态" },
         ],
       });
@@ -2326,9 +2326,9 @@ async function createCommand(idOverride?: string) {
   if (opts.runtime === "claude-code-cli") {
     console.log("[anet] 请确保已安装 Claude Code CLI 并登录: claude auth login");
   } else if (opts.runtime === "codex-sdk") {
-    console.log("[anet] 请确保已执行: codex auth login");
+    console.log("[anet] 请确保已执行: codex login");
   } else if (opts.runtime === "grok-build-acp") {
-    console.log("[anet] 请确保已安装并登录 Grok Build CLI: grok auth login");
+    console.log("[anet] 请确保已安装并登录 Grok Build CLI: grok login");
   } else {
     // Either claude-agent-sdk (explicit / picker-default) or undefined runtime
     // — fall through to vendor selection. credAlreadyProvided also skips since
@@ -2346,7 +2346,7 @@ async function createCommand(idOverride?: string) {
           if (key) opts._envs.push(`${sel.envKey}=${key}`);
         }
         if (sel.requiresAuth === "codex") {
-          console.log("[anet] 请确保已执行: codex auth login");
+          console.log("[anet] 请确保已执行: codex login");
         } else if (sel.requiresAuth === "claude") {
           console.log("[anet] 请确保已安装 Claude Code CLI 并登录: claude auth login");
         }
@@ -3829,6 +3829,14 @@ async function serverCommand() {
     const loginHint = (defaultAccountReady && defaultPass)
       ? `anet login --username ${defaultUser} --password ${defaultPass}`
       : `anet login`;
+    // hub start does NOT persist the hub URL to global config, so a fresh
+    // `anet login` on this machine fails with "No hub configured". Give the
+    // this-machine hint an explicit loopback --hub (reachable regardless of
+    // whether the hub bound 127.0.0.1 or 0.0.0.0).
+    const localHubUrl = `http://127.0.0.1:${port}`;
+    const loginHintLocal = (defaultAccountReady && defaultPass)
+      ? `anet login --hub ${localHubUrl} --username ${defaultUser} --password ${defaultPass}`
+      : `anet login --hub ${localHubUrl}`;
 
     if (havValidUser) {
       console.log(`  This machine — already logged in. Next:`);
@@ -3836,7 +3844,7 @@ async function serverCommand() {
       console.log(`    anet node start my-agent\n`);
     } else {
       console.log(`  This machine — login then create a node:`);
-      console.log(`    ${loginHint}`);
+      console.log(`    ${loginHintLocal}`);
       console.log(`    anet node create my-agent`);
       console.log(`    anet node start my-agent\n`);
     }
@@ -9512,7 +9520,7 @@ async function createBatchWizardCommand() {
     baseUrl = (await ask("ANTHROPIC_BASE_URL (空白=Anthropic default)", "")) || undefined;
     model = (await ask("Model id", "")) || undefined;
     presetLabel = `custom (${runtime}${model ? " + " + model : ""})`;
-    // Custom runtime auth inference: codex-sdk uses `codex auth login`, claude-
+    // Custom runtime auth inference: codex-sdk uses `codex login`, claude-
     // code-cli uses `claude` subscription; the SDK path needs an API key.
     if (runtime === "codex-sdk") requiresAuth = "codex";
     else if (runtime === "claude-code-cli") requiresAuth = "claude";
@@ -9543,8 +9551,8 @@ async function createBatchWizardCommand() {
   // prompt and print a hint that the user should run the vendor's own login.
   let apiKey: string | undefined;
   if (requiresAuth === "codex") {
-    console.log("  [anet] codex-sdk — will reuse `codex auth login` state (no API key needed)");
-    console.log("         If not logged in: run `codex auth login` in a separate terminal first.");
+    console.log("  [anet] codex-sdk — will reuse `codex login` state (no API key needed)");
+    console.log("         If not logged in: run `codex login` in a separate terminal first.");
     apiKey = undefined;
   } else if (requiresAuth === "claude") {
     console.log("  [anet] claude-code-cli — will reuse `claude` CLI / subscription (no API key needed)");
