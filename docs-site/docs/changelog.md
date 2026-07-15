@@ -5,9 +5,33 @@
 - **2026-05 起**：采用 v0.6 → v0.7 → v0.8 → v0.9 → v0.10 → v0.11 渐进发布，`v0.X.Y` 格式对齐 `commhub-server` 的 `0.X.Y` semver 风格
 - **2026-04 之前**：曾使用 `v1.0.0-preview.N` / `v2.1` 等过度承诺型版本号，已废弃
 - **当前 stable**：npm `latest` tag（按 [版本号体系](/guide/versioning) 查 npm latest 即为权威）；v0.8.1 是 Apache 2.0 OSS 首发版本
-- **当前 preview**：v0.11-preview2（见下方第一条；通过 npm `@preview` tag 发布；尚未 promote 到 `@latest`）
+- **当前 preview**：Grok 人机共存 TUI（`agent-network@2.3.0-preview.23` / `agent-node@2.5.0-preview.21`，见下方第一条；通过 npm `@preview` tag 发布；尚未 promote 到 `@latest`）
 - 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
 :::
+
+## Grok 人机共存 TUI（`grok-build-cli`）—— preview（2026-07-15）🟡 preview
+
+**版本同步**（npm `@preview` tag）：
+- `@sleep2agi/agent-network@2.3.0-preview.23`
+- `@sleep2agi/agent-node@2.5.0-preview.21`
+
+> 说明：`preview.2`–`preview.22` 为增量迭代，详见 git 历史；本条记录**人机共存功能落地**这一里程碑。
+
+### 🌟 Highlights
+
+#### Grok 人机共存：attach 到 agent-node 持有的真实 Grok TUI
+
+新 `grok-build-cli` runtime + `anet grok attach <alias>`：你和 CommHub 网络任务**共享同一段 Grok 会话**——网络任务实时渲染在终端、完成后把答复回传给发起者，你随时能一起看、一起打字。
+
+```bash
+anet node create grok-shared --runtime grok-build-cli
+anet node start grok-shared        # 等日志：attach with anet grok attach grok-shared
+anet grok attach grok-shared       # Terminal 2，真实 TTY、同机同用户同项目目录
+```
+
+限制：仅 Linux、需精确 `grok 0.2.93 (f00f96316d)`、固定 text-only `[todo_write]` profile（无 fs/shell/network/MCP 工具）、只连可信 Hub、**preview 非 latest/生产**。完整用法与 caveats 见 [Grok 人机共存 TUI](/guide/grok-copresence)。
+
+---
 
 ## v0.11-preview2 — **`/loop` 全 runtime 通 + 安全批 + RFC-024 hub config-apply foundation**（2026-06-28）🟡 preview
 

@@ -5,9 +5,33 @@ This log runs reverse-chronologically. **The version scheme was reshuffled once*
 - **From 2026-05 onward**: gradual v0.6 → v0.7 → v0.8 → v0.9 → v0.10 → v0.11 releases; the `v0.X.Y` format mirrors `commhub-server`'s `0.X.Y` semver style.
 - **Before 2026-04**: used `v1.0.0-preview.N` / `v2.1` style version numbers that overpromised. Deprecated.
 - **Current stable**: whatever npm's `latest` tag points to (see [Versioning](/en/guide/versioning) — npm `latest` is authoritative); v0.8.1 was the first Apache 2.0 OSS release.
-- **Current preview**: v0.11-preview2 (first entry below; shipped via npm `@preview` tag; not yet promoted to `@latest`).
+- **Current preview**: Grok Co-presence TUI (`agent-network@2.3.0-preview.23` / `agent-node@2.5.0-preview.21`, first entry below; shipped via npm `@preview` tag; not yet promoted to `@latest`).
 - Older entries kept for git-blame continuity — see v1.0.0-preview / v2.1 / v0.x sections below.
 :::
+
+## Grok Co-presence TUI (`grok-build-cli`) — preview (2026-07-15) 🟡 preview
+
+**Version sync** (npm `@preview` tag):
+- `@sleep2agi/agent-network@2.3.0-preview.23`
+- `@sleep2agi/agent-node@2.5.0-preview.21`
+
+> Note: `preview.2`–`preview.22` were incremental iterations (see git history); this entry records the **co-presence milestone**.
+
+### 🌟 Highlights
+
+#### Grok co-presence: attach to the real Grok TUI held by the agent-node
+
+New `grok-build-cli` runtime + `anet grok attach <alias>`: you and CommHub network tasks **share one Grok session** — network tasks render live in the terminal, reply back to the originator, and you can watch and type alongside.
+
+```bash
+anet node create grok-shared --runtime grok-build-cli
+anet node start grok-shared        # wait for: attach with anet grok attach grok-shared
+anet grok attach grok-shared       # Terminal 2, real TTY, same machine/user/project dir
+```
+
+Constraints: Linux only, exact `grok 0.2.93 (f00f96316d)`, fixed text-only `[todo_write]` profile (no fs/shell/network/MCP tools), trusted Hubs only, **preview (not latest/production)**. Full usage and caveats: [Grok Co-presence TUI](/en/guide/grok-copresence).
+
+---
 
 ## v0.11-preview2 — **`/loop` works for every runtime + security batch + RFC-024 hub config-apply foundation** (2026-06-28) 🟡 preview
 
