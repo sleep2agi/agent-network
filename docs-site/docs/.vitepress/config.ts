@@ -54,7 +54,7 @@ export default withMermaid(defineConfig({
             text: 'latest ▾',
             items: [
               { text: 'latest（稳定版 · npm latest）', link: '/' },
-              { text: 'preview（2.3.0-preview.1）', link: '/preview/' },
+              { text: 'preview', link: '/preview/' },
             ]
           },
         ],
@@ -151,7 +151,7 @@ export default withMermaid(defineConfig({
             text: 'latest ▾',
             items: [
               { text: 'latest (stable · npm latest)', link: '/en/' },
-              { text: 'preview (2.3.0-preview.1)', link: '/en/preview/' },
+              { text: 'preview', link: '/en/preview/' },
             ]
           },
         ],
