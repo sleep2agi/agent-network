@@ -151,7 +151,7 @@ docker compose up -d
 
 bridge 不接受全网消息——必须在 `access.json` 里把允许的 **人**（`open_id`）和 **群**（`chat_id`）显式列出。
 
-**Docker 路径**（推荐）：通过 `.env` 配置（待 compose 草稿补完整字段名），改完 `docker compose restart` 即生效。
+**Docker 路径**（推荐）：通过 `.env` 配置（`FEISHU_ALLOW_FROM` / `FEISHU_ALLOW_CHATS` 会在启动时写入 `access.json`），改完 `docker compose restart` 即生效。
 
 **手动 anet 路径**：用 CLI 增删：
 
@@ -218,7 +218,7 @@ bot 的 reply 会跟着原消息的 `root_id` 进**同一条线程**，不会污
 
 **默认 on**。关掉：
 
-> **配置位置 TBD**（等 compose 草稿合并后补 `.env` flag 名或 `flags.ackPlaceholder` 字段位置）
+> 在 `.env` 里设 `ACK_PLACEHOLDER=true` 开启（见 `docker/feishu/.env.example`）。
 
 ## 8. 进阶：手动 anet node 配置（非 Docker）
 

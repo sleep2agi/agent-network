@@ -218,7 +218,7 @@ The timeout notice (`TIMEOUT_NOTICE_TEXT`) follows the same path — also a fres
 
 **Default `true`**. To turn it off:
 
-> **Config location TBD** (will be added once the compose draft lands the `.env` flag name or `flags.ackPlaceholder` field location)
+> Enable it by setting `ACK_PLACEHOLDER=true` in `.env` (see `docker/feishu/.env.example`).
 
 ## 8. Advanced: manual `anet node` setup (non-Docker)
 
