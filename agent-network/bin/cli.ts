@@ -3830,13 +3830,12 @@ async function serverCommand() {
       ? `anet login --username ${defaultUser} --password ${defaultPass}`
       : `anet login`;
     // hub start does NOT persist the hub URL to global config, so a fresh
-    // `anet login` on this machine fails with "No hub configured". Give the
-    // this-machine hint an explicit loopback --hub (reachable regardless of
-    // whether the hub bound 127.0.0.1 or 0.0.0.0).
-    const localHubUrl = `http://127.0.0.1:${port}`;
+    // `anet login` fails with "No hub configured". Pin --hub to the local hub
+    // explicitly (hubUrl is already http://127.0.0.1:${port} — a loopback
+    // address, reachable regardless of whether the hub bound 127.0.0.1 or 0.0.0.0).
     const loginHintLocal = (defaultAccountReady && defaultPass)
-      ? `anet login --hub ${localHubUrl} --username ${defaultUser} --password ${defaultPass}`
-      : `anet login --hub ${localHubUrl}`;
+      ? `anet login --hub ${hubUrl} --username ${defaultUser} --password ${defaultPass}`
+      : `anet login --hub ${hubUrl}`;
 
     if (havValidUser) {
       console.log(`  This machine — already logged in. Next:`);
