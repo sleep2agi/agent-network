@@ -103,3 +103,4 @@ anet node start codex-node
 - **`spawn codex ENOENT`**：`codex` 没装或 npm 全局 bin 不在 PATH 上。先 `codex --version` 确认；PATH 修复参考 [节点 Runtime — claude-code-cli](./runtimes.md#claude-code-cli)。
 - **`codex auth login` 报未知命令**：换 `codex login`，或直接用 `OPENAI_API_KEY` 环境变量（PowerShell 用 `$env:OPENAI_API_KEY="..."`，Linux/WSL 用 `export`）。
 - **连本地 Hub**：WSL 连「Windows 宿主机上的本地 Hub」时别用 `localhost`，用宿主机在 WSL 里的可达地址。
+- **命令跑完后报 `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING) ... src\win\async.c`**：这是 Windows 上 Node/libuv 进程退出时的句柄清理竞态，**发生在命令实际工作完成之后**（比如 `anet login` 已经把 token 存好了才崩），功能其实已生效。多见于 conda 自带 / 旧版打包的 node；改用 [nodejs.org](https://nodejs.org) 的干净 **Node 22 LTS**（非 conda 的 node）通常可解。
