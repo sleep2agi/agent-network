@@ -20,7 +20,7 @@ graph TB
 
     subgraph "Data Security"
         SQL[SQL Injection Protection<br/>Parameterized queries]
-        PWD[Password Hashing<br/>SHA-256]
+        PWD[Password Hashing<br/>scrypt]
         TKHASH[Token Hash Storage]
     end
 
@@ -39,9 +39,9 @@ graph TB
 ::: info Actually shipped vs design goal (v0.10.11)
 The diagram above represents the **design goal**. Current v0.10.11 reality:
 
-- ✅ **Shipped**: Rate limiting / token auth (utok_/ntok_/atok_) / CORS / 4-tier RBAC / network isolation (server-enforced) / SQL-injection guards / SHA-256 password hashing / audit log / task event log
+- ✅ **Shipped**: Rate limiting / token auth (utok_/ntok_/atok_) / CORS / 4-tier RBAC / network isolation (server-enforced) / SQL-injection guards / salted scrypt password hashing / audit log / task event log
 - ⏳ **Not fully enforced**: Token Scope (`api_tokens.scope` column exists and [`auth.ts:73-137`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L73) `createToken` writes different scope values per token type, but [`auth.ts:143-165 resolveToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L143) **does not return `scope` in its result** — RBAC decisions don't consume the written scope; security report **R12** was not addressed in v0.9.x or any v0.10.x scope (Recovery & Observability / Direct Runtime + Observability Foundations / Hero A+D / subsequent UX-fix chain themes took priority), queued for v0.11+ / unscheduled — see [security audit](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md))
-- ⏳ **Planned upgrade**: SHA-256 → Argon2id password hashing (verify [`db.ts:503-505 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L503) still uses `Bun.CryptoHasher("sha256")`; security report **R9** was not addressed in v0.9.x or v0.10.x, queued for v0.11+ / unscheduled)
+- ✅ **Password hashing = salted scrypt** (shipped in Round-6 A1, closing security report **R9**): Node built-in `crypto.scryptSync`, per-password random salt — verify [`db.ts:1057 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L1057). Argon2id was deliberately not adopted (avoids a native dep); see "Password Security" below
 :::
 
 ## Authentication
@@ -151,13 +151,16 @@ flowchart TD
 
 ### Password Security
 
-- Passwords are stored as SHA-256 hashes with a static prefix salt `anet:` — verified at [`server/src/db.ts:427-429 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L427):
+- Passwords are stored with **salted scrypt** (Node built-in `crypto.scryptSync`, not SHA-256) — verified at [`server/src/db.ts:1057 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L1057):
   ```ts
-  export function hashPassword(password: string): string {
-    return new Bun.CryptoHasher("sha256").update(`anet:${password}`).digest("hex");
+  export function hashPassword(plain: string): string {
+    const N = getScryptN();               // default 14 → 2^14≈16384 iter (~50ms), tunable via COMMHUB_SCRYPT_N
+    const salt = randomBytes(16);         // fresh random salt per password
+    const hash = scryptSync(plain, salt, 64, { N: 1 << N, r: 8, p: 1, maxmem: 128 * 1024 * 1024 });
+    return `scrypt$${N}$${salt.toString("base64")}$${hash.toString("base64")}`;
   }
   ```
-  The `anet:` prefix defeats generic cross-project rainbow tables, but it is **not a per-user salt** — the same password produces the same hash across different accounts. Argon2id migration plan is in the ::: info below.
+  **Each password gets its own 16-byte random salt** (stored inside the hash string), so the same password yields a **different** hash across accounts; scrypt is memory-hard and GPU/ASIC-resistant, stronger than bcrypt. Legacy bare SHA-256 hashes are **lazily migrated** to scrypt on login (`verifyPassword` accepts both formats and rehashes in place on a legacy match). Argon2id was deliberately not used: scrypt is a Node built-in with zero new deps.
 
 - **Password strength** — verified at [`server/src/auth.ts:24-50 validatePasswordStrength`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L24):
   - User-chosen passwords (register / `anet passwd`): **≥ 8 chars** + rejected against [`password-dict.ts WEAK_PASSWORDS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts)
@@ -167,8 +170,8 @@ flowchart TD
 - Usernames support letters, numbers, underscores, and Chinese characters
 - Login failures don't reveal whether the username or password was wrong ([`auth.ts:99-100`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L99) intentionally merges both errors into the same message to prevent username enumeration)
 
-::: info Planned (v0.11+ / unscheduled)
-SHA-256 → Argon2id upgrade ([security report R9](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)) for stronger brute-force resistance and per-user salt (to prevent identical-hash collisions for the same password). **The v0.9.x / v0.10.x stable line did not touch password hashing** (per-release detail in the [changelog](/en/changelog)); the security uplift is queued for a dedicated v0.11+ security cycle. Token hashes (`hashToken` uses bare SHA-256 without a salt) do not need Argon2id — tokens are 128-bit random strings, so rainbow tables don't apply.
+::: info Password hashing = salted scrypt (shipped, Round-6 A1)
+Password hashing was upgraded from the earlier SHA-256 to **salted scrypt** (`scrypt$N$salt$hash` format, a fresh random salt per password), closing security report R9. **Argon2id was deliberately not chosen** — scrypt is a Node built-in (`crypto.scryptSync`) with zero native deps, and its memory-hard, GPU/ASIC-resistant properties are sufficient; legacy SHA-256 hashes are lazily migrated on login. Token hashes (`hashToken` uses bare SHA-256 without a salt) don't need any of this — tokens are 128-bit random strings, so rainbow tables don't apply.
 :::
 
 ## Authorization
@@ -364,7 +367,7 @@ chmod 600 ~/.commhub/commhub.db
 
 | Data | Storage method | Details |
 |------|---------|------|
-| Passwords | SHA-256 hash + static prefix salt `anet:` | [db.ts:427-429](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L427); not a per-user salt — Argon2id migration plan in the [::: info above](#password-security) |
+| Passwords | salted scrypt (`scrypt$N$salt$hash`) | [db.ts:1057](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L1057); fresh random salt per password, legacy SHA-256 lazily migrated on login |
 | Tokens | SHA-256 hash (no salt) | Tokens are `crypto.randomUUID()` 128-bit random values; rainbow tables do not apply |
 | API keys | Not stored (only `process.env` / `config.env`) | Agent-node reads `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` from env; the hub's DB does not store them |
 | Task content | Plaintext | The `tasks.content` column; on a shared hub, admins can read everything. `audit_log` does not contain task bodies |
@@ -512,5 +515,5 @@ Or persist it via `flags.maxBudgetUsd` in `config.json`.
 - [Docker deployment](/en/deploy/docker) — containerization best practices
 
 ::: warning Current state
-v0.10.11 stable password hashing is still SHA-256 (verify [`db.ts:503-505 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L503)). **Argon2id migration was not touched in any v0.9.x / v0.10.x stable release** (per-release detail in the [changelog](/en/changelog)). Security report **R9** is queued for v0.11+ / unscheduled — search [open issues: Argon2id](https://github.com/sleep2agi/agent-network/issues?q=is%3Aissue+Argon2id); if no tracking issue yet, please open one. Production environments must pair this with: strong passwords + TLS + firewall + regular backups.
+Password hashing = **salted scrypt** (shipped in Round-6 A1, verify [`db.ts:1057 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L1057)): a fresh random salt per password, with legacy SHA-256 hashes lazily migrated to scrypt on login; Argon2id was deliberately not used (avoids a native dep). This closes security report **R9**. Production environments must still pair this with: strong passwords + TLS + firewall + regular backups.
 :::

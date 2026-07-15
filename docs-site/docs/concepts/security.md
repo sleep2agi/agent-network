@@ -20,7 +20,7 @@ graph TB
 
     subgraph "数据安全"
         SQL[SQL 注入防护<br/>参数化查询]
-        PWD[密码哈希<br/>SHA-256]
+        PWD[密码哈希<br/>scrypt]
         TKHASH[Token 哈希存储]
     end
 
@@ -39,9 +39,9 @@ graph TB
 ::: info v0.10.11 实际启用 vs 设计目标
 上图反映**设计目标**，当前 v0.10.11 实际执行情况：
 
-- ✅ **已启用**：速率限制 / Token 认证（utok_/ntok_/atok_）/ CORS / RBAC 四级权限 / 网络隔离（Server 端强制） / SQL 注入防护 / 密码 SHA-256 / 审计日志 / 任务事件日志
+- ✅ **已启用**：速率限制 / Token 认证（utok_/ntok_/atok_）/ CORS / RBAC 四级权限 / 网络隔离（Server 端强制） / SQL 注入防护 / 密码 salted scrypt / 审计日志 / 任务事件日志
 - ⏳ **未完全启用**：Token Scope 字段（`api_tokens.scope` 列存在 + [`auth.ts:73-137`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L73) `createToken` 按 token 类型写不同 scope，但 [`auth.ts:143-165 resolveToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L143) 返回结构里**没 scope 字段** —— RBAC 决策不消费 scope 写入；security report **R12** v0.9.x / v0.10.x 都未动（Recovery & Observability / Direct Runtime + Observability Foundations / Hero A+D / 后续 UX 修复 chain 主题为先），排到 v0.11+ / 未排期；详见 [安全审计报告](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)）
-- ⏳ **计划升级**：密码哈希 SHA-256 → Argon2id（verify [`db.ts:503-505 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L503) 仍 `Bun.CryptoHasher("sha256")`，security report **R9** v0.9.x / v0.10.x 都未动，排到 v0.11+ / 未排期）
+- ✅ **密码哈希 = salted scrypt**（Round-6 A1 已上线，闭环 security report **R9**）：Node 内建 `crypto.scryptSync`，每密码独立随机 salt，verify [`db.ts:1057 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L1057)。刻意未选 Argon2id（避免原生依赖），详见下方「密码安全」
 :::
 
 ## 认证（Authentication）
@@ -151,13 +151,16 @@ flowchart TD
 
 ### 密码安全
 
-- 密码使用 SHA-256 哈希存储 + 静态 prefix salt `anet:` —— verify [`server/src/db.ts:427-429 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L427):
+- 密码用 **salted scrypt** 哈希存储（Node 内建 `crypto.scryptSync`，不是 SHA-256）—— verify [`server/src/db.ts:1057 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L1057):
   ```ts
-  export function hashPassword(password: string): string {
-    return new Bun.CryptoHasher("sha256").update(`anet:${password}`).digest("hex");
+  export function hashPassword(plain: string): string {
+    const N = getScryptN();               // 默认 14 → 2^14≈16384 iter (~50ms)，可用 COMMHUB_SCRYPT_N 调
+    const salt = randomBytes(16);         // 每个密码独立随机 salt
+    const hash = scryptSync(plain, salt, 64, { N: 1 << N, r: 8, p: 1, maxmem: 128 * 1024 * 1024 });
+    return `scrypt$${N}$${salt.toString("base64")}$${hash.toString("base64")}`;
   }
   ```
-  `anet:` prefix 让跨项目通用 rainbow table 失效，但**不是 per-user salt** —— 同密码在不同账户哈希值相同。Argon2id 迁移规划见下文 ::: info。
+  **每个密码独立 16 字节随机 salt**（一并存进哈希串），所以同一密码在不同账户哈希值**不同**；scrypt 内存硬、抗 GPU/ASIC，强于 bcrypt。旧的裸 SHA-256 哈希在登录时**惰性迁移**到 scrypt（`verifyPassword` 两种格式都认，命中旧格式且密码正确就地 rehash）。刻意不用 Argon2id：scrypt 用 Node 内建、零新增依赖。
 
 - **密码强度** —— verify [`server/src/auth.ts:24-50 validatePasswordStrength`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L24):
   - 用户自选密码（register / `anet passwd`）：**≥ 8 字符** + 拒绝 [`password-dict.ts WEAK_PASSWORDS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts) 字典
@@ -167,8 +170,8 @@ flowchart TD
 - 用户名支持字母、数字、下划线、中文
 - 登录失败不提示是用户名错还是密码错（[`auth.ts:99-100`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L99) 故意把两种错误合并成同一文案，避免 username enumeration）
 
-::: info 计划中（v0.11+ / 未排期）
-SHA-256 → Argon2id 升级（[security report R9](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)），提升抗暴力破解能力 + per-user salt 防止同密码哈希碰撞。**v0.9.x / v0.10.x 整条 stable 线都未触碰**（每个 release 的具体改动见 [changelog](/changelog)），留 v0.11+ 安全主题专项升级。Token 哈希（cli.ts hashToken 用纯 SHA-256 无 salt）不需要 Argon2id —— token 是 128-bit 随机字符串，rainbow table 不适用。
+::: info 密码哈希 = salted scrypt（已实现，Round-6 A1）
+密码哈希已从早期的 SHA-256 升级为 **salted scrypt**（`scrypt$N$salt$hash` 格式，每密码独立随机 salt），闭环 security report R9。**未选 Argon2id 是刻意的** —— scrypt 用 Node 内建 `crypto.scryptSync`、零原生依赖，内存硬 + 抗 GPU/ASIC 已够；旧 SHA-256 哈希登录时惰性迁移。Token 哈希（`hashToken` 用纯 SHA-256 无 salt）不需要这些 —— token 是 128-bit 随机字符串，rainbow table 不适用。
 :::
 
 ## 授权（Authorization）
@@ -364,7 +367,7 @@ chmod 600 ~/.commhub/commhub.db
 
 | 数据 | 存储方式 | 细节 |
 |------|---------|------|
-| 密码 | SHA-256 哈希 + 静态 prefix salt `anet:` | [db.ts:427-429](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L427)；非 per-user salt，Argon2id 迁移见 [::: info 计划](#密码安全) |
+| 密码 | salted scrypt（`scrypt$N$salt$hash`） | [db.ts:1057](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L1057)；每密码独立随机 salt，旧 SHA-256 哈希登录时惰性迁移 |
 | Token | SHA-256 哈希（无 salt） | token 是 `crypto.randomUUID()` 128-bit 随机值，rainbow table 不适用 |
 | API Key | 不存储（仅 process env / config.env） | agent-node 进程内 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` env，hub 端 db 不存 |
 | 任务内容 | 明文 | `tasks.content` 列；多用户共享 hub 时 admin 能看所有；`audit_log` 不含 task body |
@@ -512,5 +515,5 @@ npx @sleep2agi/agent-node --alias my-agent --max-budget 0.1
 - [Docker 部署](/deploy/docker) — 容器化最佳实践
 
 ::: warning 当前阶段
-v0.10.15 stable 密码哈希仍是 SHA-256（verify [`db.ts:503-505 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L503)）。**Argon2id 迁移 v0.9.x / v0.10.x 整条 stable 线都未动**（每个 release 的具体改动见 [changelog](/changelog)）；security report **R9** 排到 v0.11+ / 未排期 — 搜索 [开放 issue: Argon2id](https://github.com/sleep2agi/agent-network/issues?q=is%3Aissue+Argon2id)，如果没 tracking issue 欢迎开一个。生产环境必须配合：强密码 + TLS + 防火墙 + 定期备份。
+密码哈希 = **salted scrypt**（Round-6 A1 已上线，verify [`db.ts:1057 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L1057)）：每密码独立随机 salt，旧 SHA-256 哈希登录时惰性迁移到 scrypt；刻意未用 Argon2id（避免原生依赖）。security report **R9** 即由此闭环。生产环境仍须配合：强密码 + TLS + 防火墙 + 定期备份。
 :::
