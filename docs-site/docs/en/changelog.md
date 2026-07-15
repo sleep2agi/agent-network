@@ -601,7 +601,7 @@ Dashboard team design pass + 4/4 verify (commit `7de97ee` + screenshot evidence,
 v0.10.2 is a hotfix scope (no v0.11.0-series RFC ship); three RFC artifacts are preserved as v0.12.0 candidates:
 
 - [RFC-013 v5](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-013-rename-hot-reload.md) rename hot-reload (third-pass review complete)
-- [RFC-014 v2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-014-daemon-phase2-host-metrics.md) daemon Phase 2 host metrics (Hero A final 10% shipped in v0.10.2)
+- [RFC-014 v2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-014-daemon-phase2.md) daemon Phase 2 host metrics (Hero A final 10% shipped in v0.10.2)
 - [RFC-015 v2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-015-token-usage-telemetry.md) [#114](https://github.com/sleep2agi/agent-network/issues/114) token-usage UI (first-pass REVISION complete)
 
 ### Upgrade
