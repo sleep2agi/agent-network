@@ -340,7 +340,7 @@ Vincent catch：Dashboard 聊天里已经能上传/预览图片，但任务发�
 ### Rollout + Smoke
 
 - 本机 CommHub 已升级并重启到 `0.8.3` 源码状态。
-- Dashboard 已升级并重启，`dm.vansin.me:3000` 对应的图片发送链路走结构化附件。
+- Dashboard 已升级并重启，图片发送链路走结构化附件。
 - 27 个 host codex-sdk agent-node 进程已按新版代码滚动重启。
 - P0 smoke：向 `test-node` 发送 `/tmp/anet-image-smoke.png`，节点日志显示 `+1 image(s)` / `→ processing [codex] +1 image(s)`，回执 `图片通道OK`。
 
