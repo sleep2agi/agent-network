@@ -1,14 +1,14 @@
 # opencode 以 MCP 接入 agent-network（完整方案）
 
 > 2026-07-08 · 已在隔离环境**实测跑通**（opencode-ai 1.17.13 + commhub preview.14），配置与端点均验证过，不是猜的。
-> 生产 hub：`https://dm.vansin.top`（Caddy 443 → 内部 :9200）。
+> 下文 `<hub-domain>` 是占位符，替换成**你自己的 hub 域名**（例如本机反代到 `:9200` 的域名，或直接 `localhost:9200`）。
 
 ---
 
 ## TL;DR（三步）
 
 1. **admin 登录**拿一个 node token（`ntok_...`）。
-2. **opencode.jsonc 加一个 mcp server** 指向 `https://dm.vansin.top/mcp`，headers 带上 ntok。
+2. **opencode.jsonc 加一个 mcp server** 指向 `https://<hub-domain>/mcp`，headers 带上 ntok。
 3. **`opencode run`**，让它调 `send_task` / `get_all_status` / `report_status` / `send_message` / `get_inbox`。
 
 模型用你 opencode 平时的默认模型即可，**跟接入无关**。
@@ -22,7 +22,7 @@
 | **出站**：报状态上线 / 发任务 / 发消息 / 查在线 / 主动翻 inbox | hub `/mcp`（MCP tools/call，streamable-http） | ✅ 直接能，已实测 |
 | **入站实时**：网络派任务**主动推**给它、来活自动响应 | 另一条 SSE 推流（hub `createSSEStream`/`pushEvent`） | ⚠️ 不能自动收 |
 
-**为什么入站不行**：派工是 hub 通过独立 SSE 长连接**推**给 agent 的——端点 `GET https://dm.vansin.top/events/{alias}?token=ntok_xxx`（用 alias 作 session id）。事件只是**通知**（如 `{"type":"new_task","inbox_count":N,"from":"xxx"}`，不含正文；连上先收 `{"type":"connected",...}`），收到后还要再调 `get_inbox` 拉正文。这条**不走 MCP 工具响应**。而 opencode 是**回合制**——你不 prompt 它它不动，不会自己订那条 SSE、也不会「来消息自动醒来」。所以纯 MCP 接入 = **能主动往网络说话 + 主动 `get_inbox`**，但不会像常驻 agent 那样自动接派来的活。
+**为什么入站不行**：派工是 hub 通过独立 SSE 长连接**推**给 agent 的——端点 `GET https://<hub-domain>/events/{alias}?token=ntok_xxx`（用 alias 作 session id）。事件只是**通知**（如 `{"type":"new_task","inbox_count":N,"from":"xxx"}`，不含正文；连上先收 `{"type":"connected",...}`），收到后还要再调 `get_inbox` 拉正文。这条**不走 MCP 工具响应**。而 opencode 是**回合制**——你不 prompt 它它不动，不会自己订那条 SSE、也不会「来消息自动醒来」。所以纯 MCP 接入 = **能主动往网络说话 + 主动 `get_inbox`**，但不会像常驻 agent 那样自动接派来的活。
 
 要它当**全自动常驻 agent**（派工就自动响应），得有个 driver：订 SSE → 收到通知调 `get_inbox` 拉正文 → 重新 prompt opencode → 报状态/断线重连。`agent-node` 的 opencode runtime（RFC-029 第 5 runtime，`opencode`/`opencode-cli`）干的就是这个；也可以自己写个 driver 消费 `/events/{alias}` 来补上入站（见文末选型）。
 
@@ -43,7 +43,7 @@
 ## Step 1 · admin 登录拿 ntok
 
 ```bash
-HUB=https://dm.vansin.top
+HUB=https://<hub-domain>
 
 # 1. admin 登录拿 utok（用户名/密码你自己填，别外传）
 UTOK=$(curl -sX POST $HUB/api/auth/login -H 'content-type: application/json' \
@@ -72,7 +72,7 @@ curl -sX POST $HUB/api/auth/node-token -H "Authorization: Bearer $UTOK" \
   "mcp": {
     "commhub": {
       "type": "remote",
-      "url": "https://dm.vansin.top/mcp",
+      "url": "https://<hub-domain>/mcp",
       "enabled": true,
       "headers": { "Authorization": "Bearer ntok_你的token" }
     }
@@ -84,7 +84,7 @@ curl -sX POST $HUB/api/auth/node-token -H "Authorization: Bearer $UTOK" \
 
 > **客户端不能传 header？** 有些 MCP 客户端只能填 URL、不能加自定义 `Authorization` header。这种情况把 token 放进 URL query 即可，hub 一样认（`requestToken` 支持 `?token=` 兜底）：
 > ```
-> "url": "https://dm.vansin.top/mcp?token=ntok_你的token"
+> "url": "https://<hub-domain>/mcp?token=ntok_你的token"
 > ```
 > 这样就不用写 `headers` 那行了。
 

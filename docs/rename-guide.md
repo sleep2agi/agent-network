@@ -13,7 +13,7 @@
 节点正在运行，alias 改名：
 
 ```bash
-cd <项目 workdir>                # 例：cd /home/vansin/blueleap
+cd <项目 workdir>                # 例：cd ~/projects/my-app
 anet node rename B站马 B站负责人
 ```
 
@@ -33,7 +33,7 @@ tmux rename-session -t B站马 B站负责人
 
 ```bash
 tmux kill-session -t B站马
-cd /home/vansin/blueleap
+cd ~/projects/my-app
 anet node rename B站马 B站负责人
 tmux new-session -d -s B站负责人 "anet node start B站负责人"
 ```
