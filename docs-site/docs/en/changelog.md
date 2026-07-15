@@ -33,6 +33,21 @@ Constraints: Linux only, exact `grok 0.2.93 (f00f96316d)`, fixed text-only `[tod
 
 ---
 
+## opencode-cli — the 5th formal Runtime (RFC-029) (2026-07-09)
+
+New `opencode-cli` runtime: use the public [sst/opencode](https://github.com/sst/opencode) CLI as a **multi-vendor front-end** (unified session / auth abstraction) — anet's 5th formal runtime.
+
+### 🌟 Highlights
+
+- **`anet node create --runtime opencode-cli`**: the interactive `anet node create` wizard is now a **5-way picker** (opencode-cli added).
+- **Vendor preset**: after picking the runtime, choose an `anthropic` (reads `ANTHROPIC_API_KEY`) or `openai` (reads `OPENAI_API_KEY`) preset — the key is read from env, not prompted.
+- **Parent-mediated model**: same as `codex-sdk` — opencode runs as a pure LLM worker; the commhub SSE / inbox / reply roundtrip is handled by the agent-node parent process (no commhub MCP server on the opencode side).
+- **Version pin**: spawns the local `opencode` CLI at a fixed `opencode-ai` version pin (the first `anet node create` prompts `npm i -g opencode-ai@<pin>`); the free-model keyless path passed full e2e (2026-07-09).
+
+Usage and comparison: [Node Runtime — Five runtimes](/en/guide/runtimes); design: [RFC-029](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md).
+
+---
+
 ## v0.11-preview2 — **`/loop` works for every runtime + security batch + RFC-024 hub config-apply foundation** (2026-06-28) 🟡 preview
 
 **Version alignment** (npm `@preview` tag, three packages in sync):

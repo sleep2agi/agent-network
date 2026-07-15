@@ -33,6 +33,21 @@ anet grok attach grok-shared       # Terminal 2，真实 TTY、同机同用户�
 
 ---
 
+## opencode-cli —— 第 5 个正式 Runtime（RFC-029）（2026-07-09）
+
+新增 `opencode-cli` runtime：用公版 [sst/opencode](https://github.com/sst/opencode) CLI 当**多 vendor 前端**（统一 session / auth 抽象），成为 anet 的第 5 个正式 runtime。
+
+### 🌟 Highlights
+
+- **`anet node create --runtime opencode-cli`**：`anet node create` 交互式向导升级为 **5-way picker**（新增 opencode-cli 一项）。
+- **vendor preset**：选完 runtime 后选 `anthropic`（读 `ANTHROPIC_API_KEY`）或 `openai`（读 `OPENAI_API_KEY`）preset —— key 从 env 读、不 prompt。
+- **父进程中介模型**：与 `codex-sdk` 同款 —— opencode 作为纯 LLM 工作器跑任务，commhub 的 SSE / inbox / reply 由 agent-node 父进程承担（opencode 侧不挂 commhub MCP server）。
+- **版本 pin**：spawn 本机 `opencode` 命令，固定 `opencode-ai` 版本 pin（首次 `anet node create` 会提示 `npm i -g opencode-ai@<pin>`）；free-model keyless 全链路已 e2e 验通（2026-07-09）。
+
+用法与对照见 [节点 Runtime — 五种 Runtime 对比](/guide/runtimes)、设计见 [RFC-029](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md)。
+
+---
+
 ## v0.11-preview2 — **`/loop` 全 runtime 通 + 安全批 + RFC-024 hub config-apply foundation**（2026-06-28）🟡 preview
 
 **版本同步**（npm `@preview` tag, 三包齐发）：
