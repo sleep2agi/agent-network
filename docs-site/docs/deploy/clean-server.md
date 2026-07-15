@@ -174,7 +174,7 @@ anet node create my-bot
 | `claude-agent-sdk` | ⭐⭐ | 程序化用 Anthropic 兼容 API（MiniMax / 书生 / 小米 MiMo 等国产模型走这里） | **弹 vendor 子菜单** → 选 vendor → 选 model → 填 API Key | API Key |
 | `codex-sdk` | ⭐⭐⭐ | 写代码 / 跑命令，用 OpenAI Codex | 跳过 vendor, 走 codex 登录态 | agent-node + codex CLI + `codex auth login` |
 | `grok-build-acp` | ⭐⭐⭐ | 用 xAI Grok Build 跑任务 | 跳过 vendor, 走 grok 登录态 + `GROK_CODE_XAI_API_KEY` | grok CLI + `grok auth login` + `GROK_CODE_XAI_API_KEY` |
-| `opencode-cli` | ⭐⭐⭐ | 用公版 sst/opencode CLI 当多 vendor 前端 | 选 vendor preset (anthropic / openai), key 从 env 读 | `opencode` CLI + Anthropic/OpenAI env key |
+| `opencode-cli` **(preview)** | ⭐⭐⭐ | 用公版 sst/opencode CLI 当多 vendor 前端（**仅 preview 渠道，latest 未含**） | 选 vendor preset (anthropic / openai), key 从 env 读 | `opencode` CLI + Anthropic/OpenAI env key |
 
 ::: warning runtime 默认项注意
 向导**默认高亮第一项**（当前是 `claude-agent-sdk`），新手一路按 Enter 会落到这条要配 vendor + API Key 的路径上。**建议手动选 `claude-code-cli`** 入门最快（[#237 坑 3](https://github.com/sleep2agi/agent-network/issues/237) 已知 UX 痛点，将来 wizard 默认会调整）。

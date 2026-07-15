@@ -155,7 +155,9 @@ npx @sleep2agi/agent-node \
 :::
 :::
 
-### opencode-cli
+### opencode-cli（preview）
+
+> ⚠️ **仅 preview 渠道**：npm latest 尚未包含，装 latest 的 `anet node create` 选单里没有它（见 [runtimes 表](/guide/runtimes)）。RFC-029 稳定后进 latest。
 
 基于 [公版 sst/opencode](https://github.com/sst/opencode) CLI 接入 (RFC-029)。opencode 是多 vendor 前端 (统一 UI + session + auth 抽象), anet 通过 `opencode acp` (stdio JSON-RPC) 常驻子进程做 think()。
 
