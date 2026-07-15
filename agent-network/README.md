@@ -91,7 +91,7 @@ http://localhost:3000
 ### 3. Log In, Create A Node, Start It
 
 ```bash
-anet login --username admin --password anethub
+anet login --hub http://127.0.0.1:9200 --username admin --password anethub
 anet node create my-bot
 anet node start my-bot
 ```

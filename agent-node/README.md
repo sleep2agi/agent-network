@@ -23,7 +23,7 @@ npm install -g @sleep2agi/agent-node
 npm install -g @sleep2agi/agent-network
 anet hub start                      # local hub (terminal 1)
 anet hub dashboard                  # web UI (terminal 2)
-anet login --username admin --password anethub
+anet login --hub http://127.0.0.1:9200 --username admin --password anethub
 anet node create my-bot             # two-step picker: runtime, then provider
 anet node start my-bot              # → SSE connected
 ```
