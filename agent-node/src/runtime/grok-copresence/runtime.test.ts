@@ -17,7 +17,7 @@ import {
 import { PassThrough } from "stream";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { join, resolve } from "path";
 import { describe, expect, test } from "bun:test";
 import { connectGrokAttach } from "../../../../agent-network/src/grok-attach-client";
 import {
@@ -1096,6 +1096,48 @@ describe("Grok copresence runtime integration", () => {
     }
   }, 15_000);
 
+  test("excludes a different runtime from the same canonical project for the full TUI lifetime", async () => {
+    const ownerFixture = new RuntimeFixture();
+    const contenderFixture = new RuntimeFixture(ownerFixture.cwd);
+    let owner: GrokCopresenceRuntimeSession | undefined;
+    let contender: GrokCopresenceRuntimeSession | undefined;
+    let afterRelease: GrokCopresenceRuntimeSession | undefined;
+    try {
+      owner = await ownerFixture.open();
+      const placeholders = [".grok", ".claude", ".cursor", ".mcp.json", ".envrc"]
+        .map((name) => join(ownerFixture.cwd, name));
+      for (const placeholder of placeholders) {
+        writeFileSync(placeholder, "", { mode: 0o444 });
+        chmodSync(placeholder, 0o444);
+      }
+
+      let contenderError: unknown;
+      try {
+        contender = await contenderFixture.open(SESSION_2);
+      } catch (error) {
+        contenderError = error;
+      }
+      expect(contenderError instanceof Error ? contenderError.message : String(contenderError))
+        .toContain("project is busy");
+      expect(contender).toBeUndefined();
+      expect(contenderFixture.spawnedArgs).toHaveLength(0);
+      for (const placeholder of placeholders) expect(existsSync(placeholder), placeholder).toBe(true);
+
+      await owner.close();
+      owner = undefined;
+      for (const placeholder of placeholders) expect(existsSync(placeholder), placeholder).toBe(false);
+
+      afterRelease = await contenderFixture.open(SESSION_2);
+      expect(contenderFixture.spawnedArgs).toHaveLength(1);
+    } finally {
+      await afterRelease?.close();
+      await contender?.close();
+      await owner?.close();
+      await contenderFixture.close();
+      await ownerFixture.close();
+    }
+  }, 12_000);
+
   test("contains an exited recovery generation before reusing its PID", async () => {
     const fixture = new RuntimeFixture();
     fixture.reconnectAttempts = 2;
@@ -1789,7 +1831,7 @@ function seedPostStopFootprint(fixture: RuntimeFixture): {
 
 class RuntimeFixture {
   readonly root = mkdtempSync(join(tmpdir(), "grok-copres-runtime-"));
-  readonly cwd = join(this.root, "work");
+  readonly cwd: string;
   readonly grokHome = join(this.root, "grok-home");
   readonly authPath = join(this.grokHome, "auth.json");
   readonly leaderSocket = join(this.root, "leader.sock");
@@ -1824,8 +1866,10 @@ class RuntimeFixture {
   private recoverySpawnRelease: (() => void) | null = null;
   private ptys: FakePty[] = [];
 
-  constructor() {
+  constructor(sharedCwd?: string) {
+    this.cwd = sharedCwd ? resolve(sharedCwd) : join(this.root, "work");
     mkdirSync(this.cwd, { recursive: true, mode: 0o700 });
+    mkdirSync(join(this.cwd, ".anet"), { recursive: true, mode: 0o700 });
     mkdirSync(this.grokHome, { recursive: true, mode: 0o700 });
     writeFileSync(
       join(this.grokHome, "anet-copresence-preview.md"),
@@ -1936,8 +1980,8 @@ class RuntimeFixture {
     };
   }
 
-  async open(): Promise<GrokCopresenceRuntimeSession> {
-    return openGrokCopresenceRuntime(this.options());
+  async open(sessionId = SESSION): Promise<GrokCopresenceRuntimeSession> {
+    return openGrokCopresenceRuntime(this.options(sessionId));
   }
 
   private readonly spawn: GrokPtySpawn = async (_binary, args, options) => {
@@ -1948,13 +1992,15 @@ class RuntimeFixture {
     this.placeholderPresentAtSpawn.push(existsSync(sandboxPlaceholder));
     this.spawnedArgs.push([...args]);
     this.spawnedEnvs.push({ ...options.env });
+    const sessionFlagIndex = Math.max(args.indexOf("--session-id"), args.indexOf("--resume"));
+    const spawnedSessionId = sessionFlagIndex >= 0 ? args[sessionFlagIndex + 1] : SESSION;
     const pty = new FakePty(
       tuiProcessId,
       _binary,
       options.cwd,
       options.env,
       this.leaderSocket,
-      grokSessionDirectory(this.grokHome, this.cwd, SESSION),
+      grokSessionDirectory(this.grokHome, this.cwd, spawnedSessionId),
       this.writes,
       this.spawnEvents,
       this.spawnRawEvents,
