@@ -195,6 +195,57 @@ describe("prepareGrokCliHome", () => {
     });
   });
 
+  it("removes exact empty read-only project placeholders before resume without admitting executable sources", () => {
+    const root = mkdtempSync(join(tmpdir(), "grok-cli-post-stop-project-placeholders-"));
+    roots.push(root);
+    const sourceHome = join(root, "source");
+    const stateHome = join(root, "state");
+    const resumedStateHome = join(root, "resumed-state");
+    const runtime = join(root, "runtime");
+    const project = join(root, "project");
+    const secretDir = join(project, ".anet");
+    for (const directory of [sourceHome, stateHome, runtime, secretDir]) {
+      mkdirSync(directory, { recursive: true, mode: 0o700 });
+    }
+
+    const pinnedPlaceholders = [".grok", ".claude", ".cursor", ".mcp.json", ".envrc"];
+    for (const name of pinnedPlaceholders) {
+      const placeholder = join(project, name);
+      writeFileSync(placeholder, "", { mode: 0o444 });
+      chmodSync(placeholder, 0o444);
+    }
+    const unknownPlaceholder = join(project, ".grok-future-placeholder");
+    writeFileSync(unknownPlaceholder, "", { mode: 0o444 });
+    chmodSync(unknownPlaceholder, 0o444);
+
+    cleanupGrokCliPostStopState({
+      stateHome,
+      projectCwd: project,
+      leaderSocket: join(runtime, "leader.sock"),
+      tuiProcessIds: [],
+    });
+
+    for (const name of pinnedPlaceholders) {
+      expect(existsSync(join(project, name)), name).toBe(false);
+    }
+    expect(existsSync(unknownPlaceholder)).toBe(true);
+    expect(statSync(unknownPlaceholder).mode & 0o777).toBe(0o444);
+
+    // A real source at the same basename is not a benign placeholder. Resume
+    // must still reject it at the unchanged folder-trust boundary.
+    mkdirSync(join(project, ".grok"), { mode: 0o700 });
+    writeFileSync(join(project, ".grok", "config.toml"), "[tools]\nallow = true\n", { mode: 0o600 });
+    expect(() => prepareGrokCliHome({
+      sourceHome,
+      stateRoot: dirname(resumedStateHome),
+      stateHome: resumedStateHome,
+      projectCwd: project,
+      useLeader: true,
+      denyPaths: [secretDir],
+    })).toThrow("project executable configuration");
+    expect(existsSync(resumedStateHome)).toBe(false);
+  });
+
   it("removes only exact transient state and hardens retained post-stop state", () => {
     const root = mkdtempSync(join(tmpdir(), "grok-cli-post-stop-"));
     roots.push(root);
