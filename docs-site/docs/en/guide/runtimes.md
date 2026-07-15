@@ -18,6 +18,7 @@ Every Agent Node has a **Runtime** (engine kernel) that decides how the node cal
 - **Writing copy / translation / analysis (programmatic) / using a domestic Chinese model** → `claude-agent-sdk` + pick the matching vendor in the wizard
 - **Writing code / running commands** → `codex-sdk`
 - **Using xAI Grok Build** → `grok-build-acp` ([detailed runtime guide ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md))
+- **Human + agent sharing one Grok TUI (co-presence, attach to the live Grok session)** → `grok-build-cli` ([Grok Co-presence TUI · preview](/en/guide/grok-copresence))
 - **Reach a vendor that's NOT in the built-in list** (DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / Qwen ...) → `claude-agent-sdk` + pick `custom` in the vendor submenu + `ANTHROPIC_BASE_URL`
 - **Mix and match (recommended)** → run all four on one Hub, pick the best engine per role
 :::
