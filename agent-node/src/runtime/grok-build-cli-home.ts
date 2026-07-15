@@ -724,16 +724,19 @@ export function cleanupGrokCliPostStopState(opts: CleanupGrokCliPostStopOptions)
     removeExactEmptyPostStopDirectory(directory);
   }
 
+  // Grok writes retained state with 0644/0755 even under the parent 0077
+  // umask. Preserve exact unknown entries for the scanner, but make every
+  // real retained file/directory owner-only before it is inspected. Complete
+  // this independently-owned containment domain before inspecting project
+  // placeholders: a fatal project counterexample must remain fatal without
+  // starving the mode-000 reclaim or retained-state hardening.
+  hardenPostStopTree(stateHome);
+  hardenExactPostStopFile(nativeLeaderLockPath(leaderSocket));
+
   // Pinned Grok creates empty read-deny placeholder files for these exact
   // project policy paths. Reclaim them only after every TUI/Leader writer has
   // stopped; the next prepare must still reject any real executable source.
   removeExactProjectSandboxPlaceholders(projectCwd);
-
-  // Grok writes retained state with 0644/0755 even under the parent 0077
-  // umask. Preserve exact unknown entries for the scanner, but make every
-  // real retained file/directory owner-only before it is inspected.
-  hardenPostStopTree(stateHome);
-  hardenExactPostStopFile(nativeLeaderLockPath(leaderSocket));
 }
 
 function ensureCredentialLink(sourceHome: string, stateHome: string, name: string) {
