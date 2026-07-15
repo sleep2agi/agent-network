@@ -12,6 +12,7 @@
 
 import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync, rmSync, cpSync } from "fs";
 import { join } from "path";
+import { fileURLToPath } from "url";
 import { homedir } from "os";
 import { spawn, execSync, execFileSync } from "child_process";
 import { createHash, randomBytes, randomUUID } from "crypto";
@@ -232,7 +233,7 @@ function loadServerConfig(): Record<string, any> {
 // overwrites on demand (called from launchAgent before grok-build-acp
 // spawn) so the file matches the currently-installed agent-network version.
 function findBundledNodeServerJs(): string | null {
-  const here = new URL(".", import.meta.url).pathname;
+  const here = fileURLToPath(new URL(".", import.meta.url));
   const candidates = [
     join(here, "..", "..", "dist", "src", "node-server.js"),  // installed npm package layout
     join(here, "..", "src", "node-server.js"),
@@ -589,8 +590,8 @@ interface Semver {
 function packageJsonPath() {
   // Try multiple paths: compiled dist/bin/cli.js → ../../package.json, source bin/cli.ts → ../package.json
   const candidates = [
-    join(new URL(".", import.meta.url).pathname, "..", "..", "package.json"),
-    join(new URL(".", import.meta.url).pathname, "..", "package.json"),
+    join(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "package.json"),
+    join(fileURLToPath(new URL(".", import.meta.url)), "..", "package.json"),
   ];
   for (const p of candidates) {
     try { if (existsSync(p)) return p; } catch {}
@@ -2622,7 +2623,7 @@ function ensureMcpJson(profile: Profile) {
   const anetDir = join(process.cwd(), ".anet");
   const serverTs = join(anetDir, "node-server.js");
   // 查找 node-server.ts 源文件——混淆后路径可能变，多个候选
-  const selfDir = typeof import.meta.url === "string" ? new URL(".", import.meta.url).pathname : __dirname || "";
+  const selfDir = typeof import.meta.url === "string" ? fileURLToPath(new URL(".", import.meta.url)) : __dirname || "";
   const argv1Dir = process.argv[1] ? join(process.argv[1], "..") : "";
   const candidates = [
     // dist/src/node-server.js（npm 包混淆后产物，优先）
