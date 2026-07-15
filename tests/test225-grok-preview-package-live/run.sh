@@ -118,6 +118,16 @@ log() { printf '%s\n' "$*" | tee -a "$REPORT"; }
 fail() { log "FAIL: $*"; exit 1; }
 pass() { log "PASS: $*"; }
 
+PROJECT_SANDBOX_PLACEHOLDER_NAMES=(.grok .claude .cursor .mcp.json .envrc)
+assert_no_project_sandbox_placeholders() {
+  local name target
+  for name in "${PROJECT_SANDBOX_PLACEHOLDER_NAMES[@]}"; do
+    target="$WORK/$name"
+    [ ! -e "$target" ] && [ ! -L "$target" ] \
+      || fail "post-stop cleanup retained pinned project sandbox placeholder: $name"
+  done
+}
+
 SOURCE_COMMIT=${TEST225_SOURCE_COMMIT:-}
 [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] \
   || fail "SOURCE_COMMIT must bind this gate to one full lowercase Git SHA"
@@ -395,6 +405,7 @@ assert_fake_observations_exact() {
           and .requiredProtectedPathDeniesPresent == true
           and .agentProfileExact == true
           and .tuiFlagsExact == true
+          and .projectSandboxPlaceholdersExact == true
           and .parentEnvKeys == $expectedParent[0]
           and (.parentForbiddenKeys | length) == 0
           and .parentMarkerValueObserved == false
@@ -413,7 +424,7 @@ assert_fake_observations_exact() {
         elif .kind == "spawn" then $expectedPty[0] else $expected[0] end) as $want
       | {kind,missing:($want - .envKeys),extra:(.envKeys - $want),forbiddenKeys,markerValueObserved,
           ownerMarkerValid,socketEnvExact,terminalEnvExpected,parentPidMatches,selectedSandboxProfileMatched,sandboxEnvMatchesArgv,authPathSandboxDenied,
-          requiredDenyToolsPresent,requiredProtectedPathDeniesPresent,agentProfileExact,tuiFlagsExact,
+          requiredDenyToolsPresent,requiredProtectedPathDeniesPresent,agentProfileExact,tuiFlagsExact,projectSandboxPlaceholdersExact,
           parentMissing:($expectedParent[0] - (.parentEnvKeys // [])),
           parentExtra:((.parentEnvKeys // []) - $expectedParent[0]),
           parentForbiddenKeys,parentMarkerValueObserved})' \
@@ -1873,6 +1884,7 @@ NODE_PROCESS_PID=""
 assert_snapshot_gone "$FALLBACK_PID_SNAPSHOT"
 wait_no_fallback_runtime 300 \
   || fail "pre-global stop left agent-node, Grok, npm wrapper, or lock-holder processes"
+assert_no_project_sandbox_placeholders
 
 # Install the exact same unpublished tarball into an owner-only user-global
 # prefix only after the fallback path has succeeded. From here onward npm is
@@ -2080,6 +2092,8 @@ NODE_PROCESS_PID=""
 assert_snapshot_gone "$FALLBACK_PID_SNAPSHOT"
 wait_no_fallback_runtime 300 \
   || fail "global resume stop left agent-node, Grok, npm wrapper, or lock-holder processes"
+assert_no_project_sandbox_placeholders
+pass "installed-package stop/resume removes exact pinned project sandbox placeholders"
 
 run_keyless_gate() {
   local real_bin=${TEST225_REAL_GROK_BIN:-/host-grok/bin/grok-0.2.93}
@@ -2208,6 +2222,7 @@ run_real_gate() {
     || fail "optional real first stop left an agent-node or lock-holder process"
   [ "$(matching_process_count "$real_bin")" -eq 0 ] \
     || fail "optional real first stop left a Grok process"
+  assert_no_project_sandbox_placeholders
   refresh_real_auth_patterns "$HOME/.grok/auth.json"
   run_real_auth_evidence_gate first_turn_post_stop \
     "$real_state_home" "$real_session" "$WORK" "$real_leader" "$real_socket" \
@@ -2301,6 +2316,7 @@ run_real_gate() {
     || fail "optional real resume stop left an agent-node or lock-holder process"
   [ "$(matching_process_count "$real_bin")" -eq 0 ] \
     || fail "optional real resume stop left a Grok process"
+  assert_no_project_sandbox_placeholders
   refresh_real_auth_patterns "$HOME/.grok/auth.json"
   run_real_auth_evidence_gate final_shutdown \
     "$real_state_home" "$real_session" "$WORK" "$real_leader" "$real_socket" \

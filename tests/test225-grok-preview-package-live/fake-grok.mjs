@@ -287,6 +287,29 @@ if (!agentProfileExact || !tuiFlagsExact || !sandboxEnvMatchesArgv) {
   process.exit(69);
 }
 
+// Pinned Grok 0.2.93's native sandbox materializes each absent project deny
+// target as an empty, read-only regular file. Reproduce that production
+// footprint only after every main-TUI launch invariant has passed: probes and
+// the separately spawned Leader must never mutate the project directory.
+const projectSandboxPlaceholderNames = [".grok", ".claude", ".cursor", ".mcp.json", ".envrc"];
+for (const name of projectSandboxPlaceholderNames) {
+  const target = path.join(cwd, name);
+  const fd = fs.openSync(
+    target,
+    fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0),
+    0o444,
+  );
+  try {
+    fs.fchmodSync(fd, 0o444);
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile() || stat.nlink !== 1 || stat.size !== 0 || (stat.mode & 0o7777) !== 0o444) {
+      throw new Error(`fake grok: invalid project sandbox placeholder tuple for ${name}`);
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 const sessionDir = path.join(
   grokHome,
   "sessions",
@@ -318,6 +341,14 @@ recordEnvironment("spawn", {
   requiredProtectedPathDeniesPresent,
   agentProfileExact,
   tuiFlagsExact,
+  projectSandboxPlaceholdersExact: projectSandboxPlaceholderNames.every((name) => {
+    const stat = fs.lstatSync(path.join(cwd, name));
+    return !stat.isSymbolicLink()
+      && stat.isFile()
+      && stat.nlink === 1
+      && stat.size === 0
+      && (stat.mode & 0o7777) === 0o444;
+  }),
   ...readDerivedProcessEnvironment(expectedParentPid),
 });
 
