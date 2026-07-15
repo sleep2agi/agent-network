@@ -173,7 +173,7 @@ anet node create my-bot
 | **`claude-code-cli`**（推荐入门） | ⭐ | 已经在用 Claude Code，想白嫖订阅 | 跳过 vendor + model, 直接走本机 claude 登录态 | 本机已 `claude auth login` |
 | `claude-agent-sdk` | ⭐⭐ | 程序化用 Anthropic 兼容 API（MiniMax / 书生 / 小米 MiMo 等国产模型走这里） | **弹 vendor 子菜单** → 选 vendor → 选 model → 填 API Key | API Key |
 | `codex-sdk` | ⭐⭐⭐ | 写代码 / 跑命令，用 OpenAI Codex | 跳过 vendor, 走 codex 登录态 | agent-node + codex CLI + `codex login` |
-| `grok-build-acp` | ⭐⭐⭐ | 用 xAI Grok Build 跑任务 | 跳过 vendor, 走 grok 登录态 + `GROK_CODE_XAI_API_KEY` | grok CLI + `grok auth login` + `GROK_CODE_XAI_API_KEY` |
+| `grok-build-acp` | ⭐⭐⭐ | 用 xAI Grok Build 跑任务 | 跳过 vendor, 走 grok 登录态 + `GROK_CODE_XAI_API_KEY` | grok CLI + `grok login` + `GROK_CODE_XAI_API_KEY` |
 | `opencode-cli` **(preview)** | ⭐⭐⭐ | 用公版 sst/opencode CLI 当多 vendor 前端（**仅 preview 渠道，latest 未含**） | 选 vendor preset (anthropic / openai), key 从 env 读 | `opencode` CLI + Anthropic/OpenAI env key |
 
 ::: warning runtime 默认项注意

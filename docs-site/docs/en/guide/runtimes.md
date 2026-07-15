@@ -11,7 +11,7 @@ Every Agent Node has a **Runtime** (engine kernel) that decides how the node cal
 | `claude-code-cli` | spawn local `claude` CLI | "Just use Claude in the terminal" — **zero config if you already have the Claude subscription** | Claude Sonnet / Opus (subscription) | `claude auth login` done | Wizard ends right after pick, **skips vendor / model / API-key** |
 | `claude-agent-sdk` | `@anthropic-ai/claude-agent-sdk` (bundled with agent-node) | Programmatic access to any Anthropic-compatible API | Anthropic direct / MiniMax / InternLM / Xiaomi MiMo / DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / Qwen / ... ([full table](/en/guide/multi-model)) | API key | **The only runtime that pops the vendor submenu → pick vendor → pick model → enter API key** |
 | `codex-sdk` | `@openai/codex-sdk` (bundled with agent-node) | Writing code / running shell commands | OpenAI Codex (gpt-5 etc) | `codex login` done ([@openai/codex](https://www.npmjs.com/package/@openai/codex) CLI) | Wizard prints `codex login` hint, **skips vendor** |
-| `grok-build-acp` | spawn local `grok` ACP server | Run tasks / collaborate via xAI Grok Build | xAI Grok (grok-build series) | `grok auth login` done + `GROK_CODE_XAI_API_KEY` env (this runtime **also needs** the env — it's a runtime prereq, not a wizard output) | Wizard prints `grok auth login` hint, **skips vendor** |
+| `grok-build-acp` | spawn local `grok` ACP server | Run tasks / collaborate via xAI Grok Build | xAI Grok (grok-build series) | `grok login` done + `GROK_CODE_XAI_API_KEY` env (this runtime **also needs** the env — it's a runtime prereq, not a wizard output) | Wizard prints `grok login` hint, **skips vendor** |
 | `opencode-cli` (preview) | spawn local `opencode` CLI (public sst/opencode, fixed `opencode-ai` version pin) | Use the public opencode CLI as a multi-vendor front-end (unified session / auth abstraction, [RFC-029](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md)) | Multi-vendor: Anthropic native / OpenAI preset | Install `opencode` CLI (`npm i -g opencode-ai@<pin>`) + pick a vendor preset (Anthropic reads `ANTHROPIC_API_KEY` / OpenAI reads `OPENAI_API_KEY` env) | Wizard prompts to install opencode CLI → pick vendor preset (anthropic / openai); API key read from env, **not prompted** |
 
 > ⚠️ **`opencode-cli` is preview-channel only** (RFC-029, still iterating): npm **latest does not include it yet** — after installing latest, `anet node create` shows only the first 4 runtimes (`claude-code-cli` / `claude-agent-sdk` / `codex-sdk` / `grok-build-acp`). It lands in latest once stable.
@@ -416,7 +416,7 @@ Run agents via [xAI Grok Build](https://x.ai/grok)'s local CLI — the node spaw
 
 ### Prerequisites
 
-- `grok` CLI installed and `grok auth login` completed on the host
+- `grok` CLI installed and `grok login` completed on the host
 - `GROK_CODE_XAI_API_KEY` environment variable set
 - npm `latest` `agent-network` + `agent-node` (includes the grok `session/prompt` timeout fix; see [troubleshooting → grok-build-acp node task hangs](/en/troubleshooting#grok-build-acp-node-task-hangs-session-prompt-timed-out-after-300000ms-json-rpc-error-32603))
 
