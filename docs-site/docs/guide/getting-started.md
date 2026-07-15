@@ -57,7 +57,7 @@ anet hub dashboard
 第三个终端给 CLI 也登录一次（后续 `anet node ...` 命令带凭证）：
 
 ```bash
-anet login --username admin --password anethub
+anet login --hub http://127.0.0.1:9200 --username admin --password anethub
 ```
 
 `anet whoami` 确认身份。

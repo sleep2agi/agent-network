@@ -57,7 +57,7 @@ Open `http://localhost:3000` in your browser and log in with `admin / anethub`.
 In terminal #3, log the CLI in too (so subsequent `anet node ...` commands carry the credentials):
 
 ```bash
-anet login --username admin --password anethub
+anet login --hub http://127.0.0.1:9200 --username admin --password anethub
 ```
 
 `anet whoami` confirms your identity.
