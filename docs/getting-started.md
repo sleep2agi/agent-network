@@ -25,7 +25,7 @@ anet hub start
 anet hub dashboard
 
 # 4. In another terminal — login, create, and start an agent
-anet login --username admin --password anethub
+anet login --hub http://127.0.0.1:9200 --username admin --password anethub
 anet node create my-agent --runtime codex-sdk
 anet node start my-agent
 ```
@@ -84,7 +84,7 @@ anet node create my-agent --runtime codex-sdk --model <codex-model-id>
 
 | Runtime | AI Model | Needs |
 |---------|----------|-------|
-| `codex-sdk` | Codex | `codex auth login` |
+| `codex-sdk` | Codex | `codex login` |
 | `claude-agent-sdk` | Anthropic / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter (any Anthropic-compatible endpoint) | API key in env or via `anet node create` prompts |
 | `claude-code-cli` | Claude Code CLI | Claude Code installed + Claude Pro/Team/Max subscription (`claude auth login`) |
 

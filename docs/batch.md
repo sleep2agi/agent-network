@@ -55,7 +55,7 @@ R104-B 校准：`--preset` 现在接受的是 **vendor key**（不再是 model i
 | `minimax` | `claude-agent-sdk` | MiniMax-M2.7 | `https://api.minimaxi.com/anthropic` |
 | `mimo` | `claude-agent-sdk` | mimo-v2.5-pro（默认）/ v2.5 / v2-pro / v2-omni | `https://token-plan-cn.xiaomimimo.com/anthropic` |
 | `anthropic` | `claude-agent-sdk` | claude-sonnet-4-6（默认）/ claude-opus-4-6 / claude-haiku-4-5 | Anthropic 原生 |
-| `codex` | `codex-sdk` | gpt-5.4（默认）/ o3 | (需 `codex auth login`) |
+| `codex` | `codex-sdk` | gpt-5.4（默认）/ o3 | (需 `codex login`) |
 | `claude-code` | `claude-code-cli` | 用 Claude Code 订阅模型 | (需 Claude 订阅) |
 | `custom` | `claude-agent-sdk` | 自己填 model id | 自己填 baseUrl |
 
