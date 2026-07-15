@@ -122,7 +122,7 @@ anet passwd                       # 交互式：输旧密码 → 输新密码 �
 
 **忘记旧密码怎么办？**
 - 不能用 `anet passwd`（要求输旧密码）
-- 在 Hub 主机跑 `anet hub admin reset-user --username <username>` 强制重置（owner 本机权限即可，绕过 HTTP 校验，详见 [FAQ Q17b](/faq#_17b-忘密码怎么办-v0-8)）
+- 在 Hub 主机跑 `anet hub admin reset-user --username <username>` 强制重置（owner 本机权限即可，绕过 HTTP 校验，详见 [FAQ Q17b](/faq#_17b-忘密码怎么办)）
 
 更深入：[Token 体系](/concepts/tokens) / [安全设计 — 密码安全](/concepts/security)
 :::

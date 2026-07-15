@@ -87,7 +87,7 @@ anet goal cancel <alias> <goal-id>                          # 5d. Cancel
 - Starting in preview2, all 4 runtimes (`claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`) can run `/loop`; previously only `claude-code-cli` did
 - Interval units: `60s` / `5m` / `30m` / `2h` / `1d`, **minimum 60s**
 - Replace `<alias>` with your node alias (`anet node ls`); get `<goal-id>` from `anet goal list <alias>`
-- Full command reference + persistence + restart behavior: [Agent Node — Loop scheduler](/en/guide/agent-node#loop-scheduler)
+- Full command reference + persistence + restart behavior: [Agent Node — Loop scheduler](/en/guide/agent-node#recurring-tasks-the-loop-scheduler)
 
 ## preview2 highlights (with deep links)
 
@@ -103,7 +103,7 @@ anet node loop researcher "scan twitter for grok updates" --every 30m
 anet node loop daily-bot "post the morning summary" --every 2h
 ```
 
-📖 Full usage + trigger mechanics → [Agent Node — Loop scheduler](/en/guide/agent-node#loop-scheduler)
+📖 Full usage + trigger mechanics → [Agent Node — Loop scheduler](/en/guide/agent-node#recurring-tasks-the-loop-scheduler)
 
 ### 🔒 Security batch (4 items)
 

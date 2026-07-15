@@ -71,7 +71,7 @@ anet node loop researcher "scan twitter for grok updates" --every 30m
 anet node loop daily-bot "post the morning summary" --every 2h
 ```
 
-Full usage + trigger mechanics: [Agent Node — Loop scheduler](/en/guide/agent-node#loop-scheduler) (ZH + EN parity).
+Full usage + trigger mechanics: [Agent Node — Loop scheduler](/en/guide/agent-node#recurring-tasks-the-loop-scheduler) (ZH + EN parity).
 
 ### 🔒 Security batch
 
@@ -738,7 +738,7 @@ Release flow follows the [v0.9.0 split-brain lessons #126](https://github.com/sl
 ### 5 P0 fix chain
 
 **1. [#129](https://github.com/sleep2agi/agent-network/issues/129) Vendor API auth fast-fail + vendor-specific URL hint** ([`9840cf3`](https://github.com/sleep2agi/agent-network/commit/9840cf3))
-Background: when an intern key expired, agent-node previously silently waited 120s then printed a generic "claude-agent-sdk 调用超时" error. Now the `isAuthError(msg)` heuristic covers the Anthropic standard (401/403, `invalid_api_key`, `authentication_error`) plus intern's A02xx family (`user_token_expired`) plus generic OpenAI-compat 401 envelopes (`unauthorized` / `expired_token`); on hit it **short-circuits the retry loop** (retrying with the same bad key just wastes the backoff window) and prints a **vendor-specific URL hint** based on `ANTHROPIC_BASE_URL` host (intern → `chat.intern-ai.org.cn`, minimax → `platform.minimaxi.com`, anthropic → `console.anthropic.com`, otherwise generic). The clear error returns in **under 5 seconds** instead of the 15 minutes pre-v0.9.1 took. Full write-up: [troubleshooting → Vendor API auth failure](/en/troubleshooting#vendor-api-auth-failure-401-invalid_api_key-expired_token-intern-a02xx-user_token_expired).
+Background: when an intern key expired, agent-node previously silently waited 120s then printed a generic "claude-agent-sdk 调用超时" error. Now the `isAuthError(msg)` heuristic covers the Anthropic standard (401/403, `invalid_api_key`, `authentication_error`) plus intern's A02xx family (`user_token_expired`) plus generic OpenAI-compat 401 envelopes (`unauthorized` / `expired_token`); on hit it **short-circuits the retry loop** (retrying with the same bad key just wastes the backoff window) and prints a **vendor-specific URL hint** based on `ANTHROPIC_BASE_URL` host (intern → `chat.intern-ai.org.cn`, minimax → `platform.minimaxi.com`, anthropic → `console.anthropic.com`, otherwise generic). The clear error returns in **under 5 seconds** instead of the 15 minutes pre-v0.9.1 took. Full write-up: [troubleshooting → Vendor API auth failure](/en/troubleshooting#vendor-api-auth-failure-401-invalid-api-key-expired-token-intern-a02xx-user-token-expired).
 
 **2. [#132 Tier 1](https://github.com/sleep2agi/agent-network/issues/132) Fan-out timeout + retry-with-backoff** (same commit [`9840cf3`](https://github.com/sleep2agi/agent-network/commit/9840cf3))
 The [SDK concurrency investigation Phase 3](https://github.com/sleep2agi/agent-network/blob/main/docs/research/sdk-concurrency-investigation.md): in a 30-agent papercope fan-out demo, intern API per-request latency stretched to 17-37s (10-20× the 1.57s single-agent baseline), so the old 120s timeout fired mid-stream and 25 / 30 sub-agents silently failed. Two changes:
@@ -802,7 +802,7 @@ Pairs with #133's runtime-first wizard to keep the interactive wizard stable on 
 
 ### Known gaps (non-blocking)
 
-- The vendor adapter relies on a URL regex to detect the vendor — self-hosted lmdeploy / proxied intern endpoints / aggregator routes will not trigger the bias and need a manual `--prompt`. See [Vendor Adapters — Side effects](/en/concepts/vendor-adapters#side-effects-must-read).
+- The vendor adapter relies on a URL regex to detect the vendor — self-hosted lmdeploy / proxied intern endpoints / aggregator routes will not trigger the bias and need a manual `--prompt`. See [Vendor Adapters — Side effects](/en/concepts/vendor-adapters#⚠-side-effects-must-read).
 - The `--no-vendor-bias` flag is not yet implemented (P1 polish gap, planned alongside a `bias_active` info-display follow-up).
 
 ### Release process

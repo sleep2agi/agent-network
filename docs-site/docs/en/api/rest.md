@@ -1927,7 +1927,7 @@ Once connected the server periodically runs `tmux capture-pane` and pushes the p
 ## Legacy Endpoints (v0.6 era — frozen in OSS)
 
 ::: warning Not required since Apache 2.0
-Since v0.8 the project is Apache 2.0 open-source + self-hosted — there is no official paid license. The two endpoints below are leftovers from the v0.6 trial/activation flow. The hub still keeps a `licenses` table and an initial 14-day trial as a safety net, but new users and the main docs do not need to touch them. If you hit `license_expired`, see [troubleshooting](/en/troubleshooting#license-expired-legacy-behavior).
+Since v0.8 the project is Apache 2.0 open-source + self-hosted — there is no official paid license. The two endpoints below are leftovers from the v0.6 trial/activation flow. The hub still keeps a `licenses` table and an initial 14-day trial as a safety net, but new users and the main docs do not need to touch them. If you hit `license_expired`, see [troubleshooting](/en/troubleshooting#license-expired-license-expired-legacy-behavior).
 :::
 
 ### GET /api/license
@@ -1982,7 +1982,7 @@ curl -X POST http://localhost:9200/api/license/activate \
 | 400 | `key required` | Body missing `key` |
 | 400 | `invalid license key` | `key` does not start with `anet-` or is < 16 chars (**prefix-and-length check only, no real signature**) |
 
-> Effectively a self-service bypass kept around purely so that anyone hitting `license_expired` has an escape hatch in the OSS era. See [troubleshooting — license_expired](/en/troubleshooting#license-expired-legacy-behavior) and [CLI `anet activate`](/en/guide/cli#other).
+> Effectively a self-service bypass kept around purely so that anyone hitting `license_expired` has an escape hatch in the OSS era. See [troubleshooting — license_expired](/en/troubleshooting#license-expired-license-expired-legacy-behavior) and [CLI `anet activate`](/en/guide/cli#other).
 
 ---
 

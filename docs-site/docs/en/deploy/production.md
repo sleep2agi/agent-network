@@ -83,7 +83,7 @@ v0.7 / V2-era deployment scripts often passed `COMMHUB_ENABLE_TMUX=1` (when it w
 :::
 
 ::: tip Want to use the tmux control plane (for local dev / Dashboard debugging)
-Endpoint details: [REST API — Tmux control plane](/en/api/rest#tmux). All three endpoints (`GET /api/tmux/:name` / `POST /api/tmux/:name/send` / `WebSocket /ws/tmux/:name`) share the same auth gate (`COMMHUB_ENABLE_TMUX=1` + `COMMHUB_TMUX_ALLOWLIST` IP allowlist + `users.role='admin'`).
+Endpoint details: [REST API — Tmux control plane](/en/api/rest#tmux-debug-endpoints-opt-in). All three endpoints (`GET /api/tmux/:name` / `POST /api/tmux/:name/send` / `WebSocket /ws/tmux/:name`) share the same auth gate (`COMMHUB_ENABLE_TMUX=1` + `COMMHUB_TMUX_ALLOWLIST` IP allowlist + `users.role='admin'`).
 :::
 
 ### 6. Back up the SQLite database
