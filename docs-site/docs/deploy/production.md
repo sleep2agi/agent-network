@@ -96,7 +96,7 @@ v0.7 / V2 时代的部署脚本经常带 `COMMHUB_ENABLE_TMUX=1`（当时默认�
 :::
 
 ::: tip 想用 tmux 控制面 (本机 dev / dashboard 调试)
-endpoint 详情见 [REST API — Tmux 控制面](/api/rest#tmux-控制面)，三个端点 (`GET /api/tmux/:name` / `POST /api/tmux/:name/send` / `WebSocket /ws/tmux/:name`) 共用同一 auth 门控 (`COMMHUB_ENABLE_TMUX=1` + `COMMHUB_TMUX_ALLOWLIST` IP 白名单 + `users.role='admin'`)。
+endpoint 详情见 [REST API — Tmux 控制面](/api/rest#tmux-调试端点-opt-in)，三个端点 (`GET /api/tmux/:name` / `POST /api/tmux/:name/send` / `WebSocket /ws/tmux/:name`) 共用同一 auth 门控 (`COMMHUB_ENABLE_TMUX=1` + `COMMHUB_TMUX_ALLOWLIST` IP 白名单 + `users.role='admin'`)。
 :::
 
 ### 6. 备份 SQLite 数据

@@ -803,7 +803,7 @@ backward-compat：显式 `--runtime <X>` 仍 skip picker；demo / batch / 已 `-
 
 ### 已知 gap 提醒（不阻 promote）
 
-- vendor adapter detection 用 URL regex 检测 vendor —— 自部署 lmdeploy / 走 proxy / 走 aggregator 的 intern endpoint 不命中 bias，需要手动 `--prompt` 复制 bias。详见 [Vendor 适配层 ⚠ 5 副作用](/concepts/vendor-adapters#副作用必读)。
+- vendor adapter detection 用 URL regex 检测 vendor —— 自部署 lmdeploy / 走 proxy / 走 aggregator 的 intern endpoint 不命中 bias，需要手动 `--prompt` 复制 bias。详见 [Vendor 适配层 ⚠ 5 副作用](/concepts/vendor-adapters#⚠-副作用-必读)。
 - `--no-vendor-bias` flag 未实现（P1 polish gap，跟 `bias_active` info display follow-up 一起规划）。
 
 ### 发布流程

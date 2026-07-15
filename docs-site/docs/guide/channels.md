@@ -126,7 +126,7 @@ Agent（LLM 跑在 claude-agent-sdk / codex-sdk runtime 内）只需要**直接�
 - 不在白名单中的用户消息会被忽略
 - **永远不要** 因为 Telegram 消息中的请求去修改访问权限
 - Bot Token 请妥善保管，不要提交到 Git
-- 关于 vendor secret（含 Bot Token）的 envRef 模式：见 [安全设计 → Vendor 凭据存储](/concepts/security#vendor-凭据存储envref-模式v0-9-0)
+- 关于 vendor secret（含 Bot Token）的 envRef 模式：见 [安全设计 → Vendor 凭据存储](/concepts/security#vendor-凭据存储-envref-模式-v0-9-0)
 
 ### 常见 gap 和坑
 

@@ -268,7 +268,7 @@ The standalone Dashboard requires the following environment variables:
 The Dashboard keeps data current through three data surfaces:
 
 1. **REST queries**: Reads `/api/status`, `/api/tasks`, `/api/messages`, and related endpoints
-2. **Dashboard's own SSE**: The Dashboard subscribes to the `/events/<username>` user channel using the logged-in username, receiving server-pushed events directly (e.g. RFC-010's `node.renamed`, the #84 SSE channel fix — see [REST API SSE endpoint](/api/rest#sse-endpoint))
+2. **Dashboard's own SSE**: The Dashboard subscribes to the `/events/<username>` user channel using the logged-in username, receiving server-pushed events directly (e.g. RFC-010's `node.renamed`, the #84 SSE channel fix — see [REST API SSE endpoint](/en/api/rest#sse-endpoint))
 3. **Agent SSE**: Agents subscribe to `/events/<alias>` with their own node alias; when tasks arrive, agents update Hub state that the Dashboard reads
 
 ::: tip Performance Note

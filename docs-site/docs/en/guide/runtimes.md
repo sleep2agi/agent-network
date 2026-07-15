@@ -28,7 +28,7 @@ Every Agent Node has a **Runtime** (engine kernel) that decides how the node cal
 :::
 
 ::: tip Wizard order at a glance
-The real wizard order: `node-name → runtime → (only if claude-agent-sdk) vendor → model → API key / auth`. The 5-way runtime menu **defaults the highlight to `claude-agent-sdk`** (the most complex path: vendor + key required); first-time users should manually pick `claude-code-cli`. Full step-by-step at [Getting Started §5](/en/guide/getting-started#_5-create-an-agent).
+The real wizard order: `node-name → runtime → (only if claude-agent-sdk) vendor → model → API key / auth`. The 5-way runtime menu **defaults the highlight to `claude-agent-sdk`** (the most complex path: vendor + key required); first-time users should manually pick `claude-code-cli`. Full step-by-step at [Getting Started §5](/en/guide/getting-started#_4-create-and-start-a-node).
 :::
 
 ---

@@ -9,7 +9,7 @@ Agent Node 是 Agent Network 中的工作单元 -- 接收任务、调用 AI 模�
 - **用 xAI Grok Build** → `grok-build-acp` ([详细见 GitHub ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md))
 - **接国产 / 非内置 vendor** (DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / 通义千问 等) → `claude-agent-sdk` + 在 vendor 子菜单选 `自定义 (custom)` + `ANTHROPIC_BASE_URL`
 
-**5 runtime × npm 包 × wizard 行为 × 前置 auth 的权威对照**: 见 [runtimes — 五种 Runtime 对比 (canonical)](/guide/runtimes#五种-runtime-对比-canonical-表). `anet node create` wizard 完整顺序 (`节点名 → runtime → ... `): [上手指南 §5](/guide/getting-started#_5-创建-agent-节点).
+**5 runtime × npm 包 × wizard 行为 × 前置 auth 的权威对照**: 见 [runtimes — 五种 Runtime 对比 (canonical)](/guide/runtimes#五种-runtime-对比-canonical-表). `anet node create` wizard 完整顺序 (`节点名 → runtime → ... `): [上手指南 §5](/guide/getting-started#_4-创建并启动节点).
 :::
 
 ## 安装

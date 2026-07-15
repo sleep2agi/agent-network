@@ -144,7 +144,7 @@ Verify [`server/src/index.ts:386-402`](https://github.com/sleep2agi/agent-networ
 
 Implications:
 - The actual status flip can lag `expires_at` by up to ~5 minutes
-- **A task that's already `acked` or `running` is never auto-expired** — the agent has picked it up, so the patrol leaves it alone even past its TTL (that's why the state diagram has no `acked → expired` edge). To kill a stuck `running` task, use [`cancel_task`](/en/api/mcp-tools#cancel_task)
+- **A task that's already `acked` or `running` is never auto-expired** — the agent has picked it up, so the patrol leaves it alone even past its TTL (that's why the state diagram has no `acked → expired` edge). To kill a stuck `running` task, use [`cancel_task`](/en/api/mcp-tools#cancel-task)
 :::
 
 ## Retry Mechanism

@@ -598,7 +598,7 @@ export ANTHROPIC_AUTH_TOKEN='<新 key>'
 anet node stop <alias>
 anet node start <alias>
 
-# 4. 如果用 envRef 模式 (推荐, 见 /concepts/security#vendor-凭据存储envref-模式v0-9-0):
+# 4. 如果用 envRef 模式 (推荐, 见 /concepts/security#vendor-凭据存储-envref-模式-v0-9-0):
 #    config.json 不动 (它存的是 env var 名), 只需要把新值 export 到 process.env 再重启 agent
 ```
 

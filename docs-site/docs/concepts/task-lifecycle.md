@@ -144,7 +144,7 @@ verify [`server/src/index.ts:386-402`](https://github.com/sleep2agi/agent-networ
 
 含义：
 - 实际状态翻转最多比 `expires_at` 晚 ~5 分钟
-- **已经 `acked` 或 `running` 的任务不会被自动过期** —— agent 已经接手了，即使超过 TTL patrol 也不动它（所以状态机图里没有 `acked → expired` 边）。要终止一个卡住的 `running` 任务用 [`cancel_task`](/api/mcp-tools#cancel_task)
+- **已经 `acked` 或 `running` 的任务不会被自动过期** —— agent 已经接手了，即使超过 TTL patrol 也不动它（所以状态机图里没有 `acked → expired` 边）。要终止一个卡住的 `running` 任务用 [`cancel_task`](/api/mcp-tools#cancel-task)
 :::
 
 ## 重试机制

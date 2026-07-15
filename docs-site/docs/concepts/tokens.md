@@ -213,7 +213,7 @@ anet login                     # 重新登录拿新 utok_
 | 存储位置 | hub `api_tokens` 表（SHA-256 hash）+ 客户端 `~/.anet/config.json` 或 `~/.anet/server/admin-utok.json`（chmod 600）| agent node `config.json` env map（`envRef` 模式推荐 / plain string deprecated）|
 | Revoke 路径 | `anet token revoke <id>`（hub 端立即吊销）| 厂商各自后台撤销 + 节点 `anet node migrate-token-to-envref` 一键迁 |
 | 失效后行为 | hub 拒登录 / 401 | LLM 调用 401 / agent FATAL exit on unset envRef |
-| 文档 | 本页 | [Vendor 凭据存储（envRef 模式，v0.9.0+）](/concepts/security#vendor-凭据存储envref-模式v0-9-0)|
+| 文档 | 本页 | [Vendor 凭据存储（envRef 模式，v0.9.0+）](/concepts/security#vendor-凭据存储-envref-模式-v0-9-0)|
 
 > 跟人讨论时记得**显式说**「我说的是 hub token 还是 vendor token」—— 写 `utok_xxx` 还是 `sk-xxx` 前缀就清楚。
 

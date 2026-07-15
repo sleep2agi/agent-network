@@ -253,7 +253,7 @@ anet channel ls
 ```
 
 ::: tip 想加更多人？
-`anet channel add telegram <node> --allow <new-uid-list>` **会覆盖** allowlist，不是追加。要保留原来的人就把完整列表再传一遍（`--allow 11111,22222,33333`）。这是已知坑 ([guide/channels.md](/guide/channels#known-gaps-and-pitfalls))，未来会改 append。
+`anet channel add telegram <node> --allow <new-uid-list>` **会覆盖** allowlist，不是追加。要保留原来的人就把完整列表再传一遍（`--allow 11111,22222,33333`）。这是已知坑 ([guide/channels.md](/guide/channels#常见-gap-和坑))，未来会改 append。
 :::
 
 ## 7. 启动节点
