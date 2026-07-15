@@ -684,6 +684,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   private spawnEnv: NodeJS.ProcessEnv;
   private readonly controlledSpawnEnv: NodeJS.ProcessEnv;
   private ptyGeneration = 0;
+  private ownedAnyTuiGeneration = false;
   private readonly pendingTuiProcessIds = new Set<number>();
   private recoveryPromise: Promise<void> | null = null;
 
@@ -1013,6 +1014,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       exited: false,
     };
     this.pendingTuiProcessIds.add(pty.pid);
+    this.ownedAnyTuiGeneration = true;
     this.pty = pty;
     this.activeTui = tui;
     pty.onData((data) => {
@@ -1264,8 +1266,10 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     // enter close() through open()'s catch path. It never owned a TUI writer and
     // must not mutate another runtime's post-stop state. Only a PID registered
     // immediately after a successful PTY spawn proves this runtime owned a
-    // generation whose death can authorize cleanup.
-    if (this.pendingTuiProcessIds.size > 0) {
+    // generation whose death can authorize cleanup. Keep that proof latched
+    // even after a confirmed recovery boundary consumes its pending PID: final
+    // cleanup still owns the retained session/log footprint in that case.
+    if (this.ownedAnyTuiGeneration) {
       try {
         cleanupGrokCliPostStopState({
           stateHome: this.opts.grokHome,
