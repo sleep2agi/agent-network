@@ -1,6 +1,6 @@
 # MCP Tools 参考
 
-CommHub Server 提供 17 个 MCP Tools，通过 `POST /mcp`（Streamable HTTP）端点调用。
+CommHub Server 共注册约 40 个 MCP Tools；本页文档化其中 agent 日常协作最常用的 17 个核心工具（其余为节点管理、供应商配置等运维类工具）。全部通过 `POST /mcp`（Streamable HTTP）端点调用。
 
 ## 工具分类
 

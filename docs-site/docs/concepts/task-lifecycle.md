@@ -359,7 +359,7 @@ CREATE TABLE inbox (
 ## 下一步
 
 **实操**：
-- 发任务的 5 种方式：[CLI 命令](/guide/cli) 的 `anet task send` / `commhub_send_task` MCP 工具 / Dashboard ChatPanel / REST `/api/tasks` / SSE 推送
+- 发任务的 4 种方式：`commhub_send_task` MCP 工具 / Dashboard ChatPanel / REST `/api/tasks` / SSE 推送
 - 想看任务流：[Dashboard — Tasks 面板](/guide/dashboard#tasks-任务管理)
 - 重试 / 取消失败任务：Dashboard 直接点按钮
 

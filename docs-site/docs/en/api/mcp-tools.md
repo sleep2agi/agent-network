@@ -1,6 +1,6 @@
 # MCP Tools Reference
 
-CommHub Server provides 17 MCP Tools, called via the `POST /mcp` (Streamable HTTP) endpoint.
+CommHub Server registers ~40 MCP Tools in total; this page documents the 17 core tools agents use most for day-to-day collaboration (the rest are node-management, provider-config, and other ops tools). All are called via the `POST /mcp` (Streamable HTTP) endpoint.
 
 ## Tool Categories
 

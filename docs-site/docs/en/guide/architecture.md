@@ -170,7 +170,7 @@ The control layer (kill / restart / redeploy) is deferred to v0.11.0. Details: [
 
 ### MCP Tool Groups
 
-CommHub provides 17 MCP Tools in two groups:
+CommHub provides 17 core MCP Tools for agents, in two groups:
 
 **Agent-side tools (4)** -- agents report status and fetch tasks:
 

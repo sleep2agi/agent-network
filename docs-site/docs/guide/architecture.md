@@ -170,7 +170,7 @@ REST 层新增**单机 health + agent 列表**两个 endpoint，给 dashboard Se
 
 ### MCP 工具分组
 
-CommHub 提供 17 个 MCP Tools，分为两组：
+CommHub 为 agent 提供 17 个核心 MCP Tools，分为两组：
 
 **Agent 端工具（4 个）** -- Agent 上报状态、拉取任务：
 

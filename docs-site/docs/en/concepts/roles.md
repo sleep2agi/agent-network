@@ -45,7 +45,6 @@ Agent Network has 4 roles: `owner` / `admin` / `member` / `viewer`. **The role e
 | `/api/audit-log` — all rows | Only `users.role='admin'` (verified at [`server/src/index.ts:1086-1089`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1086)) | | | |
 | `/api/users` (list users) | Only `users.role='admin'` (same system-level gate) | | | |
 | `/api/server-logs` (debug console) | Only `users.role='admin'` | | | |
-| `/api/admin/wipe-db` (and similar) | Only `users.role='admin'` | | | |
 | `anet hub admin reset-user` (reset any user's password) | Local-only CLI command on the hub host, not role-gated (the hub owner just needs local shell access) | | | |
 
 > ※ `anet node start / stop / delete` are **pure local CLI operations** — they read/write the local `.anet/nodes/<alias>/` directory directly, and `startCommand` / `deleteCommand` have **no network-role / owner / per-creator check** whatsoever. Whoever has that node config on their machine can start/stop/delete it, regardless of their network role. The only network-role-gated lifecycle op is `anet node create` (it requests an `ntok_` from the hub, and `canWrite` blocks viewer).
