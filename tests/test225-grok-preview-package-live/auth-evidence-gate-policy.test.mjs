@@ -5,6 +5,7 @@ import {
   linkSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -124,6 +125,30 @@ test("preview remains fatal for boundary errors, extra errors, and every credent
   assert.throws(() => classifyAuthEvidenceGate("unknown", makeAuthEvidenceDiagnostic({
     phase: "first_turn_post_stop",
   })));
+});
+
+test("authenticated release containment scans each Grok generation only after stop", () => {
+  const harness = readFileSync(new URL("./run.sh", import.meta.url), "utf8");
+  const firstStop = harness.indexOf('stop_node_checked "$real_alias" real-first');
+  const firstPostStopScan = harness.indexOf("run_real_auth_evidence_gate first_turn_post_stop");
+  const resumedReply = harness.indexOf('wait_pane test225-real-resume-attach "$continuity_nonce"');
+  const resumedStop = harness.indexOf('stop_node_checked "$real_alias" real-resumed');
+  const finalPostStopScan = harness.indexOf("run_real_auth_evidence_gate final_shutdown");
+  const authenticatedPass = harness.indexOf(
+    'pass "optional authenticated real Grok package E2E: live render, reply, stop/resume, auth scan"',
+  );
+
+  assert.ok(firstStop >= 0);
+  assert.ok(firstPostStopScan > firstStop);
+  assert.ok(resumedReply > firstPostStopScan);
+  assert.ok(resumedStop > resumedReply);
+  assert.ok(finalPostStopScan > resumedStop);
+  assert.equal(
+    harness.includes("run_real_auth_evidence_gate resume_turn_pre_stop"),
+    false,
+    "the post-stop state classifier must not run while the resumed Grok writer is live",
+  );
+  assert.ok(authenticatedPass > finalPostStopScan);
 });
 
 test("raw state credential mutation changes preview structure warning to fatal", () => {
