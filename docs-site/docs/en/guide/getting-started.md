@@ -75,7 +75,7 @@ The wizard asks: runtime → (only for `claude-agent-sdk`) vendor → model → 
 ::: tip Easiest path for newcomers — pick `claude-code-cli` manually
 The wizard **defaults to highlighting `claude-agent-sdk`**; pressing Enter all the way lands you on the vendor + API-key path. If you've already done `claude auth login`, **manually picking `claude-code-cli`** is the zero-config fastest path.
 
-The 5-runtime comparison: [Runtime — Five runtimes comparison](/en/guide/runtimes#five-runtimes-canonical-table).
+The 5-runtime comparison: [Runtime — Five runtimes comparison](/en/guide/runtimes#five-runtimes-—-canonical-table).
 :::
 
 Start the node:
@@ -137,7 +137,7 @@ The project direction is **Apache 2.0 open source + self-host + courses / consul
 **Advanced**:
 - [Multi-agent coordination](/en/guide/architecture#agent-node) — peer agents auto-coordinate via `get_all_status` / `send_task` / `get_task`
 - [Batch node management with `anet project up/restart/down`](/en/guide/batch) — start/stop every node under cwd in one command; zero-keyboard recovery after reboot
-- [LAN-shared hub](/en/deploy/clean-server#_3-start-the-hub-tmux-recommended) — `anet hub start --host 0.0.0.0` lets other machines join
+- [LAN-shared hub](/en/deploy/clean-server#_2-start-the-hub-recommended-under-tmux) — `anet hub start --host 0.0.0.0` lets other machines join
 
 **Demos**:
 ```bash

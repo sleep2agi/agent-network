@@ -527,7 +527,7 @@ npx @sleep2agi/agent-node --alias 代码 --runtime codex-sdk
 
 `anet node create <alias>` 成功后 print **行为披露 banner**：built-in tools 清单（具体 list 或 `all (Claude Code preset)`）+ MCP tools + 当前 flags（`dangerouslySkipPermissions=true` / `teammateMode=true`）+ 一行 "agent 可读写文件、跑 shell、访问网络"。banner 在 [agent-network/bin/cli.ts](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) `createCommand` 末尾打印 —— 让你**看清你创建了一个能干啥的 agent**，主动决定 sandboxing。
 
-> **⚠ User responsibility**：默认 preset + 默认 `dangerouslySkipPermissions=true` 意味着 agent 启动后**能改文件、跑 shell、访问网络且不弹确认**。详见 [安全设计 → 工具权限](/concepts/security#工具权限默认-claude-code-preset-user-responsibility)。
+> **⚠ User responsibility**：默认 preset + 默认 `dangerouslySkipPermissions=true` 意味着 agent 启动后**能改文件、跑 shell、访问网络且不弹确认**。详见 [安全设计 → 工具权限](/concepts/security#工具权限-默认-claude-code-preset-user-responsibility)。
 
 ::: warning 安全提示
 - 默认 preset 全集 + 默认 yolo mode（`dangerouslySkipPermissions`）—— 别在 `$HOME` 直接跑 agent，用一次性工作目录

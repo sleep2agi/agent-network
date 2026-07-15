@@ -137,7 +137,7 @@ anet node start my-bot
 **进阶**:
 - [多 Agent 协作](/guide/architecture#agent-node) — peer agents 通过 `get_all_status` / `send_task` / `get_task` 自治协调
 - [批量节点管理 `anet project up/restart/down`](/guide/batch) — cwd 下所有节点一键起停, reboot 后零键盘恢复
-- [局域网共用 Hub](/deploy/clean-server#_3-起-hub-推荐-tmux-挂着) — `anet hub start --host 0.0.0.0` 让其他机器加入
+- [局域网共用 Hub](/deploy/clean-server#_2-起-hub-推荐-tmux-挂着) — `anet hub start --host 0.0.0.0` 让其他机器加入
 
 **实战 demo**:
 ```bash

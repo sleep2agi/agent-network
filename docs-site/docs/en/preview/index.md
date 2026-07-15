@@ -114,7 +114,7 @@ Four cross-tenant / data-integrity gaps closed for public-hub multi-user / multi
 - **read-path stale-marker fix** ([#283](https://github.com/sleep2agi/agent-network/issues/283))
 - **Password KDF strengthening** ([#285](https://github.com/sleep2agi/agent-network/issues/285))
 
-📖 Full description → [Changelog — v0.11-preview2 Security batch](/en/changelog#-security-batch)
+📖 Full description → [Changelog — v0.11-preview2 Security batch](/en/changelog#v0-11-preview2-—-loop-works-for-every-runtime-security-batch-rfc-024-hub-config-apply-foundation-2026-06-28-🟡-preview)
 
 ### 🛠 Engineering hardening
 
@@ -141,7 +141,7 @@ Four cross-tenant / data-integrity gaps closed for public-hub multi-user / multi
 
 ## Full release notes
 
-→ [Changelog v0.11-preview2 full entry](/en/changelog#v0-11-preview2-loop-works-for-every-runtime-security-batch-rfc-024-hub-config-apply-foundation-2026-06-28-preview)
+→ [Changelog v0.11-preview2 full entry](/en/changelog#v0-11-preview2-—-loop-works-for-every-runtime-security-batch-rfc-024-hub-config-apply-foundation-2026-06-28-🟡-preview)
 
 ## References
 

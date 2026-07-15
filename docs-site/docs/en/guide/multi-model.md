@@ -174,7 +174,7 @@ The Anthropic-compatible protocol **only standardizes the wire format**; it **do
 - ✅ MiniMax / Anthropic native: emits `tool_use` content blocks cleanly, works out of the box
 - ❌ InternLM intern-s2-preview: defaults to verbose "Thinking Process" text, **does not emit** `tool_use` blocks (forcing `tool_choice` is rejected with `-20077`)
 
-From [v0.9.1](/en/changelog#v0-9-1-patch-130-intern-tool-calling-hotfix-promoted-2026-05-15-stable) ([#130 hotfix](https://github.com/sleep2agi/agent-network/issues/130)) onward, agent-node ships a **vendor adapter** that detects `ANTHROPIC_BASE_URL` and prepends a system-prompt bias to nudge vendor behavior back to Anthropic-standard.
+From [v0.9.1](/en/changelog#v0-9-1-—-patch-130-intern-tool-calling-hotfix-promoted-2026-05-15-✅-stable) ([#130 hotfix](https://github.com/sleep2agi/agent-network/issues/130)) onward, agent-node ships a **vendor adapter** that detects `ANTHROPIC_BASE_URL` and prepends a system-prompt bias to nudge vendor behavior back to Anthropic-standard.
 
 **Current adapter (intern) trigger**: URL matches the regex `/intern-ai\.org\.cn|chat\.intern-ai/i` ([`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/commit/4cd0024)) — the "InternLM" example above (`ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn`) triggers it automatically.
 

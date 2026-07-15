@@ -91,7 +91,7 @@ anet node start  →  spawn 本机 `claude` 二进制子进程
 - 节点启动时 anet CLI 在 cwd 写 `.mcp.json`（[`agent-network/bin/cli.ts ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)）+ spawn `claude` 二进制
 - claude 按 `.mcp.json` 起一个本地 bun MCP server（`.anet/node-server.js`，[源码](https://github.com/sleep2agi/agent-network/blob/main/agent-network/src/node-server.ts) 用 `StdioServerTransport`）
 - 本地 MCP server 内部把 commhub 工具调用 HTTP 转发到 CommHub `/mcp`
-- 完整 4 runtime MCP 路径对比 + tool name 命名空间差异见 [架构 → MCP 接入路径](/guide/architecture#mcp-接入路径不同-runtime-不同走法-v0-9-0)
+- 完整 4 runtime MCP 路径对比 + tool name 命名空间差异见 [架构 → MCP 接入路径](/guide/architecture#mcp-接入路径-不同-runtime-不同走法-v0-9-0)
 
 ### 适用场景
 
@@ -182,7 +182,7 @@ anet node start  →  spawn agent-node 子进程
 - agent-node 进程通过 SDK 调 Anthropic 兼容 API
 - 默认 `api.anthropic.com`，可通过 `ANTHROPIC_BASE_URL` 重定向到任何兼容服务
 - `settingSources: []` 完全隔离宿主机配置，不会读你本地的 `~/.claude/`
-- LLM 看到的 commhub 工具名是 SDK namespace 化的 **`mcp__commhub__send_task`** 等（单 `commhub` 前缀；非二进制 HTTP MCP 路径）—— 完整 4 runtime MCP 路径对比见 [架构 → MCP 接入路径](/guide/architecture#mcp-接入路径不同-runtime-不同走法-v0-9-0)
+- LLM 看到的 commhub 工具名是 SDK namespace 化的 **`mcp__commhub__send_task`** 等（单 `commhub` 前缀；非二进制 HTTP MCP 路径）—— 完整 4 runtime MCP 路径对比见 [架构 → MCP 接入路径](/guide/architecture#mcp-接入路径-不同-runtime-不同走法-v0-9-0)
 - vendor adapter（针对书生 intern 等的 system-prompt bias）也在这层注入 —— 详见 [Vendor 适配层](/concepts/vendor-adapters)
 
 ### 适用场景
@@ -303,7 +303,7 @@ anet node start  →  spawn agent-node 子进程
 - 通过官方 `@openai/codex-sdk` 包驱动 codex thread
 - 支持 Read / Write / Edit / Bash / Glob / Grep / WebSearch（codex CLI baked in）
 - 鉴权走 `codex login`（OAuth 流程）或 `OPENAI_API_KEY`
-- **codex thread 不直接调 commhub MCP 工具**（`codexOpts` 不传 `mcpServers`，[`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)）—— 多 Agent 派活由 agent-node 父进程外部完成，详见 [架构 → MCP 接入路径](/guide/architecture#mcp-接入路径不同-runtime-不同走法-v0-9-0)
+- **codex thread 不直接调 commhub MCP 工具**（`codexOpts` 不传 `mcpServers`，[`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)）—— 多 Agent 派活由 agent-node 父进程外部完成，详见 [架构 → MCP 接入路径](/guide/architecture#mcp-接入路径-不同-runtime-不同走法-v0-9-0)
 
 ### 适用场景
 

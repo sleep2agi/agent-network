@@ -171,7 +171,7 @@ Anthropic 兼容协议**只解决数据格式**，**不保证行为一致**。�
 - ✅ MiniMax / Anthropic 官方：tool_use content blocks 干净 emit，OOTB 工作
 - ❌ 书生 intern-s2-preview：默认走 verbose "Thinking Process" 文本，**不发** `tool_use` blocks（强制 `tool_choice` 还被 `-20077` 拒）
 
-从 [v0.9.1](/changelog#v0-9-1-patch-130-intern-tool-calling-hotfix-promote-2026-05-15-stable)（[#130 hotfix](https://github.com/sleep2agi/agent-network/issues/130)）起 agent-node 引入 **vendor adapter** 检测 `ANTHROPIC_BASE_URL` 后 prepend 一段 system-prompt bias 把厂商行为掰回 Anthropic 标准。
+从 [v0.9.1](/changelog#v0-9-1-—-patch-130-intern-tool-calling-hotfix-promote-2026-05-15-✅-stable)（[#130 hotfix](https://github.com/sleep2agi/agent-network/issues/130)）起 agent-node 引入 **vendor adapter** 检测 `ANTHROPIC_BASE_URL` 后 prepend 一段 system-prompt bias 把厂商行为掰回 Anthropic 标准。
 
 **当前 adapter（intern）触发条件**：URL 命中 `/intern-ai\.org\.cn|chat\.intern-ai/i` 正则（[`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/commit/4cd0024)）—— 上面 "书生" 配置示例的 `ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn` 会自动触发。
 

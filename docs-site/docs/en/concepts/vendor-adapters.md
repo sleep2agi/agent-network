@@ -126,4 +126,4 @@ Aligned with the follow-up gaps listed in [#130's engineering code trace](https:
 - Issue: [#130 intern tool-calling broken on Anthropic protocol](https://github.com/sleep2agi/agent-network/issues/130)
 - SDK team direct-curl A/B research (191 lines): [`docs/research/intern-tool-calling-investigation.md`](https://github.com/sleep2agi/agent-network/blob/main/docs/research/intern-tool-calling-investigation.md)
 - Engineering team 3-layer code trace (183 lines): [`docs/research/intern-tool-calling-code-trace.md`](https://github.com/sleep2agi/agent-network/blob/main/docs/research/intern-tool-calling-code-trace.md)
-- Context: [CHANGELOG v0.9.0 Recovery & Observability](/en/changelog#v0-9-0-recovery-observability) + [Security `Tool Permissions`](/en/concepts/security#tool-permissions-default-claude-code-preset-user-responsibility)
+- Context: [CHANGELOG v0.9.0 Recovery & Observability](/en/changelog#v0-9-0-—-recovery-observability-2026-05-15-✅-stable) + [Security `Tool Permissions`](/en/concepts/security#tool-permissions-default-claude-code-preset-user-responsibility)

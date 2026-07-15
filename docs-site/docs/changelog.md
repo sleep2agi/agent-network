@@ -775,7 +775,7 @@ backward-compat：显式 `--runtime <X>` 仍 skip picker；demo / batch / 已 `-
 
 - **两 phase publish SOP** 沿用（v0.9.0 split-brain lessons #126）—— 避免 npm `--tag latest` 直推
 - **macOS PTY 边界 case** 进入 release smoke checklist（detached tmux + setRawMode）
-- **fan-out / 高并发 timeout 调参文档化**：[troubleshooting Vendor API 超时段](/troubleshooting#vendor-api-超时fan-out-高并发-132-retry-with-backoff) + [agent-node.md env table](/guide/agent-node#环境变量)
+- **fan-out / 高并发 timeout 调参文档化**：[troubleshooting Vendor API 超时段](/troubleshooting#vendor-api-超时-fan-out-高并发-132-retry-with-backoff) + [agent-node.md env table](/guide/agent-node#环境变量)
 - **runtime-first wizard 区分 anet create vs --batch**：batch wizard 仍 vendor-first（用 `selectVendorAndModel()` 但不走 `selectRuntime()`），doc 显式消歧
 - **CLAUDE_MAX_RETRIES=0 opt-out**：保留退回 v0.9.1 行为路径供调试 / 跑老脚本
 - **vendor-specific remediation hint 路由**进入设计原则：每加一个 verified vendor 都附 URL hint

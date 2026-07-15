@@ -126,4 +126,4 @@ anet node start my-intern-agent --prompt "你是一个谨慎的代码 reviewer�
 - Issue: [#130 intern tool-calling broken on Anthropic protocol](https://github.com/sleep2agi/agent-network/issues/130)
 - SDK 团队 直 curl A/B research（191 行）: [`docs/research/intern-tool-calling-investigation.md`](https://github.com/sleep2agi/agent-network/blob/main/docs/research/intern-tool-calling-investigation.md)
 - 工程团队 3-layer code trace（183 行）: [`docs/research/intern-tool-calling-code-trace.md`](https://github.com/sleep2agi/agent-network/blob/main/docs/research/intern-tool-calling-code-trace.md)
-- 上下文：[CHANGELOG v0.9.0 Recovery & Observability](/changelog#v0-9-0-recovery-observability) + [Security `工具权限`](/concepts/security#工具权限默认-claude-code-preset-user-responsibility)
+- 上下文：[CHANGELOG v0.9.0 Recovery & Observability](/changelog#v0-9-0-—-recovery-observability-2026-05-15-✅-stable) + [Security `工具权限`](/concepts/security#工具权限-默认-claude-code-preset-user-responsibility)

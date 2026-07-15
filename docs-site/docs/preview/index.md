@@ -114,7 +114,7 @@ anet node loop daily-bot "发布今日早报" --every 2h
 - **read-path stale-marker 修**（[#283](https://github.com/sleep2agi/agent-network/issues/283)）
 - **password KDF 强化**（[#285](https://github.com/sleep2agi/agent-network/issues/285)）
 
-📖 完整描述 → [更新日志 — v0.11-preview2 安全批](/changelog#-安全批)
+📖 完整描述 → [更新日志 — v0.11-preview2 安全批](/changelog#v0-11-preview2-—-loop-全-runtime-通-安全批-rfc-024-hub-config-apply-foundation-2026-06-28-🟡-preview)
 
 ### 🛠 Engineering hardening
 
@@ -141,7 +141,7 @@ anet node loop daily-bot "发布今日早报" --every 2h
 
 ## 完整 release notes
 
-→ [更新日志 v0.11-preview2 完整条目](/changelog#v0-11-preview2-loop-全-runtime-通-安全批-rfc-024-hub-config-apply-foundation-2026-06-28-preview)
+→ [更新日志 v0.11-preview2 完整条目](/changelog#v0-11-preview2-—-loop-全-runtime-通-安全批-rfc-024-hub-config-apply-foundation-2026-06-28-🟡-preview)
 
 ## 参考
 
