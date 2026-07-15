@@ -282,6 +282,54 @@ describe("prepareGrokCliHome", () => {
     expect(statSync(wrongMode).mode & 0o7777).toBe(0o644);
   });
 
+  it("does not let a fatal project counterexample starve independent state containment", () => {
+    const root = mkdtempSync(join(tmpdir(), "grok-cli-post-stop-independent-domains-"));
+    roots.push(root);
+    const stateHome = join(root, "state");
+    const runtime = join(root, "runtime");
+    const project = join(root, "project");
+    for (const directory of [stateHome, runtime, project]) {
+      mkdirSync(directory, { mode: 0o700 });
+    }
+
+    const sandboxMarker = join(stateHome, `sandbox-blocked.${TUI_PID + 9}`);
+    const retainedFile = join(stateHome, "retained-state");
+    const retainedDirectory = join(stateHome, "retained-directory");
+    const nativeLock = join(runtime, "leader.lock");
+    writeFileSync(sandboxMarker, "", { mode: 0o600 });
+    chmodSync(sandboxMarker, 0o000);
+    writeFileSync(retainedFile, "retained\n", { mode: 0o664 });
+    chmodSync(retainedFile, 0o664);
+    mkdirSync(retainedDirectory, { mode: 0o775 });
+    chmodSync(retainedDirectory, 0o775);
+    writeFileSync(nativeLock, "1\n", { mode: 0o664 });
+    chmodSync(nativeLock, 0o664);
+
+    // A project executable-source counterexample remains fatal and untouched.
+    // It must not prevent the separately-owned state tree and native lock from
+    // being contained after all writers have been confirmed stopped.
+    const projectCounterexample = join(project, ".mcp.json");
+    writeFileSync(projectCounterexample, "", { mode: 0o400 });
+    chmodSync(projectCounterexample, 0o400);
+    const counterexampleBefore = lstatSync(projectCounterexample);
+
+    expect(() => cleanupGrokCliPostStopState({
+      stateHome,
+      projectCwd: project,
+      leaderSocket: join(runtime, "leader.sock"),
+      tuiProcessIds: [],
+    })).toThrow("expected an empty owner-held single-link regular file with mode 0444");
+
+    const counterexampleAfter = lstatSync(projectCounterexample);
+    expect(counterexampleAfter.dev).toBe(counterexampleBefore.dev);
+    expect(counterexampleAfter.ino).toBe(counterexampleBefore.ino);
+    expect(counterexampleAfter.mode & 0o7777).toBe(0o400);
+    expect(existsSync(sandboxMarker)).toBe(false);
+    expect(statSync(retainedFile).mode & 0o7777).toBe(0o600);
+    expect(statSync(retainedDirectory).mode & 0o7777).toBe(0o700);
+    expect(statSync(nativeLock).mode & 0o7777).toBe(0o600);
+  });
+
   it("preserves nonempty, linked, wrong-mode, and wrong-type project counterexamples", () => {
     const cases: Array<{
       label: string;
