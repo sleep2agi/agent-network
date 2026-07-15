@@ -54,7 +54,7 @@ anet hub dashboard
 #   浏览器访问 http://localhost:3000
 
 # 终端 3 —— 登录 + 创建 + 启动 Agent
-anet login --username admin --password anethub
+anet login --hub http://127.0.0.1:9200 --username admin --password anethub
 anet node create my-bot          # 交互式：选 runtime → 选 provider → 填 API key
 anet node start my-bot           # 等到 "SSE connected" 即就绪
 ```
@@ -79,7 +79,7 @@ anet project restart    # 重启 cwd 节点接新版
 - **一个 CLI，五种 Runtime。** Claude Code CLI / Claude Agent SDK / Codex SDK / Grok Build ACP / opencode CLI 同台运行，按角色挑最合适的。
 - **八家 LLM，一个开关切换。** Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 InternLM / 小米 MiMo / OpenRouter 走 `ANTHROPIC_BASE_URL` 一键路由；OpenAI 走 `codex-sdk`、xAI Grok 走 `grok-build-acp`。
 - **本地跑，跨服务器也跑。** Hub 默认绑 `127.0.0.1`；改 `0.0.0.0` 绑公网 IP，**多台云服务器 / 多个工位的 Agent 都能加入同一个 Hub**。SQLite 全程在 Hub 那台机，不用注册账号、不用登云、零遥测。
-- **Mesh 派活开箱即用。** Agent 之间通过 17 个 MCP 工具自动发现 + 互相派活，不用写编排逻辑。
+- **Mesh 派活开箱即用。** Agent 之间通过约 40 个 MCP 工具自动发现 + 互相派活，不用写编排逻辑。
 - **自带 Web Dashboard。** 7 大页（Overview / Nodes / Tasks / Messages / Chat / Admin / Settings）+ 实时节点拓扑图，跑在 `localhost:3000`。
 - **和 LangGraph / AutoGen / CrewAI 不一样：** anet 是 **npm 包**，零 Python 依赖；**本地优先**而非 SaaS；**多厂商不锁定**而非默认 OpenAI；**人 + Agent 同台**通过 Dashboard Chat 协作。
 
@@ -145,7 +145,7 @@ flowchart LR
 - **MCP Streamable HTTP**（`/mcp`）—— Agent / Claude Code / Codex 接入点
 - **SSE 推送**（`/events/:alias`）—— Hub 实时把任务推给 Agent
 - **REST API**（`/api/*`）—— Dashboard、管理、监控、审计日志
-- **17 个 MCP 工具** —— `send_task` / `get_task` / `send_reply` / `report_status` / `get_all_status` / …
+- **约 40 个 MCP 工具** —— `send_task` / `get_task` / `send_reply` / `report_status` / `get_all_status` / …
 
 📖 架构详解 → <https://anet.sh/guide/architecture>
 
@@ -159,7 +159,7 @@ flowchart LR
 |---|---|---|---|
 | `claude-code-cli` | spawn 本地 `claude` CLI 子进程 | 复用 Claude Pro 订阅，享 Claude Code 全套工具 | 本地 `claude` 已登录 |
 | `claude-agent-sdk` | 编程式调 Anthropic 兼容 API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter（通过 `ANTHROPIC_BASE_URL`） | API key |
-| `codex-sdk` | OpenAI `@openai/codex-sdk` | 写代码 / 跑命令 | `codex auth login` 或 `OPENAI_API_KEY` |
+| `codex-sdk` | OpenAI `@openai/codex-sdk` | 写代码 / 跑命令 | `codex login` 或 `OPENAI_API_KEY` |
 | `grok-build-acp` | 本地 `grok agent stdio` + Agent Client Protocol | Grok Build 节点加入 Agent Network，复用本机 Grok 登录态 | 本地 `grok` 已登录 |
 
 ### Grok Build 接入
@@ -218,7 +218,7 @@ anet grok attach grok-shared
 | MiniMax | 内置 vendor · verified | `https://api.minimaxi.com/anthropic` |
 | 小米 MiMo | 内置 vendor · verified | `https://token-plan-cn.xiaomimimo.com/anthropic` |
 | 书生 Intern | 内置 vendor · verified | `https://chat.intern-ai.org.cn`（裸域名，无 `/anthropic`）|
-| OpenAI Codex（`codex-sdk`）| 内置 vendor · verified | n/a —— `codex auth login` |
+| OpenAI Codex（`codex-sdk`）| 内置 vendor · verified | n/a —— `codex login` |
 | DeepSeek / 智谱 GLM / 月之暗面 Kimi / OpenRouter / 自建 | 走 `custom` 供应商（**不在内置列表，自行验证 endpoint + model id**）| 自填 base URL + `ANTHROPIC_AUTH_TOKEN` |
 
 📖 各家 Key / 模型 / 接入 → <https://anet.sh/guide/multi-model>

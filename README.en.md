@@ -54,7 +54,7 @@ anet hub dashboard
 #   open http://localhost:3000
 
 # Terminal 3 — log in, create + start an agent
-anet login --username admin --password anethub
+anet login --hub http://127.0.0.1:9200 --username admin --password anethub
 anet node create my-bot          # interactive: runtime → provider → API key
 anet node start my-bot           # waits for "SSE connected"
 ```
@@ -79,7 +79,7 @@ Full cross-version migration reference: [Upgrade Guide](https://anet.sh/en/guide
 - **One CLI, five runtimes.** Claude Code CLI / Claude Agent SDK / Codex SDK / Grok Build ACP / opencode CLI run side-by-side on the same hub. Pick per role.
 - **Eight LLM providers, one config switch.** Anthropic / MiniMax / DeepSeek / GLM (Zhipu) / Kimi (Moonshot) / InternLM / Xiaomi MiMo / OpenRouter all route through `ANTHROPIC_BASE_URL`; OpenAI goes via `codex-sdk`, xAI Grok goes via `grok-build-acp`.
 - **Local. LAN. Cross-server.** Hub binds to `127.0.0.1` for pure local; switch to `0.0.0.0` and **agents on other laptops, cloud VMs, or any servers can join the same Hub** over real-time SSE. SQLite stays on whichever box runs the Hub. No cloud account, no telemetry, no signup.
-- **Mesh dispatch out of the box.** Agents discover each other via 17 MCP tools (`get_all_status`, `send_task`, `get_task`, …) — no choreography to script.
+- **Mesh dispatch out of the box.** Agents discover each other via ~40 MCP tools (`get_all_status`, `send_task`, `get_task`, …) — no choreography to script.
 - **Web Dashboard included.** 7 pages (Overview / Nodes / Tasks / Messages / Chat / Admin / Settings) + a live node topology graph, on `localhost:3000`.
 - **Different from LangGraph / AutoGen / CrewAI:** anet is an **npm package**, zero Python; **local-first**, not SaaS; **multi-vendor without lock-in**, not OpenAI-by-default; **human + agent on the same surface** via Dashboard Chat, not pure programmatic orchestration.
 
@@ -145,7 +145,7 @@ flowchart LR
 - **MCP Streamable HTTP** at `/mcp` — agent and Claude Code / Codex connect point
 - **SSE Push** at `/events/:alias` — server pushes tasks to agents in real time
 - **REST API** at `/api/*` — Dashboard, admin, monitoring, audit log
-- **17 MCP tools** — `send_task` / `get_task` / `send_reply` / `report_status` / `get_all_status` / …
+- **~40 MCP tools** — `send_task` / `get_task` / `send_reply` / `report_status` / `get_all_status` / …
 
 📖 Architecture deep dive → <https://anet.sh/en/guide/architecture>
 
@@ -159,7 +159,7 @@ Pick one per node. Mix freely on the same hub.
 |---|---|---|---|
 | `claude-code-cli` | Spawns your local `claude` CLI as a subprocess | Reusing a Claude Pro subscription, full Claude Code tool suite | `claude` already logged in |
 | `claude-agent-sdk` | Programmatic Anthropic-compatible client | Anthropic / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter via `ANTHROPIC_BASE_URL` | API key |
-| `codex-sdk` | OpenAI's `@openai/codex-sdk` | Code generation, shell-heavy work | `codex auth login` or `OPENAI_API_KEY` |
+| `codex-sdk` | OpenAI's `@openai/codex-sdk` | Code generation, shell-heavy work | `codex login` or `OPENAI_API_KEY` |
 | `grok-build-acp` | Local `grok agent stdio` over Agent Client Protocol | Joining Agent Network as a Grok Build node, reusing host-local Grok auth | local `grok` already logged in |
 
 ### Grok Build
@@ -196,7 +196,7 @@ Stable support: SSE task receive, Grok ACP execution, `grokSession` persistence/
 | MiniMax | built-in vendor · verified | `https://api.minimaxi.com/anthropic` |
 | Xiaomi MiMo | built-in vendor · verified | `https://token-plan-cn.xiaomimimo.com/anthropic` |
 | InternLM | built-in vendor · verified | `https://chat.intern-ai.org.cn` (bare domain, no `/anthropic`) |
-| OpenAI Codex (`codex-sdk`) | built-in vendor · verified | n/a — `codex auth login` |
+| OpenAI Codex (`codex-sdk`) | built-in vendor · verified | n/a — `codex login` |
 | DeepSeek / GLM (Zhipu) / Kimi (Moonshot) / OpenRouter / self-hosted | via the `custom` vendor (**not built-in — verify the endpoint + model id yourself**) | provide base URL + `ANTHROPIC_AUTH_TOKEN` |
 
 📖 Per-provider keys, models, and access → <https://anet.sh/en/guide/multi-model>
