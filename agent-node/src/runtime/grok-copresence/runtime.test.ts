@@ -1128,6 +1128,33 @@ describe("Grok copresence runtime integration", () => {
     }
   }, 15_000);
 
+  test("retains final-cleanup ownership after every failed recovery PID is consumed", async () => {
+    const fixture = new RuntimeFixture();
+    fixture.reconnectAttempts = 1;
+    fixture.tuiProcessIds = [42, 43];
+    fixture.exitOnSubscriptionTuiSpawns.add(2);
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await fixture.open();
+      const footprint = seedPostStopFootprint(fixture);
+      await fixture.crashCurrent();
+      const internals = runtime as unknown as {
+        fatalShutdownPromise: Promise<void> | null;
+        ownedAnyTuiGeneration: boolean;
+        pendingTuiProcessIds: Set<number>;
+      };
+      await waitFor(() => internals.fatalShutdownPromise !== null, 5_000);
+      await internals.fatalShutdownPromise;
+
+      expect(internals.ownedAnyTuiGeneration).toBe(true);
+      expect(internals.pendingTuiProcessIds.size).toBe(0);
+      for (const path of footprint.removedPaths) expect(existsSync(path), path).toBe(false);
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 10_000);
+
   test("arbitrates a live PTY, settles final JSONL, attaches once, and resumes", async () => {
     const fixture = new RuntimeFixture();
     let runtime: GrokCopresenceRuntimeSession | undefined;
