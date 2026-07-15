@@ -46,7 +46,7 @@ anet hub start
 anet hub dashboard
 
 # 终端 3 —— 登录 + 创节点 + 启动
-anet login --username admin --password anethub
+anet login --hub http://127.0.0.1:9200 --username admin --password anethub
 anet node create my-bot
 anet node start my-bot
 ```

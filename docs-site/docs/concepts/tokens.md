@@ -23,7 +23,7 @@
 ### 怎么来的
 
 ```bash
-anet login --username admin --password anethub
+anet login --hub http://127.0.0.1:9200 --username admin --password anethub
 ```
 
 hub 验账号密码 OK，发一个 `utok_xxxxxxxx...` 给你。

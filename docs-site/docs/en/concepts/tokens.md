@@ -23,7 +23,7 @@ That's it. **The only two tokens you need to know**, both CLI-managed.
 ### How
 
 ```bash
-anet login --username admin --password anethub
+anet login --hub http://127.0.0.1:9200 --username admin --password anethub
 ```
 
 Hub verifies your credentials and issues `utok_xxxxxxxx...` to you.
