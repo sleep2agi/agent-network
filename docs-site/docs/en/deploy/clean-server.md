@@ -136,7 +136,7 @@ tmux a -t anet-hub             # Then Ctrl+C to stop, Ctrl+B D to keep the tmux 
 ```
 
 ::: tip `anet hub --help` doesn't list stop/status yet?
-On v2.2.12 latest, `anet hub --help` **does not list** the `stop` / `status` subcommands (display bug, tracked in [#240](https://github.com/sleep2agi/agent-network/issues/240), fix in [PR #241](https://github.com/sleep2agi/agent-network/pull/241), shipping with v0.10.16); **the commands themselves work** — running `anet hub status` returns `hub running / vX.Y.Z / pid N`.
+`anet hub --help` now lists the `stop` / `status` subcommands (2.2.12 had a display bug that omitted them, fixed in [#240](https://github.com/sleep2agi/agent-network/issues/240) / [PR #241](https://github.com/sleep2agi/agent-network/pull/241), shipped in current latest); the commands themselves have always worked — running `anet hub status` returns `hub running / vX.Y.Z / pid N`.
 :::
 :::
 

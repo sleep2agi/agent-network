@@ -136,7 +136,7 @@ tmux a -t anet-hub             # 然后按 Ctrl+C 停, Ctrl+B D 留 tmux 会话
 ```
 
 ::: tip `anet hub --help` 暂时看不到 stop/status?
-v2.2.12 latest 的 `anet hub --help` **不列出** `stop` / `status` 子命令(显示 bug, [#240](https://github.com/sleep2agi/agent-network/issues/240) 跟踪, [PR #241](https://github.com/sleep2agi/agent-network/pull/241) 修, 下版 v0.10.16 自然带出); **但命令本身可用** — 跑 `anet hub status` 直接返 `hub running / vX.Y.Z / pid N`.
+`anet hub --help` 现已列出 `stop` / `status` 子命令(2.2.12 曾有显示 bug 漏列, [#240](https://github.com/sleep2agi/agent-network/issues/240) / [PR #241](https://github.com/sleep2agi/agent-network/pull/241) 已修, 现 latest 带出); 命令本身一直可用 — 跑 `anet hub status` 直接返 `hub running / vX.Y.Z / pid N`.
 :::
 :::
 
