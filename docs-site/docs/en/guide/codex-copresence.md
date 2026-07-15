@@ -32,7 +32,7 @@ The `codex-app-server` runtime has two modes:
 codex app-server --listen ws://127.0.0.1:4500
 ```
 
-> Bind `127.0.0.1` only; never expose it publicly. For a long-running local setup, prefer `codex app-server daemon start` + `codex --remote unix://` (the unix-socket transport is Linux/macOS only; on Windows use the WS form above).
+> Bind `127.0.0.1` only; never expose it publicly. For a long-running local setup, prefer `codex remote-control start` + `codex --remote unix://` (the unix-socket transport is Linux/macOS only; on Windows use the WS form above).
 
 **2. Attach the human TUI** (another terminal):
 
