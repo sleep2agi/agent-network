@@ -76,7 +76,7 @@ Full cross-version migration reference: [Upgrade Guide](https://anet.sh/en/guide
 
 ## Why Agent Network
 
-- **One CLI, four runtimes.** Claude Code CLI / Claude Agent SDK / Codex SDK / Grok Build ACP run side-by-side on the same hub. Pick per role.
+- **One CLI, five runtimes.** Claude Code CLI / Claude Agent SDK / Codex SDK / Grok Build ACP / opencode CLI run side-by-side on the same hub. Pick per role.
 - **Eight LLM providers, one config switch.** Anthropic / MiniMax / DeepSeek / GLM (Zhipu) / Kimi (Moonshot) / InternLM / Xiaomi MiMo / OpenRouter all route through `ANTHROPIC_BASE_URL`; OpenAI goes via `codex-sdk`, xAI Grok goes via `grok-build-acp`.
 - **Local. LAN. Cross-server.** Hub binds to `127.0.0.1` for pure local; switch to `0.0.0.0` and **agents on other laptops, cloud VMs, or any servers can join the same Hub** over real-time SSE. SQLite stays on whichever box runs the Hub. No cloud account, no telemetry, no signup.
 - **Mesh dispatch out of the box.** Agents discover each other via 17 MCP tools (`get_all_status`, `send_task`, `get_task`, …) — no choreography to script.

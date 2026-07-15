@@ -9,7 +9,7 @@ Agent Node 是 Agent Network 中的工作单元 -- 接收任务、调用 AI 模�
 - **用 xAI Grok Build** → `grok-build-acp` ([详细见 GitHub ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md))
 - **接国产 / 非内置 vendor** (DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / 通义千问 等) → `claude-agent-sdk` + 在 vendor 子菜单选 `自定义 (custom)` + `ANTHROPIC_BASE_URL`
 
-**4 runtime × npm 包 × wizard 行为 × 前置 auth 的权威对照**: 见 [runtimes — 四种 Runtime 对比 (canonical)](/guide/runtimes#四种-runtime-对比-canonical-表). `anet node create` wizard 完整顺序 (`节点名 → runtime → ... `): [上手指南 §5](/guide/getting-started#_5-创建-agent-节点).
+**5 runtime × npm 包 × wizard 行为 × 前置 auth 的权威对照**: 见 [runtimes — 五种 Runtime 对比 (canonical)](/guide/runtimes#五种-runtime-对比-canonical-表). `anet node create` wizard 完整顺序 (`节点名 → runtime → ... `): [上手指南 §5](/guide/getting-started#_5-创建-agent-节点).
 :::
 
 ## 安装
@@ -22,7 +22,7 @@ npm install -g @sleep2agi/agent-node
 npx @sleep2agi/agent-node --help
 ```
 
-## 四种 Runtime
+## 五种 Runtime
 
 Agent Node 支持四种 AI 运行时引擎，覆盖主流模型：
 
@@ -644,7 +644,7 @@ SSE 断连后自动重连，使用指数退避策略：
 - [一键安装与起步](/guide/one-shot-install) — anet 装好后 5 分钟跑第一个 agent
 
 **深入配置**：
-- [Runtimes](/guide/runtimes) — 四个 runtime（claude-agent-sdk / codex-sdk / claude-code-cli / grok-build-acp）选哪个
+- [Runtimes](/guide/runtimes) — 五个 runtime（claude-agent-sdk / codex-sdk / claude-code-cli / grok-build-acp / opencode-cli）选哪个
 - [多模型配置](/guide/multi-model) — 用 DeepSeek / MiniMax / Kimi / Claude 等
 - [Channel 插件](/guide/channels) — agent 怎么接 Telegram / 微信 / 飞书
 

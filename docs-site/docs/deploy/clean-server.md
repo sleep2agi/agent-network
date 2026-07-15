@@ -166,7 +166,7 @@ anet node create my-bot
 节点名 → runtime → (仅 claude-agent-sdk 才弹) vendor → model → API Key / 鉴权
 ```
 
-**runtime 是第一道分叉, 4 选 1, 决定后面要不要配 vendor + 配什么依赖** (npm 包 / 主推模型 / 详细 wizard 行为对照见 [runtimes — 四种 Runtime 对比 (canonical)](/guide/runtimes#四种-runtime-对比-canonical-表)):
+**runtime 是第一道分叉, 5 选 1, 决定后面要不要配 vendor + 配什么依赖** (npm 包 / 主推模型 / 详细 wizard 行为对照见 [runtimes — 四种 Runtime 对比 (canonical)](/guide/runtimes#五种-runtime-对比-canonical-表)):
 
 | Runtime | 复杂度 | 适合 | wizard 后续 | 额外依赖 |
 |---|---|---|---|---|
@@ -174,6 +174,7 @@ anet node create my-bot
 | `claude-agent-sdk` | ⭐⭐ | 程序化用 Anthropic 兼容 API（MiniMax / 书生 / 小米 MiMo 等国产模型走这里） | **弹 vendor 子菜单** → 选 vendor → 选 model → 填 API Key | API Key |
 | `codex-sdk` | ⭐⭐⭐ | 写代码 / 跑命令，用 OpenAI Codex | 跳过 vendor, 走 codex 登录态 | agent-node + codex CLI + `codex auth login` |
 | `grok-build-acp` | ⭐⭐⭐ | 用 xAI Grok Build 跑任务 | 跳过 vendor, 走 grok 登录态 + `GROK_CODE_XAI_API_KEY` | grok CLI + `grok auth login` + `GROK_CODE_XAI_API_KEY` |
+| `opencode-cli` | ⭐⭐⭐ | 用公版 sst/opencode CLI 当多 vendor 前端 | 选 vendor preset (anthropic / openai), key 从 env 读 | `opencode` CLI + Anthropic/OpenAI env key |
 
 ::: warning runtime 默认项注意
 向导**默认高亮第一项**（当前是 `claude-agent-sdk`），新手一路按 Enter 会落到这条要配 vendor + API Key 的路径上。**建议手动选 `claude-code-cli`** 入门最快（[#237 坑 3](https://github.com/sleep2agi/agent-network/issues/237) 已知 UX 痛点，将来 wizard 默认会调整）。
@@ -376,6 +377,6 @@ sudo systemctl status anet-hub anet-node@my-bot
 - [一键安装](/guide/one-shot-install) — `setup-anet.sh` 自动起 hub + dashboard + 多 agent
 - [生产部署 / 公网部署安全](/deploy/production) — TLS / 防火墙 / 备份 / 公网风险点
 - [Channel 接入](/guide/channels) — Telegram / WeChat / 飞书 完整接入手册
-- [节点 Runtime](/guide/runtimes) — 4 个 runtime 详细对比
+- [节点 Runtime](/guide/runtimes) — 5 个 runtime 详细对比
 
 如果踩到本页没覆盖的坑，欢迎到 [GitHub Issues](https://github.com/sleep2agi/agent-network/issues) 开一条 + cite 哪一步、什么报错、`anet -v` 输出。

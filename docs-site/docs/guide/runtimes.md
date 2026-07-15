@@ -1,10 +1,10 @@
 # 节点 Runtime
 
-每个 Agent Node 都有一个 **Runtime**（运行时内核），决定这个节点用什么方式调用大模型 / 跑工具。Agent Network 内置四种 Runtime，**同一个 Hub 上可以混搭**——一个 Claude Code CLI agent 调任务给 MiniMax agent，再让 Codex agent 写代码，结果汇总回来。
+每个 Agent Node 都有一个 **Runtime**（运行时内核），决定这个节点用什么方式调用大模型 / 跑工具。Agent Network 内置五种 Runtime，**同一个 Hub 上可以混搭**——一个 Claude Code CLI agent 调任务给 MiniMax agent，再让 Codex agent 写代码，结果汇总回来。
 
-## 四种 Runtime 对比（canonical 表）
+## 五种 Runtime 对比（canonical 表）
 
-> 本表是全站 4 runtime 信息的**单一权威来源**, 其他页面 (`cli` / `agent-node` / `getting-started` / `clean-server`) 都引用这里, 别在那些页面里重复整表.
+> 本表是全站 5 runtime 信息的**单一权威来源**, 其他页面 (`cli` / `agent-node` / `getting-started` / `clean-server`) 都引用这里, 别在那些页面里重复整表.
 
 | Runtime | npm 包 / 内核 | 适用场景 | 主推模型 | 前置 auth | wizard 行为 (`anet node create`) |
 |---|---|---|---|---|---|
@@ -12,6 +12,7 @@
 | `claude-agent-sdk` | `@anthropic-ai/claude-agent-sdk` (随 agent-node 装) | 编程式调用任意 Anthropic 兼容 API | Anthropic 直连 / MiniMax / 书生 Intern / 小米 MiMo / DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / 通义千问 ... ([完整表](/guide/multi-model)) | API Key | **唯一会弹 vendor 子菜单 → 选 vendor → 选 model → 填 API Key** |
 | `codex-sdk` | `@openai/codex-sdk` (随 agent-node 装) | 写代码 / 跑命令 | OpenAI Codex (gpt-5 等) | 已 `codex auth login` ([@openai/codex](https://www.npmjs.com/package/@openai/codex) CLI) | 选完 print `codex auth login` hint, **跳过 vendor** |
 | `grok-build-acp` | spawn 本机 `grok` ACP server | 用 xAI Grok Build 跑任务 / 协作 | xAI Grok (grok-build 系列) | 已 `grok auth login` + `GROK_CODE_XAI_API_KEY` env (该 runtime **另需**该 env, 非 wizard 输出) | 选完 print `grok auth login` hint, **跳过 vendor** |
+| `opencode-cli` | spawn 本机 `opencode` 命令 (公版 sst/opencode CLI, 固定 `opencode-ai` 版本 pin) | 用公版 opencode 做多 vendor 前端 (统一 session / auth 抽象, [RFC-029](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md)) | 多 vendor: Anthropic 原生 / OpenAI preset | 装 `opencode` CLI (`npm i -g opencode-ai@<pin>`) + 选 vendor preset (Anthropic 读 `ANTHROPIC_API_KEY` / OpenAI 读 `OPENAI_API_KEY` env) | 选完提示装 opencode CLI → 选 vendor preset (anthropic / openai), API key 从 env 读、**不 prompt** |
 
 ::: tip 不知道怎么选?
 - **想白嫖 Claude 订阅 / 新手最省事** → `claude-code-cli` (`claude auth login` 后 0 配置)
@@ -21,11 +22,11 @@
 - **想人和 agent 同时用同一个 Grok TUI（共存，attach 到活的 Grok 会话）** → `grok-build-cli` ([Grok 人机共存 TUI · preview](/guide/grok-copresence))
 - **想用公版 sst/opencode CLI 当多 vendor 前端（统一 session/auth）** → `opencode-cli`（需本机装 `opencode` CLI + Anthropic/OpenAI env key，[RFC-029](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md)）
 - **接国产 / 非内置 vendor** (DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / 通义千问 等) → `claude-agent-sdk` + 在 vendor 子菜单选 `自定义 (custom)` + `ANTHROPIC_BASE_URL`
-- **混搭 (推荐)** → 同一 Hub 全开, 每个角色挑最合适的内核
+- **混搭 (推荐)** → 同一 Hub 五种全开, 每个角色挑最合适的内核
 :::
 
 ::: tip wizard 顺序速览
-向导真实顺序: `节点名 → runtime → (仅 claude-agent-sdk) vendor → model → API Key / 鉴权`. runtime 菜单**默认高亮第一项 `claude-agent-sdk`** (要配 vendor + key, 复杂度最高); 新手强烈建议手动选 `claude-code-cli`. 完整步骤见 [上手指南 §5](/guide/getting-started#_5-创建-agent-节点).
+向导真实顺序: `节点名 → runtime → (仅 claude-agent-sdk) vendor → model → API Key / 鉴权`. 5-way runtime 菜单**默认高亮第一项 `claude-agent-sdk`** (要配 vendor + key, 复杂度最高); 新手强烈建议手动选 `claude-code-cli`. 完整步骤见 [上手指南 §5](/guide/getting-started#_5-创建-agent-节点).
 :::
 
 ---

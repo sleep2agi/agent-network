@@ -75,7 +75,7 @@ anet node create my-bot
 ::: tip 新手最省事 — 手动选 `claude-code-cli`
 向导**默认高亮 `claude-agent-sdk`**, 一路 Enter 会落到要填 vendor + API Key 的复杂路径。如果已经 `claude auth login`, **手动选 `claude-code-cli`** = 零配置最快路径。
 
-4 个 runtime 对照见 [Runtime — 四种 Runtime 对比](/guide/runtimes#四种-runtime-对比-canonical-表)。
+5 个 runtime 对照见 [Runtime — 五种 Runtime 对比](/guide/runtimes#五种-runtime-对比-canonical-表)。
 :::
 
 启动节点：

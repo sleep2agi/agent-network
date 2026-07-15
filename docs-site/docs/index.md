@@ -19,7 +19,7 @@ features:
     title: 本地优先
     details: Hub、节点、数据全跑在你自己的硬件上，SQLite 单文件存储，不依赖任何托管服务。
   - icon: 🤖
-    title: 4 种 Runtime · 任意主流大模型
+    title: 5 种 Runtime · 任意主流大模型
     details: Claude Code · Claude Agent SDK · Codex · Grok Build 同台协作；任意 Anthropic 兼容 API（书生 / MiniMax / 小米 MiMo / DeepSeek / GLM / Kimi / OpenRouter / Anthropic 直连 ...）即插即用。
   - icon: 📖
     title: Apache 2.0 开源

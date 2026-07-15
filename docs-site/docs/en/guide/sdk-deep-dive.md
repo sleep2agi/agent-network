@@ -3,7 +3,7 @@
 > For contributors who want to plug in a new SDK or understand how anet wraps existing ones.
 > If you're just trying to pick one to use, read [Node Runtime](/en/guide/runtimes) instead.
 
-anet ships four runtimes today. Two are SDK adapters; the other two (`claude-code-cli` spawns the local `claude` binary; `grok-build-acp` spawns the local `grok` ACP server) follow the spawn-subprocess pattern and are out of scope for this SDK-adapter comparison:
+anet ships five runtimes today. Two are SDK adapters; the other three (`claude-code-cli` spawns the local `claude` binary; `grok-build-acp` spawns the local `grok` ACP server; `opencode-cli` spawns the local `opencode` CLI) follow the spawn-subprocess pattern and are out of scope for this SDK-adapter comparison:
 
 - `claude-agent-sdk` — official `@anthropic-ai/claude-agent-sdk`, listed in [`@sleep2agi/agent-node`'s regular `dependencies`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json) (not baked into the dist — the build flag is `--external` — but npm resolves it as a sub-dependency at install time)
 - `codex-sdk` — official `@openai/codex-sdk`, listed as an **`optionalDependencies`** (npm 7+ pulls it in by default; if it's missing, run `npm install -g @openai/codex-sdk` plus install the `@openai/codex` binary globally)
