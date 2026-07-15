@@ -375,6 +375,12 @@ describe("Grok copresence runtime integration", () => {
     let runtime: GrokCopresenceRuntimeSession | undefined;
     try {
       runtime = await fixture.open();
+      const projectPlaceholders = [".grok", ".claude", ".cursor", ".mcp.json", ".envrc"]
+        .map((name) => join(fixture.cwd, name));
+      for (const placeholder of projectPlaceholders) {
+        writeFileSync(placeholder, "", { mode: 0o444 });
+        chmodSync(placeholder, 0o444);
+      }
       const first = join(fixture.grokHome, "sandbox-blocked-dir.42");
       const second = join(fixture.grokHome, "sandbox-blocked-dir.43");
       const unknown = join(fixture.grokHome, "sandbox-blocked-dir.44");
@@ -385,6 +391,7 @@ describe("Grok copresence runtime integration", () => {
       await waitFor(() => fixture.spawnedArgs.length === 2, 5_000);
       expect(existsSync(first)).toBe(false);
       expect(existsSync(unknown)).toBe(true);
+      for (const placeholder of projectPlaceholders) expect(existsSync(placeholder), placeholder).toBe(false);
 
       mkdirSync(second, { mode: 0o000 });
       await runtime.close();
