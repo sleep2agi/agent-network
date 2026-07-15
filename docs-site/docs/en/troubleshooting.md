@@ -850,6 +850,8 @@ Comprehensive system health check:
 anet doctor
 ```
 
+It checks: global config + auth token, hub reachability (version / sessions / SSE), each node's config health (legacy fields get a `--fix` migration hint), plain-secret hygiene ([#125](https://github.com/sleep2agi/agent-network/issues/125)), and required CLIs (Claude Code / Codex / Bun). Add `--fix` to auto-migrate repairable node configs and re-issue any `ntok_` the hub rejects.
+
 ### Manual Checklist
 
 ```bash

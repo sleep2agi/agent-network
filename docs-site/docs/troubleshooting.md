@@ -849,6 +849,8 @@ tmpfs:
 anet doctor
 ```
 
+检查项：全局配置 + auth token、hub 连通性（版本 / sessions / SSE）、每个节点配置健康度（旧字段给 `--fix` 迁移提示）、明文密钥卫生（[#125](https://github.com/sleep2agi/agent-network/issues/125)）、必需 CLI（Claude Code / Codex / Bun）。加 `--fix` 自动迁移可修的节点配置 + 重发被 hub 拒的 `ntok_`。
+
 ### 手动检查清单
 
 ```bash
