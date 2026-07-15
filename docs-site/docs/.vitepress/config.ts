@@ -76,6 +76,7 @@ export default withMermaid(defineConfig({
               { text: '批量 Agent', link: '/guide/batch' },
               { text: 'Agent Node', link: '/guide/agent-node' },
               { text: '节点 Runtime', link: '/guide/runtimes' },
+              { text: 'Grok 人机共存 TUI (preview)', link: '/guide/grok-copresence' },
               { text: 'Grok Build ACP Runtime ↗', link: 'https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md' },
               { text: 'SDK Deep-dive', link: '/guide/sdk-deep-dive' },
               { text: 'Channel 接入', link: '/guide/channels' },

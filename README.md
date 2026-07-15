@@ -182,6 +182,28 @@ anet node start grok-demo
 
 📖 Grok Build 运行时说明 → [`docs/grok-build-runtime.md`](./docs/grok-build-runtime.md)
 
+### Grok 人机共存 TUI（`grok-build-cli`，preview）
+
+`grok-build-cli` 让你 **attach 到 agent-node 持有的那个真实 Grok TUI**：你和 CommHub 网络任务共享同一段 Grok 会话——任务在同一个终端里实时渲染、完成后把答复回传给发起者，你随时能在旁边一起看、一起打字。（`grok-build-acp` 是独立 ACP 路径，不支持 attach。）
+
+前提：Linux + Node.js ≥ 22.13，且已安装并用**同一 OS 用户**登录精确版本的 Grok CLI `0.2.93 (f00f96316d)`。
+
+```bash
+npm install -g @sleep2agi/agent-network@preview   # 首次 node start 会自动拉取并校验 agent-node@preview
+
+# Terminal 1：在目标项目目录创建并启动共存节点
+anet node create grok-shared --runtime grok-build-cli
+anet node start grok-shared
+# 等日志出现：attach with anet grok attach grok-shared
+
+# Terminal 2：同机、同 OS 用户、同一项目目录的真实终端里 attach
+anet grok attach grok-shared
+```
+
+`Ctrl-]` 只 detach，不会停节点。共存会话是固定的 text-only `[todo_write]` profile（无 filesystem / shell / network / MCP / subagent 工具）。这是 **preview**，只连可信 Hub 与可信任务，不属于 latest/生产。
+
+📖 完整用法与 caveats → [`docs-site` grok 人机共存指南](https://anet.sh/guide/grok-copresence)
+
 📖 Runtime 详解 → <https://anet.sh/guide/runtimes>
 
 ---
