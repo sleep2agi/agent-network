@@ -331,6 +331,8 @@ When enabled, agent-node runs `spawn('codex', ['app-server'])` and talks the ful
 
 ## codex-app-server (Codex TUI bridge, RFC-030)
 
+> Want a **human and an agent to share one Codex session** (co-presence)? See the full step-by-step [Codex TUI Co-presence (preview)](/en/guide/codex-copresence).
+
 Attach a **codex CLI TUI session** to the network as a node. The node spawns its own standalone `codex app-server` and a bridge subscribes to the same codex thread as a client. Key difference vs `codex-sdk`: `codex-sdk` embeds the SDK and exclusively owns the codex thread, whereas **`codex-app-server` speaks the standard `codex app-server` protocol, where one thread can be subscribed by multiple clients** — so **a codex session you're typing into in the TUI can simultaneously become a network node**.
 
 ### Prerequisites

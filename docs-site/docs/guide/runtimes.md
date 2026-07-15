@@ -351,6 +351,8 @@ ANET_CODEX_STDIO_DIRECT=1 anet node start <codex-node>
 
 ## codex-app-server（Codex TUI 桥, RFC-030）
 
+> 想让**人和 agent 共用同一个 Codex 会话**（人机共存）？完整分步指南见 [Codex TUI 人机共存 (preview)](/guide/codex-copresence)。
+
 把一个 **codex CLI 的 TUI 会话**接进网络当节点 —— 节点自己起一个独立的 `codex app-server`，桥（bridge）作为客户端订阅同一条 codex thread。跟 `codex-sdk` 的关键区别：`codex-sdk` 是 agent-node 内嵌 SDK 独占管理 codex thread；**`codex-app-server` 用的是标准 `codex app-server` 协议，一条 thread 可以被多个客户端订阅**——于是**你在 codex TUI 里手打的那个会话，可以同时变成网络节点**。
 
 ### 前置
