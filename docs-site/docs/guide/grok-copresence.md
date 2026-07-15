@@ -15,6 +15,8 @@
 - 已安装并登录**精确版本**的 Grok CLI：`grok 0.2.93 (f00f96316d)`（末尾允许 `[stable]`），且由**运行 anet 的同一 OS 用户**执行 `grok login`。
 
 ```bash
+# 装精确版本（共存对 grok 版本敏感）——install.sh 支持 bash -s <版本>
+curl -fsSL https://x.ai/cli/install.sh | bash -s 0.2.93
 grok login
 grok --version   # 必须是 grok 0.2.93 (f00f96316d)
 ```

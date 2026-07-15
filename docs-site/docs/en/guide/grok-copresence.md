@@ -15,6 +15,8 @@ This is a **preview**, not latest/production. Only connect to trusted Hubs and t
 - The **exact** Grok CLI version installed and logged in: `grok 0.2.93 (f00f96316d)` (a trailing `[stable]` is fine), with `grok login` run as the **same OS user** that runs anet.
 
 ```bash
+# Install the exact version (co-presence is grok-version-sensitive) — install.sh supports bash -s <version>
+curl -fsSL https://x.ai/cli/install.sh | bash -s 0.2.93
 grok login
 grok --version   # must be grok 0.2.93 (f00f96316d)
 ```
