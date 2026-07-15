@@ -171,6 +171,7 @@ export default withMermaid(defineConfig({
               { text: 'Batch Agents', link: '/en/guide/batch' },
               { text: 'Agent Node', link: '/en/guide/agent-node' },
               { text: 'Node Runtime', link: '/en/guide/runtimes' },
+              { text: 'Grok Co-presence TUI (preview)', link: '/en/guide/grok-copresence' },
               { text: 'Grok Build ACP Runtime ↗', link: 'https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md' },
               { text: 'SDK Deep-dive', link: '/en/guide/sdk-deep-dive' },
               { text: 'Channel Integration', link: '/en/guide/channels' },

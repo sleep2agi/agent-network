@@ -371,9 +371,11 @@ anet node create 翻译官 --runtime claude-agent-sdk --model <minimax-model-id>
 > v0.9.0 短暂引入过「默认 detached tmux」行为（[#122](https://github.com/sleep2agi/agent-network/issues/122)），v0.9.2 通过 [#136](https://github.com/sleep2agi/agent-network/issues/136) 回退 —— detached tmux 触发了 macOS bun `setRawMode errno 5`（detached child 的 stdio 不是 real PTY，claude-code-cli setRawMode 调用失败）。现在的 `--tmux` 走 **attached** 模式（`tmux new -As`），PTY chain 保持完整不再触发 bug。
 
 ::: tip 想 re-attach 到已跑的 tmux 节点？
-当前没有顶层 `anet attach <alias>` 子命令（[#121](https://github.com/sleep2agi/agent-network/issues/121) 计划中, 未实施）。re-attach 用：
+当前没有通用的顶层 `anet attach <alias>` 子命令（[#121](https://github.com/sleep2agi/agent-network/issues/121) 计划中, 未实施）。re-attach 用：
 - `tmux a -t <alias>` —— 直接 tmux 命令
 - 或 `anet node start <alias> --tmux` —— `--tmux` flag 用 `tmux new -As`, session 已存在直接 attach
+
+**例外：Grok 人机共存**（`--runtime grok-build-cli`）有专用的 `anet grok attach <alias>`，可 attach 到 agent-node 持有的真实 Grok TUI，与网络任务同处一个会话。详见 [Grok 人机共存 TUI](./grok-copresence.md)。
 :::
 
 ```bash

@@ -365,9 +365,11 @@ Start an agent node. **Default is foreground** (stdio inherits the current termi
 > v0.9.0 briefly introduced an "auto-wrap into detached tmux" default ([#122](https://github.com/sleep2agi/agent-network/issues/122)). v0.9.2 reverts it via [#136](https://github.com/sleep2agi/agent-network/issues/136) — detached tmux triggered `setRawMode errno 5` on macOS bun (the detached child's stdio isn't a real PTY, claude-code-cli's setRawMode call failed). The new `--tmux` path is **attached** (`tmux new -As`), keeping the PTY chain intact so setRawMode works everywhere.
 
 ::: tip Want to re-attach to a running tmux node?
-There is no top-level `anet attach <alias>` subcommand today ([#121](https://github.com/sleep2agi/agent-network/issues/121) is planned, not yet implemented). To re-attach:
+There is no generic top-level `anet attach <alias>` subcommand today ([#121](https://github.com/sleep2agi/agent-network/issues/121) is planned, not yet implemented). To re-attach:
 - `tmux a -t <alias>` — direct tmux command
 - or `anet node start <alias> --tmux` — the `--tmux` flag uses `tmux new -As`, which attaches if the session already exists
+
+**Exception: Grok co-presence** (`--runtime grok-build-cli`) has a dedicated `anet grok attach <alias>` that attaches you to the real Grok TUI held by the agent-node, sharing one session with network tasks. See [Grok Co-presence TUI](./grok-copresence.md).
 :::
 
 ```bash
