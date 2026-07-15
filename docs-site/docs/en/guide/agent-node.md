@@ -600,7 +600,7 @@ When running in Docker, environment variables are the most convenient configurat
 - [One-shot install](/en/guide/one-shot-install) — first agent in 5 minutes after install
 
 **Configure deeper**:
-- [Runtimes](/en/guide/runtimes) — picking between claude-agent-sdk / codex-sdk / claude-code-cli / grok-build-acp
+- [Runtimes](/en/guide/runtimes) — picking between claude-agent-sdk / codex-sdk / claude-code-cli / grok-build-acp / opencode-cli
 - [Multi-model](/en/guide/multi-model) — use DeepSeek / MiniMax / Kimi / Claude
 - [Channel plugins](/en/guide/channels) — wire agents to Telegram / WeChat / Feishu
 
