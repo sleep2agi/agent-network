@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "crypto";
 import { spawn } from "child_process";
 import {
+  chmodSync,
   closeSync,
   constants,
   existsSync,
@@ -380,6 +381,113 @@ export function cleanupGrokCliStoppedTuiGeneration(
   removeExactEmptyPostStopDirectory(blockedDirectory);
 }
 
+// Real pinned Grok 0.2.93 plants an unreadable mode-000 sandbox marker in its
+// state home under its OWN pid (never the node-pty generation ids), as either a
+// file or a directory.
+const SANDBOX_BLOCKED_PLACEHOLDER_PREFIXES = Object.freeze([
+  "sandbox-blocked.",
+  "sandbox-blocked-dir.",
+]);
+
+function isSandboxBlockedPlaceholderName(name: string): boolean {
+  return SANDBOX_BLOCKED_PLACEHOLDER_PREFIXES.some((prefix) => name.startsWith(prefix));
+}
+
+/**
+ * Reclaim a pinned-Grok `sandbox-blocked.<pid>` / `sandbox-blocked-dir.<pid>`
+ * marker encountered during the post-stop harden walk.
+ *
+ * Grok creates this marker at mode 000 under its own pid, which never equals
+ * the node-pty generation ids used for the exact PID-bound directory cleanup.
+ * Left untouched the unreadable entry both (a) aborts the harden walk the moment
+ * open()/readdir() raises EACCES, so no retained state gets hardened, and (b)
+ * survives to the containment scanner as a fatal `grok_current_state_structure`
+ * anomaly. The runtime owns this inode, so it may chmod it back to owner-only
+ * even at mode 000 — ownership, not the permission bits, authorizes chmod — and
+ * inspect it safely. fchmod would need an fd, but a mode-000 inode cannot be
+ * opened until it is readable, so a path chmod is the only owner-available
+ * primitive; the inode identity is pinned through an O_NOFOLLOW handle
+ * immediately afterward so a swapped symlink/replacement cannot be inspected or
+ * removed by mistake.
+ *
+ * Only an EMPTY, single-link, owner-held, non-symlink placeholder is the benign
+ * sandbox marker and is removed exactly. Any non-empty / hard-linked / wrong-
+ * type entry is deliberately left in an unreadable owner-only state so it still
+ * fails closed as a structural anomaly. `before` is the caller's lstat, already
+ * confirmed non-symlink and owner-held.
+ */
+function reclaimSandboxBlockedPlaceholder(
+  path: string,
+  before: ReturnType<typeof lstatSync>,
+  uid: number | undefined,
+): void {
+  if (before.isDirectory()) {
+    chmodSync(path, 0o700);
+    let empty = false;
+    let fd: number | undefined;
+    try {
+      fd = openSync(
+        path,
+        constants.O_RDONLY | (constants.O_DIRECTORY || 0) | (constants.O_NOFOLLOW || 0),
+      );
+      const opened = fstatSync(fd);
+      if (!opened.isDirectory()
+        || !sameFileIdentity(before, opened)
+        || (uid !== undefined && opened.uid !== uid)) {
+        throw new Error(
+          `grok-build-cli refuses post-stop sandbox placeholder ${path}: identity changed during reclaim`,
+        );
+      }
+      empty = readdirSync(path).length === 0;
+    } finally {
+      if (fd !== undefined) closeSync(fd);
+    }
+    if (!empty) {
+      // Non-empty marker: restore the unreadable mode so the scanner still maps
+      // it to the fatal structural role rather than a hardened owner-only tree.
+      chmodSync(path, 0o000);
+      return;
+    }
+    const after = lstatSync(path);
+    if (after.isSymbolicLink() || !after.isDirectory() || !sameFileIdentity(before, after)) {
+      throw new Error(
+        `grok-build-cli refuses post-stop sandbox placeholder ${path}: directory changed before removal`,
+      );
+    }
+    rmdirSync(path);
+    return;
+  }
+  if (!before.isFile() || before.nlink !== 1 || before.size !== 0) {
+    // Non-regular, hard-linked, or non-empty marker: leave it exactly as Grok
+    // wrote it so the scanner classifies it as a fatal structural anomaly.
+    return;
+  }
+  chmodSync(path, 0o700);
+  let fd: number | undefined;
+  try {
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+    const opened = fstatSync(fd);
+    if (!opened.isFile()
+      || opened.nlink !== 1
+      || opened.size !== 0
+      || !sameFileIdentity(before, opened)
+      || (uid !== undefined && opened.uid !== uid)) {
+      throw new Error(
+        `grok-build-cli refuses post-stop sandbox placeholder ${path}: file changed during reclaim`,
+      );
+    }
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+  const after = lstatSync(path);
+  if (after.isSymbolicLink() || !after.isFile() || !sameFileIdentity(before, after)) {
+    throw new Error(
+      `grok-build-cli refuses post-stop sandbox placeholder ${path}: file changed before removal`,
+    );
+  }
+  rmSync(path);
+}
+
 function hardenPostStopTree(path: string, relativePath = ""): void {
   const stat = lstatSync(path);
   if (stat.isSymbolicLink()) {
@@ -388,6 +496,12 @@ function hardenPostStopTree(path: string, relativePath = ""): void {
   }
   const uid = process.getuid?.();
   if (uid !== undefined) assertCurrentOwner(path, uid, stat.uid);
+  if (isSandboxBlockedPlaceholderName(basename(path))) {
+    // Chmod-then-remove/keep the mode-000 sandbox marker before any generic
+    // open/readdir would EACCES-abort this walk or leave it as a fatal survivor.
+    reclaimSandboxBlockedPlaceholder(path, stat, uid);
+    return;
+  }
   if (stat.isDirectory()) {
     assertOwnedDirectoryForPostStop(path, `post-stop directory ${path}`);
     for (const entry of readdirSync(path)) {

@@ -223,10 +223,17 @@ describe("prepareGrokCliHome", () => {
     writeFileSync(identity, "identity\n", { mode: 0o644 });
     symlinkSync(identity, join(stateHome, "agent_id"));
     const blocked = join(stateHome, `sandbox-blocked-dir.${TUI_PID}`);
+    // An empty mode-000 marker under Grok's own (non node-pty) pid must be
+    // reclaimed PID-independently by the harden walk, not survive as a fatal
+    // structural anomaly, and an empty sandbox-blocked file marker likewise.
     const untrackedBlocked = join(stateHome, `sandbox-blocked-dir.${TUI_PID + 1}`);
+    const untrackedBlockedFile = join(stateHome, `sandbox-blocked.${TUI_PID + 2}`);
     mkdirSync(blocked, { mode: 0o700 });
     chmodSync(blocked, 0o000);
     mkdirSync(untrackedBlocked, { mode: 0o700 });
+    chmodSync(untrackedBlocked, 0o000);
+    writeFileSync(untrackedBlockedFile, "", { mode: 0o600 });
+    chmodSync(untrackedBlockedFile, 0o000);
 
     cleanupGrokCliPostStopState({
       stateHome,
@@ -242,7 +249,8 @@ describe("prepareGrokCliHome", () => {
     expect(existsSync(join(cwdSessions, "prompt_history.jsonl"))).toBe(false);
     expect(existsSync(join(stateHome, "sessions", "session_search.sqlite"))).toBe(false);
     expect(existsSync(blocked)).toBe(false);
-    expect(existsSync(untrackedBlocked)).toBe(true);
+    expect(existsSync(untrackedBlocked)).toBe(false);
+    expect(existsSync(untrackedBlockedFile)).toBe(false);
     for (const file of [
       join(session, "updates.jsonl"),
       join(stateHome, "logs", "unified.jsonl"),
@@ -251,7 +259,7 @@ describe("prepareGrokCliHome", () => {
       join(runtime, "l.lock"),
     ]) expect(statSync(file).mode & 0o777, file).toBe(0o600);
     for (const directory of [stateHome, join(stateHome, "sessions"), cwdSessions, session,
-      join(stateHome, "logs"), join(stateHome, "docs"), untrackedBlocked]) {
+      join(stateHome, "logs"), join(stateHome, "docs")]) {
       expect(statSync(directory).mode & 0o777, directory).toBe(0o700);
     }
     expect(lstatSync(join(stateHome, "agent_id")).isSymbolicLink()).toBe(true);
@@ -353,6 +361,69 @@ describe("prepareGrokCliHome", () => {
       tuiProcessIds: [TUI_PID],
     })).toThrow("expected an empty real directory");
     expect(readFileSync(join(blocked, "unknown"), "utf8")).toBe("counterexample\n");
+  });
+
+  it("reclaims an empty mode-000 sandbox marker under a foreign pid without aborting", () => {
+    const root = mkdtempSync(join(tmpdir(), "grok-cli-post-stop-foreign-blocked-"));
+    roots.push(root);
+    const stateHome = join(root, "state");
+    const runtime = join(root, "runtime");
+    const cwd = join(root, "project");
+    for (const directory of [stateHome, runtime, cwd]) mkdirSync(directory, { mode: 0o700 });
+    // Grok plants these under ITS OWN pid, which never matches the node-pty ids
+    // passed as tuiProcessIds, so the exact PID-bound cleanup never sees them.
+    const foreignDir = join(stateHome, `sandbox-blocked-dir.${TUI_PID + 7}`);
+    const foreignFile = join(stateHome, `sandbox-blocked.${TUI_PID + 8}`);
+    mkdirSync(foreignDir, { mode: 0o700 });
+    chmodSync(foreignDir, 0o000);
+    writeFileSync(foreignFile, "", { mode: 0o600 });
+    chmodSync(foreignFile, 0o000);
+
+    cleanupGrokCliPostStopState({
+      stateHome,
+      projectCwd: cwd,
+      leaderSocket: join(runtime, "l.sock"),
+      tuiProcessIds: [TUI_PID],
+    });
+
+    expect(existsSync(foreignDir)).toBe(false);
+    expect(existsSync(foreignFile)).toBe(false);
+    expect(statSync(stateHome).mode & 0o777).toBe(0o700);
+  });
+
+  it("keeps a non-empty foreign sandbox marker unreadable so it fails closed", () => {
+    const root = mkdtempSync(join(tmpdir(), "grok-cli-post-stop-foreign-nonempty-"));
+    roots.push(root);
+    const stateHome = join(root, "state");
+    const runtime = join(root, "runtime");
+    const cwd = join(root, "project");
+    for (const directory of [stateHome, runtime, cwd]) mkdirSync(directory, { mode: 0o700 });
+    const foreignDir = join(stateHome, `sandbox-blocked-dir.${TUI_PID + 7}`);
+    const foreignFile = join(stateHome, `sandbox-blocked.${TUI_PID + 8}`);
+    mkdirSync(foreignDir, { mode: 0o700 });
+    writeFileSync(join(foreignDir, "residue"), "unexpected\n", { mode: 0o600 });
+    chmodSync(foreignDir, 0o000);
+    writeFileSync(foreignFile, "unexpected\n", { mode: 0o600 });
+    chmodSync(foreignFile, 0o000);
+
+    // A non-empty marker is not the benign sandbox placeholder; the harden walk
+    // must neither abort nor remove it. It is left unreadable and owner-only so
+    // the containment scanner maps it to the fatal structural role.
+    cleanupGrokCliPostStopState({
+      stateHome,
+      projectCwd: cwd,
+      leaderSocket: join(runtime, "l.sock"),
+      tuiProcessIds: [TUI_PID],
+    });
+
+    expect(existsSync(foreignDir)).toBe(true);
+    expect(existsSync(foreignFile)).toBe(true);
+    expect(statSync(foreignDir).mode & 0o777).toBe(0o000);
+    expect(statSync(foreignFile).mode & 0o777).toBe(0o000);
+    chmodSync(foreignDir, 0o700);
+    expect(readdirSync(foreignDir)).toEqual(["residue"]);
+    chmodSync(foreignFile, 0o600);
+    expect(readFileSync(foreignFile, "utf8")).toBe("unexpected\n");
   });
 
   it("validates exact TUI process ids before mutation and refuses a placeholder symlink", () => {
