@@ -341,7 +341,7 @@ Vincent catch: Dashboard could upload and preview images, but tasks sent to agen
 
 - Local CommHub and Dashboard were upgraded and restarted.
 - 27 host codex-sdk agent-node processes were rolled to the new code.
-- P0 smoke sent `/tmp/anet-image-smoke.png` to `通信测试牛`; node logs showed `+1 image(s)` / `→ processing [codex] +1 image(s)`, with reply `图片通道OK`.
+- P0 smoke sent `/tmp/anet-image-smoke.png` to `test-node`; node logs showed `+1 image(s)` / `→ processing [codex] +1 image(s)`, with reply `图片通道OK`.
 
 ### Known Limits
 
