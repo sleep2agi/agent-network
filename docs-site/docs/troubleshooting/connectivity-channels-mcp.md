@@ -32,7 +32,7 @@ anet doctor --fix
 ## 2. 查看 channel 实际状态
 
 ```bash
-anet channel ls [node]
+anet channel status <node>
 ```
 
 这个命令用于确认 CLI 实际读取的是哪份 channel 配置。重点看：
@@ -49,7 +49,7 @@ anet node stop <node>
 anet node start <node>
 ```
 
-新版本 `anet node start` / `anet node resume` 会在 channel 初始化失败时打印显式 warning。没收到 Telegram 回复时，先看启动日志和 `anet channel ls`，再看 agent 任务日志。
+新版本 `anet node start` / `anet node resume` 会在 channel 初始化失败时打印显式 warning。没收到 Telegram 回复时，先看启动日志和 `anet channel status`，再看 agent 任务日志。
 
 ## 3. Agent 没有 `send_task`
 
@@ -66,7 +66,7 @@ anet node start <node>
 
 1. 确认节点 runtime。
 2. 跑 `anet doctor`。
-3. 对 Telegram / channel 问题跑 `anet channel ls [node]`。
+3. 对 Telegram / channel 问题跑 `anet channel status <node>`。
 4. 重启节点，让 runtime 重新加载 MCP / channel 配置。
 
 ## 4. 发了但对方没收到
@@ -75,7 +75,7 @@ anet node start <node>
 
 1. `anet status` 看目标节点是否在线。
 2. `anet doctor` 看 token / MCP / hub 状态。
-3. 如果目标是 Telegram channel，跑 `anet channel ls [node]`。
+3. 如果目标是 Telegram channel，跑 `anet channel status <node>`。
 4. 如果是 agent 间任务，检查发送方日志里是否有 `send_task` 调用结果。
 
 离线节点可能仍会收到 inbox 里的消息，但实时回复依赖节点恢复在线并重新连上 SSE。

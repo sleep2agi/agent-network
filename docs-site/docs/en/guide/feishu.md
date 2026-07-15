@@ -167,7 +167,7 @@ anet channel allow feishu <node> --rm-from ou_<your-open-id>
 anet channel allow feishu <node> --rm-chat oc_<group-chat-id>
 ```
 
-The flags are **repeatable** (one invocation can carry multiple `--add-from a --add-from b`) and also accept comma-separated lists (`--add-from a,b,c`).
+The flags are **repeatable** (one invocation can carry multiple `--add-from a --add-from b`). **Comma-separated lists are NOT supported** — `--add-from a,b,c` is stored verbatim as a single open_id.
 
 Inspect the current whitelist:
 

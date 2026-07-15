@@ -66,7 +66,7 @@ Keep the security group / firewall locked down to **22(SSH) + 80 + 443**. Don't 
 
 ### 5. Verify the tmux control plane is off
 
-**Since v0.8, the tmux control plane is disabled by default.** Verified at [`server/src/index.ts:32`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L32): `TMUX_ENABLED = process.env.COMMHUB_ENABLE_TMUX === "1"` — **only an explicit `=1` enables it**; `=0` / `=true` / unset all leave it off.
+**Since v0.8, the tmux control plane is disabled by default.** Verified at [`server/src/index.ts:36`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L36): `TMUX_ENABLED = process.env.COMMHUB_ENABLE_TMUX === "1"` — **only an explicit `=1` enables it**; `=0` / `=true` / unset all leave it off.
 
 So as long as you do **not** actively set `COMMHUB_ENABLE_TMUX=1`, it's already off:
 

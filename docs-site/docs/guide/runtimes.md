@@ -11,7 +11,7 @@
 | `claude-code-cli` | spawn 本机 `claude` 命令 | 想"像在终端用 Claude"那样干活, **复用 Claude 订阅 0 配置** | Claude Sonnet / Opus (订阅) | 已 `claude auth login` | 选完直接结束, **跳过 vendor / model / API key** |
 | `claude-agent-sdk` | `@anthropic-ai/claude-agent-sdk` (随 agent-node 装) | 编程式调用任意 Anthropic 兼容 API | Anthropic 直连 / MiniMax / 书生 Intern / 小米 MiMo / DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / 通义千问 ... ([完整表](/guide/multi-model)) | API Key | **唯一会弹 vendor 子菜单 → 选 vendor → 选 model → 填 API Key** |
 | `codex-sdk` | `@openai/codex-sdk` (随 agent-node 装) | 写代码 / 跑命令 | OpenAI Codex (gpt-5 等) | 已 `codex auth login` ([@openai/codex](https://www.npmjs.com/package/@openai/codex) CLI) | 选完 print `codex auth login` hint, **跳过 vendor** |
-| `grok-build-acp` | spawn 本机 `grok` ACP server | 用 xAI Grok Build 跑任务 / 协作 | xAI Grok (grok-build 系列) | 已 `grok login` + `GROK_CODE_XAI_API_KEY` env (该 runtime **另需**该 env, 非 wizard 输出) | 选完 print `grok login` hint, **跳过 vendor** |
+| `grok-build-acp` | spawn 本机 `grok` ACP server | 用 xAI Grok Build 跑任务 / 协作 | xAI Grok (grok-build 系列) | 已 `grok auth login` + `GROK_CODE_XAI_API_KEY` env (该 runtime **另需**该 env, 非 wizard 输出) | 选完 print `grok auth login` hint, **跳过 vendor** |
 
 ::: tip 不知道怎么选?
 - **想白嫖 Claude 订阅 / 新手最省事** → `claude-code-cli` (`claude auth login` 后 0 配置)
@@ -430,7 +430,7 @@ anet node start codexbridge
 
 ### 前置
 
-- 本机已装 `grok` CLI 并 `grok login` 完成
+- 本机已装 `grok` CLI 并 `grok auth login` 完成
 - 环境变量 `GROK_CODE_XAI_API_KEY` 已设
 - npm `latest` 的 `agent-network` + `agent-node`（包含 grok `session/prompt` 超时修复；详见 [troubleshooting → grok-build-acp 节点任务挂死](/troubleshooting#grok-build-acp-节点任务挂死-session-prompt-timed-out-after-300000ms-json-rpc-error-32603)）
 

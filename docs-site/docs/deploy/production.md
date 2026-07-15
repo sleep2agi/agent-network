@@ -79,7 +79,7 @@ DNS 解析到你的服务器 IP，Caddy 会自动签发 Let's Encrypt 证书。
 
 ### 5. 确认 tmux 控制面已关闭
 
-**v0.8 起 tmux 控制面默认关闭**，verify [`server/src/index.ts:32`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L32) `TMUX_ENABLED = process.env.COMMHUB_ENABLE_TMUX === "1"` —— **只有显式 `=1` 才开启**，`=0` / `=true` / 不设 都是关。
+**v0.8 起 tmux 控制面默认关闭**，verify [`server/src/index.ts:36`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L36) `TMUX_ENABLED = process.env.COMMHUB_ENABLE_TMUX === "1"` —— **只有显式 `=1` 才开启**，`=0` / `=true` / 不设 都是关。
 
 所以你只要**不主动设** `COMMHUB_ENABLE_TMUX=1`，就已经是关闭状态：
 

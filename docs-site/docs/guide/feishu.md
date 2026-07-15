@@ -167,7 +167,7 @@ anet channel allow feishu <node> --rm-from ou_<your-open-id>
 anet channel allow feishu <node> --rm-chat oc_<group-chat-id>
 ```
 
-flags 是 **repeatable** 的（一次 `--add-from a --add-from b` 加多个），也支持 `--add-from a,b,c` 逗号语法。
+flags 是 **repeatable** 的（一次 `--add-from a --add-from b` 加多个）。**不支持逗号语法**——`--add-from a,b,c` 会被当成单个 open_id 原样存储。
 
 查看当前白名单：
 

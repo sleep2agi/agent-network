@@ -32,7 +32,7 @@ anet doctor --fix
 ## 2. Inspect channel state
 
 ```bash
-anet channel ls [node]
+anet channel status <node>
 ```
 
 This shows the channel config the CLI actually reads. Check:
@@ -49,7 +49,7 @@ anet node stop <node>
 anet node start <node>
 ```
 
-Recent `anet node start` / `anet node resume` prints an explicit warning when channel initialization fails. If Telegram replies are missing, check startup logs and `anet channel ls` before digging into task logs.
+Recent `anet node start` / `anet node resume` prints an explicit warning when channel initialization fails. If Telegram replies are missing, check startup logs and `anet channel status` before digging into task logs.
 
 ## 3. Agent does not have `send_task`
 
@@ -66,7 +66,7 @@ If the agent says it has no `send_task` or `get_all_status`:
 
 1. Confirm the node runtime.
 2. Run `anet doctor`.
-3. For Telegram / channel issues, run `anet channel ls [node]`.
+3. For Telegram / channel issues, run `anet channel status <node>`.
 4. Restart the node so the runtime reloads MCP / channel config.
 
 ## 4. Sent, but the receiver did not see it
@@ -75,7 +75,7 @@ From the user's perspective, check in this order:
 
 1. `anet status` to see whether the target node is online.
 2. `anet doctor` for token / MCP / hub health.
-3. If the target is a Telegram channel, run `anet channel ls [node]`.
+3. If the target is a Telegram channel, run `anet channel status <node>`.
 4. For agent-to-agent tasks, inspect the sender log for the `send_task` result.
 
 Offline nodes may still receive inbox messages, but real-time replies depend on the node coming back online and reconnecting SSE.
