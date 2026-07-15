@@ -228,8 +228,10 @@ REST API automatically scopes based on token type:
 | `POST /api/auth/register` | 30/min | Prevent registration attacks |
 | `POST /api/auth/login` | 10/min | Prevent brute force |
 
-::: info Only register + login have IP rate limiting in v0.8
-Verify [`server/src/index.ts:430`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L430) (register, 30/min) + [L444](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L445) (login, 10/min) — these are the only two call sites for `checkRateLimit()`. The function's `maxPerMinute = 60` default is reserved for future expansion; **no other endpoint currently rate-limits per IP**. If you're worried about write abuse, layer rate limiting at a reverse proxy (nginx / Cloudflare / etc.) in front.
+::: info register and login use different mechanisms
+- **register**: the generic `checkRateLimit()` (30/min) — verify [`server/src/index.ts:721`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L721). The `maxPerMinute = 60` default is reserved for future expansion.
+- **login**: a dedicated `LoginIpRateLimiter` (10 requests per 60-second window, per IP) **plus** a failure-based progressive account lockout (triggered after ≥ 5 consecutive failures; lock duration starts at 30 s and backs off exponentially up to a 15-minute cap) — verify [`server/src/auth_login_guard.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth_login_guard.ts).
+- **No other endpoint rate-limits per IP** — if you're worried about write abuse, layer rate limiting at a reverse proxy (nginx / Cloudflare / etc.) in front.
 :::
 
 ### Implementation
@@ -260,7 +262,7 @@ When the limit is exceeded the server returns HTTP 429 with a body like:
 { "ok": false, "error": "too many requests, try again later" }
 ```
 
-(`/login` returns `"too many attempts, try again later"`; on a `/login` hit the server also writes audit `action='login_rate_limited'` with the client IP. Verify [`server/src/index.ts:445-446`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L445). **No `retry_after_seconds` field or `Retry-After` header is set** — the window is a fixed 60 seconds, just wait.)
+(the register 429 body is shown above; `/login` goes through the dedicated guard — an IP-limit hit returns `error: "rate_limited"` and a failure-lockout hit returns `error: "login_locked"`, **both with a `Retry-After` header and a `retry_after_ms` field in the body**, and the server writes audit `action='login_rate_limited'` with the client IP. Verify [`server/src/auth_login_guard.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth_login_guard.ts).)
 
 ### Localhost Exemption
 
