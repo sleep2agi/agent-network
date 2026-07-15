@@ -102,6 +102,22 @@ curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status
 
 ## 认证类错误
 
+### `No hub configured. Pass --hub <url> or run 'anet init' first.`
+
+**现象**：全新装后第一次 `anet login`（或照着 `anet hub start` 的提示跑 `anet login --username admin --password anethub`）直接报这个，登不进去。
+
+**原因**：`anet hub start` 只起 hub，**不会**把 hub 地址写进全局配置；而 `anet login` 需要知道连哪个 hub —— 中间少了「设置 hub 地址」这一步（`anet init` 或 `--hub` 会做）。
+
+**解决**：登录时直接带 `--hub`（本机 hub 默认 `127.0.0.1:9200`）：
+
+```bash
+anet login --hub http://127.0.0.1:9200 --username admin --password anethub
+```
+
+或先 `anet init --hub <url>` 设好 hub 再 `anet login`。连远程 hub 把地址换成对应 IP。
+
+---
+
 ### 401 `auth required` / `invalid token` / `token required`
 
 实际 server 返回三种 401 错码（**不是** `{"error": "unauthorized"}`；verify `grep error.*401 server/src/index.ts`）：

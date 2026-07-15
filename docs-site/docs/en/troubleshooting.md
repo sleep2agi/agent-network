@@ -102,6 +102,22 @@ curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status
 
 ## Auth Errors
 
+### `No hub configured. Pass --hub <url> or run 'anet init' first.`
+
+**Symptom**: on a fresh install, your first `anet login` (or the `anet login --username admin --password anethub` suggested by `anet hub start`) fails with this — you can't log in.
+
+**Cause**: `anet hub start` only launches the hub; it does **not** write the hub URL into your global config. But `anet login` needs to know which hub to reach — the "set the hub URL" step (done by `anet init` or `--hub`) is missing in between.
+
+**Fix**: pass `--hub` directly at login (a local hub defaults to `127.0.0.1:9200`):
+
+```bash
+anet login --hub http://127.0.0.1:9200 --username admin --password anethub
+```
+
+Or run `anet init --hub <url>` first, then `anet login`. For a remote hub, use its IP.
+
+---
+
 ### 401 `auth required` / `invalid token` / `token required`
 
 The server actually returns one of three 401 errors (**not** `{"error": "unauthorized"}`; verify `grep error.*401 server/src/index.ts`):
