@@ -99,6 +99,7 @@ anet node start codex-node
 
 ## 常见坑
 
+- **`anet --version`（或任意命令）报 `ENOENT ... 'E:\C:\...\package.json'`（盘符被拼错）**：当 anet 装在某个盘（如 `C:`）、却从**另一个盘**（如 `E:\`）跑命令时触发（[#446](https://github.com/sleep2agi/agent-network/issues/446)）。**已在 preview `2.3.0-preview.29` 修复**，latest 补丁跟进中。临时绕过：切到 anet 所在盘再跑（先 `cd C:`），或把 Node/anet 装到跟工作目录同一个盘。
 - **`spawn codex ENOENT`**：`codex` 没装或 npm 全局 bin 不在 PATH 上。先 `codex --version` 确认；PATH 修复参考 [节点 Runtime — claude-code-cli](./runtimes.md#claude-code-cli)。
 - **`codex login` 报未知命令（很旧的 codex CLI）**：升级 codex（`npm i -g @openai/codex@latest`），或直接用 `OPENAI_API_KEY` 环境变量（PowerShell 用 `$env:OPENAI_API_KEY="..."`，Linux/WSL 用 `export`）。
 - **连本地 Hub**：WSL 连「Windows 宿主机上的本地 Hub」时别用 `localhost`，用宿主机在 WSL 里的可达地址。

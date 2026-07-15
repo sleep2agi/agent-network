@@ -99,6 +99,7 @@ anet node start codex-node
 
 ## Common gotchas
 
+- **`anet --version` (or any command) fails with `ENOENT ... 'E:\C:\...\package.json'` (mangled drive path)**: happens when anet is installed on one drive (e.g. `C:`) but you run it from **another drive** (e.g. `E:\`) ([#446](https://github.com/sleep2agi/agent-network/issues/446)). **Fixed in preview `2.3.0-preview.29`**; a latest patch is tracked in #446. Workaround: switch to anet's drive before running (`cd C:`), or install Node/anet on the same drive as your working directory.
 - **`spawn codex ENOENT`**: `codex` isn't installed, or npm's global bin isn't on PATH. Confirm with `codex --version` first; PATH fix at [Node Runtime — claude-code-cli](./runtimes.md#claude-code-cli).
 - **`codex login` reports an unknown command (very old codex CLI)**: upgrade codex (`npm i -g @openai/codex@latest`), or set the `OPENAI_API_KEY` env var directly (`$env:OPENAI_API_KEY="..."` in PowerShell, `export` in Linux/WSL).
 - **Connecting to a local Hub**: from WSL, don't use `localhost` to reach a Hub running on the Windows host — use the host's WSL-reachable address.
