@@ -1316,6 +1316,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     }
     cleanupGrokCliStoppedTuiGeneration({
       stateHome: this.opts.grokHome,
+      projectCwd: this.opts.cwd,
       tuiProcessId,
     });
     this.pendingTuiProcessIds.delete(tuiProcessId);

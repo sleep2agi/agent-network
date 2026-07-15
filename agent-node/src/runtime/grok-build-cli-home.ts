@@ -61,6 +61,7 @@ export interface CleanupGrokCliPostStopOptions {
 
 export interface CleanupGrokCliStoppedTuiGenerationOptions {
   stateHome: string;
+  projectCwd: string;
   /** Exact PID returned by node-pty for the generation whose exit is confirmed. */
   tuiProcessId: number;
 }
@@ -532,12 +533,14 @@ export function cleanupGrokCliStoppedTuiGeneration(
   opts: CleanupGrokCliStoppedTuiGenerationOptions,
 ): void {
   const stateHome = resolve(opts.stateHome);
-  if (opts.stateHome !== stateHome) {
-    throw new Error("grok-build-cli stopped-generation cleanup requires a canonical absolute state home");
+  const projectCwd = resolve(opts.projectCwd);
+  if (opts.stateHome !== stateHome || opts.projectCwd !== projectCwd) {
+    throw new Error("grok-build-cli stopped-generation cleanup requires canonical absolute paths");
   }
   const blockedDirectory = sandboxBlockedDirectoryPath(stateHome, opts.tuiProcessId);
   assertOwnedDirectoryForPostStop(stateHome, "stopped-generation state home");
   removeExactEmptyPostStopDirectory(blockedDirectory);
+  removeExactProjectSandboxPlaceholders(projectCwd);
 }
 
 // Real pinned Grok 0.2.93 plants an unreadable mode-000 sandbox marker in its

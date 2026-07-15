@@ -648,7 +648,7 @@ describe("prepareGrokCliHome", () => {
     })).toThrow("positive integer TUI process ids");
     expect(existsSync(leaderLog)).toBe(true);
     expect(existsSync(blocked)).toBe(true);
-    cleanupGrokCliStoppedTuiGeneration({ stateHome, tuiProcessId: TUI_PID });
+    cleanupGrokCliStoppedTuiGeneration({ stateHome, projectCwd: cwd, tuiProcessId: TUI_PID });
     expect(existsSync(blocked)).toBe(false);
     expect(existsSync(leaderLog)).toBe(true);
 
@@ -663,6 +663,7 @@ describe("prepareGrokCliHome", () => {
     symlinkSync(external, join(linkHome, `sandbox-blocked-dir.${TUI_PID}`), "dir");
     expect(() => cleanupGrokCliStoppedTuiGeneration({
       stateHome: linkHome,
+      projectCwd: external,
       tuiProcessId: TUI_PID,
     })).toThrow("expected an empty real directory");
     expect(readFileSync(join(external, "keep"), "utf8")).toBe("unchanged\n");
