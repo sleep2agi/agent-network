@@ -1781,7 +1781,7 @@ describe("Grok copresence runtime integration", () => {
       const observed = readdirSync(captures)
         .filter((name) => name.endsWith(".env"))
         .map((name) => parseNulEnvironment(readFileSync(join(captures, name))));
-      expect(observed).toHaveLength(3);
+      expect(observed).toHaveLength(4);
       for (const env of observed) {
         expect(env).toEqual({ PATH: "/usr/local/bin:/usr/bin:/bin" });
       }

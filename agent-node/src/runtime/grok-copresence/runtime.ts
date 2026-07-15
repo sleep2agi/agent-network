@@ -38,6 +38,7 @@ import {
 } from "./state";
 import { buildGrokHelperEnv, buildGrokPtyEnv, projectGrokChildEnv } from "../grok-child-env";
 import {
+  acquireGrokProjectTurnLock,
   cleanupGrokCliPostStopState,
   cleanupGrokCliStoppedTuiGeneration,
 } from "../grok-build-cli-home";
@@ -729,6 +730,17 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
 
     try {
       const flockBinary = this.opts.flockBinary ?? "flock";
+      // Project policy placeholders live in the shared cwd, not this node's
+      // isolated Grok home. Hold the same canonical project lock used by
+      // headless turns for the entire TUI lifetime so a different node cannot
+      // spawn against, or clean up, this runtime's sandbox deny anchors.
+      // This lock is pushed first and therefore released last, after PTY,
+      // Leader, post-stop cleanup, and the node-local lifetime locks.
+      this.locks.push(await acquireGrokProjectTurnLock(
+        this.opts.cwd,
+        flockBinary,
+        this.opts.env,
+      ));
       const leaderLockKey = createHash("sha256").update(this.leaderSocket).digest("hex").slice(0, 20);
       const sessionLockDir = join(realpathSync(this.opts.grokHome), "copresence-locks");
       ensurePrivateRuntimeDirectory(sessionLockDir);
