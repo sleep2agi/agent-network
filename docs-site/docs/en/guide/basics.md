@@ -142,7 +142,7 @@ There are **several different logins** in the Agent Network ecosystem, and they 
 
 ```bash
 # Connect to a local server
-anet login
+anet login --hub http://127.0.0.1:9200
 
 # Connect to a remote server (use the server's IP)
 anet login --hub http://10.0.0.1:9200

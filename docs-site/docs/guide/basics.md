@@ -143,7 +143,7 @@ anet node start 文案1号
 
 ```bash
 # 连接本地服务器
-anet login
+anet login --hub http://127.0.0.1:9200
 
 # 连接远程服务器（填服务器 IP）
 anet login --hub http://10.0.0.1:9200
