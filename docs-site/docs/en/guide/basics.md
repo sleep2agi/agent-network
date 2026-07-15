@@ -16,7 +16,7 @@ A Runtime is the engine that an Agent uses to call an AI model. Different Runtim
 
 | Runtime | AI Model | Best For | You Need |
 |---------|----------|----------|----------|
-| `codex-sdk` | Codex (codex-sdk) | Writing code, running commands | `codex auth login` |
+| `codex-sdk` | Codex (codex-sdk) | Writing code, running commands | `codex login` |
 | `claude-agent-sdk` | Claude / MiniMax / DeepSeek / GLM / Kimi / Intern / Xiaomi MiMo / OpenRouter | Reasoning, analysis, translation (supports domestic providers) | API Key (domestic or Anthropic) |
 | `claude-code-cli` | Claude Sonnet/Opus | Reasoning, coding, terminal ops (CLI mode) | Claude Code installed + Claude Pro/Team/Max subscription |
 
@@ -174,7 +174,7 @@ anet hub dashboard
 # Open http://localhost:3000
 ```
 
-### 3. `codex auth login` -- OpenAI Account (NOT related to Agent Network)
+### 3. `codex login` -- OpenAI Account (NOT related to Agent Network)
 
 If you want to use a Codex (codex-sdk) Agent, you need to log into OpenAI's Codex first. **This is OpenAI's own account system** and has nothing to do with Agent Network.
 
@@ -188,13 +188,13 @@ If you use `claude-agent-sdk`, you need an Anthropic API key or a compatible pro
 |---------------------|-------|--------------|----------------|
 | Manage Agent Network | Terminal | `anet login` | Agent Network account |
 | View Dashboard | Browser | Web login | Agent Network account (same one) |
-| Use Codex (codex-sdk) Agent | Terminal | `codex auth login` | OpenAI account |
+| Use Codex (codex-sdk) Agent | Terminal | `codex login` | OpenAI account |
 | Use Claude Agent SDK | `anet node create` | Enter API key | Anthropic or compatible provider account |
 | Use Claude Code CLI | Terminal | `claude auth login` | Anthropic / Claude Code account |
 | Use MiniMax Agent | No login needed | Configure API Key | MiniMax account |
 
 ::: warning Remember
-`anet login` logs you into Agent Network. `codex auth login` and `claude auth login` log you into AI model providers -- they are completely separate systems.
+`anet login` logs you into Agent Network. `codex login` and `claude auth login` log you into AI model providers -- they are completely separate systems.
 :::
 
 ---
@@ -230,7 +230,7 @@ Agents need AI model API keys to do their work. Different models require keys fr
 | Xiaomi MiMo | [platform.xiaomimimo.com](https://platform.xiaomimimo.com) → API Keys | `xxx` | Same as above |
 | OpenRouter | [openrouter.ai](https://openrouter.ai) → Keys | `sk-or-xxx` | Same as above |
 | Claude | [console.anthropic.com](https://console.anthropic.com) → API Keys | `sk-ant-xxx` | Same as above |
-| Codex (codex-sdk) | No key needed | Run `codex auth login` in terminal | Saved automatically |
+| Codex (codex-sdk) | No key needed | Run `codex login` in terminal | Saved automatically |
 | Claude Code | No key needed | Run `claude auth login` in terminal | Saved automatically |
 
 ### 3. Where Are Keys Stored?

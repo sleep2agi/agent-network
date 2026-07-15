@@ -38,8 +38,7 @@ codex --version
 ### 4. Log in to codex
 
 ```powershell
-codex auth login
-# If that reports an unknown command, try: codex login
+codex login
 # Or use an API key (note PowerShell env-var syntax):
 $env:OPENAI_API_KEY = "sk-your-key"
 ```
@@ -90,7 +89,7 @@ Install anet, install the runtime's CLI, log in to your Hub, create the node —
 ```bash
 npm install -g @sleep2agi/agent-network
 npm install -g @openai/codex
-codex auth login              # or export OPENAI_API_KEY=sk-...
+codex login              # or export OPENAI_API_KEY=sk-...
 anet login --hub https://<your-hub-address> --username <user> --password <password>
 anet node create codex-node --runtime codex-sdk
 anet node start codex-node
@@ -101,6 +100,6 @@ anet node start codex-node
 ## Common gotchas
 
 - **`spawn codex ENOENT`**: `codex` isn't installed, or npm's global bin isn't on PATH. Confirm with `codex --version` first; PATH fix at [Node Runtime — claude-code-cli](./runtimes.md#claude-code-cli).
-- **`codex auth login` reports an unknown command**: use `codex login`, or set the `OPENAI_API_KEY` env var directly (`$env:OPENAI_API_KEY="..."` in PowerShell, `export` in Linux/WSL).
+- **`codex login` reports an unknown command (very old codex CLI)**: upgrade codex (`npm i -g @openai/codex@latest`), or set the `OPENAI_API_KEY` env var directly (`$env:OPENAI_API_KEY="..."` in PowerShell, `export` in Linux/WSL).
 - **Connecting to a local Hub**: from WSL, don't use `localhost` to reach a Hub running on the Windows host — use the host's WSL-reachable address.
 - **`Assertion failed: !(handle->flags & UV_HANDLE_CLOSING) ... src\win\async.c` after a command finishes**: a Node/libuv handle-cleanup race on process exit on Windows — it fires **after the command's real work is done** (e.g. `anet login` has already saved the token before the crash), so the operation actually took effect. Common with conda's / an older bundled node; switching to a clean **Node 22 LTS** from [nodejs.org](https://nodejs.org) (not conda's node) usually fixes it.

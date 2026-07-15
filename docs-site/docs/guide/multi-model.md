@@ -30,7 +30,7 @@ Agent Network 支持在同一个网络中运行不同 AI 模型的 Agent。所�
 | **Claude Sonnet（当前主线）** | Anthropic | `claude-agent-sdk` | Anthropic API Key | 主力推理（具体 ID 查 [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview)） | 中-高 |
 | **Claude Opus（当前主线）** | Anthropic | `claude-agent-sdk` | Anthropic API Key | 复杂任务 / 长上下文（同上） | 极高 |
 | **Claude Code** | Anthropic | `claude-code-cli` | Claude Max 订阅 | 终端交互 | 订阅制 |
-| **Codex (codex-sdk)** | OpenAI | `codex-sdk` | codex auth login | 代码生成 | 中 |
+| **Codex (codex-sdk)** | OpenAI | `codex-sdk` | codex login | 代码生成 | 中 |
 | **OpenRouter（多模型聚合）** | OpenRouter | `claude-agent-sdk` | `ANTHROPIC_AUTH_TOKEN` | 一个 API Key 用所有模型（GPT-4 / Claude / Gemini / Llama 等），统一计费；**不在内置 `VENDORS` 列表**，走 `custom` 供应商接入（`openrouter.ai/api/v1`）| 跟随上游 |
 | **xAI Grok Build** | xAI | `grok-build-acp` | `grok auth login` + `GROK_CODE_XAI_API_KEY`（runtime 前置） | xAI Grok Build ACP 协议跨 agent 协作；`anet node create` 4-way runtime picker 可选（v0.10.8 / v0.10.11 起），[详细 runtime 指南 ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)| 中 |
 
@@ -103,7 +103,7 @@ anet node start 推理大师
 
 ```bash
 # 先登录 OpenAI
-codex auth login
+codex login
 
 # 创建 Codex Agent
 # --model 填 OpenAI Codex 文档里的最新 model id
@@ -130,7 +130,7 @@ ANTHROPIC_AUTH_TOKEN=你的Key \
 anet node create 代码审查 --runtime claude-agent-sdk
 
 # 3. 海外代码组（高能力）
-codex auth login
+codex login
 anet node create 架构师 --runtime codex-sdk --model <codex-model-id>
 
 # 4. 全部启动

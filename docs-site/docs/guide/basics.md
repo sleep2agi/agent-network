@@ -16,7 +16,7 @@ Runtime 就是 Agent 用来调用 AI 模型的引擎。不同的 Runtime 对接�
 
 | Runtime | 对接模型 | 适合场景 | 需要什么 |
 |---------|---------|---------|---------|
-| `codex-sdk` | Codex (codex-sdk) | 写代码、跑命令 | `codex auth login` |
+| `codex-sdk` | Codex (codex-sdk) | 写代码、跑命令 | `codex login` |
 | `claude-agent-sdk` | Claude / MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter | 推理、分析、翻译（支持国产模型） | API Key（国产或 Anthropic） |
 | `claude-code-cli` | Claude Sonnet/Opus | 推理、写代码、终端操作（CLI 模式） | Claude Code CLI 已安装 + Claude Max 订阅 |
 
@@ -175,7 +175,7 @@ anet hub dashboard
 # 浏览器打开 http://localhost:3000
 ```
 
-### 3. `codex auth login` -- OpenAI 账号（和 Agent Network 无关）
+### 3. `codex login` -- OpenAI 账号（和 Agent Network 无关）
 
 如果你要用 Codex (codex-sdk) 模型的 Agent，需要先登录 OpenAI 的 Codex。**这是 OpenAI 自己的账号体系**，跟 Agent Network 没关系。
 
@@ -189,13 +189,13 @@ anet hub dashboard
 |-----------|---------|---------|---------|
 | 管理 Agent Network | 终端 | `anet login` | Agent Network 账号 |
 | 看 Dashboard | 浏览器 | 网页登录 | Agent Network 账号（同一个） |
-| 用 Codex (codex-sdk) Agent | 终端 | `codex auth login` | OpenAI 账号 |
+| 用 Codex (codex-sdk) Agent | 终端 | `codex login` | OpenAI 账号 |
 | 用 Claude Agent SDK | `anet node create` | 填 API Key | Anthropic 或兼容服务商账号 |
 | 用 Claude Code CLI | 终端 | `claude auth login` | Anthropic / Claude Code 账号 |
 | 用 MiniMax Agent | 不用登录 | 配置 API Key 即可 | MiniMax 账号 |
 
 ::: warning 记住
-`anet login` 是登录 Agent Network。`codex auth login` 和 `claude auth login` 是登录 AI 模型提供商，和 Agent Network 是两码事。
+`anet login` 是登录 Agent Network。`codex login` 和 `claude auth login` 是登录 AI 模型提供商，和 Agent Network 是两码事。
 :::
 
 ---
@@ -231,7 +231,7 @@ Agent 干活需要调用 AI 模型，不同模型的 Key 要去不同地方申�
 | 小米 MiMo | [platform.xiaomimimo.com](https://platform.xiaomimimo.com) → API Keys | `xxx` | 同上 |
 | OpenRouter | [openrouter.ai](https://openrouter.ai) → Keys | `sk-or-xxx` | 同上 |
 | Claude | [console.anthropic.com](https://console.anthropic.com) → API Keys | `sk-ant-xxx` | 同上 |
-| Codex (codex-sdk) | 不需要 Key | 终端执行 `codex auth login` | 自动保存 |
+| Codex (codex-sdk) | 不需要 Key | 终端执行 `codex login` | 自动保存 |
 | Claude Code | 不需要 Key | 终端执行 `claude auth login` | 自动保存 |
 
 ### 3. Key 保存在哪？

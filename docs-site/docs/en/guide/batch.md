@@ -36,7 +36,7 @@ Running `anet create --batch` with no flags enters the wizard.
 | Field | Flag | Default | Notes |
 |------|------|------|------|
 | Vendor / model | `--preset <key>` | omit → interactive **vendor picker** (shares the same `selectVendorAndModel()` implementation — ⚠ the batch wizard is still vendor-first, **unlike `anet create`'s v0.9.2+ runtime-first wizard** [#133](https://github.com/sleep2agi/agent-network/issues/133); you pick the vendor first, then the model. v0.10.5-7 incremental UX upgrades have shipped: workdir-mode prompt ([#152](https://github.com/sleep2agi/agent-network/issues/152)) / silent-exit fix ([#155](https://github.com/sleep2agi/agent-network/issues/155)) / codex-sdk batch-path yolo flags parity ([#156](https://github.com/sleep2agi/agent-network/issues/156))) | `--preset` accepts a vendor key (`intern` / `minimax` / `mimo` / `anthropic` / `codex` / `claude-code` / `custom`); for backward compat it also accepts the old model id (e.g. `intern-s1-pro`, auto-resolved back to its vendor) |
-| API key | `--api-key <key>` | interactive | written as each node's runtime auth token — **codex-sdk / claude-code-cli runtimes now auto-skip the API-key prompt** (v0.10.5 [#153](https://github.com/sleep2agi/agent-network/issues/153) — users `codex auth login` / `claude auth login` instead) |
+| API key | `--api-key <key>` | interactive | written as each node's runtime auth token — **codex-sdk / claude-code-cli runtimes now auto-skip the API-key prompt** (v0.10.5 [#153](https://github.com/sleep2agi/agent-network/issues/153) — users `codex login` / `claude auth login` instead) |
 | Workdir | `--workdir <path>` | `~/anet-team` | parent directory |
 | Workdir mode | `--workdir-mode separate\|shared` | `separate` | `separate` = one subdirectory per node; `shared` = all nodes write into the same `<workdir>/.anet/nodes` |
 | Prefix | `--prefix <name>` | interactive | alias prefix, e.g. `engineer` → `engineer1` |
@@ -56,7 +56,7 @@ The `anet create --batch` wizard goes through `selectVendorAndModel()` (cli.ts `
 | `minimax` | `claude-agent-sdk` | MiniMax-M2.7 | `https://api.minimaxi.com/anthropic` |
 | `mimo` | `claude-agent-sdk` | mimo-v2.5-pro (default) / v2.5 / v2-pro / v2-omni / v2.5-tts-voicedesign (TTS voice-design, not for text chat) | `https://token-plan-cn.xiaomimimo.com/anthropic` |
 | `anthropic` | `claude-agent-sdk` | claude-sonnet-4-6 (default) / opus-4-6 / haiku-4-5 | Anthropic native |
-| `codex` | `codex-sdk` | gpt-5.5 (default) / o3 | (needs `codex auth login`) |
+| `codex` | `codex-sdk` | gpt-5.5 (default) / o3 | (needs `codex login`) |
 | `claude-code` | `claude-code-cli` | uses the Claude Code subscription model | (needs a Claude subscription) |
 | `custom` | `claude-agent-sdk` | fill in your own model id | fill in your own base URL |
 

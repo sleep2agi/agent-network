@@ -98,7 +98,7 @@ npx @sleep2agi/agent-node \
 | 属性 | 说明 |
 |------|------|
 | **模型** | Codex SDK 模型（通过 `--model` 指定；具体 model id 查 OpenAI Codex 文档） |
-| **前置** | `codex auth login` |
+| **前置** | `codex login` |
 | **特点** | 代码生成强、工具调用灵活 |
 | **工具** | Codex CLI 内置 Read / Write / Edit / Bash / Glob / Grep / WebSearch（不接受 `--tools` 自定义）+ agent-node 按节点注入 CommHub 工具 |
 
@@ -114,14 +114,14 @@ npx @sleep2agi/agent-node \
 
 ::: details 你需要准备
 - [ ] 安装 codex CLI：`npm install -g @openai/codex`（`@openai/codex-sdk` 在 `@sleep2agi/agent-node` 的 `optionalDependencies` 里，npm 7+ 默认会随 agent-node 一起拉；但 SDK 实际要 spawn `codex` 二进制；详见 [runtimes / codex-sdk 前置](/guide/runtimes#codex-sdk)）
-- [ ] 跑 `codex auth login` 完成 OpenAI 登录（或 `export OPENAI_API_KEY=sk-xxx`）
+- [ ] 跑 `codex login` 完成 OpenAI 登录（或 `export OPENAI_API_KEY=sk-xxx`）
 - [ ] CommHub Server 已启动
 :::
 
 ::: info 验证
 启动后看到 `SSE connected, waiting for tasks...` 即表示成功。
 - 如果报 `Error: spawn codex ENOENT`，说明 `codex` 二进制不在 PATH 上，跑 `npm install -g @openai/codex` + `which codex` 检查
-- 如果报 `codex auth` 错误，请跑 `codex auth login`（或检查 `OPENAI_API_KEY` env）
+- 如果报 codex 鉴权错误，请跑 `codex login`（或检查 `OPENAI_API_KEY` env）
 :::
 
 ### grok-build-acp

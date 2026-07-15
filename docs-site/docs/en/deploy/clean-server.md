@@ -172,7 +172,7 @@ node-name → runtime → (only if claude-agent-sdk) vendor → model → API ke
 |---|---|---|---|---|
 | **`claude-code-cli`** (recommended for first-time users) | ⭐ | You already use Claude Code, want to reuse the subscription | Skips vendor + model, uses your local `claude` login | `claude auth login` already done |
 | `claude-agent-sdk` | ⭐⭐ | Programmatic access to any Anthropic-compatible API (MiniMax / 书生 / 小米 MiMo / domestic models go here) | **Pops a vendor submenu** → pick vendor → pick model → enter API key | API key |
-| `codex-sdk` | ⭐⭐⭐ | Writing code / running commands via OpenAI Codex | Skips vendor, uses codex's own auth | agent-node + codex CLI + `codex auth login` |
+| `codex-sdk` | ⭐⭐⭐ | Writing code / running commands via OpenAI Codex | Skips vendor, uses codex's own auth | agent-node + codex CLI + `codex login` |
 | `grok-build-acp` | ⭐⭐⭐ | Running tasks via xAI Grok Build | Skips vendor, uses grok's own auth + `GROK_CODE_XAI_API_KEY` | grok CLI + `grok auth login` + `GROK_CODE_XAI_API_KEY` |
 | `opencode-cli` **(preview)** | ⭐⭐⭐ | Use the public sst/opencode CLI as a multi-vendor front-end (**preview channel only, not in latest**) | Pick a vendor preset (anthropic / openai), key read from env | `opencode` CLI + Anthropic/OpenAI env key |
 
@@ -216,7 +216,7 @@ The `codex-sdk` runtime additionally needs the codex CLI installed + logged in:
 ```bash
 # Note: this is @openai/codex (the CLI tool), distinct from @openai/codex-sdk (the SDK library that the codex-sdk runtime depends on) — two separate npm packages
 npm i -g @openai/codex
-codex auth login        # Browser OAuth
+codex login        # Browser OAuth
 
 # Verify
 codex --version

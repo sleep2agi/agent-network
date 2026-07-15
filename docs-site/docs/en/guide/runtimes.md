@@ -10,7 +10,7 @@ Every Agent Node has a **Runtime** (engine kernel) that decides how the node cal
 |---|---|---|---|---|---|
 | `claude-code-cli` | spawn local `claude` CLI | "Just use Claude in the terminal" — **zero config if you already have the Claude subscription** | Claude Sonnet / Opus (subscription) | `claude auth login` done | Wizard ends right after pick, **skips vendor / model / API-key** |
 | `claude-agent-sdk` | `@anthropic-ai/claude-agent-sdk` (bundled with agent-node) | Programmatic access to any Anthropic-compatible API | Anthropic direct / MiniMax / InternLM / Xiaomi MiMo / DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / Qwen / ... ([full table](/en/guide/multi-model)) | API key | **The only runtime that pops the vendor submenu → pick vendor → pick model → enter API key** |
-| `codex-sdk` | `@openai/codex-sdk` (bundled with agent-node) | Writing code / running shell commands | OpenAI Codex (gpt-5 etc) | `codex auth login` done ([@openai/codex](https://www.npmjs.com/package/@openai/codex) CLI) | Wizard prints `codex auth login` hint, **skips vendor** |
+| `codex-sdk` | `@openai/codex-sdk` (bundled with agent-node) | Writing code / running shell commands | OpenAI Codex (gpt-5 etc) | `codex login` done ([@openai/codex](https://www.npmjs.com/package/@openai/codex) CLI) | Wizard prints `codex login` hint, **skips vendor** |
 | `grok-build-acp` | spawn local `grok` ACP server | Run tasks / collaborate via xAI Grok Build | xAI Grok (grok-build series) | `grok auth login` done + `GROK_CODE_XAI_API_KEY` env (this runtime **also needs** the env — it's a runtime prereq, not a wizard output) | Wizard prints `grok auth login` hint, **skips vendor** |
 | `opencode-cli` (preview) | spawn local `opencode` CLI (public sst/opencode, fixed `opencode-ai` version pin) | Use the public opencode CLI as a multi-vendor front-end (unified session / auth abstraction, [RFC-029](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md)) | Multi-vendor: Anthropic native / OpenAI preset | Install `opencode` CLI (`npm i -g opencode-ai@<pin>`) + pick a vendor preset (Anthropic reads `ANTHROPIC_API_KEY` / OpenAI reads `OPENAI_API_KEY` env) | Wizard prompts to install opencode CLI → pick vendor preset (anthropic / openai); API key read from env, **not prompted** |
 
@@ -251,7 +251,7 @@ npm install -g @openai/codex
 
 ```bash
 # Option A: OAuth flow (recommended, reuses your ChatGPT Plus / Pro)
-codex auth login
+codex login
 
 # Option B: raw API key
 export OPENAI_API_KEY=sk-xxx
@@ -263,7 +263,7 @@ export OPENAI_API_KEY=sk-xxx
 codex --version
 # Expected: codex 0.x.x (exact version may differ)
 
-codex auth status
+codex login status
 # Expected: shows the logged-in OpenAI account or API key state
 ```
 
@@ -290,7 +290,7 @@ anet node start  →  spawn agent-node subprocess
 
 - Driven by the official `@openai/codex-sdk` package, run as a codex thread
 - Supports Read / Write / Edit / Bash / Glob / Grep / WebSearch (baked into the codex CLI)
-- Auth via `codex auth login` (OAuth) or `OPENAI_API_KEY`
+- Auth via `codex login` (OAuth) or `OPENAI_API_KEY`
 - **The codex thread does not call commhub MCP tools directly** (`codexOpts` does not pass `mcpServers`, [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)) — multi-agent dispatch happens externally in agent-node's parent process. See [Architecture → MCP integration paths](/en/guide/architecture#mcp-integration-paths-per-runtime-v0-9-0).
 
 ### When to pick
@@ -302,7 +302,7 @@ anet node start  →  spawn agent-node subprocess
 ### Config
 
 ```bash
-codex auth login  # one-time
+codex login  # one-time
 
 anet node create coder \
   --runtime codex-sdk \
@@ -343,7 +343,7 @@ Install the `codex` CLI and log in (same as codex-sdk):
 
 ```bash
 npm install -g @openai/codex
-codex auth login       # or export OPENAI_API_KEY=sk-xxx
+codex login       # or export OPENAI_API_KEY=sk-xxx
 codex --version        # expect codex 0.144.0+ (app-server protocol baseline)
 ```
 
@@ -371,7 +371,7 @@ anet node start  →  spawn agent-node child (runtime=codex-app-server)
 **① Owned (default)** — the node spawns its own app-server and creates a fresh thread. Multiple codex-app-server nodes are fully independent:
 
 ```bash
-codex auth login
+codex login
 anet node create codexbridge --runtime codex-app-server
 anet node start codexbridge
 ```

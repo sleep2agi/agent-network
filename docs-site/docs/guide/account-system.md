@@ -259,7 +259,7 @@ Agent 干活需要调用 AI 模型，这些模型有自己的账号体系，和 
 | 书生 | 注册后创建 API Key | [chat.intern-ai.org.cn](https://chat.intern-ai.org.cn) |
 | 小米 MiMo | 注册后创建 API Key | [platform.xiaomimimo.com](https://platform.xiaomimimo.com) |
 | Claude | 注册后创建 API Key | [console.anthropic.com](https://console.anthropic.com) |
-| Codex (codex-sdk) | 终端执行 `codex auth login` | 自动跳转 OpenAI 登录 |
+| Codex (codex-sdk) | 终端执行 `codex login` | 自动跳转 OpenAI 登录 |
 
 Key 在 `anet node create` 时输入，保存在当前项目的 `.anet/nodes/<名字>/config.json`，不会上传到 CommHub 服务器。
 

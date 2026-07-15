@@ -10,7 +10,7 @@
 |---|---|---|---|---|---|
 | `claude-code-cli` | spawn 本机 `claude` 命令 | 想"像在终端用 Claude"那样干活, **复用 Claude 订阅 0 配置** | Claude Sonnet / Opus (订阅) | 已 `claude auth login` | 选完直接结束, **跳过 vendor / model / API key** |
 | `claude-agent-sdk` | `@anthropic-ai/claude-agent-sdk` (随 agent-node 装) | 编程式调用任意 Anthropic 兼容 API | Anthropic 直连 / MiniMax / 书生 Intern / 小米 MiMo / DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / 通义千问 ... ([完整表](/guide/multi-model)) | API Key | **唯一会弹 vendor 子菜单 → 选 vendor → 选 model → 填 API Key** |
-| `codex-sdk` | `@openai/codex-sdk` (随 agent-node 装) | 写代码 / 跑命令 | OpenAI Codex (gpt-5 等) | 已 `codex auth login` ([@openai/codex](https://www.npmjs.com/package/@openai/codex) CLI) | 选完 print `codex auth login` hint, **跳过 vendor** |
+| `codex-sdk` | `@openai/codex-sdk` (随 agent-node 装) | 写代码 / 跑命令 | OpenAI Codex (gpt-5 等) | 已 `codex login` ([@openai/codex](https://www.npmjs.com/package/@openai/codex) CLI) | 选完 print `codex login` hint, **跳过 vendor** |
 | `grok-build-acp` | spawn 本机 `grok` ACP server | 用 xAI Grok Build 跑任务 / 协作 | xAI Grok (grok-build 系列) | 已 `grok auth login` + `GROK_CODE_XAI_API_KEY` env (该 runtime **另需**该 env, 非 wizard 输出) | 选完 print `grok auth login` hint, **跳过 vendor** |
 | `opencode-cli` (preview) | spawn 本机 `opencode` 命令 (公版 sst/opencode CLI, 固定 `opencode-ai` 版本 pin) | 用公版 opencode 做多 vendor 前端 (统一 session / auth 抽象, [RFC-029](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md)) | 多 vendor: Anthropic 原生 / OpenAI preset | 装 `opencode` CLI (`npm i -g opencode-ai@<pin>`) + 选 vendor preset (Anthropic 读 `ANTHROPIC_API_KEY` / OpenAI 读 `OPENAI_API_KEY` env) | 选完提示装 opencode CLI → 选 vendor preset (anthropic / openai), API key 从 env 读、**不 prompt** |
 
@@ -263,7 +263,7 @@ npm install -g @openai/codex
 
 ```bash
 # 方式 A：OAuth 流程（推荐，复用 ChatGPT Plus / Pro 订阅）
-codex auth login
+codex login
 
 # 方式 B：直接走 API Key
 export OPENAI_API_KEY=sk-xxx
@@ -275,7 +275,7 @@ export OPENAI_API_KEY=sk-xxx
 codex --version
 # 期望输出：codex 0.x.x（具体版本号可能不同）
 
-codex auth status
+codex login status
 # 期望：显示当前登录的 OpenAI 账号 / API key 状态
 ```
 
@@ -302,7 +302,7 @@ anet node start  →  spawn agent-node 子进程
 
 - 通过官方 `@openai/codex-sdk` 包驱动 codex thread
 - 支持 Read / Write / Edit / Bash / Glob / Grep / WebSearch（codex CLI baked in）
-- 鉴权走 `codex auth login`（OAuth 流程）或 `OPENAI_API_KEY`
+- 鉴权走 `codex login`（OAuth 流程）或 `OPENAI_API_KEY`
 - **codex thread 不直接调 commhub MCP 工具**（`codexOpts` 不传 `mcpServers`，[`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)）—— 多 Agent 派活由 agent-node 父进程外部完成，详见 [架构 → MCP 接入路径](/guide/architecture#mcp-接入路径不同-runtime-不同走法-v0-9-0)
 
 ### 适用场景
@@ -314,7 +314,7 @@ anet node start  →  spawn agent-node 子进程
 ### 配置示例
 
 ```bash
-codex auth login  # 一次性
+codex login  # 一次性
 
 anet node create coder \
   --runtime codex-sdk \
@@ -363,7 +363,7 @@ ANET_CODEX_STDIO_DIRECT=1 anet node start <codex-node>
 
 ```bash
 npm install -g @openai/codex
-codex auth login       # 或 export OPENAI_API_KEY=sk-xxx
+codex login       # 或 export OPENAI_API_KEY=sk-xxx
 codex --version        # 期望 codex 0.144.0 及以上（app-server 协议以此为准）
 ```
 
@@ -391,7 +391,7 @@ anet node start  →  spawn agent-node 子进程（runtime=codex-app-server）
 **① 独占（默认）** —— 节点自己起 app-server + 新建 thread。多个 codex-app-server 节点互不干扰：
 
 ```bash
-codex auth login
+codex login
 anet node create codexbridge --runtime codex-app-server
 anet node start codexbridge
 ```

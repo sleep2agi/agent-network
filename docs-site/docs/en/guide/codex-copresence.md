@@ -10,7 +10,7 @@ This is a **preview** (not on `latest`), and currently a **single-machine** form
 
 ## Prerequisites
 
-- Install and authenticate the Codex CLI (verified baseline `codex-cli 0.144`): `codex auth login`
+- Install and authenticate the Codex CLI (verified baseline `codex-cli 0.144`): `codex login`
 - Install the preview anet packages:
 
 ```bash

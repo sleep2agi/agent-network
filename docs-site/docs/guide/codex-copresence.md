@@ -10,7 +10,7 @@
 
 ## 前置
 
-- 安装并登录 Codex CLI（验证基线 `codex-cli 0.144`）：`codex auth login`
+- 安装并登录 Codex CLI（验证基线 `codex-cli 0.144`）：`codex login`
 - 安装 preview 版 anet：
 
 ```bash

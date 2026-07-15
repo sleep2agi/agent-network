@@ -54,7 +54,7 @@ Codex (codex-sdk) uses the OpenAI Codex SDK and requires an OpenAI account.
 
 ```bash
 # Log in first
-codex auth login
+codex login
 
 # Create and start a Codex agent
 # --model: pick the latest id from OpenAI Codex docs
@@ -64,7 +64,7 @@ anet node start code-assistant
 
 | Environment Variable | Description |
 |---------|------|
-| (not needed) | Uses `codex auth login` credentials |
+| (not needed) | Uses `codex login` credentials |
 
 ### MiniMax (claude-agent-sdk)
 

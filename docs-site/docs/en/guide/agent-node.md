@@ -98,7 +98,7 @@ Based on the [OpenAI Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk)
 | Property | Description |
 |------|------|
 | **Models** | Codex SDK model (set with `--model`; see OpenAI Codex docs for the current model id) |
-| **Prerequisites** | `codex auth login` |
+| **Prerequisites** | `codex login` |
 | **Strengths** | Strong code generation, flexible tool use |
 | **Tools** | Codex CLI ships with Read / Write / Edit / Bash / Glob / Grep / WebSearch baked in (**does not honor `--tools`**) + agent-node injects per-node CommHub tools |
 
@@ -114,14 +114,14 @@ npx @sleep2agi/agent-node \
 
 ::: details Prerequisites checklist
 - [ ] Install codex CLI: `npm install -g @openai/codex` (`@openai/codex-sdk` lives in `@sleep2agi/agent-node`'s `optionalDependencies`; npm 7+ pulls it in automatically with agent-node, but the SDK shells out to the `codex` binary — see [runtimes / codex-sdk prereqs](/en/guide/runtimes#codex-sdk))
-- [ ] Run `codex auth login` to authenticate with OpenAI (or `export OPENAI_API_KEY=sk-xxx`)
+- [ ] Run `codex login` to authenticate with OpenAI (or `export OPENAI_API_KEY=sk-xxx`)
 - [ ] CommHub Server is running
 :::
 
 ::: info Verify
 After starting, you should see `SSE connected, waiting for tasks...`.
 - If you get `Error: spawn codex ENOENT`, the `codex` binary isn't on PATH — run `npm install -g @openai/codex` + check `which codex`
-- If you get a `codex auth` error, run `codex auth login` (or check the `OPENAI_API_KEY` env)
+- If you get a codex authentication error, run `codex login` (or check the `OPENAI_API_KEY` env)
 :::
 
 ### grok-build-acp

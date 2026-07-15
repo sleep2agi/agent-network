@@ -36,7 +36,7 @@ anet batch cleanup 工程师 --workdir ~/anet-team
 | 字段 | flag | 默认 | 说明 |
 |------|------|------|------|
 | 供应商 / 模型 | `--preset <key>` | 不传则走交互式 **vendor 选单**（共用 `selectVendorAndModel()` —— ⚠ batch wizard 仍 vendor-first，**跟 `anet create` v0.9.2+ 的 runtime-first wizard 不一样** [#133](https://github.com/sleep2agi/agent-network/issues/133)；先选供应商再选模型。v0.10.5-7 incremental UX 增强已 ship：workdir mode prompt（[#152](https://github.com/sleep2agi/agent-network/issues/152)）/ silent-exit 修（[#155](https://github.com/sleep2agi/agent-network/issues/155)）/ codex-sdk batch path yolo flags parity（[#156](https://github.com/sleep2agi/agent-network/issues/156)））| `--preset` 接受 vendor key（`intern` / `minimax` / `mimo` / `anthropic` / `codex` / `claude-code` / `custom`）；为兼容旧用法也接受旧的 model id（如 `intern-s1-pro`，会自动 resolve 回对应 vendor）|
-| API key | `--api-key <key>` | 交互输入 | 写入每个 node 的 runtime auth token —— **codex-sdk / claude-code-cli runtime 自动跳过 API key prompt**（v0.10.5 [#153](https://github.com/sleep2agi/agent-network/issues/153) — 用户改去 `codex auth login` / `claude auth login`）|
+| API key | `--api-key <key>` | 交互输入 | 写入每个 node 的 runtime auth token —— **codex-sdk / claude-code-cli runtime 自动跳过 API key prompt**（v0.10.5 [#153](https://github.com/sleep2agi/agent-network/issues/153) — 用户改去 `codex login` / `claude auth login`）|
 | Workdir | `--workdir <path>` | `~/anet-team` | 父目录 |
 | Workdir mode | `--workdir-mode separate\|shared` | `separate` | `separate` 每个 node 一个子目录；`shared` 所有 node 写同一个 `<workdir>/.anet/nodes` |
 | Prefix | `--prefix <name>` | 交互输入 | alias 前缀，例如 `工程师` → `工程师1号` |
@@ -56,7 +56,7 @@ anet batch cleanup 工程师 --workdir ~/anet-team
 | `minimax` | `claude-agent-sdk` | MiniMax-M2.7 | `https://api.minimaxi.com/anthropic` |
 | `mimo` | `claude-agent-sdk` | mimo-v2.5-pro（默认）/ v2.5 / v2-pro / v2-omni / v2.5-tts-voicedesign（TTS 语音设计，文本对话不用）| `https://token-plan-cn.xiaomimimo.com/anthropic` |
 | `anthropic` | `claude-agent-sdk` | claude-sonnet-4-6（默认）/ opus-4-6 / haiku-4-5 | Anthropic 原生 |
-| `codex` | `codex-sdk` | gpt-5.5（默认）/ o3 | （需 `codex auth login`）|
+| `codex` | `codex-sdk` | gpt-5.5（默认）/ o3 | （需 `codex login`）|
 | `claude-code` | `claude-code-cli` | 用 Claude Code 订阅模型 | （需 Claude 订阅）|
 | `custom` | `claude-agent-sdk` | 自己填 model id | 自己填 base URL |
 

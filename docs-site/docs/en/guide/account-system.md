@@ -258,7 +258,7 @@ Agents need AI model APIs to do work. These have their own account systems, comp
 | InternLM | Create API Key after signup | [chat.intern-ai.org.cn](https://chat.intern-ai.org.cn) |
 | Xiaomi MiMo | Create API Key after signup | [platform.xiaomimimo.com](https://platform.xiaomimimo.com) |
 | Claude | Create API Key after signup | [console.anthropic.com](https://console.anthropic.com) |
-| Codex (codex-sdk) | Run `codex auth login` in terminal | Auto-redirects to OpenAI login |
+| Codex (codex-sdk) | Run `codex login` in terminal | Auto-redirects to OpenAI login |
 
 Keys are entered during `anet node create` and saved locally at `current-project/.anet/nodes/<name>/config.json`. They are **never uploaded** to the CommHub server.
 
