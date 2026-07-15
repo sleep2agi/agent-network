@@ -9,7 +9,11 @@ The current preview channel = **v0.11-preview2** (npm `@preview` tag). This rele
 - RFC-024 hub config-apply foundation (4 new MCP tools)
 :::
 
-## Three-package versions (preview2, 2026-06-28)
+::: tip Install the current preview via the `@preview` tag — don't copy version numbers
+The specific `preview.N` numbers below are a **2026-06-28 snapshot**; the preview channel keeps iterating (it's now well past preview.1). **Always install / upgrade the current preview via the `@preview` tag** (the install commands below already do), rather than copying a specific version number.
+:::
+
+## Three-package versions (preview2, 2026-06-28 snapshot)
 
 | Package | preview1 | **preview2** |
 |---|---|---|
@@ -24,9 +28,9 @@ The current preview channel = **v0.11-preview2** (npm `@preview` tag). This rele
 ### Clean install (new user)
 
 ```bash
-npm install -g @sleep2agi/agent-network@2.3.0-preview.1
-npm install -g @sleep2agi/agent-node@2.5.0-preview.1
-npm install -g @sleep2agi/commhub-server@0.9.0-preview.1
+npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-node@preview
+npm install -g @sleep2agi/commhub-server@preview
 ```
 
 Bootstrap:

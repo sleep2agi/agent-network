@@ -9,7 +9,11 @@
 - RFC-024 hub config-apply foundation（4 个新 MCP tools）
 :::
 
-## 三包版本（preview2，2026-06-28）
+::: tip 装当前 preview 用 `@preview` tag，别照抄版本号
+下方具体 `preview.N` 版本号是 **2026-06-28 快照**，preview channel 一直在迭代（现已远超 preview.1）。**装 / 升当前 preview 一律用 `@preview` tag**（下方安装命令已用），不要照抄具体版本号。
+:::
+
+## 三包版本（preview2，2026-06-28 快照）
 
 | 包 | preview1 | **preview2** |
 |---|---|---|
@@ -24,9 +28,9 @@
 ### Clean install（新用户）
 
 ```bash
-npm install -g @sleep2agi/agent-network@2.3.0-preview.1
-npm install -g @sleep2agi/agent-node@2.5.0-preview.1
-npm install -g @sleep2agi/commhub-server@0.9.0-preview.1
+npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-node@preview
+npm install -g @sleep2agi/commhub-server@preview
 ```
 
 启动：
