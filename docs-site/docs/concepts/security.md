@@ -178,7 +178,7 @@ flowchart TD
 
 ### RBAC 权限检查
 
-每次 MCP 工具调用都进行权限检查（[`server/src/tools.ts:24-30 canWrite`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L24)）：
+每次 MCP 工具调用都进行权限检查（[`server/src/tools.ts:106 canWrite`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L106)）：
 
 ```typescript
 const canWrite = (effectiveNetworkId?: string | null): boolean => {

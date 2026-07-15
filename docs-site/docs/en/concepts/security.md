@@ -178,7 +178,7 @@ Password hashing was upgraded from the earlier SHA-256 to **salted scrypt** (`sc
 
 ### RBAC Permission Checks
 
-Every MCP tool call goes through a permission check ([`server/src/tools.ts:24-30 canWrite`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L24)):
+Every MCP tool call goes through a permission check ([`server/src/tools.ts:106 canWrite`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L106)):
 
 ```typescript
 const canWrite = (effectiveNetworkId?: string | null): boolean => {
