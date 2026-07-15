@@ -35,7 +35,7 @@ References:
 
 ```bash
 anet hub start
-anet login --username admin --password anethub
+anet login --hub http://127.0.0.1:9200 --username admin --password anethub
 anet node create grok-demo --runtime grok-build-acp
 anet node start grok-demo
 ```

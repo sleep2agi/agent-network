@@ -202,7 +202,7 @@ anet setup
 2. `confirm` 是否顺带装 CommHub Server（本地开发 / 测试用）
 3. 按勾选项算出缺哪些包（`@anthropic-ai/claude-code` / `@sleep2agi/agent-node` / `@openai/codex` / `@sleep2agi/commhub-server`），列出 `npm install -g` 命令
 4. `confirm` 后执行安装
-5. 验证安装结果，提示 `codex auth login` / `claude auth login`（如选了对应 runtime）
+5. 验证安装结果，提示 `codex login` / `claude auth login`（如选了对应 runtime）
 6. 完成 → 提示下一步 `anet node create <node-name>`
 
 ### `anet run`
