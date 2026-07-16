@@ -59,7 +59,7 @@ MINIMAX_KEY=sk-cp-your-key ./setup-anet.sh
 MINIMAX_KEY=sk-cp-xxx ./setup-anet.sh nodeA nodeB nodeC
 
 # Pick a MiniMax model
-MINIMAX_KEY=sk-cp-xxx MINIMAX_MODEL=MiniMax-M2 ./setup-anet.sh
+MINIMAX_KEY=sk-cp-xxx MINIMAX_MODEL=MiniMax-M3 ./setup-anet.sh
 
 # Change hub bind address
 MINIMAX_KEY=sk-cp-xxx ANET_HUB_IP=127.0.0.1 ./setup-anet.sh
@@ -75,6 +75,7 @@ MINIMAX_KEY=sk-cp-xxx WIPE=1 ./setup-anet.sh
 
 | Model ID | Notes |
 |---|---|
+| `MiniMax-M3` | **Current latest** (vision-capable; anet wizard default) — recommend `MINIMAX_MODEL=MiniMax-M3` |
 | `MiniMax-M2.7` | `setup-anet.sh` default fallback (check MiniMax docs for the current latest model id) |
 | `MiniMax-M2.7-highspeed` | High-speed variant |
 | `MiniMax-M2.5` | |

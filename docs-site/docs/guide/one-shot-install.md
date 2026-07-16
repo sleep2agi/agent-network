@@ -59,7 +59,7 @@ MINIMAX_KEY=sk-cp-你的key ./setup-anet.sh
 MINIMAX_KEY=sk-cp-xxx ./setup-anet.sh 节点A 节点B 节点C
 
 # 选择 MiniMax 模型
-MINIMAX_KEY=sk-cp-xxx MINIMAX_MODEL=MiniMax-M2 ./setup-anet.sh
+MINIMAX_KEY=sk-cp-xxx MINIMAX_MODEL=MiniMax-M3 ./setup-anet.sh
 
 # 改 Hub 绑定地址
 MINIMAX_KEY=sk-cp-xxx ANET_HUB_IP=127.0.0.1 ./setup-anet.sh
@@ -75,6 +75,7 @@ MINIMAX_KEY=sk-cp-xxx WIPE=1 ./setup-anet.sh
 
 | 模型 ID | 备注 |
 |---|---|
+| `MiniMax-M3` | **当前最新**（vision-capable；anet 向导默认）—— 推荐显式设 `MINIMAX_MODEL=MiniMax-M3` |
 | `MiniMax-M2.7` | `setup-anet.sh` 默认 fallback（MiniMax 迭代后请到官方文档查最新 model id） |
 | `MiniMax-M2.7-highspeed` | 高速版 |
 | `MiniMax-M2.5` | |
