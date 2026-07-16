@@ -10,14 +10,15 @@ Agent Network 支持在同一个网络中运行不同 AI 模型的 Agent。所�
 
 | 模型 | 服务商 | Runtime | API 地址 | 成本 |
 |------|--------|---------|---------|------|
-| **MiniMax**（`MiniMax-M2.7`） | MiniMax | `claude-agent-sdk` | api.minimaxi.com/anthropic | 极低 |
+| **MiniMax**（`MiniMax-M3` 默认，vision / `MiniMax-M2.7` legacy 纯文本） | MiniMax | `claude-agent-sdk` | api.minimaxi.com/anthropic | 极低 |
+| **DeepSeek**（`deepseek-v4-pro` 默认 / `deepseek-v4-flash`） | DeepSeek | `claude-agent-sdk` | api.deepseek.com/anthropic | 极低 |
 | **书生 Intern-S2-Preview**（`anet node create` vendor 选单默认项，**仅在选 `claude-agent-sdk` runtime 后才出现** —— [#133](https://github.com/sleep2agi/agent-network/issues/133) runtime-first wizard 起 v0.9.2+） | 书生 | `claude-agent-sdk` | chat.intern-ai.org.cn（**裸域名，无 `/anthropic`**） | 低 |
 | **书生 Intern-S1-Pro** | 书生 | `claude-agent-sdk` | chat.intern-ai.org.cn（**裸域名，无 `/anthropic`**） | 低 |
 | **小米 MiMo**（`mimo-v2.5-pro` 默认 + v2.5 / v2-pro / v2-omni / v2.5-tts-voicedesign[^mimo-tts]） | 小米 | `claude-agent-sdk` | token-plan-cn.xiaomimimo.com/anthropic | 低 |
 
 [^mimo-tts]: `mimo-v2.5-tts-voicedesign` 是 **TTS 语音设计模型**，Anthropic Messages 文本请求大概率 vendor 不支持；文本对话请用前 4 个 model（`mimo-v2.5-pro` / `mimo-v2.5` / `mimo-v2-pro` / `mimo-v2-omni`）。v0.10.10 起 wizard 凑齐官方 5 model preset。
 
-> 验证机制（#104-B 设计调整后）：cli.ts 不再用「`MODEL_PRESETS` + `[UNVERIFIED]` 标记」那套 —— 现在统一是 [`VENDORS` 列表（在 cli.ts 里 grep `const VENDORS`）](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)，**进列表 = 已 verified-with-real-call**。**DeepSeek / GLM / Kimi 等未跑通验证的 provider 故意不进列表** —— 它们走下方「自定义」`custom` 供应商接入（任何 Anthropic 兼容 API 都能用 `custom`）。各家 model id 到对应平台官网查（[MiniMax](https://platform.minimaxi.com) / [小米 MiMo](https://platform.xiaomimimo.com) / [DeepSeek](https://api-docs.deepseek.com) / [智谱](https://open.bigmodel.cn)）。
+> 验证机制（#104-B 设计调整后）：cli.ts 不再用「`MODEL_PRESETS` + `[UNVERIFIED]` 标记」那套 —— 现在统一是 [`VENDORS` 列表（在 cli.ts 里 grep `const VENDORS`）](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)，**进列表 = 已 verified-with-real-call**。**GLM / Kimi / OpenRouter 等未内置的 provider 走下方「自定义」`custom` 供应商接入**（任何 Anthropic 兼容 API 都能用 `custom`；DeepSeek 已内置，无需走 custom）。各家 model id 到对应平台官网查（[MiniMax](https://platform.minimaxi.com) / [小米 MiMo](https://platform.xiaomimimo.com) / [DeepSeek](https://api-docs.deepseek.com) / [智谱](https://open.bigmodel.cn)）。
 
 ::: tip 任何 Anthropic-compatible 提供商都能接
 上表是常用 provider，但 `claude-agent-sdk` 通过 `ANTHROPIC_BASE_URL` 接入**任何**支持 Anthropic Messages API 的服务商。没列出的服务商（自部署 vLLM / SiliconFlow / 通义千问 Anthropic 兼容端点等）也能用，只需把 `ANTHROPIC_BASE_URL` 指向对应平台的 Anthropic 兼容 endpoint，把 API Key 设到 `ANTHROPIC_AUTH_TOKEN` 即可。详见下方"配置方式"。
@@ -156,7 +157,7 @@ Agent Node → ANTHROPIC_BASE_URL → 服务商 API → AI 模型
 示例：
 ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
   → Agent Node 发请求到 MiniMax
-  → MiniMax 返回 MiniMax-M2.7 的结果
+  → MiniMax 返回 MiniMax-M3 的结果
   → Agent 以为自己在跟 "Claude" 聊天，实际用的是 MiniMax
 ```
 
