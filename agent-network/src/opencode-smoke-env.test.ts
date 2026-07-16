@@ -80,6 +80,8 @@ describe("buildOpencodeSmokeEnv", () => {
       list: false,
       task: false,
       skill: false,
+      webfetch: false,
+      websearch: false,
       question: false,
     });
     expect(inlineConfig.plugin).toEqual([]);
