@@ -55,7 +55,7 @@ anet hub dashboard
 
 # Terminal 3 — log in, create + start an agent
 anet login --hub http://127.0.0.1:9200 --username admin --password anethub
-anet node create my-bot          # interactive: runtime → provider → API key
+anet node create my-bot          # pick runtime (have a Claude subscription? pick claude-code-cli = zero config, fastest) → provider → API key
 anet node start my-bot           # waits for "SSE connected"
 ```
 
@@ -70,7 +70,7 @@ anet project restart    # restart cwd nodes against the new version
 
 Full cross-version migration reference: [Upgrade Guide](https://anet.sh/en/guide/upgrade).
 
-<sub>Prereq: Node.js ≥ 22.13.0 (required by `@inquirer/prompts` and friends; older versions trip `EBADENGINE` warnings during install but still work).</sub>
+<sub>Prereqs: **Node.js ≥ 22.13.0** + **Bun ≥ 1.2.0** (install Bun: `npm i -g bun`). `anet hub start` launches `commhub-server` via `bunx`, so **without Bun the very first step crashes with `spawn bunx ENOENT`**.</sub>
 
 ---
 

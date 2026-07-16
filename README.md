@@ -55,7 +55,7 @@ anet hub dashboard
 
 # 终端 3 —— 登录 + 创建 + 启动 Agent
 anet login --hub http://127.0.0.1:9200 --username admin --password anethub
-anet node create my-bot          # 交互式：选 runtime → 选 provider → 填 API key
+anet node create my-bot          # 选 runtime（有 Claude 订阅选 claude-code-cli = 0 配置最快）→ provider → API key
 anet node start my-bot           # 等到 "SSE connected" 即就绪
 ```
 
@@ -70,7 +70,7 @@ anet project restart    # 重启 cwd 节点接新版
 
 完整跨版本迁移参考 [升级指南](https://anet.sh/guide/upgrade)。
 
-<sub>前置：Node.js ≥ 22.13.0（`@inquirer/prompts` 等依赖要求；老版本会触发 `EBADENGINE` warnings，不影响安装）。</sub>
+<sub>前置：**Node.js ≥ 22.13.0** + **Bun ≥ 1.2.0**（装 Bun：`npm i -g bun`）。`anet hub start` 底层用 `bunx` 起 `commhub-server`，**没装 Bun 第一步就会崩 `spawn bunx ENOENT`**。</sub>
 
 ---
 
