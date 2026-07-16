@@ -303,7 +303,7 @@ CREATE TABLE audit_log (
 );
 ```
 
-Recorded `action` values (**19 total**; verify `grep logAudit server/src/*.ts + auth.ts:294 + cli.ts` — 18 go through the [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L447), `password_reset_by_admin` is a direct INSERT at [`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294)):
+Recorded `action` values (**19 total**; verify `grep logAudit server/src/*.ts + auth.ts resetUserPassword() + cli.ts` — 18 go through the [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L447), `password_reset_by_admin` is a direct INSERT at [`auth.ts` `resetUserPassword()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts)):
 
 | Operation | Trigger |
 |------|---------|
@@ -312,7 +312,7 @@ Recorded `action` values (**19 total**; verify `grep logAudit server/src/*.ts + 
 | `login_failed` | Login failure (wrong password / unknown username) |
 | `login_rate_limited` | Login hit the IP rate limit (10/min) |
 | `password_changed` | `anet passwd` ([`index.ts:504`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L504)) |
-| `password_reset_by_admin` | hub admin force-reset via `anet hub admin reset-user` ([`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294) + [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)) |
+| `password_reset_by_admin` | hub admin force-reset via `anet hub admin reset-user` ([`auth.ts` `resetUserPassword()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) + [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)) |
 | `network_renamed` / `network_deleted` / `network_joined` | Network rename / delete / join |
 | `member_added` / `member_role_changed` / `member_removed` | Network membership changes (`detail` records `<user_id> as <role>` / `<user_id> → <role>`) |
 | `token_created` / `token_revoked` | API-token lifecycle |
