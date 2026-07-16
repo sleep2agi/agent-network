@@ -20,7 +20,7 @@
 - **Windows 全面修复**：跨盘 `anet --version` 崩溃（#446）、runtime 派发/检测/spawn 的 Unix 假设簇（#447）
 - **codex-app-server**（RFC-030）：`--codex-app-server-url` / `--codex-thread-id` 建节点 flag（带 runtime guard）
 - **OpenCode**（RFC-029）：vetted `opencode-ai@1.18.1` 精确 pin + 全套 release gates
-- picker 为 **7-way**（claude-agent-sdk / claude-code-cli / codex-sdk / codex-app-server / grok-build-acp / grok-build-cli / opencode-cli）
+- picker 为 **6-way**（claude-agent-sdk / claude-code-cli / codex-sdk / codex-app-server / grok-build-acp / opencode-cli；对已发布 .34 bundle 直接核实——grok-build-cli 未在其中）
 - MCP 上下文自带回复语义说明（终态才推 Dashboard）
 
 安装：`npm i -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview`
