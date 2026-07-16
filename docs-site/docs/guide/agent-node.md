@@ -666,7 +666,7 @@ SSE 断连后自动重连，使用指数退避策略：
 - [一键安装与起步](/guide/one-shot-install) — anet 装好后 5 分钟跑第一个 agent
 
 **深入配置**：
-- [Runtimes](/guide/runtimes) — 五个 runtime（claude-agent-sdk / codex-sdk / claude-code-cli / grok-build-acp / opencode-cli）选哪个
+- [Runtimes](/guide/runtimes) — runtime 怎么选（正式版 4 种，预览版 6 种）
 - [多模型配置](/guide/multi-model) — 用 DeepSeek / MiniMax / Kimi / Claude 等
 - [Channel 插件](/guide/channels) — agent 怎么接 Telegram / 微信 / 飞书
 

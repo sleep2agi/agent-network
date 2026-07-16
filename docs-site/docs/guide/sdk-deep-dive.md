@@ -3,7 +3,7 @@
 > 给"想自己接新 SDK"或者"想看懂 anet 怎么 wrap SDK"的 contributor。
 > 只是想用？看 [节点 Runtime](/guide/runtimes)。
 
-anet 当前内置五个 Runtime，其中两个是 SDK adapter；其他三个（`claude-code-cli` spawn 本机 `claude` 二进制；`grok-build-acp` spawn 本机 `grok` ACP server；`opencode-cli` spawn 本机 `opencode` CLI）都是 spawn 子进程路线，不在本页 SDK adapter 对比范围内：
+anet 内置多个 Runtime，其中**恰好两个是 SDK adapter**——`claude-agent-sdk` 和 `codex-sdk`——本页只对比这两个。其余都走 spawn 子进程路线，不在本页 SDK adapter 对比范围内：`claude-code-cli` spawn 本机 `claude` 二进制、`grok-build-acp` spawn 本机 `grok` ACP server、`opencode-cli`(preview) spawn 本机 `opencode` CLI、`codex-app-server`(preview) 桥接一个 spawn 出来的 codex app-server。（渠道可用性——正式版 4 种 / 预览版 6 种——见 [runtimes canonical 表](/guide/runtimes#runtime-对比-canonical-表)。）
 
 - `claude-agent-sdk` — `@anthropic-ai/claude-agent-sdk` 官方 SDK，在 [`@sleep2agi/agent-node` 的 regular `dependencies`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json) 里（不是打进 dist；build flag `--external`，npm 安装时作为 sub-dep 自动拉）
 - `codex-sdk` — `@openai/codex-sdk` 官方 SDK，列为 **`optionalDependencies`**（npm 7+ 默认会拉，若没拉用户 `npm install -g @openai/codex-sdk` + `@openai/codex` 二进制全局）

@@ -36,7 +36,7 @@ Rows tagged `(preview)` below are **preview-only** and not selectable on stable.
 :::
 
 ::: tip Wizard order at a glance
-The real wizard order: `node-name → runtime → (only if claude-agent-sdk) vendor → model → API key / auth`. The 5-way runtime menu **defaults the highlight to `claude-agent-sdk`** (the most complex path: vendor + key required); first-time users should manually pick `claude-code-cli`. Full step-by-step at [Getting Started §5](/en/guide/getting-started#_4-create-and-start-a-node).
+The real wizard order: `node-name → runtime → (only if claude-agent-sdk) vendor → model → API key / auth`. The runtime menu (4-way on stable / 6-way on preview) **defaults the highlight to `claude-agent-sdk`** (the most complex path: vendor + key required); first-time users should manually pick `claude-code-cli`. Full step-by-step at [Getting Started §5](/en/guide/getting-started#_4-create-and-start-a-node).
 :::
 
 ---
