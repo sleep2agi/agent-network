@@ -2,6 +2,12 @@
 
 The minimum path for a brand-new user — **5 steps, 5 minutes**. One command + one verification per step.
 
+::: tip Fastest path (recommended) — zero config if you have a Claude subscription
+The easiest route: with `claude` installed and `claude auth login` done, pick the **`claude-code-cli` runtime** in Step 4 — no API key, no model picker, just one command to bring a personal AI employee online that does real work and takes orders from your phone. This is the **most stable, least error-prone** path.
+
+No Claude subscription? Use `claude-agent-sdk` + one model API key (MiniMax / DeepSeek / InternLM / Xiaomi), see Step 4.
+:::
+
 ::: tip Already have anet installed?
 Skip this page and go to the [Upgrade Guide](/en/guide/upgrade) (usually `anet upgrade` + `anet project restart` to restart cwd nodes).
 :::

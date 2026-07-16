@@ -2,6 +2,12 @@
 
 新用户首次跑通的最小路径——**5 步, 5 分钟**。每步一条命令 + 一句验证。
 
+::: tip 最快路径（推荐）— 有 Claude 订阅就 0 配置
+最省事的走法：本机装好 `claude` 并 `claude auth login` 后，第 4 步**选 `claude-code-cli` runtime**——全程不用填 API key、不用选模型，一条命令就上线一个"能干活、手机也能指挥"的私人 AI 员工。这是**最稳、最少踩坑**的路径。
+
+没有 Claude 订阅？走 `claude-agent-sdk` + 一个模型 API key（MiniMax / DeepSeek / 书生 / 小米），见第 4 步。
+:::
+
 ::: tip 已经装过 anet?
 跳过本页, 走 [升级指南](/guide/upgrade)（通常 `anet upgrade` 一键 + `anet project restart` 重启 cwd 节点）。
 :::
