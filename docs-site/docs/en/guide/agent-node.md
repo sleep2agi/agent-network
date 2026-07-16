@@ -553,7 +553,7 @@ After a successful `anet node create <alias>`, agent-node prints a **behavior-di
 ::: warning Security note
 - Default preset + default yolo mode (`dangerouslySkipPermissions`) — don't run agents directly from `$HOME`; use a disposable working directory
 - For strict sandbox: `--tools Read,Glob,Grep` gives a read-only agent
-- To turn off yolo mode: `anet node create --no-skip-permissions` (every tool call prompts, hurts long-task UX)
+- To turn off yolo: for codex-sdk nodes use `anet node create --no-yolo`; for claude runtimes (claude-code-cli / claude-agent-sdk) set `dangerouslySkipPermissions` to `false` in the node's `config.json` (**there is no `--no-skip-permissions` flag**). Every tool call then prompts, hurting long-task UX
 - Per-task budget cap: `--max-budget 0.1` (see [Budget Control](#budget-control) below)
 :::
 

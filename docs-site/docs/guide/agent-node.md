@@ -552,7 +552,7 @@ npx @sleep2agi/agent-node --alias 代码 --runtime codex-sdk
 ::: warning 安全提示
 - 默认 preset 全集 + 默认 yolo mode（`dangerouslySkipPermissions`）—— 别在 `$HOME` 直接跑 agent，用一次性工作目录
 - 严格 sandbox 时 `--tools Read,Glob,Grep` 只给只读
-- 关 yolo 用 `anet node create --no-skip-permissions`（长任务每个工具调用都弹确认）
+- 关 yolo：codex-sdk 节点用 `anet node create --no-yolo`；claude 系（claude-code-cli / claude-agent-sdk）把 node `config.json` 的 `dangerouslySkipPermissions` 设为 `false`（**没有 `--no-skip-permissions` 这个 flag**）。关掉后长任务每个工具调用都弹确认
 - 预算限制 `--max-budget 0.1`（见下方 [预算控制](#预算控制)）
 :::
 
