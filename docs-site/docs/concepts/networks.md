@@ -123,10 +123,10 @@ anet network delete old-network --force
 | 查看 Agent 状态 | &check; | &check; | &check; | &check; |
 | 查看任务列表 | &check; | &check; | &check; | &check; |
 
-> 「创建/撤销 network Token」原本标 member ❌，实际 [`auth.ts:236-242 createToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L236) 只挡 **viewer**（`viewer cannot create full-access network tokens`），owner / admin / member 都能建。撤销 Token 走 [`auth.ts revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) `WHERE token_id = ? AND user_id = ?` —— 任何用户都能撤销**自己的** token，也不按网络角色门控。不带 `network_id` 的纯 user token（`utok_`）任何登录用户都能创建。
+> 「创建/撤销 network Token」原本标 member ❌，实际 [`auth.ts:303-320 createToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L303) 只挡 **viewer**（`viewer cannot create full-access network tokens`），owner / admin / member 都能建。撤销 Token 走 [`auth.ts revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) `WHERE token_id = ? AND user_id = ?` —— 任何用户都能撤销**自己的** token，也不按网络角色门控。不带 `network_id` 的纯 user token（`utok_`）任何登录用户都能创建。
 
 ::: warning 审计日志权限**不**走网络角色
-旧 doc 在这里列「查看审计日志」一行 —— 实际 `/api/audit-log` 不按 owner / admin / member / viewer **网络角色**门控（verify [`server/src/index.ts:1086-1089`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1086)）：
+旧 doc 在这里列「查看审计日志」一行 —— 实际 `/api/audit-log` 不按 owner / admin / member / viewer **网络角色**门控（verify [`server/src/index.ts:1926-1929`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1926)）：
 
 - **系统级 admin**（`users.role='admin'`，首位注册用户）：看所有人 audit_log
 - **非 admin**（`users.role='user'`）：只看自己的 audit_log（server 自动加 `WHERE user_id = self` 过滤）
@@ -226,7 +226,7 @@ v0.6 时代设计过 Free / Pro / Admin 三档配额体系（下表），Apache 
 
 | 配额项 | v0.8 实际行为 |
 |--------|---------------|
-| **创建网络数** (`max_networks_owned`) | ✅ **仍 enforced** —— [`auth.ts:184-189 createNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L184) 按 `users.plan || "free"` 查 `QUOTAS` 上限，free 默认 **2**，仅 `users.role='admin'` 豁免 |
+| **创建网络数** (`max_networks_owned`) | ✅ **仍 enforced** —— [`auth.ts:249-262 createNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L249) 按 `users.plan || "free"` 查 `QUOTAS` 上限，free 默认 **2**，仅 `users.role='admin'` 豁免 |
 | 加入网络数 | ❌ hub 没在 join path 调 quota check |
 | 每网络 Agent 数 | ❌ |
 | 每天任务数 | ❌ |
@@ -276,7 +276,7 @@ sql = addScope(sql, params, effectiveNetId);
 ```sql
 -- 网络表
 CREATE TABLE networks (
-  -- 基础 schema（db.ts:168-177）
+  -- 基础 schema（db.ts:413-424）
   network_id   TEXT PRIMARY KEY,
   network_name TEXT NOT NULL,
   owner_id     TEXT NOT NULL,
@@ -285,7 +285,7 @@ CREATE TABLE networks (
   created_at   TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(owner_id, network_name),         -- 同一 owner 下 network 名唯一
-  -- V3.13 ALTER TABLE 迁移补的列（db.ts:299-301）
+  -- V3.13 ALTER TABLE 迁移补的列（db.ts:675-676）
   visibility   TEXT DEFAULT 'private',  -- private/public (**字段存在, 当前不启用**, 见下方 [配额限制 section](#quota-limits))
   max_members  INTEGER DEFAULT 50        -- **字段存在, server 端不强制检查**: addNetworkMember + joinByInvite 都没有 max_members gate, 是 v0.6 配额体系的预留字段, 见 [配额限制 v0.6 设计目标 — v0.8 部分启用](#quota-limits)
 );

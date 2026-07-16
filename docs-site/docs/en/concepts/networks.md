@@ -123,10 +123,10 @@ Each user has a role in each network. Four permission levels from highest to low
 | View agent status | &check; | &check; | &check; | &check; |
 | View task list | &check; | &check; | &check; | &check; |
 
-> "Create/revoke network tokens" was previously marked member ❌. In fact [`auth.ts:236-242 createToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L236) only blocks **viewer** (`viewer cannot create full-access network tokens`) — owner / admin / member can all create them. Revoking goes through [`auth.ts revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) `WHERE token_id = ? AND user_id = ?` — any user can revoke **their own** tokens, also not network-role-gated. Pure user tokens (`utok_`, no `network_id`) can be created by any logged-in user.
+> "Create/revoke network tokens" was previously marked member ❌. In fact [`auth.ts:303-320 createToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L303) only blocks **viewer** (`viewer cannot create full-access network tokens`) — owner / admin / member can all create them. Revoking goes through [`auth.ts revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) `WHERE token_id = ? AND user_id = ?` — any user can revoke **their own** tokens, also not network-role-gated. Pure user tokens (`utok_`, no `network_id`) can be created by any logged-in user.
 
 ::: warning Audit log permission is **not** gated by network role
-The matrix used to list "View audit log" — but `/api/audit-log` is **not** gated by the network-level role (`owner` / `admin` / `member` / `viewer`). Verified at [`server/src/index.ts:1086-1089`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1086):
+The matrix used to list "View audit log" — but `/api/audit-log` is **not** gated by the network-level role (`owner` / `admin` / `member` / `viewer`). Verified at [`server/src/index.ts:1926-1929`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1926):
 
 - **System admin** (`users.role='admin'`, the first registered user): can read everyone's audit log
 - **Non-admin** (`users.role='user'`): can only see their own audit log (the server auto-adds `WHERE user_id = self`)
@@ -226,7 +226,7 @@ v0.6 designed a Free / Pro / Admin three-tier quota system (table below). After 
 
 | Quota | v0.8 actual behavior |
 |--------|---------------|
-| **Networks created** (`max_networks_owned`) | ✅ **Still enforced** — [`auth.ts:184-189 createNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L184) reads `users.plan || "free"` and checks the `QUOTAS` cap; free defaults to **2**. Only `users.role='admin'` is exempt. |
+| **Networks created** (`max_networks_owned`) | ✅ **Still enforced** — [`auth.ts:249-262 createNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L249) reads `users.plan || "free"` and checks the `QUOTAS` cap; free defaults to **2**. Only `users.role='admin'` is exempt. |
 | Networks joined | ❌ Hub does not run quota checks on the join path |
 | Agents per network | ❌ |
 | Tasks per day | ❌ |
@@ -276,7 +276,7 @@ Network-related database tables:
 ```sql
 -- Networks table
 CREATE TABLE networks (
-  -- Base schema (db.ts:168-177)
+  -- Base schema (db.ts:413-424)
   network_id   TEXT PRIMARY KEY,
   network_name TEXT NOT NULL,
   owner_id     TEXT NOT NULL,
@@ -285,7 +285,7 @@ CREATE TABLE networks (
   created_at   TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(owner_id, network_name),         -- network name unique per owner
-  -- Columns added by the V3.13 ALTER TABLE migration (db.ts:299-301)
+  -- Columns added by the V3.13 ALTER TABLE migration (db.ts:675-676)
   visibility   TEXT DEFAULT 'private',  -- private/public (**field exists but currently inert** — see [Quota limits — v0.6 design / partially enforced in v0.8](#quota-limits))
   max_members  INTEGER DEFAULT 50        -- **field exists, server-side enforcement is OFF**: addNetworkMember + joinByInvite have no max_members gate. Reserved for the v0.6 quota system. See the quota-limits section below.
 );
