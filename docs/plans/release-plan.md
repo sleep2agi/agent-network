@@ -9,7 +9,7 @@
 | 通道 | @sleep2agi/agent-network | @sleep2agi/agent-node | 说明 |
 |---|---|---|---|
 | **latest**（稳定） | 2.2.21 | 2.4.13 | 4 个 runtime；⚠ 带 Windows 跨盘 `anet --version` 崩溃（#446） |
-| **preview** | 2.3.0-preview.33 | 2.5.0-preview.25 | 全部 Windows 修复（#446/#447）+ `--codex-app-server-url` flag；OpenCode pin 暂时回退到 1.17.13 |
+| **preview** | **2.3.0-preview.34** | **2.5.0-preview.26** | canonical：全部 Windows 修复 + codex-app-server flag + OpenCode 1.18.1 全门禁（7/7 Linux + 真 Windows 复验）|
 
 ## 进行中 → 下一个 preview（canonical，`.34` / `.26`）
 
