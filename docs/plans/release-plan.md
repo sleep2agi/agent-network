@@ -1,6 +1,6 @@
 # 版本规划（living doc）
 
-> 最后更新：2026-07-16。Owner：release ops。版本号**怎么读**（npm 版号 vs bundle tag 两套体系）见 [versioning](../docs-site/docs/guide/versioning.md)。
+> 最后更新：2026-07-16。Owner：release ops。版本号**怎么读**（npm 版号 vs bundle tag 两套体系）见 [versioning](../../docs-site/docs/guide/versioning.md)。
 
 ## 当前已发布状态
 
@@ -16,7 +16,7 @@
 - **全部 Windows 修复**（真机验证过）：`fileURLToPath`（#446）、codex-app-server 启动派发、`where`/`shell:true` spawn、agent-node `isAbsolute` 配置路径（#447）
 - **`--codex-app-server-url` / `--codex-thread-id`** 建节点 flag（RFC-030），并收紧 runtime guard
 - **OpenCode（RFC-029）**：恢复 vetted `opencode-ai@1.18.1` pin + release-gate 产物
-- **MCP 上下文**：commhub 回复 status 语义写进 agent 说明（[详见](./agent-reply-to-dashboard.md)）
+- **MCP 上下文**：commhub 回复 status 语义写进 agent 说明（[详见](../sop/agent-reply-to-dashboard.md)）
 
 门禁：release ops 跑 Linux/OpenCode CI 门禁 → 真 Windows 机器验证 → 单点发布（不再两人并行发 `@preview`）。
 

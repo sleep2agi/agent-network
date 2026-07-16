@@ -8,7 +8,7 @@
 
 | 能力 | 依据 |
 |---|---|
-| Hub 任务生命周期：`send_task` → 投递 → `send_reply`（终态）→ `new_reply` SSE | 全体 agent 每天靠它协作；[回复语义](./agent-reply-to-dashboard.md) |
+| Hub 任务生命周期：`send_task` → 投递 → `send_reply`（终态）→ `new_reply` SSE | 全体 agent 每天靠它协作；[回复语义](../sop/agent-reply-to-dashboard.md) |
 | SSE 会话注册 + `report_status`（谁在线） | dashboard + fleet 持续依赖 |
 | SQLite 存储（WAL）+ salted-scrypt 认证 + 登录限流 | 对源码安全审计过；文档已核 |
 | 双 token 模型（`utok_` 用户 / `ntok_` 节点） | 每个节点握手都在用 |
