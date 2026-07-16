@@ -604,6 +604,41 @@ curl "http://localhost:9200/api/tasks?status=running&limit=10" \
 
 ---
 
+### GET /api/task/{task_id}
+
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
+
+按 `task_id` 取**单个任务**的完整记录。路径同时接受 `/api/task/<id>` 与 `/api/tasks/<id>`（末尾 `s` 可选）。
+
+```bash
+curl http://localhost:9200/api/task/<task_id> \
+  -H "Authorization: Bearer ntok_xxx"
+```
+
+**路径参数**：
+
+| 参数 | 说明 |
+|------|------|
+| `task_id` | 任务 ID（URL 编码）；绑定 `ntok_` 时结果被强制限定在 token 自带的 network |
+
+**响应（200）**：`task` 为 `tasks` 表整行（`SELECT *`，字段同上 [GET /api/tasks](#get-api-tasks)）。
+
+```json
+{
+  "ok": true,
+  "task": { "task_id": "...", "status": "replied", "from_name": "...", "to_name": "...", "content": "...", "created_at": "...", "completed_at": "..." }
+}
+```
+
+**未找到（404）**：
+
+```json
+{ "ok": false, "error": "task_not_found", "task_id": "<task_id>" }
+```
+
+---
+
 ### GET /api/nodes
 
 

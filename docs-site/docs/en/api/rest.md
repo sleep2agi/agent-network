@@ -604,6 +604,41 @@ Field mapping to the `tasks` table schema ([`server/src/db.ts:87-105`](https://g
 
 ---
 
+### GET /api/task/{task_id}
+
+
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
+
+Fetch the full record of a **single task** by `task_id`. The path accepts both `/api/task/<id>` and `/api/tasks/<id>` (trailing `s` optional).
+
+```bash
+curl http://localhost:9200/api/task/<task_id> \
+  -H "Authorization: Bearer ntok_xxx"
+```
+
+**Path parameter**:
+
+| Param | Description |
+|------|------|
+| `task_id` | Task ID (URL-encoded); with an `ntok_` bound token the result is forced to the token's own network |
+
+**Response (200)**: `task` is the full `tasks` row (`SELECT *`; same fields as [GET /api/tasks](#get-api-tasks) above).
+
+```json
+{
+  "ok": true,
+  "task": { "task_id": "...", "status": "replied", "from_name": "...", "to_name": "...", "content": "...", "created_at": "...", "completed_at": "..." }
+}
+```
+
+**Not found (404)**:
+
+```json
+{ "ok": false, "error": "task_not_found", "task_id": "<task_id>" }
+```
+
+---
+
 ### GET /api/nodes
 
 
