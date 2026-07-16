@@ -2,7 +2,7 @@
 
 > 包版本映射：agent-network 2.3.0 / agent-node 2.5.0 / commhub-server 0.9.0 / dashboard 0.7.0（见 [版本矩阵](../README.md)）。
 
-> 状态：进行中（preview 泡验期）。**发布锚点：世界人工智能大会（WAIC，7 月下旬）前完成 promote——v0.11.0 就是 WAIC 发布物。**
+> 状态：进行中（preview 泡验期）。**发布锚点：世界人工智能大会（WAIC，7 月下旬）前完成 promote——v0.11.0 就是 WAIC 发布物**（[WAIC 发布规划](./waic-release.md)）。
 >
 > ## 🎯 本版最大目标：**收敛与可靠，不是新功能**
 >
