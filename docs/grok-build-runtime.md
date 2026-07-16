@@ -48,13 +48,17 @@ model:   grok-build (default)
 SSE connected
 ```
 
-Send a REST task:
+Send a REST task（三个变量都从登录后的 `~/.anet/config.json` 取——`anet login` 会写入；缺 `network_id` 请求会被拒）:
 
 ```bash
+COMMHUB_URL=$(jq -r .hub ~/.anet/config.json)
+ANET_TOKEN=$(jq -r .token ~/.anet/config.json)
+NETWORK_ID=$(jq -r .network_id ~/.anet/config.json)
+
 curl -sS -X POST "$COMMHUB_URL/api/task" \
   -H "Authorization: Bearer $ANET_TOKEN" \
   -H "Content-Type: application/json" \
-  --data '{"alias":"grok-demo","task":"Reply with exactly GROK_RUNTIME_OK.","from":"api","priority":"high"}'
+  --data '{"alias":"grok-demo","task":"Reply with exactly GROK_RUNTIME_OK.","from":"api","priority":"high","network_id":"'"$NETWORK_ID"'"}'
 ```
 
 Expected result in `/api/tasks`:

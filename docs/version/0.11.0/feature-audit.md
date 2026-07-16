@@ -22,7 +22,7 @@
 | claude-code-cli | ✅ | ✅ | 生产 fleet 每天在跑（Tier 0）；首跑 dev-channels 确认框需 TTY（文档已写） |
 | claude-agent-sdk | ⏳ | ⏳ | 待走查：vendor picker→envRef→跑任务全程；行为依赖厂商 |
 | codex-sdk | ⏳ | ⏳ | 待走查：`codex login` 态复用→派任务；OAuth 无 CI |
-| grok-build-acp | ⏳ | ⏳ | 待走查：`grok login`→ACP 跑任务 |
+| grok-build-acp | ⚠️ | ⚠️ | 真机走查 PASS（2026-07-16，Docker 隔离，证据 docs/tests/p-0.11.0-grok-acp-journey/）：全链路真通、grok 真回复（15s replied）、grokSession 持久化与文档一致。坑：① 文档 REST 示例缺 network_id 原样必失败（已修文档）+ hub 报错文案在单网络下自相矛盾（业务，待立案）② $ANET_TOKEN 等变量全站未定义获取方式（已修文档）③ /api/networks 返回 name:null（业务，待立案）④ latest 的 create 提示打的是错误的 `grok auth login`（preview 已修，等 canonical）。headless 鉴权：复制 ~/.grok/auth.json 可用 |
 | codex-app-server | —（latest 不含） | ⚠️ | 真 Windows 验过一轮（含共存 attach 命令）；未泡验；flag 已实现 |
 | opencode-cli | —（latest 不含） | ⚠️ | release ops 官方 registry 冷装 E2E PASS（test385）；需精确 pin |
 
