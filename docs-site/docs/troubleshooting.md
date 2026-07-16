@@ -899,7 +899,7 @@ anet doctor
 # 1. Server 健康（含 SSE 连接数 + sessions / license / uptime，无需 auth）
 curl http://localhost:9200/health
 # 关注字段: ok / version / sessions_count / sse_connections / sse_sessions / uptime
-# verify: server/src/index.ts:780-805
+# verify: the `GET /health` handler in index.ts
 
 # 2. 认证有效 + 看所有 session 状态汇总
 curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status

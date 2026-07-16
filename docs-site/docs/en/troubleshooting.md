@@ -900,7 +900,7 @@ It checks: global config + auth token, hub reachability (version / sessions / SS
 # 1. Server health (includes SSE connection count + sessions / license / uptime, no auth required)
 curl http://localhost:9200/health
 # Key fields: ok / version / sessions_count / sse_connections / sse_sessions / uptime
-# Verified at server/src/index.ts:780-805
+# Verified at the `GET /health` handler in index.ts
 
 # 2. Valid auth + summary of all session states
 curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status
