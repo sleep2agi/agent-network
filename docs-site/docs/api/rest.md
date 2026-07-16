@@ -1320,7 +1320,7 @@ curl -X POST http://localhost:9200/api/broadcast \
 | `filter_server` | string | | 只发给指定 `server` 字段的 session |
 | `filter_status` | string | | 只发给指定 status 的 session（如 `idle` / `working`） |
 
-> 跟 MCP [`broadcast`](mcp-tools#broadcast) 同款字段；`from_session` 不是参数，server 端硬编码 `'api'`（[`index.ts:945`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L945) 跟 MCP 版的 `'hub'` 不同）。
+> 跟 MCP [`broadcast`](mcp-tools#broadcast) 同款字段；`from_session` 不是参数，server 端硬编码 `'api'`（[`index.ts` — `POST /api/broadcast` handler](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) 跟 MCP 版的 `'hub'` 不同）。
 
 **响应**（成功）：
 

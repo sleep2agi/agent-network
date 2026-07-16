@@ -1321,7 +1321,7 @@ curl -X POST http://localhost:9200/api/broadcast \
 | `filter_server` | string | | Only deliver to sessions whose `server` field matches |
 | `filter_status` | string | | Only deliver to sessions in the given status (e.g. `idle` / `working`) |
 
-> Same field set as the MCP [`broadcast`](mcp-tools#broadcast) tool. `from_session` is **not** a parameter — the server hard-codes `'api'` ([`index.ts:945`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L945); the MCP version uses `'hub'`).
+> Same field set as the MCP [`broadcast`](mcp-tools#broadcast) tool. `from_session` is **not** a parameter — the server hard-codes `'api'` ([`index.ts` — `POST /api/broadcast` handler](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts); the MCP version uses `'hub'`).
 
 **Response** (success):
 
