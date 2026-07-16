@@ -1,6 +1,6 @@
 # 版本规划（living doc）
 
-> **各版本的迭代范围（冻结的功能清单）** 见 [docs/version/](../version/)：[2.3.0](../version/2.3.0/plan.md) · [2.2.22](../version/2.2.22/plan.md)。本文只保留通道状态与政策。
+> **各版本的迭代范围（冻结的功能清单）** 见 [docs/version/](../version/)：[版本矩阵](../version/README.md) · [v0.11.0](../version/0.11.0/plan.md) · [v0.10.16](../version/0.10.16/plan.md)。本文只保留通道状态与政策。
 
 > 最后更新：2026-07-16。Owner：release ops。版本号**怎么读**（npm 版号 vs bundle tag 两套体系）见 [versioning](../../docs-site/docs/guide/versioning.md)。
 

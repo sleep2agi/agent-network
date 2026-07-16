@@ -1,6 +1,8 @@
-# 2.3.0 迭代规划（本版本范围 · 冻结）
+# v0.11.0 迭代规划（整体版本 · 范围冻结）
 
-> 状态：进行中。对应包：agent-network 2.3.0 / agent-node 2.5.0（现处 preview 泡验期）。
+> 包版本映射：agent-network 2.3.0 / agent-node 2.5.0 / commhub-server 0.9.0 / dashboard 0.7.0（见 [版本矩阵](../README.md)）。
+
+> 状态：进行中（preview 泡验期）。
 > **范围已冻结**：不在下表里的功能一律排 2.4.0+，防失控。新想法 → 开 issue 打 `2.4.0-candidate` 标签，不插队。
 
 ## 本版本要交付的功能
