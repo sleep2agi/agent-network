@@ -116,6 +116,82 @@ anet node start <alias>
 
 ---
 
+## v0.10.15 — **Wave 2 CLI UX 收尾（9 项）**（2026-06-10）✅ stable
+
+**版本同步**（npm `latest` tag）：纯 CLI 包升级，无 agent-node / commhub-server 变更、无 PINNED bump、无需重启 hub/runtime。
+- `@sleep2agi/agent-network@2.2.12` ← bumped（from 2.2.11）
+- `@sleep2agi/agent-node@2.4.10` ← unchanged
+- `@sleep2agi/commhub-server@0.8.5` ← unchanged（PINNED）
+
+### 🌟 Highlights
+
+#### `anet hub status` 可信化（P1.1 / #214 F7-04）
+
+容器环境（node:24-slim、alpine 等）缺 `lsof` 时旧版会谎报 "Hub not running"（即便 `/health` 返回 200），且 busybox `lsof` 会把流式 fd 编号当 PID、渲染成 60+ 项乱码。修复（commit `d33bbfc`）：`/health` 作 ground truth，不再 false negative；PID 列表 sanity-filter，>5 时折叠成 "top-3 + count"；三态输出明确（healthy / port 被占但不健康 / 未运行，各带对应 hint）。
+
+#### Did-you-mean 命令纠错（P1.2 / #214 F7-02/10/11）
+
+Levenshtein 距离 ≤2 的 typo 自动建议，替代旧的 50 行 help dump。顶层 / `anet node` / `anet project` 三处 default 分支都接上：
+
+```
+$ anet creat
+Unknown command "creat". Did you mean: anet create?
+```
+
+#### `anet node restart <alias>`（P1.3 / #173）
+
+跟 `anet project restart` / `anet batch restart` 对称，单节点重启不用敲 stop + start 两条。
+
+#### `-V` 与 `anet help` 别名（P1.4 / #192）
+
+`-V`（大写，cargo/git/docker 惯例）等价 `-v` / `--version`；`anet help`（无 dash）等价 `--help` / `-h`。
+
+### 🐛 Bugs Fixed
+
+- **#214** hub status PID 列表破损（容器 lsof 流式 fd 编号污染）
+- **#214** hub status 谎报 not running（`/health` 200 但 lsof 不可用环境）
+- **#214** 拼错命令无提示（F7-02/10/11）
+
+### 📦 Install（全新安装）
+
+```bash
+npm i -g @sleep2agi/agent-network@latest
+anet --version          # agent-network v2.2.12 ⬆
+```
+
+---
+
+## v0.10.14 — **回执可靠性 / 派单去重 / idle 超时 / `--help` 安全 四件套**（2026-06-10）✅ stable
+
+**版本同步**（npm `latest` tag）：
+- `@sleep2agi/agent-node@2.4.10` ← bumped（from 2.4.9）
+- `@sleep2agi/commhub-server@0.8.5` ← bumped（from 0.8.4，PINNED 同步对齐）
+- `@sleep2agi/agent-network@2.2.11` ← bumped（from 2.2.10）
+
+### 🌟 Highlights
+
+#### #168 回执可靠性（codex / claude / grok 全 runtime）
+
+**症状**：节点按时把产物写到 `/tmp`，但完成回执从未到达 dispatcher，运营侧只看到 "idle / no output"，得手动 `ls /tmp` 才找到产物。根因在共享的 `agent-node` callCommHub + sendReply + processInbox 链，非 runtime-specific。修复（commit `5b61d1c`）：新增 `reply-reliability.ts`（`CommHubError` typed class + `classifyCommHubResponse` 分类器 success/retryable/appLevel + `PendingReplyQueue` 磁盘持久化幂等队列，跨重启保留 attempts）；`processInbox` 改为 drain-pending → inflight guard → process → persist + send + clear-on-success → ack。新增 20 test cases（bun test 111 pass / 0 fail，0 schema 改动）。服务端配套（#216）：`send_reply` 三分语义 —— `not_found` 不入库 / `offline` 入库显式 `queued` / 结构化错误，修掉之前 false-positive `ok:true` 的误报。
+
+#### #212 派单去重（commhub-server guardrail）
+
+server-side dedup per `(from, to, content-hash)`，默认 5min 窗口，in-memory 零 schema 改动（commit `1f3ae1e`）。agent 自己 retry / 用户误触发重复 prompt 时，同窗口内只过一次。窗口可用 `COMMHUB_SEND_DEDUP_WINDOW_MS` 调。
+
+#### idle 超时 + `--help` 安全
+
+四件套的其余两件：节点 idle 超时处理，与 `--help` 输出的安全收敛。
+
+### 📦 Install（全新安装）
+
+```bash
+npm i -g @sleep2agi/agent-network@latest @sleep2agi/agent-node@latest
+anet --version          # agent-network v2.2.11 ⬆
+agent-node --version    # agent-node v2.4.10 ⬆
+```
+
+---
+
 ## v0.10.13 — **grok-build-acp `session/prompt` 300s timeout 卡死修复（P0 hotfix）**（2026-06-08）✅ stable
 
 **版本同步**（npm `latest` tag）：

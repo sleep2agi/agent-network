@@ -116,6 +116,82 @@ Full upgrade workflow + cross-version migration → [Upgrade Guide](/en/guide/up
 
 ---
 
+## v0.10.15 — **Wave 2 CLI UX polish (9 items)** (2026-06-10) ✅ stable
+
+**Version sync** (npm `latest` tag): CLI-only release — no agent-node / commhub-server change, no PINNED bump, no hub/runtime restart needed.
+- `@sleep2agi/agent-network@2.2.12` ← bumped (from 2.2.11)
+- `@sleep2agi/agent-node@2.4.10` ← unchanged
+- `@sleep2agi/commhub-server@0.8.5` ← unchanged (PINNED)
+
+### 🌟 Highlights
+
+#### Trustworthy `anet hub status` (P1.1 / #214 F7-04)
+
+In containers (node:24-slim, alpine…) without `lsof`, the old build falsely reported "Hub not running" even when `/health` returned 200, and busybox `lsof` streamed fd numbers as PIDs, rendering 60+ junk entries. Fix (commit `d33bbfc`): `/health` is now the ground truth (no more false negatives); the PID list is sanity-filtered and folds to "top-3 + count" when >5; three clear states (healthy / port-held-but-unhealthy / not-running), each with the right hint.
+
+#### Did-you-mean command correction (P1.2 / #214 F7-02/10/11)
+
+Typos within Levenshtein distance ≤2 get an auto-suggestion instead of a 50-line help dump. Wired into the top-level, `anet node`, and `anet project` default branches:
+
+```
+$ anet creat
+Unknown command "creat". Did you mean: anet create?
+```
+
+#### `anet node restart <alias>` (P1.3 / #173)
+
+Symmetric with `anet project restart` / `anet batch restart` — restart a single node without typing stop + start.
+
+#### `-V` and `anet help` aliases (P1.4 / #192)
+
+`-V` (uppercase, cargo/git/docker convention) equals `-v` / `--version`; `anet help` (no dash) equals `--help` / `-h`.
+
+### 🐛 Bugs Fixed
+
+- **#214** hub status PID list corruption (container lsof streamed-fd pollution)
+- **#214** hub status falsely "not running" (`/health` 200 but lsof unavailable)
+- **#214** no hint on mistyped commands (F7-02/10/11)
+
+### 📦 Install
+
+```bash
+npm i -g @sleep2agi/agent-network@latest
+anet --version          # agent-network v2.2.12 ⬆
+```
+
+---
+
+## v0.10.14 — **Reply reliability / dispatch dedup / idle timeout / `--help` safety** (2026-06-10) ✅ stable
+
+**Version sync** (npm `latest` tag):
+- `@sleep2agi/agent-node@2.4.10` ← bumped (from 2.4.9)
+- `@sleep2agi/commhub-server@0.8.5` ← bumped (from 0.8.4, PINNED realigned)
+- `@sleep2agi/agent-network@2.2.11` ← bumped (from 2.2.10)
+
+### 🌟 Highlights
+
+#### #168 Reply reliability (codex / claude / grok — all runtimes)
+
+**Symptom**: a node wrote its output to `/tmp` on time, but the completion reply never reached the dispatcher — operators only saw "idle / no output" and had to `ls /tmp` by hand. Root cause was in the shared `agent-node` callCommHub + sendReply + processInbox chain, not runtime-specific. Fix (commit `5b61d1c`): new `reply-reliability.ts` (`CommHubError` typed class + `classifyCommHubResponse` classifier for success/retryable/appLevel + a disk-persisted idempotent `PendingReplyQueue` that survives restarts and keeps an attempts counter); `processInbox` reworked to drain-pending → inflight guard → process → persist + send + clear-on-success → ack. 20 new test cases (bun test 111 pass / 0 fail, zero schema change). Server side (#216): `send_reply` now has three-way semantics — `not_found` not stored / `offline` stored as explicit `queued` / structured error — fixing the earlier false-positive `ok:true`.
+
+#### #212 Dispatch dedup (commhub-server guardrail)
+
+Server-side dedup per `(from, to, content-hash)`, 5-min default window, in-memory with zero schema change (commit `1f3ae1e`). When an agent retries or a user double-fires the same prompt, only one passes within the window. Tunable via `COMMHUB_SEND_DEDUP_WINDOW_MS`.
+
+#### idle timeout + `--help` safety
+
+The remaining two of the four: node idle-timeout handling, and safer `--help` output.
+
+### 📦 Install
+
+```bash
+npm i -g @sleep2agi/agent-network@latest @sleep2agi/agent-node@latest
+anet --version          # agent-network v2.2.11 ⬆
+agent-node --version    # agent-node v2.4.10 ⬆
+```
+
+---
+
 ## v0.10.13 — **`grok-build-acp` `session/prompt` 300s timeout hang fix (P0 hotfix)** (2026-06-08) ✅ stable
 
 **Version alignment** (npm `latest` tag):
