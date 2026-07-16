@@ -74,24 +74,23 @@ bias 的核心指令是「**必须**发 tool_use」。对**多 Agent 协作**（
 
 **典型 use case 偏移**：你想让 intern agent 写一份周报，但 bias 让它疯狂尝试调 `Read` / `WebFetch` 而不是直接写文本。
 
-**Migration hint**：单 agent 报告任务用 `anet node start <alias> --prompt "你只输出报告，不要调工具"` 自带 system prompt 关闭 default bias。
+**Migration hint**：给节点设自定义 system prompt（写 node `config.json` 的 `systemPrompt` 字段，如「你只输出报告，不要调工具」）可**引导**行为，但**对 intern endpoint 它不会关掉 tool-use bias**（bias 仍无条件 prepend、你的 prompt 拼在其后，见 #1 更正）。
 
 ### 5. Tokens 减输出 = 减 explainability
 
 跟 #1 同根：intern 默认 1024 tokens 撞顶（verbose 推理）→ bias 后 122 tokens clean stop。tool 链干净是好事，但用户看不到 model **为什么**这么决策。
 
-**Migration hint**：未来计划加 verbose 模式（preview gap），日志里 dump model 完整 raw response。当前需要 model thinking 可见性的场景同 #1，用 `--prompt` 退回原始 RLHF。
+**Migration hint**：未来计划加 verbose 模式（preview gap），日志里 dump model 完整 raw response。当前想要 model thinking 可见性，只能**不走 intern-biased 路径**（见 #1 更正）；没有 `--prompt` 快捷开关。
 
 ---
 
-## Opt-out：用 `--prompt` 自带 system prompt
+## 能不能关掉 bias？（当前：不能）
 
-```bash
-# 关闭 intern adapter default bias（替换为你自己的 system prompt）
-anet node start my-intern-agent --prompt "你是一个谨慎的代码 reviewer，仅在用户明确要求时调工具。"
-```
+对 intern endpoint，这段 tool-use bias 是**无条件 prepend** 的（[`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) `combinedSystemPrompt = internToolUseBias + SYSTEM_PROMPT`）——**目前没有关掉它的开关**：
 
-注意：`--prompt` 是**替换**不是**追加** —— vendor adapter bias 不会再被 prepend。如果你既想要 bias 又想加自己的指令，目前需要手动 copy bias 内容到 `--prompt` 里再拼自己的。
+- 给节点设自定义 system prompt（写 node `config.json` 的 `systemPrompt` 字段，或直接跑 `agent-node --prompt`）只会**拼在 bias 之后**，不替换、不移除 bias。
+- `anet node start` **没有** `--prompt` flag。
+- 想完全不带 bias：**换非 intern 兼容端点**，或等 `--no-vendor-bias` 开关落地（P1 backlog，见 §5）。
 
 也可以在 `.anet/nodes/<alias>/config.json` 的 `prompt` 字段持久化（agent-node `loadProfile` 读取）。
 

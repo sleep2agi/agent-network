@@ -46,7 +46,7 @@ The vendor adapter is the **minimum viable fix for an RLHF bias**, not a free lu
 
 The bias makes the model **skip the thinking stage** and emit tool_use directly — flattening one of intern-s2-preview's signature features (visible chain-of-reasoning). You can't see the model's decision reasoning when debugging.
 
-**Migration hint**: to keep thinking visible, start with `anet node start <alias> --prompt "your system prompt"` — your prompt **replaces** the default bias, and the model reverts to its original RLHF behavior.
+**Correction (source-verified 2026-07-16)**: ⚠️ the note here and several below — that `anet node start --prompt` replaces/disables the bias and reverts the model to native RLHF — is **inaccurate**. In reality: ① `anet node start` has **no** `--prompt` flag (`--prompt` is an `agent-node` flag; set a node's system prompt via its `config.json` `systemPrompt` field); ② for intern endpoints the bias is prepended **unconditionally** ([`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) `combinedSystemPrompt = internToolUseBias + SYSTEM_PROMPT`) — a custom prompt is **appended after** the bias, not a replacement, and does **not** revert the model to native RLHF. To see the raw Thinking Process, don't use the intern endpoint (or wait for the upstream fix to retire the adapter); a code-level `--no-vendor-bias` switch is not yet implemented (see §5 backlog).
 
 ### 2. Detection fragility — URL regex only matches the chat.intern-ai.org.cn family
 
@@ -74,24 +74,23 @@ The bias's core instruction is "**must** emit tool_use". This is net positive fo
 
 **Typical use-case skew**: you ask an intern agent to write a weekly report, but the bias makes it frantically try to call `Read` / `WebFetch` instead of writing prose.
 
-**Migration hint**: for single-agent report tasks, pass your own system prompt with `anet node start <alias> --prompt "Only produce reports; do not call tools."` — that disables the default bias.
+**Migration hint**: setting a custom system prompt (via the node's `config.json` `systemPrompt` field, e.g. "Only produce reports; do not call tools.") can **steer** behavior, but for intern endpoints it does **not** turn off the tool-use bias (the bias is still prepended unconditionally, your prompt is appended after it — see the correction under #1).
 
 ### 5. Fewer tokens out = less explainability
 
 Same root cause as #1: intern's default output saturates 1024 tokens (verbose reasoning) → with the bias it cleanly stops at 122. A clean tool-call chain is good, but you lose insight into **why** the model decided this way.
 
-**Migration hint**: a verbose mode (preview gap) is planned to dump the model's full raw response. For now, anytime you need model-thinking visibility, fall back to a custom `--prompt` (same as #1) to revert to native RLHF.
+**Migration hint**: a verbose mode (preview gap) is planned to dump the model's full raw response. For now, to get model-thinking visibility you have to avoid the intern-biased path (see the correction under #1); there is no `--prompt` shortcut.
 
 ---
 
-## Opt-out: pass your own `--prompt`
+## Can you turn off the bias? (currently: no)
 
-```bash
-# Disables intern adapter default bias (replaces it with your prompt)
-anet node start my-intern-agent --prompt "You are a careful code reviewer. Only call tools when the user explicitly asks."
-```
+For intern endpoints the tool-use bias is prepended **unconditionally** ([`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) `combinedSystemPrompt = internToolUseBias + SYSTEM_PROMPT`) — there is **no switch to disable it** right now:
 
-Note: `--prompt` **replaces** rather than **appends** — the vendor adapter bias is no longer prepended. If you want both the bias and your own instructions, you currently need to copy the bias content into your `--prompt` and concatenate.
+- Setting a custom system prompt (the node's `config.json` `systemPrompt` field, or `agent-node --prompt` directly) is **appended after** the bias — it does not replace or remove it.
+- `anet node start` has **no** `--prompt` flag.
+- To run with no bias at all: use a **non-intern endpoint**, or wait for the `--no-vendor-bias` switch to land (P1 backlog, see §5).
 
 The prompt can also be persisted in the `prompt` field of `.anet/nodes/<alias>/config.json` (agent-node reads it via `loadProfile`).
 
