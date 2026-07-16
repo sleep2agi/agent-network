@@ -137,6 +137,8 @@ describe("buildAuthJsonBody + writeOpencodeAuthJson", () => {
       list: false,
       task: false,
       skill: false,
+      webfetch: false,
+      websearch: false,
       question: false,
     });
   });
@@ -171,7 +173,8 @@ describe("buildAuthJsonBody + writeOpencodeAuthJson", () => {
     const raw = JSON.parse(readFileSync(configPath, "utf-8"));
     expect(raw.model).toBeUndefined();
     expect(raw.provider).toEqual({ openai: { options: {} } });
-    expect(raw.tools.webfetch).toBeUndefined();
+    expect(raw.tools.webfetch).toBe(false);
+    expect(raw.tools.websearch).toBe(false);
     expect(raw.tools.bash).toBe(false);
     expect(raw.tools.skill).toBe(false);
     expect(raw.tools.question).toBe(false);
