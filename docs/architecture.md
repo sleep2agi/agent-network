@@ -544,7 +544,7 @@ R256 校准：旧 doc 用 `send_task(hub, result)` 回复任务结果 —— 这
 - ~~SSE 实时更新，不用 WebSocket~~
 - ~~一个 HTML 文件搞定~~
 
-### 访问方式（当前 v0.8）
+### 访问方式（当前 stable）
 
 ```bash
 anet hub start            # 起 commhub-server (9200)
