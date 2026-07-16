@@ -35,6 +35,12 @@ Dashboard 聊天窗口。**会不会触发取决于 status**——交互式/协�
 
 补充（同日多次实测）：**commhub_reply 的 task_id 窗口会过期**——回复稍晚就报 `reply_task_not_found`（600s 窗口关闭）。遇到别重试 reply，**直接 send_task 补发**；耗时长的任务从一开始就用 send_task 回。
 
+## 「任务超时（600s 内无最终回复）」自动回复 ≠ 节点死了
+
+busy 节点（如 codex-app-server 单线程 turn）收到新任务会**排队**（日志：`queued (a turn is in flight)`），排满 600s 就自动回一条「codex-app-server 错误: 任务超时」。**这条超时经常只是排队溢出**——节点可能正健康地跑着一个几小时的大 turn。真实翻车（2026-07-16）：协调者据此差点重启一个正在跑关键任务的节点，capture-pane 才发现它活得好好的。
+
+**判死活标准动作**：先 `tmux capture-pane` 看终端实况 + 查 hub 心跳（updated_at 新鲜=活），**别只凭超时消息下结论**。改进方向（候选）：hub/runtime 把"排队中"与"真超时"区分回复。
+
 ## 用了终态还是不显示？
 
 那通常是**生产层传输**问题（浏览器侧 HTTP/2、或 SSE 代理被 buffer/掐掉），不是回复本身。
