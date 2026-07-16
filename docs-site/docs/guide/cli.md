@@ -134,7 +134,7 @@ npm install -g @sleep2agi/agent-network
 | `anet demo debate [opts]` | **辩论赛**：6 角色（主持/正反 4 辩/评委）一键 9 步辩论 |
 | `anet demo socialmedia [opts]` | **社交媒体内容工厂**：4 角色（选题/文案/配图/审核）~3 min |
 | `anet demo pr-review [opts]` | **代码 PR 审查室**：4 角色（安全/性能/风格 3 reviewer 并行 + judge）~2 min |
-| `anet demo sci-team [opts]` | **科研军团**：1 leader + N-1 worker（默认 10，5-50 可调）；**Phase 1 scaffold** — leader 当前为 placeholder echo，真正的智能 fan-out 排在 [RFC-008](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-008-multi-agent-team-convention.md) Phase 2（RFC 状态 Proposed，跟踪见 [#51](https://github.com/sleep2agi/agent-network/issues/51)） |
+| `anet demo sci-team [opts]` | **科研军团**：1 leader + N-1 worker（默认 10，5-50 可调）；**Phase 1 scaffold** — leader 当前为 placeholder echo，真正的智能 fan-out 排在 [RFC-008](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-008-multi-agent-team-convention.md) Phase 2（RFC 状态 Proposed；#51 是已落地的 Phase 1 demo 原始 issue） |
 
 
 ### Channel 管理
