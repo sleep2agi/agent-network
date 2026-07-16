@@ -485,9 +485,13 @@ function positionalArgs(argv: string[]): string[] {
 
 function commandExists(name: string): boolean {
   try {
-    // `command` is a shell builtin; use /bin/sh -c with shell-safe quoting
-    // (shellQuote, NOT JSON.stringify which lets $() / `` expand inside "...")
-    execFileSync("/bin/sh", ["-c", `command -v ${shellQuote(name)}`], { stdio: "ignore" });
+    // Windows has no /bin/sh; use `where`. Unix: `command -v` via /bin/sh with
+    // shell-safe quoting (shellQuote, NOT JSON.stringify which lets $() / `` expand).
+    if (process.platform === "win32") {
+      execFileSync("where", [name], { stdio: "ignore" });
+    } else {
+      execFileSync("/bin/sh", ["-c", `command -v ${shellQuote(name)}`], { stdio: "ignore" });
+    }
     return true;
   } catch {
     return false;
@@ -2942,7 +2946,7 @@ async function launchAgent(id: string, forceNewSession = false) {
     // Try agent-node from PATH, fallback to npx
     let cmd = "agent-node";
     let commandArgs = agentArgs;
-    try { execSync("which agent-node", { stdio: "pipe" }); } catch {
+    try { execSync(process.platform === "win32" ? "where agent-node" : "which agent-node", { stdio: "pipe" }); } catch {
       cmd = "npx";
       commandArgs = ["-y", "@sleep2agi/agent-node@preview", ...agentArgs];
     }
@@ -2985,7 +2989,7 @@ async function launchAgent(id: string, forceNewSession = false) {
         // Stable timer — child survives 30s → reset backoff to base.
         // Mirrors the connectFeishu supervisor pattern from PR #263.
         const stableTimer = setTimeout(() => ctrl.markStable(), 30_000);
-        const child = spawn(cmd, commandArgs, { env: childEnv, stdio: "inherit" });
+        const child = spawn(cmd, commandArgs, { env: childEnv, stdio: "inherit", shell: process.platform === "win32" });
         if (child.pid) writeFileSync(pidFile, String(child.pid));
 
         let settled = false;
