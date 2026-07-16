@@ -20,7 +20,7 @@ anet 内置多个 Runtime，其中**恰好两个是 SDK adapter**——`claude-a
 
 | 维度 | `claude-agent-sdk` | `codex-sdk` |
 |---|---|---|
-| **package / 版本** | `@anthropic-ai/claude-agent-sdk` ^0.2.140（regular dep；以 [agent-node/package.json](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json) 为准） | `@openai/codex-sdk` >=0.130.0（`optionalDependencies`；同上） |
+| **package / 版本** | `@anthropic-ai/claude-agent-sdk` ^0.2.140（regular dep；以 [agent-node/package.json](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json) 为准） | `@openai/codex-sdk` ^0.133.0（`optionalDependencies`；同上） |
 | **API entry** | `query({ prompt, options })` → `AsyncGenerator<SDKMessage>` | `new Codex({...}).startThread(opts)` / `.resumeThread(id, opts)` → `Thread`；`Thread.run()` / `Thread.runStreamed()` |
 | **Session 语义** | `SDKSystemMessage{subtype:'init'}.session_id` 第一帧拿到；resume 用 `Options.resume` 或 `Options.continue`；落盘 `~/.claude/projects/<cwd>/<uuid>.jsonl` | `Thread.id` 首次 turn 启动后才有；resume 用 `codex.resumeThread(id, opts)`；落盘 `~/.codex/sessions/` |
 | **Tool 注册** | `tools: string[]` 内置 + `mcpServers: Record<string, McpServerConfig>` 多协议（stdio / http / sse）；可定义 subagent | 工具集**不可剥离**（Codex CLI 内置 Read/Write/Edit/Bash/Grep/Glob/WebSearch 全套）；MCP 通过 Codex CLI 全局 `config.toml` 注入 |
