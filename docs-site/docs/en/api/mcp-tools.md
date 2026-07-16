@@ -224,6 +224,7 @@ Dispatch a task to a specified agent's inbox. **`send_task` triggers AI processi
 | `ttl_seconds` | number | | Expiration time (default 3600, max 86400) |
 | `network_id` | string | | Network ID |
 | `parent_task_id` | string | | Parent task ID; child replies are auto-chained back to the parent task originator |
+| `meta` | object | | Structured task metadata; mainly for attachments `{ attachments: [{ type, path, url, mime, name, size }] }`, written to the task's `meta_json` column |
 
 **Response**:
 

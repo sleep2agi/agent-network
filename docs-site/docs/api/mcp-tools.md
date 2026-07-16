@@ -224,6 +224,7 @@ ack 成功还会把 `tasks` 表里 `task_id = message_id` 的行从 `status='del
 | `ttl_seconds` | number | | 过期时间（默认 3600，最大 86400） |
 | `network_id` | string | | 网络 ID |
 | `parent_task_id` | string | | 父任务 ID；子任务回复后会自动沿任务链回传给父任务发起者 |
+| `meta` | object | | 结构化任务元数据；主要用于附件 `{ attachments: [{ type, path, url, mime, name, size }] }`，写入 task 的 `meta_json` 列 |
 
 **返回值**：
 
