@@ -40,7 +40,8 @@ First start provisions an admin user and writes a local recovery admin `utok_` t
 
 Don't expose `9200` / `3000` directly. Caddy gives you automatic HTTPS:
 
-```caddy
+```nginx
+# /etc/caddy/Caddyfile
 hub.your-domain.com {
     reverse_proxy localhost:9200
     header {

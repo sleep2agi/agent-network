@@ -45,7 +45,7 @@ anet hub start --host 0.0.0.0
 
 不要直接把 `9200` / `3000` 端口挂公网。用 Caddy 自动 HTTPS：
 
-```caddy
+```nginx
 # /etc/caddy/Caddyfile
 hub.your-domain.com {
     reverse_proxy localhost:9200
