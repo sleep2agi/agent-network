@@ -162,7 +162,7 @@ anet node start my-bot
 **实战 demo（实验性，仅供体验）**:
 ```bash
 anet demo                  # 列出可用 demo
-anet demo pr-review        # 3 角色 PR 评审小组
+anet demo pr-review        # PR 评审室 — 3 reviewer（安全/性能/风格）+ judge
 ```
 
 **深入**:

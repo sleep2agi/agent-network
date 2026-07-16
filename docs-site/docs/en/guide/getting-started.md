@@ -162,7 +162,7 @@ The project direction is **Apache 2.0 open source + self-host + courses / consul
 **Demos** (experimental, for a quick taste):
 ```bash
 anet demo                  # list available demos
-anet demo pr-review        # 3-role PR review squad
+anet demo pr-review        # PR review room — 3 reviewers (security/perf/style) + judge
 ```
 
 **Deeper**:
