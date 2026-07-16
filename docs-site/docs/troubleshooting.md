@@ -8,6 +8,48 @@
 看 [版本号体系](/guide/versioning) 理清 npm 包版（`anet -v` 那几行）和 `v0.10.x` bundle release 的对应关系；想升级走 [升级指南](/guide/upgrade)。
 :::
 
+## 启动类错误（首次运行最常见）
+
+### `anet hub start` -- `spawn bunx ENOENT`
+
+```
+Error: spawn bunx ENOENT
+```
+
+**原因**：本机没装 **Bun**。`commhub-server` 是 Bun-shebang TypeScript，`anet hub start` 底层用 `bunx --bun` 起它，没有 Bun 就崩在第一步。
+
+**解决**：
+
+```bash
+npm i -g bun
+# 或： curl -fsSL https://bun.sh/install | bash
+bun --version        # 应输出 1.2.x 或更新
+```
+
+装好 Bun 再跑 `anet hub start`。完整前置见 [上手指南 · 前置](/guide/getting-started)。（[#235](https://github.com/sleep2agi/agent-network/issues/235) 跟进给启动前友好预检。）
+
+---
+
+### `anet node start` -- `agent-node is not installed or cannot report a version`
+
+```
+agent-node is not installed or cannot report a version. Run: anet upgrade
+```
+
+**原因**：`claude-agent-sdk` / `codex-sdk` 两个 runtime 依赖 `agent-node` 包。设计是首次 `node start` 由 npx 懒加载自动拉取，但当前版本的启动检查**不等它拉完**就报错退出（[#450](https://github.com/sleep2agi/agent-network/issues/450)，#237 同族）。
+
+**解决**：先手动装一次再启动：
+
+```bash
+npm i -g @sleep2agi/agent-node
+agent-node --version     # 应输出当前 latest 或更新
+anet node start <name>
+```
+
+> `claude-code-cli` / `grok-build-acp` runtime 不吃这个坑（不走 `agent-node` SDK 适配路径）。
+
+---
+
 ## 连接类错误
 
 ### `ECONNREFUSED` -- 连接被拒绝

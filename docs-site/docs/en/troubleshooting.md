@@ -8,6 +8,48 @@ For `anet doctor`, Telegram channel setup, MCP tool injection, or codex-sdk acti
 See [Versioning](/en/guide/versioning) to map the npm-package versions printed by `anet -v` onto `v0.10.x` bundle releases. To upgrade, follow the [Upgrade Guide](/en/guide/upgrade).
 :::
 
+## Startup Errors (most common on first run)
+
+### `anet hub start` -- `spawn bunx ENOENT`
+
+```
+Error: spawn bunx ENOENT
+```
+
+**Cause**: **Bun** is not installed. `commhub-server` is Bun-shebang TypeScript, and `anet hub start` launches it via `bunx --bun` — without Bun it crashes on the very first step.
+
+**Fix**:
+
+```bash
+npm i -g bun
+# or: curl -fsSL https://bun.sh/install | bash
+bun --version        # should print 1.2.x or newer
+```
+
+Then run `anet hub start` again. Full prerequisites: [Getting Started · Prerequisites](/en/guide/getting-started). ([#235](https://github.com/sleep2agi/agent-network/issues/235) tracks a friendly pre-start check.)
+
+---
+
+### `anet node start` -- `agent-node is not installed or cannot report a version`
+
+```
+agent-node is not installed or cannot report a version. Run: anet upgrade
+```
+
+**Cause**: the `claude-agent-sdk` / `codex-sdk` runtimes depend on the `agent-node` package. It's designed to lazy-fetch via npx on the first `node start`, but the current startup check **doesn't wait for the fetch** and exits with this error ([#450](https://github.com/sleep2agi/agent-network/issues/450); #237 is the umbrella).
+
+**Fix**: install it once, then start:
+
+```bash
+npm i -g @sleep2agi/agent-node
+agent-node --version     # should print the current latest or newer
+anet node start <name>
+```
+
+> The `claude-code-cli` / `grok-build-acp` runtimes don't hit this (they don't use the `agent-node` SDK-adapter path).
+
+---
+
 ## Connection Errors
 
 ### `ECONNREFUSED` -- Connection Refused
