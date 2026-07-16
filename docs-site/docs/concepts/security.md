@@ -466,7 +466,7 @@ anet info my-agent           # 列 tools: + flags: 行
 > ⚠ **User responsibility**：默认 preset + 默认 `dangerouslySkipPermissions=true` 意味着 agent 启动后能**改文件、跑 shell、访问网络且不弹确认**。请：
 > 1. **不要在 `$HOME` 直接跑 agent**，用一次性工作目录（`mkdir agent-work && cd agent-work && anet node create ...`）—— 详见 [SECURITY.md](https://github.com/sleep2agi/agent-network/blob/main/SECURITY.md)
 > 2. 需要严格 sandbox 时显式 `--tools Read,Glob,Grep` 只给只读权限
-> 3. 关掉 yolo mode：`anet node create --no-skip-permissions`（注意：跑就会一直弹工具调用确认，长任务体验差）
+> 3. 关掉自动批准（yolo）：codex-sdk 节点用 `anet node create --no-yolo`；claude 系（claude-code-cli / claude-agent-sdk）把 node `config.json` 的 `dangerouslySkipPermissions` 设为 `false`（**没有 `--no-skip-permissions` 这个 flag**）。注意关掉后每次工具调用都会弹确认，长任务体验差
 > 4. 单任务预算限制：`--max-budget 0.1`（见下方 [预算控制](#预算控制)）
 
 ### 预算控制

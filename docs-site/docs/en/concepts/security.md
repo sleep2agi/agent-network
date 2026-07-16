@@ -466,7 +466,7 @@ After a successful `anet node create`, agent-node prints a **behavior-disclosure
 > ⚠ **User responsibility**: the default preset + default `dangerouslySkipPermissions=true` means the agent can **edit files, run shell commands, and access the network without confirmation prompts**. Please:
 > 1. **Do NOT run agents from `$HOME` directly** — use a disposable working directory (`mkdir agent-work && cd agent-work && anet node create ...`); see [SECURITY.md](https://github.com/sleep2agi/agent-network/blob/main/SECURITY.md)
 > 2. For strict sandboxing, set `--tools Read,Glob,Grep` to grant read-only permissions
-> 3. Turn off yolo mode with `anet node create --no-skip-permissions` (note: every tool call will then prompt for confirmation, which hurts long-task UX)
+> 3. Turn off auto-approval (yolo): for codex-sdk nodes use `anet node create --no-yolo`; for claude runtimes (claude-code-cli / claude-agent-sdk) set `dangerouslySkipPermissions` to `false` in the node's `config.json` (**there is no `--no-skip-permissions` flag**). Note: every tool call will then prompt for confirmation, which hurts long-task UX.
 > 4. Cap per-task spend: `--max-budget 0.1` (see [Budget Control](#budget-control) below)
 
 ### Budget Control
