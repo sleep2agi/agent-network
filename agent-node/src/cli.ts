@@ -11,7 +11,7 @@
  */
 
 import { readFileSync, existsSync, writeFileSync, chmodSync } from "fs";
-import { dirname, join } from "path";
+import { dirname, join, isAbsolute } from "path";
 import { hostname as osHostname, homedir } from "os";
 import { createCommhubSdkMcpServer } from "./commhub-mcp";
 import { getHostTelemetry } from "./host-telemetry";
@@ -176,7 +176,7 @@ let configFilePath = "";  // 用于 session 写回
 let currentConfigRevision = 0;
 
 if (opts.config) {
-  const cfgPath = opts.config.startsWith("/") ? opts.config : join(process.cwd(), opts.config);
+  const cfgPath = isAbsolute(opts.config) ? opts.config : join(process.cwd(), opts.config);
   // RFC-024 — boot self-heal. If the primary config is corrupt / missing,
   // restore from the .prev sidecar that processConfigUpdate writes
   // before every restart-required apply. Without this wire-up, a node
