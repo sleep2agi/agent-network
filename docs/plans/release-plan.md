@@ -9,7 +9,7 @@
 | 通道 | @sleep2agi/agent-network | @sleep2agi/agent-node | 说明 |
 |---|---|---|---|
 | **latest**（稳定） | 2.2.21 | 2.4.13 | 4 个 runtime；⚠ 带 Windows 跨盘 `anet --version` 崩溃（#446） |
-| **preview** | **2.3.0-preview.34** | **2.5.0-preview.26** | canonical：全部 Windows 修复 + codex-app-server flag + OpenCode 1.18.1。真 Windows 复验 PASS；Linux 门禁 1-2 层真绿、3 层测试期望修复后 3-7 续跑中——**latest promote 冻结待真全绿** |
+| **preview** | **2.3.0-preview.34** | **2.5.0-preview.26** | canonical：全部 Windows 修复 + codex-app-server flag + OpenCode 1.18.1。真 Windows 复验 PASS；Linux 门禁 1-6 已真绿、7 终跑中。⚠️ 审计新发现 stop 孤儿窗 P0（OpenCode 节点 stop 可留 detached ACP 孤儿），修复 draft 在途（evidence pair .35/.27）。**promote 解冻 = 7/7 真绿 + 孤儿窗修复合入并复跑受影响门禁**。另：picker 实为 6-way |
 
 ## 进行中 → 下一个 preview（canonical，`.34` / `.26`）
 
