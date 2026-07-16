@@ -207,7 +207,7 @@ register() → callCommHub("report_status", {
 3. **CommHub inbox**: **不清理** —— 残留 inbox 消息会一直留着。如果之后用同 alias 再 `anet node start`，新进程会从 `getInbox` 拉到旧消息（注意：旧消息可能跟新进程 session 上下文无关）。
 
 ::: warning 旧 doc P1 设计未采纳
-原 doc 写「DELETE FROM sessions / DELETE FROM inbox」是设计草稿意图，**未实施**。当前 v0.8.2 实际只 mark offline + 删本地目录，不清服务端 row。
+原 doc 写「DELETE FROM sessions / DELETE FROM inbox」是设计草稿意图，**未实施**。实际只 mark offline + 删本地目录，不清服务端 row（v0.8.2 起验证，至当前 stable 未变）。
 :::
 
 **确认流程**（[cli.ts:2831-2835](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2831)）：
