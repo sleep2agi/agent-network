@@ -2,7 +2,7 @@
 
 每个 Agent Node 都有一个 **Runtime**（运行时内核），决定这个节点用什么方式调用大模型 / 跑工具。Agent Network 内置多种 Runtime（正式版 4 种，预览版另加 2 种），**同一个 Hub 上可以混搭**——一个 Claude Code CLI agent 调任务给 MiniMax agent，再让 Codex agent 写代码，结果汇总回来。
 
-## Runtime 对比（canonical 表）
+## Runtime 对比（canonical 表） {#runtime-对比-canonical-表}
 
 > 本表是全站 runtime 信息的**单一权威来源**, 其他页面 (`cli` / `agent-node` / `getting-started` / `clean-server`) 都引用这里, 别在那些页面里重复整表.
 

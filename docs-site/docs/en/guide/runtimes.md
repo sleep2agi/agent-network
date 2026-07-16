@@ -2,7 +2,7 @@
 
 Every Agent Node has a **Runtime** (engine kernel) that decides how the node calls models and runs tools. Agent Network ships several Runtimes (4 in stable, plus 2 more in preview) — **and you can mix them on a single Hub**: a Claude Code CLI agent dispatches a translation task to a MiniMax agent, then asks a Codex agent to write code, and merges the results back.
 
-## Runtimes — canonical table
+## Runtimes — canonical table {#runtimes-—-canonical-table}
 
 > This table is the **single source of truth** for runtimes across the entire site. Other pages (`cli` / `agent-node` / `getting-started` / `clean-server`) reference it — they do not duplicate the full table.
 
