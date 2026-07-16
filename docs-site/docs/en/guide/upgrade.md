@@ -156,7 +156,7 @@ anet status
 ## v0.7 → v0.8 Upgrade Notes (historical path) {#v0-7-v0-8-upgrade-notes-latest}
 
 ::: info Fewer and fewer people need this section
-Current stable is v0.10.13. Upgrading between v0.8 / v0.9 / v0.10.x is a straight `anet upgrade` or `npm install -g @sleep2agi/agent-network@latest` — **the auth migration below is NOT required**. Full per-version increments: [changelog](/en/changelog). Kept here as a reference for users who need to traverse v0.7 → v0.10.13 in one go.
+Current stable is v0.10.15. Upgrading between v0.8 / v0.9 / v0.10.x is a straight `anet upgrade` or `npm install -g @sleep2agi/agent-network@latest` — **the auth migration below is NOT required**. Full per-version increments: [changelog](/en/changelog). Kept here as a reference for users who need to traverse v0.7 → v0.10.15 in one go.
 :::
 
 ::: details v0.7 → v0.8 auth / password migration detail

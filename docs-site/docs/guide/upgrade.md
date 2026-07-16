@@ -160,7 +160,7 @@ anet status
 ## v0.7 → v0.8 升级注意（历史路径） {#v0-7-v0-8-升级注意-最新}
 
 ::: info 看这节的人应该越来越少
-当前 stable 是 v0.10.13。从 v0.8 / v0.9 / v0.10.x 之间升级直接 `anet upgrade` 或 `npm install -g @sleep2agi/agent-network@latest` 即可，**无须重做下方 v0.7→v0.8 鉴权迁移**。完整逐版改动见 [changelog](/changelog)。本节保留作 v0.7 → v0.10.13 跨版本升级时的关键节点参考。
+当前 stable 是 v0.10.15。从 v0.8 / v0.9 / v0.10.x 之间升级直接 `anet upgrade` 或 `npm install -g @sleep2agi/agent-network@latest` 即可，**无须重做下方 v0.7→v0.8 鉴权迁移**。完整逐版改动见 [changelog](/changelog)。本节保留作 v0.7 → v0.10.15 跨版本升级时的关键节点参考。
 :::
 
 ::: details v0.7 → v0.8 鉴权 / 密码管理迁移细节
