@@ -101,7 +101,7 @@ curl -X POST http://localhost:9200/api/auth/register \
 
 The `user` object's 5 fields match [`server/src/auth.ts:7-13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L7) `AuthUser` interface (`display_name` / `email` may be `null`); `token` is the `utok_` for CLI/Dashboard; `network_token` is the `ntok_` for agents in the auto-created default network.
 
-**Common 4xx errors** (verify [`auth.ts:30-48 register()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L30)):
+**Common 4xx errors** (verify [`auth.ts register()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts)):
 
 | Status | `error` value | Trigger |
 |------|------------|---------|
@@ -154,7 +154,7 @@ curl -X POST http://localhost:9200/api/auth/login \
 
 The `user` object's 5 fields match the register response (note `email` may be `null`); `network_id` is the default network the user owns ([`auth.ts:113-115`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L113) does `ORDER BY role = 'owner' DESC LIMIT 1`). Each login issues a **brand-new** `utok_` (existing tokens are not rotated, so multiple devices can log in independently — see [`auth.ts:102-110`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L102)).
 
-**Common 4xx errors** (verify [`auth.ts:94-100 login()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L94)):
+**Common 4xx errors** (verify [`auth.ts login()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts)):
 
 | Status | `error` value | Trigger |
 |------|------------|---------|
@@ -291,7 +291,7 @@ curl -X POST http://localhost:9200/api/auth/password \
 
 Matches the `anet passwd` CLI behavior (the CLI writes the new token back into `~/.anet/config.json` automatically). Other devices' next request returns `401 invalid token` and they must `anet login` again.
 
-**Common 4xx errors** (verify [`auth.ts:274-282 changePassword()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L274)):
+**Common 4xx errors** (verify [`auth.ts changePassword()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts)):
 
 | Status | `error` value | Trigger |
 |------|------------|---------|
@@ -374,7 +374,7 @@ curl -X POST http://localhost:9200/api/networks \
 }
 ```
 
-**Common 4xx errors** (verify [`auth.ts:182-206 createNetwork()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L182)):
+**Common 4xx errors** (verify [`auth.ts createNetwork()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts)):
 
 | Status | `error` value | Trigger |
 |------|------------|---------|
@@ -1446,7 +1446,7 @@ curl -X POST http://localhost:9200/api/auth/node-token \
 
 The `token` is the `ntok_` for that `(node_name, network_id)` pair. The hub force-binds the `network_id` to the token — when an agent calls MCP with this token, the server locks operations to that network and rejects cross-network access. See [Tokens — ntok_](/en/concepts/tokens) for more.
 
-**Common 4xx errors** (verify [`auth.ts:130-141 createNetworkTokenForNode()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L130) + [`index.ts:514-529` route](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L514)):
+**Common 4xx errors** (verify [`auth.ts createNetworkTokenForNode()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) + [`index.ts:514-529` route](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L514)):
 
 | Status | `error` value | Trigger |
 |------|------------|---------|
@@ -1727,7 +1727,7 @@ curl -X POST http://localhost:9200/api/networks/net_xxx/invite \
 }
 ```
 
-**Common 4xx errors** (verify [`auth.ts:344-356 createInvite()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L344) + [`index.ts:634` route handler](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L688)):
+**Common 4xx errors** (verify [`auth.ts createInvite()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) + [`index.ts:634` route handler](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L688)):
 
 | Status | `error` value | Trigger |
 |------|------------|---------|
@@ -1761,7 +1761,7 @@ curl -X POST http://localhost:9200/api/networks/join \
 }
 ```
 
-**Common 4xx errors** (verify [`auth.ts:358-378 joinByInvite()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L358)):
+**Common 4xx errors** (verify [`auth.ts joinByInvite()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts)):
 
 | Status | `error` value | Trigger |
 |------|------------|---------|

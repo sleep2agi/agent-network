@@ -101,7 +101,7 @@ curl -X POST http://localhost:9200/api/auth/register \
 
 `user` 对象 5 字段对照 [`server/src/auth.ts:7-13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L7) `AuthUser` interface（`display_name` / `email` 可为 `null`）；`token` 是 `utok_` 给 CLI/Dashboard 用，`network_token` 是 `ntok_` 给 default network 里的 agent 用。
 
-**常见 4xx**（verify [`auth.ts:30-48 register()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L30)）：
+**常见 4xx**（verify [`auth.ts register()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts)）：
 
 | 状态 | `error` 值 | 触发条件 |
 |------|------------|---------|
@@ -154,7 +154,7 @@ curl -X POST http://localhost:9200/api/auth/login \
 
 `user` 对象 5 字段同 register 响应（注 `email` 可为 `null`）；`network_id` 是该用户作为 owner 的 default network（[`auth.ts:113-115`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L113) 取 `ORDER BY role = 'owner' DESC LIMIT 1`）。每次 login 都签发**新的** `utok_`（不撤销已有，多设备登录互不踢，[`auth.ts:102-110`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L102)）。
 
-**常见 4xx**（verify [`auth.ts:94-100 login()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L94)）：
+**常见 4xx**（verify [`auth.ts login()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts)）：
 
 | 状态 | `error` 值 | 触发条件 |
 |------|------------|---------|
@@ -291,7 +291,7 @@ curl -X POST http://localhost:9200/api/auth/password \
 
 跟 `anet passwd` CLI 行为一致（CLI 拿到新 token 后自动写 `~/.anet/config.json`）。其他设备下次请求拿 `401 invalid token` → 必须 `anet login` 重新登录。
 
-**常见 4xx**（verify [`auth.ts:274-282 changePassword()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L274)）：
+**常见 4xx**（verify [`auth.ts changePassword()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts)）：
 
 | 状态 | `error` 值 | 触发条件 |
 |------|------------|---------|
@@ -374,7 +374,7 @@ curl -X POST http://localhost:9200/api/networks \
 }
 ```
 
-**常见 4xx**（verify [`auth.ts:182-206 createNetwork()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L182)）：
+**常见 4xx**（verify [`auth.ts createNetwork()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts)）：
 
 | 状态 | `error` 值 | 触发条件 |
 |------|------------|---------|
@@ -1445,7 +1445,7 @@ curl -X POST http://localhost:9200/api/auth/node-token \
 
 `token` 是该 `(node_name, network_id)` 组合的 `ntok_`，hub 端强制 binding——agent 用这个 token 调 MCP 时，server 自动锁定到 `network_id`，跨网络访问拒绝。详见 [Token 概念 — ntok_](/concepts/tokens#_2-ntok-agent-的-token-每个-agent-一个)。
 
-**常见 4xx**（verify [`auth.ts:130-141 createNetworkTokenForNode()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L130) + [`index.ts:514-529` route](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L514)）：
+**常见 4xx**（verify [`auth.ts createNetworkTokenForNode()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) + [`index.ts:514-529` route](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L514)）：
 
 | 状态 | `error` 值 | 触发条件 |
 |------|------------|---------|
@@ -1726,7 +1726,7 @@ curl -X POST http://localhost:9200/api/networks/net_xxx/invite \
 }
 ```
 
-**常见 4xx**（verify [`auth.ts:344-356 createInvite()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L344) + [`index.ts:634` route handler](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L688)）：
+**常见 4xx**（verify [`auth.ts createInvite()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) + [`index.ts:634` route handler](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L688)）：
 
 | 状态 | `error` 值 | 触发条件 |
 |------|------------|---------|
@@ -1760,7 +1760,7 @@ curl -X POST http://localhost:9200/api/networks/join \
 }
 ```
 
-**常见 4xx**（verify [`auth.ts:358-378 joinByInvite()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L358)）：
+**常见 4xx**（verify [`auth.ts joinByInvite()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts)）：
 
 | 状态 | `error` 值 | 触发条件 |
 |------|------------|---------|
