@@ -279,7 +279,7 @@ anet network invite --role member        # 生成邀请码（admin/member/viewer
 anet passwd                       # 交互式：输旧密码 → 输新密码 ≥ 8 字符 + 非弱密码字典
 ```
 
-要求：≥ 8 字符 + 不在 [`password-dict.ts WEAK_PASSWORDS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts) 字典里。**`anet passwd` / `anet hub admin reset-user` 无任何长度豁免** —— 只有首次注册 admin（register 路径）才允许 ≥ 4，让 quick-start `admin / anethub` 默认成立（verify [`auth.ts:43-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L43)）。
+要求：≥ 8 字符 + 不在 [`password-dict.ts WEAK_PASSWORDS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts) 字典里。**`anet passwd` / `anet hub admin reset-user` 无任何长度豁免** —— 只有首次注册 admin（register 路径）才允许 ≥ 4，让 quick-start `admin / anethub` 默认成立（verify [`auth.ts` `register()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) 的 `isFirstUser` 分支）。
 
 ### 17b. 忘密码怎么办？
 

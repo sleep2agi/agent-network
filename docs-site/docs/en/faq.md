@@ -279,7 +279,7 @@ The current v0.10.x stable line still does not expose `promote` / `demote` CLI s
 anet passwd                       # interactive: old password → new password ≥ 8 chars + not in weak-password dict
 ```
 
-Requirements: ≥ 8 characters + not in [`password-dict.ts WEAK_PASSWORDS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts). **`anet passwd` and `anet hub admin reset-user` have no length exemption** — only the first-time admin **register** path allows ≥ 4 chars so that the quick-start `admin / anethub` default works (verified at [`auth.ts:43-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L43)).
+Requirements: ≥ 8 characters + not in [`password-dict.ts WEAK_PASSWORDS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts). **`anet passwd` and `anet hub admin reset-user` have no length exemption** — only the first-time admin **register** path allows ≥ 4 chars so that the quick-start `admin / anethub` default works (verified in [`auth.ts` `register()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts), the `isFirstUser` branch).
 
 ### 17b. Forgot my password — how to reset?
 
