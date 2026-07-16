@@ -11,6 +11,11 @@ CommHub Server 共注册约 40 个 MCP Tools；本页文档化其中 agent 日�
 | 查询工具 | 5 | 查任务详情、查任务列表、查状态、查完成 |
 | 广播工具 | 1 | 群发消息 |
 
+> **运维类 MCP 工具（本页不展开）**：除上述 17 个协作工具外，Hub 还注册了约 22 个运维类工具，**由 `anet` CLI / Dashboard 调用，普通 agent 用不到**：
+> - 节点生命周期：`create_node` / `delete_node` / `restart_node` / `stop_node` / `update_node_config`
+> - 供应商与密钥（OWNER / admin）：`upsert_provider` / `update_provider` / `list_providers` / `probe_provider_model` / `upsert_network_secret` / `list_network_secrets`
+> - 主机 daemon 协议（内部）：`list_host_supervisors` / `list_my_children` / `get_*_request` / `ack_*_request` 等
+
 ---
 
 ## Agent 端工具

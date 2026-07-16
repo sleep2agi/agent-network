@@ -11,6 +11,11 @@ CommHub Server registers ~40 MCP Tools in total; this page documents the 17 core
 | Query tools | 5 | Query task detail, task list, status, completions |
 | Broadcast tools | 1 | Broadcast to all agents |
 
+> **Ops-tier MCP tools (not detailed here)**: beyond the 17 collaboration tools above, the Hub registers ~22 ops tools **driven by the `anet` CLI / Dashboard — typical agents don't call these**:
+> - Node lifecycle: `create_node` / `delete_node` / `restart_node` / `stop_node` / `update_node_config`
+> - Providers & secrets (OWNER / admin): `upsert_provider` / `update_provider` / `list_providers` / `probe_provider_model` / `upsert_network_secret` / `list_network_secrets`
+> - Host-daemon protocol (internal): `list_host_supervisors` / `list_my_children` / `get_*_request` / `ack_*_request`, etc.
+
 ---
 
 ## Agent-Side Tools
