@@ -31,7 +31,7 @@ Rows tagged `(preview)` below are **preview-only** and not selectable on stable.
 - **Using xAI Grok Build** → `grok-build-acp` ([detailed runtime guide ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md))
 - **Human + agent sharing one Grok TUI (co-presence, attach to the live Grok session)** → `grok-build-cli` ([Grok Co-presence TUI · preview](/en/guide/grok-copresence))
 - **Use the public sst/opencode CLI as a multi-vendor front-end (unified session/auth)** → `opencode-cli` (needs the local `opencode` CLI + an Anthropic/OpenAI env key, [RFC-029](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md))
-- **Reach a vendor that's NOT in the built-in list** (DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / Qwen ...) → `claude-agent-sdk` + pick `custom` in the vendor submenu + `ANTHROPIC_BASE_URL`
+- **Reach a vendor that's NOT in the built-in list** (GLM / Kimi / OpenRouter / vLLM / SiliconFlow / Qwen ...) → `claude-agent-sdk` + pick `custom` in the vendor submenu + `ANTHROPIC_BASE_URL`
 - **Mix and match (recommended)** → run all five on one Hub, pick the best engine per role
 :::
 
@@ -229,7 +229,7 @@ The table below is the `claude-agent-sdk` runtime's built-in providers from `ane
 | InternLM | Intern-S2-Preview (default) / Intern-S1-Pro (see [InternLM](https://chat.intern-ai.org.cn)) | `https://chat.intern-ai.org.cn` (**bare hostname, no `/anthropic` suffix** — unlike MiniMax et al.) |
 | Xiaomi MiMo | mimo-v2.5-pro (default) / v2.5 / v2-pro / v2-omni (see [Xiaomi platform](https://platform.xiaomimimo.com)) | `https://token-plan-cn.xiaomimimo.com/anthropic` |
 
-> Source: [`cli.ts VENDORS`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts). **Providers that haven't passed verification (DeepSeek / GLM / Kimi) are intentionally NOT in the VENDORS list** — reach them via the `custom` vendor (any Anthropic-compatible API accepts a base URL + model there).
+> Source: [`cli.ts VENDORS`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts). **Providers that haven't passed verification (GLM / Kimi) are intentionally NOT in the VENDORS list** — reach them via the `custom` vendor (any Anthropic-compatible API accepts a base URL + model there).
 
 ::: tip Model IDs change frequently
 Providers ship new model versions every few weeks. **Pull the latest model ID from the provider's console** and pass it to `--model`.
@@ -535,7 +535,7 @@ The whole flow is visible in real time on the Tasks / Messages dashboard pages.
 ::: warning Not verified
 - `claude-code-cli` — runs locally (v0.8.2 fixed the session-resume default-loss bug, see [changelog](/en/changelog)); no E2E regression yet
 - `codex-sdk` — unit-tested only, real codex auth E2E pending
-- **DeepSeek / GLM / Kimi and other unverified providers** — intentionally **not in the `VENDORS` list** (#104-B design: the list only holds verified entries, unverified ones don't get mixed in); reach them via the `custom` vendor — usable, but verify the endpoint + model id on your own first
+- **GLM / Kimi and other unverified providers** — intentionally **not in the `VENDORS` list** (#104-B design: the list only holds verified entries, unverified ones don't get mixed in); reach them via the `custom` vendor — usable, but verify the endpoint + model id on your own first
 :::
 
 ---

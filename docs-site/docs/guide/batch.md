@@ -60,7 +60,7 @@ anet batch cleanup 工程师 --workdir ~/anet-team
 | `claude-code` | `claude-code-cli` | 用 Claude Code 订阅模型 | （需 Claude 订阅）|
 | `custom` | `claude-agent-sdk` | 自己填 model id | 自己填 base URL |
 
-每个内置 vendor 的 `baseUrl` + model id 都 verified-with-real-call 才进 `VENDORS` 列表。DeepSeek / GLM / Kimi / OpenRouter 等不在列表的 provider 走 `--preset custom` 手填。
+每个内置 vendor 的 `baseUrl` + model id 都 verified-with-real-call 才进 `VENDORS` 列表。GLM / Kimi / OpenRouter 等不在列表的 provider 走 `--preset custom` 手填。
 
 > 兼容性：`--preset` 也接受旧的 model-id 值（如 `--preset intern-s1-pro`），cli.ts 会自动 resolve 回对应 vendor。
 

@@ -38,7 +38,7 @@ sequenceDiagram
 | Codex (codex-sdk) | `codex-sdk` | 代码生成、命令执行 | ⭐⭐⭐ |
 | MiniMax | `claude-agent-sdk` | 低成本文案、翻译（通过 Anthropic 兼容 API；model id 查 [platform.minimaxi.com](https://platform.minimaxi.com)） | ⭐⭐ |
 
-> `anet node create` 的内置 `VENDORS` 供应商列表：书生 Intern / MiniMax / 小米 MiMo / Anthropic Claude / Codex / Claude Code CLI / 自定义（custom）—— 每个内置 vendor 都 verified-with-real-call。DeepSeek / GLM / Kimi / OpenRouter 等不在内置列表的 Anthropic 兼容 provider 走「自定义」接入，完整表见 [多模型配置](/guide/multi-model)。
+> `anet node create` 的内置 `VENDORS` 供应商列表：书生 Intern / MiniMax / DeepSeek / 小米 MiMo / Anthropic Claude / Codex / Claude Code CLI / 自定义（custom）—— 每个内置 vendor 都 verified-with-real-call。GLM / Kimi / OpenRouter 等不在内置列表的 Anthropic 兼容 provider 走「自定义」接入，完整表见 [多模型配置](/guide/multi-model)。
 
 ### 网络隔离
 

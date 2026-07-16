@@ -46,12 +46,13 @@ Any model that supports the Anthropic Messages API can be integrated via the `cl
 
 - **Anthropic** native SDK (Claude Sonnet / Opus / Haiku; see [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview))
 - **MiniMax** (Anthropic-compatible; see [MiniMax platform](https://platform.minimaxi.com))
+- **DeepSeek** (Anthropic-compatible; see [DeepSeek platform](https://platform.deepseek.com))
 - **InternLM** (Anthropic-compatible; see [InternLM chat](https://chat.intern-ai.org.cn))
 - **Xiaomi MiMo** (Anthropic-compatible; see [Xiaomi platform](https://platform.xiaomimimo.com))
 - **OpenAI Codex** (`codex-sdk` runtime; see OpenAI Codex docs)
 - **xAI Grok** (`grok-build-acp` runtime over ACP protocol; currently only enabled via the `--runtime grok-build-acp` flag — [detailed runtime guide ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md))
 
-Providers NOT in the `VENDORS` list (DeepSeek / Zhipu GLM / Moonshot Kimi / OpenRouter, etc.) — reach them via the `custom` vendor: any Anthropic-compatible API accepts a base URL + model id there; usable, but verify it yourself first.
+Providers NOT in the `VENDORS` list (Zhipu GLM / Moonshot Kimi / OpenRouter, etc.) — reach them via the `custom` vendor: any Anthropic-compatible API accepts a base URL + model id there; usable, but verify it yourself first.
 
 Full endpoint table + configuration examples at [Multi-model](/en/guide/multi-model). Any provider that supports the Anthropic Messages API works via `ANTHROPIC_BASE_URL`.
 

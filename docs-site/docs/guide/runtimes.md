@@ -31,7 +31,7 @@
 - **用 xAI Grok Build** → `grok-build-acp` ([详细 runtime 指南 ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md))
 - **想人和 agent 同时用同一个 Grok TUI（共存，attach 到活的 Grok 会话）** → `grok-build-cli` ([Grok 人机共存 TUI · preview](/guide/grok-copresence))
 - **想用公版 sst/opencode CLI 当多 vendor 前端（统一 session/auth）** → `opencode-cli`（需本机装 `opencode` CLI + Anthropic/OpenAI env key，[RFC-029](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md)）
-- **接国产 / 非内置 vendor** (DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / 通义千问 等) → `claude-agent-sdk` + 在 vendor 子菜单选 `自定义 (custom)` + `ANTHROPIC_BASE_URL`
+- **接国产 / 非内置 vendor** (GLM / Kimi / OpenRouter / vLLM / SiliconFlow / 通义千问 等) → `claude-agent-sdk` + 在 vendor 子菜单选 `自定义 (custom)` + `ANTHROPIC_BASE_URL`
 - **混搭 (推荐)** → 同一 Hub 五种全开, 每个角色挑最合适的内核
 :::
 
@@ -241,7 +241,7 @@ anet node create translator \
 | 书生 InternLM | Intern-S2-Preview（默认）/ Intern-S1-Pro（查 [书生](https://chat.intern-ai.org.cn)） | `https://chat.intern-ai.org.cn`（**裸域名，无 `/anthropic` 后缀** —— 跟 MiniMax 等不同） |
 | 小米 MiMo | mimo-v2.5-pro（默认）/ v2.5 / v2-pro / v2-omni（查 [小米开放平台](https://platform.xiaomimimo.com)） | `https://token-plan-cn.xiaomimimo.com/anthropic` |
 
-> 来源：[`cli.ts VENDORS`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)。**DeepSeek / GLM / Kimi 等没跑通验证的 provider 故意不进 VENDORS 列表** —— 用「自定义」`custom` 供应商接入（任何 Anthropic 兼容 API 都能填 base URL + model）。
+> 来源：[`cli.ts VENDORS`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)。**GLM / Kimi 等没跑通验证的 provider 故意不进 VENDORS 列表** —— 用「自定义」`custom` 供应商接入（任何 Anthropic 兼容 API 都能填 base URL + model）。
 
 ::: tip 模型版本号会变
 各家 LLM 厂商每隔几周升级模型，硬编码具体版本号容易过时。**到对应平台拿最新 model id**，填到 `--model` 参数即可。
@@ -555,7 +555,7 @@ anet node start coder
 ::: warning 未验证（请自行评估）
 - `claude-code-cli` —— 本机能跑（v0.8.2 修了 session resume 默认丢失 bug，详见 [changelog](/changelog)），未做 E2E 回归
 - `codex-sdk` —— 单元测试通过，缺真实 codex 鉴权回归
-- **DeepSeek / GLM / Kimi 等没跑通验证的 provider** —— 故意**不进 `VENDORS` 列表**（#104-B 设计：列表里的都是 verified，没验证的不混进去）；要用就走「自定义」`custom` 供应商接入，能用但请自己先验证 endpoint + model id
+- **GLM / Kimi 等没跑通验证的 provider** —— 故意**不进 `VENDORS` 列表**（#104-B 设计：列表里的都是 verified，没验证的不混进去）；要用就走「自定义」`custom` 供应商接入，能用但请自己先验证 endpoint + model id
 :::
 
 ---

@@ -7,7 +7,7 @@ Agent Node is the working unit in Agent Network -- it receives tasks, invokes an
 - **Writing copy / translation / analysis (programmatic) / using a domestic Chinese model** → `claude-agent-sdk` + pick the matching vendor in the wizard
 - **Writing code / running commands** → `codex-sdk`
 - **Using xAI Grok Build** → `grok-build-acp` ([detailed runtime guide ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md))
-- **Reach a vendor that's NOT in the built-in list** (DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / Qwen ...) → `claude-agent-sdk` + pick `custom` in the vendor submenu + `ANTHROPIC_BASE_URL`
+- **Reach a vendor that's NOT in the built-in list** (GLM / Kimi / OpenRouter / vLLM / SiliconFlow / Qwen ...) → `claude-agent-sdk` + pick `custom` in the vendor submenu + `ANTHROPIC_BASE_URL`
 
 **Authoritative comparison** of runtimes × npm package × wizard behavior × prereq auth (4 in stable, 6 in preview): [runtimes — canonical table](/en/guide/runtimes#runtimes-—-canonical-table). Full `anet node create` wizard order (`node-name → runtime → ...`): [Getting Started §5](/en/guide/getting-started#_4-create-and-start-a-node).
 :::

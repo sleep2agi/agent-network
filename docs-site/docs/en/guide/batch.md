@@ -60,7 +60,7 @@ The `anet create --batch` wizard goes through `selectVendorAndModel()` (cli.ts `
 | `claude-code` | `claude-code-cli` | uses the Claude Code subscription model | (needs a Claude subscription) |
 | `custom` | `claude-agent-sdk` | fill in your own model id | fill in your own base URL |
 
-Every built-in vendor's `baseUrl` + model id is verified-with-real-call before it lands in `VENDORS`. Providers not on the list (DeepSeek / GLM / Kimi / OpenRouter, etc.) go through `--preset custom` with manual entry.
+Every built-in vendor's `baseUrl` + model id is verified-with-real-call before it lands in `VENDORS`. Providers not on the list (GLM / Kimi / OpenRouter, etc.) go through `--preset custom` with manual entry.
 
 > Compatibility: `--preset` also accepts the old model-id values (e.g. `--preset intern-s1-pro`); cli.ts auto-resolves them back to the matching vendor.
 
