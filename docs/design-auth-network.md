@@ -20,7 +20,7 @@
 > - utok_/ntok_ 权限边界（utok_ 当前能调 MCP）
 > - Token scope (agent/readonly) — createToken 统一写 full
 > - 公开网络自动加入 + 审批流
-> - **Argon2id 密码哈希**（当前 SHA-256；v0.9+ 计划迁移）
+> - ~~**Argon2id 密码哈希**（当前 SHA-256；v0.9+ 计划迁移）~~ —— **已落地，非"未实现"**：密码哈希现为 **salted scrypt**（`scrypt$<N>$<salt>$<hash>`，N=14，已从早期 SHA-256 迁移，带 lazy re-hash）。原计划的 Argon2id 主动不采用（需 native dep，scrypt 用 Node 内置 `crypto` 零依赖），verify [`server/src/db.ts` password hashing](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts)。
 > - RFC-001 Phase 3：完全移除 COMMHUB_AUTH_TOKEN 代码路径
 >
 > ⛔ 已废弃方向（本文下方仍有相关引用，请忽略）：

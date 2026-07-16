@@ -1,7 +1,7 @@
 # @sleep2agi/agent-network 架构设计
 
 > CLI 名：`anet` | npm 包名：`@sleep2agi/agent-network`
-> 当前 stable：v0.8.x 系列（通过 npm `latest` tag 发布）。四件套（agent-network CLI / commhub-server / agent-node / agent-network-dashboard）的具体版本号以 npm 包页 dist-tags + [changelog](https://anet.sh/changelog) 为准 —— 本文不写死版本号，避免 release 后 stale。
+> 当前 stable 通过 npm `latest` tag 发布。四件套（agent-network CLI / commhub-server / agent-node / agent-network-dashboard）的具体版本号以 npm 包页 dist-tags + [changelog](https://anet.sh/changelog) 为准 —— 本文不写死版本号，避免 release 后 stale。
 > 本文最早写于 V2 早期（CLI v0.0.x），部分目录结构 / runtime 命名描述仍保留作为历史背景；最新可执行行为以代码 + [anet.sh](https://anet.sh) 文档为准。
 
 ---
@@ -519,7 +519,7 @@ R256 校准：旧 doc 用 `send_task(hub, result)` 回复任务结果 —— 这
 
 > **R220 校准（2026-05-13）**：本节的「内置轻量 UI」+「`http://YOUR_IP:9200/dashboard`」是 V2 早期设计草稿，**v0.8 实际未实现** —— commhub-server `server/src/index.ts` 没有 `/dashboard` 路由（[全 source grep `/dashboard` 0 hit](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)）。当前**唯一 Dashboard 是独立的 Next.js 包 `@sleep2agi/agent-network-dashboard`**，通过 `anet hub dashboard` 子命令拉起（[`agent-network/bin/cli.ts:2386`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2386) `sub === "dashboard"` 分支，默认端口 3000；版本不再 hardcode pin —— [`dashboardReleaseTag()` cli.ts:347](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L347) 默认拉 `@preview` tag，可用 `ANET_DASHBOARD_VERSION` env 覆盖，跟 anet release channel 对齐 — 见 #61）。最新部署方式见 [anet.sh/guide/dashboard](https://anet.sh/guide/dashboard)。下面的「两种 Dashboard」/「内置 UI 设计原则」/「实现方案」/「HTML 结构」全是 V2 设计草稿，仅保留历史背景，**当前不适用**。
 
-### 当前 (v0.8) Dashboard
+### 当前 Dashboard
 
 | 维度 | 实际值 |
 |------|------|
