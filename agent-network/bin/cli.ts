@@ -429,6 +429,8 @@ function saveProfile(id: string, profile: Profile) {
     env: normalized.env || {},
     flags: normalized.flags || {},
     ...(normalized.session ? { session: normalized.session } : {}),
+    ...(normalized.codexAppServerUrl ? { codexAppServerUrl: normalized.codexAppServerUrl } : {}),
+    ...(normalized.codexThreadId ? { codexThreadId: normalized.codexThreadId } : {}),
     // RFC-008 / issue #51 team-scale demo metadata. Optional on every node;
     // present only when set by `anet demo sci-team` (Phase 1 scaffold) or
     // a future RFC-008 client. Without this persist, agent-node reads back a
