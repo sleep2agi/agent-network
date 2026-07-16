@@ -2857,6 +2857,7 @@ async function launchAgent(id: string, forceNewSession = false) {
 
   if (
     runtime === "codex-sdk" ||
+    runtime === "codex-app-server" ||
     runtime === "claude-agent-sdk" ||
     runtime === "grok-build-acp" ||
     runtime === "opencode-cli"
