@@ -229,7 +229,7 @@ REST API 根据 Token 类型自动限制范围：
 | `POST /api/auth/login` | 10 次/分 | 防暴力破解 |
 
 ::: info register 与 login 用不同机制
-- **register**：通用 `checkRateLimit()`（30/min），verify [`server/src/index.ts:721`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L721)。`checkRateLimit` 签名 `maxPerMinute = 60` 默认值为未来扩展预留。
+- **register**：通用 `checkRateLimit()`（30/min），verify [`index.ts` `checkRateLimit()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)。`checkRateLimit` 签名 `maxPerMinute = 60` 默认值为未来扩展预留。
 - **login**：专用 `LoginIpRateLimiter`（每 IP 每 60 秒窗口 10 次）**外加**基于失败次数的账户级渐进锁定（连续失败 ≥ 5 次触发，锁定时长 30 秒起、指数退避至上限 15 分钟），verify [`server/src/auth_login_guard.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth_login_guard.ts)。
 - **其它 endpoint 当前不做 IP rate limit** —— 担心写操作被滥用，前置反向代理（nginx / cloudflare 等）补即可。
 :::
@@ -237,7 +237,7 @@ REST API 根据 Token 类型自动限制范围：
 ### 实现方式
 
 ```typescript
-// 内存存储，per IP（verify server/src/index.ts:55-67）
+// 内存存储，per IP（verify `checkRateLimit()` in index.ts）
 const rateLimits = new Map<string, { count: number; resetAt: number }>();
 
 function checkRateLimit(ip: string, maxPerMinute = 60): boolean {
@@ -266,7 +266,7 @@ function checkRateLimit(ip: string, maxPerMinute = 60): boolean {
 
 ### 本地豁免
 
-localhost (`127.0.0.1` / `::1`)、以及 IP 解析为空 / `"unknown"` 的请求免速率限制，方便开发和测试（[`index.ts:58`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L58)）。
+localhost (`127.0.0.1` / `::1`)、以及 IP 解析为空 / `"unknown"` 的请求免速率限制，方便开发和测试（[`index.ts` `checkRateLimit()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)）。
 
 ## CORS 配置
 
@@ -279,7 +279,7 @@ COMMHUB_CORS_ORIGINS="https://dashboard.example.com" anet hub start
 ```
 
 ::: warning CORS 默认 **不是** `*`
-verify [`server/src/index.ts:256-258`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L256)：`COMMHUB_CORS_ORIGINS` 未设时默认白名单 = `["http://localhost:3000", "http://localhost:3001"]`（**仅本机 dev origin**），**不是** `*`。设了 `COMMHUB_CORS_ORIGINS`（逗号分隔）会**完全替换**这个默认值。
+verify [`index.ts` `CORS_ORIGINS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)：`COMMHUB_CORS_ORIGINS` 未设时默认白名单 = `["http://localhost:3000", "http://localhost:3001"]`（**仅本机 dev origin**），**不是** `*`。设了 `COMMHUB_CORS_ORIGINS`（逗号分隔）会**完全替换**这个默认值。
 
 `Access-Control-Allow-Origin` 只在请求的 `Origin` 命中白名单时回显该 origin，否则回空字符串（浏览器据此拦截跨域请求）。源码不 hardcode 任何作者域名 —— 生产部署 Dashboard 跨域必须显式设 `COMMHUB_CORS_ORIGINS`。
 :::
@@ -307,11 +307,11 @@ CREATE TABLE audit_log (
 
 | 操作 | 触发场景 |
 |------|---------|
-| `register` | 用户注册（[`index.ts:436`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L436)） |
+| `register` | 用户注册（[`index.ts` `POST /api/auth/register`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)） |
 | `login` | 用户登录成功 |
 | `login_failed` | 用户登录失败（密码不匹配 / username 不存在） |
 | `login_rate_limited` | login 触发 IP rate limit（10/分） |
-| `password_changed` | `anet passwd` 改密码（[`index.ts:504`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L504)） |
+| `password_changed` | `anet passwd` 改密码（[`index.ts` `POST /api/auth/password`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)） |
 | `password_reset_by_admin` | hub admin 用 `anet hub admin reset-user` 强制重置（[`auth.ts` `resetUserPassword()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) + [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)） |
 | `network_renamed` / `network_deleted` / `network_joined` | network 改名 / 删除 / 加入 |
 | `member_added` / `member_role_changed` / `member_removed` | network 成员变更（`detail` 字段记 `<user_id> as <role>` / `<user_id> → <role>`） |
@@ -321,7 +321,7 @@ CREATE TABLE audit_log (
 | `invite_created` | 创建网络邀请码 |
 
 ::: info `create_network` / `network_created` 不写 audit
-当前 [`index.ts:635`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L635) 的 POST `/api/networks` 不调 `logAudit`，所以新建 network 不留 audit 行。仅 rename / delete / join 写 audit。
+当前 [`index.ts` `POST /api/networks`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) 的 POST `/api/networks` 不调 `logAudit`，所以新建 network 不留 audit 行。仅 rename / delete / join 写 audit。
 :::
 
 ### 查询审计日志

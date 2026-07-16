@@ -229,7 +229,7 @@ REST API automatically scopes based on token type:
 | `POST /api/auth/login` | 10/min | Prevent brute force |
 
 ::: info register and login use different mechanisms
-- **register**: the generic `checkRateLimit()` (30/min) — verify [`server/src/index.ts:721`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L721). The `maxPerMinute = 60` default is reserved for future expansion.
+- **register**: the generic `checkRateLimit()` (30/min) — verify [`index.ts` `checkRateLimit()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts). The `maxPerMinute = 60` default is reserved for future expansion.
 - **login**: a dedicated `LoginIpRateLimiter` (10 requests per 60-second window, per IP) **plus** a failure-based progressive account lockout (triggered after ≥ 5 consecutive failures; lock duration starts at 30 s and backs off exponentially up to a 15-minute cap) — verify [`server/src/auth_login_guard.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth_login_guard.ts).
 - **No other endpoint rate-limits per IP** — if you're worried about write abuse, layer rate limiting at a reverse proxy (nginx / Cloudflare / etc.) in front.
 :::
@@ -237,7 +237,7 @@ REST API automatically scopes based on token type:
 ### Implementation
 
 ```typescript
-// In-memory store, per IP (verify server/src/index.ts:55-67)
+// In-memory store, per IP (verify `checkRateLimit()` in index.ts)
 const rateLimits = new Map<string, { count: number; resetAt: number }>();
 
 function checkRateLimit(ip: string, maxPerMinute = 60): boolean {
@@ -266,7 +266,7 @@ When the limit is exceeded the server returns HTTP 429 with a body like:
 
 ### Localhost Exemption
 
-localhost (`127.0.0.1` / `::1`), plus requests whose IP resolves to empty / `"unknown"`, are exempt from rate limiting for convenient development and testing ([`index.ts:58`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L58)).
+localhost (`127.0.0.1` / `::1`), plus requests whose IP resolves to empty / `"unknown"`, are exempt from rate limiting for convenient development and testing ([`index.ts` `checkRateLimit()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)).
 
 ## CORS Configuration
 
@@ -279,7 +279,7 @@ COMMHUB_CORS_ORIGINS="https://dashboard.example.com" anet hub start
 ```
 
 ::: warning CORS default is **not** `*`
-Verify [`server/src/index.ts:256-258`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L256): when `COMMHUB_CORS_ORIGINS` is unset the default allowlist is `["http://localhost:3000", "http://localhost:3001"]` (**localhost dev origins only**), **not** `*`. Setting `COMMHUB_CORS_ORIGINS` (comma-separated) **fully replaces** that default.
+Verify [`index.ts` `CORS_ORIGINS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts): when `COMMHUB_CORS_ORIGINS` is unset the default allowlist is `["http://localhost:3000", "http://localhost:3001"]` (**localhost dev origins only**), **not** `*`. Setting `COMMHUB_CORS_ORIGINS` (comma-separated) **fully replaces** that default.
 
 `Access-Control-Allow-Origin` echoes the request `Origin` only when it's in the allowlist, otherwise it returns an empty string (the browser then blocks the cross-origin request). No author-specific domains are hardcoded — production deployments serving the Dashboard cross-origin must set `COMMHUB_CORS_ORIGINS` explicitly.
 :::
@@ -307,11 +307,11 @@ Recorded `action` values (**19 total**; verify `grep logAudit server/src/*.ts + 
 
 | Operation | Trigger |
 |------|---------|
-| `register` | User registration ([`index.ts:436`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L436)) |
+| `register` | User registration ([`index.ts` `POST /api/auth/register`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)) |
 | `login` | Successful login |
 | `login_failed` | Login failure (wrong password / unknown username) |
 | `login_rate_limited` | Login hit the IP rate limit (10/min) |
-| `password_changed` | `anet passwd` ([`index.ts:504`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L504)) |
+| `password_changed` | `anet passwd` ([`index.ts` `POST /api/auth/password`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)) |
 | `password_reset_by_admin` | hub admin force-reset via `anet hub admin reset-user` ([`auth.ts` `resetUserPassword()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) + [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)) |
 | `network_renamed` / `network_deleted` / `network_joined` | Network rename / delete / join |
 | `member_added` / `member_role_changed` / `member_removed` | Network membership changes (`detail` records `<user_id> as <role>` / `<user_id> → <role>`) |
@@ -321,7 +321,7 @@ Recorded `action` values (**19 total**; verify `grep logAudit server/src/*.ts + 
 | `invite_created` | Network invite code creation |
 
 ::: info `create_network` / `network_created` is NOT audited
-Today's POST `/api/networks` handler ([`index.ts:635`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L635)) does not call `logAudit`, so new networks leave no audit row. Only rename / delete / join write audit entries.
+Today's POST `/api/networks` handler ([`index.ts` `POST /api/networks`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)) does not call `logAudit`, so new networks leave no audit row. Only rename / delete / join write audit entries.
 :::
 
 ### Querying Audit Logs
