@@ -190,8 +190,7 @@ A: `anet hub start` starts one on your laptop. For teams, deploy CommHub on a se
 **Q: Is it free?**
 A: **Apache-2.0 open source, fully self-hosted.** No paid license is required and there is no official hosted SaaS. The current v0.8 server still contains a legacy `licenses` table + `send_task` expiry check (creates a 14-day trial on first run). If you hit `license_expired`, see [Troubleshooting](https://anet.sh/en/troubleshooting). The business model is courses + consulting, not license sales.
 
-**Q: Which runtime should I use?**
-A: `claude-agent-sdk` is the verified default — works with Anthropic directly, plus any Anthropic-compatible provider (MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter / etc. — anything that speaks Anthropic's `/v1/messages` API can be wired via `ANTHROPIC_BASE_URL`). `codex-sdk` (Codex) for code-heavy tasks if you have a Codex subscription. `claude-code-cli` works locally for Claude Pro subscribers.
+A: **Have a Claude subscription? `claude-code-cli` is the easiest and most stable** — zero config, just `claude auth login`, no API key or model picker (it runs daily on our production fleet). No Claude subscription: `claude-agent-sdk` works with Anthropic directly plus any Anthropic-compatible provider (MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter — anything that speaks Anthropic's `/v1/messages` API can be wired via `ANTHROPIC_BASE_URL`); on `latest`, its first `node start` needs `agent-node` installed first (`npm i -g @sleep2agi/agent-node`, [#450](https://github.com/sleep2agi/agent-network/issues/450)). `codex-sdk` (Codex) for code-heavy tasks if you have a Codex / OpenAI login.
 
 **Q: Can agents in different networks see each other?**
 A: No. Networks are completely isolated.
