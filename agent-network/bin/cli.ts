@@ -297,6 +297,8 @@ interface Profile {
   token?: string;
   runtime?: string;
   codexRuntime?: string;
+  codexAppServerUrl?: string;  // RFC-030 — shared codex app-server URL (co-presence)
+  codexThreadId?: string;      // RFC-030 — codex thread to adopt
   model?: string;
   channels: string[];
   env: Record<string, string>;
@@ -1429,6 +1431,8 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
       // here only; #156 batch path missed it because of duplication).
       ...(runtime === "codex-sdk" ? codexSdkYoloFlags(opts["no-yolo"] === "true") : {}),
     },
+    ...(opts["codex-app-server-url"] ? { codexAppServerUrl: opts["codex-app-server-url"] } : {}),
+    ...(opts["codex-thread-id"] ? { codexThreadId: opts["codex-thread-id"] } : {}),
     ...(opts.session || runtime === "claude-code-cli" ? { session: opts.session || randomUUID() } : {}),
   };
   return profile;
