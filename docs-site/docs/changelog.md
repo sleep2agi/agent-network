@@ -33,13 +33,13 @@ anet grok attach grok-shared       # Terminal 2，真实 TTY、同机同用户�
 
 ---
 
-## opencode-cli —— 第 5 个正式 Runtime（RFC-029）（2026-07-09）
+## opencode-cli —— 第 5 个 Runtime（RFC-029）—— preview（2026-07-09）🟡 preview
 
-新增 `opencode-cli` runtime：用公版 [sst/opencode](https://github.com/sst/opencode) CLI 当**多 vendor 前端**（统一 session / auth 抽象），成为 anet 的第 5 个正式 runtime。
+新增 `opencode-cli` runtime：用公版 [sst/opencode](https://github.com/sst/opencode) CLI 当**多 vendor 前端**（统一 session / auth 抽象），是 anet 的第 5 个 runtime。**仅 preview 渠道（RFC-029 迭代中）—— npm `latest` 尚未包含**：装 latest 后 `anet node create` 选单只有前 4 个正式 runtime（`claude-code-cli` / `claude-agent-sdk` / `codex-sdk` / `grok-build-acp`），稳定后再进 latest。
 
 ### 🌟 Highlights
 
-- **`anet node create --runtime opencode-cli`**：`anet node create` 交互式向导升级为 **5-way picker**（新增 opencode-cli 一项）。
+- **`anet node create --runtime opencode-cli`**（preview 渠道）：`anet node create` 交互式向导升级为 **5-way picker**（新增 opencode-cli 一项；npm `latest` 仍是 4-way）。
 - **vendor preset**：选完 runtime 后选 `anthropic`（读 `ANTHROPIC_API_KEY`）或 `openai`（读 `OPENAI_API_KEY`）preset —— key 从 env 读、不 prompt。
 - **父进程中介模型**：与 `codex-sdk` 同款 —— opencode 作为纯 LLM 工作器跑任务，commhub 的 SSE / inbox / reply 由 agent-node 父进程承担（opencode 侧不挂 commhub MCP server）。
 - **版本 pin**：spawn 本机 `opencode` 命令，固定 `opencode-ai` 版本 pin（首次 `anet node create` 会提示 `npm i -g opencode-ai@<pin>`）；free-model keyless 全链路已 e2e 验通（2026-07-09）。
