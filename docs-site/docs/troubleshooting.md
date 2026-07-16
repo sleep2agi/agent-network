@@ -353,10 +353,10 @@ HTTP 429
 | `POST /api/auth/login` | 10 次/分钟 | `too many attempts, try again later`（+ audit `login_rate_limited`） |
 
 ::: info v0.8 当前只有这两个 endpoint 做 IP rate limit
-其他 endpoint **不做 IP rate limit**（`checkRateLimit` 函数 default=60 仅函数签名 default，[`server/src/index.ts:56`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L56) 实际只在 register/login 两处调；详见 [安全设计 — 速率限制](/concepts/security#速率限制-rate-limiting)）。担心其他端点被写滥用，前置反向代理（nginx / Cloudflare）加 rate limit。
+其他 endpoint **不做 IP rate limit**（`checkRateLimit` 函数 default=60 仅函数签名 default，[`index.ts` `checkRateLimit()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) 实际只在 register/login 两处调；详见 [安全设计 — 速率限制](/concepts/security#速率限制-rate-limiting)）。担心其他端点被写滥用，前置反向代理（nginx / Cloudflare）加 rate limit。
 :::
 
-**解决**：等 60 秒后重试。localhost / `::1` / `unknown` IP 免限制（[`index.ts:58`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L58)）。响应**无** `retry_after_seconds` 字段，**无** `Retry-After` header，窗口固定 60 秒。
+**解决**：等 60 秒后重试。localhost / `::1` / `unknown` IP 免限制（[`index.ts` `checkRateLimit()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)）。响应**无** `retry_after_seconds` 字段，**无** `Retry-After` header，窗口固定 60 秒。
 
 ---
 

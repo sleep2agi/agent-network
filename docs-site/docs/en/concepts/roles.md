@@ -86,10 +86,10 @@ anet network join <code>
 
 For team leads, trusted operators, anyone who needs to manage members.
 
-- **Can**: everything member can; invite new members + remove non-owner members (invite [`index.ts:695`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L695) / remove [`index.ts:681`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L681): `["owner","admin"]` gate).
+- **Can**: everything member can; invite new members + remove non-owner members (invite [`index.ts` `POST /api/networks/:id/invite`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) / remove [`index.ts` `DELETE /api/networks/:id/members/:id`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts): `["owner","admin"]` gate).
 
   > Note: `anet node start / stop / delete` / editing config are **not** admin network-role privileges — they're pure local CLI operations (see note ※ on the permission matrix above), available to whoever holds the node config on their machine, regardless of network role. An admin **cannot** remotely start/stop an agent on someone else's machine.
-- **Cannot**: **change an existing member's role** — `PUT /api/networks/:id/members/:user_id` is **owner-only** ([`index.ts:674`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L674) `if (callerRole !== "owner")` → 403); admin can only invite / remove, not re-role existing members. Also cannot: delete the network itself; remove an owner or promote anyone to owner; **read other users' `/api/audit-log` rows** — admin-only endpoints are gated by **system-level** `users.role='admin'` (**not** network admin). A network admin sees only their own audit log rows, same as members and viewers.
+- **Cannot**: **change an existing member's role** — `PUT /api/networks/:id/members/:user_id` is **owner-only** ([`index.ts` `PUT /api/networks/:id/members/:id`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) `if (callerRole !== "owner")` → 403); admin can only invite / remove, not re-role existing members. Also cannot: delete the network itself; remove an owner or promote anyone to owner; **read other users' `/api/audit-log` rows** — admin-only endpoints are gated by **system-level** `users.role='admin'` (**not** network admin). A network admin sees only their own audit log rows, same as members and viewers.
 
 Become an admin:
 ```bash

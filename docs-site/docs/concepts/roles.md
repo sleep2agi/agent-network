@@ -106,12 +106,12 @@ anet network join <code>                         # 用邀请码加入
 
 **能干什么**：
 - member 的全部
-- 邀请新成员入网 + 移除非 owner 成员（invite [`index.ts:695`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L695) / remove [`index.ts:681`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L681)：`["owner","admin"]` 门控）
+- 邀请新成员入网 + 移除非 owner 成员（invite [`index.ts` `POST /api/networks/:id/invite`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) / remove [`index.ts` `DELETE /api/networks/:id/members/:id`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)：`["owner","admin"]` 门控）
 
 > 注：`anet node start / stop / delete` / 改 config **不是 admin 的网络角色特权** —— 它们是纯本地 CLI 操作（见上方权限矩阵注 ※），谁的机器上有那份 node config 谁就能管，跟网络角色无关。admin **不能**远程 start/stop 别人机器上的 agent。
 
 **不能干什么**：
-- ❌ **改成员 role** —— `PUT /api/networks/:id/members/:user_id` 是 **owner only**（[`index.ts:674`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L674) `if (callerRole !== "owner")` 直接 403）；admin 只能 invite / remove，不能改已有成员的 role
+- ❌ **改成员 role** —— `PUT /api/networks/:id/members/:user_id` 是 **owner only**（[`index.ts` `PUT /api/networks/:id/members/:id`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) `if (callerRole !== "owner")` 直接 403）；admin 只能 invite / remove，不能改已有成员的 role
 - ❌ 删除 network 本身（只有 owner 能）
 - ❌ 移除 owner / 把别人升到 owner
 - ❌ 看其他人的 `/api/audit-log` row —— admin-only 端点是**系统级** `users.role='admin'` 限定（**不是** network admin）；network admin 跟 viewer / member 一样只能看自己的 audit log row
