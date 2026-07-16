@@ -2,7 +2,7 @@
 
 > 包版本映射：agent-network 2.3.0 / agent-node 2.5.0 / commhub-server 0.9.0 / dashboard 0.7.0（见 [版本矩阵](../README.md)）。
 
-> 状态：进行中（preview 泡验期）。
+> 状态：进行中（preview 泡验期）。**发布锚点：世界人工智能大会（WAIC，7 月下旬）前完成 promote——v0.11.0 就是 WAIC 发布物。**
 >
 > ## 🎯 本版最大目标：**收敛与可靠，不是新功能**
 >
@@ -48,6 +48,7 @@
 - tools 编辑（要 hub 扩 update_node_config schema，后端立项后再排）
 - Slack 重塑的**全量实现**（本版只出设计稿定方向）
 - 新 runtime 接入、PG 后端、CLI 成员角色管理（promote/demote）
+- **Feishu channel 本版不发布**（Vincent 2026-07-16 定）：盘点查出 Docker 从零旅程阻断 + 假阳性连接标志（详见 [feature-audit](./feature-audit.md)），且缺测试 App 无法验连接层。文档标注 experimental/未发布，修复 issue 挂 v0.12
 - 任何未列入上表的新功能
 
 ## 收尾判据（Definition of Done）
