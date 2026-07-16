@@ -76,7 +76,7 @@ curl -X POST http://localhost:9200/api/auth/register \
 
 | Field | Type | Required | Description |
 |------|------|:----:|------|
-| `username` | string | &check; | Username (2-50 chars, letters/numbers/underscores/Chinese) |
+| `username` | string | &check; | Username (2-50 chars, letters/numbers/underscores/hyphens/Chinese) |
 | `password` | string | &check; | Password (>= 8 chars + not in weak-password dictionary; first bootstrap admin exempt, >= 4 OK) |
 | `email` | string | | Email |
 | `display_name` | string | | Display name |

@@ -76,7 +76,7 @@ curl -X POST http://localhost:9200/api/auth/register \
 
 | 字段 | 类型 | 必需 | 说明 |
 |------|------|:----:|------|
-| `username` | string | &check; | 用户名（2-50 字符，字母/数字/下划线/中文） |
+| `username` | string | &check; | 用户名（2-50 字符，字母/数字/下划线/连字符/中文） |
 | `password` | string | &check; | 密码（>= 8 字符 + 非弱密码字典；首个 bootstrap admin 例外，>= 4 即可） |
 | `email` | string | | 邮箱 |
 | `display_name` | string | | 显示名 |
