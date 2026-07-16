@@ -3,6 +3,16 @@
 > 0号工作流产出。判定针对**用户按文档实际走**：✅ 能用 / ⚠️ 带坑能用（坑写明）/ ❌ 不能用 / ⏳ 待走查。
 > 判定分 **latest**（用户默认装到的）与 **preview** 两列——规则0：latest 只留 ✅。
 
+## 记分板（一眼看全，随走查更新）
+
+| 状态 | 数量 | 明细 |
+|---|---|---|
+| ✅ 稳 | 8 | 安装(Linux/macOS)、doctor/whoami/help、upgrade、查询三件套、自建 hub 全流程、claude-code-cli、dashboard 节点操作 |
+| ⚠️ 带坑能用 | 5 | login(需--hub)、grok-build-acp(文档坑已修/hub 小 bug 立案)、dashboard 聊天(终态+prod传输)、大会话历史、telegram |
+| ❌ / 🚫 | 3 | 安装(Windows latest，v0.10.16 修)、anet.sh 部署冻结、feishu(圈围不发布) |
+| ⏳ 走查中 | 2 | claude-agent-sdk、codex-sdk |
+| —（latest 不含） | 2 | codex-app-server、opencode-cli（preview，随 canonical） |
+
 ## 基础旅程
 
 | 旅程 | latest | preview | 证据/坑 |
