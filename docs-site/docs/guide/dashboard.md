@@ -190,7 +190,7 @@ Admin 面板对 `users.role='admin'` 的用户可见 —— 这是**系统级** 
 
 管理功能包括：
 
-- **用户管理** -- 查看所有注册用户（`/api/users` 仅系统级 admin）；修改角色当前走 REST `PUT /api/networks/:id/members/:user_id`（owner only，详见 [API — PUT members](/api/rest#put-api-networks-id-members-user-id)），CLI 暂无 `promote` / `demote` 子命令（排在 v0.9+）
+- **用户管理** -- 查看所有注册用户（`/api/users` 仅系统级 admin）；修改角色当前走 REST `PUT /api/networks/:id/members/:user_id`（owner only，详见 [API — PUT members](/api/rest#put-api-networks-id-members-user-id)），CLI 暂无 `promote` / `demote` 子命令（排到 v0.11+ / 未排期）
 - **网络管理** -- 查看所有网络、成员（配额体系 v0.8 **部分启用**：`createNetwork` 仍 enforces `max_networks_owned`，其他 quota 项 dormant；详见 [networks 配额限制](/concepts/networks#quota-limits)）
 - **系统统计** -- 服务器负载、数据库大小、连接数
 - **审计日志** -- 所有操作的详细记录（`/api/audit-log` 端点 + Dashboard Audit Log 页；系统级 admin 看全部，其他角色看自己 row）
