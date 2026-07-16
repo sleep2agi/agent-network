@@ -26,7 +26,7 @@ anet hub dashboard
 
 # 4. In another terminal — login, create, and start an agent
 anet login --hub http://127.0.0.1:9200 --username admin --password anethub
-anet node create my-agent --runtime codex-sdk
+anet node create my-agent --runtime claude-code-cli   # golden path: reuses your Claude subscription, zero config (needs local claude — see runtimes below)
 anet node start my-agent
 ```
 
@@ -76,17 +76,17 @@ anet network use my-team     # Switch to it
 # Interactive (asks you to choose runtime/model)
 anet node create my-agent
 
-# Or specify directly
-anet node create my-agent --runtime codex-sdk --model <codex-model-id>
+# Or specify directly (golden path — zero config if you have a Claude subscription)
+anet node create my-agent --runtime claude-code-cli
 ```
 
-**Available runtimes**:
+**Available runtimes** (claude-code-cli is the recommended starting point):
 
 | Runtime | AI Model | Needs |
 |---------|----------|-------|
+| `claude-code-cli` **⭐ recommended** | Claude Code CLI (reuses your subscription) | `npm i -g @anthropic-ai/claude-code` + `claude auth login` (Claude Pro/Team/Max) — zero config, most stable |
+| `claude-agent-sdk` | Anthropic / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter (any Anthropic-compatible endpoint) | API key in env or via `anet node create` prompts; on `latest`, first `node start` needs `agent-node` installed first ([#450](https://github.com/sleep2agi/agent-network/issues/450)) |
 | `codex-sdk` | Codex | `codex login` |
-| `claude-agent-sdk` | Anthropic / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter (any Anthropic-compatible endpoint) | API key in env or via `anet node create` prompts |
-| `claude-code-cli` | Claude Code CLI | Claude Code installed + Claude Pro/Team/Max subscription (`claude auth login`) |
 
 For the full provider endpoint table (each provider's `ANTHROPIC_BASE_URL` etc.), see [docs-site/guide/multi-model](https://anet.sh/guide/multi-model).
 
