@@ -58,7 +58,7 @@ The regex `/intern-ai\.org\.cn|chat\.intern-ai/i` is a plain string match. Three
 
 In these cases the bias **never fires** and tool calling stays broken.
 
-**Migration hint**: for self-hosted / proxy setups, copy the bias content into a `--prompt` manually. The exact bias content is in [agent-node source — commit 4cd0024](https://github.com/sleep2agi/agent-network/commit/4cd0024) (~10 lines).
+**Migration hint**: for self-hosted / proxy setups (the endpoint doesn't match the intern regex, so the bias isn't auto-applied), if you want the bias, copy its content into the node's `config.json` `systemPrompt` (or `agent-node --prompt`; `anet node start` has no such flag). The exact bias content is in [agent-node source — commit 4cd0024](https://github.com/sleep2agi/agent-network/commit/4cd0024) (~10 lines).
 
 ### 3. Silent injection — the bias is invisibly prepended to your system prompt
 

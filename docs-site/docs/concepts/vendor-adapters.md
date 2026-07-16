@@ -58,7 +58,7 @@ regex `/intern-ai\.org\.cn|chat\.intern-ai/i` 是简单字符串匹配，三个�
 
 这些场景下 bias **不会启动**，tool calling 还是会卡。
 
-**Migration hint**：自部署 / proxy 场景需要手动 `--prompt` 把 bias 内容复制进来。bias 实际内容见 [agent-node 源码 commit 4cd0024](https://github.com/sleep2agi/agent-network/commit/4cd0024)（~10 行）。
+**Migration hint**：自部署 / proxy 场景（endpoint 不匹配 intern 正则、bias 不会自动加）如需 bias，手动把 bias 内容加进 node `config.json` 的 `systemPrompt`（或 `agent-node --prompt`；`anet node start` 无此 flag）。bias 实际内容见 [agent-node 源码 commit 4cd0024](https://github.com/sleep2agi/agent-network/commit/4cd0024)（~10 行）。
 
 ### 3. Silent injection — bias 默默 prepend 到 system prompt
 
