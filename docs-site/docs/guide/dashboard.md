@@ -293,7 +293,7 @@ Dashboard 通过三类数据面保持更新：
   - **分组**：group-box hover（hover group 标题高亮所有成员）+ group 间虚线分隔
   - **副控件**：minimap（左下角缩略图 + 视口框拖动）+ cwd tooltip（hover 节点显示 `project_dir`）+ S/M/L 尺寸 toggle
   - **浅色模式**：中心 hub 24px 脉冲（解决了 stable 浅色不可见问题）
-- **ServersDrawer 服务器抽屉**（[#119](https://github.com/sleep2agi/agent-network/issues/119)）：右侧抽屉按物理机（`hostname` + `ip`）聚合 agent 列表 + 实时 CPU load / 内存柱状图 / agent count，数据来自 [`GET /api/servers`](/api/rest#get-api-servers)（10min stale-mark offline 副作用 + 裸 JSON array 响应，[server/src/index.ts:845](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L845)）。同 host 多 agent 会折叠到同一行；老 agent 没 host telemetry 字段时显示 `unknown` host group。
+- **ServersDrawer 服务器抽屉**（[#119](https://github.com/sleep2agi/agent-network/issues/119)）：右侧抽屉按物理机（`hostname` + `ip`）聚合 agent 列表 + 实时 CPU load / 内存柱状图 / agent count，数据来自 [`GET /api/servers`](/api/rest#get-api-servers)（10min stale-mark offline 副作用 + 裸 JSON array 响应，[`index.ts` `GET /api/servers`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)）。同 host 多 agent 会折叠到同一行；老 agent 没 host telemetry 字段时显示 `unknown` host group。
 - **Tasks 状态 tab**：color-coded 圆点 + 移动端横滚
 - **移动端 audit 修复**：banner 让位 hamburger / UserBar 图标化
 - **Sidebar 底部 "Quick search ⌘K" chip**：移动端 launcher 入口
