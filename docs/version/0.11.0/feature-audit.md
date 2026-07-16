@@ -45,6 +45,7 @@
 | dashboard 长会话历史 | ⚠️ | 大会话加载超时（根因 prod 传输，hub 本身 3ms）；PR#37 降级兜底待合 |
 | Telegram channel | ⚠️ | 本迭代全程在生产用（可靠）；坑：per-node state 目录、allowlist 可被 git clean 卷走（文档已写） |
 | Feishu channel | 🚫/❌ | 安全走查完成（2026-07-16，未触任何 live 群/生产节点/secret 值）：🚫 缺测试飞书 App，真实鉴权/WS 未验；已确认 ❌×2：① Docker 从零旅程阻断——文档把 allowlist 写可选但 CLI 要求至少一个 --allow（否则 exit 1），entrypoint 又吞错继续启动=channel 静默漏绑，且多 ID 逗号串存成单元素不命中；② "bridge online"/"client ready" 是假阳性（SDK start 即置 connected，dummy 凭据也 online），无可信鉴权成功标志。另：权限文档缺 p2p/group_at 接收权限、长连接域名应为 open.feishu.cn 非 api、订阅顺序有坑。**需要：测试企业 App + onReady 成功日志，然后重验**。跟进：4 处文档已修（98f3b7ee），业务 bug 已立案 #451/#452 |
+| dashboard 新建节点向导（需 host_supervisor daemon） | ⏳ | 盲区补记（2026-07-16 用户实撞）：向导第一步要求目标机先 `anet daemon up`，全 fleet 无 daemon → 列表空走不下去（空态提示本身清晰）。daemon 旅程未走查，暂按"未验证"对待，建节点走 CLI（✅已验）。列入下批走查 |
 | 文档站 anet.sh | ❌ | 部署冻结在 7/2，40+ 修复未上线（等 Vercel 后台 redeploy）；GitHub 侧文档 ✅ 是新的 |
 
 ## 走查方法（补 ⏳ 时照此）
