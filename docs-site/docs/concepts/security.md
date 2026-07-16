@@ -162,7 +162,7 @@ flowchart TD
   ```
   **每个密码独立 16 字节随机 salt**（一并存进哈希串），所以同一密码在不同账户哈希值**不同**；scrypt 内存硬、抗 GPU/ASIC，强于 bcrypt。旧的裸 SHA-256 哈希在登录时**惰性迁移**到 scrypt（`verifyPassword` 两种格式都认，命中旧格式且密码正确就地 rehash）。刻意不用 Argon2id：scrypt 用 Node 内建、零新增依赖。
 
-- **密码强度** —— verify [`server/src/auth.ts:24-50 validatePasswordStrength`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L24):
+- **密码强度** —— verify [`server/src/auth.ts:56-77 validatePasswordStrength`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L56):
   - 用户自选密码（register / `anet passwd`）：**≥ 8 字符** + 拒绝 [`password-dict.ts WEAK_PASSWORDS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts) 字典
   - 首次 bootstrap admin **register 例外**：≥ 4 字符即可（让快速上手 `admin / anethub` 默认成立）—— [`auth.ts:43-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L43) 检测「首位注册用户」时只校验 length ≥ 4；**`anet passwd` / `reset-user` 无此豁免**，永远强制 ≥ 8 + 非弱密码
   - 公网部署必须**立刻** `anet passwd` 改强密码

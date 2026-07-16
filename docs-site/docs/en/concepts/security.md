@@ -162,7 +162,7 @@ flowchart TD
   ```
   **Each password gets its own 16-byte random salt** (stored inside the hash string), so the same password yields a **different** hash across accounts; scrypt is memory-hard and GPU/ASIC-resistant, stronger than bcrypt. Legacy bare SHA-256 hashes are **lazily migrated** to scrypt on login (`verifyPassword` accepts both formats and rehashes in place on a legacy match). Argon2id was deliberately not used: scrypt is a Node built-in with zero new deps.
 
-- **Password strength** — verified at [`server/src/auth.ts:24-50 validatePasswordStrength`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L24):
+- **Password strength** — verified at [`server/src/auth.ts:56-77 validatePasswordStrength`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L56):
   - User-chosen passwords (register / `anet passwd`): **≥ 8 chars** + rejected against [`password-dict.ts WEAK_PASSWORDS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts)
   - Bootstrap admin **register exception**: ≥ 4 chars (so the quick-start `admin / anethub` default works) — [`auth.ts:43-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L43) only requires length ≥ 4 for the very first registered user; **`anet passwd` / `reset-user` have no such exemption**, always enforcing ≥ 8 + not in the weak-password dictionary
   - Public deployments must rotate the password **immediately** via `anet passwd`
