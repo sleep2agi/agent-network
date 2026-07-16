@@ -185,7 +185,7 @@ Anthropic 兼容协议**只解决数据格式**，**不保证行为一致**。�
 
 详见 [Vendor 适配层](/concepts/vendor-adapters)（完整机制 + per-副作用 Migration hint + future polish gap）。
 
-**opt-out**：`anet node start <alias> --prompt "你的 system prompt"` —— `--prompt` 是**替换**而非追加，vendor bias 不会再被 prepend，model 退回原始 RLHF。
+**能关掉 bias 吗（当前：不能）**：对 intern endpoint，vendor bias 是**无条件 prepend** 的（`combinedSystemPrompt = internToolUseBias + SYSTEM_PROMPT`）。`anet node start` **没有** `--prompt` flag；给节点设自定义 system prompt（node `config.json` 的 `systemPrompt` 字段 / `agent-node --prompt`）只会**拼在 bias 之后、不移除它**，model **不会**退回原始 RLHF。想不带 bias 只能换非 intern 端点，详见 [Vendor 适配层 — 能不能关掉 bias](/concepts/vendor-adapters)。
 
 ## 模型选择建议
 

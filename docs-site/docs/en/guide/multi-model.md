@@ -188,7 +188,7 @@ From [v0.9.1](/en/changelog#v0-9-1-—-patch-130-intern-tool-calling-hotfix-prom
 
 See [Vendor Adapters](/en/concepts/vendor-adapters) for the full mechanism + per-side-effect migration hints + future polish gaps.
 
-**Opt-out**: `anet node start <alias> --prompt "your system prompt"` — `--prompt` **replaces** rather than appends, so the vendor bias is no longer prepended and the model reverts to its native RLHF.
+**Can you turn off the bias? (currently: no)**: for intern endpoints the vendor bias is prepended **unconditionally** (`combinedSystemPrompt = internToolUseBias + SYSTEM_PROMPT`). `anet node start` has **no** `--prompt` flag; a custom system prompt (the node's `config.json` `systemPrompt` field, or `agent-node --prompt`) is **appended after** the bias and does not remove it, so the model does **not** revert to native RLHF. To run without the bias, use a non-intern endpoint — see [Vendor Adapters — Can you turn off the bias](/en/concepts/vendor-adapters).
 
 ## Mixed Deployment in Practice
 
