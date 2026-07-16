@@ -132,7 +132,7 @@ npm install -g @sleep2agi/agent-network
 anet hub start
 
 # 3. 创建并启动 Agent
-anet node create assistant --runtime codex-sdk
+anet node create assistant --runtime claude-code-cli   # 最省事：复用 Claude 订阅、0 配置（需本机装 claude：npm i -g @anthropic-ai/claude-code）
 anet node start assistant
 ```
 
