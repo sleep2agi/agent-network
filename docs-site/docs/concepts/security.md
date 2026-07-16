@@ -40,7 +40,7 @@ graph TB
 上图反映**设计目标**，当前 v0.10.11 实际执行情况：
 
 - ✅ **已启用**：速率限制 / Token 认证（utok_/ntok_/atok_）/ CORS / RBAC 四级权限 / 网络隔离（Server 端强制） / SQL 注入防护 / 密码 salted scrypt / 审计日志 / 任务事件日志
-- ⏳ **未完全启用**：Token Scope 字段（`api_tokens.scope` 列存在 + [`auth.ts:73-137`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L73) `createToken` 按 token 类型写不同 scope，但 [`auth.ts:143-165 resolveToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L143) 返回结构里**没 scope 字段** —— RBAC 决策不消费 scope 写入；security report **R12** v0.9.x / v0.10.x 都未动（Recovery & Observability / Direct Runtime + Observability Foundations / Hero A+D / 后续 UX 修复 chain 主题为先），排到 v0.11+ / 未排期；详见 [安全审计报告](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)）
+- ⏳ **未完全启用**：Token Scope 字段（`api_tokens.scope` 列存在 + [`auth.ts` `createToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) 按 token 类型写不同 scope，但 [`auth.ts` `resolveToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) 返回结构里**没 scope 字段** —— RBAC 决策不消费 scope 写入；security report **R12** v0.9.x / v0.10.x 都未动（Recovery & Observability / Direct Runtime + Observability Foundations / Hero A+D / 后续 UX 修复 chain 主题为先），排到 v0.11+ / 未排期；详见 [安全审计报告](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)）
 - ✅ **密码哈希 = salted scrypt**（Round-6 A1 已上线，闭环 security report **R9**）：Node 内建 `crypto.scryptSync`，每密码独立随机 salt，verify [`db.ts:1057 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L1057)。刻意未选 Argon2id（避免原生依赖），详见下方「密码安全」
 :::
 
