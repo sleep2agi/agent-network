@@ -485,9 +485,10 @@ Checks (in actual order per [`cli.ts doctorCommand`](https://github.com/sleep2ag
 2. Auth token presence
 3. Hub reachability (GET `/health` — shows sessions / SSE / license / multi-network info)
 4. Local node configs + per-node process status + legacy-field diagnosis ([`diagnoseNode` cli.ts](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) detects 8 issue kinds: legacy_alias_field / legacy_resume_field / legacy_runtime_name / stale_dev_hub / missing_token / user_token / untyped_token / missing_node_id)
-5. Dependencies: `claude --version` / `codex --version` / `bun --version`
-6. Current project `.mcp.json` commhub config
-7. Telegram channel env (`~/.claude/channels/telegram/.env` silently empty? — known token-loss foot-gun for `/telegram:configure`)
+5. No plain-secret config: every node config env value is either non-secret or an envRef object; a plaintext secret triggers ❌ with a hint to run `anet node migrate-token-to-envref`
+6. Dependencies: `claude --version` / `codex --version` / `bun --version`
+7. Current project `.mcp.json` commhub config
+8. Telegram channel env (`~/.claude/channels/telegram/.env` silently empty? — known token-loss foot-gun for `/telegram:configure`)
 
 ::: tip `--fix` is new in v0.8
 Pre-v0.7, an expired `ntok_` required a manual `anet node delete` + recreate. Since v0.8, `--fix` probes + re-issues in place, and agent-node SSE 401 auto-reloads the token instead of going offline ([RFC-001 Phase 2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md) implementation detail).
