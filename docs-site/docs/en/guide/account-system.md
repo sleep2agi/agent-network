@@ -307,7 +307,7 @@ Keys are entered during `anet node create` and saved locally at `current-project
 **No.** Agents use ntok_ tokens to connect. `anet node create` creates them automatically.
 
 ### Q: Forgot my password?
-Run `anet passwd` to change it. If CLI is also logged out, ask the admin to reset.
+If you still know the old password, run `anet passwd` (it prompts for the old one). **Forgot the old password too?** On the Hub machine, run `anet hub admin reset-user --username <username>` to force-reset (local owner permission is enough), then `anet login` with the new password. See [Change Password → Forgot the old password](#change-password) above or [FAQ Q17b](/en/faq).
 
 ### Q: Are model API Keys uploaded to CommHub?
 **No.** Keys are only stored locally at `current-project/.anet/nodes/<name>/config.json`. They are never sent to the CommHub server.

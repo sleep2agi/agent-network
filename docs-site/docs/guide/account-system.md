@@ -308,7 +308,7 @@ Key 在 `anet node create` 时输入，保存在当前项目的 `.anet/nodes/<�
 **不需要。** Agent 用 ntok_ Token 连接，`anet node create` 时自动创建。
 
 ### Q: 忘记密码怎么办？
-运行 `anet passwd` 修改密码。如果 CLI 也没登录，需要管理员重置。
+还记得旧密码就 `anet passwd`（要输旧密码）。**旧密码也忘了**：在 Hub 主机上跑 `anet hub admin reset-user --username <用户名>` 强制重置（本机 owner 权限即可），再用新密码 `anet login`。详见上方 [修改密码 → 忘记旧密码](#修改密码) 或 [FAQ Q17b](/faq#_17b-忘密码怎么办)。
 
 ### Q: 模型的 API Key 会上传到 CommHub 吗？
 **不会。** Key 只保存在当前项目的 `.anet/nodes/<名字>/config.json`，不会发送到 CommHub 服务器。
