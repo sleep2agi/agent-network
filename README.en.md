@@ -198,10 +198,11 @@ Stable support: SSE task receive, Grok ACP execution, `grokSession` persistence/
 |---|---|---|
 | Anthropic Claude | built-in vendor · verified | `https://api.anthropic.com` |
 | MiniMax | built-in vendor · verified | `https://api.minimaxi.com/anthropic` |
+| DeepSeek | built-in vendor · verified | `https://api.deepseek.com/anthropic` |
 | Xiaomi MiMo | built-in vendor · verified | `https://token-plan-cn.xiaomimimo.com/anthropic` |
 | InternLM | built-in vendor · verified | `https://chat.intern-ai.org.cn` (bare domain, no `/anthropic`) |
 | OpenAI Codex (`codex-sdk`) | built-in vendor · verified | n/a — `codex login` |
-| DeepSeek / GLM (Zhipu) / Kimi (Moonshot) / OpenRouter / self-hosted | via the `custom` vendor (**not built-in — verify the endpoint + model id yourself**) | provide base URL + `ANTHROPIC_AUTH_TOKEN` |
+| GLM (Zhipu) / Kimi (Moonshot) / OpenRouter / self-hosted | via the `custom` vendor (**not built-in — verify the endpoint + model id yourself**) | provide base URL + `ANTHROPIC_AUTH_TOKEN` |
 
 📖 Per-provider keys, models, and access → <https://anet.sh/en/guide/multi-model>
 

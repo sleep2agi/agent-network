@@ -220,10 +220,11 @@ anet grok attach grok-shared
 |---|---|---|
 | Anthropic Claude | 内置 vendor · verified | `https://api.anthropic.com` |
 | MiniMax | 内置 vendor · verified | `https://api.minimaxi.com/anthropic` |
+| DeepSeek | 内置 vendor · verified | `https://api.deepseek.com/anthropic` |
 | 小米 MiMo | 内置 vendor · verified | `https://token-plan-cn.xiaomimimo.com/anthropic` |
 | 书生 Intern | 内置 vendor · verified | `https://chat.intern-ai.org.cn`（裸域名，无 `/anthropic`）|
 | OpenAI Codex（`codex-sdk`）| 内置 vendor · verified | n/a —— `codex login` |
-| DeepSeek / 智谱 GLM / 月之暗面 Kimi / OpenRouter / 自建 | 走 `custom` 供应商（**不在内置列表，自行验证 endpoint + model id**）| 自填 base URL + `ANTHROPIC_AUTH_TOKEN` |
+| 智谱 GLM / 月之暗面 Kimi / OpenRouter / 自建 | 走 `custom` 供应商（**不在内置列表，自行验证 endpoint + model id**）| 自填 base URL + `ANTHROPIC_AUTH_TOKEN` |
 
 📖 各家 Key / 模型 / 接入 → <https://anet.sh/guide/multi-model>
 
