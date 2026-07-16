@@ -122,18 +122,19 @@ anet node start my-bot
 
 ## 已验证 vs 未验证
 
-::: info 已验证 (当前 stable)
-本页 5 步都经过 release gate 验证。详细测试报告见 [更新日志](/changelog) + [测试报告](https://github.com/sleep2agi/agent-network/tree/main/docs/tests)。
+::: info 已验证 (当前 stable，真机走查)
+详细测试报告见 [更新日志](/changelog) + [测试报告](https://github.com/sleep2agi/agent-network/tree/main/docs/tests)。
 
-- `anet hub start` + 默认账号自动创建
-- `anet hub dashboard`
-- `anet login` / `anet register` / `anet logout` / `anet whoami`
-- `anet node create / start / delete / ls`（`claude-agent-sdk` runtime + CLI 流程已验证；vendor 维度 `VENDORS` 列表 — Anthropic / MiniMax / 书生 Intern / 小米 MiMo — verified-with-real-call）
+- `anet hub start` + 默认账号自动创建 / `anet hub dashboard`
+- `anet login`（带 `--hub`）/ `anet register` / `anet logout` / `anet whoami`
+- **`claude-code-cli` runtime 端到端** —— 生产 fleet 每天在跑（最省事路径，见步骤 4 推荐）；首跑 dev-channels 确认框需 TTY
+- `claude-agent-sdk` 的 `node create`（含 vendor 路径：Anthropic / MiniMax / 书生 Intern / 小米 MiMo — verified-with-real-call）+ `node ls / delete`
 - Dashboard Chat（markdown / Enter 发 / 乐观回显 / 来源标签 / 错误兜底 / 历史持久）
 :::
 
-::: warning 未验证 (请自行评估)
-- `codex-sdk` runtime / `claude-code-cli` runtime 端到端流程
+::: warning 带坑 / 未验证 (请自行评估)
+- **`claude-agent-sdk` / `codex-sdk` 的首次 `node start`**：latest 上 `agent-node` 懒加载没拉完就退（`agent-node is not installed...`，[#450](https://github.com/sleep2agi/agent-network/issues/450)）。先 `npm i -g @sleep2agi/agent-node` 再启动即可（见上方步骤 4 提示）。
+- `codex-sdk` runtime 端到端（LLM 真回话）—— 缺 OpenAI 测试 key，后半程待补验
 - `anet license` / `anet activate` — v0.6 legacy, OSS 用户无需操作（详 [troubleshooting](/troubleshooting#license-expired-授权过期-legacy-行为)）
 - `anet network create` 跨用户网络共享 — 代码已合并但未做 E2E 回归
 - **一键安装脚本 `setup-anet.sh`** — 未经端到端验证, 用前自审, 见 [一键安装（实验性）](/guide/one-shot-install)

@@ -122,18 +122,19 @@ Refresh the page — chat history is preserved.
 
 ## Verified vs not verified
 
-::: info Verified (current stable)
-All 5 steps above pass the release gate. Detailed test reports: [Changelog](/en/changelog) + [test reports](https://github.com/sleep2agi/agent-network/tree/main/docs/tests).
+::: info Verified (current stable, real-machine walkthrough)
+Detailed test reports: [Changelog](/en/changelog) + [test reports](https://github.com/sleep2agi/agent-network/tree/main/docs/tests).
 
-- `anet hub start` + automatic default account creation
-- `anet hub dashboard`
-- `anet login` / `anet register` / `anet logout` / `anet whoami`
-- `anet node create / start / delete / ls` (the `claude-agent-sdk` runtime + CLI flow is verified; vendor-level, the `VENDORS` list — Anthropic / MiniMax / InternLM / Xiaomi MiMo — is verified-with-real-call)
+- `anet hub start` + automatic default account creation / `anet hub dashboard`
+- `anet login` (with `--hub`) / `anet register` / `anet logout` / `anet whoami`
+- **`claude-code-cli` runtime end-to-end** — runs daily on the production fleet (the easiest path, recommended in Step 4); first run needs a TTY for the dev-channels confirmation
+- `claude-agent-sdk` `node create` (incl. the vendor path: Anthropic / MiniMax / InternLM / Xiaomi MiMo — verified-with-real-call) + `node ls / delete`
 - Dashboard Chat (markdown / Enter-to-send / optimistic echo / source labels / error fallback / persistent history)
 :::
 
-::: warning Not verified (use at your own risk)
-- `codex-sdk` runtime / `claude-code-cli` runtime end-to-end flow
+::: warning Has caveats / not verified (use at your own risk)
+- **`claude-agent-sdk` / `codex-sdk` first `node start`**: on latest, `agent-node`'s lazy-fetch isn't awaited and it exits early (`agent-node is not installed...`, [#450](https://github.com/sleep2agi/agent-network/issues/450)). Run `npm i -g @sleep2agi/agent-node` first, then start (see the Step 4 note above).
+- `codex-sdk` runtime end-to-end (real LLM reply) — no OpenAI test key yet, the second half is pending verification
 - `anet license` / `anet activate` — v0.6 legacy, OSS users don't need to touch these (see [troubleshooting](/en/troubleshooting#license-expired-license-expired-legacy-behavior))
 - `anet network create` and cross-user network sharing — code merged but no E2E regression
 - **One-shot install script `setup-anet.sh`** — not end-to-end verified, audit before use, see [One-shot install (experimental)](/en/guide/one-shot-install)
