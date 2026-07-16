@@ -12,7 +12,8 @@
 FROM oven/bun:1.3.1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      bash curl jq ca-certificates procps sqlite3 nodejs npm && \
+      bash curl jq ca-certificates procps sqlite3 nodejs npm \
+      python3 make g++ && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /repo

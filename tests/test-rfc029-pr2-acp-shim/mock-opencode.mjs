@@ -14,13 +14,19 @@
 //                      response with stopReason + usage.
 //
 // Env toggles:
-//   MOCK_THINKING_ONLY=1 → prompt emits only agent_thought_chunk (no
+//   .mock-thinking-only marker in cwd → prompt emits only agent_thought_chunk (no
 //                          agent_message_chunk) → runtime.ts's #383
 //                          rescue path fires and follow-up prompt
 //                          gets a plain-text answer.
-//   MOCK_LOAD_FAILS=1    → session/load returns a JSON-RPC error so
+//   .mock-load-fails marker in cwd    → session/load returns a JSON-RPC error so
 //                          the runtime falls back to session/new with
 //                          the explicit "session lost on restart" log.
+
+import { existsSync } from "node:fs";
+// Fixture-local control files avoid both a test-only child-env escape hatch
+// and any assumption about the production runtime's random external cwd.
+const THINKING_ONLY = existsSync("/harness/.mock-thinking-only");
+const LOAD_FAILS = existsSync("/harness/.mock-load-fails");
 
 let buf = "";
 let promptCount = 0;
@@ -79,7 +85,7 @@ function handleRequest(req) {
       });
       break;
     case "session/load":
-      if (process.env.MOCK_LOAD_FAILS === "1") {
+      if (LOAD_FAILS) {
         write({ jsonrpc: "2.0", id: req.id, error: { code: -32000, message: "session not found (mock)" }});
       } else {
         write({
@@ -93,7 +99,7 @@ function handleRequest(req) {
       promptCount++;
       const sessionId = req.params?.sessionId ?? "ses_mock";
       const msgId = "msg_mock_" + promptCount;
-      const thinkingOnly = process.env.MOCK_THINKING_ONLY === "1" && promptCount === 1;
+      const thinkingOnly = THINKING_ONLY && promptCount === 1;
 
       // Emit an initial available_commands_update (matches U8 fixture).
       write({

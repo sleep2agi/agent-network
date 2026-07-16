@@ -11,7 +11,7 @@
  */
 
 import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync, rmSync, cpSync } from "fs";
-import { join } from "path";
+import { dirname, isAbsolute, join } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
 import { spawn, execSync, execFileSync } from "child_process";
@@ -20,10 +20,51 @@ import { checkbox, confirm, select } from "@inquirer/prompts";
 import { ensureGitignoreRule, ensureGitignoreRules } from "../src/gitignore-writeback";
 import { superviseChild } from "../src/supervise-child";
 import { encodeCwd } from "../src/project-key";
+import { buildOpencodeSmokeEnv } from "../src/opencode-smoke-env";
+import {
+  OPENCODE_AGENT_NODE_SPEC,
+  OPENCODE_AGENT_NODE_VERSION,
+  agentNodeHelpSupportsOpencode,
+  opencodeExactPairInstallCommand,
+  resolveAgentNodePackageEntrypointFromPath,
+  validateAgentNodePackageEntrypoint,
+} from "../src/opencode-agent-node-pair";
+import { hardenOpencodeAgentNodeEnv } from "../src/opencode-launch-env";
+import {
+  clearOpencodeAuthJson,
+  findOpencodePreset,
+  prepareOpencodeNodeForProfileWrite,
+  readOpencodePrivateProfileFile,
+  writeOpencodeAuthJson,
+  writeOpencodePrivateProfileFile,
+} from "../src/opencode-preset";
+import {
+  buildOpencodeAuthLoginArgs,
+  readOpencodeAuthLoginCredential,
+  revalidateOpencodeAuthLoginSandbox,
+  withOpencodeAuthLoginSandbox,
+} from "../src/opencode-auth-login";
+import {
+  cleanupOpencodeSafeExternalRoot,
+  createOpencodeSafeExternalRoot,
+  revalidateOpencodeSafeExternalRoot,
+} from "../src/opencode-safe-root";
+import {
+  discoverOpencodeForbiddenRoots,
+  resolveOpencodePackageBinaryFromPath,
+  validateOpencodePackageBinary,
+} from "../src/opencode-package-binary";
+import {
+  assertOpencodeNodeStateUntracked,
+  readOpencodeRuntimeBinding,
+  removeOpencodeRuntimeBinding,
+  writeOpencodeRuntimeBinding,
+} from "../src/opencode-runtime-binding";
 
 const args = process.argv.slice(2);
 const command = args[0];
 const home = process.env.HOME || process.env.USERPROFILE || "~";
+const opencodeBindingHome = () => home === "~" ? homedir() : home;
 
 // ── Config helpers ──
 
@@ -324,9 +365,25 @@ interface Profile {
 
 // Re-export from the pure helper module (src/normalize-runtime.ts) so
 // unit tests can import without dragging in CLI side-effects.
-import { normalizeRuntime, type RuntimeName } from "../src/normalize-runtime";
+import {
+  normalizeRuntime,
+  normalizeRuntimeStrict,
+  type RuntimeName,
+} from "../src/normalize-runtime";
 import { findEnvironAliasMatches } from "../src/environ-alias";
 export { normalizeRuntime, type RuntimeName };
+
+function runtimeForExecution(
+  profileOrRuntime: Profile | string | undefined,
+  context: string,
+): RuntimeName {
+  try {
+    return normalizeRuntimeStrict(profileOrRuntime);
+  } catch (error: any) {
+    console.error(`[anet] Refusing to ${context}: ${error?.message || error}`);
+    process.exit(1);
+  }
+}
 
 function nodeDisplayName(id: string, profile?: Profile | null): string {
   return profile?.node_name || profile?.name || profile?.alias || id;
@@ -412,9 +469,66 @@ function loadStoredProfile(id: string): Profile | null {
   } catch { return null; }
 }
 
+function resolveStartProfile(
+  nodeId: string,
+  candidate: Profile,
+): { profile: Profile; runtime: RuntimeName } {
+  const nodeWorkDir = join(nodesDir(), nodeId);
+  const bindingHome = opencodeBindingHome();
+  const binding = readOpencodeRuntimeBinding(nodeWorkDir, bindingHome);
+  if (!binding) {
+    const runtime = runtimeForExecution(candidate, `start node ${JSON.stringify(nodeId)}`);
+    if (runtime === "opencode-cli") {
+      throw new Error(
+        `OpenCode runtime binding is missing for node ${JSON.stringify(nodeId)}. ` +
+        `Refusing legacy/unproven state; recreate this preview node before starting it.`,
+      );
+    }
+    return { profile: candidate, runtime };
+  }
+
+  // The external record is authoritative. A checkout that replaces the
+  // project-local config with another runtime must not steer this launch into
+  // an unhardened branch. Re-open the private profile without following its
+  // leaf, require the original exact runtime, and reject force-added Git state.
+  assertOpencodeNodeStateUntracked(nodeWorkDir);
+  const raw = readOpencodePrivateProfileFile(nodeWorkDir, "config.json");
+  if (raw === undefined) {
+    throw new Error(`OpenCode config.json is missing for bound node ${JSON.stringify(nodeId)}`);
+  }
+  let project: Record<string, any>;
+  try {
+    project = JSON.parse(raw);
+  } catch (error: any) {
+    throw new Error(`OpenCode config.json is invalid: ${error?.message || error}`);
+  }
+  const profile = normalizeStoredProfile(nodeId, project);
+  const runtime = runtimeForExecution(profile, `start bound OpenCode node ${JSON.stringify(nodeId)}`);
+  if (runtime !== "opencode-cli") {
+    throw new Error(
+      `OpenCode runtime binding mismatch for node ${JSON.stringify(nodeId)}: ` +
+      `project config now selects ${JSON.stringify(runtime)}.`,
+    );
+  }
+  return { profile, runtime };
+}
+
 function saveProfile(id: string, profile: Profile) {
   const dir = join(nodesDir(), id);
-  mkdirSync(dir, { recursive: true });
+  const isOpencode = normalizeRuntime(profile) === "opencode-cli";
+  if (isOpencode) {
+    // Validate/create without following any pre-planted state path. mkdir and
+    // chmod both follow a final symlink on POSIX, so this must run first.
+    prepareOpencodeNodeForProfileWrite(dir);
+    // A project checkout must never be able to replace the runtime-bearing
+    // profile. Record the immutable runtime identity outside the project
+    // before writing any token-bearing state, and refuse force-added .anet
+    // content even when .gitignore would normally hide it.
+    assertOpencodeNodeStateUntracked(dir);
+    writeOpencodeRuntimeBinding(dir, opencodeBindingHome());
+  } else {
+    mkdirSync(dir, { recursive: true });
+  }
   const normalized = normalizeStoredProfile(id, profile);
   const toSave: Record<string, any> = {
     anet_version: normalized.anet_version,
@@ -429,8 +543,12 @@ function saveProfile(id: string, profile: Profile) {
     env: normalized.env || {},
     flags: normalized.flags || {},
     ...(normalized.session ? { session: normalized.session } : {}),
-    ...(normalized.codexAppServerUrl ? { codexAppServerUrl: normalized.codexAppServerUrl } : {}),
-    ...(normalized.codexThreadId ? { codexThreadId: normalized.codexThreadId } : {}),
+    ...((normalized.codexAppServerUrl ?? profile.codexAppServerUrl)
+      ? { codexAppServerUrl: normalized.codexAppServerUrl ?? profile.codexAppServerUrl }
+      : {}),
+    ...((normalized.codexThreadId ?? profile.codexThreadId)
+      ? { codexThreadId: normalized.codexThreadId ?? profile.codexThreadId }
+      : {}),
     // RFC-008 / issue #51 team-scale demo metadata. Optional on every node;
     // present only when set by `anet demo sci-team` (Phase 1 scaffold) or
     // a future RFC-008 client. Without this persist, agent-node reads back a
@@ -440,7 +558,14 @@ function saveProfile(id: string, profile: Profile) {
     ...(normalized.team ? { team: normalized.team } : {}),
     ...(normalized.role ? { role: normalized.role } : {}),
   };
-  writeFileSync(join(dir, "config.json"), JSON.stringify(toSave, null, 2) + "\n");
+  const body = JSON.stringify(toSave, null, 2) + "\n";
+  if (isOpencode) {
+    // The profile contains the node ntok_. Never replace through a
+    // pre-planted config.json symlink or an unvalidated state tree.
+    writeOpencodePrivateProfileFile(dir, "config.json", body);
+  } else {
+    writeFileSync(join(dir, "config.json"), body);
+  }
 }
 
 function listProfileIds(): string[] {
@@ -937,38 +1062,100 @@ async function setupCommand() {
   console.log(`\n完成！下一步: anet node create <node-name>`);
 }
 
-// RFC-029 — the effective opencode-ai pin. Prefers the per-machine
-// override at `~/.anet/opencode-pin.json` (written by
-// `anet opencode upgrade-pin` after smoke pass); falls back to
-// `OPENCODE_BUILTIN_PIN` when the override is absent or malformed.
-// Read fresh on every check so a mid-session upgrade takes effect
-// without a restart.
-import { readEffectivePin, writePinOverride, OPENCODE_BUILTIN_PIN } from "../src/opencode-pin";
+// RFC-029 — the effective opencode-ai pin. A per-machine smoke marker may
+// attest the exact built-in pin, but cannot select a different upstream
+// version: only a new maintainer-vetted preview can bump the release pin.
+import {
+  formatOpencodePackageIdentityFailure,
+  opencodeExactInstallCommand,
+  readEffectivePin,
+  writePinOverride,
+  OPENCODE_BUILTIN_PIN,
+} from "../src/opencode-pin";
 export const OPENCODE_PINNED_VERSION = OPENCODE_BUILTIN_PIN;
 
-function checkOpencodePin(): { ok: true } | { ok: false; found: string | null; hint: string } {
-  const bin = "opencode";
+type OpencodeLaunchIdentity = { binary: string; version: string };
+let opencodeLaunchIdentity: OpencodeLaunchIdentity | null = null;
+
+function createOpencodeProbeContext(prefix: string) {
+  const root = createOpencodeSafeExternalRoot({ prefix });
+  try {
+    for (const relative of [
+      ".config",
+      join(".local", "share"),
+      ".cache",
+      join(".local", "state"),
+      ".runtime",
+      "tmp",
+    ]) {
+      mkdirSync(join(root.root, relative), { recursive: true, mode: 0o700 });
+    }
+    return { root, env: buildOpencodeSmokeEnv(process.env, root.root, root.cwd) };
+  } catch (error) {
+    try {
+      cleanupOpencodeSafeExternalRoot(root);
+    } catch (cleanupError: any) {
+      throw new Error(
+        `OpenCode probe setup failed and its external root could not be cleaned: ` +
+        `${cleanupError?.message || cleanupError}`,
+      );
+    }
+    throw error;
+  }
+}
+
+function checkOpencodePin():
+  | ({ ok: true } & OpencodeLaunchIdentity)
+  | { ok: false; found: string | null; hint: string } {
   const effective = readEffectivePin();
   const expected = effective.version;
-  if (!commandExists(bin)) {
+  const forbiddenRoots = discoverOpencodeForbiddenRoots();
+  let raw = "";
+  let binary = "";
+  let probe: ReturnType<typeof createOpencodeProbeContext> | undefined;
+  let failure: string | undefined;
+  try {
+    binary = resolveOpencodePackageBinaryFromPath(process.env.PATH ?? "", {
+      expectedVersion: expected,
+      forbiddenRoots,
+    });
+    probe = createOpencodeProbeContext(".anet-opencode-version-");
+    revalidateOpencodeSafeExternalRoot(probe.root);
+    raw = execFileSync(binary, ["--version"], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 5_000,
+      cwd: probe.root.cwd,
+      env: probe.env,
+    }).trim();
+    validateOpencodePackageBinary(binary, {
+      expectedVersion: expected,
+      forbiddenRoots,
+    });
+  } catch (e: any) {
+    failure = `opencode package identity/version check failed: ${e?.message || e}`;
+  } finally {
+    if (probe) {
+      try {
+        cleanupOpencodeSafeExternalRoot(probe.root);
+      } catch (cleanupError: any) {
+        failure = `opencode version probe external-root cleanup failed: ${cleanupError?.message || cleanupError}`;
+      }
+    }
+  }
+  if (failure) {
     return {
       ok: false,
       found: null,
-      hint: `opencode CLI not found in PATH. Install (exact): npm install -g opencode-ai@${expected}`,
+      hint: formatOpencodePackageIdentityFailure(expected, failure),
     };
   }
-  let raw = "";
-  try {
-    raw = execSync(`${bin} --version`, { encoding: "utf-8", timeout: 5000 }).trim();
-  } catch (e: any) {
-    return { ok: false, found: null, hint: `opencode --version failed: ${e?.message || e}` };
-  }
-  // opencode --version prints just the semver (e.g. "1.17.13"). Match
+  // opencode --version prints just the semver (e.g. "1.18.1"). Match
   // the first x.y.z substring so future format tweaks (build metadata
   // suffix) don't break the pin check.
   const m = raw.match(/(\d+\.\d+\.\d+)/);
   const found = m ? m[1] : raw;
-  if (found === expected) return { ok: true };
+  if (found === expected) return { ok: true, binary, version: expected };
   const sourceNote = effective.source === "override-file"
     ? ` (from ${opencodeUsePinSource()}; smoke passed ${effective.smokePassedAt})`
     : ` (baked-in default)`;
@@ -977,15 +1164,130 @@ function checkOpencodePin(): { ok: true } | { ok: false; found: string | null; h
     found,
     hint:
       `Expected opencode-ai@${expected}${sourceNote}; found ${found}.\n` +
-      `  → Downgrade: npm install -g opencode-ai@${expected}\n` +
-      `  → Or run: anet opencode upgrade-pin ${found}   ` +
-      `(smoke-tests the new version; on pass writes ~/.anet/opencode-pin.json.)`,
+      `  → Install the exact release pin: ${opencodeExactInstallCommand(expected)}\n` +
+      `  → A different upstream version requires a newly vetted agent-network preview.`,
   };
 }
 
 function opencodeUsePinSource(): string {
   // Kept small so the hint above stays one grep-able string.
   return "~/.anet/opencode-pin.json override";
+}
+
+type AgentNodeLaunchPlan = {
+  command: string;
+  argsPrefix: string[];
+  source: "explicit" | "global";
+  probeEnv: NodeJS.ProcessEnv;
+};
+
+let opencodeAgentNodeLaunchPlan: AgentNodeLaunchPlan | null = null;
+
+function planSupportsOpencode(plan: AgentNodeLaunchPlan): boolean {
+  try {
+    const help = execFileSync(plan.command, [...plan.argsPrefix, "--help"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 5_000,
+      env: plan.probeEnv,
+    });
+    return agentNodeHelpSupportsOpencode(help);
+  } catch {
+    return false;
+  }
+}
+
+function opencodeAgentNodeError(detail: string): Error {
+  return new Error(
+    `${detail}\n` +
+    `Install the exact vetted pair: ${opencodeExactPairInstallCommand()}`,
+  );
+}
+
+/**
+ * Resolve the exact package-owned agent-node paired with this network build.
+ * A merely capable older preview is insufficient: historical builds could
+ * advertise opencode-cli without this release's isolation guarantees.
+ */
+function resolveOpencodeAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
+  if (opencodeAgentNodeLaunchPlan) return opencodeAgentNodeLaunchPlan;
+  const probeEnv = hardenOpencodeAgentNodeEnv(process.env, process.env.PATH);
+  const forbiddenRoots = discoverOpencodeForbiddenRoots();
+  const explicit = process.env.ANET_AGENT_NODE_BIN;
+
+  if (explicit) {
+    if (!isAbsolute(explicit) || !existsSync(explicit)) {
+      throw opencodeAgentNodeError(
+        "ANET_AGENT_NODE_BIN must name an existing absolute agent-node CLI path",
+      );
+    }
+    let entrypoint: string;
+    try {
+      entrypoint = validateAgentNodePackageEntrypoint(
+        explicit,
+        OPENCODE_AGENT_NODE_SPEC,
+        OPENCODE_AGENT_NODE_VERSION,
+        forbiddenRoots,
+      );
+    } catch (error: any) {
+      throw opencodeAgentNodeError(
+        `ANET_AGENT_NODE_BIN is not the exact trusted ${OPENCODE_AGENT_NODE_SPEC}: ${error?.message || error}`,
+      );
+    }
+    const plan: AgentNodeLaunchPlan = {
+      command: process.execPath,
+      argsPrefix: [entrypoint],
+      source: "explicit",
+      probeEnv,
+    };
+    if (!planSupportsOpencode(plan)) {
+      throw opencodeAgentNodeError(
+        "ANET_AGENT_NODE_BIN lacks opencode-cli; refusing a runtime fallback",
+      );
+    }
+    opencodeAgentNodeLaunchPlan = plan;
+    return plan;
+  }
+
+  try {
+    const entrypoint = resolveAgentNodePackageEntrypointFromPath(
+      process.env.PATH ?? "",
+      OPENCODE_AGENT_NODE_SPEC,
+      OPENCODE_AGENT_NODE_VERSION,
+      forbiddenRoots,
+    );
+    const plan: AgentNodeLaunchPlan = {
+      command: process.execPath,
+      argsPrefix: [entrypoint],
+      source: "global",
+      probeEnv,
+    };
+    if (!planSupportsOpencode(plan)) {
+      throw new Error("exact global package does not advertise opencode-cli");
+    }
+    console.log(`[anet] using installed exact ${OPENCODE_AGENT_NODE_SPEC}.`);
+    opencodeAgentNodeLaunchPlan = plan;
+    return plan;
+  } catch (error: any) {
+    throw opencodeAgentNodeError(
+      `No exact trusted global ${OPENCODE_AGENT_NODE_SPEC} is available ` +
+      `(${error?.message || error}); automatic npx execution is disabled for opencode-cli`,
+    );
+  }
+}
+
+function revalidateOpencodeAgentNodeLaunchPlan(plan: AgentNodeLaunchPlan): AgentNodeLaunchPlan {
+  const entrypoint = validateAgentNodePackageEntrypoint(
+    plan.argsPrefix[0],
+    OPENCODE_AGENT_NODE_SPEC,
+    OPENCODE_AGENT_NODE_VERSION,
+    discoverOpencodeForbiddenRoots(),
+  );
+  const checked = { ...plan, command: process.execPath, argsPrefix: [entrypoint] };
+  if (!planSupportsOpencode(checked)) {
+    throw opencodeAgentNodeError(`${OPENCODE_AGENT_NODE_SPEC} no longer advertises opencode-cli`);
+  }
+  return checked;
 }
 
 function assertStartCompatibility(runtime: RuntimeName) {
@@ -998,6 +1300,18 @@ function assertStartCompatibility(runtime: RuntimeName) {
     if (!check.ok) {
       console.error(`[anet] Incompatible opencode-ai runtime.`);
       console.error(`[anet] ${check.hint}`);
+      process.exit(1);
+    }
+    // Preserve the exact package-owned executable that passed the pin check.
+    // Profile env/.env is merged later and may replace PATH; the child must
+    // still verify and spawn this same file.
+    opencodeLaunchIdentity = { binary: check.binary, version: check.version };
+    try {
+      resolveOpencodeAgentNodeLaunchPlan();
+    } catch (error: any) {
+      console.error(`[anet] Incompatible agent-node for opencode-cli.`);
+      console.error(`[anet] ${error?.message || error}`);
+      console.error(`[anet] Refusing to start: an unsupported agent-node could silently select another runtime.`);
       process.exit(1);
     }
     return;
@@ -1055,6 +1369,22 @@ function checkRuntimeDependency(runtime: RuntimeName, phase: "create" | "start")
     if (phase === "start") printClaudeCodeNotice();
     return;
   }
+  // Unlike legacy runtimes, opencode-cli never executes an ambient or
+  // project-context npx fallback. Keep the early UX aligned with the strict
+  // package-identity gate in resolveOpencodeAgentNodeLaunchPlan().
+  if (runtime === "opencode-cli") {
+    if (!commandExists("agent-node")) {
+      console.warn(
+        `[anet] opencode-cli requires the exact paired global ${OPENCODE_AGENT_NODE_SPEC}; automatic npx execution is disabled.`,
+      );
+      console.warn(`[anet] Install exact pair: ${opencodeExactPairInstallCommand()}`);
+    }
+    if (phase === "create" && !commandExists("opencode")) {
+      console.warn(`[anet] Warning: opencode CLI not found in PATH.`);
+      console.warn(`[anet] Install (exact): ${opencodeExactInstallCommand(OPENCODE_PINNED_VERSION)}`);
+    }
+    return;
+  }
   // #214 P2.5 — agent-node is *intentionally* lazy-fetched via npx by
   // `anet node start` (see bin/cli.ts:~2378). Showing a scary "not found"
   // warning during the create wizard misleads first-time users into thinking
@@ -1066,12 +1396,6 @@ function checkRuntimeDependency(runtime: RuntimeName, phase: "create" | "start")
   if (runtime === "grok-build-acp" && !commandExists("grok")) {
     console.warn(`[anet] Warning: grok CLI not found in PATH.`);
     console.warn(`[anet] Install/login Grok Build first: https://x.ai/cli`);
-  }
-  if (runtime === "opencode-cli" && phase === "create" && !commandExists("opencode")) {
-    // Create-phase nudge only — start-phase runs the strict version
-    // pin check in assertStartCompatibility() and hard-fails there.
-    console.warn(`[anet] Warning: opencode CLI not found in PATH.`);
-    console.warn(`[anet] Install (exact): npm install -g opencode-ai@${OPENCODE_PINNED_VERSION}`);
   }
   // RFC-030 — codex-app-server (codex TUI bridge) runs a standalone
   // `codex app-server`, so it needs the `codex` CLI on PATH (same binary
@@ -1389,7 +1713,7 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
   // Default to claude-agent-sdk — works with any Anthropic-compatible API
   // (MiniMax/DeepSeek/GLM/Kimi/Anthropic). claude-code-cli only works for Max/Pro
   // subscribers and was a poor default that left non-subscribers with broken nodes.
-  const runtime = normalizeRuntime(opts.runtime || "claude-agent-sdk");
+  const runtime = runtimeForExecution(opts.runtime, "create node");
   const defaultModel =
     runtime === "codex-sdk" || runtime === "codex-app-server" ? "gpt-5.5" : undefined;
 
@@ -1433,8 +1757,12 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
       // here only; #156 batch path missed it because of duplication).
       ...(runtime === "codex-sdk" ? codexSdkYoloFlags(opts["no-yolo"] === "true") : {}),
     },
-    ...(opts["codex-app-server-url"] ? { codexAppServerUrl: opts["codex-app-server-url"] } : {}),
-    ...(opts["codex-thread-id"] ? { codexThreadId: opts["codex-thread-id"] } : {}),
+    ...(runtime === "codex-app-server" && opts["codex-app-server-url"]
+      ? { codexAppServerUrl: opts["codex-app-server-url"] }
+      : {}),
+    ...(runtime === "codex-app-server" && opts["codex-thread-id"]
+      ? { codexThreadId: opts["codex-thread-id"] }
+      : {}),
     ...(opts.session || runtime === "claude-code-cli" ? { session: opts.session || randomUUID() } : {}),
   };
   return profile;
@@ -1485,19 +1813,27 @@ function loadNodeDotenv(nodeId: string): Record<string, string> {
   const path = join(nodesDir(), nodeId, ".env");
   if (!existsSync(path)) return {};
   try {
-    const raw = readFileSync(path, "utf-8");
-    const out: Record<string, string> = {};
-    for (const line of raw.split("\n")) {
-      const t = line.trim();
-      if (!t || t.startsWith("#")) continue;
-      const eq = t.indexOf("=");
-      if (eq <= 0) continue;
-      const key = t.slice(0, eq).trim();
-      const val = t.slice(eq + 1);  // do NOT trim — token values are taken verbatim after the first `=`
-      if (key) out[key] = val;
-    }
-    return out;
+    return parseNodeDotenv(readFileSync(path, "utf-8"));
   } catch { return {}; }
+}
+
+function parseNodeDotenv(raw: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of raw.split("\n")) {
+    const t = line.trim();
+    if (!t || t.startsWith("#")) continue;
+    const eq = t.indexOf("=");
+    if (eq <= 0) continue;
+    const key = t.slice(0, eq).trim();
+    const val = t.slice(eq + 1);  // do NOT trim — token values are taken verbatim after the first `=`
+    if (key) out[key] = val;
+  }
+  return out;
+}
+
+function loadOpencodeNodeDotenv(nodeId: string): Record<string, string> {
+  const raw = readOpencodePrivateProfileFile(join(nodesDir(), nodeId), ".env");
+  return raw === undefined ? {} : parseNodeDotenv(raw);
 }
 
 // #193 envRef Option A — ensure the user's project-level `.anet/.gitignore`
@@ -1535,6 +1871,14 @@ function ensureAnetInRootGitignore(): void {
 }
 
 function saveCreatedNode(id: string, profile: Profile) {
+  if (normalizeRuntime(profile) === "opencode-cli") {
+    // This must be the first node-state operation: the envRef rewrite and
+    // saveProfile both carry credentials. Reject node/leaf symlinks first.
+    const nodeDir = prepareOpencodeNodeForProfileWrite(join(nodesDir(), id));
+    // Creation never inherits a same-uid pre-planted dotenv, even when it is
+    // an ordinary 0600 file. Clear it before writing this create's refs.
+    writeOpencodePrivateProfileFile(nodeDir, ".env", "");
+  }
   // v0.11 security — node create writes to .anet/nodes/<id>/ which carries
   // access.json + per-node tokens. Make sure project-root .gitignore covers
   // .anet/ before we drop any secret state into it. Idempotent; silent
@@ -1581,12 +1925,17 @@ function rewritePlainSecretsToEnvRef(nodeId: string, profile: Profile): void {
   // existing keys; .gitignore is ensured so the file never leaks via git.
   try {
     const nodeDir = join(nodesDir(), nodeId);
-    mkdirSync(nodeDir, { recursive: true });
     const dotenvPath = join(nodeDir, ".env");
-    const merged = loadNodeDotenv(nodeId);
+    const isOpencode = normalizeRuntime(profile) === "opencode-cli";
+    if (isOpencode) prepareOpencodeNodeForProfileWrite(nodeDir);
+    else mkdirSync(nodeDir, { recursive: true });
+    // Creation is a fresh OpenCode boundary: never preserve old PATH,
+    // NODE_OPTIONS, or ANET_* entries from a pre-existing dotenv.
+    const merged = isOpencode ? {} : loadNodeDotenv(nodeId);
     for (const { refName, value } of rewrites) merged[refName] = value;
     const body = Object.entries(merged).map(([k, v]) => `${k}=${v}`).join("\n") + "\n";
-    writeFileSync(dotenvPath, body, { mode: 0o600 });
+    if (isOpencode) writeOpencodePrivateProfileFile(nodeDir, ".env", body);
+    else writeFileSync(dotenvPath, body, { mode: 0o600 });
     ensureNodeDotenvGitignore();
   } catch (e: any) {
     console.warn(`[anet] ⚠ could not write per-node .env: ${e?.message || e} — fall back to manual export only.`);
@@ -1638,9 +1987,8 @@ async function ensureNodeToken(profile: Profile, id: string): Promise<Profile> {
 // from `preset.envKey` at create time and NEVER prompted (per
 // 通信龙 PR③ flag refinement 2). File modes: auth.json is written
 // 0o600 by writeOpencodeAuthJson. If the env key is missing we emit
-// a clear message so the operator knows to re-run after exporting
-// it, rather than baking an empty auth.json that would fail at
-// start time.
+// a node-scoped upstream login command rather than suggesting a second create
+// of an alias that now already exists.
 function writeOpencodePresetIfRequested(id: string, profile: Profile, wizardOpts: Record<string, any>): void {
   if (normalizeRuntime(profile) !== "opencode-cli") return;
   const presetId = wizardOpts._opencodePreset || "anthropic";
@@ -1655,20 +2003,83 @@ function writeOpencodePresetIfRequested(id: string, profile: Profile, wizardOpts
   }
   const apiKey = readPresetKeyFromEnv(preset);
   const nodeWorkDir = join(nodesDir(), id);
+  // Always materialize the selected provider and visible safe tool policy,
+  // including for keyless/free-model use.
+  const configPath = writeOpencodeConfigJson(nodeWorkDir, preset);
   if (!apiKey) {
+    // A keyless create is a fresh semantic boundary too: never inherit a
+    // regular 0600 auth.json pre-planted by the checkout.
+    clearOpencodeAuthJson(nodeWorkDir);
     console.warn(
       `[anet] ⚠ opencode-cli preset '${preset.id}' selected but ${preset.envKey} is not set — ` +
-      `auth.json NOT written. Export ${preset.envKey} and re-run \`anet node create ${id}\` or ` +
-      `write ${join(nodeWorkDir, ".local", "share", "opencode", "auth.json")} manually before start.`,
+      `no vendor credential written; auth.json reset to an empty object. ` +
+      `Keyless/free models can still start without a credential.`,
+    );
+    console.warn(`[anet]   To add this vendor later, run the node-scoped sandboxed login:`);
+    console.warn(
+      `[anet]   anet opencode auth-login ${shellQuote(id)} --provider ${preset.configProviderId}`,
     );
     console.warn(`[anet]   sign-up / key page: ${preset.signupUrl}`);
+    console.log(`[anet]   opencode.json written with safe tool defaults: ${configPath}`);
     return;
   }
   const authPath = writeOpencodeAuthJson(nodeWorkDir, preset, apiKey);
-  const configPath = writeOpencodeConfigJson(nodeWorkDir, preset);
   console.log(`[anet] ✅ opencode preset '${preset.id}' materialized:`);
-  console.log(`  auth.json:     ${authPath} (mode 0o600, read-denied to the running agent)`);
-  console.log(`  opencode.json: ${configPath}`);
+  console.log(`  auth.json:     ${authPath} (mode 0o600; sensitive — same-uid processes can still read it)`);
+  console.log(`  opencode.json: ${configPath} (safe tools disabled by default)`);
+  console.log(`[anet]   Default opencode-cli mode is for communication/text tasks in a launch-scoped external workspace.`);
+  console.log(`[anet]   Code tools require flags.opencodeUnsafeTools=true for trusted tasks; use Docker/VM for isolation.`);
+}
+
+function printOpencodeCreationSecurityDisclosure(profile: Profile): void {
+  const unsafeTools = profile.flags?.opencodeUnsafeTools === true;
+  console.log(`\n[anet] ${unsafeTools ? "⚠" : "🛡"} OpenCode tool/cwd policy:`);
+  if (unsafeTools) {
+    console.log(`[anet]    Built-in: bash / read / glob / grep / edit / write / list / task / skill ENABLED`);
+    console.log(`[anet]    Built-in: question DISABLED (unattended ACP has no interactive answer UI)`);
+    console.log(`[anet]    Cwd:      project cwd`);
+    console.log(`[anet]    HIGH RISK: flags.opencodeUnsafeTools=true is only for trusted tasks.`);
+    console.log(`[anet]    This is not a security sandbox; use Docker/VM for process and filesystem isolation.`);
+  } else {
+    console.log(`[anet]    Built-in disabled: bash / read / glob / grep / edit / write / list / task / skill / question`);
+    console.log(`[anet]    Cwd:      external disposable workspace (removed after child exit)`);
+    console.log(`[anet]    Intended for communication and text-only tasks.`);
+    console.log(`[anet]    Code tools require flags.opencodeUnsafeTools=true for trusted tasks.`);
+  }
+  console.log(`[anet]    CommHub:  agent-node receives tasks and publishes final text.`);
+  console.log(`[anet]              OpenCode itself is not given CommHub MCP tools in this preview.`);
+}
+
+/** Configure OpenCode consistently for both node-create entry points. */
+async function configureOpencodeRuntime(
+  wizardOpts: Record<string, any>,
+  interactive = Boolean(process.stdin.isTTY),
+): Promise<void> {
+  wizardOpts.runtime = "opencode-cli";
+  const currentPin = readEffectivePin();
+  console.log(`[anet] 请确保已安装 opencode CLI (exact): ${opencodeExactInstallCommand(currentPin.version)}`);
+  console.log(`[anet]   pin source: ${currentPin.source === "override-file" ? `~/.anet/opencode-pin.json (smoke ${currentPin.smokePassedAt})` : "built-in default"}`);
+
+  if (!interactive) {
+    wizardOpts._opencodePreset ||= "anthropic";
+    console.log(`[anet] non-TTY create: opencode preset = ${wizardOpts._opencodePreset}`);
+    return;
+  }
+  try {
+    const { select: sel } = await import("@inquirer/prompts");
+    const preset = await sel({
+      message: "选择 opencode vendor preset:",
+      choices: [
+        { value: "anthropic", name: "Anthropic 原生 API — reads ANTHROPIC_API_KEY env" },
+        { value: "openai", name: "OpenAI — reads OPENAI_API_KEY env" },
+      ],
+    });
+    wizardOpts._opencodePreset = preset;
+    console.log(`[anet] opencode preset = ${preset}. Credential materializes below the per-node state directory with mode 0600.`);
+  } catch (e: any) {
+    console.log(`[anet] ⚠ preset selector 不可用 (${e?.message || e}) — 默认 anthropic`);
+    wizardOpts._opencodePreset = "anthropic";
+  }
 }
 
 function writeLegacyProjectAlias(alias: string) {
@@ -2050,13 +2461,25 @@ function printProfileSummary(id: string, profile: Profile) {
   console.log(JSON.stringify(summary, null, 2));
 }
 
+/** Single source for both node-create picker paths on the canonical main line. */
+function createRuntimeChoices() {
+  return [
+    { value: "claude-agent-sdk", name: "claude-agent-sdk — 任意 OpenAI/Anthropic-compat vendor (intern / MiniMax / Claude / GLM / ...)" },
+    { value: "claude-code-cli", name: "claude-code-cli — Anthropic Claude (Max/Pro plan), 复用 `claude` CLI 登录态" },
+    { value: "codex-sdk", name: "codex-sdk — OpenAI Codex, 复用 `codex login` 登录态" },
+    { value: "codex-app-server", name: "codex-app-server — OpenAI Codex TUI 桥 (RFC-030)" },
+    { value: "grok-build-acp", name: "grok-build-acp — Grok Build ACP, 复用 `grok` CLI 登录态" },
+    { value: "opencode-cli", name: "opencode-cli — 公版 OpenCode CLI, Anthropic/OpenAI preset (RFC-029)" },
+  ];
+}
+
 async function createInteractiveCommand() {
   console.log(`
 [anet] Create a node
 
 This wizard creates one agent node for this project:
   - node config: .anet/nodes/<node-name>/config.json
-  - runtime: claude-code-cli / codex-sdk / claude-agent-sdk / grok-build-acp
+  - runtime: claude-agent-sdk / claude-code-cli / codex-sdk / codex-app-server / grok-build-acp / opencode-cli
   - optional Telegram channel: text + images from an allowlist user
 `);
 
@@ -2084,18 +2507,7 @@ This wizard creates one agent node for this project:
     const { select: sel } = await import("@inquirer/prompts");
     pickedRuntime = await sel({
       message: "选择 runtime:",
-      choices: [
-        { value: "claude-agent-sdk", name: "claude-agent-sdk — 任意 OpenAI/Anthropic-compat vendor (intern / MiniMax / Claude / GLM / ...)" },
-        { value: "claude-code-cli",  name: "claude-code-cli  — Anthropic Claude (Max/Pro plan), 复用 `claude` CLI 登录态" },
-        { value: "codex-sdk",        name: "codex-sdk        — OpenAI Codex, 复用 `codex login` 登录态" },
-        { value: "codex-app-server", name: "codex-app-server — OpenAI Codex TUI 桥 (RFC-030), 独立 `codex app-server`, 可接管已有 codex 会话" },
-        { value: "grok-build-acp",   name: "grok-build-acp   — Grok Build ACP, 复用 `grok` CLI 登录态" },
-        // RFC-029 — public sst/opencode CLI (multi-vendor front-end
-        // with unified session + auth abstraction). Runtime not yet
-        // wired to think() (PR② lands the ACP shim); wizard just
-        // records the choice so PR③ preset wiring can build on it.
-        { value: "opencode-cli",     name: "opencode-cli     — 公版 sst/opencode CLI, 多 vendor (Anthropic 原生 + OpenAI preset, RFC-029)" },
-      ],
+      choices: createRuntimeChoices(),
     }) as any;
   } catch (e: any) {
     console.log(`[anet] ⚠ Runtime selector unavailable: ${e?.message || e} — defaulting to claude-agent-sdk`);
@@ -2116,30 +2528,7 @@ This wizard creates one agent node for this project:
     opts.runtime = "grok-build-acp";
     console.log(`[anet] 请确保已安装并登录 Grok Build CLI: grok login`);
   } else if (pickedRuntime === "opencode-cli") {
-    opts.runtime = "opencode-cli";
-    // RFC-029 PR③ — pin note + vendor preset selector. The preset
-    // choice is stored on opts so createProfileFromOpts + saveCreatedNode
-    // can materialize auth.json / opencode.json inside the node's
-    // workdir (HOME-isolated per §8 D5). API key is read from env at
-    // save time; we don't prompt for it.
-    const currentPin = readEffectivePin();
-    console.log(`[anet] 请确保已安装 opencode CLI (exact): npm install -g opencode-ai@${currentPin.version}`);
-    console.log(`[anet]   pin source: ${currentPin.source === "override-file" ? `~/.anet/opencode-pin.json (smoke ${currentPin.smokePassedAt})` : "built-in default"}`);
-    try {
-      const { select: sel } = await import("@inquirer/prompts");
-      const preset = await sel({
-        message: "选择 opencode vendor preset:",
-        choices: [
-          { value: "anthropic", name: "Anthropic 原生 API — reads ANTHROPIC_API_KEY env" },
-          { value: "openai",    name: "OpenAI                 — reads OPENAI_API_KEY env" },
-        ],
-      });
-      (opts as any)._opencodePreset = preset;
-      console.log(`[anet] opencode preset = ${preset}. 请确保 ${preset === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"} 已 export; 会在 create 落到 node HOME 下的 auth.json (mode 0o600).`);
-    } catch (e: any) {
-      console.log(`[anet] ⚠ preset selector 不可用 (${e?.message || e}) — 默认 anthropic`);
-      (opts as any)._opencodePreset = "anthropic";
-    }
+    await configureOpencodeRuntime(opts, true);
   } else {
     // claude-agent-sdk — flow continues into vendor + model picker.
     const sel = await selectVendorAndModel();
@@ -2236,8 +2625,12 @@ Telegram setup:
   if (normalizeRuntime(profile) === "claude-code-cli") {
     printClaudeCodeNotice();
   }
-  console.log(`[anet] ⚠ dangerouslySkipPermissions and teammateMode enabled by default.`);
-  console.log(`[anet] To disable: edit .anet/nodes/${id}/config.json → flags`);
+  if (normalizeRuntime(profile) === "opencode-cli") {
+    printOpencodeCreationSecurityDisclosure(profile);
+  } else {
+    console.log(`[anet] ⚠ dangerouslySkipPermissions and teammateMode enabled by default.`);
+    console.log(`[anet] To disable: edit .anet/nodes/${id}/config.json → flags`);
+  }
   printProfileSummary(id, loadProfile(id) || profile);
   console.log(`\nStart: anet node start ${id}`);
   // #135 v2 fix — let the dispatch-end exit handle clean shutdown (see top
@@ -2257,7 +2650,7 @@ async function createCommand(idOverride?: string) {
   const id = idOverride || args[1];
   if (!id) return createInteractiveCommand();
   if (id.startsWith("--")) {
-    console.error("Usage: anet node create <node-name> [--runtime claude-code-cli|codex-sdk|claude-agent-sdk|grok-build-acp] [--model ...] [--tools ...]");
+    console.error("Usage: anet node create <node-name> [--runtime claude-agent-sdk|claude-code-cli|codex-sdk|codex-app-server|grok-build-acp|opencode-cli] [--model ...] [--tools ...]");
     console.error("Or run fully interactive: anet node create");
     process.exit(1);
   }
@@ -2301,9 +2694,15 @@ async function createCommand(idOverride?: string) {
   );
   const credAlreadyProvided = !!process.env.ANTHROPIC_AUTH_TOKEN
     || !!process.env.ANTHROPIC_API_KEY || envFlagHasAuth;
-  const explicitRuntime = opts.runtime ? normalizeRuntime(opts.runtime) : undefined;
-  const runtimeAlreadyExplicit = explicitRuntime === "codex-sdk" || explicitRuntime === "claude-code-cli" || explicitRuntime === "grok-build-acp";
-  const skipInteractive = credAlreadyProvided || runtimeAlreadyExplicit;
+  const explicitRuntime = opts.runtime
+    ? runtimeForExecution(opts.runtime, "create node")
+    : undefined;
+  const runtimeAlreadyExplicit = explicitRuntime === "claude-agent-sdk"
+    || explicitRuntime === "claude-code-cli"
+    || explicitRuntime === "codex-sdk"
+    || explicitRuntime === "codex-app-server"
+    || explicitRuntime === "grok-build-acp"
+    || explicitRuntime === "opencode-cli";
 
   // #133 selectRuntime — runtime-first, exported as a helper so create paths
   // (interactive single / batch wizard / sci-team demo) can share the picker.
@@ -2312,12 +2711,7 @@ async function createCommand(idOverride?: string) {
       const { select: sel } = await import("@inquirer/prompts");
       const picked = await sel({
         message: "选择 runtime:",
-        choices: [
-          { value: "claude-agent-sdk", name: "claude-agent-sdk — 任意 OpenAI/Anthropic-compat vendor (intern / MiniMax / Claude / GLM / ...)" },
-          { value: "claude-code-cli",  name: "claude-code-cli  — Anthropic Claude (Max/Pro plan), 复用 `claude` CLI 登录态" },
-          { value: "codex-sdk",        name: "codex-sdk        — OpenAI Codex, 复用 `codex login` 登录态" },
-          { value: "grok-build-acp",   name: "grok-build-acp   — Grok Build ACP, 复用 `grok` CLI 登录态" },
-        ],
+        choices: createRuntimeChoices(),
       });
       return picked as any;
     } catch (e: any) {
@@ -2326,7 +2720,9 @@ async function createCommand(idOverride?: string) {
     }
   };
 
-  if (!skipInteractive && process.stdin.isTTY) {
+  // A pre-exported Anthropic credential must not suppress the runtime picker:
+  // users still need to choose OpenCode before vendor credentials are used.
+  if (!runtimeAlreadyExplicit && process.stdin.isTTY) {
     const runtime = await selectRuntime();
     if (runtime) opts.runtime = runtime;
   } else if (explicitRuntime) {
@@ -2338,8 +2734,12 @@ async function createCommand(idOverride?: string) {
     console.log("[anet] 请确保已安装 Claude Code CLI 并登录: claude auth login");
   } else if (opts.runtime === "codex-sdk") {
     console.log("[anet] 请确保已执行: codex login");
+  } else if (opts.runtime === "codex-app-server") {
+    console.log("[anet] 请确保已执行: codex login（codex-app-server 需要 codex CLI）");
   } else if (opts.runtime === "grok-build-acp") {
     console.log("[anet] 请确保已安装并登录 Grok Build CLI: grok login");
+  } else if (opts.runtime === "opencode-cli") {
+    await configureOpencodeRuntime(opts, Boolean(process.stdin.isTTY));
   } else {
     // Either claude-agent-sdk (explicit / picker-default) or undefined runtime
     // — fall through to vendor selection. credAlreadyProvided also skips since
@@ -2484,6 +2884,9 @@ async function createCommand(idOverride?: string) {
   }
   if (normalizeRuntime(profile) === "claude-code-cli") {
     printClaudeCodeNotice();
+  }
+  if (normalizeRuntime(profile) === "opencode-cli") {
+    printOpencodeCreationSecurityDisclosure(profile);
   }
   // #101 user warning — surface the resolved toolset + dangerouslySkipPermissions
   // implication on every node create so users see what the agent can do before
@@ -2813,9 +3216,15 @@ async function launchAgent(id: string, forceNewSession = false) {
     console.error(`Node "${id}" not found. Create it first: anet node create ${id}`);
     process.exit(1);
   }
-  const { id: nodeId, profile } = resolved;
-
-  const runtime = normalizeRuntime(profile);
+  const nodeId = resolved.id;
+  let profile: Profile;
+  let runtime: RuntimeName;
+  try {
+    ({ profile, runtime } = resolveStartProfile(nodeId, resolved.profile));
+  } catch (error: any) {
+    console.error(`[anet] Refusing to start node ${JSON.stringify(nodeId)}: ${error?.message || error}`);
+    process.exit(1);
+  }
   const displayName = nodeDisplayName(nodeId, profile);
   const session = profileSession(profile);
   const willResume = !!session && !forceNewSession;
@@ -2917,6 +3326,8 @@ async function launchAgent(id: string, forceNewSession = false) {
     // getter can resolve `node_id → canonical alias` server-side without
     // relying on the mutable COMMHUB_ALIAS. The runtime can fall back to
     // COMMHUB_ALIAS today; once PR-4 lands, the getter prefers NODE_ID.
+    const launcherPath = process.env.PATH;
+    const launcherOpencodeSafeBase = process.env.ANET_OPENCODE_SAFE_BASE;
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       COMMHUB_ALIAS: displayName,
@@ -2943,16 +3354,33 @@ async function launchAgent(id: string, forceNewSession = false) {
     // gitignored) so a wizard-create-then-start in a fresh shell works
     // without the user having to manually export the secret first. Priority
     // is process.env (explicit shell) > dotenv file (see resolveProfileEnv).
-    const _dotenvSDK = loadNodeDotenv(nodeId);
+    const _dotenvSDK = runtime === "opencode-cli"
+      ? loadOpencodeNodeDotenv(nodeId)
+      : loadNodeDotenv(nodeId);
     if (Object.keys(_dotenvSDK).length > 0) {
       console.log(`[anet] loaded ${Object.keys(_dotenvSDK).length} key(s) from .anet/nodes/${nodeId}/.env`);
     }
     Object.assign(env, resolveProfileEnv(profile.env as any, home, _dotenvSDK));
 
+    if (runtime === "opencode-cli") {
+      if (!opencodeLaunchIdentity) {
+        throw new Error("opencode launch identity missing after successful compatibility gate");
+      }
+      // Reassert the trusted launcher boundary after profile/.env merge.
+      env.ANET_OPENCODE_BIN = opencodeLaunchIdentity.binary;
+      env.ANET_OPENCODE_VERSION = opencodeLaunchIdentity.version;
+      if (launcherOpencodeSafeBase === undefined) delete env.ANET_OPENCODE_SAFE_BASE;
+      else env.ANET_OPENCODE_SAFE_BASE = launcherOpencodeSafeBase;
+    }
+
     // Try agent-node from PATH, fallback to npx
     let cmd = "agent-node";
     let commandArgs = agentArgs;
-    try { execSync(process.platform === "win32" ? "where agent-node" : "which agent-node", { stdio: "pipe" }); } catch {
+    if (runtime === "opencode-cli") {
+      const plan = resolveOpencodeAgentNodeLaunchPlan();
+      cmd = plan.command;
+      commandArgs = [...plan.argsPrefix, ...agentArgs];
+    } else try { execSync(process.platform === "win32" ? "where agent-node" : "which agent-node", { stdio: "pipe" }); } catch {
       cmd = "npx";
       commandArgs = ["-y", "@sleep2agi/agent-node@preview", ...agentArgs];
     }
@@ -2971,20 +3399,48 @@ async function launchAgent(id: string, forceNewSession = false) {
     // dashboard can show the remote-restart button enabled. Bare-spawn
     // agent-nodes (running outside `anet node start`) inherit the unset
     // env and default to `false` per buildConfigSnapshot.
-    const childEnv = { ...env, ANET_CONFIG_UPDATE_CAPABLE: "1" };
+    const childEnv = runtime === "opencode-cli"
+      ? {
+        ...hardenOpencodeAgentNodeEnv(env, launcherPath),
+        ANET_CONFIG_UPDATE_CAPABLE: "1",
+      }
+      : { ...env, ANET_CONFIG_UPDATE_CAPABLE: "1" };
     const pidFile = join(nodesDir(), nodeId, ".pid");
 
     // Sentinel code agent-node uses to request re-spawn. Must stay in
     // lockstep with RESTART_SENTINEL in agent-node/src/runtime/config-apply.ts.
     const RESTART_SENTINEL = 75;
     let lastNonRestartCode: number | null = null;
+    let activeAgentChild: ReturnType<typeof spawn> | null = null;
+    let parentShuttingDown = false;
+    let childKillTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // The foreground anet process owns the supervised OpenCode child. Keep
+    // this handler OpenCode-only: generic Windows runtimes launch through a
+    // cmd.exe wrapper (`shell:true`) and must retain main's already-vetted
+    // process lifecycle until a process-tree-aware Windows gate exists.
+    const forwardAgentSignal = (signal: NodeJS.Signals) => {
+      if (parentShuttingDown) return;
+      parentShuttingDown = true;
+      try { activeAgentChild?.kill(signal); } catch {}
+      childKillTimer = setTimeout(() => {
+        try { activeAgentChild?.kill("SIGKILL"); } catch {}
+      }, 5_000);
+      childKillTimer.unref?.();
+    };
+    const onAgentSigint = () => forwardAgentSignal("SIGINT");
+    const onAgentSigterm = () => forwardAgentSignal("SIGTERM");
+    if (runtime === "opencode-cli") {
+      process.once("SIGINT", onAgentSigint);
+      process.once("SIGTERM", onAgentSigterm);
+    }
 
     await superviseChild({
       label: "agent-node",
       // shutdownGate fires when the child exits with a non-sentinel
       // code → record the code and tell the supervisor to stop. The
       // post-loop code below propagates it to the parent process.
-      shutdownGate: () => lastNonRestartCode !== null,
+      shutdownGate: () => parentShuttingDown || lastNonRestartCode !== null,
       // The agent-node SIGINT/SIGTERM contract is the parent's: don't
       // jitter, don't backoff hard — re-spawn quickly after a sentinel
       // exit (the config-apply restart path drained in-flight already).
@@ -2992,10 +3448,30 @@ async function launchAgent(id: string, forceNewSession = false) {
       baseDelayMs: 500,
       maxDelayMs: 5_000,
       runOnce: async (ctrl) => {
+        let runCommand = cmd;
+        let runCommandArgs = commandArgs;
+        if (runtime === "opencode-cli") {
+          try {
+            const checked = revalidateOpencodeAgentNodeLaunchPlan(
+              resolveOpencodeAgentNodeLaunchPlan(),
+            );
+            runCommand = checked.command;
+            runCommandArgs = [...checked.argsPrefix, ...agentArgs];
+          } catch (error: any) {
+            console.error(`[anet] opencode-cli exact-pair revalidation failed: ${error?.message || error}`);
+            lastNonRestartCode = 1;
+            return;
+          }
+        }
         // Stable timer — child survives 30s → reset backoff to base.
         // Mirrors the connectFeishu supervisor pattern from PR #263.
         const stableTimer = setTimeout(() => ctrl.markStable(), 30_000);
-        const child = spawn(cmd, commandArgs, { env: childEnv, stdio: "inherit", shell: process.platform === "win32" });
+        const child = spawn(runCommand, runCommandArgs, {
+          env: childEnv,
+          stdio: "inherit",
+          shell: runtime === "opencode-cli" ? false : process.platform === "win32",
+        });
+        if (runtime === "opencode-cli") activeAgentChild = child;
         if (child.pid) writeFileSync(pidFile, String(child.pid));
 
         let settled = false;
@@ -3008,12 +3484,15 @@ async function launchAgent(id: string, forceNewSession = false) {
             };
             child.once("exit", (code, signal) => done({ code, signal }));
             child.once("error", (err) => {
-              console.error(`[anet] ❌ spawn ${cmd} failed: ${err.message || err}`);
+              console.error(`[anet] ❌ spawn ${runCommand} failed: ${err.message || err}`);
               done({ code: null, signal: null });
             });
           },
         );
         clearTimeout(stableTimer);
+        if (runtime === "opencode-cli" && activeAgentChild === child) {
+          activeAgentChild = null;
+        }
 
         // Always remove the .pid before deciding the next step — the
         // next spawn writes a fresh one. Without this, a momentary
@@ -3032,6 +3511,11 @@ async function launchAgent(id: string, forceNewSession = false) {
         lastNonRestartCode = exitInfo.code ?? 0;
       },
     });
+    if (childKillTimer) clearTimeout(childKillTimer);
+    if (runtime === "opencode-cli") {
+      process.off("SIGINT", onAgentSigint);
+      process.off("SIGTERM", onAgentSigterm);
+    }
 
     // If the child exited with a non-zero, non-sentinel code, propagate
     // it as the parent's exit so `anet node start <name>` still surfaces
@@ -4725,6 +5209,28 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
     console.error(`Node "${oldId}" has an in-flight rename (.anet/nodes/${oldId}/rename.lock). Resolve it first.`);
     process.exit(1);
   }
+  // An external OpenCode binding is authoritative even when project-local
+  // config.json was replaced with another runtime. Rename must not become a
+  // laundering path that deletes the old binding and leaves a runnable,
+  // unbound legacy profile under the new name. Validate the same private,
+  // exact profile used by `node start` before any config write/copy/lock.
+  let boundRenameProfile: Profile | undefined;
+  try {
+    const binding = readOpencodeRuntimeBinding(oldDir, opencodeBindingHome());
+    if (binding) {
+      const resolvedBound = resolveStartProfile(oldId, resolved.profile);
+      if (resolvedBound.runtime !== "opencode-cli") {
+        throw new Error("external OpenCode binding resolved to a non-OpenCode runtime");
+      }
+      boundRenameProfile = resolvedBound.profile;
+    }
+  } catch (error: any) {
+    console.error(
+      `[anet] Refusing to rename externally-bound OpenCode node ${JSON.stringify(oldId)}: ` +
+      `${error?.message || error}`,
+    );
+    process.exit(1);
+  }
   // state check: running node needs --force (RFC-010 §4.4 active rename).
   // #146 / #180 ship-blocker — DO NOT trust .pid for old-process identity. A
   // stale .pid (left by an agent that exited abnormally, its exit handler never
@@ -4766,7 +5272,7 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
     console.error(`[anet] rename needs hub + token + network_id — run 'anet login' first.`);
     process.exit(1);
   }
-  const stored = loadStoredProfile(oldId) || resolved.profile;
+  const stored = boundRenameProfile || loadStoredProfile(oldId) || resolved.profile;
   // #146 R3 — node_id must stay stable across the rename. loadStoredProfile →
   // normalizeStoredProfile already fills a missing node_id in memory with the
   // deterministic legacyNodeId(oldId), so `stored.node_id` is populated — but
@@ -4855,7 +5361,15 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
   } catch (e: any) {
     // ── PHASE 1 失败回滚: old 原封不动 ──
     console.error(`[anet] rename PHASE 1 failed: ${e.message} — rolling back`);
-    if (existsSync(newDir)) rmSync(newDir, { recursive: true, force: true });
+    let bindingCleanupError: any;
+    if (existsSync(newDir)) {
+      try {
+        removeOpencodeRuntimeBinding(newDir, opencodeBindingHome());
+      } catch (cleanupError: any) {
+        bindingCleanupError = cleanupError;
+      }
+      if (!bindingCleanupError) rmSync(newDir, { recursive: true, force: true });
+    }
     // PR-3 (#110) — txnId is null for local-only renames; no server abort needed.
     if (txnId) {
       await fetch(`${hub}/api/node-rename/abort`, {
@@ -4864,7 +5378,15 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
       }).catch(() => {});
     }
     if (existsSync(lockPath)) rmSync(lockPath, { force: true });
-    console.error(`[anet] rollback complete — "${oldId}" unchanged.`);
+    if (bindingCleanupError) {
+      console.error(
+        `[anet] rollback INCOMPLETE — failed to remove the prepared external OpenCode binding: ` +
+        `${bindingCleanupError?.message || bindingCleanupError}`,
+      );
+      console.error(`[anet] prepared directory preserved for recovery: .anet/nodes/${newName}`);
+    } else {
+      console.error(`[anet] rollback complete — "${oldId}" unchanged.`);
+    }
     process.exit(1);
   }
 
@@ -4882,7 +5404,15 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
   if (!commit.ok) {
     // C1 失败: commhub 路由未切, 仍可干净回滚
     console.error(`[anet] rename PHASE 2 C1 (commhub commit) failed: ${commit.error} — rolling back`);
-    if (existsSync(newDir)) rmSync(newDir, { recursive: true, force: true });
+    let bindingCleanupError: any;
+    if (existsSync(newDir)) {
+      try {
+        removeOpencodeRuntimeBinding(newDir, opencodeBindingHome());
+      } catch (cleanupError: any) {
+        bindingCleanupError = cleanupError;
+      }
+      if (!bindingCleanupError) rmSync(newDir, { recursive: true, force: true });
+    }
     // PR-3 (#110) — txnId is null for local-only path; nothing to abort server-side.
     if (txnId) {
       await fetch(`${hub}/api/node-rename/abort`, {
@@ -4891,7 +5421,15 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
       }).catch(() => {});
     }
     if (existsSync(lockPath)) rmSync(lockPath, { force: true });
-    console.error(`[anet] rollback complete — "${oldId}" unchanged.`);
+    if (bindingCleanupError) {
+      console.error(
+        `[anet] rollback INCOMPLETE — failed to remove the prepared external OpenCode binding: ` +
+        `${bindingCleanupError?.message || bindingCleanupError}`,
+      );
+      console.error(`[anet] prepared directory preserved for recovery: .anet/nodes/${newName}`);
+    } else {
+      console.error(`[anet] rollback complete — "${oldId}" unchanged.`);
+    }
     process.exit(1);
   }
 
@@ -4989,6 +5527,16 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
 
   // C3: 原子切换本地 — 删 old 目录 (含其中 rename.lock)。在 restart 前删, 这样
   // 重启进程不会看到 stale old dir。
+  try {
+    removeOpencodeRuntimeBinding(oldDir, opencodeBindingHome());
+  } catch (e: any) {
+    console.error(
+      `[anet] ❌ rename is committed in CommHub, but the old external OpenCode binding ` +
+      `could not be removed: ${e?.message || e}`,
+    );
+    console.error(`[anet]    Both local directories were preserved; do not reuse "${oldId}" until the binding is repaired.`);
+    process.exit(1);
+  }
   try {
     rmSync(oldDir, { recursive: true, force: true });
   } catch (e: any) {
@@ -5684,6 +6232,12 @@ Delete a node and its config. Use --force to skip confirmation.
     return;
   }
 
+  // The runtime identity lives outside the project tree so a config downgrade
+  // cannot bypass it. Remove that exact record first for every runtime: this
+  // also repairs an older/downgraded profile whose config no longer says
+  // opencode-cli. Any unsafe/tampered binding state fails closed and keeps the
+  // node directory available for recovery.
+  removeOpencodeRuntimeBinding(nodeDir, opencodeBindingHome());
   rmSync(nodeDir, { recursive: true, force: true });
   console.log(`[anet] Deleted "${displayName}"`);
 }
@@ -6132,24 +6686,25 @@ function printUpgradePlan(plan: UpgradePlanRow[]) {
   }
 }
 
-// RFC-029 PR③ — `anet opencode …` command family (currently only
-// `upgrade-pin <version>`). Kept in its own dispatch namespace so
-// future opencode-specific management commands (e.g. cache prune,
-// preset rewrite) can hang off the same top-level.
+// RFC-029 — OpenCode lifecycle and pin-management commands.
 async function opencodeCommand() {
   const sub = args[1];
   if (!sub || sub === "--help" || sub === "-h" || sub === "help") {
     console.log(`anet opencode <sub>
 
 Subcommands:
-  upgrade-pin <version>   Install opencode-ai@<version>, run a smoke test,
-                          and — ONLY on smoke pass — record it as the
-                          effective pin (~/.anet/opencode-pin.json).
-                          The effective pin is consulted by every
-                          \`anet node start\` for an opencode-cli node.
+  upgrade-pin <version>   Reinstall and smoke the exact release pin.
+                          Different versions remain rejected until a new
+                          maintainer-vetted agent-network preview bumps it.
+  auth-login <node> --provider <anthropic|openai>
+                          Run upstream login inside a fresh private HOME/XDG
+                          tree, import only the selected API-key credential,
+                          then delete the temporary DB/log/auth state.
 
 Examples:
-  anet opencode upgrade-pin 1.18.0
+  anet opencode upgrade-pin ${OPENCODE_BUILTIN_PIN}
+  anet opencode auth-login my-node --provider anthropic
+  anet opencode auth-login my-node --provider openai
 `);
     return;
   }
@@ -6157,9 +6712,164 @@ Examples:
     await opencodeUpgradePinCommand(args[2]);
     return;
   }
+  if (sub === "auth-login") {
+    await opencodeAuthLoginCommand(args[2]);
+    return;
+  }
   console.error(`[anet] unknown opencode subcommand: ${sub}`);
   console.error(`[anet] try: anet opencode --help`);
   process.exit(1);
+}
+
+type InteractiveLoginResult = {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  requestedSignal: NodeJS.Signals | null;
+  spawnError?: Error;
+};
+
+async function runInteractiveOpencodeLogin(
+  binary: string,
+  loginArgs: string[],
+  cwd: string,
+  env: Readonly<NodeJS.ProcessEnv>,
+): Promise<InteractiveLoginResult> {
+  const child = spawn(binary, loginArgs, { cwd, env: { ...env }, stdio: "inherit" });
+  let requestedSignal: NodeJS.Signals | null = null;
+  let spawnError: Error | undefined;
+  let forceTimer: ReturnType<typeof setTimeout> | undefined;
+  const signalHandlers = new Map<NodeJS.Signals, () => void>();
+
+  const requestStop = (signal: NodeJS.Signals) => {
+    if (requestedSignal === null) requestedSignal = signal;
+    try { child.kill(signal); } catch {}
+    if (!forceTimer) {
+      forceTimer = setTimeout(() => {
+        try { child.kill("SIGKILL"); } catch {}
+      }, 2_000);
+      forceTimer.unref?.();
+    }
+  };
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as NodeJS.Signals[]) {
+    const handler = () => requestStop(signal);
+    signalHandlers.set(signal, handler);
+    process.on(signal, handler);
+  }
+
+  try {
+    return await new Promise<InteractiveLoginResult>((resolve) => {
+      let settled = false;
+      const finish = (code: number | null, signal: NodeJS.Signals | null) => {
+        if (settled) return;
+        settled = true;
+        resolve({ code, signal, requestedSignal, ...(spawnError ? { spawnError } : {}) });
+      };
+      child.once("error", (error) => {
+        spawnError = error;
+        if (!child.pid) finish(null, null);
+        else requestStop("SIGKILL");
+      });
+      child.once("exit", finish);
+    });
+  } finally {
+    if (forceTimer) clearTimeout(forceTimer);
+    for (const [signal, handler] of signalHandlers) process.off(signal, handler);
+  }
+}
+
+async function opencodeAuthLoginCommand(rawNode: string | undefined): Promise<void> {
+  const usage = "anet opencode auth-login <node> --provider <anthropic|openai>";
+  if (!rawNode) {
+    console.error(`[anet] usage: ${usage}`);
+    process.exit(1);
+  }
+  const commandOpts = parseOpts();
+  const provider = commandOpts.provider;
+  const preset = findOpencodePreset(provider);
+  if (!provider || provider === "true" || !preset) {
+    console.error(`[anet] auth-login requires --provider anthropic or --provider openai`);
+    console.error(`[anet] usage: ${usage}`);
+    process.exit(1);
+  }
+
+  const resolved = resolveNodeRef(rawNode);
+  // Auth import is a credential write: accept only a direct child from this
+  // project's enumerated node store, never an alias that resolves outside it.
+  const localProfileIds = new Set(listProfileIds());
+  if (!resolved || !localProfileIds.has(resolved.id)) {
+    console.error(`[anet] node not found: ${rawNode}`);
+    process.exit(1);
+  }
+  if (normalizeRuntime(resolved.profile) !== "opencode-cli") {
+    console.error(`[anet] node '${resolved.id}' is not an opencode-cli node`);
+    process.exit(1);
+  }
+
+  const pin = checkOpencodePin();
+  if (!pin.ok) {
+    console.error(`[anet] incompatible opencode-ai for auth-login.`);
+    console.error(`[anet] ${pin.hint}`);
+    process.exit(1);
+  }
+
+  const nodeWorkDir = join(nodesDir(), resolved.id);
+  console.log(
+    `[anet] OpenCode ${preset.id} API-key login for '${resolved.id}' ` +
+    `(exact opencode-ai@${pin.version}, fresh private state).`,
+  );
+  console.log(`[anet] Persistent auth changes only after upstream exits 0 and the credential shape validates.`);
+
+  let credential: Awaited<ReturnType<typeof readOpencodeAuthLoginCredential>> | null = null;
+  try {
+    credential = await withOpencodeAuthLoginSandbox({
+      nodeWorkDir,
+      provider: preset.id,
+      parentEnv: process.env,
+    }, async (sandbox) => {
+      revalidateOpencodeAuthLoginSandbox(sandbox);
+      const vettedBinary = validateOpencodePackageBinary(pin.binary, {
+        expectedVersion: pin.version,
+        forbiddenRoots: [...discoverOpencodeForbiddenRoots(), nodeWorkDir],
+      });
+      const result = await runInteractiveOpencodeLogin(
+        vettedBinary,
+        buildOpencodeAuthLoginArgs(preset.id),
+        sandbox.cwd,
+        sandbox.env,
+      );
+      if (result.requestedSignal) {
+        throw new Error(`interactive login interrupted by ${result.requestedSignal}`);
+      }
+      if (result.spawnError) {
+        throw new Error(`could not start the vetted OpenCode binary: ${result.spawnError.message}`);
+      }
+      if (result.code !== 0) {
+        throw new Error(
+          `upstream login exited without success ` +
+          `(code=${result.code ?? "null"} signal=${result.signal ?? "none"})`,
+        );
+      }
+      return readOpencodeAuthLoginCredential(sandbox);
+    });
+  } catch (error: any) {
+    const detail = String(error?.message ?? error).replace(/[\r\n]+/g, " ").slice(0, 500);
+    console.error(`[anet] ✗ OpenCode auth-login failed; persistent auth unchanged: ${detail}`);
+    process.exit(1);
+  }
+  if (!credential) {
+    console.error(`[anet] ✗ OpenCode auth-login failed; persistent auth unchanged: no validated API credential`);
+    process.exit(1);
+  }
+
+  try {
+    const authPath = writeOpencodeAuthJson(nodeWorkDir, preset, credential.key);
+    console.log(`[anet] ✓ imported ${preset.id} API credential into ${authPath} (mode 0600).`);
+    console.log(`[anet] Restart '${resolved.id}' to use the new credential.`);
+  } catch (error: any) {
+    const detail = String(error?.message ?? error).replace(/[\r\n]+/g, " ").slice(0, 500);
+    console.error(`[anet] ✗ validated login, but persistent atomic write failed: ${detail}`);
+    process.exit(1);
+  }
 }
 
 async function opencodeUpgradePinCommand(rawVersion: string | undefined) {
@@ -6170,12 +6880,28 @@ async function opencodeUpgradePinCommand(rawVersion: string | undefined) {
   }
   const version = rawVersion.match(/^\d+\.\d+\.\d+/)![0];
 
+  if (version !== OPENCODE_BUILTIN_PIN) {
+    console.error(
+      `[anet] Refusing opencode-ai@${version}: this preview is vetted only for ` +
+      `opencode-ai@${OPENCODE_BUILTIN_PIN}.`,
+    );
+    console.error(
+      `[anet] Install/smoke the exact release pin with: ` +
+      `anet opencode upgrade-pin ${OPENCODE_BUILTIN_PIN}`,
+    );
+    console.error(`[anet] A different upstream version requires a newly vetted preview.`);
+    process.exit(1);
+  }
+
   console.log(`[anet] opencode upgrade-pin: target version = ${version}`);
   console.log(`[anet]   1/3 installing opencode-ai@${version} globally...`);
   try {
-    execSync(`npm install -g opencode-ai@${version}`, {
+    execFileSync(process.platform === "win32" ? "npm.cmd" : "npm", [
+      "install", "-g", `opencode-ai@${version}`,
+    ], {
       stdio: "inherit",
       timeout: 5 * 60_000,
+      shell: process.platform === "win32",
     });
   } catch (e: any) {
     console.error(`[anet] ✗ npm install failed. Refusing to update the pin.`);
@@ -6185,10 +6911,52 @@ async function opencodeUpgradePinCommand(rawVersion: string | undefined) {
   // Confirm the installed version matches what we asked for. Guards
   // against `latest`-tag drift + npm skew.
   let installedRaw = "";
+  let installedBinary = "";
+  let versionProbe: ReturnType<typeof createOpencodeProbeContext> | undefined;
+  let versionProbeFailure: string | undefined;
+  const forbiddenRoots = discoverOpencodeForbiddenRoots();
   try {
-    installedRaw = execSync(`opencode --version`, { encoding: "utf-8", timeout: 5_000 }).trim();
+    const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+    const globalRootRaw = execFileSync(npmCommand, ["root", "-g"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 10_000,
+      shell: process.platform === "win32",
+    });
+    const globalRootLines = globalRootRaw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    if (globalRootLines.length !== 1 || !isAbsolute(globalRootLines[0])) {
+      throw new Error("npm root -g did not return one absolute package root");
+    }
+    installedBinary = validateOpencodePackageBinary(
+      join(globalRootLines[0], "opencode-ai", "bin", "opencode.exe"),
+      { expectedVersion: version, forbiddenRoots },
+    );
+    versionProbe = createOpencodeProbeContext(".anet-opencode-upgrade-version-");
+    revalidateOpencodeSafeExternalRoot(versionProbe.root);
+    installedRaw = execFileSync(installedBinary, ["--version"], {
+      encoding: "utf-8",
+      timeout: 5_000,
+      cwd: versionProbe.root.cwd,
+      env: versionProbe.env,
+    }).trim();
+    validateOpencodePackageBinary(installedBinary, {
+      expectedVersion: version,
+      forbiddenRoots,
+    });
   } catch (e: any) {
-    console.error(`[anet] ✗ opencode --version failed after install: ${e?.message || e}`);
+    versionProbeFailure = String(e?.message || e);
+  } finally {
+    if (versionProbe) {
+      try {
+        cleanupOpencodeSafeExternalRoot(versionProbe.root);
+      } catch (cleanupError: any) {
+        versionProbeFailure =
+          `upgrade version-probe external-root cleanup failed: ${cleanupError?.message || cleanupError}`;
+      }
+    }
+  }
+  if (versionProbeFailure) {
+    console.error(`[anet] ✗ opencode package identity/version check failed after install: ${versionProbeFailure}`);
     console.error(`[anet]   pin NOT updated.`);
     process.exit(1);
   }
@@ -6204,7 +6972,7 @@ async function opencodeUpgradePinCommand(rawVersion: string | undefined) {
   // gated on this — an install without a working ACP surface is not
   // usable.
   console.log(`[anet]   2/3 smoke: spawning opencode acp + probing initialize/session/new...`);
-  const smokeResult = await smokeOpencodeAcp();
+  const smokeResult = await smokeOpencodeAcp(installedBinary, version);
   if (!smokeResult.ok) {
     console.error(`[anet] ✗ opencode-ai@${version} smoke failed: ${smokeResult.reason}`);
     console.error(`[anet]   pin NOT updated. The runtime will still reject this version at start.`);
@@ -6214,97 +6982,153 @@ async function opencodeUpgradePinCommand(rawVersion: string | undefined) {
   console.log(`[anet]   ✓ smoke passed at ${smokePassedAt}`);
   console.log(`[anet]   3/3 writing pin override to ~/.anet/opencode-pin.json...`);
   writePinOverride(version, smokePassedAt, "smoke: initialize + session/new via `opencode acp`");
-  console.log(`[anet] ✓ pinned opencode-ai@${version}. \`anet node start\` for opencode-cli nodes will now accept it.`);
+  console.log(`[anet] ✓ verified release pin opencode-ai@${version}; opencode-cli nodes will accept it.`);
 }
 
 // Deterministic ACP smoke — no vendor key, no vendor call, just
 // verifies the freshly-installed binary can be spawned, honors the
 // JSON-RPC protocol, and returns a sessionId. If ANY step fails we
 // treat the whole probe as failed and refuse to write the pin.
-async function smokeOpencodeAcp(): Promise<{ ok: true; smokePassedAt: string } | { ok: false; reason: string }> {
+async function smokeOpencodeAcp(
+  binary: string,
+  expectedVersion: string,
+): Promise<{ ok: true; smokePassedAt: string } | { ok: false; reason: string }> {
   const { spawn } = await import("child_process");
-  return new Promise((resolve) => {
-    let settled = false;
-    const settle = (v: { ok: true; smokePassedAt: string } | { ok: false; reason: string }) => {
-      if (!settled) { settled = true; resolve(v); }
-    };
-    const proc = spawn("opencode", ["acp"], { stdio: ["pipe", "pipe", "pipe"] });
-    const kill = () => { try { proc.kill("SIGTERM"); } catch { /* already gone */ } };
-    let buf = "";
-    const timer = setTimeout(() => {
-      settle({ ok: false, reason: "smoke timed out after 15s" });
-      kill();
-    }, 15_000);
+  let smoke: ReturnType<typeof createOpencodeProbeContext>;
+  try {
+    smoke = createOpencodeProbeContext(".anet-opencode-smoke-");
+  } catch (error: any) {
+    return { ok: false, reason: `could not create external smoke root: ${error?.message || error}` };
+  }
+  const smokeRoot = smoke.root.root;
+  const smokeCwd = smoke.root.cwd;
+  const smokeEnv = smoke.env;
 
-    proc.on("error", (e) => {
-      clearTimeout(timer);
-      settle({ ok: false, reason: `spawn error: ${e.message}` });
+  let result: { ok: true; smokePassedAt: string } | { ok: false; reason: string };
+  try {
+    revalidateOpencodeSafeExternalRoot(smoke.root);
+    const vettedBinary = validateOpencodePackageBinary(binary, {
+      expectedVersion,
+      forbiddenRoots: discoverOpencodeForbiddenRoots(),
     });
-    proc.on("exit", (code, signal) => {
-      clearTimeout(timer);
-      if (!settled) {
-        settle({ ok: false, reason: `opencode acp exited before smoke completed (code=${code} signal=${signal})` });
-      }
-    });
+    result = await new Promise<{ ok: true; smokePassedAt: string } | { ok: false; reason: string }>((resolve) => {
+      type SmokeOutcome = { ok: true; smokePassedAt: string } | { ok: false; reason: string };
+      let outcome: SmokeOutcome | null = null;
+      let resolved = false;
+      let seenInitialize = false;
+      let seenSessionNew = false;
+      const proc = spawn(vettedBinary, ["acp"], {
+        cwd: smokeCwd,
+        env: smokeEnv,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      let forceKillTimer: ReturnType<typeof setTimeout> | null = null;
+      let timer: ReturnType<typeof setTimeout>;
 
-    // Feed initialize + session/new; expect responses for both.
-    let seenInitialize = false;
-    let seenSessionNew = false;
-    proc.stdout.on("data", (chunk: Buffer) => {
-      buf += chunk.toString("utf-8");
-      while (buf.includes("\n")) {
-        const idx = buf.indexOf("\n");
-        const line = buf.slice(0, idx).trim();
-        buf = buf.slice(idx + 1);
-        if (!line) continue;
-        let msg: any;
-        try { msg = JSON.parse(line); } catch { continue; }
-        if (msg.id === 1 && msg.result) {
-          seenInitialize = true;
-          // Now send session/new
-          proc.stdin.write(JSON.stringify({
-            jsonrpc: "2.0", id: 2, method: "session/new",
-            params: { cwd: process.cwd(), mcpServers: [] },
-          }) + "\n");
-        } else if (msg.id === 2 && msg.result && typeof msg.result.sessionId === "string") {
-          seenSessionNew = true;
-          clearTimeout(timer);
-          settle({ ok: true, smokePassedAt: new Date().toISOString() });
-          kill();
-        } else if (msg.error) {
-          clearTimeout(timer);
-          settle({ ok: false, reason: `smoke rpc error id=${msg.id}: ${msg.error.message}` });
-          kill();
+      const resolveOnce = (result: SmokeOutcome) => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timer);
+        if (forceKillTimer) clearTimeout(forceKillTimer);
+        resolve(result);
+      };
+      const exitFailure = (code: number | null, signal: NodeJS.Signals | null): SmokeOutcome => ({
+        ok: false,
+        reason: seenSessionNew
+          ? `opencode acp exited after session/new without a recorded outcome (code=${code} signal=${signal})`
+          : seenInitialize
+            ? `session/new never responded (code=${code} signal=${signal})`
+            : `initialize never responded (code=${code} signal=${signal})`,
+      });
+      const terminateThenResolve = (result: SmokeOutcome) => {
+        if (outcome) return;
+        outcome = result;
+        clearTimeout(timer);
+
+        // Never resolve while the smoke child can still be alive. TERM gets a
+        // one-second grace period, then KILL; the exit/close handler below is
+        // the only normal path that resolves the Promise.
+        if (proc.exitCode !== null || proc.signalCode !== null) {
+          resolveOnce(result);
+          return;
         }
-      }
-    });
+        try { proc.kill("SIGTERM"); } catch { /* exit/close will settle */ }
+        forceKillTimer = setTimeout(() => {
+          try { proc.kill("SIGKILL"); } catch { /* exit/close will settle */ }
+        }, 1_000);
+      };
+      let buf = "";
+      timer = setTimeout(() => {
+        terminateThenResolve({ ok: false, reason: "smoke timed out after 15s" });
+      }, 15_000);
 
-    // Kick off initialize
-    proc.stdin.write(JSON.stringify({
-      jsonrpc: "2.0", id: 1, method: "initialize",
-      params: {
-        protocolVersion: 1,
-        clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
-      },
-    }) + "\n");
+      proc.on("error", (e) => {
+        const failure: SmokeOutcome = { ok: false, reason: `spawn error: ${e.message}` };
+        // A spawn failure has no child to reap. Later ChildProcess errors with
+        // a pid still follow the bounded TERM/KILL path.
+        if (!proc.pid) resolveOnce(failure);
+        else terminateThenResolve(failure);
+      });
+      proc.on("exit", (code, signal) => {
+        resolveOnce(outcome ?? exitFailure(code, signal));
+      });
+      // Avoid an unhandled EPIPE if the binary exits between protocol steps.
+      proc.stdin.on("error", () => {});
 
-    // If the child dies with only initialize seen, that's still a
-    // failure — session/new is where the transport actually stresses.
-    proc.on("close", () => {
-      clearTimeout(timer);
-      if (!settled) {
-        settle({
-          ok: false,
-          reason:
-            seenSessionNew
-              ? "unreachable (settled=false with session/new done)"
-              : seenInitialize
-                ? "session/new never responded"
-                : "initialize never responded",
-        });
-      }
+      // Feed initialize + session/new; expect responses for both.
+      proc.stdout.on("data", (chunk: Buffer) => {
+        buf += chunk.toString("utf-8");
+        while (buf.includes("\n")) {
+          const idx = buf.indexOf("\n");
+          const line = buf.slice(0, idx).trim();
+          buf = buf.slice(idx + 1);
+          if (!line) continue;
+          let msg: any;
+          try { msg = JSON.parse(line); } catch { continue; }
+          if (msg.id === 1 && msg.result) {
+            seenInitialize = true;
+            // Probe session/new only inside the disposable smoke root. This
+            // prevents project opencode.json/AGENTS.md/plugin discovery.
+            proc.stdin.write(JSON.stringify({
+              jsonrpc: "2.0", id: 2, method: "session/new",
+              params: { cwd: smokeCwd, mcpServers: [] },
+            }) + "\n");
+          } else if (msg.id === 2 && msg.result && typeof msg.result.sessionId === "string") {
+            seenSessionNew = true;
+            terminateThenResolve({ ok: true, smokePassedAt: new Date().toISOString() });
+          } else if (msg.error) {
+            terminateThenResolve({ ok: false, reason: `smoke rpc error id=${msg.id}: ${msg.error.message}` });
+          }
+        }
+      });
+
+      // Kick off initialize
+      proc.stdin.write(JSON.stringify({
+        jsonrpc: "2.0", id: 1, method: "initialize",
+        params: {
+          protocolVersion: 1,
+          clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+        },
+      }) + "\n");
+
+      // `exit` is expected for every successfully-spawned child. `close` is a
+      // defensive fallback for unusual ChildProcess implementations/tests.
+      proc.on("close", (code, signal) => {
+        resolveOnce(outcome ?? exitFailure(code, signal));
+      });
     });
-  });
+  } catch (error: any) {
+    result = { ok: false, reason: `smoke setup/protocol failure: ${error?.message || error}` };
+  }
+  try {
+    cleanupOpencodeSafeExternalRoot(smoke.root);
+  } catch (cleanupError: any) {
+    return {
+      ok: false,
+      reason: `smoke external-root cleanup failed: ${cleanupError?.message || cleanupError}`,
+    };
+  }
+  return result;
 }
 
 async function upgradeCommand() {
@@ -9527,7 +10351,7 @@ async function createBatchWizardCommand() {
   let requiresAuth: "claude" | "codex" | undefined;
   if (opts.preset === "__custom__") {
     const customRuntime = await ask("Runtime (claude-agent-sdk / codex-sdk / claude-code-cli)", "claude-agent-sdk");
-    runtime = normalizeRuntime(customRuntime);
+    runtime = runtimeForExecution(customRuntime, "create batch nodes");
     baseUrl = (await ask("ANTHROPIC_BASE_URL (空白=Anthropic default)", "")) || undefined;
     model = (await ask("Model id", "")) || undefined;
     presetLabel = `custom (${runtime}${model ? " + " + model : ""})`;

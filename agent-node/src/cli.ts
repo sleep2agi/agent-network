@@ -10,7 +10,7 @@
  * 配置加载: --config > CLI args > env > .anet/nodes/<name>/config.json > ~/.anet/config.json > defaults
  */
 
-import { readFileSync, existsSync, writeFileSync, chmodSync } from "fs";
+import { readFileSync, existsSync, writeFileSync, chmodSync, realpathSync } from "fs";
 import { dirname, join, isAbsolute } from "path";
 import { hostname as osHostname, homedir } from "os";
 import { createCommhubSdkMcpServer } from "./commhub-mcp";
@@ -80,13 +80,39 @@ import {
   type ConfigPatch,
 } from "./runtime/config-apply";
 import { resolveTelegramAccess, buildEmptyAllowlistWarn, loadTelegramAccess } from "./util/access-resolve";
+import {
+  backupOpencodeConfig,
+  configStateDeclaresOpencode,
+  loadOpencodeConfigWithSelfHeal,
+  readOpencodeConfig,
+  writeOpencodeConfig,
+  writebackOpencodeSession,
+} from "./runtime/opencode-acp/profile-state";
+import { OPENCODE_DEFAULT_PIN } from "./runtime/opencode-acp/binary";
 
 const home = homedir();
+
+// Capture the launcher boundary before config.json `env` is merged below.
+// A node profile may intentionally override PATH for other runtimes, but it
+// must never replace the OpenCode executable/version selected by anet (or the
+// operator's original PATH for a direct agent-node launch).
+const INITIAL_OPENCODE_BIN = process.env.ANET_OPENCODE_BIN;
+const INITIAL_OPENCODE_VERSION = process.env.ANET_OPENCODE_VERSION;
+const INITIAL_LAUNCH_PATH = process.env.PATH || "";
+const INITIAL_OPENCODE_SAFE_BASE = process.env.ANET_OPENCODE_SAFE_BASE;
 
 // ── 参数解析 ──
 const argv = process.argv.slice(2);
 const opts: Record<string, string> = {};
 const cliChannels: string[] = [];
+
+// Let the parent anet launcher resolve the real package-owned entrypoint. It
+// then spawns this file through process.execPath, avoiding Windows .cmd and
+// short-lived npx wrapper processes at the trusted OpenCode boundary.
+if (argv.length === 1 && argv[0] === "--print-entrypoint") {
+  console.log(realpathSync(process.argv[1]));
+  process.exit(0);
+}
 
 let PKG_VERSION = "2.1.0";
 try {
@@ -115,7 +141,7 @@ for (let i = 0; i < argv.length; i++) {
 选项:
   --config <path>     配置文件 (.anet/nodes/<name>/config.json)
   --alias <name>      Agent 别名 / CommHub alias (必需)
-  --runtime <type>    claude-agent-sdk (default) | codex-sdk | grok-build-acp
+  --runtime <type>    claude-agent-sdk (default) | claude-code-cli | codex-sdk | codex-app-server | grok-build-acp | opencode-cli
   --model <name>      AI 模型 (codex 默认: gpt-5.5, claude-agent-sdk 默认: claude-sonnet-4-6)
   --hub <url>         CommHub URL
   --tools <list>      工具列表，逗号分隔 ("all" = 全部)
@@ -130,8 +156,11 @@ for (let i = 0; i < argv.length; i++) {
 
 Runtime:
   claude-agent-sdk  Claude Agent SDK — Claude/MiniMax/Anthropic 兼容 API
+  claude-code-cli   Claude Code CLI — 复用 Claude Code 登录态
   codex-sdk         Codex SDK — GPT-5.4，复用 codex 登录态
+  codex-app-server  Codex app-server — Codex TUI bridge
   grok-build-acp    Grok Build ACP — xAI Grok Build via "grok agent stdio"
+  opencode-cli      opencode CLI — Anthropic/OpenAI vendor preset via ACP
 `);
     process.exit(0);
   }
@@ -168,6 +197,7 @@ function loadJson(path: string): Record<string, any> | null {
 
 let fileConfig: Record<string, any> = {};
 let configFilePath = "";  // 用于 session 写回
+let opencodeConfigState = false;
 // RFC-024 — last-known revision of fileConfig (the hub-promoted
 // config_revision after the most recent applied update). Bumped by
 // processConfigUpdate after a successful apply ack; reported to hub
@@ -177,6 +207,15 @@ let currentConfigRevision = 0;
 
 if (opts.config) {
   const cfgPath = isAbsolute(opts.config) ? opts.config : join(process.cwd(), opts.config);
+  const explicitlyOpencode = opts.runtime === "opencode-cli" || opts.runtime === "opencode";
+  try {
+    // Inspect both primary and .prev without following a suspicious leaf.
+    // This also lets a config-only direct launch select the hardened loader.
+    opencodeConfigState = explicitlyOpencode || configStateDeclaresOpencode(cfgPath);
+  } catch (e: any) {
+    console.error(`[agent-node] Refusing unsafe config state: ${e?.message || e}`);
+    process.exit(1);
+  }
   // RFC-024 — boot self-heal. If the primary config is corrupt / missing,
   // restore from the .prev sidecar that processConfigUpdate writes
   // before every restart-required apply. Without this wire-up, a node
@@ -186,7 +225,9 @@ if (opts.config) {
   // AND no .prev fallback) fall back to the old loadJson semantics so
   // a fresh-install (no .prev) still boots with whatever we have.
   try {
-    const outcome = loadConfigWithSelfHeal(cfgPath);
+    const outcome = opencodeConfigState
+      ? loadOpencodeConfigWithSelfHeal(cfgPath)
+      : loadConfigWithSelfHeal(cfgPath);
     fileConfig = outcome.config;
     configFilePath = cfgPath;
     if (outcome.source === "prev") {
@@ -194,6 +235,10 @@ if (opts.config) {
     }
     console.log(`[agent-node] Config: ${cfgPath} (source=${outcome.source})`);
   } catch (e: any) {
+    if (opencodeConfigState) {
+      console.error(`[agent-node] Refusing unsafe OpenCode config: ${e?.message || e}`);
+      process.exit(1);
+    }
     // No usable config (no primary + no .prev). Fall back to the
     // pre-RFC-024 behaviour: try a plain loadJson, accept null.
     const fc = loadJson(cfgPath);
@@ -336,8 +381,38 @@ const RUNTIME_MAP: Record<string, string> = {
   // `codex-app-server` (canonical) / `codex-tui` / `codex-appserver`.
   "codex-app-server": "codex-app-server", "codex-appserver": "codex-app-server", "codex-tui": "codex-app-server",
 };
-const RUNTIME = (RUNTIME_MAP[rawRuntime] || "claude") as "claude" | "codex" | "grok" | "opencode" | "codex-app-server";
+if (!Object.prototype.hasOwnProperty.call(RUNTIME_MAP, rawRuntime)) {
+  const supported = [...new Set(Object.keys(RUNTIME_MAP))].join(", ");
+  console.error(`[${ALIAS}] Unsupported runtime "${rawRuntime}". Supported: ${supported}`);
+  process.exit(1);
+}
+const RUNTIME = RUNTIME_MAP[rawRuntime] as "claude" | "codex" | "grok" | "opencode" | "codex-app-server";
 const RUNTIME_LABEL = rawRuntime; // 日志用原始名
+
+if (RUNTIME === "opencode" && configFilePath && !opencodeConfigState) {
+  console.error(`[${ALIAS}] OpenCode config did not pass the private no-follow boot gate.`);
+  process.exit(1);
+}
+if (RUNTIME === "opencode" && !configFilePath) {
+  console.error(`[${ALIAS}] opencode-cli requires --config pointing at a private anet node profile.`);
+  process.exit(1);
+}
+if (RUNTIME === "opencode" && INITIAL_OPENCODE_VERSION !== undefined
+  && INITIAL_OPENCODE_VERSION !== OPENCODE_DEFAULT_PIN) {
+  console.error(
+    `[${ALIAS}] Refusing ANET_OPENCODE_VERSION=${INITIAL_OPENCODE_VERSION}; ` +
+    `this agent-node is vetted only for opencode-ai@${OPENCODE_DEFAULT_PIN}.`,
+  );
+  process.exit(1);
+}
+
+// fileConfig.env is intentionally merged before runtime selection. Restore
+// this host trust anchor afterwards so a node checkout cannot redirect the
+// supposedly external safe runtime base when the parent shell left it unset.
+if (RUNTIME === "opencode") {
+  if (INITIAL_OPENCODE_SAFE_BASE === undefined) delete process.env.ANET_OPENCODE_SAFE_BASE;
+  else process.env.ANET_OPENCODE_SAFE_BASE = INITIAL_OPENCODE_SAFE_BASE;
+}
 
 // RFC-030 — codex-app-server nodes reply to dispatched tasks with send_task
 // (immediate SSE wake + actionable) instead of send_reply (inbox-only, no
@@ -505,7 +580,9 @@ if (process.env.COMMHUB_TOKEN && fileConfig.token && process.env.COMMHUB_TOKEN !
 }
 function reloadNodeToken(): boolean {
   if (!configFilePath) return false;
-  const freshConfig = loadJson(configFilePath);
+  const freshConfig = RUNTIME === "opencode"
+    ? readOpencodeConfig(configFilePath)
+    : loadJson(configFilePath);
   const freshToken = typeof freshConfig?.token === "string" ? freshConfig.token : "";
   if (!freshToken || freshToken === AUTH_TOKEN) return false;
   AUTH_TOKEN = freshToken;
@@ -545,6 +622,12 @@ const CHANNELS = channelSpecs.map((spec) => {
 function writebackSession(sessionId: string) {
   if (!configFilePath || !sessionId) return;
   try {
+    if (RUNTIME === "opencode") {
+      if (writebackOpencodeSession(configFilePath, sessionId)) {
+        debug(`session 写回: ${configFilePath} → ${sessionId.slice(0, 8)}...`);
+      }
+      return;
+    }
     const cfg = JSON.parse(readFileSync(configFilePath, "utf-8"));
     if (cfg.session === sessionId) return; // 已是最新
     cfg.session = sessionId;
@@ -1446,6 +1529,9 @@ let grokSessionId: string | undefined = RUNTIME === "grok" ? (SESSION_ID || unde
 // holder — the next turn spawns fresh).
 let opencodeSessionId: string | undefined = RUNTIME === "opencode" ? (SESSION_ID || undefined) : undefined;
 let opencodeRuntimeSession: import("./runtime/opencode-acp/runtime").OpencodeRuntimeSession | null = null;
+// Set synchronously immediately after spawn, before initialize or session/new
+// resolves. shutdown() uses this handle during the handshake window.
+let opencodeRuntimeClient: import("./runtime/opencode-acp/client").OpencodeAcpClient | null = null;
 
 // RFC-030 — codex-app-server runtime state.
 // `codexAppServerThreadId` is the persisted codex thread this node binds
@@ -2593,12 +2679,17 @@ function sanitizeGrokCommhubLeak(text: string): string {
 // stale handle on the next turn and re-open with the persisted
 // sessionId; runtime.openOpencodeRuntime tries `session/load` first
 // and falls back to `session/new` with an explicit "session lost on
-// restart" log line — no silent history loss.
+// restart" log line. The hardened preview uses launch-scoped writable
+// OpenCode data, so local 1.18.1 history is not promised across child crashes.
 //
 // #383 thinking-only rescue is inherited from the runtime layer (see
 // opencodeThink). Toggle via ANET_DISABLE_383_REPROMPT env, shared
 // with the claude runtime for uniform operator override.
+// Stable string marker for release tarball inspection. Bun minifies function
+// identifiers, so keep an independently reachable literal in the bundle.
+const OPENCODE_PROCESS_BUNDLE_MARKER = "processWithOpencode";
 async function processWithOpencode(task: string, _from: string, _images?: string[]): Promise<string> {
+  debug(`[${OPENCODE_PROCESS_BUNDLE_MARKER}] dispatch`);
   const { openOpencodeRuntime, opencodeThink } =
     await import("./runtime/opencode-acp/runtime");
 
@@ -2607,13 +2698,21 @@ async function processWithOpencode(task: string, _from: string, _images?: string
   if (opencodeRuntimeSession && !opencodeRuntimeSession.client.isRunning) {
     log(`[opencode] previous child exited — reopening on this turn`);
     opencodeRuntimeSession = null;
+    opencodeRuntimeClient = null;
   }
 
   if (!opencodeRuntimeSession) {
-    opencodeRuntimeSession = await openOpencodeRuntime({
+    const opened = await openOpencodeRuntime({
       cwd: process.cwd(),
-      workDir: process.cwd(),  // §8 D5: HOME isolation lands here
+      // Safe mode puts process/session cwd and fresh HOME/XDG roots in one
+      // external launch-scoped tree. The explicit flag restores project cwd
+      // only for trusted coding tasks.
+      workDir: NODE_DIR,
+      unsafeTools: fileConfig.flags?.opencodeUnsafeTools === true,
       sessionId: opencodeSessionId,
+      onClient: (client) => {
+        opencodeRuntimeClient = client;
+      },
       onSession: async (id: string) => {
         opencodeSessionId = id;
         writebackSession(id);
@@ -2621,16 +2720,26 @@ async function processWithOpencode(task: string, _from: string, _images?: string
       onExit: (info) => {
         warn(`[opencode] child exited code=${info.code} signal=${info.signal}; next turn will reopen`);
         opencodeRuntimeSession = null;
+        opencodeRuntimeClient = null;
       },
       log,
       warn,
+      binary: INITIAL_OPENCODE_BIN,
+      expectedVersion: INITIAL_OPENCODE_VERSION,
+      binarySearchPath: INITIAL_LAUNCH_PATH,
     });
+    // The exit event can race the final handshake response. Do not publish a
+    // session whose child already exited after onExit cleared the early handle.
+    if (!opened.client.isRunning) {
+      throw new Error("opencode ACP child exited while opening the runtime session");
+    }
+    opencodeRuntimeSession = opened;
   }
 
   const outcome = await opencodeThink(opencodeRuntimeSession, {
     prompt: task,
     cwd: process.cwd(),
-    workDir: process.cwd(),
+    workDir: NODE_DIR,
     sessionId: opencodeRuntimeSession.sessionId,
     log,
     warn,
@@ -2645,6 +2754,26 @@ async function processWithOpencode(task: string, _from: string, _images?: string
   );
 
   return outcome.replyText || "（无回复）";
+}
+
+async function closeOpencodeRuntime(reason: string): Promise<void> {
+  const client = opencodeRuntimeClient ?? opencodeRuntimeSession?.client ?? null;
+  if (client?.isRunning) {
+    log(`[opencode] stopping ACP child (${reason})`);
+    await Promise.race([
+      client.stop("SIGTERM"),
+      new Promise<void>((resolve) => setTimeout(resolve, 1_000)),
+    ]).catch((e: any) => {
+      warn(`[opencode] graceful stop failed: ${e?.message || e}`);
+    });
+    if (client.isRunning) {
+      await client.stop("SIGKILL").catch((e: any) => {
+        warn(`[opencode] forced stop failed: ${e?.message || e}`);
+      });
+    }
+  }
+  opencodeRuntimeClient = null;
+  opencodeRuntimeSession = null;
 }
 
 // RFC-030 — codex-app-server runtime turn.
@@ -4033,6 +4162,7 @@ async function processConfigUpdate(): Promise<void> {
         warn(`[config-apply] restart_only ack restarting failed (continuing to exit): ${ackErr?.message || ackErr}`);
       }
       await drainInFlightThink();
+      await closeOpencodeRuntime("config restart_only");
       log(`[config-apply] exiting with RESTART_SENTINEL=${RESTART_SENTINEL} for parent supervisor`);
       process.exit(RESTART_SENTINEL);
     }
@@ -4064,9 +4194,12 @@ async function processConfigUpdate(): Promise<void> {
       });
       return;
     }
-    const backup = backupConfigPrev(configFilePath);
+    const backup = RUNTIME === "opencode"
+      ? backupOpencodeConfig(configFilePath)
+      : backupConfigPrev(configFilePath);
     const merged = mergePatch(fileConfig, update.patch);
-    atomicWriteJson(configFilePath, merged);
+    if (RUNTIME === "opencode") writeOpencodeConfig(configFilePath, merged);
+    else atomicWriteJson(configFilePath, merged);
     log(`[config-apply] wrote ${configFilePath} (.prev backedUp=${backup.backedUp})`);
 
     if (mode === "hot") {
@@ -4094,6 +4227,7 @@ async function processConfigUpdate(): Promise<void> {
       warn(`[config-apply] restart ack restarting failed (continuing to exit): ${ackErr?.message || ackErr}`);
     }
     await drainInFlightThink();
+    await closeOpencodeRuntime("config restart");
     log(`[config-apply] exiting with RESTART_SENTINEL=${RESTART_SENTINEL} for parent supervisor`);
     process.exit(RESTART_SENTINEL);
   } catch (err: any) {
@@ -4511,8 +4645,12 @@ if (RUNTIME === "codex" || RUNTIME === "grok" || RUNTIME === "codex-app-server")
   }
 }
 
+let shuttingDown = false;
 const shutdown = async () => {
+  if (shuttingDown) return;
+  shuttingDown = true;
   log("shutting down...");
+  await closeOpencodeRuntime("signal shutdown");
   // #261 P0-1 — gate the feishu supervisor loop so it stops re-forking
   // on the soon-to-arrive child exit. SIGTERM each tracked worker (give
   // it 500 ms to exit gracefully), then SIGKILL holdouts. Without this,

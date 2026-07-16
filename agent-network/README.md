@@ -14,7 +14,7 @@ Run a local network of AI agents from one CLI.
 Agent Network is a local-first multi-agent runtime:
 
 - **CommHub**: MCP + REST + SSE hub for task routing, auth, networks, and status.
-- **Agent nodes**: long-running AI workers backed by Claude Code, Claude Agent SDK, Codex SDK, or Grok Build ACP.
+- **Agent nodes**: long-running AI workers backed by Claude Code, Claude Agent SDK, Codex SDK, Codex app-server, Grok Build ACP, or OpenCode ACP.
 - **Dashboard**: browser UI for topology, chat, tasks, node health, and server telemetry.
 - **CLI**: `anet`, the single entry point for setup, auth, node lifecycle, and demos.
 
@@ -47,6 +47,14 @@ Preview channel:
 ```bash
 npm install -g @sleep2agi/agent-network@preview
 anet -v
+```
+
+Canonical OpenCode preview (exact vetted pair; automatic `npx` fallback is intentionally disabled):
+
+```bash
+npm install -g @sleep2agi/agent-network@2.3.0-preview.34 \
+  @sleep2agi/agent-node@2.5.0-preview.26 \
+  opencode-ai@1.18.1
 ```
 
 Current npm dist-tags verified on 2026-05-28 (v0.10.11 stable):
@@ -98,8 +106,8 @@ anet node start my-bot
 
 `anet node create` walks you through:
 
-1. Runtime: `claude-code-cli`, `claude-agent-sdk`, `codex-sdk`, or `grok-build-acp`.
-2. Provider preset: Anthropic, MiniMax, InternLM, Xiaomi MiMo, or `custom` (any Anthropic-compatible endpoint — used for DeepSeek / GLM / Kimi / OpenRouter etc.; codex-sdk for OpenAI Codex; grok-build-acp for xAI Grok).
+1. Runtime: `claude-agent-sdk`, `claude-code-cli`, `codex-sdk`, `codex-app-server`, `grok-build-acp`, or `opencode-cli` (the canonical preview picker has exactly these 6 choices).
+2. Provider preset: Anthropic, MiniMax, InternLM, Xiaomi MiMo, or `custom` (any Anthropic-compatible endpoint — used for DeepSeek / GLM / Kimi / OpenRouter etc.; Codex runtimes reuse Codex auth; grok-build-acp reuses Grok auth; opencode-cli offers Anthropic/OpenAI presets).
 3. API key and model settings.
 
 When the node starts successfully, look for:
@@ -154,7 +162,9 @@ Do not expose the hub directly to the public internet without a reverse proxy, H
 | `claude-code-cli` | You want Claude Code CLI sessions and channel support | Uses Claude Code process; supports stable `COMMHUB_RESUME_ID` in recent previews |
 | `claude-agent-sdk` | You want Anthropic-compatible API providers | Good default for provider presets |
 | `codex-sdk` | You want Codex-backed nodes | Useful as a backup runtime when Claude quota is constrained |
+| `codex-app-server` | You want a Codex TUI thread shared with network tasks | Canonical preview; connects to the local app-server over WebSocket |
 | `grok-build-acp` | You want Grok Build through `grok agent stdio` | Requires Grok Build CLI auth; stable for receive/reply, session persistence, and explicit `send_task` delegation |
+| `opencode-cli` | You want public OpenCode ACP with Anthropic/OpenAI presets | Canonical preview; exact `opencode-ai@1.18.1` and exact network/node pair required |
 
 ### Grok Build ACP
 

@@ -2,13 +2,11 @@
 //
 // The default pinned version lives here as `OPENCODE_BUILTIN_PIN`
 // (bumped by hand when the maintainers vet a new release). Operators
-// who want to run a newer version locally use `anet opencode
-// upgrade-pin <version>`; that command installs the target version,
-// runs a lightweight smoke against it (initialize + session/new via
-// stdio JSON-RPC), and — ONLY on smoke pass — writes an override
-// file to `~/.anet/opencode-pin.json`. `readEffectivePin()` prefers
-// the override file; when it's absent or malformed, it falls back
-// to the built-in constant.
+// can use `anet opencode upgrade-pin <version>` to reinstall and smoke
+// the release pin. A locally-smoked DIFFERENT upstream version is not
+// equivalent to the maintainer's Docker/E2E vetting, so this release
+// refuses to make one effective; accepting a new version requires a
+// new agent-network preview with a bumped built-in constant.
 //
 // The override file is per-machine and does NOT go into the repo,
 // so different hosts can hold different pins during a rollout.
@@ -19,11 +17,26 @@ import { join, dirname } from "path";
 
 /**
  * Version this branch was validated against by the maintainers.
- * Bumped when a new opencode-ai release passes the manual smoke +
- * PR② e2e in a fresh checkout. `readEffectivePin()` still returns
- * this when no override file exists.
+ * Bumped when a new opencode-ai release passes the full Docker/E2E gate.
  */
-export const OPENCODE_BUILTIN_PIN = "1.17.13";
+export const OPENCODE_BUILTIN_PIN = "1.18.1";
+
+/** Exact upstream remediation shared by every CLI failure path. */
+export function opencodeExactInstallCommand(version = OPENCODE_BUILTIN_PIN): string {
+  return `npm install -g opencode-ai@${version}`;
+}
+
+/** Preserve package-identity diagnostics while always leaving a missing or
+ * untrusted install with an actionable exact-pin command. */
+export function formatOpencodePackageIdentityFailure(
+  expectedVersion: string,
+  detail: string,
+): string {
+  return (
+    `Expected trusted opencode-ai@${expectedVersion}; ${detail}\n` +
+    `  → Install/reinstall exact: ${opencodeExactInstallCommand(expectedVersion)}`
+  );
+}
 
 /** Where the per-machine override lives. Kept under `~/.anet/` so
  *  it sits next to the other anet-local state. */
@@ -52,10 +65,10 @@ export interface EffectivePin {
 }
 
 /**
- * Prefer a validated override file when present; otherwise fall
- * back to the built-in constant. A malformed override file is
- * ignored (built-in wins) — we don't want a partially-written
- * override to wedge every start.
+ * Recognize a validated override only when it records the exact built-in
+ * release pin. A different locally-smoked version is deliberately ignored:
+ * the lightweight ACP smoke does not replace the maintainer's full security
+ * and reply-path gate. Malformed/stale files also fall back to the built-in.
  */
 export function readEffectivePin(homeDirOverride?: string): EffectivePin {
   const path = opencodePinFilePath(homeDirOverride);
@@ -68,8 +81,8 @@ export function readEffectivePin(homeDirOverride?: string): EffectivePin {
     // Require both version AND smokePassedAt — a version without a
     // smoke marker is refused (see 通信龙 PR② PR③ flag refinement:
     // "没过 smoke 就拒写 + 报错, 别让用户 pin 到没验过的版本").
-    if (typeof parsed.version === "string" && typeof parsed.smokePassedAt === "string" &&
-        parsed.version.match(/^\d+\.\d+\.\d+/) && parsed.smokePassedAt.match(/^\d{4}-\d{2}-\d{2}T/)) {
+    if (parsed.version === OPENCODE_BUILTIN_PIN && typeof parsed.smokePassedAt === "string" &&
+        parsed.smokePassedAt.match(/^\d{4}-\d{2}-\d{2}T/)) {
       return {
         version: parsed.version,
         source: "override-file",

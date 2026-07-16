@@ -1,6 +1,6 @@
 # RFC-029 PR④ — kernel-live ACP e2e container.
 #
-# Real opencode-ai@1.17.13 (pinned) driven end-to-end through the real
+# Real release-pinned opencode-ai driven end-to-end through the real
 # agent-node runtime (openOpencodeRuntime + opencodeThink from #386).
 # No mock at the vendor boundary — the child process really is
 # `opencode acp`, the protocol frames really are ACP JSON-RPC, and the
@@ -22,7 +22,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 # Pin opencode to the exact version RFC-029 PR② verified against.
-RUN npm i -g opencode-ai@1.17.13 --silent && opencode --version
+ARG OPENCODE_VERSION=1.18.1
+RUN npm i -g "opencode-ai@${OPENCODE_VERSION}" --silent \
+    && test "$(opencode --version)" = "${OPENCODE_VERSION}"
 
 WORKDIR /harness
 

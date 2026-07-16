@@ -10,6 +10,8 @@
 | **红线** | 只做**公版 [sst/opencode](https://github.com/sst/opencode)**, 不引入任何非公开分支/fork 概念, 不在公开仓提任何私有对应物 |
 | **依据** | 公版 opencode 官方文档 (`opencode.ai/docs`), 现有 4 runtime adapter 代码链 (agent-node/src/cli.ts + agent-network/bin/cli.ts + server/src/index.ts) |
 
+> 发版复验更新（2026-07-16）：canonical preview 已将 vetted exact pin 升至 `opencode-ai@1.18.1`，对应 exact pair 为 `agent-network@2.3.0-preview.34` / `agent-node@2.5.0-preview.26`。下文 `1.17.13` 保留为 RFC 当时的历史探针与决策记录，不再是当前发版 pin。
+
 ---
 
 ## 摘要
