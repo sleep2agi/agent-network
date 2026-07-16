@@ -10,7 +10,7 @@ CommHub Server provides a REST API for Dashboard, CLI, and third-party system in
 | Auth | `Authorization: Bearer <token>` **(recommended)**; `?token=<token>` URL query kept for SSE / browser EventSource (access-log leak risk — see [Security](/en/concepts/security)) |
 | Content Type | `application/json` |
 | Encoding | UTF-8 |
-| Endpoint count | 30+ across **12 groups**: [Public 1](#public-endpoints) · [Auth 5](#auth-endpoints) · [Network 5](#network-endpoints) · [Data Query 10](#data-query-endpoints) · [Task Dispatch 2](#task-dispatch-endpoints) · [MCP 1](#mcp-endpoint) · [SSE 1](#sse-endpoint) · [Token Management 4](#token-management-endpoints) · [Network Members 6](#network-member-endpoints) · [Node Rename 3](#node-rename-endpoints-rfc-010) · [Tmux Debug 3 (opt-in)](#tmux-debug-endpoints-opt-in) · [Legacy 2](#legacy-endpoints-v0-6-era-—-frozen-in-oss) |
+| Endpoint count | 30+ across **13 groups**: [Public 1](#public-endpoints) · [Auth 5](#auth-endpoints) · [Network 5](#network-endpoints) · [Data Query 10](#data-query-endpoints) · [Task Dispatch 2](#task-dispatch-endpoints) · [MCP 1](#mcp-endpoint) · [SSE 1](#sse-endpoint) · [Token Management 4](#token-management-endpoints) · [Network Members 6](#network-member-endpoints) · [Files 2](#file-endpoints) · [Node Rename 3](#node-rename-endpoints-rfc-010) · [Tmux Debug 3 (opt-in)](#tmux-debug-endpoints-opt-in) · [Legacy 2](#legacy-endpoints-v0-6-era-—-frozen-in-oss) |
 | Full endpoint source | [`server/src/index.ts:390-1160`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L390) |
 
 ## Public Endpoints
@@ -1771,6 +1771,48 @@ curl -X POST http://localhost:9200/api/networks/join \
 | 400 | `already a member of this network` | Caller is already a member |
 
 After receiving this response, the `anet network join` CLI auto-switches to the joined network (updating the `network_id` field in `~/.anet/config.json` to `res.network_id`) and prints `Joined network as <role>`. The server also auto-issues a network-bound token for the joiner ([`auth.ts:374-377`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L374), `name='auto-join' scope='full'`) and writes a `network_joined` audit row.
+
+---
+
+## File Endpoints
+
+Attachment (image, etc.) upload / download — backs Dashboard image sending, commhub attachments, codex-sdk image input, and the like. Both endpoints require `Authorization: Bearer <token>`.
+
+### POST /api/upload
+
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
+
+Uploads a file and returns a downloadable `url`.
+
+- Request: `multipart/form-data` with a `file` field; a `Content-Length` header is required.
+- Size cap **12 MiB** (`MAX_UPLOAD_BYTES`), checked in two stages: fail-fast on `Content-Length`, then re-verify the parsed size.
+- Rate limit: **60/hour** (keyed by token id, falling back to IP); over the limit returns `429 rate_limited` (with `X-RateLimit-*` headers).
+
+```bash
+curl -X POST http://localhost:9200/api/upload \
+  -H "Authorization: Bearer utok_xxx" \
+  -F "file=@./cover.png"
+```
+
+Success `200`:
+
+```json
+{ "ok": true, "file_id": "...", "url": "/api/files/<file_id>", "size": 12345, "mime": "image/png" }
+```
+
+Common errors: `411 length_required` (no `Content-Length`) · `413 payload_too_large` (over 12 MiB, includes `limit_bytes`) · `415 unsupported_media_type` (not `multipart/form-data`) · `400 missing_file` (no `file` field) · `429 rate_limited`.
+
+### GET /api/files/:file_id
+
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
+
+Downloads a file returned by `POST /api/upload`. Always forces `Content-Disposition: attachment` + `X-Content-Type-Options: nosniff` (the browser won't inline-render it — XSS defense).
+
+```bash
+curl -OJ http://localhost:9200/api/files/<file_id> -H "Authorization: Bearer utok_xxx"
+```
+
+Common errors: `400 bad_file_id` (malformed id) · `404 not_found` (no index entry) / `404 blob_missing` (indexed but the file is gone from disk).
 
 ---
 

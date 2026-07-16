@@ -10,7 +10,7 @@ CommHub Server 提供 REST API 供 Dashboard、CLI 和第三方系统调用。
 | 认证 | `Authorization: Bearer <token>` **（推荐）**；`?token=<token>` URL query 为 SSE / 浏览器 EventSource 保留（有 access-log 泄漏风险，详见 [安全设计](/concepts/security)） |
 | 内容类型 | `application/json` |
 | 编码 | UTF-8 |
-| Endpoint 数 | 30+（**12 类**：[公开 1](#公开端点) · [认证 5](#认证端点) · [网络 5](#网络端点) · [数据查询 10](#数据查询端点) · [任务派发 2](#任务派发端点) · [MCP 1](#mcp-端点) · [SSE 1](#sse-端点) · [Token 管理 4](#token-管理端点) · [网络成员 6](#网络成员端点) · [节点改名 3](#节点改名端点-rfc-010) · [Tmux 调试 3 (opt-in)](#tmux-调试端点-opt-in) · [Legacy 2](#legacy-端点-v0-6-时代-oss-后不再演进)） |
+| Endpoint 数 | 30+（**13 类**：[公开 1](#公开端点) · [认证 5](#认证端点) · [网络 5](#网络端点) · [数据查询 10](#数据查询端点) · [任务派发 2](#任务派发端点) · [MCP 1](#mcp-端点) · [SSE 1](#sse-端点) · [Token 管理 4](#token-管理端点) · [网络成员 6](#网络成员端点) · [文件 2](#文件端点) · [节点改名 3](#节点改名端点-rfc-010) · [Tmux 调试 3 (opt-in)](#tmux-调试端点-opt-in) · [Legacy 2](#legacy-端点-v0-6-时代-oss-后不再演进)） |
 | 全 endpoint source | [`server/src/index.ts:390-1160`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L390) |
 
 ## 公开端点
@@ -1770,6 +1770,48 @@ curl -X POST http://localhost:9200/api/networks/join \
 | 400 | `already a member of this network` | 调用者已是该网络成员 |
 
 `anet network join` CLI 拿到该响应后会自动切换到加入的 network（即 `~/.anet/config.json` 的 `network_id` 字段更新为 `res.network_id`），并打印 `Joined network as <role>`。同时 server 自动颁发一个 `network_id` 绑定的 token 给加入者（[`auth.ts:374-377`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L374) `name='auto-join' scope='full'`），写 audit `network_joined`。
+
+---
+
+## 文件端点
+
+附件（图片等）的上传 / 下载，支撑 Dashboard 发图片、commhub 附件、codex-sdk 图片输入等功能。两个端点都需 `Authorization: Bearer <token>`。
+
+### POST /api/upload
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
+
+上传一个文件，返回可下载的 `url`。
+
+- 请求：`multipart/form-data`，必须带一个 `file` 字段，且必须带 `Content-Length` 头。
+- 大小上限 **12 MiB**（`MAX_UPLOAD_BYTES`），两段校验：先按 `Content-Length` fail-fast，再按解析后的实际大小复核。
+- 限流：**60 次/小时**（按 token id 计，无 token 时按 IP），超限返回 `429 rate_limited`（带 `X-RateLimit-*` 头）。
+
+```bash
+curl -X POST http://localhost:9200/api/upload \
+  -H "Authorization: Bearer utok_xxx" \
+  -F "file=@./cover.png"
+```
+
+成功 `200`：
+
+```json
+{ "ok": true, "file_id": "...", "url": "/api/files/<file_id>", "size": 12345, "mime": "image/png" }
+```
+
+常见错误：`411 length_required`（缺 `Content-Length`）· `413 payload_too_large`（超 12 MiB，带 `limit_bytes`）· `415 unsupported_media_type`（不是 `multipart/form-data`）· `400 missing_file`（没 `file` 字段）· `429 rate_limited`。
+
+### GET /api/files/:file_id
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
+
+下载 `POST /api/upload` 返回的文件。始终强制 `Content-Disposition: attachment` + `X-Content-Type-Options: nosniff`（浏览器不 inline 渲染，防 XSS）。
+
+```bash
+curl -OJ http://localhost:9200/api/files/<file_id> -H "Authorization: Bearer utok_xxx"
+```
+
+常见错误：`400 bad_file_id`（id 格式非法）· `404 not_found`（无此文件索引）/ `404 blob_missing`（有索引但磁盘上文件不在）。
 
 ---
 
