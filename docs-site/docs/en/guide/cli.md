@@ -196,7 +196,7 @@ What it does:
 ```
 anet hub start
 Starting CommHub Server on port 9200 (bind 127.0.0.1)...
-✅ Server running on http://127.0.0.1:9200 (commhub-server v0.8.4)
+✅ Server running on http://127.0.0.1:9200 (commhub-server v0.8.8)
 🔒 secured
 ✅ Admin account created
    username: admin
@@ -275,7 +275,7 @@ Sample output:
 ```
 [anet] hub: ✅ running on http://127.0.0.1:9200
 [anet]   pid(s):         123456
-[anet]   server version: 0.8.4-preview.0
+[anet]   server version: 0.8.8
 ```
 
 If nothing is listening on the port the command prints `Hub not running on port <port>` and a hint to run `anet hub start`.

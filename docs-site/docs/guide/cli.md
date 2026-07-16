@@ -196,7 +196,7 @@ anet hub start [options]
 ```
 anet hub start
 Starting CommHub Server on port 9200 (bind 127.0.0.1)...
-✅ Server running on http://127.0.0.1:9200 (commhub-server v0.8.4)
+✅ Server running on http://127.0.0.1:9200 (commhub-server v0.8.8)
 🔒 secured
 ✅ Admin account created
    username: admin
@@ -281,7 +281,7 @@ anet hub status --port 8080  # 自定义端口
 ```
 [anet] hub: ✅ running on http://127.0.0.1:9200
 [anet]   pid(s):         123456
-[anet]   server version: 0.8.4-preview.0
+[anet]   server version: 0.8.8
 ```
 
 未在监听该端口时显示 `Hub not running on port <port>` + 提示 `anet hub start`。
