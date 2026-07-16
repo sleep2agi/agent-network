@@ -321,7 +321,11 @@ Agent Node is the working unit in the network, responsible for receiving tasks, 
 
 **Runs on**: Client machines (can be multiple). Connects to CommHub Server over the network.
 
-### Five Runtimes
+### Runtimes
+
+::: tip 4 on stable / 6 on preview
+The diagram and table below list all runtimes; rows tagged *(preview)* are preview-only and not selectable via `anet node create` on stable (channel availability: [runtimes canonical table](/en/guide/runtimes#runtimes-—-canonical-table)).
+:::
 
 ```mermaid
 graph LR
@@ -335,6 +339,7 @@ graph LR
         R2[codex-sdk<br/>OpenAI Codex]
         R3[grok-build-acp<br/>xAI Grok Build ACP]
         R4[opencode-cli<br/>Public sst/opencode]
+        R5[codex-app-server<br/>OpenAI Codex TUI bridge]
     end
 
     CORE --> R0
@@ -342,6 +347,7 @@ graph LR
     CORE --> R2
     CORE --> R3
     CORE --> R4
+    CORE --> R5
 ```
 
 | Runtime | AI Engine | Use Case | Models |
@@ -351,6 +357,7 @@ graph LR
 | `codex-sdk` | OpenAI Codex SDK (v0.10.0+ can opt-in to a direct stdio path — see below) | Code generation, tool use | OpenAI Codex |
 | `grok-build-acp` | spawn local `grok` ACP server | xAI Grok Build ACP-protocol cross-agent collaboration | xAI Grok (grok-build series) ([details on GitHub ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)) |
 | `opencode-cli` *(preview)* | spawn local `opencode` CLI (public sst/opencode) | Use opencode as a multi-vendor front-end (unified session/auth abstraction, [RFC-029](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md)) | Multi-vendor: Anthropic native / OpenAI preset |
+| `codex-app-server` *(preview)* | start / adopt a codex app-server bridge ([RFC-030](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)) | Human-agent co-presence: a human and the agent share one codex session | OpenAI Codex (gpt-5.5 etc) |
 
 ::: tip v0.10.0 new — `codex-direct-stdio` opt-in path ([#141](https://github.com/sleep2agi/agent-network/issues/141))
 Set `ANET_CODEX_STDIO_DIRECT=1` to make agent-node switch the codex runtime from the `@openai/codex-sdk` wrapper to **`spawn('codex', ['app-server'])` + a ~155 LOC direct stdio JSON-RPC client**, getting the full 67-method v2 protocol surface (thread / turn / item / realtime) and **bypassing** the wrapper's `--mcp-config` HTTP-transport bug family ([#102](https://github.com/sleep2agi/agent-network/issues/102) hang root cause). **v0.10.x (including the current stable) still defaults to the wrapper**; v0.11.0 plans to flip the default and rename the toggle to `ANET_CODEX_LEGACY_SDK=1` opt-out. The LLM-side tool surface is **unchanged** (the codex thread still uses only its baked-in tools; the commhub roundtrip is still handled by the agent-node parent process) — what changes is purely the **transport protocol** between agent-node and the codex process. Details: [runtimes — codex-sdk § codex-direct-stdio](/en/guide/runtimes#codex-sdk) + [agent-node — env vars § ANET_CODEX_STDIO_DIRECT](/en/guide/agent-node#environment-variables) + [v0.10.0 GitHub release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.0).
@@ -358,7 +365,7 @@ Set `ANET_CODEX_STDIO_DIRECT=1` to make agent-node switch the codex runtime from
 
 ### MCP integration paths (per runtime, v0.9.0+)
 
-The five runtimes expose commhub tools to the LLM via **different** paths — this affects the tool names the LLM sees and how you debug routing problems (the diagram below covers the first 4 MCP-injected/proxy paths; `opencode-cli` shares `codex-sdk`'s **parent-mediated** model — see the note after the diagram):
+The runtimes expose commhub tools to the LLM via **different** paths — this affects the tool names the LLM sees and how you debug routing problems (the diagram below covers 4 MCP-injected/proxy paths; `opencode-cli` shares `codex-sdk`'s **parent-mediated** model, and `codex-app-server` (preview) uses the codex app-server's **HTTP MCP injection** — both explained after the diagram):
 
 ```mermaid
 flowchart LR
@@ -399,6 +406,8 @@ flowchart LR
 **`codex-sdk` does not expose commhub tools to the LLM**: `codexOpts` does not pass `mcpServers` ([`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)). The codex thread only sees its baked-in tools (Read / Write / Edit / Bash / Glob / Grep / WebSearch). **Multi-agent dispatch happens outside the LLM in agent-node's parent process**: agent-node maintains the SSE connection plus `report_status` / `get_inbox` / `send_reply` calls back to CommHub, feeds the task text into the codex thread, and posts the codex reply back via CommHub. The codex thread itself **does not know** commhub exists — it is just an LLM worker.
 
 **`opencode-cli` is parent-mediated too — it does not expose commhub tools to the LLM**: the `opencode.json` anet writes for opencode only pins the vendor provider baseUrl ([`agent-network/src/opencode-preset.ts` `writeOpencodeConfigJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/src/opencode-preset.ts)); it does **not** mount a commhub MCP server (the opencode runtime passes `mcpServers: []`). `processWithOpencode` just feeds the task as a prompt to the opencode session (`opencodeThink({ prompt })`) and reads back `replyText`; the SSE / inbox / reply commhub roundtrip is entirely handled by the agent-node parent process — like the codex thread, the opencode process is a pure LLM worker that does not know commhub exists.
+
+**`codex-app-server` (preview) uses the codex app-server's HTTP MCP injection** ([RFC-030](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)): **unlike** `codex-sdk`'s parent-mediated model — when agent-node starts / adopts the codex app-server and commhub is configured, it passes `-c mcp_servers.commhub.url="<hub>/mcp"` + `-c mcp_servers.commhub.bearer_token_env_var="ANET_CODEX_COMMHUB_TOKEN"` (Bearer injected via the spawn env), mounting commhub as a streamable-HTTP MCP server so **the LLM in the codex session calls commhub tools directly** (same family as `grok-build-acp`'s HTTP injection). Verify [`agent-node/src/runtime/codex-app-server/runtime.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/runtime/codex-app-server/runtime.ts) `buildOwnedAppServerArgs` (injected only when `wireCommhub = commhubMcpUrl && commhubToken`).
 
 **`grok-build-acp` uses explicit per-session `mcpServers` injection + HTTP transport** (v0.10.11 preview [#204](https://github.com/sleep2agi/agent-network/issues/204)):
 

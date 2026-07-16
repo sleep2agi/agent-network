@@ -321,7 +321,11 @@ Agent Node 是网络中的工作单元，负责接收任务、调用 AI 模型�
 
 **部署位置**：客户端机器（可多台），通过网络连接 CommHub Server。
 
-### 五种 Runtime
+### Runtime 一览
+
+::: tip 正式版 4 种 / 预览版 6 种
+下图与表含全部 runtime；标 *(preview)* 的仅预览版可用，正式版 `anet node create` 选不到（渠道可用性见 [runtimes canonical 表](/guide/runtimes#runtime-对比-canonical-表)）。
+:::
 
 ```mermaid
 graph LR
@@ -335,6 +339,7 @@ graph LR
         R2[codex-sdk<br/>OpenAI Codex]
         R3[grok-build-acp<br/>xAI Grok Build ACP]
         R4[opencode-cli<br/>公版 sst/opencode]
+        R5[codex-app-server<br/>OpenAI Codex TUI 桥]
     end
 
     CORE --> R0
@@ -342,6 +347,7 @@ graph LR
     CORE --> R2
     CORE --> R3
     CORE --> R4
+    CORE --> R5
 ```
 
 | Runtime | AI 引擎 | 适用场景 | 模型 |
@@ -351,6 +357,7 @@ graph LR
 | `codex-sdk` | OpenAI Codex SDK（v0.10.0 起可 opt-in 直 stdio 路径，见下） | 代码生成、工具调用 | OpenAI Codex |
 | `grok-build-acp` | spawn 本机 `grok` ACP server | xAI Grok Build ACP 协议跨 agent 协作 | xAI Grok (grok-build 系列)（[详见 GitHub ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)） |
 | `opencode-cli` *(preview)* | spawn 本机 `opencode` 命令（公版 sst/opencode CLI） | 用 opencode 当多 vendor 前端（统一 session/auth 抽象，[RFC-029](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md)） | 多 vendor：Anthropic 原生 / OpenAI preset |
+| `codex-app-server` *(preview)* | 起/adopt codex app-server 桥（[RFC-030](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)） | 人机共存：人和 agent 共用同一个 codex 会话 | OpenAI Codex（gpt-5.5 等） |
 
 ::: tip v0.10.0 新增 — `codex-direct-stdio` opt-in 路径（[#141](https://github.com/sleep2agi/agent-network/issues/141)）
 设 `ANET_CODEX_STDIO_DIRECT=1`，agent-node 把 codex runtime 从 `@openai/codex-sdk` wrapper 切到 **`spawn('codex', ['app-server'])` + ~155 LOC 直 stdio JSON-RPC 客户端**，拿到完整 67-method v2 protocol surface（thread / turn / item / realtime），**绕开** wrapper `--mcp-config` HTTP transport bug 链（[#102](https://github.com/sleep2agi/agent-network/issues/102) hang root cause family）。**v0.10.x（含当前 stable）默认仍走 wrapper**；v0.11.0 计划 default flip + toggle 改成 `ANET_CODEX_LEGACY_SDK=1` opt-out 反向开关。LLM 侧看到的工具集**不变**（codex thread 仍只用 baked-in 工具，commhub roundtrip 仍由 agent-node 父进程承担），变的只是 agent-node ↔ codex 进程间的**传输协议**。详见 [runtimes — codex-sdk § codex-direct-stdio](/guide/runtimes#codex-sdk) + [agent-node — 环境变量 § ANET_CODEX_STDIO_DIRECT](/guide/agent-node#环境变量) + [v0.10.0 GitHub release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.0)。
@@ -358,7 +365,7 @@ graph LR
 
 ### MCP 接入路径（不同 runtime 不同走法，v0.9.0+）
 
-5 个 runtime 给 LLM 暴露 commhub 工具的方式**不同**，对 LLM 看到的工具名 / 排错路径都有影响（下图画了前 4 个 MCP-injected/proxy 的走法；`opencode-cli` 与 `codex-sdk` 同属**父进程中介**模型，见图后说明）：
+各 runtime 给 LLM 暴露 commhub 工具的方式**不同**，对 LLM 看到的工具名 / 排错路径都有影响（下图画了 4 个 MCP-injected/proxy 的走法；`opencode-cli` 与 `codex-sdk` 同属**父进程中介**模型、`codex-app-server`(preview) 走 codex app-server 的 **HTTP MCP 注入**，都在图后说明）：
 
 ```mermaid
 flowchart LR
@@ -399,6 +406,8 @@ flowchart LR
 **`codex-sdk` 不直接给 LLM 暴露 commhub 工具**：`codexOpts` 不传 `mcpServers`（[`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)），codex thread 只用 baked-in 工具（Read / Write / Edit / Bash / Glob / Grep / WebSearch）。**多 Agent 派活通过 agent-node 父进程**外部完成：agent-node 维持 SSE + `report_status` / `get_inbox` / `send_reply` 跟 commhub roundtrip，把任务文本喂给 codex thread，再把 codex 回复经 commhub 回上游。codex thread 本身**不知道** commhub 存在 —— 它只是个 LLM 工作器。
 
 **`opencode-cli` 同款父进程中介，不给 LLM 暴露 commhub 工具**：anet 写给 opencode 的 `opencode.json` 只 pin vendor provider baseUrl（[`agent-network/src/opencode-preset.ts` `writeOpencodeConfigJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/src/opencode-preset.ts)），**不挂 commhub MCP server**（opencode runtime 侧 `mcpServers: []`）。`processWithOpencode` 只把任务当 prompt 喂给 opencode session（`opencodeThink({ prompt })`），拿 `replyText` 回来；SSE / inbox / reply 的 commhub roundtrip 全由 agent-node 父进程承担 —— opencode 进程和 codex thread 一样是个纯 LLM 工作器，不知道 commhub 存在。
+
+**`codex-app-server`(preview) 走 codex app-server 的 HTTP MCP 注入**（[RFC-030](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)）：跟 `codex-sdk` 的父进程中介**不同** —— agent-node 起 / adopt codex app-server 时，若配了 commhub，就用 `-c mcp_servers.commhub.url="<hub>/mcp"` + `-c mcp_servers.commhub.bearer_token_env_var="ANET_CODEX_COMMHUB_TOKEN"`（Bearer 从 spawn env 注入）把 commhub 挂成 streamable-HTTP MCP server，**codex 会话里的 LLM 直接调 commhub 工具**（跟 `grok-build-acp` 的 HTTP 注入同族）。verify [`agent-node/src/runtime/codex-app-server/runtime.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/runtime/codex-app-server/runtime.ts) `buildOwnedAppServerArgs`（`wireCommhub = commhubMcpUrl && commhubToken` 时才注入）。
 
 **`grok-build-acp` 走 per-session mcpServers 显式注入 + HTTP transport**（v0.10.11 preview [#204](https://github.com/sleep2agi/agent-network/issues/204)）：
 
