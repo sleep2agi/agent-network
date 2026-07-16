@@ -12,6 +12,7 @@
 | `anet login`（全新机器） | ⚠️ | ⚠️ | 必须带 `--hub`（裸 login 报 No hub configured）；文档已全改带 --hub，hub start 提示语也已修（preview） |
 | `anet doctor` / `whoami` / `--help` | ✅ | ✅ | 真机验：无配置时优雅报错并给下一步指引 |
 | `anet upgrade` | ✅ | ✅ | 真机验 dry-run/--no-auto-self/channel 判定；默认自动装+自升（#154） |
+| `anet status` / `tasks` / `network ls`（登录后查询三件套） | ✅ | ✅ | 真机验（2026-07-16，隔离 hub）：三条对新 hub 均正确渲染（0 agents/无任务/默认网络⭐） |
 | `anet hub start`（自建 hub 全流程） | ✅ | ✅ | 真机从零走通（2026-07-16）：hub start(指定端口) → health 200 → 默认 admin/anethub 登录（带 --hub）→ node create → node ls 全链 PASS；坑：latest banner 的登录提示缺 --hub（preview 已修，照文档走没问题） |
 
 ## 建节点 & 跑任务（按 runtime）
