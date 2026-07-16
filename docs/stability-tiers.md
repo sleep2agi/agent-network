@@ -1,64 +1,56 @@
-# Stability tiers — what is rock-solid vs. still moving
+# 稳定性分层 —— 哪些是铁打的、哪些还在动
 
-> Living doc. Last updated: 2026-07-16. Purpose: when iterating, know what you must
-> NOT break (Tier 0/1), what to touch carefully (Tier 2), and where fast iteration is
-> fine (Tier 3). Companion to the [release plan](./release-plan.md).
+> Living doc。最后更新：2026-07-16。用途：迭代时知道**什么绝不能弄坏**（Tier 0/1）、什么要小心动（Tier 2）、哪里可以放开快跑（Tier 3）。配套阅读：[版本规划](./release-plan.md)。
 
-## Tier 0 — Protected core. Do not change without explicit owner sign-off
+## Tier 0 —— 保护核心。没有 owner 明确点头不许动
 
-Verified daily by the whole fleet in production; everything else depends on these.
+整个 fleet 每天在生产上验证；其它一切都建立在这上面。
 
-| capability | evidence |
+| 能力 | 依据 |
 |---|---|
-| Hub task lifecycle: `send_task` → deliver → `send_reply`(terminal) → `new_reply` SSE | the entire agent fleet coordinates through it daily; [reply semantics](./agent-reply-to-dashboard.md) |
-| SSE session registry + `report_status` (who's online) | dashboard + fleet rely on it continuously |
-| SQLite storage (WAL) + salted-scrypt auth + login rate-limiting | security-audited against source; docs verified |
-| Dual token model (`utok_` user / `ntok_` node) | every node handshake uses it |
-| `claude-code-cli` runtime | Tier-1 reliability; all long-running production nodes use it |
-| anet CLI basics: `login` / `node create/start/stop/ls` / `hub start` / `doctor` / `--version` | real-machine verified on published latest 2.2.21 (Linux) |
-| Release policy: preview-first, `latest` never touched by preview publishes | enforced process |
-| Frozen baseline `703374e` (gateway protocol) | frozen by decree — do not touch |
+| Hub 任务生命周期：`send_task` → 投递 → `send_reply`（终态）→ `new_reply` SSE | 全体 agent 每天靠它协作；[回复语义](./agent-reply-to-dashboard.md) |
+| SSE 会话注册 + `report_status`（谁在线） | dashboard + fleet 持续依赖 |
+| SQLite 存储（WAL）+ salted-scrypt 认证 + 登录限流 | 对源码安全审计过；文档已核 |
+| 双 token 模型（`utok_` 用户 / `ntok_` 节点） | 每个节点握手都在用 |
+| `claude-code-cli` runtime | Tier-1 可靠性；所有长跑生产节点在用 |
+| anet CLI 基础：`login` / `node create/start/stop/ls` / `hub start` / `doctor` / `--version` | 已发布 latest 2.2.21 真机验证（Linux） |
+| 发版政策：preview-first，发 preview 绝不碰 `latest` | 流程强制 |
+| 冻结基线 `703374e`（gateway 协议） | 明令冻结——不许碰 |
 
-**Rule: any PR touching Tier 0 needs a real-machine smoke (not just unit/mocks) before merge, and preview soak before promote.**
+**规则：动 Tier 0 的 PR，merge 前必须真机 smoke（不能只有单测/mock），promote 前必须 preview 泡够。**
 
-## Tier 1 — Reliable, but with known sharp edges
+## Tier 1 —— 靠谱，但有已知棱角
 
-Works in production; edges are documented. Change with tests + the edge in mind.
+生产在用；棱角有记录。改的时候带着测试、想着棱角。
 
-| capability | sharp edge |
+| 能力 | 棱角 |
 |---|---|
-| `claude-agent-sdk` runtime + vendor adapters | vendor-dependent behavior; adapter bias only fires on known base-URLs |
-| `codex-sdk` runtime | works; real OAuth flow not covered by CI |
-| `grok-build-acp` runtime | formally integrated; not on E2E |
-| `anet upgrade` | auto-installs + auto-self-upgrades by default (since #154) — docs were stale on this until recently |
-| Telegram channel | per-node state dir required; allowlist can be swept by git clean |
-| Feishu channel | config/ARG drift history; restart requires exact-PID discipline |
-| Dashboard chat (send + new_reply display) | reply must use terminal status; see Tier 0 row |
+| `claude-agent-sdk` runtime + vendor adapters | 行为依赖厂商；adapter bias 只对已知 base-URL 生效 |
+| `codex-sdk` runtime | 能用；真实 OAuth 流程没上 CI |
+| `grok-build-acp` runtime | 正式接入；没上 E2E |
+| `anet upgrade` | #154 起默认自动装包 + 自动自升——文档一度写反，最近才修 |
+| Telegram channel | 需要 per-node state 目录；allowlist 可能被 git clean 卷走 |
+| Feishu channel | 有配置/ARG drift 历史；重启必须精确 PID |
+| Dashboard 聊天（发送 + new_reply 显示） | 回复必须终态 status；见 Tier 0 那行 |
 
-## Tier 2 — Preview / actively moving. Iterate freely, gate before promote
+## Tier 2 —— preview / 活跃变动区。放开迭代，发布前过门禁
 
-Expect breakage; that is what the preview channel is for.
+会坏，这正是 preview 通道存在的意义。
 
-- **codex-app-server** (RFC-030, Phase 0A): a Windows/dispatch bug cluster was just fixed
-  (#446/#447); co-presence verified on real Windows once — not yet soaked
-- **opencode-cli** (RFC-029): preview-only, pinned `opencode-ai` version
-- **grok-build-cli co-presence**: preview
-- **Windows support overall**: fixes exist in preview only; `latest` 2.2.21 still crashes
-  cross-drive until 2.2.22 ships
-- Dashboard panels beyond chat basics (org views, config editing, M2+ interaction work)
+- **codex-app-server**（RFC-030，Phase 0A）：刚修完一簇 Windows/派发 bug（#446/#447）；共存在真 Windows 验证过一轮——还没泡
+- **opencode-cli**（RFC-029）：仅 preview，`opencode-ai` 精确 pin
+- **grok-build-cli 共存**：preview
+- **Windows 支持整体**：修复只在 preview；`latest` 2.2.21 跨盘仍崩，等 2.2.22
+- Dashboard 聊天基础之外的面板（org 视图、配置编辑、M2+ 交互）
 
-## Tier 3 — Known broken right now (fix, don't build on)
+## Tier 3 —— 当前已知坏的（先修，别在上面盖楼）
 
-- anet.sh docs deploy frozen since Jul 2 (Vercel git integration; needs dashboard action)
-- Prod dashboard transport (HTTP/2 / SSE proxy) — causes chat-history timeouts and delayed
-  reply display; hub itself answers in milliseconds
-- `latest` on Windows when cwd drive ≠ install drive (#446; fixed in preview)
+- anet.sh 文档站部署冻结在 7/2（Vercel git 集成；要后台操作）
+- 生产 dashboard 传输（HTTP/2 / SSE 代理）——聊天历史超时、回复显示延迟的根因；hub 本身毫秒级响应
+- `latest` 在 Windows 上 cwd 盘 ≠ 安装盘时崩（#446；preview 已修）
 
-## Why things felt chaotic — and the countermeasures already in place
+## 为什么最近感觉混沌 —— 以及已经上的对策
 
-1. **Parallel preview publishing** by two owners clobbered `@preview` → now single-point
-   publish from a canonical main base.
-2. **Linux-only E2E** missed Windows Unix-isms (`/bin/sh`, `which`, spawn without shell,
-   `startsWith("/")`) → real-machine verification is now part of the gate.
-3. **Silent semantics** (reply status, lazy runtime fetch) surprised even maintainers →
-   being documented as discovered (this doc, reply doc, release plan).
+1. **两个 owner 并行发 preview** 互相覆盖 `@preview` → 现在从 canonical main 基线**单点发布**。
+2. **只有 Linux E2E**，测不出 Windows 的 Unix-ism（`/bin/sh`、`which`、spawn 无 shell、`startsWith("/")`）→ **真机验证进门禁**。
+3. **潜规则语义**（回复 status、runtime 懒加载）连维护者都会踩 → **边发现边成文**（本文档、回复文档、版本规划）。

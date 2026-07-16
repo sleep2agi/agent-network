@@ -1,42 +1,35 @@
-# How agents reply so it shows in the Dashboard chat
+# Agent 怎么回复才能显示在 Dashboard 聊天窗口
 
-When you send a message to a node from the Dashboard, the node's reply only appears
-in the Dashboard chat window if it triggers a `new_reply` SSE event. **Whether it
-does is status-dependent** — this trips up interactive/coordinator sessions.
+你从 Dashboard 给节点发消息后，节点的回复**只有触发 `new_reply` SSE 事件**才会出现在
+Dashboard 聊天窗口。**会不会触发取决于 status**——交互式/协调型 session 最容易在这栽跟头。
 
-## The rule
+## 规则
 
-Reply with **`commhub_reply(task_id, text, status="completed")`** — a *terminal* status.
+用 **`commhub_reply(task_id, text, status="completed")`** 回——status 必须是**终态**。
 
-| status | internal call | `new_reply` SSE | shows in Dashboard chat |
+| status | 内部走的调用 | `new_reply` SSE | Dashboard 聊天显示 |
 |---|---|---|---|
-| `completed` / `failed` / `cancelled` (terminal) | `send_reply` | ✅ emitted | ✅ yes (real-time) |
-| `in_progress` / `blocked` / `error` (non-terminal) | `report_status` | ❌ not emitted | ❌ no |
+| `completed` / `failed` / `cancelled`（终态） | `send_reply` | ✅ 发 | ✅ 实时显示 |
+| `in_progress` / `blocked` / `error`（非终态） | `report_status` | ❌ 不发 | ❌ 不显示 |
 
-So a progress update sent as `status="in_progress"` will **silently not appear** in
-the Dashboard chat — it only updates the session status row.
+也就是说：用 `status="in_progress"` 发进度，**Dashboard 聊天里静默看不见**——它只更新会话状态行，即使调用返回 ok。
 
-## Per-runtime
+## 按 runtime 分
 
-- **claude-code-cli / claude-agent-sdk / codex-sdk / grok-build-acp / opencode-cli**:
-  agent-node auto-replies with a terminal status (`send_reply`) when the task finishes,
-  so replies surface in the Dashboard automatically.
-- **codex-app-server** (RFC-030): replies via `send_task` (immediate SSE wake), which
-  also surfaces.
-- **Interactive / coordinator sessions** (a claude CLI or codex TUI session driving
-  CommHub directly): you must use `commhub_reply` with `status="completed"` to reply
-  into the Dashboard. A non-terminal status routes to `report_status` and the reply
-  never shows — even though the call returns `ok`.
+- **claude-code-cli / claude-agent-sdk / codex-sdk / grok-build-acp / opencode-cli**：
+  agent-node 在任务完成时自动用终态回（`send_reply`），Dashboard 自动能看到。
+- **codex-app-server**（RFC-030）：用 `send_task` 回（立即 SSE 唤醒），同样能显示。
+- **交互式 / 协调型 session**（claude CLI 或 codex TUI 直接驱动 CommHub）：**必须手动**用
+  `commhub_reply` + `status="completed"` 才能回进 Dashboard。用非终态会走 `report_status`，
+  回复永远不显示——哪怕调用返回 ok。
 
-## If replies still don't show
+## 用了终态还是不显示？
 
-If you use a terminal status and the reply still doesn't appear, the cause is usually
-**transport** at the prod layer (HTTP/2 to the browser, or the SSE proxy being
-buffered/stripped), not the reply itself. The hub emits `new_reply` in milliseconds;
-confirm the browser has a live SSE connection to `/api/hub/events`.
+那通常是**生产层传输**问题（浏览器侧 HTTP/2、或 SSE 代理被 buffer/掐掉），不是回复本身。
+hub 发 `new_reply` 是毫秒级的；先确认浏览器对 `/api/hub/events` 有活的 SSE 连接。
 
-## Verified against
+## 代码依据
 
-- `server/src/tools.ts` — the `send_reply` handler emits `pushEvent(alias, { type: "new_reply", in_reply_to, status }, ...)`.
-- `agent-network/src/node-server.ts` — the `commhub_reply` tool routes terminal status → `send_reply`, non-terminal → `report_status`.
-- Dashboard `TaskChatPanel` — `useSSE({ url: '/api/hub/events' })` refetches the task on `type === 'new_reply'` keyed by `in_reply_to`.
+- `server/src/tools.ts` —— `send_reply` 处理器发 `pushEvent(alias, { type: "new_reply", in_reply_to, status }, ...)`。
+- `agent-network/src/node-server.ts` —— `commhub_reply` 工具：终态 → `send_reply`，非终态 → `report_status`。
+- Dashboard `TaskChatPanel` —— `useSSE({ url: '/api/hub/events' })`，收到 `type === 'new_reply'` 按 `in_reply_to` 刷新任务。
