@@ -123,6 +123,10 @@ Scans every node under the current cwd's `.anet/nodes/` and starts / restarts / 
 
 ### Demo (multi-agent showcase)
 
+::: warning Experimental — for a quick taste only
+The `anet demo` series is an **experimental showcase** to feel multi-agent collaboration in a few minutes; **stability is not guaranteed** (some demos like `sci-team` are still scaffolds with a placeholder leader). Don't use it in production or for a formal demo; for real multi-agent orchestration, build your own per the [architecture guide](/en/guide/architecture).
+:::
+
 | Command | Description |
 |------|------|
 | `anet demo ls` | List available demos |

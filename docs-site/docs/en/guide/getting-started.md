@@ -153,7 +153,7 @@ The project direction is **Apache 2.0 open source + self-host + courses / consul
 - [Batch node management with `anet project up/restart/down`](/en/guide/batch) — start/stop every node under cwd in one command; zero-keyboard recovery after reboot
 - [LAN-shared hub](/en/deploy/clean-server#_2-start-the-hub-recommended-under-tmux) — `anet hub start --host 0.0.0.0` lets other machines join
 
-**Demos**:
+**Demos** (experimental, for a quick taste):
 ```bash
 anet demo                  # list available demos
 anet demo pr-review        # 3-role PR review squad

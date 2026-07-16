@@ -153,7 +153,7 @@ anet node start my-bot
 - [批量节点管理 `anet project up/restart/down`](/guide/batch) — cwd 下所有节点一键起停, reboot 后零键盘恢复
 - [局域网共用 Hub](/deploy/clean-server#_2-起-hub-推荐-tmux-挂着) — `anet hub start --host 0.0.0.0` 让其他机器加入
 
-**实战 demo**:
+**实战 demo（实验性，仅供体验）**:
 ```bash
 anet demo                  # 列出可用 demo
 anet demo pr-review        # 3 角色 PR 评审小组

@@ -123,6 +123,10 @@ npm install -g @sleep2agi/agent-network
 
 ### Demo（多 Agent 演示）
 
+::: warning 实验性 — 仅供快速体验
+`anet demo` 系列是**实验性演示**，用来几分钟感受多 Agent 协作，**稳定性不作保证**（部分 demo 如 `sci-team` 仍是 scaffold、leader 为 placeholder）。别用于生产或正式演示场合；正经多 Agent 编排请按 [架构](/guide/architecture) 自己搭。
+:::
+
 | 命令 | 说明 |
 |------|------|
 | `anet demo ls` | 列出可用 demo |
