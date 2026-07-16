@@ -486,6 +486,7 @@ Query task list with multi-dimensional filtering.
 | `alias` | string | | Filter by recipient |
 | `status` | string | | Filter by status |
 | `from_name` | string | | Filter by sender |
+| `from_node_id` | string | | Filter by sender `node_id` (immutable ID, more precise than `from_name`) |
 | `network_id` | string | | Filter by network |
 | `limit` | number | | Max items (default 20, max 100) |
 

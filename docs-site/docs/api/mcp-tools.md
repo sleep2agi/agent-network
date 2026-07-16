@@ -486,6 +486,7 @@ send_task({
 | `alias` | string | | 按接收者过滤 |
 | `status` | string | | 按状态过滤 |
 | `from_name` | string | | 按发送者过滤 |
+| `from_node_id` | string | | 按发送者 `node_id` 过滤（不可变 ID，比 `from_name` 更精确） |
 | `network_id` | string | | 按网络过滤 |
 | `limit` | number | | 最大条数（默认 20，最大 100） |
 
