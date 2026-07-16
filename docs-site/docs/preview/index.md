@@ -13,6 +13,20 @@
 下方具体 `preview.N` 版本号是 **2026-06-28 快照**，preview channel 一直在迭代（现已远超 preview.1）。**装 / 升当前 preview 一律用 `@preview` tag**（下方安装命令已用），不要照抄具体版本号。
 :::
 
+## 当前 preview = canonical（2.3.0-preview.34 / 2.5.0-preview.26，2026-07-16）
+
+@preview 现在指向 **canonical 合并版**（7/7 Linux 门禁 + 真 Windows 复验后从验证过的 tgz 发布）：
+
+- **Windows 全面修复**：跨盘 `anet --version` 崩溃（#446）、runtime 派发/检测/spawn 的 Unix 假设簇（#447）
+- **codex-app-server**（RFC-030）：`--codex-app-server-url` / `--codex-thread-id` 建节点 flag（带 runtime guard）
+- **OpenCode**（RFC-029）：vetted `opencode-ai@1.18.1` 精确 pin + 全套 release gates
+- picker 为 **7-way**（claude-agent-sdk / claude-code-cli / codex-sdk / codex-app-server / grok-build-acp / grok-build-cli / opencode-cli）
+- MCP 上下文自带回复语义说明（终态才推 Dashboard）
+
+安装：`npm i -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview`
+
+---
+
 ## 三包版本（preview2，2026-06-28 快照）
 
 | 包 | preview1 | **preview2** |

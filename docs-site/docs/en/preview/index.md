@@ -13,6 +13,20 @@ The current preview channel = **v0.11-preview2** (npm `@preview` tag). This rele
 The specific `preview.N` numbers below are a **2026-06-28 snapshot**; the preview channel keeps iterating (it's now well past preview.1). **Always install / upgrade the current preview via the `@preview` tag** (the install commands below already do), rather than copying a specific version number.
 :::
 
+## Current preview = canonical (2.3.0-preview.34 / 2.5.0-preview.26, 2026-07-16)
+
+@preview now points at the **canonical build** (published from the exact tgz that passed 7/7 Linux gates + real-Windows verification):
+
+- **Windows fixes across the board**: cross-drive `anet --version` crash (#446) and the runtime dispatch/detection/spawn Unix-ism cluster (#447)
+- **codex-app-server** (RFC-030): `--codex-app-server-url` / `--codex-thread-id` create flags (runtime-guarded)
+- **OpenCode** (RFC-029): vetted exact pin `opencode-ai@1.18.1` + full release gates
+- The picker is **7-way** (claude-agent-sdk / claude-code-cli / codex-sdk / codex-app-server / grok-build-acp / grok-build-cli / opencode-cli)
+- MCP context ships the reply-semantics note (terminal status pushes to the Dashboard)
+
+Install: `npm i -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview`
+
+---
+
 ## Three-package versions (preview2, 2026-06-28 snapshot)
 
 | Package | preview1 | **preview2** |
