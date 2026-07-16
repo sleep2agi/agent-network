@@ -13,6 +13,10 @@ In traditional AI applications, each agent is an isolated entity. When you need 
 
 Agent Network was built to solve exactly these problems.
 
+::: tip First time? Start with the simplest scenario
+You don't need to stand up a whole team on day one. **The fastest taste is giving yourself one personal AI employee**: if you have a Claude subscription, `claude-code-cli` brings an agent online in one command / 5 minutes — one that does real work and takes orders from your phone. See the [Getting Started guide](/en/guide/getting-started). Multi-agent collaboration and multi-model mixing are **advanced** capabilities — grow into them once this path runs smoothly.
+:::
+
 ## Core Concepts
 
 ### Communication Hub (CommHub)

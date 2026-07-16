@@ -13,6 +13,10 @@ Agent Network 是一套**企业级多 AI Agent 协作基础设施**，让多个 
 
 Agent Network 就是为了解决这些问题而生的。
 
+::: tip 第一次用？从最简单的场景开始
+不用一上来就搭一个团队。**最快的体验是给自己搭一个私人 AI 员工**：有 Claude 订阅的话，用 `claude-code-cli` 一条命令、5 分钟上线一个能干活、手机也能指挥的 agent —— 见 [上手指南](/guide/getting-started)。多 Agent 协作、多模型混搭是**进阶能力**，等这条跑顺了再扩。
+:::
+
 ## 核心理念
 
 ### 通信中枢（CommHub）
