@@ -1,6 +1,6 @@
 // RFC-029 PR④ — kernel-live e2e for the opencode-cli ACP shim.
 //
-// Drives the REAL opencode-ai@1.17.13 binary through the REAL
+// Drives the real release-pinned opencode-ai binary through the real
 // openOpencodeRuntime + opencodeThink (agent-node/src/runtime/
 // opencode-acp/runtime.ts, shipped in #386). No mock at the vendor
 // boundary — the child process is a real `opencode acp` speaking real
@@ -15,7 +15,7 @@
 //                   - session/prompt returns AT LEAST ONE
 //                     agent_message_chunk (the reducer accumulates it
 //                     into replyText)
-//                   - replyText is non-empty (real vendor produced
+//                   - replyText is non-empty (real upstream free model produced
 //                     text). We do NOT hard-pin the response phrasing
 //                     since free models paraphrase; length + a loose
 //                     regex (word boundary of "hello") is the smell
@@ -23,10 +23,10 @@
 //                   - stopReason lands (end_turn or similar).
 //                   - Clean exit — no orphan opencode processes.
 //
-// Model is forced to the free tier via a per-node opencode.jsonc
-// dropped into the runtime's HOME (workDir), so a) we never
-// accidentally hit a paid tier and b) the wire captures the model
-// selection path the RFC-029 shim will actually use in production.
+// Model is forced to the free tier via the persistent per-node
+// `.config/opencode/opencode.json`. Safe runtime startup re-renders its
+// allowlisted model into a fresh global-config root, so this exercises the
+// same selection path shipped in production without loading arbitrary config.
 
 import { openOpencodeRuntime, opencodeThink } from "/agent-node-src/src/runtime/opencode-acp/runtime";
 import { execFileSync, execSync } from "node:child_process";
@@ -51,14 +51,16 @@ function pgrepOpencode(): number[] {
 
 function makeWorkDir(): string {
   const dir = join(tmpdir(), `pr4-live-${Date.now().toString(36)}`);
-  mkdirSync(dir, { recursive: true });
-  // Force the free model + build mode. opencode reads the config
-  // rooted at $HOME (which the runtime sets to workDir per §8 D5).
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  // Force the free model; safe startup copies only this allowlisted selector
+  // from the persistent node config into its fresh XDG config root.
   const cfgDir = join(dir, ".config", "opencode");
-  mkdirSync(cfgDir, { recursive: true });
+  mkdirSync(join(dir, ".config"), { mode: 0o700 });
+  mkdirSync(cfgDir, { mode: 0o700 });
   writeFileSync(
-    join(cfgDir, "opencode.jsonc"),
+    join(cfgDir, "opencode.json"),
     JSON.stringify({ model: FREE_MODEL }, null, 2),
+    { mode: 0o600 },
   );
   return dir;
 }
@@ -76,6 +78,8 @@ async function runHappyLive() {
   const runtime = await openOpencodeRuntime({
     cwd: projectCwd,
     workDir,
+    expectedVersion: process.env.OPENCODE_VERSION_UNDER_TEST || "1.18.1",
+    binarySearchPath: process.env.PATH || "",
     log: (m) => { logs.push(m); process.stderr.write(`[runtime.log] ${m}\n`); },
     warn: (m) => { warns.push(m); process.stderr.write(`[runtime.warn] ${m}\n`); },
   });

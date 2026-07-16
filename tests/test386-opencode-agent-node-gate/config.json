@@ -1,0 +1,11 @@
+{
+  "anet_version": "test386",
+  "node_id": "n_test386",
+  "node_name": "gate",
+  "alias": "gate",
+  "runtime": "opencode-cli",
+  "network_id": "net_test386",
+  "hub": "http://127.0.0.1:9",
+  "token": "ntok_test386_not_a_real_credential",
+  "model": "opencode/deepseek-v4-flash-free"
+}

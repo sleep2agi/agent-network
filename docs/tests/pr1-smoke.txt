@@ -1,0 +1,82 @@
+# RFC-029 PR① smoke gate
+
+date: 2026-07-16T02:57:19+00:00
+bun: 1.3.1
+node: v18.20.4
+
+## S1 — normalize-runtime unit tests
+
+```
+(pass) normalizeRuntime — profile object paths > legacy profile normalization keeps unknown → default for display/migration
+
+ 30 pass
+ 0 fail
+ 38 expect() calls
+Ran 30 tests across 1 file. [57.00ms]
+```
+
+## S2 — wizard picker source has opencode-cli
+
+  grep hits: 1 (expect >=1)
+  ✓ wizard choice registered
+
+## S3 — start with opencode NOT installed → hard-fail with clear pin hint
+
+```
+  (opencode not on PATH — good)
+---
+[anet] Starting new session for "testnode" [opencode-cli]...
+
+[anet] opencode-cli requires the exact paired global @sleep2agi/agent-node@2.5.0-preview.26; automatic npx execution is disabled.
+[anet] Install exact pair: npm install -g @sleep2agi/agent-network@2.3.0-preview.34 @sleep2agi/agent-node@2.5.0-preview.26
+[anet] Incompatible opencode-ai runtime.
+[anet] Expected trusted opencode-ai@1.18.1; opencode package identity/version check failed: no trusted exact opencode-ai package entrypoint found on PATH
+  → Install/reinstall exact: npm install -g opencode-ai@1.18.1
+---
+exit=1
+```
+
+  ✓ hard-fail with pin hint (exit=1, mentions opencode-ai@1.18.1)
+
+## S4 — install opencode-ai@1.18.1, verify pin passes + processTask stub
+
+```
+  installed opencode-ai@1.18.1
+  opencode --version: 1.18.1
+```
+
+```
+[agent-node] Config: /tmp/anethome-s4/.anet/nodes/testnode/config.json (source=primary)
+[02:57:47] [INFO ] [testnode] 启动
+[02:57:47] [INFO ] [testnode]   alias:   testnode [from: --alias flag]
+[02:57:47] [INFO ] [testnode]   runtime: opencode-cli
+[02:57:47] [INFO ] [testnode]   model:   opencode/deepseek-v4-flash-free 
+[02:57:47] [INFO ] [testnode]   hub:     http://127.0.0.1:9999 (auth)
+[02:57:47] [WARN ] [testnode]   token 验证失败 — 检查 token 是否有效。运行: anet login
+[02:57:47] [INFO ] [testnode]   tools:   all (Claude Code preset — built-in: WebFetch/WebSearch/Bash/Read/Write/Edit/Glob/Grep/Task/...)
+[02:57:47] [INFO ] [testnode]   channels: (none)
+[02:57:47] [INFO ] [testnode]   session: (new)
+[02:57:47] [INFO ] [testnode]   log-dir: /repo/agent-node/.anet/nodes/testnode/logs
+[02:57:47] [INFO ] [testnode]   goals:   /tmp/anethome-s4/.anet/nodes/testnode/goals.json
+[02:57:47] [INFO ] [testnode]   goals scheduler: enabled (runtime=opencode)
+error: Unable to connect. Is the computer able to access the url?
+  path: "http://127.0.0.1:9999/mcp",
+ errno: 0,
+  code: "ConnectionRefused"
+
+
+Bun v1.3.1 (Linux x64 baseline)
+```
+
+  ✓ agent-node reached the opencode-cli runtime path
+
+## S5 — unknown configured runtime fails closed
+
+```
+[anet] Refusing to start node "bogusnode": unsupported runtime "future-runtime-typo"; expected one of: claude-agent-sdk, claude-code-cli, codex-sdk, codex-app-server, grok-build-acp, opencode-cli
+exit=1
+```
+
+  ✓ unknown runtime rejected before launch
+
+OVERALL: PASS

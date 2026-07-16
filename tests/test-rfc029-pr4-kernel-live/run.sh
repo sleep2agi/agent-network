@@ -82,7 +82,7 @@ else
   check "opencode child present during turn (pgrep)"        "$pidsDuring" ge 1
   check "session id issued by session/new"                  "$session"    regex '^ses_'
   check "at least one agent_message_chunk"                  "$chunks"     ge 1
-  check "replyText non-empty (real vendor produced text)"   "$replyLen"   gt 0
+  check "replyText non-empty (real upstream free model produced text)"   "$replyLen"   gt 0
   # Loose smell test — free models paraphrase. A single letter is
   # enough to prove a real turn happened; strict phrase pinning would
   # flake on paraphrasing.

@@ -1,0 +1,4 @@
+#!/bin/sh
+: > /tmp/test386-npx-args
+printf '%s\n' 'fixture: exact preview resolver unavailable' >&2
+exit 69

@@ -1,0 +1,58 @@
+# RFC-029 PR④ — kernel-live ACP e2e report
+
+date: 2026-07-16T03:09:45+00:00
+bun: 1.3.1
+node: v18.20.4
+opencode: 1.18.1
+free model: opencode/deepseek-v4-flash-free
+
+## Full harness output
+
+```
+[runtime.log] [opencode-acp] session/new — ses_0971909d...
+===S-happy-live-BEGIN===
+{
+  "freeModel": "opencode/deepseek-v4-flash-free",
+  "wallMs": 9709,
+  "replyText": "hello world",
+  "replyTextLength": 11,
+  "thoughtTextLength": 94,
+  "sessionId": "ses_0971909d1ffe2wFCVogpWSphds",
+  "chunks": 2,
+  "thoughtChunks": 22,
+  "stopReason": "end_turn",
+  "rescued": false,
+  "usage": {
+    "inputTokens": 3659,
+    "outputTokens": 3,
+    "totalTokens": 3684,
+    "thoughtTokens": 22
+  },
+  "pidsBefore": [],
+  "pidsDuring": [
+    63
+  ],
+  "pidsAfter": [],
+  "logsFromRuntime": [
+    "[opencode-acp] session/new — ses_0971909d..."
+  ],
+  "warnsFromRuntime": []
+}
+===S-happy-live-END===
+```
+
+harness exit=0
+
+## Assertions
+
+  ✓ opencode child present during turn (pgrep) — ge '1' got '1'
+  ✓ session id issued by session/new — regex '^ses_' got 'ses_0971909d1ffe2wFCVogpWSphds'
+  ✓ at least one agent_message_chunk — ge '1' got '2'
+  ✓ replyText non-empty (real upstream free model produced text) — gt '0' got '11'
+  ✓ replyText looks like a real turn (contains a letter) — regex '[A-Za-z]' got 'hello world'
+  ✓ stopReason recorded — regex '.+' got 'end_turn'
+  ✓ no orphan opencode after runtime.client.stop — eq '0' got '0'
+  ✓ wall time under 3-minute idle ceiling — regex '^[0-9]+$' got '9709'
+
+OVERALL: PASS
+trailer: RFC-029 PR④ kernel-live — PASS

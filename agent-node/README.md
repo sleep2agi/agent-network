@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/sleep2agi/agent-network/blob/main/LICENSE)
 [![Docs](https://img.shields.io/badge/docs-anet.sh-009e7e.svg)](https://anet.sh)
 
-Agent runtime for Agent Network. Connects to a CommHub server, registers under an alias, and processes incoming tasks with Claude, Codex, Grok Build, or compatible HTTP runtimes.
+Agent runtime for Agent Network. Connects to a CommHub server, registers under an alias, and processes incoming tasks with Claude, Codex, Codex app-server, Grok Build, or OpenCode ACP runtimes.
 
 The supported entry point is the `anet` CLI from `@sleep2agi/agent-network`, which writes the right `config.json`, network token, and environment variables for you.
 
@@ -15,6 +15,14 @@ You usually don't install this package directly — `anet node create` and `anet
 
 ```bash
 npm install -g @sleep2agi/agent-node
+```
+
+For the canonical OpenCode preview, install the entire vetted pair exactly. The OpenCode path does not execute an ambient package or automatic `npx` fallback:
+
+```bash
+npm install -g @sleep2agi/agent-network@2.3.0-preview.34 \
+  @sleep2agi/agent-node@2.5.0-preview.26 \
+  opencode-ai@1.18.1
 ```
 
 ## Verified flow
@@ -44,7 +52,7 @@ CLI flags:
 |---|---|---|
 | `--alias` | required | unique name in the hub |
 | `--hub` | `http://127.0.0.1:9200` | CommHub URL |
-| `--runtime` | `claude-agent-sdk` | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` / `grok-build-acp` / `http-api` |
+| `--runtime` | `claude-agent-sdk` | `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `codex-app-server` / `grok-build-acp` / `opencode-cli` |
 | `--model` | runtime default | passed through to the SDK |
 | `--tools` | (none) | `all` or comma-separated list |
 | `--max-turns` | `50` | upper bound per task |
@@ -57,10 +65,11 @@ CLI flags:
 | `claude-agent-sdk` | [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) | verified | Anthropic-compatible API; works with MiniMax, DeepSeek, GLM, Kimi, Anthropic, OpenRouter, or custom endpoints |
 | `codex-sdk` | [@openai/codex-sdk](https://www.npmjs.com/package/@openai/codex-sdk) | unverified end-to-end | unit tests pass, no full E2E with real codex auth |
 | `claude-code-cli` | local `claude` CLI | unverified end-to-end | runs locally for Claude Pro subscribers (v0.8.2 fixed the session-resume default-loss bug; see [changelog](https://anet.sh/en/changelog)) |
+| `codex-app-server` | local `codex app-server` WebSocket | preview, Windows-verified | shares a Codex TUI thread with dispatched network tasks |
 | `grok-build-acp` | local `grok agent stdio` | stable runtime, native MCP injection boundary remains preview | requires Grok Build CLI login; stable for receive/reply, session persistence, and explicit CommHub delegation handled by agent-node |
-| `http-api` | OpenAI/Anthropic-compatible HTTP | experimental | reads `ANTHROPIC_*`, `OPENAI_*`, or `MINIMAX_CODING_API_KEY` environment variables |
+| `opencode-cli` | exact `opencode-ai@1.18.1` ACP child | canonical preview, release-gated | defaults to a launch-scoped external workspace with tools disabled; Anthropic/OpenAI presets |
 
-Runtimes are loaded lazily — picking one doesn't pull the others' dependencies. `claude-code-cli` adds zero extra SDK weight.
+The canonical preview picker exposes exactly these 6 runtimes. They are loaded lazily; picking one does not pull the others' SDK dependencies. `claude-code-cli` adds zero extra SDK weight.
 
 ## Grok Build ACP
 

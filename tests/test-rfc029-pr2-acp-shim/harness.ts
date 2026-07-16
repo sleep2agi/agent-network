@@ -19,15 +19,27 @@ import {
   openOpencodeRuntime,
   opencodeThink,
 } from "/agent-node-src/src/runtime/opencode-acp/runtime";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-const MOCK = "/harness/mock-opencode-launcher.sh";
+const MOCK = "/harness/mock-global/node_modules/opencode-ai/bin/opencode.exe";
 
-async function runScenario(label: string, mockEnv: Record<string, string>, opts: { sessionId?: string; rescueDisabled?: boolean }) {
-  const savedEnv: Record<string, string | undefined> = {};
-  for (const k of Object.keys(mockEnv)) {
-    savedEnv[k] = process.env[k];
-    process.env[k] = mockEnv[k];
-  }
+async function runScenario(
+  label: string,
+  mockMode: { thinkingOnly?: boolean; loadFails?: boolean },
+  opts: { sessionId?: string; rescueDisabled?: boolean },
+) {
+  const workDir = mkdtempSync(join(tmpdir(), "opencode-pr2-"));
+  // The production child environment intentionally has no test-only toggle.
+  // These controls belong to the mock fixture itself, outside the random
+  // external runtime cwd that the harness cannot predict in advance.
+  const thinkingControl = "/harness/.mock-thinking-only";
+  const loadControl = "/harness/.mock-load-fails";
+  rmSync(thinkingControl, { force: true });
+  rmSync(loadControl, { force: true });
+  if (mockMode.thinkingOnly) writeFileSync(thinkingControl, "1\n");
+  if (mockMode.loadFails) writeFileSync(loadControl, "1\n");
   const rescueEnv = process.env.ANET_DISABLE_383_REPROMPT;
   if (opts.rescueDisabled) process.env.ANET_DISABLE_383_REPROMPT = "1";
   else delete process.env.ANET_DISABLE_383_REPROMPT;
@@ -36,17 +48,18 @@ async function runScenario(label: string, mockEnv: Record<string, string>, opts:
   const warns: string[] = [];
   try {
     const runtime = await openOpencodeRuntime({
-      cwd: "/tmp",
-      workDir: "/tmp",
+      cwd: workDir,
+      workDir,
       sessionId: opts.sessionId,
       binary: MOCK,
+      expectedVersion: "1.18.1",
       log: (m) => logs.push(m),
       warn: (m) => warns.push(m),
     });
     const outcome = await opencodeThink(runtime, {
       prompt: "hi",
-      cwd: "/tmp",
-      workDir: "/tmp",
+      cwd: workDir,
+      workDir,
       sessionId: runtime.sessionId,
       log: (m) => logs.push(m),
       warn: (m) => warns.push(m),
@@ -67,10 +80,9 @@ async function runScenario(label: string, mockEnv: Record<string, string>, opts:
     }, null, 2));
     console.log(`===${label}-END===`);
   } finally {
-    for (const [k, v] of Object.entries(savedEnv)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
+    rmSync(thinkingControl, { force: true });
+    rmSync(loadControl, { force: true });
+    rmSync(workDir, { recursive: true, force: true });
     if (rescueEnv === undefined) delete process.env.ANET_DISABLE_383_REPROMPT;
     else process.env.ANET_DISABLE_383_REPROMPT = rescueEnv;
   }
@@ -78,8 +90,8 @@ async function runScenario(label: string, mockEnv: Record<string, string>, opts:
 
 async function main() {
   await runScenario("S-happy", {}, {});
-  await runScenario("S-thinking", { MOCK_THINKING_ONLY: "1" }, {});
-  await runScenario("S-load-fails", { MOCK_LOAD_FAILS: "1" }, { sessionId: "ses_stale_from_prior_boot" });
+  await runScenario("S-thinking", { thinkingOnly: true }, {});
+  await runScenario("S-load-fails", { loadFails: true }, { sessionId: "ses_stale_from_prior_boot" });
 }
 
 main().catch((e) => {

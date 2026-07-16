@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+: > /tmp/test386-profile-opencode-was-executed
+if [ "${1:-}" = "--version" ]; then
+  printf '%s\n' '1.17.13'
+fi
+exit 93

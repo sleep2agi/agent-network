@@ -19,13 +19,32 @@ COPY tests/test-rfc029-pr2-acp-shim/mock-opencode.mjs /harness/mock-opencode.mjs
 COPY tests/test-rfc029-pr2-acp-shim/harness.ts /harness/harness.ts
 COPY tests/test-rfc029-pr2-acp-shim/run.sh /harness/run.sh
 
-# Small launcher so the runtime's spawn(bin, ['acp']) call runs the
-# mock instead of the real opencode CLI. The launcher just ignores
-# the `acp` positional and execs the mock script.
-RUN cat > /harness/mock-opencode-launcher.sh <<'SH' && chmod +x /harness/mock-opencode-launcher.sh
+# Give the deterministic launcher the same package-owned identity as the
+# upstream executable. The runtime now rejects loose same-version shims before
+# it opens ACP, so this layout is part of the integration boundary under test.
+RUN mkdir -p /harness/mock-global/node_modules/opencode-ai/bin \
+  && cat > /harness/mock-global/node_modules/opencode-ai/bin/opencode.exe <<'SH'
 #!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.18.1"
+  exit 0
+fi
 exec node /harness/mock-opencode.mjs
 SH
+RUN cat > /harness/mock-global/node_modules/opencode-ai/package.json <<'JSON'
+{
+  "name": "opencode-ai",
+  "version": "1.18.1",
+  "bin": {
+    "opencode": "bin/opencode.exe"
+  }
+}
+JSON
+RUN mkdir -p /harness/mock-bin \
+  && chmod 0755 /harness/mock-global/node_modules/opencode-ai/bin/opencode.exe \
+  && chmod 0644 /harness/mock-global/node_modules/opencode-ai/package.json \
+  && ln -s /harness/mock-global/node_modules/opencode-ai/bin/opencode.exe \
+    /harness/mock-bin/opencode
 
 RUN cat > /harness/package.json <<'JSON'
 {

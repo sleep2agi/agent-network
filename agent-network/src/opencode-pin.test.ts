@@ -10,6 +10,8 @@ import { join } from "path";
 import { tmpdir } from "os";
 import {
   OPENCODE_BUILTIN_PIN,
+  formatOpencodePackageIdentityFailure,
+  opencodeExactInstallCommand,
   readEffectivePin,
   writePinOverride,
   opencodePinFilePath,
@@ -22,21 +24,42 @@ beforeEach(() => {
 });
 
 describe("opencode-pin — built-in fallback", () => {
+  test("release builtin pin is the revalidated opencode-ai@1.18.1", () => {
+    expect(OPENCODE_BUILTIN_PIN).toBe("1.18.1");
+  });
+
   test("returns the built-in constant when no override file exists", () => {
     const pin = readEffectivePin(fakeHome);
     expect(pin.version).toBe(OPENCODE_BUILTIN_PIN);
     expect(pin.source).toBe("builtin");
     expect(pin.smokePassedAt).toBeUndefined();
   });
+
+  test("missing/untrusted package hint preserves detail and exact install command", () => {
+    const detail = "opencode package identity/version check failed: no trusted package on PATH";
+    const hint = formatOpencodePackageIdentityFailure(OPENCODE_BUILTIN_PIN, detail);
+    expect(hint).toContain(detail);
+    expect(hint).toContain("Expected trusted opencode-ai@1.18.1");
+    expect(hint).toContain("npm install -g opencode-ai@1.18.1");
+    expect(opencodeExactInstallCommand()).toBe("npm install -g opencode-ai@1.18.1");
+  });
 });
 
 describe("opencode-pin — override file write + read round-trip", () => {
-  test("writePinOverride then readEffectivePin returns the new version", () => {
-    writePinOverride("1.18.0", "2026-07-04T00:00:00.000Z", "smoke: initialize + session/new", fakeHome);
+  test("a smoke marker for the exact release pin is recognized", () => {
+    writePinOverride(OPENCODE_BUILTIN_PIN, "2026-07-04T00:00:00.000Z", "smoke: initialize + session/new", fakeHome);
     const pin = readEffectivePin(fakeHome);
-    expect(pin.version).toBe("1.18.0");
+    expect(pin.version).toBe(OPENCODE_BUILTIN_PIN);
     expect(pin.source).toBe("override-file");
     expect(pin.smokePassedAt).toBe("2026-07-04T00:00:00.000Z");
+  });
+
+  test("a locally-smoked different version cannot override the release pin", () => {
+    writePinOverride("1.18.2", "2026-07-04T00:00:00.000Z", "lightweight smoke only", fakeHome);
+    const pin = readEffectivePin(fakeHome);
+    expect(pin.version).toBe(OPENCODE_BUILTIN_PIN);
+    expect(pin.source).toBe("builtin");
+    expect(pin.smokePassedAt).toBeUndefined();
   });
 });
 

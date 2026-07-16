@@ -5,14 +5,16 @@
 #   S1: normalize-runtime unit tests all pass (21/21 including 5 new).
 #   S2: wizard help / usage strings surface `opencode-cli` as a choice.
 #   S3: `anet node start X` on a node whose runtime is `opencode-cli`
-#       hard-fails with a clear "install opencode-ai@1.17.13" message
+#       hard-fails with a clear "install opencode-ai@1.18.1" message
 #       when opencode is NOT on PATH.
-#   S4: with `opencode-ai@1.17.13` installed, `anet node start` passes
+#   S4: with `opencode-ai@1.18.1` installed, `anet node start` passes
 #       the version pin, spawns agent-node, and agent-node's PR①
 #       processTask stub returns a clear "not yet implemented" line
 #       (proving the runtime registration reaches all four seams:
 #       agent-network CLI → agent-node cli.ts RUNTIME_MAP →
 #       processTask switch → server normalizeRuntime).
+#   S5: a non-empty unknown runtime in config fails closed before any
+#       launcher/dependency fallback can silently run Claude instead.
 #
 # Non-mock. Real bun. Real opencode install/uninstall on a real PATH.
 # No vendor key required (the stub trips before any vendor call).
@@ -43,6 +45,19 @@ step() {
     fail=1
   fi
 }
+write_opencode_binding() {
+  local node_dir="$1"
+  local home_dir="$2"
+  OPENCODE_BINDING_NODE_DIR="$node_dir" \
+  OPENCODE_BINDING_HOME="$home_dir" \
+    bun -e '
+      import { writeOpencodeRuntimeBinding } from "/repo/agent-network/src/opencode-runtime-binding.ts";
+      writeOpencodeRuntimeBinding(
+        process.env.OPENCODE_BINDING_NODE_DIR!,
+        process.env.OPENCODE_BINDING_HOME!,
+      );
+    '
+}
 
 # ── S1 — unit tests ────────────────────────────────────────────────
 {
@@ -55,12 +70,12 @@ step() {
 } >> "$REPORT"
 
 # ── S2 — wizard choice surfaces opencode-cli ───────────────────────
-# The wizard's choices literal is compiled from bin/cli.ts. Search
-# the source verbatim to make sure the option is exposed.
+# Both create paths consume createRuntimeChoices() in the CLI. Search the
+# source-of-truth row and tolerate grep status 1 so absence is reported.
 {
   echo "## S2 — wizard picker source has opencode-cli"
   echo
-  hit=$(grep -c 'value: "opencode-cli"' /repo/agent-network/bin/cli.ts)
+  hit=$(grep -c 'value: "opencode-cli"' /repo/agent-network/bin/cli.ts || true)
   echo "  grep hits: $hit (expect >=1)"
   if [[ "$hit" -ge 1 ]]; then
     echo "  ✓ wizard choice registered"
@@ -76,7 +91,7 @@ step() {
 # config.json, then run `bun run bin/cli.ts node start`. The launcher
 # runs assertStartCompatibility which spawns `opencode --version`
 # under the hood. Without a `opencode` on PATH, it should exit 1
-# with a message pointing at `npm install -g opencode-ai@1.17.13`.
+# with a message pointing at `npm install -g opencode-ai@1.18.1`.
 export HOME=/tmp/anethome-s3
 mkdir -p "$HOME/.anet/nodes/testnode"
 # agent-network's `node start` resolves node dirs from cwd/.anet/nodes,
@@ -109,6 +124,14 @@ cat > "$HOME/.anet/nodes/testnode/config.json" <<CFG
   "model": "opencode/deepseek-v4-flash-free"
 }
 CFG
+chmod 700 "$HOME/.anet" "$HOME/.anet/nodes" "$HOME/.anet/nodes/testnode"
+chmod 700 /repo/agent-network /repo/agent-network/.anet /repo/agent-network/.anet/nodes \
+  /repo/agent-network/.anet/nodes/testnode
+chmod 600 "$HOME/.anet/nodes/testnode/config.json" \
+  /repo/agent-network/.anet/nodes/testnode/config.json
+write_opencode_binding \
+  /repo/agent-network/.anet/nodes/testnode \
+  "$HOME"
 
 {
   echo "## S3 — start with opencode NOT installed → hard-fail with clear pin hint"
@@ -127,14 +150,14 @@ CFG
   echo "exit=$rc"
   echo '```'
   echo
-  # We expect exit=1 and a clear "install opencode-ai@1.17.13" hint.
+  # We expect exit=1 and a clear "install opencode-ai@1.18.1" hint.
   cd /repo/agent-network
   set +e
   out=$( HOME="$HOME" bun run bin/cli.ts node start testnode 2>&1 | head -40 )
   rc=$?
   set -e
-  if [[ "$rc" -ne 0 ]] && echo "$out" | grep -qE 'opencode-ai@1\.17\.13'; then
-    echo "  ✓ hard-fail with pin hint (exit=$rc, mentions opencode-ai@1.17.13)"
+  if [[ "$rc" -ne 0 ]] && echo "$out" | grep -qE 'opencode-ai@1\.18\.1'; then
+    echo "  ✓ hard-fail with pin hint (exit=$rc, mentions opencode-ai@1.18.1)"
   else
     echo "  ✗ expected exit != 0 + pin hint; got exit=$rc"
     echo "$out" | tail -20 >> "$REPORT"
@@ -149,11 +172,11 @@ CFG
 # (b) processTask reaches the PR① opencode-cli stub. We DON'T need a
 # real hub — agent-node's first heartbeat will fail, but that's after
 # the runtime dispatch branch we care about.
-echo "## S4 — install opencode-ai@1.17.13, verify pin passes + processTask stub" >> "$REPORT"
+echo "## S4 — install opencode-ai@1.18.1, verify pin passes + processTask stub" >> "$REPORT"
 echo >> "$REPORT"
 echo '```' >> "$REPORT"
 {
-  npm install -g opencode-ai@1.17.13 >/dev/null 2>&1 && echo "  installed opencode-ai@1.17.13"
+  npm install -g opencode-ai@1.18.1 >/dev/null 2>&1 && echo "  installed opencode-ai@1.18.1"
   echo "  opencode --version: $(opencode --version | head -1)"
 } >> "$REPORT" 2>&1
 echo '```' >> "$REPORT"
@@ -168,6 +191,11 @@ cp -f /tmp/anethome-s3/.anet/nodes/testnode/config.json \
 mkdir -p /repo/agent-network/.anet/nodes/testnode
 cp -f /tmp/anethome-s3/.anet/nodes/testnode/config.json \
       /repo/agent-network/.anet/nodes/testnode/config.json
+chmod 700 "$HOME/.anet" "$HOME/.anet/nodes" "$HOME/.anet/nodes/testnode"
+chmod 700 /repo/agent-network /repo/agent-network/.anet /repo/agent-network/.anet/nodes \
+  /repo/agent-network/.anet/nodes/testnode
+chmod 600 "$HOME/.anet/nodes/testnode/config.json" \
+  /repo/agent-network/.anet/nodes/testnode/config.json
 
 # We invoke agent-node directly so we can observe the processTask
 # stub without needing a live hub (start via agent-network would
@@ -198,6 +226,48 @@ else
   echo "  ✗ agent-node did not log runtime=opencode-cli" >> "$REPORT"
   fail=1
 fi
+
+# ── S5 — unknown configured runtime fails closed ───────────────────
+# A normal umask-0002 installation may leave HOME/.anet at 0775. With no
+# binding for this node, probing the external OpenCode state must not impose
+# OpenCode's private-directory policy on an unrelated runtime.
+chmod 775 "$HOME/.anet"
+mkdir -p /repo/agent-network/.anet/nodes/bogusnode
+cat > /repo/agent-network/.anet/nodes/bogusnode/config.json <<'CFG'
+{
+  "anet_version": "smoke-pr1",
+  "node_id": "n_smoke_bogus",
+  "node_name": "bogusnode",
+  "alias": "bogusnode",
+  "runtime": "future-runtime-typo",
+  "network_id": "net_smoke",
+  "hub": "http://127.0.0.1:9999",
+  "token": "ntok_smoke_no_hub_needed"
+}
+CFG
+chmod 700 /repo/agent-network/.anet/nodes/bogusnode
+chmod 600 /repo/agent-network/.anet/nodes/bogusnode/config.json
+
+{
+  echo
+  echo "## S5 — unrelated runtime bypasses absent binding under HOME/.anet=0775, then fails closed"
+  echo
+  echo '```'
+  set +e
+  out=$(cd /repo/agent-network && HOME="$HOME" bun run bin/cli.ts node start bogusnode 2>&1)
+  rc=$?
+  set -e
+  echo "$out" | head -20
+  echo "exit=$rc"
+  echo '```'
+  echo
+  if [[ "$rc" -ne 0 ]] && echo "$out" | grep -q 'unsupported runtime "future-runtime-typo"'; then
+    echo "  ✓ absent binding did not reject HOME/.anet=0775; unknown runtime rejected before launch"
+  else
+    echo "  ✗ expected fail-closed unknown runtime; exit=$rc"
+    fail=1
+  fi
+} >> "$REPORT"
 
 echo >> "$REPORT"
 if [[ "$fail" -eq 0 ]]; then

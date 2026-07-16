@@ -8,10 +8,10 @@
 // Explicit `claude-code-cli` choice still works.
 
 import { describe, expect, test } from "bun:test";
-import { normalizeRuntime } from "./normalize-runtime";
+import { normalizeRuntime, normalizeRuntimeStrict } from "./normalize-runtime";
 
 describe("normalizeRuntime — fallback default is claude-agent-sdk (Vincent no-Max)", () => {
-  test("unknown string → claude-agent-sdk (was claude-code-cli pre-2026-06-28)", () => {
+  test("legacy normalization: unknown string → claude-agent-sdk", () => {
     expect(normalizeRuntime("totally-unknown-runtime")).toBe("claude-agent-sdk");
   });
 
@@ -33,6 +33,27 @@ describe("normalizeRuntime — fallback default is claude-agent-sdk (Vincent no-
 
   test("profile with empty-string runtime field → claude-agent-sdk", () => {
     expect(normalizeRuntime({ alias: "x", runtime: "" } as any)).toBe("claude-agent-sdk");
+  });
+});
+
+describe("normalizeRuntimeStrict — execution boundaries fail closed", () => {
+  test("missing and empty runtime still select the documented default", () => {
+    expect(normalizeRuntimeStrict()).toBe("claude-agent-sdk");
+    expect(normalizeRuntimeStrict("")).toBe("claude-agent-sdk");
+    expect(normalizeRuntimeStrict({})).toBe("claude-agent-sdk");
+  });
+
+  test("canonical names and supported aliases are accepted", () => {
+    expect(normalizeRuntimeStrict("opencode-cli")).toBe("opencode-cli");
+    expect(normalizeRuntimeStrict("opencode")).toBe("opencode-cli");
+    expect(normalizeRuntimeStrict({ runtime: "codex-tui" })).toBe("codex-app-server");
+  });
+
+  test("a non-empty unknown runtime is rejected", () => {
+    expect(() => normalizeRuntimeStrict("bogus-runtime-name")).toThrow("unsupported runtime");
+    expect(() => normalizeRuntimeStrict({ runtime: "bogus-runtime-name" })).toThrow(
+      "bogus-runtime-name",
+    );
   });
 });
 
@@ -133,7 +154,7 @@ describe("normalizeRuntime — profile object paths", () => {
     expect(normalizeRuntime({ runtime: "agent-sdk" } as any)).toBe("claude-agent-sdk");
   });
 
-  test("profile with unknown runtime string → claude-agent-sdk (fallback)", () => {
+  test("legacy profile normalization keeps unknown → default for display/migration", () => {
     expect(normalizeRuntime({ runtime: "bogus-runtime-name" } as any)).toBe("claude-agent-sdk");
   });
 });

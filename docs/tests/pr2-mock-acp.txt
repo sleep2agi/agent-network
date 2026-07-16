@@ -1,0 +1,92 @@
+# RFC-029 PR② — mock-opencode ACP CI gate
+
+date: 2026-07-16T02:59:31+00:00
+bun: 1.3.1
+node: v18.20.4
+
+## Full harness output
+
+```
+===S-happy-BEGIN===
+{
+  "replyText": "hello world",
+  "thoughtText": "Analyzing request.",
+  "sessionId": "ses_mock_new",
+  "chunks": 2,
+  "thoughtChunks": 2,
+  "stopReason": "end_turn",
+  "rescued": false,
+  "usage": {
+    "inputTokens": 10,
+    "outputTokens": 2,
+    "totalTokens": 12,
+    "thoughtTokens": 2
+  },
+  "logsFromRuntime": [
+    "[opencode-acp] session/new — ses_mock_new..."
+  ],
+  "warnsFromRuntime": []
+}
+===S-happy-END===
+===S-thinking-BEGIN===
+{
+  "replyText": "hello world",
+  "thoughtText": "Analyzing request.",
+  "sessionId": "ses_mock_new",
+  "chunks": 0,
+  "thoughtChunks": 2,
+  "stopReason": "end_turn",
+  "rescued": true,
+  "usage": {
+    "inputTokens": 10,
+    "outputTokens": 0,
+    "totalTokens": 12,
+    "thoughtTokens": 2
+  },
+  "logsFromRuntime": [
+    "[opencode-acp] session/new — ses_mock_new...",
+    "[opencode-acp] #383 thinking-only terminal turn (chunks=0 thoughtChunks=2) — re-prompting for plain-text final"
+  ],
+  "warnsFromRuntime": []
+}
+===S-thinking-END===
+===S-load-fails-BEGIN===
+{
+  "replyText": "hello world",
+  "thoughtText": "Analyzing request.",
+  "sessionId": "ses_mock_new",
+  "chunks": 2,
+  "thoughtChunks": 2,
+  "stopReason": "end_turn",
+  "rescued": false,
+  "usage": {
+    "inputTokens": 10,
+    "outputTokens": 2,
+    "totalTokens": 12,
+    "thoughtTokens": 2
+  },
+  "logsFromRuntime": [
+    "[opencode-acp] session/new — ses_mock_new..."
+  ],
+  "warnsFromRuntime": [
+    "[opencode-acp] session lost on restart — session/load(ses_stale_fr...) failed (opencode ACP error id=2: -32000 session not found (mock)); falling back to session/new. Prior conversation history is unavailable this turn."
+  ]
+}
+===S-load-fails-END===
+```
+
+harness exit=0
+
+## Assertions
+
+  ✓ S-happy replyText: hello world (expected hello world)
+  ✓ S-happy rescued: false (expected false)
+  ✓ S-happy chunks: 2 (expected 2)
+  ✓ S-happy stopReason: end_turn (expected end_turn)
+  ✓ S-thinking replyText: hello world (expected hello world)
+  ✓ S-thinking rescued: true (expected true)
+  ✓ S-thinking thoughtText contains: 1 (expected 1)
+  ✓ S-load-fails replyText: hello world (expected hello world)
+  ✓ S-load-fails logged 'session lost on restart': 1 (expected 1)
+
+OVERALL: PASS

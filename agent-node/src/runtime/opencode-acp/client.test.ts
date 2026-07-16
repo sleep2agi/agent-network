@@ -27,6 +27,10 @@ function makeStubBinary(script: string): string {
   return shPath;
 }
 
+function stubEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return { PATH: process.env.PATH, ...extra };
+}
+
 describe("OpencodeAcpClient — request/response correlation", () => {
   test("request() resolves with the matching response's result", async () => {
     const stub = makeStubBinary(`
@@ -44,7 +48,7 @@ describe("OpencodeAcpClient — request/response correlation", () => {
       });
     `);
     const c = new OpencodeAcpClient();
-    c.start({ binary: stub });
+    c.start({ binary: stub, env: stubEnv() });
     try {
       const r = await c.request<{ echoed: string }>("initialize", { protocolVersion: 1 }, 5000);
       expect(r.echoed).toBe("initialize");
@@ -67,7 +71,7 @@ describe("OpencodeAcpClient — request/response correlation", () => {
       });
     `);
     const c = new OpencodeAcpClient();
-    c.start({ binary: stub });
+    c.start({ binary: stub, env: stubEnv() });
     try {
       let thrown: Error | null = null;
       try { await c.request("session/new", {}, 3000); }
@@ -101,7 +105,7 @@ describe("OpencodeAcpClient — streaming notifications", () => {
     const c = new OpencodeAcpClient();
     const notifications: any[] = [];
     c.on("notification", (n) => notifications.push(n));
-    c.start({ binary: stub });
+    c.start({ binary: stub, env: stubEnv() });
     try {
       const result = await c.request<{ stopReason: string }>("session/prompt", {}, 5000);
       expect(result.stopReason).toBe("end_turn");
@@ -109,6 +113,58 @@ describe("OpencodeAcpClient — streaming notifications", () => {
       expect(notifications[0].params.update.sessionUpdate).toBe("agent_thought_chunk");
       expect(notifications[1].params.update.sessionUpdate).toBe("agent_message_chunk");
     } finally { await c.stop(); }
+  });
+
+  test("id-carrying reverse requests get an explicit method-not-found response", async () => {
+    const stub = makeStubBinary(`
+      let buf = "";
+      let initializeId;
+      process.stdin.on("data", (chunk) => {
+        buf += chunk;
+        while (buf.includes("\\n")) {
+          const idx = buf.indexOf("\\n");
+          const line = buf.slice(0, idx).trim();
+          buf = buf.slice(idx + 1);
+          if (!line) continue;
+          const msg = JSON.parse(line);
+          if (initializeId === undefined && msg.method === "initialize") {
+            initializeId = msg.id;
+            process.stdout.write(JSON.stringify({
+              jsonrpc: "2.0",
+              id: "permission-1",
+              method: "session/request_permission",
+              params: { options: [] },
+            }) + "\\n");
+            continue;
+          }
+          if (msg.id === "permission-1" && msg.error?.code === -32601) {
+            process.stdout.write(JSON.stringify({
+              jsonrpc: "2.0",
+              id: initializeId,
+              result: { reverseError: msg.error },
+            }) + "\\n");
+          }
+        }
+      });
+    `);
+    const c = new OpencodeAcpClient();
+    const reverseRequests: any[] = [];
+    const notifications: any[] = [];
+    c.on("serverRequest", (request) => reverseRequests.push(request));
+    c.on("notification", (notification) => notifications.push(notification));
+    c.start({ binary: stub, env: stubEnv() });
+    try {
+      const result = await c.request<{ reverseError: { code: number; message: string } }>(
+        "initialize", {}, 5000,
+      );
+      expect(result.reverseError.code).toBe(-32601);
+      expect(result.reverseError.message).toContain("session/request_permission");
+      expect(reverseRequests).toHaveLength(1);
+      expect(reverseRequests[0].id).toBe("permission-1");
+      expect(notifications).toHaveLength(0);
+    } finally {
+      await c.stop();
+    }
   });
 });
 
@@ -125,7 +181,7 @@ describe("OpencodeAcpClient — process lifecycle", () => {
       });
     `);
     const c = new OpencodeAcpClient();
-    c.start({ binary: stub });
+    c.start({ binary: stub, env: stubEnv() });
     let thrown: Error | null = null;
     try {
       await c.request("session/prompt", {}, 5000);
@@ -140,9 +196,41 @@ describe("OpencodeAcpClient — process lifecycle", () => {
       process.stdin.resume();
     `);
     const c = new OpencodeAcpClient();
-    c.start({ binary: stub });
+    c.start({ binary: stub, env: stubEnv() });
     expect(c.isRunning).toBe(true);
     await c.stop();
     expect(c.isRunning).toBe(false);
+  });
+
+  test("explicit child env is not merged with the client's process.env", async () => {
+    const stub = makeStubBinary(`
+      let buf = "";
+      process.stdin.on("data", (chunk) => {
+        buf += chunk;
+        if (!buf.includes("\\n")) return;
+        const req = JSON.parse(buf.slice(0, buf.indexOf("\\n")));
+        process.stdout.write(JSON.stringify({
+          jsonrpc: "2.0",
+          id: req.id,
+          result: {
+            home: process.env.HOME ?? null,
+            commhub: process.env.COMMHUB_TOKEN ?? null,
+            marker: process.env.SAFE_MARKER ?? null,
+          },
+        }) + "\\n");
+      });
+    `);
+    const c = new OpencodeAcpClient();
+    c.start({ binary: stub, env: stubEnv({ SAFE_MARKER: "present" }) });
+    try {
+      const result = await c.request<{ home: string | null; commhub: string | null; marker: string }>(
+        "initialize", {}, 5000,
+      );
+      expect(result.home).toBeNull();
+      expect(result.commhub).toBeNull();
+      expect(result.marker).toBe("present");
+    } finally {
+      await c.stop();
+    }
   });
 });

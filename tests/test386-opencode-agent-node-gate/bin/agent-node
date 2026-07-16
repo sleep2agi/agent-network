@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+case "${1:-}" in
+  --help|-h)
+    printf '%s\n' 'agent-node runtimes: claude-agent-sdk | codex-sdk | grok-build-acp'
+    ;;
+  --version|-v)
+    printf '%s\n' 'agent-node v2.4.13'
+    ;;
+  *)
+    : > /tmp/test386-stale-global-was-launched
+    exit 91
+    ;;
+esac

@@ -1,6 +1,7 @@
 # opencode 以 MCP 接入 agent-network（完整方案）
 
 > 2026-07-08 · 已在隔离环境**实测跑通**（opencode-ai 1.17.13 + commhub preview.14），配置与端点均验证过，不是猜的。
+> 发版口径更新（2026-07-16）：RFC-029 canonical runtime preview 已另行复验并精确锁定 `opencode-ai@1.18.1`；本页的 `1.17.13` 仅描述当时这条直接 MCP 实验。
 > 下文 `<hub-domain>` 是占位符，替换成**你自己的 hub 域名**（例如本机反代到 `:9200` 的域名，或直接 `localhost:9200`）。
 
 ---

@@ -12,8 +12,8 @@
 //   - newline-delimited JSON-RPC framing (in + out)
 //   - id-correlated request/response with per-request timeout
 //   - streaming notifications surface via `on("notification", ...)`
-//   - HOME env isolation is the caller's job (env passed through
-//     verbatim — runtime.ts sets `HOME=<node workdir>` per §8 D5)
+//   - child environment isolation is the caller's job (`env` is the
+//     complete environment and is passed through verbatim)
 //
 // What lives in runtime.ts:
 //   - session/new vs session/load restart policy (crash-preservation
@@ -50,6 +50,8 @@ export interface JsonRpcNotification<P = unknown> {
   params?: P;
 }
 
+export type JsonRpcServerRequest<P = unknown> = JsonRpcRequest<P>;
+
 export type JsonRpcMessage =
   | JsonRpcRequest
   | JsonRpcSuccess
@@ -61,12 +63,19 @@ export interface OpencodeAcpClientOptions {
    *  D5 this should be the per-node work dir so opencode's own
    *  `--cwd` file resolution stays scoped. */
   cwd?: string;
-  /** Full env for the child. Callers MUST set `HOME=<node workdir>`
-   *  here to isolate opencode's auth.json + opencode.json + session
-   *  cache per anet node (§8 D5). */
+  /** Complete env for the child. It is NOT merged with process.env. */
   env?: NodeJS.ProcessEnv;
   /** Binary name / path. Defaults to `"opencode"` (found via $PATH). */
   binary?: string;
+}
+
+export interface OpencodeAcpExitInfo {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  /** Present only for the ChildProcess `error` finalizer. A native `exit`
+   *  event leaves this undefined and proves the captured process instance is
+   *  no longer able to write its launch-scoped state. */
+  cause?: Error;
 }
 
 export class OpencodeAcpClient extends EventEmitter {
@@ -84,6 +93,13 @@ export class OpencodeAcpClient extends EventEmitter {
     return this.lastIncomingAt;
   }
 
+  /** Native child PID captured by spawn. Kept readable after `exit` so the
+   *  cleanup boundary can distinguish the exited direct process from live
+   *  descendants that inherited its launch environment. */
+  get processId(): number | undefined {
+    return this.child?.pid;
+  }
+
   start(opts: OpencodeAcpClientOptions = {}): void {
     if (this.child) throw new Error("OpencodeAcpClient already started");
     const bin = opts.binary ?? "opencode";
@@ -92,7 +108,11 @@ export class OpencodeAcpClient extends EventEmitter {
     // the server binds to stdio only). Do not pass them here.
     this.child = spawn(bin, ["acp"], {
       cwd: opts.cwd ?? process.cwd(),
-      env: { ...process.env, ...opts.env },
+      // `spawn()` inherits process.env when `env` is undefined. Use an empty
+      // object as the lower-level default so a caller can never accidentally
+      // leak agent-node's CommHub/channel/MCP credentials. runtime.ts always
+      // supplies the exact allowlisted environment built in child-env.ts.
+      env: opts.env ?? {},
       stdio: ["pipe", "pipe", "pipe"],
     });
 
@@ -101,13 +121,16 @@ export class OpencodeAcpClient extends EventEmitter {
     this.child.stderr.setEncoding("utf8");
     this.child.stderr.on("data", (chunk: string) => this.emit("stderr", chunk));
     this.child.on("exit", (code, signal) => {
-      this.closed = true;
-      this.emit("exit", { code, signal });
-      const errMsg = `opencode acp exited (code=${code} signal=${signal})`;
-      for (const [, p] of this.pending) p.reject(new Error(errMsg));
-      this.pending.clear();
+      this.finalizeExit(code, signal);
     });
-    this.child.on("error", (err) => this.emit("error", err));
+    this.child.on("error", (err) => {
+      // A spawn failure may emit `error` without `exit`. Finalize first so
+      // stop() and any handshake request cannot hang forever. EventEmitter's
+      // special `error` event throws when unobserved, so surface it only when
+      // the caller explicitly subscribed (runtime.ts does).
+      this.finalizeExit(null, null, err);
+      if (this.listenerCount("error") > 0) this.emit("error", err);
+    });
   }
 
   async request<R = unknown, P = unknown>(method: string, params?: P, timeoutMs = 30_000): Promise<R> {
@@ -184,9 +207,24 @@ export class OpencodeAcpClient extends EventEmitter {
   /** Terminate the child and refuse further requests. Idempotent. */
   async stop(signal: NodeJS.Signals = "SIGTERM"): Promise<void> {
     if (!this.child || this.closed) return;
-    try { this.child.kill(signal); } catch { /* already gone */ }
-    // Await the exit handler which sets `closed = true` and clears pending.
-    if (!this.closed) await new Promise<void>((r) => this.once("exit", () => r()));
+    await new Promise<void>((resolve, reject) => {
+      const onExit = () => resolve();
+      // Subscribe before kill(): a very short-lived child can otherwise exit
+      // between kill() and once(), leaving shutdown waiting forever.
+      this.once("exit", onExit);
+      if (this.closed) {
+        this.off("exit", onExit);
+        resolve();
+        return;
+      }
+      try {
+        this.child!.kill(signal);
+      } catch (error) {
+        this.off("exit", onExit);
+        if (this.closed) resolve();
+        else reject(error);
+      }
+    });
   }
 
   /**
@@ -195,6 +233,20 @@ export class OpencodeAcpClient extends EventEmitter {
    */
   get isRunning(): boolean {
     return this.child !== null && !this.closed;
+  }
+
+  private finalizeExit(
+    code: number | null,
+    signal: NodeJS.Signals | null,
+    cause?: Error,
+  ): void {
+    if (this.closed) return;
+    this.closed = true;
+    const err = cause ?? new Error(`opencode acp exited (code=${code} signal=${signal})`);
+    for (const [, pending] of this.pending) pending.reject(err);
+    this.pending.clear();
+    const info: OpencodeAcpExitInfo = { code, signal, ...(cause ? { cause } : {}) };
+    this.emit("exit", info);
   }
 
   private onStdout(chunk: string): void {
@@ -231,6 +283,29 @@ export class OpencodeAcpClient extends EventEmitter {
         }
       } else {
         this.emit("orphanResponse", msg);
+      }
+      return;
+    }
+    // Reverse request from the agent to this unattended client. We advertise
+    // no filesystem/terminal capabilities and expose no permission/question
+    // UI, so no client method is implemented. Never silently treat an id-
+    // carrying request as a notification: the agent would wait forever for a
+    // response and leave session/prompt wedged until its five-minute idle kill.
+    if ("id" in msg && "method" in msg && (msg as any).method) {
+      const request = msg as JsonRpcServerRequest;
+      this.emit("serverRequest", request);
+      if (this.child && !this.closed) {
+        const response = {
+          jsonrpc: "2.0" as const,
+          id: request.id,
+          error: {
+            code: -32601,
+            message: `Unsupported ACP client method: ${request.method}`,
+          },
+        };
+        this.child.stdin.write(`${JSON.stringify(response)}\n`, (error) => {
+          if (error) this.emit("protocolError", error);
+        });
       }
       return;
     }

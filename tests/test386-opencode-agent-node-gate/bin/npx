@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+printf '%s\n' "$*" > /tmp/test386-npx-args
+if [ "$#" -eq 3 ] \
+  && [ "$1" = "-y" ] \
+  && [ "$2" = "@sleep2agi/agent-node@2.5.0-preview.26" ] \
+  && [ "$3" = "--print-entrypoint" ]; then
+  printf '%s\n' '/test/exact-global/node_modules/@sleep2agi/agent-node/dist/cli.js'
+  exit 0
+fi
+
+printf '%s\n' "unexpected npx arguments: $*" >&2
+exit 64

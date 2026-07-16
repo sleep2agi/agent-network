@@ -40,6 +40,7 @@ step() {
 export HOME=/tmp/anethome-s2
 export ANTHROPIC_API_KEY="sk-smoke-anthropic-example-key"
 mkdir -p "$HOME/.anet"
+rm -rf /tmp/pr3-node-workdir
 
 {
   echo "## S2 — auth.json / opencode.json materialization"
@@ -51,13 +52,12 @@ mkdir -p "$HOME/.anet"
     const preset = findOpencodePreset("anthropic");
     const key = readPresetKeyFromEnv(preset, process.env);
     const workDir = "/tmp/pr3-node-workdir";
-    require("fs").mkdirSync(workDir, { recursive: true });
+    require("fs").mkdirSync(workDir, { recursive: true, mode: 0o700 });
     const authPath = writeOpencodeAuthJson(workDir, preset, key);
     const cfgPath = writeOpencodeConfigJson(workDir, preset);
     console.log("auth=" + authPath);
     console.log("cfg=" + cfgPath);
     console.log("authMode=" + (require("fs").statSync(authPath).mode & 0o777).toString(8));
-    console.log("authBody=" + require("fs").readFileSync(authPath, "utf-8").trim());
   '
   echo '```'
   echo
@@ -68,8 +68,8 @@ if [[ -f "$AUTH_PATH" ]]; then
   step "S2 auth.json exists" "yes" "yes"
   MODE=$(stat -c %a "$AUTH_PATH")
   step "S2 auth.json mode" "$MODE" "600"
-  step "S2 auth.json contains anthropic key" \
-    "$(jq -r .anthropic.key "$AUTH_PATH")" "sk-smoke-anthropic-example-key"
+  step "S2 auth.json contains the expected synthetic key" \
+    "$(jq -e '.anthropic.key == "sk-smoke-anthropic-example-key"' "$AUTH_PATH" >/dev/null && echo yes || echo no)" "yes"
 else
   step "S2 auth.json exists" "no" "yes"
 fi
@@ -91,25 +91,55 @@ else
   step "S3 denylist regex present" "no" "yes"
 fi
 
-# ── S4: upgrade-pin smoke gates on smoke pass ──────────────────
+# ── S4: unvetted upgrade-pin fails before npm or pin write ─────────
+S4_FAKE_BIN=/tmp/pr3-fake-bin
+S4_NPM_SENTINEL=/tmp/pr3-npm-called
+S4_LOG=/tmp/pr3-upgrade-pin.log
+rm -rf "$S4_FAKE_BIN"
+rm -f "$S4_NPM_SENTINEL" "$S4_LOG" "$HOME/.anet/opencode-pin.json"
+mkdir -p "$S4_FAKE_BIN"
+cat > "$S4_FAKE_BIN/npm" <<'FAKE_NPM'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > /tmp/pr3-npm-called
+exit 91
+FAKE_NPM
+chmod 755 "$S4_FAKE_BIN/npm"
+
+set +e
+(
+  cd /repo/agent-network
+  PATH="$S4_FAKE_BIN:$PATH" timeout 60 bun run bin/cli.ts opencode upgrade-pin 99.99.99
+) > "$S4_LOG" 2>&1
+S4_RC=$?
+set -e
+
 {
   echo
-  echo "## S4 — upgrade-pin gate (smoke MUST pass before pin writes)"
+  echo "## S4 — unvetted upgrade-pin is rejected before npm"
   echo
   echo '```'
-  set +e
-  cd /repo/agent-network && timeout 60 bun run bin/cli.ts opencode upgrade-pin 99.99.99 2>&1 | head -20
-  RC=$?
-  set -e
-  echo "exit=$RC"
+  head -20 "$S4_LOG"
+  echo "exit=$S4_RC"
   echo '```'
   echo
 } >> "$REPORT"
 
-if [[ ! -f "$HOME/.anet/opencode-pin.json" ]]; then
-  step "S4 pin file NOT created on smoke failure" "no" "no"
+step "S4 unvetted pin exits nonzero" \
+  "$([[ "$S4_RC" -ne 0 ]] && echo yes || echo no)" "yes"
+
+step "S4 vetted-only refusal emitted" \
+  "$(grep -Fq 'Refusing opencode-ai@99.99.99: this preview is vetted only for opencode-ai@1.18.1' "$S4_LOG" && echo yes || echo no)" "yes"
+
+if [[ ! -e "$S4_NPM_SENTINEL" ]]; then
+  step "S4 npm was NOT invoked" "no" "no"
 else
-  step "S4 pin file NOT created on smoke failure" "yes" "no"
+  step "S4 npm was NOT invoked" "yes" "no"
+fi
+
+if [[ ! -f "$HOME/.anet/opencode-pin.json" ]]; then
+  step "S4 pin file NOT created on refusal" "no" "no"
+else
+  step "S4 pin file NOT created on refusal" "yes" "no"
 fi
 
 # ── S5: existing denylist entries preserved ─────────────────────

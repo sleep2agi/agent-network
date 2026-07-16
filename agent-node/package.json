@@ -1,7 +1,7 @@
 {
   "name": "@sleep2agi/agent-node",
-  "version": "2.5.0-preview.16",
-  "description": "AI Agent runtime for CommHub networks. Supports 4 runtimes: Claude Code CLI, Claude Agent SDK, Codex SDK, and Grok Build ACP.",
+  "version": "2.5.0-preview.26",
+  "description": "AI Agent runtime for CommHub networks. Supports Claude Code CLI, Claude Agent SDK, Codex SDK, Codex app-server, Grok Build ACP, and OpenCode CLI.",
   "bin": {
     "agent-node": "dist/cli.js"
   },
@@ -41,7 +41,8 @@
     "directory": "agent-node"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "tag": "preview"
   },
   "bugs": {
     "url": "https://github.com/sleep2agi/agent-network/issues"
