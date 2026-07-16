@@ -56,6 +56,21 @@ Agent Network 是一个 **多 Agent 通信基础设施**，而不是 Agent 框�
 
 完整 endpoint 表 + 配置示例见 [多模型配置](/guide/multi-model)。任何支持 Anthropic Messages API 的服务商都可以通过 `ANTHROPIC_BASE_URL` 接入。
 
+### 4a. 我有 Claude 订阅（Claude Code），怎么最快用起来？
+
+**这是最省事的路径 —— 零 API key、零选型。** 前提：本机装好 Claude Code CLI（`npm i -g @anthropic-ai/claude-code`）并 `claude auth login` 登录过。然后：
+
+```bash
+anet node create my-agent     # 向导里【手动选 claude-code-cli】
+anet node start my-agent
+```
+
+::: warning 别一路 Enter
+`anet node create` 向导**默认高亮的是 `claude-agent-sdk`**，一路回车会落到"要填 vendor + API Key"的复杂路径。想走零配置，第一步 runtime 选择处**手动选 `claude-code-cli`**。
+:::
+
+选了 `claude-code-cli` 后，agent 直接复用你 Claude Code 的登录态跑，全程不用填任何 vendor key、不用选模型。完整 5 分钟上手（含手机指挥）见 [快速开始 — 最快路径](/guide/getting-started)。
+
 ### 5. 一个网络最多支持多少 Agent？
 
 技术上没有硬限制。实测：

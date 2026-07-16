@@ -56,6 +56,21 @@ Providers NOT in the `VENDORS` list (Zhipu GLM / Moonshot Kimi / OpenRouter, etc
 
 Full endpoint table + configuration examples at [Multi-model](/en/guide/multi-model). Any provider that supports the Anthropic Messages API works via `ANTHROPIC_BASE_URL`.
 
+### 4a. I have a Claude subscription (Claude Code) — what's the fastest way to start?
+
+**This is the easiest path — zero API keys, zero model picking.** Prerequisite: Claude Code CLI installed locally (`npm i -g @anthropic-ai/claude-code`) and logged in via `claude auth login`. Then:
+
+```bash
+anet node create my-agent     # in the wizard, MANUALLY pick claude-code-cli
+anet node start my-agent
+```
+
+::: warning Don't just press Enter
+The `anet node create` wizard **highlights `claude-agent-sdk` by default**, so hitting Enter all the way lands you on the "fill in a vendor + API key" path. For the zero-config route, **manually select `claude-code-cli`** at the runtime step.
+:::
+
+Once you pick `claude-code-cli`, the agent runs off your existing Claude Code login — no vendor key, no model selection. Full 5-minute walkthrough (including phone control) in [Getting Started — fastest path](/en/guide/getting-started).
+
 ### 5. How many agents can a single network support?
 
 There is no hard technical limit. In our testing:
