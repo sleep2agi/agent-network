@@ -7,10 +7,11 @@
 ## 前置
 
 1. **飞书自建应用**：在 [开放平台](https://open.feishu.cn) 建一个「企业自建应用」，启用机器人能力。
-2. **权限**（应用能力 → 权限管理）：`im:message:send_as_bot`、`im:message`、`im:resource`。
-3. **事件订阅**：选 **WebSocket 模式**，订阅 `im.message.receive_v1`（仅此一个）。
-4. **发布版本** + 等管理员 approve。无需公网 IP、无需 webhook URL、无需 Encrypt Key。
-5. 复制 **App ID** + **App Secret**（凭证 & 基本信息页）。
+2. **权限**（应用能力 → 权限管理）：接收权限按[官方「接收消息」文档](https://open.feishu.cn/document/server-docs/im-v1/message/events/receive?lang=zh-CN)申请 `im:message.p2p_msg:readonly`、`im:message.group_at_msg:readonly`；bridge 另需 `im:message`、`im:message:send_as_bot`、`im:resource`。
+3. 复制 **App ID** + **App Secret**（凭证 & 基本信息页）。
+4. 先按下文绑定并启动节点，保持测试长连接客户端运行。
+5. 再回后台按[官方顺序](https://open.feishu.cn/document/server-docs/event-subscription-guide/event-subscription-configure-/request-url-configuration-case)选择并保存**使用长连接**，只订阅 `im.message.receive_v1`。
+6. **创建并发布版本**，等待管理员 approve。无需公网 IP、webhook URL 或 Encrypt Key。
 
 ## 安装 + 绑定
 
@@ -57,13 +58,15 @@ agent-node 启动时检测 `channels: ["feishu", ...]` → fork 飞书 bridge wo
 export ANET_FEISHU_WORKER_PATH=/path/to/your/worker.js
 ```
 
-启动 log 应出现：
+启动 log 会先出现这些 Worker 进程标记：
 
 ```
 [agent-node] channels: feishu(/path/.anet/nodes/<node-name>/channels/feishu)
 [agent-node] [feishu] forked worker (pid 12345) for ... via ...
 [feishu:worker] bridge online — node=<node-name> dir=... ipc=yes
 ```
+
+当前版本的 `bridge online` 不能单独证明飞书鉴权或 WebSocket 成功。还要确认没有 `failed to obtain token` / `[ws] ws connect failed`，并确认飞书后台能识别正在运行的测试连接；SDK 会先访问 `open.feishu.cn`，再连接平台动态下发的 `wss://...` 目标。
 
 ## 触发策略
 
@@ -115,7 +118,8 @@ Vincent 2026-06-29 简化方案：用户给 bot 发图，bot **不强制走** vi
 |---|---|
 | 节点启动报 `unsupported channel: feishu` | agent-node 版本太老，升级到含本 PR 的版本 |
 | `[feishu] worker path not found` warn | 设 `ANET_FEISHU_WORKER_PATH`，或确认 `@sleep2agi/agent-network` 已安装 + 编译 |
-| WSClient 连不上飞书 | App 未 approve / 凭证写错 / 网络问题 — bridge 会自动重连，看 stderr |
+| `failed to obtain token` | App ID / Secret 错、App 状态不可用或鉴权失败；`bridge online` 不能覆盖这条错误 |
+| `[ws] ws connect failed` | 检查 `open.feishu.cn` HTTPS 与平台动态返回的 WSS 目标是否被企业网 / 代理拦截 |
 | 群里 @bot 不响应 | 1) bot 已加群且有发言权限 2) `access.json` `allowChats` 含目标 chat_id 3) `/open-apis/bot/v3/info` 是否返回有效 open_id |
 | 收到回复是 "agent-node M5a placeholder…" | 当前 v0.13 alpha 是 M5a 占位；M5b 替换为真 think() 集成（未 ship 时） |
 

@@ -16,22 +16,28 @@
 
 ## 2. 前置：飞书自建应用
 
-在 [飞书开放平台](https://open.feishu.cn) 建一个**企业自建应用**，启用机器人能力：
+在 [飞书开放平台](https://open.feishu.cn) 建一个**企业自建应用**，按下面的顺序配置：
 
-1. **权限**（应用能力 → 权限管理）：
-   - `im:message:send_as_bot` — bot 发消息
-   - `im:message` — 收消息
-   - `im:resource` — 上传图片
-2. **事件订阅**：在「事件订阅 → 配置方式」选 **「使用长连接」**（**不是** 「使用 Webhook URL」），然后在事件列表订阅 **「接收消息 - `im.message.receive_v1`」**（仅此一个）。
-   - 不需要公网 IP / webhook URL / Encrypt Key
-3. **发布版本** + 等管理员 approve
-4. 复制 **App ID** + **App Secret**（凭证 & 基本信息页）
+1. 在「应用能力 → 添加应用能力」中启用**机器人**。
+2. 在「权限管理」申请以下权限（两项 readonly 接收权限见[飞书官方「接收消息」事件文档](https://open.feishu.cn/document/server-docs/im-v1/message/events/receive?lang=zh-CN)，发送 / 资源权限用于下列 bridge 能力）：
+   - `im:message.p2p_msg:readonly` — 接收用户发给机器人的单聊消息
+   - `im:message.group_at_msg:readonly` — 接收群聊中 @机器人的消息
+   - `im:message` — 读取消息内容并调用消息接口
+   - `im:message:send_as_bot` — 以机器人身份发消息
+   - `im:resource` — 上传机器人要发送的图片等资源
+3. 在「凭证与基础信息」复制 **App ID** + **App Secret**。
+4. **先不要保存事件订阅配置。** 先带着这组凭证按 §3（Docker）或 §8（手动）启动一条测试长连接，并保持进程运行。
+5. 测试连接启动后，再回到「事件订阅 → 配置方式」选 **「使用长连接」**（**不是**「使用 Webhook URL」）并保存，然后只订阅 **「接收消息 - `im.message.receive_v1`」**。
+   - [飞书官方长连接配置说明](https://open.feishu.cn/document/server-docs/event-subscription-guide/event-subscription-configure-/request-url-configuration-case)要求：**先启动长连接客户端，再保存订阅方式**。
+   - 不需要公网 IP / webhook URL / Encrypt Key。
+6. **创建并发布版本**，等待管理员审批。
 
 ::: warning ⚠️ 真坑（用户实战卡过的）
-1. **配置方式必须选「使用长连接」** —— 不是「使用 Webhook URL」。飞书后台菜单原话是「长连接」，不叫「WebSocket」，找不到「WebSocket」按钮就是选错段了。
-2. **事件订阅别选成「用户进入会话（`bot_p2p_chat_entered`）」** —— 看到列表里其他叫「会话」「消息」的事件不要勾选，只勾「接收消息 `im.message.receive_v1`」这一条。多勾会触发非预期路径。
-3. **网络可达性**：bot 跑的机器要能连 `api.feishu.cn`（长连接事件走这域名，**不是** `open.feishu.cn`）。如果 agent-node 日志反复 `[ws] ws connect failed` 又零事件 → 多半是公司网/DPI 只放行 `open.feishu.cn` 挡了 `api.feishu.cn`，换可达网络部署（或加白名单）。
-4. **群聊先把 bot 拉进群** —— bot 没在群里你 @ 也 @ 不出来。群管理员在群设置 → 群机器人 → 添加机器人 → 选你刚发布的自建应用。后续 §6 还会强调 group `chat_id` 也要加白名单。
+1. **先起测试连接，再保存订阅方式** —— 顺序反了时，飞书后台会检测不到长连接客户端。
+2. **配置方式必须选「使用长连接」** —— 不是「使用 Webhook URL」。飞书后台菜单原话是「长连接」，不叫「WebSocket」。
+3. **事件订阅别选成「用户进入会话（`bot_p2p_chat_entered`）」** —— 只勾「接收消息 `im.message.receive_v1`」这一条；多勾会触发非预期路径。
+4. **网络可达性**：官方 SDK 先通过 `https://open.feishu.cn/callback/ws/endpoint` 鉴权并取得平台动态下发的 `wss://...` 地址，再连接该 WebSocket。企业防火墙 / 代理至少要放行 `open.feishu.cn` 的 HTTPS，以及响应里返回的动态 WSS 目标；不要硬编码旧域名或单个 WSS 域名 / IP。
+5. **群聊先把 bot 拉进群** —— bot 没在群里你 @ 也 @ 不出来。群管理员在群设置 → 群机器人 → 添加机器人 → 选你刚发布的自建应用。后续 §6 还会强调 group `chat_id` 也要加白名单。
 :::
 
 ## 3. 🚀 Docker 一键（推荐）
@@ -47,7 +53,7 @@ docker/feishu/
 ├── docker-compose.yml      # BYOH 默认 + 可选 local-hub profile
 ├── Dockerfile              # node:22-bookworm-slim + bun + 钉版本号
 ├── .env.example            # 字段模板, 注释里带验证过的 vendor+model 对照
-├── entrypoint.sh           # login → node create → channel add feishu → start, 幂等
+├── entrypoint.sh           # login → node create → channel add feishu → start；重启时重跑 bootstrap
 └── README.md               # 三步快启 + .env 清单 + 故障排查表
 ```
 
@@ -64,7 +70,9 @@ docker compose up -d                        # 首次 build 约 2 min
 docker compose logs -f feishu-agent         # 跟启动 + 运行日志
 ```
 
-容器 entrypoint 跑完整 bring-up：`hub init` → `anet login` → `anet node create` → `anet channel add feishu` → `anet node start`，每步**幂等**（重启容器不重复折腾），状态全在 `./data/.anet/` 持久化。
+首次配置新 App 时，让容器保持运行，然后回到 §2 第 5 步保存「使用长连接」并添加事件订阅。当前版本的 `bridge online` 只表示 Worker 已启动，**不能单独证明飞书鉴权和 WebSocket 已成功**；还要确认日志没有 `failed to obtain token` / `[ws] ws connect failed`，并确认飞书后台能识别这条测试连接。
+
+容器 entrypoint 跑完整 bring-up：`hub init` → `anet login` → `anet node create` → `anet channel add feishu` → `anet node start`。节点状态持久化在 `./data/.anet/`；每次重启都会按当前 `.env` 重新写入 Docker bootstrap 白名单。
 
 ### `.env` 关键字段（以 [`docker/feishu/.env.example`](https://github.com/sleep2agi/agent-network/blob/main/docker/feishu/.env.example) 为准）
 
@@ -74,8 +82,8 @@ docker compose logs -f feishu-agent         # 跟启动 + 运行日志
 | `HUB_USER` / `HUB_PASSWORD` | 该 hub 上的账号（**非交互式 `anet login --username/--password`，每次启动重新登录，不用预签 ntok\_**） | ✅ |
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` | §2 拿到的飞书自建应用凭证 | ✅ |
 | `ANET_MODEL` + `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` | 模型后端三件套（详见 §4） | ✅ |
-| `FEISHU_ALLOW_FROM` | 允许私聊的 `open_id` 列表（逗号分隔） | 可选但**强烈建议** |
-| `FEISHU_ALLOW_CHATS` | 允许群聊的 `chat_id` 列表（逗号分隔） | 可选 |
+| `FEISHU_ALLOW_FROM` | 允许私聊的、**当前 App 下的一个 `open_id`**（Docker 启动参数不支持逗号列表） | ✅ 与下一项至少填一项 |
+| `FEISHU_ALLOW_CHATS` | 允许群聊的、当前 App 下的一个 `chat_id` | ✅ 与上一项至少填一项 |
 | `NODE_ALIAS` | 节点 alias（默认 `feishu-agent`） | 可选 |
 | `ACK_PLACEHOLDER` | "⏳ 处理中…" 占位开关（默认 `true`，详见 §7） | 可选 |
 
@@ -151,7 +159,7 @@ docker compose up -d
 
 bridge 不接受全网消息——必须在 `access.json` 里把允许的 **人**（`open_id`）和 **群**（`chat_id`）显式列出。
 
-**Docker 路径**（推荐）：通过 `.env` 配置（`FEISHU_ALLOW_FROM` / `FEISHU_ALLOW_CHATS` 会在启动时写入 `access.json`），改完 `docker compose restart` 即生效。
+**Docker 路径**（推荐）：第一次启动前，`.env` 的 `FEISHU_ALLOW_FROM`（当前 App 下的一个真实 `open_id`）和 `FEISHU_ALLOW_CHATS`（一个 `chat_id`）**必须至少填一项**；留空不是「允许所有人」。这两个启动参数都**不支持逗号列表**，因此当前 Docker 路径每类最多配置一个 ID。不要在容器里用 CLI 追加更多 ID：entrypoint 会在下次重启时按 `.env` 重写 `access.json`。需要多 ID 时暂用下面的非 Docker 手动路径。
 
 **手动 anet 路径**：用 CLI 增删：
 
@@ -273,13 +281,17 @@ anet channel add feishu <node-name>
 anet node start <node-name>
 ```
 
-启动 log 应出现：
+首次配置新 App 时，保持节点运行，然后回到 §2 第 5 步保存长连接订阅并发布版本。
+
+启动 log 会先出现这些 **Worker 进程标记**：
 
 ```
 [agent-node] channels: feishu(/path/.anet/nodes/<node-name>/channels/feishu)
 [agent-node] [feishu] forked worker (pid 12345) for ... via ...
 [feishu:worker] bridge online — node=<node-name> dir=... ipc=yes
 ```
+
+`bridge online` 在当前版本里不是连接成功证据：即使 App 凭证鉴权失败，仍可能先打印这一行。连接层走查还必须确认没有 `failed to obtain token` / `[ws] ws connect failed`，并确认飞书后台在保存「使用长连接」时识别到正在运行的测试客户端；不要通过发消息来代替连接层验证。
 
 worker 路径默认 `dist/src/im/feishu/worker.js`（`@sleep2agi/agent-network` 安装后即有）。如需覆盖：
 
@@ -299,14 +311,16 @@ export ANET_FEISHU_WORKER_PATH=/path/to/your/worker.js
 |---|---|
 | 节点启动报 `unsupported channel: feishu` | agent-node 版本太老，升级到 `agent-node@2.4.15-preview.2` 或更新 |
 | `[feishu] worker path not found` warn | 设 `ANET_FEISHU_WORKER_PATH`，或确认 `@sleep2agi/agent-network` 已安装 + 编译 |
-| WSClient 连不上飞书 | App 未 approve / 凭证写错 / 网络问题 — bridge 会自动重连，看 stderr |
+| `failed to obtain token` | App ID / Secret 错、App 状态不可用或鉴权失败；`bridge online` 不能覆盖这条错误 |
+| `[ws] ws connect failed` | 检查到 `open.feishu.cn` 的 HTTPS，以及平台动态返回的 WSS 目标是否被企业网 / 代理拦截 |
+| 只有 `bridge online` / `client ready` | 仅是本地初始化线索，不足以证明鉴权或 WebSocket 已连上；按上两行先排错误，并看飞书后台能否识别测试连接 |
 | 群里 @bot 不响应 | 1) bot 已加群且有发言权限 2) `access.json` `allowChats` 含目标 `chat_id` 3) `/open-apis/bot/v3/info` 是否返回有效 `open_id` 4) 改完 `access.json` 是否 restart 过节点（不热加载，见 §5） |
 | 私聊不响应 | `open_id` 是否在 `allowFrom` 内（`anet channel ls` 看一下） |
 | **连上了、有事件、但消息「没反应」** | bridge stderr **grep `deny` / `allowFrom`**：消息收到了但发件人不在白名单。**换 App 后最常见**（`open_id` 按 App 变了，见 §5 危险提示） |
 | 收到图片 bot 答非所问 / 报错 | 后端不是 vision-capable（见 §4）—— 切到支持 vision 的 model |
 | **发图片 bot 回「收到事件但没有可处理的文本/图片内容」** | 图片**没被抠出来**，两种根因依次排：① 节点没开图片能力（`flags.modelImageCapable` 默认不设，见 §4）② **下载失败**——日志看 `[feishu:image] … download FAILED`，最常见是**旧版本的 `downloadImage` SDK 误用 bug**（[#324](https://github.com/sleep2agi/agent-network/pull/324)，`2.2.22-preview.2` 等旧版带），升级到含修复的 preview 即根治。详见 [经典案例 · 同源篇](/troubleshooting/case-feishu-silent-deny#同源案例-图片识别不了) |
 
-诊断口诀（按层收窄）：① 日志无 `client ready` = 网络连不上飞书长连接域名 → 换网络；② 有 `client ready` 但零事件 = 飞书后台事件订阅没配对（漏 `im.message.receive_v1` / 没设长连接 / 没发布版本）；③ 有 `client ready`、有事件、但不回 = 应用层拒了，grep `deny` / `allowFrom`；④ 发图无反应 = 图片没抠出来，查 `modelImageCapable` flag + 下载是否失败（旧版本 bug，升级）。完整复盘 → [经典案例：飞书 Bot 静默拒收](/troubleshooting/case-feishu-silent-deny)。
+诊断口诀（按层收窄）：① 先找 `failed to obtain token` / `[ws] ws connect failed`，`bridge online` 或 `client ready` 单独出现不等于连接成功；② 飞书后台已识别测试连接、但零事件 = 检查是否漏 `im.message.receive_v1` / 未使用长连接 / 未发布版本；③ 已有事件、但不回 = 应用层拒了，grep `deny` / `allowFrom`；④ 发图无反应 = 查 `modelImageCapable` flag + 下载是否失败（旧版本 bug，升级）。完整复盘 → [经典案例：飞书 Bot 静默拒收](/troubleshooting/case-feishu-silent-deny)。
 
 ## 10. 已知限制（preview scope）
 

@@ -7,7 +7,7 @@
 ## 现象
 
 - 飞书自建应用换了一个新 App（从任务型应用切到带 IM 能力的新应用）。
-- Bot 进程健康：日志有 `client ready`、`event-dispatch is ready`、`bridge online`，长连接已建立。
+- Bot 进程仍在，日志有 `client ready`、`event-dispatch is ready`、`bridge online`；当时把这些本地初始化标记误读成了「长连接已建立」。当前实现里，它们单独出现并不能证明鉴权或 WebSocket 成功。
 - 用户在单聊里发「你好」，**Bot 毫无反应**——既不报错，也不回复。
 - 反复重启、反复确认飞书后台「权限、事件订阅、发布版本都配了」，依旧无效。
 
@@ -90,21 +90,21 @@
 | 2 | `<node>/channels/feishu/.env` | 同上（Worker 实际读这个文件，可能覆盖环境变量） |
 | 3 | **`<node>/channels/feishu/access.json`** | **`allowFrom` / `allowChats` —— 因为 `open_id` / `chat_id` 随 App 变，旧 ID 会全部失效** |
 
-漏掉第 3 处的典型症状：**`client ready` 正常、能看到事件、但用户消息「毫无反应」**。
+漏掉第 3 处的典型症状：**已经看到真实事件进入 Worker，但用户消息仍「毫无反应」**。
 
 ## 通用诊断决策树（Bot 收不到消息时）
 
 把这次的教训沉淀成一棵从「连接 → 订阅 → 访问控制」三层依次收窄的决策树：
 
-**先看 Worker 日志有没有 `client ready` / `event-dispatch is ready`。**
+**先找连接 / 鉴权错误，再找真实事件证据；不要把 `client ready`、`event-dispatch is ready` 或 `bridge online` 单独当成成功线。**
 
-- **A) 没有 `client ready`、反复连接失败**
-  = 长连接连不上 = **网络阻断**（企业网 / DPI 挑域名阻断）。换到能访问飞书长连接域名的网络部署，重启、改配置都无用。
+- **A) 有 `failed to obtain token` 或反复 `[ws] ws connect failed`**
+  = 连接层还没过。前者优先检查 App ID / Secret 与 App 状态；后者检查 `https://open.feishu.cn/callback/ws/endpoint` 是否可达，以及平台动态返回的 `wss://...` 目标是否被企业网 / 代理拦截。即使同时出现 `bridge online`，也不能排除本分支。
 
-- **B) 有 `client ready`，但日志零事件**
-  = 连上了、平台却不推 = **App 侧事件订阅问题**。最常见：订了错的事件、缺 `im.message.receive_v1`、订阅方式没设成「使用长连接」、或改完没「创建版本 → 发布」。
+- **B) 飞书后台已识别正在运行的测试连接，但日志零事件**
+  = 转查 **App 侧事件订阅**。确认按[官方长连接配置顺序](https://open.feishu.cn/document/server-docs/event-subscription-guide/event-subscription-configure-/request-url-configuration-case)先启动测试客户端、再保存「使用长连接」，并只订阅 `im.message.receive_v1`，最后「创建版本 → 发布」。
 
-- **C) 有 `client ready`、有事件进来、但 Bot 不回**（本案例）
+- **C) 已有真实事件进来、但 Bot 不回**（本案例）
   = 消息收到了，被**应用层拒了**。**必须 grep 日志 `deny` / `allowFrom`**：
   - `[feishu:audit] deny ... not in allowFrom` → 白名单问题（换 App 后最常见，见上）。
   - `empty vendor result` → 模型生成了但抽不出文本（多为模型 × 网关响应格式不兼容），换一个兼容的模型。

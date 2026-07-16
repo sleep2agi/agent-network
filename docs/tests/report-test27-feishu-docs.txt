@@ -1,0 +1,49 @@
+Test 27 addendum — Feishu setup-documentation gate
+Date: 2026-07-16 (Asia/Shanghai)
+Base: main@59d5709c
+Candidate: docs/feishu-journey-v011 (final tree rebased onto the base above)
+
+Scope
+- Documentation-only validation for the Feishu from-zero setup journey.
+- No Feishu App credentials were read or used.
+- No bridge, production node, configuration, or PID was touched.
+- No message was sent to any Feishu user or group.
+
+L0 — Docker environment and independent suite image: PASS
+- Docker client/server: 29.4.0 / 29.4.0.
+- Built with tests/test27-cases-docs/Dockerfile as
+  anet-feishu-docs:267892fd.
+- Image build exit code: 0.
+- Existing npm audit/engine warnings were non-blocking and unrelated to
+  this docs-only change.
+
+L1 — Feishu documentation semantic contract: PASS
+- ZH/EN guide line parity: 338 / 338.
+- ZH/EN troubleshooting-case line parity: 145 / 145.
+- Both receive scopes and the official receive-event link are present.
+- The documented endpoint is open.feishu.cn, followed by a dynamically
+  returned wss:// target; the old api.feishu.cn claim is absent from the
+  eight updated guidance files.
+- The documented order is client first, then save long-connection mode.
+- bridge online/client ready are explicitly not treated as proof of WS
+  authentication success.
+- At least one allowlist variable is required; comma-separated Docker
+  values are rejected as documentation, and the current one-ID/rewrite
+  limitation is explicit.
+
+L2 — VitePress build and internal links: PASS
+- Command: npm run build, executed inside the Test 27 Docker image.
+- VitePress 1.6.4 rendered all pages successfully in 61.38 s on the
+  final rebased image (the pre-rebase run also passed in 54.88 s).
+- Exit code: 0.
+- Existing Caddy syntax-highlighting and large-chunk notices were warnings
+  only; no broken internal link or render failure occurred.
+
+L3 — Official Feishu links: PASS
+- Receive-message event documentation: HTTP 200.
+- Long-connection setup documentation: HTTP 200.
+- Requests were read-only curl checks from the isolated Docker container.
+
+Result: PASS (documentation layers only)
+Live connection/authentication remains intentionally untested until a
+dedicated test enterprise App is provided.

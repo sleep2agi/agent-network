@@ -142,11 +142,11 @@ anet channel allow feishu TMWork小助手 --add-chat oc_<chat_id>   # 加群
 
 ## 5. 故障排查决策树
 
-**先看 worker 日志有没有 `client ready` / `event-dispatch is ready`。**
+**先找连接 / 鉴权错误和真实事件证据；`client ready`、`event-dispatch is ready`、`bridge online` 单独出现都不是成功线。**
 
-- **A) 没有 `client ready`** = 长连接连不上 = 网络阻断 `api.feishu.cn`（企业网/DPI）。换网络部署。
-- **B) 有 `client ready` 但零事件** = app 侧事件订阅没配对（漏 `im.message.receive_v1` / 没设长连接 / 没发布版本）。
-- **C) 有 `client ready`、有事件、但不回** = 应用层拒了。**grep `deny`/`allowFrom`**：
+- **A) `failed to obtain token` / `[ws] ws connect failed`** = 连接层未过。前者查凭证与 App 状态；后者查 `open.feishu.cn` HTTPS 和平台动态返回的 `wss://...` 目标是否被企业网 / DPI 拦截。即使同时有 `bridge online` 也不算成功。
+- **B) 后台已识别测试连接但零事件** = app 侧事件订阅没配对。必须先保持客户端运行、再保存「使用长连接」，并检查 `im.message.receive_v1` / 已发布版本。
+- **C) 已有真实事件、但不回** = 应用层拒了。**grep `deny`/`allowFrom`**：
   - `[feishu:audit] deny ... not in allowFrom` → 白名单（换 app 后最常见）。
   - `empty vendor result` → 模型生成了但抽不出文本（模型×网关不兼容），换 model。
   - `No conversation found` → session 失效，清 session 重启。

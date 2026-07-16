@@ -7,7 +7,7 @@
 ## Symptoms
 
 - The Feishu custom app was switched to a new app (from a task-oriented app to a new IM-capable one).
-- The bot process was healthy: logs showed `client ready`, `event-dispatch is ready`, `bridge online` — the long-connection was established.
+- The bot process stayed alive and logged `client ready`, `event-dispatch is ready`, and `bridge online`; at the time, those local-initialization markers were misread as proof that the long-lived connection was established. In the current implementation, they do not by themselves prove authentication or WebSocket readiness.
 - The user sent "hi" in a direct message and the bot was **completely silent** — no error, no reply.
 - Repeated restarts and repeated checks of the Feishu console ("permissions, event subscriptions, published version — all configured") changed nothing.
 
@@ -90,21 +90,21 @@ This is the core checklist of the case. **All three must change; the one most of
 | 2 | `<node>/channels/feishu/.env` | Same as above (the worker actually reads this file, which can override env vars) |
 | 3 | **`<node>/channels/feishu/access.json`** | **`allowFrom` / `allowChats` — because `open_id` / `chat_id` change with the app, all old IDs become invalid** |
 
-Classic symptom of missing #3: **`client ready` is fine, events arrive, yet the user's messages get "no reaction."**
+Classic symptom of missing #3: **real events are visibly reaching the worker, yet the user's messages get "no reaction."**
 
 ## General Decision Tree (when the bot doesn't receive messages)
 
 Distilled into a tree that narrows through three layers — connection → subscription → access control:
 
-**First check whether the worker log has `client ready` / `event-dispatch is ready`.**
+**Look for connection / authentication errors first, then for real event evidence; do not treat `client ready`, `event-dispatch is ready`, or `bridge online` alone as a success line.**
 
-- **A) No `client ready`, repeated connection failures**
-  = the long-connection can't connect = **network block** (corporate network / DPI blocking the domain). Deploy where the Feishu long-connection domain is reachable; restarts and config changes won't help.
+- **A) `failed to obtain token` appears or `[ws] ws connect failed` repeats**
+  = the connection layer has not passed. For the former, check the App ID / Secret and app state; for the latter, check reachability to `https://open.feishu.cn/callback/ws/endpoint` and whether the corporate network / proxy blocks the dynamically returned `wss://...` destination. A simultaneous `bridge online` line does not rule out this branch.
 
-- **B) `client ready` present, but zero events in the log**
-  = connected, but the platform isn't pushing = **app-side subscription problem**. Most common: wrong event subscribed, missing `im.message.receive_v1`, subscription mode not set to "long-connection", or changes not "version created → published".
+- **B) The Feishu console recognizes the running test connection, but the log has zero events**
+  = inspect the **app-side event subscription**. Follow the [official long-lived connection order](https://open.feishu.cn/document/server-docs/event-subscription-guide/event-subscription-configure-/request-url-configuration-case): start the test client first, then save "Long-lived connection"; subscribe only to `im.message.receive_v1`, then create and publish a version.
 
-- **C) `client ready` present, events arrive, but the bot doesn't reply** (this case)
+- **C) Real events arrive, but the bot doesn't reply** (this case)
   = message received, denied at the **application layer**. **You must grep the log for `deny` / `allowFrom`:**
   - `[feishu:audit] deny ... not in allowFrom` → allowlist problem (most common after switching apps, see above).
   - `empty vendor result` → the model generated output but no text could be extracted (usually a model × gateway response-format mismatch); switch to a compatible model.

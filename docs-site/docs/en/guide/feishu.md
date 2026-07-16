@@ -16,22 +16,28 @@ Connect an anet node to Feishu so Feishu users can talk to the agent directly. `
 
 ## 2. Prerequisites: Feishu self-built app
 
-In the [Feishu Open Platform](https://open.feishu.cn), create an **enterprise self-built app** and enable bot capabilities:
+In the [Feishu Open Platform](https://open.feishu.cn), create an **enterprise self-built app** and configure it in this order:
 
-1. **Permissions** (App Capabilities → Permissions):
-   - `im:message:send_as_bot` — bot sends messages
-   - `im:message` — bot receives messages
-   - `im:resource` — upload images
-2. **Event subscription**: under "Event Subscription → Delivery mode" pick **"Long-lived connection / 使用长连接"** (**NOT** "Webhook URL"), then in the event list subscribe to **"Receive message — `im.message.receive_v1`"** (only this one).
-   - No public IP / webhook URL / Encrypt Key needed
-3. **Publish a version** + wait for admin approval
-4. Copy the **App ID** + **App Secret** (Credentials & basic info page)
+1. Enable **Bot** under App Capabilities → Add App Capability.
+2. Request these permissions under Permissions (Feishu's official [Receive message event documentation](https://open.feishu.cn/document/server-docs/im-v1/message/events/receive?lang=en-US) covers the two readonly receive scopes; the send / resource scopes support the bridge capabilities below):
+   - `im:message.p2p_msg:readonly` — receive DMs that users send to the bot
+   - `im:message.group_at_msg:readonly` — receive group messages that @mention the bot
+   - `im:message` — read message content and call message APIs
+   - `im:message:send_as_bot` — send messages as the bot
+   - `im:resource` — upload images and other resources that the bot sends
+3. Copy the **App ID** + **App Secret** from Credentials & Basic Info.
+4. **Do not save the event-subscription settings yet.** Use these credentials to start a test long-lived connection through §3 (Docker) or §8 (manual), and keep that process running.
+5. With the test connection running, return to Event Subscription → Delivery Mode, select **"Long-lived connection / 使用长连接"** (**NOT** "Webhook URL"), save it, and subscribe only to **"Receive message — `im.message.receive_v1`"**.
+   - Feishu's official [long-lived connection setup guide](https://open.feishu.cn/document/server-docs/event-subscription-guide/event-subscription-configure-/request-url-configuration-case) requires this order: **start the client before saving the delivery mode**.
+   - No public IP, webhook URL, or Encrypt Key is needed.
+6. **Create and publish a version**, then wait for admin approval.
 
 ::: warning ⚠️ Real-world gotchas (users have hit all four)
-1. **Delivery mode MUST be "Long-lived connection / 使用长连接"** — not "Webhook URL". The Feishu admin labels it "长连接", not "WebSocket"; if you can't find a "WebSocket" button you're looking in the wrong section.
-2. **Don't subscribe `bot_p2p_chat_entered` ("User entered chat") by mistake** — the event list shows other "session" / "message"-flavored events. Tick **only** "Receive message `im.message.receive_v1`". Extra subscriptions trigger unintended paths.
-3. **Network reachability**: the bot host must be able to reach `api.feishu.cn` (the long-lived connection events flow through that domain — **not** `open.feishu.cn`). If agent-node logs keep printing `[ws] ws connect failed` with zero events delivered → most likely a corporate / DPI network is whitelisting only `open.feishu.cn` and blocking `api.feishu.cn`. Deploy from a network that can reach `api.feishu.cn` (or whitelist it).
-4. **Add the bot to the group first** — if the bot isn't a group member, no one can `@` it. A group admin needs to go to Group Settings → Group Bots → Add Bot → pick the self-built app you just published. §6 below also requires the group's `chat_id` to be on the allowlist.
+1. **Start the test connection before saving the delivery mode** — if the order is reversed, the Feishu console cannot detect a long-lived connection client.
+2. **Delivery mode MUST be "Long-lived connection / 使用长连接"** — not "Webhook URL". The Feishu console calls it "长连接", not "WebSocket".
+3. **Don't subscribe `bot_p2p_chat_entered` ("User entered chat") by mistake** — tick only "Receive message `im.message.receive_v1`". Extra subscriptions trigger unintended paths.
+4. **Network reachability**: the official SDK first authenticates through `https://open.feishu.cn/callback/ws/endpoint` and receives a dynamically assigned `wss://...` URL, then connects that WebSocket. Corporate firewalls and proxies must allow HTTPS to `open.feishu.cn` plus the dynamic WSS destination returned in the response; do not hard-code an old domain or a single WSS hostname / IP.
+5. **Add the bot to the group first** — if the bot isn't a group member, no one can `@` it. A group admin needs to go to Group Settings → Group Bots → Add Bot → pick the self-built app you just published. §6 below also requires the group's `chat_id` to be on the allowlist.
 :::
 
 ## 3. 🚀 Docker one-command (recommended)
@@ -47,7 +53,7 @@ docker/feishu/
 ├── docker-compose.yml      # BYOH default + optional local-hub profile
 ├── Dockerfile              # node:22-bookworm-slim + bun + pinned versions
 ├── .env.example            # field template, annotated with verified vendor+model combos
-├── entrypoint.sh           # login → node create → channel add feishu → start, idempotent
+├── entrypoint.sh           # login → node create → channel add feishu → start; reruns bootstrap on restart
 └── README.md               # 3-step quickstart + .env essentials + troubleshooting table
 ```
 
@@ -64,7 +70,9 @@ docker compose up -d                        # ~2 min on the first build
 docker compose logs -f feishu-agent         # tail bring-up + runtime logs
 ```
 
-The container entrypoint runs the full bring-up chain: `hub init` → `anet login` → `anet node create` → `anet channel add feishu` → `anet node start`. Each step is **idempotent** — restart the container at any time, prior state is preserved under `./data/.anet/`.
+For a new app, leave the container running and return to §2 step 5 to save "Long-lived connection" and add the event subscription. In the current release, `bridge online` means only that the worker started; it **does not by itself prove Feishu authentication or WebSocket readiness**. Also confirm that the log has no `failed to obtain token` / `[ws] ws connect failed` and that the Feishu console recognizes the test connection.
+
+The container entrypoint runs the full bring-up chain: `hub init` → `anet login` → `anet node create` → `anet channel add feishu` → `anet node start`. Node state persists under `./data/.anet/`; each restart rewrites the Docker bootstrap allowlist from the current `.env`.
 
 ### `.env` essentials (canonical source: [`docker/feishu/.env.example`](https://github.com/sleep2agi/agent-network/blob/main/docker/feishu/.env.example))
 
@@ -74,8 +82,8 @@ The container entrypoint runs the full bring-up chain: `hub init` → `anet logi
 | `HUB_USER` / `HUB_PASSWORD` | Account on that hub (**non-interactive `anet login --username/--password` runs on every container start, so there is no pre-issued ntok_ to manage**) | ✅ |
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` | The credentials from §2 | ✅ |
 | `ANET_MODEL` + `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` | LLM-backend triple (see §4) | ✅ |
-| `FEISHU_ALLOW_FROM` | `open_id` allowlist for DMs (comma-separated) | Optional, **strongly recommended** |
-| `FEISHU_ALLOW_CHATS` | `chat_id` allowlist for groups (comma-separated) | Optional |
+| `FEISHU_ALLOW_FROM` | One DM sender `open_id` scoped to the **current app** (the Docker bootstrap option does not parse comma-separated lists) | ✅ At least one of these two |
+| `FEISHU_ALLOW_CHATS` | One group `chat_id` scoped to the current app | ✅ At least one of these two |
 | `NODE_ALIAS` | Node alias (default `feishu-agent`) | Optional |
 | `ACK_PLACEHOLDER` | "⏳ 处理中…" placeholder switch (default `true`, see §7) | Optional |
 
@@ -151,7 +159,7 @@ When the picked backend doesn't support images and Feishu delivers an image mess
 
 The bridge does **not** accept messages from the entire network — you must explicitly list allowed **users** (`open_id`) and **groups** (`chat_id`) in `access.json`.
 
-**Docker path** (recommended): edit `.env` (the `FEISHU_ALLOW_FROM` / `FEISHU_ALLOW_CHATS` variables get pushed through to `access.json` during bring-up). Run `docker compose restart` for changes to take effect.
+**Docker path** (recommended): before the first startup, set at least one of `.env` `FEISHU_ALLOW_FROM` (one real `open_id` scoped to the current app) or `FEISHU_ALLOW_CHATS` (one `chat_id`). Empty does not mean "allow everyone." Neither bootstrap option parses comma-separated lists, so the current Docker path supports at most one ID of each kind. Do not append more IDs with the CLI inside the container: the entrypoint rewrites `access.json` from `.env` on the next restart. Use the non-Docker manual path below when multiple IDs are required.
 
 **Manual `anet` path**: use the CLI to add / remove entries:
 
@@ -273,13 +281,17 @@ Writes under `.anet/nodes/<node-name>/channels/feishu/`:
 anet node start <node-name>
 ```
 
-The startup log should contain:
+For a new app, keep the node running and return to §2 step 5 to save the long-lived connection subscription and publish the version.
+
+Startup logs first include these **worker-process markers**:
 
 ```
 [agent-node] channels: feishu(/path/.anet/nodes/<node-name>/channels/feishu)
 [agent-node] [feishu] forked worker (pid 12345) for ... via ...
 [feishu:worker] bridge online — node=<node-name> dir=... ipc=yes
 ```
+
+In the current release, `bridge online` is not connection-success evidence: this line can appear even when the app credentials fail authentication. A connection-layer check must also confirm there is no `failed to obtain token` / `[ws] ws connect failed` and that the Feishu console recognizes the running test client when saving "Long-lived connection"; do not substitute a live message for a connection-only check.
 
 The worker path defaults to `dist/src/im/feishu/worker.js` (shipped with `@sleep2agi/agent-network`). To override:
 
@@ -299,14 +311,16 @@ export ANET_FEISHU_WORKER_PATH=/path/to/your/worker.js
 |---|---|
 | Node startup logs `unsupported channel: feishu` | agent-node is too old — upgrade to `agent-node@2.4.15-preview.2` or newer |
 | `[feishu] worker path not found` warn | Set `ANET_FEISHU_WORKER_PATH`, or verify `@sleep2agi/agent-network` is installed and compiled |
-| WSClient can't connect to Feishu | App not approved / wrong credentials / network issue — the bridge auto-reconnects; check stderr |
+| `failed to obtain token` | Wrong App ID / Secret, unusable app state, or authentication failure; `bridge online` does not override this error |
+| `[ws] ws connect failed` | Check HTTPS access to `open.feishu.cn` and whether the corporate network / proxy blocks the dynamically returned WSS destination |
+| Only `bridge online` / `client ready` appears | These are local-initialization clues, not proof of authentication or WebSocket readiness; rule out the two errors above and check whether the Feishu console recognizes the test client |
 | Bot doesn't reply in a group | 1) Bot is added to the group with send permissions 2) `access.json` `allowChats` includes the target `chat_id` 3) `/open-apis/bot/v3/info` is returning a valid `open_id` 4) After editing `access.json`, did you restart the node? (Not hot-reloaded — see §5) |
 | Bot doesn't reply in a DM | Verify the sender's `open_id` is in `allowFrom` (run `anet channel ls`) |
 | **Connected, events arrive, but messages get "no reaction"** | **grep the bridge stderr for `deny` / `allowFrom`**: message received but sender not in allowlist. **Most common after switching apps** (`open_id` changed per app — see the §5 danger note) |
 | Bot replies seem wrong / errors out on an image | The backend isn't vision-capable (§4) — switch to a vision-capable model |
 | **Sending an image gets "received the event but no processable text/image content"** | The image wasn't extracted. Check in order: ① the node has image capability off (`flags.modelImageCapable` is unset by default — see §4) ② **download failed** — look for `[feishu:image] … download FAILED` in the log; most often the **old `downloadImage` SDK-misuse bug** ([#324](https://github.com/sleep2agi/agent-network/pull/324), present in old builds like `2.2.22-preview.2`) — upgrade to a preview that includes the fix. See [Case Study · companion](/en/troubleshooting/case-feishu-silent-deny#companion-case-the-bot-can-t-see-images) |
 
-Diagnostic mnemonic (narrow by layer): ① no `client ready` in the log = can't reach the Feishu long-connection domain → change network; ② `client ready` but zero events = console event subscription not wired (missing `im.message.receive_v1` / not long-connection mode / version not published); ③ `client ready`, events arrive, but no reply = denied at the application layer, grep `deny` / `allowFrom`; ④ image gets no reaction = the image wasn't extracted — check the `modelImageCapable` flag + whether the download failed (old-version bug, upgrade). Full post-mortem → [Case Study: Feishu Silent Deny](/en/troubleshooting/case-feishu-silent-deny).
+Diagnostic mnemonic (narrow by layer): ① look first for `failed to obtain token` / `[ws] ws connect failed`; `bridge online` or `client ready` alone does not mean the connection succeeded; ② the Feishu console recognizes the test connection but no events arrive = check for missing `im.message.receive_v1`, the wrong delivery mode, or an unpublished version; ③ events arrive but there is no reply = denied at the application layer, grep `deny` / `allowFrom`; ④ an image gets no reaction = check the `modelImageCapable` flag and whether the download failed (old-version bug, upgrade). Full post-mortem → [Case Study: Feishu Silent Deny](/en/troubleshooting/case-feishu-silent-deny).
 
 ## 10. Known limitations (preview scope)
 

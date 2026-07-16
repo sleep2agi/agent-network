@@ -11,7 +11,9 @@ docker compose up -d                       # builds image first time (~2 min)
 docker compose logs -f feishu-agent        # tail bring-up + agent logs
 ```
 
-The container's entrypoint runs the full bring-up chain automatically: hub init → login → node create → channel add feishu → start. Idempotent — restart the container any time, prior state is preserved under `./data/.anet/`.
+For a brand-new Feishu app, start and keep this client running **before** saving "使用长连接" in Event Subscription; then save the mode and add only `im.message.receive_v1`. See the [full guide](../../docs-site/docs/en/guide/feishu.md) for the required scopes and connection checks. `bridge online` alone is not proof that Feishu authentication succeeded.
+
+The container's entrypoint runs the full bring-up chain automatically: hub init → login → node create → channel add feishu → start. Node state persists under `./data/.anet/`; each restart reapplies the bootstrap allowlist from `.env`.
 
 ## `.env` essentials
 
@@ -22,17 +24,20 @@ HUB_PASSWORD=your-password                 # login is non-interactive via --user
 
 FEISHU_APP_ID=cli_xxxx                     # from https://open.feishu.cn → your app
 FEISHU_APP_SECRET=xxxx
+FEISHU_ALLOW_FROM=ou_xxx                   # one app-scoped open_id; required unless FEISHU_ALLOW_CHATS is set
 
 ANET_MODEL=deepseek-v4-pro                 # or MiniMax-M3 (vision) / claude-sonnet-4-6 / etc.
 ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
 ANTHROPIC_AUTH_TOKEN=sk-xxxx
 ```
 
-Optional whitelist (recommended for prod — keeps bot from being triggered by random users):
+Access allowlist (required — set at least one; empty is not allow-all):
 ```bash
-FEISHU_ALLOW_FROM=ou_xxx,ou_yyy            # sender open_id allowlist (DM)
-FEISHU_ALLOW_CHATS=oc_xxx,oc_yyy           # chat_id allowlist (group)
+FEISHU_ALLOW_FROM=ou_xxx                   # one sender open_id (DM)
+FEISHU_ALLOW_CHATS=oc_xxx                  # one chat_id (group)
 ```
+
+The Docker bootstrap does not split comma-separated values, so it currently supports at most one ID of each kind. Do not append extra IDs with the CLI inside the container: the next restart rewrites `access.json` from `.env`. Use the non-Docker manual setup for multi-ID allowlists until the entrypoint is fixed.
 
 See `.env.example` for the full annotated list (verified vendor + model combos, NODE_ALIAS override, etc.).
 
