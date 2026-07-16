@@ -34,6 +34,13 @@ cp <node-config>.json <node-config>.json.bak-jam-$(date +%H%M)
 # 4. 验证：pane 出现 created thread/SSE connected；hub /api/status 心跳刷新
 ```
 
+## 快照竞态警告（真实案例）
+
+「先保全再重启」的快照可能**跟垂死 turn 的最后写入竞态**：实测重启前后 workspace 又多了 3 个
+文件的写入（其中一个还是安全相关修复）。所以：**重启完成、节点稳定后，必须把保全物（分支/PR）
+与 workspace 重新逐文件 diff 一次**（tree hash 对比最稳），有漂移以 workspace 较新版本为准补齐。
+不做这步，保全物可能悄悄少了最后几笔关键修改。
+
 ## 重启后
 
 - 任务**拆小步重喂**（一步一报），避免又进一个几小时的大 turn
