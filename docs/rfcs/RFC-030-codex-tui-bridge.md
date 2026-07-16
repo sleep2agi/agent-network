@@ -928,7 +928,7 @@ codex app-server generate-json-schema --out ./schemas
 ```
 - `codexThreadId` 存放于**专属字段**（不占用通用 `session` 字段, 避免与其他 runtime 冲突）; 首次落地由 `onThread` 自动写回。
 - `approvalPolicy` + `sandboxMode` 驱动 OWNED app-server 的 `-c approval_policy` / `-c sandbox_mode`（自动批准 / 沙箱姿态）; adopt server 自带策略。
-- 前置：本机装 `codex` CLI 并 `codex auth login`。
+- 前置：本机装 `codex` CLI 并 `codex login`（codex 没有 `auth` 子命令）。
 
 ### 18.6 已知边界 / 后续
 
