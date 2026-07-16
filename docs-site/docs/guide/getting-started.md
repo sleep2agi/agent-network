@@ -6,7 +6,12 @@
 跳过本页, 走 [升级指南](/guide/upgrade)（通常 `anet upgrade` 一键 + `anet project restart` 重启 cwd 节点）。
 :::
 
-**前置**: Node.js ≥ 22.13.0（`commhub-server` 和 `agent-node` 在第一次需要时由 `bunx` / `npx` 自动拉取, 不用手动装）。
+**前置**（两个都要装）：
+
+- **Node.js ≥ 22.13.0**
+- **Bun ≥ 1.2.0** —— 装法 `npm i -g bun`（或 `curl -fsSL https://bun.sh/install | bash`）。第 2 步 `anet hub start` 底层用 `bunx` 起 `commhub-server`，**没装 Bun 第一步就会崩 `spawn bunx ENOENT`**。装完 `bun --version` 应有输出。
+
+这俩装好就行；`commhub-server` / `agent-node` 首次用时自动拉取，不用手动装。
 
 ---
 

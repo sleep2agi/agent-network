@@ -6,7 +6,12 @@ The minimum path for a brand-new user — **5 steps, 5 minutes**. One command + 
 Skip this page and go to the [Upgrade Guide](/en/guide/upgrade) (usually `anet upgrade` + `anet project restart` to restart cwd nodes).
 :::
 
-**Prerequisite**: Node.js ≥ 22.13.0 (`commhub-server` and `agent-node` are auto-fetched via `bunx` / `npx` on first use — you don't install them manually).
+**Prerequisites** (install both):
+
+- **Node.js ≥ 22.13.0**
+- **Bun ≥ 1.2.0** — install with `npm i -g bun` (or `curl -fsSL https://bun.sh/install | bash`). Step 2's `anet hub start` launches `commhub-server` via `bunx`, so **without Bun the very first step crashes with `spawn bunx ENOENT`**. After installing, `bun --version` should print a version.
+
+With both installed, `commhub-server` / `agent-node` are auto-fetched on first use — you don't install them manually.
 
 ---
 
