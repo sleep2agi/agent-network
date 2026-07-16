@@ -126,7 +126,7 @@ npx @sleep2agi/agent-node \
 
 ### grok-build-acp
 
-基于 [xAI Grok Build ACP (Agent Communication Protocol)](https://docs.x.ai/docs/grok-build) 接入，spawn 本地 `grok` ACP server 跑任务。第 4 runtime，已可在 `anet node create` wizard 里选择，也可用 `--runtime grok-build-acp` 显式指定。详细配置 / Known Limits / Delegation Contract 见 [grok-build-runtime.md ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)。
+基于 [xAI Grok Build ACP (Agent Communication Protocol)](https://docs.x.ai/docs/overview) 接入，spawn 本地 `grok` ACP server 跑任务。第 4 runtime，已可在 `anet node create` wizard 里选择，也可用 `--runtime grok-build-acp` 显式指定。详细配置 / Known Limits / Delegation Contract 见 [grok-build-runtime.md ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)。
 
 | 属性 | 说明 |
 |------|------|

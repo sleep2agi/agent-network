@@ -126,7 +126,7 @@ After starting, you should see `SSE connected, waiting for tasks...`.
 
 ### grok-build-acp
 
-Integrates with [xAI Grok Build ACP (Agent Communication Protocol)](https://docs.x.ai/docs/grok-build) by spawning the local `grok` ACP server. This is the 4th runtime; it is available in the `anet node create` wizard and can also be selected explicitly with `--runtime grok-build-acp`. Full configuration / Known Limits / Delegation Contract: [grok-build-runtime.md ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md).
+Integrates with [xAI Grok Build ACP (Agent Communication Protocol)](https://docs.x.ai/docs/overview) by spawning the local `grok` ACP server. This is the 4th runtime; it is available in the `anet node create` wizard and can also be selected explicitly with `--runtime grok-build-acp`. Full configuration / Known Limits / Delegation Contract: [grok-build-runtime.md ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md).
 
 | Field | Description |
 |------|------|
