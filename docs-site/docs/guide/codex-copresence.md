@@ -32,7 +32,7 @@ npm install -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview
 codex app-server --listen ws://127.0.0.1:4500
 ```
 
-> 只绑 `127.0.0.1`，不要暴露公网。本地长驻优先 `codex remote-control start` + `codex --remote unix://`（unix socket 仅 Linux/macOS；Windows 用上面的 WS）。
+> 只绑 `127.0.0.1`，不要暴露公网。**Linux/macOS** 上本地长驻优先 `codex remote-control start` + `codex --remote unix://`。**Windows 不支持 `codex remote-control` daemon**（真机报 `daemon lifecycle is only supported on Unix platforms`）——Windows 就用上面的 `codex app-server --listen ws://`，靠计划任务/服务保持常驻。
 
 **2. 人类接入 TUI**（另开一个终端）：
 
