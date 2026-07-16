@@ -42,14 +42,14 @@ Agent Network has 4 roles: `owner` / `admin` / `member` / `viewer`. **The role e
 | Delete network | ❌ | ❌ | ❌ | ✅ |
 | **Hub-global** (system-level `users.role` gate, **not** network role) | | | | |
 | `/api/audit-log` — your own rows | ✅ | ✅ | ✅ | ✅ |
-| `/api/audit-log` — all rows | Only `users.role='admin'` (verified at [`server/src/index.ts:1086-1089`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1086)) | | | |
+| `/api/audit-log` — all rows | Only `users.role='admin'` (verified at [`server/src/index.ts:1926-1929`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1926)) | | | |
 | `/api/users` (list users) | Only `users.role='admin'` (same system-level gate) | | | |
 | `/api/server-logs` (debug console) | Only `users.role='admin'` | | | |
 | `anet hub admin reset-user` (reset any user's password) | Local-only CLI command on the hub host, not role-gated (the hub owner just needs local shell access) | | | |
 
 > ※ `anet node start / stop / delete` are **pure local CLI operations** — they read/write the local `.anet/nodes/<alias>/` directory directly, and `startCommand` / `deleteCommand` have **no network-role / owner / per-creator check** whatsoever. Whoever has that node config on their machine can start/stop/delete it, regardless of their network role. The only network-role-gated lifecycle op is `anet node create` (it requests an `ntok_` from the hub, and `canWrite` blocks viewer).
 
-> the three MCP write tools `send_task` / `cancel_task` / `reassign_task` pass through **a single [`canWrite` gate](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L24)** (`role !== "viewer"` — owner/admin/member all pass) with **no per-task ownership check** — a member can cancel / reassign **any** task in the network, not just ones they dispatched. Renaming a network is owner-only ([`auth.ts:218 renameNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L218) `if (net.owner_id !== userId)`), same as deleting it — admin cannot rename.
+> the three MCP write tools `send_task` / `cancel_task` / `reassign_task` pass through **a single [`canWrite` gate](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L111)** (`role !== "viewer"` — owner/admin/member all pass) with **no per-task ownership check** — a member can cancel / reassign **any** task in the network, not just ones they dispatched. Renaming a network is owner-only ([`auth.ts:282 renameNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L282) `if (net.owner_id !== userId)`), same as deleting it — admin cannot rename.
 
 ---
 
@@ -126,7 +126,7 @@ The 4 roles above are scoped to a single network. There is also a **hub-global a
 | Operation | network admin | hub-global admin (`admin` user) |
 |---|---|---|
 | `/api/audit-log` — own rows | ✅ | ✅ |
-| `/api/audit-log` — all rows | ❌ (server auto-filters `WHERE user_id = self`) | ✅ (index.ts:1086-1089) |
+| `/api/audit-log` — all rows | ❌ (server auto-filters `WHERE user_id = self`) | ✅ (index.ts:1926-1929) |
 | `anet hub admin reset-user` (reset any user's password) | ❌ | ✅ (local-only) |
 | Create new users | ❌ | ✅ |
 | See all networks on the hub | ❌ (only ones they're a member of) | ✅ |

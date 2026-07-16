@@ -42,14 +42,14 @@ Agent Network 用 4 个角色：`owner` / `admin` / `member` / `viewer`。**你 
 | 删除 network | ❌ | ❌ | ❌ | ✅ |
 | **hub 全局**（系统级 `users.role` 门控，**不是** 网络角色） | | | | |
 | 看 `/api/audit-log` 自己的 row | ✅ | ✅ | ✅ | ✅ |
-| 看 `/api/audit-log` 全部 row | 仅 `users.role='admin'`（verify [`server/src/index.ts:1086-1089`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1086)） | | | |
+| 看 `/api/audit-log` 全部 row | 仅 `users.role='admin'`（verify [`server/src/index.ts:1926-1929`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1926)） | | | |
 | `/api/users` 看用户列表 | 仅 `users.role='admin'`（同上系统级） | | | |
 | `/api/server-logs` 调试 console | 仅 `users.role='admin'` | | | |
 | `anet hub admin reset-user`（重置任意用户密码） | 仅 hub 本机命令行调用，与角色无关（owner 本机权限即可） | | | |
 
 > ※ `anet node start / stop / delete` 是**纯本地 CLI 操作** —— 直接读写本机 `.anet/nodes/<alias>/` 目录，`startCommand` / `deleteCommand` 里**没有任何网络角色 / owner / per-creator 检查**。谁的机器上有那份 node config，谁就能 start/stop/delete 它，跟该 user 在网络里是什么 role 无关。受网络角色门控的只有 `anet node create`（要向 hub 换 `ntok_`，`canWrite` 挡 viewer）。
 
-> `send_task` / `cancel_task` / `reassign_task` 三个 MCP 写工具**只过一道 [`canWrite` 门](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L24)**（`role !== "viewer"` —— owner/admin/member 都放行），**没有 per-task ownership 检查** —— member 可以 cancel / reassign 网络里**任何**任务，不限「自己派的」。重命名 network 是 owner-only（[`auth.ts:218 renameNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L218) `if (net.owner_id !== userId)`），跟「删除 network」一样，admin 不能改名。
+> `send_task` / `cancel_task` / `reassign_task` 三个 MCP 写工具**只过一道 [`canWrite` 门](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L111)**（`role !== "viewer"` —— owner/admin/member 都放行），**没有 per-task ownership 检查** —— member 可以 cancel / reassign 网络里**任何**任务，不限「自己派的」。重命名 network 是 owner-only（[`auth.ts:282 renameNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L282) `if (net.owner_id !== userId)`），跟「删除 network」一样，admin 不能改名。
 
 ---
 
@@ -161,7 +161,7 @@ network 的 4 个 role（owner/admin/member/viewer）是**绑定到某个 networ
 | 操作 | network admin | hub 全局 admin (`admin` user) |
 |---|---|---|
 | 调 `/api/audit-log` 看**自己的** row | ✅ | ✅ |
-| 调 `/api/audit-log` 看**其他人** row | ❌（server 自动 `WHERE user_id = self` 过滤） | ✅（看全部，index.ts:1086-1089） |
+| 调 `/api/audit-log` 看**其他人** row | ❌（server 自动 `WHERE user_id = self` 过滤） | ✅（看全部，index.ts:1926-1929） |
 | `anet hub admin reset-user`（重置任意用户密码） | ❌ | ✅（仅 hub 本机调用） |
 | 创建新 user | ❌ | ✅（仅 hub 全局 admin） |
 | 看 hub 所有 network | ❌（只看自己有 role 的） | ✅ |
