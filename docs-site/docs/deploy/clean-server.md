@@ -166,7 +166,7 @@ anet node create my-bot
 节点名 → runtime → (仅 claude-agent-sdk 才弹) vendor → model → API Key / 鉴权
 ```
 
-**runtime 是第一道分叉, 5 选 1, 决定后面要不要配 vendor + 配什么依赖** (npm 包 / 主推模型 / 详细 wizard 行为对照见 [runtimes — 五种 Runtime 对比 (canonical)](/guide/runtimes#五种-runtime-对比-canonical-表)):
+**runtime 是第一道分叉（正式版 4 选 1；预览版另加 `codex-app-server` / `opencode-cli`），决定后面要不要配 vendor + 配什么依赖** (npm 包 / 主推模型 / 详细 wizard 行为对照见 [runtimes — Runtime 对比 (canonical)](/guide/runtimes#runtime-对比-canonical-表)):
 
 | Runtime | 复杂度 | 适合 | wizard 后续 | 额外依赖 |
 |---|---|---|---|---|
@@ -377,6 +377,6 @@ sudo systemctl status anet-hub anet-node@my-bot
 - [一键安装](/guide/one-shot-install) — `setup-anet.sh` 自动起 hub + dashboard + 多 agent
 - [生产部署 / 公网部署安全](/deploy/production) — TLS / 防火墙 / 备份 / 公网风险点
 - [Channel 接入](/guide/channels) — Telegram / WeChat / 飞书 完整接入手册
-- [节点 Runtime](/guide/runtimes) — 5 个 runtime 详细对比
+- [节点 Runtime](/guide/runtimes) — runtime 详细对比
 
 如果踩到本页没覆盖的坑，欢迎到 [GitHub Issues](https://github.com/sleep2agi/agent-network/issues) 开一条 + cite 哪一步、什么报错、`anet -v` 输出。

@@ -166,7 +166,7 @@ The wizard asks the following, in order:
 node-name → runtime → (only if claude-agent-sdk) vendor → model → API key / auth
 ```
 
-**Runtime is the first fork — it's a 5-way pick that decides whether you'll be asked for a vendor and what dependencies you'll need** (npm package / default models / detailed wizard behavior: see [runtimes — canonical table](/en/guide/runtimes#five-runtimes-—-canonical-table)):
+**Runtime is the first fork — a 4-way pick on stable (6-way on preview) that decides whether you'll be asked for a vendor and what dependencies you'll need** (npm package / default models / detailed wizard behavior: see [runtimes — canonical table](/en/guide/runtimes#runtimes-—-canonical-table)):
 
 | Runtime | Complexity | Best for | Wizard follow-up | Extra dependencies |
 |---|---|---|---|---|
@@ -377,6 +377,6 @@ In the order they hit you on a real fresh machine — **symptom → cause → fi
 - [One-shot install](/en/guide/one-shot-install) — `setup-anet.sh` brings up hub + dashboard + multi-agent in one shot
 - [Production / public-internet deployment](/en/deploy/production) — TLS / firewall / backup / public-internet risk surface
 - [Channel integration](/en/guide/channels) — full Telegram / WeChat / Feishu integration manual
-- [Node runtime](/en/guide/runtimes) — detailed comparison of the five runtimes
+- [Node runtime](/en/guide/runtimes) — detailed comparison of the runtimes
 
 If you hit a bug not covered here, please open a [GitHub issue](https://github.com/sleep2agi/agent-network/issues) — include which step failed, the exact error, and the `anet -v` output.
