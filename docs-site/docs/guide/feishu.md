@@ -147,7 +147,7 @@ docker compose up -d
 
 | 后端 | model 示例 | 备注 |
 |---|---|---|
-| Anthropic 官方 | `claude-sonnet-4-5-...` | 主线 vision |
+| Anthropic 官方 | `claude-sonnet-4-6` | 主线 vision |
 | MiniMax | `MiniMax-M3` | 国内可达 |
 | 小米 MiMo（vision） | `mimo-v2.5-pro` 等 | 国内可达 |
 

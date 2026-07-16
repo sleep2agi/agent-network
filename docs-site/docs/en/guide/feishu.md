@@ -147,7 +147,7 @@ The Feishu bridge hands inbound messages to the `claude-agent-sdk` runtime, so t
 
 | Backend | Example model | Notes |
 |---|---|---|
-| Anthropic native | `claude-sonnet-4-5-...` | Mainline vision |
+| Anthropic native | `claude-sonnet-4-6` | Mainline vision |
 | MiniMax | `MiniMax-M3` | China-domestic reachable |
 | Xiaomi MiMo (vision) | `mimo-v2.5-pro` etc. | China-domestic reachable |
 
