@@ -81,7 +81,7 @@ The 5-runtime comparison: [Runtime — Five runtimes comparison](/en/guide/runti
 Start the node:
 
 ::: warning Fresh install + claude-agent-sdk / codex-sdk? Install agent-node first
-These runtimes depend on the `agent-node` package. The first `node start` triggers an npx auto-fetch that takes ~1 minute, but the current startup check **doesn't wait for it** and exits with `agent-node is not installed or cannot report a version` (reproduced on real hardware, [#237](https://github.com/sleep2agi/agent-network/issues/237)-class). Run this once before starting:
+These runtimes depend on the `agent-node` package. The first `node start` triggers an npx auto-fetch that takes ~1 minute, but the current startup check **doesn't wait for it** and exits with `agent-node is not installed or cannot report a version` (reproduced on real hardware, [#450](https://github.com/sleep2agi/agent-network/issues/450) (precise filing; #237 is the umbrella)). Run this once before starting:
 
 ```bash
 npm install -g @sleep2agi/agent-node
