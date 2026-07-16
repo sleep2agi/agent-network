@@ -168,8 +168,8 @@ npx @sleep2agi/agent-node \
 | **工具** | opencode 内置; Feishu channel 下 commhub MCP 一律 deny (跟 grok/claude-code-cli 同) |
 
 ```bash
-# 1. 装 pinned 版
-npm install -g opencode-ai@1.17.13
+# 1. 装 pinned 版（preview 当前 pin；以 anet node start 报的 exact 版本为准，可能随版本更新）
+npm install -g opencode-ai@1.18.1
 
 # 2. Export 你选的 preset 对应的 env
 export ANTHROPIC_API_KEY=sk-...    # for anthropic preset
@@ -200,6 +200,26 @@ opencode 内建 anthropic client 硬编码 `x-api-key`。Bearer-only 兼容网�
 ::: warning auth.json 敏感路径
 opencode 的 `auth.json` 存 vendor API key。agent-node 的 read-denylist 会阻止运行中的 opencode agent Read / exfil 自己 auth.json (跟飞书 access.json 同类防线)。
 :::
+
+### codex-app-server（preview）
+
+> ⚠️ **仅 preview 渠道**：npm latest 尚未包含，装 latest 的 `anet node create` 选单里没有它（见 [runtimes 表](/guide/runtimes#runtime-对比-canonical-表)）。RFC-030 稳定后进 latest。
+
+基于 OpenAI Codex 的 **app-server 桥**（[RFC-030](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)）——节点持有一个 codex app-server 进程，人和 agent **共用同一个 codex 会话**（人机共存）：agent 处理网络派来的任务，人可在同一个 codex TUI 里随时查看 / 接管。
+
+| 属性 | 说明 |
+|------|------|
+| **模型** | OpenAI Codex（gpt-5.5 等，复用 codex 登录态） |
+| **前置** | 本机装 `codex` CLI 并 `codex login`（codex 没有 `auth` 子命令） |
+| **特点** | 人机共存桥；`codexThreadId` 存专属字段，不占用通用 `session` |
+| **审批** | 需要审批的 turn 会挂起交人类在 TUI 处理，桥**不代答** |
+
+```bash
+anet node create codex桥 --runtime codex-app-server
+anet node start codex桥
+```
+
+详细设计 / 已知边界见 [RFC-030](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)。
 
 ### claude-agent-sdk + 国产模型
 

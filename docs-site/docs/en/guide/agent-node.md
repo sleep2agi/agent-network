@@ -168,8 +168,9 @@ Integrates the [public sst/opencode](https://github.com/sst/opencode) CLI (RFC-0
 | **Tools** | opencode built-ins; under a Feishu channel the commhub MCP is always denied (same as grok / claude-code-cli) |
 
 ```bash
-# 1. Install the pinned version
-npm install -g opencode-ai@1.17.13
+# 1. Install the pinned version (current preview pin; trust the exact version
+#    that `anet node start` reports — it can change between releases)
+npm install -g opencode-ai@1.18.1
 
 # 2. Export the env var for your chosen preset
 export ANTHROPIC_API_KEY=sk-...    # for the anthropic preset
@@ -200,6 +201,26 @@ opencode's built-in anthropic client hardcodes `x-api-key`. Bearer-only compatib
 ::: warning auth.json is a sensitive path
 opencode's `auth.json` holds the vendor API key. agent-node's read-denylist blocks a running opencode agent from Read-ing / exfiltrating its own auth.json (same defense as Feishu's access.json).
 :::
+
+### codex-app-server (preview)
+
+> ⚠️ **Preview channel only**: not in npm latest — the `anet node create` picker on latest does not list it (see [runtimes table](/en/guide/runtimes#runtimes-—-canonical-table)). Ships to latest once RFC-030 stabilizes.
+
+An **app-server bridge** over OpenAI Codex ([RFC-030](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)) — the node owns a codex app-server process, and a human and the agent **share one codex session** (co-presence): the agent handles tasks dispatched over the network while a human can watch / take over from the same codex TUI.
+
+| Attribute | Notes |
+|------|------|
+| **Model** | OpenAI Codex (gpt-5.5 etc, reuses the codex login) |
+| **Prereq** | `codex` CLI installed + `codex login` (codex has no `auth` subcommand) |
+| **Traits** | Human-agent co-presence bridge; `codexThreadId` lives in a dedicated field, not the shared `session` |
+| **Approval** | Turns that need approval suspend for a human to handle in the TUI — the bridge **never answers on your behalf** |
+
+```bash
+anet node create codex-bridge --runtime codex-app-server
+anet node start codex-bridge
+```
+
+Full design / known limits: [RFC-030](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md).
 
 ### claude-agent-sdk + Domestic Models
 
