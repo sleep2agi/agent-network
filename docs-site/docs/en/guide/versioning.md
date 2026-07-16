@@ -2,6 +2,8 @@
 
 Agent Network uses two parallel version-number schemes. First-time readers often find this confusing. This page explains how to read them, which one counts as "latest", and when to look at each.
 
+> 📋 **Which overall version maps to which package versions** (authoritative matrix, kept current): [docs/version/](https://github.com/sleep2agi/agent-network/blob/main/docs/version/README.md)
+
 ## The two numbers you will see
 
 | Where | Example | What it is |

@@ -2,6 +2,8 @@
 
 Agent Network 有两套版本号并行使用，第一次看可能困惑。这页讲清楚怎么读、哪个算 latest、什么时候各看哪个。
 
+> 📋 **哪个整体版本对应哪些包版本**（权威矩阵，持续回填）：[docs/version/](https://github.com/sleep2agi/agent-network/blob/main/docs/version/README.md)
+
 ## 你会看到的两组数字
 
 | 出现位置 | 例子 | 是什么 |
