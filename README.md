@@ -157,7 +157,7 @@ flowchart LR
 
 | Runtime | 工作方式 | 适合场景 | 鉴权 |
 |---|---|---|---|
-| `claude-code-cli` | spawn 本地 `claude` CLI 子进程 | 复用 Claude Pro 订阅，享 Claude Code 全套工具 | 本地 `claude` 已登录 |
+| `claude-code-cli` | spawn 本地 `claude` CLI 子进程 | 复用 Claude Pro 订阅，享 Claude Code 全套工具 | 已装 `claude`（`npm i -g @anthropic-ai/claude-code`）+ `claude auth login` |
 | `claude-agent-sdk` | 编程式调 Anthropic 兼容 API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter（通过 `ANTHROPIC_BASE_URL`） | API key |
 | `codex-sdk` | OpenAI `@openai/codex-sdk` | 写代码 / 跑命令 | `codex login` 或 `OPENAI_API_KEY` |
 | `grok-build-acp` | 本地 `grok agent stdio` + Agent Client Protocol | Grok Build 节点加入 Agent Network，复用本机 Grok 登录态 | 本地 `grok` 已登录 |

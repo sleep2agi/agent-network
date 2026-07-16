@@ -157,7 +157,7 @@ Pick one per node. Mix freely on the same hub.
 
 | Runtime | What it does | Best for | Auth |
 |---|---|---|---|
-| `claude-code-cli` | Spawns your local `claude` CLI as a subprocess | Reusing a Claude Pro subscription, full Claude Code tool suite | `claude` already logged in |
+| `claude-code-cli` | Spawns your local `claude` CLI as a subprocess | Reusing a Claude Pro subscription, full Claude Code tool suite | `claude` installed (`npm i -g @anthropic-ai/claude-code`) + `claude auth login` |
 | `claude-agent-sdk` | Programmatic Anthropic-compatible client | Anthropic / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter via `ANTHROPIC_BASE_URL` | API key |
 | `codex-sdk` | OpenAI's `@openai/codex-sdk` | Code generation, shell-heavy work | `codex login` or `OPENAI_API_KEY` |
 | `grok-build-acp` | Local `grok agent stdio` over Agent Client Protocol | Joining Agent Network as a Grok Build node, reusing host-local Grok auth | local `grok` already logged in |
