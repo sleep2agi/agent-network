@@ -46,7 +46,7 @@ vendor adapter 是**修复 RLHF 偏差的最小可行方案**，不是免费的�
 
 bias 让 model **skip thinking 阶段**直接发 tool_use —— intern-s2-preview 一大特色（链式推理可见性）被压平。Debug 时看不到 model 决策推理。
 
-**Migration hint**：想看 thinking 用 `anet node start <alias> --prompt "你的 system prompt"` 自带 system prompt —— **替换** default bias，model 退回到原始 RLHF 行为。
+**修正（源码核实 2026-07-16）**：⚠️ 本节及下方多处的「`anet node start --prompt` 替换/关闭 bias、model 退回原始 RLHF」说法**不准确**。实际：① `anet node start` **没有** `--prompt` flag（`--prompt` 是 `agent-node` 二进制的 flag；给 anet 节点设 system prompt 请写 node `config.json` 的 `systemPrompt` 字段）；② 对 intern endpoint，这段 bias 是**无条件 prepend** 的（[`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) `combinedSystemPrompt = internToolUseBias + SYSTEM_PROMPT`）—— 你的自定义 prompt 只会**拼在 bias 之后、不会替换/关掉它**，model **不会**退回原始 RLHF。想看原始 Thinking Process 目前只能**不走 intern endpoint**（换非 intern 兼容端，或等上游修复后 adapter 退役）；代码级 `--no-vendor-bias` 开关尚未实现（见 §5 backlog）。
 
 ### 2. Detection fragility — URL regex 只匹配 chat.intern-ai.org.cn 系列
 
