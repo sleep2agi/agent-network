@@ -253,7 +253,7 @@ anet activate <key>   # v0.6 legacy command, writes a new license row (the key i
 anet hub start --dev-open
 # When you can't pass a CLI flag (Docker / systemd), the env var is equivalent:
 # COMMHUB_DEV_OPEN=1 anet hub start
-# (verify [`server/src/index.ts:13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L13): either the `--dev-open` flag or `COMMHUB_DEV_OPEN=1` works)
+# (verify [`index.ts` `DEV_OPEN`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts): either the `--dev-open` flag or `COMMHUB_DEV_OPEN=1` works)
 ```
 
 ---
@@ -906,7 +906,7 @@ curl http://localhost:9200/health
 curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status
 # Returns sessions[] (full list) + summary { idle, working, offline, total }
 # ⚠ The status query param is NOT honored — the server does not filter by status
-#   (server/src/index.ts:816-843). Filter idle agents locally with jq:
+#   (the `GET /api/tasks` handler in index.ts). Filter idle agents locally with jq:
 #   curl ... /api/status | jq '.sessions[] | select(.status=="idle")'
 
 # 3. Database size

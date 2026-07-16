@@ -400,7 +400,7 @@ location / {
 ```
 
 ::: tip rate limit IP 检测
-hub 端 register / login 端点取 `req.headers["x-forwarded-for"]?.split(",")[0]` 作为 `clientIP` 喂给 `checkRateLimit`（[`server/src/index.ts:428`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L428) register / L443 login）。如果反代不设 `X-Forwarded-For`，所有请求会被认成同一个 IP（反代自身），rate limit 会误伤所有用户。
+hub 端 register / login 端点取 `req.headers["x-forwarded-for"]?.split(",")[0]` 作为 `clientIP` 喂给 `checkRateLimit`（[`index.ts` `POST /api/auth/register` / `POST /api/auth/login` handlers](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)）。如果反代不设 `X-Forwarded-For`，所有请求会被认成同一个 IP（反代自身），rate limit 会误伤所有用户。
 :::
 
 ## 下一步

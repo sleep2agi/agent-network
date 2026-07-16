@@ -252,7 +252,7 @@ anet activate <key>   # v0.6 legacy 命令，写入新 license row（不验证 k
 anet hub start --dev-open
 # Docker / systemd 场景没法加 CLI flag 时，用 env 变量等效开启：
 # COMMHUB_DEV_OPEN=1 anet hub start
-# （verify [`server/src/index.ts:13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L13)：`--dev-open` flag 或 `COMMHUB_DEV_OPEN=1` 二选一即可）
+# （verify [`index.ts` `DEV_OPEN`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)：`--dev-open` flag 或 `COMMHUB_DEV_OPEN=1` 二选一即可）
 ```
 
 ---
@@ -904,7 +904,7 @@ curl http://localhost:9200/health
 # 2. 认证有效 + 看所有 session 状态汇总
 curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status
 # 返回 sessions[] 全列 + summary { idle, working, offline, total }
-# ⚠ status query param 不生效 — server 端不按 status 过滤（server/src/index.ts:816-843）。
+# ⚠ status query param 不生效 — server 端不按 status 过滤（the `GET /api/tasks` handler in index.ts）。
 #   要筛 idle agent，本地用 jq： curl ... /api/status | jq '.sessions[] | select(.status=="idle")'
 
 # 3. 数据库大小
