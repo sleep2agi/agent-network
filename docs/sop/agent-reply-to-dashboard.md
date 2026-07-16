@@ -33,6 +33,8 @@ Dashboard 聊天窗口。**会不会触发取决于 status**——交互式/协�
 
 **一句话规则：要对方立刻看到 = send_task 或终态 commhub_reply，其余一律当作"只写库不通知"。**
 
+补充（同日多次实测）：**commhub_reply 的 task_id 窗口会过期**——回复稍晚就报 `reply_task_not_found`（600s 窗口关闭）。遇到别重试 reply，**直接 send_task 补发**；耗时长的任务从一开始就用 send_task 回。
+
 ## 用了终态还是不显示？
 
 那通常是**生产层传输**问题（浏览器侧 HTTP/2、或 SSE 代理被 buffer/掐掉），不是回复本身。

@@ -9,8 +9,8 @@
 |---|---|---|
 | ✅ 稳 | 8 | 安装(Linux/macOS)、doctor/whoami/help、upgrade、查询三件套、自建 hub 全流程、claude-code-cli、dashboard 节点操作 |
 | ⚠️ 带坑能用 | 5 | login(需--hub)、grok-build-acp(文档坑已修/hub 小 bug 立案)、dashboard 聊天(终态+prod传输)、大会话历史、telegram |
-| ❌ / 🚫 | 3 | 安装(Windows latest，v0.10.16 修)、anet.sh 部署冻结、feishu(圈围不发布) |
-| ⏳ 走查中 | 2 | claude-agent-sdk、codex-sdk |
+| ❌ / 🚫 | 4 | 安装(Windows latest，v0.10.16 修)、anet.sh 部署冻结、feishu(圈围不发布)、**claude-agent-sdk latest 首启阻断(#237)** |
+| ⏳ 走查中 | 1 | codex-sdk |
 | —（latest 不含） | 2 | codex-app-server、opencode-cli（preview，随 canonical） |
 
 ## 基础旅程
@@ -30,7 +30,7 @@
 | runtime | latest | preview | 证据/坑 |
 |---|---|---|---|
 | claude-code-cli | ✅ | ✅ | 生产 fleet 每天在跑（Tier 0）；首跑 dev-channels 确认框需 TTY（文档已写） |
-| claude-agent-sdk | ⏳ | ⏳ | 待走查：vendor picker→envRef→跑任务全程；行为依赖厂商 |
+| claude-agent-sdk | ❌ 首启阻断 | ⏳ | 真机走查（2026-07-16，Docker 隔离+真实 MiniMax key，证据 docs/tests/report-test384.txt）：create 一路 ✅（含 MiniMax vendor 路径），但 **latest 首次 `node start` 约 2s 即退**：`agent-node is not installed or cannot report a version`——npx 懒拉检查不等拉取（显式 npx 实测要 65s 才成）。#237 坑5 已知问题、troubleshooting 有 workaround（先 anet upgrade），但**新用户按 Quick Start 走必卡**。修复方向：start 前预拉/检查放宽等待/文档 Quick Start 加一步。另：公开示例的 alias 字段在 2.2.21 config 缺失（不阻断） |
 | codex-sdk | ⏳ | ⏳ | 待走查：`codex login` 态复用→派任务；OAuth 无 CI |
 | grok-build-acp | ⚠️ | ⚠️ | 真机走查 PASS（2026-07-16，Docker 隔离，证据 docs/tests/p-0.11.0-grok-acp-journey/）：全链路真通、grok 真回复（15s replied）、grokSession 持久化与文档一致。坑：① 文档 REST 示例缺 network_id 原样必失败（已修文档）+ hub 报错文案在单网络下自相矛盾（业务，待立案）② $ANET_TOKEN 等变量全站未定义获取方式（已修文档）③ /api/networks 返回 name:null（业务，待立案）④ latest 的 create 提示打的是错误的 `grok auth login`（preview 已修，等 canonical）。headless 鉴权：复制 ~/.grok/auth.json 可用 |
 | codex-app-server | —（latest 不含） | ⚠️ | 真 Windows 验过一轮（含共存 attach 命令）；未泡验；flag 已实现 |
