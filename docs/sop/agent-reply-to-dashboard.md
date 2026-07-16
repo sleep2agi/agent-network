@@ -23,6 +23,16 @@ Dashboard 聊天窗口。**会不会触发取决于 status**——交互式/协�
   `commhub_reply` + `status="completed"` 才能回进 Dashboard。用非终态会走 `report_status`，
   回复永远不显示——哪怕调用返回 ok。
 
+## 推广：想让任何一方「立刻看到」你的消息
+
+不止 Dashboard——**给协调者/其他 agent 会话发消息**也是同一套语义。实测（2026-07-16）：
+- `send_task` → **推送**，对方会话立刻收到 ✅
+- `commhub_reply` + 终态 status → 推送（见上表）✅
+- `send_ack` / `send_message` / 非终态 reply → **不推送**——调用返回 ok、任务状态也变了，但对方**看不到**，
+  只能事后 poll。真实翻车：执行者用 send_ack 应答派工，协调者两轮催单误判其"无响应"。
+
+**一句话规则：要对方立刻看到 = send_task 或终态 commhub_reply，其余一律当作"只写库不通知"。**
+
 ## 用了终态还是不显示？
 
 那通常是**生产层传输**问题（浏览器侧 HTTP/2、或 SSE 代理被 buffer/掐掉），不是回复本身。
