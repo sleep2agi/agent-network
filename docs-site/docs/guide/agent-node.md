@@ -298,7 +298,7 @@ flowchart TD
 ```
 
 ::: tip 全局 `~/.anet/config.json` fallback
-[`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) 在加载完项目 config 后会用全局 `~/.anet/config.json` 的 `hub` 和 `token` 字段填空缺。**只有这两个字段会跨项目 fallback**——`runtime` / `model` / `tools` / `env` 等都必须在项目 `config.json` / CLI / env 提供，全局 config 不接管。跟 [feedback_config_priority] memory 一致（项目字段级覆盖全局，缺失字段 fallback 到全局）。
+[`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) 在加载完项目 config 后会用全局 `~/.anet/config.json` 的 `hub` 和 `token` 字段填空缺。**只有这两个字段会跨项目 fallback**——`runtime` / `model` / `tools` / `env` 等都必须在项目 `config.json` / CLI / env 提供，全局 config 不接管。项目字段级覆盖全局，缺失字段才 fallback 到全局。
 :::
 
 ### config.json 完整字段

@@ -299,7 +299,7 @@ flowchart TD
 ```
 
 ::: tip Global `~/.anet/config.json` fallback
-After the project config is loaded, [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) fills in the missing `hub` and `token` fields from the global `~/.anet/config.json`. **Only these two fields fall back across projects** — `runtime` / `model` / `tools` / `env` must be set via project `config.json` / CLI / env; global config does not cover them. Aligned with the [feedback_config_priority] memory ("project config overrides global at the field level; missing fields fall back to global").
+After the project config is loaded, [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) fills in the missing `hub` and `token` fields from the global `~/.anet/config.json`. **Only these two fields fall back across projects** — `runtime` / `model` / `tools` / `env` must be set via project `config.json` / CLI / env; global config does not cover them. Project config overrides global at the field level; missing fields fall back to global.
 :::
 
 ### Full config.json Fields
