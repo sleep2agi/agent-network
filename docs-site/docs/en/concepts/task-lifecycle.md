@@ -36,18 +36,18 @@ stateDiagram-v2
 ```
 
 ::: warning `created` is essentially invisible on the production path
-The diagram's `[*] → created → delivered` reflects the **schema default** ([`server/src/db.ts:151`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L151) `status TEXT NOT NULL DEFAULT 'created'`), but **no code path UPDATEs `created` to `delivered`**: [`server/src/tools.ts:637-639`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L637) `send_task` inserts with `VALUES (..., 'delivered', ...)` directly, bypassing the default. So through normal API flows you'll **never observe** a task in `created` state.
+The diagram's `[*] → created → delivered` reflects the **schema default** ([`server/src/db.ts:185`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L185) `status TEXT NOT NULL DEFAULT 'created'`), but **no code path UPDATEs `created` to `delivered`**: [`server/src/tools.ts:932-933`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L932) `send_task` inserts with `VALUES (..., 'delivered', ...)` directly, bypassing the default. So through normal API flows you'll **never observe** a task in `created` state.
 
 `created` still appears in three WHERE clauses defensively:
 
 | Operation | Accepted source states | Source |
 |------|------------------------|------|
-| `cancel_task` | `created` / `delivered` / `acked` / `running` | [tools.ts:946](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L946) |
-| `send_ack` (Hub tool) | `created` / `delivered` | [tools.ts:808](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L808) |
-| Expiration patrol | `created` / `delivered` | [index.ts:390-392](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L390) |
-| `ack_inbox` (Agent tool) | `delivered` (**only 1**) | [tools.ts:480](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L480) |
+| `cancel_task` | `created` / `delivered` / `acked` / `running` | [tools.ts:1356](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L1356) |
+| `send_ack` (Hub tool) | `created` / `delivered` | [tools.ts:1211](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L1211) |
+| Expiration patrol | `created` / `delivered` | [index.ts:508-510](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L508) |
+| `ack_inbox` (Agent tool) | `delivered` (**only 1**) | [tools.ts:710](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L710) |
 
-`ack_inbox` and `send_ack` have different WHERE clauses — `ack_inbox` (agent-side tool, L354) accepts only `delivered`, while `send_ack` (hub-side tool, L679) accepts `created` / `delivered`. The "4 cancellable states" are exactly the `cancel_task` row. The state diagram above doesn't draw `created`'s outgoing edges for simplicity; SQL allows them, but the only way a row enters the `created` state is a direct DB INSERT that omits the status column — no REST/MCP entry point does that.
+`ack_inbox` and `send_ack` have different WHERE clauses — `ack_inbox` (agent-side tool, L687) accepts only `delivered`, while `send_ack` (hub-side tool, L1200) accepts `created` / `delivered`. The "4 cancellable states" are exactly the `cancel_task` row. The state diagram above doesn't draw `created`'s outgoing edges for simplicity; SQL allows them, but the only way a row enters the `created` state is a direct DB INSERT that omits the status column — no REST/MCP entry point does that.
 :::
 
 ## Status Reference
@@ -140,7 +140,7 @@ expires_at = datetime('now', '+3600 seconds')
 ```
 
 ::: warning The expiry patrol only covers `created` / `delivered`
-Verify [`server/src/index.ts:386-402`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L386): expiration is not real-time — a **patrol that runs every 5 minutes** UPDATEs tasks with `expires_at < now` **and `status IN ('created', 'delivered')`** to `expired`.
+Verify [`server/src/index.ts:502-515`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L502): expiration is not real-time — a **patrol that runs every 5 minutes** UPDATEs tasks with `expires_at < now` **and `status IN ('created', 'delivered')`** to `expired`.
 
 Implications:
 - The actual status flip can lag `expires_at` by up to ~5 minutes
@@ -195,7 +195,7 @@ Cancellation will:
 3. Record the cancellation reason in the result field
 4. Log a task_event
 
-Cancellable statuses: `created` / `delivered` / `acked` / `running` (4 statuses — verified at [`server/src/tools.ts:946`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L946) `WHERE status IN ('created', 'delivered', 'acked', 'running')`. The tool's own description string only mentions 3 (missing `created`); the SQL is the source of truth with 4. Terminal states `replied` / `failed` / `cancelled` / `expired` cannot be cancelled directly — retry first, then cancel.)
+Cancellable statuses: `created` / `delivered` / `acked` / `running` (4 statuses — verified at [`server/src/tools.ts:1356`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L1356) `WHERE status IN ('created', 'delivered', 'acked', 'running')`. The tool's own description string only mentions 3 (missing `created`); the SQL is the source of truth with 4. Terminal states `replied` / `failed` / `cancelled` / `expired` cannot be cancelled directly — retry first, then cancel.)
 
 ## Reassigning Tasks
 
@@ -250,7 +250,7 @@ By distinguishing types, only `task` and `broadcast` trigger processing, while `
 
 ## Task Event Log
 
-Every status change is recorded in the `task_events` table (verified at [`server/src/db.ts:192-200`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L192)):
+Every status change is recorded in the `task_events` table (verified at [`server/src/db.ts:235-244`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L235)):
 
 ```sql
 CREATE TABLE task_events (
@@ -305,7 +305,7 @@ ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, creat
 
 ## Database Table Schema
 
-Below is the schema as it actually exists in v0.8 (after all ALTER TABLE migrations). The original CREATE TABLE and migrations live in [`server/src/db.ts:144-162`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L144) (tasks, 17 original columns), [`db.ts:382-383`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L382) (V3 adds `network_id` to `tasks` and 5 other tables), and [`db.ts:491`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L491) (adds `parent_task_id`).
+Below is the schema as it actually exists in v0.8 (after all ALTER TABLE migrations). The original CREATE TABLE and migrations live in [`server/src/db.ts:178-195`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L178) (tasks, 17 original columns), [`db.ts:702`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L702) (V3 adds `network_id` to `tasks` and 5 other tables), and [`db.ts:989`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L989) (adds `parent_task_id`).
 
 ```sql
 -- Effective tasks schema: 19 columns (17 original + 2 migrations)
