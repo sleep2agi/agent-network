@@ -334,6 +334,7 @@ Prefer English / async? Use [GitHub Discussions](https://github.com/sleep2agi/ag
 
 - [anet.sh](https://anet.sh) — full documentation site · [Getting started](https://anet.sh/en/guide/getting-started) · [Architecture](https://anet.sh/en/guide/architecture) · [Runtimes](https://anet.sh/en/guide/runtimes) · [Changelog](https://anet.sh/en/changelog)
 - 📚 [R&D methodology SOPs](./docs/sop/) — Issue-centric AI-Native development workflow
+- 🗺 [Release plan](./docs/release-plan.md) (living doc, zh) · [Stability tiers](./docs/stability-tiers.md) — what is rock-solid vs still in preview
 - [@sleep2agi on npm](https://www.npmjs.com/org/sleep2agi) — package index
 - [Discussions](https://github.com/sleep2agi/agent-network/discussions) · [Issues](https://github.com/sleep2agi/agent-network/issues)
 

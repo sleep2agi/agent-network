@@ -356,6 +356,7 @@ tests/           Docker 测试矩阵
 
 - [anet.sh](https://anet.sh) —— 完整文档站 · [上手指南](https://anet.sh/guide/getting-started) · [架构概览](https://anet.sh/guide/architecture) · [Runtime](https://anet.sh/guide/runtimes) · [Changelog](https://anet.sh/changelog)
 - 📚 [研发流程 SOP](./docs/sop/) —— 以 Issue 为中心的 AI-Native 研发迭代流程
+- 🗺 [版本规划](./docs/release-plan.md)（living doc）· [稳定性分层](./docs/stability-tiers.md) —— 哪些能力铁打不许动、哪些还在 preview 快跑
 - [@sleep2agi on npm](https://www.npmjs.com/org/sleep2agi) —— 包索引
 - [Discussions](https://github.com/sleep2agi/agent-network/discussions) · [Issues](https://github.com/sleep2agi/agent-network/issues)
 
