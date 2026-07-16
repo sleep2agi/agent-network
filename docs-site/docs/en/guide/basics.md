@@ -34,7 +34,7 @@ Every Agent needs a unique name within its network -- that's the alias. Other ag
 
 ```bash
 # "coder-1" is this Agent's alias
-anet node create coder-1 --runtime claude-agent-sdk --model MiniMax-M2.7
+anet node create coder-1 --runtime claude-agent-sdk --model MiniMax-M3
 ```
 
 In the Dashboard ChatPanel, select "coder-1" and send a Task:
