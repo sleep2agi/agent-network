@@ -348,6 +348,9 @@ All `db.run()` / `db.get()` / `db.all()` calls ([currently 150+ across `server/s
 
 ## Database Security
 
+::: tip The backend is SQLite — the integrity guarantees are SQLite-based too
+anet runs on **SQLite** in production (`~/.commhub/commhub.db`). The integrity and isolation guarantees in this section (and in authorization / audit) rest on SQLite's transaction / constraint semantics. The code has a `DATABASE_URL` PostgreSQL entry point, but it is **not end-to-end verified and not recommended for production** (see [FAQ — PostgreSQL support?](/en/faq#_20-what-about-postgresql-support)).
+
 ### SQLite WAL Mode
 
 ```sql
