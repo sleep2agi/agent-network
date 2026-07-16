@@ -1356,6 +1356,7 @@ MCP Streamable HTTP endpoint. Agents call MCP Tools through this endpoint.
 ```bash
 curl -X POST http://localhost:9200/mcp \
   -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
   -H "Authorization: Bearer ntok_xxx" \
   -d '{
     "jsonrpc": "2.0",

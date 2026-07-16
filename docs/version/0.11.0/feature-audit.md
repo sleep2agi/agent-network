@@ -8,9 +8,9 @@
 | 状态 | 数量 | 明细 |
 |---|---|---|
 | ✅ 稳 | 8 | 安装(Linux/macOS)、doctor/whoami/help、upgrade、查询三件套、自建 hub 全流程、claude-code-cli、dashboard 节点操作 |
-| ⚠️ 带坑能用 | 5 | login(需--hub)、grok-build-acp(文档坑已修/hub 小 bug 立案)、dashboard 聊天(终态+prod传输)、大会话历史、telegram |
+| ⚠️ 带坑能用 | 6 | login(需--hub)、grok-build-acp(文档坑已修/hub 小 bug 立案)、dashboard 聊天(终态+prod传输)、大会话历史、telegram、codex-sdk(前半程✅,auth-gate止步) |
 | ❌ / 🚫 | 4 | 安装(Windows latest，v0.10.16 修)、anet.sh 部署冻结、feishu(圈围不发布)、**claude-agent-sdk latest 首启阻断(#237)** |
-| ⏳ 走查中 | 1 | codex-sdk |
+| ⏳ 走查中 | 0 | —（全部旅程已有结论；codex-sdk 后半程等测试 key 补验） |
 | —（latest 不含） | 2 | codex-app-server、opencode-cli（preview，随 canonical） |
 
 ## 基础旅程
@@ -30,8 +30,8 @@
 | runtime | latest | preview | 证据/坑 |
 |---|---|---|---|
 | claude-code-cli | ✅ | ✅ | 生产 fleet 每天在跑（Tier 0）；首跑 dev-channels 确认框需 TTY（文档已写） |
-| claude-agent-sdk | ❌ 首启阻断 | ⏳ | 真机走查（2026-07-16，Docker 隔离+真实 MiniMax key，证据 docs/tests/report-test384.txt）：create 一路 ✅（含 MiniMax vendor 路径），但 **latest 首次 `node start` 约 2s 即退**：`agent-node is not installed or cannot report a version`——npx 懒拉检查不等拉取（显式 npx 实测要 65s 才成）。#450 已精确立案（#237 为 umbrella）、troubleshooting 有 workaround（先 anet upgrade），但**新用户按 Quick Start 走必卡**。修复方向：start 前预拉/检查放宽等待/文档 Quick Start 加一步。另：公开示例的 alias 字段在 2.2.21 config 缺失（不阻断） |
-| codex-sdk | ⏳ | ⏳ | 待走查：`codex login` 态复用→派任务；OAuth 无 CI |
+| claude-agent-sdk | ❌ 首启阻断 | ⏳ | 真机走查（2026-07-16，Docker 隔离+真实 MiniMax key，证据 docs/tests/report-test384.txt）：create 一路 ✅（含 MiniMax vendor 路径），但 **latest 首次 `node start` 约 2s 即退**：`agent-node is not installed or cannot report a version`——npx 懒拉检查不等拉取（显式 npx 实测要 65s 才成）。#450 已精确立案（#237 为 umbrella）、troubleshooting 有 workaround（先 anet upgrade），但**新用户按 Quick Start 走必卡**。修复方向见 #450。**E2E 补充确认（test224）**：手动全局装 agent-node 后全链真通（真实 MiniMax 任务 10s replied）。新坑：显式 --runtime/--model create 的 config env_keys=[]（vendor env 未持久化，靠 shell 继承才通，待立案）；/mcp curl 模板缺双 Accept 头 406（文档已修）。另：公开示例的 alias 字段在 2.2.21 config 缺失（不阻断） |
+| codex-sdk | ⚠️ 前半程✅ | ⏳ | 真机走查（test225，Docker 隔离）：login/create ✅（runtime/model/ntok 全正确生成）；**auth gate 如实止步**（无 OpenAI 测试 key，不造假 key 不虚报闭环）——后半程待有测试 key 或 canonical 后补验 |
 | grok-build-acp | ⚠️ | ⚠️ | 真机走查 PASS（2026-07-16，Docker 隔离，证据 docs/tests/p-0.11.0-grok-acp-journey/）：全链路真通、grok 真回复（15s replied）、grokSession 持久化与文档一致。坑：① 文档 REST 示例缺 network_id 原样必失败（已修文档）+ hub 报错文案在单网络下自相矛盾（业务，待立案）② $ANET_TOKEN 等变量全站未定义获取方式（已修文档）③ /api/networks 返回 name:null（业务，待立案）④ latest 的 create 提示打的是错误的 `grok auth login`（preview 已修，等 canonical）。headless 鉴权：复制 ~/.grok/auth.json 可用 |
 | codex-app-server | —（latest 不含） | ⚠️ | 真 Windows 验过一轮（含共存 attach 命令）；未泡验；flag 已实现 |
 | opencode-cli | —（latest 不含） | ⚠️ | release ops 官方 registry 冷装 E2E PASS（test385）；需精确 pin |
@@ -44,7 +44,7 @@
 | dashboard 节点操作（重启/停止/删除） | ✅ | 生产在用（RFC-027） |
 | dashboard 长会话历史 | ⚠️ | 大会话加载超时（根因 prod 传输，hub 本身 3ms）；PR#37 降级兜底待合 |
 | Telegram channel | ⚠️ | 本迭代全程在生产用（可靠）；坑：per-node state 目录、allowlist 可被 git clean 卷走（文档已写） |
-| Feishu channel | 🚫/❌ | 安全走查完成（2026-07-16，未触任何 live 群/生产节点/secret 值）：🚫 缺测试飞书 App，真实鉴权/WS 未验；已确认 ❌×2：① Docker 从零旅程阻断——文档把 allowlist 写可选但 CLI 要求至少一个 --allow（否则 exit 1），entrypoint 又吞错继续启动=channel 静默漏绑，且多 ID 逗号串存成单元素不命中；② "bridge online"/"client ready" 是假阳性（SDK start 即置 connected，dummy 凭据也 online），无可信鉴权成功标志。另：权限文档缺 p2p/group_at 接收权限、长连接域名应为 open.feishu.cn 非 api、订阅顺序有坑。**需要：测试企业 App + onReady 成功日志，然后重验** |
+| Feishu channel | 🚫/❌ | 安全走查完成（2026-07-16，未触任何 live 群/生产节点/secret 值）：🚫 缺测试飞书 App，真实鉴权/WS 未验；已确认 ❌×2：① Docker 从零旅程阻断——文档把 allowlist 写可选但 CLI 要求至少一个 --allow（否则 exit 1），entrypoint 又吞错继续启动=channel 静默漏绑，且多 ID 逗号串存成单元素不命中；② "bridge online"/"client ready" 是假阳性（SDK start 即置 connected，dummy 凭据也 online），无可信鉴权成功标志。另：权限文档缺 p2p/group_at 接收权限、长连接域名应为 open.feishu.cn 非 api、订阅顺序有坑。**需要：测试企业 App + onReady 成功日志，然后重验**。跟进：4 处文档已修（98f3b7ee），业务 bug 已立案 #451/#452 |
 | 文档站 anet.sh | ❌ | 部署冻结在 7/2，40+ 修复未上线（等 Vercel 后台 redeploy）；GitHub 侧文档 ✅ 是新的 |
 
 ## 走查方法（补 ⏳ 时照此）

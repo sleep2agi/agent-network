@@ -1355,6 +1355,7 @@ MCP Streamable HTTP 端点，Agent 通过此端点调用 MCP Tools。
 ```bash
 curl -X POST http://localhost:9200/mcp \
   -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
   -H "Authorization: Bearer ntok_xxx" \
   -d '{
     "jsonrpc": "2.0",
