@@ -15,7 +15,7 @@ The specific `preview.N` numbers below are a **2026-06-28 snapshot**; the previe
 
 ## Current preview = canonical (2.3.0-preview.34 / 2.5.0-preview.26, 2026-07-16)
 
-@preview now points at the **canonical build** (published from the exact tgz that passed 7/7 Linux gates + real-Windows verification):
+@preview now points at the **canonical build** (published from the exact tgz after real-Windows verification; independent Linux gate re-run in progress — latest promotion gated on true green):
 
 - **Windows fixes across the board**: cross-drive `anet --version` crash (#446) and the runtime dispatch/detection/spawn Unix-ism cluster (#447)
 - **codex-app-server** (RFC-030): `--codex-app-server-url` / `--codex-thread-id` create flags (runtime-guarded)

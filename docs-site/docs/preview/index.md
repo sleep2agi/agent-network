@@ -15,7 +15,7 @@
 
 ## 当前 preview = canonical（2.3.0-preview.34 / 2.5.0-preview.26，2026-07-16）
 
-@preview 现在指向 **canonical 合并版**（7/7 Linux 门禁 + 真 Windows 复验后从验证过的 tgz 发布）：
+@preview 现在指向 **canonical 合并版**（真 Windows 复验 PASS 后从验证过的 tgz 发布；Linux 门禁独立复跑中，latest promote 以真全绿为前提）：
 
 - **Windows 全面修复**：跨盘 `anet --version` 崩溃（#446）、runtime 派发/检测/spawn 的 Unix 假设簇（#447）
 - **codex-app-server**（RFC-030）：`--codex-app-server-url` / `--codex-thread-id` 建节点 flag（带 runtime guard）

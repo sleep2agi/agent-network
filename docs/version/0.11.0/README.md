@@ -34,7 +34,7 @@
 | 2 | **OpenCode runtime**（RFC-029：`opencode-cli`，精确 pin `opencode-ai@1.18.1`） | release ops | vetted 完成，等并入 canonical | 官方 registry 冷装 E2E（已有 test385 基线） |
 | 3 | **Windows 平台支持**（Unix-ism 修复簇：fileURLToPath / where / shell:true / isAbsolute） | 运行时/协调 | preview 已修，真机验过一轮 | 真 Windows 复验合并版 |
 | 4 | **MCP 回复语义上下文**（commhub_reply 终态才推 dash，写进 agent 自动加载的 instructions） | 协调 | main 已合（d050c258） | 随 canonical 出 |
-| 5 | **canonical preview 收敛**（两条并行 preview 线合一，单点发布 `.34`/`.26`） | release ops | ✅ **完成**：7/7 门禁 PASS → 真 Windows 复验 PASS → **`.34`/`.26` 已从验证过的 tgz 单点发布**，#454 已 merge。剩：泡验 + UAT → promote | promote 门禁见 DoD |
+| 5 | **canonical preview 收敛**（两条并行 preview 线合一，单点发布 `.34`/`.26`） | release ops | `.34`/`.26` 已发布（真 Windows 复验 PASS）、#454 已 merge；⚠️ **门禁纠偏**：发布时误采作者自证报告，真实为 1-2 层真绿、3 层已修（2ea1db1f）、3-7 新鲜续跑中——**promote 冻结待真全绿** | 3-7 真绿 + 泡验 + UAT → promote |
 
 ## 同期 dashboard（独立包 0.6.x/0.7.x，但属同一迭代）
 

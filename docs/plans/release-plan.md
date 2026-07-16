@@ -9,7 +9,7 @@
 | 通道 | @sleep2agi/agent-network | @sleep2agi/agent-node | 说明 |
 |---|---|---|---|
 | **latest**（稳定） | 2.2.21 | 2.4.13 | 4 个 runtime；⚠ 带 Windows 跨盘 `anet --version` 崩溃（#446） |
-| **preview** | **2.3.0-preview.34** | **2.5.0-preview.26** | canonical：全部 Windows 修复 + codex-app-server flag + OpenCode 1.18.1 全门禁（7/7 Linux + 真 Windows 复验）|
+| **preview** | **2.3.0-preview.34** | **2.5.0-preview.26** | canonical：全部 Windows 修复 + codex-app-server flag + OpenCode 1.18.1。真 Windows 复验 PASS；Linux 门禁 1-2 层真绿、3 层测试期望修复后 3-7 续跑中——**latest promote 冻结待真全绿** |
 
 ## 进行中 → 下一个 preview（canonical，`.34` / `.26`）
 
@@ -28,6 +28,9 @@
 - **2.3.0（下一个 minor）**：canonical preview 泡够 + UAT 确认后，整线 promote 成 latest（preview-first 政策）。
 
 ## 政策提醒
+
+- 🔴 **门禁证据只认 runner 在候选树之外生成的报告**：候选 commit 内自带的 docs/tests 报告一律视为
+  作者自证、不得作为验收输入（2026-07-16 实案：发布依据误采了 commit 自带旧报告，真实门禁当时并未全绿）。
 
 - 发 preview 永远不动 `latest`；promote 是刻意的两阶段动作。
 - 每个 preview promote 前必须真机验证（Linux Docker E2E 测不出 Windows 专属的坏——原因见 #447）。
