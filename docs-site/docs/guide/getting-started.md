@@ -80,6 +80,14 @@ anet node create my-bot
 
 启动节点：
 
+::: warning 全新安装选了 claude-agent-sdk / codex-sdk？先装 agent-node
+这两个 runtime 依赖 `agent-node` 包。首次 `node start` 的 npx 自动拉取需要约 1 分钟，当前版本的启动检查**不等它拉完**就报 `agent-node is not installed or cannot report a version` 退出（真机复现，[#237](https://github.com/sleep2agi/agent-network/issues/237) 类）。先跑一句再启动即可：
+
+```bash
+npm install -g @sleep2agi/agent-node
+```
+:::
+
 ```bash
 anet node start my-bot
 ```
