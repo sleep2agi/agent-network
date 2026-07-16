@@ -761,7 +761,7 @@ curl http://localhost:9200/api/server/<host>/agents \
 
 **Root cause**: agent-node 2.4.8 and below hard-coded a 300 s `session/prompt` timeout (inherited from the older codex-sdk wrapper). The grok-build-acp backend, however, is biased toward longer user-level tasks where 5 min is routinely too tight.
 
-**Fix**: Upgrade to `agent-node 2.4.9` (v0.10.13 hotfix) — it widens the client-side `session/prompt` timeout to match the grok backend's real working window. Live-tested in-house: tasks of 47 s / 5 min / >10 min all complete normally.
+**Fix**: Run `anet upgrade` to the current latest (the hotfix landed in `agent-node 2.4.9` / v0.10.13 and is in every later version) — it widens the client-side `session/prompt` timeout to match the grok backend's real working window. Live-tested in-house: tasks of 47 s / 5 min / >10 min all complete normally.
 
 ```bash
 # 1. Upgrade

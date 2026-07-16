@@ -760,7 +760,7 @@ curl http://localhost:9200/api/server/<host>/agents \
 
 **根因**：agent-node 2.4.8 及以下对 ACP `session/prompt` 写死了 300 s 超时（沿用 codex-sdk wrapper 的旧值），但 grok-build-acp 后端是用户级长任务为主，5 min 是常态偏短。
 
-**修复**：升到 `agent-node 2.4.9`（v0.10.13 hotfix）— 把 `session/prompt` 的 client-side 超时拉宽到 grok 后端的实际工作窗口，本机活体节点 47s / 5min / >10min 的任务都能正常完成。
+**修复**：跑 `anet upgrade` 升到当前 latest（该 hotfix 自 `agent-node 2.4.9` / v0.10.13 起，之后版本都带）— 把 `session/prompt` 的 client-side 超时拉宽到 grok 后端的实际工作窗口，本机活体节点 47s / 5min / >10min 的任务都能正常完成。
 
 ```bash
 # 1. 升级
