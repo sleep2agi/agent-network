@@ -13,7 +13,7 @@
 
 ## 进行中 → 下一个 preview（canonical，`.34` / `.26`）
 
-由 release ops 从 `main@d050c258` 构建，把两条并行 preview 线合并成一个：
+**draft PR [#454](https://github.com/sleep2agi/agent-network/pull/454) 已出**（base 含全部 Windows 修复），等门禁重跑 + Windows 复验后单点发布。内容：
 
 - **全部 Windows 修复**（真机验证过）：`fileURLToPath`（#446）、codex-app-server 启动派发、`where`/`shell:true` spawn、agent-node `isAbsolute` 配置路径（#447）
 - **`--codex-app-server-url` / `--codex-thread-id`** 建节点 flag（RFC-030），并收紧 runtime guard
