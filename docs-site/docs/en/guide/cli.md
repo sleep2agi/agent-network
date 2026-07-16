@@ -70,6 +70,7 @@ After installation, the `anet` command is available globally.
 | `anet node create <name>` | Create an agent node |
 | `anet node start <name>` | Start an agent |
 | `anet node stop <name>` | Stop an agent |
+| `anet node restart <name>` | Restart a single node (one command = stop then start); symmetric with `anet project restart` / `anet batch restart`, no need to type two. Since v0.10.15 |
 | `anet node resume <name>` | Resume previous session |
 | `anet node ls` | List all nodes |
 | `anet info <name>` | View agent details |

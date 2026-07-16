@@ -70,6 +70,7 @@ npm install -g @sleep2agi/agent-network
 | `anet node create <name>` | 创建 Agent 节点 |
 | `anet node start <name>` | 启动 Agent |
 | `anet node stop <name>` | 停止 Agent |
+| `anet node restart <name>` | 重启单个节点（一条命令 = stop 再 start）；跟 `anet project restart` / `anet batch restart` 对称，不用敲两条。v0.10.15 起 |
 | `anet node resume <name>` | 恢复上次 session |
 | `anet node ls` | 列出所有节点 |
 | `anet info <name>` | 查看 Agent 详情 |
