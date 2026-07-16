@@ -17,8 +17,8 @@ import type { Stats } from "fs";
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from "path";
 import { opencodeOwnedPathModeIsSafe } from "./opencode-owner-mode";
 
-export const OPENCODE_AGENT_NETWORK_VERSION = "2.3.0-preview.34";
-export const OPENCODE_AGENT_NODE_VERSION = "2.5.0-preview.26";
+export const OPENCODE_AGENT_NETWORK_VERSION = "2.3.0-preview.35";
+export const OPENCODE_AGENT_NODE_VERSION = "2.5.0-preview.27";
 export const OPENCODE_AGENT_NODE_SPEC =
   `@sleep2agi/agent-node@${OPENCODE_AGENT_NODE_VERSION}`;
 

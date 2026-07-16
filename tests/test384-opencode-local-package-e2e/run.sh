@@ -13,8 +13,8 @@ ADMIN_PASSWORD='Test384-Strong-Password!'
 LIVE_ALIAS=wizard-openai
 FREE_MODEL="${OPENCODE_FREE_MODEL:-opencode/deepseek-v4-flash-free}"
 EXPECTED_OPENCODE="${OPENCODE_VERSION_UNDER_TEST:-1.18.1}"
-EXPECTED_NETWORK="${AGENT_NETWORK_VERSION_UNDER_TEST:-2.3.0-preview.34}"
-EXPECTED_NODE="${AGENT_NODE_VERSION_UNDER_TEST:-2.5.0-preview.26}"
+EXPECTED_NETWORK="${AGENT_NETWORK_VERSION_UNDER_TEST:-2.3.0-preview.35}"
+EXPECTED_NODE="${AGENT_NODE_VERSION_UNDER_TEST:-2.5.0-preview.27}"
 REAL_PATH="$PATH"
 FAKE_BIN_DIR=/test384/fake-bin
 FAKE_CANONICAL_BIN=/test384/fake-global/node_modules/opencode-ai/bin/opencode.exe
@@ -944,6 +944,28 @@ cp "$ANTHROPIC_CONFIG_BACKUP" "$ANTHROPIC_CONFIG"
 chmod 600 "$ANTHROPIC_CONFIG"
 echo "PASS: downgraded bound OpenCode profile cannot launder its runtime through rename"
 
+# A missing external binding is not permission to mint a replacement during
+# rename. Temporarily remove the exact record and prove the preflight refuses
+# before config persistence, copy, or lock creation; then restore the fixture.
+ANTHROPIC_BINDING=$(grep -Rl '"nodeId": "wizard-anthropic"' "$BINDING_ROOT")
+[[ -n "$ANTHROPIC_BINDING" ]]
+ANTHROPIC_BINDING_BACKUP="$ROOT/wizard-anthropic.binding.before-missing-test"
+mv "$ANTHROPIC_BINDING" "$ANTHROPIC_BINDING_BACKUP"
+ANTHROPIC_CONFIG_HASH=$(sha256sum "$ANTHROPIC_CONFIG" | cut -d' ' -f1)
+set +e
+MISSING_BINDING_RENAME_OUT=$(cd "$WORK_DIR" && anet node rename wizard-anthropic should-not-bind 2>&1)
+MISSING_BINDING_RENAME_RC=$?
+set -e
+[[ "$MISSING_BINDING_RENAME_RC" -ne 0 ]]
+grep -q 'runtime binding is missing' <<<"$MISSING_BINDING_RENAME_OUT"
+[[ "$(sha256sum "$ANTHROPIC_CONFIG" | cut -d' ' -f1)" = "$ANTHROPIC_CONFIG_HASH" ]]
+[[ ! -e "$WORK_DIR/.anet/nodes/should-not-bind" ]]
+[[ ! -e "$ANTHROPIC_NODE/rename.lock" ]]
+[[ ! -e "$ANTHROPIC_BINDING" ]]
+mv "$ANTHROPIC_BINDING_BACKUP" "$ANTHROPIC_BINDING"
+chmod 600 "$ANTHROPIC_BINDING"
+echo "PASS: missing OpenCode binding cannot be laundered into a new binding through rename"
+
 # This node was created but never started, so rename exercises the local-only
 # rollback-safe branch. The external binding must move with the node identity:
 # one new record, no stale old-name record, and no net count change.
@@ -955,34 +977,54 @@ BINDINGS_AFTER_RENAME=$(find "$BINDING_ROOT" -maxdepth 1 -type f -name '*.json' 
 [[ "$BINDINGS_AFTER_RENAME" -eq "$BINDINGS_BEFORE" ]]
 ! grep -Rqs '"nodeId": "wizard-anthropic"' "$BINDING_ROOT"
 grep -Rqs '"nodeId": "wizard-anthropic-renamed"' "$BINDING_ROOT"
+for private_dir in \
+  "$RENAMED_ANTHROPIC_NODE" \
+  "$RENAMED_ANTHROPIC_NODE/.config" \
+  "$RENAMED_ANTHROPIC_NODE/.config/opencode" \
+  "$RENAMED_ANTHROPIC_NODE/.local" \
+  "$RENAMED_ANTHROPIC_NODE/.local/share" \
+  "$RENAMED_ANTHROPIC_NODE/.local/share/opencode"; do
+  [[ "$(stat -c '%a' "$private_dir")" = "700" ]]
+done
 echo "PASS: local-only OpenCode rename replaced the external binding without a stale old-name record"
 
-# Delete must remove the exact external record before deleting project state.
-# Reusing the same alias as an unrelated runtime then proves both cleanup and
-# that an existing binding root plus HOME/.anet=0775 cannot gate other nodes.
-(cd "$WORK_DIR" && anet node delete "$LIVE_ALIAS" --force)
-[[ ! -e "$OPENAI_NODE" ]]
-BINDINGS_AFTER_DELETE=$(find "$BINDING_ROOT" -maxdepth 1 -type f -name '*.json' | wc -l | tr -d ' ')
-[[ "$BINDINGS_AFTER_DELETE" -eq $((BINDINGS_BEFORE - 1)) ]]
-! grep -Rqs '"nodeId": "wizard-openai"' "$BINDING_ROOT"
+# Bound OpenCode deletion has no durable lifecycle lock yet, so it must refuse
+# before touching config or the external binding even after the node stopped.
+OPENAI_CONFIG_HASH=$(sha256sum "$OPENAI_NODE/config.json" | cut -d' ' -f1)
+set +e
+DELETE_OUT=$(cd "$WORK_DIR" && anet node delete "$LIVE_ALIAS" --force 2>&1)
+DELETE_RC=$?
+set -e
+[[ "$DELETE_RC" -ne 0 ]]
+grep -q 'refusing delete of bound opencode-cli node' <<<"$DELETE_OUT"
+[[ -d "$OPENAI_NODE" ]]
+[[ "$(sha256sum "$OPENAI_NODE/config.json" | cut -d' ' -f1)" = "$OPENAI_CONFIG_HASH" ]]
+BINDINGS_AFTER_DELETE_REFUSAL=$(find "$BINDING_ROOT" -maxdepth 1 -type f -name '*.json' | wc -l | tr -d ' ')
+[[ "$BINDINGS_AFTER_DELETE_REFUSAL" -eq "$BINDINGS_BEFORE" ]]
+grep -Rqs '"nodeId": "wizard-openai"' "$BINDING_ROOT"
+echo "PASS: bound OpenCode delete refuses before config or binding mutation"
 
+# An unrelated unbound runtime remains independent of the populated binding
+# namespace, including the supported HOME/.anet=0775 private-group layout.
 chmod 775 "$HOME/.anet"
-mkdir -p "$OPENAI_NODE"
-chmod 700 "$OPENAI_NODE"
-cat >"$OPENAI_NODE/config.json" <<'JSON'
+REUSE_ALIAS=unbound-runtime-reuse
+REUSE_NODE="$WORK_DIR/.anet/nodes/$REUSE_ALIAS"
+mkdir -p "$REUSE_NODE"
+chmod 700 "$REUSE_NODE"
+cat >"$REUSE_NODE/config.json" <<'JSON'
 {
   "anet_version": "test384-reuse",
   "node_id": "n_test384_reuse",
-  "node_name": "wizard-openai",
-  "alias": "wizard-openai",
-  "runtime": "future-runtime-after-delete"
+  "node_name": "unbound-runtime-reuse",
+  "alias": "unbound-runtime-reuse",
+  "runtime": "future-runtime-unbound"
 }
 JSON
-chmod 600 "$OPENAI_NODE/config.json"
+chmod 600 "$REUSE_NODE/config.json"
 set +e
-REUSE_OUT=$(cd "$WORK_DIR" && anet node start "$LIVE_ALIAS" 2>&1)
+REUSE_OUT=$(cd "$WORK_DIR" && anet node start "$REUSE_ALIAS" 2>&1)
 REUSE_RC=$?
 set -e
 [[ "$REUSE_RC" -ne 0 ]]
-grep -q 'unsupported runtime "future-runtime-after-delete"' <<<"$REUSE_OUT"
-echo "PASS: delete removed the binding; same-name non-OpenCode reuse bypassed HOME/.anet=0775 and reached strict runtime validation"
+grep -q 'unsupported runtime "future-runtime-unbound"' <<<"$REUSE_OUT"
+echo "PASS: unrelated unbound runtime bypassed populated binding namespace and reached strict runtime validation"

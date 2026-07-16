@@ -23,6 +23,8 @@ import { basename, dirname, isAbsolute, join, relative, resolve, win32 } from "p
 const OPENCODE_LAUNCH_PREFIX = ".anet-opencode-launch-";
 export const OPENCODE_LAUNCH_OWNER_FILE = ".anet-opencode-launch-owner.json";
 const OPENCODE_LAUNCH_OWNER_FORMAT = "anet-opencode-launch-v1";
+export const OPENCODE_LAUNCH_CHILD_FILE = ".anet-opencode-launch-child.json";
+const OPENCODE_LAUNCH_CHILD_FORMAT = "anet-opencode-launch-child-v2";
 const STALE_LAUNCH_GRACE_MS = 5 * 60_000;
 const PROCESS_INSTANCE_ID = randomBytes(24).toString("hex");
 
@@ -57,6 +59,16 @@ interface LaunchOwnerMarker {
   launchIno: string;
 }
 
+interface LaunchChildMarker {
+  format: typeof OPENCODE_LAUNCH_CHILD_FORMAT;
+  childPid: number;
+  childProcessIdentity: string | null;
+  processGroupId: number;
+  sessionId: number;
+  launchDev: string;
+  launchIno: string;
+}
+
 interface TrackedLaunchRoot {
   dev: number | bigint;
   ino: number | bigint;
@@ -71,6 +83,8 @@ interface TrackedLaunchRoot {
   enforceManagedPreflight: boolean;
   managedConfigDir?: string;
   ancestorSnapshot: AncestorIdentity[];
+  processGroupId?: number;
+  sessionId?: number;
   active: boolean;
 }
 
@@ -637,6 +651,17 @@ function atomicWritePrivateFile(path: string, body: string, label: string): void
     }
     renameSync(temp, path);
     assertPrivateRegularFile(path, label);
+    // Owner/child markers are crash-recovery authority. Persist the directory
+    // entry after the atomic rename; file fsync alone does not make the rename
+    // durable. Windows has no portable directory-fsync equivalent here.
+    if (process.platform !== "win32") {
+      const parentFd = openSync(
+        parent,
+        constants.O_RDONLY | (constants.O_DIRECTORY || 0) | (constants.O_NOFOLLOW || 0),
+      );
+      try { fsyncSync(parentFd); }
+      finally { closeSync(parentFd); }
+    }
   } catch (error) {
     if (fd !== undefined) {
       try { closeSync(fd); } catch {}
@@ -646,26 +671,29 @@ function atomicWritePrivateFile(path: string, body: string, label: string): void
   }
 }
 
-export interface OpencodeExitedProcessIdentity {
+export interface OpencodeSpawnedProcessIdentity {
   pid: number;
   /** Linux /proc start-ticks identity; unavailable on Windows/macOS. */
   identity: string | null;
+  /** Dedicated POSIX process group created for this ACP child. */
+  processGroupId?: number | null;
+  /** Dedicated Linux session held by the ACP supervisor anchor. */
+  sessionId?: number | null;
+}
+
+export interface OpencodeExitedProcessIdentity extends OpencodeSpawnedProcessIdentity {
   nativeExitObserved: true;
 }
 
 interface LinuxProcessStat {
   identity: string;
   state: string;
+  processGroupId: number;
+  sessionId: number;
 }
 
 function readLinuxProcessStat(pid: number): LinuxProcessStat | undefined {
-  if (process.platform !== "linux") {
-    // A native ChildProcess exit is the strongest portable proof available.
-    // Safe mode cannot spawn tools/MCP/web children; unsafe mode is an
-    // explicit trusted-task opt-in. Delete promptly instead of retaining
-    // copied credentials until an unrelated future launch.
-    return exitedProcess?.nativeExitObserved === true ? false : undefined;
-  }
+  if (process.platform !== "linux") return undefined;
   try {
     // /proc/<pid>/stat field 22 is the process start time in clock ticks. It
     // disambiguates PID reuse without trusting wall-clock timestamps. `comm`
@@ -675,8 +703,14 @@ function readLinuxProcessStat(pid: number): LinuxProcessStat | undefined {
     if (close < 0) return undefined;
     const fieldsFromState = stat.slice(close + 1).trim().split(/\s+/);
     const state = fieldsFromState[0];
+    const processGroupId = Number(fieldsFromState[2]);
+    const sessionId = Number(fieldsFromState[3]);
     const startTicks = fieldsFromState[19];
-    return state && startTicks ? { identity: `${pid}:${startTicks}`, state } : undefined;
+    return state && startTicks
+      && Number.isSafeInteger(processGroupId) && processGroupId > 0
+      && Number.isSafeInteger(sessionId) && sessionId > 0
+      ? { identity: `${pid}:${startTicks}`, state, processGroupId, sessionId }
+      : undefined;
   } catch {
     return undefined;
   }
@@ -694,6 +728,18 @@ function isPidAlive(pid: number): boolean {
   } catch (error: any) {
     // EPERM still proves a process occupies the PID; fail closed and keep its
     // launch tree rather than risking deletion of live credentials/state.
+    return error?.code === "EPERM";
+  }
+}
+
+function isProcessGroupAlive(processGroupId: number): boolean {
+  if (process.platform === "win32"
+    || !Number.isSafeInteger(processGroupId) || processGroupId <= 0) return false;
+  try {
+    process.kill(-processGroupId, 0);
+    return true;
+  } catch (error: any) {
+    // EPERM proves the group exists; ESRCH is the only complete negative.
     return error?.code === "EPERM";
   }
 }
@@ -725,8 +771,19 @@ function launchRootReferencedByLiveProcess(
   launchRoot: string,
   safeWorkspace: string | undefined,
   exitedProcess?: OpencodeExitedProcessIdentity,
+  persistedProcessGroupId?: number,
+  persistedSessionId?: number,
 ): boolean | undefined {
-  if (process.platform !== "linux") return undefined;
+  const processGroupId = exitedProcess?.processGroupId ?? persistedProcessGroupId;
+  const sessionId = exitedProcess?.sessionId ?? persistedSessionId;
+  if (process.platform !== "linux") {
+    // A surviving dedicated POSIX group is stronger evidence than the direct
+    // child's exit and covers descendants whose environment is opaque.
+    if (processGroupId && isProcessGroupAlive(processGroupId)) return true;
+    // On platforms without procfs, a native ChildProcess exit is the strongest
+    // portable proof available once the dedicated group is gone.
+    return exitedProcess?.nativeExitObserved === true ? false : undefined;
+  }
   let entries: string[];
   try {
     entries = readdirSync("/proc");
@@ -759,6 +816,22 @@ function launchRootReferencedByLiveProcess(
       && procStat?.identity === exitedProcess.identity
       && (procStat.state === "Z" || procStat.state === "X")) {
       continue;
+    }
+    // Descendants inherit the ACP leader's process group even after
+    // reparenting. This remains observable when PR_SET_DUMPABLE=0 makes
+    // environ/cwd unreadable, so never remove their credential-bearing root.
+    if (processGroupId
+      && procStat?.processGroupId === processGroupId
+      && procStat.state !== "Z" && procStat.state !== "X") {
+      return true;
+    }
+    // A descendant may create another pgrp but cannot silently leave its
+    // supervisor's session without setsid(). Retain the credential root for
+    // every live member of the durable session receipt as well.
+    if (sessionId
+      && procStat?.sessionId === sessionId
+      && procStat.state !== "Z" && procStat.state !== "X") {
+      return true;
     }
     try {
       if (statSync(`/proc/${entry}`).uid !== uid) continue;
@@ -804,6 +877,36 @@ function parseLaunchOwnerMarker(path: string): LaunchOwnerMarker | undefined {
   } catch {
     return undefined;
   }
+}
+
+function parseLaunchChildMarker(path: string): LaunchChildMarker | undefined {
+  try {
+    const source = readPrivateRegularFile(path, "OpenCode launch child marker");
+    if (source === undefined) return undefined;
+    const parsed = JSON.parse(source) as Partial<LaunchChildMarker>;
+    if (parsed.format !== OPENCODE_LAUNCH_CHILD_FORMAT
+      || !Number.isSafeInteger(parsed.childPid) || (parsed.childPid ?? 0) <= 0
+      || !(parsed.childProcessIdentity === null || typeof parsed.childProcessIdentity === "string")
+      || !Number.isSafeInteger(parsed.processGroupId) || (parsed.processGroupId ?? 0) <= 0
+      || parsed.processGroupId !== parsed.childPid
+      || !Number.isSafeInteger(parsed.sessionId) || (parsed.sessionId ?? 0) <= 0
+      || parsed.sessionId !== parsed.childPid
+      || typeof parsed.launchDev !== "string" || !/^\d+$/.test(parsed.launchDev)
+      || typeof parsed.launchIno !== "string" || !/^\d+$/.test(parsed.launchIno)) {
+      return undefined;
+    }
+    return parsed as LaunchChildMarker;
+  } catch {
+    return undefined;
+  }
+}
+
+function childMarkerMatchesLaunchNamespace(
+  marker: LaunchChildMarker,
+  launchStat: { dev: number | bigint; ino: number | bigint },
+): boolean {
+  return marker.launchDev === String(launchStat.dev)
+    && marker.launchIno === String(launchStat.ino);
 }
 
 function markerMatchesLaunchNamespace(
@@ -891,6 +994,26 @@ function releaseTrackedLaunchRoot(
 ): boolean {
   const tracked = trackedLaunchRoots.get(launchRoot);
   if (!tracked) return !lstatIfPresent(launchRoot);
+  const exitedProcessGroupId = exitedProcess?.processGroupId;
+  const exitedSessionId = exitedProcess?.sessionId;
+  if (exitedProcessGroupId !== undefined && exitedProcessGroupId !== null) {
+    if (!Number.isSafeInteger(exitedProcessGroupId) || exitedProcessGroupId <= 0) return false;
+    if (tracked.processGroupId !== undefined
+      && tracked.processGroupId !== exitedProcessGroupId) return false;
+    // Keep the binding after deferred cleanup so a later same-process sweep
+    // still recognizes an opaque descendant.
+    tracked.processGroupId = exitedProcessGroupId;
+  }
+  if (exitedSessionId !== undefined && exitedSessionId !== null) {
+    if (!Number.isSafeInteger(exitedSessionId) || exitedSessionId <= 0) return false;
+    if (tracked.sessionId !== undefined && tracked.sessionId !== exitedSessionId) return false;
+    tracked.sessionId = exitedSessionId;
+  }
+  if (unspawned && (tracked.processGroupId !== undefined || tracked.sessionId !== undefined)) {
+    // Once a real child inherited the tree, the no-child discard path must
+    // never authorize deletion.
+    return false;
+  }
   tracked.active = false;
   // The ACP child may have left a tool subprocess behind. Preserve the tree
   // while any live descendant still carries its launch-scoped XDG roots; a
@@ -900,6 +1023,8 @@ function releaseTrackedLaunchRoot(
       launchRoot,
       tracked.safeWorkspace ? tracked.effectiveCwd : undefined,
       exitedProcess,
+      tracked.processGroupId,
+      tracked.sessionId,
     );
     // Unknown procfs state is not proof that the credential-bearing tree is
     // unused. Only a complete negative scan authorizes deletion.
@@ -936,6 +1061,13 @@ function cleanupStaleLaunchRoots(launchBase: string): void {
     if (tracked?.active && matchesTrackedInode) continue;
 
     const marker = parseLaunchOwnerMarker(join(launchRoot, OPENCODE_LAUNCH_OWNER_FILE));
+    const childMarkerPath = join(launchRoot, OPENCODE_LAUNCH_CHILD_FILE);
+    const childMarkerEntry = lstatIfPresent(childMarkerPath);
+    const childMarker = parseLaunchChildMarker(childMarkerPath);
+    // A planted/tampered child marker is not deletion authority. It may only
+    // defer cleanup of this unpredictable 0700 root.
+    if (childMarkerEntry
+      && (!childMarker || !childMarkerMatchesLaunchNamespace(childMarker, before))) continue;
     // An inactive, same-inode in-memory binding is stronger than the marker's
     // live parent PID: it records that this process already observed child
     // exit/build failure. Let the sweep retry a transient removal failure.
@@ -946,7 +1078,25 @@ function cleanupStaleLaunchRoots(launchBase: string): void {
     const inferredWorkspace = lstatIfPresent(join(launchRoot, "workspace"))
       ? join(launchRoot, "workspace")
       : undefined;
-    const referenced = launchRootReferencedByLiveProcess(launchRoot, inferredWorkspace);
+    if (matchesTrackedInode && tracked?.processGroupId !== undefined
+      && childMarker?.processGroupId !== undefined
+      && tracked.processGroupId !== childMarker.processGroupId) continue;
+    if (matchesTrackedInode && tracked?.sessionId !== undefined
+      && childMarker?.sessionId !== undefined
+      && tracked.sessionId !== childMarker.sessionId) continue;
+    const processGroupId = matchesTrackedInode
+      ? tracked?.processGroupId ?? childMarker?.processGroupId
+      : childMarker?.processGroupId;
+    const sessionId = matchesTrackedInode
+      ? tracked?.sessionId ?? childMarker?.sessionId
+      : childMarker?.sessionId;
+    const referenced = launchRootReferencedByLiveProcess(
+      launchRoot,
+      inferredWorkspace,
+      undefined,
+      processGroupId,
+      sessionId,
+    );
     if (referenced === true) continue;
 
     const createdAt = marker?.createdAtMs ?? before.mtimeMs;
@@ -982,6 +1132,85 @@ export function cleanupOpencodeChildEnv(
   const tracked = trackedLaunchRoots.get(launchRoot);
   if (!tracked || tracked.workDir !== workDir) return false;
   return releaseTrackedLaunchRoot(launchRoot, exitedProcess);
+}
+
+/**
+ * Durably bind a successfully spawned detached ACP child to its launch root.
+ * Cleanup can then recognize opaque surviving descendants by process group,
+ * including after agent-node itself crashes and a later process sweeps roots.
+ * Call immediately after spawn(), before the first await.
+ */
+export function bindOpencodeChildProcessGroup(
+  workDirInput: string,
+  env: NodeJS.ProcessEnv,
+  child: OpencodeSpawnedProcessIdentity,
+): void {
+  const workDir = resolve(workDirInput);
+  const dataRoot = env.XDG_DATA_HOME;
+  if (typeof dataRoot !== "string") {
+    throw new Error("opencode refuses child binding: launch data root is missing");
+  }
+  const launchRoot = dirname(resolve(dataRoot));
+  if (resolve(dataRoot) !== join(launchRoot, "data")) {
+    throw new Error("opencode refuses child binding: launch data root changed");
+  }
+  const tracked = trackedLaunchRoots.get(launchRoot);
+  if (!tracked || !tracked.active || tracked.workDir !== workDir) {
+    throw new Error("opencode refuses child binding: launch root is not active");
+  }
+  const processGroupId = child.processGroupId;
+  const sessionId = child.sessionId;
+  if (process.platform === "win32" || !Number.isSafeInteger(child.pid) || child.pid <= 0
+    || !Number.isSafeInteger(processGroupId) || (processGroupId ?? 0) <= 0
+    || processGroupId !== child.pid
+    || !Number.isSafeInteger(sessionId) || (sessionId ?? 0) <= 0
+    || sessionId !== child.pid) {
+    throw new Error("opencode refuses child binding: expected a dedicated Linux session/group leader");
+  }
+  if (!(child.identity === null || typeof child.identity === "string")) {
+    throw new Error("opencode refuses child binding: invalid child process identity");
+  }
+
+  const base = lstatIfPresent(tracked.basePath);
+  const launch = lstatIfPresent(launchRoot);
+  if (!base || !sameIdentity(base, { dev: tracked.baseDev, ino: tracked.baseIno })
+    || !launch || !sameIdentity(launch, tracked)) {
+    throw new Error("opencode refuses child binding: launch namespace changed");
+  }
+  assertPrivateDirectory(launchRoot, "fresh OpenCode launch root", true);
+
+  const stat = readLinuxProcessStat(child.pid);
+  if (stat) {
+    if (stat.processGroupId !== processGroupId
+      || stat.sessionId !== sessionId
+      || (child.identity !== null && stat.identity !== child.identity)
+      || stat.state === "Z" || stat.state === "X") {
+      throw new Error("opencode refuses child binding: spawned process identity changed");
+    }
+  } else if (!isProcessGroupAlive(processGroupId)) {
+    throw new Error("opencode refuses child binding: spawned process group is not live");
+  }
+
+  const marker: LaunchChildMarker = {
+    format: OPENCODE_LAUNCH_CHILD_FORMAT,
+    childPid: child.pid,
+    childProcessIdentity: child.identity,
+    processGroupId,
+    sessionId: sessionId as number,
+    launchDev: String(tracked.dev),
+    launchIno: String(tracked.ino),
+  };
+  atomicWritePrivateFile(
+    join(launchRoot, OPENCODE_LAUNCH_CHILD_FILE),
+    JSON.stringify(marker) + "\n",
+    "OpenCode launch child marker",
+  );
+  const after = lstatIfPresent(launchRoot);
+  if (!after || !sameIdentity(after, tracked)) {
+    throw new Error("opencode refuses child binding: launch root changed after marker write");
+  }
+  tracked.processGroupId = processGroupId;
+  tracked.sessionId = sessionId as number;
 }
 
 /** Remove a launch tree after binary resolution/spawn failed before a child

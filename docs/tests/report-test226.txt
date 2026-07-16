@@ -1,6 +1,6 @@
 # Test 226 — opencode-cli release pin matrix
 
-date: 2026-07-16T03:15:29+00:00
+date: 2026-07-16T07:37:51+00:00
 candidate pin: 1.18.1
 opencode: 1.18.1
 bun: 1.3.1
@@ -15,7 +15,7 @@ node: v18.20.4
 
 # RFC-029 PR④ — kernel-live ACP e2e report
 
-date: 2026-07-16T03:15:30+00:00
+date: 2026-07-16T07:37:53+00:00
 bun: 1.3.1
 node: v18.20.4
 opencode: 1.18.1
@@ -24,32 +24,32 @@ free model: opencode/deepseek-v4-flash-free
 ## Full harness output
 
 ```
-[runtime.log] [opencode-acp] session/new — ses_09713c95...
+[runtime.log] [opencode-acp] session/new — ses_09623901...
 ===S-happy-live-BEGIN===
 {
   "freeModel": "opencode/deepseek-v4-flash-free",
-  "wallMs": 9227,
+  "wallMs": 10221,
   "replyText": "hello world",
   "replyTextLength": 11,
   "thoughtTextLength": 94,
-  "sessionId": "ses_09713c955ffeS3V1KKYzyigDOR",
+  "sessionId": "ses_09623901affe7BUGCKxkw3l7Zr",
   "chunks": 2,
   "thoughtChunks": 22,
   "stopReason": "end_turn",
   "rescued": false,
   "usage": {
-    "inputTokens": 3657,
+    "inputTokens": 2020,
     "outputTokens": 3,
-    "totalTokens": 3682,
+    "totalTokens": 2045,
     "thoughtTokens": 22
   },
   "pidsBefore": [],
   "pidsDuring": [
-    83
+    93
   ],
   "pidsAfter": [],
   "logsFromRuntime": [
-    "[opencode-acp] session/new — ses_09713c95..."
+    "[opencode-acp] session/new — ses_09623901..."
   ],
   "warnsFromRuntime": []
 }
@@ -61,13 +61,13 @@ harness exit=0
 ## Assertions
 
   ✓ opencode child present during turn (pgrep) — ge '1' got '1'
-  ✓ session id issued by session/new — regex '^ses_' got 'ses_09713c955ffeS3V1KKYzyigDOR'
+  ✓ session id issued by session/new — regex '^ses_' got 'ses_09623901affe7BUGCKxkw3l7Zr'
   ✓ at least one agent_message_chunk — ge '1' got '2'
   ✓ replyText non-empty (real upstream free model produced text) — gt '0' got '11'
   ✓ replyText looks like a real turn (contains a letter) — regex '[A-Za-z]' got 'hello world'
   ✓ stopReason recorded — regex '.+' got 'end_turn'
   ✓ no orphan opencode after runtime.client.stop — eq '0' got '0'
-  ✓ wall time under 3-minute idle ceiling — regex '^[0-9]+$' got '9227'
+  ✓ wall time under 3-minute idle ceiling — regex '^[0-9]+$' got '10221'
 
 OVERALL: PASS
 trailer: RFC-029 PR④ kernel-live — PASS

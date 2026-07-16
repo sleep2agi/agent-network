@@ -10,8 +10,8 @@
  * anet run                     独立 SSE Agent
  */
 
-import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync, rmSync, cpSync } from "fs";
-import { dirname, isAbsolute, join } from "path";
+import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, lstatSync, renameSync, rmSync, cpSync } from "fs";
+import { dirname, isAbsolute, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
 import { spawn, execSync, execFileSync } from "child_process";
@@ -30,6 +30,10 @@ import {
   validateAgentNodePackageEntrypoint,
 } from "../src/opencode-agent-node-pair";
 import { hardenOpencodeAgentNodeEnv } from "../src/opencode-launch-env";
+import {
+  signalExactProcessGracefully,
+  stopExactProcessTermOnly,
+} from "../src/opencode-wrapper-stop";
 import {
   clearOpencodeAuthJson,
   findOpencodePreset,
@@ -3412,27 +3416,61 @@ async function launchAgent(id: string, forceNewSession = false) {
     const RESTART_SENTINEL = 75;
     let lastNonRestartCode: number | null = null;
     let activeAgentChild: ReturnType<typeof spawn> | null = null;
+    let activeAgentChildIdentity: BoundOpencodeProcessIdentity | null = null;
     let parentShuttingDown = false;
-    let childKillTimer: ReturnType<typeof setTimeout> | null = null;
+    const childGracefulStops = new Set<Promise<boolean>>();
 
     // The foreground anet process owns the supervised OpenCode child. Keep
     // this handler OpenCode-only: generic Windows runtimes launch through a
     // cmd.exe wrapper (`shell:true`) and must retain main's already-vetted
     // process lifecycle until a process-tree-aware Windows gate exists.
-    const forwardAgentSignal = (signal: NodeJS.Signals) => {
-      if (parentShuttingDown) return;
+    const forwardAgentSignal = (signal: "SIGINT" | "SIGTERM") => {
       parentShuttingDown = true;
-      try { activeAgentChild?.kill(signal); } catch {}
-      childKillTimer = setTimeout(() => {
-        try { activeAgentChild?.kill("SIGKILL"); } catch {}
-      }, 5_000);
-      childKillTimer.unref?.();
+      const child = activeAgentChild;
+      if (!child?.pid) return;
+      const pid = child.pid;
+      const identity = activeAgentChildIdentity;
+      const attempt = signalExactProcessGracefully({
+        pid,
+        // Bind the live ChildProcess handle to Linux starttime. The handle
+        // alone still stores a numeric PID and is not a pidfd.
+        readState: () => {
+          if (child.exitCode !== null || child.signalCode !== null) return "exited-or-reused";
+          if (activeAgentChild !== child || !identity) return "unknown";
+          const currentStartTime = readProcStartTime(identity.pid);
+          if (!currentStartTime) return pidAlive(identity.pid) ? "unknown" : "exited-or-reused";
+          return currentStartTime === identity.startTime ? "same" : "exited-or-reused";
+        },
+        // agent-node may need to drain supervisor TERM + group reap + procfs
+        // verification. Keep the wrapper alive beyond that whole budget.
+        timeoutMs: 10_000,
+        pollMs: 100,
+      }, signal).then((exited) => {
+        if (!exited) {
+          // SIGKILLing only the wrapper would orphan its detached ACP group.
+          // Retain the owner tree for inspection/retry and make any eventual
+          // launcher exit non-zero rather than claiming a clean stop.
+          process.exitCode = 1;
+          console.error(
+            `[anet] OpenCode agent-node pid ${pid} did not exit after ${signal}; ` +
+            `wrapper retained so its detached ACP process group is not orphaned`,
+          );
+        }
+        return exited;
+      }).finally(() => {
+        childGracefulStops.delete(attempt);
+      });
+      childGracefulStops.add(attempt);
     };
     const onAgentSigint = () => forwardAgentSignal("SIGINT");
     const onAgentSigterm = () => forwardAgentSignal("SIGTERM");
+    const onAgentSighup = () => forwardAgentSignal("SIGTERM");
     if (runtime === "opencode-cli") {
-      process.once("SIGINT", onAgentSigint);
-      process.once("SIGTERM", onAgentSigterm);
+      // Persistent listeners make a second operator signal a retry, never the
+      // default action that would kill only the wrapper and orphan its ACP.
+      process.on("SIGINT", onAgentSigint);
+      process.on("SIGTERM", onAgentSigterm);
+      process.on("SIGHUP", onAgentSighup);
     }
 
     await superviseChild({
@@ -3471,7 +3509,13 @@ async function launchAgent(id: string, forceNewSession = false) {
           stdio: "inherit",
           shell: runtime === "opencode-cli" ? false : process.platform === "win32",
         });
-        if (runtime === "opencode-cli") activeAgentChild = child;
+        if (runtime === "opencode-cli") {
+          activeAgentChild = child;
+          const startTime = child.pid ? readProcStartTime(child.pid) : undefined;
+          activeAgentChildIdentity = child.pid && startTime
+            ? { pid: child.pid, startTime }
+            : null;
+        }
         if (child.pid) writeFileSync(pidFile, String(child.pid));
 
         let settled = false;
@@ -3492,6 +3536,7 @@ async function launchAgent(id: string, forceNewSession = false) {
         clearTimeout(stableTimer);
         if (runtime === "opencode-cli" && activeAgentChild === child) {
           activeAgentChild = null;
+          activeAgentChildIdentity = null;
         }
 
         // Always remove the .pid before deciding the next step — the
@@ -3511,10 +3556,11 @@ async function launchAgent(id: string, forceNewSession = false) {
         lastNonRestartCode = exitInfo.code ?? 0;
       },
     });
-    if (childKillTimer) clearTimeout(childKillTimer);
+    if (childGracefulStops.size > 0) await Promise.all([...childGracefulStops]);
     if (runtime === "opencode-cli") {
       process.off("SIGINT", onAgentSigint);
       process.off("SIGTERM", onAgentSigterm);
+      process.off("SIGHUP", onAgentSighup);
     }
 
     // If the child exited with a non-zero, non-sentinel code, propagate
@@ -5099,6 +5145,102 @@ function findNodeProcessesByAlias(...aliases: string[]): number[] | null {
   return [...pids];
 }
 
+interface BoundOpencodeProcessIdentity {
+  pid: number;
+  /** Linux procfs starttime (field 22), stable across PID reuse. */
+  startTime: string;
+}
+
+function readProcStartTime(pid: number): string | undefined {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const commEnd = stat.lastIndexOf(")");
+    if (commEnd < 0) return undefined;
+    // The suffix starts at field 3 (state); starttime is field 22.
+    return stat.slice(commEnd + 2).trim().split(/\s+/)[19];
+  } catch {
+    return undefined;
+  }
+}
+
+function readBoundOpencodeProcessIdentity(
+  pid: number,
+  nodeId: string,
+  _profile: Profile,
+): BoundOpencodeProcessIdentity | undefined {
+  if (process.platform !== "linux" || pid === process.pid) return undefined;
+  let argv: string[];
+  try {
+    argv = readFileSync(`/proc/${pid}/cmdline`).toString("utf8").split("\0").filter(Boolean);
+  } catch {
+    return undefined;
+  }
+  const expectedConfig = resolve(join(nodesDir(), nodeId, "config.json"));
+  const isAgentNode = argv.some((value) => {
+    const base = value.split(/[\\/]/).pop() || value;
+    return base === "agent-node"
+      || value.includes("@sleep2agi/agent-node")
+      || /[\\/]agent-node[\\/](?:dist|src)[\\/]cli\.(?:js|ts)$/.test(value);
+  });
+  if (!isAgentNode) return undefined;
+  const valueAfter = (flag: string): string | undefined => {
+    const index = argv.indexOf(flag);
+    return index >= 0 ? argv[index + 1] : undefined;
+  };
+  const config = valueAfter("--config");
+  if (!config || resolve(config) !== expectedConfig) return undefined;
+  if (valueAfter("--runtime") !== "opencode-cli") return undefined;
+  // Alias is mutable config/display metadata. Canonical config path + bound
+  // runtime identify ownership even if a profile rename raced the old wrapper.
+  const startTime = readProcStartTime(pid);
+  return startTime ? { pid, startTime } : undefined;
+}
+
+function boundOpencodeProcessState(
+  expected: BoundOpencodeProcessIdentity,
+  nodeId: string,
+  profile: Profile,
+): "same" | "exited-or-reused" | "unknown" {
+  const currentStartTime = readProcStartTime(expected.pid);
+  if (!currentStartTime) return pidAlive(expected.pid) ? "unknown" : "exited-or-reused";
+  if (currentStartTime !== expected.startTime) return "exited-or-reused";
+  const current = readBoundOpencodeProcessIdentity(expected.pid, nodeId, profile);
+  if (!current) return pidAlive(expected.pid) ? "unknown" : "exited-or-reused";
+  return current.startTime === expected.startTime ? "same" : "exited-or-reused";
+}
+
+async function terminateBoundOpencodeProcess(
+  expected: BoundOpencodeProcessIdentity,
+  nodeId: string,
+  profile: Profile,
+): Promise<boolean> {
+  // Never SIGKILL only the wrapper: it owns a detached OpenCode ACP process
+  // group. If its graceful handler cannot run, retain the ownership tree and
+  // fail the stop instead of manufacturing an orphan.
+  return stopExactProcessTermOnly({
+    pid: expected.pid,
+    readState: () => boundOpencodeProcessState(expected, nodeId, profile),
+  });
+}
+
+function findBoundOpencodeProcesses(
+  nodeId: string,
+  profile: Profile,
+): BoundOpencodeProcessIdentity[] | null {
+  if (process.platform !== "linux") return null;
+  let entries: string[];
+  try { entries = readdirSync("/proc").filter((name) => /^\d+$/.test(name)); }
+  catch { return null; }
+  const matches: BoundOpencodeProcessIdentity[] = [];
+  for (const entry of entries) {
+    const pid = Number(entry);
+    if (!Number.isInteger(pid)) continue;
+    const identity = readBoundOpencodeProcessIdentity(pid, nodeId, profile);
+    if (identity) matches.push(identity);
+  }
+  return matches;
+}
+
 // #146 GOTCHA-2 — best-effort drain before a rename restart kills the agent.
 // Polls commhub /api/status: returns true once the node is NOT actively
 // running a task (idle / blocked / error / offline / fell off status), false
@@ -5223,6 +5365,11 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
         throw new Error("external OpenCode binding resolved to a non-OpenCode runtime");
       }
       boundRenameProfile = resolvedBound.profile;
+    } else if (normalizeRuntimeStrict(resolved.profile) === "opencode-cli") {
+      throw new Error(
+        `OpenCode runtime binding is missing for node ${JSON.stringify(oldId)}. ` +
+        `Refusing legacy/unproven state; recreate this preview node before renaming it.`,
+      );
     }
   } catch (error: any) {
     console.error(
@@ -5230,6 +5377,39 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
       `${error?.message || error}`,
     );
     process.exit(1);
+  }
+  if (boundRenameProfile) {
+    // Active bound OpenCode rename used to fall through to the legacy alias
+    // scan and its SIGKILL fallback. Killing only agent-node can orphan the
+    // detached ACP group, and alias metadata is not an ownership identity.
+    // Require the authoritative TERM-only stop command before rename mutates
+    // config, binding, lock, or CommHub state.
+    const liveBound = findBoundOpencodeProcesses(oldId, boundRenameProfile);
+    if (liveBound === null) {
+      console.error(
+        `[anet] Refusing to rename bound OpenCode node ${JSON.stringify(oldId)}: ` +
+        `cannot prove the exact wrapper is stopped; run 'anet node stop ${oldId}' first.`,
+      );
+      process.exit(1);
+    }
+    const boundPidPath = join(oldDir, ".pid");
+    let unauthenticatedLivePid: number | undefined;
+    if (liveBound.length === 0 && existsSync(boundPidPath)) {
+      const recordedPid = Number(readFileSync(boundPidPath, "utf8").trim());
+      if (Number.isSafeInteger(recordedPid) && recordedPid > 0 && pidAlive(recordedPid)) {
+        unauthenticatedLivePid = recordedPid;
+      }
+    }
+    if (liveBound.length > 0 || unauthenticatedLivePid !== undefined) {
+      const detail = liveBound.length > 0
+        ? `exact wrapper pid(s) ${liveBound.map(({ pid }) => pid).join(", ")} still live`
+        : `recorded pid ${unauthenticatedLivePid} is live but not authenticatable`;
+      console.error(
+        `[anet] Refusing to rename running bound OpenCode node ${JSON.stringify(oldId)}: ${detail}; ` +
+        `run 'anet node stop ${oldId}' first.`,
+      );
+      process.exit(1);
+    }
   }
   // state check: running node needs --force (RFC-010 §4.4 active rename).
   // #146 / #180 ship-blocker — DO NOT trust .pid for old-process identity. A
@@ -5290,9 +5470,41 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
   // ── PHASE 1: PREPARE (copy/prepare, old node untouched — fully rollbackable) ──
   writeFileSync(lockPath, JSON.stringify({ old: oldId, new: newName, phase: "prepare", ts: Date.now() }) + "\n");
   let txnId: string | null = "";
+  let preparedNewDirIdentity: { dev: number; ino: number } | undefined;
+  const ownsPreparedNewDir = (): boolean => {
+    if (!boundRenameProfile) return true;
+    if (!preparedNewDirIdentity) return false;
+    try {
+      const current = lstatSync(newDir);
+      return current.isDirectory()
+        && !current.isSymbolicLink()
+        && current.dev === preparedNewDirIdentity.dev
+        && current.ino === preparedNewDirIdentity.ino;
+    } catch {
+      return false;
+    }
+  };
   try {
     // P2: copy (not move) old → new + update config.alias
+    if (boundRenameProfile) {
+      // fs.cpSync creates a recursive-copy destination through the caller's
+      // umask (typically 0755), even when the source node root is private.
+      // Establish and validate the exact destination as 0700 first so copied
+      // profile/auth state is never transiently exposed and saveProfile can
+      // create the replacement external binding without weakening its mode
+      // invariant. mkdir is the no-overwrite claim on the checked name.
+      mkdirSync(newDir, { mode: 0o700 });
+      const created = lstatSync(newDir);
+      if (!created.isDirectory() || created.isSymbolicLink()) {
+        throw new Error("prepared OpenCode rename target is not a real directory");
+      }
+      preparedNewDirIdentity = { dev: created.dev, ino: created.ino };
+      prepareOpencodeNodeForProfileWrite(newDir);
+    }
     cpSync(oldDir, newDir, { recursive: true });
+    if (boundRenameProfile && !ownsPreparedNewDir()) {
+      throw new Error("prepared OpenCode rename target changed during copy");
+    }
     const newLock = join(newDir, "rename.lock");
     if (existsSync(newLock)) rmSync(newLock, { force: true });  // lock belongs to oldDir only
     // #146 — cpSync also copies the old node's `.pid`; that PID belongs to the
@@ -5363,12 +5575,18 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
     console.error(`[anet] rename PHASE 1 failed: ${e.message} — rolling back`);
     let bindingCleanupError: any;
     if (existsSync(newDir)) {
-      try {
-        removeOpencodeRuntimeBinding(newDir, opencodeBindingHome());
-      } catch (cleanupError: any) {
-        bindingCleanupError = cleanupError;
+      if (!ownsPreparedNewDir()) {
+        bindingCleanupError = new Error(
+          "rename target is not the directory created by this transaction; preserved without mutation",
+        );
+      } else {
+        try {
+          removeOpencodeRuntimeBinding(newDir, opencodeBindingHome());
+        } catch (cleanupError: any) {
+          bindingCleanupError = cleanupError;
+        }
+        if (!bindingCleanupError) rmSync(newDir, { recursive: true, force: true });
       }
-      if (!bindingCleanupError) rmSync(newDir, { recursive: true, force: true });
     }
     // PR-3 (#110) — txnId is null for local-only renames; no server abort needed.
     if (txnId) {
@@ -5406,12 +5624,18 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
     console.error(`[anet] rename PHASE 2 C1 (commhub commit) failed: ${commit.error} — rolling back`);
     let bindingCleanupError: any;
     if (existsSync(newDir)) {
-      try {
-        removeOpencodeRuntimeBinding(newDir, opencodeBindingHome());
-      } catch (cleanupError: any) {
-        bindingCleanupError = cleanupError;
+      if (!ownsPreparedNewDir()) {
+        bindingCleanupError = new Error(
+          "rename target is not the directory created by this transaction; preserved without mutation",
+        );
+      } else {
+        try {
+          removeOpencodeRuntimeBinding(newDir, opencodeBindingHome());
+        } catch (cleanupError: any) {
+          bindingCleanupError = cleanupError;
+        }
+        if (!bindingCleanupError) rmSync(newDir, { recursive: true, force: true });
       }
-      if (!bindingCleanupError) rmSync(newDir, { recursive: true, force: true });
     }
     // PR-3 (#110) — txnId is null for local-only path; nothing to abort server-side.
     if (txnId) {
@@ -5650,6 +5874,52 @@ function stopNode(nodeId: string): boolean {
   }
 }
 
+async function stopNodeAuthoritatively(
+  nodeId: string,
+  profile: Profile,
+  requireBoundOpencode = false,
+): Promise<boolean> {
+  const binding = readOpencodeRuntimeBinding(join(nodesDir(), nodeId), opencodeBindingHome());
+  if (!binding) {
+    if (requireBoundOpencode) {
+      throw new Error("bound OpenCode identity disappeared during stop; refusing legacy PID fallback");
+    }
+    return stopNode(nodeId);
+  }
+
+  const initial = findBoundOpencodeProcesses(nodeId, profile);
+  if (initial === null) {
+    throw new Error("cannot inspect process table for bound OpenCode stop");
+  }
+  const pidFile = join(nodesDir(), nodeId, ".pid");
+  if (initial.length === 0 && existsSync(pidFile)) {
+    const recordedPid = Number(readFileSync(pidFile, "utf8").trim());
+    if (Number.isSafeInteger(recordedPid) && recordedPid > 0 && pidAlive(recordedPid)) {
+      throw new Error(
+        `live recorded pid ${recordedPid} is not an authentic bound OpenCode wrapper; state retained`,
+      );
+    }
+  }
+  for (const identity of initial) {
+    if (!(await terminateBoundOpencodeProcess(identity, nodeId, profile))) {
+      throw new Error(
+        `bound OpenCode process ${identity.pid} did not exit after SIGTERM; ` +
+        `wrapper retained so its detached ACP process group is not orphaned`,
+      );
+    }
+  }
+  const survivors = findBoundOpencodeProcesses(nodeId, profile);
+  if (survivors === null) {
+    throw new Error("cannot re-scan process table for bound OpenCode stop");
+  }
+  if (survivors.length > 0) {
+    throw new Error(`bound OpenCode process survived stop: ${survivors.map(p => p.pid).join(", ")}`);
+  }
+  // PID state is cleared only after the exact process-table receipt has gone.
+  rmSync(pidFile, { force: true });
+  return initial.length > 0;
+}
+
 async function stopCommand() {
   const ref = args[1];
   if (!ref) {
@@ -5667,22 +5937,54 @@ Stop a running agent node.
     process.exit(1);
   }
 
-  const displayName = nodeDisplayName(resolved.id, resolved.profile);
-  // #122 — auto-tmux on start needs symmetric cleanup on stop. Kill the
-  // tmux session first (idempotent — has-session check guards), then SIGTERM
-  // the recorded PID and notify the hub. Order matters: killing tmux kills
-  // any child processes too, which makes `stopNode` mostly a defensive op
-  // when the PID file is stale.
-  const tmuxKilled = tmuxSessionRunning(displayName);
-  if (tmuxKilled) killTmuxSession(displayName);
-  const killed = stopNode(resolved.id);
+  let trustedProfile: Profile;
+  try {
+    trustedProfile = resolveStartProfile(resolved.id, resolved.profile).profile;
+  } catch (error: any) {
+    console.error(`[anet] refusing stop before mutation: ${error?.message || error}`);
+    process.exit(1);
+  }
+  const displayName = nodeDisplayName(resolved.id, trustedProfile);
+  let isBoundOpencode = false;
+  try {
+    isBoundOpencode = !!readOpencodeRuntimeBinding(
+      join(nodesDir(), resolved.id),
+      opencodeBindingHome(),
+    );
+  } catch (error: any) {
+    console.error(`[anet] refusing stop before mutation: ${error?.message || error}`);
+    process.exit(1);
+  }
+
+  // Generic runtimes retain the existing tmux-first behavior. A bound
+  // OpenCode node must first let its exact wrapper run the group-aware async
+  // shutdown; killing tmux first can bypass that handler and orphan ACP.
+  let tmuxKilled = false;
+  if (!isBoundOpencode && tmuxSessionRunning(displayName)) {
+    killTmuxSession(displayName);
+    tmuxKilled = true;
+  }
+  let killed = false;
+  try {
+    killed = await stopNodeAuthoritatively(resolved.id, trustedProfile, isBoundOpencode);
+  } catch (error: any) {
+    console.error(`[anet] refusing/failed authoritative stop: ${error?.message || error}`);
+    process.exit(1);
+  }
+  // A same-name tmux session can be recreated between process verification
+  // and cleanup. Never mutate it for bound OpenCode; report the residual for
+  // explicit operator inspection instead of creating an alias TOCTOU kill.
+  const residualBoundTmux = isBoundOpencode && tmuxSessionRunning(displayName);
   // Always notify server — even if PID file missing, server may have stale session
-  await notifyServerOffline(resolved.profile, resolved.id);
+  await notifyServerOffline(trustedProfile, resolved.id);
   if (killed || tmuxKilled) {
     const what = [tmuxKilled ? "tmux" : null, killed ? "process" : null].filter(Boolean).join(" + ");
     console.log(`[anet] Stopped "${displayName}" (${what} killed, server notified)`);
   } else {
     console.log(`[anet] "${displayName}" is not running locally (server notified offline)`);
+  }
+  if (residualBoundTmux) {
+    console.warn(`[anet] bound OpenCode tmux session "${displayName}" was not mutated; inspect it explicitly`);
   }
 }
 
@@ -5694,6 +5996,13 @@ Stop a running agent node.
 // so `anet project up` on 22 nodes is genuinely zero-keystroke.
 
 interface ProjectNode { id: string; alias: string; profile: Profile | null; invalid?: string; }
+
+function projectNodeHasOpencodeBinding(node: ProjectNode): boolean {
+  return !!readOpencodeRuntimeBinding(
+    join(nodesDir(), node.id),
+    opencodeBindingHome(),
+  );
+}
 
 function printProjectUsage() {
   console.log(`
@@ -5911,8 +6220,20 @@ async function projectUp(invokedAs = "anet project up") {
     if (n.invalid) {
       console.log(`  ⚠  ${n.alias} — invalid config: ${n.invalid}`);
       invalid.push({ alias: n.alias, reason: n.invalid });
-    } else {
+      continue;
+    }
+    try {
+      if (projectNodeHasOpencodeBinding(n)) {
+        const reason = "bound opencode-cli nodes require explicit 'anet node start/stop' lifecycle";
+        console.log(`  ⚠  ${n.alias} — invalid config: ${reason}`);
+        invalid.push({ alias: n.alias, reason });
+        continue;
+      }
       startable.push(n);
+    } catch (error: any) {
+      const reason = `runtime binding preflight failed: ${error?.message ?? error}`;
+      console.log(`  ⚠  ${n.alias} — invalid config: ${reason}`);
+      invalid.push({ alias: n.alias, reason });
     }
   }
 
@@ -5965,8 +6286,20 @@ async function projectRestart() {
     if (n.invalid) {
       console.log(`  ⚠  ${n.alias} — invalid config: ${n.invalid}`);
       invalid.push({ alias: n.alias, reason: n.invalid });
-    } else {
+      continue;
+    }
+    try {
+      if (projectNodeHasOpencodeBinding(n)) {
+        const reason = "bound opencode-cli restart requires explicit stop, review, then start";
+        console.log(`  ⚠  ${n.alias} — invalid config: ${reason}`);
+        invalid.push({ alias: n.alias, reason });
+        continue;
+      }
       startable.push(n);
+    } catch (error: any) {
+      const reason = `runtime binding preflight failed: ${error?.message ?? error}`;
+      console.log(`  ⚠  ${n.alias} — invalid config: ${reason}`);
+      invalid.push({ alias: n.alias, reason });
     }
   }
 
@@ -6007,16 +6340,39 @@ async function projectDown() {
     return;
   }
   console.log(`\n[anet] anet project down — ${nodes.length} node(s) in ${process.cwd()}`);
-  let stopped = 0, alreadyDown = 0;
+  let stopped = 0, alreadyDown = 0, failed = 0;
   for (const n of nodes) {
-    const tmuxAlive = tmuxSessionRunning(n.alias);
-    if (tmuxAlive) killTmuxSession(n.alias);
-    const localKilled = stopNode(n.id);
-    if (n.profile) {
+    let bound = false;
+    let trustedProfile = n.profile;
+    try {
+      if (!trustedProfile) throw new Error("profile is unavailable");
+      trustedProfile = resolveStartProfile(n.id, trustedProfile).profile;
+      bound = projectNodeHasOpencodeBinding(n);
+    } catch (error: any) {
+      console.log(`  ✗  ${n.alias} — preflight failed: ${error?.message ?? error}`);
+      failed++;
+      continue;
+    }
+    let tmuxAlive = false;
+    let localKilled = false;
+    try {
+      if (bound) {
+        localKilled = await stopNodeAuthoritatively(n.id, trustedProfile, true);
+      } else {
+        tmuxAlive = tmuxSessionRunning(n.alias);
+        if (tmuxAlive) killTmuxSession(n.alias);
+        localKilled = stopNode(n.id);
+      }
+    } catch (error: any) {
+      console.log(`  ✗  ${n.alias} — authoritative stop failed: ${error?.message ?? error}`);
+      failed++;
+      continue;
+    }
+    if (trustedProfile) {
       // Hub may be down (the very scenario this command runs in) — cap notify
       // at 2s so a 22-node teardown isn't held hostage by 44 hung fetches.
       await Promise.race([
-        notifyServerOffline(n.profile, n.id),
+        notifyServerOffline(trustedProfile, n.id),
         new Promise<void>(r => setTimeout(r, 2000)),
       ]).catch(() => {});
     }
@@ -6027,8 +6383,16 @@ async function projectDown() {
       console.log(`  ·  ${n.alias} — not running`);
       alreadyDown++;
     }
+    if (bound && tmuxSessionRunning(n.alias)) {
+      console.warn(`  ⚠  ${n.alias} — same-name tmux retained for explicit inspection`);
+    }
   }
-  console.log(`\n  ${stopped}/${nodes.length} stopped${alreadyDown ? ` · ${alreadyDown} were not running` : ""}\n`);
+  if (failed > 0) process.exitCode = 1;
+  console.log(
+    `\n  ${stopped}/${nodes.length} stopped` +
+    `${alreadyDown ? ` · ${alreadyDown} were not running` : ""}` +
+    `${failed ? ` · ${failed} failed safely` : ""}\n`,
+  );
 }
 
 // ── loop ── (#144 round-6)
@@ -6215,10 +6579,6 @@ Delete a node and its config. Use --force to skip confirmation.
   const displayName = nodeDisplayName(nodeId, profile);
   const opts = parseOpts();
 
-  // Stop if running + notify server
-  stopNode(nodeId);
-  await notifyServerOffline(profile, nodeId);
-
   const nodeDir = join(nodesDir(), nodeId);
   if (!existsSync(nodeDir)) {
     console.error(`Node directory not found: ${nodeDir}`);
@@ -6231,6 +6591,30 @@ Delete a node and its config. Use --force to skip confirmation.
     console.log(`[anet] Run again with --force to confirm.`);
     return;
   }
+
+  // Deletion has no durable lifecycle lock yet. For an externally-bound
+  // OpenCode node, even a successful stop followed by a concurrent start can
+  // race binding/config removal. Refuse the whole operation before signaling
+  // or mutating anything; explicit stop remains available.
+  let boundOpencode = false;
+  try {
+    boundOpencode = !!readOpencodeRuntimeBinding(nodeDir, opencodeBindingHome());
+  } catch (error: any) {
+    console.error(`[anet] refusing delete before mutation: ${error?.message || error}`);
+    process.exit(1);
+  }
+  if (boundOpencode) {
+    console.error(
+      "[anet] refusing delete of bound opencode-cli node without an external lifecycle lock; " +
+      "run 'anet node stop' and retain the node for explicit inspection",
+    );
+    process.exit(1);
+  }
+
+  // Generic runtimes retain the historical stop + offline behavior, now only
+  // after the confirmation gate so a dry delete never signals a process.
+  stopNode(nodeId);
+  await notifyServerOffline(profile, nodeId);
 
   // The runtime identity lives outside the project tree so a config downgrade
   // cannot bypass it. Remove that exact record first for every runtime: this
@@ -10084,6 +10468,26 @@ async function createBatch(opts: BatchOptions): Promise<BatchResult> {
       // batchAliasFor() can never silently escape `.anet/nodes/`.
       validateNodeName(alias);
       const nodeDir = batchNodeDirFor(opts, i);
+      const sessName = `${tmuxPrefix}-${alias}`;
+      if (tmuxSessionRunning(sessName)) {
+        console.error(`        ❌ ${alias.padEnd(14)} existing tmux owner retained: ${sessName}`);
+        failed.push(alias);
+        continue;
+      }
+      const existingNodeDir = join(nodeDir, ".anet", "nodes", alias);
+      if (existsSync(existingNodeDir)) {
+        try {
+          if (readOpencodeRuntimeBinding(existingNodeDir, opencodeBindingHome())) {
+            console.error(`        ❌ ${alias.padEnd(14)} bound opencode-cli node retained; stop explicitly`);
+            failed.push(alias);
+            continue;
+          }
+        } catch (error: any) {
+          console.error(`        ❌ ${alias.padEnd(14)} binding preflight failed: ${error?.message ?? error}`);
+          failed.push(alias);
+          continue;
+        }
+      }
       mkdirSync(nodeDir, { recursive: true });
       process.chdir(nodeDir);
 
@@ -10162,7 +10566,10 @@ async function createBatch(opts: BatchOptions): Promise<BatchResult> {
         }
         const nodeDir = nodeI > 0 ? batchNodeDirFor(opts, nodeI) : opts.workdir;
         const sessName = `${tmuxPrefix}-${alias}`;
-        killTmuxSession(sessName);
+        if (tmuxSessionRunning(sessName)) {
+          console.error(`        ❌ tmux ${alias}: owner appeared during create; retained`);
+          continue;
+        }
         try {
           process.chdir(nodeDir);
           startNodeTmuxSession(sessName, alias);
@@ -10185,6 +10592,33 @@ async function createBatch(opts: BatchOptions): Promise<BatchResult> {
 //   - restart  stop + start (best-effort; relies on saved .anet/nodes/ configs)
 //   - cleanup  stop + rm -rf <workdir>/node*  + remove empty <workdir>
 //   - list     enumerate distinct `<prefix>` groups currently active in tmux
+
+function findBatchBoundOpencodeNodes(workdir: string): string[] {
+  const roots = [join(workdir, ".anet", "nodes")];
+  if (existsSync(workdir)) {
+    for (const entry of readdirSync(workdir)) {
+      if (!entry.startsWith("node")) continue;
+      const candidate = join(workdir, entry);
+      const stat = lstatSync(candidate);
+      if (stat.isDirectory() && !stat.isSymbolicLink()) {
+        roots.push(join(candidate, ".anet", "nodes"));
+      }
+    }
+  }
+  const bound: string[] = [];
+  for (const root of roots) {
+    if (!existsSync(root)) continue;
+    for (const nodeId of readdirSync(root)) {
+      const nodeDir = join(root, nodeId);
+      const stat = lstatSync(nodeDir);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) {
+        throw new Error(`batch lifecycle refuses non-directory node state: ${nodeDir}`);
+      }
+      if (readOpencodeRuntimeBinding(nodeDir, opencodeBindingHome())) bound.push(nodeDir);
+    }
+  }
+  return bound;
+}
 
 function batchLifecycle(opts: { prefix: string; verb: "start" | "stop" | "restart" | "cleanup" | "list"; workdir?: string }) {
   const { prefix, verb, workdir } = opts;
@@ -10213,6 +10647,38 @@ function batchLifecycle(opts: { prefix: string; verb: "start" | "stop" | "restar
       for (const a of aliases.slice(0, 5)) console.log(`    - ${a}`);
       if (aliases.length > 5) console.log(`    ... +${aliases.length - 5} more`);
     }
+    return;
+  }
+
+  if (verb === "start") {
+    // Phase 1 never implemented in-place start. Return before the shared stop
+    // pass: the old ordering killed every matching session for a hint-only
+    // command.
+    console.log("[anet] 'start' in-place not yet implemented (Phase 1 scaffold). Re-run:");
+    console.log("         anet create --batch    # generic");
+    console.log("         anet demo sci-team     # sci-team preset");
+    return;
+  }
+
+  if (!workdir) {
+    console.error(
+      "[anet] refusing batch lifecycle without --workdir: ownership cannot be proven for bound OpenCode nodes",
+    );
+    process.exitCode = 1;
+    return;
+  }
+  try {
+    const bound = findBatchBoundOpencodeNodes(resolve(workdir));
+    if (bound.length > 0) {
+      console.error(
+        `[anet] refusing batch ${verb}: ${bound.length} bound opencode-cli node(s) require explicit node stop`,
+      );
+      process.exitCode = 1;
+      return;
+    }
+  } catch (error: any) {
+    console.error(`[anet] refusing batch ${verb} before mutation: ${error?.message ?? error}`);
+    process.exitCode = 1;
     return;
   }
 
@@ -10264,7 +10730,7 @@ function batchLifecycle(opts: { prefix: string; verb: "start" | "stop" | "restar
     return;
   }
 
-  if (verb === "restart" || verb === "start") {
+  if (verb === "restart") {
     // Phase 1: restart/start in-place is not yet wired (would need to walk
     // saved .anet/nodes/<alias>/config.json under <workdir>/node*/ and
     // re-launch tmux). For now, hint the user to re-run the create wizard.
@@ -11342,7 +11808,14 @@ switch (command) {
 // explicitly in both branches so readline / @inquirer signal handlers
 // don't keep the event loop alive past the dispatch.
 main().then(
-  () => { if (process.env.ANET_INTERNAL_KEEP_PROCESS !== "1") process.exit(0); },
+  () => {
+    if (process.env.ANET_INTERNAL_KEEP_PROCESS !== "1") {
+      // Several safe-refusal paths intentionally set exitCode after printing a
+      // precise diagnostic. Preserve that status instead of turning a verified
+      // refusal into shell success at the shared CLI terminator.
+      process.exit(process.exitCode ?? 0);
+    }
+  },
   (err: any) => {
     // #237 — Friendly classification for unhandled fetch errors. Replaces
     // the bare "FATAL: TypeError: fetch failed + 10-line Node stack" output

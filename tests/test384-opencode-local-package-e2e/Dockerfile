@@ -1,8 +1,8 @@
 FROM node:22-bookworm-slim
 
 ARG OPENCODE_VERSION=1.18.1
-ARG AGENT_NETWORK_VERSION=2.3.0-preview.34
-ARG AGENT_NODE_VERSION=2.5.0-preview.26
+ARG AGENT_NETWORK_VERSION=2.3.0-preview.35
+ARG AGENT_NODE_VERSION=2.5.0-preview.27
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       bash ca-certificates curl jq procps python3 python3-pexpect ripgrep unzip \

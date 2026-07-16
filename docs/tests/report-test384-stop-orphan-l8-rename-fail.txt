@@ -1,6 +1,6 @@
-# test384 — opencode local-package preview release gate
+# test384 — opencode local-package preview release gate (failed: prepared rename directory mode)
 
-date: 2026-07-16T07:21:58+00:00
+date: 2026-07-16T06:44:49+00:00
 node: v22.23.1
 bun: 1.3.14
 opencode expected: 1.18.1
@@ -29,8 +29,8 @@ Options:
                                                                 [string] [default: "opencode.local"]
       --cors         additional domains to allow for CORS                      [array] [default: []]
       --cwd          working directory                                [string] [default: "/test384"]PASS: exact local tarballs installed — agent-network=2.3.0-preview.35 agent-node=2.5.0-preview.27; both publishConfig.tag=preview
-PASS: tarball sha256 network=01107b1f52d8e76f25f2e0be7ac4923acd65ac38efffa582e925c98ee2048a10
-PASS: tarball sha256 node=31088718637d8db37ddb326d9757671b01bfc81bf0f90bdef6134a8b6fb1c9a6
+PASS: tarball sha256 network=e72a489022f3d61c273103f882307f0b90d0ed00e9d0e891924e7d2c5298580f
+PASS: tarball sha256 node=5cf33b6a536a264a73d34f123ef2fa8857040b954e48521e8c0c98edc01171e8
 PASS: agent-node bundle markers processWithOpencode + opencode-cli present
 PASS: opencode-ai exact pin=1.18.1 and acp smoke passed
 
@@ -79,31 +79,26 @@ PASS: candidate in trusted-base ancestor chain hard-failed before OpenCode ACP s
 
 ## L6 — exact 1.18.1 real task ignores malicious ancestor config/plugin
 PASS: installed agent-network launched installed agent-node; alias reached idle
-PASS: task da867636... reached replied under hostile parent overrides; result length=117
+PASS: task 790e9ed2... reached replied under hostile parent overrides; result length=26
 PASS: exact opencode-ai@1.18.1 kept node free model authoritative; ancestor file-plugin marker absent
 safe node-log evidence:
-[07:22:43] [INFO ] [wizard-openai] SSE connected
-[07:22:43] [INFO ] [wizard-openai] → processing [opencode]: Hold the ACP initialize request open until supervisor shutdown.
-[07:22:51] [INFO ] [wizard-openai] [opencode-acp] session/new — ses_09631756...
-[07:22:54] [INFO ] [wizard-openai] [opencode] turn done | reply=132ch thought=355ch chunks=62 stopReason=end_turn rescued=false in=2016 out=64 thought=70
-[07:22:54] [INFO ] [wizard-openai] sending reply to api (task 31027a45, status=replied)...
-[07:22:54] [INFO ] [wizard-openai] → processing [opencode]: Reply in one short sentence confirming the preview OpenCode end-to-end test.
-[07:22:58] [INFO ] [wizard-openai] [opencode] turn done | reply=101ch thought=1174ch chunks=22 stopReason=end_turn rescued=false in=177 out=24 thought=254
-[07:22:58] [INFO ] [wizard-openai] sending reply to api (task da867636, status=replied)...
+[06:45:35] [INFO ] [wizard-openai] SSE connected
+[06:45:35] [INFO ] [wizard-openai] → processing [opencode]: Hold the ACP initialize request open until supervisor shutdown.
+[06:45:46] [INFO ] [wizard-openai] [opencode-acp] session/new — ses_09653696...
+[06:45:49] [INFO ] [wizard-openai] [opencode] turn done | reply=250ch thought=326ch chunks=74 stopReason=end_turn rescued=false in=2016 out=76 thought=64
+[06:45:49] [INFO ] [wizard-openai] sending reply to api (task 8782b6fd, status=replied)...
+[06:45:49] [INFO ] [wizard-openai] → processing [opencode]: Reply in one short sentence confirming the preview OpenCode end-to-end test.
+[06:45:51] [INFO ] [wizard-openai] [opencode] turn done | reply=10ch thought=120ch chunks=2 stopReason=end_turn rescued=false in=189 out=3 thought=26
+[06:45:52] [INFO ] [wizard-openai] sending reply to api (task 790e9ed2, status=replied)...
 
 ## L7 — graceful shutdown + global orphan audit
 PASS: launcher exited on SIGTERM; zero agent-node/opencode-acp orphan processes
 
 ## L8 — external OpenCode binding follows rename/delete lifecycle
 PASS: downgraded bound OpenCode profile cannot launder its runtime through rename
-PASS: missing OpenCode binding cannot be laundered into a new binding through rename
-[anet] persisted canonical node_id n_5ace4396 before rename.
-[anet] note: "wizard-anthropic" has no server registration yet (never started). Performing local-only rename — no commhub 2PC needed.
-[anet] node_id: n_5ace4396 — unchanged (only the alias changed; ntok_ token still valid).
-[anet] ✅ Renamed "wizard-anthropic" → "wizard-anthropic-renamed" (txn null). Node was not running — next `anet node start 'wizard-anthropic-renamed'` registers under the new alias.
-PASS: local-only OpenCode rename replaced the external binding without a stale old-name record
-PASS: bound OpenCode delete refuses before config or binding mutation
-PASS: unrelated unbound runtime bypassed populated binding namespace and reached strict runtime validation
+[anet] persisted canonical node_id n_64f2c8aa before rename.
+[anet] rename PHASE 1 failed: OpenCode preset refuses node workDir at /tmp/test384/project/.anet/nodes/wizard-anthropic-renamed: directory mode must be 0700 — rolling back
+[anet] rollback complete — "wizard-anthropic" unchanged.
 
-OVERALL: PASS
-trailer: test384 local package -> picker -> security/lifecycle gates -> real OpenCode reply — PASS
+OVERALL: FAIL at L8 binding rename/delete lifecycle (exit=1)
+trailer: test384 local package -> picker -> security/lifecycle gates -> real OpenCode reply — FAIL

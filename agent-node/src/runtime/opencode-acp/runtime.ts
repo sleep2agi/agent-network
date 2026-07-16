@@ -36,12 +36,14 @@ import {
 } from "./client";
 import { resolve } from "path";
 import {
+  bindOpencodeChildProcessGroup,
   buildOpencodeChildEnv,
   cleanupOpencodeChildEnv,
   discardUnspawnedOpencodeChildEnv,
   readOpencodeProcessIdentity,
   revalidateOpencodeChildLaunch,
   type OpencodeExitedProcessIdentity,
+  type OpencodeSpawnedProcessIdentity,
 } from "./child-env";
 import {
   discoverOpencodeForbiddenRoots,
@@ -154,11 +156,14 @@ export async function openOpencodeRuntime(opts: {
   client.on("error", (error: Error) => {
     warn(`[opencode-acp] child process error: ${error.message}`);
   });
+  client.on("cleanupError", (error: Error) => {
+    warn(`[opencode-acp] supervisor cleanup retained for retry: ${error.message}`);
+  });
   let childEnv: NodeJS.ProcessEnv | undefined;
   let effectiveCwd: string;
   let launchCleaned = false;
   let spawnAttempted = false;
-  let spawnedProcessIdentity: Omit<OpencodeExitedProcessIdentity, "nativeExitObserved"> | undefined;
+  let spawnedProcessIdentity: OpencodeSpawnedProcessIdentity | undefined;
   const cleanupLaunch = (exitedProcess?: OpencodeExitedProcessIdentity): boolean => {
     if (launchCleaned) return true;
     if (!childEnv) return true;
@@ -242,16 +247,29 @@ export async function openOpencodeRuntime(opts: {
     });
     client.start({ cwd: effectiveCwd, env: childEnv, binary: spawnedBinary });
     spawnAttempted = true;
-    const childPid = client.processId;
-    const childIdentity = childPid === undefined
-      ? undefined
-      : readOpencodeProcessIdentity(childPid);
-    if (childPid !== undefined) {
-      spawnedProcessIdentity = { pid: childPid, identity: childIdentity ?? null };
-    }
-    // Expose the live handle before the first await so SIGTERM during a slow
-    // initialize/session handshake can still kill the child.
+    // Expose the owner handle before the first await. At this point the
+    // supervisor has not launched OpenCode, so parent death can only leave an
+    // empty anchor which exits on IPC disconnect.
     opts.onClient?.(client);
+    const supervisor = await client.prepare();
+    const childPid = supervisor?.pid ?? client.processId;
+    const childIdentity = supervisor?.identity ?? (childPid === undefined
+      ? undefined
+      : readOpencodeProcessIdentity(childPid));
+    if (childPid !== undefined) {
+      spawnedProcessIdentity = {
+        pid: childPid,
+        identity: childIdentity ?? null,
+        processGroupId: supervisor?.processGroupId ?? client.processGroupId ?? null,
+        sessionId: supervisor?.sessionId ?? client.sessionId ?? null,
+      };
+      if (spawnedProcessIdentity.processGroupId !== null) {
+        bindOpencodeChildProcessGroup(workDir, childEnv, spawnedProcessIdentity);
+      }
+    }
+    // Marker file + parent directory were fsync'd by the binding call. Only
+    // now may the supervisor inherit fd0/1/2 into the vendor process.
+    await client.activate();
 
     // Handshake: initialize (declare client capabilities).
     await client.request("initialize", {
@@ -298,16 +316,24 @@ export async function openOpencodeRuntime(opts: {
   } catch (error) {
     // initialize/session failures happen before a runtime session is returned;
     // without this boundary the ACP child survives with no owner.
-    if (client.isRunning) {
-      await client.stop("SIGKILL").catch((stopError: any) => {
-        warn(`[opencode-acp] failed to kill child after open failure: ${stopError?.message ?? stopError}`);
-      });
+    let cleanupError: unknown;
+    try {
+      await client.stop("SIGKILL", 5_000);
+    } catch (stopError: any) {
+      cleanupError = stopError;
+      warn(`[opencode-acp] failed to clean child/group after open failure: ${stopError?.message ?? stopError}`);
     }
     // Covers binary-probe/start failures where no child existed to emit exit.
     if (!spawnAttempted && childEnv) {
       if (discardUnspawnedOpencodeChildEnv(workDir, childEnv)) launchCleaned = true;
     } else if (childEnv) {
       cleanupLaunch();
+    }
+    if (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "OpenCode runtime open failed and supervisor cleanup is unconfirmed",
+      );
     }
     throw error;
   }
@@ -334,13 +360,15 @@ export async function opencodeThink(
   // poisoned process boundary: kill it before returning control. agent-node's
   // onExit hook clears the shared handle, so the next task opens a fresh child.
   const killFailedTurnChild = async (phase: string): Promise<void> => {
-    if (!runtime.client.isRunning) return;
-    await runtime.client.stop("SIGKILL").catch((stopError: any) => {
+    try {
+      await runtime.client.stop("SIGKILL", 5_000);
+    } catch (stopError: any) {
       warn(
-        `[opencode-acp] failed to kill child after ${phase}: ` +
+        `[opencode-acp] failed to clean child after ${phase}: ` +
         `${stopError?.message ?? stopError}`,
       );
-    });
+      throw stopError;
+    }
   };
 
   const onNotification = (n: JsonRpcNotification) => {
@@ -355,7 +383,14 @@ export async function opencodeThink(
       prompt: [{ type: "text", text: opts.prompt }],
     }, idleTimeoutMs);
   } catch (error) {
-    await killFailedTurnChild("session/prompt failure");
+    try {
+      await killFailedTurnChild("session/prompt failure");
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "OpenCode prompt failed and supervisor cleanup is unconfirmed",
+      );
+    }
     throw error;
   } finally {
     runtime.client.off("notification", onNotification);
@@ -401,7 +436,14 @@ export async function opencodeThink(
         rescued = true;
       }
     } catch (e: any) {
-      await killFailedTurnChild("#383 rescue prompt failure");
+      try {
+        await killFailedTurnChild("#383 rescue prompt failure");
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [e, cleanupError],
+          "OpenCode rescue prompt failed and supervisor cleanup is unconfirmed",
+        );
+      }
       warn(`[opencode-acp] #383 rescue re-prompt failed; child discarded: ${e?.message ?? e}`);
     } finally {
       runtime.client.off("notification", onRescueNotification);

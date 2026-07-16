@@ -10,7 +10,8 @@
 // (tests/test-rfc029-pr2-acp-shim/).
 
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { once } from "events";
 import { join } from "path";
 import { tmpdir } from "os";
 import { OpencodeAcpClient } from "./client";
@@ -31,6 +32,25 @@ function stubEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return { PATH: process.env.PATH, ...extra };
 }
 
+async function waitForFixture(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("timed out waiting for client lifecycle fixture");
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+  }
+}
+
+function pidIsLive(pid: number): boolean {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const close = stat.lastIndexOf(")");
+    const state = close < 0 ? "" : stat.slice(close + 1).trim().split(/\s+/)[0];
+    return state !== "Z" && state !== "X";
+  } catch {
+    return false;
+  }
+}
+
 describe("OpencodeAcpClient — request/response correlation", () => {
   test("request() resolves with the matching response's result", async () => {
     const stub = makeStubBinary(`
@@ -49,6 +69,7 @@ describe("OpencodeAcpClient — request/response correlation", () => {
     `);
     const c = new OpencodeAcpClient();
     c.start({ binary: stub, env: stubEnv() });
+    await c.activate();
     try {
       const r = await c.request<{ echoed: string }>("initialize", { protocolVersion: 1 }, 5000);
       expect(r.echoed).toBe("initialize");
@@ -72,6 +93,7 @@ describe("OpencodeAcpClient — request/response correlation", () => {
     `);
     const c = new OpencodeAcpClient();
     c.start({ binary: stub, env: stubEnv() });
+    await c.activate();
     try {
       let thrown: Error | null = null;
       try { await c.request("session/new", {}, 3000); }
@@ -106,6 +128,7 @@ describe("OpencodeAcpClient — streaming notifications", () => {
     const notifications: any[] = [];
     c.on("notification", (n) => notifications.push(n));
     c.start({ binary: stub, env: stubEnv() });
+    await c.activate();
     try {
       const result = await c.request<{ stopReason: string }>("session/prompt", {}, 5000);
       expect(result.stopReason).toBe("end_turn");
@@ -153,6 +176,7 @@ describe("OpencodeAcpClient — streaming notifications", () => {
     c.on("serverRequest", (request) => reverseRequests.push(request));
     c.on("notification", (notification) => notifications.push(notification));
     c.start({ binary: stub, env: stubEnv() });
+    await c.activate();
     try {
       const result = await c.request<{ reverseError: { code: number; message: string } }>(
         "initialize", {}, 5000,
@@ -169,6 +193,31 @@ describe("OpencodeAcpClient — streaming notifications", () => {
 });
 
 describe("OpencodeAcpClient — process lifecycle", () => {
+  test("supervisor receipt is ready before the vendor can inherit launch state", async () => {
+    if (process.platform !== "linux") return;
+    const startedFile = join(tmpdir(), `opencode-client-started-${process.pid}-${Date.now()}`);
+    const stub = makeStubBinary(`
+      import { writeFileSync } from "fs";
+      writeFileSync(process.env.STARTED_FILE, String(process.pid));
+      process.stdin.resume();
+    `);
+    const c = new OpencodeAcpClient();
+    c.start({ binary: stub, env: stubEnv({ STARTED_FILE: startedFile }) });
+    try {
+      const receipt = await c.prepare();
+      expect(receipt).toBeDefined();
+      expect(receipt!.pid).toBe(c.processId!);
+      expect(receipt!.processGroupId).toBe(receipt!.pid);
+      expect(receipt!.sessionId).toBe(receipt!.pid);
+      expect(existsSync(startedFile)).toBe(false);
+      await c.activate();
+      await waitForFixture(() => existsSync(startedFile));
+    } finally {
+      await c.stop("SIGKILL").catch(() => {});
+      rmSync(startedFile, { force: true });
+    }
+  });
+
   test("child exit rejects all pending requests", async () => {
     // Stub that reads one line then exits without responding.
     const stub = makeStubBinary(`
@@ -182,6 +231,7 @@ describe("OpencodeAcpClient — process lifecycle", () => {
     `);
     const c = new OpencodeAcpClient();
     c.start({ binary: stub, env: stubEnv() });
+    await c.activate();
     let thrown: Error | null = null;
     try {
       await c.request("session/prompt", {}, 5000);
@@ -197,9 +247,149 @@ describe("OpencodeAcpClient — process lifecycle", () => {
     `);
     const c = new OpencodeAcpClient();
     c.start({ binary: stub, env: stubEnv() });
+    await c.activate();
     expect(c.isRunning).toBe(true);
     await c.stop();
     expect(c.isRunning).toBe(false);
+  });
+
+  test("a crashing group leader cannot leave a live descendant behind", async () => {
+    if (process.platform !== "linux") return;
+    const childPidFile = join(tmpdir(), `opencode-client-child-${process.pid}-${Date.now()}`);
+    const stub = makeStubBinary(`
+      import { spawn } from "child_process";
+      import { writeFileSync } from "fs";
+      const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+        stdio: "ignore",
+      });
+      child.unref();
+      writeFileSync(process.env.CHILD_PID_FILE, String(child.pid));
+      setTimeout(() => process.exit(23), 50);
+    `);
+    const c = new OpencodeAcpClient();
+    const exited = once(c, "exit");
+    c.start({ binary: stub, env: stubEnv({ CHILD_PID_FILE: childPidFile }) });
+    await c.activate();
+    try {
+      await waitForFixture(() => existsSync(childPidFile));
+      const childPid = Number(readFileSync(childPidFile, "utf8"));
+      expect(Number.isSafeInteger(childPid) && childPid > 0).toBe(true);
+      await exited;
+      await waitForFixture(() => {
+        try {
+          const stat = readFileSync(`/proc/${childPid}/stat`, "utf8");
+          const close = stat.lastIndexOf(")");
+          const state = close < 0 ? "" : stat.slice(close + 1).trim().split(/\s+/)[0];
+          return state === "Z" || state === "X";
+        } catch {
+          return true;
+        }
+      });
+      expect(c.isRunning).toBe(false);
+    } finally {
+      await c.stop("SIGKILL").catch(() => {});
+      rmSync(childPidFile, { force: true });
+    }
+  });
+
+  test("SIGSTOP supervisor makes stop fail closed until the exact owner resumes", async () => {
+    if (process.platform !== "linux") return;
+    const vendorPidFile = join(tmpdir(), `opencode-client-vendor-${process.pid}-${Date.now()}`);
+    const stub = makeStubBinary(`
+      import { writeFileSync } from "fs";
+      writeFileSync(process.env.VENDOR_PID_FILE, String(process.pid));
+      process.stdin.resume();
+    `);
+    const c = new OpencodeAcpClient();
+    c.start({ binary: stub, env: stubEnv({ VENDOR_PID_FILE: vendorPidFile }) });
+    await c.activate();
+    const supervisorPid = c.processId!;
+    await waitForFixture(() => existsSync(vendorPidFile));
+    const vendorPid = Number(readFileSync(vendorPidFile, "utf8"));
+    process.kill(supervisorPid, "SIGSTOP");
+    try {
+      let stopError: Error | null = null;
+      try { await c.stop("SIGTERM", 200); }
+      catch (error: any) { stopError = error; }
+      expect(stopError?.message).toContain("owner tree retained");
+      expect(c.cleanupConfirmed).toBe(false);
+      expect(c.isRunning).toBe(true);
+      expect(pidIsLive(supervisorPid)).toBe(true);
+      expect(pidIsLive(vendorPid)).toBe(true);
+
+      const exited = once(c, "exit");
+      process.kill(supervisorPid, "SIGCONT");
+      await exited;
+      expect(c.cleanupConfirmed).toBe(true);
+      await waitForFixture(() => !pidIsLive(vendorPid));
+    } finally {
+      try { process.kill(supervisorPid, "SIGCONT"); } catch {}
+      await c.stop("SIGKILL", 2_000).catch(() => {});
+      rmSync(vendorPidFile, { force: true });
+    }
+  });
+
+  test("external supervisor SIGKILL never triggers a stale PGID kill or clean exit", async () => {
+    if (process.platform !== "linux" || !existsSync("/usr/bin/python3")) return;
+    const vendorPidFile = join(tmpdir(), `opencode-client-external-kill-${process.pid}-${Date.now()}`);
+    const stub = makeStubBinary(`
+      import { spawn } from "child_process";
+      import { writeFileSync } from "fs";
+      const python = [
+        "import ctypes, signal, time",
+        "assert ctypes.CDLL(None).prctl(1, 0, 0, 0, 0) == 0",
+        "signal.signal(signal.SIGHUP, signal.SIG_IGN)",
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)",
+        "time.sleep(60)",
+      ].join("\\n");
+      const survivor = spawn("python3", ["-c", python], { stdio: "ignore" });
+      survivor.unref();
+      writeFileSync(process.env.VENDOR_PID_FILE, String(survivor.pid));
+      setInterval(() => {}, 1000);
+    `);
+    const c = new OpencodeAcpClient();
+    let publicExitCount = 0;
+    c.on("exit", () => { publicExitCount += 1; });
+    c.start({ binary: stub, env: stubEnv({ VENDOR_PID_FILE: vendorPidFile }) });
+    await c.activate();
+    await waitForFixture(() => existsSync(vendorPidFile));
+    const vendorPid = Number(readFileSync(vendorPidFile, "utf8"));
+    const directVendorPid = c.vendorProcessId!;
+    const cleanupFailed = once(c, "cleanupError");
+    process.kill(c.processId!, "SIGKILL");
+    try {
+      await cleanupFailed;
+      expect(pidIsLive(vendorPid)).toBe(true);
+      expect(c.cleanupConfirmed).toBe(false);
+      expect(publicExitCount).toBe(0);
+    } finally {
+      // Test-only exact PID cleanup. Production deliberately retains and
+      // reports this external-SIGKILL boundary instead of targeting old PGID.
+      try { process.kill(vendorPid, "SIGKILL"); } catch {}
+      try { process.kill(directVendorPid, "SIGKILL"); } catch {}
+      await waitForFixture(() => !pidIsLive(vendorPid));
+      await waitForFixture(() => !pidIsLive(directVendorPid));
+      await c.stop("SIGTERM", 2_000).catch(() => {});
+      rmSync(vendorPidFile, { force: true });
+    }
+    expect(c.cleanupConfirmed).toBe(true);
+    expect(publicExitCount).toBe(1);
+  });
+
+  test("concurrent stop callers share one verified public exit", async () => {
+    if (process.platform !== "linux") return;
+    const stub = makeStubBinary(`process.stdin.resume();`);
+    const c = new OpencodeAcpClient();
+    let exitCount = 0;
+    c.on("exit", () => { exitCount += 1; });
+    c.start({ binary: stub, env: stubEnv() });
+    await c.activate();
+    await Promise.all([
+      c.stop("SIGTERM", 3_000),
+      c.stop("SIGKILL", 3_000),
+    ]);
+    expect(c.cleanupConfirmed).toBe(true);
+    expect(exitCount).toBe(1);
   });
 
   test("explicit child env is not merged with the client's process.env", async () => {
@@ -222,6 +412,7 @@ describe("OpencodeAcpClient — process lifecycle", () => {
     `);
     const c = new OpencodeAcpClient();
     c.start({ binary: stub, env: stubEnv({ SAFE_MARKER: "present" }) });
+    await c.activate();
     try {
       const result = await c.request<{ home: string | null; commhub: string | null; marker: string }>(
         "initialize", {}, 5000,

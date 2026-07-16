@@ -1,6 +1,6 @@
 # RFC-029 PR② — mock-opencode ACP CI gate
 
-date: 2026-07-16T02:59:31+00:00
+date: 2026-07-16T07:28:18+00:00
 bun: 1.3.1
 node: v18.20.4
 

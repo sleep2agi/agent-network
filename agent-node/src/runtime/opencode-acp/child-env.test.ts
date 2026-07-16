@@ -20,16 +20,26 @@ import { dirname, isAbsolute, join, relative, resolve } from "path";
 import { tmpdir } from "os";
 import {
   assertNoManagedOpencodeConfig,
+  bindOpencodeChildProcessGroup,
   buildOpencodeChildEnv,
   cleanupOpencodeChildEnv,
   OPENCODE_ANCESTOR_DISCOVERY_CANDIDATES,
   OPENCODE_LOCAL_TOOL_KEYS,
+  OPENCODE_LAUNCH_CHILD_FILE,
   OPENCODE_LAUNCH_OWNER_FILE,
   OPENCODE_UNATTENDED_DENY_TOOL_KEYS,
   opencodeManagedConfigCandidates,
   readOpencodeProcessIdentity,
   revalidateOpencodeChildLaunch,
 } from "./child-env";
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("timed out waiting for process-group fixture");
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+  }
+}
 
 function makeLaunchBase(label: string): string {
   if (process.platform !== "linux" || process.getuid === undefined) {
@@ -808,6 +818,162 @@ describe("buildOpencodeChildEnv — deny-by-default boundary", () => {
         orphan.kill("SIGKILL");
         await exited.catch(() => {});
       }
+      rmSync(launchBase, { recursive: true, force: true });
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
+  test("durable process-group binding protects opaque descendants across later and crash-style sweeps", async () => {
+    const workDir = mkdtempSync(join(tmpdir(), "opencode-opaque-group-"));
+    const launchBase = makeLaunchBase("opaque-group");
+    const readyFile = join(tmpdir(), `opencode-opaque-ready-${process.pid}-${Date.now()}`);
+    let groupId: number | undefined;
+    let survivorPid: number | undefined;
+    let leader: ChildProcess | null = null;
+    let first: NodeJS.ProcessEnv | undefined;
+    let later: NodeJS.ProcessEnv | undefined;
+    try {
+      first = buildOpencodeChildEnv({
+        workDir,
+        cwd: join(workDir, "requested-project"),
+        launchBase,
+        parentEnv: {},
+        unsafeTools: true,
+      });
+      const firstRoot = dirname(first.XDG_DATA_HOME!);
+      const leaderProgram = [
+        'const { spawn } = require("child_process");',
+        'const { existsSync } = require("fs");',
+        'const child = spawn("python3", ["-c", process.env.PYTHON_CODE],',
+        '  { env: process.env, stdio: "ignore" });',
+        'child.unref();',
+        'const timer = setInterval(() => {',
+        '  if (existsSync(process.env.READY_FILE)) { clearInterval(timer); process.exit(0); }',
+        '}, 10);',
+      ].join("\n");
+      const pythonProgram = [
+        "import ctypes, os, time",
+        "libc = ctypes.CDLL(None)",
+        "assert libc.prctl(4, 0, 0, 0, 0) == 0",
+        'with open(os.environ["READY_FILE"], "w") as ready:',
+        "    ready.write(str(os.getpid()))",
+        "    ready.flush()",
+        "time.sleep(60)",
+      ].join("\n");
+      leader = spawn(process.execPath, ["-e", leaderProgram], {
+        detached: true,
+        env: {
+          ...first,
+          PATH: process.env.PATH,
+          READY_FILE: readyFile,
+          PYTHON_CODE: pythonProgram,
+        },
+        stdio: "ignore",
+      });
+      const leaderExited = once(leader, "exit");
+      await once(leader, "spawn");
+      const leaderPid = leader.pid!;
+      groupId = leaderPid;
+      const leaderIdentity = readOpencodeProcessIdentity(leaderPid);
+      expect(leaderIdentity).toBeDefined();
+      bindOpencodeChildProcessGroup(workDir, first, {
+        pid: leaderPid,
+        identity: leaderIdentity!,
+        processGroupId: groupId,
+        sessionId: groupId,
+      });
+      const childMarkerTemplate = JSON.parse(readFileSync(
+        join(firstRoot, OPENCODE_LAUNCH_CHILD_FILE),
+        "utf8",
+      ));
+      await waitUntil(() => existsSync(readyFile));
+      survivorPid = Number(readFileSync(readyFile, "utf8"));
+      expect(Number.isSafeInteger(survivorPid) && survivorPid! > 0).toBe(true);
+      await leaderExited;
+      leader = null;
+
+      const exitToken = {
+        pid: leaderPid,
+        identity: leaderIdentity!,
+        processGroupId: groupId,
+        sessionId: groupId,
+        nativeExitObserved: true as const,
+      };
+      expect(cleanupOpencodeChildEnv(workDir, first, exitToken)).toBe(false);
+      expect(existsSync(firstRoot)).toBe(true);
+
+      // Clone only the durable marker shapes into an otherwise untracked root.
+      // This models a fresh agent-node after an owner crash, where only the
+      // persisted pgid can retain an opaque descendant's credential tree.
+      const ownerMarkerTemplate = JSON.parse(readFileSync(
+        join(firstRoot, OPENCODE_LAUNCH_OWNER_FILE),
+        "utf8",
+      ));
+      const crashRoot = join(launchBase, ".anet-opencode-launch-durable-crash");
+      mkdirSync(join(crashRoot, "data"), { recursive: true, mode: 0o700 });
+      const crashStat = statSync(crashRoot);
+      writeFileSync(join(crashRoot, OPENCODE_LAUNCH_OWNER_FILE), JSON.stringify({
+        ...ownerMarkerTemplate,
+        ownerPid: 2_147_483_647,
+        ownerProcessIdentity: "dead-process-identity",
+        ownerInstanceId: "dead-process-instance-id",
+        createdAtMs: 0,
+        launchDev: String(crashStat.dev),
+        launchIno: String(crashStat.ino),
+      }), { mode: 0o600 });
+      writeFileSync(join(crashRoot, OPENCODE_LAUNCH_CHILD_FILE), JSON.stringify({
+        ...childMarkerTemplate,
+        launchDev: String(crashStat.dev),
+        launchIno: String(crashStat.ino),
+      }), { mode: 0o600 });
+
+      later = buildOpencodeChildEnv({
+        workDir,
+        cwd: join(workDir, "requested-project"),
+        launchBase,
+        parentEnv: {},
+      });
+      expect(existsSync(firstRoot)).toBe(true);
+      expect(existsSync(crashRoot)).toBe(true);
+      expect(cleanupOpencodeChildEnv(workDir, later)).toBe(true);
+      later = undefined;
+
+      process.kill(-groupId, "SIGKILL");
+      await waitUntil(() => {
+        try {
+          const stat = readFileSync(`/proc/${survivorPid}/stat`, "utf8");
+          const close = stat.lastIndexOf(")");
+          const state = close < 0 ? "" : stat.slice(close + 1).trim().split(/\s+/)[0];
+          return state === "Z" || state === "X";
+        } catch {
+          return true;
+        }
+      });
+      groupId = undefined;
+
+      later = buildOpencodeChildEnv({
+        workDir,
+        cwd: join(workDir, "requested-project"),
+        launchBase,
+        parentEnv: {},
+      });
+      expect(existsSync(firstRoot)).toBe(false);
+      expect(existsSync(crashRoot)).toBe(false);
+      expect(cleanupOpencodeChildEnv(workDir, later)).toBe(true);
+      later = undefined;
+      first = undefined;
+    } finally {
+      if (groupId !== undefined) {
+        try { process.kill(-groupId, "SIGKILL"); } catch {}
+      }
+      if (leader && leader.exitCode === null && leader.signalCode === null) {
+        const exited = once(leader, "exit");
+        leader.kill("SIGKILL");
+        await exited.catch(() => {});
+      }
+      if (later) cleanupOpencodeChildEnv(workDir, later);
+      if (first) cleanupOpencodeChildEnv(workDir, first);
+      rmSync(readyFile, { force: true });
       rmSync(launchBase, { recursive: true, force: true });
       rmSync(workDir, { recursive: true, force: true });
     }

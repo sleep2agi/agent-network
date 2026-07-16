@@ -1,6 +1,6 @@
 {
   "name": "@sleep2agi/agent-node",
-  "version": "2.5.0-preview.26",
+  "version": "2.5.0-preview.27",
   "type": "module",
   "bin": {
     "agent-node": "dist/cli.js"
