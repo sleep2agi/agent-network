@@ -916,7 +916,10 @@ echo
 echo "## L8 — external OpenCode binding follows rename/delete lifecycle"
 BINDING_ROOT="$HOME/.anet/opencode-runtime-bindings"
 BINDINGS_BEFORE=$(find "$BINDING_ROOT" -maxdepth 1 -type f -name '*.json' | wc -l | tr -d ' ')
-[[ "$BINDINGS_BEFORE" -eq 2 ]]
+# 3 = wizard-openai + wizard-anthropic + preseed-regular: saveProfile writes a
+# runtime binding for EVERY opencode-cli node by design (immutable runtime
+# identity recorded outside the project — see opencode-runtime-binding.ts).
+[[ "$BINDINGS_BEFORE" -eq 3 ]]
 
 # A project-local runtime downgrade must not be launderable through rename.
 # The preflight gate runs before save/copy/lock, leaving the original binding
