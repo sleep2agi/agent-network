@@ -1,0 +1,244 @@
+# Test 386 — stop-orphan second run (expected failure history)
+
+- date: 2026-07-16T06:25:41+00:00
+bun test v1.3.1 (89fa0f34)
+
+src/opencode-wrapper-stop.test.ts:
+(pass) bound OpenCode wrapper TERM-only stop > a responsive wrapper exits after SIGTERM [25.00ms]
+(pass) bound OpenCode wrapper TERM-only stop > a parent-forwarded SIGINT retains a SIGSTOP'd wrapper and detached child [173.01ms]
+
+src/opencode-owner-mode.test.ts:
+(pass) OpenCode owner/mode policy > accepts umask-0002 modes only for a non-root uid=gid layout [2.00ms]
+(pass) OpenCode owner/mode policy > always rejects world write and keeps root/foreign ownership strict
+
+src/opencode-agent-node-pair.test.ts:
+(pass) OpenCode agent-node release pairing > pins the exact versions being released together [2.00ms]
+(pass) OpenCode agent-node release pairing > rejects latest 2.4.x-style help and accepts the RFC-029 capability
+(pass) OpenCode agent-node release pairing > admits only the exact preview package identity with safe file modes [7.00ms]
+(pass) OpenCode agent-node release pairing > skips an exact project-local impersonator and selects the later global package [5.00ms]
+
+src/opencode-launch-env.test.ts:
+(pass) hardenOpencodeAgentNodeEnv > restores launcher PATH and strips every pre-entrypoint loader hook [2.00ms]
+(pass) hardenOpencodeAgentNodeEnv > does not mutate the caller's env object
+(pass) hardenOpencodeAgentNodeEnv > strips case-variant loader and PATH keys for Windows semantics
+
+src/opencode-auth-login.test.ts:
+(pass) OpenCode manual auth-login sandbox > builds deterministic provider-specific API-key login argv [1.00ms]
+(pass) OpenCode manual auth-login sandbox > uses a fresh all-XDG tree and strips ambient credentials/config hooks [36.00ms]
+(pass) OpenCode manual auth-login sandbox > strictly consumes only the selected provider API record through a private leaf [22.00ms]
+(pass) OpenCode manual auth-login sandbox > refuses OAuth, mixed-provider and symlink auth shapes without disclosing secrets [24.00ms]
+(pass) OpenCode manual auth-login sandbox > persistent planted DB/log links are never exposed and cleanup never follows descendant links [22.00ms]
+(pass) OpenCode manual auth-login sandbox > cleanup unlinks a swapped root symlink but never removes its outside target [15.00ms]
+(pass) OpenCode manual auth-login sandbox > cleanup quarantines the tracked inode but leaves a regular root-name replacement untouched [19.00ms]
+(pass) OpenCode manual auth-login sandbox > a live tracked root whose literal name ends in deleted is still removed [19.00ms]
+(pass) OpenCode manual auth-login sandbox > Linux reports nlink zero for a removed directory retained by fd [9.00ms]
+(pass) OpenCode manual auth-login sandbox > cleanup retains inode ownership after bounded failure and succeeds on retry [15.00ms]
+(pass) OpenCode manual auth-login sandbox > refuses a concurrent live owner marker [21.00ms]
+(pass) OpenCode manual auth-login sandbox > refuses a provider that does not match the node's unique configured preset [11.00ms]
+(pass) OpenCode manual auth-login sandbox > prunes a dead owner's stale root without following its planted links [31.00ms]
+(pass) OpenCode manual auth-login sandbox > PID reuse does not retain a stale credential root [33.00ms]
+(pass) OpenCode manual auth-login sandbox > stale sweep resumes a crash-left quarantine while its owner marker remains [36.00ms]
+(pass) OpenCode manual auth-login sandbox > stale sweep removes an empty quarantine left after marker-last deletion [16.00ms]
+(pass) OpenCode manual auth-login sandbox > spawn-time revalidation rejects a hostile ancestor discovery candidate [16.00ms]
+(pass) OpenCode manual auth-login sandbox > with helper always cleans the fresh root when the action throws [17.00ms]
+
+src/opencode-runtime-binding.test.ts:
+(pass) external OpenCode runtime binding > survives regular config runtime downgrade and proves the original exact runtime [11.00ms]
+(pass) external OpenCode runtime binding > read returns undefined only for absent state and deterministic keys separate nodes [8.00ms]
+(pass) external OpenCode runtime binding > an absent exact leaf does not impose POSIX modes on ordinary runtime state [1.00ms]
+(pass) external OpenCode runtime binding > unbound legacy symlink or junction-style node paths remain invisible [5.00ms]
+(pass) external OpenCode runtime binding > Windows synthetic permission bits do not disable structural security checks
+(pass) external OpenCode runtime binding > secure removal is idempotent and removes the exact binding [7.00ms]
+(pass) external OpenCode runtime binding > secure removal refuses tampered content without unlinking it [6.00ms]
+(pass) external OpenCode runtime binding > rejects binding-directory and leaf symlinks [7.00ms]
+(pass) external OpenCode runtime binding > rejects dangling binding-root and exact-leaf symlinks [4.00ms]
+(pass) external OpenCode runtime binding > rejects permissive modes, hard links, and foreign ownership [11.00ms]
+(pass) external OpenCode runtime binding > rejects private but tampered runtime, identity, and extra fields [8.00ms]
+(pass) external OpenCode runtime binding > rejects binding roots that overlap the canonical project in either direction [4.00ms]
+(pass) external OpenCode runtime binding > a symlinked node workDir cannot remove another project's binding [8.00ms]
+(pass) assertOpencodeNodeStateUntracked > allows ordinary non-Git projects [2.00ms]
+(pass) assertOpencodeNodeStateUntracked > allows ignored/untracked state but rejects git add -f tracked state [25.00ms]
+(pass) assertOpencodeNodeStateUntracked > rejects a force-added dotenv or any tracked file below the node directory [54.00ms]
+
+src/opencode-preset.test.ts:
+(pass) OPENCODE_PRESETS registry > exports the two blessed presets (anthropic + openai) [2.00ms]
+(pass) OPENCODE_PRESETS registry > findOpencodePreset('anthropic') returns the record; unknown returns null
+(pass) readPresetKeyFromEnv — env-only, no interactive prompt > returns the trimmed key when the env var is set
+(pass) readPresetKeyFromEnv — env-only, no interactive prompt > returns null when the env var is missing / empty
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > body shape matches opencode auth.json convention
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > writes to <workdir>/.local/share/opencode/auth.json with mode 0o600 [8.00ms]
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > writeOpencodeConfigJson lands under .config/opencode with 0o600 [7.00ms]
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > keyless create atomically clears a private pre-planted auth file [10.00ms]
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > default tool policy disables filesystem, shell, task, and skill tools
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > writes only blessed provider identity and strips all pre-planted routing/executable config [7.00ms]
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > atomically replaces a private but invalid pre-planted config without parsing it [7.00ms]
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > rejects symlink escapes in workDir, config/data ancestors, and final targets [12.00ms]
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > validates the full tree before mutation so a bad auth side cannot partially rewrite config [2.00ms]
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > rejects permissive modes and foreign owners without chmod-follow repair [6.00ms]
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > prepares .anet/nodes/node before profile secrets and provides atomic private leaf I/O [37.00ms]
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > accepts an ordinary 0775 project root for a non-root uid=gid private group
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > profile preflight rejects .anet/nodes/node and config/.env symlink chains before secret writes [9.00ms]
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > profile preflight rejects writable ancestors and non-private node roots [3.00ms]
+
+src/opencode-smoke-env.test.ts:
+(pass) buildOpencodeSmokeEnv > locks the exact hardened ancestor candidate set [3.00ms]
+(pass) buildOpencodeSmokeEnv > rejects sticky world-writable /tmp instead of silently degrading
+(pass) buildOpencodeSmokeEnv > inherits only transport/locale trust settings and controls all OpenCode roots [3.00ms]
+(pass) buildOpencodeSmokeEnv > every writable root can be precreated private, including XDG_RUNTIME_DIR [1.00ms]
+
+src/opencode-package-binary.test.ts:
+(pass) validateOpencodePackageBinary > accepts only the canonical exact npm package entrypoint [3.00ms]
+(pass) validateOpencodePackageBinary > rejects a same-version package impersonator inside the project [5.00ms]
+(pass) validateOpencodePackageBinary > skips a same-version project shim and selects a later trusted package [4.00ms]
+(pass) validateOpencodePackageBinary > rejects a monorepo-root package when invoked from a nested app [4.00ms]
+(pass) validateOpencodePackageBinary > ordinary 0664 checkout package.json does not abort boundary discovery [3.00ms]
+(pass) validateOpencodePackageBinary > accepts both exact registry spellings of bin.opencode [4.00ms]
+(pass) validateOpencodePackageBinary > rejects forged name, version, and bin metadata [3.00ms]
+(pass) validateOpencodePackageBinary > rejects world-writable files and package ancestors [6.00ms]
+(pass) validateOpencodePackageBinary > rejects a symlinked package.json even when its contents are exact [2.00ms]
+
+ 76 pass
+ 0 fail
+ 400 expect() calls
+Ran 76 tests across 9 files. [1093.00ms]
+PASS: exact pairing plus launch, TERM-only wrapper stop, auth-login, smoke-env, and preset security unit tests
+bun test v1.3.1 (89fa0f34)
+
+src/runtime/opencode-acp/events.test.ts:
+(pass) reduceOpencodeAcpNotification — session/update dispatch > agent_message_chunk with text content → replyText += content.text [2.00ms]
+(pass) reduceOpencodeAcpNotification — session/update dispatch > agent_thought_chunk with text → thoughtText, NOT replyText (grok discipline) [1.00ms]
+(pass) reduceOpencodeAcpNotification — session/update dispatch > tool_call and tool_call_update both bump toolCalls
+(pass) reduceOpencodeAcpNotification — session/update dispatch > usage_update snaps totalTokens into state.usage
+(pass) reduceOpencodeAcpNotification — session/update dispatch > available_commands_update consumed silently (session-init only)
+(pass) reduceOpencodeAcpNotification — session/update dispatch > agent_message_chunk without text content adds a warning
+(pass) reduceOpencodeAcpNotification — session/update dispatch > unknown method returns ignored without mutating state
+(pass) reduceOpencodeAcpNotification — session/update dispatch > unknown sessionUpdate subtype returns ignored (forward-compat)
+(pass) reduceOpencodeAcpResponse — session/prompt terminal response > captures stopReason + usage from result
+(pass) reduceOpencodeAcpResponse — session/prompt terminal response > missing stopReason still marks turn complete [1.00ms]
+(pass) reduceOpencodeAcpFrames — replay the Phase 0b captured turn > full one-word turn: 10 thought chunks + 1 message chunk + usage + response [1.00ms]
+(pass) reduceOpencodeAcpFrames — replay the Phase 0b captured turn > thinking-only terminal turn (no agent_message_chunk) — replyText stays empty
+
+src/runtime/opencode-acp/child-env.test.ts:
+(pass) buildOpencodeChildEnv — deny-by-default boundary > locks the exact hardened ancestor candidate set
+(pass) buildOpencodeChildEnv — deny-by-default boundary > rejects sticky world-writable /tmp instead of silently degrading [7.00ms]
+(pass) buildOpencodeChildEnv — deny-by-default boundary > passes only runtime/network allowlist and controls all state roots [28.00ms]
+(pass) buildOpencodeChildEnv — deny-by-default boundary > safe inline policy disables every local tool without replacing provider/model [21.00ms]
+(pass) buildOpencodeChildEnv — deny-by-default boundary > unsafe opt-in explicitly overrides the wizard's persisted safe policy [10.00ms]
+(pass) buildOpencodeChildEnv — deny-by-default boundary > detects exact managed config sources across Linux, Windows, and macOS [1.00ms]
+(pass) buildOpencodeChildEnv — deny-by-default boundary > safe runtime renders ordinary same-uid config through a strict allowlist [20.00ms]
+(pass) buildOpencodeChildEnv — deny-by-default boundary > copies only blessed API auth fields into fresh data and keeps persistent state outside the child [21.00ms]
+(pass) buildOpencodeChildEnv — deny-by-default boundary > never exposes planted persistent DB/log/cache/state/tmp descendants in safe or unsafe mode [43.00ms]
+(pass) buildOpencodeChildEnv — deny-by-default boundary > removes a partially built launch tree when env construction fails [18.00ms]
+(pass) buildOpencodeChildEnv — deny-by-default boundary > pre-spawn revalidation hard-fails when an ancestor discovery candidate appears [29.00ms]
+(pass) buildOpencodeChildEnv — deny-by-default boundary > keeps active roots but reclaims a dead-owner crash root without following symlinks [52.00ms]
+(pass) buildOpencodeChildEnv — deny-by-default boundary > reclaims dead-owner roots after the node workDir is deleted or recreated [65.00ms]
+(pass) buildOpencodeChildEnv — deny-by-default boundary > a transient cleanup pathname swap is retried after child exit [26.00ms]
+(pass) buildOpencodeChildEnv — deny-by-default boundary > a dead owner marker is retained while an orphan child still references the root [48.00ms]
+(pass) buildOpencodeChildEnv — deny-by-default boundary > durable process-group binding protects opaque descendants across later and crash-style sweeps [155.01ms]
+(pass) buildOpencodeChildEnv — deny-by-default boundary > an exact exited-process identity exemption never hides a live descendant or PID mismatch [56.00ms]
+(pass) buildOpencodeChildEnv — deny-by-default boundary > rejects symlinks at workDir and every security-sensitive state layer [14.00ms]
+(pass) buildOpencodeChildEnv — deny-by-default boundary > rejects permissive modes and foreign ownership without repairing them [2.00ms]
+
+src/runtime/opencode-acp/profile-state.test.ts:
+(pass) OpenCode private profile state > loads, atomically updates, backs up, and writes a session [13.00ms]
+(pass) OpenCode private profile state > a post-load config symlink cannot redirect session writeback [1.00ms]
+(pass) OpenCode private profile state > boot refuses a config symlink before self-heal can write its target
+(pass) OpenCode private profile state > backup refuses a pre-planted .prev symlink [1.00ms]
+(pass) OpenCode private profile state > runtime hint rejects suspicious config leaves for every runtime [1.00ms]
+
+src/runtime/opencode-acp/client.test.ts:
+(pass) OpencodeAcpClient — request/response correlation > request() resolves with the matching response's result [163.01ms]
+(pass) OpencodeAcpClient — request/response correlation > error response rejects the promise with a shaped message [150.01ms]
+(pass) OpencodeAcpClient — streaming notifications > emits 'notification' for every session/update frame [144.01ms]
+(pass) OpencodeAcpClient — streaming notifications > id-carrying reverse requests get an explicit method-not-found response [141.01ms]
+(pass) OpencodeAcpClient — process lifecycle > supervisor receipt is ready before the vendor can inherit launch state [118.00ms]
+(pass) OpencodeAcpClient — process lifecycle > child exit rejects all pending requests [147.01ms]
+(pass) OpencodeAcpClient — process lifecycle > isRunning flips false after stop() [86.00ms]
+(pass) OpencodeAcpClient — process lifecycle > a crashing group leader cannot leave a live descendant behind [203.01ms]
+(pass) OpencodeAcpClient — process lifecycle > SIGSTOP supervisor makes stop fail closed until the exact owner resumes [348.01ms]
+366 |       // Test-only exact PID cleanup. Production deliberately retains and
+367 |       // reports this external-SIGKILL boundary instead of targeting old PGID.
+368 |       try { process.kill(vendorPid, "SIGKILL"); } catch {}
+369 |       try { process.kill(directVendorPid, "SIGKILL"); } catch {}
+370 |       await waitForFixture(() => !pidIsLive(vendorPid));
+371 |       await waitForFixture(() => !pidIsLive(directVendorPid));
+                                                                 ^
+ReferenceError: directVendorPid is not defined
+      at <anonymous> (/repo/agent-node/src/runtime/opencode-acp/client.test.ts:371:60)
+      at waitForFixture (/repo/agent-node/src/runtime/opencode-acp/client.test.ts:37:11)
+      at waitForFixture (/repo/agent-node/src/runtime/opencode-acp/client.test.ts:35:31)
+      at <anonymous> (/repo/agent-node/src/runtime/opencode-acp/client.test.ts:371:13)
+(fail) OpencodeAcpClient — process lifecycle > external supervisor SIGKILL never triggers a stale PGID kill or clean exit [1617.07ms]
+(pass) OpencodeAcpClient — process lifecycle > concurrent stop callers share one verified public exit [74.00ms]
+(pass) OpencodeAcpClient — process lifecycle > explicit child env is not merged with the client's process.env [154.01ms]
+
+src/runtime/opencode-acp/runtime.test.ts:
+[opencode-acp] session/new — ses_test...
+(pass) openOpencodeRuntime — cwd and tool policy > safe default keeps spawn + ACP session in one external launch workspace [222.01ms]
+[opencode-acp] session/new — ses_probe_au...
+(pass) openOpencodeRuntime — cwd and tool policy > version probe root is credential-free and gone before runtime auth is materialized [196.01ms]
+[opencode-acp] session/load ok — resumed ses_existing...
+(pass) openOpencodeRuntime — cwd and tool policy > safe session/load reuses the exact spawn PWD as its ACP cwd [227.01ms]
+[opencode-acp] session/new — ses_test...
+(pass) openOpencodeRuntime — cwd and tool policy > explicit unsafe flag restores project cwd and emits a trusted-task warning [182.01ms]
+[opencode-acp] session/new — ses_test...
+(pass) openOpencodeRuntime — opening lifecycle > normal stop removes the launch root and copied vendor auth [236.01ms]
+[opencode-acp] session/new — ses_test...
+[opencode-acp] session/new — ses_test...
+[opencode-acp] session/new — ses_test...
+[opencode-acp] session/new — ses_test...
+[opencode-acp] session/new — ses_test...
+[opencode-acp] session/new — ses_test...
+[opencode-acp] session/new — ses_test...
+[opencode-acp] session/new — ses_test...
+[opencode-acp] session/new — ses_test...
+[opencode-acp] session/new — ses_test...
+[opencode-acp] session/new — ses_test...
+[opencode-acp] session/new — ses_test...
+[opencode-acp] session/new — ses_test...
+[opencode-acp] session/new — ses_test...
+[opencode-acp] session/new — ses_test...
+[opencode-acp] session/new — ses_test...
+[opencode-acp] session/new — ses_test...
+[opencode-acp] session/new — ses_test...
+[opencode-acp] session/new — ses_test...
+[opencode-acp] session/new — ses_test...
+[opencode-acp] session/new — ses_test...
+[opencode-acp] session/new — ses_test...
+[opencode-acp] session/new — ses_test...
+[opencode-acp] session/new — ses_test...
+[opencode-acp] session/new — ses_test...
+(pass) openOpencodeRuntime — opening lifecycle > repeated open/stop cycles do not accumulate launch roots [5788.24ms]
+(pass) openOpencodeRuntime — opening lifecycle > an ancestor candidate planted by the version probe hard-fails before ACP spawn [91.00ms]
+(pass) openOpencodeRuntime — opening lifecycle > package replacement after credential-free probe is rejected and runtime auth root is discarded [102.00ms]
+(pass) openOpencodeRuntime — opening lifecycle > in-place binary self-modification after probe is rejected before credential spawn [110.00ms]
+(pass) openOpencodeRuntime — opening lifecycle > production rejects canonical same-version packages below project cwd or node workDir [38.00ms]
+(pass) openOpencodeRuntime — opening lifecycle > initialize failure force-kills the child before rejecting [187.01ms]
+(pass) openOpencodeRuntime — opening lifecycle > onClient exposes a stalled-handshake child synchronously for shutdown [109.00ms]
+[opencode-acp] session/new — ses_idle...
+(pass) opencodeThink — failed-turn lifecycle > prompt idle timeout force-kills the child before rejecting [296.01ms]
+[opencode-acp] session/new — ses_rescue_i...
+[opencode-acp] #383 thinking-only terminal turn (chunks=0 thoughtChunks=1) — re-prompting for plain-text final
+(pass) opencodeThink — failed-turn lifecycle > a failed thinking-only rescue discards the child before returning [245.01ms]
+
+src/runtime/opencode-acp/binary.test.ts:
+(pass) resolvePinnedOpencodeBinary > locks the non-root uid=gid umask-0002 compatibility policy [3.00ms]
+(pass) resolvePinnedOpencodeBinary > accepts the canonical package entrypoint and probes it from the external cwd [54.00ms]
+(pass) resolvePinnedOpencodeBinary > accepts an npm-style PATH shim but returns the canonical package binary [40.00ms]
+(pass) resolvePinnedOpencodeBinary > rejects a same-version fake package inside the project before executing it [1.00ms]
+(pass) resolvePinnedOpencodeBinary > rejects forged package metadata and noncanonical entrypoints [4.00ms]
+(pass) resolvePinnedOpencodeBinary > rejects unsafe file, package-directory, ancestor, and owner modes [5.00ms]
+(pass) resolvePinnedOpencodeBinary > still enforces exact --version output after package identity succeeds [45.00ms]
+(pass) resolvePinnedOpencodeBinary > refuses a caller-selected version other than the vetted release pin [1.00ms]
+(pass) resolvePinnedOpencodeBinary > rejects a same-version package in a monorepo ancestor before probing it [3.00ms]
+(pass) resolvePinnedOpencodeBinary > discovers a workspace ancestor when the configured project leaf is absent [1.00ms]
+(pass) resolvePinnedOpencodeBinary > launcher absolute path wins over a hostile search PATH [26.00ms]
+(pass) resolvePinnedOpencodeBinary > rejects non-absolute overrides
+
+1 tests failed:
+(fail) OpencodeAcpClient — process lifecycle > external supervisor SIGKILL never triggers a stale PGID kill or clean exit [1617.07ms]
+
+ 73 pass
+ 1 fail
+ 720 expect() calls
+Ran 74 tests across 6 files. [12.32s]

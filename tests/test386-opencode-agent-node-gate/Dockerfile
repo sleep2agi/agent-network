@@ -1,7 +1,7 @@
 FROM oven/bun:1.3.1
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends jq python3 make g++ git \
+  && apt-get install -y --no-install-recommends jq python3 make g++ git tmux \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /repo/agent-network
@@ -33,7 +33,7 @@ RUN umask 0002 \
 USER root
 
 RUN chmod 755 /test/run.sh /test/bin/* /test/fail-bin/* /test/capable-bin/* /test/profile-bin/* \
-      /test/project-bin/* \
+      /test/project-bin/* /test/stop-fixture/agent-node \
   && chmod 644 /test/loader-canary.cjs \
   && chmod 644 /test/exact-node/package.json \
   && chmod 755 /test/exact-node/dist/cli.js \

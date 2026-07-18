@@ -1,0 +1,26 @@
+#!/usr/bin/env bun
+
+import { spawn } from "child_process";
+import { writeFileSync } from "fs";
+
+let child: ReturnType<typeof spawn> | null = null;
+if (process.env.STOP_FIXTURE_CHILD_PID_FILE) {
+  child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+  writeFileSync(process.env.STOP_FIXTURE_CHILD_PID_FILE, String(child.pid));
+}
+
+const shutdown = () => {
+  if (child?.pid) {
+    try { process.kill(-child.pid, "SIGKILL"); } catch {}
+  }
+  process.exit(0);
+};
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
+process.on("SIGHUP", shutdown);
+setInterval(() => {}, 1_000);

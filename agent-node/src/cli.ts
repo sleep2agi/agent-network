@@ -2690,12 +2690,36 @@ function sanitizeGrokCommhubLeak(text: string): string {
 const OPENCODE_PROCESS_BUNDLE_MARKER = "processWithOpencode";
 async function processWithOpencode(task: string, _from: string, _images?: string[]): Promise<string> {
   debug(`[${OPENCODE_PROCESS_BUNDLE_MARKER}] dispatch`);
+  if (shuttingDown) {
+    throw new Error("agent-node is shutting down; refusing to open a new OpenCode process tree");
+  }
   const { openOpencodeRuntime, opencodeThink } =
     await import("./runtime/opencode-acp/runtime");
 
-  // Reset the holder if the child has already exited — the next call
-  // will re-open with session/load per the persisted sessionId.
+  // Dynamic import is an await boundary. A signal can stop the old client and
+  // clear its holder while this function is suspended; without this second
+  // gate the resumed turn creates a fresh credential root after shutdown has
+  // already passed closeOpencodeRuntime(), then process.exit strands it.
+  if (shuttingDown) {
+    throw new Error("agent-node is shutting down; refusing to open a new OpenCode process tree");
+  }
+
+  if (!opencodeRuntimeSession && opencodeRuntimeClient) {
+    if (!opencodeRuntimeClient.cleanupConfirmed) {
+      throw opencodeRuntimeClient.cleanupError
+        ?? new Error("previous OpenCode open attempt still owns a process tree");
+    }
+    opencodeRuntimeClient = null;
+  }
+
+  // Re-open only after the supervisor has proved its whole session empty.
+  // A dead anchor with residual members is a fail-closed owner state, not a
+  // license to create a second OpenCode tree.
   if (opencodeRuntimeSession && !opencodeRuntimeSession.client.isRunning) {
+    if (!opencodeRuntimeSession.client.cleanupConfirmed) {
+      throw opencodeRuntimeSession.client.cleanupError
+        ?? new Error("previous OpenCode supervisor cleanup is unconfirmed; refusing a second child");
+    }
     log(`[opencode] previous child exited — reopening on this turn`);
     opencodeRuntimeSession = null;
     opencodeRuntimeClient = null;
@@ -2758,19 +2782,14 @@ async function processWithOpencode(task: string, _from: string, _images?: string
 
 async function closeOpencodeRuntime(reason: string): Promise<void> {
   const client = opencodeRuntimeClient ?? opencodeRuntimeSession?.client ?? null;
-  if (client?.isRunning) {
-    log(`[opencode] stopping ACP child (${reason})`);
-    await Promise.race([
-      client.stop("SIGTERM"),
-      new Promise<void>((resolve) => setTimeout(resolve, 1_000)),
-    ]).catch((e: any) => {
-      warn(`[opencode] graceful stop failed: ${e?.message || e}`);
-    });
-    if (client.isRunning) {
-      await client.stop("SIGKILL").catch((e: any) => {
-        warn(`[opencode] forced stop failed: ${e?.message || e}`);
-      });
-    }
+  if (!client) return;
+  if (!client.cleanupConfirmed) {
+    log(`[opencode] stopping ACP supervisor (${reason})`);
+    await client.stop("SIGTERM", 4_000);
+  }
+  if (!client.cleanupConfirmed) {
+    throw client.cleanupError
+      ?? new Error("OpenCode supervisor stop returned without confirmed session cleanup");
   }
   opencodeRuntimeClient = null;
   opencodeRuntimeSession = null;
@@ -3201,6 +3220,12 @@ function think(task: string, from: string, taskId: string | null, images?: strin
     return Promise.resolve(`执行出错: agent-node 重启中（config-apply drain），任务暂不处理，请稍后重发`);
   }
   const run = async () => {
+    // Calls already queued before the signal did not see the admission check
+    // below. Re-check at execution time so no runtime can begin after shutdown
+    // has started; OpenCode additionally re-checks across its dynamic import.
+    if (shuttingDown) {
+      return "执行出错: agent-node 正在关闭，任务暂不处理，请稍后重发";
+    }
     // Expose CURRENT_TASK_ID for runtime processes (Claude SDK / Codex)
     // so the LLM can pass it as parent_task_id when delegating sub-tasks.
     // Server has a fallback (latest open task to this caller) but explicit
@@ -4650,7 +4675,19 @@ const shutdown = async () => {
   if (shuttingDown) return;
   shuttingDown = true;
   log("shutting down...");
-  await closeOpencodeRuntime("signal shutdown");
+  try {
+    await closeOpencodeRuntime("signal shutdown");
+  } catch (shutdownError: any) {
+    // Keep agent-node alive as the supervisor owner. A later TERM/INT/HUP can
+    // retry after SIGCONT or after a transient residual process exits.
+    shuttingDown = false;
+    process.exitCode = 1;
+    warn(
+      `[opencode] shutdown refused while owner tree is retained: ` +
+      `${shutdownError?.message ?? shutdownError}`,
+    );
+    return;
+  }
   // #261 P0-1 — gate the feishu supervisor loop so it stops re-forking
   // on the soon-to-arrive child exit. SIGTERM each tracked worker (give
   // it 500 ms to exit gracefully), then SIGKILL holdouts. Without this,
@@ -4674,6 +4711,7 @@ const shutdown = async () => {
 };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+process.on("SIGHUP", shutdown);
 for (const channel of TELEGRAM_CHANNELS) connectTelegram(channel);
 for (const channel of FEISHU_CHANNELS) void connectFeishu(channel);
 connectSSE();
