@@ -214,3 +214,170 @@ p.expect(r"选择 runtime"); p.sendline("")  # default
 **Author-Agent**: 通信测试马
 **Reviewer**: 通信龙
 **Refs**: [v010 chain-test baseline](v010-chain-test-baseline.md), [Round 9 preview.7 6/6 PASS](report-test-v092-preview7.md)
+
+---
+
+## 9. Evidence Provenance Gate (常设规则, 07-29 P3-A 事故固化)
+
+**Scope (MUST apply to)**: Docker E2E, preview smoke, 安全 gate (RFC-030 P3 identity/security), release promote (preview → latest).
+**Enforcement**: **没有本节要求的 provenance manifest, 不得 GO preview/latest**。作者自报 (author-generated report, tests committed in candidate tree) 不构成独立证据 (per [[feedback_gate_evidence_must_be_runner_generated]]).
+
+### 9.1 Runner requirements (MUST)
+
+R-1 Runner **MUST** execute from a **clean checkout at the exact candidate SHA**. `git worktree add` from a fresh `origin/main` fetch, or `git clone --depth 1 <repo> <tmpdir> && git checkout <SHA>`. Runner tree **MUST NOT** live inside the candidate PR tree.
+
+R-2 Provenance manifest **MUST** record (verbatim commands, not derived):
+- `git rev-parse HEAD` — exact 40-hex SHA (**MUST** equal candidate)
+- `git rev-parse HEAD^{tree}` — root tree oid
+- `git status --porcelain` — **MUST** be empty (any output → INVALID)
+- `git log -1 --format=%H` — for cross-verify
+- Runner script SHA256 (`sha256sum <runner>.sh`)
+- npm tarball SHA256 for every `<pkg>@<version>` under test (`sha256sum <pkg>-<version>.tgz` from `npm pack`)
+- Runner package.json SHA256 (if the runner has a manifest)
+- Start / end timestamp (RFC3339, `Asia/Shanghai`)
+- Runner environment: `uname -a`, `node --version`, `npm --version`, `docker --version`, `bash --version` (first line each)
+- `NODE_ENV`, `CI`, `ANET_*` flags actually present at runtime (name only, value only when NOT a secret — see 9.6)
+
+R-3 If **any** of the above is missing, contradictory, or unreproducible → the entire evidence bundle **is INVALID**. Partial acceptance is prohibited (do not "trust the rest").
+
+### 9.2 Test switches / fault-injection flags (MUST)
+
+R-4 Every test switch, feature flag, or fault-injection env referenced in the runner **MUST** exist in the candidate SHA. Manifest **MUST** include, per flag:
+- The exact file path (candidate-relative) where the flag is read
+- A `git show <SHA>:<path> | grep -n <FLAG>` transcript proving the read site
+- The default value at that SHA
+
+R-5 If a flag referenced in the runner is **not found** in the candidate SHA (typo, invented, from a not-yet-merged branch, or from a stale local checkout), the evidence bundle is **INVALID**. See **9.5 INVALID example** for a concrete case (`ANET_P3_IDENTITY_DISABLE`).
+
+### 9.3 Runner isolation & evidence-only PR (MUST)
+
+R-6 Runner-generated evidence **MUST** be produced in a directory **outside the candidate tree** (e.g. `/tmp/anet-gate-<runid>/evidence/`), then attached to a **separate evidence-only PR** or issue comment. Files inside the candidate PR tree (including `docs/tests/report-*.md` committed together with the candidate code) do **not** count as independent evidence.
+
+R-7 The evidence-only PR **MUST NOT** mix runtime code, config, or test-source changes. If the runner requires new fixtures, land those under a separate, prior PR; the evidence PR is diff-free from the candidate.
+
+### 9.4 Reviewer duties (MUST)
+
+R-8 The reviewer **MUST** perform an **independent clean checkout** at the candidate SHA and **re-run the key unit tests** listed in the manifest. Screen-reading the runner log is insufficient.
+
+R-9 The reviewer **MUST** actively falsify at least **two** critical gates via mutation:
+- Temporarily flip an assert (e.g. change `expect(x).toBe(true)` to `.toBe(false)`) and confirm the gate **turns red**.
+- Comment out a test body and confirm coverage/gate output changes.
+- Any gate that "exists but never fails" (green under any input) **counts as no gate**.
+
+R-10 Mutation results (before/after) **MUST** be recorded as part of the reviewer's independent evidence and attached to the review verdict.
+
+### 9.5 INVALID example (07-29 P3-A)
+
+- Candidate SHA: `9f2ec282...`
+- Report claimed the identity gate was exercised via `ANET_P3_IDENTITY_DISABLE=1`.
+- `git show 9f2ec282:agent-network/src/**/*.ts | grep ANET_P3_IDENTITY_DISABLE` → **0 hits** across the candidate tree.
+- The flag existed in the runner author's local branch but **was never committed**; the gate silently no-oped.
+- Verdict: entire evidence bundle **INVALID**. Rollback = discard old evidence, cut a new candidate SHA (with the flag actually present), re-run under a new evidence-only PR. No PASS from the old bundle carries over.
+
+### 9.6 Recovery flow (INVALID → new evidence)
+
+1. Mark the old evidence bundle **INVALID** in the tracking issue (comment, do not delete).
+2. Land the missing fixture/flag as a separate PR; wait for merge.
+3. Cut a new candidate SHA that contains the fixture.
+4. Fresh runner + fresh reviewer follow §9.1–9.4 from scratch. No inheritance from prior PASS lines.
+5. Only after the new bundle passes independent review may the gate transition to GO.
+
+### 9.7 Secret hygiene (MUST)
+
+R-11 Manifest and runner logs **MUST NOT** record: any token (utok_/ntok_/atok_/sk-*/Bearer/JWT/gh[p|o|u]_/vercel_*/etc.), credential material, private key content, `~/.claude`/`~/.commhub`/`~/.anet` path values, or environment-variable **values** for anything that could plausibly be sensitive.
+
+R-12 Allowed in manifest: SHA256 hashes of tarballs / scripts / non-secret artifacts, tool versions (node/npm/docker/etc.), env-var **names** (not values), boolean feature-flag settings, RFC3339 timestamps, hostnames when non-sensitive.
+
+R-13 Do **not** fingerprint long-term secrets (e.g. `sha256sum` of an OAuth token or long-lived API key). Short-lived per-run nonces are OK.
+
+### 9.8 Applicable pipelines & GO gate
+
+| Pipeline | Provenance manifest required? | Consequence if missing |
+|---|---|---|
+| Docker E2E (families A–F, this playbook §2) | **MUST** | No preview ship |
+| Preview smoke (§5 per-preview workflow) | **MUST** | No preview ship |
+| Security gate (RFC-030 P3, identity/permission) | **MUST** | No merge to main |
+| Release promote (preview → latest, §5 step 6–7) | **MUST** | No dist-tag flip |
+
+**No provenance manifest → no GO.** Applies uniformly; the standard is not case-by-case.
+
+### 9.9 Manifest template (copy-paste)
+
+```yaml
+# evidence-manifest.yaml — v1
+runner:
+  script_path: /tmp/anet-gate-<runid>/run.sh
+  script_sha256: <64-hex>
+  invoked_at: 2026-07-29T10:00:00+08:00
+  finished_at: 2026-07-29T10:07:34+08:00
+  host_env:
+    uname: "Linux ... x86_64"
+    node: "v24.1.0"
+    npm: "10.7.0"
+    docker: "27.1.1"
+    bash: "GNU bash, version 5.2.15..."
+
+candidate:
+  repo: sleep2agi/agent-network
+  sha: <40-hex>                       # MUST equal target
+  tree_oid: <40-hex>                  # git rev-parse HEAD^{tree}
+  status_porcelain: ""                # MUST be empty string
+  checkout_path: /tmp/anet-gate-<runid>/checkout
+
+packages_under_test:
+  - name: "@sleep2agi/agent-network"
+    version: 2.5.0-preview.7
+    tarball_sha256: <64-hex>
+  - name: "@sleep2agi/agent-node"
+    version: 2.5.0-preview.7
+    tarball_sha256: <64-hex>
+
+flags:
+  - name: ANET_P3_IDENTITY_DISABLE
+    read_at: agent-network/src/security/identity.ts:42       # candidate-relative
+    grep_transcript: |
+      $ git show <SHA>:agent-network/src/security/identity.ts | grep -n ANET_P3_IDENTITY_DISABLE
+      42:  if (process.env.ANET_P3_IDENTITY_DISABLE === "1") return null;
+    default_value: unset
+
+cases:
+  - id: P3-A
+    verdict: PASS|FAIL|INVALID
+    stdout_sha256: <64-hex>
+    stderr_sha256: <64-hex>
+    artifacts_dir: /tmp/anet-gate-<runid>/evidence/P3-A/
+
+secret_hygiene:
+  scan_command: "grep -R -E '(ntok|utok|atok)_|sk-[A-Za-z0-9]{20,}|Bearer |eyJ' /tmp/anet-gate-<runid>/evidence/"
+  scan_exit_code: 1                    # 1 = no match; MUST be 1
+
+reviewer:
+  independent_checkout_path: /tmp/anet-gate-<runid>-review/checkout
+  independent_checkout_sha: <40-hex>   # MUST equal candidate.sha
+  mutations_attempted:
+    - target: agent-network/test/security/identity.test.ts:88
+      before_verdict: PASS
+      after_verdict: FAIL
+    - target: agent-network/test/security/identity.test.ts:112
+      before_verdict: PASS
+      after_verdict: FAIL
+
+verdict:
+  overall: PASS|FAIL|INVALID
+  reason: "..."
+```
+
+### 9.10 Review checklist
+
+- [ ] Runner ran from a clean checkout **outside** the candidate PR tree
+- [ ] `git status --porcelain` transcript captured and empty
+- [ ] `git rev-parse HEAD` equals candidate SHA
+- [ ] Every flag / switch in the runner has a `git show <SHA>:<path> | grep` proof of presence
+- [ ] Evidence lives in an evidence-only PR / attachment, not mixed with candidate code
+- [ ] Reviewer re-ran key unit tests from an **independent** checkout at the same SHA
+- [ ] Reviewer performed ≥ 2 gate mutations and confirmed each turns red
+- [ ] Secret-hygiene scan attached, exit code = 1 (no match)
+- [ ] Manifest fields all present per §9.9 template
+- [ ] Applicable pipeline row in §9.8 satisfied
+
+> **Cross-reference**: [`../sop/methodology.md`](../sop/methodology.md) §3 Verify-First SOP records how these gates plug into the general release verify chain. This §9 is the authoritative source for the provenance manifest itself; do not fork the template.

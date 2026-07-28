@@ -450,6 +450,8 @@ docs-loop 每 10 轮才 deploy 一次（节流成本）。
 ## 3. Verify-First SOP
 
 > **核心原则**：派 owner 阻塞 ship 直到 5 件 verifiable artifacts 全绿。
+>
+> **Evidence provenance gate (常设, 07-29 P3-A 事故固化)**：任何 Docker E2E / preview smoke / 安全 gate / release promote 的证据, 都必须携带一份 provenance manifest (clean checkout SHA + tree oid + tarball SHA256 + flag grep 证据 + 独立 reviewer 复跑 + 至少 2 项 gate mutation), 否则整包 evidence **INVALID**, 不得 GO。作者自报的 report 不构成独立证据。权威模板与 checklist 见 [`../tests/release-gate-playbook.md`](../tests/release-gate-playbook.md) §9。
 
 ### 3.1 五件 artifacts
 
