@@ -10,7 +10,7 @@
  * anet run                     独立 SSE Agent
  */
 
-import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync, rmSync, cpSync } from "fs";
+import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync, rmSync, cpSync, unlinkSync } from "fs";
 import { dirname, isAbsolute, join } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
@@ -183,8 +183,14 @@ async function createCodexCopresenceThread(ws: string, timeoutMs = 60_000): Prom
       const p = pending.get(msg.id);
       if (!p) return;
       pending.delete(msg.id);
-      if (msg.error) p.reject(new Error(`${msg.error.code}: ${msg.error.message}`));
-      else p.resolve(msg.result);
+      if (msg.error) {
+        // #P2fix复审顺手4 — attach .code so isAlreadyInitializedError's
+        // code-based branch is live (mirrors codex-app-server-client.ts
+        // where the shared client attaches err.error.code).
+        const rpcErr = new Error(`${msg.error.code}: ${msg.error.message}`);
+        (rpcErr as Error & { code?: number }).code = msg.error.code;
+        p.reject(rpcErr);
+      } else p.resolve(msg.result);
     }
   });
   const request = (method: string, params: any, timeoutMsInner: number) => new Promise<any>((resolve, reject) => {
@@ -267,8 +273,15 @@ function assertSafeHubUrl(hub: string): void {
 // `tmux send-keys` (writes into pane history).
 function writeCodexCopresenceEnvFile(codexHome: string, token: string): string {
   const envPath = join(codexHome, ".anet-copresence.env");
-  writeFileSync(envPath, `export ANET_CODEX_COMMHUB_TOKEN=${shellQuote(token)}\n`);
-  chmodSync(envPath, 0o600);
+  // #P2fix复审必修 — TOCTOU + symlink-follow attack surface.
+  // Without pre-unlink, a pre-existing symlink at envPath would be followed
+  // by writeFileSync and write the token to the link target (rm -f later only
+  // removes the link, not the target). Without flag:"wx", writeFileSync creates
+  // the file at umask default (typically 0644) and the chmod-to-0600 race is
+  // observable to any world-readable scan.
+  try { unlinkSync(envPath); } catch (err: any) { if (err?.code !== "ENOENT") throw err; }
+  writeFileSync(envPath, `export ANET_CODEX_COMMHUB_TOKEN=${shellQuote(token)}\n`, { mode: 0o600, flag: "wx" });
+  chmodSync(envPath, 0o600);  // belt-and-suspenders in case older node ignores mode option
   return envPath;
 }
 
@@ -374,7 +387,17 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   }
 
   mkdirSync(opts.codexHome, { recursive: true });
-  try { chmodSync(opts.codexHome, 0o700); } catch { /* best-effort */ }
+  // #P2fix复审顺手2 — 0700 on the parent is a load-bearing invariant for the
+  // 0600 env file inside; if we can't enforce it, refuse to start rather than
+  // silently degrade to whatever perms already exist.
+  try {
+    chmodSync(opts.codexHome, 0o700);
+  } catch (e: any) {
+    console.error(`[anet] ❌ cannot set 0700 on CODEX_HOME (${opts.codexHome}): ${e?.message || e}`);
+    console.error(`[anet]    The token env file requires a 0700 parent directory.`);
+    console.error(`[anet]    Fix perms manually (chmod 700 ${shellQuote(opts.codexHome)}) or point --codex-home elsewhere.`);
+    process.exit(1);
+  }
 
   const { appsrv: appsrvSession, bridge: bridgeSession, tui: tuiSession } =
     copresenceTmuxSessions(displayName);
@@ -432,6 +455,10 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     console.error(`[anet] ❌ app-server did not bind ${wsUrl} within 25s.`);
     console.error(`[anet]    Debug:   tmux attach -t ${appsrvSession}`);
     console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
+    // #P2fix复审顺手3 — env file was source-then-rm'd by the tmux child on
+    // the happy path, but if the bash chain crashed before reaching `rm -f`
+    // (e.g. the `.` failed) the token file could linger. Defense-in-depth.
+    try { rmSync(envFilePath, { force: true }); } catch { /* best-effort */ }
     process.exit(1);
   }
   console.log(`[anet] ① app-server READY on ${wsUrl}`);
@@ -444,6 +471,8 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     console.error(`[anet] ❌ thread/start failed: ${e?.message || e}`);
     console.error(`[anet]    Debug:   tmux attach -t ${appsrvSession}`);
     console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
+    // #P2fix复审顺手3 — defense-in-depth env-file cleanup (see :431).
+    try { rmSync(envFilePath, { force: true }); } catch { /* best-effort */ }
     process.exit(1);
   }
   // #P2fix顺手3 — defense-in-depth shape check before threadId flows into
@@ -452,6 +481,8 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   if (!SAFE_THREAD_ID.test(threadId)) {
     console.error(`[anet] internal error: unexpected threadId shape (rejected before shell interpolation)`);
     console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
+    // #P2fix复审顺手3 — defense-in-depth env-file cleanup (see :431).
+    try { rmSync(envFilePath, { force: true }); } catch { /* best-effort */ }
     process.exit(1);
   }
   console.log(`[anet] thread: ${threadId}`);
