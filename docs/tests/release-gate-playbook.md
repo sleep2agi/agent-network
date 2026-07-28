@@ -277,7 +277,7 @@ R-8 The reviewer **MUST** perform an **independent clean checkout** at the candi
 
 R-9 The reviewer **MUST** actively falsify at least **two** critical gates by **mutating production code or input fixtures**, keeping test files and assertions **unmodified**. Flipping an assertion (`toBe(true) → toBe(false)`) or commenting out a test body only proves the test executed — it does not prove the gate would catch a real defect. Legitimate mutation targets:
 
-- **Regress a production invariant** — e.g. re-issue the same UUID twice where the fix issues two distinct ones; return a hardcoded value where the fix computes it.
+- **Regress a production invariant** — e.g. the fix threads **one shared** UUID through both the tmux env-var and the on-disk marker; mutate the production code so the two sites each call `randomUUID()` independently and confirm the unmodified test transitions PASS → FAIL. Choose mutations that break the invariant the gate exists to enforce; never rewrite the correct behaviour in reverse.
 - **Silently drop an error branch** — e.g. replace a thrown enum error with `return []` / `return null`.
 - **Corrupt an input fixture** — e.g. inject an extra alias into a golden JSON to see whether the schema check catches it.
 
@@ -391,7 +391,22 @@ cases:
     artifacts_dir: /tmp/anet-gate-<RUN_ID>/evidence/<CASE_ID>/
 
 secret_hygiene:
-  scan_command: "grep -R -E '(ntok|utok|atok)_|sk-[A-Za-z0-9]{20,}|Bearer |eyJ' /tmp/anet-gate-<RUN_ID>/evidence/"
+  # Self-match-safe layout (see §9.11):
+  # - manifest lives OUTSIDE the scan tree (parallel to it, not inside it), so its own scan_command regex cannot match itself.
+  # - Scan targets are explicit subdirectories that DO include runner sources + fixtures + artifacts.
+  # - Scanner itself is invoked from outside the scan tree.
+  scan_layout:
+    manifest_path:      /tmp/anet-gate-<RUN_ID>/evidence-manifest.yaml
+    scan_targets:
+      - /tmp/anet-gate-<RUN_ID>/evidence/artifacts/
+      - /tmp/anet-gate-<RUN_ID>/evidence/runner/
+      - /tmp/anet-gate-<RUN_ID>/evidence/reviewer/
+    scanner_invocation_cwd: /tmp/anet-gate-<RUN_ID>/scanner/       # outside every scan_target
+  scan_command: |
+    grep -R -E '(ntok|utok|atok)_[A-Za-z0-9]{16,}|sk-[A-Za-z0-9]{20,}|Bearer [A-Za-z0-9._~+/-]{20,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|ghu_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{40,}|vercel_[A-Za-z0-9_]{20,}|-----BEGIN [A-Z ]+PRIVATE KEY-----' \
+      /tmp/anet-gate-<RUN_ID>/evidence/artifacts/ \
+      /tmp/anet-gate-<RUN_ID>/evidence/runner/ \
+      /tmp/anet-gate-<RUN_ID>/evidence/reviewer/
   scan_exit_code: 1                           # 1 = no match; MUST be 1
 
 reviewer:
@@ -428,14 +443,42 @@ verdict:
 - [ ] `git cat-file -e <SHA>^{commit}` reachability probe recorded with exit code 0
 - [ ] `git status --porcelain` captured **twice** (pre-run + post-run), **both empty**
 - [ ] `git rev-parse HEAD` equals candidate SHA
-- [ ] Every flag / switch in the runner has a `git grep -n --fixed-strings <FLAG> <SHA> -- <subtree>` proof with **captured exit code** (0 or 1; a >1 rc is treated as invalid probe, not "no match")
+- [ ] Every flag / switch actually referenced by the runner has a `git grep -n --fixed-strings <FLAG> <SHA> -- <subtree>` proof with **captured exit code = 0** (matched at least once). A `rc=1` (confirmed no match) means the flag is missing from the candidate SHA → per R-5 the whole bundle is INVALID, not "checklist item satisfied"; `rc>1` = probe itself failed and MUST be re-run.
 - [ ] Runner sources and fixtures are **copied into the evidence bundle** (`evidence/runner/`), each with `{path, sha256}` in manifest — not only hashed
 - [ ] Evidence lives in an evidence-only PR / attachment, not mixed with candidate code
 - [ ] Reviewer re-ran key unit tests from an **independent** checkout at the same SHA (also via `fetch + worktree add --detach`)
 - [ ] Reviewer performed ≥ 2 mutations against **production code or input fixtures** (tests unmodified), each with mutation diff + before/after test rc showing PASS → FAIL
 - [ ] Reviewer's dirty checkout was removed (`git worktree remove --force`) after evidence capture, and the removal is recorded
-- [ ] Secret-hygiene scan attached, exit code = 1 (no match)
+- [ ] Secret-hygiene scan attached, exit code = 1 (no match), and layout satisfies §9.11 (manifest + scanner invocation outside every scan target; `evidence/runner/` and `evidence/reviewer/` **included** in scan targets, not allow-listed away)
 - [ ] Manifest fields all present per §9.9 template, placeholders replaced (no `<RUN_ID>` / `<40-hex>` left literal)
 - [ ] Applicable pipeline row in §9.8 satisfied
+
+### 9.11 Self-match-safe secret scan (MUST)
+
+The scanner regex in §9.9 is itself a token-shaped string; a naive `grep -R … /tmp/anet-gate-<RUN_ID>/` would match the manifest that stores that regex, the runner source that invokes the scan, or a review report that quotes an INVALID example. Design the scan layout so no such self-match occurs:
+
+R-14 The manifest file **MUST** live **outside** every scan target. Recommended layout:
+
+```
+/tmp/anet-gate-<RUN_ID>/
+  evidence-manifest.yaml            ← manifest (NOT scanned; parallel to evidence/)
+  evidence/
+    artifacts/                      ← run outputs, in scan target
+    runner/                         ← runner sources + fixtures, in scan target (still scanned)
+    reviewer/                       ← reviewer mutation patches + rc logs, in scan target
+  scanner/                          ← scanner invocation cwd, NOT scanned
+    scan.log
+    scan.exit
+```
+
+R-15 Scan targets **MUST** be enumerated explicitly (per manifest `secret_hygiene.scan_targets`) and **MUST** include `evidence/runner/` and `evidence/reviewer/`. Do not "solve" self-matches by simply excluding runner or reviewer sources — those are the exact places a leaked secret is likeliest to hide.
+
+R-16 The scanner command itself **MUST NOT** be stored inside any scan target (place `scan.sh` under `scanner/`, not under `evidence/`). Documentation examples (e.g. this playbook, or `report-*.md`) that quote the regex **MUST** live in a project doc tree separate from the per-run evidence bundle so they never enter a scan target.
+
+R-17 If a real secret leak is found, the offending file is quarantined per §9.6 (recovery flow); do **not** allow-list it to make the scan pass.
+
+An acceptable alternative to `grep -R`: an allowlist-based scanner (e.g. `gitleaks --no-git`) with a config committed alongside the runner. The same layout constraints apply — the config itself must live outside scan targets.
+
+---
 
 > **Cross-reference**: [`../sop/methodology.md`](../sop/methodology.md) §3 Verify-First SOP records how these gates plug into the general release verify chain. This §9 is the authoritative source for the provenance manifest itself; do not fork the template.
