@@ -618,7 +618,7 @@ opencode serve 通常经 `util-linux script` wrapper 起, wrapper PGID 与 openc
   - mode 询问: `headless` (B1' acp stdio) vs `copresence` (B3 serve + attach)
   - vendor 询问: Anthropic native / OpenAI (v0.3 D3 定, Bearer-only 走 plugin 后续)
   - env-var 检测: 若无 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` 提示配置
-- `checkRuntimeDependency`: `opencode --version` + pin `opencode-ai@<exact>` per §11.10 R1
+- `checkRuntimeDependency`: `opencode --version` + pin `opencode-ai@<exact>` per §11.8 D_new_7
 - `assertStartCompatibility`: opencode version 必须 == pinned; 否则 fail-closed
 - `anet doctor` (M3 新增, D_new_6): 检查 opencode binary + version pin + env var + optional serve port reachable
 
