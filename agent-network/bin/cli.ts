@@ -1950,6 +1950,12 @@ Setup:
   anet upgrade                  Upgrade all anet packages (channel-aware)
   anet upgrade --channel preview|latest --dry-run --self  (see flags)
 
+Daemon (host_supervisor — required by the dashboard's node-creation wizard):
+  anet daemon up [name]         Create + start a daemon (one-shot, default: "daemon")
+  anet daemon init <name>       Create a host_supervisor node config
+  anet daemon start <name>      Start an existing daemon
+  anet daemon list              List locally-configured daemons
+
 Other:
   anet import [alias]           Import sessions from CommHub
   anet register                  Create new account
