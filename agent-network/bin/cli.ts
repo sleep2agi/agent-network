@@ -20,6 +20,18 @@ import { createServer as netCreateServer } from "net";
 import { checkbox, confirm, select } from "@inquirer/prompts";
 import { ensureGitignoreRule, ensureGitignoreRules } from "../src/gitignore-writeback";
 import { superviseChild } from "../src/supervise-child";
+import {
+  writeMarker as writeCopresenceMarker,
+  readMarker as readCopresenceMarker,
+  deleteMarker as deleteCopresenceMarker,
+  reapVerifiedGroups as reapCopresenceGroups,
+  readTmuxSessionMarker as readTmuxCopresenceMarker,
+  readPgid as readCopresencePgid,
+  readStarttimeJiffies as readCopresenceStarttime,
+  markerFilePath as copresenceMarkerFilePath,
+  type CopresenceMarker,
+  type SessionMarker,
+} from "../src/copresence-identity";
 import { encodeCwd } from "../src/project-key";
 import { buildOpencodeSmokeEnv } from "../src/opencode-smoke-env";
 import {
@@ -402,6 +414,18 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   const { appsrv: appsrvSession, bridge: bridgeSession, tui: tuiSession } =
     copresenceTmuxSessions(displayName);
 
+  // #P3fix — identity marker for this start. Injected into each tmux session
+  // env; inherited by pane bash + exec'd codex + codex subprocesses via
+  // /proc/*/environ. Stop-time environ scan uses this uuid to distinguish
+  // our processes from any name-collision imposter.
+  const identityMarker = randomUUID();
+
+  // If a stale marker file exists from a prior boot / crashed start, delete
+  // it so this fresh start writes a clean record. (Boot_id check in readMarker
+  // would refuse the stale file anyway, but explicit cleanup keeps state
+  // predictable across restarts on the same boot.)
+  deleteCopresenceMarker(nodesDir(), resolved.id);
+
   // Kill any prior instances so this is idempotent.
   for (const s of [appsrvSession, bridgeSession, tuiSession]) {
     if (tmuxSessionRunning(s)) {
@@ -441,7 +465,9 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   ].join(" ; ");
   try {
     execFileSync("tmux", [
-      "new-session", "-d", "-s", appsrvSession, "-c", process.cwd(),
+      "new-session", "-d", "-s", appsrvSession,
+      "-e", `ANET_NODE_MARKER=${identityMarker}`,
+      "-c", process.cwd(),
       "bash", "-lc", appsrvCmd,
     ], { stdio: "pipe" });
   } catch (e: any) {
@@ -503,7 +529,9 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   const bridgeCmd = `unset COMMHUB_TOKEN ANET_CODEX_COMMHUB_TOKEN && exec anet node start ${shellQuote(displayName)}`;
   try {
     execFileSync("tmux", [
-      "new-session", "-d", "-s", bridgeSession, "-c", process.cwd(),
+      "new-session", "-d", "-s", bridgeSession,
+      "-e", `ANET_NODE_MARKER=${identityMarker}`,
+      "-c", process.cwd(),
       "bash", "-lc", bridgeCmd,
     ], { stdio: "pipe" });
   } catch (e: any) {
@@ -523,7 +551,9 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   ].join(" ; ");
   try {
     execFileSync("tmux", [
-      "new-session", "-d", "-s", tuiSession, "-c", process.cwd(),
+      "new-session", "-d", "-s", tuiSession,
+      "-e", `ANET_NODE_MARKER=${identityMarker}`,
+      "-c", process.cwd(),
       "bash", "-lc", tuiCmd,
     ], { stdio: "pipe" });
   } catch (e: any) {
@@ -532,6 +562,49 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     process.exit(1);
   }
   console.log(`[anet] ③ TUI tmux=${tuiSession} ready to attach`);
+
+  // #P3fix — harvest pane pid/pgid/starttime for each session and persist the
+  // identity marker atomically at 0600. Marker uuid is what stop-time
+  // environ scan uses; pids/pgids are hints (real identity truth is the
+  // environ scan). Any harvest failure is logged but non-fatal — stop will
+  // fall back to marker-only environ scan.
+  const harvestSession = (session: string): SessionMarker | null => {
+    try {
+      const paneOut = execFileSync("tmux", [
+        "list-panes", "-t", session, "-F", "#{pane_pid}",
+      ], { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
+      const panePid = parseInt(paneOut.trim().split("\n")[0], 10);
+      if (!Number.isFinite(panePid) || panePid <= 0) return null;
+      return {
+        tmux: session,
+        pid: panePid,
+        pgid: readCopresencePgid(panePid),
+        starttime_jiffies: readCopresenceStarttime(panePid),
+      };
+    } catch (e: any) {
+      console.error(`[anet] ⚠ could not harvest identity for tmux ${session}: ${e?.message || e}`);
+      return null;
+    }
+  };
+  const appsrvMk = harvestSession(appsrvSession);
+  const bridgeMk = harvestSession(bridgeSession);
+  const tuiMk = harvestSession(tuiSession);
+  if (appsrvMk && bridgeMk && tuiMk) {
+    try {
+      writeCopresenceMarker(nodesDir(), resolved.id, {
+        appsrv: appsrvMk,
+        bridge: bridgeMk,
+        tui: tuiMk,
+      });
+      console.log(`[anet] identity marker written (uuid=${identityMarker.slice(0, 8)}…)`);
+    } catch (e: any) {
+      console.error(`[anet] ⚠ could not persist identity marker: ${e?.message || e}`);
+      console.error(`[anet]    Stop will fall back to legacy tmux-name teardown (blind-kill-imposter risk).`);
+    }
+  } else {
+    console.error(`[anet] ⚠ incomplete pane harvest; skipping identity marker write.`);
+    console.error(`[anet]    Stop will fall back to legacy tmux-name teardown.`);
+  }
 
   const hubBase = opts.hub.replace(/\/+$/, "");
   console.log("");
@@ -6173,6 +6246,80 @@ Stop a running agent node.
   }
 
   const displayName = nodeDisplayName(resolved.id, resolved.profile);
+
+  // #P3fix — copresence teardown via identity marker (fail-closed).
+  //
+  // If runtime is codex-app-server (the only copresence-capable runtime),
+  // we require a valid marker file to touch any tmux session or process
+  // for this alias. Missing / stale / corrupt marker = refuse; we do NOT
+  // fall back to name-based `tmux kill-session -t <alias>-*` sweep,
+  // because a name-only sweep blind-kills any imposter that happens to
+  // share the session name (P3 evidence 2026-07-28: identity 负例 imposter
+  // was killed under the pre-P3 P2 sweep).
+  //
+  // Non-copresence runtimes keep the pre-P3 legacy path unchanged
+  // (byte-identical), so `claude-code-cli`/`grok-build-acp`/… stop paths
+  // are not affected by this fix.
+  if (resolved.profile.runtime === "codex-app-server") {
+    const mrk = readCopresenceMarker(nodesDir(), resolved.id);
+    if (!mrk.ok) {
+      console.log(
+        `[anet] copresence identity marker refuse=${mrk.refuse}` +
+        (mrk.detail ? ` (${mrk.detail})` : ""),
+      );
+      console.log(
+        `[anet]    No tmux/proc teardown performed — marker required for identity gate.`,
+      );
+      console.log(
+        `[anet]    If stale from a prior boot, delete manually: rm '${copresenceMarkerFilePath(nodesDir(), resolved.id)}'`,
+      );
+      // Still clean any stale .pid file and notify hub offline; that
+      // path is P2-era + generic and doesn't touch tmux or foreign procs.
+      const killed = stopNode(resolved.id);
+      await notifyServerOffline(resolved.profile, resolved.id);
+      console.log(
+        `[anet] "${displayName}" copresence teardown SKIPPED (marker refused)` +
+        (killed ? " — stopped stale .pid record + notified hub offline" : " — notified hub offline"),
+      );
+      return;
+    }
+    const m = mrk.marker!;
+    const reap = await reapCopresenceGroups(m.marker, 3000);
+    console.log(
+      `[anet] copresence reap: killed_pgids=[${reap.killed_pgids.join(",")}]` +
+      ` skipped_pgids=[${reap.skipped_pgids.map((s) => `${s.pgid}(foreign=${s.foreign.join(",")})`).join(",")}]` +
+      ` residual_marker_pids=[${reap.residual_marker_pids.join(",")}]`,
+    );
+    if (reap.residual_marker_pids.length > 0) {
+      console.log(
+        `[anet] ⚠ marker-bearing processes still alive after TERM+KILL;` +
+        ` preserving marker file for idempotent retry.`,
+      );
+      await notifyServerOffline(resolved.profile, resolved.id);
+      return;
+    }
+    // Kill only tmux sessions whose ANET_NODE_MARKER env matches ours.
+    for (const s of [m.sessions.appsrv.tmux, m.sessions.bridge.tmux, m.sessions.tui.tmux]) {
+      const smk = readTmuxCopresenceMarker(s);
+      if (smk === m.marker) {
+        if (tmuxSessionRunning(s)) killTmuxSession(s);
+      } else if (smk === undefined) {
+        // Session gone or marker never set — nothing to kill.
+        continue;
+      } else {
+        console.log(
+          `[anet] ⚠ tmux ${s} ANET_NODE_MARKER differs from our marker — NOT killed`,
+        );
+      }
+    }
+    deleteCopresenceMarker(nodesDir(), resolved.id);
+    // stopNode cleans any stale .pid; identity reap already killed the bridge.
+    stopNode(resolved.id);
+    await notifyServerOffline(resolved.profile, resolved.id);
+    console.log(`[anet] Stopped copresence "${displayName}" (identity-gated teardown)`);
+    return;
+  }
+
   // #122 — auto-tmux on start needs symmetric cleanup on stop. Kill the
   // tmux session first (idempotent — has-session check guards), then SIGTERM
   // the recorded PID and notify the hub. Order matters: killing tmux kills
