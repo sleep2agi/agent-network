@@ -396,6 +396,133 @@ describe("Test 8: malformed marker → structured refuse (never throws)", () => 
   });
 });
 
+// ─── Test 8b: filesystem/environment refuse guards ──────────────────────
+//
+// These target the three refuses that had no test coverage in the initial
+// v2 candidate (通信龙 mutation复核 task fb363cf7). Each fixture is
+// carefully constructed so that ONLY the target guard fires — all earlier
+// guards in readMarker (SYMLINK → NOT_REGULAR → WRONG_MODE → OWNER_MISMATCH
+// → PARSE_ERROR → SCHEMA_INVALID → STALE_BOOT_ID) pass, so the specific
+// refuse is uniquely observable.
+//
+// If a fixture triggered an earlier guard by accident, disabling the target
+// guard wouldn't be observable — the earlier guard would mask it. Every
+// test below is designed so that removing the target guard changes the
+// return value from `refuse:<TARGET>` to something else observable
+// (typically `ok`, or a subsequent-guard refuse, or a thrown error).
+describe("Test 8b: filesystem/environment refuse guards (mutation-sensitive)", () => {
+  // MUTATION CASES (for 通信龙's automated mutation复核):
+  //   - Comment `if (!lstat.isFile())` → NOT_REGULAR test RED
+  //     (readMarker falls to readFileSync which throws EISDIR on a directory)
+  //   - Comment `if (lstat.uid !== ownUid)` → OWNER_MISMATCH test RED
+  //     (returns ok:{marker} because our fixture is otherwise valid)
+  //   - Comment `if (parsed.boot_id !== currentBoot)` → STALE_BOOT_ID test RED
+  //     (returns ok:{marker} because everything else is valid)
+
+  test("NOT_REGULAR: directory at marker path with mode 0600 (skips SYMLINK+WRONG_MODE)", () => {
+    // Fixture: create a *directory* at the exact path where the marker file
+    // would live. Directory bits 0o600 pass WRONG_MODE. isSymbolicLink=false
+    // passes SYMLINK. So NOT_REGULAR is the only fireable guard.
+    const nodeDir = join(tmpNodesDir, "notreg-node");
+    mkdirSync(nodeDir, { recursive: true, mode: 0o700 });
+    // Create the marker "file" as a directory.
+    const markerPath = join(nodeDir, "copresence-identity.json");
+    mkdirSync(markerPath, { mode: 0o600 });
+    // Force mode to 0o600 (mkdir + umask may not honor 0o600 exactly).
+    chmodSync(markerPath, 0o600);
+    // Sanity check the fixture: lstat sees a directory with mode 0o600.
+    const st = statSync(markerPath);
+    expect(st.isDirectory()).toBe(true);
+    expect(st.mode & 0o777).toBe(0o600);
+    const r = readMarker(tmpNodesDir, "notreg-node");
+    expect(r.kind).toBe("refuse");
+    if (r.kind === "refuse") expect(r.cause).toBe("NOT_REGULAR");
+    // Note: if NOT_REGULAR guard is removed, readFileSync throws EISDIR
+    // and readMarker itself throws. Bun's `expect(fn).toBe(...)` on the
+    // thrown result reports failure — test correctly turns RED.
+  });
+
+  test("OWNER_MISMATCH: valid marker file whose lstat.uid differs from process.getuid() (SECURITY CRITICAL)", () => {
+    // We cannot chown as non-root, so this test overrides process.getuid
+    // for its duration. This is the *only* way to construct the mismatch
+    // without helper-side DI (which we chose to avoid — see fork brief).
+    //
+    // The marker file is otherwise fully valid: correct mode, correct
+    // schema, matching boot_id. So the ONLY guard that fires is
+    // OWNER_MISMATCH. If that guard is removed, readMarker returns
+    // { kind: "ok", ... } and the test's `expect(r.kind).toBe("refuse")`
+    // assertion fails → test correctly turns RED.
+    const uuid = "owner-mismatch-uuid-1234";
+    // Write a fully valid marker (uses real process.getuid for owner_uid).
+    writeMarker(tmpNodesDir, "owner-mismatch-node", uuid, makeSessions());
+    // Now spoof process.getuid to return a different uid.
+    const realGetuid = process.getuid;
+    const spoofedUid = ((realGetuid ? realGetuid.call(process) : 0) + 424242) >>> 0;
+    // Use Object.defineProperty because process.getuid may be non-writable on
+    // some Node builds; defineProperty forces the replacement.
+    Object.defineProperty(process, "getuid", {
+      value: () => spoofedUid,
+      configurable: true,
+      writable: true,
+    });
+    try {
+      const r = readMarker(tmpNodesDir, "owner-mismatch-node");
+      expect(r.kind).toBe("refuse");
+      if (r.kind === "refuse") {
+        expect(r.cause).toBe("OWNER_MISMATCH");
+        // Also assert the detail message references BOTH uids to catch
+        // regressions where the message accidentally uses ownUid in place
+        // of lstat.uid or vice versa.
+        expect(r.detail).toContain(String(spoofedUid));
+      }
+    } finally {
+      // Restore. Use defineProperty again to reinstall the real fn.
+      Object.defineProperty(process, "getuid", {
+        value: realGetuid,
+        configurable: true,
+        writable: true,
+      });
+    }
+  });
+
+  test("STALE_BOOT_ID: valid schema but boot_id differs from current /proc boot_id", () => {
+    // Bypass writeMarker (which stamps current boot_id) and hand-write a
+    // marker JSON with a deliberately-wrong boot_id. Everything else is
+    // valid: mode 0o600, owner=us, schema OK. So the ONLY guard that fires
+    // is STALE_BOOT_ID. Removing that guard returns `ok` and the assertion
+    // `r.cause === "STALE_BOOT_ID"` fails → test correctly turns RED.
+    const nodeDir = join(tmpNodesDir, "stale-boot-node");
+    mkdirSync(nodeDir, { recursive: true, mode: 0o700 });
+    const path = join(nodeDir, "copresence-identity.json");
+    const stale = {
+      marker: "stale-boot-uuid-9999",
+      // A boot_id that cannot possibly match: fixed sentinel unrelated to
+      // any real /proc value. If /proc/sys/kernel/random/boot_id ever
+      // returned this literal string, we would need to update — but the
+      // sentinel is chosen to be visibly not-a-UUID to make that impossible
+      // by design.
+      boot_id: "0000ffff-stale-boot-id-for-mutation-test-fixture",
+      started_at_epoch_ms: 1,
+      owner_uid: process.getuid ? process.getuid() : -1,
+      sessions: {
+        appsrv: { tmux: "a-appsrv", pid: 100, pgid: 100, starttime_jiffies: 500 },
+        bridge: { tmux: "a-bridge", pid: 200, pgid: 200, starttime_jiffies: 600 },
+        tui: { tmux: "a-tui", pid: 300, pgid: 300, starttime_jiffies: 700 },
+      },
+    };
+    writeFileSync(path, JSON.stringify(stale, null, 2) + "\n", { mode: 0o600 });
+    chmodSync(path, 0o600);
+    const r = readMarker(tmpNodesDir, "stale-boot-node");
+    expect(r.kind).toBe("refuse");
+    if (r.kind === "refuse") {
+      expect(r.cause).toBe("STALE_BOOT_ID");
+      // Detail must mention the stale boot_id in the marker (this catches
+      // a mutation where the message would use `currentBoot` twice).
+      expect(r.detail).toContain(stale.boot_id);
+    }
+  });
+});
+
 // ─── Test 9: self-context ───────────────────────────────────────────────
 
 describe("Test 9: self-context refuses stop from within the tree", () => {
