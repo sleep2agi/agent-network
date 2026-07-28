@@ -204,7 +204,11 @@ async function createCodexCopresenceThread(ws: string, timeoutMs = 60_000): Prom
         clientInfo: { name: "anet-copresence-creator", title: "creator", version: "0.0.1" },
       }, 10_000);
       notify("initialized", {});
-    } catch { /* already initialized on shared server */ }
+    } catch (e) {
+      // #P2fix顺手4 — only swallow "already initialized" on the shared
+      // server path; every other initialize failure is real.
+      if (!isAlreadyInitializedError(e)) throw e;
+    }
     const started: any = await request("thread/start", {}, 15_000);
     const threadId: string | undefined = started?.threadId ?? started?.thread?.id;
     if (!threadId) throw new Error("thread/start returned no threadId");
@@ -232,12 +236,66 @@ function copresenceTmuxSessions(displayName: string): { appsrv: string; bridge: 
   return { appsrv: `${displayName}-appsrv`, bridge: `${displayName}-桥`, tui: displayName };
 }
 
+// #P2fix必修2 — validate hub URL for the --copresence codepath before it
+// interpolates into a bash -c argument. `hub` comes from the project-local
+// `.anet/nodes/<id>/config.json`, so a hostile checkout could plant a URL
+// containing shell metacharacters. URL parsing catches most junk; the
+// explicit-char reject is defense-in-depth (backtick / dollar / quote would
+// break out of the outer single-quoted wrapper even if URL.parse accepted).
+const UNSAFE_HUB_CHARS = /['"`$;|&\r\n\t\\]/;
+function assertSafeHubUrl(hub: string): void {
+  if (typeof hub !== "string" || !hub) {
+    throw new Error("hub URL is empty");
+  }
+  if (UNSAFE_HUB_CHARS.test(hub)) {
+    const printable = hub.replace(/[^\x20-\x7e]/g, "?");
+    throw new Error(`invalid hub URL (contains disallowed character): ${printable}`);
+  }
+  let parsed: URL;
+  try { parsed = new URL(hub); }
+  catch { throw new Error(`invalid hub URL (not parseable): ${hub}`); }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`invalid hub URL (scheme must be http/https): ${hub}`);
+  }
+}
+
+// #P2fix必修1 — token must NOT appear in argv or tmux pane_start_command.
+// Writes ANET_CODEX_COMMHUB_TOKEN to a 0600 file inside <codexHome> (0700);
+// the tmux child sources then removes it before exec'ing codex, so the
+// value never reaches /proc/*/cmdline nor tmux's pane_start_command.
+// Do NOT use `tmux new-session -e KEY=VAL` (env pairs are argv) or
+// `tmux send-keys` (writes into pane history).
+function writeCodexCopresenceEnvFile(codexHome: string, token: string): string {
+  const envPath = join(codexHome, ".anet-copresence.env");
+  writeFileSync(envPath, `export ANET_CODEX_COMMHUB_TOKEN=${shellQuote(token)}\n`);
+  chmodSync(envPath, 0o600);
+  return envPath;
+}
+
+// #P2fix顺手3 — threadId comes from our own JSON-RPC thread/start response
+// (server-generated UUID / ULID / opaque token), but we interpolate it into
+// a bash string, so a strict-shape check is cheap defense-in-depth against
+// a protocol change or a compromised app-server.
+const SAFE_THREAD_ID = /^[A-Za-z0-9_-]+$/;
+
+// #P2fix顺手4 — mirrors codex-app-server-bridge.ts:isAlreadyInitialized.
+// Only "already initialized" (code -32600 or matching message) is expected
+// on the shared-server bootstrap path; every other initialize failure is
+// real and must re-throw. Inline copy — cli.ts stays package-boundary-free.
+function isAlreadyInitializedError(e: unknown): boolean {
+  const code = (e as { code?: unknown })?.code;
+  if (code === -32600) return true;
+  const msg = (e as { message?: unknown })?.message;
+  return typeof msg === "string" && /already initialized/i.test(msg);
+}
+
 interface CopresenceOptions {
   codexBin: string;
   codexHome: string;
   model?: string;
   port?: number;
   dangerFullAccess: boolean;
+  yesDangerFullAccess: boolean;
   hub: string;
   token: string;
 }
@@ -272,22 +330,44 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     process.exit(1);
   }
 
+  // #P2fix必修2 — hub URL sanity before any interpolation into bash -c.
+  // Rejects bad schemes, empty, and shell-metacharacter contamination.
+  try { assertSafeHubUrl(opts.hub); }
+  catch (e: any) {
+    console.error(`[anet] ❌ ${e?.message || String(e)}`);
+    console.error(`[anet]    Fix: correct the hub URL in ${join(nodesDir(), resolved.id, "config.json")} (or global .anet/config.json).`);
+    process.exit(1);
+  }
+
   // Risk C double safeguard — dangerous sandbox is never the default.
   // Requires: explicit CLI flag (opts.dangerFullAccess) + typed 'yes' at
-  // start + stderr banner every launch.
+  // start (TTY caller) OR a second explicit --yes-danger-full-access flag
+  // (non-TTY caller) — the two-flag non-TTY path blocks a piped-yes bypass
+  // (`printf 'yes\n' | anet node start …`) while giving CI/Docker E2E an
+  // opt-in route. Stderr banner fires either way.
   if (opts.dangerFullAccess) {
     console.error("");
     console.error(`⚠  --dangerously-allow-full-access ENABLED for ${displayName}`);
     console.error("   This grants the codex session unrestricted filesystem/network access.");
     console.error("   Read-only default is safer; only enable if you understand the risk.");
     console.error("");
-    const ok = await askTypedConfirmation(
-      "   Type 'yes' to confirm (any other input aborts): ",
-      "yes",
-    );
-    if (!ok) {
-      console.error("[anet] aborted (danger-full-access not confirmed).");
-      process.exit(1);
+    if (process.stdin.isTTY) {
+      const ok = await askTypedConfirmation(
+        "   Type 'yes' to confirm (any other input aborts): ",
+        "yes",
+      );
+      if (!ok) {
+        console.error("[anet] aborted (danger-full-access not confirmed).");
+        process.exit(1);
+      }
+    } else {
+      if (!opts.yesDangerFullAccess) {
+        console.error("[anet] aborted: danger-full-access needs an interactive TTY, or");
+        console.error("       both --dangerously-allow-full-access AND --yes-danger-full-access");
+        console.error("       (second explicit flag prevents `printf 'yes\\n' |` bypass in scripts).");
+        process.exit(1);
+      }
+      console.error("[anet] non-TTY danger opt-in via --yes-danger-full-access — proceeding");
     }
     console.error(`[anet] ⚠ codex 共存节点 ${displayName} 以 danger-full-access 模式运行`);
     console.error(`[anet] ⚠ (no filesystem or network sandbox; codex may write/delete freely)`);
@@ -315,16 +395,25 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   const model = opts.model || "gpt-5.5";
 
   // ── piece ① codex app-server (loopback WS + commhub MCP) ──────────────
+  // #P2fix必修1 — token to 0600 file, sourced-then-removed inside the tmux
+  // child. Never appears in argv / /proc/*/cmdline / tmux pane_start_command.
+  const envFilePath = writeCodexCopresenceEnvFile(opts.codexHome, opts.token);
+  // #P2fix必修2 — shellQuote every `-c` TOML fragment (including the hub
+  // URL fragment). assertSafeHubUrl was called above; shellQuote guards
+  // even in the face of a validator regression.
+  const hubMcpUrlToml = `mcp_servers.commhub.url="${opts.hub}/mcp"`;
+  const bearerTomlLiteral = `mcp_servers.commhub.bearer_token_env_var="ANET_CODEX_COMMHUB_TOKEN"`;
   const appsrvCmd = [
     `export CODEX_HOME=${shellQuote(opts.codexHome)}`,
-    `export ANET_CODEX_COMMHUB_TOKEN=${shellQuote(opts.token)}`,
+    `. ${shellQuote(envFilePath)}`,
+    `rm -f ${shellQuote(envFilePath)}`,
     `clear`,
     `exec ${shellQuote(opts.codexBin)} app-server`
       + ` -c approval_policy=${approvalPolicy}`
       + ` -c sandbox_mode=${sandboxMode}`
       + ` -c model=${shellQuote(model)}`
-      + ` -c 'mcp_servers.commhub.url="${opts.hub}/mcp"'`
-      + ` -c 'mcp_servers.commhub.bearer_token_env_var="ANET_CODEX_COMMHUB_TOKEN"'`
+      + ` -c ${shellQuote(hubMcpUrlToml)}`
+      + ` -c ${shellQuote(bearerTomlLiteral)}`
       + ` --listen ${wsUrl}`,
   ].join(" ; ");
   try {
@@ -334,13 +423,15 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     ], { stdio: "pipe" });
   } catch (e: any) {
     console.error(`[anet] ❌ tmux new-session ${appsrvSession} failed: ${e?.message || e}`);
+    try { rmSync(envFilePath, { force: true }); } catch { /* best-effort */ }
     process.exit(1);
   }
   console.log(`[anet] ① app-server tmux=${appsrvSession} listening ${wsUrl} (sandbox=${sandboxMode})…`);
   const bound = await waitForTmuxPaneText(appsrvSession, `listening on: ${wsUrl}`, 25_000);
   if (!bound) {
     console.error(`[anet] ❌ app-server did not bind ${wsUrl} within 25s.`);
-    console.error(`[anet]    Debug: tmux attach -t ${appsrvSession}`);
+    console.error(`[anet]    Debug:   tmux attach -t ${appsrvSession}`);
+    console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
     process.exit(1);
   }
   console.log(`[anet] ① app-server READY on ${wsUrl}`);
@@ -351,7 +442,16 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     threadId = await createCodexCopresenceThread(wsUrl);
   } catch (e: any) {
     console.error(`[anet] ❌ thread/start failed: ${e?.message || e}`);
-    console.error(`[anet]    Debug: tmux attach -t ${appsrvSession}`);
+    console.error(`[anet]    Debug:   tmux attach -t ${appsrvSession}`);
+    console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
+    process.exit(1);
+  }
+  // #P2fix顺手3 — defense-in-depth shape check before threadId flows into
+  // a bash-string interpolation. Server-generated ids match; anything else
+  // means either a protocol drift or a compromised app-server.
+  if (!SAFE_THREAD_ID.test(threadId)) {
+    console.error(`[anet] internal error: unexpected threadId shape (rejected before shell interpolation)`);
+    console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
     process.exit(1);
   }
   console.log(`[anet] thread: ${threadId}`);
@@ -377,6 +477,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     ], { stdio: "pipe" });
   } catch (e: any) {
     console.error(`[anet] ❌ tmux new-session ${bridgeSession} failed: ${e?.message || e}`);
+    console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
     process.exit(1);
   }
   console.log(`[anet] ② bridge tmux=${bridgeSession} starting…`);
@@ -396,6 +497,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     ], { stdio: "pipe" });
   } catch (e: any) {
     console.error(`[anet] ❌ tmux new-session ${tuiSession} failed: ${e?.message || e}`);
+    console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
     process.exit(1);
   }
   console.log(`[anet] ③ TUI tmux=${tuiSession} ready to attach`);
@@ -893,7 +995,11 @@ function parseOpts(): Record<string, string> & { _channels: string[]; _envs: str
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--channel" && args[i + 1]) { r._channels.push(args[++i]); continue; }
     if (args[i] === "--env" && args[i + 1]) { r._envs.push(args[++i]); continue; }
-    if (args[i].startsWith("--") && args[i + 1] && !args[i + 1].startsWith("--")) {
+    // #P2fix设计裁6 — boolean flags must not swallow the next positional as a
+    // value; `--copresence <alias>` previously assigned `copresence=<alias>`
+    // and callers checking `=== "true"` silently lost the feature. Mirrors
+    // the BOOLEAN_FLAGS handling in positionalArgs() below.
+    if (args[i].startsWith("--") && !BOOLEAN_FLAGS.has(args[i]) && args[i + 1] && !args[i + 1].startsWith("--")) {
       r[args[i].slice(2)] = args[++i];
     } else if (args[i].startsWith("--")) {
       r[args[i].slice(2)] = "true";
@@ -912,6 +1018,10 @@ const BOOLEAN_FLAGS = new Set([
   // RFC-030 P2 — co-presence orchestration flags.
   "--copresence",
   "--dangerously-allow-full-access",
+  // #P2fix设计裁5 — non-TTY confirmation of danger-full-access requires this
+  // second explicit flag alongside --dangerously-allow-full-access. TTY
+  // callers still use the typed 'yes' prompt.
+  "--yes-danger-full-access",
 ]);
 
 // #173 — extract the bare positional operands from an argv slice, mirroring
@@ -1789,7 +1899,10 @@ Co-presence (codex TUI + agent share one thread, RFC-030):
       Attach with: tmux attach -t <name>. Stop with: anet node stop <name>.
       Requires runtime=codex-app-server on the node.
       Default sandbox is read-only. To grant full FS/network access, add
-      --dangerously-allow-full-access (requires typed 'yes' confirmation).
+      --dangerously-allow-full-access. In an interactive TTY this prompts for
+      a typed 'yes'; in a non-TTY caller (script / CI / Docker) you must ALSO
+      pass --yes-danger-full-access to confirm — the second explicit flag
+      prevents \`printf 'yes\\n' |\` from bypassing the prompt.
       Optional: --codex-bin <path> --codex-home <dir> --model <id> --port <p>
 
 Channel:
@@ -4039,7 +4152,11 @@ async function startCommand() {
     return;
   }
 
-  const id = args[1];
+  // #P2fix设计裁6 — extract alias via positionalArgs so `--copresence <alias>`
+  // is not treated as `id=--copresence`. positionalArgs is already boolean-
+  // aware; parseOpts is now too (see BOOLEAN_FLAGS check above).
+  const startPositionals = positionalArgs(args.slice(1));
+  const id = startPositionals[0];
   if (!id) { showProfiles("start"); return; }
   const opts = parseOpts();
   const forceNewSession = !!opts["new-session"];
@@ -4065,6 +4182,7 @@ async function startCommand() {
       model: opts.model,
       port: opts.port ? Number(opts.port) : undefined,
       dangerFullAccess: opts["dangerously-allow-full-access"] === "true",
+      yesDangerFullAccess: opts["yes-danger-full-access"] === "true",
       hub: profileHub,
       token: profileTok,
     });
