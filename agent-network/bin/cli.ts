@@ -16,6 +16,7 @@ import { fileURLToPath } from "url";
 import { homedir } from "os";
 import { spawn, execSync, execFileSync } from "child_process";
 import { createHash, randomBytes, randomUUID } from "crypto";
+import { createServer as netCreateServer } from "net";
 import { checkbox, confirm, select } from "@inquirer/prompts";
 import { ensureGitignoreRule, ensureGitignoreRules } from "../src/gitignore-writeback";
 import { superviseChild } from "../src/supervise-child";
@@ -95,6 +96,317 @@ function tmuxAvailable(): boolean {
   try { execFileSync("tmux", ["-V"], { stdio: "pipe" }); tmuxAvailableCache = true; }
   catch { tmuxAvailableCache = false; }
   return tmuxAvailableCache;
+}
+
+// ── RFC-030 co-presence orchestration helpers ────────────────────────────
+//
+// `anet node start <alias> --copresence` spawns 3 tmux sessions:
+//   ① <alias>-appsrv : codex app-server (loopback WS + commhub MCP)
+//   ② <alias>-桥      : agent-node bridge (adopt-mode, connects to hub)
+//   ③ <alias>         : codex resume --remote (human-attachable TUI)
+// Replaces the .demo/setup-copresence.sh bash dance with a first-class
+// command. Preserves the RFC-030 MVP posture: loopback-only bind, ntok-only
+// auth, per-node CODEX_HOME isolation. Risk C (dangerous sandbox) requires
+// an explicit flag + typed confirmation + stderr banner — never silent.
+
+const COPRESENCE_PORT_RANGE_START = 24700;
+const COPRESENCE_PORT_RANGE_END = 24799;
+
+async function findFreeLoopbackPort(preferred?: number): Promise<number> {
+  const tryOne = (port: number) => new Promise<number | null>((resolve) => {
+    const s = netCreateServer();
+    s.once("error", () => resolve(null));
+    s.listen(port, "127.0.0.1", () => {
+      const addr = s.address();
+      const chosen = typeof addr === "object" && addr ? addr.port : null;
+      s.close(() => resolve(chosen));
+    });
+  });
+  if (preferred !== undefined) {
+    const got = await tryOne(preferred);
+    if (got !== null) return got;
+  }
+  for (let p = COPRESENCE_PORT_RANGE_START; p <= COPRESENCE_PORT_RANGE_END; p++) {
+    const got = await tryOne(p);
+    if (got !== null) return got;
+  }
+  throw new Error(`no free port in ${COPRESENCE_PORT_RANGE_START}-${COPRESENCE_PORT_RANGE_END}`);
+}
+
+function waitForTmuxPaneText(sessionName: string, needle: string, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise((resolve) => {
+    const poll = () => {
+      try {
+        const out = execFileSync("tmux", ["capture-pane", "-t", sessionName, "-p"], {
+          stdio: ["ignore", "pipe", "pipe"], encoding: "utf8",
+        });
+        if (out.includes(needle)) { resolve(true); return; }
+      } catch { /* session may still be spinning up */ }
+      if (Date.now() >= deadline) { resolve(false); return; }
+      setTimeout(poll, 400);
+    };
+    poll();
+  });
+}
+
+async function resolveCopresenceWebSocketCtor(): Promise<any> {
+  const g = (globalThis as any).WebSocket;
+  if (typeof g === "function") return g;
+  try {
+    const undici = await import("undici");
+    if (typeof (undici as any).WebSocket === "function") return (undici as any).WebSocket;
+  } catch { /* fall through */ }
+  throw new Error(
+    "no WebSocket available — need Bun / Node 22+ (global WebSocket) or `undici` in node_modules",
+  );
+}
+
+// Minimal WebSocket JSON-RPC thread creator against a running `codex
+// app-server`. Mirrors agent-node/tests/rfc-030-create-thread.ts but inlined
+// so the shipped CLI can call it (tests/ is not published).
+async function createCodexCopresenceThread(ws: string, timeoutMs = 60_000): Promise<string> {
+  const WsCtor = await resolveCopresenceWebSocketCtor();
+  const socket = new WsCtor(ws);
+  const deadline = Date.now() + timeoutMs;
+  await new Promise<void>((resolve, reject) => {
+    const to = setTimeout(() => reject(new Error(`ws open timeout on ${ws}`)), Math.max(1000, deadline - Date.now()));
+    socket.addEventListener("open", () => { clearTimeout(to); resolve(); }, { once: true });
+    socket.addEventListener("error", (e: any) => { clearTimeout(to); reject(new Error(`ws error: ${e?.message || e}`)); }, { once: true });
+  });
+  let nextId = 1;
+  const pending = new Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>();
+  socket.addEventListener("message", (ev: any) => {
+    let msg: any;
+    try { msg = JSON.parse(typeof ev.data === "string" ? ev.data : ev.data.toString()); } catch { return; }
+    if (typeof msg?.id === "number" && !msg.method) {
+      const p = pending.get(msg.id);
+      if (!p) return;
+      pending.delete(msg.id);
+      if (msg.error) p.reject(new Error(`${msg.error.code}: ${msg.error.message}`));
+      else p.resolve(msg.result);
+    }
+  });
+  const request = (method: string, params: any, timeoutMsInner: number) => new Promise<any>((resolve, reject) => {
+    const id = nextId++;
+    const to = setTimeout(() => { pending.delete(id); reject(new Error(`request ${method} timeout`)); }, timeoutMsInner);
+    pending.set(id, {
+      resolve: (v) => { clearTimeout(to); resolve(v); },
+      reject: (e) => { clearTimeout(to); reject(e); },
+    });
+    socket.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
+  });
+  const notify = (method: string, params: any) =>
+    socket.send(JSON.stringify({ jsonrpc: "2.0", method, params }));
+  try {
+    try {
+      await request("initialize", {
+        clientInfo: { name: "anet-copresence-creator", title: "creator", version: "0.0.1" },
+      }, 10_000);
+      notify("initialized", {});
+    } catch { /* already initialized on shared server */ }
+    const started: any = await request("thread/start", {}, 15_000);
+    const threadId: string | undefined = started?.threadId ?? started?.thread?.id;
+    if (!threadId) throw new Error("thread/start returned no threadId");
+    // Tiny turn persists the rollout so `codex resume --remote` can adopt.
+    await request("turn/start", {
+      threadId,
+      clientUserMessageId: "anet-copresence:bootstrap",
+      input: [{ type: "text", text: "只回复一个词：READY" }],
+    }, 45_000);
+    await new Promise((r) => setTimeout(r, 3000));
+    return threadId;
+  } finally {
+    try { socket.close(); } catch { /* ignore */ }
+  }
+}
+
+async function askTypedConfirmation(prompt: string, expected: string): Promise<boolean> {
+  const rl = getRL();
+  const answer = await new Promise<string>((resolve) => rl.question(prompt, (s) => resolve(s)));
+  closeRL();
+  return answer.trim() === expected;
+}
+
+function copresenceTmuxSessions(displayName: string): { appsrv: string; bridge: string; tui: string } {
+  return { appsrv: `${displayName}-appsrv`, bridge: `${displayName}-桥`, tui: displayName };
+}
+
+interface CopresenceOptions {
+  codexBin: string;
+  codexHome: string;
+  model?: string;
+  port?: number;
+  dangerFullAccess: boolean;
+  hub: string;
+  token: string;
+}
+
+async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOptions): Promise<void> {
+  const resolved = resolveNodeRef(nodeId);
+  if (!resolved) {
+    console.error(`Node "${nodeId}" not found. Create it first: anet node create ${nodeId}`);
+    process.exit(1);
+  }
+  const displayName = nodeDisplayName(resolved.id, resolved.profile);
+  const profile = resolved.profile;
+  if (profile.runtime !== "codex-app-server") {
+    console.error(`[anet] ❌ --copresence requires runtime=codex-app-server (node "${displayName}" is runtime=${profile.runtime}).`);
+    console.error(`[anet]    Create a copresence-capable node with:`);
+    console.error(`[anet]      anet node create ${shellQuote(displayName)} --runtime codex-app-server`);
+    process.exit(1);
+  }
+  if (!tmuxAvailable()) {
+    console.error(`[anet] ❌ --copresence requires tmux (used to isolate the 3-piece dance).`);
+    console.error(`[anet]    Install tmux (e.g. \`brew install tmux\` / \`apt-get install tmux\`) and retry.`);
+    process.exit(1);
+  }
+  if (!commandExists(opts.codexBin)) {
+    console.error(`[anet] ❌ codex binary "${opts.codexBin}" not found in PATH.`);
+    console.error(`[anet]    Install codex CLI (e.g. \`npm install -g @openai/codex\`) or pass --codex-bin <path>.`);
+    process.exit(1);
+  }
+  if (!opts.token || !opts.token.startsWith("ntok_")) {
+    console.error(`[anet] ❌ node token is missing or not an ntok_ (co-presence bridge requires network-scoped ntok_).`);
+    console.error(`[anet]    Run \`anet doctor --fix\` to repair, or recreate the node.`);
+    process.exit(1);
+  }
+
+  // Risk C double safeguard — dangerous sandbox is never the default.
+  // Requires: explicit CLI flag (opts.dangerFullAccess) + typed 'yes' at
+  // start + stderr banner every launch.
+  if (opts.dangerFullAccess) {
+    console.error("");
+    console.error(`⚠  --dangerously-allow-full-access ENABLED for ${displayName}`);
+    console.error("   This grants the codex session unrestricted filesystem/network access.");
+    console.error("   Read-only default is safer; only enable if you understand the risk.");
+    console.error("");
+    const ok = await askTypedConfirmation(
+      "   Type 'yes' to confirm (any other input aborts): ",
+      "yes",
+    );
+    if (!ok) {
+      console.error("[anet] aborted (danger-full-access not confirmed).");
+      process.exit(1);
+    }
+    console.error(`[anet] ⚠ codex 共存节点 ${displayName} 以 danger-full-access 模式运行`);
+    console.error(`[anet] ⚠ (no filesystem or network sandbox; codex may write/delete freely)`);
+  }
+
+  mkdirSync(opts.codexHome, { recursive: true });
+  try { chmodSync(opts.codexHome, 0o700); } catch { /* best-effort */ }
+
+  const { appsrv: appsrvSession, bridge: bridgeSession, tui: tuiSession } =
+    copresenceTmuxSessions(displayName);
+
+  // Kill any prior instances so this is idempotent.
+  for (const s of [appsrvSession, bridgeSession, tuiSession]) {
+    if (tmuxSessionRunning(s)) {
+      console.log(`[anet] killing prior tmux session ${s}`);
+      killTmuxSession(s);
+    }
+  }
+  await new Promise((r) => setTimeout(r, 500));
+
+  const port = await findFreeLoopbackPort(opts.port);
+  const wsUrl = `ws://127.0.0.1:${port}`;
+  const approvalPolicy = opts.dangerFullAccess ? "never" : "on-request";
+  const sandboxMode = opts.dangerFullAccess ? "danger-full-access" : "read-only";
+  const model = opts.model || "gpt-5.5";
+
+  // ── piece ① codex app-server (loopback WS + commhub MCP) ──────────────
+  const appsrvCmd = [
+    `export CODEX_HOME=${shellQuote(opts.codexHome)}`,
+    `export ANET_CODEX_COMMHUB_TOKEN=${shellQuote(opts.token)}`,
+    `clear`,
+    `exec ${shellQuote(opts.codexBin)} app-server`
+      + ` -c approval_policy=${approvalPolicy}`
+      + ` -c sandbox_mode=${sandboxMode}`
+      + ` -c model=${shellQuote(model)}`
+      + ` -c 'mcp_servers.commhub.url="${opts.hub}/mcp"'`
+      + ` -c 'mcp_servers.commhub.bearer_token_env_var="ANET_CODEX_COMMHUB_TOKEN"'`
+      + ` --listen ${wsUrl}`,
+  ].join(" ; ");
+  try {
+    execFileSync("tmux", [
+      "new-session", "-d", "-s", appsrvSession, "-c", process.cwd(),
+      "bash", "-lc", appsrvCmd,
+    ], { stdio: "pipe" });
+  } catch (e: any) {
+    console.error(`[anet] ❌ tmux new-session ${appsrvSession} failed: ${e?.message || e}`);
+    process.exit(1);
+  }
+  console.log(`[anet] ① app-server tmux=${appsrvSession} listening ${wsUrl} (sandbox=${sandboxMode})…`);
+  const bound = await waitForTmuxPaneText(appsrvSession, `listening on: ${wsUrl}`, 25_000);
+  if (!bound) {
+    console.error(`[anet] ❌ app-server did not bind ${wsUrl} within 25s.`);
+    console.error(`[anet]    Debug: tmux attach -t ${appsrvSession}`);
+    process.exit(1);
+  }
+  console.log(`[anet] ① app-server READY on ${wsUrl}`);
+
+  // ── create fresh thread + persist config ──────────────────────────────
+  let threadId: string;
+  try {
+    threadId = await createCodexCopresenceThread(wsUrl);
+  } catch (e: any) {
+    console.error(`[anet] ❌ thread/start failed: ${e?.message || e}`);
+    console.error(`[anet]    Debug: tmux attach -t ${appsrvSession}`);
+    process.exit(1);
+  }
+  console.log(`[anet] thread: ${threadId}`);
+
+  const rawCfgPath = join(nodesDir(), resolved.id, "config.json");
+  const rawCfg = JSON.parse(readFileSync(rawCfgPath, "utf-8"));
+  rawCfg.codexAppServerPort = port;
+  rawCfg.codexAppServerUrl = wsUrl;
+  rawCfg.codexThreadId = threadId;
+  delete rawCfg.session;
+  writeFileSync(rawCfgPath, JSON.stringify(rawCfg, null, 2) + "\n");
+
+  // ── piece ② bridge (agent-node adopt mode) ────────────────────────────
+  // The bridge re-invokes `anet node start` in foreground under tmux; that
+  // path reads codexAppServerUrl / codexThreadId from the config we just
+  // wrote and spawns agent-node in adopt mode. Same launchAgent()
+  // codepath as the non-copresence case — no fork of the bridge dispatch.
+  const bridgeCmd = `unset COMMHUB_TOKEN ANET_CODEX_COMMHUB_TOKEN && exec anet node start ${shellQuote(displayName)}`;
+  try {
+    execFileSync("tmux", [
+      "new-session", "-d", "-s", bridgeSession, "-c", process.cwd(),
+      "bash", "-lc", bridgeCmd,
+    ], { stdio: "pipe" });
+  } catch (e: any) {
+    console.error(`[anet] ❌ tmux new-session ${bridgeSession} failed: ${e?.message || e}`);
+    process.exit(1);
+  }
+  console.log(`[anet] ② bridge tmux=${bridgeSession} starting…`);
+  await new Promise((r) => setTimeout(r, 3000));
+
+  // ── piece ③ codex TUI (attachable, resumes same thread) ───────────────
+  const tuiFlags: string[] = [];
+  if (opts.dangerFullAccess) tuiFlags.push("--dangerously-bypass-approvals-and-sandbox");
+  const tuiCmd = [
+    `export CODEX_HOME=${shellQuote(opts.codexHome)}`,
+    `exec ${shellQuote(opts.codexBin)} resume --remote ${wsUrl} ${threadId} ${tuiFlags.join(" ")}`.trim(),
+  ].join(" ; ");
+  try {
+    execFileSync("tmux", [
+      "new-session", "-d", "-s", tuiSession, "-c", process.cwd(),
+      "bash", "-lc", tuiCmd,
+    ], { stdio: "pipe" });
+  } catch (e: any) {
+    console.error(`[anet] ❌ tmux new-session ${tuiSession} failed: ${e?.message || e}`);
+    process.exit(1);
+  }
+  console.log(`[anet] ③ TUI tmux=${tuiSession} ready to attach`);
+
+  const hubBase = opts.hub.replace(/\/+$/, "");
+  console.log("");
+  console.log(`[anet] ✅ 共存节点 ${displayName} 就绪`);
+  console.log(`[anet]    attach:    tmux attach -t ${shellQuote(displayName)}`);
+  console.log(`[anet]    stop:      anet node stop ${shellQuote(displayName)}`);
+  console.log(`[anet]    dashboard: ${hubBase}/nodes/${encodeURIComponent(displayName)}`);
+  console.log(`[anet]    runtime:   codex-app-server @ ${wsUrl}  (sandbox=${sandboxMode})`);
 }
 
 // Pin commhub-server to a specific version to defeat bunx caching of older
@@ -593,7 +905,14 @@ function parseOpts(): Record<string, string> & { _channels: string[]; _envs: str
 // #173 — boolean (no-value) flags must NOT swallow the following token as a
 // value. parseOpts's heuristic ("--flag" + non-"--" token → that token is the
 // value) would otherwise read `anet node start --all foo` as all="foo".
-const BOOLEAN_FLAGS = new Set(["--all", "--tmux", "--new-session"]);
+const BOOLEAN_FLAGS = new Set([
+  "--all",
+  "--tmux",
+  "--new-session",
+  // RFC-030 P2 — co-presence orchestration flags.
+  "--copresence",
+  "--dangerously-allow-full-access",
+]);
 
 // #173 — extract the bare positional operands from an argv slice, mirroring
 // parseOpts's flag/value consumption, so `--all`'s mutual exclusion with a
@@ -1462,6 +1781,16 @@ Session:
   anet node start <name> --new-session   Start with fresh Claude session
   anet node resume <name> --session <id> Resume specific session
   anet session ls               List Claude Code sessions
+
+Co-presence (codex TUI + agent share one thread, RFC-030):
+  anet node start <name> --copresence
+      Spawn 3-piece dance: codex app-server (loopback WS) + agent-node bridge
+      + attachable codex TUI. All 3 in tmux (<name>, <name>-appsrv, <name>-桥).
+      Attach with: tmux attach -t <name>. Stop with: anet node stop <name>.
+      Requires runtime=codex-app-server on the node.
+      Default sandbox is read-only. To grant full FS/network access, add
+      --dangerously-allow-full-access (requires typed 'yes' confirmation).
+      Optional: --codex-bin <path> --codex-home <dir> --model <id> --port <p>
 
 Channel:
   anet channel add telegram <name> --bot-token <tok> --allow <uid>
@@ -3715,6 +4044,33 @@ async function startCommand() {
   const opts = parseOpts();
   const forceNewSession = !!opts["new-session"];
 
+  // RFC-030 P2 — `anet node start <alias> --copresence` spawns the 3-piece
+  // codex co-presence dance (app-server + bridge + attachable TUI).
+  // Replaces .demo/setup-copresence.sh. See startCopresenceOrchestration
+  // for the Risk C double-safeguard (default read-only; danger requires
+  // explicit flag + typed confirm + stderr banner) and the per-node
+  // CODEX_HOME isolation.
+  if (opts.copresence === "true") {
+    const resolvedForCopresence = resolveNodeRef(id);
+    if (!resolvedForCopresence) {
+      console.error(`Node "${id}" not found. Create it first: anet node create ${id}`);
+      process.exit(1);
+    }
+    const codexHomeDefault = join(nodesDir(), resolvedForCopresence.id, "codex-home");
+    const profileHub = (resolvedForCopresence.profile as any).hub || getHub();
+    const profileTok = resolvedForCopresence.profile.token || "";
+    await startCopresenceOrchestration(id, {
+      codexBin: opts["codex-bin"] || "codex",
+      codexHome: opts["codex-home"] || codexHomeDefault,
+      model: opts.model,
+      port: opts.port ? Number(opts.port) : undefined,
+      dangerFullAccess: opts["dangerously-allow-full-access"] === "true",
+      hub: profileHub,
+      token: profileTok,
+    });
+    return;
+  }
+
   // #136 (Vincent telegram 5158/5159/5161) — revert #122 default auto-wrap.
   // The detached-tmux-by-default path triggered `setRawMode errno 5` on
   // macOS bun (bun's claude-code-cli wants to call setRawMode on a real PTY
@@ -5673,13 +6029,31 @@ Stop a running agent node.
   // the recorded PID and notify the hub. Order matters: killing tmux kills
   // any child processes too, which makes `stopNode` mostly a defensive op
   // when the PID file is stale.
-  const tmuxKilled = tmuxSessionRunning(displayName);
-  if (tmuxKilled) killTmuxSession(displayName);
+  //
+  // RFC-030 P2 — co-presence nodes own three tmux sessions
+  // (`<alias>`, `<alias>-appsrv`, `<alias>-桥`). Sweep all three
+  // unconditionally: has-session guards make the extra kills no-op for
+  // non-copresence nodes, so this stays safe for every runtime.
+  const copresenceSessions = copresenceTmuxSessions(displayName);
+  const tmuxTuiKilled = tmuxSessionRunning(copresenceSessions.tui);
+  const tmuxAppsrvKilled = tmuxSessionRunning(copresenceSessions.appsrv);
+  const tmuxBridgeKilled = tmuxSessionRunning(copresenceSessions.bridge);
+  if (tmuxTuiKilled) killTmuxSession(copresenceSessions.tui);
+  if (tmuxAppsrvKilled) killTmuxSession(copresenceSessions.appsrv);
+  if (tmuxBridgeKilled) killTmuxSession(copresenceSessions.bridge);
+  const tmuxKilled = tmuxTuiKilled || tmuxAppsrvKilled || tmuxBridgeKilled;
   const killed = stopNode(resolved.id);
   // Always notify server — even if PID file missing, server may have stale session
   await notifyServerOffline(resolved.profile, resolved.id);
   if (killed || tmuxKilled) {
-    const what = [tmuxKilled ? "tmux" : null, killed ? "process" : null].filter(Boolean).join(" + ");
+    const tmuxLabels: string[] = [];
+    if (tmuxTuiKilled) tmuxLabels.push("tui");
+    if (tmuxAppsrvKilled) tmuxLabels.push("appsrv");
+    if (tmuxBridgeKilled) tmuxLabels.push("bridge");
+    const what = [
+      tmuxLabels.length ? `tmux(${tmuxLabels.join("+")})` : null,
+      killed ? "process" : null,
+    ].filter(Boolean).join(" + ");
     console.log(`[anet] Stopped "${displayName}" (${what} killed, server notified)`);
   } else {
     console.log(`[anet] "${displayName}" is not running locally (server notified offline)`);
