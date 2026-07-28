@@ -402,12 +402,17 @@ secret_hygiene:
       - /tmp/anet-gate-<RUN_ID>/evidence/runner/
       - /tmp/anet-gate-<RUN_ID>/evidence/reviewer/
     scanner_invocation_cwd: /tmp/anet-gate-<RUN_ID>/scanner/       # outside every scan_target
+  # -l = filenames-only (do NOT print matched lines / secret values); -I = skip binaries; -R = recursive; -E = extended regex
   scan_command: |
-    grep -R -E '(ntok|utok|atok)_[A-Za-z0-9]{16,}|sk-[A-Za-z0-9]{20,}|Bearer [A-Za-z0-9._~+/-]{20,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|ghu_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{40,}|vercel_[A-Za-z0-9_]{20,}|-----BEGIN [A-Z ]+PRIVATE KEY-----' \
+    grep -RIlE '(ntok|utok|atok)_[A-Za-z0-9]{16,}|sk-[A-Za-z0-9]{20,}|Bearer [A-Za-z0-9._~+/-]{20,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|ghu_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{40,}|vercel_[A-Za-z0-9_]{20,}|-----BEGIN [A-Z ]+PRIVATE KEY-----' \
       /tmp/anet-gate-<RUN_ID>/evidence/artifacts/ \
       /tmp/anet-gate-<RUN_ID>/evidence/runner/ \
       /tmp/anet-gate-<RUN_ID>/evidence/reviewer/
-  scan_exit_code: 1                           # 1 = no match; MUST be 1
+  # exit code semantics:
+  #   1  = no match  → PASS (this is the MUST-be state for a clean bundle)
+  #   0  = at least one file matched → gate FAIL, quarantine per §9.6, do NOT allow-list
+  #   >1 = scanner error → probe INVALID, MUST be re-run (do NOT treat as no-match)
+  scan_exit_code: 1                           # 1 = no match; MUST be 1 for a passing bundle
 
 reviewer:
   independent_checkout:
@@ -450,6 +455,7 @@ verdict:
 - [ ] Reviewer performed ≥ 2 mutations against **production code or input fixtures** (tests unmodified), each with mutation diff + before/after test rc showing PASS → FAIL
 - [ ] Reviewer's dirty checkout was removed (`git worktree remove --force`) after evidence capture, and the removal is recorded
 - [ ] Secret-hygiene scan attached, exit code = 1 (no match), and layout satisfies §9.11 (manifest + scanner invocation outside every scan target; `evidence/runner/` and `evidence/reviewer/` **included** in scan targets, not allow-listed away)
+- [ ] Scanner output (stdout / stderr / `scanner/scan.log`) contains **only** matched file paths, rule IDs, hit counts, and exit codes — **no matched lines / captured groups / secret values** (per R-17). If `grep`, use `-l`; if a dedicated scanner, use its redacted mode (e.g. `gitleaks --redact`).
 - [ ] Manifest fields all present per §9.9 template, placeholders replaced (no `<RUN_ID>` / `<40-hex>` left literal)
 - [ ] Applicable pipeline row in §9.8 satisfied
 
@@ -477,7 +483,9 @@ R-16 The scanner command itself **MUST NOT** be stored inside any scan target (p
 
 R-17 If a real secret leak is found, the offending file is quarantined per §9.6 (recovery flow); do **not** allow-list it to make the scan pass.
 
-An acceptable alternative to `grep -R`: an allowlist-based scanner (e.g. `gitleaks --no-git`) with a config committed alongside the runner. The same layout constraints apply — the config itself must live outside scan targets.
+**Scanner output MUST NOT echo matched secret values.** Scanner stdout, stderr, and any evidence artifact produced by the scanner (including `scanner/scan.log`) may contain **only**: matched file paths, rule IDs, hit counts, and exit codes. Never matched lines / captured groups / surrounding context. Use `grep -l` (filenames-only) or a scanner with guaranteed redaction (e.g. `gitleaks --redact`) — never `grep` variants that print matched text. If a leak is real, the file is quarantined per §9.6; its content stays out of the log.
+
+An acceptable alternative to `grep -R`: an allowlist-based scanner (e.g. `gitleaks --no-git --redact`) with a config committed alongside the runner. The same layout constraints (§9.11 R-14..R-16) apply — the config itself must live outside scan targets, and scanner output must also stay redacted.
 
 ---
 
