@@ -3,7 +3,7 @@
 | 项 | 值 |
 |----|----|
 | **作者** | 通信工程马 |
-| **状态** | v0.3 — **Vincent 拍板 D2 track = ① 直接一步 B1'** (常驻 ACP), 实施启动. Phase 0b U1/U3/U5/U8 探针全出 (`docs/analysis/rfc029-opencode-probe/summary.md`), ACP shim 净估 ~15-25 LOC, opencode-ai@`1.17.13` pin. 分 ~3 PR (① runtime 注册 → ② ACP shim + supervisor → ③ vendor preset + wizard hint + docs). (历史: v0.2 通信龙 v0.1 review PASS+merged PR #369) |
+| **状态** | v0.4 — **Vincent 2026-07-23 定调 opencode 提升为第 5 个原生 runtime, 人机共存 (co-existence) 一等**. v0.3 headless (B1' ACP) 保留为 mode; v0.4 新增 §11 co-existence formalization (serve + attach + PGID identity teardown). 通信龙 review addendum draft PASS + Vincent 拍 D_new_5 = B full copresence 全 track. 分 M0-M5 里程碑 (M0 探针 → M1 headless 骨架 WIP → M2 copresence 核心 → M3 wizard+doctor → M4 Docker E2E → M5 preview 发版), 6-8 工作日. (历史: v0.3 B1' 已 in-flight; v0.2 通信龙 v0.1 review PASS+merged PR #369) |
 | **调度** | 通信龙 dispatch task_id `418d0521-0148-452a-9f5a-70ed13f195e3` (HIGH, Vincent 要求) |
 | **创建** | 2026-07-01 (北京 UTC+8) |
 | **关联 RFC** | [RFC-021](RFC-021-acp-capability-profile-expansion.md) (ACP capability 扩展 — grok-build-acp precedent) · [RFC-006 (project memory)](../../.claude/memory/) codex-code-cli-mcp runtime 类似 track |
@@ -17,6 +17,8 @@
 ## 摘要
 
 给 anet 加**第 5 种 runtime**: 公版 `sst/opencode` CLI, 跟现有 `claude-code-cli` / `codex-sdk` / `claude-agent-sdk` / `grok-build-acp` 并列一档。用户可以在 `anet init node` 时选 `opencode-cli` runtime, 节点跑起来后走 `opencode` 后端做 think(), 但对 CommHub 网络 (send_task / report_status 等) 的接入语义跟其他 runtime 完全一致。
+
+**v0.4 增补**：opencode-cli 支持**人机共存 (co-existence)**: 一个 opencode 进程既是 anet 后端也是人类 TUI。人类可 `opencode run --attach` 直接看/操作, anet 派任务时把 network turn 塞进同一 session; lease/leader 语义 + PGID identity handshake teardown 见 §11. `--mode headless` 用 v0.3 B1' (ACP stdio, 无人值守), `--mode copresence` 用 v0.4 B3 (serve + attach). 同一 runtime name 内部按 mode 分派 (D_new_2). 详见 §11 co-existence formalization.
 
 **关键调研结论**: 公版 opencode 完全可 spawn 集成, 不是 TUI-only。有两条一等程序化入口:
 1. **`opencode run "..."`** — 一次性 (one-shot), 支持 `-s <id>` session resume, `--format json` 事件流输出
@@ -479,4 +481,188 @@ Docker e2e non-mock: 起独立 hub + `anet node start`, feed 一个真 task, 观
 
 ---
 
-**下一步**: 通信龙 review → 有 CHANGE_REQ 回滚修 → PASS 后 Phase 0 活体探针 + RFC v0.2 补数字 → Vincent 拍板 track 选型 → Phase 1 实施.
+**下一步 (v0.3)**: 通信龙 review → 有 CHANGE_REQ 回滚修 → PASS 后 Phase 0 活体探针 + RFC v0.2 补数字 → Vincent 拍板 track 选型 → Phase 1 实施.
+
+---
+
+## 11. Co-existence formalization (v0.4)
+
+> **驱动**: Vincent 2026-07-23 定调 opencode 从 demo → 正式**第 5 个原生 runtime**, 人机共存 (co-existence) 一等
+> **状态**: 通信龙 review draft PASS ✅; D_new_1/2/3/4/6/7 通信龙 approved (lead-scope), D_new_5 Vincent 拍板 = **B full copresence** 全 track
+> **红线**: 只做公版 [sst/opencode](https://github.com/sst/opencode); 不碰生产; 测试全 Docker; 不动 frozen A (RFC-030 保护面)
+
+### 11.1 Scope shift v0.3 → v0.4
+
+v0.3 的 B1' 是**纯 agent-backend**: `opencode acp` stdio JSON-RPC, 只让 anet 自己用 opencode 做 think(), 人类不参与。v0.4 把 opencode 提到**第 5 个原生 runtime**, 与 grok 一样支持**人机共存 (co-existence)**:
+
+- 一个 opencode 进程既是 anet 后端也是人类 TUI
+- 人类可 attach 直接看/操作, anet 派任务时把 network turn 塞进同一 session
+- lease/leader 仲裁: 默认 anet 拥有 session; 人类 attach 立即拿到主导; detach 后 anet 收回
+- 生命周期: serve 常驻 + attach lease + 进程清理 (PGID identity handshake, 防孤儿)
+
+新目标: `anet init node --runtime opencode-cli` 出的节点既能被 anet 派工, 也能被 Vincent 手指 attach 上去直接聊。
+
+### 11.2 Co-existence 拓扑: Option (i) 主线, U9 gate 退 (ii)
+
+#### Option (i) — 复用 opencode 原生多客户端 (serve + run --attach) ✅ 主线
+
+opencode 支持 `opencode run --attach <serve-url>` 让另一 CLI 连到已跑的 serve 复用 session。
+
+```
+[anet-agent] ──HTTP+SSE──▶ [opencode serve @ 127.0.0.1:<random>]
+                              ▲
+[human] ──── opencode run --attach ws://127.0.0.1:<port> ────┘
+```
+
+- anet 侧走 HTTP `/session/:id/message` + SSE, 跟 v0.3 B1 legacy 一样
+- 人类侧走 `opencode run --attach` 原生 CLI (D_new_3: 官方 UX, 不新增 `anet attach`)
+- lease/仲裁由 opencode 自己管 (turn 排队机制未验, 需 U9 探针)
+- anet 只用 HTTP session id 认领 turn
+
+**优点**: opencode 官方支持路径, 零自制 protocol.
+**风险**: opencode 内建仲裁行为不透明; 两侧 concurrent turn 可能撞车 → **需 U9 验证 (test221 已证 fanout, 未证并发仲裁)**.
+**工时估**: 8-12h (M2 主体)
+
+#### Option (ii) — anet 掌 arbiter, opencode 内嵌 PTY (类 grok-copresence) ⚠️ fallback
+
+anet 自己起 arbiter 进程持 opencode 的 PTY, 人类通过 anet 提供的 unix socket attach, 走 `agent-node/src/runtime/grok-copresence/attach.ts` 同一 protocol。
+
+```
+[anet-arbiter (owns PTY)] ─── PTY ───▶ [opencode 子进程]
+     ▲                                       ▲
+     │ unix socket (grok-copresence proto)   │ (network turn 转发)
+     │                                       │
+[human "anet attach <alias>"] ────────────────┘
+```
+
+- 直接复用 grok-copresence 状态机 (idle / human_editing / human_turn / network_turn / recovering)
+- lease/leader 由 anet arbiter 强控, 行为完全可测
+- 人类走 `anet attach <alias>` (一致 UX)
+
+**优点**: 状态机透明可测; 跟 grok 语义完全对齐; 一等 anet UX.
+**风险**: PTY-driven opencode 交互解析比 grok 更复杂 (opencode TUI 富交互); 每 opencode 上游 UI 改动都可能影响解析.
+**工时估**: 14-20h (含 PTY 交互解析层)
+
+**Fallback 条件**: M0 U9 探针若证明 Option (i) 并发 turn 语义**不可测/不可控** (e.g. race 无仲裁, 数据 corrupt, 崩溃), 退 Option (ii). 通信龙 明确要求 U9 拿真数字后再决 M1 起点。
+
+### 11.3 与 v0.3 B1' 的关系 (D_new_2: 同一 runtime name, --mode 分派)
+
+v0.3 B1' (opencode acp stdio + grok-build-acp 复用) 仍是 **headless-only 场景** (定时任务节点、无人值守) 的选择。v0.4 co-existence 在 **人机共存节点** 场景增补 B3 (serve + attach)。两条路径通过 CLI wizard 一次问题选:
+
+- `anet init node --runtime opencode-cli --mode headless` → B1' (acp stdio)
+- `anet init node --runtime opencode-cli --mode copresence` → B3 (serve + attach)
+
+内部 registry (`RuntimeName`) 都统一到 `opencode-cli`, `processTask` 根据 cfg.opencodeMode 分派。
+
+### 11.4 Session lifecycle 状态机 (Option (i) 主线)
+
+```
+   [none]
+     │ anet init
+     ▼
+   [serve-bootstrapping]   (spawn opencode serve, waitReady port)
+     │ ready
+     ▼
+   [session-init]          (POST /session, 存 cfg.opencodeSession)
+     │
+     ▼
+   [idle]  ──anet enqueue──▶ [network-turn] ──complete──▶ [idle]
+     ▲                                                       │
+     │ human detach                                          │ human attach (opencode run --attach)
+     │                                                       ▼
+     └──────────────────────── [human-turn] ◀──────────────
+                                    │
+                              (opencode serve 内建的 turn 排队)
+```
+
+**关键设计点**:
+- anet 侧 turn 检测: POST /session/:id/message 前查 GET /session/:id/state (opencode 有无 state endpoint 需 U10 验); 忙则排队
+- 人类 attach 检测: 轮询 GET /session/:id/clients 或订阅 SSE (U9)
+- session 持久化: cfg.opencodeSession = serve session id; serve 崩溃后 supervise-child 重启, session id resume
+
+### 11.5 进程清理 (硬 P0 — PGID identity handshake)
+
+opencode serve 通常经 `util-linux script` wrapper 起, wrapper PGID 与 opencode 真 PGID 分开。teardown 若只杀 wrapper 会**留孤儿 opencode 进程**。
+
+**修法** (通信龙 同 grok 侧原则):
+1. spawn 前预生成 numeric handshake token (PID/PGID/starttime tuple)
+2. opencode 子进程收 env token; 启动后 `/proc/<pid>/stat` 读回 starttime + PGID
+3. anet 侧存 sanctioned (PID, PGID, starttime) 三元组
+4. teardown 时:
+   - SIGTERM 真实 opencode group (identity 校验过的), 等 5s
+   - 若未死 → SIGKILL 同 group
+   - 再 reap wrapper
+   - `exited` 判据 = **两个 PGID 都 gone** (`/proc/<pid>` 不存在 且 wait() 返回)
+5. identity 不匹配 → **绝不 kill** (防误杀无关进程, 同 grok exact-owner-identity 原则)
+
+**负例反例** (M4 硬测): wrapper gone 但 opencode PGID 存活 → 测试必转红 (revert fix 后 test 必 pass; per 测试 label 真实覆盖类型 gate)。
+
+### 11.6 Reuse map — 不重造 primitive
+
+| 用途 | 复用源 (frozen 保护, 只读 pattern) | 新增 (opencode 侧, sibling module) |
+|---|---|---|
+| PGID handshake + identity | 参 `agent-node/src/runtime/grok-copresence/runtime.ts` PGID pattern | opencode 专属 spawn helper |
+| Attach socket protocol | 若走 Option (ii) 直接抄 `grok-copresence/attach.ts` | (Option (i) 不需要) |
+| Session state machine | 参 `grok-copresence/state.ts` phase 集 | opencode session shape |
+| Supervise child | `agent-node/src/util/supervise-child.ts` | 直接复用 |
+| Exact env allowlist | 参 [RFC-030 frozen A](RFC-030-codex-tui-bridge.md) `codex-app-server/runtime.ts` allowlist primitive | opencode env allowlist (Anthropic/OpenAI vendor key + OPENCODE_CONFIG + HOME/USER 最小集) |
+| Bearer for local HTTP | 参 [RFC-030](RFC-030-codex-tui-bridge.md) 128-bit CSPRNG bearer | serve port 前 loopback bind + shared secret header (D_new_4 双保险) |
+| ACP reducer (fallback) | `agent-node/src/runtime/grok-build-acp/events.ts` | 若 B3 (HTTP) 失败退 B1' |
+
+**红线**: 不修改 grok-copresence/*、grok-build-acp/*、RFC-030 protected A 中任一文件; 只**读取 pattern**, opencode 侧新建 sibling module。
+
+### 11.7 CLI 向导变动 (`agent-network/bin/cli.ts`, M3)
+
+- runtime picker 增 `opencode-cli` 选项
+- 选后:
+  - mode 询问: `headless` (B1' acp stdio) vs `copresence` (B3 serve + attach)
+  - vendor 询问: Anthropic native / OpenAI (v0.3 D3 定, Bearer-only 走 plugin 后续)
+  - env-var 检测: 若无 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` 提示配置
+- `checkRuntimeDependency`: `opencode --version` + pin `opencode-ai@<exact>` per §11.10 R1
+- `assertStartCompatibility`: opencode version 必须 == pinned; 否则 fail-closed
+- `anet doctor` (M3 新增, D_new_6): 检查 opencode binary + version pin + env var + optional serve port reachable
+
+### 11.8 决策点 (D_new_1..7)
+
+| # | 决策 | 结论 | 签核 |
+|---|---|---|---|
+| **D_new_1** | co-existence 拓扑 Option (i) vs (ii) | **(i) 优先, U9 gate 退 (ii)** | 通信龙 approved (lead-scope) |
+| **D_new_2** | 同 runtime name 内部 mode vs 拆两个 runtime name | 同一 `opencode-cli`, `--mode` flag 分派; registry 只加一项 | 通信龙 approved |
+| **D_new_3** | `anet attach <alias>` vs `opencode run --attach` | Option (i) → `opencode run --attach` 官方 UX | 通信龙 approved |
+| **D_new_4** | opencode serve HTTP 认证 | loopback bind + bearer header **双保险** | 通信龙 approved |
+| **D_new_5** | 直接一步 copresence 还是 M1 先纯 headless | **B full copresence 全 track** (Vincent 定: headless 版作用不大) | Vincent 拍板 |
+| **D_new_6** | 首启 auth: 加 `anet doctor` 检测? | 加, M3 期落 | 通信龙 approved |
+| **D_new_7** | 上游 opencode-ai release 稳定 pin | `assertStartCompatibility` 锁 exact; 每次 bump 前跑 Docker cold-start 冒烟 | 通信龙 approved |
+
+### 11.9 里程碑 M0-M5 (Vincent full track)
+
+| # | 里程碑 | 内容 | 工时 | 门禁 |
+|---|---|---|---|---|
+| **M0** | 探针 | U9 (opencode serve 多客户端并发 turn 仲裁) + U10 (session state endpoint 存在性). Docker isolated, raw HTTP dumps 落盘. | 2-3h | 数据先给通信龙 → 决 M2 拓扑走 Option (i) 或退 (ii) |
+| **M1** | headless 骨架 WIP | B1' processTask + 5 处 registry + VendorSpec preset + opencode/ sibling module. 不 merge-to-main, WIP hold 等 M2. | 8-10h | 独立预审; hold merge 到 M2 |
+| **M2** | copresence 核心 | serve daemon + supervise-child + HTTP+SSE + Option (i) attach detection + **PGID identity teardown**. 最严. | 10-14h | **独审 + 通信龙 sign**; 门禁不许绕; loopback+bearer 审要看调用侧 |
+| **M3** | CLI wizard + docs + `anet doctor` | 见 §11.7 | 5-7h | 独审 |
+| **M4** | Docker E2E | headless think + copresence attach/detach + **orphan kill 负例** + preset auth | 8-11h | 真号码贴 PR body per claim=reality; 负例必转红 |
+| **M5** | preview 发版 | exact-pin promote + Docker cold-start smoke; 对齐 v0.11.0 red-line (latest 只 stable) | 3-4h | 独审 + 通信龙 sign; 不 promote latest 直到 UAT |
+
+**总计**: ~40-55h wall-clock, 全职 6-8 工作日 (含 review 缓冲 1.3x).
+
+### 11.10 红线 checklist (承诺)
+
+- [x] 只做公版 sst/opencode
+- [x] 不动 frozen A (RFC-030 protected 39 files)
+- [x] 不修改 grok-copresence/*, grok-build-acp/* 源文件 (只读 pattern)
+- [x] 不碰生产 hub/DB
+- [x] 所有集成测试 Docker
+- [x] preview 稳定后再 promote latest (对齐 v0.11.0)
+- [x] 作者不自审; 通信龙 review → Vincent 拍决策点 → 我实施
+- [x] PR body/commit/注释不含内部 memory-slug 语法 (公开仓 slug guard)
+- [x] docs-only PR 严守 0 代码 diff; runtime 代码另 PR
+
+### 11.11 下一步 (v0.4)
+
+1. 本 v0.4 addendum 落地 (docs-only PR) → 独审 → 通信龙 sign → merge
+2. M0 探针 (U9/U10) 拿真数字 → 通信龙 决 M2 拓扑
+3. M1 WIP → hold
+4. M2 copresence 核心 → 独审 + 通信龙 sign → merge
+5. M3-M5 顺推; 每 M 完成交 candidate SHA + 独审报告
