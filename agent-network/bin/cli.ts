@@ -14,7 +14,7 @@ import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirS
 import { dirname, isAbsolute, join } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
-import { spawn, execSync, execFileSync } from "child_process";
+import { spawn, spawnSync, execSync, execFileSync } from "child_process";
 import { createHash, randomBytes, randomUUID } from "crypto";
 import {
   writeMarker as writeCopresenceMarker,
@@ -4467,15 +4467,89 @@ async function startCommand() {
   }
 
   // `tmux new -As <alias>`:
+  // #486 P0 CR — the previous shape `tmux new -As <alias> … stdio:"inherit"`
+  // is ATTACHED and needs the caller's TTY. That defeated the purpose of
+  // pointing headless callers at `--tmux` as an escape hatch: in a
+  // no-TTY environment `tmux new -As` immediately printed
+  // "open terminal failed: not a terminal" and the parent's spawn +
+  // synchronous `child.on("exit")` returned so fast that the parent
+  // exited 0 — same "假成功" pattern as the mainline #486 bug, sub-path
+  // edition. Two behaviors now:
+  //   TTY present    → keep attached foreground (setRawMode inside claude
+  //                    still needs a real PTY chain; this path is what
+  //                    interactive users have relied on since #122).
+  //   TTY absent     → detached: `tmux new-session -d`, stdio:"ignore",
+  //                    then a bounded `tmux has-session` poll to prove
+  //                    the session actually came up. If it didn't (tmux
+  //                    quick-fail, permissions, no server startup), the
+  //                    captured tmux stderr is surfaced and the parent
+  //                    exits non-zero. Prints the exact attach command
+  //                    for follow-up.
   //   -A  attach if the session already exists (handles the rerun case)
   //   -s  session name (= alias for discoverability)
   //   -c  start in cwd
-  //   <cmd> the agent runtime, foreground (no flag — default is foreground)
-  // stdio: 'inherit' makes the parent terminal a tmux client; setRawMode
-  // sees a real PTY through the tmux client/server pair.
   const inner = forceNewSession
     ? `anet node start ${shellQuote(alias)} --new-session`
     : `anet node start ${shellQuote(alias)}`;
+
+  const headless = !process.stdin.isTTY;
+  if (headless) {
+    // Detached spawn: no stdin inheritance, capture stderr for surfacing
+    // on quick-fail. `new-session -d` returns immediately; we then
+    // verify liveness with `has-session` inside a bounded poll before
+    // reporting success. Any observed failure path exits non-zero.
+    let tmuxStderr = "";
+    try {
+      // Reuse the same argv shape (`-A -s -c <inner>`) but with
+      // `new-session -d`. `-A` still handles the rerun case (attach if
+      // exists) which for detached-startup means "leave existing session
+      // alone and consider it started".
+      const proc = spawnSync(
+        "tmux",
+        ["new-session", "-d", "-A", "-s", alias, "-c", process.cwd(), inner],
+        { stdio: ["ignore", "pipe", "pipe"] },
+      );
+      tmuxStderr = String(proc.stderr || "");
+      if (proc.status !== 0) {
+        console.error(`[anet] ❌ tmux new-session detached failed (exit ${proc.status}).`);
+        if (tmuxStderr.trim()) console.error(`[anet]    tmux stderr: ${tmuxStderr.trim()}`);
+        console.error(`[anet]    Fall back to: anet node start ${shellQuote(alias)}`);
+        process.exit(proc.status ?? 1);
+      }
+    } catch (e: any) {
+      console.error(`[anet] ❌ tmux detached launch failed: ${e?.message || e}`);
+      console.error(`[anet]    Fall back to: anet node start ${shellQuote(alias)}`);
+      process.exit(1);
+    }
+    // Bounded liveness poll — `has-session` returns 0 when the session
+    // exists. Wait up to ~2 s (10 × 200 ms) for the tmux server to
+    // register the new session. If we never see it, the detached spawn
+    // exited cleanly but the session didn't come up (rare — usually
+    // means the inner command quick-failed) → surface non-zero.
+    const started = Date.now();
+    let alive = false;
+    while (Date.now() - started < 2000) {
+      if (tmuxSessionRunning(alias)) { alive = true; break; }
+      // Small blocking wait; keep dependencies minimal (no timers).
+      const s = Date.now(); while (Date.now() - s < 200) { /* busy */ }
+    }
+    if (!alive) {
+      console.error(`[anet] ❌ tmux session "${alias}" did not appear within 2 s of detached spawn.`);
+      console.error(`[anet]    The tmux server accepted the spawn but the session isn't visible; the`);
+      console.error(`[anet]    inner command likely quick-failed. Inspect with:`);
+      console.error(`[anet]      tmux ls`);
+      console.error(`[anet]      tmux new-session -A -s ${alias} -- ${inner}`);
+      process.exit(1);
+    }
+    console.log(`[anet] ✅ tmux session "${alias}" started detached.`);
+    console.log(`[anet]    Attach:   tmux attach -t ${alias}`);
+    console.log(`[anet]    Stop:     anet node stop ${alias}`);
+    return;
+  }
+
+  // TTY-present path: attached foreground (unchanged shape).
+  // stdio: 'inherit' makes the parent terminal a tmux client; setRawMode
+  // sees a real PTY through the tmux client/server pair.
   const tmuxArgs = ["new", "-As", alias, "-c", process.cwd(), inner];
   try {
     const child = spawn("tmux", tmuxArgs, { stdio: "inherit" });

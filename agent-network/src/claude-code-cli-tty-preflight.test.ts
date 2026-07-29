@@ -128,3 +128,115 @@ describe("claude-code-cli spawn preflight (#486 P0 regression gate)", () => {
     expect(errorSlice).toMatch(/process\.exit\(\s*[1-9]\d*\s*\)/);
   });
 });
+
+// #486 P0 CR — --tmux escape hatch regression gate. Prior candidate
+// pointed headless callers at `--tmux`; that path itself was ATTACHED
+// (`tmux new -As … stdio:"inherit"`) so it also needed a TTY, and its
+// synchronous `child.on("exit")` returned so fast that the parent
+// exited 0 even when tmux quick-failed with "open terminal failed: not
+// a terminal". Same "假成功" pattern as the mainline #486 bug, sub-path
+// edition. These assertions catch a regression back to the attached
+// shape or to the silent-exit-0-on-quick-fail behavior.
+//
+// Same source-order + substring style as the block above — cli.ts's
+// startCommand is inside the same ~12k-line entrypoint and cannot be
+// imported; behavioural verification of the headless path is left to
+// independent Docker validation without a Claude subscription
+// requirement (tmux quick-fail is testable without claude).
+describe("--tmux escape-hatch headless (#486 CR regression gate)", () => {
+  const CLI_TEXT = readFileSync(join(import.meta.dir, "..", "bin", "cli.ts"), "utf8");
+
+  /** Body of `startCommand`, up to the next top-level function. */
+  function startCommandBody(): string {
+    const start = CLI_TEXT.indexOf("async function startCommand(");
+    expect(start).toBeGreaterThan(-1);
+    const rest = CLI_TEXT.slice(start + 1);
+    const end = rest.search(/\n(?:export )?(?:async )?function /);
+    return end < 0 ? rest : rest.slice(0, end);
+  }
+
+  const startBody = startCommandBody();
+
+  /**
+   * The `--tmux` branch specifically — anchored on the unique
+   * "// --tmux path:" comment that only appears inside the wantTmux
+   * branch. This deliberately excludes the earlier
+   * `--accept-dev-channels` block (which also spawns `tmux new-session
+   * -d` but for a different feature).
+   */
+  function tmuxBranch(): string {
+    const idx = startBody.indexOf("// --tmux path:");
+    expect(idx).toBeGreaterThan(-1);
+    return startBody.slice(idx);
+  }
+
+  test("body contains the --tmux branch (anchor)", () => {
+    // `wantTmux` is the flag; if the whole branch gets refactored the
+    // gate needs updating too — failing here is that signal.
+    expect(startBody).toContain("wantTmux");
+    expect(startBody).toContain('spawn("tmux"');
+  });
+
+  test("--tmux branch has a headless (no-TTY) codepath (`new-session -d`)", () => {
+    // Prior code only had `["new", "-As", alias …]` with stdio inherit
+    // (attached, needs TTY). The fix adds a headless codepath with
+    // `"new-session", "-d"` inside the wantTmux branch.
+    const branch = tmuxBranch();
+    expect(branch).toMatch(/["']new-session["']\s*,\s*["']-d["']/);
+  });
+
+  test("--tmux headless: does NOT inherit stdin on detached spawn (was `stdio:\"inherit\"`)", () => {
+    // Locate the headless detached call inside wantTmux and ensure
+    // that spawn call does not carry stdio:"inherit". The TTY-present
+    // branch legitimately still uses stdio:"inherit"; the window scope
+    // keeps that from cross-matching.
+    const branch = tmuxBranch();
+    const detachedAt = branch.search(/["']new-session["']\s*,\s*["']-d["']/);
+    expect(detachedAt).toBeGreaterThan(-1);
+    // Look 400 chars before + 400 chars after the detached args.
+    const around = branch.slice(Math.max(0, detachedAt - 400), detachedAt + 400);
+    expect(around).not.toMatch(/stdio\s*:\s*["']inherit["']/);
+    // Positive: some form of stdio suppression / capture (ignore, pipe).
+    expect(around).toMatch(/stdio\s*:\s*(?:["']ignore["']|\[)/);
+  });
+
+  test("--tmux headless: verifies session liveness after detached spawn", () => {
+    // After `new-session -d` the spawn returns without proving the
+    // session came up; must be paired with an actual `tmuxSessionRunning(`
+    // call to prove liveness. If we ever drop this check, tmux quick-fail
+    // becomes silent again. Deliberately requires the FUNCTION CALL, not
+    // mere mention of "has-session" (that string appears in explanatory
+    // comments and would otherwise mask a mutation).
+    const branch = tmuxBranch();
+    const detachedAt = branch.search(/["']new-session["']\s*,\s*["']-d["']/);
+    expect(detachedAt).toBeGreaterThan(-1);
+    // Look ahead up to ~1500 chars for the liveness function call.
+    const after = branch.slice(detachedAt, detachedAt + 1500);
+    expect(after).toMatch(/tmuxSessionRunning\s*\(\s*alias\s*\)/);
+  });
+
+  test("--tmux headless: propagates non-zero exit on failure paths", () => {
+    // Anywhere between the detached-spawn call and the end of the
+    // headless branch, at least one process.exit(<non-zero>) must
+    // exist. Silent exit 0 is the exact regression we're preventing.
+    const branch = tmuxBranch();
+    const detachedAt = branch.search(/["']new-session["']\s*,\s*["']-d["']/);
+    expect(detachedAt).toBeGreaterThan(-1);
+    const after = branch.slice(detachedAt, detachedAt + 2500);
+    // Must contain at least one non-zero exit before the "started
+    // detached" success print. Accept either literal `1` or
+    // `proc.status ?? 1`.
+    expect(after).toMatch(/process\.exit\(\s*(?:proc\.status\s*\?\?\s*1|1)\s*\)/);
+  });
+
+  test("--tmux headless: prints attach hint after successful startup", () => {
+    // Success path must tell the user how to attach — otherwise the
+    // "escape hatch" leaves them stranded with a running but invisible
+    // session. Positive UX assertion.
+    const branch = tmuxBranch();
+    const detachedAt = branch.search(/["']new-session["']\s*,\s*["']-d["']/);
+    expect(detachedAt).toBeGreaterThan(-1);
+    const after = branch.slice(detachedAt, detachedAt + 2500);
+    expect(after).toMatch(/tmux attach -t/);
+  });
+});
