@@ -213,6 +213,45 @@ function resolveRequestAuth(req: Request): { userId: string; networkId: string |
   return { userId: resolved.user.user_id, networkId: resolved.networkId, username: resolved.user.username, tokenName: resolved.tokenName, tokenId: resolved.tokenId };
 }
 
+// #495 — shared authorization gate for /api/files/:file_id downloads.
+// Called from the GET handler and any future HEAD/Range/dashboard-proxy
+// entry so the allow-list can't drift between methods (通信龙 clause 2:
+// "授权若只在 GET 分支实现, HEAD 或 Range 走别路径 = 等于没修").
+//
+// Returns true if the caller may read this entry; false otherwise. The
+// caller emits 404 on false — never 403; 403 would leak that the
+// file_id exists and enables enumeration.
+//
+// Allow-list (staged P0 hotfix; same-network non-owner is NOT included
+// here — see follow-up #503):
+//   - Legacy master AUTH_TOKEN (RFC-001 read-only) → allow.
+//   - admin utok_ → allow (mirrors requireAdminAuth).
+//   - Owner match: caller's resolved user_id === entry.owner_id.
+//   - null owner_id + DEV_OPEN → allow. DEV_OPEN uploads carry
+//     owner_id=null (authCtx=null in DEV_OPEN mode); rejecting them
+//     would break the intended local-dev anonymous flow. Encoded as
+//     an explicit env-gated branch so if DEV_OPEN semantics change,
+//     the code fails loudly instead of trusting a stale note.
+//   - Everything else → deny (404). New uploads in production always
+//     carry a truthy owner_id (requireAuth blocks the null-owner-
+//     producing path when DEV_OPEN=off and no legacy master token is
+//     configured), so denying null-owner in production closes the
+//     enumeration vector for legacy blobs without breaking new uploads.
+export function authorizeFileDownload(req: Request, entry: { owner_id?: unknown }): boolean {
+  const token = requestToken(req);
+  const authCtx = resolveRequestAuth(req);
+  const resolved = token ? resolveToken(token) : null;
+  const isLegacyMasterCaller = !authCtx && isLegacyAuthToken(req);
+  const isAdminCaller = !!resolved && resolved.user.role === "admin";
+  const ownerId = typeof entry.owner_id === "string" && entry.owner_id.length > 0
+    ? entry.owner_id
+    : null;
+  const isOwnerCaller = !!authCtx && !!ownerId && authCtx.userId === ownerId;
+  if (isLegacyMasterCaller || isAdminCaller || isOwnerCaller) return true;
+  if (ownerId === null && DEV_OPEN) return true;
+  return false;
+}
+
 type RestNetworkScope = {
   networkId: string | null;
   networkIds: string[] | null;
@@ -1627,26 +1666,11 @@ return Bun.serve({
     // the same strict regex used at generation time before any
     // filesystem access.
     //
-    // #495 authorization contract:
-    //   - Legacy master AUTH_TOKEN (deprecated, read-only allowed) →
-    //     unrestricted access (single-tenant deployments).
-    //   - admin utok_ → unrestricted (mirrors requireAdminAuth's
-    //     role check).
-    //   - Any other resolved token → the token's user_id MUST equal
-    //     entry.owner_id. Mismatch, or entry.owner_id === null when
-    //     the caller is a normal user, returns 404 (NOT 403 — 403
-    //     would leak that the file_id exists, enabling enumeration).
-    //   - null owner_id policy: reject for non-admin, non-legacy
-    //     callers. Rationale: null owner arises when the file was
-    //     uploaded via legacy master AUTH_TOKEN (upload path writes
-    //     `owner_id: authCtx?.userId ?? null`), and those callers
-    //     already have unrestricted read via the legacy branch above.
-    //     No legitimate cross-user share of null-owner files exists
-    //     under the current tokens/scopes model; blocking here closes
-    //     the vulnerability without breaking any existing legitimate
-    //     path. Deployments that need to grant a real user access to
-    //     an old null-owner file can back-fill the index entry
-    //     manually.
+    // Ownership gate is factored into `authorizeFileDownload` (see
+    // src/server.ts near resolveRequestAuth). Any future HEAD, Range,
+    // conditional-request, or dashboard-proxy path for /api/files
+    // MUST route through the same helper — do not duplicate the
+    // allow-list inline, or the branches will drift.
     const fileMatch = url.pathname.match(/^\/api\/files\/(.+)$/);
     if (fileMatch && req.method === "GET") {
       const authErr = requireAuth(req);
@@ -1670,19 +1694,10 @@ return Bun.serve({
         return withCors(req, Response.json({ ok: false, error: "index_invalid" }, { status: 500 }));
       }
 
-      // #495 — ownership gate. Placed AFTER the file-exists checks so
-      // an attacker who fuzzes random file_ids cannot distinguish
-      // "you don't own this" (404) from "no such file" (404).
-      const fileToken = requestToken(req);
-      const fileAuthCtx = resolveRequestAuth(req);
-      const fileResolved = fileToken ? resolveToken(fileToken) : null;
-      const isLegacyMasterCaller = !fileAuthCtx && isLegacyAuthToken(req);
-      const isAdminCaller = !!fileResolved && fileResolved.user.role === "admin";
-      const ownerId = typeof entry.owner_id === "string" && entry.owner_id.length > 0
-        ? entry.owner_id
-        : null;
-      const isOwnerCaller = !!fileAuthCtx && !!ownerId && fileAuthCtx.userId === ownerId;
-      if (!isLegacyMasterCaller && !isAdminCaller && !isOwnerCaller) {
+      // #495 ownership gate — placed AFTER file-exists so denied
+      // callers cannot distinguish "you don't own this" from
+      // "no such file". Both branches return the same 404 shape.
+      if (!authorizeFileDownload(req, entry)) {
         return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
       }
 
