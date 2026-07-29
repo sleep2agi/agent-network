@@ -2,7 +2,7 @@
 //
 // Boots a PRIVATE server instance via the #434 seam (`bootServer({ port: 0 })`,
 // same signature as PR #438) and derives BASE from the actual bound port.
-// This keeps the suite alive in aggregate runs: `await import("./index.js")`
+// This keeps the suite alive in aggregate runs: `await import("./server.js")`
 // is a module-cache no-op when another file booted first, so relying on the
 // import side effect + own PORT env leaves every fetch ConnectionRefused
 // while the tests still "run" (通信龙 #461 review, finding 2). Gate:
@@ -41,12 +41,9 @@ beforeAll(async () => {
   // documented contract still is to set it externally; see db-adapter.ts).
   process.env.COMMHUB_DB = process.env.COMMHUB_DB || SERVER_DB;
   process.env.HOST = "127.0.0.1";
-  // The default import-boot instance (pre-#434 behavior) must not fight
-  // over a fixed port — 9200 may be a real hub on the dev box. (PORT=0
-  // won't do: index.ts parses `Number(process.env.PORT) || 9200`, which
-  // swallows 0.) Our assertions run against the private bootServer
-  // instance below either way.
-  process.env.PORT = process.env.PORT || String(16000 + Math.floor(Math.random() * 1000));
+  // (#438 corrective: importing server.js is side-effect-free — no
+  // default instance, no PORT juggling; only the private bootServer
+  // instance below listens.)
 
   const suffix = `${Date.now()}_${Math.floor(Math.random() * 1000)}`;
   const pw = "BootstrapPw123Aa!";
@@ -86,9 +83,9 @@ beforeAll(async () => {
     [AVATAR_NODE_ID, TARGET_ALIAS, memberNetworkId]
   );
 
-  // Private instance on an OS-assigned port — never collides with the
-  // default import-boot instance another test file may own.
-  const mod: any = await import("./index.js");
+  // Private instance on an OS-assigned port — collision-free by
+  // construction (kernel-assigned).
+  const mod: any = await import("./server.js");
   privateServer = mod.bootServer({ port: 0, hostname: "127.0.0.1" });
   BASE = `http://127.0.0.1:${privateServer.port}`;
 });

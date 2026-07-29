@@ -113,7 +113,7 @@ describe("withUtf8CharsetContentType — #426", () => {
   // out of sync. Kept as fragment-level greps (not whole-body match) so
   // added comments don't break the assertion.
   test("production helper covers the same content-type branches", () => {
-    const src = readFileSync(join(import.meta.dir, "index.ts"), "utf-8");
+    const src = readFileSync(join(import.meta.dir, "server.ts"), "utf-8");
     expect(src).toContain("function withUtf8CharsetContentType(res: Response): Response {");
     expect(src).toContain("if (/;\\s*charset=/i.test(ct)) return res;");
     for (const branch of [
