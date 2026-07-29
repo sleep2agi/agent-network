@@ -1619,12 +1619,34 @@ return Bun.serve({
       }));
     }
 
-    // ── REST: file download (#221) ──
-    // GET /api/files/:file_id with Bearer auth. Always forces
-    // Content-Disposition: attachment + X-Content-Type-Options: nosniff
-    // so the served file can never be executed or rendered as HTML.
-    // The file_id is validated against the same strict regex used at
-    // generation time before any filesystem access.
+    // ── REST: file download (#221 + #495) ──
+    // GET /api/files/:file_id with Bearer auth + ownership check.
+    // Always forces Content-Disposition: attachment +
+    // X-Content-Type-Options: nosniff so the served file can never be
+    // executed or rendered as HTML. The file_id is validated against
+    // the same strict regex used at generation time before any
+    // filesystem access.
+    //
+    // #495 authorization contract:
+    //   - Legacy master AUTH_TOKEN (deprecated, read-only allowed) →
+    //     unrestricted access (single-tenant deployments).
+    //   - admin utok_ → unrestricted (mirrors requireAdminAuth's
+    //     role check).
+    //   - Any other resolved token → the token's user_id MUST equal
+    //     entry.owner_id. Mismatch, or entry.owner_id === null when
+    //     the caller is a normal user, returns 404 (NOT 403 — 403
+    //     would leak that the file_id exists, enabling enumeration).
+    //   - null owner_id policy: reject for non-admin, non-legacy
+    //     callers. Rationale: null owner arises when the file was
+    //     uploaded via legacy master AUTH_TOKEN (upload path writes
+    //     `owner_id: authCtx?.userId ?? null`), and those callers
+    //     already have unrestricted read via the legacy branch above.
+    //     No legitimate cross-user share of null-owner files exists
+    //     under the current tokens/scopes model; blocking here closes
+    //     the vulnerability without breaking any existing legitimate
+    //     path. Deployments that need to grant a real user access to
+    //     an old null-owner file can back-fill the index entry
+    //     manually.
     const fileMatch = url.pathname.match(/^\/api\/files\/(.+)$/);
     if (fileMatch && req.method === "GET") {
       const authErr = requireAuth(req);
@@ -1646,6 +1668,22 @@ return Bun.serve({
       }
       if (!validateIndexEntry(entry)) {
         return withCors(req, Response.json({ ok: false, error: "index_invalid" }, { status: 500 }));
+      }
+
+      // #495 — ownership gate. Placed AFTER the file-exists checks so
+      // an attacker who fuzzes random file_ids cannot distinguish
+      // "you don't own this" (404) from "no such file" (404).
+      const fileToken = requestToken(req);
+      const fileAuthCtx = resolveRequestAuth(req);
+      const fileResolved = fileToken ? resolveToken(fileToken) : null;
+      const isLegacyMasterCaller = !fileAuthCtx && isLegacyAuthToken(req);
+      const isAdminCaller = !!fileResolved && fileResolved.user.role === "admin";
+      const ownerId = typeof entry.owner_id === "string" && entry.owner_id.length > 0
+        ? entry.owner_id
+        : null;
+      const isOwnerCaller = !!fileAuthCtx && !!ownerId && fileAuthCtx.userId === ownerId;
+      if (!isLegacyMasterCaller && !isAdminCaller && !isOwnerCaller) {
+        return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
       }
 
       let storage;
