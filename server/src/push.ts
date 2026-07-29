@@ -97,6 +97,23 @@ function clientKey(sessionName: string, networkId?: string | null): string {
   return `${networkId || "global"}:${sessionName}`;
 }
 
+// ── #461 network observer channels ───────────────────────────────────
+// Dashboard (or any network member) subscribes GET /events/network/:id
+// and receives SUMMARY events for ALL new_task / new_reply traffic in
+// that network — not just tasks it sent/received. Summary events carry
+// ids + routing metadata only, never task/reply content.
+//
+// Key scheme: leading NUL byte makes an observer key impossible to
+// forge from the session scheme above (`${networkId}:${sessionName}`)
+// for any networkId the hub itself issues (net_* / "global"). Only a
+// master-token caller could even inject a NUL into network_id via the
+// legacy ?network_id= path, and master token is root already.
+const OBSERVER_KEY_PREFIX = "\u0000netobs:";
+
+function observerKey(networkId: string): string {
+  return `${OBSERVER_KEY_PREFIX}${networkId}`;
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Close + dispatch helpers
 // ─────────────────────────────────────────────────────────────────────
@@ -215,8 +232,24 @@ function ensureLivenessSweep(): void {
 
 /** 创建 SSE Response 并注册到 clients map */
 export function createSSEStream(sessionName: string, networkId?: string | null): Response {
+  return createStreamForKey(
+    clientKey(sessionName, networkId),
+    { type: "connected", session: sessionName, network_id: networkId ?? null },
+  );
+}
+
+/** #461 — 创建网络级观察者 SSE Response（dashboard 观察第三方流量）。
+ *  Shares the exact same registration / backpressure / liveness
+ *  machinery as session streams; only the key scheme differs. */
+export function createNetworkObserverStream(networkId: string): Response {
+  return createStreamForKey(
+    observerKey(networkId),
+    { type: "connected", observer: true, network_id: networkId },
+  );
+}
+
+function createStreamForKey(key: string, initialEvent: Record<string, unknown>): Response {
   const encoder = new TextEncoder();
-  const key = clientKey(sessionName, networkId);
   let client: SSEClient;
 
   const stream = new ReadableStream<Uint8Array>({
@@ -237,7 +270,7 @@ export function createSSEStream(sessionName: string, networkId?: string | null):
       // even the first byte respects the contract.
       tryEnqueueBytes(
         client,
-        encoder.encode(`data: ${JSON.stringify({ type: "connected", session: sessionName, network_id: networkId ?? null })}\n\n`),
+        encoder.encode(`data: ${JSON.stringify(initialEvent)}\n\n`),
       );
 
       // Periodic keepalive doubles as a half-open probe — if the
@@ -338,6 +371,40 @@ export function pushEvent(sessionName: string, event: Record<string, unknown>, n
   if (!arr || arr.length === 0) return;
 
   const data = `data: ${JSON.stringify(event)}\n\n`;
+  let needPrune = false;
+
+  for (const c of arr) {
+    if (c.closed) {
+      needPrune = true;
+      continue;
+    }
+    const result = tryEnqueueBytes(c, c.encoder.encode(data));
+    if (result === "dead") needPrune = true;
+  }
+
+  if (needPrune) pruneClosed(key);
+}
+
+/** #461 — 推送网络级摘要事件给该网络的所有观察者连接。
+ *
+ *  Callers pass ROUTING METADATA ONLY (task_id / from / to / status /
+ *  priority / message_id) — never task or reply content. The event is
+ *  stamped with `network_id` + `scope: "network"` here so observers can
+ *  always tell which network the event belongs to and that it came from
+ *  the observer stream rather than their personal channel.
+ *
+ *  No-op when networkId is falsy: legacy null-network traffic has no
+ *  observer stream (the route requires an explicit network id). */
+export function pushNetworkObserverEvent(
+  networkId: string | null | undefined,
+  event: Record<string, unknown>,
+): void {
+  if (!networkId) return;
+  const key = observerKey(networkId);
+  const arr = clients.get(key);
+  if (!arr || arr.length === 0) return;
+
+  const data = `data: ${JSON.stringify({ ...event, network_id: networkId, scope: "network" })}\n\n`;
   let needPrune = false;
 
   for (const c of arr) {

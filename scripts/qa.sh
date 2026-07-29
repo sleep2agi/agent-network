@@ -50,6 +50,9 @@ L0_TESTS=(
   "password-dict:server/src/password-dict.test.ts"
   "auth-tokens:server/src/auth-tokens.test.ts"
   "auth-validate:server/src/auth-validate.test.ts"
+  "observer-push:server/src/observer-push.test.ts"
+  "avatar-validate:server/src/avatar-validate.test.ts"
+  "observer-avatar-http:server/src/observer-avatar-http.test.ts"
 )
 L1_TESTS=(
   "qa-cli-01-hub-start"
