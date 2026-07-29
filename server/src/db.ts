@@ -348,6 +348,38 @@ try {
   if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
 }
 
+// Node DISPLAY attributes (Vincent 目标第 3 条 — dashboard/app 多维度编辑).
+// Same posture as avatar_url above: hub-side presentation only, NOT part of
+// the RFC-024 config-apply pipeline (agent-node consumes none of them, so a
+// doorbell/ack round-trip would be meaningless and could wedge the config
+// revision). Written only via PUT /api/nodes/:ref/attrs.
+//
+//   display_name   — human label shown in the UI. Distinct from `alias`,
+//                    which is the ROUTING key (messages address the alias)
+//                    and from `node_name`, which is an addressing key
+//                    (`WHERE node_id OR node_name OR alias`). Renaming
+//                    either of those must go through the rename 2PC
+//                    (/api/node-rename/*), never through an attrs write.
+//   team, tags     — organisation metadata; tags stored as JSON array text.
+//   attrs_revision — optimistic-lock counter for these display fields ONLY.
+//                    Deliberately separate from config_revision so that
+//                    editing a tag never bumps the node's *config* revision
+//                    (which would perturb the config ack protocol).
+//
+// All nullable / defaulted so the ~100 rows already in flight keep reading.
+for (const ddl of [
+  `ALTER TABLE nodes ADD COLUMN display_name TEXT`,
+  `ALTER TABLE nodes ADD COLUMN team TEXT`,
+  `ALTER TABLE nodes ADD COLUMN tags TEXT`,
+  `ALTER TABLE nodes ADD COLUMN attrs_revision INTEGER NOT NULL DEFAULT 0`,
+]) {
+  try {
+    db.exec(ddl);
+  } catch (e: any) {
+    if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+  }
+}
+
 // RFC-027 §2 — stop/delete request envelope. Mirrors
 // node_create_requests structure so the daemon-side pull/ack pattern
 // is symmetric with create_node. action='stop'|'delete' picks which

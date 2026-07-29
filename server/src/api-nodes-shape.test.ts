@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { db } from "./db.js";
+import { parseStoredTags } from "./node-attrs-validate.js";
 
 // Regression test for SELECT * fragility on GET /api/nodes.
 //
@@ -41,7 +42,12 @@ function mapRow(r: Record<string, unknown>): Record<string, unknown> {
     catch { /* malformed */ }
   }
   const { config_snapshot, ...rest } = r;
-  return { ...rest, role };
+  return {
+    ...rest,
+    tags: parseStoredTags(r.tags),
+    attrs_revision: Number(r.attrs_revision ?? 0),
+    role,
+  };
 }
 
 describe("RFC-024 regression — GET /api/nodes response shape (no SELECT *)", () => {
@@ -66,7 +72,7 @@ describe("RFC-024 regression — GET /api/nodes response shape (no SELECT *)", (
       `SELECT node_id, node_name, alias, runtime, model,
               config_path, channels, server, hostname,
               network_id, created_at, updated_at,
-              config_snapshot
+              config_snapshot, display_name, team, tags, attrs_revision
        FROM nodes WHERE node_id = ?1`,
       TEST_NODE,
     );
@@ -85,11 +91,17 @@ describe("RFC-024 regression — GET /api/nodes response shape (no SELECT *)", (
     expect(row).not.toHaveProperty("config_snapshot");
     // role is EXTRACTED from config_snapshot JSON, not the raw blob
     expect(row.role).toBe("host_supervisor");
-    // Belt: full key set is exactly the 13 contract fields
+    // Belt: the key set is exactly the dashboard-facing contract.
+    // NOTE: this file MIRRORS the handler's SQL rather than calling it, so
+    // it can drift — it already lagged behind `lifecycle_state` /
+    // `avatar_url`, which the handler selects but this mirror does not.
+    // Treat a diff here as "re-read the handler", not as proof of the wire
+    // shape; node-attrs.test.ts asserts the real HTTP response.
     expect(Object.keys(row).sort()).toEqual([
-      "alias", "channels", "config_path", "created_at", "hostname",
-      "model", "network_id", "node_id", "node_name", "role", "runtime",
-      "server", "updated_at",
+      "alias", "attrs_revision", "channels", "config_path", "created_at",
+      "display_name", "hostname", "model", "network_id", "node_id",
+      "node_name", "role", "runtime", "server", "tags", "team",
+      "updated_at",
     ]);
   });
 
@@ -102,7 +114,8 @@ describe("RFC-024 regression — GET /api/nodes response shape (no SELECT *)", (
     );
     let row = mapRow(db.get<Record<string, unknown>>(
       `SELECT node_id, node_name, alias, runtime, model, config_path, channels,
-              server, hostname, network_id, created_at, updated_at, config_snapshot
+              server, hostname, network_id, created_at, updated_at, config_snapshot,
+              display_name, team, tags, attrs_revision
        FROM nodes WHERE node_id = ?1`,
       TEST_NODE,
     )!);
@@ -113,7 +126,8 @@ describe("RFC-024 regression — GET /api/nodes response shape (no SELECT *)", (
     db.run(`UPDATE nodes SET config_snapshot = ?1 WHERE node_id = ?2`, ["not-json{", TEST_NODE]);
     row = mapRow(db.get<Record<string, unknown>>(
       `SELECT node_id, node_name, alias, runtime, model, config_path, channels,
-              server, hostname, network_id, created_at, updated_at, config_snapshot
+              server, hostname, network_id, created_at, updated_at, config_snapshot,
+              display_name, team, tags, attrs_revision
        FROM nodes WHERE node_id = ?1`,
       TEST_NODE,
     )!);
@@ -124,7 +138,8 @@ describe("RFC-024 regression — GET /api/nodes response shape (no SELECT *)", (
            [JSON.stringify({ model: "x", flags: {} }), TEST_NODE]);
     row = mapRow(db.get<Record<string, unknown>>(
       `SELECT node_id, node_name, alias, runtime, model, config_path, channels,
-              server, hostname, network_id, created_at, updated_at, config_snapshot
+              server, hostname, network_id, created_at, updated_at, config_snapshot,
+              display_name, team, tags, attrs_revision
        FROM nodes WHERE node_id = ?1`,
       TEST_NODE,
     )!);
@@ -141,7 +156,8 @@ describe("RFC-024 regression — GET /api/nodes response shape (no SELECT *)", (
     );
     const rows = db.all<Record<string, unknown>>(
       `SELECT node_id, node_name, alias, runtime, model, config_path, channels,
-              server, hostname, network_id, created_at, updated_at, config_snapshot
+              server, hostname, network_id, created_at, updated_at, config_snapshot,
+              display_name, team, tags, attrs_revision
        FROM nodes WHERE network_id = ?1`,
       TEST_NETWORK,
     ).map(mapRow);

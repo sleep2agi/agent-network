@@ -6,6 +6,7 @@ import { db, logTaskEvent, logAudit } from "./db.js";
 import { createSSEStream, createNetworkObserverStream, pushEvent, pushNetworkObserverEvent, getSSEStats } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { validateAvatarUrl } from "./avatar-validate.js";
+import { narrowTags, parseStoredTags, validateScalarAttr } from "./node-attrs-validate.js";
 import { register, login, resolveToken, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, renameNetwork, changePassword, issueUserToken, listTokens, createToken, revokeToken, getNetworkMembers, getUserNetworkRole, addNetworkMember, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
 import { abortRename, cleanupCommittedRenameSessions, commitRename, prepareRename, resolveCanonicalAlias } from "./rename.js";
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
@@ -2129,6 +2130,115 @@ return Bun.serve({
     // legacy master token). Value passes validateAvatarUrl (http/https
     // only, ≤ 2048 chars, no control chars — XSS boundary, see
     // avatar-validate.ts).
+    // ── REST: node DISPLAY attributes (display_name / team / tags) ──
+    // Companion to the avatar route below: hub-side presentation fields that
+    // agent-node does not consume, so they deliberately bypass the RFC-024
+    // config-apply pipeline (no doorbell, no ack, no config_revision bump).
+    //
+    // Unlike avatar, these are multi-field and multi-editor, so they carry
+    // their OWN optimistic lock (`attrs_revision`). A stale base revision is
+    // a 409 with the current value, mirroring update_node_config's contract
+    // so the dashboard can reuse its conflict-resolution UX.
+    //
+    // NOT editable here: `alias` (message-routing key) and `node_name`
+    // (addressing key). Renaming those must go through the rename 2PC at
+    // /api/node-rename/* which cascades sessions + api_tokens + SSE cleanup;
+    // a single-table UPDATE would strand the node (see #146).
+    const nodeAttrsMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/attrs$/);
+    if (nodeAttrsMatch && req.method === "PUT") {
+      let attrsBody: any;
+      try {
+        attrsBody = await req.json();
+      } catch {
+        return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 }));
+      }
+      const ref = decodeURIComponent(nodeAttrsMatch[1]);
+      const params: any[] = [ref, ref, ref];
+      let sql = "SELECT node_id, alias, network_id, display_name, team, tags, attrs_revision FROM nodes WHERE (node_id = ?1 OR node_name = ?2 OR alias = ?3)";
+      sql = addNetworkScope(sql, params, restScope);
+      sql += " ORDER BY updated_at DESC LIMIT 1";
+      const node = db.get<any>(sql, ...params);
+      if (!node) return withCors(req, Response.json({ ok: false, error: "node not found" }, { status: 404 }));
+
+      const nodeNetId = node.network_id ?? singleNetworkId(restScope);
+      if (!canRestWriteNetwork(restAuth, nodeNetId, isAdmin)) {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));
+      }
+
+      // Optimistic lock BEFORE any narrowing work, so a losing writer never
+      // has side effects.
+      const currentRev = Number(node.attrs_revision ?? 0);
+      const baseRev = attrsBody?.base_attrs_revision;
+      if (typeof baseRev !== "number" || !Number.isInteger(baseRev) || baseRev < 0) {
+        return withCors(req, Response.json({
+          ok: false, error: "base_attrs_revision required (integer >= 0)",
+        }, { status: 400 }));
+      }
+      if (baseRev !== currentRev) {
+        return withCors(req, Response.json({
+          ok: false,
+          error: "attrs_revision_conflict",
+          current_attrs_revision: currentRev,
+          message: "another editor changed this node's attributes; re-read and retry",
+        }, { status: 409 }));
+      }
+
+      // Scalars reject on wrong type (never coerce); tags drop junk per item.
+      const nextDisplay = "display_name" in attrsBody
+        ? validateScalarAttr(attrsBody.display_name, "display_name")
+        : null;
+      if (nextDisplay && !nextDisplay.ok) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_display_name", reason: nextDisplay.reason }, { status: 400 }));
+      }
+      const nextTeam = "team" in attrsBody ? validateScalarAttr(attrsBody.team, "team") : null;
+      if (nextTeam && !nextTeam.ok) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_team", reason: nextTeam.reason }, { status: 400 }));
+      }
+      const nextTags = "tags" in attrsBody ? narrowTags(attrsBody.tags) : null;
+
+      // Only the supplied fields move; the rest keep their stored value.
+      const sets: string[] = [];
+      const vals: any[] = [];
+      if (nextDisplay) { sets.push(`display_name = ?${vals.length + 1}`); vals.push(nextDisplay.value); }
+      if (nextTeam) { sets.push(`team = ?${vals.length + 1}`); vals.push(nextTeam.value); }
+      if (nextTags) { sets.push(`tags = ?${vals.length + 1}`); vals.push(JSON.stringify(nextTags)); }
+      // A no-op patch still bumps the revision: the caller observed a state
+      // and asserted it, so honouring the CAS keeps client counters in step.
+      sets.push(`attrs_revision = ?${vals.length + 1}`); vals.push(currentRev + 1);
+      sets.push(`updated_at = datetime('now')`);
+      vals.push(node.node_id);
+      // Guard the UPDATE with the same revision so two concurrent writers
+      // that both passed the read above cannot both land.
+      vals.push(currentRev);
+      const res = db.run(
+        `UPDATE nodes SET ${sets.join(", ")} WHERE node_id = ?${vals.length - 1} AND attrs_revision = ?${vals.length}`,
+        vals,
+      );
+      if (!res.changes) {
+        const fresh = db.get<any>("SELECT attrs_revision FROM nodes WHERE node_id = ?1", node.node_id);
+        return withCors(req, Response.json({
+          ok: false,
+          error: "attrs_revision_conflict",
+          current_attrs_revision: Number(fresh?.attrs_revision ?? currentRev),
+          message: "another editor changed this node's attributes; re-read and retry",
+        }, { status: 409 }));
+      }
+      logAudit(restAuth?.userId ?? null, restAuth?.username ?? null, "node_attrs_updated", "node", node.node_id,
+        JSON.stringify({ display_name: nextDisplay?.value ?? undefined, team: nextTeam?.value ?? undefined, tags: nextTags ?? undefined }),
+        undefined, nodeNetId ?? undefined);
+      const after = db.get<any>(
+        "SELECT display_name, team, tags, attrs_revision FROM nodes WHERE node_id = ?1", node.node_id);
+      return withCors(req, Response.json({
+        ok: true,
+        node_id: node.node_id,
+        alias: node.alias,
+        display_name: after?.display_name ?? null,
+        team: after?.team ?? null,
+        tags: parseStoredTags(after?.tags),
+        attrs_revision: Number(after?.attrs_revision ?? currentRev + 1),
+      }));
+    }
+
     const nodeAvatarMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/avatar$/);
     if (nodeAvatarMatch && req.method === "PUT") {
       let avatarBody: any;
@@ -2315,7 +2425,8 @@ return Bun.serve({
       let sql = `SELECT node_id, node_name, alias, runtime, model,
                         config_path, channels, server, hostname,
                         network_id, created_at, updated_at,
-                        config_snapshot, lifecycle_state, avatar_url
+                        config_snapshot, lifecycle_state, avatar_url,
+                        display_name, team, tags, attrs_revision
                  FROM nodes WHERE 1=1`;
       const params: any[] = [];
       sql = addNetworkScope(sql, params, restScope);
@@ -2337,7 +2448,16 @@ return Bun.serve({
           catch { /* malformed snapshot — leave role null */ }
         }
         const { config_snapshot, ...rest } = r;
-        return { ...rest, role };
+        // `tags` is stored as JSON text; hand the dashboard a real array so
+        // it can map() without a guard, and normalise legacy/absent values
+        // to [] rather than null. attrs_revision is normalised to a number
+        // so pre-migration rows (NULL) read as 0.
+        return {
+          ...rest,
+          tags: parseStoredTags(r.tags),
+          attrs_revision: Number(r.attrs_revision ?? 0),
+          role,
+        };
       });
       return withCors(req, Response.json({ ok: true, nodes: rows, count: rows.length }));
     }
