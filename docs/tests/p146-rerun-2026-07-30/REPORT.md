@@ -72,3 +72,62 @@ egress beyond loopback.
 
 `evidence.log` is scrubbed: all `utok_` / `ntok_` values and token hashes
 are replaced with `<redacted>` (verified: zero raw tokens remain).
+
+---
+
+# Part 2 — the CLI restart choreography (2026-07-30)
+
+Covers the half Part 1 deliberately excluded: `anet node rename <old> <new>
+--force` stopping the old agent, confirming it is dead, and what it claims
+about the relaunch. Files: `cli-harness.sh`, `deaf-agent.mjs`,
+`cli-evidence.log`, `cli-verdicts.txt`.
+
+Targets the two blockers a prior review raised against the #146 fix.
+
+| # | requirement | verdict | evidence |
+|---|---|---|---|
+| R1 | a SIGTERM-**deaf** old process is escalated to SIGKILL — no survivor left to heartbeat the old alias back | **PASS** | `old_pid_alive=0`; the shell independently reported `356 Killed`, and the mock only dies to SIGKILL |
+| R1b | after the rename the hub holds no live session under the OLD alias | **PASS** | `stale_before_alias_present=0` |
+| R2 | a relaunch that cannot happen is reported honestly — no false "restarted + re-registered" | **PASS** | `false_success_claims=0`, 3 honest signals in output |
+| R3 | after the CLI rename the hub accepts traffic for the NEW alias | **PASS** | `send_task_to_new_alias_ok=1` |
+
+## Two FAILs on the way, both mine — recorded because they matter
+
+This did not go green on the first run, and neither red was a product
+defect. Reporting only the final green would hide how easy it is to
+manufacture a false bug here.
+
+**Attempt 1 — 3 FAILs.** The container had no `ps`. The CLI refused the
+rename outright:
+
+```
+[anet] ❌ cannot inspect the process table (`ps` failed) — refusing the rename.
+       Rename must locate + stop the old agent; without `ps` it risks a
+       ghost or stopping the wrong process.
+```
+
+That is the product being **correct** (fail-closed rather than risk killing
+an unrelated process). Had the red been reported as-is it would have read
+as "rename is broken".
+
+**Attempt 2 — R1 still FAIL.** The CLI reported `Node was not running` and
+skipped the kill path entirely. Cause: `findNodeProcessesByAlias` only
+matches genuine agent executables (`agent-node` / `claude` / `codex` /
+`grok` or the package path) **and** requires an `--alias <name>` argv pair —
+a deliberate #180 R1 guard so a substring match cannot get an unrelated
+process killed. My mock ran as `bun deaf-agent.mjs`, so it was correctly
+not recognised as that node's process. Fixing the *mock* to satisfy the
+real identity contract (run from a path carrying the package name, pass
+`--alias`) turned R1 green.
+
+Both reds were harness defects meeting correct product defences. The
+green only counts because the mock now meets the same identity bar a real
+agent process does.
+
+## Still not covered
+
+- The relaunch **succeeding** end to end. This container has no runtime
+  credentials, so R2 verifies the honest-failure path, not a live restart.
+- Whether `latest` (the published package users install) carries these
+  fixes. Part 1 and Part 2 both test source at `main` — as #491 showed,
+  main being fixed does not mean users stopped hitting it.

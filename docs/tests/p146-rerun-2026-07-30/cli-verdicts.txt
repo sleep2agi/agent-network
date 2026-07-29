@@ -1,0 +1,4 @@
+PASS | R1 SIGTERM-deaf old process is escalated to SIGKILL (no survivor) | old_pid_alive=0 rename_exit=0
+PASS | R1b hub no longer reports the OLD alias as a live session | stale_before_alias_present=0
+PASS | R2 relaunch that cannot happen is reported honestly (no false green) | false_success_claims=0 honest_signals=3
+PASS | R3 after a CLI rename the hub accepts traffic for the NEW alias | send_task_to_new_alias_ok=1
