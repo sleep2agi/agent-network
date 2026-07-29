@@ -35,6 +35,15 @@ features:
 
 ## 30 秒上手
 
+::: warning 先装这两个，否则第一步就崩
+**Node.js ≥ 22.13.0** + **Bun ≥ 1.2.0**。`anet hub start` 底层用 `bunx` 起 `commhub-server`，
+没装 Bun 会直接报 `spawn bunx ENOENT`。
+
+```bash
+npm i -g bun
+```
+:::
+
 ```bash
 # 装一个全局包
 npm install -g @sleep2agi/agent-network
