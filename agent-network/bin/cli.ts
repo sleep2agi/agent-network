@@ -24,8 +24,11 @@ import {
   realKiller,
   callerCarriesMarker,
   reapMarkerGroups,
+  prepareIdentityForStart,
+  anchorsFromMarker,
   type SessionInfo,
 } from "../src/copresence-identity";
+import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
 import { createServer as netCreateServer } from "net";
 import { checkbox, confirm, select } from "@inquirer/prompts";
 import { ensureGitignoreRule, ensureGitignoreRules } from "../src/gitignore-writeback";
@@ -420,6 +423,46 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // code reported success). See docs of writeMarker() in copresence-identity.ts.
   const identityMarker = randomUUID();
 
+  // #P3fix必修12 — tmux capability preflight. `new-session -e KEY=VALUE`
+  // (how the marker gets injected) needs tmux 3.2+; Ubuntu 20.04 ships
+  // 3.0a. Without this check the very first new-session below dies with
+  // tmux's raw usage dump and the operator has nothing to act on.
+  assertTmuxSupportsSessionEnv(
+    () => execFileSync("tmux", ["-V"], { stdio: ["ignore", "pipe", "pipe"] }).toString(),
+    (m) => console.error(m),
+    (m) => { console.error(m); process.exit(1); },
+  );
+
+  // #P3fix必修5+6 — everything identity-related happens BEFORE the first
+  // marker-carrying tmux session exists.
+  //   5: the marker file is written now, not after the app-server binds.
+  //      v2 wrote it after a 25s wait and after several exit(1) paths, so a
+  //      start that died in that window left a live marker-carrying session
+  //      with no marker file on disk — an unreclaimable ghost, the exact
+  //      failure this feature exists to prevent.
+  //   6: if a marker from a previous generation is still on disk (a stop
+  //      that failed deliberately preserves it), its processes are reaped
+  //      by identity FIRST. v2 overwrote the file with a fresh uuid while
+  //      only killing tmux sessions by NAME, permanently losing the handle
+  //      on any surviving subprocess of the old generation.
+  const identityPrep = await prepareIdentityForStart(identityMarker, {
+    readMarker: () => readCopresenceMarker(nodesDir(), resolved.id),
+    reap: (uuid, anchors) => reapMarkerGroups(realEnumerator(), realKiller(), uuid, {
+      graceMs: 3000,
+      logger: (m) => console.log(`[anet] ${m}`),
+      anchors,
+    }),
+    removeMarker: () => removeCopresenceMarker(nodesDir(), resolved.id),
+    writeMarker: (uuid, sessions) => { writeCopresenceMarker(nodesDir(), resolved.id, uuid, sessions); },
+    logger: (m) => console.log(`[anet] ${m}`),
+  });
+  if (identityPrep.kind === "blocked") {
+    console.error(`[anet] ❌ refusing to start ${displayName}: ${identityPrep.detail}`);
+    console.error(`[anet]    ${identityPrep.remedy}`);
+    process.exit(1);
+  }
+  console.log(`[anet] identity marker written (uuid=${identityMarker.slice(0, 8)}… — on disk before any session starts)`);
+
   // Kill any prior instances so this is idempotent.
   for (const s of [appsrvSession, bridgeSession, tuiSession]) {
     if (tmuxSessionRunning(s)) {
@@ -482,15 +525,12 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   }
   console.log(`[anet] ① app-server READY on ${wsUrl}`);
 
-  // #P3fix复审 finding #5 — write the identity marker file NOW, as soon as
-  // the FIRST session with ANET_NODE_MARKER injected is running. If any of
-  // the 6 downstream early-exit paths (thread/start, SAFE_THREAD_ID reject,
-  // bridge/tui tmux new-session, etc.) fires, the identity flow can still
-  // reap appsrv on the next `anet node stop`. Prior placement (after all 3
-  // sessions up) left orphans-with-no-marker-file for partial failures.
-  //
-  // Sessions object is best-effort observability only (all fields optional
-  // per finding #4) — reap identity is /proc/*/environ scan for the uuid.
+  // #P3fix必修5 — the marker file itself was already written before the
+  // first tmux session (see prepareIdentityForStart above); everything from
+  // here on is a best-effort refresh that adds pane-pid hints. Those hints
+  // are observability plus invariant-11 scope anchors — they are NOT the
+  // reap identity (that is always the environ uuid), so a failed refresh
+  // degrades post-mortem detail, never reclaimability.
   const harvestSession = (session: string): SessionInfo | undefined => {
     try {
       const panePid = Number(execFileSync("tmux", ["display-message", "-p", "-t", session, "#{pane_pid}"], { stdio: ["ignore", "pipe", "ignore"] }).toString().trim());
@@ -505,10 +545,10 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     writeCopresenceMarker(nodesDir(), resolved.id, identityMarker, {
       appsrv: harvestSession(appsrvSession),
     });
-    console.log(`[anet] identity marker written (uuid=${identityMarker.slice(0, 8)}… — appsrv up, bridge/tui pending)`);
+    console.log(`[anet] identity marker refreshed with appsrv pane hint (bridge/tui pending)`);
   } catch (e: any) {
-    console.error(`[anet] ⚠ could not persist identity marker: ${e?.message || e}`);
-    console.error(`[anet]    Stop will fall back to legacy tmux-name teardown (subprocess-orphan risk).`);
+    console.error(`[anet] ⚠ could not refresh identity marker hints: ${e?.message || e}`);
+    console.error(`[anet]    Teardown still works — the marker uuid written before startup governs reap.`);
   }
 
   // ── create fresh thread + persist config ──────────────────────────────
@@ -6275,6 +6315,12 @@ Stop a running agent node.
       const reapResult = await reapMarkerGroups(enumer, killer, uuid, {
         graceMs: 3000,
         logger: (m) => console.log(`[anet] ${m}`),
+        // #P3fix必修1+2 — the recorded pane pids anchor the invariant-11
+        // scope test, so a marker-carrying descendant whose environ we
+        // cannot read (non-dumpable) is still accounted for instead of
+        // being dropped. Each anchor is re-validated (alive + matching
+        // starttime) inside the scan before it may widen scope.
+        anchors: anchorsFromMarker(markerResult.marker),
       });
       if (reapResult.kind === "success") {
         removeCopresenceMarker(nodesDir(), resolved.id);

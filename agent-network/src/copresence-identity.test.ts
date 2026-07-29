@@ -28,6 +28,11 @@ import {
   callerCarriesMarker,
   reapMarkerGroups,
   realKiller,
+  prepareIdentityForStart,
+  type PrepareStartDeps,
+  type ReadMarkerResult,
+  type ReapResult,
+  type ScanAnchors,
   type ProcessEnumerator,
   type KillPrimitive,
   type CopresenceMarker,
@@ -716,30 +721,135 @@ describe("Blocker 1: scanEnvironForMarker EACCES discrimination", () => {
     expect(result).toEqual([9999]);
   });
 
-  test("Defect A defense: own-uid running EACCES records unreadable pid → reap refuses to delete marker", async () => {
-    // Real-world calibration (audit + practical Linux behavior 2026-07-29):
+  test("Defect A defense: own-uid EACCES pid IN SCOPE (anchored) → reap refuses to delete marker", async () => {
     // Rather than throwing (which crashed the whole scan on random system
     // processes like sd-pam, docker daemons, systemd-oomd), scan RECORDS
-    // the pid as "unreadable own-uid" and continues. reapMarkerGroups treats
-    // ANY unreadable-own-uid pid as "cannot prove teardown succeeded" and
-    // returns kind:"failed" (preserving the marker file for retry). This
-    // maintains Defect A defense WITHOUT crashing on unrelated system procs.
+    // the pid as unreadable and continues. reapMarkerGroups treats an
+    // IN-SCOPE unreadable pid as "cannot prove teardown succeeded" and
+    // returns kind:"failed" (preserving the marker file for retry).
+    //
+    // Blocker 1 refinement: "in scope" is now load-bearing. Here the
+    // unreadable pid is a child of a validated marker-file session pid, so
+    // it is plausibly part of our tree and MUST fail closed. The companion
+    // test below covers the same pid with no anchor — that one must NOT
+    // block teardown, which is what made v2 unusable on real hosts.
     const enumer = new MockEnumer();
     const killer = new MockKiller();
-    // A process that: is ours, is running, but its environ returns EACCES.
-    // With NO marker-carrying pids visible, scan would return hits=0 but
-    // unreadableOwnUid=[500] — reap must NOT report success.
-    enumer.add(500, "ANET_NODE_MARKER=u1\0", 500, 0, 1, { ownerUid: process.getuid?.() ?? -1, state: "S" });
+    const ourUid = process.getuid?.() ?? -1;
+    // 400 = recorded appsrv pane pid, still alive with the recorded starttime.
+    enumer.add(400, "ANET_NODE_MARKER=u1\0", 400, 777, 1, { ownerUid: ourUid, state: "S" });
+    enumer.environErrs.set(400, Object.assign(new Error("EACCES"), { code: "EACCES" }));
+    // 500 = its child; own uid, running, environ unreadable.
+    enumer.add(500, "ANET_NODE_MARKER=u1\0", 500, 0, 400, { ownerUid: ourUid, state: "S" });
     enumer.environErrs.set(500, Object.assign(new Error("EACCES"), { code: "EACCES" }));
-    // Sanity: scan sees the unreadable
-    const scan = scanEnvironForMarkerFull(enumer, "u1");
+    const anchors = { sessions: [{ pid: 400, starttime_jiffies: 777 }] };
+    const scan = scanEnvironForMarkerFull(enumer, "u1", anchors);
     expect(scan.hits.length).toBe(0);
-    expect(scan.unreadableOwnUid).toEqual([500]);
+    expect(scan.unreadableOwnUid.sort()).toEqual([400, 500]);
+    expect(scan.unreadableOutOfScope).toEqual([]);
     // Reap must refuse:
-    const result = await reapMarkerGroups(enumer, killer, "u1", { graceMs: 0, logger: () => {} });
+    const result = await reapMarkerGroups(enumer, killer, "u1", { graceMs: 0, logger: () => {}, anchors });
     expect(result.kind).toBe("failed");
     if (result.kind === "failed") {
-      expect(result.unreadableOwnUid).toEqual([500]);
+      expect(result.unreadableOwnUid?.sort()).toEqual([400, 500]);
+    }
+  });
+
+  test("Blocker 1: own-uid EACCES pid OUT OF SCOPE → informational only, teardown still succeeds", async () => {
+    // This is the defect that made v2 100% non-functional on a normal Linux
+    // host: a same-uid process whose PRIMARY GID differs from ours fails the
+    // kernel's __ptrace_may_access gid check, so its environ EACCESes even
+    // though its real uid matches. v2 put it on the fail-closed list, so
+    // reapMarkerGroups could never return success, the marker was never
+    // removed, and every single stop printed "teardown incomplete" — even
+    // when the copresence tree was already perfectly clean.
+    const enumer = new MockEnumer();
+    const killer = new MockKiller();
+    const ourUid = process.getuid?.() ?? -1;
+    // Unrelated same-uid process: own pgroup, ppid=1, no anchor above it.
+    enumer.add(8888, "SOMETHING_ELSE=1\0", 8888, 0, 1, { ownerUid: ourUid, state: "S" });
+    enumer.environErrs.set(8888, Object.assign(new Error("EACCES"), { code: "EACCES" }));
+    const scan = scanEnvironForMarkerFull(enumer, "u1");
+    expect(scan.hits).toEqual([]);
+    expect(scan.unreadableOwnUid).toEqual([]);
+    expect(scan.unreadableOutOfScope).toEqual([8888]);
+    const result = await reapMarkerGroups(enumer, killer, "u1", { graceMs: 0, logger: () => {} });
+    expect(result.kind).toBe("success");
+  });
+
+  test("Blocker 1: unreadable pid sharing a marker carrier's PGROUP is in scope (no anchors needed)", () => {
+    const enumer = new MockEnumer();
+    const ourUid = process.getuid?.() ?? -1;
+    // 700 carries the marker and is readable → a hit, pgid 700.
+    enumer.add(700, "ANET_NODE_MARKER=u1\0", 700, 0, 1, { ownerUid: ourUid, state: "S" });
+    // 701 shares pgid 700 but its environ is unreadable → in scope via pgid.
+    enumer.add(701, "ANET_NODE_MARKER=u1\0", 700, 0, 700, { ownerUid: ourUid, state: "S" });
+    enumer.environErrs.set(701, Object.assign(new Error("EACCES"), { code: "EACCES" }));
+    // 900 is unrelated and unreadable → out of scope.
+    enumer.add(900, "OTHER=1\0", 900, 0, 1, { ownerUid: ourUid, state: "S" });
+    enumer.environErrs.set(900, Object.assign(new Error("EACCES"), { code: "EACCES" }));
+    const scan = scanEnvironForMarkerFull(enumer, "u1");
+    expect(scan.hits).toEqual([700]);
+    expect(scan.unreadableOwnUid).toEqual([701]);
+    expect(scan.unreadableOutOfScope).toEqual([900]);
+  });
+
+  test("Blocker 8/invariant 5: an anchor whose starttime no longer matches is REJECTED (pid reuse)", () => {
+    // The header promised a starttime re-verification for years and the code
+    // never did one — SessionInfo.starttime_jiffies was written and never
+    // read. It is now the gate that stops a stale marker from widening the
+    // fail-closed scope onto whatever unrelated process inherited the pid.
+    const enumer = new MockEnumer();
+    const ourUid = process.getuid?.() ?? -1;
+    // pid 400 exists but with a DIFFERENT starttime than the marker recorded
+    // → recycled pid → must not anchor anything.
+    enumer.add(400, "SOMETHING_ELSE=1\0", 400, /* starttime */ 999, 1, { ownerUid: ourUid, state: "S" });
+    enumer.add(500, "ANET_NODE_MARKER=u1\0", 500, 0, 400, { ownerUid: ourUid, state: "S" });
+    enumer.environErrs.set(500, Object.assign(new Error("EACCES"), { code: "EACCES" }));
+    const stale = { sessions: [{ pid: 400, starttime_jiffies: 777 }] };
+    const withStale = scanEnvironForMarkerFull(enumer, "u1", stale);
+    expect(withStale.unreadableOwnUid).toEqual([]);
+    expect(withStale.unreadableOutOfScope).toEqual([500]);
+    // Same anchor pid, matching starttime → accepted, 500 becomes in-scope.
+    const fresh = { sessions: [{ pid: 400, starttime_jiffies: 999 }] };
+    const withFresh = scanEnvironForMarkerFull(enumer, "u1", fresh);
+    expect(withFresh.unreadableOwnUid).toEqual([500]);
+    expect(withFresh.unreadableOutOfScope).toEqual([]);
+  });
+
+  test("Blocker 7: post-kill RESCAN unreadable half also preserves the marker", async () => {
+    // reapMarkerGroups' final gate is
+    //   `residual.length > 0 || rescan.unreadableOwnUid.length > 0`
+    // and the audit proved the second half was dead: rewriting it to
+    // `residual.length > 0` left 52/52 tests green. This test covers it.
+    const enumer = new MockEnumer();
+    const killer = new MockKiller();
+    const ourUid = process.getuid?.() ?? -1;
+    // 400 = live anchor (recorded pane pid, matching starttime).
+    enumer.add(400, "ANET_NODE_MARKER=u1\0", 400, 777, 1, { ownerUid: ourUid, state: "S" });
+    // 500 = readable marker carrier in its own pgroup — this one gets killed.
+    enumer.add(500, "ANET_NODE_MARKER=u1\0", 500, 0, 400, { ownerUid: ourUid, state: "S" });
+    const anchors = { sessions: [{ pid: 400, starttime_jiffies: 777 }] };
+    killer.aliveMap.set(500, false); // exits on SIGTERM
+    const logs: string[] = [];
+    const result = await reapMarkerGroups(enumer, killer, "u1", {
+      graceMs: 0,
+      logger: (m) => logs.push(m),
+      anchors,
+      // Between the kill and the post-rescan, pid 400 (still alive, still an
+      // anchor) becomes environ-unreadable — e.g. it re-execs into a
+      // non-dumpable state. residual hits are 0, so ONLY the rescan's
+      // unreadable half can catch it.
+      sleep: async () => {
+        enumer.procs.delete(500);
+        enumer.environErrs.set(400, Object.assign(new Error("EACCES"), { code: "EACCES" }));
+      },
+    });
+    expect(result.kind).toBe("failed");
+    if (result.kind === "failed") {
+      expect(result.residualPids).toEqual([]);
+      expect(result.unreadableOwnUid).toEqual([400]);
+      expect(result.detail).toContain("unreadable");
     }
   });
 
@@ -908,5 +1018,225 @@ describe("Finding #4: writeMarker accepts partial sessions object", () => {
     const r = readMarker(tmpNodesDir, "no-sessions-node");
     expect(r.kind).toBe("ok");
     if (r.kind === "ok") expect(r.marker.marker).toBe(uuid);
+  });
+});
+
+// ─── Blocker 3: group-level unreadable must not couple to the whole box ───
+
+describe("Blocker 3: verifyGroupHomogeneity stat-unreadable pids are bounded by ownership", () => {
+  // v2 pushed EVERY pid whose /proc/PID/stat read threw onto the `unreadable`
+  // list BEFORE applying the pgid filter. One unrelated process anywhere on
+  // the machine with a hidden stat (hidepid, LSM, container policy) therefore
+  // turned EVERY group into ENUM_ERROR — nothing was ever killed, on any
+  // node, for as long as that process lived.
+
+  test("an unrelated OTHER-uid pid whose stat is unreadable does NOT poison the group", () => {
+    const enumer = new MockEnumer();
+    const ourUid = process.getuid?.() ?? -1;
+    enumer.add(700, "ANET_NODE_MARKER=u1\0", 700, 0, 1, { ownerUid: ourUid, state: "S" });
+    // Unrelated root process hidden from us: stat read throws, uid is not ours.
+    enumer.add(31337, "OTHER=1\0", 31337, 0, 1, { ownerUid: 0, state: "S" });
+    enumer.statErrs.set(31337, Object.assign(new Error("EACCES"), { code: "EACCES" }));
+    const result = verifyGroupHomogeneity(enumer, 700, "u1");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.members).toEqual([700]);
+  });
+
+  test("a pid hidden so thoroughly that even its uid is unknown does NOT poison the group", () => {
+    const enumer = new MockEnumer();
+    const ourUid = process.getuid?.() ?? -1;
+    enumer.add(700, "ANET_NODE_MARKER=u1\0", 700, 0, 1, { ownerUid: ourUid, state: "S" });
+    // listAllPids reports it, but nothing about it is readable (hidepid=2).
+    const base = enumer.listAllPids.bind(enumer);
+    enumer.listAllPids = () => [...base(), 41337];
+    enumer.statErrs.set(41337, Object.assign(new Error("EACCES"), { code: "EACCES" }));
+    const result = verifyGroupHomogeneity(enumer, 700, "u1");
+    expect(result.ok).toBe(true);
+  });
+
+  test("an OWN-uid pid whose stat is unreadable still fails closed (we cannot rule out membership)", () => {
+    const enumer = new MockEnumer();
+    const ourUid = process.getuid?.() ?? -1;
+    enumer.add(700, "ANET_NODE_MARKER=u1\0", 700, 0, 1, { ownerUid: ourUid, state: "S" });
+    enumer.add(701, "ANET_NODE_MARKER=u1\0", 700, 0, 700, { ownerUid: ourUid, state: "S" });
+    enumer.statErrs.set(701, Object.assign(new Error("EACCES"), { code: "EACCES" }));
+    const result = verifyGroupHomogeneity(enumer, 700, "u1");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.cause).toBe("ENUM_ERROR");
+      expect(result.unreadablePids).toEqual([701]);
+    }
+  });
+});
+
+// ─── Blocker 4: MISSING wins over PLATFORM_UNSUPPORTED ───────────────────
+
+describe("Blocker 4: readMarker checks MISSING before PLATFORM_UNSUPPORTED", () => {
+  // The stop caller treats every cause except MISSING as "a marker exists
+  // but we refused it" and prints a loud corruption warning. v2 returned
+  // PLATFORM_UNSUPPORTED before touching the filesystem, so on macOS and
+  // Windows EVERY node of EVERY runtime — none of which have ever had a
+  // marker file — printed that warning on `anet node stop`. A user-visible
+  // regression against the pre-P3 baseline for people who never used
+  // copresence at all.
+  const withPlatform = <T,>(platform: string, fn: () => T): T => {
+    const original = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { value: platform, configurable: true });
+    try { return fn(); } finally { Object.defineProperty(process, "platform", original); }
+  };
+
+  test("non-Linux + NO marker file → MISSING (silent legacy fall-through, no scary warning)", () => {
+    for (const platform of ["darwin", "win32"]) {
+      const r = withPlatform(platform, () => readMarker(tmpNodesDir, "node-without-marker"));
+      expect(r.kind).toBe("refuse");
+      if (r.kind === "refuse") expect(r.cause).toBe("MISSING");
+    }
+  });
+
+  test("non-Linux + marker file present → PLATFORM_UNSUPPORTED (we genuinely cannot act on it)", () => {
+    writeMarker(tmpNodesDir, "node-with-marker", "some-uuid", {});
+    for (const platform of ["darwin", "win32"]) {
+      const r = withPlatform(platform, () => readMarker(tmpNodesDir, "node-with-marker"));
+      expect(r.kind).toBe("refuse");
+      if (r.kind === "refuse") expect(r.cause).toBe("PLATFORM_UNSUPPORTED");
+    }
+  });
+});
+
+// ─── Blockers 5 + 6: start-side identity preparation ─────────────────────
+
+describe("Blockers 5+6: prepareIdentityForStart", () => {
+  const ourUid = process.getuid?.() ?? -1;
+
+  interface Recorder {
+    deps: PrepareStartDeps;
+    written: Array<{ uuid: string; sessions: CopresenceMarker["sessions"] }>;
+    removed: number;
+    reaped: Array<{ uuid: string; anchors: ScanAnchors }>;
+    log: string[];
+  }
+
+  function recorder(opts: {
+    read: () => ReadMarkerResult;
+    reapResult?: ReapResult;
+  }): Recorder {
+    const written: Recorder["written"] = [];
+    const reaped: Recorder["reaped"] = [];
+    const log: string[] = [];
+    let removed = 0;
+    const rec = {
+      written, reaped, log,
+      get removed() { return removed; },
+      deps: {
+        readMarker: opts.read,
+        reap: async (uuid: string, anchors: ScanAnchors) => {
+          reaped.push({ uuid, anchors });
+          return opts.reapResult ?? { kind: "success", killedPgids: [], residualPids: [] };
+        },
+        removeMarker: () => { removed++; },
+        writeMarker: (uuid: string, sessions: CopresenceMarker["sessions"]) => { written.push({ uuid, sessions }); },
+        logger: (m: string) => log.push(m),
+      } as PrepareStartDeps,
+    };
+    return rec as Recorder;
+  }
+
+  test("no marker on disk → writes the new marker, reaps nothing", async () => {
+    const rec = recorder({ read: () => ({ kind: "refuse", cause: "MISSING", detail: "none" }) });
+    const result = await prepareIdentityForStart("new-uuid", rec.deps);
+    expect(result.kind).toBe("ok");
+    expect(rec.reaped).toEqual([]);
+    expect(rec.written.length).toBe(1);
+    expect(rec.written[0].uuid).toBe("new-uuid");
+  });
+
+  test("Blocker 6: a PRESERVED marker is reaped by its OWN uuid before the new one is written", async () => {
+    // The stop path deliberately preserves the marker when teardown could not
+    // be proven complete. v2's start then overwrote it with a fresh uuid
+    // while killing only tmux sessions BY NAME — the surviving subprocesses
+    // of the old generation kept running with an environ uuid that no longer
+    // existed anywhere on disk. Permanently unreclaimable.
+    const marker: CopresenceMarker = {
+      marker: "old-uuid",
+      boot_id: "b",
+      started_at_epoch_ms: 1,
+      owner_uid: ourUid,
+      sessions: { appsrv: makeSession({ pid: 4242, starttime_jiffies: 777 }) },
+    };
+    const rec = recorder({ read: () => ({ kind: "ok", marker }) });
+    const result = await prepareIdentityForStart("new-uuid", rec.deps);
+    expect(result.kind).toBe("ok");
+    if (result.kind === "ok") expect(result.reclaimedUuid).toBe("old-uuid");
+    // Reaped the OLD uuid, with the marker's recorded pane pid as scope anchor.
+    expect(rec.reaped.length).toBe(1);
+    expect(rec.reaped[0].uuid).toBe("old-uuid");
+    expect(rec.reaped[0].anchors.sessions).toEqual([{ pid: 4242, starttime_jiffies: 777 }]);
+    expect(rec.removed).toBe(1);
+    expect(rec.written.map((w) => w.uuid)).toEqual(["new-uuid"]);
+  });
+
+  test("Blocker 6: if the old generation cannot be reaped, start is BLOCKED and nothing is overwritten", async () => {
+    const marker: CopresenceMarker = {
+      marker: "old-uuid",
+      boot_id: "b",
+      started_at_epoch_ms: 1,
+      owner_uid: ourUid,
+      sessions: {},
+    };
+    const rec = recorder({
+      read: () => ({ kind: "ok", marker }),
+      reapResult: {
+        kind: "failed",
+        killedPgids: [],
+        residualPids: [4242],
+        skippedGroups: [],
+        detail: "1 marker-carrying pid(s) still alive",
+      },
+    });
+    const result = await prepareIdentityForStart("new-uuid", rec.deps);
+    expect(result.kind).toBe("blocked");
+    if (result.kind === "blocked") {
+      expect(result.cause).toBe("STALE_TREE_ALIVE");
+      expect(result.detail).toContain("old-uuid".slice(0, 8));
+    }
+    // The critical assertion: the old identity is still the one on disk.
+    expect(rec.written).toEqual([]);
+    expect(rec.removed).toBe(0);
+  });
+
+  test("a marker from a previous BOOT is discarded without a reap (its pids cannot exist)", async () => {
+    const rec = recorder({ read: () => ({ kind: "refuse", cause: "STALE_BOOT_ID", detail: "rebooted" }) });
+    const result = await prepareIdentityForStart("new-uuid", rec.deps);
+    expect(result.kind).toBe("ok");
+    expect(rec.reaped).toEqual([]);
+    expect(rec.removed).toBe(1);
+    expect(rec.written.map((w) => w.uuid)).toEqual(["new-uuid"]);
+  });
+
+  test("an unreadable/suspicious marker BLOCKS start rather than overwriting it", async () => {
+    for (const cause of ["SYMLINK", "NOT_REGULAR", "WRONG_MODE", "OWNER_MISMATCH", "PARSE_ERROR", "SCHEMA_INVALID", "PLATFORM_UNSUPPORTED"] as const) {
+      const rec = recorder({ read: () => ({ kind: "refuse", cause, detail: `d-${cause}` }) });
+      const result = await prepareIdentityForStart("new-uuid", rec.deps);
+      expect(result.kind).toBe("blocked");
+      if (result.kind === "blocked") expect(result.cause).toBe("UNUSABLE_MARKER");
+      expect(rec.written).toEqual([]);
+      expect(rec.removed).toBe(0);
+    }
+  });
+
+  test("Blocker 5: the marker is written with an EMPTY sessions object (before any session exists)", async () => {
+    // Ordering is the whole point: the file must be on disk before the first
+    // marker-carrying tmux session is created, so there is no window in which
+    // a live carrier exists with no marker file. That means there are no pane
+    // pids to record yet — and there must not need to be, because identity is
+    // the uuid alone.
+    const rec = recorder({ read: () => ({ kind: "refuse", cause: "MISSING", detail: "none" }) });
+    await prepareIdentityForStart("new-uuid", rec.deps);
+    expect(rec.written[0].sessions).toEqual({});
+  });
+
+  test("refuses an empty uuid (guards against a silently regenerated identity)", async () => {
+    const rec = recorder({ read: () => ({ kind: "refuse", cause: "MISSING", detail: "none" }) });
+    await expect(prepareIdentityForStart("", rec.deps)).rejects.toThrow();
   });
 });
