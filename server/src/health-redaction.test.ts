@@ -115,6 +115,76 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
   });
 });
 
+describe("f28a6c1b /health sse_sessions — auth-gated restoration for dashboard 'online' widget", () => {
+  // The dashboard's server-side Next.js proxy (agent-network-dashboard
+  // `app/api/hub/health/route.ts` → `hubFetch('/health')`) forwards the
+  // logged-in user's V3 utok_ as `Authorization: Bearer …`. Anonymous
+  // callers (public watchdog, internet strangers) still get NO
+  // sse_sessions — that leak stays closed. Authenticated callers get
+  // the sessions map scoped to their networks (ops sees all).
+
+  test("regular member with valid utok_: sse_sessions present, filtered to member's networks", async () => {
+    const res = await fetch(`${BASE}/health`, {
+      headers: { Authorization: `Bearer ${userToken}` },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    // Field must be present when authenticated — otherwise dashboard
+    // "online" widget shows 0.
+    expect("sse_sessions" in body).toBe(true);
+    // Must contain the member's own SSE connection key.
+    const ownKey = `${userNetworkId}:${userName}`;
+    expect(body.sse_sessions[ownKey]).toBeGreaterThanOrEqual(1);
+    // Watchdog aggregate contract unchanged.
+    expect(body.sse_connections).toBeGreaterThanOrEqual(1);
+  });
+
+  test("admin with valid utok_: sse_sessions present, full unfiltered map (ops parity with /api/stats/sse)", async () => {
+    const res = await fetch(`${BASE}/health`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect("sse_sessions" in body).toBe(true);
+    // Admin sees the member's key even though they live in a different
+    // network (admin scope spans everything, same as /api/stats/sse).
+    const memberKey = `${userNetworkId}:${userName}`;
+    expect(body.sse_sessions[memberKey]).toBeGreaterThanOrEqual(1);
+    // Sanity: admin's view must match the auth-gated ops endpoint.
+    const opsRes = await fetch(`${BASE}/api/stats/sse`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    const ops = await opsRes.json() as any;
+    expect(body.sse_sessions).toEqual(ops.sessions);
+  });
+
+  test("anonymous still gets NO sse_sessions (leak stays closed, mutation-red witness)", async () => {
+    // This is the mutation-red assertion for the auth gate: if the
+    // handler stops distinguishing anonymous from authenticated and
+    // starts including sse_sessions unconditionally, this test turns
+    // RED. Distinct from the older `does NOT expose SSE key detail`
+    // test — that one guards against any regression restoring the
+    // OLD unconditional leak; this one guards against a well-meaning
+    // "just always send it if authenticated is optional" bug.
+    const res = await fetch(`${BASE}/health`);
+    const body = await res.json() as any;
+    expect("sse_sessions" in body).toBe(false);
+  });
+
+  test("invalid/garbage token: treated as anonymous — no sse_sessions", async () => {
+    const res = await fetch(`${BASE}/health`, {
+      headers: { Authorization: "Bearer utok_completely_fake_nonexistent" },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    // resolveRequestAuth returns null for unresolvable tokens, so the
+    // handler must NOT fall through to "authenticated" branch. Otherwise
+    // a bad token would degrade to "anonymous with sse_sessions" — that
+    // would be the leak in a different disguise.
+    expect("sse_sessions" in body).toBe(false);
+  });
+});
+
 describe("#473 GET /api/stats/sse — detail survives, behind ops auth", () => {
   test("anonymous → 401", async () => {
     const res = await fetch(`${BASE}/api/stats/sse`);

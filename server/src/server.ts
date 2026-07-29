@@ -1197,10 +1197,67 @@ return Bun.serve({
       // now lives behind auth at GET /api/stats/sse.
       // `version` stays: it does help fingerprinting, but ops needs it
       // to verify deploys land, and the tradeoff was accepted in review.
+      //
+      // #495-followup / f28a6c1b — auth-gated `sse_sessions` restored so
+      // the dashboard's own "online" widget can compute per-agent status
+      // in one round-trip. Rules:
+      //   - anonymous (no valid token): NO sse_sessions field → watchdog
+      //     contract untouched, no topology leak (mutation removing this
+      //     gate turns the anonymous test RED — see health-redaction.test)
+      //   - admin utok_ / legacy master / DEV_OPEN: full sessions map
+      //     (parity with /api/stats/sse ops path)
+      //   - regular utok_ member: sessions map FILTERED to network_ids
+      //     the caller is a member of — safe against the "any account
+      //     sees all-network topology" regression the #473 fix closed;
+      //     dashboard user proxies with the logged-in user's utok_ so
+      //     their own network's aliases surface; strangers' networks do
+      //     not
       const count = db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM sessions");
       const sse = getSSEStats();
       const license = db.get<any>("SELECT type, expires_at FROM licenses LIMIT 1");
-      return withCors(req, Response.json({
+
+      // Non-fatal auth probe (no 401 — /health must stay 200 anonymous).
+      const healthAuth = resolveRequestAuth(req);
+      const healthIsMaster = !healthAuth && isLegacyAuthToken(req);
+      const healthIsDevOpen = !healthAuth && !AUTH_TOKEN && DEV_OPEN;
+      const healthIsAdmin = !!(healthAuth?.username && db.get<any>(
+        "SELECT role FROM users WHERE username = ?1", healthAuth.username,
+      )?.role === "admin");
+
+      let scopedSessions: Record<string, number> | undefined;
+      if (healthIsMaster || healthIsDevOpen || healthIsAdmin) {
+        // Ops parity with /api/stats/sse — full map.
+        scopedSessions = sse.sessions;
+      } else if (healthAuth?.userId) {
+        // Regular authenticated member — filter to networks they belong
+        // to. Keys are `{networkId}:{alias}` (or observer keys shaped
+        // `\0netobs:{networkId}`); parse the network prefix and keep
+        // only entries whose network is in the member's set.
+        const memberNets = new Set<string>(
+          db.all<{ network_id: string }>(
+            "SELECT network_id FROM network_members WHERE user_id = ?1",
+            healthAuth.userId,
+          ).map((r) => r.network_id),
+        );
+        // If member has no networks at all, keep field present but empty
+        // so the dashboard can distinguish "authenticated + none active"
+        // from "not authenticated at all".
+        const filtered: Record<string, number> = {};
+        for (const [key, n] of Object.entries(sse.sessions)) {
+          // Observer keys start with `\0netobs:` — printableKey renders
+          // them as `netobs:<networkId>` (leading `\0` stripped). Handle
+          // both raw and printable forms defensively.
+          const printableObs = key.startsWith("netobs:") ? key.slice("netobs:".length) : null;
+          const netId = printableObs ?? key.split(":")[0];
+          if (memberNets.has(netId)) filtered[key] = n;
+        }
+        scopedSessions = filtered;
+      }
+      // healthAuth == null AND no legacy master AND no DEV_OPEN → leave
+      // scopedSessions undefined → sse_sessions field omitted entirely
+      // (watchdog + arbitrary internet strangers see aggregates only).
+
+      const body: Record<string, unknown> = {
         ok: true,
         version: SERVER_VERSION,
         api_version: "v3",
@@ -1214,7 +1271,9 @@ return Bun.serve({
         multi_network: true,
         license: license?.type || "none",
         uptime: Math.floor(process.uptime()),
-      }));
+      };
+      if (scopedSessions !== undefined) body.sse_sessions = scopedSessions;
+      return withCors(req, Response.json(body));
     }
 
     // ── All REST /api endpoints require auth (if token configured) ──
