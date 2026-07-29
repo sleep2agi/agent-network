@@ -99,13 +99,15 @@ function checkRateLimit(ip: string, maxPerMinute = 60): boolean {
   entry.count++;
   return true;
 }
-// Cleanup stale entries every 5 minutes
-setInterval(() => {
+// Cleanup stale entries every 5 minutes. Interval is registered in
+// startHub() (#476) — module scope must stay timer-free so importing
+// this module neither holds the event loop open nor does periodic work.
+function sweepStaleRateLimits(): void {
   const now = Date.now();
   for (const [ip, entry] of rateLimits) {
     if (now > entry.resetAt) rateLimits.delete(ip);
   }
-}, 300000);
+}
 
 // ── Factory: 每个请求创建新的 McpServer（stateless 模式）──
 function createServer(clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false, callerTokenId?: string | null): McpServer {
@@ -501,7 +503,10 @@ const wsTmuxIntervals = new Map<object, ReturnType<typeof setInterval>>();
 
 
 // ── Task expiration patrol (every 5 minutes) ──
-setInterval(() => {
+// Registered in startHub() (#476): this WRITES the DB, so it must never
+// run as an import side effect — a tool/test importing this module with
+// COMMHUB_DB unset would patrol the production database.
+function patrolExpiredTasks(): void {
   try {
     const result = db.run(
       `UPDATE tasks SET status = 'expired', completed_at = datetime('now')
@@ -516,7 +521,7 @@ setInterval(() => {
       for (const t of expired) logTaskEvent(t.task_id, null, "expired", "patrol");
     }
   } catch {}
-}, 5 * 60 * 1000);
+}
 
 // #434 — test-safety seam, same signature as PR #438 so the two branches
 // merge cleanly. Wraps the sole Bun.serve config in a factory so
@@ -2532,17 +2537,33 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   // every COMMHUB_STALE_SWEEP_SECONDS (default 60s).
   const staleSweeperTimer = startStaleSessionSweeper();
 
-  // The Bun.serve socket is what keeps the process alive; the sweepers
-  // must not — otherwise a test (or a future caller) that stops the
-  // server would still hang on two live intervals it cannot reach.
+  // #476 — the two legacy module-level intervals, now owned by startHub
+  // like every other periodic job: rate-limit map cleanup (memory only)
+  // and task expiration patrol (writes DB — must never run on import).
+  // Periods env-overridable so tests can observe a real firing without
+  // waiting minutes (mirrors COMMHUB_RETENTION_SWEEP_MINUTES above).
+  const rateLimitSweepMs = Number(process.env.COMMHUB_RATELIMIT_SWEEP_MS) > 0
+    ? Number(process.env.COMMHUB_RATELIMIT_SWEEP_MS) : 300000;
+  const taskPatrolMs = Number(process.env.COMMHUB_TASK_PATROL_MS) > 0
+    ? Number(process.env.COMMHUB_TASK_PATROL_MS) : 5 * 60 * 1000;
+  const rateLimitSweepTimer = setInterval(sweepStaleRateLimits, rateLimitSweepMs);
+  const taskPatrolTimer = setInterval(patrolExpiredTasks, taskPatrolMs);
+
+  // The Bun.serve socket is what keeps the process alive; the periodic
+  // jobs must not — otherwise a test (or a future caller) that stops the
+  // server would still hang on live intervals it cannot reach.
   (retentionSweeperTimer as any)?.unref?.();
   (staleSweeperTimer as any)?.unref?.();
+  (rateLimitSweepTimer as any)?.unref?.();
+  (taskPatrolTimer as any)?.unref?.();
 
   // ── Graceful shutdown ───────────────────────────────
   function shutdown() {
     console.log("[commhub] shutting down...");
     clearInterval(retentionSweeperTimer);
     clearInterval(staleSweeperTimer);
+    clearInterval(rateLimitSweepTimer);
+    clearInterval(taskPatrolTimer);
     db.close();
     process.exit(0);
   }

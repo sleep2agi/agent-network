@@ -36,6 +36,54 @@ describe("#438 corrective — importing server.ts is side-effect-free", () => {
   });
 });
 
+describe("#476 — import alone must let the process exit", () => {
+  test("a subprocess that only imports server.js exits by itself (no module-level timers hold the loop)", () => {
+    // Witnessed-red: pre-#476 (main 541a80aa) this child is killed by the
+    // timeout with a non-zero exit — two module-level setIntervals
+    // (rate-limit sweep + DB-writing task patrol) held the event loop
+    // after a bare import. Post-#476 both live inside startHub, so the
+    // child exits 0 on its own. Runs in a subprocess because the parent
+    // test process has its own handles and can't observe loop-emptiness.
+    const child = Bun.spawnSync({
+      cmd: ["bun", "-e", 'await import("./src/server.js");'],
+      cwd: `${import.meta.dir}/..`,
+      env: { ...process.env, COMMHUB_DB: process.env.COMMHUB_DB || "/tmp/anet-476-probe.db" },
+      timeout: 10_000,
+    });
+    expect(child.exitCode).toBe(0);
+  }, 15_000);
+
+  test("the moved task patrol actually FIRES under startHub (not just registered-looking)", () => {
+    // Fake-gate guard for the #476 move: stub patrolExpiredTasks to a
+    // no-op (or forget to register it in startHub) and this goes red.
+    // Runs in a subprocess because startHub is single-shot per process
+    // and the patrol period is shrunk via env for observability.
+    const script = `
+      process.env.COMMHUB_TASK_PATROL_MS = "100";
+      const { startHub } = await import("./src/server.js");
+      const { db } = await import("./src/db.js");
+      const hub = startHub({ port: 0, hostname: "127.0.0.1" });
+      db.run("DELETE FROM tasks WHERE task_id = 't476_patrol'");
+      db.run("INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, created_at, expires_at) " +
+             "VALUES ('t476_patrol', 'a', 'b', 'normal', 'delivered', 'x', datetime('now'), datetime('now', '-1 minute'))");
+      await new Promise((r) => setTimeout(r, 600));
+      const row = db.get("SELECT status FROM tasks WHERE task_id = 't476_patrol'");
+      console.log("PATROL_RESULT:" + (row ? row.status : "missing"));
+      db.run("DELETE FROM tasks WHERE task_id = 't476_patrol'");
+      hub.stop(true);
+      process.exit(0);
+    `;
+    const child = Bun.spawnSync({
+      cmd: ["bun", "-e", script],
+      cwd: `${import.meta.dir}/..`,
+      env: { ...process.env, COMMHUB_DB: process.env.COMMHUB_DB || "/tmp/anet-476-patrol.db" },
+      timeout: 15_000,
+    });
+    const out = new TextDecoder().decode(child.stdout);
+    expect(out).toContain("PATROL_RESULT:expired");
+  }, 20_000);
+});
+
 describe("#438 corrective — startHub is explicit, single-shot, observable", () => {
   test("startHub boots a live hub; second call throws with first boot's coordinates; bootServer stays available", async () => {
     const { startHub, bootServer, getStartedHub } = await import("./server.js") as any;
