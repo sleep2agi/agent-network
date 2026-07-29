@@ -1,4 +1,4 @@
-# Channel 插件踩坑经验
+# Channel / 共存节点踩坑经验
 
 > **适用范围**：本文是给**实现 Claude Code Channel 插件**（telegram / commhub / wechat / feishu 等）的开发者看的内部踩坑记录。
 >
@@ -116,3 +116,36 @@ https://github.com/anthropics/claude-plugins-official/tree/main/external_plugins
 - `capabilities`: `experimental: { "claude/channel": {} }`
 - `instructions`: 告诉 Claude 消息格式和回复方式
 - `notifications/claude/channel`: `meta.user` 决定显示名
+
+## 8. runtime 名是否可用，只能以真跑为准
+
+`codex-app-server` 是真实存在的 runtime，生产上有共存节点在跑，但它不等于“任意已发布 npm 包都能用”：
+
+- 截至今晚实测，已发布 npm 包未包含 `codex-app-server`；旧发布包收到这个名字会静默回落到 `claude`，不报错。
+- `--help` 不列不能证明 runtime / flag 不存在。grok 的 `--leader`、opencode 的 `--copresence` 都是同类隐藏开关。
+- grep 已发布 dist 也不能作否定证据，混淆产物会产生字面量假阴性。
+- 公开文档凡是写“支持 `codex-app-server`”，必须同时写清楚渠道：源码分支 / commit、预览包版本或已发布包版本。未验证的渠道一律标“锁定”或“待验证”。已开 issue #491 跟修复发布包静默回落问题。
+
+最低验证：
+
+```bash
+anet node create <alias> --runtime codex-app-server
+anet node start <alias>
+# 派短任务确认节点自报 / dashboard runtime 是 codex-app-server，而不是 claude
+```
+
+判据是“真实进程 + 短任务响应 + runtime 标识正确”，不是 help 文本或 dist 字面量。
+
+## 9. codex 共存节点 cwd 要查 app-server，不是只查桥
+
+codex thread 的工作目录继承自 `codex app-server` 进程。桥进程在哪个目录启动，不代表 codex 线程会在哪个目录写文件。
+
+踩坑复盘：如果只在拉桥前 `cd` 到目标目录，但 app-server 仍留在原 shell 目录，节点会自报主仓库 cwd；配上写权限，就等于把节点放进主仓库写文件。
+
+正确检查：
+
+```bash
+readlink /proc/<app-server-pid>/cwd
+```
+
+只查桥进程 cwd 查不出这个问题。共存脚本必须在启动 app-server 前切到目标工作目录，或显式预检 app-server cwd。参考本机已验证脚本：`~/.local/bin/tmppt-niu-copresence.sh`，里面包含预检、端口复用、不重复拉桥和这次事故由来。

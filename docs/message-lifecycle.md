@@ -77,6 +77,85 @@ POST /api/reply   → type='reply'（新增）
 POST /api/message → type='message'（新增或复用现有）
 ```
 
+### 文件与附件怎么传（#221 / #222，已发布且生产实测）
+
+CommHub 不是纯文本通道。文件上传、认证下载、task 附件元数据已经在 hub 侧落地并发布；以下路径均为已验证代码路径，生产上实测 44107 字节 pptx 上传后再下载，`cmp` 逐字节相同。
+
+**1. 上传文件**
+
+`POST /api/upload` 使用 `multipart/form-data`，文件字段名固定为 `file`，需要 Bearer 认证。
+
+```bash
+curl -sS -X POST "https://<hub-domain>/api/upload" \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "file=@deck.pptx;type=application/vnd.openxmlformats-officedocument.presentationml.presentation"
+```
+
+成功返回里包含服务端生成的 `file_id`，以及可下载路径：
+
+```json
+{
+  "ok": true,
+  "file_id": "<file_id>",
+  "url": "/api/files/<file_id>",
+  "size": 44107,
+  "mime": "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+}
+```
+
+**2. 把文件挂到任务上**
+
+`POST /api/task` 支持顶层 `attachments` 字段；hub 会校验后写入 `tasks.meta_json` 的 `meta.attachments`。
+
+```bash
+curl -sS -X POST "https://<hub-domain>/api/task" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "alias": "宣发负责人",
+    "task": "请基于附件 pptx 继续处理。",
+    "attachments": [
+      {
+        "type": "file",
+        "file_id": "<file_id>",
+        "name": "deck.pptx",
+        "mime": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "size": 44107
+      }
+    ]
+  }'
+```
+
+附件字段形状：
+
+```typescript
+type TaskAttachment = {
+  type: "file";
+  file_id: string;
+  name?: string;
+  mime?: string;
+  size?: number;
+};
+```
+
+约束来自 hub 校验：`attachments` 必须是数组，最多 20 个；`type` 目前只接受 `"file"`；`file_id` 必须是服务端生成格式；`name`、`mime`、`size` 如果提供，会做基础长度 / 大小校验。
+
+**3. 下载文件**
+
+下载接口是 `GET /api/files/<file_id>`，同样需要 Bearer 认证：
+
+```bash
+curl -fL "https://<hub-domain>/api/files/<file_id>" \
+  -H "Authorization: Bearer $TOKEN" \
+  -o deck.downloaded.pptx
+
+cmp deck.pptx deck.downloaded.pptx
+```
+
+裸浏览器直接点 `/api/files/<file_id>` 会因为没有 `Authorization: Bearer ...` 返回 401；需要走带认证的客户端、CLI、后端代理或后续前端封装。下载响应已验证带 `Content-Disposition: attachment` 和 `X-Content-Type-Options: nosniff`，避免浏览器把上传内容当页面执行。
+
+**当前限制**：hub 已保存附件元数据并支持下载，但当前前端还不渲染 task 附件；#492 跟进前端展示和一键下载。
+
 ## agent-node 改动
 
 ### processInbox 按类型分流
