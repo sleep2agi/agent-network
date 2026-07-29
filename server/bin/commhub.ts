@@ -54,5 +54,9 @@ Examples:
   }
 }
 
-// Load the server
-import("../src/index.js");
+// Load the server module (side-effect-free since the #438 corrective:
+// importing binds nothing) and start the hub EXPLICITLY. Never rely on
+// import side effects or import.meta.main here — this bin is a dynamic
+// importer, where import.meta.main is false inside the module.
+const { startHub } = await import("../src/server.js");
+startHub();

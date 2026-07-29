@@ -14,8 +14,11 @@ import { register, login } from "./auth.js";
 
 const SERVER_DB = mkdtempSync(join(tmpdir(), "anet-upload-http-db-")) + "/commhub.db";
 const UPLOADS_DIR = mkdtempSync(join(tmpdir(), "anet-upload-http-fs-"));
-const PORT = 19000 + Math.floor(Math.random() * 1000);
-const BASE = `http://127.0.0.1:${PORT}`;
+// #438 corrective: private bootServer({ port: 0 }) instance — the OS
+// assigns the port and BASE is derived from the ACTUAL bound port, so
+// this suite is immune to both the parent-side random-port TOCTOU and
+// the aggregate module-cache no-op (import no longer boots anything).
+let BASE = "";
 
 let server: any;
 let userToken = "";
@@ -27,7 +30,6 @@ beforeAll(async () => {
   // we want to validate the production code path).
   process.env.COMMHUB_DB = SERVER_DB;
   process.env.COMMHUB_UPLOADS_DIR = UPLOADS_DIR;
-  process.env.PORT = String(PORT);
   process.env.HOST = "127.0.0.1";
 
   // Use a unique username + strong password each run so we don't trip
@@ -50,16 +52,17 @@ beforeAll(async () => {
   }
   expect(userToken).toBeTruthy();
 
-  // Import the server module — its top-level `Bun.serve` call binds
-  // the port immediately. The import side effect IS the server start.
-  await import("./index.js");
+  // Importing is side-effect-free now; boot a private instance and
+  // read the real port back.
+  const { bootServer } = await import("./server.js");
+  server = bootServer({ port: 0, hostname: "127.0.0.1" });
+  BASE = `http://127.0.0.1:${server.port}`;
   // Tiny settle so the listener is ready.
   await new Promise((r) => setTimeout(r, 100));
 });
 
 afterAll(() => {
-  // Best-effort cleanup. The Bun.serve handle is created at import
-  // time so we can't easily stop it — process exit handles that.
+  try { server?.stop?.(true); } catch {}
   try { rmSync(UPLOADS_DIR, { recursive: true, force: true }); } catch {}
   try { rmSync(SERVER_DB, { recursive: true, force: true }); } catch {}
 });

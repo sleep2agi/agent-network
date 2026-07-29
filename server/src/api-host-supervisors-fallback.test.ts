@@ -27,8 +27,10 @@ import { register, login, createNetwork } from "./auth.js";
 import { db } from "./db.js";
 
 const SERVER_DB = mkdtempSync(join(tmpdir(), "anet-hs-fallback-db-")) + "/commhub.db";
-const PORT = 18000 + Math.floor(Math.random() * 1000);
-const BASE = `http://127.0.0.1:${PORT}`;
+// #438 corrective: private bootServer({ port: 0 }) instance (see
+// uploads-http.test.ts for rationale).
+let BASE = "";
+let server: any = null;
 
 // Three users:
 //   soloUser    — single accessible network (fallback should work)
@@ -41,7 +43,6 @@ let soloDaemonAlias = "";
 
 beforeAll(async () => {
   process.env.COMMHUB_DB = SERVER_DB;
-  process.env.PORT = String(PORT);
   process.env.HOST = "127.0.0.1";
 
   const suffix = `${Date.now()}_${Math.floor(Math.random() * 1000)}`;
@@ -53,6 +54,12 @@ beforeAll(async () => {
   // case a false-negative for our fix contract.
   const seed = register(`seed_admin_${suffix}`, password, undefined, "seed");
   if (!seed.ok || !seed.token) throw new Error("seed admin failed: " + JSON.stringify(seed));
+  // "First registered user is auto-admin" only holds when this suite has
+  // the DB to itself. In an aggregate run another suite registers first,
+  // the seed lands as a plain user, and paths 7/8 silently test the
+  // wrong role. Promote explicitly — resolveToken reads users.role at
+  // request time, so promotion after token issuance is effective.
+  db.run("UPDATE users SET role = 'admin' WHERE username = ?1", [`seed_admin_${suffix}`]);
   // Save the admin token so path 7 can hit /api/host-supervisors as an
   // admin directly (通信龙 review point 1: verify admin+no-query goes 400
   // explicitly, not only implicitly via seed_admin's shadow presence).
@@ -108,8 +115,10 @@ beforeAll(async () => {
     userIdForToken: login(`multi_${suffix}`, password).user!.user_id,
   });
 
-  // Import triggers Bun.serve at module load — this IS the server start.
-  await import("./index.js");
+  // server.ts is side-effect-free to import; boot a private instance.
+  const { bootServer } = await import("./server.js");
+  server = bootServer({ port: 0, hostname: "127.0.0.1" });
+  BASE = `http://127.0.0.1:${server.port}`;
   await new Promise((r) => setTimeout(r, 100));
 });
 
@@ -145,6 +154,7 @@ function seedHostSupervisorDaemon(opts: {
 }
 
 afterAll(() => {
+  try { server?.stop?.(true); } catch {}
   try { rmSync(SERVER_DB, { recursive: true, force: true }); } catch {}
 });
 
