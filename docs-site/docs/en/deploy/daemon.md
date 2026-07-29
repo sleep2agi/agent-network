@@ -109,9 +109,25 @@ A no-op wearing a green checkmark. The tell is that the `name` in `pm2 jlist` do
 
 `min_uptime` **exists only in ecosystem config files — the pm2 CLI does not accept it as a flag**. So services started via CLI never have it set, and fall back to the 1-second default.
 
-Combine that with the "fail slowly" advice above (`sleep 30; exit 1`) and it breaks: 30 seconds > the 1-second default, so pm2 counts the attempt as a **successful start** that later exited. The `max_restarts` counter resets, and the service **retries forever, never enters `errored`, and nobody ever notices**.
+Combine that with the "fail slowly" advice above (`sleep 30; exit 1`) and it breaks: 30 seconds > the 1-second default, so pm2 concludes the process **did start stably** before exiting — and **resets the exponential backoff delay**. Every failure starts backing off from scratch, so the service **restarts forever at a constant, fast rate**.
+
+Measured (5-second failure path, `max_restarts: 3`, the two apps differing only in `min_uptime`):
+
+| | `min_uptime: 1000` (below failure path) | `min_uptime: 15000` (above it) |
+|---|---|---|
+| Restarts in 3.5 minutes | **15, still climbing** | **2, then flat** |
+| Backoff actually engaging | No — reset each time | Yes — interval grows fast |
 
 **Rule: `min_uptime` must exceed how long your failure path takes.** If it sleeps 30, set 45000.
+
+::: warning With exp_backoff_restart_delay set, don't expect an errored state
+Neither app above **ever entered `errored`** — even with `max_restarts` set to 3.
+Once `exp_backoff_restart_delay` is configured, pm2 **replaces** the "stop at max_restarts" behavior with exponential backoff: it keeps retrying indefinitely, just further and further apart.
+
+So the value of `min_uptime` isn't "fail enough times and it stops and reports" — it's **making the backoff actually work**.
+
+If you need to know when a service is down, that has to come from **external monitoring** (a periodic `/health` probe, say). Don't count on pm2 entering `errored` to tell you.
+:::
 
 A working configuration:
 
