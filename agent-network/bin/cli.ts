@@ -14,7 +14,7 @@ import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirS
 import { dirname, isAbsolute, join } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
-import { spawn, execSync, execFileSync } from "child_process";
+import { spawn, spawnSync, execSync, execFileSync } from "child_process";
 import { createHash, randomBytes, randomUUID } from "crypto";
 import {
   writeMarker as writeCopresenceMarker,
@@ -4277,6 +4277,36 @@ async function launchAgent(id: string, forceNewSession = false) {
       saveProfile(nodeId, profile);
     }
 
+    // #486 P0 — claude CLI 2.1.220+ auto-switches to --print mode when its
+    // stdin is not a TTY, then errors "Input must be provided either through
+    // stdin or as a prompt argument when using --print" AND exits with code
+    // 0 (upstream Anthropic bug). anet spawns with { stdio: "inherit" }, so
+    // any headless caller (CI, systemd unit, docker run without -it, a
+    // watchdog / project-up child, any shell whose stdin is redirected)
+    // inherits a non-TTY stdin and hits this — the agent never comes online
+    // and downstream sees a false-success "session pinned" line. Refuse the
+    // spawn up front with actionable guidance so scripted callers see a
+    // real failure (non-zero exit + clear error), and interactive callers
+    // stay on the happy path.
+    //
+    // The dev-channels warn a few lines above (~L4211) covers the narrower
+    // "dev-channels + no TTY" case (needs Enter to dismiss a prompt). This
+    // gate is broader: NEW claude CLI needs a TTY unconditionally for
+    // interactive mode. Both warn/refuse paths coexist; this one fires
+    // first when it applies.
+    if (!process.stdin.isTTY) {
+      console.error(`[anet] ❌ claude-code-cli requires an interactive TTY on stdin.`);
+      console.error(`[anet]    Current shell's stdin is not a TTY. Claude CLI 2.1.220+`);
+      console.error(`[anet]    auto-switches to --print mode without a TTY and refuses to`);
+      console.error(`[anet]    start its interactive session, so the agent never comes online.`);
+      console.error(`[anet]    Fix:`);
+      console.error(`[anet]      • For headless / CI / systemd / docker without -it:`);
+      console.error(`[anet]        anet node start ${shellQuote(nodeId)} --tmux`);
+      console.error(`[anet]        (anet allocates a real PTY inside a tmux session)`);
+      console.error(`[anet]      • Or re-run this command from an interactive terminal.`);
+      process.exit(1);
+    }
+
     let launchedWithResume = false;
     const supportsSessionId = claudeSupportsSessionId();
     if (!supportsSessionId) {
@@ -4311,10 +4341,20 @@ async function launchAgent(id: string, forceNewSession = false) {
       if (child.pid) writeFileSync(pidFile, String(child.pid));
       child.on("exit", (code) => {
         try { rmSync(pidFile, { force: true }); } catch {}
-        if (forceNewSession) {
-          console.log(`\n[anet] New Claude Code session saved: ${profile.session?.slice(0, 8)}...`);
-        } else if (!launchedWithResume) {
-          console.log(`\n[anet] Claude Code session pinned: ${profile.session?.slice(0, 8)}...`);
+        // #486 P0 — only print the "session pinned / saved" success line
+        // when claude actually exited cleanly. Old behavior printed it
+        // after ANY exit (including error paths where claude died with
+        // an argument-parse error), giving scripted callers a false-
+        // success signal. Non-zero exit propagates via process.exit
+        // below; treating exit 0 as the only success path also protects
+        // against upstream claude bugs that emit an error to stderr but
+        // still exit 0 (rare but observed pre-#486 fix).
+        if ((code ?? 0) === 0) {
+          if (forceNewSession) {
+            console.log(`\n[anet] New Claude Code session saved: ${profile.session?.slice(0, 8)}...`);
+          } else if (!launchedWithResume) {
+            console.log(`\n[anet] Claude Code session pinned: ${profile.session?.slice(0, 8)}...`);
+          }
         }
         // Use the child's exit code as the parent's exit code via the
         // fa08eb4 wrap's natural process.exit(0) path. For non-zero exits,
@@ -4325,7 +4365,9 @@ async function launchAgent(id: string, forceNewSession = false) {
       child.on("error", (err) => {
         try { rmSync(pidFile, { force: true }); } catch {}
         console.error(`[anet] ❌ spawn claude failed: ${err.message || err}`);
-        resolve();
+        // #486 P0 — was `resolve()` → main() natural exit 0 → scripted
+        // callers see spawn ENOENT as success. Propagate as failure.
+        process.exit(1);
       });
     });
   }
@@ -4482,15 +4524,89 @@ async function startCommand() {
   }
 
   // `tmux new -As <alias>`:
+  // #486 P0 CR — the previous shape `tmux new -As <alias> … stdio:"inherit"`
+  // is ATTACHED and needs the caller's TTY. That defeated the purpose of
+  // pointing headless callers at `--tmux` as an escape hatch: in a
+  // no-TTY environment `tmux new -As` immediately printed
+  // "open terminal failed: not a terminal" and the parent's spawn +
+  // synchronous `child.on("exit")` returned so fast that the parent
+  // exited 0 — same "假成功" pattern as the mainline #486 bug, sub-path
+  // edition. Two behaviors now:
+  //   TTY present    → keep attached foreground (setRawMode inside claude
+  //                    still needs a real PTY chain; this path is what
+  //                    interactive users have relied on since #122).
+  //   TTY absent     → detached: `tmux new-session -d`, stdio:"ignore",
+  //                    then a bounded `tmux has-session` poll to prove
+  //                    the session actually came up. If it didn't (tmux
+  //                    quick-fail, permissions, no server startup), the
+  //                    captured tmux stderr is surfaced and the parent
+  //                    exits non-zero. Prints the exact attach command
+  //                    for follow-up.
   //   -A  attach if the session already exists (handles the rerun case)
   //   -s  session name (= alias for discoverability)
   //   -c  start in cwd
-  //   <cmd> the agent runtime, foreground (no flag — default is foreground)
-  // stdio: 'inherit' makes the parent terminal a tmux client; setRawMode
-  // sees a real PTY through the tmux client/server pair.
   const inner = forceNewSession
     ? `anet node start ${shellQuote(alias)} --new-session`
     : `anet node start ${shellQuote(alias)}`;
+
+  const headless = !process.stdin.isTTY;
+  if (headless) {
+    // Detached spawn: no stdin inheritance, capture stderr for surfacing
+    // on quick-fail. `new-session -d` returns immediately; we then
+    // verify liveness with `has-session` inside a bounded poll before
+    // reporting success. Any observed failure path exits non-zero.
+    let tmuxStderr = "";
+    try {
+      // Reuse the same argv shape (`-A -s -c <inner>`) but with
+      // `new-session -d`. `-A` still handles the rerun case (attach if
+      // exists) which for detached-startup means "leave existing session
+      // alone and consider it started".
+      const proc = spawnSync(
+        "tmux",
+        ["new-session", "-d", "-A", "-s", alias, "-c", process.cwd(), inner],
+        { stdio: ["ignore", "pipe", "pipe"] },
+      );
+      tmuxStderr = String(proc.stderr || "");
+      if (proc.status !== 0) {
+        console.error(`[anet] ❌ tmux new-session detached failed (exit ${proc.status}).`);
+        if (tmuxStderr.trim()) console.error(`[anet]    tmux stderr: ${tmuxStderr.trim()}`);
+        console.error(`[anet]    Fall back to: anet node start ${shellQuote(alias)}`);
+        process.exit(proc.status ?? 1);
+      }
+    } catch (e: any) {
+      console.error(`[anet] ❌ tmux detached launch failed: ${e?.message || e}`);
+      console.error(`[anet]    Fall back to: anet node start ${shellQuote(alias)}`);
+      process.exit(1);
+    }
+    // Bounded liveness poll — `has-session` returns 0 when the session
+    // exists. Wait up to ~2 s (10 × 200 ms) for the tmux server to
+    // register the new session. If we never see it, the detached spawn
+    // exited cleanly but the session didn't come up (rare — usually
+    // means the inner command quick-failed) → surface non-zero.
+    const started = Date.now();
+    let alive = false;
+    while (Date.now() - started < 2000) {
+      if (tmuxSessionRunning(alias)) { alive = true; break; }
+      // Small blocking wait; keep dependencies minimal (no timers).
+      const s = Date.now(); while (Date.now() - s < 200) { /* busy */ }
+    }
+    if (!alive) {
+      console.error(`[anet] ❌ tmux session "${alias}" did not appear within 2 s of detached spawn.`);
+      console.error(`[anet]    The tmux server accepted the spawn but the session isn't visible; the`);
+      console.error(`[anet]    inner command likely quick-failed. Inspect with:`);
+      console.error(`[anet]      tmux ls`);
+      console.error(`[anet]      tmux new-session -A -s ${alias} -- ${inner}`);
+      process.exit(1);
+    }
+    console.log(`[anet] ✅ tmux session "${alias}" started detached.`);
+    console.log(`[anet]    Attach:   tmux attach -t ${alias}`);
+    console.log(`[anet]    Stop:     anet node stop ${alias}`);
+    return;
+  }
+
+  // TTY-present path: attached foreground (unchanged shape).
+  // stdio: 'inherit' makes the parent terminal a tmux client; setRawMode
+  // sees a real PTY through the tmux client/server pair.
   const tmuxArgs = ["new", "-As", alias, "-c", process.cwd(), inner];
   try {
     const child = spawn("tmux", tmuxArgs, { stdio: "inherit" });
