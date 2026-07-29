@@ -214,6 +214,45 @@ function resolveRequestAuth(req: Request): { userId: string; networkId: string |
   return { userId: resolved.user.user_id, networkId: resolved.networkId, username: resolved.user.username, tokenName: resolved.tokenName, tokenId: resolved.tokenId };
 }
 
+// #495 — shared authorization gate for /api/files/:file_id downloads.
+// Called from the GET handler and any future HEAD/Range/dashboard-proxy
+// entry so the allow-list can't drift between methods (通信龙 clause 2:
+// "授权若只在 GET 分支实现, HEAD 或 Range 走别路径 = 等于没修").
+//
+// Returns true if the caller may read this entry; false otherwise. The
+// caller emits 404 on false — never 403; 403 would leak that the
+// file_id exists and enables enumeration.
+//
+// Allow-list (staged P0 hotfix; same-network non-owner is NOT included
+// here — see follow-up #503):
+//   - Legacy master AUTH_TOKEN (RFC-001 read-only) → allow.
+//   - admin utok_ → allow (mirrors requireAdminAuth).
+//   - Owner match: caller's resolved user_id === entry.owner_id.
+//   - null owner_id + DEV_OPEN → allow. DEV_OPEN uploads carry
+//     owner_id=null (authCtx=null in DEV_OPEN mode); rejecting them
+//     would break the intended local-dev anonymous flow. Encoded as
+//     an explicit env-gated branch so if DEV_OPEN semantics change,
+//     the code fails loudly instead of trusting a stale note.
+//   - Everything else → deny (404). New uploads in production always
+//     carry a truthy owner_id (requireAuth blocks the null-owner-
+//     producing path when DEV_OPEN=off and no legacy master token is
+//     configured), so denying null-owner in production closes the
+//     enumeration vector for legacy blobs without breaking new uploads.
+export function authorizeFileDownload(req: Request, entry: { owner_id?: unknown }): boolean {
+  const token = requestToken(req);
+  const authCtx = resolveRequestAuth(req);
+  const resolved = token ? resolveToken(token) : null;
+  const isLegacyMasterCaller = !authCtx && isLegacyAuthToken(req);
+  const isAdminCaller = !!resolved && resolved.user.role === "admin";
+  const ownerId = typeof entry.owner_id === "string" && entry.owner_id.length > 0
+    ? entry.owner_id
+    : null;
+  const isOwnerCaller = !!authCtx && !!ownerId && authCtx.userId === ownerId;
+  if (isLegacyMasterCaller || isAdminCaller || isOwnerCaller) return true;
+  if (ownerId === null && DEV_OPEN) return true;
+  return false;
+}
+
 type RestNetworkScope = {
   networkId: string | null;
   networkIds: string[] | null;
@@ -1620,14 +1659,27 @@ return Bun.serve({
       }));
     }
 
-    // ── REST: file download (#221) ──
-    // GET /api/files/:file_id with Bearer auth. Always forces
-    // Content-Disposition: attachment + X-Content-Type-Options: nosniff
-    // so the served file can never be executed or rendered as HTML.
-    // The file_id is validated against the same strict regex used at
-    // generation time before any filesystem access.
+    // ── REST: file download (#221 + #495 + #500 CR2 HEAD) ──
+    // GET or HEAD /api/files/:file_id with Bearer auth + ownership
+    // check. Always forces Content-Disposition: attachment +
+    // X-Content-Type-Options: nosniff so the served file can never be
+    // executed or rendered as HTML. The file_id is validated against
+    // the same strict regex used at generation time before any
+    // filesystem access.
+    //
+    // Ownership gate is factored into `authorizeFileDownload` (see
+    // src/server.ts near resolveRequestAuth). HEAD MUST route through
+    // the same helper — pre-#500-CR2, HEAD fell through to a fallback
+    // 200 page whose body happened to be byte-identical to the
+    // "unknown file" case, so no enumeration oracle formed in practice.
+    // That was coincidence, not a gate. A change to the fallback (e.g.
+    // adding "Requested resource: <hint>") would materialize the oracle
+    // with zero failing tests. Any future Range, conditional-request,
+    // or dashboard-proxy path for /api/files MUST route through this
+    // handler (via authorizeFileDownload) — do not duplicate the
+    // allow-list inline, or the branches will drift.
     const fileMatch = url.pathname.match(/^\/api\/files\/(.+)$/);
-    if (fileMatch && req.method === "GET") {
+    if (fileMatch && (req.method === "GET" || req.method === "HEAD")) {
       const authErr = requireAuth(req);
       if (authErr) return withCors(req, authErr);
 
@@ -1647,6 +1699,15 @@ return Bun.serve({
       }
       if (!validateIndexEntry(entry)) {
         return withCors(req, Response.json({ ok: false, error: "index_invalid" }, { status: 500 }));
+      }
+
+      // #495 ownership gate — placed AFTER file-exists so denied
+      // callers cannot distinguish "you don't own this" from
+      // "no such file". Both branches return the same 404 shape
+      // for BOTH GET and HEAD (HEAD honours body-omission but the
+      // status code and headers are the authoritative signal).
+      if (!authorizeFileDownload(req, entry)) {
+        return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
       }
 
       let storage;
@@ -1676,7 +1737,6 @@ return Bun.serve({
       const safeFilename = (entry.name && /^[\x20-\x7e]+$/.test(entry.name))
         ? entry.name
         : `${fileId}${entry.ext}`;
-      const blob = Bun.file(storage.absolutePath);
       const responseHeaders: Record<string, string> = {
         ...corsHeaders(req),
         "Content-Type": "application/octet-stream", // always opaque; nosniff prevents the client from re-deciding
@@ -1685,6 +1745,15 @@ return Bun.serve({
         "X-Content-Type-Options": "nosniff",
         "Cache-Control": "private, no-store",
       };
+      // HEAD: return the same status and headers as GET, but no body,
+      // per RFC 9110 §9.3.2. This ensures HEAD passes through the same
+      // authorization helper — a cross-owner HEAD is 404 (same as GET),
+      // not a fallback 200. Status/headers are the authoritative
+      // signal; body omission is HTTP-standard for HEAD.
+      if (req.method === "HEAD") {
+        return new Response(null, { status: 200, headers: responseHeaders });
+      }
+      const blob = Bun.file(storage.absolutePath);
       return new Response(blob, { status: 200, headers: responseHeaders });
     }
 
