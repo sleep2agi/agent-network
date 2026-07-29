@@ -50,6 +50,11 @@ L0_TESTS=(
   "password-dict:server/src/password-dict.test.ts"
   "auth-tokens:server/src/auth-tokens.test.ts"
   "auth-validate:server/src/auth-validate.test.ts"
+  "observer-push:server/src/observer-push.test.ts"
+  "avatar-validate:server/src/avatar-validate.test.ts"
+  # observer-avatar-http.test.ts 不进 L0：它启真 HTTP server，import 链需要
+  # MCP SDK，而 CI 的 L0 层按设计不跑 bun install（ms 级零依赖预算）。
+  # 它的 CI 归属是会安装依赖的层级；本地跑法见该文件头注释的门禁命令。
 )
 L1_TESTS=(
   "qa-cli-01-hub-start"

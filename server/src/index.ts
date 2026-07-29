@@ -3,8 +3,9 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
 import { db, logTaskEvent, logAudit } from "./db.js";
-import { createSSEStream, pushEvent, getSSEStats } from "./push.js";
+import { createSSEStream, createNetworkObserverStream, pushEvent, pushNetworkObserverEvent, getSSEStats } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
+import { validateAvatarUrl } from "./avatar-validate.js";
 import { register, login, resolveToken, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, renameNetwork, changePassword, issueUserToken, listTokens, createToken, revokeToken, getNetworkMembers, getUserNetworkRole, addNetworkMember, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
 import { abortRename, cleanupCommittedRenameSessions, commitRename, prepareRename, resolveCanonicalAlias } from "./rename.js";
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
@@ -517,9 +518,25 @@ setInterval(() => {
   } catch {}
 }, 5 * 60 * 1000);
 
-Bun.serve({
-  port: PORT,
-  hostname: HOST,
+// #434 — test-safety seam, same signature as PR #438 so the two branches
+// merge cleanly. Wraps the sole Bun.serve config in a factory so
+// integration tests can request an OS-assigned ephemeral port
+// (`bootServer({ port: 0 })`) and read the actual bound port back from
+// the returned server. In an aggregate `bun test` run only the FIRST test
+// file's import boots the default server (module cache) — later files'
+// PORT env is ignored, so a suite that hard-codes its own port gets
+// ConnectionRefused on every fetch while still "running" (审查修复 per
+// 通信龙 #461 review, finding 2). Suites boot a private instance via this
+// seam instead. #438 additionally moves the default boot below under
+// `import.meta.main`; until that lands, import keeps booting (pre-#434
+// behavior) so the not-yet-migrated suites stay green.
+//
+// Note: `opts.port ?? PORT` uses nullish-coalescing on purpose — `||`
+// would swallow a legitimate `0`. Same for hostname.
+export function bootServer(opts?: { port?: number; hostname?: string }): ReturnType<typeof Bun.serve> {
+return Bun.serve({
+  port: opts?.port ?? PORT,
+  hostname: opts?.hostname ?? HOST,
   idleTimeout: 255, // max value: keep SSE connections alive (seconds)
   // #221 — defense-in-depth cap on the raw request body. The /api/upload
   // handler also pre-checks Content-Length and post-checks parsed size
@@ -581,6 +598,40 @@ Bun.serve({
       // rewrite the header. Streamed bodies (SSE) pass through untouched
       // because Response takes the original ReadableStream verbatim.
       return withUtf8CharsetContentType(response);
+    }
+
+    // ── #461 SSE network observer stream ──
+    // GET /events/network/:network_id → 网络级摘要事件（new_task / new_reply
+    // routing metadata only, no content）。Dashboard 用它实时感知第三方流量,
+    // 退役 15s 软轮询。MUST be matched before the generic /events/(.+) route
+    // below, which would otherwise swallow the path as a session name.
+    //
+    // Auth mirrors /events/:session's three paths:
+    //   1. legacy AUTH_TOKEN (master) → any network
+    //   2/3. ntok_ / utok_ → must CURRENTLY be a member of the requested
+    //        network. Membership is checked unconditionally — there is NO
+    //        token-bound-network shortcut. removeNetworkMember deletes the
+    //        membership row but does NOT revoke the user's ntok, so the
+    //        network_members lookup IS the revocation mechanism: an ntok
+    //        bound to this network whose owner was removed must lose the
+    //        stream (审查修复 per 通信龙 #461 review, finding 1).
+    const netEventsMatch = url.pathname.match(/^\/events\/network\/(.+)$/);
+    if (netEventsMatch && req.method === "GET") {
+      const authErr = requireAuth(req);
+      if (authErr) return authErr;
+      const observedNetId = decodeURIComponent(netEventsMatch[1]);
+      const authCtx = resolveRequestAuth(req);
+      if (!authCtx && isLegacyAuthToken(req)) {
+        return createNetworkObserverStream(observedNetId);
+      }
+      if (!authCtx) {
+        return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 403 }));
+      }
+      const observerRole = getUserNetworkRole(authCtx.userId, observedNetId);
+      if (!observerRole) {
+        return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
+      }
+      return createNetworkObserverStream(observedNetId);
     }
 
     // ── SSE push: Agent 实时接收任务推送 ──
@@ -1724,6 +1775,9 @@ Bun.serve({
       if (target.state === "online") {
         pushEvent(targetAlias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority: body.priority, from: fromSession, ...(canonical.renamed ? { renamed_from: body.alias } : {}) }, taskNetId);
       }
+      // #461 network observer summary — unconditional (the task row
+      // exists even when the target is offline/queued), metadata only.
+      pushNetworkObserverEvent(taskNetId, { type: "new_task", task_id: id, from: fromSession, to: targetAlias, status: target.state === "online" ? "delivered" : "queued", priority: body.priority });
       // #212 — stamp the dedup index only after the inbox/tasks insert
       // succeeds. Mirrors the MCP `send_task` path so a failed write
       // never shadows a legitimate retry.
@@ -2025,6 +2079,51 @@ Bun.serve({
       }));
     }
 
+    // ── #462 REST: set / clear a node's custom avatar ──
+    // PUT /api/nodes/:ref/avatar  body: { "avatar_url": "https://…" | null }
+    //
+    // Deliberately NOT part of the RFC-024 config-apply pipeline: avatar
+    // is a pure display attribute — nothing for agent-node to consume, no
+    // config_revision / ack round-trip, no restart tier. Persisted on the
+    // nodes row and served back via GET /api/nodes (cross-device).
+    //
+    // Auth: same write gate as node delete above — network-scoped lookup
+    // + canRestWriteNetwork (member with role above viewer, or admin, or
+    // legacy master token). Value passes validateAvatarUrl (http/https
+    // only, ≤ 2048 chars, no control chars — XSS boundary, see
+    // avatar-validate.ts).
+    const nodeAvatarMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/avatar$/);
+    if (nodeAvatarMatch && req.method === "PUT") {
+      let avatarBody: any;
+      try {
+        avatarBody = await req.json();
+      } catch {
+        return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 }));
+      }
+      const validated = validateAvatarUrl(avatarBody?.avatar_url);
+      if (!validated.ok) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_avatar_url", reason: validated.reason }, { status: 400 }));
+      }
+      const ref = decodeURIComponent(nodeAvatarMatch[1]);
+      const params: any[] = [ref, ref, ref];
+      let sql = "SELECT node_id, alias, network_id FROM nodes WHERE (node_id = ?1 OR node_name = ?2 OR alias = ?3)";
+      sql = addNetworkScope(sql, params, restScope);
+      sql += " ORDER BY updated_at DESC LIMIT 1";
+      const node = db.get<any>(sql, ...params);
+      if (!node) return withCors(req, Response.json({ ok: false, error: "node not found" }, { status: 404 }));
+
+      const nodeNetId = node.network_id ?? singleNetworkId(restScope);
+      if (!canRestWriteNetwork(restAuth, nodeNetId, isAdmin)) {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));
+      }
+
+      db.run(
+        "UPDATE nodes SET avatar_url = ?1, updated_at = datetime('now') WHERE node_id = ?2",
+        [validated.value, node.node_id]
+      );
+      return withCors(req, Response.json({ ok: true, node_id: node.node_id, alias: node.alias, avatar_url: validated.value }));
+    }
+
     // ── REST: nodes table (V2 Sprint 2) ──
     // Explicit column list — NOT `SELECT *`. Two reasons:
     //   1. `SELECT *` silently broadcasts any column added later to the
@@ -2173,10 +2272,13 @@ Bun.serve({
       // (#345) but /api/nodes never SELECTed it. Following #312
       // "explicit SELECT" discipline — extend the projection here,
       // do NOT switch to SELECT *.
+      // #462: avatar_url added to the projection so custom avatars are
+      // cross-device (dashboard hydrates from here; localStorage was the
+      // only store before). Nullable — null means "use default set".
       let sql = `SELECT node_id, node_name, alias, runtime, model,
                         config_path, channels, server, hostname,
                         network_id, created_at, updated_at,
-                        config_snapshot, lifecycle_state
+                        config_snapshot, lifecycle_state, avatar_url
                  FROM nodes WHERE 1=1`;
       const params: any[] = [];
       sql = addNetworkScope(sql, params, restScope);
@@ -2366,6 +2468,11 @@ Security: ${SECURITY_LABEL}
     },
   },
 });
+} // end bootServer
+
+// Boot the default server at import (pre-#434 behavior — #438 moves this
+// under `import.meta.main`). Exported so callers can read the bound port.
+export const server = bootServer();
 
 // Round-2/4 review ② — periodic retention sweep + incremental VACUUM.
 // Sweeps every hour by default. Operators can disable any single table

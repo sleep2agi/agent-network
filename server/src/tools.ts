@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
 import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, generateNetworkToken } from "./db.js";
-import { pushEvent } from "./push.js";
+import { pushEvent, pushNetworkObserverEvent } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { getUserNetworkRole, createNetworkTokenForNode } from "./auth.js";
 import {
@@ -958,6 +958,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (target.state === "online") {
         pushEvent(targetAlias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority, from: from_session, ...(canonical.renamed ? { renamed_from: alias } : {}) }, effectiveNetId);
       }
+      // #461 network observer summary — unconditional (task row exists
+      // even when the target is offline/queued), metadata only.
+      pushNetworkObserverEvent(effectiveNetId, { type: "new_task", task_id: id, from: from_session, to: targetAlias, status: target.state === "online" ? "delivered" : "queued", priority });
 
       if (target.state === "offline") {
         return {
@@ -1185,6 +1188,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
       const session = scopedSessionStatus(alias, effectiveNetId);
       pushEvent(alias, { type: "new_reply", from: from_session, message_id: id, in_reply_to, status: replyStatus }, effectiveNetId);
+      // #461 network observer summary — ids + routing only, no reply text.
+      pushNetworkObserverEvent(effectiveNetId, { type: "new_reply", task_id: in_reply_to ?? null, message_id: id, from: from_session, to: alias, status: replyStatus });
 
       return {
         content: [{
@@ -1267,6 +1272,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       logTaskEvent(task_id, task.status, "delivered", from_session, "retry");
       // SSE push (unconditional — channel is keyed by alias, not network)
       pushEvent(task.to_name, { type: "new_task", inbox_count: 1, priority: task.priority, from: from_session }, effectiveNetId ?? task.network_id ?? null);
+      pushNetworkObserverEvent(effectiveNetId ?? task.network_id ?? null, { type: "new_task", task_id, from: from_session, to: task.to_name, status: "delivered", priority: task.priority });
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ ok: true, task_id, retried_to: task.to_name }) }],
       };
@@ -1419,6 +1425,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       });
       logTaskEvent(task_id, task.status, "delivered", from_session, `reassign: ${oldAlias} → ${reassignedAlias}`);
       pushEvent(reassignedAlias, { type: "new_task", inbox_count: 1, priority: task.priority, from: from_session, ...(canonical.renamed ? { renamed_from: new_alias } : {}) }, effectiveNetId ?? task.network_id ?? null);
+      pushNetworkObserverEvent(effectiveNetId ?? task.network_id ?? null, { type: "new_task", task_id, from: from_session, to: reassignedAlias, status: "delivered", priority: task.priority });
       return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, task_id, reassigned_from: oldAlias, reassigned_to: reassignedAlias, ...(canonical.renamed ? { renamed_from: new_alias, renamed_to: reassignedAlias } : {}) }) }] };
     }
   );

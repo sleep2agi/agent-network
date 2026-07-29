@@ -338,6 +338,16 @@ try {
   if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
 }
 
+// #462 — user-set custom avatar (nullable http/https image URL). Pure
+// display attribute: deliberately NOT part of the RFC-024 config-apply
+// pipeline (nothing for agent-node to consume, no revision/ack). Written
+// only via PUT /api/nodes/:ref/avatar which validates the URL shape.
+try {
+  db.exec(`ALTER TABLE nodes ADD COLUMN avatar_url TEXT`);
+} catch (e: any) {
+  if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+}
+
 // RFC-027 §2 — stop/delete request envelope. Mirrors
 // node_create_requests structure so the daemon-side pull/ack pattern
 // is symmetric with create_node. action='stop'|'delete' picks which
