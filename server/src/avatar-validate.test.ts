@@ -98,6 +98,12 @@ describe("#462 validateAvatarUrl", () => {
     if (q.ok) expect(q.value).not.toContain("'");
   });
 
+  test("rejects URLs with embedded credentials (userinfo)", () => {
+    expect(validateAvatarUrl("https://user:pass@example.com/a.png").ok).toBe(false);
+    expect(validateAvatarUrl("https://user@example.com/a.png").ok).toBe(false);
+    expect(validateAvatarUrl("http://:secret@example.com/a.png").ok).toBe(false);
+  });
+
   test("enforces the length cap", () => {
     const base = "https://example.com/";
     const ok = base + "a".repeat(MAX_AVATAR_URL_LENGTH - base.length);

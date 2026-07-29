@@ -44,6 +44,14 @@ export function validateAvatarUrl(raw: unknown): AvatarValidation {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     return { ok: false, reason: "avatar_url protocol must be http or https" };
   }
+  // Embedded credentials (https://user:pass@host/…) would be persisted,
+  // leaked to the avatar host on every render, and can spoof the visible
+  // origin in UIs. Reject outright rather than silently stripping — the
+  // caller should know their input carried secrets (通信龙 review round-2
+  // follow-up).
+  if (parsed.username || parsed.password) {
+    return { ok: false, reason: "avatar_url must not contain credentials (userinfo)" };
+  }
   // Persist the NORMALIZED href, not the raw input: href percent-encodes
   // markup-hostile characters (" < > ` → %22 %3C %3E %60), so what lands
   // in the DB is already safe to interpolate into an <img src> attribute.
