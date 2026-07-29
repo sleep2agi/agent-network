@@ -1,0 +1,24 @@
+# Path C headless tmux start then explicit stop with process tree
+start_pid=91575 start_pgid=91575 start_exit_code=0
+stop_exit_code=0
+parent_pid=91628 parent_pgid=91604
+child_pid= child_pgid=
+setsid_child_pid= setsid_child_pgid=
+design_before_stop_tmux_has_session_rc=0
+design_before_stop_pane=91604 bun
+tmux_cmd=tmux has-session -t p486-tree-1785322639
+tmux_has_session_rc=1
+pid_scan_cmd=ps -p 91575,91628,, -o pid=,pgid=,stat=,args=
+pgid_scan_cmd=ps -eo pid=,pgid=,stat=,args= | awk pgid in {91575,91604,,}
+cmdline_scan_cmd=pgrep -af P486TREE178532263989451_C
+91634 bash -c trap "exit 0" TERM INT HUP; sleep "${P486_TREE_SLEEP:-120}" setsid-child-P486TREE178532263989451_C
+tree_log:
+PARENT pid=91628 pgid=91604 ppid=91604 marker=P486TREE178532263989451_C mode=hold args=--session-id\ 11111111-1111-4111-8111-111111111111\ -n\ p486-tree-1785322639
+CHILD pid=91633 pgid=91604 marker=P486TREE178532263989451_C
+SETSID_CHILD pid=91634 pgid=91634 marker=P486TREE178532263989451_C
+start_output:
+[anet] ✅ tmux session "p486-tree-1785322639" started detached.
+[anet]    Attach:   tmux attach -t p486-tree-1785322639
+[anet]    Stop:     anet node stop p486-tree-1785322639
+stop_output:
+[anet] Stopped "p486-tree-1785322639" (tmux(tui) + process killed, server notified)

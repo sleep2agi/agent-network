@@ -1,0 +1,28 @@
+# Path B quick fake claude failure with process tree
+exit_code=7
+parent_pid=90721 parent_pgid=90697
+child_pid=90726 child_pgid=90697
+setsid_child_pid=90727 setsid_child_pgid=90727
+tmux_cmd=tmux has-session -t p486-tree-1785322639
+tmux_has_session_rc=1
+pid_scan_cmd=ps -p 90721,90726,90727 -o pid=,pgid=,stat=,args=
+  90727   90727 Ss   bash -c trap "exit 0" TERM INT HUP; sleep "${P486_TREE_SLEEP:-120}" setsid-child-P486TREE178532263989451_B
+pgid_scan_cmd=ps -eo pid=,pgid=,stat=,args= | awk pgid in {90697,90697,90727}
+  90727   90727 Ss   bash -c trap "exit 0" TERM INT HUP; sleep "${P486_TREE_SLEEP:-120}" setsid-child-P486TREE178532263989451_B
+  90730   90727 S    sleep 120
+cmdline_scan_cmd=pgrep -af P486TREE178532263989451_B
+90727 bash -c trap "exit 0" TERM INT HUP; sleep "${P486_TREE_SLEEP:-120}" setsid-child-P486TREE178532263989451_B
+tree_log:
+PARENT pid=90721 pgid=90697 ppid=90697 marker=P486TREE178532263989451_B mode=exit0 args=--session-id\ 11111111-1111-4111-8111-111111111111\ -n\ p486-tree-1785322639
+CHILD pid=90726 pgid=90697 marker=P486TREE178532263989451_B
+SETSID_CHILD pid=90727 pgid=90727 marker=P486TREE178532263989451_B
+cli_output:
+[anet] Resuming session 11111111... for "p486-tree-1785322639" [claude-code-cli]...
+
+[anet] claude-code-cli requires:
+  - Claude Pro / Team / Enterprise subscription
+  - Run "claude auth login" first
+  - Uses Anthropic Claude only
+  - For other models, use --runtime codex-sdk or claude-agent-sdk
+[anet] Token: ntok_fak...
+Hangup
