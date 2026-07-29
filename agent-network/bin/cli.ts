@@ -5908,6 +5908,14 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
   let txnId: string | null = "";
   try {
     // P2: copy (not move) old → new + update config.alias
+    // #457 — pre-create newDir with 0700 so cpSync preserves target dir mode.
+    // Node fs.cp does NOT overwrite an existing dest dir's mode; if we let
+    // cpSync create newDir, it defaults to umask (0755 under umask 022) and
+    // then fails opencode-preset's 0700 predjection at PHASE-3 wiring. Verified
+    // Node 20.20.0: `mkdirSync(dst,{mode:0o700})` + `cpSync(src,dst)` leaves
+    // dst at 0700 even when src is 0755. Structural fix, no post-cpSync chmod
+    // (would be TOCTOU vs the预检's own identity-bound fchmod branch).
+    mkdirSync(newDir, { mode: 0o700, recursive: false });
     cpSync(oldDir, newDir, { recursive: true });
     const newLock = join(newDir, "rename.lock");
     if (existsSync(newLock)) rmSync(newLock, { force: true });  // lock belongs to oldDir only
