@@ -107,6 +107,7 @@ export default withMermaid(defineConfig({
               { text: 'Docker 部署', link: '/deploy/docker' },
               { text: 'npm 部署', link: '/deploy/npm' },
               { text: '生产部署 / 公网部署安全', link: '/deploy/production' },
+              { text: '让 hub 常驻：进程守护', link: '/deploy/daemon' },
             ]
           },
           {
@@ -204,6 +205,7 @@ export default withMermaid(defineConfig({
               { text: 'Docker', link: '/en/deploy/docker' },
               { text: 'npm', link: '/en/deploy/npm' },
               { text: 'Production / Public Internet', link: '/en/deploy/production' },
+              { text: 'Keeping the Hub Alive', link: '/en/deploy/daemon' },
             ]
           },
           {
