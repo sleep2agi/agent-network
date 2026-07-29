@@ -797,6 +797,63 @@ function authHeaders(token?: string): Record<string, string> {
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
+// #473 — the per-connection SSE breakdown (`{networkId}:{alias}` → count)
+// moved OFF the anonymous /health body (it leaked the whole agent
+// topology) and behind auth at GET /api/stats/sse. Returns the SAME
+// `sessions` map getSSEStats() always produced, so downstream key lookups
+// are unchanged.
+//
+// TRISTATE by design (审查 round-2, 通信龙): the map alone can't tell
+// "genuinely 0 connections" from "I'm not allowed to see" — a non-admin
+// user gets 403 here, and rendering that as "0 connected" is a LIE that
+// reads as "hub is dead". So `ok` distinguishes them: ok=false means the
+// detail is unavailable (403 / unreachable / bad JSON), and callers must
+// then show "unknown" or fall back to the anonymous aggregate
+// health.sse_connections — never 0. Never throws.
+type SseDetail = { ok: boolean; sessions: Record<string, number> };
+async function fetchSseSessions(hub: string): Promise<SseDetail> {
+  try {
+    const res = await fetch(`${hub}/api/stats/sse`, { headers: authHeaders() });
+    if (!res.ok) return { ok: false, sessions: {} };
+    const body = await res.json() as any;
+    const sessions = (body && typeof body.sessions === "object" && body.sessions) || {};
+    return { ok: true, sessions };
+  } catch {
+    return { ok: false, sessions: {} };
+  }
+}
+
+// #473 — anonymous aggregate connection count from /health (never gated,
+// every user can read it). The reliable source for "how many SSE
+// connections" when the per-alias detail is unavailable.
+async function fetchSseConnectionCount(hub: string): Promise<number | null> {
+  try {
+    const res = await fetch(`${hub}/health`, { headers: authHeaders() });
+    if (!res.ok) return null;
+    const body = await res.json() as any;
+    return typeof body.sse_connections === "number" ? body.sse_connections : null;
+  } catch {
+    return null;
+  }
+}
+
+// #473 — "are all these SPECIFIC aliases SSE-connected?" for the
+// orchestration wait-loops. TRISTATE (审查 round-2b, 通信龙): the aggregate
+// count CANNOT answer this — `sse_connections >= aliases.length` is true
+// whenever N unrelated nodes are connected, which would falsely claim
+// "all connected" while a/b/c/d are all down. That's the same class of
+// lie as the fake 0, just inverted. So when the per-alias detail is
+// unavailable (non-admin 403 / unreachable), we return "unknown" and the
+// caller must say so honestly rather than guess from the count.
+//   "yes"     — every alias has ≥1 connection (verified)
+//   "no"      — detail readable, at least one alias not yet connected
+//   "unknown" — detail not readable; cannot assert either way
+async function sseAllConnected(hub: string, aliases: string[]): Promise<"yes" | "no" | "unknown"> {
+  const detail = await fetchSseSessions(hub);
+  if (!detail.ok) return "unknown";
+  return aliases.every(a => (detail.sessions[a] || 0) >= 1) ? "yes" : "no";
+}
+
 function loadGlobal(): Record<string, any> {
   const p = globalConfigPath();
   if (existsSync(p)) try { return JSON.parse(readFileSync(p, "utf-8")); } catch {}
@@ -4520,16 +4577,18 @@ async function lsCommand() {
   // Fetch CommHub status first
   const gc = loadGlobal();
   let networkSessions: any[] = [];
-  let sseSessions: Record<string, number> = {};
+  // #473 tristate: sseDetail.ok=false → detail unavailable (non-admin/403),
+  // per-node column shows "?" not a false "not connected".
+  let sseDetail: SseDetail = { ok: false, sessions: {} };
 
   if (gc.hub) {
     try {
-      const [statusRes, healthRes] = await Promise.all([
+      const [statusRes, sseRes] = await Promise.all([
         fetch(`${gc.hub}/api/status`, { headers: authHeaders() }).then(r => r.json() as any),
-        fetch(`${gc.hub}/health`, { headers: authHeaders() }).then(r => r.json() as any),
+        fetchSseSessions(gc.hub), // #473: was /health.sse_sessions (now auth-gated)
       ]);
       networkSessions = statusRes.sessions || [];
-      sseSessions = healthRes.sse_sessions || {};
+      sseDetail = sseRes;
     } catch {}
   }
 
@@ -4555,7 +4614,7 @@ async function lsCommand() {
       // Match with CommHub
       const ns: any = networkSessions.find((n: any) => n.alias === displayName || n.node_id === p?.node_id);
       const serverStatus = ns ? ns.status : (localAlive ? "starting" : "offline");
-      const sseConnected = sseSessions[displayName] ? "●" : "○";
+      const sseConnected = !sseDetail.ok ? "?" : (sseDetail.sessions[displayName] ? "●" : "○");
 
       const statusIcon = serverStatus === "idle" ? "idle" :
                          serverStatus === "working" ? "working" :
@@ -4616,7 +4675,7 @@ async function lsCommand() {
         if (match) {
           const alias = match[1].trim();
           const ns: any = networkSessions.find((n: any) => n.alias === alias);
-          const sse = sseSessions[alias] ? "●" : "○";
+          const sse = !sseDetail.ok ? "?" : (sseDetail.sessions[alias] ? "●" : "○");
           network = ns ? `${alias} ${ns.status} ${sse}` : `${alias} (not registered)`;
         }
       }
@@ -8076,14 +8135,17 @@ async function statusCommand() {
   if (!hub) { console.log("No hub configured. Run: anet init"); return; }
 
   try {
-    const [statusRes, healthRes, tasksRes] = await Promise.all([
+    // #473: this summary line needs only the COUNT, so read the anonymous
+    // aggregate health.sse_connections — every user can read it. Using the
+    // per-alias detail's key-count here was the regression that showed
+    // non-admins "0 connected" (detail 403 → {} → 0) on a live hub.
+    const [statusRes, sseCount, tasksRes] = await Promise.all([
       fetch(`${hub}/api/status`, { headers: authHeaders() }).then(r => r.json() as any).catch(() => ({ sessions: [] })),
-      fetch(`${hub}/health`, { headers: authHeaders() }).then(r => r.json() as any).catch(() => ({})),
+      fetchSseConnectionCount(hub),
       fetch(`${hub}/api/tasks?limit=10`, { headers: authHeaders() }).then(r => r.json() as any).catch(() => ({ tasks: [] })),
     ]);
 
     const sessions = statusRes.sessions || [];
-    const sse = healthRes.sse_sessions || {};
     const tasks = tasksRes.tasks || [];
 
     const classifyStatus = (s: any) => {
@@ -8103,7 +8165,7 @@ async function statusCommand() {
 
     console.log(`\n  CommHub: ${hub}`);
     console.log(`  Agents: ${summary.idle || 0} idle, ${summary.working || 0} working, ${summary.offline || 0} offline`);
-    console.log(`  SSE:    ${Object.keys(sse).length} connected`);
+    console.log(`  SSE:    ${sseCount === null ? "unknown" : `${sseCount} connected`}`);
     console.log(`  Tasks:  ${tasks.length} recent\n`);
 
     if (working.length > 0) {
@@ -9511,10 +9573,12 @@ async function demoDebateCommand() {
   for (let i = 0; i < 30; i++) {
     await new Promise(r => setTimeout(r, 2000));
     try {
-      const h = await fetch(`${hub}/health`).then(r => r.json() as any);
-      const sse = h?.sse_sessions || {};
-      const allUp = DEBATE_ROLES.every(r => sse[roleAliases[r]] >= 1);
-      if (allUp) { console.log(`        ✓ 6 agent 全部 SSE connected`); break; }
+      // #473: tristate — never GUESS from the aggregate count that these
+      // specific aliases are up. "unknown" (non-admin/unreachable) → say
+      // so and proceed, don't claim connected and don't burn the full 60s.
+      const state = await sseAllConnected(hub, DEBATE_ROLES.map(r => roleAliases[r]));
+      if (state === "yes") { console.log(`        ✓ 6 agent 全部 SSE connected`); break; }
+      if (state === "unknown") { console.log(`        ⚠ 无法确认 6 个 agent 的 SSE 连接状态（需 admin 权限查看明细），继续执行`); break; }
     } catch {}
   }
 
@@ -9898,10 +9962,9 @@ async function demoSocialMediaCommand() {
   for (let i = 0; i < 30; i++) {
     await new Promise(r => setTimeout(r, 2000));
     try {
-      const h = await fetch(`${hub}/health`).then(r => r.json() as any);
-      const sse = h?.sse_sessions || {};
-      const allUp = SOCIAL_ROLES.every(r => sse[roleAliases[r]] >= 1);
-      if (allUp) { console.log(`        ✓ 4 agent 全部 SSE connected`); break; }
+      const state = await sseAllConnected(hub, SOCIAL_ROLES.map(r => roleAliases[r]));
+      if (state === "yes") { console.log(`        ✓ 4 agent 全部 SSE connected`); break; }
+      if (state === "unknown") { console.log(`        ⚠ 无法确认 4 个 agent 的 SSE 连接状态（需 admin 权限查看明细），继续执行`); break; }
     } catch {}
   }
 
@@ -10322,10 +10385,9 @@ async function demoPrReviewCommand() {
   for (let i = 0; i < 30; i++) {
     await new Promise(r => setTimeout(r, 2000));
     try {
-      const h = await fetch(`${hub}/health`).then(r => r.json() as any);
-      const sse = h?.sse_sessions || {};
-      const allUp = PR_REVIEW_ROLES.every(r => sse[roleAliases[r]] >= 1);
-      if (allUp) { console.log(`        ✓ 4 agent 全部 SSE connected`); break; }
+      const state = await sseAllConnected(hub, PR_REVIEW_ROLES.map(r => roleAliases[r]));
+      if (state === "yes") { console.log(`        ✓ 4 agent 全部 SSE connected`); break; }
+      if (state === "unknown") { console.log(`        ⚠ 无法确认 4 个 agent 的 SSE 连接状态（需 admin 权限查看明细），继续执行`); break; }
     } catch {}
   }
 
@@ -11667,7 +11729,7 @@ async function doctorCommand() {
       check("CommHub reachable", health.ok === true, `${gc.hub} v${health.version || "?"}`);
       if (health.api_version) info("API version", health.api_version);
       info("Sessions", `${health.sessions_count || health.sessions || 0} registered`);
-      info("SSE connections", `${Object.keys(health.sse_sessions || {}).length} active`);
+      info("SSE connections", `${health.sse_connections ?? 0} active`); // #473: aggregate stayed on /health
       if (health.license) info("License", health.license);
       if (health.multi_network) check("Multi-network", true);
     } catch (e: any) {

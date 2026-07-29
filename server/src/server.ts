@@ -1146,6 +1146,17 @@ return Bun.serve({
 
     // ── REST: health (public, no auth) ──
     if (url.pathname === "/health") {
+      // #473 — /health is ANONYMOUS BY CONTRACT (the central watchdog
+      // cron curls it every minute to decide dead-or-alive; adding auth
+      // here would blind it — do NOT add requireAuth, do NOT change the
+      // 200-with-JSON shape without telling the watchdog owner first).
+      // Anonymous callers get AGGREGATES ONLY. The per-key SSE detail
+      // (`{networkId}:{alias}` + observer keys) used to be inlined here,
+      // which handed any internet stranger the full network id + all
+      // agent aliases (95 on the public hub when audited) — that detail
+      // now lives behind auth at GET /api/stats/sse.
+      // `version` stays: it does help fingerprinting, but ops needs it
+      // to verify deploys land, and the tradeoff was accepted in review.
       const count = db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM sessions");
       const sse = getSSEStats();
       const license = db.get<any>("SELECT type, expires_at FROM licenses LIMIT 1");
@@ -1156,7 +1167,6 @@ return Bun.serve({
         transport: "streamable-http",
         sessions_count: count?.cnt ?? 0,
         sse_connections: sse.total,
-        sse_sessions: sse.sessions,
         auth: DEV_OPEN ? "dev-open" : "user-token",
         security: DEV_OPEN ? "dev-open" : "secured",
         tmux: TMUX_ENABLED ? "enabled" : "disabled",
@@ -1178,6 +1188,28 @@ return Bun.serve({
     const restScope = resolveRestNetworkScope(url, restAuth, isAdmin);
     if (restScope.denied) {
       return withCors(req, Response.json({ ok: false, error: restScope.denied }, { status: 403 }));
+    }
+
+    // ── #473 REST: SSE connection detail (ops-only) ──
+    // The per-key breakdown /health used to expose anonymously: keys are
+    // `{networkId}:{alias}` (+ `\0netobs:{networkId}` observer keys via
+    // printableKey), i.e. the full network/agent topology. Ops-scoped:
+    // legacy master token (restAuth null once requireAuth passed) or an
+    // admin user. Regular members get 403 — the detail spans EVERY
+    // network, so per-network filtering would be required to open it
+    // wider; no consumer needs that today.
+    if (url.pathname === "/api/stats/sse") {
+      // restAuth === null here means the caller passed the legacy master
+      // token (requireAuth already accepted it above) OR the hub runs in
+      // DEV_OPEN mode. Both are treated as ops: master token is root, and
+      // under DEV_OPEN this endpoint is anonymously readable BY DESIGN
+      // (dev convenience — production never sets COMMHUB_DEV_OPEN, so the
+      // topology detail stays gated in every real deployment).
+      if (restAuth && !isAdmin) {
+        return withCors(req, Response.json({ ok: false, error: "admin or master token required" }, { status: 403 }));
+      }
+      const sse = getSSEStats();
+      return withCors(req, Response.json({ ok: true, total: sse.total, sessions: sse.sessions }));
     }
 
     // ── REST: all sessions status ──
