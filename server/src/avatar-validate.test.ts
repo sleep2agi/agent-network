@@ -73,6 +73,31 @@ describe("#462 validateAvatarUrl", () => {
     expect(validateAvatarUrl("https://example.com/a\u009f.png").ok).toBe(false);
   });
 
+  test("normalizes to parsed.href: markup-hostile chars come out percent-encoded (finding 3)", () => {
+    const r1 = validateAvatarUrl('https://example.com/a"b.png');
+    expect(r1).toEqual({ ok: true, value: "https://example.com/a%22b.png" });
+    const r2 = validateAvatarUrl("https://example.com/</script><script>.png");
+    expect(r2.ok).toBe(true);
+    if (r2.ok) {
+      expect(r2.value).not.toContain("<");
+      expect(r2.value).not.toContain(">");
+    }
+    const r3 = validateAvatarUrl("https://example.com/a`b.png");
+    expect(r3.ok).toBe(true);
+    if (r3.ok) expect(r3.value).not.toContain("`");
+  });
+
+  test("rejects values whose href still carries attribute-breaking chars (single quote)", () => {
+    // WHATWG URL leaves ' un-encoded in the PATH component — href alone
+    // doesn't neutralize it there, so the validator must refuse.
+    expect(validateAvatarUrl("https://example.com/a'b.png").ok).toBe(false);
+    // In the QUERY component ' IS percent-encoded by href → accepted,
+    // but the stored value must carry no raw quote.
+    const q = validateAvatarUrl("https://example.com/x.png?a='1'");
+    expect(q.ok).toBe(true);
+    if (q.ok) expect(q.value).not.toContain("'");
+  });
+
   test("enforces the length cap", () => {
     const base = "https://example.com/";
     const ok = base + "a".repeat(MAX_AVATAR_URL_LENGTH - base.length);

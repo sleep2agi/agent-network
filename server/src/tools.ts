@@ -960,7 +960,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
       // #461 network observer summary — unconditional (task row exists
       // even when the target is offline/queued), metadata only.
-      pushNetworkObserverEvent(effectiveNetId, { type: "new_task", task_id: id, from: from_session, to: targetAlias, status: "delivered", priority });
+      pushNetworkObserverEvent(effectiveNetId, { type: "new_task", task_id: id, from: from_session, to: targetAlias, status: target.state === "online" ? "delivered" : "queued", priority });
 
       if (target.state === "offline") {
         return {

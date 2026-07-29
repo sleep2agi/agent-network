@@ -44,5 +44,18 @@ export function validateAvatarUrl(raw: unknown): AvatarValidation {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     return { ok: false, reason: "avatar_url protocol must be http or https" };
   }
-  return { ok: true, value: trimmed };
+  // Persist the NORMALIZED href, not the raw input: href percent-encodes
+  // markup-hostile characters (" < > ` → %22 %3C %3E %60), so what lands
+  // in the DB is already safe to interpolate into an <img src> attribute.
+  // The dashboard renderer lives in a different package this repo cannot
+  // audit — the server must not bet on it escaping (审查修复 per 通信龙
+  // #461/#462 review, finding 3).
+  const normalized = parsed.href;
+  // Belt-and-braces: reject anything href does NOT encode that could
+  // still break out of an attribute context (WHATWG URL leaves ' and \
+  // untouched in some positions).
+  if (/["'<>\\`]/.test(normalized)) {
+    return { ok: false, reason: "avatar_url contains characters not allowed in a URL" };
+  }
+  return { ok: true, value: normalized };
 }

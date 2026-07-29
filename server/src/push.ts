@@ -114,6 +114,14 @@ function observerKey(networkId: string): string {
   return `${OBSERVER_KEY_PREFIX}${networkId}`;
 }
 
+/** Render a client key for logs / stats. Observer keys embed a raw NUL
+ *  byte (collision guard above); printing that verbatim makes grep treat
+ *  hub logs as binary and breaks log shippers, and getSSEStats feeds
+ *  /health. Display as a visible "\\0" escape instead. */
+function printableKey(key: string): string {
+  return key.split("\u0000").join("\\0");
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Close + dispatch helpers
 // ─────────────────────────────────────────────────────────────────────
@@ -131,7 +139,7 @@ function closeClient(client: SSEClient, reason: string): void {
     // Already closed by the runtime, or controller errored. Either way
     // we're done with it.
   }
-  console.log(`[${ts()}] SSE ✕ ${client.key} closed (reason=${reason})`);
+  console.log(`[${ts()}] SSE ✕ ${printableKey(client.key)} closed (reason=${reason})`);
 }
 
 /** Best-effort enqueue with backpressure guard. Returns:
@@ -264,7 +272,7 @@ function createStreamForKey(key: string, initialEvent: Record<string, unknown>):
 
       if (!clients.has(key)) clients.set(key, []);
       clients.get(key)!.push(client);
-      console.log(`[${ts()}] SSE ← ${key} connected (${clients.get(key)!.length} clients)`);
+      console.log(`[${ts()}] SSE ← ${printableKey(key)} connected (${clients.get(key)!.length} clients)`);
 
       // Send initial connected frame through the backpressure guard so
       // even the first byte respects the contract.
@@ -332,7 +340,7 @@ function pruneClosed(key: string): void {
   const alive = arr.filter((c) => !c.closed);
   if (alive.length === 0) {
     clients.delete(key);
-    console.log(`[${ts()}] SSE ✕ ${key} disconnected (0 remaining)`);
+    console.log(`[${ts()}] SSE ✕ ${printableKey(key)} disconnected (0 remaining)`);
   } else if (alive.length !== arr.length) {
     clients.set(key, alive);
   }
@@ -437,7 +445,7 @@ export function getSSEStats(): { total: number; sessions: Record<string, number>
   for (const [name, arr] of clients) {
     const alive = arr.filter((c) => !c.closed);
     if (alive.length === 0) continue;
-    sessions[name] = alive.length;
+    sessions[printableKey(name)] = alive.length;
     total += alive.length;
   }
   return { total, sessions };

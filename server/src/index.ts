@@ -518,9 +518,25 @@ setInterval(() => {
   } catch {}
 }, 5 * 60 * 1000);
 
-Bun.serve({
-  port: PORT,
-  hostname: HOST,
+// #434 — test-safety seam, same signature as PR #438 so the two branches
+// merge cleanly. Wraps the sole Bun.serve config in a factory so
+// integration tests can request an OS-assigned ephemeral port
+// (`bootServer({ port: 0 })`) and read the actual bound port back from
+// the returned server. In an aggregate `bun test` run only the FIRST test
+// file's import boots the default server (module cache) — later files'
+// PORT env is ignored, so a suite that hard-codes its own port gets
+// ConnectionRefused on every fetch while still "running" (审查修复 per
+// 通信龙 #461 review, finding 2). Suites boot a private instance via this
+// seam instead. #438 additionally moves the default boot below under
+// `import.meta.main`; until that lands, import keeps booting (pre-#434
+// behavior) so the not-yet-migrated suites stay green.
+//
+// Note: `opts.port ?? PORT` uses nullish-coalescing on purpose — `||`
+// would swallow a legitimate `0`. Same for hostname.
+export function bootServer(opts?: { port?: number; hostname?: string }): ReturnType<typeof Bun.serve> {
+return Bun.serve({
+  port: opts?.port ?? PORT,
+  hostname: opts?.hostname ?? HOST,
   idleTimeout: 255, // max value: keep SSE connections alive (seconds)
   // #221 — defense-in-depth cap on the raw request body. The /api/upload
   // handler also pre-checks Content-Length and post-checks parsed size
@@ -592,8 +608,13 @@ Bun.serve({
     //
     // Auth mirrors /events/:session's three paths:
     //   1. legacy AUTH_TOKEN (master) → any network
-    //   2/3. ntok_ / utok_ → must be a member of the requested network
-    //        (ntok_ additionally passes if the token is bound to it)
+    //   2/3. ntok_ / utok_ → must CURRENTLY be a member of the requested
+    //        network. Membership is checked unconditionally — there is NO
+    //        token-bound-network shortcut. removeNetworkMember deletes the
+    //        membership row but does NOT revoke the user's ntok, so the
+    //        network_members lookup IS the revocation mechanism: an ntok
+    //        bound to this network whose owner was removed must lose the
+    //        stream (审查修复 per 通信龙 #461 review, finding 1).
     const netEventsMatch = url.pathname.match(/^\/events\/network\/(.+)$/);
     if (netEventsMatch && req.method === "GET") {
       const authErr = requireAuth(req);
@@ -607,7 +628,7 @@ Bun.serve({
         return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 403 }));
       }
       const observerRole = getUserNetworkRole(authCtx.userId, observedNetId);
-      if (!observerRole && authCtx.networkId !== observedNetId) {
+      if (!observerRole) {
         return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
       }
       return createNetworkObserverStream(observedNetId);
@@ -1756,7 +1777,7 @@ Bun.serve({
       }
       // #461 network observer summary — unconditional (the task row
       // exists even when the target is offline/queued), metadata only.
-      pushNetworkObserverEvent(taskNetId, { type: "new_task", task_id: id, from: fromSession, to: targetAlias, status: "delivered", priority: body.priority });
+      pushNetworkObserverEvent(taskNetId, { type: "new_task", task_id: id, from: fromSession, to: targetAlias, status: target.state === "online" ? "delivered" : "queued", priority: body.priority });
       // #212 — stamp the dedup index only after the inbox/tasks insert
       // succeeds. Mirrors the MCP `send_task` path so a failed write
       // never shadows a legitimate retry.
@@ -2447,6 +2468,11 @@ Security: ${SECURITY_LABEL}
     },
   },
 });
+} // end bootServer
+
+// Boot the default server at import (pre-#434 behavior — #438 moves this
+// under `import.meta.main`). Exported so callers can read the bound port.
+export const server = bootServer();
 
 // Round-2/4 review ② — periodic retention sweep + incremental VACUUM.
 // Sweeps every hour by default. Operators can disable any single table

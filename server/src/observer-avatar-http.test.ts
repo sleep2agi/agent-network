@@ -1,42 +1,60 @@
 // #461 + #462 — HTTP integration tests against the real Bun.serve hub.
 //
-// Pattern mirrors uploads-http.test.ts / api-host-supervisors-fallback:
-// temp DB + ephemeral port, `import("./index.js")` side effect boots the
-// server, real fetch() against the production code path (auth included).
+// Boots a PRIVATE server instance via the #434 seam (`bootServer({ port: 0 })`,
+// same signature as PR #438) and derives BASE from the actual bound port.
+// This keeps the suite alive in aggregate runs: `await import("./index.js")`
+// is a module-cache no-op when another file booted first, so relying on the
+// import side effect + own PORT env leaves every fetch ConnectionRefused
+// while the tests still "run" (通信龙 #461 review, finding 2). Gate:
+//   bun test src/uploads-http.test.ts src/observer-avatar-http.test.ts → 0 fail
 //
-// #461: GET /events/network/:id observer stream — membership auth, summary
-//       events for third-party REST dispatches, no content leakage.
+// #461: GET /events/network/:id observer stream — membership auth incl.
+//       member-removal revocation, summary events for third-party traffic
+//       (REST dispatch + MCP send_reply), no content leakage.
 // #462: PUT /api/nodes/:ref/avatar + GET /api/nodes round trip — persistence,
-//       XSS-shaped rejects, clear semantics, write-permission gate.
+//       href normalization, XSS-shaped rejects, clear semantics, write gate.
 
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { register, login } from "./auth.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { register, login, addNetworkMember, removeNetworkMember, createNetworkTokenForNode } from "./auth.js";
+import { registerTools } from "./tools.js";
 import { db } from "./db.js";
 
 const SERVER_DB = mkdtempSync(join(tmpdir(), "anet-obs-avatar-db-")) + "/commhub.db";
-const PORT = 17000 + Math.floor(Math.random() * 1000);
-const BASE = `http://127.0.0.1:${PORT}`;
+
+let BASE = "";
+let privateServer: any = null;
 
 let memberToken = "";
 let memberNetworkId = "";
+let memberUserId = "";
 let outsiderToken = "";
+let outsiderUserId = "";
 const TARGET_ALIAS = "obs-target-agent";
 const AVATAR_NODE_ID = "node_avatar_test_1";
 
 beforeAll(async () => {
-  process.env.COMMHUB_DB = SERVER_DB;
-  process.env.PORT = String(PORT);
+  // Kept for per-file runs launched without an external COMMHUB_DB (the
+  // documented contract still is to set it externally; see db-adapter.ts).
+  process.env.COMMHUB_DB = process.env.COMMHUB_DB || SERVER_DB;
   process.env.HOST = "127.0.0.1";
+  // The default import-boot instance (pre-#434 behavior) must not fight
+  // over a fixed port — 9200 may be a real hub on the dev box. (PORT=0
+  // won't do: index.ts parses `Number(process.env.PORT) || 9200`, which
+  // swallows 0.) Our assertions run against the private bootServer
+  // instance below either way.
+  process.env.PORT = process.env.PORT || String(16000 + Math.floor(Math.random() * 1000));
 
   const suffix = `${Date.now()}_${Math.floor(Math.random() * 1000)}`;
   const pw = "BootstrapPw123Aa!";
 
-  let r = register(`obs_member_${suffix}`, pw, undefined, "seed");
+  const memberName = `obs_member_${suffix}`;
+  let r = register(memberName, pw, undefined, "seed");
   if (!r.ok || !r.token) {
-    const lr = login(`obs_member_${suffix}`, pw);
+    const lr = login(memberName, pw);
     if (lr.token) { memberToken = lr.token; memberNetworkId = lr.network_id ?? ""; }
   } else {
     memberToken = r.token;
@@ -44,10 +62,15 @@ beforeAll(async () => {
   }
   expect(memberToken).toBeTruthy();
   expect(memberNetworkId).toBeTruthy();
+  memberUserId = db.get<any>("SELECT user_id FROM users WHERE username = ?1", memberName)?.user_id ?? "";
+  expect(memberUserId).toBeTruthy();
 
-  const r2 = register(`obs_outsider_${suffix}`, pw, undefined, "seed");
+  const outsiderName = `obs_outsider_${suffix}`;
+  const r2 = register(outsiderName, pw, undefined, "seed");
   if (r2.ok && r2.token) outsiderToken = r2.token;
   expect(outsiderToken).toBeTruthy();
+  outsiderUserId = db.get<any>("SELECT user_id FROM users WHERE username = ?1", outsiderName)?.user_id ?? "";
+  expect(outsiderUserId).toBeTruthy();
 
   // Target agent session in the member's network, freshly seen → online.
   db.run(
@@ -63,11 +86,15 @@ beforeAll(async () => {
     [AVATAR_NODE_ID, TARGET_ALIAS, memberNetworkId]
   );
 
-  await import("./index.js");
-  await new Promise((r) => setTimeout(r, 100));
+  // Private instance on an OS-assigned port — never collides with the
+  // default import-boot instance another test file may own.
+  const mod: any = await import("./index.js");
+  privateServer = mod.bootServer({ port: 0, hostname: "127.0.0.1" });
+  BASE = `http://127.0.0.1:${privateServer.port}`;
 });
 
 afterAll(() => {
+  try { privateServer?.stop?.(true); } catch {}
   try { rmSync(SERVER_DB, { recursive: true, force: true }); } catch {}
 });
 
@@ -127,9 +154,43 @@ describe("#461 GET /events/network/:id — auth", () => {
     expect(connected.network_id).toBe(memberNetworkId);
     await reader.cancel();
   });
+
+  test("membership removal revokes observer access — ntok exploit repro (通信龙 review finding 1)", async () => {
+    // Exact repro of the review's exploit: add user C to network A, mint
+    // an ntok BOUND to A, remove C from A — the same live ntok must lose
+    // the stream. network_members IS the revocation mechanism because
+    // removeNetworkMember does not revoke the user's tokens; the old
+    // `!role && authCtx.networkId !== observedNetId` OR-form let the
+    // token's network binding bypass the membership check (utok would
+    // not catch this: its authCtx.networkId is null, so only ntok
+    // exercises the vulnerable branch — verified by stubbing the OR
+    // back in: THIS test goes red, the utok variants stay green).
+    const added = addNetworkMember(memberNetworkId, outsiderUserId, "member");
+    expect(added.ok).toBe(true);
+    const minted = createNetworkTokenForNode(outsiderUserId, memberNetworkId, "revocation-probe");
+    expect(minted.ok).toBe(true);
+    const ntok = minted.token!;
+    expect(ntok.startsWith("ntok_")).toBe(true);
+
+    const whileMember = await fetch(`${BASE}/events/network/${memberNetworkId}`, { headers: auth(ntok) });
+    expect(whileMember.status).toBe(200);
+    const reader = whileMember.body!.getReader();
+    expect((await readFrame(reader)).type).toBe("connected");
+    await reader.cancel();
+
+    const removed = removeNetworkMember(memberNetworkId, outsiderUserId);
+    expect(removed.ok).toBe(true);
+    // The review's failing probe: /events/network/A with the still-live
+    // network-bound token → must now be 403, not 200.
+    const afterRemoval = await fetch(`${BASE}/events/network/${memberNetworkId}`, { headers: auth(ntok) });
+    expect(afterRemoval.status).toBe(403);
+    // utok of the removed user is denied too.
+    const utokAfter = await fetch(`${BASE}/events/network/${memberNetworkId}`, { headers: auth(outsiderToken) });
+    expect(utokAfter.status).toBe(403);
+  });
 });
 
-describe("#461 observer receives third-party dispatch summaries", () => {
+describe("#461 observer receives third-party traffic summaries", () => {
   test("REST /api/task dispatch → observer gets new_task summary, no content", async () => {
     const res = await fetch(`${BASE}/events/network/${memberNetworkId}`, { headers: auth(memberToken) });
     const reader = res.body!.getReader();
@@ -150,11 +211,47 @@ describe("#461 observer receives third-party dispatch summaries", () => {
     expect(evt.task_id).toBe(dispatched.task_id);
     expect(evt.from).toBe("third-party-sender");
     expect(evt.to).toBe(TARGET_ALIAS);
+    // Online session was seeded → delivered; offline would report queued.
     expect(evt.status).toBe("delivered");
     expect(evt.priority).toBe("high");
     expect(evt.network_id).toBe(memberNetworkId);
     expect(evt.scope).toBe("network");
     // The acceptance line: summary must NOT leak the task body.
+    expect(JSON.stringify(evt)).not.toContain(secret);
+    await reader.cancel();
+  });
+
+  test("MCP send_reply → observer gets new_reply summary, reply text NOT in frame", async () => {
+    // Drive the REAL registered MCP handler (same interception pattern as
+    // ack-create-request.test.ts) with the member's network enforced, and
+    // read the observer stream over real HTTP.
+    const res = await fetch(`${BASE}/events/network/${memberNetworkId}`, { headers: auth(memberToken) });
+    const reader = res.body!.getReader();
+    await readFrame(reader); // connected
+
+    const tools: Record<string, (args: any) => Promise<any>> = {};
+    const mcp = new McpServer({ name: "test", version: "0" }) as any;
+    mcp.tool = (name: string, _desc: string, _schema: any, handler: any) => { tools[name] = handler; };
+    registerTools(mcp, undefined, memberNetworkId, memberUserId);
+    expect(typeof tools["send_reply"]).toBe("function");
+
+    const secret = `SECRET-REPLY-TEXT-${Date.now()}`;
+    const result = await tools["send_reply"]({
+      alias: TARGET_ALIAS,
+      text: secret,
+      status: "replied",
+      from_session: "reply-worker",
+    });
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.ok).toBe(true);
+
+    const evt = await readFrame(reader);
+    expect(evt.type).toBe("new_reply");
+    expect(evt.from).toBe("reply-worker");
+    expect(evt.to).toBe(TARGET_ALIAS);
+    expect(evt.status).toBe("replied");
+    expect(evt.message_id).toBe(parsed.message_id);
+    expect(evt.network_id).toBe(memberNetworkId);
     expect(JSON.stringify(evt)).not.toContain(secret);
     await reader.cancel();
   });
@@ -182,6 +279,20 @@ describe("#462 PUT /api/nodes/:ref/avatar + GET /api/nodes", () => {
     expect(row.avatar_url).toBe(avatarUrl);
     // #312 discipline still holds — internals must not leak.
     expect("config_snapshot" in row).toBe(false);
+  });
+
+  test("markup-hostile chars are stored NORMALIZED (href), not raw (通信龙 review finding 3)", async () => {
+    const put = await fetch(`${BASE}/api/nodes/${AVATAR_NODE_ID}/avatar`, {
+      method: "PUT",
+      headers: { ...auth(memberToken), "Content-Type": "application/json" },
+      body: JSON.stringify({ avatar_url: 'https://cdn.example.com/a"b.png' }),
+    });
+    expect(put.status).toBe(200);
+    const putBody = await put.json() as any;
+    expect(putBody.avatar_url).toBe("https://cdn.example.com/a%22b.png");
+    const row = db.get<any>("SELECT avatar_url FROM nodes WHERE node_id = ?1", AVATAR_NODE_ID);
+    expect(row.avatar_url).toBe("https://cdn.example.com/a%22b.png");
+    expect(row.avatar_url).not.toContain('"');
   });
 
   test("clear avatar with null → avatar_url null in list", async () => {
