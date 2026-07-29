@@ -4220,6 +4220,36 @@ async function launchAgent(id: string, forceNewSession = false) {
       saveProfile(nodeId, profile);
     }
 
+    // #486 P0 — claude CLI 2.1.220+ auto-switches to --print mode when its
+    // stdin is not a TTY, then errors "Input must be provided either through
+    // stdin or as a prompt argument when using --print" AND exits with code
+    // 0 (upstream Anthropic bug). anet spawns with { stdio: "inherit" }, so
+    // any headless caller (CI, systemd unit, docker run without -it, a
+    // watchdog / project-up child, any shell whose stdin is redirected)
+    // inherits a non-TTY stdin and hits this — the agent never comes online
+    // and downstream sees a false-success "session pinned" line. Refuse the
+    // spawn up front with actionable guidance so scripted callers see a
+    // real failure (non-zero exit + clear error), and interactive callers
+    // stay on the happy path.
+    //
+    // The dev-channels warn a few lines above (~L4211) covers the narrower
+    // "dev-channels + no TTY" case (needs Enter to dismiss a prompt). This
+    // gate is broader: NEW claude CLI needs a TTY unconditionally for
+    // interactive mode. Both warn/refuse paths coexist; this one fires
+    // first when it applies.
+    if (!process.stdin.isTTY) {
+      console.error(`[anet] ❌ claude-code-cli requires an interactive TTY on stdin.`);
+      console.error(`[anet]    Current shell's stdin is not a TTY. Claude CLI 2.1.220+`);
+      console.error(`[anet]    auto-switches to --print mode without a TTY and refuses to`);
+      console.error(`[anet]    start its interactive session, so the agent never comes online.`);
+      console.error(`[anet]    Fix:`);
+      console.error(`[anet]      • For headless / CI / systemd / docker without -it:`);
+      console.error(`[anet]        anet node start ${shellQuote(nodeId)} --tmux`);
+      console.error(`[anet]        (anet allocates a real PTY inside a tmux session)`);
+      console.error(`[anet]      • Or re-run this command from an interactive terminal.`);
+      process.exit(1);
+    }
+
     let launchedWithResume = false;
     const supportsSessionId = claudeSupportsSessionId();
     if (!supportsSessionId) {
@@ -4254,10 +4284,20 @@ async function launchAgent(id: string, forceNewSession = false) {
       if (child.pid) writeFileSync(pidFile, String(child.pid));
       child.on("exit", (code) => {
         try { rmSync(pidFile, { force: true }); } catch {}
-        if (forceNewSession) {
-          console.log(`\n[anet] New Claude Code session saved: ${profile.session?.slice(0, 8)}...`);
-        } else if (!launchedWithResume) {
-          console.log(`\n[anet] Claude Code session pinned: ${profile.session?.slice(0, 8)}...`);
+        // #486 P0 — only print the "session pinned / saved" success line
+        // when claude actually exited cleanly. Old behavior printed it
+        // after ANY exit (including error paths where claude died with
+        // an argument-parse error), giving scripted callers a false-
+        // success signal. Non-zero exit propagates via process.exit
+        // below; treating exit 0 as the only success path also protects
+        // against upstream claude bugs that emit an error to stderr but
+        // still exit 0 (rare but observed pre-#486 fix).
+        if ((code ?? 0) === 0) {
+          if (forceNewSession) {
+            console.log(`\n[anet] New Claude Code session saved: ${profile.session?.slice(0, 8)}...`);
+          } else if (!launchedWithResume) {
+            console.log(`\n[anet] Claude Code session pinned: ${profile.session?.slice(0, 8)}...`);
+          }
         }
         // Use the child's exit code as the parent's exit code via the
         // fa08eb4 wrap's natural process.exit(0) path. For non-zero exits,
@@ -4268,7 +4308,9 @@ async function launchAgent(id: string, forceNewSession = false) {
       child.on("error", (err) => {
         try { rmSync(pidFile, { force: true }); } catch {}
         console.error(`[anet] ❌ spawn claude failed: ${err.message || err}`);
-        resolve();
+        // #486 P0 — was `resolve()` → main() natural exit 0 → scripted
+        // callers see spawn ENOENT as success. Propagate as failure.
+        process.exit(1);
       });
     });
   }
