@@ -1658,21 +1658,27 @@ return Bun.serve({
       }));
     }
 
-    // ── REST: file download (#221 + #495) ──
-    // GET /api/files/:file_id with Bearer auth + ownership check.
-    // Always forces Content-Disposition: attachment +
+    // ── REST: file download (#221 + #495 + #500 CR2 HEAD) ──
+    // GET or HEAD /api/files/:file_id with Bearer auth + ownership
+    // check. Always forces Content-Disposition: attachment +
     // X-Content-Type-Options: nosniff so the served file can never be
     // executed or rendered as HTML. The file_id is validated against
     // the same strict regex used at generation time before any
     // filesystem access.
     //
     // Ownership gate is factored into `authorizeFileDownload` (see
-    // src/server.ts near resolveRequestAuth). Any future HEAD, Range,
-    // conditional-request, or dashboard-proxy path for /api/files
-    // MUST route through the same helper — do not duplicate the
+    // src/server.ts near resolveRequestAuth). HEAD MUST route through
+    // the same helper — pre-#500-CR2, HEAD fell through to a fallback
+    // 200 page whose body happened to be byte-identical to the
+    // "unknown file" case, so no enumeration oracle formed in practice.
+    // That was coincidence, not a gate. A change to the fallback (e.g.
+    // adding "Requested resource: <hint>") would materialize the oracle
+    // with zero failing tests. Any future Range, conditional-request,
+    // or dashboard-proxy path for /api/files MUST route through this
+    // handler (via authorizeFileDownload) — do not duplicate the
     // allow-list inline, or the branches will drift.
     const fileMatch = url.pathname.match(/^\/api\/files\/(.+)$/);
-    if (fileMatch && req.method === "GET") {
+    if (fileMatch && (req.method === "GET" || req.method === "HEAD")) {
       const authErr = requireAuth(req);
       if (authErr) return withCors(req, authErr);
 
@@ -1696,7 +1702,9 @@ return Bun.serve({
 
       // #495 ownership gate — placed AFTER file-exists so denied
       // callers cannot distinguish "you don't own this" from
-      // "no such file". Both branches return the same 404 shape.
+      // "no such file". Both branches return the same 404 shape
+      // for BOTH GET and HEAD (HEAD honours body-omission but the
+      // status code and headers are the authoritative signal).
       if (!authorizeFileDownload(req, entry)) {
         return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
       }
@@ -1728,7 +1736,6 @@ return Bun.serve({
       const safeFilename = (entry.name && /^[\x20-\x7e]+$/.test(entry.name))
         ? entry.name
         : `${fileId}${entry.ext}`;
-      const blob = Bun.file(storage.absolutePath);
       const responseHeaders: Record<string, string> = {
         ...corsHeaders(req),
         "Content-Type": "application/octet-stream", // always opaque; nosniff prevents the client from re-deciding
@@ -1737,6 +1744,15 @@ return Bun.serve({
         "X-Content-Type-Options": "nosniff",
         "Cache-Control": "private, no-store",
       };
+      // HEAD: return the same status and headers as GET, but no body,
+      // per RFC 9110 §9.3.2. This ensures HEAD passes through the same
+      // authorization helper — a cross-owner HEAD is 404 (same as GET),
+      // not a fallback 200. Status/headers are the authoritative
+      // signal; body omission is HTTP-standard for HEAD.
+      if (req.method === "HEAD") {
+        return new Response(null, { status: 200, headers: responseHeaders });
+      }
+      const blob = Bun.file(storage.absolutePath);
       return new Response(blob, { status: 200, headers: responseHeaders });
     }
 

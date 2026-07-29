@@ -66,6 +66,31 @@ const userBNetworkToken = rB.network_token!;
 const userBNetworkId = getUserAllNetworks(userBUserId)[0]?.network_id!;
 if (!userBNetworkId) throw new Error("userB default network not found");
 
+// #500 CR2 DEV_OPEN 假门 fix — assert userB is NOT admin at fixture
+// setup time. If fixture ordering ever changes (e.g. auth.ts flips
+// "first user auto-admin" logic, or an earlier test file promotes
+// userB), the assertion catches it before Test A/B can silently
+// short-circuit through the admin branch of authorizeFileDownload
+// and hide a broken DEV_OPEN gate. Independent审员 caught this
+// class of假门 in the prior CR round — the assertion writes the
+// "userB is non-admin" invariant into the test itself so a future
+// fixture drift cannot re-open the hole.
+{
+  const userBRoleRow = db.get<{ role: string }>(
+    "SELECT role FROM users WHERE user_id = ?1",
+    userBUserId,
+  );
+  if (!userBRoleRow) throw new Error("userB not found in users table after register");
+  if (userBRoleRow.role === "admin") {
+    throw new Error(
+      `[#500 CR2 fixture-drift guard] userB was auto-promoted to admin ` +
+      `(role=${userBRoleRow.role}). Refusing to run: the DEV_OPEN and ` +
+      `cross-owner tests would short-circuit through the admin allow-list ` +
+      `branch and validate nothing.`,
+    );
+  }
+}
+
 // Add userA as a member of userB's default network. This is what makes
 // the "same-network non-owner" test cell meaningful — without it, that
 // test would only prove cross-network denial, which is a weaker claim.
@@ -193,6 +218,90 @@ describe.skipIf(!isProdMode)("#495 — GET /api/files/:file_id authorization (ow
     expect(res.status).toBe(404);
     const body: any = await res.json();
     expect(body.error).toBe("not_found");
+  });
+});
+
+// #500 CR2 ① — HEAD verb explicit authz coverage. Pre-CR2, HEAD fell
+// through to a fallback 200 page; body was byte-identical to unknown
+// file_id so no oracle formed by accident, but it was coincidence, not
+// a gate. This suite asserts HEAD routes through authorizeFileDownload
+// per RFC 9110 §9.3.2: same status/headers as GET, body omitted.
+async function headAs(token: string | null, fileId: string): Promise<Response> {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return fetch(`${BASE}/api/files/${fileId}`, { method: "HEAD", headers });
+}
+
+describe.skipIf(!isProdMode)("#500 CR2 — HEAD /api/files/:file_id authorization (parity with GET)", () => {
+  let userBFileId = "";
+
+  beforeAll(async () => {
+    userBFileId = await uploadAs(userBToken, new TextEncoder().encode("head-scenario-payload"), "b-head.txt");
+  });
+
+  test("owner (userB) HEAD own file → 200 + content-length header (body omitted per HEAD)", async () => {
+    const res = await headAs(userBToken, userBFileId);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-length")).toBe(String("head-scenario-payload".length));
+    expect(res.headers.get("content-disposition")).toContain("attachment");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  test("🔴 cross-owner HEAD (userA HEAD userB's file) → 404 via helper (was fallback 200 pre-CR2)", async () => {
+    const res = await headAs(userAToken, userBFileId);
+    expect(res.status).toBe(404);
+    // 404 must originate from authorizeFileDownload, not the fallback
+    // page. Body is application/json ({"ok":false,"error":"not_found"})
+    // — check Content-Type so a future fallback rewrite (e.g. adding
+    // "requested resource type: X") does not silently form an oracle
+    // while HEAD still returns 200 from that page.
+    expect(res.headers.get("content-type")?.toLowerCase()).toContain("application/json");
+  });
+
+  test("HEAD unknown file_id → 404 with same shape as cross-owner (no enumeration signal)", async () => {
+    const res = await headAs(userAToken, "0123456789abcdef0123456789abcdef");
+    expect(res.status).toBe(404);
+    expect(res.headers.get("content-type")?.toLowerCase()).toContain("application/json");
+  });
+
+  test("HEAD anonymous → 401 (auth still required, symmetric with GET)", async () => {
+    const res = await headAs(null, userBFileId);
+    expect(res.status).toBe(401);
+  });
+
+  test("admin HEAD any file → 200 (operational access preserved on HEAD)", async () => {
+    const res = await headAs(adminToken, userBFileId);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-length")).toBe(String("head-scenario-payload".length));
+  });
+});
+
+// #500 CR2 ④ — Upload owner persistence. Prove that new authenticated
+// uploads always write a truthy owner_id to the on-disk index entry.
+// If the upload handler ever regresses to writing owner_id=null in
+// requireAuth-guarded paths, D1 turns red — the invariant that
+// "production uploads never produce null-owner blobs" is documented
+// in the authorizeFileDownload comment and this test enforces it.
+describe.skipIf(!isProdMode)("#500 CR2 — upload persists truthy owner_id (D1)", () => {
+  test("D1: userA authenticated upload → index entry owner_id === userA.userId (never null)", async () => {
+    const fileId = await uploadAs(userAToken, new TextEncoder().encode("owner-persistence-check"), "d1.bin");
+    const { readFileSync } = await import("fs");
+    const entryPath = join(UPLOADS_DIR, ".index", `${fileId}.json`);
+    expect(existsSync(entryPath)).toBe(true);
+    const entry = JSON.parse(readFileSync(entryPath, "utf-8"));
+    expect(entry.owner_id).not.toBeNull();
+    expect(entry.owner_id).toBe(userAUserId);
+    expect(entry.owner).toBe(nameA); // owner username stays consistent with the token that uploaded
+  });
+
+  test("D1b: userB authenticated upload via utok_ → owner_id === userB.userId", async () => {
+    const fileId = await uploadAs(userBToken, new TextEncoder().encode("owner-persistence-check-b"), "d1b.bin");
+    const { readFileSync } = await import("fs");
+    const entryPath = join(UPLOADS_DIR, ".index", `${fileId}.json`);
+    expect(existsSync(entryPath)).toBe(true);
+    const entry = JSON.parse(readFileSync(entryPath, "utf-8"));
+    expect(entry.owner_id).not.toBeNull();
+    expect(entry.owner_id).toBe(userBUserId);
   });
 });
 

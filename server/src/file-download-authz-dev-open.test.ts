@@ -34,10 +34,44 @@ process.env.COMMHUB_DEV_OPEN = "1";
 delete process.env.COMMHUB_AUTH_TOKEN;
 
 const { register } = await import("./auth.js");
+const { db } = await import("./db.js");
+
+// #500 CR2 DEV_OPEN 假门 fix — register a FIRST user (userA) so any
+// "first-user-auto-admin" logic falls on userA. Then register userB
+// as the non-admin download-attempt actor. Without this two-user
+// split, the download test would short-circuit through the admin
+// allow-list branch instead of exercising the DEV_OPEN branch — the
+// mutation test (remove DEV_OPEN branch → expect RED) would silently
+// still pass.
 const nameA = `useraaa_devopen_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
 const rA = register(nameA, "BootstrapPw123Aa!", undefined, "userA");
 if (!rA.ok) throw new Error(`userA register failed: ${rA.error}`);
-const userAToken = rA.token!;
+
+const nameB = `userbbb_devopen_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+const rB = register(nameB, "BootstrapPw123Aa!", undefined, "userB");
+if (!rB.ok) throw new Error(`userB register failed: ${rB.error}`);
+const userBToken = rB.token!;
+const userBUserId = rB.user!.user_id;
+
+// Fixture-drift guard: userB must NOT be admin. If a future auth.ts
+// change grants admin to more than the first user (or the DB seeder
+// promotes both), the DEV_OPEN test would silently short-circuit
+// through the admin branch of authorizeFileDownload. Fail loudly.
+{
+  const roleRow = db.get<{ role: string }>(
+    "SELECT role FROM users WHERE user_id = ?1",
+    userBUserId,
+  );
+  if (!roleRow) throw new Error("userB not found in users table after register");
+  if (roleRow.role === "admin") {
+    throw new Error(
+      `[#500 CR2 fixture-drift guard] userB was auto-promoted to admin ` +
+      `(role=${roleRow.role}) in DEV_OPEN sibling test. Refusing to run: ` +
+      `the DEV_OPEN branch would not actually be exercised — the download ` +
+      `would short-circuit through the admin allow-list and validate nothing.`,
+    );
+  }
+}
 
 const { bootServer } = await import("./server.js");
 const server = bootServer({ port: 0, hostname: "127.0.0.1" });
@@ -78,7 +112,7 @@ async function downloadAs(token: string | null, fileId: string): Promise<Respons
 }
 
 describe.skipIf(!devOpenActive)("#495 — DEV_OPEN null-owner allowance (Test B)", () => {
-  test("null-owner uploaded via anonymous DEV_OPEN request → normal user can download (200)", async () => {
+  test("null-owner uploaded via anonymous DEV_OPEN request → non-admin userB can download (200) via DEV_OPEN branch", async () => {
     const devOpenFileId = await uploadAnon(new TextEncoder().encode("dev-open-blob"), "dev.bin");
 
     // Verify the upload really produced null-owner (matches the shape
@@ -90,7 +124,11 @@ describe.skipIf(!devOpenActive)("#495 — DEV_OPEN null-owner allowance (Test B)
       expect(entry.owner_id).toBeNull();
     }
 
-    const res = await downloadAs(userAToken, devOpenFileId);
+    // userB is non-admin (guarded at module load). If DEV_OPEN branch
+    // is removed from authorizeFileDownload, this returns 404 instead
+    // of 200 — the assertion below turns red, catching the regression
+    // structurally rather than via admin-branch short-circuit.
+    const res = await downloadAs(userBToken, devOpenFileId);
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("dev-open-blob");
   });
