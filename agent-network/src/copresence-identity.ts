@@ -81,10 +81,20 @@ export interface CopresenceMarker {
   boot_id: string;
   started_at_epoch_ms: number;
   owner_uid: number;
+  // Best-effort observability hints (which tmux session each pid came from,
+  // pgid/starttime at harvest time). NOT the identity source — reap uses
+  // /proc/PID/environ scan for the marker uuid, which stays valid even when
+  // the recorded pids die or spawn workers under different pgids.
+  //
+  // Finding #4 (audit 92d53c8f): every field here is OPTIONAL. If pane pid
+  // harvest fails for any session (or all), the marker file still gets
+  // written — the identity uuid is what matters. Prior all-or-nothing gate
+  // meant one flaky tmux display-message call destroyed the node's ability
+  // to be identity-reaped forever.
   sessions: {
-    appsrv: SessionInfo;
-    bridge: SessionInfo;
-    tui: SessionInfo;
+    appsrv?: SessionInfo;
+    bridge?: SessionInfo;
+    tui?: SessionInfo;
   };
 }
 
@@ -96,7 +106,8 @@ export type RefuseCause =
   | "OWNER_MISMATCH"
   | "PARSE_ERROR"
   | "SCHEMA_INVALID"
-  | "STALE_BOOT_ID";
+  | "STALE_BOOT_ID"
+  | "PLATFORM_UNSUPPORTED";
 
 export type ReadMarkerResult =
   | { kind: "ok"; marker: CopresenceMarker }
@@ -125,6 +136,20 @@ export interface ProcessEnumerator {
   listAllPids(): number[];
   readEnviron(pid: number): string | null;
   readStat(pid: number): ProcStat | null;
+  /**
+   * Owner uid of /proc/<pid>. Used by scanEnvironForMarker to discriminate
+   * "other-user process (expected EACCES)" from "our own process with weird
+   * EACCES (real problem, must fail closed)".
+   * Returns null if the pid is gone (ENOENT).
+   */
+  readOwnerUid(pid: number): number | null;
+  /**
+   * Single-character process state from /proc/<pid>/status (R/S/D/Z/T/...).
+   * `Z` means zombie — mm freed, environ returns EACCES even to owner, but
+   * the pid is going away shortly. Skip zombies during environ scan.
+   * Returns null if the pid is gone (ENOENT).
+   */
+  readState(pid: number): string | null;
 }
 
 /**
@@ -220,6 +245,7 @@ function validateSchema(obj: unknown): obj is CopresenceMarker {
   const s = obj.sessions;
   for (const key of ["appsrv", "bridge", "tui"] as const) {
     const sess = s[key];
+    if (sess === undefined) continue; // optional per finding #4
     if (!isPlainObject(sess)) return false;
     if (typeof sess.tmux !== "string") return false;
     if (typeof sess.pid !== "number") return false;
@@ -237,6 +263,18 @@ function validateSchema(obj: unknown): obj is CopresenceMarker {
  * all return { kind: "refuse", cause, detail }.
  */
 export function readMarker(nodesDir: string, nodeId: string): ReadMarkerResult {
+  // Finding #7 (audit 92d53c8f): P3 identity teardown depends on /proc/*
+  // which only exists on Linux. On Darwin/Windows dev machines every stop
+  // used to misreport marker corruption (or crash reading /proc/…). Refuse
+  // cleanly with a clear cause so the cli falls through to the legacy sweep
+  // without alarming the operator.
+  if (process.platform !== "linux") {
+    return {
+      kind: "refuse",
+      cause: "PLATFORM_UNSUPPORTED",
+      detail: `P3 identity teardown requires Linux /proc; platform=${process.platform}; falling through to legacy sweep`,
+    };
+  }
   const path = markerFilePath(nodesDir, nodeId);
   // Use lstat to catch symlinks (statSync would follow).
   let lstat;
@@ -333,16 +371,72 @@ export function realEnumerator(): ProcessEnumerator {
       }
       return { pgid: pgrp, starttime_jiffies: starttime, ppid };
     },
+    readOwnerUid(pid: number): number | null {
+      // IMPORTANT: check /proc/PID/environ's OWN owner, not /proc/PID directory.
+      // Some special processes (systemd sd-pam, setuid children, root
+      // sub-daemons launched via user session) have /proc/PID owned by the
+      // real user uid but /proc/PID/environ owned by root with mode 0400.
+      // We're testing whether we CAN read environ; the environ file's owner
+      // is what actually matters for that.
+      //
+      // If /proc/PID/environ specifically can't be stat'd, the pid is either
+      // gone or the container/policy layer blocks even the metadata; return
+      // null (skip) — safer to not treat as "ours" than to fail-closed and
+      // block stops for irrelevant system processes.
+      try {
+        return statSync(`/proc/${pid}/environ`).uid;
+      } catch (err: any) {
+        if (err?.code === "ENOENT" || err?.code === "ESRCH") return null;
+        if (err?.code === "EACCES") return null; // metadata itself blocked, treat as not-ours
+        throw err;
+      }
+    },
+    readState(pid: number): string | null {
+      // /proc/<pid>/stat field-after-comm[0] is state. We already have readStat
+      // above but that throws on malformed; here we want a lighter/silent read
+      // that returns just the state char (used to detect zombies during environ
+      // EACCES discrimination). Prefer /proc/<pid>/status (line-oriented, more
+      // stable to parse than the space-packed stat).
+      //
+      // We combine State + TracerPid into a single call for callers that need
+      // both. When TracerPid != 0, the task's mm is locked by the tracer and
+      // readEnviron will EACCES even for the owner — treat that as an
+      // expected "mm-locked" state (returned as "t" per convention).
+      let raw: string;
+      try {
+        raw = readFileSync(`/proc/${pid}/status`, "utf8");
+      } catch (err: any) {
+        if (err?.code === "ENOENT" || err?.code === "ESRCH") return null;
+        throw err;
+      }
+      const tracerMatch = raw.match(/^TracerPid:\s*(\d+)/m);
+      if (tracerMatch && Number(tracerMatch[1]) > 0) {
+        return "t"; // ptrace-stopped: mm-locked, environ unreadable, expected
+      }
+      // Line format: `State:\tZ (zombie)` — take the first non-whitespace char
+      // after `State:`.
+      const m = raw.match(/^State:\s*(\S)/m);
+      return m ? m[1] : null;
+    },
   };
 }
 
 export function realKiller(): KillPrimitive {
   return {
     killPgroup(pgid: number, signal: "TERM" | "KILL"): void {
+      // Finding #2 (audit 92d53c8f): kill(-0) targets the CALLER's own
+      // process group — kernel threads have pgrp=0. Any code path that
+      // arrived here with pgid<=0 has a bug upstream; refuse to signal.
+      if (pgid <= 0) {
+        throw new Error(`killPgroup refused: pgid must be > 0 (got ${pgid}); kill(-0) or kill(-negative) would target caller's own pgroup`);
+      }
       // Negative pid → group signal. process.kill accepts string signal.
       process.kill(-pgid, signal === "TERM" ? "SIGTERM" : "SIGKILL");
     },
     pgroupAlive(pgid: number): boolean {
+      if (pgid <= 0) {
+        throw new Error(`pgroupAlive refused: pgid must be > 0 (got ${pgid})`);
+      }
       try {
         process.kill(-pgid, 0);
         return true;
@@ -363,21 +457,89 @@ export function realKiller(): KillPrimitive {
  * pids, which may be stale (main died, workers survived under new pgids).
  *
  * Bytes format of /proc/PID/environ: NUL-separated key=value pairs.
+ *
+ * Blocker 1 fix (independent audit 92d53c8f, 2026-07-29): /proc/<pid>/environ
+ * is 0400 owner-only. Blindly reading it will hit EACCES on every other-user
+ * process (pid 1 is systemd/root → guaranteed EACCES). The naive fix — wrap
+ * in try/catch and continue — would silently miss marker-carrying processes
+ * whose environ we can't read for some other reason, recreating Defect A
+ * ("nothing killed but report success"). Right fix:
+ *
+ *   1. Try readEnviron.
+ *   2. On EACCES, discriminate via readOwnerUid + readState:
+ *      - Owner uid != ours     → EXPECTED skip (can't be one of our procs).
+ *      - Own uid, state = Z    → EXPECTED skip (zombie, mm freed).
+ *      - Own uid, not zombie   → FAIL-CLOSED (unexplained EACCES on our own
+ *                                live process is a real problem, must throw).
  */
+export interface ScanResult {
+  /** Pids whose environ we successfully read and matched the marker uuid. */
+  hits: number[];
+  /**
+   * Pids we had to SKIP due to EACCES on own-uid running-state process.
+   * These pids MIGHT be marker-carrying but we couldn't verify. Reap flow
+   * uses this to REFUSE marker removal even when hits=0 (defense against
+   * Defect A: silently missing a marker-carrying process, then deleting
+   * the marker as if teardown succeeded).
+   */
+  unreadableOwnUid: number[];
+}
+
 export function scanEnvironForMarker(enumer: ProcessEnumerator, markerUuid: string): number[] {
+  return scanEnvironForMarkerFull(enumer, markerUuid).hits;
+}
+
+export function scanEnvironForMarkerFull(enumer: ProcessEnumerator, markerUuid: string): ScanResult {
+  if (typeof markerUuid !== "string" || markerUuid.length === 0) {
+    throw new Error("scanEnvironForMarker: markerUuid must be a non-empty string");
+  }
   if (typeof markerUuid !== "string" || markerUuid.length === 0) {
     throw new Error("scanEnvironForMarker: markerUuid must be a non-empty string");
   }
   const needle = `ANET_NODE_MARKER=${markerUuid}`;
+  const ownUid = process.getuid ? process.getuid()! : -1;
   const pids = enumer.listAllPids();
   const hits: number[] = [];
+  const unreadableOwnUid: number[] = [];
   for (const pid of pids) {
-    const env = enumer.readEnviron(pid);
+    let env: string | null;
+    try {
+      env = enumer.readEnviron(pid);
+    } catch (err: any) {
+      // Blocker 1 fix (audit 92d53c8f + practical Linux calibration).
+      //
+      // Real /proc has many pids where readEnviron EACCES even when the pid
+      // "appears" ours by directory stat: sd-pam (env owned by root),
+      // docker/podman daemons (dumpable=0), systemd session leaders,
+      // ptrace-locked, exec2-transitioning, etc.
+      //
+      // Discrimination:
+      //   - Non-EACCES error → throw (real problem, not a permission thing)
+      //   - env-file uid != ours → skip (not ours)
+      //   - state Z/X/T/t or other non-R/S/D → skip (mm-locked/dying)
+      //   - Otherwise (own-uid, running state, still EACCES) →
+      //     record in unreadableOwnUid list. Caller uses this to refuse
+      //     removing the marker file (defense against Defect A: if we
+      //     silently skipped and reported hits=0, marker would be deleted
+      //     as if teardown succeeded, but a real marker-carrying process
+      //     might have been in the unreadable set).
+      if (err?.code !== "EACCES") throw err;
+      let envOwnerUid: number | null;
+      try { envOwnerUid = enumer.readOwnerUid(pid); } catch { continue; }
+      if (envOwnerUid == null) continue;
+      if (envOwnerUid !== ownUid) continue;
+      let state: string | null;
+      try { state = enumer.readState(pid); } catch { continue; }
+      if (state == null) continue;
+      if (state !== "R" && state !== "S" && state !== "D") continue;
+      unreadableOwnUid.push(pid);
+      continue;
+    }
     if (env == null) continue; // pid raced away, normal
     const parts = env.split("\0");
     if (parts.indexOf(needle) >= 0) hits.push(pid);
   }
-  return hits;
+  return { hits, unreadableOwnUid };
 }
 
 export function groupPidsByPgid(enumer: ProcessEnumerator, pids: number[]): Map<number, number[]> {
@@ -396,20 +558,33 @@ export function groupPidsByPgid(enumer: ProcessEnumerator, pids: number[]): Map<
 
 export type HomogeneityResult =
   | { ok: true; members: number[] }
-  | { ok: false; cause: "FOREIGN_MEMBER" | "ENUM_ERROR"; foreignPids: number[]; unreadablePids: number[]; detail: string };
+  | { ok: false; cause: "FOREIGN_MEMBER" | "ENUM_ERROR" | "EMPTY_GROUP"; foreignPids: number[]; unreadablePids: number[]; detail: string };
 
 /**
  * Verify that EVERY live member of `pgid` carries the marker.
  *
  * Blocker 2 fix: enumeration errors surface as ENUM_ERROR (fail-closed),
  * never as an empty-list judged "safe". Any unreadable member also
- * fails-closed.
+ * fails-closed. Empty group (no live members at all) also refuses — killing
+ * an empty pgroup can't be right and empty-list judged "ok" recreates the
+ * exact defect shape (independent audit 92d53c8f finding #6).
+ *
+ * Blocker 2 second half (zombie): a zombie same-uid process's environ
+ * returns EACCES even to owner (mm freed), but stat still exists with
+ * original pgid. Without discrimination, the zombie would be treated as
+ * "unreadable member" → ENUM_ERROR → entire group SKIPPED. Since re-verify
+ * happens post-SIGTERM (when zombies are most numerous), teardown would
+ * never escalate. Fix: apply the same owner-uid + state=Z discriminator as
+ * scanEnvironForMarker.
  *
  * Algorithm:
  *   1. Enumerate all pids on the system.
  *   2. Filter to pids whose /proc/PID/stat pgid == target pgid.
- *   3. For each such pid, check its environ. If pid can't be read → fail-closed.
- *      If pid lacks marker → foreign member → fail-closed.
+ *   3. For each such pid, check its environ with EACCES discrimination:
+ *      - Other-user EACCES  → skip (can't be ours anyway).
+ *      - Own-uid zombie     → skip (expected, dying).
+ *      - Own-uid live EACCES → truly unreadable → fail-closed.
+ *      - Missing marker     → foreign member → fail-closed.
  */
 export function verifyGroupHomogeneity(
   enumer: ProcessEnumerator,
@@ -417,6 +592,7 @@ export function verifyGroupHomogeneity(
   markerUuid: string,
 ): HomogeneityResult {
   const needle = `ANET_NODE_MARKER=${markerUuid}`;
+  const ownUid = process.getuid ? process.getuid()! : -1;
   let allPids: number[];
   try {
     allPids = enumer.listAllPids();
@@ -440,15 +616,34 @@ export function verifyGroupHomogeneity(
     groupMembers.push(pid);
   }
   const foreign: number[] = [];
+  const liveMembers: number[] = [];
   for (const pid of groupMembers) {
     let env: string | null;
     try {
       env = enumer.readEnviron(pid);
     } catch (err: any) {
+      if (err?.code === "EACCES") {
+        // Discriminator (see scanEnvironForMarker for full rationale). At
+        // the group level, we're stricter than at scan level: if a member's
+        // environ is unreadable AND we can't rule out its ownership OR its
+        // dumpable=0 state, we mark it unreadable and let the group refuse
+        // ENUM_ERROR. Marker-carrying-member-not-verifiable → don't kill.
+        let envOwnerUid: number | null;
+        try { envOwnerUid = enumer.readOwnerUid(pid); } catch { continue; }
+        if (envOwnerUid == null) continue;
+        if (envOwnerUid !== ownUid) continue;
+        let state: string | null;
+        try { state = enumer.readState(pid); } catch { continue; }
+        if (state == null) continue;
+        if (state !== "R" && state !== "S" && state !== "D") continue;
+        unreadable.push(pid);
+        continue;
+      }
       unreadable.push(pid);
       continue;
     }
     if (env == null) continue; // pid gone between stat and environ, normal race
+    liveMembers.push(pid);
     const parts = env.split("\0");
     if (parts.indexOf(needle) < 0) foreign.push(pid);
   }
@@ -458,7 +653,14 @@ export function verifyGroupHomogeneity(
   if (foreign.length > 0) {
     return { ok: false, cause: "FOREIGN_MEMBER", foreignPids: foreign, unreadablePids: [], detail: `${foreign.length} member(s) do not carry the marker` };
   }
-  return { ok: true, members: groupMembers };
+  if (liveMembers.length === 0) {
+    // Finding #6 (audit 92d53c8f): empty-group judged ok:true is defect
+    // shape B. If nothing was found in the pgid, don't signal (empty
+    // pgroup = pgroup dissolved; kill(-pgid) would be a no-op at best and
+    // potentially catch a stray pgid re-assigned to something else).
+    return { ok: false, cause: "EMPTY_GROUP", foreignPids: [], unreadablePids: [], detail: `pgid=${pgid} has no live marker-carrying members` };
+  }
+  return { ok: true, members: liveMembers };
 }
 
 // ─── Self-context check ─────────────────────────────────────────────────
@@ -500,38 +702,29 @@ export function callerCarriesMarker(enumer: ProcessEnumerator, markerUuid: strin
   return { self: false };
 }
 
-// ─── PID reuse verification ─────────────────────────────────────────────
-
-/**
- * For each session recorded in the marker file, check whether the recorded
- * pid still refers to that specific process (starttime_jiffies match) and
- * whether the host has restarted (boot_id already checked by readMarker,
- * this is the per-session pid re-verification for stale hint detection).
- *
- * A session whose current /proc/PID/stat starttime differs from the marker's
- * stored starttime is a stale PID — the OS recycled it to an unrelated proc.
- * Skip that session, do NOT signal.
- */
-export function sessionStillFresh(enumer: ProcessEnumerator, session: SessionInfo): boolean {
-  let stat: ProcStat | null;
-  try {
-    stat = enumer.readStat(session.pid);
-  } catch {
-    return false; // fail-closed
-  }
-  if (stat == null) return false; // process gone
-  return stat.starttime_jiffies === session.starttime_jiffies;
-}
-
 // ─── Reap orchestration ─────────────────────────────────────────────────
+// (sessionStillFresh removed 2026-07-29 per audit 92d53c8f finding #1 — it
+// had zero production call sites and gave Test 6 false coverage. PID-reuse
+// defense in practice comes from the boot_id check inside readMarker plus
+// the environ-scan-is-truth rule that ignores the marker file's stored pids
+// entirely at reap time. If a future need re-introduces per-session stale-
+// pid detection, wire it into reapMarkerGroups before adding tests.)
 
 export type ReapResult =
-  | { kind: "success"; killedPgids: number[]; residualPids: number[] }
-  | { kind: "failed"; killedPgids: number[]; residualPids: number[]; skippedGroups: Array<{ pgid: number; reason: string }>; detail: string };
+  | { kind: "success"; killedPgids: number[]; residualPids: number[]; unreadableOwnUid?: number[] }
+  | { kind: "failed"; killedPgids: number[]; residualPids: number[]; skippedGroups: Array<{ pgid: number; reason: string }>; detail: string; unreadableOwnUid?: number[] };
 
 export interface ReapOptions {
   graceMs: number;
   logger: (msg: string) => void;
+  /**
+   * Sleep primitive (grace period). Real code uses setTimeout; tests inject
+   * a fast/deterministic sleep so grace paths are actually covered. Prior
+   * impl was a busy-wait `while (Date.now() < end) {}` — audit 92d53c8f
+   * finding #3 flagged that as pinning one CPU core for graceMs and blocking
+   * the event loop; test coverage missed it because tests passed graceMs=0.
+   */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 /**
@@ -547,20 +740,36 @@ export interface ReapOptions {
  *   7. Send SIGKILL to any group still alive.
  *   8. Post-rescan: if any marker-carrying pid alive → preserve marker.
  */
-export function reapMarkerGroups(
+export async function reapMarkerGroups(
   enumer: ProcessEnumerator,
   killer: KillPrimitive,
   markerUuid: string,
   opts: ReapOptions,
-): ReapResult {
+): Promise<ReapResult> {
   const skippedGroups: Array<{ pgid: number; reason: string }> = [];
   const killedPgids: number[] = [];
 
-  // Step 1-2: discover + group
-  const pids = scanEnvironForMarker(enumer, markerUuid);
-  opts.logger(`[identity] environ scan found ${pids.length} marker-carrying pid(s)`);
-  if (pids.length === 0) {
+  // Step 1-2: discover + group. Use ..Full form so we can retain the list
+  // of pids we had to SKIP due to EACCES on own-uid running processes.
+  // Those unreadable pids might have been marker-carrying; treating hits=0
+  // as "success + delete marker" when the unreadable list is non-empty
+  // recreates Defect A. Instead we return kind:"failed" and preserve the
+  // marker for retry.
+  const scan = scanEnvironForMarkerFull(enumer, markerUuid);
+  const pids = scan.hits;
+  opts.logger(`[identity] environ scan found ${pids.length} marker-carrying pid(s), ${scan.unreadableOwnUid.length} own-uid unreadable`);
+  if (pids.length === 0 && scan.unreadableOwnUid.length === 0) {
     return { kind: "success", killedPgids: [], residualPids: [] };
+  }
+  if (pids.length === 0 && scan.unreadableOwnUid.length > 0) {
+    return {
+      kind: "failed",
+      killedPgids: [],
+      residualPids: [],
+      skippedGroups: [],
+      detail: `no marker-carrying pids found, but ${scan.unreadableOwnUid.length} own-uid running process(es) had unreadable environ — cannot prove marker-bearing processes don't exist; preserve marker for retry`,
+      unreadableOwnUid: scan.unreadableOwnUid,
+    };
   }
   const groups = groupPidsByPgid(enumer, pids);
   opts.logger(`[identity] grouped into ${groups.size} pgroup(s): ${[...groups.keys()].join(",")}`);
@@ -592,12 +801,9 @@ export function reapMarkerGroups(
     };
   }
 
-  // Step 5: grace
-  const sleep = (ms: number) => {
-    const end = Date.now() + ms;
-    while (Date.now() < end) { /* busy-wait so we don't need an async layer here */ }
-  };
-  sleep(opts.graceMs);
+  // Step 5: grace — real setTimeout, NOT busy-wait (finding #3).
+  const sleep = opts.sleep || ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  await sleep(opts.graceMs);
 
   // Step 6-7: re-verify then SIGKILL as needed
   for (const pgid of verifiedGroups) {
@@ -621,14 +827,18 @@ export function reapMarkerGroups(
   }
 
   // Step 8: post-rescan
-  const residual = scanEnvironForMarker(enumer, markerUuid);
-  if (residual.length > 0) {
+  const rescan = scanEnvironForMarkerFull(enumer, markerUuid);
+  const residual = rescan.hits;
+  if (residual.length > 0 || rescan.unreadableOwnUid.length > 0) {
     return {
       kind: "failed",
       killedPgids,
       residualPids: residual,
       skippedGroups,
-      detail: `${residual.length} marker-carrying pid(s) still alive after grace+KILL`,
+      detail: residual.length > 0
+        ? `${residual.length} marker-carrying pid(s) still alive after grace+KILL`
+        : `no marker-carrying residual but ${rescan.unreadableOwnUid.length} own-uid unreadable — preserve marker for retry`,
+      unreadableOwnUid: rescan.unreadableOwnUid.length > 0 ? rescan.unreadableOwnUid : undefined,
     };
   }
   return { kind: "success", killedPgids, residualPids: [] };

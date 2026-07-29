@@ -24,6 +24,7 @@ import {
   realKiller,
   callerCarriesMarker,
   reapMarkerGroups,
+  type SessionInfo,
 } from "../src/copresence-identity";
 import { createServer as netCreateServer } from "net";
 import { checkbox, confirm, select } from "@inquirer/prompts";
@@ -481,6 +482,35 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   }
   console.log(`[anet] ① app-server READY on ${wsUrl}`);
 
+  // #P3fix复审 finding #5 — write the identity marker file NOW, as soon as
+  // the FIRST session with ANET_NODE_MARKER injected is running. If any of
+  // the 6 downstream early-exit paths (thread/start, SAFE_THREAD_ID reject,
+  // bridge/tui tmux new-session, etc.) fires, the identity flow can still
+  // reap appsrv on the next `anet node stop`. Prior placement (after all 3
+  // sessions up) left orphans-with-no-marker-file for partial failures.
+  //
+  // Sessions object is best-effort observability only (all fields optional
+  // per finding #4) — reap identity is /proc/*/environ scan for the uuid.
+  const harvestSession = (session: string): SessionInfo | undefined => {
+    try {
+      const panePid = Number(execFileSync("tmux", ["display-message", "-p", "-t", session, "#{pane_pid}"], { stdio: ["ignore", "pipe", "ignore"] }).toString().trim());
+      if (!Number.isInteger(panePid) || panePid <= 0) return undefined;
+      const enumer = realEnumerator();
+      const stat = enumer.readStat(panePid);
+      if (!stat) return undefined;
+      return { tmux: session, pid: panePid, pgid: stat.pgid, starttime_jiffies: stat.starttime_jiffies };
+    } catch { return undefined; }
+  };
+  try {
+    writeCopresenceMarker(nodesDir(), resolved.id, identityMarker, {
+      appsrv: harvestSession(appsrvSession),
+    });
+    console.log(`[anet] identity marker written (uuid=${identityMarker.slice(0, 8)}… — appsrv up, bridge/tui pending)`);
+  } catch (e: any) {
+    console.error(`[anet] ⚠ could not persist identity marker: ${e?.message || e}`);
+    console.error(`[anet]    Stop will fall back to legacy tmux-name teardown (subprocess-orphan risk).`);
+  }
+
   // ── create fresh thread + persist config ──────────────────────────────
   let threadId: string;
   try {
@@ -553,46 +583,20 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   }
   console.log(`[anet] ③ TUI tmux=${tuiSession} ready to attach`);
 
-  // #P3fix必修1 — persist identity marker AFTER all 3 tmux sessions are up.
-  // The `identityMarker` uuid was already injected via -e into every session
-  // (single source of truth). We record the tmux pane bash pid + its pgid +
-  // starttime as best-effort observability hints; the stop-time reap uses
-  // /proc/*/environ scan as the authoritative identity source, NOT these hints.
-  //
-  // Marker write follows the fix-fork architecture: fail-closed 0600 atomic
-  // write with pre-unlink + wx flag (see copresence-identity.ts writeMarker).
-  //
-  // If marker write fails, we log-only and continue — the node is running,
-  // stop will fall through to the legacy tmux-name teardown path (imperfect
-  // but non-fatal). We do NOT tear down the 3-piece just because bookkeeping
-  // failed; that would penalize the user for a metadata glitch.
+  // #P3fix复审 finding #5 — best-effort marker-file update with bridge/tui
+  // observability hints now that both sessions are up. Marker file was
+  // already written after appsrv (see above) with just appsrv's hint —
+  // reap identity is unchanged (still environ scan for uuid). This write
+  // is purely for post-mortem debugging so operators can `cat` the marker
+  // file and see all three pane pids. Best-effort: if the rewrite fails,
+  // the appsrv-only marker still works for reap.
   try {
-    const harvest = (session: string): { tmux: string; pid: number; pgid: number; starttime_jiffies: number } | null => {
-      try {
-        const panePid = Number(execFileSync("tmux", ["display-message", "-p", "-t", session, "#{pane_pid}"], { stdio: ["ignore", "pipe", "ignore"] }).toString().trim());
-        if (!Number.isInteger(panePid) || panePid <= 0) return null;
-        const enumer = realEnumerator();
-        const stat = enumer.readStat(panePid);
-        if (!stat) return null;
-        return { tmux: session, pid: panePid, pgid: stat.pgid, starttime_jiffies: stat.starttime_jiffies };
-      } catch { return null; }
-    };
-    const appsrvMk = harvest(appsrvSession);
-    const bridgeMk = harvest(bridgeSession);
-    const tuiMk    = harvest(tuiSession);
-    if (appsrvMk && bridgeMk && tuiMk) {
-      writeCopresenceMarker(nodesDir(), resolved.id, identityMarker, {
-        appsrv: appsrvMk, bridge: bridgeMk, tui: tuiMk,
-      });
-      console.log(`[anet] identity marker written (uuid=${identityMarker.slice(0, 8)}…)`);
-    } else {
-      console.error(`[anet] ⚠ pane pid harvest incomplete; skipping identity marker write.`);
-      console.error(`[anet]    Stop will fall back to legacy tmux-name teardown (subprocess-orphan risk).`);
-    }
-  } catch (e: any) {
-    console.error(`[anet] ⚠ could not persist identity marker: ${e?.message || e}`);
-    console.error(`[anet]    Stop will fall back to legacy tmux-name teardown (subprocess-orphan risk).`);
-  }
+    writeCopresenceMarker(nodesDir(), resolved.id, identityMarker, {
+      appsrv: harvestSession(appsrvSession),
+      bridge: harvestSession(bridgeSession),
+      tui:    harvestSession(tuiSession),
+    });
+  } catch { /* best-effort observability update; appsrv-only marker still governs reap */ }
 
   const hubBase = opts.hub.replace(/\/+$/, "");
   console.log("");
@@ -6268,7 +6272,7 @@ Stop a running agent node.
         console.error(`[anet]    Detach from the tmux session (Ctrl-b d) and run stop from an outside shell.`);
         process.exit(2);
       }
-      const reapResult = reapMarkerGroups(enumer, killer, uuid, {
+      const reapResult = await reapMarkerGroups(enumer, killer, uuid, {
         graceMs: 3000,
         logger: (m) => console.log(`[anet] ${m}`),
       });
