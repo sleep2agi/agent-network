@@ -4432,7 +4432,13 @@ async function connectSSE() {
 // ── 启动 ──
 log(`启动`);
 log(`  alias:   ${ALIAS || "(none!)"} [from: ${ALIAS_SOURCE}]`);  // #203 traceability
-log(`  runtime: ${RUNTIME_LABEL}`);
+// #491 — report the runtime that is ACTUALLY in effect, not just what the
+// operator typed. `--runtime codex-tui` runs the `codex-app-server`
+// implementation; echoing only the input hid which code path was live and
+// sent one investigation down the wrong track ("wrong model" instead of
+// "wrong runtime"). The raw input is kept alongside so the line still
+// answers "did my flag land?".
+log(`  runtime: ${RUNTIME}${RUNTIME_LABEL === RUNTIME ? "" : ` (input: ${RUNTIME_LABEL})`}`);
 log(`  model:   ${MODEL || (RUNTIME === "codex" || RUNTIME === "codex-app-server" ? "gpt-5.5" : RUNTIME === "grok" ? "grok-build" : "claude-sonnet-4-6")} ${MODEL ? "" : "(default)"}`);
 log(`  hub:     ${COMMHUB_URL}${AUTH_TOKEN ? " (auth)" : " (no auth!)"}`);
 // #214 维度 5 A6 — surface the grok ACP idle-timeout resolution so the
