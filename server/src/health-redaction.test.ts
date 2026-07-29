@@ -91,6 +91,18 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(body.sse_connections).toBeGreaterThanOrEqual(1);
   });
 
+  test("CLI count source stays truthful: health.sse_connections == /api/stats/sse total (no fake 0)", async () => {
+    // The CLI's `anet doctor` line reads health.sse_connections now
+    // (was Object.keys(sse_sessions).length). This pins that aggregate to
+    // the same number the auth-gated detail endpoint reports — so a live
+    // hub with N connections shows N, never the "0 active" regression the
+    // review caught. There is exactly one live SSE connection in setup.
+    const health = await (await fetch(`${BASE}/health`)).json() as any;
+    const detail = await (await fetch(`${BASE}/api/stats/sse`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
+    expect(health.sse_connections).toBe(detail.total);
+    expect(health.sse_connections).toBeGreaterThanOrEqual(1);
+  });
+
   test("does NOT expose SSE key detail: no sse_sessions field, no alias, no network id", async () => {
     const res = await fetch(`${BASE}/health`);
     const text = await res.text();
@@ -122,4 +134,43 @@ describe("#473 GET /api/stats/sse — detail survives, behind ops auth", () => {
     expect(typeof body.total).toBe("number");
     expect(body.sessions[`${userNetworkId}:${userName}`]).toBeGreaterThanOrEqual(1);
   });
+
+  test("legacy master token → 200 (ops path — restAuth null, isLegacyAuthToken)", () => {
+    // COMMHUB_AUTH_TOKEN is captured at module import, so this path needs
+    // a fresh process with the env set before boot (aggregate order can't
+    // guarantee this file imports server.ts first). Subprocess, like the
+    // patrol test. Reviewer flagged this path had code but no test.
+    const script = `
+      process.env.COMMHUB_AUTH_TOKEN = "master-secret-xyz";
+      const { startHub } = await import("./src/server.js");
+      const hub = startHub({ port: 0, hostname: "127.0.0.1" });
+      const base = "http://127.0.0.1:" + hub.port;
+      const anon = await fetch(base + "/api/stats/sse");
+      const master = await fetch(base + "/api/stats/sse", { headers: { Authorization: "Bearer master-secret-xyz" } });
+      const health = await fetch(base + "/health");
+      const hb = await health.json();
+      console.log("RESULT:" + JSON.stringify({
+        anon: anon.status,
+        master: master.status,
+        masterOk: (await master.json()).ok,
+        healthHasSseSessions: "sse_sessions" in hb,
+      }));
+      hub.stop(true);
+      process.exit(0);
+    `;
+    const child = Bun.spawnSync({
+      cmd: ["bun", "-e", script],
+      cwd: `${import.meta.dir}/..`,
+      env: { ...process.env, COMMHUB_DB: process.env.COMMHUB_DB || "/tmp/anet-473-master.db" },
+      timeout: 15_000,
+    });
+    const out = new TextDecoder().decode(child.stdout);
+    const m = out.match(/RESULT:(\{.*\})/);
+    expect(m).not.toBeNull();
+    const r = JSON.parse(m![1]);
+    expect(r.anon).toBe(401);        // token configured → anonymous rejected
+    expect(r.master).toBe(200);      // legacy master token → ops access
+    expect(r.masterOk).toBe(true);
+    expect(r.healthHasSseSessions).toBe(false); // /health still redacted with a token set
+  }, 20_000);
 });

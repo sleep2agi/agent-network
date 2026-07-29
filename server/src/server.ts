@@ -1199,6 +1199,12 @@ return Bun.serve({
     // network, so per-network filtering would be required to open it
     // wider; no consumer needs that today.
     if (url.pathname === "/api/stats/sse") {
+      // restAuth === null here means the caller passed the legacy master
+      // token (requireAuth already accepted it above) OR the hub runs in
+      // DEV_OPEN mode. Both are treated as ops: master token is root, and
+      // under DEV_OPEN this endpoint is anonymously readable BY DESIGN
+      // (dev convenience — production never sets COMMHUB_DEV_OPEN, so the
+      // topology detail stays gated in every real deployment).
       if (restAuth && !isAdmin) {
         return withCors(req, Response.json({ ok: false, error: "admin or master token required" }, { status: 403 }));
       }

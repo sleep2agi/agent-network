@@ -797,6 +797,25 @@ function authHeaders(token?: string): Record<string, string> {
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
+// #473 — the per-connection SSE breakdown (`{networkId}:{alias}` → count)
+// moved OFF the anonymous /health body (it leaked the whole agent
+// topology) and behind auth at GET /api/stats/sse. Returns the SAME
+// `sessions` map getSSEStats() always produced, so downstream key lookups
+// are unchanged. Degrades gracefully: non-admin (403), unreachable, or
+// any parse error → {} (empty detail), NEVER a throw and NEVER a fake 0
+// masquerading as "hub is dead". Callers that only need the COUNT should
+// read health.sse_connections (an aggregate that stayed on /health).
+async function fetchSseSessions(hub: string): Promise<Record<string, number>> {
+  try {
+    const res = await fetch(`${hub}/api/stats/sse`, { headers: authHeaders() });
+    if (!res.ok) return {};
+    const body = await res.json() as any;
+    return (body && typeof body.sessions === "object" && body.sessions) || {};
+  } catch {
+    return {};
+  }
+}
+
 function loadGlobal(): Record<string, any> {
   const p = globalConfigPath();
   if (existsSync(p)) try { return JSON.parse(readFileSync(p, "utf-8")); } catch {}
@@ -4524,12 +4543,12 @@ async function lsCommand() {
 
   if (gc.hub) {
     try {
-      const [statusRes, healthRes] = await Promise.all([
+      const [statusRes, sseRes] = await Promise.all([
         fetch(`${gc.hub}/api/status`, { headers: authHeaders() }).then(r => r.json() as any),
-        fetch(`${gc.hub}/health`, { headers: authHeaders() }).then(r => r.json() as any),
+        fetchSseSessions(gc.hub), // #473: was /health.sse_sessions (now auth-gated)
       ]);
       networkSessions = statusRes.sessions || [];
-      sseSessions = healthRes.sse_sessions || {};
+      sseSessions = sseRes;
     } catch {}
   }
 
@@ -8068,14 +8087,13 @@ async function statusCommand() {
   if (!hub) { console.log("No hub configured. Run: anet init"); return; }
 
   try {
-    const [statusRes, healthRes, tasksRes] = await Promise.all([
+    const [statusRes, sse, tasksRes] = await Promise.all([
       fetch(`${hub}/api/status`, { headers: authHeaders() }).then(r => r.json() as any).catch(() => ({ sessions: [] })),
-      fetch(`${hub}/health`, { headers: authHeaders() }).then(r => r.json() as any).catch(() => ({})),
+      fetchSseSessions(hub), // #473: was /health.sse_sessions (now auth-gated)
       fetch(`${hub}/api/tasks?limit=10`, { headers: authHeaders() }).then(r => r.json() as any).catch(() => ({ tasks: [] })),
     ]);
 
     const sessions = statusRes.sessions || [];
-    const sse = healthRes.sse_sessions || {};
     const tasks = tasksRes.tasks || [];
 
     const classifyStatus = (s: any) => {
@@ -9503,8 +9521,7 @@ async function demoDebateCommand() {
   for (let i = 0; i < 30; i++) {
     await new Promise(r => setTimeout(r, 2000));
     try {
-      const h = await fetch(`${hub}/health`).then(r => r.json() as any);
-      const sse = h?.sse_sessions || {};
+      const sse = await fetchSseSessions(hub); // #473: detail auth-gated off /health
       const allUp = DEBATE_ROLES.every(r => sse[roleAliases[r]] >= 1);
       if (allUp) { console.log(`        ✓ 6 agent 全部 SSE connected`); break; }
     } catch {}
@@ -9890,8 +9907,7 @@ async function demoSocialMediaCommand() {
   for (let i = 0; i < 30; i++) {
     await new Promise(r => setTimeout(r, 2000));
     try {
-      const h = await fetch(`${hub}/health`).then(r => r.json() as any);
-      const sse = h?.sse_sessions || {};
+      const sse = await fetchSseSessions(hub); // #473: detail auth-gated off /health
       const allUp = SOCIAL_ROLES.every(r => sse[roleAliases[r]] >= 1);
       if (allUp) { console.log(`        ✓ 4 agent 全部 SSE connected`); break; }
     } catch {}
@@ -10314,8 +10330,7 @@ async function demoPrReviewCommand() {
   for (let i = 0; i < 30; i++) {
     await new Promise(r => setTimeout(r, 2000));
     try {
-      const h = await fetch(`${hub}/health`).then(r => r.json() as any);
-      const sse = h?.sse_sessions || {};
+      const sse = await fetchSseSessions(hub); // #473: detail auth-gated off /health
       const allUp = PR_REVIEW_ROLES.every(r => sse[roleAliases[r]] >= 1);
       if (allUp) { console.log(`        ✓ 4 agent 全部 SSE connected`); break; }
     } catch {}
@@ -11659,7 +11674,7 @@ async function doctorCommand() {
       check("CommHub reachable", health.ok === true, `${gc.hub} v${health.version || "?"}`);
       if (health.api_version) info("API version", health.api_version);
       info("Sessions", `${health.sessions_count || health.sessions || 0} registered`);
-      info("SSE connections", `${Object.keys(health.sse_sessions || {}).length} active`);
+      info("SSE connections", `${health.sse_connections ?? 0} active`); // #473: aggregate stayed on /health
       if (health.license) info("License", health.license);
       if (health.multi_network) check("Multi-network", true);
     } catch (e: any) {
