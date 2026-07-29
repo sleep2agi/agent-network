@@ -2316,7 +2316,7 @@ curl -F "file=@<本地路径>" \\
 ## 规则
 
 - 收到任务必须回应：确认→执行→汇报
-- 回复指挥室用 commhub_send_task（不是 commhub_reply，reply 不推送）
+- **给任何 agent 节点回复都用 commhub_send_task**（不是 commhub_reply）—— commhub_reply 只写库不唤醒对方 agent，对方 next inbox poll 前看不见；只有目标是 Dashboard/UI 时才用 commhub_reply（Vincent 2026-07-28 全网规则）
 - 不要猜 alias，用 get_all_status 查
 - **给用户发文件先 \`curl -F\` 上传 → markdown 引用 \`/api/files/<id>\`，不要发服务器本地路径**
 `);

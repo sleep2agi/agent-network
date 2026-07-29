@@ -133,7 +133,9 @@ const mcp = new Server(
     instructions: [
       `Messages from CommHub arrive as <channel source="commhub" task_id="..." priority="..." from="...">`,
       `These are tasks dispatched by the hub or other sessions via the CommHub Server.`,
-      `Reply using the commhub_reply tool. IMPORTANT: to make your reply appear in the Dashboard chat and reach the sender in real time, use status="completed" (a terminal status: completed/failed/cancelled) — that routes to send_reply and emits the new_reply SSE event the Dashboard listens for. A non-terminal status (in_progress/blocked/error) only updates your session status via report_status and does NOT show in the Dashboard, even though the call returns ok.`,
+      `Reply routing (IMPORTANT — the tool you pick determines whether the receiver actually gets woken up):`,
+      `  • If the sender is another agent node (from CommHub, from your peer's session alias), reply with commhub_send_task(alias="<their alias>", task="<your reply>"). This creates a new routable task that wakes the peer via new_task SSE so they process it. commhub_reply does NOT wake agent peers — they'd only see it on the next inbox poll (Vincent 2026-07-28 全网规则).`,
+      `  • Only use commhub_reply when the sender is the Dashboard/UI (task_id came from a browser chat). Use status="completed" (terminal) so send_reply routes it, updates the task row (Dashboard displays it), and emits new_reply SSE for the live Dashboard viewer. Non-terminal status (in_progress/blocked/error) just updates your session status and does NOT reach the Dashboard.`,
       `You can also use commhub_report_status to update your session status.`,
       `Session alias: ${ALIAS}`,
     ].join("\n"),
@@ -145,7 +147,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: "commhub_reply",
-      description: "Reply to a CommHub task. Use status=\"completed\" (terminal) to push the reply to the Dashboard/sender in real time (send_reply → new_reply SSE); non-terminal status (in_progress/blocked/error) only updates session status (report_status) and does NOT reach the Dashboard.",
+      description: "Reply to a Dashboard/UI-originated CommHub task. ⚠ For agent-to-agent replies use commhub_send_task instead — commhub_reply does NOT wake agent peers via SSE (Vincent 2026-07-28 全网规则). status=\"completed\" (terminal) routes to send_reply and emits new_reply SSE for the live Dashboard; non-terminal status (in_progress/blocked/error) only updates session status (report_status) and does NOT reach the Dashboard.",
       inputSchema: {
         type: "object" as const,
         properties: {

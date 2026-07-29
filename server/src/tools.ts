@@ -1058,7 +1058,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // ── V2: send_reply (关联 task_id，不触发 think) ──
   server.tool(
     "send_reply",
-    "Send a reply to a task. Linked to task_id via in_reply_to. Does NOT trigger agent processing.",
+    "Send a reply to a Dashboard/UI-originated task (updates task row, emits new_reply SSE — Dashboard reads it). ⚠ NOT for agent-to-agent replies: agent nodes only log new_reply and do not processInbox on it, so the peer will not see the reply in real time. Use send_task for peer-to-peer replies (RFC-030, Vincent 2026-07-28 全网规则). If the target alias resolves to a live agent node, the response includes a `warning` field pointing to send_task.",
     {
       alias: z.string().min(1).max(200).describe("Target session alias"),
       text: z.string().min(1).max(10000).describe("Reply content"),
@@ -1191,10 +1191,26 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // #461 network observer summary — ids + routing only, no reply text.
       pushNetworkObserverEvent(effectiveNetId, { type: "new_reply", task_id: in_reply_to ?? null, message_id: id, from: from_session, to: alias, status: replyStatus });
 
+      // #498 — When the reply target is a live agent node (not Dashboard/UI),
+      // warn the caller that agent peers only log new_reply and do not
+      // processInbox on it. Points at the correct next action (send_task)
+      // so a follow-up turn corrects course rather than "why didn't they
+      // respond" spelunking. Absent field when target is Dashboard/hub/api
+      // (the correct path for commhub_reply) — silence is affirmation.
+      const targetIsAgent = replyTargetNodeId !== null && alias !== "hub" && alias !== "api";
+      const warning = targetIsAgent
+        ? `Target "${alias}" is an agent node. commhub_reply/send_reply does NOT wake agent peers (they only log new_reply, they do not processInbox on it) — the peer will not see this reply in real time. For agent-to-agent replies, use commhub_send_task(alias="${alias}", task="<your reply>") so the peer wakes via new_task SSE and processes it. (RFC-030, Vincent 2026-07-28 全网规则.)`
+        : undefined;
+
       return {
         content: [{
           type: "text" as const,
-          text: JSON.stringify({ ok: true, message_id: id, session_status: session?.status ?? "unknown" }),
+          text: JSON.stringify({
+            ok: true,
+            message_id: id,
+            session_status: session?.status ?? "unknown",
+            ...(warning ? { warning } : {}),
+          }),
         }],
       };
     }
