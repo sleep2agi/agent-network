@@ -1,0 +1,32 @@
+[
+  {
+    "case": "case-1 rename while running → send_task to new alias delivered",
+    "verdict": "PASS",
+    "note": "commit=true send=true inbox_has_task=true"
+  },
+  {
+    "case": "case-3 stale alias → explicit outcome, not a silent timeout",
+    "verdict": "PASS",
+    "note": "explicit_error=false canonical_redirect=true landed_on_new=true payload={\"ok\":true,\"message_id\":\"d223fea9-0528-4926-9da3-a4181b0eefa1\",\"renamed_from\":\"before\",\"renamed_to\":\"after\",\"session_status\":\"idle\"}"
+  },
+  {
+    "case": "case-2 rename while stopped → delivered after restart",
+    "verdict": "PASS",
+    "note": "commit=true send_ok=true inbox_has_task=true"
+  },
+  {
+    "case": "case-4 purely-created node rename → clear, actionable error",
+    "verdict": "PASS",
+    "note": "status=200 ok=false code=node_local_only body={\"ok\":false,\"code\":\"node_local_only\",\"error\":\"node \\\"never-registered-node\\\" has no server session in this network\",\"suggested\":\"rename locally\"}"
+  },
+  {
+    "case": "case-5 node list + status surfaces show the new alias, not the old",
+    "verdict": "PASS",
+    "note": "shows_new=true shows_stale=false"
+  },
+  {
+    "case": "negative-control (MUST FAIL) — inbox lookup rejects a marker never sent",
+    "verdict": "FAIL",
+    "note": "found_bogus_marker=false → FAIL here is the CORRECT outcome; PASS would mean the delivery assertions are vacuous"
+  }
+]
