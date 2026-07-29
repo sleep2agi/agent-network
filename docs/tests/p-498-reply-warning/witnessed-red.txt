@@ -1,0 +1,27 @@
+bun test v1.3.14 (0d9b296a)
+
+src/send-reply-agent-warning.test.ts:
+[commhub] database: /tmp/anet-498-warn-test-red.db
+[commhub] 🎉 14-day free trial started!
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+[17:18:01] peer-agent-498 → send_reply (replied) → peer-agent-498: peer reply (should trigger warning)
+142 |       status: "replied",
+143 |       from_session: AGENT_ALIAS,
+144 |     });
+145 | 
+146 |     expect(reply.ok).toBe(true);
+147 |     expect(reply.warning).toBeDefined();
+                                ^
+error: expect(received).toBeDefined()
+
+Received: undefined
+
+      at <anonymous> (/home/vansin/agent-orchestra-498/server/src/send-reply-agent-warning.test.ts:147:27)
+(fail) send_reply warning field (#498) > target alias resolves to a real agent → response includes `warning` field [65.53ms]
+[17:18:01] peer-agent-498 → send_reply (replied) → hub: dashboard reply
+[17:18:01] peer-agent-498 → send_reply (replied) → api: dashboard reply via api
+
+ 2 pass
+ 1 fail
+ 7 expect() calls
+Ran 3 tests across 1 file. [698.00ms]
