@@ -837,16 +837,21 @@ async function fetchSseConnectionCount(hub: string): Promise<number | null> {
   }
 }
 
-// #473 — "are all these aliases SSE-connected?" for the orchestration
-// wait-loops. Prefers precise per-alias detail; when that's unavailable
-// (non-admin 403) falls back to the aggregate count so a non-admin
-// operator doesn't sit through the full 60s empty wait while the agents
-// are actually already up (审查 round-2 non-blocking item).
-async function sseAllConnected(hub: string, aliases: string[]): Promise<boolean> {
+// #473 — "are all these SPECIFIC aliases SSE-connected?" for the
+// orchestration wait-loops. TRISTATE (审查 round-2b, 通信龙): the aggregate
+// count CANNOT answer this — `sse_connections >= aliases.length` is true
+// whenever N unrelated nodes are connected, which would falsely claim
+// "all connected" while a/b/c/d are all down. That's the same class of
+// lie as the fake 0, just inverted. So when the per-alias detail is
+// unavailable (non-admin 403 / unreachable), we return "unknown" and the
+// caller must say so honestly rather than guess from the count.
+//   "yes"     — every alias has ≥1 connection (verified)
+//   "no"      — detail readable, at least one alias not yet connected
+//   "unknown" — detail not readable; cannot assert either way
+async function sseAllConnected(hub: string, aliases: string[]): Promise<"yes" | "no" | "unknown"> {
   const detail = await fetchSseSessions(hub);
-  if (detail.ok) return aliases.every(a => (detail.sessions[a] || 0) >= 1);
-  const count = await fetchSseConnectionCount(hub);
-  return count !== null && count >= aliases.length;
+  if (!detail.ok) return "unknown";
+  return aliases.every(a => (detail.sessions[a] || 0) >= 1) ? "yes" : "no";
 }
 
 function loadGlobal(): Record<string, any> {
@@ -9560,11 +9565,12 @@ async function demoDebateCommand() {
   for (let i = 0; i < 30; i++) {
     await new Promise(r => setTimeout(r, 2000));
     try {
-      // #473: sseAllConnected prefers per-alias detail, falls back to
-      // the aggregate count when detail is 403'd (non-admin) — no 60s
-      // empty wait, no false "not connected".
-      const allUp = await sseAllConnected(hub, DEBATE_ROLES.map(r => roleAliases[r]));
-      if (allUp) { console.log(`        ✓ 6 agent 全部 SSE connected`); break; }
+      // #473: tristate — never GUESS from the aggregate count that these
+      // specific aliases are up. "unknown" (non-admin/unreachable) → say
+      // so and proceed, don't claim connected and don't burn the full 60s.
+      const state = await sseAllConnected(hub, DEBATE_ROLES.map(r => roleAliases[r]));
+      if (state === "yes") { console.log(`        ✓ 6 agent 全部 SSE connected`); break; }
+      if (state === "unknown") { console.log(`        ⚠ 无法确认 6 个 agent 的 SSE 连接状态（需 admin 权限查看明细），继续执行`); break; }
     } catch {}
   }
 
@@ -9948,8 +9954,9 @@ async function demoSocialMediaCommand() {
   for (let i = 0; i < 30; i++) {
     await new Promise(r => setTimeout(r, 2000));
     try {
-      const allUp = await sseAllConnected(hub, SOCIAL_ROLES.map(r => roleAliases[r]));
-      if (allUp) { console.log(`        ✓ 4 agent 全部 SSE connected`); break; }
+      const state = await sseAllConnected(hub, SOCIAL_ROLES.map(r => roleAliases[r]));
+      if (state === "yes") { console.log(`        ✓ 4 agent 全部 SSE connected`); break; }
+      if (state === "unknown") { console.log(`        ⚠ 无法确认 4 个 agent 的 SSE 连接状态（需 admin 权限查看明细），继续执行`); break; }
     } catch {}
   }
 
@@ -10370,8 +10377,9 @@ async function demoPrReviewCommand() {
   for (let i = 0; i < 30; i++) {
     await new Promise(r => setTimeout(r, 2000));
     try {
-      const allUp = await sseAllConnected(hub, PR_REVIEW_ROLES.map(r => roleAliases[r]));
-      if (allUp) { console.log(`        ✓ 4 agent 全部 SSE connected`); break; }
+      const state = await sseAllConnected(hub, PR_REVIEW_ROLES.map(r => roleAliases[r]));
+      if (state === "yes") { console.log(`        ✓ 4 agent 全部 SSE connected`); break; }
+      if (state === "unknown") { console.log(`        ⚠ 无法确认 4 个 agent 的 SSE 连接状态（需 admin 权限查看明细），继续执行`); break; }
     } catch {}
   }
 
