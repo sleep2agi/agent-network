@@ -251,14 +251,38 @@ fi
 
 ## 开机自启
 
-pm2 需要一条 root 权限的命令才能在系统重启后自动拉起：
+**光配好 pm2 并不会开机自启。** 必须先让 pm2 生成一个 systemd unit：
 
 ```bash
-sudo loginctl enable-linger <user>
-pm2 save
+pm2 startup            # 它只会「打印」出需要 root 执行的命令，自己不动手
 ```
 
-不跑也能正常用，只是服务器重启后要手动 `pm2 resurrect`。
+然后把它打印出来的那条命令原样用 root 执行（长这样，路径按你的环境会不同）：
+
+```bash
+sudo env PATH=$PATH:/path/to/node/bin /path/to/pm2 startup systemd -u <user> --hp /home/<user>
+```
+
+最后保存当前进程列表：
+
+```bash
+pm2 save               # 确认服务真的起来了再执行
+```
+
+::: warning 只跑 loginctl enable-linger 是不够的
+`loginctl enable-linger <user>` 让用户的 systemd session 在没登录时也常驻，
+但**它不会生成 pm2 的 unit**，所以单跑它开机后 pm2 根本不会被拉起。
+两者解决的不是同一件事：`pm2 startup` 负责「开机时谁来拉 pm2」，
+linger 负责「用户没登录时 user session 还在不在」。
+
+自查一句话：
+
+```bash
+ls /etc/systemd/system/pm2-*.service     # 没有这个文件 = 开机自启没配
+```
+:::
+
+没配也能正常用，只是服务器重启后要手动 `pm2 resurrect`。
 
 ::: warning pm2 save 要放在最后
 确认服务真的起来了再 `pm2 save`，否则会把坏状态固化进开机自启。

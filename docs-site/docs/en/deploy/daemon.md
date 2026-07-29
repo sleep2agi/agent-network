@@ -231,12 +231,35 @@ The watchdog itself needs two constraints: **act only after several consecutive 
 
 ## Starting on boot
 
-pm2 needs one root-privileged command to come back after a reboot:
+**Configuring pm2 does not by itself survive a reboot.** You have to let pm2 generate a systemd unit first:
 
 ```bash
-sudo loginctl enable-linger <user>
-pm2 save
+pm2 startup            # only PRINTS the root command to run; it doesn't run it
 ```
+
+Then run the command it printed, verbatim, as root (paths vary by environment):
+
+```bash
+sudo env PATH=$PATH:/path/to/node/bin /path/to/pm2 startup systemd -u <user> --hp /home/<user>
+```
+
+Finally, save the current process list:
+
+```bash
+pm2 save               # only after confirming the service is genuinely up
+```
+
+::: warning loginctl enable-linger alone is not enough
+`loginctl enable-linger <user>` keeps a user's systemd session alive without a login, but **it does not create pm2's unit** — on its own, nothing starts pm2 at boot.
+
+The two solve different problems: `pm2 startup` decides *who starts pm2 at boot*; linger decides *whether the user session persists without a login*.
+
+One-line self-check:
+
+```bash
+ls /etc/systemd/system/pm2-*.service     # missing = boot autostart is not configured
+```
+:::
 
 It works fine without this; you just have to `pm2 resurrect` manually after a restart.
 
