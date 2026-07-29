@@ -745,6 +745,70 @@ curl -X DELETE "http://localhost:9200/api/nodes/%E4%BB%A3%E7%A0%811%E5%8F%B7" \
 
 ---
 
+### PUT /api/nodes/:ref/avatar
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
+
+设置或清除某个节点的自定义头像（#462）。**不走 RFC-024 的 config-apply 流水线**——头像是纯展示属性，不参与节点配置的版本协商。
+
+```bash
+# 设置头像
+curl -X PUT "http://localhost:9200/api/nodes/n_abc12345/avatar" \
+  -H "Authorization: Bearer ntok_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"avatar_url": "https://example.com/a.png"}'
+
+# 清除头像（传 null 或空串）
+curl -X PUT "http://localhost:9200/api/nodes/n_abc12345/avatar" \
+  -H "Authorization: Bearer ntok_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"avatar_url": null}'
+```
+
+**路径参数**：`:ref` 与 `DELETE /api/nodes/:ref` 同规则，接受 `node_id` / `node_name` / `alias`（中文 alias 需 URL-encode），并做网络作用域过滤。
+
+**权限**：与节点删除同一道门——需要该网络中**高于 `viewer`** 的成员角色，或 admin。master token 用不了（`requireAuth` 对任何非 GET 的 `/api/` 请求 401）。
+
+**响应**（成功，200）：
+
+```json
+{
+  "ok": true,
+  "node_id": "n_abc12345",
+  "alias": "代码1号",
+  "avatar_url": "https://example.com/a.png"
+}
+```
+
+**响应**（校验失败，400）：
+
+```json
+{ "ok": false, "error": "invalid_avatar_url", "reason": "avatar_url protocol must be http or https" }
+```
+
+#### 校验规则（[`avatar-validate.ts` ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/avatar-validate.ts)）
+
+该函数是一条 **XSS 信任边界**——存进去的值最终会落到 dashboard 的 `<img src>`。规则按顺序：
+
+| 检查 | 行为 |
+|------|------|
+| `null` / 空串 | 通过，存 `null`（即清除头像） |
+| 非字符串 | 拒绝 |
+| 长度 > 2048 | 拒绝 |
+| 含空白或控制字符 | 拒绝（**在 `new URL()` 之前**做，因此 `java\tscript:` / `java\nscript:` 这类靠控制字符绕过 scheme 检查的写法会被挡住） |
+| 非绝对 URL | 拒绝 |
+| 协议不是 `http:` / `https:` | 拒绝（挡掉 `javascript:` / `data:` / `vbscript:` / `file:` / `blob:`） |
+| 含内嵌凭证（`https://user:pass@host/…`） | 拒绝（**不静默剥离**——调用方应当知道自己传了带密码的 URL） |
+
+**存的是规范化后的值（`URL.href`），不是原始输入。** 例如 `https://e.com/a".png` 会被存成 `https://e.com/a%22.png`，`<` `>` 反引号同理百分号编码。这样即使渲染端把它拼进 HTML 字符串而不是设 `.src`，也无法闭合属性。
+
+> **服务端不会去 fetch 这个 URL**，所以没有服务端 SSRF。但残余风险仍在：任何有写权限的成员都能让所有看 dashboard 的人的浏览器去请求任意主机（暴露访问者 IP / Referer、可做追踪像素、可从访问者机器探测内网地址）。头像功能的这个取舍是明确接受的。
+
+**读取**：`GET /api/nodes` 的返回里已加上 `avatar_url` 字段（未设置时为 `null`）。
+
+---
+
+
 ### GET /api/servers
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
@@ -1452,6 +1516,51 @@ data: {"type":"new_task","inbox_count":1,"priority":"high","from":"指挥室"}
 ```
 
 ---
+
+### GET /events/network/:network_id
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
+
+**网络级观察者流**（#461）——一条 SSE 长连接，收该网络内**所有**任务/回复的**摘要**事件。Dashboard 用它做实时刷新，不必为每个节点各开一条 `/events/:name`。
+
+```bash
+curl -N -H "Authorization: Bearer utok_xxx" \
+  http://localhost:9200/events/network/net_xxxxx
+```
+
+**权限**：必须是该网络的**成员**（`getUserNetworkRole` 命中）。
+
+> **注意这里没有"token 绑定即可"的逃生通道。** 成员关系本身就是吊销机制——`removeNetworkMember` 只删成员行，**不会吊销该用户已经签发的 `ntok_`**。若此处允许「token 的 network_id 等于被观察网络」就放行，一个已被移出网络的人靠手上没过期的 ntok 仍能拿到整网实时流。该端点因此**只认成员关系**，与 `/events/:session` 的 ntok 路径保持一致。
+
+**只有元数据，没有正文。** 每个事件都是显式构造的字面量对象，只含 id 与路由信息——任务内容、回复正文、错误详情、配置一律不进这条流。想拿正文仍需走 `GET /api/tasks`（该端点本来就对网络成员开放全文）。
+
+**推送的事件类型**：
+
+| 事件 | 触发条件 | 数据 |
+|------|---------|------|
+| `connected` | 初始连接握手 | `{session, network_id}` |
+| `new_task` | `send_task` / `retry_task` / `reassign_task` / REST `POST /api/task` | `{task_id, from, to, status, priority}` |
+| `new_reply` | `send_reply` | `{task_id, message_id, from, to, status}` |
+
+`new_task` 的 `status` 反映投递结果：目标在线为 `delivered`，离线只入队为 `queued`。
+
+**示例数据流**：
+
+```
+event: connected
+data: {"type":"connected","session":"net_xxxxx","network_id":"net_xxxxx"}
+
+event: new_task
+data: {"type":"new_task","task_id":"t_abc","from":"指挥室","to":"代码1号","status":"delivered","priority":"high"}
+
+event: new_reply
+data: {"type":"new_reply","task_id":"t_abc","message_id":"m_def","from":"代码1号","to":"指挥室","status":"replied"}
+```
+
+**网络隔离**：观察者只会收到自己网络的事件；`network_id` 与 `scope` 由服务端写入，调用方无法伪造。
+
+---
+
 
 ## Token 管理端点
 
