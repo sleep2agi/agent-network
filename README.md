@@ -40,6 +40,14 @@
 
 ## 30 秒上手
 
+> **先装这两个，否则第一步就崩。**
+> **Node.js ≥ 22.13.0** + **Bun ≥ 1.2.0** —— `anet hub start` 底层用 `bunx` 起 `commhub-server`，
+> 没装 Bun 会直接报 `spawn bunx ENOENT`。
+>
+> ```bash
+> npm i -g bun
+> ```
+
 ```bash
 # 装一个全局包
 npm install -g @sleep2agi/agent-network
@@ -69,8 +77,6 @@ anet project restart    # 重启 cwd 节点接新版
 ```
 
 完整跨版本迁移参考 [升级指南](https://anet.sh/guide/upgrade)。
-
-<sub>前置：**Node.js ≥ 22.13.0** + **Bun ≥ 1.2.0**（装 Bun：`npm i -g bun`）。`anet hub start` 底层用 `bunx` 起 `commhub-server`，**没装 Bun 第一步就会崩 `spawn bunx ENOENT`**。</sub>
 
 ---
 

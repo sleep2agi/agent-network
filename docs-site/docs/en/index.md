@@ -35,6 +35,15 @@ features:
 
 ## 30-second quickstart
 
+::: warning Install these two first, or step one crashes
+**Node.js ≥ 22.13.0** + **Bun ≥ 1.2.0**. `anet hub start` uses `bunx` under the hood to launch
+`commhub-server`; without Bun it fails immediately with `spawn bunx ENOENT`.
+
+```bash
+npm i -g bun
+```
+:::
+
 ```bash
 # Install one global package
 npm install -g @sleep2agi/agent-network
