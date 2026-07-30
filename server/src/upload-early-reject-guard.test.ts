@@ -35,6 +35,18 @@ const LINES = RAW.split("\n");
 // like the "req.formData()" doc references at the top of the handler.
 // (Block comments /* */ are rare inside this handler; if you add one
 // that mentions the boundary, extend this helper.)
+//
+// KNOWN LIMITATION (lead 50208c1b): this naive strip cuts on ANY `//`,
+// including one inside a string literal (e.g. `"https://…"`). If a
+// pre-drain line ever contains such a literal, the strip could snip
+// off the return statement after it and produce a false NEGATIVE (miss
+// a genuine unwrapped return). Currently no pre-drain line in the
+// /api/upload handler holds this shape; the precondition floor of 10
+// catches only "range collapsed to empty", not "silently minus one".
+// If someone adds a URL-string literal in this range in the future,
+// upgrade to a real tokenizer — not because block-comment mentions of
+// req.formData() need it, but because the string-literal-with-`//`
+// case is the actual gap.
 function stripLineComment(s: string): string {
   const idx = s.indexOf("//");
   return idx >= 0 ? s.slice(0, idx) : s;
@@ -61,10 +73,23 @@ if (handlerStartIdx >= 0) {
   }
 }
 
-// Collect every `return` statement in the pre-drain range that
-// invokes withCors OR earlyReject. Anything else (e.g. the helper's
-// bare `return wrapped;`) is skipped — that's the helper body, not a
-// pre-drain response return.
+// Collect every `return` statement in the pre-drain range. Classify:
+//   earlyReject  — the correct wrapping (sets Connection: close)
+//   withCors     — bare wrapping without Connection: close (regression)
+//   other        — produces a Response some OTHER way (e.g.
+//                  `return Response.json(...)` / `return new Response(...)`);
+//                  this shape ALSO skips earlyReject and MUST fail the guard.
+//                  Detected via /Response\b/ so `return wrapped;` /
+//                  `return;` / `return blob;` (helper body, non-response
+//                  returns) are correctly skipped, but any new Response-
+//                  producing path (Response.json / new Response / etc.) is
+//                  caught. Lead 50208c1b: earlier version used implicit-skip
+//                  which made the third assertion恒真 — it counted only what
+//                  it recognised, so "unrecognised = 0" was vacuous.
+//                  Order matters: earlyReject → withCors → other. A line
+//                  like `return earlyReject(new Response(…))` contains
+//                  both `earlyReject` AND `Response`, and must classify as
+//                  earlyReject (already-wrapped), not as other.
 type ReturnHit = { lineNumber: number; text: string; kind: "earlyReject" | "withCors" | "other" };
 const preDrainReturns: ReturnHit[] = [];
 if (handlerStartIdx >= 0 && drainIdx > handlerStartIdx) {
@@ -75,9 +100,13 @@ if (handlerStartIdx >= 0 && drainIdx > handlerStartIdx) {
       preDrainReturns.push({ lineNumber: i + 1, text: LINES[i].trim(), kind: "earlyReject" });
     } else if (/\breturn withCors\b/.test(code)) {
       preDrainReturns.push({ lineNumber: i + 1, text: LINES[i].trim(), kind: "withCors" });
+    } else if (/Response\b/.test(code)) {
+      // `return new Response(...)` / `return Response.json(...)` / etc.
+      // — produces a Response but skips the earlyReject wrapper.
+      preDrainReturns.push({ lineNumber: i + 1, text: LINES[i].trim(), kind: "other" });
     }
-    // Bare `return wrapped;`, `return;`, `return blob;` etc. are
-    // deliberately skipped — they are not pre-drain response returns.
+    // Bare `return wrapped;`, `return;`, `return blob;` are non-response
+    // returns and correctly skipped (no `Response` token).
   }
 }
 
@@ -112,11 +141,15 @@ describe("#503 F3=A static guard: /api/upload pre-body-drain returns use earlyRe
     expect(bareWithCors.length).toBe(0);
   });
 
-  test("every pre-drain return classifies as either earlyReject or withCors (catches new response patterns)", () => {
-    // If someone introduces `return new Response(...)` or another
-    // wrapper, this test flags it so the guard can be extended
-    // rather than silently missing the new shape.
-    const classified = preDrainReturns.filter((r) => r.kind === "earlyReject" || r.kind === "withCors").length;
-    expect(classified).toBe(preDrainReturns.length);
+  test("no pre-drain return produces a Response without going through earlyReject (catches new response shapes)", () => {
+    // Catches `return Response.json(...)` / `return new Response(...)` /
+    // any other pre-drain Response-producing path that skips the wrapper.
+    // Lead 50208c1b: previous version was 恒真 because unrecognised
+    // shapes were silently dropped from `preDrainReturns` — the filter
+    // then counted "recognised = recognised" and never failed. Now the
+    // collector classifies unrecognised Response-producers as "other";
+    // this assertion reports them by line, not just count.
+    const unknown = preDrainReturns.filter((r) => r.kind === "other");
+    expect(unknown.map((r) => `L${r.lineNumber}: ${r.text}`)).toEqual([]);
   });
 });
