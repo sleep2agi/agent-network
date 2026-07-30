@@ -87,6 +87,16 @@ const nonAdminUserB = reg("userb");
 const outsiderUser = reg("outsider");
 const viewerOnlyUser = reg("vieweronly");
 const mixedUser = reg("mixed");
+// 4. Additional admins with different network-membership counts for
+//    F2=F auto-derive (U11a/b/c). adminUser is multi-network (own
+//    default + N1 below, → U11b). adminSingleUser stays single-network
+//    on its own default → U11a. adminZeroUser has zero memberships
+//    (own default is dropped below) → U11c.
+const adminSingleUser = reg("adminsingle");
+db.run("UPDATE users SET role = 'admin' WHERE user_id = ?1", [adminSingleUser.userId]);
+const adminZeroUser = reg("adminzero");
+db.run("UPDATE users SET role = 'admin' WHERE user_id = ?1", [adminZeroUser.userId]);
+db.run("DELETE FROM network_members WHERE user_id = ?1", [adminZeroUser.userId]);
 
 // N1 is userA's own default network — userA stays single-network so the
 // "no query param, unambiguous membership" upload path (U6) is reachable.
@@ -222,6 +232,11 @@ describe.skipIf(!isProdMode)("#503 — fixture integrity", () => {
     // The admin probe must really be admin, or D6/D10/D14/U10b/U11/U12
     // would be measuring a non-admin and silently prove nothing.
     expect(roleOf(adminUser.userId)).toBe("admin");
+    // F2=F auto-derive probes: adminSingleUser must be admin AND in exactly
+    // one network; adminZeroUser must be admin AND in zero networks.
+    // Fixture drift on either turns U11a/U11c into vacuously-true tests.
+    expect(roleOf(adminSingleUser.userId)).toBe("admin");
+    expect(roleOf(adminZeroUser.userId)).toBe("admin");
   });
 
   test("network membership is shaped as the matrix assumes", () => {
@@ -330,8 +345,38 @@ describe.skipIf(!isProdMode)("#503 U — upload network attribution", () => {
     expect((await res.json() as any).error).toBe("unknown_network");
   });
 
-  test("U11: admin utok_, no param → 400 network_id_required (attribution is never guessed for admins)", async () => {
-    const res = await upload(adminUser.token, "u11", "u11.bin");
+  // #503 Finding 2 = Option F (lead 40be9845): admin gets the same
+  // "auto-derive when unambiguous / require param when ambiguous"
+  // rule as utok_. Split old U11 into three rows to pin all three
+  // membership shapes.
+  test("U11a: admin utok_, EXACTLY 1 network membership, no param → 200 and entry.network_id === that network (F auto-derive)", async () => {
+    expect(roleOf(adminSingleUser.userId)).toBe("admin");
+    const singleNet = db.all<{ network_id: string }>(
+      "SELECT network_id FROM network_members WHERE user_id = ?1", adminSingleUser.userId,
+    );
+    expect(singleNet.length).toBe(1);
+    const fileId = await uploadOk(adminSingleUser.token, "u11a", "u11a.bin");
+    expect(readEntry(fileId).network_id).toBe(singleNet[0].network_id);
+  });
+
+  test("U11b: admin utok_, ≥2 network memberships, no param → 400 network_id_required (strict on ambiguity)", async () => {
+    expect(roleOf(adminUser.userId)).toBe("admin");
+    const multi = db.all<{ network_id: string }>(
+      "SELECT network_id FROM network_members WHERE user_id = ?1", adminUser.userId,
+    );
+    expect(multi.length).toBeGreaterThanOrEqual(2);
+    const res = await upload(adminUser.token, "u11b", "u11b.bin");
+    expect(res.status).toBe(400);
+    expect((await res.json() as any).error).toBe("network_id_required");
+  });
+
+  test("U11c: admin utok_, ZERO network memberships, no param → 400 network_id_required (no unowned files even for admin)", async () => {
+    expect(roleOf(adminZeroUser.userId)).toBe("admin");
+    const zero = db.all<{ network_id: string }>(
+      "SELECT network_id FROM network_members WHERE user_id = ?1", adminZeroUser.userId,
+    );
+    expect(zero.length).toBe(0);
+    const res = await upload(adminZeroUser.token, "u11c", "u11c.bin");
     expect(res.status).toBe(400);
     expect((await res.json() as any).error).toBe("network_id_required");
   });

@@ -1639,8 +1639,22 @@ return Bun.serve({
     // X-Content-Type-Options: nosniff so uploaded files can never be
     // executed or served as HTML.
     if (url.pathname === "/api/upload" && req.method === "POST") {
+      // #503 Finding 3 = Option A (lead 40be9845): every 4xx returned
+      // BEFORE `req.formData()` drains the request body MUST include
+      // `Connection: close`. Otherwise the client's still-inbound bytes
+      // land on a keepalive connection the server already answered on,
+      // poisoning the next pooled request. Bug is pre-existing (411/
+      // 413/415/429/401 all have this shape) — the #503 authz block
+      // just made it visible under aggregate `bun test` with a 12MiB
+      // upload immediately followed by another request. Per-file green
+      // hides this class of bug.
+      const earlyReject = (res: Response): Response => {
+        const wrapped = withCors(req, res);
+        wrapped.headers.set("Connection", "close");
+        return wrapped;
+      };
       const authErr = requireAuth(req);
-      if (authErr) return withCors(req, authErr);
+      if (authErr) return earlyReject(authErr);
 
       // Rate-limit key prefers the token id (so 60/h is per-token, not
       // per-IP); falls back to IP for legacy or anonymous-but-dev-open.
@@ -1654,7 +1668,7 @@ return Bun.serve({
           "X-RateLimit-Reset": String(Math.floor(rate.resetAt / 1000)),
         };
         if (rate.retryAfterMs) headers["Retry-After"] = String(Math.ceil(rate.retryAfterMs / 1000));
-        return withCors(req, new Response(
+        return earlyReject(new Response(
           JSON.stringify({ ok: false, error: "rate_limited", message: "Upload rate limit exceeded (60/hour). Try again later.", retry_after_ms: rate.retryAfterMs }),
           { status: 429, headers: { ...headers, "Content-Type": "application/json; charset=utf-8" } },   // #426 — legacy clients default to ISO-8859-1 without charset
         ));
@@ -1668,17 +1682,17 @@ return Bun.serve({
       //             or lied Content-Length header)
       const contentLength = req.headers.get("Content-Length");
       if (!contentLength) {
-        return withCors(req, Response.json(
+        return earlyReject(Response.json(
           { ok: false, error: "length_required", message: "Content-Length header is required for /api/upload" },
           { status: 411 },
         ));
       }
       const declaredBytes = Number(contentLength);
       if (!Number.isFinite(declaredBytes) || declaredBytes < 0) {
-        return withCors(req, Response.json({ ok: false, error: "bad_content_length" }, { status: 400 }));
+        return earlyReject(Response.json({ ok: false, error: "bad_content_length" }, { status: 400 }));
       }
       if (declaredBytes > MAX_REQUEST_CONTENT_LENGTH) {
-        return withCors(req, Response.json(
+        return earlyReject(Response.json(
           { ok: false, error: "payload_too_large", message: `Upload exceeds the ${MAX_UPLOAD_BYTES} byte limit`, limit_bytes: MAX_UPLOAD_BYTES },
           { status: 413 },
         ));
@@ -1698,7 +1712,7 @@ return Bun.serve({
         case "anonymous":
           // Unreachable: requireAuth above already 401s. Kept so the
           // switch stays exhaustive and a future auth change fails loud.
-          return withCors(req, Response.json({ ok: false, error: "auth_required" }, { status: 401 }));
+          return earlyReject(Response.json({ ok: false, error: "auth_required" }, { status: 401 }));
         case "dev-open-anon":
           // Local dev only. Deliberately does NOT claim a real network,
           // even if one was requested — an unauthenticated caller must
@@ -1711,7 +1725,7 @@ return Bun.serve({
           // fail-closed so relaxing that rule cannot silently start
           // producing unattributed blobs.
           if (!requestedNetId) {
-            return withCors(req, Response.json({
+            return earlyReject(Response.json({
               ok: false, error: "network_id_required",
               message: "legacy master uploads must specify a network_id query param",
             }, { status: 400 }));
@@ -1720,22 +1734,36 @@ return Bun.serve({
           break;
         case "ntok":
           if (requestedNetId && requestedNetId !== principal.boundNetworkId) {
-            return withCors(req, Response.json({
+            return earlyReject(Response.json({
               ok: false, error: "network_id_conflict",
               message: "network_id query param conflicts with the token-bound network",
             }, { status: 400 }));
           }
           uploadNetId = principal.boundNetworkId;
           break;
-        case "admin-utok":
-          if (!requestedNetId) {
-            return withCors(req, Response.json({
+        case "admin-utok": {
+          // #503 Finding 2 = Option F (lead 40be9845): admin follows the same
+          // "auto-derive when unambiguous / require param when ambiguous" rule
+          // as utok_. Rule 4's REASON (no unowned files) is preserved — the
+          // derived network is a real membership. Strict on genuine ambiguity:
+          // 0 or ≥2 memberships → 400. Preserves prod upload contract (in
+          // prod admin is in exactly 1 network; auto-derive succeeds).
+          if (requestedNetId) {
+            // Admin bypasses membership; network existence validated below.
+            uploadNetId = requestedNetId;
+            break;
+          }
+          const adminNetworks = getUserNetworkIds(principal.userId);
+          if (adminNetworks.length === 1) {
+            uploadNetId = adminNetworks[0];
+          } else {
+            return earlyReject(Response.json({
               ok: false, error: "network_id_required",
-              message: "admin uploads must specify a network_id query param",
+              message: "admin has 0 or ≥2 network memberships; network_id query param required",
             }, { status: 400 }));
           }
-          uploadNetId = requestedNetId;
           break;
+        }
         case "utok": {
           if (requestedNetId) {
             // A non-member asking for someone else's network never gets
@@ -1748,7 +1776,7 @@ return Bun.serve({
           }
           uploadNetId = singleNetworkId(resolveRestNetworkScope(url.searchParams.get("network_id"), authCtx, false));
           if (!uploadNetId) {
-            return withCors(req, Response.json({
+            return earlyReject(Response.json({
               ok: false, error: "network_id_required",
               message: "network_id query param required for a multi-network user token; 'first network' is not assumed",
             }, { status: 400 }));
@@ -1761,7 +1789,7 @@ return Bun.serve({
         const networkRow = db.get<any>("SELECT * FROM networks WHERE network_id = ?1", uploadNetId);
         if (!networkRow) {
           if (principal.kind === "admin-utok" || principal.kind === "legacy-master") {
-            return withCors(req, Response.json({
+            return earlyReject(Response.json({
               ok: false, error: "unknown_network",
               message: "network_id does not exist",
             }, { status: 400 }));
@@ -1769,17 +1797,17 @@ return Bun.serve({
           // Byte-identical to the non-member 404 above: distinguishing
           // the two would hand an unprivileged caller a network-existence
           // oracle.
-          return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
+          return earlyReject(Response.json({ ok: false, error: "not_found" }, { status: 404 }));
         }
       }
 
       if (!canRestWriteNetwork(authCtx, uploadNetId, principal.kind === "admin-utok")) {
-        return withCors(req, Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));
+        return earlyReject(Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));
       }
 
       const contentType = req.headers.get("Content-Type") ?? "";
       if (!/^multipart\/form-data/i.test(contentType)) {
-        return withCors(req, Response.json(
+        return earlyReject(Response.json(
           { ok: false, error: "unsupported_media_type", message: "Use multipart/form-data with a 'file' field" },
           { status: 415 },
         ));
