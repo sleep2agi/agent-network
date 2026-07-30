@@ -17,6 +17,7 @@ import {
   MAX_UPLOAD_BYTES,
   buildStoragePath,
   pathForExistingBlob,
+  isValidCalendarBucket,
   generateFileId,
   getUploadsRoot,
   indexEntryPath,
@@ -1774,10 +1775,15 @@ return Bun.serve({
 
       let entry: any;
       try { entry = JSON.parse(readFileSync(idxPath, "utf-8")); } catch {
-        return withCors(req, Response.json({ ok: false, error: "index_corrupt" }, { status: 500 }));
+        // #509 副指挥 66983a19: corrupted index must not leak "server
+        // failed" signal — 404 with same shape as unknown file_id
+        // (input refused at boundary, no enumeration).
+        return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
       }
       if (!validateIndexEntry(entry)) {
-        return withCors(req, Response.json({ ok: false, error: "index_invalid" }, { status: 500 }));
+        // #509 副指挥 66983a19: schema-invalid index (bucket "../etc",
+        // missing fields, wrong types) is also 404 — same discipline.
+        return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
       }
 
       // #495 ownership gate — placed AFTER file-exists so denied
@@ -1789,6 +1795,17 @@ return Bun.serve({
         return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
       }
 
+      // #509 defence-in-depth: pre-check date_bucket against BOTH
+      // shape regex AND real-calendar semantics. A poisoned index (e.g.
+      // "../etc", "2026-02-30", "2026-13-01") must return 404 not 500
+      // — 500 says "server failed"; 404 says "input refused at boundary".
+      // 副指挥 b1082017 / 66983a19 hard doors:
+      //   • 稳定 404 非 500 for invalid/missing/poisoned date_bucket
+      //   • 真日历语义校验, 不仅 regex 形状
+      if (!isValidCalendarBucket(entry.date_bucket)) {
+        return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
+      }
+
       let storage;
       try {
         // #509 fix: use the date_bucket recorded in the index at upload
@@ -1797,7 +1814,10 @@ return Bun.serve({
         // yesterday's bucket forever — read path must respect that.
         storage = pathForExistingBlob(entry.date_bucket, entry.file_id, entry.ext);
       } catch {
-        return withCors(req, Response.json({ ok: false, error: "index_invalid" }, { status: 500 }));
+        // Defence-in-depth: unreachable given the pre-check above, but
+        // keep as fallback. Return 404 not 500 to match the pre-check
+        // shape — caller sees the same code for all invalid-bucket cases.
+        return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
       }
       if (!isPathInsideUploadsRoot(storage.absolutePath)) {
         // Defence: should be unreachable since buildStoragePath rejected

@@ -344,17 +344,15 @@ describe.skipIf(!isProdMode)("#509 — download uses index date_bucket, not toda
     // pinned in tests, not just in the function name.
   });
 
-  test("Door 1 defence: poisoned index date_bucket (e.g. '../etc') is rejected", async () => {
-    // The read-path helper validates dateBucket with the same regex
-    // family used for file_id path-escape defence. A poisoned .index
-    // JSON claiming date_bucket = "../etc" should trip index_invalid
-    // (500), not silently traverse the filesystem.
+  // Helper: plant an index entry with a poisoned/invalid date_bucket.
+  // Blob file is optional — the point is the bucket string itself.
+  function plantPoisonedBucketEntry(dateBucket: unknown): string {
     const fileId = require("crypto").randomUUID().replace(/-/g, "");
     const indexDir = join(UPLOADS_DIR, ".index");
     mkdirSync(indexDir, { recursive: true });
     const entry = {
       file_id: fileId,
-      date_bucket: "../etc",  // poisoned
+      date_bucket: dateBucket,
       ext: ".txt",
       name: "poison.txt",
       mime: "application/octet-stream",
@@ -364,10 +362,57 @@ describe.skipIf(!isProdMode)("#509 — download uses index date_bucket, not toda
       uploaded_at: new Date().toISOString(),
     };
     writeFileSync(join(indexDir, fileId + ".json"), JSON.stringify(entry));
+    return fileId;
+  }
+
+  // 副指挥 66983a19 hard-door: 稳定 404 非 500 for
+  //   • path-escape poisoned buckets ("../etc", "..\\etc", etc.)
+  //   • non-calendar buckets ("2026-02-30", "2026-13-01", ...)
+  //   • shape-only-valid but semantically impossible dates
+  // 500 says "server failed to handle input"; 404 says "input refused
+  // at the boundary". The latter is a stronger, more auditable posture.
+  const invalidBuckets: Array<[string, unknown]> = [
+    ["path-escape ../etc", "../etc"],
+    ["path-escape .. only", ".."],
+    ["backslash traversal", "..\\etc"],
+    ["contains null byte", " date"],
+    ["contains slash", "2026/07/29"],
+    ["empty string", ""],
+    ["all-nines shape but not calendar", "9999-99-99"],
+    ["month 13 (impossible)", "2026-13-01"],
+    ["month 00 (impossible)", "2026-00-15"],
+    ["day 30 in February 2026 (non-leap-year rejected)", "2026-02-30"],
+    ["day 32 (impossible)", "2026-07-32"],
+    ["Feb 29 on non-leap year", "2025-02-29"],
+  ];
+
+  for (const [label, badBucket] of invalidBuckets) {
+    test(`Refinement (副指挥 66983a19) — invalid bucket "${label}" → 404 (not 500)`, async () => {
+      const fileId = plantPoisonedBucketEntry(badBucket);
+      const res = await downloadAs(userAToken, fileId);
+      // 稳定 404: pre-check via isValidCalendarBucket rejects at the
+      // boundary. 500 would signal a caught throw from deeper code —
+      // that is exactly the shape we're refusing to accept per副指挥
+      // b1082017 (可靠性差很远).
+      expect(res.status).toBe(404);
+      const body: any = await res.json();
+      expect(body.error).toBe("not_found");
+    });
+  }
+
+  test("Refinement (副指挥 66983a19) — valid Feb 29 on ACTUAL leap year 2024 is accepted (not over-rejected)", async () => {
+    // Sanity: the calendar validator must not accidentally reject
+    // legitimate leap-day buckets from a real leap year. Constructs
+    // an entry at 2024-02-29 (valid), blob at that path, downloads it.
+    const content = new TextEncoder().encode("leap-day-blob");
+    const fileId = plantFileAtBucket({
+      ownerToken: userAToken,
+      ownerUserId: userAUserId,
+      dateBucket: "2024-02-29",
+      content,
+    });
     const res = await downloadAs(userAToken, fileId);
-    // Some layer up-front (validateIndexEntry) may catch this before
-    // pathForExistingBlob; either 500 index_invalid or 404 not_found
-    // is acceptable — the invariant is "no traversal into ../etc".
-    expect([404, 500]).toContain(res.status);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("leap-day-blob");
   });
 });

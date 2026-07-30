@@ -99,6 +99,34 @@ export function sanitizeExt(filename: string | undefined | null): string {
 const DATE_BUCKET_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
+ * Validate a date_bucket string against BOTH shape (YYYY-MM-DD regex)
+ * AND real-calendar semantics: rejects "2026-02-30", "2026-13-01",
+ * "2026-00-15", leap-day-on-non-leap-year, etc. Shape-only check is not
+ * enough because the regex accepts any digit combination in each
+ * position.
+ *
+ * Used as a pre-check by the download handler before it calls into
+ * pathForExistingBlob — a non-calendar bucket is a 404 (invalid input
+ * rejected at the boundary), NOT a 500 (uncaught throw from deep in
+ * the read path). Distinguishing these matters: 500 says "server
+ * failed"; 404 says "we know your request is bad, refused early".
+ */
+export function isValidCalendarBucket(bucket: unknown): bucket is string {
+  if (typeof bucket !== "string") return false;
+  if (!DATE_BUCKET_REGEX.test(bucket)) return false;
+  // Round-trip via Date to reject non-calendar shapes like "2026-02-30"
+  // or "2026-13-01". `Date.UTC` coerces overflow ("2026-02-30" becomes
+  // "2026-03-02") — if the ISO round-trip doesn't equal the input, the
+  // caller supplied a non-calendar bucket.
+  const [yStr, mStr, dStr] = bucket.split("-");
+  const y = Number(yStr), m = Number(mStr), d = Number(dStr);
+  if (m < 1 || m > 12) return false;
+  if (d < 1 || d > 31) return false;
+  const roundtrip = new Date(Date.UTC(y, m - 1, d)).toISOString().slice(0, 10);
+  return roundtrip === bucket;
+}
+
+/**
  * Build the storage path for a NEW upload. Computes today's date bucket
  * from the runtime clock (or `opts.now` for tests). Use ONLY for creating
  * a fresh blob; for reading an existing blob whose bucket is already
