@@ -263,35 +263,17 @@ describe.skipIf(!isProdMode)("#509 — download uses index date_bucket, not toda
       dateBucket: BUCKET_YESTERDAY,
       content,
     });
-    // Whether Range is honoured is orthogonal to #509 and NOT decided by
-    // this codebase: the handler is `new Response(Bun.file(path), {status:200})`
-    // with no Range handling anywhere, so 200-vs-206 is decided purely by the
-    // Bun runtime. Measured 2026-07-30 with byte-identical code:
-    //   bun 1.2.22 → 200 + full body     bun 1.3.14 → 206 + correct slice
-    // So both statuses are legitimate and this test must pass on both.
-    //
-    // 🔴 But "accept either status" must NOT mean "assert nothing". The first
-    // version guarded the body check with `if (status === 200)`, so on the
-    // runtime production actually runs (206) the body assertion never
-    // executed — the test claimed to prove the blob path resolved correctly
-    // while only ever checking a status code. Each branch asserts its own
-    // bytes, and an unrecognised status fails loudly rather than silently
-    // skipping.
+    // #514: Range is now handled in application code, not delegated to Bun.
+    // That makes 206 the only valid result across Bun versions; accepting 200
+    // here would re-open the runtime-dependent behavior this test guards.
     const res = await fetch(`${BASE}/api/files/${fileId}`, {
       method: "GET",
       headers: { Authorization: `Bearer ${userAToken}`, Range: "bytes=0-4" },
     });
-    expect([200, 206]).toContain(res.status);
-    if (res.status === 206) {
-      // Runtime honoured Range: body must be exactly the requested slice,
-      // and the slice must come from THIS file (total length 20 proves the
-      // resolved blob is the planted one, not some other bucket's file).
-      expect(await res.text()).toBe("01234");
-      expect(res.headers.get("content-range")).toBe(`bytes 0-4/${content.byteLength}`);
-    } else {
-      // Runtime ignored Range: body must be the complete planted blob.
-      expect(await res.text()).toBe("0123456789ABCDEFGHIJ");
-    }
+    expect(res.status).toBe(206);
+    expect(await res.text()).toBe("01234");
+    expect(res.headers.get("content-range")).toBe(`bytes 0-4/${content.byteLength}`);
+    expect(res.headers.get("content-length")).toBe("5");
   });
 
   test("Door 3 conditional: yesterday's file with If-None-Match → served or 304, never 404", async () => {

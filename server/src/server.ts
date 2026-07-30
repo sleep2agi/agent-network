@@ -255,6 +255,42 @@ export function authorizeFileDownload(req: Request, entry: { owner_id?: unknown 
   return false;
 }
 
+type ByteRange =
+  | { ok: true; start: number; end: number; length: number }
+  | { ok: false };
+
+function parseSingleByteRange(rangeHeader: string | null, size: number): ByteRange | null {
+  if (rangeHeader === null) return null;
+  if (!Number.isSafeInteger(size) || size < 0) return { ok: false };
+  const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim());
+  if (!match) return { ok: false };
+  const [, rawStart, rawEnd] = match;
+  if (rawStart === "" && rawEnd === "") return { ok: false };
+
+  let start: number;
+  let end: number;
+  if (rawStart === "") {
+    const suffixLength = Number(rawEnd);
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) return { ok: false };
+    if (size === 0) return { ok: false };
+    start = Math.max(0, size - suffixLength);
+    end = size - 1;
+  } else {
+    start = Number(rawStart);
+    if (!Number.isSafeInteger(start) || start < 0) return { ok: false };
+    if (start >= size) return { ok: false };
+    if (rawEnd === "") {
+      end = size - 1;
+    } else {
+      end = Number(rawEnd);
+      if (!Number.isSafeInteger(end) || end < start) return { ok: false };
+      end = Math.min(end, size - 1);
+    }
+  }
+
+  return { ok: true, start, end, length: end - start + 1 };
+}
+
 type RestNetworkScope = {
   networkId: string | null;
   networkIds: string[] | null;
@@ -1847,7 +1883,31 @@ return Bun.serve({
         "Content-Disposition": `attachment; filename="${safeFilename.replace(/"/g, "")}"`,
         "X-Content-Type-Options": "nosniff",
         "Cache-Control": "private, no-store",
+        "Accept-Ranges": "bytes",
       };
+      const range = parseSingleByteRange(req.headers.get("Range"), entry.size);
+      if (range && !range.ok) {
+        return new Response(null, {
+          status: 416,
+          headers: {
+            ...responseHeaders,
+            "Content-Length": "0",
+            "Content-Range": `bytes */${entry.size}`,
+          },
+        });
+      }
+      if (range?.ok) {
+        const headers = {
+          ...responseHeaders,
+          "Content-Length": String(range.length),
+          "Content-Range": `bytes ${range.start}-${range.end}/${entry.size}`,
+        };
+        if (req.method === "HEAD") {
+          return new Response(null, { status: 206, headers });
+        }
+        const blob = Bun.file(storage.absolutePath).slice(range.start, range.end + 1);
+        return new Response(blob, { status: 206, headers });
+      }
       // HEAD: return the same status and headers as GET, but no body,
       // per RFC 9110 §9.3.2. This ensures HEAD passes through the same
       // authorization helper — a cross-owner HEAD is 404 (same as GET),

@@ -164,12 +164,18 @@ describe("POST /api/upload — 6-item security checklist (HTTP integration)", ()
 
 describe("GET /api/files/:file_id — download safety", () => {
   let fileId = "";
+  let rangeFileId = "";
+  const rangeContent = Uint8Array.from({ length: 64 }, (_, i) => i);
 
   beforeAll(async () => {
     const content = new TextEncoder().encode("hello-world-from-#221-integration-test");
     const res = await uploadFile(content, "greeting.txt", "text/plain");
     const body = await res.json() as any;
     fileId = body.file_id;
+
+    const rangeRes = await uploadFile(rangeContent, "range.bin", "application/octet-stream");
+    const rangeBody = await rangeRes.json() as any;
+    rangeFileId = rangeBody.file_id;
   });
 
   test("(item 3) download returns the blob with Content-Disposition: attachment + X-Content-Type-Options: nosniff", async () => {
@@ -178,8 +184,70 @@ describe("GET /api/files/:file_id — download safety", () => {
     expect(res.headers.get("Content-Disposition") ?? "").toMatch(/^attachment(;|$)/i);
     expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(res.headers.get("Content-Type")).toBe("application/octet-stream");
+    expect(res.headers.get("Accept-Ranges")).toBe("bytes");
     const text = await res.text();
     expect(text).toBe("hello-world-from-#221-integration-test");
+  });
+
+  test("#514 Range bytes=a-b returns exact 206 partial content, not a tolerant 200/full body", async () => {
+    const res = await fetch(`${BASE}/api/files/${rangeFileId}`, {
+      headers: { ...authHeaders(), Range: "bytes=3-8" },
+    });
+    expect(res.status).toBe(206);
+    expect(res.headers.get("Content-Range")).toBe("bytes 3-8/64");
+    expect(res.headers.get("Content-Length")).toBe("6");
+    expect(res.headers.get("Accept-Ranges")).toBe("bytes");
+    const body = new Uint8Array(await res.arrayBuffer());
+    expect(body.length).toBe(6);
+    expect([...body]).toEqual([...rangeContent.slice(3, 9)]);
+  });
+
+  test("#514 Range bytes=N- returns the exact open-ended tail", async () => {
+    const res = await fetch(`${BASE}/api/files/${rangeFileId}`, {
+      headers: { ...authHeaders(), Range: "bytes=60-" },
+    });
+    expect(res.status).toBe(206);
+    expect(res.headers.get("Content-Range")).toBe("bytes 60-63/64");
+    expect(res.headers.get("Content-Length")).toBe("4");
+    const body = new Uint8Array(await res.arrayBuffer());
+    expect(body.length).toBe(4);
+    expect([...body]).toEqual([...rangeContent.slice(60)]);
+  });
+
+  test("#514 Range bytes=-N returns the exact suffix", async () => {
+    const res = await fetch(`${BASE}/api/files/${rangeFileId}`, {
+      headers: { ...authHeaders(), Range: "bytes=-7" },
+    });
+    expect(res.status).toBe(206);
+    expect(res.headers.get("Content-Range")).toBe("bytes 57-63/64");
+    expect(res.headers.get("Content-Length")).toBe("7");
+    const body = new Uint8Array(await res.arrayBuffer());
+    expect(body.length).toBe(7);
+    expect([...body]).toEqual([...rangeContent.slice(57)]);
+  });
+
+  test("#514 unsatisfiable Range returns 416 with concrete Content-Range size", async () => {
+    const res = await fetch(`${BASE}/api/files/${rangeFileId}`, {
+      headers: { ...authHeaders(), Range: "bytes=64-70" },
+    });
+    expect(res.status).toBe(416);
+    expect(res.headers.get("Content-Range")).toBe("bytes */64");
+    expect(res.headers.get("Content-Length")).toBe("0");
+    const body = new Uint8Array(await res.arrayBuffer());
+    expect(body.length).toBe(0);
+  });
+
+  test("#514 HEAD Range mirrors GET status and range headers without a body", async () => {
+    const res = await fetch(`${BASE}/api/files/${rangeFileId}`, {
+      method: "HEAD",
+      headers: { ...authHeaders(), Range: "bytes=3-8" },
+    });
+    expect(res.status).toBe(206);
+    expect(res.headers.get("Content-Range")).toBe("bytes 3-8/64");
+    expect(res.headers.get("Content-Length")).toBe("6");
+    expect(res.headers.get("Accept-Ranges")).toBe("bytes");
+    const body = new Uint8Array(await res.arrayBuffer());
+    expect(body.length).toBe(0);
   });
 
   test("anonymous download is 401", async () => {
