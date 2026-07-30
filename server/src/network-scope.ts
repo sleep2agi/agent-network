@@ -19,8 +19,14 @@ export type RestNetworkScope = {
 };
 
 export function getUserNetworkIds(userId: string): string[] {
+  // JOIN networks: deleteNetwork historically left network_members rows
+  // behind (fixed alongside PR #519, but legacy DBs still carry strays).
+  // A ghost membership must neither make a single-network user look
+  // ambiguous nor let the write fallback resolve INTO a deleted network.
   return db.all<{ network_id: string }>(
-    "SELECT network_id FROM network_members WHERE user_id = ?1",
+    `SELECT m.network_id FROM network_members m
+     JOIN networks n ON n.network_id = m.network_id
+     WHERE m.user_id = ?1`,
     userId
   ).map((row) => row.network_id);
 }

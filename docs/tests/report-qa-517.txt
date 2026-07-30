@@ -1,0 +1,45 @@
+
+=== L0 env — hub boot ===
+  ✓ hub /health 200 :9251
+
+=== L1 auth — utok with current_network=null (the #517 precondition) ===
+  ✓ login issues utok_ token
+  ✓ register auto-created default network (net_b2dbc90b54d0)
+  ✓ utok current_network is null (issue precondition)
+
+=== L2 seed — target agent session inside net_b2dbc90b54d0 (direct sqlite, no prod) ===
+  ✓ seeded node+session peer-517-e2e in net_b2dbc90b54d0
+
+=== L3 single-network utok writes WITHOUT network_id (the fix) ===
+  ✓ S1 send_task ok
+  ✓ S2 task row scoped to net_b2dbc90b54d0
+  ✓ S3 send_message ok (tool previously had NO network_id input)
+
+=== L4 multi-network utok — ambiguous without, explicit works ===
+  ✓ created second network (net_2ae8961d54a5)
+  ✓ S4 error
+  ✓ S4 message
+  ✓ S5 explicit network_id ok
+
+=== L5 deleted network — membership cleanup restores auto-resolve ===
+  ✓ delete second network
+  ✓ S6 auto-resolve works again after delete (no ghost membership)
+
+=== L6 viewer role — resolves, then role-denied with viewer wording ===
+  ✓ viewer joined net_b2dbc90b54d0 via invite
+  ✓ S7 error
+  ✓ S7 message
+
+=== L7 outsider — explicit foreign network_id ===
+  ✓ S8 error
+  ✓ S8 message
+
+=== L8 zero memberships — after deleting own default network ===
+  ✓ S9 error
+  ✓ S9 message
+  ✓ S9 no orphaned task row written
+
+=== result ===
+
+PASS=22 FAIL=0
+QA-517 ALL PASS

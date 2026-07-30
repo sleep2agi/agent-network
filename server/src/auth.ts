@@ -297,6 +297,11 @@ export function deleteNetwork(userId: string, networkId: string): { ok: boolean;
   const sessions = db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM sessions WHERE network_id = ?1", networkId);
   if (sessions && sessions.cnt > 0) return { ok: false, error: `network has ${sessions.cnt} active session(s) — stop them first` };
   db.run("DELETE FROM networks WHERE network_id = ?1 AND owner_id = ?2", [networkId, userId]);
+  // PR #519 codex catch: leaving membership rows behind made deleted
+  // networks count toward getUserNetworkIds — a stale row could flip a
+  // single-network user to "ambiguous" or auto-resolve writes INTO the
+  // deleted network. Remove memberships with the network.
+  db.run("DELETE FROM network_members WHERE network_id = ?1", [networkId]);
   return { ok: true };
 }
 

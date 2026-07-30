@@ -27,6 +27,7 @@
 
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { db, uuidv4 } from "./db.js";
+import { deleteNetwork } from "./auth.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerTools } from "./tools.js";
 
@@ -347,6 +348,51 @@ describe("precise denial causes", () => {
       error: "permission_denied",
       message: "Viewer role cannot write to this network",
     });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Group 3b — ghost memberships (PR #519 codex P2): deleteNetwork used to
+// leave network_members rows behind, so a stale membership to a deleted
+// network could (a) make a single-network user look multi-network, or
+// (b) auto-resolve a write INTO the deleted network, creating orphaned
+// rows. getUserNetworkIds now joins networks; deleteNetwork now removes
+// its membership rows.
+// ─────────────────────────────────────────────────────────────────────
+describe("ghost memberships (deleted networks)", () => {
+  const GHOST = "net_517_ghost";
+
+  test("membership to a deleted network does not break single-network auto-resolve", async () => {
+    // stale row: membership exists, networks row does not
+    db.run(`INSERT INTO network_members (user_id, network_id, role, joined_at) VALUES (?1, ?2, 'owner', datetime('now'))`, [U_SINGLE, GHOST]);
+    const { tools } = buildHandlers({ userId: U_SINGLE });
+    const r = await call(tools["send_task"], { alias: A1, task: "x517 ghost still-single", priority: "normal" });
+    expect(r.ok).toBe(true);
+    expect(taskRow("x517 ghost still-single")?.network_id).toBe(NET_A);
+    db.run("DELETE FROM network_members WHERE network_id = ?1", [GHOST]);
+  });
+
+  test("sole membership pointing at a deleted network → no-membership error, no orphaned write", async () => {
+    db.run(`INSERT INTO network_members (user_id, network_id, role, joined_at) VALUES (?1, ?2, 'owner', datetime('now'))`, [U_NONE, GHOST]);
+    const { tools } = buildHandlers({ userId: U_NONE });
+    const r = await call(tools["send_task"], { alias: A1, task: "x517 ghost orphan", priority: "normal" });
+    expect(r).toEqual({
+      ok: false,
+      error: "network_id_required",
+      message: "user token has no network memberships; join or create a network first",
+    });
+    expect(taskRow("x517 ghost orphan")).toBeNull();
+    db.run("DELETE FROM network_members WHERE network_id = ?1", [GHOST]);
+  });
+
+  test("deleteNetwork removes the network's membership rows (root cause)", () => {
+    const NET_DEL = "net_517_del";
+    db.run(`INSERT INTO networks (network_id, network_name, owner_id, created_at) VALUES (?1, ?1, ?2, datetime('now'))`, [NET_DEL, U_SINGLE]);
+    db.run(`INSERT INTO network_members (user_id, network_id, role, joined_at) VALUES (?1, ?2, 'owner', datetime('now'))`, [U_SINGLE, NET_DEL]);
+    const res = deleteNetwork(U_SINGLE, NET_DEL);
+    expect(res.ok).toBe(true);
+    const left = db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM network_members WHERE network_id = ?1", NET_DEL);
+    expect(left?.cnt).toBe(0);
   });
 });
 

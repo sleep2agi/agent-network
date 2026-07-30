@@ -1,0 +1,81 @@
+bun test v1.3.14 (0d9b296a)
+
+src/mcp-write-network-resolution.test.ts:
+[commhub] database: /tmp/517-p2-red.db
+[commhub] 🎉 14-day free trial started!
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+[10:03:37] u517_single → send_task → peer-517-a1: x517 g1 send_task
+[10:03:37] u517_single → send_message → peer-517-a1: x517 g1 send_message
+[10:03:37] u517_single → send_reply (replied) → peer-517-a1: x517 g1 send_reply
+[10:03:37] peer-517-a1 → ack_inbox: 8d000361
+[10:03:37] u517_single → send_ack → task 74de77bf
+[10:03:37] u517_single → retry_task → b49a67cc
+[10:03:37] u517_single → cancel_task → 8be68c81
+[10:03:37] u517_single → reassign_task → 1a95b180 → peer-517-a2
+[10:03:37] u517_multi → send_message → peer-517-a1: x517 g2 send_message
+[10:03:38] u517_multi → send_reply (replied) → peer-517-a1: x517 g2 send_reply
+[10:03:38] peer-517-a1 → ack_inbox: 47e8d3cc
+[10:03:38] u517_multi → send_ack → task 539a4a0b
+[10:03:38] u517_multi → retry_task → 3b4b4427
+[10:03:38] u517_multi → cancel_task → 3fc86f5c
+[10:03:38] u517_multi → reassign_task → 664b4be6 → peer-517-a2
+365 |   test("membership to a deleted network does not break single-network auto-resolve", async () => {
+366 |     // stale row: membership exists, networks row does not
+367 |     db.run(`INSERT INTO network_members (user_id, network_id, role, joined_at) VALUES (?1, ?2, 'owner', datetime('now'))`, [U_SINGLE, GHOST]);
+368 |     const { tools } = buildHandlers({ userId: U_SINGLE });
+369 |     const r = await call(tools["send_task"], { alias: A1, task: "x517 ghost still-single", priority: "normal" });
+370 |     expect(r.ok).toBe(true);
+                       ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (/home/vansin/anet-work/fix-517-net-scope/server/src/mcp-write-network-resolution.test.ts:370:18)
+(fail) ghost memberships (deleted networks) > membership to a deleted network does not break single-network auto-resolve [62.37ms]
+374 | 
+375 |   test("sole membership pointing at a deleted network → no-membership error, no orphaned write", async () => {
+376 |     db.run(`INSERT INTO network_members (user_id, network_id, role, joined_at) VALUES (?1, ?2, 'owner', datetime('now'))`, [U_NONE, GHOST]);
+377 |     const { tools } = buildHandlers({ userId: U_NONE });
+378 |     const r = await call(tools["send_task"], { alias: A1, task: "x517 ghost orphan", priority: "normal" });
+379 |     expect(r).toEqual({
+                    ^
+error: expect(received).toEqual(expected)
+
+  {
+-   "error": "network_id_required",
+-   "message": "user token has no network memberships; join or create a network first",
++   "alias": "peer-517-a1",
++   "error": "alias_not_found",
++   "message": "alias not found: peer-517-a1",
+    "ok": false,
++   "queued": false,
+  }
+
+- Expected  - 2
++ Received  + 4
+
+      at <anonymous> (/home/vansin/anet-work/fix-517-net-scope/server/src/mcp-write-network-resolution.test.ts:379:15)
+(fail) ghost memberships (deleted networks) > sole membership pointing at a deleted network → no-membership error, no orphaned write [54.64ms]
+390 |     db.run(`INSERT INTO networks (network_id, network_name, owner_id, created_at) VALUES (?1, ?1, ?2, datetime('now'))`, [NET_DEL, U_SINGLE]);
+391 |     db.run(`INSERT INTO network_members (user_id, network_id, role, joined_at) VALUES (?1, ?2, 'owner', datetime('now'))`, [U_SINGLE, NET_DEL]);
+392 |     const res = deleteNetwork(U_SINGLE, NET_DEL);
+393 |     expect(res.ok).toBe(true);
+394 |     const left = db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM network_members WHERE network_id = ?1", NET_DEL);
+395 |     expect(left?.cnt).toBe(0);
+                            ^
+error: expect(received).toBe(expected)
+
+Expected: 0
+Received: 1
+
+      at <anonymous> (/home/vansin/anet-work/fix-517-net-scope/server/src/mcp-write-network-resolution.test.ts:395:23)
+(fail) ghost memberships (deleted networks) > deleteNetwork removes the network's membership rows (root cause) [52.47ms]
+[10:03:38] peer-517-a1 → send_task → peer-517-a2: x517 g4 ntok plain
+[10:03:38] peer-517-a1 → send_task → peer-517-a2: x517 g4 ntok override
+[10:03:39] hub → send_message → peer-517-a1: x517 g5 legacy
+
+ 24 pass
+ 3 fail
+ 54 expect() calls
+Ran 27 tests across 1 file. [2.30s]
