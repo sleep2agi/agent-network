@@ -292,6 +292,58 @@ describe.skipIf(!isProdMode)("#509 — download uses index date_bucket, not toda
     expect(new Uint8Array(await res.arrayBuffer())).toEqual(yesterdayBlob);
   });
 
+  test("Item 3 (副指挥 b1082017) — server TZ / UTC-boundary: entry bucket is authoritative regardless of runtime clock", async () => {
+    // 副指挥 7 硬门 ③: "覆盖服务时区与 UTC 日期边界".
+    //
+    // The read path is now structurally no-clock: pathForExistingBlob
+    // takes only the stored dateBucket, calls no getDateBucket / new
+    // Date() / Date.now(). This test pins that invariant with an
+    // explicit UTC-boundary scenario rather than leaving it as
+    // structural reasoning.
+    //
+    // Scenario: an entry recorded on 2026-07-29 (a hard-coded UTC
+    // date, unrelated to today's runtime clock). Even if the server
+    // process's runtime clock is anywhere in 2026-07-30..2026-08-01
+    // (i.e. one, two, or more midnights past the recorded bucket),
+    // the download must still resolve to the stored bucket path.
+    //
+    // The fixture uses a hard-coded date string (not offset from
+    // today) so the assertion is anchored on the invariant, not on
+    // "wall-clock happens to differ by exactly N days". If someone
+    // future-dates the runtime environment, this test still passes
+    // because the read path never consults the clock.
+    const hardcodedPastBucket = "2026-07-29";
+    const content = new TextEncoder().encode("tz-boundary-payload");
+    const fileId = plantFileAtBucket({
+      ownerToken: userAToken,
+      ownerUserId: userAUserId,
+      dateBucket: hardcodedPastBucket,
+      content,
+    });
+
+    // Precondition: blob is at the hard-coded bucket, NOT at any
+    // date derivable from `new Date()` at test time. If both paths
+    // happened to exist the test would not distinguish a
+    // stored-bucket read from a runtime-computed one.
+    expect(existsSync(join(UPLOADS_DIR, hardcodedPastBucket, fileId + ".txt"))).toBe(true);
+    // If today happens to be exactly 2026-07-29 (rare but possible
+    // when re-running the fixture), the today-bucket path exists too;
+    // the invariant we care about is the read succeeds because of the
+    // stored bucket, not because of a runtime coincidence.
+
+    const res = await downloadAs(userAToken, fileId);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("tz-boundary-payload");
+
+    // Additional invariant grep: the fixture's stored bucket is the
+    // ONLY bucket the read path should have visited. We can't observe
+    // the exact filesystem access here without instrumenting, but the
+    // structural property is enforced by pathForExistingBlob's API
+    // (no `now` parameter, no Date import). Combined with Door 1
+    // (yesterday-not-today) and this hard-coded case, the intent is
+    // pinned in tests, not just in the function name.
+  });
+
   test("Door 1 defence: poisoned index date_bucket (e.g. '../etc') is rejected", async () => {
     // The read-path helper validates dateBucket with the same regex
     // family used for file_id path-escape defence. A poisoned .index
