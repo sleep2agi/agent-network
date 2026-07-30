@@ -3,7 +3,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
 import { db, logTaskEvent, logAudit } from "./db.js";
-import { createSSEStream, createNetworkObserverStream, pushEvent, pushNetworkObserverEvent, getSSEStats } from "./push.js";
+import { createSSEStream, createNetworkObserverStream, pushEvent, pushNetworkObserverEvent, getSSEStats, PRINTABLE_OBSERVER_KEY_PREFIX } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { validateAvatarUrl } from "./avatar-validate.js";
 import { narrowTags, parseStoredTags, validateScalarAttr } from "./node-attrs-validate.js";
@@ -1233,22 +1233,41 @@ return Bun.serve({
         // to. Keys are `{networkId}:{alias}` (or observer keys shaped
         // `\0netobs:{networkId}`); parse the network prefix and keep
         // only entries whose network is in the member's set.
+        //
+        // 🔴 ntok_ (network-scoped token) MUST be forced to its single
+        // bound network (parity with resolveRestNetworkScope L277:
+        // `if (authCtx.networkId) return { networkId: authCtx.networkId }`).
+        // Falling through to the utok_ union query would return
+        // sessions from every network the underlying user belongs to,
+        // silently escalating a network-scoped token to a user-scoped
+        // token — the exact "认证 ≠ 已授权" mistake this whole change
+        // is meant to prevent. Same shape as f28a6c1b root cause; see
+        // CR3 audit 4703b0e7.
         const memberNets = new Set<string>(
-          db.all<{ network_id: string }>(
-            "SELECT network_id FROM network_members WHERE user_id = ?1",
-            healthAuth.userId,
-          ).map((r) => r.network_id),
+          healthAuth.networkId
+            ? [healthAuth.networkId]  // ntok_ single-network enforce
+            : db.all<{ network_id: string }>(
+                "SELECT network_id FROM network_members WHERE user_id = ?1",
+                healthAuth.userId,
+              ).map((r) => r.network_id),
         );
         // If member has no networks at all, keep field present but empty
         // so the dashboard can distinguish "authenticated + none active"
         // from "not authenticated at all".
         const filtered: Record<string, number> = {};
         for (const [key, n] of Object.entries(sse.sessions)) {
-          // Observer keys start with `\0netobs:` — printableKey renders
-          // them as `netobs:<networkId>` (leading `\0` stripped). Handle
-          // both raw and printable forms defensively.
-          const printableObs = key.startsWith("netobs:") ? key.slice("netobs:".length) : null;
-          const netId = printableObs ?? key.split(":")[0];
+          // Observer keys are shape `\0netobs:<networkId>` raw; keyed
+          // through `printableKey()` in push.ts, they surface here as
+          // the literal string `\\0netobs:<networkId>` (backslash-zero,
+          // not NUL byte). Use the shared `PRINTABLE_OBSERVER_KEY_PREFIX`
+          // export so this side and the emitter side stay locked to the
+          // same literal — CR3 audit 4703b0e7 caught prior check
+          // `startsWith("netobs:")` was always false → observer keys
+          // silently over-filtered out of member views.
+          const isObserver = key.startsWith(PRINTABLE_OBSERVER_KEY_PREFIX);
+          const netId = isObserver
+            ? key.slice(PRINTABLE_OBSERVER_KEY_PREFIX.length)
+            : key.split(":")[0];
           if (memberNets.has(netId)) filtered[key] = n;
         }
         scopedSessions = filtered;

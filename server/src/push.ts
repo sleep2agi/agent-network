@@ -110,6 +110,15 @@ function clientKey(sessionName: string, networkId?: string | null): string {
 // legacy ?network_id= path, and master token is root already.
 const OBSERVER_KEY_PREFIX = "\u0000netobs:";
 
+/** Printable form of `OBSERVER_KEY_PREFIX` — the shape emitted by
+ *  `printableKey()` (below) and therefore the shape callers see via
+ *  `getSSEStats().sessions`. Exported so downstream consumers (e.g.
+ *  `/health` filter in server.ts) key off the same literal instead of
+ *  each side re-writing the escape sequence — CR3 audit 4703b0e7
+ *  found server.ts had `"netobs:"` (no `\\0`) which never matched and
+ *  silently over-filtered observer keys. */
+export const PRINTABLE_OBSERVER_KEY_PREFIX = "\\0netobs:";
+
 function observerKey(networkId: string): string {
   return `${OBSERVER_KEY_PREFIX}${networkId}`;
 }

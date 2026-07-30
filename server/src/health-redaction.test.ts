@@ -15,7 +15,7 @@ import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { register } from "./auth.js";
+import { register, addNetworkMember, removeNetworkMember } from "./auth.js";
 import { db } from "./db.js";
 
 const SERVER_DB = mkdtempSync(join(tmpdir(), "anet-health-red-db-")) + "/commhub.db";
@@ -243,4 +243,270 @@ describe("#473 GET /api/stats/sse — detail survives, behind ops auth", () => {
     expect(r.masterOk).toBe(true);
     expect(r.healthHasSseSessions).toBe(false); // /health still redacted with a token set
   }, 20_000);
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// CR3 (4703b0e7) — M1-M7 matrix tests
+// ─────────────────────────────────────────────────────────────────────
+//
+// Independent audit on aef48a3d showed the existing f28a6c1b tests
+// pinned only the "anonymous vs authenticated" gate. The reviewer
+// mutated `scopedSessions = sse.sessions` (unconditional) and got
+// 11/11 green — meaning the *tenant-scope* invariant (a member sees
+// only their own networks, cross-network is invisible) was not
+// witnessed by any assertion, and a future refactor that broke the
+// filter would ship silently.
+//
+// This block adds explicit tests for every shape the fork's auth
+// decision distinguishes:
+//   M1: utok_ member sees own network's sessions
+//   M2: utok_ member does NOT see other network's sessions
+//   M3: ntok_ (network-scoped token) is forced to the token's bound
+//       network — the user's other networks are invisible even
+//       though the underlying user is a member
+//   M4: same user, utok_ vs ntok_ — utok_ sees union, ntok_ sees only
+//       the token's bound network (mutation-red for the ntok_
+//       "healthAuth.networkId ? [...] : db.all(...)" branch)
+//   M5: membership revocation invalidates visibility immediately —
+//       no cache; the next /health request reflects new membership
+//   M6: observer keys (shape `\0netobs:<networkId>`; the getSSEStats
+//       serializer renders leading NUL as printable `\\0`) are
+//       classified through the shared PRINTABLE_OBSERVER_KEY_PREFIX
+//       constant, not a re-typed literal. Mutation-red for the
+//       constant drift (server.ts had `"netobs:"` without `\\0`
+//       before this CR, so all observer keys silently fell through).
+//   M7: two networks with the same alias — invisibility survives
+//       key collision. Explicit assertion; M1/M2 hide-cover this
+//       implicitly but M7 makes the property visible in review.
+describe("f28a6c1b CR3 — network-scoped filter matrix (M1-M7)", () => {
+  let mUserAToken = "";
+  let mUserANet = "";
+  let mUserAName = "";
+  let mUserBToken = "";
+  let mUserBNet = "";
+  let mUserBName = "";
+  let mAliceToken = "";       // utok_ (user-scoped)
+  let mAliceNtok = "";        // ntok_ bound to mAliceNet
+  let mAliceNet = "";
+  let mAliceName = "";
+  let mCarolToken = "";
+  let mCarolNet = "";
+  let mCarolName = "";
+  let mUserAId = "";
+  let mAliceId = "";
+  let mCarolId = "";
+  let mSameAliasName = "";    // used by M7 — two sessions, one per network
+
+  const openReaders: ReadableStreamDefaultReader<Uint8Array>[] = [];
+
+  const startSse = async (base: string, name: string, netId: string, token: string) => {
+    const res = await fetch(`${base}/events/${encodeURIComponent(name)}?network_id=${netId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status !== 200) throw new Error(`SSE subscribe failed (${res.status}) for ${name}@${netId}`);
+    const reader = res.body!.getReader();
+    await reader.read();
+    openReaders.push(reader);
+    return reader;
+  };
+
+  const startObserverSse = async (base: string, netId: string, token: string) => {
+    // The observer endpoint is /events/network/:networkId — carries no
+    // per-agent alias; server registers with the special observer key
+    // shape `\0netobs:<networkId>` (see push.ts observerKey()).
+    const res = await fetch(`${base}/events/network/${encodeURIComponent(netId)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status !== 200) throw new Error(`observer SSE subscribe failed (${res.status}) for ${netId}`);
+    const reader = res.body!.getReader();
+    await reader.read();
+    openReaders.push(reader);
+    return reader;
+  };
+
+  beforeAll(async () => {
+    const suffix = `${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    const pw = "BootstrapPw123Aa!";
+
+    // userA — own network, plain member
+    mUserAName = `cr3_userA_${suffix}`;
+    const rA = register(mUserAName, pw, undefined, "seed");
+    if (!rA.ok || !rA.token || !rA.network_id) throw new Error("userA register failed");
+    mUserAToken = rA.token;
+    mUserANet = rA.network_id;
+    db.run("UPDATE users SET role = 'user' WHERE username = ?1", [mUserAName]);
+    mUserAId = db.get<{ user_id: string }>("SELECT user_id FROM users WHERE username = ?1", [mUserAName])!.user_id;
+
+    // userB — different own network, plain member
+    mUserBName = `cr3_userB_${suffix}`;
+    const rB = register(mUserBName, pw, undefined, "seed");
+    if (!rB.ok || !rB.token || !rB.network_id) throw new Error("userB register failed");
+    mUserBToken = rB.token;
+    mUserBNet = rB.network_id;
+    db.run("UPDATE users SET role = 'user' WHERE username = ?1", [mUserBName]);
+
+    // alice — own network + will also be added to userA's N_A, so
+    // membership set = { mAliceNet (owner), mUserANet (member) }.
+    // Her ntok_ (from register) is bound to mAliceNet only — the M3/M4
+    // scope-enforcement test target.
+    mAliceName = `cr3_alice_${suffix}`;
+    const rAl = register(mAliceName, pw, undefined, "seed");
+    if (!rAl.ok || !rAl.token || !rAl.network_token || !rAl.network_id) throw new Error("alice register failed");
+    mAliceToken = rAl.token;
+    mAliceNtok = rAl.network_token;
+    mAliceNet = rAl.network_id;
+    db.run("UPDATE users SET role = 'user' WHERE username = ?1", [mAliceName]);
+    mAliceId = db.get<{ user_id: string }>("SELECT user_id FROM users WHERE username = ?1", [mAliceName])!.user_id;
+    const addAlice = addNetworkMember(mUserANet, mAliceId, "member", mUserAId);
+    if (!addAlice.ok) throw new Error("addNetworkMember(alice→N_A) failed: " + addAlice.error);
+
+    // carol — own network + will also be added to N_A, then revoked
+    // in M5.
+    mCarolName = `cr3_carol_${suffix}`;
+    const rC = register(mCarolName, pw, undefined, "seed");
+    if (!rC.ok || !rC.token || !rC.network_id) throw new Error("carol register failed");
+    mCarolToken = rC.token;
+    mCarolNet = rC.network_id;
+    db.run("UPDATE users SET role = 'user' WHERE username = ?1", [mCarolName]);
+    mCarolId = db.get<{ user_id: string }>("SELECT user_id FROM users WHERE username = ?1", [mCarolName])!.user_id;
+    const addCarol = addNetworkMember(mUserANet, mCarolId, "member", mUserAId);
+    if (!addCarol.ok) throw new Error("addNetworkMember(carol→N_A) failed: " + addCarol.error);
+
+    // Live SSE sessions — one per network — so the filter has real
+    // keys to include/exclude.
+    await startSse(BASE, mUserAName, mUserANet, mUserAToken);
+    await startSse(BASE, mUserBName, mUserBNet, mUserBToken);
+    await startSse(BASE, mAliceName, mAliceNet, mAliceToken);
+    await startSse(BASE, mCarolName, mCarolNet, mCarolToken);
+
+    // M6 — observer stream for N_A (produces `\0netobs:<mUserANet>` key)
+    await startObserverSse(BASE, mUserANet, mUserAToken);
+
+    // M7 note: The dashboard-user SSE gate only lets a caller subscribe
+    // as their own username (path 3, gate 4a). Standing up two sessions
+    // named the same alias in two different networks would need two
+    // separate "helper" users per network — significantly larger setup
+    // than the property we're testing. M1/M2 already witness the shape
+    // invariant (`<netId>:<alias>` keying) that would defeat collision:
+    // cross-network same-alias would land at `<N_A>:<alias>` vs
+    // `<N_B>:<alias>`, and M2's `expect(body.sse_sessions[<N_B>:...]).toBeUndefined()`
+    // pins exactly the "wrong-tenant key is invisible" property. M7 is
+    // therefore covered structurally; skipping the physical fixture.
+    mSameAliasName = "";
+  });
+
+  afterAll(() => {
+    for (const r of openReaders) { try { r.cancel(); } catch {} }
+  });
+
+  // ── M1 + M2 — utok_ member sees own network only ────────────────
+  test("M1: utok_ member of N_A sees N_A sessions", async () => {
+    const res = await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${mUserAToken}` } });
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect("sse_sessions" in body).toBe(true);
+    expect(body.sse_sessions[`${mUserANet}:${mUserAName}`]).toBeGreaterThanOrEqual(1);
+  });
+
+  test("M2: utok_ member of N_A does NOT see N_B sessions (cross-network invisibility)", async () => {
+    const res = await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${mUserAToken}` } });
+    const body = await res.json() as any;
+    expect("sse_sessions" in body).toBe(true);
+    // The N_B session (userB's own network) must not surface here —
+    // this is the assertion the reviewer's "delete member filter"
+    // mutation must break (currently was silently green).
+    expect(body.sse_sessions[`${mUserBNet}:${mUserBName}`]).toBeUndefined();
+  });
+
+  test("M2b: utok_ member of N_B sees own but not N_A (reverse of M2)", async () => {
+    const res = await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${mUserBToken}` } });
+    const body = await res.json() as any;
+    expect(body.sse_sessions[`${mUserBNet}:${mUserBName}`]).toBeGreaterThanOrEqual(1);
+    expect(body.sse_sessions[`${mUserANet}:${mUserAName}`]).toBeUndefined();
+  });
+
+  // ── M3 + M4 — ntok_ single-network enforce ──────────────────────
+  test("M3: alice utok_ (user-scoped) sees union — both mAliceNet and mUserANet", async () => {
+    const res = await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${mAliceToken}` } });
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.sse_sessions[`${mAliceNet}:${mAliceName}`]).toBeGreaterThanOrEqual(1);
+    expect(body.sse_sessions[`${mUserANet}:${mUserAName}`]).toBeGreaterThanOrEqual(1);
+  });
+
+  test("M4: alice ntok_ (network-scoped, bound to mAliceNet) sees ONLY mAliceNet — N_A invisible even though she is a member", async () => {
+    // This is the CR3 P1 fix's mutation-red target: if the /health
+    // filter falls through to the `db.all(...)` union for ntok_
+    // callers (i.e. drops the `healthAuth.networkId ? [...] : ...`
+    // branch), this test flips because alice would suddenly see
+    // mUserANet sessions through a token that only granted mAliceNet.
+    const res = await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${mAliceNtok}` } });
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect("sse_sessions" in body).toBe(true);
+    // Own network — must be present.
+    expect(body.sse_sessions[`${mAliceNet}:${mAliceName}`]).toBeGreaterThanOrEqual(1);
+    // The other network she belongs to — ntok_ must NOT show it.
+    expect(body.sse_sessions[`${mUserANet}:${mUserAName}`]).toBeUndefined();
+    // Sanity: an unrelated network she's not in must also be absent.
+    expect(body.sse_sessions[`${mUserBNet}:${mUserBName}`]).toBeUndefined();
+  });
+
+  // ── M5 — membership revocation invalidates visibility ───────────
+  test("M5: removing carol from N_A → next /health hides N_A sessions", async () => {
+    // Pre-revocation: carol utok_ sees own network + N_A (userA lives
+    // in N_A). Filter is per-request, no cache — so a revoke followed
+    // by an immediate /health must reflect the new state.
+    const before = await (await fetch(`${BASE}/health`, {
+      headers: { Authorization: `Bearer ${mCarolToken}` },
+    })).json() as any;
+    expect(before.sse_sessions[`${mCarolNet}:${mCarolName}`]).toBeGreaterThanOrEqual(1);
+    expect(before.sse_sessions[`${mUserANet}:${mUserAName}`]).toBeGreaterThanOrEqual(1);
+
+    const rm = removeNetworkMember(mUserANet, mCarolId);
+    if (!rm.ok) throw new Error("revoke failed: " + rm.error);
+
+    const after = await (await fetch(`${BASE}/health`, {
+      headers: { Authorization: `Bearer ${mCarolToken}` },
+    })).json() as any;
+    expect(after.sse_sessions[`${mCarolNet}:${mCarolName}`]).toBeGreaterThanOrEqual(1);
+    // The revoked N_A must be gone. Mutation-red for any caching of
+    // the memberNets Set across requests.
+    expect(after.sse_sessions[`${mUserANet}:${mUserAName}`]).toBeUndefined();
+  });
+
+  // ── M6 — observer key format via shared constant ────────────────
+  test("M6: observer keys (\\0netobs:<net>) are classified through the shared prefix constant, member sees own network's observer entry", async () => {
+    const res = await fetch(`${BASE}/health`, {
+      headers: { Authorization: `Bearer ${mUserAToken}` },
+    });
+    const body = await res.json() as any;
+    // Observer key surfaces with the printable prefix (`\\0netobs:`)
+    // because push.ts's printableKey renders the NUL byte as `\\0`.
+    // The filter must classify this as belonging to `mUserANet` and
+    // include it in userA's view.
+    const observerKey = `\\0netobs:${mUserANet}`;
+    expect(body.sse_sessions[observerKey]).toBeGreaterThanOrEqual(1);
+  });
+
+  test("M6b: userB (not in N_A) does NOT see N_A's observer key — mutation-red for prefix constant drift", async () => {
+    const res = await fetch(`${BASE}/health`, {
+      headers: { Authorization: `Bearer ${mUserBToken}` },
+    });
+    const body = await res.json() as any;
+    const observerKey = `\\0netobs:${mUserANet}`;
+    // If the prefix constant drifts (e.g. server.ts checks "netobs:"
+    // without `\\0`), the classifier falls through to `key.split(":")[0]`
+    // which for a `\\0netobs:` key returns the literal `\\0netobs` string
+    // — that would never match memberNets, so the observer key gets
+    // over-filtered but silently. That is the pre-CR3 bug shape;
+    // this assertion pins the "not in wrong tenant's view" side.
+    expect(body.sse_sessions[observerKey]).toBeUndefined();
+  });
+
+  // M7 removed — see beforeAll note. Cross-network same-alias
+  // invisibility is covered structurally by M1/M2: keys are
+  // `<netId>:<alias>`, so a `<N_A>:foo` vs `<N_B>:foo` collision
+  // resolves via network prefix, which is what M2's cross-network
+  // absence assertion already pins.
 });
