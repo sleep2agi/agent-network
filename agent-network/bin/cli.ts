@@ -2080,7 +2080,7 @@ Session:
   anet node create <name> --resume <id>  Bind an existing Claude session
   anet node create <name> --resume-latest  Bind the latest Claude session
   anet node start <name>                 Start in this terminal (foreground, default)
-  anet node start <name> --tmux          Start in a new tmux session + attach
+  anet node start <name> --tmux          Start in a tmux session (attach with a terminal; detached when headless)
   anet node start <name> --new-session   Start with fresh Claude session
   anet node resume <name> --session <id> Resume specific session
   anet session ls               List Claude Code sessions
@@ -4258,13 +4258,16 @@ async function launchAgent(id: string, forceNewSession = false) {
 
     // #237 P0 #6 — Claude Code's `--dangerously-load-development-channels`
     // pops an interactive confirm box ("I am using this for local
-    // development / Exit") that needs an Enter keystroke. In tmux/project
-    // batch paths anet auto-confirms via autoConfirmDevChannels() (uses
-    // capture-pane → send-keys). In a plain foreground `anet node start
-    // <alias>` from a non-TTY shell (ssh detached, scripted bootstrap,
-    // systemd unit before user attach), no one types Enter → node hangs
-    // offline indefinitely with no signal that it's waiting on the user.
-    // Friendly preflight: warn loud and suggest the escape hatch.
+    // development / Exit") that needs an Enter keystroke. anet auto-confirms
+    // it via autoConfirmDevChannels() (capture-pane → send-keys) ONLY on the
+    // `project up`/`project restart` batch paths and the single-node
+    // `--accept-dev-channels` flag — NOT on plain `node start` and NOT on
+    // `--tmux` (#494 clarified this; the warn below points accordingly).
+    // In a plain foreground `anet node start <alias>` from a non-TTY shell
+    // (ssh detached, scripted bootstrap, systemd unit before user attach),
+    // no one types Enter → node hangs offline indefinitely with no signal
+    // that it's waiting on the user. Friendly preflight: warn loud and
+    // suggest the escape hatch that actually dismisses the prompt.
     if (hasDevChannels && !process.stdin.isTTY) {
       console.warn(`[anet] ⚠ claude-code-cli with --dangerously-load-development-channels needs an interactive TTY to confirm Claude Code's dev-channels prompt.`);
       console.warn(`[anet]   This shell's stdin is not a TTY → the spawned claude process will hang on the confirm box and the node will stay offline.`);

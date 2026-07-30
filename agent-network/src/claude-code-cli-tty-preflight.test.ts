@@ -69,13 +69,25 @@ describe("claude-code-cli spawn preflight (#486 P0 regression gate)", () => {
     expect(slice).not.toMatch(/process\.exit\(\s*0\s*\)/);
   });
 
-  test("Refuse: message names claude-code-cli and points at --tmux escape hatch", () => {
+  test("Refuse: message names claude-code-cli and recommends --accept-dev-channels first (--tmux listed with its precondition)", () => {
     const preflight = body.indexOf("process.stdin.isTTY");
     const spawnClaude = body.indexOf('spawn("claude", claudeArgs');
     const slice = body.slice(preflight, spawnClaude);
     // Operator needs to know which runtime it is and how to escape.
     expect(slice).toMatch(/claude-code-cli/);
+    // #494 — the primary headless recommendation is --accept-dev-channels
+    // (always detached + auto-confirms the dev-channels prompt); --tmux
+    // stays listed but must come after it and carry the "does NOT
+    // auto-confirm" caveat so nobody is pointed back at a wall.
+    expect(slice).toMatch(/--accept-dev-channels/);
     expect(slice).toMatch(/--tmux/);
+    // Ordering is asserted inside the refusal's Fix section (comments
+    // earlier in the function legitimately mention --tmux first).
+    const fixIdx = slice.indexOf("For headless / CI / systemd");
+    expect(fixIdx).toBeGreaterThan(-1);
+    const fixSlice = slice.slice(fixIdx);
+    expect(fixSlice.indexOf("--accept-dev-channels")).toBeLessThan(fixSlice.indexOf("--tmux"));
+    expect(fixSlice).toMatch(/does NOT auto-confirm/);
     // And it must be an ERROR, not a warn/log (scriptable callers
     // parse stderr for failures).
     expect(slice).toMatch(/console\.error/);
