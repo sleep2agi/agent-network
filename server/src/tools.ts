@@ -31,7 +31,7 @@ import {
   vaultUpsert, vaultGet, vaultListKeys, vaultDelete,
   VaultError,
 } from "./vault.js";
-import { stripHostLocalPathsForCrossHostSafe } from "./uploads.js";
+import { stripHostLocalPathsForCrossHostSafe, validateAttachments } from "./uploads.js";
 import {
   validateBaseUrl as _validateBaseUrl,
   SUPPORTED_VENDORS,
@@ -1092,11 +1092,47 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       status: z.enum(["replied", "failed", "cancelled"]).optional().default("replied").describe("Task outcome"),
       from_session: z.string().max(200).optional(),
       network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens)"),
+      // #507 — top-level attachments (parity with REST /api/task L506). MCP Zod
+      // otherwise silently strips unknown fields, so a caller passing
+      // `attachments` before this schema entry existed would see `ok:true`
+      // and never learn the attachments were dropped. Validated by
+      // validateAttachments (uploads.ts) — the same helper the REST path uses.
+      attachments: z.any().optional().describe("Optional attachment array; parity with send_task's meta.attachments. Each item: {type:'file', file_id, name?, mime?, size?}. Persisted into tasks.meta_json + inbox.meta_json."),
+      // #507 — optional structured metadata (parity with send_task L837). If
+      // both `attachments` (top-level) and `meta.attachments` are supplied,
+      // top-level wins (same rule as REST /api/task L2101).
+      meta: z.any().optional().describe("Optional structured reply metadata, e.g. { attachments: [...] }."),
     },
-    async ({ alias, text, in_reply_to, status: replyStatus, from_session: _fromIn, network_id: netId }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
+    async ({ alias, text, in_reply_to, status: replyStatus, from_session: _fromIn, network_id: netId, attachments, meta }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(netId);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
-      console.log(`[${ts()}] ${from_session} → send_reply (${replyStatus}) → ${alias}: ${text.slice(0, 60)}`);
+
+      // #507 — validate attachments BEFORE any DB write. Rejects malformed
+      // input (bad file_id, >20 items, size > cap, non-object item, wrong
+      // type field) with an explicit error the caller can act on. Empty /
+      // absent attachments return { ok: true, attachments: [] } — the
+      // reverse-(e) invariant (no attachments → behavior unchanged) is
+      // pinned by tests that assert byte-identical response shape
+      // before/after this validation runs.
+      const attachmentsResult = validateAttachments(attachments ?? (meta && typeof meta === "object" ? (meta as any).attachments : undefined));
+      if (!attachmentsResult.ok) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              ok: false,
+              error: "bad_attachments",
+              message: attachmentsResult.error,
+            }),
+          }],
+        };
+      }
+      const mergedMeta = attachmentsResult.attachments.length
+        ? { ...(meta && typeof meta === "object" ? meta : {}), attachments: attachmentsResult.attachments }
+        : meta;
+      const metaJson = normalizeMetaJson(mergedMeta);
+
+      console.log(`[${ts()}] ${from_session} → send_reply (${replyStatus}) → ${alias}: ${text.slice(0, 60)}${attachmentsResult.attachments.length ? ` [+${attachmentsResult.attachments.length} attachments]` : ""}`);
       const id = uuidv4();
       let taskBefore: { status: string } | null = null;
       if (in_reply_to) {
@@ -1141,17 +1177,32 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         if (!lc.ok) return { content: [{ type: "text" as const, text: JSON.stringify(lc) }] };
       }
       const replyLogged = db.transaction(() => {
+        // #507 — write meta_json on inbox insert (parity with send_task L952).
+        // Prior to this the attachments field on a send_reply call was
+        // silently stripped by MCP Zod, leaving `ok:true` with no persisted
+        // meta.
         db.run(
-          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, in_reply_to, requires_response, network_id)
-           VALUES (?1, ?2, ?3, 'reply', 'normal', ?4, ?5, ?6, 'none', ?7)`,
-          [id, alias, replyTargetNodeId, text, from_session, in_reply_to ?? null, effectiveNetId ?? null]
+          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, in_reply_to, requires_response, network_id, meta_json)
+           VALUES (?1, ?2, ?3, 'reply', 'normal', ?4, ?5, ?6, 'none', ?7, ?8)`,
+          [id, alias, replyTargetNodeId, text, from_session, in_reply_to ?? null, effectiveNetId ?? null, metaJson]
         );
 
         // 更新 tasks 表
         if (in_reply_to) {
-          const updateParams: any[] = [replyStatus, text, in_reply_to];
-          let updateSql = `UPDATE tasks SET status = ?1, result = ?2, completed_at = datetime('now')
-             WHERE task_id = ?3 AND status IN ('created', 'delivered', 'acked', 'running')`;
+          // #507 — persist meta_json onto the tasks row too, so
+          // dashboard's task view sees the reply's attachments alongside
+          // the reply text (parity with send_task L957/959 which writes
+          // meta_json into both inbox and tasks). The COALESCE guards
+          // against clobbering pre-existing meta_json when this reply
+          // brings no attachments (metaJson === null → keep the existing
+          // task meta_json unchanged). Reverse-(e) invariant.
+          const updateParams: any[] = [replyStatus, text, metaJson, in_reply_to];
+          let updateSql = `UPDATE tasks
+             SET status = ?1,
+                 result = ?2,
+                 completed_at = datetime('now'),
+                 meta_json = COALESCE(?3, meta_json)
+             WHERE task_id = ?4 AND status IN ('created', 'delivered', 'acked', 'running')`;
           updateSql = addScope(updateSql, updateParams, effectiveNetId);
           const result = db.run(updateSql, updateParams);
           if (result.changes === 0) {
@@ -1229,6 +1280,29 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         ? `Target "${alias}" is an agent node. commhub_reply/send_reply does NOT wake agent peers (they only log new_reply, they do not processInbox on it) — the peer will not see this reply in real time. For agent-to-agent replies, use commhub_send_task(alias="${alias}", task="<your reply>") so the peer wakes via new_task SSE and processes it. (RFC-030, Vincent 2026-07-28 全网规则.)`
         : undefined;
 
+      // #507 — echo attachments READ BACK FROM DB (lead 2b5f6634): the point
+      // of the echo is to prove attachments actually landed in storage, not
+      // to reflect the in-memory variable we tried to write. Reading
+      // `attachmentsResult.attachments` here would still show `ok:true` +
+      // full echo if the UPDATE failed with `changes=0` (e.g. task moved to
+      // terminal between the pre-check and the transaction). SELECT from
+      // inbox.meta_json (always written, uses the id we just generated) so
+      // the echo means "these attachments are on disk now". Absent field
+      // when the caller sent no attachments — reverse-(e) invariant: a
+      // no-attachment call returns the exact same response shape as before
+      // this PR. Persisted-attachments field is only added when the caller
+      // actually asked for attachments.
+      let attachmentsSaved: unknown[] | null = null;
+      if (attachmentsResult.attachments.length > 0) {
+        const persistedRow = db.get<{ meta_json: string | null }>(
+          "SELECT meta_json FROM inbox WHERE id = ?1", [id]
+        );
+        const persistedMeta = parseMetaJson(persistedRow?.meta_json ?? null);
+        attachmentsSaved = persistedMeta && typeof persistedMeta === "object" && Array.isArray((persistedMeta as any).attachments)
+          ? (persistedMeta as any).attachments
+          : [];
+      }
+
       return {
         content: [{
           type: "text" as const,
@@ -1237,6 +1311,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             message_id: id,
             session_status: session?.status ?? "unknown",
             ...(warning ? { warning } : {}),
+            ...(attachmentsSaved !== null ? { attachments_saved: attachmentsSaved } : {}),
           }),
         }],
       };
