@@ -2080,7 +2080,7 @@ Session:
   anet node create <name> --resume <id>  Bind an existing Claude session
   anet node create <name> --resume-latest  Bind the latest Claude session
   anet node start <name>                 Start in this terminal (foreground, default)
-  anet node start <name> --tmux          Start in a new tmux session + attach
+  anet node start <name> --tmux          Start in a tmux session (attach with a terminal; detached when headless)
   anet node start <name> --new-session   Start with fresh Claude session
   anet node resume <name> --session <id> Resume specific session
   anet session ls               List Claude Code sessions
@@ -4258,17 +4258,25 @@ async function launchAgent(id: string, forceNewSession = false) {
 
     // #237 P0 #6 — Claude Code's `--dangerously-load-development-channels`
     // pops an interactive confirm box ("I am using this for local
-    // development / Exit") that needs an Enter keystroke. In tmux/project
-    // batch paths anet auto-confirms via autoConfirmDevChannels() (uses
-    // capture-pane → send-keys). In a plain foreground `anet node start
-    // <alias>` from a non-TTY shell (ssh detached, scripted bootstrap,
-    // systemd unit before user attach), no one types Enter → node hangs
-    // offline indefinitely with no signal that it's waiting on the user.
-    // Friendly preflight: warn loud and suggest the escape hatch.
+    // development / Exit") that needs an Enter keystroke. anet auto-confirms
+    // it via autoConfirmDevChannels() (capture-pane → send-keys) ONLY on the
+    // `project up`/`project restart` batch paths and the single-node
+    // `--accept-dev-channels` flag — NOT on plain `node start` and NOT on
+    // `--tmux` (#494 clarified this; the warn below points accordingly).
+    // In a plain foreground `anet node start <alias>` from a non-TTY shell
+    // (ssh detached, scripted bootstrap, systemd unit before user attach),
+    // no one types Enter → node hangs offline indefinitely with no signal
+    // that it's waiting on the user. Friendly preflight: warn loud and
+    // suggest the escape hatch that actually dismisses the prompt.
     if (hasDevChannels && !process.stdin.isTTY) {
       console.warn(`[anet] ⚠ claude-code-cli with --dangerously-load-development-channels needs an interactive TTY to confirm Claude Code's dev-channels prompt.`);
       console.warn(`[anet]   This shell's stdin is not a TTY → the spawned claude process will hang on the confirm box and the node will stay offline.`);
-      console.warn(`[anet]   Fix: re-run with \`anet node start ${shellQuote(nodeId)} --tmux\` (anet auto-confirms in tmux mode via capture-pane).`);
+      // #494 — this used to point at `--tmux` and claim anet auto-confirms
+      // there. The single-node `--tmux` path never ran the capture-pane
+      // watcher (only `project up` and `--accept-dev-channels` do), so a
+      // headless dev-channels node started via `--tmux` sat on the confirm
+      // box forever. Point at the flag that actually dismisses the prompt.
+      console.warn(`[anet]   Fix: re-run with \`anet node start ${shellQuote(nodeId)} --accept-dev-channels\` (detached tmux + anet auto-confirms the prompt via capture-pane).`);
       console.warn(`[anet]   Or attach a TTY (interactive ssh) and run again, then hit Enter on the prompt.`);
     }
 
@@ -4300,9 +4308,20 @@ async function launchAgent(id: string, forceNewSession = false) {
       console.error(`[anet]    auto-switches to --print mode without a TTY and refuses to`);
       console.error(`[anet]    start its interactive session, so the agent never comes online.`);
       console.error(`[anet]    Fix:`);
+      // #494 — recommend the purpose-built headless path FIRST.
+      // `--accept-dev-channels` always spawns DETACHED (works with no TTY
+      // anywhere) and additionally auto-confirms Claude's dev-channels
+      // prompt if one appears (a `--tmux` detached session leaves that
+      // prompt waiting until someone attaches). `--tmux` stays listed with
+      // its precondition spelled out so nobody is pointed back at a wall.
       console.error(`[anet]      • For headless / CI / systemd / docker without -it:`);
-      console.error(`[anet]        anet node start ${shellQuote(nodeId)} --tmux`);
-      console.error(`[anet]        (anet allocates a real PTY inside a tmux session)`);
+      console.error(`[anet]        anet node start ${shellQuote(nodeId)} --accept-dev-channels`);
+      console.error(`[anet]        (detached tmux session with a real PTY; auto-confirms the`);
+      console.error(`[anet]         dev-channels prompt if the node uses server: channels)`);
+      console.error(`[anet]      • anet node start ${shellQuote(nodeId)} --tmux`);
+      console.error(`[anet]        (attached when run from a terminal; detached when headless —`);
+      console.error(`[anet]         note: does NOT auto-confirm a dev-channels prompt; attach`);
+      console.error(`[anet]         with \`tmux attach -t <alias>\` if the node waits on one)`);
       console.error(`[anet]      • Or re-run this command from an interactive terminal.`);
       process.exit(1);
     }
@@ -4442,8 +4461,12 @@ async function startCommand() {
   const wantTmux = opts.tmux === "true";
 
   // #176 — headless / no-TTY start with automatic dev-channels prompt
-  // dismissal. Default `startCommand` and `--tmux` both assume an attached
-  // TTY: claude-code-cli pops "WARNING: Loading development channels …
+  // dismissal. Default `startCommand` assumes an attached TTY, and `--tmux`
+  // did too until #486-CR/#494 (it now falls back to a detached session
+  // when stdin is not a TTY — see the `headless` branch below — but it
+  // still does NOT dismiss the dev-channels prompt; only this flag and
+  // `project up` run the capture-pane watcher).
+  // claude-code-cli pops "WARNING: Loading development channels …
   // (Enter to confirm)" on every launch and waits for keyboard input. From
   // a watchdog / cron / CI / `setsid`-detached caller there is no TTY to
   // press Enter, so the process hangs forever and the node never comes up
@@ -4601,6 +4624,15 @@ async function startCommand() {
     console.log(`[anet] ✅ tmux session "${alias}" started detached.`);
     console.log(`[anet]    Attach:   tmux attach -t ${alias}`);
     console.log(`[anet]    Stop:     anet node stop ${alias}`);
+    // #494 — a detached `--tmux` start does not run the dev-channels
+    // prompt watcher; a claude node with server: channels will sit on the
+    // confirm box until a human attaches. Don't let that read as success
+    // silently — say so and point at the flag that handles it.
+    if ((resolved.profile.channels ?? []).some(ch => typeof ch === "string" && ch.startsWith("server:"))) {
+      console.warn(`[anet] ⚠ this node loads dev channels (server:*): Claude will wait on its`);
+      console.warn(`[anet]   confirm prompt inside the detached session. Attach and hit Enter,`);
+      console.warn(`[anet]   or use \`anet node start ${shellQuote(alias)} --accept-dev-channels\` which auto-confirms.`);
+    }
     return;
   }
 

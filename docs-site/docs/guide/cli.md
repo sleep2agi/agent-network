@@ -371,14 +371,14 @@ anet node create 翻译官 --runtime claude-agent-sdk --model <minimax-model-id>
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
 
-启动 Agent 节点。**默认前台运行**（stdio 接当前终端）；想后台跑或想用 tmux 管理，加 `--tmux` 开 tmux session 并 attach。
+启动 Agent 节点。**默认前台运行**（stdio 接当前终端）；想后台跑或想用 tmux 管理，加 `--tmux` 开 tmux session（从终端跑会 attach 进入；headless/无 TTY 时自动转 **detached** 后台起，见下）。
 
-> v0.9.0 短暂引入过「默认 detached tmux」行为（[#122](https://github.com/sleep2agi/agent-network/issues/122)），v0.9.2 通过 [#136](https://github.com/sleep2agi/agent-network/issues/136) 回退 —— detached tmux 触发了 macOS bun `setRawMode errno 5`（detached child 的 stdio 不是 real PTY，claude-code-cli setRawMode 调用失败）。现在的 `--tmux` 走 **attached** 模式（`tmux new -As`），PTY chain 保持完整不再触发 bug。
+> v0.9.0 短暂引入过「默认 detached tmux」行为（[#122](https://github.com/sleep2agi/agent-network/issues/122)），v0.9.2 通过 [#136](https://github.com/sleep2agi/agent-network/issues/136) 回退 —— detached tmux 触发了 macOS bun `setRawMode errno 5`（detached child 的 stdio 不是 real PTY，claude-code-cli setRawMode 调用失败）。现在的 `--tmux` 在**有终端时走 attached** 模式（`tmux new -As`，PTY chain 完整不触发该 bug）；[#486](https://github.com/sleep2agi/agent-network/issues/486)/[#494](https://github.com/sleep2agi/agent-network/issues/494) 起 **stdin 不是 TTY 时自动转 detached**（`tmux new-session -d` + session 存活校验，失败非零退出），headless/CI/systemd 场景不再撞「open terminal failed」。
 
 ::: tip 想 re-attach 到已跑的 tmux 节点？
 当前没有通用的顶层 `anet attach <alias>` 子命令（[#121](https://github.com/sleep2agi/agent-network/issues/121) 计划中, 未实施）。re-attach 用：
 - `tmux a -t <alias>` —— 直接 tmux 命令
-- 或 `anet node start <alias> --tmux` —— `--tmux` flag 用 `tmux new -As`, session 已存在直接 attach
+- 或 `anet node start <alias> --tmux` —— 从终端跑用 `tmux new -As`, session 已存在直接 attach
 
 **例外：Grok 人机共存**（`--runtime grok-build-cli`）有专用的 `anet grok attach <alias>`，可 attach 到 agent-node 持有的真实 Grok TUI，与网络任务同处一个会话。详见 [Grok 人机共存 TUI](./grok-copresence.md)。
 :::
@@ -389,7 +389,7 @@ anet node start <name> [options]
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `--tmux` | false | 在新 tmux session 里跑并 attach 进入（session 名 = alias；`-A` 已存在则 attach）；按 `Ctrl-B D` detach |
+| `--tmux` | false | 在 tmux session 里跑（session 名 = alias；`-A` 已存在则 attach）。从终端跑 = attach 进入，按 `Ctrl-B D` detach；**headless（stdin 非 TTY）= 自动 detached 起**，之后 `tmux attach -t <alias>`。注意：不会自动确认 dev-channels 弹窗，那个用 `--accept-dev-channels` |
 | `--new-session` | false | 忽略旧 Claude session，创建新的（同 `--resume` chain 的「重新开始」） |
 
 **默认（无 flag）**：
@@ -404,12 +404,14 @@ anet node start <name>
 anet node start <name> --tmux
 ```
 
-**`--tmux` 行为**：内部执行 `tmux new -As <alias> -c <cwd> "anet node start <alias>"`：
+**`--tmux` 行为（有终端时）**：内部执行 `tmux new -As <alias> -c <cwd> "anet node start <alias>"`：
 - `-A` —— alias 已有同名 session 直接 attach（rerun 友好）
 - `-s` —— session 名 = alias（discoverability）
 - `-c` —— start 在当前 cwd
 - inner cmd 不带 `--tmux`，所以内层就是 foreground 跑，没有递归
 - 终端是 tmux client，PTY chain 完整：claude-code-cli 的 setRawMode、`Ctrl-C`/raw input 都正常工作
+
+**`--tmux` 行为（headless，stdin 非 TTY）**：自动转 `tmux new-session -d`（detached），随后做最长 2s 的 `tmux has-session` 存活校验；tmux 失败或 session 未出现都**非零退出**并透传 tmux stderr。detached 模式**不会**自动确认 claude 的 dev-channels 弹窗 —— 带 `server:*` channel 的节点请改用 `--accept-dev-channels`（detached + capture-pane 自动确认）。
 
 **`--tmux` 失败回退**：如果 tmux 未装，命令拒绝 + 提示装 tmux 或回退默认前台。
 

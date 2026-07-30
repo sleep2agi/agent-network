@@ -365,14 +365,14 @@ Cross-machine deploy is still supported: the wizard still prints the export comm
 
 > [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
 
-Start an agent node. **Default is foreground** (stdio inherits the current terminal); pass `--tmux` to launch the node inside a new tmux session and attach.
+Start an agent node. **Default is foreground** (stdio inherits the current terminal); pass `--tmux` to launch the node inside a tmux session (attaches when run from a terminal; automatically **detached** when headless / stdin is not a TTY — see below).
 
-> v0.9.0 briefly introduced an "auto-wrap into detached tmux" default ([#122](https://github.com/sleep2agi/agent-network/issues/122)). v0.9.2 reverts it via [#136](https://github.com/sleep2agi/agent-network/issues/136) — detached tmux triggered `setRawMode errno 5` on macOS bun (the detached child's stdio isn't a real PTY, claude-code-cli's setRawMode call failed). The new `--tmux` path is **attached** (`tmux new -As`), keeping the PTY chain intact so setRawMode works everywhere.
+> v0.9.0 briefly introduced an "auto-wrap into detached tmux" default ([#122](https://github.com/sleep2agi/agent-network/issues/122)). v0.9.2 reverts it via [#136](https://github.com/sleep2agi/agent-network/issues/136) — detached tmux triggered `setRawMode errno 5` on macOS bun (the detached child's stdio isn't a real PTY, claude-code-cli's setRawMode call failed). The `--tmux` path is **attached when a terminal is present** (`tmux new -As`, keeping the PTY chain intact so setRawMode works); since [#486](https://github.com/sleep2agi/agent-network/issues/486)/[#494](https://github.com/sleep2agi/agent-network/issues/494) it **falls back to detached** (`tmux new-session -d` + liveness check, non-zero exit on failure) when stdin is not a TTY, so headless / CI / systemd callers no longer hit "open terminal failed".
 
 ::: tip Want to re-attach to a running tmux node?
 There is no generic top-level `anet attach <alias>` subcommand today ([#121](https://github.com/sleep2agi/agent-network/issues/121) is planned, not yet implemented). To re-attach:
 - `tmux a -t <alias>` — direct tmux command
-- or `anet node start <alias> --tmux` — the `--tmux` flag uses `tmux new -As`, which attaches if the session already exists
+- or `anet node start <alias> --tmux` — from a terminal it uses `tmux new -As`, which attaches if the session already exists
 
 **Exception: Grok co-presence** (`--runtime grok-build-cli`) has a dedicated `anet grok attach <alias>` that attaches you to the real Grok TUI held by the agent-node, sharing one session with network tasks. See [Grok Co-presence TUI](./grok-copresence.md).
 :::
@@ -383,7 +383,7 @@ anet node start <name> [options]
 
 | Parameter | Default | Description |
 |------|--------|------|
-| `--tmux` | false | Start in a new tmux session and attach (session name = alias; `-A` attaches if it already exists). Detach with `Ctrl-B D`. |
+| `--tmux` | false | Start in a tmux session (session name = alias; `-A` attaches if it already exists). From a terminal it attaches — detach with `Ctrl-B D`; **headless (stdin not a TTY) it starts detached** — re-join with `tmux attach -t <alias>`. Note: it does NOT auto-confirm the dev-channels prompt; use `--accept-dev-channels` for that. |
 | `--new-session` | false | Ignore previous Claude session, create a new one (the "start over" path on the `--resume` chain) |
 
 **Default (no flag)**:
@@ -398,12 +398,14 @@ anet node start <name>
 anet node start <name> --tmux
 ```
 
-**`--tmux` semantics**: internally runs `tmux new -As <alias> -c <cwd> "anet node start <alias>"`:
+**`--tmux` semantics (terminal present)**: internally runs `tmux new -As <alias> -c <cwd> "anet node start <alias>"`:
 - `-A` — if a same-name session already exists, attach to it instead of erroring (rerun-friendly)
 - `-s` — session name = alias (discoverability)
 - `-c` — start in the current cwd
 - the inner command does **not** carry `--tmux`, so the inner `anet node start` runs foreground — no recursion
 - the parent terminal becomes a tmux client, keeping the PTY chain intact: `claude-code-cli` setRawMode, `Ctrl-C`, raw input all work normally
+
+**`--tmux` semantics (headless, stdin not a TTY)**: automatically switches to `tmux new-session -d` (detached), then polls `tmux has-session` for up to 2 s to prove the session actually came up; a tmux failure or a missing session **exits non-zero** with tmux's stderr surfaced. Detached mode does **not** auto-confirm claude's dev-channels prompt — for nodes with `server:*` channels use `--accept-dev-channels` (detached + capture-pane auto-confirm) instead.
 
 **`--tmux` fallback**: if tmux isn't installed, the command errors out and suggests installing tmux or dropping the flag to run foreground.
 
