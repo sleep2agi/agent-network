@@ -1,0 +1,65 @@
+# Task #507 mutation-red matrix — actual runs on tools.ts
+# generated 2026-07-30 by 通信工程马 on origin/main @ bf0a3ce5 (post #503, post #25, post NUL fix)
+# discipline: every mutation actually applied to source, run, captured, reverted.
+# NUL check (mechanical, per lead 2b5f6634): grep -c $'\0' → 0
+
+## Baseline (unmutated)
+
+  15 pass / 0 fail / 55 expect() — src/send-reply-attachments.test.ts
+  757 pass / 10 skip / 0 fail / 2218 expect() — aggregate bun test src/
+
+## Mutation 1 — delete the echo block (read-back SELECT + attachmentsSaved population)
+
+- File+lines: server/src/tools.ts, the block that runs after chainReplyToParent
+  and before the return statement:
+      let attachmentsSaved: unknown[] | null = null;
+      if (attachmentsResult.attachments.length > 0) {
+        const persistedRow = db.get<{ meta_json: string | null }>(
+          "SELECT meta_json FROM inbox WHERE id = ?1", [id]
+        );
+        const persistedMeta = parseMetaJson(persistedRow?.meta_json ?? null);
+        attachmentsSaved = persistedMeta && typeof persistedMeta === "object" && Array.isArray((persistedMeta as any).attachments)
+          ? (persistedMeta as any).attachments
+          : [];
+      }
+- Change: replace whole block with `let attachmentsSaved: unknown[] | null = null;`
+  (attachmentsSaved stays null → response spread omits the attachments_saved field)
+- Result: **11 pass / 4 fail** — the 4 fails are EXACTLY the 4 tests that assert echo:
+    (fail) P1: two attachments persist to tasks.meta_json AND inbox.meta_json AND echo READ BACK FROM DB
+    (fail) P2: meta.attachments (nested form) also accepted
+    (fail) P3: top-level attachments WIN over meta.attachments when both supplied (parity with REST /api/task L2101)
+    (fail) echo integrity — echo values are exactly what the DB round-trip produced (proves read-back not passthrough)
+  Reverse-(e) tests (R-e1..R-e4) still pass (they assert absence of attachments_saved key, which is now always absent) — expected.
+  Negative tests (N1..N7) still pass (they assert validation failure paths that fire before the echo would run).
+
+## Coverage semantics — what this mutation proves and what it does NOT
+
+Proves: the echo code path is exercised by 4 tests, all independently named. Removing it produces 4 discrete red rows, each pointing at a specific test's assertion. No silent-pass on echo removal.
+
+Does NOT prove: that the echo comes from the DB round-trip specifically, not from the in-memory attachmentsResult.attachments variable. To catch that class of regression, one would need a scenario where DB write partially fails while in-memory data is valid (e.g., UPDATE returns changes=0 due to a race between the taskBefore.status pre-check and the UPDATE). Such a race is hard to construct deterministically in a unit test — the current suite instead pins the invariant via structural checks (readTaskMeta / readInboxMeta done independently in the test, then compared to reply.attachments_saved). See "echo integrity" test for the toEqual-against-independent-DB-read assertion.
+
+Lead 2b5f6634 raised this concern explicitly. The fix here is: (1) code reads from DB (not from in-memory input), and (2) test independently reads DB and compares. If a future refactor replaces the DB read with in-memory pass-through, the toEqual assertion in "echo integrity" still holds ON HAPPY PATH but fails on the race-condition path — the failure signal exists but is not deterministically triggered in unit tests. A follow-up integration test that races UPDATE against status changes would be the mutation-red proof for read-back-vs-passthrough; deferred as scope creep in this PR.
+
+## Aggregate baseline invariant (Constraint 3 discipline)
+
+  pre-#507  (main @ bf0a3ce5):    742 pass / 10 skip / 0 fail / 2163 expect
+  post-#507 (this PR):            757 pass / 10 skip / 0 fail / 2218 expect
+  delta:                          +15 pass /  0 skip / 0 fail / +55 expect
+
+  - skip count unchanged (no silent test-skip introduced)
+  - fail count unchanged at 0 (no existing test broken)
+  - +15 pass matches exactly the 15 new tests added
+  - +55 expects proportional (average 3.7 assertions/test)
+
+## Not run in this manifest (redundant coverage)
+
+Reverting the schema change (removing attachments: z.any().optional()) would also turn P1/P2/P3/echo-integrity red — via the Zod-strip mechanism that was the ORIGINAL bug — but the tests' failure mode would be indistinguishable from Mutation 1 (attachments_saved missing / arrays empty). Adds no new coverage information beyond Mutation 1; skipped to avoid inflated matrix.
+
+Reverting the handler INSERT/UPDATE meta_json changes would turn the readTaskMeta/readInboxMeta assertions red — but again, redundant with Mutation 1. The first tripwire is enough.
+
+## Related
+
+- #503 (upstream design established many of the discipline patterns used here)
+- #25 (regression pins for validateIndexEntry ext regex — same author-doesnt-self-audit + mutation-red discipline)
+- #527 (regex 4-copy dedup evaluation — different concern)
+- #529 (MCP tools default-strip class-wide P3 — parent-class of the send_reply attachments bug this PR fixes)
