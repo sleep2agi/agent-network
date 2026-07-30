@@ -194,3 +194,53 @@
   U13   <- M11,M21
   U14   <- M11,M5
   D1    <- (none) happy path (ntok_ reads its own network); guarded indirectly by M2/M19
+
+## Part 2 — F2/F3 mutations added post-lead-ruling (2026-07-30, after fork session limit)
+
+Fork fix-503-impl died on session limit before applying F2=F (admin
+auto-derive) and F3=A (Connection: close on early-reject). The M1-M7
+mutations above were run on v3 (pre-lead-ruling) admin behavior +
+without earlyReject. M8-M10 below cover the F2/F3 additions.
+
+[M8] RED  (claimed: U11a)
+      mutation: admin-utok upload case: delete the F2=F auto-derive branch → always require ?network_id=
+      RED  #503 U — upload network attribution > U11a: admin utok_, EXACTLY 1 network membership, no param → 200 and entry.network_id === that network (F auto-derive)
+      (48 pass, 1 fail — exactly and only U11a red; failure reason: "upload expected 200, got 400: network_id_required" — precisely the auto-derive path removed.)
+
+[M9] CANNOT REPRO — reported honestly per lead 40be9845 "别硬凑"
+      mutation: earlyReject helper: remove `wrapped.headers.set("Connection", "close")`
+      NEUTRAL  aggregate bun test src/: 709 pass / 10 skip / 0 fail — same as with Connection:close.
+      Interpretation: Fork's originally-reported timeout (uploads-http.test.ts "missing Content-Length → 411"
+      that stalled on 5s after a preceding 12MiB upload) does NOT reproduce in current setup. Possible reasons:
+        (a) Bun's fetch client used by tests does not reuse keepalive connections aggressively enough
+            to reproduce pool poisoning in-process
+        (b) Fork's reported repro may have been flaky
+        (c) Some other rebase-time change coincidentally fixed the trigger scenario
+      F3=A remains the correct fix on HTTP/1.1 semantics: a server that responds before draining the
+      request body MUST NOT reuse the connection. `Connection: close` is the standard signal. The fix
+      is defence against a real HTTP hazard, even though we can't turn the specific test scenario
+      red with a simple negation of it here. Not shipping a fake red for a real defence.
+
+[M10] RED  (claimed: 8 tests including fixture-integrity)
+      mutation: swap `nonAdminUserA = reg("usera")` for `nonAdminUserA = seedUser` (first-registered → auto-admin)
+      RED  #503 — fixture integrity > probes are registered after the auto-admin slot is taken, and are not admin
+              [fails on `expect(roleOf(nonAdminUserA.userId)).not.toBe("admin")`]
+      RED  #503 D — download network scope > D3, D4, D5 (admin bypass masks intended behavior)
+      RED  #503 E — denied responses carry no enumeration signal > E7, E8 (admin skips scope-guard)
+      RED  #503 — network scope does not regress cross-day downloads (#509)
+      (41 pass, 8 fail — proves the `role !== 'admin'` fixture assertion actually catches the shape it
+      exists to catch. Constraint 3-2 mutation reversal per lead adc5e9e0.)
+
+## Constraint 3 triple gate summary (lead adc5e9e0)
+
+  1. Static source count (git grep -c on test source file, not `bun test` output):
+       git grep -c 'not\.toBe.*admin' server/src/file-network-scope.test.ts
+       → count reported in file-network-scope.test.ts by inline `expect(roleOf(...)).not.toBe("admin")` assertions.
+       Judged from SOURCE FILE, not test-runner output (which never prints passing assertion text).
+
+  2. Admin-probe mutation reversal: see M10 above — 8 tests turn RED including the
+       "probes are registered after the auto-admin slot is taken, and are not admin" fixture assertion.
+
+  3. Test-ID → precondition map: see test-id-map.txt in this directory. Each non-admin D row
+       lists the exact precondition line whose truth it depends on (not just counts).
+
