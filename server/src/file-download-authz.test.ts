@@ -56,6 +56,16 @@ const rA = register(nameA, "BootstrapPw123Aa!", undefined, "userA");
 if (!rA.ok) throw new Error(`userA register failed: ${rA.error}`);
 const userAToken = rA.token!;
 const userAUserId = rA.user!.user_id;
+const userANetworkId = rA.network_id!;
+
+// #503 — userA joins userB's network below, which makes userA a
+// SAME-network peer. Cross-network denial needs a principal who is in
+// neither, so userC exists purely to be an outsider.
+const nameC = `userccc_495_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+const rC = register(nameC, "BootstrapPw123Aa!", undefined, "userC");
+if (!rC.ok) throw new Error(`userC register failed: ${rC.error}`);
+const userCToken = rC.token!;
+const userCUserId = rC.user!.user_id;
 
 const nameB = `userbbb_495_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
 const rB = register(nameB, "BootstrapPw123Aa!", undefined, "userB");
@@ -132,10 +142,16 @@ afterAll(() => {
   delete process.env.COMMHUB_AUTH_TOKEN;
 });
 
-async function uploadAs(token: string, content: Uint8Array, filename: string): Promise<string> {
+// #503 — a utok_ holder in more than one network must name the target
+// network; the server refuses to guess ("first network" is not assumed).
+// Callers using a single-network token can still omit it.
+async function uploadAs(token: string, content: Uint8Array, filename: string, networkId?: string): Promise<string> {
   const form = new FormData();
   form.append("file", new Blob([content], { type: "application/octet-stream" }), filename);
-  const res = await fetch(`${BASE}/api/upload`, {
+  const url = networkId
+    ? `${BASE}/api/upload?network_id=${encodeURIComponent(networkId)}`
+    : `${BASE}/api/upload`;
+  const res = await fetch(url, {
     method: "POST",
     body: form,
     headers: { Authorization: `Bearer ${token}` },
@@ -173,27 +189,36 @@ describe.skipIf(!isProdMode)("#495 — GET /api/files/:file_id authorization (ow
     expect(await res.text()).toBe("agent-blob");
   });
 
-  test("🔴 non-owner (userA) downloads userB's file → 404 (was 200 pre-#495)", async () => {
-    const res = await downloadAs(userAToken, userBFileId);
+  test("🔴 cross-network non-owner (userC) downloads userB's file → 404 (was 200 pre-#495)", async () => {
+    // Precondition — userC is in NEITHER of userB's networks, so the 404
+    // is cross-network denial. This row used to use userA, but #503 made
+    // userA a legitimate same-network reader; keeping userA here would
+    // have turned #495's guarantee into a test that asserts nothing.
+    const rows = db.all<{ network_id: string }>(
+      "SELECT network_id FROM network_members WHERE user_id = ?1 AND network_id = ?2",
+      userCUserId, userBNetworkId,
+    );
+    expect(rows.length).toBe(0);
+    const res = await downloadAs(userCToken, userBFileId);
     expect(res.status).toBe(404);
     const body: any = await res.json();
     expect(body.error).toBe("not_found");
   });
 
-  test("🔴 same-network non-owner (userA is a member of userB's network) → 404 (STAGED carve-out; follow-up #503)", async () => {
-    // Precondition — userA really is a member of userB's default
-    // network (added in module setup). Guard the invariant so the
-    // 404 result actually represents "same-network peer denied",
-    // not "cross-network denied".
+  test("🔴 same-network non-owner (userA is a member of userB's network) → 200 (#503 lifted the #495 staged carve-out)", async () => {
+    // Precondition — userA really is a member of userB's default network
+    // (added in module setup), so the 200 represents "same-network peer
+    // allowed" rather than an owner match or an admin bypass.
     const rows = db.all<{ network_id: string }>(
       "SELECT network_id FROM network_members WHERE user_id = ?1 AND network_id = ?2",
       userAUserId, userBNetworkId,
     );
     expect(rows.length).toBe(1);
+    expect(db.get<{ role: string }>("SELECT role FROM users WHERE user_id = ?1", userAUserId)?.role)
+      .not.toBe("admin");
     const res = await downloadAs(userAToken, userBFileId);
-    expect(res.status).toBe(404);
-    const body: any = await res.json();
-    expect(body.error).toBe("not_found");
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("secret-from-B");
   });
 
   test("admin caller downloads any file → 200 (operational access preserved)", async () => {
@@ -247,8 +272,10 @@ describe.skipIf(!isProdMode)("#500 CR2 — HEAD /api/files/:file_id authorizatio
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
   });
 
-  test("🔴 cross-owner HEAD (userA HEAD userB's file) → 404 via helper (was fallback 200 pre-CR2)", async () => {
-    const res = await headAs(userAToken, userBFileId);
+  test("🔴 cross-network HEAD (userC HEAD userB's file) → 404 via helper (was fallback 200 pre-CR2)", async () => {
+    // userC, not userA — #503 makes userA a same-network reader, so the
+    // GET/HEAD parity claim needs a principal who is genuinely denied.
+    const res = await headAs(userCToken, userBFileId);
     expect(res.status).toBe(404);
     // 404 must originate from authorizeFileDownload, not the fallback
     // page. Body is application/json ({"ok":false,"error":"not_found"})
@@ -284,7 +311,9 @@ describe.skipIf(!isProdMode)("#500 CR2 — HEAD /api/files/:file_id authorizatio
 // in the authorizeFileDownload comment and this test enforces it.
 describe.skipIf(!isProdMode)("#500 CR2 — upload persists truthy owner_id (D1)", () => {
   test("D1: userA authenticated upload → index entry owner_id === userA.userId (never null)", async () => {
-    const fileId = await uploadAs(userAToken, new TextEncoder().encode("owner-persistence-check"), "d1.bin");
+    // userA belongs to two networks (own default + userB's), so #503
+    // requires the target network to be named explicitly.
+    const fileId = await uploadAs(userAToken, new TextEncoder().encode("owner-persistence-check"), "d1.bin", userANetworkId);
     const { readFileSync } = await import("fs");
     const entryPath = join(UPLOADS_DIR, ".index", `${fileId}.json`);
     expect(existsSync(entryPath)).toBe(true);
@@ -314,13 +343,18 @@ describe.skipIf(!isProdMode)("#495 — null-owner policy in production (DEV_OPEN
     // reproduces the shape a DEV_OPEN or legacy master upload would
     // create, without needing to spin up a second server in a
     // different mode.
-    nullOwnerFileId = await uploadAs(userAToken, new TextEncoder().encode("legacy-blob"), "legacy.txt");
+    nullOwnerFileId = await uploadAs(userAToken, new TextEncoder().encode("legacy-blob"), "legacy.txt", userANetworkId);
     const { readFileSync: rfs, writeFileSync: wfs } = await import("fs");
     const entryFile = join(UPLOADS_DIR, ".index", `${nullOwnerFileId}.json`);
     if (!existsSync(entryFile)) throw new Error(`index entry not found: ${entryFile}`);
     const entry = JSON.parse(rfs(entryFile, "utf-8"));
     entry.owner = null;
     entry.owner_id = null;
+    // #503 — a true legacy entry predates network attribution entirely.
+    // Deleting the key (rather than nulling it) matches what the writer
+    // emits when there is no attribution, so this fixture exercises the
+    // legacy compatibility branch instead of the network branch.
+    delete entry.network_id;
     wfs(entryFile, JSON.stringify(entry, null, 2));
   });
 

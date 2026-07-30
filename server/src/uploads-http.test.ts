@@ -71,13 +71,22 @@ function authHeaders(): Record<string, string> {
   return { "Authorization": `Bearer ${userToken}` };
 }
 
+// #503 — the bootstrap user is the first account in this suite's fresh
+// DB, so it is a system admin, and admins must name the target network
+// explicitly (attribution is never guessed). uploadNetworkId() keeps
+// that detail in one place.
+function uploadNetworkId(): string {
+  if (!userNetworkId) throw new Error("test bootstrap: userNetworkId missing");
+  return `?network_id=${encodeURIComponent(userNetworkId)}`;
+}
+
 async function uploadFile(content: Uint8Array, filename: string, mime: string, opts: { skipAuth?: boolean; overrideContentLength?: string | null } = {}): Promise<Response> {
   const form = new FormData();
   form.append("file", new Blob([content], { type: mime }), filename);
   const headers: Record<string, string> = opts.skipAuth ? {} : { ...authHeaders() };
   // Note: fetch sets Content-Length automatically; only override when
   // testing the missing-header path.
-  const res = await fetch(`${BASE}/api/upload`, { method: "POST", body: form, headers });
+  const res = await fetch(`${BASE}/api/upload${uploadNetworkId()}`, { method: "POST", body: form, headers });
   return res;
 }
 
@@ -137,7 +146,7 @@ describe("POST /api/upload — 6-item security checklist (HTTP integration)", ()
         controller.close();
       },
     });
-    const res = await fetch(`${BASE}/api/upload`, {
+    const res = await fetch(`${BASE}/api/upload${uploadNetworkId()}`, {
       method: "POST",
       body: stream,
       headers: { ...authHeaders(), "Content-Type": "multipart/form-data; boundary=xxx", "Transfer-Encoding": "chunked" },
@@ -153,7 +162,7 @@ describe("POST /api/upload — 6-item security checklist (HTTP integration)", ()
     // this body" which is the security property we care about; the
     // exact code depends on whether Bun's multipart parser bails before
     // or after our Content-Type pre-check.
-    const res = await fetch(`${BASE}/api/upload`, {
+    const res = await fetch(`${BASE}/api/upload${uploadNetworkId()}`, {
       method: "POST",
       body: JSON.stringify({ nope: 1 }),
       headers: { ...authHeaders(), "Content-Type": "application/json" },

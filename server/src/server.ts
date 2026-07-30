@@ -217,7 +217,55 @@ function resolveRequestAuth(req: Request): { userId: string; networkId: string |
   return { userId: resolved.user.user_id, networkId: resolved.networkId, username: resolved.user.username, tokenName: resolved.tokenName, tokenId: resolved.tokenId };
 }
 
-// #495 — shared authorization gate for /api/files/:file_id downloads.
+// #503 — the credential kinds that authorization decisions branch on.
+// Resolved once per request at the handler, so the authz helpers stay
+// pure functions of (principal, entry) and every credential kind is a
+// directly constructible test input instead of a hand-assembled Request.
+export type Principal =
+  | { kind: "anonymous" }
+  | { kind: "dev-open-anon" }
+  | { kind: "legacy-master" }
+  | { kind: "utok"; userId: string; username: string; isAdmin: false }
+  | { kind: "ntok"; userId: string; boundNetworkId: string }
+  | { kind: "admin-utok"; userId: string; username: string };
+
+export function resolvePrincipal(req: Request): Principal {
+  const authCtx = resolveRequestAuth(req);
+  if (!authCtx) {
+    if (isLegacyAuthToken(req)) return { kind: "legacy-master" };
+    if (DEV_OPEN) return { kind: "dev-open-anon" };
+    return { kind: "anonymous" };
+  }
+  const token = requestToken(req);
+  const resolved = token ? resolveToken(token) : null;
+  const isAdmin = !!resolved && resolved.user.role === "admin";
+  // Bound network wins over admin classification: a ntok_ issued BY an
+  // admin is still a ntok_, and its bound scope defines its identity.
+  // Inverting this order would silently re-grant every production agent
+  // node cross-network read, since production node tokens resolve to an
+  // admin user (see the 生产影响 note on authorizeFileDownload).
+  if (authCtx.networkId) return { kind: "ntok", userId: authCtx.userId, boundNetworkId: authCtx.networkId };
+  if (isAdmin) return { kind: "admin-utok", userId: authCtx.userId, username: authCtx.username };
+  return { kind: "utok", userId: authCtx.userId, username: authCtx.username, isAdmin: false };
+}
+
+// #503 — coerce the on-disk (untrusted, hand-editable) index entry into
+// the shape the authz helper reasons about. Every `typeof` narrowing for
+// these two fields lives here and nowhere else, so the authz rules can be
+// read as rules rather than as string-checks.
+export function normalizeEntry(
+  entry: { owner_id?: unknown; network_id?: unknown },
+): { ownerId: string | null; networkId: string | null } {
+  const ownerId = typeof entry.owner_id === "string" && entry.owner_id.length > 0
+    ? entry.owner_id
+    : null;
+  const networkId = typeof entry.network_id === "string" && entry.network_id.length > 0
+    ? entry.network_id
+    : null;
+  return { ownerId, networkId };
+}
+
+// #495/#503 — shared authorization gate for /api/files/:file_id downloads.
 // Called from the GET handler and any future HEAD/Range/dashboard-proxy
 // entry so the allow-list can't drift between methods (通信龙 clause 2:
 // "授权若只在 GET 分支实现, HEAD 或 Range 走别路径 = 等于没修").
@@ -226,33 +274,48 @@ function resolveRequestAuth(req: Request): { userId: string; networkId: string |
 // caller emits 404 on false — never 403; 403 would leak that the
 // file_id exists and enables enumeration.
 //
-// Allow-list (staged P0 hotfix; same-network non-owner is NOT included
-// here — see follow-up #503):
+// Allow-list — network scope enforced by #503:
 //   - Legacy master AUTH_TOKEN (RFC-001 read-only) → allow.
 //   - admin utok_ → allow (mirrors requireAdminAuth).
-//   - Owner match: caller's resolved user_id === entry.owner_id.
-//   - null owner_id + DEV_OPEN → allow. DEV_OPEN uploads carry
-//     owner_id=null (authCtx=null in DEV_OPEN mode); rejecting them
-//     would break the intended local-dev anonymous flow. Encoded as
-//     an explicit env-gated branch so if DEV_OPEN semantics change,
-//     the code fails loudly instead of trusting a stale note.
+//   - entry.network_id present → caller must belong to THAT network:
+//     ntok_ must be bound to it; utok_ must hold any role in it
+//     (viewer included — viewer is read-only, and a viewer who can see
+//     a task but not open its attachment is a broken product).
+//   - entry.network_id absent (legacy / unattributed) → the pre-#503
+//     rules stand unchanged: owner match, or null owner_id + DEV_OPEN.
 //   - Everything else → deny (404). New uploads in production always
 //     carry a truthy owner_id (requireAuth blocks the null-owner-
 //     producing path when DEV_OPEN=off and no legacy master token is
 //     configured), so denying null-owner in production closes the
 //     enumeration vector for legacy blobs without breaking new uploads.
-export function authorizeFileDownload(req: Request, entry: { owner_id?: unknown }): boolean {
-  const token = requestToken(req);
-  const authCtx = resolveRequestAuth(req);
-  const resolved = token ? resolveToken(token) : null;
-  const isLegacyMasterCaller = !authCtx && isLegacyAuthToken(req);
-  const isAdminCaller = !!resolved && resolved.user.role === "admin";
-  const ownerId = typeof entry.owner_id === "string" && entry.owner_id.length > 0
-    ? entry.owner_id
-    : null;
-  const isOwnerCaller = !!authCtx && !!ownerId && authCtx.userId === ownerId;
-  if (isLegacyMasterCaller || isAdminCaller || isOwnerCaller) return true;
-  if (ownerId === null && DEV_OPEN) return true;
+//
+// 生产影响: 新的 ntok 归属文件走 network gate, admin 签发的 ntok 也走 gate
+// (kind='ntok' 分类优先绑定). 98 历史文件无 network_id 走老文件兼容分支
+// (owner/admin 可读, 存量行为不变).
+//
+// 行为变更: admin 的节点令牌 (ntok_) 失去它今天拥有的跨网络读权. 生产今天
+// 所有文件在同一 network → 无实际影响, 但语义变更须明写, 不能悄悄发生.
+export function authorizeFileDownload(
+  principal: Principal,
+  entry: { ownerId: string | null; networkId: string | null },
+): boolean {
+  if (principal.kind === "legacy-master") return true;
+  if (principal.kind === "admin-utok") return true;
+
+  if (entry.networkId !== null) {
+    if (principal.kind === "anonymous" || principal.kind === "dev-open-anon") return false;
+    if (principal.kind === "ntok") return principal.boundNetworkId === entry.networkId;
+    return !!getUserNetworkRole(principal.userId, entry.networkId);
+  }
+
+  if (principal.kind === "ntok" || principal.kind === "utok") {
+    if (entry.ownerId !== null && principal.userId === entry.ownerId) return true;
+  }
+  // Kept env-gated rather than narrowed to kind==='dev-open-anon': the
+  // pre-#503 rule allowed ANY caller to read a null-owner entry while
+  // DEV_OPEN is on, and #503 is scoped to adding network scope, not to
+  // tightening the local-dev carve-out.
+  if (entry.ownerId === null && DEV_OPEN) return true;
   return false;
 }
 
@@ -1576,8 +1639,22 @@ return Bun.serve({
     // X-Content-Type-Options: nosniff so uploaded files can never be
     // executed or served as HTML.
     if (url.pathname === "/api/upload" && req.method === "POST") {
+      // #503 Finding 3 = Option A (lead 40be9845): every 4xx returned
+      // BEFORE `req.formData()` drains the request body MUST include
+      // `Connection: close`. Otherwise the client's still-inbound bytes
+      // land on a keepalive connection the server already answered on,
+      // poisoning the next pooled request. Bug is pre-existing (411/
+      // 413/415/429/401 all have this shape) — the #503 authz block
+      // just made it visible under aggregate `bun test` with a 12MiB
+      // upload immediately followed by another request. Per-file green
+      // hides this class of bug.
+      const earlyReject = (res: Response): Response => {
+        const wrapped = withCors(req, res);
+        wrapped.headers.set("Connection", "close");
+        return wrapped;
+      };
       const authErr = requireAuth(req);
-      if (authErr) return withCors(req, authErr);
+      if (authErr) return earlyReject(authErr);
 
       // Rate-limit key prefers the token id (so 60/h is per-token, not
       // per-IP); falls back to IP for legacy or anonymous-but-dev-open.
@@ -1591,7 +1668,7 @@ return Bun.serve({
           "X-RateLimit-Reset": String(Math.floor(rate.resetAt / 1000)),
         };
         if (rate.retryAfterMs) headers["Retry-After"] = String(Math.ceil(rate.retryAfterMs / 1000));
-        return withCors(req, new Response(
+        return earlyReject(new Response(
           JSON.stringify({ ok: false, error: "rate_limited", message: "Upload rate limit exceeded (60/hour). Try again later.", retry_after_ms: rate.retryAfterMs }),
           { status: 429, headers: { ...headers, "Content-Type": "application/json; charset=utf-8" } },   // #426 — legacy clients default to ISO-8859-1 without charset
         ));
@@ -1605,25 +1682,132 @@ return Bun.serve({
       //             or lied Content-Length header)
       const contentLength = req.headers.get("Content-Length");
       if (!contentLength) {
-        return withCors(req, Response.json(
+        return earlyReject(Response.json(
           { ok: false, error: "length_required", message: "Content-Length header is required for /api/upload" },
           { status: 411 },
         ));
       }
       const declaredBytes = Number(contentLength);
       if (!Number.isFinite(declaredBytes) || declaredBytes < 0) {
-        return withCors(req, Response.json({ ok: false, error: "bad_content_length" }, { status: 400 }));
+        return earlyReject(Response.json({ ok: false, error: "bad_content_length" }, { status: 400 }));
       }
       if (declaredBytes > MAX_REQUEST_CONTENT_LENGTH) {
-        return withCors(req, Response.json(
+        return earlyReject(Response.json(
           { ok: false, error: "payload_too_large", message: `Upload exceeds the ${MAX_UPLOAD_BYTES} byte limit`, limit_bytes: MAX_UPLOAD_BYTES },
           { status: 413 },
         ));
       }
 
+      // #503 — decide which network this upload is attributed to, then
+      // check the caller may write there. Attribution and authorization
+      // are two questions; neither substitutes for the other. Placed
+      // after the in-memory rate limiter (above) and before the body is
+      // read, so an unauthorized caller never gets a DB query per byte
+      // uploaded and never gets their multipart envelope parsed.
+      const principal = resolvePrincipal(req);
+      const requestedNetId = url.searchParams.get("network_id");
+      let uploadNetId: string | null = null;
+
+      switch (principal.kind) {
+        case "anonymous":
+          // Unreachable: requireAuth above already 401s. Kept so the
+          // switch stays exhaustive and a future auth change fails loud.
+          return earlyReject(Response.json({ ok: false, error: "auth_required" }, { status: 401 }));
+        case "dev-open-anon":
+          // Local dev only. Deliberately does NOT claim a real network,
+          // even if one was requested — an unauthenticated caller must
+          // not be able to file blobs into a tenant's network.
+          uploadNetId = null;
+          break;
+        case "legacy-master":
+          // Unreachable today: requireAuth 401s master tokens on every
+          // non-GET /api/ request (RFC-001 made them read-only). Kept
+          // fail-closed so relaxing that rule cannot silently start
+          // producing unattributed blobs.
+          if (!requestedNetId) {
+            return earlyReject(Response.json({
+              ok: false, error: "network_id_required",
+              message: "legacy master uploads must specify a network_id query param",
+            }, { status: 400 }));
+          }
+          uploadNetId = requestedNetId;
+          break;
+        case "ntok":
+          if (requestedNetId && requestedNetId !== principal.boundNetworkId) {
+            return earlyReject(Response.json({
+              ok: false, error: "network_id_conflict",
+              message: "network_id query param conflicts with the token-bound network",
+            }, { status: 400 }));
+          }
+          uploadNetId = principal.boundNetworkId;
+          break;
+        case "admin-utok": {
+          // #503 Finding 2 = Option F (lead 40be9845): admin follows the same
+          // "auto-derive when unambiguous / require param when ambiguous" rule
+          // as utok_. Rule 4's REASON (no unowned files) is preserved — the
+          // derived network is a real membership. Strict on genuine ambiguity:
+          // 0 or ≥2 memberships → 400. Preserves prod upload contract (in
+          // prod admin is in exactly 1 network; auto-derive succeeds).
+          if (requestedNetId) {
+            // Admin bypasses membership; network existence validated below.
+            uploadNetId = requestedNetId;
+            break;
+          }
+          const adminNetworks = getUserNetworkIds(principal.userId);
+          if (adminNetworks.length === 1) {
+            uploadNetId = adminNetworks[0];
+          } else {
+            return earlyReject(Response.json({
+              ok: false, error: "network_id_required",
+              message: "admin has 0 or ≥2 network memberships; network_id query param required",
+            }, { status: 400 }));
+          }
+          break;
+        }
+        case "utok": {
+          if (requestedNetId) {
+            // A non-member asking for someone else's network never gets
+            // here: the REST scope guard (`restScope.denied`) already
+            // 403'd, with the same body whether the network exists or
+            // not. Re-checking membership here would be a second, drifting
+            // copy of a decision this codebase makes in one place.
+            uploadNetId = requestedNetId;
+            break;
+          }
+          uploadNetId = singleNetworkId(resolveRestNetworkScope(url.searchParams.get("network_id"), authCtx, false));
+          if (!uploadNetId) {
+            return earlyReject(Response.json({
+              ok: false, error: "network_id_required",
+              message: "network_id query param required for a multi-network user token; 'first network' is not assumed",
+            }, { status: 400 }));
+          }
+          break;
+        }
+      }
+
+      if (uploadNetId !== null) {
+        const networkRow = db.get<any>("SELECT * FROM networks WHERE network_id = ?1", uploadNetId);
+        if (!networkRow) {
+          if (principal.kind === "admin-utok" || principal.kind === "legacy-master") {
+            return earlyReject(Response.json({
+              ok: false, error: "unknown_network",
+              message: "network_id does not exist",
+            }, { status: 400 }));
+          }
+          // Byte-identical to the non-member 404 above: distinguishing
+          // the two would hand an unprivileged caller a network-existence
+          // oracle.
+          return earlyReject(Response.json({ ok: false, error: "not_found" }, { status: 404 }));
+        }
+      }
+
+      if (!canRestWriteNetwork(authCtx, uploadNetId, principal.kind === "admin-utok")) {
+        return earlyReject(Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));
+      }
+
       const contentType = req.headers.get("Content-Type") ?? "";
       if (!/^multipart\/form-data/i.test(contentType)) {
-        return withCors(req, Response.json(
+        return earlyReject(Response.json(
           { ok: false, error: "unsupported_media_type", message: "Use multipart/form-data with a 'file' field" },
           { status: 415 },
         ));
@@ -1695,6 +1879,8 @@ return Bun.serve({
             size: file.size,
             owner: authCtx?.username ?? null,
             owner_id: authCtx?.userId ?? null,
+            // Key omitted (not null) when unattributed — see UploadIndexEntry.
+            ...(uploadNetId ? { network_id: uploadNetId } : {}),
             uploaded_at: new Date().toISOString(),
           }, null, 2));
         }
@@ -1765,7 +1951,7 @@ return Bun.serve({
       // "no such file". Both branches return the same 404 shape
       // for BOTH GET and HEAD (HEAD honours body-omission but the
       // status code and headers are the authoritative signal).
-      if (!authorizeFileDownload(req, entry)) {
+      if (!authorizeFileDownload(resolvePrincipal(req), normalizeEntry(entry))) {
         return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
       }
 

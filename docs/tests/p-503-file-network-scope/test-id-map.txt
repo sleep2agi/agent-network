@@ -1,0 +1,134 @@
+# #503 test-ID -> precondition map
+# For every row that depends on a probe's identity or on a fixture
+# fact, the exact source line whose truth the row's verdict rests on.
+# Counting assertions is not evidence; this is the mapping.
+# File: server/src/file-network-scope.test.ts
+
+probes are registered after the auto-admin slot is taken, and are not admin
+    defined      :: server/src/file-network-scope.test.ts:216
+    precondition :: server/src/file-network-scope.test.ts:217 :: expect(roleOf(nonAdminUserA.userId)).not.toBe("admin");
+    precondition :: server/src/file-network-scope.test.ts:218 :: expect(roleOf(nonAdminUserB.userId)).not.toBe("admin");
+    precondition :: server/src/file-network-scope.test.ts:219 :: expect(roleOf(outsiderUser.userId)).not.toBe("admin");
+    precondition :: server/src/file-network-scope.test.ts:220 :: expect(roleOf(viewerOnlyUser.userId)).not.toBe("admin");
+    precondition :: server/src/file-network-scope.test.ts:221 :: expect(roleOf(mixedUser.userId)).not.toBe("admin");
+    precondition :: server/src/file-network-scope.test.ts:224 :: expect(roleOf(adminUser.userId)).toBe("admin");
+
+network membership is shaped as the matrix assumes
+    defined      :: server/src/file-network-scope.test.ts:227
+    precondition :: server/src/file-network-scope.test.ts:233 :: expect(memberships(nonAdminUserA.userId).map((r) => r.network_id)).toEqual([N1]);
+    precondition :: server/src/file-network-scope.test.ts:235 :: expect(memberships(nonAdminUserB.userId).map((r) => r.network_id).sort()).toEqual([N1, N2].sort());
+    precondition :: server/src/file-network-scope.test.ts:237 :: expect(memberships(outsiderUser.userId).some((r) => r.network_id === N1)).toBe(false);
+    precondition :: server/src/file-network-scope.test.ts:239 :: expect(memberships(viewerOnlyUser.userId)).toEqual([{ network_id: N1, role: "viewer" }]);
+    precondition :: server/src/file-network-scope.test.ts:241 :: expect(db.get<any>("SELECT * FROM networks WHERE network_id = ?1", N_FAKE)).toBeFalsy();
+    precondition :: server/src/file-network-scope.test.ts:244 :: expect(db.get<any>("SELECT * FROM networks WHERE network_id = ?1", N3)).toBeTruthy();
+    precondition :: server/src/file-network-scope.test.ts:245 :: expect(memberships(nonAdminUserB.userId).some((r) => r.network_id === N3)).toBe(false);
+
+U4: ntok_(N1), no param → 200 and entry.network_id === N1 (bound network is the attribution)
+    defined      :: server/src/file-network-scope.test.ts:274
+    precondition :: server/src/file-network-scope.test.ts:276 :: expect(readEntry(fileId).network_id).toBe(N1);
+
+U5: ntok_(N1), param=N2 → 400 network_id_conflict (never silently overridden)
+    defined      :: server/src/file-network-scope.test.ts:279
+    precondition :: server/src/file-network-scope.test.ts:284 :: expect(db.get<any>("SELECT * FROM networks WHERE network_id = ?1", N2)).toBeTruthy();
+
+U6: utok_ single-network non-admin, no param → 200 and entry.network_id === N1
+    defined      :: server/src/file-network-scope.test.ts:287
+    precondition :: server/src/file-network-scope.test.ts:288 :: expect(roleOf(nonAdminUserA.userId)).not.toBe("admin");
+    precondition :: server/src/file-network-scope.test.ts:290 :: expect(readEntry(fileId).network_id).toBe(N1);
+
+U7: utok_ multi-network non-admin, no param → 400 network_id_required ('first network' is never assumed)
+    defined      :: server/src/file-network-scope.test.ts:293
+    precondition :: server/src/file-network-scope.test.ts:294 :: expect(roleOf(nonAdminUserB.userId)).not.toBe("admin");
+
+U8: utok_ multi-network non-admin, param=N1 (a network they belong to) → 200 and entry.network_id === N1
+    defined      :: server/src/file-network-scope.test.ts:300
+    precondition :: server/src/file-network-scope.test.ts:301 :: expect(roleOf(nonAdminUserB.userId)).not.toBe("admin");
+    precondition :: server/src/file-network-scope.test.ts:303 :: expect(readEntry(fileId).network_id).toBe(N1);
+
+U9: utok_ non-admin, param=N3 (exists, not a member) → 403 at the shared REST scope guard
+    defined      :: server/src/file-network-scope.test.ts:312
+    precondition :: server/src/file-network-scope.test.ts:313 :: expect(roleOf(nonAdminUserB.userId)).not.toBe("admin");
+
+U10a: utok_ non-admin, param=N_FAKE (does not exist) → 403, indistinguishable from U9
+    defined      :: server/src/file-network-scope.test.ts:319
+    precondition :: server/src/file-network-scope.test.ts:320 :: expect(roleOf(nonAdminUserB.userId)).not.toBe("admin");
+
+U10b: admin utok_, param=N_FAKE → 400 unknown_network (admin already knows the network list; no oracle)
+    defined      :: server/src/file-network-scope.test.ts:326
+    precondition :: server/src/file-network-scope.test.ts:327 :: expect(roleOf(adminUser.userId)).toBe("admin");
+
+U12: admin utok_, param=N1 → 200 and entry.network_id === N1
+    defined      :: server/src/file-network-scope.test.ts:339
+    precondition :: server/src/file-network-scope.test.ts:341 :: expect(readEntry(fileId).network_id).toBe(N1);
+
+U13: utok_ viewer, single network, no param → 403 permission_denied (read-only role cannot write)
+    defined      :: server/src/file-network-scope.test.ts:344
+    precondition :: server/src/file-network-scope.test.ts:345 :: expect(roleOf(viewerOnlyUser.userId)).not.toBe("admin");
+
+U14: utok_ member of N1 but viewer in N2, param=N2 → 403 permission_denied
+    defined      :: server/src/file-network-scope.test.ts:351
+    precondition :: server/src/file-network-scope.test.ts:352 :: expect(roleOf(mixedUser.userId)).not.toBe("admin");
+    precondition :: server/src/file-network-scope.test.ts:359 :: expect(readEntry(okFileId).network_id).toBe(N1);
+    precondition :: server/src/file-network-scope.test.ts:369 :: expect(readEntry(fileInN1).network_id).toBe(N1);
+    precondition :: server/src/file-network-scope.test.ts:370 :: expect(readEntry(fileInN2).network_id).toBe(N2);
+
+D3: utok_ non-admin who is a member of N1 reads a file in N1 → 200 (the carve-out #495 deferred)
+    defined      :: server/src/file-network-scope.test.ts:404
+    precondition :: server/src/file-network-scope.test.ts:405 :: expect(roleOf(nonAdminUserB.userId)).not.toBe("admin");
+    precondition :: server/src/file-network-scope.test.ts:408 :: expect(readEntry(fileInN1).owner_id).toBe(nonAdminUserA.userId);
+    precondition :: server/src/file-network-scope.test.ts:409 :: expect(readEntry(fileInN1).owner_id).not.toBe(nonAdminUserB.userId);
+
+🔴 D4: utok_ non-admin who is not a member of N1 reads a file in N1 → 404
+    defined      :: server/src/file-network-scope.test.ts:415
+    precondition :: server/src/file-network-scope.test.ts:416 :: expect(roleOf(outsiderUser.userId)).not.toBe("admin");
+
+D5: utok_ non-admin with role viewer in N1 reads a file in N1 → 200 (viewer is read-only, not read-never)
+    defined      :: server/src/file-network-scope.test.ts:422
+    precondition :: server/src/file-network-scope.test.ts:423 :: expect(roleOf(viewerOnlyUser.userId)).not.toBe("admin");
+
+D6: admin utok_ reads a file in a network → 200 (operational access preserved)
+    defined      :: server/src/file-network-scope.test.ts:429
+    precondition :: server/src/file-network-scope.test.ts:430 :: expect(roleOf(adminUser.userId)).toBe("admin");
+
+D8: utok_ non-admin owner reads their own legacy (no network_id) file → 200
+    defined      :: server/src/file-network-scope.test.ts:442
+    precondition :: server/src/file-network-scope.test.ts:443 :: expect(roleOf(nonAdminUserA.userId)).not.toBe("admin");
+
+🔴 D9: utok_ non-admin non-owner reads someone else's legacy file → 404 (owner match did not widen)
+    defined      :: server/src/file-network-scope.test.ts:449
+    precondition :: server/src/file-network-scope.test.ts:450 :: expect(roleOf(nonAdminUserB.userId)).not.toBe("admin");
+    precondition :: server/src/file-network-scope.test.ts:454 :: expect(db.all("SELECT 1 FROM network_members WHERE user_id = ?1 AND network_id = ?2",
+
+D12: utok_ non-admin reads a null-owner legacy file with DEV_OPEN off → 404 fail-closed
+    defined      :: server/src/file-network-scope.test.ts:471
+    precondition :: server/src/file-network-scope.test.ts:472 :: expect(roleOf(nonAdminUserA.userId)).not.toBe("admin");
+    precondition :: server/src/file-network-scope.test.ts:473 :: expect(process.env.COMMHUB_DEV_OPEN).toBeUndefined();
+
+🔴 D15: an ntok_ ISSUED BY AN ADMIN, bound to N1, reads a file in N2 → 404
+    defined      :: server/src/file-network-scope.test.ts:489
+    precondition :: server/src/file-network-scope.test.ts:495 :: expect(roleOf(adminUser.userId)).toBe("admin");
+    precondition :: server/src/file-network-scope.test.ts:499 :: expect(tokenRow?.user_id).toBe(adminUser.userId);
+    precondition :: server/src/file-network-scope.test.ts:500 :: expect(tokenRow?.network_id).toBe(N1);
+
+E3: cross-network deny via utok_ (D4) is byte-identical to unknown file_id
+    defined      :: server/src/file-network-scope.test.ts:535
+    precondition :: server/src/file-network-scope.test.ts:536 :: expect(roleOf(outsiderUser.userId)).not.toBe("admin");
+
+E7: upload to a network you are not a member of → 403 with the shared scope-guard body
+    defined      :: server/src/file-network-scope.test.ts:573
+    precondition :: server/src/file-network-scope.test.ts:574 :: expect(roleOf(nonAdminUserB.userId)).not.toBe("admin");
+
+E8: for a non-admin, 'network exists but is not yours' and 'network does not exist' are byte-identical
+    defined      :: server/src/file-network-scope.test.ts:580
+    precondition :: server/src/file-network-scope.test.ts:584 :: expect(db.get<any>("SELECT * FROM networks WHERE network_id = ?1", N3)).toBeTruthy();
+    precondition :: server/src/file-network-scope.test.ts:585 :: expect(db.get<any>("SELECT * FROM networks WHERE network_id = ?1", N_FAKE)).toBeFalsy();
+    precondition :: server/src/file-network-scope.test.ts:586 :: expect(roleOf(nonAdminUserB.userId)).not.toBe("admin");
+
+E9: admin uploading to a nonexistent network gets the distinguishable 400 (no oracle — admin sees the list anyway)
+    defined      :: server/src/file-network-scope.test.ts:593
+    precondition :: server/src/file-network-scope.test.ts:594 :: expect(roleOf(adminUser.userId)).toBe("admin");
+
+an attributed file ignores owner match — network membership is the rule
+    defined      :: server/src/file-network-scope.test.ts:638
+    precondition :: server/src/file-network-scope.test.ts:642 :: expect(inNetwork.ownerId).toBe("u_owner");
+
