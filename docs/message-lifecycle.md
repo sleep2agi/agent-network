@@ -79,7 +79,11 @@ POST /api/message → type='message'（新增或复用现有）
 
 ### 文件与附件怎么传（#221 / #222，已发布且生产实测）
 
-CommHub 不是纯文本通道。文件上传、认证下载、task 附件元数据已经在 hub 侧落地并发布；以下路径均为已验证代码路径，生产上实测 44107 字节 pptx 上传后再下载，`cmp` 逐字节相同。
+CommHub 不是纯文本通道。文件上传、认证下载、task 附件元数据已经在 hub 侧落地并发布；以下路径均为已验证代码路径，生产上已实测 pptx / xlsx / pdf 上传后再下载，`cmp` 逐字节相同。Dashboard `0.6.3-preview.40` 已经能从界面发文件、收文件、内联展示图片/视频。
+
+::: warning 当前发送附件只有一条路
+附件必须随 `send_task` / REST `POST /api/task` 的 `attachments` 发送。**不要用 reply 带附件**：当前 reply 路径会返回 `ok:true`，但附件会被静默丢弃，发送方和接收方都看不到错误。这个缺陷已立案 #507，修复上线前文档按“不支持 reply 附件”处理。
+:::
 
 **1. 上传文件**
 
@@ -152,9 +156,12 @@ curl -fL "https://<hub-domain>/api/files/<file_id>" \
 cmp deck.pptx deck.downloaded.pptx
 ```
 
-裸浏览器直接点 `/api/files/<file_id>` 会因为没有 `Authorization: Bearer ...` 返回 401；需要走带认证的客户端、CLI、后端代理或后续前端封装。下载响应已验证带 `Content-Disposition: attachment` 和 `X-Content-Type-Options: nosniff`，避免浏览器把上传内容当页面执行。
+裸浏览器直接点 `/api/files/<file_id>` 会因为没有 `Authorization: Bearer ...` 返回 401。Dashboard 下载不是浏览器直连 hub：浏览器只持有自己的 session cookie，Dashboard 服务端代理在后端补 Bearer 后转发文件。下载响应已验证带 `Content-Disposition: attachment` 和 `X-Content-Type-Options: nosniff`，避免浏览器把上传内容当页面执行。
 
-**当前限制**：hub 已保存附件元数据并支持下载，但当前前端还不渲染 task 附件；#492 跟进前端展示和一键下载。
+**当前限制 / 安全边界**：
+- 昨天及更早上传的文件目前可能取不回：下载路径按“今天”算目录，#509 修复仍在两门里。不要把文件功能写成“完全可用”。
+- PPT / Excel / PDF 当前只下载，不在网页里预览。这是有意设计：网页预览等于把上传内容按网页渲染，容易引入同源 XSS；接第三方在线预览又等于把文件传给外部服务。两条都不选。
+- 附件卡片目前只在聊天面板和消息页显示，任务详情页还没有。
 
 ## agent-node 改动
 

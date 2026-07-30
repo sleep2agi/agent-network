@@ -39,6 +39,22 @@ Dashboard 是 Agent Network 的 Web 管理界面，提供实时监控和任务�
 :::
 :::
 
+::: info 2026-07-30 生产预览：dashboard `0.6.3-preview.40`
+以下能力已在生产验证：
+
+- **发文件**：Chat 面板界面上传，Dashboard 服务端代理补 Bearer 后转发到 hub；单文件上限 12MB，超限有明确提示，hub 侧 60 次 / 小时限流。
+- **收文件**：聊天面板和消息页的附件卡片可点击下载。
+- **图片 / 视频内联展示**：图片直接展示，视频可在页面内播放。
+- **节点属性编辑**：支持编辑显示名 / 团队 / 标签。
+
+安全边界也要按实际写清楚：
+
+- 下载不是浏览器直连 hub。浏览器只持有 Dashboard session cookie；Dashboard 后端代理带 Bearer 访问 `GET /api/files/<file_id>`，再把文件转给浏览器。裸链直接打开会 401。
+- PPT / Excel / PDF 只下载，不在网页中预览。这是有意选择：同源网页预览有 XSS 风险；第三方在线预览会把文件传给外部服务。
+- 附件目前只在聊天面板和消息页显示，任务详情页还没有。
+- 昨天及更早上传的文件当前可能取不回，#509 修复仍在两门里。
+:::
+
 ## 页面一览
 
 当前主导航是 **Nodes / Overview / Schedules / SkillHub / Tasks / Servers / Providers / Admin / Settings**（Admin 仅系统级管理员可见）。`Messages` 等低频页面仍可通过直接 URL 或命令面板访问。**ChatPanel 是从 Overview 的在线节点卡片或 Nodes 节点视图打开的内嵌面板，不存在单独的 Chat 导航页。**
@@ -131,6 +147,8 @@ Event Log:
 | Last Seen | 最后心跳时间 |
 | Task | 当前正在执行的任务 |
 
+`0.6.3-preview.40` 起，节点详情里已支持编辑显示名、团队和标签。该能力只覆盖已上线 Dashboard 路径；CLI / REST 的完整字段管理以对应 API 文档和 changelog 为准。
+
 **状态指示灯**：
 
 | 颜色 | 状态 | 含义 |
@@ -163,6 +181,8 @@ Event Log:
 
 消息流来自 CommHub REST 数据；Agent 自己通过 `/events/:alias` SSE 长连接接收任务推送。
 
+`0.6.3-preview.40` 起，消息页会展示附件卡片并支持下载；图片可内联查看，视频可内联播放。PPT / Excel / PDF 不做网页预览，只提供下载。
+
 ### ChatPanel（对话面板）
 
 ChatPanel 让你直接在 Web 端与 Agent 对话。它不是独立页面：从 **Overview** 点击在线 Agent 卡片，或在 **Nodes** 节点视图中打开：
@@ -173,6 +193,8 @@ ChatPanel 让你直接在 Web 端与 Agent 对话。它不是独立页面：从 
    - **Task** -- 正式任务，Agent 会处理并回复
    - **Message** -- 聊天消息，Agent 不会自动处理
 4. 查看 Agent 的回复
+
+文件发送走 task 附件路径：界面上传文件后，Dashboard 后端把文件上传到 hub，再用 `send_task` / `POST /api/task` 的 `attachments` 发送。当前不要用 reply 发附件，reply 附件会被静默丢弃（#507）。
 
 ```mermaid
 sequenceDiagram
