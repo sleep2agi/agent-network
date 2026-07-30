@@ -5,6 +5,7 @@ import { registerTools } from "./tools.js";
 import { db, logTaskEvent, logAudit } from "./db.js";
 import { createSSEStream, createNetworkObserverStream, pushEvent, pushNetworkObserverEvent, getSSEStats, PRINTABLE_OBSERVER_KEY_PREFIX } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
+import { addNetworkScope, canRestWriteNetwork, getUserNetworkIds, resolveRestNetworkScope, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { validateAvatarUrl } from "./avatar-validate.js";
 import { narrowTags, parseStoredTags, validateScalarAttr } from "./node-attrs-validate.js";
 import { register, login, resolveToken, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, renameNetwork, changePassword, issueUserToken, listTokens, createToken, revokeToken, getNetworkMembers, getUserNetworkRole, addNetworkMember, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
@@ -291,62 +292,6 @@ function parseSingleByteRange(rangeHeader: string | null, size: number): ByteRan
   return { ok: true, start, end, length: end - start + 1 };
 }
 
-type RestNetworkScope = {
-  networkId: string | null;
-  networkIds: string[] | null;
-  denied?: string;
-};
-
-function getUserNetworkIds(userId: string): string[] {
-  return db.all<{ network_id: string }>(
-    "SELECT network_id FROM network_members WHERE user_id = ?1",
-    userId
-  ).map((row) => row.network_id);
-}
-
-function resolveRestNetworkScope(url: URL, authCtx: { userId: string; networkId: string | null } | null, isAdmin: boolean): RestNetworkScope {
-  const requested = url.searchParams.get("network_id");
-
-  // Legacy global token or open dev mode keeps the old global behavior.
-  if (!authCtx) return { networkId: requested || null, networkIds: null };
-
-  // Network tokens are forcibly scoped to their bound network.
-  if (authCtx.networkId) return { networkId: authCtx.networkId, networkIds: null };
-
-  // System admins may intentionally inspect all networks.
-  if (isAdmin) return { networkId: requested || null, networkIds: null };
-
-  if (requested) {
-    const role = getUserNetworkRole(authCtx.userId, requested);
-    if (!role) return { networkId: null, networkIds: [], denied: "access denied to requested network" };
-    return { networkId: requested, networkIds: null };
-  }
-
-  return { networkId: null, networkIds: getUserNetworkIds(authCtx.userId) };
-}
-
-function addNetworkScope(sql: string, params: any[], scope: RestNetworkScope, column = "network_id"): string {
-  if (scope.networkId) {
-    sql += ` AND ${column} = ?${params.length + 1}`;
-    params.push(scope.networkId);
-  } else if (scope.networkIds) {
-    if (scope.networkIds.length === 0) {
-      sql += " AND 1=0";
-    } else {
-      const placeholders = scope.networkIds.map((_, i) => `?${params.length + i + 1}`).join(", ");
-      sql += ` AND ${column} IN (${placeholders})`;
-      params.push(...scope.networkIds);
-    }
-  }
-  return sql;
-}
-
-function singleNetworkId(scope: RestNetworkScope): string | null {
-  if (scope.networkId) return scope.networkId;
-  if (scope.networkIds?.length === 1) return scope.networkIds[0];
-  return null;
-}
-
 function sqliteTime(date: Date): string {
   return date.toISOString().replace("T", " ").slice(0, 19);
 }
@@ -445,13 +390,6 @@ function bucketTelemetry(rows: any[], fromMs: number, bucketMs: number) {
     }));
 }
 
-function canRestWriteNetwork(authCtx: { userId: string; networkId: string | null } | null, networkId: string | null, isAdmin: boolean): boolean {
-  if (!authCtx) return true; // legacy global token or open dev mode
-  if (isAdmin) return true;
-  if (!networkId) return false;
-  const role = getUserNetworkRole(authCtx.userId, networkId);
-  return !!role && role !== "viewer";
-}
 
 type RestDeliveryTarget =
   | { state: "online"; alias: string; session: any }
@@ -1341,7 +1279,7 @@ return Bun.serve({
     // Token-bound networkId takes precedence (ntok_ → forced), then query param
     const restAuth = resolveRequestAuth(req);
     const isAdmin = !!(restAuth?.username && db.get<any>("SELECT role FROM users WHERE username = ?1", restAuth.username)?.role === "admin");
-    const restScope = resolveRestNetworkScope(url, restAuth, isAdmin);
+    const restScope = resolveRestNetworkScope(url.searchParams.get("network_id"), restAuth, isAdmin);
     if (restScope.denied) {
       return withCors(req, Response.json({ ok: false, error: restScope.denied }, { status: 403 }));
     }

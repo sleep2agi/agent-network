@@ -1,0 +1,343 @@
+bun test v1.3.14 (0d9b296a)
+
+src/mcp-write-network-resolution.test.ts:
+[commhub] database: /tmp/517-net-scope-red.db
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+160 | // ─────────────────────────────────────────────────────────────────────
+161 | describe("utok single-network auto-resolve (no network_id argument)", () => {
+162 |   test("send_task resolves to the only membership", async () => {
+163 |     const { tools } = buildHandlers({ userId: U_SINGLE });
+164 |     const r = await call(tools["send_task"], { alias: A1, task: "x517 g1 send_task", priority: "normal" });
+165 |     expect(r.ok).toBe(true);
+                       ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (/home/vansin/anet-work/fix-517-net-scope/server/src/mcp-write-network-resolution.test.ts:165:18)
+(fail) utok single-network auto-resolve (no network_id argument) > send_task resolves to the only membership [76.90ms]
+167 |   });
+168 | 
+169 |   test("send_message resolves to the only membership", async () => {
+170 |     const { tools } = buildHandlers({ userId: U_SINGLE });
+171 |     const r = await call(tools["send_message"], { alias: A1, message: "x517 g1 send_message" });
+172 |     expect(r.ok).toBe(true);
+                       ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (/home/vansin/anet-work/fix-517-net-scope/server/src/mcp-write-network-resolution.test.ts:172:18)
+(fail) utok single-network auto-resolve (no network_id argument) > send_message resolves to the only membership [66.48ms]
+175 | 
+176 |   test("send_reply resolves to the only membership", async () => {
+177 |     const { tools } = buildHandlers({ userId: U_SINGLE });
+178 |     const t = makeTask(A1, "delivered", "x517 g1 send_reply parent");
+179 |     const r = await call(tools["send_reply"], { alias: A1, text: "x517 g1 send_reply", in_reply_to: t, status: "replied" });
+180 |     expect(r.ok).toBe(true);
+                       ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (/home/vansin/anet-work/fix-517-net-scope/server/src/mcp-write-network-resolution.test.ts:180:18)
+(fail) utok single-network auto-resolve (no network_id argument) > send_reply resolves to the only membership [71.64ms]
+183 | 
+184 |   test("ack_inbox resolves to the only membership", async () => {
+185 |     const { tools } = buildHandlers({ userId: U_SINGLE });
+186 |     const ib = makeInbox(A1, "x517 g1 ack_inbox");
+187 |     const r = await call(tools["ack_inbox"], { alias: A1, message_id: ib });
+188 |     expect(r.ok).toBe(true);
+                       ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (/home/vansin/anet-work/fix-517-net-scope/server/src/mcp-write-network-resolution.test.ts:188:18)
+(fail) utok single-network auto-resolve (no network_id argument) > ack_inbox resolves to the only membership [78.47ms]
+191 | 
+192 |   test("send_ack resolves to the only membership", async () => {
+193 |     const { tools } = buildHandlers({ userId: U_SINGLE });
+194 |     const t = makeTask(A1, "delivered", "x517 g1 send_ack");
+195 |     const r = await call(tools["send_ack"], { task_id: t });
+196 |     expect(r.ok).toBe(true);
+                       ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (/home/vansin/anet-work/fix-517-net-scope/server/src/mcp-write-network-resolution.test.ts:196:18)
+(fail) utok single-network auto-resolve (no network_id argument) > send_ack resolves to the only membership [71.62ms]
+199 | 
+200 |   test("retry_task resolves to the only membership", async () => {
+201 |     const { tools } = buildHandlers({ userId: U_SINGLE });
+202 |     const t = makeTask(A1, "failed", "x517 g1 retry_task");
+203 |     const r = await call(tools["retry_task"], { task_id: t });
+204 |     expect(r.ok).toBe(true);
+                       ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (/home/vansin/anet-work/fix-517-net-scope/server/src/mcp-write-network-resolution.test.ts:204:18)
+(fail) utok single-network auto-resolve (no network_id argument) > retry_task resolves to the only membership [66.72ms]
+207 | 
+208 |   test("cancel_task resolves to the only membership", async () => {
+209 |     const { tools } = buildHandlers({ userId: U_SINGLE });
+210 |     const t = makeTask(A1, "delivered", "x517 g1 cancel_task");
+211 |     const r = await call(tools["cancel_task"], { task_id: t });
+212 |     expect(r.ok).toBe(true);
+                       ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (/home/vansin/anet-work/fix-517-net-scope/server/src/mcp-write-network-resolution.test.ts:212:18)
+(fail) utok single-network auto-resolve (no network_id argument) > cancel_task resolves to the only membership [75.25ms]
+215 | 
+216 |   test("reassign_task resolves to the only membership", async () => {
+217 |     const { tools } = buildHandlers({ userId: U_SINGLE });
+218 |     const t = makeTask(A1, "delivered", "x517 g1 reassign_task");
+219 |     const r = await call(tools["reassign_task"], { task_id: t, new_alias: A2 });
+220 |     expect(r.ok).toBe(true);
+                       ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (/home/vansin/anet-work/fix-517-net-scope/server/src/mcp-write-network-resolution.test.ts:220:18)
+(fail) utok single-network auto-resolve (no network_id argument) > reassign_task resolves to the only membership [66.84ms]
+231 | // ─────────────────────────────────────────────────────────────────────
+232 | describe("utok multi-network", () => {
+233 |   test("send_task without network_id → exact network_id_required error", async () => {
+234 |     const { tools } = buildHandlers({ userId: U_MULTI });
+235 |     const r = await call(tools["send_task"], { alias: A1, task: "x517 g2 ambiguous", priority: "normal" });
+236 |     expect(r).toEqual({
+                    ^
+error: expect(received).toEqual(expected)
+
+@@ -1,4 +1,4 @@
+  {
+-   "error": "network_id_required",
+-   "message": "user token spans 2 networks; pass network_id explicitly (see /api/auth/me networks[].network_id)",
++   "error": "permission_denied",
++   "message": "network_id required (utok current_network is null; pass explicit network_id from /api/auth/me networks[0].network_id)",
+    "ok": false,
+
+- Expected  - 2
++ Received  + 2
+
+      at <anonymous> (/home/vansin/anet-work/fix-517-net-scope/server/src/mcp-write-network-resolution.test.ts:236:15)
+(fail) utok multi-network > send_task without network_id → exact network_id_required error [64.80ms]
+242 |   });
+243 | 
+244 |   test("send_message threads explicit network_id", async () => {
+245 |     const { tools } = buildHandlers({ userId: U_MULTI });
+246 |     const r = await call(tools["send_message"], { alias: A1, message: "x517 g2 send_message", network_id: NET_A });
+247 |     expect(r.ok).toBe(true);
+                       ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (/home/vansin/anet-work/fix-517-net-scope/server/src/mcp-write-network-resolution.test.ts:247:18)
+(fail) utok multi-network > send_message threads explicit network_id [58.95ms]
+250 | 
+251 |   test("send_reply threads explicit network_id", async () => {
+252 |     const { tools } = buildHandlers({ userId: U_MULTI });
+253 |     const t = makeTask(A1, "delivered", "x517 g2 send_reply parent");
+254 |     const r = await call(tools["send_reply"], { alias: A1, text: "x517 g2 send_reply", in_reply_to: t, status: "replied", network_id: NET_A });
+255 |     expect(r.ok).toBe(true);
+                       ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (/home/vansin/anet-work/fix-517-net-scope/server/src/mcp-write-network-resolution.test.ts:255:18)
+(fail) utok multi-network > send_reply threads explicit network_id [56.59ms]
+258 | 
+259 |   test("ack_inbox threads explicit network_id", async () => {
+260 |     const { tools } = buildHandlers({ userId: U_MULTI });
+261 |     const ib = makeInbox(A1, "x517 g2 ack_inbox");
+262 |     const r = await call(tools["ack_inbox"], { alias: A1, message_id: ib, network_id: NET_A });
+263 |     expect(r.ok).toBe(true);
+                       ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (/home/vansin/anet-work/fix-517-net-scope/server/src/mcp-write-network-resolution.test.ts:263:18)
+(fail) utok multi-network > ack_inbox threads explicit network_id [61.30ms]
+266 | 
+267 |   test("send_ack threads explicit network_id", async () => {
+268 |     const { tools } = buildHandlers({ userId: U_MULTI });
+269 |     const t = makeTask(A1, "delivered", "x517 g2 send_ack");
+270 |     const r = await call(tools["send_ack"], { task_id: t, network_id: NET_A });
+271 |     expect(r.ok).toBe(true);
+                       ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (/home/vansin/anet-work/fix-517-net-scope/server/src/mcp-write-network-resolution.test.ts:271:18)
+(fail) utok multi-network > send_ack threads explicit network_id [69.47ms]
+274 | 
+275 |   test("retry_task threads explicit network_id", async () => {
+276 |     const { tools } = buildHandlers({ userId: U_MULTI });
+277 |     const t = makeTask(A1, "failed", "x517 g2 retry_task");
+278 |     const r = await call(tools["retry_task"], { task_id: t, network_id: NET_A });
+279 |     expect(r.ok).toBe(true);
+                       ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (/home/vansin/anet-work/fix-517-net-scope/server/src/mcp-write-network-resolution.test.ts:279:18)
+(fail) utok multi-network > retry_task threads explicit network_id [105.94ms]
+282 | 
+283 |   test("cancel_task threads explicit network_id", async () => {
+284 |     const { tools } = buildHandlers({ userId: U_MULTI });
+285 |     const t = makeTask(A1, "delivered", "x517 g2 cancel_task");
+286 |     const r = await call(tools["cancel_task"], { task_id: t, network_id: NET_A });
+287 |     expect(r.ok).toBe(true);
+                       ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (/home/vansin/anet-work/fix-517-net-scope/server/src/mcp-write-network-resolution.test.ts:287:18)
+(fail) utok multi-network > cancel_task threads explicit network_id [75.31ms]
+290 | 
+291 |   test("reassign_task threads explicit network_id", async () => {
+292 |     const { tools } = buildHandlers({ userId: U_MULTI });
+293 |     const t = makeTask(A1, "delivered", "x517 g2 reassign_task");
+294 |     const r = await call(tools["reassign_task"], { task_id: t, new_alias: A2, network_id: NET_A });
+295 |     expect(r.ok).toBe(true);
+                       ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (/home/vansin/anet-work/fix-517-net-scope/server/src/mcp-write-network-resolution.test.ts:295:18)
+(fail) utok multi-network > reassign_task threads explicit network_id [90.83ms]
+297 |   });
+298 | 
+299 |   test("all 7 formerly param-less write tools expose network_id in their input schema", () => {
+300 |     const { schemas } = buildHandlers({ userId: U_MULTI });
+301 |     for (const name of ["send_message", "send_reply", "ack_inbox", "send_ack", "retry_task", "cancel_task", "reassign_task"]) {
+302 |       expect(Object.keys(schemas[name] ?? {})).toContain("network_id");
+                                                     ^
+error: expect(received).toContain(expected)
+
+Expected to contain: "network_id"
+Received: [ "alias", "message", "from_session" ]
+
+      at <anonymous> (/home/vansin/anet-work/fix-517-net-scope/server/src/mcp-write-network-resolution.test.ts:302:48)
+(fail) utok multi-network > all 7 formerly param-less write tools expose network_id in their input schema [70.48ms]
+309 | // ─────────────────────────────────────────────────────────────────────
+310 | describe("precise denial causes", () => {
+311 |   test("utok with zero memberships → network_id_required naming the real cause", async () => {
+312 |     const { tools } = buildHandlers({ userId: U_NONE });
+313 |     const r = await call(tools["send_task"], { alias: A1, task: "x517 g3 none", priority: "normal" });
+314 |     expect(r).toEqual({
+                    ^
+error: expect(received).toEqual(expected)
+
+@@ -1,4 +1,4 @@
+  {
+-   "error": "network_id_required",
+-   "message": "user token has no network memberships; join or create a network first",
++   "error": "permission_denied",
++   "message": "network_id required (utok current_network is null; pass explicit network_id from /api/auth/me networks[0].network_id)",
+    "ok": false,
+
+- Expected  - 2
++ Received  + 2
+
+      at <anonymous> (/home/vansin/anet-work/fix-517-net-scope/server/src/mcp-write-network-resolution.test.ts:314:15)
+(fail) precise denial causes > utok with zero memberships → network_id_required naming the real cause [72.82ms]
+319 |   });
+320 | 
+321 |   test("utok explicitly targeting a network it is not a member of → access_denied", async () => {
+322 |     const { tools } = buildHandlers({ userId: U_OUTSIDER });
+323 |     const r = await call(tools["send_task"], { alias: A1, task: "x517 g3 outsider", priority: "normal", network_id: NET_A });
+324 |     expect(r).toEqual({
+                    ^
+error: expect(received).toEqual(expected)
+
+@@ -1,4 +1,4 @@
+  {
+-   "error": "access_denied",
+-   "message": "access denied to requested network (not a member)",
++   "error": "permission_denied",
++   "message": "Viewer role cannot send tasks",
+    "ok": false,
+
+- Expected  - 2
++ Received  + 2
+
+      at <anonymous> (/home/vansin/anet-work/fix-517-net-scope/server/src/mcp-write-network-resolution.test.ts:324:15)
+(fail) precise denial causes > utok explicitly targeting a network it is not a member of → access_denied [69.98ms]
+330 |   });
+331 | 
+332 |   test("viewer in a single network → permission_denied (send_task wording)", async () => {
+333 |     const { tools } = buildHandlers({ userId: U_VIEWER });
+334 |     const r = await call(tools["send_task"], { alias: A1, task: "x517 g3 viewer task", priority: "normal" });
+335 |     expect(r).toEqual({
+                    ^
+error: expect(received).toEqual(expected)
+
+@@ -2,3 +2,3 @@
+    "error": "permission_denied",
+-   "message": "Viewer role cannot send tasks",
++   "message": "network_id required (utok current_network is null; pass explicit network_id from /api/auth/me networks[0].network_id)",
+    "ok": false,
+
+- Expected  - 1
++ Received  + 1
+
+      at <anonymous> (/home/vansin/anet-work/fix-517-net-scope/server/src/mcp-write-network-resolution.test.ts:335:15)
+(fail) precise denial causes > viewer in a single network → permission_denied (send_task wording) [75.32ms]
+340 |   });
+341 | 
+342 |   test("viewer in a single network → permission_denied (generic write wording)", async () => {
+343 |     const { tools } = buildHandlers({ userId: U_VIEWER });
+344 |     const r = await call(tools["send_message"], { alias: A1, message: "x517 g3 viewer msg" });
+345 |     expect(r).toEqual({
+                    ^
+error: expect(received).toEqual(expected)
+
+@@ -2,3 +2,3 @@
+    "error": "permission_denied",
+-   "message": "Viewer role cannot write to this network",
++   "message": "network_id required (utok current_network is null; pass explicit network_id from /api/auth/me networks[0].network_id)",
+    "ok": false,
+
+- Expected  - 1
++ Received  + 1
+
+      at <anonymous> (/home/vansin/anet-work/fix-517-net-scope/server/src/mcp-write-network-resolution.test.ts:345:15)
+(fail) precise denial causes > viewer in a single network → permission_denied (generic write wording) [57.21ms]
+[08:51:05] peer-517-a1 → send_task → peer-517-a2: x517 g4 ntok plain
+[08:51:05] peer-517-a1 → send_task → peer-517-a2: x517 g4 ntok override
+[08:51:05] hub → send_message → peer-517-a1: x517 g5 legacy
+
+ 3 pass
+ 21 fail
+ 27 expect() calls
+Ran 24 tests across 1 file. [1.93s]

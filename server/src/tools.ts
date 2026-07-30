@@ -4,6 +4,7 @@ import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, ge
 import { pushEvent, pushNetworkObserverEvent } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { getUserNetworkRole, createNetworkTokenForNode } from "./auth.js";
+import { canRestWriteNetwork, getUserNetworkIds, singleNetworkId } from "./network-scope.js";
 import {
   buildAnetArgs as _unused_buildAnetArgs,           // ensure module is loaded
   validateName as validateChildName,
@@ -97,28 +98,54 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }],
     };
   };
-  // If enforceNetworkId is set, override any client-supplied network_id
-  const getNetworkId = (clientNetId?: string | null) => enforceNetworkId ?? clientNetId ?? null;
+  // MCP-side auth context in the shape network-scope.ts helpers take.
+  // null = legacy global-token / open-dev mode (unscoped, allow-all).
+  const mcpAuthCtx = enforceUserId ? { userId: enforceUserId, networkId: enforceNetworkId ?? null } : null;
 
-  // Check write access. For ntok_ the network is enforced by the token.
-  // For utok_ (no enforced network) we accept the network_id supplied in the
-  // request and verify the user has a write role on it.
-  const canWrite = (effectiveNetworkId?: string | null): boolean => {
-    if (!enforceUserId) return true; // legacy global token mode, allow
-    const netId = enforceNetworkId ?? effectiveNetworkId ?? null;
-    if (!netId) return false; // no network resolvable
-    const role = getUserNetworkRole(enforceUserId, netId);
-    return !!role && role !== "viewer"; // owner/admin/member can write
+  // If enforceNetworkId is set (ntok_), override any client-supplied
+  // network_id. #517: for utok_ with no explicit network_id, fall back to
+  // the user's single membership via the SAME singleNetworkId used by REST
+  // POST /api/task (network-scope.ts) — utok_ rows carry network_id=null by
+  // design, so without this fallback single-network nodes could read
+  // everything but write nothing. Multi-network stays null (ambiguous) and
+  // canWrite rejects with network_id_required.
+  const getNetworkId = (clientNetId?: string | null) => {
+    const explicit = enforceNetworkId ?? clientNetId ?? null;
+    if (explicit !== null || !enforceUserId) return explicit;
+    return singleNetworkId({ networkId: null, networkIds: getUserNetworkIds(enforceUserId) });
   };
 
+  // Check write access — delegates to the shared canRestWriteNetwork so MCP
+  // and REST cannot drift again (#517). isAdmin=false: MCP has no admin
+  // bypass today; keep behavior identical to before the extraction.
+  const canWrite = (effectiveNetworkId?: string | null): boolean => {
+    const netId = enforceNetworkId ?? effectiveNetworkId ?? null;
+    return canRestWriteNetwork(mcpAuthCtx, netId, false);
+  };
+
+  // #517: name the REAL cause. The old catch-all blamed permissions for
+  // what was actually an unresolvable network, sending operators down the
+  // wrong debugging path (roles/membership) for hours.
   const writeDeniedReply = (effectiveNetworkId?: string | null, action = "write") => {
     const netId = enforceNetworkId ?? effectiveNetworkId ?? null;
-    const message = !netId
-      ? "network_id required (utok current_network is null; pass explicit network_id from /api/auth/me networks[0].network_id)"
-      : action === "send_task"
+    let error: string;
+    let message: string;
+    if (!netId) {
+      const memberships = enforceUserId ? getUserNetworkIds(enforceUserId) : [];
+      error = "network_id_required";
+      message = memberships.length === 0
+        ? "user token has no network memberships; join or create a network first"
+        : `user token spans ${memberships.length} networks; pass network_id explicitly (see /api/auth/me networks[].network_id)`;
+    } else if (enforceUserId && !getUserNetworkRole(enforceUserId, netId)) {
+      error = "access_denied";
+      message = "access denied to requested network (not a member)";
+    } else {
+      error = "permission_denied";
+      message = action === "send_task"
         ? "Viewer role cannot send tasks"
         : "Viewer role cannot write to this network";
-    return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied", message }) }] };
+    }
+    return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error, message }) }] };
   };
 
   const addScope = (sql: string, params: any[], networkId?: string | null, column = "network_id"): string => {
@@ -130,13 +157,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   type ReadScope = { networkId?: string | null; networkIds?: string[] | null; denied?: string };
 
-  const getReadableNetworkIds = (): string[] => {
-    if (!enforceUserId) return [];
-    return db.all<{ network_id: string }>(
-      "SELECT network_id FROM network_members WHERE user_id = ?1",
-      enforceUserId
-    ).map((row) => row.network_id);
-  };
+  // Delegates to the shared membership query (network-scope.ts) — was a
+  // byte-for-byte duplicate of getUserNetworkIds before #517.
+  const getReadableNetworkIds = (): string[] =>
+    enforceUserId ? getUserNetworkIds(enforceUserId) : [];
 
   const resolveReadScope = (clientNetId?: string | null): ReadScope => {
     if (!enforceUserId) return { networkId: clientNetId ?? null, networkIds: null };
@@ -690,9 +714,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       alias: z.string().min(1).max(200).describe("Session alias"),
       message_id: z.string().min(1).max(200),
       response: z.string().max(10000).optional(),
+      network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens)"),
     },
-    async ({ alias, message_id, response }) => {
-      const effectiveNetId = getNetworkId(null);
+    async ({ alias, message_id, response, network_id: netId }) => {
+      const effectiveNetId = getNetworkId(netId);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
       console.log(`[${ts()}] ${alias} → ack_inbox: ${message_id.slice(0, 8)}`);
       const ackParams: any[] = [message_id, alias];
@@ -1004,9 +1029,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       alias: z.string().min(1).max(200).describe("Target session alias"),
       message: z.string().min(1).max(10000).describe("Message content"),
       from_session: z.string().max(200).optional(),
+      network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens)"),
     },
-    async ({ alias, message, from_session: _fromIn }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
-      const effectiveNetId = getNetworkId(null);
+    async ({ alias, message, from_session: _fromIn, network_id: netId }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
+      const effectiveNetId = getNetworkId(netId);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
       const canonical = resolveCanonicalAlias(effectiveNetId, alias);
       const targetAlias = canonical.alias;
@@ -1065,9 +1091,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       in_reply_to: z.string().max(200).optional().describe("Original task/message ID"),
       status: z.enum(["replied", "failed", "cancelled"]).optional().default("replied").describe("Task outcome"),
       from_session: z.string().max(200).optional(),
+      network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens)"),
     },
-    async ({ alias, text, in_reply_to, status: replyStatus, from_session: _fromIn }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
-      const effectiveNetId = getNetworkId(null);
+    async ({ alias, text, in_reply_to, status: replyStatus, from_session: _fromIn, network_id: netId }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
+      const effectiveNetId = getNetworkId(netId);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
       console.log(`[${ts()}] ${from_session} → send_reply (${replyStatus}) → ${alias}: ${text.slice(0, 60)}`);
       const id = uuidv4();
@@ -1223,9 +1250,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     {
       task_id: z.string().min(1).max(200).describe("Task ID to acknowledge"),
       from_session: z.string().max(200).optional(),
+      network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens)"),
     },
-    async ({ task_id, from_session: _fromIn }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
-      const effectiveNetId = getNetworkId(null);
+    async ({ task_id, from_session: _fromIn, network_id: netId }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
+      const effectiveNetId = getNetworkId(netId);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
       console.log(`[${ts()}] ${from_session} → send_ack → task ${task_id.slice(0, 8)}`);
       const updateParams: any[] = [task_id];
@@ -1249,9 +1277,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     {
       task_id: z.string().min(1).max(200).describe("Task ID to retry"),
       from_session: z.string().max(200).optional(),
+      network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens)"),
     },
-    async ({ task_id, from_session: _fromIn }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
-      const effectiveNetId = getNetworkId(null);
+    async ({ task_id, from_session: _fromIn, network_id: netId }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
+      const effectiveNetId = getNetworkId(netId);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
       console.log(`[${ts()}] ${from_session} → retry_task → ${task_id.slice(0, 8)}`);
       // Find the original task
@@ -1368,9 +1397,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       task_id: z.string().min(1).max(200).describe("Task ID to cancel"),
       reason: z.string().max(1000).optional().describe("Cancellation reason"),
       from_session: z.string().max(200).optional(),
+      network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens)"),
     },
-    async ({ task_id, reason, from_session: _fromIn }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
-      const effectiveNetId = getNetworkId(null);
+    async ({ task_id, reason, from_session: _fromIn, network_id: netId }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
+      const effectiveNetId = getNetworkId(netId);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
       console.log(`[${ts()}] ${from_session} → cancel_task → ${task_id.slice(0, 8)}`);
       const updateParams: any[] = [reason || "cancelled by " + from_session, task_id];
@@ -1400,9 +1430,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       task_id: z.string().min(1).max(200).describe("Task ID to reassign"),
       new_alias: z.string().min(1).max(200).describe("Target agent alias"),
       from_session: z.string().max(200).optional(),
+      network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens)"),
     },
-    async ({ task_id, new_alias, from_session: _fromIn }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
-      const effectiveNetId = getNetworkId(null);
+    async ({ task_id, new_alias, from_session: _fromIn, network_id: netId }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
+      const effectiveNetId = getNetworkId(netId);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
       console.log(`[${ts()}] ${from_session} → reassign_task → ${task_id.slice(0, 8)} → ${new_alias}`);
       const taskParams: any[] = [task_id];
