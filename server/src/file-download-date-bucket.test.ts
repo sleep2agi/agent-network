@@ -85,6 +85,25 @@ async function _uploadProbe(): Promise<number> {
 }
 const isProdMode = (await _uploadProbe()) !== 200;
 
+/**
+ * 🔴 Precondition, deliberately OUTSIDE every skipIf.
+ *
+ * The whole #509 suite below hangs off `describe.skipIf(!isProdMode)`, and
+ * `isProdMode` is decided by a *live probe* rather than a constant. If the
+ * probe comes back 200 (DEV_OPEN active in this environment), every Door
+ * test silently disappears and the file still reports green — a validator
+ * running it in a differently-configured container would report PASS while
+ * having exercised none of the #509 read path.
+ *
+ * Unlike the master-token / dev-open conditionals elsewhere in this repo,
+ * #509 has no dev-open counterpart suite: skipping here means the coverage
+ * is simply absent, not relocated. So an unrunnable suite must fail loudly
+ * and say why, instead of vanishing quietly.
+ */
+test("precondition: #509 suite is actually runnable (not silently skipped)", () => {
+  expect(isProdMode).toBe(true);
+});
+
 afterAll(() => {
   try { server?.stop?.(true); } catch {}
   try { rmSync(UPLOADS_DIR, { recursive: true, force: true }); } catch {}
