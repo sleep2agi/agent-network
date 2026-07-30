@@ -313,6 +313,41 @@ describe("assertOpencodeNodeStateUntracked", () => {
     expect(() => assertOpencodeNodeStateUntracked(node)).not.toThrow();
   });
 
+  test("allows ordinary untracked projects inside a Git worktree checkout", () => {
+    const repo = join(root, "repo");
+    const worktree = join(root, "repo-worktree");
+    execFileSync("git", ["init", "--quiet", repo], { stdio: "pipe", shell: false });
+    execFileSync(
+      "git",
+      [
+        "-C", repo,
+        "-c", "user.name=agent-network-test",
+        "-c", "user.email=agent-network-test@example.invalid",
+        "commit", "--allow-empty", "-m", "init",
+      ],
+      { stdio: "pipe", shell: false },
+    );
+    execFileSync("git", ["-C", repo, "worktree", "add", "--detach", worktree, "HEAD"], {
+      stdio: "pipe",
+      shell: false,
+    });
+
+    const worktreeProject = join(worktree, "project");
+    const worktreeNode = join(worktreeProject, ".anet", "nodes", "node-a");
+    mkdirSync(worktreeNode, { recursive: true, mode: 0o700 });
+    writeFileSync(join(worktreeNode, "config.json"), "{}\n", { mode: 0o600 });
+    writeFileSync(join(worktreeNode, ".env"), "ANET_TOKEN=test\n", { mode: 0o600 });
+
+    expect(readFileSync(join(worktree, ".git"), "utf8")).toMatch(/^gitdir: /);
+    expect(() => assertOpencodeNodeStateUntracked(worktreeNode)).not.toThrow();
+  });
+
+  test("rejects forged Git worktree file markers", () => {
+    writeFileSync(join(project, ".git"), "gitdir: /definitely/not/a/git/dir\n", { mode: 0o600 });
+
+    expect(() => assertOpencodeNodeStateUntracked(node)).toThrow(/Git repository metadata is invalid/);
+  });
+
   test("allows ignored/untracked state but rejects git add -f tracked state", () => {
     execFileSync("git", ["init", "--quiet", project], { stdio: "pipe", shell: false });
     writeFileSync(join(project, ".gitignore"), ".anet/\n", { mode: 0o600 });

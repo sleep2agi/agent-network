@@ -584,10 +584,43 @@ export function assertExactOpencodeRuntimeBinding(
   return binding;
 }
 
-function findGitMarkerRoot(start: string): string | undefined {
+interface GitRepositoryMarker {
+  workTreeRoot: string;
+  gitDir: string;
+}
+
+function readGitFile(markerPath: string, markerRoot: string): string {
+  const stat = lstatSync(markerPath);
+  if (!stat.isFile() || stat.size <= 0 || stat.size > 4096) {
+    throw new Error("invalid Git file marker");
+  }
+  const content = readFileSync(markerPath, "utf8");
+  if (content.includes("\0")) throw new Error("invalid Git file marker");
+  const line = content.endsWith("\n") ? content.slice(0, -1) : content;
+  if (line.includes("\n") || line.includes("\r")) throw new Error("invalid Git file marker");
+  const match = /^gitdir: (.+)$/.exec(line);
+  if (!match) throw new Error("invalid Git file marker");
+  const gitDir = match[1];
+  if (gitDir.trim() !== gitDir || gitDir.length === 0) throw new Error("invalid Git file marker");
+  const resolvedGitDir = realpathSync(isAbsolute(gitDir) ? gitDir : resolve(markerRoot, gitDir));
+  if (!lstatSync(resolvedGitDir).isDirectory()) throw new Error("invalid Git file marker");
+  return resolvedGitDir;
+}
+
+function readGitRepositoryMarker(markerRoot: string): GitRepositoryMarker {
+  const markerPath = join(markerRoot, ".git");
+  const stat = lstatSync(markerPath);
+  const workTreeRoot = realpathSync(markerRoot);
+  if (stat.isDirectory()) {
+    return { workTreeRoot, gitDir: realpathSync(markerPath) };
+  }
+  return { workTreeRoot, gitDir: readGitFile(markerPath, markerRoot) };
+}
+
+function findGitRepositoryMarker(start: string): GitRepositoryMarker | undefined {
   let current = start;
   while (true) {
-    if (lstatIfPresent(join(current, ".git"))) return current;
+    if (lstatIfPresent(join(current, ".git"))) return readGitRepositoryMarker(current);
     const parent = dirname(current);
     if (parent === current) return undefined;
     current = parent;
@@ -624,8 +657,13 @@ function gitPath(path: string): string {
 export function assertOpencodeNodeStateUntracked(nodeWorkDir: string): void {
   const identity = canonicalNodeIdentity(nodeWorkDir);
   const canonicalNode = join(identity.projectRoot, ".anet", "nodes", identity.nodeId);
-  const markerRoot = findGitMarkerRoot(canonicalNode);
-  if (!markerRoot) return;
+  let marker: GitRepositoryMarker | undefined;
+  try {
+    marker = findGitRepositoryMarker(canonicalNode);
+  } catch {
+    throw new Error("OpenCode cannot verify tracked node state: Git repository metadata is invalid");
+  }
+  if (!marker) return;
 
   const common = {
     encoding: "utf8" as const,
@@ -638,7 +676,12 @@ export function assertOpencodeNodeStateUntracked(nodeWorkDir: string): void {
   try {
     const output = execFileSync(
       "git",
-      ["-c", "core.fsmonitor=false", "-C", canonicalNode, "rev-parse", "--show-toplevel"],
+      [
+        "-c", "core.fsmonitor=false",
+        "--git-dir", marker.gitDir,
+        "--work-tree", marker.workTreeRoot,
+        "rev-parse", "--show-toplevel",
+      ],
       common,
     );
     repositoryRoot = realpathSync(stripCommandNewline(output));
@@ -660,7 +703,12 @@ export function assertOpencodeNodeStateUntracked(nodeWorkDir: string): void {
   try {
     tracked = execFileSync(
       "git",
-      ["-c", "core.fsmonitor=false", "-C", repositoryRoot, "ls-files", "-z", "--", ...paths],
+      [
+        "-c", "core.fsmonitor=false",
+        "--git-dir", marker.gitDir,
+        "--work-tree", repositoryRoot,
+        "ls-files", "-z", "--", ...paths,
+      ],
       common,
     );
   } catch {
