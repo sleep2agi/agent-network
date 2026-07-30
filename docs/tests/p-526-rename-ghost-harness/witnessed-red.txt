@@ -1,0 +1,191 @@
+# #526 witnessed-red evidence — sweep stubbed, ghost detected, trailer emitted
+# Captured: 2026-07-30 · docker run --rm --tmpfs /tmp:rw,exec anet-qa180-red
+# See README.md §Witnessed-red evidence for interpretation.
+---
+
+=== preflight — assert each dependency separately ===
+  ✓ preflight: /tmp free space ok (32193096 KiB)
+  ✓ preflight: 'script' present (/usr/bin/script)
+  ✓ preflight: 'tmux' present
+  ✓ preflight: 'anet' present (anet v2.3.0-preview.34)
+  ✓ preflight: 'bun' present
+  ✓ preflight: 'claude' present (/usr/local/bin/claude)
+  ✓ preflight: all auxiliaries present (curl, jq, python3, sqlite3, pgrep, ps, kill)
+
+=== 0. boot hub + admin ===
+  ✓ hub /health 200 :9239
+  ✓ admin utok minted
+  ✓ anet global config written (hub + utok + net_id)
+
+=== A. foreground start — anet node start (no tmux) ===
+  · created node rename-target-a @ /tmp/qa-180-work/.anet/nodes/rename-target-a (ntok minted, config written)
+  · anet node start rename-target-a → wrapper PID 182 (backgrounded via script PTY, no tmux)
+  ✓ A.1 claude spawned under alias=rename-target-a: pids=[334]
+  · A.2 /api/status doesn't show rename-target-a yet (mock heartbeat may still be ramping)
+  · A.3 firing: anet node rename rename-target-a renamed-a --force
+  · A.3 rename exit code=0 wall=78s
+    · [anet] note: "rename-target-a" has no server registration yet (never started). Performing local-only rename — no commhub 2PC needed.
+    · [anet] node was running — restarting under new alias "renamed-a" (#146 Option B)...
+    · [anet] ⚠ "rename-target-a" still running a task after 60s — proceeding with restart (--force).
+    · [anet]   An in-flight task may be interrupted without a reply (dispatcher's task stays open).
+    · [anet] stopped old agent process(es): 334
+    · [witnessed-red] sweepMcpOrphansForAlias intentionally disabled — MCP orphan sweep skipped.
+    · [anet] node_id node_rename-target-a_9e67f8bc8705 unchanged in local config; this runtime's commhub identity is resume_id cc-node_rename-target-a_9e67f8bc8705 — also stable across the rename. ntok_ token still valid.
+    · [anet] ✅ Renamed "rename-target-a" → "renamed-a" (txn null) — agent restarted + verified live under the new alias (new process pid alive (hub heartbeat still catching up)).
+  ✓ A.4 pgrep alias=rename-target-a AFTER rename → NONE (no ghost in this case)
+  ✓ A.5 new alias=renamed-a has claude pids=[2990]
+  ✓ A.6 /api/status no longer shows rename-target-a (clean)
+  ✗ A.6b GHOST DETECTED: 1 MCP subprocess(es) still heart-beating with OLD alias=rename-target-a
+    · 335 bash -c      set -uo pipefail     HUB='http://127.0.0.1:9239'     TOK='ntok_bab3777f1ce84325ae0a18e8fe51ed31'     ALIAS='rename-target-a'     NETID=''     echo "[mock-mcp pid=$$] started, will heartbeat alias=$ALIAS" >&2     trap 'echo "[mock-mcp pid=$$] SIGTERM received, exiting" >&2; exit 0' SIGTERM     while true; do       if [[ -n "$HUB" && -n "$TOK" && -n "$ALIAS" ]]; then         curl -sS -X POST "$HUB/api/status"           -H "Authorization: Bearer $TOK"           -H 'Content-Type: application/json'           -d "{\"alias\":\"$ALIAS\",\"status\":\"idle\",\"agent\":\"mock-mcp\",\"task\":\"waiting\",\"progress\":0${NETID:+,\"network_id\":\"$NETID\"}}"           >/dev/null 2>&1 || true       fi       # Sleep in short chunks so SIGTERM is responsive       for _ in $(seq 1 20); do sleep 0.1; done     done   
+  · A.6c diagnostic total pgrep mock-mcp count = 5
+  · A.7 /api/status doesn't yet show renamed-a (new node still starting)
+
+=== B. tmux-detached start — startNodeTmuxSession pattern ===
+  · created node rename-target-b @ /tmp/qa-180-work/.anet/nodes/rename-target-b (ntok minted, config written)
+  · B.1 tmux new-session -d -s rename-target-b 'anet node start rename-target-b' fired
+  ✓ B.1 claude spawned under alias=rename-target-b: pids=[4133]
+  ·   process tree:
+  ·     claude pid=4133 ← parent pid=3764 (node) ← grandparent pid=3762 (tmux: server)
+  · B.3 firing: anet node rename rename-target-b renamed-b --force
+  · B.3 rename exit code=0 wall=77s
+    · [anet] persisted canonical node_id node_rename-target-b_f9dd18143d49 before rename.
+    · [anet] note: "rename-target-b" has no server registration yet (never started). Performing local-only rename — no commhub 2PC needed.
+    · [anet] node was running — restarting under new alias "renamed-b" (#146 Option B)...
+    · [anet] ⚠ "rename-target-b" still running a task after 60s — proceeding with restart (--force).
+    · [anet]   An in-flight task may be interrupted without a reply (dispatcher's task stays open).
+    · [anet] stopped old agent process(es): 4133
+    · [witnessed-red] sweepMcpOrphansForAlias intentionally disabled — MCP orphan sweep skipped.
+    · [anet] node_id node_rename-target-b_f9dd18143d49 unchanged in local config; this runtime's commhub identity is resume_id cc-node_rename-target-b_f9dd18143d49 — also stable across the rename. ntok_ token still valid.
+    · [anet] ✅ Renamed "rename-target-b" → "renamed-b" (txn null) — agent restarted + verified live under the new alias (new process pid alive (hub heartbeat still catching up)).
+  ✓ B.4 pgrep alias=rename-target-b AFTER rename → NONE (no ghost in this case either)
+  ✓ B.5 new alias=renamed-b has claude pids=[10203]
+  ✓ B.6 /api/status no longer shows rename-target-b (clean)
+  ✗ B.6b GHOST DETECTED: 1 MCP subprocess(es) still heart-beating with OLD alias=rename-target-b
+    · 4134 bash -c      set -uo pipefail     HUB='http://127.0.0.1:9239'     TOK='ntok_726cb65c1204404699b98c4fab7aaddc'     ALIAS='rename-target-b'     NETID=''     echo "[mock-mcp pid=$$] started, will heartbeat alias=$ALIAS" >&2     trap 'echo "[mock-mcp pid=$$] SIGTERM received, exiting" >&2; exit 0' SIGTERM     while true; do       if [[ -n "$HUB" && -n "$TOK" && -n "$ALIAS" ]]; then         curl -sS -X POST "$HUB/api/status"           -H "Authorization: Bearer $TOK"           -H 'Content-Type: application/json'           -d "{\"alias\":\"$ALIAS\",\"status\":\"idle\",\"agent\":\"mock-mcp\",\"task\":\"waiting\",\"progress\":0${NETID:+,\"network_id\":\"$NETID\"}}"           >/dev/null 2>&1 || true       fi       # Sleep in short chunks so SIGTERM is responsive       for _ in $(seq 1 20); do sleep 0.1; done     done   
+  · B.6c diagnostic total pgrep mock-mcp count = 9
+  · B.7 /api/status doesn't yet show renamed-b
+  · B.8 tmux session 'rename-target-b' gone
+  · B.8 tmux session 'renamed-b' running (auto-restart under new alias)
+
+────────────────────────────────────────────
+issue #180 rename ghost e2e — PASS=18 FAIL=2
+  (FAIL count = ghost/reproductions; higher = worse)
+────────────────────────────────────────────
+...
+(intermediate lines truncated — see full log for verbose diagnostics)
+...
+  · created node rename-target-b @ /tmp/qa-180-work/.anet/nodes/rename-target-b (ntok minted, config written)
+  · B.1 tmux new-session -d -s rename-target-b 'anet node start rename-target-b' fired
+  ✓ B.1 claude spawned under alias=rename-target-b: pids=[4133]
+  ·   process tree:
+  ·     claude pid=4133 ← parent pid=3764 (node) ← grandparent pid=3762 (tmux: server)
+  · B.3 firing: anet node rename rename-target-b renamed-b --force
+  · B.3 rename exit code=0 wall=77s
+    · [anet] persisted canonical node_id node_rename-target-b_f9dd18143d49 before rename.
+    · [anet] note: "rename-target-b" has no server registration yet (never started). Performing local-only rename — no commhub 2PC needed.
+    · [anet] node was running — restarting under new alias "renamed-b" (#146 Option B)...
+    · [anet] ⚠ "rename-target-b" still running a task after 60s — proceeding with restart (--force).
+    · [anet]   An in-flight task may be interrupted without a reply (dispatcher's task stays open).
+    · [anet] stopped old agent process(es): 4133
+    · [witnessed-red] sweepMcpOrphansForAlias intentionally disabled — MCP orphan sweep skipped.
+    · [anet] node_id node_rename-target-b_f9dd18143d49 unchanged in local config; this runtime's commhub identity is resume_id cc-node_rename-target-b_f9dd18143d49 — also stable across the rename. ntok_ token still valid.
+    · [anet] ✅ Renamed "rename-target-b" → "renamed-b" (txn null) — agent restarted + verified live under the new alias (new process pid alive (hub heartbeat still catching up)).
+  ✓ B.4 pgrep alias=rename-target-b AFTER rename → NONE (no ghost in this case either)
+  ✓ B.5 new alias=renamed-b has claude pids=[10203]
+  ✓ B.6 /api/status no longer shows rename-target-b (clean)
+  ✗ B.6b GHOST DETECTED: 1 MCP subprocess(es) still heart-beating with OLD alias=rename-target-b
+    · 4134 bash -c      set -uo pipefail     HUB='http://127.0.0.1:9239'     TOK='ntok_726cb65c1204404699b98c4fab7aaddc'     ALIAS='rename-target-b'     NETID=''     echo "[mock-mcp pid=$$] started, will heartbeat alias=$ALIAS" >&2     trap 'echo "[mock-mcp pid=$$] SIGTERM received, exiting" >&2; exit 0' SIGTERM     while true; do       if [[ -n "$HUB" && -n "$TOK" && -n "$ALIAS" ]]; then         curl -sS -X POST "$HUB/api/status"           -H "Authorization: Bearer $TOK"           -H 'Content-Type: application/json'           -d "{\"alias\":\"$ALIAS\",\"status\":\"idle\",\"agent\":\"mock-mcp\",\"task\":\"waiting\",\"progress\":0${NETID:+,\"network_id\":\"$NETID\"}}"           >/dev/null 2>&1 || true       fi       # Sleep in short chunks so SIGTERM is responsive       for _ in $(seq 1 20); do sleep 0.1; done     done   
+  · B.6c diagnostic total pgrep mock-mcp count = 9
+  · B.7 /api/status doesn't yet show renamed-b
+  · B.8 tmux session 'rename-target-b' gone
+  · B.8 tmux session 'renamed-b' running (auto-restart under new alias)
+
+────────────────────────────────────────────
+issue #180 rename ghost e2e — PASS=18 FAIL=2
+  (FAIL count = ghost/reproductions; higher = worse)
+────────────────────────────────────────────
+
+
+════════════════════════════════════════════════════════════════════
+3RD STATE — sweep stubbed AND setsid removed (pre-branch mock shape)
+Captured: 2026-07-30 · docker run --rm --tmpfs /tmp:rw,exec anet-qa180-red
+Purpose: capture the "该出现而没出现的东西" evidence (通信龙 task b9c0bcf7).
+
+Setup for this run (all mutations applied together):
+  • agent-network/bin/cli.ts: sweepMcpOrphansForAlias body replaced with
+    `return []` — the entire #180 main fix disabled.
+  • tests/qa-180-rename-ghost/mock-claude: `setsid` REMOVED from the
+    mock-mcp spawn line — reverts to the pre-branch mock shape where
+    mock-mcp lives in mock-claude's process group.
+
+Expected observation: PASS=N FAIL=0 despite the #180 fix being fully
+disabled. Why: mock-mcp dies by SIGHUP cascade when mock-claude dies
+(same process group), so no orphan survives for the sweep to catch or
+miss. The harness was structurally unable to witness a red case.
+
+Key signals (grepped from full run log — the [witnessed-red] console
+line confirms the stub is in effect):
+════════════════════════════════════════════════════════════════════
+
+--- preflight (all green) ---
+
+=== preflight — assert each dependency separately ===
+  ✓ preflight: /tmp free space ok (32193096 KiB)
+  ✓ preflight: 'script' present (/usr/bin/script)
+  ✓ preflight: 'tmux' present
+  ✓ preflight: 'anet' present (anet v2.3.0-preview.34)
+  ✓ preflight: 'bun' present
+  ✓ preflight: 'claude' present (/usr/local/bin/claude)
+  ✓ preflight: all auxiliaries present (curl, jq, python3, sqlite3, pgrep, ps, kill)
+
+=== 0. boot hub + admin ===
+  ✓ hub /health 200 :9239
+  ✓ admin utok minted
+  ✓ anet global config written (hub + utok + net_id)
+
+=== A. foreground start — anet node start (no tmux) ===
+  · created node rename-target-a @ /tmp/qa-180-work/.anet/nodes/rename-target-a (ntok minted, config written)
+  · anet node start rename-target-a → wrapper PID 181 (backgrounded via script PTY, no tmux)
+  ✓ A.1 claude spawned under alias=rename-target-a: pids=[334]
+  · A.2 /api/status doesn't show rename-target-a yet (mock heartbeat may still be ramping)
+  · A.3 firing: anet node rename rename-target-a renamed-a --force
+  · A.3 rename exit code=0 wall=78s
+    · [anet] note: "rename-target-a" has no server registration yet (never started). Performing local-only rename — no commhub 2PC needed.
+    · [anet] node was running — restarting under new alias "renamed-a" (#146 Option B)...
+    · [anet] ⚠ "rename-target-a" still running a task after 60s — proceeding with restart (--force).
+    · [anet]   An in-flight task may be interrupted without a reply (dispatcher's task stays open).
+    · [anet] stopped old agent process(es): 334
+    · [witnessed-red] sweepMcpOrphansForAlias intentionally disabled — MCP orphan sweep skipped.
+    · [anet] node_id node_rename-target-a_76bca2c952f8 unchanged in local config; this runtime's commhub identity is resume_id cc-node_rename-target-a_76bca2c952f8 — also stable across the rename. ntok_ token still valid.
+    · [anet] ✅ Renamed "rename-target-a" → "renamed-a" (txn null) — agent restarted + verified live under the new alias (new process pid alive (hub
+
+--- middle: sweep-stub signal fires + A.6b/B.6b still PASS ---
+    · [witnessed-red] sweepMcpOrphansForAlias intentionally disabled — MCP orphan sweep skipped.
+  ✓ A.4 pgrep alias=rename-target-a AFTER rename → NONE (no ghost in this case)
+  ✓ A.6 /api/status no longer shows rename-target-a (clean)
+  ✓ A.6b no MCP subprocess heart-beating OLD alias=rename-target-a (sweepMcpOrphansForAlias caught them)
+  · A.6c diagnostic total pgrep mock-mcp count = 3
+    · [witnessed-red] sweepMcpOrphansForAlias intentionally disabled — MCP orphan sweep skipped.
+  ✓ B.4 pgrep alias=rename-target-b AFTER rename → NONE (no ghost in this case either)
+  ✓ B.6 /api/status no longer shows rename-target-b (clean)
+  ✓ B.6b no MCP subprocess heart-beating OLD alias=rename-target-b (sweepMcpOrphansForAlias caught them)
+  · B.6c diagnostic total pgrep mock-mcp count = 3
+issue #180 rename ghost e2e — PASS=20 FAIL=0
+
+════════════════════════════════════════════════════════════════════
+Conclusion (the finding that justifies the mock-mcp setsid upgrade):
+
+  • Second state (setsid mock + sweep stub)   → PASS=18 FAIL=2  GHOST DETECTED
+  • Third state (no-setsid mock + sweep stub) → PASS=20 FAIL=0  WRONG-green
+
+The delta between second and third state IS the mock's fidelity. The
+production ghost class (`findMcpBridgeOrphansByAlias` matches env-
+carrying orphans that survived the parent) requires the child to
+actually survive; the pre-branch mock never allowed that. This is
+why the门 was previously green regardless of whether the fix existed.
+
+Not-appearing evidence: no `✗ ... GHOST DETECTED` line appears
+anywhere in the 3rd-state output despite `[witnessed-red]` firing —
+confirming the sweep function's stub took effect but there was
+nothing to sweep because there was no ghost.
+════════════════════════════════════════════════════════════════════
