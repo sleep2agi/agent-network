@@ -1746,7 +1746,7 @@ return Bun.serve({
             uploadNetId = requestedNetId;
             break;
           }
-          uploadNetId = singleNetworkId(resolveRestNetworkScope(url, authCtx, false));
+          uploadNetId = singleNetworkId(resolveRestNetworkScope(url.searchParams.get("network_id"), authCtx, false));
           if (!uploadNetId) {
             return withCors(req, Response.json({
               ok: false, error: "network_id_required",
