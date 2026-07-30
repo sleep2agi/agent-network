@@ -38,6 +38,90 @@ ok()   { printf "  ✓ %s\n" "$*"; PASS=$((PASS+1)); }
 bad()  { printf "  ✗ %s\n" "$*"; FAIL=$((FAIL+1)); }
 raw()  { printf "  · %s\n" "$*"; }
 
+# #526 — emit the PASS=N FAIL=N trailer on EVERY exit path.
+# The CI gate parses `PASS=X FAIL=Y` from stdout; an early `exit 1`
+# (missing binary / bailout / preflight fail) that skips this line
+# makes the gate report "no trailer → treat as regression", which
+# fails-closed but masks the real cause (see #526 log analysis).
+# A trap catches early exits so the gate always gets a truthy verdict.
+emit_trailer() {
+  printf "\n────────────────────────────────────────────\n"
+  printf "issue #180 rename ghost e2e — PASS=%d FAIL=%d\n" "$PASS" "$FAIL"
+  printf "  (FAIL count = ghost/reproductions; higher = worse)\n"
+  printf "────────────────────────────────────────────\n"
+}
+trap emit_trailer EXIT
+
+# #526 — preflight: each dependency asserts itself and reports its own
+# failure reason (not "the harness didn't produce a trailer"). Docker /
+# image / disk are the workflow's job before invoking this script;
+# these are the in-container prereqs the harness itself relies on.
+preflight() {
+  note "preflight — assert each dependency separately"
+  local missing=0
+  local disk_avail
+  disk_avail=$(df -Pk /tmp 2>/dev/null | awk 'NR==2{print $4}')
+  # 200 MiB floor — mock hub db + logs + fixtures easily fit; anything
+  # less risks weird failure modes (sqlite write fails silently).
+  if [ -z "${disk_avail:-}" ] || [ "$disk_avail" -lt 204800 ]; then
+    bad "preflight: /tmp free space too low (need ≥ 200 MiB, got ${disk_avail:-unknown} KiB)"
+    missing=$((missing+1))
+  else
+    ok "preflight: /tmp free space ok (${disk_avail} KiB)"
+  fi
+  # `script` (util-linux) — the CASE A PTY wrapper needs it.
+  if ! command -v script >/dev/null 2>&1; then
+    bad "preflight: 'script' (util-linux) missing — CASE A PTY wrapper cannot run"
+    missing=$((missing+1))
+  else
+    ok "preflight: 'script' present ($(command -v script))"
+  fi
+  # tmux — CASE B pattern uses tmux new-session -d.
+  if ! command -v tmux >/dev/null 2>&1; then
+    bad "preflight: 'tmux' missing — CASE B (tmux-detached start) cannot run"
+    missing=$((missing+1))
+  else
+    ok "preflight: 'tmux' present"
+  fi
+  # anet — the CLI under test.
+  if ! command -v anet >/dev/null 2>&1; then
+    bad "preflight: 'anet' missing — the CLI under test is not installed"
+    missing=$((missing+1))
+  else
+    ok "preflight: 'anet' present ($(anet --version 2>/dev/null | head -1 || echo 'no version'))"
+  fi
+  # bun — server + node runtime.
+  if ! command -v bun >/dev/null 2>&1; then
+    bad "preflight: 'bun' missing — hub cannot start"
+    missing=$((missing+1))
+  else
+    ok "preflight: 'bun' present"
+  fi
+  # mock claude binary — CI installs to /usr/local/bin/claude, dev
+  # runs may symlink elsewhere. Fail-clear rather than let downstream
+  # ps grep silently return empty.
+  if ! command -v claude >/dev/null 2>&1; then
+    bad "preflight: 'claude' missing — mock claude binary not on PATH"
+    missing=$((missing+1))
+  else
+    ok "preflight: 'claude' present ($(command -v claude))"
+  fi
+  # Basic auxiliaries. Each on its own line so a red preflight names
+  # the exact one that is missing.
+  for tool in curl jq python3 sqlite3 pgrep ps kill; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      bad "preflight: '$tool' missing"
+      missing=$((missing+1))
+    fi
+  done
+  [ "$missing" -eq 0 ] && ok "preflight: all auxiliaries present (curl, jq, python3, sqlite3, pgrep, ps, kill)"
+  if [ "$missing" -gt 0 ]; then
+    printf "\n::error::preflight failed with %d missing prerequisites — refusing to run the harness (see individual ✗ lines above).\n" "$missing"
+    exit 1
+  fi
+}
+preflight
+
 # alias_pgrep — list PIDs of claude processes matching --alias/-n <name>
 alias_pgrep() {
   # Matches how findNodeProcessesByAlias parses argv (require binary name +
@@ -121,9 +205,23 @@ cd "$WORK"
 # Start in the background — mimics user opening a terminal + running the cmd.
 # `anet node start` for claude-code-cli runtime enters launchAgent → spawns
 # claude → awaits its exit. We background it so the shell continues.
-COMMHUB_URL="$HUB_BASE" nohup anet node start "$CHILD_A" >/tmp/anet-start-A.log 2>&1 &
+#
+# #526 — wrap with `script -q -c ... /dev/null` so `process.stdin.isTTY`
+# is true for the child. Claude CLI 2.1.220+ auto-switches to `--print`
+# mode without a TTY and refuses to start its interactive session, so
+# anet's #494 preflight fail-closes with a clear "requires TTY" error
+# and the harness never reaches the trailer. `script` allocates a real
+# PTY WITHOUT introducing tmux — CASE A's "foreground no tmux" language
+# above is load-bearing (进程树 shape differs, ghost-production
+# conditions per case are distinct even though the CLEANUP path
+# (`sweepMcpOrphansForAlias`) is common). Do NOT switch to
+# `--accept-dev-channels`: that spawns a DETACHED tmux session (see
+# `agent-network/bin/cli.ts` L4476/L4499), collapsing CASE A into a
+# duplicate of CASE B while the label still claims "no tmux" —
+# 通信龙 2026-07-30 hard裁定.
+COMMHUB_URL="$HUB_BASE" nohup script -q -c "anet node start '$CHILD_A'" /dev/null >/tmp/anet-start-A.log 2>&1 &
 ANET_START_A_PID=$!
-raw "anet node start $CHILD_A → wrapper PID $ANET_START_A_PID (backgrounded)"
+raw "anet node start $CHILD_A → wrapper PID $ANET_START_A_PID (backgrounded via script PTY, no tmux)"
 
 # Wait for claude to appear in ps (mock claude prints readiness on stderr).
 for i in $(seq 1 30); do
@@ -136,6 +234,17 @@ if [[ -n "$CLAUDE_A_PIDS_BEFORE" ]]; then
 else
   bad "A.1 claude never appeared for $CHILD_A after 30s"
   tail -30 /tmp/anet-start-A.log
+  # #526 — do NOT exit early. The trailer trap will fire regardless,
+  # but the CI gate needs to distinguish "detected ghost" (FAIL>0 from
+  # real repro) from "harness bailed" (FAIL≥1 from A.1 bad). Both
+  # correctly show as failed, but the log tells operators whether the
+  # harness reached its detection code or fell over before it. Skipping
+  # the rest of CASE A + CASE B here means we still exit non-zero (FAIL>0)
+  # but with a trailer — which is the point of #526.
+  #
+  # We still short-circuit the rest of CASE A + CASE B because they
+  # depend on the CASE A node existing, but we do it via the trap
+  # rather than a naked `exit 1` that skipped the trailer.
   exit 1
 fi
 
@@ -248,9 +357,9 @@ else
   bad "B.1 claude never appeared for $CHILD_B after 30s"
   tmux capture-pane -t "$CHILD_B" -p 2>/dev/null | sed 's/^/    · /'
   raw "SKIP rest of B due to no claude"
-  printf "\n────────────────────────────────────────────\n"
-  printf "issue #180 rename ghost e2e — PASS=%d FAIL=%d\n" "$PASS" "$FAIL"
-  printf "────────────────────────────────────────────\n"
+  # #526 — trailer is now emitted via the EXIT trap, no need to print
+  # it manually here (avoids double-emission when the trap fires on
+  # exit 1). Trap catches EVERY exit path.
   exit 1
 fi
 
@@ -334,8 +443,8 @@ tmux kill-server 2>/dev/null || true
 pkill -f "^/usr/local/bin/claude" 2>/dev/null || true
 sleep 1
 
-printf "\n────────────────────────────────────────────\n"
-printf "issue #180 rename ghost e2e — PASS=%d FAIL=%d\n" "$PASS" "$FAIL"
-printf "  (FAIL count = ghost/reproductions; higher = worse)\n"
-printf "────────────────────────────────────────────\n"
+# #526 — trailer is emitted by the `trap emit_trailer EXIT` at the top;
+# don't print it here or it would double-emit on normal completion.
+# Final rc = FAIL count. The gate reads it as `runner exit code` (must
+# be 0) alongside the trailer.
 [[ "$FAIL" -eq 0 ]]

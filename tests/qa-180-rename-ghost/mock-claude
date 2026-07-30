@@ -51,7 +51,7 @@ echo "[mock-claude pid=$$] alias: '${ALIAS:-<none>}'" >&2
 # by NOT wiring the subprocess's stdin to anything — the subprocess
 # heart-beats until externally SIGTERM'd.
 spawn_mcp_subprocess() {
-  bash -c "
+  setsid bash -c "
     set -uo pipefail
     HUB='${COMMHUB_URL:-}'
     TOK='${COMMHUB_TOKEN:-}'
