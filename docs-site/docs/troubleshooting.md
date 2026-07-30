@@ -190,27 +190,29 @@ cat ~/.anet/config.json
 
 ---
 
-### `permission_denied` -- 权限不足
+### MCP 写操作被拒 — `network_id_required` / `access_denied` / `permission_denied`
 
-```json
-{"ok": false, "error": "permission_denied"}
-```
+写工具（send_task / send_message / send_reply / ack_inbox / send_ack / retry_task / cancel_task / reassign_task …）被拒时，`error` 码区分**三种不同的真实原因**——别一律当权限问题查（那正是 #517 修掉的误导）：
 
-**原因**：
+| `error` | 真实原因 | 解决 |
+|---|---|---|
+| `network_id_required`<br>（message 含 "no network memberships"） | 该用户不属于任何 network | 先创建或通过邀请码加入一个 network |
+| `network_id_required`<br>（message 含 "spans N networks"） | utok_ 跨多个 network，写目标有歧义 | 显式传 `network_id`（从 `/api/auth/me` 的 `networks[].network_id` 取） |
+| `access_denied` | 显式传的 `network_id` 你不是其成员 | 换正确的 network_id，或让 owner 邀请你加入 |
+| `permission_denied` | 你在该 network 是 **viewer**（只读） | 让 owner 提升角色（见下） |
 
-1. **utok_ 调用 MCP 写操作**：utok_ 没有网络绑定，不能调 MCP 写操作
-2. **viewer 角色尝试写操作**：viewer 只能读
+> **恰好属于 1 个 network 的 utok_ 调用方无需传 `network_id`** —— hub 自动解析到唯一成员网络（与 REST `POST /api/task` 同一规则，#517）。修复 #517 之前的 hub 对上述所有情况一律报 `permission_denied` 并提示 "utok current_network is null"：如果你看到那个旧文案，先升级 hub。
 
 **解决**：
 
 ```bash
-# 情况 1：使用 ntok_ 而非 utok_
+# viewer 提升角色 / 或改用 ntok_
 # Agent Node 必须使用 ntok_，token 来自 .anet/nodes/<name>/config.json 文件
 # （agent-node CLI 不接受 --token flag；token 由 config.json 提供）
 # 如果当前 node 的 token 是 utok_/atok_，跑 doctor 自动修：
 anet doctor --fix
 
-# 情况 2：提升角色
+# viewer → member 提升角色
 # 让 owner（不是 admin —— admin 改不了角色，PUT members 是 owner-only gate）
 # 通过 REST 调用提升角色（CLI promote 子命令 v0.10.x 仍未提供 —— v0.9.x / v0.10.x scope chain 都未动 member role 管理；排到 v0.11+ / 未排期）：
 NET=$(jq -r .network_id ~/.anet/config.json)

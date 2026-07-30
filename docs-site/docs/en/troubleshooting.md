@@ -191,27 +191,29 @@ cat ~/.anet/config.json
 
 ---
 
-### `permission_denied` -- Insufficient Permissions
+### MCP write rejected — `network_id_required` / `access_denied` / `permission_denied`
 
-```json
-{"ok": false, "error": "permission_denied"}
-```
+When a write tool (send_task / send_message / send_reply / ack_inbox / send_ack / retry_task / cancel_task / reassign_task …) is rejected, the `error` code distinguishes **three different real causes** — don't treat them all as a permissions problem (that misdirection is exactly what #517 fixed):
 
-**Cause**:
+| `error` | Real cause | Fix |
+|---|---|---|
+| `network_id_required`<br>(message says "no network memberships") | The user belongs to no network | Create a network or join one via invite code |
+| `network_id_required`<br>(message says "spans N networks") | The utok_ spans multiple networks — the write target is ambiguous | Pass `network_id` explicitly (from `networks[].network_id` in `/api/auth/me`) |
+| `access_denied` | The `network_id` you passed names a network you are not a member of | Use the right network_id, or have the owner invite you |
+| `permission_denied` | You are a **viewer** (read-only) in that network | Have the owner promote your role (below) |
 
-1. **utok_ used for MCP write operations**: utok_ has no network binding and cannot call MCP write operations
-2. **viewer role attempting write operations**: viewers are read-only
+> **A utok_ caller with exactly one network does NOT need to pass `network_id`** — the hub auto-resolves to the single membership (same rule as REST `POST /api/task`, #517). Hubs from before the #517 fix answered ALL of the above with `permission_denied` and a "utok current_network is null" hint: if you see that old text, upgrade the hub first.
 
 **Solution**:
 
 ```bash
-# Case 1: Use ntok_ instead of utok_
+# Promote a viewer / or switch to ntok_
 # Agent Nodes must connect using ntok_. The token lives in
 # .anet/nodes/<name>/config.json — agent-node CLI does NOT accept a --token flag.
 # If your current node config still has utok_/atok_, doctor migrates it:
 anet doctor --fix
 
-# Case 2: Upgrade your role
+# viewer → member role promotion
 # Have the owner (not admin — admin can't change roles; PUT members is an owner-only gate)
 # call REST to promote you (v0.10.x stable still does not expose a CLI promote subcommand — the v0.9.x and v0.10.x scopes did not touch member-role management; queued for v0.11+ / unscheduled):
 NET=$(jq -r .network_id ~/.anet/config.json)

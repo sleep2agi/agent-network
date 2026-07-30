@@ -189,6 +189,7 @@ report_completion({
 | `alias` | string | &check; | Session 别名 |
 | `message_id` | string | &check; | 消息 ID |
 | `response` | string | | **当前 no-op**：handler 接受这个参数但不写库（[`tools.ts:337-360`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L337) 整段没有引用 `response`）。schema 保留是为了 forward-compat / 不破坏现有调用方；想真正回复用 [`send_reply`](#send-reply) |
+| `network_id` | string | | Network 范围。utok_ 恰好 1 个成员网络时自动解析，可省略；跨多网络必须显式传（#517） |
 
 **返回值**：
 
@@ -268,6 +269,7 @@ send_task({
 | `alias` | string | &check; | 目标 Agent 别名 |
 | `message` | string | &check; | 消息内容（最大 10000 字符） |
 | `from_session` | string | | 发送者标识（默认 "hub"） |
+| `network_id` | string | | Network 范围。utok_ 恰好 1 个成员网络时自动解析，可省略；跨多网络必须显式传（#517） |
 
 **返回值**：
 
@@ -296,6 +298,7 @@ send_task({
 | `in_reply_to` | string | | 原始 task/message ID |
 | `status` | enum | | `replied`（默认）/ `failed` / `cancelled` |
 | `from_session` | string | | 发送者标识（默认 "hub"） |
+| `network_id` | string | | Network 范围。utok_ 恰好 1 个成员网络时自动解析，可省略；跨多网络必须显式传（#517） |
 
 **返回值**：
 
@@ -321,6 +324,7 @@ send_task({
 |------|------|:----:|------|
 | `task_id` | string | &check; | 任务 ID |
 | `from_session` | string | | 发送者标识（默认 "hub"） |
+| `network_id` | string | | Network 范围。utok_ 恰好 1 个成员网络时自动解析，可省略；跨多网络必须显式传（#517） |
 
 **返回值**：
 
@@ -346,6 +350,7 @@ send_task({
 |------|------|:----:|------|
 | `task_id` | string | &check; | 任务 ID |
 | `from_session` | string | | 发送者标识 |
+| `network_id` | string | | Network 范围。utok_ 恰好 1 个成员网络时自动解析，可省略；跨多网络必须显式传（#517） |
 
 **返回值**：
 
@@ -378,6 +383,7 @@ send_task({
 | `task_id` | string | &check; | 任务 ID |
 | `reason` | string | | 取消原因（最大 1000 字符） |
 | `from_session` | string | | 发送者标识 |
+| `network_id` | string | | Network 范围。utok_ 恰好 1 个成员网络时自动解析，可省略；跨多网络必须显式传（#517） |
 
 **返回值**：
 
@@ -410,6 +416,7 @@ send_task({
 | `task_id` | string | &check; | 任务 ID |
 | `new_alias` | string | &check; | 新目标 Agent 别名 |
 | `from_session` | string | | 发送者标识 |
+| `network_id` | string | | Network 范围。utok_ 恰好 1 个成员网络时自动解析，可省略；跨多网络必须显式传（#517） |
 
 **返回值**：
 
@@ -707,7 +714,9 @@ send_task({
 
 | 错误 | 含义 |
 |------|------|
-| `permission_denied` | 权限不足（viewer 写、缺少可写 network 绑定等） |
+| `network_id_required` | 写操作无法确定目标 network：utok_ 调用方有 **0 个或 ≥2 个** network 成员身份，且未显式传 `network_id`。恰好 1 个成员身份时 hub 会**自动解析**，无需传。`message` 会区分是「无成员身份」还是「跨多个 network 需显式指定」 |
+| `access_denied` | 显式传入的 `network_id` 指向一个调用方**不是成员**的 network |
+| `permission_denied` | **viewer 角色**尝试写操作（viewer 只能读；owner/admin/member 可写） |
 | `license_expired` | 试用期过期（v0.6 legacy 路径，Apache 2.0 OSS 后不再需要；命中后照 [troubleshooting `license_expired` 段](/troubleshooting) 清 SQLite `licenses` 表即可） |
 | `message not found or not yours` | 消息不存在或不属于该 Agent |
 | `task not found` | 任务不存在 |

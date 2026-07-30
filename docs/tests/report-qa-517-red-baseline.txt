@@ -1,0 +1,45 @@
+
+=== L0 env — hub boot ===
+  ✓ hub /health 200 :9251
+
+=== L1 auth — utok with current_network=null (the #517 precondition) ===
+  ✓ login issues utok_ token
+  ✓ register auto-created default network (net_3e288131b42a)
+  ✓ utok current_network is null (issue precondition)
+
+=== L2 seed — target agent session inside net_3e288131b42a (direct sqlite, no prod) ===
+  ✓ seeded node+session peer-517-e2e in net_3e288131b42a
+
+=== L3 single-network utok writes WITHOUT network_id (the fix) ===
+  ✗ S1 send_task ok — got [false] want [true]
+  ✗ S2 task row scoped to net_3e288131b42a — got [] want [net_3e288131b42a]
+  ✗ S3 send_message ok (tool previously had NO network_id input) — got [false] want [true]
+
+=== L4 multi-network utok — ambiguous without, explicit works ===
+  ✓ created second network (net_ad52ecfb3ba5)
+  ✗ S4 error — got [permission_denied] want [network_id_required]
+  ✗ S4 message — got [network_id required (utok current_network is null; pass explicit network_id from /api/auth/me networks[0].network_id)] want [user token spans 2 networks; pass network_id explicitly (see /api/auth/me networks[].network_id)]
+  ✓ S5 explicit network_id ok
+
+=== L5 deleted network — membership cleanup restores auto-resolve ===
+  ✓ delete second network
+  ✗ S6 auto-resolve works again after delete (no ghost membership) — got [false] want [true]
+
+=== L6 viewer role — resolves, then role-denied with viewer wording ===
+  ✓ viewer joined net_3e288131b42a via invite
+  ✓ S7 error
+  ✗ S7 message — got [network_id required (utok current_network is null; pass explicit network_id from /api/auth/me networks[0].network_id)] want [Viewer role cannot send tasks]
+
+=== L7 outsider — explicit foreign network_id ===
+  ✗ S8 error — got [permission_denied] want [access_denied]
+  ✗ S8 message — got [Viewer role cannot send tasks] want [access denied to requested network (not a member)]
+
+=== L8 zero memberships — after deleting own default network ===
+  ✗ S9 error — got [permission_denied] want [network_id_required]
+  ✗ S9 message — got [network_id required (utok current_network is null; pass explicit network_id from /api/auth/me networks[0].network_id)] want [user token has no network memberships; join or create a network first]
+  ✓ S9 no orphaned task row written
+
+=== result ===
+
+PASS=11 FAIL=11
+QA-517 FAILED

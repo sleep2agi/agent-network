@@ -189,6 +189,7 @@ Acknowledge message receipt. After ACK, the message won't be returned by `get_in
 | `alias` | string | &check; | Session alias |
 | `message_id` | string | &check; | Message ID |
 | `response` | string | | **Currently a no-op**: the handler accepts this parameter but never writes it to the database ([`tools.ts:337-360`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L337) never references `response`). The schema is kept for forward-compat / to avoid breaking existing callers; if you want to actually reply, use [`send_reply`](#send-reply). |
+| `network_id` | string | | Network scope. Auto-resolved for utok_ callers with exactly one membership — optional then; required when the caller spans multiple networks (#517) |
 
 **Response**:
 
@@ -268,6 +269,7 @@ Send a message (does not trigger AI processing, display only).
 | `alias` | string | &check; | Target agent alias |
 | `message` | string | &check; | Message content (max 10000 chars) |
 | `from_session` | string | | Sender identifier (default "hub") |
+| `network_id` | string | | Network scope. Auto-resolved for utok_ callers with exactly one membership — optional then; required when the caller spans multiple networks (#517) |
 
 **Response**:
 
@@ -296,6 +298,7 @@ Reply to a task. Links to the original task_id and does not trigger the recipien
 | `in_reply_to` | string | | Original task/message ID |
 | `status` | enum | | `replied` (default) / `failed` / `cancelled` |
 | `from_session` | string | | Sender identifier (default "hub") |
+| `network_id` | string | | Network scope. Auto-resolved for utok_ callers with exactly one membership — optional then; required when the caller spans multiple networks (#517) |
 
 **Response**:
 
@@ -321,6 +324,7 @@ Acknowledge task receipt (lightweight, does not enter inbox).
 |------|------|:----:|------|
 | `task_id` | string | &check; | Task ID |
 | `from_session` | string | | Sender identifier (default "hub") |
+| `network_id` | string | | Network scope. Auto-resolved for utok_ callers with exactly one membership — optional then; required when the caller spans multiple networks (#517) |
 
 **Response**:
 
@@ -346,6 +350,7 @@ Retry a failed/cancelled/expired task.
 |------|------|:----:|------|
 | `task_id` | string | &check; | Task ID |
 | `from_session` | string | | Sender identifier |
+| `network_id` | string | | Network scope. Auto-resolved for utok_ callers with exactly one membership — optional then; required when the caller spans multiple networks (#517) |
 
 **Response**:
 
@@ -378,6 +383,7 @@ Cancel a pending task.
 | `task_id` | string | &check; | Task ID |
 | `reason` | string | | Cancellation reason (max 1000 chars) |
 | `from_session` | string | | Sender identifier |
+| `network_id` | string | | Network scope. Auto-resolved for utok_ callers with exactly one membership — optional then; required when the caller spans multiple networks (#517) |
 
 **Response**:
 
@@ -410,6 +416,7 @@ Reassign a task to another agent.
 | `task_id` | string | &check; | Task ID |
 | `new_alias` | string | &check; | New target agent alias |
 | `from_session` | string | | Sender identifier |
+| `network_id` | string | | Network scope. Auto-resolved for utok_ callers with exactly one membership — optional then; required when the caller spans multiple networks (#517) |
 
 **Response**:
 
@@ -707,7 +714,9 @@ The `text` field is a JSON string that needs to be parsed.
 
 | Error | Meaning |
 |------|------|
-| `permission_denied` | Insufficient permissions (viewer writing, missing writable network binding, etc.) |
+| `network_id_required` | The write could not be scoped to a network: the utok_ caller has **0 or ≥2** network memberships and passed no explicit `network_id`. With exactly 1 membership the hub **auto-resolves** — no parameter needed. The `message` states which case applies (no memberships vs. multiple networks) |
+| `access_denied` | The explicitly supplied `network_id` names a network the caller is **not a member of** |
+| `permission_denied` | A **viewer role** attempted a write (viewers are read-only; owner/admin/member can write) |
 | `license_expired` | Trial period expired (v0.6 legacy path; not needed after Apache 2.0 OSS — when hit, follow the `license_expired` section in [troubleshooting](/en/troubleshooting) to clear the SQLite `licenses` table) |
 | `message not found or not yours` | Message doesn't exist or doesn't belong to this agent |
 | `task not found` | Task doesn't exist |

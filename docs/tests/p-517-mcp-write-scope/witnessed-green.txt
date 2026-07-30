@@ -1,0 +1,29 @@
+bun test v1.3.14 (0d9b296a)
+
+src/mcp-write-network-resolution.test.ts:
+[commhub] database: /tmp/517-net-scope-green.db
+[commhub] 🎉 14-day free trial started!
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+[08:55:41] u517_single → send_task → peer-517-a1: x517 g1 send_task
+[08:55:41] u517_single → send_message → peer-517-a1: x517 g1 send_message
+[08:55:41] u517_single → send_reply (replied) → peer-517-a1: x517 g1 send_reply
+[08:55:41] peer-517-a1 → ack_inbox: 21552091
+[08:55:41] u517_single → send_ack → task 2588b431
+[08:55:42] u517_single → retry_task → 338562f6
+[08:55:42] u517_single → cancel_task → 7e030ce4
+[08:55:42] u517_single → reassign_task → 781463ae → peer-517-a2
+[08:55:42] u517_multi → send_message → peer-517-a1: x517 g2 send_message
+[08:55:42] u517_multi → send_reply (replied) → peer-517-a1: x517 g2 send_reply
+[08:55:42] peer-517-a1 → ack_inbox: 30eb6543
+[08:55:42] u517_multi → send_ack → task 3feb824a
+[08:55:42] u517_multi → retry_task → 7259c101
+[08:55:42] u517_multi → cancel_task → c14533d1
+[08:55:42] u517_multi → reassign_task → c2e95212 → peer-517-a2
+[08:55:43] peer-517-a1 → send_task → peer-517-a2: x517 g4 ntok plain
+[08:55:43] peer-517-a1 → send_task → peer-517-a2: x517 g4 ntok override
+[08:55:43] hub → send_message → peer-517-a1: x517 g5 legacy
+
+ 24 pass
+ 0 fail
+ 50 expect() calls
+Ran 24 tests across 1 file. [2.15s]
