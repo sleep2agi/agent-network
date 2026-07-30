@@ -94,15 +94,50 @@ export function sanitizeExt(filename: string | undefined | null): string {
   return match ? "." + match[1].toLowerCase() : "";
 }
 
+// YYYY-MM-DD bucket string regex — matches what getDateBucket produces
+// and what an index entry's `date_bucket` field is validated against.
+const DATE_BUCKET_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+
 /**
- * Build the per-upload storage path. The file_id and ext are validated
- * against strict regexes; any path-separator or `..` segment from a
- * malicious client gets rejected at the regex layer before any I/O.
+ * Build the storage path for a NEW upload. Computes today's date bucket
+ * from the runtime clock (or `opts.now` for tests). Use ONLY for creating
+ * a fresh blob; for reading an existing blob whose bucket is already
+ * recorded in the index, use pathForExistingBlob() instead.
+ *
+ * The file_id and ext are validated against strict regexes; any
+ * path-separator or `..` segment from a malicious client gets rejected
+ * at the regex layer before any I/O.
  */
 export function buildStoragePath(fileId: string, ext: string, opts: { uploadsRoot?: string; now?: Date } = {}): GeneratedFile {
   if (!FILE_ID_REGEX.test(fileId)) throw new Error(`file_id "${fileId}" is invalid`);
   if (ext && !/^\.[A-Za-z0-9]{1,16}$/.test(ext)) throw new Error(`ext "${ext}" is invalid`);
   const dateBucket = getDateBucket(opts.now);
+  const root = opts.uploadsRoot ?? getUploadsRoot();
+  const relativePath = join(dateBucket, fileId + ext);
+  const absolutePath = join(root, relativePath);
+  return { fileId, ext, dateBucket, relativePath, absolutePath };
+}
+
+/**
+ * Build the storage path for an EXISTING blob, using the caller-supplied
+ * `dateBucket` (typically read from the index entry). Does NOT compute
+ * a date from the runtime clock — that is the write-side concern.
+ *
+ * This split exists because sharing one date-computing function between
+ * write and read semantics caused #509: yesterday's file downloaded
+ * today would look under today's bucket → blob_missing → 404, even
+ * though the blob was still sitting in yesterday's directory.
+ *
+ * The file_id, ext and dateBucket are validated against strict regexes
+ * before any I/O; a poisoned index bucket (e.g. `../etc`) is rejected
+ * here just as file_id path-escape attempts are.
+ */
+export function pathForExistingBlob(dateBucket: string, fileId: string, ext: string, opts: { uploadsRoot?: string } = {}): GeneratedFile {
+  if (!FILE_ID_REGEX.test(fileId)) throw new Error(`file_id "${fileId}" is invalid`);
+  if (ext && !/^\.[A-Za-z0-9]{1,16}$/.test(ext)) throw new Error(`ext "${ext}" is invalid`);
+  if (typeof dateBucket !== "string" || !DATE_BUCKET_REGEX.test(dateBucket)) {
+    throw new Error(`date_bucket "${dateBucket}" is invalid`);
+  }
   const root = opts.uploadsRoot ?? getUploadsRoot();
   const relativePath = join(dateBucket, fileId + ext);
   const absolutePath = join(root, relativePath);

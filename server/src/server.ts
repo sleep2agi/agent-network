@@ -16,6 +16,7 @@ import {
   MAX_REQUEST_CONTENT_LENGTH,
   MAX_UPLOAD_BYTES,
   buildStoragePath,
+  pathForExistingBlob,
   generateFileId,
   getUploadsRoot,
   indexEntryPath,
@@ -1790,7 +1791,11 @@ return Bun.serve({
 
       let storage;
       try {
-        storage = buildStoragePath(entry.file_id, entry.ext);
+        // #509 fix: use the date_bucket recorded in the index at upload
+        // time, NOT today's date. buildStoragePath computes today; that is
+        // correct for new uploads only. Yesterday's file lives in
+        // yesterday's bucket forever — read path must respect that.
+        storage = pathForExistingBlob(entry.date_bucket, entry.file_id, entry.ext);
       } catch {
         return withCors(req, Response.json({ ok: false, error: "index_invalid" }, { status: 500 }));
       }
