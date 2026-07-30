@@ -33,8 +33,11 @@ sg docker -c 'docker run --rm qa-517-mcp-write-scope'
 
 Reports: `docs/tests/report-qa-517.txt` (fix branch, 22/22 PASS) and
 `docs/tests/report-qa-517-red-baseline.txt` (same suite against
-origin/main's server: 11 FAIL — proves the suite detects the pre-fix
-behavior, including the old misleading error text).
+origin/main's server: 11 assertions turn red, including the old
+misleading error text — note some are derived assertions of the same
+underlying operation, e.g. S1 send_task failing implies S2's task-row
+lookup finds nothing; the baseline proves the suite detects pre-fix
+behavior, not that there are 11 independent root causes).
 
 ntok_ zero-change pins are covered in the unit suite (they need a minted
 network token; unit layer injects it, keeping this suite server-API-only).

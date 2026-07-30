@@ -36,19 +36,9 @@ sg docker -c 'docker run --rm anet-qa-hub-09'
 
 ## 抠出的额外契约（R14 实测发现）
 
-**cancel_task 需要 network-scoped writer（NTOK）**，UTOK 直接调返回 `{"ok":false,"error":"permission_denied"}`。
+**cancel_task 的调用方网络解析（#517 之后的语义）**：UTOK 恰好属于 1 个 network 时 hub 自动解析、直接成功；跨多个 network 时须显式传 `network_id`，否则返回 `{"ok":false,"error":"network_id_required"}`（不再是旧的 `permission_denied`）。`network_id` 已是 cancel_task 的 optional 参数。
 
-[tools.ts L812](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L812)：
-```ts
-const effectiveNetId = getNetworkId(null);
-if (!canWrite(effectiveNetId)) return { ... "permission_denied" };
-```
-
-UTOK 没有 inherent network，`getNetworkId(null)` 拿不到 network，`canWrite(null)` false。
-**SDK 含义**：admin / dashboard 想取消任务，要么用 NTOK，要么通过 REST 端点（不存在）。
-要么 hub 加 UTOK + 显式 network_id 支持。
-
-(这是测试逼出来的真 SDK 设计 gap。)
+> 历史注（R14 实测，#517 修复前）：当时 UTOK 调 cancel_task 一律 `permission_denied` —— `getNetworkId(null)` 拿不到 network、`canWrite(null)` false，本 README 曾在此记下根因与修法（"hub 加 UTOK + 显式 network_id 支持"）。该 gap 由 [#517](https://github.com/sleep2agi/agent-network/issues/517) / PR #519 落实：单网络自动解析（与 REST `POST /api/task` 同规则）+ 全部写工具补 optional `network_id` + 错误码分三真因（`network_id_required` / `access_denied` / `permission_denied`=仅 viewer）。详见 [troubleshooting 分诊表](../../docs-site/docs/troubleshooting.md)。
 
 ## 锁住的契约
 
