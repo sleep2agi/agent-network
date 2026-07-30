@@ -510,3 +510,116 @@ describe("f28a6c1b CR3 — network-scoped filter matrix (M1-M7)", () => {
   // resolves via network prefix, which is what M2's cross-network
   // absence assertion already pins.
 });
+
+// ── #506 — same alias, two networks: /health sse_sessions must not cross ──
+//
+// #505 restored auth-gated `sse_sessions`. Its member filter parses the
+// `{networkId}:{alias}` key prefix and keeps only the caller's networks.
+// That was verified at merge time by a standalone validator, but a
+// validator does not re-run on future refactors — this pins it.
+//
+// Construction: the dashboard-user SSE gate only lets a caller subscribe
+// to its own username (gate 4a), so two users can never share one key that
+// way. Gate 4b is the usable path: any member may subscribe to an alias
+// that exists as a session IN THEIR network. So we seed a session row with
+// the SAME alias in two different networks and have each network's own
+// member subscribe to it — producing `{N_A}:{alias}` and `{N_B}:{alias}`
+// live at once, which is exactly the collision the filter must separate.
+//
+// Mutation-red (verified by hand, see the PR): replacing the member filter
+// with `scopedSessions = sse.sessions` turns the two "must NOT contain the
+// other network's key" assertions red.
+describe("#506 cross-network isolation of /health sse_sessions (same alias, two networks)", () => {
+  const SHARED_ALIAS = "shared-alias-506";
+  let aToken = "", aNet = "", aName = "";
+  let bToken = "", bNet = "", bName = "";
+  let readerA: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  let readerB: ReadableStreamDefaultReader<Uint8Array> | null = null;
+
+  beforeAll(async () => {
+    const sfx = `${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    const pw = "BootstrapPw123Aa!";
+
+    // Probe users are registered AFTER the suite's seed user, so neither is
+    // the auto-admin first user. Asserted below rather than assumed: an
+    // admin caller takes the unfiltered branch and would make these tests
+    // pass while proving nothing.
+    const ra = register(`h506_a_${sfx}`, pw, undefined, "seed");
+    const rb = register(`h506_b_${sfx}`, pw, undefined, "seed");
+    if (!ra.ok || !ra.token || !rb.ok || !rb.token) throw new Error("506 register failed");
+    aName = `h506_a_${sfx}`; aToken = ra.token; aNet = ra.network_id ?? "";
+    bName = `h506_b_${sfx}`; bToken = rb.token; bNet = rb.network_id ?? "";
+    if (!aNet || !bNet || aNet === bNet) throw new Error("506 needs two distinct networks");
+    db.run("UPDATE users SET role = 'user' WHERE username IN (?1, ?2)", [aName, bName]);
+
+    // Same alias name, one session row per network → gate 4b lets each
+    // network's own member subscribe to it.
+    for (const [net, tag] of [[aNet, "a"], [bNet, "b"]] as const) {
+      db.run(
+        `INSERT INTO sessions (resume_id, alias, network_id, last_seen_at, status)
+         VALUES (?1, ?2, ?3, datetime('now'), 'idle')`,
+        [`s_506_${tag}_${sfx}`, SHARED_ALIAS, net],
+      );
+    }
+
+    const sub = async (token: string, net: string) => {
+      const res = await fetch(
+        `${BASE}/events/${encodeURIComponent(SHARED_ALIAS)}?network_id=${encodeURIComponent(net)}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if (res.status !== 200) throw new Error(`506 SSE subscribe failed (${net}): ${res.status}`);
+      const rd = res.body!.getReader();
+      await rd.read(); // connected frame → key registered
+      return rd;
+    };
+    readerA = await sub(aToken, aNet);
+    readerB = await sub(bToken, bNet);
+  });
+
+  afterAll(() => {
+    try { readerA?.cancel(); } catch {}
+    try { readerB?.cancel(); } catch {}
+  });
+
+  test("probe users are NOT admin (an admin caller would bypass the filter and prove nothing)", () => {
+    for (const n of [aName, bName]) {
+      const row = db.get<{ role: string }>("SELECT role FROM users WHERE username = ?1", n);
+      expect(row?.role).not.toBe("admin");
+    }
+  });
+
+  test("both same-alias keys are live at once (the collision actually exists)", async () => {
+    // Read through the ops endpoint with the admin token: if this shows only
+    // one of the two keys, the fixture never built the collision and the
+    // isolation assertions below would be vacuous.
+    const res = await fetch(`${BASE}/api/stats/sse`, { headers: { Authorization: `Bearer ${adminToken}` } });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { sessions?: Record<string, number> };
+    const keys = Object.keys(body.sessions ?? {});
+    expect(keys).toContain(`${aNet}:${SHARED_ALIAS}`);
+    expect(keys).toContain(`${bNet}:${SHARED_ALIAS}`);
+  });
+
+  test("member of network A sees only A's copy of the shared alias", async () => {
+    const res = await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${aToken}` } });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { sse_sessions?: Record<string, number> };
+    expect(body.sse_sessions).toBeDefined();
+    const keys = Object.keys(body.sse_sessions!);
+    expect(keys).toContain(`${aNet}:${SHARED_ALIAS}`);
+    expect(keys).not.toContain(`${bNet}:${SHARED_ALIAS}`);
+    // Nothing from the other network at all, by any key shape.
+    expect(keys.some((k) => k.startsWith(`${bNet}:`))).toBe(false);
+  });
+
+  test("member of network B sees only B's copy (reverse direction)", async () => {
+    const res = await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${bToken}` } });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { sse_sessions?: Record<string, number> };
+    expect(body.sse_sessions).toBeDefined();
+    const keys = Object.keys(body.sse_sessions!);
+    expect(keys).toContain(`${bNet}:${SHARED_ALIAS}`);
+    expect(keys).not.toContain(`${aNet}:${SHARED_ALIAS}`);
+    expect(keys.some((k) => k.startsWith(`${aNet}:`))).toBe(false);
+  });
+});
