@@ -180,6 +180,15 @@ export type UploadIndexEntry = {
   mime: string;        // best-effort mime from the multipart Content-Type
   size: number;        // byte length of the binary
   owner?: string;      // upload token id / username, for traceability
+  // Written by the upload handler as `authCtx?.userId ?? null`, so `null`
+  // is a real on-disk value — the type must say so rather than pretend
+  // the field is `string | undefined`.
+  owner_id?: string | null;
+  // #503 — network the upload is attributed to. The key is OMITTED (not
+  // written as null) when there is no attribution, so "absent" and
+  // "unattributed" are the same on-disk shape and legacy entries written
+  // before #503 are indistinguishable from new unattributed ones.
+  network_id?: string;
   uploaded_at: string; // ISO 8601
 };
 
@@ -198,6 +207,12 @@ export function indexEntryPath(fileId: string, opts: { uploadsRoot?: string } = 
 export function validateIndexEntry(entry: unknown): entry is UploadIndexEntry {
   if (!entry || typeof entry !== "object") return false;
   const e: any = entry;
+  // #503 — if the network_id key is present it must be a non-empty string.
+  // An absent key is valid (legacy entries + unattributed uploads); that
+  // keeps this in sync with the writer, which omits the key entirely
+  // rather than writing null. owner_id is deliberately NOT constrained
+  // here — existing entries legitimately carry owner_id=null.
+  if ("network_id" in e && !(typeof e.network_id === "string" && e.network_id.length > 0)) return false;
   return (
     typeof e.file_id === "string" && FILE_ID_REGEX.test(e.file_id) &&
     typeof e.date_bucket === "string" && /^\d{4}-\d{2}-\d{2}$/.test(e.date_bucket) &&

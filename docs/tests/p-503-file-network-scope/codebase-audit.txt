@@ -1,0 +1,59 @@
+# #503 codebase-consistency audit
+# generated 2026-07-30T05:54:25Z  base=85e5c140f682c3af0d9d8b870a4c2a68273bc953
+
+== A. every /api/files route (origin/main) ==
+219:// #495 — shared authorization gate for /api/files/:file_id downloads.
+1636:    // path. The download URL `/api/files/<file_id>` requires the same
+1746:        // Persist the index entry so /api/files/<file_id> can do an
+1772:        url: `/api/files/${fileId}`,
+1779:    // GET or HEAD /api/files/:file_id with Bearer auth + ownership
+1794:    // or dashboard-proxy path for /api/files MUST route through this
+1872:        console.error("[/api/files] size mismatch:", { fileId, indexed: entry.size, onDisk: st.size });
+
+== A'. every /api/files route (this branch) ==
+267:// #495/#503 — shared authorization gate for /api/files/:file_id downloads.
+1699:    // path. The download URL `/api/files/<file_id>` requires the same
+1902:        // Persist the index entry so /api/files/<file_id> can do an
+1930:        url: `/api/files/${fileId}`,
+1937:    // GET or HEAD /api/files/:file_id with Bearer auth + ownership
+1952:    // or dashboard-proxy path for /api/files MUST route through this
+2030:        console.error("[/api/files] size mismatch:", { fileId, indexed: entry.size, onDisk: st.size });
+
+== A''. authorizeFileDownload call sites (this branch) — must be exactly one ==
+297:export function authorizeFileDownload(
+1988:      if (!authorizeFileDownload(resolvePrincipal(req), normalizeEntry(entry))) {
+
+== B. canRestWriteNetwork sites (origin/main) ==
+448:function canRestWriteNetwork(authCtx: { userId: string; networkId: string | null } | null, networkId: string | null, isAdmin: boolean): boolean {
+1950:      if (!canRestWriteNetwork(restAuth, taskNetId, isAdmin)) {
+2087:      if (!canRestWriteNetwork(restAuth, restScope.networkId, isAdmin)) {
+2286:      if (!canRestWriteNetwork(restAuth, nodeNetId, isAdmin)) {
+2361:    // + canRestWriteNetwork (member with role above viewer, or admin, or
+2396:      if (!canRestWriteNetwork(restAuth, nodeNetId, isAdmin)) {
+2495:      if (!canRestWriteNetwork(restAuth, nodeNetId, isAdmin)) {
+
+== B'. canRestWriteNetwork sites (this branch) ==
+511:function canRestWriteNetwork(authCtx: { userId: string; networkId: string | null } | null, networkId: string | null, isAdmin: boolean): boolean {
+1838:      if (!canRestWriteNetwork(authCtx, uploadNetId, principal.kind === "admin-utok")) {
+2108:      if (!canRestWriteNetwork(restAuth, taskNetId, isAdmin)) {
+2245:      if (!canRestWriteNetwork(restAuth, restScope.networkId, isAdmin)) {
+2444:      if (!canRestWriteNetwork(restAuth, nodeNetId, isAdmin)) {
+2519:    // + canRestWriteNetwork (member with role above viewer, or admin, or
+2554:      if (!canRestWriteNetwork(restAuth, nodeNetId, isAdmin)) {
+2653:      if (!canRestWriteNetwork(restAuth, nodeNetId, isAdmin)) {
+
+== C. networks-existence lookups (origin/main) ==
+1074:        const net = db.get<any>("SELECT * FROM networks WHERE network_id = ?1", resolved.networkId);
+1180:      const network = db.get<any>("SELECT * FROM networks WHERE network_id = ?1", networkId);
+
+== C'. networks-existence lookups (this branch) ==
+1137:        const net = db.get<any>("SELECT * FROM networks WHERE network_id = ?1", resolved.networkId);
+1243:      const network = db.get<any>("SELECT * FROM networks WHERE network_id = ?1", networkId);
+1823:        const networkRow = db.get<any>("SELECT * FROM networks WHERE network_id = ?1", uploadNetId);
+
+== D. shared REST network-scope guard (owns non-member ?network_id= rejection) ==
+1408:    if (restScope.denied) {
+1409:      return withCors(req, Response.json({ ok: false, error: restScope.denied }, { status: 403 }));
+1804:            // here: the REST scope guard (`restScope.denied`) already
+
+== E. dashboard proxy — unchanged by this branch ==

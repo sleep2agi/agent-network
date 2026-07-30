@@ -1,0 +1,196 @@
+# #503 mutation matrix — every row below was produced by actually applying
+# the mutation to source, running the suite, and restoring. No mutation was
+# judged by inspection. Runner: scratchpad/503/mutate.py + mutate2.py
+# generated 2026-07-30T05:54:57.125242Z
+
+## Part 1 — mutation -> rows that turned RED
+
+[M1] RED  (claimed: D3,D5)
+      mutation: authorizeFileDownload: disable the whole #503 network branch (falls back to pre-#503 owner-only)
+      RED  #503 D — download network scope > D3: utok_ non-admin who is a member of N1 reads a file in N1 → 200 (the carve-out #495 deferred)
+      RED  #503 D — download network scope > D5: utok_ non-admin with role viewer in N1 reads a file in N1 → 200 (viewer is read-only, not read-never)
+      RED  #503 D — download network scope > 🔴 D15: an ntok_ ISSUED BY AN ADMIN, bound to N1, reads a file in N2 → 404
+      RED  #503 — authorizeFileDownload covers every Principal variant > ntok_ is allowed only in its bound network
+      RED  #503 — authorizeFileDownload covers every Principal variant > an attributed file ignores owner match — network membership is the rule
+
+[M2] RED  (claimed: D2,E2,E6)
+      mutation: authorizeFileDownload: ntok_ bound-network equality -> always true (cross-network ntok_ allowed)
+      RED  #503 D — download network scope > 🔴 D2: ntok_ bound to N2 reads a file in N1 → 404 (the cross-network leak #503 closes)
+      RED  #503 D — download network scope > 🔴 D15: an ntok_ ISSUED BY AN ADMIN, bound to N1, reads a file in N2 → 404
+      RED  #503 E — denied responses carry no enumeration signal > E2: cross-network deny (D2) is byte-identical to unknown file_id
+      RED  #503 E — denied responses carry no enumeration signal > E6: HEAD on a cross-network deny matches HEAD on unknown file_id (status + headers)
+      RED  #503 — authorizeFileDownload covers every Principal variant > ntok_ is allowed only in its bound network
+
+[M3] RED  (claimed: D4,E3)
+      mutation: authorizeFileDownload: utok_ membership lookup -> always true (any authenticated user reads any network)
+      RED  #503 D — download network scope > 🔴 D4: utok_ non-admin who is not a member of N1 reads a file in N1 → 404
+      RED  #503 E — denied responses carry no enumeration signal > E3: cross-network deny via utok_ (D4) is byte-identical to unknown file_id
+      RED  #503 — authorizeFileDownload covers every Principal variant > an attributed file ignores owner match — network membership is the rule
+
+[M4] RED  (claimed: D15)
+      mutation: resolvePrincipal: classify admin BEFORE bound network (admin-issued ntok_ takes the admin bypass)
+      RED  #503 D — download network scope > 🔴 D15: an ntok_ ISSUED BY AN ADMIN, bound to N1, reads a file in N2 → 404
+
+[M5] RED  (claimed: U2,U4,U6,U8,U12,U14)
+      mutation: upload writer: stop persisting network_id on the index entry
+      RED  #503 U — upload network attribution > U4: ntok_(N1), no param → 200 and entry.network_id === N1 (bound network is the attribution)
+      RED  #503 U — upload network attribution > U6: utok_ single-network non-admin, no param → 200 and entry.network_id === N1
+      RED  #503 U — upload network attribution > U8: utok_ multi-network non-admin, param=N1 (a network they belong to) → 200 and entry.network_id === N1
+      RED  #503 U — upload network attribution > U12: admin utok_, param=N1 → 200 and entry.network_id === N1
+      RED  #503 U — upload network attribution > U14: utok_ member of N1 but viewer in N2, param=N2 → 403 permission_denied
+      RED  #503 D — download network scope > (unnamed)
+      RED  #503 — network scope does not regress cross-day downloads (#509) > a file indexed under a past date_bucket is still readable by its network
+
+[M6] RED  (claimed: U3,U3b)
+      mutation: upload writer: persist network_id unconditionally (writes null when unattributed)
+      RED  #503 U3 — DEV_OPEN anonymous uploads are never attributed to a network > U3: anonymous DEV_OPEN upload asking for a REAL network → 200, but the network_id key is absent
+      RED  #503 U3 — DEV_OPEN anonymous uploads are never attributed to a network > U3b: an unattributed DEV_OPEN blob is still readable by its own server (writer and validator agree)
+
+[M7] RED  (claimed: E5)
+      mutation: validateIndexEntry: drop the network_id shape check (empty-string attribution accepted)
+      RED  #503 E — denied responses carry no enumeration signal > E5: schema-invalid index entry is byte-identical to unknown file_id
+
+[M8] RED  (claimed: U5)
+      mutation: upload: drop the ntok_ conflict check (query param silently overrides the bound network)
+      RED  #503 U — upload network attribution > U5: ntok_(N1), param=N2 → 400 network_id_conflict (never silently overridden)
+
+[M9] RED  (claimed: U11)
+      mutation: upload: admin with no param falls back to the requested/any network instead of 400
+      RED  #503 U — upload network attribution > U11: admin utok_, no param → 400 network_id_required (attribution is never guessed for admins)
+
+[M10] RED  (claimed: U7)
+      mutation: upload: multi-network utok_ picks the first network instead of demanding an explicit one
+      RED  #503 U — upload network attribution > U7: utok_ multi-network non-admin, no param → 400 network_id_required ('first network' is never assumed)
+
+[M11] RED  (claimed: U13,U14)
+      mutation: upload: remove the canRestWriteNetwork gate (viewers may write)
+      RED  #503 U — upload network attribution > U13: utok_ viewer, single network, no param → 403 permission_denied (read-only role cannot write)
+      RED  #503 U — upload network attribution > U14: utok_ member of N1 but viewer in N2, param=N2 → 403 permission_denied
+
+[M12] RED  (claimed: U10b,E9)
+      mutation: upload: remove the networks-existence check (uploads attributed to a nonexistent network)
+      RED  #503 U — upload network attribution > U10b: admin utok_, param=N_FAKE → 400 unknown_network (admin already knows the network list; no oracle)
+      RED  #503 E — denied responses carry no enumeration signal > E9: admin uploading to a nonexistent network gets the distinguishable 400 (no oracle — admin sees the list anyway)
+
+[M13] RED  (claimed: D8)
+      mutation: authorizeFileDownload: remove the legacy owner-match rule
+      RED  #503 D — download network scope > D8: utok_ non-admin owner reads their own legacy (no network_id) file → 200
+      RED  #503 — authorizeFileDownload covers every Principal variant > legacy entries keep the pre-#503 owner-match rule
+
+[M14] RED  (claimed: D9)
+      mutation: authorizeFileDownload: widen legacy owner-match to any authenticated caller
+      RED  #503 D — download network scope > 🔴 D9: utok_ non-admin non-owner reads someone else's legacy file → 404 (owner match did not widen)
+      RED  #503 — authorizeFileDownload covers every Principal variant > legacy entries keep the pre-#503 owner-match rule
+
+[M15] RED  (claimed: D12)
+      mutation: authorizeFileDownload: allow null-owner legacy entries regardless of DEV_OPEN
+      RED  #503 D — download network scope > D12: utok_ non-admin reads a null-owner legacy file with DEV_OPEN off → 404 fail-closed
+      RED  #503 — authorizeFileDownload covers every Principal variant > legacy entries keep the pre-#503 owner-match rule
+
+[M16] RED  (claimed: D6,D10,D14)
+      mutation: authorizeFileDownload: remove the admin-utok bypass
+      RED  #503 D — download network scope > D6: admin utok_ reads a file in a network → 200 (operational access preserved)
+      RED  #503 D — download network scope > D10: admin utok_ reads a legacy file → 200 (存量可读性不变)
+      RED  #503 D — download network scope > D14: admin utok_ reads a null-owner legacy file → 200
+      RED  #503 — authorizeFileDownload covers every Principal variant > legacy-master and admin-utok bypass in both entry shapes
+
+[M17] RED  (claimed: D7,D11,D13)
+      mutation: authorizeFileDownload: remove the legacy-master bypass
+      RED  #503 D — download network scope > D7: legacy master reads a file in a network → 200 (single-tenant deployments)
+      RED  #503 D — download network scope > D11: legacy master reads a legacy file → 200
+      RED  #503 D — download network scope > D13: legacy master reads a null-owner legacy file → 200
+      RED  #503 — authorizeFileDownload covers every Principal variant > legacy-master and admin-utok bypass in both entry shapes
+
+[M18] RED  (claimed: U1,U2)
+      mutation: requireAuth: let master tokens through on write verbs (RFC-001 read-only rule relaxed)
+      RED  #503 U — upload network attribution > U1: legacy master upload, no param → 401 (master tokens are read-only, RFC-001)
+      RED  #503 U — upload network attribution > U2: legacy master upload, param=N1 → 401 (a query param does not buy write access)
+
+[M19] RED  (claimed: D1,U6,fixture)
+      mutation: normalizeEntry: stop narrowing network_id to a non-empty string
+      RED  #503 — authorizeFileDownload covers every Principal variant > normalizeEntry is the only place on-disk values are narrowed
+
+[M20] RED  (claimed: ADMIN-PROBE)
+      mutation: fixture: point nonAdminUserA at the FIRST registered user (auto-admin) — constraint-3 gate
+      RED  #503 — fixture integrity > probes are registered after the auto-admin slot is taken, and are not admin
+      RED  #503 — fixture integrity > network membership is shaped as the matrix assumes
+      RED  #503 U — upload network attribution > U6: utok_ single-network non-admin, no param → 200 and entry.network_id === N1
+      RED  #503 U — upload network attribution > U9: utok_ non-admin, param=N3 (exists, not a member) → 403 at the shared REST scope guard
+      RED  #503 D — download network scope > (unnamed)
+      RED  #503 E — denied responses carry no enumeration signal > E2: cross-network deny (D2) is byte-identical to unknown file_id
+      RED  #503 E — denied responses carry no enumeration signal > E3: cross-network deny via utok_ (D4) is byte-identical to unknown file_id
+      RED  #503 E — denied responses carry no enumeration signal > E4: corrupted index JSON is byte-identical to unknown file_id
+      RED  #503 E — denied responses carry no enumeration signal > E5: schema-invalid index entry is byte-identical to unknown file_id
+      RED  #503 E — denied responses carry no enumeration signal > E6: HEAD on a cross-network deny matches HEAD on unknown file_id (status + headers)
+      RED  #503 E — denied responses carry no enumeration signal > E7: upload to a network you are not a member of → 403 with the shared scope-guard body
+      RED  #503 E — denied responses carry no enumeration signal > E8: for a non-admin, 'network exists but is not yours' and 'network does not exist' are byte-identical
+      RED  #503 — network scope does not regress cross-day downloads (#509) > a file indexed under a past date_bucket is still readable by its network
+
+[M21] RED  (claimed: D3,D4,D5,D9)
+      mutation: promote the download-only probes (userB / outsider / viewerOnly) to admin; every upload in the fixture still succeeds, so each D row must catch it by itself
+      RED  #503 — fixture integrity > probes are registered after the auto-admin slot is taken, and are not admin
+      RED  #503 U — upload network attribution > U7: utok_ multi-network non-admin, no param → 400 network_id_required ('first network' is never assumed)
+      RED  #503 U — upload network attribution > U8: utok_ multi-network non-admin, param=N1 (a network they belong to) → 200 and entry.network_id === N1
+      RED  #503 U — upload network attribution > U9: utok_ non-admin, param=N3 (exists, not a member) → 403 at the shared REST scope guard
+      RED  #503 U — upload network attribution > U10a: utok_ non-admin, param=N_FAKE (does not exist) → 403, indistinguishable from U9
+      RED  #503 U — upload network attribution > U13: utok_ viewer, single network, no param → 403 permission_denied (read-only role cannot write)
+      RED  #503 D — download network scope > D3: utok_ non-admin who is a member of N1 reads a file in N1 → 200 (the carve-out #495 deferred)
+      RED  #503 D — download network scope > 🔴 D4: utok_ non-admin who is not a member of N1 reads a file in N1 → 404
+      RED  #503 D — download network scope > D5: utok_ non-admin with role viewer in N1 reads a file in N1 → 200 (viewer is read-only, not read-never)
+      RED  #503 D — download network scope > 🔴 D9: utok_ non-admin non-owner reads someone else's legacy file → 404 (owner match did not widen)
+      RED  #503 E — denied responses carry no enumeration signal > E3: cross-network deny via utok_ (D4) is byte-identical to unknown file_id
+      RED  #503 E — denied responses carry no enumeration signal > E7: upload to a network you are not a member of → 403 with the shared scope-guard body
+      RED  #503 E — denied responses carry no enumeration signal > E8: for a non-admin, 'network exists but is not yours' and 'network does not exist' are byte-identical
+
+[M22] RED  (claimed: D8,D12)
+      mutation: promote nonAdminUserA to admin and give its fixture uploads an explicit network_id, isolating 'the probe is an admin' from 'admins must name a network'
+      RED  #503 — fixture integrity > probes are registered after the auto-admin slot is taken, and are not admin
+      RED  #503 U — upload network attribution > U6: utok_ single-network non-admin, no param → 200 and entry.network_id === N1
+      RED  #503 D — download network scope > D8: utok_ non-admin owner reads their own legacy (no network_id) file → 200
+      RED  #503 D — download network scope > D12: utok_ non-admin reads a null-owner legacy file with DEV_OPEN off → 404 fail-closed
+      RED  #503 E — denied responses carry no enumeration signal > E4: corrupted index JSON is byte-identical to unknown file_id
+      RED  #503 E — denied responses carry no enumeration signal > E5: schema-invalid index entry is byte-identical to unknown file_id
+      RED  #503 — network scope does not regress cross-day downloads (#509) > a file indexed under a past date_bucket is still readable by its network
+
+## Part 2 — row -> mutations that made it RED
+## (a row with no mutation is a happy-path/unreachability row; noted inline)
+
+  D2    <- M2
+  D3    <- M1,M21
+  D4    <- M21,M3
+  D5    <- M1,M21
+  D6    <- M16
+  D7    <- M17
+  D8    <- M13,M22
+  D9    <- M14,M21
+  D10   <- M16
+  D11   <- M17
+  D12   <- M15,M22
+  D13   <- M17
+  D14   <- M16
+  D15   <- M1,M2,M4
+  E2    <- M2,M20
+  E3    <- M20,M21,M3
+  E4    <- M20,M22
+  E5    <- M20,M22,M7
+  E6    <- M2,M20
+  E7    <- M20,M21
+  E8    <- M20,M21
+  E9    <- M12
+  U1    <- M18
+  U2    <- M18
+  U3    <- M6
+  U3b   <- M6
+  U4    <- M5
+  U5    <- M8
+  U6    <- M20,M22,M5
+  U7    <- M10,M21
+  U8    <- M21,M5
+  U9    <- M20,M21
+  U10a  <- M21
+  U10b  <- M12
+  U11   <- M9
+  U12   <- M5
+  U13   <- M11,M21
+  U14   <- M11,M5
+  D1    <- (none) happy path (ntok_ reads its own network); guarded indirectly by M2/M19
