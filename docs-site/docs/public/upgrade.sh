@@ -5,8 +5,7 @@
 # (channel-aware multi-package upgrade — #88), and falls back to a plain
 # `npm install -g @sleep2agi/agent-network@latest` if only the CLI is missing.
 # This upgrades an existing host; it is not a fresh-server installer.
-# Either way, the dashboard tmux session is restarted and the npx cache is
-# cleared so the new pinned dashboard version is pulled.
+# Either way, the dashboard tmux session is restarted.
 #
 # Usage (on a host with an existing Agent Network installation):
 #   curl -fsSL https://anet.sh/upgrade.sh | bash
@@ -14,8 +13,7 @@
 # Steps:
 #   1. Run `anet upgrade --channel latest` (or fallback npm install)
 #   2. Kill the running anet-dashboard tmux session
-#   3. Clear the npx cache (forces new pinned Dashboard version)
-#   4. Restart the Dashboard in the same tmux session
+#   3. Restart the Dashboard in the same tmux session
 
 set -euo pipefail
 
@@ -29,7 +27,7 @@ fi
 # Make sure npm-global is on PATH.
 export PATH=~/.npm-global/bin:$PATH
 
-echo "[1/4] Upgrading agent-network (channel: latest) ..."
+echo "[1/3] Upgrading agent-network (channel: latest) ..."
 if command -v anet >/dev/null 2>&1; then
   # Channel-aware multi-package upgrade (#88). anet upgrade resolves the
   # right dist-tag, surfaces the plan, and installs whatever is globally
@@ -43,15 +41,11 @@ else
 fi
 
 echo ""
-echo "[2/4] Stopping the dashboard tmux session ..."
+echo "[2/3] Stopping the dashboard tmux session ..."
 tmux kill-session -t anet-dashboard 2>/dev/null || true
 
 echo ""
-echo "[3/4] Clearing the npx cache (so the new Dashboard version is pulled) ..."
-rm -rf ~/.npm/_npx
-
-echo ""
-echo "[4/4] Restarting the dashboard ..."
+echo "[3/3] Restarting the dashboard ..."
 DASHBOARD_HOST="${ANET_DASHBOARD_HOST:-${ANET_HUB_IP:-127.0.0.1}}"
 PATH_PREFIX="PATH=~/.npm-global/bin:\$PATH"
 tmux new-session -d -s anet-dashboard -n dashboard "$PATH_PREFIX anet hub dashboard --ip $DASHBOARD_HOST; bash"
