@@ -28,7 +28,7 @@ fi
 # Make sure npm-global is on PATH.
 export PATH=~/.npm-global/bin:$PATH
 
-echo "[1/4] Upgrading agent-network (channel: latest) ..."
+echo "[1/3] Upgrading agent-network (channel: latest) ..."
 if command -v anet >/dev/null 2>&1; then
   # Channel-aware multi-package upgrade (#88). anet upgrade resolves the
   # right dist-tag, surfaces the plan, and installs whatever is globally
@@ -42,15 +42,12 @@ else
 fi
 
 echo ""
-echo "[2/4] Stopping the dashboard tmux session ..."
+echo "[2/3] Stopping the dashboard tmux session ..."
 tmux kill-session -t anet-dashboard 2>/dev/null || true
 
-echo ""
-echo "[3/4] Clearing the npx cache (so the new Dashboard version is pulled) ..."
-rm -rf ~/.npm/_npx
 
 echo ""
-echo "[4/4] Restarting the dashboard ..."
+echo "[3/3] Restarting the dashboard ..."
 HUB_IP="${ANET_HUB_IP:-0.0.0.0}"
 PATH_PREFIX="PATH=~/.npm-global/bin:\$PATH"
 tmux new-session -d -s anet-dashboard -n dashboard "$PATH_PREFIX anet hub dashboard --ip $HUB_IP; bash"
