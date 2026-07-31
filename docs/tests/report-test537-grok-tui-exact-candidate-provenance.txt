@@ -99,6 +99,27 @@ The agent-node runtime list contains `grok-build-acp` only; it does not contain
 provide the shared Grok TUI runtime. This is a user-path control, not an
 inference from version numbers.
 
+Main-integration preflight
+--------------------------
+A read-only three-way merge preflight used:
+
+  main=71b3d8964f780d8e9503f52624d1a596e6fb4660
+  candidate=4854928b35c14abaaae788aba7ec043cea10643b
+  merge_base=4437ffb30737c333ffdd3b51281260103f5d2983
+
+The branches have 248 main-only commits and 84 candidate-only commits.
+`git merge-tree` reports 18 files changed on both sides; 17 contain a total of
+55 conflict blocks. The largest production hotspots are:
+
+  agent-network/bin/cli.ts: 27 conflict blocks
+  agent-node/src/cli.ts: 7 conflict blocks
+  agent-network/src/normalize-runtime.ts: 1 conflict block
+
+The remaining conflicts cover package manifests/lockfiles, runtime and deploy
+documentation, and RFC-030. This proves that delivery requires an explicit
+owner-led integration onto current main; treating the old preview branch as a
+merge-ready release candidate would be unsafe.
+
 Verdict
 -------
 FAIL.
