@@ -5,11 +5,15 @@ This log runs reverse-chronologically. **The version scheme was reshuffled once*
 - **From 2026-05 onward**: gradual v0.6 → v0.7 → v0.8 → v0.9 → v0.10 → v0.11 releases; the `v0.X.Y` format mirrors `commhub-server`'s `0.X.Y` semver style.
 - **Before 2026-04**: used `v1.0.0-preview.N` / `v2.1` style version numbers that overpromised. Deprecated.
 - **Current stable**: whatever npm's `latest` tag points to (see [Versioning](/en/guide/versioning) — npm `latest` is authoritative); v0.8.1 was the first Apache 2.0 OSS release.
-- **Current preview**: Grok Co-presence TUI (`agent-network@2.3.0-preview.23` / `agent-node@2.5.0-preview.21`, first entry below; shipped via npm `@preview` tag; not yet promoted to `@latest`).
+- **Current preview**: follow npm's `preview` dist-tag. Current published packages do not include `grok-build-cli` / `anet grok attach`; see [Issue #537](https://github.com/sleep2agi/agent-network/issues/537) for Grok TUI status.
 - Older entries kept for git-blame continuity — see v1.0.0-preview / v2.1 / v0.x sections below.
 :::
 
 ## Grok Co-presence TUI (`grok-build-cli`) — preview (2026-07-15) 🟡 preview
+
+::: danger Correction — 2026-07-31
+The section below records a candidate milestone, not a currently installable feature. Rechecking the published npm packages showed that neither current `latest` nor `preview` contains `grok-build-cli` / `anet grok attach`; do not run the installation or usage commands in this historical entry. See the [Grok TUI status page](/en/guide/grok-copresence).
+:::
 
 **Version sync** (npm `@preview` tag):
 - `@sleep2agi/agent-network@2.3.0-preview.23`

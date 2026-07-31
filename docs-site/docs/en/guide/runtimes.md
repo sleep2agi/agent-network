@@ -13,6 +13,10 @@ Every Agent Node has a **Runtime** (engine kernel) that decides how the node cal
 Rows tagged `(preview)` below are **preview-only** and not selectable on stable.
 :::
 
+::: warning Grok TUI co-presence has not shipped
+`grok-build-cli` / `anet grok attach` are not in the current `latest` or `preview` packages, so they are not selectable runtimes in the table below. Use `grok-build-acp` for now; it does not support attach. See the [Grok TUI status page](/en/guide/grok-copresence).
+:::
+
 | Runtime | npm package / engine | When to pick | Default models | Prereq auth | Wizard behavior (`anet node create`) |
 |---|---|---|---|---|---|
 | `claude-code-cli` **⭐ recommended start** | spawn local `claude` CLI | "Just use Claude in the terminal" — **zero config if you already have the Claude subscription** (the **first choice** if you have a Claude subscription — most stable) | Claude Sonnet / Opus (subscription) | `claude auth login` done | Wizard ends right after pick, **skips vendor / model / API-key** |
@@ -30,10 +34,9 @@ Rows tagged `(preview)` below are **preview-only** and not selectable on stable.
 - **Writing code / running commands** → `codex-sdk`
 - **Human and Agent sharing one Codex TUI/thread** → preview `codex-app-server` + `anet node start <alias> --copresence` ([full guide](/en/guide/codex-copresence))
 - **Using xAI Grok Build** → `grok-build-acp` ([detailed runtime guide ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md))
-- **Human + agent sharing one Grok TUI (co-presence, attach to the live Grok session)** → `grok-build-cli` ([Grok Co-presence TUI · preview](/en/guide/grok-copresence))
 - **Use the public sst/opencode CLI as a multi-vendor front-end (unified session/auth)** → `opencode-cli` (needs the local `opencode` CLI + an Anthropic/OpenAI env key, [RFC-029](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md))
 - **Reach a vendor that's NOT in the built-in list** (GLM / Kimi / OpenRouter / vLLM / SiliconFlow / Qwen ...) → `claude-agent-sdk` + pick `custom` in the vendor submenu + `ANTHROPIC_BASE_URL`
-- **Mix and match (recommended)** → run all five on one Hub, pick the best engine per role
+- **Mix and match (recommended)** → combine currently available runtimes by role on one Hub
 :::
 
 ::: tip Wizard order at a glance

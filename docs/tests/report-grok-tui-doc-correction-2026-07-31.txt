@@ -1,0 +1,39 @@
+Grok TUI documentation correction
+Date: 2026-07-31
+Base: origin/main f78c9373
+
+Scope
+-----
+- Bilingual Grok co-presence guide
+- Bilingual runtime guide
+- Bilingual changelog correction notice
+
+Authoritative package check
+---------------------------
+- @sleep2agi/agent-network: latest 2.2.21, preview 2.3.0-preview.36
+- @sleep2agi/agent-node: latest 2.4.13, preview 2.5.0-preview.27
+- Downloaded both current preview tarballs from npm and searched their built
+  JavaScript for grok-build-cli, anet grok attach, and the Grok co-presence
+  capability marker: zero matches.
+
+Documentation result
+--------------------
+- Replaced each 91-line install guide with a 20-line not-released status page.
+- Removed grok-build-cli from runtime recommendations.
+- Kept grok-build-acp as the currently available, non-attachable Grok path.
+- Corrected the changelog's current-preview summary and marked the old entry
+  as a historical candidate record whose commands must not be run.
+- Removed the stale "run all five" runtime count.
+
+Static verification
+-------------------
+- git diff --check: PASS
+- Unsupported install commands absent from both live status pages: PASS
+- Unpublished runtime absent from both recommendation lists: PASS
+- Current availability warning present in both runtime pages: PASS
+- Changelog correction present in both languages: PASS
+- Linked versioning pages exist: PASS
+
+No Docker image or npm package was built. This is a Markdown-only correction;
+the user requested conserving Codex/Claude quota, and the npm tarballs plus
+source/static checks are the relevant availability evidence.
