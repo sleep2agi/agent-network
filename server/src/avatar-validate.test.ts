@@ -60,8 +60,10 @@ describe("#462 validateAvatarUrl", () => {
     expect(validateAvatarUrl("ftp://example.com/a.png").ok).toBe(false);
   });
 
-  test("rejects relative / protocol-relative / non-URL strings", () => {
-    expect(validateAvatarUrl("/avatars/1.png").ok).toBe(false);
+  test("rejects protocol-relative / non-URL / schemeless strings", () => {
+    // SPEC CHANGE (通信龙 裁定, avatar 接线单): same-origin pool paths
+    // (/avatars/<name>.<ext>) are now ACCEPTED — that case moved to the
+    // dedicated relative-branch suite below. Everything here stays rejected.
     expect(validateAvatarUrl("//cdn.example.com/1.png").ok).toBe(false);
     expect(validateAvatarUrl("not a url").ok).toBe(false);
     expect(validateAvatarUrl("example.com/x.png").ok).toBe(false);
@@ -109,5 +111,53 @@ describe("#462 validateAvatarUrl", () => {
     const ok = base + "a".repeat(MAX_AVATAR_URL_LENGTH - base.length);
     expect(validateAvatarUrl(ok).ok).toBe(true);
     expect(validateAvatarUrl(ok + "a").ok).toBe(false);
+  });
+});
+
+// ── Same-origin relative branch (通信龙 裁定: relax to portable pool paths;
+//    absolute URLs would weld one hostname into the DB across multi-origin
+//    entry points). Each direction is its OWN test so any single guard
+//    being deleted turns its OWN assertion red (no merged catch-all).
+describe("validateAvatarUrl — same-origin relative pool paths", () => {
+  test("accepts a pool path: /avatars/avatar-09.webp", () => {
+    const r = validateAvatarUrl("/avatars/avatar-09.webp");
+    expect(r).toEqual({ ok: true, value: "/avatars/avatar-09.webp" });
+  });
+
+  test("accepts png and svg pool files", () => {
+    expect(validateAvatarUrl("/avatars/intern_avatar.png")).toEqual({ ok: true, value: "/avatars/intern_avatar.png" });
+    expect(validateAvatarUrl("/avatars/team-logo.svg")).toEqual({ ok: true, value: "/avatars/team-logo.svg" });
+  });
+
+  test("rejects protocol-relative //host (classic same-origin bypass)", () => {
+    const r = validateAvatarUrl("//evil.com/x.png");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain("protocol-relative");
+  });
+
+  test("rejects javascript: scheme (still, after the relax)", () => {
+    expect(validateAvatarUrl("javascript:alert(1)").ok).toBe(false);
+  });
+
+  test("rejects non-/avatars/ absolute paths (/etc/passwd)", () => {
+    expect(validateAvatarUrl("/etc/passwd").ok).toBe(false);
+  });
+
+  test("rejects non-whitelisted extensions under /avatars/", () => {
+    expect(validateAvatarUrl("/avatars/payload.html").ok).toBe(false);
+  });
+
+  test("rejects nested/traversal paths (charset forbids further slashes)", () => {
+    expect(validateAvatarUrl("/avatars/../secrets.webp").ok).toBe(false);
+    expect(validateAvatarUrl("/avatars/sub/x.webp").ok).toBe(false);
+  });
+
+  test("rejects percent-encoding inside the filename (no encoded surprises)", () => {
+    expect(validateAvatarUrl("/avatars/a%2f..%2fx.webp").ok).toBe(false);
+  });
+
+  test("absolute http(s) branch is UNTOUCHED by the relax (positive control)", () => {
+    const r = validateAvatarUrl("https://example.com/pic.png");
+    expect(r.ok).toBe(true);
   });
 });
