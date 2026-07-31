@@ -73,6 +73,32 @@ the candidate advanced. There are exactly 62 commits from the reported
 insertions and 504 deletions, including runtime containment, credentials,
 recovery, lifecycle, and the test gates themselves.
 
+Published-preview usability control
+-----------------------------------
+The currently published preview packages were fetched without installing them
+on the host:
+
+  @sleep2agi/agent-network@2.3.0-preview.36
+    tarball sha256=c290941939c0c3744c0e7bab0bc5417220e9b60a237798a0f03fdd18385f8026
+  @sleep2agi/agent-node@2.5.0-preview.27
+    tarball sha256=f07e2f7678ea404256247c3c27d8a531bb16546e743ac2b8162a055c858a51e1
+
+An extracted-payload scan found zero files containing `grok-build-cli`,
+`anet grok attach`, or the Grok co-presence capability marker.
+
+Both exact packages were then installed together in a disposable clean
+`node:22.13.1-bookworm-slim` container. The real entrypoints reported:
+
+  anet v2.3.0-preview.36
+  agent-node v2.5.0-preview.27
+  anet help Grok TUI marker count: 0
+  agent-node help Grok TUI marker count: 0
+
+The agent-node runtime list contains `grok-build-acp` only; it does not contain
+`grok-build-cli`. Therefore the currently published preview channel does not
+provide the shared Grok TUI runtime. This is a user-path control, not an
+inference from version numbers.
+
 Verdict
 -------
 FAIL.
@@ -86,6 +112,9 @@ Per the approved #537 protocol, downstream Docker suites 219, 224, and 225
 were not run after this hard precondition failed. The reports were not
 relabeled or overwritten. This verdict concerns evidence provenance; it does
 not claim that the later runtime implementation itself is functionally broken.
+It also does not claim that Grok TUI is currently installable: the published
+preview control above proves that it is not present in the current preview
+packages.
 
 The reusable hard-precondition gate is recorded in
 `tests/test537-grok-tui-provenance/`. It rejects dirty worktrees, derives the
