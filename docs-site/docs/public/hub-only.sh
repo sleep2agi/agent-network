@@ -120,7 +120,7 @@ if [ "$WIPE" = "1" ] || [ "$WIPE" = "true" ]; then
   pkill -9 -f commhub-server 2>/dev/null || true
   pkill -9 -f agent-network-dashboard 2>/dev/null || true
   pkill -9 -f agent-node 2>/dev/null || true
-  rm -rf ~/.anet ~/.commhub ~/.npm/_npx ~/.npm-global/lib/node_modules/@sleep2agi 2>/dev/null
+  rm -rf ~/.anet ~/.commhub ~/.npm-global/lib/node_modules/@sleep2agi 2>/dev/null
   mkdir -p ~/.commhub
 fi
 
