@@ -1,27 +1,27 @@
 # test537 — Grok TUI saved-report provenance
 
 This gate compares the source commit declared by saved Grok TUI reports with
-the exact candidate commit being reviewed. It must run before test219,
-test224, or test225; a mismatch is a hard stop, not an instruction to relabel
-old reports.
+the exact candidate commit being reviewed. It also requires the
+`git archive`-expanded source marker to equal that commit, so changing only
+`EXPECTED_SOURCE_COMMIT` cannot make a different checkout pass. It must run
+before test219, test224, or test225; a mismatch is a hard stop, not an
+instruction to relabel old reports.
 
-From the reporting worktree, build with the candidate clean checkout supplied
-as a read-only named context:
-
-```bash
-sg docker -c 'docker build \
-  --build-context candidate=/home/vansin/commniu-grok-candidate-537 \
-  -t anet-grok-tui-537:dev \
-  -f tests/test537-grok-tui-provenance/Dockerfile .'
-```
-
-Then run:
+From the reporting worktree, run the wrapper against a clean candidate
+worktree:
 
 ```bash
-sg docker -c 'docker run --rm \
-  -e EXPECTED_SOURCE_COMMIT=4854928b35c14abaaae788aba7ec043cea10643b \
-  anet-grok-tui-537:dev'
+tests/test537-grok-tui-provenance/run-docker.sh \
+  /home/vansin/commniu-grok-candidate-537
 ```
+
+The wrapper refuses a dirty worktree, derives the full expected SHA from its
+HEAD, creates a minimal temporary `git archive`, builds the fixed
+`anet-test537-grok-tui-provenance:dev` tag, and runs the gate in a read-only,
+network-disabled container. The archive expands test225's `$Format:%H$`
+marker, independently binding the copied reports to the candidate commit.
+Temporary extraction is restricted to a `mktemp` directory under `/tmp` and
+removed through the repository safe-delete guard.
 
 For issue #537 the expected result is exit code 1, because the three committed
 reports identify `501764f83c0428ebc153d132ae049de38d7041f6`.

@@ -23,11 +23,11 @@ for test_id in 219 224 225; do
 done
 
 archive_marker="$(tr -d '\r\n' < /candidate/tests/test225-grok-preview-package-live/source-commit.txt)"
-if [ "$archive_marker" != '$Format:%H$' ] && [ "$archive_marker" != "$expected" ]; then
-  echo "FAIL: test225 archive marker=$archive_marker expected literal export marker or $expected"
+if [ "$archive_marker" != "$expected" ]; then
+  echo "FAIL: candidate archive source_commit=$archive_marker expected=$expected"
   failed=1
 else
-  echo "PASS: test225 archive marker is valid for a checkout/export boundary"
+  echo "PASS: candidate archive source_commit=$archive_marker"
 fi
 
 if [ "$failed" -ne 0 ]; then

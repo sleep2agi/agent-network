@@ -48,9 +48,14 @@ Committed report hashes:
   60af8b022187177504393c8b0d45cce8d617b65a0c9c0f30c1754981430a50c2  report-test224.txt
   f8108d0dc0c0d0afd519c782d81c5e3f3edd948204c7c298954f3cb7da9a67bb  report-test225.txt
 
-The test225 source-commit file contains the literal Git export-subst marker
-`$Format:%H$`; this is valid for an archive boundary but does not repair the
-three stale committed reports.
+The candidate's test225 source-commit file contains the Git export-subst marker
+`$Format:%H$`. The final gate consumes a minimal `git archive`, where Git
+expands that marker to the actual archived commit:
+
+  4854928b35c14abaaae788aba7ec043cea10643b
+
+This independently binds the copied reports to the candidate source boundary,
+but does not repair the three stale committed reports.
 
 Root-cause classification
 -------------------------
@@ -83,23 +88,22 @@ relabeled or overwritten. This verdict concerns evidence provenance; it does
 not claim that the later runtime implementation itself is functionally broken.
 
 The reusable hard-precondition gate is recorded in
-`tests/test537-grok-tui-provenance/`. Its shell was syntax-checked. Its
-Dockerfile was deliberately not built under the capacity condition below.
+`tests/test537-grok-tui-provenance/`. It rejects dirty worktrees, derives the
+full SHA from candidate HEAD, creates a minimal `git archive`, and requires
+both the expanded archive marker and all three reports to equal that SHA.
 
 Witnessed-red execution
 -----------------------
-The runner was also executed once in a disposable, read-only, network-disabled
-container with the candidate and reporting worktrees mounted read-only:
+The final wrapper built a fixed-tag gate image from the minimal candidate
+archive, then ran it in a disposable, read-only, network-disabled container:
 
-  image: node:22.13.1-bookworm-slim
+  image tag: anet-test537-grok-tui-provenance:dev
+  image id: sha256:e936799f72480ded6c9bd292a4e43e4a0937df3b6bee0797b14412dcff2e6da6
   container controls:
     --rm --read-only --network none --cap-drop ALL
     --security-opt no-new-privileges
 
-The base image was not cached and Docker pulled it before the run. No custom
-image was built, and the disposable container was removed after execution.
-
-Observed runner output:
+Actual-candidate run, expected SHA derived from its clean HEAD:
 
   FAIL test219 source_commit=501764f83c0428ebc153d132ae049de38d7041f6
        expected=4854928b35c14abaaae788aba7ec043cea10643b
@@ -107,17 +111,35 @@ Observed runner output:
        expected=4854928b35c14abaaae788aba7ec043cea10643b
   FAIL test225 source_commit=501764f83c0428ebc153d132ae049de38d7041f6
        expected=4854928b35c14abaaae788aba7ec043cea10643b
-  PASS test225 archive marker is an unexpanded Git export-subst marker
+  PASS candidate archive source_commit=4854928b35c14abaaae788aba7ec043cea10643b
   RESULT: FAIL — exact-candidate provenance is not established
 
-The runner returned rc=1 as required for the stale-report condition. The
-outer assertion accepted only rc=1 and returned rc=0, proving that the gate
-is witnessed-red rather than merely described.
+Observed rc=1, as required for the stale-report condition.
+
+Environment-only bypass mutation:
+
+  EXPECTED_SOURCE_COMMIT=501764f83c0428ebc153d132ae049de38d7041f6
+  PASS test219/test224/test225 report source_commit
+  FAIL candidate archive source_commit=4854928b... expected=501764f8...
+  RESULT: FAIL
+
+Observed rc=1. This proves that changing only the expected environment value
+cannot make reports from a different candidate archive pass.
+
+Controlled positive:
+
+  Starting from the same exact candidate archive, temporary report copies were
+  changed to declare 4854928b...; no repository report was edited. All three
+  report checks and the independently expanded archive marker passed.
+
+Observed rc=0. This is evidence for gate behavior only, not evidence that
+test219/test224/test225 actually passed on the candidate.
 
 Host capacity note
 ------------------
-Before the Docker run, `/` had 9.6 GiB available and was 97% used. No Docker
-build was started, both because the provenance gate already failed and because
-the host was above the agreed capacity warning threshold. After the one-shot
-run and concurrent host activity, `/` reported 13 GiB available and 96% used;
-that increase is not attributed to this test.
+Before the first one-shot Docker run, `/` had 9.6 GiB available and was 97%
+used. That run pulled the previously uncached official
+`node:22.13.1-bookworm-slim` base image but built no custom image. After
+concurrent host cleanup, `/` reported 13 GiB available and 96% used. Only then
+was the small fixed-tag gate image built and exercised; no rotating SHA tag or
+broad cleanup was used.
