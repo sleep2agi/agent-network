@@ -15,9 +15,26 @@ export type AvatarValidation =
  * Normalize + validate an untrusted avatar_url patch value.
  *
  *   null / undefined / "" / whitespace-only  → { ok, value: null }  (clear)
- *   valid absolute http(s) URL               → { ok, value: trimmed }
+ *   same-origin pool path /avatars/<name>.<ext>  → { ok, value: trimmed }
+ *   valid absolute http(s) URL               → { ok, value: normalized }
  *   anything else                            → { ok: false, reason }
+ *
+ * Relative branch rationale (通信龙 裁定, avatar 接线单): the hub is
+ * reached through several origins (localhost dev, public domains) — an
+ * absolute URL would weld ONE hostname into the DB and break the image
+ * for every other entry point; a same-origin relative path is portable.
+ * 🔴 Trap this branch must block: "starts with /" ≠ "same-origin" —
+ * "//evil.com/x.png" ALSO starts with "/" but is a protocol-relative URL
+ * the browser resolves to evil.com. Hence: single leading slash with the
+ * SECOND char not "/", then an exact value-set match (the /avatars/ pool
+ * prefix + extension whitelist), not a shape match.
  */
+
+// Exact allowed set for same-origin values: the dashboard's designed pool
+// under /avatars/. Filename charset excludes "/" (no traversal, no nested
+// paths) and "%" (no encoded surprises); extensions mirror the actual
+// pool contents. Widen ONLY by extending this list deliberately.
+const SAME_ORIGIN_AVATAR_RE = /^\/avatars\/[A-Za-z0-9._-]+\.(webp|png|svg)$/;
 export function validateAvatarUrl(raw: unknown): AvatarValidation {
   if (raw === null || raw === undefined) return { ok: true, value: null };
   if (typeof raw !== "string") {
@@ -35,6 +52,23 @@ export function validateAvatarUrl(raw: unknown): AvatarValidation {
   if (/[\u0000-\u001f\u007f-\u009f\s]/.test(trimmed)) {
     return { ok: false, reason: "avatar_url must not contain whitespace or control characters" };
   }
+  // Same-origin relative branch (runs AFTER the whitespace/control gate
+  // above — that check protects this branch too). Order of the two tests
+  // matters for the reason string, not for safety: the exact-set regex
+  // alone already rejects "//…" (second char is "/", first segment must
+  // literally be "avatars"), the explicit double-slash check just names
+  // the classic bypass in its own words.
+  if (trimmed.startsWith("/")) {
+    if (trimmed.startsWith("//")) {
+      return { ok: false, reason: "avatar_url must not be protocol-relative (//host/…)" };
+    }
+    if (!SAME_ORIGIN_AVATAR_RE.test(trimmed)) {
+      return { ok: false, reason: "relative avatar_url must match /avatars/<name>.(webp|png|svg)" };
+    }
+    return { ok: true, value: trimmed };
+  }
+  // Absolute http(s) branch — unchanged from #462 (do not touch while
+  // relaxing: 通信龙 裁定 condition 3).
   let parsed: URL;
   try {
     parsed = new URL(trimmed);
