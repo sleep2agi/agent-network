@@ -98,6 +98,10 @@ anet node start my-agent
 
 Token 类型、作用域与兼容规则见 [Token 体系](/concepts/tokens)。
 
+<a id="agent-node-管理"></a>
+<a id="anet-node-create"></a>
+<a id="anet-node-start"></a>
+
 ## 节点
 
 | 命令 | 作用 |
@@ -116,6 +120,8 @@ Token 类型、作用域与兼容规则见 [Token 体系](/concepts/tokens)。
 | `anet node migrate-token-to-envref <name>` | 将配置中的明文 secret 改为 envRef，并先生成备份 |
 
 `node delete` 不会自动撤销该节点已签发的 `ntok_`；需要彻底失效时另行执行 `anet token revoke <token-id>`。
+
+`COMMHUB_TOKEN` 不是 CLI 参数，也不存在 `anet node start --token`。节点鉴权按节点配置、全局配置、legacy `COMMHUB_TOKEN` 环境变量的顺序取值；`anet login --token` 登录的是 CLI 用户，不是向 `node start` 临时注入节点 token。
 
 创建节点时常用参数：
 
@@ -203,6 +209,8 @@ CLI 直接修改 `.anet/nodes/<node>/goals.json`。运行中的节点不会自�
 恢复共存节点时仍应使用 `anet node start <name> --copresence`，不能改用普通 `node start`。
 
 `opencode-cli` 当前是由 agent-node 管理的任务 runtime，不是可 attach 的共享 OpenCode TUI。`grok-build-cli` 共享 Grok TUI 也未进入当前 preview 包；当前可用的 `grok-build-acp` 不支持 attach。
+
+<a id="其他"></a>
 
 ## 其他命令
 

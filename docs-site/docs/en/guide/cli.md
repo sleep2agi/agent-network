@@ -98,6 +98,10 @@ Invite options include `--role admin|member|viewer`, `--uses <n>`, and `--expire
 
 See [Token model](/en/concepts/tokens) for token types, scopes, and compatibility behavior.
 
+<a id="agent-node-management"></a>
+<a id="anet-node-create"></a>
+<a id="anet-node-start"></a>
+
 ## Nodes
 
 | Command | Purpose |
@@ -116,6 +120,8 @@ See [Token model](/en/concepts/tokens) for token types, scopes, and compatibilit
 | `anet node migrate-token-to-envref <name>` | Replace plaintext secrets with envRef after writing a backup |
 
 `node delete` does not automatically revoke the node's issued `ntok_`. To invalidate it completely, also run `anet token revoke <token-id>`.
+
+`COMMHUB_TOKEN` is not a CLI option, and there is no `anet node start --token`. Node authentication resolves in this order: node config, global config, then the legacy `COMMHUB_TOKEN` environment fallback. `anet login --token` logs in the CLI user; it does not inject a temporary node token into `node start`.
 
 Common creation options:
 
@@ -203,6 +209,8 @@ The following commands exist in the current preview and must not be presented as
 Resume a co-presence node with `anet node start <name> --copresence`; do not replace it with a normal `node start`.
 
 `opencode-cli` is currently an agent-node-managed task runtime, not an attachable shared OpenCode TUI. The shared Grok TUI runtime `grok-build-cli` is also absent from the current preview packages; the available `grok-build-acp` runtime does not support attach.
+
+<a id="other"></a>
 
 ## Other commands
 
