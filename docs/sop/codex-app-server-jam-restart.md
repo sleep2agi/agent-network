@@ -8,7 +8,7 @@
 
 超时消息 ≠ 卡死（见 [推送语义](./agent-reply-to-dashboard.md)）。按顺序验证：
 
-1. **capture-pane 看终端实况**：`tmux capture-pane -t <会话名> -p | tail -30`
+1. **capture-pane 看终端实况**：`tmux capture-pane -t =<会话名> -p | tail -30`
    - 有新输出/工具调用在滚 → **在干活，别动它**（大 turn 可以合法跑很久）
 2. **看它的工作目录是否还在变**：`git -C <工作区> status --porcelain | wc -l` 隔几分钟对比
    - 输出静止 + 工作区静止 ≥1 小时 → 基本坐实卡死
@@ -35,7 +35,7 @@ for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; 
 
 # 4. 必须仍走共存入口；它会创建新 thread 并写回 config
 anet node start <alias> --copresence
-tmux attach -t <alias>
+tmux attach -t =<alias>
 ```
 
 验证：TUI/bridge pane 有新输出，hub 心跳刷新；Linux 上再用 `readlink /proc/<app-server-pid>/cwd` 确认 app-server cwd 是目标项目。不要只查 bridge。

@@ -175,7 +175,7 @@ cd /path/to/project
 for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
 anet node create codex-human --runtime codex-app-server
 anet node start codex-human --copresence
-tmux attach -t codex-human
+tmux attach -t =codex-human
 ```
 
 It requires bash + tmux 3.2+, defaults to read-only, and must also be restarted with `--copresence` after a disconnect. A plain `anet node start` is a background-node path, not co-presence recovery. Full guide: <https://anet.sh/en/guide/codex-copresence>.

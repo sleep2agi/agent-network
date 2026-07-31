@@ -404,7 +404,7 @@ cd /path/to/project
 for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
 anet node create codexbridge --runtime codex-app-server
 anet node start codexbridge --copresence
-tmux attach -t codexbridge
+tmux attach -t =codexbridge
 ```
 
 它统一编排独立 app-server、bridge 与 TUI，默认只读。完整权限、恢复、停止与原生 Windows 手工 WS 步骤见 [Codex TUI 人机共存](/guide/codex-copresence)。

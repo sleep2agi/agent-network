@@ -183,7 +183,7 @@ cd /path/to/project
 for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
 anet node create codex-human --runtime codex-app-server
 anet node start codex-human --copresence
-tmux attach -t codex-human
+tmux attach -t =codex-human
 ```
 
 默认只读；停止前先 `Ctrl-B D` detach，再从外部 shell 运行 `anet node stop codex-human`。断线恢复必须仍用 `--copresence`，不能退回普通 `anet node start`，否则会另起节点争抢同一 alias。

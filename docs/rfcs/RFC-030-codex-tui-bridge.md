@@ -905,7 +905,7 @@ codex app-server generate-json-schema --out ./schemas
 ```bash
 anet node create <alias> --runtime codex-app-server
 anet node start <alias> --copresence
-tmux attach -t <alias>
+tmux attach -t =<alias>
 ```
 
 该命令取代早期 `.demo/setup-copresence.sh` 手工编排，一次创建独立 app-server、bridge、TUI 三个 tmux session，并写回 `codexAppServerUrl` / `codexThreadId`。它仅存在于 preview，npm latest 完全没有 `codex-app-server` / `--copresence`。

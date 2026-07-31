@@ -382,7 +382,7 @@ anet node create 翻译官 --runtime claude-agent-sdk --model <minimax-model-id>
 
 **例外：Grok 人机共存**（`--runtime grok-build-cli`）有专用的 `anet grok attach <alias>`，可 attach 到 agent-node 持有的真实 Grok TUI，与网络任务同处一个会话。详见 [Grok 人机共存 TUI](./grok-copresence.md)。
 
-**例外：Codex TUI 人机共存**（preview `codex-app-server`）用 `anet node start <alias> --copresence` 一次启动 app-server、bridge 与可 attach 的 TUI；用 `tmux attach -t <alias>` 进入。详见 [Codex TUI 人机共存](./codex-copresence.md)。
+**例外：Codex TUI 人机共存**（preview `codex-app-server`）用 `anet node start <alias> --copresence` 一次启动 app-server、bridge 与可 attach 的 TUI；用精确目标 `tmux attach -t =<alias>` 进入。详见 [Codex TUI 人机共存](./codex-copresence.md)。
 :::
 
 ```bash

@@ -376,7 +376,7 @@ There is no generic top-level `anet attach <alias>` subcommand today ([#121](htt
 
 **Exception: Grok co-presence** (`--runtime grok-build-cli`) has a dedicated `anet grok attach <alias>` that attaches you to the real Grok TUI held by the agent-node, sharing one session with network tasks. See [Grok Co-presence TUI](./grok-copresence.md).
 
-**Exception: Codex TUI co-presence** (preview `codex-app-server`) uses `anet node start <alias> --copresence` to start the app-server, bridge, and attachable TUI together; enter it with `tmux attach -t <alias>`. See [Codex TUI Co-presence](./codex-copresence.md).
+**Exception: Codex TUI co-presence** (preview `codex-app-server`) uses `anet node start <alias> --copresence` to start the app-server, bridge, and attachable TUI together; enter it with the exact target `tmux attach -t =<alias>`. See [Codex TUI Co-presence](./codex-copresence.md).
 :::
 
 ```bash

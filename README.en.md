@@ -183,7 +183,7 @@ cd /path/to/project
 for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
 anet node create codex-human --runtime codex-app-server
 anet node start codex-human --copresence
-tmux attach -t codex-human
+tmux attach -t =codex-human
 ```
 
 The default is read-only. Detach with `Ctrl-B D`, then run `anet node stop codex-human` from an external shell. Recovery must keep `--copresence`; a plain `anet node start` launches another node that competes for the same alias.

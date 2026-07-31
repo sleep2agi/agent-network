@@ -61,10 +61,20 @@ Codex thread 的工作目录继承自 **app-server 进程启动时的 cwd**，�
 | `codex-human-桥` | `agent-node` bridge，接收网络派工并投进同一 thread |
 | `codex-human` | 人类可 attach 的原生 Codex TUI |
 
+### tmux 目标必须精确匹配
+
 `codex-human` 同时也是另外两个 session 名的前缀。tmux 的普通 `-t codex-human`
-可能在 TUI session 已退出时静默匹配到 `codex-human-appsrv` 或 bridge。attach、
-`capture-pane`、`send-keys` 等操作都应使用 `-t =codex-human` 强制精确匹配，或直接使用
-pane ID；执行前先确认目标 session。三个 session 中有一个消失时尤其要避免前缀匹配。
+可能在 TUI session 已退出时静默匹配到 `codex-human-appsrv` 或 bridge。操作前先列出
+session 与 pane 复核：
+
+```bash
+tmux list-sessions -F '#{session_name}'
+tmux list-panes -t =codex-human -F '#{pane_id} #{pane_current_command}'
+tmux attach -t =codex-human
+```
+
+`capture-pane`、`send-keys` 等操作也应使用 `-t =codex-human` 强制精确匹配，或直接使用
+`%42` 这类 pane ID。三个 session 中有一个消失时尤其要避免前缀匹配。
 
 在 TUI 中按 `Ctrl-B D` 只会 detach，不会停节点。停止时请先 detach，再从**共存进程树外的终端**运行：
 
@@ -84,7 +94,30 @@ for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; 
 anet node start codex-human --copresence
 ```
 
-这不是理论风险：已知至少两个生产节点因照抄通用提示而静默重复运行，分别持续约 2 天和 9 天。
+这不是理论风险：生产节点 `TM副责人` 因此静默重复运行约 2 天，`A站副责人` 则持续约 9 天（[#535](https://github.com/sleep2agi/agent-network/issues/535)）。
+:::
+
+### 首次派活前必须看一眼 TUI 是否卡在审批框
+
+::: danger 节点会「看起来完全健康」却什么都干不了
+`--copresence` 起完之后，TUI 一旦接上，MCP 工具调用就变成**要人确认**。如果没人在 TUI 前面点，节点会永远停在：
+
+```
+Allow the commhub MCP server to run tool "get_task"?
+› 1. Allow   2. Allow for this session   3. Always allow   4. Cancel
+```
+
+**此时 hub 上的所有信号都是健康的**：`status=idle`、SSE 已连接、`last_seen_at` 持续更新。派活方看不出任何异常，只会以为它闲着。
+
+**唯一能发现的方法**（hub 的任何字段都查不出来）：
+
+```bash
+tmux capture-pane -t =<alias> -p | grep "Allow the commhub MCP"
+```
+
+**处置**：选 `3. Always allow`（commhub 那几个工具是节点自身运转必需的）；或在 app-server 启动参数里带 `-c approval_policy=never`，从源头避免。
+
+实测（2026-07-31）：新建 TUI 的节点复现；同宿主既有共存节点未受影响（它们的 app-server 启动时带了 `approval_policy=never`）。**所以这是「新建 TUI 时」的坑，不是存量问题。**
 :::
 
 ## 权限：默认只读，完整访问必须双重确认
@@ -154,7 +187,7 @@ TUI 启动时可能出现 `Update available`，且默认高亮立即升级。共
 一条 thread 同一时刻只能有一个 active turn；后续网络任务会 FIFO 排队。当前网络任务等待最终回复的窗口**默认**是 600 秒（runtime 选项可覆盖，并非不可变的硬上限）：
 
 - 看到“`600s 内无最终回复`”**不等于节点已死**，也不会自动取消正在 Codex 中执行的 turn。
-- 不要立刻重复派同一任务；先看 `tmux capture-pane -t codex-human -p | tail -30` 和工作区是否仍在变化。
+- 不要立刻重复派同一任务；先看 `tmux capture-pane -t =codex-human -p | tail -30` 和工作区是否仍在变化。
 - 重代码/长工具链任务尽量拆成可在 10 分钟内完成并回报的小步；若确认静默卡死，按 [codex-app-server 卡死诊断与重启 SOP](https://github.com/sleep2agi/agent-network/blob/main/docs/sop/codex-app-server-jam-restart.md) 先保全工作再重启。
 
 ## 安全与已知边界

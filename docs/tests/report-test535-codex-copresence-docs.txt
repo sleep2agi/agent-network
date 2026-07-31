@@ -1,14 +1,15 @@
 Test: Codex TUI co-presence documentation refresh
 Date: 2026-07-31 (Asia/Shanghai)
 Branch: docs/codex-copresence-refresh-20260731
-Base: 6f29bb6055fd621bacbc46da20dc0b10f4a00700 (origin/main)
-Candidate state: uncommitted docs-only worktree at test time
+Base: 6f29bb6055fd621bacbc46da20dc0b10f4a00700 (origin/main at branch creation)
+Tested baseline commit: 13e12cfc9b5cd3d485b4803c539e1f754ac7edb9
+Candidate state: uncommitted MINOR follow-up on the pushed docs refresh at test time
 
 Environment
 -----------
 - Docker only; production and host package installations were not modified.
 - Fixed reusable image tag: anet-docs-codex:dev
-- Tested image ID: sha256:676f1efa94fe465504516271043620cb15d70c21c7bf9f2eec570777fe010692
+- Tested image ID: sha256:1fdc10ef8bc5543d19e691ea27843b4963a88126e86d5443fdf3deedb1e2f9db
 - Base image: node:22.13.1-bookworm-slim
 
 Focused gate
@@ -22,16 +23,20 @@ Run:
     anet-docs-codex:dev'
 
 Result:
-  59 passed, 0 failed
+  73 passed, 0 failed
 
 Coverage:
 - Chinese and English canonical pages exist.
 - Preview-only / npm latest absence is explicit.
 - `anet upgrade --channel preview` is documented.
 - First-class `anet node start <alias> --copresence` lifecycle is present.
-- Exact tmux selectors avoid prefix collisions across the three sessions.
+- Canonical diagnosis and every refreshed co-presence entry point use exact
+  tmux targets (`-t =<name>`), with no fuzzy `codex-human` selector left.
+- The three-session prefix-collision failure mode and pane-ID alternative
+  are documented in both languages.
 - Plain `anet node start` recovery is explicitly rejected.
-- The known two-day and nine-day duplicate-node incidents are recorded.
+- Both production duplicate cases are named with their observed durations:
+  `TM副责人` (~2 days) and `A站副责人` (~9 days).
 - Complete inherited `COMMHUB_*` identity cleanup is present.
 - app-server cwd, not bridge cwd, is the documented source of thread cwd.
 - Default read-only and full-access double confirmation are documented.

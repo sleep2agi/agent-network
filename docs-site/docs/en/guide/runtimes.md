@@ -384,7 +384,7 @@ cd /path/to/project
 for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
 anet node create codexbridge --runtime codex-app-server
 anet node start codexbridge --copresence
-tmux attach -t codexbridge
+tmux attach -t =codexbridge
 ```
 
 It orchestrates a dedicated app-server, bridge, and TUI together and defaults to read-only. See [Codex TUI Co-presence](/en/guide/codex-copresence) for permissions, recovery, stop behavior, and the native-Windows manual WebSocket path.

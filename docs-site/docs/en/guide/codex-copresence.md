@@ -61,11 +61,21 @@ A Codex thread inherits its working directory from the **app-server process cwd*
 | `codex-human-桥` | the `agent-node` bridge that receives network tasks and submits them to the thread |
 | `codex-human` | the native Codex TUI that a human can attach to |
 
+### Use exact tmux targets
+
 `codex-human` is also a prefix of the other two session names. A normal
 `-t codex-human` selector can silently match `codex-human-appsrv` or the bridge after
-the TUI session exits. Use `-t =codex-human` for exact matching—or a pane ID—with
-`attach`, `capture-pane`, `send-keys`, and similar commands, and verify the target
-session first. Prefix matching is especially risky after one of the three sessions dies.
+the TUI session exits. List the sessions and panes before operating:
+
+```bash
+tmux list-sessions -F '#{session_name}'
+tmux list-panes -t =codex-human -F '#{pane_id} #{pane_current_command}'
+tmux attach -t =codex-human
+```
+
+Use `-t =codex-human` for exact matching—or a pane ID such as `%42`—with
+`capture-pane`, `send-keys`, and similar commands. Prefix matching is especially risky
+after one of the three sessions dies.
 
 Pressing `Ctrl-B D` in the TUI only detaches; it does not stop the node. Detach first, then stop it from a terminal **outside the co-presence process tree**:
 
@@ -85,8 +95,30 @@ for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; 
 anet node start codex-human --copresence
 ```
 
-This is not theoretical: at least two production nodes are known to have run silent
-duplicates for about two and nine days after operators followed the generic hint.
+This is not theoretical: the production node `TM副责人` ran a silent duplicate for about two days, and `A站副责人` did so for about nine days after operators followed the generic hint ([#535](https://github.com/sleep2agi/agent-network/issues/535)).
+:::
+
+### Check the TUI for a pending approval before the first dispatch
+
+::: danger The node can look completely healthy while doing nothing
+Once a TUI attaches, MCP tool calls become interactive. With nobody watching the pane, the node stalls forever on:
+
+```
+Allow the commhub MCP server to run tool "get_task"?
+› 1. Allow   2. Allow for this session   3. Always allow   4. Cancel
+```
+
+**Every signal the hub exposes still reads healthy**: `status=idle`, SSE connected, `last_seen_at` ticking. A dispatcher sees nothing wrong and assumes the node is simply free.
+
+**The only way to detect it** (no hub field reveals this):
+
+```bash
+tmux capture-pane -t =<alias> -p | grep "Allow the commhub MCP"
+```
+
+**Fix**: choose `3. Always allow` — the commhub tools are what the node needs to function — or start the app-server with `-c approval_policy=never` so the prompt never appears.
+
+Measured 2026-07-31: reproduced on a freshly created TUI; pre-existing co-presence nodes on the same host were unaffected because their app-servers were started with `approval_policy=never`. **This is a new-TUI hazard, not a latent fleet problem.**
 :::
 
 ## Permissions: read-only by default, explicit double opt-in for full access
@@ -157,7 +189,7 @@ The TUI may show `Update available` with upgrade-now selected by default. On a s
 Only one turn can be active in a thread; later network tasks queue FIFO. The current network-task wait for a final answer **defaults** to 600 seconds (runtime options can override it; it is not an immutable hard cap):
 
 - “No final reply within 600s” **does not prove the node is dead** and does not cancel the Codex turn already running.
-- Do not immediately dispatch the same task again. First inspect `tmux capture-pane -t codex-human -p | tail -30` and whether the workspace is still changing.
+- Do not immediately dispatch the same task again. First inspect `tmux capture-pane -t =codex-human -p | tail -30` and whether the workspace is still changing.
 - Break code-heavy or tool-heavy work into steps that can report within ten minutes. If the turn is genuinely stuck, follow the [codex-app-server jam diagnosis and restart SOP](https://github.com/sleep2agi/agent-network/blob/main/docs/sop/codex-app-server-jam-restart.md): preserve work before restarting.
 
 ## Security and known limits
