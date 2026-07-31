@@ -1,143 +1,59 @@
-# 5-Minute Intro to anet
+# Agent Network in 5 Minutes
 
-## What is Agent Network?
+Agent Network (`anet`) connects multiple AI agents through one self-hosted network. Agents can discover teammates, delegate tasks, and return results; you can observe and dispatch work from the Dashboard.
 
-Agent Network is an **enterprise-grade multi-AI-agent collaboration infrastructure** that lets multiple AI agents work together like a team -- one command to start, automatic network join, instant messaging and task dispatch.
-
-In traditional AI applications, each agent is an isolated entity. When you need multiple agents to collaborate on complex tasks, you face these challenges:
-
-- How do agents communicate with each other?
-- How are tasks assigned and tracked?
-- How do you mix different models (Claude / GPT / MiniMax)?
-- How do you monitor each agent's status in real time?
-
-Agent Network was built to solve exactly these problems.
-
-::: tip First time? Start with the simplest scenario
-You don't need to stand up a whole team on day one. **The fastest taste is giving yourself one personal AI employee**: if you have a Claude subscription, `claude-code-cli` brings an agent online in one command / 5 minutes — one that does real work and takes orders from your phone. See the [Getting Started guide](/en/guide/getting-started). Multi-agent collaboration and multi-model mixing are **advanced** capabilities — grow into them once this path runs smoothly.
-:::
-
-## Core Concepts
-
-### Communication Hub (CommHub)
-
-All agents communicate through a centralized communication server (CommHub Server). CommHub is built on the [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) standard, providing ~40 MCP Tools (17 core collaboration tools) with Streamable HTTP + SSE real-time push.
+## How it works
 
 ```mermaid
-sequenceDiagram
-    Agent A->>CommHub Server: send_task
-    CommHub Server->>Agent B: SSE push
-    Agent B->>CommHub Server: report result
-    CommHub Server->>Agent A: reply
+flowchart LR
+  A[Agent A] -->|task| H[CommHub]
+  H -->|SSE push| B[Agent B]
+  B -->|result| H
+  H --> A
+  D[Dashboard] --> H
 ```
 
-### Heterogeneous Multi-Model
+- **CommHub** stores network, node, and task state and routes work.
+- **Agent Node** connects one local AI runtime and processes incoming tasks.
+- **Dashboard / CLI** configure the system, show status, and dispatch work.
 
-Agents running different models can coexist in the same network. Claude Code (`claude-code-cli`) handles complex reasoning and tool use, Codex (`codex-sdk`) takes on code tasks, MiniMax / InternLM and the like (via `claude-agent-sdk`) handle low-cost copywriting, Grok Build (`grok-build-acp`) handles ACP-protocol tasks -- these 4 runtimes share the same communication protocol without interference. (MiniMax is a **vendor** running on `claude-agent-sdk`, not a runtime of its own; see [Runtimes](/en/guide/runtimes) for the runtime-vs-vendor distinction.)
+The Hub, Dashboard, and SQLite data run on hardware you control. Members and tasks are isolated between Networks.
 
-| Model | Runtime | Use Case | Recommended |
-|------|---------|---------|-------------|
-| Claude Code | `claude-code-cli` | Complex reasoning, tool use, file ops | ⭐⭐⭐ |
-| Claude Sonnet/Opus | `claude-agent-sdk` | Reasoning, analysis (Anthropic API mainline) | ⭐⭐⭐ |
-| Codex (codex-sdk) | `codex-sdk` | Code generation, command execution | ⭐⭐⭐ |
-| MiniMax | `claude-agent-sdk` | Low-cost copywriting (via Anthropic-compatible API; check model id at [platform.minimaxi.com](https://platform.minimaxi.com)) | ⭐⭐ |
+## Runtimes and model providers
 
-> `anet node create`'s built-in `VENDORS` list: InternLM / MiniMax / DeepSeek / Xiaomi MiMo / Anthropic Claude / Codex / Claude Code CLI / Custom — every built-in vendor is verified-with-real-call. GLM / Kimi / OpenRouter and other Anthropic-compatible providers not in the built-in list go through "Custom"; full table in [Multi-model](/en/guide/multi-model).
+A runtime controls how `agent-node` drives an AI. A provider controls the model and billing. They are different choices.
 
-### Network Isolation
+| Runtime | Use it when |
+|---|---|
+| `claude-code-cli` | You already use Claude Code CLI and want its interactive capabilities |
+| `claude-agent-sdk` | You call Anthropic or an Anthropic-compatible API |
+| `codex-sdk` | You use Codex for coding tasks |
+| `grok-build-acp` | You use the Grok Build ACP interface |
 
-Each team or project can create an independent network. Agents, tasks, and messages across different networks are fully isolated -- like separate Slack Workspaces.
+Stable behavior follows npm `latest`; preview features require an explicit channel install described in [Version channels](/en/guide/versioning). See [Runtimes](/en/guide/runtimes) for details.
 
-### Web-Based Command Center
+## Shortest setup path
 
-Dashboard + ChatPanel provide a web interface for direct agent conversations, batch task dispatch, and real-time status monitoring -- no command line needed.
-
-## Architecture Overview
-
-```mermaid
-graph TB
-    subgraph "Agent Layer"
-        A1[Agent 1<br/>Claude]
-        A2[Agent 2<br/>Codex (codex-sdk)]
-        A3[Agent 3<br/>MiniMax]
-        A4[Agent N<br/>...]
-    end
-
-    subgraph "Communication Layer"
-        CH[CommHub Server<br/>MCP + SSE + REST]
-        DB[(SQLite WAL)]
-    end
-
-    subgraph "Management Layer"
-        CLI[anet CLI]
-        DASH[Dashboard<br/>Next.js]
-    end
-
-    subgraph "Integration Layer"
-        TG[Telegram]
-        WX[WeChat]
-        FS[Feishu]
-    end
-
-    A1 <-->|MCP/SSE| CH
-    A2 <-->|MCP/SSE| CH
-    A3 <-->|MCP/SSE| CH
-    A4 <-->|MCP/SSE| CH
-    CH --- DB
-    CLI -->|REST| CH
-    DASH -->|REST + SSE| CH
-    TG -->|Channel Plugin| A1
-    WX -->|Channel Plugin| A1
-    FS -->|Channel Plugin| A1
+```bash
+npm install -g bun @sleep2agi/agent-network @sleep2agi/agent-node
+anet hub start
+anet hub dashboard
+anet login --hub http://127.0.0.1:9200 --username admin
+anet node create my-bot
+anet node start my-bot
 ```
 
-## What Can You Build?
+Requires Node.js ≥ 22.13. The Hub listens on `127.0.0.1` by default; read [Production security](/en/deploy/production) before exposing it. See [Getting started](/en/guide/getting-started) for the verified step-by-step flow.
 
-### Multi-Agent Collaborative Development
+## Key terms
 
-A command center dispatches tasks while 10 agents write code, run tests, and do reviews in parallel.
+| Name | Meaning |
+|---|---|
+| Network | An isolated collaboration space |
+| Node | A stable agent identity and configuration |
+| Session | One online run of a Node |
+| Task | A work item that triggers processing and has a lifecycle |
+| Message | A plain message without task processing |
+| `utok_` / `ntok_` | User login credential / node-and-network-bound credential |
 
-```mermaid
-graph LR
-    CMD[Commander<br/>Implement user login] --> C1[Coder-1<br/>Write backend API]
-    CMD --> C2[Coder-2<br/>Write frontend page]
-    CMD --> C3[Coder-3<br/>Write unit tests]
-    CMD --> W1[Writer-1<br/>Write API docs]
-```
-
-### Low-Cost Automation
-
-Use low-cost models like MiniMax for batch document processing, data handling, and translation. Each task costs just a few cents.
-
-### Cross-Model Mixing
-
-Claude designs the architecture, Codex (codex-sdk) writes the implementation, MiniMax handles simple text processing -- automatically assigning the best model based on task type.
-
-### Social Experiments
-
-100 AI agents making friends, debating, and playing games. Agent Network supports large-scale agent orchestration.
-
-### Real-Time Monitoring
-
-The Dashboard shows who's doing what, communication links, and task progress in real time -- like a mission control center.
-
-## Key Concepts
-
-| Concept | Description |
-|------|------|
-| **CommHub Server** | Communication hub, the routing center for all messages |
-| **Agent Node** | A working unit in the network, running an AI model to process tasks |
-| **Network** | An isolated collaboration space, one per team |
-| **Session** | A single runtime instance of an agent (identified by resume_id) |
-| **Task** | A work unit with a lifecycle (created -> delivered -> acked -> running -> replied) |
-| **Message** | A chat message that does not trigger processing |
-| **Channel** | An external integration (Telegram / WeChat / Feishu) |
-| **MCP Tool** | A tool agents use to interact with CommHub (send_task / report_status etc.) |
-| **utok_** | User-level token for CLI login and Dashboard |
-| **ntok_** | Network-level token, bound to a specific network, used for agent connections |
-
-## Next Steps
-
-- [Getting Started](/en/guide/getting-started) -- Walk through the verified local flow
-- [Architecture](/en/guide/architecture) -- Deep dive into system design
-- [CLI Commands](/en/guide/cli) -- Master all commands
+Continue with [Getting started](/en/guide/getting-started) · [Architecture](/en/guide/architecture) · [CLI](/en/guide/cli)

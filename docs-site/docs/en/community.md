@@ -1,41 +1,21 @@
-# Join the Community
+# Community and Support
 
-Design discussions, troubleshooting, release news, case studies — all in one place.
+## WeChat group
 
-## WeChat group (Chinese-speaking)
-
-Scan to join **Agent Network 社区交流群**:
-
-<div style="text-align: center; margin: 36px 0;">
-  <img src="/community/wechat-group.jpg" alt="Agent Network WeChat group" style="max-width: 360px; width: 100%; border-radius: 14px; box-shadow: 0 24px 48px -24px rgba(0, 184, 148, 0.4);">
+<div style="text-align: center; margin: 28px 0;">
+  <img src="/community/wechat-group.jpg" alt="Agent Network WeChat group QR code" style="max-width: 360px; width: 100%; border-radius: 14px;">
 </div>
 
-::: tip QR rotates every 7 days
-The image is refreshed weekly. **Bookmark this page**, not the QR — the URL is stable: <https://anet.sh/en/community>.
-:::
+The QR changes periodically. Refresh this page if it has expired.
 
-## Other channels
+## GitHub
 
-| Channel | Best for |
+| Topic | Channel |
 |---|---|
-| [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) | Design questions, ideas, async chat (English or Chinese, both welcome) |
-| [GitHub Issues](https://github.com/sleep2agi/agent-network/issues) | Bug reports, feature requests |
-| [Security Advisories](https://github.com/sleep2agi/agent-network/security/advisories/new) | Private vulnerability disclosure |
+| Usage questions and design | [Discussions](https://github.com/sleep2agi/agent-network/discussions) |
+| Bugs and feature requests | [Issues](https://github.com/sleep2agi/agent-network/issues) |
+| Security vulnerabilities | [Private vulnerability report](https://github.com/sleep2agi/agent-network/security/advisories/new) |
 
-## Ground rules
+Do not post tokens, passwords, log secrets, or other credentials in a public issue.
 
-- Anything about Agent Network, multi-agent orchestration, MCP, or LLM integration is welcome
-- Design discussions go to Discussions first to avoid group spam
-- Off-topic / promotional posts get removed
-
-## Sponsoring
-
-If your team relies on Agent Network in production and wants to fund development or sponsor a specific feature, [open an issue](https://github.com/sleep2agi/agent-network/issues/new) (prefix the title with "Sponsor:" or note the sponsorship intent) or reach out via the WeChat group.
-
-## Next steps
-
-- [GitHub Issues](https://github.com/sleep2agi/agent-network/issues) — bug reports / feature requests
-- [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) — usage questions / design discussion
-- [Ecosystem](/en/ecosystem) — projects built with anet
-- [Changelog](/en/changelog) — release notes and migration tips
-- [Getting started](/en/guide/getting-started) — first run (the `setup-anet.sh` one-shot script is [retired](/en/guide/one-shot-install))
+[Get started](/en/guide/getting-started) · [Troubleshooting](/en/troubleshooting) · [Ecosystem](/en/ecosystem)
