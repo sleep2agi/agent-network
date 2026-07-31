@@ -24,6 +24,8 @@ Documentation result
 - Corrected the changelog's current-preview summary and marked the old entry
   as a historical candidate record whose commands must not be run.
 - Removed the stale "run all five" runtime count.
+- Replaced a hardcoded "current stable 2.2.21" label with the authoritative
+  npm latest dist-tag rule.
 
 Static verification
 -------------------

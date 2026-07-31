@@ -7,7 +7,7 @@
 > 本表是全站 runtime 信息的**单一权威来源**, 其他页面 (`cli` / `agent-node` / `getting-started` / `clean-server`) 都引用这里, 别在那些页面里重复整表.
 
 ::: tip 哪些 runtime 在哪个版本可用（真机实测）
-- **正式版**（`npm i -g @sleep2agi/agent-network`, 当前 2.2.21）：**4 种正式 runtime** —— `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`。
+- **正式版**（`npm i -g @sleep2agi/agent-network`）：**4 种正式 runtime** —— `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`。具体版本以 npm `latest` dist-tag 为准。
 - **预览版**（`@preview`）：在正式 4 种之外再加 `codex-app-server` / `opencode-cli`（共 **6 种**）；且对未知 runtime 会明确报错拦截（正式版会**静默退化**成默认 runtime，不报错）。
 
 下表标 `(preview)` 的行**仅预览版可用**，正式版选不到。

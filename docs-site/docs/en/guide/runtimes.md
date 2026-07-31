@@ -7,7 +7,7 @@ Every Agent Node has a **Runtime** (engine kernel) that decides how the node cal
 > This table is the **single source of truth** for runtimes across the entire site. Other pages (`cli` / `agent-node` / `getting-started` / `clean-server`) reference it — they do not duplicate the full table.
 
 ::: tip Which runtimes are available in which channel (real-machine verified)
-- **Stable** (`npm i -g @sleep2agi/agent-network`, currently 2.2.21): **4 production runtimes** — `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`.
+- **Stable** (`npm i -g @sleep2agi/agent-network`): **4 production runtimes** — `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`. Follow npm's `latest` dist-tag for the exact version.
 - **Preview** (`@preview`): adds `codex-app-server` / `opencode-cli` on top of the 4 (**6 total**), and rejects unknown runtimes with an explicit error (stable **silently falls back** to the default runtime instead).
 
 Rows tagged `(preview)` below are **preview-only** and not selectable on stable.
