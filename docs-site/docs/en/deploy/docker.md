@@ -1,9 +1,7 @@
 # Docker Deployment
 
-::: warning Full Docker deployment guide pending
-This page used to be built on top of the `demos/codex-telegram-squad/` Dockerfile + docker-compose, which was removed during the [#198](https://github.com/sleep2agi/agent-network/issues/198) docs rewrite — the old paths are stale. The full Docker deployment guide (hub + dashboard + multi-agent one-shot compose) is queued for the v0.11+ doc rework.
-
-Until then, the section below is the minimum "this actually works" path.
+::: warning No maintained production compose bundle
+Dockerfiles and compose files in this repository are test fixtures or integration-specific examples, not a general production template. This page documents only the verifiable minimum path.
 :::
 
 ## Recommended path: npm + tmux (most reliable)
@@ -31,7 +29,7 @@ Whether docker compose or plain tmux, the per-box startup order is the same:
 
 1. `anet hub start --host 0.0.0.0` (bind LAN; default `127.0.0.1` is fine for purely local use)
 2. `anet hub dashboard`
-3. `anet login --username admin --password <your-password>` (the first `anet hub start` auto-bootstraps `admin` / `anethub` — **run `anet passwd` to change the password before any public-internet deploy**)
+3. `anet login --hub http://127.0.0.1:9200 --username admin` (use the password shown during first startup; run `anet passwd` before exposing the Hub)
 4. `anet node create <alias>` × N (one config per agent)
 5. `anet project up` to bring every node in cwd up
 

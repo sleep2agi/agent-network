@@ -1,7 +1,7 @@
 Agent Network front-door documentation audit
 Date: 2026-07-31
 Branch: docs/frontdoor-final-audit
-Base: 67740865ca0514a52fcb64a7cb5053e71eb5d100
+Base: 18ed64f616d19f861283bd910c52fe9376ab8e59
 
 Scope
 -----
@@ -10,17 +10,20 @@ Scope
 - Remove the custom theme's second homepage layer: six stale cards, dated notice,
   incomplete install widget, provider badges, and promo video duplicated the
   standard VitePress hero/features rendered from index.md.
-- Remove active documentation that still promoted the retired setup-anet.sh.
-- Replace stale one-shot links with getting-started or clean-server routes.
-- Remove the obsolete v0.11 Docker-guide promise and stale current-version claim.
-- Keep the bilingual retirement page and compatibility stub for old bookmarks.
+- Preserve the retired-installer cleanup already present in the base branch,
+  remove the remaining stale references in upgrade surfaces, and guard it
+  against regression.
+- Keep the bilingual retirement page, compatibility stub, and supported
+  replacement routes for old bookmarks.
+- Replace the historical V2 guide's stale `v0.8.x` current-version claim with
+  the authoritative npm dist-tag rule, and remove empty or dated guide copy.
 
 Verification
 ------------
 Dockerfile: tests/qa-frontdoor-docs/Dockerfile
 Image: anet-frontdoor-docs:dev
-Image ID: sha256:e96d17015ee0ccafde67005866b93252f94f55b659eeacbefbe2bfee0d96d235
-Image size: 534897158 bytes
+Image ID: sha256:332486912d8d4928400aa2189cd50b08e45bd8c8721fdd66afbfbb6911a52edf
+Image size: 597972092 bytes
 
 Checks:
 - README <= 100 lines per language.
@@ -31,6 +34,8 @@ Checks:
 - Chinese/English retirement pages and supported replacement routes exist.
 - Historical V2 note no longer claims v0.8.x is current.
 - VitePress 1.6.4 full production build.
+- Built Chinese and English HTML contain the concise hero/install content and
+  none of the retired custom-layer classes or old feature-card labels.
 
 Result
 ------
@@ -38,7 +43,8 @@ PASS: front doors remain concise
 PASS: stale setup-anet promotions removed from active bilingual docs
 PASS: witnessed-red validator catches a reintroduced promotion
 PASS: retirement and replacement routes exist
-PASS: VitePress production build (39.40s)
+PASS: VitePress production build (35.91s; full container run 38s)
+PASS: rendered bilingual homepages contain only the concise front door
 
 Expected warning
 ----------------

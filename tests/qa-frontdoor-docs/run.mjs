@@ -103,3 +103,38 @@ execFileSync("npm", ["run", "build"], {
   stdio: "inherit",
 });
 console.log("PASS: VitePress production build");
+
+const renderedHomepages = [
+  ["Chinese", read("docs-site/docs/.vitepress/dist/index.html")],
+  ["English", read("docs-site/docs/.vitepress/dist/en/index.html")],
+];
+const retiredHomepageMarkers = [
+  "fg-title",
+  "hero-badges",
+  "hero-notice",
+  "install-cmd",
+  "hero-video-card",
+  "一行装完",
+  "三种 Runtime",
+  "一键 Demo",
+  "自动迁移",
+  "Install in one command",
+  "Three runtimes",
+  "One-command demo",
+  "Automatic migration",
+];
+for (const [language, html] of renderedHomepages) {
+  for (const marker of retiredHomepageMarkers) {
+    check(!html.includes(marker), `${language} rendered homepage still contains ${marker}`);
+  }
+  check(html.includes("@sleep2agi/agent-network"), `${language} rendered homepage lost the install command`);
+}
+check(renderedHomepages[0][1].includes("让 AI Agent 组成团队"), "Chinese rendered homepage lost the concise hero");
+check(renderedHomepages[1][1].includes("Turn AI agents into a team"), "English rendered homepage lost the concise hero");
+
+if (failures.length) {
+  console.error(`FAIL (${failures.length})`);
+  for (const failure of failures) console.error(`- ${failure}`);
+  process.exit(1);
+}
+console.log("PASS: rendered bilingual homepages contain only the concise front door");

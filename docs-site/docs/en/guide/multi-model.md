@@ -306,8 +306,6 @@ done
 
 ## Next steps
 
-**Use it now**:
-
 **Configure and tune**:
 - Where does the cost go? See the "Cost" column in the model tables earlier on this page
 - Persist multiple API keys? See [Agent Node -- config.json env field](/en/guide/agent-node)

@@ -2,14 +2,14 @@
 
 > **⚠️ 本文档为 V1.3 → V2.0 历史升级笔记（2026-03 ~ 04 写于 V2 preview 阶段）。**
 > 
-> 当前 stable 线是 **v0.8.x**（对应 `commhub-server` semver；具体各包版本以 npm `latest` tag 为准，doc 不写死避免 stale）。
+> 当前版本请以各 npm 包的 `latest` dist-tag 为准；本文中的旧版本号只描述当时迁移背景。
 > 
 > **新用户请走当前快速安装路径**：
-> - 公开站：https://anet.sh/guide/getting-started（或 https://anet.sh/guide/one-shot-install 一键脚本）
+> - 公开站：https://anet.sh/guide/getting-started
 > - 仓库内：[../README.md](../README.md) → `npm i -g @sleep2agi/agent-network@latest`
 > - 升级指南：[../docs-site/docs/guide/upgrade.md](../docs-site/docs/guide/upgrade.md)
 > 
-> 下方步骤仅供从 1.3.x 跨大版本升级的存量用户参考，新装 / 0.6+ → 0.8 用户不适用。
+> 下方步骤仅供从 1.3.x 跨大版本升级的存量用户参考，新安装不适用。
 
 ## 版本变化（V1.3 → V2.0，历史）
 
