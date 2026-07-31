@@ -7,6 +7,9 @@ Scope
 -----
 - Keep the already-merged README (77 lines/language) and anet.sh landing source
   (35 lines/language) concise.
+- Remove the custom theme's second homepage layer: six stale cards, dated notice,
+  incomplete install widget, provider badges, and promo video duplicated the
+  standard VitePress hero/features rendered from index.md.
 - Remove active documentation that still promoted the retired setup-anet.sh.
 - Replace stale one-shot links with getting-started or clean-server routes.
 - Remove the obsolete v0.11 Docker-guide promise and stale current-version claim.
@@ -16,12 +19,13 @@ Verification
 ------------
 Dockerfile: tests/qa-frontdoor-docs/Dockerfile
 Image: anet-frontdoor-docs:dev
-Image ID: sha256:75ce1582029f63954b8a8ed4fc462c58e95191ca7107f1777a92601816322a8f
-Image size: 534898483 bytes
+Image ID: sha256:e96d17015ee0ccafde67005866b93252f94f55b659eeacbefbe2bfee0d96d235
+Image size: 534897158 bytes
 
 Checks:
 - README <= 100 lines per language.
 - anet.sh landing source <= 50 lines per language.
+- No custom theme slot re-injects a second homepage or stale runtime/install claims.
 - No active bilingual page retains a known setup-anet promotion.
 - Witnessed-red mutation reintroduces one old promotion and is detected exactly once.
 - Chinese/English retirement pages and supported replacement routes exist.
@@ -34,7 +38,7 @@ PASS: front doors remain concise
 PASS: stale setup-anet promotions removed from active bilingual docs
 PASS: witnessed-red validator catches a reintroduced promotion
 PASS: retirement and replacement routes exist
-PASS: VitePress production build (36.67s)
+PASS: VitePress production build (39.40s)
 
 Expected warning
 ----------------

@@ -14,6 +14,20 @@ for (const path of ["docs-site/docs/index.md", "docs-site/docs/en/index.md"]) {
   check(read(path).split("\n").length <= 50, `${path} exceeds 50 lines`);
 }
 
+const layout = read("docs-site/docs/.vitepress/theme/Layout.vue");
+for (const staleLayer of ["FeatureGrid", "HeroBadges", "HeroNotice", "HeroVideo", "InstallCommand"]) {
+  check(!layout.includes(staleLayer), `homepage still injects the duplicate ${staleLayer} layer`);
+}
+for (const removedComponent of [
+  "FeatureGrid.vue",
+  "HeroBadges.vue",
+  "HeroNotice.vue",
+  "HeroVideo.vue",
+  "InstallCommand.vue",
+]) {
+  check(!existsSync(`docs-site/docs/.vitepress/theme/components/${removedComponent}`), `stale component remains: ${removedComponent}`);
+}
+
 const promotedInstallerClaims = [
   "`setup-anet.sh` 在一台空 Ubuntu/Debian 上一行命令起",
   "`setup-anet.sh` spins up hub + dashboard",
