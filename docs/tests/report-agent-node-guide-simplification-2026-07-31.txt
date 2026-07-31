@@ -4,11 +4,13 @@ Scope
 -----
 - docs-site/docs/guide/agent-node.md
 - docs-site/docs/en/guide/agent-node.md
+- docs-site/docs/guide/runtimes.md
+- docs-site/docs/en/guide/runtimes.md
 
 Outcome
 -------
-- Chinese guide: 681 -> 154 lines.
-- English guide: 682 -> 154 lines.
+- Chinese guide: 681 -> 160 lines.
+- English guide: 682 -> 160 lines.
 - Removed duplicated runtime installation tables, old preview history, fixed model/version
   examples, obsolete roadmap text, and repeated troubleshooting material.
 - Kept only common node behavior and linked runtime-specific details to canonical pages.
@@ -16,6 +18,11 @@ Outcome
   permission defaults differ by runtime; a node config must not be copied across machines.
 - Clarified current UI boundaries: Codex co-presence is preview-only, OpenCode is a task
   runtime, and shared Grok TUI support is not released.
+- Preserved inbound legacy anchors for environment variables, loop scheduling, and
+  reconnection after the guide rewrite.
+- Restored three source-backed details: TOOLS/SYSTEM_PROMPT are config/CLI inputs rather
+  than env vars; OpenCode's built-in Anthropic path does not support Bearer-only
+  gateways; the Grok cross-link now targets the Grok runtime section.
 
 Static/source gates
 -------------------

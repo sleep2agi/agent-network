@@ -51,6 +51,8 @@ anet node start my-agent --tmux
 
 切换 runtime 前先停止旧进程。不要让两个不同进程以同一 alias / node identity 同时连接 Hub。
 
+<a id="环境变量"></a>
+
 ## 节点文件
 
 每个项目的节点状态位于 `.anet/nodes/<alias>/`：
@@ -113,6 +115,8 @@ anet node create reader --runtime claude-agent-sdk --tools Read,Glob,Grep
 
 详细威胁模型和默认值见[安全设计](/concepts/security)。
 
+<a id="循环任务-loop-调度器"></a>
+
 ## 循环任务
 
 对在线节点创建周期任务：
@@ -124,6 +128,8 @@ anet goal cancel my-agent <goal-id>
 ```
 
 循环状态保存在该节点的 `goals.json`。间隔必须带单位；CLI 当前接受分钟、小时或天。循环会真实消耗模型额度，先用较长间隔验证，不要把它当高精度 cron。
+
+<a id="断线重连"></a>
 
 ## 生命周期与恢复
 

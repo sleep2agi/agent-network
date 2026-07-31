@@ -51,6 +51,8 @@ Do not select a runtime here from an old version number or fixed count. Availabi
 
 Stop the previous process before changing runtimes. Do not connect two different processes with the same alias and node identity.
 
+<a id="environment-variables"></a>
+
 ## Node files
 
 Project-local node state is under `.anet/nodes/<alias>/`:
@@ -113,6 +115,8 @@ Treat a node that can write files, run shell commands, or use the network as unt
 
 See the [security model](/en/concepts/security) for current defaults and threats.
 
+<a id="recurring-tasks-the-loop-scheduler"></a>
+
 ## Scheduled tasks
 
 Create a recurring task for an online node:
@@ -124,6 +128,8 @@ anet goal cancel my-agent <goal-id>
 ```
 
 Goal state is stored in the node's `goals.json`. Intervals require a unit; the CLI currently accepts minutes, hours, or days. Each run consumes real model quota, so validate with a conservative interval. This is not a high-precision cron service.
+
+<a id="reconnection"></a>
 
 ## Lifecycle and recovery
 

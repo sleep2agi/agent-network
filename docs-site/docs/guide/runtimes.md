@@ -28,6 +28,10 @@
 
 > ⚠️ **`opencode-cli` 仅 preview 渠道**（RFC-029 迭代中）：npm **latest 尚未包含**——装 latest 后 `anet node create` 选单只有前 4 个 runtime（`claude-code-cli` / `claude-agent-sdk` / `codex-sdk` / `grok-build-acp`）。稳定后再进 latest。
 
+> OpenCode 内置 Anthropic client 发送 `x-api-key`。只接受 Bearer 的 Anthropic 兼容网关（例如 Kimi coding）会返回 401；这类网关要使用支持对应鉴权的 OpenCode plugin 或自定义路径，不能直接套内置 Anthropic preset。
+
+> Agent Node 不读取名为 `TOOLS` 或 `SYSTEM_PROMPT` 的环境变量。工具列表请用 `--tools` 或配置项 `tools`；系统提示词请用 `--prompt` 或配置项 `systemPrompt`。
+
 ::: tip 不知道怎么选?
 - **想白嫖 Claude 订阅 / 新手最省事** → `claude-code-cli` (`claude auth login` 后 0 配置)
 - **写文案 / 翻译 / 分析 (编程式) / 接国产模型** → `claude-agent-sdk` + 在 wizard 里选对应 vendor
@@ -498,7 +502,7 @@ GROK_ACP_TIMEOUT_MS=900000 anet node start my-grok
 ### 详见
 
 - [`grok-build-runtime.md` 完整 runtime 指南](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md) — Known Limits + debug + preview chain
-- [agent-node § grok-build-acp tip](/guide/agent-node#claude-code-cli) — v0.10.11 [#204](https://github.com/sleep2agi/agent-network/issues/204) per-node isolated cwd 细节
+- [grok-build-acp](#grok-build-acp) — 每个节点使用独立工作目录；不要从其他 runtime 的章节推断 Grok 行为
 - [troubleshooting → grok-build-acp 节点任务挂死](/troubleshooting#grok-build-acp-节点任务挂死-session-prompt-timed-out-after-300000ms-json-rpc-error-32603) — `session/prompt` 超时排错入口
 - [architecture § Debug tip](/guide/architecture) — runtime debug 入口
 
