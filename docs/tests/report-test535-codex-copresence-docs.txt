@@ -3,6 +3,7 @@ Date: 2026-07-31 (Asia/Shanghai)
 Branch: docs/codex-copresence-refresh-20260731
 Base: 6f29bb6055fd621bacbc46da20dc0b10f4a00700 (origin/main at branch creation)
 Tested source commit: 6791c4bf0d58baee2c189e9ceddb7c0a6157addb
+Merged source equivalent: 71b3d8964f780d8e9503f52624d1a596e6fb4660 (#536)
 Candidate state: committed and pushed; clean before this report-only update
 
 Environment
