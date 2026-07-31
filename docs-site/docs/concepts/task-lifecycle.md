@@ -6,9 +6,9 @@ Task（任务）是 Agent Network 中的核心数据单元。每个任务都有�
 
 ```mermaid
 stateDiagram-v2
-    [*] --> created: send_task
+    [*] --> delivered: send_task
+    [*] --> created: 兼容/直接写库
 
-    created --> delivered: 写入 inbox + 推送 SSE
     created --> cancelled: cancel_task
     created --> acked: send_ack
     created --> expired: TTL 超时（巡检）
@@ -36,18 +36,7 @@ stateDiagram-v2
 ```
 
 ::: warning `created` 在生产路径上基本不可见
-状态机里的 `[*] → created → delivered` 是按 schema 默认值（[`server/src/db.ts:185`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L185) `status TEXT NOT NULL DEFAULT 'created'`）画的，但 **没有任何代码路径会把 `created` UPDATE 成 `delivered`**：[`server/src/tools.ts:932-933`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L932) 的 `send_task` 在 INSERT 时就直接写 `VALUES (..., 'delivered', ...)`，跳过默认值。所以正常 API 流程里**永远观察不到** `created` 这个状态。
-
-`created` 仍然作为防御性兜底出现在三条 WHERE 子句里：
-
-| 操作 | 接受的当前状态 | 源码 |
-|------|---------------|------|
-| `cancel_task` | `created` / `delivered` / `acked` / `running` | [tools.ts:1356](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L1356) |
-| `send_ack`（Hub tool） | `created` / `delivered` | [tools.ts:1211](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L1211) |
-| 过期巡检（patrol） | `created` / `delivered` | [index.ts:508-510](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L508) |
-| `ack_inbox`（Agent tool） | `delivered`（**仅 1 个**） | [tools.ts:710](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L710) |
-
-`ack_inbox` 和 `send_ack` 的 WHERE 子句不同 —— `ack_inbox`（agent 端 tool，L687）只接受 `delivered`，`send_ack`（hub 端 tool，L1200）接受 `created` / `delivered` 两种。「4 个可取消状态」就是 `cancel_task` 那行；本节状态机图为简化未画 `created` 的出边，实际 SQL 允许（直接构造 DB row 走 INSERT 默认值才能进入 `created` 态，REST/MCP 没有这种入口）。
+`created` 是数据库默认值，但正常 REST/MCP 发送路径会直接写入 `delivered`。它只作为兼容兜底被 `cancel_task`、`send_ack` 和过期巡检接受；`ack_inbox` 只接受 `delivered`。因此正常调用中通常看不到 `created`。
 :::
 
 ## 状态说明
@@ -81,7 +70,7 @@ sequenceDiagram
     participant A as 代码1号
 
     H->>S: send_task(alias="代码1号", task="写排序算法")
-    Note over S: 状态: created → delivered
+    Note over S: 状态: delivered
     S->>S: INSERT inbox + tasks
     S-->>A: SSE: {type: "new_task"}
 
@@ -140,7 +129,7 @@ expires_at = datetime('now', '+3600 seconds')
 ```
 
 ::: warning 过期巡检只覆盖 `created` / `delivered`
-verify [`server/src/index.ts:502-515`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L502)：过期不是实时的 —— 一个 **每 5 分钟跑一次的 patrol** 把 `expires_at < now` 且 **`status IN ('created', 'delivered')`** 的任务 UPDATE 成 `expired`。
+过期不是实时的：默认每 5 分钟运行一次 patrol，把 `expires_at < now` 且状态为 `created` 或 `delivered` 的任务改为 `expired`。可通过 `COMMHUB_TASK_PATROL_MS` 调整周期。
 
 含义：
 - 实际状态翻转最多比 `expires_at` 晚 ~5 分钟
@@ -152,7 +141,7 @@ verify [`server/src/index.ts:502-515`](https://github.com/sleep2agi/agent-networ
 失败、取消、过期的任务都可以重试：
 
 ::: tip
-下面的调用走 REST `POST /mcp`，不是 Claude Code agent 的 stdio channel wrapper。channel wrapper（[`channel/commhub-channel.ts:138-196`](https://github.com/sleep2agi/agent-network/blob/main/channel/commhub-channel.ts#L138)）只暴露 5 个 `commhub_*` tool（`commhub_reply` / `commhub_report_status` / `commhub_send_task` / `commhub_send_message` / `commhub_get_all_status`）；`cancel_task` / `retry_task` / `reassign_task` / `get_inbox` 属于管理 / Dashboard 操作，不对 agent self-service 开放。
+下面的管理调用走 REST `POST /mcp`。Claude Code channel wrapper 只暴露通信与状态工具，不提供 `cancel_task` / `retry_task` / `reassign_task` / `get_inbox`。
 :::
 
 ```bash
@@ -195,7 +184,7 @@ cancel_task(task_id="t_xxx", reason="不再需要")
 3. 记录取消原因到 result 字段
 4. 记录 task_event
 
-可取消的状态：`created` / `delivered` / `acked` / `running`（4 个状态，verify [`server/src/tools.ts:1356`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L1356) `WHERE status IN ('created', 'delivered', 'acked', 'running')` —— server 的 tool description 字符串只列 3 个少一个 `created`，实际 SQL 4 个；终态 `replied` / `failed` / `cancelled` / `expired` 不能直接 cancel，需先 retry 再 cancel）
+可取消状态是 `created` / `delivered` / `acked` / `running`。终态 `replied` / `failed` / `cancelled` / `expired` 不能直接取消。
 
 ## 转移任务
 
@@ -250,7 +239,7 @@ sequenceDiagram
 
 ## 任务事件日志
 
-每个状态变更都记录到 `task_events` 表（verify [`server/src/db.ts:235-244`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L235)）：
+每个状态变更都记录到 `task_events` 表：
 
 ```sql
 CREATE TABLE task_events (
@@ -303,61 +292,18 @@ Agent 拉取 inbox 时，自动按优先级排序：
 ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, created_at
 ```
 
-## 数据库表结构
+## 持久化字段
 
-下方是 v0.8 实际生效的 schema（含所有 ALTER TABLE migration 之后的字段）。CREATE TABLE 原文 + migrations 见 [`server/src/db.ts:178-195`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L178)（tasks 原 17 列）+ [`db.ts:702`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L702) (V3 给 `tasks` 等 6 张表加 `network_id`) + [`db.ts:989`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L989) (加 `parent_task_id`)。
-
-```sql
--- 实际 tasks 表 19 列（原 17 + migration 2）
-CREATE TABLE tasks (
-  task_id           TEXT PRIMARY KEY,
-  from_node_id      TEXT,
-  from_name         TEXT NOT NULL DEFAULT 'hub',
-  to_node_id        TEXT,
-  to_name           TEXT NOT NULL,
-  priority          TEXT NOT NULL DEFAULT 'normal',
-  status            TEXT NOT NULL DEFAULT 'created',
-  content           TEXT NOT NULL,
-  result            TEXT,
-  in_reply_to       TEXT,
-  requires_response TEXT DEFAULT 'reply',
-  scope             TEXT DEFAULT 'single',
-  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
-  delivered_at      TEXT,
-  started_at        TEXT,
-  completed_at      TEXT,
-  expires_at        TEXT,
-  network_id        TEXT,           -- ALTER (V3)
-  parent_task_id    TEXT            -- ALTER (子任务 chain)
-);
-
--- 实际 inbox 表（原 9 + migration 5）
-CREATE TABLE inbox (
-  id                TEXT PRIMARY KEY,
-  session_name      TEXT NOT NULL,
-  type              TEXT DEFAULT 'task',
-  priority          TEXT DEFAULT 'normal',
-  content           TEXT NOT NULL,
-  context           TEXT,
-  from_session      TEXT DEFAULT 'hub',
-  acked             INTEGER DEFAULT 0,
-  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
-  in_reply_to       TEXT,           -- ALTER
-  requires_response TEXT DEFAULT 'reply',  -- ALTER
-  expires_at        TEXT,           -- ALTER
-  scope             TEXT DEFAULT 'single', -- ALTER
-  network_id        TEXT            -- ALTER (V3)
-);
-```
+`tasks` 保存发送方、接收方、状态、优先级、内容、结果、过期时间、`network_id` 和可选的 `parent_task_id`；`inbox` 保存面向具体会话的投递记录。字段会随 migration 演进，集成方应使用 REST/MCP 契约，而不是依赖表列数量。
 
 ::: info `from_node_id` / `to_node_id` vs `from_name` / `to_name`
-`*_node_id` 是**持久节点 ID**（跟 `nodes` 表 join 用，agent 删除后 task 还能回查 metadata）；`*_name` 是**当时的 alias** 字符串（人类可读，渲染表用）。两者并存是因为 alias 可以重命名/重用，但 node_id 永远唯一。`from_name` 默认 `'hub'`（非 agent 发起的 task）。
+`*_node_id` 是持久节点 ID，`*_name` 是任务创建时的人类可读 alias。两者并存是为了在 alias 重命名后仍保留稳定关联；非 agent 发起的任务可使用 `from_name='hub'`。
 :::
 
 ## 下一步
 
 **实操**：
-- 发任务的 4 种方式：`commhub_send_task` MCP 工具 / Dashboard ChatPanel / REST `/api/tasks` / SSE 推送
+- 发任务的入口：`commhub_send_task`、Dashboard ChatPanel 或 REST `/api/tasks`；Hub 再通过 SSE 通知在线接收方
 - 想看任务流：[Dashboard — Tasks 面板](/guide/dashboard#tasks-任务管理)
 - 重试 / 取消失败任务：Dashboard 直接点按钮
 

@@ -7,10 +7,14 @@
 > 本表是全站 runtime 信息的**单一权威来源**, 其他页面 (`cli` / `agent-node` / `getting-started` / `clean-server`) 都引用这里, 别在那些页面里重复整表.
 
 ::: tip 哪些 runtime 在哪个版本可用（真机实测）
-- **正式版**（`npm i -g @sleep2agi/agent-network`, 当前 2.2.21）：**4 种正式 runtime** —— `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`。
+- **正式版**（`npm i -g @sleep2agi/agent-network`）：**4 种正式 runtime** —— `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`。具体版本以 npm `latest` dist-tag 为准。
 - **预览版**（`@preview`）：在正式 4 种之外再加 `codex-app-server` / `opencode-cli`（共 **6 种**）；且对未知 runtime 会明确报错拦截（正式版会**静默退化**成默认 runtime，不报错）。
 
 下表标 `(preview)` 的行**仅预览版可用**，正式版选不到。
+:::
+
+::: warning Grok TUI 共存尚未发布
+`grok-build-cli` / `anet grok attach` 不在当前 `latest` 或 `preview` 包中，因此不属于下面的可选 runtime。当前请使用 `grok-build-acp`；它不支持 attach。详见 [Grok TUI 状态页](/guide/grok-copresence)。
 :::
 
 | Runtime | npm 包 / 内核 | 适用场景 | 主推模型 | 前置 auth | wizard 行为 (`anet node create`) |
@@ -30,10 +34,9 @@
 - **写代码 / 跑命令** → `codex-sdk`
 - **人和 Agent 共用一个 Codex TUI/thread** → preview `codex-app-server` + `anet node start <alias> --copresence`（[完整指南](/guide/codex-copresence)）
 - **用 xAI Grok Build** → `grok-build-acp` ([详细 runtime 指南 ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md))
-- **想人和 agent 同时用同一个 Grok TUI（共存，attach 到活的 Grok 会话）** → `grok-build-cli` ([Grok 人机共存 TUI · preview](/guide/grok-copresence))
 - **想用公版 sst/opencode CLI 当多 vendor 前端（统一 session/auth）** → `opencode-cli`（需本机装 `opencode` CLI + Anthropic/OpenAI env key，[RFC-029](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md)）
 - **接国产 / 非内置 vendor** (GLM / Kimi / OpenRouter / vLLM / SiliconFlow / 通义千问 等) → `claude-agent-sdk` + 在 vendor 子菜单选 `自定义 (custom)` + `ANTHROPIC_BASE_URL`
-- **混搭 (推荐)** → 同一 Hub 五种全开, 每个角色挑最合适的内核
+- **混搭 (推荐)** → 在同一 Hub 按角色组合当前可用 runtime
 :::
 
 ::: tip wizard 顺序速览

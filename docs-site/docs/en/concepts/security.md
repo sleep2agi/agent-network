@@ -15,7 +15,7 @@ graph TB
     subgraph "Access Control"
         RBAC[RBAC Four Levels<br/>owner/admin/member/viewer]
         NET[Network Isolation<br/>Server-side enforced]
-        SCOPE[Token Scope<br/>full/agent/readonly]
+        SCOPE[Network Membership<br/>owner/admin/member/viewer]
     end
 
     subgraph "Data Security"
@@ -25,7 +25,7 @@ graph TB
     end
 
     subgraph "Audit Trail"
-        AUDIT[Audit Log<br/>All operations recorded]
+        AUDIT[Audit Log<br/>Security-relevant operations]
         EVENTS[Task Event Log]
     end
 
@@ -36,26 +36,23 @@ graph TB
     SQL --> AUDIT
 ```
 
-::: info Actually shipped vs design goal (v0.10.11)
-The diagram above represents the **design goal**. Current v0.10.11 reality:
-
-- ✅ **Shipped**: Rate limiting / token auth (utok_/ntok_/atok_) / CORS / 4-tier RBAC / network isolation (server-enforced) / SQL-injection guards / salted scrypt password hashing / audit log / task event log
-- ⏳ **Not fully enforced**: Token Scope (`api_tokens.scope` column exists and [`auth.ts` `createToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) writes different scope values per token type, but [`auth.ts` `resolveToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) **does not return `scope` in its result** — RBAC decisions don't consume the written scope; security report **R12** was not addressed in v0.9.x or any v0.10.x scope (Recovery & Observability / Direct Runtime + Observability Foundations / Hero A+D / subsequent UX-fix chain themes took priority), queued for v0.11+ / unscheduled — see [security audit](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md))
-- ✅ **Password hashing = salted scrypt** (shipped in Round-6 A1, closing security report **R9**): Node built-in `crypto.scryptSync`, per-password random salt — verify [`db.ts:1057 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L1057). Argon2id was deliberately not adopted (avoids a native dep); see "Password Security" below
+::: info Current boundary
+The server enforces network binding and membership. `api_tokens.scope` is recorded, but current authorization primarily relies on the token's user/network binding and `network_members`; do not treat the `scope` string alone as proof of permission.
 :::
 
 ## Authentication
 
 ### Token System
 
-v0.8 uses a **dual-token system**:
+The current system uses three token types:
 
 | Token | Prefix | Binding | Purpose |
 |-------|------|------|------|
 | User Token | `utok_` | User | CLI / Dashboard login |
 | Network Token | `ntok_` | User + Network | Agent connection |
+| API Token | `atok_` | User, optionally network-bound | Long-lived API credential created by `anet token create` |
 
-`atok_` (the V2-era API token) has been superseded by `utok_` + `ntok_` — the code still keeps a prefix-compatibility check (it won't error), but **new users never need to touch it**; `anet token create / ls / revoke` all operate on `utok_` / `ntok_` underneath. See [Token System](/en/concepts/tokens) for details.
+See [Token System](/en/concepts/tokens) for details.
 
 ### Token Storage
 
@@ -74,9 +71,9 @@ const inputHash = hashToken(inputToken);
 const row = db.get("SELECT * FROM api_tokens WHERE token_hash = ?", inputHash);
 ```
 
-### Vendor Credential Storage (envRef mode, v0.9.0+)
+### Vendor Credential Storage (envRef mode) {#vendor-credential-storage-envref-mode-v0-9-0}
 
-When an agent node runs the `claude-agent-sdk` runtime it needs vendor API keys (`ANTHROPIC_AUTH_TOKEN` / `OPENAI_API_KEY` / `MINIMAX_KEY` …). Where they live matters a lot. Since [#125](https://github.com/sleep2agi/agent-network/issues/125) (v0.9.0 promote gate #2), the agent-node `config.json` env map **accepts two value shapes** (tagged union):
+When an agent node runs `claude-agent-sdk`, it needs vendor API keys such as `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY`, or `MINIMAX_KEY`. The `config.json` env map accepts two value shapes:
 
 ```jsonc
 // Legacy shape (still works, deprecated) — plain token persisted to config.json
@@ -94,15 +91,13 @@ When an agent node runs the `claude-agent-sdk` runtime it needs vendor API keys 
 }
 ```
 
-**Why envRef**: a plain token written into `config.json` leaks into git history, dashboard payloads, `anet ls` output, error envelopes, log lines, and more. Keeping the secret in `process.env` instead means it never touches disk.
+**Why envRef**: it keeps plaintext tokens out of `config.json`, reducing exposure through git, configuration displays, and logs. The launcher can read the actual value from the process environment or a mode-0600 `.env` file in the node directory; envRef is not a “never touches disk” promise.
 
 **agent-node accepts both shapes**:
 - A bare `string` → still used as plain, prints a one-shot deprecation banner pointing at `anet node migrate-token-to-envref <alias>`
 - A `{ _envRef: "<NAME>" }` → reads `process.env[NAME]`; if the var is unset the agent **fatally exits at startup** (refuses to start silently broken) and prints an `export NAME='...'` remediation hint
 
-**`anet node create` automatically uses envRef**: after [#125](https://github.com/sleep2agi/agent-network/issues/125), `saveCreatedNode` runs `rewritePlainSecretsToEnvRef()` before writing config.json — new nodes **never persist plain secrets**; the original value is dropped into the current shell's `process.env` (so the immediate spawn works) and `export NAME='value'` lines are printed for the user to persist into `~/.bashrc` or a secrets manager.
-
-**Since v0.10.10 — envRef Option A wizard auto-source ([#193](https://github.com/sleep2agi/agent-network/issues/193))**: in addition to the `process.env` + printed `export` behavior above, `anet node create` **also** writes the API key to `.anet/nodes/<alias>/.env` (mode 0600, auto-added to `.anet/.gitignore`). When you run `anet node start <alias>` from the same shell, the `.env` is sourced automatically before launch — **no manual `export ANTHROPIC_AUTH_TOKEN_N_<id>=...` and no copy into `~/.bashrc` needed**. Cross-machine deployment still requires copying once (the wizard still prints an `export` line for that). See [cli.md `anet node create`](/en/guide/cli#anet-node-create) — the envRef wizard auto-source ::: tip block.
+**`anet node create` uses envRef automatically**: `config.json` stores only the variable name. The actual API key is written to `.anet/nodes/<alias>/.env` (mode 0600 and ignored through `.anet/.gitignore`) and loaded at startup. Cross-machine deployment still requires securely transferring that secret; see [`anet node create`](/en/guide/cli#anet-node-create).
 
 **Migrating existing nodes**:
 
@@ -118,40 +113,17 @@ anet node migrate-token-to-envref <alias>
 
 **Secret detection heuristic** (shared across agent-node / `anet node create` / `anet doctor`): env key suffix matches `/_TOKEN|_KEY|_SECRET|AUTH$/`, or value prefix matches `/sk-|utok_|ntok_|atok_|ak-|gsk_|key-|Bearer/` — either match flags the value as a secret.
 
-### Token Verification Flow (v0.8)
+### Token Verification Flow
 
-```mermaid
-flowchart TD
-    REQ[HTTP Request] --> EXTRACT[Extract Token]
-    EXTRACT --> HDR{Authorization header?}
-    HDR -->|Yes| TOKEN[Bearer token]
-    HDR -->|No| QS{URL ?token=?}
-    QS -->|Yes| TOKEN
-    QS -->|No| DEVOPEN{--dev-open?}
+The Hub parses credentials from the Bearer header (a few SSE/compatibility routes also accept a query token), checks whether the token exists, is expired, or is revoked, then applies user identity, network binding, and membership. Use `--dev-open` only for isolated local demos.
 
-    TOKEN --> RESOLVE[resolveToken<br/>Query api_tokens table]
-    RESOLVE --> FOUND{Found?}
-    FOUND -->|Yes| CHECK_EXPIRE{Expired?}
-    CHECK_EXPIRE -->|No| OK[Auth passed<br/>Extract user + network]
-    CHECK_EXPIRE -->|Yes| DENY[401]
-    FOUND -->|No| LEGACY{COMMHUB_AUTH_TOKEN<br/>set & matches?<br/>/api/* reads only}
-
-    LEGACY -->|Yes| OK_LEGACY[Auth passed<br/>+ deprecation warning<br/>removed in v1.0]
-    LEGACY -->|No| DENY
-
-    DEVOPEN -->|Yes| OK_OPEN[Open mode<br/>offline tutorial only]
-    DEVOPEN -->|No| DENY
-```
-
-::: warning Key changes in v0.8
-- The v0.5-era path where unset `COMMHUB_AUTH_TOKEN` triggered open mode is **deleted**. The hub now refuses to start without `--dev-open` unless a valid utok_/ntok_ exists.
-- The master-token compat path **only allows `/api/*` read requests**; all writes are rejected.
-- This legacy path is fully removed in v1.0 ([RFC-001 Phase 3](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md); tracking issue: [open issues: COMMHUB_AUTH_TOKEN](https://github.com/sleep2agi/agent-network/issues?q=is%3Aissue+COMMHUB_AUTH_TOKEN)).
+::: warning Legacy master token
+`COMMHUB_AUTH_TOKEN` remains a backward-compatible master path with broad privileges. Do not enable it in new deployments. Migrate older deployments to `utok_` / `ntok_`, but do not assume the compatibility path has already been removed from the code.
 :::
 
 ### Password Security
 
-- Passwords are stored with **salted scrypt** (Node built-in `crypto.scryptSync`, not SHA-256) — verified at [`server/src/db.ts:1057 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L1057):
+- Passwords are stored with **salted scrypt** (Node built-in `crypto.scryptSync`, not SHA-256):
   ```ts
   export function hashPassword(plain: string): string {
     const N = getScryptN();               // default 14 → 2^14≈16384 iter (~50ms), tunable via COMMHUB_SCRYPT_N
@@ -160,52 +132,34 @@ flowchart TD
     return `scrypt$${N}$${salt.toString("base64")}$${hash.toString("base64")}`;
   }
   ```
-  **Each password gets its own 16-byte random salt** (stored inside the hash string), so the same password yields a **different** hash across accounts; scrypt is memory-hard and GPU/ASIC-resistant, stronger than bcrypt. Legacy bare SHA-256 hashes are **lazily migrated** to scrypt on login (`verifyPassword` accepts both formats and rehashes in place on a legacy match). Argon2id was deliberately not used: scrypt is a Node built-in with zero new deps.
+  **Each password gets its own 16-byte random salt** (stored inside the hash string), so the same password yields a different hash across accounts. Legacy bare SHA-256 hashes are lazily migrated to scrypt after a successful login.
 
-- **Password strength** — verified at [`server/src/auth.ts:56-77 validatePasswordStrength`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L56):
+- **Password strength** is handled by the shared `validatePasswordStrength()` check:
   - User-chosen passwords (register / `anet passwd`): **≥ 8 chars** + rejected against [`password-dict.ts WEAK_PASSWORDS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts)
-  - Bootstrap admin **register exception**: ≥ 4 chars (so the quick-start `admin / anethub` default works) — [`auth.ts:43-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L43) only requires length ≥ 4 for the very first registered user; **`anet passwd` / `reset-user` have no such exemption**, always enforcing ≥ 8 + not in the weak-password dictionary
+  - The bootstrap admin's register path has a 4-character minimum. **`anet passwd` / `reset-user` do not have this exemption**: they require at least 8 characters and reject the weak-password dictionary.
   - Public deployments must rotate the password **immediately** via `anet passwd`
 
 - Usernames support letters, numbers, underscores, and Chinese characters
-- Login failures don't reveal whether the username or password was wrong ([`auth.ts:99-100`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L99) intentionally merges both errors into the same message to prevent username enumeration)
+- Login failures do not reveal whether the username or password was wrong, preventing username enumeration
 
-::: info Password hashing = salted scrypt (shipped, Round-6 A1)
-Password hashing was upgraded from the earlier SHA-256 to **salted scrypt** (`scrypt$N$salt$hash` format, a fresh random salt per password), closing security report R9. **Argon2id was deliberately not chosen** — scrypt is a Node built-in (`crypto.scryptSync`) with zero native deps, and its memory-hard, GPU/ASIC-resistant properties are sufficient; legacy SHA-256 hashes are lazily migrated on login. Token hashes (`hashToken` uses bare SHA-256 without a salt) don't need any of this — tokens are 128-bit random strings, so rainbow tables don't apply.
+::: info Passwords and tokens use different hash strategies
+Passwords use scrypt with a fresh salt; legacy SHA-256 password hashes are lazily migrated after a successful login. Tokens are high-entropy random values, and the database stores only their SHA-256 hashes.
 :::
 
 ## Authorization
 
 ### RBAC Permission Checks
 
-Every MCP tool call goes through a permission check ([`server/src/tools.ts:106 canWrite`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L106)):
-
-```typescript
-const canWrite = (effectiveNetworkId?: string | null): boolean => {
-  if (!enforceUserId) return true; // legacy global-token mode (dev-open / atok_ only)
-  // ntok_: enforceNetworkId is locked by the token; utok_: use effectiveNetworkId from the MCP call
-  const netId = enforceNetworkId ?? effectiveNetworkId ?? null;
-  if (!netId) return false;        // no resolvable network → deny
-  const role = getUserNetworkRole(enforceUserId, netId);
-  return !!role && role !== "viewer"; // owner/admin/member can write
-};
-```
+MCP write tools use a shared `canWrite` check against membership in the target network:
 
 **Key points**:
 - `ntok_` → `enforceNetworkId` is locked by the token; the server **does not honor** any client-supplied network_id (prevents cross-network writes).
-- `utok_` → `enforceNetworkId` is empty, so the server **accepts** the `effectiveNetworkId` passed in the MCP call and checks `network_members.role`.
+- `utok_` → the server resolves a target network and checks `network_members.role`.
 - Regardless of token type, a `viewer` role is denied on writes.
 
 ### Server-Side Network Enforcement
 
-This is the core of the security design -- the network ID is **never trusted from the client**:
-
-```typescript
-// Server extracts network_id from token, ignores client-provided value
-const getNetworkId = (clientNetId) => enforceNetworkId ?? clientNetId ?? null;
-```
-
-Even if the client sends `network_id=other_network`, the server ignores it and enforces the token-bound network.
+An `ntok_` has a token-bound network that client parameters cannot override. A `utok_` may select a target network, but the server verifies that the user is a member; it does not trust an arbitrary client-supplied network ID.
 
 ### REST API Permissions
 
@@ -215,9 +169,9 @@ REST API automatically scopes based on token type:
 |-----------|-------------|
 | `ntok_` | Only bound network data |
 | `utok_` | All networks the user belongs to |
-| `atok_` (full) | All networks the user belongs to |
-| Global Token | All data |
-| System admin | All data |
+| `atok_` | Bound network only when scoped; otherwise the user's memberships |
+| Legacy master token | Generic REST scope; not a substitute for endpoints requiring a concrete user membership |
+| System admin | Hub-wide admin and cross-network query routes; membership management still checks the caller's role in that network |
 
 ## Rate Limiting
 
@@ -229,44 +183,22 @@ REST API automatically scopes based on token type:
 | `POST /api/auth/login` | 10/min | Prevent brute force |
 
 ::: info register and login use different mechanisms
-- **register**: the generic `checkRateLimit()` (30/min) — verify [`index.ts` `checkRateLimit()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts). The `maxPerMinute = 60` default is reserved for future expansion.
-- **login**: a dedicated `LoginIpRateLimiter` (10 requests per 60-second window, per IP) **plus** a failure-based progressive account lockout (triggered after ≥ 5 consecutive failures; lock duration starts at 30 s and backs off exponentially up to a 15-minute cap) — verify [`server/src/auth_login_guard.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth_login_guard.ts).
+- **register**: the generic `checkRateLimit()` (30/min).
+- **login**: a dedicated `LoginIpRateLimiter` (10 requests per 60-second window, per IP) **plus** progressive account lockout after ≥ 5 consecutive failures (30 seconds initially, exponential backoff to 15 minutes).
 - **No other endpoint rate-limits per IP** — if you're worried about write abuse, layer rate limiting at a reverse proxy (nginx / Cloudflare / etc.) in front.
 :::
 
-### Implementation
-
-```typescript
-// In-memory store, per IP (verify `checkRateLimit()` in index.ts)
-const rateLimits = new Map<string, { count: number; resetAt: number }>();
-
-function checkRateLimit(ip: string, maxPerMinute = 60): boolean {
-  // localhost / internal / unknown exempt (dev/testing)
-  if (!ip || ip === "unknown" || ip === "127.0.0.1" || ip === "::1") return true;
-
-  const now = Date.now();
-  const entry = rateLimits.get(ip);
-  if (!entry || now > entry.resetAt) {
-    rateLimits.set(ip, { count: 1, resetAt: now + 60000 });
-    return true;
-  }
-  if (entry.count >= maxPerMinute) return false;  // at limit, no further ++
-  entry.count++;
-  return true;
-}
-```
-
-When the limit is exceeded the server returns HTTP 429 with a body like:
+### 429 responses
 
 ```json
 { "ok": false, "error": "too many requests, try again later" }
 ```
 
-(the register 429 body is shown above; `/login` goes through the dedicated guard — an IP-limit hit returns `error: "rate_limited"` and a failure-lockout hit returns `error: "login_locked"`, **both with a `Retry-After` header and a `retry_after_ms` field in the body**, and the server writes audit `action='login_rate_limited'` with the client IP. Verify [`server/src/auth_login_guard.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth_login_guard.ts).)
+That is the register response. Login returns `rate_limited` for the IP limit or `login_locked` for account lockout; both include `Retry-After` and `retry_after_ms`.
 
 ### Localhost Exemption
 
-localhost (`127.0.0.1` / `::1`), plus requests whose IP resolves to empty / `"unknown"`, are exempt from rate limiting for convenient development and testing ([`index.ts` `checkRateLimit()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)).
+The generic register limiter exempts localhost and `"unknown"`. The dedicated login limiter **does not**. In production, use a trusted reverse proxy to supply the client IP and add a gateway-level rate limit.
 
 ## CORS Configuration
 
@@ -279,49 +211,23 @@ COMMHUB_CORS_ORIGINS="https://dashboard.example.com" anet hub start
 ```
 
 ::: warning CORS default is **not** `*`
-Verify [`index.ts` `CORS_ORIGINS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts): when `COMMHUB_CORS_ORIGINS` is unset the default allowlist is `["http://localhost:3000", "http://localhost:3001"]` (**localhost dev origins only**), **not** `*`. Setting `COMMHUB_CORS_ORIGINS` (comma-separated) **fully replaces** that default.
+When `COMMHUB_CORS_ORIGINS` is unset, the allowlist is `http://localhost:3000` and `http://localhost:3001`, **not** `*`. Setting the variable fully replaces the defaults.
 
 `Access-Control-Allow-Origin` echoes the request `Origin` only when it's in the allowlist, otherwise it returns an empty string (the browser then blocks the cross-origin request). No author-specific domains are hardcoded — production deployments serving the Dashboard cross-origin must set `COMMHUB_CORS_ORIGINS` explicitly.
 :::
 
 ## Audit Logging
 
-All key operations are recorded in the `audit_log` table (verify [`server/src/db.ts:201-212`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L201)):
+Important operations are written to `audit_log` with the caller, action, target, details, IP, network, and timestamp. Actions grow with product capabilities, so this page does not pin a count.
 
-```sql
-CREATE TABLE audit_log (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id       TEXT,
-  username      TEXT,
-  action        TEXT NOT NULL,
-  target_type   TEXT,           -- 'user' / 'network' / 'token' / 'auth' / ...
-  target_id     TEXT,           -- linked user_id / network_id / token_id
-  detail        TEXT,           -- e.g. '<user_id> as <role>' / '<old> → <new>'
-  ip            TEXT,           -- client IP (rate-limited paths set this)
-  network_id    TEXT,           -- the network the operation happened in
-  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
-);
-```
+Common action groups:
 
-Recorded `action` values (**19 total**; verify `grep logAudit server/src/*.ts + auth.ts resetUserPassword() + cli.ts` — 18 go through the [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L447), `password_reset_by_admin` is a direct INSERT at [`auth.ts` `resetUserPassword()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts)):
+- Login and password: `register`, `login`, `login_failed`, `login_rate_limited`, `login_locked`, `password_changed`
+- Networks and members: `network_renamed`, `network_deleted`, `network_joined`, `member_*`, `invite_created`
+- Tokens and nodes: `token_*`, `node_token_created`, `node_rename_*`, `node_attrs_updated`
 
-| Operation | Trigger |
-|------|---------|
-| `register` | User registration ([`index.ts` `POST /api/auth/register`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)) |
-| `login` | Successful login |
-| `login_failed` | Login failure (wrong password / unknown username) |
-| `login_rate_limited` | Login hit the IP rate limit (10/min) |
-| `password_changed` | `anet passwd` ([`index.ts` `POST /api/auth/password`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)) |
-| `password_reset_by_admin` | hub admin force-reset via `anet hub admin reset-user` ([`auth.ts` `resetUserPassword()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) + [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)) |
-| `network_renamed` / `network_deleted` / `network_joined` | Network rename / delete / join |
-| `member_added` / `member_role_changed` / `member_removed` | Network membership changes (`detail` records `<user_id> as <role>` / `<user_id> → <role>`) |
-| `token_created` / `token_revoked` | API-token lifecycle |
-| `node_token_created` | `anet node create` auto-mints an `ntok_` |
-| `node_rename_prepared` / `node_rename_committed` / `node_rename_aborted` | RFC-010 node-rename two-phase transaction (one audit row each for PREPARE / COMMIT / ABORT) |
-| `invite_created` | Network invite code creation |
-
-::: info `create_network` / `network_created` is NOT audited
-Today's POST `/api/networks` handler ([`index.ts` `POST /api/networks`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)) does not call `logAudit`, so new networks leave no audit row. Only rename / delete / join write audit entries.
+::: info Network creation is not currently audited
+POST `/api/networks` does not write `create_network` or `network_created`. Do not depend on those nonexistent actions.
 :::
 
 ### Querying Audit Logs
@@ -334,7 +240,7 @@ curl -H "Authorization: Bearer $UTOK" "$HUB/api/audit-log?limit=50"
 
 ## SQL Injection Protection
 
-All database operations use parameterized queries:
+Database queries bind parameters instead of concatenating user input:
 
 ```typescript
 // Correct: Parameterized query
@@ -344,12 +250,11 @@ db.run("SELECT * FROM sessions WHERE alias = ?1", [alias]);
 db.run(`SELECT * FROM sessions WHERE alias = '${alias}'`);
 ```
 
-All `db.run()` / `db.get()` / `db.all()` calls ([currently 150+ across `server/src/*.ts`](https://github.com/sleep2agi/agent-network/tree/main/server/src)) use parameterized binding. (The older "85+" figure was a v0.5-era estimate; the server codebase has roughly doubled since.)
-
 ## Database Security
 
 ::: tip The backend is SQLite — the integrity guarantees are SQLite-based too
 anet runs on **SQLite** in production (`~/.commhub/commhub.db`). The integrity and isolation guarantees in this section (and in authorization / audit) rest on SQLite's transaction / constraint semantics. The code has a `DATABASE_URL` PostgreSQL entry point, but it is **not end-to-end verified and not recommended for production** (see [FAQ — PostgreSQL support?](/en/faq#_20-what-about-postgresql-support)).
+:::
 
 ### SQLite WAL Mode
 
@@ -372,9 +277,9 @@ chmod 600 ~/.commhub/commhub.db
 
 | Data | Storage method | Details |
 |------|---------|------|
-| Passwords | salted scrypt (`scrypt$N$salt$hash`) | [db.ts:1057](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L1057); fresh random salt per password, legacy SHA-256 lazily migrated on login |
-| Tokens | SHA-256 hash (no salt) | Tokens are `crypto.randomUUID()` 128-bit random values; rainbow tables do not apply |
-| API keys | Not stored (only `process.env` / `config.env`) | Agent-node reads `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` from env; the hub's DB does not store them |
+| Passwords | salted scrypt (`scrypt$N$salt$hash`) | fresh random salt per password, legacy SHA-256 lazily migrated on login |
+| Tokens | SHA-256 hash (no salt) | Tokens come from `crypto.randomUUID()`; plaintext is not stored in the database |
+| API keys | Not stored in the Hub database | agent-node reads process environment or a node `.env`; envRef keeps only the variable name in `config.json` |
 | Task content | Plaintext | The `tasks.content` column; on a shared hub, admins can read everything. `audit_log` does not contain task bodies |
 | Audit logs | Plaintext | `audit_log` has 10 columns including `user_id` / `username` / `action` / `detail` / `ip` / `network_id` |
 
@@ -405,24 +310,22 @@ COMMHUB_CORS_ORIGINS="https://dashboard.example.com"
 
 ### SSE Connection Security
 
-SSE connections use the same authentication mechanism as the REST API (Bearer Token / URL token parameter). **From v0.8.1, agent-node auto-reloads its token and reconnects when SSE returns 401**, so an expired ntok_ no longer leaves the agent silently offline.
+SSE connections use the same authentication mechanism as the REST API (Bearer Token / URL token parameter). agent-node reloads its token and reconnects after an SSE 401.
 
-### Dashboard auth (v0.8 thin cookie-proxy)
+### Dashboard auth
 
-From v0.8.0, the Dashboard (`@sleep2agi/agent-network-dashboard@0.4.2+`) runs as a **thin cookie-proxy**:
+The Dashboard runs as a thin cookie-proxy:
 
 - Browser logs into the Dashboard with username / password → Next.js backend obtains a `utok_` and writes it to an HttpOnly cookie
-- The Dashboard frontend **no longer holds any long-lived service token** (the v0.7-era `COMMHUB_AUTH_TOKEN` / `DASHBOARD_PASSWORD` env vars are gone)
+- The Dashboard frontend does not hold a long-lived service token
 - The backend forwards requests to the Hub with the current session's `utok_` Bearer header
 - Session cookie expires / user logs out → cookie cleared → next request returns 401, forcing re-login
-
-This is the Dashboard side of RFC-001 Phase 2 landing. **Combined with `admin-utok.json` local recovery, the project ships with 0-token-config quick-start**. Full design: [RFC-001](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md).
 
 ## Agent Runtime Security
 
 ### Isolation Strategy
 
-Each Agent Node is fully isolated and does not read host machine config — claude-agent-sdk passes `settingSources: []` to `query()` (the SDK entry point is the `query()` function, not a `new Agent({...})` class):
+`claude-agent-sdk` defaults to `settingSources: []`, so it does not automatically load host Claude configuration:
 
 ```typescript
 const options = {
@@ -432,9 +335,11 @@ const options = {
 for await (const message of query({ prompt, options })) { /* ... */ }
 ```
 
+This is not operating-system isolation. Filesystem, shell, and network tools still act on the host environment. Use a container or a dedicated low-privilege account when stronger isolation is required.
+
 ### Tool Permissions (default = Claude Code preset, user responsibility)
 
-Since [#101](https://github.com/sleep2agi/agent-network/issues/101) Option B (anet v0.9.0+), the `claude-agent-sdk` runtime's **default toolset is the full Claude Code preset** — not an empty set. Every new node, right after spawn, can:
+The `claude-agent-sdk` runtime defaults to the full Claude Code preset. A newly started node can:
 
 - Filesystem: `Read` / `Write` / `Edit` / `Glob` / `Grep`
 - Shell: `Bash` (subject to `dangerouslySkipPermissions=true` on by default — no per-call confirmation)
@@ -442,8 +347,6 @@ Since [#101](https://github.com/sleep2agi/agent-network/issues/101) Option B (an
 - Subtasks: `Task` / `NotebookEdit` / ...
 
 Plus the ~40 MCP tools on the hub side (`commhub_send_task` / `commhub_reply` / ...).
-
-**Why the default changed to preset**: [#101 root cause](https://github.com/sleep2agi/agent-network/issues/101) — when `config.json` had no `tools` field, agent-node set the SDK's `options.tools = undefined`, which the SDK reads as "zero built-in tools". Agents could only call MCP tools and hallucinated "network restricted" when asked for `WebFetch` / `Bash` / `Read`. Option B forces the fallback to the SDK `{ type: 'preset', preset: 'claude_code' }` sentinel — per the SDK type definitions this is the right way to say "give me the full Claude Code toolset".
 
 **Granularity**:
 
@@ -461,7 +364,7 @@ anet node create my-agent --tools Read,Glob,Grep
 anet info my-agent           # prints tools: + flags: lines
 ```
 
-After a successful `anet node create`, agent-node prints a **behavior-disclosure banner**: the built-in tools (list or `"all (Claude Code preset)"`) + MCP tools + current flags (`dangerouslySkipPermissions=true` / `teammateMode=true`) + the sentence "The agent can read/write files, run shell commands, and access the network". Vincent [4927](https://github.com/sleep2agi/agent-network/issues/101) pushed for this banner so **users actually see what they signed up for and take ownership of sandboxing**.
+After `anet node create`, the CLI prints the effective tools and permission flags. You still need to choose isolation appropriate to the working directory and data sensitivity.
 
 > ⚠ **User responsibility**: the default preset + default `dangerouslySkipPermissions=true` means the agent can **edit files, run shell commands, and access the network without confirmation prompts**. Please:
 > 1. **Do NOT run agents from `$HOME` directly** — use a disposable working directory (`mkdir agent-work && cd agent-work && anet node create ...`); see [SECURITY.md](https://github.com/sleep2agi/agent-network/blob/main/SECURITY.md)
@@ -484,13 +387,13 @@ Or persist it via `flags.maxBudgetUsd` in `config.json`.
 
 ### Production Deployment
 
-- [ ] Run `anet passwd` **immediately** after `anet hub start` to change the strong password (the `admin/anethub` default is for local quick-start only)
-- [ ] **Do NOT** set `COMMHUB_AUTH_TOKEN` env (soft-deprecated v0.8 / removed v1.0; new deployments go through admin `utok_` bootstrap)
+- [ ] Run `anet passwd` **immediately** after `anet hub start`
+- [ ] Do not set legacy `COMMHUB_AUTH_TOKEN` in new deployments; use `utok_` / `ntok_`
 - [ ] Use TLS (HTTPS); Caddy auto-cert recommended
 - [ ] Configure firewall rules (only open 80/443)
 - [ ] Configure CORS whitelist via `COMMHUB_CORS_ORIGINS`
 - [ ] Agent nodes use `ntok_` (one per agent, hub enforces network binding)
-- [ ] Set `~/.anet/server/admin-utok.json` permissions to 600 (v0.8 bootstrap does this automatically)
+- [ ] Confirm `~/.anet/server/admin-utok.json` has mode 600
 - [ ] Regular `~/.commhub/commhub.db` backups
 - [ ] Monitor audit log (`/api/audit-log`)
 
@@ -499,18 +402,16 @@ Or persist it via `flags.maxBudgetUsd` in `config.json`.
 - [ ] Restrict tool permissions (avoid `--tools all`)
 - [ ] Set budget caps
 - [ ] Use Docker for isolation
-- [ ] Don't hardcode secrets in environment variables
+- [ ] Do not store plaintext secrets in `config.json`; use envRef, a protected `.env`, or a secrets manager
 - [ ] Add `.anet/` to `.gitignore`
 
 ## Next steps
 
 **Dig into the implementation**:
-- [RFC-001 — `COMMHUB_AUTH_TOKEN` deprecation roadmap](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md) — three-phase master-token soft-deprecation
 - [Architecture — Security section](/en/guide/architecture#security-architecture) — token flow and the corresponding DB tables
 - [Account system](/en/guide/account-system) — relationship between utok_ / ntok_ / password
 
 **Hands-on**:
-- Upgrade to the v0.8 admin model: [Upgrade guide — v0.7 → v0.8](/en/guide/upgrade#v0-7-v0-8-upgrade-notes-latest)
 - Forgot password: run `anet hub admin reset-user <username>` on the Hub machine
 - Repair expired tokens: `anet doctor --fix` auto-probes and reissues ntok_
 - Change password: `anet passwd` interactive
@@ -518,7 +419,3 @@ Or persist it via `flags.maxBudgetUsd` in `config.json`.
 **Production deployment checklist**:
 - [Production deployment](/en/deploy/production) — full TLS / firewall / CORS / backup checklist
 - [Docker deployment](/en/deploy/docker) — containerization best practices
-
-::: warning Current state
-Password hashing = **salted scrypt** (shipped in Round-6 A1, verify [`db.ts:1057 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L1057)): a fresh random salt per password, with legacy SHA-256 hashes lazily migrated to scrypt on login; Argon2id was deliberately not used (avoids a native dep). This closes security report **R9**. Production environments must still pair this with: strong passwords + TLS + firewall + regular backups.
-:::

@@ -6,9 +6,9 @@ A Task is the core data unit in Agent Network. Every task has a complete lifecyc
 
 ```mermaid
 stateDiagram-v2
-    [*] --> created: send_task
+    [*] --> delivered: send_task
+    [*] --> created: compatibility/direct insert
 
-    created --> delivered: Write to inbox + SSE push
     created --> cancelled: cancel_task
     created --> acked: send_ack
     created --> expired: TTL timeout (patrol)
@@ -36,18 +36,7 @@ stateDiagram-v2
 ```
 
 ::: warning `created` is essentially invisible on the production path
-The diagram's `[*] → created → delivered` reflects the **schema default** ([`server/src/db.ts:185`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L185) `status TEXT NOT NULL DEFAULT 'created'`), but **no code path UPDATEs `created` to `delivered`**: [`server/src/tools.ts:932-933`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L932) `send_task` inserts with `VALUES (..., 'delivered', ...)` directly, bypassing the default. So through normal API flows you'll **never observe** a task in `created` state.
-
-`created` still appears in three WHERE clauses defensively:
-
-| Operation | Accepted source states | Source |
-|------|------------------------|------|
-| `cancel_task` | `created` / `delivered` / `acked` / `running` | [tools.ts:1356](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L1356) |
-| `send_ack` (Hub tool) | `created` / `delivered` | [tools.ts:1211](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L1211) |
-| Expiration patrol | `created` / `delivered` | [index.ts:508-510](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L508) |
-| `ack_inbox` (Agent tool) | `delivered` (**only 1**) | [tools.ts:710](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L710) |
-
-`ack_inbox` and `send_ack` have different WHERE clauses — `ack_inbox` (agent-side tool, L687) accepts only `delivered`, while `send_ack` (hub-side tool, L1200) accepts `created` / `delivered`. The "4 cancellable states" are exactly the `cancel_task` row. The state diagram above doesn't draw `created`'s outgoing edges for simplicity; SQL allows them, but the only way a row enters the `created` state is a direct DB INSERT that omits the status column — no REST/MCP entry point does that.
+`created` is the database default, but normal REST/MCP dispatch writes `delivered` directly. It remains a compatibility state accepted by `cancel_task`, `send_ack`, and the expiration patrol; `ack_inbox` accepts only `delivered`. Normal callers therefore rarely observe `created`.
 :::
 
 ## Status Reference
@@ -81,7 +70,7 @@ sequenceDiagram
     participant A as Coder-1
 
     H->>S: send_task(alias="coder-1", task="Write a sorting algorithm")
-    Note over S: Status: created → delivered
+    Note over S: Status: delivered
     S->>S: INSERT inbox + tasks
     S-->>A: SSE: {type: "new_task"}
 
@@ -140,7 +129,7 @@ expires_at = datetime('now', '+3600 seconds')
 ```
 
 ::: warning The expiry patrol only covers `created` / `delivered`
-Verify [`server/src/index.ts:502-515`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L502): expiration is not real-time — a **patrol that runs every 5 minutes** UPDATEs tasks with `expires_at < now` **and `status IN ('created', 'delivered')`** to `expired`.
+Expiry is not real-time. By default, a patrol runs every five minutes and marks tasks whose `expires_at` has passed and whose status is `created` or `delivered` as `expired`. `COMMHUB_TASK_PATROL_MS` can override the interval.
 
 Implications:
 - The actual status flip can lag `expires_at` by up to ~5 minutes
@@ -152,7 +141,7 @@ Implications:
 Failed, cancelled, and expired tasks can all be retried:
 
 ::: tip
-The following calls go via REST `POST /mcp` rather than the Claude Code agent's stdio channel wrapper. The channel wrapper ([`channel/commhub-channel.ts:138-196`](https://github.com/sleep2agi/agent-network/blob/main/channel/commhub-channel.ts#L138)) exposes 5 `commhub_*` tools (`commhub_reply` / `commhub_report_status` / `commhub_send_task` / `commhub_send_message` / `commhub_get_all_status`); `cancel_task` / `retry_task` / `reassign_task` / `get_inbox` are admin / dashboard ops and not exposed to agent self-service.
+The management calls below go through REST `POST /mcp`. The Claude Code channel wrapper exposes communication and status tools, not `cancel_task`, `retry_task`, `reassign_task`, or `get_inbox`.
 :::
 
 ```bash
@@ -195,7 +184,7 @@ Cancellation will:
 3. Record the cancellation reason in the result field
 4. Log a task_event
 
-Cancellable statuses: `created` / `delivered` / `acked` / `running` (4 statuses — verified at [`server/src/tools.ts:1356`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L1356) `WHERE status IN ('created', 'delivered', 'acked', 'running')`. The tool's own description string only mentions 3 (missing `created`); the SQL is the source of truth with 4. Terminal states `replied` / `failed` / `cancelled` / `expired` cannot be cancelled directly — retry first, then cancel.)
+Cancellable statuses are `created`, `delivered`, `acked`, and `running`. Terminal states (`replied`, `failed`, `cancelled`, `expired`) cannot be cancelled directly.
 
 ## Reassigning Tasks
 
@@ -250,7 +239,7 @@ By distinguishing types, only `task` and `broadcast` trigger processing, while `
 
 ## Task Event Log
 
-Every status change is recorded in the `task_events` table (verified at [`server/src/db.ts:235-244`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L235)):
+Every status change is recorded in the `task_events` table:
 
 ```sql
 CREATE TABLE task_events (
@@ -303,61 +292,18 @@ When agents fetch their inbox, items are automatically sorted by priority:
 ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, created_at
 ```
 
-## Database Table Schema
+## Persisted fields
 
-Below is the schema as it actually exists in v0.8 (after all ALTER TABLE migrations). The original CREATE TABLE and migrations live in [`server/src/db.ts:178-195`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L178) (tasks, 17 original columns), [`db.ts:702`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L702) (V3 adds `network_id` to `tasks` and 5 other tables), and [`db.ts:989`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L989) (adds `parent_task_id`).
-
-```sql
--- Effective tasks schema: 19 columns (17 original + 2 migrations)
-CREATE TABLE tasks (
-  task_id           TEXT PRIMARY KEY,
-  from_node_id      TEXT,
-  from_name         TEXT NOT NULL DEFAULT 'hub',
-  to_node_id        TEXT,
-  to_name           TEXT NOT NULL,
-  priority          TEXT NOT NULL DEFAULT 'normal',
-  status            TEXT NOT NULL DEFAULT 'created',
-  content           TEXT NOT NULL,
-  result            TEXT,
-  in_reply_to       TEXT,
-  requires_response TEXT DEFAULT 'reply',
-  scope             TEXT DEFAULT 'single',
-  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
-  delivered_at      TEXT,
-  started_at        TEXT,
-  completed_at      TEXT,
-  expires_at        TEXT,
-  network_id        TEXT,           -- ALTER (V3)
-  parent_task_id    TEXT            -- ALTER (sub-task chain)
-);
-
--- Effective inbox schema (9 original + 5 migrations)
-CREATE TABLE inbox (
-  id                TEXT PRIMARY KEY,
-  session_name      TEXT NOT NULL,
-  type              TEXT DEFAULT 'task',
-  priority          TEXT DEFAULT 'normal',
-  content           TEXT NOT NULL,
-  context           TEXT,
-  from_session      TEXT DEFAULT 'hub',
-  acked             INTEGER DEFAULT 0,
-  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
-  in_reply_to       TEXT,           -- ALTER
-  requires_response TEXT DEFAULT 'reply',  -- ALTER
-  expires_at        TEXT,           -- ALTER
-  scope             TEXT DEFAULT 'single', -- ALTER
-  network_id        TEXT            -- ALTER (V3)
-);
-```
+`tasks` stores sender, recipient, status, priority, content, result, expiry, `network_id`, and an optional `parent_task_id`. `inbox` stores delivery records for individual sessions. Columns evolve through migrations; integrations should rely on the REST/MCP contracts rather than a fixed column count.
 
 ::: info `from_node_id` / `to_node_id` vs `from_name` / `to_name`
-`*_node_id` is the **persistent node ID** (joins against the `nodes` table — useful for looking up metadata even after the agent is deleted). `*_name` is the **alias as a string at the time of writing** (human-readable, used in table renders). Both exist because aliases can be renamed or reused, while `node_id` is permanently unique. `from_name` defaults to `'hub'` for tasks dispatched by the hub itself (not by an agent).
+`*_node_id` is the persistent node ID, while `*_name` is the human-readable alias captured when the task was created. Keeping both preserves stable linkage after an alias is renamed. Non-agent-originated tasks may use `from_name='hub'`.
 :::
 
 ## Next steps
 
 **Hands-on**:
-- 4 ways to send a task: `commhub_send_task` MCP tool / Dashboard ChatPanel / REST `/api/tasks` / SSE push
+- Send tasks through `commhub_send_task`, the Dashboard ChatPanel, or REST `/api/tasks`; the Hub then notifies online recipients over SSE
 - View the task flow: [Dashboard — Tasks panel](/en/guide/dashboard#tasks)
 - Retry / cancel failed tasks: click the buttons in the Dashboard
 

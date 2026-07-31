@@ -5,11 +5,15 @@
 - **2026-05 起**：采用 v0.6 → v0.7 → v0.8 → v0.9 → v0.10 → v0.11 渐进发布，`v0.X.Y` 格式对齐 `commhub-server` 的 `0.X.Y` semver 风格
 - **2026-04 之前**：曾使用 `v1.0.0-preview.N` / `v2.1` 等过度承诺型版本号，已废弃
 - **当前 stable**：npm `latest` tag（按 [版本号体系](/guide/versioning) 查 npm latest 即为权威）；v0.8.1 是 Apache 2.0 OSS 首发版本
-- **当前 preview**：Grok 人机共存 TUI（`agent-network@2.3.0-preview.23` / `agent-node@2.5.0-preview.21`，见下方第一条；通过 npm `@preview` tag 发布；尚未 promote 到 `@latest`）
+- **当前 preview**：以 npm `preview` dist-tag 为准；当前发布包不含 `grok-build-cli` / `anet grok attach`。Grok TUI 状态见 [Issue #537](https://github.com/sleep2agi/agent-network/issues/537)
 - 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
 :::
 
 ## Grok 人机共存 TUI（`grok-build-cli`）—— preview（2026-07-15）🟡 preview
+
+::: danger 2026-07-31 更正
+下文记录的是当时的候选里程碑，不是当前可安装能力。重新核验 npm 发布包后，当前 `latest` 与 `preview` 均不含 `grok-build-cli` / `anet grok attach`；其中的安装与运行命令请勿执行。现状见 [Grok TUI 状态页](/guide/grok-copresence)。
+:::
 
 **版本同步**（npm `@preview` tag）：
 - `@sleep2agi/agent-network@2.3.0-preview.23`

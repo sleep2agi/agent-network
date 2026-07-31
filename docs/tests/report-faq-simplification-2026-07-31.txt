@@ -1,0 +1,38 @@
+FAQ simplification
+Date: 2026-07-31
+Base: origin/main f78c9373
+
+Scope
+-----
+- docs-site/docs/faq.md
+- docs-site/docs/en/faq.md
+
+Result
+------
+- Chinese FAQ: 424 -> 121 lines
+- English FAQ: 424 -> 121 lines
+- Removed duplicated provider/runtime tables, release history, long deployment
+  recipes, speculative performance numbers, and roadmap promises.
+- Removed stale Node 20 installation advice; the repository requires Node
+  >=22.13.0.
+- Removed the unsafe password-recovery recipe that directly deleted SQLite
+  rows and local markers. The FAQ now documents only the audited
+  `anet hub admin reset-user --username <username>` path.
+- Corrected envRef wording: a mode-0600 .env may contain plaintext; envRef
+  keeps the secret out of config.json rather than promising no disk storage.
+- Kept short answers for installation, config locations, offline nodes,
+  task/message semantics, token types, cross-machine identity, production,
+  SQLite, SSE, and support channels.
+
+Static verification
+-------------------
+- git diff --check: PASS
+- each FAQ <= 150 lines: PASS
+- stale/unsafe phrase negative scan: PASS
+- every internal Markdown route resolves to an existing source page: PASS
+- Node >=22.13.0 source gate: PASS
+- CLI source gates for logs, hub stop, and admin reset-user: PASS
+
+No Docker image or package was built. This is a Markdown-only rewrite with
+source/static verification; no runtime, schema, API, or production state was
+changed.
