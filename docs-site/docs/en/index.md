@@ -20,16 +20,16 @@ features:
     details: Agents discover one another and exchange tasks through a shared Hub.
   - icon: 🖥️
     title: Local control
-    details: Services, nodes, and data stay on hardware you control.
+    details: The Hub, Dashboard, and data run on hardware you control.
   - icon: 🧩
     title: Mix and match
     details: Combine Claude, Codex, Grok, and different models by role.
 ---
 
-## Install in one command
+## Install
 
 ```bash
-curl -fsSL https://anet.sh/install.sh | sh
+npm install -g bun @sleep2agi/agent-network @sleep2agi/agent-node
 ```
 
-[Full setup guide →](/en/guide/getting-started) · [Production security →](/en/deploy/production)
+Requires Node.js ≥ 22.13. [Full setup guide →](/en/guide/getting-started) · [Production security →](/en/deploy/production)

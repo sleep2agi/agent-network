@@ -20,16 +20,16 @@ features:
     details: 不同 Agent 通过同一个 Hub 发现彼此、收发任务。
   - icon: 🖥️
     title: 本地掌控
-    details: 服务、节点和数据都运行在你的机器上。
+    details: Hub、Dashboard 和数据运行在你控制的机器上。
   - icon: 🧩
     title: 自由组合
     details: 按角色混用 Claude、Codex、Grok 和不同模型。
 ---
 
-## 一行安装
+## 安装
 
 ```bash
-curl -fsSL https://anet.sh/install.sh | sh
+npm install -g bun @sleep2agi/agent-network @sleep2agi/agent-node
 ```
 
-[完整上手指南 →](/guide/getting-started) · [生产部署安全指南 →](/deploy/production)
+需要 Node.js ≥ 22.13。[完整上手指南 →](/guide/getting-started) · [生产部署安全指南 →](/deploy/production)
