@@ -52,6 +52,22 @@ The test225 source-commit file contains the literal Git export-subst marker
 `$Format:%H$`; this is valid for an archive boundary but does not repair the
 three stale committed reports.
 
+Root-cause classification
+-------------------------
+The gate generators already require a full SHA:
+
+- test219 reads `TEST219_SOURCE_COMMIT`.
+- test224 reads `TEST224_SOURCE_COMMIT`.
+- test225 reads `TEST225_SOURCE_COMMIT` and additionally compares it with the
+  archive-expanded source marker.
+
+Therefore this is not evidence that the generators silently accept an
+unbound run. It is evidence that the saved reports were not regenerated after
+the candidate advanced. There are exactly 62 commits from the reported
+`501764f8` state through `4854928b`; their diff changes 62 files with 16,587
+insertions and 504 deletions, including runtime containment, credentials,
+recovery, lifecycle, and the test gates themselves.
+
 Verdict
 -------
 FAIL.
