@@ -38,13 +38,16 @@ Once running:
 
 ## Pairs with
 
-| Package | Version |
+| Package | |
 |---|---|
-| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | 2.1.7 |
-| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | 0.4.2 |
-| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | 2.3.0 |
+| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | CLI |
+| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | Web UI |
+| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | Agent runtime host |
 
-## MCP tools (17)
+Install the matching versions with `npm install -g <pkg>` — the `latest` dist-tag on npm is
+authoritative. Pinning versions here goes stale on every release and nobody comes back to fix it.
+
+## MCP tools
 
 ### Agent-side
 | Tool | Description |
@@ -96,7 +99,7 @@ Network-management endpoints (`/api/networks…`) are present and used by the cu
 
 Auth: `Authorization: Bearer <token>` header, or `?token=<token>` query.
 
-## SQLite schema (13 tables)
+## SQLite schema
 
 Auto-created on first run.
 
