@@ -1,0 +1,52 @@
+Troubleshooting guide simplification report — 2026-07-31
+
+Scope
+-----
+- docs-site/docs/troubleshooting.md
+- docs-site/docs/en/troubleshooting.md
+
+Outcome
+-------
+- Chinese guide: 967 -> 266 lines.
+- English guide: 969 -> 266 lines.
+- Reorganized diagnosis by dependency layer: environment, Hub, auth/network,
+  node, runtime, task, channel, and Docker.
+- Removed release-history narration, fixed preview/package versions, obsolete
+  roadmap claims, stale source line references, and duplicated API internals.
+- Removed unsafe recovery recipes that directly mutated SQLite rows, deleted
+  bootstrap markers, recursively wiped state, or broadly killed processes.
+- Preserved current error breadcrumbs such as license_expired, rate limits,
+  network quota/active-session errors, alias identity conflicts, and runtime
+  timeout symptoms, with safe recovery or canonical links.
+- Verified that the current CLI can list network members but cannot change a
+  user's global role/plan. The guide therefore does not invent a replacement
+  command for the removed privilege-escalation SQL.
+- Preserved all ten repository-referenced legacy fragments for quota, license,
+  vendor auth/timeout, and Grok timeout troubleshooting.
+- Explained why direct SQL is not a supported fallback: it bypasses API auth,
+  auditing, and consistency checks and can corrupt related state.
+
+Static/source gates
+-------------------
+PASS  git diff --check
+PASS  both guides are 266 lines and have 27 matching section headings
+PASS  all internal Markdown targets exist
+PASS  balanced fenced code blocks
+PASS  stale/dangerous phrase scan: no v0.x/preview-number instructions,
+      ANET_CODEX_STDIO_DIRECT, direct DELETE/UPDATE SQL, recursive state wipe,
+      fixed bootstrap password, unpublished grok-build-cli, or fixed OpenCode pin
+PASS  documented CLI commands exist in agent-network/bin/cli.ts
+PASS  CLI/source inspection confirms no public global role/plan mutation command;
+      owner-only network member role changes exist only on the scoped REST route
+PASS  package engines confirm Node >=22.13.0 and Bun >=1.2.0
+PASS  agent-node source confirms the `SSE connected` readiness signal
+PASS  server source confirms license_expired remains a possible legacy error
+PASS  VitePress 1.6.4 Docker build on origin/main baseline and this candidate
+PASS  every repository inbound troubleshooting fragment appears as an exact id
+      in VitePress-rendered Chinese and English HTML
+
+Test policy
+-----------
+Documentation-only change. A disposable Docker image ran VitePress only; no Hub,
+model runtime, npm publish, production process, database, or user configuration
+was touched. This did not consume Codex or Claude quota.
