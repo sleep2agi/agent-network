@@ -148,7 +148,9 @@ The final wrapper built a fixed-tag gate image from the minimal candidate
 archive, then ran it in a disposable, read-only, network-disabled container:
 
   image tag: anet-test537-grok-tui-provenance:dev
-  image id: sha256:e936799f72480ded6c9bd292a4e43e4a0937df3b6bee0797b14412dcff2e6da6
+  image id: sha256:e03f05564d2920452b926341dc7e05bf3b5028be00bec8603ec9b9cf131cefeb
+  image id source:
+    docker image inspect --format '{{.Id}}' anet-test537-grok-tui-provenance:dev
   container controls:
     --rm --read-only --network none --cap-drop ALL
     --security-opt no-new-privileges
@@ -165,6 +167,11 @@ Actual-candidate run, expected SHA derived from its clean HEAD:
   RESULT: FAIL — exact-candidate provenance is not established
 
 Observed rc=1, as required for the stale-report condition.
+The wrapper emitted
+`image_id=sha256:e03f05564d2920452b926341dc7e05bf3b5028be00bec8603ec9b9cf131cefeb`;
+an independent post-run `docker image inspect --format '{{.Id}}'` of the fixed
+tag returned the same value. The ID was therefore obtained from the built
+artifact rather than copied from a prior tag incarnation.
 
 Environment-only bypass mutation:
 

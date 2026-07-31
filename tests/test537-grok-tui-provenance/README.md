@@ -20,6 +20,10 @@ HEAD, creates a minimal temporary `git archive`, builds the fixed
 `anet-test537-grok-tui-provenance:dev` tag, and runs the gate in a read-only,
 network-disabled container. The archive expands test225's `$Format:%H$`
 marker, independently binding the copied reports to the candidate commit.
+Immediately after the build, the wrapper obtains the immutable image ID from
+the built artifact with `docker image inspect --format '{{.Id}}'` and prints
+both `image_tag` and `image_id`; saved evidence must copy that emitted value,
+not a remembered tag-to-digest mapping.
 Temporary extraction is restricted to a `mktemp` directory under `/tmp` and
 removed through the repository safe-delete guard.
 

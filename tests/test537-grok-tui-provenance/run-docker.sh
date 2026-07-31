@@ -43,12 +43,23 @@ df -h / | tail -n 1
 export TEST537_ARCHIVE_DIR="$archive_dir"
 export TEST537_EXPECTED="$expected"
 export TEST537_REPO_ROOT="$REPO_ROOT"
+export TEST537_IMAGE_TAG="anet-test537-grok-tui-provenance:dev"
 
 sg docker -c 'docker build \
   --build-context "candidate=$TEST537_ARCHIVE_DIR" \
-  -t anet-test537-grok-tui-provenance:dev \
+  -t "$TEST537_IMAGE_TAG" \
   -f "$TEST537_REPO_ROOT/tests/test537-grok-tui-provenance/Dockerfile" \
   "$TEST537_REPO_ROOT"'
+
+image_id="$(
+  sg docker -c 'docker image inspect --format "{{.Id}}" "$TEST537_IMAGE_TAG"'
+)"
+if [[ ! "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+  echo "FAIL: built image returned an invalid immutable id: $image_id" >&2
+  exit 2
+fi
+printf 'image_tag=%s\n' "$TEST537_IMAGE_TAG"
+printf 'image_id=%s\n' "$image_id"
 
 sg docker -c 'docker run --rm \
   --read-only \
@@ -56,4 +67,4 @@ sg docker -c 'docker run --rm \
   --cap-drop ALL \
   --security-opt no-new-privileges \
   -e "EXPECTED_SOURCE_COMMIT=$TEST537_EXPECTED" \
-  anet-test537-grok-tui-provenance:dev'
+  "$TEST537_IMAGE_TAG"'
