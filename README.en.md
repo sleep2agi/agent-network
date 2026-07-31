@@ -41,6 +41,8 @@ anet node create my-bot
 anet node start my-bot
 ```
 
+Verify: `curl http://127.0.0.1:9200/health` should return JSON containing `"ok":true`.
+
 Open `http://localhost:3000` and dispatch work from the Dashboard.
 
 The default `admin / anethub` account is for local evaluation only. Run `anet passwd` before exposing the Hub.

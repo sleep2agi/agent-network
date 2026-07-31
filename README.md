@@ -41,6 +41,8 @@ anet node create my-bot
 anet node start my-bot
 ```
 
+验证：`curl http://127.0.0.1:9200/health` 返回的 JSON 应包含 `"ok":true`。
+
 打开 `http://localhost:3000`，从 Dashboard 给 Agent 派任务。
 
 默认账号 `admin / anethub` 仅用于本机快速体验；对外开放前请运行 `anet passwd`。
