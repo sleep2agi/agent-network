@@ -1,149 +1,128 @@
-# Production / Public-Internet Deployment
+# Production Deployment Security
 
-::: danger Default config is NOT safe for the public internet
-The current stable line (v0.10.15 — the `v0.X.Y` format mirrors `commhub-server`'s `0.X.Y` semver style; the old `v2.1.x` CLI version scheme is deprecated — see [changelog](/en/changelog)) is tuned for **local use only**. Running with `--host 0.0.0.0` straight to the open internet leaves you wide open.
-
-Read this entire page **before opening any firewall ports**.
+::: danger Do not expose the Hub or Dashboard ports directly
+The defaults are designed for local use: the Hub listens on `127.0.0.1:9200`, and the Dashboard uses port `3000`.
+The Dashboard bind address can inherit the `HOSTNAME` environment variable, so set it explicitly in production.
+Before an internet deployment, configure a strong password, TLS proxy, firewall, and backups.
 :::
 
-## What the defaults look like today
+## Defaults
 
-| Item | Default | Risk |
+| Item | Default | Production requirement |
 |---|---|---|
-| Hub bind | `127.0.0.1` (local only) | Public mode needs explicit `--host 0.0.0.0` |
-| Default account | `admin / anethub` for quick-start, or set by `--username/--password` | Rotate immediately with `anet passwd` |
-| `COMMHUB_AUTH_TOKEN` | deprecated in v0.8 | No longer part of the main deployment path |
-| tmux control plane | disabled by default | Requires `COMMHUB_ENABLE_TMUX=1` + admin auth |
-| Multi-tenant isolation | network-scoped | Users only access networks they belong to |
-| HTTPS | none | 9200 / 3000 are plaintext by default |
+| Hub | `127.0.0.1:9200` | Keep it local and access it through a reverse proxy |
+| Dashboard | Port `3000`; bind address may inherit `HOSTNAME` | Set `--host 127.0.0.1` explicitly |
+| Admin | Username `admin`; random bootstrap password shown once | Run `anet passwd` after the first login |
+| HTTPS | Not provided | Terminate TLS at Caddy, Nginx, or a cloud gateway |
+| tmux control plane | Disabled | Keep it disabled in production |
+| Data | `~/.commhub/commhub.db` | Back it up and restrict backup permissions |
 
-Full audit: [`docs/open-source-security-risk-report.md`](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md). **v0.8.0 / v0.8.1 has closed all P0 items** (auth required ✅ / localhost-only default ✅ / `admin/anethub` default with forced `anet passwd` rotation ✅ / tmux off ✅ / network scope enforced ✅). This page is kept as a public-deployment checklist.
+## Deployment checklist
 
-## Minimum checklist for public deployment
+### 1. Change the password immediately
 
-### 1. Change the password — now
-
-```bash
-anet login --username admin --password anethub
-anet passwd                       # interactive, ≥ 12 chars, mixed case + digits + symbols
-```
-
-### 2. Do not configure a master token in v0.8+
+Start locally. Save the random bootstrap password printed by the command, then log in and change it:
 
 ```bash
-anet hub start --host 0.0.0.0
+anet hub start
+anet login --hub http://127.0.0.1:9200 --username admin
+anet passwd
 ```
 
-First start provisions an admin user and writes a local recovery admin `utok_` to `~/.anet/server/admin-utok.json` (`chmod 600`). Legacy `COMMHUB_AUTH_TOKEN` / `--token` remains as a v0.8 soft-compat path only and logs a deprecation warning.
+The new password must be at least eight characters and must not appear in the weak-password list.
+The random bootstrap password is not shown again.
 
-### 3. Reverse proxy + TLS (required)
+### 2. Use an HTTPS reverse proxy
 
-Don't expose `9200` / `3000` directly. Caddy gives you automatic HTTPS:
+Keep the Hub and Dashboard on their loopback addresses. This is a minimal Caddy configuration:
 
-```nginx
-# /etc/caddy/Caddyfile
-hub.your-domain.com {
-    reverse_proxy localhost:9200
-    header {
-        X-Content-Type-Options nosniff
-        -Server
-    }
+```text
+hub.example.com {
+    reverse_proxy 127.0.0.1:9200
+    header -Server
+    header X-Content-Type-Options nosniff
 }
 
-dashboard.your-domain.com {
-    reverse_proxy localhost:3000
+dashboard.example.com {
+    reverse_proxy 127.0.0.1:3000
 }
 ```
 
+Point the domains at the server, then run `sudo systemctl reload caddy`. Replace the example domains.
+
+### 3. Pin the bind addresses
+
+Keep the Hub on its default `127.0.0.1` address, and start the Dashboard explicitly:
+
 ```bash
-sudo systemctl reload caddy
+anet hub dashboard --host 127.0.0.1
 ```
 
-DNS your hostname to the box and Caddy will fetch a Let's Encrypt cert automatically.
+Remote nodes connect through `https://hub.example.com`; the Hub itself does not need a public bind address.
 
-### 4. Firewall: 22 + 80 + 443 only
+### 4. Restrict the firewall
 
-Keep the security group / firewall locked down to **22(SSH) + 80 + 443**. Don't open 9200 / 3000 to the world — Caddy proxies them through 443.
+Expose only the entry points you need, usually:
+
+- `22`: SSH (preferably restricted by source IP)
+- `80`: certificate issuance and HTTP redirects
+- `443`: HTTPS
+
+Do not expose `9200` or `3000` directly to the internet.
 
 ### 5. Verify the tmux control plane is off
 
-**Since v0.8, the tmux control plane is disabled by default.** Verified at [`server/src/index.ts:36`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L36): `TMUX_ENABLED = process.env.COMMHUB_ENABLE_TMUX === "1"` — **only an explicit `=1` enables it**; `=0` / `=true` / unset all leave it off.
+The server enables its tmux HTTP/WebSocket endpoints only when `COMMHUB_ENABLE_TMUX=1`.
+Leave that variable unset in production; the startup log should show `Tmux: DISABLED`.
 
-So as long as you do **not** actively set `COMMHUB_ENABLE_TMUX=1`, it's already off:
+If a trusted environment genuinely needs this feature, also configure the IP allowlist and require an admin caller.
+See [REST API: tmux control plane](/en/api/rest#tmux-debug-endpoints-opt-in).
 
-```bash
-# Default (off, no env needed)
-anet hub start --host 0.0.0.0
+### 6. Use invitations
 
-# Verify by checking the startup banner after the hub boots:
-# Tmux: DISABLED (set COMMHUB_ENABLE_TMUX=1)   ← expected
-```
-
-::: warning Drop `COMMHUB_ENABLE_TMUX=1` from legacy scripts
-v0.7 / V2-era deployment scripts often passed `COMMHUB_ENABLE_TMUX=1` (when it was the default). On a public deployment that leaves tmux HTTP/WS endpoints exposed — even with admin auth + an IP allowlist, that's an unnecessary attack surface. **Confirm any `--host 0.0.0.0` hub does not set `COMMHUB_ENABLE_TMUX=1` in env / systemd unit / docker-compose** (the startup banner should show `Tmux: DISABLED`).
-:::
-
-::: tip Want to use the tmux control plane (for local dev / Dashboard debugging)
-Endpoint details: [REST API — Tmux control plane](/en/api/rest#tmux-debug-endpoints-opt-in). All three endpoints (`GET /api/tmux/:name` / `POST /api/tmux/:name/send` / `WebSocket /ws/tmux/:name`) share the same auth gate (`COMMHUB_ENABLE_TMUX=1` + `COMMHUB_TMUX_ALLOWLIST` IP allowlist + `users.role='admin'`).
-:::
-
-### 6. Back up the SQLite database
+Account registration and network membership are separate. After teammates register their own accounts,
+use a single-use member invitation to add them to the intended network:
 
 ```bash
-crontab -l 2>/dev/null > /tmp/cron
-echo "0 3 * * * sqlite3 ~/.commhub/commhub.db \".backup '~/.commhub/backup-\$(date +\\%F).db'\"" >> /tmp/cron
-crontab /tmp/cron
+anet network invite --role member --uses 1
 ```
 
-Prune weekly: `find ~/.commhub/backup-*.db -mtime +30 -delete`.
+`POST /api/auth/register` is currently public and rate-limited. If self-service registration is not allowed,
+block that path at the reverse proxy or gateway. Do not share an administrator account.
 
-### 7. Watch failed logins
+### 7. Back up and monitor
+
+Use SQLite's online backup command rather than copying a live database file:
 
 ```bash
-journalctl --user -u anet-hub | grep -E '401|auth' | tail -50
+umask 077
+mkdir -p ~/.commhub/backups
+sqlite3 ~/.commhub/commhub.db \
+  ".backup '$HOME/.commhub/backups/commhub-$(date +%F).db'"
 ```
 
-v0.8 ships `/api/audit-log` + a Dashboard Audit Log page (admin role).
+Automate backups, define a retention period, and regularly test a restore. Backups contain account and message data,
+so handle them as sensitive data.
 
-## Sharing a Hub across users? Read this
+At minimum, monitor:
 
-::: tip v0.8 has multi-tenant isolation
-As of v0.8.0:
+- `GET http://127.0.0.1:9200/health`
+- free disk space
+- the Dashboard Audit Log
+- whether a reliable process manager supervises the Hub
 
-- `get_inbox` / `get_all_status` / `list_tasks` are filtered by the caller's network membership (R7 / R8 fixed)
-- SSE subscribe enforces network membership
+For long-running service and reboot recovery, see [Hub process supervision](/en/deploy/daemon).
 
-Cross-team / open-registration scenarios are safe to enable, but we still recommend invite-only via `anet network invite --role member --uses N` rather than fully-open `/api/auth/register`.
-:::
+## Deployment modes
 
-Acceptable today:
+| Scenario | Recommendation |
+|---|---|
+| Personal development | Listen on loopback only |
+| Trusted LAN | Still use strong passwords and HTTPS |
+| Internet collaboration | TLS proxy + firewall + invitations + backups |
 
-- Inside-the-team trust, ≤ 20 people
-- Solo with multiple agents
-- Trusted contractors with NDAs
+## Security resources
 
-## Self-host vs. hosted
-
-| Option | Use it for | Notes |
-|---|---|---|
-| **Local only** | Solo dev | Safest, zero config |
-| **LAN** | Team 5–20 | Trusted network, no TLS needed |
-| **VPS + reverse proxy** | Cross-site collaboration | Run all 7 steps above |
-| **Hosted SaaS** | ❌ Not offered | Project is self-hosted-first; no hosted tier planned |
-
-## Our commitments
-
-- **v0.8.0 / v0.8.1 has closed P0**: auth required ✅ / localhost-only default ✅ / `admin/anethub` default with required `anet passwd` rotation ✅ / tmux off ✅ / network scope enforced ✅
-- **v0.9.0 / v0.9.1 shipped** ([changelog](/en/changelog#v0-9-0-—-recovery-observability-2026-05-15-✅-stable)): vendor-credential envRef mode ✅ ([#125](https://github.com/sleep2agi/agent-network/issues/125) — secrets no longer persist in plaintext `config.json`) + default-toolset transparency ✅ ([#101](https://github.com/sleep2agi/agent-network/issues/101) — Claude Code preset by default + behavior-disclosure banner, [user-responsibility checklist](/en/concepts/security#tool-permissions-default-claude-code-preset-user-responsibility)) + host-telemetry observability ✅ ([#119](https://github.com/sleep2agi/agent-network/issues/119) `/api/servers` + dashboard ServersDrawer)
-- **v0.9.2 shipped** ([changelog](/en/changelog#v0-9-2-—-patch-auth-fast-fail-fan-out-retry-wizard-redo-122-default-tmux-reverted-2026-05-16-✅-stable)): vendor API auth fast-fail ✅ ([#129](https://github.com/sleep2agi/agent-network/issues/129) — 15 min → <5 s + vendor-specific URL hint) + fan-out retry-with-backoff ✅ ([#132](https://github.com/sleep2agi/agent-network/issues/132) Tier 1 `CLAUDE_MAX_RETRIES=2` + jitter) + `anet node start` reverted to foreground default ✅ ([#136](https://github.com/sleep2agi/agent-network/issues/136) — fixes the macOS bun setRawMode bug)
-- **v0.10.0 / v0.10.1 shipped** ([changelog](/en/changelog)): per-server-daemon Phase 1 observability endpoint family ✅ ([#99](https://github.com/sleep2agi/agent-network/issues/99) `GET /api/server/:host/health` + `/api/server/:host/agents`, used by the dashboard ServersDrawer, monitoring scripts, and external observability integrations; auth matches the existing `/api/servers`) + per-agent process telemetry ✅ ([#142](https://github.com/sleep2agi/agent-network/issues/142) `rss` / `cpu_pct` / `uptime_seconds` / `in_flight_count`) + codex app-server stdio direct opt-in ✅ ([#141](https://github.com/sleep2agi/agent-network/issues/141) `ANET_CODEX_STDIO_DIRECT=1` bypasses the `@openai/codex-sdk` wrapper [#102](https://github.com/sleep2agi/agent-network/issues/102) hang root cause family) + release-gate playbook first full run + v0.10.1 `PINNED_SERVER_VERSION` chain-bump fixes the `anet hub start` default-path functionality regression
-- **v0.10.2 → v0.10.15 shipped** ([changelog](/en/changelog)): the cumulative chain covers host disk telemetry, dashboard Hero D topology, codex-sdk default model + yolo flags, `anet upgrade` UX + Option B detached, `anet create --batch` wizard, Servers panel UI, commhub attachment metadata, Xiaomi MiMo 5-model preset, envRef wizard-to-start auto-source, `grok-build-acp` per-node identity isolation + `session/prompt` timeout hotfix, and more — sustained Method B SOP clean ship (per-patch detail in the [changelog](/en/changelog))
-- **Unscheduled / future**: token TTL + revoke-all + checksummed install scripts — **not in the v0.9.x or v0.10.x scope**; planned for v0.11+ as priorities permit. (Note: [security report R9](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)'s password hashing **already shipped** — as salted scrypt; Argon2id was deliberately not adopted since it needs a native dep. See [Security](/en/concepts/security).)
-- Vulnerabilities: report via [GitHub Security Advisories](https://github.com/sleep2agi/agent-network/security/advisories/new) — 48-hour ack, 7-day patch for critical
-
-## Feedback
-
-Hitting an edge case this page doesn't cover? Reach out on:
-- [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) — public
-- [WeChat community](/en/community) — Chinese-speaking
-- [Security Advisories](https://github.com/sleep2agi/agent-network/security/advisories/new) — private vulnerabilities
+- Configuration and permissions: [Security](/en/concepts/security)
+- Version migrations: [Upgrade guide](/en/guide/upgrade)
+- Private vulnerability reports: [GitHub Security Advisories](https://github.com/sleep2agi/agent-network/security/advisories/new)
