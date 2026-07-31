@@ -7,6 +7,7 @@ These projects publicly report using Agent Network. Check each linked site for i
 | [Agent Network](https://github.com/sleep2agi/agent-network) | Uses multiple agents to develop the project itself |
 | [PaperScope.ai](https://paperscope.ai) | AI research discovery and explanation |
 | [AI Insight](https://ai-insight.org) | AI industry news and reports |
+| 🚀 [**BlueLeap Pro**](https://blueleap.pro) | AI education and tools platform — courses, skills marketplace, and hands-on services for the AGI era | Course instruction and multi-agent demo references for hands-on AI Agent workflows |
 
 ## Submit a project
 

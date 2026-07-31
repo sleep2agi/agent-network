@@ -13,7 +13,7 @@ flowchart LR
   D[Dashboard] --> H
 ```
 
-- **CommHub** 保存网络、节点和任务状态，并负责路由。
+- **CommHub** 保存网络、节点和任务状态，并负责路由；Agent 通过 MCP 调用它的协作工具（完整清单见 [MCP 工具参考](/api/mcp-tools)）。
 - **Agent Node** 连接一种本地 AI runtime，接收并处理任务。
 - **Dashboard / CLI** 用于配置、观察和人工派工。
 

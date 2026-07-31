@@ -7,6 +7,7 @@
 | [Agent Network](https://github.com/sleep2agi/agent-network) | 项目自身使用多 Agent 协作开发 |
 | [PaperScope.ai](https://paperscope.ai) | AI 论文发现与解读 |
 | [AI Insight](https://ai-insight.org) | AI 行业资讯与研报 |
+| 🚀 [**蓝色跃迁 BlueLeap Pro**](https://blueleap.pro) | AI 教育与工具平台 —— AGI 时代课程、技能商城与实战服务 | 课程教学与 AI Agent 实战 demo 多 Agent 编排参考 |
 
 ## 提交项目
 

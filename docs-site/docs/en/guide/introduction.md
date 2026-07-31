@@ -13,7 +13,7 @@ flowchart LR
   D[Dashboard] --> H
 ```
 
-- **CommHub** stores network, node, and task state and routes work.
+- **CommHub** stores network, node, and task state and routes work; agents call its collaboration tools over MCP (full list in the [MCP tools reference](/en/api/mcp-tools)).
 - **Agent Node** connects one local AI runtime and processes incoming tasks.
 - **Dashboard / CLI** configure the system, show status, and dispatch work.
 
