@@ -19,6 +19,11 @@ command -v anet
 command -v bun
 ```
 
+::: warning 不要用 `bunx` / `npx` 当守护入口
+`bunx` / `npx` 会把包解到 `/tmp` 下的缓存目录并**从那里执行**。机器重启后 `/tmp` 被清空，
+守护进程就再也起不来，而 PM2 只显示反复重启、看不出根因。始终用 `command -v` 取到的**绝对路径**。
+:::
+
 下面以 PM2 为例。把 `script` 换成 `command -v anet` 返回的绝对路径：
 
 ```js
@@ -31,7 +36,11 @@ module.exports = {
     interpreter: 'none',
     env: { HOST: '127.0.0.1', PORT: '9200' },
     autorestart: true,
+    // min_uptime 必须大于「进程失败退出所需时间」。若小于它，PM2 会认为
+    // 这次启动成功、不计入失败，backoff 永不触发 —— 崩溃循环看起来像正常重启。
     min_uptime: 45000,
+    // 只配 backoff、不配 max_restarts = 失败进程无限重试。这里是有意的：
+    // Hub 应持续自愈；代价是坏掉的进程会一直重试并刷日志。需要上限就自行加 max_restarts。
     exp_backoff_restart_delay: 200,
     kill_timeout: 10000,
     max_memory_restart: '2G',

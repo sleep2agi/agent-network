@@ -99,6 +99,20 @@ See the [account system](/en/guide/account-system) and
 per-package commands or historical default passwords, because they mislead current
 installations.
 
+## Forgotten administrator password
+
+Run this on the Hub host:
+
+```bash
+anet hub admin reset-user --username <user>
+```
+
+::: tip Why this is called out separately
+`anet hub --help` does **not** list the `admin` subcommand, so this command cannot be discovered
+by reading the help output. Do not reach for direct SQLite edits instead — those bypass
+authorization and auditing, and can corrupt related state.
+:::
+
 ## Rollback does not mean deleting state
 
 Installing an older CLI does **not** roll back migrated configuration or the Hub

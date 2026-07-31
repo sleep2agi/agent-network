@@ -20,6 +20,12 @@ command -v anet
 command -v bun
 ```
 
+::: warning Do not use `bunx` / `npx` as the daemon entrypoint
+`bunx` / `npx` unpack the package into a cache directory under `/tmp` and **execute it from there**.
+After a reboot `/tmp` is cleared and the daemon can no longer start — PM2 will only show repeated
+restarts, with no hint of the cause. Always use the **absolute path** from `command -v`.
+:::
+
 This PM2 example uses the absolute path returned by `command -v anet`:
 
 ```js
@@ -32,7 +38,14 @@ module.exports = {
     interpreter: 'none',
     env: { HOST: '127.0.0.1', PORT: '9200' },
     autorestart: true,
+    // min_uptime must exceed how long a failing start takes to exit. If it is
+    // smaller, PM2 counts the start as successful, never trips backoff, and a
+    // crash loop looks like ordinary restarts.
     min_uptime: 45000,
+    // backoff without max_restarts = a failing process retries forever. That is
+    // deliberate here: the Hub should keep self-healing. The cost is that a truly
+    // broken process retries indefinitely and floods the logs. Add max_restarts
+    // if you want it to give up after N attempts.
     exp_backoff_restart_delay: 200,
     kill_timeout: 10000,
     max_memory_restart: '2G',
