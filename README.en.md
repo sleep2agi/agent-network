@@ -45,7 +45,7 @@ Verify: `curl http://127.0.0.1:9200/health` should return JSON containing `"ok":
 
 Open `http://localhost:3000` and dispatch work from the Dashboard.
 
-Save the random password printed by the first `anet hub start`; enter it at login and change it when prompted.
+The default administrator username is `admin`. Use the initial password shown by the first `anet hub start`, then run `anet passwd` immediately after login.
 
 ## What it does
 
