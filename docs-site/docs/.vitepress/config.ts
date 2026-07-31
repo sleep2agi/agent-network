@@ -65,7 +65,6 @@ export default withMermaid(defineConfig({
               { text: '5 分钟懂 anet', link: '/guide/introduction' },
               { text: '30 秒上手', link: '/guide/getting-started' },
               { text: 'Windows 上手', link: '/guide/windows' },
-              { text: '架构概览', link: '/guide/architecture' },
             ]
           },
           {
@@ -74,38 +73,42 @@ export default withMermaid(defineConfig({
               { text: '账号体系', link: '/guide/account-system' },
               { text: 'Dashboard', link: '/guide/dashboard' },
               { text: 'CLI 命令', link: '/guide/cli' },
-              { text: '批量 Agent', link: '/guide/batch' },
               { text: 'Agent Node', link: '/guide/agent-node' },
               { text: '节点 Runtime', link: '/guide/runtimes' },
-              { text: 'Grok 人机共存 TUI (preview)', link: '/guide/grok-copresence' },
-              { text: 'Codex TUI 人机共存 (preview)', link: '/guide/codex-copresence' },
-              { text: 'Grok Build ACP Runtime ↗', link: 'https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md' },
-              { text: 'SDK Deep-dive', link: '/guide/sdk-deep-dive' },
-              { text: 'Channel 接入', link: '/guide/channels' },
-              { text: '飞书 Channel 接入', link: '/guide/feishu' },
               { text: '多模型配置', link: '/guide/multi-model' },
               { text: '升级指南', link: '/guide/upgrade' },
-              { text: '版本号体系', link: '/guide/versioning' },
             ]
           },
           {
             text: '核心概念',
             items: [
-              { text: '核心概念（基础）', link: '/guide/basics' },
+              { text: '架构概览', link: '/guide/architecture' },
               { text: 'Token 体系', link: '/concepts/tokens' },
               { text: '角色与权限', link: '/concepts/roles' },
               { text: '网络隔离', link: '/concepts/networks' },
               { text: '任务生命周期', link: '/concepts/task-lifecycle' },
               { text: '安全设计', link: '/concepts/security' },
-              { text: 'Vendor 适配层', link: '/concepts/vendor-adapters' },
+            ]
+          },
+          {
+            text: '接入',
+            items: [
+              { text: 'Channel 接入', link: '/guide/channels' },
+              { text: '飞书 Channel', link: '/guide/feishu' },
+            ]
+          },
+          {
+            text: 'Preview 功能',
+            items: [
+              { text: 'Preview 说明', link: '/preview/' },
+              { text: 'Grok 人机共存 TUI', link: '/guide/grok-copresence' },
+              { text: 'Codex TUI 人机共存', link: '/guide/codex-copresence' },
             ]
           },
           {
             text: '部署',
             items: [
               { text: '干净服务器从零部署', link: '/deploy/clean-server' },
-              { text: 'Docker 部署', link: '/deploy/docker' },
-              { text: 'npm 部署', link: '/deploy/npm' },
               { text: '生产部署 / 公网部署安全', link: '/deploy/production' },
               { text: '让 hub 常驻：进程守护', link: '/deploy/daemon' },
             ]
@@ -121,9 +124,6 @@ export default withMermaid(defineConfig({
             text: '帮助',
             items: [
               { text: '故障排查', link: '/troubleshooting' },
-              { text: '连接 / Channel / MCP 排障', link: '/troubleshooting/connectivity-channels-mcp' },
-              { text: '经典案例：飞书静默拒收', link: '/troubleshooting/case-feishu-silent-deny' },
-              { text: '远程建节点：CLI 登录态不跨机', link: '/troubleshooting/remote-node-cli-login' },
               { text: 'FAQ', link: '/faq' },
               { text: '更新日志', link: '/changelog' },
             ]
@@ -163,7 +163,6 @@ export default withMermaid(defineConfig({
               { text: '5-Minute Intro to anet', link: '/en/guide/introduction' },
               { text: '30-Second Quickstart', link: '/en/guide/getting-started' },
               { text: 'Windows Setup', link: '/en/guide/windows' },
-              { text: 'Architecture', link: '/en/guide/architecture' },
             ]
           },
           {
@@ -172,38 +171,42 @@ export default withMermaid(defineConfig({
               { text: 'Account System', link: '/en/guide/account-system' },
               { text: 'Dashboard', link: '/en/guide/dashboard' },
               { text: 'CLI Commands', link: '/en/guide/cli' },
-              { text: 'Batch Agents', link: '/en/guide/batch' },
               { text: 'Agent Node', link: '/en/guide/agent-node' },
               { text: 'Node Runtime', link: '/en/guide/runtimes' },
-              { text: 'Grok Co-presence TUI (preview)', link: '/en/guide/grok-copresence' },
-              { text: 'Codex TUI Co-presence (preview)', link: '/en/guide/codex-copresence' },
-              { text: 'Grok Build ACP Runtime ↗', link: 'https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md' },
-              { text: 'SDK Deep-dive', link: '/en/guide/sdk-deep-dive' },
-              { text: 'Channel Integration', link: '/en/guide/channels' },
-              { text: 'Feishu Channel Integration', link: '/en/guide/feishu' },
               { text: 'Multi-Model Config', link: '/en/guide/multi-model' },
               { text: 'Upgrade Guide', link: '/en/guide/upgrade' },
-              { text: 'Versioning', link: '/en/guide/versioning' },
             ]
           },
           {
             text: 'Core Concepts',
             items: [
-              { text: 'Core Concepts (Basics)', link: '/en/guide/basics' },
+              { text: 'Architecture', link: '/en/guide/architecture' },
               { text: 'Token System', link: '/en/concepts/tokens' },
               { text: 'Roles & Permissions', link: '/en/concepts/roles' },
               { text: 'Network Isolation', link: '/en/concepts/networks' },
               { text: 'Task Lifecycle', link: '/en/concepts/task-lifecycle' },
               { text: 'Security Design', link: '/en/concepts/security' },
-              { text: 'Vendor Adapters', link: '/en/concepts/vendor-adapters' },
+            ]
+          },
+          {
+            text: 'Integrations',
+            items: [
+              { text: 'Channels', link: '/en/guide/channels' },
+              { text: 'Feishu Channel', link: '/en/guide/feishu' },
+            ]
+          },
+          {
+            text: 'Preview Features',
+            items: [
+              { text: 'Preview overview', link: '/en/preview/' },
+              { text: 'Grok Co-presence TUI', link: '/en/guide/grok-copresence' },
+              { text: 'Codex TUI Co-presence', link: '/en/guide/codex-copresence' },
             ]
           },
           {
             text: 'Deployment',
             items: [
               { text: 'Fresh Server From Scratch', link: '/en/deploy/clean-server' },
-              { text: 'Docker', link: '/en/deploy/docker' },
-              { text: 'npm', link: '/en/deploy/npm' },
               { text: 'Production / Public Internet', link: '/en/deploy/production' },
               { text: 'Keeping the Hub Alive', link: '/en/deploy/daemon' },
             ]
@@ -219,9 +222,6 @@ export default withMermaid(defineConfig({
             text: 'Help',
             items: [
               { text: 'Troubleshooting', link: '/en/troubleshooting' },
-              { text: 'Connectivity / Channels / MCP', link: '/en/troubleshooting/connectivity-channels-mcp' },
-              { text: 'Case Study: Feishu Silent Deny', link: '/en/troubleshooting/case-feishu-silent-deny' },
-              { text: 'Remote Nodes: CLI Login Not Portable', link: '/en/troubleshooting/remote-node-cli-login' },
               { text: 'FAQ', link: '/en/faq' },
               { text: 'Changelog', link: '/en/changelog' },
             ]
