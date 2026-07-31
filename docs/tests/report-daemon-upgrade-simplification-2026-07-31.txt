@@ -1,0 +1,58 @@
+Daemon and upgrade documentation simplification — 2026-07-31
+
+Base
+----
+584cdee6cb898bbf52e1f249ffdc6e6c88aecf97
+
+Scope
+-----
+- docs-site/docs/deploy/daemon.md: 310 -> 112 lines
+- docs-site/docs/en/deploy/daemon.md: 287 -> 115 lines
+- docs-site/docs/guide/upgrade.md: 321 -> 116 lines
+- docs-site/docs/en/guide/upgrade.md: 319 -> 130 lines
+
+Corrections
+-----------
+- Removed the fixed commhub-server preview version and temporary-cache path.
+- Made `anet hub start` the supervised entry point so the CLI owns its server pin.
+- Kept one-supervisor, loopback, exact-PID, secret-storage, health-check, backoff,
+  boot, and safe-reload boundaries without the long production incident narrative.
+- Replaced fixed "current stable" claims with npm dist-tag semantics.
+- Moved SQLite backup after Hub shutdown so DB/WAL/SHM are copied consistently.
+- Removed recursive `~/.anet` deletion and in-place overwrite rollback instructions.
+- Clarified that downgrading a CLI does not downgrade migrated config/database state.
+- Preserved both repository-referenced v0.7 legacy fragments exactly.
+- Warned co-presence nodes to restart with their original co-presence mode.
+
+Docker checks
+-------------
+PASS source/static contract:
+
+  sg docker -c 'docker build \
+    -f /tmp/commniu-ops-safety-harness/Dockerfile \
+    -t anet-docs-ops-safety:dev \
+    /tmp/commniu-ops-safety-docs'
+
+The gate verifies current CLI support for dry-run, no-auto-self, project restart,
+and copresence; safety text in both languages; absence of the stale preview pin,
+fixed stable version, broad-delete command, and direct SQL; exact legacy anchors;
+and line-count ceilings.
+
+PASS final real VitePress build in Docker (`vitepress v1.6.4`, 38.56 s):
+
+  sg docker -c 'docker run --rm --entrypoint sh \
+    -v /tmp/commniu-ops-safety-docs/docs-site/docs:/input:ro \
+    anet-docs-vitepress:dev -lc \
+    "cp -a /input /site/docs && npm run build"'
+
+PASS rendered HTML contains exact IDs:
+- `v0-7-v0-8-升级注意-最新`
+- `v0-7-v0-8-upgrade-notes-latest`
+
+The VitePress build alone does not validate URL fragments; the IDs were checked
+against the generated HTML after the build.
+
+Boundaries
+----------
+- No npm publish, merge, production deployment, or production-state mutation.
+- No Codex or Claude model-node invocation.
