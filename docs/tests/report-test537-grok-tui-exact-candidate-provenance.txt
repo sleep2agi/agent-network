@@ -1,0 +1,77 @@
+Test: #537 Grok TUI exact-candidate clean-checkout provenance
+Date: 2026-07-31 (Asia/Shanghai)
+Issue: https://github.com/sleep2agi/agent-network/issues/537
+Finding comment:
+  https://github.com/sleep2agi/agent-network/issues/537#issuecomment-5139054614
+
+Scope
+-----
+Reporting base:
+  origin/main
+  71b3d8964f780d8e9503f52624d1a596e6fb4660
+
+Candidate under review:
+  origin/preview/grok-build-cli
+  4854928b35c14abaaae788aba7ec043cea10643b
+
+Clean-checkout evidence
+-----------------------
+Reporting worktree:
+  /home/vansin/commniu-wt-537
+  branch test/537-grok-tui-requalification
+  clean before report changes
+
+Candidate worktree:
+  /home/vansin/commniu-grok-candidate-537
+  detached at 4854928b35c14abaaae788aba7ec043cea10643b
+  git status --porcelain: empty
+
+The candidate worktree consumed 22 MiB. No existing /tmp/grok-* worktree,
+shared runtime source, production process, npm package, or Docker artifact was
+modified.
+
+Hard precondition
+-----------------
+Expected every saved report to bind to:
+  4854928b35c14abaaae788aba7ec043cea10643b
+
+Observed:
+  docs/tests/report-test219.txt:3
+    source_commit=501764f83c0428ebc153d132ae049de38d7041f6
+  docs/tests/report-test224.txt:4
+    source_commit=501764f83c0428ebc153d132ae049de38d7041f6
+  docs/tests/report-test225.txt:3
+    source_commit=501764f83c0428ebc153d132ae049de38d7041f6
+
+Committed report hashes:
+  cbfdf73e1a4cefa9155b191a3dd3e116d412c594eab3f7b66b3d8e77a0f19ded  report-test219.txt
+  60af8b022187177504393c8b0d45cce8d617b65a0c9c0f30c1754981430a50c2  report-test224.txt
+  f8108d0dc0c0d0afd519c782d81c5e3f3edd948204c7c298954f3cb7da9a67bb  report-test225.txt
+
+The test225 source-commit file contains the literal Git export-subst marker
+`$Format:%H$`; this is valid for an archive boundary but does not repair the
+three stale committed reports.
+
+Verdict
+-------
+FAIL.
+
+Exact candidate 4854928b35c14abaaae788aba7ec043cea10643b is not eligible
+to enter release closeout on the currently committed evidence. The existing
+green conclusions prove behavior only for
+501764f83c0428ebc153d132ae049de38d7041f6.
+
+Per the approved #537 protocol, downstream Docker suites 219, 224, and 225
+were not run after this hard precondition failed. The reports were not
+relabeled or overwritten. This verdict concerns evidence provenance; it does
+not claim that the later runtime implementation itself is functionally broken.
+
+The reusable hard-precondition gate is recorded in
+`tests/test537-grok-tui-provenance/`. Its shell was syntax-checked, but its
+Docker image was deliberately not built under the capacity condition below.
+
+Host capacity note
+------------------
+Before any Docker work, `/` had 9.6 GiB available and was 97% used. No Docker
+build was started, both because the provenance gate already failed and because
+the host was above the agreed capacity warning threshold.
