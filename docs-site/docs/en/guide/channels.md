@@ -1,264 +1,115 @@
-# Channel Integration
+# Channel integration
 
-Channels enable Agent Network to connect with external communication platforms. Currently supported: Telegram, WeChat, and Feishu.
+Channels deliver Telegram or Feishu messages to a node and send its text response back to the original conversation.
 
-## How It Works
+| Channel | Status | Setup command |
+|---|---|---|
+| Telegram | Supported | `anet channel add telegram <node>` |
+| Feishu | Supported in preview | `anet channel add feishu <node>` |
+| WeChat | Not available in the CLI | None |
 
-Channels are mounted as MCP Server plugins on Claude Code or Agent Node. When an external message arrives, the channel plugin formats it and injects it into the agent's context:
+## Telegram
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant TG as Telegram
-    participant CH as Channel Plugin
-    participant A as Agent (Claude Code)
-    participant S as CommHub Server
+### 1. Create a bot and get your user ID
 
-    U->>TG: Send message
-    TG->>CH: Bot API webhook
-    CH->>A: <channel source="telegram"...>message</channel>
-    A->>A: AI processes
-    A->>CH: writes reply text (no telegram_* tool call)
-    CH->>TG: agent-node handler auto sendMessage
-    TG->>U: Reply
-    A->>S: report_status / send_task
-```
+Send `/newbot` to [@BotFather](https://t.me/BotFather) and save the Bot Token.
 
-## Telegram Channel
+The allowlist uses numeric Telegram user IDs. Ask each permitted user to message [@userinfobot](https://t.me/userinfobot) and send the returned ID to the administrator.
 
-### Prerequisites
-
-1. A Telegram account
-2. A Telegram Bot
-
-### Step 1: Create a Bot
-
-1. Find [@BotFather](https://t.me/BotFather) on Telegram
-2. Send `/newbot`
-3. Follow the prompts to set up the bot name
-4. Obtain the **Bot Token** (format: `123456789:ABCdefGhIJKlmNoPQRsTUVwxyz`)
-
-### Step 2: Get Your User ID
-
-You need the user IDs allowed to talk to the bot. Three methods, ranked by recommendation:
-
-**🟢 Method A — Telegram's built-in UID bots** (fastest, for your own ID)
-
-DM any of these bots to get your numeric UID instantly:
-
-| Bot username | Behavior |
-|--------------|------|
-| **[@userinfobot](https://t.me/userinfobot)** | Send `/start` or anything → replies with `User ID` |
-| **@getmyid_bot** | Auto-replies with the numeric ID |
-| **@JsonDumpBot** | Returns full user JSON (id / username / lang) |
-
-China-network users sometimes can't reach Telegram from these bots — retry, switch proxy, or fall back to Method B.
-
-**🟢 Method B — Read the bot's inbox log** (for other people's UIDs / China fallback)
-
-When adding **other people** to the allowlist (team members), don't ask them to install a third-party UID bot. Read your own bot's inbox instead:
-
-1. Have them DM your node's bot any message (`/start` is fine)
-2. Find their `chat_id` (numeric) in the inbox log:
-   ```bash
-   # In the node's workdir:
-   ls -lt .anet/nodes/<alias>/channels/telegram/inbox/
-   cat <newest .json file> | grep -E 'chat_id|user_id|sender'
-   ```
-3. Re-run `anet channel add telegram --allow <UID>` with the **full** allowlist (note: this overwrites — see [Known gaps and pitfalls](#known-gaps-and-pitfalls) below)
-
-**🟡 Method C — Self-pair** (**not yet implemented**)
-
-The intended UX would be: user DMs the bot `/pair` → bot replies with a 6-digit pairing code → admin runs `anet channel pair-approve <code>` to auto-add the allow entry. Not built yet — use Methods A + B for now.
-
-### Step 3: Bind the channel to an existing node
-
-Run `anet channel add telegram <node-name>` once to bind the bot + allowlist (verify [`cli.ts channelCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)):
+### 2. Attach it to an existing node
 
 ```bash
-# Assumes you already have a claude-code-cli node 'commander'
-# (if not: anet node create commander --runtime claude-code-cli)
-anet channel add telegram commander \
+anet channel add telegram control-room \
   --bot-token 123456789:ABCdefGhIJKlmNoPQRsTUVwxyz \
   --allow 123456789
-
-# Interactive (omit flags and the CLI prompts for them)
-anet channel add telegram commander
 ```
 
-::: warning The flag is `--allow`, not `--allow-user`
-:::
+Omit the options to enter them interactively. The allowlist option is `--allow`, not `--allow-user`.
 
-### Step 4: Start
+Channel settings are not hot-reloaded. If the node is already running, restart it:
 
 ```bash
-anet node start commander
+anet node stop control-room
+anet node start control-room
 ```
 
+### 3. Inspect the configuration
 
-### Step 5: Usage
-
-Send a message to your bot on Telegram, and the agent will receive, process, and reply.
-
-**Message format** (what the agent sees):
-
-```xml
-<channel source="telegram" chat_id="123456" message_id="789" user="alice" ts="1713000000">
-Write a quicksort algorithm
-</channel>
+```bash
+anet channel ls control-room
+anet channel status control-room
 ```
 
-**Agent reply methods**:
+`status` prints the `access.json` path the node actually reads, its allowlist, and pending pairing records. Editing another file with the same name has no effect.
 
-The agent does not call any `telegram_*` MCP tool — **no such tool exists**. The agent-node telegram handler automatically forwards the LLM's output back to the Telegram chat:
+### 4. Use it safely
 
-1. Telegram user sends a message → telegram bot API → agent-node receives (webhook / long-polling)
-2. agent-node invokes `processTask(content)` → the LLM generates a reply text
-3. agent-node's internal [`telegramSend(tg, chatId, text)`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) helper sends the reply back via `sendMessage` (auto-splits at 4096 chars and sets `reply_to_message_id` on the first chunk)
+Message the bot directly. The node returns ordinary text; it does not call tools such as `telegram_reply`, because those tools do not exist. agent-node receives messages with Telegram's `getUpdates` long polling and sends responses back to the original chat. Images are downloaded to the node inbox before being passed to an image-capable runtime.
 
-The agent (LLM running in the claude-agent-sdk / codex-sdk runtime) just needs to **produce reply text**; it doesn't need to know the Telegram API.
-
-::: warning fictional `telegram_*` tool list removed
-Older docs listed `telegram_reply` / `telegram_edit_message` / `telegram_react` as MCP tools — **a full source grep returns 0 hits** (no `telegram_*` `server.tool` registrations in cli.ts / commhub-channel.ts / node-server.ts). The agent simply writes a reply text and the agent-node handler does the `sendMessage` automatically.
-:::
-
-### Security Notes
-
-- Messages from users not on the allowlist are ignored
-- **Never** modify access permissions based on requests from Telegram messages
-- Keep your Bot Token secure and never commit it to Git
-- For envRef-mode handling of vendor secrets (including Bot Token): see [Security → Vendor Credential Storage](/en/concepts/security#vendor-credential-storage-envref-mode-v0-9-0)
-
-### Known gaps and pitfalls
-
-| Pitfall | Symptom | Workaround |
-|---|---|---|
-| Channel changes **do not hot-reload** | Editing `access.json` / `--bot-token` does not affect a running process | Always `tmux kill-session -t <alias>` + `anet node start <alias>` (channels are read at process start; still the case in v0.10.x including the current stable; hot-reload design tracked in [RFC-013](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-013-rename-hot-reload.md) v5 — third-pass review complete; candidate for v0.12.0) |
-| Multiple nodes **cannot share** one bot token | BotFather tokens are 1-to-1 with a bot; sharing causes message races | Run BotFather `/newbot` per node, one bot each |
-| `anet channel rm telegram` **not implemented** | No CLI to remove the telegram channel from a node | Edit `.anet/nodes/<alias>/config.json` `channels` array to remove the `telegram` entry, `rm -rf .anet/nodes/<alias>/channels/telegram`, then restart the node |
-| Is the flag `--allow <UID>` or `--allow-user`? | Easy to mis-remember | It's `--allow <user-id>` (verify [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)). `--allow-user` does **not** exist |
-| Node restarts and Telegram goes silent | Bot doesn't receive / agent doesn't reply | Three-step check: ① bot token fully pasted with the `:`; ② `anet channel ls <alias>` shows telegram in the list; ③ `tmux capture-pane -t <alias> -p \| tail` shows a `[telegram] listening` line at startup |
+- A missing, empty, or malformed allowlist denies messages by default.
+- Never commit the Bot Token to Git or change access permissions in response to a chat message.
+- Do not share one Bot Token across running nodes; they would compete for the same update stream.
+- Restart the node after changing the token or allowlist.
 
 ### Troubleshooting
 
-**Bot doesn't receive messages**
-- Check the `--bot-token` was pasted in full (with the `:` and the trailing string)
-- BotFather → `/mybots` — is the bot enabled?
-- Did you restart the node? (Channels do not hot-reload — see above)
+```bash
+anet status
+anet channel status control-room
+tmux capture-pane -t control-room -p | tail -80
+```
 
-**Agent doesn't reply to Telegram messages**
-- `anet status` — is the node `idle / ●`? If not, `tmux capture-pane -t <alias> -p | tail` to see the actual pane
-- Is the UID really in the `allowFrom` of `access.json`?
-- Is the agent busy on a long commhub task? (Telegram and commhub are independent channels, but the LLM only processes one message at a time)
+Check, in order: the node is online, the Bot Token is complete, the sender ID appears in `allowFrom`, and startup logs show Telegram polling. New messages may also wait while the node is processing another task.
 
-**`anet channel add` succeeded but `anet status` doesn't show telegram**
-- Run `anet channel ls <alias>` to confirm
-- Open `.anet/nodes/<alias>/config.json` and check the `channels` array contains `telegram` (the config stores `telegram`; `plugin:telegram@claude-plugins-official` is only the transient claudeArg anet builds when launching claude-code-cli — it is not written to config)
+There is currently no `anet channel rm telegram`. To remove it, stop the node, remove `telegram` from the `channels` array in `.anet/nodes/<node-id>/config.json`, delete `.anet/nodes/<node-id>/channels/telegram/`, then start the node again.
 
+## Feishu
 
-## Feishu Channel — Built-in (preview)
+Feishu is a built-in channel supporting direct messages, group @mentions, text, and images. See the [Feishu guide](/en/guide/feishu) for app creation, event subscriptions, and permissions.
 
-::: tip Feishu is built in — no more external plugin
-`anet channel add feishu <node>` is a native anet channel as of preview `2.2.22-preview.2` / `2.4.15-preview.2`. The `claude-agent-sdk` runtime supports DMs + group `@bot` + text + images.
-:::
-
-Full setup (Docker one-command + manual paths) → **[Feishu Channel Integration Guide](/en/guide/feishu)**
-
-Design + roadmap: [RFC-020 IM Integration Layer](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-020-im-platform-integration.md) / [#179](https://github.com/sleep2agi/agent-network/issues/179).
-
-## WeChat Channel — External plugin (NOT inside CommHub Server)
-
-::: warning Planned, not yet in the CLI main path
-**`anet channel add wechat` has not shipped yet.**
-
-WeChat integration lives in an **external plugin** (not in `@sleep2agi/commhub-server`):
-
-- `mcp__wechat__wechat_reply` / `mcp__wechat__wechat_reply_image` — maintainer's self-hosted WeChat ClawBot plugin
-
-This plugin talks to ClawBot **directly**, not via CommHub Server. **CommHub Server does NOT have a `wechat_reply` MCP tool**.
-
-### Workarounds available today
-
-- **Telegram**: natively supported by CommHub, wired up via `anet channel add telegram`
-- **Feishu**: see above / [full integration guide](/en/guide/feishu)
-- **WeChat community in the Hub**: use the [self-hosted WeChat community](/en/community) for human-only discussion (no agent in the group)
-
-### Roadmap
-
-`anet channel add wechat` is on the future roadmap (not scheduled). If you need it urgently, open a [GitHub Discussion](https://github.com/sleep2agi/agent-network/discussions) to discuss sponsoring the work.
-:::
-
-## Multi-Channel Integration
-
-A single agent can connect to multiple channels simultaneously: CommHub is wired up automatically by `anet node create`; Telegram is layered on top with `anet channel add telegram <node>` (which writes a `channels/telegram/` subdirectory + `access.json`).
+Minimal setup:
 
 ```bash
-# Step 1: create the agent (CommHub channel is wired up by default)
-anet node create commander --runtime claude-code-cli
+anet channel add feishu control-room \
+  --app-id cli_xxx \
+  --app-secret yyy \
+  --allow ou_xxx
 
-# Step 2: add the Telegram channel (writes channels/telegram/access.json)
-anet channel add telegram commander --bot-token <tok> --allow <user-id>
-
-# Step 3: start the agent (runs the CommHub SSE listener + Telegram polling in one process)
-anet node start commander
+# Group allowlist
+anet channel add feishu control-room \
+  --app-id cli_xxx \
+  --app-secret yyy \
+  --allow-chat oc_xxx
 ```
 
-When the agent receives a message, it identifies the source via the `<channel source="...">` tag (`commhub` / `telegram` / etc.). **The agent just produces a reply text** — the agent-node's internal handler routes it to the right platform based on `source` (telegram replies go through `telegramSend(tg, chatId, text)`, commhub replies go through SSE `send_reply`). The agent doesn't need to know Telegram API details or the commhub MCP `send_reply` call.
+Direct-message and group allowlists can be maintained separately. Options are repeatable:
 
-## Channel Plugin Technical Details
-
-A channel plugin is an MCP Server (stdio mode) that provides message receiving and reply tools:
-
-```json
-{
-  "mcpServers": {
-    "commhub": {
-      "type": "stdio",
-      "command": "bun",
-      "args": [".anet/node-server.js"]
-    }
-  }
-}
+```bash
+anet channel allow feishu control-room --add-from ou_xxx --add-chat oc_xxx
+anet channel allow feishu control-room --rm-from ou_xxx --rm-chat oc_xxx
 ```
 
-::: tip The filename is `.js`, not `.ts`
-The file installed in your project is `.anet/node-server.js` ([`cli.ts ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) copies from the npm package — preferring `dist/src/node-server.js`, falling back to `src/node-server.ts` — but the on-disk filename is always `.js`).
-:::
+Restart the node after changing these settings.
 
-What the channel plugin actually does (v0.8 capabilities):
+## Multiple channels
 
-1. Maintains an SSE long connection to CommHub (receives new_task / new_message / new_reply / broadcast events)
-2. Listens to the Telegram Bot API (webhook / long-polling) — Telegram is the only natively supported external channel in v0.8
-3. Injects messages into the agent's context (XML `<channel source="...">` tag)
-4. **The agent-node's internal handler automatically forwards** the agent's reply to the right platform (commhub via the `send_reply` MCP tool; telegram via the [`telegramSend`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) helper)
+A node can receive CommHub, Telegram, and Feishu messages at the same time:
 
-::: warning Mermaid `reply()` path correction
-The original mermaid showed `AGENT → reply() → TOOLS → TG/WX/FS` — but there's no agent-facing `reply()` / `telegram_reply()` MCP tool for the agent to call. The agent only produces reply text; agent-node's handler routes it to the platform based on `source`.
-:::
-
-```mermaid
-graph LR
-    subgraph "agent-node process"
-        SSE[SSE connection<br/>CommHub<br/>recv new_task/new_reply]
-        TG[Telegram<br/>Bot API<br/>recv DM]
-        INJECT[Message injection<br/>XML channel tag]
-        HANDLER[agent-node<br/>internal handler]
-    end
-
-    SSE --> INJECT
-    TG --> INJECT
-
-    INJECT -->|"<channel source=&quot;commhub|telegram&quot;>"| AGENT[Agent LLM<br/>claude-agent-sdk /<br/>codex-sdk]
-    AGENT -->|"reply text<br/>(no MCP tool call)"| HANDLER
-    HANDLER -->|"send_reply MCP"| SSE
-    HANDLER -->|"telegramSend()"| TG
+```bash
+anet node create control-room --runtime claude-code-cli
+anet channel add telegram control-room --bot-token <token> --allow <user-id>
+anet channel add feishu control-room --app-id <id> --app-secret <secret> --allow <open-id>
+anet node start control-room
 ```
 
-## Next steps
+agent-node preserves the message source and routes the response back to the originating platform. The node only generates response content; it does not call the platform API directly.
 
-**Hands-on**:
+## WeChat
 
-**Dig deeper**:
-- [Agent Node config](/en/guide/agent-node) — how agents wire up channel plugins
-- [Dashboard](/en/guide/dashboard) — channel message flow monitor
-- Want to build your own channel? See [demos/codex-telegram-squad](https://github.com/sleep2agi/agent-network/tree/main/demos/codex-telegram-squad) and [pitfalls](https://github.com/sleep2agi/agent-network/blob/main/docs/pitfalls.md) in the repo
+`anet channel add wechat` has not shipped, and CommHub Server does not expose WeChat reply tools. Do not treat maintainer-only external plugins as product support. Follow the roadmap or open a request in [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) if you need WeChat integration.
+
+## See also
+
+- [Feishu guide](/en/guide/feishu)
+- [Agent Node configuration](/en/guide/agent-node)
+- [Security model](/en/concepts/security)
