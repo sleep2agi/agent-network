@@ -12,7 +12,7 @@ Before an internet deployment, configure a strong password, TLS proxy, firewall,
 |---|---|---|
 | Hub | `127.0.0.1:9200` | Keep it local and access it through a reverse proxy |
 | Dashboard | Port `3000`; bind address may inherit `HOSTNAME` | Set `--host 127.0.0.1` explicitly |
-| Admin | Username `admin`; random bootstrap password shown once | Run `anet passwd` after the first login |
+| Admin | Username `admin`; initial password shown on first start | Run `anet passwd` after the first login |
 | HTTPS | Not provided | Terminate TLS at Caddy, Nginx, or a cloud gateway |
 | tmux control plane | Disabled | Keep it disabled in production |
 | Data | `~/.commhub/commhub.db` | Back it up and restrict backup permissions |
@@ -21,7 +21,7 @@ Before an internet deployment, configure a strong password, TLS proxy, firewall,
 
 ### 1. Change the password immediately
 
-Start locally. Save the random bootstrap password printed by the command, then log in and change it:
+Start locally. Save the initial password from the first startup output, then log in and change it:
 
 ```bash
 anet hub start
@@ -30,7 +30,7 @@ anet passwd
 ```
 
 The new password must be at least eight characters and must not appear in the weak-password list.
-The random bootstrap password is not shown again.
+Initial-password behavior varies by release channel. Follow the startup output instead of relying on a fixed value.
 
 ### 2. Use an HTTPS reverse proxy
 
