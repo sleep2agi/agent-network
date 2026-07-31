@@ -66,7 +66,7 @@ anet token revoke <token-id>
 
 - Never paste a complete `utok_` or `ntok_` into chat, logs, or issues.
 - Change passwords with `anet passwd`. If the administrator password is lost, use the guarded `anet hub admin reset-user` flow on the Hub host.
-- Do not configure `COMMHUB_AUTH_TOKEN` for a new deployment. It remains only for legacy compatibility and is not the current login path.
+- Do not configure `COMMHUB_AUTH_TOKEN` for a new deployment. It remains only for legacy compatibility and is not the current login path; under REST `/api`, it permits cross-Network reads only, while non-read requests return 401.
 
 ## Hub tokens are not model-provider keys
 

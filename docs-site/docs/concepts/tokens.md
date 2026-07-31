@@ -66,7 +66,7 @@ anet token revoke <token-id>
 
 - 不要在聊天、日志或 issue 中粘贴完整 `utok_`、`ntok_`。
 - 改密使用 `anet passwd`；忘记管理员密码时，在 Hub 主机上使用 `anet hub admin reset-user` 的安全确认流程。
-- 新部署不要配置 `COMMHUB_AUTH_TOKEN`。它只保留旧部署兼容，不是当前登录主线。
+- 新部署不要配置 `COMMHUB_AUTH_TOKEN`。它只保留旧部署兼容，不是当前登录主线；在 REST `/api` 下仅允许跨 Network 读取，非只读请求会返回 401。
 
 ## 不要和模型厂商密钥混淆
 
