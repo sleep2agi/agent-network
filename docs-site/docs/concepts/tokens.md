@@ -1,261 +1,91 @@
 # Token 体系
 
-::: tip 一句话
-**日常你只有 2 个 token：`utok_`（你的）和 `ntok_`（每个 agent 的）。** 都是 CLI 自动管理，不用手输。本文 95% 内容讲这两个。
+::: tip 日常只需要理解两种 token
+`utok_` 代表用户，`ntok_` 代表某个 network 中的节点。CLI 会自动创建、保存和使用它们。
 :::
 
-## 简到不能再简的图
+## 快速路径
 
-```
-你（人）          ──── utok_ ────►   hub
-                                       │
-                                       │ 验证 OK 后发 ntok_ 给每个 agent
-                                       ▼
-你的 agent 节点 ──── ntok_ ────►   hub
-```
-
-完了。**你的 token 心智模型就这两个**。
-
----
-
-## 1. `utok_`：你的 token（人面对）
-
-### 怎么来的
+首次启动 Hub 会创建 `admin` 用户，并打印一次随机初始密码。保存该密码，然后在另一个终端登录：
 
 ```bash
-anet login --hub http://127.0.0.1:9200 --username admin --password anethub
+# 终端 1
+anet hub start
+
+# 终端 2：按提示输入首次启动打印的密码
+anet login --hub http://127.0.0.1:9200 --username admin
+
+anet node create my-agent
+anet node start my-agent
 ```
 
-hub 验账号密码 OK，发一个 `utok_xxxxxxxx...` 给你。
+登录成功后，CLI 自动保存用户 token；创建节点时，CLI 再为该节点申请独立 token。日常不需要复制 token 字符串。
 
-> ℹ️ 首次 `anet hub start` 默认账户是 `admin / anethub`（快速上手）。**立刻用 `anet passwd` 改成你自己的强密码**。也可以 `anet hub start --username alice --password your-strong-pass` 自定义。
+## 两种 token
 
-### 存哪
+| Token | 代表谁 | 如何获得 | 默认保存位置 |
+|---|---|---|---|
+| `utok_` | 登录用户 | `anet login` | `~/.anet/config.json` |
+| `ntok_` | 一个节点在一个 network 中的身份 | `anet node create <alias>` | `.anet/nodes/<alias>/config.json` |
 
-```bash
-~/.anet/config.json
-```
+### `utok_`
 
-里面长这样：
-```json
-{
-  "hub": "http://hub:9200",
-  "token": "utok_xxxxxxxxxxxxxxxx",
-  "user": { "username": "admin", ... }
-}
-```
+- CLI 用它执行 `anet status`、`anet tasks`、`anet network ls` 等用户操作。
+- Hub 会结合用户的系统角色和 network membership 决定可访问范围；具体读写权限还受 network role 限制。
+- 每次登录可能产生新的用户 token。用 `anet token ls` 查看，用 `anet token revoke <token-id>` 撤销。
 
-### 干啥用
+### `ntok_`
 
-CLI 自动带着它去调 hub：
-- `anet status`、`anet tasks`、`anet network ls` — 全用它
-- 浏览器登录 dashboard — 拿它换 cookie
+- 节点启动后用它连接 Hub、接收任务并调用 CommHub 工具。
+- Hub 会把请求限制在 token 绑定的 network；token 名称会记录创建它的节点。不要在节点之间复用 `ntok_`。
+- 本地执行 `anet node delete <alias>` 不会自动撤销 Hub 中的 token；不再使用时还要执行 `anet token revoke <token-id>`。
 
-**你不用手动输**。一次 `anet login` 之后就不用管它了。
+## 本机管理员恢复 token
 
-### 不能干啥
+首次 `anet hub start` 还会把管理员 `utok_` 保存到：
 
-- ❌ 不能给 agent 直连 hub 用（agent 必须用 `ntok_`）
-
----
-
-## 2. `ntok_`：agent 的 token（每个 agent 一个）
-
-### 怎么来的
-
-```bash
-anet node create 翻译官 --runtime claude-agent-sdk ...
-```
-
-CLI 在背后做了一件事：拿你的 `utok_` 找 hub 换一个 `ntok_xxxxxxxx...` 给"翻译官"这个 agent 用。
-
-### 存哪
-
-```bash
-.anet/nodes/翻译官/config.json
-```
-
-里面长这样：
-```json
-{
-  "node_name": "翻译官",
-  "token": "ntok_xxxxxxxxxxxxxxxx",
-  "network_id": "net_xxx",
-  ...
-}
-```
-
-### 干啥用
-
-```bash
-anet node start 翻译官
-```
-
-启动 agent 时，agent 拿 `ntok_` 跟 hub 建 SSE 长连接。**你也不用手动输**。
-
-### 为啥每个 agent 一个
-
-每个 `ntok_` 跟一个 `(agent, network)` 绑死，hub 端**强制**不允许跨网络。这是网络隔离的核心机制。
-
----
-
-## 就这两个，没了。
-
-完。 **你日常用 anet 接触的 token 只有这两个，CLI 全帮你管好**：
-
-| 你做啥 | CLI 帮你管哪个 token |
-|---|---|
-| `anet login` | 写 `utok_` 到 `~/.anet/config.json` |
-| `anet node create X` | 用 `utok_` 跟 hub 换 `ntok_`，写到 `.anet/nodes/X/config.json` |
-| `anet node start X` | 拿 X 的 `ntok_` 连 hub SSE |
-| `anet status` 等其他命令 | 自动用 `utok_` |
-
-你**不需要**：
-- ❌ 手动 copy/paste token 字符串
-- ❌ 记住 token 是啥
-- ❌ 知道 token 长啥样
-
----
-
-# 运维补充：Bootstrap Admin Token
-
-v0.8 起，`COMMHUB_AUTH_TOKEN` 进入软废弃。Hub 的长期身份统一收敛到用户 token：管理员也是 `utok_`，Agent 仍然是 `ntok_`。
-
-首次 `anet hub start` 会自动创建 admin 用户，并把一个本机恢复用的 admin `utok_` 写到：
-
-```bash
+```text
 ~/.anet/server/admin-utok.json
 ```
 
-文件权限为 `600`，内容包含 `username`、`user_id`、`token`、`created_at`。它只用于本机运维命令和启动 Dashboard 的便利路径，不需要复制到别的机器。
+该文件权限为 `600`，用于 Hub 主机上的恢复操作和 Dashboard 启动。不要复制到其他机器，也不要提交到版本库。
 
-::: warning
-`~/.anet/server/config.json` 里的 `auth_token` 从 v0.8 开始会被忽略并打印迁移 warning。`COMMHUB_AUTH_TOKEN` 只保留软兼容到 v1.0，并且只允许少量 `/api/*` 读请求。
-:::
-
----
-
-## 法务 / 安全审计才看的部分
-
-### Token 生命周期对照
-
-| 事件 | utok_ | ntok_ |
-|---|---|---|
-| 部署 hub | 自动 bootstrap admin `utok_` 到 `admin-utok.json` | - |
-| 注册账号 | 创建一个 | 附带创建一个绑默认网络 |
-| 登录 | 创建一个新的（老的不自动失效） | 不变 |
-| 改密码 | 当前设备换新 `utok_`，其他设备 `utok_` 失效（[详细 5 副作用](/api/rest#post-api-auth-password)） | 不变 |
-| 创建 node | 不变 | 创建一个绑该 node + network |
-| 删 node (`anet node delete`) | 不变 | **不自动撤销** —— hub 端 `api_tokens` 行仍保留（[`cli.ts` `notifyServerOffline`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) 只发 `report_status` offline，不删 token）。要清干净请加 `anet token revoke <id>` |
-| 手动撤销 | `anet token revoke <id>` | 同左 |
-
-### 权限决策（hub 端怎么判断你能不能调）
-
-```mermaid
-flowchart TD
-    REQ[请求到达 hub] --> HAS{带 Bearer token?}
-    HAS -->|否| DENY1[401 拒绝<br/>除非显式 --dev-open]
-
-    HAS -->|是| TYPE{Token 类型}
-    TYPE -->|utok_| UTOK[用户级:<br/>查 users 表]
-    TYPE -->|ntok_| NTOK[网络级:<br/>查 api_tokens 表]
-
-    UTOK --> UROLE{是这个 network 的成员?}
-    UROLE -->|是| UOP{读还是写?}
-    UROLE -->|否| DENY2[403 拒绝]
-    UOP -->|读| ALLOW[放行]
-    UOP -->|写 + 角色 ≥ member| ALLOW
-    UOP -->|写 + 是 viewer| DENY3[viewer 不能写]
-
-    NTOK --> FORCED[hub 强制锁 network_id<br/>到 ntok 自带的 binding]
-    FORCED --> NROLE{该 node 在该 network<br/>有 member 以上权限?}
-    NROLE -->|是| ALLOW
-    NROLE -->|否| DENY4[403 拒绝]
-```
-
-### 安全实践
+## 安全操作
 
 ```bash
-# 1. 配置文件权限审计
-#    ✅ ~/.anet/server/admin-utok.json    自动 600 (cli.ts saveAdminUtok)
-#    ✅ ~/.anet/server/config.json        自动 600 (cli.ts saveServerConfig)
-#    ⚠ ~/.anet/config.json                **不是自动 600**（cli.ts saveGlobal 默认 644）—— 多用户共享 host 建议手动改：
+# ~/.anet/config.json 当前不会自动设为 600；共享主机上应手动收紧
 chmod 600 ~/.anet/config.json
-# 单用户 host 影响有限（home 目录通常已 700）；多用户机器其他本地用户可读你的 utok_。
-# v0.9 RFC 待修自动 600。
 
-# 2. .anet/ 不要提交 git
-echo ".anet/" >> .gitignore
+# 项目级节点配置不要提交
+printf '\n.anet/\n' >> .gitignore
 
-# 3. v0.8 起公网部署，默认 admin/anethub 必须立刻改密
-anet login --username admin --password anethub
-anet passwd   # 改成强密码（≥ 8 位 + 非弱密码字典）
-# 或者 bootstrap 时直接设你自己的：
-anet hub start --username alice --password 'your-strong-pass!'
-
-# 4. 定期轮换登录 token
-anet token ls                  # 看现有 utok_
-anet token revoke tok_xxx      # 撤销老的
-anet login                     # 重新登录拿新 utok_
+# 查看并撤销不再使用的 token
+anet token ls
+anet token revoke <token-id>
 ```
 
----
+- 不要在聊天、日志或 issue 中粘贴完整 `utok_`、`ntok_`。
+- 改密使用 `anet passwd`；忘记管理员密码时，在 Hub 主机上使用 `anet hub admin reset-user` 的安全确认流程。
+- 新部署不要配置 `COMMHUB_AUTH_TOKEN`。它只保留旧部署兼容，不是当前登录主线。
 
-## 别混淆：hub token vs vendor API token
+## 不要和模型厂商密钥混淆
 
-本页讲的 `utok_` / `ntok_` 是 **hub 自己的 token**（CommHub server 端 SHA-256 hash 存 `api_tokens` 表）—— 控制「你 / 这个 agent 能不能登录 hub、能不能调 commhub MCP 工具、属于哪个 network」。
-
-跟它无关的另一类 token 是 **vendor API token**（`ANTHROPIC_AUTH_TOKEN` / `OPENAI_API_KEY` / `MINIMAX_KEY` / `INTERN_API_KEY` …）—— 控制「`claude-agent-sdk` runtime 能不能调上游 LLM 厂商 API」。两个 token 完全独立的体系：
-
-| 维度 | `utok_` / `ntok_`（hub token） | vendor API token |
+| | Hub token | 模型厂商密钥 |
 |---|---|---|
-| 作用范围 | CommHub server | 上游 LLM 厂商（Anthropic / MiniMax / 书生 / …）|
-| 存储位置 | hub `api_tokens` 表（SHA-256 hash）+ 客户端 `~/.anet/config.json` 或 `~/.anet/server/admin-utok.json`（chmod 600）| agent node `config.json` env map（`envRef` 模式推荐 / plain string deprecated）|
-| Revoke 路径 | `anet token revoke <id>`（hub 端立即吊销）| 厂商各自后台撤销 + 节点 `anet node migrate-token-to-envref` 一键迁 |
-| 失效后行为 | hub 拒登录 / 401 | LLM 调用 401 / agent FATAL exit on unset envRef |
-| 文档 | 本页 | [Vendor 凭据存储（envRef 模式，v0.9.0+）](/concepts/security#vendor-凭据存储-envref-模式-v0-9-0)|
+| 常见前缀/变量 | `utok_`、`ntok_` | `ANTHROPIC_AUTH_TOKEN`、`OPENAI_API_KEY` 等 |
+| 控制什么 | 能否访问 Hub、节点属于哪个 network | 能否调用上游模型 |
+| 由谁撤销 | `anet token revoke` | 对应厂商控制台 |
 
-> 跟人讨论时记得**显式说**「我说的是 hub token 还是 vendor token」—— 写 `utok_xxx` 还是 `sk-xxx` 前缀就清楚。
+推荐用 `envRef` 保存厂商密钥，避免把密钥明文写入节点配置。详见
+[安全设计：Vendor 凭据](/concepts/security#vendor-凭据存储-envref-模式-v0-9-0)。
 
-## 历史兼容（不用关心）
+## 向后兼容
 
-### `atok_`
+旧 `atok_` token 仍然有效，升级不会要求立即替换；新登录和新节点使用 `utok_` / `ntok_`。
 
-V2 时代有过 `atok_`（api token）。V3 改成 `utok_` + `ntok_` 体系。
+## 相关文档
 
-代码里还保留对 `atok_` 前缀的兼容判断（不报错），但**新用户完全不需要接触**。`anet token create / ls / revoke` 命令底层走的都是 `utok_` / `ntok_`。
-
----
-
-## FAQ
-
-**Q：我每天接触几个 token？**
-A：**0 个手动输入**。CLI 全自动管理。你只要 `anet login` 一次 + `anet node create` 每个 agent 一次，token 自动写文件，之后就不管了。
-
-**Q：admin 账户的默认密码是什么？**
-A：`admin / anethub`（快速上手默认）。**首次 `anet login` 之后立刻 `anet passwd` 改成你自己的强密码**（≥ 8 位 + 非弱密码）。也可以在 `anet hub start --username … --password …` 时直接传你想要的。
-
-**Q：我在另一台服务器加 agent，要用 COMMHUB_AUTH_TOKEN 吗？**
-A：**不要**。另一台服务器加 agent 只要：
-1. `anet login --hub http://hub:9200 --username admin --password anethub`（一步配 hub + 登录；脚本化也可分两步：`anet init --hub ...` 然后 `anet login ...`）
-2. `anet node create xxx ...`
-3. `anet node start xxx`
-
-整个流程 0 接触 COMMHUB_AUTH_TOKEN。
-
-**Q：utok_ 和 ntok_ 实际差别？**
-A：`utok_` 是**你**的身份证，可跨 network。`ntok_` 是**某个 agent**在**某个 network** 的身份证，被 hub 锁死，跨不出去。
-
-**Q：v0.5.x 没设 COMMHUB_AUTH_TOKEN 会怎样？**
-A：v0.5 默认 open mode，匿名请求放行（R3 漏洞，**已于 v0.7 / v0.8 修掉**）。**v0.8+ 已完全不需要 `COMMHUB_AUTH_TOKEN`** —— hub 起来自动 bootstrap admin 用户，凭 `utok_` 鉴权；旧 master token 仅作为兼容路径打 deprecation warning，v1.0 移除。
-
-**Q：升级 hub 到 v0.8+ 后，已有 agent 的 ntok_ 还能用吗？**
-A：能用。`api_tokens` schema 不变。`COMMHUB_AUTH_TOKEN` env 即使设了也只会触发 deprecation warning，不影响 hub 启动 —— v0.8 hub 不再依赖 master token，直接 `anet hub start` 就能起。
-
-## 下一步
-
-- **CLI 操作**：[CLI 命令 — token 章节](/guide/cli)（`anet token ls/create/revoke`）
-- **架构对应**：[架构概览 — 安全章节](/guide/architecture#安全架构)
-- **完整安全模型**：[安全设计](/concepts/security)
-- **升级指南**：从 v0.7 master token 模式升 v0.8 utok_/ntok_：[升级指南](/guide/upgrade#v0-7-v0-8-升级注意-最新)
-- **RFC**：[RFC-001 — COMMHUB_AUTH_TOKEN 废弃路线图](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md)
+- [CLI：token 命令](/guide/cli)
+- [Network 与角色](/concepts/networks)
+- [安全设计](/concepts/security)
+- [升级指南](/guide/upgrade)

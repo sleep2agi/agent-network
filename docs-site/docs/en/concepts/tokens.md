@@ -1,238 +1,91 @@
 # Token System
 
-::: tip One line
-**Zero manual token typing in daily use.** The CLI auto-manages two tokens: `utok_` (yours) and `ntok_` (one per agent).
+::: tip Two token types cover normal use
+`utok_` represents a user. `ntok_` represents one node in one network. The CLI creates, stores, and uses both automatically.
 :::
 
-## Simplest picture
+## Quick path
 
-```
-You (human)         ──── utok_ ────►   hub
-                                          │
-                                          │ Verifies, then issues ntok_ for each agent
-                                          ▼
-Your agent node  ──── ntok_ ────►   hub
-```
-
-That's it. **The only two tokens you need to know**, both CLI-managed.
-
----
-
-## 1. `utok_` — your token
-
-### How
+The first `anet hub start` creates the `admin` user and prints a random bootstrap password once. Save it, then log in from another terminal:
 
 ```bash
-anet login --hub http://127.0.0.1:9200 --username admin --password anethub
+# Terminal 1
+anet hub start
+
+# Terminal 2: enter the password printed on first start
+anet login --hub http://127.0.0.1:9200 --username admin
+
+anet node create my-agent
+anet node start my-agent
 ```
 
-Hub verifies your credentials and issues `utok_xxxxxxxx...` to you.
+After login, the CLI stores the user token. When you create a node, it requests a separate token for that node. Normal use does not require copying token strings.
 
-### Where it lives
+## The two token types
+
+| Token | Identity | How it is issued | Default location |
+|---|---|---|---|
+| `utok_` | A logged-in user | `anet login` | `~/.anet/config.json` |
+| `ntok_` | One node in one network | `anet node create <alias>` | `.anet/nodes/<alias>/config.json` |
+
+### `utok_`
+
+- The CLI uses it for user operations such as `anet status`, `anet tasks`, and `anet network ls`.
+- The Hub combines the user's system role and network membership to determine access; the network role further limits reads and writes.
+- Logins may issue additional user tokens. List them with `anet token ls` and revoke one with `anet token revoke <token-id>`.
+
+### `ntok_`
+
+- A running node uses it to connect to the Hub, receive tasks, and call CommHub tools.
+- The Hub restricts requests to the token's network, and the token name records the node it was created for. Do not reuse an `ntok_` across nodes.
+- Local `anet node delete <alias>` does not automatically revoke the Hub token. Revoke the token separately when it is no longer needed.
+
+## Local admin recovery token
+
+The first `anet hub start` also stores an administrator `utok_` at:
+
+```text
+~/.anet/server/admin-utok.json
+```
+
+The file mode is `600`. It supports recovery commands on the Hub host and Dashboard startup. Do not copy it to other machines or commit it.
+
+## Security practices
 
 ```bash
-~/.anet/config.json
-```
-
-```json
-{
-  "hub": "http://hub:9200",
-  "token": "utok_xxxxxxxxxxxxxxxx",
-  "user": { "username": "admin", ... }
-}
-```
-
-### What it does
-
-Every `anet ...` command attaches it automatically:
-- `anet status`, `anet tasks`, `anet network ls`, …
-- Dashboard browser login exchanges it for a cookie
-
-**You never type it.** After one `anet login`, the CLI handles everything.
-
-### What it cannot do
-
-❌ Agents cannot use `utok_` to connect to the hub directly — they need `ntok_`.
-
----
-
-## 2. `ntok_` — one per agent
-
-### How
-
-```bash
-anet node create translator --runtime claude-agent-sdk ...
-```
-
-Behind the scenes: the CLI uses your `utok_` to fetch an `ntok_xxxxxxxx...` from the hub, bound to (translator + current network), and writes it to the node config.
-
-### Where it lives
-
-```bash
-.anet/nodes/translator/config.json
-```
-
-```json
-{
-  "node_name": "translator",
-  "token": "ntok_xxxxxxxxxxxxxxxx",
-  "network_id": "net_xxx",
-  ...
-}
-```
-
-### What it does
-
-```bash
-anet node start translator
-```
-
-Agent uses its `ntok_` to open the SSE connection to the hub. **You never type this one either.**
-
-### Why one per agent
-
-`ntok_` is bound to (agent, network), and the hub **forces** that binding — an agent can never act outside its own network. Core isolation mechanism.
-
----
-
-## That's both of them.
-
-The CLI manages both automatically:
-
-| You run | CLI handles |
-|---|---|
-| `anet login` | Writes `utok_` to `~/.anet/config.json` |
-| `anet node create X` | Uses `utok_` to fetch `ntok_`, writes to `.anet/nodes/X/config.json` |
-| `anet node start X` | Reads X's `ntok_` and connects to hub SSE |
-| `anet status / tasks / network ls / ...` | Uses `utok_` automatically |
-
-You **never have to**:
-- ❌ Copy/paste token strings
-- ❌ Remember any token value
-- ❌ Set env vars
-
----
-
-## FAQ
-
-**Q: Is `admin / anethub` a token?**
-A: No, that's a username + password. `anet login` exchanges those for a `utok_`.
-
-**Q: Real difference between `utok_` and `ntok_`?**
-A: `utok_` is **your** identity — operates across networks you belong to. `ntok_` is **one agent's identity in one network** — locked by the hub.
-
-**Q: I'm adding an agent on another server, which token do I set?**
-A: None. Flow:
-1. `anet login --hub http://hub:9200 --username admin --password ...` ← one step that sets the hub URL and gets `utok_` (or two-step: `anet init --hub ...` then `anet login ...`)
-2. `anet node create xxx ...` ← gets `ntok_` automatically
-3. `anet node start xxx` ← uses `ntok_` automatically
-
-Whole flow: **zero manual token entry**.
-
-**Q: Does the hub server itself have a token?**
-A: Since v0.8, the hub bootstraps an admin `utok_` to `~/.anet/server/admin-utok.json` for local recovery/admin commands. The old `COMMHUB_AUTH_TOKEN` master token is deprecated and will be removed in v1.0.
-
-**Q: Does the dashboard need a token to start?**
-A: Users log into Dashboard with username/password. The backend proxies requests with the browser session cookie; it should not hold a long-lived service token.
-
-**Q: Do tokens expire?**
-A: Not today. TTL + revoke-all is on the v0.9 roadmap. `utok_` rotates on password change; `ntok_` can be revoked via `anet token revoke <id>` or by deleting the node.
-
----
-
-## For auditors / security teams
-
-### Token lifecycle matrix
-
-| Event | `utok_` | `ntok_` |
-|---|---|---|
-| Deploy hub | Admin `utok_` auto-bootstrapped to `admin-utok.json` (v0.8) | — |
-| Register account | One created | One created bound to the default network |
-| Log in | A new one is issued (old one stays valid until revoked) | Unchanged |
-| Change password | Current device gets a new `utok_`; other devices' `utok_` are invalidated ([full 5 side effects](/en/api/rest#post-api-auth-password)) | Unchanged |
-| Create node | Unchanged | One created, bound to the node × network |
-| Delete node (`anet node delete`) | Unchanged | **Not auto-revoked** — the `api_tokens` row stays on the hub ([`cli.ts` `notifyServerOffline`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) only sends `report_status` offline; it does not delete the token). Use `anet token revoke <id>` separately to fully clean up. |
-| Manual revoke | `anet token revoke <id>` | Same |
-
-### Authorization decision (how the hub decides)
-
-```mermaid
-flowchart TD
-    REQ[Request arrives] --> HAS{Bearer token present?}
-    HAS -->|No| DENY1[401 — denied<br/>unless --dev-open is set]
-
-    HAS -->|Yes| TYPE{Token type}
-    TYPE -->|utok_| UTOK[User-level:<br/>look up users table]
-    TYPE -->|ntok_| NTOK[Network-level:<br/>look up api_tokens table]
-
-    UTOK --> UROLE{Member of this network?}
-    UROLE -->|Yes| UOP{Read or write?}
-    UROLE -->|No| DENY2[403 — denied]
-    UOP -->|Read| ALLOW[Allowed]
-    UOP -->|Write + role ≥ member| ALLOW
-    UOP -->|Write + viewer| DENY3[viewer cannot write]
-
-    NTOK --> FORCED[Hub forces network_id<br/>to the binding in ntok_]
-    FORCED --> NROLE{Node has ≥ member role<br/>in that network?}
-    NROLE -->|Yes| ALLOW
-    NROLE -->|No| DENY4[403 — denied]
-```
-
-### Security practices
-
-```bash
-# 1. Config-file permissions audit
-#    ✅ ~/.anet/server/admin-utok.json    auto 600 (cli.ts saveAdminUtok)
-#    ✅ ~/.anet/server/config.json        auto 600 (cli.ts saveServerConfig)
-#    ⚠ ~/.anet/config.json                **NOT auto-600** (cli.ts saveGlobal uses the default 644) — on shared multi-user hosts, fix manually:
+# ~/.anet/config.json is not currently forced to mode 600
 chmod 600 ~/.anet/config.json
-# Single-user hosts: limited impact (HOME is usually 700 already).
-# Multi-user machines: other local users can read your utok_.
-# v0.9 RFC will auto-fix the chmod.
 
-# 2. Don't commit .anet/
-echo ".anet/" >> .gitignore
+# Never commit project-level node configuration
+printf '\n.anet/\n' >> .gitignore
 
-# 3. Public deployment: change default admin / anethub immediately
-anet login --username admin --password anethub
-anet passwd   # rotate to strong (≥ 8 chars + not in weak-password dict)
-# Or set your own at bootstrap:
-anet hub start --username alice --password 'your-strong-pass!'
-
-# 4. Rotate login tokens periodically
-anet token ls                  # list current utok_
-anet token revoke tok_xxx      # revoke old ones
-anet login                     # log in again to get a fresh utok_
+# Inspect and revoke tokens that are no longer needed
+anet token ls
+anet token revoke <token-id>
 ```
 
----
+- Never paste a complete `utok_` or `ntok_` into chat, logs, or issues.
+- Change passwords with `anet passwd`. If the administrator password is lost, use the guarded `anet hub admin reset-user` flow on the Hub host.
+- Do not configure `COMMHUB_AUTH_TOKEN` for a new deployment. It remains only for legacy compatibility and is not the current login path.
 
-## Don't confuse: hub token vs vendor API token
+## Hub tokens are not model-provider keys
 
-This page is about **hub tokens** — `utok_` / `ntok_` — issued by the CommHub server, hashed in `api_tokens`, and used to authorize "can you log into the hub / call commhub MCP tools / which network do you belong to."
-
-The unrelated category is **vendor API tokens** (`ANTHROPIC_AUTH_TOKEN` / `OPENAI_API_KEY` / `MINIMAX_KEY` / `INTERN_API_KEY` / …) used to authorize "can `claude-agent-sdk` runtime reach the upstream LLM vendor API." The two systems are independent:
-
-| Dimension | `utok_` / `ntok_` (hub tokens) | Vendor API tokens |
+| | Hub token | Model-provider key |
 |---|---|---|
-| Scope | CommHub server | Upstream LLM vendor (Anthropic / MiniMax / InternLM / …) |
-| Storage | hub `api_tokens` table (SHA-256 hash) + client `~/.anet/config.json` or `~/.anet/server/admin-utok.json` (chmod 600) | Agent node `config.json` env map (`envRef` mode recommended / plain string deprecated) |
-| Revocation | `anet token revoke <id>` (hub revokes immediately) | Vendor-side revocation + node-side `anet node migrate-token-to-envref` for a one-shot rewrite |
-| When invalid | Hub rejects login / 401 | LLM call returns 401 / agent FATAL exit on unset envRef |
-| Docs | This page | [Vendor Credential Storage (envRef mode, v0.9.0+)](/en/concepts/security#vendor-credential-storage-envref-mode-v0-9-0) |
+| Common prefix or variable | `utok_`, `ntok_` | `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY`, and similar |
+| Controls | Hub access and network identity | Access to an upstream model |
+| Revoked by | `anet token revoke` | The provider console |
 
-> When discussing with teammates, **explicitly say** "I mean the hub token" or "I mean the vendor token" — or just paste the prefix (`utok_xxx` vs `sk-xxx`) so it's unambiguous.
+Use `envRef` for provider credentials so secrets are not written directly into node configuration. See
+[Security: vendor credentials](/en/concepts/security#vendor-credential-storage-envref-mode-v0-9-0).
 
-## Legacy (don't worry about it)
+## Backward compatibility
 
-### `atok_`
+Existing `atok_` tokens remain valid and do not need immediate replacement. New logins and nodes use `utok_` / `ntok_`.
 
-V2 had `atok_` (api token). V3 replaced it with `utok_` + `ntok_`. The codebase still tolerates the `atok_` prefix for backward compat (no error thrown), but **new users don't need to touch it**. `anet token create / ls / revoke` all transparently go through `utok_` / `ntok_` under the hood.
+## Related documentation
 
-## Next steps
-
-- **CLI usage**: [CLI commands — token section](/en/guide/cli) (`anet token ls/create/revoke`)
-- **Architecture mapping**: [Architecture — Security](/en/guide/architecture#security-architecture)
-- **Full security model**: [Security design](/en/concepts/security)
-- **Upgrade**: from v0.7 master-token mode to v0.8 utok_/ntok_: [Upgrade guide](/en/guide/upgrade#v0-7-v0-8-upgrade-notes-latest)
-- **RFC**: [RFC-001 — `COMMHUB_AUTH_TOKEN` deprecation roadmap](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md)
+- [CLI token commands](/en/guide/cli)
+- [Networks and roles](/en/concepts/networks)
+- [Security](/en/concepts/security)
+- [Upgrade guide](/en/guide/upgrade)
