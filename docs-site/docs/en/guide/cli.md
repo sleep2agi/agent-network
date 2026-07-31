@@ -375,6 +375,8 @@ There is no generic top-level `anet attach <alias>` subcommand today ([#121](htt
 - or `anet node start <alias> --tmux` — from a terminal it uses `tmux new -As`, which attaches if the session already exists
 
 **Exception: Grok co-presence** (`--runtime grok-build-cli`) has a dedicated `anet grok attach <alias>` that attaches you to the real Grok TUI held by the agent-node, sharing one session with network tasks. See [Grok Co-presence TUI](./grok-copresence.md).
+
+**Exception: Codex TUI co-presence** (preview `codex-app-server`) uses `anet node start <alias> --copresence` to start the app-server, bridge, and attachable TUI together; enter it with `tmux attach -t <alias>`. See [Codex TUI Co-presence](./codex-copresence.md).
 :::
 
 ```bash
@@ -385,6 +387,9 @@ anet node start <name> [options]
 |------|--------|------|
 | `--tmux` | false | Start in a tmux session (session name = alias; `-A` attaches if it already exists). From a terminal it attaches — detach with `Ctrl-B D`; **headless (stdin not a TTY) it starts detached** — re-join with `tmux attach -t <alias>`. Note: it does NOT auto-confirm the dev-channels prompt; use `--accept-dev-channels` for that. |
 | `--new-session` | false | Ignore previous Claude session, create a new one (the "start over" path on the `--resume` chain) |
+| `--copresence` | false | **Preview-only; the node must use `codex-app-server`.** Starts three tmux sessions (app-server / bridge / TUI) and defaults to read-only. Recovery must keep this flag rather than falling back to a plain `node start` |
+| `--dangerously-allow-full-access` | false | With `--copresence` only: disables Codex filesystem/network sandboxing. A TTY requires typed `yes`; non-TTY callers also need the next double-confirmation flag |
+| `--yes-danger-full-access` | false | Non-TTY callers only; must accompany `--dangerously-allow-full-access` |
 
 **Default (no flag)**:
 

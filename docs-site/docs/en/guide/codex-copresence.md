@@ -1,67 +1,175 @@
 # Codex TUI Co-presence (`codex-app-server`, preview)
 
-The `codex-app-server` runtime lets a **human and an Agent share one Codex session**: the human types / reads output / handles approvals in the native Codex TUI, while Agent Network tasks are injected into the **same Codex thread** via CommHub. Both see the same history and the same live events. ([RFC-030](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md), Phase 0A.)
+The `codex-app-server` runtime lets a **human and an Agent share one Codex session**: the human types, reads output, and handles approvals in the native Codex TUI while Agent Network tasks arrive through CommHub in the **same Codex thread**. Both sides see the same history and live events. ([RFC-030](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md), Phase 0A.)
 
-> Unlike the headless `codex-sdk`: `codex-sdk` is a background worker with no shareable live TUI; `codex-app-server` is the one that gives you co-presence.
+> Unlike the headless `codex-sdk`, which is a background worker without a shareable live TUI, `codex-app-server` provides Codex TUI co-presence.
 
 ::: warning Preview
-This is a **preview** (not on `latest`), and currently a **single-machine** form. Only connect to trusted Hubs.
+This is **preview-only**. npm `latest` currently contains none of `codex-app-server`, `--copresence`, or `codexAppServerUrl`; commands on this page will not work with a `latest` installation. The current implementation is still a trusted single-machine shape, not the production Policy Gateway. Connect only to a trusted Hub and accept only trusted tasks.
 :::
 
 ## Prerequisites
 
-- Install and authenticate the Codex CLI (verified baseline `codex-cli 0.144`): `npm install -g @openai/codex`, then `codex login`
-- Install the preview anet packages:
+- Install and authenticate the Codex CLI (protocol verification baseline: `codex-cli 0.144.x`):
+
+```bash
+npm install -g @openai/codex
+codex login
+```
+
+- Install or switch to the preview channel:
 
 ```bash
 npm install -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview
+# If anet is already installed, switch the whole component set:
+anet upgrade --channel preview
+
+# Verify: versions must say preview and help must include Co-presence / --copresence
+anet -v
+anet --help
 ```
 
-## Two topologies (understand this first)
+- The recommended one-command path also needs `bash` and **tmux 3.2+**. It currently targets POSIX environments such as Linux/WSL; for native Windows, use the [manual shared-WebSocket path](#native-windows-or-advanced-adoption-manual-shared-websocket).
+- The node must have a network-scoped `ntok_`. Run `anet doctor --fix` for an old node with no token, or recreate it.
 
-The `codex-app-server` runtime has two modes:
-
-- **Self-hosted (default, no URL)**: the node **spawns its own** `codex app-server` (ephemeral port, fresh thread) — you start nothing, but that server is private to the node on an ephemeral port, so your TUI can't attach to it. **This is not co-presence** — just a codex-powered agent. For this: `anet node create codex-node --runtime codex-app-server` + `anet node start`, done.
-- **Shared (URL passed) → co-presence**: **you** start a fixed-address app-server that both your `codex --remote` TUI and the anet node connect to. This is co-presence — the rest of this page. Co-presence **requires** starting the shared server manually, because the human and the agent must attach to the same fixed address (the node's private ephemeral one won't do).
-
-## Start a co-presence session (shared mode)
-
-**1. Start the shared codex app-server** (WebSocket transport — cross-platform, incl. Windows):
+## Recommended: first-class `--copresence`
 
 ```bash
-codex app-server --listen ws://127.0.0.1:4500
+# 0. From an external clean shell, enter the project the node should operate on
+cd /path/to/project
+
+# Remove every inherited COMMHUB_* identity; do not enumerate only known names
+for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
+
+# 1. Create a preview-runtime node
+anet node create codex-human --runtime codex-app-server
+
+# 2. Start the app-server, bridge, and attachable Codex TUI
+anet node start codex-human --copresence
+
+# 3. Enter the shared human/agent TUI
+tmux attach -t =codex-human
 ```
 
-> Bind `127.0.0.1` only; never expose it publicly. On **Linux/macOS**, prefer `codex remote-control start` + `codex --remote unix://` for a long-running setup. **Windows does not support the `codex remote-control` daemon** (it errors `daemon lifecycle is only supported on Unix platforms`) — on Windows use the `codex app-server --listen ws://` form above and keep it alive via a Scheduled Task / service.
+A Codex thread inherits its working directory from the **app-server process cwd**, not the bridge cwd. `cd` into the target project **before** `--copresence`. On Linux, verify with `readlink /proc/<app-server-pid>/cwd`; checking only the bridge is insufficient.
 
-**2. Attach the human TUI** (another terminal):
+`--copresence` creates three tmux sessions carrying one shared identity marker:
+
+| Session | Role |
+|---|---|
+| `codex-human-appsrv` | loopback-only `codex app-server` with CommHub MCP injected |
+| `codex-human-桥` | the `agent-node` bridge that receives network tasks and submits them to the thread |
+| `codex-human` | the native Codex TUI that a human can attach to |
+
+`codex-human` is also a prefix of the other two session names. A normal
+`-t codex-human` selector can silently match `codex-human-appsrv` or the bridge after
+the TUI session exits. Use `-t =codex-human` for exact matching—or a pane ID—with
+`attach`, `capture-pane`, `send-keys`, and similar commands, and verify the target
+session first. Prefix matching is especially risky after one of the three sessions dies.
+
+Pressing `Ctrl-B D` in the TUI only detaches; it does not stop the node. Detach first, then stop it from a terminal **outside the co-presence process tree**:
 
 ```bash
-codex --remote ws://127.0.0.1:4500
+anet node stop codex-human
 ```
 
-**3. Start the anet bridge node** (a second client on the same app-server):
+The stop path uses a persistent identity marker to reap all three sessions and their children. Calling `stop` from inside the co-presence session fails closed so it cannot kill the caller's own shell.
 
-One command — `--codex-app-server-url` writes the address straight into the node config (no env var, no manual editing); the runtime **auto-captures and writes back** `codexThreadId`:
+::: danger Recovery must return through the co-presence command
+If a bridge has been disconnected for a long time and prints “run `anet node start codex-human` to recover,” **do not copy that generic hint**. A plain `start` launches a separate non-co-presence node that competes with the surviving bridge for the same alias. From an external shell, stop the old tree, clear every `COMMHUB_*` variable again, and restart with:
 
 ```bash
-anet node create codex-human --runtime codex-app-server --codex-app-server-url ws://127.0.0.1:4500
-anet node start codex-human   # on connect, auto-captures the thread and writes codexThreadId to config.json
+anet node stop codex-human
+cd /path/to/project
+for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
+anet node start codex-human --copresence
 ```
 
-> Optional: add `--codex-thread-id <id>` to adopt a **specific** existing session (omit it to auto-capture). The address can also come from the env var `ANET_CODEX_APP_SERVER_URL`, or directly from `config.json`'s `codexAppServerUrl` (all three are equivalent; precedence: config > env).
+This is not theoretical: at least two production nodes are known to have run silent
+duplicates for about two and nine days after operators followed the generic hint.
+:::
 
-Now when another Agent Network node dispatches a `send_task` to `codex-human`, the task appears in the human-visible Codex TUI; the human can also type directly, or add requirements inside an agent-initiated turn.
+## Permissions: read-only by default, explicit double opt-in for full access
 
-## Notes
+Co-presence defaults to `sandbox_mode=read-only` with on-request approvals. If Codex must write files or use unrestricted command/network tools, opt in explicitly:
 
-- **Preview + single-machine**: Phase 0A form, single-machine trusted profile only.
-- **One active turn per thread at a time**; "simultaneous communication" means multiple producers (the human + multiple agents) can post into the same thread.
-- **All Codex commands / file changes / permission approvals are decided by the human TUI**; the agent side goes through a restricted MCP proxy.
-- The app-server listens on `127.0.0.1` only; tokens / secrets never go into git or chat.
-- On Windows use the **WS transport** (not the unix socket); native deps like node-pty are not required.
+```bash
+anet node start codex-human --copresence --dangerously-allow-full-access
+```
+
+- An interactive terminal requires you to type `yes`.
+- A non-TTY script, CI job, or Docker caller must also pass `--yes-danger-full-access`:
+
+```bash
+anet node start codex-human --copresence \
+  --dangerously-allow-full-access \
+  --yes-danger-full-access
+```
+
+The second flag is only for non-interactive callers and cannot be omitted; it prevents piped input from bypassing confirmation. Full access disables the filesystem/network sandbox, so use it only in a trusted workspace with trusted tasks.
+
+## A normal `codex-app-server` node is not co-presence
+
+Without `--copresence`:
+
+```bash
+anet node create codex-worker --runtime codex-app-server
+anet node start codex-worker
+```
+
+The node spawns a private app-server and a fresh thread. This is useful as a codex-backed background Agent, but there is no human-attachable TUI, so this path **is not co-presence**.
+
+## Native Windows or advanced adoption: manual shared WebSocket
+
+Native Windows does not have the tmux orchestration above. You can manually connect both the TUI and bridge to one loopback WebSocket. Give **each node its own app-server and port; never share one across nodes**: the CommHub bearer token is app-server process state, so sharing mixes thread identities and creates a single point of failure.
+
+```powershell
+# Check that the chosen port is free; this is a placeholder
+# Windows PowerShell:
+Get-NetTCPConnection -LocalPort <free-port> -ErrorAction SilentlyContinue
+
+# Terminal 1: enter the target project before starting the dedicated app-server
+cd C:\path\to\project
+codex app-server --listen ws://127.0.0.1:<free-port>
+
+# Terminal 2: start the bridge first so it creates/captures a thread
+# and writes codexThreadId to the node config
+Get-ChildItem Env:COMMHUB_* | ForEach-Object { Remove-Item "Env:$($_.Name)" }
+anet node create codex-human --runtime codex-app-server --codex-app-server-url ws://127.0.0.1:<free-port>
+anet node start codex-human
+
+# Read codexThreadId from config.json, then attach Terminal 3 to that exact thread
+codex resume --remote ws://127.0.0.1:<free-port> <codexThreadId>
+```
+
+`codex resume --remote` must include the session/thread id. Omitting it opens a historical-session picker and makes attaching to the wrong thread easy. You may also pass `--codex-thread-id <id>` when creating the node to adopt a specific thread; otherwise the runtime captures one and writes `codexThreadId` back to config.
+
+Advanced Linux/macOS users can also use this topology with an existing app-server, but prefer `--copresence` for everyday use because it manages loopback binding, isolated `CODEX_HOME`, MCP injection, tmux lifecycle, and stop identity together. If common ports such as 24700–24720 are occupied by other co-presence nodes, choose another free loopback port and check it before starting.
+
+A manually started app-server does not automatically get the CommHub MCP injection supplied by `--copresence`. If the human TUI needs direct `commhub_*` tools, configure the RFC-030 MCP URL and bearer-token environment variable **before the app-server creates the thread**. Existing threads snapshot their tool set, so adding MCP later does not work. Never put the token in argv or chat.
+
+::: warning Codex CLI update prompt
+The TUI may show `Update available` with upgrade-now selected by default. On a shared host, choose skip/later and schedule Codex CLI upgrades for a maintenance window; replacing the global binary may affect every co-presence node on that machine.
+:::
+
+## Long tasks and the 600-second message
+
+Only one turn can be active in a thread; later network tasks queue FIFO. The current network-task wait for a final answer **defaults** to 600 seconds (runtime options can override it; it is not an immutable hard cap):
+
+- “No final reply within 600s” **does not prove the node is dead** and does not cancel the Codex turn already running.
+- Do not immediately dispatch the same task again. First inspect `tmux capture-pane -t codex-human -p | tail -30` and whether the workspace is still changing.
+- Break code-heavy or tool-heavy work into steps that can report within ten minutes. If the turn is genuinely stuck, follow the [codex-app-server jam diagnosis and restart SOP](https://github.com/sleep2agi/agent-network/blob/main/docs/sop/codex-app-server-jam-restart.md): preserve work before restarting.
+
+## Security and known limits
+
+- The app-server binds to `127.0.0.1`; tokens and secrets must not enter argv, git, or chat.
+- A thread has one active turn at a time. “Concurrent communication” means multiple producers can enqueue work, not that turns execute in parallel.
+- In the default mode the bridge never answers approvals; approval-requiring turns wait for the human TUI. Full access is the explicit high-risk exception.
+- Phase 0A still connects the TUI and bridge as direct clients. The production single-upstream Policy Gateway, mandatory arbitration, and minimal control plane are not implemented yet.
 
 ## References
 
 - [RFC-030 Codex TUI Bridge](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)
-- [Node Runtime](/en/guide/runtimes) · [Grok Co-presence TUI](/en/guide/grok-copresence) (the other co-presence)
+- [Node runtimes](/en/guide/runtimes)
+- [CLI: `anet node start`](/en/guide/cli#anet-node-start)
+- [Grok Co-presence TUI](/en/guide/grok-copresence)

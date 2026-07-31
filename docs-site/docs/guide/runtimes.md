@@ -28,6 +28,7 @@
 - **想白嫖 Claude 订阅 / 新手最省事** → `claude-code-cli` (`claude auth login` 后 0 配置)
 - **写文案 / 翻译 / 分析 (编程式) / 接国产模型** → `claude-agent-sdk` + 在 wizard 里选对应 vendor
 - **写代码 / 跑命令** → `codex-sdk`
+- **人和 Agent 共用一个 Codex TUI/thread** → preview `codex-app-server` + `anet node start <alias> --copresence`（[完整指南](/guide/codex-copresence)）
 - **用 xAI Grok Build** → `grok-build-acp` ([详细 runtime 指南 ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md))
 - **想人和 agent 同时用同一个 Grok TUI（共存，attach 到活的 Grok 会话）** → `grok-build-cli` ([Grok 人机共存 TUI · preview](/guide/grok-copresence))
 - **想用公版 sst/opencode CLI 当多 vendor 前端（统一 session/auth）** → `opencode-cli`（需本机装 `opencode` CLI + Anthropic/OpenAI env key，[RFC-029](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md)）
@@ -396,6 +397,18 @@ anet node start  →  spawn agent-node 子进程（runtime=codex-app-server）
 
 ### 两种拓扑
 
+**推荐的人机共存入口**不是手改 config，而是 preview CLI 的一等命令：
+
+```bash
+cd /path/to/project
+for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
+anet node create codexbridge --runtime codex-app-server
+anet node start codexbridge --copresence
+tmux attach -t codexbridge
+```
+
+它统一编排独立 app-server、bridge 与 TUI，默认只读。完整权限、恢复、停止与原生 Windows 手工 WS 步骤见 [Codex TUI 人机共存](/guide/codex-copresence)。
+
 **① 独占（默认）** —— 节点自己起 app-server + 新建 thread。多个 codex-app-server 节点互不干扰：
 
 ```bash
@@ -409,18 +422,15 @@ anet node start codexbridge
 { "runtime": "codex-app-server", "model": "gpt-5.5" }
 ```
 
-**② 接管已有 codex 会话** —— 让一个正在运行的 codex 会话同时变成节点。先跑一个共享 app-server + 人类 `codex --remote` TUI，然后在节点 config 里指过去：
+**② 接管已有 codex 会话** —— 让一个正在运行的 codex 会话同时变成节点。`--copresence` 会自动生成并保存 URL/thread 绑定；高级或原生 Windows 手工路径也可在创建节点时传：
 
-```jsonc
-// config.json
-{
-  "runtime": "codex-app-server",
-  "codexAppServerUrl": "ws://127.0.0.1:24777",  // 指向正在运行的 codex app-server
-  "codexThreadId": "019f…"                       // 要接管的已有 thread
-}
+```bash
+anet node create codexbridge --runtime codex-app-server \
+  --codex-app-server-url ws://127.0.0.1:<free-port> \
+  --codex-thread-id <thread-id>
 ```
 
-桥作为**第二个客户端** `thread/resume` 复用该线程。你继续在 TUI 里打字，网络也能派任务进同一条 thread。`codexThreadId` 会在首次落地后自动写回，重启 resume 同一会话。
+桥作为**第二个客户端** `thread/resume` 复用该线程。TUI 接入时必须运行 `codex resume --remote <ws-url> <thread-id>`，不能省略 thread id。每个节点必须使用独立 app-server，不能跨节点共用进程级 CommHub token。
 
 ### 回复用 send_task（不是 send_reply）
 

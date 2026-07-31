@@ -216,10 +216,11 @@ opencode 的 `auth.json` 存 vendor API key。agent-node 的 read-denylist 会�
 
 ```bash
 anet node create codex桥 --runtime codex-app-server
-anet node start codex桥
+anet node start codex桥 --copresence
+tmux attach -t codex桥
 ```
 
-详细设计 / 已知边界见 [RFC-030](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)。
+上面是一等共存路径（需要 preview、bash、tmux 3.2+，默认只读）。普通 `anet node start codex桥` 只会启动后台节点，不提供人类 TUI；断线恢复也不能用普通 start。完整步骤、权限和 Windows 手工路径见 [Codex TUI 人机共存](/guide/codex-copresence)，设计边界见 [RFC-030](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)。
 
 ### claude-agent-sdk + 国产模型
 

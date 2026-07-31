@@ -28,6 +28,7 @@ Rows tagged `(preview)` below are **preview-only** and not selectable on stable.
 - **Reuse a Claude subscription / smoothest first-time path** → `claude-code-cli` (zero config after `claude auth login`)
 - **Writing copy / translation / analysis (programmatic) / using a domestic Chinese model** → `claude-agent-sdk` + pick the matching vendor in the wizard
 - **Writing code / running commands** → `codex-sdk`
+- **Human and Agent sharing one Codex TUI/thread** → preview `codex-app-server` + `anet node start <alias> --copresence` ([full guide](/en/guide/codex-copresence))
 - **Using xAI Grok Build** → `grok-build-acp` ([detailed runtime guide ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md))
 - **Human + agent sharing one Grok TUI (co-presence, attach to the live Grok session)** → `grok-build-cli` ([Grok Co-presence TUI · preview](/en/guide/grok-copresence))
 - **Use the public sst/opencode CLI as a multi-vendor front-end (unified session/auth)** → `opencode-cli` (needs the local `opencode` CLI + an Anthropic/OpenAI env key, [RFC-029](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md))
@@ -376,6 +377,18 @@ anet node start  →  spawn agent-node child (runtime=codex-app-server)
 
 ### Two topologies
 
+The recommended co-presence entry point is the preview CLI command, not hand-editing config:
+
+```bash
+cd /path/to/project
+for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
+anet node create codexbridge --runtime codex-app-server
+anet node start codexbridge --copresence
+tmux attach -t codexbridge
+```
+
+It orchestrates a dedicated app-server, bridge, and TUI together and defaults to read-only. See [Codex TUI Co-presence](/en/guide/codex-copresence) for permissions, recovery, stop behavior, and the native-Windows manual WebSocket path.
+
 **① Owned (default)** — the node spawns its own app-server and creates a fresh thread. Multiple codex-app-server nodes are fully independent:
 
 ```bash
@@ -389,18 +402,15 @@ anet node start codexbridge
 { "runtime": "codex-app-server", "model": "gpt-5.5" }
 ```
 
-**② Adopt an existing codex session** — make a running codex session a node too. Run a shared app-server + a human `codex --remote` TUI, then point the node config at it:
+**② Adopt an existing codex session** — make a running codex session a node too. `--copresence` generates and persists the URL/thread binding automatically. Advanced or native-Windows manual setups may pass it during node creation:
 
-```jsonc
-// config.json
-{
-  "runtime": "codex-app-server",
-  "codexAppServerUrl": "ws://127.0.0.1:24777",  // a running codex app-server
-  "codexThreadId": "019f…"                       // the existing thread to adopt
-}
+```bash
+anet node create codexbridge --runtime codex-app-server \
+  --codex-app-server-url ws://127.0.0.1:<free-port> \
+  --codex-thread-id <thread-id>
 ```
 
-The bridge attaches as a **second client** and `thread/resume`s that thread. You keep typing in the TUI while the network dispatches tasks into the same thread. `codexThreadId` is written back after first bind, so a restart resumes the same session.
+The bridge attaches as a **second client** and `thread/resume`s that thread. The TUI must attach with `codex resume --remote <ws-url> <thread-id>`; do not omit the thread id. Each node must use a dedicated app-server — never share the process-scoped CommHub token across nodes.
 
 ### Reply via send_task (not send_reply)
 

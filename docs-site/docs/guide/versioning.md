@@ -29,6 +29,7 @@ Agent Network 有两套版本号并行使用，第一次看可能困惑。这页
 - 查 release 节奏 / 一个 wave 包含哪些 fix → [GitHub releases](https://github.com/sleep2agi/agent-network/releases)
 - 查单个包独立 hotfix → npm registry 上该包的 versions 列表
 - 升 latest → `anet upgrade` 一键全升，不用自己挑 wave
+- 切 preview → `anet upgrade --channel preview`；切回稳定频道 → `anet upgrade --channel latest`
 
 ## 下一步
 

@@ -170,7 +170,25 @@ flowchart LR
 | `codex-app-server`（preview） | 本地 `codex app-server` WebSocket bridge | Codex TUI 与 Agent Network 人机共存 | 本地 `codex` 已登录 |
 | `opencode-cli`（preview） | 精确 `opencode-ai@1.18.1` + ACP | Anthropic/OpenAI preset 的通信与文本任务 | 对应 vendor API key |
 
-> latest 仍是前 4 个 runtime；canonical preview 的 picker 额外包含 `codex-app-server` 与 `opencode-cli`，合计 6 项。OpenCode 必须使用 vetted exact pair：`agent-network@2.3.0-preview.34` + `agent-node@2.5.0-preview.26` + `opencode-ai@1.18.1`。完整对比见 [anet.sh — Runtimes](https://anet.sh/guide/runtimes)。
+> latest 仍是前 4 个 runtime；preview 的 picker 额外包含 `codex-app-server` 与 `opencode-cli`，合计 6 项。用 `anet upgrade --channel preview` 保持 `agent-network` / `agent-node` 在同一 preview 频道，别混装 latest 与 preview；OpenCode 另需精确 `opencode-ai@1.18.1`。完整对比见 [anet.sh — Runtimes](https://anet.sh/guide/runtimes)。
+
+### Codex TUI 人机共存（`codex-app-server`，preview-only）
+
+`codex-app-server` 与 `--copresence` **完全不在 npm `latest`**；先安装/切换 preview，再从一个不带旧 `COMMHUB_*` 身份的外部 shell 启动：
+
+```bash
+anet upgrade --channel preview
+codex login
+cd /path/to/project
+for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
+anet node create codex-human --runtime codex-app-server
+anet node start codex-human --copresence
+tmux attach -t codex-human
+```
+
+默认只读；停止前先 `Ctrl-B D` detach，再从外部 shell 运行 `anet node stop codex-human`。断线恢复必须仍用 `--copresence`，不能退回普通 `anet node start`，否则会另起节点争抢同一 alias。
+
+📖 完整权限、Windows 手工 WS、600 秒默认等待窗与排障 → [Codex TUI 人机共存](https://anet.sh/guide/codex-copresence)
 
 ### Grok Build 接入
 

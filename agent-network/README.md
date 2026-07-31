@@ -49,11 +49,11 @@ npm install -g @sleep2agi/agent-network@preview
 anet -v
 ```
 
-Canonical OpenCode preview (exact vetted pair; automatic `npx` fallback is intentionally disabled):
+Current preview channel (keep `agent-network` / `agent-node` aligned; OpenCode's automatic `npx` fallback is intentionally disabled):
 
 ```bash
-npm install -g @sleep2agi/agent-network@2.3.0-preview.34 \
-  @sleep2agi/agent-node@2.5.0-preview.26 \
+npm install -g @sleep2agi/agent-network@preview \
+  @sleep2agi/agent-node@preview \
   opencode-ai@1.18.1
 ```
 
@@ -165,6 +165,20 @@ Do not expose the hub directly to the public internet without a reverse proxy, H
 | `codex-app-server` | You want a Codex TUI thread shared with network tasks | Canonical preview; connects to the local app-server over WebSocket |
 | `grok-build-acp` | You want Grok Build through `grok agent stdio` | Requires Grok Build CLI auth; stable for receive/reply, session persistence, and explicit `send_task` delegation |
 | `opencode-cli` | You want public OpenCode ACP with Anthropic/OpenAI presets | Canonical preview; exact `opencode-ai@1.18.1` and exact network/node pair required |
+
+For Codex TUI co-presence, install the preview channel, create a `codex-app-server` node, then use the first-class start path:
+
+```bash
+anet upgrade --channel preview
+codex login
+cd /path/to/project
+for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
+anet node create codex-human --runtime codex-app-server
+anet node start codex-human --copresence
+tmux attach -t codex-human
+```
+
+It requires bash + tmux 3.2+, defaults to read-only, and must also be restarted with `--copresence` after a disconnect. A plain `anet node start` is a background-node path, not co-presence recovery. Full guide: <https://anet.sh/en/guide/codex-copresence>.
 
 ### Grok Build ACP
 

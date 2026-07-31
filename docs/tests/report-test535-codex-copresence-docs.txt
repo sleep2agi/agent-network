@@ -1,0 +1,61 @@
+Test: Codex TUI co-presence documentation refresh
+Date: 2026-07-31 (Asia/Shanghai)
+Branch: docs/codex-copresence-refresh-20260731
+Base: 6f29bb6055fd621bacbc46da20dc0b10f4a00700 (origin/main)
+Candidate state: uncommitted docs-only worktree at test time
+
+Environment
+-----------
+- Docker only; production and host package installations were not modified.
+- Fixed reusable image tag: anet-docs-codex:dev
+- Tested image ID: sha256:676f1efa94fe465504516271043620cb15d70c21c7bf9f2eec570777fe010692
+- Base image: node:22.13.1-bookworm-slim
+
+Focused gate
+------------
+Build:
+  sg docker -c 'docker build -t anet-docs-codex:dev \
+    -f tests/test535-codex-copresence-docs/Dockerfile .'
+
+Run:
+  sg docker -c 'docker run --rm --name anet-docs-codex-check \
+    anet-docs-codex:dev'
+
+Result:
+  59 passed, 0 failed
+
+Coverage:
+- Chinese and English canonical pages exist.
+- Preview-only / npm latest absence is explicit.
+- `anet upgrade --channel preview` is documented.
+- First-class `anet node start <alias> --copresence` lifecycle is present.
+- Exact tmux selectors avoid prefix collisions across the three sessions.
+- Plain `anet node start` recovery is explicitly rejected.
+- The known two-day and nine-day duplicate-node incidents are recorded.
+- Complete inherited `COMMHUB_*` identity cleanup is present.
+- app-server cwd, not bridge cwd, is the documented source of thread cwd.
+- Default read-only and full-access double confirmation are documented.
+- Manual Windows/adopt flow requires an exact `codexThreadId`.
+- Manual app-server setup discloses that MCP is not injected automatically.
+- Thread-less `codex --remote` is absent from the canonical guide.
+- Cross-node app-server sharing is rejected.
+- Shared-host Codex update prompt warning is present.
+- 600 seconds is described as an overridable default, not a hard cap.
+- RFC records the implemented command and no longer recommends
+  `codex app-server daemon start`.
+- Jam-restart SOP returns through `--copresence`.
+- Root ZH/EN README, package READMEs, CLI reference, agent-node guide,
+  and runtime guide all carry the first-class command.
+- Package READMEs no longer pin the stale preview.34 / preview.26 pair.
+- Chinese and English versioning guides document the preview/latest switch.
+- VitePress build completed and rendered:
+  - /guide/codex-copresence.html
+  - /en/guide/codex-copresence.html
+
+Baseline-suite note
+-------------------
+The pre-existing tests/test27-cases-docs suite was also run in Docker.
+Its VitePress build passed, but the overall suite reported 18 passed /
+33 failed because origin/main no longer contains the old cases/demo fixtures
+that test27 still requires. Those unrelated fixture failures are not used as
+candidate evidence; the focused gate above is the acceptance result.

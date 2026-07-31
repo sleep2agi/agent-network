@@ -1,67 +1,172 @@
 # Codex TUI 人机共存（`codex-app-server`，preview）
 
-`codex-app-server` runtime 让**人和 Agent 共用同一个 Codex 会话**：人在原生 Codex TUI 里输入 / 看输出 / 处理审批，同时 Agent Network 的任务经 CommHub 注入**同一个 Codex thread**。人和 agent 看到同一段历史、同一组实时事件。（[RFC-030](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)，Phase 0A。）
+`codex-app-server` runtime 让**人和 Agent 共用同一个 Codex 会话**：人在原生 Codex TUI 里输入、看输出、处理审批，Agent Network 的任务经 CommHub 注入**同一个 Codex thread**。双方看到同一段历史和同一组实时事件。（[RFC-030](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)，Phase 0A。）
 
-> 与无头的 `codex-sdk` 不同：`codex-sdk` 是后台工作器、没有可共存的活 TUI；`codex-app-server` 才是「人机共存」。
+> 与无头的 `codex-sdk` 不同：`codex-sdk` 是后台工作器、没有可共存的活 TUI；`codex-app-server` 才提供 Codex TUI 人机共存。
 
 ::: warning Preview
-这是 **preview**（不在 `latest`），且当前为**单机**形态。只连可信 Hub。
+这是 **preview-only** 功能。npm `latest` 当前完全不含 `codex-app-server`、`--copresence` 或 `codexAppServerUrl`；装了 `latest` 的用户无法使用本页命令。当前实现还是单机可信形态，不是生产 Policy Gateway；只连接可信 Hub、只接收可信任务。
 :::
 
 ## 前置
 
-- 安装并登录 Codex CLI（验证基线 `codex-cli 0.144`）：`npm install -g @openai/codex`，然后 `codex login`
-- 安装 preview 版 anet：
+- 安装并登录 Codex CLI（协议验证基线为 `codex-cli 0.144.x`）：
+
+```bash
+npm install -g @openai/codex
+codex login
+```
+
+- 安装或切换到 preview 频道：
 
 ```bash
 npm install -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview
+# 已装 anet 时也可让整组组件切到 preview：
+anet upgrade --channel preview
+
+# 自检：输出必须显示 preview 版本，help 必须出现 Co-presence / --copresence
+anet -v
+anet --help
 ```
 
-## 两种拓扑（先搞清楚）
+- 推荐的一键共存路径还需要 `bash` 和 **tmux 3.2+**。当前以 Linux/WSL 等 POSIX 环境为目标；原生 Windows 请用下方的[手工共享 WS 路径](#原生-windows-或高级接管手工共享-ws)。
+- 节点必须持有 network-scoped `ntok_`。旧节点缺 token 时先运行 `anet doctor --fix`，或重新创建节点。
 
-`codex-app-server` runtime 有两种模式：
-
-- **自持（默认，不传 URL）**：节点**自己 spawn 一个 codex app-server**（临时端口、新 thread），你什么都不用起——但那个 server 是节点私有的、临时端口，你的 TUI 连不进去。**这不是共存**，只是一个能跑 codex 的 agent。想要这个：`anet node create codex-node --runtime codex-app-server` + `anet node start`，完事。
-- **共享（传 URL）→ 人机共存**：你**自己**起一个固定地址的 app-server，你的 `codex --remote` TUI 和 anet 节点都连它。这才是人机共存——下面讲的就是这个。共存**必须**手动起共享 server，因为人和 agent 得连同一个固定地址（节点私有的临时那个满足不了）。
-
-## 起共存会话（共享模式）
-
-**1. 起共享 codex app-server**（WS transport，跨平台，含 Windows）：
+## 推荐：一等 `--copresence` 路径
 
 ```bash
-codex app-server --listen ws://127.0.0.1:4500
+# 0. 在外部干净 shell 中进入节点要操作的项目
+cd /path/to/project
+
+# 清掉调用方继承的全部 COMMHUB_* 身份，不能只逐个删已知变量
+for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
+
+# 1. 创建 preview runtime 节点
+anet node create codex-human --runtime codex-app-server
+
+# 2. 一键启动 app-server、bridge 和可 attach 的 Codex TUI
+anet node start codex-human --copresence
+
+# 3. 进入人机共用的 TUI
+tmux attach -t =codex-human
 ```
 
-> 只绑 `127.0.0.1`，不要暴露公网。**Linux/macOS** 上本地长驻优先 `codex remote-control start` + `codex --remote unix://`。**Windows 不支持 `codex remote-control` daemon**（真机报 `daemon lifecycle is only supported on Unix platforms`）——Windows 就用上面的 `codex app-server --listen ws://`，靠计划任务/服务保持常驻。
+Codex thread 的工作目录继承自 **app-server 进程启动时的 cwd**，不是 bridge 的 cwd；因此要在运行 `--copresence` **之前**先 `cd` 到目标项目。Linux 上可用 `readlink /proc/<app-server-pid>/cwd` 复核，不能只检查 bridge。
 
-**2. 人类接入 TUI**（另开一个终端）：
+`--copresence` 会创建三个带同一身份标记的 tmux session：
+
+| Session | 作用 |
+|---|---|
+| `codex-human-appsrv` | 只监听 loopback 的 `codex app-server`，并注入 CommHub MCP |
+| `codex-human-桥` | `agent-node` bridge，接收网络派工并投进同一 thread |
+| `codex-human` | 人类可 attach 的原生 Codex TUI |
+
+`codex-human` 同时也是另外两个 session 名的前缀。tmux 的普通 `-t codex-human`
+可能在 TUI session 已退出时静默匹配到 `codex-human-appsrv` 或 bridge。attach、
+`capture-pane`、`send-keys` 等操作都应使用 `-t =codex-human` 强制精确匹配，或直接使用
+pane ID；执行前先确认目标 session。三个 session 中有一个消失时尤其要避免前缀匹配。
+
+在 TUI 中按 `Ctrl-B D` 只会 detach，不会停节点。停止时请先 detach，再从**共存进程树外的终端**运行：
 
 ```bash
-codex --remote ws://127.0.0.1:4500
+anet node stop codex-human
 ```
 
-**3. 起 anet bridge 节点**（作为第二个客户端，绑同一个 app-server）：
+停止流程会用持久身份标记收拢这三个 session 及其子进程；从共存 session 内调用 `stop` 会 fail closed，避免把当前 shell 一起杀掉。
 
-一条命令搞定——`--codex-app-server-url` 直接把地址写进节点配置，无需 env、无需手改文件；thread 由 runtime **自动捕获并写回** `codexThreadId`：
+::: danger 断线恢复仍必须回到共存命令
+如果 bridge 长时间断线后提示“运行 `anet node start codex-human` 手动恢复”，**不要照抄这条通用提示**。普通 `start` 会另起一个非共存节点，与仍存活的 bridge 争抢同一 alias。应在外部 shell 中停止旧共存树、重新清空 `COMMHUB_*`，再运行：
 
 ```bash
-anet node create codex-human --runtime codex-app-server --codex-app-server-url ws://127.0.0.1:4500
-anet node start codex-human   # 连上后自动捕获 thread，写回 config.json 的 codexThreadId
+anet node stop codex-human
+cd /path/to/project
+for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
+anet node start codex-human --copresence
 ```
 
-> 可选：加 `--codex-thread-id <id>` 接管**指定**的已有会话（不加则自动捕获）。地址也可用环境变量 `ANET_CODEX_APP_SERVER_URL`，或直接改 `config.json` 的 `codexAppServerUrl`（三者等效，优先级：config > env）。
+这不是理论风险：已知至少两个生产节点因照抄通用提示而静默重复运行，分别持续约 2 天和 9 天。
+:::
 
-现在 Agent Network 里其他节点向 `codex-human` 派 `send_task`，任务会出现在人类可见的 Codex TUI 里；人也可在 TUI 里直接输入，或在 agent 发起的 turn 中补充要求。
+## 权限：默认只读，完整访问必须双重确认
 
-## 注意
+共存默认使用 `sandbox_mode=read-only` 与按需审批。需要 Codex 写文件、跑完整网络/命令工具时，必须显式选择：
 
-- **preview + 单机**：Phase 0A 形态，仅单机可信 profile。
-- **一个 thread 同一时刻只有一个 active turn**；「同时通信」= 多生产者（人 + 多个 agent）可同时向同一 thread 投递。
-- **所有 Codex 命令 / 文件变更 / 权限审批只由人类 TUI 决定**；agent 侧走受限 MCP 代理。
-- app-server 只监听 `127.0.0.1`；token / 密钥不入 git、不走聊天。
-- Windows 走 **WS transport**（不是 unix socket）；node-pty 等原生依赖非必需。
+```bash
+anet node start codex-human --copresence --dangerously-allow-full-access
+```
+
+- 交互式终端会要求手工输入 `yes`。
+- 非 TTY 的脚本、CI 或 Docker 还必须再传 `--yes-danger-full-access`：
+
+```bash
+anet node start codex-human --copresence \
+  --dangerously-allow-full-access \
+  --yes-danger-full-access
+```
+
+第二个 flag 只用于无法交互的调用方，不能省略；它防止管道输入绕过确认。完整访问会关闭文件系统/网络沙箱，只应在可信工作区和可信任务上启用。
+
+## 普通 `codex-app-server` 节点不是共存
+
+不带 `--copresence` 时：
+
+```bash
+anet node create codex-worker --runtime codex-app-server
+anet node start codex-worker
+```
+
+节点会自己 spawn 私有 app-server 和新 thread，适合作为 codex 驱动的后台 Agent；由于没有人类可 attach 的 TUI，这条路径**不是人机共存**。
+
+## 原生 Windows 或高级接管：手工共享 WS
+
+原生 Windows 没有上述 tmux 编排，可手工让 TUI 与 bridge 连接同一个 loopback WebSocket。**每个节点使用独立 app-server/端口，不要让多个节点共用**：CommHub bearer token 是 app-server 的进程级环境，复用会造成 thread 身份混淆，也会制造单点故障。
+
+```powershell
+# 起前先找空闲端口；示例端口仅占位
+# Windows PowerShell:
+Get-NetTCPConnection -LocalPort <free-port> -ErrorAction SilentlyContinue
+
+# Terminal 1：先 cd 到目标项目，再起独立 app-server
+cd C:\path\to\project
+codex app-server --listen ws://127.0.0.1:<free-port>
+
+# Terminal 2：先启动 bridge，让 runtime 创建/捕获 thread 并写回 codexThreadId
+Get-ChildItem Env:COMMHUB_* | ForEach-Object { Remove-Item "Env:$($_.Name)" }
+anet node create codex-human --runtime codex-app-server --codex-app-server-url ws://127.0.0.1:<free-port>
+anet node start codex-human
+
+# 从节点 config.json 读取 codexThreadId 后，Terminal 3 接入同一条 thread
+codex resume --remote ws://127.0.0.1:<free-port> <codexThreadId>
+```
+
+`codex resume --remote` 必须带 session/thread id；省略会进入历史会话 picker，容易接错线程。创建节点时也可加 `--codex-thread-id <id>` 接管指定 thread；不传时 runtime 自动捕获并把 `codexThreadId` 写回节点配置。
+
+Linux/macOS 的高级用户也可用这一拓扑连接已存在的 app-server，但日常使用优先 `--copresence`，它会统一处理 loopback、独立 `CODEX_HOME`、MCP 注入、tmux 生命周期与停止身份。若本机 24700–24720 等常用范围已被其他共存节点占用，继续选新的空闲 loopback 端口，启动前先查占用。
+
+手工启动的 app-server 不会自动获得 `--copresence` 注入的 CommHub MCP；若希望人类 TUI 直接调用 `commhub_*`，必须在 **app-server 创建 thread 之前**按 RFC-030 配好 MCP URL 与 bearer-token 环境变量。既有 thread 会快照工具集，事后补 MCP 不会生效。不要把 token 放进命令行或聊天。
+
+::: warning Codex CLI 升级提示
+TUI 启动时可能出现 `Update available`，且默认高亮立即升级。共享宿主上请选“跳过/稍后”，把 Codex CLI 升级安排到维护窗口；全局升级二进制可能同时影响这台机器上的所有共存节点。
+:::
+
+## 长任务与 600 秒提示
+
+一条 thread 同一时刻只能有一个 active turn；后续网络任务会 FIFO 排队。当前网络任务等待最终回复的窗口**默认**是 600 秒（runtime 选项可覆盖，并非不可变的硬上限）：
+
+- 看到“`600s 内无最终回复`”**不等于节点已死**，也不会自动取消正在 Codex 中执行的 turn。
+- 不要立刻重复派同一任务；先看 `tmux capture-pane -t codex-human -p | tail -30` 和工作区是否仍在变化。
+- 重代码/长工具链任务尽量拆成可在 10 分钟内完成并回报的小步；若确认静默卡死，按 [codex-app-server 卡死诊断与重启 SOP](https://github.com/sleep2agi/agent-network/blob/main/docs/sop/codex-app-server-jam-restart.md) 先保全工作再重启。
+
+## 安全与已知边界
+
+- app-server 只监听 `127.0.0.1`；token/密钥不进 argv、git 或聊天。
+- 一条 thread 同一时刻只有一个 active turn；“同时通信”表示多生产者可以投递，不表示多个 turn 并行执行。
+- 默认模式下桥不代答审批，需要审批的 turn 交给人类 TUI；完整访问模式则是用户显式选择的高风险例外。
+- Phase 0A 仍是 TUI 与 bridge 直接双客户端连接。生产形态所需的单 upstream Policy Gateway、强制仲裁和最小控制面尚未完成。
 
 ## 参考
 
 - [RFC-030 Codex TUI Bridge](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)
-- [节点 Runtime](/guide/runtimes) · [Grok 人机共存 TUI](/guide/grok-copresence)（另一种共存）
+- [节点 Runtime](/guide/runtimes)
+- [CLI：`anet node start`](/guide/cli#anet-node-start)
+- [Grok 人机共存 TUI](/guide/grok-copresence)

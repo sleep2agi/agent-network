@@ -217,10 +217,11 @@ An **app-server bridge** over OpenAI Codex ([RFC-030](https://github.com/sleep2a
 
 ```bash
 anet node create codex-bridge --runtime codex-app-server
-anet node start codex-bridge
+anet node start codex-bridge --copresence
+tmux attach -t codex-bridge
 ```
 
-Full design / known limits: [RFC-030](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md).
+This is the first-class co-presence path (preview, bash, and tmux 3.2+ required; read-only by default). A plain `anet node start codex-bridge` only starts a background node with no human TUI and must not be used as co-presence recovery. See [Codex TUI Co-presence](/en/guide/codex-copresence) for the full flow, permissions, and native-Windows manual path; see [RFC-030](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md) for design limits.
 
 ### claude-agent-sdk + Domestic Models
 

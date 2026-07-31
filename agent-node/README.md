@@ -17,11 +17,11 @@ You usually don't install this package directly — `anet node create` and `anet
 npm install -g @sleep2agi/agent-node
 ```
 
-For the canonical OpenCode preview, install the entire vetted pair exactly. The OpenCode path does not execute an ambient package or automatic `npx` fallback:
+For the current preview channel, install `agent-network` and `agent-node` from the same dist-tag. The OpenCode path does not execute an ambient package or automatic `npx` fallback:
 
 ```bash
-npm install -g @sleep2agi/agent-network@2.3.0-preview.34 \
-  @sleep2agi/agent-node@2.5.0-preview.26 \
+npm install -g @sleep2agi/agent-network@preview \
+  @sleep2agi/agent-node@preview \
   opencode-ai@1.18.1
 ```
 
@@ -70,6 +70,18 @@ CLI flags:
 | `opencode-cli` | exact `opencode-ai@1.18.1` ACP child | canonical preview, release-gated | defaults to a launch-scoped external workspace with tools disabled; Anthropic/OpenAI presets |
 
 The canonical preview picker exposes exactly these 6 runtimes. They are loaded lazily; picking one does not pull the others' SDK dependencies. `claude-code-cli` adds zero extra SDK weight.
+
+`codex-app-server` co-presence is preview-only and is orchestrated by the `anet` CLI:
+
+```bash
+cd /path/to/project
+for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
+anet node create codex-human --runtime codex-app-server
+anet node start codex-human --copresence
+tmux attach -t codex-human
+```
+
+The command starts a dedicated app-server, this bridge runtime, and a human TUI in three identity-linked tmux sessions. It requires tmux 3.2+, defaults to read-only, and recovery must keep the `--copresence` flag. See <https://anet.sh/en/guide/codex-copresence>.
 
 ## Grok Build ACP
 
