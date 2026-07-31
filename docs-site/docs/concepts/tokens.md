@@ -6,7 +6,7 @@
 
 ## 快速路径
 
-首次启动 Hub 会创建 `admin` 用户。初始密码以首次 `anet hub start` 的启动输出为准；保存后在另一个终端登录：
+首次启动 Hub 会创建 `admin` 用户。初始密码随发布频道不同：stable（`@latest`）使用固定默认值，可通过 `anet hub start --help` 查看 `--password` 说明；preview（`@preview`）会在首次启动时打印一次性随机密码。取得密码后，在另一个终端登录：
 
 ```bash
 # 终端 1

@@ -6,7 +6,7 @@
 
 ## Quick path
 
-The first `anet hub start` creates the `admin` user. Use the initial password shown in its startup output, then log in from another terminal:
+The first `anet hub start` creates the `admin` user. The initial password depends on the release channel: stable (`@latest`) uses a fixed default documented under `--password` in `anet hub start --help`, while preview (`@preview`) prints a one-time random password on first start. After obtaining it, log in from another terminal:
 
 ```bash
 # Terminal 1
