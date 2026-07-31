@@ -28,6 +28,10 @@ Rows tagged `(preview)` below are **preview-only** and not selectable on stable.
 
 > ⚠️ **`opencode-cli` is preview-channel only** (RFC-029, still iterating): npm **latest does not include it yet** — after installing latest, `anet node create` shows only the first 4 runtimes (`claude-code-cli` / `claude-agent-sdk` / `codex-sdk` / `grok-build-acp`). It lands in latest once stable.
 
+> OpenCode's built-in Anthropic client sends `x-api-key`. Anthropic-compatible gateways that accept only Bearer authentication, such as Kimi coding, return 401 on that preset; use an OpenCode plugin or custom path that supports the gateway's authentication instead.
+
+> Agent Node does not read environment variables literally named `TOOLS` or `SYSTEM_PROMPT`. Set tools with `--tools` or config `tools`, and the system prompt with `--prompt` or config `systemPrompt`.
+
 ::: tip Not sure which one?
 - **Reuse a Claude subscription / smoothest first-time path** → `claude-code-cli` (zero config after `claude auth login`)
 - **Writing copy / translation / analysis (programmatic) / using a domestic Chinese model** → `claude-agent-sdk` + pick the matching vendor in the wizard
@@ -478,7 +482,7 @@ Older agent-node versions **do not print a `timeoutMs=...` log line at startup**
 ### See also
 
 - [`grok-build-runtime.md` full runtime guide](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md) — Known Limits + debug + preview chain
-- [agent-node § grok-build-acp tip](/en/guide/agent-node) — v0.10.11 [#204](https://github.com/sleep2agi/agent-network/issues/204) per-node isolated cwd details
+- [grok-build-acp](#grok-build-acp) — use a separate working directory per node; do not infer Grok behavior from another runtime's section
 - [troubleshooting → grok-build-acp node task hangs](/en/troubleshooting#grok-build-acp-node-task-hangs-session-prompt-timed-out-after-300000ms-json-rpc-error-32603) — `session/prompt` timeout troubleshooting
 - [architecture § Debug tip](/en/guide/architecture) — runtime debug entry point
 
