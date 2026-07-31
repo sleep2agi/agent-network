@@ -1,0 +1,63 @@
+One-shot installer retirement — 2026-07-31
+
+Base
+----
+9681c6f5e6c81b196aa2559ae4b8818966b62e1b
+
+Scope
+-----
+- public setup-anet.sh: 239 -> 26 lines
+- Chinese status page: 145 -> 29 lines
+- English status page: 145 -> 33 lines
+- clean-server retirement/channel link text: two lines per language
+
+Reason
+------
+The public installer was explicitly marked unverified while still being promoted
+as runnable. It contained broad process-name kills, recursive removal of user and
+npx state, a public bind default, a fixed bootstrap credential flow, shell-string
+secret forwarding, and stale MiniMax model claims.
+
+The URL is retained for old bookmarks, but now performs no setup, explains the
+retirement, links to maintained guides, and exits with status 64. The pages explain
+why old downloaded copies are unsafe instead of silently dropping the URL.
+
+Witnessed red — exact old artifact
+----------------------------------
+The exact script from base commit 9681c6f5 was extracted inside an isolated Alpine
+container and run as an unprivileged test user with WIPE=1 and a temporary HOME.
+Three sentinel files represented `.anet`, `.commhub`, and live `~/.npm/_npx` code.
+
+Result:
+
+  WITNESSED_RED old_rc=1 sentinels_deleted=3/3
+
+No host path was writable by the container.
+
+Witnessed green — retired artifact
+-----------------------------------
+PASS independent Dockerfile: `/tmp/commniu-one-shot-harness/Dockerfile`
+
+  sg docker -c 'docker build \
+    -f /tmp/commniu-one-shot-harness/Dockerfile \
+    -t anet-docs-one-shot-retired:dev \
+    /tmp/commniu-one-shot-retirement'
+
+The green gate verifies:
+- Bash syntax
+- exact non-zero status 64
+- retirement message present
+- before/after hashes of `.anet`, `.commhub`, and `_npx` fixtures are identical
+- destructive/process-match/public-bind/default-credential/model strings absent
+- contradictory verified/unverified page claims absent
+- WeChat is not described as shipped in clean-server
+
+PASS final VitePress 1.6.4 Docker build: 39.50 s
+PASS rendered Chinese and English retirement pages contain their status headings
+PASS rendered public `setup-anet.sh` contains the retirement notice
+PASS git diff --check
+
+Boundaries
+----------
+- No npm publish, merge, deployment, or production mutation.
+- No Codex or Claude model-node invocation.

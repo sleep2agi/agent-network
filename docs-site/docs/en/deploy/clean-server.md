@@ -374,9 +374,9 @@ In the order they hit you on a real fresh machine — **symptom → cause → fi
 ## Next
 
 - [Getting Started](/en/guide/getting-started) — end-to-end walkthrough for an already-installed laptop setup
-- [One-shot install](/en/guide/one-shot-install) — `setup-anet.sh` brings up hub + dashboard + multi-agent in one shot
+- [One-shot installer retirement](/en/guide/one-shot-install) — the old script is disabled; use this page's step-by-step flow
 - [Production / public-internet deployment](/en/deploy/production) — TLS / firewall / backup / public-internet risk surface
-- [Channel integration](/en/guide/channels) — full Telegram / WeChat / Feishu integration manual
+- [Channel integration](/en/guide/channels) — current channel status and Telegram / Feishu setup; WeChat has not shipped
 - [Node runtime](/en/guide/runtimes) — detailed comparison of the runtimes
 
 If you hit a bug not covered here, please open a [GitHub issue](https://github.com/sleep2agi/agent-network/issues) — include which step failed, the exact error, and the `anet -v` output.
