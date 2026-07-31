@@ -10,16 +10,12 @@ CommHub Server provides a REST API for Dashboard, CLI, and third-party system in
 | Auth | `Authorization: Bearer <token>` **(recommended)**; `?token=<token>` URL query kept for SSE / browser EventSource (access-log leak risk — see [Security](/en/concepts/security)) |
 | Content Type | `application/json` |
 | Encoding | UTF-8 |
-| Endpoint count | 30+ across **13 groups**: [Public 1](#public-endpoints) · [Auth 5](#auth-endpoints) · [Network 5](#network-endpoints) · [Data Query 10](#data-query-endpoints) · [Task Dispatch 2](#task-dispatch-endpoints) · [MCP 1](#mcp-endpoint) · [SSE 1](#sse-endpoint) · [Token Management 4](#token-management-endpoints) · [Network Members 6](#network-member-endpoints) · [Files 2](#file-endpoints) · [Node Rename 3](#node-rename-endpoints-rfc-010) · [Tmux Debug 3 (opt-in)](#tmux-debug-endpoints-opt-in) · [Legacy 2](#legacy-endpoints-v0-6-era-—-frozen-in-oss) |
-| Full endpoint source | [`server/src/index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) |
+| Endpoint catalog | See the feature-grouped sections below; this page does not pin a count that will drift |
+| Implementation entry | [`server/src/server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) |
 
 ## Public Endpoints
 
 ### GET /health
-
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Health check, no authentication required.
 
 ```bash
@@ -29,12 +25,11 @@ curl http://localhost:9200/health
 ```json
 {
   "ok": true,
-  "version": "0.8.8",
+  "version": "<server version>",
   "api_version": "v3",
   "transport": "streamable-http",
   "sessions_count": 0,
   "sse_connections": 0,
-  "sse_sessions": {},
   "auth": "user-token",
   "security": "secured",
   "tmux": "disabled",
@@ -45,8 +40,10 @@ curl http://localhost:9200/health
 }
 ```
 
-::: tip The `license` field is a v0.6 legacy
-`license: "trial"` is a leftover from the v0.6 era 14-day trial mechanism. After the Apache 2.0 OSS transition it is **no longer a commercial feature gate** (self-hosted has no notion of "expired"). The `send_task` path still runs the trial check only for backward compatibility (verify [`server/src/tools.ts:521`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L521) where `license_expired` is still emitted); if you hit it, see [troubleshooting](/en/troubleshooting). **The v0.9.x and v0.10.x scopes did not touch this** (Recovery & Observability took priority); full removal is queued for v0.11+ / unscheduled.
+Unauthenticated requests receive aggregate counts only. With a system-admin or master token, the response also includes network-scoped `sse_sessions` details.
+
+::: warning `license` still affects task dispatch
+First start creates a 14-day trial record. MCP `send_task` still checks `expires_at` and returns `license_expired` after expiry. Do not treat `/health.license` as display-only.
 :::
 
 ---
@@ -54,10 +51,6 @@ curl http://localhost:9200/health
 ## Auth Endpoints
 
 ### POST /api/auth/register
-
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Register a new user. The first user registered automatically becomes admin.
 
 ```bash
@@ -112,17 +105,13 @@ The `user` object's 5 fields match [`server/src/auth.ts:7-13`](https://github.co
 | 400 | `password must be at least 8 characters` | Non-bootstrap user password < 8 |
 | 400 | `password must be at least 4 characters` | First user (bootstrap admin) password < 4 |
 | 400 | `password is too common` | Hits the weak-password dictionary ([`password-dict.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts); bootstrap admin is exempt) |
-| 429 | `too many requests, try again later` | Exceeded 30/min IP rate limit ([`index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts); localhost is exempt — see [Security — IP rate limits](/en/concepts/security#per-ip-limits)) |
+| 429 | `too many requests, try again later` | Exceeded 30/min IP rate limit (localhost is exempt — see [Security — IP rate limits](/en/concepts/security#per-ip-limits)) |
 
 **Rate limit**: 30 requests/minute per IP.
 
 ---
 
 ### POST /api/auth/login
-
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 User login.
 
 ```bash
@@ -159,17 +148,13 @@ The `user` object's 5 fields match the register response (note `email` may be `n
 | Status | `error` value | Trigger |
 |------|------------|---------|
 | 401 | `invalid username or password` | Username doesn't exist **or** password hash mismatch ([`auth.ts:99-100`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L99) intentionally collapses both into the same message to avoid username enumeration); the server also writes a `login_failed` audit row |
-| 429 | `too many attempts, try again later` | Exceeded 10/min IP rate limit ([`index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts); on hit the server writes a `login_rate_limited` audit row with the client IP) |
+| 429 | `too many attempts, try again later` | Exceeded 10/min IP rate limit; on hit the server writes a `login_rate_limited` audit row with the client IP |
 
 **Rate limit**: 10 requests/minute per IP.
 
 ---
 
 ### GET /api/auth/me
-
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Get current user info.
 
 ```bash
@@ -202,10 +187,6 @@ curl http://localhost:9200/api/auth/me \
 ---
 
 ### PUT /api/auth/me
-
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Update personal info.
 
 ```bash
@@ -222,7 +203,7 @@ curl -X PUT http://localhost:9200/api/auth/me \
 | `display_name` | string | | Display name |
 | `email` | string | | Email |
 
-Only the provided fields are updated ([server/src/index.ts](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) uses conditional SQL with `if (body.X)`); `username` / `role` / `password` are **not** mutable through this endpoint.
+Only provided fields are updated; `username` / `role` / `password` are **not** mutable through this endpoint.
 
 **Response** (success):
 
@@ -239,7 +220,7 @@ Only the provided fields are updated ([server/src/index.ts](https://github.com/s
 }
 ```
 
-**Common 4xx errors** (verify [`server/src/index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)):
+**Common 4xx errors**:
 
 | Status | `error` value | Trigger |
 |------|------------|---------|
@@ -247,16 +228,12 @@ Only the provided fields are updated ([server/src/index.ts](https://github.com/s
 | 401 | `token required` / `invalid token` | Missing / invalid utok_ |
 
 ::: info Missing fields are not an error
-If you supply only `display_name` and omit `email` (or omit both), the server does not return 400 — [`index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) builds the SQL conditionally with `if (body.X)`. When everything is omitted it just re-SELECTs and returns the user as-is. **No field-length validation** here (the v0.9.x and v0.10.x scopes did not touch this; schema-level checks are queued for v0.11+ / unscheduled).
+Supplying only `display_name` or omitting both fields does not return 400. If both are omitted, the original user record is returned. There is currently no field-length validation.
 :::
 
 ---
 
 ### POST /api/auth/password
-
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Change password.
 
 ```bash
@@ -280,10 +257,10 @@ curl -X POST http://localhost:9200/api/auth/password \
 }
 ```
 
-`revoked` is the number of utok\_/atok\_ tokens on **other devices** that were just revoked (it does **not** include the caller's own token — that one is revoked separately at index.ts L490).
+`revoked` is the number of utok\_/atok\_ tokens on **other devices** that were just revoked; it does not include the caller's own token.
 
-**Key side effects** (verify [`auth.ts:267-282 changePassword + revokeOtherUserTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L267) + [`index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)):
-1. **The caller's `utok_`** (`resolved.tokenId`) is revoked immediately ([`index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) `revokeToken(...)` explicit delete)
+**Key side effects**:
+1. **The caller's `utok_`** (`resolved.tokenId`) is revoked immediately
 2. **All other devices' `utok_` / `atok_`** are also revoked in one shot ([`auth.ts:269-270`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L269) `DELETE ... WHERE user_id=? AND network_id IS NULL AND token_id != ?currentTokenId`) — the count is returned in the `revoked` field
 3. **`ntok_` tokens are unaffected** (`revokeOtherUserTokens` filters on `network_id IS NULL`, so agent nodes using `ntok_` keep running through a password change; matches the [account-system / Change Password](/en/guide/account-system#change-password) narrative)
 4. **A fresh `utok_`** (`issued.token`) is minted for the caller and returned in this response — the caller must overwrite local storage with the new token right away
@@ -310,10 +287,6 @@ Password-strength validation reuses `validatePasswordStrength()` from register (
 ## Network Endpoints
 
 ### GET /api/networks
-
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Get all networks the user belongs to.
 
 ```bash
@@ -348,10 +321,6 @@ Each row in `networks` has 10 fields: the 9 `networks` table columns ([`server/s
 ---
 
 ### POST /api/networks
-
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Create a new network.
 
 ```bash
@@ -385,9 +354,6 @@ curl -X POST http://localhost:9200/api/networks \
 ---
 
 ### GET /api/networks/:id
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Get network details (membership check: caller must be a member of the network or a system admin, otherwise 403).
 
 ```bash
@@ -422,14 +388,11 @@ curl http://localhost:9200/api/networks/net_abc123 \
 }
 ```
 
-The `network` object has 9 fields = `SELECT * FROM networks WHERE network_id = ?1` ([`server/src/index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)), including the v3 migrations `visibility` + `max_members`. The `settings` column is reserved for future per-network JSON config and is currently always `null`. `stats.tasks` is aggregated by status (same shape as the nested `tasks.by_status` in [GET /api/stats](#get-api-stats)).
+`network` contains the full network record. `stats.tasks` is aggregated by status, using the same shape as [GET /api/stats](#get-api-stats).
 
 ---
 
 ### PUT /api/networks/:id
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Rename a network (owner only).
 
 ```bash
@@ -465,9 +428,6 @@ Writes audit log `action='network_renamed'`; the `detail` column records the new
 ---
 
 ### DELETE /api/networks/:id
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Delete a network (owner only, must have no active sessions).
 
 ```bash
@@ -496,10 +456,6 @@ Writes audit log `action='network_deleted'`.
 ## Data Query Endpoints
 
 ### GET /api/status
-
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Get all session statuses.
 
 ```bash
@@ -540,15 +496,11 @@ curl "http://localhost:9200/api/status?network_id=net_xxx" \
 }
 ```
 
-The `summary` field is a count aggregated by status ([`server/src/index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)): the `working` bucket collapses `working / blocked / error / waiting_input / running / busy`; `offline` is sessions whose `updated_at` is older than 10 minutes (the server recomputes this on every GET and writes back to the DB); everything else counts as `idle`.
+`summary` groups `working / blocked / error / waiting_input / running / busy` under `working`; other active states count as `idle`. A background sweep runs about once a minute and marks sessions with no update for over 10 minutes as `offline`; this GET is read-only.
 
 ---
 
 ### GET /api/tasks
-
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Get task list.
 
 ```bash
@@ -607,7 +559,7 @@ Field mapping to the `tasks` table schema ([`server/src/db.ts:87-105`](https://g
 ### GET /api/task/{task_id}
 
 
-> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
+> Source ↗
 
 Fetch the full record of a **single task** by `task_id`. The path accepts both `/api/task/<id>` and `/api/tasks/<id>` (trailing `s` optional).
 
@@ -640,10 +592,6 @@ curl http://localhost:9200/api/task/<task_id> \
 ---
 
 ### GET /api/nodes
-
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Get node list (persistent node info, distinct from session's transient state).
 
 ```bash
@@ -691,9 +639,6 @@ The `nodes` table is **persistent node identity** (written at creation, deleted 
 ---
 
 ### DELETE /api/nodes/:ref
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Delete a node from the hub server side — removes the persistent identity row in `nodes` and the heartbeat row in `sessions` (same transaction), and pushes a `node_deleted` SSE event to the alias channel and the network channel so dashboards refresh in real time. Shipped via PR #86 "node delete cascade and node_deleted SSE".
 
 ```bash
@@ -706,7 +651,7 @@ curl -X DELETE "http://localhost:9200/api/nodes/%E4%BB%A3%E7%A0%811%E5%8F%B7" \
   -H "Authorization: Bearer ntok_xxx"
 ```
 
-**Path parameter**: at [`server/src/index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts), the server resolves `:ref` via `node_id = ? OR node_name = ? OR alias = ?` (filtered to the network scope, then ordered by `updated_at DESC LIMIT 1`).
+**Path parameter**: `:ref` accepts `node_id`, `node_name`, or `alias`; lookup is always constrained to the current network scope.
 
 **Response** (success, 200):
 
@@ -721,9 +666,7 @@ curl -X DELETE "http://localhost:9200/api/nodes/%E4%BB%A3%E7%A0%811%E5%8F%B7" \
 }
 ```
 
-**SSE side effect**: after the delete, a `node_deleted` event is pushed to **two SSE channels** ([`server/src/index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)):
-- The alias's own SSE channel (if any subscribers remain)
-- The user-level SSE channel for the `network_id` (so every network member sees the deletion immediately)
+**SSE side effect**: after deletion, a `node_deleted` event is pushed to the node's `alias` channel if a listener is still attached.
 
 ```json
 // node_deleted SSE event payload
@@ -746,9 +689,6 @@ This REST endpoint only removes the hub-side `nodes` / `sessions` rows; it does 
 ---
 
 ### GET /api/servers
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Aggregate agents by **physical server** (`hostname` + `ip`) and return live host telemetry — used by the dashboard's "Servers" sidebar. Refs [issue #119](https://github.com/sleep2agi/agent-network/issues/119).
 
 ```bash
@@ -796,7 +736,7 @@ Host telemetry is reported by agent-node on every `report_status` call ([issue #
 
 ### GET /api/server/:host/health
 
-> [source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) · v0.10.0 / `commhub-server@0.8.2`
+> source ↗ · v0.10.0 / `commhub-server@0.8.2`
 
 Returns the **current health snapshot of a single physical server** plus 24h-bucketed telemetry history. Refs [issue #99](https://github.com/sleep2agi/agent-network/issues/99) (per-server daemon Phase 1 scaffold).
 
@@ -831,7 +771,7 @@ curl "http://localhost:9200/api/server/$(python3 -c 'import urllib.parse; print(
   "hostname": "dev-machine",
   "ip": "192.168.1.42",
   "agent_count": 7,
-  "alert_level": "ok",
+  "alert_level": "green",
   "alerts": [],
   "latest": {
     "cpu_load_1min": 0.42,
@@ -857,13 +797,13 @@ curl "http://localhost:9200/api/server/$(python3 -c 'import urllib.parse; print(
 |------|------|
 | `host` | The host value from the request path |
 | `agent_count` | Active session count on this host (window over the latest row's `COUNT(*) OVER ()`) |
-| `alert_level` | `ok` / `warn` / `critical` (computed by `serverAlertLevel(latest)`; from v0.10.2 onwards, `disk_avail_gb < 1` triggers `critical` and `< 5` triggers `warn` — verify [`server/src/index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)) |
-| `alerts` | Active alert list, non-empty when `alert_level != ok` |
+| `alert_level` | `green` / `yellow` / `red`; disk availability below 5 GB is yellow and below 1 GB is red |
+| `alerts` | Active alert list, non-empty when `alert_level != green` |
 | `latest` | Most recent heartbeat instant telemetry (CPU / mem / disk + `last_seen`) |
-| `latest.disk_total_gb` / `disk_used_gb` / `disk_avail_gb` | **Available from v0.10.2** (agent-node `2.4.1+`, [`host-telemetry.ts readDiskStats()`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/host-telemetry.ts)) — sampled via `execFileSync('df', ['-k', '/'])`; the POSIX `-k` flag shares one parse path across Linux + macOS; on Windows or parse failure, all three fields gracefully fall back to `null` (the dashboard renders `—` rather than a misleading `0`). Older agents (`< 2.4.1`) emit `null` for all three. |
+| `latest.disk_total_gb` / `disk_used_gb` / `disk_avail_gb` | Disk telemetry; `null` when unsupported or sampling fails |
 | `history.5m` | Last 5 min, **1 min bucket** (from the `agent_telemetry` history table) |
 | `history.1h` | Last 1 h, **5 min bucket** |
-| `history.24h` | Last 24 h, **1 hour bucket**; from v0.10.2, each bucket also carries `disk_avail_min` / `disk_used_max` extreme-aggregation fields (verify [`server/src/index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)) |
+| `history.24h` | Last 24 hours in one-hour buckets, including `disk_avail_min` / `disk_used_max` extrema |
 
 **404**: `{ "ok": false, "error": "server not found" }` — no (active or offline) session matches the host.
 
@@ -873,7 +813,7 @@ curl "http://localhost:9200/api/server/$(python3 -c 'import urllib.parse; print(
 
 ### GET /api/server/:host/agents
 
-> [source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) · v0.10.0 / `commhub-server@0.8.2`
+> source ↗ · v0.10.0 / `commhub-server@0.8.2`
 
 Returns the **agent list on a single server** plus per-agent process telemetry (rss / cpu / uptime / in-flight count). Refs [issue #99](https://github.com/sleep2agi/agent-network/issues/99) + [issue #142](https://github.com/sleep2agi/agent-network/issues/142) per-agent process telemetry.
 
@@ -934,10 +874,6 @@ curl http://localhost:9200/api/server/dev-machine/agents \
 ---
 
 ### GET /api/messages
-
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Get recent inbox messages.
 
 ```bash
@@ -982,7 +918,7 @@ curl "http://localhost:9200/api/messages?limit=100" \
 }
 ```
 
-Field mapping to the server `SELECT` ([`server/src/index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)) `id, session_name as to_alias, from_session as from_alias, type, priority, content, created_at, network_id` — the primary key is `id` (not `message_id`); the response also includes `priority` + `network_id`, which earlier doc omitted.
+Fields include `id, to_alias, from_alias, type, priority, content, created_at, network_id`; the primary key is `id`, not `message_id`.
 
 ::: info Current schema caveat
 The SELECT doesn't include `in_reply_to` yet; reply-polling uses a heuristic of `from_alias` + `type='reply'` + recency (see comment at `cli.ts`).
@@ -991,10 +927,6 @@ The SELECT doesn't include `in_reply_to` yet; reply-polling uses a heuristic of 
 ---
 
 ### GET /api/completions
-
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Get completion records (summary records written via the `report_completion` MCP tool — distinct from a simple `tasks` row with `status='replied'`).
 
 ```bash
@@ -1037,10 +969,6 @@ The `artifacts` field is a JSON string (agent-defined schema); consumers must `J
 ---
 
 ### GET /api/task_events
-
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Get the task-state-change audit log (task lifecycle). Every time a task's `status` changes the server inserts one row — this is the primary data source for "where is this task stuck / who changed the status".
 
 ```bash
@@ -1056,7 +984,7 @@ curl "http://localhost:9200/api/task_events?task_id=t_a1b2c3d4" \
 | `network_id` | Filter by network (when an `ntok_` is bound, this parameter is overridden by the token's network) |
 | `limit` | Max items (default 50, max 500) |
 
-> `network_id` isn't read inside the task_events handler itself — every REST endpoint goes through [`resolveRestNetworkScope` (index.ts)](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts): a `utok_` caller may pass `network_id` to target a network (membership is verified), an `ntok_` caller is forcibly scoped to the token's bound network, and a system admin may inspect any network.
+> Every REST query applies `resolveRestNetworkScope`: a `utok_` caller may pass `network_id` (membership is verified), an `ntok_` caller is forced to the token-bound network, and a system admin may inspect any network.
 
 **Response**:
 
@@ -1092,10 +1020,6 @@ Events are sorted `created_at DESC` (newest first). `actor` is the originator of
 ---
 
 ### GET /api/stats
-
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Get aggregate statistics.
 
 ```bash
@@ -1130,10 +1054,7 @@ curl http://localhost:9200/api/stats \
 ---
 
 ### GET /api/server-logs
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
-Read the last N lines from the hub process's **in-memory console-log ring buffer** (debug aid). **`users.role = 'admin'` only** (same system-admin gate as [GET /api/users](#get-api-users) / [GET /api/audit-log](#get-api-audit-log) — **not** the per-network admin role). Buffer capacity defaults to 500 lines and is configurable via `COMMHUB_LOG_RING` ([`index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)).
+Read the last N lines from the hub process's **in-memory console-log ring buffer**. This is restricted to `users.role = 'admin'`, not the per-network admin role. Capacity defaults to 500 lines and is configurable via `COMMHUB_LOG_RING`.
 
 ```bash
 curl "http://localhost:9200/api/server-logs?limit=100" \
@@ -1160,7 +1081,7 @@ curl "http://localhost:9200/api/server-logs?limit=100" \
 }
 ```
 
-Sorted **newest first**; each `line` is truncated to 4000 chars ([`index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)). **The buffer is cleared on process restart** — this is not persistent storage. For durable logs, redirect stdout to a file or journald.
+Sorted **newest first**; each `line` is truncated to 4000 characters. **The buffer is cleared on process restart**; use stdout/journald for durable logs.
 
 **4xx errors**:
 
@@ -1172,11 +1093,7 @@ Sorted **newest first**; each `line` is truncated to 4000 chars ([`index.ts`](ht
 ---
 
 ### GET /api/audit-log
-
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
-Get the audit log. **Permissions: any authenticated user can call this endpoint, but non-**system admin** callers only see their own log rows** (the server adds `WHERE user_id = <caller>` automatically when `users.role !== 'admin'` — see [`server/src/index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)). System admin (`users.role = 'admin'`) sees everything and can filter by any `user_id`.
+Get the audit log. Any authenticated user may call it, but non-system-admin callers only see their own records. A system admin can see all records and filter by `user_id`.
 
 ::: warning Not the network-level admin/owner role
 "admin" here means `users.role='admin'` (**system-level**, the first registered user by default) — **not** the per-network `owner / admin / member / viewer` roles. Same distinction as [GET /api/users](#get-api-users).
@@ -1233,10 +1150,6 @@ POST `/api/networks` does not call `logAudit`, so audit_log will **never** conta
 ---
 
 ### GET /api/users
-
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Get the list of all users (**system admin** only — i.e. `users.role = 'admin'`, distinct from per-network `owner / admin / member / viewer` roles).
 
 ```bash
@@ -1286,9 +1199,6 @@ The response **does not include** `password_hash` (the SELECT explicitly enumera
 REST equivalents of the `send_task` / `broadcast` MCP tools (non-MCP path, suitable for webhooks / reverse proxies / Dashboard).
 
 ### POST /api/task
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 REST version of `send_task`: writes inbox + tasks rows for a target alias and pushes `new_task` over SSE.
 
 ```bash
@@ -1303,7 +1213,7 @@ curl -X POST http://localhost:9200/api/task \
   }'
 ```
 
-**Request body** (verify [`TaskSchema`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)):
+**Request body** (verify `TaskSchema`):
 
 | Field | Type | Required | Description |
 |------|------|:----:|------|
@@ -1312,7 +1222,7 @@ curl -X POST http://localhost:9200/api/task \
 | `priority` | enum | | `high` / `normal` (default) / `low` |
 | `from` | string | | Sender identifier (default `"api"`) |
 | `network_id` | string | | Target network (utok\_ caller; ntok\_ is force-bound) |
-| `ttl_seconds` | number | | Expiry in seconds (default 3600). Not part of the schema — server reads it directly from `body.ttl_seconds` at [`index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts). |
+| `ttl_seconds` | number | | Expiry in seconds; default 3600 |
 
 **Response** (success):
 
@@ -1333,9 +1243,6 @@ curl -X POST http://localhost:9200/api/task \
 A `new_task` SSE event is pushed to the target alias on success.
 
 ### POST /api/broadcast
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 REST version of `broadcast`: writes inbox rows for a group of sessions and pushes `broadcast` SSE events.
 
 ```bash
@@ -1348,7 +1255,7 @@ curl -X POST http://localhost:9200/api/broadcast \
   }'
 ```
 
-**Request body** (verify [`BroadcastSchema`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)):
+**Request body** (verify `BroadcastSchema`):
 
 | Field | Type | Required | Description |
 |------|------|:----:|------|
@@ -1356,7 +1263,7 @@ curl -X POST http://localhost:9200/api/broadcast \
 | `filter_server` | string | | Only deliver to sessions whose `server` field matches |
 | `filter_status` | string | | Only deliver to sessions in the given status (e.g. `idle` / `working`) |
 
-> Same field set as the MCP [`broadcast`](mcp-tools#broadcast) tool. `from_session` is **not** a parameter — the server hard-codes `'api'` ([`index.ts` — `POST /api/broadcast` handler](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts); the MCP version uses `'hub'`).
+> Fields match the MCP [`broadcast`](mcp-tools#broadcast) tool. `from_session` is not a parameter; REST uses `api` as the sender.
 
 **Response** (success):
 
@@ -1383,9 +1290,6 @@ curl -X POST http://localhost:9200/api/broadcast \
 ## MCP Endpoint
 
 ### POST /mcp
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 MCP Streamable HTTP endpoint. Agents call MCP Tools through this endpoint.
 
 ```bash
@@ -1409,9 +1313,6 @@ curl -X POST http://localhost:9200/mcp \
 ## SSE Endpoint
 
 ### GET /events/:name
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 SSE real-time push endpoint. Clients receive events via a long-lived connection. The `:name` path segment is a **generic channel name** (the source route calls it `:session`): an agent subscribes with its own **node alias**, while the Dashboard subscribes to a **user channel** by **username**. The SSE layer itself is just a per-channel-name `Map` ([`push.ts:11` `clients`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L11)) — it does not distinguish alias from username; `pushEvent(name, ...)` reaches whoever registered that name (e.g. `node.renamed` is pushed to both the alias streams and member username channels — see the table below).
 
 ```bash
@@ -1457,10 +1358,6 @@ data: {"type":"new_task","inbox_count":1,"priority":"high","from":"commander"}
 ## Token Management Endpoints
 
 ### POST /api/auth/node-token
-
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Create a network-bound `ntok_` for a node. `anet node create` calls this automatically and writes the result into `.anet/nodes/<node-name>/config.json` `token` field.
 
 ```bash
@@ -1481,7 +1378,7 @@ curl -X POST http://localhost:9200/api/auth/node-token \
 
 The `token` is the `ntok_` for that `(node_name, network_id)` pair. The hub force-binds the `network_id` to the token — when an agent calls MCP with this token, the server locks operations to that network and rejects cross-network access. See [Tokens — ntok_](/en/concepts/tokens) for more.
 
-**Common 4xx errors** (verify [`auth.ts createNetworkTokenForNode()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) + [`index.ts` route](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)):
+**Common 4xx errors** (returned by `createNetworkTokenForNode()` and route authorization):
 
 | Status | `error` value | Trigger |
 |------|------------|---------|
@@ -1491,10 +1388,6 @@ The `token` is the `ntok_` for that `(node_name, network_id)` pair. The hub forc
 | 401 | `auth required` / `invalid token` | Missing / invalid utok_ |
 
 ### POST /api/auth/tokens
-
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Create an API token.
 
 ```bash
@@ -1527,10 +1420,6 @@ See [Token system](/en/concepts/tokens) for the full picture.
 :::
 
 ### GET /api/auth/tokens
-
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 List all user tokens.
 
 ```bash
@@ -1567,9 +1456,6 @@ curl http://localhost:9200/api/auth/tokens \
 The 6 fields per row map directly to [`auth.ts:209-213`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L209) `listTokens` SELECT: `token_id / name / scope / network_id / last_used_at / created_at`. `scope` is one of `user` (utok\_) / `network` (ntok\_) / `full` (legacy atok\_); `network_id` is only set for `network` / `full` scope. Sorted by `created_at DESC`. The plaintext `token` field is **not** returned here (only at POST creation).
 
 ### DELETE /api/auth/tokens/:id
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Revoke a token (immediate server-side invalidation — distinct from `anet logout` which only clears the local token).
 
 ```bash
@@ -1596,9 +1482,6 @@ Writes audit log `action='token_revoked'`. After revocation, the next request us
 ## Network Member Endpoints
 
 ### GET /api/networks/:id/members
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Get network member list (owner / admin only).
 
 ```bash
@@ -1633,9 +1516,6 @@ curl http://localhost:9200/api/networks/net_xxx/members \
 `anet network members` CLI renders this response (using `m.display_name || m.username` for the name, with a role emoji icon).
 
 ### POST /api/networks/:id/members
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Add a member to the network (owner / admin only; the invite flow is usually smoother — see [POST /api/networks/:id/invite](#post-api-networks-id-invite) to issue a code that the recipient can redeem).
 
 ```bash
@@ -1669,9 +1549,6 @@ curl -X POST http://localhost:9200/api/networks/net_xxx/members \
 Writes audit log `action='member_added'`; the `detail` column records `<user_id> as <role>`.
 
 ### PUT /api/networks/:id/members/:user_id
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Change a member's role (owner only; cannot change the owner's own role).
 
 ```bash
@@ -1705,9 +1582,6 @@ curl -X PUT http://localhost:9200/api/networks/net_xxx/members/u_def456 \
 Writes audit log `action='member_role_changed'`; the `detail` column records `<user_id> → <new_role>`. This is the endpoint that FAQ Q17 mentions for "changing roles".
 
 ### DELETE /api/networks/:id/members/:user_id
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Remove a member (owner / admin only; cannot remove the owner).
 
 ```bash
@@ -1733,9 +1607,6 @@ curl -X DELETE http://localhost:9200/api/networks/net_xxx/members/u_def456 \
 Writes audit log `action='member_removed'`; the `detail` column records `<user_id>`.
 
 ### POST /api/networks/:id/invite
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Create an invite code.
 
 ```bash
@@ -1762,21 +1633,17 @@ curl -X POST http://localhost:9200/api/networks/net_xxx/invite \
 }
 ```
 
-**Common 4xx errors** (verify [`auth.ts createInvite()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) + [`index.ts` route handler](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)):
+**Common 4xx errors** (returned by `createInvite()` and route authorization):
 
 | Status | `error` value | Trigger |
 |------|------------|---------|
 | 400 | `invalid role` | `role` is not one of `admin` / `member` / `viewer` |
-| 403 | `not a member of this network` | Caller is not a member of the network ([`index.ts` callerRole gate](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)) |
+| 403 | `not a member of this network` | Caller is not a member of the network |
 | 403 | `owner/admin required` | Caller is `member` / `viewer` — cannot issue invites |
 
 The recipient joins via `anet network join inv_abc123def456` or `POST /api/networks/join`. `invite_code` is `inv_` prefix + 12 characters (`auth.ts:346` `slice(0, 12)`).
 
 ### POST /api/networks/join
-
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Join a network with an invite code.
 
 ```bash
@@ -1815,7 +1682,7 @@ Attachment (image, etc.) upload / download — backs Dashboard image sending, co
 
 ### POST /api/upload
 
-> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
+> Source ↗
 
 Uploads a file and returns a downloadable `url`.
 
@@ -1839,7 +1706,7 @@ Common errors: `411 length_required` (no `Content-Length`) · `413 payload_too_l
 
 ### GET /api/files/:file_id
 
-> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
+> Source ↗
 
 Downloads a file returned by `POST /api/upload`. Always forces `Content-Disposition: attachment` + `X-Content-Type-Options: nosniff` (the browser won't inline-render it — XSS defense).
 
@@ -1881,7 +1748,7 @@ Errors usually return this shape:
 
 ### POST /api/node-rename/prepare
 
-> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
+> Source ↗
 
 PHASE 1: register a rename transaction (old node untouched, fully rollbackable). On success writes a `node_rename_prepared` audit row.
 
@@ -1901,7 +1768,7 @@ curl -X POST http://localhost:9200/api/node-rename/prepare \
 
 ### POST /api/node-rename/commit
 
-> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
+> Source ↗
 
 PHASE 2 C1: commit the rename transaction (CommHub routing switches to `new_alias`). On success writes a `node_rename_committed` audit row.
 
@@ -1915,7 +1782,7 @@ body `{ txn_id }` is required (missing → 400).
 
 ### POST /api/node-rename/abort
 
-> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
+> Source ↗
 
 Roll back the rename transaction (called before C1; old node restored). On success writes a `node_rename_aborted` audit row.
 
@@ -1932,13 +1799,10 @@ body `{ txn_id }` is required (missing → 400).
 ## Tmux Debug Endpoints (opt-in)
 
 ::: warning Off by default
-Only available when the hub is started with `COMMHUB_ENABLE_TMUX=1` ([`index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)). **Otherwise all paths return 404 `tmux disabled`**. Even when enabled, you still need (a) the caller IP to be inside `COMMHUB_TMUX_ALLOWLIST` (comma-separated, defaults to localhost only; verify [`index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)) and (b) `users.role = 'admin'` system-admin auth. Intended use: expose tmux sessions running agents on the hub machine to local devs / Dashboard. **Never expose on the public internet.** Public-deploy hardening: [Production §5 Verify tmux control plane is off](/en/deploy/production#_5-verify-the-tmux-control-plane-is-off).
+Only available with `COMMHUB_ENABLE_TMUX=1`; otherwise these routes return 404 `tmux disabled`. Enabling them also requires the caller IP in `COMMHUB_TMUX_ALLOWLIST` (localhost by default) and a system-admin user. **Never expose these routes publicly.** See [Production §5](/en/deploy/production#_5-verify-the-tmux-control-plane-is-off).
 :::
 
 ### GET /api/tmux/:name
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Capture the tail of a tmux session's current pane (`tmux capture-pane -t <name> -p` wrapper).
 
 ```bash
@@ -1959,9 +1823,6 @@ curl "http://localhost:9200/api/tmux/anet-node-coder-1?lines=50" \
 ```
 
 ### POST /api/tmux/:name/send
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Send keys into a tmux session (`tmux send-keys -t <name> "<text>" Enter` wrapper).
 
 ```bash
@@ -1989,9 +1850,6 @@ curl -X POST "http://localhost:9200/api/tmux/anet-node-coder-1/send" \
 | 400 | `<tmux stderr>` | `tmux` subprocess exited non-zero (e.g. session not found) |
 
 ### GET /ws/tmux/:name
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 WebSocket endpoint — live-streams a tmux session's pane output. It's the live counterpart of `GET /api/tmux/:name`: the HTTP one is a one-shot `capture-pane`, this one keeps streaming once connected. Auth gating is **identical** to the two HTTP endpoints above (same `requireTmuxAccess` — `COMMHUB_ENABLE_TMUX=1` + caller IP in `COMMHUB_TMUX_ALLOWLIST` + `users.role='admin'` auth; any failure is rejected before the WS upgrade).
 
 ```
@@ -2009,9 +1867,6 @@ Since v0.8 the project is Apache 2.0 open-source + self-hosted — there is no o
 :::
 
 ### GET /api/license
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 Reads the first row of the `licenses` table (by `created_at` ascending) and returns trial / pro status with `days_left`.
 
 ```bash
@@ -2036,10 +1891,7 @@ curl http://localhost:9200/api/license
 ```
 
 ### POST /api/license/activate
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
-Inject a pro license key. [`index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) only checks that `key.startsWith('anet-') && length >= 16` — **there is no real server-side validation**. The endpoint deletes any existing license row and writes a fresh pro license (limits 50 agents / 10 networks / 10000 tasks/day, expires in 365 days).
+Inject a pro license key. The current implementation only checks the `anet-` prefix and minimum length; **there is no signature validation**. Success replaces the existing license record.
 
 ```bash
 curl -X POST http://localhost:9200/api/license/activate \
@@ -2064,6 +1916,21 @@ curl -X POST http://localhost:9200/api/license/activate \
 
 ---
 
+## Additional endpoints in newer channels
+
+These routes exist in the current source, but older stable packages may not include them. Check `anet -v` and the actual response from your hub.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/stats/sse` | SSE connection details for system-admin/master callers |
+| GET | `/api/host-supervisors` | Network-scoped host-supervisor inventory |
+| GET | `/api/nodes/:id/config` | Read a node's masked config snapshot |
+| PUT | `/api/nodes/:ref/attrs` | Update `display_name`, `team`, and `tags` with revision conflict protection |
+| PUT | `/api/nodes/:ref/avatar` | Set or clear an http/https avatar URL |
+| GET | `/events/network/:network_id` | Subscribe to network summary events without message bodies |
+
+---
+
 ## Next steps
 
 **Corresponding MCP tools**:
@@ -2072,7 +1939,7 @@ curl -X POST http://localhost:9200/api/license/activate \
 **Dig into auth**:
 - [Tokens](/en/concepts/tokens) — utok_ / ntok_ / atok_
 - [Security design](/en/concepts/security) — full auth model
-- [v0.7 → v0.8 upgrade](/en/guide/upgrade#v0-7-v0-8-upgrade-notes-latest) — RFC-001 Phase 2
+- [Upgrade guide](/en/guide/upgrade)
 
 **Real-world usage**:
 - [Dashboard](/en/guide/dashboard) — what REST endpoints the UI actually calls

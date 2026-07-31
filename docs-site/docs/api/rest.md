@@ -10,16 +10,12 @@ CommHub Server 提供 REST API 供 Dashboard、CLI 和第三方系统调用。
 | 认证 | `Authorization: Bearer <token>` **（推荐）**；`?token=<token>` URL query 为 SSE / 浏览器 EventSource 保留（有 access-log 泄漏风险，详见 [安全设计](/concepts/security)） |
 | 内容类型 | `application/json` |
 | 编码 | UTF-8 |
-| Endpoint 数 | 30+（**13 类**：[公开 1](#公开端点) · [认证 5](#认证端点) · [网络 5](#网络端点) · [数据查询 10](#数据查询端点) · [任务派发 2](#任务派发端点) · [MCP 1](#mcp-端点) · [SSE 1](#sse-端点) · [Token 管理 4](#token-管理端点) · [网络成员 6](#网络成员端点) · [文件 2](#文件端点) · [节点改名 3](#节点改名端点-rfc-010) · [Tmux 调试 3 (opt-in)](#tmux-调试端点-opt-in) · [Legacy 2](#legacy-端点-v0-6-时代-oss-后不再演进)） |
-| 全 endpoint source | [`server/src/index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) |
+| Endpoint 目录 | 见下方按功能分组的接口；不记录易过时的总数 |
+| 实现入口 | [`server/src/server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) |
 
 ## 公开端点
 
 ### GET /health
-
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 健康检查，不需要认证。
 
 ```bash
@@ -29,12 +25,11 @@ curl http://localhost:9200/health
 ```json
 {
   "ok": true,
-  "version": "0.8.8",
+  "version": "<server version>",
   "api_version": "v3",
   "transport": "streamable-http",
   "sessions_count": 0,
   "sse_connections": 0,
-  "sse_sessions": {},
   "auth": "user-token",
   "security": "secured",
   "tmux": "disabled",
@@ -45,8 +40,10 @@ curl http://localhost:9200/health
 }
 ```
 
-::: tip `license` 字段是 v0.6 legacy
-`license: "trial"` 是 v0.6 时代 14 天试用机制的残留字段，Apache 2.0 OSS 后**不再作为商业功能门控**（自部署没有"过期"概念）。`send_task` 路径仍跑 trial 检查仅为后向兼容（verify [`server/src/tools.ts:521`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L521) `license_expired` 仍 emit），若命中见 [troubleshooting](/troubleshooting)。**v0.9.x / v0.10.x scope 都未动**（Recovery & Observability 主题为先），整段移除排到 v0.11+ / 未排期。
+未认证请求只返回聚合数量。携带 system-admin 或 master token 时，响应还会包含按 network 隔离的 `sse_sessions` 明细。
+
+::: warning `license` 仍影响任务发送
+首次启动会创建 14 天 trial 记录。当前 MCP `send_task` 仍检查 `expires_at`；过期会返回 `license_expired`。不要把 `/health.license` 当作纯展示字段。
 :::
 
 ---
@@ -54,10 +51,6 @@ curl http://localhost:9200/health
 ## 认证端点
 
 ### POST /api/auth/register
-
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 注册新用户。第一个注册的用户自动成为管理员。
 
 ```bash
@@ -112,17 +105,13 @@ curl -X POST http://localhost:9200/api/auth/register \
 | 400 | `password must be at least 8 characters` | 第二个起注册用户密码 < 8 |
 | 400 | `password must be at least 4 characters` | 首位用户（bootstrap admin）密码 < 4 |
 | 400 | `password is too common` | 命中弱密码字典（[`password-dict.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts)，首位用户豁免） |
-| 429 | `too many requests, try again later` | 超过 30/分 IP rate limit（[`index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)；localhost 豁免，详见 [安全 — IP rate limit](/concepts/security#ip-级别限制)）|
+| 429 | `too many requests, try again later` | 超过 30/分 IP rate limit（localhost 豁免，详见 [安全 — IP rate limit](/concepts/security#ip-级别限制)）|
 
 **速率限制**：30 次/分钟 per IP。
 
 ---
 
 ### POST /api/auth/login
-
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 用户登录。
 
 ```bash
@@ -159,17 +148,13 @@ curl -X POST http://localhost:9200/api/auth/login \
 | 状态 | `error` 值 | 触发条件 |
 |------|------------|---------|
 | 401 | `invalid username or password` | 用户名不存在 **或** 密码哈希不匹配（[`auth.ts:99-100`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L99) 故意把两种错误合并成同一文案，避免 username enumeration）；server 同时写 `login_failed` audit |
-| 429 | `too many attempts, try again later` | 超过 10/分 IP rate limit（[`index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)；触发时写 `login_rate_limited` audit + clientIP）|
+| 429 | `too many attempts, try again later` | 超过 10/分 IP rate limit（触发时写 `login_rate_limited` audit + clientIP）|
 
 **速率限制**：10 次/分钟 per IP。
 
 ---
 
 ### GET /api/auth/me
-
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 获取当前用户信息。
 
 ```bash
@@ -202,10 +187,6 @@ curl http://localhost:9200/api/auth/me \
 ---
 
 ### PUT /api/auth/me
-
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 修改个人信息。
 
 ```bash
@@ -222,7 +203,7 @@ curl -X PUT http://localhost:9200/api/auth/me \
 | `display_name` | string | | 显示名 |
 | `email` | string | | 邮箱 |
 
-只更新提供的字段（[server/src/index.ts](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) 用 `if (body.X)` 条件 SQL）；`username` / `role` / `password` **不**通过此 endpoint 修改。
+只更新提供的字段；`username` / `role` / `password` **不**通过此 endpoint 修改。
 
 **响应**（成功）：
 
@@ -239,7 +220,7 @@ curl -X PUT http://localhost:9200/api/auth/me \
 }
 ```
 
-**常见 4xx**（verify [`server/src/index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)）：
+**常见 4xx**：
 
 | 状态 | `error` 值 | 触发条件 |
 |------|------------|---------|
@@ -247,16 +228,12 @@ curl -X PUT http://localhost:9200/api/auth/me \
 | 401 | `token required` / `invalid token` | 缺/无效 utok_ |
 
 ::: info 字段缺失不报错
-如果只传 `display_name` 而省略 `email`（或两者都不传），server 不会报 400 —— [`index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) 用 `if (body.X)` 条件累加 SQL，全部省略时只 re-SELECT user 返回。**无字段长度校验**（v0.9.x / v0.10.x 都未动，schema-level 校验排到 v0.11+ / 未排期）。
+如果只传 `display_name` 而省略 `email`（或两者都不传），server 不会报 400；两者都省略时返回原用户记录。当前没有字段长度校验。
 :::
 
 ---
 
 ### POST /api/auth/password
-
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 修改密码。
 
 ```bash
@@ -280,10 +257,10 @@ curl -X POST http://localhost:9200/api/auth/password \
 }
 ```
 
-`revoked` 字段是**其他设备**上被撤销的 utok\_/atok\_ 数量（不含本次调用方自己的 token，那个是 index.ts L490 单独撤销的）。
+`revoked` 字段是**其他设备**上被撤销的 utok\_/atok\_ 数量，不含本次调用方自己的 token。
 
-**关键副作用** (verify [`auth.ts:267-282 changePassword + revokeOtherUserTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L267) + [`index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)):
-1. **当前调用方的 `utok_`** (`resolved.tokenId`) 立即撤销（[`index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) `revokeToken(...)` 显式删）
+**关键副作用**：
+1. **当前调用方的 `utok_`** (`resolved.tokenId`) 立即撤销
 2. **其他设备的所有 `utok_` / `atok_`** 同步撤销（[`auth.ts:269-270`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L269) `DELETE ... WHERE user_id=? AND network_id IS NULL AND token_id != ?currentTokenId` 一锅端）—— 计数返回到 `revoked` 字段
 3. **`ntok_` 不受影响**（`revokeOtherUserTokens` 只删 `network_id IS NULL` 的 token，agent node 用 `ntok_` 跑着的不会被改密打断；跟 [account-system 改密码副作用](/guide/account-system#修改密码) ZH 描述一致）
 4. **新 `utok_`** (`issued.token`) 颁发给调用方作为响应返回 —— 调用方应立即用新 token 覆盖本地存储
@@ -310,10 +287,6 @@ curl -X POST http://localhost:9200/api/auth/password \
 ## 网络端点
 
 ### GET /api/networks
-
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 获取用户所属的所有网络。
 
 ```bash
@@ -348,10 +321,6 @@ curl http://localhost:9200/api/networks \
 ---
 
 ### POST /api/networks
-
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 创建新网络。
 
 ```bash
@@ -385,9 +354,6 @@ curl -X POST http://localhost:9200/api/networks \
 ---
 
 ### GET /api/networks/:id
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 获取网络详情（含成员身份校验：必须是该 network 成员或系统 admin，否则 403）。
 
 ```bash
@@ -422,14 +388,11 @@ curl http://localhost:9200/api/networks/net_abc123 \
 }
 ```
 
-`network` 对象 9 字段 = `SELECT * FROM networks WHERE network_id = ?1` ([`server/src/index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)) 完整 schema (含 v3 migration `visibility` + `max_members`)。`settings` 字段保留作未来 per-network JSON 配置，目前为 `null`。`stats.tasks` 按 status 聚合（同 [GET /api/stats](#get-api-stats) 内嵌结构）。
+`network` 返回完整网络记录；`stats.tasks` 按 status 聚合，与 [GET /api/stats](#get-api-stats) 的内嵌结构一致。
 
 ---
 
 ### PUT /api/networks/:id
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 重命名网络（仅 owner）。
 
 ```bash
@@ -465,9 +428,6 @@ curl -X PUT http://localhost:9200/api/networks/net_abc123 \
 ---
 
 ### DELETE /api/networks/:id
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 删除网络（仅 owner，必须无活跃 session）。
 
 ```bash
@@ -496,10 +456,6 @@ curl -X DELETE http://localhost:9200/api/networks/net_abc123 \
 ## 数据查询端点
 
 ### GET /api/status
-
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 获取所有 session 状态。
 
 ```bash
@@ -540,15 +496,11 @@ curl "http://localhost:9200/api/status?network_id=net_xxx" \
 }
 ```
 
-`summary` 字段是按 status 聚合的计数（[`server/src/index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)）：`working` 类把 `working / blocked / error / waiting_input / running / busy` 都归一进去；`offline` 类是 server 端 `updated_at` 落后 10 分钟的 session（每次 GET 实时计算并写回 DB）；其他算 `idle`。
+`summary` 按 status 聚合：`working / blocked / error / waiting_input / running / busy` 归入 `working`，其他活动状态归入 `idle`。后台巡检约每分钟运行一次，把超过 10 分钟没有更新的 session 标为 `offline`；本 GET 是只读查询。
 
 ---
 
 ### GET /api/tasks
-
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 获取任务列表。
 
 ```bash
@@ -605,10 +557,6 @@ curl "http://localhost:9200/api/tasks?status=running&limit=10" \
 ---
 
 ### GET /api/task/{task_id}
-
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 按 `task_id` 取**单个任务**的完整记录。路径同时接受 `/api/task/<id>` 与 `/api/tasks/<id>`（末尾 `s` 可选）。
 
 ```bash
@@ -640,10 +588,6 @@ curl http://localhost:9200/api/task/<task_id> \
 ---
 
 ### GET /api/nodes
-
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 获取节点列表（持久化节点信息，区别于 session 的临时状态）。
 
 ```bash
@@ -691,9 +635,6 @@ curl http://localhost:9200/api/nodes \
 ---
 
 ### DELETE /api/nodes/:ref
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 删除节点（hub server 端）—— 从 `nodes` 表删持久身份 + 从 `sessions` 表删运行时心跳记录（同一个 transaction），并往 alias channel + network channel 推 `node_deleted` SSE 事件让 dashboard 实时刷新。配套 PR #86「node delete cascade and node_deleted SSE」。
 
 ```bash
@@ -706,7 +647,7 @@ curl -X DELETE "http://localhost:9200/api/nodes/%E4%BB%A3%E7%A0%811%E5%8F%B7" \
   -H "Authorization: Bearer ntok_xxx"
 ```
 
-**路径参数**：`:ref` 在 server 端 [`server/src/index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) 用 OR 拼 `node_id = ? OR node_name = ? OR alias = ?` 找节点（网络作用域过滤后取 `updated_at DESC` 第一条）。
+**路径参数**：`:ref` 可用 `node_id`、`node_name` 或 `alias`；查询始终受当前 network scope 限制。
 
 **响应**（成功，200）：
 
@@ -721,9 +662,7 @@ curl -X DELETE "http://localhost:9200/api/nodes/%E4%BB%A3%E7%A0%811%E5%8F%B7" \
 }
 ```
 
-**SSE 副作用**：删完往**两个 SSE channel** 推 `node_deleted` event（[`server/src/index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)）：
-- `alias` 自身的 SSE channel（如果还有订阅者）
-- 该 `network_id` 的 user 级 SSE channel（每个网络成员都能立刻看到）
+**SSE 副作用**：删除后向该 `alias` 的 SSE channel 推送 `node_deleted` event（如果仍有订阅者）。
 
 ```json
 // node_deleted SSE event payload
@@ -746,9 +685,6 @@ curl -X DELETE "http://localhost:9200/api/nodes/%E4%BB%A3%E7%A0%811%E5%8F%B7" \
 ---
 
 ### PUT /api/nodes/:ref/avatar
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
-
 设置或清除某个节点的自定义头像（#462）。**不走 RFC-024 的 config-apply 流水线**——头像是纯展示属性，不参与节点配置的版本协商。
 
 ```bash
@@ -810,9 +746,6 @@ curl -X PUT "http://localhost:9200/api/nodes/n_abc12345/avatar" \
 
 
 ### GET /api/servers
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 按**物理服务器**（`hostname` + `ip`）聚合 agent 列表 + host 实时遥测，给 dashboard 「服务器侧栏」用。Refs [issue #119](https://github.com/sleep2agi/agent-network/issues/119)。
 
 ```bash
@@ -860,8 +793,6 @@ host telemetry 由 agent-node 在每次 `report_status` 时带上（[issue #119]
 
 ### GET /api/server/:host/health
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) · v0.10.0 / `commhub-server@0.8.2`
-
 取**单台物理服务器**的当前健康快照 + 24h 分桶历史 telemetry。Refs [issue #99](https://github.com/sleep2agi/agent-network/issues/99)（守护节点 Phase 1 scaffold）。
 
 ::: tip 需要 `agent-network@2.2.1+`
@@ -894,7 +825,7 @@ curl "http://localhost:9200/api/server/$(python3 -c 'import urllib.parse; print(
   "hostname": "dev-machine",
   "ip": "192.168.1.42",
   "agent_count": 7,
-  "alert_level": "ok",
+  "alert_level": "green",
   "alerts": [],
   "latest": {
     "cpu_load_1min": 0.42,
@@ -920,13 +851,13 @@ curl "http://localhost:9200/api/server/$(python3 -c 'import urllib.parse; print(
 |------|------|
 | `host` | 请求路径里传入的 host 值 |
 | `agent_count` | 该 host 上活跃 session 数（窗口取最新一行的 `COUNT(*) OVER ()`）|
-| `alert_level` | `ok` / `warn` / `critical`（取 `serverAlertLevel(latest)` 计算；v0.10.2+ 加 `disk_avail_gb < 1 → critical` / `< 5 → warn` 触发，verify [`server/src/index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)）|
-| `alerts` | 当前命中告警列表，`alert_level != ok` 时非空 |
+| `alert_level` | `green` / `yellow` / `red`；磁盘可用空间低于 5 GB 为 yellow，低于 1 GB 为 red |
+| `alerts` | 当前命中告警列表，`alert_level != green` 时非空 |
 | `latest` | 该 host 最近一次心跳的瞬时 telemetry（CPU / mem / disk + `last_seen`）|
-| `latest.disk_total_gb` / `disk_used_gb` / `disk_avail_gb` | **v0.10.2 起**（agent-node `2.4.1+`，[`host-telemetry.ts readDiskStats()`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/host-telemetry.ts)）—— 通过 `execFileSync('df', ['-k', '/'])` 采样，POSIX `-k` Linux + macOS 同 parse 路径；Windows / 解析失败 graceful `null`（dashboard 渲染 `—` 不误导成 0）。老 agent (`< 2.4.1`) 不带字段时三字段都 `null` |
+| `latest.disk_total_gb` / `disk_used_gb` / `disk_avail_gb` | 磁盘 telemetry；不支持或采样失败时为 `null` |
 | `history.5m` | 最近 5min，**1 min bucket**（取自 `agent_telemetry` 历史表）|
 | `history.1h` | 最近 1h，**5 min bucket** |
-| `history.24h` | 最近 24h，**1 hour bucket**；v0.10.2 起 bucket 内附 `disk_avail_min` / `disk_used_max` 字段（极值聚合，verify [`server/src/index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)）|
+| `history.24h` | 最近 24h，按小时分桶；每桶含 `disk_avail_min` / `disk_used_max` 极值 |
 
 **404**：`{ "ok": false, "error": "server not found" }` —— 该 host 没有任何（活跃或离线）session 命中。
 
@@ -935,8 +866,6 @@ curl "http://localhost:9200/api/server/$(python3 -c 'import urllib.parse; print(
 ---
 
 ### GET /api/server/:host/agents
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) · v0.10.0 / `commhub-server@0.8.2`
 
 取**单台服务器上的 agent 列表** + per-agent 进程 telemetry（rss / cpu / uptime / in-flight count）。Refs [issue #99](https://github.com/sleep2agi/agent-network/issues/99) + [issue #142](https://github.com/sleep2agi/agent-network/issues/142) per-agent process telemetry。
 
@@ -997,10 +926,6 @@ curl http://localhost:9200/api/server/dev-machine/agents \
 ---
 
 ### GET /api/messages
-
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 获取最近 inbox 消息列表。
 
 ```bash
@@ -1045,7 +970,7 @@ curl "http://localhost:9200/api/messages?limit=100" \
 }
 ```
 
-字段对照 server SELECT ([`server/src/index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)) `id, session_name as to_alias, from_session as from_alias, type, priority, content, created_at, network_id` —— 主键字段是 `id` 不是 `message_id`，含 `priority` + `network_id` 两个之前 doc 漏掉的字段。
+字段包括 `id, to_alias, from_alias, type, priority, content, created_at, network_id`；主键是 `id`，不是 `message_id`。
 
 ::: info 当前 schema 限制
 SELECT 暂未包含 `in_reply_to` 字段；轮询匹配回复消息时按 `from_alias` + `type='reply'` + recency 启发式匹配（详见 `cli.ts` 注释）。
@@ -1054,10 +979,6 @@ SELECT 暂未包含 `in_reply_to` 字段；轮询匹配回复消息时按 `from_
 ---
 
 ### GET /api/completions
-
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 获取完成记录（agent 通过 `report_completion` MCP 工具写入的总结性记录，跟 `tasks` 表 `status='replied'` 的简单 reply 不同）。
 
 ```bash
@@ -1100,10 +1021,6 @@ curl "http://localhost:9200/api/completions?since=2026-04-12T00:00:00Z" \
 ---
 
 ### GET /api/task_events
-
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 获取任务状态变更日志（task 生命周期审计）。每次 task `status` 变化 server 都会插一行，是排查「任务卡住 / 谁改了状态」的主要数据源。
 
 ```bash
@@ -1119,7 +1036,7 @@ curl "http://localhost:9200/api/task_events?task_id=t_a1b2c3d4" \
 | `network_id` | 按网络过滤（绑了 `ntok_` 时此参数被强制覆盖为 token 自带的 network）|
 | `limit` | 最大条数（默认 50，最大 500） |
 
-> `network_id` 不在 task_events handler 本体里读，而是所有 REST 端点统一走 [`resolveRestNetworkScope` (index.ts)](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)：`utok_` 调用可传 `network_id` 指定网络（校验 membership），`ntok_` 调用强制锁到 token 绑定的 network，system admin 可查任意网络。
+> 所有 REST 查询统一应用 `resolveRestNetworkScope`：`utok_` 可传 `network_id`（并校验 membership），`ntok_` 强制使用 token 绑定的 network，system admin 可查任意 network。
 
 **响应**：
 
@@ -1155,10 +1072,6 @@ curl "http://localhost:9200/api/task_events?task_id=t_a1b2c3d4" \
 ---
 
 ### GET /api/stats
-
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 获取统计数据。
 
 ```bash
@@ -1193,10 +1106,7 @@ curl http://localhost:9200/api/stats \
 ---
 
 ### GET /api/server-logs
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
-读 hub 进程内**内存环形 buffer** 里的最近 N 行 console 日志（debug 用）。**仅 `users.role = 'admin'` 系统 admin 可调**（跟 [GET /api/users](#get-api-users) / [GET /api/audit-log](#get-api-audit-log) 同款 system-admin gate，注意**不是网络级 admin**）。Buffer 容量默认 500 行（由 `COMMHUB_LOG_RING` env 调，[`index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)）。
+读 hub 进程内**内存环形 buffer** 里的最近 N 行 console 日志（debug 用）。**仅 `users.role = 'admin'` 系统 admin 可调**，不是网络级 admin。Buffer 容量默认 500 行，可用 `COMMHUB_LOG_RING` 调整。
 
 ```bash
 curl "http://localhost:9200/api/server-logs?limit=100" \
@@ -1223,7 +1133,7 @@ curl "http://localhost:9200/api/server-logs?limit=100" \
 }
 ```
 
-按时间**倒序**返回（最新在最前）；每行 `line` 截断到 4000 字符（[`index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)）。**进程重启 buffer 清空** —— 这不是持久化日志，要持久化日志做 stdout/journald 重定向。
+按时间**倒序**返回（最新在最前）；每行 `line` 截断到 4000 字符。**进程重启 buffer 清空**；持久化请使用 stdout/journald。
 
 **4xx**：
 
@@ -1235,11 +1145,7 @@ curl "http://localhost:9200/api/server-logs?limit=100" \
 ---
 
 ### GET /api/audit-log
-
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
-获取审计日志。**权限：所有已认证用户都可调，但非**系统 admin** 只能看到自己的 log 行**（server 端走 `users.role !== 'admin'` 自动加 `WHERE user_id = <caller>` 过滤，见 [`server/src/index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)）。系统 admin (`users.role = 'admin'`) 看全部 + 可用 `user_id` 参数过滤任意用户。
+获取审计日志。所有已认证用户都可调用，但非系统 admin 只能看到自己的记录；系统 admin 可查看全部并按 `user_id` 过滤。
 
 ::: warning 不是网络级 admin/owner
 这里的 "admin" 指 `users.role='admin'`（**系统级**，首位注册用户默认是），**不是**网络级别的 `owner / admin / member / viewer`。详见 [GET /api/users](#get-api-users) 同款区分。
@@ -1296,10 +1202,6 @@ POST `/api/networks` 不调 `logAudit`，所以 audit_log 里**不会**有 `crea
 ---
 
 ### GET /api/users
-
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 获取所有用户列表（仅**系统 admin** —— 即 `users.role = 'admin'`，跟网络级别的 `owner / admin / member / viewer` 角色不同）。
 
 ```bash
@@ -1349,9 +1251,6 @@ curl http://localhost:9200/api/users \
 REST 版的 `send_task` / `broadcast`（非 MCP 路径，适合 webhook / 反代 / Dashboard 用）。
 
 ### POST /api/task
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 REST 版 `send_task`：往指定 alias 的 inbox 投递任务 + 写 tasks 表 + SSE 推 `new_task`。
 
 ```bash
@@ -1366,7 +1265,7 @@ curl -X POST http://localhost:9200/api/task \
   }'
 ```
 
-**请求体**（verify [`TaskSchema`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)）：
+**请求体**（verify `TaskSchema`）：
 
 | 字段 | 类型 | 必需 | 说明 |
 |------|------|:----:|------|
@@ -1375,7 +1274,7 @@ curl -X POST http://localhost:9200/api/task \
 | `priority` | enum | | `high` / `normal`（默认）/ `low` |
 | `from` | string | | 发送者标识（默认 `"api"`） |
 | `network_id` | string | | 目标 network（utok\_ 调用时；ntok\_ 调用强制绑定） |
-| `ttl_seconds` | number | | 过期秒数（默认 3600；非 schema 字段，server 在 [`index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) 直接取 `body.ttl_seconds`） |
+| `ttl_seconds` | number | | 过期秒数，默认 3600 |
 
 **响应**（成功）：
 
@@ -1393,12 +1292,9 @@ curl -X POST http://localhost:9200/api/task \
 | 403 | `access denied to requested network` | utok\_ 调用方不是 `network_id` 成员 |
 | 403 | `permission_denied` | 角色不足（viewer 不能写）|
 
-**不**写 audit log（[`/api/task` 处理函数 index.ts](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) 没有 `logAudit` 调用，跟 `POST /api/networks` 的「不写」一致）；成功后给 target alias 推送 `new_task` SSE 事件。
+此端点不写 audit log；成功后给 target alias 推送 `new_task` SSE 事件。
 
 ### POST /api/broadcast
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 REST 版 `broadcast`：往一组 session 的 inbox 同步广播 + 给每个 SSE 推 `broadcast`。
 
 ```bash
@@ -1411,7 +1307,7 @@ curl -X POST http://localhost:9200/api/broadcast \
   }'
 ```
 
-**请求体**（verify [`BroadcastSchema`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)）：
+**请求体**（verify `BroadcastSchema`）：
 
 | 字段 | 类型 | 必需 | 说明 |
 |------|------|:----:|------|
@@ -1419,7 +1315,7 @@ curl -X POST http://localhost:9200/api/broadcast \
 | `filter_server` | string | | 只发给指定 `server` 字段的 session |
 | `filter_status` | string | | 只发给指定 status 的 session（如 `idle` / `working`） |
 
-> 跟 MCP [`broadcast`](mcp-tools#broadcast) 同款字段；`from_session` 不是参数，server 端硬编码 `'api'`（[`index.ts` — `POST /api/broadcast` handler](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) 跟 MCP 版的 `'hub'` 不同）。
+> 字段与 MCP [`broadcast`](mcp-tools#broadcast) 一致；`from_session` 不是参数，REST 发送方固定为 `api`。
 
 **响应**（成功）：
 
@@ -1446,9 +1342,6 @@ curl -X POST http://localhost:9200/api/broadcast \
 ## MCP 端点
 
 ### POST /mcp
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 MCP Streamable HTTP 端点，Agent 通过此端点调用 MCP Tools。
 
 ```bash
@@ -1472,9 +1365,6 @@ curl -X POST http://localhost:9200/mcp \
 ## SSE 端点
 
 ### GET /events/:name
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 SSE 实时推送端点，客户端通过长连接接收事件。路径段 `:name` 是一个**通用 channel 名**（源码里叫 `:session`）：Agent 用自己的 **node alias** 订阅、Dashboard 用 **username** 订阅 user channel。SSE 层本身是 per-channel-name 的 `Map`（[`push.ts:11` `clients`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L11)），不区分 alias / username —— `pushEvent(name, ...)` 推给谁取决于谁注册了那个 name（如 `node.renamed` 同时推 alias 流和成员 username channel，见下表）。
 
 ```bash
@@ -1518,9 +1408,6 @@ data: {"type":"new_task","inbox_count":1,"priority":"high","from":"指挥室"}
 ---
 
 ### GET /events/network/:network_id
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
-
 **网络级观察者流**（#461）——一条 SSE 长连接，收该网络内**所有**任务/回复的**摘要**事件。Dashboard 用它做实时刷新，不必为每个节点各开一条 `/events/:name`。
 
 ```bash
@@ -1565,10 +1452,6 @@ data: {"type":"new_reply","task_id":"t_abc","message_id":"m_def","from":"代码1
 ## Token 管理端点
 
 ### POST /api/auth/node-token
-
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 为某个节点创建网络绑定的 `ntok_`。`anet node create` 会自动调用它，写入到 `.anet/nodes/<node-name>/config.json` 的 `token` 字段。
 
 ```bash
@@ -1589,7 +1472,7 @@ curl -X POST http://localhost:9200/api/auth/node-token \
 
 `token` 是该 `(node_name, network_id)` 组合的 `ntok_`，hub 端强制 binding——agent 用这个 token 调 MCP 时，server 自动锁定到 `network_id`，跨网络访问拒绝。详见 [Token 概念 — ntok_](/concepts/tokens#_2-ntok-agent-的-token-每个-agent-一个)。
 
-**常见 4xx**（verify [`auth.ts createNetworkTokenForNode()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) + [`index.ts` route](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)）：
+**常见 4xx**（由 `createNetworkTokenForNode()` 和路由鉴权返回）：
 
 | 状态 | `error` 值 | 触发条件 |
 |------|------------|---------|
@@ -1599,10 +1482,6 @@ curl -X POST http://localhost:9200/api/auth/node-token \
 | 401 | `auth required` / `invalid token` | 缺/无效 utok_ |
 
 ### POST /api/auth/tokens
-
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 创建 API Token。
 
 ```bash
@@ -1635,10 +1514,6 @@ curl -X POST http://localhost:9200/api/auth/tokens \
 :::
 
 ### GET /api/auth/tokens
-
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 列出用户的所有 Token。
 
 ```bash
@@ -1675,9 +1550,6 @@ curl http://localhost:9200/api/auth/tokens \
 每行 6 字段对照 [`auth.ts:209-213`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L209) `listTokens` SELECT：`token_id / name / scope / network_id / last_used_at / created_at`。`scope` 取值 `user` (utok\_) / `network` (ntok\_) / `full` (legacy atok\_)；`network_id` 仅 `network` / `full` scope 有值。按 `created_at DESC` 排序。明文 Token 字段**不返回**（只能在 POST 创建时拿一次）。
 
 ### DELETE /api/auth/tokens/:id
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 撤销 Token（hub 端立即吊销，跟 `anet logout` 仅本机清 token 区别开）。
 
 ```bash
@@ -1704,9 +1576,6 @@ curl -X DELETE http://localhost:9200/api/auth/tokens/tok_xxx \
 ## 网络成员端点
 
 ### GET /api/networks/:id/members
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 获取网络成员列表（仅 owner / admin）。
 
 ```bash
@@ -1741,9 +1610,6 @@ curl http://localhost:9200/api/networks/net_xxx/members \
 `anet network members` CLI 用这个响应渲染成员列表（按 `m.display_name || m.username` 显示，role 加 emoji 图标）。
 
 ### POST /api/networks/:id/members
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 添加网络成员（owner / admin only；通常 invite 流程更顺，[POST /api/networks/:id/invite](#post-api-networks-id-invite) 创建邀请码让对方自行加入）。
 
 ```bash
@@ -1777,9 +1643,6 @@ curl -X POST http://localhost:9200/api/networks/net_xxx/members \
 写 audit log `action='member_added'`，`detail` 字段记 `<user_id> as <role>`。
 
 ### PUT /api/networks/:id/members/:user_id
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 修改成员角色（仅 owner，不能修改 owner 自己的角色）。
 
 ```bash
@@ -1813,9 +1676,6 @@ curl -X PUT http://localhost:9200/api/networks/net_xxx/members/u_def456 \
 写 audit log `action='member_role_changed'`，`detail` 字段记 `<user_id> → <new_role>`。FAQ Q17 提到的「改角色」入口就是这个 endpoint。
 
 ### DELETE /api/networks/:id/members/:user_id
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 移除成员（owner / admin only，不能移除 owner 自己）。
 
 ```bash
@@ -1841,9 +1701,6 @@ curl -X DELETE http://localhost:9200/api/networks/net_xxx/members/u_def456 \
 写 audit log `action='member_removed'`，`detail` 字段记 `<user_id>`。
 
 ### POST /api/networks/:id/invite
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 创建邀请码。
 
 ```bash
@@ -1870,21 +1727,17 @@ curl -X POST http://localhost:9200/api/networks/net_xxx/invite \
 }
 ```
 
-**常见 4xx**（verify [`auth.ts createInvite()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) + [`index.ts` route handler](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)）：
+**常见 4xx**（由 `createInvite()` 和路由鉴权返回）：
 
 | 状态 | `error` 值 | 触发条件 |
 |------|------------|---------|
 | 400 | `invalid role` | `role` 不是 `admin` / `member` / `viewer` 之一 |
-| 403 | `not a member of this network` | 调用者本身不在该网络（[`index.ts` callerRole gate](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)） |
+| 403 | `not a member of this network` | 调用者本身不在该网络 |
 | 403 | `owner/admin required` | 调用者是 `member` / `viewer`，无权 issue 邀请码 |
 
 接收方用 `anet network join inv_abc123def456` 或 `POST /api/networks/join` 加入。`invite_code` 是 `inv_` 前缀 + 12 字符（`auth.ts:346` `slice(0, 12)`）。
 
 ### POST /api/networks/join
-
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 用邀请码加入网络。
 
 ```bash
@@ -1922,9 +1775,6 @@ curl -X POST http://localhost:9200/api/networks/join \
 附件（图片等）的上传 / 下载，支撑 Dashboard 发图片、commhub 附件、codex-sdk 图片输入等功能。两个端点都需 `Authorization: Bearer <token>`。
 
 ### POST /api/upload
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 上传一个文件，返回可下载的 `url`。
 
 - 请求：`multipart/form-data`，必须带一个 `file` 字段，且必须带 `Content-Length` 头。
@@ -1946,9 +1796,6 @@ curl -X POST http://localhost:9200/api/upload \
 常见错误：`411 length_required`（缺 `Content-Length`）· `413 payload_too_large`（超 12 MiB，带 `limit_bytes`）· `415 unsupported_media_type`（不是 `multipart/form-data`）· `400 missing_file`（没 `file` 字段）· `429 rate_limited`。
 
 ### GET /api/files/:file_id
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 下载 `POST /api/upload` 返回的文件。始终强制 `Content-Disposition: attachment` + `X-Content-Type-Options: nosniff`（浏览器不 inline 渲染，防 XSS）。
 
 ```bash
@@ -1988,9 +1835,6 @@ curl -OJ http://localhost:9200/api/files/<file_id> -H "Authorization: Bearer uto
 > RFC-010 active-rename 两阶段事务的协调端点，由 `anet node rename` 内部调用（流程见 [node-lifecycle §7](https://github.com/sleep2agi/agent-network/blob/main/docs/node-lifecycle.md)）。一般不直接手调，列在此处供集成方参考。三个端点都要 `Authorization: Bearer`（缺 token 401 / 无效 token 401）。
 
 ### POST /api/node-rename/prepare
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 PHASE 1：登记一笔改名事务（old node 不动，全程可回滚）。成功后写 `node_rename_prepared` audit。
 
 ```bash
@@ -2008,9 +1852,6 @@ curl -X POST http://localhost:9200/api/node-rename/prepare \
 **响应**：`{ ok, txn_id }` —— `txn_id` 用于后续 commit / abort。三个字段缺一返回 400。
 
 ### POST /api/node-rename/commit
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 PHASE 2 C1：提交改名事务（CommHub 路由切到 `new_alias`）。成功后写 `node_rename_committed` audit。
 
 ```bash
@@ -2022,9 +1863,6 @@ curl -X POST http://localhost:9200/api/node-rename/commit \
 body `{ txn_id }` 必填（缺则 400）。
 
 ### POST /api/node-rename/abort
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 回滚改名事务（C1 之前调用，old node 恢复原状）。成功后写 `node_rename_aborted` audit。
 
 ```bash
@@ -2040,13 +1878,10 @@ body `{ txn_id }` 必填（缺则 400）。
 ## Tmux 调试端点（opt-in）
 
 ::: warning 默认关闭
-仅在 `COMMHUB_ENABLE_TMUX=1` 启动 hub 时启用（[`index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)）。**默认全部返回 404 `tmux disabled`**。启用后还需 (a) 调用方 IP 在 `COMMHUB_TMUX_ALLOWLIST` 允许范围（逗号分隔，默认仅 localhost；verify [`index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)）+ (b) `users.role='admin'` system-admin auth。设计意图：让 hub 主机上的 agent tmux session 暴露给同机的 dev / dashboard 调试，**绝不要在公网开**。公网部署 hardening 步骤见 [生产部署 §5 tmux 控制面已关闭](/deploy/production#_5-确认-tmux-控制面已关闭)。
+仅在 `COMMHUB_ENABLE_TMUX=1` 时启用；默认返回 404 `tmux disabled`。启用后还要求调用方 IP 位于 `COMMHUB_TMUX_ALLOWLIST`（默认仅 localhost），且调用者是 system admin。**绝不要在公网开启。** 公网部署见 [生产部署 §5](/deploy/production#_5-确认-tmux-控制面已关闭)。
 :::
 
 ### GET /api/tmux/:name
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 抓取指定 tmux session 当前 pane 末尾 N 行输出（`tmux capture-pane -t <name> -p` 包装）。
 
 ```bash
@@ -2067,9 +1902,6 @@ curl "http://localhost:9200/api/tmux/anet-node-代码1号?lines=50" \
 ```
 
 ### POST /api/tmux/:name/send
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 往指定 tmux session 注入按键（`tmux send-keys -t <name> "<text>" Enter` 包装）。
 
 ```bash
@@ -2097,9 +1929,6 @@ curl -X POST "http://localhost:9200/api/tmux/anet-node-代码1号/send" \
 | 400 | `<tmux stderr>` | `tmux` 子进程非 0 退出（如 session 不存在） |
 
 ### GET /ws/tmux/:name
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 WebSocket 端点 —— 实时流式推送指定 tmux session 的 pane 输出。是 `GET /api/tmux/:name` 的 live 版本：HTTP 那个是一次性 `capture-pane`，这个是连上后持续 stream。鉴权门控跟上面两个 HTTP 端点**完全一致**（走同一个 `requireTmuxAccess` —— `COMMHUB_ENABLE_TMUX=1` + IP 在 `COMMHUB_TMUX_ALLOWLIST` 内 + `users.role='admin'` auth；任一不满足在 WS upgrade 前就被拒）。
 
 ```
@@ -2117,9 +1946,6 @@ v0.8 起项目转 Apache 2.0 开源 + 自部署，没有官方付费 license。�
 :::
 
 ### GET /api/license
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
 查 `licenses` 表第一行（按 `created_at` 升序），返回 trial / pro 状态 + 剩余天数。
 
 ```bash
@@ -2144,10 +1970,7 @@ curl http://localhost:9200/api/license
 ```
 
 ### POST /api/license/activate
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
-
-注入 pro license key（[`index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) 只校验 `key.startsWith('anet-') && length >= 16`，**没真正的服务端校验**）。删除原有 license 行 + 写新 pro license（限额 50 agent / 10 network / 10000 task/day，过期 365 天）。
+注入 pro license key。当前只校验 `anet-` 前缀与最小长度，**没有签名校验**；成功后会替换现有 license 记录。
 
 ```bash
 curl -X POST http://localhost:9200/api/license/activate \
@@ -2172,6 +1995,21 @@ curl -X POST http://localhost:9200/api/license/activate \
 
 ---
 
+## 较新频道的补充端点
+
+这些接口已在当前源码中提供，但较旧的 stable 包可能没有。以本机 `anet -v` 和实际响应为准。
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| GET | `/api/stats/sse` | system-admin/master 查看 SSE 连接明细 |
+| GET | `/api/host-supervisors` | 按 network 查询 host supervisor |
+| GET | `/api/nodes/:id/config` | 读取节点的脱敏配置快照 |
+| PUT | `/api/nodes/:ref/attrs` | 更新 `display_name`、`team`、`tags`，带 revision 冲突保护 |
+| PUT | `/api/nodes/:ref/avatar` | 设置或清除 http/https 头像 URL |
+| GET | `/events/network/:network_id` | 订阅不含消息正文的网络级摘要事件 |
+
+---
+
 ## 下一步
 
 **对应 MCP 工具**：
@@ -2180,7 +2018,7 @@ curl -X POST http://localhost:9200/api/license/activate \
 **深入鉴权**：
 - [Token 体系](/concepts/tokens) — utok_ / ntok_ / atok_
 - [安全设计](/concepts/security) — 完整鉴权模型
-- [v0.7 → v0.8 升级](/guide/upgrade#v0-7-v0-8-升级注意-最新) — RFC-001 Phase 2
+- [升级指南](/guide/upgrade)
 
 **实战调用**：
 - [Dashboard](/guide/dashboard) — 实际 UI 调用了哪些 REST 端点
