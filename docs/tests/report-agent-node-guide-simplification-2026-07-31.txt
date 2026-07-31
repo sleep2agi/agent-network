@@ -35,6 +35,8 @@ PASS  package engine requires Node >=22.13.0 and Bun >=1.2.0
 PASS  CLI source contains the documented create/start/stop/loop/goal/envRef commands
 PASS  source confirms claude-agent-sdk permissionMode=auto while other standard
       runtime configs retain dangerouslySkipPermissions for compatibility
+PASS  VitePress 1.6.4 Docker build on origin/main baseline and this candidate
+PASS  all six preserved legacy fragments appear as exact ids in rendered HTML
 PASS  stale phrase scan: old preview chain, v0.11 roadmap, fixed OpenCode version,
       grok-build-cli, ANET_CODEX_STDIO_DIRECT, universal permission default,
       and unsupported WeChat claims are absent
