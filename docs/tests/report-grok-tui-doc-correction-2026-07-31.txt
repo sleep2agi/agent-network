@@ -1,0 +1,47 @@
+Grok TUI documentation correction
+Date: 2026-07-31
+Base: origin/main f78c9373
+
+Scope
+-----
+- Bilingual Grok co-presence guide
+- Bilingual runtime guide
+- Bilingual changelog correction notice
+
+Published CLI check
+-------------------
+- @sleep2agi/agent-network: latest 2.2.21, preview 2.3.0-preview.36
+- @sleep2agi/agent-node: latest 2.4.13, preview 2.5.0-preview.27
+- Under Node 22.23.2 with an isolated HOME, the real published CLIs returned:
+    npx -y @sleep2agi/agent-network@2.2.21 grok attach probe-node
+    -> Unknown: grok (exit 1)
+    npx -y @sleep2agi/agent-network@2.3.0-preview.36 grok attach probe-node
+    -> Unknown: grok (exit 1)
+- Auxiliary only: searching downloaded, built JavaScript found no literal
+  Grok co-presence markers. This is not an availability gate: minification or
+  escaped/obfuscated strings can cause false negatives. Executing the real
+  package command above is the authoritative evidence.
+
+Documentation result
+--------------------
+- Replaced each 91-line install guide with a 20-line not-released status page.
+- Removed grok-build-cli from runtime recommendations.
+- Kept grok-build-acp as the currently available, non-attachable Grok path.
+- Corrected the changelog's current-preview summary and marked the old entry
+  as a historical candidate record whose commands must not be run.
+- Removed the stale "run all five" runtime count.
+- Replaced a hardcoded "current stable 2.2.21" label with the authoritative
+  npm latest dist-tag rule.
+
+Static verification
+-------------------
+- git diff --check: PASS
+- Unsupported install commands absent from both live status pages: PASS
+- Unpublished runtime absent from both recommendation lists: PASS
+- Current availability warning present in both runtime pages: PASS
+- Changelog correction present in both languages: PASS
+- Linked versioning pages exist: PASS
+
+No Docker image or npm package was built. This is a Markdown-only correction;
+the user requested conserving Codex/Claude quota. Published CLI execution plus
+source/static checks are the relevant availability evidence.
