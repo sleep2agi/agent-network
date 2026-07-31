@@ -45,7 +45,9 @@ anet node start my-bot
 
 打开 `http://localhost:3000`，从 Dashboard 给 Agent 派任务。
 
-默认管理员用户名是 `admin`。初始密码以首次 `anet hub start` 的启动输出为准；登录后立即运行 `anet passwd`。
+默认管理员用户名是 `admin`，初始密码是 `anethub`。**任何公网部署都必须登录后立即运行 `anet passwd` 改密**，否则被扫到端口就能进。
+
+> 预览版（`@preview`）行为不同：首次 `anet hub start` 会打印一次性随机密码，只显示这一次，请当场保存。
 
 ## 能做什么
 

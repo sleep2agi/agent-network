@@ -45,7 +45,9 @@ Verify: `curl http://127.0.0.1:9200/health` should return JSON containing `"ok":
 
 Open `http://localhost:3000` and dispatch work from the Dashboard.
 
-The default administrator username is `admin`. Use the initial password shown by the first `anet hub start`, then run `anet passwd` immediately after login.
+The default administrator account is `admin` / `anethub`. **Any public deployment must run `anet passwd` immediately after login** — otherwise anyone who scans the port can walk in.
+
+> Preview builds (`@preview`) behave differently: the first `anet hub start` prints a one-time random password. It is shown once, so save it right then.
 
 ## What it does
 
