@@ -170,7 +170,25 @@ Pick one per node. Mix freely on the same hub.
 | `codex-app-server` (preview) | Local `codex app-server` WebSocket bridge | Human/agent coexistence in a Codex TUI thread | local `codex` already logged in |
 | `opencode-cli` (preview) | Exact `opencode-ai@1.18.1` over ACP | Communication/text tasks with Anthropic or OpenAI presets | matching vendor API key |
 
-> latest remains the first 4 runtimes. The canonical preview picker adds `codex-app-server` and `opencode-cli`, for exactly 6 choices. OpenCode requires the vetted exact pair: `agent-network@2.3.0-preview.34` + `agent-node@2.5.0-preview.26` + `opencode-ai@1.18.1`. See [anet.sh — Runtimes](https://anet.sh/en/guide/runtimes) for the full comparison.
+> latest remains the first 4 runtimes. Preview adds `codex-app-server` and `opencode-cli`, for exactly 6 choices. Use `anet upgrade --channel preview` to keep `agent-network` and `agent-node` on the same preview channel; do not mix latest and preview. OpenCode additionally requires exact `opencode-ai@1.18.1`. See [anet.sh — Runtimes](https://anet.sh/en/guide/runtimes) for the full comparison.
+
+### Codex TUI co-presence (`codex-app-server`, preview-only)
+
+`codex-app-server` and `--copresence` are **completely absent from npm `latest`**. Switch to preview, then start from an external shell with no inherited `COMMHUB_*` identity:
+
+```bash
+anet upgrade --channel preview
+codex login
+cd /path/to/project
+for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
+anet node create codex-human --runtime codex-app-server
+anet node start codex-human --copresence
+tmux attach -t =codex-human
+```
+
+The default is read-only. Detach with `Ctrl-B D`, then run `anet node stop codex-human` from an external shell. Recovery must keep `--copresence`; a plain `anet node start` launches another node that competes for the same alias.
+
+📖 Permissions, native-Windows manual WebSocket flow, the default 600-second wait, and troubleshooting: [Codex TUI Co-presence](https://anet.sh/en/guide/codex-copresence)
 
 ### Grok Build
 

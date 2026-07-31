@@ -381,6 +381,8 @@ anet node create 翻译官 --runtime claude-agent-sdk --model <minimax-model-id>
 - 或 `anet node start <alias> --tmux` —— 从终端跑用 `tmux new -As`, session 已存在直接 attach
 
 **例外：Grok 人机共存**（`--runtime grok-build-cli`）有专用的 `anet grok attach <alias>`，可 attach 到 agent-node 持有的真实 Grok TUI，与网络任务同处一个会话。详见 [Grok 人机共存 TUI](./grok-copresence.md)。
+
+**例外：Codex TUI 人机共存**（preview `codex-app-server`）用 `anet node start <alias> --copresence` 一次启动 app-server、bridge 与可 attach 的 TUI；用精确目标 `tmux attach -t =<alias>` 进入。详见 [Codex TUI 人机共存](./codex-copresence.md)。
 :::
 
 ```bash
@@ -391,6 +393,9 @@ anet node start <name> [options]
 |------|--------|------|
 | `--tmux` | false | 在 tmux session 里跑（session 名 = alias；`-A` 已存在则 attach）。从终端跑 = attach 进入，按 `Ctrl-B D` detach；**headless（stdin 非 TTY）= 自动 detached 起**，之后 `tmux attach -t <alias>`。注意：不会自动确认 dev-channels 弹窗，那个用 `--accept-dev-channels` |
 | `--new-session` | false | 忽略旧 Claude session，创建新的（同 `--resume` chain 的「重新开始」） |
+| `--copresence` | false | **preview-only，且节点必须为 `codex-app-server`**。起 3 个 tmux session（app-server / bridge / TUI）；默认只读。断线恢复也必须继续带这个 flag，不能退成普通 `node start` |
+| `--dangerously-allow-full-access` | false | 仅搭配 `--copresence`：关闭 Codex 文件系统/网络沙箱。TTY 必须输入 `yes`；非 TTY 还需下一个双确认 flag |
+| `--yes-danger-full-access` | false | 仅非 TTY 调用方使用；必须与 `--dangerously-allow-full-access` 同时给出 |
 
 **默认（无 flag）**：
 

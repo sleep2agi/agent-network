@@ -295,15 +295,17 @@ task_id: 01J...
 
 ```bash
 codex app-server --listen ws://127.0.0.1:4500
-codex --remote ws://127.0.0.1:4500
+codex resume --remote ws://127.0.0.1:4500 <THREAD_ID>
 ```
 
 本地长期运行优先使用 daemon Unix socket：
 
 ```bash
-codex app-server daemon start
-codex --remote unix://
+codex remote-control start
+codex resume --remote unix:// <THREAD_ID>
 ```
+
+`resume --remote` 必须带明确 thread/session id；省略会进入历史会话 picker，不能作为自动化绑定方式。原生 Windows 不支持 `remote-control` daemon，使用 loopback WS。
 
 注意：Unix socket transport 仍是 WebSocket Upgrade，不是裸 JSONL。`codex app-server proxy` 只代理原始 socket 字节，不会自动把协议转换为 stdio JSONL。
 
@@ -660,6 +662,8 @@ Hub 必须先在 loopback 完成管理员初始化，再置于 TLS 反向代理�
 
 以下命令是拟议产品 UX，当前主干尚未实现：
 
+> ⚠️ **历史提案，不是当前操作指南。** 当前 preview 已采用独立 `codex-app-server` runtime + `anet node start <alias> --copresence`，见 §18.3；不要照抄本节的普通 `codex-sdk` / `node start` 命令恢复共存节点。
+
 ```bash
 # 创建一个普通 codex-sdk 节点，但选择共享 app-server transport
 anet node create codex-human --runtime codex-sdk --codex-transport app-server
@@ -869,6 +873,8 @@ codex app-server generate-json-schema --out ./schemas
 | `codex-app-server` runtime（`runtime.ts` + `cli.ts` 接线）| ✅ Phase 0A | 741 全量测试 + 真节点 e2e |
 | 网络闭环：`send_task` → 桥 → 真 codex → `send_task` 回 | ✅ | 隔离 hub 真节点 e2e PASS |
 | `anet node create --runtime codex-app-server` | ✅ | 隔离 hub 真建节点，config 写 `runtime:"codex-app-server"` |
+| `anet node start <alias> --copresence` | ✅ preview | 一等编排 app-server + bridge + TUI 三个 tmux session；默认只读，full access 双确认 |
+| 共存停止身份收拢 | ✅ preview | 持久 marker + PGID 身份门；从共存树内 stop fail closed |
 
 ### 18.1b 明确**未**落地（生产前置, 设计文档 §3.2/§4/§8）
 
@@ -893,6 +899,16 @@ codex app-server generate-json-schema --out ./schemas
 - **独占（owned, 默认）**：节点自己 `spawn codex app-server --listen ws://127.0.0.1:<临时端口>`, 桥 `thread/start` 新建并拥有一条 thread。多个节点互不干扰（各自 app-server + thread）。
 - **接管已有会话（shared / adopt）**：config 设 `codexAppServerUrl`（指向正在运行的 `codex app-server`）+ `codexThreadId`（已有线程）→ 桥作为**第二个 client** 接入、`thread/resume` 复用该线程。于是一个正在被人类 `codex --remote` TUI 使用的会话**同时变成网络节点**。桥**永不代答审批**（审批只归人类 TUI）。
 - 若 `thread/resume` 因线程从未持久化 rollout 而失败（`no rollout found`）, 桥回退到 `thread/start` 新建, 不让陈旧 id 卡死开机。
+
+日常共存的产品入口已是：
+
+```bash
+anet node create <alias> --runtime codex-app-server
+anet node start <alias> --copresence
+tmux attach -t =<alias>
+```
+
+该命令取代早期 `.demo/setup-copresence.sh` 手工编排，一次创建独立 app-server、bridge、TUI 三个 tmux session，并写回 `codexAppServerUrl` / `codexThreadId`。它仅存在于 preview，npm latest 完全没有 `codex-app-server` / `--copresence`。
 
 ### 18.4 回复走 send_task（实测决策）
 
@@ -933,5 +949,8 @@ codex app-server generate-json-schema --out ./schemas
 ### 18.6 已知边界 / 后续
 
 - 审批（approval）流：桥永不代答, 纯文本 turn 不触发审批; 需要审批的 turn 会 `waiting_human` 挂起, 由人类 TUI 处理（设计如此）。
-- 接管拓扑的 `codexAppServerUrl`/`codexThreadId` 目前靠手工写 config; `anet node create` 交互向导已给提示, 后续可加专属 flag。
+- 接管字段已支持 `anet node create --codex-app-server-url <ws> --codex-thread-id <id>`；推荐的人机共存路径是 `anet node start <alias> --copresence` 自动生成并写回字段，不再要求手改 config。
+- `codex resume --remote` 接入时必须带 `codexThreadId`；省略会进入历史会话 picker，容易接错 thread。
+- 每个节点必须使用独立 app-server：CommHub bearer token 是 app-server 进程级环境，不能在多个节点之间复用。
+- 当前任务等待最终回复默认 600s（可由 runtime 选项覆盖），超时不证明 turn 已死，也不会取消底层 Codex turn。
 - codex-app-server 内层 codex 的 loops MCP（自管 /loop 工具）接线为后续增强; 派工闭环不依赖它。

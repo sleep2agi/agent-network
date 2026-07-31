@@ -29,6 +29,7 @@ Agent Network uses two parallel version-number schemes. First-time readers often
 - Check release cadence / what one wave includes → [GitHub releases](https://github.com/sleep2agi/agent-network/releases)
 - Check a single package's independent hotfix history → that package's npm registry versions list
 - Bump to latest → `anet upgrade` (all four at once, no need to pick a wave)
+- Switch to preview → `anet upgrade --channel preview`; switch back to stable → `anet upgrade --channel latest`
 
 ## Next
 

@@ -1,0 +1,66 @@
+Test: Codex TUI co-presence documentation refresh
+Date: 2026-07-31 (Asia/Shanghai)
+Branch: docs/codex-copresence-refresh-20260731
+Base: 6f29bb6055fd621bacbc46da20dc0b10f4a00700 (origin/main at branch creation)
+Tested baseline commit: 13e12cfc9b5cd3d485b4803c539e1f754ac7edb9
+Candidate state: uncommitted MINOR follow-up on the pushed docs refresh at test time
+
+Environment
+-----------
+- Docker only; production and host package installations were not modified.
+- Fixed reusable image tag: anet-docs-codex:dev
+- Tested image ID: sha256:1fdc10ef8bc5543d19e691ea27843b4963a88126e86d5443fdf3deedb1e2f9db
+- Base image: node:22.13.1-bookworm-slim
+
+Focused gate
+------------
+Build:
+  sg docker -c 'docker build -t anet-docs-codex:dev \
+    -f tests/test535-codex-copresence-docs/Dockerfile .'
+
+Run:
+  sg docker -c 'docker run --rm --name anet-docs-codex-check \
+    anet-docs-codex:dev'
+
+Result:
+  73 passed, 0 failed
+
+Coverage:
+- Chinese and English canonical pages exist.
+- Preview-only / npm latest absence is explicit.
+- `anet upgrade --channel preview` is documented.
+- First-class `anet node start <alias> --copresence` lifecycle is present.
+- Canonical diagnosis and every refreshed co-presence entry point use exact
+  tmux targets (`-t =<name>`), with no fuzzy `codex-human` selector left.
+- The three-session prefix-collision failure mode and pane-ID alternative
+  are documented in both languages.
+- Plain `anet node start` recovery is explicitly rejected.
+- Both production duplicate cases are named with their observed durations:
+  `TM副责人` (~2 days) and `A站副责人` (~9 days).
+- Complete inherited `COMMHUB_*` identity cleanup is present.
+- app-server cwd, not bridge cwd, is the documented source of thread cwd.
+- Default read-only and full-access double confirmation are documented.
+- Manual Windows/adopt flow requires an exact `codexThreadId`.
+- Manual app-server setup discloses that MCP is not injected automatically.
+- Thread-less `codex --remote` is absent from the canonical guide.
+- Cross-node app-server sharing is rejected.
+- Shared-host Codex update prompt warning is present.
+- 600 seconds is described as an overridable default, not a hard cap.
+- RFC records the implemented command and no longer recommends
+  `codex app-server daemon start`.
+- Jam-restart SOP returns through `--copresence`.
+- Root ZH/EN README, package READMEs, CLI reference, agent-node guide,
+  and runtime guide all carry the first-class command.
+- Package READMEs no longer pin the stale preview.34 / preview.26 pair.
+- Chinese and English versioning guides document the preview/latest switch.
+- VitePress build completed and rendered:
+  - /guide/codex-copresence.html
+  - /en/guide/codex-copresence.html
+
+Baseline-suite note
+-------------------
+The pre-existing tests/test27-cases-docs suite was also run in Docker.
+Its VitePress build passed, but the overall suite reported 18 passed /
+33 failed because origin/main no longer contains the old cases/demo fixtures
+that test27 still requires. Those unrelated fixture failures are not used as
+candidate evidence; the focused gate above is the acceptance result.
