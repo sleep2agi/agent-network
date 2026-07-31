@@ -132,6 +132,9 @@ See [Tokens and permissions](/en/concepts/tokens), [Roles](/en/concepts/roles), 
 
 ### Other authentication/network errors
 
+<a id="quota-exceeded-max-n-networks-for-free-plan"></a>
+<a id="license-expired-license-expired-legacy-behavior"></a>
+
 | Error | Safe response |
 |---|---|
 | `password must be at least 8 characters` / `too common` | Choose at least eight characters and avoid the weak-password list |
@@ -140,6 +143,8 @@ See [Tokens and permissions](/en/concepts/tokens), [Roles](/en/concepts/roles), 
 | `network has N active session(s)` | Use `anet status`, stop the nodes normally, then retry network deletion |
 | `quota exceeded` | Use `anet network ls` and remove unused networks. There is currently no public CLI for changing a user plan/global role; contact the Hub operator and do not promote the user to global admin as a shortcut |
 | `license_expired` | If it remains after `anet license` and an upgrade, contact the Hub operator. There is no safe public CLI for cleaning legacy rows; stop the Hub, back up the database, and file a redacted diagnostic instead of deleting `licenses` rows online |
+
+Direct database writes bypass API authorization, auditing, and consistency checks and can corrupt related license or identity state, so this guide does not provide SQL “fixes.”
 
 ## Agent Node
 
@@ -179,6 +184,10 @@ Stop old instances and keep one process. Do not reclaim identity by editing `nod
 ### Wrong working directory
 
 File tools use the node's launch directory. Stop it, enter the intended project, and start again. In Codex TUI co-presence, the thread directory is inherited from the app-server process. Follow [Codex TUI co-presence](/en/guide/codex-copresence) and inspect the full session group, not only the bridge.
+
+<a id="vendor-api-auth-failure-401-invalid-api-key-expired-token-intern-a02xx-user-token-expired"></a>
+<a id="vendor-api-timeout-high-concurrency-fan-out-132-retry-with-backoff"></a>
+<a id="grok-build-acp-node-task-hangs-session-prompt-timed-out-after-300000ms-json-rpc-error-32603"></a>
 
 ## Runtime and model
 

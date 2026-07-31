@@ -132,6 +132,9 @@ anet hub admin reset-user --username <username>
 
 ### 其它认证/network 报错
 
+<a id="quota-exceeded-max-n-networks-for-free-plan"></a>
+<a id="license-expired-授权过期-legacy-行为"></a>
+
 | 报错 | 安全处理 |
 |---|---|
 | `password must be at least 8 characters` / `too common` | 使用至少 8 位且不在弱密码表中的新密码 |
@@ -140,6 +143,8 @@ anet hub admin reset-user --username <username>
 | `network has N active session(s)` | 用 `anet status` 找出节点，正常停止后再删除 network |
 | `quota exceeded` | 用 `anet network ls` 检查并删除不再使用的 network。目前没有公开 CLI 可修改用户 plan/全局角色；联系 Hub 运维，不要把用户直接改成全局 admin |
 | `license_expired` | 运行 `anet license` 并升级后仍出现时，联系 Hub 运维。目前没有安全的公开 CLI 可清理 legacy 行；停止 Hub、备份数据库并提交脱敏诊断，不要在线删除 `licenses` 行 |
+
+直接写数据库会绕过 API 的鉴权、审计和一致性检查，并可能损坏关联的许可或身份状态，所以这里不提供 SQL“修复”。
 
 ## Agent Node
 
@@ -179,6 +184,10 @@ tmux ls
 ### 工作目录不对
 
 文件工具使用节点的启动目录。停止节点，切到正确项目目录再启动。Codex TUI 共存时，线程目录继承自 app-server 进程；请按 [Codex TUI 共存指南](/guide/codex-copresence)检查整组会话，不要只看桥进程。
+
+<a id="vendor-api-auth-失败-401-invalid-api-key-expired-token-intern-a02xx-user-token-expired"></a>
+<a id="vendor-api-超时-fan-out-高并发-132-retry-with-backoff"></a>
+<a id="grok-build-acp-节点任务挂死-session-prompt-timed-out-after-300000ms-json-rpc-error-32603"></a>
 
 ## Runtime 和模型
 

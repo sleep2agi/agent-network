@@ -7,8 +7,8 @@ Scope
 
 Outcome
 -------
-- Chinese guide: 967 -> 257 lines.
-- English guide: 969 -> 257 lines.
+- Chinese guide: 967 -> 266 lines.
+- English guide: 969 -> 266 lines.
 - Reorganized diagnosis by dependency layer: environment, Hub, auth/network,
   node, runtime, task, channel, and Docker.
 - Removed release-history narration, fixed preview/package versions, obsolete
@@ -21,11 +21,15 @@ Outcome
 - Verified that the current CLI can list network members but cannot change a
   user's global role/plan. The guide therefore does not invent a replacement
   command for the removed privilege-escalation SQL.
+- Preserved all ten repository-referenced legacy fragments for quota, license,
+  vendor auth/timeout, and Grok timeout troubleshooting.
+- Explained why direct SQL is not a supported fallback: it bypasses API auth,
+  auditing, and consistency checks and can corrupt related state.
 
 Static/source gates
 -------------------
 PASS  git diff --check
-PASS  both guides are 257 lines and have 27 matching section headings
+PASS  both guides are 266 lines and have 27 matching section headings
 PASS  all internal Markdown targets exist
 PASS  balanced fenced code blocks
 PASS  stale/dangerous phrase scan: no v0.x/preview-number instructions,
@@ -37,10 +41,12 @@ PASS  CLI/source inspection confirms no public global role/plan mutation command
 PASS  package engines confirm Node >=22.13.0 and Bun >=1.2.0
 PASS  agent-node source confirms the `SSE connected` readiness signal
 PASS  server source confirms license_expired remains a possible legacy error
+PASS  VitePress 1.6.4 Docker build on origin/main baseline and this candidate
+PASS  every repository inbound troubleshooting fragment appears as an exact id
+      in VitePress-rendered Chinese and English HTML
 
 Test policy
 -----------
-Documentation-only change. No Docker image, Hub, model runtime, npm package,
-production process, database, or user configuration was changed. The user asked
-to conserve Codex/Claude quota, so verification was limited to source and static
-checks appropriate to the prose-only scope.
+Documentation-only change. A disposable Docker image ran VitePress only; no Hub,
+model runtime, npm publish, production process, database, or user configuration
+was touched. This did not consume Codex or Claude quota.
