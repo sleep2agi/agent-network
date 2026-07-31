@@ -1,810 +1,256 @@
 # CLI 命令参考
 
-`anet` 是 Agent Network 的命令行管理工具，覆盖 Hub、账号、Network、Agent Node、监控和 Demo 操作。
+`anet` 管理 Hub、账号、Network、节点和外部 Channel。本页只保留当前命令与容易误操作的行为；专题配置请进入对应指南。
 
-## 安装
-
-```bash
-npm install -g @sleep2agi/agent-network
-```
-
-安装后即可使用 `anet` 命令。
-
-## 命令总览
-
-### 快速启动
-
-| 命令 | 说明 | 状态 |
-|------|------|------|
-| `anet init` | 配置 hub 地址 | 已验证 |
-| `anet init project` | 配置 Claude Code 项目（`project` 是固定子命令，不是项目名占位符） | 已验证 |
-| `anet setup` | 交互式安装 runtime 依赖（按需勾选 claude CLI / agent-node / codex CLI / commhub-server） | 已验证 |
-
-### 服务器管理
-
-| 命令 | 说明 |
-|------|------|
-| `anet hub start` | 启动 CommHub Server |
-| `anet hub stop` | 停掉本机正在跑的 hub server (SIGTERM → 3s → SIGKILL) |
-| `anet hub status` | 查看 hub 运行状态 (PID + 端口 + version) |
-| `anet hub dashboard` | 启动 Dashboard UI |
-| `anet hub config` | 查看/修改 Hub 配置 |
-| `anet hub admin reset-user --username <u>` | 本机重置普通用户密码 |
-
-### 账号管理
-
-| 命令 | 说明 |
-|------|------|
-| `anet register` | 注册账号 |
-| `anet login` | 登录 |
-| `anet logout` | 退出（清掉本机 `~/.anet/config.json` 里的 token，但 hub 端 token 仍有效；要彻底失效请用 `anet token revoke`） |
-| `anet whoami` | 查看当前用户 |
-| `anet passwd` | 修改密码 |
-
-### 网络管理
-
-| 命令 | 说明 |
-|------|------|
-| `anet network ls` | 列出网络 |
-| `anet network create <name>` | 创建网络 |
-| `anet network use <name>` | 切换当前网络 |
-| `anet network info` | 查看当前网络详情 |
-| `anet network rename <old> <new>` | 重命名网络 |
-| `anet network delete <name> --force` | 删除网络（owner 限定，需要 `--force` 跳过确认） |
-| `anet network invite` | 为当前网络创建邀请码 |
-| `anet network join <invite_code>` | 用邀请码加入网络 |
-| `anet network members` | 列出当前网络成员（role / joined_at） |
-
-### Token 管理
-
-| 命令 | 说明 |
-|------|------|
-| `anet token create <name>` | 创建 API Token（Token 只显示一次，立即保存） |
-| `anet token` / `anet token ls` | 列出所有 Token（默认子命令 = ls） |
-| `anet token revoke <id>` | 撤销 Token（hub 端立即吊销） |
-
-### Agent Node 管理
-
-| 命令 | 说明 |
-|------|------|
-| `anet node create <name>` | 创建 Agent 节点 |
-| `anet node start <name>` | 启动 Agent |
-| `anet node stop <name>` | 停止 Agent |
-| `anet node restart <name>` | 重启单个节点（一条命令 = stop 再 start）；跟 `anet project restart` / `anet batch restart` 对称，不用敲两条。v0.10.15 起 |
-| `anet node resume <name>` | 恢复上次 session |
-| `anet node ls` | 列出所有节点 |
-| `anet info <name>` | 查看 Agent 详情 |
-| `anet logs <name>` | 查看 Agent 日志（加 `--follow` 实时 tail） |
-| `anet node rename <old> <new>` | 重命名 Agent —— ⚠ **节点必须至少 `anet node start` 启动过一次**（在 commhub server 端留下 sessions 行）。从未 start 过的 purely-created 节点 rename 会在 `prepareRename` 阶段 fail 报 `node not found in network`，[#110](https://github.com/sleep2agi/agent-network/issues/110)。Workaround：先 `anet node start <old>` 跑一次让 server 端注册，再 stop 后 rename。失败安全（PHASE 1 rollback，老节点完好）|
-| `anet node migrate-token-to-envref <name>` | 把节点 `config.json` 里的明文 secret（按 key 后缀 `_TOKEN`/`_KEY`/`_SECRET`/`AUTH` 或值前缀 `sk-`/`utok_`/`ntok_`/`atok_`/`ak-`/`gsk_`/`key-`/`Bearer ` 识别）迁移到 envRef 形式 `{ _envRef: "<KEY>_<NODE_SUFFIX>" }`，secret 不再持久化在磁盘 —— 写 `config.json.bak-<ts>` 备份原文件、打印需要 `export` 的 env 变量列表。详见 [安全设计 — Vendor 凭据存储 envRef 模式](/concepts/security#vendor-凭据存储-envref-模式-v0-9-0) + [Token 体系 — envRef](/concepts/tokens) ([#125](https://github.com/sleep2agi/agent-network/issues/125)) |
-| `anet node delete <name>` | 删除 Agent. **两步式**: 第一次跑只打印 will-delete 预览 + 提示 "Run again with `--force` to confirm"; 第二次跑加 `--force` 才真删. **不自动撤销 ntok_** — 要彻底清干净再加 `anet token revoke <id>`, 详见 [Token 生命周期](/concepts/tokens#token-生命周期对照). |
-
-### Session 绑定（`claude-code-cli` runtime）
-
-只 `claude-code-cli` runtime 用得上 Claude Code session（`~/.claude/projects/<cwd>/*.jsonl`）；`claude-agent-sdk` / `codex-sdk` 没有 Claude Code session 语义。
-
-| 命令 | 说明 |
-|------|------|
-| `anet node create <name> --resume <id>` | 创建节点并绑定**指定 session**（不存在则报错退出，[`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)） |
-| `anet node create <name> --resume-latest` | 创建节点并绑定**最新 session**（`listClaudeSessions()[0]`，[`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)） |
-| `anet node create <name>` | TTY 模式下交互式 picker（age / size / 前 60 字符首行预览，[`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)）；非 TTY 则照常给随机 session id |
-| `anet node start <name> --new-session` | 强制起**新** session（覆盖 profile.session） |
-| `anet node resume <name> [--session <id>]` | 恢复 session（详见 [anet node resume](#anet-node-resume)） |
-| `anet session ls` | 列当前 cwd 下 Claude Code session（picker 和 ls 共用 [`listClaudeSessions()` cli.ts](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)） |
-
-> **零键盘恢复**：从 #115 起，`anet node start` spawn `claude` 时自动注入 `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999`（[`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)），跳过 Claude Code 默认 70min session-age 阈值的「Resume from summary / full / Don't ask again」交互弹窗，**整批节点重启时不用一个个按键确认**。per-spawn 注入、不写 `~/.claude/settings.json`，用户显式 export 覆盖；resume 时还原**完整 session**（没有 per-invocation flag 强制 compact summary，#115 commit msg 解释 restart-recovery 不带意外 compaction 更安全）。
-
-### 项目级（cwd-wide）
-
-扫描当前 cwd 下 `.anet/nodes/` 里所有节点，统一起 / 重启 / 停。见 [issue #117](https://github.com/sleep2agi/agent-network/issues/117) + verify [`cli.ts projectCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)。
-
-| 命令 | 说明 |
-|------|------|
-| `anet project up` | 起所有节点（已跑的 skip，幂等；▶ started / ⏭ already-running） |
-| `anet project restart` | 杀掉现有 tmux + 重新启每个节点（↻ restarted / ▶ started）|
-| `anet project down` | 停所有节点（杀 tmux + notify hub offline；⏹ stopped）|
-
-**共享选项**：
-
-| 选项 | 默认 | 说明 |
-|------|------|------|
-| `--stagger <秒>` | `3` | 节点之间错峰延迟，`0` 关闭 |
-| `--only a,b,c` | — | 只对列出的 alias 或 node_id 操作 |
-| `--exclude x,y` | — | 跳过列出的 alias 或 node_id |
-
-> **`down` 给 hub-offline 通知设了 2s 超时上限**（cli.ts）—— 这条命令常用于「hub 自己挂了」的场景，22 个节点串行 fetch 卡 44 个超时会拖死命令；2s race 保证 worst-case 也能快速 teardown。
-
-### 监控
-
-| 命令 | 说明 |
-|------|------|
-| `anet status` | 网络概览（在线 Agent + 任务统计） |
-| `anet tasks [status]` | 查看任务列表 |
-| `anet doctor` | 系统诊断（加 `--fix` 自动 probe + 重发过期 `ntok_` 写回节点 config） |
-
-### Demo（多 Agent 演示）
-
-::: warning 实验性 — 仅供快速体验
-`anet demo` 系列是**实验性演示**，用来几分钟感受多 Agent 协作，**稳定性不作保证**（部分 demo 如 `sci-team` 仍是 scaffold、leader 为 placeholder）。别用于生产或正式演示场合；正经多 Agent 编排请按 [架构](/guide/architecture) 自己搭。
-:::
-
-| 命令 | 说明 |
-|------|------|
-| `anet demo ls` | 列出可用 demo |
-| `anet demo debate [opts]` | **辩论赛**：6 角色（主持/正反 4 辩/评委）一键 9 步辩论 |
-| `anet demo socialmedia [opts]` | **社交媒体内容工厂**：4 角色（选题/文案/配图/审核）~3 min |
-| `anet demo pr-review [opts]` | **代码 PR 审查室**：4 角色（安全/性能/风格 3 reviewer 并行 + judge）~2 min |
-| `anet demo sci-team [opts]` | **科研军团**：1 leader + N-1 worker（默认 10，5-50 可调）；**Phase 1 scaffold** — leader 当前为 placeholder echo，真正的智能 fan-out 排在 [RFC-008](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-008-multi-agent-team-convention.md) Phase 2（RFC 状态 Proposed；#51 是已落地的 Phase 1 demo 原始 issue） |
-
-
-### Channel 管理
-
-| 命令 | 说明 |
-|------|------|
-| `anet channel add <type>` | 添加 Channel（telegram/wechat/feishu） |
-| `anet channel ls` | 列出 Channel |
-
-### Goal 管理（[#191](https://github.com/sleep2agi/agent-network/issues/191) / [#184](https://github.com/sleep2agi/agent-network/issues/184)）
-
-`/goal` / `/loop` 在 agent 内调度的周期任务落盘到 `.anet/nodes/<node>/goals.json`；这一组命令负责本地侧 CRUD（详见 [`anet goal`](#anet-goal)）。
-
-| 命令 | 说明 |
-|------|------|
-| `anet goal list [node]` | 列出本地 goal（不带 node 列所有节点） |
-| `anet goal show <node> <id>` | 查看单个 goal 详情 + 末 10 条 progress_log |
-| `anet goal edit <node> <id> [--interval ...] [--text "..."] [--status ...]` | 修改 interval/text/status（至少一个 flag） |
-| `anet goal cancel <node> <id>` | 标记 goal 为 `cancelled` |
-
-> 运行中的 agent-node 把 goal 状态保留在内存里跑 —— 改完 `goals.json` 需要重启该节点才会生效（live goal control 走 commhub MCP 工具，issue [#191](https://github.com/sleep2agi/agent-network/issues/191) Phase 1 Pillar C 设计中）。
-
-### 其他
-
-| 命令 | 说明 |
-|------|------|
-| `anet config` | **只读**查看 `~/.anet/config.json` 内容（`anet config path` 打印路径，`anet config json` 输出 raw JSON）。修改走 `anet login` / `anet init` / `anet network use`，不是 `anet config --set`。verify [`cli.ts configShowCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) |
-| `anet upgrade` | 打印升级计划（self-upgrade 默认关闭，避免升级中替换正在运行的 CLI 进程；给出手动步骤）。完整指南见 [升级指南](/guide/upgrade) |
-| `anet create --batch` / `anet batch <verb>` | 批量起 N 个 agent（prefix 自动编号 + 独立 workdir/config/tmux），再用 `anet batch list/start/stop/restart/cleanup` 统一管 lifecycle。详见 [批量 Agent](/guide/batch) |
-| `anet license` / `anet activate <key>` | v0.6 legacy 命令，**OSS 用户无需操作**。`anet license` 当前返 `License: Apache-2.0 (open source)` 三行。`anet activate` 仅在命中 `license_expired` 时作兜底用。详见 [troubleshooting — `license_expired`](/troubleshooting#license-expired-授权过期-legacy-行为) |
-| `anet session ls` | 列出当前项目下的 Claude Code session（`claude-code-cli` runtime 用） |
-| `anet import [alias]` | 从 CommHub 把 claude-code agent 的 session 导入为本地 `.anet/nodes/<alias>/config.json`（不传 alias 则导入全部） |
-| `anet run` | 用 Client SDK 起一个**极简 standalone SSE agent**：连 hub、监听 task、自动 echo「收到」回复 —— **不跑 LLM**。需 `--alias`，可选 `--hub`。跟 `anet node start`（跑真实 AI runtime）不同，`anet run` 只是最小连通性 demo。verify [`cli.ts runCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) |
-
----
-
-## 详细用法
-
-### anet hub start
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
-
-启动 CommHub 通信服务器。
+## 安装与帮助
 
 ```bash
-anet hub start [options]
+# 稳定版
+npm install -g @sleep2agi/agent-network@latest
+
+# 预览版
+npm install -g @sleep2agi/agent-network@preview
+
+anet --help
+anet <command> --help
+anet -v
 ```
 
-**执行这条命令后，系统自动完成以下操作：**
+需要 Node.js 22.13+ 和 Bun 1.2+。`--help` 只显示帮助，不会创建 token、启动服务或执行其他业务操作。
 
-1. 启动 CommHub Server（默认绑定 `127.0.0.1:9200`，仅本机可访问；v0.8 起不再需要 `COMMHUB_AUTH_TOKEN`）
-2. 创建 SQLite 数据库（`~/.commhub/commhub.db`，含 14 张表）
-3. 首次运行自动 bootstrap admin 账户，默认凭证 **`admin / anethub`**（快速上手），并把 admin `utok_` 写到 `~/.anet/server/admin-utok.json`（chmod 600）
-4. 写入本机 Hub 地址到 `~/.anet/config.json`
-5. 如已有有效 `utok_` 会复用登录态；否则用默认凭证 `anet login --username admin --password anethub`
-6. **公网部署立刻 `anet passwd` 改密**
+## 最短启动路径
 
-::: info 你应该看到
-```
+```bash
+# 终端 1
 anet hub start
-Starting CommHub Server on port 9200 (bind 127.0.0.1)...
-✅ Server running on http://127.0.0.1:9200 (commhub-server v0.8.8)
-🔒 secured
-✅ Admin account created
-   username: admin
-   password: anethub
-   Store this password now; it will not be shown again.
-   Admin token saved to ~/.anet/server/admin-utok.json
 
-This machine — login then create a node:
-  anet login --username admin --password anethub
-  anet node create my-agent
-  anet node start my-agent
-```
-:::
+# 终端 2
+anet login --hub http://127.0.0.1:9200 --username admin
 
-::: tip 想自定义凭证（推荐公网部署）
-默认 `admin / anethub` 只适合本机快速上手。公网部署可以传 flag 直接设强密码：
-```bash
-anet hub start --username alice --password 'your-strong-pass!'
-```
-注意：自定义密码必须 ≥ 8 位且不在 top-1000 弱密码字典里。默认凭证（首次启动）不受此强度限制 —— 但**必须**用 `anet passwd` 立刻改成强密码。
-:::
-
-::: tip 第二次启动（idempotent）
-admin 已经 bootstrap 过（`~/.anet/server/admin-utok.json` 存在），再次 `anet hub start` 会显示：
-```
-✅ Admin already exists (admin-utok.json found, user=admin)
-```
-不会重复创建，也不会再 prompt。
-:::
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `--port` | 9200 | 监听端口 |
-| `--host` / `--ip` | 127.0.0.1 | 绑定地址；局域网接入用 `0.0.0.0` |
-| `--username` | `admin` | 自定义 admin 用户名 |
-| `--password` | `anethub`（快速上手默认） | 自定义 admin 密码（≥8 位 + 非弱密码；默认值跳过强度校验） |
-| `--dev-open` | false | **危险**：无鉴权运行，仅用于离线 tutorial |
-
-**环境变量**：
-
-| 变量 | 说明 |
-|------|------|
-| `PORT` | 监听端口 |
-| `COMMHUB_AUTH_TOKEN` | 旧 master token 兼容环境变量；v0.8 起 deprecated |
-| `DATABASE_URL` | PostgreSQL 连接（v0.8+ 产品方向已转 SQLite only，详见 [v3-postgresql-design.md banner](https://github.com/sleep2agi/agent-network/blob/main/docs/v3-postgresql-design.md)；adapter 仅作社区扩展点保留 / E2E 未验证，**主线不推荐生产使用**；默认 SQLite） |
-| `COMMHUB_CORS_ORIGINS` | CORS 白名单 |
-
-### anet hub stop
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) (`serverCommand` "stop" 分支)
-
-::: tip v0.10.11 起新增（[#200](https://github.com/sleep2agi/agent-network/issues/200)）
-本命令 v0.10.11 起 ship，已在 npm `latest`。如果你装的还是 v0.10.10 及之前，跑 `anet upgrade` 即得。
-:::
-
-停掉本机正在跑的 CommHub Server。用 `lsof -t -i :<port> -sTCP:LISTEN` 找进程，SIGTERM 优雅退出，3s 内没退就 SIGKILL 兜底。
-
-```bash
-anet hub stop                # 默认端口 9200
-anet hub stop --port 8080    # 自定义端口
-```
-
-无前台进程时也能干净停（v0.10.11 之前需要 `lsof -ti:9200 | xargs kill` 手动 hack，#200 之后不用了）。
-
-### anet hub status
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) (`serverCommand` "status" 分支)
-
-::: tip v0.10.11 起新增（[#199](https://github.com/sleep2agi/agent-network/issues/199)）
-本命令 v0.10.11 起 ship，已在 npm `latest`。如果你装的还是 v0.10.10 及之前，跑 `anet upgrade` 即得。
-:::
-
-显示 hub 运行状态：进程 PID、端口、`/health` 返回的 server version。
-
-```bash
-anet hub status              # 默认端口 9200
-anet hub status --port 8080  # 自定义端口
-```
-
-输出示例：
-
-```
-[anet] hub: ✅ running on http://127.0.0.1:9200
-[anet]   pid(s):         123456
-[anet]   server version: 0.8.8
-```
-
-未在监听该端口时显示 `Hub not running on port <port>` + 提示 `anet hub start`。
-
-### anet passwd
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
-
-修改当前登录用户密码。默认交互式输入旧密码、新密码、确认密码；脚本可用 `--old` / `--new`。
-
-```bash
-anet passwd
-anet passwd --old old-password --new new-password
-```
-
-成功后 hub 会返回新的 `utok_`，CLI 自动写回 `~/.anet/config.json`。该用户其他设备上的 `utok_` 会失效；agent 使用的 `ntok_` 不受影响。
-
-### anet hub admin reset-user
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
-
-Hub 主机本机恢复命令，绕过 HTTP API 直接读 SQLite。
-
-```bash
-anet hub admin reset-user --username alice
-```
-
-它会生成随机新密码、撤销该用户全部 `utok_`、颁发一个新的 `utok_` 并在 `audit_log` 写入 `password_reset_by_admin`。新密码只打印一次。
-
-### anet node create
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) (`createCommand`)
-
-创建新的 Agent 节点。
-
-```bash
-anet node create <name> [options]
-```
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `--runtime` | 不传则走交互式 **runtime-first wizard** ([#133](https://github.com/sleep2agi/agent-network/issues/133) v0.9.2 起): latest 走 **4-way** 选 `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`（`opencode-cli` / `codex-app-server` **仅 preview**，装 preview 才出 = 6-way，见 [runtimes 表](/guide/runtimes)）. **只有 `claude-agent-sdk` 才继续走 vendor picker + model 选择 + API Key**; `claude-code-cli` / `codex-sdk` / `grok-build-acp` print 对应 CLI 的 auth login hint 然后跳过 vendor (`claude auth login` / `codex login` / `grok login`；`grok-build-acp` 另需 `GROK_CODE_XAI_API_KEY` env)；`opencode-cli` 需先装 `opencode` CLI，再选 vendor preset (anthropic / openai，key 从 env 读)。详见 [runtimes](/guide/runtimes)。详细 wizard 顺序见 [上手指南 §5](/guide/getting-started#_4-创建并启动节点). | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` / `grok-build-acp` / `opencode-cli` / `codex-app-server` |
-| `--model` | (按 runtime 默认) | 模型名称 |
-
-**示例**：
-
-```bash
-# 交互式创建
+# 登录后
 anet node create my-agent
-
-# 直接指定
-anet node create 代码助手 --runtime codex-sdk --model <codex-model-id>
-
-# MiniMax Agent
-anet node create 翻译官 --runtime claude-agent-sdk --model <minimax-model-id>
+anet node start my-agent
 ```
 
-创建后会在 `.anet/nodes/<node-name>/config.json` 生成配置文件（目录名是 alias，不是内部 `node_id`）。下面是上面 `codex-sdk` 示例命令（未带额外 flag）的实际输出：
+初始密码随发布频道不同：stable（`@latest`）使用固定默认值，可在 `anet hub start --help` 的 `--password` 说明中查看；preview（`@preview`）首次启动会打印一次性随机密码。登录后立即运行 `anet passwd`。
 
-```json
-{
-  "anet_version": "0.1.0",
-  "node_id": "n_a1b2c3d4",
-  "node_name": "代码助手",
-  "alias": "代码助手",
-  "runtime": "codex-sdk",
-  "model": "<codex-model-id>",
-  "channels": ["server:commhub"],
-  "env": {},
-  "flags": {
-    "dangerouslySkipPermissions": true
-  }
-}
-```
+完整安装与首次配置见 [快速开始](/guide/getting-started)。
 
-以下字段**按条件生成**，不是每个 node 都有：`teammateMode`（仅 `claude-code-cli` runtime，默认 `in-process`）、`session`（仅 `claude-code-cli` runtime 或传了 `--session`）、`maxTurns`（仅传了 `--max-turns`）、`tools`（仅传了 `--tools`）。
+## Hub
 
-::: tip v0.10.10+ envRef wizard 自动衔接（[#193](https://github.com/sleep2agi/agent-network/issues/193)）
-选 `claude-agent-sdk` runtime + 第三方 vendor（小米 MiMo / MiniMax / 书生 / GLM 等）粘贴 API key 后，wizard 自动把 key 写到 `.anet/nodes/<alias>/.env`（mode 0600，自动加入 `.anet/.gitignore`），`config.json.env.ANTHROPIC_AUTH_TOKEN` 只存 envRef 引用 `{ "_envRef": "ANTHROPIC_AUTH_TOKEN_N_<id>" }` 形式 —— **secret 不再持久化在磁盘明文里**。
+| 命令 | 作用 |
+|---|---|
+| `anet hub start` | 启动 Hub；默认监听 `127.0.0.1:9200` |
+| `anet hub stop [--port <p>]` | 停止指定端口上的本机 Hub |
+| `anet hub status [--port <p>]` | 显示监听状态、PID 和服务版本 |
+| `anet hub dashboard` | 启动 Dashboard，默认端口 `3000` |
+| `anet hub config` | 查看或修改本机 Hub 启动配置 |
+| `anet hub admin reset-user --username <user>` | 在 Hub 主机上重置用户密码和用户 token |
 
-紧接着同一 shell 跑 `anet node start <alias>` 时，会在启动前自动 source 该 `.env`，**无需手动 `export ANTHROPIC_AUTH_TOKEN_N_<id>=...`**。debug 日志只输出 `loaded N key(s) from .anet/nodes/<alias>/.env`，不 echo key 值。
-
-跨机部署仍支持：wizard 仍 print 一次 export 命令，用户可手动 copy 到另一台机后再 `start`。
-:::
-
-### anet node start
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
-
-启动 Agent 节点。**默认前台运行**（stdio 接当前终端）；想后台跑或想用 tmux 管理，加 `--tmux` 开 tmux session（从终端跑会 attach 进入；headless/无 TTY 时自动转 **detached** 后台起，见下）。
-
-> v0.9.0 短暂引入过「默认 detached tmux」行为（[#122](https://github.com/sleep2agi/agent-network/issues/122)），v0.9.2 通过 [#136](https://github.com/sleep2agi/agent-network/issues/136) 回退 —— detached tmux 触发了 macOS bun `setRawMode errno 5`（detached child 的 stdio 不是 real PTY，claude-code-cli setRawMode 调用失败）。现在的 `--tmux` 在**有终端时走 attached** 模式（`tmux new -As`，PTY chain 完整不触发该 bug）；[#486](https://github.com/sleep2agi/agent-network/issues/486)/[#494](https://github.com/sleep2agi/agent-network/issues/494) 起 **stdin 不是 TTY 时自动转 detached**（`tmux new-session -d` + session 存活校验，失败非零退出），headless/CI/systemd 场景不再撞「open terminal failed」。
-
-::: tip 想 re-attach 到已跑的 tmux 节点？
-当前没有通用的顶层 `anet attach <alias>` 子命令（[#121](https://github.com/sleep2agi/agent-network/issues/121) 计划中, 未实施）。re-attach 用：
-- `tmux a -t <alias>` —— 直接 tmux 命令
-- 或 `anet node start <alias> --tmux` —— 从终端跑用 `tmux new -As`, session 已存在直接 attach
-
-**例外：Grok 人机共存**（`--runtime grok-build-cli`）有专用的 `anet grok attach <alias>`，可 attach 到 agent-node 持有的真实 Grok TUI，与网络任务同处一个会话。详见 [Grok 人机共存 TUI](./grok-copresence.md)。
-
-**例外：Codex TUI 人机共存**（preview `codex-app-server`）用 `anet node start <alias> --copresence` 一次启动 app-server、bridge 与可 attach 的 TUI；用精确目标 `tmux attach -t =<alias>` 进入。详见 [Codex TUI 人机共存](./codex-copresence.md)。
-:::
-
-```bash
-anet node start <name> [options]
-```
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `--tmux` | false | 在 tmux session 里跑（session 名 = alias；`-A` 已存在则 attach）。从终端跑 = attach 进入，按 `Ctrl-B D` detach；**headless（stdin 非 TTY）= 自动 detached 起**，之后 `tmux attach -t <alias>`。注意：不会自动确认 dev-channels 弹窗，那个用 `--accept-dev-channels` |
-| `--new-session` | false | 忽略旧 Claude session，创建新的（同 `--resume` chain 的「重新开始」） |
-| `--copresence` | false | **preview-only，且节点必须为 `codex-app-server`**。起 3 个 tmux session（app-server / bridge / TUI）；默认只读。断线恢复也必须继续带这个 flag，不能退成普通 `node start` |
-| `--dangerously-allow-full-access` | false | 仅搭配 `--copresence`：关闭 Codex 文件系统/网络沙箱。TTY 必须输入 `yes`；非 TTY 还需下一个双确认 flag |
-| `--yes-danger-full-access` | false | 仅非 TTY 调用方使用；必须与 `--dangerously-allow-full-access` 同时给出 |
-
-**默认（无 flag）**：
-
-```bash
-anet node start <name>
-# 在当前终端跑，stdio inherit。Ctrl-C 退出。
-# 想后台跑请自己 tmux 包：
-#   tmux new -s <name>
-#   anet node start <name>
-# 或一行：
-anet node start <name> --tmux
-```
-
-**`--tmux` 行为（有终端时）**：内部执行 `tmux new -As <alias> -c <cwd> "anet node start <alias>"`：
-- `-A` —— alias 已有同名 session 直接 attach（rerun 友好）
-- `-s` —— session 名 = alias（discoverability）
-- `-c` —— start 在当前 cwd
-- inner cmd 不带 `--tmux`，所以内层就是 foreground 跑，没有递归
-- 终端是 tmux client，PTY chain 完整：claude-code-cli 的 setRawMode、`Ctrl-C`/raw input 都正常工作
-
-**`--tmux` 行为（headless，stdin 非 TTY）**：自动转 `tmux new-session -d`（detached），随后做最长 2s 的 `tmux has-session` 存活校验；tmux 失败或 session 未出现都**非零退出**并透传 tmux stderr。detached 模式**不会**自动确认 claude 的 dev-channels 弹窗 —— 带 `server:*` channel 的节点请改用 `--accept-dev-channels`（detached + capture-pane 自动确认）。
-
-**`--tmux` 失败回退**：如果 tmux 未装，命令拒绝 + 提示装 tmux 或回退默认前台。
-
-**`anet node stop` 行为**：检测到同名 tmux session 时**先 `tmux kill-session`**再 SIGTERM 进程 + 通知 hub。这对 `--tmux` 创建的 session、以及 `anet project up` ([#117](https://github.com/sleep2agi/agent-network/issues/117)) 创建的 detached session 都适用，输出会告诉你 "tmux + process killed" 还是 "process killed"。
-
-### anet status
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
-
-查看网络状态概览。
-
-```bash
-anet status
-```
-
-输出示例：
-
-```
-Agent Network Status
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Network: default (net_a1b2c3d4)
-Server:  http://localhost:9200
-
-Nodes (5 online, 2 offline):
-  🟢 指挥室      idle     Claude      3s ago
-  🟢 代码1号     working  Codex (codex-sdk)     写排序算法
-  🟢 代码2号     idle     Codex (codex-sdk)     15s ago
-  🟢 文案1号     idle     MiniMax     1m ago
-  🟢 文案2号     idle     MiniMax     2m ago
-  ⚪ 测试1号     offline              2h ago
-  ⚪ 测试2号     offline              3h ago
-
-Tasks: 42 replied, 3 running, 0 failed
-```
-
-### anet tasks
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
-
-查看任务列表。
-
-```bash
-anet tasks [status] [--limit <n>]
-```
+常用启动参数：
 
 | 参数 | 说明 |
-|------|------|
-| `status` | 按状态过滤；任何 [Task 生命周期状态机](/concepts/task-lifecycle#状态说明) 中的状态都可传（`delivered` / `acked` / `running` / `replied` / `failed` / `cancelled` / `expired`） |
-| `--limit` | 显示条数（默认 20） |
+|---|---|
+| `--port <port>` | Hub 端口，默认 `9200` |
+| `--host <host>` / `--ip <host>` | 绑定地址，默认仅本机的 `127.0.0.1` |
+| `--username <user>` | 首次启动时指定管理员用户名 |
+| `--password <pass>` | 首次启动时显式指定管理员密码 |
+| `--dev-open` | 关闭鉴权，仅限隔离开发环境 |
 
-**示例**：
+不要把 `--dev-open` 或直接暴露的 `0.0.0.0:9200` 用于生产。公网部署见 [生产部署](/deploy/production)。
 
-```bash
-# 查看所有任务
-anet tasks
+## 账号、Network 与 Token
 
-# 只看失败的
-anet tasks failed
+### 账号
 
-# 限制条数
-anet tasks --limit 5
-```
+| 命令 | 作用 |
+|---|---|
+| `anet register` | 创建账号 |
+| `anet login` | 使用用户名和密码登录 |
+| `anet login --token <token>` | 使用已有 API token 登录 |
+| `anet logout` | 删除本机保存的登录 token；不会撤销 Hub 上的 token |
+| `anet whoami` | 显示当前用户和可访问的 Network |
+| `anet passwd` | 修改密码并轮换当前登录 token |
 
-### anet doctor
+### Network
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
+| 命令 | 作用 |
+|---|---|
+| `anet network ls` | 列出当前用户加入的 Network |
+| `anet network create <name>` | 创建 Network |
+| `anet network use <name>` | 切换当前 Network |
+| `anet network info` | 查看当前 Network |
+| `anet network rename <old> <new>` | 重命名 Network |
+| `anet network delete <name> --force` | 删除 Network |
+| `anet network invite [options]` | 创建邀请码 |
+| `anet network join <code>` | 使用邀请码加入 Network |
+| `anet network members` | 列出当前 Network 成员 |
 
-系统诊断。
+邀请码可使用 `--role admin|member|viewer`、`--uses <n>` 和 `--expires <days>`。
 
-```bash
-anet doctor              # 只诊断，输出每项 ✅ / ❌ + 修复提示
-anet doctor --fix        # 自动修复：(a) migrateNode 把 V2 legacy 字段 (alias/resume/legacy_runtime_name) 改成 v0.8 schema (b) probe 过期 ntok_ 并跟 hub 重发新 token 写回 .anet/nodes/<name>/config.json
-```
+### Token
 
-检查项（按 [`cli.ts doctorCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) 实际顺序）：
+| 命令 | 作用 |
+|---|---|
+| `anet token` / `anet token ls` | 列出当前用户的 API token |
+| `anet token create <name>` | 创建 API token；明文只显示一次 |
+| `anet token revoke <token-id>` | 撤销 token |
 
-1. 全局配置（`~/.anet/config.json` 有无 hub / token）
-2. Auth token 是否存在
-3. Hub 可达性（GET `/health` + 显示 sessions / SSE / license / multi-network 信息）
-4. 本地节点配置 + 各节点运行状态 + legacy 字段诊断（[`diagnoseNode` cli.ts](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)：legacy_alias_field / legacy_resume_field / legacy_runtime_name / stale_dev_hub / missing_token / user_token / untyped_token / missing_node_id 共 8 种）
-5. 无明文 secret 扫描：所有节点 config 的 env value 要么非 secret、要么是 envRef 对象；命中明文 secret 会 ❌ 提示用 `anet node migrate-token-to-envref` 迁移
-6. 依赖：`claude --version` / `codex --version` / `bun --version`
-7. 当前项目 `.mcp.json` 的 commhub 配置
-8. Telegram channel env（`~/.claude/channels/telegram/.env` 是否被静默清空，是 `/telegram:configure` 已知的 token 丢失 foot-gun）
+Token 类型、作用域与兼容规则见 [Token 体系](/concepts/tokens)。
 
-::: tip `--fix` 是 v0.8 新增
-v0.7 之前 ntok_ 失效需要手动 `anet node delete` + 重新 create；v0.8 起 `--fix` 直接探测+重发，agent-node SSE 401 也会自动 reload token 不离线（[RFC-001 Phase 2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md) 实施细节）。
-:::
+<a id="agent-node-管理"></a>
+<a id="anet-node-create"></a>
+<a id="anet-node-start"></a>
 
-### anet upgrade
+## 节点
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
+| 命令 | 作用 |
+|---|---|
+| `anet node create <name>` | 创建节点；未指定 runtime 时进入向导 |
+| `anet node start <name>` | 在当前终端启动节点 |
+| `anet node start <name> --tmux` | 在 tmux 中启动或连接节点 |
+| `anet node stop <name>` | 停止节点及其同名 tmux session |
+| `anet node restart <name>` | 停止后重新启动单个节点 |
+| `anet node resume <name> [--session <id>]` | 使用保存的会话或指定会话恢复 |
+| `anet node delete <name> --force` | 删除本地节点配置 |
+| `anet node rename <ref> <new>` | 重命名已在 Hub 注册的节点 |
+| `anet node ls` | 列出本地节点及网络状态 |
+| `anet info <name>` | 显示节点配置、进程和近期任务 |
+| `anet logs <name> [--follow]` | 查看或追踪节点日志 |
+| `anet node migrate-token-to-envref <name>` | 将配置中的明文 secret 改为 envRef，并先生成备份 |
 
-打印 / 执行升级计划 —— 4 包覆盖（`anet self` / `agent-node` / `commhub-server` / `agent-network-dashboard`）+ 双通道（preview / latest，auto-detect 或 `--channel` 覆盖）。从 [#88](https://github.com/sleep2agi/agent-network/issues/88) 起重写（v0.9.0+），老版只覆盖 2/3 包且把 preview 用户**静默降级**到 `@latest`。
+`node delete` 不会自动撤销该节点已签发的 `ntok_`；需要彻底失效时另行执行 `anet token revoke <token-id>`。
 
-```bash
-anet upgrade [--channel preview|latest] [--self] [--dry-run]
-```
+`COMMHUB_TOKEN` 不是 CLI 参数，也不存在 `anet node start --token`。节点鉴权按节点配置、全局配置、legacy `COMMHUB_TOKEN` 环境变量的顺序取值；`anet login --token` 登录的是 CLI 用户，不是向 `node start` 临时注入节点 token。
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `--channel preview|latest` | auto-detect | 强制选发布通道；auto-detect：当前 anet 版本含 prerelease tag → `preview`，否则 `latest` |
-| `--self` | false | 触发 detached self-spawn 升级 anet 自己（`sh -c 'npm install -g ... && anet -v'`，stderr → `/tmp/anet-self-upgrade.err`）；不加这 flag 默认只 print 手动命令，避免升级时替换运行中的 CLI 进程 |
-| `--dry-run` | false | 只 print plan + 不实际跑 |
-| `--fork-script` | — | deprecated，保留向后兼容 |
-
-**Plan 输出（per 包一行）**：
-
-```
-  anet (self)         2.2.0                →  2.2.10               → upgrade
-                      (v0.10.6 #154 起 anet upgrade 默认自动 detached spawn — self < target 不需 --self flag；
-                       chicken-and-egg 注：2.2.4 及以下用户需手装 1 次 `npm install -g @sleep2agi/agent-network@latest`
-                       升到 2.2.5+，之后再升级都自动 detached spawn)
-  agent-node          2.4.0                →  2.4.9                → upgrade
-  commhub-server      not installed        →  0.8.4                (lazy via npx, skipped)
-                      (not installed globally — lazy-fetched via npx by `anet hub start`)
-  dashboard           0.5.0                →  0.5.6                → upgrade
-```
-
-| Badge | 含义 |
-|------|------|
-| `→ upgrade` | current < target，需要装新版 |
-| `✓ up to date` | 已是 target，跳过 |
-| `(lazy via npx, skipped)` | 全局没装 —— anet 会按需 `bunx/npx` 拉取，不用全局升 |
-| `(self — see below)` | anet 自身默认不自升（要加 `--self`）|
-| `⚠ npm registry lookup failed` | 包名拼错或网络问题 |
-
-**`commhub-server` 行恒带说明**：`(anet hub start uses pinned <PINNED_SERVER_VERSION>)` —— `anet hub start` 不管全局装啥都跑 [`PINNED_SERVER_VERSION` cli.ts](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) 的版本（避免 server breaking 风险）。全局 install 只给 `bunx @sleep2agi/commhub-server` 直接跑用。
-
-**Node 版本检查**：低于 `engines.node`（22.13.0）只 warn 不 block（preview.9+ 真的会 fail，但用户显式知道自己在做啥时给路过去）。附带 `nvm install 22 && nvm use 22` 提示。
-
-**升完提示跑** `anet project restart` ([#117](https://github.com/sleep2agi/agent-network/issues/117))，让 cwd 下已起的节点拿新 agent-node 版本。
-
-完整升级指南见 [升级指南](/guide/upgrade)。
-
-### anet project
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
-
-cwd-wide 节点编排，[#117](https://github.com/sleep2agi/agent-network/issues/117) 引入（v0.9.0+，v0.10.0 起进 npm `latest`，verify [`agent-network/bin/cli.ts` `case "project"`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)）。
-
-```bash
-anet project <up|restart|down> [--stagger <seconds>] [--only a,b] [--exclude x,y]
-```
-
-| 子命令 | 行为 |
-|--------|------|
-| `anet project up` | 起 cwd `.anet/nodes/` 下所有节点；同名 tmux 已跑的 skip（▶ started / ⏭ already-running）|
-| `anet project restart` | 杀掉每个节点现有 tmux session + 重新启（↻ restarted / ▶ started） |
-| `anet project down` | 停所有节点 + notify hub offline（⏹ stopped）|
-
-**`down` 的 2s offline-notify timeout**（[`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)）：该命令常用于 hub 自挂场景，22 个节点串行 fetch 卡 44 个超时会拖死命令；`Promise.race + setTimeout(2000)` 保证 worst-case 也能快速 teardown。
-
-**节点选择**：`--only` / `--exclude` 接 alias 或 node_id（逗号分隔），`splitCsv` 拆分。
-
-**联动 #115**：每个内层 `anet node start` spawn 跑 [`startNodeTmuxSession`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)，env 自动注入 `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999` 跳过 Claude Code resume prompt —— 22 节点 reboot 后 `anet project up` 是真正的**零键盘恢复**。
-
-> ⚠ v0.9.2 起 `anet node start` 默认前台（[#136](https://github.com/sleep2agi/agent-network/issues/136)）。`anet project up` 仍走 detached tmux 起 N 个节点的内层 `anet node start <alias>`，在 macOS bun 下可能再触发 `setRawMode errno 5`（同 #136 根因）—— 受影响用户改用 `tmux new -s mybox` 然后顺序 `anet node start <alias> --tmux` 起每个节点。批量 detached 路径的修复跟进见 #136 follow-up。
-
-### anet network invite
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
-
-创建网络邀请码。
-
-```bash
-anet network invite [options]
-```
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `--role` | member | 邀请角色：`admin` / `member` / `viewer` |
-| `--uses` | 1 | 最大使用次数，-1 为无限 |
-| `--expires` | (无) | 过期天数 |
-
-**示例**：
-
-```bash
-# 先切换到目标 network
-anet network use dev
-
-# 创建单次邀请码
-anet network invite
-
-# 创建可用 10 次的成员邀请码
-anet network invite --role member --uses 10
-
-# 创建 7 天过期的 viewer 邀请码
-anet network invite --role viewer --expires 7
-```
-
-### anet token create
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
-
-创建 API Token。
-
-```bash
-anet token create <name>
-```
-
-**示例**：
-
-```bash
-# 创建 API token
-anet token create my-agent-token
-```
-
-::: warning 安全提示
-创建的 Token 只会显示一次，请妥善保管。丢失后需要重新创建。
-:::
-
-### anet node resume
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
-
-恢复之前被中断的 Agent session。当 Agent 崩溃、手动停止或意外退出时，可以用此命令恢复上下文，不丢失之前的对话历史。
-
-```bash
-anet node resume <name> [--session <id>]
-```
+创建节点时常用参数：
 
 | 参数 | 说明 |
-|------|------|
-| `<name>` | Agent 名称（alias） |
-| `--session` | 指定要恢复的 session ID（可选） |
+|---|---|
+| `--runtime <runtime>` | 指定 runtime；可用值以当前频道的创建向导和 [Runtime 对比](/guide/runtimes) 为准 |
+| `--model <id>` | 覆盖 runtime 默认模型 |
+| `--resume <id>` | `claude-code-cli`：绑定指定 Claude Code session |
+| `--resume-latest` | `claude-code-cli`：绑定当前项目最近的 session |
+| `--tools <list>` | 为支持该选项的 runtime 配置工具集 |
 
-如果不指定 `--session`，会使用 config.json 中保存的上次 session。
+`anet session ls` 可列出当前目录下的 Claude Code sessions。不同 runtime 的会话语义不同，不要把 Claude session ID 当作 Codex thread ID 使用。
 
-**Session 自动保存机制**：
+## 项目批量管理
 
-- 每次任务完成后，Agent Node 会自动将 session_id（Claude）或 thread_id（Codex）保存到 `config.json` 的 `session` 字段
-- 下次用 `anet node resume` 时自动读取，无需手动记录
+这些命令扫描当前目录的 `.anet/nodes/`：
 
-**适用场景**：
+| 命令 | 作用 |
+|---|---|
+| `anet project up` | 启动所有未运行节点 |
+| `anet project restart` | 重启所有节点 |
+| `anet project down` | 停止所有节点并上报离线 |
 
-- Agent 进程崩溃或被 kill，需要恢复上下文继续工作
-- 手动 `anet node stop` 后想要接着之前的对话继续
-- 网络断连导致 Agent 掉线，重连后恢复
+共享参数：
 
-```bash
-# 恢复上次 session
-anet node resume 指挥室
+- `--stagger <seconds>`：节点间错峰，默认 3 秒，`0` 表示关闭。
+- `--only a,b`：只处理列出的 alias 或 node ID。
+- `--exclude x,y`：跳过列出的 alias 或 node ID。
 
-# 恢复指定 session
-anet node resume 马 --session abc123
-```
+批量创建和清理见 [批量 Agent](/guide/batch)。
 
-::: tip 和 anet node start 的区别
-`anet node start` 默认创建新 session。如果想恢复旧 session，用 `anet node resume`。如果想强制创建新 session，用 `anet node start <name> --new-session`。
-:::
+## Channel
 
-### anet init project
+| 命令 | 作用 |
+|---|---|
+| `anet channel add telegram <node> --bot-token <token> --allow <uid>` | 添加 Telegram |
+| `anet channel add feishu <node> ...` | 添加飞书；当前为 preview 能力 |
+| `anet channel allow feishu <node> ...` | 修改飞书私聊或群聊白名单 |
+| `anet channel ls [node]` | 列出 Channel |
+| `anet channel status [node]` | 显示 Telegram 实际配置路径和白名单 |
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
+Channel 配置不会热加载，修改后需要重启节点。`anet channel add wechat` 尚未发布。完整命令见 [Channel 接入](/guide/channels)。
 
-初始化 Claude Code 项目，自动配置 MCP 和 CLAUDE.md。
+## Goal
 
-这里的 `project` 是 **固定子命令关键字**，不是可替换的项目名占位符；请按字面输入 `anet init project`。它会在你当前所在目录初始化项目配置，不会创建名为 `project` 的新目录。
+| 命令 | 作用 |
+|---|---|
+| `anet goal list [node]` | 列出本地 goal |
+| `anet goal show <node> <id>` | 查看详情与进度记录 |
+| `anet goal edit <node> <id> ...` | 修改 interval、文本或状态 |
+| `anet goal cancel <node> <id>` | 标记为 cancelled |
+| `anet node loop <node> ...` | 创建或管理节点循环任务；以该命令的 `--help` 为准 |
 
-```bash
-anet init project
-```
+CLI 直接修改 `.anet/nodes/<node>/goals.json`。运行中的节点不会自动重载该文件，修改后请重启节点。
 
-**自动创建的文件**：
+## 诊断与维护
 
-```
-{项目}/
-├── .mcp.json            # MCP Server 配置
-├── CLAUDE.md            # Agent 行为规则
-└── .anet/
-    ├── node-server.js   # Channel 插件（自动从 npm 包 dist/src/node-server.js 复制）
-    └── package.json     # 依赖
-```
+| 命令 | 作用 |
+|---|---|
+| `anet status` | 显示当前 Network 的节点和任务概览 |
+| `anet tasks [status] [--limit <n>]` | 查询任务 |
+| `anet doctor` | 检查配置、Hub、依赖、secret 与 Channel |
+| `anet doctor --fix` | 执行兼容迁移并修复可自动恢复的 token 问题；会修改配置 |
+| `anet upgrade [--channel latest|preview] [--dry-run]` | 检查并执行频道内升级 |
+| `anet config` / `anet config path` / `anet config json` | 查看全局配置摘要、路径或原始 JSON |
+| `anet init` | 配置 Hub URL |
+| `anet init project` | 在当前目录创建 CommHub MCP 项目配置 |
+| `anet setup` | 安装所选 runtime 的依赖 |
 
-`.mcp.json` 内容：
+升级细节见 [升级指南](/guide/upgrade)。
 
-```json
-{
-  "mcpServers": {
-    "commhub": {
-      "type": "stdio",
-      "command": "bun",
-      "args": [".anet/node-server.js"]
-    }
-  }
-}
-```
+## Preview 专属能力
 
-### anet goal
+以下能力存在于当前 preview，不应写成 stable 已支持：
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
+| 命令 | 作用 |
+|---|---|
+| `anet daemon up [name]` | 创建并启动 `host_supervisor` |
+| `anet daemon init <name>` / `start <name>` / `list` | 管理本机 daemon |
+| `anet node start <name> --copresence` | 启动 Codex app-server、桥和共享 TUI |
+| `anet opencode ...` | 管理 OpenCode preview 集成 |
 
-本地管理 agent-node 的调度 goal（`/goal` / `/loop` 在 agent 内 spawn 出来的周期任务，issue [#184](https://github.com/sleep2agi/agent-network/issues/184) Phase 1 落盘到 `.anet/nodes/<node>/goals.json`，issue [#191](https://github.com/sleep2agi/agent-network/issues/191) Phase 1 Pillar A 把 CLI CRUD 补齐）。
+`--copresence` 只适用于 `runtime=codex-app-server`。默认沙箱为只读；开启完整文件系统和网络访问需要 `--dangerously-allow-full-access`。TTY 会要求输入 `yes`，非 TTY 还必须同时提供 `--yes-danger-full-access`。
 
-```bash
-anet goal <subcommand> [args] [flags]
-```
+恢复共存节点时仍应使用 `anet node start <name> --copresence`，不能改用普通 `node start`。
 
-子命令：
+`opencode-cli` 当前是由 agent-node 管理的任务 runtime，不是可 attach 的共享 OpenCode TUI。`grok-build-cli` 共享 Grok TUI 也未进入当前 preview 包；当前可用的 `grok-build-acp` 不支持 attach。
 
-| 子命令 | 用途 |
-|--------|------|
-| `list [node]` | 不带 node 列所有节点；带 node 只列那个节点。空节点跳过，全部为空时打印 `No goals found.` |
-| `show <node> <id>` | 详细视图 + 末 10 条 progress_log 时间线 + `runtime` / `parent_task_id` / `report_to` |
-| `edit <node> <id> ...` | 修改 `interval` / `text` / `status`（至少一个 flag），原子写盘（tmp + rename） |
-| `cancel <node> <id>` | 把 goal 改成 `cancelled`，并追加一条 progress_log entry |
+<a id="其他"></a>
 
-`<id>` 接受前缀匹配（一般 8 位足够，歧义则报错并提示用更长的 id）。
+## 其他命令
 
-**`edit` 接受的 flag**：
+| 命令 | 作用 |
+|---|---|
+| `anet import [alias]` | 从 Hub 导入可恢复的本地节点配置 |
+| `anet run --alias <name>` | 启动不调用 LLM 的最小 SSE echo agent |
+| `anet demo [name]` | 运行实验性演示；不作为生产编排方案 |
+| `anet batch <verb>` | 管理 `anet create --batch` 创建的批次 |
+| `anet license` / `anet activate <key>` | legacy 许可证兼容命令；Apache-2.0 用户通常无需使用 |
 
-| Flag | 取值 | 说明 |
-|------|------|------|
-| `--interval` | `5min` / `10min` / `1h` / `1d` / `每5分钟` / `每小时` / `hourly` / `daily` / ... | 跟 agent-node 内 `/goal` 解析器同一套规则；**sub-minute 拒绝**（`MIN_INTERVAL_MS = 60s`，避免 wake-storm）。改完后 `next_wake_at = now + new interval`，下次 tick 立即生效，不等老窗口走完。 |
-| `--text` | 任意非空字符串 | 完整替换 goal text |
-| `--status` | `active` / `paused` / `completed` / `cancelled` | 白名单校验，其他值拒绝 |
+旧别名 `anet create`、`anet start` 等仍为兼容保留，新文档统一使用 `anet node ...`。
 
-至少要给一个 flag，否则报 `No edit flags supplied`。每次成功 `edit` 会自动追加一条 `progress_log` entry 写明改了哪些字段，留审计痕迹。
+## 配置位置与环境变量
 
-**例子**：
+| 路径 | 内容 |
+|---|---|
+| `~/.anet/config.json` | 当前 Hub、用户 token 和 Network |
+| `.anet/nodes/<node>/config.json` | 节点配置 |
+| `~/.commhub/commhub.db` | 默认 Hub SQLite 数据库 |
+| `~/.anet/server/admin-utok.json` | Hub 主机的本地管理员恢复 token |
 
-```bash
-# 列所有节点的本地 goal
-anet goal list
+常见环境变量：
 
-# 看一个节点的 goal
-anet goal list my-coder
+| 变量 | 作用 |
+|---|---|
+| `COMMHUB_URL` | Hub URL |
+| `COMMHUB_ALIAS` | 节点 alias |
+| `COMMHUB_TOKEN` | 认证 token；节点配置中的 token 优先级更高 |
+| `COMMHUB_AUTH_TOKEN` | legacy Hub master-token 兼容入口；新部署使用用户和节点 token |
+| `ANTHROPIC_BASE_URL` | Anthropic 兼容模型端点 |
+| `ANTHROPIC_AUTH_TOKEN` | 第三方 Anthropic 兼容端点凭据 |
+| `ANTHROPIC_API_KEY` | Anthropic 官方端点凭据 |
 
-# 看一个 goal 详情
-anet goal show my-coder abcd1234
+Secret 建议使用 envRef，不要把 token 或模型密钥直接提交到配置仓库。详见 [安全设计](/concepts/security)。
 
-# 把 interval 改成 10 分钟
-anet goal edit my-coder abcd1234 --interval 10min
+## 延伸阅读
 
-# 同时改 text + status
-anet goal edit my-coder abcd1234 \
-  --text "每 10 分钟检查 deploy 状态并把异常上报指挥室" \
-  --status active
-
-# 暂停一个 goal
-anet goal edit my-coder abcd1234 --status paused
-
-# 取消一个 goal
-anet goal cancel my-coder abcd1234
-```
-
-> **运行中的 node 不感知本地 `goals.json` 改动**：当前 agent-node 把 goal 状态保留在内存里。`anet goal edit/cancel` 改 file 后，CLI 会通过 `.pid` / tmux session 检测节点是否在跑，并在 stdout 提示 `node appears to be running; restart it for local goals.json changes to take effect.`。live goal control（agent 自己通过 commhub MCP 工具 CRUD goal）规划在 issue [#191](https://github.com/sleep2agi/agent-network/issues/191) Phase 1 Pillar C，等 design review。
-
-## 常用选项
-
-常见命令会读取以下选项或对应配置：
-
-| 选项 | 说明 |
-|------|------|
-| `--hub <url>` | CommHub Server 地址 |
-| `--help` | 显示帮助 |
-| `--version` | 显示版本 |
-
-> v0.8 起鉴权统一走 `anet login --hub <URL> --username --password`（一步）或 `anet login` 拿 `utok_`，不再用 `--token` 传 master token。详见 [Token 概念](/concepts/tokens) + [RFC-001](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md)。
-
-## 环境变量
-
-| 变量 | 说明 | 优先级 |
-|------|------|--------|
-| `COMMHUB_URL` | CommHub Server 地址 | env > 配置文件（命令行 `--hub` 最高） |
-| `COMMHUB_ALIAS` | Agent 别名 | env > 配置文件（命令行 `--alias` 最高） |
-| `COMMHUB_TOKEN` | 认证 Token | **agent-node：最低** —— node config (`ntok_`) > 全局 config > 此 env，且 env 跟 node config 冲突时**被忽略 + 打 warning**（[`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)，防 leftover export 把回复发错 network）。`anet` CLI 里则是 env > 全局 config |
-| `COMMHUB_AUTH_TOKEN` | **server 端** legacy master token（v0.8 软废弃，v1.0 移除）—— 由 hub 进程读，不是 agent 连接用的优先级变量 | server-side |
-| `ANTHROPIC_BASE_URL` | 模型 API 地址（MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter 等第三方 Anthropic 兼容 endpoint；完整 provider 列表见 [multi-model](/guide/multi-model)） | - |
-| `ANTHROPIC_AUTH_TOKEN` | 模型 API Key —— **第三方 Anthropic 兼容 endpoint** 走这个 | - |
-| `ANTHROPIC_API_KEY` | 模型 API Key —— **api.anthropic.com 直连专用**（详见 [runtimes 常见坑](/guide/runtimes#claude-agent-sdk)） | - |
-
-## 下一步
-
-**手把手起步**：
-- 从零跑一遍：[一键安装与起步](/guide/one-shot-install) — 装 + 跑第一个 agent
-
-**深入命令背后**：
-- 配置文件结构：[Agent Node](/guide/agent-node)（config.json 字段说明）
-- 多个 runtime 怎么选：[Runtimes](/guide/runtimes)
-- 国产/海外模型切换：[多模型配置](/guide/multi-model)
-
-**v0.8 新工具**：
-- `anet passwd` — 改密码（[安全设计](/concepts/security)）
-- `anet hub admin reset-user <username>` — 本机重置用户（owner 强制）
-- `anet doctor --fix` — 自动探测 + 重发过期 ntok_
-- `anet hub start` — 首次自动 bootstrap admin（默认 `admin / anethub`）
-
-**完整升级指南**：[v0.7 → v0.8 升级注意](/guide/upgrade#v0-7-v0-8-升级注意-最新)
+- [快速开始](/guide/getting-started)
+- [Agent Node 配置](/guide/agent-node)
+- [Runtime 对比](/guide/runtimes)
+- [Channel 接入](/guide/channels)
+- [Token 体系](/concepts/tokens)
