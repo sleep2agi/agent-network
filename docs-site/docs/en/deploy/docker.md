@@ -10,7 +10,7 @@ Until then, the section below is the minimum "this actually works" path.
 
 Most self-hosters actually run **npm global install + tmux + `anet project up`**. It's lighter than docker compose, easier to debug, and iterates faster. See:
 
-- [One-shot install (multi-agent + tmux)](/en/guide/one-shot-install) — `setup-anet.sh` spins up hub + dashboard + multiple agents on a blank Ubuntu/Debian box in one command
+- [Clean-server deployment](/en/deploy/clean-server) — step-by-step flow for bringing up hub + dashboard + multiple agents on a blank Ubuntu/Debian box (the `setup-anet.sh` one-shot script is [retired](/en/guide/one-shot-install) — do not run an old copy)
 - [npm deployment guide](/en/deploy/npm) — manual, step-by-step
 - [Production / public-internet deployment](/en/deploy/production) — TLS / firewall / backup / public-internet risks
 
@@ -48,4 +48,4 @@ A containerized version is just steps 1–5 split across different services / co
 
 - [npm deployment guide](/en/deploy/npm) — non-Docker step-by-step
 - [Production / public-internet deployment](/en/deploy/production) — TLS / firewall / backup / safety
-- [One-shot install](/en/guide/one-shot-install) — fastest path
+- [One-shot installer retirement](/en/guide/one-shot-install) — the old `setup-anet.sh` is disabled; the page lists the replacement paths

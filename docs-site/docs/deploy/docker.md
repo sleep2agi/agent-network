@@ -10,7 +10,7 @@
 
 绝大多数自部署用户实际跑的是 **npm 全局装 + tmux + `anet project up`** 组合 —— 比 docker compose 更轻、debug 更直、迭代更快。详见：
 
-- [一键安装（多 Agent + tmux）](/guide/one-shot-install) — `setup-anet.sh` 在一台空 Ubuntu/Debian 上一行命令起 hub + dashboard + 多个 agent
+- [干净服务器从零部署](/deploy/clean-server) — 空 Ubuntu/Debian 上起 hub + dashboard + 多个 agent 的分步流程（`setup-anet.sh` 一键脚本[已退役](/guide/one-shot-install)，不要运行旧副本）
 - [npm 部署指南](/deploy/npm) — 手动版本的 step-by-step
 - [生产部署 / 公网部署安全](/deploy/production) — TLS / 防火墙 / 备份 / 公网风险点
 
@@ -48,4 +48,4 @@
 
 - [npm 部署指南](/deploy/npm) — 不走 Docker 的标准 step-by-step
 - [生产部署 / 公网部署安全](/deploy/production) — TLS / 防火墙 / 备份 / 安全注意
-- [一键安装](/guide/one-shot-install) — 最快路径
+- [一键安装脚本已退役](/guide/one-shot-install) — 旧 `setup-anet.sh` 已停用，页内说明替代路径
