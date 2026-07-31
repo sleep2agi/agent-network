@@ -11,6 +11,7 @@ Scope
 - Remove the custom theme's second homepage layer: six stale cards, dated notice,
   incomplete install widget, provider badges, and promo video duplicated the
   standard VitePress hero/features rendered from index.md.
+- Remove the leftover CSS rule that hid those standard VitePress feature cards.
 - Preserve the retired-installer cleanup already present in the base branch,
   remove the remaining stale references in upgrade surfaces, and guard it
   against regression.
@@ -27,13 +28,15 @@ Verification
 ------------
 Dockerfile: tests/qa-frontdoor-docs/Dockerfile
 Image: anet-frontdoor-docs:dev
-Image ID: sha256:c30c1329b3238f3177a51b1bc8b514fec64d0c62b2f66708a1fcc8e53b5f4890
-Image size: 597938922 bytes
+Image ID: sha256:ae689433b32bacdb26f2cbf65eb25857d4952713e8872846837517b02de29a48
+Image size: 597939171 bytes
 
 Checks:
 - README <= 100 lines per language.
 - anet.sh landing source <= 50 lines per language.
 - No custom theme slot re-injects a second homepage or stale runtime/install claims.
+- Custom CSS cannot hide the standard `.VPFeatures` cards; a witnessed-red
+  mutation proves this visibility gate fails when the rule is reintroduced.
 - No active bilingual page retains a known setup-anet promotion.
 - Witnessed-red mutation reintroduces one old promotion and is detected exactly once.
 - Chinese/English retirement pages and supported replacement routes exist.
@@ -52,7 +55,8 @@ PASS: stale setup-anet promotions removed from active bilingual docs
 PASS: witnessed-red validator catches a reintroduced promotion
 PASS: retirement and replacement routes exist
 PASS: upgrade shell syntax checks
-PASS: VitePress production build (37.62s)
+PASS: homepage feature-card visibility witnessed-red gate
+PASS: VitePress production build (35.37s)
 PASS: rendered bilingual homepages contain only the concise front door
 
 Expected warning

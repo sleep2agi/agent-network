@@ -28,6 +28,14 @@ for (const removedComponent of [
   check(!existsSync(`docs-site/docs/.vitepress/theme/components/${removedComponent}`), `stale component remains: ${removedComponent}`);
 }
 
+const customCss = read("docs-site/docs/.vitepress/theme/custom.css");
+const hidesDefaultFeatures = (css) => /\.VPFeatures\s*\{[^}]*display\s*:\s*none\b/is.test(css);
+check(
+  hidesDefaultFeatures(`${customCss}\n.VPFeatures { display: none !important; }`),
+  "witnessed-red homepage-visibility mutation was not detected",
+);
+check(!hidesDefaultFeatures(customCss), "default homepage feature cards are hidden by custom CSS");
+
 const promotedInstallerClaims = [
   "`setup-anet.sh` 在一台空 Ubuntu/Debian 上一行命令起",
   "`setup-anet.sh` spins up hub + dashboard",
@@ -137,6 +145,12 @@ for (const [language, html] of renderedHomepages) {
 }
 check(renderedHomepages[0][1].includes("让 AI Agent 组成团队"), "Chinese rendered homepage lost the concise hero");
 check(renderedHomepages[1][1].includes("Turn AI agents into a team"), "English rendered homepage lost the concise hero");
+for (const marker of ["一个网络", "本地掌控", "自由组合"]) {
+  check(renderedHomepages[0][1].includes(marker), `Chinese rendered homepage lost feature card: ${marker}`);
+}
+for (const marker of ["One network", "Local control", "Mix and match"]) {
+  check(renderedHomepages[1][1].includes(marker), `English rendered homepage lost feature card: ${marker}`);
+}
 
 if (failures.length) {
   console.error(`FAIL (${failures.length})`);
