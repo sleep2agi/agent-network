@@ -810,8 +810,6 @@
   margin: 0;
 }
 
-/* hide VitePress default features (we render our own) */
-.VPFeatures { display: none !important; }
 
 /* ---------- Trust row ---------- */
 .trust-row {
