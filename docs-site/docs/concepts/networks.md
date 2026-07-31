@@ -93,7 +93,7 @@ anet network delete old-network --force
 ```
 
 ::: warning 删除网络
-删除网络前必须先停止所有 Agent。网络删除后，所有关联的任务和消息数据将丢失。
+删除前必须先停止该网络的所有 Agent。删除不可通过 CLI 撤销；请先备份 Hub 数据库。
 :::
 
 ## RBAC 权限模型
@@ -105,9 +105,9 @@ anet network delete old-network --force
 | 角色 | 含义 | 谁是 |
 |------|------|------|
 | **owner** | 网络创建者 | 创建网络的用户 |
-| **admin** | 管理员 | 被 owner 提升的用户 |
+| **admin** | 管理员 | 通过 admin 邀请加入，或由 owner 调整角色 |
 | **member** | 成员 | 通过邀请码加入的用户 |
-| **viewer** | 只读 | 通过 `anet network invite --role viewer` 邀请码加入；公开网络自动加入是设计目标（[方式三](#方式三-公开网络) 未实装） |
+| **viewer** | 只读 | 通过 `anet network invite --role viewer` 邀请码加入 |
 
 ### 权限矩阵
 
@@ -116,17 +116,17 @@ anet network delete old-network --force
 | 删除/重命名网络 | &check; | | | |
 | 邀请/踢除成员 | &check; | &check; | | |
 | 创建/撤销 network Token | &check; | &check; | &check; | |
-| 启动 Agent Node | &check; | &check; | &check; | |
+| 创建 Agent (`anet node create`) | &check; | &check; | &check; | |
 | 发任务 (send_task) | &check; | &check; | &check; | |
 | 回复任务 (send_reply) | &check; | &check; | &check; | |
 | 取消/重试任务 | &check; | &check; | &check; | |
 | 查看 Agent 状态 | &check; | &check; | &check; | &check; |
 | 查看任务列表 | &check; | &check; | &check; | &check; |
 
-> 「创建/撤销 network Token」原本标 member ❌，实际 [`auth.ts:303-320 createToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L303) 只挡 **viewer**（`viewer cannot create full-access network tokens`），owner / admin / member 都能建。撤销 Token 走 [`auth.ts revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) `WHERE token_id = ? AND user_id = ?` —— 任何用户都能撤销**自己的** token，也不按网络角色门控。不带 `network_id` 的纯 user token（`utok_`）任何登录用户都能创建。
+> owner / admin / member 可以创建 network Token，viewer 不可以。任何用户都只能撤销自己的 Token；登录用户也可以创建不带 `network_id` 的 user Token。
 
 ::: warning 审计日志权限**不**走网络角色
-旧 doc 在这里列「查看审计日志」一行 —— 实际 `/api/audit-log` 不按 owner / admin / member / viewer **网络角色**门控（verify [`server/src/index.ts:1926-1929`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1926)）：
+`/api/audit-log` 不按 owner / admin / member / viewer **网络角色**门控：
 
 - **系统级 admin**（`users.role='admin'`，首位注册用户）：看所有人 audit_log
 - **非 admin**（`users.role='user'`）：只看自己的 audit_log（server 自动加 `WHERE user_id = self` 过滤）
@@ -136,15 +136,7 @@ anet network delete old-network --force
 
 ### Dashboard 权限表现
 
-Dashboard 根据角色调整按钮可见性 / 可点击性（设计目标）：
-
-- **viewer** 看不到"发任务"、"广播"按钮
-- **member** 看不到"管理成员"、"设置"按钮
-- **admin** 看不到"删除网络"按钮
-
-::: info Dashboard 实际行为（当前 stable）
-角色 → 按钮可见性的 UI 联动**部分实装**。即使按钮当前还显示，**Server 端会 403 拒绝**（`canWrite()` 强制 RBAC），权限本身不会绕过。完整 UI 按钮 hiding **v0.9.x / v0.10.x 整条 stable 线都未动**（每个 release 的具体改动见 [changelog](/changelog)），排到 v0.11+ Dashboard 改造里再补。
-:::
+Dashboard 会根据角色调整部分按钮，但 UI 不是授权边界。Server 会对每次请求重新执行 RBAC；即使按钮仍可见，无权操作也会返回 403。
 
 ## 加入网络
 
@@ -173,7 +165,7 @@ anet network join inv_abc123def456
 
 ### 方式二：跨机器部署 Agent {#跨机器部署}
 
-**v0.8 推荐做法**：在每台目标机器上**直接 `anet node create`**，不要复制 `config.json`。每台机器的 node 是独立的注册，hub 自动颁发独立的 `ntok_`，互不冲突。
+在每台目标机器上**直接 `anet node create`**，不要复制 `config.json`。每台机器独立注册，Hub 会颁发独立的 `ntok_`。
 
 ```bash
 # 在目标机器上 — 一步同时配 hub 地址 + 登录（拿到 utok_）
@@ -185,22 +177,8 @@ anet node start remote-agent                     # 启动
 ```
 
 ::: warning 不要跨机 copy `.anet/nodes/<name>/config.json`
-config 里的 `node_id` 是 `anet node create` 时**本地随机生成**的稳定 ID（`generateNodeId()`，CommHub `resume_id` = `sdk-${node_id}`）。复制到另一台机器会让两台机器用同一个 `node_id` → 同一个 `resume_id`，hub 端 SSE 路由会乱（先到的连接接收 task，第二台机器收不到）。
-
-如果一定要把 config 从 A 机器移到 B 机器（而不是新建），用 `anet node rename` 或在 B 上重新 `anet node create`。
-
-> ⚠ `anet node rename` 的已知 gap（[#110](https://github.com/sleep2agi/agent-network/issues/110)）：节点必须**至少 `anet node start` 过一次**才能 rename（否则 CommHub Server 端没 sessions 行，`prepareRename` 失败）。复制 config 后第一步先 start 一次让 server 注册，再 rename。失败安全（PHASE 1 rollback 老节点完好）。
+复制 config 会复用同一套 `node_id`、alias 和节点凭证，让两台机器同时声称同一个身份。Hub 可能拒绝连接或把投递交给错误进程。新机器应重新运行 `anet node create`；真正迁机时必须先停止源机器，且绝不能让两端同时启动。
 :::
-
-### 方式三：公开网络
-
-::: info 设计中
-公开网络功能为设计目标，尚未完全实现。
-:::
-
-```bash
-# (Planned, not yet implemented. Tracking: https://github.com/sleep2agi/agent-network/issues/new?title=network+visibility)
-```
 
 ## 系统角色 vs 网络角色
 
@@ -210,108 +188,30 @@ Agent Network 有两层权限：
 
 | 角色 | 谁 | 权限 |
 |------|-----|------|
-| **admin** | 第一个注册的用户（自动） | 管理所有用户、全局统计 |
+| **admin** | 第一个注册的用户（自动） | hub 级用户列表、审计和 server log；本机可重置密码 |
 | **user** | 后续注册的用户 | 创建网络、加入网络 |
 
 ### Layer 2: 网络角色（per network）
 
 每个用户在每个网络中有独立的角色（owner / admin / member / viewer）。
 
-两层权限叠加。例如：系统 admin 可以看全局数据，但在某个网络中如果是 viewer，则不能在该网络中发任务。
+两层权限分别生效。系统 admin 可以使用 hub 级用户、审计和日志接口，但 `/api/networks` 仍只列 membership；若它在某个 network 中是 viewer，也不能在该网络发任务。
 
-## 配额限制（v0.6 设计目标 — v0.8 部分启用） {#quota-limits}
+## 当前配额 {#quota-limits}
 
-::: warning v0.6 配额体系多数已搁置
-v0.6 时代设计过 Free / Pro / Admin 三档配额体系（下表），Apache 2.0 OSS 转向后**多数项已搁置**，但 **createNetwork 仍 enforces 一项**：
-
-| 配额项 | v0.8 实际行为 |
-|--------|---------------|
-| **创建网络数** (`max_networks_owned`) | ✅ **仍 enforced** —— [`auth.ts:249-262 createNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L249) 按 `users.plan || "free"` 查 `QUOTAS` 上限，free 默认 **2**，仅 `users.role='admin'` 豁免 |
-| 加入网络数 | ❌ hub 没在 join path 调 quota check |
-| 每网络 Agent 数 | ❌ |
-| 每天任务数 | ❌ |
-| Token 数 | ❌ |
-| 网络最大成员 | ❌ `networks.max_members` 字段 dormant |
-
-- `anet activate <key>` 是 v0.6 legacy 命令，OSS 后**不再用作"升级"路径**
-- `users.role = 'admin'`（首位注册用户自动获得）才能突破 free 配额，详见 [troubleshooting → quota_exceeded 解决方案](/troubleshooting#quota-exceeded-max-n-networks-for-free-plan)
-
-下表保留为自部署管理员**手动设置软配额**的设计参考（v0.9.x / v0.10.x 整条 stable 线都未实现 — 每个 release 的具体改动见 [changelog](/changelog)；排到 v0.11+ / 未排期）。
-:::
-
-| 配额项 | Free（v0.6 设计） | Pro（v0.6 设计） | Admin |
-|--------|:----------:|:---------:|:-----:|
-| 创建网络数 | 2 | 10 | 无限 |
-| 加入网络数 | 3 | 20 | 无限 |
-| 每网络 Agent 数 | 5 | 50 | 无限 |
-| 每天任务数 | 100 | 5000 | 无限 |
-| Token 数 | 3 | 20 | 无限 |
-| 网络最大成员 | 5 | 50 | 无限 |
-
-OSS 自部署场景下，硬件 / 数据库性能上限才是实际配额（SQLite 单机 100+ agent 验证过，多于此请 issue 讨论扩展方案）。
+`createNetwork()` 仍限制普通用户拥有的 network 数，默认 free 上限为 2；`users.role='admin'` 豁免。加入 network、每网 Agent、每日任务、Token 和成员数目前不执行对应配额。遇到 `quota exceeded` 见 [排障指南](/troubleshooting#quota-exceeded-max-n-networks-for-free-plan)。
 
 ## Server 端强制隔离
 
-网络隔离在 **Server 端强制执行**，客户端无法绕过：
-
-```typescript
-// Server 端：从 Token 提取 network_id，不信任客户端传入的
-const effectiveNetId = enforceNetworkId ?? clientNetId ?? null;
-
-// 所有查询自动加 network_id 过滤
-sql = addScope(sql, params, effectiveNetId);
-// → WHERE ... AND network_id = ?
-```
+网络隔离在 **Server 端强制执行**：
 
 这意味着：
 
-- ntok_ 绑定了 network A → 所有操作都限定在 network A
-- 即使客户端传 `network_id=B`，Server 会忽略，强制用 A
-- 不同网络的数据完全不可见
+- `ntok_` 固定绑定一个 network，不能借请求参数切换到另一个 network
+- `utok_` 请求必须通过目标 network 的 membership 检查
+- 任务、消息、节点和成员查询都按解析后的 network scope 过滤
 
-## 数据库表
-
-网络相关的数据库表：
-
-```sql
--- 网络表
-CREATE TABLE networks (
-  -- 基础 schema（db.ts:413-424）
-  network_id   TEXT PRIMARY KEY,
-  network_name TEXT NOT NULL,
-  owner_id     TEXT NOT NULL,
-  description  TEXT,
-  settings     TEXT,                     -- network 级配置 JSON（预留字段）
-  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE(owner_id, network_name),         -- 同一 owner 下 network 名唯一
-  -- V3.13 ALTER TABLE 迁移补的列（db.ts:675-676）
-  visibility   TEXT DEFAULT 'private',  -- private/public (**字段存在, 当前不启用**, 见下方 [配额限制 section](#quota-limits))
-  max_members  INTEGER DEFAULT 50        -- **字段存在, server 端不强制检查**: addNetworkMember + joinByInvite 都没有 max_members gate, 是 v0.6 配额体系的预留字段, 见 [配额限制 v0.6 设计目标 — v0.8 部分启用](#quota-limits)
-);
-
--- 网络成员表
-CREATE TABLE network_members (
-  network_id  TEXT NOT NULL,
-  user_id     TEXT NOT NULL,
-  role        TEXT NOT NULL DEFAULT 'member',
-  invited_by  TEXT,
-  joined_at   TEXT NOT NULL DEFAULT (datetime('now')),
-  PRIMARY KEY (network_id, user_id)
-);
-
--- 邀请码表
-CREATE TABLE network_invites (
-  invite_code TEXT PRIMARY KEY,
-  network_id  TEXT NOT NULL,
-  role        TEXT NOT NULL DEFAULT 'member',
-  created_by  TEXT NOT NULL,
-  max_uses    INTEGER DEFAULT 1,
-  used_count  INTEGER DEFAULT 0,
-  expires_at  TEXT,
-  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-```
+数据库以 `networks`、`network_members` 和 `network_invites` 分别保存网络、成员角色和邀请码；字段级细节以当前 migration 为准。
 
 ## 下一步
 
@@ -321,5 +221,5 @@ CREATE TABLE network_invites (
 
 **深入**：
 - 双 token 边界（utok_ vs ntok_）：[安全模型](/concepts/security)
-- 网络 + 账号在 SQLite 怎么存：上方 schema + [架构](/guide/architecture)
+- 网络 + 账号在 SQLite 怎么存：[架构](/guide/architecture)
 - 多 network 同时跑：[CLI 命令](/guide/cli) 的 `anet network ls / use` 章节
