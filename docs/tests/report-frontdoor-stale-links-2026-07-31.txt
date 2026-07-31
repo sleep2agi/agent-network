@@ -1,0 +1,42 @@
+Agent Network front-door documentation audit
+Date: 2026-07-31
+Branch: docs/frontdoor-final-audit
+Base: 67740865ca0514a52fcb64a7cb5053e71eb5d100
+
+Scope
+-----
+- Keep the already-merged README (77 lines/language) and anet.sh landing source
+  (35 lines/language) concise.
+- Remove active documentation that still promoted the retired setup-anet.sh.
+- Replace stale one-shot links with getting-started or clean-server routes.
+- Remove the obsolete v0.11 Docker-guide promise and stale current-version claim.
+- Keep the bilingual retirement page and compatibility stub for old bookmarks.
+
+Verification
+------------
+Dockerfile: tests/qa-frontdoor-docs/Dockerfile
+Image: anet-frontdoor-docs:dev
+Image ID: sha256:75ce1582029f63954b8a8ed4fc462c58e95191ca7107f1777a92601816322a8f
+Image size: 534898483 bytes
+
+Checks:
+- README <= 100 lines per language.
+- anet.sh landing source <= 50 lines per language.
+- No active bilingual page retains a known setup-anet promotion.
+- Witnessed-red mutation reintroduces one old promotion and is detected exactly once.
+- Chinese/English retirement pages and supported replacement routes exist.
+- Historical V2 note no longer claims v0.8.x is current.
+- VitePress 1.6.4 full production build.
+
+Result
+------
+PASS: front doors remain concise
+PASS: stale setup-anet promotions removed from active bilingual docs
+PASS: witnessed-red validator catches a reintroduced promotion
+PASS: retirement and replacement routes exist
+PASS: VitePress production build (36.67s)
+
+Expected warning
+----------------
+The existing VitePress bundle has chunks above 500 kB. This content-only change
+does not add client code and does not attempt an unrelated bundling refactor.

@@ -251,10 +251,7 @@ done
 
 ## 下一步
 
-**直接用**：
-
 **配置和调优**：
-- 钱花在哪儿？看 [一键安装与起步](/guide/one-shot-install) 一节的成本对比
 - 想把多个 API Key 持久化？看 [Agent Node 配置](/guide/agent-node) 的 env 字段
 - API 限流报错？多数厂商有并发上限，[FAQ](/faq) 里有应对策略
 

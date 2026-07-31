@@ -320,7 +320,7 @@ npm install -g @sleep2agi/agent-network@preview
 ## Next steps
 
 **Get started**:
-- [One-shot install](/en/guide/one-shot-install) — first agent in 5 minutes after install
+- [Getting started](/en/guide/getting-started) — install and start the first agent
 
 **Production**:
 - [Production deployment](/en/deploy/production) — multi-machine + TLS + backups

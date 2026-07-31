@@ -143,7 +143,7 @@ Detailed test reports: [Changelog](/en/changelog) + [test reports](https://githu
 - `codex-sdk` runtime end-to-end (real LLM reply) — no OpenAI test key yet, the second half is pending verification
 - `anet license` / `anet activate` — v0.6 legacy, OSS users don't need to touch these (see [troubleshooting](/en/troubleshooting#license-expired-license-expired-legacy-behavior))
 - `anet network create` and cross-user network sharing — code merged but no E2E regression
-- **One-shot install script `setup-anet.sh`** — not end-to-end verified, audit before use, see [One-shot install (experimental)](/en/guide/one-shot-install)
+- **Old `setup-anet.sh` installer** — [retired](/en/guide/one-shot-install) because its cleanup and credential boundaries were unsafe; do not run a saved copy
 :::
 
 ::: tip No hosted service

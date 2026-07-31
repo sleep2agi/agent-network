@@ -306,10 +306,7 @@ done
 
 ## Next steps
 
-**Use it now**:
-
 **Configure and tune**:
-- Where does the cost go? See the cost comparison in [One-shot install](/en/guide/one-shot-install)
 - Persist multiple API keys? See [Agent Node -- config.json env field](/en/guide/agent-node)
 - Rate-limit errors? Most providers have concurrency caps -- see [FAQ](/en/faq)
 

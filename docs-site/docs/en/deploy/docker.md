@@ -1,16 +1,14 @@
 # Docker Deployment
 
-::: warning Full Docker deployment guide pending
-This page used to be built on top of the `demos/codex-telegram-squad/` Dockerfile + docker-compose, which was removed during the [#198](https://github.com/sleep2agi/agent-network/issues/198) docs rewrite — the old paths are stale. The full Docker deployment guide (hub + dashboard + multi-agent one-shot compose) is queued for the v0.11+ doc rework.
-
-Until then, the section below is the minimum "this actually works" path.
+::: warning No maintained production compose bundle
+Dockerfiles and compose files in this repository are test fixtures or integration-specific examples, not a general production template. This page documents only the verifiable minimum path.
 :::
 
 ## Recommended path: npm + tmux (most reliable)
 
 Most self-hosters actually run **npm global install + tmux + `anet project up`**. It's lighter than docker compose, easier to debug, and iterates faster. See:
 
-- [One-shot install (multi-agent + tmux)](/en/guide/one-shot-install) — `setup-anet.sh` spins up hub + dashboard + multiple agents on a blank Ubuntu/Debian box in one command
+- [Fresh-server deployment](/en/deploy/clean-server) — install on a new Ubuntu/Debian host and verify each stage
 - [npm deployment guide](/en/deploy/npm) — manual, step-by-step
 - [Production / public-internet deployment](/en/deploy/production) — TLS / firewall / backup / public-internet risks
 
@@ -31,7 +29,7 @@ Whether docker compose or plain tmux, the per-box startup order is the same:
 
 1. `anet hub start --host 0.0.0.0` (bind LAN; default `127.0.0.1` is fine for purely local use)
 2. `anet hub dashboard`
-3. `anet login --username admin --password <your-password>` (the first `anet hub start` auto-bootstraps `admin` / `anethub` — **run `anet passwd` to change the password before any public-internet deploy**)
+3. `anet login --hub http://127.0.0.1:9200 --username admin` (use the password shown during first startup; run `anet passwd` before exposing the Hub)
 4. `anet node create <alias>` × N (one config per agent)
 5. `anet project up` to bring every node in cwd up
 
@@ -48,4 +46,4 @@ A containerized version is just steps 1–5 split across different services / co
 
 - [npm deployment guide](/en/deploy/npm) — non-Docker step-by-step
 - [Production / public-internet deployment](/en/deploy/production) — TLS / firewall / backup / safety
-- [One-shot install](/en/guide/one-shot-install) — fastest path
+- [Fresh-server deployment](/en/deploy/clean-server) — complete step-by-step flow for a new server

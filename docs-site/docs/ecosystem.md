@@ -30,7 +30,7 @@
 ## 下一步
 
 **做项目**：
-- [一键安装与起步](/guide/one-shot-install) — 装好 anet
+- [快速上手](/guide/getting-started) — 安装并启动 Agent
 - [Channel 插件](/guide/channels) — 接你自己的 IM / API
 
 **收录你的项目**：在 GitHub 开 issue 把项目名 / 链接 / 一句话简介贴上来（标题前缀 "Ecosystem:"）。
