@@ -46,7 +46,7 @@ Runtime availability follows the installed npm channel; do not infer it from a f
 | `codex-app-server` | Share a Codex thread with a human TUI | Preview-only; use `anet node start <name> --copresence` |
 | `opencode-cli` | Run the vetted OpenCode ACP path | Preview-only |
 
-A shared Grok TUI is not in the current npm packages. Development branches may contain source-only experiments, but they are not an installable product path until published and listed in the [Grok TUI status page](https://anet.sh/guide/grok-copresence).
+Neither npm `latest` nor `preview` includes a shared Grok TUI. Development branches may contain source-only experiments, but they are not an installable product path until published and listed in the [Grok TUI status page](https://anet.sh/guide/grok-copresence).
 
 ## Configuration and security
 

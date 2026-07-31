@@ -48,8 +48,8 @@ The node is ready after its log reports `SSE connected`. Open `http://localhost:
 
 - Claude Code, Claude Agent SDK, Codex SDK, and Grok Build ACP are the published task-runtime paths.
 - Codex TUI co-presence is preview-only and must be started and recovered with `--copresence`; see the [co-presence guide](https://anet.sh/guide/codex-copresence).
-- OpenCode support is preview-only.
-- A shared Grok TUI is not in the current npm packages. Use `grok-build-acp` for published Grok nodes and follow the [Grok TUI status page](https://anet.sh/guide/grok-copresence).
+- OpenCode support is preview-only. Its automatic `npx` fallback is intentionally disabled, so install the documented CLI explicitly.
+- Neither npm `latest` nor `preview` includes a shared Grok TUI. Use `grok-build-acp` for published Grok nodes and follow the [Grok TUI status page](https://anet.sh/guide/grok-copresence).
 
 Development branches may contain source-only runtime experiments. They are not supported installation paths until they appear in an npm dist-tag and the runtime guide.
 
