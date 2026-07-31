@@ -12,7 +12,7 @@ The first `anet hub start` creates the `admin` user. The initial password depend
 # Terminal 1
 anet hub start
 
-# Terminal 2: enter the password printed on first start
+# Terminal 2: stable uses the --help default; preview uses the first-start password
 anet login --hub http://127.0.0.1:9200 --username admin
 
 anet node create my-agent

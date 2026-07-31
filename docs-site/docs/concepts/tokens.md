@@ -12,7 +12,7 @@
 # 终端 1
 anet hub start
 
-# 终端 2：按提示输入首次启动打印的密码
+# 终端 2：stable 用 --help 中的默认密码；preview 用首启打印的随机密码
 anet login --hub http://127.0.0.1:9200 --username admin
 
 anet node create my-agent
