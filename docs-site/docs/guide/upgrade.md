@@ -30,7 +30,7 @@ anet --version            # 看输出的版本号即当前装的 npm latest
 
 ```bash
 npm install -g @sleep2agi/agent-network
-# 或一键安装脚本（含 admin password 提示等 UX）
+# 或使用公开的包安装脚本
 curl -fsSL https://anet.sh/install.sh | bash
 ```
 
