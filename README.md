@@ -36,7 +36,7 @@ anet hub start
 anet hub dashboard
 
 # 终端 3
-anet login --hub http://127.0.0.1:9200 --username admin --password anethub
+anet login --hub http://127.0.0.1:9200 --username admin
 anet node create my-bot
 anet node start my-bot
 ```
@@ -45,7 +45,7 @@ anet node start my-bot
 
 打开 `http://localhost:3000`，从 Dashboard 给 Agent 派任务。
 
-默认账号 `admin / anethub` 仅用于本机快速体验；对外开放前请运行 `anet passwd`。
+保存 `anet hub start` 首次启动时打印的随机密码；登录时输入该密码，并按提示立即修改。
 
 ## 能做什么
 

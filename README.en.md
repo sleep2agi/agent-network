@@ -36,7 +36,7 @@ anet hub start
 anet hub dashboard
 
 # Terminal 3
-anet login --hub http://127.0.0.1:9200 --username admin --password anethub
+anet login --hub http://127.0.0.1:9200 --username admin
 anet node create my-bot
 anet node start my-bot
 ```
@@ -45,7 +45,7 @@ Verify: `curl http://127.0.0.1:9200/health` should return JSON containing `"ok":
 
 Open `http://localhost:3000` and dispatch work from the Dashboard.
 
-The default `admin / anethub` account is for local evaluation only. Run `anet passwd` before exposing the Hub.
+Save the random password printed by the first `anet hub start`; enter it at login and change it when prompted.
 
 ## What it does
 
