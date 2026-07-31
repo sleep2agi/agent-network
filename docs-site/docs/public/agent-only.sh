@@ -86,7 +86,7 @@ export PATH=~/.npm-global/bin:$PATH
 if [ "$WIPE" = "1" ] || [ "$WIPE" = "true" ]; then
   echo "[wipe] 清状态..."
   tmux ls 2>/dev/null | awk -F: '/^anet-/{print $1}' | xargs -I{} tmux kill-session -t {} 2>/dev/null || true
-  pkill -f agent-node 2>/dev/null || true
+  pkill -u "$(id -u)" -f agent-node 2>/dev/null || true
   rm -rf ~/.anet ~/anodes/.anet ~/.npm-global/lib/node_modules/@sleep2agi 2>/dev/null
 fi
 
