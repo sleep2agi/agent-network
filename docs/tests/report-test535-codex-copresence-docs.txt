@@ -2,14 +2,14 @@ Test: Codex TUI co-presence documentation refresh
 Date: 2026-07-31 (Asia/Shanghai)
 Branch: docs/codex-copresence-refresh-20260731
 Base: 6f29bb6055fd621bacbc46da20dc0b10f4a00700 (origin/main at branch creation)
-Tested baseline commit: 13e12cfc9b5cd3d485b4803c539e1f754ac7edb9
-Candidate state: uncommitted MINOR follow-up on the pushed docs refresh at test time
+Tested source commit: 6791c4bf0d58baee2c189e9ceddb7c0a6157addb
+Candidate state: committed and pushed; clean before this report-only update
 
 Environment
 -----------
 - Docker only; production and host package installations were not modified.
 - Fixed reusable image tag: anet-docs-codex:dev
-- Tested image ID: sha256:1fdc10ef8bc5543d19e691ea27843b4963a88126e86d5443fdf3deedb1e2f9db
+- Tested image ID: sha256:b07824dd0d4cfb1d2dda9b5d0968b981d4ee8e3f8ed5bcc5703354c1aa12127e
 - Base image: node:22.13.1-bookworm-slim
 
 Focused gate
