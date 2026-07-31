@@ -1,0 +1,65 @@
+Agent Network front-door documentation audit
+Date: 2026-07-31
+Branch: docs/frontdoor-final-audit
+Base: 18ed64f616d19f861283bd910c52fe9376ab8e59
+Integrated main: 24f5d8541776fef25390acf6c8b56b205cf36f7c
+
+Scope
+-----
+- Keep the already-merged README (77 lines/language) and anet.sh landing source
+  (35 lines/language) concise.
+- Remove the custom theme's second homepage layer: six stale cards, dated notice,
+  incomplete install widget, provider badges, and promo video duplicated the
+  standard VitePress hero/features rendered from index.md.
+- Remove the leftover CSS rule that hid those standard VitePress feature cards.
+- Preserve the retired-installer cleanup already present in the base branch,
+  remove the remaining stale references in upgrade surfaces, and guard it
+  against regression.
+- Keep the bilingual retirement page, compatibility stub, and supported
+  replacement routes for old bookmarks.
+- Replace the historical V2 guide's stale `v0.8.x` current-version claim with
+  the authoritative npm dist-tag rule, and remove empty or dated guide copy.
+- Keep both public upgrade scripts on loopback by default and stop printing a
+  hard-coded password after an upgrade that does not reset Hub credentials.
+- Incorporate main@24f5d854's security correction: upgrading must not delete
+  the shared `~/.npm/_npx` cache.
+
+Verification
+------------
+Dockerfile: tests/qa-frontdoor-docs/Dockerfile
+Image: anet-frontdoor-docs:dev
+Image ID: sha256:ae689433b32bacdb26f2cbf65eb25857d4952713e8872846837517b02de29a48
+Image size: 597939171 bytes
+
+Checks:
+- README <= 100 lines per language.
+- anet.sh landing source <= 50 lines per language.
+- No custom theme slot re-injects a second homepage or stale runtime/install claims.
+- Custom CSS cannot hide the standard `.VPFeatures` cards; a witnessed-red
+  mutation proves this visibility gate fails when the rule is reintroduced.
+- No active bilingual page retains a known setup-anet promotion.
+- Witnessed-red mutation reintroduces one old promotion and is detected exactly once.
+- Chinese/English retirement pages and supported replacement routes exist.
+- Historical V2 note no longer claims v0.8.x is current.
+- Stable and preview upgrade scripts default Dashboard to `127.0.0.1`, retain
+  explicit `ANET_DASHBOARD_HOST=0.0.0.0` opt-in plus the legacy `ANET_HUB_IP`
+  override, preserve account state, and do not delete the shared npx cache.
+- VitePress 1.6.4 full production build.
+- Built Chinese and English HTML contain the concise hero/install content and
+  none of the retired custom-layer classes or old feature-card labels.
+
+Result
+------
+PASS: front doors remain concise
+PASS: stale setup-anet promotions removed from active bilingual docs
+PASS: witnessed-red validator catches a reintroduced promotion
+PASS: retirement and replacement routes exist
+PASS: upgrade shell syntax checks
+PASS: homepage feature-card visibility witnessed-red gate
+PASS: VitePress production build (35.37s)
+PASS: rendered bilingual homepages contain only the concise front door
+
+Expected warning
+----------------
+The existing VitePress bundle has chunks above 500 kB. This content-only change
+does not add client code and does not attempt an unrelated bundling refactor.

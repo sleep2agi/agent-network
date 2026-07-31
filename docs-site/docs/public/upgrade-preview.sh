@@ -3,10 +3,11 @@
 #
 # Channel-aware via #88 `anet upgrade --channel preview` (resolves whatever
 # is globally installed: CLI / agent-node / commhub-server / dashboard).
-# Falls back to `npm i -g @sleep2agi/agent-network@preview` if anet isn't
-# installed yet. Mirror of upgrade.sh — only the channel differs.
+# Falls back to `npm i -g @sleep2agi/agent-network@preview` if only the CLI is
+# missing. This upgrades an existing host; it is not a fresh-server installer.
+# Mirror of upgrade.sh — only the channel differs.
 #
-# Usage (on a host that already ran setup-anet.sh):
+# Usage (on a host with an existing Agent Network installation):
 #   curl -fsSL https://anet.sh/upgrade-preview.sh | bash
 
 set -euo pipefail
@@ -19,7 +20,7 @@ fi
 
 export PATH=~/.npm-global/bin:$PATH
 
-echo "[1/4] Upgrading agent-network (channel: preview) ..."
+echo "[1/3] Upgrading agent-network (channel: preview) ..."
 if command -v anet >/dev/null 2>&1; then
   anet upgrade --channel preview
 else
@@ -29,18 +30,14 @@ else
 fi
 
 echo ""
-echo "[2/4] Stopping the dashboard tmux session ..."
+echo "[2/3] Stopping the dashboard tmux session ..."
 tmux kill-session -t anet-dashboard 2>/dev/null || true
 
 echo ""
-echo "[3/4] Clearing the npx cache (so the new preview dashboard is pulled) ..."
-rm -rf ~/.npm/_npx
-
-echo ""
-echo "[4/4] Restarting the dashboard ..."
-HUB_IP="${ANET_HUB_IP:-0.0.0.0}"
+echo "[3/3] Restarting the dashboard ..."
+DASHBOARD_HOST="${ANET_DASHBOARD_HOST:-${ANET_HUB_IP:-127.0.0.1}}"
 PATH_PREFIX="PATH=~/.npm-global/bin:\$PATH"
-tmux new-session -d -s anet-dashboard -n dashboard "$PATH_PREFIX anet hub dashboard --ip $HUB_IP; bash"
+tmux new-session -d -s anet-dashboard -n dashboard "$PATH_PREFIX anet hub dashboard --ip $DASHBOARD_HOST; bash"
 
 for i in $(seq 1 30); do
   if curl -fs http://127.0.0.1:3000 -o /dev/null 2>&1; then break; fi
@@ -49,12 +46,18 @@ done
 
 LAN_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 ANET_VERSION="$(anet --version 2>/dev/null | head -1 || echo 'unknown')"
+if [ "$DASHBOARD_HOST" = "0.0.0.0" ]; then
+  DASHBOARD_URL="http://${LAN_IP:-127.0.0.1}:3000"
+else
+  DASHBOARD_URL="http://$DASHBOARD_HOST:3000"
+fi
 
 echo ""
 echo "================================================================"
 echo "  ✅ Preview upgrade complete — $ANET_VERSION"
 echo ""
-echo "  Dashboard:  http://$LAN_IP:3000   (admin / anethub)"
+echo "  Dashboard:  $DASHBOARD_URL"
+echo "  Account:    use the existing Hub username and password (upgrade does not reset them)"
 echo "  Browser:    hard refresh once (Cmd+Shift+R) to drop cached JS"
 echo "  Logs:       tmux a -t anet-dashboard"
 echo ""

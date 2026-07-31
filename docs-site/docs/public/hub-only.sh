@@ -117,10 +117,10 @@ if [ "$WIPE" = "1" ] || [ "$WIPE" = "true" ]; then
         ~/.config/systemd/user/anet-dashboard.service \
         ~/.config/systemd/user/anet-commander.service 2>/dev/null
   tmux ls 2>/dev/null | awk -F: '/^anet-/{print $1}' | xargs -I{} tmux kill-session -t {} 2>/dev/null || true
-  pkill -9 -f commhub-server 2>/dev/null || true
-  pkill -9 -f agent-network-dashboard 2>/dev/null || true
-  pkill -9 -f agent-node 2>/dev/null || true
-  rm -rf ~/.anet ~/.commhub ~/.npm/_npx ~/.npm-global/lib/node_modules/@sleep2agi 2>/dev/null
+  pkill -9 -u "$(id -u)" -f commhub-server 2>/dev/null || true
+  pkill -9 -u "$(id -u)" -f agent-network-dashboard 2>/dev/null || true
+  pkill -9 -u "$(id -u)" -f agent-node 2>/dev/null || true
+  rm -rf ~/.anet ~/.commhub ~/.npm-global/lib/node_modules/@sleep2agi 2>/dev/null
   mkdir -p ~/.commhub
 fi
 

@@ -1,0 +1,42 @@
+Agent Network core-pages concision audit
+Date: 2026-07-31
+Branch: docs/core-pages-concise
+Base: 18ed64f616d19f861283bd910c52fe9376ab8e59
+
+Scope
+-----
+- Rewrite the bilingual five-minute introduction around verifiable components,
+  runtimes, setup commands, and concepts.
+- Remove unsupported marketing claims, hard tool counts, cost promises, and
+  scale claims.
+- Shorten ecosystem and community pages to their current purpose and links.
+- Remove BlueLeap Pro because its published HTTP and HTTPS endpoints are no
+  longer reachable, so it fails the page's own inclusion criterion.
+- Reduce the stable sidebar while keeping detailed pages searchable and linked
+  from relevant guides.
+
+Verification
+------------
+Dockerfile: tests/qa-core-docs/Dockerfile
+Image: anet-core-docs:dev
+Image ID: sha256:3c01968b627f910dd8ef157403eca6a7bc3d39a000a945fcc6177ea443ec2569
+Image size: 527906502 bytes
+
+Checks
+------
+- Chinese and English introductions <= 70 lines.
+- Ecosystem pages <= 35 lines and community pages <= 30 lines.
+- Witnessed-red mutation proves the unsupported-claim detector can fail.
+- Both introductions retain install, Node version, npm-channel, and loopback facts.
+- Each language sidebar has at most 30 links.
+- Five public ecosystem/community destinations return HTTP 2xx after redirects.
+- VitePress 1.6.4 production build.
+
+Result
+------
+PASS: six bilingual core pages stay concise
+PASS: unsupported marketing claims are absent and witnessed-red works
+PASS: concise intro retains install, version, and loopback facts
+PASS: sidebars stay below 30 links per language
+PASS: ecosystem and community destinations are reachable
+PASS: VitePress production build (36.31s; full container run 41s)

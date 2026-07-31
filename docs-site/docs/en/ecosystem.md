@@ -1,40 +1,22 @@
 # Ecosystem
 
-Projects built on Agent Network, or projects that use Agent Network as their productivity backbone.
+These projects publicly report using Agent Network. Check each linked site for its current status.
 
-## Built with anet
-
-| Project | What it is | How it uses anet |
-|---|---|---|
-| 🌀 [**Agent Network**](https://github.com/sleep2agi/agent-network) | The very project you're reading about — **dogfood**: agent-network is itself developed using agent-network | claude-code-cli + Codex agents mesh-collaborate to ship code, docs, tests, graphics |
-| 📑 [**PaperScope.ai**](https://paperscope.ai) | Discover and understand AI research papers through an intelligent platform | Agent pipeline for fetching, summarizing, and tagging papers |
-| 📊 [**AI Insight**](https://ai-insight.org) | Daily AI industry intelligence — research reports + signal-rich aggregator (LLMs, Agents, frontier tech) | "AI Agent army" produces daily content, anet orchestrates the workflow |
+| Project | Purpose |
+|---|---|
+| [Agent Network](https://github.com/sleep2agi/agent-network) | Uses multiple agents to develop the project itself |
+| [PaperScope.ai](https://paperscope.ai) | AI research discovery and explanation |
+| [AI Insight](https://ai-insight.org) | AI industry news and reports |
 | 🚀 [**BlueLeap Pro**](https://blueleap.pro) | AI education and tools platform — courses, skills marketplace, and hands-on services for the AGI era | Course instruction and multi-agent demo references for hands-on AI Agent workflows |
 
-## Want to be listed?
+## Submit a project
 
-If your project uses Agent Network as multi-agent infrastructure, or you use anet to collaborate and ship faster, we'd love to feature it:
+A listing must:
 
-- **PR**: edit [`docs-site/docs/en/ecosystem.md`](https://github.com/sleep2agi/agent-network/blob/main/docs-site/docs/en/ecosystem.md)
-- **Discussion**: open a [GitHub Discussion](https://github.com/sleep2agi/agent-network/discussions) (prefix the title with "Ecosystem:"), describe your project and how you use anet
-- **WeChat**: drop it in the [community group](/en/community), the maintainer will gather submissions
+- have a reachable website, repository, or package;
+- genuinely use an Agent Network runtime, CommHub, or Dashboard;
+- explain its purpose in one sentence.
 
-## Inclusion criteria
+Edit the [English source page](https://github.com/sleep2agi/agent-network/edit/main/docs-site/docs/en/ecosystem.md) and open a PR, or start a [GitHub Discussion](https://github.com/sleep2agi/agent-network/discussions) with an `Ecosystem:` title.
 
-- Project is reachable (live URL, open-source repo, or npm package — **at least one public entry point**)
-- Genuinely uses Agent Network (any runtime / commhub / dashboard)
-- Can describe what it does in one sentence
-
-We don't require open source, a specific license, or any specific stack.
-
-## Next steps
-
-**Build a project**:
-- [One-shot install](/en/guide/one-shot-install) — install anet
-- [Channel plugins](/en/guide/channels) — wire your own IM / API
-
-**Get your project listed**: open a GitHub issue with name / link / one-line description (prefix the title with "Ecosystem:").
-
-**Learn more**:
-- [Community](/en/community) — WeChat group / Discussions / sponsoring
-- [Architecture](/en/guide/architecture) — capability overview
+[Get started](/en/guide/getting-started) · [Channels](/en/guide/channels) · [Community](/en/community)

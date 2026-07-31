@@ -320,7 +320,7 @@ npm install -g @sleep2agi/agent-network@preview
 ## 下一步
 
 **起步**：
-- [一键安装与起步](/guide/one-shot-install) — anet 装好后 5 分钟跑第一个 agent
+- [30 秒上手](/guide/getting-started) — anet 装好后跑第一个 agent（`setup-anet.sh` 一键脚本[已退役](/guide/one-shot-install)）
 
 **生产**：
 - [生产部署](/deploy/production) — 多机部署 + TLS + 备份

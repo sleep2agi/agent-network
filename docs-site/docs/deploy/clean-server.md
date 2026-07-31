@@ -374,9 +374,9 @@ sudo systemctl status anet-hub anet-node@my-bot
 ## 下一步
 
 - [上手指南](/guide/getting-started) — 已经装好 anet 的端到端走查（笔记本场景）
-- [一键安装](/guide/one-shot-install) — `setup-anet.sh` 自动起 hub + dashboard + 多 agent
+- [一键安装脚本退役说明](/guide/one-shot-install) — 旧脚本已停用，请使用本页的分步流程
 - [生产部署 / 公网部署安全](/deploy/production) — TLS / 防火墙 / 备份 / 公网风险点
-- [Channel 接入](/guide/channels) — Telegram / WeChat / 飞书 完整接入手册
+- [Channel 接入](/guide/channels) — 当前渠道状态与 Telegram / 飞书接入；微信尚未发布
 - [节点 Runtime](/guide/runtimes) — runtime 详细对比
 
 如果踩到本页没覆盖的坑，欢迎到 [GitHub Issues](https://github.com/sleep2agi/agent-network/issues) 开一条 + cite 哪一步、什么报错、`anet -v` 输出。
