@@ -17,13 +17,15 @@ Scope
   replacement routes for old bookmarks.
 - Replace the historical V2 guide's stale `v0.8.x` current-version claim with
   the authoritative npm dist-tag rule, and remove empty or dated guide copy.
+- Keep both public upgrade scripts on loopback by default and stop printing a
+  hard-coded password after an upgrade that does not reset Hub credentials.
 
 Verification
 ------------
 Dockerfile: tests/qa-frontdoor-docs/Dockerfile
 Image: anet-frontdoor-docs:dev
-Image ID: sha256:332486912d8d4928400aa2189cd50b08e45bd8c8721fdd66afbfbb6911a52edf
-Image size: 597972092 bytes
+Image ID: sha256:d6a5f5a7d90673476931f2a832505ef06e890035f87904a1c8c9fea11b84bfb3
+Image size: 597970666 bytes
 
 Checks:
 - README <= 100 lines per language.
@@ -33,6 +35,9 @@ Checks:
 - Witnessed-red mutation reintroduces one old promotion and is detected exactly once.
 - Chinese/English retirement pages and supported replacement routes exist.
 - Historical V2 note no longer claims v0.8.x is current.
+- Stable and preview upgrade scripts default Dashboard to `127.0.0.1`, retain
+  explicit `ANET_DASHBOARD_HOST=0.0.0.0` opt-in plus the legacy `ANET_HUB_IP`
+  override, and preserve account state.
 - VitePress 1.6.4 full production build.
 - Built Chinese and English HTML contain the concise hero/install content and
   none of the retired custom-layer classes or old feature-card labels.
@@ -43,7 +48,8 @@ PASS: front doors remain concise
 PASS: stale setup-anet promotions removed from active bilingual docs
 PASS: witnessed-red validator catches a reintroduced promotion
 PASS: retirement and replacement routes exist
-PASS: VitePress production build (35.91s; full container run 38s)
+PASS: upgrade shell syntax checks
+PASS: VitePress production build (35.19s; full container run 38s)
 PASS: rendered bilingual homepages contain only the concise front door
 
 Expected warning

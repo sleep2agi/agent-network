@@ -3,7 +3,8 @@
 #
 # Delegates to `anet upgrade --channel latest` when anet is already installed
 # (channel-aware multi-package upgrade — #88), and falls back to a plain
-# `npm install -g @sleep2agi/agent-network@latest` for brand-new boxes.
+# `npm install -g @sleep2agi/agent-network@latest` if only the CLI is missing.
+# This upgrades an existing host; it is not a fresh-server installer.
 # Either way, the dashboard tmux session is restarted and the npx cache is
 # cleared so the new pinned dashboard version is pulled.
 #
@@ -51,9 +52,9 @@ rm -rf ~/.npm/_npx
 
 echo ""
 echo "[4/4] Restarting the dashboard ..."
-HUB_IP="${ANET_HUB_IP:-0.0.0.0}"
+DASHBOARD_HOST="${ANET_DASHBOARD_HOST:-${ANET_HUB_IP:-127.0.0.1}}"
 PATH_PREFIX="PATH=~/.npm-global/bin:\$PATH"
-tmux new-session -d -s anet-dashboard -n dashboard "$PATH_PREFIX anet hub dashboard --ip $HUB_IP; bash"
+tmux new-session -d -s anet-dashboard -n dashboard "$PATH_PREFIX anet hub dashboard --ip $DASHBOARD_HOST; bash"
 
 # Give it up to 30s to pull packages + start.
 for i in $(seq 1 30); do
@@ -63,12 +64,18 @@ done
 
 LAN_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 ANET_VERSION="$(anet --version 2>/dev/null | head -1 || echo 'unknown')"
+if [ "$DASHBOARD_HOST" = "0.0.0.0" ]; then
+  DASHBOARD_URL="http://${LAN_IP:-127.0.0.1}:3000"
+else
+  DASHBOARD_URL="http://$DASHBOARD_HOST:3000"
+fi
 
 echo ""
 echo "================================================================"
 echo "  ✅ Upgrade complete — $ANET_VERSION"
 echo ""
-echo "  Dashboard:  http://$LAN_IP:3000   (admin / anethub)"
+echo "  Dashboard:  $DASHBOARD_URL"
+echo "  Account:    use the existing Hub username and password (upgrade does not reset them)"
 echo "  Browser:    hard refresh once (Cmd+Shift+R) to drop cached JS"
 echo "  Logs:       tmux a -t anet-dashboard"
 echo ""

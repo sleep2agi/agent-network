@@ -75,6 +75,12 @@ check(read("docs-site/docs/guide/one-shot-install.md").includes("一键安装脚
 check(read("docs-site/docs/en/guide/one-shot-install.md").includes("One-shot installer retired"), "English retirement page missing");
 check(read("docs-site/docs/public/setup-anet.sh").includes("已退役"), "public compatibility stub is not retired");
 check(read("docs/upgrade-v2.md").includes("本文中的旧版本号只描述当时迁移背景"), "historical upgrade note still presents a stale current version");
+for (const path of ["docs-site/docs/public/upgrade.sh", "docs-site/docs/public/upgrade-preview.sh"]) {
+  const script = read(path);
+  check(script.includes('ANET_DASHBOARD_HOST:-${ANET_HUB_IP:-127.0.0.1}'), `${path} does not default the dashboard to loopback`);
+  check(!script.includes("Dashboard:  http://$LAN_IP:3000   (admin / anethub)"), `${path} still prints stale credentials`);
+  check(script.includes("upgrade does not reset them"), `${path} does not preserve existing-account semantics`);
+}
 
 for (const route of [
   "docs-site/docs/guide/getting-started.md",
