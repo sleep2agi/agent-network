@@ -1,0 +1,32 @@
+CLI guide simplification report — 2026-07-31
+
+Scope
+-----
+- docs-site/docs/guide/cli.md
+- docs-site/docs/en/guide/cli.md
+
+Outcome
+-------
+- Chinese guide: 810 -> 256 lines.
+- English guide: 804 -> 256 lines.
+- Replaced duplicated command narration with a compact command reference and
+  canonical links for runtime, token, channel, and deployment details.
+- Kept node authentication precise: there is no `node start --token`; token
+  resolution is node config, global config, then legacy COMMHUB_TOKEN fallback.
+- Preserved eight repository/external compatibility fragments for node management,
+  create, start, and other commands across Chinese and English pages.
+
+Verification
+------------
+PASS  git diff --check
+PASS  balanced fenced code blocks
+PASS  auth precedence matches agent-node/src/cli.ts
+PASS  anet node start has no --token option in agent-network/bin/cli.ts
+PASS  VitePress 1.6.4 Docker build on origin/main baseline and this candidate
+PASS  all eight preserved legacy fragments appear as exact ids in rendered HTML
+
+Test policy
+-----------
+Documentation-only change. A disposable Docker image ran VitePress only; no Hub,
+model runtime, npm publish, production process, database, or user configuration
+was touched. This did not consume Codex or Claude quota.
