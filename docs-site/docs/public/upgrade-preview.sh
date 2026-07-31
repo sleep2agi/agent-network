@@ -6,7 +6,7 @@
 # Falls back to `npm i -g @sleep2agi/agent-network@preview` if anet isn't
 # installed yet. Mirror of upgrade.sh — only the channel differs.
 #
-# Usage (on a host with an existing Agent Network installation):
+# Usage (on a host that already ran setup-anet.sh):
 #   curl -fsSL https://anet.sh/upgrade-preview.sh | bash
 
 set -euo pipefail

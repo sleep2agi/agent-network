@@ -1,14 +1,16 @@
 # Docker 部署
 
-::: warning 当前没有受维护的生产 compose 套件
-仓库中的 Dockerfile 和 compose 文件用于测试或特定集成，不是通用生产部署模板。下面只说明可验证的最小路径。
+::: warning 完整 Docker 部署指南待写
+本页原本基于 `demos/codex-telegram-squad/` 目录的 Dockerfile + docker-compose 写成，但该 demo 已在 [#198](https://github.com/sleep2agi/agent-network/issues/198) docs 重写中移除，老路径已 stale。**完整 Docker 部署指南**（hub + dashboard + 多 agent 一键 compose）排进 v0.11+ doc rework。
+
+在那之前，下面是「跑得通」的最小路径。
 :::
 
 ## 推荐路径：npm + tmux（最稳）
 
 绝大多数自部署用户实际跑的是 **npm 全局装 + tmux + `anet project up`** 组合 —— 比 docker compose 更轻、debug 更直、迭代更快。详见：
 
-- [干净服务器部署](/deploy/clean-server) — 在新 Ubuntu/Debian 上分步安装并逐项验证
+- [干净服务器从零部署](/deploy/clean-server) — 空 Ubuntu/Debian 上起 hub + dashboard + 多个 agent 的分步流程（`setup-anet.sh` 一键脚本[已退役](/guide/one-shot-install)，不要运行旧副本）
 - [npm 部署指南](/deploy/npm) — 手动版本的 step-by-step
 - [生产部署 / 公网部署安全](/deploy/production) — TLS / 防火墙 / 备份 / 公网风险点
 
@@ -29,7 +31,7 @@
 
 1. `anet hub start --host 0.0.0.0`（绑 LAN；本机用 default `127.0.0.1` 也行）
 2. `anet hub dashboard`
-3. `anet login --hub http://127.0.0.1:9200 --username admin`（使用首次启动时给出的密码；公网部署前运行 `anet passwd`）
+3. `anet login --username admin --password <你的密码>`（首次 hub start 会自动 bootstrap `admin`/`anethub`，**公网部署前立刻 `anet passwd` 改强密码**）
 4. `anet node create <alias>` × N（每个 agent 一份配置）
 5. `anet project up` 把 cwd 下所有节点起起来
 
@@ -46,4 +48,4 @@
 
 - [npm 部署指南](/deploy/npm) — 不走 Docker 的标准 step-by-step
 - [生产部署 / 公网部署安全](/deploy/production) — TLS / 防火墙 / 备份 / 安全注意
-- [干净服务器部署](/deploy/clean-server) — 新服务器的完整分步流程
+- [一键安装脚本已退役](/guide/one-shot-install) — 旧 `setup-anet.sh` 已停用，页内说明替代路径

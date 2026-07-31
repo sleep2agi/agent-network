@@ -320,7 +320,7 @@ npm install -g @sleep2agi/agent-network@preview
 ## Next steps
 
 **Get started**:
-- [Getting started](/en/guide/getting-started) — install and start the first agent
+- [Getting started](/en/guide/getting-started) — run your first agent after install (the `setup-anet.sh` one-shot script is [retired](/en/guide/one-shot-install))
 
 **Production**:
 - [Production deployment](/en/deploy/production) — multi-machine + TLS + backups

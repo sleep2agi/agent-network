@@ -319,7 +319,7 @@ ZH 翻译要点：
 # Channel-aware multi-package upgrade
 anet upgrade
 
-# Or via the published upgrade script
+# Or via the one-shot script
 curl -fsSL https://anet.sh/upgrade.sh | bash
 \`\`\`
 

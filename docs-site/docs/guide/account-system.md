@@ -326,7 +326,7 @@ Key 在 `anet node create` 时输入，保存在当前项目的 `.anet/nodes/<�
 - [网络隔离](/concepts/networks) — RBAC 权限矩阵、邀请码、数据隔离原理
 
 **实操**：
-- [快速上手](/guide/getting-started) — 安装并启动第一个 Agent
+- [30 秒上手](/guide/getting-started) — 装好 anet 后第一个 agent（`setup-anet.sh` 一键脚本[已退役](/guide/one-shot-install)）
 - [多模型配置](/guide/multi-model) — 各种 AI 模型怎么配
 - [Dashboard](/guide/dashboard) — Web UI 看 token / 用户 / 网络
 

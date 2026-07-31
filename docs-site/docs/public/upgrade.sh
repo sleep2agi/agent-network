@@ -7,7 +7,7 @@
 # Either way, the dashboard tmux session is restarted and the npx cache is
 # cleared so the new pinned dashboard version is pulled.
 #
-# Usage (on a host with an existing Agent Network installation):
+# Usage (on a host that already ran setup-anet.sh):
 #   curl -fsSL https://anet.sh/upgrade.sh | bash
 #
 # Steps:
@@ -18,7 +18,7 @@
 
 set -euo pipefail
 
-# Must run as the non-root user that owns the Agent Network installation.
+# Must run as a non-root user (same permission model as setup-anet.sh).
 if [ "$(id -u)" -eq 0 ]; then
   echo "[!] Running as root. Switch to the anet user first:  su - anet"
   echo "    Then re-run this command."

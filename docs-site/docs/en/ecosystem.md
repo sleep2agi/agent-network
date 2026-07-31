@@ -30,7 +30,7 @@ We don't require open source, a specific license, or any specific stack.
 ## Next steps
 
 **Build a project**:
-- [Getting started](/en/guide/getting-started) — install and start an agent
+- [Getting started](/en/guide/getting-started) — install anet (the `setup-anet.sh` one-shot script is [retired](/en/guide/one-shot-install))
 - [Channel plugins](/en/guide/channels) — wire your own IM / API
 
 **Get your project listed**: open a GitHub issue with name / link / one-line description (prefix the title with "Ecosystem:").

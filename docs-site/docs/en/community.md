@@ -38,4 +38,4 @@ If your team relies on Agent Network in production and wants to fund development
 - [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) — usage questions / design discussion
 - [Ecosystem](/en/ecosystem) — projects built with anet
 - [Changelog](/en/changelog) — release notes and migration tips
-- [Getting started](/en/guide/getting-started) — first run
+- [Getting started](/en/guide/getting-started) — first run (the `setup-anet.sh` one-shot script is [retired](/en/guide/one-shot-install))

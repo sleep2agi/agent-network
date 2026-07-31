@@ -30,7 +30,7 @@ From there on, `anet upgrade` auto-detached-spawns and `anet -v` reflects the ne
 
 ```bash
 npm install -g @sleep2agi/agent-network
-# Or use the published package installer
+# Or via the one-shot install script (handles admin-password prompts and other UX)
 curl -fsSL https://anet.sh/install.sh | bash
 ```
 

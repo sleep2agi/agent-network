@@ -39,4 +39,4 @@
 - [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) — 使用问题 / 设计讨论
 - [生态](/ecosystem) — 用 anet 做出来的项目
 - [更新日志](/changelog) — 各版本变化和迁移注意
-- [快速上手](/guide/getting-started) — 第一次跑通
+- [30 秒上手](/guide/getting-started) — 第一次跑通（`setup-anet.sh` 一键脚本[已退役](/guide/one-shot-install)）

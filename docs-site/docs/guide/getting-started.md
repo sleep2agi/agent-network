@@ -143,7 +143,7 @@ anet node start my-bot
 - `codex-sdk` runtime 端到端（LLM 真回话）—— 缺 OpenAI 测试 key，后半程待补验
 - `anet license` / `anet activate` — v0.6 legacy, OSS 用户无需操作（详 [troubleshooting](/troubleshooting#license-expired-授权过期-legacy-行为)）
 - `anet network create` 跨用户网络共享 — 代码已合并但未做 E2E 回归
-- **旧 `setup-anet.sh` 一键脚本** — 已因清理范围和凭据边界不安全而[退役](/guide/one-shot-install)，不要运行以前保存的副本
+- **一键安装脚本 `setup-anet.sh`** — 已退役停用, 不要运行旧副本, 见 [退役说明](/guide/one-shot-install)
 :::
 
 ::: tip 没有官方托管
