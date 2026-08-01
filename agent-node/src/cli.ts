@@ -1233,15 +1233,18 @@ async function drainPendingReplies(): Promise<void> {
 // from `get_inbox` (it's only marked acked when ack_inbox lands) and
 // trigger the LLM twice.
 const inflightMessageIds = new Set<string>();
+const displayedInformationalMessageIds = new Set<string>();
+
+const INBOX_RETRY = { initialDelayMs: 1_000, maxDelayMs: 30_000 } as const;
 
 const workInboxDrain = createInboxDrainLane((cause) => {
   const error = cause as any;
   warn(`inbox work drain failed: ${error?.message || error}`);
-});
+}, INBOX_RETRY);
 const informationalInboxDrain = createInboxDrainLane((cause) => {
   const error = cause as any;
   warn(`inbox informational drain failed: ${error?.message || error}`);
-});
+}, INBOX_RETRY);
 
 function isGoalCommand(content: string): boolean {
   return /^\s*\/(?:goal|loop)\b/i.test(content || "");
@@ -3650,6 +3653,12 @@ async function processOpencodeCopresenceMessages() {
   if (RUNTIME !== "opencode" || opencodeMode !== "copresence") return;
 
   const messages = await getInbox();
+  const pendingInformationalIds = new Set(
+    messages.filter((msg) => (msg.type || "task") === "message").map((msg) => msg.id),
+  );
+  for (const displayedId of displayedInformationalMessageIds) {
+    if (!pendingInformationalIds.has(displayedId)) displayedInformationalMessageIds.delete(displayedId);
+  }
   for (const msg of messages) {
     if ((msg.type || "task") !== "message") continue;
     if (inflightMessageIds.has(msg.id)) {
@@ -3661,10 +3670,17 @@ async function processOpencodeCopresenceMessages() {
       const from = msg.from_session || "hub";
       const content = msg.content as string;
       log(`← [${from}] (message/${msg.priority || "normal"}) ${content.slice(0, 100)}`);
-      const runtime = await ensureOpencodeCopresenceRuntime();
-      await runtime.notify(`[${from}] ${content}`);
-      log(`[opencode-copresence] displayed message ${msg.id.slice(0, 8)} from ${from}`);
-      await ackMessage(msg.id).catch((e: any) => warn(`ack failed for message ${msg.id.slice(0, 8)}: ${e.message}`));
+      if (!displayedInformationalMessageIds.has(msg.id)) {
+        const runtime = await ensureOpencodeCopresenceRuntime();
+        await runtime.notify(`[${from}] ${content}`);
+        displayedInformationalMessageIds.add(msg.id);
+        log(`[opencode-copresence] displayed message ${msg.id.slice(0, 8)} from ${from}`);
+      }
+      // Do not swallow ack failure. The informational lane retries with
+      // backoff; the displayed-id set makes those retries ack-only so a lost
+      // response cannot spam duplicate TUI notifications in this process.
+      await ackMessage(msg.id);
+      displayedInformationalMessageIds.delete(msg.id);
     } finally {
       inflightMessageIds.delete(msg.id);
     }

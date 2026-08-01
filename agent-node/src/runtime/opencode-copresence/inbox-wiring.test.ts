@@ -9,6 +9,7 @@ describe("OpenCode copresence CommHub message wiring", () => {
     expect(cli).toContain("const workInboxDrain = createInboxDrainLane(");
     expect(cli).toContain("const informationalInboxDrain = createInboxDrainLane(");
     expect(cli).not.toContain("const informationalInboxDrain = workInboxDrain");
+    expect(cli).toContain("}, INBOX_RETRY)");
   });
 
   test("new_message SSE uses a non-blocking informational lane", () => {
@@ -29,6 +30,9 @@ describe("OpenCode copresence CommHub message wiring", () => {
     const branch = cli.slice(display, skip);
     expect(branch).toContain('runtime.notify(`[${from}] ${content}`)');
     expect(branch).toContain("await ackMessage(msg.id)");
+    expect(branch).toContain("displayedInformationalMessageIds.add(msg.id)");
+    expect(branch).toContain("displayedInformationalMessageIds.delete(msg.id)");
+    expect(branch).not.toContain("ack failed for message");
     expect(branch).not.toContain("processTask(");
     expect(branch).not.toContain("sendReply(");
   });

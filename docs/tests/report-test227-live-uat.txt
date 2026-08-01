@@ -120,4 +120,13 @@ PASS — a prompt typed into the final full TUI visibly executed `commhub_send_m
 PASS — independent Hub inbox readback found exact content `FINAL_HEAD_OUTBOUND_OK`, `type=message`, and `from_session=opencode-指挥狗`.
 PASS — this final smoke proves the lifecycle fixes did not regress either receive or send.
 
+## Layer 12 — retry-enabled final live build
+
+Inbound message ID: 61039356-b1e7-4160-97e6-afb5a3908860
+Marker: FINAL_RETRY_BUILD_INBOUND_OK
+
+PASS — after adding exponential inbox retry and ack-only retry suppression, the isolated candidate was rebuilt and restarted.
+PASS — startup again produced exactly one `ready session=` and one direct OpenCode serve child.
+PASS — Hub `new_message` displayed the exact marker in the full TUI and the bridge acknowledged it.
+
 OVERALL: PASS

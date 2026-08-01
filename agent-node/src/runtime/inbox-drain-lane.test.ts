@@ -74,4 +74,24 @@ describe("inbox drain lanes", () => {
     expect(errors).toHaveLength(1);
     expect((errors[0] as Error).message).toBe("temporary inbox failure");
   });
+
+  test("retry mode backs off and eventually completes the same drain", async () => {
+    const errors: unknown[] = [];
+    const lane = createInboxDrainLane(
+      (error) => errors.push(error),
+      { initialDelayMs: 1, maxDelayMs: 2 },
+    );
+    let attempts = 0;
+
+    lane.schedule(async () => {
+      attempts++;
+      if (attempts < 3) throw new Error(`transient-${attempts}`);
+    });
+
+    await lane.idle();
+    expect(attempts).toBe(3);
+    expect(errors).toHaveLength(2);
+    expect((errors[0] as Error).message).toBe("transient-1");
+    expect((errors[1] as Error).message).toBe("transient-2");
+  });
 });

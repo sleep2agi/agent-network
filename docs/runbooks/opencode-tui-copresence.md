@@ -62,6 +62,8 @@ CommHub 的两种入站语义保持分离：
 - `send_task` / Dashboard 任务进入共享 session，运行模型，并把回答回传给发送方。
 - `send_message` / Dashboard 普通消息由 `new_message` SSE 立即唤醒，在 TUI 显示 15 秒通知并 ack；它不运行模型，也不写入 session 对话历史。任务处理和普通消息使用两条独立串行 drain，因此模型正在跑任务时，普通消息仍能立即显示。
 
+两条 drain 的传输错误使用 1 秒起、最高 30 秒的指数退避重试。普通消息在 notify 成功后先记本进程 displayed-id，再尝试 ack；若 ack 响应丢失，重试只补 ack，不重复弹通知。Hub 已经提交 ack、但响应在网络中丢失时，下次 inbox 快照会清掉该 displayed-id。
+
 普通消息不能使用 OpenCode `noReply` user message 伪装通知：该 API 虽然当下不生成回答，却会留下未回答的 user turn，下一条真实任务可能把它一起回答，造成延迟误回复或 agent 间回复循环。
 
 网络提交前读取 `/session/status`：已有 human/network turn 忙时排队，agent-node 内部的多条网络任务再经过 FIFO 串行化。OpenCode 1.18.1 仍没有原子“空闲检查并认领”API，因此人类可能恰好在空闲检查后开始输入；这是已知 preview 并发竞态，不能宣称强 lease。
