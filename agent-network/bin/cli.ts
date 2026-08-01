@@ -11947,7 +11947,7 @@ async function infoCommand() {
   const toolsArr = Array.isArray(profile.tools) ? profile.tools : [];
   const requestedTools = toolsArr.length ? `[${toolsArr.join(", ")}]` : "all (Claude Code preset)";
   console.log(`  tools:    ${profile.grokCopresence === true
-    ? "fixed preview profile [todo_write] (text-only; no filesystem/shell/network/media/MCP/subagents)"
+    ? "fixed preview profile [todo_write,search_tool,use_tool] (commhub MCP only; no filesystem/shell/web/media/subagents)"
     : requestedTools}`);
   // Flags worth surfacing — dangerouslySkipPermissions is the one most likely
   // to surprise users in retrospect, so list it first.
