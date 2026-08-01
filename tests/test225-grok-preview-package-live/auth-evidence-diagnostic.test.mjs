@@ -625,6 +625,7 @@ test("state scanner accepts only an exact private regular agent_id copy", () => 
     );
 
     writeFileSync(isolatedIdentity, readFileSync(fixture.identity), { mode: 0o644 });
+    chmodSync(isolatedIdentity, 0o644);
     assert.deepEqual(
       scanStateFixture(fixture).errorRoles,
       ["grok_current_state_structure"],
