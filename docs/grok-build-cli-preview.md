@@ -13,13 +13,13 @@ The formal native Leader/Policy Gateway runtime is a separate, stricter track. I
 ## Verified candidate (2026-08-01)
 
 The implementation source tested in Docker is commit
-`9c87d315840e07d4e0056b8c2dc1a1680c30803a`, merged from the earlier Grok
-candidate onto `origin/main` at `772dbbdad85bd951dd71e0f8320a26109c6d63f7`.
-It has not been merged, published, or deployed.
+`8addab2cdcf231f4c078466acd091eaedddf5034`. It has not been merged or
+published. The exact package candidate is deployed only to the local
+`指挥狗` preview node for UAT.
 
 The gates were run in order and all passed:
 
-- [test219](tests/report-test219.txt): 287 checks, zero failures; native PTY,
+- [test219](tests/report-test219.txt): 293 checks, zero failures; native PTY,
   reducers, attach, arbitration, reply, approval, reconnect, and package builds.
 - [test224](tests/report-test224.txt): network-disabled package and credential
   boundary; preview metadata, owner-only state, redaction, and zero synthetic
@@ -28,7 +28,9 @@ The gates were run in order and all passed:
   real tmux rendering, reply, stop/resume, and same-session continuity.
   Both the pinned keyless Grok 0.2.93 gate and the read-only-mounted real
   authenticated Grok gate passed. The run issued zero tmux input commands and
-  performed zero publish actions.
+  performed zero publish actions. A separate local UAT then used
+  `search_tool` and `use_tool` to execute CommHub `send_task`; it returned
+  `ok: true`, and the same attached TUI completed a second human turn.
 
 The authenticated scan reports a closed `scan_error` as a visible preview
 structure warning. It did not find a credential match and is accepted only by
@@ -80,28 +82,32 @@ The default `grok-build-cli` profile created by `anet` enables co-presence. `ane
 
 The preview uses one runtime-owned, mode-`0600` agent profile selected with
 the TUI-effective `--agent` flag. Its exact model-tool inventory is
-`[todo_write]`: filesystem, shell, network, media, MCP, scheduler, and
-subagent tools are unavailable. Generic `tools` and `maxTurns` settings are
+`[todo_write,search_tool,use_tool]`. The latter two expose only one
+runtime-owned CommHub MCP server; host and project MCP definitions are never
+loaded. Filesystem, shell, web, media, scheduler, and subagent tools remain
+unavailable. Generic `tools` and `maxTurns` settings are
 rejected in co-presence because Grok 0.2.93 ignores their corresponding CLI
 flags in interactive mode. This deliberate text-only restriction lets the
 pinned CLI read its existing owner-only login after sandbox re-exec without
-giving a network prompt a model-tool route to that file. Use another runtime
-when code inspection/editing, shell execution, or web/media access is needed.
+giving a network prompt a model-tool route to that file. The CommHub server is
+a self-contained package artifact staged below the isolated Grok home; its
+credential snapshot lives in a separate owner-only credential directory and
+is explicitly denied to model tools. This split is required because the
+sandbox bind-hides project `.anet`, while release scans must prove credentials
+never entered Grok session state. Use another runtime when code inspection,
+editing, shell execution, or web/media access is needed.
 
-Pinned Grok 0.2.93 wraps `todo_write` in a permission lifecycle but resolves
-that session-local helper without reading human input. The runtime accepts
-only the exact observed tuple: no request ID, `tool_name=todo_write`, and
-`decision=allow`. A network turn may accept at most one such lifecycle and
-only when no human decision was already dispatched. A human TUI turn may emit
-the same exact session-local lifecycle repeatedly; those repetitions keep the
-TUI alive but do not widen the accepted tool or decision. The helper's state
-stays in the owner-only
-Grok session. Any different tool, decision, identity shape, overlap, mode
-change, or unresolved completion still closes the runtime. This narrow
-preview exception is not production-grade approval ownership and is not a
-capability claim for `latest`.
+Pinned Grok 0.2.93 wraps each fixed tool in a permission lifecycle. The runtime
+accepts only the exact observed automatic tuple for `todo_write`,
+`search_tool`, or `use_tool`, with strict request/turn correlation. A network
+turn may use each exact tool tuple at most once. Human turns may repeat an
+exact tuple without killing the TUI. CommHub mutations still show a human
+approval prompt; choose the one-time approval, not always-approve. Any other
+tool, decision, identity shape, overlap, mode change, or unresolved completion
+closes the runtime. This narrow preview exception is not production-grade
+approval ownership and is not a capability claim for `latest`.
 
-### Human-turn lifecycle regression (2026-08-01)
+### Human-turn and MCP lifecycle regressions (2026-08-01)
 
 Grok 0.2.93 was observed emitting three consecutive exact `todo_write`
 lifecycles for one human prompt. The earlier network-only gate, and then an
@@ -110,14 +116,16 @@ after an otherwise valid automatic resolution. Commit `9c87d315` keeps the
 network limit unchanged while admitting repeated exact lifecycles only for a
 human-owned turn.
 
-The regression test was first run against the old condition and failed. With
-the fix, Docker test219 passed 287 tests, test224 passed with networking
+The regression tests were first run against the old conditions and failed.
+One additional live failure showed that the sandbox correctly hid project
+`.anet` but the generated MCP config incorrectly pointed inside that hidden
+directory. The final candidate stages a self-contained server outside the
+hidden project path while keeping the credential outside scanned TUI state.
+With the fixes, Docker test219 passed 293 tests, test224 passed with networking
 disabled, and the authenticated packed-package test225 passed. A live
-`指挥狗` session then processed a prompt containing three exact todo updates,
-completed the turn, processed a second human prompt, and retained the
-agent-node process, Leader socket, and attach socket. Functional access to an
-MCP tool is still outside this text-only profile; the lifecycle survival result
-must not be read as an MCP capability claim.
+`指挥狗` session called `search_tool`, approved a single `use_tool` invocation,
+sent a real CommHub task, completed a second human prompt, and retained the
+agent-node process, Leader socket, attach socket, and bridge.
 
 The runtime prepares Grok's owner-only folder-trust store non-interactively,
 but grants trust to the exact canonical working directory only. It first
@@ -187,9 +195,9 @@ fallback if the native TUI path fails.
 - Do not use this runtime for production work or connect it to a public/untrusted Hub.
 - Do not enable permission bypass for the co-presence profile.
 - Treat every approval prompt as human-visible experimental behavior, not as proof of production-grade owner or lease enforcement.
-- The pinned TUI auto-resolves only the fixed session-local `todo_write` helper during an active network turn; this explicit preview exception is why untrusted tasks remain forbidden.
+- The pinned TUI may auto-resolve only the exact fixed tool lifecycles for `todo_write`, `search_tool`, and `use_tool`; CommHub mutations remain human-confirmed.
 - Grok children and runtime lock helpers receive exact, from-empty environment allowlists. CommHub/cloud credentials are not inherited by those processes.
-- The shared-TUI preview has the exact fixed tool inventory `[todo_write]`; do not treat it as a filesystem-, network-, media-, MCP-, subagent-, or shell-capable coding runtime.
+- The shared-TUI preview has the exact fixed inventory `[todo_write,search_tool,use_tool]`; MCP access is limited to its single runtime-owned CommHub server. Do not treat it as a filesystem-, web-, media-, subagent-, or shell-capable coding runtime.
 - Folder trust is runtime-owned, mode `0600`, and contains exactly the current canonical working directory; project executable configuration is a startup error rather than implicitly trusted code.
 - Known values loaded by the process and recognized credential shapes/assignments in network task text or replies are scrubbed before ordinary logs, status, pending replies, and external delivery. This is not a universal classifier for arbitrary opaque text: do not paste credentials into the shared conversation or TUI. The isolated Grok conversation transcript is the only owner-only raw transcript store: its directories are `0700` and regular files are `0600`; do not copy it into reports or support bundles.
 - Do not infer `latest` support from this document. Promotion requires a separate review and release decision.
@@ -207,13 +215,18 @@ tree contains a project MCP/LSP/hook/plugin/config/direnv source that Grok
 folder trust could execute. Remove or isolate that source before using the
 shared-TUI preview; the runtime will not click through or broaden trust.
 
+If the TUI says CommHub is unavailable, inspect the owner-only MCP stderr log
+under the node's isolated Grok home. A healthy start records `MCP stdio
+connected`, `ready`, and registration for the node alias. Do not point the MCP
+back at project `.anet`: that directory is intentionally bind-hidden.
+
 If `anet` says the preview `agent-node` does not advertise `grok-build-cli`, the required preview package has not been published or cached yet. Do not force an older package to run the profile.
 
 ## Handoff
 
 - Candidate branch: `fix/grok-tui-main-sync-3h`
 - Clean worktree used for the candidate: `/tmp/commniu-grok-tui-3h`
-- Tested source commit: `9c87d315840e07d4e0056b8c2dc1a1680c30803a`
+- Tested source commit: `8addab2cdcf231f4c078466acd091eaedddf5034`
 - Reusable Docker tags: `anet-test219:dev`, `anet-test224:dev`, and
   `anet-test225:dev`
 - The reports above are generated artifacts bound to the tested source commit.

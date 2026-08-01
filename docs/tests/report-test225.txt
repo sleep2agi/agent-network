@@ -1,6 +1,6 @@
 # test225 — Grok preview candidate tarball + live co-presence
-date: 2026-08-01T03:33:54+00:00
-source_commit=9c87d315840e07d4e0056b8c2dc1a1680c30803a
+date: 2026-08-01T07:51:05+00:00
+source_commit=8addab2cdcf231f4c078466acd091eaedddf5034
 network=container-local Hub; outbound npm only for initial candidate dependency resolution
 [L0] clean candidate package image
 PASS: anet candidate installed without global agent-node (candidate=2.5.0-preview.26); published preview Hub=0.9.0-preview.21
@@ -23,7 +23,7 @@ PASS: persisted co-presence true/false and socket identities override stale ambi
 PASS: node stop/resume reused one session: first start used npx preview fallback; resume used global candidate
 PASS: installed-package stop/resume removes exact pinned project sandbox placeholders
 [L5] optional pinned keyless Grok gate
-PASS: pinned Grok TUI inventory, unsafe mutations, and exact keyless todo lifecycle gate
+PASS: pinned Grok TUI inventory, exact commhub MCP, unsafe mutations, and keyless todo lifecycle gate
 [L6] optional authenticated real Grok gate
 diagnostic: auth_evidence phase=first_turn_post_stop outcome=scan_error artifact=test225-auth-evidence-diagnostic.json detail_withheld=true
 WARNING: auth_evidence phase=first_turn_post_stop scanOutcome:scan_error preview_structure_warning=true
@@ -43,6 +43,6 @@ npx_preview_fallback=PASS
 global_agent_node_resume=PASS
 external_publish_actions=0
 tmux_input_commands_issued=0
-failure_contract_sha256=ecb3240764e42169c9e4a34ade6d6b0095597b68a602b428bf4d862b3f481b79
-candidate_tarball_sha256=a68244194e3121cdc4a49c0d208c50849ef06b7d53ce3b21b0f65d8b9452995f file=sleep2agi-agent-network-2.3.0-preview.34.tgz
-candidate_tarball_sha256=4d6ef71688ab1adee3dc020b409faa73dd2d3ada84aa7dfd1fb92300b0b5e909 file=sleep2agi-agent-node-2.5.0-preview.26.tgz
+failure_contract_sha256=7ee81a8d51ccba594e01729e2bb03188813239eb295e9a87a89d295c545df1c0
+candidate_tarball_sha256=f48957bef88064a78c84265b7a76af434dcf8d27456328d984d40463273792b7 file=sleep2agi-agent-network-2.3.0-preview.34.tgz
+candidate_tarball_sha256=20d7c722c2ffea5ae63c5e3693ad4959052579c31ee94405d24ed54d7665eb32 file=sleep2agi-agent-node-2.5.0-preview.26.tgz
