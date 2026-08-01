@@ -3546,7 +3546,20 @@ async function processInbox() {
       const images = await extractImagePaths(msg);
       log(`← [${from}] (${msgType}/${msg.priority || "normal"})${images.length ? ` +${images.length} image(s)` : ""} ${content.slice(0, 100)}`);
 
-      // Non-task / non-broadcast: ack and move on, nothing to reply to.
+      // OpenCode copresence has a human-visible shared TUI. A CommHub
+      // send_message is informational (no response lifecycle), but it must
+      // still appear there. Use OpenCode's TUI notification endpoint so the
+      // message cannot enter model history or trigger an agent reply loop.
+      if (msgType === "message" && RUNTIME === "opencode" && opencodeMode === "copresence") {
+        const runtime = await ensureOpencodeCopresenceRuntime();
+        await runtime.notify(`[${from}] ${content}`);
+        log(`[opencode-copresence] displayed message ${msg.id.slice(0, 8)} from ${from}`);
+        await ackMessage(msg.id).catch((e: any) => warn(`ack failed for message ${msg.id.slice(0, 8)}: ${e.message}`));
+        continue;
+      }
+
+      // Other non-task / non-broadcast messages retain their historical
+      // ack-only behavior; send_message never implies an LLM response.
       if (msgType !== "task" && msgType !== "broadcast") {
         debug(`skip non-task message: type=${msgType}`);
         await ackMessage(msg.id).catch((e: any) => warn(`ack failed for non-task ${msg.id.slice(0, 8)}: ${e.message}`));
@@ -4397,7 +4410,7 @@ async function connectSSE() {
               firstConnect = false;
               continue;
             }
-            if (["new_task", "broadcast"].includes(ev.type)) {
+            if (["new_task", "new_message", "broadcast"].includes(ev.type)) {
               log(`← SSE ${ev.type}`);
               await processInbox();
             }

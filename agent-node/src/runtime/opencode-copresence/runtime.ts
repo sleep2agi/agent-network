@@ -36,6 +36,7 @@ export interface OpenCodeCopresenceSession {
   readonly sessionId: string;
   readonly attachScriptPath: string;
   readonly isRunning: boolean;
+  notify(message: string, timeoutMs?: number): Promise<void>;
   submit(prompt: string, timeoutMs?: number): Promise<OpenCodeCopresenceSubmitResult>;
   close(): Promise<void>;
 }
@@ -310,6 +311,24 @@ export async function openVettedOpenCodeCopresence(
       get isRunning() {
         return !closed && child.exitCode === null && child.signalCode === null;
       },
+      notify(message: string, timeoutMs = 30_000) {
+        return (async () => {
+          if (!session.isRunning) throw new Error("OpenCode copresence server is not running");
+          await fetchJson(url, password, "/tui/show-toast", {
+            method: "POST",
+            // CommHub send_message is informational and does not request a
+            // response. Use OpenCode's TUI notification channel instead of a
+            // noReply user message: noReply leaves an unanswered user turn in
+            // history, which the next real task can accidentally answer.
+            body: JSON.stringify({
+              title: "Agent Network message",
+              message,
+              variant: "info",
+              duration: 15_000,
+            }),
+          }, timeoutMs);
+        })();
+      },
       submit(prompt: string, timeoutMs = 300_000) {
         const operation = queue.then(async () => {
           if (!session.isRunning) throw new Error("OpenCode copresence server is not running");
@@ -437,6 +456,7 @@ export async function openOpenCodeCopresenceRuntime(
       get sessionId() { return core!.sessionId; },
       get attachScriptPath() { return core!.attachScriptPath; },
       get isRunning() { return core!.isRunning; },
+      notify: (message, timeoutMs) => core!.notify(message, timeoutMs),
       submit: (prompt, timeoutMs) => core!.submit(prompt, timeoutMs),
       async close() {
         await core!.close();

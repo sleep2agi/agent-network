@@ -21,7 +21,16 @@ let runtime: Awaited<ReturnType<typeof openOpenCodeCopresenceRuntime>> | undefin
 const checks: Record<string, unknown> = {};
 
 function pane(): string {
-  return execFileSync("tmux", ["capture-pane", "-p", "-t", tmuxName, "-S", "-200"], { encoding: "utf8" });
+  return execFileSync("tmux", ["capture-pane", "-e", "-p", "-t", tmuxName, "-S", "-200"], { encoding: "utf8" });
+}
+
+async function waitForPane(marker: string, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (pane().includes(marker)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  return false;
 }
 
 try {
@@ -40,14 +49,20 @@ try {
   checks.launcherDoesNotLogPassword = !launcher.includes("set -x");
 
   execFileSync("tmux", ["new-session", "-d", "-s", tmuxName, "-x", "140", "-y", "45", runtime.attachScriptPath]);
-  await new Promise((resolve) => setTimeout(resolve, 2_000));
   checks.tuiAliveBefore = execFileSync("tmux", ["has-session", "-t", tmuxName]).length === 0;
+  checks.tuiRenderedBefore = await waitForPane("ctrl+p", 15_000);
+
+  const noticeMarker = `NOTICE227_${Date.now().toString(36)}`;
+  await runtime.notify(`[dashboard] ${noticeMarker}`, 30_000);
+  checks.informationalMessageVisible = await waitForPane(noticeMarker, 5_000);
+  checks.tuiAliveAfterNotice = execFileSync("tmux", ["has-session", "-t", tmuxName]).length === 0;
 
   const marker = `TUI227_${Date.now().toString(36)}`;
   const first = await runtime.submit(`Reply with exactly ${marker}`, 180_000);
   await new Promise((resolve) => setTimeout(resolve, 1_500));
   const firstPane = pane();
   checks.firstReplyLength = first.replyText.length;
+  checks.noticeDidNotLeakIntoFirstReply = !first.replyText.includes(noticeMarker);
   checks.sharedTurnVisibleInTui = firstPane.includes(marker);
   checks.tuiAliveAfterFirst = execFileSync("tmux", ["has-session", "-t", tmuxName]).length === 0;
 
@@ -64,7 +79,11 @@ try {
     checks.launcherUsesOfficialAttach === true,
     checks.launcherDoesNotLogPassword === true,
     checks.tuiAliveBefore === true,
+    checks.tuiRenderedBefore === true,
+    checks.informationalMessageVisible === true,
+    checks.tuiAliveAfterNotice === true,
     Number(checks.firstReplyLength) > 0,
+    checks.noticeDidNotLeakIntoFirstReply === true,
     checks.sharedTurnVisibleInTui === true,
     checks.tuiAliveAfterFirst === true,
     Number(checks.secondReplyLength) > 0,

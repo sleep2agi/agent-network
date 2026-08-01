@@ -46,6 +46,13 @@ anet node start opencode-指挥狗 --copresence
 
 共存模式只在 `127.0.0.1` 随机端口监听，使用每次启动随机生成的 Basic Auth 密码。agent-node 通过 `POST /session/:id/message` 把网络任务送进共享 session；人类 TUI 通过官方 `opencode attach` 连接同一个 session。共存模式不使用 ACP。
 
+CommHub 的两种入站语义保持分离：
+
+- `send_task` / Dashboard 任务进入共享 session，运行模型，并把回答回传给发送方。
+- `send_message` / Dashboard 普通消息由 `new_message` SSE 立即唤醒，在 TUI 显示 15 秒通知并 ack；它不运行模型，也不写入 session 对话历史。
+
+普通消息不能使用 OpenCode `noReply` user message 伪装通知：该 API 虽然当下不生成回答，却会留下未回答的 user turn，下一条真实任务可能把它一起回答，造成延迟误回复或 agent 间回复循环。
+
 网络提交前读取 `/session/status`：已有 human/network turn 忙时排队，agent-node 内部的多条网络任务再经过 FIFO 串行化。OpenCode 1.18.1 仍没有原子“空闲检查并认领”API，因此人类可能恰好在空闲检查后开始输入；这是已知 preview 并发竞态，不能宣称强 lease。
 
 ## 安全与生命周期
@@ -73,11 +80,11 @@ sg docker -c 'docker rmi anet-test227:dev'
 
 验收顺序：
 
-1. process-group 与 FIFO 单元层
+1. process-group、FIFO、`new_message` SSE 与 inbox 接线单元层
 2. CLI mode/tmux/陈旧环境接线层
 3. loopback + 未认证 401 + launcher 0700
-4. 真 OpenCode 1.18.1 full TUI 显示网络 turn
-5. 第二条 turn 后 TUI/server 仍在线
+4. 真 OpenCode 1.18.1 full TUI 显示普通消息通知，且通知不污染下一条模型回复
+5. 两条真实任务 turn 后 TUI/server 仍在线
 
 证据：
 
@@ -93,6 +100,7 @@ sg docker -c 'docker rmi anet-test227:dev'
 - `agent-node/src/cli.ts`
 - `agent-network/bin/cli.ts`
 - `agent-node/src/runtime/opencode-copresence/runtime.test.ts`
+- `agent-node/src/runtime/opencode-copresence/inbox-wiring.test.ts`
 - `agent-network/src/opencode-copresence-cli.test.ts`
 
 实机候选节点位于 `/home/vansin/opencode-tui-live`，tmux 为 `opencode-指挥狗` / `opencode-指挥狗-桥`。它使用隔离候选 agent-node，不修改全局 npm 包。

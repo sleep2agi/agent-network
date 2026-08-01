@@ -35,9 +35,21 @@ if (command === "serve") {
       if (busyMs > 0) { statuses[id] = { type:"busy" }; setTimeout(() => delete statuses[id], busyMs); }
       return send(res, { id, title:json.title });
     }
+    if (req.url === "/tui/show-toast" && req.method === "POST") {
+      if (json.title !== "Agent Network message" || json.variant !== "info" || json.duration !== 15000) {
+        res.writeHead(400); return res.end("invalid notification toast");
+      }
+      if (!(json.message || "").startsWith("notice:")) {
+        res.writeHead(400); return res.end("missing notification message");
+      }
+      return send(res, true);
+    }
     const match = req.url.match(/^\\/session\\/(ses_[A-Za-z0-9]+)\\/message$/);
     if (match && req.method === "POST") {
       const id = match[1];
+      if ((json.parts?.[0]?.text || "").startsWith("notice:") || json.noReply === true) {
+        res.writeHead(400); return res.end("notifications must not enter session history");
+      }
       if (env.FAKE_REQUIRE_MODEL === "1" && (json.model?.providerID !== "opencode" || json.model?.modelID !== "fake")) {
         res.writeHead(400); return res.end("missing model identity");
       }
@@ -116,6 +128,8 @@ describe("OpenCode native serve+attach copresence", () => {
       const launcher = readFileSync(runtime.attachScriptPath, "utf8");
       expect(launcher).toContain("opencode' attach");
       expect(launcher).toContain("--session 'ses_test123'");
+
+      await runtime.notify("notice:dashboard-message", 5_000);
 
       const [one, two] = await Promise.all([
         runtime.submit("one", 5_000),

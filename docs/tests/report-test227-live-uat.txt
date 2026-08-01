@@ -23,10 +23,31 @@ PASS — task moved delivered → running → replied.
 PASS — Hub result was `[opencode-指挥狗] OPENCODE_TUI_LIVE_OK`.
 PASS — the same prompt and assistant reply were visible in the full TUI.
 
-## Layer 3 — lifecycle
+## Layer 3 — ordinary message receive and recovery
+
+Pre-fix message ID: df434ebb-05cf-431d-9d3c-0e998c0ba944
+Fresh message ID: 4740d01b-e17a-46f1-aa55-4f856da5d16f
+
+PASS — before the fix, `send_message` remained pending in the Hub inbox and did not wake the bridge.
+PASS — after restart on the fix, the pending message was displayed and acknowledged without running the model.
+PASS — a fresh online message triggered `new_message`, appeared immediately in the shared TUI, and left the inbox empty.
+
+## Layer 4 — notification/task isolation
+
+Message ID: 577126da-1fc1-41e2-90b6-24259cda5432
+Message marker: TOAST_ONLY_20260801_2222 / SHOULD_NEVER_APPEAR
+Task ID: db4ef761-d62d-41eb-90af-83464ce2854e
+Task marker: CLEAN_TASK_REPLY_20260801
+
+PASS — the ordinary message appeared as an `Agent Network message` TUI notification and was acknowledged.
+PASS — the next task result was exactly `[opencode-指挥狗] CLEAN_TASK_REPLY_20260801`; `SHOULD_NEVER_APPEAR` did not leak into the model reply.
+PASS — this replaces the rejected `noReply` approach, which was witnessed to delay-answer an informational message on the next task.
+
+## Layer 5 — lifecycle
 
 PASS — `tmux has-session -t opencode-指挥狗` after the reply.
 PASS — `tmux has-session -t opencode-指挥狗-桥` after the reply.
 PASS — no global npm package was modified; agent-node came from an isolated candidate prefix.
+PASS — stop/restart removed the current managed process group; a separately verified stale server at port 46299 (PID/PGRP 1207050, old launch cwd) was terminated by exact process group without affecting the current server at port 33655.
 
 OVERALL: PASS
