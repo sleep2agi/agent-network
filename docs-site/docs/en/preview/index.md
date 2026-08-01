@@ -98,7 +98,7 @@ anet goal cancel <alias> <goal-id>                          # 5d. Cancel
 
 **Notes**:
 
-- Starting in preview2, all 4 runtimes (`claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`) can run `/loop`; previously only `claude-code-cli` did
+- Starting in preview2, all production runtimes (`claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`) can run `/loop`; previously only `claude-code-cli` did
 - Interval units: `60s` / `5m` / `30m` / `2h` / `1d`, **minimum 60s**
 - Replace `<alias>` with your node alias (`anet node ls`); get `<goal-id>` from `anet goal list <alias>`
 - Full command reference + persistence + restart behavior: [Agent Node — Loop scheduler](/en/guide/agent-node#recurring-tasks-the-loop-scheduler)
@@ -144,7 +144,7 @@ Four cross-tenant / data-integrity gaps closed for public-hub multi-user / multi
 
 | Feature | latest (npm `latest`) | preview (`2.3.0-preview.N`) |
 |---|---|---|
-| `/loop` scheduler | `claude-code-cli` only | **All 4 runtimes** |
+| `/loop` scheduler | `claude-code-cli` only | **All production runtimes** |
 | `anet node loop` CLI | ❌ | ✅ |
 | Cross-tenant write防护带 | Partial (`#275`) | ✅ 4 tools + SQL guard |
 | retention sweep / VACUUM | ❌ | ✅ |

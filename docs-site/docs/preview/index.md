@@ -98,7 +98,7 @@ anet goal cancel <alias> <goal-id>                          # 5d. 停止
 
 **说明**：
 
-- preview2 起，4 个 runtime（`claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`）都能跑 `/loop`，之前只有 `claude-code-cli` 行
+- preview2 起，下列 runtime（`claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`）都能跑 `/loop`，之前只有 `claude-code-cli` 行
 - 间隔单位支持 `60s` / `5m` / `30m` / `2h` / `1d`，**最小 60s**
 - `<alias>` 换成你的节点别名（`anet node ls` 查），`<goal-id>` 用 `anet goal list <alias>` 拿
 - 完整命令 + 持久化 + 重启行为见 [Agent Node — 循环任务](/guide/agent-node#循环任务-loop-调度器)
