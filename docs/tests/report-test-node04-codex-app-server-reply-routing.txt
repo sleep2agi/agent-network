@@ -1,0 +1,22 @@
+# qa-node-04 codex-app-server reply routing
+[0] start isolated hub
+[1] register dashboard user and network
+[2] register codex-app-server receiver and peer sender sessions
+sessions visible in isolated hub: 2
+[3] witnessed-red: dashboard from_name=admin is not a routable node session
+WITNESSED_RED_RAW_SEND_TASK_TO_ADMIN={"ok":false,"error":"alias_not_found","message":"alias not found: admin","alias":"admin","queued":false}
+WITNESSED_RED_ADMIN_SESSION_COUNT=0
+WITNESSED_RED_REPLY_MESSAGE_COUNT=0
+WITNESSED_RED_PARENT_TASK_ROW={"task_id":"2e89b39c-9bd6-47d0-8808-48fdeed9a2bb","from_node_id":null,"from_name":"admin","to_node_id":null,"to_name":"codex-node","priority":"normal","status":"delivered","content":"dashboard asks codex","result":null,"in_reply_to":null,"requires_response":"reply","scope":"single","created_at":"2026-08-01 11:16:38","delivered_at":"2026-08-01 11:16:38","started_at":null,"completed_at":null,"expires_at":"2026-08-01 12:16:38","network_id":"net_feb75f4305c0","parent_task_id":null,"meta_json":null}
+[4] fixed wire route: dashboard source falls back to send_reply and is dashboard-visible
+FIX_DASHBOARD_RAW={"ok":true,"message_id":"3dc400f1-56b9-4ca7-8a0a-e25bd73727e8","session_status":"unknown"}
+FIX_DASHBOARD_REPLY_MESSAGE_COUNT=1
+FIX_DASHBOARD_PARENT_TASK_ROW={"task_id":"2e89b39c-9bd6-47d0-8808-48fdeed9a2bb","from_node_id":null,"from_name":"admin","to_node_id":null,"to_name":"codex-node","priority":"normal","status":"replied","content":"dashboard asks codex","result":"[codex-node] fixed dashboard reply","in_reply_to":null,"requires_response":"reply","scope":"single","created_at":"2026-08-01 11:16:38","delivered_at":"2026-08-01 11:16:38","started_at":null,"completed_at":"2026-08-01 11:16:39","expires_at":"2026-08-01 12:16:38","network_id":"net_feb75f4305c0","parent_task_id":null,"meta_json":null}
+[5] fixed wire route: agent peer remains send_task-routed, including failed priority marker
+FIX_PEER_RAW={"ok":true,"message_id":"d707c22d-e1a3-417e-83f0-3589b23c1c3a","session_status":"idle"}
+FIX_PEER_INBOX={"ok":true,"messages":[{"id":"d707c22d-e1a3-417e-83f0-3589b23c1c3a","type":"task","priority":"high","content":"⚠️ [codex-node] reply routed as peer task","context":null,"from_session":"codex-node","created_at":"2026-08-01 11:16:39","network_id":"net_feb75f4305c0","meta_json":null,"meta":null}]}
+FIX_PEER_HIGH_FAILURE_TASK_COUNT=1
+FIX_PEER_REPLY_MESSAGE_COUNT=0
+PASS qa-node-04 codex-app-server reply routing
+Assertions: 5/5
+Duration_ms: 3660
