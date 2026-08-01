@@ -151,6 +151,41 @@ test("authenticated release containment scans each Grok generation only after st
   assert.ok(authenticatedPass > finalPostStopScan);
 });
 
+test("keyless and authenticated Grok gates use disjoint state roots", () => {
+  const harness = readFileSync(new URL("./run.sh", import.meta.url), "utf8");
+  const keylessFunction = harness.indexOf("run_keyless_gate() {");
+  const realFunction = harness.indexOf("run_real_gate() {");
+  const evidencePath = harness.indexOf(
+    'local keyless_state_evidence="$HOME/.anet-grok-keyless-evidence"',
+    keylessFunction,
+  );
+  const destinationGuard = harness.indexOf(
+    '[ ! -e "$keyless_state_evidence" ] && [ ! -L "$keyless_state_evidence" ]',
+    evidencePath,
+  );
+  const markerScan = harness.indexOf(
+    'scan_fixed_file /tmp/test225-markers "$GROK_STATE"',
+    destinationGuard,
+  );
+  const preserveKeylessState = harness.indexOf(
+    'mv -- "$GROK_STATE" "$keyless_state_evidence"',
+    markerScan,
+  );
+  const freshAuthenticatedState = harness.indexOf(
+    'mkdir -m 700 "$GROK_STATE"',
+    preserveKeylessState,
+  );
+
+  assert.ok(keylessFunction >= 0);
+  assert.ok(realFunction > keylessFunction);
+  assert.ok(evidencePath > keylessFunction);
+  assert.ok(destinationGuard > evidencePath);
+  assert.ok(markerScan > destinationGuard);
+  assert.ok(preserveKeylessState > markerScan);
+  assert.ok(freshAuthenticatedState > preserveKeylessState);
+  assert.ok(freshAuthenticatedState < realFunction);
+});
+
 test("raw state credential mutation changes preview structure warning to fatal", () => {
   const fixture = stateFixture();
   const unknownState = path.join(fixture.home, "unreviewed.data");

@@ -2139,6 +2139,20 @@ run_keyless_gate() {
   # cache after the probe exits; the production close path proves the same
   # cache lifecycle independently through cleanupGrokCliPostStopState.
   rm -rf -- "$(dirname "$profile_fixture")/.bun"
+  # The keyless inventory process generates an account-derived vendor
+  # agent_id even though it never loads the mounted auth file. The following
+  # authenticated gate treats every auth scalar (including that account id)
+  # as private, so scanning both phases in one state root would misclassify
+  # the already-stopped keyless fixture as a cross-node credential leak.
+  # Preserve that exact phase as a separate owner-only evidence root and make
+  # the authenticated node prove itself against a genuinely empty state root.
+  local keyless_state_evidence="$HOME/.anet-grok-keyless-evidence"
+  [ ! -e "$keyless_state_evidence" ] && [ ! -L "$keyless_state_evidence" ] \
+    || fail "keyless evidence state destination already exists"
+  scan_fixed_file /tmp/test225-markers "$GROK_STATE" \
+    || fail "keyless Grok state contains a synthetic credential marker"
+  mv -- "$GROK_STATE" "$keyless_state_evidence"
+  mkdir -m 700 "$GROK_STATE"
   pass "pinned Grok TUI inventory, exact commhub MCP, unsafe mutations, and keyless todo lifecycle gate"
 }
 
