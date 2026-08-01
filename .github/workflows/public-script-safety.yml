@@ -1,0 +1,38 @@
+# Guard the shell scripts we serve from https://anet.sh/<name>.
+#
+# Several of them tell the reader to `curl ... | bash`, so a destructive line
+# here runs on a stranger's machine. On 2026-07-31 four of these scripts were
+# found to wipe `~/.npm/_npx` (not ours — npx executes from there, so it breaks
+# every other npx tool on the box) and to `pkill -f` by process name (which
+# has already taken down a production hub in this repo). All four were found
+# by hand; this workflow exists so the next one is not.
+#
+# Python rather than an in-yml bash loop, per the team's CI-guard pattern
+# (same reasoning as no-memory-slugs.yml).
+
+name: lint (public script safety)
+
+on:
+  pull_request:
+    paths:
+      - 'docs-site/docs/public/**'
+      - '.github/scripts/check-public-script-safety.py'
+      - '.github/workflows/public-script-safety.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs-site/docs/public/**'
+      - '.github/scripts/check-public-script-safety.py'
+      - '.github/workflows/public-script-safety.yml'
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # Prints the number of scripts scanned and exits 2 on an empty scope,
+      # so "0 findings" can never be confused with "never ran".
+      - run: python3 .github/scripts/check-public-script-safety.py
