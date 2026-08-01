@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/safe-rm.sh"
 
 export HOME=/tmp/anethome
 export COMMHUB_DB=/tmp/commhub-qa-node-04.db
@@ -93,7 +94,7 @@ fixed_reply_route() {
 
 log "# qa-node-04 codex-app-server reply routing"
 log "[0] start isolated hub"
-rm -rf "$HOME/.commhub" "$HOME/.anet/server" "$COMMHUB_DB"
+safe_rm_rf "$HOME/.commhub" "$HOME/.anet/server" "$COMMHUB_DB"
 cd /app/server
 HOST=127.0.0.1 PORT="$HUB_PORT" bun run src/index.ts >/tmp/hub.log 2>&1 &
 HUB_PID=$!

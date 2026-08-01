@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/safe-rm.sh"
 
 REPORT_DIR="${REPORT_DIR:-/report}"
 REPORT="$REPORT_DIR/pr3-smoke.txt"
@@ -95,7 +96,7 @@ fi
 S4_FAKE_BIN=/tmp/pr3-fake-bin
 S4_NPM_SENTINEL=/tmp/pr3-npm-called
 S4_LOG=/tmp/pr3-upgrade-pin.log
-rm -rf "$S4_FAKE_BIN"
+safe_rm_rf "$S4_FAKE_BIN"
 rm -f "$S4_NPM_SENTINEL" "$S4_LOG" "$HOME/.anet/opencode-pin.json"
 mkdir -p "$S4_FAKE_BIN"
 cat > "$S4_FAKE_BIN/npm" <<'FAKE_NPM'

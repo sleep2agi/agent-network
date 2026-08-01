@@ -11,6 +11,7 @@ COPY server/src ./src
 
 WORKDIR /app
 COPY tests/qa-node-04-codex-app-server-reply-routing/run.sh /app/run.sh
+COPY tests/lib/safe-rm.sh /lib/safe-rm.sh
 RUN chmod +x /app/run.sh
 
 CMD ["/app/run.sh"]
