@@ -6,6 +6,7 @@
  *   --runtime claude-agent-sdk  → Claude Agent SDK (Claude/MiniMax)
  *   --runtime codex-sdk         → Codex SDK (GPT-5.4)
  *   --runtime grok-build-acp    → Grok Build ACP (xAI)
+ *   --runtime grok-build-cli    → Grok Build CLI headless / co-presence TUI
  *
  * 配置加载: --config > CLI args > env > .anet/nodes/<name>/config.json > ~/.anet/config.json > defaults
  */
@@ -89,6 +90,13 @@ import {
   writebackOpencodeSession,
 } from "./runtime/opencode-acp/profile-state";
 import { OPENCODE_DEFAULT_PIN } from "./runtime/opencode-acp/binary";
+import { buildGrokChildEnv } from "./runtime/grok-child-env";
+import {
+  collectKnownCredentialValues,
+  createCredentialRedactor,
+  type CredentialRedactor,
+} from "./credential-redaction";
+import { appendPrivateLogLine, preparePrivateLogDirectory } from "./private-log";
 
 const home = homedir();
 
@@ -108,7 +116,8 @@ const cliChannels: string[] = [];
 
 // Let the parent anet launcher resolve the real package-owned entrypoint. It
 // then spawns this file through process.execPath, avoiding Windows .cmd and
-// short-lived npx wrapper processes at the trusted OpenCode boundary.
+// short-lived npx wrapper processes at the trusted OpenCode/Grok boundary;
+// the recorded PID is therefore the real process reached by node stop.
 if (argv.length === 1 && argv[0] === "--print-entrypoint") {
   console.log(realpathSync(process.argv[1]));
   process.exit(0);
@@ -141,7 +150,7 @@ for (let i = 0; i < argv.length; i++) {
 选项:
   --config <path>     配置文件 (.anet/nodes/<name>/config.json)
   --alias <name>      Agent 别名 / CommHub alias (必需)
-  --runtime <type>    claude-agent-sdk (default) | claude-code-cli | codex-sdk | codex-app-server | grok-build-acp | opencode-cli
+  --runtime <type>    claude-agent-sdk (default) | claude-code-cli | codex-sdk | codex-app-server | grok-build-acp | grok-build-cli | opencode-cli
   --model <name>      AI 模型 (codex 默认: gpt-5.5, claude-agent-sdk 默认: claude-sonnet-4-6)
   --hub <url>         CommHub URL
   --tools <list>      工具列表，逗号分隔 ("all" = 全部)
@@ -160,7 +169,10 @@ Runtime:
   codex-sdk         Codex SDK — GPT-5.4，复用 codex 登录态
   codex-app-server  Codex app-server — Codex TUI bridge
   grok-build-acp    Grok Build ACP — xAI Grok Build via "grok agent stdio"
+  grok-build-cli    Grok Build CLI — headless 或 grokCopresence 共存 TUI 模式
   opencode-cli      opencode CLI — Anthropic/OpenAI vendor preset via ACP
+
+Capabilities: ANET_CAPABILITY_GROK_COPRESENCE_V2
 `);
     process.exit(0);
   }
@@ -372,6 +384,7 @@ const RUNTIME_MAP: Record<string, string> = {
   "claude-agent-sdk": "claude", "claude-sdk": "claude", "agent-sdk": "claude", "claude": "claude",
   "codex-sdk": "codex", "codex": "codex",
   "grok-build-acp": "grok", "grok-build": "grok", "grok": "grok",
+  "grok-build-cli": "grok", "grok-cli": "grok", "grok-tui": "grok",
   // RFC-029 — opencode CLI runtime. `opencode-cli` is the canonical
   // launcher name (matches claude-code-cli precedent); `opencode` is
   // the short alias. Internal bucket is `"opencode"`.
@@ -388,6 +401,41 @@ if (!Object.prototype.hasOwnProperty.call(RUNTIME_MAP, rawRuntime)) {
 }
 const RUNTIME = RUNTIME_MAP[rawRuntime] as "claude" | "codex" | "grok" | "opencode" | "codex-app-server";
 const RUNTIME_LABEL = rawRuntime; // 日志用原始名
+// `grok-build-cli` defaults to the compatible `grok -p` headless lane.
+// `grokCopresence:true` explicitly switches it to the single PTY-owner bridge
+// where human and CommHub turns share the same interactive Grok session.
+// `ANET_GROK_TUI_FALLBACK=1` remains the ACP lane's historical warning-only
+// flag; changing its meaning here would silently migrate existing nodes.
+const GROK_EXECUTION_MODE: "acp" | "cli" =
+  rawRuntime === "grok-build-cli" || rawRuntime === "grok-cli" || rawRuntime === "grok-tui"
+    ? "cli"
+    : "acp";
+// Grok 0.2.93 otherwise creates session JSONL using the caller's ambient
+// umask (commonly 0664). This process is one dedicated node/runtime, so set a
+// private creation mask before logs, isolated HOME state, prompt files, or
+// the PTY child are created. Existing credential stores are separately
+// validated/repaired by their boundary-specific writers.
+if (GROK_EXECUTION_MODE === "cli") process.umask(0o077);
+if (GROK_EXECUTION_MODE === "cli" && (process.platform !== "linux" || !existsSync("/proc/self/fd"))) {
+  console.error("[agent-node] grok-build-cli preview requires Linux with procfs mounted at /proc");
+  process.exit(1);
+}
+const rawGrokCopresence = opts["grok-copresence"]
+  ?? fileConfig.grokCopresence
+  ?? fileConfig.flags?.grokCopresence
+  ?? process.env.ANET_GROK_COPRESENCE;
+const GROK_COPRESENCE = GROK_EXECUTION_MODE === "cli"
+  && (rawGrokCopresence === true || rawGrokCopresence === "true" || rawGrokCopresence === "1");
+if (GROK_COPRESENCE) {
+  console.warn(
+    "[agent-node] EXPERIMENTAL/DANGEROUS grok-build-cli co-presence is enabled; "
+    + "the shared human TUI must receive tasks only from trusted senders. "
+    + "The pinned preview auto-resolves its session-local todo_write helper for network turns.",
+  );
+}
+const RUNTIME_AGENT_LABEL = RUNTIME === "grok" && GROK_EXECUTION_MODE === "cli"
+  ? "agent-node:grok-build-cli"
+  : `agent-node:${RUNTIME}`;
 
 if (RUNTIME === "opencode" && configFilePath && !opencodeConfigState) {
   console.error(`[${ALIAS}] OpenCode config did not pass the private no-follow boot gate.`);
@@ -442,6 +490,9 @@ let TOOLS: string[] | typeof TOOLS_PRESET =
   toolsRaw === "all" ? TOOLS_PRESET
   : (TOOLS_EXPLICIT && TOOLS_EXPLICIT.length) ? TOOLS_EXPLICIT
   : TOOLS_PRESET;
+if (GROK_EXECUTION_MODE === "cli" && !opts.tools && Array.isArray(fileConfig.tools) && fileConfig.tools.length === 0) {
+  TOOLS = [];
+}
 // Default 50 turns. The old default of 5 was way too low — Claude Agent SDK
 // uses one turn per tool roundtrip, so any task that uses commhub MCP or
 // reads files burns through 5 turns instantly and fails with
@@ -565,17 +616,55 @@ const TELEGRAM_GETUPDATES_TIMEOUT_MS = resolveTimeoutMs({
 const NEW_SESSION = opts["new-session"] === "true";
 const SESSION_ID = NEW_SESSION ? "" : (
   RUNTIME === "grok"
-    ? (opts.session || fileConfig.grokSession || fileConfig.session || fileConfig.resume || fileConfig.sessionId || "")
+    ? (GROK_EXECUTION_MODE === "cli"
+      ? (opts.session || fileConfig.grokCliSession || "")
+      : (opts.session || fileConfig.grokSession || fileConfig.session || fileConfig.resume || fileConfig.sessionId || ""))
     : (opts.session || fileConfig.session || fileConfig.resume || fileConfig.sessionId || "")
 );
 const SYSTEM_PROMPT = opts.prompt || fileConfig.systemPrompt || "";
+const unsafeInitialGrokHubCredential = GROK_EXECUTION_MODE === "cli"
+  ? ["COMMHUB_TOKEN", "COMMHUB_AUTH_TOKEN"].find((key) => {
+    const value = process.env[key];
+    return value && !value.startsWith("disabled-for-grok-cli");
+  })
+  : undefined;
+if (unsafeInitialGrokHubCredential) {
+  console.error(
+    `[${ALIAS}] refusing grok-build-cli: a real ${unsafeInitialGrokHubCredential} in the initial process environment ` +
+    `would be readable through /proc. Start via the matching anet source launcher or unset that variable.`,
+  );
+  process.exit(1);
+}
 // Token priority: node config (ntok_) > global config > legacy env. Earlier
 // versions let process.env.COMMHUB_TOKEN win, which silently overrode the
 // node's network-bound ntok_ when users had a leftover legacy export in
 // their shell — replies then landed in the wrong network and Dashboard
 // never saw them.
 let AUTH_TOKEN = fileConfig.token || globalConfig.token || process.env.COMMHUB_TOKEN || "";
-if (process.env.COMMHUB_TOKEN && fileConfig.token && process.env.COMMHUB_TOKEN !== fileConfig.token) {
+let persistenceRedactor: CredentialRedactor = createCredentialRedactor();
+// Consumers such as PendingReplyQueue live for the whole process. Delegate
+// through this stable handle so a node-token rotation immediately updates
+// their exact-value set instead of leaving the queue bound to the old object.
+const persistenceRedactorHandle: CredentialRedactor = {
+  redactText: (value) => persistenceRedactor.redactText(value),
+  redactValue: <T>(value: T): T => persistenceRedactor.redactValue(value),
+};
+
+function refreshPersistenceRedactor(): void {
+  persistenceRedactor = createCredentialRedactor({
+    knownValues: collectKnownCredentialValues(process.env, [
+      AUTH_TOKEN,
+      fileConfig.token,
+      globalConfig.token,
+    ]),
+  });
+}
+if (
+  process.env.COMMHUB_TOKEN
+  && !process.env.COMMHUB_TOKEN.startsWith("disabled-for-grok-cli")
+  && fileConfig.token
+  && process.env.COMMHUB_TOKEN !== fileConfig.token
+) {
   console.warn(`[${ALIAS}] ⚠ COMMHUB_TOKEN env override ignored (using node config token). Unset COMMHUB_TOKEN to silence this warning.`);
 }
 function reloadNodeToken(): boolean {
@@ -587,6 +676,7 @@ function reloadNodeToken(): boolean {
   if (!freshToken || freshToken === AUTH_TOKEN) return false;
   AUTH_TOKEN = freshToken;
   fileConfig.token = freshToken;
+  refreshPersistenceRedactor();
   warn(`reloaded node token from ${configFilePath}`);
   return true;
 }
@@ -594,7 +684,9 @@ const LOG_DIR = opts["log-dir"] || join(process.cwd(), ".anet", "nodes", ALIAS, 
 const NODE_DIR = configFilePath ? dirname(configFilePath) : join(process.cwd(), ".anet", "nodes", ALIAS);
 const GOALS_PATH = opts["goals-path"] || fileConfig.flags?.goalsPath || fileConfig.goalsPath || join(NODE_DIR, "goals.json");
 const GOAL_TICK_MS = Math.max(10_000, parseInt(opts["goal-tick-ms"] || process.env.ANET_GOAL_TICK_MS || fileConfig.flags?.goalTickMs || "30000"));
-const goalStore = new GoalStore(GOALS_PATH);
+const goalStore = new GoalStore(GOALS_PATH, GROK_EXECUTION_MODE === "cli"
+  ? { redactor: persistenceRedactorHandle }
+  : {});
 
 // RFC-025 M1e — per-process state for the self-loop tools' safety
 // 防线. Lives at module scope so the SAME counters are shared across
@@ -643,10 +735,11 @@ function writebackGrokSession(sessionId: string) {
   if (!configFilePath || !sessionId) return;
   try {
     const cfg = JSON.parse(readFileSync(configFilePath, "utf-8"));
-    if (cfg.grokSession === sessionId) return;
-    cfg.grokSession = sessionId;
+    const key = GROK_EXECUTION_MODE === "cli" ? "grokCliSession" : "grokSession";
+    if (cfg[key] === sessionId) return;
+    cfg[key] = sessionId;
     writeFileSync(configFilePath, JSON.stringify(cfg, null, 2) + "\n");
-    debug(`grokSession 写回: ${configFilePath} → ${sessionId.slice(0, 8)}...`);
+    debug(`${key} 写回: ${configFilePath} → ${sessionId.slice(0, 8)}...`);
   } catch (e: any) {
     warn(`writebackGrokSession failed: ${e.message}`);
   }
@@ -674,10 +767,11 @@ function clearGrokSession(reason: string) {
   if (!configFilePath) return;
   try {
     const cfg = JSON.parse(readFileSync(configFilePath, "utf-8"));
-    if (!cfg.grokSession) return;
-    delete cfg.grokSession;
+    const key = GROK_EXECUTION_MODE === "cli" ? "grokCliSession" : "grokSession";
+    if (!cfg[key]) return;
+    delete cfg[key];
     writeFileSync(configFilePath, JSON.stringify(cfg, null, 2) + "\n");
-    warn(`cleared grokSession (${reason})`);
+    warn(`cleared ${key} (${reason})`);
   } catch (e: any) {
     warn(`clearGrokSession failed: ${e.message}`);
   }
@@ -780,11 +874,24 @@ function initFeishuChannel(spec: { type: string; path?: string; raw: string }): 
 
 const FEISHU_CHANNELS = CHANNELS.filter(ch => ch.type === "feishu").map(initFeishuChannel);
 
+if (GROK_EXECUTION_MODE === "cli" && FEISHU_CHANNELS.length > 0) {
+  console.error(
+    "[agent-node] grok-build-cli preview currently refuses Feishu channels: "
+    + "the forked worker log boundary is not credential-isolated. Use the CommHub inbox lane.",
+  );
+  process.exit(1);
+}
+
 const UNSUPPORTED_CHANNEL = CHANNELS.find(ch => ch.type !== "telegram" && ch.type !== "feishu");
 if (UNSUPPORTED_CHANNEL) {
   console.error(`[agent-node] unsupported channel: ${UNSUPPORTED_CHANNEL.raw}`);
   process.exit(1);
 }
+
+// Channel initialisation may load additional credentials from channel-local
+// .env files. Build the shared redactor only after those files have been
+// processed, and rebuild it whenever the node token rotates.
+refreshPersistenceRedactor();
 
 // Telegram + Claude runtime: 自动注入 Read 工具（用于读取下载的图片/文件）。
 // #101 fix: TOOLS may now be the preset sentinel (no array methods) — preset
@@ -795,18 +902,28 @@ if (TELEGRAM_CHANNELS.length > 0 && RUNTIME !== "codex" && RUNTIME !== "codex-ap
 }
 
 // ── 日志：终端 + 文件 ──
-import { mkdirSync, appendFileSync } from "fs";
-try { mkdirSync(LOG_DIR, { recursive: true }); } catch {}
+import { appendFileSync, mkdirSync } from "fs";
+const PRIVATE_LOG_DIR = GROK_EXECUTION_MODE === "cli"
+  ? preparePrivateLogDirectory(LOG_DIR, persistenceRedactorHandle)
+  : LOG_DIR;
+if (GROK_EXECUTION_MODE !== "cli") {
+  try { mkdirSync(LOG_DIR, { recursive: true }); } catch {}
+}
 
 function _log(level: string, levelNum: number, msg: string) {
   if (levelNum < LOG_LEVEL) return;
+  const safeMsg = persistenceRedactor.redactText(msg).text;
   const ts = new Date().toTimeString().slice(0, 8);
   const tag = level.toUpperCase().padEnd(5);
-  const line = `[${ts}] [${tag}] [${ALIAS}] ${msg}`;
+  const line = `[${ts}] [${tag}] [${ALIAS}] ${safeMsg}`;
   console.log(line);
   try {
     const date = new Date().toISOString().slice(0, 10);
-    appendFileSync(join(LOG_DIR, `${date}.log`), line + "\n");
+    if (GROK_EXECUTION_MODE === "cli") {
+      appendPrivateLogLine(PRIVATE_LOG_DIR, `${date}.log`, line + "\n", persistenceRedactorHandle);
+    } else {
+      appendFileSync(join(LOG_DIR, `${date}.log`), line + "\n");
+    }
   } catch {}
 }
 const log = (msg: string) => _log("info", 1, msg);
@@ -1045,13 +1162,16 @@ if (NODE_ID) {
 // instead of requiring a node restart.
 const register = async () => {
   const alias = await liveAlias();
+  const activeSessionId = RUNTIME === "grok"
+    ? grokSessionId
+    : SESSION_ID || undefined;
   const result = await callCommHub("report_status", {
     resume_id: RESUME_ID, alias, status: "idle",
     server: osHostname(), hostname: osHostname(),
-    agent: `agent-node:${RUNTIME}`, project_dir: process.cwd(),
+    agent: RUNTIME_AGENT_LABEL, project_dir: process.cwd(),
     node_id: NODE_ID || undefined,
     node_name: NODE_NAME || undefined,
-    session_id: SESSION_ID || undefined,
+    session_id: activeSessionId,
     config_path: configFilePath || undefined,
     // #260 P5 — always emit the current channel spec list (even as
     // "[]" after disable-all), otherwise the hub's COALESCE on
@@ -1074,10 +1194,15 @@ const register = async () => {
 };
 const reportStatus = async (status: string, task?: string) => {
   const alias = await liveAlias();
+  const activeSessionId = RUNTIME === "grok"
+    ? grokSessionId
+    : RUNTIME === "claude"
+      ? claudeSessionId
+      : SESSION_ID || undefined;
   return callCommHub("report_status", {
     resume_id: RESUME_ID, alias, status, task,
     node_id: NODE_ID || undefined,
-    session_id: claudeSessionId || grokSessionId || SESSION_ID || undefined,
+    session_id: activeSessionId,
     config_path: configFilePath || undefined,
     // #260 P5 — always emit the current channel spec list (even as
     // "[]" after disable-all), otherwise the hub's COALESCE on
@@ -1191,7 +1316,7 @@ const PENDING_REPLIES_PATH = configFilePath
   ? join(dirname(configFilePath), "pending-replies.json")
   : "";
 const pendingReplies: PendingReplyQueue | null = PENDING_REPLIES_PATH
-  ? new PendingReplyQueue(PENDING_REPLIES_PATH)
+  ? new PendingReplyQueue(PENDING_REPLIES_PATH, { redactor: persistenceRedactorHandle })
   : null;
 
 function persistPendingReply(entry: Omit<PendingReply, "attempts">): void {
@@ -1517,7 +1642,7 @@ async function runGoalSchedulerTick() {
 // ══════════════════════════════════════
 // Claude Runtime
 // ══════════════════════════════════════
-let claudeSessionId: string | undefined = SESSION_ID || undefined;
+let claudeSessionId: string | undefined = RUNTIME === "claude" ? (SESSION_ID || undefined) : undefined;
 let grokSessionId: string | undefined = RUNTIME === "grok" ? (SESSION_ID || undefined) : undefined;
 // RFC-029 PR② — opencode-cli session state.
 // `opencodeSessionId` is persisted across turns; on a supervisor-driven
@@ -1554,6 +1679,9 @@ const codexAppServerUrl: string | undefined =
   undefined;
 let codexAppServerRuntimeSession:
   import("./runtime/codex-app-server/runtime").CodexAppServerRuntimeSession | null = null;
+if (NEW_SESSION && RUNTIME === "grok" && GROK_EXECUTION_MODE === "cli") {
+  clearGrokSession("--new-session requested");
+}
 
 // #213 — track whether the current process resumed a pre-existing grok
 // session (truthy SESSION_ID at boot) so we can prepend the un-closed-loop
@@ -3077,6 +3205,636 @@ async function processWithGrok(task: string, from: string, images?: string[]): P
   }
 }
 
+// ══════════════════════════════════════
+// Grok Build CLI Runtime (TUI execution engine, push-driven via agent-node)
+// ══════════════════════════════════════
+function buildGrokCliCommhubPrompt(task: string, from: string): string {
+  const currentTaskId = process.env.CURRENT_TASK_ID || "(unknown)";
+  const runtimePrompt = [
+    `你是 ${ALIAS}，CommHub 网络中的 AI 节点。`,
+    `agent-node 已负责从 CommHub 收取任务，并会把你的最终文本回复给 ${from}。`,
+    `你当前通过 Grok Build CLI 的 headless 单轮模式执行；不要声称自己正在等待 TUI 输入，也不要轮询或确认 inbox。`,
+    `不要调用项目或用户配置中发现的 CommHub/MCP 工具；跨 agent 显式派发由 agent-node wrapper 在进入 Grok 前处理。`,
+    `当前任务 ID 是 ${currentTaskId}。`,
+    `请直接完成任务，不要只回复“收到”。`,
+    ``,
+    `收到来自 ${from} 的任务：`,
+    task,
+  ].join("\n");
+  return SYSTEM_PROMPT ? `${SYSTEM_PROMPT}\n\n${runtimePrompt}` : runtimePrompt;
+}
+
+const activeGrokCliTurns = new Set<AbortController>();
+let validatedGrokCliBinary = "";
+
+type GrokCopresenceSession = import("./runtime/grok-copresence/runtime").GrokCopresenceRuntimeSession;
+let grokCopresenceRuntimeSession: GrokCopresenceSession | null = null;
+let grokCopresenceRuntimeOpening: Promise<GrokCopresenceSession> | null = null;
+let grokCopresenceLocalTaskSequence = 0;
+
+function grokCopresenceTimeoutMs(): number {
+  const raw = process.env.GROK_CLI_TIMEOUT_MS
+    || fileConfig.flags?.grokCliTimeoutMs
+    || fileConfig.grokCliTimeoutMs
+    || "300000";
+  const parsed = Number.parseInt(String(raw), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 300_000;
+}
+
+function resolveGrokCopresenceSocket(configured: unknown, fallback: string): string {
+  const value = typeof configured === "string" && configured.trim()
+    ? configured.trim()
+    : fallback;
+  const expanded = expandHome(value);
+  return expanded.startsWith("/") ? expanded : join(process.cwd(), expanded);
+}
+
+async function handleGrokCopresenceHumanPrompt(prompt: string): Promise<void> {
+  // A2 boundary: only the existing, deterministic explicit-delegation parser
+  // may turn a human TUI line into a CommHub call. Ordinary conversation is
+  // deliberately ignored here and remains local to Grok.
+  const redacted = persistenceRedactor.redactText(prompt);
+  if (redacted.redactions > 0) {
+    warn(`[grok-preview] masked ${redacted.redactions} credential value(s) before human TUI delegation`);
+  }
+  const result = await tryHandleExplicitDelegation(redacted.text, "human:grok-tui", null, true);
+  if (result) {
+    // Delegation results can contain third-party credentials that were not in
+    // this process's known-value set. Keep content out of ordinary logs
+    // altogether; completion metadata is sufficient for operator diagnostics.
+    log(`[grok-copresence] A2 human delegation completed (${result.length} chars)`);
+  }
+}
+
+async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
+  if (!GROK_COPRESENCE) {
+    throw new Error("grok copresence runtime requested without grokCopresence:true");
+  }
+  if (process.platform !== "linux") {
+    throw new Error("grok co-presence preview currently requires Linux PTY, /proc, and Unix sockets");
+  }
+  if (grokCopresenceRuntimeSession) return grokCopresenceRuntimeSession;
+  if (grokCopresenceRuntimeOpening) return grokCopresenceRuntimeOpening;
+
+  grokCopresenceRuntimeOpening = (async () => {
+    // Approval ownership is an invariant, not a best-effort preference. An
+    // existing yolo profile must be migrated instead of silently turning
+    // network input into an implicit permission grant.
+    if (fileConfig.flags?.dangerouslySkipPermissions === true) {
+      throw new Error(
+        "grok copresence refuses flags.dangerouslySkipPermissions=true; "
+        + "approval decisions must remain owned by the attached human TUI",
+      );
+    }
+    if (opts.tools !== undefined || fileConfig.tools !== undefined) {
+      throw new Error(
+        "grok copresence preview uses one fixed text-only tool profile; remove custom tools from the node config",
+      );
+    }
+    if (
+      MAX_TURNS_CLI !== undefined
+      || fileConfig.flags?.maxTurns !== undefined
+      || fileConfig.maxTurns !== undefined
+    ) {
+      throw new Error(
+        "grok copresence preview does not support maxTurns because pinned Grok ignores it in interactive TUI mode",
+      );
+    }
+
+    const grokBinary = process.env.GROK_BINARY || "grok";
+    const grokCwd = process.cwd();
+    const sourceGrokHome = process.env.GROK_HOME || join(home, ".grok");
+
+    const { execFileSync } = await import("child_process");
+    const { assertGrokCliVersion } = await import("./runtime/grok-build-cli");
+    const {
+      prepareGrokCliHome,
+      assertNoDiscoveredGrokHooks,
+      grokCliStateKey,
+      grokProjectPolicyPaths,
+    } = await import("./runtime/grok-build-cli-home");
+    const {
+      assertGrokCopresenceFeatures,
+      assertGrokCopresenceVersion,
+      assertGrokCopresenceApprovalOwnership,
+      openGrokCopresenceRuntime,
+    } = await import("./runtime/grok-copresence/runtime");
+
+    const grokHomeKey = grokCliStateKey(NODE_ID || ALIAS || "default");
+    const stateGrokRoot = join(home, ".anet-grok");
+    const stateGrokHome = join(stateGrokRoot, grokHomeKey);
+    const runtimeDir = join(stateGrokHome, "run");
+    const leaderSocket = resolveGrokCopresenceSocket(
+      opts["grok-leader-socket"]
+        ?? fileConfig.grokLeaderSocket
+        ?? fileConfig.flags?.grokLeaderSocket
+        ?? process.env.GROK_LEADER_SOCKET,
+      join(runtimeDir, "leader.sock"),
+    );
+    const attachSocket = resolveGrokCopresenceSocket(
+      opts["grok-attach-socket"]
+        ?? fileConfig.grokAttachSocket
+        ?? fileConfig.flags?.grokAttachSocket
+        ?? process.env.ANET_GROK_ATTACH_SOCKET,
+      join(runtimeDir, "attach.sock"),
+    );
+    if (leaderSocket === attachSocket) {
+      throw new Error("grok leader and attach sockets must use different paths");
+    }
+
+    const prepareRuntime = () => {
+      const grokCliHome = prepareGrokCliHome({
+        sourceHome: sourceGrokHome,
+        stateRoot: stateGrokRoot,
+        stateHome: stateGrokHome,
+        projectCwd: grokCwd,
+        useLeader: true,
+        denyPaths: [
+          join(grokCwd, ".anet"),
+          join(home, ".anet"),
+          configFilePath || "",
+          join(grokCwd, ".mcp.json"),
+        ],
+      });
+      const env = buildGrokChildEnv({
+        parentEnv: process.env,
+        cwd: grokCwd,
+        home: grokCliHome.home,
+        authPath: grokCliHome.authPath,
+        oidcIssuer: grokCliHome.oidcIssuer,
+        oidcClientId: grokCliHome.oidcClientId,
+        expectedParentPid: process.pid,
+        defaultSelectedPermission: "allow_once",
+      });
+      return { grokCliHome, env };
+    };
+
+    // Prepare the isolated home before every Grok executable call. In
+    // particular, --version/--help/inspect must not inherit user hooks/MCPs.
+    const initialRuntime = prepareRuntime();
+    let version: string;
+    let help: string;
+    try {
+      version = execFileSync(grokBinary, ["--version"], {
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 5_000,
+        cwd: grokCwd,
+        env: initialRuntime.env,
+      }).trim();
+      help = execFileSync(grokBinary, ["--help"], {
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 5_000,
+        cwd: grokCwd,
+        env: initialRuntime.env,
+      });
+      assertGrokCliVersion(version);
+      assertGrokCopresenceVersion(version);
+      assertGrokCopresenceFeatures(help);
+    } catch (error: any) {
+      throw new Error(
+        `Grok CLI is missing or too old for co-presence (${error?.message || error}). `
+        + "Install the pinned Grok Build CLI and verify `grok --help`.",
+      );
+    }
+
+    // Reuse this exact gate before the initial PTY and every recovery spawn.
+    // A workspace turn may have changed project configuration; reconnect must
+    // never bypass the initial hook, MCP and permission audit.
+    const auditAndPrepareRuntime = () => {
+      const auditRuntime = prepareRuntime();
+      let inspection: string;
+      try {
+        const spawnVersion = execFileSync(grokBinary, ["--version"], {
+          encoding: "utf-8",
+          stdio: ["ignore", "pipe", "pipe"],
+          timeout: 5_000,
+          cwd: grokCwd,
+          env: auditRuntime.env,
+        }).trim();
+        const spawnHelp = execFileSync(grokBinary, ["--help"], {
+          encoding: "utf-8",
+          stdio: ["ignore", "pipe", "pipe"],
+          timeout: 5_000,
+          cwd: grokCwd,
+          env: auditRuntime.env,
+        });
+        assertGrokCopresenceVersion(spawnVersion);
+        assertGrokCopresenceFeatures(spawnHelp);
+        inspection = execFileSync(grokBinary, ["inspect", "--json"], {
+          encoding: "utf-8",
+          stdio: ["ignore", "pipe", "pipe"],
+          timeout: 10_000,
+          maxBuffer: 2 * 1024 * 1024,
+          cwd: grokCwd,
+          env: auditRuntime.env,
+        });
+      } catch (error: any) {
+        throw new Error(
+          `grok copresence safety audit failed before TUI spawn (${error?.code || error?.status || "inspect error"})`,
+        );
+      }
+      assertNoDiscoveredGrokHooks(inspection);
+      assertGrokCopresenceApprovalOwnership(inspection, auditRuntime.grokCliHome.home);
+      // Clear runtime-owned executable state once more after the inspector.
+      return prepareRuntime();
+    };
+
+    const { grokCliHome, env } = prepareRuntime();
+    if (!grokCliHome.copresenceAgentProfile) {
+      throw new Error("grok copresence safety audit did not produce its runtime-owned agent profile");
+    }
+    const session = await openGrokCopresenceRuntime({
+      binary: grokBinary,
+      cwd: grokCwd,
+      grokHome: grokCliHome.home,
+      env,
+      sessionId: grokSessionId || undefined,
+      newSession: NEW_SESSION,
+      leaderSocket,
+      attachSocket,
+      alias: currentAlias(),
+      model: MODEL || undefined,
+      agentProfile: grokCliHome.copresenceAgentProfile,
+      alwaysApprove: false,
+      // Workspace capability is still mediated by Grok's interactive
+      // permission UI. `alwaysApprove:false` is invariant, so only the human
+      // attached to this PTY may approve a mutating tool call.
+      sandboxProfile: grokCliHome.workspaceProfile,
+      protectedPaths: [
+        grokCliHome.home,
+        dirname(grokCliHome.authPath),
+        join(grokCwd, ".anet"),
+        join(home, ".anet"),
+        ...grokProjectPolicyPaths(grokCwd),
+        "/proc",
+      ],
+      flockBinary: process.env.FLOCK_BINARY || "flock",
+      turnTimeoutMs: grokCopresenceTimeoutMs(),
+      beforeSpawn: () => auditAndPrepareRuntime().env,
+      onSession: (sessionId) => writebackGrokSession(sessionId),
+      onHumanPrompt: handleGrokCopresenceHumanPrompt,
+      log: (message) => log(message),
+      warn: (message) => warn(message),
+    });
+    grokCopresenceRuntimeSession = session;
+    log(`[grok-copresence] ${version}; attach with anet grok attach ${NODE_NAME || ALIAS}`);
+    return session;
+  })();
+
+  try {
+    return await grokCopresenceRuntimeOpening;
+  } catch (error) {
+    grokCopresenceRuntimeOpening = null;
+    throw error;
+  }
+}
+
+const GROK_COPRESENCE_FAILURE_CODE_SET = new Set([
+  "approval_boundary",
+  "correlation",
+  "input_validation",
+  "jsonl_tail",
+  "leader_lifecycle",
+  "native_outcome",
+  "runtime_closed",
+  "service_or_model",
+  "spawn_audit",
+  "timeout",
+  "tui_exit",
+  "unknown",
+]);
+
+// This is deliberately a direct list of reviewed runtime outputs, not a
+// source/stage/reason cartesian product.  The CLI is a separate persistence
+// boundary from the runtime module, so it revalidates the non-enumerable
+// property before placing the value-free marker in a Hub reply.
+const GROK_COPRESENCE_JSONL_FAILURE_SUBCODE_SET = new Set([
+  "unknown",
+  "chat.stat.missing_after_arm",
+  "chat.stat.identity_changed",
+  "chat.stat.size_regressed",
+  "chat.stat.non_regular",
+  "chat.stat.owner_mismatch",
+  "chat.stat.io_other",
+  "chat.open.io_other",
+  "chat.fstat.non_regular",
+  "chat.fstat.io_other",
+  "chat.read.io_other",
+  "chat.read.state_invariant",
+  "chat.close.io_other",
+  "chat.reduce.state_invariant",
+  "events.stat.missing_after_arm",
+  "events.stat.identity_changed",
+  "events.stat.size_regressed",
+  "events.stat.non_regular",
+  "events.stat.owner_mismatch",
+  "events.stat.io_other",
+  "events.open.io_other",
+  "events.fstat.non_regular",
+  "events.fstat.io_other",
+  "events.read.io_other",
+  "events.read.state_invariant",
+  "events.close.io_other",
+  "events.reduce.state_invariant",
+  "events.lifecycle.state_invariant",
+  "combined.flush.state_invariant",
+]);
+
+type ReviewedGrokFailure = {
+  code: string;
+  subcode: string;
+};
+
+function reviewedGrokCopresenceFailureCode(value: unknown): string | null {
+  return typeof value === "string" && GROK_COPRESENCE_FAILURE_CODE_SET.has(value)
+    ? value
+    : null;
+}
+
+function reviewedGrokCopresenceFailure(
+  codeValue: unknown,
+  subcodeValue: unknown,
+): ReviewedGrokFailure {
+  const code = reviewedGrokCopresenceFailureCode(codeValue);
+  if (!code || code === "unknown") {
+    return { code: "unknown", subcode: "unknown" };
+  }
+  if (code === "jsonl_tail") {
+    return {
+      code,
+      subcode: typeof subcodeValue === "string"
+        && GROK_COPRESENCE_JSONL_FAILURE_SUBCODE_SET.has(subcodeValue)
+        ? subcodeValue
+        : "unknown",
+    };
+  }
+  return subcodeValue === "none"
+    ? { code, subcode: "none" }
+    : { code: "unknown", subcode: "unknown" };
+}
+
+function withoutGrokFailureMarkers(value: string): string {
+  return value.replace(
+    /\[grok_(?:failure|subcode):[^\]\r\n]*\]/g,
+    "[grok_diagnostic_marker_withheld]",
+  );
+}
+
+async function processWithGrokCopresence(
+  task: string,
+  from: string,
+  taskId: string | null,
+  images?: string[],
+): Promise<string> {
+  if (images?.length) {
+    warn(`[grok-copresence] image attachments are not wired into the shared TUI; sending text-only task`);
+  }
+  try {
+    const session = await ensureGrokCopresenceRuntime();
+    const effectiveTaskId = taskId || [
+      "local",
+      process.pid,
+      Date.now().toString(36),
+      (++grokCopresenceLocalTaskSequence).toString(36),
+    ].join("-");
+    const result = await session.submit({
+      taskId: effectiveTaskId,
+      from,
+      text: task,
+      timeoutMs: grokCopresenceTimeoutMs(),
+    });
+    return sanitizeGrokCommhubLeak(result.replyText || "（无回复）");
+  } catch (error) {
+    const {
+      grokCopresenceFailureCode,
+      grokCopresenceFailureSubcode,
+    } = await import("./runtime/grok-copresence/runtime");
+    const failureCode = grokCopresenceFailureCode(error);
+    const failureSubcode = grokCopresenceFailureSubcode(error);
+    const message = error instanceof Error ? error.message : String(error || "unknown error");
+    const wrapped = new Error(message);
+    Object.defineProperty(wrapped, "grokFailureCode", {
+      value: failureCode,
+      enumerable: false,
+      configurable: false,
+      writable: false,
+    });
+    Object.defineProperty(wrapped, "grokFailureSubcode", {
+      value: failureSubcode,
+      enumerable: false,
+      configurable: false,
+      writable: false,
+    });
+    throw wrapped;
+  }
+}
+
+async function processWithGrokCli(task: string, from: string, images?: string[]): Promise<string> {
+  if (images?.length) {
+    warn(`[grok-cli] image attachments are not wired into --prompt-json yet; sending text-only prompt`);
+  }
+
+  const grokBinary = process.env.GROK_BINARY || "grok";
+  // Unlike ACP, the CLI lane is a coding runtime: it must operate in the real
+  // worktree so git metadata and atomic writes retain normal semantics.
+  const grokCwd = process.cwd();
+  debug(`[grok-cli] cwd=${grokCwd}`);
+
+  const { execFileSync } = await import("child_process");
+  const { runGrokCliTurn, assertGrokCliFeatures, assertGrokCliVersion } = await import("./runtime/grok-build-cli");
+  const {
+    prepareGrokCliHome,
+    assertNoDiscoveredGrokHooks,
+    acquireGrokProjectTurnLock,
+    grokCliStateKey,
+  } = await import("./runtime/grok-build-cli-home");
+  const sourceGrokHome = process.env.GROK_HOME || join(home, ".grok");
+  const rawGrokHomeKey = NODE_ID || ALIAS || "default";
+  const grokHomeKey = grokCliStateKey(rawGrokHomeKey);
+  const stateGrokRoot = join(home, ".anet-grok");
+  const stateGrokHome = join(stateGrokRoot, grokHomeKey);
+  if (process.platform !== "linux") {
+    throw new Error("grok-build-cli secure turn supervision currently requires Linux user/PID namespaces");
+  }
+  const unshareBinary = process.env.UNSHARE_BINARY || "unshare";
+  const flockBinary = process.env.FLOCK_BINARY || "flock";
+  const setprivBinary = process.env.SETPRIV_BINARY || "setpriv";
+  const grokTurnLauncher = {
+    binary: setprivBinary,
+    args: [
+      "--pdeathsig", "SIGKILL",
+      "--",
+      "/bin/sh", "-c",
+      '[ "$PPID" -eq "$ANET_EXPECTED_PARENT_PID" ] || exit 125; exec "$@"',
+      "anet-grok-supervisor",
+      unshareBinary,
+      "--user",
+      "--map-root-user",
+      "--keep-caps",
+      "--pid",
+      "--fork",
+      "--kill-child=SIGKILL",
+      "--mount-proc",
+    ],
+  };
+
+  // Prepare before *any* Grok probe. This prevents --version/--help from
+  // inheriting executable extensions or trust state from the source home.
+  // prepareRuntime is also called before every actual spawn (including a
+  // fresh-session retry), so a prior yolo turn cannot persist a hook for the
+  // next process.
+  const prepareRuntime = () => {
+    const grokCliHome = prepareGrokCliHome({
+      sourceHome: sourceGrokHome,
+      stateRoot: stateGrokRoot,
+      stateHome: stateGrokHome,
+      projectCwd: grokCwd,
+      denyPaths: [
+        join(grokCwd, ".anet"),
+        join(home, ".anet"),
+        configFilePath || "",
+        join(grokCwd, ".mcp.json"),
+      ],
+    });
+    // Build from an empty object. The worker never receives CommHub identity,
+    // routing state, arbitrary config envRef values, or ambient cloud creds.
+    const env = buildGrokChildEnv({
+      parentEnv: process.env,
+      cwd: grokCwd,
+      home: grokCliHome.home,
+      authPath: grokCliHome.authPath,
+      oidcIssuer: grokCliHome.oidcIssuer,
+      oidcClientId: grokCliHome.oidcClientId,
+      expectedParentPid: process.pid,
+    });
+    return { grokCliHome, env };
+  };
+
+  const initialRuntime = prepareRuntime();
+  debug(`[grok-cli] isolated home=${initialRuntime.grokCliHome.home}`);
+  if (validatedGrokCliBinary !== grokBinary) {
+    try {
+      const version = execFileSync(grokBinary, ["--version"], {
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 5_000,
+        cwd: grokCwd,
+        env: initialRuntime.env,
+      }).trim();
+      const help = execFileSync(grokBinary, ["--help"], {
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 5_000,
+        cwd: grokCwd,
+        env: initialRuntime.env,
+      });
+      assertGrokCliVersion(version);
+      assertGrokCliFeatures(help);
+      validatedGrokCliBinary = grokBinary;
+      debug(`[grok-cli] ${version}`);
+    } catch (error: any) {
+      throw new Error(
+        `Grok CLI is missing or too old for grok-build-cli (${error?.message || error}). ` +
+        `Install/update Grok Build CLI, then verify \`grok --help\`.`,
+      );
+    }
+  }
+
+  const timeoutRaw = process.env.GROK_CLI_TIMEOUT_MS
+    || fileConfig.flags?.grokCliTimeoutMs
+    || fileConfig.grokCliTimeoutMs
+    || "300000";
+  const parsedTimeout = Number.parseInt(String(timeoutRaw), 10);
+  const idleTimeoutMs = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 300_000;
+  const alwaysApprove = fileConfig.flags?.dangerouslySkipPermissions === true;
+
+  const runOnce = async (sessionId?: string, label = "primary") => {
+    const started = Date.now();
+    const turnLock = await acquireGrokProjectTurnLock(grokCwd, flockBinary);
+    try {
+    const auditRuntime = prepareRuntime();
+    let inspection: string;
+    try {
+      inspection = execFileSync(grokBinary, ["inspect", "--json"], {
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 10_000,
+        maxBuffer: 2 * 1024 * 1024,
+        cwd: grokCwd,
+        env: auditRuntime.env,
+      });
+    } catch (error: any) {
+      throw new Error(
+        `grok-build-cli hook audit failed before spawn (${error?.code || error?.status || "inspect error"})`,
+      );
+    }
+    assertNoDiscoveredGrokHooks(inspection);
+    // Re-check static paths and clear runtime-owned executable sources once
+    // more after inspect, narrowing the audit-to-spawn window and preventing
+    // the inspector itself from leaving executable state behind.
+    const { grokCliHome, env: grokRuntimeEnv } = prepareRuntime();
+
+    const controller = new AbortController();
+    activeGrokCliTurns.add(controller);
+    let result;
+    try {
+      result = await runGrokCliTurn({
+        prompt: buildGrokCliCommhubPrompt(task, from),
+        cwd: grokCwd,
+        sessionId,
+        model: MODEL || undefined,
+        maxTurns: currentMaxTurns(),
+        idleTimeoutMs,
+        binary: grokBinary,
+        launcher: grokTurnLauncher,
+        lockFd: turnLock.fd,
+        env: grokRuntimeEnv,
+        alwaysApprove,
+        toolAllowlist: Array.isArray(TOOLS) ? TOOLS : undefined,
+        sandboxProfile: alwaysApprove ? grokCliHome.workspaceProfile : grokCliHome.readOnlyProfile,
+        protectedPaths: [
+          grokCliHome.home,
+          sourceGrokHome,
+          join(grokCwd, ".anet"),
+          join(home, ".anet"),
+          "/proc",
+        ],
+        signal: controller.signal,
+        onEvent: (event) => {
+          if (event.type === "end") debug(`[grok-cli] end stopReason=${event.stopReason || "unknown"}`);
+        },
+        onStderr: (line) => {
+          if (/error|fail|cannot|denied|enoent|not found/i.test(line)) warn(`[grok-cli-stderr] ${line}`);
+          else debug(`[grok-cli-stderr] ${line}`);
+        },
+      });
+    } finally {
+      activeGrokCliTurns.delete(controller);
+    }
+    writebackGrokSession(result.sessionId);
+    log(`[grok-cli] done ${label} | ${Date.now() - started}ms | session=${result.sessionId.slice(0, 8)} | events=${result.eventCount}`);
+    return sanitizeGrokCommhubLeak(result.replyText || "（无回复）");
+    } finally {
+      await turnLock.release();
+    }
+  };
+
+  const firstSessionId = grokSessionId || SESSION_ID || undefined;
+  try {
+    return await runOnce(firstSessionId);
+  } catch (e: any) {
+    const message = String(e?.message || e);
+    if (firstSessionId && /session[^\n]*(not found|does not exist|missing)|persisted cwd|failed to resume|sandbox[^\n]*(differ|mismatch|profile)/i.test(message)) {
+      warn(`[grok-cli] saved session could not be resumed; retrying once with a fresh session`);
+      clearGrokSession("CLI resume failed");
+      return await runOnce(undefined, "fresh-retry");
+    }
+    throw e;
+  }
+}
+
 function parseToolJson(value: any): any {
   const text = value?.content?.[0]?.text;
   if (typeof text === "string") {
@@ -3090,9 +3848,14 @@ function findTaskId(value: any): string | undefined {
   return value.task_id || value.message_id || value.id;
 }
 
-async function tryHandleExplicitDelegation(task: string, from: string, taskId: string | null): Promise<string | null> {
+async function tryHandleExplicitDelegation(
+  task: string,
+  from: string,
+  taskId: string | null,
+  allowRootTask = false,
+): Promise<string | null> {
   const parsed = extractExplicitDelegation(task);
-  if (!parsed || !taskId) return null;
+  if (!parsed || (!taskId && !allowRootTask)) return null;
 
   // #230 — alias-equality + self-exclusion precheck.
   //
@@ -3137,7 +3900,7 @@ async function tryHandleExplicitDelegation(task: string, from: string, taskId: s
       task: parsed.childTask,
       priority: "normal",
       from_session: fromAlias,
-      parent_task_id: taskId,
+      parent_task_id: taskId || undefined,
     }));
   } catch (e: any) {
     // #230 — if the real send_task still gets rejected by the server
@@ -3224,7 +3987,11 @@ function think(task: string, from: string, taskId: string | null, images?: strin
         return await processWithCodex(task, from, images);
       }
       if (RUNTIME === "grok") {
-        return await processWithGrok(task, from, images);
+        return GROK_EXECUTION_MODE === "cli"
+          ? GROK_COPRESENCE
+            ? await processWithGrokCopresence(task, from, taskId, images)
+            : await processWithGrokCli(task, from, images)
+          : await processWithGrok(task, from, images);
       }
       if (RUNTIME === "opencode") {
         return await processWithOpencode(task, from, images);
@@ -3289,35 +4056,71 @@ async function extractImagePaths(msg: any): Promise<string[]> {
 }
 
 async function processTask(task: string, from: string, taskId: string | null = null, images?: string[]): Promise<{ text: string; failed: boolean }> {
-  log(`→ processing [${RUNTIME}]${images?.length ? ` +${images.length} image(s)` : ""}: ${task.slice(0, 80)}`);
-  await reportStatus("working", task.slice(0, 200)).catch(() => {});
+  // The experimental Grok CLI lane writes its prompt into the shared TUI
+  // session. Never place credential-shaped input there: mask it before the
+  // runtime, status preview, logs, and any later durable state see it.
+  const redactedTask = GROK_EXECUTION_MODE === "cli"
+    ? persistenceRedactor.redactText(task)
+    : { text: task, redactions: 0 };
+  const runtimeTask = redactedTask.text;
+  if (redactedTask.redactions > 0) {
+    warn(`[grok-preview] masked ${redactedTask.redactions} credential value(s) before the shared TUI session`);
+  }
+  const taskLogSuffix = GROK_EXECUTION_MODE === "cli"
+    ? ` (${runtimeTask.length} chars; content withheld)`
+    : `: ${runtimeTask.slice(0, 80)}`;
+  log(`→ processing [${RUNTIME}]${images?.length ? ` +${images.length} image(s)` : ""}${taskLogSuffix}`);
+  await reportStatus("working", runtimeTask.slice(0, 200)).catch(() => {});
 
   // RFC-025 M1c P0b — context injection.
   // Prepend a self-loop block so the agent knows what it's currently
   // looping. Pure formatter; empty when no active/paused goals.
   // Read goals fresh every turn (no cache) so M1d edits / new loops
   // show up immediately on the next think.
-  let augmentedTask = task;
+  let augmentedTask = runtimeTask;
   try {
     const myGoals = await goalStore.list();
     const block = formatSelfLoopsBlock(myGoals);
     if (block) {
-      augmentedTask = block + "\n" + task;
+      augmentedTask = block + "\n" + runtimeTask;
     }
   } catch (e: any) {
     // Defensive: a bad goalStore read MUST NOT block normal task
     // processing. Log and continue with the original task.
     warn(`[goals/format] inject failed: ${e?.message ?? e} (task continues without block)`);
   }
+  if (GROK_EXECUTION_MODE === "cli") {
+    // Legacy goals predate this preview boundary and may already contain
+    // credential material. Redact the fully assembled prompt, not only the
+    // newly received task, before it can reach Grok's TUI/session transcript.
+    const safeAugmented = persistenceRedactor.redactText(augmentedTask);
+    augmentedTask = safeAugmented.text;
+    if (safeAugmented.redactions > 0) {
+      warn(`[grok-preview] masked ${safeAugmented.redactions} credential value(s) from durable goal context`);
+    }
+  }
 
   let text: string;
   let failed = false;
+  let grokFailureCode: string | null = null;
+  let grokFailureSubcode: string | null = null;
   try {
-    text = await tryHandleExplicitDelegation(augmentedTask, from, taskId)
+    // Every inbound network task must be visible in the shared Grok TUI. A2
+    // delegation is intentionally human-only, so the legacy network-side
+    // wrapper is skipped for copresence and remains unchanged elsewhere.
+    text = (GROK_COPRESENCE ? null : await tryHandleExplicitDelegation(augmentedTask, from, taskId))
       || await think(augmentedTask, from, taskId, images);
   } catch (err: any) {
     text = `${RUNTIME} 错误: ${err.message}`;
     failed = true;
+    if (GROK_COPRESENCE) {
+      const reviewed = reviewedGrokCopresenceFailure(
+        err?.grokFailureCode,
+        err?.grokFailureSubcode,
+      );
+      grokFailureCode = reviewed.code;
+      grokFailureSubcode = reviewed.subcode;
+    }
     error(`✗ ${err.message}`);
   } finally {
     await reportStatus("idle").catch(() => {});
@@ -3330,6 +4133,10 @@ async function processTask(task: string, from: string, taskId: string | null = n
   // "may not have access" / "may not exist").
   if (!failed && /(API 错误|API error|需要设置.*KEY|missing.*key|issue with the selected model|may not have access|may not exist|model.+not.+(found|available))/i.test(text)) {
     failed = true;
+    if (GROK_COPRESENCE) {
+      grokFailureCode = "service_or_model";
+      grokFailureSubcode = "none";
+    }
   }
 
   // Vendor-error transient retry (Vincent 2026-06-29 UAT — 通信龙 65e59373):
@@ -3363,6 +4170,10 @@ async function processTask(task: string, from: string, taskId: string | null = n
       const retried = await think(augmentedTask, from, taskId, images);
       text = retried;
       failed = false;
+      if (GROK_COPRESENCE) {
+        grokFailureCode = null;
+        grokFailureSubcode = null;
+      }
       // Re-apply the API-error detection on the retry result (consistency
       // with the first-attempt path; without this a retried "API error"
       // message would slip through as `failed=false`).
@@ -3372,10 +4183,22 @@ async function processTask(task: string, from: string, taskId: string | null = n
         )
       ) {
         failed = true;
+        if (GROK_COPRESENCE) {
+          grokFailureCode = "service_or_model";
+          grokFailureSubcode = "none";
+        }
       }
     } catch (err: any) {
       text = `${RUNTIME} 错误: ${err.message}`;
       failed = true;
+      if (GROK_COPRESENCE) {
+        const reviewed = reviewedGrokCopresenceFailure(
+          err?.grokFailureCode,
+          err?.grokFailureSubcode,
+        );
+        grokFailureCode = reviewed.code;
+        grokFailureSubcode = reviewed.subcode;
+      }
       warn(`[vendor-retry] retry attempt ${retryAttempt} threw: ${err?.message ?? err}`);
     }
   }
@@ -3397,10 +4220,25 @@ async function processTask(task: string, from: string, taskId: string | null = n
   if (text && isVendorErrorForUser(text, failed)) {
     const raw = text;
     text = VENDOR_ERROR_REPLACEMENT;
+    if (GROK_COPRESENCE && !grokFailureCode) {
+      grokFailureCode = "service_or_model";
+      grokFailureSubcode = "none";
+    }
     failed = true;
+    const safeRaw = persistenceRedactor.redactText(raw.slice(0, 400).replace(/\n/g, " ")).text;
     process.stderr.write(
-      `[vendor-error] sanitized for user (after retries exhausted); raw: ${raw.slice(0, 400).replace(/\n/g, " ")}\n`,
+      `[vendor-error] sanitized for user (after retries exhausted); raw: ${safeRaw}\n`,
     );
+  }
+  if (GROK_COPRESENCE && failed) {
+    const reviewed = reviewedGrokCopresenceFailure(
+      grokFailureCode || "unknown",
+      grokFailureSubcode || "unknown",
+    );
+    text = `[grok_failure:${reviewed.code}] [grok_subcode:${reviewed.subcode}] ${withoutGrokFailureMarkers(text)}`;
+  }
+  if (GROK_EXECUTION_MODE === "cli") {
+    text = persistenceRedactor.redactText(text).text;
   }
   return { text, failed };
 }
@@ -3485,7 +4323,10 @@ async function processInbox() {
       const content = msg.content as string;
       const msgType = msg.type || "task";
       const images = await extractImagePaths(msg);
-      log(`← [${from}] (${msgType}/${msg.priority || "normal"})${images.length ? ` +${images.length} image(s)` : ""} ${content.slice(0, 100)}`);
+      const inboundLogSuffix = GROK_EXECUTION_MODE === "cli"
+        ? ` (${content.length} chars; content withheld)`
+        : ` ${content.slice(0, 100)}`;
+      log(`← [${from}] (${msgType}/${msg.priority || "normal"})${images.length ? ` +${images.length} image(s)` : ""}${inboundLogSuffix}`);
 
       // Non-task / non-broadcast: ack and move on, nothing to reply to.
       if (msgType !== "task" && msgType !== "broadcast") {
@@ -3501,6 +4342,10 @@ async function processInbox() {
         continue;
       }
 
+      const persistenceSafeContent = GROK_EXECUTION_MODE === "cli"
+        ? persistenceRedactor.redactText(content).text
+        : content;
+
       // #144 round-6: anet /loop is universal — all recognized runtimes
       // (claude / codex / grok) route /loop and /goal commands to the
       // scheduler. The pre-#144 `RUNTIME !== "claude"` carve-out was
@@ -3508,11 +4353,13 @@ async function processInbox() {
       // native /loop) was false: the SDK is one-shot per-task, no
       // persistent CC REPL to fire CronCreate/ScheduleWakeup from. See
       // goals/store.ts runtimeBucket comment for full rationale.
-      if (isGoalCommand(content)) {
+      if (isGoalCommand(persistenceSafeContent)) {
         let replyText: string;
         let goalFailed = false;
         try {
-          const created = await createScheduledGoal(content, from, msg.id);
+          // Goal state is durable and bypasses processTask. Keep the Grok
+          // preview's redact-before-persistence invariant on this branch too.
+          const created = await createScheduledGoal(persistenceSafeContent, from, msg.id);
           replyText = `[${ALIAS}] ${created}`;
         } catch (e: any) {
           replyText = `[${ALIAS}] /loop 创建失败：${e.message}`;
@@ -3525,14 +4372,20 @@ async function processInbox() {
 
       // (3b) Run the LLM turn.
       const { text: result, failed } = await processTask(content, from, msg.id, images);
-      log(`processTask returned: "${result.slice(0, 80)}" (${result.length} chars, failed=${failed})`);
+      if (GROK_EXECUTION_MODE === "cli") {
+        log(`processTask returned (${result.length} chars, content withheld, failed=${failed})`);
+      } else {
+        log(`processTask returned: "${result.slice(0, 80)}" (${result.length} chars, failed=${failed})`);
+      }
 
       // Low-value successful replies are dropped (preserve previous
       // behaviour — codex / claude often emit "done." / "✅" for trivial
       // confirmations). Failures ALWAYS surface so the dispatcher sees
       // the real error instead of silence.
       if (!failed && isLowValueText(result, true)) {
-        log(`skip reply: low-value (${result.slice(0, 30)})`);
+        log(GROK_EXECUTION_MODE === "cli"
+          ? `skip reply: low-value (${result.length} chars; content withheld)`
+          : `skip reply: low-value (${result.slice(0, 30)})`);
         await ackMessage(msg.id).catch((e: any) => warn(`ack failed for low-value ${msg.id.slice(0, 8)}: ${e.message}`));
         continue;
       }
@@ -3557,15 +4410,21 @@ async function deliverReplyReliably(
   taskId: string,
   failed: boolean,
 ): Promise<void> {
+  // The queue already scrubs at serialization, but every egress must use the
+  // same body. Otherwise a goal/channel bypass can persist a safe copy while
+  // still sending or logging the raw model/error text.
+  const safeBody = GROK_EXECUTION_MODE === "cli"
+    ? persistenceRedactor.redactText(body).text
+    : body;
   // Persist BEFORE attempting — crash safety. Attempts=0 means "not yet
   // tried"; drainPendingReplies increments on each failed retry.
-  persistPendingReply({ to: target, text: body, taskId, failed, queuedAt: Date.now() });
+  persistPendingReply({ to: target, text: safeBody, taskId, failed, queuedAt: Date.now() });
   log(`sending reply to ${target} (task ${taskId.slice(0, 8)}, status=${failed ? "failed" : "replied"})...`);
   try {
-    await sendReply(target, body, taskId, failed);
+    await sendReply(target, safeBody, taskId, failed);
     clearPendingReply(target, taskId);
     lastReplyTime[target] = Date.now();
-    log(`→ [${target}] ${body.slice(0, 100)}`);
+    log(`→ [${target}] ${safeBody.slice(0, 100)}`);
   } catch (e: any) {
     if (e instanceof CommHubError && e.appLevel) {
       // Server told us "no" with a structured reason. Drop and log
@@ -3683,12 +4542,18 @@ async function handleTelegramMessage(tg: TelegramApi, msg: any) {
 
   debug(`[TG] processing: ${prompt.slice(0, 80)}`);
   try {
-    const result = await think(prompt, from, null, images);
-    await telegramSend(tg, chatId, result, messageId);
-    log(`→ [${from}] ${result.slice(0, 100)}`);
+    // Keep Telegram on the same Grok-preview ingress/egress boundary as
+    // CommHub and Feishu. Calling think() directly used to bypass task and
+    // reply credential redaction for grok-build-cli.
+    const result = await processTask(prompt, from, null, images);
+    await telegramSend(tg, chatId, result.text, messageId);
+    log(`→ [${from}] ${result.text.slice(0, 100)}`);
   } catch (e: any) {
-    error(`telegram task failed: ${e.message}`);
-    await telegramSend(tg, chatId, `处理出错: ${e.message}`, messageId).catch(() => {});
+    const safeError = GROK_EXECUTION_MODE === "cli"
+      ? persistenceRedactor.redactText(e?.message ?? String(e)).text
+      : (e?.message ?? String(e));
+    error(`telegram task failed: ${safeError}`);
+    await telegramSend(tg, chatId, `处理出错: ${safeError}`, messageId).catch(() => {});
   }
 }
 
@@ -3989,6 +4854,10 @@ function wireFeishuChildHandlers(
           warn(`[feishu] think() threw: ${e?.message ?? e}`);
           replyText = `[agent-node 异常] ${e?.message ?? String(e)}`;
         }
+      }
+
+      if (GROK_EXECUTION_MODE === "cli") {
+        replyText = persistenceRedactor.redactText(replyText).text;
       }
 
       if (typeof child.send !== "function") return;
@@ -4447,7 +5316,7 @@ log(`  hub:     ${COMMHUB_URL}${AUTH_TOKEN ? " (auth)" : " (no auth!)"}`);
 // 300 s default. Only logged when the grok runtime is in use; the value
 // is the same one runGrokAcpTurn() will use for its session/prompt
 // activity-based timeout (#211).
-if (RUNTIME === "grok") {
+if (RUNTIME === "grok" && GROK_EXECUTION_MODE === "acp") {
   const t = resolveGrokAcpTimeout({
     envValue: process.env.GROK_ACP_TIMEOUT_MS,
     flagValue: fileConfig.flags?.grokAcpTimeoutMs,
@@ -4458,6 +5327,9 @@ if (RUNTIME === "grok") {
     t.source === "env" ? "env GROK_ACP_TIMEOUT_MS" :
     "default";
   log(`  [grok] session/prompt idle timeout = ${t.valueMs}ms (source: ${sourceLabel})`);
+} else if (RUNTIME === "grok") {
+  const raw = process.env.GROK_CLI_TIMEOUT_MS || fileConfig.flags?.grokCliTimeoutMs || "300000";
+  log(`  [grok-cli] execution mode=${GROK_COPRESENCE ? "co-presence TUI" : "headless TUI engine"}; idle timeout=${raw}ms`);
 }
 
 // Validate token + show user/network info
@@ -4488,14 +5360,15 @@ if (AUTH_TOKEN) {
   warn(`  未配置 token — agent 数据不隔离。运行: anet login`);
 }
 
-// #101 fix: log resolved toolset shape — explicit list shows entries, preset
-// surfaces as "all (Claude Code preset)" so users can tell at a glance their
-// agent has the full built-in set vs a restricted allowlist.
-log(`  tools:   ${
+// #101 fix: log resolved toolset shape. Co-presence ignores the generic tool
+// config and uses the one runtime-owned profile verified for the pinned TUI.
+const requestedToolsSummary =
   Array.isArray(TOOLS)
     ? (TOOLS.length ? `[${TOOLS.join(",")}]` : "(none)")
-    : "all (Claude Code preset — built-in: WebFetch/WebSearch/Bash/Read/Write/Edit/Glob/Grep/Task/...)"
-}`);
+    : "all (Claude Code preset — built-in: WebFetch/WebSearch/Bash/Read/Write/Edit/Glob/Grep/Task/...)";
+log(`  tools:   ${GROK_COPRESENCE
+  ? "fixed preview profile [todo_write] (text-only; no filesystem/shell/network/media/MCP/subagents)"
+  : requestedToolsSummary}`);
 log(`  channels:${[
   TELEGRAM_CHANNELS.length ? `telegram(${TELEGRAM_CHANNELS.map(ch => ch.dir).join(",")})` : "",
   FEISHU_CHANNELS.length ? `feishu(${FEISHU_CHANNELS.map(ch => ch.dir).join(",")})` : "",
@@ -4539,6 +5412,12 @@ switch (startupAction.kind) {
   }
 }
 
+if (GROK_COPRESENCE) {
+  // Warm the one PTY owner before inbox/SSE processing so `anet grok attach`
+  // is immediately usable and no network task can trigger a headless race.
+  // Failure is terminal by design: co-presence never degrades to `grok -p`.
+  await ensureGrokCopresenceRuntime();
+}
 await register();
 log("已注册到 CommHub");
 processInbox().catch((e: any) => warn(`initial inbox scan failed: ${e.message}`));
@@ -4657,6 +5536,14 @@ const shutdown = async () => {
   shuttingDown = true;
   log("shutting down...");
   await closeOpencodeRuntime("signal shutdown");
+  await grokCopresenceRuntimeSession?.close().catch((e: any) => {
+    warn(`[grok-copresence] close failed: ${e?.message || e}`);
+  });
+  for (const controller of activeGrokCliTurns) controller.abort();
+  const childDeadline = Date.now() + 1_500;
+  while (activeGrokCliTurns.size > 0 && Date.now() < childDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
   // #261 P0-1 — gate the feishu supervisor loop so it stops re-forking
   // on the soon-to-arrive child exit. SIGTERM each tracked worker (give
   // it 500 ms to exit gracefully), then SIGKILL holdouts. Without this,

@@ -18,6 +18,7 @@ export type RuntimeName =
   | "codex-sdk"
   | "claude-agent-sdk"
   | "grok-build-acp"
+  | "grok-build-cli"
   | "opencode-cli"
   | "codex-app-server";
 
@@ -30,6 +31,7 @@ export const SUPPORTED_RUNTIME_NAMES: readonly RuntimeName[] = [
   "codex-sdk",
   "codex-app-server",
   "grok-build-acp",
+  "grok-build-cli",
   "opencode-cli",
 ] as const;
 
@@ -57,6 +59,13 @@ function canonicalizeRuntime(runtime: string): RuntimeName | undefined {
     runtime === "grok-build" ||
     runtime === "grok-build-acp"
   ) return "grok-build-acp";
+  // Grok shared-TUI lane is explicit opt-in. Legacy `grok` aliases stay on
+  // ACP so an existing profile can never silently change execution mode.
+  if (
+    runtime === "grok-build-cli" ||
+    runtime === "grok-cli" ||
+    runtime === "grok-tui"
+  ) return "grok-build-cli";
   if (
     runtime === "claude" ||
     runtime === "claude-sdk" ||

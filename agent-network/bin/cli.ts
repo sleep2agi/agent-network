@@ -10,7 +10,7 @@
  * anet run                     独立 SSE Agent
  */
 
-import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync, rmSync, cpSync, unlinkSync } from "fs";
+import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync, rmSync, cpSync, unlinkSync, realpathSync } from "fs";
 import { dirname, isAbsolute, join } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
@@ -30,6 +30,7 @@ import {
 } from "../src/copresence-identity";
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
 import { createServer as netCreateServer } from "net";
+import { PassThrough } from "stream";
 import { checkbox, confirm, select } from "@inquirer/prompts";
 import { ensureGitignoreRule, ensureGitignoreRules } from "../src/gitignore-writeback";
 import { superviseChild } from "../src/supervise-child";
@@ -74,6 +75,14 @@ import {
   removeOpencodeRuntimeBinding,
   writeOpencodeRuntimeBinding,
 } from "../src/opencode-runtime-binding";
+import { connectGrokAttach } from "../src/grok-attach-client";
+import {
+  agentNodeHelpSupportsGrokCopresence,
+  buildGrokAgentNodeEnv,
+  buildGrokPreviewResolverEnv,
+  grokBuildCliCreationFields,
+  prepareGrokPreviewResolverConfigs,
+} from "../src/grok-copresence-profile";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -862,8 +871,11 @@ function loadGlobal(): Record<string, any> {
 
 function saveGlobal(data: Record<string, any>) {
   const dir = join(home, ".anet");
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "config.json"), JSON.stringify(data, null, 2) + "\n");
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  try { chmodSync(dir, 0o700); } catch {}
+  const configPath = join(dir, "config.json");
+  writeFileSync(configPath, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
+  try { chmodSync(configPath, 0o600); } catch {}
 }
 
 function loadServerConfig(): Record<string, any> {
@@ -952,6 +964,11 @@ interface Profile {
   env: Record<string, string>;
   flags: Record<string, any>;
   session?: string;
+  grokSession?: string;
+  grokCliSession?: string;
+  grokCopresence?: boolean;
+  grokLeaderSocket?: string;
+  grokAttachSocket?: string;
   resume?: string;
   resumeAlias?: string;
   tools?: string[];
@@ -997,6 +1014,9 @@ function nodeDisplayName(id: string, profile?: Profile | null): string {
 }
 
 function profileSession(profile: Profile): string {
+  const runtime = normalizeRuntime(profile);
+  if (runtime === "grok-build-cli") return profile.grokCliSession || "";
+  if (runtime === "grok-build-acp") return profile.grokSession || profile.session || "";
   return profile.session || "";
 }
 
@@ -1134,7 +1154,8 @@ function saveProfile(id: string, profile: Profile) {
     assertOpencodeNodeStateUntracked(dir);
     writeOpencodeRuntimeBinding(dir, opencodeBindingHome());
   } else {
-    mkdirSync(dir, { recursive: true });
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    try { chmodSync(dir, 0o700); } catch {}
   }
   const normalized = normalizeStoredProfile(id, profile);
   const toSave: Record<string, any> = {
@@ -1156,6 +1177,13 @@ function saveProfile(id: string, profile: Profile) {
     ...((normalized.codexThreadId ?? profile.codexThreadId)
       ? { codexThreadId: normalized.codexThreadId ?? profile.codexThreadId }
       : {}),
+    ...(normalized.grokSession ? { grokSession: normalized.grokSession } : {}),
+    ...(normalized.grokCliSession ? { grokCliSession: normalized.grokCliSession } : {}),
+    ...(typeof normalized.grokCopresence === "boolean"
+      ? { grokCopresence: normalized.grokCopresence }
+      : {}),
+    ...(normalized.grokLeaderSocket ? { grokLeaderSocket: normalized.grokLeaderSocket } : {}),
+    ...(normalized.grokAttachSocket ? { grokAttachSocket: normalized.grokAttachSocket } : {}),
     // RFC-008 / issue #51 team-scale demo metadata. Optional on every node;
     // present only when set by `anet demo sci-team` (Phase 1 scaffold) or
     // a future RFC-008 client. Without this persist, agent-node reads back a
@@ -1171,7 +1199,9 @@ function saveProfile(id: string, profile: Profile) {
     // pre-planted config.json symlink or an unvalidated state tree.
     writeOpencodePrivateProfileFile(dir, "config.json", body);
   } else {
-    writeFileSync(join(dir, "config.json"), body);
+    const configPath = join(dir, "config.json");
+    writeFileSync(configPath, body, { mode: 0o600 });
+    try { chmodSync(configPath, 0o600); } catch {}
   }
 }
 
@@ -1192,7 +1222,8 @@ function parseOpts(): Record<string, string> & { _channels: string[]; _envs: str
     // value; `--copresence <alias>` previously assigned `copresence=<alias>`
     // and callers checking `=== "true"` silently lost the feature. Mirrors
     // the BOOLEAN_FLAGS handling in positionalArgs() below.
-    if (args[i].startsWith("--") && !BOOLEAN_FLAGS.has(args[i]) && args[i + 1] && !args[i + 1].startsWith("--")) {
+    if (BOOLEAN_FLAGS.has(args[i])) { r[args[i].slice(2)] = "true"; continue; }
+    if (args[i].startsWith("--") && args[i + 1] && !args[i + 1].startsWith("--")) {
       r[args[i].slice(2)] = args[++i];
     } else if (args[i].startsWith("--")) {
       r[args[i].slice(2)] = "true";
@@ -1215,6 +1246,7 @@ const BOOLEAN_FLAGS = new Set([
   // second explicit flag alongside --dangerously-allow-full-access. TTY
   // callers still use the typed 'yes' prompt.
   "--yes-danger-full-access",
+  "--grok-headless",
 ]);
 
 // #173 — extract the bare positional operands from an argv slice, mirroring
@@ -1234,14 +1266,14 @@ function positionalArgs(argv: string[]): string[] {
   return out;
 }
 
-function commandExists(name: string): boolean {
+function commandExists(name: string, env?: NodeJS.ProcessEnv): boolean {
   try {
     // Windows has no /bin/sh; use `where`. Unix: `command -v` via /bin/sh with
     // shell-safe quoting (shellQuote, NOT JSON.stringify which lets $() / `` expand).
     if (process.platform === "win32") {
-      execFileSync("where", [name], { stdio: "ignore" });
+      execFileSync("where", [name], { stdio: "ignore", env });
     } else {
-      execFileSync("/bin/sh", ["-c", `command -v ${shellQuote(name)}`], { stdio: "ignore" });
+      execFileSync("/bin/sh", ["-c", `command -v ${shellQuote(name)}`], { stdio: "ignore", env });
     }
     return true;
   } catch {
@@ -1599,6 +1631,10 @@ async function setupCommand() {
         value: "grok-build-acp",
       },
       {
+        name: `grok-build-cli — Grok 共存 TUI（实验性 preview；仅可接收可信任务）`,
+        value: "grok-build-cli",
+      },
+      {
         name: `claude-agent-sdk — Claude Agent SDK${isInstalled(versions.agentNode) ? "（已就绪 ✅）" : "（需要安装 agent-node）"}`,
         value: "claude-agent-sdk",
       },
@@ -1619,13 +1655,16 @@ async function setupCommand() {
     addPackage("@anthropic-ai/claude-code");
   }
   if (runtimeSelections.includes("codex-sdk")) {
-    if (!isInstalled(versions.agentNode)) addPackage("@sleep2agi/agent-node");
+    if (!isInstalled(versions.agentNode) && !runtimeSelections.includes("grok-build-cli")) addPackage("@sleep2agi/agent-node");
     if (!isInstalled(versions.codex)) addPackage("@openai/codex");
   }
-  if (runtimeSelections.includes("grok-build-acp") && !isInstalled(versions.agentNode)) {
+  if (runtimeSelections.includes("grok-build-acp") && !isInstalled(versions.agentNode) && !runtimeSelections.includes("grok-build-cli")) {
     addPackage("@sleep2agi/agent-node");
   }
-  if (runtimeSelections.includes("claude-agent-sdk") && !isInstalled(versions.agentNode)) {
+  if (runtimeSelections.includes("grok-build-cli") && !isInstalled(versions.agentNode)) {
+    addPackage("@sleep2agi/agent-node@preview");
+  }
+  if (runtimeSelections.includes("claude-agent-sdk") && !isInstalled(versions.agentNode) && !runtimeSelections.includes("grok-build-cli")) {
     addPackage("@sleep2agi/agent-node");
   }
   if (installCommhubServer && !isInstalled(versions.commhubServer)) {
@@ -1661,7 +1700,7 @@ async function setupCommand() {
   if (runtimeSelections.includes("claude-code-cli")) {
     console.log(`  ${isInstalled(verified.claude) ? "✅" : "❌"} ${formatDetectedVersion(verified.claude)}`);
   }
-  if (runtimeSelections.includes("codex-sdk") || runtimeSelections.includes("claude-agent-sdk") || runtimeSelections.includes("grok-build-acp")) {
+  if (runtimeSelections.includes("codex-sdk") || runtimeSelections.includes("claude-agent-sdk") || runtimeSelections.includes("grok-build-acp") || runtimeSelections.includes("grok-build-cli")) {
     console.log(`  ${isInstalled(verified.agentNode) ? "✅" : "❌"} ${formatDetectedVersion(verified.agentNode)}`);
   }
   if (runtimeSelections.includes("codex-sdk")) {
@@ -1674,8 +1713,12 @@ async function setupCommand() {
   if (runtimeSelections.includes("codex-sdk")) {
     console.log(`  ⚠ codex 需要登录: codex login`);
   }
-  if (runtimeSelections.includes("grok-build-acp")) {
+  if (runtimeSelections.includes("grok-build-acp") || runtimeSelections.includes("grok-build-cli")) {
     console.log(`  ⚠ grok 需要安装并登录: grok login 或 x.ai CLI 认证缓存`);
+  }
+  if (runtimeSelections.includes("grok-build-cli")) {
+    console.warn(`  ⚠ EXPERIMENTAL/DANGEROUS: 网络任务会驱动同一个 Grok TUI；审批归属未完成硬化。`);
+    console.warn(`  ⚠ 仅在 preview 中使用，不要接入不可信任务。`);
   }
   if (runtimeSelections.includes("claude-code-cli")) {
     console.log(`  ⚠ claude 需要登录: claude auth login`);
@@ -1799,21 +1842,36 @@ function opencodeUsePinSource(): string {
 type AgentNodeLaunchPlan = {
   command: string;
   argsPrefix: string[];
-  source: "explicit" | "global";
+  source: "explicit" | "global" | "preview";
   probeEnv: NodeJS.ProcessEnv;
 };
 
 let opencodeAgentNodeLaunchPlan: AgentNodeLaunchPlan | null = null;
+let grokAgentNodeLaunchPlan: AgentNodeLaunchPlan | null = null;
+
+function agentNodeHelp(plan: AgentNodeLaunchPlan): string {
+  return execFileSync(plan.command, [...plan.argsPrefix, "--help"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: plan.source === "preview" ? 120_000 : 5_000,
+    env: plan.probeEnv,
+  });
+}
 
 function planSupportsOpencode(plan: AgentNodeLaunchPlan): boolean {
   try {
-    const help = execFileSync(plan.command, [...plan.argsPrefix, "--help"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 5_000,
-      env: plan.probeEnv,
-    });
-    return agentNodeHelpSupportsOpencode(help);
+    return agentNodeHelpSupportsOpencode(agentNodeHelp(plan));
+  } catch {
+    return false;
+  }
+}
+
+function planSupportsRuntime(plan: AgentNodeLaunchPlan, runtime: RuntimeName): boolean {
+  try {
+    const help = agentNodeHelp(plan);
+    return runtime === "grok-build-cli"
+      ? agentNodeHelpSupportsGrokCopresence(help)
+      : help.includes(runtime);
   } catch {
     return false;
   }
@@ -1912,6 +1970,115 @@ function revalidateOpencodeAgentNodeLaunchPlan(plan: AgentNodeLaunchPlan): Agent
   return checked;
 }
 
+function resolvePreviewAgentNodeEntrypoint(resolverEnv: NodeJS.ProcessEnv): string {
+  let output: string;
+  try {
+    output = execFileSync(
+      "npx",
+      ["-y", "@sleep2agi/agent-node@preview", "--print-entrypoint"],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 120_000,
+        env: resolverEnv,
+      },
+    );
+  } catch {
+    throw new Error("could not install and resolve @sleep2agi/agent-node@preview");
+  }
+
+  const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length !== 1 || !isAbsolute(lines[0])) {
+    throw new Error("@sleep2agi/agent-node@preview returned an invalid entrypoint");
+  }
+  const entrypoint = realpathSync(lines[0]);
+  const packageRoot = dirname(dirname(entrypoint));
+  const expectedEntrypoint = realpathSync(join(packageRoot, "dist", "cli.js"));
+  if (entrypoint !== expectedEntrypoint) {
+    throw new Error("@sleep2agi/agent-node@preview entrypoint is outside its package payload");
+  }
+
+  const packageJsonPath = join(packageRoot, "package.json");
+  const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+  if (
+    pkg?.name !== "@sleep2agi/agent-node"
+    || typeof pkg?.version !== "string"
+    || !pkg.version.includes("-preview.")
+    || pkg?.publishConfig?.tag !== "preview"
+  ) {
+    throw new Error("resolved agent-node package is not a preview-channel candidate");
+  }
+
+  const uid = process.getuid?.();
+  for (const path of [entrypoint, packageJsonPath]) {
+    const stat = statSync(path);
+    if (!stat.isFile() || (uid !== undefined && stat.uid !== uid) || (stat.mode & 0o022) !== 0) {
+      throw new Error("resolved agent-node package has unsafe ownership or mode");
+    }
+  }
+  return entrypoint;
+}
+
+/**
+ * Resolve and capability-check the executable before launch. An old global
+ * agent-node must never receive an unknown runtime name: historical builds
+ * normalized unknown names to Claude. We instead fall back explicitly to the
+ * preview package and verify that package advertises grok-build-cli first.
+ */
+function resolveGrokAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
+  if (grokAgentNodeLaunchPlan) return grokAgentNodeLaunchPlan;
+  prepareGrokPreviewResolverConfigs(home);
+  const resolverEnv = buildGrokPreviewResolverEnv(process.env, home);
+
+  const explicit = process.env.ANET_AGENT_NODE_BIN;
+  if (explicit) {
+    if (!isAbsolute(explicit) || !existsSync(explicit)) {
+      throw new Error("ANET_AGENT_NODE_BIN must name an existing absolute agent-node CLI path");
+    }
+    const plan: AgentNodeLaunchPlan = {
+      command: process.execPath,
+      argsPrefix: [explicit],
+      source: "explicit",
+      probeEnv: resolverEnv,
+    };
+    if (!planSupportsRuntime(plan, "grok-build-cli")) {
+      throw new Error("ANET_AGENT_NODE_BIN lacks the required Grok co-presence capability; refusing a runtime fallback");
+    }
+    grokAgentNodeLaunchPlan = plan;
+    return plan;
+  }
+
+  if (commandExists("agent-node", resolverEnv)) {
+    const globalPlan: AgentNodeLaunchPlan = {
+      command: "agent-node",
+      argsPrefix: [],
+      source: "global",
+      probeEnv: resolverEnv,
+    };
+    if (planSupportsRuntime(globalPlan, "grok-build-cli")) {
+      console.log("[anet] using installed agent-node with Grok co-presence capability.");
+      grokAgentNodeLaunchPlan = globalPlan;
+      return globalPlan;
+    }
+    console.warn(`[anet] installed agent-node lacks the required Grok co-presence capability; using @sleep2agi/agent-node@preview instead.`);
+  } else {
+    console.log(`[anet] agent-node is not installed globally; fetching @sleep2agi/agent-node@preview.`);
+  }
+
+  const previewEntrypoint = resolvePreviewAgentNodeEntrypoint(resolverEnv);
+  const previewPlan: AgentNodeLaunchPlan = {
+    command: process.execPath,
+    argsPrefix: [previewEntrypoint],
+    source: "preview",
+    probeEnv: resolverEnv,
+  };
+  if (!planSupportsRuntime(previewPlan, "grok-build-cli")) {
+    throw new Error("@sleep2agi/agent-node@preview lacks the required Grok co-presence capability; refusing a runtime fallback");
+  }
+  grokAgentNodeLaunchPlan = previewPlan;
+  return previewPlan;
+}
+
 function assertStartCompatibility(runtime: RuntimeName) {
   // RFC-029 — opencode CLI's Zed ACP surface is the only integration
   // point, and its message-schema stability across upstream releases
@@ -1932,6 +2099,18 @@ function assertStartCompatibility(runtime: RuntimeName) {
       resolveOpencodeAgentNodeLaunchPlan();
     } catch (error: any) {
       console.error(`[anet] Incompatible agent-node for opencode-cli.`);
+      console.error(`[anet] ${error?.message || error}`);
+      console.error(`[anet] Refusing to start: an unsupported agent-node could silently select another runtime.`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (runtime === "grok-build-cli") {
+    try {
+      resolveGrokAgentNodeLaunchPlan();
+    } catch (error: any) {
+      console.error(`[anet] Incompatible grok-build-cli runtime.`);
       console.error(`[anet] ${error?.message || error}`);
       console.error(`[anet] Refusing to start: an unsupported agent-node could silently select another runtime.`);
       process.exit(1);
@@ -1982,6 +2161,15 @@ function printClaudeCodeNotice() {
   console.log(`  - For other models, use --runtime codex-sdk or claude-agent-sdk`);
 }
 
+function printGrokCopresenceWarning(nodeRef?: string) {
+  console.warn(`[anet] ⚠ EXPERIMENTAL/DANGEROUS Grok co-presence preview.`);
+  console.warn(`[anet]   Network tasks drive the same Grok TUI; approval ownership is not fully hardened.`);
+  console.warn(`[anet]   Fixed text-only model tools: [todo_write]; no filesystem, shell, network, media, MCP, or subagents.`);
+  console.warn(`[anet]   Pinned preview auto-resolves the session-local todo_write helper for active network turns.`);
+  console.warn(`[anet]   Use only with trusted tasks and a trusted network. Do not use in production.`);
+  if (nodeRef) console.warn(`[anet]   Attach from another terminal: anet grok attach ${nodeRef}`);
+}
+
 function checkRuntimeDependency(runtime: RuntimeName, phase: "create" | "start") {
   if (runtime === "claude-code-cli") {
     if (!commandExists("claude")) {
@@ -2015,7 +2203,7 @@ function checkRuntimeDependency(runtime: RuntimeName, phase: "create" | "start")
   if (phase === "start" && !commandExists("agent-node")) {
     console.log(`[anet] note: agent-node will be lazy-fetched via npx on first start (this is normal).`);
   }
-  if (runtime === "grok-build-acp" && !commandExists("grok")) {
+  if ((runtime === "grok-build-acp" || runtime === "grok-build-cli") && !commandExists("grok")) {
     console.warn(`[anet] Warning: grok CLI not found in PATH.`);
     console.warn(`[anet] Install/login Grok Build first: https://x.ai/cli`);
   }
@@ -2097,6 +2285,13 @@ Co-presence (codex TUI + agent share one thread, RFC-030):
       pass --yes-danger-full-access to confirm — the second explicit flag
       prevents \`printf 'yes\\n' |\` from bypassing the prompt.
       Optional: --codex-bin <path> --codex-home <dir> --model <id> --port <p>
+
+Grok co-presence (preview only):
+  anet node create <name> --runtime grok-build-cli
+                                Create an experimental shared Grok TUI node
+  anet grok attach <name>       Attach this terminal (Ctrl-] detaches)
+  --grok-headless               Use legacy per-turn grok-build-cli instead
+  WARNING: network tasks drive the same TUI; use trusted tasks/networks only
 
 Channel:
   anet channel add telegram <name> --bot-token <tok> --allow <uid>
@@ -2357,13 +2552,20 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
   const runtime = runtimeForExecution(opts.runtime, "create node");
   const defaultModel =
     runtime === "codex-sdk" || runtime === "codex-app-server" ? "gpt-5.5" : undefined;
+  const nodeId = generateNodeId();
+  const grokHeadless = opts["grok-headless"] === "true";
+  if (grokHeadless && runtime !== "grok-build-cli") {
+    console.error("--grok-headless is valid only with --runtime grok-build-cli");
+    process.exit(1);
+  }
 
   const profile: Profile = {
     anet_version: "0.1.0",
-    node_id: generateNodeId(),
+    node_id: nodeId,
     node_name: id,
     alias: id,
     runtime,
+    ...grokBuildCliCreationFields(runtime, nodeId, grokHeadless),
     ...(gc.network_id ? { network_id: gc.network_id } : {}),
     ...(opts.hub ? { hub } : {}),
     ...(opts.model || defaultModel ? { model: opts.model || defaultModel } : {}),
@@ -2383,7 +2585,9 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
       //     consumers may read it).
       ...(runtime === "claude-agent-sdk"
         ? { permissionMode: "auto" }
-        : { dangerouslySkipPermissions: true }),
+        : runtime === "grok-build-cli"
+          ? { dangerouslySkipPermissions: false }
+          : { dangerouslySkipPermissions: true }),
       // #259 Y (2026-06-25): plumb vendor-known image capability down so
       // agent-node's claude-agent-sdk runtime can pick the structured-prompt
       // path. Only written when the chosen model is explicitly verified
@@ -2404,7 +2608,15 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
     ...(runtime === "codex-app-server" && opts["codex-thread-id"]
       ? { codexThreadId: opts["codex-thread-id"] }
       : {}),
-    ...(opts.session || runtime === "claude-code-cli" ? { session: opts.session || randomUUID() } : {}),
+    ...(runtime === "claude-code-cli"
+      ? { session: opts.session || randomUUID() }
+      : opts.session && runtime === "grok-build-cli"
+        ? { grokCliSession: opts.session }
+        : opts.session && runtime === "grok-build-acp"
+          ? { grokSession: opts.session }
+          : opts.session
+            ? { session: opts.session }
+            : {}),
   };
   return profile;
 }
@@ -3094,6 +3306,10 @@ function printProfileSummary(id: string, profile: Profile) {
     runtime: normalizeRuntime(profile),
     model: profile.model || "(runtime default)",
     session: profileSession(profile) || "(new)",
+    ...(profile.grokCopresence === true ? {
+      grokCopresence: true,
+      grokAttachSocket: profile.grokAttachSocket,
+    } : {}),
     channels: profile.channels,
     env: maskSecretEnv(profile.env || {}),
     config: join(nodesDir(), id, "config.json"),
@@ -3110,6 +3326,7 @@ function createRuntimeChoices() {
     { value: "codex-sdk", name: "codex-sdk — OpenAI Codex, 复用 `codex login` 登录态" },
     { value: "codex-app-server", name: "codex-app-server — OpenAI Codex TUI 桥 (RFC-030)" },
     { value: "grok-build-acp", name: "grok-build-acp — Grok Build ACP, 复用 `grok` CLI 登录态" },
+    { value: "grok-build-cli", name: "grok-build-cli — Grok 共存 TUI（preview，仅可信任务）" },
     { value: "opencode-cli", name: "opencode-cli — 公版 OpenCode CLI, Anthropic/OpenAI preset (RFC-029)" },
   ];
 }
@@ -3120,7 +3337,7 @@ async function createInteractiveCommand() {
 
 This wizard creates one agent node for this project:
   - node config: .anet/nodes/<node-name>/config.json
-  - runtime: claude-agent-sdk / claude-code-cli / codex-sdk / codex-app-server / grok-build-acp / opencode-cli
+  - runtime: claude-agent-sdk / claude-code-cli / codex-sdk / codex-app-server / grok-build-acp / grok-build-cli / opencode-cli
   - optional Telegram channel: text + images from an allowlist user
 `);
 
@@ -3165,9 +3382,10 @@ This wizard creates one agent node for this project:
     opts.runtime = "codex-app-server";
     console.log(`[anet] 请确保已执行: codex login （codex-app-server 需要 codex CLI）`);
     console.log(`[anet] 接管已有 codex 会话：在 config.json 里设 codexAppServerUrl + codexThreadId`);
-  } else if (pickedRuntime === "grok-build-acp") {
-    opts.runtime = "grok-build-acp";
+  } else if (pickedRuntime === "grok-build-acp" || pickedRuntime === "grok-build-cli") {
+    opts.runtime = pickedRuntime;
     console.log(`[anet] 请确保已安装并登录 Grok Build CLI: grok login`);
+    if (pickedRuntime === "grok-build-cli") printGrokCopresenceWarning(id);
   } else if (pickedRuntime === "opencode-cli") {
     await configureOpencodeRuntime(opts, true);
   } else {
@@ -3268,6 +3486,8 @@ Telegram setup:
   }
   if (normalizeRuntime(profile) === "opencode-cli") {
     printOpencodeCreationSecurityDisclosure(profile);
+  } else if (profile.grokCopresence === true) {
+    printGrokCopresenceWarning(id);
   } else {
     console.log(`[anet] ⚠ dangerouslySkipPermissions and teammateMode enabled by default.`);
     console.log(`[anet] To disable: edit .anet/nodes/${id}/config.json → flags`);
@@ -3291,7 +3511,7 @@ async function createCommand(idOverride?: string) {
   const id = idOverride || args[1];
   if (!id) return createInteractiveCommand();
   if (id.startsWith("--")) {
-    console.error("Usage: anet node create <node-name> [--runtime claude-agent-sdk|claude-code-cli|codex-sdk|codex-app-server|grok-build-acp|opencode-cli] [--model ...] [--tools ...]");
+    console.error("Usage: anet node create <node-name> [--runtime claude-agent-sdk|claude-code-cli|codex-sdk|codex-app-server|grok-build-acp|grok-build-cli|opencode-cli] [--model ...] [--tools ...]");
     console.error("Or run fully interactive: anet node create");
     process.exit(1);
   }
@@ -3343,6 +3563,7 @@ async function createCommand(idOverride?: string) {
     || explicitRuntime === "codex-sdk"
     || explicitRuntime === "codex-app-server"
     || explicitRuntime === "grok-build-acp"
+    || explicitRuntime === "grok-build-cli"
     || explicitRuntime === "opencode-cli";
 
   // #133 selectRuntime — runtime-first, exported as a helper so create paths
@@ -3377,8 +3598,9 @@ async function createCommand(idOverride?: string) {
     console.log("[anet] 请确保已执行: codex login");
   } else if (opts.runtime === "codex-app-server") {
     console.log("[anet] 请确保已执行: codex login（codex-app-server 需要 codex CLI）");
-  } else if (opts.runtime === "grok-build-acp") {
+  } else if (opts.runtime === "grok-build-acp" || opts.runtime === "grok-build-cli") {
     console.log("[anet] 请确保已安装并登录 Grok Build CLI: grok login");
+    if (opts.runtime === "grok-build-cli") printGrokCopresenceWarning(id);
   } else if (opts.runtime === "opencode-cli") {
     await configureOpencodeRuntime(opts, Boolean(process.stdin.isTTY));
   } else {
@@ -3528,6 +3750,13 @@ async function createCommand(idOverride?: string) {
   }
   if (normalizeRuntime(profile) === "opencode-cli") {
     printOpencodeCreationSecurityDisclosure(profile);
+  } else if (profile.grokCopresence === true) {
+    printGrokCopresenceWarning(id);
+    console.log(`[anet]   Start the node first, then attach from a second terminal.`);
+    console.log(`\nStart: anet node start ${id}`);
+    closeRL();
+    if (process.env.ANET_INTERNAL_KEEP_PROCESS !== "1") process.exit(0);
+    return;
   }
   // #101 user warning — surface the resolved toolset + dangerouslySkipPermissions
   // implication on every node create so users see what the agent can do before
@@ -3780,6 +4009,109 @@ function ensureMcpJson(profile: Profile) {
 
 // ── launch helper (shared by start + resume) ──
 
+async function grokCommand() {
+  if (args[1] !== "attach") {
+    console.error("Usage: anet grok attach <node>");
+    process.exit(1);
+  }
+
+  const ref = args[2];
+  if (!ref || ref.startsWith("--")) {
+    console.error("Usage: anet grok attach <node>");
+    process.exit(1);
+  }
+  const resolved = resolveNodeRef(ref);
+  if (!resolved) {
+    console.error(`Node "${ref}" not found. Create it first: anet node create ${ref} --runtime grok-build-cli`);
+    process.exit(1);
+  }
+  const { id: nodeId, profile } = resolved;
+  if (normalizeRuntime(profile) !== "grok-build-cli") {
+    console.error(`[anet] Node "${nodeDisplayName(nodeId, profile)}" is not a grok-build-cli node.`);
+    process.exit(1);
+  }
+  if (profile.grokCopresence !== true) {
+    console.error(`[anet] Node "${nodeDisplayName(nodeId, profile)}" uses legacy headless grok-build-cli mode.`);
+    console.error(`[anet] Create a new grok-build-cli node or migrate its config explicitly.`);
+    process.exit(1);
+  }
+  const socketPath = profile.grokAttachSocket;
+  if (!socketPath || !isAbsolute(socketPath)) {
+    console.error(`[anet] Node config is missing an absolute grokAttachSocket; refusing to guess the bridge identity.`);
+    process.exit(1);
+  }
+  if (!process.stdin.isTTY || !process.stdout.isTTY || typeof process.stdin.setRawMode !== "function") {
+    console.error("[anet] grok attach requires an interactive TTY on stdin and stdout.");
+    process.exit(1);
+  }
+
+  printGrokCopresenceWarning();
+  const relay = new PassThrough({ highWaterMark: 64 * 1024 });
+  const stdin = process.stdin;
+  const wasRaw = stdin.isRaw === true;
+  const wasPaused = stdin.isPaused();
+  let session: Awaited<ReturnType<typeof connectGrokAttach>> | undefined;
+  let restored = false;
+  let detaching = false;
+
+  const restoreTerminal = () => {
+    if (restored) return;
+    restored = true;
+    stdin.off("data", onInput);
+    relay.off("drain", onRelayDrain);
+    try { stdin.setRawMode(wasRaw); } catch {}
+    if (wasPaused) stdin.pause();
+    else stdin.resume();
+  };
+  const requestDetach = () => {
+    if (detaching) return;
+    detaching = true;
+    stdin.pause();
+    session?.detach();
+  };
+  const onRelayDrain = () => stdin.resume();
+  const onInput = (chunk: Buffer | string) => {
+    if (detaching) return;
+    const bytes = typeof chunk === "string" ? Buffer.from(chunk) : Buffer.from(chunk);
+    const escape = bytes.indexOf(0x1d); // Ctrl-] is local-only.
+    const forward = escape === -1 ? bytes : bytes.subarray(0, escape);
+    if (forward.length > 0 && !relay.write(forward)) stdin.pause();
+    if (escape !== -1) requestDetach();
+  };
+  const signals: NodeJS.Signals[] = ["SIGINT", "SIGQUIT", "SIGTERM", "SIGHUP"];
+
+  try {
+    session = await connectGrokAttach({
+      socketPath,
+      input: relay,
+      output: process.stdout,
+      signalSource: process,
+      terminalSize: () => ({ cols: process.stdout.columns, rows: process.stdout.rows }),
+      detachOnInputEnd: true,
+      onHello: (hello) => {
+        process.stderr.write(
+          `[anet] attached to Grok TUI "${hello.alias}" session ${hello.sessionId.slice(0, 8)}… (detach: Ctrl-])\r\n`,
+        );
+      },
+      onError: (error) => process.stderr.write(`[anet] grok attach: ${error.message}\r\n`),
+    });
+
+    for (const signal of signals) process.once(signal, requestDetach);
+    stdin.setRawMode(true);
+    stdin.on("data", onInput);
+    relay.on("drain", onRelayDrain);
+    stdin.resume();
+
+    const closed = await session.closed;
+    if (closed.error) throw closed.error;
+  } finally {
+    for (const signal of signals) process.off(signal, requestDetach);
+    restoreTerminal();
+    session?.detach();
+    relay.end();
+  }
+}
+
 // #245 task E — detect channel plugin failures in the latest node log and
 // surface an actionable warning before launchAgent re-spawns claude. The
 // channel-plugin lifecycle is entirely inside Claude Code (anet only passes
@@ -3871,11 +4203,12 @@ async function launchAgent(id: string, forceNewSession = false) {
   const willResume = !!session && !forceNewSession;
   const label = willResume ? `Resuming session ${session.slice(0, 8)}...` : "Starting new session";
   console.log(`[anet] ${label} for "${displayName}" [${runtime}]...\n`);
+  if (profile.grokCopresence === true) printGrokCopresenceWarning(nodeId);
   checkRuntimeDependency(runtime, "start");
   assertStartCompatibility(runtime);
 
   // Auto-configure .mcp.json for commhub channel
-  ensureMcpJson(profile);
+  if (runtime !== "grok-build-cli") ensureMcpJson(profile);
 
   // Token already merged in loadProfile: project > global.
   // SSE requires a network-scoped token (ntok_); utok_ leftovers from older
@@ -3898,7 +4231,11 @@ async function launchAgent(id: string, forceNewSession = false) {
     console.error(`[anet]      anet node create ${nodeId}`);
     process.exit(1);
   }
-  console.log(`[anet] Token: ${token.slice(0, 8)}...`);
+  if (runtime === "grok-build-cli") {
+    console.log(`[anet] Token: configured (${token.startsWith("ntok_") ? "node" : "custom"})`);
+  } else {
+    console.log(`[anet] Token: ${token.slice(0, 8)}...`);
+  }
 
   // Fix 1 (#146 / RFC-018) — ensure node_id is persisted in the raw config.
   // resume_id is derived from node_id (agent-node: sdk-<node_id>; claude-code-
@@ -3920,6 +4257,7 @@ async function launchAgent(id: string, forceNewSession = false) {
     runtime === "codex-app-server" ||
     runtime === "claude-agent-sdk" ||
     runtime === "grok-build-acp" ||
+    runtime === "grok-build-cli" ||
     runtime === "opencode-cli"
   ) {
     // spawn agent-node
@@ -3973,7 +4311,12 @@ async function launchAgent(id: string, forceNewSession = false) {
       ...process.env,
       COMMHUB_ALIAS: displayName,
       ...(profile.node_id ? { COMMHUB_NODE_ID: profile.node_id } : {}),
-      ...(token ? { COMMHUB_TOKEN: token } : {}),
+      ...(runtime === "grok-build-cli"
+        ? {
+          COMMHUB_TOKEN: "disabled-for-grok-cli-parent",
+          COMMHUB_AUTH_TOKEN: "disabled-for-grok-cli-parent",
+        }
+        : token ? { COMMHUB_TOKEN: token } : {}),
       ...(hub ? { COMMHUB_URL: hub } : {}),
     };
     // #203 defense-in-depth — when profile.node_id is falsy (legacy config
@@ -4013,12 +4356,22 @@ async function launchAgent(id: string, forceNewSession = false) {
       if (launcherOpencodeSafeBase === undefined) delete env.ANET_OPENCODE_SAFE_BASE;
       else env.ANET_OPENCODE_SAFE_BASE = launcherOpencodeSafeBase;
     }
+    // Keep the real node credential in the 0600 profile store. Re-assert the
+    // sentinels after envRef resolution so profile env cannot reintroduce it.
+    if (runtime === "grok-build-cli") {
+      env.COMMHUB_TOKEN = "disabled-for-grok-cli-parent";
+      env.COMMHUB_AUTH_TOKEN = "disabled-for-grok-cli-parent";
+    }
 
     // Try agent-node from PATH, fallback to npx
     let cmd = "agent-node";
     let commandArgs = agentArgs;
     if (runtime === "opencode-cli") {
       const plan = resolveOpencodeAgentNodeLaunchPlan();
+      cmd = plan.command;
+      commandArgs = [...plan.argsPrefix, ...agentArgs];
+    } else if (runtime === "grok-build-cli") {
+      const plan = resolveGrokAgentNodeLaunchPlan();
       cmd = plan.command;
       commandArgs = [...plan.argsPrefix, ...agentArgs];
     } else try { execSync(process.platform === "win32" ? "where agent-node" : "which agent-node", { stdio: "pipe" }); } catch {
@@ -4045,6 +4398,8 @@ async function launchAgent(id: string, forceNewSession = false) {
         ...hardenOpencodeAgentNodeEnv(env, launcherPath),
         ANET_CONFIG_UPDATE_CAPABLE: "1",
       }
+      : runtime === "grok-build-cli"
+      ? buildGrokAgentNodeEnv(env)
       : { ...env, ANET_CONFIG_UPDATE_CAPABLE: "1" };
     const pidFile = join(nodesDir(), nodeId, ".pid");
 
@@ -4689,7 +5044,10 @@ async function resumeCommand() {
       }
     }
     const stored = loadStoredProfile(nodeId) || profile;
-    stored.session = sessionId;
+    const runtime = normalizeRuntime(stored);
+    if (runtime === "grok-build-cli") stored.grokCliSession = sessionId;
+    else if (runtime === "grok-build-acp") stored.grokSession = sessionId;
+    else stored.session = sessionId;
     await ensureNodeToken(stored, nodeId);
     saveProfile(nodeId, stored);
   }
@@ -6465,20 +6823,27 @@ async function notifyServerOffline(profile: Profile, nodeId: string) {
 
 // ── stop ──
 
-function stopNode(nodeId: string): boolean {
+type StopNodeResult = { status: "not-running" | "stopped" | "survived"; pid?: number };
+
+async function stopNode(nodeId: string): Promise<StopNodeResult> {
   const pidFile = join(nodesDir(), nodeId, ".pid");
-  if (!existsSync(pidFile)) return false;
+  if (!existsSync(pidFile)) return { status: "not-running" };
   const pid = parseInt(readFileSync(pidFile, "utf-8").trim());
-  if (isNaN(pid)) { rmSync(pidFile, { force: true }); return false; }
-  try {
-    process.kill(pid, 0); // check alive
-    process.kill(pid, "SIGTERM");
+  if (isNaN(pid)) {
     rmSync(pidFile, { force: true });
-    return true;
-  } catch {
-    rmSync(pidFile, { force: true });
-    return false;
+    return { status: "not-running" };
   }
+  if (!pidAlive(pid)) {
+    rmSync(pidFile, { force: true });
+    return { status: "not-running", pid };
+  }
+  if (await terminateNodeProcess(pid, false)) {
+    rmSync(pidFile, { force: true });
+    return { status: "stopped", pid };
+  }
+  // Keep the pidfile: a surviving runtime must remain visible to the next
+  // stop/restart attempt, and the CLI must not claim it is offline.
+  return { status: "survived", pid };
 }
 
 async function stopCommand() {
@@ -6579,7 +6944,13 @@ Stop a running agent node.
   if (tmuxAppsrvKilled) killTmuxSession(copresenceSessions.appsrv);
   if (tmuxBridgeKilled) killTmuxSession(copresenceSessions.bridge);
   const tmuxKilled = tmuxTuiKilled || tmuxAppsrvKilled || tmuxBridgeKilled;
-  const killed = stopNode(resolved.id);
+  const stopResult = await stopNode(resolved.id);
+  if (stopResult.status === "survived") {
+    console.error(`[anet] could not confirm that "${displayName}" exited (pid ${stopResult.pid}); pidfile retained.`);
+    process.exitCode = 1;
+    return;
+  }
+  const killed = stopResult.status === "stopped";
   // Always notify server — even if PID file missing, server may have stale session
   await notifyServerOffline(resolved.profile, resolved.id);
   if (killed || tmuxKilled) {
@@ -6887,9 +7258,14 @@ async function projectRestart() {
     const n = startable[i];
     const wasRunning = tmuxSessionRunning(n.alias);
     if (wasRunning) killTmuxSession(n.alias);
-    stopNode(n.id);
+    const stopResult = await stopNode(n.id);
+    if (stopResult.status === "survived") {
+      const reason = `pid ${stopResult.pid} survived SIGTERM; restart refused`;
+      console.log(`  ✗  ${n.alias} — ${reason}`);
+      failed.push({ alias: n.alias, reason });
+      continue;
+    }
     try {
-      rmSync(join(nodesDir(), n.id, ".pid"), { force: true });  // clear stale pid so verify sees only the fresh process
       startNodeTmuxSession(n.alias, n.alias);
       console.log(`  ${wasRunning ? "↻" : "▶"}  ${n.alias} — starting…`);
       spawned.push(n);
@@ -6918,11 +7294,17 @@ async function projectDown() {
     return;
   }
   console.log(`\n[anet] anet project down — ${nodes.length} node(s) in ${process.cwd()}`);
-  let stopped = 0, alreadyDown = 0;
+  let stopped = 0, alreadyDown = 0, failed = 0;
   for (const n of nodes) {
     const tmuxAlive = tmuxSessionRunning(n.alias);
     if (tmuxAlive) killTmuxSession(n.alias);
-    const localKilled = stopNode(n.id);
+    const stopResult = await stopNode(n.id);
+    if (stopResult.status === "survived") {
+      console.log(`  ✗  ${n.alias} — pid ${stopResult.pid} survived SIGTERM; pidfile retained`);
+      failed++;
+      continue;
+    }
+    const localKilled = stopResult.status === "stopped";
     if (n.profile) {
       // Hub may be down (the very scenario this command runs in) — cap notify
       // at 2s so a 22-node teardown isn't held hostage by 44 hung fetches.
@@ -6939,7 +7321,8 @@ async function projectDown() {
       alreadyDown++;
     }
   }
-  console.log(`\n  ${stopped}/${nodes.length} stopped${alreadyDown ? ` · ${alreadyDown} were not running` : ""}\n`);
+  console.log(`\n  ${stopped}/${nodes.length} stopped${alreadyDown ? ` · ${alreadyDown} were not running` : ""}${failed ? ` · ${failed} failed` : ""}\n`);
+  if (failed) process.exitCode = 1;
 }
 
 // ── loop ── (#144 round-6)
@@ -7127,7 +7510,12 @@ Delete a node and its config. Use --force to skip confirmation.
   const opts = parseOpts();
 
   // Stop if running + notify server
-  stopNode(nodeId);
+  const stopResult = await stopNode(nodeId);
+  if (stopResult.status === "survived") {
+    console.error(`[anet] Refusing to delete "${displayName}": pid ${stopResult.pid} survived SIGTERM.`);
+    process.exitCode = 1;
+    return;
+  }
   await notifyServerOffline(profile, nodeId);
 
   const nodeDir = join(nodesDir(), nodeId);
@@ -11018,18 +11406,20 @@ async function createBatch(opts: BatchOptions): Promise<BatchResult> {
         promptText = `你是 ${alias}。\n\n${opts.systemPrompt}`;
       }
 
+      const nodeId = generateNodeId();
       const profile: Profile = {
         anet_version: "0.1.0",
-        node_id: generateNodeId(),
+        node_id: nodeId,
         node_name: alias,
         alias,
         runtime: opts.runtime,
+        ...grokBuildCliCreationFields(opts.runtime, nodeId),
         ...(opts.model ? { model: opts.model } : {}),
         ...(gc.network_id ? { network_id: gc.network_id } : {}),
         channels: ["server:commhub"],
         env: envMap,
         flags: {
-          dangerouslySkipPermissions: true,
+          dangerouslySkipPermissions: opts.runtime === "grok-build-cli" ? false : true,
           // #156 (Vincent 5531) — same codex-sdk yolo posture as single-node
           // (createProfileFromOpts). Helper is the source of truth, shared
           // between the two paths to prevent the v0.10.6 1/4-vs-4/4 drift.
@@ -11548,11 +11938,13 @@ async function infoCommand() {
   console.log(`  model:    ${profile.model || "(default)"}`);
   console.log(`  hub:      ${profile.hub || loadGlobal().hub || "-"}`);
   console.log(`  channels: ${profile.channels?.join(", ") || "(none)"}`);
-  // #101 user warning — make the effective toolset explicit. Empty / missing
-  // tools means the runtime gets the full Claude Code preset; this is shown as
-  // "all (preset)" so users don't mistake it for "no tools".
+  // The co-presence preview uses a fixed runtime-owned TUI profile. Generic
+  // node tools are unsupported because pinned Grok ignores --tools in TUI.
   const toolsArr = Array.isArray(profile.tools) ? profile.tools : [];
-  console.log(`  tools:    ${toolsArr.length ? `[${toolsArr.join(", ")}]` : "all (Claude Code preset)"}`);
+  const requestedTools = toolsArr.length ? `[${toolsArr.join(", ")}]` : "all (Claude Code preset)";
+  console.log(`  tools:    ${profile.grokCopresence === true
+    ? "fixed preview profile [todo_write] (text-only; no filesystem/shell/network/media/MCP/subagents)"
+    : requestedTools}`);
   // Flags worth surfacing — dangerouslySkipPermissions is the one most likely
   // to surprise users in retrospect, so list it first.
   const flags = (profile as any).flags || {};
@@ -12113,6 +12505,9 @@ if (args.slice(1).some((a) => a === "--help" || a === "-h")) {
     case "project":
       printProjectUsage();
       break;
+    case "grok":
+      console.log("Usage: anet grok attach <node>");
+      break;
     case "node":
       // #144 — if it's `anet node loop --help` specifically, delegate
       // to nodeLoopCommand so the user sees the loop-specific help
@@ -12178,6 +12573,7 @@ switch (command) {
     break;
   case "daemon": await daemonCommand(); break; // RFC-026 P2 / #338 — host_supervisor one-cmd
   case "project": await projectCommand(); break;  // #117 — cwd-wide orchestration
+  case "grok": await grokCommand(); break;
   case "start": await startCommand(); break;   // backward compat
   case "resume": await resumeCommand(); break; // backward compat
   case "rename": await renameCommand(); break; // backward compat

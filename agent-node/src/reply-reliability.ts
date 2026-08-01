@@ -15,13 +15,32 @@
 //   3. `PendingReplyQueue` — disk-backed queue keyed by `(to, task_id)`
 //      that holds replies which could not be delivered immediately
 //      because of transient failures. The queue is drained on every
-//      `processInbox()` tick (and on process restart).
+//      `processInbox()` tick (and on process restart). Every serialization
+//      crosses the shared credential redactor and is atomically written 0600.
 //
 // The design intent is that cli.ts wires these into the inbox loop with
 // "persist before send, ack after deliver" ordering so a crash, an SSE
 // drop, or a transient hub outage never silently loses a reply.
 
-import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync } from "fs";
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  fchmodSync,
+  fsyncSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "fs";
+import { randomBytes } from "crypto";
+import {
+  createCredentialRedactor,
+  type CredentialRedactionOptions,
+  type CredentialRedactor,
+} from "./credential-redaction";
 
 export class CommHubError extends Error {
   code?: number | string;
@@ -145,6 +164,11 @@ export type PendingReply = {
   attempts: number;
 };
 
+export interface PendingReplyQueueOptions extends CredentialRedactionOptions {
+  /** Reuse the process-wide log/persistence redactor when one already exists. */
+  redactor?: CredentialRedactor;
+}
+
 /**
  * Deterministic 32-char hash for queue dedup keys when no task_id is
  * available. Not cryptographic — collisions only matter inside one
@@ -176,37 +200,80 @@ export function quickHash(s: string): string {
  * config.json and the I/O is tiny.
  */
 export class PendingReplyQueue {
-  constructor(private readonly filePath: string) {}
+  private readonly redactor: CredentialRedactor;
+
+  constructor(
+    private readonly filePath: string,
+    redaction: PendingReplyQueueOptions = {},
+  ) {
+    this.redactor = redaction.redactor ?? createCredentialRedactor(redaction);
+  }
 
   load(): PendingReply[] {
+    if (!existsSync(this.filePath)) return [];
+    let raw: string;
     try {
-      if (!existsSync(this.filePath)) return [];
-      const raw = readFileSync(this.filePath, "utf8");
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
+      raw = readFileSync(this.filePath, "utf8");
     } catch {
       return [];
     }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      // Older direct-write versions could leave a truncated file after a
+      // crash.  They already treated it as an empty queue; replace it rather
+      // than retaining arbitrary (possibly credential-bearing) bytes.
+      this.writeAtomic([]);
+      return [];
+    }
+
+    if (!Array.isArray(parsed)) {
+      this.writeAtomic([]);
+      return [];
+    }
+    const sanitized = this.sanitize(parsed as PendingReply[]);
+    const changed = JSON.stringify(parsed) !== JSON.stringify(sanitized);
+    const mode = statSync(this.filePath).mode & 0o777;
+
+    // Security migration for queue files written by older versions: scrub
+    // their content at the first read and repair broad modes.  Do not merely
+    // return a cleaned in-memory copy while leaving credential bytes on disk.
+    if (changed) this.writeAtomic(sanitized);
+    else if (mode !== 0o600) chmodSync(this.filePath, 0o600);
+    return sanitized;
   }
 
   save(items: PendingReply[]): void {
-    // Atomic write: serialise to a sibling tmp file, then rename onto
-    // filePath. Rename is atomic on POSIX (and on Win32 if the dest
-    // exists, which it always does after the first save). Previously a
-    // direct writeFileSync was used — if the process crashed mid-write
-    // (or the disk filled mid-flush), the next load() would JSON.parse
-    // a truncated file, fall through the catch, and return an empty
-    // queue, silently losing every pending reply. The disk-backed
-    // contract of this queue ("a crash, an SSE drop, or a transient
-    // hub outage never silently loses a reply") was being violated by
-    // its own persistence layer.
-    const tmp = `${this.filePath}.tmp`;
+    // Scrub at the final serialization boundary so callers cannot bypass it
+    // by calling save() directly.  writeAtomic uses a fresh 0600 sibling,
+    // fsyncs it, and then renames it over the queue.
+    this.writeAtomic(this.sanitize(items));
+  }
+
+  private sanitize<T>(value: T): T {
+    return this.redactor.redactValue(value);
+  }
+
+  private writeAtomic(items: PendingReply[]): void {
+    const tmp = `${this.filePath}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
+    let fd: number | undefined;
     try {
-      writeFileSync(tmp, JSON.stringify(items, null, 2));
+      // wx prevents a pre-created sibling/symlink from redirecting the write.
+      fd = openSync(tmp, "wx", 0o600);
+      fchmodSync(fd, 0o600);
+      writeFileSync(fd, JSON.stringify(items, null, 2), "utf8");
+      fsyncSync(fd);
+      closeSync(fd);
+      fd = undefined;
       renameSync(tmp, this.filePath);
+      // The temp inode is already 0600; reinforce the postcondition for
+      // platforms/filesystems with unusual rename mode behaviour.
+      chmodSync(this.filePath, 0o600);
     } catch (e) {
-      // Best-effort cleanup of the tmp file on rename failure so we
-      // don't litter a sibling .tmp next to the queue.
+      if (fd !== undefined) {
+        try { closeSync(fd); } catch { /* ignore */ }
+      }
       try { unlinkSync(tmp); } catch { /* ignore */ }
       throw e;
     }
@@ -218,12 +285,13 @@ export class PendingReplyQueue {
    * preserved and the body/timestamp fields are refreshed.
    */
   persist(entry: Omit<PendingReply, "attempts">): void {
+    const sanitized = this.sanitize(entry);
     const items = this.load();
-    const idx = this.findIndex(items, entry.to, entry.taskId, entry.text);
+    const idx = this.findIndex(items, sanitized.to, sanitized.taskId, sanitized.text);
     if (idx >= 0) {
-      items[idx] = { ...items[idx], ...entry, attempts: items[idx].attempts };
+      items[idx] = { ...items[idx], ...sanitized, attempts: items[idx].attempts };
     } else {
-      items.push({ ...entry, attempts: 0 });
+      items.push({ ...sanitized, attempts: 0 });
     }
     this.save(items);
   }

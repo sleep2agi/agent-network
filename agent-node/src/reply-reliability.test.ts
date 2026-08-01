@@ -13,7 +13,16 @@
 //   7. drain() — successful drain clears, transient failure requeues
 //      with attempts++, app-level failure drops loudly
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, existsSync, rmSync } from "fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import {
@@ -22,6 +31,7 @@ import {
   PendingReplyQueue,
   quickHash,
 } from "./reply-reliability";
+import { createCredentialRedactor } from "./credential-redaction";
 
 describe("classifyCommHubResponse", () => {
   test("returns ok with parsed application payload (the happy path)", () => {
@@ -141,6 +151,8 @@ describe("CommHubError", () => {
 });
 
 describe("PendingReplyQueue", () => {
+  const OPAQUE_CREDENTIAL = "real-opaque-credential-R7x3-without-known-prefix";
+
   function freshDir(): string {
     return mkdtempSync(join(tmpdir(), "anet-pending-reply-"));
   }
@@ -165,6 +177,154 @@ describe("PendingReplyQueue", () => {
       expect(items[0].to).toBe("alice");
       expect(items[0].taskId).toBe("tsk_a");
       expect(items[0].attempts).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("final persistence boundary scrubs known, shaped, assignment and error credentials", () => {
+    const dir = freshDir();
+    const file = join(dir, "pending.json");
+    const rawValues = [
+      OPAQUE_CREDENTIAL,
+      "ntok_1234567890abcdef",
+      "utok_1234567890abcdef",
+      "atok_1234567890abcdef",
+      "github_pat_1234567890_ABCDEFGHIJKL",
+      "aws-secret-material",
+      "database-password",
+    ];
+    try {
+      const q = new PendingReplyQueue(file, { knownValues: [OPAQUE_CREDENTIAL] });
+      q.persist({
+        to: "alice",
+        text: [
+          `reply=${OPAQUE_CREDENTIAL}`,
+          "ntok_1234567890abcdef",
+          "utok_1234567890abcdef",
+          "atok_1234567890abcdef",
+          "github_pat_1234567890_ABCDEFGHIJKL",
+          "AWS_SECRET_ACCESS_KEY=aws-secret-material",
+          "DATABASE_URL=postgres://user:database-password@db/runtime",
+        ].join(" "),
+        taskId: "tsk_scrub",
+        failed: true,
+        queuedAt: 1,
+        lastError: `send failed: GITHUB_TOKEN=${OPAQUE_CREDENTIAL}`,
+      });
+
+      const raw = readFileSync(file, "utf8");
+      for (const value of rawValues) expect(raw).not.toContain(value);
+      expect(raw).toContain("[REDACTED_CREDENTIAL]");
+      expect(q.load()[0].text).toContain("[REDACTED_CREDENTIAL]");
+      expect(statSync(file).mode & 0o777).toBe(0o600);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("direct save cannot bypass scrub and leaves no sibling temp artifact", () => {
+    const dir = freshDir();
+    const file = join(dir, "pending.json");
+    try {
+      const q = new PendingReplyQueue(file, { knownValues: [OPAQUE_CREDENTIAL] });
+      q.save([{
+        to: `recipient-${OPAQUE_CREDENTIAL}`,
+        text: `body ${OPAQUE_CREDENTIAL}`,
+        taskId: `task-${OPAQUE_CREDENTIAL}`,
+        failed: false,
+        queuedAt: 1,
+        lastError: `failure ${OPAQUE_CREDENTIAL}`,
+        attempts: 2,
+      }]);
+
+      const raw = readFileSync(file, "utf8");
+      expect(raw).not.toContain(OPAQUE_CREDENTIAL);
+      expect(raw.match(/\[REDACTED_CREDENTIAL\]/g)?.length).toBeGreaterThanOrEqual(4);
+      expect(readdirSync(dir)).toEqual(["pending.json"]);
+      expect(statSync(file).mode & 0o777).toBe(0o600);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("load migrates an old broad-mode queue without leaving raw credential bytes", () => {
+    const dir = freshDir();
+    const file = join(dir, "pending.json");
+    try {
+      writeFileSync(file, JSON.stringify([{
+        to: "alice",
+        text: `legacy reply ${OPAQUE_CREDENTIAL}`,
+        taskId: "tsk_legacy",
+        failed: false,
+        queuedAt: 1,
+        attempts: 0,
+      }]));
+      chmodSync(file, 0o644);
+
+      const q = new PendingReplyQueue(file, { knownValues: [OPAQUE_CREDENTIAL] });
+      const items = q.load();
+      expect(items[0].text).not.toContain(OPAQUE_CREDENTIAL);
+      expect(readFileSync(file, "utf8")).not.toContain(OPAQUE_CREDENTIAL);
+      expect(statSync(file).mode & 0o777).toBe(0o600);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("load repairs a broad mode even when content needs no rewrite", () => {
+    const dir = freshDir();
+    const file = join(dir, "pending.json");
+    try {
+      writeFileSync(file, JSON.stringify([{
+        to: "alice",
+        text: "ordinary reply",
+        taskId: "tsk_mode_only",
+        failed: false,
+        queuedAt: 1,
+        attempts: 0,
+      }], null, 2));
+      chmodSync(file, 0o644);
+
+      const q = new PendingReplyQueue(file);
+      expect(q.load()[0].text).toBe("ordinary reply");
+      expect(statSync(file).mode & 0o777).toBe(0o600);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("accepts the same process-wide redactor used by ordinary log call sites", () => {
+    const dir = freshDir();
+    const file = join(dir, "pending.json");
+    try {
+      const redactor = createCredentialRedactor({ knownValues: [OPAQUE_CREDENTIAL] });
+      const q = new PendingReplyQueue(file, { redactor });
+      q.persist({
+        to: "alice",
+        text: `reply ${OPAQUE_CREDENTIAL}`,
+        taskId: "tsk_shared_redactor",
+        failed: false,
+        queuedAt: 1,
+      });
+      expect(readFileSync(file, "utf8")).not.toContain(OPAQUE_CREDENTIAL);
+      expect(redactor.redactText(`log ${OPAQUE_CREDENTIAL}`).text).not.toContain(OPAQUE_CREDENTIAL);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("invalid legacy content is securely replaced with an empty 0600 queue", () => {
+    const dir = freshDir();
+    const file = join(dir, "pending.json");
+    try {
+      writeFileSync(file, `[{"text":"${OPAQUE_CREDENTIAL}"`);
+      chmodSync(file, 0o644);
+      const q = new PendingReplyQueue(file, { knownValues: [OPAQUE_CREDENTIAL] });
+      expect(q.load()).toEqual([]);
+      expect(JSON.parse(readFileSync(file, "utf8"))).toEqual([]);
+      expect(readFileSync(file, "utf8")).not.toContain(OPAQUE_CREDENTIAL);
+      expect(statSync(file).mode & 0o777).toBe(0o600);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -252,6 +412,26 @@ describe("PendingReplyQueue.drain", () => {
       expect(items[0].attempts).toBe(1);
       expect(items[0].lastError).toContain("ECONNRESET");
       expect(items[0].lastTryAt).toBeGreaterThan(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("transient error text is scrubbed before it reaches disk", async () => {
+    const dir = freshDir();
+    const file = join(dir, "pending.json");
+    const marker = "opaque-error-credential-X91Q";
+    try {
+      const q = new PendingReplyQueue(file, { knownValues: [marker] });
+      q.persist({ to: "alice", text: "safe reply", taskId: "tsk_a", failed: false, queuedAt: 1 });
+      await q.drain(async () => {
+        throw new Error(`transport failed with DATABASE_URL=postgres://u:p@db/runtime and ${marker}`);
+      });
+
+      const raw = readFileSync(file, "utf8");
+      expect(raw).not.toContain(marker);
+      expect(raw).not.toContain("postgres://u:p@db/runtime");
+      expect(raw).toContain("[REDACTED_CREDENTIAL]");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
