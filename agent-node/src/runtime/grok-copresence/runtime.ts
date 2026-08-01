@@ -691,7 +691,6 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   private approvalDecisionDispatched = false;
   private activePermissionRequestId: string | null = null;
   private activePermissionExactPreviewTool: string | null = null;
-  private readonly previewAutomaticResolutionConsumed = new Set<string>();
   private activeTurnTerminalEventSeen = false;
   private spawnEnv: NodeJS.ProcessEnv;
   private readonly controlledSpawnEnv: NodeJS.ProcessEnv;
@@ -1150,7 +1149,6 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         this.approvalDecisionDispatched = false;
         this.activePermissionRequestId = null;
         this.activePermissionExactPreviewTool = null;
-        this.previewAutomaticResolutionConsumed.clear();
         this.resetHumanComposerAudit();
         this.completionPendingSince = 0;
         this.lastChatActivityAt = 0;
@@ -1983,17 +1981,6 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           continue;
         }
         const exactPreviewTool = exactPreviewAutomaticPermissionRequestTool(event);
-        if (
-          exactPreviewTool
-          && this.arbitration.activeTurn?.owner === "network"
-          && this.previewAutomaticResolutionConsumed.has(exactPreviewTool)
-        ) {
-          void this.failFatal(new GrokCopresenceFailure(
-            "approval_boundary",
-            `grok copresence observed more than one ${exactPreviewTool} permission lifecycle in a turn`,
-          ));
-          return;
-        }
         const transition = this.transition({ type: "approval_requested" });
         if (!transition.accepted) {
           void this.failFatal(new GrokCopresenceFailure(
@@ -2024,9 +2011,6 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           humanDecisionDispatched: this.approvalDecisionDispatched,
           waitingHuman: this.arbitration.waitingHuman,
           turnOwner: this.arbitration.activeTurn?.owner ?? null,
-          alreadyConsumed: this.activePermissionExactPreviewTool
-            ? this.previewAutomaticResolutionConsumed.has(this.activePermissionExactPreviewTool)
-            : false,
           terminalEventSeen: this.activeTurnTerminalEventSeen,
           event,
         })) {
@@ -2035,8 +2019,10 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           // `search_tool` / `use_tool` can reach only the single runtime-owned
           // CommHub MCP server already verified during startup. Accepting only
           // these exact names and shapes keeps the shared TUI alive without
-          // broadening its filesystem/process/web boundary. A network turn may
-          // consume each tool tuple once; human turns may repeat an exact tuple.
+          // broadening its filesystem/process/web boundary. Fixed tools may be
+          // called repeatedly in one human or network turn; each lifecycle is
+          // still required to be sequential, exact, and correlated to the
+          // currently active request.
           //
           // The lifecycle is:
           // requested(tool_name=<fixed tool>) -> resolved(decision=allow)
@@ -2044,7 +2030,6 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           // preview-local completion.  Do not derive this exception from the
           // profile array: adding a future tool must never grant it the same
           // behavior accidentally.
-          this.previewAutomaticResolutionConsumed.add(this.activePermissionExactPreviewTool!);
           this.clearApprovalCorrelation();
           this.transition({ type: "preview_todo_resolved_automatically" });
           continue;
@@ -2162,7 +2147,6 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     const result = reduceGrokCopresenceState(this.arbitration, event);
     this.arbitration = result.state;
     if (result.accepted && event.type === "schedule_network") {
-      this.previewAutomaticResolutionConsumed.clear();
       this.activeTurnTerminalEventSeen = false;
     } else if (result.accepted && event.type === "human_input_submitted") {
       this.activeTurnTerminalEventSeen = false;
@@ -3126,7 +3110,6 @@ export function isGrokPreviewAutomaticResolution(input: {
   humanDecisionDispatched: boolean;
   waitingHuman: boolean;
   turnOwner: "human" | "network" | null;
-  alreadyConsumed: boolean;
   terminalEventSeen: boolean;
   event: {
     type?: unknown;
@@ -3147,7 +3130,6 @@ export function isGrokPreviewAutomaticResolution(input: {
     && !input.humanDecisionDispatched
     && input.waitingHuman
     && (input.turnOwner === "network" || input.turnOwner === "human")
-    && (!input.alreadyConsumed || input.turnOwner === "human")
     && !input.terminalEventSeen
     && isExactPreviewAutomaticPermissionResolution(input.event, input.requestTool);
 }

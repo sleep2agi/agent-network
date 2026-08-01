@@ -49,14 +49,13 @@ type FakeDelayedWrite = {
 };
 
 describe("Grok copresence launch and injection policy", () => {
-  test("keeps the preview todo auto-resolution exception exact and limited to active turns", () => {
+  test("keeps the fixed-tool auto-resolution exception exact and limited to active turns", () => {
     const exact = {
       requestTool: "todo_write",
       activeRequestId: "tool:todo_write",
       humanDecisionDispatched: false,
       waitingHuman: true,
       turnOwner: "network" as const,
-      alreadyConsumed: false,
       terminalEventSeen: false,
       event: {
         type: "permission_resolved",
@@ -71,18 +70,12 @@ describe("Grok copresence launch and injection policy", () => {
       ...exact,
       turnOwner: "human",
     })).toBe(true);
-    expect(isGrokPreviewAutomaticResolution({
-      ...exact,
-      turnOwner: "human",
-      alreadyConsumed: true,
-    })).toBe(true);
     for (const mutation of [
       { ...exact, requestTool: null },
       { ...exact, activeRequestId: "tool:read_file" },
       { ...exact, humanDecisionDispatched: true },
       { ...exact, waitingHuman: false },
       { ...exact, turnOwner: null },
-      { ...exact, alreadyConsumed: true },
       { ...exact, terminalEventSeen: true },
       { ...exact, event: { ...exact.event, decision: "allow_once" } },
       { ...exact, event: { ...exact.event, request_id: "mutated" } },
@@ -104,7 +97,6 @@ describe("Grok copresence launch and injection policy", () => {
         humanDecisionDispatched: false,
         waitingHuman: true,
         turnOwner: "human" as const,
-        alreadyConsumed: false,
         terminalEventSeen: false,
         event: {
           type: "permission_resolved",
@@ -118,8 +110,7 @@ describe("Grok copresence launch and injection policy", () => {
       expect(isGrokPreviewAutomaticResolution({
         ...exact,
         turnOwner: "network",
-        alreadyConsumed: true,
-      })).toBe(false);
+      })).toBe(true);
     }
 
     for (const tool of ["read_file", "Bash", "commhub_send_task"]) {
@@ -129,7 +120,6 @@ describe("Grok copresence launch and injection policy", () => {
         humanDecisionDispatched: false,
         waitingHuman: true,
         turnOwner: "human",
-        alreadyConsumed: false,
         terminalEventSeen: false,
         event: {
           type: "permission_resolved",
@@ -1632,12 +1622,11 @@ describe("Grok copresence runtime integration", () => {
     }
   }, 12_000);
 
-  test("rejects terminal reordering and a second todo lifecycle in one network turn", async () => {
+  test("rejects terminal reordering around automatic permission lifecycles", async () => {
     for (const mutation of [
       "END_BEFORE_RESOLUTION",
       "END_BEFORE_REQUEST",
       "EVENTS_FIRST",
-      "TWICE",
     ]) {
       const fixture = new RuntimeFixture();
       let runtime: GrokCopresenceRuntimeSession | undefined;
@@ -1656,6 +1645,27 @@ describe("Grok copresence runtime integration", () => {
       }
     }
   }, 12_000);
+
+  test("allows repeated fixed-tool automatic permission lifecycles in one network turn", async () => {
+    const fixture = new RuntimeFixture();
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await fixture.open();
+      const result = await runtime.submit({
+        taskId: "preview-todo-order-twice",
+        from: "reviewer",
+        text: "AUTO_RESOLVE_TODO_TWICE",
+        timeoutMs: 3_000,
+      });
+      expect(result.replyText).toBe("TODO TWICE preview-todo-order-twice");
+      expect(runtime.isRunning).toBe(true);
+      expect(existsSync(fixture.attachSocket)).toBe(true);
+      expect(fixture.approvalDecisionCount()).toBe(0);
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 8_000);
 
   test("never replies with a tool-bearing assistant when the final log is delayed past settling", async () => {
     const fixture = new RuntimeFixture();
@@ -2618,6 +2628,13 @@ class FakePty implements GrokPtyLike {
             ? [request, resolution, request, resolution]
             : [request, resolution];
       for (const event of ordered) appendJson(eventsPath, event);
+      if (message.endsWith("TWICE")) {
+        appendJson(join(this.sessionDir, "chat_history.jsonl"), {
+          type: "assistant",
+          content: `TODO TWICE ${taskId}`,
+        });
+        appendJson(eventsPath, terminal);
+      }
       if (message.endsWith("EVENTS_FIRST")) {
         this.delayedWrites.push(setTimeout(() => {
           appendJson(join(this.sessionDir, "chat_history.jsonl"), userRecord);
