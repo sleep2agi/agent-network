@@ -1051,6 +1051,34 @@ function ownerOnlySingleLinkRegular(stat) {
     && (uid === undefined || stat.uid === (typeof stat.uid === "bigint" ? BigInt(uid) : uid));
 }
 
+function exactPrivateIdentityCopy(sourcePath, targetPath) {
+  let sourceFd;
+  let targetFd;
+  try {
+    sourceFd = openSync(sourcePath, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+    targetFd = openSync(targetPath, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+    const sourceBefore = fstatSync(sourceFd, { bigint: true });
+    const targetBefore = fstatSync(targetFd, { bigint: true });
+    if (!ownerOnlySingleLinkRegular(sourceBefore)
+      || !ownerOnlySingleLinkRegular(targetBefore)
+      || sourceBefore.size <= 0n
+      || sourceBefore.size > 4_096n
+      || sourceBefore.size !== targetBefore.size) return false;
+    const sourceBytes = readFileSync(sourceFd);
+    const targetBytes = readFileSync(targetFd);
+    const sourceAfter = fstatSync(sourceFd, { bigint: true });
+    const targetAfter = fstatSync(targetFd, { bigint: true });
+    return sameStableMetadata(sourceBefore, sourceAfter)
+      && sameStableMetadata(targetBefore, targetAfter)
+      && sourceBytes.equals(targetBytes);
+  } catch {
+    return false;
+  } finally {
+    if (targetFd !== undefined) closeSync(targetFd);
+    if (sourceFd !== undefined) closeSync(sourceFd);
+  }
+}
+
 function ownedSingleLinkEmptyModeZeroRegular(stat) {
   const uid = process.getuid?.();
   return stat.isFile()
@@ -1428,7 +1456,22 @@ function scanCurrentStateEntry(
       || descriptor.kind === "log_directory" || descriptor.kind === "pinned_directory") {
       errorRoles.add(descriptor.errorRole);
     }
-    if (descriptor.kind === "identity" || descriptor.kind === "session_other") {
+    if (descriptor.kind === "identity") {
+      if (!exactPrivateIdentityCopy(expectedIdentityPath, entryPath)) {
+        errorRoles.add("grok_current_state_structure");
+      }
+      recordStateFile(
+        entryPath,
+        descriptor,
+        patterns,
+        allowedLogPatterns,
+        matchedRoles,
+        errorRoles,
+        commitChecks,
+      );
+      return;
+    }
+    if (descriptor.kind === "session_other") {
       errorRoles.add("grok_current_state_structure");
     }
     if (descriptor.kind === "log_unknown") errorRoles.add(descriptor.errorRole);

@@ -780,6 +780,47 @@ export function cleanupGrokCliPostStopState(opts: CleanupGrokCliPostStopOptions)
   removeExactProjectSandboxPlaceholders(projectCwd);
 }
 
+function exactPrivateIdentityCopy(source: string, target: string): boolean {
+  const uid = process.getuid?.();
+  let sourceFd: number | undefined;
+  let targetFd: number | undefined;
+  try {
+    sourceFd = openSync(source, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+    targetFd = openSync(target, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+    const sourceBefore = fstatSync(sourceFd);
+    const targetBefore = fstatSync(targetFd);
+    const boundedOwnedIdentity = (stat: ReturnType<typeof fstatSync>) =>
+      stat.isFile()
+      && stat.nlink === 1
+      && (uid === undefined || stat.uid === uid)
+      && stat.size > 0
+      && stat.size <= 4_096;
+    // The vendor source agent_id is not an auth token and existing supported
+    // installs may keep it at 0664. That source was already admitted through
+    // the symlink path; require ownership and no world-write here, while the
+    // runtime-owned copied target must remain exactly 0600.
+    if (!boundedOwnedIdentity(sourceBefore)
+      || (sourceBefore.mode & 0o002) !== 0
+      || !boundedOwnedIdentity(targetBefore)
+      || (targetBefore.mode & 0o777) !== 0o600
+      || sourceBefore.size !== targetBefore.size) return false;
+    const sourceBytes = readFileSync(sourceFd);
+    const targetBytes = readFileSync(targetFd);
+    const sourceAfter = fstatSync(sourceFd);
+    const targetAfter = fstatSync(targetFd);
+    return sameFileIdentity(sourceBefore, sourceAfter)
+      && sameFileIdentity(targetBefore, targetAfter)
+      && sourceBefore.size === sourceAfter.size
+      && targetBefore.size === targetAfter.size
+      && sourceBytes.equals(targetBytes);
+  } catch {
+    return false;
+  } finally {
+    if (targetFd !== undefined) closeSync(targetFd);
+    if (sourceFd !== undefined) closeSync(sourceFd);
+  }
+}
+
 function ensureCredentialLink(sourceHome: string, stateHome: string, name: string) {
   const source = join(sourceHome, name);
   const target = join(stateHome, name);
@@ -789,6 +830,15 @@ function ensureCredentialLink(sourceHome: string, stateHome: string, name: strin
     if (
       existing.isSymbolicLink()
       && resolve(dirname(target), readlinkSync(target)) === resolve(source)
+    ) return;
+    // Pinned Grok 0.2.93 may atomically replace the agent_id symlink with an
+    // owner-only regular copy while persisting authenticated state. Accept
+    // only an exact, bounded copy of the owner-bound source identity. Any
+    // changed value, link count, owner, type, or mode remains fail-closed.
+    if (
+      existing.isFile()
+      && !existing.isSymbolicLink()
+      && exactPrivateIdentityCopy(source, target)
     ) return;
     throw new Error(`grok-build-cli refuses generated credential state at ${target}`);
   }

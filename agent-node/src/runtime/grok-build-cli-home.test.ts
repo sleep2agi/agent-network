@@ -42,6 +42,43 @@ describe("prepareGrokCliHome", () => {
     expect(() => grokCliStateKey("..")).toThrow("cannot be empty");
   });
 
+  it("accepts only the pinned Grok regular-file copy of source agent_id", () => {
+    const root = mkdtempSync(join(tmpdir(), "grok-cli-agent-id-copy-"));
+    roots.push(root);
+    const sourceHome = join(root, "source");
+    const stateHome = join(root, "state");
+    const secretDir = join(root, "project", ".anet");
+    mkdirSync(sourceHome, { recursive: true, mode: 0o700 });
+    mkdirSync(secretDir, { recursive: true, mode: 0o700 });
+    writeFileSync(join(sourceHome, "agent_id"), "stable-agent-id\n", { mode: 0o664 });
+
+    prepareGrokCliHome({
+      sourceHome,
+      stateRoot: dirname(stateHome),
+      stateHome,
+      denyPaths: [secretDir],
+    });
+    const isolatedIdentity = join(stateHome, "agent_id");
+    expect(lstatSync(isolatedIdentity).isSymbolicLink()).toBe(true);
+
+    rmSync(isolatedIdentity);
+    writeFileSync(isolatedIdentity, "stable-agent-id\n", { mode: 0o600 });
+    expect(() => prepareGrokCliHome({
+      sourceHome,
+      stateRoot: dirname(stateHome),
+      stateHome,
+      denyPaths: [secretDir],
+    })).not.toThrow();
+
+    writeFileSync(isolatedIdentity, "different-agent\n", { mode: 0o600 });
+    expect(() => prepareGrokCliHome({
+      sourceHome,
+      stateRoot: dirname(stateHome),
+      stateHome,
+      denyPaths: [secretDir],
+    })).toThrow("refuses generated credential state");
+  });
+
   it("isolates config/trust, preserves a shared auth path, and creates stable sandbox profiles", () => {
     const root = mkdtempSync(join(tmpdir(), "grok-cli-home-"));
     roots.push(root);

@@ -611,6 +611,29 @@ test("state scanner binds one-level identity target and never follows other link
   }
 });
 
+test("state scanner accepts only an exact private regular agent_id copy", () => {
+  const fixture = stateFixture("regular-identity-copy");
+  try {
+    const isolatedIdentity = path.join(fixture.home, "agent_id");
+    writeFileSync(isolatedIdentity, readFileSync(fixture.identity), { mode: 0o600 });
+    assert.equal(scanStateFixture(fixture).scanOutcome, "clean");
+
+    writeFileSync(isolatedIdentity, "different identity\n", { mode: 0o600 });
+    assert.deepEqual(
+      scanStateFixture(fixture).errorRoles,
+      ["grok_current_state_structure"],
+    );
+
+    writeFileSync(isolatedIdentity, readFileSync(fixture.identity), { mode: 0o644 });
+    assert.deepEqual(
+      scanStateFixture(fixture).errorRoles,
+      ["grok_current_state_structure"],
+    );
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("binds the exact current home and accepts only its two owner-bound runtime sockets", async () => {
   const root = mkdtempSync(path.join(tmpdir(), "test225-auth-evidence-socket-"));
   const state = path.join(root, "state");
