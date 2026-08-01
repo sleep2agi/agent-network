@@ -184,6 +184,7 @@ describe("prepareGrokCliHome", () => {
       emptyStateFiles: ["leader.log"],
       cwdSessionFiles: ["prompt_history.jsonl"],
       sessionRootFiles: ["session_search.sqlite"],
+      transientStateDirectories: [".bun", ".grok", "marketplace-cache"],
       projectSandboxPlaceholders: {
         basenames: [".grok", ".claude", ".cursor", ".mcp.json", ".envrc"],
         type: "single-link-empty-regular-file",
@@ -469,6 +470,14 @@ describe("prepareGrokCliHome", () => {
     writeFileSync(join(stateHome, "logs", "unified.jsonl"), "retained log\n", { mode: 0o644 });
     writeFileSync(join(stateHome, "docs", "guide.md"), "static guide\n", { mode: 0o644 });
     writeFileSync(join(stateHome, "unknown-future-state"), "leave for scanner\n", { mode: 0o644 });
+    const externalCacheTarget = join(root, "external-cache-target");
+    writeFileSync(externalCacheTarget, "external stays\n", { mode: 0o600 });
+    for (const name of GROK_POST_STOP_CLEANUP_POLICY.transientStateDirectories) {
+      const transient = join(stateHome, name);
+      mkdirSync(join(transient, "nested"), { recursive: true, mode: 0o700 });
+      writeFileSync(join(transient, "nested", "cache.js"), "executable cache\n", { mode: 0o600 });
+      symlinkSync(externalCacheTarget, join(transient, "external-link"));
+    }
     writeFileSync(join(runtime, "l.lock"), "1\n", { mode: 0o644 });
     writeFileSync(identity, "identity\n", { mode: 0o644 });
     symlinkSync(identity, join(stateHome, "agent_id"));
@@ -501,6 +510,10 @@ describe("prepareGrokCliHome", () => {
     expect(existsSync(blocked)).toBe(false);
     expect(existsSync(untrackedBlocked)).toBe(false);
     expect(existsSync(untrackedBlockedFile)).toBe(false);
+    for (const name of GROK_POST_STOP_CLEANUP_POLICY.transientStateDirectories) {
+      expect(existsSync(join(stateHome, name)), name).toBe(false);
+    }
+    expect(readFileSync(externalCacheTarget, "utf8")).toBe("external stays\n");
     for (const file of [
       join(session, "updates.jsonl"),
       join(stateHome, "logs", "unified.jsonl"),

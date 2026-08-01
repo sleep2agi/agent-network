@@ -725,11 +725,13 @@ test("binds the exact current home and accepts only its two owner-bound runtime 
 });
 
 const OBSERVED_PINNED_STATE_FILES = Object.freeze([
+  ".config-init.lock",
   ".metadata_version",
   "active_sessions.json",
   "active_sessions.lock",
   "managed_config.lock",
   "models_cache.json",
+  "tip_cursor.json",
 ]);
 const OBSERVED_PINNED_STATE_DIRECTORIES = Object.freeze(["docs", "skills"]);
 
@@ -1208,6 +1210,21 @@ test("unified-log allowlist never hides a secret, moved value, or unknown log pa
     writeFileSync(path.join(fixture.logs, "other.jsonl"), "{}\n", { mode: 0o600 });
     const result = scanStateFixture(fixture);
     assert.ok(result.errorRoles.includes("grok_unified_log_scan"));
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("the exact commhub MCP stderr log is scanned while sibling MCP logs stay red", () => {
+  const fixture = metadataStateFixture("metadata-commhub-mcp-log");
+  try {
+    const mcpLogs = path.join(fixture.logs, "mcp");
+    mkdirSync(mcpLogs, { mode: 0o700 });
+    writeFileSync(path.join(mcpLogs, "commhub.stderr.log"), "clean\n", { mode: 0o600 });
+    assertCleanStateFixture(fixture);
+
+    writeFileSync(path.join(mcpLogs, "other.stderr.log"), "clean\n", { mode: 0o600 });
+    assert.ok(scanStateFixture(fixture).errorRoles.includes("grok_unified_log_scan"));
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }

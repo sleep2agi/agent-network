@@ -2134,6 +2134,11 @@ run_keyless_gate() {
     || fail "commhub MCP doctor leaked a synthetic credential marker"
   rm -f -- "$mcp_doctor"
   run_tui_inventory_gate "$real_bin" "$profile_fixture"
+  # `mcp doctor` is an out-of-band vendor diagnostic, not a managed node
+  # generation, so it has no runtime close hook. Remove only its exact Bun
+  # cache after the probe exits; the production close path proves the same
+  # cache lifecycle independently through cleanupGrokCliPostStopState.
+  rm -rf -- "$(dirname "$profile_fixture")/.bun"
   pass "pinned Grok TUI inventory, exact commhub MCP, unsafe mutations, and keyless todo lifecycle gate"
 }
 
@@ -2207,7 +2212,7 @@ run_real_gate() {
     -H "Authorization: Bearer $USER_TOKEN" -H 'Content-Type: application/json' \
     --data "$(jq -nc --arg alias "$real_alias" --arg network "$NETWORK_ID" \
       --arg nonce "$continuity_nonce" \
-      '{alias:$alias,task:("Remember this nonce for my next turn: " + $nonce + ". Reply with exactly GROK_PREVIEW_REAL_225_A and nothing else."),from:"test225-driver",priority:"high",network_id:$network}')" \
+      '{alias:$alias,task:("Do not call search_tool or use_tool. Remember this nonce for my next turn: " + $nonce + ". Reply with exactly GROK_PREVIEW_REAL_225_A and nothing else."),from:"test225-driver",priority:"high",network_id:$network}')" \
     | jq -r '.task_id // .message_id // empty')
   for _ in $(seq 1 1800); do
     first_row=$(curl -fsS "$HUB/api/tasks?limit=80&network_id=$NETWORK_ID" \

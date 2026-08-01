@@ -88,6 +88,7 @@ export const GROK_POST_STOP_CLEANUP_POLICY = Object.freeze({
   emptyStateFiles: Object.freeze(["leader.log"]),
   cwdSessionFiles: Object.freeze(["prompt_history.jsonl"]),
   sessionRootFiles: Object.freeze(["session_search.sqlite"]),
+  transientStateDirectories: Object.freeze([".bun", ".grok", "marketplace-cache"]),
   projectSandboxPlaceholders: Object.freeze({
     basenames: Object.freeze([".grok", ".claude", ".cursor", ".mcp.json", ".envrc"]),
     type: "single-link-empty-regular-file",
@@ -103,6 +104,31 @@ export const GROK_POST_STOP_CLEANUP_POLICY = Object.freeze({
     replaceExtension: ".lock",
   }),
 });
+
+function validateTransientPostStopDirectory(path: string): void {
+  const stat = lstatIfPresent(path);
+  if (!stat) return;
+  const uid = process.getuid?.();
+  if (stat.isSymbolicLink() || !stat.isDirectory()) {
+    throw new Error(`grok-build-cli refuses transient post-stop state at ${path}: expected a real directory`);
+  }
+  if (uid !== undefined) assertCurrentOwner(path, uid, stat.uid);
+}
+
+function removeTransientPostStopDirectory(path: string): void {
+  const before = lstatIfPresent(path);
+  if (!before) return;
+  const quarantine = `${path}.anet-post-stop-${randomBytes(12).toString("hex")}`;
+  if (lstatIfPresent(quarantine)) {
+    throw new Error(`grok-build-cli refuses occupied transient quarantine path: ${quarantine}`);
+  }
+  renameSync(path, quarantine);
+  const moved = lstatSync(quarantine);
+  if (moved.isSymbolicLink() || !moved.isDirectory() || !sameFileIdentity(before, moved)) {
+    throw new Error(`grok-build-cli transient post-stop state changed during quarantine: ${path}`);
+  }
+  rmSync(quarantine, { recursive: true, force: false });
+}
 
 export interface GrokProjectTurnLock {
   /** Parent fd for the already-locked open-file-description. Pass to turn. */
@@ -728,6 +754,12 @@ export function cleanupGrokCliPostStopState(opts: CleanupGrokCliPostStopOptions)
   }
   for (const name of GROK_POST_STOP_CLEANUP_POLICY.sessionRootFiles) {
     removeExactPostStopFile(join(sessionsRoot, name));
+  }
+  for (const name of GROK_POST_STOP_CLEANUP_POLICY.transientStateDirectories) {
+    validateTransientPostStopDirectory(join(stateHome, name));
+  }
+  for (const name of GROK_POST_STOP_CLEANUP_POLICY.transientStateDirectories) {
+    removeTransientPostStopDirectory(join(stateHome, name));
   }
   for (const directory of sandboxBlockedDirectories) {
     removeExactEmptyPostStopDirectory(directory);

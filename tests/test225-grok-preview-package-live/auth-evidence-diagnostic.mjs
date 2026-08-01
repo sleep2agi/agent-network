@@ -992,11 +992,13 @@ const GENERATED_POLICY_FILES = new Set([
 // roots only prevents ordinary vendor state from being mistaken for a scan
 // failure before its contents are checked.
 const PINNED_STATE_FILE_NAMES = Object.freeze([
+  ".config-init.lock",
   ".metadata_version",
   "active_sessions.json",
   "active_sessions.lock",
   "managed_config.lock",
   "models_cache.json",
+  "tip_cursor.json",
 ]);
 const PINNED_STATE_DIRECTORY_NAMES = Object.freeze(["docs", "skills"]);
 const PINNED_STATE_FILES = new Set(PINNED_STATE_FILE_NAMES);
@@ -1168,6 +1170,17 @@ function currentStateDescriptor(parts, bindings) {
   if (parts.length === 2 && parts[0] === "logs" && parts[1] === "unified.jsonl") {
     return {
       kind: "unified_log",
+      matchRole: "grok_unified_log_state",
+      errorRole: "grok_unified_log_scan",
+    };
+  }
+  if (parts.length === 2 && parts[0] === "logs" && parts[1] === "mcp") {
+    return { kind: "log_directory", errorRole: "grok_unified_log_scan" };
+  }
+  if (parts.length === 3 && parts[0] === "logs" && parts[1] === "mcp"
+    && parts[2] === "commhub.stderr.log") {
+    return {
+      kind: "file",
       matchRole: "grok_unified_log_state",
       errorRole: "grok_unified_log_scan",
     };
