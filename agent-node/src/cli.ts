@@ -12,7 +12,7 @@
  */
 
 import { readFileSync, existsSync, writeFileSync, chmodSync, realpathSync } from "fs";
-import { dirname, join, isAbsolute } from "path";
+import { dirname, join, isAbsolute, resolve } from "path";
 import { hostname as osHostname, homedir } from "os";
 import { createCommhubSdkMcpServer } from "./commhub-mcp";
 import { getHostTelemetry } from "./host-telemetry";
