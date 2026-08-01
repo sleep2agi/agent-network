@@ -2030,7 +2030,13 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           event,
         })) {
           // Keyless black-box evidence for the pinned 0.2.93 build shows that
-          // the fixed preview profile's sole session-local tool emits
+          // the fixed preview profile's sole session-local tool emits this
+          // exact lifecycle in both network and human turns. It cannot mutate
+          // the workspace or call the network, so accepting that native result
+          // keeps the shared TUI alive without broadening the tool boundary.
+          // The tuple remains exact and may occur only once per active turn.
+          //
+          // The lifecycle is:
           // requested(tool_name=todo_write) -> resolved(decision=allow)
           // without reading TUI input.  Treat only that exact tuple as a
           // preview-local completion.  Do not derive this exception from the
@@ -3146,7 +3152,7 @@ export function isGrokPreviewTodoAutomaticResolution(input: {
     && requestId === input.activeRequestId
     && !input.humanDecisionDispatched
     && input.waitingHuman
-    && input.turnOwner === "network"
+    && (input.turnOwner === "network" || input.turnOwner === "human")
     && !input.alreadyConsumed
     && !input.terminalEventSeen
     && isExactPreviewTodoPermissionResolution(input.event);

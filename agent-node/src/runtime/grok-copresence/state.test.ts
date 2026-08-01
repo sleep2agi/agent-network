@@ -193,7 +193,7 @@ describe("Grok co-presence arbitration", () => {
     expect(done.effects.some(({ type }) => type === "network_turn_completed")).toBe(false);
   });
 
-  it("clears only an already-waiting preview todo resolution without completing the turn", () => {
+  it("clears an already-waiting preview todo resolution in either active turn without completing it", () => {
     const h = harness();
     h.send({ type: "network_task_received", task: task("todo") });
     h.send({ type: "schedule_network" });
@@ -212,11 +212,14 @@ describe("Grok co-presence arbitration", () => {
     human.send({ type: "human_input_started" });
     human.send({ type: "human_input_submitted" });
     human.send({ type: "approval_requested" });
-    expect(human.send({ type: "preview_todo_resolved_automatically" }).accepted).toBe(false);
+    expect(human.send({ type: "preview_todo_resolved_automatically" })).toMatchObject({
+      accepted: true,
+      effects: [],
+    });
     expect(human.state).toMatchObject({
       phase: "human_turn",
       activeTurn: { owner: "human" },
-      waitingHuman: true,
+      waitingHuman: false,
     });
   });
 });

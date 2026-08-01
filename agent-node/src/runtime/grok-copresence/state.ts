@@ -200,8 +200,8 @@ export function reduceGrokCopresenceState(
     case "preview_todo_resolved_automatically":
       if (
         !state.waitingHuman
-        || state.phase !== "network_turn"
-        || state.activeTurn?.owner !== "network"
+        || (state.phase !== "network_turn" && state.phase !== "human_turn")
+        || (state.activeTurn?.owner !== "network" && state.activeTurn?.owner !== "human")
       ) return ignored(state);
       return changed(state, { waitingHuman: false });
   }

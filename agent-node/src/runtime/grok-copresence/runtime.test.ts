@@ -49,7 +49,7 @@ type FakeDelayedWrite = {
 };
 
 describe("Grok copresence launch and injection policy", () => {
-  test("keeps the preview todo auto-resolution exception exact and network-turn-only", () => {
+  test("keeps the preview todo auto-resolution exception exact and limited to active turns", () => {
     const exact = {
       requestWasExact: true,
       activeRequestId: "tool:todo_write",
@@ -67,12 +67,15 @@ describe("Grok copresence launch and injection policy", () => {
       },
     };
     expect(isGrokPreviewTodoAutomaticResolution(exact)).toBe(true);
+    expect(isGrokPreviewTodoAutomaticResolution({
+      ...exact,
+      turnOwner: "human",
+    })).toBe(true);
     for (const mutation of [
       { ...exact, requestWasExact: false },
       { ...exact, activeRequestId: "tool:read_file" },
       { ...exact, humanDecisionDispatched: true },
       { ...exact, waitingHuman: false },
-      { ...exact, turnOwner: "human" as const },
       { ...exact, turnOwner: null },
       { ...exact, alreadyConsumed: true },
       { ...exact, terminalEventSeen: true },
@@ -1424,6 +1427,53 @@ describe("Grok copresence runtime integration", () => {
     }
   }, 8_000);
 
+  test("keeps the shared TUI alive when the pinned preview auto-resolves todo_write in a human turn", async () => {
+    const fixture = new RuntimeFixture();
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    let attached: Awaited<ReturnType<typeof connectGrokAttach>> | undefined;
+    try {
+      runtime = await fixture.open();
+      await runtime.submit({
+        taskId: "human-todo-warmup",
+        from: "reviewer",
+        text: "warmup",
+        timeoutMs: 3_000,
+      });
+      const input = new PassThrough();
+      attached = await connectGrokAttach({
+        socketPath: fixture.attachSocket,
+        input,
+        output: new PassThrough(),
+        signalSource: fixture.signals,
+        terminalSize: () => ({ cols: 100, rows: 30 }),
+      });
+
+      // connectGrokAttach resolves after the hello handshake; give its input
+      // pump one event-loop turn to become active before typing the first key.
+      await Bun.sleep(50);
+      input.write("HUMAN_AUTO_RESOLVE_TODO");
+      await waitFor(() => runtime!.state.phase === "human_editing");
+      input.write("\r");
+      await waitFor(() => fixture.humanPrompts.includes("HUMAN_AUTO_RESOLVE_TODO"));
+      await waitFor(() => runtime!.state.phase === "idle");
+      expect(fixture.approvalDecisionCount()).toBe(0);
+      expect(runtime.isRunning).toBe(true);
+      expect(existsSync(fixture.attachSocket)).toBe(true);
+
+      input.write("second-human-turn");
+      await waitFor(() => runtime!.state.phase === "human_editing");
+      input.write("\r");
+      await waitFor(() => fixture.humanPrompts.includes("second-human-turn"));
+      await waitFor(() => runtime!.state.phase === "idle");
+      expect(runtime.isRunning).toBe(true);
+      expect(existsSync(fixture.attachSocket)).toBe(true);
+    } finally {
+      attached?.detach();
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 8_000);
+
   test("rejects every mutated preview todo_write automatic resolution tuple", async () => {
     for (const mutation of [
       "WRONG_DECISION",
@@ -2624,6 +2674,42 @@ class FakePty implements GrokPtyLike {
           content: `<user_query>${submitted}</user_query>`,
         });
         appendJson(join(this.sessionDir, "events.jsonl"), { type: "turn_started", turn_number: 6 });
+        if (submitted === "HUMAN_AUTO_RESOLVE_TODO") {
+          this.delayedWrites.push(setTimeout(() => {
+            appendJson(join(this.sessionDir, "events.jsonl"), {
+              type: "permission_requested",
+              tool_name: "todo_write",
+              ts: "preview-human-todo-requested",
+            });
+            appendJson(join(this.sessionDir, "chat_history.jsonl"), {
+              type: "assistant",
+              content: "",
+              tool_calls: [{ id: "call-human-todo", name: "todo_write", arguments: "{}" }],
+            });
+            appendJson(join(this.sessionDir, "chat_history.jsonl"), {
+              type: "tool_result",
+              content: "ok",
+            });
+            this.delayedWrites.push(setTimeout(() => {
+              appendJson(join(this.sessionDir, "events.jsonl"), {
+                type: "permission_resolved",
+                tool_name: "todo_write",
+                decision: "allow",
+                ts: "preview-human-todo-resolved",
+                wait_ms: 0,
+              });
+              appendJson(join(this.sessionDir, "chat_history.jsonl"), {
+                type: "assistant",
+                content: "human answer after todo",
+              });
+              appendJson(join(this.sessionDir, "events.jsonl"), {
+                type: "turn_ended",
+                outcome: "completed",
+              });
+            }, 150));
+          }, 100));
+          return;
+        }
         appendJson(join(this.sessionDir, "chat_history.jsonl"), { type: "assistant", content: "human answer" });
         appendJson(join(this.sessionDir, "events.jsonl"), { type: "turn_ended", outcome: "completed" });
       }
