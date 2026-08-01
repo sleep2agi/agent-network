@@ -227,8 +227,10 @@ If `anet` says the preview `agent-node` does not advertise `grok-build-cli`, the
 - Candidate branch: `fix/grok-tui-main-sync-3h`
 - Clean worktree used for the candidate: `/tmp/commniu-grok-tui-3h`
 - Tested source commit: `8addab2cdcf231f4c078466acd091eaedddf5034`
-- Reusable Docker tags: `anet-test219:dev`, `anet-test224:dev`, and
-  `anet-test225:dev`
+- Docker gates use the fixed tags `anet-test219:dev`, `anet-test224:dev`, and
+  `anet-test225:dev`. The verified images were removed after report capture to
+  protect shared-host disk space; rebuild the same fixed tags from the exact
+  source commit when reproducing the run.
 - The reports above are generated artifacts bound to the tested source commit.
   Do not relabel them after a source change; rerun 219, then 224, then 225.
 - Remaining release work: independent review, an explicit preview release
