@@ -31,7 +31,7 @@ import {
   grokCopresenceFailureSubcode,
   grokSessionDirectory,
   hasGrokTuiReadyMarker,
-  isGrokPreviewTodoAutomaticResolution,
+  isGrokPreviewAutomaticResolution,
   openGrokCopresenceRuntime,
   type GrokCopresenceRuntimeSession,
   type GrokPtyLike,
@@ -51,7 +51,7 @@ type FakeDelayedWrite = {
 describe("Grok copresence launch and injection policy", () => {
   test("keeps the preview todo auto-resolution exception exact and limited to active turns", () => {
     const exact = {
-      requestWasExact: true,
+      requestTool: "todo_write",
       activeRequestId: "tool:todo_write",
       humanDecisionDispatched: false,
       waitingHuman: true,
@@ -66,18 +66,18 @@ describe("Grok copresence launch and injection policy", () => {
         wait_ms: 0,
       },
     };
-    expect(isGrokPreviewTodoAutomaticResolution(exact)).toBe(true);
-    expect(isGrokPreviewTodoAutomaticResolution({
+    expect(isGrokPreviewAutomaticResolution(exact)).toBe(true);
+    expect(isGrokPreviewAutomaticResolution({
       ...exact,
       turnOwner: "human",
     })).toBe(true);
-    expect(isGrokPreviewTodoAutomaticResolution({
+    expect(isGrokPreviewAutomaticResolution({
       ...exact,
       turnOwner: "human",
       alreadyConsumed: true,
     })).toBe(true);
     for (const mutation of [
-      { ...exact, requestWasExact: false },
+      { ...exact, requestTool: null },
       { ...exact, activeRequestId: "tool:read_file" },
       { ...exact, humanDecisionDispatched: true },
       { ...exact, waitingHuman: false },
@@ -92,7 +92,53 @@ describe("Grok copresence launch and injection policy", () => {
       { ...exact, event: { ...exact.event, ts: "" } },
       { ...exact, event: { ...exact.event, extra: "mutated" } },
     ]) {
-      expect(isGrokPreviewTodoAutomaticResolution(mutation)).toBe(false);
+      expect(isGrokPreviewAutomaticResolution(mutation)).toBe(false);
+    }
+  });
+
+  test("admits exact automatic lifecycles only for the fixed preview tool boundary", () => {
+    for (const tool of ["todo_write", "search_tool", "use_tool"]) {
+      const exact = {
+        requestTool: tool,
+        activeRequestId: `tool:${tool}`,
+        humanDecisionDispatched: false,
+        waitingHuman: true,
+        turnOwner: "human" as const,
+        alreadyConsumed: false,
+        terminalEventSeen: false,
+        event: {
+          type: "permission_resolved",
+          tool_name: tool,
+          decision: "allow",
+          ts: "reviewed-timestamp-shape",
+          wait_ms: 0,
+        },
+      };
+      expect(isGrokPreviewAutomaticResolution(exact)).toBe(true);
+      expect(isGrokPreviewAutomaticResolution({
+        ...exact,
+        turnOwner: "network",
+        alreadyConsumed: true,
+      })).toBe(false);
+    }
+
+    for (const tool of ["read_file", "Bash", "commhub_send_task"]) {
+      expect(isGrokPreviewAutomaticResolution({
+        requestTool: tool,
+        activeRequestId: `tool:${tool}`,
+        humanDecisionDispatched: false,
+        waitingHuman: true,
+        turnOwner: "human",
+        alreadyConsumed: false,
+        terminalEventSeen: false,
+        event: {
+          type: "permission_resolved",
+          tool_name: tool,
+          decision: "allow",
+          ts: "reviewed-timestamp-shape",
+          wait_ms: 0,
+        },
+      })).toBe(false);
     }
   });
 
@@ -1500,6 +1546,51 @@ describe("Grok copresence runtime integration", () => {
     }
   }, 8_000);
 
+  test("keeps the shared TUI alive across exact search_tool then use_tool in a human turn", async () => {
+    const fixture = new RuntimeFixture();
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    let attached: Awaited<ReturnType<typeof connectGrokAttach>> | undefined;
+    try {
+      runtime = await fixture.open();
+      await runtime.submit({
+        taskId: "human-mcp-warmup",
+        from: "reviewer",
+        text: "warmup",
+        timeoutMs: 3_000,
+      });
+      const input = new PassThrough();
+      attached = await connectGrokAttach({
+        socketPath: fixture.attachSocket,
+        input,
+        output: new PassThrough(),
+        signalSource: fixture.signals,
+        terminalSize: () => ({ cols: 100, rows: 30 }),
+      });
+
+      await Bun.sleep(50);
+      input.write("HUMAN_AUTO_RESOLVE_MCP");
+      await waitFor(() => runtime!.state.phase === "human_editing");
+      input.write("\r");
+      await waitFor(() => fixture.humanPrompts.includes("HUMAN_AUTO_RESOLVE_MCP"));
+      await waitFor(() => runtime!.state.phase === "idle");
+      expect(fixture.approvalDecisionCount()).toBe(0);
+      expect(runtime.isRunning).toBe(true);
+      expect(existsSync(fixture.attachSocket)).toBe(true);
+
+      input.write("human-after-mcp");
+      await waitFor(() => runtime!.state.phase === "human_editing");
+      input.write("\r");
+      await waitFor(() => fixture.humanPrompts.includes("human-after-mcp"));
+      await waitFor(() => runtime!.state.phase === "idle");
+      expect(runtime.isRunning).toBe(true);
+      expect(existsSync(fixture.attachSocket)).toBe(true);
+    } finally {
+      attached?.detach();
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 8_000);
+
   test("rejects every mutated preview todo_write automatic resolution tuple", async () => {
     for (const mutation of [
       "WRONG_DECISION",
@@ -2757,6 +2848,55 @@ class FakePty implements GrokPtyLike {
                   });
                 }, 150));
               }, 100));
+            }, 150));
+          }, 100));
+          return;
+        }
+        if (submitted === "HUMAN_AUTO_RESOLVE_MCP") {
+          const eventsPath = join(this.sessionDir, "events.jsonl");
+          const chatPath = join(this.sessionDir, "chat_history.jsonl");
+          this.delayedWrites.push(setTimeout(() => {
+            appendJson(eventsPath, {
+              type: "permission_requested",
+              tool_name: "search_tool",
+              ts: "preview-human-search-requested",
+            });
+            appendJson(chatPath, {
+              type: "assistant",
+              content: "",
+              tool_calls: [{ id: "call-human-search", name: "search_tool", arguments: "{}" }],
+            });
+            appendJson(chatPath, { type: "tool_result", content: "bounded search result" });
+            this.delayedWrites.push(setTimeout(() => {
+              appendJson(eventsPath, {
+                type: "permission_resolved",
+                tool_name: "search_tool",
+                decision: "allow",
+                ts: "preview-human-search-resolved",
+                wait_ms: 0,
+              });
+              appendJson(eventsPath, {
+                type: "permission_requested",
+                tool_name: "use_tool",
+                ts: "preview-human-use-requested",
+              });
+              appendJson(chatPath, {
+                type: "assistant",
+                content: "",
+                tool_calls: [{ id: "call-human-use", name: "use_tool", arguments: "{}" }],
+              });
+              appendJson(chatPath, { type: "tool_result", content: "bounded use result" });
+              this.delayedWrites.push(setTimeout(() => {
+                appendJson(eventsPath, {
+                  type: "permission_resolved",
+                  tool_name: "use_tool",
+                  decision: "allow",
+                  ts: "preview-human-use-resolved",
+                  wait_ms: 0,
+                });
+                appendJson(chatPath, { type: "assistant", content: "human answer after MCP" });
+                appendJson(eventsPath, { type: "turn_ended", outcome: "completed" });
+              }, 150));
             }, 150));
           }, 100));
           return;

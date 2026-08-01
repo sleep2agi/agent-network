@@ -430,7 +430,7 @@ if (GROK_COPRESENCE) {
   console.warn(
     "[agent-node] EXPERIMENTAL/DANGEROUS grok-build-cli co-presence is enabled; "
     + "the shared human TUI must receive tasks only from trusted senders. "
-    + "The pinned preview auto-resolves its session-local todo_write helper for network turns.",
+    + "The pinned preview auto-resolves only the exact fixed todo_write/search_tool/use_tool lifecycle; MCP is CommHub-only.",
   );
 }
 const RUNTIME_AGENT_LABEL = RUNTIME === "grok" && GROK_EXECUTION_MODE === "cli"

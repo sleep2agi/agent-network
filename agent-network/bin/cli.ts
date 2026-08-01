@@ -2164,8 +2164,8 @@ function printClaudeCodeNotice() {
 function printGrokCopresenceWarning(nodeRef?: string) {
   console.warn(`[anet] ⚠ EXPERIMENTAL/DANGEROUS Grok co-presence preview.`);
   console.warn(`[anet]   Network tasks drive the same Grok TUI; approval ownership is not fully hardened.`);
-  console.warn(`[anet]   Fixed text-only model tools: [todo_write]; no filesystem, shell, network, media, MCP, or subagents.`);
-  console.warn(`[anet]   Pinned preview auto-resolves the session-local todo_write helper for active network turns.`);
+  console.warn(`[anet]   Fixed tools: [todo_write,search_tool,use_tool]; MCP is the single runtime-owned CommHub server.`);
+  console.warn(`[anet]   No filesystem, shell, web, media, project/host MCP, or subagents.`);
   console.warn(`[anet]   Use only with trusted tasks and a trusted network. Do not use in production.`);
   if (nodeRef) console.warn(`[anet]   Attach from another terminal: anet grok attach ${nodeRef}`);
 }

@@ -696,8 +696,8 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   private quarantinedNetworkTaskId = "";
   private approvalDecisionDispatched = false;
   private activePermissionRequestId: string | null = null;
-  private activePermissionIsExactPreviewTodo = false;
-  private previewTodoAutomaticResolutionConsumed = false;
+  private activePermissionExactPreviewTool: string | null = null;
+  private readonly previewAutomaticResolutionConsumed = new Set<string>();
   private activeTurnTerminalEventSeen = false;
   private spawnEnv: NodeJS.ProcessEnv;
   private readonly controlledSpawnEnv: NodeJS.ProcessEnv;
@@ -1168,7 +1168,8 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         this.lifecycleBuffer = "";
         this.approvalDecisionDispatched = false;
         this.activePermissionRequestId = null;
-        this.activePermissionIsExactPreviewTodo = false;
+        this.activePermissionExactPreviewTool = null;
+        this.previewAutomaticResolutionConsumed.clear();
         this.resetHumanComposerAudit();
         this.completionPendingSince = 0;
         this.lastChatActivityAt = 0;
@@ -1982,10 +1983,10 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           return;
         }
         if (this.activePermissionRequestId) {
-          if (this.activePermissionIsExactPreviewTodo) {
+          if (this.activePermissionExactPreviewTool) {
             void this.failFatal(new GrokCopresenceFailure(
               "approval_boundary",
-              "grok copresence observed a duplicate preview todo permission request",
+              "grok copresence observed a duplicate preview automatic permission request",
             ));
             return;
           }
@@ -2000,15 +2001,15 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           // gate after an Enter/Ctrl-C decision has already been dispatched.
           continue;
         }
-        const exactPreviewTodo = isExactPreviewTodoPermissionRequest(event);
+        const exactPreviewTool = exactPreviewAutomaticPermissionRequestTool(event);
         if (
-          exactPreviewTodo
+          exactPreviewTool
           && this.arbitration.activeTurn?.owner === "network"
-          && this.previewTodoAutomaticResolutionConsumed
+          && this.previewAutomaticResolutionConsumed.has(exactPreviewTool)
         ) {
           void this.failFatal(new GrokCopresenceFailure(
             "approval_boundary",
-            "grok copresence observed more than one preview todo permission lifecycle in a turn",
+            `grok copresence observed more than one ${exactPreviewTool} permission lifecycle in a turn`,
           ));
           return;
         }
@@ -2021,7 +2022,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           return;
         }
         this.activePermissionRequestId = requestId;
-        this.activePermissionIsExactPreviewTodo = exactPreviewTodo;
+        this.activePermissionExactPreviewTool = exactPreviewTool;
         this.approvalDecisionDispatched = false;
         if (this.deferredHuman.length) {
           // Pre-approval keystrokes are never consent. Drop them instead of
@@ -2036,32 +2037,33 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         }
       } else if (event?.type === "permission_resolved") {
         const requestId = lifecyclePermissionIdentity(event);
-        if (isGrokPreviewTodoAutomaticResolution({
-          requestWasExact: this.activePermissionIsExactPreviewTodo,
+        if (isGrokPreviewAutomaticResolution({
+          requestTool: this.activePermissionExactPreviewTool,
           activeRequestId: this.activePermissionRequestId,
           humanDecisionDispatched: this.approvalDecisionDispatched,
           waitingHuman: this.arbitration.waitingHuman,
           turnOwner: this.arbitration.activeTurn?.owner ?? null,
-          alreadyConsumed: this.previewTodoAutomaticResolutionConsumed,
+          alreadyConsumed: this.activePermissionExactPreviewTool
+            ? this.previewAutomaticResolutionConsumed.has(this.activePermissionExactPreviewTool)
+            : false,
           terminalEventSeen: this.activeTurnTerminalEventSeen,
           event,
         })) {
-          // Keyless black-box evidence for the pinned 0.2.93 build shows that
-          // the fixed preview profile's sole session-local tool emits this
-          // exact lifecycle in both network and human turns. It cannot mutate
-          // the workspace or call the network, so accepting that native result
-          // keeps the shared TUI alive without broadening the tool boundary.
-          // Network turns may use the tuple only once. Human turns may update
-          // the same local todo list repeatedly; each lifecycle is still
-          // checked independently against the exact pinned shape.
+          // Pinned 0.2.93 emits this exact automatic lifecycle for each tool
+          // admitted by the fixed preview profile. `todo_write` is local;
+          // `search_tool` / `use_tool` can reach only the single runtime-owned
+          // CommHub MCP server already verified during startup. Accepting only
+          // these exact names and shapes keeps the shared TUI alive without
+          // broadening its filesystem/process/web boundary. A network turn may
+          // consume each tool tuple once; human turns may repeat an exact tuple.
           //
           // The lifecycle is:
-          // requested(tool_name=todo_write) -> resolved(decision=allow)
+          // requested(tool_name=<fixed tool>) -> resolved(decision=allow)
           // without reading TUI input.  Treat only that exact tuple as a
           // preview-local completion.  Do not derive this exception from the
           // profile array: adding a future tool must never grant it the same
           // behavior accidentally.
-          this.previewTodoAutomaticResolutionConsumed = true;
+          this.previewAutomaticResolutionConsumed.add(this.activePermissionExactPreviewTool!);
           this.clearApprovalCorrelation();
           this.transition({ type: "preview_todo_resolved_automatically" });
           continue;
@@ -2187,7 +2189,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     const result = reduceGrokCopresenceState(this.arbitration, event);
     this.arbitration = result.state;
     if (result.accepted && event.type === "schedule_network") {
-      this.previewTodoAutomaticResolutionConsumed = false;
+      this.previewAutomaticResolutionConsumed.clear();
       this.activeTurnTerminalEventSeen = false;
     } else if (result.accepted && event.type === "human_input_submitted") {
       this.activeTurnTerminalEventSeen = false;
@@ -2199,7 +2201,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
 
   private clearApprovalCorrelation(_clearSettled = false): void {
     this.activePermissionRequestId = null;
-    this.activePermissionIsExactPreviewTodo = false;
+    this.activePermissionExactPreviewTool = null;
     this.approvalDecisionDispatched = false;
   }
 
@@ -3105,24 +3107,28 @@ function lifecyclePermissionIdentity(event: {
   return toolName && Buffer.byteLength(toolName, "utf8") <= 512 ? `tool:${toolName}` : null;
 }
 
-function isExactPreviewTodoPermissionRequest(event: {
+function exactPreviewAutomaticPermissionRequestTool(event: {
   type?: unknown;
   ts?: unknown;
   request_id?: unknown;
   requestId?: unknown;
   tool_name?: unknown;
   toolName?: unknown;
-}): boolean {
-  return exactObjectKeys(event, ["tool_name", "ts", "type"])
-    && event.type === "permission_requested"
-    && isBoundedLifecycleShapeString(event.ts)
-    && event.request_id === undefined
-    && event.requestId === undefined
-    && event.tool_name === "todo_write"
-    && event.toolName === undefined;
+}): string | null {
+  if (!exactObjectKeys(event, ["tool_name", "ts", "type"])) return null;
+  if (
+    event.type !== "permission_requested"
+    || !isBoundedLifecycleShapeString(event.ts)
+    || event.request_id !== undefined
+    || event.requestId !== undefined
+    || typeof event.tool_name !== "string"
+    || !(GROK_COPRESENCE_EFFECTIVE_TOOLS as readonly string[]).includes(event.tool_name)
+    || event.toolName !== undefined
+  ) return null;
+  return event.tool_name;
 }
 
-function isExactPreviewTodoPermissionResolution(event: {
+function isExactPreviewAutomaticPermissionResolution(event: {
   type?: unknown;
   decision?: unknown;
   ts?: unknown;
@@ -3131,7 +3137,7 @@ function isExactPreviewTodoPermissionResolution(event: {
   requestId?: unknown;
   tool_name?: unknown;
   toolName?: unknown;
-}): boolean {
+}, expectedTool: string): boolean {
   return exactObjectKeys(event, ["decision", "tool_name", "ts", "type", "wait_ms"])
     && event.type === "permission_resolved"
     && isBoundedLifecycleShapeString(event.ts)
@@ -3140,14 +3146,14 @@ function isExactPreviewTodoPermissionResolution(event: {
     && event.wait_ms >= 0
     && event.request_id === undefined
     && event.requestId === undefined
-    && event.tool_name === "todo_write"
+    && event.tool_name === expectedTool
     && event.toolName === undefined
     && event.decision === "allow";
 }
 
 /** Exact preview exception; exported so every rejected dimension has a pure mutation test. */
-export function isGrokPreviewTodoAutomaticResolution(input: {
-  requestWasExact: boolean;
+export function isGrokPreviewAutomaticResolution(input: {
+  requestTool: string | null;
   activeRequestId: string | null;
   humanDecisionDispatched: boolean;
   waitingHuman: boolean;
@@ -3166,15 +3172,16 @@ export function isGrokPreviewTodoAutomaticResolution(input: {
   };
 }): boolean {
   const requestId = lifecyclePermissionIdentity(input.event);
-  return input.requestWasExact
-    && input.activeRequestId === "tool:todo_write"
+  return input.requestTool !== null
+    && (GROK_COPRESENCE_EFFECTIVE_TOOLS as readonly string[]).includes(input.requestTool)
+    && input.activeRequestId === `tool:${input.requestTool}`
     && requestId === input.activeRequestId
     && !input.humanDecisionDispatched
     && input.waitingHuman
     && (input.turnOwner === "network" || input.turnOwner === "human")
     && (!input.alreadyConsumed || input.turnOwner === "human")
     && !input.terminalEventSeen
-    && isExactPreviewTodoPermissionResolution(input.event);
+    && isExactPreviewAutomaticPermissionResolution(input.event, input.requestTool);
 }
 
 function exactObjectKeys(value: object, expected: readonly string[]): boolean {
