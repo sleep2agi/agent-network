@@ -635,6 +635,31 @@ test("state scanner accepts only an exact private regular agent_id copy", () => 
   }
 });
 
+test("state scanner accepts a bounded private vendor agent_id when no source exists", () => {
+  const fixture = stateFixture("generated-identity");
+  try {
+    const missingSource = path.join(fixture.root, "missing-agent-id");
+    const isolatedIdentity = path.join(fixture.home, "agent_id");
+    writeFileSync(isolatedIdentity, "vendor-generated-id\n", { mode: 0o600 });
+    assert.equal(scanStateFixture(fixture, {
+      expectedIdentityPath: missingSource,
+    }).scanOutcome, "clean");
+
+    writeFileSync(
+      isolatedIdentity,
+      "PRIVATE_AUTH_SCALAR_0123456789\n",
+      { mode: 0o600 },
+    );
+    const leaked = scanStateFixture(fixture, {
+      expectedIdentityPath: missingSource,
+    });
+    assert.equal(leaked.status, "failed");
+    assert.deepEqual(leaked.matchedRoles, ["grok_identity_state"]);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("binds the exact current home and accepts only its two owner-bound runtime sockets", async () => {
   const root = mkdtempSync(path.join(tmpdir(), "test225-auth-evidence-socket-"));
   const state = path.join(root, "state");

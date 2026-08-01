@@ -1051,7 +1051,7 @@ function ownerOnlySingleLinkRegular(stat) {
     && (uid === undefined || stat.uid === (typeof stat.uid === "bigint" ? BigInt(uid) : uid));
 }
 
-function exactPrivateIdentityCopy(sourcePath, targetPath) {
+function exactPrivateIdentityCopy(sourcePath, targetPath, commitChecks) {
   let sourceFd;
   let targetFd;
   try {
@@ -1068,14 +1068,57 @@ function exactPrivateIdentityCopy(sourcePath, targetPath) {
     const targetBytes = readFileSync(targetFd);
     const sourceAfter = fstatSync(sourceFd, { bigint: true });
     const targetAfter = fstatSync(targetFd, { bigint: true });
-    return sameStableMetadata(sourceBefore, sourceAfter)
+    const equal = sameStableMetadata(sourceBefore, sourceAfter)
       && sameStableMetadata(targetBefore, targetAfter)
       && sourceBytes.equals(targetBytes);
+    if (equal) {
+      commitChecks.push({
+        kind: "regular",
+        path: sourcePath,
+        role: "grok_current_state_structure",
+        stat: sourceAfter,
+        requirePrivateState: true,
+      });
+      commitChecks.push({
+        kind: "regular",
+        path: targetPath,
+        role: "grok_current_state_structure",
+        stat: targetAfter,
+        requirePrivateState: true,
+      });
+    }
+    return equal;
   } catch {
     return false;
   } finally {
     if (targetFd !== undefined) closeSync(targetFd);
     if (sourceFd !== undefined) closeSync(sourceFd);
+  }
+}
+
+function privateGeneratedIdentity(targetPath, commitChecks) {
+  let fd;
+  try {
+    fd = openSync(targetPath, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+    const before = fstatSync(fd, { bigint: true });
+    if (!ownerOnlySingleLinkRegular(before)
+      || before.size <= 0n
+      || before.size > 4_096n) return false;
+    readFileSync(fd);
+    const after = fstatSync(fd, { bigint: true });
+    if (!sameStableMetadata(before, after)) return false;
+    commitChecks.push({
+      kind: "regular",
+      path: targetPath,
+      role: "grok_current_state_structure",
+      stat: after,
+      requirePrivateState: true,
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }
 
@@ -1457,7 +1500,20 @@ function scanCurrentStateEntry(
       errorRoles.add(descriptor.errorRole);
     }
     if (descriptor.kind === "identity") {
-      if (!exactPrivateIdentityCopy(expectedIdentityPath, entryPath)) {
+      let sourceAbsent = false;
+      try {
+        lstatSync(expectedIdentityPath);
+      } catch (error) {
+        sourceAbsent = error?.code === "ENOENT";
+      }
+      const absentSource = sourceAbsent
+        ? absentCommitToken(expectedIdentityPath, "grok_current_state_structure")
+        : null;
+      const validIdentity = sourceAbsent
+        ? Boolean(absentSource) && privateGeneratedIdentity(entryPath, commitChecks)
+        : exactPrivateIdentityCopy(expectedIdentityPath, entryPath, commitChecks);
+      if (absentSource) commitChecks.push(absentSource);
+      if (!validIdentity) {
         errorRoles.add("grok_current_state_structure");
       }
       recordStateFile(
