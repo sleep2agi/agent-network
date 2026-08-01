@@ -1,0 +1,16 @@
+# test225 live UAT — 指挥狗 Grok TUI
+date: 2026-08-01T11:46:00+00:00
+source_commit=026937d0e2e124292e10b96c6806abb35c8a3eaf
+candidate=/home/vansin/commniu-grok-candidate-026937d0
+node=指挥狗
+runtime=grok-build-cli
+grok=0.2.93
+
+PASS: launched the reviewed local candidate with --permission-mode bypassPermissions --always-approve.
+PASS: one network turn completed two sequential todo_write lifecycles, search_tool, and use_tool without a human approval prompt.
+PASS: task 72ce272a-372b-4b84-9cf7-10a844893d23 replied FINAL_AUTO_APPROVE_UAT_PASS.
+PASS: follow-up task 8912b8a9-5418-4e20-933a-cd924beccc20 replied SECOND_TURN_ALIVE.
+PASS: the attachable tmux session remained live after both turns.
+
+Attach: tmux attach -t 指挥狗
+Detach: Ctrl-b, then d

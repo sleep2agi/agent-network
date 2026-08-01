@@ -1,6 +1,6 @@
 # test225 — Grok preview candidate tarball + live co-presence
-date: 2026-08-01T07:51:05+00:00
-source_commit=8addab2cdcf231f4c078466acd091eaedddf5034
+date: 2026-08-01T11:40:21+00:00
+source_commit=026937d0e2e124292e10b96c6806abb35c8a3eaf
 network=container-local Hub; outbound npm only for initial candidate dependency resolution
 [L0] clean candidate package image
 PASS: anet candidate installed without global agent-node (candidate=2.5.0-preview.26); published preview Hub=0.9.0-preview.21
@@ -43,6 +43,6 @@ npx_preview_fallback=PASS
 global_agent_node_resume=PASS
 external_publish_actions=0
 tmux_input_commands_issued=0
-failure_contract_sha256=7ee81a8d51ccba594e01729e2bb03188813239eb295e9a87a89d295c545df1c0
-candidate_tarball_sha256=f48957bef88064a78c84265b7a76af434dcf8d27456328d984d40463273792b7 file=sleep2agi-agent-network-2.3.0-preview.34.tgz
-candidate_tarball_sha256=20d7c722c2ffea5ae63c5e3693ad4959052579c31ee94405d24ed54d7665eb32 file=sleep2agi-agent-node-2.5.0-preview.26.tgz
+failure_contract_sha256=5c8f18e174ec592f6dd005f0d6a433b533046fd179c32f30a415cc936696d140
+candidate_tarball_sha256=4d7caba296cec3477c2ef9f7a973ad67b81f6b3710f8c9152d66b7d9e92d658a file=sleep2agi-agent-network-2.3.0-preview.34.tgz
+candidate_tarball_sha256=491d45eac33bcbdb97c0134fec15086da5c6ceb0b7932941796991790b37dd29 file=sleep2agi-agent-node-2.5.0-preview.26.tgz
