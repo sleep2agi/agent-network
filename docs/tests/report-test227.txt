@@ -1,6 +1,6 @@
 # Test 227 — OpenCode native TUI co-presence
 
-date: 2026-08-01T23:03:19+00:00
+date: 2026-08-01T23:16:17+00:00
 bun: 1.3.1
 opencode: 1.18.1
 tmux: tmux 3.3a
@@ -9,25 +9,36 @@ tmux: tmux 3.3a
 bun test v1.3.1 (89fa0f34)
 
 ../agent-node-src/src/runtime/opencode-copresence/runtime.test.ts:
-(pass) OpenCode native serve+attach copresence > wires one token-bound CommHub MCP without reopening local tools [6.00ms]
-(pass) OpenCode native serve+attach copresence > uses one authenticated loopback session for FIFO network turns and emits an owner-only attach launcher [5316.22ms]
-(pass) OpenCode native serve+attach copresence > waits for an already-busy human session before injecting a network turn [5683.24ms]
+(pass) OpenCode native serve+attach copresence > wires one token-bound CommHub MCP without reopening local tools [4.00ms]
+(pass) OpenCode native serve+attach copresence > uses one authenticated loopback session for FIFO network turns and emits an owner-only attach launcher [5368.23ms]
+(pass) OpenCode native serve+attach copresence > waits for an already-busy human session before injecting a network turn [5684.24ms]
 (pass) OpenCode native serve+attach copresence > binds teardown authority to a detached pid, pgrp, and process start ticks [2.00ms]
 
  4 pass
  0 fail
  38 expect() calls
-Ran 4 tests across 1 file. [11.05s]
+Ran 4 tests across 1 file. [11.11s]
 bun test v1.3.1 (89fa0f34)
 
 ../agent-node-src/src/runtime/opencode-copresence/inbox-wiring.test.ts:
-(pass) OpenCode copresence CommHub message wiring > new_message SSE wakes the inbox immediately [2.00ms]
-(pass) OpenCode copresence CommHub message wiring > message is displayed as a non-replying TUI notification before the generic ack-only branch [1.00ms]
+(pass) OpenCode copresence CommHub message wiring > new_message SSE uses a non-blocking informational lane [2.00ms]
+(pass) OpenCode copresence CommHub message wiring > message is displayed as a non-replying TUI notification in the fast drain [1.00ms]
+(pass) OpenCode copresence CommHub message wiring > the task drain does not claim OpenCode copresence messages
+
+ 3 pass
+ 0 fail
+ 12 expect() calls
+Ran 3 tests across 1 file. [35.00ms]
+bun test v1.3.1 (89fa0f34)
+
+../agent-node-src/src/runtime/inbox-drain-lane.test.ts:
+(pass) inbox drain lanes > an informational lane drains while the work lane is busy [1.00ms]
+(pass) inbox drain lanes > each lane remains serial [1.00ms]
 
  2 pass
  0 fail
- 7 expect() calls
-Ran 2 tests across 1 file. [37.00ms]
+ 5 expect() calls
+Ran 2 tests across 1 file. [19.00ms]
 bun test v1.3.1 (89fa0f34)
 
 ../agent-network-src/src/opencode-copresence-cli.test.ts:
@@ -36,18 +47,18 @@ bun test v1.3.1 (89fa0f34)
 (pass) OpenCode co-presence CLI wiring > does not depend on a long-lived tmux server's stale launcher environment
 (pass) OpenCode co-presence CLI wiring > waits for the owner-only runtime launcher before starting the official TUI
 (pass) OpenCode co-presence CLI wiring > the generic --copresence dispatcher selects OpenCode by stored runtime [1.00ms]
-(pass) OpenCode co-presence CLI wiring > operator help names the create, attach, and stop commands [1.00ms]
+(pass) OpenCode co-presence CLI wiring > operator help names the create, attach, and stop commands [2.00ms]
 
  6 pass
  0 fail
  18 expect() calls
-Ran 6 tests across 1 file. [41.00ms]
+Ran 6 tests across 1 file. [42.00ms]
 
 ## Layers 1–5 — auth, CommHub MCP outbound, official attach TUI, shared turns, lifecycle
 {
   "checks": {
     "loopback": true,
-    "session": "ses_0406e6945ffeY28zhzLZiysxLf",
+    "session": "ses_040628a6dffeINrXFt3FVTVX7y",
     "launcherMode": 448,
     "launcherUsesOfficialAttach": true,
     "launcherDoesNotLogPassword": true,
@@ -56,7 +67,7 @@ Ran 6 tests across 1 file. [41.00ms]
     "informationalMessageVisible": true,
     "tuiAliveAfterNotice": true,
     "mcpAuthenticated": true,
-    "outboundReplyLength": 44,
+    "outboundReplyLength": 67,
     "outboundToolCalled": true,
     "firstReplyLength": 15,
     "noticeDidNotLeakIntoFirstReply": true,
@@ -66,7 +77,17 @@ Ran 6 tests across 1 file. [41.00ms]
     "tuiAliveAfterSecond": true,
     "runtimeAliveAfterSecond": true
   },
-  "paneTail": "                              \u001b[48;5;233m\n\u001b[48;5;232m                                                                                                  \u001b[48;5;233m  \u001b[48;5;234m    \u001b[38;5;8mConnect from 75+ providers to \u001b[38;5;15m    \u001b[48;5;233m\n\u001b[48;5;232m                                                                                                  \u001b[48;5;233m  \u001b[48;5;234m    \u001b[38;5;8muse other models, including \u001b[38;5;15m      \u001b[48;5;233m\n\u001b[48;5;232m                                                                                                  \u001b[48;5;233m  \u001b[48;5;234m    \u001b[38;5;8mClaude, GPT, Gemini etc\u001b[38;5;15m           \u001b[48;5;233m\n\u001b[48;5;232m                                                                                                  \u001b[48;5;233m  \u001b[48;5;234m                                      \u001b[48;5;233m\n\u001b[48;5;232m                                                                                                  \u001b[48;5;233m  \u001b[48;5;234m    \u001b[38;5;255mConnect provider\u001b[38;5;15m        \u001b[38;5;8m/connect\u001b[38;5;15m  \u001b[48;5;233m\n\u001b[48;5;232m  \u001b[38;5;75m┃\u001b[38;5;15m\u001b[48;5;234m                                                                                             \u001b[48;5;232m  \u001b[48;5;233m  \u001b[48;5;234m                                      \u001b[48;5;233m\n\u001b[48;5;232m  \u001b[38;5;75m┃\u001b[38;5;15m\u001b[48;5;234m                                                                                             \u001b[48;5;232m  \u001b[48;5;233m\n\u001b[48;5;232m  \u001b[38;5;75m┃\u001b[38;5;15m\u001b[48;5;234m                                                                                             \u001b[48;5;232m  \u001b[48;5;233m  \u001b[38;5;8m/run/user/0/.anet-opencode-launch-\u001b[38;5;15m\n\u001b[48;5;232m  \u001b[38;5;75m┃\u001b[38;5;15m\u001b[48;5;234m  \u001b[38;5;75mBuild\u001b[38;5;15m \u001b[38;5;8m·\u001b[38;5;15m \u001b[38;5;255mNorth Mini Code Free\u001b[38;5;15m \u001b[38;5;8mOpenCode Zen\u001b[38;5;15m                                                  \u001b[48;5;232m  \u001b[48;5;233m  \u001b[38;5;8mJPlyld/\u001b[38;5;255mworkspace\u001b[38;5;15m\n\u001b[48;5;232m  \u001b[38;5;75m╹\u001b[38;5;234m▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\u001b[38;5;15m  \u001b[48;5;233m\n\u001b[48;5;232m   \u001b[38;5;8m/run/user/0/.anet-opencode-launch-JPlyld/workspace\u001b[38;5;15m                 \u001b[38;5;8m2.1K (1%)\u001b[38;5;15m  \u001b[38;5;255mctrl+p \u001b[38;5;8mcommands\u001b[38;5;15m  \u001b[48;5;233m  \u001b[38;5;114m•\u001b[38;5;8m \u001b[1mOpen\u001b[38;5;255mCode\u001b[0m\u001b[38;5;8m\u001b[48;5;233m 1.18.1\u001b[38;5;15m\n\u001b[48;5;232m                                                                                                  \u001b[48;5;233m\n"
+  "paneTail": "                              \u001b[48;5;233m\n\u001b[48;5;232m                                                                                                  \u001b[48;5;233m  \u001b[48;5;234m    \u001b[38;5;8mConnect from 75+ providers to \u001b[38;5;15m    \u001b[48;5;233m\n\u001b[48;5;232m                                                                                                  \u001b[48;5;233m  \u001b[48;5;234m    \u001b[38;5;8muse other models, including \u001b[38;5;15m      \u001b[48;5;233m\n\u001b[48;5;232m                                                                                                  \u001b[48;5;233m  \u001b[48;5;234m    \u001b[38;5;8mClaude, GPT, Gemini etc\u001b[38;5;15m           \u001b[48;5;233m\n\u001b[48;5;232m                                                                                                  \u001b[48;5;233m  \u001b[48;5;234m                                      \u001b[48;5;233m\n\u001b[48;5;232m                                                                                                  \u001b[48;5;233m  \u001b[48;5;234m    \u001b[38;5;255mConnect provider\u001b[38;5;15m        \u001b[38;5;8m/connect\u001b[38;5;15m  \u001b[48;5;233m\n\u001b[48;5;232m  \u001b[38;5;75m┃\u001b[38;5;15m\u001b[48;5;234m                                                                                             \u001b[48;5;232m  \u001b[48;5;233m  \u001b[48;5;234m                                      \u001b[48;5;233m\n\u001b[48;5;232m  \u001b[38;5;75m┃\u001b[38;5;15m\u001b[48;5;234m                                                                                             \u001b[48;5;232m  \u001b[48;5;233m\n\u001b[48;5;232m  \u001b[38;5;75m┃\u001b[38;5;15m\u001b[48;5;234m                                                                                             \u001b[48;5;232m  \u001b[48;5;233m  \u001b[38;5;8m/run/user/0/.anet-opencode-launch-\u001b[38;5;15m\n\u001b[48;5;232m  \u001b[38;5;75m┃\u001b[38;5;15m\u001b[48;5;234m  \u001b[38;5;75mBuild\u001b[38;5;15m \u001b[38;5;8m·\u001b[38;5;15m \u001b[38;5;255mNorth Mini Code Free\u001b[38;5;15m \u001b[38;5;8mOpenCode Zen\u001b[38;5;15m                                                  \u001b[48;5;232m  \u001b[48;5;233m  \u001b[38;5;8m2CBiig/\u001b[38;5;255mworkspace\u001b[38;5;15m\n\u001b[48;5;232m  \u001b[38;5;75m╹\u001b[38;5;234m▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\u001b[38;5;15m  \u001b[48;5;233m\n\u001b[48;5;232m   \u001b[38;5;8m/run/user/0/.anet-opencode-launch-2CBiig/workspace\u001b[38;5;15m                 \u001b[38;5;8m2.1K (1%)\u001b[38;5;15m  \u001b[38;5;255mctrl+p \u001b[38;5;8mcommands\u001b[38;5;15m  \u001b[48;5;233m  \u001b[38;5;114m•\u001b[38;5;8m \u001b[1mOpen\u001b[38;5;255mCode\u001b[0m\u001b[38;5;8m\u001b[48;5;233m 1.18.1\u001b[38;5;15m\n\u001b[48;5;232m                                                                                                  \u001b[48;5;233m\n"
 }
 
 OVERALL: PASS
+
+## Busy-inbox follow-up (2026-08-02 Asia/Shanghai)
+
+Layer-0 focused rerun in the same Docker image:
+
+- inbox drain lanes: 3 pass, 0 fail
+- OpenCode inbox wiring: 5 pass, 0 fail
+- total: 8 pass, 0 fail, 25 assertions
+
+Witnessed-red mutation: replacing the independent informational lane with the work lane made `work and informational drains are independent lanes` fail. Restored production code returned the focused suite to 8/8 PASS.

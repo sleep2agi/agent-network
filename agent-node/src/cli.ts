@@ -89,6 +89,7 @@ import {
   writebackOpencodeSession,
 } from "./runtime/opencode-acp/profile-state";
 import { OPENCODE_DEFAULT_PIN } from "./runtime/opencode-acp/binary";
+import { createInboxDrainLane } from "./runtime/inbox-drain-lane";
 
 const home = homedir();
 
@@ -1231,6 +1232,15 @@ async function drainPendingReplies(): Promise<void> {
 // from `get_inbox` (it's only marked acked when ack_inbox lands) and
 // trigger the LLM twice.
 const inflightMessageIds = new Set<string>();
+
+const workInboxDrain = createInboxDrainLane((cause) => {
+  const error = cause as any;
+  warn(`inbox work drain failed: ${error?.message || error}`);
+});
+const informationalInboxDrain = createInboxDrainLane((cause) => {
+  const error = cause as any;
+  warn(`inbox informational drain failed: ${error?.message || error}`);
+});
 
 function isGoalCommand(content: string): boolean {
   return /^\s*\/(?:goal|loop)\b/i.test(content || "");
@@ -3536,6 +3546,12 @@ async function processInbox() {
   const messages = await getInbox();
   if (!messages.length) return;
   for (const msg of messages) {
+    // OpenCode copresence informational messages belong to their own fast
+    // lane. Leaving them in the task drain would make a message wait behind
+    // an arbitrarily long model turn from an earlier inbox row.
+    if ((msg.type || "task") === "message" && RUNTIME === "opencode" && opencodeMode === "copresence") {
+      continue;
+    }
     // (3a) Inflight guard.
     if (inflightMessageIds.has(msg.id)) {
       debug(`skip inflight message ${msg.id.slice(0, 8)}`);
@@ -3548,18 +3564,6 @@ async function processInbox() {
       const msgType = msg.type || "task";
       const images = await extractImagePaths(msg);
       log(`← [${from}] (${msgType}/${msg.priority || "normal"})${images.length ? ` +${images.length} image(s)` : ""} ${content.slice(0, 100)}`);
-
-      // OpenCode copresence has a human-visible shared TUI. A CommHub
-      // send_message is informational (no response lifecycle), but it must
-      // still appear there. Use OpenCode's TUI notification endpoint so the
-      // message cannot enter model history or trigger an agent reply loop.
-      if (msgType === "message" && RUNTIME === "opencode" && opencodeMode === "copresence") {
-        const runtime = await ensureOpencodeCopresenceRuntime();
-        await runtime.notify(`[${from}] ${content}`);
-        log(`[opencode-copresence] displayed message ${msg.id.slice(0, 8)} from ${from}`);
-        await ackMessage(msg.id).catch((e: any) => warn(`ack failed for message ${msg.id.slice(0, 8)}: ${e.message}`));
-        continue;
-      }
 
       // Other non-task / non-broadcast messages retain their historical
       // ack-only behavior; send_message never implies an LLM response.
@@ -3620,6 +3624,44 @@ async function processInbox() {
       inflightMessageIds.delete(msg.id);
     }
   }
+}
+
+/**
+ * Drain only human-visible OpenCode copresence messages. This deliberately
+ * runs in a different serialized lane from task processing so an SSE
+ * new_message event remains visible while a model turn is still running.
+ */
+async function processOpencodeCopresenceMessages() {
+  if (RUNTIME !== "opencode" || opencodeMode !== "copresence") return;
+
+  const messages = await getInbox();
+  for (const msg of messages) {
+    if ((msg.type || "task") !== "message") continue;
+    if (inflightMessageIds.has(msg.id)) {
+      debug(`skip inflight informational message ${msg.id.slice(0, 8)}`);
+      continue;
+    }
+    inflightMessageIds.add(msg.id);
+    try {
+      const from = msg.from_session || "hub";
+      const content = msg.content as string;
+      log(`← [${from}] (message/${msg.priority || "normal"}) ${content.slice(0, 100)}`);
+      const runtime = await ensureOpencodeCopresenceRuntime();
+      await runtime.notify(`[${from}] ${content}`);
+      log(`[opencode-copresence] displayed message ${msg.id.slice(0, 8)} from ${from}`);
+      await ackMessage(msg.id).catch((e: any) => warn(`ack failed for message ${msg.id.slice(0, 8)}: ${e.message}`));
+    } finally {
+      inflightMessageIds.delete(msg.id);
+    }
+  }
+}
+
+function scheduleWorkInboxDrain() {
+  workInboxDrain.schedule(processInbox);
+}
+
+function scheduleInformationalInboxDrain() {
+  informationalInboxDrain.schedule(processOpencodeCopresenceMessages);
 }
 
 // Helper used by both the goal-command path and the LLM-driven task path.
@@ -4411,11 +4453,19 @@ async function connectSSE() {
                 register().catch((e) => warn(`re-register failed: ${e?.message || e}`));
               }
               firstConnect = false;
+              // Drain rows that may have arrived while SSE was disconnected.
+              // Scheduling (instead of awaiting) keeps the event reader alive;
+              // informational messages have a separate lane from model work.
+              scheduleWorkInboxDrain();
+              scheduleInformationalInboxDrain();
               continue;
             }
-            if (["new_task", "new_message", "broadcast"].includes(ev.type)) {
+            if (ev.type === "new_message" && RUNTIME === "opencode" && opencodeMode === "copresence") {
               log(`← SSE ${ev.type}`);
-              await processInbox();
+              scheduleInformationalInboxDrain();
+            } else if (["new_task", "new_message", "broadcast"].includes(ev.type)) {
+              log(`← SSE ${ev.type}`);
+              scheduleWorkInboxDrain();
             }
             if (ev.type === "new_reply") {
               log(`← SSE reply from ${ev.from || "?"}${ev.in_reply_to ? ` (task ${ev.in_reply_to.slice(0, 8)})` : ""}`);
@@ -4616,7 +4666,8 @@ switch (startupAction.kind) {
 
 await register();
 log("已注册到 CommHub");
-processInbox().catch((e: any) => warn(`initial inbox scan failed: ${e.message}`));
+scheduleWorkInboxDrain();
+scheduleInformationalInboxDrain();
 // RFC-024 — fire a reportStatus immediately on startup so the
 // config_snapshot reaches the hub right after register(), instead of
 // waiting up to 3 minutes for the periodic timer below to fire. Hub

@@ -65,4 +65,37 @@ PASS — all pinned local tools remained explicitly denied; `commhub_*` was the 
 PASS — after MCP enablement, an inbound ordinary message still displayed and the Hub task replied exactly `[opencode-指挥狗] OPENCODE_BIDIRECTIONAL_OK` in 3 seconds.
 PASS — both TUI and bridge tmux sessions remained alive.
 
+## Layer 7 — human TUI outbound task lifecycle
+
+Outbound task ID: 7797f592-0d3d-405c-a260-2cbea95ae193
+Task marker: OPENCODE_TUI_TASK_REQUEST_20260802
+Reply marker: OPENCODE_TUI_TASK_REPLY_20260802
+
+PASS — a prompt typed into the full TUI executed `commhub_send_task` and received a real Hub task ID.
+PASS — the TUI polled `commhub_get_task` until the task changed to `replied`, then displayed the exact peer reply.
+PASS — Hub stored the task with `from_session=opencode-指挥狗`; this was not a simulated or verbal tool call.
+
+## Layer 8 — busy task does not block ordinary messages
+
+Busy task ID: dbad2c0a-4a79-43bd-a2a1-843363c1213e
+Message ID: db6ddda8-f337-4efe-be37-ca8c8aa2bf04
+Message marker: BUSY_MESSAGE_2_VISIBLE_20260802
+
+PASS — Hub accepted the ordinary message while the node status was `working`.
+PASS — bridge chronology was: task processing at 07:20:37, message SSE/display at 07:20:38, task terminal result at 07:20:45.
+PASS — therefore the informational message became visible seven seconds before the busy task ended; it no longer waits behind the model turn.
+PASS — work and informational drains are separately serialized, and startup plus SSE reconnect both schedule the informational recovery drain.
+PASS — a controlled Docker mutation that aliases the informational lane back to the work lane makes the wiring suite fail; the safety assertion is witnessed-red.
+
+The synthetic busy task intentionally requested repeated identical tool calls and eventually hit OpenCode's `doom_loop` safety rule. That failure is not counted as a task-success assertion; only its occupied interval is used for the concurrency test.
+
+## Layer 9 — post-restart human outbound message
+
+Outbound message ID: 2fafcef9-07af-4c59-9fb5-e742d8a87dbf
+Outbound marker: HUMAN_TUI_SEND_OK_20260802_0722
+
+PASS — after installing the candidate into the isolated node prefix and restarting only the two exact node sessions, a prompt typed into the TUI executed `commhub_send_message`.
+PASS — Hub inbox independently read back the exact marker, `type=message`, and `from_session=opencode-指挥狗`.
+PASS — live entry point is `tmux attach -t opencode-指挥狗`; the similarly named `指挥狗` session is a separate Grok node.
+
 OVERALL: PASS

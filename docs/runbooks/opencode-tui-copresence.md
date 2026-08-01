@@ -60,7 +60,7 @@ anet node start opencode-指挥狗 --copresence
 CommHub 的两种入站语义保持分离：
 
 - `send_task` / Dashboard 任务进入共享 session，运行模型，并把回答回传给发送方。
-- `send_message` / Dashboard 普通消息由 `new_message` SSE 立即唤醒，在 TUI 显示 15 秒通知并 ack；它不运行模型，也不写入 session 对话历史。
+- `send_message` / Dashboard 普通消息由 `new_message` SSE 立即唤醒，在 TUI 显示 15 秒通知并 ack；它不运行模型，也不写入 session 对话历史。任务处理和普通消息使用两条独立串行 drain，因此模型正在跑任务时，普通消息仍能立即显示。
 
 普通消息不能使用 OpenCode `noReply` user message 伪装通知：该 API 虽然当下不生成回答，却会留下未回答的 user turn，下一条真实任务可能把它一起回答，造成延迟误回复或 agent 间回复循环。
 
@@ -93,12 +93,13 @@ sg docker -c 'docker rmi anet-test227:dev'
 
 验收顺序：
 
-1. process-group、FIFO、`new_message` SSE 与 inbox 接线单元层
+1. process-group、FIFO、独立 work/informational drain、`new_message` SSE 与 inbox 接线单元层
 2. CLI mode/tmux/陈旧环境接线层
 3. loopback + 未认证 401 + launcher 0700
 4. 真 OpenCode 1.18.1 使用 bearer 连接隔离假 CommHub MCP，并实际调用 `send_message`
 5. full TUI 显示普通消息通知，且通知不污染下一条模型回复
 6. 两条真实任务 turn 后 TUI/server 仍在线
+7. busy task 未结束时普通消息先显示；把两条 drain 重新合并的 mutation 必须转红
 
 证据：
 
@@ -115,6 +116,8 @@ sg docker -c 'docker rmi anet-test227:dev'
 - `agent-network/bin/cli.ts`
 - `agent-node/src/runtime/opencode-copresence/runtime.test.ts`
 - `agent-node/src/runtime/opencode-copresence/inbox-wiring.test.ts`
+- `agent-node/src/runtime/inbox-drain-lane.ts`
+- `agent-node/src/runtime/inbox-drain-lane.test.ts`
 - `agent-network/src/opencode-copresence-cli.test.ts`
 
 实机候选节点位于 `/home/vansin/opencode-tui-live`，tmux 为 `opencode-指挥狗` / `opencode-指挥狗-桥`。它使用隔离候选 agent-node，不修改全局 npm 包。

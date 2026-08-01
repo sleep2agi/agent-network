@@ -15,6 +15,7 @@ mkdir -p "$(dirname "$REPORT")"
   echo "## Layer 0 — unit and process identity"
   bun test /agent-node-src/src/runtime/opencode-copresence/runtime.test.ts
   bun test /agent-node-src/src/runtime/opencode-copresence/inbox-wiring.test.ts
+  bun test /agent-node-src/src/runtime/inbox-drain-lane.test.ts
   bun test /agent-network-src/src/opencode-copresence-cli.test.ts
   echo
   echo "## Layers 1–5 — auth, CommHub MCP outbound, official attach TUI, shared turns, lifecycle"
