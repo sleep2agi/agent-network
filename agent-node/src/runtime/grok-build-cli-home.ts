@@ -58,6 +58,8 @@ export interface GrokCliHome {
   workspaceProfile: string;
   /** Absolute runtime-owned profile passed through the TUI-effective --agent flag. */
   copresenceAgentProfile?: string;
+  /** Owner-only credential staging directory denied to model tools. */
+  commhubCredentialDir?: string;
 }
 
 export interface CleanupGrokCliPostStopOptions {
@@ -1038,8 +1040,9 @@ function validateCommhubMcpConfig(
  */
 function stageCommhubMcpConfig(
   config: GrokCommhubMcpConfig,
+  stateRoot: string,
   stateHome: string,
-): GrokCommhubMcpConfig {
+): { config: GrokCommhubMcpConfig; credentialDir: string } {
   const readStable = (path: string, label: string, expectedMode?: number): string => {
     const before = lstatSync(path);
     const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
@@ -1060,11 +1063,19 @@ function stageCommhubMcpConfig(
 
   const runtimeDir = join(stateHome, "runtime-mcp");
   ensurePrivateDirectory(runtimeDir, "commhub MCP runtime directory");
+  // Credentials are deliberately outside the Grok state tree: release
+  // containment scans must prove that the TUI/session state never captured a
+  // bearer token.  This sibling is a credential store (like project .anet),
+  // not TUI state, and is separately denied to model tools by the caller.
+  const credentialRoot = join(dirname(stateRoot), ".anet-grok-credentials");
+  const credentialDir = join(credentialRoot, basename(stateHome));
+  ensurePrivateDirectory(credentialRoot, "commhub MCP credential root");
+  ensurePrivateDirectory(credentialDir, "commhub MCP credential directory");
   const serverPath = join(runtimeDir, "node-server.js");
-  const envFile = join(runtimeDir, ".env");
+  const envFile = join(credentialDir, ".env");
   writeGeneratedFile(serverPath, readStable(config.serverPath, "server"));
   writeGeneratedFile(envFile, readStable(config.envFile, "environment", 0o600));
-  return { ...config, serverPath, envFile };
+  return { config: { ...config, serverPath, envFile }, credentialDir };
 }
 
 function trustedProjectDirectory(projectCwd: string, protectedPaths: readonly string[]): string {
@@ -1290,9 +1301,10 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
   const sourceAuth = readPrivateSourceAuth(authPath);
   ensurePrivateDirectory(stateRoot, "isolated state root");
   ensurePrivateDirectory(stateHome, "isolated state home");
-  const commhubMcp = sourceCommhubMcp
-    ? stageCommhubMcpConfig(sourceCommhubMcp, stateHome)
+  const stagedCommhubMcp = sourceCommhubMcp
+    ? stageCommhubMcpConfig(sourceCommhubMcp, stateRoot, stateHome)
     : undefined;
+  const commhubMcp = stagedCommhubMcp?.config;
   hardenExistingGrokSessionStore(stateHome);
 
   // Native Grok command hooks are launched by the CLI process itself rather
@@ -1474,6 +1486,7 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
     home: stateHome,
     authPath,
     ...(oidcIssuer && oidcClientId ? { oidcIssuer, oidcClientId } : {}),
+    ...(stagedCommhubMcp ? { commhubCredentialDir: stagedCommhubMcp.credentialDir } : {}),
     readOnlyProfile,
     workspaceProfile,
     ...(opts.useLeader === true ? { copresenceAgentProfile } : {}),

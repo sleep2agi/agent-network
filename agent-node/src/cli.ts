@@ -3472,6 +3472,7 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
       sandboxProfile: grokCliHome.workspaceProfile,
       protectedPaths: [
         grokCliHome.home,
+        grokCliHome.commhubCredentialDir || "",
         dirname(grokCliHome.authPath),
         join(grokCwd, ".anet"),
         join(home, ".anet"),

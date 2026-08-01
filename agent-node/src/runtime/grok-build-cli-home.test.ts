@@ -15,7 +15,7 @@ import {
 } from "fs";
 import { tmpdir } from "os";
 import { homedir } from "os";
-import { dirname, join, resolve } from "path";
+import { basename, dirname, join, resolve } from "path";
 import {
   acquireGrokProjectTurnLock,
   assertNoDiscoveredGrokHooks,
@@ -810,7 +810,7 @@ describe("prepareGrokCliHome", () => {
     expect(config).toContain("[mcp_servers.commhub]");
     expect(config).toContain('command = "bun"');
     const stagedServer = join(stateHome, "runtime-mcp", "node-server.js");
-    const stagedEnv = join(stateHome, "runtime-mcp", ".env");
+    const stagedEnv = join(dirname(dirname(stateHome)), ".anet-grok-credentials", basename(stateHome), ".env");
     expect(config).toContain(`args = [${JSON.stringify(stagedServer)}]`);
     expect(config).toContain(`ANET_COMMHUB_ENV_FILE = ${JSON.stringify(stagedEnv)}`);
     expect(readFileSync(stagedServer, "utf8")).toBe("// reviewed commhub MCP server\n");
@@ -944,7 +944,7 @@ describe("prepareGrokCliHome", () => {
     expect(config).toContain("[mcp_servers.commhub]");
     expect(config).not.toContain("ntok_secret");
     expect(config).toContain(JSON.stringify(join(stateHome, "runtime-mcp", "node-server.js")));
-    expect(config).toContain(JSON.stringify(join(stateHome, "runtime-mcp", ".env")));
+    expect(config).toContain(JSON.stringify(join(dirname(dirname(stateHome)), ".anet-grok-credentials", basename(stateHome), ".env")));
 
     chmodSync(envFile, 0o644);
     expect(() => prepareGrokCliHome({ ...base, commhubMcp: valid }))
