@@ -809,8 +809,14 @@ describe("prepareGrokCliHome", () => {
     expect(config).toContain("remember_tool_approvals = false");
     expect(config).toContain("[mcp_servers.commhub]");
     expect(config).toContain('command = "bun"');
-    expect(config).toContain(`args = [${JSON.stringify(commhubServer)}]`);
-    expect(config).toContain(`ANET_COMMHUB_ENV_FILE = ${JSON.stringify(commhubEnv)}`);
+    const stagedServer = join(stateHome, "runtime-mcp", "node-server.js");
+    const stagedEnv = join(stateHome, "runtime-mcp", ".env");
+    expect(config).toContain(`args = [${JSON.stringify(stagedServer)}]`);
+    expect(config).toContain(`ANET_COMMHUB_ENV_FILE = ${JSON.stringify(stagedEnv)}`);
+    expect(readFileSync(stagedServer, "utf8")).toBe("// reviewed commhub MCP server\n");
+    expect(readFileSync(stagedEnv, "utf8")).toBe("COMMHUB_TOKEN=ntok_test\n");
+    expect(statSync(stagedServer).mode & 0o777).toBe(0o600);
+    expect(statSync(stagedEnv).mode & 0o777).toBe(0o600);
     expect(config).toContain('COMMHUB_ALIAS = "指挥狗"');
     expect(config).not.toContain("ntok_test");
     expect(readFileSync(join(stateHome, "requirements.toml"), "utf8"))
@@ -937,6 +943,8 @@ describe("prepareGrokCliHome", () => {
     const config = readFileSync(join(stateHome, "config.toml"), "utf8");
     expect(config).toContain("[mcp_servers.commhub]");
     expect(config).not.toContain("ntok_secret");
+    expect(config).toContain(JSON.stringify(join(stateHome, "runtime-mcp", "node-server.js")));
+    expect(config).toContain(JSON.stringify(join(stateHome, "runtime-mcp", ".env")));
 
     chmodSync(envFile, 0o644);
     expect(() => prepareGrokCliHome({ ...base, commhubMcp: valid }))

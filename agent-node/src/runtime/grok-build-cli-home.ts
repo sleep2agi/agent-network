@@ -1029,6 +1029,44 @@ function validateCommhubMcpConfig(
   return { serverPath, envFile, alias: config.alias, resumeId: config.resumeId };
 }
 
+/**
+ * Copy the reviewed project artifacts into the isolated runtime home.  The
+ * shared-TUI sandbox intentionally bind-hides project `.anet`, so pointing
+ * Grok's stdio child at the source files would make the only MCP disappear.
+ * The packaged node-server is self-contained; keep both it and its credential
+ * snapshot in a private, runtime-owned directory that is not model-readable.
+ */
+function stageCommhubMcpConfig(
+  config: GrokCommhubMcpConfig,
+  stateHome: string,
+): GrokCommhubMcpConfig {
+  const readStable = (path: string, label: string, expectedMode?: number): string => {
+    const before = lstatSync(path);
+    const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+    try {
+      const opened = fstatSync(fd);
+      const uid = process.getuid?.();
+      if (!opened.isFile() || opened.nlink !== 1
+        || opened.dev !== before.dev || opened.ino !== before.ino
+        || (uid !== undefined && opened.uid !== uid)
+        || (expectedMode !== undefined && (opened.mode & 0o777) !== expectedMode)) {
+        throw new Error(`grok-build-cli commhub MCP ${label} changed during staging`);
+      }
+      return readFileSync(fd, "utf8");
+    } finally {
+      closeSync(fd);
+    }
+  };
+
+  const runtimeDir = join(stateHome, "runtime-mcp");
+  ensurePrivateDirectory(runtimeDir, "commhub MCP runtime directory");
+  const serverPath = join(runtimeDir, "node-server.js");
+  const envFile = join(runtimeDir, ".env");
+  writeGeneratedFile(serverPath, readStable(config.serverPath, "server"));
+  writeGeneratedFile(envFile, readStable(config.envFile, "environment", 0o600));
+  return { ...config, serverPath, envFile };
+}
+
 function trustedProjectDirectory(projectCwd: string, protectedPaths: readonly string[]): string {
   const lexical = resolve(projectCwd);
   const canonical = realpathSync(lexical);
@@ -1244,7 +1282,7 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
       : realpathSync(resolve(opts.projectCwd)))
     : undefined;
   if (projectCwd) assertNoProjectGrokExecutableSources(projectCwd, opts.useLeader === true);
-  const commhubMcp = opts.commhubMcp
+  const sourceCommhubMcp = opts.commhubMcp
     ? validateCommhubMcpConfig(opts.commhubMcp, projectCwd!)
     : undefined;
   // Validate credentials before creating or rewriting any isolated state.
@@ -1252,6 +1290,9 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
   const sourceAuth = readPrivateSourceAuth(authPath);
   ensurePrivateDirectory(stateRoot, "isolated state root");
   ensurePrivateDirectory(stateHome, "isolated state home");
+  const commhubMcp = sourceCommhubMcp
+    ? stageCommhubMcpConfig(sourceCommhubMcp, stateHome)
+    : undefined;
   hardenExistingGrokSessionStore(stateHome);
 
   // Native Grok command hooks are launched by the CLI process itself rather
