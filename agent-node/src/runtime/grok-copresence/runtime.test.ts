@@ -71,6 +71,11 @@ describe("Grok copresence launch and injection policy", () => {
       ...exact,
       turnOwner: "human",
     })).toBe(true);
+    expect(isGrokPreviewTodoAutomaticResolution({
+      ...exact,
+      turnOwner: "human",
+      alreadyConsumed: true,
+    })).toBe(true);
     for (const mutation of [
       { ...exact, requestWasExact: false },
       { ...exact, activeRequestId: "tool:read_file" },
@@ -2698,14 +2703,39 @@ class FakePty implements GrokPtyLike {
                 ts: "preview-human-todo-resolved",
                 wait_ms: 0,
               });
-              appendJson(join(this.sessionDir, "chat_history.jsonl"), {
-                type: "assistant",
-                content: "human answer after todo",
-              });
-              appendJson(join(this.sessionDir, "events.jsonl"), {
-                type: "turn_ended",
-                outcome: "completed",
-              });
+              this.delayedWrites.push(setTimeout(() => {
+                appendJson(join(this.sessionDir, "events.jsonl"), {
+                  type: "permission_requested",
+                  tool_name: "todo_write",
+                  ts: "preview-human-todo-requested-again",
+                });
+                appendJson(join(this.sessionDir, "chat_history.jsonl"), {
+                  type: "assistant",
+                  content: "",
+                  tool_calls: [{ id: "call-human-todo-again", name: "todo_write", arguments: "{}" }],
+                });
+                appendJson(join(this.sessionDir, "chat_history.jsonl"), {
+                  type: "tool_result",
+                  content: "ok",
+                });
+                this.delayedWrites.push(setTimeout(() => {
+                  appendJson(join(this.sessionDir, "events.jsonl"), {
+                    type: "permission_resolved",
+                    tool_name: "todo_write",
+                    decision: "allow",
+                    ts: "preview-human-todo-resolved-again",
+                    wait_ms: 0,
+                  });
+                  appendJson(join(this.sessionDir, "chat_history.jsonl"), {
+                    type: "assistant",
+                    content: "human answer after repeated todo updates",
+                  });
+                  appendJson(join(this.sessionDir, "events.jsonl"), {
+                    type: "turn_ended",
+                    outcome: "completed",
+                  });
+                }, 150));
+              }, 100));
             }, 150));
           }, 100));
           return;

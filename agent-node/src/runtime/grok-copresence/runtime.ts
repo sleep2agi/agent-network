@@ -2034,7 +2034,9 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           // exact lifecycle in both network and human turns. It cannot mutate
           // the workspace or call the network, so accepting that native result
           // keeps the shared TUI alive without broadening the tool boundary.
-          // The tuple remains exact and may occur only once per active turn.
+          // Network turns may use the tuple only once. Human turns may update
+          // the same local todo list repeatedly; each lifecycle is still
+          // checked independently against the exact pinned shape.
           //
           // The lifecycle is:
           // requested(tool_name=todo_write) -> resolved(decision=allow)
@@ -3153,7 +3155,7 @@ export function isGrokPreviewTodoAutomaticResolution(input: {
     && !input.humanDecisionDispatched
     && input.waitingHuman
     && (input.turnOwner === "network" || input.turnOwner === "human")
-    && !input.alreadyConsumed
+    && (!input.alreadyConsumed || input.turnOwner === "human")
     && !input.terminalEventSeen
     && isExactPreviewTodoPermissionResolution(input.event);
 }
