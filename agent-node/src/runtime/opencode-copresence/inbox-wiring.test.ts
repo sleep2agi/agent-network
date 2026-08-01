@@ -28,6 +28,7 @@ describe("OpenCode copresence CommHub message wiring", () => {
     expect(display).toBeGreaterThan(-1);
     expect(skip).toBeGreaterThan(display);
     const branch = cli.slice(display, skip);
+    expect(branch).toContain("await drainInboxBatch(messages");
     expect(branch).toContain('runtime.notify(`[${from}] ${content}`)');
     expect(branch).toContain("await ackMessage(msg.id)");
     expect(branch).toContain("displayedInformationalMessageIds.add(msg.id)");

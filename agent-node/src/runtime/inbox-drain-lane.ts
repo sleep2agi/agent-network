@@ -9,6 +9,32 @@ export interface InboxDrainRetryOptions {
 }
 
 /**
+ * Attempt every item in one inbox snapshot before surfacing the first error.
+ *
+ * An informational inbox item can fail after its user-visible side effect
+ * (for example, the toast succeeded but ack_inbox lost its response). If the
+ * batch aborted immediately, that one row would head-of-line block every
+ * later message until its retry succeeded. The lane still retries the batch,
+ * but later items get one attempt during the current pass.
+ */
+export async function drainInboxBatch<T>(
+  items: readonly T[],
+  run: (item: T) => Promise<void>,
+): Promise<void> {
+  let failed = false;
+  let firstError: unknown;
+  for (const item of items) {
+    try {
+      await run(item);
+    } catch (error) {
+      if (!failed) firstError = error;
+      failed = true;
+    }
+  }
+  if (failed) throw firstError;
+}
+
+/**
  * Serialize work inside one inbox lane without blocking callers such as the
  * SSE reader. Separate lanes can continue independently: a long-running task
  * turn must not prevent a human-visible informational message from draining.

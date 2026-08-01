@@ -89,7 +89,7 @@ import {
   writebackOpencodeSession,
 } from "./runtime/opencode-acp/profile-state";
 import { OPENCODE_DEFAULT_PIN } from "./runtime/opencode-acp/binary";
-import { createInboxDrainLane } from "./runtime/inbox-drain-lane";
+import { createInboxDrainLane, drainInboxBatch } from "./runtime/inbox-drain-lane";
 import { createSingleFlight } from "./util/single-flight";
 
 const home = homedir();
@@ -3659,11 +3659,11 @@ async function processOpencodeCopresenceMessages() {
   for (const displayedId of displayedInformationalMessageIds) {
     if (!pendingInformationalIds.has(displayedId)) displayedInformationalMessageIds.delete(displayedId);
   }
-  for (const msg of messages) {
-    if ((msg.type || "task") !== "message") continue;
+  await drainInboxBatch(messages, async (msg) => {
+    if ((msg.type || "task") !== "message") return;
     if (inflightMessageIds.has(msg.id)) {
       debug(`skip inflight informational message ${msg.id.slice(0, 8)}`);
-      continue;
+      return;
     }
     inflightMessageIds.add(msg.id);
     try {
@@ -3684,7 +3684,7 @@ async function processOpencodeCopresenceMessages() {
     } finally {
       inflightMessageIds.delete(msg.id);
     }
-  }
+  });
 }
 
 function scheduleWorkInboxDrain() {

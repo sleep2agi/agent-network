@@ -1,10 +1,10 @@
 # Test 228 — OpenCode inbox concurrency and lifecycle wiring
 
-date: 2026-08-01T23:44:39+00:00
+date: 2026-08-01T23:57:55+00:00
 bun: 1.3.1
 
 ## Layer 0 — production bundle compiles
-Bundled 237 modules in 77ms
+Bundled 237 modules in 61ms
 
   cli.js  0.94 MB  (entry point)
 
@@ -17,23 +17,24 @@ src/runtime/inbox-drain-lane.test.ts:
 (pass) inbox drain lanes > each lane remains serial [1.00ms]
 (pass) inbox drain lanes > a failed drain is reported and does not poison later retries [1.00ms]
 (pass) inbox drain lanes > retry mode backs off and eventually completes the same drain [4.00ms]
+(pass) inbox drain lanes > one failed inbox item does not starve later items in the same snapshot
 
- 4 pass
+ 5 pass
  0 fail
- 12 expect() calls
-Ran 4 tests across 1 file. [25.00ms]
+ 14 expect() calls
+Ran 5 tests across 1 file. [24.00ms]
 
 ## Layer 2 — single-flight runtime startup
 bun test v1.3.1 (89fa0f34)
 
 src/util/single-flight.test.ts:
 (pass) single-flight resource initialization > concurrent callers share exactly one initializer [3.00ms]
-(pass) single-flight resource initialization > a rejected initializer is cleared and can be retried [2.00ms]
+(pass) single-flight resource initialization > a rejected initializer is cleared and can be retried [1.00ms]
 
  2 pass
  0 fail
  9 expect() calls
-Ran 2 tests across 1 file. [23.00ms]
+Ran 2 tests across 1 file. [22.00ms]
 
 ## Layer 3 — CLI integration wiring
 bun test v1.3.1 (89fa0f34)
@@ -49,8 +50,8 @@ src/runtime/opencode-copresence/inbox-wiring.test.ts:
 
  7 pass
  0 fail
- 26 expect() calls
-Ran 7 tests across 1 file. [42.00ms]
+ 27 expect() calls
+Ran 7 tests across 1 file. [40.00ms]
 
 OVERALL: PASS
 
@@ -61,5 +62,6 @@ OVERALL: PASS
 - Removing the `SIGHUP` shutdown registration made the wiring suite fail: 6 pass, 1 fail (`EXPECTED_RED`).
 - Removing the retry loop made the drain-lane suite fail: 3 pass, 1 fail (`EXPECTED_RED`).
 - Swallowing informational-message ack failure made the wiring suite fail: 6 pass, 1 fail (`EXPECTED_RED`).
+- Before `drainInboxBatch` existed, the same-snapshot starvation test failed at module load (`drainInboxBatch` export missing). With the helper wired into the production informational drain, all later rows are attempted before the first error is rethrown for lane retry; the helper behavior test and production-call wiring assertion are both green.
 
 All mutations changed production or production wiring only; test files were unchanged.

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createInboxDrainLane } from "./inbox-drain-lane.js";
+import { createInboxDrainLane, drainInboxBatch } from "./inbox-drain-lane.js";
 
 function deferred() {
   let resolve!: () => void;
@@ -93,5 +93,16 @@ describe("inbox drain lanes", () => {
     expect(errors).toHaveLength(2);
     expect((errors[0] as Error).message).toBe("transient-1");
     expect((errors[1] as Error).message).toBe("transient-2");
+  });
+
+  test("one failed inbox item does not starve later items in the same snapshot", async () => {
+    const attempted: string[] = [];
+
+    await expect(drainInboxBatch(["first", "second", "third"], async (item) => {
+      attempted.push(item);
+      if (item === "first") throw new Error("first ack failed");
+    })).rejects.toThrow("first ack failed");
+
+    expect(attempted).toEqual(["first", "second", "third"]);
   });
 });
