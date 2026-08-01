@@ -109,4 +109,15 @@ WITNESSED RED — killing the bridge tmux previously left detached server PID 23
 PASS — after registering `SIGHUP` on the normal shutdown path, exact `tmux kill-session` removed agent PID 2444356 and its detached serve PID 2444495 within one second.
 PASS — the final restart again produced one runtime/session and left both exact tmux windows online.
 
+## Layer 11 — final HEAD bidirectional smoke
+
+Candidate HEAD under test: fe097ef9b72c5fb4979a49e96f7204f0df02bb9e
+Inbound task ID: bab17d51-9aeb-4069-b109-d6c4f30c5a69
+Outbound message ID: b77956c2-b605-499e-9764-effa70531b1e
+
+PASS — after the single-flight and SIGHUP fixes were installed, Hub dispatched the inbound task and received exact result `[opencode-指挥狗] FINAL_HEAD_INBOUND_OK`.
+PASS — a prompt typed into the final full TUI visibly executed `commhub_send_message`.
+PASS — independent Hub inbox readback found exact content `FINAL_HEAD_OUTBOUND_OK`, `type=message`, and `from_session=opencode-指挥狗`.
+PASS — this final smoke proves the lifecycle fixes did not regress either receive or send.
+
 OVERALL: PASS
