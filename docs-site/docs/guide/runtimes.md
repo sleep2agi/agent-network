@@ -7,8 +7,8 @@
 > 本表是全站 runtime 信息的**单一权威来源**, 其他页面 (`cli` / `agent-node` / `getting-started` / `clean-server`) 都引用这里, 别在那些页面里重复整表.
 
 ::: tip 哪些 runtime 在哪个版本可用（真机实测）
-- **正式版**（`npm i -g @sleep2agi/agent-network`）：**4 种正式 runtime** —— `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`。具体版本以 npm `latest` dist-tag 为准。
-- **预览版**（`@preview`）：在正式 4 种之外再加 `codex-app-server` / `opencode-cli`（共 **6 种**）；且对未知 runtime 会明确报错拦截（正式版会**静默退化**成默认 runtime，不报错）。
+- **正式版**（`npm i -g @sleep2agi/agent-network`）：**正式 runtime** —— `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`。具体版本以 npm `latest` dist-tag 为准。
+- **预览版**（`@preview`）：在正式版之外再加 `codex-app-server` / `opencode-cli`；且对未知 runtime 会明确报错拦截（正式版会**静默退化**成默认 runtime，不报错）。
 
 下表标 `(preview)` 的行**仅预览版可用**，正式版选不到。
 :::
@@ -26,7 +26,7 @@
 | `codex-app-server` (preview) | OWNED codex app-server 桥 ([RFC-030](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)) | 复用 codex TUI / 人机共存桥（人和 agent 共用一个 codex 会话） | OpenAI Codex (gpt-5.5 等) | 已 `codex login`（该 runtime 需 codex CLI） | 选完 print `codex login` hint, **跳过 vendor** |
 | `opencode-cli` (preview) | spawn 本机 `opencode` 命令 (公版 sst/opencode CLI, 固定 `opencode-ai` 版本 pin) | 用公版 opencode 做多 vendor 前端 (统一 session / auth 抽象, [RFC-029](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md)) | 多 vendor: Anthropic 原生 / OpenAI preset | 装 `opencode` CLI (`npm i -g opencode-ai@<pin>`) + 选 vendor preset (Anthropic 读 `ANTHROPIC_API_KEY` / OpenAI 读 `OPENAI_API_KEY` env) | 选完提示装 opencode CLI → 选 vendor preset (anthropic / openai), API key 从 env 读、**不 prompt** |
 
-> ⚠️ **`opencode-cli` 仅 preview 渠道**（RFC-029 迭代中）：npm **latest 尚未包含**——装 latest 后 `anet node create` 选单只有前 4 个 runtime（`claude-code-cli` / `claude-agent-sdk` / `codex-sdk` / `grok-build-acp`）。稳定后再进 latest。
+> ⚠️ **`opencode-cli` 仅 preview 渠道**（RFC-029 迭代中）：npm **latest 尚未包含**——装 latest 后 `anet node create` 选单只有正式版的那几个 runtime（`claude-code-cli` / `claude-agent-sdk` / `codex-sdk` / `grok-build-acp`）。稳定后再进 latest。
 
 > OpenCode 内置 Anthropic client 发送 `x-api-key`。只接受 Bearer 的 Anthropic 兼容网关（例如 Kimi coding）会返回 401；这类网关要使用支持对应鉴权的 OpenCode plugin 或自定义路径，不能直接套内置 Anthropic preset。
 
