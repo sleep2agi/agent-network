@@ -1,0 +1,32 @@
+# Test 227 live UAT — OpenCode TUI co-presence
+
+Date: 2026-08-01 Asia/Shanghai
+Node: opencode-指挥狗
+Project: /home/vansin/opencode-tui-live
+TUI tmux: opencode-指挥狗
+Bridge tmux: opencode-指挥狗-桥
+OpenCode: 1.18.1
+Model: opencode/north-mini-code-free
+
+## Layer 1 — startup
+
+PASS — `anet node start opencode-指挥狗 --copresence` created both exact tmux sessions.
+PASS — full official OpenCode attach TUI rendered and remained attached to the shared session.
+PASS — bridge connected to CommHub SSE.
+
+## Layer 2 — real Hub task
+
+Task ID: a31b51ab-0d18-4260-a53b-ec87f92d0630
+Prompt marker: OPENCODE_TUI_LIVE_OK
+
+PASS — task moved delivered → running → replied.
+PASS — Hub result was `[opencode-指挥狗] OPENCODE_TUI_LIVE_OK`.
+PASS — the same prompt and assistant reply were visible in the full TUI.
+
+## Layer 3 — lifecycle
+
+PASS — `tmux has-session -t opencode-指挥狗` after the reply.
+PASS — `tmux has-session -t opencode-指挥狗-桥` after the reply.
+PASS — no global npm package was modified; agent-node came from an isolated candidate prefix.
+
+OVERALL: PASS

@@ -11,7 +11,7 @@
  */
 
 import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync, rmSync, cpSync, unlinkSync } from "fs";
-import { dirname, isAbsolute, join } from "path";
+import { dirname, isAbsolute, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
 import { spawn, spawnSync, execSync, execFileSync } from "child_process";
@@ -113,14 +113,12 @@ function tmuxAvailable(): boolean {
 
 // ── RFC-030 co-presence orchestration helpers ────────────────────────────
 //
-// `anet node start <alias> --copresence` spawns 3 tmux sessions:
-//   ① <alias>-appsrv : codex app-server (loopback WS + commhub MCP)
-//   ② <alias>-桥      : agent-node bridge (adopt-mode, connects to hub)
-//   ③ <alias>         : codex resume --remote (human-attachable TUI)
-// Replaces the .demo/setup-copresence.sh bash dance with a first-class
-// command. Preserves the RFC-030 MVP posture: loopback-only bind, ntok-only
-// auth, per-node CODEX_HOME isolation. Risk C (dangerous sandbox) requires
-// an explicit flag + typed confirmation + stderr banner — never silent.
+// `anet node start <alias> --copresence` starts a runtime-specific shared TUI:
+//   codex:    app-server + agent-node bridge + codex remote TUI (3 tmux panes)
+//   opencode: native loopback serve + agent-node bridge + official attach TUI
+//             (the server lives inside the bridge process, so 2 tmux panes)
+// Both paths use per-node credentials and exact tmux names. The codex path
+// additionally preserves the RFC-030 Risk C double-confirmation gate.
 
 const COPRESENCE_PORT_RANGE_START = 24700;
 const COPRESENCE_PORT_RANGE_END = 24799;
@@ -647,6 +645,86 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   console.log(`[anet]    runtime:   codex-app-server @ ${wsUrl}  (sandbox=${sandboxMode})`);
 }
 
+async function startOpencodeCopresenceOrchestration(nodeId: string): Promise<void> {
+  const resolved = resolveNodeRef(nodeId);
+  if (!resolved) {
+    console.error(`Node "${nodeId}" not found. Create it first: anet node create ${nodeId}`);
+    process.exit(1);
+  }
+  const runtime = runtimeForExecution(resolved.profile, `start OpenCode copresence node ${JSON.stringify(nodeId)}`);
+  const displayName = nodeDisplayName(resolved.id, resolved.profile);
+  if (runtime !== "opencode-cli") {
+    console.error(`[anet] ❌ OpenCode --copresence requires runtime=opencode-cli (node "${displayName}" is runtime=${runtime}).`);
+    process.exit(1);
+  }
+  if (!tmuxAvailable()) {
+    console.error(`[anet] ❌ OpenCode --copresence requires tmux.`);
+    process.exit(1);
+  }
+
+  const profile: Profile = { ...resolved.profile, opencodeMode: "copresence" };
+  saveProfile(resolved.id, profile);
+  const bridgeSession = `${displayName}-桥`;
+  const tuiSession = displayName;
+  const attachScript = join(nodesDir(), resolved.id, "opencode-attach.sh");
+  for (const name of [bridgeSession, tuiSession]) {
+    if (tmuxSessionRunning(name)) killTmuxSession(name);
+  }
+  rmSync(attachScript, { force: true });
+
+  const cliEntry = resolve(process.argv[1]);
+  const bridgeCommand = [
+    `export PATH=${shellQuote(process.env.PATH ?? "")}`,
+    ...(process.env.ANET_AGENT_NODE_BIN
+      ? [`export ANET_AGENT_NODE_BIN=${shellQuote(process.env.ANET_AGENT_NODE_BIN)}`]
+      : []),
+    ...(process.env.ANET_OPENCODE_SAFE_BASE
+      ? [`export ANET_OPENCODE_SAFE_BASE=${shellQuote(process.env.ANET_OPENCODE_SAFE_BASE)}`]
+      : []),
+    `export ANET_OPENCODE_MODE=copresence`,
+    `exec ${shellQuote(process.execPath)} ${shellQuote(cliEntry)} node start ${shellQuote(resolved.id)}`,
+  ].join(" ; ");
+  execFileSync("tmux", [
+    "new-session", "-d", "-s", bridgeSession, "-c", process.cwd(),
+    "bash", "-lc", bridgeCommand,
+  ], { stdio: "pipe" });
+
+  const deadline = Date.now() + 30_000;
+  while (!existsSync(attachScript) && tmuxSessionRunning(bridgeSession) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  if (!existsSync(attachScript)) {
+    let tail = "";
+    try {
+      tail = execFileSync("tmux", ["capture-pane", "-p", "-t", bridgeSession, "-S", "-80"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      }).slice(-3_000);
+    } catch {}
+    killTmuxSession(bridgeSession);
+    console.error(`[anet] ❌ OpenCode copresence server did not produce its attach launcher within 30s.`);
+    if (tail) console.error(tail);
+    process.exit(1);
+  }
+
+  execFileSync("tmux", [
+    "new-session", "-d", "-s", tuiSession, "-c", process.cwd(),
+    "bash", "-lc", `exec ${shellQuote(attachScript)}`,
+  ], { stdio: "pipe" });
+  if (!tmuxSessionRunning(tuiSession)) {
+    killTmuxSession(bridgeSession);
+    console.error(`[anet] ❌ OpenCode TUI tmux exited during startup.`);
+    process.exit(1);
+  }
+
+  console.log("");
+  console.log(`[anet] ✅ OpenCode 共存节点 ${displayName} 就绪`);
+  console.log(`[anet]    attach:  tmux attach -t ${shellQuote(displayName)}`);
+  console.log(`[anet]    stop:    anet node stop ${shellQuote(displayName)}`);
+  console.log(`[anet]    bridge:  ${bridgeSession}`);
+  console.log(`[anet]    mode:    opencode-cli copresence (native serve + full attach TUI)`);
+}
+
 // Pin commhub-server to a specific version to defeat bunx caching of older
 // versions (bunx with @preview caches the first-resolved version and may not
 // refetch). A `latest` agent-network release must pin a *stable* server.
@@ -947,6 +1025,7 @@ interface Profile {
   codexRuntime?: string;
   codexAppServerUrl?: string;  // RFC-030 — shared codex app-server URL (co-presence)
   codexThreadId?: string;      // RFC-030 — codex thread to adopt
+  opencodeMode?: "headless" | "copresence";
   model?: string;
   channels: string[];
   env: Record<string, string>;
@@ -1155,6 +1234,9 @@ function saveProfile(id: string, profile: Profile) {
       : {}),
     ...((normalized.codexThreadId ?? profile.codexThreadId)
       ? { codexThreadId: normalized.codexThreadId ?? profile.codexThreadId }
+      : {}),
+    ...((normalized.opencodeMode ?? profile.opencodeMode)
+      ? { opencodeMode: normalized.opencodeMode ?? profile.opencodeMode }
       : {}),
     // RFC-008 / issue #51 team-scale demo metadata. Optional on every node;
     // present only when set by `anet demo sci-team` (Phase 1 scaffold) or
@@ -2085,13 +2167,15 @@ Session:
   anet node resume <name> --session <id> Resume specific session
   anet session ls               List Claude Code sessions
 
-Co-presence (codex TUI + agent share one thread, RFC-030):
+Co-presence (human TUI + network agent share one thread):
   anet node start <name> --copresence
-      Spawn 3-piece dance: codex app-server (loopback WS) + agent-node bridge
-      + attachable codex TUI. All 3 in tmux (<name>, <name>-appsrv, <name>-桥).
+      For codex-app-server: spawn app-server + bridge + attachable Codex TUI
+      in tmux (<name>, <name>-appsrv, <name>-桥).
+      For opencode-cli: spawn authenticated loopback serve inside the bridge
+      plus the official full OpenCode attach TUI (<name>, <name>-桥).
       Attach with: tmux attach -t <name>. Stop with: anet node stop <name>.
-      Requires runtime=codex-app-server on the node.
-      Default sandbox is read-only. To grant full FS/network access, add
+      OpenCode setup: anet node create <name> --runtime opencode-cli --mode copresence
+      Codex defaults to a read-only sandbox. To grant full FS/network access, add
       --dangerously-allow-full-access. In an interactive TTY this prompts for
       a typed 'yes'; in a non-TTY caller (script / CI / Docker) you must ALSO
       pass --yes-danger-full-access to confirm — the second explicit flag
@@ -2403,6 +2487,9 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
       : {}),
     ...(runtime === "codex-app-server" && opts["codex-thread-id"]
       ? { codexThreadId: opts["codex-thread-id"] }
+      : {}),
+    ...(runtime === "opencode-cli"
+      ? { opencodeMode: opts.mode === "copresence" || opts.copresence === "true" ? "copresence" : "headless" }
       : {}),
     ...(opts.session || runtime === "claude-code-cli" ? { session: opts.session || randomUUID() } : {}),
   };
@@ -4432,6 +4519,14 @@ async function startCommand() {
     if (!resolvedForCopresence) {
       console.error(`Node "${id}" not found. Create it first: anet node create ${id}`);
       process.exit(1);
+    }
+    const copresenceRuntime = runtimeForExecution(
+      resolvedForCopresence.profile,
+      `start copresence node ${JSON.stringify(id)}`,
+    );
+    if (copresenceRuntime === "opencode-cli") {
+      await startOpencodeCopresenceOrchestration(id);
+      return;
     }
     const codexHomeDefault = join(nodesDir(), resolvedForCopresence.id, "codex-home");
     const profileHub = (resolvedForCopresence.profile as any).hub || getHub();

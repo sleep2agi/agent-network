@@ -1532,6 +1532,15 @@ let opencodeRuntimeSession: import("./runtime/opencode-acp/runtime").OpencodeRun
 // Set synchronously immediately after spawn, before initialize or session/new
 // resolves. shutdown() uses this handle during the handshake window.
 let opencodeRuntimeClient: import("./runtime/opencode-acp/client").OpencodeAcpClient | null = null;
+const opencodeMode = RUNTIME === "opencode"
+  ? ((fileConfig as { opencodeMode?: unknown }).opencodeMode ?? process.env.ANET_OPENCODE_MODE ?? "headless")
+  : "headless";
+if (RUNTIME === "opencode" && opencodeMode !== "headless" && opencodeMode !== "copresence") {
+  console.error(`[${ALIAS}] invalid opencodeMode=${JSON.stringify(opencodeMode)}; expected headless or copresence`);
+  process.exit(1);
+}
+let opencodeCopresenceSession:
+  import("./runtime/opencode-copresence/runtime").OpenCodeCopresenceSession | null = null;
 
 // RFC-030 — codex-app-server runtime state.
 // `codexAppServerThreadId` is the persisted codex thread this node binds
@@ -2690,6 +2699,12 @@ function sanitizeGrokCommhubLeak(text: string): string {
 const OPENCODE_PROCESS_BUNDLE_MARKER = "processWithOpencode";
 async function processWithOpencode(task: string, _from: string, _images?: string[]): Promise<string> {
   debug(`[${OPENCODE_PROCESS_BUNDLE_MARKER}] dispatch`);
+  if (opencodeMode === "copresence") {
+    const runtime = await ensureOpencodeCopresenceRuntime();
+    const outcome = await runtime.submit(task);
+    log(`[opencode-copresence] turn done | reply=${outcome.replyText.length}ch session=${runtime.sessionId.slice(0, 12)}`);
+    return outcome.replyText || "（无回复）";
+  }
   const { openOpencodeRuntime, opencodeThink } =
     await import("./runtime/opencode-acp/runtime");
 
@@ -2756,7 +2771,51 @@ async function processWithOpencode(task: string, _from: string, _images?: string
   return outcome.replyText || "（无回复）";
 }
 
+async function ensureOpencodeCopresenceRuntime(): Promise<
+  import("./runtime/opencode-copresence/runtime").OpenCodeCopresenceSession
+> {
+  if (opencodeCopresenceSession?.isRunning) return opencodeCopresenceSession;
+  if (opencodeCopresenceSession) {
+    await opencodeCopresenceSession.close().catch((error: any) => {
+      warn(`[opencode-copresence] stale runtime cleanup failed: ${error?.message ?? error}`);
+    });
+    opencodeCopresenceSession = null;
+  }
+  const { openOpenCodeCopresenceRuntime } =
+    await import("./runtime/opencode-copresence/runtime");
+  const opened = await openOpenCodeCopresenceRuntime({
+    cwd: process.cwd(),
+    workDir: NODE_DIR,
+    model: MODEL,
+    unsafeTools: fileConfig.flags?.opencodeUnsafeTools === true,
+    binary: INITIAL_OPENCODE_BIN,
+    expectedVersion: INITIAL_OPENCODE_VERSION,
+    binarySearchPath: INITIAL_LAUNCH_PATH,
+    title: `${ALIAS} · Agent Network shared TUI`,
+    onSession: async (id) => {
+      opencodeSessionId = id;
+      writebackSession(id);
+    },
+    log,
+    warn,
+  });
+  if (!opened.isRunning) {
+    await opened.close().catch(() => {});
+    throw new Error("OpenCode copresence server exited while opening");
+  }
+  opencodeCopresenceSession = opened;
+  log(`[opencode-copresence] human TUI launcher: ${opened.attachScriptPath}`);
+  return opened;
+}
+
 async function closeOpencodeRuntime(reason: string): Promise<void> {
+  if (opencodeCopresenceSession) {
+    log(`[opencode-copresence] stopping shared server (${reason})`);
+    await opencodeCopresenceSession.close().catch((e: any) => {
+      warn(`[opencode-copresence] stop failed: ${e?.message || e}`);
+    });
+    opencodeCopresenceSession = null;
+  }
   const client = opencodeRuntimeClient ?? opencodeRuntimeSession?.client ?? null;
   if (client?.isRunning) {
     log(`[opencode] stopping ACP child (${reason})`);
@@ -4680,6 +4739,15 @@ const shutdown = async () => {
 };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+if (RUNTIME === "opencode" && opencodeMode === "copresence") {
+  try {
+    await ensureOpencodeCopresenceRuntime();
+  } catch (error: any) {
+    console.error(`[${ALIAS}] OpenCode copresence startup failed: ${error?.message ?? error}`);
+    await closeOpencodeRuntime("startup failure");
+    process.exit(1);
+  }
+}
 for (const channel of TELEGRAM_CHANNELS) connectTelegram(channel);
 for (const channel of FEISHU_CHANNELS) void connectFeishu(channel);
 connectSSE();
