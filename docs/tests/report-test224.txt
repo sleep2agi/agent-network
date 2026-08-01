@@ -1,7 +1,7 @@
 # test224 — Grok preview credential and package gate
-date: 2026-07-13T14:11:20+00:00
+date: 2026-08-01T02:05:48+00:00
 network: disabled by runner
-source_commit=501764f83c0428ebc153d132ae049de38d7041f6
+source_commit=94dffddfc41f2ab2ba8aec781c8e6e9d75385dfe
 [L0] isolated, synthetic-only environment
 PASS: targeted Docker context contains no host auth/config state
 [L1] exact child environment + durable text boundaries
@@ -10,6 +10,6 @@ PASS: real child env equals the reviewed set; text boundaries redact; config/ses
 PASS: candidate tarballs contain runnable entrypoints and force publishConfig.tag=preview
 [L3] synthetic credential leakage scan
 PASS: tarballs, extracted payloads, build output, test output, and report contain zero synthetic marker bytes
-candidate_tarball_sha256=f58870c0b37e3f3515617450bd1e23e157676144d3128ededfeadc30428f2a11 file=sleep2agi-agent-node-2.5.0-preview.21.tgz
-candidate_tarball_sha256=8dcbdb0a27930908a4f03dd2294dfddd8df7719a492b15b654f8509ee7af4703 file=sleep2agi-agent-network-2.3.0-preview.23.tgz
+candidate_tarball_sha256=cf111b35d241d656896d7ec2ca7f6835164017ccffceeafd4badb1cc6bdcde18 file=sleep2agi-agent-node-2.5.0-preview.26.tgz
+candidate_tarball_sha256=bad0626d7b4587bfc091bdc88dc7b129ea245ad4499b553985e76d42def9e1e1 file=sleep2agi-agent-network-2.3.0-preview.34.tgz
 Summary: PASS (Docker-only; runtime executed with network disabled; no real credential was read)

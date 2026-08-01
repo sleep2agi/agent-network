@@ -2,13 +2,38 @@
 
 ## Status and boundary
 
-`grok-build-cli` co-presence is a dangerous experimental candidate for the npm `preview` channel. It is not production-ready, is not part of `latest`, and must not be connected to untrusted tasks or an untrusted network.
+`grok-build-cli` co-presence is a dangerous experimental candidate for the npm `preview` channel. It is not production-ready, is not part of `latest`, and must not be connected to untrusted tasks or an untrusted network. This lane uses the native Grok TUI directly; it does not use ACP and has no ACP fallback.
 
 This guide describes the candidate source behavior. It does not assert that a particular npm `preview` dist-tag already contains the candidate; package publication remains gated on install-from-tarball testing, an independent review, and explicit release approval.
 
 The main known risk is intentional and visible: CommHub tasks drive the same Grok TUI that a human uses, so both sides share one conversation context. Production-grade approval ownership is incomplete. A model action or approval prompt must not be treated as a secure boundary against untrusted task content.
 
 The formal native Leader/Policy Gateway runtime is a separate, stricter track. Its Phase 0 protocol freeze, Phase 1A implementation gate, approval-owner work, and `latest` release gate remain locked. This preview does not claim those capabilities.
+
+## Verified candidate (2026-08-01)
+
+The implementation source tested in Docker is commit
+`94dffddfc41f2ab2ba8aec781c8e6e9d75385dfe`, merged from the earlier Grok
+candidate onto `origin/main` at `772dbbdad85bd951dd71e0f8320a26109c6d63f7`.
+It has not been merged, published, or deployed.
+
+The gates were run in order and all passed:
+
+- [test219](tests/report-test219.txt): 286 checks, zero failures; native PTY,
+  reducers, attach, arbitration, reply, approval, reconnect, and package builds.
+- [test224](tests/report-test224.txt): network-disabled package and credential
+  boundary; preview metadata, owner-only state, redaction, and zero synthetic
+  marker leakage.
+- [test225](tests/report-test225.txt): packed-package create/start/register/task,
+  real tmux rendering, reply, stop/resume, and same-session continuity.
+  Both the pinned keyless Grok 0.2.93 gate and the read-only-mounted real
+  authenticated Grok gate passed. The run issued zero tmux input commands and
+  performed zero publish actions.
+
+The authenticated scan reports a closed `scan_error` as a visible preview
+structure warning. It did not find a credential match and is accepted only by
+the explicit preview policy; it remains a blocker to claiming production or
+`latest` readiness.
 
 ## Requirements
 
@@ -128,20 +153,13 @@ anet node start grok-turn
 
 This launches one streaming-JSON Grok CLI turn per task. It has no shared interactive TUI, and `anet grok attach grok-turn` intentionally fails.
 
-### Grok ACP
-
-```bash
-anet node create grok-acp --runtime grok-build-acp
-anet node start grok-acp
-```
-
-This launches `grok agent stdio` and uses ACP session handling. It is not an alias for the process-per-turn `grok-build-cli` lane.
-
 | Profile | Execution path | `anet grok attach` |
 |---|---|---|
 | `--runtime grok-build-cli` | shared human/network TUI | yes |
 | `--runtime grok-build-cli --grok-headless` | one streaming-JSON CLI turn per task | no |
-| `--runtime grok-build-acp` | `grok agent stdio` ACP | no |
+
+ACP is intentionally outside this implementation and is not used as a
+fallback if the native TUI path fails.
 
 ## Preview safety rules
 
@@ -170,3 +188,16 @@ folder trust could execute. Remove or isolate that source before using the
 shared-TUI preview; the runtime will not click through or broaden trust.
 
 If `anet` says the preview `agent-node` does not advertise `grok-build-cli`, the required preview package has not been published or cached yet. Do not force an older package to run the profile.
+
+## Handoff
+
+- Candidate branch: `fix/grok-tui-main-sync-3h`
+- Clean worktree used for the candidate: `/tmp/commniu-grok-tui-3h`
+- Tested source commit: `94dffddfc41f2ab2ba8aec781c8e6e9d75385dfe`
+- Reusable Docker tags: `anet-grok-tui-219:dev`,
+  `anet-grok-tui-224:dev`, and `anet-grok-tui-225:dev`
+- The reports above are generated artifacts bound to the tested source commit.
+  Do not relabel them after a source change; rerun 219, then 224, then 225.
+- Remaining release work: independent review, an explicit preview release
+  decision, and a reviewed npm preview publication. Do not self-merge or
+  publish from this candidate.
