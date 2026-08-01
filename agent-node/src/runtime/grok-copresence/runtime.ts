@@ -155,7 +155,6 @@ export interface GrokCopresenceOpenOptions {
   model?: string;
   agentProfile: string;
   maxTurns?: number;
-  alwaysApprove?: boolean;
   toolAllowlist?: readonly string[];
   sandboxProfile: string;
   protectedPaths?: readonly string[];
@@ -366,7 +365,6 @@ export interface BuildGrokCopresenceArgsOptions {
   model?: string;
   agentProfile: string;
   maxTurns?: number;
-  alwaysApprove?: boolean;
   toolAllowlist?: readonly string[];
   sandboxProfile: string;
   protectedPaths?: readonly string[];
@@ -389,20 +387,17 @@ export function buildGrokCopresenceArgs(opts: BuildGrokCopresenceArgsOptions): s
     opts.resume ? "--resume" : "--session-id", opts.sessionId,
     // Unlike --tools, this flag is honored by the pinned interactive TUI.
     "--agent", opts.agentProfile,
-    // Reset a resumed process to the interactive approval policy. The PTY
-    // proxy separately blocks every TUI route that could turn YOLO back on.
-    "--permission-mode", "default",
+    // This preview exposes only the fixed runtime-owned profile below. Keep
+    // that narrow inventory in always-approve mode so CommHub operations do
+    // not strand the shared TUI on a Yes/No prompt.
+    "--permission-mode", "bypassPermissions",
+    "--always-approve",
   ];
   if (opts.model) args.push("--model", opts.model);
   if (opts.maxTurns !== undefined) {
     throw new Error("grok copresence does not support maxTurns; Grok 0.2.93 ignores it in interactive TUI mode");
   }
 
-  if (opts.alwaysApprove) {
-    throw new Error(
-      "grok copresence forbids dangerouslySkipPermissions; approvals must be owned by the human TUI",
-    );
-  }
   if (opts.toolAllowlist !== undefined) {
     throw new Error(
       `grok copresence uses a fixed preview tool profile (${GROK_COPRESENCE_EFFECTIVE_TOOLS.join(",")}); custom tools are unsupported`,
@@ -670,7 +665,6 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private lifecycleBuffer = "";
   private recoveryLifecycleBuffer = "";
-  private recoveryUnsafeApprovalMode = false;
   private completionPendingSince = 0;
   private lastChatActivityAt = 0;
   private humanDecoder = new StringDecoder("utf8");
@@ -823,7 +817,6 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       // spawn chatter through the routing reducer could carry an orphan old
       // completion into the first new network task on process-level resume.
       this.recoveryLifecycleBuffer = "";
-      this.recoveryUnsafeApprovalMode = false;
       if (!this.chatTail || !this.eventsTail) {
         throw new Error("grok copresence startup lost its JSONL cursors");
       }
@@ -835,11 +828,6 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       if (this.recoveryLifecycleBuffer.trim()) {
         throw new GrokUnsafeRecoveryApprovalError(
           "Grok startup events JSONL ended with an incomplete lifecycle record",
-        );
-      }
-      if (this.recoveryUnsafeApprovalMode) {
-        throw new GrokUnsafeRecoveryApprovalError(
-          "Grok started in an unsafe automatic-approval mode",
         );
       }
       this.logState = newGrokJsonlState();
@@ -1014,7 +1002,6 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       model: this.opts.model,
       agentProfile: this.opts.agentProfile,
       maxTurns: this.opts.maxTurns,
-      alwaysApprove: this.opts.alwaysApprove,
       toolAllowlist: this.opts.toolAllowlist,
       sandboxProfile: this.opts.sandboxProfile,
       protectedPaths: this.opts.protectedPaths,
@@ -1143,7 +1130,6 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         // late records from the dead writer and resume-startup chatter to a
         // stable EOF, then reset all semantic correlation before scheduling.
         this.recoveryLifecycleBuffer = "";
-        this.recoveryUnsafeApprovalMode = false;
         if (!this.chatTail || !this.eventsTail) {
           throw new Error("grok copresence recovery lost its JSONL cursors");
         }
@@ -1157,11 +1143,6 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         if (this.recoveryLifecycleBuffer.trim()) {
           throw new GrokUnsafeRecoveryApprovalError(
             "Grok events JSONL ended with an incomplete lifecycle record during recovery",
-          );
-        }
-        if (this.recoveryUnsafeApprovalMode) {
-          throw new GrokUnsafeRecoveryApprovalError(
-            "Grok resumed in an unsafe automatic-approval mode",
           );
         }
         this.logState = newGrokJsonlState();
@@ -1463,17 +1444,17 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         this.deferHumanInput(input.subarray(offset));
         return;
       }
-      // Grok 0.2.93 exposes two direct mode toggles outside the permission
-      // dialog. They cannot reach the sole TUI: user-level requirements.toml
-      // is not an enforcement boundary in this version.
+      // Keep the runtime-owned always-approve posture immutable. These keys
+      // would otherwise toggle it back to an interactive mode and strand a
+      // network task on the next permission prompt.
       if (input[offset] === 0x0f) { // Ctrl+O: always-approve toggle
         offset += 1;
-        this.warnBlockedAutoApproval("Ctrl+O");
+        this.warnBlockedPermissionModeChange("Ctrl+O");
         continue;
       }
       if (input.subarray(offset, offset + 3).equals(Buffer.from("\x1b[Z", "binary"))) {
         offset += 3; // Shift+Tab cycles Normal -> Plan -> Always-approve.
-        this.warnBlockedAutoApproval("Shift+Tab");
+        this.warnBlockedPermissionModeChange("Shift+Tab");
         continue;
       }
 
@@ -1508,7 +1489,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
               if (this.arbitration.phase === "human_editing") {
                 this.transition({ type: "human_input_cancelled" });
               }
-              this.warnBlockedAutoApproval("editor navigation after slash input");
+              this.warnBlockedPermissionModeChange("editor navigation after slash input");
               this.scheduleNetworkIfIdle();
               return;
             }
@@ -1521,7 +1502,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           // Unknown CSI/SS3/Alt sequences include enhanced keyboard encodings
           // such as CSI-u, which can represent Ctrl+O or a slash without those
           // raw bytes. Never forward them to the policy-owning TUI.
-          this.warnBlockedAutoApproval("unknown terminal control sequence");
+          this.warnBlockedPermissionModeChange("unknown terminal control sequence");
           return;
         }
       }
@@ -1532,7 +1513,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         && ![0x03, 0x08, 0x0a, 0x0d, 0x15].includes(nextControl);
       if (unmodelledEditorControl) {
         offset += 1;
-        this.warnBlockedAutoApproval("unknown editor control key");
+        this.warnBlockedPermissionModeChange("unknown editor control key");
         continue;
       }
       if (this.arbitration.phase === "idle") this.transition({ type: "human_input_started" });
@@ -1550,7 +1531,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         if (this.arbitration.phase === "human_editing") {
           this.transition({ type: "human_input_cancelled" });
         }
-        this.warnBlockedAutoApproval("slash command");
+        this.warnBlockedPermissionModeChange("slash command");
         if (offset < input.length) {
           // Same-frame bytes are not a new, intentional composer action.
           this.attach?.broadcastStatus({
@@ -1565,7 +1546,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       if (control === 0x2f && this.humanComposerAuditTainted) {
         // Once cursor/edit state diverges from the mirror, a slash could be
         // inserted at column zero without being visible to the audit. Drop it.
-        this.warnBlockedAutoApproval("slash after unmodelled editor control");
+        this.warnBlockedPermissionModeChange("slash after unmodelled editor control");
         continue;
       }
 
@@ -1640,8 +1621,8 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     this.humanComposerLeadingSlash = false;
   }
 
-  private warnBlockedAutoApproval(route: string): void {
-    const warning = `${route} was blocked: Grok co-presence keeps approval policy immutable and per-turn`;
+  private warnBlockedPermissionModeChange(route: string): void {
+    const warning = `${route} was blocked: Grok co-presence keeps its runtime-owned always-approve policy immutable`;
     this.warn(`[grok-copresence] ${warning}`);
     this.attach?.broadcastStatus({ ...this.attachStatus(), warning });
   }
@@ -2089,12 +2070,10 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           this.clearApprovalCorrelation();
           this.transition({ type: "approval_resolved_by_human" });
         }
-      } else if (isUnsafeApprovalLifecycleEvent(event)) {
-        void this.failFatal(new GrokCopresenceFailure(
-          "approval_boundary",
-          "grok copresence observed an unsafe automatic-approval mode and shut down",
-        ));
-        return;
+      } else if (isAutomaticApprovalLifecycleEvent(event)) {
+        // Expected for the pinned `--always-approve` launch. Explicit deny
+        // rules and the fixed three-tool profile remain authoritative.
+        continue;
       }
     }
     if (Buffer.byteLength(buffered, "utf8") <= MAX_LIFECYCLE_LINE_BYTES) {
@@ -2128,15 +2107,9 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         throw new GrokUnsafeRecoveryApprovalError(
           "Grok recovery crossed an unresolved or unaudited permission lifecycle",
         );
-      } else if (event.type === "yolo_toggled" && event.enabled === true) {
-        // Latch any unsafe transition seen during an unobserved startup or
-        // recovery window. A later "off/default" record cannot prove no tool
-        // was approved while the permissive mode was active.
-        this.recoveryUnsafeApprovalMode = true;
-      } else if (event.type === "phase_changed" && typeof event.phase === "string") {
-        if (/^(?:always[-_ ]?approve|yolo|auto)$/i.test(event.phase)) {
-          this.recoveryUnsafeApprovalMode = true;
-        }
+      } else if (isAutomaticApprovalLifecycleEvent(event)) {
+        // Expected startup/recovery state for this runtime-owned preview.
+        continue;
       }
     }
     if (Buffer.byteLength(buffered, "utf8") > MAX_LIFECYCLE_LINE_BYTES) {
@@ -2244,7 +2217,6 @@ function assertSafePersistedGrokSessionForResume(sessionDir: string): void {
 
   let buffer = "";
   let activePermission: string | null = null;
-  let unsafeApprovalMode = false;
   assertTrustedResumeFile(eventsPath, "events", true, (chunk) => {
     let buffered = buffer + chunk;
     buffer = "";
@@ -2288,11 +2260,10 @@ function assertSafePersistedGrokSessionForResume(sessionDir: string): void {
           }
           activePermission = null;
         }
-      } else if (event.type === "yolo_toggled" && typeof event.enabled === "boolean") {
-        unsafeApprovalMode = event.enabled;
-      } else if (event.type === "phase_changed" && typeof event.phase === "string") {
-        if (/^(?:always[-_ ]?approve|yolo|auto)$/i.test(event.phase)) unsafeApprovalMode = true;
-        else if (/^(?:normal|default|plan)$/i.test(event.phase)) unsafeApprovalMode = false;
+      } else if (isAutomaticApprovalLifecycleEvent(event)) {
+        // Persisted automatic-mode records are expected. Every new PTY is
+        // launched with the same immutable mode and fixed tool profile.
+        continue;
       }
     }
     if (Buffer.byteLength(buffered, "utf8") > MAX_LIFECYCLE_LINE_BYTES) {
@@ -2303,9 +2274,6 @@ function assertSafePersistedGrokSessionForResume(sessionDir: string): void {
   if (buffer.trim()) throw new Error("grok copresence refuses resume with an incomplete events record");
   if (activePermission) {
     throw new Error("grok copresence refuses resume while a persisted human approval is unresolved");
-  }
-  if (unsafeApprovalMode) {
-    throw new Error("grok copresence refuses resume from a persisted automatic-approval mode");
   }
 }
 
@@ -3196,7 +3164,7 @@ function isBoundedLifecycleShapeString(value: unknown): value is string {
     && Buffer.byteLength(value, "utf8") <= 256;
 }
 
-function isUnsafeApprovalLifecycleEvent(event: {
+function isAutomaticApprovalLifecycleEvent(event: {
   type?: unknown;
   enabled?: unknown;
   phase?: unknown;

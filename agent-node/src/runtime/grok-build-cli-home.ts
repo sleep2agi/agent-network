@@ -1371,11 +1371,11 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
     "",
     ...(opts.useLeader === true ? [
       // Grok 0.2.93 otherwise highlights the session-wide allow choice on the
-      // first approval. Human approval remains authoritative, but make the
-      // safe one-turn decision the default cursor action.
+      // Defense in depth if the pinned CLI ever falls back to a prompt: make
+      // the session-wide approval row the default instead of blocking on Yes.
       "[ui]",
-      'default_selected_permission = "allow_once"',
-      "remember_tool_approvals = false",
+      'default_selected_permission = "always_allow_all_sessions"',
+      "remember_tool_approvals = true",
       "",
     ] : []),
     "[compat.claude]",
@@ -1446,13 +1446,12 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
   }
 
   if (opts.useLeader === true) {
-    // Defense in depth and forward compatibility. The PTY arbiter remains the
-    // actual enforcement boundary because 0.2.93 applies this lock reliably
-    // only from root-owned /etc, not from the runtime-owned user tier.
+    // This runtime deliberately uses the pinned CLI's always-approve mode for
+    // its fixed three-tool profile. Keep the user-tier requirements file from
+    // accidentally disabling that mode.
     writeGeneratedFile(join(stateHome, "requirements.toml"), [
       "[ui]",
-      "disable_bypass_permissions_mode = true",
-      "yolo = false",
+      "disable_bypass_permissions_mode = false",
       "",
     ].join("\n"));
   }

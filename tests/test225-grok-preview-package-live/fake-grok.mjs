@@ -77,6 +77,7 @@ if (argv.includes("--help")) {
     "--agent",
     "--deny",
     "--permission-mode",
+    "--always-approve",
     "--output-format",
     "--prompt-json",
     "--disable-web-search",

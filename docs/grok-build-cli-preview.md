@@ -6,7 +6,7 @@
 
 This guide describes the candidate source behavior. It does not assert that a particular npm `preview` dist-tag already contains the candidate; package publication remains gated on install-from-tarball testing, an independent review, and explicit release approval.
 
-The main known risk is intentional and visible: CommHub tasks drive the same Grok TUI that a human uses, so both sides share one conversation context. Production-grade approval ownership is incomplete. A model action or approval prompt must not be treated as a secure boundary against untrusted task content.
+The main known risk is intentional and visible: CommHub tasks drive the same Grok TUI that a human uses, so both sides share one conversation context. The fixed preview tools are automatically approved; there is no per-call Yes/No boundary. Connect this runtime only to trusted tasks and a trusted network.
 
 The formal native Leader/Policy Gateway runtime is a separate, stricter track. Its Phase 0 protocol freeze, Phase 1A implementation gate, approval-owner work, and `latest` release gate remain locked. This preview does not claim those capabilities.
 
@@ -98,14 +98,14 @@ never entered Grok session state. Use another runtime when code inspection,
 editing, shell execution, or web/media access is needed.
 
 Pinned Grok 0.2.93 wraps each fixed tool in a permission lifecycle. The runtime
-accepts only the exact observed automatic tuple for `todo_write`,
-`search_tool`, or `use_tool`, with strict request/turn correlation. A network
-turn may use each exact tool tuple at most once. Human turns may repeat an
-exact tuple without killing the TUI. CommHub mutations still show a human
-approval prompt; choose the one-time approval, not always-approve. Any other
-tool, decision, identity shape, overlap, mode change, or unresolved completion
-closes the runtime. This narrow preview exception is not production-grade
-approval ownership and is not a capability claim for `latest`.
+starts the TUI with `--permission-mode bypassPermissions --always-approve`, so
+`todo_write`, `search_tool`, and `use_tool` proceed without a Yes/No prompt.
+The runtime still accepts only their exact observed lifecycle tuples with
+strict request/turn correlation. A network turn may use each exact tool tuple
+at most once; human turns may repeat an exact tuple. Any other tool, decision,
+identity shape, overlap, or unresolved completion closes the runtime. This
+automatic approval applies only to the fixed three-tool profile and is not a
+capability claim for `latest`.
 
 ### Human-turn and MCP lifecycle regressions (2026-08-01)
 
@@ -123,8 +123,8 @@ directory. The final candidate stages a self-contained server outside the
 hidden project path while keeping the credential outside scanned TUI state.
 With the fixes, Docker test219 passed 293 tests, test224 passed with networking
 disabled, and the authenticated packed-package test225 passed. A live
-`指挥狗` session called `search_tool`, approved a single `use_tool` invocation,
-sent a real CommHub task, completed a second human prompt, and retained the
+`指挥狗` session called `search_tool`, invoked `use_tool`, sent a real CommHub
+task, completed a second human prompt, and retained the
 agent-node process, Leader socket, attach socket, and bridge.
 
 The runtime prepares Grok's owner-only folder-trust store non-interactively,
@@ -193,9 +193,8 @@ fallback if the native TUI path fails.
 
 - Use only trusted task senders. A network task influences the same model and conversation visible in the human TUI.
 - Do not use this runtime for production work or connect it to a public/untrusted Hub.
-- Do not enable permission bypass for the co-presence profile.
-- Treat every approval prompt as human-visible experimental behavior, not as proof of production-grade owner or lease enforcement.
-- The pinned TUI may auto-resolve only the exact fixed tool lifecycles for `todo_write`, `search_tool`, and `use_tool`; CommHub mutations remain human-confirmed.
+- The co-presence profile deliberately runs in immutable always-approve mode. It has no per-call human confirmation.
+- Automatic approval is limited by the fixed tool inventory to `todo_write`, `search_tool`, and `use_tool`; filesystem, shell, web/media, project/host MCP, and subagents remain unavailable.
 - Grok children and runtime lock helpers receive exact, from-empty environment allowlists. CommHub/cloud credentials are not inherited by those processes.
 - The shared-TUI preview has the exact fixed inventory `[todo_write,search_tool,use_tool]`; MCP access is limited to its single runtime-owned CommHub server. Do not treat it as a filesystem-, web-, media-, subagent-, or shell-capable coding runtime.
 - Folder trust is runtime-owned, mode `0600`, and contains exactly the current canonical working directory; project executable configuration is a startup error rather than implicitly trusted code.

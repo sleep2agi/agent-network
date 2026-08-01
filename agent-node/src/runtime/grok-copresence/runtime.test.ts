@@ -241,23 +241,14 @@ describe("Grok copresence launch and injection policy", () => {
     expect(args).toContain("--no-memory");
     expect(args).toContain("anet-workspace");
     expect(args).toContain("--permission-mode");
-    expect(args).toContain("default");
-    expect(args).not.toContain("--always-approve");
+    expect(args).toContain("bypassPermissions");
+    expect(args).toContain("--always-approve");
     expect(args).not.toContain("MCPTool");
     const denied = args.flatMap((value, index) => args[index - 1] === "--deny" ? [value] : []);
     expect(denied).toContain("Bash");
     expect(denied).toContain("Write");
     expect(denied).toContain("WebFetch");
     expect(args).toContain("Edit(/workspace/.grok)");
-    expect(() => buildGrokCopresenceArgs({
-      cwd: "/workspace",
-      sessionId: SESSION,
-      resume: false,
-      leaderSocket: "/tmp/grok-copres-test/leader.sock",
-      agentProfile: "/isolated/anet-copresence-preview.md",
-      sandboxProfile: "anet-workspace",
-      alwaysApprove: true,
-    })).toThrow("approvals must be owned by the human TUI");
     expect(() => buildGrokCopresenceArgs({
       cwd: "/workspace",
       sessionId: SESSION,
@@ -1291,7 +1282,7 @@ describe("Grok copresence runtime integration", () => {
         GROK_CLAUDE_HOOKS_ENABLED: "false",
         GROK_CURSOR_HOOKS_ENABLED: "false",
         GROK_FOLDER_TRUST: "1",
-        GROK_DEFAULT_SELECTED_PERMISSION: "allow_once",
+        GROK_DEFAULT_SELECTED_PERMISSION: "always_allow_all_sessions",
         GROK_DISABLE_AUTOUPDATER: "1",
         GROK_CHANGELOG_OFFLINE: "1",
         GROK_LEADER_LOG: "off",
@@ -1438,13 +1429,14 @@ describe("Grok copresence runtime integration", () => {
       await attached.closed;
 
       fixture.emitUnsafeApprovalMode();
-      await waitFor(() => !runtime!.isRunning);
-      await expect(runtime.submit({
-        taskId: "must-not-run-in-yolo",
+      await Bun.sleep(100);
+      expect(runtime.isRunning).toBe(true);
+      const afterModeEvent = await runtime.submit({
+        taskId: "runs-in-yolo",
         from: "reviewer",
-        text: "blocked",
-      })).rejects.toThrow("unsafe automatic-approval mode");
-      await waitFor(() => !existsSync(fixture.leaderSocket) && !existsSync(fixture.attachSocket));
+        text: "after mode event",
+      });
+      expect(afterModeEvent.replyText).toBe("FINAL runs-in-yolo");
     } finally {
       await runtime?.close();
       await fixture.close();
@@ -1844,15 +1836,20 @@ describe("Grok copresence runtime integration", () => {
     }
   }, 12_000);
 
-  test("latches any startup auto-approval transition even if a later event says normal", async () => {
+  test("accepts the pinned startup auto-approval transition", async () => {
     const fixture = new RuntimeFixture();
     fixture.spawnEvents = [
       { type: "phase_changed", phase: "auto" },
       { type: "phase_changed", phase: "normal" },
     ];
+    let runtime: GrokCopresenceRuntimeSession | undefined;
     try {
-      await expect(fixture.open()).rejects.toThrow("unsafe automatic-approval mode");
+      runtime = await fixture.open();
+      expect(runtime.isRunning).toBe(true);
+      expect(fixture.spawnedArgs[0]).toContain("--always-approve");
+      expect(fixture.spawnedArgs[0]).toContain("bypassPermissions");
     } finally {
+      await runtime?.close();
       await fixture.close();
     }
   }, 8_000);
@@ -1875,16 +1872,16 @@ describe("Grok copresence runtime integration", () => {
     }
   }, 8_000);
 
-  test("audits recovery drain and rejects an auto phase before scheduling", async () => {
+  test("keeps auto-approval across recovery before scheduling", async () => {
     const fixture = new RuntimeFixture();
     let runtime: GrokCopresenceRuntimeSession | undefined;
     try {
       runtime = await fixture.open();
       fixture.unsafeModeOnCrash = "auto";
       await fixture.crashCurrent();
-      await waitFor(() => !runtime!.isRunning, 5_000);
-      await expect(runtime.submit({ taskId: "after-auto", from: "reviewer", text: "blocked" }))
-        .rejects.toThrow("unsafe automatic-approval mode");
+      await waitFor(() => fixture.spawnedArgs.length === 2, 5_000);
+      const after = await runtime.submit({ taskId: "after-auto", from: "reviewer", text: "allowed" });
+      expect(after.replyText).toBe("FINAL after-auto");
       expect(fixture.spawnedArgs).toHaveLength(2);
     } finally {
       await runtime?.close();
@@ -2078,7 +2075,7 @@ class RuntimeFixture {
         GROK_CLAUDE_HOOKS_ENABLED: "false",
         GROK_CURSOR_HOOKS_ENABLED: "false",
         GROK_FOLDER_TRUST: "1",
-        GROK_DEFAULT_SELECTED_PERMISSION: "allow_once",
+        GROK_DEFAULT_SELECTED_PERMISSION: "always_allow_all_sessions",
         GROK_DISABLE_AUTOUPDATER: "1",
         GROK_CHANGELOG_OFFLINE: "1",
         GROK_LEADER_LOG: "off",
@@ -2104,7 +2101,6 @@ class RuntimeFixture {
       attachSocket: this.attachSocket,
       alias: "grok-test",
       agentProfile: join(this.grokHome, "anet-copresence-preview.md"),
-      alwaysApprove: false,
       sandboxProfile: "workspace",
       pollIntervalMs: this.pollIntervalMs,
       reconnectAttempts: this.reconnectAttempts,
@@ -2123,7 +2119,7 @@ class RuntimeFixture {
           GROK_CLAUDE_HOOKS_ENABLED: "false",
           GROK_CURSOR_HOOKS_ENABLED: "false",
           GROK_FOLDER_TRUST: "1",
-          GROK_DEFAULT_SELECTED_PERMISSION: "allow_once",
+          GROK_DEFAULT_SELECTED_PERMISSION: "always_allow_all_sessions",
           GROK_DISABLE_AUTOUPDATER: "1",
           GROK_CHANGELOG_OFFLINE: "1",
           GROK_LEADER_LOG: "off",

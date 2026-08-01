@@ -107,7 +107,7 @@ describe("test224 exact Grok child environment", () => {
       oidcIssuer: "https://accounts.example.invalid",
       oidcClientId: "reviewed-public-client",
       expectedParentPid: 4242,
-      defaultSelectedPermission: "allow_once",
+      defaultSelectedPermission: "always_allow_all_sessions",
     });
     const expected = {
       PATH: "/usr/local/bin:/usr/bin:/bin",
@@ -132,7 +132,7 @@ describe("test224 exact Grok child environment", () => {
       GROK_OIDC_ISSUER: "https://accounts.example.invalid",
       GROK_OIDC_CLIENT_ID: "reviewed-public-client",
       ANET_EXPECTED_PARENT_PID: "4242",
-      GROK_DEFAULT_SELECTED_PERMISSION: "allow_once",
+      GROK_DEFAULT_SELECTED_PERMISSION: "always_allow_all_sessions",
     };
     expect(baseline).toEqual(expected);
 

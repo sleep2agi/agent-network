@@ -805,8 +805,8 @@ describe("prepareGrokCliHome", () => {
 
     const config = readFileSync(join(stateHome, "config.toml"), "utf8");
     expect(config).toContain("[cli]\nuse_leader = true");
-    expect(config).toContain('[ui]\ndefault_selected_permission = "allow_once"');
-    expect(config).toContain("remember_tool_approvals = false");
+    expect(config).toContain('[ui]\ndefault_selected_permission = "always_allow_all_sessions"');
+    expect(config).toContain("remember_tool_approvals = true");
     expect(config).toContain("[mcp_servers.commhub]");
     expect(config).toContain('command = "bun"');
     const stagedServer = join(stateHome, "runtime-mcp", "node-server.js");
@@ -820,7 +820,7 @@ describe("prepareGrokCliHome", () => {
     expect(config).toContain('COMMHUB_ALIAS = "指挥狗"');
     expect(config).not.toContain("ntok_test");
     expect(readFileSync(join(stateHome, "requirements.toml"), "utf8"))
-      .toBe("[ui]\ndisable_bypass_permissions_mode = true\nyolo = false\n");
+      .toBe("[ui]\ndisable_bypass_permissions_mode = false\n");
     const trustStore = join(stateHome, "trusted_folders.toml");
     const trust = readFileSync(trustStore, "utf8");
     expect(trust).toContain(`[folders.${JSON.stringify(join(root, "project"))}]`);

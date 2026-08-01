@@ -82,7 +82,7 @@ export interface BuildGrokChildEnvOptions {
   oidcIssuer?: string;
   oidcClientId?: string;
   expectedParentPid?: number;
-  defaultSelectedPermission?: "allow_once";
+  defaultSelectedPermission?: "allow_once" | "always_allow_all_sessions";
 }
 
 /** Construct a Grok child environment from an empty object. */

@@ -2163,7 +2163,7 @@ function printClaudeCodeNotice() {
 
 function printGrokCopresenceWarning(nodeRef?: string) {
   console.warn(`[anet] ⚠ EXPERIMENTAL/DANGEROUS Grok co-presence preview.`);
-  console.warn(`[anet]   Network tasks drive the same Grok TUI; approval ownership is not fully hardened.`);
+  console.warn(`[anet]   Network tasks drive the same Grok TUI; its fixed tools are automatically approved.`);
   console.warn(`[anet]   Fixed tools: [todo_write,search_tool,use_tool]; MCP is the single runtime-owned CommHub server.`);
   console.warn(`[anet]   No filesystem, shell, web, media, project/host MCP, or subagents.`);
   console.warn(`[anet]   Use only with trusted tasks and a trusted network. Do not use in production.`);
