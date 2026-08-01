@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/safe-rm.sh"
 
 REPORT_DIR="${REPORT_DIR:-/report}"
 REPORT="$REPORT_DIR/report-test384.txt"
@@ -730,9 +731,9 @@ rm -f -- "$PROFILE_STALE_MARKER"
 # the runtime must use a fresh launch data root and leave this outside target
 # completely empty through fake and real ACP turns.
 PERSISTENT_DATA_DIR="$OPENAI_NODE/.local/share/opencode"
-rm -rf -- "$PERSISTENT_DATA_DIR/log"
+safe_rm_rf "$PERSISTENT_DATA_DIR/log"
 rm -f -- "$PERSISTENT_DATA_DIR"/opencode.db*
-rm -rf -- "$PERSISTENT_DATA_ESCAPE"
+safe_rm_rf "$PERSISTENT_DATA_ESCAPE"
 mkdir -m 700 "$PERSISTENT_DATA_ESCAPE"
 ln -s "$PERSISTENT_DATA_ESCAPE" "$PERSISTENT_DATA_DIR/log"
 ln -s "$PERSISTENT_DATA_ESCAPE/opencode.db" "$PERSISTENT_DATA_DIR/opencode.db"
