@@ -1622,6 +1622,33 @@ describe("Grok copresence runtime integration", () => {
     }
   }, 12_000);
 
+  test("fails closed on malformed or oversized permission lifecycle JSONL", async () => {
+    for (const line of [
+      "{not-json}\n",
+      `${"x".repeat(70_000)}\n`,
+    ]) {
+      const fixture = new RuntimeFixture();
+      let runtime: GrokCopresenceRuntimeSession | undefined;
+      try {
+        runtime = await fixture.open();
+        const pending = runtime.submit({
+          taskId: "malformed-lifecycle",
+          from: "reviewer",
+          text: "HOLD_OPEN",
+          timeoutMs: 3_000,
+        });
+        const sessionDir = grokSessionDirectory(fixture.grokHome, fixture.cwd, SESSION);
+        await waitFor(() => existsSync(join(sessionDir, "events.jsonl")));
+        appendFileSync(join(sessionDir, "events.jsonl"), line);
+        await expect(pending).rejects.toThrow(/lifecycle JSONL/);
+        await waitFor(() => !runtime!.isRunning);
+      } finally {
+        await runtime?.close();
+        await fixture.close();
+      }
+    }
+  }, 12_000);
+
   test("rejects terminal reordering around automatic permission lifecycles", async () => {
     for (const mutation of [
       "END_BEFORE_RESOLUTION",

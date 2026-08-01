@@ -1927,7 +1927,14 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     while ((newline = buffered.indexOf("\n")) >= 0) {
       const line = buffered.slice(0, newline).trim();
       buffered = buffered.slice(newline + 1);
-      if (!line || Buffer.byteLength(line, "utf8") > MAX_LIFECYCLE_LINE_BYTES) continue;
+      if (!line) continue;
+      if (Buffer.byteLength(line, "utf8") > MAX_LIFECYCLE_LINE_BYTES) {
+        void this.failFatal(new GrokCopresenceFailure(
+          "approval_boundary",
+          "grok copresence observed an oversized permission lifecycle JSONL event",
+        ));
+        return;
+      }
       let event: {
         type?: unknown;
         enabled?: unknown;
@@ -1943,7 +1950,14 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       try {
         event = JSON.parse(line) as typeof event;
       } catch {
-        continue;
+        // events.jsonl is the trusted permission/terminal lifecycle channel.
+        // Once a newline terminates a record, an unparsable line can hide the
+        // request, resolution, or terminal signal this reducer must enforce.
+        void this.failFatal(new GrokCopresenceFailure(
+          "approval_boundary",
+          "grok copresence observed malformed permission lifecycle JSONL",
+        ));
+        return;
       }
       if (event?.type === "permission_requested") {
         if (this.activeTurnTerminalEventSeen) {
@@ -3129,6 +3143,11 @@ export function isGrokPreviewAutomaticResolution(input: {
     && requestId === input.activeRequestId
     && !input.humanDecisionDispatched
     && input.waitingHuman
+    // The pinned process-level --always-approve mode applies to the shared
+    // Grok process, not to anet's logical turn owner. Human turns therefore
+    // emit the same exact automatic resolution lifecycle. Accepting that exact
+    // tuple keeps the shared TUI alive; owner-specific approval would require
+    // a separate dynamic-mode design, not a predicate-only restriction.
     && (input.turnOwner === "network" || input.turnOwner === "human")
     && !input.terminalEventSeen
     && isExactPreviewAutomaticPermissionResolution(input.event, input.requestTool);
