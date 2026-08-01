@@ -13,13 +13,13 @@ The formal native Leader/Policy Gateway runtime is a separate, stricter track. I
 ## Verified candidate (2026-08-01)
 
 The implementation source tested in Docker is commit
-`94dffddfc41f2ab2ba8aec781c8e6e9d75385dfe`, merged from the earlier Grok
+`9c87d315840e07d4e0056b8c2dc1a1680c30803a`, merged from the earlier Grok
 candidate onto `origin/main` at `772dbbdad85bd951dd71e0f8320a26109c6d63f7`.
 It has not been merged, published, or deployed.
 
 The gates were run in order and all passed:
 
-- [test219](tests/report-test219.txt): 286 checks, zero failures; native PTY,
+- [test219](tests/report-test219.txt): 287 checks, zero failures; native PTY,
   reducers, attach, arbitration, reply, approval, reconnect, and package builds.
 - [test224](tests/report-test224.txt): network-disabled package and credential
   boundary; preview metadata, owner-only state, redaction, and zero synthetic
@@ -89,15 +89,35 @@ giving a network prompt a model-tool route to that file. Use another runtime
 when code inspection/editing, shell execution, or web/media access is needed.
 
 Pinned Grok 0.2.93 wraps `todo_write` in a permission lifecycle but resolves
-that session-local helper without reading human input. For preview network
-turns only, the runtime accepts the exact observed tuple: no request ID,
-`tool_name=todo_write`, `decision=allow`, one active network turn, and no
-human decision already dispatched. At most one such lifecycle is accepted per
-network turn. The helper's state stays in the owner-only
+that session-local helper without reading human input. The runtime accepts
+only the exact observed tuple: no request ID, `tool_name=todo_write`, and
+`decision=allow`. A network turn may accept at most one such lifecycle and
+only when no human decision was already dispatched. A human TUI turn may emit
+the same exact session-local lifecycle repeatedly; those repetitions keep the
+TUI alive but do not widen the accepted tool or decision. The helper's state
+stays in the owner-only
 Grok session. Any different tool, decision, identity shape, overlap, mode
 change, or unresolved completion still closes the runtime. This narrow
 preview exception is not production-grade approval ownership and is not a
 capability claim for `latest`.
+
+### Human-turn lifecycle regression (2026-08-01)
+
+Grok 0.2.93 was observed emitting three consecutive exact `todo_write`
+lifecycles for one human prompt. The earlier network-only gate, and then an
+intermediate one-use human gate, both closed the Leader, attach socket, and TUI
+after an otherwise valid automatic resolution. Commit `9c87d315` keeps the
+network limit unchanged while admitting repeated exact lifecycles only for a
+human-owned turn.
+
+The regression test was first run against the old condition and failed. With
+the fix, Docker test219 passed 287 tests, test224 passed with networking
+disabled, and the authenticated packed-package test225 passed. A live
+`指挥狗` session then processed a prompt containing three exact todo updates,
+completed the turn, processed a second human prompt, and retained the
+agent-node process, Leader socket, and attach socket. Functional access to an
+MCP tool is still outside this text-only profile; the lifecycle survival result
+must not be read as an MCP capability claim.
 
 The runtime prepares Grok's owner-only folder-trust store non-interactively,
 but grants trust to the exact canonical working directory only. It first
@@ -193,9 +213,9 @@ If `anet` says the preview `agent-node` does not advertise `grok-build-cli`, the
 
 - Candidate branch: `fix/grok-tui-main-sync-3h`
 - Clean worktree used for the candidate: `/tmp/commniu-grok-tui-3h`
-- Tested source commit: `94dffddfc41f2ab2ba8aec781c8e6e9d75385dfe`
-- Reusable Docker tags: `anet-grok-tui-219:dev`,
-  `anet-grok-tui-224:dev`, and `anet-grok-tui-225:dev`
+- Tested source commit: `9c87d315840e07d4e0056b8c2dc1a1680c30803a`
+- Reusable Docker tags: `anet-test219:dev`, `anet-test224:dev`, and
+  `anet-test225:dev`
 - The reports above are generated artifacts bound to the tested source commit.
   Do not relabel them after a source change; rerun 219, then 224, then 225.
 - Remaining release work: independent review, an explicit preview release
