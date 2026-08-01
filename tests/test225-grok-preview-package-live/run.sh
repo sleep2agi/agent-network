@@ -1279,7 +1279,7 @@ LEADER_SOCKET=$(jq -r '.grokLeaderSocket' "$CONFIG")
 scan_fixed_file /tmp/test225-live-credentials "$REGISTER_LOG" "$CREATE_LOG" \
   || fail "register/create console output exposed a persisted Hub credential"
 anet info "$ALIAS" >"$INFO_LOG" 2>&1
-grep -Fq 'fixed preview profile [todo_write] (text-only; no filesystem/shell/network/media/MCP/subagents)' "$INFO_LOG" \
+grep -Fq 'fixed preview profile [todo_write,search_tool,use_tool] (commhub MCP only; no filesystem/shell/web/media/subagents)' "$INFO_LOG" \
   || fail "anet info misreported the shared TUI effective tool boundary"
 scan_fixed_file /tmp/test225-live-credentials "$INFO_LOG" \
   || fail "anet info exposed a Hub credential"
@@ -1625,7 +1625,7 @@ wait_file "$ATTACH_SOCKET" 600 \
   || fail_with_private_log "attach socket did not appear through npx preview fallback" "$START_LOG"
 grep -Fq 'agent-node is not installed globally; fetching @sleep2agi/agent-node@preview' "$START_LOG" \
   || fail "clean start did not exercise the documented npx preview fallback"
-grep -Fq 'fixed preview profile [todo_write] (text-only; no filesystem/shell/network/media/MCP/subagents)' "$START_LOG" \
+grep -Fq 'fixed preview profile [todo_write,search_tool,use_tool] (commhub MCP only; no filesystem/shell/web/media/subagents)' "$START_LOG" \
   || fail "agent-node startup misreported the shared TUI effective tool boundary"
 start_attach test225-attach
 wait_pane test225-attach 'attached to Grok TUI' "$ATTACH_CAPTURE" 200 \
@@ -2097,7 +2097,7 @@ pass "installed-package stop/resume removes exact pinned project sandbox placeho
 
 run_keyless_gate() {
   local real_bin=${TEST225_REAL_GROK_BIN:-/host-grok/bin/grok-0.2.93}
-  local profile_fixture
+  local profile_fixture mcp_doctor
   local -a profile_candidates=()
 
   [ -x "$real_bin" ] \
@@ -2111,8 +2111,30 @@ run_keyless_gate() {
   profile_fixture=${profile_candidates[0]}
   [ "$(file_mode "$profile_fixture")" = 600 ] \
     || fail "runtime-owned co-presence profile is not mode 0600"
+  mcp_doctor=$(mktemp /tmp/test225-commhub-mcp-doctor.XXXXXX)
+  chmod 600 "$mcp_doctor"
+  if ! (cd "$WORK" && env -i \
+    PATH="$PATH" HOME="$(dirname "$profile_fixture")" \
+    PWD="$WORK" GROK_HOME="$(dirname "$profile_fixture")" \
+    GROK_AUTH_PATH="$(dirname "$profile_fixture")/auth.json" \
+    GROK_CLAUDE_MCPS_ENABLED=false GROK_CURSOR_MCPS_ENABLED=false \
+    "$real_bin" mcp doctor commhub --json) >"$mcp_doctor" 2>&1; then
+    fail_with_private_log "runtime-owned commhub MCP doctor failed" "$mcp_doctor"
+  fi
+  jq -e '
+    .healthy_count == 1 and .failing_count == 0
+    and (.servers | length) == 1
+    and .servers[0].name == "commhub"
+    and .servers[0].transport == "stdio"
+    and .servers[0].healthy == true
+    and any(.servers[0].checks[]; .label == "5 tools discovered" and .passed == true)
+  ' "$mcp_doctor" >/dev/null \
+    || fail "runtime-owned commhub MCP doctor did not prove the exact five-tool server"
+  scan_fixed_file /tmp/test225-markers "$mcp_doctor" \
+    || fail "commhub MCP doctor leaked a synthetic credential marker"
+  rm -f -- "$mcp_doctor"
   run_tui_inventory_gate "$real_bin" "$profile_fixture"
-  pass "pinned Grok TUI inventory, unsafe mutations, and exact keyless todo lifecycle gate"
+  pass "pinned Grok TUI inventory, exact commhub MCP, unsafe mutations, and keyless todo lifecycle gate"
 }
 
 run_real_gate() {

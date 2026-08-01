@@ -372,7 +372,7 @@ export interface BuildGrokCopresenceArgsOptions {
   protectedPaths?: readonly string[];
 }
 
-/** Interactive TUI argv. No prompt/output JSON flags and no CommHub MCP. */
+/** Interactive TUI argv. No prompt/output JSON flags; only audited CommHub MCP. */
 export function buildGrokCopresenceArgs(opts: BuildGrokCopresenceArgsOptions): string[] {
   assertSessionId(opts.sessionId);
   assertSocketPath(opts.leaderSocket, "leader");
@@ -416,16 +416,15 @@ export function buildGrokCopresenceArgs(opts: BuildGrokCopresenceArgsOptions): s
     "--no-memory",
   );
 
-  // A2 trust boundary: the TUI never receives the node bearer token and is
-  // never allowed to call a discovered MCP tool. Human delegation is parsed
-  // from chat_history by agent-node instead.
+  // The TUI never receives the node bearer token. `search_tool` / `use_tool`
+  // can reach only the exact commhub server admitted by the inspect gate; all
+  // filesystem/process/web escape routes remain denied.
   args.push(
     // The shared process must read its owner-only GROK_AUTH_PATH after its
     // sandbox re-exec. Shell access would bypass path-specific Read/Grep/Edit
     // rules, so the experimental preview gives up terminal tools entirely.
     "--deny", "Bash",
     "--deny", "Write",
-    "--deny", "MCPTool",
     "--deny", "WebFetch",
   );
   for (const path of opts.protectedPaths ?? []) {
@@ -524,8 +523,26 @@ export function assertGrokCopresenceApprovalOwnership(
       throw new Error(`grok copresence refuses nonempty ${field}`);
     }
   }
-  if (!Array.isArray(inspection.mcpServers) || inspection.mcpServers.length !== 0) {
-    throw new Error("grok copresence refuses discovered MCP servers; A2 keeps MCP outside the TUI");
+  if (!Array.isArray(inspection.mcpServers) || inspection.mcpServers.length !== 1) {
+    throw new Error("grok copresence requires exactly one discovered commhub MCP server");
+  }
+  const commhub = inspection.mcpServers[0];
+  if (!commhub || typeof commhub !== "object" || Array.isArray(commhub)) {
+    throw new Error("grok copresence commhub MCP inspection is malformed");
+  }
+  const commhubRecord = commhub as Record<string, unknown>;
+  const source = commhubRecord.source;
+  if (
+    commhubRecord.name !== "commhub"
+    || commhubRecord.transport !== "stdio"
+    || commhubRecord.target !== "bun"
+    || !source
+    || typeof source !== "object"
+    || Array.isArray(source)
+    || (source as Record<string, unknown>).type !== "configToml"
+    || resolve(String((source as Record<string, unknown>).path || "")) !== join(allowedRoot, "config.toml")
+  ) {
+    throw new Error("grok copresence refuses any MCP server except its runtime-owned commhub stdio server");
   }
   if (!Array.isArray(inspection.lspServers) || inspection.lspServers.length !== 0) {
     throw new Error("grok copresence refuses discovered LSP servers");

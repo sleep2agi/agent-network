@@ -3323,6 +3323,8 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
     const grokHomeKey = grokCliStateKey(NODE_ID || ALIAS || "default");
     const stateGrokRoot = join(home, ".anet-grok");
     const stateGrokHome = join(stateGrokRoot, grokHomeKey);
+    const commhubMcpServer = resolve(grokCwd, ".anet", "node-server.js");
+    const commhubMcpEnv = resolve(grokCwd, ".anet", ".env");
     const runtimeDir = join(stateGrokHome, "run");
     const leaderSocket = resolveGrokCopresenceSocket(
       opts["grok-leader-socket"]
@@ -3349,6 +3351,12 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
         stateHome: stateGrokHome,
         projectCwd: grokCwd,
         useLeader: true,
+        commhubMcp: {
+          serverPath: commhubMcpServer,
+          envFile: commhubMcpEnv,
+          alias: currentAlias(),
+          resumeId: `grok-cli-${NODE_ID || grokHomeKey}`,
+        },
         denyPaths: [
           join(grokCwd, ".anet"),
           join(home, ".anet"),
@@ -5367,7 +5375,7 @@ const requestedToolsSummary =
     ? (TOOLS.length ? `[${TOOLS.join(",")}]` : "(none)")
     : "all (Claude Code preset — built-in: WebFetch/WebSearch/Bash/Read/Write/Edit/Glob/Grep/Task/...)";
 log(`  tools:   ${GROK_COPRESENCE
-  ? "fixed preview profile [todo_write] (text-only; no filesystem/shell/network/media/MCP/subagents)"
+  ? "fixed preview profile [todo_write,search_tool,use_tool] (commhub MCP only; no filesystem/shell/web/media/subagents)"
   : requestedToolsSummary}`);
 log(`  channels:${[
   TELEGRAM_CHANNELS.length ? `telegram(${TELEGRAM_CHANNELS.map(ch => ch.dir).join(",")})` : "",

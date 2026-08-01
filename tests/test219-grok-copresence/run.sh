@@ -45,6 +45,7 @@ bun test \
   src/runtime/grok-copresence/attach.test.ts \
   ../agent-network/src/grok-attach-client.test.ts \
   ../agent-network/src/grok-copresence-profile.test.ts \
+  ../agent-network/src/owner-env-file.test.ts \
   ../agent-network/src/normalize-runtime.test.ts \
   >>"$REPORT" 2>&1 || fail "state/jsonl/attach tests"
 pass "state machine + JSONL reducer + local attach protocol"

@@ -174,7 +174,7 @@ describe("Grok copresence launch and injection policy", () => {
       .toThrow("requires exactly grok 0.2.93");
   });
 
-  test("pins one TUI-effective no-I/O agent profile and hard-denies fallback routes", () => {
+  test("pins one TUI-effective commhub-only agent profile and hard-denies fallback routes", () => {
     const args = buildGrokCopresenceArgs({
       cwd: "/workspace",
       sessionId: SESSION,
@@ -197,7 +197,7 @@ describe("Grok copresence launch and injection policy", () => {
     expect(args).toContain("--permission-mode");
     expect(args).toContain("default");
     expect(args).not.toContain("--always-approve");
-    expect(args).toContain("MCPTool");
+    expect(args).not.toContain("MCPTool");
     const denied = args.flatMap((value, index) => args[index - 1] === "--deny" ? [value] : []);
     expect(denied).toContain("Bash");
     expect(denied).toContain("Write");
@@ -279,7 +279,12 @@ describe("Grok copresence launch and injection policy", () => {
         marketplaceAllowlist: [],
         mode: "default",
       },
-      mcpServers: [],
+      mcpServers: [{
+        name: "commhub",
+        transport: "stdio",
+        target: "bun",
+        source: { type: "configToml", path: `${home}/config.toml` },
+      }],
       lspServers: [],
       plugins: [],
       agents: [
@@ -317,7 +322,23 @@ describe("Grok copresence launch and injection policy", () => {
     expect(() => assertGrokCopresenceApprovalOwnership(JSON.stringify({
       ...cleanInspection,
       mcpServers: [{ name: "project-server" }],
-    }), home)).toThrow("discovered MCP servers");
+    }), home)).toThrow("runtime-owned commhub");
+    expect(() => assertGrokCopresenceApprovalOwnership(JSON.stringify({
+      ...cleanInspection,
+      mcpServers: [...cleanInspection.mcpServers, {
+        name: "host-server",
+        transport: "stdio",
+        target: "node",
+        source: { type: "mcpJson", path: "/workspace/.mcp.json" },
+      }],
+    }), home)).toThrow("exactly one");
+    expect(() => assertGrokCopresenceApprovalOwnership(JSON.stringify({
+      ...cleanInspection,
+      mcpServers: [{
+        ...cleanInspection.mcpServers[0],
+        source: { type: "configToml", path: "/home/user/.grok/config.toml" },
+      }],
+    }), home)).toThrow("runtime-owned commhub");
     expect(() => assertGrokCopresenceApprovalOwnership(JSON.stringify({
       ...cleanInspection,
       lspServers: [{ name: "project-lsp" }],

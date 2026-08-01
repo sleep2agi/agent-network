@@ -725,6 +725,16 @@ describe("prepareGrokCliHome", () => {
     const secretDir = join(root, "project", ".anet");
     mkdirSync(sourceHome, { recursive: true });
     mkdirSync(secretDir, { recursive: true });
+    const commhubServer = join(secretDir, "node-server.js");
+    const commhubEnv = join(secretDir, ".env");
+    writeFileSync(commhubServer, "// reviewed commhub MCP server\n", { mode: 0o600 });
+    writeFileSync(commhubEnv, "COMMHUB_TOKEN=ntok_test\n", { mode: 0o600 });
+    const commhubMcp = {
+      serverPath: commhubServer,
+      envFile: commhubEnv,
+      alias: "指挥狗",
+      resumeId: "grok-cli-n_test",
+    };
     const sourceAuth = join(sourceHome, "auth.json");
     writeFileSync(sourceAuth, "{}\n", { mode: 0o600 });
     for (const extensionDir of ["agents", "skills", "commands", "lsp", "lsp-servers"]) {
@@ -740,12 +750,19 @@ describe("prepareGrokCliHome", () => {
       denyPaths: [secretDir],
       projectCwd: join(root, "project"),
       useLeader: true,
+      commhubMcp,
     });
 
     const config = readFileSync(join(stateHome, "config.toml"), "utf8");
     expect(config).toContain("[cli]\nuse_leader = true");
     expect(config).toContain('[ui]\ndefault_selected_permission = "allow_once"');
     expect(config).toContain("remember_tool_approvals = false");
+    expect(config).toContain("[mcp_servers.commhub]");
+    expect(config).toContain('command = "bun"');
+    expect(config).toContain(`args = [${JSON.stringify(commhubServer)}]`);
+    expect(config).toContain(`ANET_COMMHUB_ENV_FILE = ${JSON.stringify(commhubEnv)}`);
+    expect(config).toContain('COMMHUB_ALIAS = "指挥狗"');
+    expect(config).not.toContain("ntok_test");
     expect(readFileSync(join(stateHome, "requirements.toml"), "utf8"))
       .toBe("[ui]\ndisable_bypass_permissions_mode = true\nyolo = false\n");
     const trustStore = join(stateHome, "trusted_folders.toml");
@@ -769,8 +786,8 @@ describe("prepareGrokCliHome", () => {
     expect(agentProfile).toContain("discoverSkills: false");
     expect(agentProfile).toContain("inheritSkills: false");
     expect(agentProfile).toContain("ANET_COPRESENCE_PROFILE_V1");
-    expect(agentProfile).toContain("tools:\n  - todo_write\n");
-    expect(agentProfile).toContain("disallowedTools:\n  - search_tool\n  - use_tool\n");
+    expect(agentProfile).toContain("tools:\n  - todo_write\n  - search_tool\n  - use_tool\n");
+    expect(agentProfile).not.toContain("disallowedTools:");
     expect(agentProfile).not.toMatch(/^  - (?:read_file|search_replace|run_terminal|web_|image_|video_)/m);
     expect(statSync(prepared.copresenceAgentProfile!).mode & 0o777).toBe(0o600);
     expect(() => assertGrokCopresenceAgentProfile(prepared.copresenceAgentProfile!, stateHome))
@@ -785,6 +802,7 @@ describe("prepareGrokCliHome", () => {
       denyPaths: [secretDir],
       projectCwd: join(root, "project"),
       useLeader: true,
+      commhubMcp,
     });
     writeFileSync(prepared.copresenceAgentProfile!, "---\nname: changed\n---\n", { mode: 0o600 });
     expect(() => assertGrokCopresenceAgentProfile(prepared.copresenceAgentProfile!, stateHome))
@@ -796,6 +814,7 @@ describe("prepareGrokCliHome", () => {
       denyPaths: [secretDir],
       projectCwd: join(root, "project"),
       useLeader: true,
+      commhubMcp,
     });
     expect(() => assertGrokCopresenceAgentProfile(prepared.copresenceAgentProfile!, stateHome))
       .not.toThrow();
@@ -810,6 +829,7 @@ describe("prepareGrokCliHome", () => {
       denyPaths: [secretDir],
       projectCwd: join(root, "project"),
       useLeader: true,
+      commhubMcp,
     })).toThrow("expected a regular file");
     expect(readFileSync(externalProfile, "utf8")).toBe("external\n");
     expect(statSync(externalProfile).mode & 0o777).toBe(0o644);
@@ -837,6 +857,49 @@ describe("prepareGrokCliHome", () => {
     expect(readFileSync(join(stateHome, "config.toml"), "utf8"))
       .not.toContain("default_selected_permission");
     expect(readFileSync(join(stateHome, "sandbox.toml"), "utf8")).toContain(sourceAuth);
+  });
+
+  it("admits only canonical owner-held commhub MCP artifacts", () => {
+    const root = mkdtempSync(join(tmpdir(), "grok-cli-commhub-mcp-"));
+    roots.push(root);
+    const sourceHome = join(root, "source");
+    const stateHome = join(root, "state");
+    const project = join(root, "project");
+    const anetDir = join(project, ".anet");
+    mkdirSync(sourceHome, { recursive: true });
+    mkdirSync(anetDir, { recursive: true });
+    writeFileSync(join(sourceHome, "auth.json"), "{}\n", { mode: 0o600 });
+    const serverPath = join(anetDir, "node-server.js");
+    const envFile = join(anetDir, ".env");
+    writeFileSync(serverPath, "// server\n", { mode: 0o600 });
+    writeFileSync(envFile, "COMMHUB_TOKEN=ntok_secret\n", { mode: 0o600 });
+    const base = {
+      sourceHome,
+      stateRoot: dirname(stateHome),
+      stateHome,
+      denyPaths: [anetDir],
+      projectCwd: project,
+      useLeader: true,
+    };
+    const valid = { serverPath, envFile, alias: "node-a", resumeId: "grok-cli-n_a" };
+
+    expect(() => prepareGrokCliHome({ ...base, commhubMcp: valid })).not.toThrow();
+    const config = readFileSync(join(stateHome, "config.toml"), "utf8");
+    expect(config).toContain("[mcp_servers.commhub]");
+    expect(config).not.toContain("ntok_secret");
+
+    chmodSync(envFile, 0o644);
+    expect(() => prepareGrokCliHome({ ...base, commhubMcp: valid }))
+      .toThrow("environment is not an owner-held canonical file");
+    chmodSync(envFile, 0o600);
+    expect(() => prepareGrokCliHome({
+      ...base,
+      commhubMcp: { ...valid, serverPath: join(root, "outside-node-server.js") },
+    })).toThrow("canonical project .anet artifacts");
+    expect(() => prepareGrokCliHome({
+      ...base,
+      commhubMcp: { ...valid, alias: "bad\nalias" },
+    })).toThrow("alias is invalid");
   });
 
   it("rejects a shared auth path covered by a required sandbox deny before state mutation", () => {

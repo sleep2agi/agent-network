@@ -91,7 +91,12 @@ if (argv[0] === "inspect" && argv.includes("--json")) {
   process.stdout.write(JSON.stringify({
     hooks: [],
     plugins: [],
-    mcpServers: [],
+    mcpServers: [{
+      name: "commhub",
+      transport: "stdio",
+      target: "bun",
+      source: { type: "configToml", path: `${process.env.GROK_HOME}/config.toml` },
+    }],
     lspServers: [],
     agents: [
       { name: "general-purpose", source: { type: "builtin" } },
@@ -165,11 +170,10 @@ const expectedAgentProfile = [
   "inheritSkills: false",
   "tools:",
   "  - todo_write",
-  "disallowedTools:",
   "  - search_tool",
   "  - use_tool",
   "---",
-  "ANET_COPRESENCE_PROFILE_V1: Answer the current user directly. Do not claim filesystem, shell, network, media, MCP, or subagent access.",
+  "ANET_COPRESENCE_PROFILE_V1: Answer the current user directly. Only the runtime-owned commhub MCP integration is available; do not claim filesystem, shell, web/media, or subagent access.",
   "",
 ].join("\n");
 
@@ -247,8 +251,9 @@ const sandboxObservation = selectedSandboxObservation();
 const sandboxEnvMatchesArgv = process.env.GROK_SANDBOX === valueAfter("--sandbox");
 const authPathSandboxDenied = sandboxObservation.authPathDenied;
 const deniedTools = argv.flatMap((value, index) => argv[index - 1] === "--deny" ? [value] : []);
-const requiredDenyToolsPresent = ["Bash", "Write", "MCPTool", "WebFetch"]
+const requiredDenyToolsPresent = ["Bash", "Write", "WebFetch"]
   .every((tool) => deniedTools.includes(tool));
+const forbiddenMcpDenyAbsent = !deniedTools.includes("MCPTool");
 const agentProfileExact = verifyAgentProfile();
 const tuiFlagsExact = ["--no-auto-update", "--disable-web-search", "--no-subagents", "--no-memory"]
   .every((flag) => argv.includes(flag))
@@ -277,6 +282,10 @@ if (authPathSandboxDenied) {
 if (!requiredDenyToolsPresent) {
   process.stderr.write("fake grok: shared TUI must hard-deny Bash and Write\n");
   process.exit(67);
+}
+if (!forbiddenMcpDenyAbsent) {
+  process.stderr.write("fake grok: shared TUI must not deny its exact commhub MCP dispatcher\n");
+  process.exit(70);
 }
 if (!requiredProtectedPathDeniesPresent) {
   process.stderr.write("fake grok: shared TUI must protect source and state homes from model file tools\n");
@@ -338,6 +347,7 @@ recordEnvironment("spawn", {
   sandboxEnvMatchesArgv,
   authPathSandboxDenied,
   requiredDenyToolsPresent,
+  forbiddenMcpDenyAbsent,
   requiredProtectedPathDeniesPresent,
   agentProfileExact,
   tuiFlagsExact,

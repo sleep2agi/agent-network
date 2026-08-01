@@ -45,7 +45,7 @@ const fixedProfileSource = process.argv[3] ?? "";
 const resultPath = process.argv[4] ?? "";
 let root = "";
 const marker = "ANET_COPRESENCE_PROFILE_V1";
-const expectedTools = ["todo_write"];
+const expectedTools = ["search_tool", "todo_write", "use_tool"];
 let fixedProfile = "";
 let canonicalBinary = "";
 let currentPhase = "bootstrap";
@@ -1384,7 +1384,7 @@ function factsForRows(rows, {
     exactMainRequests: Math.min(exactMain.length, 4096),
     exactAuxiliaryRequests: Math.min(exactAuxiliary.length, 4096),
     unsafeMutationRequests: Math.min(main.filter((row) =>
-      row.names.some((name) => name !== "todo_write")).length, 4096),
+      row.names.some((name) => !expectedTools.includes(name))).length, 4096),
     spawned,
     exited,
     leaderObserved,
@@ -1499,7 +1499,6 @@ async function runTui(state, label, sessionId, resume, {
     "--no-memory",
     "--deny", "Bash",
     "--deny", "Write",
-    "--deny", "MCPTool",
     "--deny", "WebFetch",
     ...[state.home, state.sandboxDenyPath, "/proc"].flatMap((protectedPath) => [
       "--deny", shellQuote(`Read(${protectedPath})`),
@@ -1895,7 +1894,7 @@ async function runProbe() {
 
   const defaultsMutationProfile = replaceExactly(
     replaceExactly(fixedProfile, "injectDefaultTools: false", "injectDefaultTools: true", "default-tool"),
-    "tools:\n  - todo_write\n",
+    "tools:\n  - todo_write\n  - search_tool\n  - use_tool\n",
     "tools: []\n",
     "default-tool",
   );
@@ -1908,14 +1907,14 @@ async function runProbe() {
     false,
     {
       mode: "mutation",
-      mutationPredicate: (row) => row.names.some((name) => name !== "todo_write"),
+      mutationPredicate: (row) => row.names.some((name) => !expectedTools.includes(name)),
     },
   );
   results.push(defaultsMutation);
   const defaultsMain = defaultsMutation.rows.filter((row) => row.marker);
   if (!defaultsMain.length
     || defaultsMain.some((row) => !row.promptNonce)
-    || !defaultsMain.some((row) => row.names.some((name) => name !== "todo_write"))) {
+    || !defaultsMain.some((row) => row.names.some((name) => !expectedTools.includes(name)))) {
     throw new ProbeFailure("mutation_defaults", "mutation_not_observed", defaultsMutation.facts);
   }
   if (passesFixedGate(defaultsMutation.rows)) {
@@ -1924,8 +1923,8 @@ async function runProbe() {
 
   const readMutationProfile = replaceExactly(
     fixedProfile,
-    "tools:\n  - todo_write\n",
-    "tools:\n  - todo_write\n  - read_file\n",
+    "tools:\n  - todo_write\n  - search_tool\n  - use_tool\n",
+    "tools:\n  - todo_write\n  - search_tool\n  - use_tool\n  - read_file\n",
     "read_file",
   );
   const readState = createProbeState("mutation-read");
@@ -1951,7 +1950,8 @@ async function runProbe() {
     throw new ProbeFailure("mutation_read", "mutation_not_red", readMutation.facts);
   }
 
-  // Exercise the only model tool that the preview intentionally exposes.
+  // Exercise the session-local todo helper independently from the two audited
+  // MCP dispatcher tools.
   // This is a separate session so the fresh/resume continuity proof above
   // remains unchanged and no lifecycle record can be inherited from it.
   const todoState = createProbeState("todo-lifecycle");

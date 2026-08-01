@@ -12,12 +12,16 @@ import { dirname, join, resolve } from "path";
 /**
  * Pinned Grok 0.2.93 ignores `--tools` in its interactive TUI.  The preview
  * therefore uses one runtime-owned agent profile and verifies the effective
- * request inventory independently.  Keep this list deliberately free of
- * filesystem, process, network, media, MCP, subagent, and scheduler tools:
- * the shared process must retain access to its owner-only auth file, while a
- * network prompt must never gain a model-tool path to that file.
+ * request inventory independently.  The two MCP dispatcher tools are useful
+ * only because startup separately proves that exactly one runtime-owned
+ * `commhub` server was discovered.  Filesystem, process, web/media, subagent,
+ * and scheduler tools remain absent.
  */
-export const GROK_COPRESENCE_EFFECTIVE_TOOLS = ["todo_write"] as const;
+export const GROK_COPRESENCE_EFFECTIVE_TOOLS = [
+  "todo_write",
+  "search_tool",
+  "use_tool",
+] as const;
 
 export const GROK_COPRESENCE_AGENT_NAME = "anet-copresence-preview";
 export const GROK_COPRESENCE_AGENT_FILE = `${GROK_COPRESENCE_AGENT_NAME}.md`;
@@ -33,11 +37,8 @@ export function renderGrokCopresenceAgentProfile(): string {
     "inheritSkills: false",
     "tools:",
     ...GROK_COPRESENCE_EFFECTIVE_TOOLS.map((tool) => `  - ${tool}`),
-    "disallowedTools:",
-    "  - search_tool",
-    "  - use_tool",
     "---",
-    `${GROK_COPRESENCE_PROFILE_MARKER}: Answer the current user directly. Do not claim filesystem, shell, network, media, MCP, or subagent access.`,
+    `${GROK_COPRESENCE_PROFILE_MARKER}: Answer the current user directly. Only the runtime-owned commhub MCP integration is available; do not claim filesystem, shell, web/media, or subagent access.`,
     "",
   ].join("\n");
 }

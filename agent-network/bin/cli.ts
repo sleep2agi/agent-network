@@ -3891,11 +3891,13 @@ function ensureMcpJson(profile: Profile) {
   //     `CODEX_CONFIG.mcp_servers` block. That override points at the same
   //     `.anet/node-server.js`, so we still need to keep it fresh on this side.
   //
+  // grok-build-cli uses the same artifact through its runtime-owned native
+  // Grok config; it never adopts the project's `.mcp.json`.
   // claude-agent-sdk and grok-build-acp do NOT use cwd .anet/node-server.js
   // (they inject in-process via createCommhubSdkMcpServer at agent-node), so
   // they keep the early-return.
   const runtime = normalizeRuntime(profile);
-  if (runtime !== "claude-code-cli" && runtime !== "codex-sdk") return;
+  if (runtime !== "claude-code-cli" && runtime !== "codex-sdk" && runtime !== "grok-build-cli") return;
   if (!profile.channels?.some(ch => ch.includes("commhub"))) return;
 
   const mcpJsonPath = join(process.cwd(), ".mcp.json");
@@ -3992,7 +3994,8 @@ function ensureMcpJson(profile: Profile) {
   const token = profile.token || "";
   let envContent = `COMMHUB_URL=${profile.hub || "http://127.0.0.1:9200"}\n`;
   if (token) envContent += `COMMHUB_TOKEN=${token}\n`;
-  writeFileSync(anetEnvPath, envContent);
+  writeFileSync(anetEnvPath, envContent, { mode: 0o600 });
+  chmodSync(anetEnvPath, 0o600);
 
   // #245 codex-sdk fix — only write `.mcp.json` for claude-code-cli. codex-sdk
   // does not read cwd `.mcp.json`; it reads `~/.codex/config.toml [mcp_servers.*]`
@@ -4207,8 +4210,9 @@ async function launchAgent(id: string, forceNewSession = false) {
   checkRuntimeDependency(runtime, "start");
   assertStartCompatibility(runtime);
 
-  // Auto-configure .mcp.json for commhub channel
-  if (runtime !== "grok-build-cli") ensureMcpJson(profile);
+  // Prepare the local commhub stdio artifact. grok-build-cli consumes it from
+  // its isolated GROK_HOME and still refuses every project/host MCP config.
+  ensureMcpJson(profile);
 
   // Token already merged in loadProfile: project > global.
   // SSE requires a network-scoped token (ntok_); utok_ leftovers from older

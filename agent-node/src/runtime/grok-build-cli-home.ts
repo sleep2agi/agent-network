@@ -38,6 +38,15 @@ export interface PrepareGrokCliHomeOptions {
   projectCwd?: string;
   /** Enable the single live Grok TUI leader for explicit copresence mode. */
   useLeader?: boolean;
+  /** The only MCP server admitted into the shared TUI's isolated config. */
+  commhubMcp?: GrokCommhubMcpConfig;
+}
+
+export interface GrokCommhubMcpConfig {
+  serverPath: string;
+  envFile: string;
+  alias: string;
+  resumeId: string;
 }
 
 export interface GrokCliHome {
@@ -898,6 +907,46 @@ function pathContains(parent: string, candidate: string): boolean {
     && !isAbsolute(rel));
 }
 
+function validateCommhubMcpConfig(
+  config: GrokCommhubMcpConfig,
+  projectCwd: string,
+): GrokCommhubMcpConfig {
+  const projectAnet = join(projectCwd, ".anet");
+  const serverPath = resolve(config.serverPath);
+  const envFile = resolve(config.envFile);
+  if (
+    config.serverPath !== serverPath
+    || config.envFile !== envFile
+    || serverPath !== join(projectAnet, "node-server.js")
+    || envFile !== join(projectAnet, ".env")
+  ) {
+    throw new Error("grok-build-cli commhub MCP paths must be the canonical project .anet artifacts");
+  }
+  const uid = process.getuid?.();
+  for (const [path, label, expectedMode] of [
+    [serverPath, "server", undefined],
+    [envFile, "environment", 0o600],
+  ] as const) {
+    const before = lstatSync(path);
+    if (
+      before.isSymbolicLink()
+      || !before.isFile()
+      || before.nlink !== 1
+      || realpathSync(path) !== path
+      || (uid !== undefined && before.uid !== uid)
+      || (expectedMode !== undefined && (before.mode & 0o777) !== expectedMode)
+    ) {
+      throw new Error(`grok-build-cli commhub MCP ${label} is not an owner-held canonical file`);
+    }
+  }
+  for (const [value, label] of [[config.alias, "alias"], [config.resumeId, "resume id"]]) {
+    if (!value || /[\0\r\n]/.test(value)) {
+      throw new Error(`grok-build-cli commhub MCP ${label} is invalid`);
+    }
+  }
+  return { serverPath, envFile, alias: config.alias, resumeId: config.resumeId };
+}
+
 function trustedProjectDirectory(projectCwd: string, protectedPaths: readonly string[]): string {
   const lexical = resolve(projectCwd);
   const canonical = realpathSync(lexical);
@@ -1113,6 +1162,9 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
       : realpathSync(resolve(opts.projectCwd)))
     : undefined;
   if (projectCwd) assertNoProjectGrokExecutableSources(projectCwd, opts.useLeader === true);
+  const commhubMcp = opts.commhubMcp
+    ? validateCommhubMcpConfig(opts.commhubMcp, projectCwd!)
+    : undefined;
   // Validate credentials before creating or rewriting any isolated state.
   // A rejected source must not be partially adopted by this runtime.
   const sourceAuth = readPrivateSourceAuth(authPath);
@@ -1199,6 +1251,14 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
     "mcps = false",
     "hooks = false",
     "",
+    ...(commhubMcp ? [
+      "[mcp_servers.commhub]",
+      'command = "bun"',
+      `args = [${JSON.stringify(commhubMcp.serverPath)}]`,
+      `env = { ANET_COMMHUB_ENV_FILE = ${JSON.stringify(commhubMcp.envFile)}, COMMHUB_ALIAS = ${JSON.stringify(commhubMcp.alias)}, COMMHUB_RESUME_ID = ${JSON.stringify(commhubMcp.resumeId)} }`,
+      "enabled = true",
+      "",
+    ] : []),
     "[folder_trust]",
     "enabled = true",
     "",
