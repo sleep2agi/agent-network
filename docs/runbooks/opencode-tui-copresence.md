@@ -18,6 +18,15 @@ tmux attach -t opencode-指挥狗
 
 离开 TUI 而不关节点：按 `Ctrl-b`，再按 `d`。
 
+在 TUI 内可以直接要求节点通信，例如：
+
+```text
+请调用 commhub_send_message，给 通信牛 发送消息：测试完成。
+请调用 commhub_send_task，给 通信龙 派任务：检查最新候选，并把结果回给我。
+```
+
+看到 TUI 中的 `⚙ commhub_send_message` / `⚙ commhub_send_task` 和 Hub 返回的成功 ID 才表示真正发送；只有模型口头说“已发送”不算成功。
+
 停止：
 
 ```bash
@@ -46,6 +55,8 @@ anet node start opencode-指挥狗 --copresence
 
 共存模式只在 `127.0.0.1` 随机端口监听，使用每次启动随机生成的 Basic Auth 密码。agent-node 通过 `POST /session/:id/message` 把网络任务送进共享 session；人类 TUI 通过官方 `opencode attach` 连接同一个 session。共存模式不使用 ACP。
 
+每次启动还会把当前节点的 CommHub ntok 绑定到一个私有 `commhub` remote MCP。TUI 使用 `commhub_send_message`、`commhub_send_task`、`commhub_get_task`、`commhub_get_all_status` 等工具主动出站；身份由 Hub 上的 node token 决定，提示词不能把节点伪装成其他 alias。节点配置的 `provider/model` 同时写入本次 OpenCode 私有配置，避免 attach TUI 回退到另一个默认模型后只输出伪工具标记而不执行。
+
 CommHub 的两种入站语义保持分离：
 
 - `send_task` / Dashboard 任务进入共享 session，运行模型，并把回答回传给发送方。
@@ -60,6 +71,8 @@ CommHub 的两种入站语义保持分离：
 - OpenCode 版本严格固定为 `opencode-ai@1.18.1`。
 - 版本探针不接触 vendor credential；通过包身份校验后才生成一次性运行环境。
 - TUI launcher 位于节点私有目录，mode 必须为 `0700`；它包含本次启动的 loopback 密码，不得复制、打印或提交。
+- CommHub token 只通过每节点私有环境变量交给 OpenCode；MCP 配置正文只保存 `{env:...}` 引用，不内嵌 token。
+- 安全模式固定 OpenCode 1.18.1，并对该版本全部内建工具逐项 deny；动态工具只放行 `commhub_*`。OpenCode 会把对象形式 wildcard 规则移到最后，因此不能用尾部 `* = deny` 再期待较早的 MCP allow 生效。
 - server 使用 detached process group；停止前复核 PID、PGRP、Linux start ticks，身份漂移时拒绝误杀。
 - 启动桥时显式传递 PATH、`ANET_AGENT_NODE_BIN` 和可选 `ANET_OPENCODE_SAFE_BASE`，不能依赖长期 tmux server 的陈旧环境。
 - 节点模型必须以 `provider/model` 形式传入 REST message body；只写顶层 anet config、却不传 REST model，会让 OpenCode 回退到 preset 默认模型。
@@ -83,8 +96,9 @@ sg docker -c 'docker rmi anet-test227:dev'
 1. process-group、FIFO、`new_message` SSE 与 inbox 接线单元层
 2. CLI mode/tmux/陈旧环境接线层
 3. loopback + 未认证 401 + launcher 0700
-4. 真 OpenCode 1.18.1 full TUI 显示普通消息通知，且通知不污染下一条模型回复
-5. 两条真实任务 turn 后 TUI/server 仍在线
+4. 真 OpenCode 1.18.1 使用 bearer 连接隔离假 CommHub MCP，并实际调用 `send_message`
+5. full TUI 显示普通消息通知，且通知不污染下一条模型回复
+6. 两条真实任务 turn 后 TUI/server 仍在线
 
 证据：
 

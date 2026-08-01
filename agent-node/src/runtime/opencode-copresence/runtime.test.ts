@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { spawn } from "child_process";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -9,7 +9,12 @@ import {
   sameLinuxProcessGroupIdentity,
   signalExactLinuxProcessGroup,
 } from "./process-group";
-import { openVettedOpenCodeCopresence } from "./runtime";
+import {
+  OPENCODE_COMMHUB_TOKEN_ENV,
+  openVettedOpenCodeCopresence,
+  wireOpenCodeCommhubMcp,
+  wireOpenCodeDefaultModel,
+} from "./runtime";
 
 const FAKE = `#!/usr/bin/env node
 const http = require("http");
@@ -108,6 +113,62 @@ function fixture(extraEnv: NodeJS.ProcessEnv = {}) {
 }
 
 describe("OpenCode native serve+attach copresence", () => {
+  test("wires one token-bound CommHub MCP without reopening local tools", () => {
+    const root = mkdtempSync(join(tmpdir(), "opencode-commhub-config-"));
+    try {
+      const configRoot = join(root, "config");
+      const renderedConfigPath = join(configRoot, "opencode", "opencode.json");
+      mkdirSync(join(configRoot, "opencode"), { recursive: true });
+      writeFileSync(renderedConfigPath, JSON.stringify({
+        permission: { "*": "deny", bash: "deny", apply_patch: "deny" },
+        tools: { bash: false, apply_patch: false },
+      }), { mode: 0o600 });
+      const env: NodeJS.ProcessEnv = {
+        PWD: root,
+        XDG_CONFIG_HOME: configRoot,
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          tools: { bash: false, apply_patch: false },
+          permission: { "*": "deny", bash: "deny", apply_patch: "deny" },
+          mcp: {},
+        }),
+        OPENCODE_PERMISSION: JSON.stringify({ "*": "deny", bash: "deny", apply_patch: "deny" }),
+      };
+      wireOpenCodeCommhubMcp(env, {
+        url: "http://127.0.0.1:9200/mcp",
+        token: "ntok_test_secret",
+        alias: "opencode-test",
+      });
+      wireOpenCodeDefaultModel(env, "opencode/north-mini-code-free");
+      const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT!);
+      const permission = JSON.parse(env.OPENCODE_PERMISSION!);
+      expect(config.mcp.commhub).toEqual({
+        type: "remote",
+        url: "http://127.0.0.1:9200/mcp",
+        enabled: true,
+        oauth: false,
+        headers: { Authorization: `Bearer {env:${OPENCODE_COMMHUB_TOKEN_ENV}}` },
+      });
+      expect(config.tools.bash).toBe(false);
+      expect(config.model).toBe("opencode/north-mini-code-free");
+      expect(config.tools["commhub_*"]).toBe(true);
+      expect(config.permission["*"]).toBeUndefined();
+      expect(config.permission.apply_patch).toBe("deny");
+      expect(config.tools.apply_patch).toBe(false);
+      expect(permission["*"]).toBeUndefined();
+      expect(permission.bash).toBe("deny");
+      expect(permission["commhub_*"]).toBe("allow");
+      expect(env[OPENCODE_COMMHUB_TOKEN_ENV]).toBe("ntok_test_secret");
+      expect(env.OPENCODE_CONFIG_CONTENT).not.toContain("ntok_test_secret");
+      expect(readFileSync(config.instructions[0], "utf8")).toContain("opencode-test");
+      expect(readFileSync(config.instructions[0], "utf8")).toContain("commhub_send_task");
+      const rendered = JSON.parse(readFileSync(renderedConfigPath, "utf8"));
+      expect(rendered.permission["*"]).toBeUndefined();
+      expect(rendered.permission.bash).toBe("deny");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test("uses one authenticated loopback session for FIFO network turns and emits an owner-only attach launcher", async () => {
     const f = fixture({ FAKE_REQUIRE_MODEL: "1" });
     let runtime: Awaited<ReturnType<typeof openVettedOpenCodeCopresence>> | undefined;

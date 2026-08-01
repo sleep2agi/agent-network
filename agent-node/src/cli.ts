@@ -2792,6 +2792,9 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
     expectedVersion: INITIAL_OPENCODE_VERSION,
     binarySearchPath: INITIAL_LAUNCH_PATH,
     title: `${ALIAS} · Agent Network shared TUI`,
+    commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`,
+    commhubToken: AUTH_TOKEN,
+    commhubAlias: ALIAS,
     onSession: async (id) => {
       opencodeSessionId = id;
       writebackSession(id);

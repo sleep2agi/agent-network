@@ -50,4 +50,19 @@ PASS — `tmux has-session -t opencode-指挥狗-桥` after the reply.
 PASS — no global npm package was modified; agent-node came from an isolated candidate prefix.
 PASS — stop/restart removed the current managed process group; a separately verified stale server at port 46299 (PID/PGRP 1207050, old launch cwd) was terminated by exact process group without affecting the current server at port 33655.
 
+## Layer 6 — human TUI outbound CommHub MCP
+
+Pre-fix evidence: the TUI showed no CommHub tools because its isolated config contained `mcp: {}`. An intermediate attempt connected MCP but left a trailing wildcard deny; OpenCode recorded `Model tried to call unavailable tool 'invalid'. Available tools: .` and Hub received nothing.
+
+Outbound message ID: f6f28ff0-850a-4e92-87d4-c02c538520ee
+Outbound marker: OPENCODE_TUI_OUTBOUND_20260802_0700
+Inbound message ID: 75cf821f-300b-4bf8-9afe-e50a5b7184c7
+Bidirectional task ID: 234d2b0a-e036-4e68-80f7-e3bd0fecc207
+
+PASS — `/mcp` reported `commhub: connected` and the TUI used the configured `opencode/north-mini-code-free` model.
+PASS — a prompt typed into the full TUI executed `commhub_send_message`; Hub inbox stored the exact marker with `from_session=opencode-指挥狗` and the same message ID shown in TUI.
+PASS — all pinned local tools remained explicitly denied; `commhub_*` was the only dynamic allow.
+PASS — after MCP enablement, an inbound ordinary message still displayed and the Hub task replied exactly `[opencode-指挥狗] OPENCODE_BIDIRECTIONAL_OK` in 3 seconds.
+PASS — both TUI and bridge tmux sessions remained alive.
+
 OVERALL: PASS

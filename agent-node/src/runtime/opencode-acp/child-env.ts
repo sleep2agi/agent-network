@@ -139,6 +139,12 @@ export const OPENCODE_LOCAL_TOOL_KEYS = [
   "list",
   "task",
   "skill",
+  // Exact 1.18.1 also exposes these built-ins. Keep them explicit so a
+  // copresence profile can drop OpenCode's order-normalized wildcard deny
+  // while still denying every pinned built-in except an injected MCP.
+  "todowrite",
+  "apply_patch",
+  "invalid",
   // Exact 1.18.1's web tools accept loopback, link-local, and RFC1918 URLs.
   // Safe mode is text-only and must not become an SSRF path into the host.
   "webfetch",
