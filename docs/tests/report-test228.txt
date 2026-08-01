@@ -1,0 +1,62 @@
+# Test 228 — OpenCode inbox concurrency and lifecycle wiring
+
+date: 2026-08-01T23:35:11+00:00
+bun: 1.3.1
+
+## Layer 0 — production bundle compiles
+Bundled 237 modules in 73ms
+
+  cli.js  0.94 MB  (entry point)
+
+
+## Layer 1 — serialized inbox lanes
+bun test v1.3.1 (89fa0f34)
+
+src/runtime/inbox-drain-lane.test.ts:
+(pass) inbox drain lanes > an informational lane drains while the work lane is busy [1.00ms]
+(pass) inbox drain lanes > each lane remains serial [2.00ms]
+(pass) inbox drain lanes > a failed drain is reported and does not poison later retries
+
+ 3 pass
+ 0 fail
+ 8 expect() calls
+Ran 3 tests across 1 file. [23.00ms]
+
+## Layer 2 — single-flight runtime startup
+bun test v1.3.1 (89fa0f34)
+
+src/util/single-flight.test.ts:
+(pass) single-flight resource initialization > concurrent callers share exactly one initializer [3.00ms]
+(pass) single-flight resource initialization > a rejected initializer is cleared and can be retried [1.00ms]
+
+ 2 pass
+ 0 fail
+ 9 expect() calls
+Ran 2 tests across 1 file. [24.00ms]
+
+## Layer 3 — CLI integration wiring
+bun test v1.3.1 (89fa0f34)
+
+src/runtime/opencode-copresence/inbox-wiring.test.ts:
+(pass) OpenCode copresence CommHub message wiring > work and informational drains are independent lanes [3.00ms]
+(pass) OpenCode copresence CommHub message wiring > new_message SSE uses a non-blocking informational lane
+(pass) OpenCode copresence CommHub message wiring > message is displayed as a non-replying TUI notification in the fast drain
+(pass) OpenCode copresence CommHub message wiring > the task drain does not claim OpenCode copresence messages [1.00ms]
+(pass) OpenCode copresence CommHub message wiring > startup and SSE reconnect both recover pending informational messages
+(pass) OpenCode copresence CommHub message wiring > runtime startup is single-flight and shutdown waits for an in-flight open
+(pass) OpenCode copresence CommHub message wiring > tmux SIGHUP enters the same cleanup path as SIGTERM [1.00ms]
+
+ 7 pass
+ 0 fail
+ 22 expect() calls
+Ran 7 tests across 1 file. [42.00ms]
+
+OVERALL: PASS
+
+## Mutation evidence
+
+- Removing the single-flight `active` reuse made the helper suite fail: 1 pass, 1 fail (`EXPECTED_RED`).
+- Replacing the CLI single-flight call with an uncoalesced promise made the wiring suite fail: 6 pass, 1 fail (`EXPECTED_RED`).
+- Removing the `SIGHUP` shutdown registration made the wiring suite fail: 6 pass, 1 fail (`EXPECTED_RED`).
+
+All three mutations changed production or production wiring only; test files were unchanged.

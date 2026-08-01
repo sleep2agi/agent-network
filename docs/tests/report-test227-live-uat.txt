@@ -98,4 +98,15 @@ PASS — after installing the candidate into the isolated node prefix and restar
 PASS — Hub inbox independently read back the exact marker, `type=message`, and `from_session=opencode-指挥狗`.
 PASS — live entry point is `tmux attach -t opencode-指挥狗`; the similarly named `指挥狗` session is a separate Grok node.
 
+## Layer 10 — offline recovery startup race and tmux cleanup
+
+First offline message ID: 13cbe1f4-0cd5-41be-8e44-3f643bdb7629
+Single-flight verification message ID: fb4e9444-2bf5-432f-bdf6-436731d449fc
+
+WITNESSED RED — before single-flight initialization, an offline pending message raced the normal startup path. One agent-node logged two different `ready session=` values and spawned two OpenCode servers (ports 42763 and 36493).
+PASS — after the fix, the same offline recovery shape logged exactly one `ready session=`, one human launcher, one direct OpenCode serve child, and displayed/acked message `fb4e9444`.
+WITNESSED RED — killing the bridge tmux previously left detached server PID 2398228 alive because the node did not handle tmux `SIGHUP`.
+PASS — after registering `SIGHUP` on the normal shutdown path, exact `tmux kill-session` removed agent PID 2444356 and its detached serve PID 2444495 within one second.
+PASS — the final restart again produced one runtime/session and left both exact tmux windows online.
+
 OVERALL: PASS

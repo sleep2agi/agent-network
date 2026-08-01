@@ -90,6 +90,7 @@ import {
 } from "./runtime/opencode-acp/profile-state";
 import { OPENCODE_DEFAULT_PIN } from "./runtime/opencode-acp/binary";
 import { createInboxDrainLane } from "./runtime/inbox-drain-lane";
+import { createSingleFlight } from "./util/single-flight";
 
 const home = homedir();
 
@@ -1551,6 +1552,9 @@ if (RUNTIME === "opencode" && opencodeMode !== "headless" && opencodeMode !== "c
 }
 let opencodeCopresenceSession:
   import("./runtime/opencode-copresence/runtime").OpenCodeCopresenceSession | null = null;
+const opencodeCopresenceOpening = createSingleFlight<
+  import("./runtime/opencode-copresence/runtime").OpenCodeCopresenceSession
+>();
 
 // RFC-030 — codex-app-server runtime state.
 // `codexAppServerThreadId` is the persisted codex thread this node binds
@@ -2785,43 +2789,54 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
   import("./runtime/opencode-copresence/runtime").OpenCodeCopresenceSession
 > {
   if (opencodeCopresenceSession?.isRunning) return opencodeCopresenceSession;
-  if (opencodeCopresenceSession) {
-    await opencodeCopresenceSession.close().catch((error: any) => {
-      warn(`[opencode-copresence] stale runtime cleanup failed: ${error?.message ?? error}`);
+  return opencodeCopresenceOpening.run(async () => {
+    if (opencodeCopresenceSession?.isRunning) return opencodeCopresenceSession;
+    if (opencodeCopresenceSession) {
+      await opencodeCopresenceSession.close().catch((error: any) => {
+        warn(`[opencode-copresence] stale runtime cleanup failed: ${error?.message ?? error}`);
+      });
+      opencodeCopresenceSession = null;
+    }
+    const { openOpenCodeCopresenceRuntime } =
+      await import("./runtime/opencode-copresence/runtime");
+    const opened = await openOpenCodeCopresenceRuntime({
+      cwd: process.cwd(),
+      workDir: NODE_DIR,
+      model: MODEL,
+      unsafeTools: fileConfig.flags?.opencodeUnsafeTools === true,
+      binary: INITIAL_OPENCODE_BIN,
+      expectedVersion: INITIAL_OPENCODE_VERSION,
+      binarySearchPath: INITIAL_LAUNCH_PATH,
+      title: `${ALIAS} · Agent Network shared TUI`,
+      commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`,
+      commhubToken: AUTH_TOKEN,
+      commhubAlias: ALIAS,
+      onSession: async (id) => {
+        opencodeSessionId = id;
+        writebackSession(id);
+      },
+      log,
+      warn,
     });
-    opencodeCopresenceSession = null;
-  }
-  const { openOpenCodeCopresenceRuntime } =
-    await import("./runtime/opencode-copresence/runtime");
-  const opened = await openOpenCodeCopresenceRuntime({
-    cwd: process.cwd(),
-    workDir: NODE_DIR,
-    model: MODEL,
-    unsafeTools: fileConfig.flags?.opencodeUnsafeTools === true,
-    binary: INITIAL_OPENCODE_BIN,
-    expectedVersion: INITIAL_OPENCODE_VERSION,
-    binarySearchPath: INITIAL_LAUNCH_PATH,
-    title: `${ALIAS} · Agent Network shared TUI`,
-    commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`,
-    commhubToken: AUTH_TOKEN,
-    commhubAlias: ALIAS,
-    onSession: async (id) => {
-      opencodeSessionId = id;
-      writebackSession(id);
-    },
-    log,
-    warn,
+    if (!opened.isRunning) {
+      await opened.close().catch(() => {});
+      throw new Error("OpenCode copresence server exited while opening");
+    }
+    opencodeCopresenceSession = opened;
+    log(`[opencode-copresence] human TUI launcher: ${opened.attachScriptPath}`);
+    return opened;
   });
-  if (!opened.isRunning) {
-    await opened.close().catch(() => {});
-    throw new Error("OpenCode copresence server exited while opening");
-  }
-  opencodeCopresenceSession = opened;
-  log(`[opencode-copresence] human TUI launcher: ${opened.attachScriptPath}`);
-  return opened;
 }
 
 async function closeOpencodeRuntime(reason: string): Promise<void> {
+  // An inbox recovery drain can race startup. Wait for that one shared open
+  // attempt before closing so shutdown cannot orphan a just-created server.
+  const opening = opencodeCopresenceOpening.pending();
+  if (opening) {
+    await opening.catch((e: any) => {
+      warn(`[opencode-copresence] startup failed while stopping: ${e?.message || e}`);
+    });
+  }
   if (opencodeCopresenceSession) {
     log(`[opencode-copresence] stopping shared server (${reason})`);
     await opencodeCopresenceSession.close().catch((e: any) => {
@@ -4806,6 +4821,10 @@ const shutdown = async () => {
 };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+// tmux kill-session closes the foreground pane with SIGHUP. Copresence uses a
+// detached OpenCode server, so ignoring SIGHUP would orphan that server and
+// leave a stale attach endpoint behind on every exact tmux restart.
+process.on("SIGHUP", shutdown);
 if (RUNTIME === "opencode" && opencodeMode === "copresence") {
   try {
     await ensureOpencodeCopresenceRuntime();

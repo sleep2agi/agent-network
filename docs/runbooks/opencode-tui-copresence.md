@@ -66,6 +66,8 @@ CommHub 的两种入站语义保持分离：
 
 网络提交前读取 `/session/status`：已有 human/network turn 忙时排队，agent-node 内部的多条网络任务再经过 FIFO 串行化。OpenCode 1.18.1 仍没有原子“空闲检查并认领”API，因此人类可能恰好在空闲检查后开始输入；这是已知 preview 并发竞态，不能宣称强 lease。
 
+启动也必须串行化：离线期间积压的普通消息会在注册后触发恢复 drain，它可能与主启动路径同时请求 OpenCode runtime。实现使用 single-flight 合并这些请求；否则一个 node 会生成两个 server/session，attach 脚本也会被后写者覆盖。
+
 ## 安全与生命周期
 
 - OpenCode 版本严格固定为 `opencode-ai@1.18.1`。
@@ -74,12 +76,14 @@ CommHub 的两种入站语义保持分离：
 - CommHub token 只通过每节点私有环境变量交给 OpenCode；MCP 配置正文只保存 `{env:...}` 引用，不内嵌 token。
 - 安全模式固定 OpenCode 1.18.1，并对该版本全部内建工具逐项 deny；动态工具只放行 `commhub_*`。OpenCode 会把对象形式 wildcard 规则移到最后，因此不能用尾部 `* = deny` 再期待较早的 MCP allow 生效。
 - server 使用 detached process group；停止前复核 PID、PGRP、Linux start ticks，身份漂移时拒绝误杀。
+- `SIGINT`、`SIGTERM` 和 tmux 关闭 pane 使用的 `SIGHUP` 全部进入同一 cleanup；少了 `SIGHUP` 会在 `tmux kill-session` 后遗留 detached server。
 - 启动桥时显式传递 PATH、`ANET_AGENT_NODE_BIN` 和可选 `ANET_OPENCODE_SAFE_BASE`，不能依赖长期 tmux server 的陈旧环境。
 - 节点模型必须以 `provider/model` 形式传入 REST message body；只写顶层 anet config、却不传 REST model，会让 OpenCode 回退到 preset 默认模型。
 
 ## 测试与复现
 
 正式套件：`tests/test227-opencode-tui-copresence/`。
+并发/生命周期窄套件：`tests/test228-opencode-inbox-concurrency/`。
 
 ```bash
 sg docker -c 'docker build -t anet-test227:dev \
@@ -89,6 +93,16 @@ sg docker -c 'docker run --name anet-test227-run --rm \
   -v "$PWD/docs/tests:/report" anet-test227:dev'
 
 sg docker -c 'docker rmi anet-test227:dev'
+```
+
+磁盘紧张时可先跑不安装 OpenCode 的窄套件：
+
+```bash
+sg docker -c 'docker build -t anet-test228:dev \
+  -f tests/test228-opencode-inbox-concurrency/Dockerfile .'
+sg docker -c 'docker run --rm \
+  -v "$PWD/docs/tests:/report" anet-test228:dev'
+sg docker -c 'docker rmi anet-test228:dev'
 ```
 
 验收顺序：
@@ -105,6 +119,7 @@ sg docker -c 'docker rmi anet-test227:dev'
 
 - `docs/tests/report-test227.txt`
 - `docs/tests/report-test227-live-uat.txt`
+- `docs/tests/report-test228.txt`
 
 ## 接手坐标
 
@@ -118,6 +133,8 @@ sg docker -c 'docker rmi anet-test227:dev'
 - `agent-node/src/runtime/opencode-copresence/inbox-wiring.test.ts`
 - `agent-node/src/runtime/inbox-drain-lane.ts`
 - `agent-node/src/runtime/inbox-drain-lane.test.ts`
+- `agent-node/src/util/single-flight.ts`
+- `agent-node/src/util/single-flight.test.ts`
 - `agent-network/src/opencode-copresence-cli.test.ts`
 
 实机候选节点位于 `/home/vansin/opencode-tui-live`，tmux 为 `opencode-指挥狗` / `opencode-指挥狗-桥`。它使用隔离候选 agent-node，不修改全局 npm 包。

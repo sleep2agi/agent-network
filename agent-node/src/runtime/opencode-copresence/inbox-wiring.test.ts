@@ -49,4 +49,21 @@ describe("OpenCode copresence CommHub message wiring", () => {
     const registered = cli.indexOf('log("已注册到 CommHub")');
     expect(cli.slice(registered, registered + 300)).toContain("scheduleInformationalInboxDrain()");
   });
+
+  test("runtime startup is single-flight and shutdown waits for an in-flight open", () => {
+    const ensureStart = cli.indexOf("async function ensureOpencodeCopresenceRuntime()");
+    const closeStart = cli.indexOf("async function closeOpencodeRuntime", ensureStart);
+    const ensure = cli.slice(ensureStart, closeStart);
+    expect(ensure).toContain("return opencodeCopresenceOpening.run(async () =>");
+
+    const closeEnd = cli.indexOf("// RFC-030", closeStart);
+    const close = cli.slice(closeStart, closeEnd);
+    expect(close).toContain("const opening = opencodeCopresenceOpening.pending()");
+    expect(close).toContain("await opening.catch(");
+  });
+
+  test("tmux SIGHUP enters the same cleanup path as SIGTERM", () => {
+    expect(cli).toContain('process.on("SIGTERM", shutdown)');
+    expect(cli).toContain('process.on("SIGHUP", shutdown)');
+  });
 });
