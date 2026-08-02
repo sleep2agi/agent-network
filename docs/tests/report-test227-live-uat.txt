@@ -138,7 +138,7 @@ Inbound task ID: 532ba14f-4a22-4e5b-b9e5-fa52013ebaa3
 Outbound message ID: aa4c5ea4-1636-4063-94d4-d81fe223080b
 
 WITNESSED RED — before `drainInboxBatch` existed, the new same-snapshot behavior test failed at module load; the old production loop aborted on the first failed item, so an ack failure could prevent every later ordinary message in that snapshot from being attempted.
-PASS — Docker test228 on the fix ran 14 tests with 0 failures. Its batch test proves the first item can throw while the second and third are still attempted; the CLI wiring assertion proves the production informational drain calls that helper.
+PASS — Docker test228 on the fix ran 15 tests with 0 failures. Its batch test proves the first item can throw while the second and third are still attempted; its composed retry test proves the later message is displayed before the failed first ack retries and that the first toast is not duplicated; the CLI wiring assertion proves the production informational drain calls that helper.
 PASS — after installing the exact bundle above and restarting only `opencode-指挥狗` plus `opencode-指挥狗-桥`, startup produced one ready session and one direct serve child.
 PASS — two ordinary messages sent back-to-back both produced `displayed message` records, then Hub inbox readback was empty, proving both were acknowledged.
 PASS — the current process completed the real inbound task with exact result `[opencode-指挥狗] CURRENT_SHA_TASK_OK`.

@@ -105,4 +105,36 @@ describe("inbox drain lanes", () => {
 
     expect(attempted).toEqual(["first", "second", "third"]);
   });
+
+  test("ack-only retry does not duplicate the first notification or delay the second", async () => {
+    const events: string[] = [];
+    const displayed = new Set<string>();
+    const pending = new Set(["first", "second"]);
+    let firstAckAttempts = 0;
+    const lane = createInboxDrainLane(() => {}, { initialDelayMs: 1, maxDelayMs: 1 });
+
+    lane.schedule(() => drainInboxBatch([...pending], async (item) => {
+      if (!displayed.has(item)) {
+        events.push(`notify:${item}`);
+        displayed.add(item);
+      }
+      if (item === "first" && firstAckAttempts++ === 0) {
+        events.push("ack:first:failed");
+        throw new Error("lost ack response");
+      }
+      events.push(`ack:${item}:ok`);
+      pending.delete(item);
+      displayed.delete(item);
+    }));
+
+    await lane.idle();
+    expect(events).toEqual([
+      "notify:first",
+      "ack:first:failed",
+      "notify:second",
+      "ack:second:ok",
+      "ack:first:ok",
+    ]);
+    expect(events.filter((event) => event === "notify:first")).toHaveLength(1);
+  });
 });
