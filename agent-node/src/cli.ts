@@ -3483,6 +3483,34 @@ function shouldSkipMessage(from: string, content: string, msgType?: string): str
 //         failure, leave queued for the next drain. On app-level
 //         rejection (e.g. target offline, task closed), drop with a
 //         loud warn — retrying would not help.
+// Coalescing, non-blocking inbox drain. The SSE read loop must never await a
+// task turn (see the call site comment). If events arrive while a drain is in
+// flight we set a pending flag instead of starting a second drain, then loop
+// once more so nothing that arrived mid-drain is missed. Per-message duplicate
+// work is already prevented by the `inflightMessageIds` guard inside
+// processInbox, so a coalesced re-run is safe.
+let inboxDraining = false;
+let inboxDrainPending = false;
+function drainInboxSoon(): void {
+  if (inboxDraining) {
+    inboxDrainPending = true;
+    return;
+  }
+  inboxDraining = true;
+  void (async () => {
+    try {
+      do {
+        inboxDrainPending = false;
+        await processInbox();
+      } while (inboxDrainPending);
+    } catch (e: any) {
+      warn(`inbox drain failed: ${e?.message || e}`);
+    } finally {
+      inboxDraining = false;
+    }
+  })();
+}
+
 async function processInbox() {
   // (1) Drain leftovers from previous runs.
   await drainPendingReplies();
@@ -3505,7 +3533,12 @@ async function processInbox() {
 
       // Non-task / non-broadcast: ack and move on, nothing to reply to.
       if (msgType !== "task" && msgType !== "broadcast") {
-        debug(`skip non-task message: type=${msgType}`);
+        // This used to be debug(), i.e. a plain message was acked and discarded
+        // with no trace at the default log level while the SENDER saw a
+        // successful delivery. Surface it at INFO so a dropped message is at
+        // least diagnosable. Whether plain messages should reach the model or a
+        // human TUI is a product decision, deliberately not made here.
+        log(`← [${from}] (message, not delivered to model) ${content.slice(0, 120)}`);
         await ackMessage(msg.id).catch((e: any) => warn(`ack failed for non-task ${msg.id.slice(0, 8)}: ${e.message}`));
         continue;
       }
@@ -4354,9 +4387,22 @@ async function connectSSE() {
               firstConnect = false;
               continue;
             }
-            if (["new_task", "broadcast"].includes(ev.type)) {
+            // Two defects fixed here, both observed live on 2026-08-02:
+            //  (a) `new_message` was missing from this list even though the hub
+            //      emits it (server/src/tools.ts pushEvent type:"new_message"),
+            //      so plain commhub_send_message traffic never woke a node.
+            //      Evidence from a production bridge log: new_task 96 hits,
+            //      new_message 0 hits.
+            //  (b) `await processInbox()` blocked the SSE read loop for the
+            //      whole duration of a task turn. On codex-app-server nodes a
+            //      turn can run for many minutes, so every later event queued
+            //      behind it and died on the node deadline — observed as 1932
+            //      log lines across ~6h with a task_reply count of 0. Drain off
+            //      the read loop, with a coalescing guard so overlapping events
+            //      never start two concurrent drains.
+            if (["new_task", "new_message", "broadcast"].includes(ev.type)) {
               log(`← SSE ${ev.type}`);
-              await processInbox();
+              drainInboxSoon();
             }
             if (ev.type === "new_reply") {
               log(`← SSE reply from ${ev.from || "?"}${ev.in_reply_to ? ` (task ${ev.in_reply_to.slice(0, 8)})` : ""}`);
