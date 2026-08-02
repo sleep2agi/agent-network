@@ -249,6 +249,29 @@ describe("OpenCode native serve+attach copresence", () => {
     }
   }, 15_000);
 
+  test("shows the normalized network-task sender in the shared TUI turn", async () => {
+    const f = fixture();
+    let runtime: Awaited<ReturnType<typeof openVettedOpenCodeCopresence>> | undefined;
+    try {
+      runtime = await openVettedOpenCodeCopresence({
+        binary: f.binary,
+        env: f.env,
+        cwd: f.root,
+        workDir: f.root,
+        startupTimeoutMs: 5_000,
+      });
+      const result = await runtime.submit(
+        "task:sender-visible",
+        5_000,
+        "\u0000  通信\n牛  ",
+      );
+      expect(result.replyText).toBe("FAKE_REPLY:[来自 通信 牛] task:sender-visible");
+    } finally {
+      await runtime?.close();
+      f.close();
+    }
+  }, 15_000);
+
   test("waits for an already-busy human session before injecting a network turn", async () => {
     const f = fixture({ FAKE_INITIAL_BUSY_MS: "350" });
     let runtime: Awaited<ReturnType<typeof openVettedOpenCodeCopresence>> | undefined;

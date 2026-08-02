@@ -46,6 +46,16 @@ describe("OpenCode copresence CommHub message wiring", () => {
     expect(work).toContain("continue;");
   });
 
+  test("network tasks pass their authenticated sender into the shared TUI turn", () => {
+    const start = cli.indexOf("async function processWithOpencode(");
+    const end = cli.indexOf("async function ensureOpencodeCopresenceRuntime()", start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const branch = cli.slice(start, end);
+    expect(branch).toContain("runtime.submit(task, undefined, _from)");
+    expect(branch).not.toContain("runtime.submit(task);");
+  });
+
   test("startup and SSE reconnect both recover pending informational messages", () => {
     const connected = cli.indexOf('if (ev.type === "connected")');
     const connectedEnd = cli.indexOf("continue;", connected);

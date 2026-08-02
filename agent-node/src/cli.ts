@@ -2718,7 +2718,7 @@ async function processWithOpencode(task: string, _from: string, _images?: string
   debug(`[${OPENCODE_PROCESS_BUNDLE_MARKER}] dispatch`);
   if (opencodeMode === "copresence") {
     const runtime = await ensureOpencodeCopresenceRuntime();
-    const outcome = await runtime.submit(task);
+    const outcome = await runtime.submit(task, undefined, _from);
     log(`[opencode-copresence] turn done | reply=${outcome.replyText.length}ch session=${runtime.sessionId.slice(0, 12)}`);
     return outcome.replyText || "（无回复）";
   }

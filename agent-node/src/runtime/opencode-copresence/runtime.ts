@@ -39,7 +39,7 @@ export interface OpenCodeCopresenceSession {
   readonly attachScriptPath: string;
   readonly isRunning: boolean;
   notify(message: string, timeoutMs?: number, sender?: string): Promise<void>;
-  submit(prompt: string, timeoutMs?: number): Promise<OpenCodeCopresenceSubmitResult>;
+  submit(prompt: string, timeoutMs?: number, sender?: string): Promise<OpenCodeCopresenceSubmitResult>;
   close(): Promise<void>;
 }
 
@@ -453,10 +453,17 @@ export async function openVettedOpenCodeCopresence(
           }, timeoutMs);
         })();
       },
-      submit(prompt: string, timeoutMs = 300_000) {
+      submit(prompt: string, timeoutMs = 300_000, sender?: string) {
         const operation = queue.then(async () => {
           if (!session.isRunning) throw new Error("OpenCode copresence server is not running");
           await waitUntilSessionIdle(url, password, created.id, timeoutMs);
+          const visibleSender = normalizeNoticeSender(sender);
+          // A network task becomes a visible user turn in the same session as
+          // the human TUI. Preserve the authenticated CommHub sender in that
+          // turn; otherwise the operator sees task text with no provenance.
+          const visiblePrompt = visibleSender
+            ? `[来自 ${visibleSender}] ${prompt}`
+            : prompt;
           // The server REST endpoint is the canonical network-side transport
           // in RFC-029. `opencode run --attach --session` is intentionally not
           // used here: in 1.18.1 it can wait before submitting when the same
@@ -467,7 +474,7 @@ export async function openVettedOpenCodeCopresence(
             method: "POST",
             body: JSON.stringify({
               ...(model ? { model } : {}),
-              parts: [{ type: "text", text: prompt }],
+              parts: [{ type: "text", text: visiblePrompt }],
             }),
           }, timeoutMs);
           const replyText = parseMessageReply(message);
@@ -593,7 +600,7 @@ export async function openOpenCodeCopresenceRuntime(
       get attachScriptPath() { return core!.attachScriptPath; },
       get isRunning() { return core!.isRunning; },
       notify: (message, timeoutMs, sender) => core!.notify(message, timeoutMs, sender),
-      submit: (prompt, timeoutMs) => core!.submit(prompt, timeoutMs),
+      submit: (prompt, timeoutMs, sender) => core!.submit(prompt, timeoutMs, sender),
       async close() {
         await core!.close();
         if (!cleanup()) {

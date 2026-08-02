@@ -67,6 +67,9 @@ TUI 不存在，可重新执行 `anet node start <alias> --copresence` 重建桥
 CommHub 的两种入站语义保持分离：
 
 - `send_task` / Dashboard 任务进入共享 session，运行模型，并把回答回传给发送方。
+  共享 TUI 中的任务 user turn 固定带 `[来自 <发送者>]` 前缀；发送者取自
+  CommHub 已认证消息元数据，并在显示前去控制字符、折叠空白、限制为 64 字符。
+  这与普通消息的临时 toast 是两条不同链路，两者都必须单独验收。
 - `send_message` / Dashboard 普通消息由 `new_message` SSE 立即唤醒，在 TUI 显示 15 秒通知并 ack；粗体标题直接显示 `Agent Network · 来自 <发送者>`，正文也保留 `[来自 <发送者>]` 前缀，因此发送者可在通知的两个位置识别。它不运行模型，也不写入 session 对话历史。任务处理和普通消息使用两条独立串行 drain，因此模型正在跑任务时，普通消息仍能立即显示。
 
 两条 drain 的传输错误使用 1 秒起、最高 30 秒的指数退避重试。普通消息在 notify 成功后先记本进程 displayed-id，再尝试 ack；若 ack 响应丢失，重试只补 ack，不重复弹通知。Hub 已经提交 ack、但响应在网络中丢失时，下次 inbox 快照会清掉该 displayed-id。同一 inbox 快照会逐条尝试完再抛出首个错误，因此第一条消息 ack 持续失败时，后面的普通消息仍能显示，不会被它队头阻塞。持续失败期间，同一个 drain 的重复 SSE 唤醒会合并为一个 dirty rerun；成功前不会无限堆积 promise，成功边界新到的事件仍会补跑一次。
