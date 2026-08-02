@@ -13,7 +13,7 @@ anet node create opencode-指挥狗 \
   --model opencode/north-mini-code-free
 
 anet node start opencode-指挥狗 --copresence
-tmux attach -t opencode-指挥狗
+tmux attach -t '=opencode-指挥狗'
 ```
 
 离开 TUI 而不关节点：按 `Ctrl-b`，再按 `d`。
@@ -44,6 +44,13 @@ anet node start opencode-指挥狗 --copresence
 - `<alias>`：官方 OpenCode full attach TUI
 - `<alias>-桥`：agent-node、loopback OpenCode server 和 CommHub SSE
 
+`tmux` 默认接受会话名前缀，所以必须保留 attach 命令里的前导 `=`。如果
+TUI 已退出但桥仍在线，`tmux attach -t <alias>` 会把 `<alias>` 模糊匹配到
+`<alias>-桥`，看到的只是 agent-node 日志，并不是 OpenCode。精确命令
+`tmux attach -t '=<alias>'` 会在 TUI 不存在时明确报错。
+
+若只是误入桥，先按 `Ctrl-b`、`d` 离开，再用精确命令进入。若精确命令报告
+TUI 不存在，可重新执行 `anet node start <alias> --copresence` 重建桥和 TUI；
 不要用 `pkill -f`、`killall` 或模糊 tmux 匹配停止节点。
 
 ## 实现拓扑

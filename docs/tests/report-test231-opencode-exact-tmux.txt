@@ -1,0 +1,56 @@
+# Test 231 — OpenCode TUI exact tmux target
+
+Date: 2026-08-03
+Base: b60a3ad4b49c6b11c8b158c12f03f6a174363d62
+
+## Reproduction
+
+- `tmux has-session -t '=opencode-指挥狗'` returned 1: the TUI session did not exist.
+- `tmux has-session -t '=opencode-指挥狗-桥'` returned 0: only the bridge existed.
+- The non-exact command `tmux attach -t opencode-指挥狗` prefix-matched the bridge.
+- The pane foreground command was `bun.exe` running agent-node, and the pane showed
+  agent-node logs. It was not an OpenCode TUI.
+
+## Witnessed red
+
+The regression test first required the CLI help and OpenCode startup output to use
+the exact tmux target `=<alias>`. Against the old implementation:
+
+- 5 pass
+- 2 fail
+- Docker exit code 1
+
+The failures showed both old strings still used the ambiguous target.
+
+## Fix
+
+- OpenCode copresence startup now prints `tmux attach -t '=alias'`.
+- Copresence help uses the same exact target.
+- The runbook explains tmux prefix matching and how to recover if the TUI exited
+  while `<alias>-桥` remained alive.
+
+## Docker witnessed green
+
+Command used an existing pinned Bun image and a read-only source mount:
+
+```bash
+sg docker -c "docker run --rm --user 1000:1000 \
+  -v /tmp/commniu-opencode-tui:/workspace:ro \
+  -w /workspace/agent-network oven/bun:1.3.1 \
+  bun test src/opencode-copresence-cli.test.ts"
+```
+
+Result: 7 pass, 0 fail, 20 assertions, Docker exit code 0.
+
+## Live TUI UAT
+
+- Recreated exact session `opencode-指挥狗` from its owner-only generated launcher.
+- Exact TUI and exact bridge sessions both existed concurrently.
+- TUI pane foreground command: `opencode.exe`.
+- Attach process: official `opencode attach` to the existing loopback server/session.
+- The already attached operator client was switched from `opencode-指挥狗-桥` to
+  exact session `opencode-指挥狗`.
+- Typed through the tmux TUI pane: `只回复 TUI_OK`.
+- The visible OpenCode TUI replied: `TUI_OK`.
+
+OVERALL: PASS

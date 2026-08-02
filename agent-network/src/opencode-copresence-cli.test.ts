@@ -51,7 +51,12 @@ describe("OpenCode co-presence CLI wiring", () => {
 
   test("operator help names the create, attach, and stop commands", () => {
     expect(cli).toContain("anet node create <name> --runtime opencode-cli --mode copresence");
-    expect(cli).toContain("tmux attach -t <name>");
+    expect(cli).toContain("tmux attach -t '=<name>'");
     expect(cli).toContain("anet node stop <name>");
+  });
+
+  test("prints an exact tmux target so an exited TUI cannot prefix-match the bridge", () => {
+    expect(body).toContain("tmux attach -t ${shellQuote(`=${displayName}`)}");
+    expect(body).not.toContain("tmux attach -t ${shellQuote(displayName)}");
   });
 });

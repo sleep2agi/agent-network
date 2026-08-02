@@ -719,7 +719,12 @@ async function startOpencodeCopresenceOrchestration(nodeId: string): Promise<voi
 
   console.log("");
   console.log(`[anet] ✅ OpenCode 共存节点 ${displayName} 就绪`);
-  console.log(`[anet]    attach:  tmux attach -t ${shellQuote(displayName)}`);
+  // tmux accepts unique session-name prefixes by default. If the human TUI
+  // has exited while `<alias>-桥` is still alive, `tmux attach -t <alias>`
+  // silently attaches to the bridge logs. Prefix '=' makes this an exact
+  // session lookup, so a missing TUI fails visibly instead of opening the
+  // wrong pane.
+  console.log(`[anet]    attach:  tmux attach -t ${shellQuote(`=${displayName}`)}`);
   console.log(`[anet]    stop:    anet node stop ${shellQuote(displayName)}`);
   console.log(`[anet]    bridge:  ${bridgeSession}`);
   console.log(`[anet]    mode:    opencode-cli copresence (native serve + full attach TUI)`);
@@ -2173,7 +2178,7 @@ Co-presence (human TUI + network agent share one thread):
       in tmux (<name>, <name>-appsrv, <name>-桥).
       For opencode-cli: spawn authenticated loopback serve inside the bridge
       plus the official full OpenCode attach TUI (<name>, <name>-桥).
-      Attach with: tmux attach -t <name>. Stop with: anet node stop <name>.
+      Attach with: tmux attach -t '=<name>'. Stop with: anet node stop <name>.
       OpenCode setup: anet node create <name> --runtime opencode-cli --mode copresence
       Codex defaults to a read-only sandbox. To grant full FS/network access, add
       --dangerously-allow-full-access. In an interactive TTY this prompts for
