@@ -64,6 +64,14 @@ CommHub 的两种入站语义保持分离：
 
 两条 drain 的传输错误使用 1 秒起、最高 30 秒的指数退避重试。普通消息在 notify 成功后先记本进程 displayed-id，再尝试 ack；若 ack 响应丢失，重试只补 ack，不重复弹通知。Hub 已经提交 ack、但响应在网络中丢失时，下次 inbox 快照会清掉该 displayed-id。同一 inbox 快照会逐条尝试完再抛出首个错误，因此第一条消息 ack 持续失败时，后面的普通消息仍能显示，不会被它队头阻塞。持续失败期间，同一个 drain 的重复 SSE 唤醒会合并为一个 dirty rerun；成功前不会无限堆积 promise，成功边界新到的事件仍会补跑一次。
 
+当前 agent-node 的共享 `get_inbox` 每次最多拉前 20 条，而且 Hub API
+尚不支持按消息类型过滤。因此“任务正在运行时普通消息仍能立即显示”的
+保证适用于普通消息已进入这 20 条快照的情况；若同一节点前面积压超过
+20 条更高优先级任务，普通消息可能等到它进入快照后才显示。这是 preview
+的已知队列窗口限制，不得宣称任意深度 backlog 下都有固定延迟上界。后续若
+要消除此限制，应为 Hub 增加向后兼容、network-scoped 的 inbox type filter，
+而不是改变所有运行时共享的全局优先级排序。
+
 普通消息不能使用 OpenCode `noReply` user message 伪装通知：该 API 虽然当下不生成回答，却会留下未回答的 user turn，下一条真实任务可能把它一起回答，造成延迟误回复或 agent 间回复循环。
 
 网络提交前读取 `/session/status`：已有 human/network turn 忙时排队，agent-node 内部的多条网络任务再经过 FIFO 串行化。固定版 OpenCode 1.18.1 在 idle 时实际返回空状态表；实现不会仅凭“缺状态条目”放行，而会再读 `/session/:id`，只有精确 session 仍存在时才按该固定版本的 idle 语义放行，缺 session、404 或未知状态形状都等到超时。
