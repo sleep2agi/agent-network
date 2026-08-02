@@ -94,6 +94,8 @@ import {
   writebackOpencodeSession,
 } from "./runtime/opencode-acp/profile-state";
 import { OPENCODE_DEFAULT_PIN } from "./runtime/opencode-acp/binary";
+import { createInboxDrainLane, drainInboxBatch } from "./runtime/inbox-drain-lane";
+import { createSingleFlight } from "./util/single-flight";
 
 const home = homedir();
 
@@ -1247,6 +1249,18 @@ async function drainPendingReplies(): Promise<void> {
 // from `get_inbox` (it's only marked acked when ack_inbox lands) and
 // trigger the LLM twice.
 const inflightMessageIds = new Set<string>();
+const displayedInformationalMessageIds = new Set<string>();
+
+const INBOX_RETRY = { initialDelayMs: 1_000, maxDelayMs: 30_000 } as const;
+
+const workInboxDrain = createInboxDrainLane((cause) => {
+  const error = cause as any;
+  warn(`inbox work drain failed: ${error?.message || error}`);
+}, INBOX_RETRY);
+const informationalInboxDrain = createInboxDrainLane((cause) => {
+  const error = cause as any;
+  warn(`inbox informational drain failed: ${error?.message || error}`);
+}, INBOX_RETRY);
 
 function isGoalCommand(content: string): boolean {
   return /^\s*\/(?:goal|loop)\b/i.test(content || "");
@@ -1548,6 +1562,18 @@ let opencodeRuntimeSession: import("./runtime/opencode-acp/runtime").OpencodeRun
 // Set synchronously immediately after spawn, before initialize or session/new
 // resolves. shutdown() uses this handle during the handshake window.
 let opencodeRuntimeClient: import("./runtime/opencode-acp/client").OpencodeAcpClient | null = null;
+const opencodeMode = RUNTIME === "opencode"
+  ? ((fileConfig as { opencodeMode?: unknown }).opencodeMode ?? process.env.ANET_OPENCODE_MODE ?? "headless")
+  : "headless";
+if (RUNTIME === "opencode" && opencodeMode !== "headless" && opencodeMode !== "copresence") {
+  console.error(`[${ALIAS}] invalid opencodeMode=${JSON.stringify(opencodeMode)}; expected headless or copresence`);
+  process.exit(1);
+}
+let opencodeCopresenceSession:
+  import("./runtime/opencode-copresence/runtime").OpenCodeCopresenceSession | null = null;
+const opencodeCopresenceOpening = createSingleFlight<
+  import("./runtime/opencode-copresence/runtime").OpenCodeCopresenceSession
+>();
 
 // RFC-030 — codex-app-server runtime state.
 // `codexAppServerThreadId` is the persisted codex thread this node binds
@@ -2706,6 +2732,12 @@ function sanitizeGrokCommhubLeak(text: string): string {
 const OPENCODE_PROCESS_BUNDLE_MARKER = "processWithOpencode";
 async function processWithOpencode(task: string, _from: string, _images?: string[]): Promise<string> {
   debug(`[${OPENCODE_PROCESS_BUNDLE_MARKER}] dispatch`);
+  if (opencodeMode === "copresence") {
+    const runtime = await ensureOpencodeCopresenceRuntime();
+    const outcome = await runtime.submit(task, undefined, _from);
+    log(`[opencode-copresence] turn done | reply=${outcome.replyText.length}ch session=${runtime.sessionId.slice(0, 12)}`);
+    return outcome.replyText || "（无回复）";
+  }
   const { openOpencodeRuntime, opencodeThink } =
     await import("./runtime/opencode-acp/runtime");
 
@@ -2772,7 +2804,65 @@ async function processWithOpencode(task: string, _from: string, _images?: string
   return outcome.replyText || "（无回复）";
 }
 
+async function ensureOpencodeCopresenceRuntime(): Promise<
+  import("./runtime/opencode-copresence/runtime").OpenCodeCopresenceSession
+> {
+  if (opencodeCopresenceSession?.isRunning) return opencodeCopresenceSession;
+  return opencodeCopresenceOpening.run(async () => {
+    if (opencodeCopresenceSession?.isRunning) return opencodeCopresenceSession;
+    if (opencodeCopresenceSession) {
+      await opencodeCopresenceSession.close().catch((error: any) => {
+        warn(`[opencode-copresence] stale runtime cleanup failed: ${error?.message ?? error}`);
+      });
+      opencodeCopresenceSession = null;
+    }
+    const { openOpenCodeCopresenceRuntime } =
+      await import("./runtime/opencode-copresence/runtime");
+    const opened = await openOpenCodeCopresenceRuntime({
+      cwd: process.cwd(),
+      workDir: NODE_DIR,
+      model: MODEL,
+      unsafeTools: fileConfig.flags?.opencodeUnsafeTools === true,
+      binary: INITIAL_OPENCODE_BIN,
+      expectedVersion: INITIAL_OPENCODE_VERSION,
+      binarySearchPath: INITIAL_LAUNCH_PATH,
+      title: `${ALIAS} · Agent Network shared TUI`,
+      commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`,
+      commhubToken: AUTH_TOKEN,
+      commhubAlias: ALIAS,
+      onSession: async (id) => {
+        opencodeSessionId = id;
+        writebackSession(id);
+      },
+      log,
+      warn,
+    });
+    if (!opened.isRunning) {
+      await opened.close().catch(() => {});
+      throw new Error("OpenCode copresence server exited while opening");
+    }
+    opencodeCopresenceSession = opened;
+    log(`[opencode-copresence] human TUI launcher: ${opened.attachScriptPath}`);
+    return opened;
+  });
+}
+
 async function closeOpencodeRuntime(reason: string): Promise<void> {
+  // An inbox recovery drain can race startup. Wait for that one shared open
+  // attempt before closing so shutdown cannot orphan a just-created server.
+  const opening = opencodeCopresenceOpening.pending();
+  if (opening) {
+    await opening.catch((e: any) => {
+      warn(`[opencode-copresence] startup failed while stopping: ${e?.message || e}`);
+    });
+  }
+  if (opencodeCopresenceSession) {
+    log(`[opencode-copresence] stopping shared server (${reason})`);
+    await opencodeCopresenceSession.close().catch((e: any) => {
+      warn(`[opencode-copresence] stop failed: ${e?.message || e}`);
+    });
+    opencodeCopresenceSession = null;
+  }
   const client = opencodeRuntimeClient ?? opencodeRuntimeSession?.client ?? null;
   if (client?.isRunning) {
     log(`[opencode] stopping ACP child (${reason})`);
@@ -3483,34 +3573,6 @@ function shouldSkipMessage(from: string, content: string, msgType?: string): str
 //         failure, leave queued for the next drain. On app-level
 //         rejection (e.g. target offline, task closed), drop with a
 //         loud warn — retrying would not help.
-// Coalescing, non-blocking inbox drain. The SSE read loop must never await a
-// task turn (see the call site comment). If events arrive while a drain is in
-// flight we set a pending flag instead of starting a second drain, then loop
-// once more so nothing that arrived mid-drain is missed. Per-message duplicate
-// work is already prevented by the `inflightMessageIds` guard inside
-// processInbox, so a coalesced re-run is safe.
-let inboxDraining = false;
-let inboxDrainPending = false;
-function drainInboxSoon(): void {
-  if (inboxDraining) {
-    inboxDrainPending = true;
-    return;
-  }
-  inboxDraining = true;
-  void (async () => {
-    try {
-      do {
-        inboxDrainPending = false;
-        await processInbox();
-      } while (inboxDrainPending);
-    } catch (e: any) {
-      warn(`inbox drain failed: ${e?.message || e}`);
-    } finally {
-      inboxDraining = false;
-    }
-  })();
-}
-
 async function processInbox() {
   // (1) Drain leftovers from previous runs.
   await drainPendingReplies();
@@ -3518,6 +3580,12 @@ async function processInbox() {
   const messages = await getInbox();
   if (!messages.length) return;
   for (const msg of messages) {
+    // OpenCode copresence informational messages belong to their own fast
+    // lane. Leaving them in the task drain would make a message wait behind
+    // an arbitrarily long model turn from an earlier inbox row.
+    if ((msg.type || "task") === "message" && RUNTIME === "opencode" && opencodeMode === "copresence") {
+      continue;
+    }
     // (3a) Inflight guard.
     if (inflightMessageIds.has(msg.id)) {
       debug(`skip inflight message ${msg.id.slice(0, 8)}`);
@@ -3531,7 +3599,8 @@ async function processInbox() {
       const images = await extractImagePaths(msg);
       log(`← [${from}] (${msgType}/${msg.priority || "normal"})${images.length ? ` +${images.length} image(s)` : ""} ${content.slice(0, 100)}`);
 
-      // Non-task / non-broadcast: ack and move on, nothing to reply to.
+      // Other non-task / non-broadcast messages retain their historical
+      // ack-only behavior; send_message never implies an LLM response.
       if (msgType !== "task" && msgType !== "broadcast") {
         // This used to be debug(), i.e. a plain message was acked and discarded
         // with no trace at the default log level while the SENDER saw a
@@ -3594,6 +3663,57 @@ async function processInbox() {
       inflightMessageIds.delete(msg.id);
     }
   }
+}
+
+/**
+ * Drain only human-visible OpenCode copresence messages. This deliberately
+ * runs in a different serialized lane from task processing so an SSE
+ * new_message event remains visible while a model turn is still running.
+ */
+async function processOpencodeCopresenceMessages() {
+  if (RUNTIME !== "opencode" || opencodeMode !== "copresence") return;
+
+  const messages = await getInbox();
+  const pendingInformationalIds = new Set(
+    messages.filter((msg) => (msg.type || "task") === "message").map((msg) => msg.id),
+  );
+  for (const displayedId of displayedInformationalMessageIds) {
+    if (!pendingInformationalIds.has(displayedId)) displayedInformationalMessageIds.delete(displayedId);
+  }
+  await drainInboxBatch(messages, async (msg) => {
+    if ((msg.type || "task") !== "message") return;
+    if (inflightMessageIds.has(msg.id)) {
+      debug(`skip inflight informational message ${msg.id.slice(0, 8)}`);
+      return;
+    }
+    inflightMessageIds.add(msg.id);
+    try {
+      const from = msg.from_session || "hub";
+      const content = msg.content as string;
+      log(`← [${from}] (message/${msg.priority || "normal"}) ${content.slice(0, 100)}`);
+      if (!displayedInformationalMessageIds.has(msg.id)) {
+        const runtime = await ensureOpencodeCopresenceRuntime();
+        await runtime.notify(content, undefined, from);
+        displayedInformationalMessageIds.add(msg.id);
+        log(`[opencode-copresence] displayed message ${msg.id.slice(0, 8)} from ${from}`);
+      }
+      // Do not swallow ack failure. The informational lane retries with
+      // backoff; the displayed-id set makes those retries ack-only so a lost
+      // response cannot spam duplicate TUI notifications in this process.
+      await ackMessage(msg.id);
+      displayedInformationalMessageIds.delete(msg.id);
+    } finally {
+      inflightMessageIds.delete(msg.id);
+    }
+  });
+}
+
+function scheduleWorkInboxDrain() {
+  workInboxDrain.schedule(processInbox);
+}
+
+function scheduleInformationalInboxDrain() {
+  informationalInboxDrain.schedule(processOpencodeCopresenceMessages);
 }
 
 // Helper used by both the goal-command path and the LLM-driven task path.
@@ -4385,24 +4505,30 @@ async function connectSSE() {
                 register().catch((e) => warn(`re-register failed: ${e?.message || e}`));
               }
               firstConnect = false;
+              // Drain rows that may have arrived while SSE was disconnected.
+              // Scheduling (instead of awaiting) keeps the event reader alive;
+              // informational messages have a separate lane from model work.
+              scheduleWorkInboxDrain();
+              scheduleInformationalInboxDrain();
               continue;
             }
-            // Two defects fixed here, both observed live on 2026-08-02:
-            //  (a) `new_message` was missing from this list even though the hub
-            //      emits it (server/src/tools.ts pushEvent type:"new_message"),
-            //      so plain commhub_send_message traffic never woke a node.
-            //      Evidence from a production bridge log: new_task 96 hits,
-            //      new_message 0 hits.
-            //  (b) `await processInbox()` blocked the SSE read loop for the
-            //      whole duration of a task turn. On codex-app-server nodes a
-            //      turn can run for many minutes, so every later event queued
-            //      behind it and died on the node deadline — observed as 1932
-            //      log lines across ~6h with a task_reply count of 0. Drain off
-            //      the read loop, with a coalescing guard so overlapping events
-            //      never start two concurrent drains.
-            if (["new_task", "new_message", "broadcast"].includes(ev.type)) {
+            // Two defects were found independently on both sides on 2026-08-02,
+            // and this branch's shape is the superset — keep it.
+            //  (a) `new_message` was missing from the wake list even though the
+            //      hub emits it (server/src/tools.ts pushEvent type:"new_message").
+            //      Production bridge log: new_task 96 hits, new_message 0 hits.
+            //  (b) the read loop used to `await processInbox()`, blocking for a
+            //      whole task turn; on codex-app-server a turn can run minutes,
+            //      so later events queued behind it and died on the node
+            //      deadline — 1932 log lines across ~6h with task_reply count 0.
+            // main fixed both with a single coalescing drain; this branch adds
+            // the separate informational lane copresence needs, which subsumes it.
+            if (ev.type === "new_message" && RUNTIME === "opencode" && opencodeMode === "copresence") {
               log(`← SSE ${ev.type}`);
-              drainInboxSoon();
+              scheduleInformationalInboxDrain();
+            } else if (["new_task", "new_message", "broadcast"].includes(ev.type)) {
+              log(`← SSE ${ev.type}`);
+              scheduleWorkInboxDrain();
             }
             if (ev.type === "new_reply") {
               log(`← SSE reply from ${ev.from || "?"}${ev.in_reply_to ? ` (task ${ev.in_reply_to.slice(0, 8)})` : ""}`);
@@ -4603,7 +4729,8 @@ switch (startupAction.kind) {
 
 await register();
 log("已注册到 CommHub");
-processInbox().catch((e: any) => warn(`initial inbox scan failed: ${e.message}`));
+scheduleWorkInboxDrain();
+scheduleInformationalInboxDrain();
 // RFC-024 — fire a reportStatus immediately on startup so the
 // config_snapshot reaches the hub right after register(), instead of
 // waiting up to 3 minutes for the periodic timer below to fire. Hub
@@ -4742,6 +4869,19 @@ const shutdown = async () => {
 };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+// tmux kill-session closes the foreground pane with SIGHUP. Copresence uses a
+// detached OpenCode server, so ignoring SIGHUP would orphan that server and
+// leave a stale attach endpoint behind on every exact tmux restart.
+process.on("SIGHUP", shutdown);
+if (RUNTIME === "opencode" && opencodeMode === "copresence") {
+  try {
+    await ensureOpencodeCopresenceRuntime();
+  } catch (error: any) {
+    console.error(`[${ALIAS}] OpenCode copresence startup failed: ${error?.message ?? error}`);
+    await closeOpencodeRuntime("startup failure");
+    process.exit(1);
+  }
+}
 for (const channel of TELEGRAM_CHANNELS) connectTelegram(channel);
 for (const channel of FEISHU_CHANNELS) void connectFeishu(channel);
 connectSSE();

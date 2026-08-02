@@ -1,0 +1,85 @@
+# Test 229 — Grok independent final review
+
+Reviewer: `grok测试员` (non-author)
+Date: 2026-08-02
+Review task: `261708af-d12f-4458-8907-8e43caccb314`
+Base: `6faa3d2ac1ceded3555cc0b774d94c773f7eb29c`
+Production source: `6041df589b97310b66e1b7e84233b5a7acdc102c`
+Reviewed report head: `ac339eb99317c29ea0a7db4f24b698e5d71fb631`
+
+## Verdict
+
+**PASS-WITH-CONDITIONS** — 0 BLOCKER, 0 MAJOR, 2 MINOR.
+
+The reviewer used an independent read-only copy, did not modify the author
+branch, and did not merge, publish, prune Docker, or alter the live node.
+
+## Independent checks
+
+- Provenance PASS: base is an ancestor of source; production paths are
+  unchanged after `6041df58`; later commits are documentation only.
+- Runtime, inbox-drain, single-flight, inbox-wiring, and CLI suites independently
+  re-ran as 28 pass / 0 fail / 113 assertions.
+- The focused concurrency/lifecycle subset was 16 pass / 0 fail / 53 assertions.
+- Installed bundle SHA256 independently matched
+  `8cddef4a29406dd85d3b1a9e1b350303de05d7106aaa3f50377d9dc3d47e0546`.
+- Both live tmux sessions remained present.
+- Packet task/message/outbound IDs matched live-UAT Layer 14.
+- All 14 requirement-matrix rows were code-backed and report-backed.
+
+## Focus findings
+
+The reviewer confirmed:
+
+- copresence spawns native `serve` and official `attach`, not ACP;
+- network tasks use `POST /session/:id/message`;
+- ordinary messages use `/tui/show-toast`, are acked, and do not enter model
+  history;
+- the work and informational lanes are independent while a task is busy;
+- batch draining, displayed-ID ack-only retry, and dirty-rerun coalescing cover
+  lost ack, same-snapshot head-of-line blocking, and repeated SSE wakeups;
+- startup is single-flight and shutdown handles SIGHUP plus exact process-group
+  identity;
+- missing/unknown session state remains fail-closed;
+- the production entry requires explicit `provider/model`;
+- the MCP is token-bound, secrets are absent from argv, the launcher is 0700,
+  and only `commhub_*` is dynamically allowed under the exact 1.18.1 pin;
+- overlap, 15-second toast, 20-row snapshot, same-UID secret access, and pin
+  boundaries are documented accurately.
+
+## Minor findings
+
+### M1 — lower-level test seam accepts an optional model
+
+`openVettedOpenCodeCopresence` accepts `model?: string`, so a direct caller can
+omit the REST model. The production entry `openOpenCodeCopresenceRuntime` calls
+`requireOpenCodeCopresenceModel` first and is fail-closed. The reviewer therefore
+classified this as MINOR and not a production-path defect.
+
+### M2 — reviewer did not rebuild the real-binary Docker harness
+
+Only about 3.4 GB disk was free. Under the explicit no-prune constraint, the
+reviewer reused the source-matched author Docker report and live evidence rather
+than rebuilding test227. The author-run real-binary harness and live UAT remain
+recorded in report-test227 and report-test227-live-uat; this is an independent
+review repetition gap, not a failed product test.
+
+## Accepted preview conditions
+
+1. OpenCode 1.18.1 has no atomic idle-check-and-claim; mixed human/network
+   replies remain possible in the documented race.
+2. Ordinary messages are visible as 15-second toasts, not history rows.
+3. `get_inbox` has a 20-row snapshot and no type filter, so arbitrary-backlog
+   latency is not bounded.
+4. Same UID and root can inspect the launcher/process environment; 0700 and
+   same-UID ownership are the stated boundary.
+5. The built-in tool deny list depends on the exact OpenCode 1.18.1 pin.
+
+## Recommendation
+
+Accept source `6041df58` as preview-ready with the documented conditions. Before
+broader publication, preserve the 1.18.1 pin and rerun test227 when disk permits;
+do not claim a strong session lease or unbounded inbox latency.
+
+The reviewer's full raw report was written to
+`/tmp/grok-opencode-tui-final-review-261708af.txt` on the review host.

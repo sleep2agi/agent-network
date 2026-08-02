@@ -1,0 +1,68 @@
+# Test 228 — OpenCode inbox concurrency and lifecycle wiring
+
+date: 2026-08-02T00:13:26+00:00
+bun: 1.3.1
+candidate source: 6041df589b97310b66e1b7e84233b5a7acdc102c
+
+## Layer 0 — production bundle compiles
+
+Bundled 237 modules in 84ms. The production entry point was emitted as a
+0.94 MB `cli.js` bundle.
+
+## Layer 1 — serialized and coalesced inbox lanes
+
+```text
+7 pass
+0 fail
+17 expect() calls
+Ran 7 tests across 1 file. [34.00ms]
+```
+
+Coverage includes independent work/informational lanes, per-lane serialization,
+retry backoff, same-snapshot starvation prevention, ack-only retry without a
+duplicate toast, and coalescing repeated wakeups into one dirty rerun.
+
+## Layer 2 — single-flight runtime startup
+
+```text
+2 pass
+0 fail
+9 expect() calls
+Ran 2 tests across 1 file. [22.00ms]
+```
+
+## Layer 3 — CLI integration wiring
+
+```text
+7 pass
+0 fail
+27 expect() calls
+Ran 7 tests across 1 file. [41.00ms]
+```
+
+The wiring suite proves independent lanes, SSE message wakeup, non-replying TUI
+notification display, task/message claim separation, startup and reconnect
+recovery, single-flight runtime opening, shutdown waiting, and SIGHUP cleanup.
+
+TOTAL: 16 tests, 0 failures, 53 assertions.
+
+## Witnessed-red mutation evidence
+
+- Removing single-flight active-resource reuse failed its helper test.
+- Bypassing CLI single-flight initialization failed the wiring test.
+- Removing SIGHUP shutdown registration failed the wiring test.
+- Removing the retry loop failed the lane test.
+- Swallowing informational-message ack failure failed the wiring test.
+- Before `drainInboxBatch`, the same-snapshot test failed at module load and the
+  old loop aborted before later rows. The fixed helper attempts every row before
+  rethrowing the first error.
+- The composed lost-ack test proves message two is notified and acknowledged
+  before message one's retry; message one is not displayed twice.
+- Replacing the coalescing drain with the old promise-chain behavior made 100
+  repeated wakeups execute 101 drains. The fixed implementation executes exactly
+  two: the active run and one coalesced post-boundary rerun.
+
+All mutations changed production code or production wiring only; test files
+remained unchanged.
+
+OVERALL: PASS

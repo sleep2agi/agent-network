@@ -1,0 +1,57 @@
+# Test 232 live UAT — task sender visible in OpenCode TUI
+
+Date: 2026-08-03
+Source commit: 9417ec0d6dec1375ac5f5b9538e62c7617fcdc67
+Candidate package SHA256: 0fee151c60f35ac5ba385477f2aa333a21c320c27bde71e700b2346715af83b4
+Installed bundle SHA256: b4c24eab444e85b3255b52830ca700cb964f479fd8708969620e5628c174b604
+Node: opencode-指挥狗
+Exact TUI: `=opencode-指挥狗`
+Exact bridge: `=opencode-指挥狗-桥`
+
+## Before the fix
+
+- Real message `ed003206-8bfd-4073-91cf-d058fcd50261` showed a sender-labelled
+  toast: `Agent Network · 来自 通信牛` and `[来自 通信牛] ...`.
+- Real task `3e7d5580-7f73-4cc7-a69c-271b52120133` appeared in the shared
+  conversation without any sender label.
+- This proved the previous UAT covered only the informational-message lane and
+  did not prove task provenance in the shared conversation.
+
+## Candidate installation
+
+- Built and packed source commit `9417ec0d` locally.
+- Installed only into the isolated candidate prefix
+  `/home/vansin/.local/share/anet-opencode-tui-candidate`.
+- Did not modify the global npm package.
+- Restarted via source `anet node start opencode-指挥狗 --copresence` after
+  clearing inherited `COMMHUB_*` variables.
+- Both exact tmux sessions came online; TUI foreground was `opencode.exe` and
+  bridge foreground was `bun.exe`.
+
+## Multi-sender witnessed green
+
+The real shared TUI visibly rendered all of these as user turns:
+
+1. Task `062142a6-b074-4b0d-8f18-c7d506ccce04`:
+   `[来自 通信牛] 【多节点发送者-UAT-牛1】请只回复 牛1_OK。`
+   Reply: `牛1_OK`.
+2. Task `66fe81ca-0e6d-4c31-9aa3-aef12be470b1`:
+   `[来自 grok测试员] 【多节点发送者-UAT-Grok】请只回复 GROK_OK。`
+   Reply: `GROK_OK`.
+3. Task `e752471b-b288-4748-83f3-9abb41cf4e46`:
+   `[来自 通信牛] 【多节点发送者-UAT-牛2】请只回复 牛2_OK。`
+   Reply: `牛2_OK`.
+4. Task `812f5a74-b9a5-4a81-9248-a5fa8e300871`:
+   `[来自 通信龙] 【多节点发送者-UAT-龙】请只回复 龙_OK。`
+   Reply: `龙_OK`.
+
+This covers consecutive FIFO tasks and three independently authenticated sender
+names. The sender label is not a fixed test string.
+
+## Regression evidence
+
+- Witnessed red: 14 pass, 2 fail, Docker rc 1.
+- Witnessed green: 16 pass, 0 fail, 74 assertions, Docker rc 0.
+- Worktree source was clean at the source commit before the report-only commit.
+
+OVERALL: PASS

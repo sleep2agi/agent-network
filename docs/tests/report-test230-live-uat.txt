@@ -1,0 +1,40 @@
+# Test 230 live UAT — OpenCode TUI sender label
+
+Date: 2026-08-02
+Source commit: 9f03577602368d5224dfc4289d1ffdc0d80c0970
+Candidate package: sleep2agi-agent-node-2.5.0-preview.26.tgz
+Candidate package SHA256: f666cf68355a6619dade074b61b333c7141d670e9f1bab1a6895ac2abf515e5f
+Installed bundle SHA256: 93ef8592e40a2bd47b1ac69c5a4697e1a3d7eff3470f4b569e442fe14ca23789
+Node: opencode-指挥狗
+TUI tmux: opencode-指挥狗
+Bridge tmux: opencode-指挥狗-桥
+
+## Witnessed red
+
+- Real message id: 9d21f61d-6ed2-410a-b2a1-2a5028b907ba
+- Sender: 通信牛
+- Before the fix, the bold toast title was the generic `Agent Network message`.
+- The sender appeared only inside the body as `[通信牛] ...`, so it was easy to miss.
+- The new sender-label test failed against the old production implementation:
+  6 pass, 1 fail; `POST /tui/show-toast returned HTTP 400`.
+
+## Witnessed green
+
+- Real message id: e23f9e19-ba1b-45e4-a00a-298068d3c660
+- Sender: 通信牛
+- The real attached TUI displayed the bold title:
+  `Agent Network · 来自 通信牛`
+- The context body displayed:
+  `[来自 通信牛] 标题验收：现在应该一眼看到是谁发来的`
+- The bridge acknowledged the same message as displayed from 通信牛.
+- Both exact tmux sessions remained alive after the UAT.
+
+## Docker regression
+
+- Runtime notification suite: 7 pass, 0 fail, 42 assertions.
+- Inbox-to-notification wiring suite: 7 pass, 0 fail, 27 assertions.
+- Total: 14 pass, 0 fail.
+- Generic callers without a sender retain the fallback title `Agent Network message`.
+- Sender text is normalized before display: control characters removed, whitespace collapsed, and length capped at 64 characters.
+
+OVERALL: PASS

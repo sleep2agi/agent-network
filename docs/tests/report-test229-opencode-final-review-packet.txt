@@ -1,0 +1,133 @@
+# Test 229 — OpenCode TUI copresence final review packet
+
+Prepared: 2026-08-02 Asia/Shanghai
+Branch: `feat/opencode-tui-copresence`
+Base: `6faa3d2ac1ceded3555cc0b774d94c773f7eb29c`
+Production source: `6041df589b97310b66e1b7e84233b5a7acdc102c`
+Report-only head at packet preparation: `c19f93b1269a6d0322d273b9e199896aeeffaa49`
+Status: local candidate; not merged, published, or installed globally
+
+## Review target
+
+Review the production diff from base through `6041df58`. Commits after that
+source SHA are documentation only. Provenance command:
+
+```bash
+git diff --exit-code 6041df589b97310b66e1b7e84233b5a7acdc102c..HEAD \
+  -- agent-network agent-node server tests
+```
+
+Expected result: exit 0.
+
+The TUI topology must be native OpenCode `serve` + official `attach`; the
+copresence path must not spawn `opencode acp`. Existing headless mode remains
+backward compatible and is outside this replacement topology.
+
+## Requirement-to-evidence matrix
+
+| Requirement | Authoritative evidence |
+| --- | --- |
+| Human can enter the real TUI | live tmux `opencode-指挥狗`; test227 official-attach harness |
+| Hub task reaches the shared session and replies | live task `8ab336a3-4499-47a1-af8b-437d262fc70b` |
+| Ordinary message is visible without creating a model turn | live message `467f36a4-5f7d-4dfe-9331-7eaf7ef3b7f6`; test227 notification/history-isolation checks |
+| Ordinary message remains visible while a task is busy | live chronology in test227-live Layer 14; independent work/info lane tests |
+| Human TUI can send a CommHub message | live outbound `a9396edf-6c06-4afe-b6b4-6ac677721c04`, independently read from Hub |
+| Human TUI can send and await a task | test227-live Layer 7 real task lifecycle |
+| Startup/reconnect recovers pending messages | test228 wiring; test227-live offline recovery |
+| Lost ack does not duplicate a toast or starve later rows | test228 composed retry and batch tests |
+| Repeated SSE wakeups do not grow an unbounded promise chain | test228 coalescing stress test |
+| One node creates one server/session | single-flight tests and live direct-child count |
+| Tmux exit cleans detached server | SIGHUP wiring mutation and live process-group teardown |
+| Identity is token-bound and secrets do not enter argv | test227 MCP harness; live argv and launcher-mode check |
+| Missing/unknown session state fails closed | runtime missing-session test and real 1.18.1 status probe |
+| Model does not silently fall back | explicit `provider/model` negative tests |
+| No global npm mutation | isolated prefix `/home/vansin/.local/share/anet-opencode-tui-candidate` |
+
+## Cumulative fixes and witnessed-red evidence
+
+1. Native TUI baseline: before the candidate there was no first-class
+   serve+attach copresence topology.
+2. Ordinary message receive: pre-fix Hub message stayed pending and never
+   appeared; post-fix it is shown through `/tui/show-toast` and acked.
+3. Human outbound MCP: pre-fix isolated config had no CommHub tools; an
+   intermediate wildcard-deny configuration produced an unavailable-tool
+   event and no Hub row. The pinned explicit-deny configuration performs the
+   real tool call.
+4. Busy receive: mutating the informational lane back onto the work lane makes
+   its independence test fail.
+5. Startup race: pre-fix offline recovery produced two ready sessions and two
+   serve children; single-flight mutation turns red.
+6. Tmux cleanup: pre-fix SIGHUP left a detached serve process; removing the
+   SIGHUP registration turns the wiring test red.
+7. Delivery retry: removing retry or swallowing ack failure turns focused
+   tests red.
+8. Same-snapshot starvation: before `drainInboxBatch`, the new test failed and
+   the old loop stopped at the first failed row.
+9. Ack ordering: the composed test requires message two to notify/ack before
+   message one's retry and requires only one toast for message one.
+10. Wakeup coalescing: old behavior executed 101 drains for one active plus 100
+    repeated wakeups; current code executes exactly two.
+11. Idle fail-open: old code accepted an absent status row even when the exact
+    session was missing; the negative test resolved when it had to reject.
+12. Model fallback: the new undefined/blank model test initially failed until
+    the explicit `provider/model` guard was added.
+
+All recorded mutations changed production code or production wiring while
+leaving their tests unchanged.
+
+## Test totals
+
+- test227 unit/wiring: 28 pass, 0 fail, 113 assertions
+- test227 real OpenCode Docker harness: every Layer 1–5 check true
+- test228 focused concurrency/lifecycle: 16 pass, 0 fail, 53 assertions
+- live UAT: Layers 1–14 PASS, including final keyboard reply and bidirectional
+  Hub readback
+
+Reports:
+
+- `docs/tests/report-test227.txt`
+- `docs/tests/report-test227-live-uat.txt`
+- `docs/tests/report-test228.txt`
+
+## Known preview boundaries
+
+- OpenCode 1.18.1 has no atomic idle-check-and-claim API. A human/network turn
+  can race after the idle check; the runbook defines the observable mixed-reply
+  symptom and requires retry rather than trusting that result.
+- Ordinary messages are 15-second TUI toasts because `noReply` user messages
+  pollute session history and can be answered by the next task.
+- Shared `get_inbox` fetches 20 rows and has no type filter. A message hidden
+  behind more than 20 higher-priority rows can be delayed until it enters the
+  snapshot; no arbitrary-backlog latency guarantee is claimed.
+- The owner-only launcher and serve/attach environments contain the loopback
+  password and node token. Same UID and root can inspect them; `0700` directory
+  ownership is the stated boundary.
+- Tool safety relies on the exact OpenCode 1.18.1 pin plus its enumerated
+  built-in deny list. Loosening the pin requires restoring/revalidating a
+  default wildcard deny.
+
+## Reproduction
+
+Run in increasing layers and stop on the first failure:
+
+```bash
+sg docker -c 'docker build -t anet-test228:dev \
+  -f tests/test228-opencode-inbox-concurrency/Dockerfile .'
+sg docker -c 'docker run --rm anet-test228:dev'
+sg docker -c 'docker rmi anet-test228:dev'
+
+sg docker -c 'docker build -t anet-test227:dev \
+  -f tests/test227-opencode-tui-copresence/Dockerfile .'
+sg docker -c 'docker run --rm anet-test227:dev'
+sg docker -c 'docker rmi anet-test227:dev'
+```
+
+Live candidate:
+
+```bash
+tmux attach -t 'opencode-指挥狗'
+tmux capture-pane -pt 'opencode-指挥狗-桥' -S -100
+```
+
+Installed live bundle SHA256 must be
+`8cddef4a29406dd85d3b1a9e1b350303de05d7106aaa3f50377d9dc3d47e0546`.

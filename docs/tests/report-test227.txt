@@ -1,0 +1,90 @@
+# Test 227 — OpenCode native TUI co-presence
+
+date: 2026-08-02T00:15:25+00:00
+bun: 1.3.1
+opencode: 1.18.1
+tmux: tmux 3.3a
+candidate source: 6041df589b97310b66e1b7e84233b5a7acdc102c
+
+## Layer 0 — Docker unit and wiring tests
+
+All commands ran inside Docker as UID 1000. The source tree and the real pinned
+OpenCode 1.18.1 installation were mounted read-only; the runtime base was an
+owner-only directory at `/home/bun/opencode-safe`.
+
+| Suite | Pass | Fail | Assertions |
+| --- | ---: | ---: | ---: |
+| OpenCode runtime | 6 | 0 | 42 |
+| CommHub inbox wiring | 7 | 0 | 27 |
+| Inbox drain lanes | 7 | 0 | 17 |
+| Single-flight startup | 2 | 0 | 9 |
+| `anet --copresence` CLI wiring | 6 | 0 | 18 |
+| **Total** | **28** | **0** | **113** |
+
+The runtime suite includes these fail-closed cases:
+
+- an undefined or blank model is rejected; the runtime requires explicit
+  `provider/model`;
+- a missing `/session/status` entry is not by itself considered idle;
+- when the exact `/session/:id` is also missing, submission times out instead
+  of writing to an unknown session.
+
+Witnessed red: the new model test initially failed because no model guard was
+exported. After that guard was added, the missing-session test still resolved
+under the old idle fallback when it was required to reject. Both defects were
+fixed before the 6/6 green run.
+
+## Layers 1–5 — real OpenCode Docker harness
+
+```json
+{
+  "checks": {
+    "loopback": true,
+    "session": "ses_0402b9a67ffe27RlSTVfHlRZYJ",
+    "launcherMode": 448,
+    "launcherUsesOfficialAttach": true,
+    "launcherDoesNotLogPassword": true,
+    "tuiAliveBefore": true,
+    "tuiRenderedBefore": true,
+    "informationalMessageVisible": true,
+    "tuiAliveAfterNotice": true,
+    "mcpAuthenticated": true,
+    "outboundReplyLength": 52,
+    "outboundToolCalled": true,
+    "firstReplyLength": 15,
+    "noticeDidNotLeakIntoFirstReply": true,
+    "sharedTurnVisibleInTui": true,
+    "tuiAliveAfterFirst": true,
+    "secondReplyLength": 14,
+    "tuiAliveAfterSecond": true,
+    "runtimeAliveAfterSecond": true
+  }
+}
+```
+
+The harness used the official `opencode attach` TUI and the actual pinned
+OpenCode binary. It proved loopback binding, owner-only launcher permissions,
+authenticated outbound CommHub MCP, ordinary-message display without history
+pollution, two shared network turns, and process survival after both turns.
+
+## Safety-gate negatives
+
+Three controlled setup attempts were rejected before the successful harness:
+
+1. root execution was rejected because the runtime base owner did not match;
+2. UID 1000 execution without a safe runtime base was rejected;
+3. a base beneath `/tmp` was rejected because a world-writable ancestor breaks
+   the owner-only secret boundary.
+
+The final UID 1000 run used `/home/bun/opencode-safe`, owned by UID 1000 and
+mode `0700`, and passed all layers.
+
+## Real pinned-version idle observation
+
+On OpenCode 1.18.1, `/session/status` returned the exact session as
+`{"type":"busy"}` during a TUI turn and returned `{}` after completion. The
+runtime therefore verifies the exact session still exists before interpreting
+an absent active-status row as idle. Missing, malformed, 404, and unknown states
+remain fail-closed until timeout.
+
+OVERALL: PASS

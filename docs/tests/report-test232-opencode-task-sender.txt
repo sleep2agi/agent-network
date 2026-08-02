@@ -1,0 +1,55 @@
+# Test 232 — OpenCode shared-TUI task sender
+
+Date: 2026-08-03
+Base: 8b2762f23a21ac5c614745ed3d16d8a9543850e1
+
+## Real reproduction
+
+Two real inbound kinds were sent from `通信牛` to `opencode-指挥狗`:
+
+- message `ed003206-8bfd-4073-91cf-d058fcd50261`
+- task `3e7d5580-7f73-4cc7-a69c-271b52120133`
+
+The message toast showed `Agent Network · 来自 通信牛` and
+`[来自 通信牛] ...`. The task user turn showed only
+`【发送者复现-T1】任务消息。请只回复 TASK_OK。` with no sender.
+
+Source inspection confirmed the split: `processWithOpencode(task, _from)`
+called `runtime.submit(task)` and ignored `_from`.
+
+## Witnessed red
+
+Tests first required both the runtime payload and production CLI wiring to
+carry the authenticated sender. Against the old implementation:
+
+- 14 pass
+- 2 fail
+- 73 assertions
+- Docker exit code 1
+
+The runtime returned `FAKE_REPLY:task:sender-visible` instead of the required
+`FAKE_REPLY:[来自 通信 牛] task:sender-visible`, and the wiring test found the
+old `runtime.submit(task)` call.
+
+## Fix
+
+- `OpenCodeCopresenceSession.submit` accepts an optional sender.
+- Network tasks pass `_from` into that call.
+- The visible shared-session user turn is `[来自 <sender>] <task>`.
+- Sender normalization removes control characters, collapses whitespace,
+  trims, caps at 64 characters, and falls back to the old prompt when absent.
+- The ACP/headless path is unchanged.
+
+## Docker witnessed green
+
+```bash
+sg docker -c "docker run --rm --user 1000:1000 \
+  -v /tmp/commniu-opencode-tui:/workspace:ro \
+  -w /workspace/agent-node oven/bun:1.3.1 \
+  bun test src/runtime/opencode-copresence/runtime.test.ts \
+    src/runtime/opencode-copresence/inbox-wiring.test.ts"
+```
+
+Result: 16 pass, 0 fail, 74 assertions, Docker exit code 0.
+
+Live multi-message UAT is recorded separately after candidate installation.

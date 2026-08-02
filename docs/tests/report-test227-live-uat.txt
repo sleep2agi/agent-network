@@ -1,0 +1,189 @@
+# Test 227 live UAT — OpenCode TUI co-presence
+
+Date: 2026-08-01 Asia/Shanghai
+Node: opencode-指挥狗
+Project: /home/vansin/opencode-tui-live
+TUI tmux: opencode-指挥狗
+Bridge tmux: opencode-指挥狗-桥
+OpenCode: 1.18.1
+Model: opencode/north-mini-code-free
+
+## Layer 1 — startup
+
+PASS — `anet node start opencode-指挥狗 --copresence` created both exact tmux sessions.
+PASS — full official OpenCode attach TUI rendered and remained attached to the shared session.
+PASS — bridge connected to CommHub SSE.
+
+## Layer 2 — real Hub task
+
+Task ID: a31b51ab-0d18-4260-a53b-ec87f92d0630
+Prompt marker: OPENCODE_TUI_LIVE_OK
+
+PASS — task moved delivered → running → replied.
+PASS — Hub result was `[opencode-指挥狗] OPENCODE_TUI_LIVE_OK`.
+PASS — the same prompt and assistant reply were visible in the full TUI.
+
+## Layer 3 — ordinary message receive and recovery
+
+Pre-fix message ID: df434ebb-05cf-431d-9d3c-0e998c0ba944
+Fresh message ID: 4740d01b-e17a-46f1-aa55-4f856da5d16f
+
+PASS — before the fix, `send_message` remained pending in the Hub inbox and did not wake the bridge.
+PASS — after restart on the fix, the pending message was displayed and acknowledged without running the model.
+PASS — a fresh online message triggered `new_message`, appeared immediately in the shared TUI, and left the inbox empty.
+
+## Layer 4 — notification/task isolation
+
+Message ID: 577126da-1fc1-41e2-90b6-24259cda5432
+Message marker: TOAST_ONLY_20260801_2222 / SHOULD_NEVER_APPEAR
+Task ID: db4ef761-d62d-41eb-90af-83464ce2854e
+Task marker: CLEAN_TASK_REPLY_20260801
+
+PASS — the ordinary message appeared as an `Agent Network message` TUI notification and was acknowledged.
+PASS — the next task result was exactly `[opencode-指挥狗] CLEAN_TASK_REPLY_20260801`; `SHOULD_NEVER_APPEAR` did not leak into the model reply.
+PASS — this replaces the rejected `noReply` approach, which was witnessed to delay-answer an informational message on the next task.
+
+## Layer 5 — lifecycle
+
+PASS — `tmux has-session -t opencode-指挥狗` after the reply.
+PASS — `tmux has-session -t opencode-指挥狗-桥` after the reply.
+PASS — no global npm package was modified; agent-node came from an isolated candidate prefix.
+PASS — stop/restart removed the current managed process group; a separately verified stale server at port 46299 (PID/PGRP 1207050, old launch cwd) was terminated by exact process group without affecting the current server at port 33655.
+
+## Layer 6 — human TUI outbound CommHub MCP
+
+Pre-fix evidence: the TUI showed no CommHub tools because its isolated config contained `mcp: {}`. An intermediate attempt connected MCP but left a trailing wildcard deny; OpenCode recorded `Model tried to call unavailable tool 'invalid'. Available tools: .` and Hub received nothing.
+
+Outbound message ID: f6f28ff0-850a-4e92-87d4-c02c538520ee
+Outbound marker: OPENCODE_TUI_OUTBOUND_20260802_0700
+Inbound message ID: 75cf821f-300b-4bf8-9afe-e50a5b7184c7
+Bidirectional task ID: 234d2b0a-e036-4e68-80f7-e3bd0fecc207
+
+PASS — `/mcp` reported `commhub: connected` and the TUI used the configured `opencode/north-mini-code-free` model.
+PASS — a prompt typed into the full TUI executed `commhub_send_message`; Hub inbox stored the exact marker with `from_session=opencode-指挥狗` and the same message ID shown in TUI.
+PASS — all pinned local tools remained explicitly denied; `commhub_*` was the only dynamic allow.
+PASS — after MCP enablement, an inbound ordinary message still displayed and the Hub task replied exactly `[opencode-指挥狗] OPENCODE_BIDIRECTIONAL_OK` in 3 seconds.
+PASS — both TUI and bridge tmux sessions remained alive.
+
+## Layer 7 — human TUI outbound task lifecycle
+
+Outbound task ID: 7797f592-0d3d-405c-a260-2cbea95ae193
+Task marker: OPENCODE_TUI_TASK_REQUEST_20260802
+Reply marker: OPENCODE_TUI_TASK_REPLY_20260802
+
+PASS — a prompt typed into the full TUI executed `commhub_send_task` and received a real Hub task ID.
+PASS — the TUI polled `commhub_get_task` until the task changed to `replied`, then displayed the exact peer reply.
+PASS — Hub stored the task with `from_session=opencode-指挥狗`; this was not a simulated or verbal tool call.
+
+## Layer 8 — busy task does not block ordinary messages
+
+Busy task ID: dbad2c0a-4a79-43bd-a2a1-843363c1213e
+Message ID: db6ddda8-f337-4efe-be37-ca8c8aa2bf04
+Message marker: BUSY_MESSAGE_2_VISIBLE_20260802
+
+PASS — Hub accepted the ordinary message while the node status was `working`.
+PASS — bridge chronology was: task processing at 07:20:37, message SSE/display at 07:20:38, task terminal result at 07:20:45.
+PASS — therefore the informational message became visible seven seconds before the busy task ended; it no longer waits behind the model turn.
+PASS — work and informational drains are separately serialized, and startup plus SSE reconnect both schedule the informational recovery drain.
+PASS — a controlled Docker mutation that aliases the informational lane back to the work lane makes the wiring suite fail; the safety assertion is witnessed-red.
+
+The synthetic busy task intentionally requested repeated identical tool calls and eventually hit OpenCode's `doom_loop` safety rule. That failure is not counted as a task-success assertion; only its occupied interval is used for the concurrency test.
+
+## Layer 9 — post-restart human outbound message
+
+Outbound message ID: 2fafcef9-07af-4c59-9fb5-e742d8a87dbf
+Outbound marker: HUMAN_TUI_SEND_OK_20260802_0722
+
+PASS — after installing the candidate into the isolated node prefix and restarting only the two exact node sessions, a prompt typed into the TUI executed `commhub_send_message`.
+PASS — Hub inbox independently read back the exact marker, `type=message`, and `from_session=opencode-指挥狗`.
+PASS — live entry point is `tmux attach -t opencode-指挥狗`; the similarly named `指挥狗` session is a separate Grok node.
+
+## Layer 10 — offline recovery startup race and tmux cleanup
+
+First offline message ID: 13cbe1f4-0cd5-41be-8e44-3f643bdb7629
+Single-flight verification message ID: fb4e9444-2bf5-432f-bdf6-436731d449fc
+
+WITNESSED RED — before single-flight initialization, an offline pending message raced the normal startup path. One agent-node logged two different `ready session=` values and spawned two OpenCode servers (ports 42763 and 36493).
+PASS — after the fix, the same offline recovery shape logged exactly one `ready session=`, one human launcher, one direct OpenCode serve child, and displayed/acked message `fb4e9444`.
+WITNESSED RED — killing the bridge tmux previously left detached server PID 2398228 alive because the node did not handle tmux `SIGHUP`.
+PASS — after registering `SIGHUP` on the normal shutdown path, exact `tmux kill-session` removed agent PID 2444356 and its detached serve PID 2444495 within one second.
+PASS — the final restart again produced one runtime/session and left both exact tmux windows online.
+
+## Layer 11 — final HEAD bidirectional smoke
+
+Candidate HEAD under test: fe097ef9b72c5fb4979a49e96f7204f0df02bb9e
+Inbound task ID: bab17d51-9aeb-4069-b109-d6c4f30c5a69
+Outbound message ID: b77956c2-b605-499e-9764-effa70531b1e
+
+PASS — after the single-flight and SIGHUP fixes were installed, Hub dispatched the inbound task and received exact result `[opencode-指挥狗] FINAL_HEAD_INBOUND_OK`.
+PASS — a prompt typed into the final full TUI visibly executed `commhub_send_message`.
+PASS — independent Hub inbox readback found exact content `FINAL_HEAD_OUTBOUND_OK`, `type=message`, and `from_session=opencode-指挥狗`.
+PASS — this final smoke proves the lifecycle fixes did not regress either receive or send.
+
+## Layer 12 — retry-enabled final live build
+
+Inbound message ID: 61039356-b1e7-4160-97e6-afb5a3908860
+Marker: FINAL_RETRY_BUILD_INBOUND_OK
+
+PASS — after adding exponential inbox retry and ack-only retry suppression, the isolated candidate was rebuilt and restarted.
+PASS — startup again produced exactly one `ready session=` and one direct OpenCode serve child.
+PASS — Hub `new_message` displayed the exact marker in the full TUI and the bridge acknowledged it.
+
+## Layer 13 — starvation fix and current candidate smoke
+
+Candidate source commit: 2b7b58453fd8295829f139a7f84f557554a09bf5
+Installed bundle SHA256: 91f873c76387fdcfdb2fbcba4358457c77bacc7f1c1a39b62ce9711768b49ce2
+Same-snapshot message IDs: b52b7729-f471-439f-a9e2-821718a3dc2d, 88ca079c-bc66-45d6-bc1b-b944c2620836
+Inbound task ID: 532ba14f-4a22-4e5b-b9e5-fa52013ebaa3
+Outbound message ID: aa4c5ea4-1636-4063-94d4-d81fe223080b
+
+WITNESSED RED — before `drainInboxBatch` existed, the new same-snapshot behavior test failed at module load; the old production loop aborted on the first failed item, so an ack failure could prevent every later ordinary message in that snapshot from being attempted.
+PASS — Docker test228 on the fix ran 15 tests with 0 failures. Its batch test proves the first item can throw while the second and third are still attempted; its composed retry test proves the later message is displayed before the failed first ack retries and that the first toast is not duplicated; the CLI wiring assertion proves the production informational drain calls that helper.
+PASS — after installing the exact bundle above and restarting only `opencode-指挥狗` plus `opencode-指挥狗-桥`, startup produced one ready session and one direct serve child.
+PASS — two ordinary messages sent back-to-back both produced `displayed message` records, then Hub inbox readback was empty, proving both were acknowledged.
+PASS — the current process completed the real inbound task with exact result `[opencode-指挥狗] CURRENT_SHA_TASK_OK`.
+PASS — a prompt typed into the current full TUI visibly executed `commhub_send_message`; independent Hub inbox readback found `CURRENT_SHA_OUTBOUND_OK`, `type=message`, `from_session=opencode-指挥狗`, and the exact outbound ID above.
+
+OVERALL: PASS
+
+## Layer 14 — final source, fail-closed idle, and bidirectional live proof
+
+Candidate production source: 6041df589b97310b66e1b7e84233b5a7acdc102c
+Installed bundle SHA256: 8cddef4a29406dd85d3b1a9e1b350303de05d7106aaa3f50377d9dc3d47e0546
+Inbound task ID: 8ab336a3-4499-47a1-af8b-437d262fc70b
+Concurrent ordinary-message ID: 467f36a4-5f7d-4dfe-9331-7eaf7ef3b7f6
+Human-TUI outbound message ID: a9396edf-6c06-4afe-b6b4-6ac677721c04
+
+PASS — the installed bundle hash was captured after building source commit
+`6041df58`; restarting only the two exact node sessions produced one runtime
+`ready` record and one direct `opencode serve` child.
+
+PASS — the Hub delivered a real task and received exact result
+`[opencode-指挥狗] FINAL_6041_TASK_OK`.
+
+PASS — while that task was still running, ordinary message
+`FINAL_6041_MESSAGE_OK` was displayed in the attached TUI and acknowledged. This
+proves receive traffic is not serialized behind a model turn on the final source.
+
+PASS — a prompt typed through the real tmux TUI invoked
+`commhub_send_message`; independent Hub readback found exact content
+`FINAL_6041_OUTBOUND_OK`, `from_session=opencode-指挥狗`, and the outbound ID
+above.
+
+PASS — an additional human keyboard check typed `只回复：现在可以用了` into
+the live TUI and received exact reply `现在可以用了` while both bridge and TUI
+sessions remained alive.
+
+PASS — on the immediately preceding coalescing source, ten parallel ordinary
+messages all produced display records, the inbox became empty, and only one
+direct serve child existed. Docker test228 binds that behavior to the same
+coalescing code carried unchanged into `6041df58`.
+
+PASS — a real OpenCode 1.18.1 probe observed an exact busy status during a turn
+and `{}` after the turn. Docker test227 witnessed red for the old missing-session
+idle fallback, then passed after requiring the exact session to exist.
+
+PASS — final Docker evidence is 28/28 unit/wiring tests plus the full real-binary
+harness; test228 adds 16/16 focused concurrency/lifecycle tests.
+
+FINAL LIVE RESULT: PASS
