@@ -52,6 +52,47 @@ export interface InboundAttachmentDescriptor {
   size?: number;
 }
 
+export interface FeishuRuntimeOriginInput {
+  sender?: { id?: string };
+  conversation?: {
+    conversationType?: string;
+    conversationId?: string;
+  };
+}
+
+/**
+ * Build the provenance label injected into a runtime turn.
+ *
+ * Shared TUI runtimes render `from` inside their visible task envelope.  The
+ * old Feishu path used only `feishu:<conversationId>`, so an operator could
+ * tell which chat a turn came from but not which Feishu member sent it.  Keep
+ * the stable `feishu:` channel prefix (used by the Feishu tool deny gate), add
+ * conversation type + sender id, and make every untrusted wire component safe
+ * for the bracket-delimited Codex/Grok envelopes and terminal UI.
+ */
+export function buildFeishuRuntimeOrigin(event: FeishuRuntimeOriginInput): string {
+  const safePart = (value: unknown, fallback: string): string => {
+    if (typeof value !== "string") return fallback;
+    const normalized = value
+      .normalize("NFKC")
+      .replace(/[\u0000-\u001f\u007f-\u009f\]\/\\]/g, "_")
+      .replace(/\s+/g, "_")
+      // Feishu open_id/chat_id/type values are ASCII identifiers. Keeping the
+      // alphabet narrow makes the byte bound exact (important for Grok's
+      // 256-byte envelope guard) and avoids Unicode bidi/confusable labels.
+      .replace(/[^A-Za-z0-9_.:@+-]/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 64);
+    return normalized || fallback;
+  };
+
+  const type = safePart(event.conversation?.conversationType, "unknown");
+  const conversationId = safePart(event.conversation?.conversationId, "unknown");
+  const senderId = safePart(event.sender?.id, "unknown");
+  return `feishu:${type}:${conversationId}:${senderId}`;
+}
+
 /**
  * Resolve the unified attachment descriptor list from the envelope's
  * `content` field, preferring the new `attachments[]` shape over the

@@ -31,7 +31,10 @@ import { extractExplicitDelegation } from "./explicit-delegation";
 import { maskedEnv } from "./secret-mask";
 import { maskSecretsInText, summarizeHits } from "./outbound-secret-mask";
 import { checkFeishuToolDeny, isFeishuChannelTurn } from "./feishu-tool-deny";
-import { buildAttachmentDescriptors } from "./runtime/feishu-envelope";
+import {
+  buildAttachmentDescriptors,
+  buildFeishuRuntimeOrigin,
+} from "./runtime/feishu-envelope";
 import {
   isVendorErrorForUser,
   isTransientVendorError,
@@ -4660,7 +4663,10 @@ function wireFeishuChildHandlers(
       const images = attachmentDescriptors.length > 0
         ? attachmentDescriptors.map((a) => a.path)
         : undefined;
-      const from = `feishu:${convId}`;
+      // Preserve both the Feishu conversation and the immutable sender id in
+      // the shared TUI's visible provenance label. The helper also strips
+      // terminal/control and task-envelope delimiter bytes from wire data.
+      const from = buildFeishuRuntimeOrigin(ev);
 
       // Path-based image input (Vincent 2026-06-29 simplification, RFC-020 §11):
       // Adapter already downloaded the image(s) to /work/feishu-attachments/...
