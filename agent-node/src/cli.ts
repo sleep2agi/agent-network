@@ -56,6 +56,11 @@ import {
 import { CurrentAliasResolver } from "./runtime/current-alias";
 import { delegationTargetExists } from "./runtime/delegation-precheck";
 import {
+  buildCodexAppServerReplyTask,
+  createReplyRouteCache,
+  resolveReplyRoute,
+} from "./runtime/reply-routing";
+import {
   isRateLimitOrQuotaError,
   quotaRemediationHint,
 } from "./runtime/claude-error-classify";
@@ -421,6 +426,7 @@ if (RUNTIME === "opencode") {
 // wake for the immediate originator). See sendReply() for the empirical
 // rationale. Other runtimes keep the send_reply task-lifecycle-close path.
 const REPLY_VIA_SEND_TASK = RUNTIME === "codex-app-server";
+const replyRouteCache = createReplyRouteCache();
 
 const COMMHUB_URL = opts.url || opts.hub || process.env.COMMHUB_URL || fileConfig.hub || "http://127.0.0.1:9200";
 const MODEL = opts.model || process.env.MODEL || fileConfig.model;
@@ -1149,18 +1155,28 @@ async function sendReply(
   // viewer would see as an orphaned reply from a non-existent sender).
   const fromAlias = await liveAlias();
 
-  // RFC-030 — codex-app-server replies via send_task, NOT send_reply.
-  // Empirically (isolated-hub e2e), send_reply enqueues to the originator's
-  // inbox as type='reply' but does NOT SSE-wake the immediate originator
-  // (only a chained-to-parent push fires) — an agent peer would only see it
-  // on its next poll. send_task fires a `new_task` SSE wake so the peer acts
-  // immediately, matching the network's "回复用 send_task" convention
-  // (Vincent, 2026-07-09). Failures are prefixed so the peer sees the error.
-  if (REPLY_VIA_SEND_TASK) {
+  // RFC-030 — codex-app-server replies to real agent sessions via send_task
+  // (immediate SSE wake + actionable), but dashboard/API senders are not
+  // routable sessions. Probe the roster instead of hardcoding sender names:
+  // if tomorrow dashboard changes from_name from "admin" to any other
+  // non-session label, this still falls back to send_reply and closes the
+  // original task lifecycle.
+  if (await resolveReplyRoute({
+    target,
+    taskId,
+    replyViaSendTask: REPLY_VIA_SEND_TASK,
+    cache: replyRouteCache,
+    loadSessions: async () => {
+      const status = parseToolJson(await callCommHub("get_all_status", {}));
+      return status?.sessions;
+    },
+  }) === "send_task") {
+    const replyTask = buildCodexAppServerReplyTask(message, failed);
     const taskResult = await callCommHub("send_task", {
       alias: target,
-      task: failed ? `⚠️ ${message}` : message,
-      priority: failed ? "high" : "normal",
+      task: replyTask.task,
+      priority: replyTask.priority,
+      from_session: fromAlias,
       parent_task_id: taskId || undefined,
     });
     return { delivered: true, reply_id: taskResult?.message_id ?? taskResult?.task_id, payload: taskResult };
@@ -3586,7 +3602,12 @@ async function processInbox() {
       // Other non-task / non-broadcast messages retain their historical
       // ack-only behavior; send_message never implies an LLM response.
       if (msgType !== "task" && msgType !== "broadcast") {
-        debug(`skip non-task message: type=${msgType}`);
+        // This used to be debug(), i.e. a plain message was acked and discarded
+        // with no trace at the default log level while the SENDER saw a
+        // successful delivery. Surface it at INFO so a dropped message is at
+        // least diagnosable. Whether plain messages should reach the model or a
+        // human TUI is a product decision, deliberately not made here.
+        log(`← [${from}] (message, not delivered to model) ${content.slice(0, 120)}`);
         await ackMessage(msg.id).catch((e: any) => warn(`ack failed for non-task ${msg.id.slice(0, 8)}: ${e.message}`));
         continue;
       }
@@ -4491,6 +4512,17 @@ async function connectSSE() {
               scheduleInformationalInboxDrain();
               continue;
             }
+            // Two defects were found independently on both sides on 2026-08-02,
+            // and this branch's shape is the superset — keep it.
+            //  (a) `new_message` was missing from the wake list even though the
+            //      hub emits it (server/src/tools.ts pushEvent type:"new_message").
+            //      Production bridge log: new_task 96 hits, new_message 0 hits.
+            //  (b) the read loop used to `await processInbox()`, blocking for a
+            //      whole task turn; on codex-app-server a turn can run minutes,
+            //      so later events queued behind it and died on the node
+            //      deadline — 1932 log lines across ~6h with task_reply count 0.
+            // main fixed both with a single coalescing drain; this branch adds
+            // the separate informational lane copresence needs, which subsumes it.
             if (ev.type === "new_message" && RUNTIME === "opencode" && opencodeMode === "copresence") {
               log(`← SSE ${ev.type}`);
               scheduleInformationalInboxDrain();

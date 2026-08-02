@@ -33,6 +33,7 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync } from "fs
 import { dirname as pathDirname } from "path";
 import { startRetentionSweeper } from "./retention.js";
 import { startStaleSessionSweeper } from "./stale-sweeper.js";
+import { resolveRestFromSession } from "./rest-identity.js";
 
 const PORT = Number(process.env.PORT) || 9200;
 const HOST = process.env.HOST || "127.0.0.1";
@@ -2088,7 +2089,38 @@ return Bun.serve({
         }, { status: 404 }));
       }
       const id = crypto.randomUUID();
-      const fromSession = body.from || "api";
+      // Identity binding, mirroring the MCP transport (tools.ts defaultFrom /
+      // fromIdentityMismatchReply). Both transports resolve the same
+      // api_tokens row through resolveToken, and auth.ts already documents the
+      // invariant: "Network-bound node tokens are an identity boundary: they
+      // must not spoof another node via from_session."
+      //
+      // MCP enforced it; this REST handler did not — it took `body.from`
+      // verbatim, so any node could POST /api/task with another node's alias
+      // and be recorded (and, once sender labels ship, *rendered in a human's
+      // TUI*) as that node. Same table, same token, one transport hardened and
+      // its sibling not.
+      //
+      // User tokens keep the previous behaviour: the Dashboard legitimately
+      // posts as its logged-in user, and tightening that is a separate change
+      // with its own compatibility surface.
+      // The decision itself lives in rest-identity.ts as a pure function so the
+      // shipped path and the tested path are the same code.
+      const identity = resolveRestFromSession({
+        token: requestToken(req),
+        tokenName: restAuth?.tokenName,
+        requestedFrom: body.from,
+      });
+      if (!identity.ok) {
+        return withCors(req, Response.json({
+          ok: false,
+          error: identity.error,
+          message: identity.message,
+          token_alias: identity.tokenAlias,
+          requested_from_session: identity.requestedFromSession,
+        }, { status: 403 }));
+      }
+      const fromSession = identity.fromSession;
       const ttlSeconds = (body as any).ttl_seconds || 3600;
       const fromNodeId = resolveRestNodeIdForAlias(fromSession, taskNetId);
       const targetNodeId = target.session?.node_id ?? null;
