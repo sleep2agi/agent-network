@@ -49,10 +49,17 @@ if (command === "serve") {
       return send(res, { id:sessionMatch[1] });
     }
     if (req.url === "/tui/show-toast" && req.method === "POST") {
-      if (json.title !== "Agent Network message" || json.variant !== "info" || json.duration !== 15000) {
+      const expectedSender = env.FAKE_EXPECT_NOTICE_SENDER || "";
+      const expectedTitle = expectedSender
+        ? "Agent Network · 来自 " + expectedSender
+        : "Agent Network message";
+      const expectedPrefix = expectedSender
+        ? "[来自 " + expectedSender + "] notice:"
+        : "notice:";
+      if (json.title !== expectedTitle || json.variant !== "info" || json.duration !== 15000) {
         res.writeHead(400); return res.end("invalid notification toast");
       }
-      if (!(json.message || "").startsWith("notice:")) {
+      if (!(json.message || "").startsWith(expectedPrefix)) {
         res.writeHead(400); return res.end("missing notification message");
       }
       return send(res, true);
@@ -220,6 +227,24 @@ describe("OpenCode native serve+attach copresence", () => {
         expect(runtime.isRunning).toBe(false);
         expect(existsSync(runtime.attachScriptPath)).toBe(false);
       }
+      f.close();
+    }
+  }, 15_000);
+
+  test("shows the network sender in both the toast title and message body", async () => {
+    const f = fixture({ FAKE_EXPECT_NOTICE_SENDER: "通信牛" });
+    let runtime: Awaited<ReturnType<typeof openVettedOpenCodeCopresence>> | undefined;
+    try {
+      runtime = await openVettedOpenCodeCopresence({
+        binary: f.binary,
+        env: f.env,
+        cwd: f.root,
+        workDir: f.root,
+        startupTimeoutMs: 5_000,
+      });
+      await runtime.notify("notice:sender-visible", 5_000, "通信牛");
+    } finally {
+      await runtime?.close();
       f.close();
     }
   }, 15_000);

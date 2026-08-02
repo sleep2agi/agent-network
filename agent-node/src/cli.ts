@@ -3672,7 +3672,7 @@ async function processOpencodeCopresenceMessages() {
       log(`← [${from}] (message/${msg.priority || "normal"}) ${content.slice(0, 100)}`);
       if (!displayedInformationalMessageIds.has(msg.id)) {
         const runtime = await ensureOpencodeCopresenceRuntime();
-        await runtime.notify(`[${from}] ${content}`);
+        await runtime.notify(content, undefined, from);
         displayedInformationalMessageIds.add(msg.id);
         log(`[opencode-copresence] displayed message ${msg.id.slice(0, 8)} from ${from}`);
       }

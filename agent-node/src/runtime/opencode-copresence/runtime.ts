@@ -38,7 +38,7 @@ export interface OpenCodeCopresenceSession {
   readonly sessionId: string;
   readonly attachScriptPath: string;
   readonly isRunning: boolean;
-  notify(message: string, timeoutMs?: number): Promise<void>;
+  notify(message: string, timeoutMs?: number, sender?: string): Promise<void>;
   submit(prompt: string, timeoutMs?: number): Promise<OpenCodeCopresenceSubmitResult>;
   close(): Promise<void>;
 }
@@ -155,6 +155,15 @@ function basicAuthorization(password: string): string {
 
 function appendBounded(current: string, chunk: string): string {
   return `${current}${chunk}`.slice(-OUTPUT_LIMIT);
+}
+
+function normalizeNoticeSender(sender: string | undefined): string | undefined {
+  const normalized = sender
+    ?.replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 64);
+  return normalized || undefined;
 }
 
 function shellQuote(value: string): string {
@@ -419,9 +428,10 @@ export async function openVettedOpenCodeCopresence(
       get isRunning() {
         return !closed && child.exitCode === null && child.signalCode === null;
       },
-      notify(message: string, timeoutMs = 30_000) {
+      notify(message: string, timeoutMs = 30_000, sender?: string) {
         return (async () => {
           if (!session.isRunning) throw new Error("OpenCode copresence server is not running");
+          const visibleSender = normalizeNoticeSender(sender);
           await fetchJson(url, password, "/tui/show-toast", {
             method: "POST",
             // CommHub send_message is informational and does not request a
@@ -429,8 +439,14 @@ export async function openVettedOpenCodeCopresence(
             // noReply user message: noReply leaves an unanswered user turn in
             // history, which the next real task can accidentally answer.
             body: JSON.stringify({
-              title: "Agent Network message",
-              message,
+              title: visibleSender
+                ? `Agent Network · 来自 ${visibleSender}`
+                : "Agent Network message",
+              // Keep the sender in the body too. Narrow OpenCode layouts can
+              // truncate either the title or body independently, so showing it
+              // in both places makes the source visible without entering chat
+              // history or asking the model to interpret the notification.
+              message: visibleSender ? `[来自 ${visibleSender}] ${message}` : message,
               variant: "info",
               duration: 15_000,
             }),
@@ -576,7 +592,7 @@ export async function openOpenCodeCopresenceRuntime(
       get sessionId() { return core!.sessionId; },
       get attachScriptPath() { return core!.attachScriptPath; },
       get isRunning() { return core!.isRunning; },
-      notify: (message, timeoutMs) => core!.notify(message, timeoutMs),
+      notify: (message, timeoutMs, sender) => core!.notify(message, timeoutMs, sender),
       submit: (prompt, timeoutMs) => core!.submit(prompt, timeoutMs),
       async close() {
         await core!.close();
