@@ -77,6 +77,34 @@ describe("REST from_session identity binding", () => {
     })).toEqual({ ok: true, fromSession: "通信IM牛" });
   });
 
+  // A network-bound token we cannot resolve to an alias must not be able to
+  // call itself anything. Found by independent review of this change.
+  describe("ntok_ with an unresolvable alias fails closed", () => {
+    for (const tokenName of ["node:", "node:   ", "dashboard", null, undefined]) {
+      test(`claim is refused when tokenName is ${JSON.stringify(tokenName)}`, () => {
+        expect(resolveRestFromSession({
+          token: NTOK,
+          tokenName,
+          requestedFrom: "通信龙",
+        })).toEqual({
+          ok: false,
+          error: "from_session_identity_mismatch",
+          message: "network token has no resolvable node alias and may not claim a from_session",
+          tokenAlias: "",
+          requestedFromSession: "通信龙",
+        });
+      });
+    }
+
+    test("no claim at all still resolves to 'api'", () => {
+      expect(resolveRestFromSession({
+        token: NTOK,
+        tokenName: "node:",
+        requestedFrom: undefined,
+      })).toEqual({ ok: true, fromSession: "api" });
+    });
+  });
+
   describe("nodeAliasForToken", () => {
     test("only ntok_ + node: prefix yields an alias", () => {
       expect(nodeAliasForToken(NTOK, "node:X")).toBe("X");

@@ -47,6 +47,28 @@ export function resolveRestFromSession(input: RestIdentityInput): RestIdentityRe
   const alias = nodeAliasForToken(input.token, input.tokenName);
   const requested = typeof input.requestedFrom === "string" ? input.requestedFrom.trim() : "";
 
+  // A network-bound token whose name we cannot resolve to an alias (`node:`,
+  // `node:   `, or a name that was never node-scoped) is the degenerate case.
+  // We know it IS a node credential; we just cannot tell WHICH node. Letting it
+  // claim anything is the worst available option, so refuse the claim outright
+  // rather than falling through to the unbound path.
+  //
+  // Production always writes `node:${nodeName}`, so this costs nothing real —
+  // but "we couldn't identify you, so you may call yourself anything" is
+  // exactly the fail-open shape this change exists to remove.
+  if (!alias && input.token.startsWith("ntok_")) {
+    if (requested) {
+      return {
+        ok: false,
+        error: "from_session_identity_mismatch",
+        message: "network token has no resolvable node alias and may not claim a from_session",
+        tokenAlias: "",
+        requestedFromSession: requested,
+      };
+    }
+    return { ok: true, fromSession: "api" };
+  }
+
   // Not a node token: unchanged behaviour. The Dashboard legitimately posts as
   // its logged-in user; tightening that is a separate change with its own
   // compatibility surface.
