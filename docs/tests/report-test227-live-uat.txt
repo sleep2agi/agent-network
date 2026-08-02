@@ -129,4 +129,19 @@ PASS — after adding exponential inbox retry and ack-only retry suppression, th
 PASS — startup again produced exactly one `ready session=` and one direct OpenCode serve child.
 PASS — Hub `new_message` displayed the exact marker in the full TUI and the bridge acknowledged it.
 
+## Layer 13 — starvation fix and current candidate smoke
+
+Candidate source commit: 2b7b58453fd8295829f139a7f84f557554a09bf5
+Installed bundle SHA256: 91f873c76387fdcfdb2fbcba4358457c77bacc7f1c1a39b62ce9711768b49ce2
+Same-snapshot message IDs: b52b7729-f471-439f-a9e2-821718a3dc2d, 88ca079c-bc66-45d6-bc1b-b944c2620836
+Inbound task ID: 532ba14f-4a22-4e5b-b9e5-fa52013ebaa3
+Outbound message ID: aa4c5ea4-1636-4063-94d4-d81fe223080b
+
+WITNESSED RED — before `drainInboxBatch` existed, the new same-snapshot behavior test failed at module load; the old production loop aborted on the first failed item, so an ack failure could prevent every later ordinary message in that snapshot from being attempted.
+PASS — Docker test228 on the fix ran 14 tests with 0 failures. Its batch test proves the first item can throw while the second and third are still attempted; the CLI wiring assertion proves the production informational drain calls that helper.
+PASS — after installing the exact bundle above and restarting only `opencode-指挥狗` plus `opencode-指挥狗-桥`, startup produced one ready session and one direct serve child.
+PASS — two ordinary messages sent back-to-back both produced `displayed message` records, then Hub inbox readback was empty, proving both were acknowledged.
+PASS — the current process completed the real inbound task with exact result `[opencode-指挥狗] CURRENT_SHA_TASK_OK`.
+PASS — a prompt typed into the current full TUI visibly executed `commhub_send_message`; independent Hub inbox readback found `CURRENT_SHA_OUTBOUND_OK`, `type=message`, `from_session=opencode-指挥狗`, and the exact outbound ID above.
+
 OVERALL: PASS
