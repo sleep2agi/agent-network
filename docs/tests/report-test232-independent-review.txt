@@ -1,0 +1,33 @@
+# Test 232 independent narrow review
+
+Date: 2026-08-03
+Dispatcher: 通信龙
+Reviewer: grok测试员
+Source: 9417ec0d6dec1375ac5f5b9538e62c7617fcdc67
+Evidence head reviewed: 569757588ed2094a945dc742b166b2449cd0c121
+Review task: 3650f37a-b4d2-405d-ae26-2a2f3fcf4053
+
+Conclusion: MERGEABLE / PASS
+
+- BLOCKER: none
+- MAJOR: none
+- MINOR: existing REST `body.from` trust semantics, outside this candidate;
+  node-token MCP senders are token-bound and reject alias mismatch.
+
+Verified:
+
+1. The production task sender flows from Hub `get_inbox` `msg.from_session`,
+   through `processTask`, into the copresence submit call. It is not parsed
+   from task text or model output.
+2. Node-token MCP calls use the Hub token-bound alias and reject a mismatched
+   client-supplied `from_session`.
+3. The independent dirty-sender case normalized control characters and
+   whitespace to `[来自 通信 牛]`.
+4. Missing sender retains the original unlabelled prompt.
+5. The headless OpenCode ACP path remains on `opencodeThink` and is unchanged.
+6. Removing CLI sender forwarding made the wiring test fail; removing the
+   runtime prefix made the behavioral test fail.
+7. After restoring production code, the reviewer obtained 16 pass, 0 fail,
+   74 assertions.
+
+The reviewer made no author-branch changes and did not merge or publish.
