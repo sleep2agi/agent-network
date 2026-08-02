@@ -239,9 +239,28 @@ async function waitUntilSessionIdle(
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const statuses = await fetchJson(url, password, "/session/status", {}, 2_000);
-    const state = statuses?.[sessionId];
-    if (state === undefined || state?.type === "idle") return;
+    try {
+      const statuses = await fetchJson(url, password, "/session/status", {}, 2_000);
+      if (statuses && typeof statuses === "object" && !Array.isArray(statuses)) {
+        const state = statuses[sessionId];
+        if (state?.type === "idle") return;
+        if (state === undefined) {
+          // Pinned OpenCode 1.18.1 returns an empty status map for an idle
+          // session, so absence alone cannot be rejected. Distinguish the
+          // real idle shape from a missing/unknown session by proving the
+          // exact session still exists. A 404, malformed record, or unknown
+          // status stays fail-closed and retries until the caller's timeout.
+          try {
+            const session = await fetchJson(url, password, `/session/${sessionId}`, {}, 2_000);
+            if (session?.id === sessionId) return;
+          } catch {
+            // Keep waiting: missing session is not evidence of idle.
+          }
+        }
+      }
+    } catch {
+      // A transient status failure is also not evidence of idle.
+    }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error(`OpenCode session remained busy for ${timeoutMs}ms`);
@@ -264,6 +283,15 @@ function parseModelRef(model: string | undefined): { providerID: string; modelID
     throw new Error(`OpenCode model must use provider/model form (got ${JSON.stringify(model)})`);
   }
   return { providerID: model.slice(0, separator), modelID: model.slice(separator + 1) };
+}
+
+export function requireOpenCodeCopresenceModel(model: string | undefined): string {
+  const normalized = model?.trim();
+  if (!normalized) {
+    throw new Error("OpenCode copresence requires an explicit provider/model");
+  }
+  parseModelRef(normalized);
+  return normalized;
 }
 
 async function stopProcessGroup(
@@ -468,6 +496,7 @@ export async function openVettedOpenCodeCopresence(
 export async function openOpenCodeCopresenceRuntime(
   opts: OpenOpenCodeCopresenceOptions,
 ): Promise<OpenCodeCopresenceSession> {
+  const model = requireOpenCodeCopresenceModel(opts.model);
   const workDir = resolve(opts.workDir);
   const projectCwd = resolve(opts.cwd);
   const unsafeTools = opts.unsafeTools === true;
@@ -514,7 +543,7 @@ export async function openOpenCodeCopresenceRuntime(
     return removed;
   };
   try {
-    if (opts.model) wireOpenCodeDefaultModel(childEnv, opts.model);
+    wireOpenCodeDefaultModel(childEnv, model);
     if (opts.commhubMcpUrl || opts.commhubToken) {
       if (!opts.commhubMcpUrl || !opts.commhubToken) {
         throw new Error("OpenCode copresence requires both CommHub MCP URL and token");
@@ -535,7 +564,7 @@ export async function openOpenCodeCopresenceRuntime(
       env: childEnv,
       cwd: effectiveCwd,
       workDir,
-      model: opts.model,
+      model,
       title: opts.title,
       startupTimeoutMs: opts.startupTimeoutMs,
       log: opts.log,

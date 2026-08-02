@@ -12,6 +12,7 @@ import {
 import {
   OPENCODE_COMMHUB_TOKEN_ENV,
   openVettedOpenCodeCopresence,
+  requireOpenCodeCopresenceModel,
   wireOpenCodeCommhubMcp,
   wireOpenCodeDefaultModel,
 } from "./runtime";
@@ -39,6 +40,13 @@ if (command === "serve") {
       const busyMs = Number(env.FAKE_INITIAL_BUSY_MS || 0);
       if (busyMs > 0) { statuses[id] = { type:"busy" }; setTimeout(() => delete statuses[id], busyMs); }
       return send(res, { id, title:json.title });
+    }
+    const sessionMatch = req.url.match(/^\\/session\\/(ses_[A-Za-z0-9]+)$/);
+    if (sessionMatch && req.method === "GET") {
+      if (env.FAKE_SESSION_LOOKUP_MISSING === "1" || !messages[sessionMatch[1]]) {
+        res.writeHead(404); return res.end("session not found");
+      }
+      return send(res, { id:sessionMatch[1] });
     }
     if (req.url === "/tui/show-toast" && req.method === "POST") {
       if (json.title !== "Agent Network message" || json.variant !== "info" || json.duration !== 15000) {
@@ -113,6 +121,13 @@ function fixture(extraEnv: NodeJS.ProcessEnv = {}) {
 }
 
 describe("OpenCode native serve+attach copresence", () => {
+  test("requires an explicit provider/model for production copresence", () => {
+    expect(() => requireOpenCodeCopresenceModel(undefined)).toThrow("explicit provider/model");
+    expect(() => requireOpenCodeCopresenceModel("  ")).toThrow("explicit provider/model");
+    expect(requireOpenCodeCopresenceModel("opencode/north-mini-code-free"))
+      .toBe("opencode/north-mini-code-free");
+  });
+
   test("wires one token-bound CommHub MCP without reopening local tools", () => {
     const root = mkdtempSync(join(tmpdir(), "opencode-commhub-config-"));
     try {
@@ -224,6 +239,24 @@ describe("OpenCode native serve+attach copresence", () => {
       const result = await runtime.submit("after-human", 5_000);
       expect(Date.now() - started).toBeGreaterThanOrEqual(300);
       expect(result.replyText).toBe("FAKE_REPLY:after-human");
+    } finally {
+      await runtime?.close();
+      f.close();
+    }
+  }, 15_000);
+
+  test("does not treat a missing session status and missing session record as idle", async () => {
+    const f = fixture({ FAKE_SESSION_LOOKUP_MISSING: "1" });
+    let runtime: Awaited<ReturnType<typeof openVettedOpenCodeCopresence>> | undefined;
+    try {
+      runtime = await openVettedOpenCodeCopresence({
+        binary: f.binary,
+        env: f.env,
+        cwd: f.root,
+        workDir: f.root,
+        startupTimeoutMs: 5_000,
+      });
+      await expect(runtime.submit("must-not-run", 250)).rejects.toThrow("remained busy");
     } finally {
       await runtime?.close();
       f.close();

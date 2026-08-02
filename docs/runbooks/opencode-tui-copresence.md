@@ -66,7 +66,9 @@ CommHub 的两种入站语义保持分离：
 
 普通消息不能使用 OpenCode `noReply` user message 伪装通知：该 API 虽然当下不生成回答，却会留下未回答的 user turn，下一条真实任务可能把它一起回答，造成延迟误回复或 agent 间回复循环。
 
-网络提交前读取 `/session/status`：已有 human/network turn 忙时排队，agent-node 内部的多条网络任务再经过 FIFO 串行化。OpenCode 1.18.1 仍没有原子“空闲检查并认领”API，因此人类可能恰好在空闲检查后开始输入；这是已知 preview 并发竞态，不能宣称强 lease。
+网络提交前读取 `/session/status`：已有 human/network turn 忙时排队，agent-node 内部的多条网络任务再经过 FIFO 串行化。固定版 OpenCode 1.18.1 在 idle 时实际返回空状态表；实现不会仅凭“缺状态条目”放行，而会再读 `/session/:id`，只有精确 session 仍存在时才按该固定版本的 idle 语义放行，缺 session、404 或未知状态形状都等到超时。
+
+OpenCode 1.18.1 仍没有原子“空闲检查并认领”API，因此人类可能恰好在空闲检查后开始输入，这是 preview 的已知残余竞态。踩中时，human 与 network 两条内容可能被合并进同一个看似正常的 assistant reply，导致网络对端收到混合内容，或其中一个 turn 被另一个吃掉；看到回复混入另一条同时输入的内容时，应把该网络 turn 判为失败并重试，不能把结果当成可信完成。这里不能宣称强 lease。
 
 启动也必须串行化：离线期间积压的普通消息会在注册后触发恢复 drain，它可能与主启动路径同时请求 OpenCode runtime。实现使用 single-flight 合并这些请求；否则一个 node 会生成两个 server/session，attach 脚本也会被后写者覆盖。
 
@@ -74,13 +76,13 @@ CommHub 的两种入站语义保持分离：
 
 - OpenCode 版本严格固定为 `opencode-ai@1.18.1`。
 - 版本探针不接触 vendor credential；通过包身份校验后才生成一次性运行环境。
-- TUI launcher 位于节点私有目录，mode 必须为 `0700`；它包含本次启动的 loopback 密码，不得复制、打印或提交。
-- CommHub token 只通过每节点私有环境变量交给 OpenCode；MCP 配置正文只保存 `{env:...}` 引用，不内嵌 token。
-- 安全模式固定 OpenCode 1.18.1，并对该版本全部内建工具逐项 deny；动态工具只放行 `commhub_*`。OpenCode 会把对象形式 wildcard 规则移到最后，因此不能用尾部 `* = deny` 再期待较早的 MCP allow 生效。
+- TUI launcher 位于节点私有目录，mode 必须为 `0700`；它包含本次启动的 loopback 密码和 CommHub token export，不得复制、打印或提交。serve/attach 子进程也通过环境变量持有这些 secret；同 UID 用户与 root 可经 `/proc/<pid>/environ` 或进程环境读取，因此安全边界是“同 UID + 私有目录”，不是 secret 不进入 `/proc`/tmux 环境。
+- CommHub token 只通过每节点私有环境变量交给 OpenCode；MCP 配置正文只保存 `{env:...}` 引用，不内嵌 token。每个节点必须独占自己的启动环境，不能共用 attach launcher 或 server。
+- 安全模式固定 OpenCode 1.18.1，并对该版本全部内建工具逐项 deny；动态工具只放行 `commhub_*`。OpenCode 会把对象形式 wildcard 规则移到最后，因此不能用尾部 `* = deny` 再期待较早的 MCP allow 生效。若未来放宽版本 pin，必须同时重新验证 wildcard 优先级并恢复可证明的默认 deny（或重新生成完整内建 deny 列表），不得直接沿用当前逐项列表。
 - server 使用 detached process group；停止前复核 PID、PGRP、Linux start ticks，身份漂移时拒绝误杀。
 - `SIGINT`、`SIGTERM` 和 tmux 关闭 pane 使用的 `SIGHUP` 全部进入同一 cleanup；少了 `SIGHUP` 会在 `tmux kill-session` 后遗留 detached server。
 - 启动桥时显式传递 PATH、`ANET_AGENT_NODE_BIN` 和可选 `ANET_OPENCODE_SAFE_BASE`，不能依赖长期 tmux server 的陈旧环境。
-- 节点模型必须以 `provider/model` 形式传入 REST message body；只写顶层 anet config、却不传 REST model，会让 OpenCode 回退到 preset 默认模型。
+- 节点模型必须以非空 `provider/model` 形式传入 REST message body；copresence 启动会拒绝空值或非法形式。只写顶层 anet config、却不传 REST model，会让 OpenCode 回退到 preset 默认模型，因此禁止静默回落。
 
 ## 测试与复现
 
