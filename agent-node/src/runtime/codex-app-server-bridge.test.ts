@@ -187,6 +187,22 @@ describe("CodexAppServerBridge — bootstrap + task mapping", () => {
     expect(bridge.pendingTurnCount()).toBe(1);
   });
 
+  test("Feishu channel provenance is visible in the shared Codex TUI turn", async () => {
+    await bridge.startTaskTurn({
+      taskId: "feishu-msg-1",
+      from: "feishu:dm:oc_chat_123:ou_sender_456",
+      text: "请汇总今天的进度",
+    });
+    const request = [...app.received]
+      .reverse()
+      .find((entry) => (entry as { method?: string }).method === "turn/start") as {
+        params?: { input?: Array<{ type?: string; text?: string }> };
+      } | undefined;
+    expect(request?.params?.input?.[0]?.text).toBe(
+      "[Agent Network/from=feishu:dm:oc_chat_123:ou_sender_456/task=feishu-msg-1] 请汇总今天的进度",
+    );
+  });
+
   test("turn/completed for OUR turn fires task_reply mapped back to the task_id", async () => {
     const turnId = await bridge.startTaskTurn({ taskId: "task_1", text: "hello" });
     const replies: Array<{ taskId: string; text: string }> = [];
