@@ -145,3 +145,45 @@ PASS — the current process completed the real inbound task with exact result `
 PASS — a prompt typed into the current full TUI visibly executed `commhub_send_message`; independent Hub inbox readback found `CURRENT_SHA_OUTBOUND_OK`, `type=message`, `from_session=opencode-指挥狗`, and the exact outbound ID above.
 
 OVERALL: PASS
+
+## Layer 14 — final source, fail-closed idle, and bidirectional live proof
+
+Candidate production source: 6041df589b97310b66e1b7e84233b5a7acdc102c
+Installed bundle SHA256: 8cddef4a29406dd85d3b1a9e1b350303de05d7106aaa3f50377d9dc3d47e0546
+Inbound task ID: 8ab336a3-4499-47a1-af8b-437d262fc70b
+Concurrent ordinary-message ID: 467f36a4-5f7d-4dfe-9331-7eaf7ef3b7f6
+Human-TUI outbound message ID: a9396edf-6c06-4afe-b6b4-6ac677721c04
+
+PASS — the installed bundle hash was captured after building source commit
+`6041df58`; restarting only the two exact node sessions produced one runtime
+`ready` record and one direct `opencode serve` child.
+
+PASS — the Hub delivered a real task and received exact result
+`[opencode-指挥狗] FINAL_6041_TASK_OK`.
+
+PASS — while that task was still running, ordinary message
+`FINAL_6041_MESSAGE_OK` was displayed in the attached TUI and acknowledged. This
+proves receive traffic is not serialized behind a model turn on the final source.
+
+PASS — a prompt typed through the real tmux TUI invoked
+`commhub_send_message`; independent Hub readback found exact content
+`FINAL_6041_OUTBOUND_OK`, `from_session=opencode-指挥狗`, and the outbound ID
+above.
+
+PASS — an additional human keyboard check typed `只回复：现在可以用了` into
+the live TUI and received exact reply `现在可以用了` while both bridge and TUI
+sessions remained alive.
+
+PASS — on the immediately preceding coalescing source, ten parallel ordinary
+messages all produced display records, the inbox became empty, and only one
+direct serve child existed. Docker test228 binds that behavior to the same
+coalescing code carried unchanged into `6041df58`.
+
+PASS — a real OpenCode 1.18.1 probe observed an exact busy status during a turn
+and `{}` after the turn. Docker test227 witnessed red for the old missing-session
+idle fallback, then passed after requiring the exact session to exist.
+
+PASS — final Docker evidence is 28/28 unit/wiring tests plus the full real-binary
+harness; test228 adds 16/16 focused concurrency/lifecycle tests.
+
+FINAL LIVE RESULT: PASS
