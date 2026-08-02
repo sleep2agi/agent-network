@@ -12,6 +12,11 @@ const specs = {
     before: "const fromLabel = displaySender(input.from);",
     after: "const fromLabel = undefined; // test mutation: drop channel provenance",
   },
+  opencode: {
+    path: "agent-node/src/runtime/opencode-copresence/runtime.ts",
+    before: "const visibleSender = normalizeNoticeSender(sender);\n          // A network task becomes a visible user turn",
+    after: "const visibleSender = undefined; // test mutation: drop channel provenance\n          // A network task becomes a visible user turn",
+  },
 };
 
 const spec = specs[mode];

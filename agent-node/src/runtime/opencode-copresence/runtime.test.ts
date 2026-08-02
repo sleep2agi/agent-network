@@ -272,6 +272,31 @@ describe("OpenCode native serve+attach copresence", () => {
     }
   }, 15_000);
 
+  test("shows Feishu conversation and sender provenance in the shared TUI turn", async () => {
+    const f = fixture();
+    let runtime: Awaited<ReturnType<typeof openVettedOpenCodeCopresence>> | undefined;
+    try {
+      runtime = await openVettedOpenCodeCopresence({
+        binary: f.binary,
+        env: f.env,
+        cwd: f.root,
+        workDir: f.root,
+        startupTimeoutMs: 5_000,
+      });
+      const result = await runtime.submit(
+        "请汇总今天的进度",
+        5_000,
+        "feishu:dm:oc_chat_123:ou_sender_456",
+      );
+      expect(result.replyText).toBe(
+        "FAKE_REPLY:[来自 feishu:dm:oc_chat_123:ou_sender_456] 请汇总今天的进度",
+      );
+    } finally {
+      await runtime?.close();
+      f.close();
+    }
+  }, 15_000);
+
   test("waits for an already-busy human session before injecting a network turn", async () => {
     const f = fixture({ FAKE_INITIAL_BUSY_MS: "350" });
     let runtime: Awaited<ReturnType<typeof openVettedOpenCodeCopresence>> | undefined;

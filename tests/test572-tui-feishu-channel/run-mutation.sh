@@ -8,6 +8,7 @@ set +e
 case "$mode" in
   origin) bun agent-network/tests/feishu-envelope-compat.test.ts ;;
   codex) bun test agent-node/src/runtime/codex-app-server-bridge.test.ts ;;
+  opencode) bun test agent-node/src/runtime/opencode-copresence/runtime.test.ts ;;
   *) echo "unknown mutation: $mode" >&2; exit 2 ;;
 esac
 test_rc=$?
