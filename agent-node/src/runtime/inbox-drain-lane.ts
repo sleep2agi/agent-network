@@ -44,6 +44,7 @@ export function createInboxDrainLane(
   retry?: InboxDrainRetryOptions,
 ): InboxDrainLane {
   let tail = Promise.resolve();
+  const scheduled = new Map<() => Promise<void>, { dirty: boolean }>();
 
   const execute = async (run: () => Promise<void>) => {
     let delayMs = retry?.initialDelayMs ?? 0;
@@ -65,7 +66,29 @@ export function createInboxDrainLane(
 
   return {
     schedule(run) {
-      tail = tail.then(() => execute(run));
+      const existing = scheduled.get(run);
+      if (existing) {
+        // The active execution re-reads the inbox on every retry. Remember
+        // that another SSE/startup wake arrived, but do not append an
+        // unbounded chain of identical closures behind a persistent failure.
+        existing.dirty = true;
+        return;
+      }
+      const state = { dirty: false };
+      scheduled.set(run, state);
+      const drain = async () => {
+        try {
+          do {
+            state.dirty = false;
+            await execute(run);
+          } while (state.dirty);
+        } finally {
+          scheduled.delete(run);
+        }
+      };
+      // A defensive rejection branch keeps one unexpected callback failure
+      // from poisoning every later drain in this lane.
+      tail = tail.then(drain, drain);
     },
     idle() {
       return tail;

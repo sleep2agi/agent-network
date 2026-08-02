@@ -56,6 +56,28 @@ describe("inbox drain lanes", () => {
     expect(events).toEqual(["first-start", "first-end", "second"]);
   });
 
+  test("repeated wakeups for the same drain coalesce into one dirty rerun", async () => {
+    const lane = createInboxDrainLane(() => {});
+    const firstStarted = deferred();
+    const releaseFirst = deferred();
+    let runs = 0;
+    const drain = async () => {
+      runs++;
+      if (runs === 1) {
+        firstStarted.resolve();
+        await releaseFirst.promise;
+      }
+    };
+
+    lane.schedule(drain);
+    await firstStarted.promise;
+    for (let i = 0; i < 100; i++) lane.schedule(drain);
+    releaseFirst.resolve();
+    await lane.idle();
+
+    expect(runs).toBe(2);
+  });
+
   test("a failed drain is reported and does not poison later retries", async () => {
     const errors: unknown[] = [];
     const lane = createInboxDrainLane((error) => errors.push(error));
