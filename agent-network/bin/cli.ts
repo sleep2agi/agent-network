@@ -515,7 +515,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   const bound = await waitForTmuxPaneText(appsrvSession, `listening on: ${wsUrl}`, 25_000);
   if (!bound) {
     console.error(`[anet] ❌ app-server did not bind ${wsUrl} within 25s.`);
-    console.error(`[anet]    Debug:   tmux attach -t ${appsrvSession}`);
+    console.error(`[anet]    Debug:   tmux attach -t ${shellQuote(`=${appsrvSession}`)}`);
     console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
     // #P2fix复审顺手3 — env file was source-then-rm'd by the tmux child on
     // the happy path, but if the bash chain crashed before reaching `rm -f`
@@ -557,7 +557,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     threadId = await createCodexCopresenceThread(wsUrl);
   } catch (e: any) {
     console.error(`[anet] ❌ thread/start failed: ${e?.message || e}`);
-    console.error(`[anet]    Debug:   tmux attach -t ${appsrvSession}`);
+    console.error(`[anet]    Debug:   tmux attach -t ${shellQuote(`=${appsrvSession}`)}`);
     console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
     // #P2fix复审顺手3 — defense-in-depth env-file cleanup (see :431).
     try { rmSync(envFilePath, { force: true }); } catch { /* best-effort */ }
@@ -641,7 +641,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   const hubBase = opts.hub.replace(/\/+$/, "");
   console.log("");
   console.log(`[anet] ✅ 共存节点 ${displayName} 就绪`);
-  console.log(`[anet]    attach:    tmux attach -t ${shellQuote(displayName)}`);
+  console.log(`[anet]    attach:    tmux attach -t ${shellQuote(`=${displayName}`)}`);
   console.log(`[anet]    stop:      anet node stop ${shellQuote(displayName)}`);
   console.log(`[anet]    dashboard: ${hubBase}/nodes/${encodeURIComponent(displayName)}`);
   console.log(`[anet]    runtime:   codex-app-server @ ${wsUrl}  (sandbox=${sandboxMode})`);
@@ -4622,7 +4622,7 @@ async function startCommand() {
       process.exit(1);
     }
     console.log(`[anet] ✅ tmux session "${alias}" started detached.`);
-    console.log(`[anet]    Attach:   tmux attach -t ${alias}`);
+    console.log(`[anet]    Attach:   tmux attach -t ${shellQuote(`=${alias}`)}`);
     console.log(`[anet]    Stop:     anet node stop ${alias}`);
     // #494 — a detached `--tmux` start does not run the dev-channels
     // prompt watcher; a claude node with server: channels will sit on the
