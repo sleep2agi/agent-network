@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { db } from "./db.js";
 import { registerTools } from "./tools.js";
+import { __resetSSEClientsForTest, createSSEStream } from "./push.js";
 
 type Handler = (args: any) => Promise<{ content: Array<{ type: "text"; text: string }> }>;
 const NET = "net_daemon_tools";
@@ -23,6 +24,7 @@ function clean() {
 }
 
 beforeEach(() => {
+  __resetSSEClientsForTest();
   clean();
   db.run("INSERT INTO users (user_id,username,password_hash,role,created_at) VALUES (?1,?1,'x','user',datetime('now'))", [USER]);
   db.run("INSERT INTO users (user_id,username,password_hash,role,created_at) VALUES (?1,?1,'x','user',datetime('now'))", [OTHER_USER]);
@@ -120,5 +122,27 @@ describe("RFC-031 wired daemon control tools", () => {
     const listed = await call(admin.list_host_supervisors, { network_id: NET });
     expect(listed.daemons).toHaveLength(1);
     expect(listed.daemons[0]).toMatchObject({ daemon_node_id: DAEMON, alias: ALIAS, online: true });
+  });
+
+  test("live exact-network SSE keeps a daemon online after its stored heartbeat is stale", async () => {
+    db.run(`INSERT INTO sessions (resume_id,alias,status,network_id,registered_at,updated_at,last_seen_at)
+            VALUES ('resume_daemon_live',?1,'idle',?2,datetime('now'),datetime('now'),'2000-01-01 00:00:00')`, [ALIAS, NET]);
+    const live = createSSEStream(ALIAS, NET);
+    const reader = live.body!.getReader();
+    const admin = handlers({ user: USER });
+    const listed = await call(admin.list_host_supervisors, { network_id: NET });
+    expect(listed.daemons[0]).toMatchObject({ daemon_node_id: DAEMON, alias: ALIAS, online: true });
+    await reader.cancel();
+  });
+
+  test("same alias SSE in another network does not make a stale daemon online", async () => {
+    db.run(`INSERT INTO sessions (resume_id,alias,status,network_id,registered_at,updated_at,last_seen_at)
+            VALUES ('resume_daemon_stale',?1,'idle',?2,datetime('now'),datetime('now'),'2000-01-01 00:00:00')`, [ALIAS, NET]);
+    const otherNetwork = createSSEStream(ALIAS, OTHER);
+    const reader = otherNetwork.body!.getReader();
+    const admin = handlers({ user: USER });
+    const listed = await call(admin.list_host_supervisors, { network_id: NET });
+    expect(listed.daemons[0]).toMatchObject({ daemon_node_id: DAEMON, alias: ALIAS, online: false });
+    await reader.cancel();
   });
 });

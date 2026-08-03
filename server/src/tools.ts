@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
 import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, generateNetworkToken } from "./db.js";
-import { pushEvent, pushNetworkObserverEvent } from "./push.js";
+import { hasLiveSSESession, pushEvent, pushNetworkObserverEvent } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { getUserNetworkRole, createNetworkTokenForNode } from "./auth.js";
 import { canRestWriteNetwork, getUserNetworkIds, singleNetworkId } from "./network-scope.js";
@@ -2212,13 +2212,15 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         })
         .filter(({ role }) => role === "host_supervisor")
         .map(({ row: r }) => {
-          // online = sessions.last_seen_at within ONLINE_MS
-          let online = false;
+          // A live, exact network-scoped node SSE is the primary presence
+          // fact. Keep the recent DB heartbeat as a compatibility fallback
+          // for older transports that do not expose an SSE connection.
+          let online = hasLiveSSESession(r.alias, r.network_id);
           let lastSeenAt: string | null = null;
           if (r.session_last_seen) {
             lastSeenAt = r.session_last_seen;
             const t = parseSqliteUtcMs(r.session_last_seen);
-            if (!isNaN(t)) online = (nowMs - t) <= ONLINE_MS;
+            if (!isNaN(t)) online = online || (nowMs - t) <= ONLINE_MS;
           }
           // Parse self-declare arrays (default to [] for pre-PR2 daemons)
           let runtimes: string[] = [];

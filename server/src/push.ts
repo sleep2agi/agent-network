@@ -97,6 +97,14 @@ function clientKey(sessionName: string, networkId?: string | null): string {
   return `${networkId || "global"}:${sessionName}`;
 }
 
+/** Return whether the exact network-scoped node session currently has an
+ * active personal SSE connection. Observer streams deliberately use a
+ * disjoint key namespace and can never satisfy this predicate. */
+export function hasLiveSSESession(sessionName: string, networkId?: string | null): boolean {
+  const arr = clients.get(clientKey(sessionName, networkId));
+  return !!arr?.some((client) => !client.closed);
+}
+
 // ── #461 network observer channels ───────────────────────────────────
 // Dashboard (or any network member) subscribes GET /events/network/:id
 // and receives SUMMARY events for ALL new_task / new_reply traffic in

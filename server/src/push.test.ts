@@ -4,12 +4,25 @@ import {
   __resetSSEClientsForTest,
   createSSEStream,
   getSSEStats,
+  hasLiveSSESession,
   pushEvent,
   __SSE_INTERNALS_FOR_TEST,
 } from "./push";
 
 afterEach(() => {
   __resetSSEClientsForTest();
+});
+
+test("live node SSE presence is exact to alias and network", async () => {
+  const res = createSSEStream("daemon-a", "net-a");
+  const reader = res.body!.getReader();
+
+  expect(hasLiveSSESession("daemon-a", "net-a")).toBe(true);
+  expect(hasLiveSSESession("daemon-a", "net-b")).toBe(false);
+  expect(hasLiveSSESession("daemon-b", "net-a")).toBe(false);
+
+  await reader.cancel();
+  expect(hasLiveSSESession("daemon-a", "net-a")).toBe(false);
 });
 
 test("rename-committed rekeys existing SSE clients from old alias to new alias (case 8)", async () => {

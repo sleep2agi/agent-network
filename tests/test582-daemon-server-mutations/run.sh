@@ -9,7 +9,7 @@ ok() { PASS=$((PASS+1)); echo "PASS $PASS: $*"; }
 fresh_server() {
   rm -rf /tmp/test582-server
   cp -a /app/server /tmp/test582-server
-  cp "$SOURCE/server/src/tools.ts" "$SOURCE/server/src/daemon-control.ts" \
+  cp "$SOURCE/server/src/tools.ts" "$SOURCE/server/src/push.ts" "$SOURCE/server/src/daemon-control.ts" \
      "$SOURCE/server/src/daemon-control.test.ts" "$SOURCE/server/src/daemon-control-tools.test.ts" \
      /tmp/test582-server/src/
 }
@@ -77,4 +77,13 @@ fi
 grep -q 'host supervisor is online when SQLite UTC timestamp is fresh' /tmp/test582-time.log || { cat /tmp/test582-time.log; fail "timezone mutation failed for the wrong reason"; }
 ok "removing SQLite UTC normalization turns red on Asia/Shanghai"
 
-echo "RESULT: PASS ($PASS checks; 5/5 controlled mutations witnessed red)"
+fresh_server
+sed -i 's/let online = hasLiveSSESession(r.alias, r.network_id);/let online = false;/' /tmp/test582-server/src/tools.ts
+if COMMHUB_DB=/tmp/test582-live-sse.db bun test /tmp/test582-server/src/daemon-control-tools.test.ts >/tmp/test582-live-sse.log 2>&1; then
+  cat /tmp/test582-live-sse.log
+  fail "live-SSE presence mutation stayed green"
+fi
+grep -q 'live exact-network SSE keeps a daemon online' /tmp/test582-live-sse.log || { cat /tmp/test582-live-sse.log; fail "live-SSE mutation failed for the wrong reason"; }
+ok "removing live SSE presence from daemon online status turns red"
+
+echo "RESULT: PASS ($PASS checks; 6/6 controlled mutations witnessed red)"
