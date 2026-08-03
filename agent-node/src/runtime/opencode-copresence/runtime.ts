@@ -247,12 +247,22 @@ async function waitUntilSessionIdle(
   timeoutMs: number,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
+  // OpenCode 1.18.1 clears /session/status just before its in-process Runner
+  // promise is removed. A POST in that narrow tail can join the completed
+  // Runner, receive the previous assistant message, and leave the newly
+  // persisted user message unanswered. Require an idle observation to remain
+  // stable across this bounded grace period before submitting another turn.
+  // This is not an atomic human/network claim; the parentID check below still
+  // fails closed if a human wins after the stable-idle observation.
+  const idleStabilityMs = 250;
+  let idleSince = 0;
   while (Date.now() < deadline) {
+    let appearsIdle = false;
     try {
       const statuses = await fetchJson(url, password, "/session/status", {}, 2_000);
       if (statuses && typeof statuses === "object" && !Array.isArray(statuses)) {
         const state = statuses[sessionId];
-        if (state?.type === "idle") return;
+        if (state?.type === "idle") appearsIdle = true;
         if (state === undefined) {
           // Pinned OpenCode 1.18.1 returns an empty status map for an idle
           // session, so absence alone cannot be rejected. Distinguish the
@@ -261,7 +271,7 @@ async function waitUntilSessionIdle(
           // status stays fail-closed and retries until the caller's timeout.
           try {
             const session = await fetchJson(url, password, `/session/${sessionId}`, {}, 2_000);
-            if (session?.id === sessionId) return;
+            if (session?.id === sessionId) appearsIdle = true;
           } catch {
             // Keep waiting: missing session is not evidence of idle.
           }
@@ -269,6 +279,12 @@ async function waitUntilSessionIdle(
       }
     } catch {
       // A transient status failure is also not evidence of idle.
+    }
+    if (appearsIdle) {
+      idleSince ||= Date.now();
+      if (Date.now() - idleSince >= idleStabilityMs) return;
+    } else {
+      idleSince = 0;
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }

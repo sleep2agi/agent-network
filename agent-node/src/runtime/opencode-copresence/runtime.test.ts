@@ -28,6 +28,8 @@ if (command === "serve") {
   const port = Number(value("--port"));
   const statuses = {};
   const messages = {};
+  let lastResponse = null;
+  let staleRunnerUntil = 0;
   const server = http.createServer(async (req, res) => {
     if (req.headers.authorization !== expectedAuth) { res.writeHead(401); return res.end("unauthorized"); }
     const body = await new Promise((resolve) => { let s=""; req.on("data", c => s+=c); req.on("end", () => resolve(s)); });
@@ -65,6 +67,7 @@ if (command === "serve") {
       return send(res, true);
     }
     const match = req.url.match(/^\\/session\\/(ses_[A-Za-z0-9]+)\\/message$/);
+    if (match && req.method === "GET") return send(res, messages[match[1]] || []);
     if (match && req.method === "POST") {
       const id = match[1];
       if ((json.parts?.[0]?.text || "").startsWith("notice:") || json.noReply === true) {
@@ -73,14 +76,21 @@ if (command === "serve") {
       if (env.FAKE_REQUIRE_MODEL === "1" && (json.model?.providerID !== "opencode" || json.model?.modelID !== "fake")) {
         res.writeHead(400); return res.end("missing model identity");
       }
+      if (lastResponse && Date.now() < staleRunnerUntil) {
+        messages[id].push({ info:{role:"user",id:json.messageID}, parts:json.parts || [] });
+        return send(res, lastResponse);
+      }
       statuses[id] = { type:"busy" };
       await new Promise(r => setTimeout(r, Number(env.FAKE_TURN_MS || 25)));
       const prompt = json.parts?.[0]?.text || "";
       const reply = "FAKE_REPLY:" + prompt;
       const parentID = env.FAKE_RACE_HUMAN === "1" ? "msg_human_race" : json.messageID;
-      messages[id].push({ info:{role:"assistant",parentID}, parts:[{type:"text",text:reply}] });
+      messages[id].push({ info:{role:"user",id:json.messageID}, parts:json.parts || [] });
+      lastResponse = { info:{role:"assistant",parentID}, parts:[{type:"text",text:reply}] };
+      messages[id].push(lastResponse);
+      staleRunnerUntil = Date.now() + Number(env.FAKE_STALE_RUNNER_MS || 0);
       delete statuses[id];
-      return send(res, { info:{role:"assistant",parentID}, parts:[{type:"text",text:reply}] });
+      return send(res, lastResponse);
     }
     res.writeHead(404); res.end("not found");
   });
@@ -308,6 +318,27 @@ describe("OpenCode native serve+attach copresence", () => {
       });
       await expect(runtime.submit("network-must-own-its-reply", 5_000))
         .rejects.toThrow("not owned by the submitted network message");
+    } finally {
+      await runtime?.close();
+      f.close();
+    }
+  }, 15_000);
+
+  test("waits past OpenCode's status-idle to Runner-cleanup gap before the next network turn", async () => {
+    const f = fixture({ FAKE_STALE_RUNNER_MS: "150" });
+    let runtime: Awaited<ReturnType<typeof openVettedOpenCodeCopresence>> | undefined;
+    try {
+      runtime = await openVettedOpenCodeCopresence({
+        binary: f.binary,
+        env: f.env,
+        cwd: f.root,
+        workDir: f.root,
+        startupTimeoutMs: 5_000,
+      });
+      const first = await runtime.submit("first-network-turn", 5_000);
+      const second = await runtime.submit("second-network-turn", 5_000);
+      expect(first.replyText).toBe("FAKE_REPLY:first-network-turn");
+      expect(second.replyText).toBe("FAKE_REPLY:second-network-turn");
     } finally {
       await runtime?.close();
       f.close();
