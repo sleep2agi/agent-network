@@ -1,6 +1,7 @@
 Test 584 — Dashboard → Codex TUI reliable delivery
 Date: 2026-08-04 (Asia/Shanghai)
 Base: origin/main 4da56c34c3159d674fb84f7ff636d6080f83b641
+Source candidate: ab9e2d46edc10807311ee0c7d38dcda460855118
 Image: anet-test584:dev
 Command: sg docker -c 'docker run --rm anet-test584:dev'
 Result: PASS (exit 0)
