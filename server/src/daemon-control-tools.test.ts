@@ -15,7 +15,7 @@ const HASH = "b".repeat(64);
 
 function clean() {
   for (const net of [NET, OTHER]) {
-    for (const table of ["daemon_node_actions", "daemon_node_inventory", "nodes", "api_tokens", "network_members", "networks"]) {
+    for (const table of ["daemon_node_actions", "daemon_node_inventory", "sessions", "nodes", "api_tokens", "network_members", "networks"]) {
       try { db.run(`DELETE FROM ${table} WHERE network_id=?1`, [net]); } catch {}
     }
   }
@@ -110,5 +110,15 @@ describe("RFC-031 wired daemon control tools", () => {
     expect(await call(daemon.ack_daemon_node_action, { action_id: started.action_id, status: "succeeded", observed_state: "running" })).toMatchObject({ ok: false, error: "invalid_daemon_action_result" });
     expect(await call(admin.get_daemon_node_action_status, { action_id: started.action_id, network_id: NET })).toMatchObject({ action: { status: "delivered" } });
     expect(await call(daemon.ack_daemon_node_action, { action_id: started.action_id, status: "succeeded", observed_state: "running", verified_pid: 4321, config_hash: HASH, config_revision: 1 })).toMatchObject({ ok: true, status: "succeeded" });
+  });
+
+  test("host supervisor is online when SQLite UTC timestamp is fresh under a non-UTC host timezone", async () => {
+    const sqliteUtcNow = new Date().toISOString().slice(0, 19).replace("T", " ");
+    db.run(`INSERT INTO sessions (resume_id,alias,status,network_id,registered_at,updated_at,last_seen_at)
+            VALUES ('resume_daemon_tools',?1,'idle',?2,datetime('now'),datetime('now'),?3)`, [ALIAS, NET, sqliteUtcNow]);
+    const admin = handlers({ user: USER });
+    const listed = await call(admin.list_host_supervisors, { network_id: NET });
+    expect(listed.daemons).toHaveLength(1);
+    expect(listed.daemons[0]).toMatchObject({ daemon_node_id: DAEMON, alias: ALIAS, online: true });
   });
 });

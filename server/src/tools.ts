@@ -65,6 +65,18 @@ function ts(): string {
   return new Date().toTimeString().slice(0, 8);
 }
 
+// SQLite datetime('now') is UTC but omits the trailing Z. Date.parse treats
+// that shape as host-local time, which makes fresh rows look 8h old on an
+// Asia/Shanghai Hub. Normalize only SQLite's canonical naive shape to UTC;
+// keep explicit-offset/ISO inputs unchanged for backward compatibility.
+export function parseSqliteUtcMs(value: string): number {
+  const raw = String(value || "").trim();
+  const sqliteUtc = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(raw)
+    ? `${raw.replace(" ", "T")}Z`
+    : raw;
+  return Date.parse(sqliteUtc);
+}
+
 function parseMetaJson(value: unknown): unknown | null {
   if (!value || typeof value !== "string") return null;
   try { return JSON.parse(value); } catch { return null; }
@@ -2205,7 +2217,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           let lastSeenAt: string | null = null;
           if (r.session_last_seen) {
             lastSeenAt = r.session_last_seen;
-            const t = Date.parse(r.session_last_seen);
+            const t = parseSqliteUtcMs(r.session_last_seen);
             if (!isNaN(t)) online = (nowMs - t) <= ONLINE_MS;
           }
           // Parse self-declare arrays (default to [] for pre-PR2 daemons)

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export TZ=Asia/Shanghai
 cd /app/server
 export COMMHUB_DB=/tmp/test580-hub.db
 rm -f "$COMMHUB_DB" "$COMMHUB_DB-wal" "$COMMHUB_DB-shm"

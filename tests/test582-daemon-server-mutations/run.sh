@@ -23,7 +23,7 @@ fresh_agent() {
 }
 
 fresh_server
-COMMHUB_DB=/tmp/test582-baseline.db bun test \
+TZ=Asia/Shanghai COMMHUB_DB=/tmp/test582-baseline.db bun test \
   /tmp/test582-server/src/daemon-control.test.ts \
   /tmp/test582-server/src/daemon-control-tools.test.ts >/tmp/test582-baseline.log 2>&1 \
   || { cat /tmp/test582-baseline.log; fail "server baseline not green"; }
@@ -68,4 +68,13 @@ fi
 grep -q 'action rechecks network and hub' /tmp/test582-drift.log || { cat /tmp/test582-drift.log; fail "network recheck mutation failed for the wrong reason"; }
 ok "removing the action-time network recheck turns red"
 
-echo "RESULT: PASS ($PASS checks; 4/4 controlled mutations witnessed red)"
+fresh_server
+sed -i 's/parseSqliteUtcMs(r.session_last_seen)/Date.parse(r.session_last_seen)/' /tmp/test582-server/src/tools.ts
+if TZ=Asia/Shanghai COMMHUB_DB=/tmp/test582-time.db bun test /tmp/test582-server/src/daemon-control-tools.test.ts >/tmp/test582-time.log 2>&1; then
+  cat /tmp/test582-time.log
+  fail "SQLite UTC normalization mutation stayed green"
+fi
+grep -q 'host supervisor is online when SQLite UTC timestamp is fresh' /tmp/test582-time.log || { cat /tmp/test582-time.log; fail "timezone mutation failed for the wrong reason"; }
+ok "removing SQLite UTC normalization turns red on Asia/Shanghai"
+
+echo "RESULT: PASS ($PASS checks; 5/5 controlled mutations witnessed red)"
