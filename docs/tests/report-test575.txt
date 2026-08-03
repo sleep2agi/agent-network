@@ -1,0 +1,48 @@
+Test 575 — OpenCode TUI network reply ownership
+Date: 2026-08-03 Asia/Shanghai
+Status: PASS (isolated candidate; not deployed/published)
+
+Candidate
+---------
+Worktree: /tmp/commniu-opencode-correlate
+Branch: fix/opencode-correlated-network-reply
+Base: 849a851949e8a72ba857c737849771421516c852
+Head: 7f2040da6d959b39f0c6dda502df049ad46243b1
+Fixed Docker tag: anet-tui-audit-opencode:dev
+Image ENV: TEST575_SOURCE_COMMIT=7f2040da6d959b39f0c6dda502df049ad46243b1
+
+Finding and fix
+---------------
+The bridge checked that a shared OpenCode session was idle and then submitted a
+network message. OpenCode 1.18.1 does not expose an atomic idle claim; a human
+TUI message can win that interval. The old bridge accepted whichever assistant
+message the POST returned, so a human-owned reply could be sent to the network
+task originator.
+
+The bridge now supplies a cryptographically random msg_anet_* messageID and
+accepts only an assistant message whose parentID equals that exact network
+message ID. A human-owned or otherwise uncorrelated reply fails closed.
+
+Witnessed red / green
+---------------------
+1. Before the production fix, a fake OpenCode server returned an assistant
+   parented by msg_human_race. The bridge resolved it; the new rejection test
+   failed (rc=1).
+2. Final focused Docker gate: PASS (rc=0).
+3. Mutation drop-reply-ownership changes only the production ownership check;
+   the test then receives a resolved promise instead of the required rejection
+   (rc=1). This is a target-path red, not a startup/import failure.
+
+Full Docker gate
+----------------
+- OpenCode copresence, inbox wiring, independent drain lanes, and single-flight:
+  26 pass, 0 fail, 101 assertions across 4 files.
+- agent-node bundle: 238 modules, cli.js 0.95 MB.
+- All containers ran with --network none.
+
+Safety
+------
+No global npm package, existing node process, token, Hub state, remote branch,
+merge, publish, or deployment was changed by this candidate. The separately
+requested opencode-指挥狗 recovery used the already installed reviewed candidate,
+not this new source branch.
