@@ -1,0 +1,101 @@
+Test 573 — Codex shared-TUI missed-terminal reconciliation
+Date: 2026-08-03 Asia/Shanghai
+Status: PASS (candidate); live node restored on existing production source
+
+Scope
+-----
+TM副责人 accepted CommHub tasks but they did not appear in the attached Codex
+TUI. Diagnose Hub → inbox → bridge → app-server → shared TUI and prevent one
+missed terminal event from permanently wedging later tasks.
+
+Production facts (read-only diagnosis)
+--------------------------------------
+- Hub session: alias=TM副责人, node_id=n_ace53877, runtime=codex-app-server,
+  app-server ws://127.0.0.1:24702, thread
+  019f4af0-177b-75a3-8d40-9251b1e719ee.
+- The TUI command used the same URL and exact thread id; this was not an
+  attach-to-the-wrong-thread failure.
+- The old bridge PID 331368 started 2026-07-31 and therefore predated
+  rfc030-work commit 81589a05 (new_message wake + non-blocking inbox drain).
+- Old bridge log: 10 task_reply successes, then 28 consecutive 600-second
+  timeouts. Later tasks were logged as "queued (a turn is in flight)".
+- App-server thread/read was authoritative counter-evidence: thread status was
+  idle; the first locally-stuck task, anet:5eb11df6-..., existed as a completed
+  turn in persisted history. The bridge had missed/lost the terminal event but
+  retained activeTurnId indefinitely.
+
+Immediate live recovery
+-----------------------
+- Cancelled only the diagnostic probe 9e76b9bb... before restart.
+- Stopped exact bridge PID 331368 with SIGTERM. TUI and app-server were not
+  restarted.
+- Restarted bridge from rfc030-work @ 81589a05 in exact tmux
+  `TM副责人-桥`; cleared all inherited COMMHUB_* plus unrelated
+  TELEGRAM_STATE_DIR/CODEX_COMPANION_SESSION_ID first.
+- Live send_task 0431779d-d642-4a00-92cf-bd41710ac8d9 was visible in tmux
+  `TM副责人` and returned the exact marker
+  `TM副责人链路恢复-20260803-002` in about five seconds.
+- Post-check: session idle, inbox_pending=0.
+- Subsequent real tasks from TM负责人 and TMCode负责人 also reached the same
+  TUI and completed, proving this was not a one-shot self-probe recovery.
+
+Message-type boundary
+---------------------
+- CommHub `task`/`broadcast` rows are model/TUI work and are the supported
+  node-to-node delivery path. The fleet rule requires peer results and
+  receipts to use send_task.
+- Plain `send_message` rows now wake the bridge on new_message (81589a05) but
+  remain intentionally ack/log-only in cli.ts; they do not enter the model or
+  TUI. A live TM网站运维 message at 08:28:58 confirmed this exact behavior.
+- A no-model `thread/inject_items` probe returned success but emitted no item
+  notification and did not render live in the attached TUI. It is therefore
+  not used as a fake passive-notification mechanism. Turning send_message into
+  a full model turn would expand it into a full-access execution surface and
+  was deliberately rejected.
+
+Candidate behavior
+------------------
+- CodexAppServerBridge.reconcileActiveTurn() treats app-server thread/read as
+  authoritative only for the exact locally-active turn.
+- Normal watchdog reads only thread status. It hydrates full turn history only
+  when the server reports idle (or an older server omits status).
+- It releases the claim only for completed/failed/interrupted. Active, missing,
+  failed-read, and stale-snapshot cases remain fail-closed.
+- Exact final_answer is recovered from persisted items, then the existing FIFO
+  drains. A single-flight guard prevents concurrent thread/read stampedes.
+- codexAppServerThink schedules reconciliation every five seconds and retains
+  the existing 600-second outer timeout.
+
+Docker evidence
+---------------
+Fixed/reused image tag: anet-test-tm-codex-reconcile:dev
+Image: sha256:cfe53bc15fda5b363b67e18bd85ec02bd2826af871933709cd1e6d4837151a52
+Size: 85,922,732 bytes
+
+1. Focused normal gate
+   docker run ... anet-test-tm-codex-reconcile:dev
+   PASS: 26 tests, 81 assertions, 0 failures.
+
+2. Full Codex app-server runtime/client/bridge gate
+   bun test codex-app-server*.test.ts codex-app-server/*.test.ts (inside Docker)
+   PASS: 38 tests, 110 assertions, 0 failures.
+
+3. Node bundle build (inside Docker, source copied to ephemeral /tmp)
+   bun run build
+   PASS: 238 modules, dist/cli.js 947,017 bytes.
+
+4. Witnessed-red mutation: remove watchdog start
+   RESULT: 25 pass, 1 fail; runtime test timed out instead of recovering.
+
+5. Witnessed-red mutation: suppress exact terminal release
+   RESULT: 25 pass, 1 fail; completed persisted turn remained unrecovered.
+
+Safety / provenance
+-------------------
+- Development worktree: /tmp/commniu-tm-codex-reconcile
+- Branch: fix/tm-codex-turn-reconcile
+- Base: origin/main 849a851949e8a72ba857c737849771421516c852
+- No edit to /home/vansin/agent-orchestra or /home/vansin/rfc030-work.
+- No push, merge, npm publish, or deployment of the candidate code.
+- Production currently runs the already-reviewed 81589a05 source; the new
+  reconciliation candidate remains separate pending review.

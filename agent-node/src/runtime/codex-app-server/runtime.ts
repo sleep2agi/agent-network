@@ -218,20 +218,31 @@ export interface CodexAppServerThinkResult {
  */
 export function codexAppServerThink(
   session: CodexAppServerRuntimeSession,
-  opts: { taskId: string; text: string; from?: string; timeoutMs?: number; log?: (m: string) => void },
+  opts: {
+    taskId: string;
+    text: string;
+    from?: string;
+    timeoutMs?: number;
+    /** Test seam; production defaults to a 5s authoritative thread/read. */
+    reconciliationIntervalMs?: number;
+    log?: (m: string) => void;
+  },
 ): Promise<CodexAppServerThinkResult> {
   const timeoutMs = opts.timeoutMs ?? 10 * 60_000;
+  const reconciliationIntervalMs = opts.reconciliationIntervalMs ?? 5_000;
   const log = opts.log ?? (() => {});
   const { bridge } = session;
 
   return new Promise<CodexAppServerThinkResult>((resolve) => {
     let settled = false;
+    let reconciliationTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = (r: CodexAppServerThinkResult) => {
       if (settled) return;
       settled = true;
       bridge.off("task_reply", onReply);
       bridge.off("task_error", onError);
       clearTimeout(timer);
+      if (reconciliationTimer) clearTimeout(reconciliationTimer);
       resolve(r);
     };
     const onReply = (ev: { taskId: string; text: string }) => {
@@ -252,8 +263,33 @@ export function codexAppServerThink(
       });
     }, timeoutMs);
 
+    // A shared app-server WebSocket can miss an individual terminal
+    // notification while the authoritative thread history still records the
+    // completed turn. Periodically reconcile the exact active turn so one
+    // dropped frame cannot wedge this task and every later FIFO entry for the
+    // lifetime of the bridge process.
+    const scheduleReconciliation = () => {
+      if (settled || reconciliationIntervalMs <= 0) return;
+      reconciliationTimer = setTimeout(async () => {
+        try {
+          const reconciled = await bridge.reconcileActiveTurn();
+          if (reconciled.recovered) {
+            log(`[codex-app-server] recovered missed terminal event for turn ${reconciled.turnId}`);
+          }
+        } catch (e) {
+          // A failed read is not evidence that the turn completed. Preserve
+          // the local claim and retry; the normal task timeout remains the
+          // outer bound.
+          log(`[codex-app-server] turn reconciliation failed: ${e instanceof Error ? e.message : String(e)}`);
+        } finally {
+          scheduleReconciliation();
+        }
+      }, reconciliationIntervalMs);
+    };
+
     bridge.on("task_reply", onReply);
     bridge.on("task_error", onError);
+    scheduleReconciliation();
 
     bridge
       .submitTask({ taskId: opts.taskId, text: opts.text, from: opts.from })

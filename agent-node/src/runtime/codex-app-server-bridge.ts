@@ -53,6 +53,7 @@ export interface PendingTurn {
   submittedAt: number;
   turnId?: string;
   agentTextChunks: string[];
+  finalText?: string;
 }
 
 export interface WaitingApproval {
@@ -60,6 +61,15 @@ export interface WaitingApproval {
   method: string;
   params: unknown;
   observedAt: number;
+}
+
+export interface ActiveTurnReconciliation {
+  /** Whether a missed terminal notification was recovered from thread/read. */
+  recovered: boolean;
+  /** Active turn id observed when reconciliation started, if any. */
+  turnId: string | null;
+  /** Authoritative status returned by thread/read when a turn was found. */
+  status?: string;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -100,6 +110,8 @@ export class CodexAppServerBridge extends EventEmitter {
    */
   private taskQueue: Array<{ taskId: string; text: string; from?: string }> = [];
   private draining = false;
+  /** Coalesce watchdog reads so concurrent callers never stampede app-server. */
+  private reconciliationInFlight: Promise<ActiveTurnReconciliation> | null = null;
 
   constructor(opts: CodexAppServerBridgeOptions) {
     super();
@@ -445,13 +457,105 @@ export class CodexAppServerBridge extends EventEmitter {
       void this.drainQueue();
       return;
     }
+    this.finishOwnedTurn(turnId, {
+      status: p.turn?.status,
+      error: p.turn?.error?.message,
+    });
+  }
+
+  /**
+   * Reconcile the bridge's local active-turn claim against app-server's
+   * authoritative persisted thread state.
+   *
+   * WebSocket notifications are best-effort. If one `turn/completed` frame is
+   * missed, the old implementation retained `activeTurnId` forever: every
+   * later Agent Network task entered the FIFO and timed out even though
+   * `thread/read` reported the thread idle and the turn completed. This method
+   * closes that one-frame failure mode without guessing that an old turn is
+   * done: only an explicit terminal status for the exact active turn releases
+   * the claim.
+   */
+  async reconcileActiveTurn(): Promise<ActiveTurnReconciliation> {
+    if (this.reconciliationInFlight) return this.reconciliationInFlight;
+    const activeAtStart = this.activeTurnId;
+    if (!activeAtStart) return { recovered: false, turnId: null };
+
+    this.reconciliationInFlight = (async () => {
+      // Keep the steady-state watchdog cheap: read only the thread status
+      // while Codex is working. Hydrate full turn history only after the
+      // authoritative status says idle (or an older server omits status).
+      const statusResult = await this.client.request<{
+        thread?: { status?: string | { type?: string } };
+      }>("thread/read", { threadId: this.threadId, includeTurns: false });
+
+      // A notification may have completed the turn while thread/read was in
+      // flight. Never let an old snapshot release a newer active claim.
+      if (this.activeTurnId !== activeAtStart) {
+        return { recovered: false, turnId: activeAtStart };
+      }
+
+      const threadStatus = extractThreadStatus(statusResult?.thread?.status);
+      if (threadStatus && threadStatus !== "idle") {
+        return { recovered: false, turnId: activeAtStart, status: threadStatus };
+      }
+
+      const result = await this.client.request<{
+        thread?: {
+          turns?: Array<{
+            id?: string;
+            status?: string;
+            error?: { message?: string } | null;
+            items?: Array<{ type?: string; text?: string; phase?: string }>;
+          }>;
+        };
+      }>("thread/read", { threadId: this.threadId, includeTurns: true });
+
+      if (this.activeTurnId !== activeAtStart) {
+        return { recovered: false, turnId: activeAtStart };
+      }
+
+      const turn = result?.thread?.turns?.find((candidate) => candidate.id === activeAtStart);
+      if (!turn || !isTerminalTurnStatus(turn.status)) {
+        return { recovered: false, turnId: activeAtStart, status: turn?.status };
+      }
+
+      const finalText = [...(turn.items ?? [])]
+        .reverse()
+        .find((item) =>
+          item.type === "agentMessage" &&
+          item.phase === "final_answer" &&
+          typeof item.text === "string"
+        )?.text;
+      const recovered = this.finishOwnedTurn(activeAtStart, {
+        status: turn.status,
+        error: turn.error?.message,
+        finalText,
+      });
+      if (recovered) {
+        this.emit("turn_reconciled", { turnId: activeAtStart, status: turn.status });
+      }
+      return { recovered, turnId: activeAtStart, status: turn.status };
+    })().finally(() => {
+      this.reconciliationInFlight = null;
+    });
+    return this.reconciliationInFlight;
+  }
+
+  private finishOwnedTurn(
+    turnId: string,
+    terminal: { status?: string; error?: string; finalText?: string },
+  ): boolean {
+    const pending = this.pendingTurns.get(turnId);
+    if (!pending) return false;
+    if (terminal.finalText) pending.finalText = terminal.finalText;
     this.pendingTurns.delete(turnId);
     if (this.activeTurnId === turnId) {
       this.activeTurnId = null;
       this.turnClaimed = false;
       this.setStatus(this.waitingApprovals.size > 0 ? "waiting_human" : "idle");
     }
-    const turnErr = p.turn?.error?.message;
+    const turnErr = terminal.error ??
+      (terminal.status === "failed" ? "Codex turn failed without an error message" : undefined);
     if (turnErr) {
       this.emit("task_error", { taskId: pending.taskId, error: turnErr });
     } else {
@@ -463,6 +567,7 @@ export class CodexAppServerBridge extends EventEmitter {
     }
     // Either way the thread just went idle from our perspective → drain FIFO.
     void this.drainQueue();
+    return true;
   }
 
   /** Read-only queue depth (for tests / observability). */
@@ -491,6 +596,19 @@ function extractTurnId(v: unknown): string | null {
   if (o.turn && typeof o.turn === "object" && typeof o.turn.id === "string") return o.turn.id;
   if (typeof o.turnId === "string") return o.turnId;
   return null;
+}
+
+function isTerminalTurnStatus(status: unknown): status is "completed" | "failed" | "interrupted" {
+  return status === "completed" || status === "failed" || status === "interrupted";
+}
+
+function extractThreadStatus(status: unknown): string | undefined {
+  if (typeof status === "string") return status;
+  if (status && typeof status === "object") {
+    const type = (status as { type?: unknown }).type;
+    if (typeof type === "string") return type;
+  }
+  return undefined;
 }
 
 /** Recognise the app-server's "already initialized" rejection (shared server). */
