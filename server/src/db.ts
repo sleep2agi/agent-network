@@ -544,6 +544,63 @@ try {
   console.warn(`[commhub] partial unique index uniq_ncr_inflight skipped: ${e?.message || e}`);
 }
 
+// RFC-031 — durable, secret-free inventory of the node profiles physically
+// present below a host_supervisor's fixed project root. This is intentionally
+// separate from `nodes`: inventory means "present on this host", while nodes
+// remains the network registry contract consumed by existing clients.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS daemon_node_inventory (
+    network_id       TEXT NOT NULL,
+    daemon_node_id   TEXT NOT NULL,
+    local_node_id    TEXT NOT NULL,
+    alias            TEXT NOT NULL,
+    runtime          TEXT NOT NULL,
+    config_relpath   TEXT NOT NULL,
+    observed_state   TEXT NOT NULL CHECK (observed_state IN ('running','stopped','unknown','quarantined')),
+    verified_pid     INTEGER,
+    config_hash      TEXT NOT NULL,
+    config_revision  INTEGER NOT NULL DEFAULT 0,
+    conflict_code    TEXT,
+    first_seen_at    INTEGER NOT NULL,
+    last_seen_at     INTEGER NOT NULL,
+    PRIMARY KEY (network_id, daemon_node_id, local_node_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_dni_daemon
+    ON daemon_node_inventory(network_id, daemon_node_id, last_seen_at);
+  CREATE INDEX IF NOT EXISTS idx_dni_node
+    ON daemon_node_inventory(network_id, local_node_id);
+
+  CREATE TABLE IF NOT EXISTS daemon_node_actions (
+    action_id         TEXT PRIMARY KEY,
+    network_id       TEXT NOT NULL,
+    daemon_node_id   TEXT NOT NULL,
+    local_node_id    TEXT NOT NULL,
+    alias             TEXT NOT NULL,
+    action            TEXT NOT NULL CHECK (action IN ('start','restart','stop','update')),
+    patch_json        TEXT,
+    base_revision     INTEGER,
+    status            TEXT NOT NULL DEFAULT 'pending'
+                      CHECK (status IN ('pending','delivered','succeeded','rejected','failed')),
+    error             TEXT,
+    result_json       TEXT,
+    created_by_token  TEXT NOT NULL,
+    created_at        INTEGER NOT NULL,
+    delivered_at      INTEGER,
+    acked_at          INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_dna_daemon
+    ON daemon_node_actions(daemon_node_id, status);
+  CREATE INDEX IF NOT EXISTS idx_dna_node
+    ON daemon_node_actions(network_id, local_node_id, status);
+`);
+try {
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_dna_inflight
+             ON daemon_node_actions(network_id, daemon_node_id, local_node_id)
+          WHERE status IN ('pending','delivered')`);
+} catch (e: any) {
+  console.warn(`[commhub] partial unique index uniq_dna_inflight skipped: ${e?.message || e}`);
+}
+
 // RFC-028 P1 v4 §2.2 — providers + provider_models + network_secrets +
 // probe_results. All 4 tables idempotent CREATE TABLE IF NOT EXISTS. F2
 // lazy gate: tables created on hub boot regardless; vault master key

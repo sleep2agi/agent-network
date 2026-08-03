@@ -99,7 +99,9 @@ export function loadAndVerifyAnetBin(env: NodeJS.ProcessEnv = process.env): stri
 // boot path calls this explicitly + stashes the result.
 let _anetBinAbs: string | null = null;
 export function getAnetBinAbs(): string {
-  if (_anetBinAbs) return _anetBinAbs;
+  // Revalidate path, permissions, and install-time hash for every action.
+  // A cached verdict would let an in-place package upgrade/tamper replace
+  // the launcher after daemon boot and before a later start/restart.
   _anetBinAbs = loadAndVerifyAnetBin();
   return _anetBinAbs;
 }

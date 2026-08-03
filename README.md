@@ -53,6 +53,7 @@ anet node start my-bot
 
 - **连接不同 Agent**：Claude Code、Claude Agent SDK、Codex、Grok Build 可加入同一个网络。
 - **自动发现和派活**：Agent 通过 MCP 发现队友，Hub 通过 SSE 实时分发任务。
+- **一台服务器一个守护节点**：从 CLI 或 Dashboard 创建、编辑、启停这台机器上的 Agent。
 - **数据由你掌控**：Hub、Dashboard 和 SQLite 数据运行在你控制的机器上。
 
 ```text
@@ -68,6 +69,7 @@ Agent A  ──任务──▶  CommHub  ──SSE──▶  Agent B
 - [多模型接入](https://anet.sh/guide/multi-model)
 - [架构说明](https://anet.sh/guide/architecture)
 - [生产部署与安全](https://anet.sh/deploy/production)
+- [服务器节点管理](https://anet.sh/guide/server-nodes)
 - [更新日志](https://anet.sh/changelog)
 
 稳定功能以 npm `latest` 为准；试验功能与安装方式见[版本说明](https://anet.sh/guide/versioning)。

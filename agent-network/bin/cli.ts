@@ -16,6 +16,7 @@ import { fileURLToPath } from "url";
 import { homedir } from "os";
 import { spawn, spawnSync, execSync, execFileSync } from "child_process";
 import { createHash, randomBytes, randomUUID } from "crypto";
+import { prepareDaemonAnetPin } from "../src/daemon-anet-pin";
 import {
   writeMarker as writeCopresenceMarker,
   readMarker as readCopresenceMarker,
@@ -5569,6 +5570,128 @@ Example:
 
 const DAEMON_DEFAULT_NAME = "daemon";
 
+async function callDaemonHubTool(name: string, toolArgs: Record<string, unknown>): Promise<any> {
+  const gc = loadGlobal();
+  if (!gc.hub || !gc.token) throw new Error("not logged in — run: anet login");
+  const headers = {
+    "Content-Type": "application/json",
+    Accept: "application/json, text/event-stream",
+    "MCP-Protocol-Version": "2025-03-26",
+    ...authHeaders(gc.token),
+  };
+  await fetch(`${gc.hub}/mcp`, {
+    method: "POST", headers,
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "anet-daemon-cli", version: getAnetVersion() || "unknown" } } }),
+  });
+  const res = await fetch(`${gc.hub}/mcp`, {
+    method: "POST", headers,
+    body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name, arguments: toolArgs } }),
+  });
+  const raw = await res.text();
+  const frames = raw.split(/\r?\n/).filter(line => line.startsWith("data:")).map(line => line.slice(5).trim()).filter(Boolean);
+  let envelope: any;
+  try { envelope = JSON.parse(frames.at(-1) || raw); }
+  catch { throw new Error(`hub returned unreadable MCP response (${res.status})`); }
+  if (envelope?.error) throw new Error(envelope.error?.message || "MCP error");
+  const text = envelope?.result?.content?.find((v: any) => v?.type === "text")?.text;
+  if (typeof text !== "string") throw new Error(`hub tool ${name} returned no result`);
+  let result: any;
+  try { result = JSON.parse(text); } catch { throw new Error(`hub tool ${name} returned invalid JSON`); }
+  if (!result?.ok) throw new Error(result?.error || `${name} failed`);
+  return result;
+}
+
+async function resolveRemoteDaemon(ref: string, networkId?: string): Promise<{ daemon_node_id: string; alias: string }> {
+  const r = await callDaemonHubTool("list_host_supervisors", { ...(networkId ? { network_id: networkId } : {}) });
+  const matches = (r.daemons || []).filter((d: any) => d.daemon_node_id === ref || d.alias === ref);
+  if (matches.length !== 1) throw new Error(matches.length ? `daemon reference is ambiguous: ${ref}` : `daemon not found: ${ref}`);
+  if (!matches[0].online) throw new Error(`daemon is offline: ${matches[0].alias}`);
+  return matches[0];
+}
+
+async function waitDaemonAction(actionId: string, networkId?: string): Promise<any> {
+  for (let i = 0; i < 40; i++) {
+    const r = await callDaemonHubTool("get_daemon_node_action_status", { action_id: actionId, ...(networkId ? { network_id: networkId } : {}) });
+    const status = r.action?.status;
+    if (status === "succeeded") return r.action;
+    if (status === "failed" || status === "rejected") throw new Error(r.action?.error || status);
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  throw new Error(`server did not confirm action within 20s: ${actionId}`);
+}
+
+async function waitCreatedNode(daemonNodeId: string, alias: string, networkId?: string): Promise<void> {
+  for (let i = 0; i < 60; i++) {
+    const r = await callDaemonHubTool("list_daemon_nodes", { daemon_node_id: daemonNodeId, ...(networkId ? { network_id: networkId } : {}) });
+    const node = (r.nodes || []).find((n: any) => n.alias === alias);
+    if (node?.conflict_code) throw new Error(`created node quarantined: ${node.conflict_code}`);
+    if (node?.observed_state === "running") return;
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  throw new Error(`server did not confirm created node within 30s: ${alias}`);
+}
+
+async function daemonRemoteCommand(sub: string) {
+  const daemonRef = args[2];
+  if (!daemonRef) {
+    console.error(`Usage: anet daemon ${sub} <daemon-node-id> ${sub === "nodes" ? "" : "<node-id-or-alias>"}`.trim());
+    process.exit(1);
+  }
+  const opts = parseOpts();
+  const gc = loadGlobal();
+  const networkId = opts["network-id"] || gc.network_id;
+  const daemon = await resolveRemoteDaemon(daemonRef, networkId);
+  const daemonNodeId = daemon.daemon_node_id;
+  if (sub === "nodes") {
+    const r = await callDaemonHubTool("list_daemon_nodes", { daemon_node_id: daemonNodeId, ...(networkId ? { network_id: networkId } : {}) });
+    console.log(`Server nodes (${r.count}):`);
+    for (const n of r.nodes || []) console.log(`  ${String(n.alias).padEnd(24)} ${String(n.observed_state).padEnd(11)} ${String(n.runtime).padEnd(20)} ${n.local_node_id}${n.conflict_code ? `  ⚠ ${n.conflict_code}` : ""}`);
+    return;
+  }
+  if (sub === "create") {
+    const nodeName = args[3];
+    if (!nodeName) { console.error("Usage: anet daemon create <daemon-node-id> <name> --runtime <runtime> --model <model>"); process.exit(1); }
+    const runtime = opts.runtime || "claude-agent-sdk";
+    const model = opts.model || (runtime === "codex-sdk" ? "gpt-5.5" : runtime === "grok-build-acp" ? "grok-build" : "claude-sonnet-4-6");
+    const r = await callDaemonHubTool("create_node", { daemon_node_id: daemonNodeId, node_spec: { name: nodeName, runtime, model, flags: {} }, ...(networkId ? { network_id: networkId } : {}) });
+    console.log(`✓ create dispatched to ${daemon.alias}: ${r.request_id}`);
+    await waitCreatedNode(daemonNodeId, nodeName, networkId);
+    console.log(`✓ ${nodeName} is running`);
+    return;
+  }
+  const ref = args[3];
+  if (!ref) { console.error(`Usage: anet daemon ${sub} <daemon-node-id> <node-id-or-alias>`); process.exit(1); }
+  const listed = await callDaemonHubTool("list_daemon_nodes", { daemon_node_id: daemonNodeId, ...(networkId ? { network_id: networkId } : {}) });
+  const node = (listed.nodes || []).find((n: any) => n.local_node_id === ref || n.alias === ref);
+  if (!node) throw new Error(`node not found on this server: ${ref}`);
+  if (sub === "edit") {
+    const flags: Record<string, unknown> = {};
+    if (opts["max-turns"] !== undefined) flags.maxTurns = Number(opts["max-turns"]);
+    if (opts.budget !== undefined) flags.budget = Number(opts.budget);
+    if (opts.timeout !== undefined) flags.timeout = Number(opts.timeout);
+    if (opts["permission-mode"] !== undefined) flags.permissionMode = opts["permission-mode"];
+    const patch = { ...(opts.model ? { model: opts.model } : {}), flags };
+    if (!opts.model && Object.keys(flags).length === 0) throw new Error("edit needs --model and/or --max-turns/--budget/--timeout/--permission-mode");
+    const r = await callDaemonHubTool("dispatch_daemon_node_action", { daemon_node_id: daemonNodeId, local_node_id: node.local_node_id, action: "update", patch, base_revision: node.config_revision || 0, ...(networkId ? { network_id: networkId } : {}) });
+    await waitDaemonAction(r.action_id, networkId);
+    console.log(`✓ ${node.alias} updated`);
+    return;
+  }
+  if (sub === "start" || sub === "restart") {
+    const r = await callDaemonHubTool("dispatch_daemon_node_action", { daemon_node_id: daemonNodeId, local_node_id: node.local_node_id, action: sub, ...(networkId ? { network_id: networkId } : {}) });
+    await waitDaemonAction(r.action_id, networkId);
+    console.log(`✓ ${node.alias} ${sub === "start" ? "started" : "restarted"}`);
+    return;
+  }
+  if (sub === "stop") {
+    const r = await callDaemonHubTool("dispatch_daemon_node_action", { daemon_node_id: daemonNodeId, local_node_id: node.local_node_id, action: "stop", ...(networkId ? { network_id: networkId } : {}) });
+    await waitDaemonAction(r.action_id, networkId);
+    console.log(`✓ ${node.alias} stopped`);
+    return;
+  }
+  throw new Error(`unknown daemon remote command: ${sub}`);
+}
+
 async function daemonCommand() {
   const sub = args[1];
   if (!sub || sub === "help" || sub === "-h" || sub === "--help") {
@@ -5579,6 +5702,14 @@ Subcommands:
   start <name>         Start a daemon (delegates to anet node start; verifies role)
   up [<name>]          init + start one-shot (default name: "${DAEMON_DEFAULT_NAME}")
   list                 List locally-configured daemon nodes
+  nodes <daemon-id>    List nodes physically managed by a server daemon
+  create <d> <name>    Create + start a node on that server
+  edit <d> <node>      Edit a stopped node (--model/--max-turns/...)
+  start-node <d> <n>   Start a stopped node (or: daemon node start ...)
+  restart <d> <node>   Restart a node through its server daemon
+  stop <d> <node>      Stop a node through its server daemon
+  node <verb> ...      Same remote actions under one namespace; e.g.
+                       anet daemon node start <daemon-id> <node>
 
 Options:
   --force              Overwrite an existing non-daemon config (init only)
@@ -5594,6 +5725,19 @@ Run \`anet hub start\` first if you don't yet have a CommHub.`);
     case "start": args.splice(0, 1); await daemonStartCommand(); break;
     case "up":    args.splice(0, 1); await daemonUpCommand(); break;
     case "list": case "ls": await daemonListCommand(); break;
+    case "nodes": case "create": case "edit": case "start-node": case "restart": case "stop":
+      await daemonRemoteCommand(sub === "start-node" ? "start" : sub); break;
+    case "node": {
+      const verb = args[2];
+      const allowed = new Set(["list", "nodes", "create", "edit", "start", "restart", "stop"]);
+      if (!verb || !allowed.has(verb)) {
+        console.error("Usage: anet daemon node <list|create|edit|start|restart|stop> <daemon-node-id> [node]");
+        process.exit(1);
+      }
+      args.splice(1, 1); // [daemon,node,verb,daemon,...] → [daemon,verb,daemon,...]
+      await daemonRemoteCommand(verb === "list" ? "nodes" : verb);
+      break;
+    }
     default: {
       const suggestion = suggestSimilar(sub, ["init", "start", "up", "list"]);
       if (suggestion) console.log(`Unknown daemon subcommand "${sub}". Did you mean: anet daemon ${suggestion}?`);
@@ -5745,6 +5889,7 @@ async function daemonStartCommand() {
     console.error(`Re-init as daemon: anet daemon init ${id} --force`);
     process.exit(1);
   }
+  Object.assign(process.env, prepareDaemonAnetPin({ projectRoot: process.cwd(), cliPath: process.argv[1] }));
   // Delegate to existing startCommand — it reads args[1] for the node name,
   // which is what we have after the `daemon start` splice in daemonCommand.
   await startCommand();
@@ -5756,6 +5901,7 @@ async function daemonUpCommand() {
     args.splice(1, 0, DAEMON_DEFAULT_NAME);
   }
   await daemonInitCommand();
+  Object.assign(process.env, prepareDaemonAnetPin({ projectRoot: process.cwd(), cliPath: process.argv[1] }));
   // After init, args[1] is still the name; startCommand reads args[1].
   await startCommand();
 }

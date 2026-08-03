@@ -55,6 +55,11 @@ import {
   isAllowedToChangeFlag,
 } from "./config-apply-validate.js";
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
+import {
+  createDaemonAction,
+  listDaemonInventory,
+  syncDaemonInventory,
+} from "./daemon-control.js";
 
 function ts(): string {
   return new Date().toTimeString().slice(0, 8);
@@ -2638,7 +2643,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // must then pass daemon_node_id explicitly. node_id derivation:
   // `node_${request_id.replace(/^cr_/,"")}` (see create-node-daemon.ts
   // and PR1 BLOCKER-1 fix), so we reverse it: `cr_${node_id.slice(5)}`.
-  const resolveDaemonForChild = (child_node_id: string): string | null => {
+  const resolveDaemonForChild = (child_node_id: string, networkId?: string | null): string | null => {
+    // Keep the RFC-027 stop/delete contract tied to RFC-026 creation rows.
+    // RFC-031 host inventory is managed through dispatch_daemon_node_action;
+    // folding it into this legacy path would silently change old callers.
+    void networkId;
     if (!child_node_id.startsWith("node_")) return null;
     const requestId = `cr_${child_node_id.slice(5)}`;
     const row = db.get<{ daemon_node_id: string }>(
@@ -2875,7 +2884,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       network_id: z.string().max(200).optional(),
     },
     async ({ child_node_id, daemon_node_id, force, grace_seconds, network_id: clientNetId }) => {
-      const resolved = daemon_node_id ?? resolveDaemonForChild(child_node_id);
+      const resolved = daemon_node_id ?? resolveDaemonForChild(child_node_id, getNetworkId(clientNetId));
       if (!resolved) {
         return { content: [{ type: "text" as const, text: JSON.stringify({
           ok: false, error: "daemon_not_resolvable",
@@ -2904,7 +2913,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       network_id: z.string().max(200).optional(),
     },
     async ({ child_node_id, daemon_node_id, confirm_alias, force, grace_seconds, delete_config, network_id: clientNetId }) => {
-      const resolved = daemon_node_id ?? resolveDaemonForChild(child_node_id);
+      const resolved = daemon_node_id ?? resolveDaemonForChild(child_node_id, getNetworkId(clientNetId));
       if (!resolved) {
         return { content: [{ type: "text" as const, text: JSON.stringify({
           ok: false, error: "daemon_not_resolvable",
@@ -3096,6 +3105,220 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         lifecycle_state: r.lifecycle_state ?? "active",
       }));
       return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, count: children.length, children }) }] };
+    },
+  );
+
+  // ── RFC-031 — server daemon inventory + offline lifecycle closure ──
+  server.tool(
+    "sync_daemon_inventory",
+    "Host supervisor reports a secret-free snapshot of local node profiles. Daemon-token only.",
+    {
+      items: z.array(z.object({
+        local_node_id: z.string().min(1).max(200),
+        alias: z.string().min(1).max(200),
+        runtime: z.string().min(1).max(64),
+        config_relpath: z.string().min(1).max(300),
+        observed_state: z.enum(["running", "stopped", "unknown"]),
+        verified_pid: z.number().int().positive().optional(),
+        config_hash: z.string().length(64),
+        config_revision: z.number().int().min(0).optional(),
+      }).strict()).max(500),
+    },
+    async ({ items }) => {
+      const daemon = resolveCallerDaemonTokenBound();
+      if (!daemon.ok) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: daemon.error }) }] };
+      try {
+        const result = syncDaemonInventory({
+          daemonNodeId: daemon.daemonNodeId,
+          daemonAlias: daemon.daemonAlias,
+          networkId: daemon.networkId,
+          items,
+        });
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, ...result }) }] };
+      } catch (e: any) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: e?.message || "inventory_sync_failed" }) }] };
+      }
+    },
+  );
+
+  server.tool(
+    "list_daemon_nodes",
+    "List nodes physically present under one host supervisor. Network scoped; no secrets or host paths.",
+    {
+      daemon_node_id: z.string().min(1).max(200),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ daemon_node_id, network_id: clientNetId }) => {
+      const net = getNetworkId(clientNetId);
+      if (!net) return writeDeniedReply(net, "read");
+      if (enforceUserId && !getUserNetworkRole(enforceUserId, net)) return writeDeniedReply(net, "read");
+      const daemon = db.get<{ node_id: string }>("SELECT node_id FROM nodes WHERE node_id=?1 AND network_id=?2", daemon_node_id, net);
+      if (!daemon) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "daemon_not_found" }) }] };
+      const nodes = listDaemonInventory(net, daemon_node_id);
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, daemon_node_id, count: nodes.length, nodes }) }] };
+    },
+  );
+
+  server.tool(
+    "dispatch_daemon_node_action",
+    "Start, stop, restart, or edit a node through its host supervisor, including stopped nodes.",
+    {
+      daemon_node_id: z.string().min(1).max(200),
+      local_node_id: z.string().min(1).max(200),
+      action: z.enum(["start", "restart", "stop", "update"]),
+      patch: z.object({
+        model: z.string().max(200).optional(),
+        flags: z.record(z.string(), z.unknown()).optional(),
+        channels: z.array(z.unknown()).max(16).optional(),
+      }).strict().optional(),
+      base_revision: z.number().int().min(0).optional(),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ daemon_node_id, local_node_id, action, patch, base_revision, network_id: clientNetId }) => {
+      const net = getNetworkId(clientNetId);
+      if (!canWrite(net)) return writeDeniedReply(net, action);
+      if (!net) return writeDeniedReply(net, action);
+      const daemon = db.get<{ alias: string }>("SELECT alias FROM nodes WHERE node_id=?1 AND network_id=?2", daemon_node_id, net);
+      if (!daemon) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "daemon_not_found" }) }] };
+      if (action === "update") {
+        if (!patch || base_revision === undefined) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "patch_and_base_revision_required" }) }] };
+        const model = typeof patch.model === "string" ? patch.model : undefined;
+        const flags = patch.flags && typeof patch.flags === "object" ? patch.flags as Record<string, unknown> : {};
+        let channels: string[] | undefined;
+        if (patch.channels !== undefined) {
+          channels = narrowChannelsPatch(patch.channels) ?? [];
+          if (patch.channels.length > 0 && channels.length === 0) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "channels_all_invalid" }) }] };
+        }
+        const invalid = validatePatch(model, flags, channels);
+        if (invalid) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "invalid_patch", ...invalid }) }] };
+        const role = enforceUserId ? getUserNetworkRole(enforceUserId, net) : null;
+        const sec = isAllowedToChangeFlag(role, flags);
+        if (sec) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "insufficient_role_for_security_flag", ...sec }) }] };
+        patch = { ...(model !== undefined ? { model } : {}), flags, ...(channels !== undefined ? { channels } : {}) };
+      } else if (patch !== undefined || base_revision !== undefined) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "patch_not_allowed_for_lifecycle_action" }) }] };
+      }
+      try {
+        const created = createDaemonAction({
+          networkId: net, daemonNodeId: daemon_node_id, localNodeId: local_node_id,
+          action, patch, baseRevision: base_revision, createdByToken: callerTokenId || "unknown",
+        });
+        pushEvent(daemon.alias, { type: "daemon_node_action", action_id: created.action_id }, net);
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, ...created, status: "pending" }) }] };
+      } catch (e: any) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: e?.message || "daemon_action_failed" }) }] };
+      }
+    },
+  );
+
+  server.tool(
+    "get_daemon_node_action",
+    "Host supervisor pulls one daemon node action. Daemon-token only.",
+    { action_id: z.string().min(1).max(200) },
+    async ({ action_id }) => {
+      const daemon = resolveCallerDaemonTokenBound();
+      if (!daemon.ok) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: daemon.error }) }] };
+      const row = db.get<any>(
+        `SELECT action_id,daemon_node_id,network_id,local_node_id,alias,action,patch_json,base_revision,status
+           FROM daemon_node_actions WHERE action_id=?1`, action_id,
+      );
+      if (!row || row.daemon_node_id !== daemon.daemonNodeId || row.network_id !== daemon.networkId) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "action_not_found" }) }] };
+      }
+      if (row.status === "pending") db.run("UPDATE daemon_node_actions SET status='delivered',delivered_at=?1 WHERE action_id=?2 AND status='pending'", [Date.now(), action_id]);
+      let parsedPatch: unknown = null;
+      if (row.patch_json) try { parsedPatch = JSON.parse(row.patch_json); } catch { return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "stored_patch_invalid" }) }] }; }
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request: { ...row, status: "delivered", patch: parsedPatch, patch_json: undefined } }) }] };
+    },
+  );
+
+  server.tool(
+    "ack_daemon_node_action",
+    "Host supervisor acknowledges a daemon node action. Daemon-token only.",
+    {
+      action_id: z.string().min(1).max(200),
+      status: z.enum(["succeeded", "rejected", "failed"]),
+      error: z.string().max(2000).optional(),
+      observed_state: z.enum(["running", "stopped", "unknown"]).optional(),
+      verified_pid: z.number().int().positive().optional(),
+      config_hash: z.string().length(64).optional(),
+      config_revision: z.number().int().min(0).optional(),
+    },
+    async ({ action_id, status, error, observed_state, verified_pid, config_hash, config_revision }) => {
+      const daemon = resolveCallerDaemonTokenBound();
+      if (!daemon.ok) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: daemon.error }) }] };
+      const row = db.get<any>("SELECT * FROM daemon_node_actions WHERE action_id=?1", action_id);
+      if (!row || row.daemon_node_id !== daemon.daemonNodeId || row.network_id !== daemon.networkId) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "action_not_found" }) }] };
+      if (["succeeded", "rejected", "failed"].includes(row.status)) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, ignored: "already_terminal", status: row.status }) }] };
+      if (status === "succeeded") {
+        const validLifecycleResult =
+          ((row.action === "start" || row.action === "restart")
+            && observed_state === "running" && verified_pid !== undefined
+            && config_hash !== undefined && config_revision !== undefined)
+          || (row.action === "stop" && observed_state === "stopped")
+          || (row.action === "update" && observed_state === "stopped"
+            && config_hash !== undefined && config_revision !== undefined
+            && row.base_revision !== null && config_revision === row.base_revision + 1);
+        if (!validLifecycleResult) {
+          return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "invalid_daemon_action_result" }) }] };
+        }
+      }
+      db.transaction(() => {
+        db.run("UPDATE daemon_node_actions SET status=?1,error=?2,acked_at=?3,result_json=?4 WHERE action_id=?5", [status, error || null, Date.now(), JSON.stringify({ observed_state, verified_pid, config_hash, config_revision }), action_id]);
+        if (status === "succeeded") {
+          const sets = ["last_seen_at=?1"];
+          const vals: any[] = [Date.now()];
+          if (observed_state) { sets.push(`observed_state=?${vals.length + 1}`); vals.push(observed_state); }
+          if (verified_pid !== undefined) { sets.push(`verified_pid=?${vals.length + 1}`); vals.push(verified_pid); }
+          if (config_hash) { sets.push(`config_hash=?${vals.length + 1}`); vals.push(config_hash); }
+          if (config_revision !== undefined) { sets.push(`config_revision=?${vals.length + 1}`); vals.push(config_revision); }
+          vals.push(row.network_id, row.daemon_node_id, row.local_node_id);
+          db.run(`UPDATE daemon_node_inventory SET ${sets.join(",")} WHERE network_id=?${vals.length - 2} AND daemon_node_id=?${vals.length - 1} AND local_node_id=?${vals.length}`, vals);
+          if (observed_state === "running") db.run("UPDATE nodes SET lifecycle_state='active' WHERE node_id=?1 AND network_id=?2", [row.local_node_id, row.network_id]);
+          if (observed_state === "stopped" && row.action === "stop") db.run("UPDATE nodes SET lifecycle_state='stopped' WHERE node_id=?1 AND network_id=?2", [row.local_node_id, row.network_id]);
+          if (row.action === "update" && config_revision !== undefined) {
+            const registered = db.get<any>("SELECT alias,config_snapshot FROM nodes WHERE node_id=?1 AND network_id=?2 AND alias=?3", row.local_node_id, row.network_id, row.alias);
+            if (registered) {
+              let snapshot: Record<string, unknown> = {};
+              let applied: Record<string, any> = {};
+              try { snapshot = registered.config_snapshot ? JSON.parse(registered.config_snapshot) : {}; } catch {}
+              try { applied = row.patch_json ? JSON.parse(row.patch_json) : {}; } catch {}
+              if (typeof applied.model === "string") snapshot.model = applied.model;
+              if (applied.flags && typeof applied.flags === "object") snapshot.flags = { ...((snapshot.flags && typeof snapshot.flags === "object") ? snapshot.flags as Record<string, unknown> : {}), ...applied.flags };
+              if (Array.isArray(applied.channels)) snapshot.channels = applied.channels;
+              db.run(
+                `UPDATE nodes SET config_revision=?1, model=COALESCE(?2,model), channels=COALESCE(?3,channels),
+                     config_snapshot=?4, updated_at=datetime('now')
+                   WHERE node_id=?5 AND network_id=?6 AND alias=?7`,
+                [config_revision, typeof applied.model === "string" ? applied.model : null,
+                Array.isArray(applied.channels) ? JSON.stringify(applied.channels) : null,
+                JSON.stringify(snapshot), row.local_node_id, row.network_id, row.alias],
+              );
+            }
+          }
+        }
+      });
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, status }) }] };
+    },
+  );
+
+  server.tool(
+    "get_daemon_node_action_status",
+    "Read one daemon action's progress/final result. Network scoped; secrets and host paths are never returned.",
+    {
+      action_id: z.string().min(1).max(200),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ action_id, network_id: clientNetId }) => {
+      const net = getNetworkId(clientNetId);
+      if (!net) return writeDeniedReply(net, "read");
+      if (enforceUserId && !getUserNetworkRole(enforceUserId, net)) return writeDeniedReply(net, "read");
+      const row = db.get<any>(
+        `SELECT action_id,daemon_node_id,local_node_id,alias,action,status,error,created_at,delivered_at,acked_at
+           FROM daemon_node_actions WHERE action_id=?1 AND network_id=?2`, action_id, net,
+      );
+      if (!row) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "action_not_found" }) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, action: row }) }] };
     },
   );
 

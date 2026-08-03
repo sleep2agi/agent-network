@@ -4593,6 +4593,26 @@ async function connectSSE() {
                 ).catch((e: any) => warn(`stop-daemon failed: ${e?.message || e}`));
               }).catch((e: any) => warn(`stop-daemon import failed: ${e?.message || e}`));
             }
+            // RFC-031 — start/restart/offline-edit is executed by the host
+            // daemon because a stopped child has no SSE connection of its
+            // own. Doorbell contains only the opaque action id; the daemon
+            // pulls the authenticated envelope before touching disk/process.
+            if (ev.type === "daemon_node_action" && fileConfig.role === "host_supervisor") {
+              log(`← SSE daemon_node_action ${ev.action_id || ""}`);
+              import("./runtime/host-control-daemon.js").then(({ handleDaemonNodeAction }) => {
+                handleDaemonNodeAction(
+                  { action_id: ev.action_id },
+                  {
+                    callCommHub,
+                    workRoot: process.cwd(),
+                    expectedNetworkId: NETWORK_ID || fileConfig.network_id || "default",
+                    expectedHubUrl: COMMHUB_URL,
+                    log: (m: string) => log(m),
+                    warn: (m: string) => warn(m),
+                  },
+                ).catch((e: any) => warn(`host-control action failed: ${e?.message || e}`));
+              }).catch((e: any) => warn(`host-control import failed: ${e?.message || e}`));
+            }
             // RFC-028 P1 — provider probe daemon doorbell (host_supervisor only).
             if (ev.type === "probe_provider" && fileConfig.role === "host_supervisor") {
               log(`← SSE probe_provider ${ev.probe_id || ""}`);
@@ -4774,6 +4794,38 @@ if (fileConfig.role === "host_supervisor") {
       }).catch((e: any) => warn(`rebuildChildrenMapOnBoot failed: ${e?.message || e}`));
     }).catch((e: any) => warn(`stop-daemon import for rebuild failed: ${e?.message || e}`));
   }, 3_000);
+
+  // RFC-031 — publish the daemon's physical node inventory after auth is
+  // established and refresh it every 30s. The scanner emits only masked,
+  // relative metadata; invalid/symlinked/conflicting profiles are skipped
+  // locally and never auto-repaired.
+  const warnedInventorySkips = new Set<string>();
+  const syncHostInventory = async () => {
+    try {
+      const { scanLocalNodeInventory } = await import("./runtime/host-control-daemon.js");
+      const scanned = scanLocalNodeInventory({
+        workRoot: process.cwd(),
+        daemonAlias: ALIAS,
+        networkId: NETWORK_ID || fileConfig.network_id || "default",
+        hubUrl: COMMHUB_URL,
+      });
+      const result = await callCommHub("sync_daemon_inventory", { items: scanned.items });
+      if (!result?.ok) warn(`[host-control] inventory sync rejected: ${result?.error || "unknown"}`);
+      else debug(`[host-control] inventory synced=${result.accepted} quarantined=${result.quarantined} skipped=${scanned.skipped.length}`);
+      for (const skipped of scanned.skipped.slice(0, 10)) {
+        const key = `${skipped.alias}\0${skipped.error}`;
+        if (!warnedInventorySkips.has(key)) {
+          warnedInventorySkips.add(key);
+          warn(`[host-control] skipped alias=${skipped.alias}: ${skipped.error}`);
+        }
+      }
+    } catch (e: any) {
+      warn(`[host-control] inventory sync failed: ${e?.message || e}`);
+    }
+  };
+  setTimeout(() => { syncHostInventory().catch(() => {}); }, 3_500);
+  const hostInventoryTimer = setInterval(() => { syncHostInventory().catch(() => {}); }, 30_000);
+  hostInventoryTimer.unref?.();
 }
 // #222 cross-host attachment cache sweeper. Runs on EVERY agent-node
 // (not just host_supervisor) — any agent receiving inbound attachments
