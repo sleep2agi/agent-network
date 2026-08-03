@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { handleDaemonNodeAction, processMatchesProfile, scanLocalNodeInventory } from "./host-control-daemon.js";
+import { handleDaemonNodeAction, hostControlPlatformSupported, processMatchesProfile, scanLocalNodeInventory } from "./host-control-daemon.js";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -22,6 +22,12 @@ function fixture(alias = "child-one") {
 }
 
 describe("RFC-031 host daemon scanner", () => {
+  test("remote host control is explicitly Linux-only in this preview", () => {
+    expect(hostControlPlatformSupported("linux")).toBe(true);
+    expect(hostControlPlatformSupported("darwin")).toBe(false);
+    expect(hostControlPlatformSupported("win32")).toBe(false);
+  });
+
   test("reports a stopped profile without token, env, prompt, or absolute path", () => {
     const f = fixture();
     const r = scanLocalNodeInventory({ workRoot: f.root, daemonAlias: "server-one", networkId: "net-one", hubUrl: "http://hub:9200" });

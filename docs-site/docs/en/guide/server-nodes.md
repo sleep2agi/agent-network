@@ -3,6 +3,7 @@
 Run one daemon on each Agent host. It manages only the node profiles below its project directory; CLI, Dashboard, and App share the same authorization and state.
 
 > This feature currently requires the matching `preview` release set. Upgrade Hub, agent-node, CLI, and Dashboard together using the [version matrix](/en/guide/versioning).
+> The first preview supports Linux hosts only. Process identity and path-race protection rely on `/proc`; remote lifecycle/editing stays disabled on Windows and macOS for now.
 
 ```bash
 anet upgrade --channel preview

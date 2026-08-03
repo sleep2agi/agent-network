@@ -3,6 +3,7 @@
 每台运行 Agent 的服务器启动一个 daemon。它只管理自己目录下的节点；CLI、Dashboard 和 App 共用同一套权限与状态。
 
 > 本功能当前仅在 `preview` 兼容组合中提供。Hub、agent-node、CLI 和 Dashboard 必须按[版本矩阵](/guide/versioning)整组升级。
+> 首个 preview 仅支持 Linux 主机；进程身份和防路径竞态依赖 `/proc`。Windows/macOS 暂不开放远程启停与编辑。
 
 ```bash
 anet upgrade --channel preview

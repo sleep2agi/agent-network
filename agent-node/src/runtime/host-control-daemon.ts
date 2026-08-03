@@ -32,6 +32,10 @@ export interface LocalInventoryItem {
   config_revision: number;
 }
 
+export function hostControlPlatformSupported(platform = process.platform): boolean {
+  return platform === "linux";
+}
+
 type VerifiedProfile = {
   configPath: string;
   pinnedConfigPath: string;
@@ -172,6 +176,7 @@ export function scanLocalNodeInventory(input: {
   const nodesRoot = join(input.workRoot, ".anet", "nodes");
   const items: LocalInventoryItem[] = [];
   const skipped: Array<{ alias: string; error: string }> = [];
+  if (!hostControlPlatformSupported()) return { items, skipped: [{ alias: "*", error: "unsupported_host_platform:linux_required" }] };
   let entries: ReturnType<typeof readdirSync>;
   try { entries = readdirSync(nodesRoot, { withFileTypes: true }) as any; }
   catch (e: any) { return { items, skipped: [{ alias: "*", error: `nodes_root_unreadable:${e?.message || e}` }] }; }
@@ -259,6 +264,7 @@ export async function handleDaemonNodeAction(
     const pulled = await deps.callCommHub("get_daemon_node_action", { action_id: event.action_id });
     request = pulled?.request ?? null;
     if (!request) throw new Error(pulled?.error || "action_pull_failed");
+    if (!hostControlPlatformSupported()) throw new Error("unsupported_host_platform:linux_required");
     profile = openVerifiedProfile(deps.workRoot, request.alias);
     const configPath = profile.configPath;
     const cfg = JSON.parse(profile.raw);
@@ -358,7 +364,7 @@ export async function handleDaemonNodeAction(
     deps.warn(`[host-control] ${event.action_id}: ${message}`);
     await deps.callCommHub("ack_daemon_node_action", {
       action_id: event.action_id,
-      status: /invalid|mismatch|identity_changed|content_changed|conflict|already_running|online_use|symlink|outside_root|forbidden/.test(message) ? "rejected" : "failed",
+      status: /invalid|mismatch|identity_changed|content_changed|conflict|already_running|online_use|symlink|outside_root|forbidden|unsupported_host_platform/.test(message) ? "rejected" : "failed",
       error: message,
     }).catch(() => {});
   } finally {
