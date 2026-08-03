@@ -86,8 +86,8 @@ cp /tmp/codex-app-server-bridge.ts agent-node/src/runtime/codex-app-server-bridg
 
 cp agent-node/src/runtime/codex-app-server-bridge.ts /tmp/codex-app-server-bridge.ts
 bun /harness/mutate.ts agent-node/src/runtime/codex-app-server-bridge.ts \
-  '!/^\\s*\\[Agent Network(?:\\/|\\])/u.test(firstUserText)' \
-  '!/^\\[Agent Network(?:\\/|\\])/u.test(firstUserText)'
+  '!/^\s*\[Agent Network(?:\/|\])/u.test(firstUserText)' \
+  '!/^\[Agent Network(?:\/|\])/u.test(firstUserText)'
 expect_red leading-whitespace-network-prefix-stays-fifo bun test agent-node/src/runtime/codex-app-server-bridge.test.ts
 cp /tmp/codex-app-server-bridge.ts agent-node/src/runtime/codex-app-server-bridge.ts
 
