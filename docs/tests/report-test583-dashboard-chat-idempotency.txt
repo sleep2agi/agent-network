@@ -1,0 +1,29 @@
+Test 583 — Dashboard chat idempotency
+Date: 2026-08-03 (Asia/Shanghai)
+Base: origin/main 9c5082162284cc24850509cab58ff88a91ebfca9
+Scope: MCP send_task only; existing callers without meta.client_request_id are unchanged.
+
+Contract
+- A valid dashboard client_request_id is scoped by authenticated network and sender.
+- An exact replay returns the original task/message id and current task status.
+- Reusing the id with a different target, content, priority, or metadata fails closed
+  with idempotency_conflict.
+- The identifier is bounded and is not a credential.
+
+Docker commands
+  sg docker -c 'docker build -t anet-chat-ha-core:dev -f tests/test583-dashboard-chat-idempotency/Dockerfile .'
+  sg docker -c 'docker run --rm anet-chat-ha-core:dev'
+
+Results
+- Focused idempotency suite: 6 pass, 0 fail.
+- Full server suite in the same Docker dependency image: 786 pass, 10 skip,
+  0 fail, 2264 assertions.
+- Witnessed-red mutation: replacing the stable derived task id with a random id
+  caused replay, conflict, and determinism assertions to fail (exit 1). Restoring
+  production code returned the suite to green.
+
+Compatibility / exclusions
+- No schema migration.
+- No change to REST /api/task behavior.
+- Old atok_ and callers that omit client_request_id retain existing behavior.
+- No production database, token, process, package, or deployment was changed.

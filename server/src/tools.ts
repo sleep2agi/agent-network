@@ -55,6 +55,7 @@ import {
   isAllowedToChangeFlag,
 } from "./config-apply-validate.js";
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
+import { clientRequestIdFromMeta, idempotentTaskId, idempotentTaskMatches, type StoredIdempotentTask } from "./task-idempotency.js";
 
 function ts(): string {
   return new Date().toTimeString().slice(0, 8);
@@ -913,6 +914,37 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const target = resolveDeliveryTarget(targetAlias, effectiveNetId);
       if (target.state === "not_found") return deliveryTargetReply(target)!;
 
+      // Dashboard sends carry a random client_request_id inside meta. Derive
+      // the task primary key from authenticated scope + that request id so a
+      // lost HTTP response can be retried safely, even after a hub restart.
+      // The existing row must match the full request; key reuse with changed
+      // content/target fails closed instead of silently returning another task.
+      const clientRequestId = clientRequestIdFromMeta(meta);
+      const id = clientRequestId
+        ? idempotentTaskId(effectiveNetId ?? null, from_session, clientRequestId)
+        : uuidv4();
+      if (clientRequestId) {
+        const existing = db.get<StoredIdempotentTask>(
+          "SELECT task_id, from_name, to_name, priority, content, network_id, meta_json, status FROM tasks WHERE task_id = ?1",
+          [id],
+        );
+        if (existing) {
+          if (!idempotentTaskMatches(existing, {
+            fromName: from_session, toName: targetAlias, priority, content: task,
+            networkId: effectiveNetId ?? null, metaJson,
+          })) {
+            return { content: [{ type: "text" as const, text: JSON.stringify({
+              ok: false, error: "idempotency_conflict",
+              message: "client_request_id was already used with a different task payload",
+            }) }] };
+          }
+          return { content: [{ type: "text" as const, text: JSON.stringify({
+            ok: true, message_id: existing.task_id, task_id: existing.task_id,
+            task_status: existing.status, idempotent_replay: true,
+          }) }] };
+        }
+      }
+
       // #212 dedup guardrail. If this exact (from, to, content) has already
       // been delivered within COMMHUB_SEND_DEDUP_WINDOW_MS (default 5 min)
       // we refuse the call and surface a structured `duplicate_send`
@@ -940,7 +972,6 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
 
       console.log(`[${ts()}] ${from_session} → send_task → ${targetAlias}: ${task.slice(0, 60)}${priority === "high" ? " [HIGH]" : ""}${canonical.renamed ? ` [renamed from ${alias}]` : ""}`);
-      const id = uuidv4();
       const fromNodeId = resolveNodeIdForAlias(from_session, effectiveNetId);
       const targetNodeId = target.session?.node_id ?? null;
       // 事务：inbox + tasks 双写 + 触碰目标 session 的 task/updated_at（让
