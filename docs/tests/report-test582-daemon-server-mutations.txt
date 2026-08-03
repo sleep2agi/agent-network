@@ -1,0 +1,21 @@
+Test 582 — daemon server-control witnessed-red mutations
+Date: 2026-08-03 Asia/Shanghai
+Source: 9c8104bc5cebad052a794e3b58546d9aa647d3e0
+Dockerfile: tests/test582-daemon-server-mutations/Dockerfile
+Image: anet-test582:dev
+Manifest: sha256:44c7e53757fb513a8e750df22a5d3cafaea4243a57b60efd0e2629c887aaa24a
+
+Command:
+  sg docker -c 'docker build -t anet-test582:dev -f tests/test582-daemon-server-mutations/Dockerfile .'
+  sg docker -c 'docker run --rm -v /tmp/commniu-daemon-server-control:/source:ro anet-test582:dev'
+
+Result: PASS (baseline green + 4/4 controlled mutations witnessed red).
+
+Mutations that each turned the intended named test red:
+  - remove network membership read gate
+  - remove successful-action evidence validation
+  - remove symlink action guard
+  - remove action-time network recheck after inventory
+
+The suite rejects a mutation failure caused by an unrelated test name. Source is
+mounted read-only; mutations run only in disposable container copies.

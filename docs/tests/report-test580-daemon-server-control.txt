@@ -1,0 +1,25 @@
+Test 580 — daemon server-control unit + contract gates
+Date: 2026-08-03 Asia/Shanghai
+Source: 9c8104bc5cebad052a794e3b58546d9aa647d3e0
+Dockerfile: tests/test580-daemon-server-control/Dockerfile
+Image: anet-test580:dev
+Manifest: sha256:538af7a04e73f804e21f130ae07426bfd4d0182513c1fe158610edb2c5ab713b
+
+Command:
+  sg docker -c 'docker build -t anet-test580:dev -f tests/test580-daemon-server-control/Dockerfile .'
+  sg docker -c 'docker run --rm anet-test580:dev'
+
+Result:
+  server inventory/tools: 13 pass, 0 fail, 34 expects
+  host scanner/actions:   9 pass, 0 fail, 25 expects
+  TOTAL:                  22 pass, 0 fail
+
+Covered facts:
+  - local-only inventory does not fabricate /api/nodes rows
+  - exact identity is manageable; conflicts and multi-daemon claims quarantine
+  - cross-network attacker cannot read/dispatch or learn an alias
+  - daemon-only sync/pull and action result evidence fail closed
+  - offline update is revisioned/private and only updates registry after ack
+  - process argv, symlink, network/Hub drift, start and stop verification
+
+No host or production state was touched.
