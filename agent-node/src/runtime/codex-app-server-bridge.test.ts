@@ -479,6 +479,259 @@ function tick(ms = 5): Promise<void> {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Dashboard → active human TUI turn steering.
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("CodexAppServerBridge — authenticated Dashboard steering", () => {
+  test("reconnect recovers an active human turn and keeps it steerable", async () => {
+    const app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize" || msg.method === "thread/resume") return respond({ result: {} });
+        if (msg.method === "thread/read") return respond({ result: { thread: {
+          status: { type: "active", activeFlags: [] },
+          turns: [{ id: "human-before-restart", status: "inProgress", items: [{ type: "userMessage", content: [{ type: "text", text: "human prompt" }] }] }],
+        } } });
+        if (msg.method === "turn/steer") return respond({ result: { turnId: "human-before-restart" } });
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    await bridge.bootstrap();
+    expect(await bridge.recoverSharedActiveTurn()).toEqual({ turnId: "human-before-restart", steerable: true });
+    expect(await bridge.submitTask({ taskId: "dash-after-restart", text: "follow up", steerIfExternalTurn: true }))
+      .toEqual({ started: true, turnId: "human-before-restart", steered: true });
+    expect(app.received.filter((entry) => (entry as any).method === "turn/steer")).toHaveLength(1);
+    await client.close();
+    await app.stop();
+  });
+
+  test("reconnect provenance keeps an orphaned network turn FIFO-only", async () => {
+    const app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize" || msg.method === "thread/resume") return respond({ result: {} });
+        if (msg.method === "thread/read") return respond({ result: { thread: {
+          status: { type: "active", activeFlags: [] },
+          turns: [{ id: "network-before-restart", status: "inProgress", items: [{ type: "userMessage", content: [{ type: "text", text: "[Agent Network/task=old] work" }] }] }],
+        } } });
+        if (msg.method === "turn/start") return respond({ result: { turnId: "after-orphan" } });
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    await bridge.bootstrap();
+    expect(await bridge.recoverSharedActiveTurn()).toEqual({ turnId: "network-before-restart", steerable: false });
+    expect((await bridge.submitTask({ taskId: "dash-not-mixed", text: "do not steer", steerIfExternalTurn: true })).started).toBe(false);
+    expect(app.received.filter((entry) => (entry as any).method === "turn/steer")).toHaveLength(0);
+    expect(bridge.queueDepth()).toBe(1);
+    app.broadcast({ jsonrpc: "2.0", method: "turn/completed", params: { threadId: THREAD, turn: { id: "network-before-restart", status: "completed" } } });
+    await tick(20);
+    expect(app.received.filter((entry) => (entry as any).method === "turn/start")).toHaveLength(1);
+    await client.close();
+    await app.stop();
+  });
+
+  test("reconnect provenance ignores leading whitespace before the network prefix", async () => {
+    const app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize" || msg.method === "thread/resume") return respond({ result: {} });
+        if (msg.method === "thread/read") return respond({ result: { thread: {
+          status: { type: "active", activeFlags: [] },
+          turns: [{ id: "spaced-network-before-restart", status: "inProgress", items: [{ type: "userMessage", content: [{ type: "text", text: "  \n[Agent Network/task=old] work" }] }] }],
+        } } });
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    await bridge.bootstrap();
+    expect(await bridge.recoverSharedActiveTurn()).toEqual({ turnId: "spaced-network-before-restart", steerable: false });
+    expect((await bridge.submitTask({ taskId: "dash-spaced-network", text: "queue safely", steerIfExternalTurn: true })).started).toBe(false);
+    expect(app.received.filter((entry) => (entry as any).method === "turn/steer")).toHaveLength(0);
+    await client.close();
+    await app.stop();
+  });
+
+  test("reconnect stays FIFO-only when real-wire active history omits userMessage", async () => {
+    const app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize" || msg.method === "thread/resume") return respond({ result: {} });
+        if (msg.method === "thread/read") return respond({ result: { thread: {
+          status: { type: "active", activeFlags: [] },
+          turns: [{ id: "unknown-before-restart", status: "inProgress", items: [{ type: "agentMessage", text: "partial" }] }],
+        } } });
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    await bridge.bootstrap();
+    expect(await bridge.recoverSharedActiveTurn()).toEqual({ turnId: "unknown-before-restart", steerable: false });
+    expect((await bridge.submitTask({ taskId: "dash-unknown", text: "queue safely", steerIfExternalTurn: true })).started).toBe(false);
+    expect(app.received.filter((entry) => (entry as any).method === "turn/steer")).toHaveLength(0);
+    await client.close();
+    await app.stop();
+  });
+
+  test("uses exact turn/steer contract and maps the human turn final answer", async () => {
+    const app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize" || msg.method === "thread/resume") return respond({ result: {} });
+        if (msg.method === "turn/steer") {
+          const expected = (msg.params as { expectedTurnId?: string })?.expectedTurnId;
+          return respond({ result: { turnId: expected } });
+        }
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    await bridge.bootstrap();
+    app.broadcast({ jsonrpc: "2.0", method: "turn/started", params: { threadId: THREAD, turn: { id: "human-1", status: "inProgress" } } });
+    await tick(10);
+
+    const replies: Array<{ taskId: string; text: string }> = [];
+    bridge.on("task_reply", (event) => replies.push(event as never));
+    const submitted = await bridge.submitTask({
+      taskId: "dash-1",
+      text: "第二条消息",
+      from: "admin",
+      steerIfExternalTurn: true,
+    });
+    expect(submitted).toEqual({ started: true, turnId: "human-1", steered: true });
+    const steer = app.received.find((entry) => (entry as { method?: string }).method === "turn/steer") as any;
+    expect(steer.params).toEqual({
+      threadId: THREAD,
+      expectedTurnId: "human-1",
+      input: [{ type: "text", text: "[Agent Network/from=admin/task=dash-1] 第二条消息" }],
+    });
+    expect(app.received.filter((entry) => (entry as any).method === "turn/start")).toHaveLength(0);
+
+    app.broadcast({ jsonrpc: "2.0", method: "item/completed", params: { threadId: THREAD, turnId: "human-1", item: { type: "agentMessage", phase: "final_answer", text: "收到并处理" } } });
+    app.broadcast({ jsonrpc: "2.0", method: "turn/completed", params: { threadId: THREAD, turn: { id: "human-1", status: "completed" } } });
+    await tick(10);
+    expect(replies).toEqual([{ taskId: "dash-1", text: "收到并处理" }]);
+    await client.close();
+    await app.stop();
+  });
+
+  test("multiple Dashboard rows steer one human turn while ordinary agent work stays queued", async () => {
+    const app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize" || msg.method === "thread/resume") return respond({ result: {} });
+        if (msg.method === "turn/steer") return respond({ result: { turnId: (msg.params as any).expectedTurnId } });
+        if (msg.method === "turn/start") return respond({ result: { turnId: "agent-after-human" } });
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    await bridge.bootstrap();
+    app.broadcast({ jsonrpc: "2.0", method: "turn/started", params: { threadId: THREAD, turn: { id: "human-many" } } });
+    await tick(10);
+
+    await Promise.all([
+      bridge.submitTask({ taskId: "dash-a", text: "A", steerIfExternalTurn: true }),
+      bridge.submitTask({ taskId: "dash-b", text: "B", steerIfExternalTurn: true }),
+      bridge.submitTask({ taskId: "node-c", text: "C", from: "node" }),
+    ]);
+    expect(app.received.filter((entry) => (entry as any).method === "turn/steer")).toHaveLength(2);
+    expect(bridge.queueDepth()).toBe(1);
+    const replies: Array<{ taskId: string; text: string }> = [];
+    bridge.on("task_reply", (event) => replies.push(event as never));
+    app.broadcast({ jsonrpc: "2.0", method: "item/completed", params: { threadId: THREAD, turnId: "human-many", item: { type: "agentMessage", phase: "final_answer", text: "shared" } } });
+    app.broadcast({ jsonrpc: "2.0", method: "turn/completed", params: { threadId: THREAD, turn: { id: "human-many", status: "completed" } } });
+    await tick(20);
+    expect(replies).toEqual([
+      { taskId: "dash-a", text: "shared" },
+      { taskId: "dash-b", text: "shared" },
+    ]);
+    expect(app.received.filter((entry) => (entry as any).method === "turn/start")).toHaveLength(1);
+    await client.close();
+    await app.stop();
+  });
+
+  test("steer mismatch fails closed and preserves the task in the normal FIFO", async () => {
+    const app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize" || msg.method === "thread/resume") return respond({ result: {} });
+        if (msg.method === "turn/steer") return respond({ result: { turnId: "wrong-turn" } });
+        if (msg.method === "turn/start") return respond({ result: { turnId: "recovered-turn" } });
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    await bridge.bootstrap();
+    app.broadcast({ jsonrpc: "2.0", method: "turn/started", params: { threadId: THREAD, turn: { id: "human-race" } } });
+    await tick(10);
+    const result = await bridge.submitTask({ taskId: "dash-race", text: "keep me", steerIfExternalTurn: true });
+    expect(result.started).toBe(false);
+    await tick(20);
+    expect(app.received.filter((entry) => (entry as any).method === "turn/start")).toHaveLength(1);
+    expect(bridge.pendingTurnCount()).toBe(1);
+    await client.close();
+    await app.stop();
+  });
+
+  test("turn completion cannot attribute a task before turn/steer acceptance", async () => {
+    let answerSteer!: () => void;
+    const app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize" || msg.method === "thread/resume") return respond({ result: {} });
+        if (msg.method === "turn/steer") answerSteer = () => respond({ result: { turnId: "human-accept-race" } });
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    await bridge.bootstrap();
+    app.broadcast({ jsonrpc: "2.0", method: "turn/started", params: { threadId: THREAD, turn: { id: "human-accept-race" } } });
+    await tick(10);
+    const replies: Array<{ taskId: string; text: string }> = [];
+    bridge.on("task_reply", (event) => replies.push(event as never));
+    const submission = bridge.submitTask({ taskId: "dash-accept-race", text: "late ack", steerIfExternalTurn: true });
+    await tick(10);
+    app.broadcast({ jsonrpc: "2.0", method: "item/completed", params: { threadId: THREAD, turnId: "human-accept-race", item: { type: "agentMessage", phase: "final_answer", text: "accepted answer" } } });
+    app.broadcast({ jsonrpc: "2.0", method: "turn/completed", params: { threadId: THREAD, turn: { id: "human-accept-race", status: "completed" } } });
+    await tick(10);
+    expect(replies).toHaveLength(0);
+    answerSteer();
+    await submission;
+    expect(replies).toEqual([{ taskId: "dash-accept-race", text: "accepted answer" }]);
+    await client.close();
+    await app.stop();
+  });
+
+  test("reconciliation recovers a missed human turn completion and exact steered reply", async () => {
+    const app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize" || msg.method === "thread/resume") return respond({ result: {} });
+        if (msg.method === "turn/steer") return respond({ result: { turnId: "human-missed" } });
+        if (msg.method === "thread/read" && (msg.params as any).includeTurns === false) {
+          return respond({ result: { thread: { status: "idle" } } });
+        }
+        if (msg.method === "thread/read") return respond({ result: { thread: { turns: [{ id: "human-missed", status: "completed", items: [{ type: "agentMessage", phase: "final_answer", text: "history answer" }] }] } } });
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    await bridge.bootstrap();
+    app.broadcast({ jsonrpc: "2.0", method: "turn/started", params: { threadId: THREAD, turn: { id: "human-missed" } } });
+    await tick(10);
+    const replies: Array<{ taskId: string; text: string }> = [];
+    bridge.on("task_reply", (event) => replies.push(event as never));
+    await bridge.submitTask({ taskId: "dash-missed", text: "recover", steerIfExternalTurn: true });
+    expect(await bridge.reconcileActiveTurn()).toEqual({ recovered: true, turnId: "human-missed", status: "completed" });
+    expect(replies).toEqual([{ taskId: "dash-missed", text: "history answer" }]);
+    await client.close();
+    await app.stop();
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
 // 通信龙 additions — synchronous claim race fix + submitTask FIFO queue.
 // ────────────────────────────────────────────────────────────────────────────
 

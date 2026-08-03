@@ -95,6 +95,7 @@ import {
 } from "./runtime/opencode-acp/profile-state";
 import { OPENCODE_DEFAULT_PIN } from "./runtime/opencode-acp/binary";
 import { createInboxDrainLane, drainInboxBatch } from "./runtime/inbox-drain-lane";
+import { dispatchInboxBatch, isInteractiveDashboardTask } from "./inbox-dispatch";
 import { createSingleFlight } from "./util/single-flight";
 
 const home = homedir();
@@ -2890,7 +2891,12 @@ async function closeOpencodeRuntime(reason: string): Promise<void> {
 // exactly like every other runtime — the bridge only wraps "run one turn".
 // A second concurrent task queues FIFO inside the bridge and is drained when
 // the in-flight turn (ours OR a human TUI's) completes.
-async function processWithCodexAppServer(task: string, _from: string, taskId: string | null): Promise<string> {
+async function processWithCodexAppServer(
+  task: string,
+  _from: string,
+  taskId: string | null,
+  steerIfExternalTurn = false,
+): Promise<string> {
   const { openCodexAppServerRuntime, codexAppServerThink } =
     await import("./runtime/codex-app-server/runtime");
 
@@ -2936,6 +2942,7 @@ async function processWithCodexAppServer(task: string, _from: string, taskId: st
     taskId: taskId || `local-${Date.now()}`,
     text: task,
     from: _from,
+    steerIfExternalTurn,
     log,
   });
 
@@ -3297,7 +3304,13 @@ let thinkQueue = Promise.resolve();
 // OLD thinkQueue ref, and the new task is killed by exit(75) mid-flight.
 let configApplyDraining = false;
 
-function think(task: string, from: string, taskId: string | null, images?: string[]): Promise<string> {
+function think(
+  task: string,
+  from: string,
+  taskId: string | null,
+  images?: string[],
+  steerIfExternalTurn = false,
+): Promise<string> {
   if (configApplyDraining) {
     // Don't accept new work during a restart drain. The error string
     // is intentionally explicit so the upstream caller (inbox handler,
@@ -3336,7 +3349,7 @@ function think(task: string, from: string, taskId: string | null, images?: strin
         return await processWithOpencode(task, from, images);
       }
       if (RUNTIME === "codex-app-server") {
-        return await processWithCodexAppServer(task, from, taskId);
+        return await processWithCodexAppServer(task, from, taskId, steerIfExternalTurn);
       }
       return await processWithClaude(task, from, images);
     } finally {
@@ -3344,6 +3357,18 @@ function think(task: string, from: string, taskId: string | null, images?: strin
       decrementInFlight();
     }
   };
+  // The app-server bridge is the concurrency authority for its one shared
+  // thread. Serializing here would prevent inbox rows 2..N from reaching
+  // turn/steer until row 1's human turn completed — the production HOL bug.
+  // Do not mutate CURRENT_TASK_ID concurrently: the adopted app-server has
+  // its own process environment and task identity is carried in the prompt.
+  if (RUNTIME === "codex-app-server") {
+    incrementInFlight();
+    return processWithCodexAppServer(task, from, taskId, steerIfExternalTurn)
+      .finally(() => {
+        decrementInFlight();
+      });
+  }
   const next = thinkQueue.then(run, run);
   thinkQueue = next.then(() => {}, () => {});
   return next;
@@ -3394,7 +3419,13 @@ async function extractImagePaths(msg: any): Promise<string[]> {
   return resolved;
 }
 
-async function processTask(task: string, from: string, taskId: string | null = null, images?: string[]): Promise<{ text: string; failed: boolean }> {
+async function processTask(
+  task: string,
+  from: string,
+  taskId: string | null = null,
+  images?: string[],
+  steerIfExternalTurn = false,
+): Promise<{ text: string; failed: boolean }> {
   log(`→ processing [${RUNTIME}]${images?.length ? ` +${images.length} image(s)` : ""}: ${task.slice(0, 80)}`);
   await reportStatus("working", task.slice(0, 200)).catch(() => {});
 
@@ -3420,7 +3451,7 @@ async function processTask(task: string, from: string, taskId: string | null = n
   let failed = false;
   try {
     text = await tryHandleExplicitDelegation(augmentedTask, from, taskId)
-      || await think(augmentedTask, from, taskId, images);
+      || await think(augmentedTask, from, taskId, images, steerIfExternalTurn);
   } catch (err: any) {
     text = `${RUNTIME} 错误: ${err.message}`;
     failed = true;
@@ -3466,7 +3497,7 @@ async function processTask(task: string, from: string, taskId: string | null = n
     );
     await new Promise((r) => setTimeout(r, backoff));
     try {
-      const retried = await think(augmentedTask, from, taskId, images);
+      const retried = await think(augmentedTask, from, taskId, images, steerIfExternalTurn);
       text = retried;
       failed = false;
       // Re-apply the API-error detection on the retry result (consistency
@@ -3579,17 +3610,17 @@ async function processInbox() {
 
   const messages = await getInbox();
   if (!messages.length) return;
-  for (const msg of messages) {
+  const processInboxMessage = async (msg: any) => {
     // OpenCode copresence informational messages belong to their own fast
     // lane. Leaving them in the task drain would make a message wait behind
     // an arbitrarily long model turn from an earlier inbox row.
     if ((msg.type || "task") === "message" && RUNTIME === "opencode" && opencodeMode === "copresence") {
-      continue;
+      return;
     }
     // (3a) Inflight guard.
     if (inflightMessageIds.has(msg.id)) {
       debug(`skip inflight message ${msg.id.slice(0, 8)}`);
-      continue;
+      return;
     }
     inflightMessageIds.add(msg.id);
     try {
@@ -3609,14 +3640,14 @@ async function processInbox() {
         // human TUI is a product decision, deliberately not made here.
         log(`← [${from}] (message, not delivered to model) ${content.slice(0, 120)}`);
         await ackMessage(msg.id).catch((e: any) => warn(`ack failed for non-task ${msg.id.slice(0, 8)}: ${e.message}`));
-        continue;
+        return;
       }
 
       const skip = shouldSkipMessage(from, content, msgType);
       if (skip) {
         debug(`skip message from ${from}: ${skip}`);
         await ackMessage(msg.id).catch((e: any) => warn(`ack failed for skipped ${msg.id.slice(0, 8)}: ${e.message}`));
-        continue;
+        return;
       }
 
       // #144 round-6: anet /loop is universal — all recognized runtimes
@@ -3638,11 +3669,17 @@ async function processInbox() {
         }
         await deliverReplyReliably(from, replyText, msg.id, goalFailed);
         await ackMessage(msg.id).catch((e: any) => warn(`ack failed for goal ${msg.id.slice(0, 8)}: ${e.message}`));
-        continue;
+        return;
       }
 
       // (3b) Run the LLM turn.
-      const { text: result, failed } = await processTask(content, from, msg.id, images);
+      const { text: result, failed } = await processTask(
+        content,
+        from,
+        msg.id,
+        images,
+        isInteractiveDashboardTask(msg),
+      );
       log(`processTask returned: "${result.slice(0, 80)}" (${result.length} chars, failed=${failed})`);
 
       // Low-value successful replies are dropped (preserve previous
@@ -3652,7 +3689,7 @@ async function processInbox() {
       if (!failed && isLowValueText(result, true)) {
         log(`skip reply: low-value (${result.slice(0, 30)})`);
         await ackMessage(msg.id).catch((e: any) => warn(`ack failed for low-value ${msg.id.slice(0, 8)}: ${e.message}`));
-        continue;
+        return;
       }
 
       // (3c-e) Persist + ack + try send.
@@ -3662,7 +3699,15 @@ async function processInbox() {
     } finally {
       inflightMessageIds.delete(msg.id);
     }
-  }
+  };
+
+  // Every Codex app-server row must reach bridge arbitration immediately.
+  // Other runtimes retain the historical serialized drain.
+  await dispatchInboxBatch(
+    messages,
+    processInboxMessage,
+    RUNTIME === "codex-app-server",
+  );
 }
 
 /**

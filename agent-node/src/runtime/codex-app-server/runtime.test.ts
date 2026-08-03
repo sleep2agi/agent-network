@@ -7,6 +7,7 @@ import {
   buildOwnedAppServerArgs,
   COMMHUB_MCP_TOKEN_ENV,
   codexAppServerThink,
+  recoverSharedTurnOnAttach,
   type CodexAppServerRuntimeSession,
 } from "./runtime";
 
@@ -70,12 +71,40 @@ describe("buildOwnedAppServerArgs", () => {
   });
 });
 
+describe("recoverSharedTurnOnAttach", () => {
+  test("invokes persisted active-turn recovery before shared runtime is returned", async () => {
+    const logs: string[] = [];
+    let calls = 0;
+    await recoverSharedTurnOnAttach({
+      async recoverSharedActiveTurn() {
+        calls++;
+        return { turnId: "human-reconnect", steerable: true };
+      },
+    }, (line) => logs.push(line), (line) => logs.push(`WARN:${line}`));
+    expect(calls).toBe(1);
+    expect(logs.some((line) => line.includes("human-reconnect") && line.includes("human/steerable"))).toBe(true);
+  });
+
+  test("history read failure is visible and never reported as steerable", async () => {
+    const warnings: string[] = [];
+    await recoverSharedTurnOnAttach({
+      async recoverSharedActiveTurn(): Promise<{ turnId: string | null; steerable: boolean }> {
+        throw new Error("history unavailable");
+      },
+    }, () => { throw new Error("must not log recovery"); }, (line) => warnings.push(line));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("history unavailable");
+  });
+});
+
 class ReconcileOnlyBridge extends EventEmitter {
   taskId = "";
   reconcileCalls = 0;
+  submitted: Record<string, unknown> | null = null;
 
-  async submitTask(input: { taskId: string }): Promise<{ started: true; turnId: string }> {
+  async submitTask(input: { taskId: string; steerIfExternalTurn?: boolean }): Promise<{ started: true; turnId: string }> {
     this.taskId = input.taskId;
+    this.submitted = input;
     return { started: true, turnId: "turn_missing_notification" };
   }
 
@@ -116,5 +145,24 @@ describe("codexAppServerThink — terminal-event reconciliation watchdog", () =>
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(bridge.reconcileCalls).toBe(1);
     expect(logs.some((line) => line.includes("recovered missed terminal event"))).toBe(true);
+  });
+
+  test("forwards the authenticated Dashboard steering decision to the bridge", async () => {
+    const bridge = new ReconcileOnlyBridge();
+    const session = { bridge } as unknown as CodexAppServerRuntimeSession;
+    await codexAppServerThink(session, {
+      taskId: "task_dashboard",
+      text: "follow-up",
+      from: "admin",
+      steerIfExternalTurn: true,
+      timeoutMs: 250,
+      reconciliationIntervalMs: 5,
+    });
+    expect(bridge.submitted).toMatchObject({
+      taskId: "task_dashboard",
+      text: "follow-up",
+      from: "admin",
+      steerIfExternalTurn: true,
+    });
   });
 });

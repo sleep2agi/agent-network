@@ -31,6 +31,23 @@ export interface CodexAppServerRuntimeSession {
   get isRunning(): boolean;
 }
 
+export async function recoverSharedTurnOnAttach(
+  bridge: Pick<CodexAppServerBridge, "recoverSharedActiveTurn">,
+  log: (message: string) => void,
+  warn: (message: string) => void,
+): Promise<void> {
+  try {
+    const recovered = await bridge.recoverSharedActiveTurn();
+    if (recovered.turnId) {
+      log(`[codex-app-server] recovered active shared turn ${recovered.turnId} (${recovered.steerable ? "human/steerable" : "network-or-unknown/FIFO-only"})`);
+    }
+  } catch (e) {
+    // Older app-server versions may not hydrate active history. Do not make
+    // the node unavailable; without a proven human turn, no steer is allowed.
+    warn(`[codex-app-server] active-turn recovery unavailable: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
 function randomPort(): number {
   // Ephemeral-ish localhost range; collisions are retried by the caller.
   return 24000 + Math.floor(Math.random() * 4000);
@@ -190,6 +207,9 @@ export async function openCodexAppServerRuntime(opts: {
     warn(`[codex-app-server] turn is waiting on a human approval — bridge will NOT answer`),
   );
   await bridge.bootstrap();
+  if (opts.serverUrl) {
+    await recoverSharedTurnOnAttach(bridge, log, warn);
+  }
 
   return {
     client,
@@ -226,6 +246,8 @@ export function codexAppServerThink(
     /** Test seam; production defaults to a 5s authoritative thread/read. */
     reconciliationIntervalMs?: number;
     log?: (m: string) => void;
+    /** Dashboard chat may join the human TUI's current in-flight turn. */
+    steerIfExternalTurn?: boolean;
   },
 ): Promise<CodexAppServerThinkResult> {
   const timeoutMs = opts.timeoutMs ?? 10 * 60_000;
@@ -292,9 +314,15 @@ export function codexAppServerThink(
     scheduleReconciliation();
 
     bridge
-      .submitTask({ taskId: opts.taskId, text: opts.text, from: opts.from })
+      .submitTask({
+        taskId: opts.taskId,
+        text: opts.text,
+        from: opts.from,
+        steerIfExternalTurn: opts.steerIfExternalTurn,
+      })
       .then((r) => {
         if (!r.started) log(`[codex-app-server] task ${opts.taskId} queued (a turn is in flight)`);
+        else if (r.steered) log(`[codex-app-server] task ${opts.taskId} steered into human turn ${r.turnId}`);
       })
       .catch((e) => finish({ replyText: `codex-app-server 错误: ${e?.message ?? e}`, failed: true, queued: false }));
   });

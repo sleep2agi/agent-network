@@ -30,7 +30,7 @@ function seed() {
   db.run("INSERT INTO sessions (resume_id, alias, status, node_id, network_id, updated_at, last_seen_at) VALUES (?1, ?2, 'idle', ?3, ?4, datetime('now'), datetime('now'))", [`resume_${TARGET}`, TARGET, `id_${TARGET}`, NET]);
 }
 
-function sendTaskHandler(): ToolHandler {
+function sendTaskHandler(auth?: { callerAlias: string; nodeToken: boolean }): ToolHandler {
   const server = new McpServer({ name: "idempotency-test", version: "0" }) as any;
   let handler: ToolHandler | undefined;
   const original = server.tool.bind(server);
@@ -38,7 +38,15 @@ function sendTaskHandler(): ToolHandler {
     if (name === "send_task") handler = candidate;
     return original(name, description, schema, candidate);
   };
-  registerTools(server, undefined, NET, USER, USER, false, null);
+  registerTools(
+    server,
+    undefined,
+    NET,
+    USER,
+    auth?.callerAlias ?? USER,
+    auth?.nodeToken ?? false,
+    auth?.nodeToken ? "token_node_chat_idem" : null,
+  );
   if (!handler) throw new Error("send_task handler missing");
   return handler;
 }
@@ -52,6 +60,42 @@ beforeEach(() => { cleanup(); seed(); });
 afterAll(cleanup);
 
 describe("send_task durable idempotency", () => {
+  test("Hub stamps authenticated user origin and overrides client spoofing", async () => {
+    const handler = sendTaskHandler();
+    const sent = await call(handler, {
+      alias: TARGET,
+      task: "authenticated dashboard payload",
+      priority: "normal",
+      meta: {
+        source: "dashboard-chat",
+        client_request_id: "dreq_0123456789abcdef0123456789abcdef",
+        auth_origin: "node",
+      },
+    });
+    expect(sent.ok).toBe(true);
+    const task = db.get<{ meta_json: string }>("SELECT meta_json FROM tasks WHERE task_id = ?1", [sent.message_id]);
+    const inbox = db.get<{ meta_json: string }>("SELECT meta_json FROM inbox WHERE id = ?1", [sent.message_id]);
+    expect(JSON.parse(task!.meta_json).auth_origin).toBe("user");
+    expect(JSON.parse(inbox!.meta_json).auth_origin).toBe("user");
+  });
+
+  test("network-token caller cannot forge Dashboard user origin through MCP", async () => {
+    const handler = sendTaskHandler({ callerAlias: "node-origin-sender", nodeToken: true });
+    const sent = await call(handler, {
+      alias: TARGET,
+      task: "node attempts user-origin spoof",
+      priority: "normal",
+      meta: {
+        source: "dashboard-chat",
+        client_request_id: "dreq_fedcba9876543210fedcba9876543210",
+        auth_origin: "user",
+      },
+    });
+    expect(sent.ok).toBe(true);
+    const inbox = db.get<{ meta_json: string }>("SELECT meta_json FROM inbox WHERE id = ?1", [sent.message_id]);
+    expect(JSON.parse(inbox!.meta_json).auth_origin).toBe("node");
+  });
+
   test("lost-response retry returns the original task and does not enqueue twice", async () => {
     const handler = sendTaskHandler();
     const args = {

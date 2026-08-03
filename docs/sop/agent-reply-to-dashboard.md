@@ -41,6 +41,25 @@ busy 节点（如 codex-app-server 单线程 turn）收到新任务会**排队**
 
 **判死活标准动作**：先 `tmux capture-pane` 看终端实况 + 查 hub 心跳（updated_at 新鲜=活），**别只凭超时消息下结论**。改进方向（候选）：hub/runtime 把"排队中"与"真超时"区分回复。
 
+### Codex TUI 共存节点的 Dashboard 消息
+
+服务端鉴权为用户的 Dashboard chat 在人类 TUI 已有 active turn 时，会通过
+`turn/steer(expectedTurnId)` 追加到该 turn；普通 agent 任务仍在 FIFO 等待，不会注入人的 turn。
+同一 active turn 内快速发送的多条 Dashboard 消息共享该 turn 的最终答案。
+
+这是“同一个用户、同一个会话”的即时补充能力，不是独立并行对话：如果人正在 TUI 里处理另一件事，
+Dashboard 补充内容会和当前上下文一起影响最终答案。需要完全隔离时，应等当前 turn 结束再发送。
+Hub 只信服务端依据 token 写入的 `auth_origin`；客户端自填 `auth_origin=user` 不会获得 steer 权限。
+升级前已入库、没有该服务端标记的消息按普通 FIFO 处理，不用 `from_session=admin` 猜测身份。
+桥重连时会从 `thread/read` 恢复 active turn；只有首条持久化 user input 能证明是人类 turn 才可 steer，
+旧 bridge 启动的 network turn 或来源不明的 active turn 一律 FIFO。
+Codex 0.133 实测 active history 可能不含 `userMessage`；这种重连不会猜测为人类，需等当前 turn
+结束。桥保持在线后，下一次实时 `turn/started` 会恢复正常即时 steer。
+
+这里的“无 `[Agent Network/…]` 前缀 = 当作人类”只是默认行为，不是身份识别能力。不要声称桥能识别
+任意旧版或外部创建、且没有该前缀的 network turn；当前安全性依赖 Phase 0A 以来本桥始终添加该前缀，
+不是 Codex app-server 协议提供的来源保证。
+
 ## 用了终态还是不显示？
 
 那通常是**生产层传输**问题（浏览器侧 HTTP/2、或 SSE 代理被 buffer/掐掉），不是回复本身。

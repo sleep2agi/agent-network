@@ -34,6 +34,18 @@ describe("dashboard task idempotency", () => {
     })).toBe(true);
   });
 
+  test("rolling upgrade ignores the new server-only auth stamp for replay equality", () => {
+    const row: StoredIdempotentTask = {
+      task_id: "idem_x", from_name: "admin", to_name: "worker", priority: "normal",
+      content: "hello", network_id: "net_a", status: "delivered",
+      meta_json: JSON.stringify({ client_request_id: "dreq_0123456789abcdef", source: "dashboard-chat" }),
+    };
+    expect(idempotentTaskMatches(row, {
+      fromName: "admin", toName: "worker", priority: "normal", content: "hello", networkId: "net_a",
+      metaJson: JSON.stringify({ client_request_id: "dreq_0123456789abcdef", source: "dashboard-chat", auth_origin: "user" }),
+    })).toBe(true);
+  });
+
   test("same request id with changed payload is a conflict", () => {
     const row: StoredIdempotentTask = {
       task_id: "idem_x", from_name: "admin", to_name: "worker", priority: "normal",

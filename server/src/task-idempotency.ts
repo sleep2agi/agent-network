@@ -55,11 +55,21 @@ function parsedMeta(value: string | null): unknown {
   try { return JSON.parse(value); } catch { return value; }
 }
 
+function logicalRequestMeta(value: string | null): unknown {
+  const parsed = parsedMeta(value);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return parsed;
+  // auth_origin is a Hub-derived audit fact, not part of the client request.
+  // Ignore it for replay equality so a request first accepted by the old Hub
+  // (without the stamp) remains idempotent across a rolling upgrade.
+  const { auth_origin: _authOrigin, ...logical } = parsed as Record<string, unknown>;
+  return logical;
+}
+
 export function idempotentTaskMatches(row: StoredIdempotentTask, expected: ExpectedIdempotentTask): boolean {
   return row.from_name === expected.fromName
     && row.to_name === expected.toName
     && row.priority === expected.priority
     && row.content === expected.content
     && (row.network_id ?? null) === (expected.networkId ?? null)
-    && canonicalJson(parsedMeta(row.meta_json)) === canonicalJson(parsedMeta(expected.metaJson));
+    && canonicalJson(logicalRequestMeta(row.meta_json)) === canonicalJson(logicalRequestMeta(expected.metaJson));
 }
