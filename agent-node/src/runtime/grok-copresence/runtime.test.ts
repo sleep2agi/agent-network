@@ -246,6 +246,17 @@ describe("Grok copresence launch and injection policy", () => {
     })).toThrow("reserved Grok user_query markup");
   });
 
+  test("shows Feishu conversation and sender provenance in the shared TUI input", () => {
+    const input = formatNetworkTuiInput({
+      taskId: "feishu-msg-1",
+      from: "feishu:dm:oc_chat_123:ou_sender_456",
+      message: "请汇总今天的进度",
+    });
+    expect(input).toContain(
+      "[Agent Network/from=feishu:dm:oc_chat_123:ou_sender_456/task=feishu-msg-1] 请汇总今天的进度",
+    );
+  });
+
   test("recognizes the pinned TUI composer footer across ANSI fragments", () => {
     expect(hasGrokTuiReadyMarker("leader socket ready")).toBe(false);
     expect(hasGrokTuiReadyMarker("Shift+\x1b[31mTab\x1b[0m:mo\x1b[2Kde")).toBe(false);

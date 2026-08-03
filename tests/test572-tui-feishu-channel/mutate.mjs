@@ -12,6 +12,11 @@ const specs = {
     before: "const fromLabel = displaySender(input.from);",
     after: "const fromLabel = undefined; // test mutation: drop channel provenance",
   },
+  grok: {
+    path: "agent-node/src/runtime/grok-copresence/runtime.ts",
+    before: "const prompt = `[Agent Network/from=${task.from}/task=${task.taskId}] ${message}`;",
+    after: "const prompt = `[Agent Network/from=remote/task=${task.taskId}] ${message}`; // test mutation: drop channel provenance",
+  },
 };
 
 const spec = specs[mode];

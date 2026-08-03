@@ -10,4 +10,7 @@ bun agent-network/tests/feishu-bridge-dispatch.test.ts
 echo "[layer 3] Feishu provenance reaches the shared Codex TUI turn"
 bun test agent-node/src/runtime/codex-app-server-bridge.test.ts
 
-echo "RESULT: PASS (Codex TUI Feishu channel contract)"
+echo "[layer 4] Feishu provenance reaches the shared Grok TUI input"
+bun test agent-node/src/runtime/grok-copresence/runtime.test.ts
+
+echo "RESULT: PASS (Codex + Grok TUI Feishu channel contract)"
