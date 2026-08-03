@@ -80,6 +80,16 @@ describe("grok copresence preview tool profile is an exact value set", () => {
     // Empty-ish.
     "",
     " ",
+    // Added by independent review of this file: case symmetry on the other two
+    // entries, the remaining control characters, an endsWith-shaped name, and a
+    // separator swap.
+    "Search_Tool",
+    "TODO_WRITE",
+    "use_tool\r",
+    "use_tool\0",
+    "x_todo_write",
+    "use-tool",
+    "todo-write",
   ];
 
   for (const tool of nearMisses) {
