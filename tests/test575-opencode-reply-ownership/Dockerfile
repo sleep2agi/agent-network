@@ -10,6 +10,8 @@ RUN cd agent-node && bun install --ignore-scripts
 
 COPY agent-node/src ./agent-node/src
 COPY tests/test575-opencode-reply-ownership ./tests/test575-opencode-reply-ownership
+RUN chmod 0755 ./tests/test575-opencode-reply-ownership/run.sh \
+  ./tests/test575-opencode-reply-ownership/run-mutation.sh
 
 ARG SOURCE_COMMIT
 ENV TEST575_SOURCE_COMMIT=$SOURCE_COMMIT
