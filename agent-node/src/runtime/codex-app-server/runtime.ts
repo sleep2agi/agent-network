@@ -31,6 +31,23 @@ export interface CodexAppServerRuntimeSession {
   get isRunning(): boolean;
 }
 
+export async function recoverSharedTurnOnAttach(
+  bridge: Pick<CodexAppServerBridge, "recoverSharedActiveTurn">,
+  log: (message: string) => void,
+  warn: (message: string) => void,
+): Promise<void> {
+  try {
+    const recovered = await bridge.recoverSharedActiveTurn();
+    if (recovered.turnId) {
+      log(`[codex-app-server] recovered active shared turn ${recovered.turnId} (${recovered.steerable ? "human/steerable" : "network-or-unknown/FIFO-only"})`);
+    }
+  } catch (e) {
+    // Older app-server versions may not hydrate active history. Do not make
+    // the node unavailable; without a proven human turn, no steer is allowed.
+    warn(`[codex-app-server] active-turn recovery unavailable: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
 function randomPort(): number {
   // Ephemeral-ish localhost range; collisions are retried by the caller.
   return 24000 + Math.floor(Math.random() * 4000);
@@ -190,6 +207,9 @@ export async function openCodexAppServerRuntime(opts: {
     warn(`[codex-app-server] turn is waiting on a human approval — bridge will NOT answer`),
   );
   await bridge.bootstrap();
+  if (opts.serverUrl) {
+    await recoverSharedTurnOnAttach(bridge, log, warn);
+  }
 
   return {
     client,

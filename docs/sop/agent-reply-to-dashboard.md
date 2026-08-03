@@ -51,6 +51,8 @@ busy 节点（如 codex-app-server 单线程 turn）收到新任务会**排队**
 Dashboard 补充内容会和当前上下文一起影响最终答案。需要完全隔离时，应等当前 turn 结束再发送。
 Hub 只信服务端依据 token 写入的 `auth_origin`；客户端自填 `auth_origin=user` 不会获得 steer 权限。
 升级前已入库、没有该服务端标记的消息按普通 FIFO 处理，不用 `from_session=admin` 猜测身份。
+桥重连时会从 `thread/read` 恢复 active turn；只有首条持久化 user input 能证明是人类 turn 才可 steer，
+旧 bridge 启动的 network turn 或来源不明的 active turn 一律 FIFO。
 
 ## 用了终态还是不显示？
 

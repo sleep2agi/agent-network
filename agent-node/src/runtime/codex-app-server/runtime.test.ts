@@ -7,6 +7,7 @@ import {
   buildOwnedAppServerArgs,
   COMMHUB_MCP_TOKEN_ENV,
   codexAppServerThink,
+  recoverSharedTurnOnAttach,
   type CodexAppServerRuntimeSession,
 } from "./runtime";
 
@@ -67,6 +68,32 @@ describe("buildOwnedAppServerArgs", () => {
     ]);
     expect(args[args.length - 2]).toBe("--listen");
     expect(args[args.length - 1]).toBe(URL);
+  });
+});
+
+describe("recoverSharedTurnOnAttach", () => {
+  test("invokes persisted active-turn recovery before shared runtime is returned", async () => {
+    const logs: string[] = [];
+    let calls = 0;
+    await recoverSharedTurnOnAttach({
+      async recoverSharedActiveTurn() {
+        calls++;
+        return { turnId: "human-reconnect", steerable: true };
+      },
+    }, (line) => logs.push(line), (line) => logs.push(`WARN:${line}`));
+    expect(calls).toBe(1);
+    expect(logs.some((line) => line.includes("human-reconnect") && line.includes("human/steerable"))).toBe(true);
+  });
+
+  test("history read failure is visible and never reported as steerable", async () => {
+    const warnings: string[] = [];
+    await recoverSharedTurnOnAttach({
+      async recoverSharedActiveTurn(): Promise<{ turnId: string | null; steerable: boolean }> {
+        throw new Error("history unavailable");
+      },
+    }, () => { throw new Error("must not log recovery"); }, (line) => warnings.push(line));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("history unavailable");
   });
 });
 

@@ -107,6 +107,8 @@ export class CodexAppServerBridge extends EventEmitter {
    * human turn; callers must opt in explicitly.
    */
   private externalActiveTurnId: string | null = null;
+  /** False when reconnect history proves the active turn came from anet. */
+  private externalActiveTurnSteerable = false;
   /** Dashboard tasks accepted through turn/steer, grouped by human turn. */
   private steeredTurns = new Map<string, SteeredTurn>();
   /**
@@ -268,7 +270,10 @@ export class CodexAppServerBridge extends EventEmitter {
     pending.turnId = turnId;
     this.pendingTurns.set(turnId, pending);
     this.activeTurnId = turnId;
-    if (this.externalActiveTurnId === turnId) this.externalActiveTurnId = null;
+    if (this.externalActiveTurnId === turnId) {
+      this.externalActiveTurnId = null;
+      this.externalActiveTurnSteerable = false;
+    }
     return turnId;
   }
 
@@ -297,7 +302,7 @@ export class CodexAppServerBridge extends EventEmitter {
       return { started: false, queuedAt: this.taskQueue.length };
     }
     if (this.externalActiveTurnId) {
-      if (input.steerIfExternalTurn) {
+      if (input.steerIfExternalTurn && this.externalActiveTurnSteerable) {
         return this.steerExternalTurn(input, this.externalActiveTurnId);
       }
       this.taskQueue.push(input);
@@ -412,6 +417,47 @@ export class CodexAppServerBridge extends EventEmitter {
   externalActiveTurn(): string | null {
     return this.externalActiveTurnId;
   }
+
+  /**
+   * Recover an already-running shared-server turn after bridge reconnect.
+   * A live turn/started notification is sufficient in the normal topology,
+   * but a restarted bridge missed that frame. Persisted first-user input is
+   * the provenance gate: `[Agent Network/…]` means an orphaned network turn
+   * and is never steerable; missing/unknown input also fails closed.
+   */
+  async recoverSharedActiveTurn(): Promise<{ turnId: string | null; steerable: boolean }> {
+    const result = await this.client.request<{
+      thread?: {
+        status?: string | { type?: string };
+        turns?: Array<{
+          id?: string;
+          status?: string;
+          items?: Array<{
+            type?: string;
+            content?: Array<{ type?: string; text?: string }>;
+          }>;
+        }>;
+      };
+    }>("thread/read", { threadId: this.threadId, includeTurns: true });
+    if (extractThreadStatus(result?.thread?.status) !== "active") {
+      return { turnId: null, steerable: false };
+    }
+    const active = [...(result?.thread?.turns ?? [])]
+      .reverse()
+      .find((turn) => turn.status === "inProgress" && typeof turn.id === "string");
+    if (!active?.id) return { turnId: null, steerable: false };
+    const firstUserText = active.items
+      ?.find((item) => item.type === "userMessage")
+      ?.content
+      ?.find((content) => content.type === "text" && typeof content.text === "string")
+      ?.text;
+    const steerable = typeof firstUserText === "string" && !/^\[Agent Network(?:\/|\])/u.test(firstUserText);
+    this.externalActiveTurnId = active.id;
+    this.externalActiveTurnSteerable = steerable;
+    if (this.waitingApprovals.size === 0) this.setStatus("working");
+    this.emit("external_turn_recovered", { turnId: active.id, steerable });
+    return { turnId: active.id, steerable };
+  }
   pendingTurnCount(): number {
     return this.pendingTurns.size;
   }
@@ -503,6 +549,7 @@ export class CodexAppServerBridge extends EventEmitter {
       // a reply unless at least one task was explicitly and successfully
       // steered into this turn.
       this.externalActiveTurnId = turnId;
+      this.externalActiveTurnSteerable = true;
       if (this.waitingApprovals.size === 0) this.setStatus("working");
       this.emit("unowned_turn_drop", { turnId, event: "turn/started" });
       return;
@@ -729,7 +776,10 @@ export class CodexAppServerBridge extends EventEmitter {
     terminal: { status?: string; error?: string; finalText?: string },
   ): boolean {
     if (this.externalActiveTurnId !== turnId && !this.steeredTurns.has(turnId)) return false;
-    if (this.externalActiveTurnId === turnId) this.externalActiveTurnId = null;
+    if (this.externalActiveTurnId === turnId) {
+      this.externalActiveTurnId = null;
+      this.externalActiveTurnSteerable = false;
+    }
     const steered = this.steeredTurns.get(turnId);
     if (steered) {
       if (terminal.finalText) steered.finalText = terminal.finalText;
