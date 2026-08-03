@@ -1,7 +1,7 @@
 Test 584 — Dashboard → Codex TUI reliable delivery
 Date: 2026-08-04 (Asia/Shanghai)
 Base: origin/main 4da56c34c3159d674fb84f7ff636d6080f83b641
-Source candidate: 8dfc384d38762253556e2c56554f3ce5563d6787
+Source candidate: 9f264840d3a4702a23f7e8fde72fafbc5c6eaf58
 Image: anet-test584:dev
 Command: sg docker -c 'docker run --rm anet-test584:dev'
 Result: PASS (exit 0)
@@ -10,7 +10,7 @@ L1 — source/build
 - agent-node CLI bundled successfully (239 modules, 1.64 MB output).
 
 L2 — app-server bridge and inbox dispatch
-- 43 tests passed, 0 failed, 123 assertions.
+- 44 tests passed, 0 failed, 126 assertions.
 - Exact turn/steer expectedTurnId contract.
 - Human-only turns do not create CommHub replies.
 - Authenticated Dashboard tasks steer an active human turn.
@@ -19,6 +19,7 @@ L2 — app-server bridge and inbox dispatch
 - Steer mismatch/race preserves the task.
 - A task is not attributed before turn/steer acceptance.
 - Missed terminal notification is recovered from exact thread history.
+- Codex 0.133 real-wire shape without persisted userMessage stays FIFO-only.
 
 L3 — Hub auth boundary and rolling idempotency
 - 12 tests passed, 0 failed (MCP user and node callers both covered).
