@@ -104,4 +104,13 @@ fi
 grep -q 'config inode replacement after verified open' /tmp/test582-config-inode.log || { cat /tmp/test582-config-inode.log; fail "config inode mutation failed for the wrong reason"; }
 ok "removing the post-open config inode recheck turns red"
 
-echo "RESULT: PASS ($PASS checks; 8/8 controlled mutations witnessed red)"
+fresh_agent
+sed -i 's/if (readStableFd(profile.configFd) !== profile.raw)/if (false \&\& readStableFd(profile.configFd) !== profile.raw)/' /tmp/test582-agent/src/runtime/host-control-daemon.ts
+if bun test /tmp/test582-agent/src/runtime/host-control-daemon.test.ts >/tmp/test582-config-content.log 2>&1; then
+  cat /tmp/test582-config-content.log
+  fail "in-place config-content recheck mutation stayed green"
+fi
+grep -q 'in-place config mutation on the opened inode' /tmp/test582-config-content.log || { cat /tmp/test582-config-content.log; fail "config content mutation failed for the wrong reason"; }
+ok "removing the opened-fd content recheck turns red"
+
+echo "RESULT: PASS ($PASS checks; 9/9 controlled mutations witnessed red)"

@@ -158,6 +158,34 @@ describe("RFC-031 daemon action", () => {
     expect(calls.at(-1)).toMatchObject({ tool: "ack_daemon_node_action", args: { status: "rejected", error: "config_identity_changed" } });
   });
 
+  test("in-place config mutation on the opened inode is rejected before action use", async () => {
+    const f = fixture();
+    const attackerBody = JSON.stringify({
+      node_id: "node_child_one",
+      alias: f.alias,
+      runtime: "opencode-cli",
+      network_id: "net-one",
+      hub: "http://hub:9200",
+      config_revision: 4,
+      model: "attacker-model-with-different-length",
+    });
+    const calls: Array<{ tool: string; args: any }> = [];
+    await handleDaemonNodeAction({ action_id: "ha_content_swap" }, {
+      ...actionBase, workRoot: f.root, log: () => {}, warn: () => {},
+      verifyRunning: () => {
+        writeFileSync(f.config, attackerBody, { mode: 0o600 });
+        return undefined;
+      },
+      callCommHub: async (tool, args) => {
+        calls.push({ tool, args });
+        if (tool === "get_daemon_node_action") return { request: { action_id: "ha_content_swap", local_node_id: "node_child_one", alias: f.alias, action: "update", patch: { model: "must-not-write" }, base_revision: 4 } };
+        return { ok: true };
+      },
+    });
+    expect(readFileSync(f.config, "utf8")).toBe(attackerBody);
+    expect(calls.at(-1)).toMatchObject({ tool: "ack_daemon_node_action", args: { status: "rejected", error: "config_content_changed" } });
+  });
+
   test("start uses exact argv and never a shell string", async () => {
     const f = fixture();
     let spawned: { args: string[]; cwd: string } | null = null;

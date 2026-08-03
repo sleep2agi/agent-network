@@ -9,6 +9,7 @@ import {
   fsyncSync,
   lstatSync,
   openSync,
+  readSync,
   readFileSync,
   readdirSync,
   realpathSync,
@@ -47,6 +48,23 @@ function sameIdentity(a: { dev: number; ino: number }, b: { dev: number; ino: nu
   return a.dev === b.dev && a.ino === b.ino;
 }
 
+function readStableFd(fd: number): string {
+  const before = fstatSync(fd);
+  if (!before.isFile() || before.size > 1024 * 1024) throw new Error("config_size_invalid");
+  const bytes = Buffer.alloc(before.size);
+  let offset = 0;
+  while (offset < bytes.length) {
+    const count = readSync(fd, bytes, offset, bytes.length - offset, offset);
+    if (count <= 0) throw new Error("config_short_read");
+    offset += count;
+  }
+  const after = fstatSync(fd);
+  if (!sameIdentity(before, after) || before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) {
+    throw new Error("config_content_changed");
+  }
+  return bytes.toString("utf8");
+}
+
 /** Open the profile directory and config without following a final symlink,
  * then keep both descriptors alive through the action. `/proc/self/fd/<dir>`
  * gives later backup/rename operations a path rooted at the already-opened
@@ -76,7 +94,7 @@ function openVerifiedProfile(workRoot: string, alias: string): VerifiedProfile {
     const currentConfig = lstatSync(configPath);
     if (!openedConfig.isFile() || openedConfig.size > 1024 * 1024) throw new Error("config_size_invalid");
     if (currentConfig.isSymbolicLink() || !sameIdentity(openedConfig, currentConfig)) throw new Error("config_identity_changed");
-    const raw = readFileSync(configFd, "utf8");
+    const raw = readStableFd(configFd);
     return {
       configPath,
       pinnedConfigPath,
@@ -105,6 +123,7 @@ function assertVerifiedProfileCurrent(profile: VerifiedProfile): void {
   const configNow = lstatSync(profile.configPath);
   if (dirNow.isSymbolicLink() || !sameIdentity(profile.dirIdentity, dirNow)) throw new Error("profile_identity_changed");
   if (configNow.isSymbolicLink() || !sameIdentity(profile.configIdentity, configNow)) throw new Error("config_identity_changed");
+  if (readStableFd(profile.configFd) !== profile.raw) throw new Error("config_content_changed");
 }
 
 function assertVerifiedDirectoryCurrent(profile: VerifiedProfile): void {
@@ -339,7 +358,7 @@ export async function handleDaemonNodeAction(
     deps.warn(`[host-control] ${event.action_id}: ${message}`);
     await deps.callCommHub("ack_daemon_node_action", {
       action_id: event.action_id,
-      status: /invalid|mismatch|identity_changed|conflict|already_running|online_use|symlink|outside_root|forbidden/.test(message) ? "rejected" : "failed",
+      status: /invalid|mismatch|identity_changed|content_changed|conflict|already_running|online_use|symlink|outside_root|forbidden/.test(message) ? "rejected" : "failed",
       error: message,
     }).catch(() => {});
   } finally {
