@@ -27,6 +27,30 @@ const USERNAME = "opencode";
 const OUTPUT_LIMIT = 64 * 1024;
 export const OPENCODE_COMMHUB_TOKEN_ENV = "ANET_OPENCODE_COMMHUB_TOKEN";
 const OPENCODE_COMMHUB_INSTRUCTIONS = "ANET-COMMHUB.md";
+let lastOpenCodeMessageTimestamp = 0;
+let openCodeMessageCounter = 0;
+
+function createOpenCodeAscendingMessageId(): string {
+  const timestamp = Date.now();
+  if (timestamp !== lastOpenCodeMessageTimestamp) {
+    lastOpenCodeMessageTimestamp = timestamp;
+    openCodeMessageCounter = 0;
+  }
+  openCodeMessageCounter++;
+  if (openCodeMessageCounter > 0xfff) {
+    throw new Error("OpenCode message ID counter overflowed within one millisecond");
+  }
+  const encoded = BigInt(timestamp) * 0x1000n + BigInt(openCodeMessageCounter);
+  const timeBytes = Buffer.alloc(6);
+  for (let index = 0; index < timeBytes.length; index++) {
+    timeBytes[index] = Number((encoded >> BigInt(40 - 8 * index)) & 0xffn);
+  }
+  const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+  const entropy = randomBytes(14);
+  let suffix = "";
+  for (const byte of entropy) suffix += alphabet[byte % alphabet.length];
+  return `msg_${timeBytes.toString("hex")}${suffix}`;
+}
 
 export interface OpenCodeCopresenceSubmitResult {
   replyText: string;
@@ -470,13 +494,29 @@ export async function openVettedOpenCodeCopresence(
           // session already has a full attach TUI, leaving a live-looking
           // process with no message in the shared session.
           const model = parseModelRef(opts.model);
+          // OpenCode creates the user message before it atomically joins the
+          // per-session runner. A human TUI submission can therefore win the
+          // narrow idle-check -> POST race, and concurrent POST callers receive
+          // the same runner result. Give this network turn a unique user-message
+          // identity and accept only an assistant response causally parented to
+          // it; otherwise a human answer could be misrouted to CommHub.
+          // OpenCode compares message IDs lexicographically to decide whether
+          // the newest user turn still needs an assistant response. A UUID-ish
+          // custom suffix sorts after OpenCode's timestamp prefix and can make
+          // a later user turn appear already answered. Generate the exact
+          // ascending ID shape used by OpenCode 1.18.1 instead.
+          const messageId = createOpenCodeAscendingMessageId();
           const message = await fetchJson(url, password, `/session/${created.id}/message`, {
             method: "POST",
             body: JSON.stringify({
+              messageID: messageId,
               ...(model ? { model } : {}),
               parts: [{ type: "text", text: visiblePrompt }],
             }),
           }, timeoutMs);
+          if (message?.info?.role !== "assistant" || message?.info?.parentID !== messageId) {
+            throw new Error("OpenCode reply was not owned by the submitted network message");
+          }
           const replyText = parseMessageReply(message);
           if (!replyText) {
             throw new Error("OpenCode POST /session/:id/message returned no assistant text");
