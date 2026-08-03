@@ -51,8 +51,8 @@ expect_red() {
 echo "L5 witnessed-red security/correctness mutations"
 cp agent-node/src/inbox-dispatch.ts /tmp/inbox-dispatch.ts
 bun /harness/mutate.ts agent-node/src/inbox-dispatch.ts \
-  'if (meta.auth_origin === "user") return true;' \
-  'if (meta.auth_origin === "user" || meta.auth_origin === "node") return true;'
+  'return meta.auth_origin === "user";' \
+  'return meta.auth_origin === "user" || meta.auth_origin === "node";'
 expect_red node-origin-cannot-steer bun test agent-node/src/inbox-dispatch.test.ts
 cp /tmp/inbox-dispatch.ts agent-node/src/inbox-dispatch.ts
 

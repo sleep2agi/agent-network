@@ -23,8 +23,8 @@ export function parseInboxDispatchMeta(message: InboxDispatchMessage): Record<st
 /**
  * Only authenticated Dashboard chat tasks may steer a human-owned Codex turn.
  * `auth_origin` is stamped by the Hub from token facts, not trusted client
- * input. The narrow legacy-admin fallback lets already-enqueued production
- * rows drain during the rolling Hub/agent-node upgrade.
+ * input. Pre-stamp rows deliberately remain ordinary FIFO tasks: an alias in
+ * old Hub data is not an authentication fact and must not unlock steering.
  */
 export function isInteractiveDashboardTask(message: InboxDispatchMessage): boolean {
   const type = message.type ?? "task";
@@ -34,8 +34,7 @@ export function isInteractiveDashboardTask(message: InboxDispatchMessage): boole
   if (typeof meta.client_request_id !== "string" || !/^dreq_[a-f0-9]{32}$/.test(meta.client_request_id)) {
     return false;
   }
-  if (meta.auth_origin === "user") return true;
-  return meta.auth_origin === undefined && message.from_session === "admin";
+  return meta.auth_origin === "user";
 }
 
 /**

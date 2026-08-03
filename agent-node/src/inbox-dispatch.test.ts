@@ -16,9 +16,9 @@ describe("isInteractiveDashboardTask", () => {
     })).toBe(true);
   });
 
-  test("accepts only the narrow legacy admin row during rolling upgrade", () => {
+  test("pre-stamp admin rows stay FIFO because aliases are not auth facts", () => {
     const meta_json = JSON.stringify({ source: "dashboard-chat", client_request_id: requestId });
-    expect(isInteractiveDashboardTask({ type: "task", from_session: "admin", meta_json })).toBe(true);
+    expect(isInteractiveDashboardTask({ type: "task", from_session: "admin", meta_json })).toBe(false);
     expect(isInteractiveDashboardTask({ type: "task", from_session: "some-node", meta_json })).toBe(false);
   });
 
