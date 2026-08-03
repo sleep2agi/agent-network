@@ -77,9 +77,10 @@ if (command === "serve") {
       await new Promise(r => setTimeout(r, Number(env.FAKE_TURN_MS || 25)));
       const prompt = json.parts?.[0]?.text || "";
       const reply = "FAKE_REPLY:" + prompt;
-      messages[id].push({ info:{role:"assistant"}, parts:[{type:"text",text:reply}] });
+      const parentID = env.FAKE_RACE_HUMAN === "1" ? "msg_human_race" : json.messageID;
+      messages[id].push({ info:{role:"assistant",parentID}, parts:[{type:"text",text:reply}] });
       delete statuses[id];
-      return send(res, { parts:[{type:"text",text:reply}] });
+      return send(res, { info:{role:"assistant",parentID}, parts:[{type:"text",text:reply}] });
     }
     res.writeHead(404); res.end("not found");
   });
@@ -287,6 +288,26 @@ describe("OpenCode native serve+attach copresence", () => {
       const result = await runtime.submit("after-human", 5_000);
       expect(Date.now() - started).toBeGreaterThanOrEqual(300);
       expect(result.replyText).toBe("FAKE_REPLY:after-human");
+    } finally {
+      await runtime?.close();
+      f.close();
+    }
+  }, 15_000);
+
+  test("refuses a reply owned by a human turn that won the idle-to-submit race", async () => {
+    const f = fixture({ FAKE_RACE_HUMAN: "1" });
+    let runtime: Awaited<ReturnType<typeof openVettedOpenCodeCopresence>> | undefined;
+    try {
+      runtime = await openVettedOpenCodeCopresence({
+        binary: f.binary,
+        env: f.env,
+        cwd: f.root,
+        workDir: f.root,
+        model: "opencode/fake",
+        startupTimeoutMs: 5_000,
+      });
+      await expect(runtime.submit("network-must-own-its-reply", 5_000))
+        .rejects.toThrow("not owned by the submitted network message");
     } finally {
       await runtime?.close();
       f.close();

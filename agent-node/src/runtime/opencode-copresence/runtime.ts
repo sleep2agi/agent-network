@@ -470,13 +470,24 @@ export async function openVettedOpenCodeCopresence(
           // session already has a full attach TUI, leaving a live-looking
           // process with no message in the shared session.
           const model = parseModelRef(opts.model);
+          // OpenCode creates the user message before it atomically joins the
+          // per-session runner. A human TUI submission can therefore win the
+          // narrow idle-check -> POST race, and concurrent POST callers receive
+          // the same runner result. Give this network turn a unique user-message
+          // identity and accept only an assistant response causally parented to
+          // it; otherwise a human answer could be misrouted to CommHub.
+          const messageId = `msg_anet_${randomBytes(16).toString("hex")}`;
           const message = await fetchJson(url, password, `/session/${created.id}/message`, {
             method: "POST",
             body: JSON.stringify({
+              messageID: messageId,
               ...(model ? { model } : {}),
               parts: [{ type: "text", text: visiblePrompt }],
             }),
           }, timeoutMs);
+          if (message?.info?.role !== "assistant" || message?.info?.parentID !== messageId) {
+            throw new Error("OpenCode reply was not owned by the submitted network message");
+          }
           const replyText = parseMessageReply(message);
           if (!replyText) {
             throw new Error("OpenCode POST /session/:id/message returned no assistant text");
