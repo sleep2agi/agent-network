@@ -34,6 +34,7 @@ import { dirname as pathDirname } from "path";
 import { startRetentionSweeper } from "./retention.js";
 import { startStaleSessionSweeper } from "./stale-sweeper.js";
 import { resolveRestFromSession } from "./rest-identity.js";
+import { stampTaskAuthOrigin, type TaskAuthOrigin } from "./task-auth-origin.js";
 
 const PORT = Number(process.env.PORT) || 9200;
 const HOST = process.env.HOST || "127.0.0.1";
@@ -2137,7 +2138,13 @@ return Bun.serve({
       const mergedMeta = attachmentsResult.attachments.length
         ? { ...((body as any).meta && typeof (body as any).meta === "object" ? (body as any).meta : {}), attachments: attachmentsResult.attachments }
         : (body as any).meta;
-      const metaJson = normalizeMetaJson(mergedMeta);
+      const rawToken = requestToken(req);
+      const authOrigin: TaskAuthOrigin = rawToken.startsWith("ntok_")
+        ? "node"
+        : restAuth
+          ? "user"
+          : "legacy";
+      const metaJson = normalizeMetaJson(stampTaskAuthOrigin(mergedMeta, authOrigin));
 
       // #212 dedup guardrail. Mirrors the MCP `send_task` tool: same
       // (from_session, target_alias, task) within COMMHUB_SEND_DEDUP_WINDOW_MS

@@ -56,6 +56,7 @@ import {
 } from "./config-apply-validate.js";
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
 import { clientRequestIdFromMeta, idempotentTaskId, idempotentTaskMatches, type StoredIdempotentTask } from "./task-idempotency.js";
+import { stampTaskAuthOrigin, type TaskAuthOrigin } from "./task-auth-origin.js";
 
 function ts(): string {
   return new Date().toTimeString().slice(0, 8);
@@ -839,7 +840,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
     async ({ alias, task, priority, context, from_session: _fromIn, ttl_seconds, network_id: netId, parent_task_id: parentIn, meta }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(netId);
-      const metaJson = normalizeMetaJson(meta);
+      const authOrigin: TaskAuthOrigin = callerTokenIsNetwork
+        ? "node"
+        : enforceUserId
+          ? "user"
+          : "legacy";
+      const metaJson = normalizeMetaJson(stampTaskAuthOrigin(meta, authOrigin));
 
       // Role check FIRST — round5 follow-up (通信牛 oracle catch):
       // the explicit-parent verification below distinguishes

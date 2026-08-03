@@ -56,6 +56,14 @@ export interface PendingTurn {
   finalText?: string;
 }
 
+interface SteeredTurn {
+  tasks: Map<string, PendingTurn>;
+  acceptedTaskIds: Set<string>;
+  agentTextChunks: string[];
+  finalText?: string;
+  terminal?: { status?: string; error?: string };
+}
+
 export interface WaitingApproval {
   reverseRequestId: number;
   method: string;
@@ -92,6 +100,15 @@ export class CodexAppServerBridge extends EventEmitter {
   private readonly label: string;
   private status: BridgeStatus = "connecting";
   private activeTurnId: string | null = null;
+  /**
+   * A turn started by the human TUI. Dashboard chat is allowed to steer this
+   * turn so a message sent while the human is actively using the TUI does not
+   * sit behind a ten-minute FIFO timeout. Agent-to-agent tasks never steer a
+   * human turn; callers must opt in explicitly.
+   */
+  private externalActiveTurnId: string | null = null;
+  /** Dashboard tasks accepted through turn/steer, grouped by human turn. */
+  private steeredTurns = new Map<string, SteeredTurn>();
   /**
    * Synchronous claim taken BEFORE the `turn/start` RPC round-trip.
    * `activeTurnId` alone is insufficient as a mutual-exclusion guard: it is
@@ -251,6 +268,7 @@ export class CodexAppServerBridge extends EventEmitter {
     pending.turnId = turnId;
     this.pendingTurns.set(turnId, pending);
     this.activeTurnId = turnId;
+    if (this.externalActiveTurnId === turnId) this.externalActiveTurnId = null;
     return turnId;
   }
 
@@ -265,16 +283,101 @@ export class CodexAppServerBridge extends EventEmitter {
    * requeued at the FRONT (original order preserved) — the app-server is the
    * authority (§6.3).
    */
-  async submitTask(input: { taskId: string; text: string; from?: string }): Promise<
-    { started: true; turnId: string } | { started: false; queuedAt: number }
+  async submitTask(input: {
+    taskId: string;
+    text: string;
+    from?: string;
+    steerIfExternalTurn?: boolean;
+  }): Promise<
+    { started: true; turnId: string; steered?: boolean } | { started: false; queuedAt: number }
   > {
-    if (this.turnClaimed || this.activeTurnId || this.taskQueue.length > 0) {
+    if (this.turnClaimed || this.activeTurnId) {
+      this.taskQueue.push(input);
+      this.emit("task_queued", { taskId: input.taskId, depth: this.taskQueue.length });
+      return { started: false, queuedAt: this.taskQueue.length };
+    }
+    if (this.externalActiveTurnId) {
+      if (input.steerIfExternalTurn) {
+        return this.steerExternalTurn(input, this.externalActiveTurnId);
+      }
+      this.taskQueue.push(input);
+      this.emit("task_queued", { taskId: input.taskId, depth: this.taskQueue.length });
+      return { started: false, queuedAt: this.taskQueue.length };
+    }
+    if (this.taskQueue.length > 0) {
       this.taskQueue.push(input);
       this.emit("task_queued", { taskId: input.taskId, depth: this.taskQueue.length });
       return { started: false, queuedAt: this.taskQueue.length };
     }
     const turnId = await this.startTaskTurn(input);
     return { started: true, turnId };
+  }
+
+  private async steerExternalTurn(
+    input: { taskId: string; text: string; from?: string; steerIfExternalTurn?: boolean },
+    expectedTurnId: string,
+  ): Promise<{ started: true; turnId: string; steered: true } | { started: false; queuedAt: number }> {
+    const state = this.steeredTurns.get(expectedTurnId) ?? {
+      tasks: new Map<string, PendingTurn>(),
+      acceptedTaskIds: new Set<string>(),
+      agentTextChunks: [],
+    };
+    state.tasks.set(input.taskId, {
+      taskId: input.taskId,
+      clientUserMessageId: `anet:${input.taskId}`,
+      submittedAt: Date.now(),
+      turnId: expectedTurnId,
+      agentTextChunks: [],
+    });
+    this.steeredTurns.set(expectedTurnId, state);
+
+    const fromLabel = displaySender(input.from);
+    const promptPrefix = fromLabel
+      ? `[Agent Network/from=${fromLabel}/task=${input.taskId}] `
+      : `[Agent Network/task=${input.taskId}] `;
+    try {
+      const response = await this.client.request("turn/steer", {
+        threadId: this.threadId,
+        input: [{ type: "text", text: promptPrefix + input.text }],
+        expectedTurnId,
+      });
+      const acceptedTurnId = extractTurnId(response);
+      if (acceptedTurnId !== expectedTurnId) {
+        throw new Error(
+          `${this.label}: turn/steer returned mismatched turnId=${acceptedTurnId ?? "(missing)"}; expected=${expectedTurnId}`,
+        );
+      }
+      state.acceptedTaskIds.add(input.taskId);
+      // If turn/completed raced the RPC response, attribution waits for this
+      // acceptance proof and is emitted now rather than fail-open earlier.
+      if (state.terminal) {
+        const task = state.tasks.get(input.taskId);
+        if (task) this.emitSteeredTask(state, task, state.terminal);
+        state.tasks.delete(input.taskId);
+        state.acceptedTaskIds.delete(input.taskId);
+        if (state.tasks.size === 0) this.steeredTurns.delete(expectedTurnId);
+      }
+      this.emit("task_steered", { taskId: input.taskId, turnId: expectedTurnId });
+      return { started: true, turnId: expectedTurnId, steered: true };
+    } catch (error) {
+      // The human turn may finish between turn/started and turn/steer. Remove
+      // the optimistic mapping, preserve the task in FIFO, and immediately
+      // try to drain: if the completion notification already raced past us,
+      // no later event would otherwise wake the queue.
+      state.tasks.delete(input.taskId);
+      state.acceptedTaskIds.delete(input.taskId);
+      if (state.tasks.size === 0) this.steeredTurns.delete(expectedTurnId);
+      if (this.externalActiveTurnId === expectedTurnId) this.externalActiveTurnId = null;
+      this.taskQueue.push(input);
+      const queuedAt = this.taskQueue.length;
+      this.emit("steer_deferred", {
+        taskId: input.taskId,
+        turnId: expectedTurnId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      void this.drainQueue();
+      return { started: false, queuedAt };
+    }
   }
 
   /** Drain the FIFO after a turn finishes. One task per idle transition. */
@@ -305,6 +408,9 @@ export class CodexAppServerBridge extends EventEmitter {
   }
   activeTurn(): string | null {
     return this.activeTurnId;
+  }
+  externalActiveTurn(): string | null {
+    return this.externalActiveTurnId;
   }
   pendingTurnCount(): number {
     return this.pendingTurns.size;
@@ -392,7 +498,12 @@ export class CodexAppServerBridge extends EventEmitter {
     const turnId = extractTurnId(params);
     if (!turnId) return;
     if (!this.pendingTurns.has(turnId)) {
-      // A turn we didn't start (§7.5 rule) — e.g. the human TUI. Observe only.
+      // A turn we didn't start — e.g. the human TUI. Track its exact id so
+      // authenticated Dashboard chat can use turn/steer. We still never map
+      // a reply unless at least one task was explicitly and successfully
+      // steered into this turn.
+      this.externalActiveTurnId = turnId;
+      if (this.waitingApprovals.size === 0) this.setStatus("working");
       this.emit("unowned_turn_drop", { turnId, event: "turn/started" });
       return;
     }
@@ -410,7 +521,11 @@ export class CodexAppServerBridge extends EventEmitter {
     if (!p || p.threadId !== this.threadId) return;
     if (typeof p.turnId !== "string") return;
     const pending = this.pendingTurns.get(p.turnId);
-    if (!pending) return; // Not our turn — human TUI is receiving deltas too.
+    if (!pending) {
+      const steered = this.steeredTurns.get(p.turnId);
+      if (steered && typeof p.delta === "string") steered.agentTextChunks.push(p.delta);
+      return; // Human TUI is receiving deltas too.
+    }
     if (typeof p.delta === "string") pending.agentTextChunks.push(p.delta);
   }
 
@@ -426,7 +541,18 @@ export class CodexAppServerBridge extends EventEmitter {
     if (!p || p.threadId !== this.threadId) return;
     if (typeof p.turnId !== "string") return;
     const pending = this.pendingTurns.get(p.turnId);
-    if (!pending) return;
+    if (!pending) {
+      const steered = this.steeredTurns.get(p.turnId);
+      if (
+        steered &&
+        p.item?.type === "agentMessage" &&
+        p.item.phase === "final_answer" &&
+        typeof p.item.text === "string"
+      ) {
+        steered.finalText = p.item.text;
+      }
+      return;
+    }
     if (
       p.item?.type === "agentMessage" &&
       p.item.phase === "final_answer" &&
@@ -450,11 +576,21 @@ export class CodexAppServerBridge extends EventEmitter {
     if (!turnId) return;
     const pending = this.pendingTurns.get(turnId);
     if (!pending) {
-      // Human-TUI-initiated turn completed. Absolutely no reply mapping —
-      // but the thread just went idle, so queued Agent tasks may proceed
-      // (§6.1: human input had its priority; FIFO resumes after).
+      // Human-TUI-initiated turn completed. Only tasks that were accepted by
+      // turn/steer are mapped; an ordinary human-only turn remains invisible
+      // to CommHub. All steered Dashboard tasks receive the same final answer
+      // because app-server emits one final answer for the shared active turn.
+      const finished = this.finishExternalTurn(turnId, {
+        status: p.turn?.status,
+        error: p.turn?.error?.message,
+      });
       this.emit("unowned_turn_drop", { turnId, event: "turn/completed" });
-      void this.drainQueue();
+      // Older app-server builds can omit turn/started for a competing human
+      // turn. Preserve the historical idle wake-up for that notification.
+      if (!finished) {
+        if (this.waitingApprovals.size === 0) this.setStatus("idle");
+        void this.drainQueue();
+      }
       return;
     }
     this.finishOwnedTurn(turnId, {
@@ -477,7 +613,9 @@ export class CodexAppServerBridge extends EventEmitter {
    */
   async reconcileActiveTurn(): Promise<ActiveTurnReconciliation> {
     if (this.reconciliationInFlight) return this.reconciliationInFlight;
-    const activeAtStart = this.activeTurnId;
+    const ownedAtStart = this.activeTurnId;
+    const externalAtStart = this.externalActiveTurnId;
+    const activeAtStart = ownedAtStart ?? externalAtStart;
     if (!activeAtStart) return { recovered: false, turnId: null };
 
     this.reconciliationInFlight = (async () => {
@@ -490,7 +628,10 @@ export class CodexAppServerBridge extends EventEmitter {
 
       // A notification may have completed the turn while thread/read was in
       // flight. Never let an old snapshot release a newer active claim.
-      if (this.activeTurnId !== activeAtStart) {
+      if (
+        (ownedAtStart && this.activeTurnId !== activeAtStart) ||
+        (externalAtStart && this.externalActiveTurnId !== activeAtStart)
+      ) {
         return { recovered: false, turnId: activeAtStart };
       }
 
@@ -510,7 +651,10 @@ export class CodexAppServerBridge extends EventEmitter {
         };
       }>("thread/read", { threadId: this.threadId, includeTurns: true });
 
-      if (this.activeTurnId !== activeAtStart) {
+      if (
+        (ownedAtStart && this.activeTurnId !== activeAtStart) ||
+        (externalAtStart && this.externalActiveTurnId !== activeAtStart)
+      ) {
         return { recovered: false, turnId: activeAtStart };
       }
 
@@ -526,11 +670,17 @@ export class CodexAppServerBridge extends EventEmitter {
           item.phase === "final_answer" &&
           typeof item.text === "string"
         )?.text;
-      const recovered = this.finishOwnedTurn(activeAtStart, {
-        status: turn.status,
-        error: turn.error?.message,
-        finalText,
-      });
+      const recovered = ownedAtStart
+        ? this.finishOwnedTurn(activeAtStart, {
+          status: turn.status,
+          error: turn.error?.message,
+          finalText,
+        })
+        : this.finishExternalTurn(activeAtStart, {
+          status: turn.status,
+          error: turn.error?.message,
+          finalText,
+        });
       if (recovered) {
         this.emit("turn_reconciled", { turnId: activeAtStart, status: turn.status });
       }
@@ -572,6 +722,47 @@ export class CodexAppServerBridge extends EventEmitter {
     // Either way the thread just went idle from our perspective → drain FIFO.
     void this.drainQueue();
     return true;
+  }
+
+  private finishExternalTurn(
+    turnId: string,
+    terminal: { status?: string; error?: string; finalText?: string },
+  ): boolean {
+    if (this.externalActiveTurnId !== turnId && !this.steeredTurns.has(turnId)) return false;
+    if (this.externalActiveTurnId === turnId) this.externalActiveTurnId = null;
+    const steered = this.steeredTurns.get(turnId);
+    if (steered) {
+      if (terminal.finalText) steered.finalText = terminal.finalText;
+      steered.terminal = { status: terminal.status, error: terminal.error };
+      for (const [taskId, task] of steered.tasks) {
+        if (!steered.acceptedTaskIds.has(taskId)) continue;
+        this.emitSteeredTask(steered, task, steered.terminal);
+        steered.tasks.delete(taskId);
+        steered.acceptedTaskIds.delete(taskId);
+      }
+      if (steered.tasks.size === 0) this.steeredTurns.delete(turnId);
+    }
+    if (this.waitingApprovals.size === 0) this.setStatus("idle");
+    void this.drainQueue();
+    return true;
+  }
+
+  private emitSteeredTask(
+    state: SteeredTurn,
+    task: PendingTurn,
+    terminal: { status?: string; error?: string },
+  ): void {
+    const turnErr = terminal.error ??
+      (terminal.status === "failed"
+        ? "Codex turn failed without an error message"
+        : terminal.status === "interrupted"
+          ? "Codex turn was interrupted without an error message"
+          : undefined);
+    const text = state.finalText && state.finalText.length > 0
+      ? state.finalText
+      : state.agentTextChunks.join("");
+    if (turnErr) this.emit("task_error", { taskId: task.taskId, error: turnErr });
+    else this.emit("task_reply", { taskId: task.taskId, text });
   }
 
   /** Read-only queue depth (for tests / observability). */

@@ -52,6 +52,25 @@ beforeEach(() => { cleanup(); seed(); });
 afterAll(cleanup);
 
 describe("send_task durable idempotency", () => {
+  test("Hub stamps authenticated user origin and overrides client spoofing", async () => {
+    const handler = sendTaskHandler();
+    const sent = await call(handler, {
+      alias: TARGET,
+      task: "authenticated dashboard payload",
+      priority: "normal",
+      meta: {
+        source: "dashboard-chat",
+        client_request_id: "dreq_0123456789abcdef0123456789abcdef",
+        auth_origin: "node",
+      },
+    });
+    expect(sent.ok).toBe(true);
+    const task = db.get<{ meta_json: string }>("SELECT meta_json FROM tasks WHERE task_id = ?1", [sent.message_id]);
+    const inbox = db.get<{ meta_json: string }>("SELECT meta_json FROM inbox WHERE id = ?1", [sent.message_id]);
+    expect(JSON.parse(task!.meta_json).auth_origin).toBe("user");
+    expect(JSON.parse(inbox!.meta_json).auth_origin).toBe("user");
+  });
+
   test("lost-response retry returns the original task and does not enqueue twice", async () => {
     const handler = sendTaskHandler();
     const args = {

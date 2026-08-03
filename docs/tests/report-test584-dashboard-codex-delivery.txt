@@ -1,0 +1,40 @@
+Test 584 — Dashboard → Codex TUI reliable delivery
+Date: 2026-08-04 (Asia/Shanghai)
+Base: origin/main 4da56c34c3159d674fb84f7ff636d6080f83b641
+Image: anet-test584:dev
+Command: sg docker -c 'docker run --rm anet-test584:dev'
+Result: PASS (exit 0)
+
+L1 — source/build
+- agent-node CLI bundled successfully (239 modules, 1.64 MB output).
+
+L2 — app-server bridge and inbox dispatch
+- 39 tests passed, 0 failed, 111 assertions.
+- Exact turn/steer expectedTurnId contract.
+- Human-only turns do not create CommHub replies.
+- Authenticated Dashboard tasks steer an active human turn.
+- Multiple Dashboard rows enter the same turn without head-of-line blocking.
+- Ordinary agent tasks remain FIFO queued.
+- Steer mismatch/race preserves the task.
+- A task is not attributed before turn/steer acceptance.
+- Missed terminal notification is recovered from exact thread history.
+
+L3 — Hub auth boundary and rolling idempotency
+- 11 tests passed, 0 failed, 25 assertions.
+- Hub overrides client-supplied auth_origin from authenticated token facts.
+- Existing pre-stamp Dashboard requests remain idempotent across rollout.
+
+L4 — private real HTTP Hub
+- 2 tests passed, 0 failed, 6 assertions.
+- User token persists auth_origin=user.
+- Node token attempting to spoof Dashboard metadata persists auth_origin=node.
+
+L5 — witnessed-red mutations
+- node-origin-cannot-steer: RED (rc 1)
+- no-head-of-line-serialization: RED (rc 1)
+- exact-expected-turn-id: RED (rc 1)
+- accepted-steer-must-reply: RED (rc 1)
+
+Production deployment was deliberately excluded from this test container.
+Hub and agent-node bridge must be deployed as one coordinated change, then a
+real Dashboard nonce must be verified through inbox ack and task reply.
