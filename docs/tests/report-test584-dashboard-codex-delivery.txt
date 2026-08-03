@@ -1,7 +1,7 @@
 Test 584 — Dashboard → Codex TUI reliable delivery
 Date: 2026-08-04 (Asia/Shanghai)
 Base: origin/main 4da56c34c3159d674fb84f7ff636d6080f83b641
-Source candidate: ff0d439d85c880eed0da31181e52d542d01024be
+Source candidate: 2e409d35f5973c6a64e5a49429c5bc16590f37ad
 Image: anet-test584:dev
 Command: sg docker -c 'docker run --rm anet-test584:dev'
 Result: PASS (exit 0)
@@ -23,6 +23,7 @@ L2 — app-server bridge and inbox dispatch
 L3 — Hub auth boundary and rolling idempotency
 - 12 tests passed, 0 failed (MCP user and node callers both covered).
 - Hub overrides client-supplied auth_origin from authenticated token facts.
+- Pre-stamp admin aliases remain FIFO and cannot unlock steering.
 - Existing pre-stamp Dashboard requests remain idempotent across rollout.
 
 L4 — private real HTTP Hub
