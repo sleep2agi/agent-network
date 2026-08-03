@@ -29,7 +29,6 @@ if (command === "serve") {
   const statuses = {};
   const messages = {};
   let lastResponse = null;
-  let staleRunnerUntil = 0;
   const server = http.createServer(async (req, res) => {
     if (req.headers.authorization !== expectedAuth) { res.writeHead(401); return res.end("unauthorized"); }
     const body = await new Promise((resolve) => { let s=""; req.on("data", c => s+=c); req.on("end", () => resolve(s)); });
@@ -76,7 +75,8 @@ if (command === "serve") {
       if (env.FAKE_REQUIRE_MODEL === "1" && (json.model?.providerID !== "opencode" || json.model?.modelID !== "fake")) {
         res.writeHead(400); return res.end("missing model identity");
       }
-      if (lastResponse && Date.now() < staleRunnerUntil) {
+      if (lastResponse && env.FAKE_REQUIRE_ASCENDING_MESSAGE_ID === "1" &&
+          !/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/.test(json.messageID || "")) {
         messages[id].push({ info:{role:"user",id:json.messageID}, parts:json.parts || [] });
         return send(res, lastResponse);
       }
@@ -88,7 +88,6 @@ if (command === "serve") {
       messages[id].push({ info:{role:"user",id:json.messageID}, parts:json.parts || [] });
       lastResponse = { info:{role:"assistant",parentID}, parts:[{type:"text",text:reply}] };
       messages[id].push(lastResponse);
-      staleRunnerUntil = Date.now() + Number(env.FAKE_STALE_RUNNER_MS || 0);
       delete statuses[id];
       return send(res, lastResponse);
     }
@@ -324,8 +323,8 @@ describe("OpenCode native serve+attach copresence", () => {
     }
   }, 15_000);
 
-  test("waits past OpenCode's status-idle to Runner-cleanup gap before the next network turn", async () => {
-    const f = fixture({ FAKE_STALE_RUNNER_MS: "150" });
+  test("uses OpenCode's ascending message ID shape across sequential network turns", async () => {
+    const f = fixture({ FAKE_REQUIRE_ASCENDING_MESSAGE_ID: "1" });
     let runtime: Awaited<ReturnType<typeof openVettedOpenCodeCopresence>> | undefined;
     try {
       runtime = await openVettedOpenCodeCopresence({

@@ -23,12 +23,12 @@ log "[L0] isolated Docker environment"
 [ ! -e /root/.anet ] || fail "image contains host Agent Network state"
 pass "isolated environment"
 
-log "[L1] idle-to-submit race reply correlation and stable Runner teardown"
+log "[L1] idle-to-submit race reply correlation and OpenCode-compatible message ordering"
 cd /workspace/agent-node
 bun test src/runtime/opencode-copresence/runtime.test.ts \
-  -t "(refuses a reply owned by a human turn|waits past OpenCode's status-idle)" \
+  -t "(refuses a reply owned by a human turn|uses OpenCode's ascending message ID)" \
   >>"$REPORT" 2>&1 \
   || fail "network reply ownership regression"
-pass "only the exact network message may own its reply after stable Runner teardown"
+pass "only the exact, chronologically ordered network message may own its reply"
 
 log "Summary: PASS"

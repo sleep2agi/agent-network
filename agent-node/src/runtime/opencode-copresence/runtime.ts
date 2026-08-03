@@ -27,6 +27,30 @@ const USERNAME = "opencode";
 const OUTPUT_LIMIT = 64 * 1024;
 export const OPENCODE_COMMHUB_TOKEN_ENV = "ANET_OPENCODE_COMMHUB_TOKEN";
 const OPENCODE_COMMHUB_INSTRUCTIONS = "ANET-COMMHUB.md";
+let lastOpenCodeMessageTimestamp = 0;
+let openCodeMessageCounter = 0;
+
+function createOpenCodeAscendingMessageId(): string {
+  const timestamp = Date.now();
+  if (timestamp !== lastOpenCodeMessageTimestamp) {
+    lastOpenCodeMessageTimestamp = timestamp;
+    openCodeMessageCounter = 0;
+  }
+  openCodeMessageCounter++;
+  if (openCodeMessageCounter > 0xfff) {
+    throw new Error("OpenCode message ID counter overflowed within one millisecond");
+  }
+  const encoded = BigInt(timestamp) * 0x1000n + BigInt(openCodeMessageCounter);
+  const timeBytes = Buffer.alloc(6);
+  for (let index = 0; index < timeBytes.length; index++) {
+    timeBytes[index] = Number((encoded >> BigInt(40 - 8 * index)) & 0xffn);
+  }
+  const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+  const entropy = randomBytes(14);
+  let suffix = "";
+  for (const byte of entropy) suffix += alphabet[byte % alphabet.length];
+  return `msg_${timeBytes.toString("hex")}${suffix}`;
+}
 
 export interface OpenCodeCopresenceSubmitResult {
   replyText: string;
@@ -247,22 +271,12 @@ async function waitUntilSessionIdle(
   timeoutMs: number,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  // OpenCode 1.18.1 clears /session/status just before its in-process Runner
-  // promise is removed. A POST in that narrow tail can join the completed
-  // Runner, receive the previous assistant message, and leave the newly
-  // persisted user message unanswered. Require an idle observation to remain
-  // stable across this bounded grace period before submitting another turn.
-  // This is not an atomic human/network claim; the parentID check below still
-  // fails closed if a human wins after the stable-idle observation.
-  const idleStabilityMs = 250;
-  let idleSince = 0;
   while (Date.now() < deadline) {
-    let appearsIdle = false;
     try {
       const statuses = await fetchJson(url, password, "/session/status", {}, 2_000);
       if (statuses && typeof statuses === "object" && !Array.isArray(statuses)) {
         const state = statuses[sessionId];
-        if (state?.type === "idle") appearsIdle = true;
+        if (state?.type === "idle") return;
         if (state === undefined) {
           // Pinned OpenCode 1.18.1 returns an empty status map for an idle
           // session, so absence alone cannot be rejected. Distinguish the
@@ -271,7 +285,7 @@ async function waitUntilSessionIdle(
           // status stays fail-closed and retries until the caller's timeout.
           try {
             const session = await fetchJson(url, password, `/session/${sessionId}`, {}, 2_000);
-            if (session?.id === sessionId) appearsIdle = true;
+            if (session?.id === sessionId) return;
           } catch {
             // Keep waiting: missing session is not evidence of idle.
           }
@@ -279,12 +293,6 @@ async function waitUntilSessionIdle(
       }
     } catch {
       // A transient status failure is also not evidence of idle.
-    }
-    if (appearsIdle) {
-      idleSince ||= Date.now();
-      if (Date.now() - idleSince >= idleStabilityMs) return;
-    } else {
-      idleSince = 0;
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
@@ -492,7 +500,12 @@ export async function openVettedOpenCodeCopresence(
           // the same runner result. Give this network turn a unique user-message
           // identity and accept only an assistant response causally parented to
           // it; otherwise a human answer could be misrouted to CommHub.
-          const messageId = `msg_anet_${randomBytes(16).toString("hex")}`;
+          // OpenCode compares message IDs lexicographically to decide whether
+          // the newest user turn still needs an assistant response. A UUID-ish
+          // custom suffix sorts after OpenCode's timestamp prefix and can make
+          // a later user turn appear already answered. Generate the exact
+          // ascending ID shape used by OpenCode 1.18.1 instead.
+          const messageId = createOpenCodeAscendingMessageId();
           const message = await fetchJson(url, password, `/session/${created.id}/message`, {
             method: "POST",
             body: JSON.stringify({

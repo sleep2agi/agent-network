@@ -8,9 +8,9 @@ const mutations = {
     '          if (message?.info?.role !== "assistant" || message?.info?.parentID !== messageId) {',
     '          if (false) {',
   ],
-  "drop-idle-stability": [
-    "  const idleStabilityMs = 250;",
-    "  const idleStabilityMs = 0;",
+  "use-unordered-message-id": [
+    "          const messageId = createOpenCodeAscendingMessageId();",
+    '          const messageId = `msg_anet_${randomBytes(16).toString("hex")}`;',
   ],
 };
 const pair = mutations[mutation];

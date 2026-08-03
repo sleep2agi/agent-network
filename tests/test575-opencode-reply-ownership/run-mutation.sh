@@ -12,8 +12,8 @@ case "$mutation" in
   drop-reply-ownership)
     test_name="refuses a reply owned by a human turn that won the idle-to-submit race"
     ;;
-  drop-idle-stability)
-    test_name="waits past OpenCode's status-idle to Runner-cleanup gap before the next network turn"
+  use-unordered-message-id)
+    test_name="uses OpenCode's ascending message ID shape across sequential network turns"
     ;;
   *)
     echo "unknown mutation: $mutation" >&2
