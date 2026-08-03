@@ -1,0 +1,111 @@
+# test572 — TUI Runtime × Feishu channel
+
+Date: 2026-08-03 (Asia/Shanghai)
+Status: PARTIAL PASS / SECURITY DESIGN GATE — not release authorization
+
+## Scope and provenance
+
+- Shared Feishu base: origin/main `9a614b0d`
+- Common + Codex candidate: branch `feat/tui-feishu-channel`, source `2cbac6b7`
+- OpenCode TUI base: `9417ec0d`; Feishu candidate `563b8b1e`
+- Grok TUI base: `4854928b`; Feishu candidate `cd24d88f`
+- No candidate was pushed, merged, published, deployed, or installed globally.
+- All work used clean worktrees under `/tmp`; the dirty primary checkout was not modified.
+
+## Implemented contract
+
+Feishu IPC now builds one bounded runtime provenance label:
+
+`feishu:<conversationType>:<conversationId>:<senderOpenId>`
+
+Each wire component is ASCII-normalized, stripped of control bytes and the
+`]/\\` task-envelope delimiters, and bounded to 64 characters. The existing
+`feishu:` prefix remains stable for the Feishu turn security gate.
+
+The same label is proved visible in:
+
+1. Codex app-server `turn/start` input;
+2. OpenCode shared-session REST message input;
+3. Grok TUI bracketed-paste network envelope.
+
+The existing Feishu bridge dispatch suite also proves that a response is sent
+back to the originating Feishu conversation.
+
+## Docker normal-path evidence
+
+One fixed tag was reused for every build: `anet-test-tui-feishu:dev`.
+
+Command:
+
+```sh
+sg docker -c 'docker build -t anet-test-tui-feishu:dev -f tests/test572-tui-feishu-channel/Dockerfile .'
+sg docker -c 'docker run --rm anet-test-tui-feishu:dev'
+```
+
+Results:
+
+- Feishu envelope compatibility/provenance: 36/36 PASS
+- Feishu bridge dispatch/reply: 17/17 PASS
+- Codex shared TUI bridge: 18 tests, 59 assertions, PASS
+- OpenCode shared TUI runtime: 9 tests, 44 assertions, PASS
+- Grok shared TUI runtime: 48 tests, 381 assertions, PASS
+
+The Grok layer ran the full existing runtime suite (not only the new string
+assertion), including lifecycle, approval, JSONL, recovery, containment, and
+process-lock cases.
+
+## Witnessed-red mutation evidence
+
+Mutation commands use an ephemeral container and exact one-hit source anchors;
+the host worktree is not modified.
+
+```sh
+sg docker -c 'docker run --rm --entrypoint bash anet-test-tui-feishu:dev tests/test572-tui-feishu-channel/run-mutation.sh <mode>'
+```
+
+- `origin`: replace the four-part Feishu provenance with legacy
+  `feishu:<conversationId>` → envelope suite FAIL (34/36), witnessed red.
+- `codex`: discard `displaySender(input.from)` → Codex suite FAIL (17/18),
+  witnessed red.
+- `opencode`: discard the submit-side normalized sender → OpenCode suite FAIL
+  (7/9), witnessed red.
+- `grok`: replace the runtime envelope sender with `remote` → focused Grok case
+  FAIL (0/1), witnessed red.
+
+## Security audit — release blocker
+
+The message/reply transport works, but existing Feishu tool isolation is not
+runtime-generic:
+
+- `checkFeishuToolDeny` is currently invoked only by the Claude SDK
+  `PreToolUse` hook in `agent-node/src/cli.ts`.
+- Codex app-server turns bypass that hook. An owned shared server may run with
+  `approval_policy=never` and `sandbox_mode=danger-full-access`; a Feishu turn
+  could therefore read node credentials or mutate files.
+- Codex 0.145 exposes per-`turn/start` `approvalPolicy` and `sandboxPolicy`, but
+  the generated protocol states both apply to the current **and subsequent**
+  turns. `readOnly` also does not reproduce the path-level read deny for
+  `.anet` credentials. It is not an equivalent drop-in guard for a shared
+  human thread.
+- OpenCode copresence globally denies its pinned built-in local tools, but
+  deliberately enables token-bound CommHub MCP tools. Existing Feishu policy
+  denies CommHub tools wholesale because the reply must travel through the
+  Feishu bridge; the shared OpenCode server cannot currently enforce that
+  difference per turn.
+- Grok copresence uses the pinned no-I/O profile and remains within its existing
+  reviewed effective-tool boundary.
+
+Therefore green transport tests are not a claim that all three runtimes are
+safe to publish with Feishu. A runtime-level security design must be signed
+before Codex/OpenCode integration is released. Prompt instructions are not an
+acceptable substitute for a machine-enforced tool boundary.
+
+Candidate options sent for technical decision:
+
+1. a separate restricted runtime/session for Feishu-origin turns;
+2. an explicitly trusted allowlist-only preview boundary (still a semantic
+   downgrade from current Feishu defense-in-depth);
+3. a runtime-level tool broker that applies the existing channel deny policy
+   before any TUI runtime tool executes.
+
+Until that decision, keep all three candidates local and do not merge/publish.
