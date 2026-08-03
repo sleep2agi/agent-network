@@ -77,4 +77,20 @@ bun /harness/mutate.ts agent-node/src/runtime/codex-app-server-bridge.ts \
 expect_red accepted-steer-must-reply bun test agent-node/src/runtime/codex-app-server-bridge.test.ts
 cp /tmp/codex-app-server-bridge.ts agent-node/src/runtime/codex-app-server-bridge.ts
 
+cp server/src/tools.ts /tmp/server-tools.ts
+bun /harness/mutate.ts server/src/tools.ts \
+  'normalizeMetaJson(stampTaskAuthOrigin(meta, authOrigin))' \
+  'normalizeMetaJson(meta)'
+export COMMHUB_DB=/tmp/test584-mutation-mcp.db
+expect_red mcp-node-cannot-forge-user-origin bun test server/src/task-idempotency-mcp.test.ts
+cp /tmp/server-tools.ts server/src/tools.ts
+
+cp server/src/server.ts /tmp/server-server.ts
+bun /harness/mutate.ts server/src/server.ts \
+  'normalizeMetaJson(stampTaskAuthOrigin(mergedMeta, authOrigin))' \
+  'normalizeMetaJson(mergedMeta)'
+export COMMHUB_DB=/tmp/test584-mutation-rest.db
+expect_red rest-node-cannot-forge-user-origin bun test server/src/task-auth-origin-http.test.ts
+cp /tmp/server-server.ts server/src/server.ts
+
 echo "RESULT: PASS"

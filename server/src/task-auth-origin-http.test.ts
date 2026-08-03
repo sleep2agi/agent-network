@@ -11,7 +11,9 @@ let base = "";
 let userToken = "";
 let nodeToken = "";
 let networkId = "";
-const TARGET = "auth-origin-http-target";
+const TARGET = `auth-origin-http-target-${process.pid}`;
+const TARGET_NODE_ID = `node_auth_origin_target_${process.pid}`;
+const TARGET_RESUME_ID = `resume_auth_origin_target_${process.pid}`;
 
 beforeAll(async () => {
   process.env.COMMHUB_DB = process.env.COMMHUB_DB || join(PRIVATE_DB_DIR, "hub.db");
@@ -26,13 +28,13 @@ beforeAll(async () => {
   nodeToken = minted.token!;
   db.run(
     `INSERT INTO sessions (resume_id, alias, status, node_id, network_id, updated_at, last_seen_at)
-     VALUES ('resume_auth_origin_target', ?1, 'idle', 'node_auth_origin_target', ?2, datetime('now'), datetime('now'))`,
-    [TARGET, networkId],
+     VALUES (?1, ?2, 'idle', ?3, ?4, datetime('now'), datetime('now'))`,
+    [TARGET_RESUME_ID, TARGET, TARGET_NODE_ID, networkId],
   );
   db.run(
     `INSERT INTO nodes (node_id, node_name, alias, network_id, created_at, updated_at, lifecycle_state)
-     VALUES ('node_auth_origin_target', ?1, ?1, ?2, datetime('now'), datetime('now'), 'active')`,
-    [TARGET, networkId],
+     VALUES (?1, ?2, ?2, ?3, datetime('now'), datetime('now'), 'active')`,
+    [TARGET_NODE_ID, TARGET, networkId],
   );
   const mod: any = await import("./server.js");
   server = mod.bootServer({ port: 0, hostname: "127.0.0.1" });
