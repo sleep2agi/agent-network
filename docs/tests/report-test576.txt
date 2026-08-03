@@ -1,0 +1,50 @@
+Test 576 — Codex TUI interrupted-turn fail-closed extension
+Date: 2026-08-03 Asia/Shanghai
+Status: PASS (isolated candidate; not deployed/published)
+
+Candidate
+---------
+Worktree: /tmp/commniu-tm-codex-reconcile
+Branch: fix/tm-codex-turn-reconcile
+Base: 849a851949e8a72ba857c737849771421516c852
+Head: 64cc6720272d295e95b9b88db92368790efb822d
+Fixed Docker tag: anet-tui-audit-codex:dev
+Image ENV: TEST573_SOURCE_COMMIT=64cc6720272d295e95b9b88db92368790efb822d
+
+Finding and fix
+---------------
+The existing reconciliation candidate recovered a missed turn/completed event,
+but its common terminal handler treated only explicit errors and status=failed
+as failures. An interrupted turn with partial assistant text could therefore be
+emitted as a successful task_reply from either the live notification path or
+the authoritative thread/read reconciliation path.
+
+Status=interrupted now produces task_error. Without an upstream error message,
+the stable error is: Codex turn was interrupted without an error message.
+
+Witnessed red / green
+---------------------
+1. Against the pre-fix candidate, the two new tests observed one successful
+   reply each for live and reconciled interrupted turns (26 pass, 2 fail).
+2. Final focused gate: 28 pass, 0 fail, 86 assertions.
+3. Final mutations, test code unchanged:
+   - drop-watchdog-start: 27 pass, 1 fail (missed terminal times out), rc=1.
+   - drop-terminal-release: 26 pass, 2 fail (authoritative terminal is not
+     recovered), rc=1.
+   - accept-interrupted: 26 pass, 2 fail (both interrupted paths emit a reply),
+     rc=1.
+
+Full Docker gate
+----------------
+- Codex app-server client, bridge, and runtime: 40 pass, 0 fail,
+  115 assertions across 3 files.
+- agent-node bundle: 238 modules, cli.js 0.95 MB.
+- The test573 image is now self-contained with exact source and dependencies;
+  its prior mount-only form was rejected when the build could not resolve zod
+  and undici.
+- All containers ran with --network none.
+
+Safety
+------
+No global npm package, live Codex bridge/TUI/app-server, token, Hub state,
+remote branch, merge, publish, or deployment was changed.

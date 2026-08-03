@@ -1,10 +1,14 @@
-// RFC-030 — unit tests for the owned codex app-server argv builder.
-// Locks the auto-approve wiring (approval_policy / sandbox_mode) and the
-// CommHub MCP wiring (url + bearer-token-env-var): passed as `-c` overrides
-// only when set, in a stable order, token never in argv, --listen always last.
+// RFC-030 — unit tests for the owned codex app-server argv builder and the
+// shared-thread terminal-event reconciliation watchdog.
 
 import { describe, expect, test } from "bun:test";
-import { buildOwnedAppServerArgs, COMMHUB_MCP_TOKEN_ENV } from "./runtime";
+import { EventEmitter } from "events";
+import {
+  buildOwnedAppServerArgs,
+  COMMHUB_MCP_TOKEN_ENV,
+  codexAppServerThink,
+  type CodexAppServerRuntimeSession,
+} from "./runtime";
 
 const URL = "ws://127.0.0.1:24555";
 
@@ -63,5 +67,54 @@ describe("buildOwnedAppServerArgs", () => {
     ]);
     expect(args[args.length - 2]).toBe("--listen");
     expect(args[args.length - 1]).toBe(URL);
+  });
+});
+
+class ReconcileOnlyBridge extends EventEmitter {
+  taskId = "";
+  reconcileCalls = 0;
+
+  async submitTask(input: { taskId: string }): Promise<{ started: true; turnId: string }> {
+    this.taskId = input.taskId;
+    return { started: true, turnId: "turn_missing_notification" };
+  }
+
+  async reconcileActiveTurn(): Promise<{
+    recovered: boolean;
+    turnId: string;
+    status: string;
+  }> {
+    this.reconcileCalls++;
+    this.emit("task_reply", { taskId: this.taskId, text: "recovered-by-watchdog" });
+    return {
+      recovered: true,
+      turnId: "turn_missing_notification",
+      status: "completed",
+    };
+  }
+}
+
+describe("codexAppServerThink — terminal-event reconciliation watchdog", () => {
+  test("resolves from authoritative reconciliation when turn/completed is missed", async () => {
+    const bridge = new ReconcileOnlyBridge();
+    const logs: string[] = [];
+    const session = { bridge } as unknown as CodexAppServerRuntimeSession;
+
+    const result = await codexAppServerThink(session, {
+      taskId: "task_watchdog",
+      text: "message delivered by Agent Network",
+      timeoutMs: 250,
+      reconciliationIntervalMs: 5,
+      log: (line) => logs.push(line),
+    });
+
+    expect(result).toEqual({
+      replyText: "recovered-by-watchdog",
+      failed: false,
+      queued: false,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(bridge.reconcileCalls).toBe(1);
+    expect(logs.some((line) => line.includes("recovered missed terminal event"))).toBe(true);
   });
 });

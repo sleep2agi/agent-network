@@ -284,6 +284,25 @@ describe("CodexAppServerBridge — bootstrap + task mapping", () => {
     expect(errors).toEqual([{ taskId: "task_1", error: "model unavailable" }]);
     expect(bridge.currentStatus()).toBe("idle");
   });
+
+  test("turn/completed with interrupted status cannot become a successful reply", async () => {
+    const turnId = await bridge.startTaskTurn({ taskId: "task_interrupted", text: "hi" });
+    const replies: unknown[] = [];
+    const errors: Array<{ taskId: string; error: string }> = [];
+    bridge.on("task_reply", (r) => replies.push(r));
+    bridge.on("task_error", (e) => errors.push(e as never));
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "turn/completed",
+      params: { threadId: THREAD, turn: { id: turnId, status: "interrupted" } },
+    });
+    await tick(10);
+    expect(replies).toHaveLength(0);
+    expect(errors).toEqual([{
+      taskId: "task_interrupted",
+      error: "Codex turn was interrupted without an error message",
+    }]);
+  });
 });
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -547,6 +566,134 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
     expect(replies.map((r) => r.taskId)).toEqual(["t-q-1", "t-q-2"]);
     expect(replies.map((r) => r.text)).toEqual(["answer-1", "answer-2"]);
     expect(bridge.currentStatus()).toBe("idle");
+    await client.close();
+    await app.stop();
+  });
+
+  test("thread/read recovers a missed turn/completed and drains the queued task", async () => {
+    let seq = 0;
+    let firstTurnIsPersistedComplete = false;
+    const app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize") return respond({ result: {} });
+        if (msg.method === "thread/resume") return respond({ result: {} });
+        if (msg.method === "turn/start") {
+          seq++;
+          return respond({ result: { turn: { id: `turn_reconcile_${seq}` } } });
+        }
+        if (msg.method === "thread/read") {
+          const includeTurns = (msg.params as { includeTurns?: boolean } | undefined)?.includeTurns;
+          return respond({
+            result: {
+              thread: {
+                id: THREAD,
+                status: { type: firstTurnIsPersistedComplete ? "idle" : "active" },
+                turns: includeTurns && firstTurnIsPersistedComplete
+                  ? [{
+                      id: "turn_reconcile_1",
+                      status: "completed",
+                      items: [{
+                        type: "agentMessage",
+                        phase: "final_answer",
+                        text: "recovered-answer-1",
+                      }],
+                    }]
+                  : undefined,
+              },
+            },
+          });
+        }
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    await bridge.bootstrap();
+    const replies: Array<{ taskId: string; text: string }> = [];
+    bridge.on("task_reply", (reply) => replies.push(reply as { taskId: string; text: string }));
+
+    await bridge.submitTask({ taskId: "t-reconcile-1", text: "first" });
+    await bridge.submitTask({ taskId: "t-reconcile-2", text: "second" });
+    expect(bridge.activeTurn()).toBe("turn_reconcile_1");
+    expect(bridge.queueDepth()).toBe(1);
+
+    // No turn/completed notification is broadcast. A non-terminal persisted
+    // status must not release the local claim.
+    expect(await bridge.reconcileActiveTurn()).toEqual({
+      recovered: false,
+      turnId: "turn_reconcile_1",
+      status: "active",
+    });
+    expect(bridge.activeTurn()).toBe("turn_reconcile_1");
+    expect(bridge.queueDepth()).toBe(1);
+
+    // This is the production failure shape: the exact turn is terminal in
+    // thread/read, but its terminal WebSocket frame never reached the bridge.
+    firstTurnIsPersistedComplete = true;
+    expect(await bridge.reconcileActiveTurn()).toEqual({
+      recovered: true,
+      turnId: "turn_reconcile_1",
+      status: "completed",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(replies).toEqual([{ taskId: "t-reconcile-1", text: "recovered-answer-1" }]);
+    expect(bridge.queueDepth()).toBe(0);
+    expect(bridge.activeTurn()).toBe("turn_reconcile_2");
+    // First check stops after the cheap active-status read. Recovery does a
+    // cheap idle-status read followed by one full-history read.
+    expect(app.received.filter((entry) => (entry as { method?: string }).method === "thread/read")).toHaveLength(3);
+
+    await client.close();
+    await app.stop();
+  });
+
+  test("thread/read never recovers an interrupted turn as success", async () => {
+    const app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize") return respond({ result: {} });
+        if (msg.method === "thread/resume") return respond({ result: {} });
+        if (msg.method === "turn/start") {
+          return respond({ result: { turn: { id: "turn_reconcile_interrupted" } } });
+        }
+        if (msg.method === "thread/read") {
+          const includeTurns = (msg.params as { includeTurns?: boolean } | undefined)?.includeTurns;
+          return respond({
+            result: {
+              thread: {
+                id: THREAD,
+                status: { type: "idle" },
+                turns: includeTurns ? [{
+                  id: "turn_reconcile_interrupted",
+                  status: "interrupted",
+                  items: [{ type: "agentMessage", phase: "final_answer", text: "partial text" }],
+                }] : undefined,
+              },
+            },
+          });
+        }
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    await bridge.bootstrap();
+    const replies: unknown[] = [];
+    const errors: Array<{ taskId: string; error: string }> = [];
+    bridge.on("task_reply", (reply) => replies.push(reply));
+    bridge.on("task_error", (error) => errors.push(error as never));
+
+    await bridge.submitTask({ taskId: "t-reconcile-interrupted", text: "first" });
+    expect(await bridge.reconcileActiveTurn()).toEqual({
+      recovered: true,
+      turnId: "turn_reconcile_interrupted",
+      status: "interrupted",
+    });
+    expect(replies).toHaveLength(0);
+    expect(errors).toEqual([{
+      taskId: "t-reconcile-interrupted",
+      error: "Codex turn was interrupted without an error message",
+    }]);
+
     await client.close();
     await app.stop();
   });
