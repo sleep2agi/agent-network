@@ -16,6 +16,19 @@ Command:
 
 Result: PASS (13/13 E2E checks) + launcher-pin unit 2/2.
 
+Full regression on the same image:
+  server:     797 pass, 10 documented skips, 0 fail (48 files)
+  agent-node: 806 pass, 0 fail as root for 48 files; 42 pass, 0 fail as
+              uid 1000 for the two permission-semantics files (848/848 total)
+
+Identity disclosure: running all agent-node files as root first produced two
+expected permission-fixture failures (`chmod 0555` cannot block root, and a
+"non-root owner" fixture was root-owned). Running those two complete files as
+uid 1000 made 42/42 pass. Conversely, running the OpenCode security fixtures as
+uid 1000 is invalid because the baked package tree is root-owned. The split run
+therefore follows each suite's stated ownership precondition rather than hiding
+either red result.
+
 E2E facts:
   1 isolated Hub boot
   2 admin/network auth
