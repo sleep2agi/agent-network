@@ -27,6 +27,12 @@ if (mutation === "drop-watchdog-start") {
     "      const recovered = this.finishOwnedTurn(activeAtStart, {\n",
     "      const recovered = false && this.finishOwnedTurn(activeAtStart, {\n",
   );
+} else if (mutation === "accept-interrupted") {
+  replaceExactlyOnce(
+    "src/runtime/codex-app-server-bridge.ts",
+    ': terminal.status === "interrupted"\n          ? "Codex turn was interrupted without an error message"',
+    ': false\n          ? "Codex turn was interrupted without an error message"',
+  );
 } else {
   throw new Error(`unknown mutation: ${mutation}`);
 }
