@@ -1,16 +1,15 @@
 Test 583 — server-control public docs build
 Date: 2026-08-03 Asia/Shanghai
-Source: 9c8104bc5cebad052a794e3b58546d9aa647d3e0
+Source: b376638a5617c016468a361fc47de0372ae2ab64
 Dockerfile: tests/test583-docs-server-control/Dockerfile
-Successful image manifest: sha256:ecb7f2859042e3b20f42bf59955a8b12d5a7abe409ee701d35f060a92e79e1e9
+Successful image manifest: sha256:a113331462701bbe9268e89397b68718f856629f5b375e55ef74ab6eef514071
 
 Result: VitePress client/server bundles and all pages rendered successfully.
 The pre-existing >500kB chunk warning remained a warning, not a build failure.
 
-Witnessed-red harness correction:
-  First build failed with `[vitepress] spawn git ENOENT` while rendering the API
-  docs. The Dockerfile now installs git + CA certificates, and the same clean
-  Docker build completed. The failed run is not counted as PASS.
+The public page presents one release name and one install entry point:
+  Agent Network 2.3 — Server Control Preview
+  anet upgrade --channel preview
 
 The test image was deleted by exact name after evidence capture due host disk
 pressure; no docker prune or pattern deletion was used.

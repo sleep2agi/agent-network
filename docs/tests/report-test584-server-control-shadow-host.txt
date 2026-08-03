@@ -1,0 +1,36 @@
+Test 584 — isolated real-host shadow acceptance
+Date: 2026-08-03 Asia/Shanghai
+Code source: a294db8b19cbdd907e2515c3217d5f798191628e
+Release docs: b376638a5617c016468a361fc47de0372ae2ab64
+Deployment root: /home/vansin/.local/share/anet-server-control-preview38
+
+Isolation:
+  Hub: 127.0.0.1:9258
+  tmux: anet-server-control-shadow-hub, anet-server-control-shadow-daemon
+  dedicated HOME, project, database, package tree, daemon and worker aliases
+  no global npm package, production Hub, or existing production node changed
+
+Exact deployed set:
+  CLI 2.3.0-preview.39 (tgz sha256 6e894fb862c6ba86141556116eb9bc70b9954abfc65c47ee732b915ec438a8a8)
+  agent-node 2.5.0-preview.30 (tgz sha256 f111770cf53138dc7e8e212daba88683dcb144033f21445f68d60bcd7ae91038)
+  Hub 0.9.0-preview.30 (tgz sha256 54ebc21b04ec4aeec03b929e4766fe5aaaeb83ba4818d40eb4f675a6ebf515f9)
+  installed CLI payload sha256 fae0bca6cdef0584eb35767e676d8bb44918645320a361d5f84b97ae0a2ba94e
+
+Result: PASS.
+  - daemon registered and reconnected after isolated Hub upgrades
+  - managed node create, list, stop, edit, start and restart returned final ack
+  - start/restart yielded distinct live PIDs; /proc argv matched exact config,
+    alias and runtime
+  - daemon and worker token-bearing configs are mode 0600
+  - after the original 60-second window elapsed, live SSE still kept the daemon
+    online; same-alias cross-network SSE is rejected by Docker contract tests
+  - health reported Hub 0.9.0-preview.30 and two live SSE connections
+
+Witnessed-red host findings fixed before this PASS:
+  1 SQLite UTC timestamp was parsed as host-local time and falsely showed offline.
+  2 session last_seen alone falsely showed a live SSE daemon offline after 60s.
+  3 daemon init inherited umask and persisted an ntok config at mode 0664.
+
+Rollback remains exact and isolated: stop only the two named tmux sessions and
+retain the deployment directory/database for audit. No production deployment or
+package publication was performed.

@@ -1,47 +1,46 @@
 Test 581 — packed-product daemon server-control E2E
 Date: 2026-08-03 Asia/Shanghai
-Source: 9c8104bc5cebad052a794e3b58546d9aa647d3e0
+Source: a294db8b19cbdd907e2515c3217d5f798191628e
 Dockerfile: tests/test581-daemon-server-e2e/Dockerfile
 Image: anet-test581:dev
-Manifest: sha256:82f94685867b78838c7c5f6f0a435dcc2ce771c5e78bb39fb9fa2e7feb2e68e4
+Manifest: sha256:46bcb3954428313533b45465b2ca9bc3af15fce2d01208768ee306d1ee259131
 
 Versions inside the tested image:
-  @sleep2agi/agent-network 2.3.0-preview.38
+  @sleep2agi/agent-network 2.3.0-preview.39
   @sleep2agi/agent-node 2.5.0-preview.30
-  @sleep2agi/commhub-server 0.9.0-preview.28 source
+  @sleep2agi/commhub-server 0.9.0-preview.30 source
 
 Command:
   sg docker -c 'docker build -t anet-test581:dev -f tests/test581-daemon-server-e2e/Dockerfile .'
   sg docker -c 'docker run --rm anet-test581:dev'
 
-Result: PASS (12/12 E2E checks) + launcher-pin unit 2/2.
+Result: PASS (13/13 E2E checks) + launcher-pin unit 2/2.
 
 E2E facts:
   1 isolated Hub boot
   2 admin/network auth
-  3 real packed daemon online
-  4 pre-existing stopped profile discovered without registry fabrication
-  5 offline edit persisted mode 0600
-  6 start returned an exact live child PID
-  7 stop proved the old PID gone
-  8 restart produced a new live PID
-  9 CLI resolves alias and lists physical inventory
-  10 CLI stop waits for final daemon ack
-  11 CLI start waits for final daemon ack
-  12 a real second tenant is denied without alias leakage
+  3 daemon init writes its token-bearing config at mode 0600
+  4 real packed daemon online
+  5 pre-existing stopped profile discovered without registry fabrication
+  6 offline edit persisted mode 0600
+  7 start returned an exact live child PID
+  8 stop proved the old PID gone
+  9 restart produced a new live PID
+  10 CLI resolves alias and lists physical inventory
+  11 CLI stop waits for final daemon ack
+  12 CLI start waits for final daemon ack
+  13 a real second tenant is denied without alias leakage
 
-Exported candidate tgz SHA256:
-  852cffec0229183423d4fa93f1f4a80d2dc83b66472278e556f838c6546649ba  sleep2agi-agent-network-2.3.0-preview.38.tgz
+Exact outward candidate tgz SHA256:
+  6e894fb862c6ba86141556116eb9bc70b9954abfc65c47ee732b915ec438a8a8  sleep2agi-agent-network-2.3.0-preview.39.tgz
   f111770cf53138dc7e8e212daba88683dcb144033f21445f68d60bcd7ae91038  sleep2agi-agent-node-2.5.0-preview.30.tgz
-  b13268b1289b64f106822354ff9e227583dd170d7a0c549a0e001a925adaca4b  sleep2agi-commhub-server-0.9.0-preview.28.tgz
+  54ebc21b04ec4aeec03b929e4766fe5aaaeb83ba4818d40eb4f675a6ebf515f9  sleep2agi-commhub-server-0.9.0-preview.30.tgz
+
+The CLI and agent-node tgz files above were copied from the passing image, not
+repacked afterward. Hub .30 was packed in Docker from the same source and then
+used by the isolated host acceptance in test 584.
 
 Harness disclosure:
   The Bun-only image adds node -> bun and chmods installed bins to 0755. This
   models a normal npm installation; Bun's global tgz install otherwise emitted
   mode 0777 in this image, which the product correctly rejects.
-
-Invalidated runs (not counted):
-  - overlaying a new tgz on an old Bun global install reported DependencyLoop;
-    the apparent subsequent green run was discarded.
-  - the candidate was then installed in a clean BUN_INSTALL and finally baked
-    into the exact image above; only the baked-image 12/12 is the final claim.
