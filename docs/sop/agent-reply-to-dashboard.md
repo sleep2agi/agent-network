@@ -56,6 +56,10 @@ Hub 只信服务端依据 token 写入的 `auth_origin`；客户端自填 `auth_
 Codex 0.133 实测 active history 可能不含 `userMessage`；这种重连不会猜测为人类，需等当前 turn
 结束。桥保持在线后，下一次实时 `turn/started` 会恢复正常即时 steer。
 
+这里的“无 `[Agent Network/…]` 前缀 = 当作人类”只是默认行为，不是身份识别能力。不要声称桥能识别
+任意旧版或外部创建、且没有该前缀的 network turn；当前安全性依赖 Phase 0A 以来本桥始终添加该前缀，
+不是 Codex app-server 协议提供的来源保证。
+
 ## 用了终态还是不显示？
 
 那通常是**生产层传输**问题（浏览器侧 HTTP/2、或 SSE 代理被 buffer/掐掉），不是回复本身。

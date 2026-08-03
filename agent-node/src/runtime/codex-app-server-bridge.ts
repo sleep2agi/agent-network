@@ -451,7 +451,7 @@ export class CodexAppServerBridge extends EventEmitter {
       ?.content
       ?.find((content) => content.type === "text" && typeof content.text === "string")
       ?.text;
-    const steerable = typeof firstUserText === "string" && !/^\[Agent Network(?:\/|\])/u.test(firstUserText);
+    const steerable = typeof firstUserText === "string" && !/^\s*\[Agent Network(?:\/|\])/u.test(firstUserText);
     this.externalActiveTurnId = active.id;
     this.externalActiveTurnSteerable = steerable;
     if (this.waitingApprovals.size === 0) this.setStatus("working");

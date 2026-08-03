@@ -84,6 +84,13 @@ bun /harness/mutate.ts agent-node/src/runtime/codex-app-server-bridge.ts \
 expect_red reconnect-network-turn-stays-fifo bun test agent-node/src/runtime/codex-app-server-bridge.test.ts
 cp /tmp/codex-app-server-bridge.ts agent-node/src/runtime/codex-app-server-bridge.ts
 
+cp agent-node/src/runtime/codex-app-server-bridge.ts /tmp/codex-app-server-bridge.ts
+bun /harness/mutate.ts agent-node/src/runtime/codex-app-server-bridge.ts \
+  '!/^\\s*\\[Agent Network(?:\\/|\\])/u.test(firstUserText)' \
+  '!/^\\[Agent Network(?:\\/|\\])/u.test(firstUserText)'
+expect_red leading-whitespace-network-prefix-stays-fifo bun test agent-node/src/runtime/codex-app-server-bridge.test.ts
+cp /tmp/codex-app-server-bridge.ts agent-node/src/runtime/codex-app-server-bridge.ts
+
 cp server/src/tools.ts /tmp/server-tools.ts
 bun /harness/mutate.ts server/src/tools.ts \
   'normalizeMetaJson(stampTaskAuthOrigin(meta, authOrigin))' \
