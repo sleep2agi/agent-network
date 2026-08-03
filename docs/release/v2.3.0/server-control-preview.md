@@ -13,11 +13,13 @@
 
 统一宣发名：**Agent Network 2.3 — Server Control**。
 
-四个独立 npm 包仍按各自 semver 发布；用户只安装兼容矩阵中的同一行，不需要自行拼版本。候选组合在 Docker 整行验收和服务器 shadow 落地通过后写入 `docs/release/versioning-and-compatibility.md`。
+对外只使用一个名称和入口：**Agent Network 2.3 — Server Control Preview**。
+内部兼容行是 CLI `2.3.0-preview.39`、agent-node `2.5.0-preview.30`、Hub `0.9.0-preview.30`、Dashboard/App `0.6.3-preview.55`；用户不需要自行拼版本。
 
 ## 一分钟体验
 
 ```bash
+anet upgrade --channel preview
 anet daemon up server-1
 anet daemon create server-1 worker-1 --runtime codex-sdk --model gpt-5.5
 anet daemon nodes server-1

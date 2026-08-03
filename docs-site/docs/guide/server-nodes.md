@@ -4,6 +4,10 @@
 
 > 本功能当前仅在 `preview` 兼容组合中提供。Hub、agent-node、CLI 和 Dashboard 必须按[版本矩阵](/guide/versioning)整组升级。
 
+```bash
+anet upgrade --channel preview
+```
+
 ## 1. 启动服务器 daemon
 
 在该服务器的项目目录执行：

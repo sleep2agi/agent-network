@@ -4,6 +4,10 @@ Run one daemon on each Agent host. It manages only the node profiles below its p
 
 > This feature currently requires the matching `preview` release set. Upgrade Hub, agent-node, CLI, and Dashboard together using the [version matrix](/en/guide/versioning).
 
+```bash
+anet upgrade --channel preview
+```
+
 ## Start the host daemon
 
 ```bash
