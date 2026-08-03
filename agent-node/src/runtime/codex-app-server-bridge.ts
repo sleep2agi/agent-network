@@ -555,7 +555,11 @@ export class CodexAppServerBridge extends EventEmitter {
       this.setStatus(this.waitingApprovals.size > 0 ? "waiting_human" : "idle");
     }
     const turnErr = terminal.error ??
-      (terminal.status === "failed" ? "Codex turn failed without an error message" : undefined);
+      (terminal.status === "failed"
+        ? "Codex turn failed without an error message"
+        : terminal.status === "interrupted"
+          ? "Codex turn was interrupted without an error message"
+          : undefined);
     if (turnErr) {
       this.emit("task_error", { taskId: pending.taskId, error: turnErr });
     } else {
