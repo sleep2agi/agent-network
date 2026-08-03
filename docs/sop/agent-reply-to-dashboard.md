@@ -53,6 +53,8 @@ Hub 只信服务端依据 token 写入的 `auth_origin`；客户端自填 `auth_
 升级前已入库、没有该服务端标记的消息按普通 FIFO 处理，不用 `from_session=admin` 猜测身份。
 桥重连时会从 `thread/read` 恢复 active turn；只有首条持久化 user input 能证明是人类 turn 才可 steer，
 旧 bridge 启动的 network turn 或来源不明的 active turn 一律 FIFO。
+Codex 0.133 实测 active history 可能不含 `userMessage`；这种重连不会猜测为人类，需等当前 turn
+结束。桥保持在线后，下一次实时 `turn/started` 会恢复正常即时 steer。
 
 ## 用了终态还是不显示？
 

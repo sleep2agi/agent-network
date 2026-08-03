@@ -532,6 +532,27 @@ describe("CodexAppServerBridge — authenticated Dashboard steering", () => {
     await app.stop();
   });
 
+  test("reconnect stays FIFO-only when real-wire active history omits userMessage", async () => {
+    const app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize" || msg.method === "thread/resume") return respond({ result: {} });
+        if (msg.method === "thread/read") return respond({ result: { thread: {
+          status: { type: "active", activeFlags: [] },
+          turns: [{ id: "unknown-before-restart", status: "inProgress", items: [{ type: "agentMessage", text: "partial" }] }],
+        } } });
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    await bridge.bootstrap();
+    expect(await bridge.recoverSharedActiveTurn()).toEqual({ turnId: "unknown-before-restart", steerable: false });
+    expect((await bridge.submitTask({ taskId: "dash-unknown", text: "queue safely", steerIfExternalTurn: true })).started).toBe(false);
+    expect(app.received.filter((entry) => (entry as any).method === "turn/steer")).toHaveLength(0);
+    await client.close();
+    await app.stop();
+  });
+
   test("uses exact turn/steer contract and maps the human turn final answer", async () => {
     const app = await startFakeApp({
       onRequest: (msg, respond) => {
