@@ -58,6 +58,18 @@ NET=$(jq -r '.networks[0].network_id' <<<"$ME")
 mcp_init "$UTOK"
 ok "admin/network authenticated"
 
+cat >"$WORK/.anet/config.json" <<EOF
+{"hub":"$BASE","token":"$UTOK","network_id":"$NET"}
+EOF
+mkdir -p /root/.anet
+cp "$WORK/.anet/config.json" /root/.anet/config.json
+chmod 600 /root/.anet/config.json
+
+cd "$WORK"
+anet daemon init mode-check-test581 >/tmp/test581-mode-init.log 2>&1
+[[ $(stat -c %a "$WORK/.anet/nodes/mode-check-test581/config.json") == 600 ]] || fail "daemon init persisted token-bearing config with non-private mode"
+ok "daemon init persists its token-bearing config at mode 600"
+
 mint() {
   curl -fsS -X POST "$BASE/api/auth/node-token" -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' \
     -d "$(jq -cn --arg n "$NET" --arg a "$1" '{network_id:$n,node_name:$a}')" | jq -r .token
@@ -71,12 +83,6 @@ EOF
 mkdir -p "$WORK/.anet/nodes/$DAEMON_ALIAS"
 mv "$WORK/.anet/nodes/$DAEMON_ALIAS.config.tmp" "$WORK/.anet/nodes/$DAEMON_ALIAS/config.json"
 chmod 600 "$WORK/.anet/nodes/$DAEMON_ALIAS/config.json"
-cat >"$WORK/.anet/config.json" <<EOF
-{"hub":"$BASE","token":"$UTOK","network_id":"$NET"}
-EOF
-mkdir -p /root/.anet
-cp "$WORK/.anet/config.json" /root/.anet/config.json
-chmod 600 /root/.anet/config.json
 cd "$WORK"
 anet daemon start "$DAEMON_ALIAS" >/tmp/test581-daemon.log 2>&1 & DAEMON_WRAPPER_PID=$!
 for _ in $(seq 1 60); do

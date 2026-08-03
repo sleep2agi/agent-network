@@ -5845,7 +5845,12 @@ async function daemonInitCommand() {
   };
   const dir = join(nodesDir(), id);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "config.json"), JSON.stringify(daemonConfig, null, 2) + "\n");
+  const configPath = join(dir, "config.json");
+  writeFileSync(configPath, JSON.stringify(daemonConfig, null, 2) + "\n", { mode: 0o600 });
+  // `mode` only applies when creating a file. A forced re-init of an older
+  // daemon profile must also repair permissive historical permissions because
+  // the file contains its node token.
+  chmodSync(configPath, 0o600);
 
   console.log(`[anet daemon] ✓ ${existing ? "re-initialized" : "created"} host_supervisor daemon "${id}"`);
   console.log(`              config:     .anet/nodes/${id}/config.json`);

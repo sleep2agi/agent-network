@@ -66,6 +66,7 @@ echo "$OUT" | grep -q "No host_supervisor daemons" && ok "empty list reports no 
 note "B. anet daemon init $DAEMON_NAME — zero manual config.json edit"
 anet daemon init "$DAEMON_NAME" 2>&1 | tee /tmp/init.log >/dev/null
 [[ -f "$WORK/.anet/nodes/$DAEMON_NAME/config.json" ]] && ok "config.json materialized" || { bad "config.json missing"; tail /tmp/init.log; exit 1; }
+[[ $(stat -c %a "$WORK/.anet/nodes/$DAEMON_NAME/config.json") == 600 ]] && ok "token-bearing config mode is 600" || bad "config mode is not private"
 
 # Assert the new config has role=host_supervisor + defaults (the actual unblocker)
 ROLE=$(jq -r '.role' "$WORK/.anet/nodes/$DAEMON_NAME/config.json")
@@ -115,6 +116,7 @@ NEW_ROLE=$(jq -r '.role' "$WORK/.anet/nodes/regular-node/config.json")
 NEW_NID=$(jq -r '.node_id' "$WORK/.anet/nodes/regular-node/config.json")
 [[ "$NEW_ROLE" == "host_supervisor" ]] && ok "--force flipped role to host_supervisor" || bad "--force didn't flip role (got '$NEW_ROLE')"
 [[ "$NEW_NID" == "$NID_REGULAR" ]] && ok "--force preserved node_id ($NID_REGULAR)" || bad "node_id changed (was $NID_REGULAR, now $NEW_NID)"
+[[ $(stat -c %a "$WORK/.anet/nodes/regular-node/config.json") == 600 ]] && ok "--force repairs token-bearing config mode to 600" || bad "--force left config mode permissive"
 
 # ── F — anet daemon list shows the daemons
 note "F. anet daemon list shows the 2 daemons"
