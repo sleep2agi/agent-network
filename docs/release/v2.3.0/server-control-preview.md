@@ -14,7 +14,7 @@
 统一宣发名：**Agent Network 2.3 — Server Control**。
 
 对外只使用一个名称和入口：**Agent Network 2.3 — Server Control Preview**。
-内部兼容行是 CLI `2.3.0-preview.39`、agent-node `2.5.0-preview.30`、Hub `0.9.0-preview.30`、Dashboard/App `0.6.3-preview.55`；用户不需要自行拼版本。
+内部兼容行是 CLI `2.3.0-preview.40`、agent-node `2.5.0-preview.31`、Hub `0.9.0-preview.31`、Dashboard/App `0.6.3-preview.55`；用户不需要自行拼版本。
 
 ## 一分钟体验
 

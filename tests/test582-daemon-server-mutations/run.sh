@@ -86,4 +86,22 @@ fi
 grep -q 'live exact-network SSE keeps a daemon online' /tmp/test582-live-sse.log || { cat /tmp/test582-live-sse.log; fail "live-SSE mutation failed for the wrong reason"; }
 ok "removing live SSE presence from daemon online status turns red"
 
-echo "RESULT: PASS ($PASS checks; 6/6 controlled mutations witnessed red)"
+fresh_server
+sed -i 's/(inventory.observed_state === "quarantined" || inventory.conflict_code)/(false)/' /tmp/test582-server/src/tools.ts
+if COMMHUB_DB=/tmp/test582-pull-quarantine.db bun test /tmp/test582-server/src/daemon-control-tools.test.ts >/tmp/test582-pull-quarantine.log 2>&1; then
+  cat /tmp/test582-pull-quarantine.log
+  fail "pull-time quarantine mutation stayed green"
+fi
+grep -q 'pull rechecks quarantine after dispatch' /tmp/test582-pull-quarantine.log || { cat /tmp/test582-pull-quarantine.log; fail "pull quarantine mutation failed for the wrong reason"; }
+ok "removing pull-time quarantine recheck turns red"
+
+fresh_agent
+perl -0pi -e 's/(const runningPid = verifyRunning\(configPath, request\.alias\);\n)(\s*\/\/ `verifyRunning`[\s\S]*?)(\s*assertVerifiedProfileCurrent\(profile\);)/$1/' /tmp/test582-agent/src/runtime/host-control-daemon.ts
+if bun test /tmp/test582-agent/src/runtime/host-control-daemon.test.ts >/tmp/test582-config-inode.log 2>&1; then
+  cat /tmp/test582-config-inode.log
+  fail "config-inode recheck mutation stayed green"
+fi
+grep -q 'config inode replacement after verified open' /tmp/test582-config-inode.log || { cat /tmp/test582-config-inode.log; fail "config inode mutation failed for the wrong reason"; }
+ok "removing the post-open config inode recheck turns red"
+
+echo "RESULT: PASS ($PASS checks; 8/8 controlled mutations witnessed red)"

@@ -114,6 +114,29 @@ describe("RFC-031 wired daemon control tools", () => {
     expect(await call(daemon.ack_daemon_node_action, { action_id: started.action_id, status: "succeeded", observed_state: "running", verified_pid: 4321, config_hash: HASH, config_revision: 1 })).toMatchObject({ ok: true, status: "succeeded" });
   });
 
+  test("pull rechecks quarantine after dispatch and rejects without delivery", async () => {
+    const daemon = handlers({ daemon: true, network: NET });
+    await call(daemon.sync_daemon_inventory, { items: inventory });
+    const admin = handlers({ user: USER });
+    const queued = await call(admin.dispatch_daemon_node_action, {
+      daemon_node_id: DAEMON,
+      local_node_id: "node_local_child",
+      action: "start",
+      network_id: NET,
+    });
+    db.run(
+      `UPDATE daemon_node_inventory
+          SET observed_state='quarantined',conflict_code='identity_conflict'
+        WHERE network_id=?1 AND daemon_node_id=?2 AND local_node_id='node_local_child'`,
+      [NET, DAEMON],
+    );
+
+    expect(await call(daemon.get_daemon_node_action, { action_id: queued.action_id }))
+      .toMatchObject({ ok: false, error: "managed_node_quarantined" });
+    expect(await call(admin.get_daemon_node_action_status, { action_id: queued.action_id, network_id: NET }))
+      .toMatchObject({ ok: true, action: { status: "rejected", error: "managed_node_quarantined" } });
+  });
+
   test("host supervisor is online when SQLite UTC timestamp is fresh under a non-UTC host timezone", async () => {
     const sqliteUtcNow = new Date().toISOString().slice(0, 19).replace("T", " ");
     db.run(`INSERT INTO sessions (resume_id,alias,status,network_id,registered_at,updated_at,last_seen_at)

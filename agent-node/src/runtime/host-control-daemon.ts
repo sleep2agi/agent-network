@@ -3,8 +3,9 @@ import { execFileSync, spawn } from "node:child_process";
 import {
   chmodSync,
   closeSync,
-  copyFileSync,
+  constants,
   existsSync,
+  fstatSync,
   fsyncSync,
   lstatSync,
   openSync,
@@ -30,16 +31,85 @@ export interface LocalInventoryItem {
   config_revision: number;
 }
 
-function safeProfilePath(workRoot: string, alias: string): string {
+type VerifiedProfile = {
+  configPath: string;
+  pinnedConfigPath: string;
+  pinnedDirPath: string;
+  dirPath: string;
+  dirFd: number;
+  configFd: number;
+  dirIdentity: { dev: number; ino: number };
+  configIdentity: { dev: number; ino: number };
+  raw: string;
+};
+
+function sameIdentity(a: { dev: number; ino: number }, b: { dev: number; ino: number }): boolean {
+  return a.dev === b.dev && a.ino === b.ino;
+}
+
+/** Open the profile directory and config without following a final symlink,
+ * then keep both descriptors alive through the action. `/proc/self/fd/<dir>`
+ * gives later backup/rename operations a path rooted at the already-opened
+ * directory inode, so renaming/replacing the alias directory cannot redirect
+ * a validated write into an attacker-selected tree. This runtime is already
+ * Linux-specific (`/proc/<pid>/cmdline` is its process identity authority). */
+function openVerifiedProfile(workRoot: string, alias: string): VerifiedProfile {
   if (!alias || alias === "." || alias === ".." || /[\0/\\\r\n]/.test(alias)) throw new Error("alias_invalid");
   const nodesRoot = realpathSync(join(workRoot, ".anet", "nodes"));
   const dir = join(nodesRoot, alias);
   if (lstatSync(dir).isSymbolicLink()) throw new Error("profile_symlink_forbidden");
   const realDir = realpathSync(dir);
   if (realDir !== nodesRoot && !realDir.startsWith(nodesRoot + sep)) throw new Error("profile_outside_root");
-  const config = join(realDir, "config.json");
-  if (lstatSync(config).isSymbolicLink()) throw new Error("config_symlink_forbidden");
-  return config;
+  let dirFd = -1;
+  let configFd = -1;
+  try {
+    dirFd = openSync(realDir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    const openedDir = fstatSync(dirFd);
+    const currentDir = lstatSync(realDir);
+    if (!openedDir.isDirectory() || currentDir.isSymbolicLink() || !sameIdentity(openedDir, currentDir)) throw new Error("profile_identity_changed");
+
+    const configPath = join(realDir, "config.json");
+    const pinnedDirPath = `/proc/self/fd/${dirFd}`;
+    const pinnedConfigPath = `${pinnedDirPath}/config.json`;
+    configFd = openSync(pinnedConfigPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const openedConfig = fstatSync(configFd);
+    const currentConfig = lstatSync(configPath);
+    if (!openedConfig.isFile() || openedConfig.size > 1024 * 1024) throw new Error("config_size_invalid");
+    if (currentConfig.isSymbolicLink() || !sameIdentity(openedConfig, currentConfig)) throw new Error("config_identity_changed");
+    const raw = readFileSync(configFd, "utf8");
+    return {
+      configPath,
+      pinnedConfigPath,
+      pinnedDirPath,
+      dirPath: realDir,
+      dirFd,
+      configFd,
+      dirIdentity: { dev: openedDir.dev, ino: openedDir.ino },
+      configIdentity: { dev: openedConfig.dev, ino: openedConfig.ino },
+      raw,
+    };
+  } catch (error) {
+    if (configFd >= 0) try { closeSync(configFd); } catch {}
+    if (dirFd >= 0) try { closeSync(dirFd); } catch {}
+    throw error;
+  }
+}
+
+function closeVerifiedProfile(profile: VerifiedProfile): void {
+  try { closeSync(profile.configFd); } catch {}
+  try { closeSync(profile.dirFd); } catch {}
+}
+
+function assertVerifiedProfileCurrent(profile: VerifiedProfile): void {
+  const dirNow = lstatSync(profile.dirPath);
+  const configNow = lstatSync(profile.configPath);
+  if (dirNow.isSymbolicLink() || !sameIdentity(profile.dirIdentity, dirNow)) throw new Error("profile_identity_changed");
+  if (configNow.isSymbolicLink() || !sameIdentity(profile.configIdentity, configNow)) throw new Error("config_identity_changed");
+}
+
+function assertVerifiedDirectoryCurrent(profile: VerifiedProfile): void {
+  const dirNow = lstatSync(profile.dirPath);
+  if (dirNow.isSymbolicLink() || !sameIdentity(profile.dirIdentity, dirNow)) throw new Error("profile_identity_changed");
 }
 
 function safeConfigHash(cfg: any): string {
@@ -88,18 +158,18 @@ export function scanLocalNodeInventory(input: {
   catch (e: any) { return { items, skipped: [{ alias: "*", error: `nodes_root_unreadable:${e?.message || e}` }] }; }
   for (const entry of entries as any[]) {
     if (!entry.isDirectory() || entry.isSymbolicLink() || entry.name === input.daemonAlias) continue;
+    let profile: VerifiedProfile | null = null;
     try {
-      const configPath = safeProfilePath(input.workRoot, entry.name);
-      const stat = lstatSync(configPath);
-      if (!stat.isFile() || stat.size > 1024 * 1024) throw new Error("config_size_invalid");
-      const cfg = JSON.parse(readFileSync(configPath, "utf8"));
+      profile = openVerifiedProfile(input.workRoot, entry.name);
+      const cfg = JSON.parse(profile.raw);
       const alias = cfg?.alias || cfg?.node_name;
       if (alias !== entry.name) throw new Error("alias_directory_mismatch");
       if (typeof cfg?.node_id !== "string" || !cfg.node_id) throw new Error("node_id_missing");
       if (cfg?.network_id && cfg.network_id !== input.networkId) throw new Error("network_mismatch");
       if (cfg?.hub && String(cfg.hub).replace(/\/$/, "") !== input.hubUrl.replace(/\/$/, "")) throw new Error("hub_mismatch");
       if (typeof cfg?.runtime !== "string" || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(cfg.runtime)) throw new Error("runtime_invalid");
-      const pid = verifiedPidFor(configPath, alias);
+      assertVerifiedProfileCurrent(profile);
+      const pid = verifiedPidFor(profile.configPath, alias);
       items.push({
         local_node_id: cfg.node_id,
         alias,
@@ -112,17 +182,19 @@ export function scanLocalNodeInventory(input: {
       });
     } catch (e: any) {
       skipped.push({ alias: entry.name, error: String(e?.message || e).slice(0, 200) });
+    } finally {
+      if (profile) closeVerifiedProfile(profile);
     }
   }
   return { items, skipped };
 }
 
-function atomicWritePrivateJson(path: string, value: unknown): void {
+function atomicWritePrivateFile(path: string, body: string): void {
   const tmp = `${path}.tmp.${process.pid}.${Date.now()}`;
   let fd = -1;
   try {
     fd = openSync(tmp, "wx", 0o600);
-    writeFileSync(fd, JSON.stringify(value, null, 2) + "\n", "utf8");
+    writeFileSync(fd, body, "utf8");
     fsyncSync(fd);
     closeSync(fd); fd = -1;
     chmodSync(tmp, 0o600);
@@ -132,6 +204,10 @@ function atomicWritePrivateJson(path: string, value: unknown): void {
     try { unlinkSync(tmp); } catch {}
     throw e;
   }
+}
+
+function atomicWritePrivateJson(path: string, value: unknown): void {
+  atomicWritePrivateFile(path, JSON.stringify(value, null, 2) + "\n");
 }
 
 export interface DaemonActionRequest {
@@ -159,17 +235,23 @@ export async function handleDaemonNodeAction(
   },
 ): Promise<void> {
   let request: DaemonActionRequest | null = null;
+  let profile: VerifiedProfile | null = null;
   try {
     const pulled = await deps.callCommHub("get_daemon_node_action", { action_id: event.action_id });
     request = pulled?.request ?? null;
     if (!request) throw new Error(pulled?.error || "action_pull_failed");
-    const configPath = safeProfilePath(deps.workRoot, request.alias);
-    const cfg = JSON.parse(readFileSync(configPath, "utf8"));
+    profile = openVerifiedProfile(deps.workRoot, request.alias);
+    const configPath = profile.configPath;
+    const cfg = JSON.parse(profile.raw);
     if (cfg?.node_id !== request.local_node_id || (cfg?.alias || cfg?.node_name) !== request.alias) throw new Error("local_identity_mismatch");
     if (cfg?.network_id && cfg.network_id !== deps.expectedNetworkId) throw new Error("local_network_mismatch");
     if (cfg?.hub && String(cfg.hub).replace(/\/$/, "") !== deps.expectedHubUrl.replace(/\/$/, "")) throw new Error("local_hub_mismatch");
     const verifyRunning = deps.verifyRunning ?? verifiedPidFor;
     const runningPid = verifyRunning(configPath, request.alias);
+    // `verifyRunning` may involve arbitrary filesystem/proc work. Re-check
+    // that the canonical alias still points to the descriptors we opened
+    // before any lifecycle command or write is allowed to run.
+    assertVerifiedProfileCurrent(profile);
     const execAnet = deps.execAnet ?? ((args, cwd) => { execFileSync(getAnetBinAbs(), args, { cwd, env: minimalEnv(), stdio: "ignore", timeout: 70_000 }); });
     const spawnAnet = deps.spawnAnet ?? ((args, cwd) => {
       const logPath = join(resolve(configPath, ".."), "host-control.log");
@@ -191,11 +273,27 @@ export async function handleDaemonNodeAction(
       if (invalid) throw new Error(`local_patch_invalid:${invalid.field}:${invalid.reason}`);
       const currentRevision = Number.isInteger(cfg.config_revision) && cfg.config_revision >= 0 ? cfg.config_revision : 0;
       if (request.base_revision !== currentRevision) throw new Error(`revision_conflict:${currentRevision}`);
-      copyFileSync(configPath, `${configPath}.prev`);
-      chmodSync(`${configPath}.prev`, 0o600);
+      atomicWritePrivateFile(`${profile.pinnedConfigPath}.prev`, profile.raw);
       const merged = mergePatch(cfg, patch);
       merged.config_revision = currentRevision + 1;
-      atomicWritePrivateJson(configPath, merged);
+      atomicWritePrivateJson(profile.pinnedConfigPath, merged);
+      // The atomic replacement intentionally changes config inode, so only
+      // the pinned directory identity remains stable here. Confirm the new
+      // canonical file lives in that directory, is private, and contains the
+      // exact value we intend to acknowledge.
+      assertVerifiedDirectoryCurrent(profile);
+      let updatedFd = -1;
+      try {
+        updatedFd = openSync(profile.pinnedConfigPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+        const updatedStat = fstatSync(updatedFd);
+        const canonicalStat = lstatSync(configPath);
+        if (!updatedStat.isFile() || canonicalStat.isSymbolicLink() || !sameIdentity(updatedStat, canonicalStat)) throw new Error("updated_config_identity_changed");
+        if ((updatedStat.mode & 0o777) !== 0o600) throw new Error("updated_config_mode_invalid");
+        const persisted = JSON.parse(readFileSync(updatedFd, "utf8"));
+        if (safeConfigHash(persisted) !== safeConfigHash(merged) || persisted.config_revision !== merged.config_revision) throw new Error("updated_config_content_mismatch");
+      } finally {
+        if (updatedFd >= 0) try { closeSync(updatedFd); } catch {}
+      }
       await deps.callCommHub("ack_daemon_node_action", {
         action_id: request.action_id, status: "succeeded", observed_state: "stopped",
         config_hash: safeConfigHash(merged), config_revision: merged.config_revision,
@@ -206,6 +304,7 @@ export async function handleDaemonNodeAction(
       if (!runningPid) throw new Error("managed_node_not_running");
       execAnet(["node", "stop", request.alias], deps.workRoot);
       if (verifyRunning(configPath, request.alias)) throw new Error("stop_not_verified");
+      assertVerifiedProfileCurrent(profile);
       await deps.callCommHub("ack_daemon_node_action", {
         action_id: request.action_id, status: "succeeded", observed_state: "stopped",
         config_hash: safeConfigHash(cfg), config_revision: Number.isInteger(cfg.config_revision) ? cfg.config_revision : 0,
@@ -213,7 +312,11 @@ export async function handleDaemonNodeAction(
       return;
     }
     if (request.action === "start" && runningPid) throw new Error("managed_node_already_running");
-    if (request.action === "restart" && runningPid) execAnet(["node", "stop", request.alias], deps.workRoot);
+    if (request.action === "restart" && runningPid) {
+      execAnet(["node", "stop", request.alias], deps.workRoot);
+      assertVerifiedProfileCurrent(profile);
+    }
+    assertVerifiedProfileCurrent(profile);
     spawnAnet(["node", "start", request.alias], deps.workRoot);
     const verifyStarted = deps.verifyStarted ?? (async (path, alias) => {
       for (let i = 0; i < 40; i++) {
@@ -225,6 +328,7 @@ export async function handleDaemonNodeAction(
     });
     const startedPid = await verifyStarted(configPath, request.alias);
     if (!startedPid) throw new Error("start_not_verified_within_10s");
+    assertVerifiedProfileCurrent(profile);
     await deps.callCommHub("ack_daemon_node_action", {
       action_id: request.action_id, status: "succeeded", observed_state: "running",
       verified_pid: startedPid,
@@ -235,8 +339,10 @@ export async function handleDaemonNodeAction(
     deps.warn(`[host-control] ${event.action_id}: ${message}`);
     await deps.callCommHub("ack_daemon_node_action", {
       action_id: event.action_id,
-      status: /invalid|mismatch|conflict|already_running|online_use|symlink|outside_root|forbidden/.test(message) ? "rejected" : "failed",
+      status: /invalid|mismatch|identity_changed|conflict|already_running|online_use|symlink|outside_root|forbidden/.test(message) ? "rejected" : "failed",
       error: message,
     }).catch(() => {});
+  } finally {
+    if (profile) closeVerifiedProfile(profile);
   }
 }

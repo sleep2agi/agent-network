@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleDaemonNodeAction, processMatchesProfile, scanLocalNodeInventory } from "./host-control-daemon.js";
@@ -123,6 +123,39 @@ describe("RFC-031 daemon action", () => {
     });
     expect(readFileSync(f.config, "utf8")).toBe(before);
     expect(calls.at(-1)).toMatchObject({ tool: "ack_daemon_node_action", args: { status: "rejected" } });
+  });
+
+  test("config inode replacement after verified open is rejected without overwriting the replacement", async () => {
+    const f = fixture();
+    const originalPath = `${f.config}.original`;
+    const attackerBody = JSON.stringify({
+      node_id: "node_attacker",
+      alias: f.alias,
+      runtime: "opencode-cli",
+      network_id: "net-one",
+      hub: "http://hub:9200",
+      config_revision: 4,
+    });
+    const calls: Array<{ tool: string; args: any }> = [];
+    let swapped = false;
+    await handleDaemonNodeAction({ action_id: "ha_inode_swap" }, {
+      ...actionBase, workRoot: f.root, log: () => {}, warn: () => {},
+      verifyRunning: () => {
+        if (!swapped) {
+          swapped = true;
+          renameSync(f.config, originalPath);
+          writeFileSync(f.config, attackerBody, { mode: 0o600 });
+        }
+        return undefined;
+      },
+      callCommHub: async (tool, args) => {
+        calls.push({ tool, args });
+        if (tool === "get_daemon_node_action") return { request: { action_id: "ha_inode_swap", local_node_id: "node_child_one", alias: f.alias, action: "update", patch: { model: "must-not-write" }, base_revision: 4 } };
+        return { ok: true };
+      },
+    });
+    expect(readFileSync(f.config, "utf8")).toBe(attackerBody);
+    expect(calls.at(-1)).toMatchObject({ tool: "ack_daemon_node_action", args: { status: "rejected", error: "config_identity_changed" } });
   });
 
   test("start uses exact argv and never a shell string", async () => {

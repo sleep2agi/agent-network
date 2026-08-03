@@ -38,7 +38,7 @@ dashboard 跟 commhub 的 REST 契约（C3）要版本约束——纳入本文�
 |------|--------------|-----------|----------------|-----------|------|
 | 当前线上飞书舰队 | 2.3.0-preview.18 | 2.5.0-preview.18 | 0.9.0-preview.14 | 0.6.3-preview.4 | ✅ 实跑中（#383 rescue + Kimi） |
 | 已发布 preview 头 | 2.3.0-preview.19 | 2.5.0-preview.18 | 0.9.0-preview.20 | 0.6.3-preview.4 | ⚠️ 未整体 e2e，agent-node 不含 opencode |
-| Server Control 候选 | 2.3.0-preview.39 | 2.5.0-preview.30 | 0.9.0-preview.30 | 0.6.3-preview.55 | 🔬 Docker 整行候选；待 shadow 落地与独立审 |
+| Server Control 候选 | 2.3.0-preview.40 | 2.5.0-preview.31 | 0.9.0-preview.31 | 0.6.3-preview.55 | 🔬 Docker 整行候选；待 shadow 落地与独立审 |
 | 下一发（含 opencode） | 2.3.0-preview.20 | 2.5.0-preview.19 | 0.9.0-preview.20 | 0.6.3-preview.4 | 🔜 待切（见 §6，dashboard 本发不动） |
 | v2.3.0 GA 目标 | 2.3.0 | 2.5.0 | 0.9.0 | 0.7.0（含 #260） | 🎯 整行测绿才升 |
 | latest（稳定线） | 2.2.21 | 2.4.13 | 0.8.8 | 0.6.x | ✅ 旧稳定，无 opencode/无 #383 |

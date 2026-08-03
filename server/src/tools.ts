@@ -3232,14 +3232,44 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     async ({ action_id }) => {
       const daemon = resolveCallerDaemonTokenBound();
       if (!daemon.ok) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: daemon.error }) }] };
-      const row = db.get<any>(
-        `SELECT action_id,daemon_node_id,network_id,local_node_id,alias,action,patch_json,base_revision,status
-           FROM daemon_node_actions WHERE action_id=?1`, action_id,
-      );
-      if (!row || row.daemon_node_id !== daemon.daemonNodeId || row.network_id !== daemon.networkId) {
-        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "action_not_found" }) }] };
+      const pulled: { row?: any; error?: string } = db.transaction(() => {
+        const row = db.get<any>(
+          `SELECT action_id,daemon_node_id,network_id,local_node_id,alias,action,patch_json,base_revision,status
+             FROM daemon_node_actions WHERE action_id=?1`, action_id,
+        );
+        if (!row || row.daemon_node_id !== daemon.daemonNodeId || row.network_id !== daemon.networkId) return { error: "action_not_found" };
+
+        // Dispatch-time authorization is not enough: inventory can converge to
+        // a conflict after an action is queued but before the daemon pulls it.
+        // Re-check the exact four-part identity and quarantine state in the
+        // same transaction that marks delivery. A quarantined/moved node must
+        // never receive a previously valid action.
+        const inventory = db.get<{ observed_state: string; conflict_code: string | null }>(
+          `SELECT observed_state,conflict_code FROM daemon_node_inventory
+            WHERE network_id=?1 AND daemon_node_id=?2 AND local_node_id=?3 AND alias=?4`,
+          row.network_id, row.daemon_node_id, row.local_node_id, row.alias,
+        );
+        const pullError = !inventory
+          ? "managed_node_identity_changed"
+          : (inventory.observed_state === "quarantined" || inventory.conflict_code)
+            ? "managed_node_quarantined"
+            : null;
+        if (pullError) {
+          if (row.status === "pending" || row.status === "delivered") {
+            db.run(
+              "UPDATE daemon_node_actions SET status='rejected',error=?1,acked_at=?2 WHERE action_id=?3 AND status IN ('pending','delivered')",
+              [pullError, Date.now(), action_id],
+            );
+          }
+          return { error: pullError };
+        }
+        if (row.status === "pending") db.run("UPDATE daemon_node_actions SET status='delivered',delivered_at=?1 WHERE action_id=?2 AND status='pending'", [Date.now(), action_id]);
+        return { row };
+      });
+      if (pulled.error || !pulled.row) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: pulled.error || "action_not_found" }) }] };
       }
-      if (row.status === "pending") db.run("UPDATE daemon_node_actions SET status='delivered',delivered_at=?1 WHERE action_id=?2 AND status='pending'", [Date.now(), action_id]);
+      const row = pulled.row;
       let parsedPatch: unknown = null;
       if (row.patch_json) try { parsedPatch = JSON.parse(row.patch_json); } catch { return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "stored_patch_invalid" }) }] }; }
       return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request: { ...row, status: "delivered", patch: parsedPatch, patch_json: undefined } }) }] };
