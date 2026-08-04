@@ -237,7 +237,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
 
 // Helper: call CommHub MCP endpoint
 async function callCommHub(toolName: string, args: Record<string, unknown>): Promise<any> {
-  const connectionHeader = OUTBOUND_ONLY ? { Connection: "close" } : {};
+  const connectionHeader: Record<string, string> = OUTBOUND_ONLY ? { Connection: "close" } : {};
   const initRes = await fetch(`${COMMHUB_URL}/mcp`, {
     method: "POST",
     headers: {

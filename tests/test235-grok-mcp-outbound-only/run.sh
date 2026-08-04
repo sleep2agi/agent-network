@@ -20,6 +20,8 @@ printf '%s\n' \
   'scope=structural MCP capabilities, real socket count, repeated task ownership, outbound tools, direct-call denial, mutation red' \
   | tee -a "$REPORT"
 
+run network-typecheck bash -ceu 'cd /workspace/agent-network && bun tsc --noEmit'
+
 run home-mode bun test /workspace/agent-node/src/runtime/grok-build-cli-home.test.ts
 
 run production-build bun build /workspace/agent-network/src/node-server.ts \
