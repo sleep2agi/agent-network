@@ -1,0 +1,40 @@
+# Reject hardcoded `from` / `from_session` in POST /api/task bodies.
+#
+# 2026-08-04: PR #571 bound REST identity to the bearer token, so a node
+# token may no longer claim a different from_session (403
+# from_session_identity_mismatch). Four call sites in
+# agent-network/bin/cli.ts still hardcoded `from: "api"` — `anet loop`
+# plus the debate / social / pr-review orchestrators. They passed only
+# because the operator config holds a `utok_`; measured the same day,
+# 297 processes on the fleet host carried `COMMHUB_TOKEN=ntok_` and none
+# carried a `utok_`, so any agent invoking those commands from its own
+# shell would have hit the 403.
+#
+# Deliberately no `paths:` filter. A path-filtered job does not run on a
+# PR that misses the filter, and a check that never ran is displayed the
+# same way as one that passed. The script reads two files and finishes in
+# well under a second, so it always runs.
+#
+# See: server/src/rest-identity.ts, tests/scripts/lint-no-hardcoded-from-session.py
+
+name: lint (from_session guard)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: lint-from-session-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  hardcoded-from-session:
+    name: no hardcoded from_session
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run lint-no-hardcoded-from-session.py
+        run: python3 tests/scripts/lint-no-hardcoded-from-session.py
