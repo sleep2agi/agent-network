@@ -270,6 +270,7 @@ export function codexAppServerThink(
 
   return new Promise<CodexAppServerThinkResult>((resolve) => {
     let settled = false;
+    let queueDeadlineElapsed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let queueTimer: ReturnType<typeof setTimeout> | undefined;
     let reconciliationTimer: ReturnType<typeof setTimeout> | undefined;
@@ -279,6 +280,8 @@ export function codexAppServerThink(
       bridge.off("task_reply", onReply);
       bridge.off("task_error", onError);
       bridge.off("task_started", onStarted);
+      bridge.off("drain_deferred", onRequeued);
+      bridge.off("steer_deferred", onRequeued);
       if (timer) clearTimeout(timer);
       if (queueTimer) clearTimeout(queueTimer);
       if (reconciliationTimer) clearTimeout(reconciliationTimer);
@@ -307,6 +310,18 @@ export function codexAppServerThink(
           queued: false,
         });
       }, timeoutMs);
+    };
+    const finishQueueTimeout = () => finish({
+      replyText: `codex-app-server 错误: 任务 ${opts.taskId} 在队列中等待 ${queueTimeoutLabel}仍未开始`,
+      failed: true,
+      queued: true,
+    });
+    const onRequeued = (ev: { taskId: string }) => {
+      if (!queueDeadlineElapsed || ev.taskId !== opts.taskId) return;
+      // The deadline may fire while this row is between FIFO shift and a
+      // failed turn/start or turn/steer RPC. If that RPC requeues it, remove
+      // it immediately instead of leaving a ghost row behind a model timer.
+      if (bridge.cancelQueuedTask(opts.taskId)) finishQueueTimeout();
     };
     const onStarted = (ev: { taskId: string; turnId: string; steered?: boolean }) => {
       if (ev.taskId !== opts.taskId) return;
@@ -341,6 +356,8 @@ export function codexAppServerThink(
     bridge.on("task_reply", onReply);
     bridge.on("task_error", onError);
     bridge.on("task_started", onStarted);
+    bridge.on("drain_deferred", onRequeued);
+    bridge.on("steer_deferred", onRequeued);
     scheduleReconciliation();
 
     queueTimer = setTimeout(() => {
@@ -349,16 +366,13 @@ export function codexAppServerThink(
       // terminal. If it already left FIFO (start RPC in flight or a lost
       // task_started event), switch to the normal response timer so the task
       // remains finite without falsely cancelling a running turn.
+      queueDeadlineElapsed = true;
       if (!bridge.cancelQueuedTask(opts.taskId)) {
         log(`[codex-app-server] queue deadline reached after task left FIFO; arming response timeout for ${opts.taskId}`);
         startResponseTimer();
         return;
       }
-      finish({
-        replyText: `codex-app-server 错误: 任务 ${opts.taskId} 在队列中等待 ${queueTimeoutLabel}仍未开始`,
-        failed: true,
-        queued: true,
-      });
+      finishQueueTimeout();
     }, queueTimeoutMs);
 
     bridge

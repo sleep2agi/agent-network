@@ -62,6 +62,13 @@ switch (mutation) {
       `      if (true || !bridge.cancelQueuedTask(opts.taskId)) {`,
     );
     break;
+  case "ignore_post_deadline_requeue":
+    replaceExact(
+      runtimePath,
+      `    bridge.on("drain_deferred", onRequeued);`,
+      `    void onRequeued;`,
+    );
+    break;
   case "cancel_queue_noop":
     replaceExact(
       bridgePath,
