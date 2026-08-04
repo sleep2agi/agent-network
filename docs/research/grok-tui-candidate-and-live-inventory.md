@@ -27,8 +27,8 @@ tools`). Its installed package artifacts are:
 
 | Alias | Node ID | Started | Workspace | TUI / bridge tmux | Runtime source | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| `指挥狗` | `n_714cffe2` | 2026-08-01 19:45 CST | `/home/vansin/grok-commanddog-workspace` | `指挥狗` / `指挥狗-node` | `/home/vansin/commniu-grok-candidate-026937d0/runtime` | Online preview; not release-approved |
-| `A站GrokTUI` | `n_d3afa188` | 2026-08-04 14:34 CST | `/home/vansin/ai-insight-grok-tui` | `A站GrokTUI` / `A站GrokTUI-node` | `/home/vansin/commniu-grok-candidate-026937d0/runtime` | Online preview; real task `5c153b50-b0ec-4352-a625-0f627d780c0f` replied |
+| `指挥狗` | `n_714cffe2` | 2026-08-01 19:45 CST | `~/grok-commanddog-workspace` | `指挥狗` / `指挥狗-node` | `~/commniu-grok-candidate-026937d0/runtime` | Online preview; not release-approved |
+| `A站GrokTUI` | `n_d3afa188` | 2026-08-04 14:34 CST | `~/ai-insight-grok-tui` | `A站GrokTUI` / `A站GrokTUI-node` | `~/commniu-grok-candidate-026937d0/runtime` | Online preview; real task `5c153b50-b0ec-4352-a625-0f627d780c0f` replied |
 
 `A站Grok` is also online as a headless `grok-build-cli` Docker node, but its
 container image provenance is not `026937d0` and its config does not enable
@@ -98,8 +98,8 @@ verified values are:
 For `A站GrokTUI` this is:
 
 ```text
-/home/vansin/.anet-grok/node-c507fc6c0474a6057614c24f/run/leader.sock
-/home/vansin/.anet-grok/node-c507fc6c0474a6057614c24f/run/attach.sock
+~/.anet-grok/node-c507fc6c0474a6057614c24f/run/leader.sock
+~/.anet-grok/node-c507fc6c0474a6057614c24f/run/attach.sock
 ```
 
 The release fix must make creation-time allocation agree with the runtime's
