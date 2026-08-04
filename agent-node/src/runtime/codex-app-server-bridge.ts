@@ -91,6 +91,7 @@ export interface ActiveTurnReconciliation {
  *   - "status_changed"    → { previous, current }
  *   - "waiting_human"     → WaitingApproval (bridge did not respond)
  *   - "approval_resolved" → { reverseRequestId } — from serverRequest/resolved
+ *   - "task_started"      → { taskId, turnId, steered } — model budget starts
  *   - "task_reply"        → { taskId, text }  — final agent message
  *   - "task_error"        → { taskId, error }
  *   - "cross_thread_drop" → { event } — event for a thread we don't own
@@ -280,6 +281,7 @@ export class CodexAppServerBridge extends EventEmitter {
       this.externalActiveTurnId = null;
       this.externalActiveTurnSteerable = false;
     }
+    this.emit("task_started", { taskId: input.taskId, turnId, steered: false });
     return turnId;
   }
 
@@ -359,6 +361,11 @@ export class CodexAppServerBridge extends EventEmitter {
         );
       }
       state.acceptedTaskIds.add(input.taskId);
+      this.emit("task_started", {
+        taskId: input.taskId,
+        turnId: expectedTurnId,
+        steered: true,
+      });
       // If turn/completed raced the RPC response, attribution waits for this
       // acceptance proof and is emitted now rather than fail-open earlier.
       if (state.terminal) {

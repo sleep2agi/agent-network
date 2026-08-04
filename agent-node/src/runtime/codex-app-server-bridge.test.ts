@@ -594,6 +594,8 @@ describe("CodexAppServerBridge — authenticated Dashboard steering", () => {
 
     const replies: Array<{ taskId: string; text: string }> = [];
     bridge.on("task_reply", (event) => replies.push(event as never));
+    const started: unknown[] = [];
+    bridge.on("task_started", (event) => started.push(event));
     const submitted = await bridge.submitTask({
       taskId: "dash-1",
       text: "第二条消息",
@@ -601,6 +603,7 @@ describe("CodexAppServerBridge — authenticated Dashboard steering", () => {
       steerIfExternalTurn: true,
     });
     expect(submitted).toEqual({ started: true, turnId: "human-1", steered: true });
+    expect(started).toEqual([{ taskId: "dash-1", turnId: "human-1", steered: true }]);
     const steer = app.received.find((entry) => (entry as { method?: string }).method === "turn/steer") as any;
     expect(steer.params).toEqual({
       threadId: THREAD,
@@ -793,6 +796,8 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
     bridge.on("task_reply", (r) => replies.push(r as { taskId: string; text: string }));
     const queued: string[] = [];
     bridge.on("task_queued", (q) => queued.push((q as { taskId: string }).taskId));
+    const started: Array<{ taskId: string; turnId: string; steered: boolean }> = [];
+    bridge.on("task_started", (event) => started.push(event as never));
 
     const r1 = await bridge.submitTask({ taskId: "t-q-1", text: "first" });
     const r2 = await bridge.submitTask({ taskId: "t-q-2", text: "second" });
@@ -803,6 +808,7 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
     // Wire gate: B is admitted into bridge FIFO, but no second turn/start is
     // emitted while A is active.
     expect(turnStartTaskIds).toEqual(["t-q-1"]);
+    expect(started).toEqual([{ taskId: "t-q-1", turnId: "turn_q_1", steered: false }]);
 
     // Complete turn 1 → bridge should auto-drain and start turn 2.
     app.broadcast({ jsonrpc: "2.0", method: "item/completed", params: { threadId: THREAD, turnId: "turn_q_1", item: { type: "agentMessage", phase: "final_answer", text: "answer-1" } } });
@@ -816,6 +822,10 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
     expect(bridge.queueDepth()).toBe(0);
     expect(bridge.activeTurn()).toBe("turn_q_2");
     expect(turnStartTaskIds).toEqual(["t-q-1", "t-q-2"]);
+    expect(started).toEqual([
+      { taskId: "t-q-1", turnId: "turn_q_1", steered: false },
+      { taskId: "t-q-2", turnId: "turn_q_2", steered: false },
+    ]);
 
     app.broadcast({ jsonrpc: "2.0", method: "item/completed", params: { threadId: THREAD, turnId: "turn_q_2", item: { type: "agentMessage", phase: "final_answer", text: "answer-2" } } });
     app.broadcast({
