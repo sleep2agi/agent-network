@@ -38,7 +38,7 @@ Final behavior
 
 Docker result
 -------------
-- normal: 55 pass / 0 fail / 181 assertions;
+- normal: 55 pass / 0 fail / 186 assertions;
 - actual minified agent-node bundle: PASS;
 - RESULT: PASS.
 
@@ -52,8 +52,9 @@ Witnessed-red mutations
 6. `omit_queue_deadline` — never-started task becomes unbounded.
 7. `queue_timeout_does_not_cancel` — timed-out row remains executable.
 8. `ignore_post_deadline_requeue` — a failed start can requeue a ghost row.
-9. `cancel_queue_noop` — exact FIFO cancellation becomes decorative.
-10. `failure_returned_as_success` — CLI bypasses failed-outcome throw.
+9. `ignore_post_deadline_steer_requeue` — failed steer can do the same.
+10. `cancel_queue_noop` — exact FIFO cancellation becomes decorative.
+11. `failure_returned_as_success` — CLI bypasses failed-outcome throw.
 
 Baseline gate
 -------------
