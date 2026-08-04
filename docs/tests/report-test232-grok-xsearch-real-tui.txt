@@ -1,7 +1,7 @@
 # test232 — real interactive Grok TUI X search
 grok_binary_sha256=4e0738d3b5550f3c842bc0ae69f468815c6329c008a110d0c27a694dc3401135
 bounded_pty_rc=124
-web_search_calls=4
+web_search_calls=8
 x_status_url_count=1
 x_status_url_http=200
 Summary: PASS (real interactive TUI; exact web_search profile; Docker-only)

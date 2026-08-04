@@ -4,7 +4,7 @@ Date: 2026-08-04
 Base: db5a9ed6
 Scope: process-profile implementation plus real Grok headless and interactive-TUI evidence; no online node change.
 Docker tag: anet-test232:dev
-Docker image: sha256:a639782760cb11bfd20587ccc92e4d0cedea18b2cb7d5a69e3f7202be28864d7
+Docker image after integration verification: sha256:ec5be051b11249abd679ba8d6de46ef3d4785c9f02f325de465a5b9ba59c29d0
 Grok binary: 0.2.93 (f00f96316d)
 Grok SHA256: 4e0738d3b5550f3c842bc0ae69f468815c6329c008a110d0c27a694dc3401135
 

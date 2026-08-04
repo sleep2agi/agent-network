@@ -3,8 +3,8 @@
 Date: 2026-08-04
 Scope: socket allocator only; no production service, online node, Hub, bridge, or published package changed.
 Base: origin/test/grok-copresence-allowlist-near-miss (db5a9ed6)
-Docker tag after verification: anet-test231:dev
-Final green image: sha256:4dd445646f43d00324c9197465b923d459e6f346b852a197f9b1538117096278
+Docker tag after integration verification: anet-test231:dev
+Final green image: sha256:ffbaae9c800ee972e547218ab210bef2517333e5d70a0292ff3e82276da1c1cf
 Pinned real Grok binary: 0.2.93 (f00f96316d)
 Pinned binary SHA256: 4e0738d3b5550f3c842bc0ae69f468815c6329c008a110d0c27a694dc3401135
 
