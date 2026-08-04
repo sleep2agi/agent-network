@@ -1,10 +1,10 @@
 Test 584 — Dashboard → Codex TUI reliable delivery
 Date: 2026-08-04 (Asia/Shanghai)
 Base: origin/main 7876336513903c42bc9212aeaf5f038bf51844cc
-Source candidate: 0b2a875b755369675d664653eb96158dff2bc0e1
+Source candidate: 904d8959f66a1f09cd694be71358bf57bbbed794
 Image: anet-test584:dev
-Image ID: sha256:8ef83ef65aaca85eaf21a6011ebf4b865a9d96a83657a0789f11c8a57ec6f4a9
-Image ENV: TEST584_SOURCE_COMMIT=0b2a875b755369675d664653eb96158dff2bc0e1
+Image ID: sha256:25e2b1e37775938374add2ccf26a9be492e324f34a67f5a1f557310749ccfcde
+Image ENV: TEST584_SOURCE_COMMIT=904d8959f66a1f09cd694be71358bf57bbbed794
 Command: sg docker -c 'docker run --rm anet-test584:dev'
 Result: PASS (exit 0)
 
@@ -42,15 +42,20 @@ L1 — source/build
 - agent-node CLI bundled successfully (239 modules, 1.65 MB output).
 
 L2 — app-server bridge, dispatch, and production wiring
-- 55 tests passed, 0 failed, 157 assertions.
+- 56 tests passed, 0 failed, 163 assertions.
 - Real createInboxDrainLane behavior proves snapshot #2 enters before snapshot #1's
   blocked model turn is released.
 - Source wiring pins the Codex-only detached path and the active-row pending-reply
   fence; non-Codex runtimes remain awaited and serial.
 - Same-tick duplicate kicks invoke one handler exactly once; cap N+1 waits and is
   admitted after a slot settles; settling emits the next Hub-window wake.
+- If the settle notification callback throws, its error remains observable and
+  the queued N+1 row is still pumped; the queue cannot silently stall.
 - A real PendingReplyQueue harness proves the active direct-send path and the
   durable drain produce one outbound reply, not two.
+- Wire assertions distinguish both runtime paths: Dashboard on a proven human
+  turn emits turn/steer and zero turn/start; a bridge-task B emits no second
+  turn/start until A's terminal event, then starts in FIFO order.
 - Existing exact turn/steer, provenance, race, FIFO, approval, and reconciliation
   tests remain green.
 
@@ -69,9 +74,12 @@ L5 — witnessed-red mutations (all rc 1)
 - same-tick-row-claim-is-unique
 - detached-admission-cap-is-real
 - settled-row-must-wake-next-hub-window
+- throwing-settle-callback-cannot-stall-queue
 - pending-reply-drain-cannot-race-active-row
 - exact-expected-turn-id
 - accepted-steer-must-reply
+- human-turn-dashboard-must-steer-not-start
+- network-task-b-cannot-start-before-a-terminal
 - reconnect-network-turn-stays-fifo
 - leading-whitespace-network-prefix-stays-fifo
 - mcp-node-cannot-forge-user-origin
