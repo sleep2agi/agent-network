@@ -61,6 +61,10 @@ switch (mutation) {
   case "ignore_started_event":
     replaceExact(runtimePath, `      startResponseTimer();\n    };\n\n    // A shared app-server WebSocket`, `      void ev;\n    };\n\n    // A shared app-server WebSocket`);
     break;
+  case "identity_defer_unbounded":
+    replaceExact(runtimePath, `      startResponseTimer();\n    };\n\n    // A shared app-server WebSocket`, `      void ev;\n    };\n\n    // A shared app-server WebSocket`);
+    replaceExact(runtimePath, `        if (r.started) startResponseTimer();`, `        if (false && r.started) startResponseTimer();`);
+    break;
   case "wrong_task_arms_timer":
     replaceExact(runtimePath, `    const onStarted = (ev: { taskId: string; turnId: string; steered?: boolean }) => {\n      if (ev.taskId !== opts.taskId) return;`, `    const onStarted = (ev: { taskId: string; turnId: string; steered?: boolean }) => {\n      if (false && ev.taskId !== opts.taskId) return;`);
     break;

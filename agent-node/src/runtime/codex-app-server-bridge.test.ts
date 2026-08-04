@@ -235,6 +235,22 @@ describe("CodexAppServerBridge — bootstrap + task mapping", () => {
 
     const result = await bridge.submitTask({ taskId: "goal-race", text: "answer me" });
     expect(result).toEqual({ started: true, turnId: "turn_response_phantom" });
+    // Two turns are concurrently in progress. A positional/latest-turn
+    // heuristic would bind the task to this first, wrong client id.
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "turn/started",
+      params: { threadId: THREAD, turn: { id: "turn_competing_wrong_client", status: "inProgress" } },
+    });
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        threadId: THREAD,
+        turnId: "turn_competing_wrong_client",
+        item: { type: "userMessage", clientId: "anet:different-task" },
+      },
+    });
     app.broadcast({
       jsonrpc: "2.0",
       method: "turn/started",
@@ -250,6 +266,24 @@ describe("CodexAppServerBridge — bootstrap + task mapping", () => {
     });
     await tick(10);
     expect(errors).toEqual([]);
+    expect(replies).toEqual([]);
+
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        threadId: THREAD,
+        turnId: "turn_competing_wrong_client",
+        item: { type: "agentMessage", phase: "final_answer", text: "wrong concurrent reply" },
+      },
+    });
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "turn/completed",
+      params: { threadId: THREAD, turn: { id: "turn_competing_wrong_client", status: "completed" } },
+    });
+    await tick(10);
+    expect(rebound).toEqual([]);
     expect(replies).toEqual([]);
 
     app.broadcast({
@@ -308,6 +342,23 @@ describe("CodexAppServerBridge — bootstrap + task mapping", () => {
               item: { type: "userMessage", clientId: "anet:early-race" },
             },
           });
+          // The authoritative terminal arrives before turn/start returns and
+          // therefore before task_started. It must be cached, then claimed
+          // after the exact client id establishes ownership.
+          broadcast({
+            jsonrpc: "2.0",
+            method: "item/completed",
+            params: {
+              threadId: THREAD,
+              turnId: "turn_actual_early",
+              item: { type: "agentMessage", phase: "final_answer", text: "early reply" },
+            },
+          });
+          broadcast({
+            jsonrpc: "2.0",
+            method: "turn/completed",
+            params: { threadId: THREAD, turn: { id: "turn_actual_early", status: "completed" } },
+          });
           setTimeout(() => respond({ result: { turn: { id: "turn_response_late" } } }), 5);
         }
       },
@@ -322,24 +373,9 @@ describe("CodexAppServerBridge — bootstrap + task mapping", () => {
     bridge.on("task_reply", () => events.push("reply"));
     const result = await bridge.submitTask({ taskId: "early-race", text: "answer me" });
     expect(result).toEqual({ started: true, turnId: "turn_actual_early" });
-    expect(bridge.activeTurn()).toBe("turn_actual_early");
-
-    app.broadcast({
-      jsonrpc: "2.0",
-      method: "item/completed",
-      params: {
-        threadId: THREAD,
-        turnId: "turn_actual_early",
-        item: { type: "agentMessage", phase: "final_answer", text: "early reply" },
-      },
-    });
-    app.broadcast({
-      jsonrpc: "2.0",
-      method: "turn/completed",
-      params: { threadId: THREAD, turn: { id: "turn_actual_early", status: "completed" } },
-    });
     await tick(10);
     expect(events).toEqual(["started", "reply"]);
+    expect(bridge.activeTurn()).toBeNull();
   });
 
   test("agentMessage/delta accumulates when server omits finalText", async () => {
