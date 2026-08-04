@@ -1,0 +1,61 @@
+# test231 — Grok socket allocator versus real workspace sandbox
+date=2026-08-04T07:38:10+00:00
+mode=red
+grok_binary_sha256=4e0738d3b5550f3c842bc0ae69f468815c6329c008a110d0c27a694dc3401135
+bun test v1.3.1 (89fa0f34)
+
+agent-network/src/grok-copresence-profile.test.ts:
+(pass) Grok copresence profile defaults > builds the Grok agent-node parent environment from an exact empty allowlist [2.00ms]
+(pass) Grok copresence profile defaults > does not mistake an old headless-only agent-node for co-presence support
+(pass) Grok copresence profile defaults > builds the npm resolver environment from an exact empty allowlist
+(pass) Grok copresence profile defaults > prepares two distinct empty owner-only npm config files without following symlinks [2.00ms]
+140 |       home: "/home/preview",
+141 |       uid: 1234,
+142 |       xdgRuntimeDir: "/does/not/exist",
+143 |     });
+144 |     const stateKey = `node-${createHash("sha256").update("n_preview").digest("hex").slice(0, 24)}`;
+145 |     expect(fields).toEqual({
+                         ^
+error: expect(received).toEqual(expected)
+
+  {
+-   "grokAttachSocket": "/home/preview/.anet-grok/node-c2da88b8caf7c85a7fb485ce/run/attach.sock",
++   "grokAttachSocket": "/tmp/anet-u1234/g/926434a07049b432/a.sock",
+    "grokCopresence": true,
+-   "grokLeaderSocket": "/home/preview/.anet-grok/node-c2da88b8caf7c85a7fb485ce/run/leader.sock",
++   "grokLeaderSocket": "/tmp/anet-u1234/g/926434a07049b432/l.sock",
+  }
+
+- Expected  - 2
++ Received  + 2
+
+      at <anonymous> (/workspace/agent-network/src/grok-copresence-profile.test.ts:145:20)
+(fail) Grok copresence profile defaults > enables copresence only for non-headless grok-build-cli [1.00ms]
+161 |       cwd: "/workspace/project",
+162 |       home: "/home/preview",
+163 |       uid: process.getuid?.(),
+164 |       xdgRuntimeDir: dir,
+165 |     });
+166 |     expect(paths.leaderSocket).toMatch(/^\/home\/preview\/\.anet-grok\/node-[a-f0-9]{24}\/run\/leader\.sock$/);
+                                     ^
+error: expect(received).toMatch(expected)
+
+Expected substring or pattern: /^\/home\/preview\/\.anet-grok\/node-[a-f0-9]{24}\/run\/leader\.sock$/
+Received: "/tmp/anet-grok-xdg-Yw4pV8/g/926434a07049b432/l.sock"
+
+      at <anonymous> (/workspace/agent-network/src/grok-copresence-profile.test.ts:166:32)
+(fail) Grok copresence profile defaults > uses the owner-bound state home even when XDG is owner-only [1.00ms]
+(pass) Grok copresence profile defaults > falls back to a bounded owner tmp path when the state home is too long
+
+ 5 pass
+ 2 fail
+ 24 expect() calls
+Ran 7 tests across 1 file. [44.00ms]
+PASS: new allocator contract rejects the old XDG-first implementation
+leader_socket=/run/user/1000/g/0f9dc51dd51c684b/l.sock
+attach_socket=/run/user/1000/g/0f9dc51dd51c684b/a.sock
+Error: Lock error: IO error: Permission denied (os error 13): IO error: Permission denied (os error 13): Permission denied (os error 13)
+
+TEST231_SOCKET_SEEN=0
+PASS: real Grok workspace sandbox rejects XDG socket with the exact Lock error
+Summary: PASS (mode=red; Docker-only; real pinned Grok + workspace sandbox)

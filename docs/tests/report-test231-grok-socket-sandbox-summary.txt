@@ -1,0 +1,62 @@
+# test231 — Grok socket allocator versus real workspace sandbox
+
+Date: 2026-08-04
+Scope: socket allocator only; no production service, online node, Hub, bridge, or published package changed.
+Base: origin/test/grok-copresence-allowlist-near-miss (db5a9ed6)
+Docker tag after verification: anet-test231:dev
+Final green image: sha256:4dd445646f43d00324c9197465b923d459e6f346b852a197f9b1538117096278
+Pinned real Grok binary: 0.2.93 (f00f96316d)
+Pinned binary SHA256: 4e0738d3b5550f3c842bc0ae69f468815c6329c008a110d0c27a694dc3401135
+
+Authoritative finding:
+An owner-only XDG_RUNTIME_DIR is not sufficient for Grok's workspace sandbox.
+With XDG_RUNTIME_DIR=/run/user/1000, the old allocator selects a socket outside
+the isolated GROK_HOME and the real binary fails with the specific error:
+
+  Lock error: IO error: Permission denied
+
+The allocator must place its primary sockets below the node's isolated,
+owner-bound state home. A bounded private /tmp path remains only as the Unix
+socket path-length fallback.
+
+Witnessed red (controlled old XDG-first implementation; tests unchanged):
+
+  docker build --build-arg TEST231_LEGACY_XDG=1 -t anet-test231:dev \
+    -f tests/test231-grok-socket-sandbox/Dockerfile .
+  docker run --rm --init --cap-add ALL \
+    --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
+    -e TEST231_MODE=red \
+    -v /home/vansin/.grok/bin/grok-0.2.93:/host-grok/grok-0.2.93:ro \
+    -v /tmp/commniu-grok-socket-fix/docs/tests:/artifacts \
+    anet-test231:dev
+
+Result:
+- new state-home unit contract rejected the XDG-first implementation;
+- allocator selected /run/user/1000/g/0f9dc51dd51c684b/l.sock;
+- real Grok emitted the exact Lock error above;
+- TEST231_SOCKET_SEEN=0;
+- suite result PASS (red witness behaved as required).
+
+Witnessed green (candidate production implementation):
+
+  docker build -t anet-test231:dev \
+    -f tests/test231-grok-socket-sandbox/Dockerfile .
+  docker run --rm --init --cap-add ALL \
+    --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
+    -e TEST231_MODE=green \
+    -v /home/vansin/.grok/bin/grok-0.2.93:/host-grok/grok-0.2.93:ro \
+    -v /tmp/commniu-grok-socket-fix/docs/tests:/artifacts \
+    anet-test231:dev
+
+Result:
+- profile unit tests: 7 pass, 0 fail, 29 assertions;
+- allocator selected
+  /home/tester/.anet-grok/node-a1ff76065c6ceb95baab66a9/run/leader.sock;
+- real Grok remained live through the bounded 8-second PTY probe;
+- TEST231_SOCKET_SEEN=1;
+- no Lock error;
+- suite result PASS.
+
+The Docker capabilities are needed for the real Grok workspace sandbox probe.
+No Hub credentials or node tokens were mounted. The final fixed tag contains
+the green implementation, not the red mutation.
