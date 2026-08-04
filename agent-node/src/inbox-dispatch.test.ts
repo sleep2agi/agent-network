@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   createDetachedInboxDispatcher,
   dispatchInboxBatch,
@@ -6,6 +9,7 @@ import {
   shouldDrainPendingReplies,
 } from "./inbox-dispatch";
 import { createInboxDrainLane } from "./runtime/inbox-drain-lane";
+import { PendingReplyQueue } from "./reply-reliability";
 
 const requestId = "dreq_0123456789abcdef0123456789abcdef";
 
@@ -48,28 +52,14 @@ describe("isInteractiveDashboardTask", () => {
 });
 
 describe("dispatchInboxBatch", () => {
-  test("concurrent mode submits later dashboard rows before the first turn completes", async () => {
-    let releaseFirst!: () => void;
-    const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
-    const entered: number[] = [];
-    const running = dispatchInboxBatch([1, 2, 3], async (value) => {
-      entered.push(value);
-      if (value === 1) await firstBlocked;
-    }, true);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(entered).toEqual([1, 2, 3]);
-    releaseFirst();
-    await running;
-  });
-
-  test("sequential mode preserves legacy runtime serialization", async () => {
+  test("awaited batches preserve legacy runtime serialization", async () => {
     let releaseFirst!: () => void;
     const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
     const entered: number[] = [];
     const running = dispatchInboxBatch([1, 2], async (value) => {
       entered.push(value);
       if (value === 1) await firstBlocked;
-    }, false);
+    });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(entered).toEqual([1]);
     releaseFirst();
@@ -226,5 +216,36 @@ describe("dispatchInboxBatch", () => {
     expect(shouldDrainPendingReplies("codex-app-server", 1)).toBe(false);
     expect(shouldDrainPendingReplies("codex-app-server", 0)).toBe(true);
     expect(shouldDrainPendingReplies("opencode", 3)).toBe(true);
+  });
+
+  test("active Codex direct delivery and durable drain send one reply, not two", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "test584-pending-singleflight-"));
+    try {
+      const queue = new PendingReplyQueue(join(dir, "pending.json"));
+      queue.persist({
+        to: "admin",
+        text: "one final reply",
+        taskId: "dashboard-task",
+        failed: false,
+        queuedAt: 1,
+      });
+      let sends = 0;
+      if (shouldDrainPendingReplies("codex-app-server", 1)) {
+        await queue.drain(async () => { sends++; });
+      }
+
+      // The active handler owns direct send/clear while the durable drain is
+      // fenced. Its completion wake sees an empty queue.
+      sends++;
+      queue.clear("admin", "dashboard-task");
+      if (shouldDrainPendingReplies("codex-app-server", 0)) {
+        await queue.drain(async () => { sends++; });
+      }
+
+      expect(sends).toBe(1);
+      expect(queue.load()).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -3739,7 +3739,7 @@ async function processInbox() {
     }
     return;
   }
-  await dispatchInboxBatch(messages, processInboxMessage, false);
+  await dispatchInboxBatch(messages, processInboxMessage);
 }
 
 /**

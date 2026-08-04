@@ -14,7 +14,7 @@ describe("Codex app-server live inbox kick wiring", () => {
 
     expect(processInbox).toContain('if (RUNTIME === "codex-app-server")');
     expect(processInbox).toContain("codexInboxDispatcher.submit(messages, processInboxMessage)");
-    expect(processInbox).toContain("await dispatchInboxBatch(messages, processInboxMessage, false)");
+    expect(processInbox).toContain("await dispatchInboxBatch(messages, processInboxMessage)");
   });
 
   test("Codex detached admission is explicitly bounded and completion wakes the Hub window", () => {

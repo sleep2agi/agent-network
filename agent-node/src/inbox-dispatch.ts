@@ -37,20 +37,10 @@ export function isInteractiveDashboardTask(message: InboxDispatchMessage): boole
   return meta.auth_origin === "user";
 }
 
-/**
- * Codex app-server owns its own FIFO/steer arbitration, so inbox entries must
- * be submitted concurrently. Sequentially awaiting entry 1 recreates the
- * production head-of-line bug: entries 2..N cannot steer the same human turn.
- */
 export async function dispatchInboxBatch<T>(
   messages: readonly T[],
   handler: (message: T) => Promise<void>,
-  concurrent: boolean,
 ): Promise<void> {
-  if (concurrent) {
-    await Promise.all(messages.map((message) => handler(message)));
-    return;
-  }
   for (const message of messages) await handler(message);
 }
 

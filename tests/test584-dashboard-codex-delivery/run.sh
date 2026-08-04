@@ -57,17 +57,10 @@ bun /harness/mutate.ts agent-node/src/inbox-dispatch.ts \
 expect_red node-origin-cannot-steer bun test agent-node/src/inbox-dispatch.test.ts
 cp /tmp/inbox-dispatch.ts agent-node/src/inbox-dispatch.ts
 
-cp agent-node/src/inbox-dispatch.ts /tmp/inbox-dispatch.ts
-bun /harness/mutate.ts agent-node/src/inbox-dispatch.ts \
-  'if (concurrent) {' \
-  'if (false) {'
-expect_red no-head-of-line-serialization bun test agent-node/src/inbox-dispatch.test.ts
-cp /tmp/inbox-dispatch.ts agent-node/src/inbox-dispatch.ts
-
 cp agent-node/src/cli.ts /tmp/agent-node-cli.ts
 bun /harness/mutate.ts agent-node/src/cli.ts \
   '    const dispatch = codexInboxDispatcher.submit(messages, processInboxMessage);' \
-  '    const dispatch = await dispatchInboxBatch(messages, processInboxMessage, true) as any;'
+  '    const dispatch = await dispatchInboxBatch(messages, processInboxMessage) as any;'
 expect_red later-sse-kick-cannot-wait-for-active-turn bun test agent-node/src/inbox-dispatch-wiring.test.ts
 cp /tmp/agent-node-cli.ts agent-node/src/cli.ts
 
