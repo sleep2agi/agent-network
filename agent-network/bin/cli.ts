@@ -7121,7 +7121,6 @@ to stop one.
     alias: displayName,
     task: slashCmd,
     priority: "normal",
-    from: "api",
     network_id: networkId || undefined,
   });
 
@@ -9835,7 +9834,7 @@ async function demoDebateCommand() {
   const transcript: Speech[] = [];
 
   async function postTask(alias: string, task: string): Promise<string> {
-    const body = JSON.stringify({ alias, task, priority: "normal", from: "api", network_id: networkId || undefined });
+    const body = JSON.stringify({ alias, task, priority: "normal", network_id: networkId || undefined });
     const res = await fetch(`${hub}/api/task`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
@@ -10220,7 +10219,7 @@ async function demoSocialMediaCommand() {
   const transcript: Speech[] = [];
 
   async function postTask(alias: string, task: string): Promise<string> {
-    const body = JSON.stringify({ alias, task, priority: "normal", from: "api", network_id: networkId || undefined });
+    const body = JSON.stringify({ alias, task, priority: "normal", network_id: networkId || undefined });
     const res = await fetch(`${hub}/api/task`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
@@ -10641,7 +10640,7 @@ async function demoPrReviewCommand() {
 
   // 4. Helpers: post task + wait reply
   async function postTask(alias: string, task: string): Promise<string> {
-    const body = JSON.stringify({ alias, task, priority: "normal", from: "api", network_id: networkId || undefined });
+    const body = JSON.stringify({ alias, task, priority: "normal", network_id: networkId || undefined });
     const res = await fetch(`${hub}/api/task`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
