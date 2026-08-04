@@ -1,0 +1,53 @@
+# test585 — Codex shared runtime open singleflight
+
+Status: PASS.
+
+Docker image: `anet-test585:dev`
+
+Evidence:
+
+- normal: 29 pass, 0 fail, 67 assertions;
+- `bypass_singleflight`: witnessed red (`opens` became 2);
+- `sticky_rejected_open`: witnessed red (a rejected open poisoned every retry);
+- `bypass_cli_wiring`: witnessed red (production path no longer contained the
+  holder call);
+- `publish_dead_session`: witnessed red (dead bootstrap was published);
+- `stale_exit_clears_new`: witnessed red (old-session invalidation erased the
+  replacement);
+- actual minified `agent-node` bundle: PASS.
+
+The concurrent production-shaped factory counts the open, app-server attach,
+thread resume, and bridge construction boundaries independently; each remains
+exactly `1` for two simultaneous Dashboard handlers. All 5 targeted mutations
+were witnessed red before the final green run.
+
+Production incident reproduced on 2026-08-04: two Dashboard rows were fetched
+one second apart, then the bridge logged two independent
+`attaching/resumed/recovered` sequences. The detached inbox dispatcher had
+allowed both handlers to observe a null lazy runtime and open separate bridge
+instances, bypassing the bridge-local FIFO.
+
+Production safety response: both UAT tasks were cancelled and only the
+`通信牛-桥` tmux session was returned to the previous #577 immutable runtime.
+`ss` then showed exactly one `node` bridge connection to app-server port
+24701. The TUI, app-server, Hub, and Dashboard were not restarted.
+
+Final production UAT after this candidate is merged must not reuse an active
+turn that predates bridge startup. A reconnect cannot prove such a turn's
+human provenance when persisted history omits its first user message, so it
+correctly remains FIFO-only. The steer proof must record a human TUI
+`turn/started` observed after bridge startup, that turn's id/time, a later
+Dashboard nonce/time, the nonce joining that same turn, the automatic reply,
+and Dashboard `task_id` readback. Queue proof additionally requires two rows
+to be fetched immediately while the second `turn/start` remains after the
+first terminal event.
+
+Acceptance:
+
+- concurrent callers execute one complete runtime open attempt and receive the
+  same session object;
+- a failed/dead attempt is not published and remains retryable;
+- a late exit from an older session cannot clear its replacement;
+- the production `processWithCodexAppServer` path is wired through the holder;
+- each safety assertion is witnessed-red under its targeted mutation;
+- the actual agent-node bundle builds in Docker.

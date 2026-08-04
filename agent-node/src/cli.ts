@@ -102,6 +102,7 @@ import {
   shouldDrainPendingReplies,
 } from "./inbox-dispatch";
 import { createSingleFlight } from "./util/single-flight";
+import { createCodexSessionManager } from "./runtime/codex-app-server/session-manager";
 
 const home = homedir();
 
@@ -1617,8 +1618,9 @@ const codexAppServerUrl: string | undefined =
   (fileConfig as { codexAppServerUrl?: string }).codexAppServerUrl ||
   process.env.ANET_CODEX_APP_SERVER_URL ||
   undefined;
-let codexAppServerRuntimeSession:
-  import("./runtime/codex-app-server/runtime").CodexAppServerRuntimeSession | null = null;
+const codexAppServerSessionManager = createCodexSessionManager<
+  import("./runtime/codex-app-server/runtime").CodexAppServerRuntimeSession
+>();
 
 // #213 — track whether the current process resumed a pre-existing grok
 // session (truthy SESSION_ID at boot) so we can prepend the un-closed-loop
@@ -2922,15 +2924,14 @@ async function processWithCodexAppServer(
   const { openCodexAppServerRuntime, codexAppServerThink } =
     await import("./runtime/codex-app-server/runtime");
 
-  // Reset the holder if the app-server child has exited — the next call
-  // reopens (spawns fresh / re-attaches) and resumes the persisted thread.
-  if (codexAppServerRuntimeSession && !codexAppServerRuntimeSession.isRunning) {
+  const existingSession = codexAppServerSessionManager.current();
+  if (existingSession && !existingSession.isRunning) {
     log(`[codex-app-server] previous session not running — reopening on this turn`);
-    codexAppServerRuntimeSession = null;
   }
 
-  if (!codexAppServerRuntimeSession) {
-    codexAppServerRuntimeSession = await openCodexAppServerRuntime({
+  const session = await codexAppServerSessionManager.getOrOpen(async () => {
+    let openedRef: import("./runtime/codex-app-server/runtime").CodexAppServerRuntimeSession | null = null;
+    const opened = await openCodexAppServerRuntime({
       serverUrl: codexAppServerUrl,
       threadId: codexAppServerThreadId,
       // Auto-approve posture (RFC-030): the bridge never answers approvals,
@@ -2950,17 +2951,23 @@ async function processWithCodexAppServer(
       onThread: (threadId) => writebackCodexThread(threadId),
       onExit: (info) => {
         warn(`[codex-app-server] app-server exited code=${info.code} signal=${info.signal}; next turn will reopen`);
-        codexAppServerRuntimeSession = null;
+        // If the child dies before open() resolves there is nothing published
+        // yet; the post-open isRunning gate below rejects it.  Once published,
+        // invalidate only that exact session so a late old exit cannot clear a
+        // newer replacement.
+        if (openedRef) codexAppServerSessionManager.invalidate(openedRef);
       },
       log,
       warn,
     });
-    // A freshly-created thread is written back via onThread; make sure the
-    // in-memory var tracks it even when resuming (idempotent).
-    writebackCodexThread(codexAppServerRuntimeSession.threadId);
-  }
+    openedRef = opened;
+    return opened;
+  });
+  // A freshly-created thread is written back via onThread; make sure the
+  // in-memory var tracks it even when resuming (idempotent).
+  writebackCodexThread(session.threadId);
 
-  const outcome = await codexAppServerThink(codexAppServerRuntimeSession, {
+  const outcome = await codexAppServerThink(session, {
     taskId: taskId || `local-${Date.now()}`,
     text: task,
     from: _from,
