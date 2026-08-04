@@ -13,8 +13,14 @@ describe("Codex app-server live inbox kick wiring", () => {
     const processInbox = cli.slice(start, end);
 
     expect(processInbox).toContain('if (RUNTIME === "codex-app-server")');
-    expect(processInbox).toContain("dispatchInboxBatchDetached(messages, processInboxMessage");
+    expect(processInbox).toContain("codexInboxDispatcher.submit(messages, processInboxMessage)");
     expect(processInbox).toContain("await dispatchInboxBatch(messages, processInboxMessage, false)");
+  });
+
+  test("Codex detached admission is explicitly bounded and completion wakes the Hub window", () => {
+    expect(cli).toContain("const CODEX_INBOX_MAX_CONCURRENT = 20;");
+    expect(cli).toContain("maxConcurrent: CODEX_INBOX_MAX_CONCURRENT");
+    expect(cli).toContain("onSettled: scheduleWorkInboxDrain");
   });
 
   test("pending reply drain is fenced while detached Codex rows are active", () => {

@@ -60,23 +60,93 @@ export async function dispatchInboxBatch<T>(
  * as every row has entered bridge arbitration; otherwise a later SSE wake is
  * only marked dirty and sits behind the first row's (up to ten-minute) turn.
  *
- * Calling the async handler directly is intentional: it runs synchronously
- * through its per-row inflight claim before yielding, so a following inbox
- * snapshot cannot double-submit the same row. Completion errors remain
- * observable through `onError` and can schedule a fresh inbox read.
+ * The bounded dispatcher claims each Hub row key synchronously before calling
+ * its async handler, deduplicates later snapshots, and queues N+1 work. Its
+ * completion hook keeps reading beyond Hub's first unacked page. Completion
+ * errors remain observable through `onError`.
  */
-export function dispatchInboxBatchDetached<T>(
-  messages: readonly T[],
-  handler: (message: T) => Promise<void>,
-  onError: (error: unknown) => void,
-): void {
-  for (const message of messages) {
-    try {
-      void handler(message).catch(onError);
-    } catch (error) {
-      onError(error);
-    }
+export interface DetachedInboxDispatcherStats {
+  active: number;
+  queued: number;
+  accepted: number;
+  deduplicated: number;
+}
+
+export interface DetachedInboxDispatcher<T> {
+  submit(messages: readonly T[], handler: (message: T) => Promise<void>): DetachedInboxDispatcherStats;
+  stats(): Pick<DetachedInboxDispatcherStats, "active" | "queued">;
+}
+
+/**
+ * Keep detached inbox work bounded and deduplicated across later SSE snapshots.
+ * The key is claimed before invoking the async handler, so two kicks in the
+ * same tick cannot double-submit one Hub row. N+1 work waits in the local FIFO
+ * and is started automatically when any active handler settles.
+ */
+export function createDetachedInboxDispatcher<T>(opts: {
+  maxConcurrent: number;
+  key: (message: T) => string;
+  onError: (error: unknown) => void;
+  onSettled?: () => void;
+}): DetachedInboxDispatcher<T> {
+  if (!Number.isInteger(opts.maxConcurrent) || opts.maxConcurrent < 1) {
+    throw new Error("maxConcurrent must be a positive integer");
   }
+  const activeKeys = new Set<string>();
+  const queuedKeys = new Set<string>();
+  const queue: Array<{ message: T; handler: (message: T) => Promise<void> }> = [];
+
+  const pump = () => {
+    while (activeKeys.size < opts.maxConcurrent && queue.length > 0) {
+      const item = queue.shift()!;
+      const key = opts.key(item.message);
+      queuedKeys.delete(key);
+      // Claim before invoking handler: an async function runs synchronously
+      // until its first await, but the dispatcher does not depend on that
+      // language detail for cross-snapshot deduplication.
+      activeKeys.add(key);
+      let running: Promise<void>;
+      try {
+        running = item.handler(item.message);
+      } catch (error) {
+        running = Promise.reject(error);
+      }
+      void running
+        .catch(opts.onError)
+        .finally(() => {
+          activeKeys.delete(key);
+          opts.onSettled?.();
+          pump();
+        });
+    }
+  };
+
+  return {
+    submit(messages, handler) {
+      let accepted = 0;
+      let deduplicated = 0;
+      for (const message of messages) {
+        const key = opts.key(message);
+        if (activeKeys.has(key) || queuedKeys.has(key)) {
+          deduplicated++;
+          continue;
+        }
+        queuedKeys.add(key);
+        queue.push({ message, handler });
+        accepted++;
+      }
+      pump();
+      return {
+        active: activeKeys.size,
+        queued: queue.length,
+        accepted,
+        deduplicated,
+      };
+    },
+    stats() {
+      return { active: activeKeys.size, queued: queue.length };
+    },
+  };
 }
 
 /**

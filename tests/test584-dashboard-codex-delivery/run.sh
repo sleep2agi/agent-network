@@ -66,10 +66,31 @@ cp /tmp/inbox-dispatch.ts agent-node/src/inbox-dispatch.ts
 
 cp agent-node/src/cli.ts /tmp/agent-node-cli.ts
 bun /harness/mutate.ts agent-node/src/cli.ts \
-  '    dispatchInboxBatchDetached(messages, processInboxMessage, (cause) => {' \
-  '    await dispatchInboxBatch(messages, processInboxMessage, true).catch((cause) => {'
+  '    const dispatch = codexInboxDispatcher.submit(messages, processInboxMessage);' \
+  '    const dispatch = await dispatchInboxBatch(messages, processInboxMessage, true) as any;'
 expect_red later-sse-kick-cannot-wait-for-active-turn bun test agent-node/src/inbox-dispatch-wiring.test.ts
 cp /tmp/agent-node-cli.ts agent-node/src/cli.ts
+
+cp agent-node/src/inbox-dispatch.ts /tmp/inbox-dispatch.ts
+bun /harness/mutate.ts agent-node/src/inbox-dispatch.ts \
+  'activeKeys.has(key) || queuedKeys.has(key)' \
+  'false'
+expect_red same-tick-row-claim-is-unique bun test agent-node/src/inbox-dispatch.test.ts
+cp /tmp/inbox-dispatch.ts agent-node/src/inbox-dispatch.ts
+
+cp agent-node/src/inbox-dispatch.ts /tmp/inbox-dispatch.ts
+bun /harness/mutate.ts agent-node/src/inbox-dispatch.ts \
+  'activeKeys.size < opts.maxConcurrent' \
+  'true'
+expect_red detached-admission-cap-is-real bun test agent-node/src/inbox-dispatch.test.ts
+cp /tmp/inbox-dispatch.ts agent-node/src/inbox-dispatch.ts
+
+cp agent-node/src/inbox-dispatch.ts /tmp/inbox-dispatch.ts
+bun /harness/mutate.ts agent-node/src/inbox-dispatch.ts \
+  '          opts.onSettled?.();' \
+  '          /* next Hub inbox window wake removed */'
+expect_red settled-row-must-wake-next-hub-window bun test agent-node/src/inbox-dispatch.test.ts
+cp /tmp/inbox-dispatch.ts agent-node/src/inbox-dispatch.ts
 
 cp agent-node/src/inbox-dispatch.ts /tmp/inbox-dispatch.ts
 bun /harness/mutate.ts agent-node/src/inbox-dispatch.ts \

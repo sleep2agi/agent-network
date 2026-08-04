@@ -96,8 +96,8 @@ import {
 import { OPENCODE_DEFAULT_PIN } from "./runtime/opencode-acp/binary";
 import { createInboxDrainLane, drainInboxBatch } from "./runtime/inbox-drain-lane";
 import {
+  createDetachedInboxDispatcher,
   dispatchInboxBatch,
-  dispatchInboxBatchDetached,
   isInteractiveDashboardTask,
   shouldDrainPendingReplies,
 } from "./inbox-dispatch";
@@ -1267,6 +1267,23 @@ const informationalInboxDrain = createInboxDrainLane((cause) => {
   const error = cause as any;
   warn(`inbox informational drain failed: ${error?.message || error}`);
 }, INBOX_RETRY);
+
+// One Hub get_inbox page is 20 rows. Keep at most one page of Codex handlers
+// active; later unique rows wait in this dispatcher and enter bridge
+// arbitration as slots settle. The bridge independently guarantees at most
+// one turn/start per thread and FIFO-queues ordinary network tasks.
+const CODEX_INBOX_MAX_CONCURRENT = 20;
+const codexInboxDispatcher = createDetachedInboxDispatcher<any>({
+  maxConcurrent: CODEX_INBOX_MAX_CONCURRENT,
+  key: (message) => String(message.id),
+  onError: (cause) => {
+    const detachedError = cause as any;
+    warn(`detached codex inbox row failed: ${detachedError?.message || detachedError}`);
+  },
+  // Advance beyond get_inbox's first 20 unacked rows and retry a failed row.
+  // The work lane coalesces simultaneous completions into a bounded dirty run.
+  onSettled: scheduleWorkInboxDrain,
+});
 
 function isGoalCommand(content: string): boolean {
   return /^\s*\/(?:goal|loop)\b/i.test(content || "");
@@ -3716,12 +3733,10 @@ async function processInbox() {
   // the serialized fetch lane. Other runtimes retain their historical
   // awaited/serialized drain.
   if (RUNTIME === "codex-app-server") {
-    dispatchInboxBatchDetached(messages, processInboxMessage, (cause) => {
-      const detachedError = cause as any;
-      warn(`detached codex inbox row failed: ${detachedError?.message || detachedError}`);
-      const retryTimer = setTimeout(scheduleWorkInboxDrain, INBOX_RETRY.initialDelayMs);
-      retryTimer.unref?.();
-    });
+    const dispatch = codexInboxDispatcher.submit(messages, processInboxMessage);
+    if (dispatch.queued > 0) {
+      debug(`codex inbox admission: active=${dispatch.active}, queued=${dispatch.queued}`);
+    }
     return;
   }
   await dispatchInboxBatch(messages, processInboxMessage, false);

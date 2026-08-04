@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+  createDetachedInboxDispatcher,
   dispatchInboxBatch,
-  dispatchInboxBatchDetached,
   isInteractiveDashboardTask,
   shouldDrainPendingReplies,
 } from "./inbox-dispatch";
@@ -86,9 +86,14 @@ describe("dispatchInboxBatch", () => {
       entered.push(value);
       if (value === 1) await firstBlocked;
     };
+    const dispatcher = createDetachedInboxDispatcher<number>({
+      maxConcurrent: 2,
+      key: String,
+      onError: (error) => errors.push(error),
+    });
 
-    dispatchInboxBatchDetached([1], handler, (error) => errors.push(error));
-    dispatchInboxBatchDetached([2], handler, (error) => errors.push(error));
+    dispatcher.submit([1], handler);
+    dispatcher.submit([2], handler);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(entered).toEqual([1, 2]);
@@ -106,15 +111,20 @@ describe("dispatchInboxBatch", () => {
     const entered: number[] = [];
     const errors: unknown[] = [];
     const lane = createInboxDrainLane((error) => errors.push(error));
+    const dispatcher = createDetachedInboxDispatcher<number>({
+      maxConcurrent: 2,
+      key: String,
+      onError: (error) => errors.push(error),
+    });
     const drain = async () => {
       const snapshot = snapshots.shift() || [];
-      dispatchInboxBatchDetached(snapshot, async (value) => {
+      dispatcher.submit(snapshot, async (value) => {
         entered.push(value);
         if (value === 1) {
           firstEntered();
           await firstBlocked;
         }
-      }, (error) => errors.push(error));
+      });
     };
 
     lane.schedule(drain);
@@ -132,12 +142,84 @@ describe("dispatchInboxBatch", () => {
 
   test("detached completion failures remain observable", async () => {
     const errors: unknown[] = [];
-    dispatchInboxBatchDetached(["late-row"], async () => {
+    const dispatcher = createDetachedInboxDispatcher<string>({
+      maxConcurrent: 1,
+      key: String,
+      onError: (error) => errors.push(error),
+    });
+    dispatcher.submit(["late-row"], async () => {
       throw new Error("detached row failed");
-    }, (error) => errors.push(error));
+    });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(errors).toHaveLength(1);
     expect((errors[0] as Error).message).toBe("detached row failed");
+  });
+
+  test("settling detached work emits a wake for the next Hub inbox window", async () => {
+    let settled = 0;
+    const dispatcher = createDetachedInboxDispatcher<string>({
+      maxConcurrent: 1,
+      key: String,
+      onError: () => {},
+      onSettled: () => { settled++; },
+    });
+    dispatcher.submit(["row"], async () => {});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(settled).toBe(1);
+  });
+
+  test("same-tick duplicate kicks claim one row exactly once", async () => {
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    let calls = 0;
+    const dispatcher = createDetachedInboxDispatcher<{ id: string }>({
+      maxConcurrent: 2,
+      key: (message) => message.id,
+      onError: () => {},
+    });
+    const handler = async () => {
+      calls++;
+      await blocked;
+    };
+
+    const first = dispatcher.submit([{ id: "same-row" }], handler);
+    const second = dispatcher.submit([{ id: "same-row" }], handler);
+
+    expect(calls).toBe(1);
+    expect(first.accepted).toBe(1);
+    expect(second.deduplicated).toBe(1);
+    release();
+    await blocked;
+  });
+
+  test("bounded admission waits N+1 and starts it after a slot settles", async () => {
+    const releases = new Map<number, () => void>();
+    const gates = new Map<number, Promise<void>>();
+    for (const value of [1, 2, 3]) {
+      gates.set(value, new Promise<void>((resolve) => releases.set(value, resolve)));
+    }
+    const entered: number[] = [];
+    const dispatcher = createDetachedInboxDispatcher<number>({
+      maxConcurrent: 2,
+      key: String,
+      onError: () => {},
+    });
+
+    const admission = dispatcher.submit([1, 2, 3], async (value) => {
+      entered.push(value);
+      await gates.get(value)!;
+    });
+    expect(admission).toMatchObject({ active: 2, queued: 1, accepted: 3 });
+    expect(entered).toEqual([1, 2]);
+
+    releases.get(1)!();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(entered).toEqual([1, 2, 3]);
+    expect(dispatcher.stats()).toEqual({ active: 2, queued: 0 });
+
+    releases.get(2)!();
+    releases.get(3)!();
+    await Promise.all([...gates.values()]);
   });
 
   test("durable reply drain waits until detached Codex rows finish", () => {
