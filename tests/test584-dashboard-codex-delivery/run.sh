@@ -18,6 +18,7 @@ test -s /tmp/test584-dist/cli.js
 echo "L2 agent bridge + dispatch"
 bun test \
   agent-node/src/inbox-dispatch.test.ts \
+  agent-node/src/inbox-dispatch-wiring.test.ts \
   agent-node/src/runtime/codex-app-server-bridge.test.ts \
   agent-node/src/runtime/codex-app-server/runtime.test.ts
 
@@ -56,11 +57,46 @@ bun /harness/mutate.ts agent-node/src/inbox-dispatch.ts \
 expect_red node-origin-cannot-steer bun test agent-node/src/inbox-dispatch.test.ts
 cp /tmp/inbox-dispatch.ts agent-node/src/inbox-dispatch.ts
 
+cp agent-node/src/cli.ts /tmp/agent-node-cli.ts
+bun /harness/mutate.ts agent-node/src/cli.ts \
+  '    const dispatch = codexInboxDispatcher.submit(messages, processInboxMessage);' \
+  '    const dispatch = await dispatchInboxBatch(messages, processInboxMessage) as any;'
+expect_red later-sse-kick-cannot-wait-for-active-turn bun test agent-node/src/inbox-dispatch-wiring.test.ts
+cp /tmp/agent-node-cli.ts agent-node/src/cli.ts
+
 cp agent-node/src/inbox-dispatch.ts /tmp/inbox-dispatch.ts
 bun /harness/mutate.ts agent-node/src/inbox-dispatch.ts \
-  'if (concurrent) {' \
-  'if (false) {'
-expect_red no-head-of-line-serialization bun test agent-node/src/inbox-dispatch.test.ts
+  'activeKeys.has(key) || queuedKeys.has(key)' \
+  'false'
+expect_red same-tick-row-claim-is-unique bun test agent-node/src/inbox-dispatch.test.ts
+cp /tmp/inbox-dispatch.ts agent-node/src/inbox-dispatch.ts
+
+cp agent-node/src/inbox-dispatch.ts /tmp/inbox-dispatch.ts
+bun /harness/mutate.ts agent-node/src/inbox-dispatch.ts \
+  'activeKeys.size < opts.maxConcurrent' \
+  'true'
+expect_red detached-admission-cap-is-real bun test agent-node/src/inbox-dispatch.test.ts
+cp /tmp/inbox-dispatch.ts agent-node/src/inbox-dispatch.ts
+
+cp agent-node/src/inbox-dispatch.ts /tmp/inbox-dispatch.ts
+bun /harness/mutate.ts agent-node/src/inbox-dispatch.ts \
+  '          opts.onSettled?.();' \
+  '          /* next Hub inbox window wake removed */'
+expect_red settled-row-must-wake-next-hub-window bun test agent-node/src/inbox-dispatch.test.ts
+cp /tmp/inbox-dispatch.ts agent-node/src/inbox-dispatch.ts
+
+cp agent-node/src/inbox-dispatch.ts /tmp/inbox-dispatch.ts
+bun /harness/mutate.ts agent-node/src/inbox-dispatch.ts \
+  $'          } catch (error) {\n            opts.onError(error);\n          } finally {' \
+  $'          } catch (error) {\n            throw error;\n          }\n          {'
+expect_red throwing-settle-callback-cannot-stall-queue bun test agent-node/src/inbox-dispatch.test.ts
+cp /tmp/inbox-dispatch.ts agent-node/src/inbox-dispatch.ts
+
+cp agent-node/src/inbox-dispatch.ts /tmp/inbox-dispatch.ts
+bun /harness/mutate.ts agent-node/src/inbox-dispatch.ts \
+  '  return runtime !== "codex-app-server" || inflightRows === 0;' \
+  '  return true;'
+expect_red pending-reply-drain-cannot-race-active-row bun test agent-node/src/inbox-dispatch.test.ts
 cp /tmp/inbox-dispatch.ts agent-node/src/inbox-dispatch.ts
 
 cp agent-node/src/runtime/codex-app-server-bridge.ts /tmp/codex-app-server-bridge.ts
@@ -75,6 +111,20 @@ bun /harness/mutate.ts agent-node/src/runtime/codex-app-server-bridge.ts \
   '        this.emitSteeredTask(steered, task, steered.terminal);' \
   '        /* reply attribution deliberately removed */'
 expect_red accepted-steer-must-reply bun test agent-node/src/runtime/codex-app-server-bridge.test.ts
+cp /tmp/codex-app-server-bridge.ts agent-node/src/runtime/codex-app-server-bridge.ts
+
+cp agent-node/src/runtime/codex-app-server-bridge.ts /tmp/codex-app-server-bridge.ts
+bun /harness/mutate.ts agent-node/src/runtime/codex-app-server-bridge.ts \
+  '    if (this.externalActiveTurnId) {' \
+  '    if (false) {'
+expect_red human-turn-dashboard-must-steer-not-start bun test agent-node/src/runtime/codex-app-server-bridge.test.ts
+cp /tmp/codex-app-server-bridge.ts agent-node/src/runtime/codex-app-server-bridge.ts
+
+cp agent-node/src/runtime/codex-app-server-bridge.ts /tmp/codex-app-server-bridge.ts
+bun /harness/mutate.ts agent-node/src/runtime/codex-app-server-bridge.ts \
+  $'    if (this.turnClaimed || this.activeTurnId) {\n      this.taskQueue.push(input);' \
+  $'    if (false) {\n      this.taskQueue.push(input);'
+expect_red network-task-b-cannot-start-before-a-terminal bun test agent-node/src/runtime/codex-app-server-bridge.test.ts
 cp /tmp/codex-app-server-bridge.ts agent-node/src/runtime/codex-app-server-bridge.ts
 
 cp agent-node/src/runtime/codex-app-server-bridge.ts /tmp/codex-app-server-bridge.ts

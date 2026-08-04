@@ -37,19 +37,121 @@ export function isInteractiveDashboardTask(message: InboxDispatchMessage): boole
   return meta.auth_origin === "user";
 }
 
-/**
- * Codex app-server owns its own FIFO/steer arbitration, so inbox entries must
- * be submitted concurrently. Sequentially awaiting entry 1 recreates the
- * production head-of-line bug: entries 2..N cannot steer the same human turn.
- */
 export async function dispatchInboxBatch<T>(
   messages: readonly T[],
   handler: (message: T) => Promise<void>,
-  concurrent: boolean,
 ): Promise<void> {
-  if (concurrent) {
-    await Promise.all(messages.map((message) => handler(message)));
-    return;
-  }
   for (const message of messages) await handler(message);
+}
+
+/**
+ * Submit one Codex app-server inbox snapshot without waiting for the model
+ * turns to finish. The serialized SSE drain must become free again as soon
+ * as every row has entered bridge arbitration; otherwise a later SSE wake is
+ * only marked dirty and sits behind the first row's (up to ten-minute) turn.
+ *
+ * The bounded dispatcher claims each Hub row key synchronously before calling
+ * its async handler, deduplicates later snapshots, and queues N+1 work. Its
+ * completion hook keeps reading beyond Hub's first unacked page. Completion
+ * errors remain observable through `onError`.
+ */
+export interface DetachedInboxDispatcherStats {
+  active: number;
+  queued: number;
+  accepted: number;
+  deduplicated: number;
+}
+
+export interface DetachedInboxDispatcher<T> {
+  submit(messages: readonly T[], handler: (message: T) => Promise<void>): DetachedInboxDispatcherStats;
+  stats(): Pick<DetachedInboxDispatcherStats, "active" | "queued">;
+}
+
+/**
+ * Keep detached inbox work bounded and deduplicated across later SSE snapshots.
+ * The key is claimed before invoking the async handler, so two kicks in the
+ * same tick cannot double-submit one Hub row. N+1 work waits in the local FIFO
+ * and is started automatically when any active handler settles.
+ */
+export function createDetachedInboxDispatcher<T>(opts: {
+  maxConcurrent: number;
+  key: (message: T) => string;
+  onError: (error: unknown) => void;
+  onSettled?: () => void;
+}): DetachedInboxDispatcher<T> {
+  if (!Number.isInteger(opts.maxConcurrent) || opts.maxConcurrent < 1) {
+    throw new Error("maxConcurrent must be a positive integer");
+  }
+  const activeKeys = new Set<string>();
+  const queuedKeys = new Set<string>();
+  const queue: Array<{ message: T; handler: (message: T) => Promise<void> }> = [];
+
+  const pump = () => {
+    while (activeKeys.size < opts.maxConcurrent && queue.length > 0) {
+      const item = queue.shift()!;
+      const key = opts.key(item.message);
+      queuedKeys.delete(key);
+      // Claim before invoking handler: an async function runs synchronously
+      // until its first await, but the dispatcher does not depend on that
+      // language detail for cross-snapshot deduplication.
+      activeKeys.add(key);
+      let running: Promise<void>;
+      try {
+        running = item.handler(item.message);
+      } catch (error) {
+        running = Promise.reject(error);
+      }
+      void running
+        .catch(opts.onError)
+        .finally(() => {
+          activeKeys.delete(key);
+          try {
+            opts.onSettled?.();
+          } catch (error) {
+            opts.onError(error);
+          } finally {
+            // Queue progress must not depend on a notification callback.
+            // A thrown onSettled used to strand N+1 until another SSE arrived.
+            pump();
+          }
+        });
+    }
+  };
+
+  return {
+    submit(messages, handler) {
+      let accepted = 0;
+      let deduplicated = 0;
+      for (const message of messages) {
+        const key = opts.key(message);
+        if (activeKeys.has(key) || queuedKeys.has(key)) {
+          deduplicated++;
+          continue;
+        }
+        queuedKeys.add(key);
+        queue.push({ message, handler });
+        accepted++;
+      }
+      pump();
+      return {
+        active: activeKeys.size,
+        queued: queue.length,
+        accepted,
+        deduplicated,
+      };
+    },
+    stats() {
+      return { active: activeKeys.size, queued: queue.length };
+    },
+  };
+}
+
+/**
+ * A detached Codex row may be between "persist pending reply" and
+ * "send/clear". Draining the durable reply queue concurrently in that
+ * window can send the same reply twice, so only drain it when no Codex inbox
+ * row is active. Other runtimes retain their historical behaviour.
+ */
+export function shouldDrainPendingReplies(runtime: string, inflightRows: number): boolean {
+  return runtime !== "codex-app-server" || inflightRows === 0;
 }
