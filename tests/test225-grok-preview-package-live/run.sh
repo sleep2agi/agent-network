@@ -1706,7 +1706,11 @@ while IFS= read -r -d '' lock_path; do
   LOCK_COUNT=$((LOCK_COUNT + 1))
   flock --exclusive --nonblock "$lock_path" true \
     || fail "lifetime lock remained held after fallback stop"
-done < <(find "$HOME/.anet-grok" "$(dirname "$LEADER_SOCKET")" -type f -name '*.lock' -print0)
+# Owner-bound state homes place the leader directory below $HOME/.anet-grok.
+# Keep both compatibility roots but de-duplicate an overlapping parent/child
+# traversal so one physical lock is proved exactly once.
+done < <(find "$HOME/.anet-grok" "$(dirname "$LEADER_SOCKET")" \
+  -type f -name '*.lock' -print0 | sort -zu)
 [ "$LOCK_COUNT" -eq 3 ] || fail "fallback stop proof did not find exactly three lifetime lock files"
 ln -sf /test225/old-v1-agent-node.mjs /tmp/test225-bin/agent-node
 start_fake_node "$RELOAD_LOG"
