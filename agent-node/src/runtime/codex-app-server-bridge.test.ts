@@ -967,6 +967,47 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
     await app.stop();
   });
 
+  test("full history never attributes a different completed turn to the owned task", async () => {
+    const app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize" || msg.method === "thread/resume") return respond({ result: {} });
+        if (msg.method === "turn/start") return respond({ result: { turn: { id: "turn_exact_owner" } } });
+        if (msg.method === "thread/read") {
+          const includeTurns = (msg.params as { includeTurns?: boolean } | undefined)?.includeTurns;
+          return respond({ result: { thread: {
+            status: { type: "active" },
+            turns: includeTurns ? [{
+              id: "different_completed_turn",
+              status: "completed",
+              items: [{ type: "agentMessage", phase: "final_answer", text: "must-not-leak" }],
+            }] : undefined,
+          } } });
+        }
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({
+      client,
+      threadId: THREAD,
+      fullHistoryReconciliationIntervalMs: 0,
+    });
+    await bridge.bootstrap();
+    const replies: unknown[] = [];
+    bridge.on("task_reply", (reply) => replies.push(reply));
+    await bridge.submitTask({ taskId: "t-exact-owner", text: "do not steal another turn" });
+
+    expect(await bridge.reconcileActiveTurn()).toEqual({
+      recovered: false,
+      turnId: "turn_exact_owner",
+      status: "active",
+    });
+    expect(replies).toHaveLength(0);
+    expect(bridge.activeTurn()).toBe("turn_exact_owner");
+    await client.close();
+    await app.stop();
+  });
+
   test("thread/read never recovers an interrupted turn as success", async () => {
     const app = await startFakeApp({
       onRequest: (msg, respond) => {
