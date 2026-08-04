@@ -69,6 +69,13 @@ switch (mutation) {
       `    void onRequeued;`,
     );
     break;
+  case "ignore_post_deadline_steer_requeue":
+    replaceExact(
+      runtimePath,
+      `    bridge.on("steer_deferred", onRequeued);`,
+      `    void onRequeued;`,
+    );
+    break;
   case "cancel_queue_noop":
     replaceExact(
       bridgePath,
