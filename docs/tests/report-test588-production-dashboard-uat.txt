@@ -1,0 +1,80 @@
+Test 588 production UAT — Dashboard to Codex TUI closed loop
+Date: 2026-08-04 (Asia/Shanghai)
+Production source: main 5d72ba3a4ef1a99eb7d6b6f133387da7a21f0393
+Deployed bridge bundle SHA256:
+67753a4217f26b2dd364a4bebd6e80902dbe6b752c44738e44a20faa6e432da1
+Production bridge tmux: 通信牛-桥
+
+Scope
+-----
+Prove the real production path, not a direct Hub shortcut:
+Dashboard /api/hub/send -> Hub task/SSE -> 通信牛 Codex app-server bridge ->
+the already-open human Codex TUI -> automatic task reply -> Dashboard
+/api/hub/tasks readback.
+
+Deployment invariants
+---------------------
+- Only the exact 通信牛-桥 tmux session was restarted.
+- Bridge PID 4046306 runs the isolated package built from the merged main SHA.
+- Existing Codex TUI PID 84956 and app-server PIDs 83568/83763 stayed alive.
+- Existing Dashboard PID 3412285 and Hub PID 3537460 stayed alive.
+- The installed dist/cli.js hash is the bundle hash recorded above.
+
+FIFO queue closure
+------------------
+Two real Dashboard requests were sent nearly simultaneously:
+
+1. task idem_4e9f58c3dce3002edcef90d419c7ebd2fea46fcf
+   nonce UAT588-QUEUE-A-1785813665222
+2. task idem_21880ecb9e4e9f9bbfd45a952b0b64b43b78a34f
+   nonce UAT588-QUEUE-B-1785813665223
+
+Both Dashboard POSTs returned HTTP 200. The bridge received both at 11:21:05,
+queued both behind the active shared turn, then emitted:
+
+- A task_started at 11:21:51 and task_reply at 11:21:57.
+- B task_started at 11:21:57, only after A replied, and task_reply at 11:22:09.
+
+Dashboard readback showed both rows status=replied with their exact nonce ACK.
+This proves FIFO progress, exact reply attribution, and no head-of-line stall.
+
+Authenticated human-turn steer closure
+---------------------------------------
+The authoritative steer UAT used the Dashboard route's production-shaped
+client request id `dreq_1968c7ad146d34cf852392cad18b5c90`.
+
+- task: idem_82df6988fa81d5c0c8a69ffc1c3772225c64aa5d
+- nonce: UAT588-STEERHEX-1785814127240
+- Dashboard POST: HTTP 200 at 11:28:47
+- Hub-stamped metadata: source=dashboard-chat, auth_origin=user
+- bridge result at 11:28:47:
+  task_started ... turn=c5e6f049-a56b-42db-8812-80f9bb1e6697 (steered)
+- bridge observation:
+  steered into human turn c5e6f049-a56b-42db-8812-80f9bb1e6697
+- task_reply: 11:28:51, exact response
+  UAT588-STEERHEX-1785814127240-ACK
+- Dashboard readback: status=replied, completed_at=03:28:51 UTC, exact ACK.
+
+The task appeared directly in the already-active human TUI turn. No second
+manual submission or bridge restart was needed.
+
+Negative/control observation
+----------------------------
+An earlier probe used a non-production request id
+`dreq_uat588steer1785813914830`. The receiver correctly did not classify it as
+an authenticated interactive Dashboard request, so it stayed FIFO and ran
+after the human turn. That successful delivery proves queue fallback, but is
+not counted as steer evidence. The valid dreq_<32 hex> run above is the steer
+gate.
+
+Final live-state audit
+----------------------
+- Dashboard queries returned no pending/started/delivered task for 通信牛.
+- Bridge, TUI, app-server, Dashboard, and Hub processes remained alive.
+- No Hub, Dashboard, TUI, or app-server restart occurred during UAT.
+
+Result
+------
+PASS — production Dashboard messages reach the current Codex TUI in both FIFO
+and authenticated human-turn steer modes, automatically return through the
+bridge, and are readable from Dashboard with exact task/result attribution.
