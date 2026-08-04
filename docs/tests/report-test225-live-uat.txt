@@ -1,7 +1,7 @@
 # test225 live UAT — 指挥狗 Grok TUI
 date: 2026-08-01T11:46:00+00:00
 source_commit=026937d0e2e124292e10b96c6806abb35c8a3eaf
-candidate=/home/vansin/commniu-grok-candidate-026937d0
+candidate=~/commniu-grok-candidate-026937d0
 node=指挥狗
 runtime=grok-build-cli
 grok=0.2.93

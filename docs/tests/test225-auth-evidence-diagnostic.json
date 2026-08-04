@@ -1,1 +1,0 @@
-{"v":2,"gate":"real_auth_evidence_scan","status":"failed","phase":"final_scan","scanOutcome":"scan_error","matchedRoles":[],"errorRoles":["grok_current_state_completeness"],"detailWithheld":true}
