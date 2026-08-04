@@ -1,48 +1,72 @@
 Test 584 — Dashboard → Codex TUI reliable delivery
 Date: 2026-08-04 (Asia/Shanghai)
-Base: origin/main 4da56c34c3159d674fb84f7ff636d6080f83b641
-Source candidate: bb41d94f347642849eb56dbc1e1d586ba907cb3d
+Base: origin/main 7876336513903c42bc9212aeaf5f038bf51844cc
+Source candidate: 9cc3d7c5c1c5fbaee673ce730524f7065d49c60d
 Image: anet-test584:dev
+Image ID: sha256:3e200d1d47d3f9da066e7a088196d54e5e059c90dd4a477faa5f662e98b87ce0
+Image ENV: TEST584_SOURCE_COMMIT=9cc3d7c5c1c5fbaee673ce730524f7065d49c60d
 Command: sg docker -c 'docker run --rm anet-test584:dev'
 Result: PASS (exit 0)
 
-L1 — source/build
-- agent-node CLI bundled successfully (239 modules, 1.64 MB output).
+Production witnessed-red that motivated this follow-up
+- Dashboard task idem_74cbad5ff7fc4b14eb0c180d1a534f2f9c23c430 reached the
+  current Codex TUI and was answered UAT584-ACK, proving authenticated inbound
+  delivery, but its bridge handler remained queued behind an already-active turn.
+- A second Dashboard task idem_f0c9855b6057f8e63ad3a2cef72f6c539decf620
+  emitted new_task while that handler was active. The bridge logged the SSE event
+  but did not fetch/process the row.
+- Root cause: workInboxDrain serialized the whole processInbox promise. Although
+  rows from one get_inbox snapshot were concurrent, a later SSE wake only set the
+  lane dirty and could not run get_inbox again until the first model turn ended
+  (or reached its 600-second default timeout).
 
-L2 — app-server bridge and inbox dispatch
-- 45 tests passed, 0 failed, 129 assertions.
-- Exact turn/steer expectedTurnId contract.
-- Human-only turns do not create CommHub replies.
-- Authenticated Dashboard tasks steer an active human turn.
-- Multiple Dashboard rows enter the same turn without head-of-line blocking.
-- Ordinary agent tasks remain FIFO queued.
-- Steer mismatch/race preserves the task.
-- A task is not attributed before turn/steer acceptance.
-- Missed terminal notification is recovered from exact thread history.
-- Codex 0.133 real-wire shape without persisted userMessage stays FIFO-only.
-- Leading whitespace cannot hide an Agent Network prefix during reconnect recovery.
+Candidate behavior
+- Codex inbox rows take their synchronous per-row inflight claim and enter bridge
+  arbitration without keeping the serialized fetch lane occupied for the model
+  turn's lifetime.
+- A later new_task/new_message/broadcast SSE wake can therefore fetch and submit a
+  new Dashboard row while the first Codex turn is still active.
+- Detached completion failures are observable and schedule a fresh inbox drain.
+- Durable pending-reply draining is fenced while any detached Codex row is active,
+  preventing a concurrent drain from racing direct send/clear and duplicating a
+  reply. Other runtimes preserve their awaited serialized behavior.
+
+L1 — source/build
+- Exact source SHA was embedded in the image ENV and printed by the harness.
+- agent-node CLI bundled successfully (239 modules, 1.65 MB output).
+
+L2 — app-server bridge, dispatch, and production wiring
+- 51 tests passed, 0 failed, 145 assertions.
+- Real createInboxDrainLane behavior proves snapshot #2 enters before snapshot #1's
+  blocked model turn is released.
+- Source wiring pins the Codex-only detached path and the active-row pending-reply
+  fence; non-Codex runtimes remain awaited and serial.
+- Existing exact turn/steer, provenance, race, FIFO, approval, and reconciliation
+  tests remain green.
 
 L3 — Hub auth boundary and rolling idempotency
-- 12 tests passed, 0 failed (MCP user and node callers both covered).
-- Hub overrides client-supplied auth_origin from authenticated token facts.
-- Pre-stamp admin aliases remain FIFO and cannot unlock steering.
-- Existing pre-stamp Dashboard requests remain idempotent across rollout.
+- 12 tests passed, 0 failed, 27 assertions.
+- Hub-authenticated user origin, node spoof rejection, replay idempotency, and
+  changed-payload conflicts remain green.
 
 L4 — private real HTTP Hub
 - 2 tests passed, 0 failed, 6 assertions.
-- User token persists auth_origin=user.
-- Node token attempting to spoof Dashboard metadata persists auth_origin=node.
+- User tokens persist auth_origin=user; node tokens cannot spoof it.
 
-L5 — witnessed-red mutations
-- node-origin-cannot-steer: RED (rc 1)
-- no-head-of-line-serialization: RED (rc 1)
-- exact-expected-turn-id: RED (rc 1)
-- accepted-steer-must-reply: RED (rc 1)
-- reconnect-network-turn-stays-fifo: RED (rc 1)
-- leading-whitespace-network-prefix-stays-fifo: RED (rc 1)
-- mcp-node-cannot-forge-user-origin: RED (rc 1)
-- rest-node-cannot-forge-user-origin: RED (rc 1)
+L5 — witnessed-red mutations (all rc 1)
+- node-origin-cannot-steer
+- no-head-of-line-serialization
+- later-sse-kick-cannot-wait-for-active-turn
+- pending-reply-drain-cannot-race-active-row
+- exact-expected-turn-id
+- accepted-steer-must-reply
+- reconnect-network-turn-stays-fifo
+- leading-whitespace-network-prefix-stays-fifo
+- mcp-node-cannot-forge-user-origin
+- rest-node-cannot-forge-user-origin
 
-Production deployment was deliberately excluded from this test container.
-Hub and agent-node bridge must be deployed as one coordinated change, then a
-real Dashboard nonce must be verified through inbox ack and task reply.
+Production deployment remains excluded from this container result. Completion
+requires independent review, a bridge-only rollout that preserves the current TUI
+and app-server, and one new real Dashboard nonce proven through: authenticated DB
+row → live SSE/steer while a TUI turn is active → automatic task reply → inbox ack
+→ Dashboard readback.
