@@ -26,7 +26,7 @@ Witnessed red (controlled old XDG-first implementation; tests unchanged):
   docker run --rm --init --cap-add ALL \
     --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
     -e TEST231_MODE=red \
-    -v /home/vansin/.grok/bin/grok-0.2.93:/host-grok/grok-0.2.93:ro \
+    -v ~/.grok/bin/grok-0.2.93:/host-grok/grok-0.2.93:ro \
     -v /tmp/commniu-grok-socket-fix/docs/tests:/artifacts \
     anet-test231:dev
 
@@ -44,7 +44,7 @@ Witnessed green (candidate production implementation):
   docker run --rm --init --cap-add ALL \
     --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
     -e TEST231_MODE=green \
-    -v /home/vansin/.grok/bin/grok-0.2.93:/host-grok/grok-0.2.93:ro \
+    -v ~/.grok/bin/grok-0.2.93:/host-grok/grok-0.2.93:ro \
     -v /tmp/commniu-grok-socket-fix/docs/tests:/artifacts \
     anet-test231:dev
 
