@@ -167,7 +167,12 @@ export interface GrokSocketPathOptions {
 }
 
 /**
- * Allocate deterministic, short Unix socket paths without creating anything.
+ * Allocate deterministic Unix socket paths without creating anything.
+ *
+ * Grok's workspace sandbox does not admit an otherwise owner-controlled
+ * XDG_RUNTIME_DIR such as /run/user/<uid>. Keep the primary sockets under the
+ * node's owner-bound state home, which the runtime already admits, and use a
+ * short private tmp path only when the Unix socket length limit requires it.
  * The runtime owns directory creation and permissions; `anet node create`
  * only persists the identity of the two sockets.
  */
@@ -175,34 +180,21 @@ export function grokCopresenceSocketPaths(
   nodeId: string,
   options: GrokSocketPathOptions = {},
 ): { leaderSocket: string; attachSocket: string } {
-  const cwd = options.cwd ?? process.cwd();
   const home = options.home ?? process.env.HOME ?? process.env.USERPROFILE ?? "~";
   const uid = options.uid ?? process.getuid?.();
   const platform = options.platform ?? process.platform;
-  const xdgRuntime = options.xdgRuntimeDir ?? process.env.XDG_RUNTIME_DIR;
-  const key = createHash("sha256")
-    .update(cwd)
-    .update("\0")
-    .update(nodeId)
-    .digest("hex")
-    .slice(0, 16);
-  const roots: string[] = [];
+  const nodeHash = createHash("sha256").update(nodeId).digest("hex");
+  const stateKey = `node-${nodeHash.slice(0, 24)}`;
 
-  if (xdgRuntime && isAbsolute(xdgRuntime) && !xdgRuntime.includes("\0")) {
-    try {
-      const stat = lstatSync(xdgRuntime);
-      const real = realpathSync(xdgRuntime);
-      if (
-        !stat.isSymbolicLink()
-        && stat.isDirectory()
-        && real === xdgRuntime
-        && (stat.mode & 0o077) === 0
-        && (uid === undefined || stat.uid === uid)
-      ) {
-        roots.push(xdgRuntime);
-      }
-    } catch {
-      // Invalid XDG_RUNTIME_DIR values fall through to the per-user tmp root.
+  if (isAbsolute(home) && !home.includes("\0")) {
+    const runtimeDir = join(home, ".anet-grok", stateKey, "run");
+    const leaderSocket = join(runtimeDir, "leader.sock");
+    const attachSocket = join(runtimeDir, "attach.sock");
+    if (
+      Buffer.byteLength(leaderSocket) <= GROK_UNIX_SOCKET_PATH_MAX_BYTES
+      && Buffer.byteLength(attachSocket) <= GROK_UNIX_SOCKET_PATH_MAX_BYTES
+    ) {
+      return { leaderSocket, attachSocket };
     }
   }
 
@@ -210,18 +202,14 @@ export function grokCopresenceSocketPaths(
   const ownerKey = uid === undefined
     ? createHash("sha256").update(home).digest("hex").slice(0, 8)
     : String(uid);
-  roots.push(join(privateTmp, `anet-u${ownerKey}`));
-
-  for (const root of roots) {
-    const runtimeDir = join(root, "g", key);
-    const leaderSocket = join(runtimeDir, "l.sock");
-    const attachSocket = join(runtimeDir, "a.sock");
-    if (
-      Buffer.byteLength(leaderSocket) <= GROK_UNIX_SOCKET_PATH_MAX_BYTES
-      && Buffer.byteLength(attachSocket) <= GROK_UNIX_SOCKET_PATH_MAX_BYTES
-    ) {
-      return { leaderSocket, attachSocket };
-    }
+  const runtimeDir = join(privateTmp, `anet-u${ownerKey}`, "g", nodeHash.slice(0, 16));
+  const leaderSocket = join(runtimeDir, "l.sock");
+  const attachSocket = join(runtimeDir, "a.sock");
+  if (
+    Buffer.byteLength(leaderSocket) <= GROK_UNIX_SOCKET_PATH_MAX_BYTES
+    && Buffer.byteLength(attachSocket) <= GROK_UNIX_SOCKET_PATH_MAX_BYTES
+  ) {
+    return { leaderSocket, attachSocket };
   }
 
   throw new Error("cannot allocate a Grok copresence socket path shorter than 100 bytes");

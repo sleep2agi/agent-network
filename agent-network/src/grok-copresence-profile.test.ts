@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { createHash } from "crypto";
 import { chmodSync, linkSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -136,13 +137,15 @@ describe("Grok copresence profile defaults", () => {
   test("enables copresence only for non-headless grok-build-cli", () => {
     const fields = grokBuildCliCreationFields("grok-build-cli", "n_preview", false, {
       cwd: "/workspace/project",
+      home: "/home/preview",
       uid: 1234,
       xdgRuntimeDir: "/does/not/exist",
     });
+    const stateKey = `node-${createHash("sha256").update("n_preview").digest("hex").slice(0, 24)}`;
     expect(fields).toEqual({
       grokCopresence: true,
-      grokLeaderSocket: expect.stringMatching(/^\/tmp\/anet-u1234\/g\/[a-f0-9]{16}\/l\.sock$/),
-      grokAttachSocket: expect.stringMatching(/^\/tmp\/anet-u1234\/g\/[a-f0-9]{16}\/a\.sock$/),
+      grokLeaderSocket: `/home/preview/.anet-grok/${stateKey}/run/leader.sock`,
+      grokAttachSocket: `/home/preview/.anet-grok/${stateKey}/run/attach.sock`,
     });
     expect(grokBuildCliCreationFields("grok-build-cli", "n_preview", true)).toEqual({
       grokCopresence: false,
@@ -150,27 +153,28 @@ describe("Grok copresence profile defaults", () => {
     expect(grokBuildCliCreationFields("grok-build-acp", "n_preview", false)).toEqual({});
   });
 
-  test("uses an owner-only, non-symlink XDG runtime directory", () => {
+  test("uses the owner-bound state home even when XDG is owner-only", () => {
     const dir = mkdtempSync(join(tmpdir(), "anet-grok-xdg-"));
     cleanup.push(dir);
     chmodSync(dir, 0o700);
     const paths = grokCopresenceSocketPaths("n_preview", {
       cwd: "/workspace/project",
+      home: "/home/preview",
       uid: process.getuid?.(),
       xdgRuntimeDir: dir,
     });
-    expect(paths.leaderSocket.startsWith(`${dir}/g/`)).toBe(true);
-    expect(paths.attachSocket.startsWith(`${dir}/g/`)).toBe(true);
+    expect(paths.leaderSocket).toMatch(/^\/home\/preview\/\.anet-grok\/node-[a-f0-9]{24}\/run\/leader\.sock$/);
+    expect(paths.attachSocket).toMatch(/^\/home\/preview\/\.anet-grok\/node-[a-f0-9]{24}\/run\/attach\.sock$/);
+    expect(paths.leaderSocket.startsWith(dir)).toBe(false);
+    expect(paths.attachSocket.startsWith(dir)).toBe(false);
   });
 
-  test("falls back to a bounded path when XDG is unsafe or too long", () => {
-    const dir = mkdtempSync(join(tmpdir(), "anet-grok-world-"));
-    cleanup.push(dir);
-    chmodSync(dir, 0o755);
+  test("falls back to a bounded owner tmp path when the state home is too long", () => {
     const paths = grokCopresenceSocketPaths("n_preview", {
-      cwd: "/".repeat(300),
+      cwd: "/workspace/project",
+      home: `/${"long-home-segment/".repeat(12)}`,
       uid: 5678,
-      xdgRuntimeDir: dir,
+      xdgRuntimeDir: "/run/user/5678",
     });
     expect(paths.leaderSocket.startsWith("/tmp/anet-u5678/g/")).toBe(true);
     expect(Buffer.byteLength(paths.leaderSocket)).toBeLessThanOrEqual(GROK_UNIX_SOCKET_PATH_MAX_BYTES);
