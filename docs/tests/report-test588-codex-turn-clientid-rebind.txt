@@ -3,11 +3,18 @@ Date: 2026-08-04 (Asia/Shanghai)
 Base: origin/main c8a549e2ad258e8419249028a90c21da6307200a
 Worktree: /tmp/commniu-codex-turn-rebind
 Branch: fix/codex-turn-clientid-rebind
-Source commit: 4a15289b226153a52538ea0931a4bdce0cfc4941
+Implementation commit: 4a15289b226153a52538ea0931a4bdce0cfc4941
+Source candidate (including merge-gate tests): a68031681e180fb45c14e8a0fa1f19400d29e5cb
 Docker image: anet-test588:dev
-Docker image id: sha256:aa29a51b1d84a803cf211b60e9a403498ab20bca414d09d8fbae2890782f0cdf
+Docker image id: sha256:fd25690ddd291f85787b2e47dc7a41dcbca003ea5f3c4dca3876238ef85673f3
 Image revision label / ANET_TEST_SOURCE_COMMIT:
-4a15289b226153a52538ea0931a4bdce0cfc4941
+a68031681e180fb45c14e8a0fa1f19400d29e5cb
+
+Reusable upstream wire conclusion
+---------------------------------
+turn/start 的响应 turnId 在竞态下不是权威的，真正的绑定是
+clientUserMessageId；“我的那一个 turn”必须按该精确标识认领，不能按最近、
+时间顺序或唯一 inProgress turn 推断。
 
 Production witnessed-red
 ------------------------
@@ -38,15 +45,31 @@ Fix
   appeared. This prevents a phantom interruption from failing the real task.
 - Reconcile missed live events by searching authoritative thread history for
   the same userMessage clientId, then finish only the matched replacement turn.
+- Cache an early terminal until exact ownership and task_started ordering are
+  established; never discard it. The existing model-response timer bounds this
+  deferred state and reports the distinct "开始处理后 ... 无最终回复" failure.
+
+Merge-condition regression coverage
+-----------------------------------
+- Two turns are concurrently in progress. The wrong turn echoes a different
+  clientId and completes first; it is not claimed. Only the turn echoing the
+  exact task clientUserMessageId can rebind and produce task_reply.
+- userMessage, final_answer, and turn/completed can all arrive before the
+  delayed turn/start response/task_started. The terminal is cached and then
+  completes in task_started -> task_reply order.
+- A started task whose client identity never confirms exits through the bounded
+  model-response timeout. Its wording is asserted distinct from FIFO queue
+  timeout wording, and a 100ms observation bound makes removal of both timer
+  arming paths fail without hanging the mutation suite.
 
 Docker command
 --------------
-sg docker -c 'docker build --build-arg SOURCE_COMMIT=4a15289b226153a52538ea0931a4bdce0cfc4941 -t anet-test588:dev -f tests/test588-codex-turn-clientid-rebind/Dockerfile .'
+sg docker -c 'docker build --build-arg SOURCE_COMMIT=a68031681e180fb45c14e8a0fa1f19400d29e5cb -t anet-test588:dev -f tests/test588-codex-turn-clientid-rebind/Dockerfile .'
 sg docker -c 'docker run --rm anet-test588:dev'
 
 Normal result
 -------------
-58 pass, 0 fail, 202 expect() calls across:
+59 pass, 0 fail, 210 expect() calls across:
 - codex-app-server-bridge.test.ts
 - codex-app-server/runtime.test.ts
 - codex-app-server/session-manager.test.ts
@@ -55,7 +78,7 @@ RESULT: PASS
 
 Witnessed-red mutation result
 -----------------------------
-All 17 targeted mutations made the unchanged test suite fail:
+All 18 targeted mutations made the unchanged test suite fail:
 1. no_client_index
 2. ignore_user_client_rebind
 3. ignore_history_client_rebind
@@ -64,15 +87,16 @@ All 17 targeted mutations made the unchanged test suite fail:
 6. overwrite_actual_with_response
 7. timer_at_submission
 8. ignore_started_event
-9. wrong_task_arms_timer
-10. omit_bridge_started_event
-11. omit_steer_started_event
-12. omit_queue_deadline
-13. queue_timeout_does_not_cancel
-14. ignore_post_deadline_requeue
-15. ignore_post_deadline_steer_requeue
-16. cancel_queue_noop
-17. failure_returned_as_success
+9. identity_defer_unbounded
+10. wrong_task_arms_timer
+11. omit_bridge_started_event
+12. omit_steer_started_event
+13. omit_queue_deadline
+14. queue_timeout_does_not_cancel
+15. ignore_post_deadline_requeue
+16. ignore_post_deadline_steer_requeue
+17. cancel_queue_noop
+18. failure_returned_as_success
 
 Production status
 -----------------
