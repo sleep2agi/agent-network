@@ -12,7 +12,7 @@ if ! bun test \
 fi
 cat "$normal"
 
-for mutation_name in aggregate_active_shortcut wrong_turn_attribution drain_during_successor; do
+for mutation_name in aggregate_active_shortcut missing_turn_fail_open wrong_turn_attribution drain_during_successor; do
   cp ./src/runtime/codex-app-server-bridge.ts /tmp/codex-app-server-bridge.ts
   bun /harness/mutate.ts "$mutation_name"
   mutation="/tmp/test586-${mutation_name}.log"
