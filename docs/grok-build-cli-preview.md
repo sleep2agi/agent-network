@@ -80,6 +80,28 @@ Press `Ctrl-]` to detach without stopping the node.
 
 The default `grok-build-cli` profile created by `anet` enables co-presence. `anet node start` owns one Grok PTY and exposes a local, same-user attach socket. The attached terminal renders that TUI. A network task sent to `grok-shared` is submitted into the same session, appears in the TUI, and its completed answer is routed to the original CommHub task.
 
+### Changing the tool profile requires a new session
+
+Grok 0.2.93 fixes the available tool inventory when it creates a session. A
+later config/profile change does **not** add or remove tools from that saved
+session: a normal restart resumes the old capability set. This was reproduced
+with a session created under the default profile; after its config was changed
+to `WebSearch`, resuming the same session still had no `web_search` tool.
+
+After changing between the default and `WebSearch` profiles, stop the node and
+create a fresh Grok session explicitly:
+
+```bash
+anet node stop grok-shared
+anet node start grok-shared --new-session
+```
+
+The old session data remains on disk, but the node config is updated to the new
+session ID. The startup banner labels the configured profile and states whether
+the command is creating a new session or resuming one. On resume it cannot
+infer that an edited config matches the session's creation-time inventory, so
+it warns instead of claiming the config change took effect.
+
 The preview uses one runtime-owned, mode-`0600` agent profile selected with
 the TUI-effective `--agent` flag. By default its exact model-tool inventory is
 `[todo_write,search_tool,use_tool]`. The latter two expose only one
