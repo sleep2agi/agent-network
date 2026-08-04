@@ -38,6 +38,8 @@ export interface CodexAppServerBridgeOptions {
   threadId?: string;
   /** Optional label for logs. */
   bridgeLabel?: string;
+  /** Slow full-history fallback; production default avoids 5s multi-MB reads. */
+  fullHistoryReconciliationIntervalMs?: number;
 }
 
 export type BridgeStatus =
@@ -131,12 +133,16 @@ export class CodexAppServerBridge extends EventEmitter {
   private draining = false;
   /** Coalesce watchdog reads so concurrent callers never stampede app-server. */
   private reconciliationInFlight: Promise<ActiveTurnReconciliation> | null = null;
+  private readonly fullHistoryReconciliationIntervalMs: number;
+  private lastFullHistoryReconciliationAt = Date.now();
 
   constructor(opts: CodexAppServerBridgeOptions) {
     super();
     this.client = opts.client;
     this.threadId = opts.threadId ?? "";
     this.label = opts.bridgeLabel ?? `bridge:${(this.threadId || "new").slice(0, 8)}`;
+    this.fullHistoryReconciliationIntervalMs =
+      opts.fullHistoryReconciliationIntervalMs ?? 60_000;
     this.attachClientListeners();
   }
 
@@ -388,7 +394,7 @@ export class CodexAppServerBridge extends EventEmitter {
   /** Drain the FIFO after a turn finishes. One task per idle transition. */
   private async drainQueue(): Promise<void> {
     if (this.draining) return;
-    if (this.turnClaimed || this.activeTurnId) return;
+    if (this.turnClaimed || this.activeTurnId || this.externalActiveTurnId) return;
     const next = this.taskQueue.shift();
     if (!next) return;
     this.draining = true;
@@ -439,6 +445,7 @@ export class CodexAppServerBridge extends EventEmitter {
         }>;
       };
     }>("thread/read", { threadId: this.threadId, includeTurns: true });
+    this.lastFullHistoryReconciliationAt = Date.now();
     if (extractThreadStatus(result?.thread?.status) !== "active") {
       return { turnId: null, steerable: false };
     }
@@ -544,6 +551,7 @@ export class CodexAppServerBridge extends EventEmitter {
     const turnId = extractTurnId(params);
     if (!turnId) return;
     if (!this.pendingTurns.has(turnId)) {
+      const ownedTurnWasActive = this.activeTurnId !== null;
       // A turn we didn't start — e.g. the human TUI. Track its exact id so
       // authenticated Dashboard chat can use turn/steer. We still never map
       // a reply unless at least one task was explicitly and successfully
@@ -552,6 +560,16 @@ export class CodexAppServerBridge extends EventEmitter {
       this.externalActiveTurnSteerable = true;
       if (this.waitingApprovals.size === 0) this.setStatus("working");
       this.emit("unowned_turn_drop", { turnId, event: "turn/started" });
+      if (ownedTurnWasActive) {
+        // A successor can start immediately after our turn completes while
+        // its terminal frame is lost. First join any in-flight cheap read,
+        // then force one exact-history read. This avoids both a missed force
+        // race and a 5-second loop over multi-megabyte thread history.
+        void this.reconcileActiveTurn()
+          .catch(() => ({ recovered: false, turnId: this.activeTurnId }))
+          .then(() => this.reconcileActiveTurn(true))
+          .catch((error) => this.emit("reconciliation_error", error));
+      }
       return;
     }
   }
@@ -652,43 +670,49 @@ export class CodexAppServerBridge extends EventEmitter {
    *
    * WebSocket notifications are best-effort. If one `turn/completed` frame is
    * missed, the old implementation retained `activeTurnId` forever: every
-   * later Agent Network task entered the FIFO and timed out even though
-   * `thread/read` reported the thread idle and the turn completed. This method
-   * closes that one-frame failure mode without guessing that an old turn is
-   * done: only an explicit terminal status for the exact active turn releases
-   * the claim.
+   * later Agent Network task entered the FIFO and timed out even though the
+   * exact persisted turn was completed. The aggregate thread can be idle or
+   * already active with a successor; only an explicit terminal status for the
+   * exact claimed turn releases it.
    */
-  async reconcileActiveTurn(): Promise<ActiveTurnReconciliation> {
+  async reconcileActiveTurn(forceFullHistory = false): Promise<ActiveTurnReconciliation> {
     if (this.reconciliationInFlight) return this.reconciliationInFlight;
     const ownedAtStart = this.activeTurnId;
     const externalAtStart = this.externalActiveTurnId;
     const activeAtStart = ownedAtStart ?? externalAtStart;
     if (!activeAtStart) return { recovered: false, turnId: null };
+    const claimedTurnChanged = () => ownedAtStart !== null
+      ? this.activeTurnId !== activeAtStart
+      : this.externalActiveTurnId !== activeAtStart;
 
     this.reconciliationInFlight = (async () => {
-      // Keep the steady-state watchdog cheap: read only the thread status
-      // while Codex is working. Hydrate full turn history only after the
-      // authoritative status says idle (or an older server omits status).
+      // Most watchdog ticks stay cheap. Full history on a real long-lived TUI
+      // can be several megabytes, so hydrate it only when the thread is idle,
+      // a successor event explicitly forces an exact check, or the slow
+      // fallback interval expires (covering loss of both terminal and
+      // successor notifications).
       const statusResult = await this.client.request<{
         thread?: { status?: string | { type?: string } };
       }>("thread/read", { threadId: this.threadId, includeTurns: false });
 
-      // A notification may have completed the turn while thread/read was in
-      // flight. Never let an old snapshot release a newer active claim.
-      if (
-        (ownedAtStart && this.activeTurnId !== activeAtStart) ||
-        (externalAtStart && this.externalActiveTurnId !== activeAtStart)
-      ) {
+      if (claimedTurnChanged()) {
         return { recovered: false, turnId: activeAtStart };
       }
 
       const threadStatus = extractThreadStatus(statusResult?.thread?.status);
-      if (threadStatus && threadStatus !== "idle") {
+      const fullHistoryDue =
+        forceFullHistory ||
+        !threadStatus ||
+        threadStatus === "idle" ||
+        Date.now() - this.lastFullHistoryReconciliationAt >=
+          this.fullHistoryReconciliationIntervalMs;
+      if (!fullHistoryDue) {
         return { recovered: false, turnId: activeAtStart, status: threadStatus };
       }
 
       const result = await this.client.request<{
         thread?: {
+          status?: string | { type?: string };
           turns?: Array<{
             id?: string;
             status?: string;
@@ -697,17 +721,21 @@ export class CodexAppServerBridge extends EventEmitter {
           }>;
         };
       }>("thread/read", { threadId: this.threadId, includeTurns: true });
+      this.lastFullHistoryReconciliationAt = Date.now();
 
-      if (
-        (ownedAtStart && this.activeTurnId !== activeAtStart) ||
-        (externalAtStart && this.externalActiveTurnId !== activeAtStart)
-      ) {
+      // A notification may have completed the turn while thread/read was in
+      // flight. Never let an old snapshot release a newer active claim.
+      if (claimedTurnChanged()) {
         return { recovered: false, turnId: activeAtStart };
       }
 
       const turn = result?.thread?.turns?.find((candidate) => candidate.id === activeAtStart);
       if (!turn || !isTerminalTurnStatus(turn.status)) {
-        return { recovered: false, turnId: activeAtStart, status: turn?.status };
+        return {
+          recovered: false,
+          turnId: activeAtStart,
+          status: turn?.status ?? extractThreadStatus(result?.thread?.status),
+        };
       }
 
       const finalText = [...(turn.items ?? [])]

@@ -1,0 +1,40 @@
+# test586 — exact-turn reconciliation under an active successor
+
+Status: PASS.
+
+Docker image: `anet-test586:dev`
+
+Evidence:
+
+- normal bridge/runtime suite: 42 pass, 0 fail, 130 assertions;
+- exact production-shaped test keeps aggregate thread status `active` while
+  the locally owned turn changes from active to completed, then proves the
+  mapped reply and FIFO drain;
+- three targeted mutations are witnessed red: aggregate-active shortcut
+  suppresses recovery, wrong-turn attribution steals another turn's answer,
+  and ignoring the active successor drains task 2 too early;
+- actual minified agent-node bundle: PASS.
+
+Performance gate: a real full-history read on the current 185-turn Codex
+thread measured 9,575,061 bytes and 4,517 ms. The implementation therefore
+keeps ordinary 5-second watchdog ticks on cheap `includeTurns:false` reads,
+forces one exact-history read when a successor `turn/started` is observed, and
+uses a 60-second full-history fallback only when both terminal and successor
+notifications were lost. Tests separately prove the successor-triggered path,
+the double-notification-loss fallback, and that FIFO task 2 is not started
+while the successor human turn remains active.
+
+Production witness (2026-08-04):
+
+- app-server `thread/read` showed owned Dashboard turn
+  `5ac3d4e4-ac91-4453-8d92-3873ad25a71a` as `completed` with the exact ACK;
+- a newer goal/TUI turn was already `inProgress`, so aggregate thread status
+  remained `active`;
+- Hub task `idem_5656030b102e4594d06fc9f10a73e304a5d045a8` remained `running` and
+  the bridge emitted no `task_reply`.
+
+Acceptance: reconciliation must inspect the exact locally claimed turn even
+when the aggregate thread is active, recover its terminal result, emit the
+mapped reply, and drain the next FIFO row. Reintroducing the aggregate-active
+early return must make the focused test red. The actual agent-node bundle must
+still build in Docker.

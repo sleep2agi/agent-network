@@ -831,7 +831,7 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
     await app.stop();
   });
 
-  test("thread/read recovers a missed turn/completed and drains the queued task", async () => {
+  test("thread/read recovers a completed owned turn while a successor keeps the thread active", async () => {
     let seq = 0;
     let firstTurnIsPersistedComplete = false;
     const app = await startFakeApp({
@@ -848,7 +848,10 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
             result: {
               thread: {
                 id: THREAD,
-                status: { type: firstTurnIsPersistedComplete ? "idle" : "active" },
+                // Production UAT: the exact owned turn completed, but a new
+                // TUI/goal turn started without an idle polling gap. Aggregate
+                // thread status therefore stays active throughout.
+                status: { type: "active" },
                 turns: includeTurns && firstTurnIsPersistedComplete
                   ? [{
                       id: "turn_reconcile_1",
@@ -888,22 +891,119 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
     expect(bridge.activeTurn()).toBe("turn_reconcile_1");
     expect(bridge.queueDepth()).toBe(1);
 
-    // This is the production failure shape: the exact turn is terminal in
-    // thread/read, but its terminal WebSocket frame never reached the bridge.
+    // Production failure shape: the exact owned turn is terminal, its
+    // turn/completed frame is lost, and a successor starts immediately so the
+    // aggregate thread never becomes idle. The successor notification forces
+    // one exact-history reconciliation.
     firstTurnIsPersistedComplete = true;
-    expect(await bridge.reconcileActiveTurn()).toEqual({
-      recovered: true,
-      turnId: "turn_reconcile_1",
-      status: "completed",
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "turn/started",
+      params: { threadId: THREAD, turn: { id: "human-successor" } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(replies).toEqual([{ taskId: "t-reconcile-1", text: "recovered-answer-1" }]);
+    expect(bridge.queueDepth()).toBe(1);
+    expect(bridge.activeTurn()).toBeNull();
+    expect(app.received.filter((entry) => (entry as { method?: string }).method === "turn/start")).toHaveLength(1);
+
+    // Recovery must not start queued task 2 while the successor is active.
+    // Its terminal event is the next legitimate FIFO drain edge.
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "turn/completed",
+      params: { threadId: THREAD, turn: { id: "human-successor", status: "completed" } },
     });
     await new Promise((resolve) => setTimeout(resolve, 40));
-    expect(replies).toEqual([{ taskId: "t-reconcile-1", text: "recovered-answer-1" }]);
     expect(bridge.queueDepth()).toBe(0);
     expect(bridge.activeTurn()).toBe("turn_reconcile_2");
-    // First check stops after the cheap active-status read. Recovery does a
-    // cheap idle-status read followed by one full-history read.
-    expect(app.received.filter((entry) => (entry as { method?: string }).method === "thread/read")).toHaveLength(3);
+    expect(app.received.filter((entry) => (entry as { method?: string }).method === "turn/start")).toHaveLength(2);
 
+    await client.close();
+    await app.stop();
+  });
+
+  test("slow full-history fallback recovers when both terminal and successor notifications are lost", async () => {
+    let persistedComplete = false;
+    const app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize" || msg.method === "thread/resume") return respond({ result: {} });
+        if (msg.method === "turn/start") return respond({ result: { turn: { id: "turn_double_loss" } } });
+        if (msg.method === "thread/read") {
+          const includeTurns = (msg.params as { includeTurns?: boolean } | undefined)?.includeTurns;
+          return respond({ result: { thread: {
+            status: { type: "active" },
+            turns: includeTurns && persistedComplete ? [{
+              id: "turn_double_loss",
+              status: "completed",
+              items: [{ type: "agentMessage", phase: "final_answer", text: "fallback-answer" }],
+            }] : undefined,
+          } } });
+        }
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({
+      client,
+      threadId: THREAD,
+      // Test seam: make the production 60s slow fallback due immediately.
+      fullHistoryReconciliationIntervalMs: 0,
+    });
+    await bridge.bootstrap();
+    const replies: Array<{ taskId: string; text: string }> = [];
+    bridge.on("task_reply", (reply) => replies.push(reply as never));
+    await bridge.submitTask({ taskId: "t-double-loss", text: "recover without frames" });
+
+    persistedComplete = true;
+    expect(await bridge.reconcileActiveTurn()).toEqual({
+      recovered: true,
+      turnId: "turn_double_loss",
+      status: "completed",
+    });
+    expect(replies).toEqual([{ taskId: "t-double-loss", text: "fallback-answer" }]);
+    expect(app.received.filter((entry) => (entry as { method?: string }).method === "thread/read")).toHaveLength(2);
+    await client.close();
+    await app.stop();
+  });
+
+  test("full history never attributes a different completed turn to the owned task", async () => {
+    const app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize" || msg.method === "thread/resume") return respond({ result: {} });
+        if (msg.method === "turn/start") return respond({ result: { turn: { id: "turn_exact_owner" } } });
+        if (msg.method === "thread/read") {
+          const includeTurns = (msg.params as { includeTurns?: boolean } | undefined)?.includeTurns;
+          return respond({ result: { thread: {
+            status: { type: "active" },
+            turns: includeTurns ? [{
+              id: "different_completed_turn",
+              status: "completed",
+              items: [{ type: "agentMessage", phase: "final_answer", text: "must-not-leak" }],
+            }] : undefined,
+          } } });
+        }
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({
+      client,
+      threadId: THREAD,
+      fullHistoryReconciliationIntervalMs: 0,
+    });
+    await bridge.bootstrap();
+    const replies: unknown[] = [];
+    bridge.on("task_reply", (reply) => replies.push(reply));
+    await bridge.submitTask({ taskId: "t-exact-owner", text: "do not steal another turn" });
+
+    expect(await bridge.reconcileActiveTurn()).toEqual({
+      recovered: false,
+      turnId: "turn_exact_owner",
+      status: "active",
+    });
+    expect(replies).toHaveLength(0);
+    expect(bridge.activeTurn()).toBe("turn_exact_owner");
     await client.close();
     await app.stop();
   });
