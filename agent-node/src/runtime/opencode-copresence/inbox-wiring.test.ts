@@ -43,7 +43,7 @@ describe("OpenCode copresence CommHub message wiring", () => {
     const fastStart = cli.indexOf("async function processOpencodeCopresenceMessages()", workStart);
     const work = cli.slice(workStart, fastStart);
     expect(work).toContain('(msg.type || "task") === "message"');
-    expect(work).toContain("continue;");
+    expect(work).toContain("return;");
   });
 
   test("network tasks pass their authenticated sender into the shared TUI turn", () => {

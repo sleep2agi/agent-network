@@ -145,6 +145,27 @@ describe("OpenCode native serve+attach copresence", () => {
       .toBe("opencode/north-mini-code-free");
   });
 
+  test("requires an explicit provider/model at the vetted launch seam too", async () => {
+    const f = fixture();
+    const outcome = await openVettedOpenCodeCopresence({
+      binary: f.binary,
+      env: f.env,
+      cwd: f.root,
+      workDir: f.root,
+      startupTimeoutMs: 5_000,
+    }).then(
+      (session) => ({ session, error: undefined }),
+      (error: unknown) => ({ session: undefined, error }),
+    );
+    try {
+      expect(outcome.error).toBeInstanceOf(Error);
+      expect((outcome.error as Error).message).toContain("explicit provider/model");
+    } finally {
+      await outcome.session?.close();
+      f.close();
+    }
+  }, 8_000);
+
   test("wires one token-bound CommHub MCP without reopening local tools", () => {
     const root = mkdtempSync(join(tmpdir(), "opencode-commhub-config-"));
     try {
@@ -250,6 +271,7 @@ describe("OpenCode native serve+attach copresence", () => {
         env: f.env,
         cwd: f.root,
         workDir: f.root,
+        model: "opencode/fake",
         startupTimeoutMs: 5_000,
       });
       await runtime.notify("notice:sender-visible", 5_000, "通信牛");
@@ -268,6 +290,7 @@ describe("OpenCode native serve+attach copresence", () => {
         env: f.env,
         cwd: f.root,
         workDir: f.root,
+        model: "opencode/fake",
         startupTimeoutMs: 5_000,
       });
       const result = await runtime.submit(
@@ -291,6 +314,7 @@ describe("OpenCode native serve+attach copresence", () => {
         env: f.env,
         cwd: f.root,
         workDir: f.root,
+        model: "opencode/fake",
         startupTimeoutMs: 5_000,
       });
       const started = Date.now();
@@ -332,6 +356,7 @@ describe("OpenCode native serve+attach copresence", () => {
         env: f.env,
         cwd: f.root,
         workDir: f.root,
+        model: "opencode/fake",
         startupTimeoutMs: 5_000,
       });
       const first = await runtime.submit("first-network-turn", 5_000);
@@ -353,6 +378,7 @@ describe("OpenCode native serve+attach copresence", () => {
         env: f.env,
         cwd: f.root,
         workDir: f.root,
+        model: "opencode/fake",
         startupTimeoutMs: 5_000,
       });
       await expect(runtime.submit("must-not-run", 250)).rejects.toThrow("remained busy");
