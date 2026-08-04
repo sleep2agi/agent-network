@@ -813,6 +813,7 @@ describe("prepareGrokCliHome", () => {
     const stagedEnv = join(dirname(dirname(stateHome)), ".anet-grok-credentials", basename(stateHome), ".env");
     expect(config).toContain(`args = [${JSON.stringify(stagedServer)}]`);
     expect(config).toContain(`ANET_COMMHUB_ENV_FILE = ${JSON.stringify(stagedEnv)}`);
+    expect(config).toContain('ANET_COMMHUB_MODE = "outbound-only"');
     expect(readFileSync(stagedServer, "utf8")).toBe("// reviewed commhub MCP server\n");
     expect(readFileSync(stagedEnv, "utf8")).toBe("COMMHUB_TOKEN=ntok_test\n");
     expect(statSync(stagedServer).mode & 0o777).toBe(0o600);
@@ -942,6 +943,7 @@ describe("prepareGrokCliHome", () => {
     expect(() => prepareGrokCliHome({ ...base, commhubMcp: valid })).not.toThrow();
     const config = readFileSync(join(stateHome, "config.toml"), "utf8");
     expect(config).toContain("[mcp_servers.commhub]");
+    expect(config).toContain('ANET_COMMHUB_MODE = "outbound-only"');
     expect(config).not.toContain("ntok_secret");
     expect(config).toContain(JSON.stringify(join(stateHome, "runtime-mcp", "node-server.js")));
     expect(config).toContain(JSON.stringify(join(dirname(dirname(stateHome)), ".anet-grok-credentials", basename(stateHome), ".env")));

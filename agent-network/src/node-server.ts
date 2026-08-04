@@ -106,6 +106,12 @@ function resolveAlias(): string {
 const ALIAS = resolveAlias();
 const RESUME_ID = process.env.COMMHUB_RESUME_ID || process.env.CLAUDE_RESUME_ID || randomUUID();
 const AUTH_TOKEN = process.env.COMMHUB_TOKEN || ANET_CONFIG.token || "";
+// Grok co-presence already has one agent-node owner for inbox, lifecycle and
+// presence. Its model-facing MCP child must therefore be a pure outbound tool
+// client: no channel capability, no SSE subscription, no inbox claim/ack, no
+// registration/heartbeat/offline report. Keep the legacy full channel mode as
+// the default for Claude Code installations that launch this same artifact.
+const OUTBOUND_ONLY = process.env.ANET_COMMHUB_MODE === "outbound-only";
 
 function log(msg: string) {
   const ts = new Date().toTimeString().slice(0, 8);
@@ -116,7 +122,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-log(`ENV: URL=${COMMHUB_URL} ALIAS=${ALIAS} RESUME_ID=${RESUME_ID.slice(0, 8)}... TMUX=${TMUX_NAME || "none"} CWD=${process.cwd()} PROJECT_ENV=${projectPath}`);
+log(`ENV: URL=${COMMHUB_URL} ALIAS=${ALIAS} RESUME_ID=${RESUME_ID.slice(0, 8)}... TMUX=${TMUX_NAME || "none"} CWD=${process.cwd()} PROJECT_ENV=${projectPath} MODE=${OUTBOUND_ONLY ? "outbound-only" : "channel"}`);
 
 // V2: track task_id → originator alias for send_reply routing
 const taskOriginators = new Map<string, string>();
@@ -130,23 +136,34 @@ const mcp = new Server(
     version: "0.3.0",
   },
   {
-    capabilities: {
-      experimental: { "claude/channel": {} },
-      tools: {},
-    },
-    instructions: [
-      `Messages from CommHub arrive as <channel source="commhub" task_id="..." priority="..." from="...">`,
-      `These are tasks dispatched by the hub or other sessions via the CommHub Server.`,
-      `Reply routing (IMPORTANT — the tool you pick determines whether the receiver actually gets woken up):`,
-      `  • If the sender is another agent node (from CommHub, from your peer's session alias), reply with commhub_send_task(alias="<their alias>", task="<your reply>"). This creates a new routable task that wakes the peer via new_task SSE so they process it. commhub_reply does NOT wake agent peers — they'd only see it on the next inbox poll (Vincent 2026-07-28 全网规则).`,
-      `  • Only use commhub_reply when the sender is the Dashboard/UI (task_id came from a browser chat). Use status="completed" (terminal) so send_reply routes it, updates the task row (Dashboard displays it), and emits new_reply SSE for the live Dashboard viewer. Non-terminal status (in_progress/blocked/error) just updates your session status and does NOT reach the Dashboard.`,
-      `You can also use commhub_report_status to update your session status.`,
-      `Session alias: ${ALIAS}`,
-    ].join("\n"),
+    capabilities: OUTBOUND_ONLY
+      ? { tools: {} }
+      : { experimental: { "claude/channel": {} }, tools: {} },
+    instructions: OUTBOUND_ONLY
+      ? [
+          `This is the outbound-only CommHub tool client for session alias ${ALIAS}.`,
+          `It never receives or acknowledges inbox rows and never owns lifecycle or presence.`,
+          `Use commhub_send_task for peer results; commhub_send_message is non-lifecycle chat.`,
+        ].join("\n")
+      : [
+          `Messages from CommHub arrive as <channel source="commhub" task_id="..." priority="..." from="...">`,
+          `These are tasks dispatched by the hub or other sessions via the CommHub Server.`,
+          `Reply routing (IMPORTANT — the tool you pick determines whether the receiver actually gets woken up):`,
+          `  • If the sender is another agent node (from CommHub, from your peer's session alias), reply with commhub_send_task(alias="<their alias>", task="<your reply>"). This creates a new routable task that wakes the peer via new_task SSE so they process it. commhub_reply does NOT wake agent peers — they'd only see it on the next inbox poll (Vincent 2026-07-28 全网规则).`,
+          `  • Only use commhub_reply when the sender is the Dashboard/UI (task_id came from a browser chat). Use status="completed" (terminal) so send_reply routes it, updates the task row (Dashboard displays it), and emits new_reply SSE for the live Dashboard viewer. Non-terminal status (in_progress/blocked/error) just updates your session status and does NOT reach the Dashboard.`,
+          `You can also use commhub_report_status to update your session status.`,
+          `Session alias: ${ALIAS}`,
+        ].join("\n"),
   }
 );
 
 // ── Tools ───────────────────────────────────────────
+const OUTBOUND_TOOL_NAMES = new Set([
+  "commhub_send_task",
+  "commhub_send_message",
+  "commhub_get_all_status",
+]);
+
 mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
@@ -215,16 +232,18 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {},
       },
     },
-  ],
+  ].filter((tool) => !OUTBOUND_ONLY || OUTBOUND_TOOL_NAMES.has(tool.name)),
 }));
 
 // Helper: call CommHub MCP endpoint
 async function callCommHub(toolName: string, args: Record<string, unknown>): Promise<any> {
+  const connectionHeader = OUTBOUND_ONLY ? { Connection: "close" } : {};
   const initRes = await fetch(`${COMMHUB_URL}/mcp`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
+      ...connectionHeader,
       ...(AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}),
     },
     body: JSON.stringify({
@@ -250,6 +269,7 @@ async function callCommHub(toolName: string, args: Record<string, unknown>): Pro
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
+      ...connectionHeader,
       ...(AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}),
     },
     body: JSON.stringify({
@@ -271,6 +291,19 @@ async function callCommHub(toolName: string, args: Record<string, unknown>): Pro
 
 mcp.setRequestHandler(CallToolRequestSchema, async (req: any) => {
   const { name, arguments: args } = req.params;
+
+  // tools/list is not the security boundary: a client can issue tools/call
+  // with an arbitrary name. Reject lifecycle/presence/inbound names before
+  // any Hub request so a direct call cannot widen outbound-only mode.
+  if (OUTBOUND_ONLY && !OUTBOUND_TOOL_NAMES.has(name)) {
+    return {
+      isError: true,
+      content: [{
+        type: "text",
+        text: JSON.stringify({ ok: false, error: "tool unavailable in outbound-only mode" }),
+      }],
+    };
+  }
 
   if (name === "commhub_reply") {
     const { task_id, text, status } = args as any;
@@ -516,6 +549,11 @@ async function main() {
   await mcp.connect(transport);
   log("MCP stdio connected");
 
+  if (OUTBOUND_ONLY) {
+    log("ready — outbound-only tools; no channel/SSE/inbox/lifecycle/presence owner");
+    return;
+  }
+
   log("starting SSE listener...");
   connectSSE().catch((err) => log(`SSE fatal: ${err}`));
 
@@ -555,13 +593,17 @@ main().catch((err) => {
 });
 
 async function gracefulShutdown() {
-  log("shutting down, reporting offline...");
-  await callCommHub("report_status", {
-    resume_id: RESUME_ID,
-    alias: ALIAS,
-    status: "offline",
-    task: "session disconnected",
-  }).catch(() => {});
+  if (OUTBOUND_ONLY) {
+    log("shutting down outbound-only MCP client");
+  } else {
+    log("shutting down, reporting offline...");
+    await callCommHub("report_status", {
+      resume_id: RESUME_ID,
+      alias: ALIAS,
+      status: "offline",
+      task: "session disconnected",
+    }).catch(() => {});
+  }
   process.exit(0);
 }
 

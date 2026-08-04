@@ -1390,7 +1390,7 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
       "[mcp_servers.commhub]",
       'command = "bun"',
       `args = [${JSON.stringify(commhubMcp.serverPath)}]`,
-      `env = { ANET_COMMHUB_ENV_FILE = ${JSON.stringify(commhubMcp.envFile)}, COMMHUB_ALIAS = ${JSON.stringify(commhubMcp.alias)}, COMMHUB_RESUME_ID = ${JSON.stringify(commhubMcp.resumeId)} }`,
+      `env = { ANET_COMMHUB_ENV_FILE = ${JSON.stringify(commhubMcp.envFile)}, ANET_COMMHUB_MODE = "outbound-only", COMMHUB_ALIAS = ${JSON.stringify(commhubMcp.alias)}, COMMHUB_RESUME_ID = ${JSON.stringify(commhubMcp.resumeId)} }`,
       "enabled = true",
       "",
     ] : []),
