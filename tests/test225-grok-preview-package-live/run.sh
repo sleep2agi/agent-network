@@ -101,6 +101,10 @@ if [ "$ARTIFACT_ABS" = / ] \
   printf 'FAIL: artifact directory is an ancestor of test225 private cleanup roots\n' >&2
   exit 1
 fi
+# Private scratch data stays under /tmp; closed diagnostics may additionally
+# be removed only from the already-validated mounted artifact root.
+SAFE_RM_ALLOW_PREFIXES="/tmp/ $ARTIFACT_ABS/"
+export SAFE_RM_ALLOW_PREFIXES
 
 # Remove stale optional evidence at the first safe point, before report
 # creation or any executable gate. A nonzero EXIT also removes a newly written

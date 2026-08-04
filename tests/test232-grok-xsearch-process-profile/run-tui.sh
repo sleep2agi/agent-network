@@ -16,7 +16,10 @@ EVIDENCE="$ROOT/evidence.json"
 SOCKET="$GROK_HOME_DIR/run/leader.sock"
 SESSION_ID=23223223-3232-4232-8232-232232232232
 
-safe_rm_rf "$ROOT"
+# This suite's synthetic home is a fixed container-only root. A trailing slash
+# makes the helper's prefix policy exact to that root rather than a sibling.
+SAFE_RM_ALLOW_PREFIXES="/tmp/ $ROOT/"
+safe_rm_rf "$ROOT/"
 mkdir -p "$GROK_HOME_DIR/run" "$WORK" "$ARTIFACT_DIR" /run/user/1000
 cp "$REAL_AUTH" "$GROK_HOME_DIR/auth.json"
 printf '%s\n' '[toolset.bash]' 'auto_background_on_timeout = false' >"$GROK_HOME_DIR/config.toml"
