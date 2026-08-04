@@ -83,6 +83,10 @@ import {
   grokBuildCliCreationFields,
   prepareGrokPreviewResolverConfigs,
 } from "../src/grok-copresence-profile";
+import {
+  grokCopresenceDisclosure,
+  type GrokCopresenceSessionDisclosure,
+} from "../src/grok-copresence-disclosure";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -2248,11 +2252,16 @@ function printClaudeCodeNotice() {
   console.log(`  - For other models, use --runtime codex-sdk or claude-agent-sdk`);
 }
 
-function printGrokCopresenceWarning(nodeRef?: string) {
+function printGrokCopresenceWarning(
+  nodeRef?: string,
+  tools?: unknown,
+  session: GrokCopresenceSessionDisclosure = "configured",
+) {
+  const disclosure = grokCopresenceDisclosure(tools, session);
   console.warn(`[anet] ⚠ EXPERIMENTAL/DANGEROUS Grok co-presence preview.`);
   console.warn(`[anet]   Network tasks drive the same Grok TUI; its fixed tools are automatically approved.`);
-  console.warn(`[anet]   Fixed tools: [todo_write,search_tool,use_tool]; MCP is the single runtime-owned CommHub server.`);
-  console.warn(`[anet]   No filesystem, shell, web, media, project/host MCP, or subagents.`);
+  for (const line of disclosure.lines) console.warn(`[anet]   ${line}`);
+  console.warn(`[anet]   MCP is the single runtime-owned CommHub server.`);
   console.warn(`[anet]   Use only with trusted tasks and a trusted network. Do not use in production.`);
   if (nodeRef) console.warn(`[anet]   Attach from another terminal: anet grok attach ${nodeRef}`);
 }
@@ -3479,7 +3488,7 @@ This wizard creates one agent node for this project:
   } else if (pickedRuntime === "grok-build-acp" || pickedRuntime === "grok-build-cli") {
     opts.runtime = pickedRuntime;
     console.log(`[anet] 请确保已安装并登录 Grok Build CLI: grok login`);
-    if (pickedRuntime === "grok-build-cli") printGrokCopresenceWarning(id);
+    if (pickedRuntime === "grok-build-cli") printGrokCopresenceWarning(id, undefined, "configured");
   } else if (pickedRuntime === "opencode-cli") {
     await configureOpencodeRuntime(opts, true);
   } else {
@@ -3581,7 +3590,7 @@ Telegram setup:
   if (normalizeRuntime(profile) === "opencode-cli") {
     printOpencodeCreationSecurityDisclosure(profile);
   } else if (profile.grokCopresence === true) {
-    printGrokCopresenceWarning(id);
+    printGrokCopresenceWarning(id, profile.tools, "configured");
   } else {
     console.log(`[anet] ⚠ dangerouslySkipPermissions and teammateMode enabled by default.`);
     console.log(`[anet] To disable: edit .anet/nodes/${id}/config.json → flags`);
@@ -3694,7 +3703,10 @@ async function createCommand(idOverride?: string) {
     console.log("[anet] 请确保已执行: codex login（codex-app-server 需要 codex CLI）");
   } else if (opts.runtime === "grok-build-acp" || opts.runtime === "grok-build-cli") {
     console.log("[anet] 请确保已安装并登录 Grok Build CLI: grok login");
-    if (opts.runtime === "grok-build-cli") printGrokCopresenceWarning(id);
+    if (opts.runtime === "grok-build-cli") {
+      const requestedTools = opts.tools ? opts.tools.split(",").map((tool) => tool.trim()) : undefined;
+      printGrokCopresenceWarning(id, requestedTools, "configured");
+    }
   } else if (opts.runtime === "opencode-cli") {
     await configureOpencodeRuntime(opts, Boolean(process.stdin.isTTY));
   } else {
@@ -3845,7 +3857,7 @@ async function createCommand(idOverride?: string) {
   if (normalizeRuntime(profile) === "opencode-cli") {
     printOpencodeCreationSecurityDisclosure(profile);
   } else if (profile.grokCopresence === true) {
-    printGrokCopresenceWarning(id);
+    printGrokCopresenceWarning(id, profile.tools, "configured");
     console.log(`[anet]   Start the node first, then attach from a second terminal.`);
     console.log(`\nStart: anet node start ${id}`);
     closeRL();
@@ -4142,7 +4154,7 @@ async function grokCommand() {
     process.exit(1);
   }
 
-  printGrokCopresenceWarning();
+  printGrokCopresenceWarning(undefined, profile.tools, "resume");
   const relay = new PassThrough({ highWaterMark: 64 * 1024 });
   const stdin = process.stdin;
   const wasRaw = stdin.isRaw === true;
@@ -4300,7 +4312,9 @@ async function launchAgent(id: string, forceNewSession = false) {
   const willResume = !!session && !forceNewSession;
   const label = willResume ? `Resuming session ${session.slice(0, 8)}...` : "Starting new session";
   console.log(`[anet] ${label} for "${displayName}" [${runtime}]...\n`);
-  if (profile.grokCopresence === true) printGrokCopresenceWarning(nodeId);
+  if (profile.grokCopresence === true) {
+    printGrokCopresenceWarning(nodeId, profile.tools, willResume ? "resume" : "new");
+  }
   checkRuntimeDependency(runtime, "start");
   assertStartCompatibility(runtime);
 
