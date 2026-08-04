@@ -53,9 +53,19 @@ busy 节点（如 codex-app-server 单线程 turn）收到新任务会**排队**
 bridge 的同步 `turnClaimed` 和 FIFO 仍保证普通 network task 一次只启动一个 turn。只有已由实时事件证明
 属于人类的 active turn，鉴权 Dashboard chat 才会走 `turn/steer`。
 
+因此要区分两种“收到”：人类 TUI turn 中的 Dashboard chat 会立即 `turn/steer` 进当前轮；bridge 自己
+已有 network task turn 时，新 task 会被立即从 Hub 取走、进入 bridge FIFO，但仍须等前一轮 terminal
+后才能 `turn/start`。本修复消灭的是“后续 SSE 根本不再读取、白等首轮 600 秒”，不是把 Codex 的单
+turn FIFO 变成并行推理。当前 600 秒任务计时仍包含排队时间；前一轮本身超过该窗口时，后续 FIFO task
+仍可能以超时结束，这是独立的 queue-deadline 语义，不应把日志里出现 `processing` 单独当成回复闭环。
+
 多条 Dashboard chat steer 到同一个人类 turn 时，它们共同取得该 turn 的最终答案，不是多条独立模型
 请求；在 terminal 与 steer 回执竞态下，各 task 的回复落库先后不作保证。若业务依赖严格逐条顺序和独立
 答案，应等当前 turn 结束后逐条发送，让它们走 FIFO turn。
+
+可靠回复队列目前也和 Codex active handler 共用安全门：只要仍有 handler 在 bridge FIFO/turn 中等待，
+durable pending reply 暂不 drain，以避免和该 handler 的直接 send/clear 重复发送。进程重启仍会恢复
+该队列；将它拆成独立 singleflight lane 是后续优化，不属于“Dashboard 入站未读取”的修复。
 
 这是“同一个用户、同一个会话”的即时补充能力，不是独立并行对话：如果人正在 TUI 里处理另一件事，
 Dashboard 补充内容会和当前上下文一起影响最终答案。需要完全隔离时，应等当前 turn 结束再发送。

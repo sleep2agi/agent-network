@@ -87,6 +87,13 @@ cp /tmp/inbox-dispatch.ts agent-node/src/inbox-dispatch.ts
 
 cp agent-node/src/inbox-dispatch.ts /tmp/inbox-dispatch.ts
 bun /harness/mutate.ts agent-node/src/inbox-dispatch.ts \
+  $'          } catch (error) {\n            opts.onError(error);\n          } finally {' \
+  $'          } catch (error) {\n            throw error;\n          }\n          {'
+expect_red throwing-settle-callback-cannot-stall-queue bun test agent-node/src/inbox-dispatch.test.ts
+cp /tmp/inbox-dispatch.ts agent-node/src/inbox-dispatch.ts
+
+cp agent-node/src/inbox-dispatch.ts /tmp/inbox-dispatch.ts
+bun /harness/mutate.ts agent-node/src/inbox-dispatch.ts \
   '  return runtime !== "codex-app-server" || inflightRows === 0;' \
   '  return true;'
 expect_red pending-reply-drain-cannot-race-active-row bun test agent-node/src/inbox-dispatch.test.ts
@@ -104,6 +111,20 @@ bun /harness/mutate.ts agent-node/src/runtime/codex-app-server-bridge.ts \
   '        this.emitSteeredTask(steered, task, steered.terminal);' \
   '        /* reply attribution deliberately removed */'
 expect_red accepted-steer-must-reply bun test agent-node/src/runtime/codex-app-server-bridge.test.ts
+cp /tmp/codex-app-server-bridge.ts agent-node/src/runtime/codex-app-server-bridge.ts
+
+cp agent-node/src/runtime/codex-app-server-bridge.ts /tmp/codex-app-server-bridge.ts
+bun /harness/mutate.ts agent-node/src/runtime/codex-app-server-bridge.ts \
+  '    if (this.externalActiveTurnId) {' \
+  '    if (false) {'
+expect_red human-turn-dashboard-must-steer-not-start bun test agent-node/src/runtime/codex-app-server-bridge.test.ts
+cp /tmp/codex-app-server-bridge.ts agent-node/src/runtime/codex-app-server-bridge.ts
+
+cp agent-node/src/runtime/codex-app-server-bridge.ts /tmp/codex-app-server-bridge.ts
+bun /harness/mutate.ts agent-node/src/runtime/codex-app-server-bridge.ts \
+  $'    if (this.turnClaimed || this.activeTurnId) {\n      this.taskQueue.push(input);' \
+  $'    if (false) {\n      this.taskQueue.push(input);'
+expect_red network-task-b-cannot-start-before-a-terminal bun test agent-node/src/runtime/codex-app-server-bridge.test.ts
 cp /tmp/codex-app-server-bridge.ts agent-node/src/runtime/codex-app-server-bridge.ts
 
 cp agent-node/src/runtime/codex-app-server-bridge.ts /tmp/codex-app-server-bridge.ts

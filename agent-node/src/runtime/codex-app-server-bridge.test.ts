@@ -582,6 +582,7 @@ describe("CodexAppServerBridge — authenticated Dashboard steering", () => {
           const expected = (msg.params as { expectedTurnId?: string })?.expectedTurnId;
           return respond({ result: { turnId: expected } });
         }
+        if (msg.method === "turn/start") return respond({ result: { turnId: "must-not-start" } });
       },
     });
     const client = new CodexAppServerClient({ url: app.url });
@@ -770,12 +771,15 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
 
   test("submitTask queues the second task and drains it after turn/completed (order preserved)", async () => {
     let seq = 0;
+    const turnStartTaskIds: string[] = [];
     const app = await startFakeApp({
       onRequest: (msg, respond) => {
         if (msg.method === "initialize") return respond({ result: {} });
         if (msg.method === "thread/resume") return respond({ result: {} });
         if (msg.method === "turn/start") {
           seq++;
+          const clientUserMessageId = (msg.params as any)?.clientUserMessageId as string;
+          turnStartTaskIds.push(clientUserMessageId.replace(/^anet:/, ""));
           respond({ result: { turn: { id: `turn_q_${seq}` } } });
         }
       },
@@ -796,6 +800,9 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
     expect(r2.started).toBe(false);
     expect(queued).toEqual(["t-q-2"]);
     expect(bridge.queueDepth()).toBe(1);
+    // Wire gate: B is admitted into bridge FIFO, but no second turn/start is
+    // emitted while A is active.
+    expect(turnStartTaskIds).toEqual(["t-q-1"]);
 
     // Complete turn 1 → bridge should auto-drain and start turn 2.
     app.broadcast({ jsonrpc: "2.0", method: "item/completed", params: { threadId: THREAD, turnId: "turn_q_1", item: { type: "agentMessage", phase: "final_answer", text: "answer-1" } } });
@@ -808,6 +815,7 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
     await new Promise((r) => setTimeout(r, 80));
     expect(bridge.queueDepth()).toBe(0);
     expect(bridge.activeTurn()).toBe("turn_q_2");
+    expect(turnStartTaskIds).toEqual(["t-q-1", "t-q-2"]);
 
     app.broadcast({ jsonrpc: "2.0", method: "item/completed", params: { threadId: THREAD, turnId: "turn_q_2", item: { type: "agentMessage", phase: "final_answer", text: "answer-2" } } });
     app.broadcast({

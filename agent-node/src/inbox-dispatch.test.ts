@@ -158,6 +158,30 @@ describe("dispatchInboxBatch", () => {
     expect(settled).toBe(1);
   });
 
+  test("a throwing settle callback cannot strand queued N+1 work", async () => {
+    let releaseFirst!: () => void;
+    const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const entered: number[] = [];
+    const errors: unknown[] = [];
+    const dispatcher = createDetachedInboxDispatcher<number>({
+      maxConcurrent: 1,
+      key: String,
+      onError: (error) => errors.push(error),
+      onSettled: () => { throw new Error("wake callback failed"); },
+    });
+    dispatcher.submit([1, 2], async (value) => {
+      entered.push(value);
+      if (value === 1) await firstBlocked;
+    });
+    expect(entered).toEqual([1]);
+
+    releaseFirst();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(entered).toEqual([1, 2]);
+    expect(errors).toHaveLength(2);
+    expect((errors[0] as Error).message).toBe("wake callback failed");
+  });
+
   test("same-tick duplicate kicks claim one row exactly once", async () => {
     let release!: () => void;
     const blocked = new Promise<void>((resolve) => { release = resolve; });

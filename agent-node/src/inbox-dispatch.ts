@@ -105,8 +105,15 @@ export function createDetachedInboxDispatcher<T>(opts: {
         .catch(opts.onError)
         .finally(() => {
           activeKeys.delete(key);
-          opts.onSettled?.();
-          pump();
+          try {
+            opts.onSettled?.();
+          } catch (error) {
+            opts.onError(error);
+          } finally {
+            // Queue progress must not depend on a notification callback.
+            // A thrown onSettled used to strand N+1 until another SSE arrived.
+            pump();
+          }
         });
     }
   };
