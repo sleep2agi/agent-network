@@ -194,6 +194,43 @@ describe("codexAppServerThink — terminal-event reconciliation watchdog", () =>
     expect(bridge.cancelCalls).toBe(1);
   });
 
+  test("a start failure that requeues after the queue deadline cannot leave a ghost row", async () => {
+    const bridge = new DeferredStartBridge();
+    bridge.queued = false;
+    bridge.submitTask = async (input: { taskId: string }) => {
+      bridge.submitted = input;
+      return { started: false as const, queuedAt: 1 };
+    };
+    const session = { bridge } as unknown as CodexAppServerRuntimeSession;
+    const thinking = codexAppServerThink(session, {
+      taskId: "task_requeues_after_deadline",
+      text: "failed start must not become a ghost",
+      timeoutMs: 200,
+      queueTimeoutMs: 30,
+      reconciliationIntervalMs: 0,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 55));
+    bridge.queued = true;
+    bridge.emit("drain_deferred", {
+      taskId: "task_requeues_after_deadline",
+      error: "turn/start lost idle race",
+    });
+    const lateReply = setTimeout(() => {
+      bridge.emit("task_reply", {
+        taskId: "task_requeues_after_deadline",
+        text: "ghost execution completed",
+      });
+    }, 260);
+    const result = await thinking;
+    clearTimeout(lateReply);
+    expect(result.failed).toBe(true);
+    expect(result.queued).toBe(true);
+    expect(result.replyText).toContain("在队列中等待");
+    expect(bridge.queued).toBe(false);
+    expect(bridge.cancelCalls).toBe(2);
+  });
+
   test("queued wait does not consume the model-response timeout budget", async () => {
     const bridge = new DeferredStartBridge();
     const session = { bridge } as unknown as CodexAppServerRuntimeSession;
