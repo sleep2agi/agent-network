@@ -257,13 +257,15 @@ export function codexAppServerThink(
 
   return new Promise<CodexAppServerThinkResult>((resolve) => {
     let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     let reconciliationTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = (r: CodexAppServerThinkResult) => {
       if (settled) return;
       settled = true;
       bridge.off("task_reply", onReply);
       bridge.off("task_error", onError);
-      clearTimeout(timer);
+      bridge.off("task_started", onStarted);
+      if (timer) clearTimeout(timer);
       if (reconciliationTimer) clearTimeout(reconciliationTimer);
       resolve(r);
     };
@@ -277,13 +279,21 @@ export function codexAppServerThink(
       log(`[codex-app-server] task_error ${ev.taskId}: ${ev.error}`);
       finish({ replyText: `codex-app-server 错误: ${ev.error}`, failed: true, queued: false });
     };
-    const timer = setTimeout(() => {
-      finish({
-        replyText: `codex-app-server 错误: 任务 ${opts.taskId} 超时（${Math.round(timeoutMs / 1000)}s 内无最终回复）`,
-        failed: true,
-        queued: false,
-      });
-    }, timeoutMs);
+    const startResponseTimer = () => {
+      if (settled || timer) return;
+      timer = setTimeout(() => {
+        finish({
+          replyText: `codex-app-server 错误: 任务 ${opts.taskId} 超时（开始处理后 ${Math.round(timeoutMs / 1000)}s 内无最终回复）`,
+          failed: true,
+          queued: false,
+        });
+      }, timeoutMs);
+    };
+    const onStarted = (ev: { taskId: string; turnId: string; steered?: boolean }) => {
+      if (ev.taskId !== opts.taskId) return;
+      log(`[codex-app-server] task_started ${ev.taskId} turn=${ev.turnId}${ev.steered ? " (steered)" : ""}`);
+      startResponseTimer();
+    };
 
     // A shared app-server WebSocket can miss an individual terminal
     // notification while the authoritative thread history still records the
@@ -311,6 +321,7 @@ export function codexAppServerThink(
 
     bridge.on("task_reply", onReply);
     bridge.on("task_error", onError);
+    bridge.on("task_started", onStarted);
     scheduleReconciliation();
 
     bridge
@@ -321,6 +332,10 @@ export function codexAppServerThink(
         steerIfExternalTurn: opts.steerIfExternalTurn,
       })
       .then((r) => {
+        // Compatibility fallback for bridge implementations predating the
+        // task_started event. The real bridge emits before this continuation;
+        // startResponseTimer is idempotent, so both paths cannot double-arm.
+        if (r.started) startResponseTimer();
         if (!r.started) log(`[codex-app-server] task ${opts.taskId} queued (a turn is in flight)`);
         else if (r.steered) log(`[codex-app-server] task ${opts.taskId} steered into human turn ${r.turnId}`);
       })
