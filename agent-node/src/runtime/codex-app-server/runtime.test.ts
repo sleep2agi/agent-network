@@ -147,7 +147,68 @@ class DeferredStartBridge extends EventEmitter {
   }
 }
 
+class IdentityNeverConfirmedBridge extends EventEmitter {
+  taskId = "";
+
+  async submitTask(input: { taskId: string }): Promise<{ started: true; turnId: string }> {
+    this.taskId = input.taskId;
+    this.emit("task_started", {
+      taskId: input.taskId,
+      turnId: "turn_response_without_client_identity",
+      steered: false,
+    });
+    return { started: true, turnId: "turn_response_without_client_identity" };
+  }
+
+  cancelQueuedTask(): boolean {
+    return false;
+  }
+
+  async reconcileActiveTurn(): Promise<{
+    recovered: false;
+    turnId: string;
+    status: "inProgress";
+  }> {
+    return {
+      recovered: false,
+      turnId: "turn_response_without_client_identity",
+      status: "inProgress",
+    };
+  }
+}
+
 describe("codexAppServerThink — terminal-event reconciliation watchdog", () => {
+  test("a started task whose client identity never confirms has a bounded, distinct response timeout", async () => {
+    const bridge = new IdentityNeverConfirmedBridge();
+    const session = { bridge } as unknown as CodexAppServerRuntimeSession;
+    const thinking = codexAppServerThink(session, {
+      taskId: "task_identity_never_confirms",
+      text: "must not defer a terminal forever",
+      timeoutMs: 25,
+      queueTimeoutMs: 500,
+      reconciliationIntervalMs: 0,
+    });
+
+    const observed = await Promise.race([
+      thinking.then((result) => ({ kind: "result" as const, result })),
+      new Promise<{ kind: "hung" }>((resolve) => setTimeout(() => resolve({ kind: "hung" }), 100)),
+    ]);
+    if (observed.kind === "hung") {
+      // Let a deliberately broken mutation settle and clear its timers so the
+      // suite reports the assertion instead of waiting for the queue deadline.
+      bridge.emit("task_reply", { taskId: bridge.taskId, text: "test cleanup" });
+      await thinking;
+    }
+
+    expect(observed.kind).toBe("result");
+    if (observed.kind !== "result") return;
+    expect(observed.result.failed).toBe(true);
+    expect(observed.result.queued).toBe(false);
+    expect(observed.result.replyText).toContain("任务 task_identity_never_confirms 超时");
+    expect(observed.result.replyText).toContain("开始处理后");
+    expect(observed.result.replyText).not.toContain("在队列中等待");
+  });
+
   test("a never-started FIFO task has its own finite, distinct queue deadline", async () => {
     const bridge = new DeferredStartBridge();
     const session = { bridge } as unknown as CodexAppServerRuntimeSession;

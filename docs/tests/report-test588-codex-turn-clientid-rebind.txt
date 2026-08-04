@@ -1,0 +1,114 @@
+Test 588 — Codex app-server client-id turn rebind
+Date: 2026-08-04 (Asia/Shanghai)
+Base: origin/main c8a549e2ad258e8419249028a90c21da6307200a
+Worktree: /tmp/commniu-codex-turn-rebind
+Branch: fix/codex-turn-clientid-rebind
+Implementation commit: 4a15289b226153a52538ea0931a4bdce0cfc4941
+Source candidate (including merge-gate tests): d3abb1aba352f52d2e79afbc2991fb42548a997b
+Docker image: anet-test588:dev
+Docker image id: sha256:3d60d3ab34860fc3ca14258141410802069a8ed4619abfea1fe886814032c1ab
+Image revision label / ANET_TEST_SOURCE_COMMIT:
+d3abb1aba352f52d2e79afbc2991fb42548a997b
+
+Reusable upstream wire conclusion
+---------------------------------
+turn/start 的响应 turnId 在竞态下不是权威的，真正的绑定是
+clientUserMessageId；“我的那一个 turn”必须按该精确标识认领，不能按最近、
+时间顺序或唯一 inProgress turn 推断。
+
+Production witnessed-red
+------------------------
+Dashboard task idem_cf2eda67c8c3ade91e76df9e82783b39836b030d reached 通信牛 TUI
+and received the exact model answer. The bridge recorded turn/start response id
+019fcaa0-73f4-71d2-a9aa-b883593e7de0, while the app-server's authoritative
+turn/started, userMessage, final_answer, turn/completed, and thread/read history
+all used replacement id 1c11f248-bbcf-41ac-9732-00412043d58a. The userMessage
+carried clientId anet:idem_cf2eda67c8c3ade91e76df9e82783b39836b030d.
+
+Because the old bridge indexed pending work only by the response turn id, the
+exact answer was visible in the TUI but no task_reply was emitted, the Dashboard
+row remained running, and the next FIFO row could not start. A control task
+(idem_d284261d0095dbc8d8bd446cd81f1be652184b38) where the bridge won the idle
+race used one consistent turn id and completed end-to-end: task_reply emitted,
+Hub status replied, and Dashboard /api/hub/tasks read back the exact ACK.
+
+Fix
+---
+- Index every pending owned turn by the immutable clientUserMessageId
+  (anet:<Hub task id>) before turn/start is sent.
+- When item/completed echoes the userMessage clientId under a different turn,
+  atomically move the pending entry from the response id to the real turn id.
+- Remove the stale response-id map entry and clear the temporary external-turn
+  classification for the real owner.
+- Defer terminal attribution if task_started has not been announced, or if an
+  unconfirmed response turn reports failure/interruption after a competing turn
+  appeared. This prevents a phantom interruption from failing the real task.
+- Reconcile missed live events by searching authoritative thread history for
+  the same userMessage clientId, then finish only the matched replacement turn.
+- Cache an early terminal until exact ownership and task_started ordering are
+  established; never discard it. The existing model-response timer bounds this
+  deferred state and reports the distinct "开始处理后 ... 无最终回复" failure.
+
+Merge-condition regression coverage
+-----------------------------------
+- Two turns are concurrently in progress. The wrong turn echoes a different
+  clientId and completes first; it is not claimed. Only the turn echoing the
+  exact task clientUserMessageId can rebind and produce task_reply.
+- userMessage, final_answer, and turn/completed can all arrive before the
+  delayed turn/start response/task_started. The terminal is cached and then
+  completes in task_started -> task_reply order.
+- A started task whose client identity never confirms exits through the bounded
+  model-response timeout. Its wording is asserted distinct from FIFO queue
+  timeout wording, and a 100ms observation bound makes removal of both timer
+  arming paths fail without hanging the mutation suite.
+- The same bound is exercised end-to-end across a real CodexAppServerBridge,
+  fake WebSocket app-server wire, and codexAppServerThink: a competing turn is
+  observed, the response-id interruption is deferred, no matching clientId
+  ever arrives, and the runtime still produces the bounded response timeout.
+- A second cross-layer case leaves the real turn/start RPC unresolved forever.
+  Because that task has left FIFO but cannot emit task_started, #585's queue
+  deadline must convert it to the normal response timer. Removing that exact
+  fallback is independently witnessed red.
+
+Docker command
+--------------
+sg docker -c 'docker build --build-arg SOURCE_COMMIT=d3abb1aba352f52d2e79afbc2991fb42548a997b -t anet-test588:dev -f tests/test588-codex-turn-clientid-rebind/Dockerfile .'
+sg docker -c 'docker run --rm anet-test588:dev'
+
+Normal result
+-------------
+61 pass, 0 fail, 221 expect() calls across:
+- codex-app-server-bridge.test.ts
+- codex-app-server/runtime.test.ts
+- codex-app-server/session-manager.test.ts
+BUILD: PASS
+RESULT: PASS
+
+Witnessed-red mutation result
+-----------------------------
+All 19 targeted mutations made the unchanged test suite fail:
+1. no_client_index
+2. ignore_user_client_rebind
+3. ignore_history_client_rebind
+4. keep_stale_response_mapping
+5. trust_phantom_terminal
+6. overwrite_actual_with_response
+7. timer_at_submission
+8. ignore_started_event
+9. identity_defer_unbounded
+10. wrong_task_arms_timer
+11. omit_bridge_started_event
+12. omit_steer_started_event
+13. omit_queue_deadline
+14. omit_left_fifo_response_fallback
+15. queue_timeout_does_not_cancel
+16. ignore_post_deadline_requeue
+17. ignore_post_deadline_steer_requeue
+18. cancel_queue_noop
+19. failure_returned_as_success
+
+Production status
+-----------------
+This report proves the source candidate in Docker. It is not merge, publish, or
+deployment authorization. The production bridge remains on the previously
+reviewed c0849553 package until independent review and merge of this candidate.

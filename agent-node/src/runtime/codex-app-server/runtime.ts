@@ -368,6 +368,10 @@ export function codexAppServerThink(
       // remains finite without falsely cancelling a running turn.
       queueDeadlineElapsed = true;
       if (!bridge.cancelQueuedTask(opts.taskId)) {
+        // This is also the finite bound for a turn/start RPC that never
+        // resolves and therefore cannot emit task_started: it has left FIFO,
+        // so convert the elapsed admission deadline into the normal bounded
+        // model-response wait instead of silently hanging forever.
         log(`[codex-app-server] queue deadline reached after task left FIFO; arming response timeout for ${opts.taskId}`);
         startResponseTimer();
         return;
