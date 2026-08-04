@@ -449,6 +449,61 @@ describe("CodexAppServerBridge — bootstrap + task mapping", () => {
     expect(bridge.pendingTurnCount()).toBe(1);
   });
 
+  test("real bridge + runtime bounds an unresolved turn/start through the left-FIFO fallback", async () => {
+    await client.close();
+    await app.stop();
+    app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize" || msg.method === "thread/resume") {
+          return respond({ result: {} });
+        }
+        if (msg.method === "thread/read") {
+          return respond({ result: { thread: { status: { type: "active" }, turns: [] } } });
+        }
+        if (msg.method === "turn/start") {
+          // Simulate an accepted-or-lost RPC whose response never resolves and
+          // whose userMessage clientId is never observed. The task has left
+          // FIFO but cannot emit task_started, so #585's queue-deadline branch
+          // must convert it to the bounded model-response timer.
+          return;
+        }
+      },
+    });
+    client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    await bridge.bootstrap();
+
+    const thinking = codexAppServerThink(
+      { bridge } as unknown as CodexAppServerRuntimeSession,
+      {
+        taskId: "turn-start-never-resolves-real-bridge",
+        text: "must remain finite after leaving FIFO",
+        timeoutMs: 25,
+        queueTimeoutMs: 25,
+        reconciliationIntervalMs: 0,
+      },
+    );
+    const observed = await Promise.race([
+      thinking.then((result) => ({ kind: "result" as const, result })),
+      new Promise<{ kind: "hung" }>((resolve) => setTimeout(() => resolve({ kind: "hung" }), 100)),
+    ]);
+    if (observed.kind === "hung") {
+      bridge.emit("task_reply", {
+        taskId: "turn-start-never-resolves-real-bridge",
+        text: "mutation cleanup",
+      });
+      await thinking;
+    }
+
+    expect(observed.kind).toBe("result");
+    if (observed.kind !== "result") return;
+    expect(observed.result.failed).toBe(true);
+    expect(observed.result.queued).toBe(false);
+    expect(observed.result.replyText).toContain("开始处理后");
+    expect(observed.result.replyText).not.toContain("在队列中等待");
+  });
+
   test("agentMessage/delta accumulates when server omits finalText", async () => {
     const turnId = await bridge.startTaskTurn({ taskId: "task_1", text: "hi" });
     const replies: Array<{ taskId: string; text: string }> = [];

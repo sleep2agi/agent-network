@@ -81,6 +81,13 @@ switch (mutation) {
   case "omit_queue_deadline":
     replaceExact(runtimePath, `    queueTimer = setTimeout(() => {`, `    if (false) queueTimer = setTimeout(() => {`);
     break;
+  case "omit_left_fifo_response_fallback":
+    replaceExact(
+      runtimePath,
+      `        log(\`[codex-app-server] queue deadline reached after task left FIFO; arming response timeout for \${opts.taskId}\`);\n        startResponseTimer();\n        return;`,
+      `        log(\`[codex-app-server] queue deadline reached after task left FIFO; response timeout omitted by mutation\`);\n        return;`,
+    );
+    break;
   case "queue_timeout_does_not_cancel":
     replaceExact(runtimePath, `      if (!bridge.cancelQueuedTask(opts.taskId)) {`, `      if (true || !bridge.cancelQueuedTask(opts.taskId)) {`);
     break;

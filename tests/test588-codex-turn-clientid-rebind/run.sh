@@ -17,7 +17,7 @@ for mutation_name in \
   no_client_index ignore_user_client_rebind ignore_history_client_rebind keep_stale_response_mapping \
   trust_phantom_terminal overwrite_actual_with_response \
   timer_at_submission ignore_started_event identity_defer_unbounded wrong_task_arms_timer \
-  omit_bridge_started_event omit_steer_started_event omit_queue_deadline \
+  omit_bridge_started_event omit_steer_started_event omit_queue_deadline omit_left_fifo_response_fallback \
   queue_timeout_does_not_cancel ignore_post_deadline_requeue \
   ignore_post_deadline_steer_requeue cancel_queue_noop failure_returned_as_success; do
   cp ./src/runtime/codex-app-server/runtime.ts /tmp/test588-runtime.ts
