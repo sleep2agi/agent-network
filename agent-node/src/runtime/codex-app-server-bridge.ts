@@ -54,6 +54,16 @@ export interface PendingTurn {
   clientUserMessageId: string;
   submittedAt: number;
   turnId?: string;
+  /** Raw id returned by turn/start; may be superseded by a goal successor race. */
+  responseTurnId?: string;
+  /** True once an app-server userMessage echoes our exact client id. */
+  identityConfirmed?: boolean;
+  /** task_started must precede any terminal task event. */
+  startAnnounced?: boolean;
+  /** An unknown successor appeared before our client-id echo. */
+  competingTurnObserved?: boolean;
+  /** Terminal raced turn/start response or identity confirmation. */
+  deferredTerminal?: { turnId: string; status?: string; error?: string };
   agentTextChunks: string[];
   finalText?: string;
 }
@@ -92,6 +102,7 @@ export interface ActiveTurnReconciliation {
  *   - "waiting_human"     → WaitingApproval (bridge did not respond)
  *   - "approval_resolved" → { reverseRequestId } — from serverRequest/resolved
  *   - "task_started"      → { taskId, turnId, steered } — model budget starts
+ *   - "task_turn_rebound" → { taskId, fromTurnId, toTurnId } — client-id repair
  *   - "task_reply"        → { taskId, text }  — final agent message
  *   - "task_error"        → { taskId, error }
  *   - "cross_thread_drop" → { event } — event for a thread we don't own
@@ -123,6 +134,8 @@ export class CodexAppServerBridge extends EventEmitter {
    */
   private turnClaimed = false;
   private pendingTurns = new Map<string, PendingTurn>();
+  /** Stable task identity across turn-id replacement races. */
+  private pendingByClientUserMessageId = new Map<string, PendingTurn>();
   /** Reverse-request ids we've observed but not resolved (bridge policy). */
   private waitingApprovals = new Map<number, WaitingApproval>();
   /**
@@ -251,6 +264,10 @@ export class CodexAppServerBridge extends EventEmitter {
       submittedAt: Date.now(),
       agentTextChunks: [],
     };
+    // Install the stable identity before the RPC. Notifications can race the
+    // turn/start response, and Codex may replace the response turn id when an
+    // automatic goal successor starts at the same idle boundary.
+    this.pendingByClientUserMessageId.set(clientUserMessageId, pending);
     // Optimistically claim active so a concurrent call races cleanly.
     this.setStatus("working");
 
@@ -262,27 +279,83 @@ export class CodexAppServerBridge extends EventEmitter {
         input: [{ type: "text", text: promptPrefix + input.text }],
       });
     } catch (e) {
+      // If the server accepted the turn but the RPC response was lost, the
+      // echoed user-message client id is stronger evidence than the failed
+      // response transport. Preserve the accepted task instead of duplicating
+      // it on retry.
+      if (pending.identityConfirmed && pending.turnId) {
+        this.announcePendingStart(pending);
+        return pending.turnId;
+      }
+      this.pendingByClientUserMessageId.delete(clientUserMessageId);
       this.turnClaimed = false;
       this.setStatus("idle");
       throw e;
     }
-    const turnId = extractTurnId(resp);
-    if (!turnId) {
+    const responseTurnId = extractTurnId(resp);
+    pending.responseTurnId = responseTurnId ?? undefined;
+    if (!responseTurnId && !pending.turnId) {
+      this.pendingByClientUserMessageId.delete(clientUserMessageId);
       this.turnClaimed = false;
       this.setStatus("idle");
       throw new Error(
         `${this.label}: turn/start response did not include a turnId (task=${input.taskId})`,
       );
     }
+    if (!pending.turnId && responseTurnId) {
+      this.bindPendingToTurn(pending, responseTurnId, false);
+    } else if (responseTurnId && pending.turnId !== responseTurnId) {
+      this.emit("task_turn_rebound", {
+        taskId: pending.taskId,
+        fromTurnId: responseTurnId,
+        toTurnId: pending.turnId,
+        clientUserMessageId,
+      });
+    }
+    this.announcePendingStart(pending);
+    return pending.turnId!;
+  }
+
+  private bindPendingToTurn(
+    pending: PendingTurn,
+    turnId: string,
+    identityConfirmed: boolean,
+  ): void {
+    const previousTurnId = pending.turnId;
+    if (previousTurnId && previousTurnId !== turnId && this.pendingTurns.get(previousTurnId) === pending) {
+      this.pendingTurns.delete(previousTurnId);
+    }
     pending.turnId = turnId;
+    if (identityConfirmed) pending.identityConfirmed = true;
     this.pendingTurns.set(turnId, pending);
     this.activeTurnId = turnId;
     if (this.externalActiveTurnId === turnId) {
       this.externalActiveTurnId = null;
       this.externalActiveTurnSteerable = false;
     }
-    this.emit("task_started", { taskId: input.taskId, turnId, steered: false });
-    return turnId;
+    if (previousTurnId && previousTurnId !== turnId) {
+      this.emit("task_turn_rebound", {
+        taskId: pending.taskId,
+        fromTurnId: previousTurnId,
+        toTurnId: turnId,
+        clientUserMessageId: pending.clientUserMessageId,
+      });
+    }
+  }
+
+  private announcePendingStart(pending: PendingTurn): void {
+    if (pending.startAnnounced || !pending.turnId) return;
+    pending.startAnnounced = true;
+    this.emit("task_started", {
+      taskId: pending.taskId,
+      turnId: pending.turnId,
+      steered: false,
+    });
+    const deferred = pending.deferredTerminal;
+    if (deferred && deferred.turnId === pending.turnId) {
+      pending.deferredTerminal = undefined;
+      this.finishOwnedTurn(pending.turnId, deferred);
+    }
   }
 
   /**
@@ -559,6 +632,12 @@ export class CodexAppServerBridge extends EventEmitter {
     if (!turnId) return;
     if (!this.pendingTurns.has(turnId)) {
       const ownedTurnWasActive = this.activeTurnId !== null;
+      const activePending = this.activeTurnId
+        ? this.pendingTurns.get(this.activeTurnId)
+        : undefined;
+      if (activePending && !activePending.identityConfirmed) {
+        activePending.competingTurnObserved = true;
+      }
       // A turn we didn't start — e.g. the human TUI. Track its exact id so
       // authenticated Dashboard chat can use turn/steer. We still never map
       // a reply unless at least one task was explicitly and successfully
@@ -608,10 +687,29 @@ export class CodexAppServerBridge extends EventEmitter {
     const p = params as {
       threadId?: string;
       turnId?: string;
-      item?: { type?: string; text?: string; phase?: string };
+      item?: { type?: string; text?: string; phase?: string; clientId?: string };
     };
     if (!p || p.threadId !== this.threadId) return;
     if (typeof p.turnId !== "string") return;
+
+    // Codex can accept turn/start with response id A, then let an automatic
+    // goal successor win the same idle boundary and persist our user message
+    // under turn id B. The echoed clientId is generated from the immutable Hub
+    // task id and is therefore the only deterministic cross-surface join key.
+    // Rebind before consuming answer/terminal events for B.
+    if (p.item?.type === "userMessage" && typeof p.item.clientId === "string") {
+      const byClientId = this.pendingByClientUserMessageId.get(p.item.clientId);
+      if (byClientId) {
+        this.bindPendingToTurn(byClientId, p.turnId, true);
+        const deferred = byClientId.deferredTerminal;
+        if (deferred) {
+          byClientId.deferredTerminal = undefined;
+          if (deferred.turnId === p.turnId && byClientId.startAnnounced) {
+            this.finishOwnedTurn(p.turnId, deferred);
+          }
+        }
+      }
+    }
     const pending = this.pendingTurns.get(p.turnId);
     if (!pending) {
       const steered = this.steeredTurns.get(p.turnId);
@@ -663,6 +761,25 @@ export class CodexAppServerBridge extends EventEmitter {
         if (this.waitingApprovals.size === 0) this.setStatus("idle");
         void this.drainQueue();
       }
+      return;
+    }
+    // Preserve ordering (task_started before task_reply/error) when
+    // notifications beat the turn/start response. Also distrust a terminal
+    // for the response id after a distinct successor appeared but before the
+    // exact client-id echo confirms which turn actually owns the task.
+    const terminalNeedsIdentity =
+      Boolean(p.turn?.error?.message) ||
+      p.turn?.status === "failed" ||
+      p.turn?.status === "interrupted";
+    if (
+      !pending.startAnnounced ||
+      (!pending.identityConfirmed && (pending.competingTurnObserved || terminalNeedsIdentity))
+    ) {
+      pending.deferredTerminal = {
+        turnId,
+        status: p.turn?.status,
+        error: p.turn?.error?.message,
+      };
       return;
     }
     this.finishOwnedTurn(turnId, {
@@ -724,7 +841,7 @@ export class CodexAppServerBridge extends EventEmitter {
             id?: string;
             status?: string;
             error?: { message?: string } | null;
-            items?: Array<{ type?: string; text?: string; phase?: string }>;
+            items?: Array<{ type?: string; text?: string; phase?: string; clientId?: string }>;
           }>;
         };
       }>("thread/read", { threadId: this.threadId, includeTurns: true });
@@ -736,11 +853,28 @@ export class CodexAppServerBridge extends EventEmitter {
         return { recovered: false, turnId: activeAtStart };
       }
 
-      const turn = result?.thread?.turns?.find((candidate) => candidate.id === activeAtStart);
+      const turns = result?.thread?.turns ?? [];
+      const activePending = ownedAtStart
+        ? this.pendingTurns.get(activeAtStart)
+        : undefined;
+      let turn = turns.find((candidate) => candidate.id === activeAtStart);
+      if (activePending) {
+        const clientMatchedTurn = turns.find((candidate) =>
+          candidate.items?.some((item) =>
+            item.type === "userMessage" &&
+            item.clientId === activePending.clientUserMessageId
+          )
+        );
+        if (clientMatchedTurn?.id) {
+          this.bindPendingToTurn(activePending, clientMatchedTurn.id, true);
+          turn = clientMatchedTurn;
+        }
+      }
+      const resolvedTurnId = activePending?.turnId ?? activeAtStart;
       if (!turn || !isTerminalTurnStatus(turn.status)) {
         return {
           recovered: false,
-          turnId: activeAtStart,
+          turnId: resolvedTurnId,
           status: turn?.status ?? extractThreadStatus(result?.thread?.status),
         };
       }
@@ -753,7 +887,7 @@ export class CodexAppServerBridge extends EventEmitter {
           typeof item.text === "string"
         )?.text;
       const recovered = ownedAtStart
-        ? this.finishOwnedTurn(activeAtStart, {
+        ? this.finishOwnedTurn(resolvedTurnId, {
           status: turn.status,
           error: turn.error?.message,
           finalText,
@@ -764,9 +898,9 @@ export class CodexAppServerBridge extends EventEmitter {
           finalText,
         });
       if (recovered) {
-        this.emit("turn_reconciled", { turnId: activeAtStart, status: turn.status });
+        this.emit("turn_reconciled", { turnId: resolvedTurnId, status: turn.status });
       }
-      return { recovered, turnId: activeAtStart, status: turn.status };
+      return { recovered, turnId: resolvedTurnId, status: turn.status };
     })().finally(() => {
       this.reconciliationInFlight = null;
     });
@@ -781,6 +915,7 @@ export class CodexAppServerBridge extends EventEmitter {
     if (!pending) return false;
     if (terminal.finalText) pending.finalText = terminal.finalText;
     this.pendingTurns.delete(turnId);
+    this.pendingByClientUserMessageId.delete(pending.clientUserMessageId);
     if (this.activeTurnId === turnId) {
       this.activeTurnId = null;
       this.turnClaimed = false;

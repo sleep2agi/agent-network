@@ -203,6 +203,145 @@ describe("CodexAppServerBridge — bootstrap + task mapping", () => {
     expect(bridge.activeTurn()).toBeNull();
   });
 
+  test("clientUserMessageId rebinds a task when a goal successor replaces the turn/start response id", async () => {
+    await client.close();
+    await app.stop();
+    app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize" || msg.method === "thread/resume") {
+          return respond({ result: {} });
+        }
+        if (msg.method === "thread/read") {
+          return respond({ result: { thread: { status: { type: "active" }, turns: [] } } });
+        }
+        if (msg.method === "turn/start") {
+          return respond({ result: { turn: { id: "turn_response_phantom" } } });
+        }
+      },
+    });
+    client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    await bridge.bootstrap();
+
+    const started: Array<{ taskId: string; turnId: string }> = [];
+    const rebound: Array<{ taskId: string; fromTurnId: string; toTurnId: string }> = [];
+    const replies: Array<{ taskId: string; text: string }> = [];
+    const errors: Array<{ taskId: string; error: string }> = [];
+    bridge.on("task_started", (event) => started.push(event as never));
+    bridge.on("task_turn_rebound", (event) => rebound.push(event as never));
+    bridge.on("task_reply", (event) => replies.push(event as never));
+    bridge.on("task_error", (event) => errors.push(event as never));
+
+    const result = await bridge.submitTask({ taskId: "goal-race", text: "answer me" });
+    expect(result).toEqual({ started: true, turnId: "turn_response_phantom" });
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "turn/started",
+      params: { threadId: THREAD, turn: { id: "turn_actual_successor", status: "inProgress" } },
+    });
+    // The response-id turn can report interrupted while the actual successor
+    // is taking ownership. It must not fail the Hub task before identity is
+    // confirmed by the echoed client id.
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "turn/completed",
+      params: { threadId: THREAD, turn: { id: "turn_response_phantom", status: "interrupted" } },
+    });
+    await tick(10);
+    expect(errors).toEqual([]);
+    expect(replies).toEqual([]);
+
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        threadId: THREAD,
+        turnId: "turn_actual_successor",
+        item: { type: "userMessage", clientId: "anet:goal-race" },
+      },
+    });
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        threadId: THREAD,
+        turnId: "turn_actual_successor",
+        item: { type: "agentMessage", phase: "final_answer", text: "race-safe reply" },
+      },
+    });
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "turn/completed",
+      params: { threadId: THREAD, turn: { id: "turn_actual_successor", status: "completed" } },
+    });
+    await tick(20);
+
+    expect(started).toEqual([{ taskId: "goal-race", turnId: "turn_response_phantom", steered: false }]);
+    expect(rebound).toEqual([{
+      taskId: "goal-race",
+      fromTurnId: "turn_response_phantom",
+      toTurnId: "turn_actual_successor",
+      clientUserMessageId: "anet:goal-race",
+    }]);
+    expect(errors).toEqual([]);
+    expect(replies).toEqual([{ taskId: "goal-race", text: "race-safe reply" }]);
+    expect(bridge.activeTurn()).toBeNull();
+    expect(bridge.pendingTurnCount()).toBe(0);
+  });
+
+  test("client-id ownership observed before the RPC response wins without reversing task event order", async () => {
+    await client.close();
+    await app.stop();
+    app = await startFakeApp({
+      onRequest: (msg, respond, broadcast) => {
+        if (msg.method === "initialize" || msg.method === "thread/resume") {
+          return respond({ result: {} });
+        }
+        if (msg.method === "turn/start") {
+          broadcast({
+            jsonrpc: "2.0",
+            method: "item/completed",
+            params: {
+              threadId: THREAD,
+              turnId: "turn_actual_early",
+              item: { type: "userMessage", clientId: "anet:early-race" },
+            },
+          });
+          setTimeout(() => respond({ result: { turn: { id: "turn_response_late" } } }), 5);
+        }
+      },
+    });
+    client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    await bridge.bootstrap();
+
+    const events: string[] = [];
+    bridge.on("task_started", () => events.push("started"));
+    bridge.on("task_reply", () => events.push("reply"));
+    const result = await bridge.submitTask({ taskId: "early-race", text: "answer me" });
+    expect(result).toEqual({ started: true, turnId: "turn_actual_early" });
+    expect(bridge.activeTurn()).toBe("turn_actual_early");
+
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        threadId: THREAD,
+        turnId: "turn_actual_early",
+        item: { type: "agentMessage", phase: "final_answer", text: "early reply" },
+      },
+    });
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "turn/completed",
+      params: { threadId: THREAD, turn: { id: "turn_actual_early", status: "completed" } },
+    });
+    await tick(10);
+    expect(events).toEqual(["started", "reply"]);
+  });
+
   test("agentMessage/delta accumulates when server omits finalText", async () => {
     const turnId = await bridge.startTaskTurn({ taskId: "task_1", text: "hi" });
     const replies: Array<{ taskId: string; text: string }> = [];
@@ -276,6 +415,15 @@ describe("CodexAppServerBridge — bootstrap + task mapping", () => {
     bridge.on("task_error", (e) => errors.push(e as never));
     app.broadcast({
       jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        threadId: THREAD,
+        turnId,
+        item: { type: "userMessage", clientId: "anet:task_1" },
+      },
+    });
+    app.broadcast({
+      jsonrpc: "2.0",
       method: "turn/completed",
       params: { threadId: THREAD, turn: { id: turnId, error: { message: "model unavailable" } } },
     });
@@ -291,6 +439,15 @@ describe("CodexAppServerBridge — bootstrap + task mapping", () => {
     const errors: Array<{ taskId: string; error: string }> = [];
     bridge.on("task_reply", (r) => replies.push(r));
     bridge.on("task_error", (e) => errors.push(e as never));
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        threadId: THREAD,
+        turnId,
+        item: { type: "userMessage", clientId: "anet:task_interrupted" },
+      },
+    });
     app.broadcast({
       jsonrpc: "2.0",
       method: "turn/completed",
@@ -967,6 +1124,57 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
     expect(bridge.activeTurn()).toBe("turn_reconcile_2");
     expect(app.received.filter((entry) => (entry as { method?: string }).method === "turn/start")).toHaveLength(2);
 
+    await client.close();
+    await app.stop();
+  });
+
+  test("thread/read uses clientUserMessageId to recover a replacement turn when all live item events were lost", async () => {
+    const app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize" || msg.method === "thread/resume") {
+          return respond({ result: {} });
+        }
+        if (msg.method === "turn/start") {
+          return respond({ result: { turn: { id: "turn_history_phantom" } } });
+        }
+        if (msg.method === "thread/read" && !(msg.params as { includeTurns?: boolean })?.includeTurns) {
+          return respond({ result: { thread: { status: { type: "active" } } } });
+        }
+        if (msg.method === "thread/read") {
+          return respond({
+            result: {
+              thread: {
+                status: { type: "active" },
+                turns: [{
+                  id: "turn_history_actual",
+                  status: "completed",
+                  items: [
+                    { type: "userMessage", clientId: "anet:history-race" },
+                    { type: "agentMessage", phase: "final_answer", text: "history rebound reply" },
+                  ],
+                }],
+              },
+            },
+          });
+        }
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    await bridge.bootstrap();
+    const replies: Array<{ taskId: string; text: string }> = [];
+    bridge.on("task_reply", (event) => replies.push(event as never));
+
+    await bridge.submitTask({ taskId: "history-race", text: "first" });
+    expect(await bridge.reconcileActiveTurn(true)).toEqual({
+      recovered: true,
+      turnId: "turn_history_actual",
+      status: "completed",
+    });
+    expect(replies).toEqual([{ taskId: "history-race", text: "history rebound reply" }]);
+    expect(bridge.activeTurn()).toBeNull();
+    expect(bridge.pendingTurnCount()).toBe(0);
     await client.close();
     await app.stop();
   });
