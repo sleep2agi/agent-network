@@ -841,6 +841,44 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
     await app.stop();
   });
 
+  test("cancelQueuedTask removes only the named FIFO row before it can execute", async () => {
+    const startedTaskIds: string[] = [];
+    let seq = 0;
+    const app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize" || msg.method === "thread/resume") return respond({ result: {} });
+        if (msg.method === "turn/start") {
+          const clientId = String((msg.params as { clientUserMessageId?: string })?.clientUserMessageId ?? "");
+          startedTaskIds.push(clientId.replace(/^anet:/, ""));
+          return respond({ result: { turn: { id: `turn_cancel_${++seq}` } } });
+        }
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    await bridge.bootstrap();
+
+    await bridge.submitTask({ taskId: "cancel-active", text: "first" });
+    await bridge.submitTask({ taskId: "cancel-me", text: "must never execute" });
+    await bridge.submitTask({ taskId: "cancel-survivor", text: "third" });
+    expect(bridge.queueDepth()).toBe(2);
+    expect(bridge.cancelQueuedTask("missing-task")).toBe(false);
+    expect(bridge.cancelQueuedTask("cancel-me")).toBe(true);
+    expect(bridge.queueDepth()).toBe(1);
+
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "turn/completed",
+      params: { threadId: THREAD, turn: { id: "turn_cancel_1", status: "completed" } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(startedTaskIds).toEqual(["cancel-active", "cancel-survivor"]);
+    expect(bridge.activeTurn()).toBe("turn_cancel_2");
+    await client.close();
+    await app.stop();
+  });
+
   test("thread/read recovers a completed owned turn while a successor keeps the thread active", async () => {
     let seq = 0;
     let firstTurnIsPersistedComplete = false;

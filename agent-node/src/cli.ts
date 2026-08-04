@@ -2921,7 +2921,7 @@ async function processWithCodexAppServer(
   taskId: string | null,
   steerIfExternalTurn = false,
 ): Promise<string> {
-  const { openCodexAppServerRuntime, codexAppServerThink } =
+  const { openCodexAppServerRuntime, codexAppServerThink, codexAppServerReplyOrThrow } =
     await import("./runtime/codex-app-server/runtime");
 
   const existingSession = codexAppServerSessionManager.current();
@@ -2975,12 +2975,9 @@ async function processWithCodexAppServer(
     log,
   });
 
-  if (outcome.failed) {
-    // Surface as a runtime error string; processTask's failure detector
-    // treats the "错误:" marker as failed=true (dashboard shows real fail).
-    return outcome.replyText;
-  }
-  return outcome.replyText || "（无回复）";
+  // Throw failed outcomes into processTask's existing failure path so the Hub
+  // records `failed`, rather than the old false-success `replied` state.
+  return codexAppServerReplyOrThrow(outcome);
 }
 
 async function processWithGrok(task: string, from: string, images?: string[]): Promise<string> {

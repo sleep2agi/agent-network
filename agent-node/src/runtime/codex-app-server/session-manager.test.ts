@@ -13,6 +13,8 @@ describe("createCodexSessionManager", () => {
     );
     expect(body).toContain("codexAppServerSessionManager.getOrOpen(async () =>");
     expect(body).toContain("codexAppServerThink(session,");
+    expect(body).toContain("return codexAppServerReplyOrThrow(outcome);");
+    expect(body).not.toContain("return outcome.replyText;");
   });
 
   test("concurrent Dashboard handlers share one complete open attempt", async () => {

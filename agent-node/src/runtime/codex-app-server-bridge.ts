@@ -855,6 +855,20 @@ export class CodexAppServerBridge extends EventEmitter {
     return this.taskQueue.length;
   }
 
+  /**
+   * Remove one task that has not begun `turn/start`/`turn/steer` yet.
+   * Used by the runtime's independent queue-wait deadline so a timed-out
+   * Dashboard row cannot silently execute later after its Hub lifecycle has
+   * already been closed as failed.
+   */
+  cancelQueuedTask(taskId: string): boolean {
+    const index = this.taskQueue.findIndex((task) => task.taskId === taskId);
+    if (index < 0) return false;
+    this.taskQueue.splice(index, 1);
+    this.emit("task_queue_cancelled", { taskId, depth: this.taskQueue.length });
+    return true;
+  }
+
   private setStatus(next: BridgeStatus): void {
     if (this.status === next) return;
     const previous = this.status;

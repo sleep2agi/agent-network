@@ -231,6 +231,13 @@ export interface CodexAppServerThinkResult {
   queued: boolean;
 }
 
+export function codexAppServerReplyOrThrow(outcome: CodexAppServerThinkResult): string {
+  if (outcome.failed) {
+    throw new Error(outcome.replyText.replace(/^codex-app-server 错误:\s*/, ""));
+  }
+  return outcome.replyText || "（无回复）";
+}
+
 /**
  * Run one Agent Network task through the bridge. Submits the task (which
  * queues FIFO if a turn is already in flight) and resolves when THIS task's
@@ -243,6 +250,8 @@ export function codexAppServerThink(
     text: string;
     from?: string;
     timeoutMs?: number;
+    /** FIFO admission deadline, separate from model execution. Default 30m. */
+    queueTimeoutMs?: number;
     /** Test seam; production defaults to a 5s authoritative thread/read. */
     reconciliationIntervalMs?: number;
     log?: (m: string) => void;
@@ -251,6 +260,10 @@ export function codexAppServerThink(
   },
 ): Promise<CodexAppServerThinkResult> {
   const timeoutMs = opts.timeoutMs ?? 10 * 60_000;
+  const queueTimeoutMs = opts.queueTimeoutMs ?? 30 * 60_000;
+  const queueTimeoutLabel = queueTimeoutMs >= 60_000
+    ? `${Math.ceil(queueTimeoutMs / 60_000)} 分钟`
+    : `${Math.ceil(queueTimeoutMs / 1000)} 秒`;
   const reconciliationIntervalMs = opts.reconciliationIntervalMs ?? 5_000;
   const log = opts.log ?? (() => {});
   const { bridge } = session;
@@ -258,6 +271,7 @@ export function codexAppServerThink(
   return new Promise<CodexAppServerThinkResult>((resolve) => {
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let queueTimer: ReturnType<typeof setTimeout> | undefined;
     let reconciliationTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = (r: CodexAppServerThinkResult) => {
       if (settled) return;
@@ -266,6 +280,7 @@ export function codexAppServerThink(
       bridge.off("task_error", onError);
       bridge.off("task_started", onStarted);
       if (timer) clearTimeout(timer);
+      if (queueTimer) clearTimeout(queueTimer);
       if (reconciliationTimer) clearTimeout(reconciliationTimer);
       resolve(r);
     };
@@ -281,6 +296,10 @@ export function codexAppServerThink(
     };
     const startResponseTimer = () => {
       if (settled || timer) return;
+      if (queueTimer) {
+        clearTimeout(queueTimer);
+        queueTimer = undefined;
+      }
       timer = setTimeout(() => {
         finish({
           replyText: `codex-app-server 错误: 任务 ${opts.taskId} 超时（开始处理后 ${Math.round(timeoutMs / 1000)}s 内无最终回复）`,
@@ -323,6 +342,24 @@ export function codexAppServerThink(
     bridge.on("task_error", onError);
     bridge.on("task_started", onStarted);
     scheduleReconciliation();
+
+    queueTimer = setTimeout(() => {
+      // A task still present in FIFO must be removed before we report a queue
+      // timeout; otherwise it could execute later after its Hub row is already
+      // terminal. If it already left FIFO (start RPC in flight or a lost
+      // task_started event), switch to the normal response timer so the task
+      // remains finite without falsely cancelling a running turn.
+      if (!bridge.cancelQueuedTask(opts.taskId)) {
+        log(`[codex-app-server] queue deadline reached after task left FIFO; arming response timeout for ${opts.taskId}`);
+        startResponseTimer();
+        return;
+      }
+      finish({
+        replyText: `codex-app-server 错误: 任务 ${opts.taskId} 在队列中等待 ${queueTimeoutLabel}仍未开始`,
+        failed: true,
+        queued: true,
+      });
+    }, queueTimeoutMs);
 
     bridge
       .submitTask({
