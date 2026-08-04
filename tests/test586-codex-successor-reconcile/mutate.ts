@@ -20,6 +20,12 @@ switch (mutation) {
       `.find((candidate) => isTerminalTurnStatus(candidate.status));`,
     );
     break;
+  case "missing_turn_fail_open":
+    replaceExact(
+      `.find((candidate) => candidate.id === activeAtStart);`,
+      `.find((candidate) => candidate.id === activeAtStart) ?? { id: activeAtStart, status: "completed", items: [] };`,
+    );
+    break;
   case "drain_during_successor":
     replaceExact(
       `if (this.turnClaimed || this.activeTurnId || this.externalActiveTurnId) return;`,
