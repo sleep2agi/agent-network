@@ -88,14 +88,18 @@ if [ "$MODE" = enabled ]; then
   [ "$RC" -eq 0 ] || fail "enabled process did not complete"
   [ "$ENDED" = true ] || fail "enabled process lacked terminal event"
   [ "$WEB_CALLS" -gt 0 ] || fail "enabled process did not call web_search"
+  # Pinned upstream-behaviour monitor: Grok 0.2.93 does not carry the
+  # requested x.com domain restriction into the authoritative tool call.
+  # A future binary that starts doing so must turn this suite red so the
+  # security boundary and documentation are reviewed rather than silently
+  # inheriting different semantics.
+  [ "$ALLOWED_X" = false ] || fail "upstream web_search domain handling changed; review the capability boundary"
   [ "$URL_COUNT" -gt 0 ] || fail "enabled process returned no x.com status URL"
   FIRST_URL=$(bun -e 'const x=await Bun.file(process.argv[1]).json(); process.stdout.write(x.xStatusUrls[0])' "$EVIDENCE")
   HTTP_CODE=$(curl -L -sS -o /dev/null -w '%{http_code}' --max-time 20 "$FIRST_URL")
   [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]] || fail "returned X status URL did not resolve successfully"
   log "x_status_url_http=$HTTP_CODE"
-  if [ "$ALLOWED_X" != true ]; then
-    log "LIMITATION: Grok used general web_search rather than allowed_domains=[x.com]"
-  fi
+  log "PINNED_UPSTREAM_FACT: Grok used general web_search rather than allowed_domains=[x.com]"
 else
   [ "$WEB_CALLS" -eq 0 ] || fail "restricted process called web_search"
   [ "$URL_COUNT" -eq 0 ] || fail "restricted process returned an unverified x.com status URL"

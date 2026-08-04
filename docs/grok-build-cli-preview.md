@@ -207,6 +207,8 @@ fallback if the native TUI path fails.
 - Do not use this runtime for production work or connect it to a public/untrusted Hub.
 - The co-presence profile deliberately runs in immutable always-approve mode. It has no per-call human confirmation.
 - Automatic approval is limited to the exact process profile. The default inventory is `todo_write`, `search_tool`, and `use_tool`. The explicit `--tools WebSearch` profile adds only general `web_search`; filesystem, shell, WebFetch/media, project/host MCP, and subagents remain unavailable.
+- Search queries leave the machine and may contain text derived from the current conversation. Do not place secrets or private source material in a task sent to the WebSearch profile.
+- Search results are untrusted model input and may contain prompt injection. The current blast radius is limited only because this profile still has no shell, filesystem, WebFetch/media, project/host MCP, or subagent tools. Adding any tool to this profile requires a fresh security review of that assumption.
 - Grok children and runtime lock helpers receive exact, from-empty environment allowlists. CommHub/cloud credentials are not inherited by those processes.
 - The shared-TUI preview has one of two exact inventories: `[todo_write,search_tool,use_tool]` or explicit `[todo_write,search_tool,use_tool,web_search]`. MCP access is limited to its single runtime-owned CommHub server. Do not treat either profile as a filesystem-, WebFetch/media-, subagent-, or shell-capable coding runtime.
 - Folder trust is runtime-owned, mode `0600`, and contains exactly the current canonical working directory; project executable configuration is a startup error rather than implicitly trusted code.

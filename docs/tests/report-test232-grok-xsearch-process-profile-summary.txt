@@ -4,7 +4,7 @@ Date: 2026-08-04
 Base: db5a9ed6
 Scope: process-profile implementation plus real Grok headless and interactive-TUI evidence; no online node change.
 Docker tag: anet-test232:dev
-Docker image: sha256:c69ac3abf7f2799d087447a3121aedadb6008b8cbe3a531d59a065ab61998be0
+Docker image: sha256:9f21ee3b3c5faa988f49753a43887491257f3a43f6f4180f7c399c559bf23709
 Grok binary: 0.2.93 (f00f96316d)
 Grok SHA256: 4e0738d3b5550f3c842bc0ae69f468815c6329c008a110d0c27a694dc3401135
 
@@ -64,6 +64,22 @@ general web_search and returned an X URL. Enabling this capability is therefore
 general web-search access; it is not a technically enforced x.com-only domain
 sandbox. The implementation must expose it as an explicit process profile and
 must not advertise an X-only network boundary.
+
+The enabled Docker gate deliberately asserts `allowed_domains_x=false`. This
+is a pinned upstream-behaviour monitor, not a desired capability: if a later
+Grok build begins carrying the requested domain restriction into its
+authoritative tool call, the suite turns red and forces a boundary review.
+
+Two risks remain explicit:
+
+- the search query itself leaves the machine and can contain text derived from
+  conversation context, creating a data-exfiltration surface;
+- search results are untrusted input placed back into a tool-using model's
+  context, creating a prompt-injection surface.
+
+The current blast radius is limited only by the exact process profile: shell,
+filesystem, WebFetch/media, project/host MCP, and subagent capabilities remain
+absent. Adding a capability changes that premise and requires a new review.
 
 Evidence handling
 -----------------
