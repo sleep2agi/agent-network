@@ -1,7 +1,7 @@
 FROM oven/bun:1.3.1
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends bubblewrap ca-certificates coreutils curl python3 util-linux \
+  && apt-get install -y --no-install-recommends bubblewrap ca-certificates coreutils curl gcc libc6-dev python3 util-linux \
   && rm -rf /var/lib/apt/lists/* \
   && chmod 4755 /usr/bin/bwrap
 

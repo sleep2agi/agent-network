@@ -4,7 +4,7 @@ Date: 2026-08-04
 Base: db5a9ed6
 Scope: process-profile implementation plus real Grok headless and interactive-TUI evidence; no online node change.
 Docker tag: anet-test232:dev
-Docker image: sha256:9f21ee3b3c5faa988f49753a43887491257f3a43f6f4180f7c399c559bf23709
+Docker image: sha256:a639782760cb11bfd20587ccc92e4d0cedea18b2cb7d5a69e3f7202be28864d7
 Grok binary: 0.2.93 (f00f96316d)
 Grok SHA256: 4e0738d3b5550f3c842bc0ae69f468815c6329c008a110d0c27a694dc3401135
 
@@ -80,6 +80,15 @@ Two risks remain explicit:
 The current blast radius is limited only by the exact process profile: shell,
 filesystem, WebFetch/media, project/host MCP, and subagent capabilities remain
 absent. Adding a capability changes that premise and requires a new review.
+
+Regression suite
+----------------
+
+The final fixed-tag Docker image ran the complete
+`agent-node/src/runtime/grok-copresence` directory: 137 tests passed, 0 failed,
+732 assertions. The image includes a native compiler because the lifecycle
+suite builds a real forged-argv listener fixture; without `cc`, that fixture
+fails at setup rather than testing production behavior.
 
 Evidence handling
 -----------------
