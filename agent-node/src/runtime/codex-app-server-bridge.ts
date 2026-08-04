@@ -775,6 +775,11 @@ export class CodexAppServerBridge extends EventEmitter {
       !pending.startAnnounced ||
       (!pending.identityConfirmed && (pending.competingTurnObserved || terminalNeedsIdentity))
     ) {
+      // This cached terminal cannot wait forever: startOwnedTaskTurn announces
+      // the response-id claim before returning, and codexAppServerThink arms
+      // its bounded model-response timer from task_started (with the resolved
+      // submit result as a compatibility fallback). The cross-layer
+      // identity-never-confirms test protects that dependency.
       pending.deferredTerminal = {
         turnId,
         status: p.turn?.status,

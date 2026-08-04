@@ -16,6 +16,10 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { CodexAppServerClient } from "./codex-app-server-client";
 import { CodexAppServerBridge } from "./codex-app-server-bridge";
+import {
+  codexAppServerThink,
+  type CodexAppServerRuntimeSession,
+} from "./codex-app-server/runtime";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Fake app-server that autoreplies to initialize / thread/resume / turn/start.
@@ -376,6 +380,73 @@ describe("CodexAppServerBridge — bootstrap + task mapping", () => {
     await tick(10);
     expect(events).toEqual(["started", "reply"]);
     expect(bridge.activeTurn()).toBeNull();
+  });
+
+  test("real bridge + runtime bounds a deferred terminal when exact client identity never arrives", async () => {
+    await client.close();
+    await app.stop();
+    app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize" || msg.method === "thread/resume") {
+          return respond({ result: {} });
+        }
+        if (msg.method === "thread/read") {
+          return respond({ result: { thread: { status: { type: "active" }, turns: [] } } });
+        }
+        if (msg.method === "turn/start") {
+          return respond({ result: { turn: { id: "turn_identity_phantom" } } });
+        }
+      },
+    });
+    client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    await bridge.bootstrap();
+
+    const thinking = codexAppServerThink(
+      { bridge } as unknown as CodexAppServerRuntimeSession,
+      {
+        taskId: "identity-never-confirms-real-bridge",
+        text: "must remain finite across both layers",
+        timeoutMs: 25,
+        queueTimeoutMs: 500,
+        reconciliationIntervalMs: 0,
+      },
+    );
+    while (!app.received.some((message) => (message as { method?: string }).method === "turn/start")) {
+      await tick(1);
+    }
+    await tick(1);
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "turn/started",
+      params: { threadId: THREAD, turn: { id: "turn_competing_without_our_client_id", status: "inProgress" } },
+    });
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "turn/completed",
+      params: { threadId: THREAD, turn: { id: "turn_identity_phantom", status: "interrupted" } },
+    });
+
+    const observed = await Promise.race([
+      thinking.then((result) => ({ kind: "result" as const, result })),
+      new Promise<{ kind: "hung" }>((resolve) => setTimeout(() => resolve({ kind: "hung" }), 100)),
+    ]);
+    if (observed.kind === "hung") {
+      bridge.emit("task_reply", {
+        taskId: "identity-never-confirms-real-bridge",
+        text: "mutation cleanup",
+      });
+      await thinking;
+    }
+
+    expect(observed.kind).toBe("result");
+    if (observed.kind !== "result") return;
+    expect(observed.result.failed).toBe(true);
+    expect(observed.result.queued).toBe(false);
+    expect(observed.result.replyText).toContain("开始处理后");
+    expect(observed.result.replyText).not.toContain("在队列中等待");
+    expect(bridge.pendingTurnCount()).toBe(1);
   });
 
   test("agentMessage/delta accumulates when server omits finalText", async () => {
