@@ -105,9 +105,13 @@ it warns instead of claiming the config change took effect.
 The preview uses one runtime-owned, mode-`0600` agent profile selected with
 the TUI-effective `--agent` flag. By default its exact model-tool inventory is
 `[todo_write,search_tool,use_tool]`. The latter two expose only one
-runtime-owned CommHub MCP server; host and project MCP definitions are never
-loaded. Filesystem, shell, web, media, scheduler, and subagent tools remain
-unavailable. One explicit process-level profile is also supported:
+runtime-owned outbound-only CommHub MCP server; host and project MCP
+definitions are never loaded. That MCP child exposes only `send_task`,
+`send_message`, and `get_all_status`. It does not register a channel
+capability, open an SSE/inbox connection, claim or acknowledge tasks, or report
+lifecycle/presence. The outer `agent-node` process remains the single inbox and
+lifecycle owner. Filesystem, shell, web, media, scheduler, and subagent tools
+remain unavailable. One explicit process-level profile is also supported:
 
 ```bash
 anet node create A站GrokTUI --runtime grok-build-cli --tools WebSearch

@@ -1,0 +1,117 @@
+# test235 — Grok CommHub MCP outbound-only ownership gate
+source_commit=d45d956f0125fc94b01e6f48db82e16bfbfbb320
+scope=structural MCP capabilities, real socket count, repeated task ownership, outbound tools, direct-call denial, mutation red
+
+$ network-typecheck bash -ceu cd\ /workspace/agent-network\ \&\&\ bun\ tsc\ --noEmit
+
+$ home-mode bun test /workspace/agent-node/src/runtime/grok-build-cli-home.test.ts
+bun test v1.3.14 (0d9b296a)
+
+agent-node/src/runtime/grok-build-cli-home.test.ts:
+(pass) prepareGrokCliHome > derives an opaque path segment and rejects dot identities [0.94ms]
+(pass) prepareGrokCliHome > accepts only the pinned Grok regular-file copy of source agent_id [8.47ms]
+(pass) prepareGrokCliHome > isolates config/trust, preserves a shared auth path, and creates stable sandbox profiles [2.45ms]
+(pass) prepareGrokCliHome > refuses broad-mode or symlinked source auth without repairing it [1.65ms]
+(pass) prepareGrokCliHome > repairs an existing Grok session store to owner-only modes [2.88ms]
+(pass) prepareGrokCliHome > does not follow a symlink while repairing an existing session store [1.49ms]
+(pass) prepareGrokCliHome > keeps the post-stop cleanup policy exact and reviewable [0.16ms]
+(pass) prepareGrokCliHome > removes exact empty read-only project placeholders before resume without admitting executable sources [5.93ms]
+(pass) prepareGrokCliHome > validates every exact project placeholder before unlinking any sibling [2.03ms]
+(pass) prepareGrokCliHome > does not let a fatal project counterexample starve independent state containment [2.54ms]
+(pass) prepareGrokCliHome > preserves nonempty, linked, wrong-mode, and wrong-type project counterexamples [5.79ms]
+(pass) prepareGrokCliHome > preserves real project extension directories and still rejects executable contents on resume [2.32ms]
+(pass) prepareGrokCliHome > removes only exact transient state and hardens retained post-stop state [7.12ms]
+(pass) prepareGrokCliHome > hardens only the native lock derived from the exact leader socket [1.37ms]
+(pass) prepareGrokCliHome > retains a non-empty leader log and rejects post-stop link attacks [3.08ms]
+(pass) prepareGrokCliHome > refuses a non-empty exact sandbox placeholder [1.43ms]
+(pass) prepareGrokCliHome > reclaims an empty mode-000 sandbox marker under a foreign pid without aborting [1.54ms]
+(pass) prepareGrokCliHome > keeps a non-empty foreign sandbox marker unreadable so it fails closed [1.27ms]
+(pass) prepareGrokCliHome > validates exact TUI process ids before mutation and refuses a placeholder symlink [1.60ms]
+(pass) prepareGrokCliHome > enables the single TUI leader only for explicit copresence mode [13.47ms]
+(pass) prepareGrokCliHome > admits only canonical owner-held commhub MCP artifacts [3.88ms]
+(pass) prepareGrokCliHome > rejects a shared auth path covered by a required sandbox deny before state mutation [0.74ms]
+(pass) prepareGrokCliHome > refuses to claim sandbox isolation when no deny target exists [0.89ms]
+(pass) prepareGrokCliHome > rejects a source GROK_HOME reached through an ancestor symlink before state mutation [0.94ms]
+(pass) prepareGrokCliHome > removes runtime-owned native hooks before every turn [1.75ms]
+(pass) prepareGrokCliHome > unlinks a runtime-owned hook symlink without touching its external target [1.67ms]
+(pass) prepareGrokCliHome > fails closed when a project native hook path exists [1.19ms]
+(pass) prepareGrokCliHome > trusts only the exact canonical nested cwd and atomically replaces stale grants [4.23ms]
+(pass) prepareGrokCliHome > rejects broad or symlinked folder-trust targets before writing trust state [1.94ms]
+(pass) prepareGrokCliHome > refuses a planted trust-store symlink and leaves its target untouched [2.26ms]
+(pass) prepareGrokCliHome > rejects every project executable source before granting folder trust [13.82ms]
+(pass) prepareGrokCliHome > does not impose the shared-folder strict policy on legacy headless mode [2.95ms]
+(pass) prepareGrokCliHome > rejects repo-root hooks from a nested cwd and dangling hook links [1.48ms]
+(pass) prepareGrokCliHome > rejects a symlinked project .grok directory [0.90ms]
+(pass) prepareGrokCliHome > rejects symlinked isolated homes and generated state without changing targets [2.25ms]
+(pass) prepareGrokCliHome > rejects a state-home path escape before chmod, removal, or writes [1.38ms]
+(pass) prepareGrokCliHome > requires a valid zero-hook inspect response [0.78ms]
+(pass) prepareGrokCliHome > flocks the canonical project inode across symlink aliases and releases cleanly [136.11ms]
+(pass) prepareGrokCliHome > gives the real flock holder only the exact helper environment [67.78ms]
+
+ 39 pass
+ 0 fail
+ 284 expect() calls
+Ran 39 tests across 1 file. [370.00ms]
+
+$ production-build bun build /workspace/agent-network/src/node-server.ts --outfile /tmp/node-server.js --target bun
+Bundled 221 modules in 48ms
+
+  node-server.js  0.50 MB  (entry point)
+
+
+$ production-socket-harness env MCP_BUNDLE=/tmp/node-server.js bun /test235/socket-harness.ts
+PASS assertions=68 outer_tasks=40 outbound_calls=12 mcp_hub_long_connections=0
+/bin/sh: 1: tmux: not found
+[10:24:42] [commhub] ENV: URL=http://127.0.0.1:34175 ALIAS=test235-grok RESUME_ID=grok-tes... TMUX=none CWD=/tmp/test235-bbLUmP PROJECT_ENV=-tmp-test235-bbLUmP MODE=outbound-only
+[10:24:42] [commhub] MCP stdio connected
+[10:24:42] [commhub] ready — outbound-only tools; no channel/SSE/inbox/lifecycle/presence owner
+[10:24:43] [commhub] shutting down outbound-only MCP client
+
+$ mutation-build bun build /workspace/agent-network/src/node-server.ts --outfile /tmp/node-server-mutated.js --target bun
+Bundled 221 modules in 52ms
+
+  node-server-mutated.js  0.50 MB  (entry point)
+
+/bin/sh: 1: tmux: not found
+[10:24:53] [commhub] ENV: URL=http://127.0.0.1:33139 ALIAS=test235-grok RESUME_ID=grok-tes... TMUX=none CWD=/tmp/test235-oyv4fG PROJECT_ENV=-tmp-test235-oyv4fG MODE=channel
+[10:24:53] [commhub] MCP stdio connected
+[10:24:53] [commhub] starting SSE listener...
+[10:24:53] [commhub] connecting to http://127.0.0.1:33139/events/test235-grok
+[10:24:53] [commhub] ready — waiting for events
+[10:24:53] [commhub] SSE connected as "test235-grok"
+[10:24:53] [commhub] registered as "test235-grok" (grok-tes)
+[10:24:53] [commhub] ← new_task: inbox_count=1 priority=normal
+[10:24:53] [commhub] ← new_task: inbox_count=1 priority=normal
+[10:24:53] [commhub] ← new_task: inbox_count=1 priority=normal
+[10:24:53] [commhub] ← new_task: inbox_count=1 priority=normal
+[10:24:53] [commhub] ← new_task: inbox_count=1 priority=normal
+[10:24:53] [commhub] ← new_task: inbox_count=1 priority=normal
+[10:24:53] [commhub] ← new_task: inbox_count=1 priority=normal
+[10:24:53] [commhub] ← new_task: inbox_count=1 priority=normal
+[10:24:53] [commhub] ← new_task: inbox_count=1 priority=normal
+[10:24:53] [commhub] ← new_task: inbox_count=1 priority=normal
+[10:24:53] [commhub] shutting down, reporting offline...
+[10:24:53] [commhub] ← new_task: inbox_count=1 priority=normal
+230 | 
+231 |   if (expectMutation) {
+232 |     if (!failures.length) {
+233 |       throw new Error("MUTATION_STAYED_GREEN: deleting outbound-only mode gate did not violate a socket or ownership assertion");
+234 |     }
+235 |     throw new Error(`EXPECTED_MUTATION_FAILURES (${failures.length})\n- ${failures.join("\n- ")}`);
+                    ^
+error: EXPECTED_MUTATION_FAILURES (7)
+- MCP omits channel capability
+- exact three outbound tools
+- only outer owner opens SSE
+- one total long-lived SSE socket
+- MCP child Hub established sockets zero at idle
+- MCP startup performs zero Hub tool calls
+- MCP inbound/lifecycle requests zero
+      at /test235/socket-harness.ts:235:15
+
+Bun v1.3.14 (Linux x64 baseline)
+PASS: witnessed-red outbound-only mutation rc=1
+
+$ runbook-gate bash -ceu $'\n  doc=/workspace/docs/grok-build-cli-preview.md\n  grep -Fq "runtime-owned outbound-only CommHub MCP server" "$doc"\n  grep -Fq "does not register a channel" "$doc"\n  grep -Fq "single inbox and" "$doc"\n'
+
+Summary: PASS (real MCP child; zero long-lived Hub sockets; 40/40 outer ownership; 12 outbound calls; mutation red)

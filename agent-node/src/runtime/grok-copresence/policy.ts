@@ -43,8 +43,8 @@ export function renderGrokCopresenceAgentProfile(): string {
     ...GROK_COPRESENCE_EFFECTIVE_TOOLS.map((tool) => `  - ${tool}`),
     "---",
     GROK_COPRESENCE_WEB_SEARCH_ENABLED
-      ? `${GROK_COPRESENCE_PROFILE_MARKER}: Answer the current user directly. The runtime-owned commhub MCP integration and general web_search are available; do not claim filesystem, shell, web-fetch/media, or subagent access. Web search is not an x.com-only network sandbox.`
-      : `${GROK_COPRESENCE_PROFILE_MARKER}: Answer the current user directly. Only the runtime-owned commhub MCP integration is available; do not claim filesystem, shell, web/media, or subagent access.`,
+      ? `${GROK_COPRESENCE_PROFILE_MARKER}: Answer the current user directly. The runtime-owned outbound-only commhub MCP integration and general web_search are available; do not claim inbound CommHub, lifecycle/presence ownership, filesystem, shell, web-fetch/media, or subagent access. Web search is not an x.com-only network sandbox.`
+      : `${GROK_COPRESENCE_PROFILE_MARKER}: Answer the current user directly. Only the runtime-owned outbound-only commhub MCP integration is available; do not claim inbound CommHub, lifecycle/presence ownership, filesystem, shell, web/media, or subagent access.`,
     "",
   ].join("\n");
 }

@@ -2140,9 +2140,9 @@ run_keyless_gate() {
     and .servers[0].name == "commhub"
     and .servers[0].transport == "stdio"
     and .servers[0].healthy == true
-    and any(.servers[0].checks[]; .label == "5 tools discovered" and .passed == true)
+    and any(.servers[0].checks[]; .label == "3 tools discovered" and .passed == true)
   ' "$mcp_doctor" >/dev/null \
-    || fail "runtime-owned commhub MCP doctor did not prove the exact five-tool server"
+    || fail "runtime-owned commhub MCP doctor did not prove the exact three-tool outbound-only server"
   scan_fixed_file /tmp/test225-markers "$mcp_doctor" \
     || fail "commhub MCP doctor leaked a synthetic credential marker"
   rm -f -- "$mcp_doctor"

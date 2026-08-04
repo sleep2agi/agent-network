@@ -174,7 +174,7 @@ const expectedAgentProfile = [
   "  - search_tool",
   "  - use_tool",
   "---",
-  "ANET_COPRESENCE_PROFILE_V1: Answer the current user directly. Only the runtime-owned commhub MCP integration is available; do not claim filesystem, shell, web/media, or subagent access.",
+  "ANET_COPRESENCE_PROFILE_V1: Answer the current user directly. Only the runtime-owned outbound-only commhub MCP integration is available; do not claim inbound CommHub, lifecycle/presence ownership, filesystem, shell, web/media, or subagent access.",
   "",
 ].join("\n");
 
