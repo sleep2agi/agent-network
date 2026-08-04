@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
+source /test225/lib/safe-rm.sh
 
 # test225 runs in the *runtime* stage of its Dockerfile.  That image contains
 # only the globally installed anet candidate, the unpublished agent-node
@@ -741,7 +742,7 @@ run_tui_inventory_gate() {
   if [ "$probe_rc" -eq 0 ] && [ "$candidate_valid" -eq 1 ] && [ "$scan_rc" -eq 0 ]; then
     persist_inventory_diagnostic "$result_file" "$TUI_INVENTORY_EVIDENCE" \
       || fail "could not persist the closed keyless inventory evidence"
-    rm -rf -- "$result_dir"
+    safe_rm_rf "$result_dir"
     rm -f -- "$TUI_INVENTORY_DIAGNOSTIC"
     inventory_result_valid "$TUI_INVENTORY_EVIDENCE" passed \
       || fail "persisted keyless inventory evidence failed closed-schema validation"
@@ -774,7 +775,7 @@ run_tui_inventory_gate() {
   rm -f -- "$TUI_INVENTORY_EVIDENCE"
   phase=$(jq -r '.phase' "$TUI_INVENTORY_DIAGNOSTIC")
   category=$(jq -r '.category' "$TUI_INVENTORY_DIAGNOSTIC")
-  rm -rf -- "$result_dir"
+  safe_rm_rf "$result_dir"
   log "diagnostic: tui_inventory phase=$phase category=$category artifact=$(basename "$TUI_INVENTORY_DIAGNOSTIC")"
   fail "pinned Grok TUI did not satisfy the fixed preview tool inventory gate"
 }
@@ -1107,16 +1108,16 @@ cleanup() {
         >/dev/null 2>&1 || auth_diagnostic_valid=0
     fi
     if [ "$auth_diagnostic_valid" -ne 1 ]; then
-      rm -rf -- "$AUTH_EVIDENCE_DIAGNOSTIC"
+      safe_rm_rf "$AUTH_EVIDENCE_DIAGNOSTIC"
       cleanup_failed=1
     fi
   fi
 
   # Producers are fenced before any credential/session/database path is gone.
-  rm -rf "$HOME" "$WORK"
+  safe_rm_rf "$HOME" "$WORK"
   for path in /tmp/test225-*; do
     [ -e "$path" ] || [ -L "$path" ] || continue
-    rm -rf -- "$path"
+    safe_rm_rf "$path"
   done
   if [ -e "$HOME" ] || [ -L "$HOME" ] || [ -e "$WORK" ] || [ -L "$WORK" ]; then
     printf 'test225 cleanup: private roots remained after deletion\n' >&2
@@ -1348,7 +1349,7 @@ scan_pattern_file_valid "$SCAN_INPUT_CONTROL_DIR/valid" \
 rm -f "$SCAN_INPUT_CONTROL_DIR/hardlink"
 scan_pattern_file_valid "$SCAN_INPUT_CONTROL_DIR/valid" \
   || fail "diagnostic scanner rejected a nonempty owner-only pattern file"
-rm -rf "$SCAN_INPUT_CONTROL_DIR"
+safe_rm_rf "$SCAN_INPUT_CONTROL_DIR"
 
 # Negative controls: a scanner read error is a gate error, not a clean result,
 # and auth refresh extends (rather than replaces) the private scan set.
@@ -1367,7 +1368,7 @@ else
   SCAN_ERROR_RC=$?
 fi
 [ "$SCAN_ERROR_RC" -eq 2 ] || fail "credential scanner skipped a direct dangling target"
-rm -rf "$SCAN_ERROR_DIR"
+safe_rm_rf "$SCAN_ERROR_DIR"
 cat > /tmp/test225-refresh-auth.json <<'EOF_REFRESH_AUTH_1'
 {"value":"TEST225_REFRESH_SCAN_OLD_0123456789"}
 EOF_REFRESH_AUTH_1
@@ -1477,7 +1478,7 @@ AUTH_ROLE_WARNING_OUTPUT=/tmp/test225-auth-role-warning-output
 printf '%s\n' clean >"$AUTH_ROLE_SELFTEST/home/.grok/agent_id"
 printf '%s\n' clean >"$AUTH_ROLE_SESSION_DIR/chat_history.jsonl"
 printf '%s\n' clean >"$AUTH_ROLE_CURRENT_HOME/unreviewed.data"
-rm -rf "$AUTH_ROLE_PRIOR_HOME"
+safe_rm_rf "$AUTH_ROLE_PRIOR_HOME"
 rm -f "$AUTH_ROLE_SESSION_DIR/agent_id" "$AUTH_ROLE_CURRENT_HOME/unreviewed.link"
 if ! (trap - EXIT; HOME="$AUTH_ROLE_SELFTEST/home"; export HOME; \
   run_real_auth_evidence_gate final_scan \
@@ -1503,7 +1504,7 @@ scan_fixed_file /tmp/test225-real-patterns "$AUTH_EVIDENCE_DIAGNOSTIC" \
   "$AUTH_ROLE_WARNING_OUTPUT" "$REPORT" \
   || fail "auth evidence preview warning retained its private marker"
 
-rm -rf "$AUTH_ROLE_SELFTEST" "$AUTH_ROLE_OUTPUT" "$AUTH_ROLE_WARNING_OUTPUT" \
+safe_rm_rf "$AUTH_ROLE_SELFTEST" "$AUTH_ROLE_OUTPUT" "$AUTH_ROLE_WARNING_OUTPUT" \
   "$REAL_AUTH_PATTERNS" \
   "$REAL_AUTH_UNSAFE_PATTERNS" "$REAL_AUTH_METADATA_MANIFEST"
 rm -f -- "$AUTH_EVIDENCE_DIAGNOSTIC"
@@ -1945,7 +1946,7 @@ scan_fixed_file /tmp/test225-live-credentials "$FEISHU_LOG" \
   || fail "Feishu refusal output exposed a Hub credential"
 [ "$(matching_process_count '/test225/fake-grok.mjs')" -eq 0 ] \
   || fail "Feishu refusal started Grok before closing the channel boundary"
-rm -rf "$FEISHU_DIR" "$FEISHU_CONFIG" "$FEISHU_LOG"
+safe_rm_rf "$FEISHU_DIR" "$FEISHU_CONFIG" "$FEISHU_LOG"
 
 # The local registry was needed only for the first npx path. Kill it before
 # resume so a false global-install check cannot silently fall back to network.
@@ -2146,7 +2147,7 @@ run_keyless_gate() {
   # generation, so it has no runtime close hook. Remove only its exact Bun
   # cache after the probe exits; the production close path proves the same
   # cache lifecycle independently through cleanupGrokCliPostStopState.
-  rm -rf -- "$(dirname "$profile_fixture")/.bun"
+  safe_rm_rf "$(dirname "$profile_fixture")/.bun"
   # The keyless inventory process generates an account-derived vendor
   # agent_id even though it never loads the mounted auth file. The following
   # authenticated gate treats every auth scalar (including that account id)

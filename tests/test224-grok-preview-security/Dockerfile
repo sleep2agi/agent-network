@@ -24,5 +24,6 @@ COPY agent-network/bin ./agent-network/bin
 COPY agent-network/src ./agent-network/src
 COPY agent-network/tsconfig.json agent-network/README.md agent-network/LICENSE agent-network/NOTICE ./agent-network/
 COPY tests/test224-grok-preview-security ./tests/test224-grok-preview-security
+COPY tests/lib/safe-rm.sh ./tests/lib/safe-rm.sh
 
 ENTRYPOINT ["bash", "tests/test224-grok-preview-security/run.sh"]

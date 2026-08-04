@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source /workspace/tests/lib/safe-rm.sh
 
 ROOT=/workspace
 ARTIFACT_DIR="${ARTIFACT_DIR:-/artifacts}"
@@ -9,7 +10,7 @@ RAW="$WORK/raw"
 PACKS="$WORK/packs"
 EXTRACTED="$WORK/extracted"
 
-rm -rf "$WORK"
+safe_rm_rf "$WORK"
 mkdir -p "$ARTIFACT_DIR" "$RAW" "$PACKS" "$EXTRACTED"
 : >"$REPORT"
 chmod 600 "$REPORT"

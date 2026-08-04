@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
+source /test232/lib/safe-rm.sh
 
 MODE=${TEST232_MODE:-enabled}
 case "$MODE" in enabled|restricted) ;; *) echo "FAIL: invalid TEST232_MODE" >&2; exit 2;; esac
@@ -16,7 +17,7 @@ WORK="$ROOT/work"
 OUTPUT="$ROOT/stream.jsonl"
 EVIDENCE="$ROOT/evidence.json"
 
-rm -rf "$ROOT"
+safe_rm_rf "$ROOT"
 mkdir -p "$GROK_HOME_DIR" "$WORK" "$ARTIFACT_DIR"
 cp "$REAL_AUTH" "$GROK_HOME_DIR/auth.json"
 printf '%s\n' '[toolset.bash]' 'auto_background_on_timeout = false' >"$GROK_HOME_DIR/config.toml"

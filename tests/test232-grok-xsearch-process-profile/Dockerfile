@@ -6,6 +6,7 @@ RUN apt-get update \
   && chmod 4755 /usr/bin/bwrap
 
 COPY tests/test232-grok-xsearch-process-profile /test232
+COPY tests/lib/safe-rm.sh /test232/lib/safe-rm.sh
 COPY agent-node/src /workspace/agent-node/src
 COPY agent-network/src /workspace/agent-network/src
 RUN chmod 755 /test232/run.sh /test232/run-tui.sh /test232/pty-run.py

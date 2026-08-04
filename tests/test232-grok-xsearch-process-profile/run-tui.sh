@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
+source /test232/lib/safe-rm.sh
 
 REAL_GROK=${TEST232_REAL_GROK_BIN:-/host-grok/grok-0.2.93}
 REAL_AUTH=${TEST232_REAL_GROK_AUTH:-/host-grok/auth.json}
@@ -15,7 +16,7 @@ EVIDENCE="$ROOT/evidence.json"
 SOCKET="$GROK_HOME_DIR/run/leader.sock"
 SESSION_ID=23223223-3232-4232-8232-232232232232
 
-rm -rf "$ROOT"
+safe_rm_rf "$ROOT"
 mkdir -p "$GROK_HOME_DIR/run" "$WORK" "$ARTIFACT_DIR" /run/user/1000
 cp "$REAL_AUTH" "$GROK_HOME_DIR/auth.json"
 printf '%s\n' '[toolset.bash]' 'auto_background_on_timeout = false' >"$GROK_HOME_DIR/config.toml"
