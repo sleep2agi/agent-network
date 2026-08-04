@@ -1,10 +1,10 @@
 Test 584 — Dashboard → Codex TUI reliable delivery
 Date: 2026-08-04 (Asia/Shanghai)
 Base: origin/main 7876336513903c42bc9212aeaf5f038bf51844cc
-Source candidate: 8c651389742b70123b7c6c0d5df4d262130a9255
+Source candidate: 0b2a875b755369675d664653eb96158dff2bc0e1
 Image: anet-test584:dev
-Image ID: sha256:528cca798095fbcb36cbc732f321aad2d75ffe9779c2b69f08a241124b449437
-Image ENV: TEST584_SOURCE_COMMIT=8c651389742b70123b7c6c0d5df4d262130a9255
+Image ID: sha256:8ef83ef65aaca85eaf21a6011ebf4b865a9d96a83657a0789f11c8a57ec6f4a9
+Image ENV: TEST584_SOURCE_COMMIT=0b2a875b755369675d664653eb96158dff2bc0e1
 Command: sg docker -c 'docker run --rm anet-test584:dev'
 Result: PASS (exit 0)
 
@@ -42,13 +42,15 @@ L1 — source/build
 - agent-node CLI bundled successfully (239 modules, 1.65 MB output).
 
 L2 — app-server bridge, dispatch, and production wiring
-- 55 tests passed, 0 failed, 156 assertions.
+- 55 tests passed, 0 failed, 157 assertions.
 - Real createInboxDrainLane behavior proves snapshot #2 enters before snapshot #1's
   blocked model turn is released.
 - Source wiring pins the Codex-only detached path and the active-row pending-reply
   fence; non-Codex runtimes remain awaited and serial.
 - Same-tick duplicate kicks invoke one handler exactly once; cap N+1 waits and is
   admitted after a slot settles; settling emits the next Hub-window wake.
+- A real PendingReplyQueue harness proves the active direct-send path and the
+  durable drain produce one outbound reply, not two.
 - Existing exact turn/steer, provenance, race, FIFO, approval, and reconciliation
   tests remain green.
 
@@ -63,7 +65,6 @@ L4 — private real HTTP Hub
 
 L5 — witnessed-red mutations (all rc 1)
 - node-origin-cannot-steer
-- no-head-of-line-serialization
 - later-sse-kick-cannot-wait-for-active-turn
 - same-tick-row-claim-is-unique
 - detached-admission-cap-is-real
