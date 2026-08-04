@@ -165,7 +165,7 @@ const expectedAgentProfilePath = path.join(grokHome, "anet-copresence-preview.md
 const expectedAgentProfile = [
   "---",
   "name: anet-copresence-preview",
-  "description: Fixed text-only Agent Network co-presence preview profile",
+  "description: Fixed Agent Network co-presence preview profile (commhub-only)",
   "injectDefaultTools: false",
   "discoverSkills: false",
   "inheritSkills: false",
