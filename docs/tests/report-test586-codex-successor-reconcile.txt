@@ -6,13 +6,13 @@ Docker image: `anet-test586:dev`
 
 Evidence:
 
-- normal bridge/runtime suite: 41 pass, 0 fail, 127 assertions;
+- normal bridge/runtime suite: 42 pass, 0 fail, 130 assertions;
 - exact production-shaped test keeps aggregate thread status `active` while
   the locally owned turn changes from active to completed, then proves the
   mapped reply and FIFO drain;
-- `aggregate_active_shortcut` mutation reintroduces the faulty early return
-  and is witnessed red (`recovered:false/status:active` instead of the exact
-  completed-turn recovery);
+- three targeted mutations are witnessed red: aggregate-active shortcut
+  suppresses recovery, wrong-turn attribution steals another turn's answer,
+  and ignoring the active successor drains task 2 too early;
 - actual minified agent-node bundle: PASS.
 
 Performance gate: a real full-history read on the current 185-turn Codex
