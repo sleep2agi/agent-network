@@ -27,6 +27,21 @@ one second apart, then the bridge logged two independent
 allowed both handlers to observe a null lazy runtime and open separate bridge
 instances, bypassing the bridge-local FIFO.
 
+Production safety response: both UAT tasks were cancelled and only the
+`通信牛-桥` tmux session was returned to the previous #577 immutable runtime.
+`ss` then showed exactly one `node` bridge connection to app-server port
+24701. The TUI, app-server, Hub, and Dashboard were not restarted.
+
+Final production UAT after this candidate is merged must not reuse an active
+turn that predates bridge startup. A reconnect cannot prove such a turn's
+human provenance when persisted history omits its first user message, so it
+correctly remains FIFO-only. The steer proof must record a human TUI
+`turn/started` observed after bridge startup, that turn's id/time, a later
+Dashboard nonce/time, the nonce joining that same turn, the automatic reply,
+and Dashboard `task_id` readback. Queue proof additionally requires two rows
+to be fetched immediately while the second `turn/start` remains after the
+first terminal event.
+
 Acceptance:
 
 - concurrent callers execute one complete runtime open attempt and receive the
