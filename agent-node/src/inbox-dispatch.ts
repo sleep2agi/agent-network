@@ -53,3 +53,38 @@ export async function dispatchInboxBatch<T>(
   }
   for (const message of messages) await handler(message);
 }
+
+/**
+ * Submit one Codex app-server inbox snapshot without waiting for the model
+ * turns to finish. The serialized SSE drain must become free again as soon
+ * as every row has entered bridge arbitration; otherwise a later SSE wake is
+ * only marked dirty and sits behind the first row's (up to ten-minute) turn.
+ *
+ * Calling the async handler directly is intentional: it runs synchronously
+ * through its per-row inflight claim before yielding, so a following inbox
+ * snapshot cannot double-submit the same row. Completion errors remain
+ * observable through `onError` and can schedule a fresh inbox read.
+ */
+export function dispatchInboxBatchDetached<T>(
+  messages: readonly T[],
+  handler: (message: T) => Promise<void>,
+  onError: (error: unknown) => void,
+): void {
+  for (const message of messages) {
+    try {
+      void handler(message).catch(onError);
+    } catch (error) {
+      onError(error);
+    }
+  }
+}
+
+/**
+ * A detached Codex row may be between "persist pending reply" and
+ * "send/clear". Draining the durable reply queue concurrently in that
+ * window can send the same reply twice, so only drain it when no Codex inbox
+ * row is active. Other runtimes retain their historical behaviour.
+ */
+export function shouldDrainPendingReplies(runtime: string, inflightRows: number): boolean {
+  return runtime !== "codex-app-server" || inflightRows === 0;
+}

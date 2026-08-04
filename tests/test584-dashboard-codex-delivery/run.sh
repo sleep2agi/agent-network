@@ -18,6 +18,7 @@ test -s /tmp/test584-dist/cli.js
 echo "L2 agent bridge + dispatch"
 bun test \
   agent-node/src/inbox-dispatch.test.ts \
+  agent-node/src/inbox-dispatch-wiring.test.ts \
   agent-node/src/runtime/codex-app-server-bridge.test.ts \
   agent-node/src/runtime/codex-app-server/runtime.test.ts
 
@@ -61,6 +62,20 @@ bun /harness/mutate.ts agent-node/src/inbox-dispatch.ts \
   'if (concurrent) {' \
   'if (false) {'
 expect_red no-head-of-line-serialization bun test agent-node/src/inbox-dispatch.test.ts
+cp /tmp/inbox-dispatch.ts agent-node/src/inbox-dispatch.ts
+
+cp agent-node/src/cli.ts /tmp/agent-node-cli.ts
+bun /harness/mutate.ts agent-node/src/cli.ts \
+  '    dispatchInboxBatchDetached(messages, processInboxMessage, (cause) => {' \
+  '    await dispatchInboxBatch(messages, processInboxMessage, true).catch((cause) => {'
+expect_red later-sse-kick-cannot-wait-for-active-turn bun test agent-node/src/inbox-dispatch-wiring.test.ts
+cp /tmp/agent-node-cli.ts agent-node/src/cli.ts
+
+cp agent-node/src/inbox-dispatch.ts /tmp/inbox-dispatch.ts
+bun /harness/mutate.ts agent-node/src/inbox-dispatch.ts \
+  '  return runtime !== "codex-app-server" || inflightRows === 0;' \
+  '  return true;'
+expect_red pending-reply-drain-cannot-race-active-row bun test agent-node/src/inbox-dispatch.test.ts
 cp /tmp/inbox-dispatch.ts agent-node/src/inbox-dispatch.ts
 
 cp agent-node/src/runtime/codex-app-server-bridge.ts /tmp/codex-app-server-bridge.ts

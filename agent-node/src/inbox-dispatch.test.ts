@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { dispatchInboxBatch, isInteractiveDashboardTask } from "./inbox-dispatch";
+import {
+  dispatchInboxBatch,
+  dispatchInboxBatchDetached,
+  isInteractiveDashboardTask,
+  shouldDrainPendingReplies,
+} from "./inbox-dispatch";
+import { createInboxDrainLane } from "./runtime/inbox-drain-lane";
 
 const requestId = "dreq_0123456789abcdef0123456789abcdef";
 
@@ -69,5 +75,74 @@ describe("dispatchInboxBatch", () => {
     releaseFirst();
     await running;
     expect(entered).toEqual([1, 2]);
+  });
+
+  test("a later SSE snapshot enters while the first detached turn is still running", async () => {
+    let releaseFirst!: () => void;
+    const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const entered: number[] = [];
+    const errors: unknown[] = [];
+    const handler = async (value: number) => {
+      entered.push(value);
+      if (value === 1) await firstBlocked;
+    };
+
+    dispatchInboxBatchDetached([1], handler, (error) => errors.push(error));
+    dispatchInboxBatchDetached([2], handler, (error) => errors.push(error));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(entered).toEqual([1, 2]);
+    expect(errors).toEqual([]);
+    releaseFirst();
+    await firstBlocked;
+  });
+
+  test("the real serialized drain lane can fetch a later SSE snapshot before the active turn ends", async () => {
+    let releaseFirst!: () => void;
+    let firstEntered!: () => void;
+    const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const firstStarted = new Promise<void>((resolve) => { firstEntered = resolve; });
+    const snapshots = [[1], [2]];
+    const entered: number[] = [];
+    const errors: unknown[] = [];
+    const lane = createInboxDrainLane((error) => errors.push(error));
+    const drain = async () => {
+      const snapshot = snapshots.shift() || [];
+      dispatchInboxBatchDetached(snapshot, async (value) => {
+        entered.push(value);
+        if (value === 1) {
+          firstEntered();
+          await firstBlocked;
+        }
+      }, (error) => errors.push(error));
+    };
+
+    lane.schedule(drain);
+    await firstStarted;
+    // This models a new_task SSE arriving after get_inbox snapshot #1 has
+    // already submitted a long-running model turn.
+    lane.schedule(drain);
+    await lane.idle();
+
+    expect(entered).toEqual([1, 2]);
+    expect(errors).toEqual([]);
+    releaseFirst();
+    await firstBlocked;
+  });
+
+  test("detached completion failures remain observable", async () => {
+    const errors: unknown[] = [];
+    dispatchInboxBatchDetached(["late-row"], async () => {
+      throw new Error("detached row failed");
+    }, (error) => errors.push(error));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(errors).toHaveLength(1);
+    expect((errors[0] as Error).message).toBe("detached row failed");
+  });
+
+  test("durable reply drain waits until detached Codex rows finish", () => {
+    expect(shouldDrainPendingReplies("codex-app-server", 1)).toBe(false);
+    expect(shouldDrainPendingReplies("codex-app-server", 0)).toBe(true);
+    expect(shouldDrainPendingReplies("opencode", 3)).toBe(true);
   });
 });

@@ -95,7 +95,12 @@ import {
 } from "./runtime/opencode-acp/profile-state";
 import { OPENCODE_DEFAULT_PIN } from "./runtime/opencode-acp/binary";
 import { createInboxDrainLane, drainInboxBatch } from "./runtime/inbox-drain-lane";
-import { dispatchInboxBatch, isInteractiveDashboardTask } from "./inbox-dispatch";
+import {
+  dispatchInboxBatch,
+  dispatchInboxBatchDetached,
+  isInteractiveDashboardTask,
+  shouldDrainPendingReplies,
+} from "./inbox-dispatch";
 import { createSingleFlight } from "./util/single-flight";
 
 const home = homedir();
@@ -3606,7 +3611,9 @@ function shouldSkipMessage(from: string, content: string, msgType?: string): str
 //         loud warn — retrying would not help.
 async function processInbox() {
   // (1) Drain leftovers from previous runs.
-  await drainPendingReplies();
+  if (shouldDrainPendingReplies(RUNTIME, inflightMessageIds.size)) {
+    await drainPendingReplies();
+  }
 
   const messages = await getInbox();
   if (!messages.length) return;
@@ -3701,13 +3708,23 @@ async function processInbox() {
     }
   };
 
-  // Every Codex app-server row must reach bridge arbitration immediately.
-  // Other runtimes retain the historical serialized drain.
-  await dispatchInboxBatch(
-    messages,
-    processInboxMessage,
-    RUNTIME === "codex-app-server",
-  );
+  // Every Codex app-server row must reach bridge arbitration immediately,
+  // including rows announced by a *later* SSE wake. Waiting for Promise.all
+  // here keeps workInboxDrain occupied for the whole model turn; its dirty
+  // rerun cannot fetch that later row until the first turn times out. Submit
+  // Codex rows after taking their synchronous inflight claims, then release
+  // the serialized fetch lane. Other runtimes retain their historical
+  // awaited/serialized drain.
+  if (RUNTIME === "codex-app-server") {
+    dispatchInboxBatchDetached(messages, processInboxMessage, (cause) => {
+      const detachedError = cause as any;
+      warn(`detached codex inbox row failed: ${detachedError?.message || detachedError}`);
+      const retryTimer = setTimeout(scheduleWorkInboxDrain, INBOX_RETRY.initialDelayMs);
+      retryTimer.unref?.();
+    });
+    return;
+  }
+  await dispatchInboxBatch(messages, processInboxMessage, false);
 }
 
 /**
