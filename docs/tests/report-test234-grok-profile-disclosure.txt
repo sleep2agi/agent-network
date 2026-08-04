@@ -1,0 +1,32 @@
+# test234 — Grok profile disclosure and session-pinning runbook
+
+Date: 2026-08-04
+Source commit: 0f07f287e61e9e50ea86b653830153c0819cea72
+Base: 8167c494f418b4ddfe5a9f697c5c1265832cc1b6
+Docker image: anet-test234:dev
+Raw Docker report SHA256: e7f06b87a69f3353352d7d137f8d71535d60fc2ff37f7fa42b004a01f6d5470e
+
+Scope:
+
+- default profile discloses exact `[todo_write,search_tool,use_tool]` and no web;
+- exact `[WebSearch]` config discloses x-search
+  `[todo_write,search_tool,use_tool,web_search]` and its remaining denies;
+- near-match/custom tool sets are labelled invalid and fail-closed;
+- resume warns that Grok 0.2.93 retains the creation-time inventory and that
+  a profile change requires `--new-session`;
+- the runbook records the reproduced session-pinning behavior and migration
+  command;
+- the production CLI bundles successfully with the disclosure helper wired at
+  create, start, and attach call sites.
+
+Docker results:
+
+- disclosure unit tests: 4 pass, 0 fail, 19 assertions;
+- CLI build: PASS, 23 modules bundled;
+- runbook session-pin gate: PASS;
+- CLI wiring gate: PASS, seven declaration/call-site occurrences;
+- mutation: changed exact `WebSearch` recognition to a disabled sentinel while
+  leaving tests unchanged; the x-search test failed with expected
+  `x-search`, received `invalid` (rc=1). Witnessed-red PASS.
+
+Summary: PASS.
