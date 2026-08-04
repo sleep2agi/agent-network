@@ -1,0 +1,59 @@
+# test232 — Grok co-presence X-search process-profile fact probe
+
+Date: 2026-08-04
+Base: db5a9ed6
+Scope: real Grok capability probe only; no production implementation or online node change.
+Docker tag: anet-test232:dev
+Docker image: sha256:0d272dde3c41167fdae2760535c6a7b0473ddb73eb67bfa61a27651db4efd23b
+Grok binary: 0.2.93 (f00f96316d)
+Grok SHA256: 4e0738d3b5550f3c842bc0ae69f468815c6329c008a110d0c27a694dc3401135
+
+Root cause
+----------
+
+The existing Grok co-presence process cannot search X by construction:
+
+1. its immutable agent profile contains only todo_write, search_tool, use_tool;
+2. its final argv includes --disable-web-search;
+3. WebFetch, shell, filesystem writes and subagents are separately denied.
+
+This is not an A-site account, auth, network, or vendor-capability failure.
+
+Same-input process comparison
+-----------------------------
+
+Both Docker runs used the same real binary, auth identity, isolated HOME,
+prompt, exact agent profile and deny rules. Only the process-level web-search
+switch differed.
+
+Restricted process (--disable-web-search):
+
+- process rc 0 with a terminal event (the model completed without searching);
+- web_search calls: 0;
+- x.com status URLs: 0;
+- PASS: the process could not perform the capability.
+
+Enabled process (no --disable-web-search):
+
+- process rc 0 and terminal event present;
+- authoritative updates.jsonl web_search lifecycle records: 6;
+- returned x.com status URLs: 1;
+- returned URL followed successfully with HTTP 200;
+- PASS: the same Grok identity and prompt performed a real X web search.
+
+Honest limitation
+-----------------
+
+Although the prompt requested allowed_domains=["x.com"], Grok 0.2.93 used
+general web_search and returned an X URL. Enabling this capability is therefore
+general web-search access; it is not a technically enforced x.com-only domain
+sandbox. The implementation must expose it as an explicit process profile and
+must not advertise an X-only network boundary.
+
+Evidence handling
+-----------------
+
+The suite reads tool lifecycle evidence from the isolated session's
+updates.jsonl. A returned URL alone is not accepted as proof. Raw model output
+and auth are kept under the disposable container root and are not copied to
+the artifact directory. Reports contain counters and HTTP status only.
