@@ -390,6 +390,7 @@ function writeAttachScript(
 export async function openVettedOpenCodeCopresence(
   opts: OpenVettedOpenCodeCopresenceOptions,
 ): Promise<OpenCodeCopresenceSession> {
+  const requiredModel = requireOpenCodeCopresenceModel(opts.model);
   const log = opts.log ?? (() => {});
   const warn = opts.warn ?? (() => {});
   const port = await reserveLoopbackPort();
@@ -493,7 +494,7 @@ export async function openVettedOpenCodeCopresence(
           // used here: in 1.18.1 it can wait before submitting when the same
           // session already has a full attach TUI, leaving a live-looking
           // process with no message in the shared session.
-          const model = parseModelRef(opts.model);
+          const model = parseModelRef(requiredModel);
           // OpenCode creates the user message before it atomically joins the
           // per-session runner. A human TUI submission can therefore win the
           // narrow idle-check -> POST race, and concurrent POST callers receive
@@ -510,7 +511,7 @@ export async function openVettedOpenCodeCopresence(
             method: "POST",
             body: JSON.stringify({
               messageID: messageId,
-              ...(model ? { model } : {}),
+              model,
               parts: [{ type: "text", text: visiblePrompt }],
             }),
           }, timeoutMs);
