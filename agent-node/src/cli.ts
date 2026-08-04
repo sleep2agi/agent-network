@@ -46,6 +46,10 @@ import {
 } from "./reply-reliability";
 import { resolveGrokAcpTimeout } from "./runtime/grok-build-acp/timeout-resolve";
 import {
+  GROK_COPRESENCE_PROFILE_ENV,
+  selectGrokCopresenceCapabilityProfile,
+} from "./runtime/grok-copresence/profile-selection";
+import {
   defaultNpmInstall,
   loadCodexSdk,
   resolveAgentNodeDir,
@@ -426,13 +430,6 @@ const rawGrokCopresence = opts["grok-copresence"]
   ?? process.env.ANET_GROK_COPRESENCE;
 const GROK_COPRESENCE = GROK_EXECUTION_MODE === "cli"
   && (rawGrokCopresence === true || rawGrokCopresence === "true" || rawGrokCopresence === "1");
-if (GROK_COPRESENCE) {
-  console.warn(
-    "[agent-node] EXPERIMENTAL/DANGEROUS grok-build-cli co-presence is enabled; "
-    + "the shared human TUI must receive tasks only from trusted senders. "
-    + "The pinned preview auto-resolves only the exact fixed todo_write/search_tool/use_tool lifecycle; MCP is CommHub-only.",
-  );
-}
 const RUNTIME_AGENT_LABEL = RUNTIME === "grok" && GROK_EXECUTION_MODE === "cli"
   ? "agent-node:grok-build-cli"
   : `agent-node:${RUNTIME}`;
@@ -492,6 +489,21 @@ let TOOLS: string[] | typeof TOOLS_PRESET =
   : TOOLS_PRESET;
 if (GROK_EXECUTION_MODE === "cli" && !opts.tools && Array.isArray(fileConfig.tools) && fileConfig.tools.length === 0) {
   TOOLS = [];
+}
+const GROK_COPRESENCE_CAPABILITY_PROFILE = GROK_COPRESENCE
+  ? selectGrokCopresenceCapabilityProfile(toolsRaw ? toolsRaw.split(",").filter(Boolean) : undefined)
+  : "commhub-only";
+// This internal value is overwritten from the validated node configuration;
+// an ambient shell value cannot widen the process. Policy/runtime modules are
+// dynamically imported only after this boot-time pin and never re-read the
+// node config per turn.
+process.env[GROK_COPRESENCE_PROFILE_ENV] = GROK_COPRESENCE_CAPABILITY_PROFILE;
+if (GROK_COPRESENCE) {
+  console.warn(
+    `[agent-node] EXPERIMENTAL/DANGEROUS grok-build-cli co-presence is enabled `
+    + `(process profile=${GROK_COPRESENCE_CAPABILITY_PROFILE}); the shared human TUI must receive `
+    + "tasks only from trusted senders. MCP is CommHub-only; WebSearch is available only in the explicit x-search profile.",
+  );
 }
 // Default 50 turns. The old default of 5 was way too low — Claude Agent SDK
 // uses one turn per tool roundtrip, so any task that uses commhub MCP or
@@ -3286,11 +3298,9 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
         + "approval decisions must remain owned by the attached human TUI",
       );
     }
-    if (opts.tools !== undefined || fileConfig.tools !== undefined) {
-      throw new Error(
-        "grok copresence preview uses one fixed text-only tool profile; remove custom tools from the node config",
-      );
-    }
+    // The generic tools option is not forwarded. It was already reduced at
+    // process boot to one of two exact profiles; any other value failed before
+    // the runtime module was loaded.
     if (
       MAX_TURNS_CLI !== undefined
       || fileConfig.flags?.maxTurns !== undefined
@@ -5367,14 +5377,16 @@ if (AUTH_TOKEN) {
   warn(`  未配置 token — agent 数据不隔离。运行: anet login`);
 }
 
-// #101 fix: log resolved toolset shape. Co-presence ignores the generic tool
-// config and uses the one runtime-owned profile verified for the pinned TUI.
+// #101 fix: log resolved toolset shape. Co-presence reduces the generic config
+// to one of two runtime-owned process profiles verified for the pinned TUI.
 const requestedToolsSummary =
   Array.isArray(TOOLS)
     ? (TOOLS.length ? `[${TOOLS.join(",")}]` : "(none)")
     : "all (Claude Code preset — built-in: WebFetch/WebSearch/Bash/Read/Write/Edit/Glob/Grep/Task/...)";
 log(`  tools:   ${GROK_COPRESENCE
-  ? "fixed preview profile [todo_write,search_tool,use_tool] (commhub MCP only; no filesystem/shell/web/media/subagents)"
+  ? GROK_COPRESENCE_CAPABILITY_PROFILE === "x-search"
+    ? "fixed x-search profile [todo_write,search_tool,use_tool,web_search] (general web; no web-fetch/filesystem/shell/media/subagents)"
+    : "fixed commhub-only profile [todo_write,search_tool,use_tool] (no filesystem/shell/web/media/subagents)"
   : requestedToolsSummary}`);
 log(`  channels:${[
   TELEGRAM_CHANNELS.length ? `telegram(${TELEGRAM_CHANNELS.map(ch => ch.dir).join(",")})` : "",

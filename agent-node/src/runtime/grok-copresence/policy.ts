@@ -8,6 +8,7 @@ import {
   realpathSync,
 } from "fs";
 import { dirname, join, resolve } from "path";
+import { readPinnedGrokCopresenceCapabilityProfile } from "./profile-selection";
 
 /**
  * Pinned Grok 0.2.93 ignores `--tools` in its interactive TUI.  The preview
@@ -17,11 +18,14 @@ import { dirname, join, resolve } from "path";
  * `commhub` server was discovered.  Filesystem, process, web/media, subagent,
  * and scheduler tools remain absent.
  */
-export const GROK_COPRESENCE_EFFECTIVE_TOOLS = [
+export const GROK_COPRESENCE_CAPABILITY_PROFILE = readPinnedGrokCopresenceCapabilityProfile();
+export const GROK_COPRESENCE_WEB_SEARCH_ENABLED = GROK_COPRESENCE_CAPABILITY_PROFILE === "x-search";
+export const GROK_COPRESENCE_EFFECTIVE_TOOLS = Object.freeze([
   "todo_write",
   "search_tool",
   "use_tool",
-] as const;
+  ...(GROK_COPRESENCE_WEB_SEARCH_ENABLED ? ["web_search"] : []),
+]);
 
 export const GROK_COPRESENCE_AGENT_NAME = "anet-copresence-preview";
 export const GROK_COPRESENCE_AGENT_FILE = `${GROK_COPRESENCE_AGENT_NAME}.md`;
@@ -31,14 +35,16 @@ export function renderGrokCopresenceAgentProfile(): string {
   return [
     "---",
     `name: ${GROK_COPRESENCE_AGENT_NAME}`,
-    "description: Fixed text-only Agent Network co-presence preview profile",
+    `description: Fixed Agent Network co-presence preview profile (${GROK_COPRESENCE_CAPABILITY_PROFILE})`,
     "injectDefaultTools: false",
     "discoverSkills: false",
     "inheritSkills: false",
     "tools:",
     ...GROK_COPRESENCE_EFFECTIVE_TOOLS.map((tool) => `  - ${tool}`),
     "---",
-    `${GROK_COPRESENCE_PROFILE_MARKER}: Answer the current user directly. Only the runtime-owned commhub MCP integration is available; do not claim filesystem, shell, web/media, or subagent access.`,
+    GROK_COPRESENCE_WEB_SEARCH_ENABLED
+      ? `${GROK_COPRESENCE_PROFILE_MARKER}: Answer the current user directly. The runtime-owned commhub MCP integration and general web_search are available; do not claim filesystem, shell, web-fetch/media, or subagent access. Web search is not an x.com-only network sandbox.`
+      : `${GROK_COPRESENCE_PROFILE_MARKER}: Answer the current user directly. Only the runtime-owned commhub MCP integration is available; do not claim filesystem, shell, web/media, or subagent access.`,
     "",
   ].join("\n");
 }

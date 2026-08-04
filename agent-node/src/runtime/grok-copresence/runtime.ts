@@ -45,6 +45,7 @@ import {
 import {
   assertGrokCopresenceAgentProfile,
   GROK_COPRESENCE_EFFECTIVE_TOOLS,
+  GROK_COPRESENCE_WEB_SEARCH_ENABLED,
 } from "./policy";
 import {
   captureOwnedGrokLeader,
@@ -403,17 +404,15 @@ export function buildGrokCopresenceArgs(opts: BuildGrokCopresenceArgsOptions): s
       `grok copresence uses a fixed preview tool profile (${GROK_COPRESENCE_EFFECTIVE_TOOLS.join(",")}); custom tools are unsupported`,
     );
   }
-  args.push(
-    "--sandbox", opts.sandboxProfile,
-    "--no-auto-update",
-    "--disable-web-search",
-    "--no-subagents",
-    "--no-memory",
-  );
+  args.push("--sandbox", opts.sandboxProfile, "--no-auto-update");
+  if (!GROK_COPRESENCE_WEB_SEARCH_ENABLED) args.push("--disable-web-search");
+  args.push("--no-subagents", "--no-memory");
 
   // The TUI never receives the node bearer token. `search_tool` / `use_tool`
   // can reach only the exact commhub server admitted by the inspect gate; all
-  // filesystem/process/web escape routes remain denied.
+  // filesystem/process/web-fetch escape routes remain denied. The explicit
+  // x-search process profile may expose general web_search; it is not a
+  // domain-restricted network sandbox.
   args.push(
     // The shared process must read its owner-only GROK_AUTH_PATH after its
     // sandbox re-exec. Shell access would bypass path-specific Read/Grep/Edit

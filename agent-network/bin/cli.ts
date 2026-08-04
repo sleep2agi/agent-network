@@ -2289,6 +2289,8 @@ Co-presence (codex TUI + agent share one thread, RFC-030):
 Grok co-presence (preview only):
   anet node create <name> --runtime grok-build-cli
                                 Create an experimental shared Grok TUI node
+  anet node create <name> --runtime grok-build-cli --tools WebSearch
+                                Opt into general web search (supports basic X URL search)
   anet grok attach <name>       Attach this terminal (Ctrl-] detaches)
   --grok-headless               Use legacy per-turn grok-build-cli instead
   WARNING: network tasks drive the same TUI; use trusted tasks/networks only
@@ -11942,12 +11944,16 @@ async function infoCommand() {
   console.log(`  model:    ${profile.model || "(default)"}`);
   console.log(`  hub:      ${profile.hub || loadGlobal().hub || "-"}`);
   console.log(`  channels: ${profile.channels?.join(", ") || "(none)"}`);
-  // The co-presence preview uses a fixed runtime-owned TUI profile. Generic
-  // node tools are unsupported because pinned Grok ignores --tools in TUI.
+  // Co-presence reduces config to one of two runtime-owned process profiles;
+  // pinned Grok ignores a general --tools allowlist in interactive TUI mode.
   const toolsArr = Array.isArray(profile.tools) ? profile.tools : [];
   const requestedTools = toolsArr.length ? `[${toolsArr.join(", ")}]` : "all (Claude Code preset)";
+  const grokCopresenceXSearch = profile.grokCopresence === true
+    && toolsArr.length === 1 && toolsArr[0] === "WebSearch";
   console.log(`  tools:    ${profile.grokCopresence === true
-    ? "fixed preview profile [todo_write,search_tool,use_tool] (commhub MCP only; no filesystem/shell/web/media/subagents)"
+    ? grokCopresenceXSearch
+      ? "fixed x-search profile [todo_write,search_tool,use_tool,web_search] (general web; no web-fetch/filesystem/shell/media/subagents)"
+      : "fixed commhub-only profile [todo_write,search_tool,use_tool] (no filesystem/shell/web/media/subagents)"
     : requestedTools}`);
   // Flags worth surfacing — dangerouslySkipPermissions is the one most likely
   // to surprise users in retrospect, so list it first.

@@ -2,9 +2,9 @@
 
 Date: 2026-08-04
 Base: db5a9ed6
-Scope: real Grok capability probe only; no production implementation or online node change.
+Scope: process-profile implementation plus real Grok headless and interactive-TUI evidence; no online node change.
 Docker tag: anet-test232:dev
-Docker image: sha256:0d272dde3c41167fdae2760535c6a7b0473ddb73eb67bfa61a27651db4efd23b
+Docker image: sha256:c69ac3abf7f2799d087447a3121aedadb6008b8cbe3a531d59a065ab61998be0
 Grok binary: 0.2.93 (f00f96316d)
 Grok SHA256: 4e0738d3b5550f3c842bc0ae69f468815c6329c008a110d0c27a694dc3401135
 
@@ -40,6 +40,21 @@ Enabled process (no --disable-web-search):
 - returned x.com status URLs: 1;
 - returned URL followed successfully with HTTP 200;
 - PASS: the same Grok identity and prompt performed a real X web search.
+
+Real interactive TUI
+--------------------
+
+The pinned Grok binary was then started through a real PTY with `--leader`,
+the runtime-owned agent profile, workspace sandbox and always-approve mode.
+The prompt was submitted through bracketed paste after startup, matching the
+shared-TUI input path rather than using headless `--single` mode.
+
+- bounded PTY rc: 124 (expected because the interactive TUI remains open);
+- authoritative web_search lifecycle records: 4;
+- returned x.com status URLs: 1;
+- returned URL followed successfully with HTTP 200;
+- PASS: the actual interactive TUI can search X when the process profile does
+  not add `--disable-web-search`.
 
 Honest limitation
 -----------------

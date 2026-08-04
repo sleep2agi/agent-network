@@ -81,13 +81,25 @@ Press `Ctrl-]` to detach without stopping the node.
 The default `grok-build-cli` profile created by `anet` enables co-presence. `anet node start` owns one Grok PTY and exposes a local, same-user attach socket. The attached terminal renders that TUI. A network task sent to `grok-shared` is submitted into the same session, appears in the TUI, and its completed answer is routed to the original CommHub task.
 
 The preview uses one runtime-owned, mode-`0600` agent profile selected with
-the TUI-effective `--agent` flag. Its exact model-tool inventory is
+the TUI-effective `--agent` flag. By default its exact model-tool inventory is
 `[todo_write,search_tool,use_tool]`. The latter two expose only one
 runtime-owned CommHub MCP server; host and project MCP definitions are never
 loaded. Filesystem, shell, web, media, scheduler, and subagent tools remain
-unavailable. Generic `tools` and `maxTurns` settings are
-rejected in co-presence because Grok 0.2.93 ignores their corresponding CLI
-flags in interactive mode. This deliberate text-only restriction lets the
+unavailable. One explicit process-level profile is also supported:
+
+```bash
+anet node create A站GrokTUI --runtime grok-build-cli --tools WebSearch
+```
+
+That exact configuration adds only `web_search` and removes the final
+`--disable-web-search` switch. It remains without WebFetch, filesystem, shell,
+media, scheduler, and subagent tools. This is general web-search access, not a
+technically enforced x.com-only network sandbox; Grok can use it for basic X
+URL/title/summary searches, but accurate likes/reposts and native XSearch are
+not promised. Any other custom `tools` value is rejected. `maxTurns` is also
+rejected because Grok 0.2.93 ignores it in interactive mode. The selected
+profile is frozen at agent-node process startup and is never changed according
+to the current human/network turn. The default text-only restriction lets the
 pinned CLI read its existing owner-only login after sandbox re-exec without
 giving a network prompt a model-tool route to that file. The CommHub server is
 a self-contained package artifact staged below the isolated Grok home; its
@@ -95,17 +107,17 @@ credential snapshot lives in a separate owner-only credential directory and
 is explicitly denied to model tools. This split is required because the
 sandbox bind-hides project `.anet`, while release scans must prove credentials
 never entered Grok session state. Use another runtime when code inspection,
-editing, shell execution, or web/media access is needed.
+editing, shell execution, WebFetch, or media access is needed.
 
 Pinned Grok 0.2.93 wraps each fixed tool in a permission lifecycle. The runtime
 starts the TUI with `--permission-mode bypassPermissions --always-approve`, so
-`todo_write`, `search_tool`, and `use_tool` proceed without a Yes/No prompt.
+the exact tools in the selected process profile proceed without a Yes/No prompt.
 The runtime still accepts only their exact observed lifecycle tuples with
 strict request/turn correlation. A network turn may use each exact tool tuple
 at most once; human turns may repeat an exact tuple. Any other tool, decision,
-identity shape, overlap, or unresolved completion closes the runtime. This
-automatic approval applies only to the fixed three-tool profile and is not a
-capability claim for `latest`.
+identity shape, overlap, or unresolved completion closes the runtime. The
+WebSearch opt-in therefore auto-approves general web search for both human
+and network turns in that process. This is not a capability claim for `latest`.
 
 ### Human-turn and MCP lifecycle regressions (2026-08-01)
 
@@ -194,9 +206,9 @@ fallback if the native TUI path fails.
 - Use only trusted task senders. A network task influences the same model and conversation visible in the human TUI.
 - Do not use this runtime for production work or connect it to a public/untrusted Hub.
 - The co-presence profile deliberately runs in immutable always-approve mode. It has no per-call human confirmation.
-- Automatic approval is limited by the fixed tool inventory to `todo_write`, `search_tool`, and `use_tool`; filesystem, shell, web/media, project/host MCP, and subagents remain unavailable.
+- Automatic approval is limited to the exact process profile. The default inventory is `todo_write`, `search_tool`, and `use_tool`. The explicit `--tools WebSearch` profile adds only general `web_search`; filesystem, shell, WebFetch/media, project/host MCP, and subagents remain unavailable.
 - Grok children and runtime lock helpers receive exact, from-empty environment allowlists. CommHub/cloud credentials are not inherited by those processes.
-- The shared-TUI preview has the exact fixed inventory `[todo_write,search_tool,use_tool]`; MCP access is limited to its single runtime-owned CommHub server. Do not treat it as a filesystem-, web-, media-, subagent-, or shell-capable coding runtime.
+- The shared-TUI preview has one of two exact inventories: `[todo_write,search_tool,use_tool]` or explicit `[todo_write,search_tool,use_tool,web_search]`. MCP access is limited to its single runtime-owned CommHub server. Do not treat either profile as a filesystem-, WebFetch/media-, subagent-, or shell-capable coding runtime.
 - Folder trust is runtime-owned, mode `0600`, and contains exactly the current canonical working directory; project executable configuration is a startup error rather than implicitly trusted code.
 - Known values loaded by the process and recognized credential shapes/assignments in network task text or replies are scrubbed before ordinary logs, status, pending replies, and external delivery. This is not a universal classifier for arbitrary opaque text: do not paste credentials into the shared conversation or TUI. The isolated Grok conversation transcript is the only owner-only raw transcript store: its directories are `0700` and regular files are `0600`; do not copy it into reports or support bundles.
 - Do not infer `latest` support from this document. Promotion requires a separate review and release decision.

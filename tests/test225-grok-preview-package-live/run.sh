@@ -1279,7 +1279,7 @@ LEADER_SOCKET=$(jq -r '.grokLeaderSocket' "$CONFIG")
 scan_fixed_file /tmp/test225-live-credentials "$REGISTER_LOG" "$CREATE_LOG" \
   || fail "register/create console output exposed a persisted Hub credential"
 anet info "$ALIAS" >"$INFO_LOG" 2>&1
-grep -Fq 'fixed preview profile [todo_write,search_tool,use_tool] (commhub MCP only; no filesystem/shell/web/media/subagents)' "$INFO_LOG" \
+grep -Fq 'fixed commhub-only profile [todo_write,search_tool,use_tool] (no filesystem/shell/web/media/subagents)' "$INFO_LOG" \
   || fail "anet info misreported the shared TUI effective tool boundary"
 scan_fixed_file /tmp/test225-live-credentials "$INFO_LOG" \
   || fail "anet info exposed a Hub credential"
@@ -1625,7 +1625,7 @@ wait_file "$ATTACH_SOCKET" 600 \
   || fail_with_private_log "attach socket did not appear through npx preview fallback" "$START_LOG"
 grep -Fq 'agent-node is not installed globally; fetching @sleep2agi/agent-node@preview' "$START_LOG" \
   || fail "clean start did not exercise the documented npx preview fallback"
-grep -Fq 'fixed preview profile [todo_write,search_tool,use_tool] (commhub MCP only; no filesystem/shell/web/media/subagents)' "$START_LOG" \
+grep -Fq 'fixed commhub-only profile [todo_write,search_tool,use_tool] (no filesystem/shell/web/media/subagents)' "$START_LOG" \
   || fail "agent-node startup misreported the shared TUI effective tool boundary"
 start_attach test225-attach
 wait_pane test225-attach 'attached to Grok TUI' "$ATTACH_CAPTURE" 200 \

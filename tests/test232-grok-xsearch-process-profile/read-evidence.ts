@@ -32,6 +32,13 @@ for (const path of filesBelow(home, "chat_history.jsonl")) {
   for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
     if (!line.trim()) continue;
     const row = JSON.parse(line);
+    if (
+      row?.type === "assistant"
+      && typeof row.content === "string"
+      && (row.tool_calls === undefined || (Array.isArray(row.tool_calls) && row.tool_calls.length === 0))
+    ) {
+      reply += row.content;
+    }
     if (!Array.isArray(row.tool_calls)) continue;
     for (const call of row.tool_calls) {
       if (call && typeof call.name === "string") calls.push({ name: call.name, arguments: call.arguments });
