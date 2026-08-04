@@ -1,0 +1,54 @@
+Test 587 — Codex FIFO wait must not consume model timeout
+Date: 2026-08-04 (Asia/Shanghai)
+Base: origin/main 02be2d6980a194f5e0a17d7dc5b86c857d72907a
+Image: anet-test587:dev
+Dockerfile: tests/test587-codex-start-relative-timeout/Dockerfile
+
+Production contradiction
+------------------------
+A Dashboard task remained in the bridge FIFO for the full 600-second runtime
+deadline and failed before its own Codex turn began. `codexAppServerThink()`
+armed the response timer before `submitTask()`, so queue admission and model
+execution incorrectly shared one budget.
+
+Witnessed red (unchanged production implementation)
+---------------------------------------------------
+The new tests were mounted read-only into the existing Docker dependency image
+before the implementation changed:
+
+- 41 pass / 3 fail / 127 assertions;
+- queued wait settled after 40 ms although no task start occurred;
+- another task's start could not be distinguished because no task-scoped start
+  event existed;
+- FIFO drain emitted no observable start event for the queued task.
+
+Implementation
+--------------
+- the bridge emits `task_started { taskId, turnId, steered }` only after a
+  task's own `turn/start` response or authenticated `turn/steer` acceptance;
+- `codexAppServerThink()` arms its 600-second model-response timer only for the
+  matching task-scoped start event;
+- queue wait therefore does not consume the model budget;
+- an idempotent `submitTask().started` fallback preserves compatibility with
+  older/test bridge implementations without double-arming the timer;
+- completion removes the new listener and clears the timer.
+
+Docker result
+-------------
+- normal: 44 pass / 0 fail / 138 assertions;
+- actual minified agent-node bundle: PASS;
+- RESULT: PASS.
+
+Witnessed-red mutations
+-----------------------
+1. `timer_at_submission`: re-arm at submission; queued-wait tests fail.
+2. `ignore_started_event`: remove event-to-timer action; late reply is accepted.
+3. `wrong_task_arms_timer`: remove task_id match; another task expires this one.
+4. `omit_bridge_started_event`: remove owned-turn event; FIFO event contract fails.
+5. `omit_steer_started_event`: remove steer event; Dashboard steer contract fails.
+
+Scope
+-----
+No Hub, Dashboard, schema, auth, token, TUI, app-server process, queue ordering,
+or timeout duration changes. This fixes only the timer origin: actual task start
+instead of queue arrival.
