@@ -10,9 +10,10 @@ Evidence:
 - exact production-shaped test keeps aggregate thread status `active` while
   the locally owned turn changes from active to completed, then proves the
   mapped reply and FIFO drain;
-- three targeted mutations are witnessed red: aggregate-active shortcut
-  suppresses recovery, wrong-turn attribution steals another turn's answer,
-  and ignoring the active successor drains task 2 too early;
+- four targeted mutations are witnessed red: aggregate-active shortcut
+  suppresses recovery, a missing exact turn fails open as fake completion,
+  wrong-turn attribution steals another turn's answer, and ignoring the active
+  successor drains task 2 too early;
 - actual minified agent-node bundle: PASS.
 
 Performance gate: a real full-history read on the current 185-turn Codex
