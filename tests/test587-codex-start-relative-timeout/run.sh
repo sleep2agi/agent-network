@@ -13,7 +13,7 @@ if ! bun test \
 fi
 cat "$normal"
 
-for mutation_name in timer_at_submission ignore_started_event wrong_task_arms_timer omit_bridge_started_event omit_steer_started_event omit_queue_deadline queue_timeout_does_not_cancel cancel_queue_noop failure_returned_as_success; do
+for mutation_name in timer_at_submission ignore_started_event wrong_task_arms_timer omit_bridge_started_event omit_steer_started_event omit_queue_deadline queue_timeout_does_not_cancel ignore_post_deadline_requeue ignore_post_deadline_steer_requeue cancel_queue_noop failure_returned_as_success; do
   cp ./src/runtime/codex-app-server/runtime.ts /tmp/test587-runtime.ts
   cp ./src/runtime/codex-app-server-bridge.ts /tmp/test587-bridge.ts
   cp ./src/cli.ts /tmp/test587-cli.ts
