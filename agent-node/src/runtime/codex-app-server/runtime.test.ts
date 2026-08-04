@@ -7,6 +7,7 @@ import {
   buildOwnedAppServerArgs,
   COMMHUB_MCP_TOKEN_ENV,
   codexAppServerThink,
+  codexAppServerReplyOrThrow,
   recoverSharedTurnOnAttach,
   type CodexAppServerRuntimeSession,
 } from "./runtime";
@@ -123,7 +124,124 @@ class ReconcileOnlyBridge extends EventEmitter {
   }
 }
 
+class DeferredStartBridge extends EventEmitter {
+  submitted: Record<string, unknown> | null = null;
+  queued = false;
+  cancelCalls = 0;
+
+  async submitTask(input: { taskId: string }): Promise<{ started: false; queuedAt: number }> {
+    this.submitted = input;
+    this.queued = true;
+    return { started: false, queuedAt: 1 };
+  }
+
+  cancelQueuedTask(_taskId: string): boolean {
+    this.cancelCalls++;
+    if (!this.queued) return false;
+    this.queued = false;
+    return true;
+  }
+
+  async reconcileActiveTurn(): Promise<{ recovered: false; turnId: null }> {
+    return { recovered: false, turnId: null };
+  }
+}
+
 describe("codexAppServerThink — terminal-event reconciliation watchdog", () => {
+  test("a never-started FIFO task has its own finite, distinct queue deadline", async () => {
+    const bridge = new DeferredStartBridge();
+    const session = { bridge } as unknown as CodexAppServerRuntimeSession;
+    const thinking = codexAppServerThink(session, {
+      taskId: "task_never_starts",
+      text: "must not hang forever",
+      timeoutMs: 30,
+      queueTimeoutMs: 35,
+      reconciliationIntervalMs: 0,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    bridge.emit("task_reply", { taskId: "task_never_starts", text: "late ghost" });
+    const result = await thinking;
+    expect(result.failed).toBe(true);
+    expect(result.queued).toBe(true);
+    expect(result.replyText).toContain("在队列中等待 1 秒仍未开始");
+    expect(result.replyText).not.toContain("开始处理后");
+    expect(bridge.cancelCalls).toBe(1);
+    expect(bridge.queued).toBe(false);
+  });
+
+  test("lost task_started after FIFO removal remains finite", async () => {
+    const bridge = new DeferredStartBridge();
+    bridge.queued = false;
+    bridge.submitTask = async (input: { taskId: string }) => {
+      bridge.submitted = input;
+      return { started: false as const, queuedAt: 1 };
+    };
+    const session = { bridge } as unknown as CodexAppServerRuntimeSession;
+    const thinking = codexAppServerThink(session, {
+      taskId: "task_event_lost",
+      text: "start event disappears",
+      timeoutMs: 25,
+      queueTimeoutMs: 30,
+      reconciliationIntervalMs: 0,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    bridge.emit("task_reply", { taskId: "task_event_lost", text: "late after lost event" });
+    const result = await thinking;
+    expect(result.failed).toBe(true);
+    expect(result.queued).toBe(false);
+    expect(result.replyText).toContain("开始处理后");
+    expect(bridge.cancelCalls).toBe(1);
+  });
+
+  test("queued wait does not consume the model-response timeout budget", async () => {
+    const bridge = new DeferredStartBridge();
+    const session = { bridge } as unknown as CodexAppServerRuntimeSession;
+    let settled = false;
+    const thinking = codexAppServerThink(session, {
+      taskId: "task_waits_then_starts",
+      text: "second FIFO task",
+      timeoutMs: 40,
+      reconciliationIntervalMs: 0,
+    }).finally(() => { settled = true; });
+
+    await new Promise((resolve) => setTimeout(resolve, 70));
+    expect(settled).toBe(false);
+
+    bridge.emit("task_started", {
+      taskId: "task_waits_then_starts",
+      turnId: "turn_after_queue",
+      steered: false,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    bridge.emit("task_reply", { taskId: "task_waits_then_starts", text: "done" });
+
+    expect(await thinking).toEqual({ replyText: "done", failed: false, queued: false });
+  });
+
+  test("another task starting cannot arm this task's timeout", async () => {
+    const bridge = new DeferredStartBridge();
+    const session = { bridge } as unknown as CodexAppServerRuntimeSession;
+    let settled = false;
+    const thinking = codexAppServerThink(session, {
+      taskId: "task_still_queued",
+      text: "wait for my own start",
+      timeoutMs: 35,
+      reconciliationIntervalMs: 0,
+    }).finally(() => { settled = true; });
+
+    bridge.emit("task_started", { taskId: "different_task", turnId: "turn_other" });
+    await new Promise((resolve) => setTimeout(resolve, 55));
+    expect(settled).toBe(false);
+
+    bridge.emit("task_started", { taskId: "task_still_queued", turnId: "turn_mine" });
+    await new Promise((resolve) => setTimeout(resolve, 55));
+    bridge.emit("task_reply", { taskId: "task_still_queued", text: "too late" });
+    const result = await thinking;
+    expect(result.failed).toBe(true);
+    expect(result.replyText).toContain("任务 task_still_queued 超时");
+  });
+
   test("resolves from authoritative reconciliation when turn/completed is missed", async () => {
     const bridge = new ReconcileOnlyBridge();
     const logs: string[] = [];
@@ -164,5 +282,20 @@ describe("codexAppServerThink — terminal-event reconciliation watchdog", () =>
       from: "admin",
       steerIfExternalTurn: true,
     });
+  });
+});
+
+describe("codexAppServerReplyOrThrow", () => {
+  test("failed bridge outcomes enter processTask's thrown failure path", () => {
+    expect(() => codexAppServerReplyOrThrow({
+      replyText: "codex-app-server 错误: queue deadline",
+      failed: true,
+      queued: true,
+    })).toThrow("queue deadline");
+  });
+
+  test("successful empty replies preserve the existing fallback", () => {
+    expect(codexAppServerReplyOrThrow({ replyText: "", failed: false, queued: false }))
+      .toBe("（无回复）");
   });
 });

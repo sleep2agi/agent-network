@@ -594,6 +594,8 @@ describe("CodexAppServerBridge — authenticated Dashboard steering", () => {
 
     const replies: Array<{ taskId: string; text: string }> = [];
     bridge.on("task_reply", (event) => replies.push(event as never));
+    const started: unknown[] = [];
+    bridge.on("task_started", (event) => started.push(event));
     const submitted = await bridge.submitTask({
       taskId: "dash-1",
       text: "第二条消息",
@@ -601,6 +603,7 @@ describe("CodexAppServerBridge — authenticated Dashboard steering", () => {
       steerIfExternalTurn: true,
     });
     expect(submitted).toEqual({ started: true, turnId: "human-1", steered: true });
+    expect(started).toEqual([{ taskId: "dash-1", turnId: "human-1", steered: true }]);
     const steer = app.received.find((entry) => (entry as { method?: string }).method === "turn/steer") as any;
     expect(steer.params).toEqual({
       threadId: THREAD,
@@ -793,6 +796,8 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
     bridge.on("task_reply", (r) => replies.push(r as { taskId: string; text: string }));
     const queued: string[] = [];
     bridge.on("task_queued", (q) => queued.push((q as { taskId: string }).taskId));
+    const started: Array<{ taskId: string; turnId: string; steered: boolean }> = [];
+    bridge.on("task_started", (event) => started.push(event as never));
 
     const r1 = await bridge.submitTask({ taskId: "t-q-1", text: "first" });
     const r2 = await bridge.submitTask({ taskId: "t-q-2", text: "second" });
@@ -803,6 +808,7 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
     // Wire gate: B is admitted into bridge FIFO, but no second turn/start is
     // emitted while A is active.
     expect(turnStartTaskIds).toEqual(["t-q-1"]);
+    expect(started).toEqual([{ taskId: "t-q-1", turnId: "turn_q_1", steered: false }]);
 
     // Complete turn 1 → bridge should auto-drain and start turn 2.
     app.broadcast({ jsonrpc: "2.0", method: "item/completed", params: { threadId: THREAD, turnId: "turn_q_1", item: { type: "agentMessage", phase: "final_answer", text: "answer-1" } } });
@@ -816,6 +822,10 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
     expect(bridge.queueDepth()).toBe(0);
     expect(bridge.activeTurn()).toBe("turn_q_2");
     expect(turnStartTaskIds).toEqual(["t-q-1", "t-q-2"]);
+    expect(started).toEqual([
+      { taskId: "t-q-1", turnId: "turn_q_1", steered: false },
+      { taskId: "t-q-2", turnId: "turn_q_2", steered: false },
+    ]);
 
     app.broadcast({ jsonrpc: "2.0", method: "item/completed", params: { threadId: THREAD, turnId: "turn_q_2", item: { type: "agentMessage", phase: "final_answer", text: "answer-2" } } });
     app.broadcast({
@@ -827,6 +837,44 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
     expect(replies.map((r) => r.taskId)).toEqual(["t-q-1", "t-q-2"]);
     expect(replies.map((r) => r.text)).toEqual(["answer-1", "answer-2"]);
     expect(bridge.currentStatus()).toBe("idle");
+    await client.close();
+    await app.stop();
+  });
+
+  test("cancelQueuedTask removes only the named FIFO row before it can execute", async () => {
+    const startedTaskIds: string[] = [];
+    let seq = 0;
+    const app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize" || msg.method === "thread/resume") return respond({ result: {} });
+        if (msg.method === "turn/start") {
+          const clientId = String((msg.params as { clientUserMessageId?: string })?.clientUserMessageId ?? "");
+          startedTaskIds.push(clientId.replace(/^anet:/, ""));
+          return respond({ result: { turn: { id: `turn_cancel_${++seq}` } } });
+        }
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    await bridge.bootstrap();
+
+    await bridge.submitTask({ taskId: "cancel-active", text: "first" });
+    await bridge.submitTask({ taskId: "cancel-me", text: "must never execute" });
+    await bridge.submitTask({ taskId: "cancel-survivor", text: "third" });
+    expect(bridge.queueDepth()).toBe(2);
+    expect(bridge.cancelQueuedTask("missing-task")).toBe(false);
+    expect(bridge.cancelQueuedTask("cancel-me")).toBe(true);
+    expect(bridge.queueDepth()).toBe(1);
+
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "turn/completed",
+      params: { threadId: THREAD, turn: { id: "turn_cancel_1", status: "completed" } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(startedTaskIds).toEqual(["cancel-active", "cancel-survivor"]);
+    expect(bridge.activeTurn()).toBe("turn_cancel_2");
     await client.close();
     await app.stop();
   });
