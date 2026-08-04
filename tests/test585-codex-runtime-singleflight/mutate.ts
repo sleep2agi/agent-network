@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const mutation = process.argv[2];
 const managerPath = "./src/runtime/codex-app-server/session-manager.ts";
+const singleFlightPath = "./src/util/single-flight.ts";
 const cliPath = "./src/cli.ts";
 
 function replaceExact(path: string, before: string, after: string) {
@@ -18,6 +19,9 @@ switch (mutation) {
       "const opening = createSingleFlight<T>();",
       "const opening = { run: (factory: () => Promise<T>) => factory(), pending: () => null as Promise<T> | null };",
     );
+    break;
+  case "sticky_rejected_open":
+    replaceExact(singleFlightPath, "if (active === attempt) active = null;", "if (false) active = null;");
     break;
   case "bypass_cli_wiring":
     replaceExact(

@@ -18,11 +18,17 @@ describe("createCodexSessionManager", () => {
   test("concurrent Dashboard handlers share one complete open attempt", async () => {
     const manager = createCodexSessionManager<FakeSession>();
     let opens = 0;
+    let attaches = 0;
+    let resumes = 0;
+    let bridgeConstructions = 0;
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const factory = async () => {
       opens++;
+      attaches++;
       await gate;
+      resumes++;
+      bridgeConstructions++;
       return { id: opens, isRunning: true };
     };
 
@@ -30,12 +36,15 @@ describe("createCodexSessionManager", () => {
     const second = manager.getOrOpen(factory);
     await Promise.resolve();
     expect(opens).toBe(1);
+    expect(attaches).toBe(1);
     expect(manager.pending()).not.toBeNull();
     release();
 
     const [a, b] = await Promise.all([first, second]);
     expect(a).toBe(b);
     expect(a.id).toBe(1);
+    expect(resumes).toBe(1);
+    expect(bridgeConstructions).toBe(1);
     expect(manager.current()).toBe(a);
   });
 
