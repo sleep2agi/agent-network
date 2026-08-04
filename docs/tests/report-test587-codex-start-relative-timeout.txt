@@ -1,0 +1,67 @@
+Test 587 — Codex FIFO and model deadlines are finite and independent
+Date: 2026-08-04 (Asia/Shanghai)
+Base: origin/main 83f0cf9d55ca12f53f1092fafff8d899bf3533d1
+Image: anet-test587:dev
+Dockerfile: tests/test587-codex-start-relative-timeout/Dockerfile
+
+Production contradiction
+------------------------
+A Dashboard task remained in the shared-thread FIFO for the full 600-second
+runtime deadline and failed before its own Codex turn began. Logs also showed
+the returned `codex-app-server 错误` was incorrectly sent as `failed=false`.
+
+Witnessed red before implementation
+-----------------------------------
+The initial start-relative tests were mounted read-only into the unchanged
+production Docker image:
+
+- 41 pass / 3 fail / 127 assertions;
+- queued wait settled after 40 ms although no task start occurred;
+- another task's start could not be distinguished because no task-scoped start
+  event existed;
+- FIFO drain emitted no observable start event for the queued task.
+
+Final behavior
+--------------
+- the bridge emits `task_started { taskId, turnId, steered }` only after a
+  task's own `turn/start` response or authenticated `turn/steer` acceptance;
+- the existing 600-second model deadline starts only on that task-scoped event;
+- FIFO wait has a separate finite 30-minute deadline;
+- queue timeout removes the exact task before reporting failure, preventing a
+  terminal Hub row from executing later as a ghost task;
+- if the row already left FIFO but its start event was lost, the queue deadline
+  arms the normal model deadline, preserving a finite outer bound;
+- failed runtime outcomes throw into `processTask`'s established failure path,
+  so Dashboard records `failed` instead of false-success `replied`;
+- timeout messages distinguish `在队列中等待 … 仍未开始` from
+  `开始处理后 … 内无最终回复`.
+
+Docker result
+-------------
+- normal: 54 pass / 0 fail / 176 assertions;
+- actual minified agent-node bundle: PASS;
+- RESULT: PASS.
+
+Witnessed-red mutations
+-----------------------
+1. `timer_at_submission` — queue wait consumes model budget.
+2. `ignore_started_event` — own start cannot arm response deadline.
+3. `wrong_task_arms_timer` — another task expires this task.
+4. `omit_bridge_started_event` — FIFO drain omits owned start event.
+5. `omit_steer_started_event` — accepted Dashboard steer omits start event.
+6. `omit_queue_deadline` — never-started task becomes unbounded.
+7. `queue_timeout_does_not_cancel` — timed-out row remains executable.
+8. `cancel_queue_noop` — exact FIFO cancellation becomes decorative.
+9. `failure_returned_as_success` — CLI bypasses failed-outcome throw.
+
+Baseline gate
+-------------
+This candidate starts from main 83f0cf9d, which already contains #583's
+`missing_turn_fail_open` mutation. The candidate diff does not modify or remove
+test586. This corrects the superseded #584 branch's stale 02be2d69 baseline.
+
+Scope
+-----
+No Hub, Dashboard, schema, auth, token, TUI, app-server process, queue order,
+or timeout duration changes. Only timer origin, the independent FIFO bound,
+exact queued-row cancellation, and truthful failed status change.
