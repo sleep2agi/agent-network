@@ -1,0 +1,99 @@
+# test232 — Grok co-presence X-search process-profile fact probe
+
+Date: 2026-08-04
+Base: db5a9ed6
+Scope: process-profile implementation plus real Grok headless and interactive-TUI evidence; no online node change.
+Docker tag: anet-test232:dev
+Docker image after integration verification: sha256:ec5be051b11249abd679ba8d6de46ef3d4785c9f02f325de465a5b9ba59c29d0
+Grok binary: 0.2.93 (f00f96316d)
+Grok SHA256: 4e0738d3b5550f3c842bc0ae69f468815c6329c008a110d0c27a694dc3401135
+
+Root cause
+----------
+
+The existing Grok co-presence process cannot search X by construction:
+
+1. its immutable agent profile contains only todo_write, search_tool, use_tool;
+2. its final argv includes --disable-web-search;
+3. WebFetch, shell, filesystem writes and subagents are separately denied.
+
+This is not an A-site account, auth, network, or vendor-capability failure.
+
+Same-input process comparison
+-----------------------------
+
+Both Docker runs used the same real binary, auth identity, isolated HOME,
+prompt, exact agent profile and deny rules. Only the process-level web-search
+switch differed.
+
+Restricted process (--disable-web-search):
+
+- process rc 0 with a terminal event (the model completed without searching);
+- web_search calls: 0;
+- x.com status URLs: 0;
+- PASS: the process could not perform the capability.
+
+Enabled process (no --disable-web-search):
+
+- process rc 0 and terminal event present;
+- authoritative updates.jsonl web_search lifecycle records: 6;
+- returned x.com status URLs: 1;
+- returned URL followed successfully with HTTP 200;
+- PASS: the same Grok identity and prompt performed a real X web search.
+
+Real interactive TUI
+--------------------
+
+The pinned Grok binary was then started through a real PTY with `--leader`,
+the runtime-owned agent profile, workspace sandbox and always-approve mode.
+The prompt was submitted through bracketed paste after startup, matching the
+shared-TUI input path rather than using headless `--single` mode.
+
+- bounded PTY rc: 124 (expected because the interactive TUI remains open);
+- authoritative web_search lifecycle records: 4;
+- returned x.com status URLs: 1;
+- returned URL followed successfully with HTTP 200;
+- PASS: the actual interactive TUI can search X when the process profile does
+  not add `--disable-web-search`.
+
+Honest limitation
+-----------------
+
+Although the prompt requested allowed_domains=["x.com"], Grok 0.2.93 used
+general web_search and returned an X URL. Enabling this capability is therefore
+general web-search access; it is not a technically enforced x.com-only domain
+sandbox. The implementation must expose it as an explicit process profile and
+must not advertise an X-only network boundary.
+
+The enabled Docker gate deliberately asserts `allowed_domains_x=false`. This
+is a pinned upstream-behaviour monitor, not a desired capability: if a later
+Grok build begins carrying the requested domain restriction into its
+authoritative tool call, the suite turns red and forces a boundary review.
+
+Two risks remain explicit:
+
+- the search query itself leaves the machine and can contain text derived from
+  conversation context, creating a data-exfiltration surface;
+- search results are untrusted input placed back into a tool-using model's
+  context, creating a prompt-injection surface.
+
+The current blast radius is limited only by the exact process profile: shell,
+filesystem, WebFetch/media, project/host MCP, and subagent capabilities remain
+absent. Adding a capability changes that premise and requires a new review.
+
+Regression suite
+----------------
+
+The final fixed-tag Docker image ran the complete
+`agent-node/src/runtime/grok-copresence` directory: 137 tests passed, 0 failed,
+732 assertions. The image includes a native compiler because the lifecycle
+suite builds a real forged-argv listener fixture; without `cc`, that fixture
+fails at setup rather than testing production behavior.
+
+Evidence handling
+-----------------
+
+The suite reads tool lifecycle evidence from the isolated session's
+updates.jsonl. A returned URL alone is not accepted as proof. Raw model output
+and auth are kept under the disposable container root and are not copied to
+the artifact directory. Reports contain counters and HTTP status only.

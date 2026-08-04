@@ -1,0 +1,11 @@
+# test232 — process-level Grok X-search capability
+mode=enabled
+grok_binary_sha256=4e0738d3b5550f3c842bc0ae69f468815c6329c008a110d0c27a694dc3401135
+process_rc=0
+ended=true
+web_search_calls=6
+allowed_domains_x=false
+x_status_url_count=1
+x_status_url_http=200
+PINNED_UPSTREAM_FACT: Grok used general web_search rather than allowed_domains=[x.com]
+Summary: PASS (mode=enabled; Docker-only; exact process-level capability difference)

@@ -1,0 +1,43 @@
+# test233 — Grok co-presence integration against current main
+
+Date: 2026-08-04
+Base: origin/main 0a81e5e3a2fc2e20f512ff6742e9a982ad0eb4b5
+Integrated inputs:
+
+- Grok/X-search candidate 4a6eae747889636820133445138a681de1354631
+- state-home socket fix a84d19836f8b plus report-only 1c0fae5f8647
+
+Scope
+-----
+
+The only textual merge conflicts were `agent-network/bin/cli.ts` and
+`agent-node/src/cli.ts`. Resolution retained both sides of each semantic
+boundary: current-main OpenCode profile persistence, Dashboard steer and
+dual inbox lanes, Codex app-server session singleflight; plus Grok session
+persistence, credential redaction, private logs and co-presence startup.
+
+Docker evidence
+---------------
+
+Fixed tag: `anet-test233:dev`
+Image: `sha256:3451fba0a86616cdfb4e247cda97b74d72c3a891ca382d766d52bcbfb896044f`
+
+- complete Grok co-presence directory: 137 pass, 0 fail, 732 assertions;
+- node-side conflict regression: 129 pass, 0 fail, 525 assertions;
+- network CLI/profile conflict regression: 63 pass, 0 fail, 150 assertions;
+- `agent-node/src/cli.ts`: bundled 77 modules successfully;
+- `agent-network/bin/cli.ts`: bundled 22 modules successfully.
+
+The real pinned Grok 0.2.93 socket sandbox test was rebuilt from this tree and
+passed with an owner-bound state-home socket. The real-account web-search
+comparison was also rerun: enabled profile produced six authoritative search
+lifecycle records and a live X URL (HTTP 200), restricted profile produced
+zero search calls, and the real interactive TUI produced eight authoritative
+search records plus a live X URL (HTTP 200).
+
+Boundary
+--------
+
+This candidate enables the explicit WebSearch process profile only. It does
+not implement or deploy the later full-access profile. No Hub, Dashboard,
+bridge, online node, npm package or production service was changed.

@@ -6,7 +6,7 @@
 // concurrent upserts (#1+#3).
 
 import { expect, test, describe, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, readdirSync } from "fs";
+import { chmodSync, mkdtempSync, rmSync, existsSync, readFileSync, statSync, writeFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import {
@@ -17,6 +17,7 @@ import {
   decideStartupAction,
 } from "./store";
 import type { AgentGoal } from "./types";
+import { createCredentialRedactor } from "../credential-redaction";
 
 function tmpPath(): { dir: string; path: string } {
   const dir = mkdtempSync(join(tmpdir(), "anet-goals-test-"));
@@ -174,6 +175,127 @@ describe("GoalStore — corruption recovery (#2)", () => {
   });
 });
 
+describe("GoalStore — Grok preview persistence boundary", () => {
+  let dir: string, path: string;
+  const legacyMarkers = {
+    task: "TEST_GOAL_TASK_CANARY_8b2d",
+    progress: "TEST_GOAL_PROGRESS_CANARY_7c3e",
+    error: "TEST_GOAL_ERROR_CANARY_6d4f",
+  };
+  const runtimeMarkers = {
+    task: "TEST_GOAL_RUNTIME_TASK_CANARY_5e6a",
+    progress: "TEST_GOAL_RUNTIME_PROGRESS_CANARY_4f7b",
+    error: "TEST_GOAL_RUNTIME_ERROR_CANARY_3a8c",
+  };
+  const allMarkers = [...Object.values(legacyMarkers), ...Object.values(runtimeMarkers)];
+  const redactor = createCredentialRedactor({ knownValues: allMarkers });
+  beforeEach(() => { ({ dir, path } = tmpPath()); });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  test("recursively migrates task/progress/error, final writes, and archives at 0600", async () => {
+    const goal = newGoal({
+      text: `legacy task ${legacyMarkers.task}`,
+      interval_ms: 60_000,
+      runtime: "grok-build-cli",
+    });
+    goal.progress_log.push({
+      ts: new Date().toISOString(),
+      status: "error",
+      summary: `legacy progress ${legacyMarkers.progress}`,
+    });
+    (goal as AgentGoal & { last_error: unknown }).last_error = {
+      message: `legacy error ${legacyMarkers.error}`,
+      nested: [{ detail: legacyMarkers.error }],
+    };
+    writeFileSync(path, JSON.stringify({ version: 1, goals: [goal] }), { mode: 0o644 });
+    chmodSync(path, 0o644);
+
+    const store = new GoalStore(path, { redactor });
+    expect((await store.load()).ok).toBe(true);
+    let persisted = readFileSync(path, "utf8");
+    for (const marker of Object.values(legacyMarkers)) expect(persisted).not.toContain(marker);
+    expect(persisted.match(/\[REDACTED_CREDENTIAL\]/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(JSON.stringify(await store.get(goal.goal_id))).not.toContain("_CANARY_");
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+
+    // Exercise the final serialization boundary with fresh raw values in all
+    // three nested locations.  The in-memory object may contain them until
+    // the next restart; no durable artifact may.
+    await store.mutate(goal.goal_id, (live) => {
+      live.text = `runtime task ${runtimeMarkers.task}`;
+      live.progress_log.push({
+        ts: new Date().toISOString(),
+        status: "error",
+        summary: `runtime progress ${runtimeMarkers.progress}`,
+      });
+      (live as AgentGoal & { last_error: unknown }).last_error = {
+        message: `runtime error ${runtimeMarkers.error}`,
+        causes: [{ message: runtimeMarkers.error }],
+      };
+    });
+    persisted = readFileSync(path, "utf8");
+    for (const marker of allMarkers) expect(persisted).not.toContain(marker);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+
+    const archive = await store.archiveAndClear("runtime switch");
+    expect(archive).toBeDefined();
+    const archived = readFileSync(archive!, "utf8");
+    for (const marker of allMarkers) expect(archived).not.toContain(marker);
+    expect(archived).toContain("[REDACTED_CREDENTIAL]");
+    expect(statSync(archive!).mode & 0o777).toBe(0o600);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(readdirSync(dir).filter((name) => name.includes(".tmp."))).toEqual([]);
+  });
+
+  test("scrubs a broad-mode corrupt backup and replaces the live file with an empty safe store", async () => {
+    const corrupt = [
+      `{\"task\":\"${legacyMarkers.task}\",`,
+      `\"progress\":{\"summary\":\"${legacyMarkers.progress}\"},`,
+      `\"error\":{\"message\":\"${legacyMarkers.error}\"}`,
+    ].join("");
+    writeFileSync(path, corrupt, { mode: 0o666 });
+    chmodSync(path, 0o644);
+    const store = new GoalStore(path, { redactor });
+    const result = await store.load();
+    expect(result.ok).toBe(false);
+    expect(result.recovered).toBeDefined();
+    const backup = readFileSync(result.recovered!, "utf8");
+    for (const marker of Object.values(legacyMarkers)) expect(backup).not.toContain(marker);
+    expect(backup).toContain("[REDACTED_CREDENTIAL]");
+    expect(statSync(result.recovered!).mode & 0o777).toBe(0o600);
+    for (const marker of Object.values(legacyMarkers)) {
+      expect(readFileSync(path, "utf8")).not.toContain(marker);
+    }
+    expect(JSON.parse(readFileSync(path, "utf8")).goals).toEqual([]);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    for (const name of readdirSync(dir)) {
+      expect(statSync(join(dir, name)).mode & 0o777).toBe(0o600);
+    }
+  });
+
+  test("recursively scrubs a parseable unsupported-schema backup", async () => {
+    const unsupported = {
+      version: 99,
+      task: legacyMarkers.task,
+      progress: [{ summary: legacyMarkers.progress }],
+      error: { message: legacyMarkers.error, SERVICE_TOKEN: "short-opaque-value" },
+    };
+    writeFileSync(path, JSON.stringify(unsupported), { mode: 0o644 });
+    chmodSync(path, 0o644);
+
+    const store = new GoalStore(path, { redactor });
+    const result = await store.load();
+    expect(result.ok).toBe(false);
+    expect(result.recovered).toBeDefined();
+    const backup = readFileSync(result.recovered!, "utf8");
+    for (const marker of Object.values(legacyMarkers)) expect(backup).not.toContain(marker);
+    expect(backup).not.toContain("short-opaque-value");
+    expect(JSON.parse(backup).error.SERVICE_TOKEN).toBe("[REDACTED_CREDENTIAL]");
+    expect(statSync(result.recovered!).mode & 0o777).toBe(0o600);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────────
 // P0 /loop SDK runtime gate (v0.4 §3.4) — the heart of "claude hands-off".
 // ─────────────────────────────────────────────────────────────────────
@@ -198,6 +320,9 @@ describe("P0 runtime gate — name resolution", () => {
     expect(runtimeBucket("codex")).toBe("codex");
     expect(runtimeBucket("grok-build-acp")).toBe("grok");
     expect(runtimeBucket("grok-build")).toBe("grok");
+    expect(runtimeBucket("grok-build-cli")).toBe("grok");
+    expect(runtimeBucket("grok-cli")).toBe("grok");
+    expect(runtimeBucket("grok-tui")).toBe("grok");
     expect(runtimeBucket("grok")).toBe("grok");
     // RFC-029 — opencode CLI bucket.
     expect(runtimeBucket("opencode-cli")).toBe("opencode");

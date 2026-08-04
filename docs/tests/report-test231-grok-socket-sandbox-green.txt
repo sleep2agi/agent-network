@@ -1,0 +1,26 @@
+# test231 — Grok socket allocator versus real workspace sandbox
+date=2026-08-04T08:46:43+00:00
+mode=green
+grok_binary_sha256=4e0738d3b5550f3c842bc0ae69f468815c6329c008a110d0c27a694dc3401135
+bun test v1.3.1 (89fa0f34)
+
+agent-network/src/grok-copresence-profile.test.ts:
+(pass) Grok copresence profile defaults > builds the Grok agent-node parent environment from an exact empty allowlist [2.00ms]
+(pass) Grok copresence profile defaults > does not mistake an old headless-only agent-node for co-presence support
+(pass) Grok copresence profile defaults > builds the npm resolver environment from an exact empty allowlist [1.00ms]
+(pass) Grok copresence profile defaults > prepares two distinct empty owner-only npm config files without following symlinks [2.00ms]
+(pass) Grok copresence profile defaults > enables copresence only for non-headless grok-build-cli [1.00ms]
+(pass) Grok copresence profile defaults > uses the owner-bound state home even when XDG is owner-only [1.00ms]
+(pass) Grok copresence profile defaults > falls back to a bounded owner tmp path when the state home is too long
+
+ 7 pass
+ 0 fail
+ 29 expect() calls
+Ran 7 tests across 1 file. [46.00ms]
+PASS: state-home allocator unit tests
+leader_socket=/home/tester/.anet-grok/node-a1ff76065c6ceb95baab66a9/run/leader.sock
+attach_socket=/home/tester/.anet-grok/node-a1ff76065c6ceb95baab66a9/run/attach.sock
+]0;grok[?1049h[?1000h[?1002h[?1003h[?1015h[?1006h[?1004h[?2004h[?25l]12;rgb:c6/c6/c6[>0q[?2026h[39m[49m[59m[0m]0;grok[?2026l]0;grok[2J]9;4;0;0[?2026l]112[?1000l[?1002l[?1003l[?1015l[?1006l[?2004l[?1004l[?25h[?1049l
+TEST231_SOCKET_SEEN=1
+PASS: real Grok workspace sandbox starts with the owner-bound state-home socket
+Summary: PASS (mode=green; Docker-only; real pinned Grok + workspace sandbox)

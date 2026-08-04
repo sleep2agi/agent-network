@@ -17,6 +17,11 @@ docs-site/docs/public/*.sh   linguist-vendored
 scripts/*.sh            linguist-vendored
 examples/**/*.sh        linguist-vendored
 
+# test225 is built from `git archive`; substitute the exact commit into its
+# runtime provenance file so a dirty checkout or arbitrary build-arg cannot
+# masquerade as a reviewed source SHA.
+tests/test225-grok-preview-package-live/source-commit.txt export-subst
+
 # Generated / built assets — never count
 docs-site/docs/.vitepress/dist/    linguist-generated
 agent-network/dist/                linguist-generated

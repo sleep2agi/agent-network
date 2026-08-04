@@ -18,6 +18,7 @@ import { join } from "path";
 import { hostname } from "os";
 import { execSync } from "child_process";
 import { encodeCwd } from "./project-key";
+import { loadOwnerOnlyEnvFile } from "./owner-env-file";
 
 // ── .env loader helper ────────────────────────────────
 function loadEnvFile(path: string): void {
@@ -34,6 +35,9 @@ function loadEnvFile(path: string): void {
 }
 
 // ── Load shared config ────────────────────────────────
+// The Grok shared-TUI parent has no bearer token. Its one reviewed MCP child
+// receives only this pointer to the launcher's protected credential file.
+loadOwnerOnlyEnvFile(process.env.ANET_COMMHUB_ENV_FILE);
 const HOME = process.env.HOME || "~";
 const COMMHUB_DIR = join(HOME, ".claude/channels/commhub");
 loadEnvFile(join(COMMHUB_DIR, ".env"));
