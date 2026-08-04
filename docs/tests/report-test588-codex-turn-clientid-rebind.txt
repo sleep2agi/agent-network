@@ -4,11 +4,11 @@ Base: origin/main c8a549e2ad258e8419249028a90c21da6307200a
 Worktree: /tmp/commniu-codex-turn-rebind
 Branch: fix/codex-turn-clientid-rebind
 Implementation commit: 4a15289b226153a52538ea0931a4bdce0cfc4941
-Source candidate (including merge-gate tests): e3d51f872f6912cbf60a5d2729a93cf8c1b05078
+Source candidate (including merge-gate tests): d3abb1aba352f52d2e79afbc2991fb42548a997b
 Docker image: anet-test588:dev
-Docker image id: sha256:7e63987d54fa6aad6745566e8316034bde4e63293363656c28e8cd7e59e7aedb
+Docker image id: sha256:3d60d3ab34860fc3ca14258141410802069a8ed4619abfea1fe886814032c1ab
 Image revision label / ANET_TEST_SOURCE_COMMIT:
-e3d51f872f6912cbf60a5d2729a93cf8c1b05078
+d3abb1aba352f52d2e79afbc2991fb42548a997b
 
 Reusable upstream wire conclusion
 ---------------------------------
@@ -65,15 +65,19 @@ Merge-condition regression coverage
   fake WebSocket app-server wire, and codexAppServerThink: a competing turn is
   observed, the response-id interruption is deferred, no matching clientId
   ever arrives, and the runtime still produces the bounded response timeout.
+- A second cross-layer case leaves the real turn/start RPC unresolved forever.
+  Because that task has left FIFO but cannot emit task_started, #585's queue
+  deadline must convert it to the normal response timer. Removing that exact
+  fallback is independently witnessed red.
 
 Docker command
 --------------
-sg docker -c 'docker build --build-arg SOURCE_COMMIT=e3d51f872f6912cbf60a5d2729a93cf8c1b05078 -t anet-test588:dev -f tests/test588-codex-turn-clientid-rebind/Dockerfile .'
+sg docker -c 'docker build --build-arg SOURCE_COMMIT=d3abb1aba352f52d2e79afbc2991fb42548a997b -t anet-test588:dev -f tests/test588-codex-turn-clientid-rebind/Dockerfile .'
 sg docker -c 'docker run --rm anet-test588:dev'
 
 Normal result
 -------------
-60 pass, 0 fail, 216 expect() calls across:
+61 pass, 0 fail, 221 expect() calls across:
 - codex-app-server-bridge.test.ts
 - codex-app-server/runtime.test.ts
 - codex-app-server/session-manager.test.ts
@@ -82,7 +86,7 @@ RESULT: PASS
 
 Witnessed-red mutation result
 -----------------------------
-All 18 targeted mutations made the unchanged test suite fail:
+All 19 targeted mutations made the unchanged test suite fail:
 1. no_client_index
 2. ignore_user_client_rebind
 3. ignore_history_client_rebind
@@ -96,11 +100,12 @@ All 18 targeted mutations made the unchanged test suite fail:
 11. omit_bridge_started_event
 12. omit_steer_started_event
 13. omit_queue_deadline
-14. queue_timeout_does_not_cancel
-15. ignore_post_deadline_requeue
-16. ignore_post_deadline_steer_requeue
-17. cancel_queue_noop
-18. failure_returned_as_success
+14. omit_left_fifo_response_fallback
+15. queue_timeout_does_not_cancel
+16. ignore_post_deadline_requeue
+17. ignore_post_deadline_steer_requeue
+18. cancel_queue_noop
+19. failure_returned_as_success
 
 Production status
 -----------------
