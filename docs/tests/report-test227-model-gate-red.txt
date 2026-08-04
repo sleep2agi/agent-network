@@ -1,0 +1,25 @@
+# Test 227 — vetted OpenCode model gate witnessed-red
+
+date: 2026-08-04T06:19:30+00:00
+base commit: 5d72ba3a4ef1a99eb7d6b6f133387da7a21f0393
+test: `requires an explicit provider/model at the vetted launch seam too`
+command: Docker `anet-test227:dev`, Layer 0 runtime suite
+
+Before the production guard was added, calling
+`openVettedOpenCodeCopresence` without `model` launched the fake server and
+resolved a session. The new test expected an `Error`, received `undefined`,
+and failed after the server remained alive until the test timeout:
+
+```text
+(fail) requires an explicit provider/model at the vetted launch seam too
+Expected constructor: [class Error]
+Received value: undefined
+10 pass, 1 fail, 1 error
+```
+
+Raw red artifact SHA-256:
+`ceeb97109e75016f1817153c01590a7cd6a5e0012bb28d6cfde4635db218161a`
+
+After adding the guard at the vetted seam, the same test returns before port
+reservation or process spawn. The full green evidence is recorded in
+`report-test227-model-gate.txt`.
