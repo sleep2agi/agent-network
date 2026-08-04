@@ -456,7 +456,11 @@ scan_fixed_file() {
   for target in "$@"; do
     [ -e "$target" ] || [ -L "$target" ] || continue
     if [ -d "$target" ]; then
-      if grep -R -F -f "$patterns" "$target" >/dev/null 2>&1; then
+      # Owner-bound runtime sockets now live below the scanned state root.
+      # They have no persistent byte content and are validated separately by
+      # the socket identity/metadata gate; scan every regular state payload
+      # while preventing GNU grep from turning a live socket into rc=2.
+      if grep -R --devices=skip -F -f "$patterns" "$target" >/dev/null 2>&1; then
         return 1
       else
         rc=$?
