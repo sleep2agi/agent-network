@@ -1,0 +1,137 @@
+# test236 — Dashboard /goal reaches shared Codex TUI
+source_commit=23f26af8e96a229ac56e33ed941400d381412006
+scope=authenticated Dashboard routing, /loop compatibility, legacy /goal compatibility, production wiring, mutation red
+
+$ routing-unit bun test /workspace/agent-node/src/goals/routing.test.ts /workspace/agent-node/src/inbox-dispatch.test.ts
+bun test v1.3.14 (0d9b296a)
+
+agent-node/src/goals/routing.test.ts:
+(pass) shouldCreateScheduledGoal > passes authenticated Dashboard /goal through to the shared Codex TUI [0.26ms]
+(pass) shouldCreateScheduledGoal > keeps /loop on the recurring scheduler for Dashboard Codex TUI tasks [0.05ms]
+(pass) shouldCreateScheduledGoal > preserves the legacy /goal scheduler alias outside authenticated Dashboard Codex TUI [0.08ms]
+(pass) shouldCreateScheduledGoal > does not treat near matches or ordinary chat as scheduler commands [0.07ms]
+(pass) shouldCreateScheduledGoal > warns when Dashboard /goal text contains a scheduler interval [0.80ms]
+(pass) shouldCreateScheduledGoal > does not add a misleading notice to ordinary goals, failures, or legacy paths [0.11ms]
+
+agent-node/src/inbox-dispatch.test.ts:
+(pass) isInteractiveDashboardTask > accepts a Hub-authenticated dashboard chat task [1.55ms]
+(pass) isInteractiveDashboardTask > pre-stamp admin rows stay FIFO because aliases are not auth facts [0.12ms]
+(pass) isInteractiveDashboardTask > rejects node-authenticated spoofing, malformed ids, and plain messages [0.09ms]
+(pass) dispatchInboxBatch > awaited batches preserve legacy runtime serialization [6.01ms]
+(pass) dispatchInboxBatch > a later SSE snapshot enters while the first detached turn is still running [2.03ms]
+(pass) dispatchInboxBatch > the real serialized drain lane can fetch a later SSE snapshot before the active turn ends [0.98ms]
+(pass) dispatchInboxBatch > detached completion failures remain observable [1.46ms]
+(pass) dispatchInboxBatch > settling detached work emits a wake for the next Hub inbox window [1.40ms]
+(pass) dispatchInboxBatch > a throwing settle callback cannot strand queued N+1 work [1.60ms]
+(pass) dispatchInboxBatch > same-tick duplicate kicks claim one row exactly once [0.56ms]
+(pass) dispatchInboxBatch > bounded admission waits N+1 and starts it after a slot settles [2.18ms]
+(pass) dispatchInboxBatch > durable reply drain waits until detached Codex rows finish [0.09ms]
+(pass) dispatchInboxBatch > active Codex direct delivery and durable drain send one reply, not two [13.34ms]
+
+ 19 pass
+ 0 fail
+ 46 expect() calls
+Ran 19 tests across 2 files. [89.00ms]
+
+$ production-wiring bash -ceu $'\n  cli=/workspace/agent-node/src/cli.ts\n  grep -Fq "const interactiveDashboardTask = isInteractiveDashboardTask(msg);" "$cli"\n  grep -Fq "shouldCreateScheduledGoal(persistenceSafeContent, RUNTIME, interactiveDashboardTask)" "$cli"\n  grep -Fq "const result = appendDashboardCodexGoalNotice(" "$cli"\n  grep -Fq "interactiveDashboardTask," "$cli"\n'
+
+$ production-build bash -ceu $'\n  cd /workspace/agent-node\n  bun build src/cli.ts --outfile /tmp/agent-node-cli.js --target node \\\n    --external @anthropic-ai/claude-agent-sdk \\\n    --external "@anthropic-ai/claude-agent-sdk-*" \\\n    --external @openai/codex-sdk \\\n    --external node-pty\n  test -s /tmp/agent-node-cli.js\n'
+Bundled 253 modules in 93ms
+
+  agent-node-cli.js  1.91 MB  (entry point)
+
+bun test v1.3.14 (0d9b296a)
+
+agent-node/src/goals/routing.test.ts:
+ 9 |   test("passes authenticated Dashboard /goal through to the shared Codex TUI", () => {
+10 |     expect(shouldCreateScheduledGoal(
+11 |       "/goal 更新一下 https://anet.sh 把乱七八糟的文档都删了",
+12 |       "codex-app-server",
+13 |       true,
+14 |     )).toBe(false);
+            ^
+error: expect(received).toBe(expected)
+
+Expected: false
+Received: true
+
+      at <anonymous> (/workspace/agent-node/src/goals/routing.test.ts:14:8)
+(fail) shouldCreateScheduledGoal > passes authenticated Dashboard /goal through to the shared Codex TUI [0.54ms]
+(pass) shouldCreateScheduledGoal > keeps /loop on the recurring scheduler for Dashboard Codex TUI tasks [0.10ms]
+(pass) shouldCreateScheduledGoal > preserves the legacy /goal scheduler alias outside authenticated Dashboard Codex TUI [0.15ms]
+(pass) shouldCreateScheduledGoal > does not treat near matches or ordinary chat as scheduler commands [0.10ms]
+(pass) shouldCreateScheduledGoal > warns when Dashboard /goal text contains a scheduler interval [1.00ms]
+(pass) shouldCreateScheduledGoal > does not add a misleading notice to ordinary goals, failures, or legacy paths [0.16ms]
+
+ 5 pass
+ 1 fail
+ 15 expect() calls
+Ran 6 tests across 1 file. [31.00ms]
+PASS: witnessed-red Dashboard Codex /goal mutation rc=1
+
+$ restored-green bun test /workspace/agent-node/src/goals/routing.test.ts
+bun test v1.3.14 (0d9b296a)
+
+agent-node/src/goals/routing.test.ts:
+(pass) shouldCreateScheduledGoal > passes authenticated Dashboard /goal through to the shared Codex TUI [0.30ms]
+(pass) shouldCreateScheduledGoal > keeps /loop on the recurring scheduler for Dashboard Codex TUI tasks [0.06ms]
+(pass) shouldCreateScheduledGoal > preserves the legacy /goal scheduler alias outside authenticated Dashboard Codex TUI [0.14ms]
+(pass) shouldCreateScheduledGoal > does not treat near matches or ordinary chat as scheduler commands [0.11ms]
+(pass) shouldCreateScheduledGoal > warns when Dashboard /goal text contains a scheduler interval [0.93ms]
+(pass) shouldCreateScheduledGoal > does not add a misleading notice to ordinary goals, failures, or legacy paths [0.15ms]
+
+ 6 pass
+ 0 fail
+ 15 expect() calls
+Ran 6 tests across 1 file. [34.00ms]
+bun test v1.3.14 (0d9b296a)
+
+agent-node/src/goals/routing.test.ts:
+(pass) shouldCreateScheduledGoal > passes authenticated Dashboard /goal through to the shared Codex TUI [0.36ms]
+(pass) shouldCreateScheduledGoal > keeps /loop on the recurring scheduler for Dashboard Codex TUI tasks [0.07ms]
+(pass) shouldCreateScheduledGoal > preserves the legacy /goal scheduler alias outside authenticated Dashboard Codex TUI [0.12ms]
+(pass) shouldCreateScheduledGoal > does not treat near matches or ordinary chat as scheduler commands [0.09ms]
+38 |       "/goal 5m 检查日志",
+39 |       "codex-app-server",
+40 |       true,
+41 |       false,
+42 |     );
+43 |     expect(reply).toBe(`目标已创建\n\n${DASHBOARD_CODEX_GOAL_INTERVAL_NOTICE}`);
+                       ^
+error: expect(received).toBe(expected)
+
+- "目标已创建
+-
+- 提示：已作为一次性目标处理；要定时请用 /loop <间隔> <任务>。"
++ "目标已创建"
+
+- Expected  - 3
++ Received  + 1
+
+      at <anonymous> (/workspace/agent-node/src/goals/routing.test.ts:43:19)
+(fail) shouldCreateScheduledGoal > warns when Dashboard /goal text contains a scheduler interval [1.15ms]
+(pass) shouldCreateScheduledGoal > does not add a misleading notice to ordinary goals, failures, or legacy paths [0.16ms]
+
+ 5 pass
+ 1 fail
+ 15 expect() calls
+Ran 6 tests across 1 file. [32.00ms]
+PASS: witnessed-red interval notice mutation rc=1
+
+$ final-green bun test /workspace/agent-node/src/goals/routing.test.ts
+bun test v1.3.14 (0d9b296a)
+
+agent-node/src/goals/routing.test.ts:
+(pass) shouldCreateScheduledGoal > passes authenticated Dashboard /goal through to the shared Codex TUI [0.27ms]
+(pass) shouldCreateScheduledGoal > keeps /loop on the recurring scheduler for Dashboard Codex TUI tasks [0.06ms]
+(pass) shouldCreateScheduledGoal > preserves the legacy /goal scheduler alias outside authenticated Dashboard Codex TUI [0.12ms]
+(pass) shouldCreateScheduledGoal > does not treat near matches or ordinary chat as scheduler commands [0.08ms]
+(pass) shouldCreateScheduledGoal > warns when Dashboard /goal text contains a scheduler interval [0.78ms]
+(pass) shouldCreateScheduledGoal > does not add a misleading notice to ordinary goals, failures, or legacy paths [0.15ms]
+
+ 6 pass
+ 0 fail
+ 15 expect() calls
+Ran 6 tests across 1 file. [30.00ms]
+
+Summary: PASS (authenticated Dashboard /goal passes to Codex TUI; interval ambiguity is explicit; /loop and legacy paths preserved; production bundle builds; two mutations red)
