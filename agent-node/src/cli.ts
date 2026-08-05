@@ -18,6 +18,7 @@ import { createCommhubSdkMcpServer } from "./commhub-mcp";
 import { getHostTelemetry } from "./host-telemetry";
 import { getProcessTelemetry, incrementInFlight, decrementInFlight } from "./process-telemetry";
 import { parseGoalCommand } from "./goals/parser";
+import { appendDashboardCodexGoalNotice, shouldCreateScheduledGoal } from "./goals/routing";
 import { GoalStore, newGoal, runtimeBucket, decideStartupAction } from "./goals/store";
 import { decideTickWork } from "./goals/scheduler";
 import { runCodexWakeForGoal, type CodexWakeDeps } from "./goals/codex-wake";
@@ -1422,10 +1423,6 @@ const codexInboxDispatcher = createDetachedInboxDispatcher<any>({
   // The work lane coalesces simultaneous completions into a bounded dirty run.
   onSettled: scheduleWorkInboxDrain,
 });
-
-function isGoalCommand(content: string): boolean {
-  return /^\s*\/(?:goal|loop)\b/i.test(content || "");
-}
 
 function formatInterval(ms: number): string {
   const min = Math.round(ms / 60_000);
@@ -4539,15 +4536,14 @@ async function processInbox() {
       const persistenceSafeContent = GROK_EXECUTION_MODE === "cli"
         ? persistenceRedactor.redactText(content).text
         : content;
+      const interactiveDashboardTask = isInteractiveDashboardTask(msg);
 
-      // #144 round-6: anet /loop is universal — all recognized runtimes
-      // (claude / codex / grok) route /loop and /goal commands to the
-      // scheduler. The pre-#144 `RUNTIME !== "claude"` carve-out was
-      // removed because the underlying premise (claude-agent-sdk has a
-      // native /loop) was false: the SDK is one-shot per-task, no
-      // persistent CC REPL to fire CronCreate/ScheduleWakeup from. See
-      // goals/store.ts runtimeBucket comment for full rationale.
-      if (isGoalCommand(persistenceSafeContent)) {
+      // `/loop` remains Agent Network's universal recurring scheduler.
+      // `/goal` remains its backwards-compatible alias except for a
+      // Hub-authenticated Dashboard task entering a shared Codex TUI. That
+      // surface owns `/goal`; intercepting it here both changes its semantics
+      // and rejects normal goal text that intentionally has no interval.
+      if (shouldCreateScheduledGoal(persistenceSafeContent, RUNTIME, interactiveDashboardTask)) {
         let replyText: string;
         let goalFailed = false;
         try {
@@ -4565,12 +4561,20 @@ async function processInbox() {
       }
 
       // (3b) Run the LLM turn.
-      const { text: result, failed } = await processTask(
+      const taskOutcome = await processTask(
         content,
         from,
         msg.id,
         images,
-        isInteractiveDashboardTask(msg),
+        interactiveDashboardTask,
+      );
+      const failed = taskOutcome.failed;
+      const result = appendDashboardCodexGoalNotice(
+        taskOutcome.text,
+        persistenceSafeContent,
+        RUNTIME,
+        interactiveDashboardTask,
+        failed,
       );
       if (GROK_EXECUTION_MODE === "cli") {
         log(`processTask returned (${result.length} chars, content withheld, failed=${failed})`);
