@@ -40,7 +40,10 @@ describe("shouldCreateScheduledGoal", () => {
       true,
       false,
     );
-    expect(reply).toBe(`目标已创建\n\n${DASHBOARD_CODEX_GOAL_INTERVAL_NOTICE}`);
+    expect(reply).toBe(`${DASHBOARD_CODEX_GOAL_INTERVAL_NOTICE}\n\n目标已创建`);
+    expect(appendDashboardCodexGoalNotice(
+      "x".repeat(2_500), "/goal 5m 检查日志", "codex-app-server", true, false,
+    ).slice(0, 2_000)).toContain(DASHBOARD_CODEX_GOAL_INTERVAL_NOTICE);
   });
 
   test("does not add a misleading notice to ordinary goals, failures, or legacy paths", () => {

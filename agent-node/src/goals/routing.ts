@@ -25,8 +25,9 @@ export function shouldCreateScheduledGoal(
 
 /**
  * Make the narrow Dashboard/Codex semantic split visible when the goal text
- * also contains a scheduler interval. The model reply is preserved verbatim;
- * this deterministic suffix prevents a user from silently expecting a loop.
+ * also contains a scheduler interval. Put the deterministic notice first so
+ * the outer 2000-character reply cap cannot truncate it from a long model
+ * response.
  */
 export function appendDashboardCodexGoalNotice(
   replyText: string,
@@ -38,5 +39,5 @@ export function appendDashboardCodexGoalNotice(
   if (failed || runtime !== "codex-app-server" || !interactiveDashboardTask) return replyText;
   if (!/^\s*\/goal\b/i.test(content || "")) return replyText;
   if (!parseGoalCommand(content).ok) return replyText;
-  return `${replyText}\n\n${DASHBOARD_CODEX_GOAL_INTERVAL_NOTICE}`;
+  return `${DASHBOARD_CODEX_GOAL_INTERVAL_NOTICE}\n\n${replyText}`;
 }

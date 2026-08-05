@@ -65,7 +65,7 @@ run restored-green bun test /workspace/agent-node/src/goals/routing.test.ts
 # Witnessed-red: keep the routing exception but remove the deterministic
 # interval notice from the successful reply. The ambiguity regression must be
 # observable even though the goal itself still reaches Codex.
-sed -i 's/return `${replyText}\\n\\n${DASHBOARD_CODEX_GOAL_INTERVAL_NOTICE}`;/return replyText;/' \
+sed -i 's/return `${DASHBOARD_CODEX_GOAL_INTERVAL_NOTICE}\\n\\n${replyText}`;/return replyText;/' \
   /workspace/agent-node/src/goals/routing.ts
 set +e
 bun test /workspace/agent-node/src/goals/routing.test.ts > /tmp/notice-mutation.out 2>&1
