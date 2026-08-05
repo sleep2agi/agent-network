@@ -41,3 +41,22 @@ export function appendDashboardCodexGoalNotice(
   if (!parseGoalCommand(content).ok) return replyText;
   return `${DASHBOARD_CODEX_GOAL_INTERVAL_NOTICE}\n\n${replyText}`;
 }
+
+/** Compose the visible goal notice before applying the ordinary reply filter. */
+export function prepareDashboardCodexGoalReply(
+  replyText: string,
+  content: string,
+  runtime: GoalRoutingRuntime,
+  interactiveDashboardTask: boolean,
+  failed: boolean,
+  isLowValueReply: (text: string) => boolean,
+): { text: string; shouldDeliver: boolean } {
+  const text = appendDashboardCodexGoalNotice(
+    replyText,
+    content,
+    runtime,
+    interactiveDashboardTask,
+    failed,
+  );
+  return { text, shouldDeliver: failed || !isLowValueReply(text) };
+}

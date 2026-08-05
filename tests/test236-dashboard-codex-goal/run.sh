@@ -28,7 +28,8 @@ run production-wiring bash -ceu '
   cli=/workspace/agent-node/src/cli.ts
   grep -Fq "const interactiveDashboardTask = isInteractiveDashboardTask(msg);" "$cli"
   grep -Fq "shouldCreateScheduledGoal(persistenceSafeContent, RUNTIME, interactiveDashboardTask)" "$cli"
-  grep -Fq "const result = appendDashboardCodexGoalNotice(" "$cli"
+  grep -Fq "const preparedReply = prepareDashboardCodexGoalReply(" "$cli"
+  grep -Fq "if (!preparedReply.shouldDeliver)" "$cli"
   grep -Fq "interactiveDashboardTask," "$cli"
 '
 
@@ -81,5 +82,24 @@ printf 'PASS: witnessed-red interval notice mutation rc=%s\n' "$notice_mutation_
 
 run final-green bun test /workspace/agent-node/src/goals/routing.test.ts
 
-printf '\nSummary: PASS (authenticated Dashboard /goal passes to Codex TUI; interval ambiguity is explicit; /loop and legacy paths preserved; production bundle builds; two mutations red)\n' \
+# Witnessed-red: evaluate low-value status against the raw model text instead
+# of the notice-prefixed text. A model reply of "收到" would then suppress the
+# required interval warning.
+sed -i 's/!isLowValueReply(text)/!isLowValueReply(replyText)/' \
+  /workspace/agent-node/src/goals/routing.ts
+set +e
+bun test /workspace/agent-node/src/goals/routing.test.ts > /tmp/order-mutation.out 2>&1
+order_mutation_rc=$?
+set -e
+cat /tmp/order-mutation.out | tee -a "$REPORT"
+cp /tmp/routing.original.ts /workspace/agent-node/src/goals/routing.ts
+if test "$order_mutation_rc" -eq 0; then
+  printf 'FAIL: moving notice composition after low-value filtering stayed green\n' | tee -a "$REPORT"
+  exit 1
+fi
+printf 'PASS: witnessed-red notice/filter ordering mutation rc=%s\n' "$order_mutation_rc" | tee -a "$REPORT"
+
+run order-restored-green bun test /workspace/agent-node/src/goals/routing.test.ts
+
+printf '\nSummary: PASS (authenticated Dashboard /goal passes to Codex TUI; interval ambiguity survives reply filtering/cap; /loop and legacy paths preserved; production bundle builds; three mutations red)\n' \
   | tee -a "$REPORT"

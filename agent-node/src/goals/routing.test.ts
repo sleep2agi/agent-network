@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   appendDashboardCodexGoalNotice,
   DASHBOARD_CODEX_GOAL_INTERVAL_NOTICE,
+  prepareDashboardCodexGoalReply,
   shouldCreateScheduledGoal,
 } from "./routing";
 
@@ -59,5 +60,18 @@ describe("shouldCreateScheduledGoal", () => {
     expect(appendDashboardCodexGoalNotice(
       "loop", "/loop 5m 检查日志", "codex-app-server", true, false,
     )).toBe("loop");
+  });
+
+  test("delivers the interval notice even when the model reply alone is low-value", () => {
+    const prepared = prepareDashboardCodexGoalReply(
+      "收到",
+      "/goal 5m 检查日志",
+      "codex-app-server",
+      true,
+      false,
+      (text) => text === "收到",
+    );
+    expect(prepared.shouldDeliver).toBe(true);
+    expect(prepared.text).toContain(DASHBOARD_CODEX_GOAL_INTERVAL_NOTICE);
   });
 });

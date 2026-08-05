@@ -18,7 +18,7 @@ import { createCommhubSdkMcpServer } from "./commhub-mcp";
 import { getHostTelemetry } from "./host-telemetry";
 import { getProcessTelemetry, incrementInFlight, decrementInFlight } from "./process-telemetry";
 import { parseGoalCommand } from "./goals/parser";
-import { appendDashboardCodexGoalNotice, shouldCreateScheduledGoal } from "./goals/routing";
+import { prepareDashboardCodexGoalReply, shouldCreateScheduledGoal } from "./goals/routing";
 import { GoalStore, newGoal, runtimeBucket, decideStartupAction } from "./goals/store";
 import { decideTickWork } from "./goals/scheduler";
 import { runCodexWakeForGoal, type CodexWakeDeps } from "./goals/codex-wake";
@@ -4569,13 +4569,15 @@ async function processInbox() {
         interactiveDashboardTask,
       );
       const failed = taskOutcome.failed;
-      const result = appendDashboardCodexGoalNotice(
+      const preparedReply = prepareDashboardCodexGoalReply(
         taskOutcome.text,
         persistenceSafeContent,
         RUNTIME,
         interactiveDashboardTask,
         failed,
+        (text) => isLowValueText(text, true),
       );
+      const result = preparedReply.text;
       if (GROK_EXECUTION_MODE === "cli") {
         log(`processTask returned (${result.length} chars, content withheld, failed=${failed})`);
       } else {
@@ -4586,7 +4588,7 @@ async function processInbox() {
       // behaviour — codex / claude often emit "done." / "✅" for trivial
       // confirmations). Failures ALWAYS surface so the dispatcher sees
       // the real error instead of silence.
-      if (!failed && isLowValueText(result, true)) {
+      if (!preparedReply.shouldDeliver) {
         log(GROK_EXECUTION_MODE === "cli"
           ? `skip reply: low-value (${result.length} chars; content withheld)`
           : `skip reply: low-value (${result.slice(0, 30)})`);
