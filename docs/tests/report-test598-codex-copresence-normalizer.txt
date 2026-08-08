@@ -1,7 +1,7 @@
 # test598 — Codex co-presence single-node normalizer
 
 Date: 2026-08-08 Asia/Shanghai
-Source commits: 1087650e81cc438da24820b66509b50486182bb4 + TUI follow-up c754b639c95b76d1a07403e5fd1797ef9224d6fa + owner/socket gates 21e4dadcfa8350b549733e66e8f31af1504d9f12 + explicit permission preparation 236c73a8b74e026a0fe96485814334e989c5b048
+Source commits: 1087650e81cc438da24820b66509b50486182bb4 + TUI follow-up c754b639c95b76d1a07403e5fd1797ef9224d6fa + owner/socket gates 21e4dadcfa8350b549733e66e8f31af1504d9f12 + explicit permission preparation 236c73a8b74e026a0fe96485814334e989c5b048 + explicit model pin dfbd2fb0a0ce1864bf71e1c53adc8cd1fe662879
 Image: anet-test598:dev
 Scope: Docker isolation only; no production node, Hub, Dashboard, bridge, TUI, or app-server was mutated.
 
@@ -13,6 +13,7 @@ PASS.
 - L1: owner/type/mode validation, permission repair, per-node goalsPath, duplicate node_id, duplicate thread ID, and duplicate goalsPath passed.
 - L1 also proves single-node apply cannot implicitly chmod the fleet inventory: it fails before stopping any runtime until a separately reviewed `prepare-permissions` step has completed.
 - L2: a real isolated tmux server stopped three exact PID+starttime-owned sessions, started a fake app-server, bridge, and TUI, verified the pinned executable version, persisted the exact `anet:<node_id>:<alias>` thread owner, verified the real cwd, proved the TUI held a socket to that app-server, and left the goal store absent (no legacy migration).
+- L2 migrated the selected config from stale `gpt-5.5` to the operator-pinned `gpt-5.6-sol`; an injected later startup failure restored the byte-identical stale-model fixture, proving the model update participates in rollback.
 - L3: thread-owner mismatch, thread-cwd mismatch, PID drift, unaccounted alias process, injected post-start version failure, injected TUI exit, and a live TUI process with no app-server socket all failed closed. Injected rollout failures restored the byte-identical config, removed the new empty goals directory, and left no new app-server/bridge/TUI sessions.
 - L4: removing the exact goalsPath collision predicate was witnessed red; removing/weakening process and rollback anchors remains covered by the explicit negative paths above.
 - Secret gate: the report contains no test token value; runtime output exposes only command hashes.
@@ -53,5 +54,11 @@ Production-shaped read-only plan against `设计副责人`:
 - canonical goalsPath: `/home/vansin/rfc030-work/.demo/goals/n_b3fac24e/goals.json`
 - legacy store: absent; no migration planned
 - unique permission repairs reported, not applied: 21 (20 configs `0664→0600` + inventory directory `0775→0700`)
+
+Production-shaped read-only pilot inspection against `P站副责人`:
+
+- Hub status reports `gpt-5.6-sol`, while its bridge config still contains stale `gpt-5.5`
+- a legacy `codex-sdk` owner, legacy bridge, and app-server are simultaneously present; the plain alias tmux is not a shared TUI
+- the normalizer now requires `--expected-model gpt-5.6-sol`, reports `modelFrom/modelTo`, and atomically pins that model instead of preserving the stale bridge snapshot
 
 The candidate is not a deployment authorization. A real-node apply still requires an owner-selected interruptible node/window, exact process/session coordinates for all three components, external socket single-owner verification, and `/goal`, `/loop` notice, `/aloop` create/cancel UAT.
