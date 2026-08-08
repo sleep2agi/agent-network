@@ -109,23 +109,64 @@ Security and privacy assertions
   record, and review notes.
 * Export downloads locally. It does not send content to anet.sh or another network.
 
-Known limits and deployment gates
-=================================
+Production rollout and UAT
+==========================
+
+Authorized merge and deployment completed on 2026-08-09 (Asia/Shanghai):
+
+* Private Hub #596 -> main `6ad202de70e5df00eb2192dfd7988bb1f848890b`;
+  deployed as `runtime-v28-skillhub-6ad202de` on port 9200.
+* Private Dashboard #3 -> main `525b8c41aec12a14b5f1f8d50a08083e8cec5634`;
+  deployed with `/skillhub` returning HTTP 200.
+* Public-export Dashboard #4 -> main
+  `5ac62da04ed98989695db31071a97bbabeb3d5a9`; deployed as
+  `dashboard-runtime-skillhub-5ac62da0` on port 3001.
+* Public catalog #597 -> main `f4eee0dd17c7f15bcd71f55cca698016ee14d18b`.
+* Vercel-root fix #599 -> main `6870d76521c8722ebedc530dd8b565b577c04aaa`.
+* Independently reviewed public skill #598 -> main
+  `13f324d4e304e5b1884566c88ccbe72f75a98158`.
+
+The first Vercel cloud build failed closed on the parent-directory script path.
+After #599, a normal `vercel --prod --yes` cloud build from merged main passed;
+no prebuilt workaround was used for the final deployment. The deployment was
+aliased to `www.anet.sh`.
+
+Live public UAT returned HTTP 200 for all four surfaces:
+
+* `https://www.anet.sh/skillhub/`
+* `https://www.anet.sh/en/skillhub/`
+* `https://www.anet.sh/skillhub/catalog.json`
+* `https://www.anet.sh/skillhub/skills/public-skill-review-checklist/1.0.0/SKILL.md`
+
+The live catalog contained exactly two reviewed entries:
+`public-skill-review-checklist@1.0.0` and `skill-writing-guide@1.0.0`.
+For the production-promoted checklist, the private Hub content, public catalog
+`content_sha256`, and downloaded SKILL.md bytes all matched:
+
+  a009367849bc1c8d4f808c9bf7474f87b1432b4643651c402dbff0fca5863be1
+
+The live catalog contained zero objects with private network, skill ID, source,
+review, creator, or reviewer fields. This proves the intended sequence:
+private submit -> private review/readback -> local allowlisted export -> public
+pull request -> independent second review -> deterministic catalog -> public
+detail/download. Private `published` status never triggered automatic Internet
+publication.
+
+Known limits and future gates
+=============================
 
 * The scanner is a defense-in-depth validator, not a universal secret detector.
   Public-repository review remains mandatory.
 * Public direct submission/federation is intentionally absent. Adding it requires
   publisher identity, abuse controls, central moderation, immutable storage, and
   an audit log.
-* Hub PR #596 and private Dashboard PR #3 must be merged and deployed before the
-  private workflow can be exercised in production.
-* The public catalog and stacked Dashboard export branches require independent
-  review, CI, and authorized merge/deployment.
-* Production UAT must prove: private submit -> private review/readback -> local
-  public bundle export -> public import/validation -> anet.sh catalog/detail read.
+* Every future public skill still requires an explicit public-repository pull
+  request and independent review; network publication alone is insufficient.
+* Future schema changes must preserve the allowlisted export and must be tested
+  against a docs-site-only Vercel project root.
 
 Verdict
 =======
 
-Candidate implementation and isolated Docker evidence: PASS.
-Merge/deployment/public UAT: PENDING authorized review and rollout.
+Private SkillHub, Dashboard export, public catalog, clean Vercel deployment, and
+production private-to-public UAT: PASS.
