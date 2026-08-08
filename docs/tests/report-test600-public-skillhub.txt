@@ -52,6 +52,32 @@ contract passed. This delta only defers URL.revokeObjectURL until the next event
 loop and adds a contract assertion; it does not change the bundle schema,
 permissions, or rendering.
 
+Vercel project-root follow-up
+============================
+
+Source commit:
+  96b70ec7deadf96da023f0012096aeeb75e11f2f
+
+Docker image:
+  tag: anet-test600-vercel-root:dev
+  image digest: sha256:6347ebe1236d26bccf0554893896a379937f786a4d5dff5df046dbb20c7ed72a
+  embedded TEST600_SOURCE_COMMIT:
+    96b70ec7deadf96da023f0012096aeeb75e11f2f
+  result: PASS (12 checks)
+
+Witnessed red used the same filesystem boundary as the Vercel project: only
+`docs-site/` was present. `npm run build` failed in prebuild with
+`MODULE_NOT_FOUND` because it referenced `../scripts/build-public-skillhub.mjs`,
+which is outside that project root. The failed cloud deployment did not replace
+the existing anet.sh production deployment.
+
+Witnessed green moves the single canonical validator into
+`docs-site/scripts/`, keeps the repository-root command as a compatibility
+wrapper, and adds a docs-site-only gate. The exact Docker source passed all 12
+checks, including a real VitePress production build in 34.34 seconds. A separate
+docs-site-only host probe also completed `npm run build` and emitted the public
+catalog and `/skillhub` page without reading a repository parent directory.
+
 Public-catalog checks
 =====================
 
@@ -65,6 +91,8 @@ Public-catalog checks
 8. Chinese and English public-boundary documentation is present.
 9. The public catalog component is wired into both locales.
 10. A real VitePress production build emits the catalog, content, and both pages.
+11. The Vercel docs-site project root contains its complete catalog validator.
+12. The production build remains green with the self-contained prebuild path.
 
 Security and privacy assertions
 ===============================
