@@ -1,9 +1,9 @@
 # test598 — Codex co-presence single-node normalizer
 
 Date: 2026-08-08 Asia/Shanghai
-Source commits: 1087650e81cc438da24820b66509b50486182bb4 + TUI follow-up c754b639c95b76d1a07403e5fd1797ef9224d6fa + owner/socket gates 21e4dadcfa8350b549733e66e8f31af1504d9f12 + explicit permission preparation 236c73a8b74e026a0fe96485814334e989c5b048 + explicit model pin dfbd2fb0a0ce1864bf71e1c53adc8cd1fe662879 + workdir permission preparation 6cf5c7894760be13ac0cadc1e36f6bd0a91c986f + exact TUI process-tree socket verification 8481306b595a83356da6a0d4743c520de18f687c
+Source commits: 1087650e81cc438da24820b66509b50486182bb4 + TUI follow-up c754b639c95b76d1a07403e5fd1797ef9224d6fa + owner/socket gates 21e4dadcfa8350b549733e66e8f31af1504d9f12 + explicit permission preparation 236c73a8b74e026a0fe96485814334e989c5b048 + explicit model pin dfbd2fb0a0ce1864bf71e1c53adc8cd1fe662879 + workdir permission preparation 6cf5c7894760be13ac0cadc1e36f6bd0a91c986f + exact TUI process-tree socket verification 8481306b595a83356da6a0d4743c520de18f687c + exact flagged app-server argv matching 47e6fa746d160123d211b2418a364d7e9adf558e
 Image: anet-test598:dev
-Image ID: sha256:c0fc0d934993f71f7be12af3f5140c2dfbd11c6a441098f9799084ce73b2dc8b
+Image ID: sha256:7ae57801c6864d6fecb5fe7a4fdbbb01dcdca18025006c8035554abcba0c9227
 Scope: Docker isolation only; no production node, Hub, Dashboard, bridge, TUI, or app-server was mutated.
 
 ## Result
@@ -15,7 +15,7 @@ PASS.
 - L1 also proves single-node apply cannot implicitly chmod the fleet inventory: it fails before stopping any runtime until a separately reviewed `prepare-permissions` step has completed.
 - L2: a real isolated tmux server stopped three exact PID+starttime-owned sessions, started a fake app-server, bridge, and TUI, verified the pinned executable version, persisted the exact `anet:<node_id>:<alias>` thread owner, verified the real cwd, proved a child in the exact TUI pane process tree held an ESTAB socket to that app-server, and left the goal store absent (no legacy migration).
 - L2 migrated the selected config from stale `gpt-5.5` to the operator-pinned `gpt-5.6-sol`; an injected later startup failure restored the byte-identical stale-model fixture, proving the model update participates in rollback.
-- L3: thread-owner mismatch, thread-cwd mismatch, PID drift, unaccounted alias process, injected post-start version failure, injected TUI exit, and a live TUI process tree with no app-server socket all failed closed. A mutation that weakened the socket test to the pane root PID rejected the valid child-held socket and turned red. Injected rollout failures restored the byte-identical config, removed the new empty goals directory, and left no new app-server/bridge/TUI sessions.
+- L3: thread-owner mismatch, thread-cwd mismatch, PID drift, unaccounted alias process, a second flagged app-server whose real argv has `-c` arguments between `app-server` and `--listen`, injected post-start version failure, injected TUI exit, and a live TUI process tree with no app-server socket all failed closed. Mutations that weakened the socket test to the pane root PID or weakened app-server matching back to adjacent argv tokens turned red. Injected rollout failures restored the byte-identical config, removed the new empty goals directory, and left no new app-server/bridge/TUI sessions.
 - L4: removing the exact goalsPath collision predicate was witnessed red; removing/weakening process and rollback anchors remains covered by the explicit negative paths above.
 - Secret gate: the report contains no test token value; runtime output exposes only command hashes.
 
@@ -29,6 +29,8 @@ Witnessed-red results:
 - duplicate-thread: rc=2
 - collision mutation: rc=1
 - unaccounted process: rc=2
+- flagged app-server with intervening `-c` arguments: rc=2
+- adjacent-token app-server matcher mutation: rc=1
 - thread-owner mismatch: rc=2
 - thread-cwd mismatch: rc=2
 - PID birth-time drift: rc=2
@@ -39,9 +41,29 @@ Witnessed-red results:
 
 Exact-source Docker run:
 
-- source commit embedded in the test image: `8481306b595a83356da6a0d4743c520de18f687c`
-- positive socket evidence: `TUI_SOCKET pane_pid=692 holder_pid=709 descendants=2`
+- source commit embedded in the test image: `47e6fa746d160123d211b2418a364d7e9adf558e`
+- image environment contains `TEST598_SOURCE_COMMIT=47e6fa746d160123d211b2418a364d7e9adf558e`
+- positive socket evidence: `TUI_SOCKET pane_pid=672 holder_pid=689 descendants=2`
 - final result: `RESULT: PASS`
+
+## Flagged app-server process-discovery correction
+
+The production pilot exposed a safety-test gap before any second node was
+mutated. Real Codex argv is shaped as `app-server -c ... -c ... --listen WS`,
+while the original discovery predicate only recognized the adjacent string
+`app-server --listen WS`. The pilot remained accounted because both of its
+app-server PIDs were explicitly supplied, but a second flagged process could
+have evaded the automatic unaccounted-process gate.
+
+Witnessed red/green evidence:
+
+- with the exact old production matcher, an isolated second app-server-shaped process containing intervening `-c` arguments was accepted and the test emitted `FALSE_GREEN: flagged-appserver-must-be-unaccounted` (suite rc=1)
+- the corrected implementation reads NUL-delimited argv and requires exact tokens; it rejected that same process as unaccounted (rc=2)
+- a mutation that restored adjacent-token matching accepted the process, so `flagged-appserver-matcher-mutation-must-be-caught` turned red (rc=1)
+- the complete exact-source Docker suite then finished `RESULT: PASS`
+
+Fleet rollout stayed paused throughout this correction. No node other than the
+already completed `P站副责人` pilot was mutated.
 
 Real production read-only socket ownership evidence:
 
