@@ -21,8 +21,9 @@ node scripts/build-public-skillhub.mjs --check
 pass "canonical catalog is deterministic and current"
 
 case_root=/tmp/test600-case
-mkdir -p "$case_root/scripts" "$case_root/docs-site/docs/public"
+mkdir -p "$case_root/scripts" "$case_root/docs-site/scripts" "$case_root/docs-site/docs/public"
 cp scripts/build-public-skillhub.mjs "$case_root/scripts/"
+cp docs-site/scripts/build-public-skillhub.mjs "$case_root/docs-site/scripts/"
 cp -a docs-site/docs/public/skillhub "$case_root/docs-site/docs/public/"
 
 cp -a "$case_root" /tmp/test600-license
@@ -86,6 +87,12 @@ grep -q "withBase('/skillhub/catalog.json')" docs-site/docs/.vitepress/theme/Pub
 grep -q "<PublicSkillHub lang=\"zh\"" docs-site/docs/skillhub/index.md
 grep -q "<PublicSkillHub lang=\"en\"" docs-site/docs/en/skillhub/index.md
 pass "public catalog component is wired for both locales"
+
+docs_only=/tmp/test600-docs-only
+mkdir -p "$docs_only"
+cp -a docs-site/. "$docs_only/"
+node "$docs_only/scripts/build-public-skillhub.mjs" --check
+pass "Vercel docs-site project root contains its complete catalog validator"
 
 npm ci --prefix docs-site --no-audit --no-fund
 npm run build --prefix docs-site
