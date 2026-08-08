@@ -28,11 +28,12 @@ PASS.
 
 - Contract test: PASS (desktop/mobile navigation, authenticated proxy,
   selected-network forwarding, submit/review wiring, no browser token field).
+- Targeted ESLint: 0 errors (one pre-existing Sidebar navigation warning).
 - `next build`: PASS, including TypeScript and all 52 static pages.
 - Generated routes include `ƒ /api/anet/skills` and `○ /skillhub`.
 - Runtime contract rerun from the built image: PASS.
 - Final image digest:
-  `sha256:66a0ce4e43785efbb73b13758aa0e4476d2c0add6e3ce5744bdbf0ee0eb2a81d`.
+  `sha256:9fe17bfacc225321e2a278d20beb57ea9518d93f2b57bc98034ac93e5831102c`.
 
 Both exact test images were removed after evidence capture because the host had
 7.7 GiB free. No bulk prune or pattern deletion was used; running containers
