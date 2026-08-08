@@ -10,7 +10,7 @@ function parseArgs(argv) {
     const arg = argv[i];
     if (!arg.startsWith("--")) fail(`unexpected positional argument ${JSON.stringify(arg)}`);
     const key = arg.slice(2);
-    if (!["mode", "config", "inventory-dir", "goals-root", "model"].includes(key)) fail(`unknown option --${key}`);
+    if (!["mode", "config", "inventory-dir", "goals-root", "model", "workdir"].includes(key)) fail(`unknown option --${key}`);
     const value = argv[++i];
     if (!value || value.startsWith("--")) fail(`--${key} requires a value`);
     out[key] = value;
@@ -52,9 +52,11 @@ if (!["plan", "prepare-permissions", "apply"].includes(args.mode)) fail("--mode 
 const configPath = resolve(args.config);
 const inventoryDir = resolve(args["inventory-dir"]);
 const goalsRoot = resolve(args["goals-root"]);
-if (!isAbsolute(configPath) || !isAbsolute(inventoryDir) || !isAbsolute(goalsRoot)) fail("all paths must be absolute");
+const workdir = args.workdir ? resolve(args.workdir) : null;
+if (!isAbsolute(configPath) || !isAbsolute(inventoryDir) || !isAbsolute(goalsRoot) || (workdir && !isAbsolute(workdir))) fail("all paths must be absolute");
 assertOwnedRegular(configPath, 0o600, "config");
 assertOwnedDirectory(inventoryDir, 0o700, "inventory directory");
+if (workdir) assertOwnedDirectory(workdir, 0o700, "node workdir");
 
 const cfg = safeJson(configPath);
 const nodeId = String(cfg.node_id || "");
@@ -95,7 +97,7 @@ if (cfg.flags?.goalsPath && resolve(cfg.flags.goalsPath) !== desired) fail(`exis
 if (args.mode === "prepare-permissions") {
   for (const repair of permissionRepairs) chmodSync(repair.path, Number.parseInt(repair.to, 8));
   console.log(JSON.stringify({ ok: true, mode: args.mode, config: configPath, inventoryCount: inventory.length,
-    permissionRepairs, contentMutated: false }));
+    workdir, permissionRepairs, contentMutated: false }));
   process.exit(0);
 }
 
@@ -123,6 +125,6 @@ if (args.mode === "apply") {
   chmodSync(tmp, 0o600); renameSync(tmp, configPath); chmodSync(configPath, 0o600);
 }
 console.log(JSON.stringify({ ok: true, mode: args.mode, config: configPath, node_id: nodeId,
-  modelFrom: currentModel, modelTo: targetModel, goalsPath: desired, inventoryCount: inventory.length,
+  modelFrom: currentModel, modelTo: targetModel, workdir, goalsPath: desired, inventoryCount: inventory.length,
   goalsFile: existsSync(desired) ? "present-mode-600" : "absent-no-migration",
   permissionRepairs }));

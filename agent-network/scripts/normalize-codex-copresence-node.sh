@@ -45,14 +45,13 @@ done
 [[ "$EXPECTED_DIST_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "REFUSE: expected dist sha256 must be lowercase hex" >&2; exit 2; }
 [[ "$EXPECTED_MODEL" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "REFUSE: expected model has unsafe shape" >&2; exit 2; }
 [[ "$(sha256sum "$DIST_CLI" | awk '{print $1}')" == "$EXPECTED_DIST_SHA256" ]] || { echo "REFUSE: dist cli sha256 mismatch" >&2; exit 2; }
-WORK_UID=$(stat -c %u "$WORKDIR"); WORK_MODE=$(stat -c %a "$WORKDIR")
+WORK_UID=$(stat -c %u "$WORKDIR")
 [[ "$WORK_UID" == "$(id -u)" ]] || { echo "REFUSE: workdir is not owned by euid" >&2; exit 2; }
-(( (8#$WORK_MODE & 8#022) == 0 )) || { echo "REFUSE: workdir is group/world writable" >&2; exit 2; }
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CONFIG_TOOL="$SCRIPT_DIR/codex-copresence-fleet-config.mjs"
 THREAD_TOOL="$SCRIPT_DIR/codex-copresence-thread-owner.mjs"
-PLAN=$(bun "$CONFIG_TOOL" --mode plan --config "$CONFIG" --inventory-dir "$INVENTORY_DIR" --goals-root "$GOALS_ROOT" --model "$EXPECTED_MODEL")
+PLAN=$(bun "$CONFIG_TOOL" --mode plan --config "$CONFIG" --inventory-dir "$INVENTORY_DIR" --goals-root "$GOALS_ROOT" --workdir "$WORKDIR" --model "$EXPECTED_MODEL")
 NODE_ID=$(bun -e 'const x=JSON.parse(process.argv[1]);process.stdout.write(x.node_id)' "$PLAN")
 DESIRED_GOALS=$(bun -e 'const x=JSON.parse(process.argv[1]);process.stdout.write(x.goalsPath)' "$PLAN")
 PERMISSION_REPAIR_COUNT=$(bun -e 'const x=JSON.parse(process.argv[1]);process.stdout.write(String(x.permissionRepairs?.length||0))' "$PLAN")
@@ -138,7 +137,7 @@ trap rollback ERR INT TERM
 for name in "${STOP_SESSIONS[@]}"; do sid=${SESSION_IDS[$name]%%:*}; tmux kill-session -t "$sid"; done
 for _ in $(seq 1 40); do alive=0; for pid in "${!EXPECTED[@]}"; do [[ -e "/proc/$pid" ]] && alive=1; done; (( alive == 0 )) && break; sleep 0.25; done
 for pid in "${!EXPECTED[@]}"; do [[ ! -e "/proc/$pid" ]] || { echo "REFUSE: pid $pid survived exact tmux stop" >&2; false; }; done
-bun "$CONFIG_TOOL" --mode apply --config "$CONFIG" --inventory-dir "$INVENTORY_DIR" --goals-root "$GOALS_ROOT" --model "$EXPECTED_MODEL"
+bun "$CONFIG_TOOL" --mode apply --config "$CONFIG" --inventory-dir "$INVENTORY_DIR" --goals-root "$GOALS_ROOT" --workdir "$WORKDIR" --model "$EXPECTED_MODEL"
 
 RUNTIME_DIR=$(mktemp -d "/tmp/anet-normalize-run-${NODE_ID}.XXXXXX"); chmod 0700 "$RUNTIME_DIR"
 cat >"$RUNTIME_DIR/appsrv.sh" <<'EOF'

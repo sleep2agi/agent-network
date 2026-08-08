@@ -24,7 +24,9 @@ model, and apply atomically pins the target instead of inheriting a stale bridge
 snapshot.
 If plan reports inventory permission repairs, review them and run the config
 tool's explicit `--mode prepare-permissions` first. Single-node apply refuses
-to repair other nodes' files implicitly.
+to repair other nodes' files implicitly. Pass the selected node's `--workdir`
+to that preparation step as well; it is included in the exact repair list and
+must be owner-only before identity-bearing processes start there.
 
 The normalizer deliberately does not run production slash UAT itself. After a
 successful apply, an authenticated external harness must prove socket
