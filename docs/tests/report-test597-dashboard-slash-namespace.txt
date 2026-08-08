@@ -1,0 +1,29 @@
+# test597 — Dashboard native slash / Agent Network scheduler namespace
+
+Date: 2026-08-08 (Asia/Shanghai)
+Source commit: d17669a9d8ed041f8102b888506579c788d2bd7c
+Docker image ID: sha256:51d78d2e9df89b0b072c4bcfc966b43fe6d478de883fbd92a19d7afe45121fb5
+Docker tag during verification: anet-test597:dev
+Result: PASS
+
+## Layer results
+
+- L0 source/build: agent-node production bundle built; agent-network `tsc --noEmit` passed.
+- L1 parser/routing/dispatch/self-management: 87 passed, 0 failed, 280 assertions.
+- L2 real Hub binary + real SQLite: 3 passed, 0 failed, 31 assertions.
+  - Authenticated Dashboard `/goal` and `/loop` stayed exact native payloads for all five agent-node runtime buckets.
+  - Authenticated Dashboard `/agoal` and `/aloop` selected ANet scheduling.
+  - A node token could not forge Dashboard origin and retained legacy compatibility behavior.
+- L3 real WebSocket bridge: the exact `/goal 更新一下文档` payload entered the existing shared thread and its final reply mapped back to the originating task.
+- L4 real CLI process: `anet node loop ... --every 5m` posted `/aloop 5m update docs` and reported that exact wire command.
+- L5 production wiring assertions passed.
+- L6 all six controlled mutations turned red:
+  1. Dashboard native slash intercepted by scheduler.
+  2. Namespaced command excluded from scheduler.
+  3. Dashboard interval migration notice removed.
+  4. Near-match boundary weakened.
+  5. CLI changed back to `/loop` on the wire.
+  6. Node-authenticated metadata allowed to forge Dashboard origin.
+- L7 restored green: 15 passed, 0 failed, 113 assertions.
+
+The fixed-tag images were removed by exact name after evidence capture because the shared host had 7.3 GiB free. No prune or pattern deletion was used.

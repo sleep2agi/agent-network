@@ -1,0 +1,18 @@
+# test596 — Native Dashboard slash and ANet scheduler documentation
+
+Date: 2026-08-08 (Asia/Shanghai)
+Source commit: d17669a9d8ed041f8102b888506579c788d2bd7c
+Docker image ID: sha256:568863e9ce46207158dd3a663a544483a1ef135ebd515736df32970246296638
+Docker tag during verification: anet-test596:dev
+Result: PASS
+
+## Layer results
+
+- Goal parser/routing/scheduler/store/self-management: 193 passed, 0 failed, 756 assertions.
+- Wake-log renderer: 18 passed, 0 failed, 46 assertions.
+- Production source contract passed for `/aloop` + `/agoal`, Dashboard compatibility routing, scheduler cadence, CLI acknowledgement timeout, and parser minimum interval.
+- Chinese and English documentation contracts passed.
+- Controlled deletion of the all-runtime Dashboard pass-through statement turned the documentation gate red; restoring it returned green.
+- VitePress built and rendered both `/guide/goals-and-loops.html` and `/en/guide/goals-and-loops.html` successfully.
+
+The fixed-tag image was removed by exact name after evidence capture because the shared host had 7.3 GiB free. No prune or pattern deletion was used.
