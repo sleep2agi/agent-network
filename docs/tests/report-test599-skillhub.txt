@@ -1,7 +1,7 @@
 # test599 — Dashboard SkillHub
 
 Date: 2026-08-08
-Candidate source: Hub `b85d2579aa4e6e08e86884037f82426ee101f8ce`;
+Candidate source: Hub `7c06fb79cd9a308b4052acf31bc662145cf271cd`;
 Dashboard `424c2cb8bdae8d01b2c29de25ec36ab5513cb8f5`.
 
 ## Result
@@ -11,7 +11,7 @@ PASS.
 ### Hub / registry (`anet-skillhub:dev`)
 
 - Production entry bundled: 256 modules, 1.49 MB.
-- Real private Hub process + real SQLite: 3 tests passed, 28 assertions.
+- Real private Hub process + real SQLite: 3 tests passed, 32 assertions.
 - Verified node-token author attribution cannot be replaced by a submitted
   `source_alias` field.
 - Verified new versions are pending, identical retry is idempotent, and
@@ -19,11 +19,12 @@ PASS.
 - Verified node tokens cannot inherit their minting owner's reviewer role.
 - Verified owner publish makes the skill visible to nodes.
 - Verified foreign-network list/review is denied.
+- Verified published detail omits internal user UUIDs and content hash.
 - Witnessed-red mutation `pending -> published`: rc=1.
 - Witnessed-red mutation removing review lookup network predicate: rc=1.
-- Restored source: 3 tests passed, 28 assertions; `RESULT: PASS`.
+- Restored source: 3 tests passed, 32 assertions; `RESULT: PASS`.
 - Final image digest used for the run:
-  `sha256:9c0c86d04105d4b39ea3fa5a4c1e2ee7fc5c7a52eb127039ec64c61aed66afa9`.
+  `sha256:6f890ab8b8d01ff67f790acfd73290bd30fbef281507b9feb78ec819066dae77`.
 
 ### Dashboard (`anet-skillhub-dashboard:dev`)
 
