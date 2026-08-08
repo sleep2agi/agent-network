@@ -1,9 +1,9 @@
 # test598 — Codex co-presence single-node normalizer
 
 Date: 2026-08-08 Asia/Shanghai
-Source commits: 1087650e81cc438da24820b66509b50486182bb4 + TUI follow-up c754b639c95b76d1a07403e5fd1797ef9224d6fa + owner/socket gates 21e4dadcfa8350b549733e66e8f31af1504d9f12 + explicit permission preparation 236c73a8b74e026a0fe96485814334e989c5b048 + explicit model pin dfbd2fb0a0ce1864bf71e1c53adc8cd1fe662879 + workdir permission preparation 6cf5c7894760be13ac0cadc1e36f6bd0a91c986f + exact TUI process-tree socket verification 8481306b595a83356da6a0d4743c520de18f687c + exact flagged app-server argv matching 47e6fa746d160123d211b2418a364d7e9adf558e + exact self-process exclusion 8c1fbcf331c556403ece5598a172bffa9e1909f5 + split/equals long-option coverage d102105eff0de72405cb96973f45f43dc34ff172
+Source commits: 1087650e81cc438da24820b66509b50486182bb4 + TUI follow-up c754b639c95b76d1a07403e5fd1797ef9224d6fa + owner/socket gates 21e4dadcfa8350b549733e66e8f31af1504d9f12 + explicit permission preparation 236c73a8b74e026a0fe96485814334e989c5b048 + explicit model pin dfbd2fb0a0ce1864bf71e1c53adc8cd1fe662879 + workdir permission preparation 6cf5c7894760be13ac0cadc1e36f6bd0a91c986f + exact TUI process-tree socket verification 8481306b595a83356da6a0d4743c520de18f687c + exact flagged app-server argv matching 47e6fa746d160123d211b2418a364d7e9adf558e + exact self-process exclusion 8c1fbcf331c556403ece5598a172bffa9e1909f5 + split/equals long-option coverage d102105eff0de72405cb96973f45f43dc34ff172 + cascading TUI-stop convergence 5b5d9a5d1d59c6c1f77e36b22e987c2c4f4b5ddd
 Image: anet-test598:dev
-Image ID: sha256:f9723392fcb283a7814e912cded9929540ae21941252e0f528a79d5568a591a8
+Image ID: sha256:ac8b9c2b7d5fb211a249074753d5a167d0aba66f0d6aa963d6b30e2af2bb77c7
 Scope: Docker test layers are isolated; production rollout evidence is documented separately below.
 
 ## Result
@@ -43,8 +43,8 @@ Witnessed-red results:
 
 Exact-source Docker run:
 
-- source commit embedded in the test image: `d102105eff0de72405cb96973f45f43dc34ff172`
-- image environment contains `TEST598_SOURCE_COMMIT=d102105eff0de72405cb96973f45f43dc34ff172`
+- source commit embedded in the test image: `5b5d9a5d1d59c6c1f77e36b22e987c2c4f4b5ddd`
+- image environment contains `TEST598_SOURCE_COMMIT=5b5d9a5d1d59c6c1f77e36b22e987c2c4f4b5ddd`
 - positive socket evidence: `TUI_SOCKET pane_pid=672 holder_pid=689 descendants=2`
 - final result: `RESULT: PASS`
 
@@ -176,3 +176,32 @@ Apply and verification:
 - one network smoke returned exactly one `DESIGN-NORMALIZE-1786187633253-ACK`; the known parent lifecycle row remained running and was explicitly cancelled after reply delivery rather than represented as fixed
 
 Standard rollout verdict: PASS (1/14 standard candidates complete).
+
+## Standard rollouts 2–4
+
+`B站副责人`:
+
+- idle/in-flight 0, three sessions unattached; six old processes were explicitly accounted, including its code-mode-host child
+- workdir mode preparation `0775→0700` left config SHA-256 byte-identical at `e403d9cf1814e75cb1ea5ee40a69b00fb8b66196d7702eacc96de1abe757b2ef`
+- normalized to app-server 0.147.0, model `gpt-5.6-sol`, exact owner/cwd, child-held ESTAB socket on 24715; rollback `/tmp/anet-normalize-n_060c1c6d.MV1POc`
+- exactly one `BSTATION-NORMALIZE-1786187833806-ACK`; known parent lifecycle row explicitly cancelled
+
+`HR负责人`:
+
+- idle/in-flight 0, three sessions unattached; five old processes explicitly accounted
+- workdir mode preparation `0775→0700` left config SHA-256 byte-identical at `4b42b8039ab11eb2988bf588925a216b577106d1e8123b97ad73b63a38e58de2`
+- normalized to app-server 0.147.0, model `gpt-5.6-sol`, exact owner/cwd, child-held ESTAB socket on 24716; rollback `/tmp/anet-normalize-n_2e918290.p9aVBi`
+- exactly one `HR-NORMALIZE-1786187958037-ACK`; known parent lifecycle row explicitly cancelled
+
+`TM副责人` exposed a real stop-order race:
+
+- preflight was idle/in-flight 0, unattached, and accounted seven old processes; workdir preparation `0775→0700` left config SHA-256 byte-identical at `dc1358687c589215533ef20fb6afc1f96398aab1b22321047fe4737c094ab287`
+- stopping app-server made the remote TUI exit before its explicit `tmux kill-session`; the old loop treated that already-converged session as an error, restored config, and intentionally left runtime stopped fail-closed at `/tmp/anet-normalize-n_ace53877.VvYDBR`
+- Docker reproduced the cascade deterministically: killing the first exact session also removed the TUI; source `d102105e` failed before replacement startup (witnessed red)
+- source `5b5d9a5d` tolerates an already-absent exact session, while the subsequent PID+birth-time barrier still requires every accounted process to be gone before config mutation; the same Docker case and the complete suite passed
+- the stopped node was recovered using the exact already-tested post-stop sequence: config apply, app-server 0.147.0, thread claim, bridge/TUI start, and process-tree socket verification
+- final owner is `anet:n_ace53877:TM副责人`, cwd `/home/vansin/tmteam`, model `gpt-5.6-sol`, TUI child ESTAB on 24702, Hub idle/in-flight 0
+- exactly one `TMDEPUTY-NORMALIZE-1786188324680-ACK`; known parent lifecycle row explicitly cancelled
+
+Standard rollout verdict: PASS (4/14 standard candidates complete). Further
+rollout paused for an independent narrow review of the cascading-stop delta.
