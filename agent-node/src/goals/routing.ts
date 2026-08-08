@@ -2,61 +2,70 @@ import { parseGoalCommand } from "./parser";
 
 export type GoalRoutingRuntime = "claude" | "codex" | "grok" | "opencode" | "codex-app-server";
 
-export const DASHBOARD_CODEX_GOAL_INTERVAL_NOTICE =
-  "提示：已作为一次性目标处理；要定时请用 /loop <间隔> <任务>。";
+const ANET_SCHEDULE_COMMAND_RE = /^\s*\/(?:agoal|aloop)\b/i;
+const LEGACY_SCHEDULE_COMMAND_RE = /^\s*\/(?:goal|loop)\b/i;
+
+export const LEGACY_ANET_SCHEDULE_NOTICE =
+  "提示：/goal 和 /loop 仅在非 Dashboard 路径处于兼容期；Agent Network 定时请改用 /aloop <间隔> <任务>。";
+
+export const DASHBOARD_NATIVE_SCHEDULE_NOTICE =
+  "提示：此 /goal 或 /loop 已原样交给节点 runtime；如需 Agent Network 定时任务，请用 /aloop <间隔> <任务>。";
 
 /**
- * `/loop` is Agent Network's recurring scheduler command.
+ * Select the Agent Network scheduled-goal path.
  *
- * `/goal` remains its backwards-compatible alias except for an authenticated
- * Dashboard chat targeting a shared Codex TUI. Codex owns `/goal` in that
- * interactive surface, so intercepting it here changes a persistent goal into
- * a recurring loop and rejects ordinary goal text that has no interval.
+ * Authenticated Dashboard chat owns the unprefixed vendor command namespace:
+ * `/goal` and `/loop` pass through to the target runtime for every runtime
+ * bucket. Agent Network commands use `/agoal` and `/aloop` instead.
+ *
+ * Non-Dashboard traffic retains `/goal` + `/loop` temporarily so existing
+ * node-to-node automations do not silently change behavior. The caller adds a
+ * deterministic migration notice through appendLegacyScheduledGoalNotice().
  */
 export function shouldCreateScheduledGoal(
   content: string,
-  runtime: GoalRoutingRuntime,
+  _runtime: GoalRoutingRuntime,
   interactiveDashboardTask: boolean,
 ): boolean {
-  if (/^\s*\/loop\b/i.test(content || "")) return true;
-  if (!/^\s*\/goal\b/i.test(content || "")) return false;
-  return !(runtime === "codex-app-server" && interactiveDashboardTask);
+  if (ANET_SCHEDULE_COMMAND_RE.test(content || "")) return true;
+  if (!LEGACY_SCHEDULE_COMMAND_RE.test(content || "")) return false;
+  return !interactiveDashboardTask;
+}
+
+/** Add a visible compatibility warning to old non-Dashboard scheduler names. */
+export function appendLegacyScheduledGoalNotice(
+  replyText: string,
+  content: string,
+  interactiveDashboardTask: boolean,
+): string {
+  if (interactiveDashboardTask || !LEGACY_SCHEDULE_COMMAND_RE.test(content || "")) return replyText;
+  return `${LEGACY_ANET_SCHEDULE_NOTICE}\n\n${replyText}`;
 }
 
 /**
- * Make the narrow Dashboard/Codex semantic split visible when the goal text
- * also contains a scheduler interval. Put the deterministic notice first so
- * the outer 2000-character reply cap cannot truncate it from a long model
- * response.
+ * Dashboard `/goal` + `/loop` are native pass-through commands. If an old
+ * scheduler-shaped interval is present, say so explicitly after the native
+ * turn instead of silently changing `/loop` from ANet scheduling to native
+ * runtime behavior. Put the notice first so the outer reply cap retains it.
  */
-export function appendDashboardCodexGoalNotice(
+export function appendDashboardNativeScheduleNotice(
   replyText: string,
   content: string,
-  runtime: GoalRoutingRuntime,
   interactiveDashboardTask: boolean,
-  failed: boolean,
 ): string {
-  if (failed || runtime !== "codex-app-server" || !interactiveDashboardTask) return replyText;
-  if (!/^\s*\/goal\b/i.test(content || "")) return replyText;
+  if (!interactiveDashboardTask || !LEGACY_SCHEDULE_COMMAND_RE.test(content || "")) return replyText;
   if (!parseGoalCommand(content).ok) return replyText;
-  return `${DASHBOARD_CODEX_GOAL_INTERVAL_NOTICE}\n\n${replyText}`;
+  return `${DASHBOARD_NATIVE_SCHEDULE_NOTICE}\n\n${replyText}`;
 }
 
-/** Compose the visible goal notice before applying the ordinary reply filter. */
-export function prepareDashboardCodexGoalReply(
+/** Compose the Dashboard migration notice before ordinary reply filtering. */
+export function prepareDashboardNativeSlashReply(
   replyText: string,
   content: string,
-  runtime: GoalRoutingRuntime,
   interactiveDashboardTask: boolean,
   failed: boolean,
   isLowValueReply: (text: string) => boolean,
 ): { text: string; shouldDeliver: boolean } {
-  const text = appendDashboardCodexGoalNotice(
-    replyText,
-    content,
-    runtime,
-    interactiveDashboardTask,
-    failed,
-  );
+  const text = appendDashboardNativeScheduleNotice(replyText, content, interactiveDashboardTask);
   return { text, shouldDeliver: failed || !isLowValueReply(text) };
 }

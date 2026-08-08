@@ -44,7 +44,7 @@ export type AgentGoalSchedule =
 
 export interface AgentGoal {
   goal_id: string;                   // UUID, stable across renames + restarts
-  text: string;                      // goal body (parsed from /goal command)
+  text: string;                      // goal body (parsed from /agoal or /aloop)
   status: GoalStatus;
   // **Legacy load-bearing**: every existing goal in goals.json across
   // the install base has `interval_ms`. RFC-025 keeps this field

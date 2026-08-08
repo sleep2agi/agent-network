@@ -69,8 +69,8 @@ function withinCooldown(g: AgentGoal, now: number): boolean {
 function intervalFromText(intervalText: string): number {
   // Reuse #288 parser (60s floor, m/h/d units, etc.). We don't have
   // a separate "parse interval string" entry point in parser.ts,
-  // so build a fake "/loop <interval> x" and read interval_ms.
-  const r = parseGoalCommand(`/loop ${intervalText} x`);
+  // so build a fake "/aloop <interval> x" and read interval_ms.
+  const r = parseGoalCommand(`/aloop ${intervalText} x`);
   if (!r.ok) throw new Error(`invalid interval "${intervalText}": ${r.error}`);
   return r.goal.interval_ms;
 }

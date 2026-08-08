@@ -1,4 +1,4 @@
-// Phase 1 of #184 — `/goal` / `/loop` scheduler command parser.
+// Phase 1 of #184 — Agent Network scheduled-goal command parser.
 //
 // Strict per 通信牛 review #7: reject ambiguous input, no defaults. The
 // minimum interval is implicitly enforced by accepting only minutes-and-up
@@ -14,7 +14,7 @@
 //   Chinese:       `5分钟`, `每5分钟`, `1小时`, `每小时`, `每天`
 //
 // Rejected: sub-minute units (`5s`, `30秒`), no interval at all, bare
-// numbers without units (`/goal 5 check` — unit-free 5 is ambiguous).
+// numbers without units (`/aloop 5 check` — unit-free 5 is ambiguous).
 //
 // #144 round-6 (this fix): added single-letter `m`/`h`/`d` so that
 // `anet node loop <alias> "<task>" --every 5m` actually creates a goal
@@ -87,8 +87,10 @@ const SUB_MINUTE_PATTERNS = [
 export function parseGoalCommand(input: string): ParseResult {
   if (typeof input !== "string") return { ok: false, error: "input must be a string" };
 
-  // Strip leading "/goal" or "/loop" (case-insensitive) + whitespace.
-  let body = input.replace(/^\s*\/(?:goal|loop)\b\s*/i, "").trim();
+  // `/aloop` is canonical and `/agoal` is its namespaced alias. Keep the
+  // historical `/loop` + `/goal` prefixes parseable for the non-Dashboard
+  // compatibility window; routing.ts decides whether a surface may use them.
+  let body = input.replace(/^\s*\/(?:aloop|agoal|loop|goal)\b\s*/i, "").trim();
   if (!body) return { ok: false, error: "goal text is empty" };
 
   // Explicit sub-minute rejection so the error message is informative.

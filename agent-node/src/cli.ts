@@ -18,7 +18,11 @@ import { createCommhubSdkMcpServer } from "./commhub-mcp";
 import { getHostTelemetry } from "./host-telemetry";
 import { getProcessTelemetry, incrementInFlight, decrementInFlight } from "./process-telemetry";
 import { parseGoalCommand } from "./goals/parser";
-import { prepareDashboardCodexGoalReply, shouldCreateScheduledGoal } from "./goals/routing";
+import {
+  appendLegacyScheduledGoalNotice,
+  prepareDashboardNativeSlashReply,
+  shouldCreateScheduledGoal,
+} from "./goals/routing";
 import { GoalStore, newGoal, runtimeBucket, decideStartupAction } from "./goals/store";
 import { decideTickWork } from "./goals/scheduler";
 import { runCodexWakeForGoal, type CodexWakeDeps } from "./goals/codex-wake";
@@ -1456,7 +1460,7 @@ async function createScheduledGoal(content: string, from: string, taskId: string
 function buildGoalWakePrompt(goal: AgentGoal): string {
   const recent = goal.progress_log.slice(-5).map((p) => `- ${p.ts} [${p.status}] ${p.summary}`).join("\n") || "- 无";
   return [
-    `【anet /loop 自动唤醒】`,
+    `【anet /aloop 自动唤醒】`,
     `你正在执行一个长期目标，请做一次增量推进和进度汇报。`,
     ``,
     `目标 ID：${goal.goal_id}`,
@@ -1470,7 +1474,7 @@ function buildGoalWakePrompt(goal: AgentGoal): string {
     `1. 先检查当前实际状态，不要只复述旧进度。`,
     `2. 能推进就直接推进；需要协调其他 agent 时使用 CommHub 工具。`,
     `3. 输出一份简短正式汇报，包含：本轮已完成（只列本轮新进展）、进行中、风险、下一步。`,
-    `4. 完成判定：仅当**整个目标**已彻底完成、不再需要后续唤醒时，在汇报**最后单独一行**输出哨兵 \`GOAL_COMPLETE\`（或中文 \`目标已完成\` 独占一行）。其他情况（本轮某些子项 completed 也算）**绝不**写这一行——一旦写了, /loop 调度器会把此 goal 标 complete 并永久跳过, loop 停止。`,
+    `4. 完成判定：仅当**整个目标**已彻底完成、不再需要后续唤醒时，在汇报**最后单独一行**输出哨兵 \`GOAL_COMPLETE\`（或中文 \`目标已完成\` 独占一行）。其他情况（本轮某些子项 completed 也算）**绝不**写这一行——一旦写了, /aloop 调度器会把此 goal 标 complete 并永久跳过, loop 停止。`,
   ].join("\n");
 }
 
@@ -1600,7 +1604,7 @@ async function runOneGoalWake(goal: AgentGoal): Promise<void> {
     try {
       await sendReply(
         goal.report_to,
-        `[${ALIAS}] /loop ${idShort} ${failed ? "执行失败" : completed ? "已完成" : "进度汇报"}\n\n${text.slice(0, 2000)}`,
+        `[${ALIAS}] /aloop ${idShort} ${failed ? "执行失败" : completed ? "已完成" : "进度汇报"}\n\n${text.slice(0, 2000)}`,
         goal.parent_task_id,
         failed,
       );
@@ -4538,11 +4542,9 @@ async function processInbox() {
         : content;
       const interactiveDashboardTask = isInteractiveDashboardTask(msg);
 
-      // `/loop` remains Agent Network's universal recurring scheduler.
-      // `/goal` remains its backwards-compatible alias except for a
-      // Hub-authenticated Dashboard task entering a shared Codex TUI. That
-      // surface owns `/goal`; intercepting it here both changes its semantics
-      // and rejects normal goal text that intentionally has no interval.
+      // Dashboard owns the target runtime's native `/goal` + `/loop`
+      // namespace. ANet scheduling uses `/agoal` + `/aloop`; old names remain
+      // compatible only outside authenticated Dashboard traffic.
       if (shouldCreateScheduledGoal(persistenceSafeContent, RUNTIME, interactiveDashboardTask)) {
         let replyText: string;
         let goalFailed = false;
@@ -4552,9 +4554,14 @@ async function processInbox() {
           const created = await createScheduledGoal(persistenceSafeContent, from, msg.id);
           replyText = `[${ALIAS}] ${created}`;
         } catch (e: any) {
-          replyText = `[${ALIAS}] /loop 创建失败：${e.message}`;
+          replyText = `[${ALIAS}] /aloop 创建失败：${e.message}`;
           goalFailed = true;
         }
+        replyText = appendLegacyScheduledGoalNotice(
+          replyText,
+          persistenceSafeContent,
+          interactiveDashboardTask,
+        );
         await deliverReplyReliably(from, replyText, msg.id, goalFailed);
         await ackMessage(msg.id).catch((e: any) => warn(`ack failed for goal ${msg.id.slice(0, 8)}: ${e.message}`));
         return;
@@ -4569,10 +4576,9 @@ async function processInbox() {
         interactiveDashboardTask,
       );
       const failed = taskOutcome.failed;
-      const preparedReply = prepareDashboardCodexGoalReply(
+      const preparedReply = prepareDashboardNativeSlashReply(
         taskOutcome.text,
         persistenceSafeContent,
-        RUNTIME,
         interactiveDashboardTask,
         failed,
         (text) => isLowValueText(text, true),

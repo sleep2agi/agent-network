@@ -7449,9 +7449,9 @@ async function projectDown() {
 //
 // `anet node loop <alias> "<task>" --every 5m`
 //
-// One-liner UX wrapper for the inbox `/loop <interval> <task>` slash
+// One-liner UX wrapper for the inbox `/aloop <interval> <task>` slash
 // command. POSTs a task to commhub via /api/task; the receiving node's
-// inbox handler parses the `/loop` prefix and calls createScheduledGoal,
+// inbox handler parses the `/aloop` prefix and calls createScheduledGoal,
 // which persists the goal in goals.json + the scheduler tick fires it.
 //
 // Why a CLI wrapper instead of just "send the slash text directly"?
@@ -7514,12 +7514,12 @@ to stop one.
   const hub = profile.hub || gc.hub || "http://127.0.0.1:9200";
   const networkId = profile.network_id || gc.network_id || null;
 
-  // The inbox parser at agent-node/src/goals/parser.ts accepts
-  // `/loop <interval> <text>` (and `/goal` as an alias). We assemble
+  // The inbox parser at agent-node/src/goals/parser.ts accepts the
+  // namespaced `/aloop <interval> <text>` command. We assemble
   // the slash form and POST it as a normal task — the node's inbox
-  // handler routes /loop tasks to createScheduledGoal regardless of
+  // handler routes /aloop tasks to createScheduledGoal regardless of
   // runtime (post-#144 the claude-bucket carve-out is gone).
-  const slashCmd = `/loop ${everyRaw} ${taskText}`;
+  const slashCmd = `/aloop ${everyRaw} ${taskText}`;
   const body = JSON.stringify({
     alias: displayName,
     task: slashCmd,
@@ -7536,7 +7536,7 @@ to stop one.
     });
     const j: any = await res.json();
     if (!j?.ok) {
-      console.error(`Failed to enqueue /loop task: ${JSON.stringify(j)}`);
+      console.error(`Failed to enqueue /aloop task: ${JSON.stringify(j)}`);
       process.exit(1);
     }
     taskId = j.message_id;
@@ -7553,14 +7553,14 @@ to stop one.
   // patterns) the failure reply went back to `from:"api"` and was
   // invisible to the user — silent fail. Now we poll for the node's
   // reply and surface what actually happened.
-  console.log(`→ Sent /loop to ${displayName} (task ${taskId.slice(0, 8)}); waiting for node confirmation...`);
+  console.log(`→ Sent /aloop to ${displayName} (task ${taskId.slice(0, 8)}); waiting for node confirmation...`);
 
   const POLL_DEADLINE_MS = 15_000;
   const POLL_INTERVAL_MS = 1_000;
   const started = Date.now();
   let taskRow: any = null;
   // Poll `/api/tasks?task_id=<id>` for the task row. After the node
-  // handles the /loop slash command it writes the reply text into
+  // handles the /aloop slash command it writes the reply text into
   // tasks.result + sets status='replied' (or 'failed'). This is the
   // robust signal — /api/messages doesn't carry in_reply_to in its
   // SELECT (existing comment at cli.ts:7053), so we can't reliably
@@ -7590,9 +7590,9 @@ to stop one.
   const replyText = String(taskRow.result || "");
   // The node's reply text is set by agent-node/src/cli.ts:createScheduledGoal
   // wrapping success as "已创建 loop 目标 <id>..." or, on failure,
-  // "/loop 创建失败：<reason>".
+  // "/aloop 创建失败：<reason>".
   if (taskRow.status === "failed" || (/创建失败|failed/i.test(replyText) && !/已创建 loop 目标/.test(replyText))) {
-    console.error(`❌ Node rejected the /loop command:`);
+    console.error(`❌ Node rejected the /aloop command:`);
     console.error(`   ${replyText.replace(/^\[[^\]]+\]\s*/, "").trim()}`);
     process.exit(1);
   }
@@ -8971,7 +8971,7 @@ function isNodeProbablyRunning(nodeId: string, profile: Profile): boolean {
 
 // #191 Phase 1 Pillar A — parse a `--interval` flag value (CLI side, kept
 // in lockstep with agent-node/src/goals/parser.ts INTERVAL_PATTERNS so the
-// edit UX matches what a node accepts in `/goal`/`/loop`). Returns ms or
+// edit UX matches what a node accepts in `/agoal`/`/aloop`). Returns ms or
 // null when the input is empty / unrecognised / sub-minute.
 const GOAL_MIN_INTERVAL_MS = 60_000;
 function parseGoalIntervalFlag(input: string | undefined): number | null {
