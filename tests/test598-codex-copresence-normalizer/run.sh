@@ -120,6 +120,31 @@ expect_red thread-owner-mismatch bun "$THREAD_TOOL" --ws ws://127.0.0.1:25981 --
 expect_red thread-cwd-mismatch bun "$THREAD_TOOL" --ws ws://127.0.0.1:25981 --thread-id thread_test_n_alpha --node-id n_alpha --alias alpha --cwd "$ROOT/wrong-work" --mode verify
 
 echo "L3 PID drift, unaccounted process, and rollback"
+ALPHA_APP_PANE=$(tmux -L test598 display-message -p -t alpha-appsrv '#{pane_pid}')
+ALPHA_BRIDGE_PANE=$(tmux -L test598 display-message -p -t alpha-bridge '#{pane_pid}')
+ALPHA_TUI_PANE=$(tmux -L test598 display-message -p -t alpha-tui '#{pane_pid}')
+"$ROOT/fake-codex" --stray-no-bind app-server -c approval_policy=never -c sandbox_mode=danger-full-access --listen ws://127.0.0.1:25981 &
+STRAY_FLAGGED_APPSRV=$!
+sleep 0.1
+FLAGGED_EXPECTED=()
+for owned in "$ALPHA_APP_PANE" "$ALPHA_BRIDGE_PANE" "$ALPHA_TUI_PANE" "$ALPHA_SOCKET_PID"; do
+  FLAGGED_EXPECTED+=(--expected-pid "$owned:$(awk '{print $22}' "/proc/$owned/stat")")
+done
+expect_red flagged-appserver-must-be-unaccounted env PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode plan --alias alpha \
+  --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" --workdir "$WORK" \
+  --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 --expected-model gpt-5.6-sol \
+  --new-appsrv-session alpha-appsrv --new-bridge-session alpha-bridge --new-tui-session alpha-tui --expected-tui-command fake-codex \
+  "${FLAGGED_EXPECTED[@]}" --stop-session alpha-appsrv --stop-session alpha-bridge --stop-session alpha-tui
+grep -Fq "unaccounted matching process pid=$STRAY_FLAGGED_APPSRV" /tmp/test598-red.log
+cp "$SCRIPT" /workspace/scripts/test598-adjacent-appserver-mutant.sh
+sed -i 's/if (( saw_app_server == 1 )) && \[\[ "${PROC_ARGV\[i\]}" == --listen/if [[ "${PROC_ARGV[i-1]:-}" == app-server \&\& "${PROC_ARGV[i]}" == --listen/' /workspace/scripts/test598-adjacent-appserver-mutant.sh
+expect_red flagged-appserver-matcher-mutation-must-be-caught must_reject env PATH="$ROOT/bin:$PATH" /workspace/scripts/test598-adjacent-appserver-mutant.sh --mode plan --alias alpha \
+  --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" --workdir "$WORK" \
+  --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 --expected-model gpt-5.6-sol \
+  --new-appsrv-session alpha-appsrv --new-bridge-session alpha-bridge --new-tui-session alpha-tui --expected-tui-command fake-codex \
+  "${FLAGGED_EXPECTED[@]}" --stop-session alpha-appsrv --stop-session alpha-bridge --stop-session alpha-tui
+kill "$STRAY_FLAGGED_APPSRV"; wait "$STRAY_FLAGGED_APPSRV" 2>/dev/null || true
+
 expect_red pid-drift env PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode plan --alias alpha \
   --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" --workdir "$WORK" \
   --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 --expected-model gpt-5.6-sol \

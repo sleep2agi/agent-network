@@ -1,4 +1,7 @@
-if (process.argv.includes("--socket-child")) {
+if (process.argv.includes("--stray-no-bind")) {
+  setInterval(() => {}, 60_000);
+}
+else if (process.argv.includes("--socket-child")) {
   const socket = new WebSocket(process.argv[process.argv.indexOf("--socket-child") + 1]);
   await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; }).catch(() => process.exit(5));
   setInterval(() => socket.send("ping"), 60_000);

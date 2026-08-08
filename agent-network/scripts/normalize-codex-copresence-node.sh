@@ -81,11 +81,33 @@ for pid in "${!EXPECTED[@]}"; do
   echo "EXPECTED pid=$pid starttime=$actual exe=$(readlink "/proc/$pid/exe") cmd_sha256=$(fingerprint "$pid")"
 done
 
+process_matches_selected_node() {
+  local i saw_app_server=0
+  for ((i=0; i<${#PROC_ARGV[@]}; i++)); do
+    if [[ "${PROC_ARGV[i]}" == --config && "${PROC_ARGV[i+1]:-}" == "$CONFIG" ]]; then return 0; fi
+    if [[ "${PROC_ARGV[i]}" == --alias && "${PROC_ARGV[i+1]:-}" == "$ALIAS" ]]; then return 0; fi
+    if [[ "${PROC_ARGV[i]}" == node && "${PROC_ARGV[i+1]:-}" == start && "${PROC_ARGV[i+2]:-}" == "$ALIAS" ]]; then return 0; fi
+    if [[ "${PROC_ARGV[i]}" == resume && "${PROC_ARGV[i+1]:-}" == "$ALIAS" ]]; then return 0; fi
+    if [[ "${PROC_ARGV[i]}" == resume && "${PROC_ARGV[i+1]:-}" == --remote && "${PROC_ARGV[i+2]:-}" == "$WS" ]]; then return 0; fi
+    if [[ "${PROC_ARGV[i]}" == app-server ]]; then saw_app_server=1; fi
+    # Real Codex inserts one or more `-c key=value` arguments between
+    # `app-server` and `--listen`.  Match argv tokens, not an adjacent string,
+    # so a second wrapper/native server on the selected port cannot evade the
+    # unaccounted-process gate while secrets remain absent from diagnostics.
+    if (( saw_app_server == 1 )) && [[ "${PROC_ARGV[i]}" == --listen && "${PROC_ARGV[i+1]:-}" == "$WS" ]]; then return 0; fi
+  done
+  return 1
+}
 mapfile -t MATCHED < <(for p in /proc/[0-9]*; do
-  pid=${p##*/}; [[ -r "$p/cmdline" ]] || continue; cmd=$(tr '\0' ' ' <"$p/cmdline")
+  pid=${p##*/}; [[ -r "$p/cmdline" ]] || continue
   [[ "$pid" == "$$" ]] && continue
-  [[ "$cmd" == *"normalize-codex-copresence-node.sh"* || "$cmd" == *"codex-copresence-fleet-config.mjs"* ]] && continue
-  if [[ "$cmd" == *"--config $CONFIG"* || "$cmd" == *"--alias $ALIAS"* || "$cmd" == *" node start $ALIAS "* || "$cmd" == *" resume $ALIAS "* || "$cmd" == *"resume --remote $WS"* || "$cmd" == *"app-server --listen $WS"* ]]; then echo "$pid"; fi
+  PROC_ARGV=(); mapfile -d '' -t PROC_ARGV <"$p/cmdline" || true
+  ((${#PROC_ARGV[@]})) || continue
+  skip=0; for arg in "${PROC_ARGV[@]}"; do
+    [[ "$arg" == *normalize-codex-copresence-node.sh || "$arg" == *codex-copresence-fleet-config.mjs ]] && skip=1
+  done
+  (( skip == 0 )) || continue
+  if process_matches_selected_node; then echo "$pid"; fi
 done)
 for pid in "${MATCHED[@]}"; do
   [[ -e "/proc/$pid/cmdline" ]] || continue
