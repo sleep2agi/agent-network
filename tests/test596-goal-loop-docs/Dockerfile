@@ -2,6 +2,12 @@ FROM oven/bun:1.3.14
 
 WORKDIR /workspace
 
+# VitePress reads Git timestamps while rendering pages. Keep the real binary in
+# the isolated image so the docs gate exercises production build behavior.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY agent-node/package.json /workspace/agent-node/package.json
 RUN cd /workspace/agent-node && bun install --ignore-scripts
 COPY agent-node /workspace/agent-node
