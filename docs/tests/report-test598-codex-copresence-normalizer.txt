@@ -252,3 +252,23 @@ is the plain alias `A站副责人`.
 
 Nonstandard rollout verdict: PASS after one witnessed fail-closed recovery; the
 failed first apply is not represented as successful.
+
+## Final production read-only audit
+
+The final audit enumerated the pilot, all 14 standard candidates, and
+`A站副责人` (16 nodes total). It made no production mutations.
+
+- `FLEET_AUDIT_PASS=16/16`: every node had exactly the expected three live, unattached sessions; config model `gpt-5.6-sol`; app-server executable version 0.147.0; exact persisted thread owner and cwd; and at least one ESTAB socket held inside that node's exact TUI pane process tree
+- `HUB_STATUS_PASS=16/16`: every node reported `agent-node:codex-app-server`, model `gpt-5.6-sol`, idle, and in-flight 0
+- no offline/decommissioned node was revived and no attached TUI was interrupted
+
+Explicitly deferred nodes:
+
+- `TMCode副责人`: the TUI had two attached clients; skipped until an owner-selected unattached window
+- `通信牛`: the TUI had two attached clients and Hub reported active work/in-flight tasks; skipped as the active control node
+- `副指挥`: bridge config has no stable `node_id`, while Hub also reported `node_id=null`; identity precondition failed closed
+- `小米MiMo负责人`: offline under an explicit fleet decommission instruction; intentionally not revived
+
+Final rollout verdict: PASS for every eligible node. Deferred nodes are not
+counted as passed, normalized, or failed; each has a concrete safety or
+governance reason above.
