@@ -186,7 +186,32 @@ tmux list-sessions -F '#{session_name}' | grep -Fxq "$NEW_TUI_SESSION"
 TUI_META=$(tmux list-panes -t "$NEW_TUI_SESSION" -F '#{pane_pid}|#{pane_dead}|#{pane_current_command}')
 IFS='|' read -r TUI_PID TUI_DEAD TUI_COMMAND <<<"$TUI_META"
 [[ "$TUI_DEAD" == 0 && "$TUI_COMMAND" == "$EXPECTED_TUI_COMMAND" ]] || { echo "TUI failed liveness gate: dead=$TUI_DEAD command=$TUI_COMMAND" >&2; false; }
-ss -tnpH "dport = :$PORT" | grep -Fq "pid=$TUI_PID," || { echo "TUI has no socket to the new app-server" >&2; false; }
+descendant_pids() {
+  local root=$1 current child ppid seen
+  local -a frontier
+  frontier=("$root"); seen=" $root "
+  printf '%s\n' "$root"
+  while ((${#frontier[@]})); do
+    current=${frontier[0]}; frontier=("${frontier[@]:1}")
+    for status in /proc/[0-9]*/status; do
+      [[ -r "$status" ]] || continue
+      child=${status#/proc/}; child=${child%/status}
+      [[ "$seen" != *" $child "* ]] || continue
+      ppid=$(awk '$1=="PPid:" {print $2}' "$status" 2>/dev/null || true)
+      if [[ "$ppid" == "$current" ]]; then
+        printf '%s\n' "$child"; seen+="$child "; frontier+=("$child")
+      fi
+    done
+  done
+}
+mapfile -t TUI_SOCKET_CANDIDATES < <(descendant_pids "$TUI_PID")
+TUI_SOCKET_PID=
+SOCKETS=$(ss -tnpH state established "dport = :$PORT")
+for candidate in "${TUI_SOCKET_CANDIDATES[@]}"; do
+  if grep -Fq "pid=$candidate," <<<"$SOCKETS"; then TUI_SOCKET_PID=$candidate; break; fi
+done
+[[ -n "$TUI_SOCKET_PID" ]] || { echo "TUI process tree has no socket to the new app-server" >&2; false; }
+echo "TUI_SOCKET pane_pid=$TUI_PID holder_pid=$TUI_SOCKET_PID descendants=${#TUI_SOCKET_CANDIDATES[@]}"
 trap - ERR INT TERM
 echo "RESULT: NORMALIZED alias=$ALIAS appsrv_version=$ACTUAL_VERSION"
 echo "ROLLBACK_COORDINATES=$BACKUP_DIR"

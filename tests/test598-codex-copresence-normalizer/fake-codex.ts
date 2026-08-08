@@ -1,13 +1,17 @@
-if (process.argv.includes("--version")) { console.log("codex-cli 9.9.9"); process.exit(0); }
-if (process.argv.includes("resume")) {
+if (process.argv.includes("--socket-child")) {
+  const socket = new WebSocket(process.argv[process.argv.indexOf("--socket-child") + 1]);
+  await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; }).catch(() => process.exit(5));
+  setInterval(() => socket.send("ping"), 60_000);
+}
+else if (process.argv.includes("--version")) { console.log("codex-cli 9.9.9"); process.exit(0); }
+else if (process.argv.includes("resume")) {
   if (process.argv.includes("thread_fail_resume")) process.exit(7);
   if (process.argv.includes("thread_no_socket")) setInterval(() => {}, 60_000);
   else {
-  const remoteAt = process.argv.indexOf("--remote");
-  if (remoteAt < 0) process.exit(4);
-  const socket = new WebSocket(process.argv[remoteAt + 1]);
-  await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; }).catch(() => process.exit(5));
-  setInterval(() => socket.send("ping"), 60_000);
+    const remoteAt = process.argv.indexOf("--remote");
+    if (remoteAt < 0) process.exit(4);
+    const child = Bun.spawn([process.execPath, "--socket-child", process.argv[remoteAt + 1]], { stdout: "ignore", stderr: "ignore" });
+    await child.exited;
   }
 }
 else {

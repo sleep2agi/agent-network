@@ -110,6 +110,10 @@ tmux -L test598 list-sessions -F '#{session_name}' | grep -Fxq alpha-appsrv
 tmux -L test598 list-sessions -F '#{session_name}' | grep -Fxq alpha-bridge
 tmux -L test598 list-sessions -F '#{session_name}' | grep -Fxq alpha-tui
 ss -ltnH 'sport = :25981' | grep -q .
+ALPHA_PANE=$(tmux -L test598 list-panes -t alpha-tui -F '#{pane_pid}')
+ALPHA_SOCKET_PID=$(ss -tnpH state established 'dport = :25981' | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -1)
+test -n "$ALPHA_SOCKET_PID"; test "$ALPHA_SOCKET_PID" != "$ALPHA_PANE"
+test "$(awk '$1=="PPid:" {print $2}' "/proc/$ALPHA_SOCKET_PID/status")" = "$ALPHA_PANE"
 bun "$THREAD_TOOL" --ws ws://127.0.0.1:25981 --thread-id thread_test_n_alpha --node-id n_alpha --alias alpha --cwd "$WORK" --mode verify
 mkdir "$ROOT/wrong-work"; chmod 0700 "$ROOT/wrong-work"
 expect_red thread-owner-mismatch bun "$THREAD_TOOL" --ws ws://127.0.0.1:25981 --thread-id thread_test_n_alpha --node-id n_other --alias alpha --cwd "$WORK" --mode claim
@@ -179,6 +183,27 @@ expect_red tui-without-socket-rolls-back-all-components env PATH="$ROOT/bin:$PAT
 test ! -d "$GOALS/n_epsilon"
 for dead in epsilon-appsrv epsilon-bridge epsilon-tui; do ! tmux -L test598 list-sessions -F '#{session_name}' | grep -Fxq "$dead"; done
 
+write_cfg "$INV/zeta-bridge-config.json" n_zeta 25986
+tmux -L test598 new-session -d -s zeta-old-appsrv 'sleep 1000'
+tmux -L test598 new-session -d -s zeta-old-bridge 'sleep 1000'
+tmux -L test598 new-session -d -s zeta-old-tui 'sleep 1000'
+Z1=$(tmux -L test598 display-message -p -t zeta-old-appsrv '#{pane_pid}')
+Z2=$(tmux -L test598 display-message -p -t zeta-old-bridge '#{pane_pid}')
+Z3=$(tmux -L test598 display-message -p -t zeta-old-tui '#{pane_pid}')
+ZS1=$(awk '{print $22}' "/proc/$Z1/stat"); ZS2=$(awk '{print $22}' "/proc/$Z2/stat"); ZS3=$(awk '{print $22}' "/proc/$Z3/stat")
+zeta_before=$(sha256sum "$INV/zeta-bridge-config.json")
+cp "$SCRIPT" /workspace/scripts/test598-root-only-mutant.sh
+sed -i 's/mapfile -t TUI_SOCKET_CANDIDATES < <(descendant_pids "$TUI_PID")/TUI_SOCKET_CANDIDATES=("$TUI_PID")/' /workspace/scripts/test598-root-only-mutant.sh
+expect_red root-only-socket-mutation-must-reject-child-holder env PATH="$ROOT/bin:$PATH" /workspace/scripts/test598-root-only-mutant.sh --mode apply --alias zeta \
+  --config "$INV/zeta-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" \
+  --workdir "$WORK" --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 --expected-model gpt-5.6-sol \
+  --new-appsrv-session zeta-appsrv --new-bridge-session zeta-bridge --new-tui-session zeta-tui --expected-tui-command fake-codex \
+  --expected-pid "$Z1:$ZS1" --expected-pid "$Z2:$ZS2" --expected-pid "$Z3:$ZS3" --stop-session zeta-old-appsrv --stop-session zeta-old-bridge --stop-session zeta-old-tui
+grep -Fq 'TUI process tree has no socket to the new app-server' /tmp/test598-red.log
+[[ "$zeta_before" == "$(sha256sum "$INV/zeta-bridge-config.json")" ]]
+test ! -d "$GOALS/n_zeta"
+for dead in zeta-appsrv zeta-bridge zeta-tui; do ! tmux -L test598 list-sessions -F '#{session_name}' | grep -Fxq "$dead"; done
+
 tmux -L test598 kill-server
 echo "L4 mutation anchors"
 grep -Fq 'entry.path !== configPath && entry.effective === desired' "$CFGTOOL"
@@ -187,7 +212,7 @@ grep -Fq 'pid $pid starttime drift' "$SCRIPT"
 grep -Fq 'runtime remains stopped fail-closed' "$SCRIPT"
 grep -Fq 'thread owner mismatch' "$THREAD_TOOL"
 grep -Fq 'thread cwd mismatch' "$THREAD_TOOL"
-grep -Fq 'TUI has no socket to the new app-server' "$SCRIPT"
+grep -Fq 'TUI process tree has no socket to the new app-server' "$SCRIPT"
 grep -Fq 'UAT_REQUIRED: socket single-owner + /goal + /loop notice + /aloop create/cancel' "$SCRIPT"
 ! grep -Fq 'ntok_TEST_ONLY' "$REPORT"
 echo "RESULT: PASS"
