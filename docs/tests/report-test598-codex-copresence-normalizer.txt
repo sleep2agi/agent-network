@@ -232,3 +232,23 @@ cancelled. No duplicate ACK was accepted as success, and this report does not
 claim that the lifecycle defect was fixed.
 
 Standard rollout verdict: PASS (14/14 standard candidates complete).
+
+## Nonstandard node — `A站副责人`
+
+This node had three unattached legacy sessions, but its `A站副责人-tui`
+session was only an idle bash process and there was no TUI client socket on
+24714. The migration therefore used the existing supported split between
+exact old stop targets and new destination names: the replacement TUI session
+is the plain alias `A站副责人`.
+
+- an explicit permission-preparation step changed `/home/vansin/ai-insight` from 0755 to 0700 while config SHA-256 remained byte-identical at `bc12106b21a21edf6355783a1db515676ebe91f24d4a3cdd7838662877d81b1b`
+- the first apply failed closed because legacy app-server wrapper PID 1196864 survived its tmux session stop; config was restored byte-identically and runtime remained stopped at rollback coordinates `/tmp/anet-normalize-n_4b1fca4d.j4TbWC`
+- read-only inspection showed that exact wrapper/native/code-mode-host tree was orphaned from tmux; their PID birth times were revalidated, the three exact PIDs were terminated, and port 24714 was verified listener-free
+- the already-tested post-stop recovery path then created exact placeholder stop targets and reran the normalizer, so config mutation and all replacement startup gates remained inside the reviewed implementation
+- final result: app-server 0.147.0, model `gpt-5.6-sol`, owner `anet:n_4b1fca4d:A站副责人`, cwd `/home/vansin/ai-insight`, and native TUI child ESTAB on 24714
+- final exact sessions are `A站副责人`, `A站副责人-appsrv`, and `A站副责人-桥`, all live and unattached; stale `A站副责人-tui` is absent
+- successful-run rollback coordinates: `/tmp/anet-normalize-n_4b1fca4d.ZKYbTY`
+- exactly one `ASTATIONDEPUTY-NORMALIZE-1786189683924-ACK`; known parent lifecycle row explicitly cancelled
+
+Nonstandard rollout verdict: PASS after one witnessed fail-closed recovery; the
+failed first apply is not represented as successful.
