@@ -13,7 +13,9 @@ The startup recipe for an opencode agent-node under pm2 supervision. Source of t
 
 Never batch this operation. First run `--mode plan`, record every matching
 process as `PID:STARTTIME` (field 22 in `/proc/PID/stat`), and name every exact
-tmux session that apply may stop. Apply refuses process drift, unaccounted
+app-server, bridge, and TUI tmux session that apply may stop. A real Codex
+0.147 probe proved the remote TUI exits when its app-server disappears, so a
+two-component app-server/bridge restart is incomplete. Apply refuses process drift, unaccounted
 alias/app-server processes, duplicate node IDs or goal stores, non-private
 config modes, symlinks, implicit models, and paths outside the selected root.
 

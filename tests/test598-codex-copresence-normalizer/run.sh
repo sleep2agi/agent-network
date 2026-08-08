@@ -23,7 +23,7 @@ must_reject() {
 }
 write_cfg() {
   local path=$1 node=$2 port=$3 model=${4:-gpt-5.6-sol}
-  printf '{"node_id":"%s","runtime":"codex-app-server","token":"ntok_TEST_ONLY","hub":"http://127.0.0.1:19999","model":"%s","codexAppServerUrl":"ws://127.0.0.1:%s"}\n' "$node" "$model" "$port" >"$path"
+  printf '{"node_id":"%s","runtime":"codex-app-server","token":"ntok_TEST_ONLY","hub":"http://127.0.0.1:19999","model":"%s","codexAppServerUrl":"ws://127.0.0.1:%s","codexThreadId":"thread_test_%s","flags":{"approvalPolicy":"never","sandboxMode":"danger-full-access"}}\n' "$node" "$model" "$port" "$node" >"$path"
   chmod 0600 "$path"
 }
 write_cfg "$INV/alpha-bridge-config.json" n_alpha 25981
@@ -66,9 +66,11 @@ cp /workspace/tests/test598-codex-copresence-normalizer/fake-bridge.ts "$ROOT/fa
 DIST_SHA=$(sha256sum "$ROOT/fake-bridge.ts" | awk '{print $1}')
 tmux -L test598 new-session -d -s alpha-appsrv 'sleep 1000'
 tmux -L test598 new-session -d -s alpha-old-bridge 'sleep 1000'
+tmux -L test598 new-session -d -s alpha-tui 'sleep 1000'
 P1=$(tmux -L test598 display-message -p -t alpha-appsrv '#{pane_pid}')
 P2=$(tmux -L test598 display-message -p -t alpha-old-bridge '#{pane_pid}')
-S1=$(awk '{print $22}' "/proc/$P1/stat"); S2=$(awk '{print $22}' "/proc/$P2/stat")
+P3=$(tmux -L test598 display-message -p -t alpha-tui '#{pane_pid}')
+S1=$(awk '{print $22}' "/proc/$P1/stat"); S2=$(awk '{print $22}' "/proc/$P2/stat"); S3=$(awk '{print $22}' "/proc/$P3/stat")
 # Wrap tmux so the production script uses this isolated server.
 mkdir "$ROOT/bin"; chmod 0700 "$ROOT/bin"
 printf '#!/usr/bin/env bash\nexec /usr/bin/tmux -L test598 "$@"\n' >"$ROOT/bin/tmux"; chmod 0700 "$ROOT/bin/tmux"
@@ -76,40 +78,63 @@ bash -c 'sleep 30 & wait' -- --alias alpha & ROGUE=$!
 expect_red unaccounted-process env PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode plan --alias alpha \
   --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" \
   --workdir "$WORK" --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 \
-  --new-appsrv-session alpha-appsrv --new-bridge-session alpha-bridge \
-  --expected-pid "$P1:$S1" --expected-pid "$P2:$S2"
+  --new-appsrv-session alpha-appsrv --new-bridge-session alpha-bridge --new-tui-session alpha-tui \
+  --expected-pid "$P1:$S1" --expected-pid "$P2:$S2" --expected-pid "$P3:$S3"
 kill "$ROGUE"; wait "$ROGUE" 2>/dev/null || true
 PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode apply --alias alpha \
   --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" \
   --workdir "$WORK" --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 \
-  --new-appsrv-session alpha-appsrv --new-bridge-session alpha-bridge \
-  --expected-pid "$P1:$S1" --expected-pid "$P2:$S2" --stop-session alpha-appsrv --stop-session alpha-old-bridge
+  --new-appsrv-session alpha-appsrv --new-bridge-session alpha-bridge --new-tui-session alpha-tui \
+  --expected-pid "$P1:$S1" --expected-pid "$P2:$S2" --expected-pid "$P3:$S3" --stop-session alpha-appsrv --stop-session alpha-old-bridge --stop-session alpha-tui
 tmux -L test598 list-sessions -F '#{session_name}' | grep -Fxq alpha-appsrv
 tmux -L test598 list-sessions -F '#{session_name}' | grep -Fxq alpha-bridge
+tmux -L test598 list-sessions -F '#{session_name}' | grep -Fxq alpha-tui
 ss -ltnH 'sport = :25981' | grep -q .
 
 echo "L3 PID drift, unaccounted process, and rollback"
 expect_red pid-drift env PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode plan --alias alpha \
   --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" --workdir "$WORK" \
   --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 \
-  --new-appsrv-session alpha-appsrv --new-bridge-session alpha-bridge --expected-pid "$$:1"
+  --new-appsrv-session alpha-appsrv --new-bridge-session alpha-bridge --new-tui-session alpha-tui --expected-pid "$$:1"
 
 write_cfg "$INV/gamma-bridge-config.json" n_gamma 25983
 tmux -L test598 new-session -d -s gamma-old-appsrv 'sleep 1000'
 tmux -L test598 new-session -d -s gamma-old-bridge 'sleep 1000'
+tmux -L test598 new-session -d -s gamma-old-tui 'sleep 1000'
 G1=$(tmux -L test598 display-message -p -t gamma-old-appsrv '#{pane_pid}')
 G2=$(tmux -L test598 display-message -p -t gamma-old-bridge '#{pane_pid}')
-GS1=$(awk '{print $22}' "/proc/$G1/stat"); GS2=$(awk '{print $22}' "/proc/$G2/stat")
+G3=$(tmux -L test598 display-message -p -t gamma-old-tui '#{pane_pid}')
+GS1=$(awk '{print $22}' "/proc/$G1/stat"); GS2=$(awk '{print $22}' "/proc/$G2/stat"); GS3=$(awk '{print $22}' "/proc/$G3/stat")
 gamma_before=$(sha256sum "$INV/gamma-bridge-config.json")
 expect_red version-failure-rolls-back env PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode apply --alias gamma \
   --config "$INV/gamma-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" \
   --workdir "$WORK" --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 0.0.0 \
-  --new-appsrv-session gamma-appsrv --new-bridge-session gamma-bridge \
-  --expected-pid "$G1:$GS1" --expected-pid "$G2:$GS2" --stop-session gamma-old-appsrv --stop-session gamma-old-bridge
+  --new-appsrv-session gamma-appsrv --new-bridge-session gamma-bridge --new-tui-session gamma-tui \
+  --expected-pid "$G1:$GS1" --expected-pid "$G2:$GS2" --expected-pid "$G3:$GS3" --stop-session gamma-old-appsrv --stop-session gamma-old-bridge --stop-session gamma-old-tui
 [[ "$gamma_before" == "$(sha256sum "$INV/gamma-bridge-config.json")" ]]
 test ! -d "$GOALS/n_gamma"
 ! tmux -L test598 list-sessions -F '#{session_name}' | grep -Fxq gamma-appsrv
 ! tmux -L test598 list-sessions -F '#{session_name}' | grep -Fxq gamma-bridge
+! tmux -L test598 list-sessions -F '#{session_name}' | grep -Fxq gamma-tui
+
+write_cfg "$INV/delta-bridge-config.json" n_delta 25984
+bun -e 'const f=process.argv[1],c=JSON.parse(require("fs").readFileSync(f));c.codexThreadId="thread_fail_resume";require("fs").writeFileSync(f,JSON.stringify(c)+"\n")' "$INV/delta-bridge-config.json"; chmod 0600 "$INV/delta-bridge-config.json"
+tmux -L test598 new-session -d -s delta-old-appsrv 'sleep 1000'
+tmux -L test598 new-session -d -s delta-old-bridge 'sleep 1000'
+tmux -L test598 new-session -d -s delta-old-tui 'sleep 1000'
+D1=$(tmux -L test598 display-message -p -t delta-old-appsrv '#{pane_pid}')
+D2=$(tmux -L test598 display-message -p -t delta-old-bridge '#{pane_pid}')
+D3=$(tmux -L test598 display-message -p -t delta-old-tui '#{pane_pid}')
+DS1=$(awk '{print $22}' "/proc/$D1/stat"); DS2=$(awk '{print $22}' "/proc/$D2/stat"); DS3=$(awk '{print $22}' "/proc/$D3/stat")
+delta_before=$(sha256sum "$INV/delta-bridge-config.json")
+expect_red tui-exit-rolls-back-all-components env PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode apply --alias delta \
+  --config "$INV/delta-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" \
+  --workdir "$WORK" --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 \
+  --new-appsrv-session delta-appsrv --new-bridge-session delta-bridge --new-tui-session delta-tui \
+  --expected-pid "$D1:$DS1" --expected-pid "$D2:$DS2" --expected-pid "$D3:$DS3" --stop-session delta-old-appsrv --stop-session delta-old-bridge --stop-session delta-old-tui
+[[ "$delta_before" == "$(sha256sum "$INV/delta-bridge-config.json")" ]]
+test ! -d "$GOALS/n_delta"
+for dead in delta-appsrv delta-bridge delta-tui; do ! tmux -L test598 list-sessions -F '#{session_name}' | grep -Fxq "$dead"; done
 
 tmux -L test598 kill-server
 echo "L4 mutation anchors"
