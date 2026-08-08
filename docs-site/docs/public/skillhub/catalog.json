@@ -4,6 +4,26 @@
   "skills": [
     {
       "schema_version": 1,
+      "slug": "public-skill-review-checklist",
+      "name": "Public skill review checklist",
+      "description": "Safe promotion checklist from private SkillHub to the public catalog.",
+      "version": "1.0.0",
+      "license": "Apache-2.0",
+      "publisher": {
+        "name": "Agent Network maintainers",
+        "url": "https://github.com/sleep2agi/agent-network"
+      },
+      "tags": [
+        "review",
+        "security",
+        "skillhub"
+      ],
+      "published_at": "2026-08-09",
+      "content_sha256": "a009367849bc1c8d4f808c9bf7474f87b1432b4643651c402dbff0fca5863be1",
+      "content_url": "/skillhub/skills/public-skill-review-checklist/1.0.0/SKILL.md"
+    },
+    {
+      "schema_version": 1,
       "slug": "skill-writing-guide",
       "name": "Skill writing guide",
       "description": "Turn a repeated agent workflow into a concise, testable SKILL.md.",
