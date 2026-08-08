@@ -1,7 +1,7 @@
 # test598 — Codex co-presence single-node normalizer
 
 Date: 2026-08-08 Asia/Shanghai
-Source commits: 1087650e81cc438da24820b66509b50486182bb4 + TUI follow-up c754b639c95b76d1a07403e5fd1797ef9224d6fa + owner/socket gates 21e4dadcfa8350b549733e66e8f31af1504d9f12 + explicit permission preparation 236c73a8b74e026a0fe96485814334e989c5b048 + explicit model pin dfbd2fb0a0ce1864bf71e1c53adc8cd1fe662879
+Source commits: 1087650e81cc438da24820b66509b50486182bb4 + TUI follow-up c754b639c95b76d1a07403e5fd1797ef9224d6fa + owner/socket gates 21e4dadcfa8350b549733e66e8f31af1504d9f12 + explicit permission preparation 236c73a8b74e026a0fe96485814334e989c5b048 + explicit model pin dfbd2fb0a0ce1864bf71e1c53adc8cd1fe662879 + workdir permission preparation 6cf5c7894760be13ac0cadc1e36f6bd0a91c986f
 Image: anet-test598:dev
 Scope: Docker isolation only; no production node, Hub, Dashboard, bridge, TUI, or app-server was mutated.
 
@@ -53,12 +53,14 @@ Production-shaped read-only plan against `设计副责人`:
 - inventory configs discovered: 20
 - canonical goalsPath: `/home/vansin/rfc030-work/.demo/goals/n_b3fac24e/goals.json`
 - legacy store: absent; no migration planned
-- unique permission repairs reported, not applied: 21 (20 configs `0664→0600` + inventory directory `0775→0700`)
+- unique inventory permission repairs reported, not applied: 21 (20 configs `0664→0600` + inventory directory `0775→0700`)
 
 Production-shaped read-only pilot inspection against `P站副责人`:
 
 - Hub status reports `gpt-5.6-sol`, while its bridge config still contains stale `gpt-5.5`
 - a legacy `codex-sdk` owner, legacy bridge, and app-server are simultaneously present; the plain alias tmux is not a shared TUI
+- its workdir is `0775`; the explicit preparation plan therefore contains 22 unique paths total (the 21 fleet inventory paths plus this selected workdir `0775→0700`)
+- the read-only normalizer plan accounted for all five matching processes (three tmux owners plus two children); the old native Codex listener executable is already marked deleted while still running
 - the normalizer now requires `--expected-model gpt-5.6-sol`, reports `modelFrom/modelTo`, and atomically pins that model instead of preserving the stale bridge snapshot
 
 The candidate is not a deployment authorization. A real-node apply still requires an owner-selected interruptible node/window, exact process/session coordinates for all three components, external socket single-owner verification, and `/goal`, `/loop` notice, `/aloop` create/cancel UAT.
