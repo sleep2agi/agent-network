@@ -244,7 +244,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (!effectiveNetId) return writeDeniedReply(effectiveNetId, "read");
       const role = enforceUserId ? getUserNetworkRole(enforceUserId, effectiveNetId) : null;
       if (enforceUserId && !role) return writeDeniedReply(effectiveNetId, "read");
-      const row = db.get<any>(`SELECT * FROM skillhub_skills WHERE skill_id = ?1 AND network_id = ?2`, skill_id, effectiveNetId);
+      const row = db.get<any>(
+        `SELECT skill_id, slug, name, description, version, content, status,
+                source_type, source_alias, created_at, updated_at, reviewed_at, review_note
+           FROM skillhub_skills WHERE skill_id = ?1 AND network_id = ?2`,
+        skill_id, effectiveNetId,
+      );
       if (!row) return skillHubReply({ ok: false, error: "skill_not_found" });
       const reviewer = !callerTokenIsNetwork && (role === "owner" || role === "admin");
       if (row.status !== "published" && !reviewer) {

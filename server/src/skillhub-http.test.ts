@@ -69,6 +69,8 @@ describe("SkillHub real Hub + SQLite", () => {
     const published = await tool(nodeToken, "list_skills", { network_id: networkId });
     expect(published.skills.map((x: any) => x.skill_id)).toContain(skillId);
     expect((await tool(nodeToken, "get_skill", { network_id: networkId, skill_id: skillId })).skill.skill_id).toBe(skillId);
+    const detail = (await tool(nodeToken, "get_skill", { network_id: networkId, skill_id: skillId })).skill;
+    expect(detail.created_by_user).toBeUndefined(); expect(detail.reviewed_by_user).toBeUndefined(); expect(detail.content_hash).toBeUndefined();
   });
 
   test("foreign user cannot read or review another network", async () => {
