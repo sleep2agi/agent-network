@@ -1,8 +1,9 @@
 # test598 — Codex co-presence single-node normalizer
 
 Date: 2026-08-08 Asia/Shanghai
-Source commits: 1087650e81cc438da24820b66509b50486182bb4 + TUI follow-up c754b639c95b76d1a07403e5fd1797ef9224d6fa + owner/socket gates 21e4dadcfa8350b549733e66e8f31af1504d9f12 + explicit permission preparation 236c73a8b74e026a0fe96485814334e989c5b048 + explicit model pin dfbd2fb0a0ce1864bf71e1c53adc8cd1fe662879 + workdir permission preparation 6cf5c7894760be13ac0cadc1e36f6bd0a91c986f
+Source commits: 1087650e81cc438da24820b66509b50486182bb4 + TUI follow-up c754b639c95b76d1a07403e5fd1797ef9224d6fa + owner/socket gates 21e4dadcfa8350b549733e66e8f31af1504d9f12 + explicit permission preparation 236c73a8b74e026a0fe96485814334e989c5b048 + explicit model pin dfbd2fb0a0ce1864bf71e1c53adc8cd1fe662879 + workdir permission preparation 6cf5c7894760be13ac0cadc1e36f6bd0a91c986f + exact TUI process-tree socket verification 8481306b595a83356da6a0d4743c520de18f687c
 Image: anet-test598:dev
+Image ID: sha256:c0fc0d934993f71f7be12af3f5140c2dfbd11c6a441098f9799084ce73b2dc8b
 Scope: Docker isolation only; no production node, Hub, Dashboard, bridge, TUI, or app-server was mutated.
 
 ## Result
@@ -12,9 +13,9 @@ PASS.
 - L0: Bash/JavaScript build and plan-only non-mutation passed.
 - L1: owner/type/mode validation, permission repair, per-node goalsPath, duplicate node_id, duplicate thread ID, and duplicate goalsPath passed.
 - L1 also proves single-node apply cannot implicitly chmod the fleet inventory: it fails before stopping any runtime until a separately reviewed `prepare-permissions` step has completed.
-- L2: a real isolated tmux server stopped three exact PID+starttime-owned sessions, started a fake app-server, bridge, and TUI, verified the pinned executable version, persisted the exact `anet:<node_id>:<alias>` thread owner, verified the real cwd, proved the TUI held a socket to that app-server, and left the goal store absent (no legacy migration).
+- L2: a real isolated tmux server stopped three exact PID+starttime-owned sessions, started a fake app-server, bridge, and TUI, verified the pinned executable version, persisted the exact `anet:<node_id>:<alias>` thread owner, verified the real cwd, proved a child in the exact TUI pane process tree held an ESTAB socket to that app-server, and left the goal store absent (no legacy migration).
 - L2 migrated the selected config from stale `gpt-5.5` to the operator-pinned `gpt-5.6-sol`; an injected later startup failure restored the byte-identical stale-model fixture, proving the model update participates in rollback.
-- L3: thread-owner mismatch, thread-cwd mismatch, PID drift, unaccounted alias process, injected post-start version failure, injected TUI exit, and a live TUI process with no app-server socket all failed closed. Injected rollout failures restored the byte-identical config, removed the new empty goals directory, and left no new app-server/bridge/TUI sessions.
+- L3: thread-owner mismatch, thread-cwd mismatch, PID drift, unaccounted alias process, injected post-start version failure, injected TUI exit, and a live TUI process tree with no app-server socket all failed closed. A mutation that weakened the socket test to the pane root PID rejected the valid child-held socket and turned red. Injected rollout failures restored the byte-identical config, removed the new empty goals directory, and left no new app-server/bridge/TUI sessions.
 - L4: removing the exact goalsPath collision predicate was witnessed red; removing/weakening process and rollback anchors remains covered by the explicit negative paths above.
 - Secret gate: the report contains no test token value; runtime output exposes only command hashes.
 
@@ -34,6 +35,19 @@ Witnessed-red results:
 - app-server version failure with rollback: rc=1
 - TUI exit with all-component rollback: rc=1
 - live TUI without app-server socket with all-component rollback: rc=1
+- root-pane-only socket mutation against a valid child-held socket: rc=1
+
+Exact-source Docker run:
+
+- source commit embedded in the test image: `8481306b595a83356da6a0d4743c520de18f687c`
+- positive socket evidence: `TUI_SOCKET pane_pid=692 holder_pid=709 descendants=2`
+- final result: `RESULT: PASS`
+
+Real production read-only socket ownership evidence:
+
+- `通信牛`: the tmux pane process is Node, while its native Codex child holds the ESTAB connection to app-server port 24701
+- `TM副责人`: the tmux pane process is Node, while its native Codex child holds the ESTAB connection to app-server port 24702
+- conclusion: checking only the pane root PID is over-strict and would safely but incorrectly roll back a healthy rollout; the gate must enumerate only that exact pane process tree and accept the exact child holder
 
 Real Codex 0.147 model probe (fully isolated alias/app-server/workspace; no production config or session):
 
