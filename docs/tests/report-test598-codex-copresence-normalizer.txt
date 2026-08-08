@@ -205,3 +205,30 @@ Standard rollout verdict: PASS (1/14 standard candidates complete).
 
 Standard rollout verdict: PASS (4/14 standard candidates complete). Further
 rollout paused for an independent narrow review of the cascading-stop delta.
+
+## Standard rollouts 5–14
+
+An independent fresh-checkout review of the cascading-stop delta returned PASS
+and independently reran image `anet-test598:dev` at exact source
+`5b5d9a5d1d59c6c1f77e36b22e987c2c4f4b5ddd` to `RESULT: PASS`. Rollout then
+resumed one idle, unattached node at a time. Every node reported app-server
+0.147.0, model `gpt-5.6-sol`, its exact persisted owner/cwd, and a TUI-process-
+tree ESTAB socket before its smoke task was sent.
+
+- `TM鸿蒙牛`: rollback `/tmp/anet-normalize-n_31977b0f.c6ta8P`; exactly one `TMHARMONY-NORMALIZE-1786188577793-ACK`
+- `TM客户端牛`: rollback `/tmp/anet-normalize-n_cd261971.cvCbbI`; exactly one `TMCLIENT-NORMALIZE-1786188663579-ACK`
+- `TM课程牛`: rollback `/tmp/anet-normalize-n_c6bb7d6d.G46y0k`; exactly one `TMCOURSE-NORMALIZE-1786188746938-ACK`
+- `TM门户牛`: rollback `/tmp/anet-normalize-n_92042cb9.k742lG`; exact owner `anet:n_92042cb9:TM门户牛`, TUI child socket on 24710; exactly one `TMPORTAL-NORMALIZE-1786188889328-ACK`
+- `TM赛事牛`: rollback `/tmp/anet-normalize-n_f87e8bff.7gua6h`; exact owner `anet:n_f87e8bff:TM赛事牛`, TUI child socket on 24709; exactly one `TMEVENT-NORMALIZE-1786189003238-ACK`
+- `TM设计师`: rollback `/tmp/anet-normalize-n_18efad80.CSQEJd`; exact owner `anet:n_18efad80:TM设计师`, TUI child socket on 24707; exactly one `TMDESIGN-NORMALIZE-1786189070042-ACK`
+- `TM云牛`: rollback `/tmp/anet-normalize-n_73687f17.kLFIIE`; exact owner `anet:n_73687f17:TM云牛`, TUI child socket on 24705; exactly one `TMCLOUD-NORMALIZE-1786189135876-ACK`
+- `TM中转牛`: rollback `/tmp/anet-normalize-n_200d364b.E3jpso`; exact owner `anet:n_200d364b:TM中转牛`, TUI child socket on 24704; exactly one `TMRELAY-NORMALIZE-1786189198539-ACK`
+- `TMCode工程牛`: its explicit `prepare-permissions` step changed `/home/vansin/tmcode` from 0775 to 0700 while config SHA-256 remained byte-identical at `d39c3c995da0ef939b7b1bc18dc38979b97bda1ab65d4653eed773566a20d50c`; rollback `/tmp/anet-normalize-n_ee935f0e.KHi0YE`; exact owner `anet:n_ee935f0e:TMCode工程牛`, cwd `/home/vansin/tmcode`, TUI child socket on 24713; exactly one `TMCODEENG-NORMALIZE-1786189287130-ACK`
+- `TMWork测试牛`: rollback `/tmp/anet-normalize-n_cbc65153.Syvc9O`; exact owner `anet:n_cbc65153:TMWork测试牛`, TUI child socket on 24712; exactly one `TMWORK-NORMALIZE-1786189360376-ACK`
+
+For every smoke, the separate known peer-task lifecycle leak left the parent
+row nonterminal after the exact ACK arrived; each parent was explicitly
+cancelled. No duplicate ACK was accepted as success, and this report does not
+claim that the lifecycle defect was fixed.
+
+Standard rollout verdict: PASS (14/14 standard candidates complete).
