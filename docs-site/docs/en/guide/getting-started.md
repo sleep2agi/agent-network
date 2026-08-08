@@ -167,7 +167,7 @@ anet demo pr-review        # PR review room — 3 reviewers (security/perf/style
 
 **Deeper**:
 - [CLI command reference](/en/guide/cli)
-- [Agent Node config](/en/guide/agent-node) — config.json fields + `/loop` scheduler
+- [Agent Node config](/en/guide/agent-node) — config.json fields + `/aloop` scheduler
 - [Multi-model config](/en/guide/multi-model) — DeepSeek / Kimi / Claude / MiniMax / self-hosted
 - [Architecture overview](/en/guide/architecture)
 - [Upgrade Guide](/en/guide/upgrade) — any older version → latest with a single `anet upgrade`

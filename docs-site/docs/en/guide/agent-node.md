@@ -127,7 +127,7 @@ anet goal list my-agent
 anet goal cancel my-agent <goal-id>
 ```
 
-Use `/loop` for every new recurring task. `/goal` is a one-time goal for authenticated Dashboard → shared Codex TUI traffic; only other agent-node paths retain it as a legacy `/loop` alias. State lives in the node's `goals.json`. The scheduler is not a precision cron service and every wake consumes real model quota.
+Dashboard `/goal` and `/loop` pass unchanged to the target runtime/TUI. Use `/aloop` for ANet recurring work (`/agoal` is an equivalent namespaced entry point; both require an interval). Old `/goal` and `/loop` remain temporarily compatible outside Dashboard and return a migration notice. State lives in the node's `goals.json`. The scheduler is not a precision cron service and every wake consumes real model quota.
 
 See [Goals and Loops](/en/guide/goals-and-loops) for routing differences, accepted schedules, wake and stop rules, self-management tools, restart limitations, and troubleshooting.
 

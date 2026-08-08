@@ -127,7 +127,7 @@ anet goal list my-agent
 anet goal cancel my-agent <goal-id>
 ```
 
-新周期任务统一使用 `/loop`。`/goal` 在认证 Dashboard → 共享 Codex TUI 时是一次性目标，在其他 agent-node 入口才保留为 `/loop` 的兼容别名。循环状态保存在该节点的 `goals.json`；它不是高精度 cron，并会真实消耗模型额度。
+Dashboard 的 `/goal`、`/loop` 会原样进入目标 runtime/TUI；ANet 周期任务统一使用 `/aloop`（`/agoal` 为同义入口，二者都要求间隔）。非 Dashboard 的旧 `/goal`、`/loop` 暂时兼容并提示迁移。循环状态保存在该节点的 `goals.json`；它不是高精度 cron，并会真实消耗模型额度。
 
 完整的路由差异、支持的时间格式、执行/停止规则、自管理工具、重启限制与排查方法见 [Goal 与 Loop](/guide/goals-and-loops)。
 

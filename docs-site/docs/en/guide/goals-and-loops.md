@@ -1,18 +1,18 @@
 # Goals and Loops
 
-`/loop` is Agent Network's recurring scheduler command. `/goal` currently carries both a compatibility path and a Codex TUI path. Use `/loop` for every new recurring task to avoid ambiguity.
+Dashboard passes `/goal` and `/loop` unchanged to the target node's runtime/TUI. Agent Network scheduling uses `/aloop`; `/agoal` is a namespaced alias for the same scheduler and also requires an explicit interval.
 
 ## Semantics at a glance
 
-| Input surface | `/loop` | `/goal` |
+| Input surface | `/goal` / `/loop` | `/aloop` / `/agoal` |
 |---|---|---|
-| Authenticated Dashboard Chat → shared Codex TUI (`codex-app-server`) | Creates an anet recurring task | Enters the shared Codex thread as a one-time goal |
-| Other agent-node inbox paths | Creates an anet recurring task | Legacy alias for `/loop`; an interval is still required |
-| `anet node loop` | Always sends `/loop` | Not used |
+| Authenticated Dashboard Chat → any agent-node runtime | Passed unchanged to that runtime/TUI; the ANet scheduler does not interpret it | Creates an ANet recurring task and requires an explicit interval |
+| Other agent-node inbox paths | Compatibility path: still creates an ANet recurring task and returns a migration notice | Creates an ANet recurring task and requires an explicit interval |
+| `anet node loop` | Not emitted | Always emits `/aloop` on the wire |
 
-“Authenticated Dashboard Chat” is not inferred from a sender name. The Hub stamps authenticated origin metadata. Old rows, ordinary node messages, and client-forged fields do not unlock this route.
+“Authenticated Dashboard Chat” is not inferred from a sender name. The Hub stamps authenticated origin metadata. Old rows, ordinary node messages, and node-forged fields do not unlock pass-through routing.
 
-If you enter `/goal 5m check logs` in Dashboard Chat for a shared Codex TUI, it is still a one-time goal, not a recurring task. The reply includes a notice telling you to use `/loop` for scheduling.
+The target runtime defines the native meaning of `/goal` and `/loop`; ANet does not rewrite them. If a Dashboard command contains an old scheduler-shaped interval, such as `/loop 5m check logs`, the reply includes a migration notice while the original command still reaches the runtime. Use `/aloop` when you want ANet scheduling.
 
 ## Create a recurring task
 
@@ -22,25 +22,25 @@ The simplest operator command is:
 anet node loop my-agent "check open issues" --every 5m
 ```
 
-`--every` accepts `m`, `h`, and `d`, such as `5m`, `2h`, or `1d`; it defaults to `5m` when omitted. The command submits `/loop` to an online node and waits up to 15 seconds for the node's creation reply. Merely enqueueing the Hub task is not reported as success.
+`--every` accepts `m`, `h`, and `d`, such as `5m`, `2h`, or `1d`; it defaults to `5m` when omitted. The command submits `/aloop` to an online node and waits up to 15 seconds for the node's creation reply. Merely enqueueing the Hub task is not reported as success.
 
 You can also send slash text through Dashboard Chat, a CommHub task, or another surface that delivers text to the node:
 
 ```text
-/loop 5m check open issues
-/loop hourly summarize progress
-/loop daily write a daily report
+/aloop 5m check open issues
+/aloop hourly summarize progress
+/agoal daily write a daily report
 ```
 
 The text parser accepts minutes, hours, days, `hourly`, and `daily`. The minimum interval is one minute. Bare numbers and sub-minute intervals are rejected.
 
-::: warning Claude Code CLI has a separate host
-The `goals.json`, `anet goal`, and self-management behavior on this page describe the agent-node scheduler. A standalone `claude-code-cli` session has Claude Code's own `/loop`; it is not managed by this local goal store.
+::: warning Native commands and ANet scheduling are separate capabilities
+Dashboard `/goal` and `/loop` belong to the target runtime. For example, a standalone `claude-code-cli` session has its own `/loop`, which is not managed by this page's `goals.json`. Use `/aloop` or `/agoal` for the ANet scheduler described here.
 :::
 
 ## What happens on each wake
 
-At startup, a node loads its own goal store. The scheduler checks for due work about every 30 seconds by default, so `/loop` is not a precision cron service. A long model turn can introduce additional delay.
+At startup, a node loads its own goal store. The scheduler checks for due work about every 30 seconds by default, so `/aloop` is not a precision cron service. A long model turn can introduce additional delay.
 
 For each due goal the node:
 
@@ -107,7 +107,7 @@ Structured schedules support:
 - `time_of_day`: a daily `HH:MM`; and
 - `weekday`: selected weekdays at `HH:MM`.
 
-Wall-clock schedules use the node's `flags.timezone`, defaulting to `Asia/Shanghai`. `anet node loop` and slash text currently create interval schedules only; use self-management tools for daily or weekday schedules.
+Wall-clock schedules use the node's `flags.timezone`, defaulting to `Asia/Shanghai`. `anet node loop`, `/aloop`, and `/agoal` currently create interval schedules only; use self-management tools for daily or weekday schedules.
 
 ## Persistence, restart, and runtime changes
 

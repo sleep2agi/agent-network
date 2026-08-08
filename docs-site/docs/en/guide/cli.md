@@ -176,7 +176,7 @@ Channel settings are not hot-reloaded; restart the node after changing them. `an
 | `anet goal cancel <node> <id>` | Mark a goal cancelled |
 | `anet node loop <node> "<task>" [--every 5m]` | Create a recurring task on an online node and wait up to 15 seconds for confirmation |
 
-`node loop` submits `/loop` through the Hub. `goal edit/cancel` modify `.anet/nodes/<node>/goals.json` directly. A running node does not hot-reload external file changes; restart it after `edit/cancel`. See [Goals and Loops](/en/guide/goals-and-loops) for current `/goal` versus `/loop` semantics, statuses, and self-management tools.
+`node loop` submits `/aloop` through the Hub. `goal edit/cancel` modify `.anet/nodes/<node>/goals.json` directly. A running node does not hot-reload external file changes; restart it after `edit/cancel`. See [Goals and Loops](/en/guide/goals-and-loops) for native Dashboard `/goal` and `/loop`, ANet `/aloop` and `/agoal`, statuses, and self-management tools.
 
 ## Diagnostics and maintenance
 

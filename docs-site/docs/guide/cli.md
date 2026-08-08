@@ -176,7 +176,7 @@ Channel 配置不会热加载，修改后需要重启节点。`anet channel add 
 | `anet goal cancel <node> <id>` | 标记为 cancelled |
 | `anet node loop <node> "<task>" [--every 5m]` | 向在线节点创建周期任务，并等待最多 15 秒确认 |
 
-`node loop` 通过 Hub 投递 `/loop`；`goal edit/cancel` 则直接修改 `.anet/nodes/<node>/goals.json`。运行中的节点不会自动重载外部文件修改，使用 `edit/cancel` 后请重启节点。`/goal` 与 `/loop` 的当前语义、状态和自管理工具见 [Goal 与 Loop](/guide/goals-and-loops)。
+`node loop` 通过 Hub 投递 `/aloop`；`goal edit/cancel` 则直接修改 `.anet/nodes/<node>/goals.json`。运行中的节点不会自动重载外部文件修改，使用 `edit/cancel` 后请重启节点。Dashboard 原生 `/goal`、`/loop` 与 ANet `/aloop`、`/agoal` 的语义、状态和自管理工具见 [Goal 与 Loop](/guide/goals-and-loops)。
 
 ## 诊断与维护
 

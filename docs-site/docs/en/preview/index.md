@@ -4,7 +4,7 @@
 The current preview channel = **v0.11-preview2** (npm `@preview` tag). This release has **not been promoted to `@latest`** — for stable production use, go back to the [latest documentation](/en/).
 
 **Features available in preview that aren't in latest yet:**
-- `anet node loop` CLI + `/loop` works across **all** runtimes (claude-agent-sdk / codex-sdk / grok-build-acp)
+- `anet node loop` CLI + `/aloop` works across all runtimes (Dashboard `/goal` and `/loop` stay native to the target runtime)
 - Security batch: cross-tenant write防护带 + retention sweep + password KDF strengthening
 - RFC-024 hub config-apply foundation (4 new MCP tools)
 :::
@@ -73,9 +73,9 @@ anet node start <alias>
 
 Full upgrade workflow + cross-version migration: [Upgrade Guide](/en/guide/upgrade).
 
-## Quickstart — try `/loop` in 60 seconds
+## Quickstart — try `/aloop` in 60 seconds
 
-Want to try the headline preview2 feature (`/loop` works for every runtime) right after upgrading? Follow these 6 steps:
+Want to try ANet recurring scheduling across runtimes right after upgrading? Follow these steps:
 
 ```bash
 anet upgrade --channel preview                              # 1. Upgrade to the preview channel
@@ -90,26 +90,26 @@ anet goal edit <alias> <goal-id> --status paused            # 5c. Pause (status:
 anet goal cancel <alias> <goal-id>                          # 5d. Cancel
 ```
 
-**Channel-equivalent form** (works inside the node's interactive prompt / Dashboard Chat / Feishu `@bot` etc. — same effect):
+**Text-equivalent form** (Dashboard Chat or another surface that delivers text to the node):
 
 ```
-/loop 5m what time is it now
+/aloop 5m what time is it now
 ```
 
 **Notes**:
 
-- Starting in preview2, all production runtimes (`claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`) can run `/loop`; previously only `claude-code-cli` did
+- Starting in preview2, all production runtimes (`claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`) can run ANet goal scheduling; the current text command is `/aloop`
 - Interval units: `60s` / `5m` / `30m` / `2h` / `1d`, **minimum 60s**
 - Replace `<alias>` with your node alias (`anet node ls`); get `<goal-id>` from `anet goal list <alias>`
 - Full command reference + persistence + restart behavior: [Agent Node — Loop scheduler](/en/guide/agent-node#recurring-tasks-the-loop-scheduler)
 
 ## preview2 highlights (with deep links)
 
-### 🌟 `/loop` works for every runtime + `anet node loop` CLI
+### 🌟 ANet goal scheduling works for every runtime + `anet node loop` CLI
 
-Before preview2, the `/loop` self-scheduler only ran for the `claude-code-cli` runtime; agent-node-driven runtimes (`claude-agent-sdk` / `codex-sdk` / `grok-build-acp`) **silently skipped** goal ticks. preview2 removes that runtime-bucket skip — every runtime can now drive a `/loop` goal end-to-end.
+Before preview2, the ANet self-scheduler only ran for the `claude-code-cli` runtime; agent-node-driven runtimes (`claude-agent-sdk` / `codex-sdk` / `grok-build-acp`) **silently skipped** goal ticks. preview2 removed that runtime-bucket skip; use `/aloop` for these tasks now.
 
-Plus: **new `anet node loop` CLI** to manage goals from outside the agent — set / list / cancel a node's running `/loop` jobs.
+Plus: **new `anet node loop` CLI** to manage goals from outside the agent — set / list / cancel a node's running ANet jobs.
 
 ```bash
 anet node loop my-codex "monitor PR #271" --every 5m
@@ -144,7 +144,7 @@ Four cross-tenant / data-integrity gaps closed for public-hub multi-user / multi
 
 | Feature | latest (npm `latest`) | preview (`2.3.0-preview.N`) |
 |---|---|---|
-| `/loop` scheduler | `claude-code-cli` only | **All production runtimes** |
+| ANet `/aloop` scheduler | `claude-code-cli` only | **All production runtimes** |
 | `anet node loop` CLI | ❌ | ✅ |
 | Cross-tenant write防护带 | Partial (`#275`) | ✅ 4 tools + SQL guard |
 | retention sweep / VACUUM | ❌ | ✅ |

@@ -167,7 +167,7 @@ anet demo pr-review        # PR 评审室 — 3 reviewer（安全/性能/风格�
 
 **深入**:
 - [CLI 命令清单](/guide/cli)
-- [Agent Node 配置](/guide/agent-node) — config.json 字段 + 循环任务 `/loop`
+- [Agent Node 配置](/guide/agent-node) — config.json 字段 + ANet 循环任务 `/aloop`
 - [多模型配置](/guide/multi-model) — DeepSeek / Kimi / Claude / MiniMax / 自部署
 - [架构概览](/guide/architecture)
 - [升级指南](/guide/upgrade) — 任意旧版 → latest 一键 `anet upgrade`

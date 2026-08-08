@@ -4,7 +4,7 @@
 当前 preview channel = **v0.11-preview2**（npm `@preview` tag）。这一版还**没 promote 到 `@latest`**——稳定生产环境用户请回到 [latest 文档](/)。
 
 **包含 latest 还没有的功能**：
-- `anet node loop` CLI + `/loop` 全 runtime 通（claude-agent-sdk / codex-sdk / grok-build-acp 都能跑了）
+- `anet node loop` CLI + `/aloop` 全 runtime 通（Dashboard 的 `/goal`、`/loop` 保留给目标 runtime）
 - 安全批：cross-tenant 写防护带 + retention sweep + password KDF 强化
 - RFC-024 hub config-apply foundation（4 个新 MCP tools）
 :::
@@ -73,9 +73,9 @@ anet node start <alias>
 
 完整升级流程 + 跨版本迁移见 [升级指南](/guide/upgrade)。
 
-## 快速试用 — 60 秒跑通 `/loop`
+## 快速试用 — 60 秒跑通 `/aloop`
 
-升级后想立刻试 preview2 的招牌新功能（`/loop` 全 runtime 通），按这套 6 步走：
+升级后想立刻试 ANet 的全 runtime 周期调度，按这套 6 步走：
 
 ```bash
 anet upgrade --channel preview                              # 1. 升级到 preview 通道
@@ -90,26 +90,26 @@ anet goal edit <alias> <goal-id> --status paused            # 5c. 暂停（statu
 anet goal cancel <alias> <goal-id>                          # 5d. 停止
 ```
 
-**频道等价用法**（在节点交互窗口 / Dashboard Chat / 飞书 @bot 等场景，效果一致）：
+**文本等价用法**（Dashboard Chat 或其他能向节点投递文本的入口）：
 
 ```
-/loop 5m 报一下现在几点
+/aloop 5m 报一下现在几点
 ```
 
 **说明**：
 
-- preview2 起，下列 runtime（`claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`）都能跑 `/loop`，之前只有 `claude-code-cli` 行
+- preview2 起，下列 runtime（`claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`）都能运行 ANet goal 调度；当前文本命令为 `/aloop`
 - 间隔单位支持 `60s` / `5m` / `30m` / `2h` / `1d`，**最小 60s**
 - `<alias>` 换成你的节点别名（`anet node ls` 查），`<goal-id>` 用 `anet goal list <alias>` 拿
 - 完整命令 + 持久化 + 重启行为见 [Agent Node — 循环任务](/guide/agent-node#循环任务-loop-调度器)
 
 ## preview2 亮点 (跳到详细文档)
 
-### 🌟 `/loop` 全 runtime 通 + `anet node loop` CLI
+### 🌟 ANet goal 调度全 runtime 通 + `anet node loop` CLI
 
-preview2 之前 `/loop` 自调度只在 `claude-code-cli` runtime 工作，agent-node 驱动的 runtime（`claude-agent-sdk` / `codex-sdk` / `grok-build-acp`）会**静默跳过** goal tick。preview2 拿掉那个 runtime-bucket skip，每个 runtime 都能把 `/loop` 任务端到端跑完。
+preview2 之前 ANet 自调度只在 `claude-code-cli` runtime 工作，agent-node 驱动的 runtime（`claude-agent-sdk` / `codex-sdk` / `grok-build-acp`）会**静默跳过** goal tick。preview2 拿掉那个 runtime-bucket skip；当前用 `/aloop` 创建这类任务。
 
-加：**新 `anet node loop` CLI**，从节点外管理 goals — set / list / cancel 一个节点正在跑的 `/loop` jobs。
+加：**新 `anet node loop` CLI**，从节点外管理 goals — set / list / cancel 一个节点正在跑的 ANet jobs。
 
 ```bash
 anet node loop my-codex "监控 PR #271 进展" --every 5m
@@ -117,7 +117,7 @@ anet node loop researcher "扫一遍 twitter 上 grok 的最新进展" --every 3
 anet node loop daily-bot "发布今日早报" --every 2h
 ```
 
-📖 完整用法 + 触发机制 → [Agent Node — 循环任务 / `/loop` 调度器](/guide/agent-node#循环任务-loop-调度器)
+📖 完整用法 + 触发机制 → [Goal 与 Loop](/guide/goals-and-loops)
 
 ### 🔒 安全批（4 项）
 
@@ -144,7 +144,7 @@ anet node loop daily-bot "发布今日早报" --every 2h
 
 | 功能 | latest (npm `latest`) | preview (`2.3.0-preview.N`) |
 |---|---|---|
-| `/loop` 调度 | 仅 `claude-code-cli` runtime | **所有 4 runtime** |
+| ANet `/aloop` 调度 | 仅 `claude-code-cli` runtime | **所有生产 runtime** |
 | `anet node loop` CLI | ❌ | ✅ |
 | cross-tenant 写防护带 | 部分 (`#275`) | ✅ 4 工具齐 + SQL guard |
 | retention sweep / VACUUM | ❌ | ✅ |

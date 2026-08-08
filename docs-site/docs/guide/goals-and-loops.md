@@ -1,18 +1,18 @@
 # Goal 与 Loop
 
-`/loop` 是 Agent Network 的周期调度命令；`/goal` 目前同时承载一条兼容路径和一条 Codex TUI 路径。为了避免歧义，新的周期任务统一使用 `/loop`。
+Dashboard 会把 `/goal` 和 `/loop` 原样交给目标节点的 runtime/TUI。Agent Network 自己的周期调度统一使用 `/aloop`；`/agoal` 是同一调度入口的命名空间别名，也必须显式提供间隔。
 
 ## 先看结论
 
-| 输入位置 | `/loop` | `/goal` |
+| 输入位置 | `/goal` / `/loop` | `/aloop` / `/agoal` |
 |---|---|---|
-| 认证 Dashboard Chat → 共享 Codex TUI（`codex-app-server`） | 创建 anet 周期任务 | 进入共享 Codex 线程，作为一次性目标执行 |
-| 其他 agent-node 收件入口 | 创建 anet 周期任务 | `/loop` 的旧兼容别名，同样要求间隔 |
-| `anet node loop` | 始终发送 `/loop` | 不使用 |
+| 认证 Dashboard Chat → 任意 agent-node runtime | 原样进入该 runtime/TUI，不由 ANet 调度器解释 | 创建 ANet 周期任务，要求显式间隔 |
+| 其他 agent-node 收件入口 | 兼容期内仍创建 ANet 周期任务，并返回迁移提示 | 创建 ANet 周期任务，要求显式间隔 |
+| `anet node loop` | 不发送 | 始终在线上发送 `/aloop` |
 
-“认证 Dashboard Chat”不是按发送者名字猜测的。Hub 会写入经认证的来源元数据；旧数据、普通节点消息或伪造字段不会获得这条特殊路由。
+“认证 Dashboard Chat”不是按发送者名字猜测的。Hub 会写入经认证的来源元数据；旧数据、普通节点消息或节点伪造字段不会获得透传路由。
 
-如果在 Dashboard 的共享 Codex TUI 中输入 `/goal 5m 检查日志`，它仍是一次性目标，不会变成周期任务。回复会附带提示，要求定时任务改用 `/loop`。
+`/goal`、`/loop` 的具体原生含义由目标 runtime 决定，ANet 不改写。若 Dashboard 输入中带有旧调度格式的间隔（例如 `/loop 5m 检查日志`），回复会附带迁移提示，但原始指令仍进入 runtime。需要 ANet 定时执行时，请明确使用 `/aloop`。
 
 ## 创建周期任务
 
@@ -22,25 +22,25 @@
 anet node loop my-agent "检查待处理 Issue" --every 5m
 ```
 
-`--every` 可用 `m`、`h`、`d`，例如 `5m`、`2h`、`1d`；省略时默认 `5m`。命令先把 `/loop` 投递给在线节点，再等待最多 15 秒的创建回执。只排入 Hub 队列不算创建成功。
+`--every` 可用 `m`、`h`、`d`，例如 `5m`、`2h`、`1d`；省略时默认 `5m`。命令先把 `/aloop` 投递给在线节点，再等待最多 15 秒的创建回执。只排入 Hub 队列不算创建成功。
 
 在 Dashboard Chat、CommHub 任务或其他能向节点投递文本的入口，也可以直接发送：
 
 ```text
-/loop 5m 检查待处理 Issue
-/loop 每小时汇总一次进展
-/loop daily 生成日报
+/aloop 5m 检查待处理 Issue
+/aloop 每小时汇总一次进展
+/agoal daily 生成日报
 ```
 
 文本解析器支持分钟、小时、天以及 `hourly`、`daily`；最短间隔为 1 分钟。裸数字和秒级间隔会被拒绝。
 
-::: warning Claude Code CLI 是另一套宿主
-本页的 `goals.json`、`anet goal` 和自管理工具描述的是 agent-node 调度器。独立的 `claude-code-cli` 会话有 Claude Code 自己的 `/loop`，不由这份本地 goal 状态管理。
+::: warning 原生命令与 ANet 调度是两套能力
+Dashboard 中的 `/goal`、`/loop` 属于目标 runtime。比如独立 `claude-code-cli` 的 `/loop` 不由本页的 `goals.json` 管理。需要本页描述的 ANet 调度器时，使用 `/aloop` 或 `/agoal`。
 :::
 
 ## 每轮如何执行
 
-节点启动时加载自己的 goal 存储。调度器默认约每 30 秒检查一次到期项，因此 `/loop` 不是高精度 cron；一次执行耗时也可能让实际时间进一步后移。
+节点启动时加载自己的 goal 存储。调度器默认约每 30 秒检查一次到期项，因此 `/aloop` 不是高精度 cron；一次执行耗时也可能让实际时间进一步后移。
 
 每次到期后，节点会：
 
@@ -107,7 +107,7 @@ anet goal cancel <node> <goal-id>
 - `time_of_day`：每天某个 `HH:MM`；
 - `weekday`：指定星期与 `HH:MM`。
 
-定点计划默认使用节点 `flags.timezone`，未配置时为 `Asia/Shanghai`。`anet node loop` 与 slash 文本目前只创建 interval；定点/星期计划通过自管理工具创建。
+定点计划默认使用节点 `flags.timezone`，未配置时为 `Asia/Shanghai`。`anet node loop`、`/aloop` 与 `/agoal` 目前只创建 interval；定点/星期计划通过自管理工具创建。
 
 ## 存储、重启和 runtime 切换
 
