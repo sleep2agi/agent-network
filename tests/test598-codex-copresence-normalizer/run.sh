@@ -137,13 +137,35 @@ expect_red flagged-appserver-must-be-unaccounted env PATH="$ROOT/bin:$PATH" "$SC
   "${FLAGGED_EXPECTED[@]}" --stop-session alpha-appsrv --stop-session alpha-bridge --stop-session alpha-tui
 grep -Fq "unaccounted matching process pid=$STRAY_FLAGGED_APPSRV" /tmp/test598-red.log
 cp "$SCRIPT" /workspace/scripts/test598-adjacent-appserver-mutant.sh
-sed -i 's/if (( saw_app_server == 1 )) && \[\[ "${PROC_ARGV\[i\]}" == --listen/if [[ "${PROC_ARGV[i-1]:-}" == app-server \&\& "${PROC_ARGV[i]}" == --listen/' /workspace/scripts/test598-adjacent-appserver-mutant.sh
+sed -i '/saw_app_server == 1.*argv_option_matches.*--listen/c\    if [[ "${PROC_ARGV[i-1]:-}" == app-server \&\& "${PROC_ARGV[i]}" == --listen \&\& "${PROC_ARGV[i+1]:-}" == "$WS" ]]; then return 0; fi' /workspace/scripts/test598-adjacent-appserver-mutant.sh
+bash -n /workspace/scripts/test598-adjacent-appserver-mutant.sh
+grep -Fq 'PROC_ARGV[i-1]' /workspace/scripts/test598-adjacent-appserver-mutant.sh
 expect_red flagged-appserver-matcher-mutation-must-be-caught must_reject env PATH="$ROOT/bin:$PATH" /workspace/scripts/test598-adjacent-appserver-mutant.sh --mode plan --alias alpha \
   --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" --workdir "$WORK" \
   --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 --expected-model gpt-5.6-sol \
   --new-appsrv-session alpha-appsrv --new-bridge-session alpha-bridge --new-tui-session alpha-tui --expected-tui-command fake-codex \
   "${FLAGGED_EXPECTED[@]}" --stop-session alpha-appsrv --stop-session alpha-bridge --stop-session alpha-tui
 kill "$STRAY_FLAGGED_APPSRV"; wait "$STRAY_FLAGGED_APPSRV" 2>/dev/null || true
+
+"$ROOT/fake-codex" --stray-no-bind --camouflage "$SCRIPT" app-server -c approval_policy=never --listen=ws://127.0.0.1:25981 &
+STRAY_EQUALS_APPSRV=$!
+sleep 0.1
+expect_red equals-appserver-must-be-unaccounted env PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode plan --alias alpha \
+  --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" --workdir "$WORK" \
+  --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 --expected-model gpt-5.6-sol \
+  --new-appsrv-session alpha-appsrv --new-bridge-session alpha-bridge --new-tui-session alpha-tui --expected-tui-command fake-codex \
+  "${FLAGGED_EXPECTED[@]}" --stop-session alpha-appsrv --stop-session alpha-bridge --stop-session alpha-tui
+grep -Fq "unaccounted matching process pid=$STRAY_EQUALS_APPSRV" /tmp/test598-red.log
+cp "$SCRIPT" /workspace/scripts/test598-split-only-option-mutant.sh
+sed -i 's/\[\[ "${PROC_ARGV\[i\]}" == "$option=$value" \]\]/false/' /workspace/scripts/test598-split-only-option-mutant.sh
+bash -n /workspace/scripts/test598-split-only-option-mutant.sh
+grep -Fq '    false' /workspace/scripts/test598-split-only-option-mutant.sh
+expect_red equals-option-mutation-must-be-caught must_reject env PATH="$ROOT/bin:$PATH" /workspace/scripts/test598-split-only-option-mutant.sh --mode plan --alias alpha \
+  --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" --workdir "$WORK" \
+  --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 --expected-model gpt-5.6-sol \
+  --new-appsrv-session alpha-appsrv --new-bridge-session alpha-bridge --new-tui-session alpha-tui --expected-tui-command fake-codex \
+  "${FLAGGED_EXPECTED[@]}" --stop-session alpha-appsrv --stop-session alpha-bridge --stop-session alpha-tui
+kill "$STRAY_EQUALS_APPSRV"; wait "$STRAY_EQUALS_APPSRV" 2>/dev/null || true
 
 expect_red pid-drift env PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode plan --alias alpha \
   --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" --workdir "$WORK" \

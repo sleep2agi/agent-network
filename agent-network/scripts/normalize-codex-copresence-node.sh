@@ -81,20 +81,26 @@ for pid in "${!EXPECTED[@]}"; do
   echo "EXPECTED pid=$pid starttime=$actual exe=$(readlink "/proc/$pid/exe") cmd_sha256=$(fingerprint "$pid")"
 done
 
+argv_option_matches() {
+  local i=$1 option=$2 value=$3
+  [[ "${PROC_ARGV[i]}" == "$option" && "${PROC_ARGV[i+1]:-}" == "$value" ]] ||
+    [[ "${PROC_ARGV[i]}" == "$option=$value" ]]
+}
 process_matches_selected_node() {
-  local i saw_app_server=0
+  local i saw_app_server=0 saw_resume=0
   for ((i=0; i<${#PROC_ARGV[@]}; i++)); do
-    if [[ "${PROC_ARGV[i]}" == --config && "${PROC_ARGV[i+1]:-}" == "$CONFIG" ]]; then return 0; fi
-    if [[ "${PROC_ARGV[i]}" == --alias && "${PROC_ARGV[i+1]:-}" == "$ALIAS" ]]; then return 0; fi
+    if argv_option_matches "$i" --config "$CONFIG"; then return 0; fi
+    if argv_option_matches "$i" --alias "$ALIAS"; then return 0; fi
     if [[ "${PROC_ARGV[i]}" == node && "${PROC_ARGV[i+1]:-}" == start && "${PROC_ARGV[i+2]:-}" == "$ALIAS" ]]; then return 0; fi
     if [[ "${PROC_ARGV[i]}" == resume && "${PROC_ARGV[i+1]:-}" == "$ALIAS" ]]; then return 0; fi
-    if [[ "${PROC_ARGV[i]}" == resume && "${PROC_ARGV[i+1]:-}" == --remote && "${PROC_ARGV[i+2]:-}" == "$WS" ]]; then return 0; fi
+    if [[ "${PROC_ARGV[i]}" == resume ]]; then saw_resume=1; fi
+    if (( saw_resume == 1 )) && argv_option_matches "$i" --remote "$WS"; then return 0; fi
     if [[ "${PROC_ARGV[i]}" == app-server ]]; then saw_app_server=1; fi
     # Real Codex inserts one or more `-c key=value` arguments between
     # `app-server` and `--listen`.  Match argv tokens, not an adjacent string,
     # so a second wrapper/native server on the selected port cannot evade the
     # unaccounted-process gate while secrets remain absent from diagnostics.
-    if (( saw_app_server == 1 )) && [[ "${PROC_ARGV[i]}" == --listen && "${PROC_ARGV[i+1]:-}" == "$WS" ]]; then return 0; fi
+    if (( saw_app_server == 1 )) && argv_option_matches "$i" --listen "$WS"; then return 0; fi
   done
   return 1
 }
