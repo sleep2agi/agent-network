@@ -233,6 +233,7 @@ anet info <alias>
 ```
 
 循环任务要求节点在线，并会消耗真实模型额度。它不是高精度 cron；先用较长周期验证。
+继续检查 `goal show` / `wake-log` 中的 `next_wake_at`、失败记录和 `paused` 状态。完整语义见 [Goal 与 Loop](/guide/goals-and-loops)。
 
 ## Channel
 

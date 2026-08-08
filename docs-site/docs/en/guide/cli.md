@@ -171,11 +171,12 @@ Channel settings are not hot-reloaded; restart the node after changing them. `an
 |---|---|
 | `anet goal list [node]` | List local goals |
 | `anet goal show <node> <id>` | Show details and progress records |
+| `anet goal wake-log <node> <id> [--tail N] [--json]` | Export the complete wake history |
 | `anet goal edit <node> <id> ...` | Change interval, text, or status |
 | `anet goal cancel <node> <id>` | Mark a goal cancelled |
-| `anet node loop <node> ...` | Create or manage a node loop; follow that command's `--help` |
+| `anet node loop <node> "<task>" [--every 5m]` | Create a recurring task on an online node and wait up to 15 seconds for confirmation |
 
-The CLI edits `.anet/nodes/<node>/goals.json` directly. A running node does not reload that file automatically; restart it after editing.
+`node loop` submits `/loop` through the Hub. `goal edit/cancel` modify `.anet/nodes/<node>/goals.json` directly. A running node does not hot-reload external file changes; restart it after `edit/cancel`. See [Goals and Loops](/en/guide/goals-and-loops) for current `/goal` versus `/loop` semantics, statuses, and self-management tools.
 
 ## Diagnostics and maintenance
 

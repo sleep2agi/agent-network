@@ -171,11 +171,12 @@ Channel 配置不会热加载，修改后需要重启节点。`anet channel add 
 |---|---|
 | `anet goal list [node]` | 列出本地 goal |
 | `anet goal show <node> <id>` | 查看详情与进度记录 |
+| `anet goal wake-log <node> <id> [--tail N] [--json]` | 导出完整 wake 历史 |
 | `anet goal edit <node> <id> ...` | 修改 interval、文本或状态 |
 | `anet goal cancel <node> <id>` | 标记为 cancelled |
-| `anet node loop <node> ...` | 创建或管理节点循环任务；以该命令的 `--help` 为准 |
+| `anet node loop <node> "<task>" [--every 5m]` | 向在线节点创建周期任务，并等待最多 15 秒确认 |
 
-CLI 直接修改 `.anet/nodes/<node>/goals.json`。运行中的节点不会自动重载该文件，修改后请重启节点。
+`node loop` 通过 Hub 投递 `/loop`；`goal edit/cancel` 则直接修改 `.anet/nodes/<node>/goals.json`。运行中的节点不会自动重载外部文件修改，使用 `edit/cancel` 后请重启节点。`/goal` 与 `/loop` 的当前语义、状态和自管理工具见 [Goal 与 Loop](/guide/goals-and-loops)。
 
 ## 诊断与维护
 

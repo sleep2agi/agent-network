@@ -127,7 +127,9 @@ anet goal list my-agent
 anet goal cancel my-agent <goal-id>
 ```
 
-Goal state is stored in the node's `goals.json`. Intervals require a unit; the CLI currently accepts minutes, hours, or days. Each run consumes real model quota, so validate with a conservative interval. This is not a high-precision cron service.
+Use `/loop` for every new recurring task. `/goal` is a one-time goal for authenticated Dashboard → shared Codex TUI traffic; only other agent-node paths retain it as a legacy `/loop` alias. State lives in the node's `goals.json`. The scheduler is not a precision cron service and every wake consumes real model quota.
+
+See [Goals and Loops](/en/guide/goals-and-loops) for routing differences, accepted schedules, wake and stop rules, self-management tools, restart limitations, and troubleshooting.
 
 <a id="reconnection"></a>
 

@@ -233,6 +233,7 @@ anet info <alias>
 ```
 
 Recurring goals require an online node and consume real model quota. They are not a high-precision cron service; validate with a conservative interval.
+Inspect `next_wake_at`, failure entries, and `paused` status with `goal show` / `wake-log`. See [Goals and Loops](/en/guide/goals-and-loops) for the full behavior.
 
 ## Channels
 
