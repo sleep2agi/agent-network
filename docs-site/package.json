@@ -8,6 +8,9 @@
   },
   "scripts": {
     "dev": "vitepress dev docs",
+    "skillhub:build": "node ../scripts/build-public-skillhub.mjs",
+    "skillhub:check": "node ../scripts/build-public-skillhub.mjs --check",
+    "prebuild": "npm run skillhub:build",
     "build": "vitepress build docs",
     "preview": "vitepress preview docs"
   },
