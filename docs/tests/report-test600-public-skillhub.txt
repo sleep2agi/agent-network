@@ -35,7 +35,8 @@ Public catalog image:
   image digest: sha256:da0d71db435021c8a8ad41ac49bc80bf60fe07eca9abbd03b90d4dce3a302eb6
   embedded TEST600_SOURCE_COMMIT:
     72f7afd6d6f1aa2e685808650e12f85e51696eee
-  result: PASS (10 checks)
+  result: PASS (10 checks) at source 72f7afd6; follow-up import preflight adds
+    an eleventh witnessed-red gate before write
 
 Dashboard image:
   tag during verification: anet-skillhub-dashboard:dev
@@ -68,7 +69,8 @@ Public-catalog checks
 Security and privacy assertions
 ===============================
 
-* Metadata keys are explicit; path slug/version must equal metadata slug/version.
+* Metadata keys are explicit at import and catalog-build time; private/unknown
+  fields are rejected before the importer creates a version directory.
 * The validator accepts only regular files and rejects symlinks.
 * Skill text is UTF-8, bounded to 128 KiB, and rejects NUL bytes.
 * Credential-shaped strings, private keys, and host-local home paths are blocked.

@@ -10,6 +10,8 @@ const skillsRoot = join(repoRoot, 'docs-site', 'docs', 'public', 'skillhub', 'sk
 const bundlePath = process.argv[2] ? resolve(process.argv[2]) : ''
 const slugRe = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const versionRe = /^[0-9A-Za-z]+(?:[._-][0-9A-Za-z]+)*$/
+const metadataKeys = new Set(['schema_version', 'slug', 'name', 'description', 'version', 'license', 'publisher', 'tags', 'published_at'])
+const publisherKeys = new Set(['name', 'url'])
 
 function fail(message) {
   console.error(`public-skillhub-import: ${message}`)
@@ -24,6 +26,9 @@ const bundleKeys = Object.keys(bundle || {}).sort().join(',')
 if (bundleKeys !== 'content,content_sha256,metadata,schema_version' || bundle.schema_version !== 1) fail('bundle shape or schema_version is invalid')
 if (typeof bundle.content !== 'string' || !bundle.content) fail('bundle content must be non-empty text')
 if (!bundle.metadata || typeof bundle.metadata !== 'object' || Array.isArray(bundle.metadata)) fail('bundle metadata is invalid')
+if (Object.keys(bundle.metadata).some(key => !metadataKeys.has(key))) fail('bundle metadata contains an unknown field')
+if (!bundle.metadata.publisher || typeof bundle.metadata.publisher !== 'object' || Array.isArray(bundle.metadata.publisher)) fail('bundle publisher is invalid')
+if (Object.keys(bundle.metadata.publisher).some(key => !publisherKeys.has(key))) fail('bundle publisher contains an unknown field')
 const { slug, version } = bundle.metadata
 if (typeof slug !== 'string' || !slugRe.test(slug) || typeof version !== 'string' || !versionRe.test(version)) fail('bundle slug/version is invalid')
 const actualHash = createHash('sha256').update(bundle.content, 'utf8').digest('hex')

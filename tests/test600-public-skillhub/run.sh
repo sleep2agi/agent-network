@@ -41,6 +41,21 @@ bad_bundle=/tmp/test600-bad-bundle.json
 node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({schema_version:1,metadata:{slug:"probe-skill",version:"1.0.0"},content:"# Probe\n",content_sha256:"0".repeat(64)}))' "$bad_bundle"
 expect_red "import rejects a mismatched content hash" node scripts/import-public-skill-bundle.mjs "$bad_bundle"
 
+cp -a "$case_root" /tmp/test600-private-field
+cp scripts/import-public-skill-bundle.mjs /tmp/test600-private-field/scripts/
+private_bundle=/tmp/test600-private-field-bundle.json
+node - "$private_bundle" <<'NODE'
+const fs = require('fs'); const crypto = require('crypto'); const content = '# Private field probe\n';
+fs.writeFileSync(process.argv[2], JSON.stringify({
+  schema_version: 1,
+  metadata: { schema_version: 1, slug: 'private-field-probe', name: 'Private field probe', description: 'Must be rejected before write.', version: '1.0.0', license: 'MIT', publisher: { name: 'Test publisher' }, tags: [], published_at: '2026-08-08', network_id: 'must-not-cross' },
+  content,
+  content_sha256: crypto.createHash('sha256').update(content).digest('hex'),
+}));
+NODE
+expect_red "import rejects private metadata before writing" node /tmp/test600-private-field/scripts/import-public-skill-bundle.mjs "$private_bundle"
+test ! -e /tmp/test600-private-field/docs-site/docs/public/skillhub/skills/private-field-probe
+
 cp -a "$case_root" /tmp/test600-import
 cp scripts/import-public-skill-bundle.mjs /tmp/test600-import/scripts/
 good_bundle=/tmp/test600-good-bundle.json
