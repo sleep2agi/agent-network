@@ -5,14 +5,14 @@ usage() {
   cat <<'EOF'
 Usage: normalize-codex-copresence-node.sh --mode plan|apply --alias NAME
   --config ABS --inventory-dir ABS --goals-root ABS --workdir ABS
-  --dist-cli ABS --expected-dist-sha256 HEX --codex-bin ABS --expected-version VERSION
+  --dist-cli ABS --expected-dist-sha256 HEX --codex-bin ABS --expected-version VERSION --expected-model MODEL
   --new-appsrv-session NAME --new-bridge-session NAME --new-tui-session NAME --expected-tui-command NAME
   --expected-pid PID:STARTTIME (repeat) --stop-session NAME (repeat)
 EOF
 }
 
 MODE=plan ALIAS= CONFIG= INVENTORY_DIR= GOALS_ROOT= WORKDIR= DIST_CLI=
-CODEX_BIN= EXPECTED_VERSION= EXPECTED_DIST_SHA256= NEW_APPSRV_SESSION= NEW_BRIDGE_SESSION= NEW_TUI_SESSION= EXPECTED_TUI_COMMAND= EXPECTED_PIDS=() STOP_SESSIONS=()
+CODEX_BIN= EXPECTED_VERSION= EXPECTED_MODEL= EXPECTED_DIST_SHA256= NEW_APPSRV_SESSION= NEW_BRIDGE_SESSION= NEW_TUI_SESSION= EXPECTED_TUI_COMMAND= EXPECTED_PIDS=() STOP_SESSIONS=()
 while (($#)); do
   case "$1" in
     --mode) MODE=${2:?}; shift 2;; --alias) ALIAS=${2:?}; shift 2;;
@@ -21,6 +21,7 @@ while (($#)); do
     --dist-cli) DIST_CLI=${2:?}; shift 2;; --codex-bin) CODEX_BIN=${2:?}; shift 2;;
     --expected-dist-sha256) EXPECTED_DIST_SHA256=${2:?}; shift 2;;
     --expected-version) EXPECTED_VERSION=${2:?}; shift 2;;
+    --expected-model) EXPECTED_MODEL=${2:?}; shift 2;;
     --new-appsrv-session) NEW_APPSRV_SESSION=${2:?}; shift 2;;
     --new-bridge-session) NEW_BRIDGE_SESSION=${2:?}; shift 2;;
     --new-tui-session) NEW_TUI_SESSION=${2:?}; shift 2;;
@@ -31,7 +32,7 @@ while (($#)); do
   esac
 done
 [[ "$MODE" == plan || "$MODE" == apply ]] || { echo "REFUSE: mode must be plan or apply" >&2; exit 2; }
-[[ -n "$ALIAS" && -n "$CONFIG" && -n "$INVENTORY_DIR" && -n "$GOALS_ROOT" && -n "$WORKDIR" && -n "$DIST_CLI" && -n "$EXPECTED_DIST_SHA256" && -n "$CODEX_BIN" && -n "$EXPECTED_VERSION" && -n "$NEW_APPSRV_SESSION" && -n "$NEW_BRIDGE_SESSION" && -n "$NEW_TUI_SESSION" && -n "$EXPECTED_TUI_COMMAND" ]] || { echo "REFUSE: missing required option" >&2; exit 2; }
+[[ -n "$ALIAS" && -n "$CONFIG" && -n "$INVENTORY_DIR" && -n "$GOALS_ROOT" && -n "$WORKDIR" && -n "$DIST_CLI" && -n "$EXPECTED_DIST_SHA256" && -n "$CODEX_BIN" && -n "$EXPECTED_VERSION" && -n "$EXPECTED_MODEL" && -n "$NEW_APPSRV_SESSION" && -n "$NEW_BRIDGE_SESSION" && -n "$NEW_TUI_SESSION" && -n "$EXPECTED_TUI_COMMAND" ]] || { echo "REFUSE: missing required option" >&2; exit 2; }
 for value in "$ALIAS" "$NEW_APPSRV_SESSION" "$NEW_BRIDGE_SESSION" "$NEW_TUI_SESSION" "$EXPECTED_TUI_COMMAND"; do
   [[ "$value" != *$'\n'* && "$value" != *$'\t'* && "$value" != *' '* && "$value" != */* && "$value" != *'|'* && "$value" != *'*'* && "$value" != *'?'* && "$value" != *'['* && "$value" != *']'* ]] || { echo "REFUSE: unsafe alias/session name" >&2; exit 2; }
 done
@@ -42,6 +43,7 @@ done
 [[ -f "$DIST_CLI" && ! -L "$DIST_CLI" ]] || { echo "REFUSE: dist cli must be a real file" >&2; exit 2; }
 [[ -x "$CODEX_BIN" && ! -L "$CODEX_BIN" ]] || { echo "REFUSE: codex binary must be executable and not a symlink" >&2; exit 2; }
 [[ "$EXPECTED_DIST_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "REFUSE: expected dist sha256 must be lowercase hex" >&2; exit 2; }
+[[ "$EXPECTED_MODEL" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "REFUSE: expected model has unsafe shape" >&2; exit 2; }
 [[ "$(sha256sum "$DIST_CLI" | awk '{print $1}')" == "$EXPECTED_DIST_SHA256" ]] || { echo "REFUSE: dist cli sha256 mismatch" >&2; exit 2; }
 WORK_UID=$(stat -c %u "$WORKDIR"); WORK_MODE=$(stat -c %a "$WORKDIR")
 [[ "$WORK_UID" == "$(id -u)" ]] || { echo "REFUSE: workdir is not owned by euid" >&2; exit 2; }
@@ -50,7 +52,7 @@ WORK_UID=$(stat -c %u "$WORKDIR"); WORK_MODE=$(stat -c %a "$WORKDIR")
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CONFIG_TOOL="$SCRIPT_DIR/codex-copresence-fleet-config.mjs"
 THREAD_TOOL="$SCRIPT_DIR/codex-copresence-thread-owner.mjs"
-PLAN=$(bun "$CONFIG_TOOL" --mode plan --config "$CONFIG" --inventory-dir "$INVENTORY_DIR" --goals-root "$GOALS_ROOT")
+PLAN=$(bun "$CONFIG_TOOL" --mode plan --config "$CONFIG" --inventory-dir "$INVENTORY_DIR" --goals-root "$GOALS_ROOT" --model "$EXPECTED_MODEL")
 NODE_ID=$(bun -e 'const x=JSON.parse(process.argv[1]);process.stdout.write(x.node_id)' "$PLAN")
 DESIRED_GOALS=$(bun -e 'const x=JSON.parse(process.argv[1]);process.stdout.write(x.goalsPath)' "$PLAN")
 PERMISSION_REPAIR_COUNT=$(bun -e 'const x=JSON.parse(process.argv[1]);process.stdout.write(String(x.permissionRepairs?.length||0))' "$PLAN")
@@ -60,8 +62,7 @@ if [[ "$MODE" == apply && "$PERMISSION_REPAIR_COUNT" != 0 ]]; then
 fi
 WS=$(bun -e 'const c=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const u=c.codexAppServerUrl;if(!/^ws:\/\/127\.0\.0\.1:[0-9]+$/.test(u||""))process.exit(2);process.stdout.write(u)' "$CONFIG") || { echo "REFUSE: codexAppServerUrl must be loopback ws" >&2; exit 2; }
 HUB=$(bun -e 'const c=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const u=c.hub;if(!/^https?:\/\//.test(u||""))process.exit(2);process.stdout.write(u.replace(/\/$/,""))' "$CONFIG") || { echo "REFUSE: missing/invalid hub URL" >&2; exit 2; }
-MODEL=$(bun -e 'const c=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const m=c.model||c.flags?.model;if(!m)process.exit(2);process.stdout.write(m)' "$CONFIG") || { echo "REFUSE: model must be explicit before rollout" >&2; exit 2; }
-[[ "$MODEL" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "REFUSE: model has unsafe shape" >&2; exit 2; }
+MODEL=$EXPECTED_MODEL
 THREAD_ID=$(bun -e 'const c=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const v=c.codexThreadId;if(!/^[A-Za-z0-9_-]{8,128}$/.test(v||""))process.exit(2);process.stdout.write(v)' "$CONFIG") || { echo "REFUSE: codexThreadId is missing or unsafe" >&2; exit 2; }
 SANDBOX_MODE=$(bun -e 'const c=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(c.flags?.sandboxMode||"workspace-write")' "$CONFIG")
 APPROVAL_POLICY=$(bun -e 'const c=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(c.flags?.approvalPolicy||"on-request")' "$CONFIG")
@@ -137,7 +138,7 @@ trap rollback ERR INT TERM
 for name in "${STOP_SESSIONS[@]}"; do sid=${SESSION_IDS[$name]%%:*}; tmux kill-session -t "$sid"; done
 for _ in $(seq 1 40); do alive=0; for pid in "${!EXPECTED[@]}"; do [[ -e "/proc/$pid" ]] && alive=1; done; (( alive == 0 )) && break; sleep 0.25; done
 for pid in "${!EXPECTED[@]}"; do [[ ! -e "/proc/$pid" ]] || { echo "REFUSE: pid $pid survived exact tmux stop" >&2; false; }; done
-bun "$CONFIG_TOOL" --mode apply --config "$CONFIG" --inventory-dir "$INVENTORY_DIR" --goals-root "$GOALS_ROOT"
+bun "$CONFIG_TOOL" --mode apply --config "$CONFIG" --inventory-dir "$INVENTORY_DIR" --goals-root "$GOALS_ROOT" --model "$EXPECTED_MODEL"
 
 RUNTIME_DIR=$(mktemp -d "/tmp/anet-normalize-run-${NODE_ID}.XXXXXX"); chmod 0700 "$RUNTIME_DIR"
 cat >"$RUNTIME_DIR/appsrv.sh" <<'EOF'

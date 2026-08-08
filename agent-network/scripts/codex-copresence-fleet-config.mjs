@@ -10,7 +10,7 @@ function parseArgs(argv) {
     const arg = argv[i];
     if (!arg.startsWith("--")) fail(`unexpected positional argument ${JSON.stringify(arg)}`);
     const key = arg.slice(2);
-    if (!["mode", "config", "inventory-dir", "goals-root"].includes(key)) fail(`unknown option --${key}`);
+    if (!["mode", "config", "inventory-dir", "goals-root", "model"].includes(key)) fail(`unknown option --${key}`);
     const value = argv[++i];
     if (!value || value.startsWith("--")) fail(`--${key} requires a value`);
     out[key] = value;
@@ -61,6 +61,10 @@ const nodeId = String(cfg.node_id || "");
 if (!/^n_[A-Za-z0-9]+$/.test(nodeId)) fail("config node_id is missing or unsafe");
 if (!cfg.token || typeof cfg.token !== "string") fail("config token is missing");
 if (cfg.runtime !== "codex-app-server") fail(`runtime must be codex-app-server, got ${JSON.stringify(cfg.runtime)}`);
+const currentModel = typeof cfg.model === "string" ? cfg.model : typeof cfg.flags?.model === "string" ? cfg.flags.model : null;
+const targetModel = args.model || currentModel;
+if (!targetModel || !/^[A-Za-z0-9._-]+$/.test(targetModel)) fail("an explicit safe --model is required when config has no model");
+if (cfg.model && cfg.flags?.model && cfg.model !== cfg.flags.model) fail("config model and flags.model conflict");
 if (existsSync(goalsRoot)) assertOwnedDirectory(goalsRoot, 0o700, "goals root");
 
 const desired = join(goalsRoot, nodeId, "goals.json");
@@ -107,15 +111,18 @@ if (args.mode === "apply") {
   const nodeDir = dirname(desired);
   if (!existsSync(nodeDir)) mkdirSync(nodeDir, { recursive: false, mode: 0o700 });
   assertOwnedDirectory(nodeDir, 0o700, "node goals directory", true);
-  const updated = { ...cfg, goalsPath: desired };
+  const updated = { ...cfg, model: targetModel, goalsPath: desired };
   if (updated.flags && Object.prototype.hasOwnProperty.call(updated.flags, "goalsPath")) {
     updated.flags = { ...updated.flags }; delete updated.flags.goalsPath;
+  }
+  if (updated.flags && Object.prototype.hasOwnProperty.call(updated.flags, "model")) {
+    updated.flags = { ...updated.flags }; delete updated.flags.model;
   }
   const tmp = `${configPath}.normalize.${process.pid}.${randomUUID()}`;
   writeFileSync(tmp, `${JSON.stringify(updated, null, 2)}\n`, { mode: 0o600, flag: "wx" });
   chmodSync(tmp, 0o600); renameSync(tmp, configPath); chmodSync(configPath, 0o600);
 }
 console.log(JSON.stringify({ ok: true, mode: args.mode, config: configPath, node_id: nodeId,
-  goalsPath: desired, inventoryCount: inventory.length,
+  modelFrom: currentModel, modelTo: targetModel, goalsPath: desired, inventoryCount: inventory.length,
   goalsFile: existsSync(desired) ? "present-mode-600" : "absent-no-migration",
   permissionRepairs }));

@@ -27,14 +27,14 @@ write_cfg() {
   printf '{"node_id":"%s","runtime":"codex-app-server","token":"ntok_TEST_ONLY","hub":"http://127.0.0.1:19999","model":"%s","codexAppServerUrl":"ws://127.0.0.1:%s","codexThreadId":"thread_test_%s","flags":{"approvalPolicy":"never","sandboxMode":"danger-full-access"}}\n' "$node" "$model" "$port" "$node" >"$path"
   chmod 0600 "$path"
 }
-write_cfg "$INV/alpha-bridge-config.json" n_alpha 25981
+write_cfg "$INV/alpha-bridge-config.json" n_alpha 25981 gpt-5.5
 write_cfg "$INV/beta-bridge-config.json" n_beta 25982
 
 echo "L0 syntax and plan is non-mutating"
 bash -n "$SCRIPT"; bun build "$CFGTOOL" --target node --outfile /tmp/test598-config-tool.js >/dev/null
 bun build "$THREAD_TOOL" --target node --outfile /tmp/test598-thread-tool.js >/dev/null
 before=$(sha256sum "$INV/alpha-bridge-config.json")
-bun "$CFGTOOL" --mode plan --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" | grep -Fq 'absent-no-migration'
+bun "$CFGTOOL" --mode plan --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" --model gpt-5.6-sol | grep -Fq '"modelTo":"gpt-5.6-sol"'
 [[ "$before" == "$(sha256sum "$INV/alpha-bridge-config.json")" && ! -e "$GOALS" ]]
 
 echo "L1 goalsPath fail-closed matrix"
@@ -63,12 +63,14 @@ cp "$INV/beta-bridge-config.json" /tmp/test598-beta
 bun -e 'const f=process.argv[1],c=JSON.parse(require("fs").readFileSync(f));c.codexThreadId="thread_test_n_alpha";require("fs").writeFileSync(f,JSON.stringify(c))' "$INV/beta-bridge-config.json"; chmod 0600 "$INV/beta-bridge-config.json"
 expect_red duplicate-thread bun "$CFGTOOL" --mode plan --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS"
 mv /tmp/test598-beta "$INV/beta-bridge-config.json"; chmod 0600 "$INV/beta-bridge-config.json"
-bun "$CFGTOOL" --mode apply --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS"
+bun "$CFGTOOL" --mode apply --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" --model gpt-5.6-sol
 test "$(stat -c %a "$GOALS")" = 700; test "$(stat -c %a "$GOALS/n_alpha")" = 700
 test ! -e "$GOALS/n_alpha/goals.json"
 test "$(bun -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1])).goalsPath)' "$INV/alpha-bridge-config.json")" = "$GOALS/n_alpha/goals.json"
+test "$(bun -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1])).model)' "$INV/alpha-bridge-config.json")" = gpt-5.6-sol
 
 echo "L2 real tmux/process apply"
+bun -e 'const f=process.argv[1],c=JSON.parse(require("fs").readFileSync(f));c.model="gpt-5.5";require("fs").writeFileSync(f,JSON.stringify(c)+"\n")' "$INV/alpha-bridge-config.json"; chmod 0600 "$INV/alpha-bridge-config.json"
 bun build --compile /workspace/tests/test598-codex-copresence-normalizer/fake-codex.ts --outfile "$ROOT/fake-codex" >/dev/null
 cp /workspace/tests/test598-codex-copresence-normalizer/fake-bridge.ts "$ROOT/fake-bridge.ts"; chmod 0700 "$ROOT/fake-codex"; chmod 0600 "$ROOT/fake-bridge.ts"
 DIST_SHA=$(sha256sum "$ROOT/fake-bridge.ts" | awk '{print $1}')
@@ -85,7 +87,7 @@ printf '#!/usr/bin/env bash\nexec /usr/bin/tmux -L test598 "$@"\n' >"$ROOT/bin/t
 chmod 0775 "$INV"
 expect_red normalizer-refuses-implicit-inventory-permission-repair env PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode apply --alias alpha \
   --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" \
-  --workdir "$WORK" --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 \
+  --workdir "$WORK" --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 --expected-model gpt-5.6-sol \
   --new-appsrv-session alpha-appsrv --new-bridge-session alpha-bridge --new-tui-session alpha-tui --expected-tui-command fake-codex \
   --expected-pid "$P1:$S1" --expected-pid "$P2:$S2" --expected-pid "$P3:$S3" --stop-session alpha-appsrv --stop-session alpha-old-bridge --stop-session alpha-tui
 for live in alpha-appsrv alpha-old-bridge alpha-tui; do tmux -L test598 list-sessions -F '#{session_name}' | grep -Fxq "$live"; done
@@ -93,15 +95,16 @@ bun "$CFGTOOL" --mode prepare-permissions --config "$INV/alpha-bridge-config.jso
 bash -c 'sleep 30 & wait' -- --alias alpha & ROGUE=$!
 expect_red unaccounted-process env PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode plan --alias alpha \
   --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" \
-  --workdir "$WORK" --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 \
+  --workdir "$WORK" --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 --expected-model gpt-5.6-sol \
   --new-appsrv-session alpha-appsrv --new-bridge-session alpha-bridge --new-tui-session alpha-tui --expected-tui-command fake-codex \
   --expected-pid "$P1:$S1" --expected-pid "$P2:$S2" --expected-pid "$P3:$S3"
 kill "$ROGUE"; wait "$ROGUE" 2>/dev/null || true
 PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode apply --alias alpha \
   --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" \
-  --workdir "$WORK" --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 \
+  --workdir "$WORK" --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 --expected-model gpt-5.6-sol \
   --new-appsrv-session alpha-appsrv --new-bridge-session alpha-bridge --new-tui-session alpha-tui --expected-tui-command fake-codex \
   --expected-pid "$P1:$S1" --expected-pid "$P2:$S2" --expected-pid "$P3:$S3" --stop-session alpha-appsrv --stop-session alpha-old-bridge --stop-session alpha-tui
+test "$(bun -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1])).model)' "$INV/alpha-bridge-config.json")" = gpt-5.6-sol
 tmux -L test598 list-sessions -F '#{session_name}' | grep -Fxq alpha-appsrv
 tmux -L test598 list-sessions -F '#{session_name}' | grep -Fxq alpha-bridge
 tmux -L test598 list-sessions -F '#{session_name}' | grep -Fxq alpha-tui
@@ -114,10 +117,10 @@ expect_red thread-cwd-mismatch bun "$THREAD_TOOL" --ws ws://127.0.0.1:25981 --th
 echo "L3 PID drift, unaccounted process, and rollback"
 expect_red pid-drift env PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode plan --alias alpha \
   --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" --workdir "$WORK" \
-  --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 \
+  --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 --expected-model gpt-5.6-sol \
   --new-appsrv-session alpha-appsrv --new-bridge-session alpha-bridge --new-tui-session alpha-tui --expected-tui-command fake-codex --expected-pid "$$:1"
 
-write_cfg "$INV/gamma-bridge-config.json" n_gamma 25983
+write_cfg "$INV/gamma-bridge-config.json" n_gamma 25983 gpt-5.5
 tmux -L test598 new-session -d -s gamma-old-appsrv 'sleep 1000'
 tmux -L test598 new-session -d -s gamma-old-bridge 'sleep 1000'
 tmux -L test598 new-session -d -s gamma-old-tui 'sleep 1000'
@@ -128,7 +131,7 @@ GS1=$(awk '{print $22}' "/proc/$G1/stat"); GS2=$(awk '{print $22}' "/proc/$G2/st
 gamma_before=$(sha256sum "$INV/gamma-bridge-config.json")
 expect_red version-failure-rolls-back env PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode apply --alias gamma \
   --config "$INV/gamma-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" \
-  --workdir "$WORK" --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 0.0.0 \
+  --workdir "$WORK" --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 0.0.0 --expected-model gpt-5.6-sol \
   --new-appsrv-session gamma-appsrv --new-bridge-session gamma-bridge --new-tui-session gamma-tui --expected-tui-command fake-codex \
   --expected-pid "$G1:$GS1" --expected-pid "$G2:$GS2" --expected-pid "$G3:$GS3" --stop-session gamma-old-appsrv --stop-session gamma-old-bridge --stop-session gamma-old-tui
 [[ "$gamma_before" == "$(sha256sum "$INV/gamma-bridge-config.json")" ]]
@@ -149,7 +152,7 @@ DS1=$(awk '{print $22}' "/proc/$D1/stat"); DS2=$(awk '{print $22}' "/proc/$D2/st
 delta_before=$(sha256sum "$INV/delta-bridge-config.json")
 expect_red tui-exit-rolls-back-all-components env PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode apply --alias delta \
   --config "$INV/delta-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" \
-  --workdir "$WORK" --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 \
+  --workdir "$WORK" --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 --expected-model gpt-5.6-sol \
   --new-appsrv-session delta-appsrv --new-bridge-session delta-bridge --new-tui-session delta-tui --expected-tui-command fake-codex \
   --expected-pid "$D1:$DS1" --expected-pid "$D2:$DS2" --expected-pid "$D3:$DS3" --stop-session delta-old-appsrv --stop-session delta-old-bridge --stop-session delta-old-tui
 [[ "$delta_before" == "$(sha256sum "$INV/delta-bridge-config.json")" ]]
@@ -168,7 +171,7 @@ ES1=$(awk '{print $22}' "/proc/$E1/stat"); ES2=$(awk '{print $22}' "/proc/$E2/st
 epsilon_before=$(sha256sum "$INV/epsilon-bridge-config.json")
 expect_red tui-without-socket-rolls-back-all-components env PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode apply --alias epsilon \
   --config "$INV/epsilon-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" \
-  --workdir "$WORK" --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 \
+  --workdir "$WORK" --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 --expected-model gpt-5.6-sol \
   --new-appsrv-session epsilon-appsrv --new-bridge-session epsilon-bridge --new-tui-session epsilon-tui --expected-tui-command fake-codex \
   --expected-pid "$E1:$ES1" --expected-pid "$E2:$ES2" --expected-pid "$E3:$ES3" --stop-session epsilon-old-appsrv --stop-session epsilon-old-bridge --stop-session epsilon-old-tui
 [[ "$epsilon_before" == "$(sha256sum "$INV/epsilon-bridge-config.json")" ]]

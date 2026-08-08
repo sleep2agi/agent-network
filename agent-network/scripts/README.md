@@ -19,6 +19,9 @@ app-server, bridge, and TUI tmux session that apply may stop. A real Codex
 two-component app-server/bridge restart is incomplete. Apply refuses process drift, unaccounted
 alias/app-server processes, duplicate node IDs or goal stores, non-private
 config modes, symlinks, implicit models, and paths outside the selected root.
+The operator must provide `--expected-model`; plan shows the existing and target
+model, and apply atomically pins the target instead of inheriting a stale bridge
+snapshot.
 If plan reports inventory permission repairs, review them and run the config
 tool's explicit `--mode prepare-permissions` first. Single-node apply refuses
 to repair other nodes' files implicitly.
