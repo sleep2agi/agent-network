@@ -71,7 +71,7 @@ run source-contract bash -ceu '
   grep -Fq "const GOAL_TICK_MS = Math.max(10_000" "$node_cli"
   grep -Fq "setInterval(() => runGoalSchedulerTick()" "$node_cli"
   grep -Fq "const POLL_DEADLINE_MS = 15_000;" "$anet_cli"
-  grep -Fq 'const slashCmd = `/aloop ${everyRaw} ${taskText}`;' "$anet_cli"
+  grep -Fq "const slashCmd = \`/aloop \${everyRaw} \${taskText}\`;" "$anet_cli"
   grep -Fq "wake-log <node> <goal-id>" "$anet_cli"
   grep -Fq "MIN_INTERVAL_MS = 60_000" "$parser"
 '
