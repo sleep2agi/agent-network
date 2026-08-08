@@ -78,3 +78,44 @@ Production-shaped read-only pilot inspection against `P站副责人`:
 - the normalizer now requires `--expected-model gpt-5.6-sol`, reports `modelFrom/modelTo`, and atomically pins that model instead of preserving the stale bridge snapshot
 
 The candidate is not a deployment authorization. A real-node apply still requires an owner-selected interruptible node/window, exact process/session coordinates for all three components, external socket single-owner verification, and `/goal`, `/loop` notice, `/aloop` create/cancel UAT.
+
+## Production pilot — `P站副责人`
+
+The owner authorized continued rollout on 2026-08-08. The pilot was limited to
+one interruptible, unattached node. Hub, Dashboard, and every other node were
+left running.
+
+Artifact and preflight:
+
+- runtime source was the exact `origin/main` commit `0d2e08a1af8daa1cf0cb607f594debb1f0eb1bce`; the normalizer branch changes no `agent-node` runtime source relative to that commit
+- staged bridge bundle: `/home/vansin/.local/share/agent-network/candidates/0d2e08a1/agent-node-cli.js`
+- staged bridge SHA-256: `f6f05ecc93854e9025f0616041ee75e407dc6135ae73e0212345a0c298b1be6e`
+- fresh preflight accounted for all five old matching processes and all three exact tmux owners; the selected TUI had zero attached clients
+- plan enumerated the complete 20-config inventory and 22 explicit permission repairs
+- `prepare-permissions` changed only modes: the aggregate hash of all 20 config files was identical before and after (`de444f4aee2e9dfc737234ed86595c33e667e47818cc8c4c13b54bc8280f0dec`)
+
+Apply result:
+
+- `RESULT: NORMALIZED alias=P站副责人 appsrv_version=0.147.0`
+- rollback coordinates: `/tmp/anet-normalize-n_b4b7a48d.cCobql`
+- config model changed from stale `gpt-5.5` to `gpt-5.6-sol`; `flags.model` is absent
+- canonical goal store is `/home/vansin/rfc030-work/.demo/goals/n_b4b7a48d/goals.json`
+- persisted thread owner verifies as `anet:n_b4b7a48d:P站副责人`, with cwd `/home/vansin/p-station`
+- old process IDs are absent; the surviving topology is exactly app-server wrapper/native child, bridge, and TUI wrapper/native child
+- the native TUI child, not the pane root, owns the ESTAB socket to port 24717
+- final config/goal files are mode 0600; inventory, goals directories, and workdir are mode 0700
+
+Production UAT:
+
+- baseline network task produced one exact reply; the pre-existing agent-to-agent parent lifecycle leak was not hidden, and its test row was explicitly cancelled after reply delivery
+- authenticated Dashboard `/goal` task `2ff95a4d-2d49-4af3-9c7e-561179f1090e` entered the shared thread, returned a substantive reply, and left the goal store absent
+- authenticated Dashboard `/loop 5m` task `d6e93a12-ff0b-4c76-bd82-abe3f8cb3ac0` entered the shared thread, prepended the `/aloop` migration notice, and left the goal store absent
+- authenticated Dashboard `/aloop 1h` task `7fc48d89-3945-41c5-aae6-1778fd43cec6` created goal `0b8f0f9c-ad95-4562-a95f-f1fcd7bf653f`; the goal was then atomically cancelled and the bridge restarted to reload the terminal state
+- a node-token request that forged `meta.auth_origin=user` was rewritten by Hub to `auth_origin=node`, used legacy scheduler compatibility, and prepended the migration notice; its test goal was cancelled and the bridge reloaded with zero active goals
+- after that bridge restart, a fresh human turn ran `sleep 20`; authenticated Dashboard task `173ee17e-1322-4cc4-874a-bc441c13e956` was recovered as the exact active human turn, logged `(steered)`, and returned `HUMAN-PILOT-DONE PILOT-STEER-1786185930-ACK` to Dashboard
+- final Hub status: idle, `agent-node:codex-app-server`, model `gpt-5.6-sol`, project `/home/vansin/p-station`, pending inbox 0
+- final goal state: active 0, cancelled 2
+
+Pilot verdict: PASS. Fleet rollout remains one node at a time; the known
+agent-to-agent single-egress/lifecycle follow-up is recorded separately and is
+not represented as fixed by this normalizer.
