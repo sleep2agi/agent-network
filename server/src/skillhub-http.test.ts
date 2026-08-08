@@ -55,6 +55,13 @@ describe("SkillHub real Hub + SQLite", () => {
     expect(retry.idempotent).toBe(true); expect(retry.skill_id).toBe(skillId);
     const conflict = await tool(nodeToken, "submit_skill", { ...input, content: "changed" });
     expect(conflict.error).toBe("skill_version_conflict");
+    const raceBase = { ...input, slug: "concurrent-version", version: "2.0.0" };
+    const raced = await Promise.all([
+      tool(nodeToken, "submit_skill", { ...raceBase, content: "winner-a" }),
+      tool(nodeToken, "submit_skill", { ...raceBase, content: "winner-b" }),
+    ]);
+    expect(raced.filter(x => x.ok).length).toBe(1);
+    expect(raced.filter(x => x.error === "skill_version_conflict").length).toBe(1);
   });
 
   test("pending is reviewer-only; owner publishes; published becomes visible", async () => {

@@ -188,12 +188,29 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         return skillHubReply({ ok: false, error: "skill_version_conflict", hint: "publish changed content under a new version" });
       }
       const skillId = `skill_${uuidv4()}`;
-      db.run(
-        `INSERT INTO skillhub_skills
-         (skill_id, network_id, slug, name, description, version, content, content_hash, status, source_type, source_alias, created_by_user)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', ?9, ?10, ?11)`,
-        [skillId, effectiveNetId, slug, name.trim(), description?.trim() || "", version, content, contentHash, sourceType, callerAlias, enforceUserId || null],
-      );
+      try {
+        db.run(
+          `INSERT INTO skillhub_skills
+           (skill_id, network_id, slug, name, description, version, content, content_hash, status, source_type, source_alias, created_by_user)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', ?9, ?10, ?11)`,
+          [skillId, effectiveNetId, slug, name.trim(), description?.trim() || "", version, content, contentHash, sourceType, callerAlias, enforceUserId || null],
+        );
+      } catch (error: any) {
+        // Two submitters may pass the preflight SELECT together. Resolve the
+        // UNIQUE race into the same deterministic idempotent/conflict contract
+        // instead of leaking a storage exception as HTTP/MCP 500.
+        if (!/unique|duplicate key/i.test(error?.message || "")) throw error;
+        const winner = db.get<any>(
+          `SELECT skill_id, content_hash, status FROM skillhub_skills
+           WHERE network_id = ?1 AND slug = ?2 AND version = ?3`,
+          effectiveNetId, slug, version,
+        );
+        if (!winner) throw error;
+        if (winner.content_hash === contentHash) {
+          return skillHubReply({ ok: true, idempotent: true, skill_id: winner.skill_id, status: winner.status });
+        }
+        return skillHubReply({ ok: false, error: "skill_version_conflict", hint: "publish changed content under a new version" });
+      }
       db.run(
         `INSERT INTO audit_log (user_id, username, action, target_type, target_id, detail, network_id)
          VALUES (?1, ?2, 'skill_submit', 'skill', ?3, ?4, ?5)`,
