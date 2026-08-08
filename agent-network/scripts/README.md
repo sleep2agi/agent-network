@@ -8,6 +8,7 @@ The startup recipe for an opencode agent-node under pm2 supervision. Source of t
 - **`pm2-opencode.config.cjs`** — the pm2 ecosystem config. Points at the installed copy of the script, not this repo.
 - **`normalize-codex-copresence-node.sh`** — single-node, fail-closed fleet normalizer. It is plan-only by default and requires exact PID birth times plus exact tmux sessions for apply.
 - **`codex-copresence-fleet-config.mjs`** — validates and atomically pins a per-node `goalsPath`; it never migrates a missing legacy shared store.
+- **`codex-copresence-thread-owner.mjs`** — resumes and reads the exact configured thread, checks its real cwd, and persists an `anet:<node_id>:<alias>` owner name before the TUI may attach.
 
 ## Codex co-presence fleet normalization
 

@@ -9,6 +9,7 @@ ROOT=/tmp/test598; INV=$ROOT/inventory; GOALS=$ROOT/goals; WORK=$ROOT/work
 safe_rm_rf "$ROOT"; mkdir -p "$INV" "$WORK"; chmod 0700 "$INV" "$WORK"
 SCRIPT=/workspace/scripts/normalize-codex-copresence-node.sh
 CFGTOOL=/workspace/scripts/codex-copresence-fleet-config.mjs
+THREAD_TOOL=/workspace/scripts/codex-copresence-thread-owner.mjs
 echo "# test598 — Codex co-presence single-node normalizer"
 echo "source_commit=${TEST598_SOURCE_COMMIT:-unknown}"
 
@@ -31,6 +32,7 @@ write_cfg "$INV/beta-bridge-config.json" n_beta 25982
 
 echo "L0 syntax and plan is non-mutating"
 bash -n "$SCRIPT"; bun build "$CFGTOOL" --target node --outfile /tmp/test598-config-tool.js >/dev/null
+bun build "$THREAD_TOOL" --target node --outfile /tmp/test598-thread-tool.js >/dev/null
 before=$(sha256sum "$INV/alpha-bridge-config.json")
 bun "$CFGTOOL" --mode plan --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" | grep -Fq 'absent-no-migration'
 [[ "$before" == "$(sha256sum "$INV/alpha-bridge-config.json")" && ! -e "$GOALS" ]]
@@ -55,6 +57,10 @@ cp "$CFGTOOL" /tmp/test598-mutant.mjs
 sed -i 's/entry.path !== configPath && entry.effective === desired/false/' /tmp/test598-mutant.mjs
 expect_red collision-mutation-must-be-caught must_reject bun /tmp/test598-mutant.mjs --mode plan --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS"
 mv /tmp/test598-beta "$INV/beta-bridge-config.json"; chmod 0600 "$INV/beta-bridge-config.json"
+cp "$INV/beta-bridge-config.json" /tmp/test598-beta
+bun -e 'const f=process.argv[1],c=JSON.parse(require("fs").readFileSync(f));c.codexThreadId="thread_test_n_alpha";require("fs").writeFileSync(f,JSON.stringify(c))' "$INV/beta-bridge-config.json"; chmod 0600 "$INV/beta-bridge-config.json"
+expect_red duplicate-thread bun "$CFGTOOL" --mode plan --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS"
+mv /tmp/test598-beta "$INV/beta-bridge-config.json"; chmod 0600 "$INV/beta-bridge-config.json"
 bun "$CFGTOOL" --mode apply --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS"
 test "$(stat -c %a "$GOALS")" = 700; test "$(stat -c %a "$GOALS/n_alpha")" = 700
 test ! -e "$GOALS/n_alpha/goals.json"
@@ -78,24 +84,28 @@ bash -c 'sleep 30 & wait' -- --alias alpha & ROGUE=$!
 expect_red unaccounted-process env PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode plan --alias alpha \
   --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" \
   --workdir "$WORK" --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 \
-  --new-appsrv-session alpha-appsrv --new-bridge-session alpha-bridge --new-tui-session alpha-tui \
+  --new-appsrv-session alpha-appsrv --new-bridge-session alpha-bridge --new-tui-session alpha-tui --expected-tui-command fake-codex \
   --expected-pid "$P1:$S1" --expected-pid "$P2:$S2" --expected-pid "$P3:$S3"
 kill "$ROGUE"; wait "$ROGUE" 2>/dev/null || true
 PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode apply --alias alpha \
   --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" \
   --workdir "$WORK" --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 \
-  --new-appsrv-session alpha-appsrv --new-bridge-session alpha-bridge --new-tui-session alpha-tui \
+  --new-appsrv-session alpha-appsrv --new-bridge-session alpha-bridge --new-tui-session alpha-tui --expected-tui-command fake-codex \
   --expected-pid "$P1:$S1" --expected-pid "$P2:$S2" --expected-pid "$P3:$S3" --stop-session alpha-appsrv --stop-session alpha-old-bridge --stop-session alpha-tui
 tmux -L test598 list-sessions -F '#{session_name}' | grep -Fxq alpha-appsrv
 tmux -L test598 list-sessions -F '#{session_name}' | grep -Fxq alpha-bridge
 tmux -L test598 list-sessions -F '#{session_name}' | grep -Fxq alpha-tui
 ss -ltnH 'sport = :25981' | grep -q .
+bun "$THREAD_TOOL" --ws ws://127.0.0.1:25981 --thread-id thread_test_n_alpha --node-id n_alpha --alias alpha --cwd "$WORK" --mode verify
+mkdir "$ROOT/wrong-work"; chmod 0700 "$ROOT/wrong-work"
+expect_red thread-owner-mismatch bun "$THREAD_TOOL" --ws ws://127.0.0.1:25981 --thread-id thread_test_n_alpha --node-id n_other --alias alpha --cwd "$WORK" --mode claim
+expect_red thread-cwd-mismatch bun "$THREAD_TOOL" --ws ws://127.0.0.1:25981 --thread-id thread_test_n_alpha --node-id n_alpha --alias alpha --cwd "$ROOT/wrong-work" --mode verify
 
 echo "L3 PID drift, unaccounted process, and rollback"
 expect_red pid-drift env PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode plan --alias alpha \
   --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" --workdir "$WORK" \
   --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 \
-  --new-appsrv-session alpha-appsrv --new-bridge-session alpha-bridge --new-tui-session alpha-tui --expected-pid "$$:1"
+  --new-appsrv-session alpha-appsrv --new-bridge-session alpha-bridge --new-tui-session alpha-tui --expected-tui-command fake-codex --expected-pid "$$:1"
 
 write_cfg "$INV/gamma-bridge-config.json" n_gamma 25983
 tmux -L test598 new-session -d -s gamma-old-appsrv 'sleep 1000'
@@ -109,7 +119,7 @@ gamma_before=$(sha256sum "$INV/gamma-bridge-config.json")
 expect_red version-failure-rolls-back env PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode apply --alias gamma \
   --config "$INV/gamma-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" \
   --workdir "$WORK" --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 0.0.0 \
-  --new-appsrv-session gamma-appsrv --new-bridge-session gamma-bridge --new-tui-session gamma-tui \
+  --new-appsrv-session gamma-appsrv --new-bridge-session gamma-bridge --new-tui-session gamma-tui --expected-tui-command fake-codex \
   --expected-pid "$G1:$GS1" --expected-pid "$G2:$GS2" --expected-pid "$G3:$GS3" --stop-session gamma-old-appsrv --stop-session gamma-old-bridge --stop-session gamma-old-tui
 [[ "$gamma_before" == "$(sha256sum "$INV/gamma-bridge-config.json")" ]]
 test ! -d "$GOALS/n_gamma"
@@ -130,11 +140,30 @@ delta_before=$(sha256sum "$INV/delta-bridge-config.json")
 expect_red tui-exit-rolls-back-all-components env PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode apply --alias delta \
   --config "$INV/delta-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" \
   --workdir "$WORK" --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 \
-  --new-appsrv-session delta-appsrv --new-bridge-session delta-bridge --new-tui-session delta-tui \
+  --new-appsrv-session delta-appsrv --new-bridge-session delta-bridge --new-tui-session delta-tui --expected-tui-command fake-codex \
   --expected-pid "$D1:$DS1" --expected-pid "$D2:$DS2" --expected-pid "$D3:$DS3" --stop-session delta-old-appsrv --stop-session delta-old-bridge --stop-session delta-old-tui
 [[ "$delta_before" == "$(sha256sum "$INV/delta-bridge-config.json")" ]]
 test ! -d "$GOALS/n_delta"
 for dead in delta-appsrv delta-bridge delta-tui; do ! tmux -L test598 list-sessions -F '#{session_name}' | grep -Fxq "$dead"; done
+
+write_cfg "$INV/epsilon-bridge-config.json" n_epsilon 25985
+bun -e 'const f=process.argv[1],c=JSON.parse(require("fs").readFileSync(f));c.codexThreadId="thread_no_socket";require("fs").writeFileSync(f,JSON.stringify(c)+"\n")' "$INV/epsilon-bridge-config.json"; chmod 0600 "$INV/epsilon-bridge-config.json"
+tmux -L test598 new-session -d -s epsilon-old-appsrv 'sleep 1000'
+tmux -L test598 new-session -d -s epsilon-old-bridge 'sleep 1000'
+tmux -L test598 new-session -d -s epsilon-old-tui 'sleep 1000'
+E1=$(tmux -L test598 display-message -p -t epsilon-old-appsrv '#{pane_pid}')
+E2=$(tmux -L test598 display-message -p -t epsilon-old-bridge '#{pane_pid}')
+E3=$(tmux -L test598 display-message -p -t epsilon-old-tui '#{pane_pid}')
+ES1=$(awk '{print $22}' "/proc/$E1/stat"); ES2=$(awk '{print $22}' "/proc/$E2/stat"); ES3=$(awk '{print $22}' "/proc/$E3/stat")
+epsilon_before=$(sha256sum "$INV/epsilon-bridge-config.json")
+expect_red tui-without-socket-rolls-back-all-components env PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode apply --alias epsilon \
+  --config "$INV/epsilon-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" \
+  --workdir "$WORK" --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 \
+  --new-appsrv-session epsilon-appsrv --new-bridge-session epsilon-bridge --new-tui-session epsilon-tui --expected-tui-command fake-codex \
+  --expected-pid "$E1:$ES1" --expected-pid "$E2:$ES2" --expected-pid "$E3:$ES3" --stop-session epsilon-old-appsrv --stop-session epsilon-old-bridge --stop-session epsilon-old-tui
+[[ "$epsilon_before" == "$(sha256sum "$INV/epsilon-bridge-config.json")" ]]
+test ! -d "$GOALS/n_epsilon"
+for dead in epsilon-appsrv epsilon-bridge epsilon-tui; do ! tmux -L test598 list-sessions -F '#{session_name}' | grep -Fxq "$dead"; done
 
 tmux -L test598 kill-server
 echo "L4 mutation anchors"
@@ -142,6 +171,9 @@ grep -Fq 'entry.path !== configPath && entry.effective === desired' "$CFGTOOL"
 grep -Fq 'unaccounted matching process' "$SCRIPT"
 grep -Fq 'pid $pid starttime drift' "$SCRIPT"
 grep -Fq 'runtime remains stopped fail-closed' "$SCRIPT"
+grep -Fq 'thread owner mismatch' "$THREAD_TOOL"
+grep -Fq 'thread cwd mismatch' "$THREAD_TOOL"
+grep -Fq 'TUI has no socket to the new app-server' "$SCRIPT"
 grep -Fq 'UAT_REQUIRED: socket single-owner + /goal + /loop notice + /aloop create/cancel' "$SCRIPT"
 ! grep -Fq 'ntok_TEST_ONLY' "$REPORT"
 echo "RESULT: PASS"

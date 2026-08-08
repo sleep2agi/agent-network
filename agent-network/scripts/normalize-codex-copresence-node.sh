@@ -6,13 +6,13 @@ usage() {
 Usage: normalize-codex-copresence-node.sh --mode plan|apply --alias NAME
   --config ABS --inventory-dir ABS --goals-root ABS --workdir ABS
   --dist-cli ABS --expected-dist-sha256 HEX --codex-bin ABS --expected-version VERSION
-  --new-appsrv-session NAME --new-bridge-session NAME --new-tui-session NAME
+  --new-appsrv-session NAME --new-bridge-session NAME --new-tui-session NAME --expected-tui-command NAME
   --expected-pid PID:STARTTIME (repeat) --stop-session NAME (repeat)
 EOF
 }
 
 MODE=plan ALIAS= CONFIG= INVENTORY_DIR= GOALS_ROOT= WORKDIR= DIST_CLI=
-CODEX_BIN= EXPECTED_VERSION= EXPECTED_DIST_SHA256= NEW_APPSRV_SESSION= NEW_BRIDGE_SESSION= NEW_TUI_SESSION= EXPECTED_PIDS=() STOP_SESSIONS=()
+CODEX_BIN= EXPECTED_VERSION= EXPECTED_DIST_SHA256= NEW_APPSRV_SESSION= NEW_BRIDGE_SESSION= NEW_TUI_SESSION= EXPECTED_TUI_COMMAND= EXPECTED_PIDS=() STOP_SESSIONS=()
 while (($#)); do
   case "$1" in
     --mode) MODE=${2:?}; shift 2;; --alias) ALIAS=${2:?}; shift 2;;
@@ -24,14 +24,15 @@ while (($#)); do
     --new-appsrv-session) NEW_APPSRV_SESSION=${2:?}; shift 2;;
     --new-bridge-session) NEW_BRIDGE_SESSION=${2:?}; shift 2;;
     --new-tui-session) NEW_TUI_SESSION=${2:?}; shift 2;;
+    --expected-tui-command) EXPECTED_TUI_COMMAND=${2:?}; shift 2;;
     --expected-pid) EXPECTED_PIDS+=("${2:?}"); shift 2;;
     --stop-session) STOP_SESSIONS+=("${2:?}"); shift 2;;
     -h|--help) usage; exit 0;; *) echo "REFUSE: unknown option $1" >&2; usage >&2; exit 2;;
   esac
 done
 [[ "$MODE" == plan || "$MODE" == apply ]] || { echo "REFUSE: mode must be plan or apply" >&2; exit 2; }
-[[ -n "$ALIAS" && -n "$CONFIG" && -n "$INVENTORY_DIR" && -n "$GOALS_ROOT" && -n "$WORKDIR" && -n "$DIST_CLI" && -n "$EXPECTED_DIST_SHA256" && -n "$CODEX_BIN" && -n "$EXPECTED_VERSION" && -n "$NEW_APPSRV_SESSION" && -n "$NEW_BRIDGE_SESSION" && -n "$NEW_TUI_SESSION" ]] || { echo "REFUSE: missing required option" >&2; exit 2; }
-for value in "$ALIAS" "$NEW_APPSRV_SESSION" "$NEW_BRIDGE_SESSION" "$NEW_TUI_SESSION"; do
+[[ -n "$ALIAS" && -n "$CONFIG" && -n "$INVENTORY_DIR" && -n "$GOALS_ROOT" && -n "$WORKDIR" && -n "$DIST_CLI" && -n "$EXPECTED_DIST_SHA256" && -n "$CODEX_BIN" && -n "$EXPECTED_VERSION" && -n "$NEW_APPSRV_SESSION" && -n "$NEW_BRIDGE_SESSION" && -n "$NEW_TUI_SESSION" && -n "$EXPECTED_TUI_COMMAND" ]] || { echo "REFUSE: missing required option" >&2; exit 2; }
+for value in "$ALIAS" "$NEW_APPSRV_SESSION" "$NEW_BRIDGE_SESSION" "$NEW_TUI_SESSION" "$EXPECTED_TUI_COMMAND"; do
   [[ "$value" != *$'\n'* && "$value" != *$'\t'* && "$value" != *' '* && "$value" != */* && "$value" != *'|'* && "$value" != *'*'* && "$value" != *'?'* && "$value" != *'['* && "$value" != *']'* ]] || { echo "REFUSE: unsafe alias/session name" >&2; exit 2; }
 done
 for path in "$CONFIG" "$INVENTORY_DIR" "$GOALS_ROOT" "$WORKDIR" "$DIST_CLI" "$CODEX_BIN"; do
@@ -48,6 +49,7 @@ WORK_UID=$(stat -c %u "$WORKDIR"); WORK_MODE=$(stat -c %a "$WORKDIR")
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CONFIG_TOOL="$SCRIPT_DIR/codex-copresence-fleet-config.mjs"
+THREAD_TOOL="$SCRIPT_DIR/codex-copresence-thread-owner.mjs"
 PLAN=$(bun "$CONFIG_TOOL" --mode plan --config "$CONFIG" --inventory-dir "$INVENTORY_DIR" --goals-root "$GOALS_ROOT")
 NODE_ID=$(bun -e 'const x=JSON.parse(process.argv[1]);process.stdout.write(x.node_id)' "$PLAN")
 DESIRED_GOALS=$(bun -e 'const x=JSON.parse(process.argv[1]);process.stdout.write(x.goalsPath)' "$PLAN")
@@ -166,6 +168,7 @@ PORT=${WS##*:}; for _ in $(seq 1 80); do ss -ltnH "sport = :$PORT" | grep -q . &
 ss -ltnH "sport = :$PORT" | grep -q . || { echo "app-server did not listen" >&2; false; }
 APPSRV_PID=$(ss -ltnpH "sport = :$PORT" | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -1); [[ -n "$APPSRV_PID" ]] || { echo "cannot resolve app-server pid" >&2; false; }
 ACTUAL_VERSION=$("/proc/$APPSRV_PID/exe" --version | awk '{print $NF}'); [[ "$ACTUAL_VERSION" == "$EXPECTED_VERSION" ]] || { echo "version mismatch: $ACTUAL_VERSION" >&2; false; }
+bun "$THREAD_TOOL" --ws "$WS" --thread-id "$THREAD_ID" --node-id "$NODE_ID" --alias "$ALIAS" --cwd "$WORKDIR" --mode claim
 tmux new-session -d -s "$NEW_BRIDGE_SESSION" -c "$WORKDIR" -e "ANET_NODE_CONFIG=$CONFIG" -e "ANET_DIST_CLI=$DIST_CLI" -e "ANET_ALIAS=$ALIAS" "$RUNTIME_DIR/bridge.sh"
 CREATED_BRIDGE=1
 tmux new-session -d -s "$NEW_TUI_SESSION" -c "$WORKDIR" -e "ANET_CODEX_BIN=$CODEX_BIN" -e "ANET_WS=$WS" -e "ANET_THREAD_ID=$THREAD_ID" -e "ANET_MODEL=$MODEL" -e "ANET_WORKDIR=$WORKDIR" -e "ANET_SANDBOX_MODE=$SANDBOX_MODE" -e "ANET_APPROVAL_POLICY=$APPROVAL_POLICY" "$RUNTIME_DIR/tui.sh"
@@ -175,6 +178,10 @@ echo "ACTIVE_SESSIONS:"; tmux list-sessions -F '#{session_name}'
 tmux list-sessions -F '#{session_name}' | grep -Fxq "$NEW_APPSRV_SESSION"
 tmux list-sessions -F '#{session_name}' | grep -Fxq "$NEW_BRIDGE_SESSION"
 tmux list-sessions -F '#{session_name}' | grep -Fxq "$NEW_TUI_SESSION"
+TUI_META=$(tmux list-panes -t "$NEW_TUI_SESSION" -F '#{pane_pid}|#{pane_dead}|#{pane_current_command}')
+IFS='|' read -r TUI_PID TUI_DEAD TUI_COMMAND <<<"$TUI_META"
+[[ "$TUI_DEAD" == 0 && "$TUI_COMMAND" == "$EXPECTED_TUI_COMMAND" ]] || { echo "TUI failed liveness gate: dead=$TUI_DEAD command=$TUI_COMMAND" >&2; false; }
+ss -tnpH "dport = :$PORT" | grep -Fq "pid=$TUI_PID," || { echo "TUI has no socket to the new app-server" >&2; false; }
 trap - ERR INT TERM
 echo "RESULT: NORMALIZED alias=$ALIAS appsrv_version=$ACTUAL_VERSION"
 echo "ROLLBACK_COORDINATES=$BACKUP_DIR"

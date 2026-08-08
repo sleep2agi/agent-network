@@ -78,13 +78,17 @@ for (const name of readdirSync(inventoryDir)) {
   assertOwnedRegular(path, 0o600, `inventory config ${name}`, false, args.mode === "apply");
   const item = safeJson(path);
   const effective = item.goalsPath || item.flags?.goalsPath || join(dirname(path), "goals.json");
-  inventory.push({ path, nodeId: String(item.node_id || ""), effective: resolve(effective) });
+  inventory.push({ path, nodeId: String(item.node_id || ""), threadId: String(item.codexThreadId || ""), effective: resolve(effective) });
 }
 if (!inventory.some((entry) => entry.path === configPath)) fail("selected config is not in inventory directory");
 const collisions = inventory.filter((entry) => entry.path !== configPath && entry.effective === desired);
 if (collisions.length) fail(`desired goalsPath collides with ${collisions.map((x) => basename(x.path)).join(", ")}`);
 const duplicateNodeIds = inventory.filter((entry) => entry.path !== configPath && entry.nodeId === nodeId);
 if (duplicateNodeIds.length) fail(`node_id is duplicated by ${duplicateNodeIds.map((x) => basename(x.path)).join(", ")}`);
+const threadId = String(cfg.codexThreadId || "");
+if (!/^[A-Za-z0-9_-]{8,128}$/.test(threadId)) fail("config codexThreadId is missing or unsafe");
+const duplicateThreads = inventory.filter((entry) => entry.path !== configPath && entry.threadId === threadId);
+if (duplicateThreads.length) fail(`codexThreadId is duplicated by ${duplicateThreads.map((x) => basename(x.path)).join(", ")}`);
 if (existsSync(desired)) assertOwnedRegular(desired, 0o600, "goals file", false, args.mode === "apply");
 if (cfg.goalsPath && resolve(cfg.goalsPath) !== desired) fail(`existing goalsPath differs from canonical path: ${cfg.goalsPath}`);
 if (cfg.flags?.goalsPath && resolve(cfg.flags.goalsPath) !== desired) fail(`existing flags.goalsPath differs from canonical path: ${cfg.flags.goalsPath}`);
