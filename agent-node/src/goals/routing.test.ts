@@ -1,77 +1,64 @@
 import { describe, expect, test } from "bun:test";
 import {
-  appendDashboardCodexGoalNotice,
-  DASHBOARD_CODEX_GOAL_INTERVAL_NOTICE,
-  prepareDashboardCodexGoalReply,
+  appendLegacyScheduledGoalNotice,
+  LEGACY_ANET_SCHEDULE_NOTICE,
   shouldCreateScheduledGoal,
 } from "./routing";
 
-describe("shouldCreateScheduledGoal", () => {
-  test("passes authenticated Dashboard /goal through to the shared Codex TUI", () => {
-    expect(shouldCreateScheduledGoal(
-      "/goal 更新一下 https://anet.sh 把乱七八糟的文档都删了",
-      "codex-app-server",
-      true,
-    )).toBe(false);
+const RUNTIMES = ["codex-app-server", "codex", "claude", "grok", "opencode"] as const;
+
+describe("shouldCreateScheduledGoal — Dashboard native slash pass-through", () => {
+  test("authenticated Dashboard /goal and /loop pass through for every agent-node runtime", () => {
+    for (const runtime of RUNTIMES) {
+      expect(shouldCreateScheduledGoal("/goal 5m update docs", runtime, true)).toBe(false);
+      expect(shouldCreateScheduledGoal("/loop 5m update docs", runtime, true)).toBe(false);
+    }
   });
 
-  test("keeps /loop on the recurring scheduler for Dashboard Codex TUI tasks", () => {
-    expect(shouldCreateScheduledGoal("/loop 每小时更新文档", "codex-app-server", true)).toBe(true);
+  test("authenticated Dashboard /agoal and /aloop always select the ANet scheduler", () => {
+    for (const runtime of RUNTIMES) {
+      expect(shouldCreateScheduledGoal("/agoal 5m update docs", runtime, true)).toBe(true);
+      expect(shouldCreateScheduledGoal("/aloop 5m update docs", runtime, true)).toBe(true);
+    }
   });
 
-  test("preserves the legacy /goal scheduler alias outside authenticated Dashboard Codex TUI", () => {
-    expect(shouldCreateScheduledGoal("/goal 1h update docs", "codex-app-server", false)).toBe(true);
-    expect(shouldCreateScheduledGoal("/goal 1h update docs", "codex", true)).toBe(true);
-    expect(shouldCreateScheduledGoal("/goal 1h update docs", "claude", true)).toBe(true);
-    expect(shouldCreateScheduledGoal("/goal 1h update docs", "grok", true)).toBe(true);
-    expect(shouldCreateScheduledGoal("/goal 1h update docs", "opencode", true)).toBe(true);
+  test("non-Dashboard traffic retains /goal and /loop during the compatibility window", () => {
+    for (const runtime of RUNTIMES) {
+      expect(shouldCreateScheduledGoal("/goal 1h update docs", runtime, false)).toBe(true);
+      expect(shouldCreateScheduledGoal("/loop 1h update docs", runtime, false)).toBe(true);
+      expect(shouldCreateScheduledGoal("/agoal 1h update docs", runtime, false)).toBe(true);
+      expect(shouldCreateScheduledGoal("/aloop 1h update docs", runtime, false)).toBe(true);
+    }
   });
 
-  test("does not treat near matches or ordinary chat as scheduler commands", () => {
-    expect(shouldCreateScheduledGoal("/goalkeeper status", "codex-app-server", true)).toBe(false);
-    expect(shouldCreateScheduledGoal("please /loop later", "codex-app-server", true)).toBe(false);
-    expect(shouldCreateScheduledGoal("更新一下文档", "codex-app-server", true)).toBe(false);
+  test("near matches and slash text away from the start never select the scheduler", () => {
+    for (const runtime of RUNTIMES) {
+      expect(shouldCreateScheduledGoal("/goalkeeper status", runtime, true)).toBe(false);
+      expect(shouldCreateScheduledGoal("/alooper status", runtime, false)).toBe(false);
+      expect(shouldCreateScheduledGoal("please /aloop later", runtime, false)).toBe(false);
+      expect(shouldCreateScheduledGoal("更新一下文档", runtime, true)).toBe(false);
+    }
+  });
+});
+
+describe("appendLegacyScheduledGoalNotice", () => {
+  test("non-Dashboard /goal and /loop replies carry a deterministic migration notice", () => {
+    expect(appendLegacyScheduledGoalNotice("created", "/goal 5m work", false))
+      .toBe(`${LEGACY_ANET_SCHEDULE_NOTICE}\n\ncreated`);
+    expect(appendLegacyScheduledGoalNotice("failed", "/loop 5m work", false))
+      .toBe(`${LEGACY_ANET_SCHEDULE_NOTICE}\n\nfailed`);
   });
 
-  test("warns when Dashboard /goal text contains a scheduler interval", () => {
-    const reply = appendDashboardCodexGoalNotice(
-      "目标已创建",
-      "/goal 5m 检查日志",
-      "codex-app-server",
-      true,
-      false,
-    );
-    expect(reply).toBe(`${DASHBOARD_CODEX_GOAL_INTERVAL_NOTICE}\n\n目标已创建`);
-    expect(appendDashboardCodexGoalNotice(
-      "x".repeat(2_500), "/goal 5m 检查日志", "codex-app-server", true, false,
-    ).slice(0, 2_000)).toContain(DASHBOARD_CODEX_GOAL_INTERVAL_NOTICE);
+  test("new namespaced commands, Dashboard pass-through, and near matches are not warned", () => {
+    expect(appendLegacyScheduledGoalNotice("created", "/aloop 5m work", false)).toBe("created");
+    expect(appendLegacyScheduledGoalNotice("created", "/agoal 5m work", false)).toBe("created");
+    expect(appendLegacyScheduledGoalNotice("native", "/loop 5m work", true)).toBe("native");
+    expect(appendLegacyScheduledGoalNotice("native", "/goal 5m work", true)).toBe("native");
+    expect(appendLegacyScheduledGoalNotice("plain", "/looper 5m work", false)).toBe("plain");
   });
 
-  test("does not add a misleading notice to ordinary goals, failures, or legacy paths", () => {
-    expect(appendDashboardCodexGoalNotice(
-      "目标已创建", "/goal 更新文档", "codex-app-server", true, false,
-    )).toBe("目标已创建");
-    expect(appendDashboardCodexGoalNotice(
-      "创建失败", "/goal 5m 检查日志", "codex-app-server", true, true,
-    )).toBe("创建失败");
-    expect(appendDashboardCodexGoalNotice(
-      "legacy", "/goal 5m 检查日志", "codex-app-server", false, false,
-    )).toBe("legacy");
-    expect(appendDashboardCodexGoalNotice(
-      "loop", "/loop 5m 检查日志", "codex-app-server", true, false,
-    )).toBe("loop");
-  });
-
-  test("delivers the interval notice even when the model reply alone is low-value", () => {
-    const prepared = prepareDashboardCodexGoalReply(
-      "收到",
-      "/goal 5m 检查日志",
-      "codex-app-server",
-      true,
-      false,
-      (text) => text === "收到",
-    );
-    expect(prepared.shouldDeliver).toBe(true);
-    expect(prepared.text).toContain(DASHBOARD_CODEX_GOAL_INTERVAL_NOTICE);
+  test("the migration notice is first so the outer reply cap cannot truncate it", () => {
+    const reply = appendLegacyScheduledGoalNotice("x".repeat(2_500), "/goal 5m work", false);
+    expect(reply.slice(0, 2_000)).toContain(LEGACY_ANET_SCHEDULE_NOTICE);
   });
 });

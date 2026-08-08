@@ -69,6 +69,24 @@ describe("parseGoalCommand — English intervals", () => {
       expect(r.goal.text).toBe("report progress");
     }
   });
+
+  test("`/aloop` strips the namespaced canonical prefix", () => {
+    const r = parseGoalCommand("/aloop 5m report progress");
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.goal.interval_ms).toBe(5 * 60_000);
+      expect(r.goal.text).toBe("report progress");
+    }
+  });
+
+  test("`/agoal` strips the namespaced compatibility prefix", () => {
+    const r = parseGoalCommand("/agoal hourly report progress");
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.goal.interval_ms).toBe(60 * 60_000);
+      expect(r.goal.text).toBe("report progress");
+    }
+  });
 });
 
 describe("parseGoalCommand — Chinese intervals", () => {
