@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
+import { createHash } from "node:crypto";
 import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, generateNetworkToken } from "./db.js";
 import { pushEvent, pushNetworkObserverEvent } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
@@ -149,6 +150,141 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     }
     return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error, message }) }] };
   };
+
+  const skillHubReply = (value: Record<string, unknown>) => ({
+    content: [{ type: "text" as const, text: JSON.stringify(value) }],
+  });
+
+  // SkillHub is a network registry, not a public filesystem. Content is an
+  // immutable SKILL.md snapshot; identity comes only from the authenticated
+  // MCP principal (never from request fields).
+  server.tool(
+    "submit_skill",
+    "Submit an immutable SKILL.md version to the caller's network SkillHub. Node identity is token-bound. New submissions require review.",
+    {
+      slug: z.string().min(2).max(80).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+      name: z.string().min(1).max(120),
+      description: z.string().max(1000).optional(),
+      version: z.string().min(1).max(40).regex(/^[0-9A-Za-z]+(?:[._-][0-9A-Za-z]+)*$/),
+      content: z.string().min(1).max(128 * 1024).refine(value => !value.includes("\0"), "content must not contain NUL bytes"),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ slug, name, description, version, content, network_id: clientNetId }) => {
+      const effectiveNetId = getNetworkId(clientNetId);
+      if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, "write");
+      if (!effectiveNetId) return writeDeniedReply(effectiveNetId, "write");
+      const sourceType = callerTokenIsNetwork ? "node" : "user";
+      if (sourceType === "node" && !callerAlias) return skillHubReply({ ok: false, error: "node_identity_unbound" });
+      const contentHash = createHash("sha256").update(content, "utf8").digest("hex");
+      const existing = db.get<any>(
+        `SELECT skill_id, content_hash, status FROM skillhub_skills
+         WHERE network_id = ?1 AND slug = ?2 AND version = ?3`,
+        effectiveNetId, slug, version,
+      );
+      if (existing) {
+        if (existing.content_hash === contentHash) {
+          return skillHubReply({ ok: true, idempotent: true, skill_id: existing.skill_id, status: existing.status });
+        }
+        return skillHubReply({ ok: false, error: "skill_version_conflict", hint: "publish changed content under a new version" });
+      }
+      const skillId = `skill_${uuidv4()}`;
+      db.run(
+        `INSERT INTO skillhub_skills
+         (skill_id, network_id, slug, name, description, version, content, content_hash, status, source_type, source_alias, created_by_user)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', ?9, ?10, ?11)`,
+        [skillId, effectiveNetId, slug, name.trim(), description?.trim() || "", version, content, contentHash, sourceType, callerAlias, enforceUserId || null],
+      );
+      db.run(
+        `INSERT INTO audit_log (user_id, username, action, target_type, target_id, detail, network_id)
+         VALUES (?1, ?2, 'skill_submit', 'skill', ?3, ?4, ?5)`,
+        [enforceUserId || null, callerAlias || null, skillId, JSON.stringify({ slug, version, source_type: sourceType }), effectiveNetId],
+      );
+      return skillHubReply({ ok: true, skill_id: skillId, status: "pending", source_type: sourceType, source_alias: callerAlias });
+    },
+  );
+
+  server.tool(
+    "list_skills",
+    "List published skills in a network. Owners/admins may include pending review items.",
+    {
+      network_id: z.string().max(200).optional(),
+      include_pending: z.boolean().optional(),
+      query: z.string().max(120).optional(),
+      limit: z.number().int().min(1).max(200).optional(),
+    },
+    async ({ network_id: clientNetId, include_pending, query, limit }) => {
+      const effectiveNetId = getNetworkId(clientNetId);
+      if (!effectiveNetId) return writeDeniedReply(effectiveNetId, "read");
+      const role = enforceUserId ? getUserNetworkRole(enforceUserId, effectiveNetId) : null;
+      if (enforceUserId && !role) return writeDeniedReply(effectiveNetId, "read");
+      // An ntok_ belongs to a node even when it was minted by the network
+      // owner. Never inherit the owner's review power through that token.
+      const reviewer = !callerTokenIsNetwork && (role === "owner" || role === "admin");
+      const showPending = !!include_pending && reviewer;
+      const params: unknown[] = [effectiveNetId];
+      let sql = `SELECT skill_id, slug, name, description, version, status, source_type, source_alias,
+                        created_at, updated_at, reviewed_at, review_note
+                   FROM skillhub_skills WHERE network_id = ?1`;
+      if (!showPending) sql += ` AND status = 'published'`;
+      if (query?.trim()) {
+        params.push(`%${query.trim()}%`);
+        sql += ` AND (slug LIKE ?${params.length} OR name LIKE ?${params.length} OR description LIKE ?${params.length})`;
+      }
+      sql += ` ORDER BY updated_at DESC LIMIT ${limit ?? 100}`;
+      return skillHubReply({ ok: true, reviewer, skills: db.all(sql, ...params) });
+    },
+  );
+
+  server.tool(
+    "get_skill",
+    "Read one SkillHub SKILL.md. Pending content is visible only to owners/admins.",
+    { skill_id: z.string().regex(/^skill_[A-Za-z0-9_-]+$/).max(200), network_id: z.string().max(200).optional() },
+    async ({ skill_id, network_id: clientNetId }) => {
+      const effectiveNetId = getNetworkId(clientNetId);
+      if (!effectiveNetId) return writeDeniedReply(effectiveNetId, "read");
+      const role = enforceUserId ? getUserNetworkRole(enforceUserId, effectiveNetId) : null;
+      if (enforceUserId && !role) return writeDeniedReply(effectiveNetId, "read");
+      const row = db.get<any>(`SELECT * FROM skillhub_skills WHERE skill_id = ?1 AND network_id = ?2`, skill_id, effectiveNetId);
+      if (!row) return skillHubReply({ ok: false, error: "skill_not_found" });
+      const reviewer = !callerTokenIsNetwork && (role === "owner" || role === "admin");
+      if (row.status !== "published" && !reviewer) {
+        return skillHubReply({ ok: false, error: "skill_not_found" });
+      }
+      return skillHubReply({ ok: true, skill: row });
+    },
+  );
+
+  server.tool(
+    "review_skill",
+    "Publish or reject a pending SkillHub submission. Network owner/admin only.",
+    {
+      skill_id: z.string().regex(/^skill_[A-Za-z0-9_-]+$/).max(200),
+      decision: z.enum(["published", "rejected"]),
+      note: z.string().max(1000).optional(),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ skill_id, decision, note, network_id: clientNetId }) => {
+      const effectiveNetId = getNetworkId(clientNetId);
+      if (!effectiveNetId) return writeDeniedReply(effectiveNetId, "write");
+      const role = enforceUserId ? getUserNetworkRole(enforceUserId, effectiveNetId) : null;
+      if (callerTokenIsNetwork || (role !== "owner" && role !== "admin")) return skillHubReply({ ok: false, error: "skill_review_admin_required" });
+      const row = db.get<any>(`SELECT status FROM skillhub_skills WHERE skill_id = ?1 AND network_id = ?2`, skill_id, effectiveNetId);
+      if (!row) return skillHubReply({ ok: false, error: "skill_not_found" });
+      if (row.status !== "pending") return skillHubReply({ ok: false, error: "skill_not_pending", status: row.status });
+      const updated = db.run(
+        `UPDATE skillhub_skills SET status = ?1, review_note = ?2, reviewed_by_user = ?3,
+         reviewed_at = datetime('now'), updated_at = datetime('now') WHERE skill_id = ?4 AND network_id = ?5 AND status = 'pending'`,
+        [decision, note?.trim() || null, enforceUserId || null, skill_id, effectiveNetId],
+      );
+      if (updated.changes !== 1) return skillHubReply({ ok: false, error: "skill_not_pending" });
+      db.run(
+        `INSERT INTO audit_log (user_id, username, action, target_type, target_id, detail, network_id)
+         VALUES (?1, ?2, 'skill_review', 'skill', ?3, ?4, ?5)`,
+        [enforceUserId || null, callerAlias || null, skill_id, JSON.stringify({ decision }), effectiveNetId],
+      );
+      return skillHubReply({ ok: true, skill_id, status: decision });
+    },
+  );
 
   const addScope = (sql: string, params: any[], networkId?: string | null, column = "network_id"): string => {
     if (!networkId) return sql;
