@@ -1,8 +1,8 @@
 # test599 — Dashboard SkillHub
 
 Date: 2026-08-08
-Candidate source: Hub `7c06fb79cd9a308b4052acf31bc662145cf271cd`;
-Dashboard `424c2cb8bdae8d01b2c29de25ec36ab5513cb8f5`.
+Candidate source: Hub `faecf3cf1cef68a61d9b597ad764a87cb29c442a`;
+Dashboard `862fe6994d6c740042df3622668dd2e998688b87`.
 
 ## Result
 
@@ -11,7 +11,7 @@ PASS.
 ### Hub / registry (`anet-skillhub:dev`)
 
 - Production entry bundled: 256 modules, 1.49 MB.
-- Real private Hub process + real SQLite: 3 tests passed, 32 assertions.
+- Real private Hub process + real SQLite: 3 tests passed, 36 assertions.
 - Verified node-token author attribution cannot be replaced by a submitted
   `source_alias` field.
 - Verified new versions are pending, identical retry is idempotent, and
@@ -20,11 +20,13 @@ PASS.
 - Verified owner publish makes the skill visible to nodes.
 - Verified foreign-network list/review is denied.
 - Verified published detail omits internal user UUIDs and content hash.
+- Verified concurrent different-content submissions under one version resolve
+  to one winner plus one clean `skill_version_conflict`, never a storage 500.
 - Witnessed-red mutation `pending -> published`: rc=1.
 - Witnessed-red mutation removing review lookup network predicate: rc=1.
-- Restored source: 3 tests passed, 32 assertions; `RESULT: PASS`.
+- Restored source: 3 tests passed, 36 assertions; `RESULT: PASS`.
 - Final image digest used for the run:
-  `sha256:6f890ab8b8d01ff67f790acfd73290bd30fbef281507b9feb78ec819066dae77`.
+  `sha256:2c780f03ec24ac245807ae8ff2037e7a87dbadeb8cc1fdf4cdcb8ab7d36bca2c`.
 
 ### Dashboard (`anet-skillhub-dashboard:dev`)
 
@@ -35,7 +37,7 @@ PASS.
 - Generated routes include `ƒ /api/anet/skills` and `○ /skillhub`.
 - Runtime contract rerun from the built image: PASS.
 - Final image digest:
-  `sha256:bca4711d2a4972e2f797be1baeefcb6539928010e4cec387d967b8bd6070950b`.
+  `sha256:2bab6eee16f354fb1738d5dfb7a6bec249a78de5d0dc6397512c2978504af3d6`.
 
 Both exact test images were removed after evidence capture because the host had
 7.7 GiB free. No bulk prune or pattern deletion was used; running containers
