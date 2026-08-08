@@ -1,8 +1,5 @@
 FROM oven/bun:1.3.14
 
-ARG SOURCE_COMMIT=unknown
-ENV SOURCE_COMMIT=${SOURCE_COMMIT}
-
 WORKDIR /workspace
 
 COPY agent-node/package.json /workspace/agent-node/package.json
@@ -18,5 +15,8 @@ COPY agent-network/tests/goal-wake-log-render.test.ts /workspace/agent-network/t
 COPY agent-network/bin/cli.ts /workspace/agent-network/bin/cli.ts
 COPY tests/test596-goal-loop-docs/run.sh /test596/run.sh
 RUN chmod 755 /test596/run.sh
+
+ARG SOURCE_COMMIT=unknown
+ENV SOURCE_COMMIT=${SOURCE_COMMIT}
 
 ENTRYPOINT ["bash", "/test596/run.sh"]

@@ -79,7 +79,7 @@ run docs-contract docs_contract
 # Witnessed-red: if the one-time Dashboard/Codex distinction disappears from
 # the Chinese page, the same documentation gate must fail.
 cp "$ZH" /tmp/goals-and-loops.zh.original
-sed -i '/作为一次性目标执行/d' "$ZH"
+sed -i 's/作为一次性目标执行/作为普通目标处理/g' "$ZH"
 set +e
 docs_contract >/tmp/docs-mutation.out 2>&1
 mutation_rc=$?
