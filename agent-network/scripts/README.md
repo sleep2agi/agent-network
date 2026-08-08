@@ -6,6 +6,22 @@ The startup recipe for an opencode agent-node under pm2 supervision. Source of t
 
 - **`opencode-node-start.sh`** — the launch recipe. Runs preflight checks then `exec`s into agent-node in the foreground so pm2 tracks it.
 - **`pm2-opencode.config.cjs`** — the pm2 ecosystem config. Points at the installed copy of the script, not this repo.
+- **`normalize-codex-copresence-node.sh`** — single-node, fail-closed fleet normalizer. It is plan-only by default and requires exact PID birth times plus exact tmux sessions for apply.
+- **`codex-copresence-fleet-config.mjs`** — validates and atomically pins a per-node `goalsPath`; it never migrates a missing legacy shared store.
+
+## Codex co-presence fleet normalization
+
+Never batch this operation. First run `--mode plan`, record every matching
+process as `PID:STARTTIME` (field 22 in `/proc/PID/stat`), and name every exact
+tmux session that apply may stop. Apply refuses process drift, unaccounted
+alias/app-server processes, duplicate node IDs or goal stores, non-private
+config modes, symlinks, implicit models, and paths outside the selected root.
+
+The normalizer deliberately does not run production slash UAT itself. After a
+successful apply, an authenticated external harness must prove socket
+single-owner plus `/goal`, `/loop` notice, and `/aloop` create/cancel. A failed
+apply restores the config but leaves the runtime stopped: automatic
+resurrection could recreate the dual-owner condition this tool removes.
 
 ## Why two files (and two locations)
 
