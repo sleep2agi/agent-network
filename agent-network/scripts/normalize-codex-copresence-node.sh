@@ -161,7 +161,14 @@ rollback() {
   echo "ROLLBACK_COORDINATES=$BACKUP_DIR" >&2; exit "$rc"
 }
 trap rollback ERR INT TERM
-for name in "${STOP_SESSIONS[@]}"; do sid=${SESSION_IDS[$name]%%:*}; tmux kill-session -t "$sid"; done
+for name in "${STOP_SESSIONS[@]}"; do
+  sid=${SESSION_IDS[$name]%%:*}
+  # Stopping app-server can make the remote TUI exit before its explicit turn
+  # in this loop.  Treat an already-absent exact session as converged; the
+  # PID+birth-time barrier below still requires every accounted process to be
+  # gone before config mutation or replacement startup.
+  tmux kill-session -t "$sid" 2>/dev/null || true
+done
 for _ in $(seq 1 40); do alive=0; for pid in "${!EXPECTED[@]}"; do [[ -e "/proc/$pid" ]] && alive=1; done; (( alive == 0 )) && break; sleep 0.25; done
 for pid in "${!EXPECTED[@]}"; do [[ ! -e "/proc/$pid" ]] || { echo "REFUSE: pid $pid survived exact tmux stop" >&2; false; }; done
 bun "$CONFIG_TOOL" --mode apply --config "$CONFIG" --inventory-dir "$INVENTORY_DIR" --goals-root "$GOALS_ROOT" --workdir "$WORKDIR" --model "$EXPECTED_MODEL"

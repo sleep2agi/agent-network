@@ -83,7 +83,14 @@ P3=$(tmux -L test598 display-message -p -t alpha-tui '#{pane_pid}')
 S1=$(awk '{print $22}' "/proc/$P1/stat"); S2=$(awk '{print $22}' "/proc/$P2/stat"); S3=$(awk '{print $22}' "/proc/$P3/stat")
 # Wrap tmux so the production script uses this isolated server.
 mkdir "$ROOT/bin"; chmod 0700 "$ROOT/bin"
-printf '#!/usr/bin/env bash\nexec /usr/bin/tmux -L test598 "$@"\n' >"$ROOT/bin/tmux"; chmod 0700 "$ROOT/bin/tmux"
+printf '%s\n' '#!/usr/bin/env bash' \
+  'if [[ "${1:-}" == kill-session && -e /tmp/test598-cascade-on-stop ]]; then' \
+  '  rm -f /tmp/test598-cascade-on-stop' \
+  '  /usr/bin/tmux -L test598 "$@"; rc=$?' \
+  '  /usr/bin/tmux -L test598 kill-session -t alpha-tui 2>/dev/null || true' \
+  '  exit "$rc"' \
+  'fi' \
+  'exec /usr/bin/tmux -L test598 "$@"' >"$ROOT/bin/tmux"; chmod 0700 "$ROOT/bin/tmux"
 chmod 0775 "$INV" "$WORK"
 expect_red normalizer-refuses-implicit-inventory-permission-repair env PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode apply --alias alpha \
   --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" \
@@ -100,6 +107,7 @@ expect_red unaccounted-process env PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode plan 
   --new-appsrv-session alpha-appsrv --new-bridge-session alpha-bridge --new-tui-session alpha-tui --expected-tui-command fake-codex \
   --expected-pid "$P1:$S1" --expected-pid "$P2:$S2" --expected-pid "$P3:$S3"
 kill "$ROGUE"; wait "$ROGUE" 2>/dev/null || true
+touch /tmp/test598-cascade-on-stop
 PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode apply --alias alpha \
   --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" \
   --workdir "$WORK" --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 --expected-model gpt-5.6-sol \
