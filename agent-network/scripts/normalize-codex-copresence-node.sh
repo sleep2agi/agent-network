@@ -100,13 +100,12 @@ process_matches_selected_node() {
 }
 mapfile -t MATCHED < <(for p in /proc/[0-9]*; do
   pid=${p##*/}; [[ -r "$p/cmdline" ]] || continue
-  [[ "$pid" == "$$" ]] && continue
+  # Skip only this exact normalizer process and the exact process-substitution
+  # scanner.  Never skip based on attacker-controlled argv text: an extra
+  # app-server could otherwise add the script name as a camouflage argument.
+  [[ "$pid" == "$$" || "$pid" == "$BASHPID" ]] && continue
   PROC_ARGV=(); mapfile -d '' -t PROC_ARGV <"$p/cmdline" || true
   ((${#PROC_ARGV[@]})) || continue
-  skip=0; for arg in "${PROC_ARGV[@]}"; do
-    [[ "$arg" == *normalize-codex-copresence-node.sh || "$arg" == *codex-copresence-fleet-config.mjs ]] && skip=1
-  done
-  (( skip == 0 )) || continue
   if process_matches_selected_node; then echo "$pid"; fi
 done)
 for pid in "${MATCHED[@]}"; do

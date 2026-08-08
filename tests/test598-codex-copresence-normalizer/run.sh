@@ -123,7 +123,7 @@ echo "L3 PID drift, unaccounted process, and rollback"
 ALPHA_APP_PANE=$(tmux -L test598 display-message -p -t alpha-appsrv '#{pane_pid}')
 ALPHA_BRIDGE_PANE=$(tmux -L test598 display-message -p -t alpha-bridge '#{pane_pid}')
 ALPHA_TUI_PANE=$(tmux -L test598 display-message -p -t alpha-tui '#{pane_pid}')
-"$ROOT/fake-codex" --stray-no-bind app-server -c approval_policy=never -c sandbox_mode=danger-full-access --listen ws://127.0.0.1:25981 &
+"$ROOT/fake-codex" --stray-no-bind --camouflage "$SCRIPT" app-server -c approval_policy=never -c sandbox_mode=danger-full-access --listen ws://127.0.0.1:25981 &
 STRAY_FLAGGED_APPSRV=$!
 sleep 0.1
 FLAGGED_EXPECTED=()
