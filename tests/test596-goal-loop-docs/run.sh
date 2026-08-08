@@ -17,28 +17,28 @@ run() {
 }
 
 docs_contract() {
-  grep -Fq '新的周期任务统一使用 `/loop`' "$ZH"
-  grep -Fq 'Use `/loop` for every new recurring task' "$EN"
-  grep -Fq '认证 Dashboard Chat → 共享 Codex TUI' "$ZH"
-  grep -Fq 'Authenticated Dashboard Chat → shared Codex TUI' "$EN"
-  grep -Fq '作为一次性目标执行' "$ZH"
-  grep -Fq 'as a one-time goal' "$EN"
-  grep -Fq '`/loop` 的旧兼容别名' "$ZH"
-  grep -Fq 'Legacy alias for `/loop`' "$EN"
-  grep -Fq '最多 15 秒' "$ZH"
-  grep -Fq 'up to 15 seconds' "$EN"
-  grep -Fq '默认约每 30 秒' "$ZH"
-  grep -Fq 'about every 30 seconds by default' "$EN"
-  grep -Fq '连续失败默认达到 5 次' "$ZH"
-  grep -Fq 'five consecutive failures by default' "$EN"
-  grep -Fq 'anet goal wake-log' "$ZH"
-  grep -Fq 'anet goal wake-log' "$EN"
-  grep -Fq '`create_my_loop`' "$ZH"
-  grep -Fq '`create_my_loop`' "$EN"
-  grep -Fq '不会热重载' "$ZH"
-  grep -Fq 'does not hot-reload' "$EN"
-  grep -Fq '独立的 `claude-code-cli`' "$ZH"
-  grep -Fq 'standalone `claude-code-cli`' "$EN"
+  grep -Fq '新的周期任务统一使用 `/loop`' "$ZH" || return 1
+  grep -Fq 'Use `/loop` for every new recurring task' "$EN" || return 1
+  grep -Fq '认证 Dashboard Chat → 共享 Codex TUI' "$ZH" || return 1
+  grep -Fq 'Authenticated Dashboard Chat → shared Codex TUI' "$EN" || return 1
+  grep -Fq '作为一次性目标执行' "$ZH" || return 1
+  grep -Fq 'as a one-time goal' "$EN" || return 1
+  grep -Fq '`/loop` 的旧兼容别名' "$ZH" || return 1
+  grep -Fq 'Legacy alias for `/loop`' "$EN" || return 1
+  grep -Fq '最多 15 秒' "$ZH" || return 1
+  grep -Fq 'up to 15 seconds' "$EN" || return 1
+  grep -Fq '默认约每 30 秒' "$ZH" || return 1
+  grep -Fq 'about every 30 seconds by default' "$EN" || return 1
+  grep -Fq '连续失败默认达到 5 次' "$ZH" || return 1
+  grep -Fq 'five consecutive failures by default' "$EN" || return 1
+  grep -Fq 'anet goal wake-log' "$ZH" || return 1
+  grep -Fq 'anet goal wake-log' "$EN" || return 1
+  grep -Fq '`create_my_loop`' "$ZH" || return 1
+  grep -Fq '`create_my_loop`' "$EN" || return 1
+  grep -Fq '不会热重载' "$ZH" || return 1
+  grep -Fq 'does not hot-reload' "$EN" || return 1
+  grep -Fq '独立的 `claude-code-cli`' "$ZH" || return 1
+  grep -Fq 'standalone `claude-code-cli`' "$EN" || return 1
 }
 
 printf '%s\n' \
