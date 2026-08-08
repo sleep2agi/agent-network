@@ -1,7 +1,8 @@
 # test599 — Dashboard SkillHub
 
 Date: 2026-08-08
-Candidate: local clean worktrees `feat/skillhub-registry` and `feat/dashboard-skillhub`
+Candidate source: Hub `b85d2579aa4e6e08e86884037f82426ee101f8ce`;
+Dashboard `424c2cb8bdae8d01b2c29de25ec36ab5513cb8f5`.
 
 ## Result
 
@@ -22,7 +23,7 @@ PASS.
 - Witnessed-red mutation removing review lookup network predicate: rc=1.
 - Restored source: 3 tests passed, 28 assertions; `RESULT: PASS`.
 - Final image digest used for the run:
-  `sha256:f622b8681403776fbccf2e7337d0c1a05c259665c0edb540c3c1734805bc014e`.
+  `sha256:9c0c86d04105d4b39ea3fa5a4c1e2ee7fc5c7a52eb127039ec64c61aed66afa9`.
 
 ### Dashboard (`anet-skillhub-dashboard:dev`)
 
@@ -33,7 +34,7 @@ PASS.
 - Generated routes include `ƒ /api/anet/skills` and `○ /skillhub`.
 - Runtime contract rerun from the built image: PASS.
 - Final image digest:
-  `sha256:9fe17bfacc225321e2a278d20beb57ea9518d93f2b57bc98034ac93e5831102c`.
+  `sha256:bca4711d2a4972e2f797be1baeefcb6539928010e4cec387d967b8bd6070950b`.
 
 Both exact test images were removed after evidence capture because the host had
 7.7 GiB free. No bulk prune or pattern deletion was used; running containers
