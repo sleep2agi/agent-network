@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "slug": "public-skill-review-checklist",
+  "name": "Public skill review checklist",
+  "description": "Safe promotion checklist from private SkillHub to the public catalog.",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "publisher": {
+    "name": "Agent Network maintainers",
+    "url": "https://github.com/sleep2agi/agent-network"
+  },
+  "tags": [
+    "review",
+    "security",
+    "skillhub"
+  ],
+  "published_at": "2026-08-09"
+}
