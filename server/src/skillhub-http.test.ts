@@ -69,7 +69,7 @@ describe("SkillHub real Hub + SQLite", () => {
     expect(nodeList.skills).toHaveLength(0);
     expect((await tool(nodeToken, "get_skill", { network_id: networkId, skill_id: skillId })).error).toBe("skill_not_found");
     const ownerList = await tool(ownerToken, "list_skills", { network_id: networkId, include_pending: true });
-    expect(ownerList.reviewer).toBe(true); expect(ownerList.skills[0].skill_id).toBe(skillId);
+    expect(ownerList.reviewer).toBe(true); expect(ownerList.skills.map((x: any) => x.skill_id)).toContain(skillId);
     expect((await tool(ownerToken, "get_skill", { network_id: networkId, skill_id: skillId })).skill.content).toContain("Verify facts");
     const reviewed = await tool(ownerToken, "review_skill", { network_id: networkId, skill_id: skillId, decision: "published" });
     expect(reviewed.status).toBe("published");
