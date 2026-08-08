@@ -634,6 +634,37 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_audit_network ON audit_log(network_id);
 `);
 
+// SkillHub — immutable, network-scoped skill submissions. A (network, slug,
+// version) tuple is write-once: retries with the same content are idempotent,
+// while different content must use a new version. Node submissions remain
+// pending until an owner/admin explicitly publishes them.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS skillhub_skills (
+    skill_id          TEXT PRIMARY KEY,
+    network_id        TEXT NOT NULL,
+    slug              TEXT NOT NULL,
+    name              TEXT NOT NULL,
+    description       TEXT NOT NULL DEFAULT '',
+    version           TEXT NOT NULL,
+    content           TEXT NOT NULL,
+    content_hash      TEXT NOT NULL,
+    status            TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'published', 'rejected', 'archived')),
+    source_type       TEXT NOT NULL CHECK(source_type IN ('node', 'user')),
+    source_alias      TEXT,
+    created_by_user   TEXT,
+    reviewed_by_user  TEXT,
+    review_note       TEXT,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    reviewed_at       TEXT,
+    UNIQUE(network_id, slug, version)
+  );
+  CREATE INDEX IF NOT EXISTS idx_skillhub_network_status
+    ON skillhub_skills(network_id, status, updated_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_skillhub_network_slug
+    ON skillhub_skills(network_id, slug, version);
+`);
+
 // ── V3: licenses table ──
 db.exec(`
   CREATE TABLE IF NOT EXISTS licenses (
