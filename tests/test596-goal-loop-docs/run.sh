@@ -23,7 +23,7 @@ docs_contract() {
   grep -Fq 'Authenticated Dashboard Chat → shared Codex TUI' "$EN"
   grep -Fq '作为一次性目标执行' "$ZH"
   grep -Fq 'as a one-time goal' "$EN"
-  grep -Fq '`/goal` 的旧兼容别名' "$ZH"
+  grep -Fq '`/loop` 的旧兼容别名' "$ZH"
   grep -Fq 'Legacy alias for `/loop`' "$EN"
   grep -Fq '最多 15 秒' "$ZH"
   grep -Fq 'up to 15 seconds' "$EN"
