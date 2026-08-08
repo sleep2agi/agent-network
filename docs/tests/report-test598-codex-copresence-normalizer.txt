@@ -1,7 +1,7 @@
 # test598 — Codex co-presence single-node normalizer
 
 Date: 2026-08-08 Asia/Shanghai
-Source commits: 1087650e81cc438da24820b66509b50486182bb4 + TUI follow-up c754b639c95b76d1a07403e5fd1797ef9224d6fa
+Source commits: 1087650e81cc438da24820b66509b50486182bb4 + TUI follow-up c754b639c95b76d1a07403e5fd1797ef9224d6fa + owner/socket gates 21e4dadcfa8350b549733e66e8f31af1504d9f12
 Image: anet-test598:dev
 Scope: Docker isolation only; no production node, Hub, Dashboard, bridge, TUI, or app-server was mutated.
 
@@ -10,9 +10,9 @@ Scope: Docker isolation only; no production node, Hub, Dashboard, bridge, TUI, o
 PASS.
 
 - L0: Bash/JavaScript build and plan-only non-mutation passed.
-- L1: owner/type/mode validation, permission repair, per-node goalsPath, duplicate node_id, and duplicate goalsPath passed.
-- L2: a real isolated tmux server stopped three exact PID+starttime-owned sessions, started a fake app-server, bridge, and TUI, verified the pinned executable version, and left the goal store absent (no legacy migration).
-- L3: PID drift, unaccounted alias process, injected post-start version failure, and injected TUI exit all failed closed. Both injected failures restored the byte-identical config, removed the new empty goals directory, and left no new app-server/bridge/TUI sessions.
+- L1: owner/type/mode validation, permission repair, per-node goalsPath, duplicate node_id, duplicate thread ID, and duplicate goalsPath passed.
+- L2: a real isolated tmux server stopped three exact PID+starttime-owned sessions, started a fake app-server, bridge, and TUI, verified the pinned executable version, persisted the exact `anet:<node_id>:<alias>` thread owner, verified the real cwd, proved the TUI held a socket to that app-server, and left the goal store absent (no legacy migration).
+- L3: thread-owner mismatch, thread-cwd mismatch, PID drift, unaccounted alias process, injected post-start version failure, injected TUI exit, and a live TUI process with no app-server socket all failed closed. Injected rollout failures restored the byte-identical config, removed the new empty goals directory, and left no new app-server/bridge/TUI sessions.
 - L4: removing the exact goalsPath collision predicate was witnessed red; removing/weakening process and rollback anchors remains covered by the explicit negative paths above.
 - Secret gate: the report contains no test token value; runtime output exposes only command hashes.
 
@@ -21,11 +21,21 @@ Witnessed-red results:
 - non-owner-controlled: rc=2
 - duplicate-node: rc=2
 - duplicate-goals-path: rc=2
+- duplicate-thread: rc=2
 - collision mutation: rc=1
 - unaccounted process: rc=2
+- thread-owner mismatch: rc=2
+- thread-cwd mismatch: rc=2
 - PID birth-time drift: rc=2
 - app-server version failure with rollback: rc=1
 - TUI exit with all-component rollback: rc=1
+- live TUI without app-server socket with all-component rollback: rc=1
+
+Real Codex 0.147 model probe (fully isolated alias/app-server/workspace; no production config or session):
+
+- `/proc/<listener-pid>/exe --version` reported `0.147`
+- model `gpt-5.6-sol` completed one real turn in approximately 5.4 seconds
+- conclusion: normalizing a node may retain `gpt-5.6-sol`; restarting its app-server naturally moves it from the observed 0.144/0.145 binaries to 0.147
 
 Real Codex 0.147 TUI behavior probe (isolated port 24753, no Hub/MCP):
 
