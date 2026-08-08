@@ -41,7 +41,9 @@ echo "L1 goalsPath fail-closed matrix"
 chmod 0775 "$INV"; chmod 0664 "$INV/beta-bridge-config.json"
 bun "$CFGTOOL" --mode plan --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" | grep -Fq 'permissionRepairs'
 test "$(stat -c %a "$INV")" = 775; test "$(stat -c %a "$INV/beta-bridge-config.json")" = 664
-bun "$CFGTOOL" --mode apply --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" >/tmp/test598-permission-apply.json
+expect_red implicit-fleet-permission-repair bun "$CFGTOOL" --mode apply --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS"
+test "$(stat -c %a "$INV")" = 775; test "$(stat -c %a "$INV/beta-bridge-config.json")" = 664
+bun "$CFGTOOL" --mode prepare-permissions --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" >/tmp/test598-permission-prepare.json
 test "$(stat -c %a "$INV")" = 700; test "$(stat -c %a "$INV/beta-bridge-config.json")" = 600
 chown 65534 "$INV/beta-bridge-config.json"
 expect_red non-owner-controlled bun "$CFGTOOL" --mode plan --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS"
@@ -80,6 +82,14 @@ S1=$(awk '{print $22}' "/proc/$P1/stat"); S2=$(awk '{print $22}' "/proc/$P2/stat
 # Wrap tmux so the production script uses this isolated server.
 mkdir "$ROOT/bin"; chmod 0700 "$ROOT/bin"
 printf '#!/usr/bin/env bash\nexec /usr/bin/tmux -L test598 "$@"\n' >"$ROOT/bin/tmux"; chmod 0700 "$ROOT/bin/tmux"
+chmod 0775 "$INV"
+expect_red normalizer-refuses-implicit-inventory-permission-repair env PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode apply --alias alpha \
+  --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" \
+  --workdir "$WORK" --dist-cli "$ROOT/fake-bridge.ts" --expected-dist-sha256 "$DIST_SHA" --codex-bin "$ROOT/fake-codex" --expected-version 9.9.9 \
+  --new-appsrv-session alpha-appsrv --new-bridge-session alpha-bridge --new-tui-session alpha-tui --expected-tui-command fake-codex \
+  --expected-pid "$P1:$S1" --expected-pid "$P2:$S2" --expected-pid "$P3:$S3" --stop-session alpha-appsrv --stop-session alpha-old-bridge --stop-session alpha-tui
+for live in alpha-appsrv alpha-old-bridge alpha-tui; do tmux -L test598 list-sessions -F '#{session_name}' | grep -Fxq "$live"; done
+bun "$CFGTOOL" --mode prepare-permissions --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" >/tmp/test598-l2-permission-prepare.json
 bash -c 'sleep 30 & wait' -- --alias alpha & ROGUE=$!
 expect_red unaccounted-process env PATH="$ROOT/bin:$PATH" "$SCRIPT" --mode plan --alias alpha \
   --config "$INV/alpha-bridge-config.json" --inventory-dir "$INV" --goals-root "$GOALS" \

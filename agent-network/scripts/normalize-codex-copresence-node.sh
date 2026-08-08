@@ -53,6 +53,11 @@ THREAD_TOOL="$SCRIPT_DIR/codex-copresence-thread-owner.mjs"
 PLAN=$(bun "$CONFIG_TOOL" --mode plan --config "$CONFIG" --inventory-dir "$INVENTORY_DIR" --goals-root "$GOALS_ROOT")
 NODE_ID=$(bun -e 'const x=JSON.parse(process.argv[1]);process.stdout.write(x.node_id)' "$PLAN")
 DESIRED_GOALS=$(bun -e 'const x=JSON.parse(process.argv[1]);process.stdout.write(x.goalsPath)' "$PLAN")
+PERMISSION_REPAIR_COUNT=$(bun -e 'const x=JSON.parse(process.argv[1]);process.stdout.write(String(x.permissionRepairs?.length||0))' "$PLAN")
+if [[ "$MODE" == apply && "$PERMISSION_REPAIR_COUNT" != 0 ]]; then
+  echo "REFUSE: $PERMISSION_REPAIR_COUNT inventory permission repairs require a separately reviewed prepare-permissions step" >&2
+  exit 2
+fi
 WS=$(bun -e 'const c=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const u=c.codexAppServerUrl;if(!/^ws:\/\/127\.0\.0\.1:[0-9]+$/.test(u||""))process.exit(2);process.stdout.write(u)' "$CONFIG") || { echo "REFUSE: codexAppServerUrl must be loopback ws" >&2; exit 2; }
 HUB=$(bun -e 'const c=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const u=c.hub;if(!/^https?:\/\//.test(u||""))process.exit(2);process.stdout.write(u.replace(/\/$/,""))' "$CONFIG") || { echo "REFUSE: missing/invalid hub URL" >&2; exit 2; }
 MODEL=$(bun -e 'const c=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const m=c.model||c.flags?.model;if(!m)process.exit(2);process.stdout.write(m)' "$CONFIG") || { echo "REFUSE: model must be explicit before rollout" >&2; exit 2; }
