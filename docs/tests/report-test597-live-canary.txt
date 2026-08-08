@@ -1,0 +1,61 @@
+# test597 live canary — Dashboard native slash / ANet scheduler namespace
+
+Date: 2026-08-08 (Asia/Shanghai)
+Source commit under test: d17669a9d8ed041f8102b888506579c788d2bd7c
+Candidate bundle SHA256: f6f05ecc93854e9025f0616041ee75e407dc6135ae73e0212345a0c298b1be6e
+Hub: existing production binary on 127.0.0.1:9200 (not restarted)
+
+## Isolation
+
+- Fresh target alias/node: `slash597-canary` / `n_82ecdd80`
+- Fresh sender-only node credential: `slash597-spoofer` / `n_d08d71f4`
+- Fresh app-server: `slash597-appsrv`, 127.0.0.1:24753
+- Fresh bridge: `slash597-bridge`
+- Fresh workspace/config/goal store: `/tmp/anet-slash597-canary`
+- Existing Hub, Dashboard, production bridges, TUIs, and app-servers were not restarted.
+- The earlier `通信牛-桥` contaminated-baseline attempt was rolled back before this run and was not touched again.
+
+## Live gates
+
+1. PASS — authenticated Dashboard `/goal` pass-through
+   - task: `9c4b5431-828a-4656-8c7c-dcf6f9cf9afd`
+   - payload reached the fresh shared Codex thread unchanged.
+   - terminal status: `replied`
+   - result contained `UAT597-ISO-GOAL-C-ACK`
+   - the goal store was still absent.
+
+2. PASS — authenticated Dashboard `/loop 5m` pass-through plus migration notice
+   - task: `d021de53-a0ca-402e-b04a-a39a0ae9ed6d`
+   - payload reached the same shared Codex thread unchanged.
+   - terminal status: `replied`
+   - result contained `UAT597-ISO-LOOP-ACK` and `请用 /aloop`.
+   - the goal store was still absent.
+
+3. PASS — Dashboard `/aloop 5m` uses the ANet scheduler
+   - task: `7b094bff-c14b-4b62-b564-21448b8ba98b`
+   - created goal: `a0c57a0f-4a26-4cf8-a238-411ca2e55477`
+   - interval: 300000 ms
+   - terminal status: `replied`
+
+4. PASS — a node token cannot forge Dashboard origin
+   - sender token was bound to `slash597-spoofer`.
+   - task: `8cd8cc55-8b76-42dc-a783-b37043dff64e`
+   - submitted metadata claimed `auth_origin=user`.
+   - persisted Hub metadata was `auth_origin=node`.
+   - legacy `/loop 5m` therefore remained compatibility scheduling, not pass-through.
+   - reply contained the migration warning and created goal `9a81be27-0111-4e85-b914-82aa0a75a6c5`.
+
+## Negative control
+
+Two preliminary Dashboard probes deliberately/accidentally used a client request id that was not exactly `dreq_` plus 32 lowercase hex characters. Both were rejected by the interactive-Dashboard predicate and followed the compatibility scheduler path. They are not counted as passing Dashboard UATs; they demonstrate that client-supplied `source`/`auth_origin` alone cannot unlock pass-through.
+
+## Cleanup and final state
+
+- `slash597-bridge` stopped by exact tmux name.
+- `slash597-appsrv` stopped by exact tmux name.
+- port 24753 closed.
+- both created goals were cancelled after the bridge stopped, then re-read from disk and verified `cancelled`.
+- no production process was stopped or restarted during isolated-canary cleanup.
+- no npm publish, global install, merge, or full rollout was performed.
+
+RESULT: PASS (isolated canary only; full rollout remains gated on independent review/authorization)
