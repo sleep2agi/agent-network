@@ -272,3 +272,17 @@ Explicitly deferred nodes:
 Final rollout verdict: PASS for every eligible node. Deferred nodes are not
 counted as passed, normalized, or failed; each has a concrete safety or
 governance reason above.
+
+## Independent final review
+
+An independent reviewer used a fresh checkout at report head
+`064cb1776d435b95c6bdd2394e4c1c2734784f33` and returned PASS:
+
+- `5b5d9a5d..064cb177` changed only this report; the reviewed production implementation remained exact
+- the 14/14 standard and 16/16 final-audit denominators were consistent, with all four deferred nodes kept outside the pass count
+- the first `A站副责人` apply remained explicitly recorded as fail-closed and byte-identically restored, not as a success
+- the peer lifecycle leak remained explicitly unfixed, with smoke parents cancelled after exact ACK delivery
+- fixed image `anet-test598:dev` still exposed `TEST598_SOURCE_COMMIT=5b5d9a5d1d59c6c1f77e36b22e987c2c4f4b5ddd` and independently reran to `RESULT: PASS` without a rebuild or prune
+
+Independent final-review verdict: PASS, with no merge, publish, or additional
+deployment performed by the reviewer.
