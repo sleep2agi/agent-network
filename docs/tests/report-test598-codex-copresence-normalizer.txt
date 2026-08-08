@@ -1,9 +1,9 @@
 # test598 — Codex co-presence single-node normalizer
 
 Date: 2026-08-08 Asia/Shanghai
-Source commits: 1087650e81cc438da24820b66509b50486182bb4 + TUI follow-up c754b639c95b76d1a07403e5fd1797ef9224d6fa + owner/socket gates 21e4dadcfa8350b549733e66e8f31af1504d9f12 + explicit permission preparation 236c73a8b74e026a0fe96485814334e989c5b048 + explicit model pin dfbd2fb0a0ce1864bf71e1c53adc8cd1fe662879 + workdir permission preparation 6cf5c7894760be13ac0cadc1e36f6bd0a91c986f + exact TUI process-tree socket verification 8481306b595a83356da6a0d4743c520de18f687c + exact flagged app-server argv matching 47e6fa746d160123d211b2418a364d7e9adf558e + exact self-process exclusion 8c1fbcf331c556403ece5598a172bffa9e1909f5
+Source commits: 1087650e81cc438da24820b66509b50486182bb4 + TUI follow-up c754b639c95b76d1a07403e5fd1797ef9224d6fa + owner/socket gates 21e4dadcfa8350b549733e66e8f31af1504d9f12 + explicit permission preparation 236c73a8b74e026a0fe96485814334e989c5b048 + explicit model pin dfbd2fb0a0ce1864bf71e1c53adc8cd1fe662879 + workdir permission preparation 6cf5c7894760be13ac0cadc1e36f6bd0a91c986f + exact TUI process-tree socket verification 8481306b595a83356da6a0d4743c520de18f687c + exact flagged app-server argv matching 47e6fa746d160123d211b2418a364d7e9adf558e + exact self-process exclusion 8c1fbcf331c556403ece5598a172bffa9e1909f5 + split/equals long-option coverage d102105eff0de72405cb96973f45f43dc34ff172
 Image: anet-test598:dev
-Image ID: sha256:17558bc88e2801143091a08f96e0083bbad2e305080714dd9532d93f40147b02
+Image ID: sha256:f9723392fcb283a7814e912cded9929540ae21941252e0f528a79d5568a591a8
 Scope: Docker isolation only; no production node, Hub, Dashboard, bridge, TUI, or app-server was mutated.
 
 ## Result
@@ -31,6 +31,8 @@ Witnessed-red results:
 - unaccounted process: rc=2
 - flagged app-server with intervening `-c` arguments: rc=2
 - adjacent-token app-server matcher mutation: rc=1
+- equals-form app-server option: rc=2
+- split-only option matcher mutation: rc=1
 - thread-owner mismatch: rc=2
 - thread-cwd mismatch: rc=2
 - PID birth-time drift: rc=2
@@ -41,8 +43,8 @@ Witnessed-red results:
 
 Exact-source Docker run:
 
-- source commit embedded in the test image: `8c1fbcf331c556403ece5598a172bffa9e1909f5`
-- image environment contains `TEST598_SOURCE_COMMIT=8c1fbcf331c556403ece5598a172bffa9e1909f5`
+- source commit embedded in the test image: `d102105eff0de72405cb96973f45f43dc34ff172`
+- image environment contains `TEST598_SOURCE_COMMIT=d102105eff0de72405cb96973f45f43dc34ff172`
 - positive socket evidence: `TUI_SOCKET pane_pid=672 holder_pid=689 descendants=2`
 - final result: `RESULT: PASS`
 
@@ -61,6 +63,8 @@ Witnessed red/green evidence:
 - the corrected implementation reads NUL-delimited argv and requires exact tokens; it rejected that same process as unaccounted (rc=2)
 - a second witnessed-red run added the normalizer script path as an unrelated camouflage argv token; the first correction's filename-based skip accepted it and again emitted `FALSE_GREEN` (suite rc=1)
 - the final scanner skips only its exact parent and scanner PIDs (`$$` and `BASHPID`), never attacker-controlled argv text; it rejected the camouflaged process (rc=2)
+- a third witnessed-red run used the upstream-valid `--listen=WS` equals form; the split-only matcher accepted it and emitted `FALSE_GREEN` (suite rc=1)
+- the final option matcher recognizes exact split and equals forms for `--listen`, `--config`, `--alias`, and `--remote`; a split-only mutation turned red (rc=1)
 - a mutation that restored adjacent-token matching accepted the process, so `flagged-appserver-matcher-mutation-must-be-caught` turned red (rc=1)
 - the complete exact-source Docker suite then finished `RESULT: PASS`
 
