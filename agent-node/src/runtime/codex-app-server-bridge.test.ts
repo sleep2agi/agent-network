@@ -207,6 +207,41 @@ describe("CodexAppServerBridge — bootstrap + task mapping", () => {
     expect(bridge.activeTurn()).toBeNull();
   });
 
+  test("authenticated Dashboard native /goal text reaches the shared thread unchanged and replies", async () => {
+    const exactPayload = "/goal 更新一下文档";
+    const turnId = await bridge.startTaskTurn({
+      taskId: "dashboard-native-goal",
+      from: "dashboard-user",
+      text: exactPayload,
+    });
+    const start = app.received.find((entry) => (entry as { method?: string }).method === "turn/start") as {
+      params?: { threadId?: string; input?: Array<{ type?: string; text?: string }> };
+    };
+    expect(start.params?.threadId).toBe(THREAD);
+    expect(start.params?.input?.[0]?.text).toBe(
+      `[Agent Network/from=dashboard-user/task=dashboard-native-goal] ${exactPayload}`,
+    );
+
+    const replies: Array<{ taskId: string; text: string }> = [];
+    bridge.on("task_reply", (reply) => replies.push(reply as never));
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        threadId: THREAD,
+        turnId,
+        item: { type: "agentMessage", phase: "final_answer", text: "文档已更新" },
+      },
+    });
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "turn/completed",
+      params: { threadId: THREAD, turn: { id: turnId, status: "completed" } },
+    });
+    await tick(10);
+    expect(replies).toEqual([{ taskId: "dashboard-native-goal", text: "文档已更新" }]);
+  });
+
   test("clientUserMessageId rebinds a task when a goal successor replaces the turn/start response id", async () => {
     await client.close();
     await app.stop();
