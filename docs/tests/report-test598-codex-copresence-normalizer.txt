@@ -1,0 +1,36 @@
+# test598 — Codex co-presence single-node normalizer
+
+Date: 2026-08-08 Asia/Shanghai
+Source commit: 1087650e81cc438da24820b66509b50486182bb4
+Image: anet-test598:dev
+Scope: Docker isolation only; no production node, Hub, Dashboard, bridge, TUI, or app-server was mutated.
+
+## Result
+
+PASS.
+
+- L0: Bash/JavaScript build and plan-only non-mutation passed.
+- L1: owner/type/mode validation, permission repair, per-node goalsPath, duplicate node_id, and duplicate goalsPath passed.
+- L2: a real isolated tmux server stopped two exact PID+starttime-owned sessions, started a fake app-server and bridge, verified the pinned executable version, and left the goal store absent (no legacy migration).
+- L3: PID drift, unaccounted alias process, and injected post-start version failure all failed closed. The injected failure restored the byte-identical config, removed the new empty goals directory, and left no new app-server/bridge sessions.
+- L4: removing the exact goalsPath collision predicate was witnessed red; removing/weakening process and rollback anchors remains covered by the explicit negative paths above.
+- Secret gate: the report contains no test token value; runtime output exposes only command hashes.
+
+Witnessed-red results:
+
+- non-owner-controlled: rc=2
+- duplicate-node: rc=2
+- duplicate-goals-path: rc=2
+- collision mutation: rc=1
+- unaccounted process: rc=2
+- PID birth-time drift: rc=2
+- app-server version failure with rollback: rc=1
+
+Production-shaped read-only plan against `设计副责人`:
+
+- inventory configs discovered: 20
+- canonical goalsPath: `/home/vansin/rfc030-work/.demo/goals/n_b3fac24e/goals.json`
+- legacy store: absent; no migration planned
+- permission repairs reported, not applied: 22 (`0664→0600`, `0775→0700`)
+
+The candidate is not a deployment authorization. A real-node apply still requires an owner-selected interruptible node/window, exact process/session coordinates, external socket single-owner verification, and `/goal`, `/loop` notice, `/aloop` create/cancel UAT. The current script restarts app-server and bridge only; whether the existing human TUI must be explicitly restarted after app-server replacement remains a rollout-review decision.
