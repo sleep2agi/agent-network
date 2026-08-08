@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
+  appendDashboardNativeScheduleNotice,
   appendLegacyScheduledGoalNotice,
+  DASHBOARD_NATIVE_SCHEDULE_NOTICE,
   LEGACY_ANET_SCHEDULE_NOTICE,
+  prepareDashboardNativeSlashReply,
   shouldCreateScheduledGoal,
 } from "./routing";
 
@@ -60,5 +63,47 @@ describe("appendLegacyScheduledGoalNotice", () => {
   test("the migration notice is first so the outer reply cap cannot truncate it", () => {
     const reply = appendLegacyScheduledGoalNotice("x".repeat(2_500), "/goal 5m work", false);
     expect(reply.slice(0, 2_000)).toContain(LEGACY_ANET_SCHEDULE_NOTICE);
+  });
+});
+
+describe("Dashboard native slash migration notice", () => {
+  test("interval-shaped /goal and /loop replies explain that ANet scheduling moved to /aloop", () => {
+    for (const command of ["/goal 5m work", "/loop 每小时 work"]) {
+      expect(appendDashboardNativeScheduleNotice("native reply", command, true))
+        .toBe(`${DASHBOARD_NATIVE_SCHEDULE_NOTICE}\n\nnative reply`);
+    }
+  });
+
+  test("ordinary native commands, namespaced commands, and non-Dashboard paths are untouched", () => {
+    expect(appendDashboardNativeScheduleNotice("native", "/goal work", true)).toBe("native");
+    expect(appendDashboardNativeScheduleNotice("native", "/loop work", true)).toBe("native");
+    expect(appendDashboardNativeScheduleNotice("scheduled", "/aloop 5m work", true)).toBe("scheduled");
+    expect(appendDashboardNativeScheduleNotice("legacy", "/loop 5m work", false)).toBe("legacy");
+  });
+
+  test("the notice survives low-value filtering and the outer reply cap", () => {
+    const prepared = prepareDashboardNativeSlashReply(
+      "收到",
+      "/loop 5m work",
+      true,
+      false,
+      (text) => text === "收到",
+    );
+    expect(prepared.shouldDeliver).toBe(true);
+    expect(prepared.text).toContain(DASHBOARD_NATIVE_SCHEDULE_NOTICE);
+    expect(appendDashboardNativeScheduleNotice("x".repeat(2_500), "/goal 5m work", true)
+      .slice(0, 2_000)).toContain(DASHBOARD_NATIVE_SCHEDULE_NOTICE);
+  });
+
+  test("failed native replies still surface the migration notice and the failure", () => {
+    const prepared = prepareDashboardNativeSlashReply(
+      "native failed",
+      "/loop 5m work",
+      true,
+      true,
+      () => false,
+    );
+    expect(prepared.shouldDeliver).toBe(true);
+    expect(prepared.text).toBe(`${DASHBOARD_NATIVE_SCHEDULE_NOTICE}\n\nnative failed`);
   });
 });
