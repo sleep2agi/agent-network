@@ -1,0 +1,103 @@
+Test 600 — Public SkillHub catalog and private-to-public promotion
+Date: 2026-08-08
+
+Scope
+=====
+
+This test covers the public anet.sh SkillHub catalog and the explicit export path
+from the private, network-scoped Dashboard SkillHub. It does not collapse the two
+trust planes:
+
+* Hub/Dashboard `published` means published inside one authenticated network.
+* Internet publication requires a local export, a public-repository pull request,
+  and a second maintainer review.
+* There is no automatic private-to-public synchronization and no public write API.
+
+Provenance
+==========
+
+Public anet.sh source commit:
+  72f7afd6d6f1aa2e685808650e12f85e51696eee
+
+Dashboard export source commits:
+  0c29aed470e5b908ab10631fa8cf6a3433483824  initial export implementation
+  181aecf7eee38459d93bc6cccbea295d0781a834  deferred Blob URL cleanup
+
+The Dashboard branch is intentionally stacked on the private SkillHub branch. It
+must not be rebased into an unrelated tree or merged before the private SkillHub
+base is available.
+
+Docker evidence
+===============
+
+Public catalog image:
+  tag during verification: anet-test600:dev
+  image digest: sha256:da0d71db435021c8a8ad41ac49bc80bf60fe07eca9abbd03b90d4dce3a302eb6
+  embedded TEST600_SOURCE_COMMIT:
+    72f7afd6d6f1aa2e685808650e12f85e51696eee
+  result: PASS (10 checks) at source 72f7afd6; follow-up import preflight adds
+    an eleventh witnessed-red gate before write
+
+Dashboard image:
+  tag during verification: anet-skillhub-dashboard:dev
+  image digest: sha256:2c4f08b32bf03ff4909056b3f38c608ed8406bb9cf1f75f597206975a28e4f20
+  embedded source commit:
+    0c29aed470e5b908ab10631fa8cf6a3433483824
+  result: contract PASS; targeted ESLint 0 errors; Next production build PASS
+  routes: 52 pages, including /skillhub
+
+The follow-up URL-lifetime delta at 181aecf7 was re-run in Docker with the
+read-only worktree mounted into node:22-bookworm-slim. The SkillHub module
+contract passed. This delta only defers URL.revokeObjectURL until the next event
+loop and adds a contract assertion; it does not change the bundle schema,
+permissions, or rendering.
+
+Public-catalog checks
+=====================
+
+1. The checked-in catalog is deterministic and current.
+2. Invalid licenses are rejected (witnessed red).
+3. Credential-shaped content is rejected without printing the value (witnessed red).
+4. A manually edited/stale catalog is rejected (witnessed red).
+5. A bundle whose SHA-256 does not match its content is rejected (witnessed red).
+6. A valid Dashboard-format bundle imports into the expected immutable path.
+7. Symlinks and unexpected files are rejected.
+8. Chinese and English public-boundary documentation is present.
+9. The public catalog component is wired into both locales.
+10. A real VitePress production build emits the catalog, content, and both pages.
+
+Security and privacy assertions
+===============================
+
+* Metadata keys are explicit at import and catalog-build time; private/unknown
+  fields are rejected before the importer creates a version directory.
+* The validator accepts only regular files and rejects symlinks.
+* Skill text is UTF-8, bounded to 128 KiB, and rejects NUL bytes.
+* Credential-shaped strings, private keys, and host-local home paths are blocked.
+* Skill content is rendered as plain text, not raw HTML.
+* Dashboard export is available only to a reviewer for a network-published skill.
+* The browser bundle is constructed from an allowlist and omits network_id,
+  skill_id, source_alias, user/node identifiers, content_hash from the private
+  record, and review notes.
+* Export downloads locally. It does not send content to anet.sh or another network.
+
+Known limits and deployment gates
+=================================
+
+* The scanner is a defense-in-depth validator, not a universal secret detector.
+  Public-repository review remains mandatory.
+* Public direct submission/federation is intentionally absent. Adding it requires
+  publisher identity, abuse controls, central moderation, immutable storage, and
+  an audit log.
+* Hub PR #596 and private Dashboard PR #3 must be merged and deployed before the
+  private workflow can be exercised in production.
+* The public catalog and stacked Dashboard export branches require independent
+  review, CI, and authorized merge/deployment.
+* Production UAT must prove: private submit -> private review/readback -> local
+  public bundle export -> public import/validation -> anet.sh catalog/detail read.
+
+Verdict
+=======
+
+Candidate implementation and isolated Docker evidence: PASS.
+Merge/deployment/public UAT: PENDING authorized review and rollout.

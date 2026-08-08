@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "slug": "skill-writing-guide",
+  "name": "Skill writing guide",
+  "description": "Turn a repeated agent workflow into a concise, testable SKILL.md.",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "publisher": {
+    "name": "Agent Network maintainers",
+    "url": "https://github.com/sleep2agi/agent-network"
+  },
+  "tags": ["documentation", "workflow", "skillhub"],
+  "published_at": "2026-08-08"
+}

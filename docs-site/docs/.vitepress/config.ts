@@ -40,6 +40,7 @@ export default withMermaid(defineConfig({
       themeConfig: {
         nav: [
           { text: '指南', link: '/guide/getting-started' },
+          { text: 'SkillHub', link: '/skillhub/' },
           { text: 'API', link: '/api/mcp-tools' },
           { text: '生态', link: '/ecosystem' },
           { text: '社群', link: '/community' },
@@ -139,6 +140,7 @@ export default withMermaid(defineConfig({
       themeConfig: {
         nav: [
           { text: 'Guide', link: '/en/guide/getting-started' },
+          { text: 'SkillHub', link: '/en/skillhub/' },
           { text: 'API', link: '/en/api/mcp-tools' },
           { text: 'Ecosystem', link: '/en/ecosystem' },
           { text: 'Community', link: '/en/community' },
