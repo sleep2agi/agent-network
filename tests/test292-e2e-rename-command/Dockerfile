@@ -1,6 +1,6 @@
 FROM oven/bun:1.3.14
 
-RUN apt-get update && apt-get install -y --no-install-recommends curl jq python3 && \
+RUN apt-get update && apt-get install -y --no-install-recommends curl jq python3 make g++ && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /repo
