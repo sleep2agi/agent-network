@@ -17,6 +17,11 @@ import { homedir } from "os";
 import { spawn, spawnSync, execSync, execFileSync } from "child_process";
 import { createHash, randomBytes, randomUUID } from "crypto";
 import {
+  atomicWritePrivateFile,
+  atomicWritePrivateJson,
+  ensurePrivateDirectory,
+} from "../src/private-state";
+import {
   writeMarker as writeCopresenceMarker,
   readMarker as readCopresenceMarker,
   removeMarker as removeCopresenceMarker,
@@ -597,7 +602,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   rawCfg.codexAppServerUrl = wsUrl;
   rawCfg.codexThreadId = threadId;
   delete rawCfg.session;
-  writeFileSync(rawCfgPath, JSON.stringify(rawCfg, null, 2) + "\n");
+  atomicWritePrivateJson(rawCfgPath, rawCfg);
 
   // ── piece ② bridge (agent-node adopt mode) ────────────────────────────
   // The bridge re-invokes `anet node start` in foreground under tmux; that
@@ -963,11 +968,9 @@ function loadGlobal(): Record<string, any> {
 
 function saveGlobal(data: Record<string, any>) {
   const dir = join(home, ".anet");
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  try { chmodSync(dir, 0o700); } catch {}
+  ensurePrivateDirectory(dir);
   const configPath = join(dir, "config.json");
-  writeFileSync(configPath, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
-  try { chmodSync(configPath, 0o600); } catch {}
+  atomicWritePrivateJson(configPath, data);
 }
 
 function loadServerConfig(): Record<string, any> {
@@ -1247,8 +1250,7 @@ function saveProfile(id: string, profile: Profile) {
     assertOpencodeNodeStateUntracked(dir);
     writeOpencodeRuntimeBinding(dir, opencodeBindingHome());
   } else {
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    try { chmodSync(dir, 0o700); } catch {}
+    ensurePrivateDirectory(dir);
   }
   const normalized = normalizeStoredProfile(id, profile);
   const toSave: Record<string, any> = {
@@ -1296,8 +1298,7 @@ function saveProfile(id: string, profile: Profile) {
     writeOpencodePrivateProfileFile(dir, "config.json", body);
   } else {
     const configPath = join(dir, "config.json");
-    writeFileSync(configPath, body, { mode: 0o600 });
-    try { chmodSync(configPath, 0o600); } catch {}
+    atomicWritePrivateFile(configPath, body);
   }
 }
 
@@ -6121,8 +6122,8 @@ async function daemonInitCommand() {
     flags: { dangerouslySkipPermissions: true, teammateMode: true },
   };
   const dir = join(nodesDir(), id);
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "config.json"), JSON.stringify(daemonConfig, null, 2) + "\n");
+  ensurePrivateDirectory(dir);
+  atomicWritePrivateJson(join(dir, "config.json"), daemonConfig);
 
   console.log(`[anet daemon] ✓ ${existing ? "re-initialized" : "created"} host_supervisor daemon "${id}"`);
   console.log(`              config:     .anet/nodes/${id}/config.json`);
@@ -6259,8 +6260,8 @@ async function importCommand() {
       session: s.resume_id,
     };
 
-    mkdirSync(nodeDir, { recursive: true });
-    writeFileSync(configPath, JSON.stringify({
+    ensurePrivateDirectory(nodeDir);
+    atomicWritePrivateJson(configPath, {
       anet_version: config.anet_version,
       node_id: config.node_id,
       node_name: config.node_name,
@@ -6269,7 +6270,7 @@ async function importCommand() {
       env: config.env,
       flags: config.flags,
       session: config.session,
-    }, null, 2) + "\n");
+    });
     console.log(`  ✅ ${s.alias} → ${projectDir}/.anet/nodes/${s.alias}/config.json`);
     created++;
   }
@@ -6868,7 +6869,7 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
         const newCfg = JSON.parse(readFileSync(newCfgPath, "utf-8"));
         if (oldCfg.session && oldCfg.session !== newCfg.session) {
           newCfg.session = oldCfg.session;
-          writeFileSync(newCfgPath, JSON.stringify(newCfg, null, 2) + "\n");
+          atomicWritePrivateJson(newCfgPath, newCfg);
           console.log(`[anet] re-synced session ${String(oldCfg.session).slice(0, 8)}… from old config (post-task writeback) — context preserved.`);
         }
       }
@@ -10247,7 +10248,7 @@ async function demoDebateCommand() {
       const cfgPath = join(nodesRoot, alias, "config.json");
       const cfg = JSON.parse(readFileSync(cfgPath, "utf-8"));
       cfg.systemPrompt = DEBATE_PROMPTS[role](topic);
-      writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+      atomicWritePrivateJson(cfgPath, cfg);
     }
     console.log(`        ✓ 创建/更新 6 个 agent`);
   } finally {
@@ -10638,7 +10639,7 @@ async function demoSocialMediaCommand() {
       const cfgPath = join(nodesRoot, alias, "config.json");
       const cfg = JSON.parse(readFileSync(cfgPath, "utf-8"));
       cfg.systemPrompt = SOCIAL_PROMPTS[role](topic, platform);
-      writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+      atomicWritePrivateJson(cfgPath, cfg);
     }
     console.log(`        ✓ 4 个 agent 就位`);
   } finally {
@@ -11061,7 +11062,7 @@ async function demoPrReviewCommand() {
       const cfgPath = join(nodesRoot, alias, "config.json");
       const cfg = JSON.parse(readFileSync(cfgPath, "utf-8"));
       cfg.systemPrompt = PR_REVIEW_PROMPTS[role]();
-      writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+      atomicWritePrivateJson(cfgPath, cfg);
     }
     console.log(`        ✓ 创建/更新 4 个 agent`);
   } finally {
@@ -12233,7 +12234,7 @@ async function migrateTokenToEnvRefCommand() {
   }
   const bakPath = `${cfgPath}.bak-${Date.now()}`;
   try {
-    writeFileSync(bakPath, readFileSync(cfgPath, "utf-8"));
+    atomicWritePrivateFile(bakPath, readFileSync(cfgPath, "utf-8"));
   } catch (e: any) {
     console.error(`[anet] Failed to write backup ${bakPath}: ${e.message}`);
     process.exit(1);
@@ -12409,7 +12410,7 @@ async function migrateNode(id: string, opts: { hub: string; utok: string; networ
     }
   }
 
-  writeFileSync(p, JSON.stringify(raw, null, 2) + "\n");
+  atomicWritePrivateJson(p, raw);
   return { ok: true, changes };
 }
 

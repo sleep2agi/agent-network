@@ -4,7 +4,9 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -18,6 +20,7 @@ import {
   computeApplyMode,
   atomicWriteJson,
   backupConfigPrev,
+  repairPrivateConfigPermissions,
   loadConfigWithSelfHeal,
   mergePatch,
   buildConfigSnapshot,
@@ -119,6 +122,45 @@ describe("atomicWriteJson — temp + rename", () => {
     // No .tmp file should remain after the rename.
     const tmpFiles = require("node:fs").readdirSync(scratch).filter((f: string) => f.includes(".tmp."));
     expect(tmpFiles.length).toBe(0);
+  });
+});
+
+describe("#472 private config permissions", () => {
+  const mode = (path: string) => lstatSync(path).mode & 0o777;
+
+  for (const mask of [0o000, 0o002, 0o022, 0o077]) {
+    test(`atomic write is 0600 under umask ${mask.toString(8)}`, () => {
+      const path = join(scratch, "config.json");
+      chmodSync(scratch, 0o777);
+      const previous = process.umask(mask);
+      try { atomicWriteJson(path, { token: "ntok_synthetic" }); }
+      finally { process.umask(previous); }
+      expect(mode(path)).toBe(0o600);
+      expect(mode(scratch)).toBe(0o700);
+    });
+  }
+
+  test("repairs existing primary, backup, and parent before token read", () => {
+    const path = join(scratch, "config.json");
+    writeFileSync(path, JSON.stringify({ token: "ntok_primary" }));
+    writeFileSync(`${path}.prev`, JSON.stringify({ token: "ntok_backup" }));
+    chmodSync(scratch, 0o775);
+    chmodSync(path, 0o664);
+    chmodSync(`${path}.prev`, 0o644);
+    repairPrivateConfigPermissions(path);
+    expect(mode(scratch)).toBe(0o700);
+    expect(mode(path)).toBe(0o600);
+    expect(mode(`${path}.prev`)).toBe(0o600);
+  });
+
+  test("backup atomically replaces a legacy broad .prev", () => {
+    const path = join(scratch, "config.json");
+    writeFileSync(path, JSON.stringify({ token: "ntok_fresh" }), { mode: 0o600 });
+    writeFileSync(`${path}.prev`, JSON.stringify({ token: "ntok_old" }));
+    chmodSync(`${path}.prev`, 0o664);
+    backupConfigPrev(path);
+    expect(mode(`${path}.prev`)).toBe(0o600);
+    expect(JSON.parse(readFileSync(`${path}.prev`, "utf8")).token).toBe("ntok_fresh");
   });
 });
 

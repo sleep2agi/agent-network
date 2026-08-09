@@ -87,6 +87,7 @@ import {
   computeApplyMode as computeConfigApplyMode,
   atomicWriteJson,
   backupConfigPrev,
+  repairPrivateConfigPermissions,
   loadConfigWithSelfHeal,
   mergePatch,
   buildConfigSnapshot,
@@ -245,6 +246,9 @@ if (opts.config) {
   const cfgPath = isAbsolute(opts.config) ? opts.config : join(process.cwd(), opts.config);
   const explicitlyOpencode = opts.runtime === "opencode-cli" || opts.runtime === "opencode";
   try {
+    // #472 — repair legacy umask-derived 0644/0664 state before reading a
+    // token. The FD-based helper refuses symlink/hardlink substitution.
+    repairPrivateConfigPermissions(cfgPath);
     // Inspect both primary and .prev without following a suspicious leaf.
     // This also lets a config-only direct launch select the hardened loader.
     opencodeConfigState = explicitlyOpencode || configStateDeclaresOpencode(cfgPath);
@@ -328,6 +332,8 @@ if (!opts.config && ALIAS) {
   const newPath = join(process.cwd(), ".anet", "nodes", ALIAS, "config.json");
   const oldPath = join(process.cwd(), ".anet", "profiles", `${ALIAS}.json`);
   const profilePath = existsSync(newPath) ? newPath : oldPath;
+  try { repairPrivateConfigPermissions(profilePath); }
+  catch (e: any) { console.error(`[agent-node] Refusing unsafe config state: ${e?.message || e}`); process.exit(1); }
   const profile = loadJson(profilePath);
   if (profile) {
     fileConfig = { ...profile, ...fileConfig };
@@ -336,7 +342,10 @@ if (!opts.config && ALIAS) {
   }
 }
 
-const globalConfig = loadJson(join(home, ".anet", "config.json")) || {};
+const globalConfigPath = join(home, ".anet", "config.json");
+try { repairPrivateConfigPermissions(globalConfigPath); }
+catch (e: any) { console.error(`[agent-node] Refusing unsafe global config: ${e?.message || e}`); process.exit(1); }
+const globalConfig = loadJson(globalConfigPath) || {};
 if (globalConfig.hub && !fileConfig.hub) fileConfig.hub = globalConfig.hub;
 if (globalConfig.token && !fileConfig.token) fileConfig.token = globalConfig.token;
 
@@ -756,7 +765,7 @@ function writebackSession(sessionId: string) {
     const cfg = JSON.parse(readFileSync(configFilePath, "utf-8"));
     if (cfg.session === sessionId) return; // 已是最新
     cfg.session = sessionId;
-    writeFileSync(configFilePath, JSON.stringify(cfg, null, 2) + "\n");
+    atomicWriteJson(configFilePath, cfg);
     debug(`session 写回: ${configFilePath} → ${sessionId.slice(0, 8)}...`);
   } catch (e: any) {
     warn(`writebackSession failed: ${e.message}`);
@@ -771,7 +780,7 @@ function writebackGrokSession(sessionId: string) {
     const key = GROK_EXECUTION_MODE === "cli" ? "grokCliSession" : "grokSession";
     if (cfg[key] === sessionId) return;
     cfg[key] = sessionId;
-    writeFileSync(configFilePath, JSON.stringify(cfg, null, 2) + "\n");
+    atomicWriteJson(configFilePath, cfg);
     debug(`${key} 写回: ${configFilePath} → ${sessionId.slice(0, 8)}...`);
   } catch (e: any) {
     warn(`writebackGrokSession failed: ${e.message}`);
@@ -788,7 +797,7 @@ function writebackCodexThread(threadId: string) {
     const cfg = JSON.parse(readFileSync(configFilePath, "utf-8"));
     if (cfg.codexThreadId === threadId) return;
     cfg.codexThreadId = threadId;
-    writeFileSync(configFilePath, JSON.stringify(cfg, null, 2) + "\n");
+    atomicWriteJson(configFilePath, cfg);
     debug(`codexThreadId 写回: ${configFilePath} → ${threadId.slice(0, 8)}...`);
   } catch (e: any) {
     warn(`writebackCodexThread failed: ${e.message}`);
@@ -803,7 +812,7 @@ function clearGrokSession(reason: string) {
     const key = GROK_EXECUTION_MODE === "cli" ? "grokCliSession" : "grokSession";
     if (!cfg[key]) return;
     delete cfg[key];
-    writeFileSync(configFilePath, JSON.stringify(cfg, null, 2) + "\n");
+    atomicWriteJson(configFilePath, cfg);
     warn(`cleared ${key} (${reason})`);
   } catch (e: any) {
     warn(`clearGrokSession failed: ${e.message}`);
