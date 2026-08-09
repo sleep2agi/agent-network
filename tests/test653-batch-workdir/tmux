@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "new-session" ]]; then
+  pwd >> "${TEST653_TMUX_CWDS:?}"
+fi
+exit 0

@@ -106,6 +106,7 @@ import {
   collectClaudeVendorEnvForCreate,
   planPlainSecretEnvRewrites,
 } from "../src/claude-vendor-env";
+import { normalizeBatchWorkdir } from "../src/batch-workdir";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -11629,6 +11630,11 @@ async function createBatch(opts: BatchOptions): Promise<BatchResult> {
     validateNodeName(opts.leaderAlias);
   }
 
+  // #178 — normalize once, before the loop changes process.cwd(). A literal
+  // wizard value such as `~/design` is not expanded by Node; if left relative,
+  // every process.chdir() iteration nests another `~/design` segment.
+  opts = { ...opts, workdir: normalizeBatchWorkdir(opts.workdir) };
+
   const tmuxPrefix = opts.team || opts.prefix;
   const gc = loadGlobal();
   mkdirSync(opts.workdir, { recursive: true });
@@ -11793,11 +11799,13 @@ function batchLifecycle(opts: { prefix: string; verb: "start" | "stop" | "restar
   if (verb === "stop") return;
 
   if (verb === "cleanup") {
-    const dir = workdir;
-    if (!dir) {
+    if (!workdir) {
       console.error("[anet] cleanup 需要 --workdir <path> 指明清理目录。");
       return;
     }
+    // Use the same one-time expansion as createBatch. Besides matching create,
+    // this prevents cleanup from treating a literal `~/...` as cwd-relative.
+    const dir = normalizeBatchWorkdir(workdir);
     if (!existsSync(dir)) {
       console.error(`[anet] 工作目录不存在: ${dir}`);
       return;
