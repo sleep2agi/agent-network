@@ -1,0 +1,51 @@
+# test647 — REST explicit-column response contracts
+
+Status: PASS
+Tested source: ec66f1172de03ab0cd3cb63872021562ce7844ef
+Base: d899f697f46222edd6c479f376f3cd343998d791
+Docker image: anet-test647:dev
+Docker image ID: sha256:dd865aa7c940db923b6180507fb5d6e48a12f229b43967af5f50f7ff28d6ce76
+Embedded ENV: TEST647_SOURCE_COMMIT=ec66f1172de03ab0cd3cb63872021562ce7844ef
+Run date: 2026-08-09T15:51:38Z
+
+Scope audited
+
+- REST rows pinned: networks list/detail, full status sessions, audit log,
+  task events, task list/detail, completions, scheduled tasks.
+- Internal existence/ownership reads narrowed: license, upload network lookup,
+  node delete, network rename/delete, invite redemption.
+- Current response keys are preserved. The change only prevents a future
+  ALTER TABLE from silently widening the wire response.
+- Dashboard consumer audit: status telemetry/model/runtime, task/chat fields,
+  network identity/description/owner, audit/events, completion fallback.
+- Mobile consumer audit: light status, task detail/history, meta_json
+  attachments, task events. meta_json remains in the explicit task contract.
+- Remaining production SELECT-star queries are classified as non-REST:
+  server/src/tools.ts is MCP-only; server/src/rename.ts is internal 2PC state.
+
+Evidence
+
+L0 production build: PASS
+- bun build server/src/index.ts --target bun
+- 258 modules, output 1.52 MB
+
+L1 REST source classification: PASS
+- server.ts, auth.ts, scheduled-tasks.ts contain zero executable SELECT-star
+  queries after the change.
+
+L2 real HTTP + SQLite shape gate: PASS
+- 5 tests, 0 failures, 29 assertions.
+- Each REST-backed table was ALTERed with future_internal_only before requests.
+- Every endpoint preserved its documented/current key set.
+- future_internal_only was absent everywhere.
+- scheduled-task created_by and schedule_json remained absent.
+
+L3 witnessed-red mutations: PASS
+- tasks REST projection -> SELECT-star: rc=1; leaked sentinel detected.
+- joined network REST projection -> n.*: rc=1; leaked sentinel detected.
+- scheduled-task list projection -> SELECT-star: rc=1; leaked sentinel detected.
+
+L4 restored source: PASS
+- 5 tests, 0 failures, 29 assertions.
+
+Result: PASS
