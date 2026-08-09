@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const PRIVATE_DB_DIR = mkdtempSync(join(tmpdir(), "anet-task-pagination-"));
-process.env.COMMHUB_DB = join(PRIVATE_DB_DIR, "hub.db");
+process.env.COMMHUB_DB ||= join(PRIVATE_DB_DIR, "hub.db");
 
 let db: typeof import("./db.js").db;
 let register: typeof import("./auth.js").register;

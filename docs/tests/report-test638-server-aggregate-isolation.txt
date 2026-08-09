@@ -1,0 +1,100 @@
+# test638 — server aggregate process/database isolation (#434)
+
+Verdict: PASS
+
+## Provenance
+
+- Branch base after #435: `19952094711babc5259e2b7953deba255304167b`
+- Witnessed-red source before rebase: `83d2490bed1ce8e7a06f8c5eaa8623220f82042c`
+- Exact tested fixed source: `606bac0564f5db8c5ab11cde96d66018cacda9e8`
+- Docker image/tag: `anet-test638:dev`
+- Image ID: `sha256:a7eaad5386fd3909e95fe3af822908a1a430a6ca0557ab3654cf1a50d94e06e0`
+- Embedded image env: `TEST638_SOURCE_COMMIT=606bac0564f5db8c5ab11cde96d66018cacda9e8`
+- Bun: 1.3.14
+
+## Witnessed red
+
+The original flat aggregate was run under `strace -f -e openat` before the
+runner existed. It reached 821 pass / 4 fail / 2506 assertions, opened the
+single parent `/tmp/test638-aggregate.db` four times, and opened neither
+suite-declared database:
+
+```
+uploads_intended_db_openat_count=0
+host_supervisors_intended_db_openat_count=0
+```
+
+The scheduled-task race worker printed that it had inherited another suite's
+`/tmp/anet-509-db-.../commhub.db`, then timed out waiting for its second worker.
+The same scheduled-task file with one explicit DB passed 12/12 (106 asserts).
+This proved that the red was aggregate process state, not scheduler behavior,
+and that a repeatable flat result would not prove database isolation.
+
+The final harness also mutates only the per-file split to a shared path. The
+two real HTTP suite maps collapse from two unique DB paths to one. The positive
+cross-suite fixture gate therefore turns red even if both child test processes
+individually happen to exit zero.
+
+## Fixed evidence
+
+One straced normal run plus concurrent normal/reverse runs produced identical:
+
+```
+files=57 pass=845 fail=0 skip=0 expects=2579 bad=false
+```
+
+Every run reported 57 distinct `TEST_DB_MAP` paths. In every order:
+
+- `api-host-supervisors-fallback`: 8 pass / 0 fail
+- `uploads-http`: 15 pass / 0 fail
+- `scheduled-tasks-http`: 12 pass / 0 fail
+- no connection-refused, DB-guard, suite-timeout, or `FAIL_SUITE` marker
+
+The syscall trace contained zero opens of the inherited shared DB and no
+`commhub.db` outside the selected per-file root. The two real fixtures were
+then queried from their retained SQLite files:
+
+```
+uploads DB: upload_admin rows=1, solo rows=0
+host DB:    upload_admin rows=0, solo rows=1
+```
+
+Thus the fixtures landed in different databases and did not leak across
+suites. The inherited shared DB was not created.
+
+## Failure gates
+
+- Running either real HTTP file without `COMMHUB_DB` exits non-zero with
+  `explicit_test_database_required`.
+- An injected child assertion failure makes the runner exit 1 and emit
+  `FAIL_SUITE`.
+- An injected hanging child with a 200 ms limit makes the runner exit 1 and
+  report `timeout=true`.
+- SIGTERM during an injected hanging child makes the runner exit 143 and
+  leaves no matching child process.
+- Deleting the per-file DB split collapses two fixture DB maps to one; the
+  positive uniqueness/cross-fixture gate rejects it.
+
+Observed final failure-gate codes:
+
+```
+nonzero_rc=1 timeout_rc=1 signal_rc=143 mutation_unique_db_paths=1
+RESULT: PASS
+```
+
+## Acceptance mapping and trade-off
+
+- Aggregate green/reaches assertions: 845/0/2579, including the historical
+  host-supervisor assertions and the newer scheduler assertions.
+- Intended temporary DBs: syscall path gate plus actual fixture rows.
+- No port/connection/timeout/DB guard failures: checked in all three runs.
+- Repeatability/order: normal plus concurrent normal/reverse counts identical.
+- Test DATABASE_URL safety: the harness supplies a fake inherited PostgreSQL
+  URL; children explicitly clear it, while #435 remains the in-adapter guard.
+
+The canonical command remains `cd server && bun run test`, but now starts one
+process per automatically enumerated test file. This is slower than flat
+`bun test src/`; the isolation is test-only and reversible, and production
+server/db/bin behavior is untouched. The rejected #438 fixed manifest,
+`test:raw` escape hatch, copied env helper, and import-main changes were not
+revived.

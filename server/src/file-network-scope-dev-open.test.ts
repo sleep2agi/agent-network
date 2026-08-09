@@ -20,7 +20,7 @@ import { tmpdir } from "os";
 const SERVER_DB = mkdtempSync(join(tmpdir(), "anet-503-devopen-db-")) + "/commhub.db";
 const UPLOADS_DIR = mkdtempSync(join(tmpdir(), "anet-503-devopen-fs-"));
 
-process.env.COMMHUB_DB = SERVER_DB;
+process.env.COMMHUB_DB ||= SERVER_DB;
 process.env.COMMHUB_UPLOADS_DIR = UPLOADS_DIR;
 process.env.HOST = "127.0.0.1";
 process.env.COMMHUB_DEV_OPEN = "1";

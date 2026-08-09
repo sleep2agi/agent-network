@@ -27,7 +27,7 @@ const UPLOADS_DIR = mkdtempSync(join(tmpdir(), "anet-495-devopen-fs-"));
 
 // Set env BEFORE importing anything that touches db-adapter.ts or
 // server.ts (both capture env at module load).
-process.env.COMMHUB_DB = SERVER_DB;
+process.env.COMMHUB_DB ||= SERVER_DB;
 process.env.COMMHUB_UPLOADS_DIR = UPLOADS_DIR;
 process.env.HOST = "127.0.0.1";
 process.env.COMMHUB_DEV_OPEN = "1";

@@ -34,7 +34,7 @@ const MASTER_TOKEN = process.env.COMMHUB_AUTH_TOKEN ?? `master-495-${Date.now()}
 // Set env BEFORE importing anything that pulls in db-adapter.ts (which
 // refuses to open a default DB under NODE_ENV=test) or server.ts (which
 // captures DEV_OPEN + AUTH_TOKEN at module load).
-process.env.COMMHUB_DB = SERVER_DB;
+process.env.COMMHUB_DB ||= SERVER_DB;
 process.env.COMMHUB_UPLOADS_DIR = UPLOADS_DIR;
 process.env.HOST = "127.0.0.1";
 process.env.COMMHUB_AUTH_TOKEN = MASTER_TOKEN;

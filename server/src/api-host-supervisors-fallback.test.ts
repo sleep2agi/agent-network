@@ -20,13 +20,10 @@
 // server on an ephemeral port with a temp DB, hit it with fetch().
 
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
-import { join } from "path";
-import { tmpdir } from "os";
+import "./require-explicit-test-db.js";
 import { register, login, createNetwork } from "./auth.js";
 import { db } from "./db.js";
 
-const SERVER_DB = mkdtempSync(join(tmpdir(), "anet-hs-fallback-db-")) + "/commhub.db";
 // #438 corrective: private bootServer({ port: 0 }) instance (see
 // uploads-http.test.ts for rationale).
 let BASE = "";
@@ -42,7 +39,6 @@ let multiNetworkA = "", multiNetworkB = "";
 let soloDaemonAlias = "";
 
 beforeAll(async () => {
-  process.env.COMMHUB_DB = SERVER_DB;
   process.env.HOST = "127.0.0.1";
 
   const suffix = `${Date.now()}_${Math.floor(Math.random() * 1000)}`;
@@ -155,7 +151,6 @@ function seedHostSupervisorDaemon(opts: {
 
 afterAll(() => {
   try { server?.stop?.(true); } catch {}
-  try { rmSync(SERVER_DB, { recursive: true, force: true }); } catch {}
 });
 
 async function get(path: string, token: string): Promise<{ status: number; body: any }> {

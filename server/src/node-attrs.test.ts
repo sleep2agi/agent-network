@@ -25,7 +25,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 
 const tmpDb = join(mkdtempSync(join(tmpdir(), "anet-attrs-")), "commhub.db");
-process.env.COMMHUB_DB = tmpDb;
+process.env.COMMHUB_DB ||= tmpDb;
 const PORT = 23000 + Math.floor(Math.random() * 1500);
 process.env.PORT = String(PORT);
 process.env.HOST = "127.0.0.1";
