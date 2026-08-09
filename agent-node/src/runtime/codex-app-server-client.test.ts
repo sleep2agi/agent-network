@@ -9,7 +9,10 @@
 // not spawn a real `codex app-server` here — that lives in the docker smoke.
 
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { CodexAppServerClient } from "./codex-app-server-client";
+import {
+  CodexAppServerClient,
+  codexAppServerConnectionError,
+} from "./codex-app-server-client";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Fake WebSocket server on loopback. Small helper to avoid pulling in `ws`.
@@ -231,6 +234,35 @@ describe("CodexAppServerClient — dispatch correctness (RFC-030 §7 + bug fix)"
     expect(parsed.error.code).toBe(-32000);
     expect(parsed.error.message).toBe("not permitted");
     expect(parsed.error.data.hint).toBe("no perms");
+  });
+});
+
+describe("CodexAppServerClient — dead shared endpoint diagnostics (#455)", () => {
+  test("wraps an empty TypeError with endpoint and remediation", () => {
+    const err = codexAppServerConnectionError(
+      "ws://127.0.0.1:4500/rpc?token=secret-value",
+      new TypeError(),
+    );
+    expect(err.message).toContain("Cannot connect to codex app-server at ws://127.0.0.1:4500/rpc");
+    expect(err.message).toContain("is it running?");
+    expect(err.message).toContain("TypeError");
+    expect(err.message).not.toContain("secret-value");
+  });
+
+  test("real dead loopback endpoint rejects and emits a non-empty actionable error", async () => {
+    const listener = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
+    const port = listener.port;
+    listener.stop(true);
+
+    const client = new CodexAppServerClient({ url: `ws://127.0.0.1:${port}` });
+    const emitted: Error[] = [];
+    client.on("error", (error) => emitted.push(error as Error));
+
+    await expect(client.connect()).rejects.toThrow("Cannot connect to codex app-server");
+    expect(emitted.length).toBeGreaterThan(0);
+    expect(emitted[0].message).toContain(`ws://127.0.0.1:${port}`);
+    expect(emitted[0].message).toContain("is it running?");
+    expect(emitted[0].message.trim().length).toBeGreaterThan(40);
   });
 });
 

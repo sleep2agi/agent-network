@@ -109,6 +109,42 @@ export interface CodexAppServerClientOptions {
   clientLabel?: string;
 }
 
+function safeWebSocketEndpoint(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl);
+    parsed.username = "";
+    parsed.password = "";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    // Do not echo a malformed URL verbatim: it may still contain a query
+    // token. The scheme is enough to tell the operator which config to check.
+    const scheme = rawUrl.match(/^[A-Za-z][A-Za-z0-9+.-]*:/)?.[0] ?? "WebSocket";
+    return `${scheme}<invalid endpoint>`;
+  }
+}
+
+function errorDetail(cause: unknown): string {
+  if (cause instanceof Error) {
+    const own = cause.message.trim() || cause.name.trim();
+    const nested = errorDetail((cause as Error & { cause?: unknown }).cause);
+    if (nested && nested !== own && nested !== "WebSocket connection failed") {
+      return own ? `${own}: ${nested}` : nested;
+    }
+    return own || "WebSocket connection failed";
+  }
+  if (typeof cause === "string" && cause.trim()) return cause.trim();
+  return "WebSocket connection failed";
+}
+
+/** Actionable, non-empty and credential-safe transport failure for operators. */
+export function codexAppServerConnectionError(url: string, cause: unknown): Error {
+  return new Error(
+    `Cannot connect to codex app-server at ${safeWebSocketEndpoint(url)} — is it running? (${errorDetail(cause)})`,
+  );
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Client
 // ────────────────────────────────────────────────────────────────────────────
@@ -173,7 +209,10 @@ export class CodexAppServerClient extends EventEmitter {
       };
       const onErrorInit = (ev: Event) => {
         // Extract a useful message from the DOM event when possible.
-        const err = extractError(ev, `connect ${this.opts.url}`);
+        const err = codexAppServerConnectionError(
+          this.opts.url,
+          extractError(ev, `connect ${safeWebSocketEndpoint(this.opts.url)}`),
+        );
         this.ws!.removeEventListener("open", onOpen);
         reject(err);
       };
@@ -193,7 +232,10 @@ export class CodexAppServerClient extends EventEmitter {
         this.pending.clear();
       });
       this.ws!.addEventListener("error", (ev: Event) => {
-        this.emit("error", extractError(ev, "ws steady-state"));
+        this.emit(
+          "error",
+          codexAppServerConnectionError(this.opts.url, extractError(ev, "ws steady-state")),
+        );
       });
     });
   }
