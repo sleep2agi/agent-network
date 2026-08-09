@@ -2,12 +2,12 @@
 
 Date: 2026-08-10 (Asia/Shanghai)
 Issue: #91
-Base commit: 6769d267017759cff6de5f2aea84c51a50184f9a
-Source commit under test: 074ae852f404f80684a25ffb6965d8d62e7661e9
+Base commit: 124fdabb33c2f4c5731d4dbe4d55387fbea211e5
+Source commit under test: 9b1b011200e7a3d4d3c63e7deb473b108ae80531
 Docker tag: anet-test654:dev (fixed/reused tag)
-Image ID: sha256:6361c65b1dfdca8f525f3f5724e7b6c4d9b6ad80fb1287fcf997c2fdab017617
-Image size: 218173321 bytes
-Embedded ENV: TEST654_SOURCE_COMMIT=074ae852f404f80684a25ffb6965d8d62e7661e9
+Image ID: sha256:08c093e00d0dc71d80a2049d6db893ee7f45a0e21eaf49b1a6afbabde21e6795
+Image size: 218172374 bytes
+Embedded ENV: TEST654_SOURCE_COMMIT=9b1b011200e7a3d4d3c63e7deb473b108ae80531
 
 ## Scope
 
@@ -22,24 +22,24 @@ Embedded ENV: TEST654_SOURCE_COMMIT=074ae852f404f80684a25ffb6965d8d62e7661e9
 - Unmanaged, ambiguous, reused-PID, foreign-command, global-install, and uninspectable
   listeners fail closed. The implementation never uses `pkill`, `killall`, or prefix matching.
 - No production process, port, config, or global package was touched. All listener tests used
-  isolated container ports 33101-33106 and fake Dashboard/npm/npx fixtures.
+  isolated container ports 33101-33108 and fake Dashboard/npm/npx fixtures.
 
 ## Commands
 
 ```sh
 sg docker -c 'docker build \
-  --build-arg=TEST654_SOURCE_COMMIT=074ae852f404f80684a25ffb6965d8d62e7661e9 \
+  --build-arg=TEST654_SOURCE_COMMIT=9b1b011200e7a3d4d3c63e7deb473b108ae80531 \
   -t anet-test654:dev \
   -f tests/test654-dashboard-managed-launch/Dockerfile .'
 
 sg docker -c 'docker run --rm \
-  -v /tmp/test654-toctou.vAh0sP:/artifacts \
+  -v /tmp/test654-restamp.8VfVHV:/artifacts \
   anet-test654:dev'
 ```
 
 ## Result
 
-Final: `RESULT pass=12 fail=0`
+Final: `RESULT pass=14 fail=0`
 
 - L0: helper unit tests 4 pass / 0 fail / 16 assertions; agent-network TypeScript
   `tsc --noEmit` passed.
@@ -50,26 +50,31 @@ Final: `RESULT pass=12 fail=0`
   version change terminated only the exact previously recorded stale PID and recorded the
   replacement.
 - L4: the listener birth fingerprint was changed after the cleanup decision but before the
-  signal; the CLI refused to signal it and the original listener remained alive.
+  signal; a second fixture changed both birth and command to model same-PID foreign reuse.
+  The CLI refused both signals and both original listeners remained alive.
 - L5: a deliberately broken `lsof` could not authorize cleanup; the unrelated listener
   remained alive.
-- L6: all three safety mutations turned red, followed by a restored green unit run.
+- L6: all four safety mutations turned red, followed by a restored green unit run.
 
 Runner output SHA256:
-`a482ee38be5af03e66d035643acb161a0b2b49d07e241c47ff09d538a0c538cb`
+`3e070df99bdb91cc002e91633c0da2d08b88177403d28c388fd100a483e5fa41`
 
 ## Witnessed-red evidence
 
 1. Removed version/source equality from the same-release gate. The version-change test failed
    because the stale 0.6.0 listener was incorrectly treated as already running.
-   Artifact SHA256: `32b1ca89290d4eedaf4979401300ed9da5a923e5015b2b0ff183d535a91c87a8`.
+   Artifact SHA256: `248047309c29d13860c777872b4212765e72fc6b58a07c4fe41332d2fd25574d`.
 2. Allowed an unmanaged listener to enter the termination path. The fail-closed matrix failed
    because `record: null` became `terminate_owned_stale` instead of `refuse`.
-   Artifact SHA256: `f5a737f9deb3b8d7cd0f5dda00dc1bbfdd1044198cfca2b8f2f20db6ba748176`.
+   Artifact SHA256: `0e521d43027f37f7abcb9fa93160dbd301be5205bb96821502ec5d394e68e9a4`.
 3. Removed the immediate pre-SIGTERM revalidation while leaving the race fixture unchanged.
    The fixture changed the birth fingerprint between the authorization decision and signal;
    the mutated CLI killed the still-live listener, so the unchanged test failed.
-   Artifact SHA256: `8bf1c6dea83773860424ced55e040054e40440196a6abb8695e6610c716a3488`.
+   Artifact SHA256: `f667af1372837bfe57543c99d9d7322c6fdc62f068485ad45abaa4be7aba7863`.
+4. Removed the same pre-SIGTERM revalidation and ran the distinct same-PID foreign-reuse
+   fixture. Its fake process changed both birth fingerprint and command identity after the
+   decision; the mutated CLI killed it, so the unchanged test failed.
+   Artifact SHA256: `9fb6009be67e5c33a3cc96b58722e7e6ab31a6892725604f99b20bd2e3d51850`.
 
 These mutations assert behavior, not source-text counts: deleting any authorization or
 pre-signal identity gate causes the unchanged test suite to fail.

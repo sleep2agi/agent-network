@@ -88,19 +88,32 @@ cat >"$RACE_BIN/ps" <<'SH'
 set -Eeuo pipefail
 case " $* " in
   *" -o lstart= "*)
-    if [[ -e "${RACE_PS_STATE:?}" ]]; then printf 'birth-2\n'; else printf 'birth-1\n'; : >"$RACE_PS_STATE"; fi
+    if [[ "${RACE_CHANGE_BIRTH:-1}" == 1 ]]; then
+      if [[ -e "${RACE_BIRTH_STATE:?}" ]]; then printf 'birth-2\n'; else printf 'birth-1\n'; : >"$RACE_BIRTH_STATE"; fi
+    else
+      printf 'birth-1\n'
+    fi
     ;;
-  *" -o command= "*) printf 'node /fixture/agent-network-dashboard/server.js\n' ;;
+  *" -o command= "*)
+    if [[ "${RACE_CHANGE_COMMAND:-0}" == 1 && -e "${RACE_COMMAND_STATE:?}" ]]; then
+      printf '/usr/bin/foreign-service --same-pid\n'
+    else
+      printf 'node /fixture/agent-network-dashboard/server.js\n'
+      : >"${RACE_COMMAND_STATE:?}"
+    fi
+    ;;
   *) exec /usr/bin/ps "$@" ;;
 esac
 SH
 chmod +x "$RACE_BIN/ps"
 
-run_birth_race(){
-  local port="$1" log="$2" pid rc alive=0
+run_identity_race(){
+  local port="$1" log="$2" change_birth="$3" change_command="$4" pid rc alive=0
   local record="$HOME/.anet/server/dashboard-$port.json"
-  export RACE_PS_STATE="$WORK/race-ps-$port.state"
-  rm -f "$RACE_PS_STATE" "$record"
+  export RACE_CHANGE_BIRTH="$change_birth" RACE_CHANGE_COMMAND="$change_command"
+  export RACE_BIRTH_STATE="$WORK/race-birth-$port.state"
+  export RACE_COMMAND_STATE="$WORK/race-command-$port.state"
+  rm -f "$RACE_BIRTH_STATE" "$RACE_COMMAND_STATE" "$record"
   PORT="$port" HOSTNAME=127.0.0.1 /usr/bin/node "$TEST/agent-network-dashboard/server.js" &
   pid=$!
   wait_listener "$port" >/dev/null
@@ -118,9 +131,12 @@ JSON
     kill "$cleanup_pid" 2>/dev/null || true
     wait "$cleanup_pid" 2>/dev/null || true
   done
-  rm -f "$record" "$RACE_PS_STATE"
+  rm -f "$record" "$RACE_BIRTH_STATE" "$RACE_COMMAND_STATE"
   return "$safe"
 }
+
+run_birth_race(){ run_identity_race "$1" "$2" 1 0; }
+run_foreign_reuse_race(){ run_identity_race "$1" "$2" 1 1; }
 
 echo "== L0 unit + typecheck =="
 cd "$ROOT/agent-network"
@@ -201,6 +217,9 @@ echo "== L4 PID birth is revalidated immediately before kill =="
 if run_birth_race 33105 "$ART/birth-race.log"; then
   ok "birth change between decision and signal refuses kill; listener remains alive"
 else bad "birth-change race was not stopped before signal"; fi
+if run_foreign_reuse_race 33107 "$ART/foreign-reuse-race.log"; then
+  ok "same PID reused by a foreign identity before signal is refused and remains alive"
+else bad "foreign PID-reuse race was not stopped before signal"; fi
 
 echo "== L5 missing inspector cannot authorize cleanup =="
 for cmd in bun node npm npx ps which timeout; do target="$(command -v "$cmd")"; ln -sf "$target" "$NO_LSOF_BIN/$cmd"; done
@@ -234,6 +253,11 @@ bun test "$ROOT/agent-network/src/dashboard-managed-process.test.ts"
 cp "$CLI" "$WORK/cli.ts.orig"
 sed -i '0,/if (!revalidateExactManagedDashboard(pid, port, expectedRecord)) return false;/{//d;}' "$CLI"
 expect_red birth-recheck run_birth_race 33106 "$ART/birth-recheck-inner.log"
+cp "$WORK/cli.ts.orig" "$CLI"
+
+cp "$CLI" "$WORK/cli.ts.orig"
+sed -i '0,/if (!revalidateExactManagedDashboard(pid, port, expectedRecord)) return false;/{//d;}' "$CLI"
+expect_red foreign-reuse-recheck run_foreign_reuse_race 33108 "$ART/foreign-reuse-recheck-inner.log"
 cp "$WORK/cli.ts.orig" "$CLI"
 
 printf 'RESULT pass=%s fail=%s\n' "$PASS" "$FAIL"
