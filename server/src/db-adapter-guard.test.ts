@@ -60,4 +60,26 @@ describe("#435 inherited DATABASE_URL guard", () => {
       })).toEqual({ kind: "sqlite", path: "/tmp/isolated.db" });
     }
   });
+
+  test("non-server callers cannot silently fall through to the production default SQLite path", () => {
+    for (const NODE_ENV of [undefined, "development", "production"]) {
+      expect(() => resolveDatabaseTarget({ ...BASE_ENV, NODE_ENV }))
+        .toThrow(/explicit COMMHUB_DB|COMMHUB_SERVER=1/);
+    }
+  });
+
+  test("the explicit server boot capability permits the canonical default SQLite path", () => {
+    expect(resolveDatabaseTarget({
+      ...BASE_ENV,
+      NODE_ENV: "production",
+      COMMHUB_SERVER: "1",
+    })).toEqual({ kind: "sqlite", path: "/nonexistent/.commhub/commhub.db" });
+  });
+
+  test("lookalike server capability values fail closed", () => {
+    for (const COMMHUB_SERVER of ["", "true", "yes", "01", " 1"] ) {
+      expect(() => resolveDatabaseTarget({ ...BASE_ENV, COMMHUB_SERVER }))
+        .toThrow(/COMMHUB_SERVER=1/);
+    }
+  });
 });

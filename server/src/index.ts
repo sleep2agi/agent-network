@@ -6,6 +6,10 @@
 // tests and tooling import "./server.js" and get bootServer/startHub
 // without binding any port. Do NOT add logic here, and do NOT import
 // this module to "get at the server" — that starts one.
-import { startHub } from "./server.js";
-
+// The default production DB path is deliberately unavailable to ordinary
+// imports / bun -e probes. This run-entry is one of the two canonical places
+// allowed to opt in, and it must do so before dynamically importing server.ts
+// (whose dependency graph constructs the DB adapter at module evaluation).
+process.env.COMMHUB_SERVER = "1";
+const { startHub } = await import("./server.js");
 startHub();

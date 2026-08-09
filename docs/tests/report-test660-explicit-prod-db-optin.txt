@@ -1,0 +1,73 @@
+# Test 660 — explicit production DB opt-in
+
+Issue: #253
+
+Source commit tested: `c40445c265063e20ca3a24d612d6f364098dc05e`
+
+Base commit: `4dacd93a6c441c243ce1537e437d254fbc485da7`
+
+## Result
+
+PASS — Docker suite: 8 checks, 0 failures. Pure contract suite: 11 tests,
+19 assertions, 0 failures.
+
+## Provenance
+
+- Image tag: `anet-test660:dev`
+- Image ID: `sha256:12bb2d9e2a1f2899ab781db8e6547508e7415b36ab1ab85fd4dee0b082231335`
+- Embedded `TEST660_SOURCE_COMMIT`:
+  `c40445c265063e20ca3a24d612d6f364098dc05e`
+- Runner artifacts archive SHA-256:
+  `1fb614e96e8e2dc17774ce036be98ce6126f574aa24fb4526f322a864951108d`
+
+## Witnessed red / green
+
+Pre-implementation contract red:
+
+- an unflagged non-test default target was accepted;
+- lookalike `COMMHUB_SERVER` values were accepted by the old fallback.
+
+Final green:
+
+- a real unflagged `bun -e` import refuses before creating
+  `$HOME/.commhub/commhub.db`;
+- an explicit `COMMHUB_DB` still opens normally;
+- real `server/src/index.ts` boots in an isolated HOME and creates its default DB;
+- real `server/bin/commhub.ts` boots in an isolated HOME and creates its default DB.
+
+Mutation gates, all witnessed red:
+
+1. remove the default-path capability guard;
+2. remove the `src/index.ts` pre-import server opt-in;
+3. remove the packaged-bin pre-import server opt-in.
+
+The entrypoint mutations run the real server and require a healthy `/health`
+response. A merely long-running or immediately failed process cannot satisfy the
+gate.
+
+## Caller audit
+
+The canonical production paths are covered in code before the server dependency
+graph is imported:
+
+- `server/bin/commhub.ts` — used by the deployed `hub-daemon.sh` runtime;
+- `server/src/index.ts` — source/dev run entry;
+- `agent-network/src/server.ts` imports `server/src/index.js`, so it inherits the
+  same pre-import opt-in.
+
+Modules such as retention, stale sweeper, vault, probes, auth, and tools import
+the DB only as part of the server graph. Tests already use either an explicit
+`COMMHUB_DB` or the inherited `NODE_ENV=test` safety guard. Ad-hoc scripts and
+`bun -e` probes must now name an explicit SQLite path (or an explicit reviewed
+PostgreSQL `DATABASE_URL`).
+
+The separate agent-network CLI SQLite maintenance path does not use
+`server/src/db-adapter.ts` and is intentionally outside this change.
+
+## Safety and compatibility
+
+- The existing `NODE_ENV=test` and `DATABASE_URL` protections are retained.
+- Explicit SQLite and PostgreSQL targets are unchanged.
+- Only the implicit production SQLite fallback is capability-gated.
+- No production database, global install, Hub process, or deployment was touched.
+

@@ -12,8 +12,8 @@
     "bin"
   ],
   "scripts": {
-    "start": "bun run src/index.ts",
-    "dev": "bun --watch run src/index.ts",
+    "start": "COMMHUB_SERVER=1 bun run src/index.ts",
+    "dev": "COMMHUB_SERVER=1 bun --watch run src/index.ts",
     "test": "bun run scripts/test-aggregate.ts"
   },
   "keywords": [

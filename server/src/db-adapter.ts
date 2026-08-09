@@ -245,14 +245,11 @@ export function assertSafeTestDatabaseEnv(env: NodeJS.ProcessEnv = process.env):
  * pre-existing history of test pollution in the same DB). The guard makes
  * the failure mode loud + actionable instead of silent + destructive.
  *
- * The guard does NOT fire when:
- *   - COMMHUB_DB is set (the test runner's documented contract); or
- *   - NODE_ENV is unset (production server) or any non-"test" value.
- *
- * Operators who run `bun -e` snippets that touch the DB are expected to
- * `COMMHUB_DB=/tmp/...` themselves — `bun -e` doesn't set NODE_ENV, so the
- * guard can't catch that case. The rule (never read or write the
- * production hub database) is documented in CLAUDE.md.
+ * The production default path is a capability, not a generic fallback:
+ * only canonical server entrypoints set COMMHUB_SERVER=1 before importing
+ * the database graph. Tests, scripts, and `bun -e` probes must name an
+ * explicit COMMHUB_DB (or a reviewed PostgreSQL DATABASE_URL), so forgetting
+ * one fails before mkdir/open/write instead of touching the live Hub.
  */
 function resolveDatabaseTargetAfterGuard(env: NodeJS.ProcessEnv): DbTarget {
   const dbUrl = env.DATABASE_URL;
@@ -268,6 +265,14 @@ function resolveDatabaseTargetAfterGuard(env: NodeJS.ProcessEnv): DbTarget {
       "  pollute the production hub DB. Run tests via:\n" +
       "    COMMHUB_DB=/tmp/test-$$.db bun test src/\n" +
       "  (or use the `npm run test` script which sets this for you)."
+    );
+  }
+
+  if (!env.COMMHUB_DB && env.COMMHUB_SERVER !== "1") {
+    throw new Error(
+      "[commhub] REFUSING to open the default production SQLite database from a non-server entrypoint.\n" +
+      "  Scripts and probes must set an explicit COMMHUB_DB path. The canonical\n" +
+      "  Hub entrypoints set COMMHUB_SERVER=1 before loading the database."
     );
   }
 
