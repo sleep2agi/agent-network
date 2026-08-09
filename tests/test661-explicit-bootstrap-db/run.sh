@@ -68,14 +68,14 @@ ok "agent-network production build"
 cp agent-network/src/bootstrap-password-db.ts /tmp/test661-bootstrap-db.orig
 cp agent-network/bin/cli.ts /tmp/test661-cli.orig
 
-sed -i 's|const dbPath = process.env.ANET_BOOTSTRAP_DB_PATH;|const dbPath = process.env.ANET_BOOTSTRAP_DB_PATH || (process.env.HOME + "/.commhub/commhub.db");|' \
+sed -i 's@const dbPath = process.env.ANET_BOOTSTRAP_DB_PATH;@const dbPath = process.env.ANET_BOOTSTRAP_DB_PATH || (process.env.HOME + "/.commhub/commhub.db");@' \
   agent-network/src/bootstrap-password-db.ts
 grep -Fq 'process.env.HOME + "/.commhub/commhub.db"' agent-network/src/bootstrap-password-db.ts
 expect_red child-restores-home-fallback bun test agent-network/src/bootstrap-password-db.test.ts
 cp /tmp/test661-bootstrap-db.orig agent-network/src/bootstrap-password-db.ts
 
-sed -i 's|if (/^postgres(?:ql)?:\/\//.test(env.DATABASE_URL || "")) {|if (false) {|' \
-  agent-network/src/bootstrap-password-db.ts
+[[ "$(grep -Fc 'DATABASE_URL ||' agent-network/src/bootstrap-password-db.ts)" -eq 1 ]]
+sed -i '/DATABASE_URL ||/c\  if (false) {' agent-network/src/bootstrap-password-db.ts
 grep -Fq 'if (false) {' agent-network/src/bootstrap-password-db.ts
 expect_red postgres-invents-sqlite bun test agent-network/src/bootstrap-password-db.test.ts
 cp /tmp/test661-bootstrap-db.orig agent-network/src/bootstrap-password-db.ts
