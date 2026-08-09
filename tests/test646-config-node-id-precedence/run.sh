@@ -16,8 +16,8 @@ grep -Fq 'envNodeId: process.env.COMMHUB_NODE_ID' agent-node/src/cli.ts
 
 # The standard anet launcher already owns the child env boundary. #532 must
 # not weaken or duplicate those two existing branches.
-test "$(grep -c 'delete childEnv.COMMHUB_NODE_ID' agent-network/bin/cli.ts)" -eq 2
-test "$(grep -c 'childEnv.COMMHUB_NODE_ID = profile.node_id' agent-network/bin/cli.ts)" -eq 2
+test "$(grep -c 'if (!profile.node_id) delete (env as Record<string, unknown>).COMMHUB_NODE_ID' agent-network/bin/cli.ts)" -eq 2
+test "$(grep -c '...(profile.node_id ? { COMMHUB_NODE_ID: profile.node_id } : {})' agent-network/bin/cli.ts)" -eq 2
 
 echo "L2: witnessed-red env-first mutation"
 cp agent-node/src/runtime/node-id-source.ts /tmp/test646-node-id-source.ts
