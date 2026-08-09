@@ -1,0 +1,84 @@
+# Issue #661 — explicit bootstrap database report
+
+Date: 2026-08-10
+Base: dd502f9f8900957150b60d660fd5d09b7291cb1c
+Source commit under test: c0493085c78673b0509f23af5f705ee76ae0af6d
+Branch: fix/661-explicit-bootstrap-db
+
+## Finding and scope
+
+`agent-network/bin/cli.ts` used a raw `bun -e` SQLite script whose child-side
+selection was `COMMHUB_DB || HOME/.commhub/commhub.db`. That write was an
+intentional, non-fatal local-Hub bootstrap operation, but it bypassed the
+explicit database discipline added to the server adapter by #660.
+
+The CLI and server are independently versioned packages; `anet hub start`
+launches the pinned server through a transient `bunx` environment, so a deep
+adapter import from the CLI is not a reliable installed-package contract. This
+change implements Issue #661's compatible alternative: the parent resolves
+the selected SQLite database into an explicit absolute path, and the child
+accepts only that dedicated path. The child contains no HOME/default fallback.
+
+- Relative `COMMHUB_DB` is anchored to the Hub launch cwd before spawning.
+- A missing/relative/NUL child path fails before `new Database()`.
+- A PostgreSQL Hub skips this non-fatal SQLite-only flag update rather than
+  inventing or touching a default SQLite database.
+- The update uses a bound SQLite parameter instead of interpolated SQL.
+
+No REST/API, schema, server adapter, production runtime, or database was
+changed.
+
+## Docker provenance
+
+- Dockerfile: `tests/test661-explicit-bootstrap-db/Dockerfile`
+- Image tag: `anet-test661-db:dev`
+- Image ID: `sha256:bd7976b9af302972dae7e2d6f246a6afbe14df219142d78218f0d4fd7fe08d99`
+- Embedded ENV: `TEST661_SOURCE_COMMIT=c0493085c78673b0509f23af5f705ee76ae0af6d`
+- Artifacts: `/tmp/test661-artifacts.YUUR1Y`
+
+The image installs dependencies with `--ignore-scripts` because node-pty's
+native postinstall is unrelated to this CLI/bootstrap path. The full
+agent-network production build, including declarations and obfuscation, runs
+inside the image and passes.
+
+## Results
+
+`RESULT pass=6 fail=0`
+
+1. Unit + real SQLite child process: 6/6 tests, 15 assertions.
+2. Real source CLI against an isolated fake Hub: PASS. A random-password
+   bootstrap updates the explicitly selected DB; a valid decoy DB under HOME
+   remains byte-logically unchanged (`must_change_password=0`). The fake `bun`
+   shim records that the child received the exact explicit path and `-e` argv.
+3. Production build: PASS.
+4. Mutation restoring child HOME/default fallback: witnessed red.
+5. Mutation removing the PostgreSQL refusal: witnessed red.
+6. Mutation bypassing CLI explicit selection: witnessed red.
+
+Mutation artifacts:
+
+- `child-restores-home-fallback.log` — 2421 bytes —
+  `976db0b86deeb6d9dc9ff9c186d20da696ab77f68ff71946c53810bcfe7ca176`
+- `postgres-invents-sqlite.log` — 1318 bytes —
+  `c5d66ebd1375014ccf1311e93c2374111ddae27d5cd589cb569c21839409b931`
+- `cli-bypasses-explicit-selection.log` — 113 bytes —
+  `cc8ab802735c00a1809ecc525e2b587c66fcdfbe235c4fa08ef2588fb0936946`
+
+## Witnessed harness failures
+
+The first two exact-source attempts stopped in the mutation injector due to
+Perl/sed delimiter escaping errors; product tests and the production build had
+already passed. Those anchors were replaced with verified exact substitutions.
+
+The next attempt exposed a more important harness defect: Bash suppresses
+`set -e` inside a function invoked as an `if` condition. The CLI-bypass
+mutation broke the database assertions, but the function continued to cleanup
+and returned 0, producing a false green. The E2E now explicitly aggregates and
+returns every observable (CLI rc, selected DB value, decoy DB value, captured
+path, first child argv). With that correction, the same mutation is non-empty
+and red; the unmodified source is green.
+
+The fixed tag was reused for each attempt. Docker had already discarded the
+three superseded manifest IDs when inspected; no broad prune or pattern delete
+was used. Host free space after the final run was approximately 5.2 GB, so no
+additional image was created.
