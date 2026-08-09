@@ -3142,12 +3142,26 @@ async function processWithCodexAppServer(
   // in-memory var tracks it even when resuming (idempotent).
   writebackCodexThread(session.threadId);
 
+  let lastActivityHeartbeatAt = Date.now();
   const outcome = await codexAppServerThink(session, {
     taskId: taskId || `local-${Date.now()}`,
     text: task,
     from: _from,
     steerIfExternalTurn,
     log,
+    onActivity: (event) => {
+      const now = Date.now();
+      if (now - lastActivityHeartbeatAt < 30_000) return;
+      lastActivityHeartbeatAt = now;
+      log(`[codex-app-server] active turn heartbeat task=${event.taskId} kind=${event.kind}`);
+      // Re-emit working status at a bounded cadence. This produces the Hub's
+      // normal status_update SSE without creating a terminal reply or a new
+      // inbox row, so observers can distinguish active work from a silent
+      // hang while the local idle deadline is being renewed.
+      void reportStatus("working", task.slice(0, 200)).catch((error) => {
+        debug(`[codex-app-server] activity report_status failed: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    },
   });
 
   // Throw failed outcomes into processTask's existing failure path so the Hub

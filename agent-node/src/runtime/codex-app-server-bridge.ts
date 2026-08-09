@@ -92,6 +92,12 @@ export interface ActiveTurnReconciliation {
   status?: string;
 }
 
+export interface CodexAppServerTaskActivity {
+  taskId: string;
+  turnId: string;
+  kind: "item_started" | "agent_delta" | "item_completed";
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Bridge
 // ────────────────────────────────────────────────────────────────────────────
@@ -102,6 +108,7 @@ export interface ActiveTurnReconciliation {
  *   - "waiting_human"     → WaitingApproval (bridge did not respond)
  *   - "approval_resolved" → { reverseRequestId } — from serverRequest/resolved
  *   - "task_started"      → { taskId, turnId, steered } — model budget starts
+ *   - "task_activity"     → CodexAppServerTaskActivity — exact owned turn made progress
  *   - "task_turn_rebound" → { taskId, fromTurnId, toTurnId } — client-id repair
  *   - "task_reply"        → { taskId, text }  — final agent message
  *   - "task_error"        → { taskId, error }
@@ -660,9 +667,10 @@ export class CodexAppServerBridge extends EventEmitter {
     }
   }
 
-  private onItemStarted(_params: unknown): void {
-    // No-op in Phase 0. Real bridge will use item ids to gate approval
-    // acceptance in later phases.
+  private onItemStarted(params: unknown): void {
+    const p = params as { threadId?: string; turnId?: string };
+    if (!p || p.threadId !== this.threadId || typeof p.turnId !== "string") return;
+    this.emitTaskActivity(p.turnId, "item_started");
   }
 
   private onAgentDelta(params: unknown): void {
@@ -674,10 +682,16 @@ export class CodexAppServerBridge extends EventEmitter {
     const pending = this.pendingTurns.get(p.turnId);
     if (!pending) {
       const steered = this.steeredTurns.get(p.turnId);
-      if (steered && typeof p.delta === "string") steered.agentTextChunks.push(p.delta);
+      if (steered && typeof p.delta === "string") {
+        steered.agentTextChunks.push(p.delta);
+        this.emitTaskActivity(p.turnId, "agent_delta");
+      }
       return; // Human TUI is receiving deltas too.
     }
-    if (typeof p.delta === "string") pending.agentTextChunks.push(p.delta);
+    if (typeof p.delta === "string") {
+      pending.agentTextChunks.push(p.delta);
+      this.emitTaskActivity(p.turnId, "agent_delta");
+    }
   }
 
   private onItemCompleted(params: unknown): void {
@@ -721,6 +735,7 @@ export class CodexAppServerBridge extends EventEmitter {
       ) {
         steered.finalText = p.item.text;
       }
+      if (steered) this.emitTaskActivity(p.turnId, "item_completed");
       return;
     }
     if (
@@ -729,6 +744,28 @@ export class CodexAppServerBridge extends EventEmitter {
       typeof p.item.text === "string"
     ) {
       pending.finalText = p.item.text;
+    }
+    this.emitTaskActivity(p.turnId, "item_completed");
+  }
+
+  private emitTaskActivity(
+    turnId: string,
+    kind: CodexAppServerTaskActivity["kind"],
+  ): void {
+    const pending = this.pendingTurns.get(turnId);
+    // turn/start's response id is not an identity proof: a concurrent goal
+    // successor can persist our exact user message under a different turn.
+    // Only the echoed clientUserMessageId makes this mapping authoritative.
+    // Otherwise an unrelated response-id turn could keep our idle deadline
+    // alive indefinitely (#587 race family).
+    if (pending?.identityConfirmed) {
+      this.emit("task_activity", { taskId: pending.taskId, turnId, kind } satisfies CodexAppServerTaskActivity);
+      return;
+    }
+    const steered = this.steeredTurns.get(turnId);
+    if (!steered) return;
+    for (const taskId of steered.acceptedTaskIds) {
+      this.emit("task_activity", { taskId, turnId, kind } satisfies CodexAppServerTaskActivity);
     }
   }
 

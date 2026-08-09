@@ -177,7 +177,74 @@ class IdentityNeverConfirmedBridge extends EventEmitter {
   }
 }
 
+class ActivityBridge extends EventEmitter {
+  async submitTask(input: { taskId: string }): Promise<{ started: true; turnId: string }> {
+    this.emit("task_started", {
+      taskId: input.taskId,
+      turnId: `turn_${input.taskId}`,
+      steered: false,
+    });
+    return { started: true, turnId: `turn_${input.taskId}` };
+  }
+
+  cancelQueuedTask(): boolean {
+    return false;
+  }
+
+  async reconcileActiveTurn(): Promise<{ recovered: false; turnId: null }> {
+    return { recovered: false, turnId: null };
+  }
+}
+
 describe("codexAppServerThink — terminal-event reconciliation watchdog", () => {
+  test("exact task activity resets the response idle deadline for a long-running turn", async () => {
+    const bridge = new ActivityBridge();
+    const session = { bridge } as unknown as CodexAppServerRuntimeSession;
+    const activities: string[] = [];
+    const thinking = codexAppServerThink(session, {
+      taskId: "task_long_active",
+      text: "keep working while tools stream",
+      timeoutMs: 35,
+      queueTimeoutMs: 500,
+      reconciliationIntervalMs: 0,
+      onActivity: (event) => activities.push(event.kind),
+    });
+
+    for (const kind of ["item_started", "agent_delta", "item_completed"] as const) {
+      await new Promise((resolve) => setTimeout(resolve, 22));
+      bridge.emit("task_activity", { taskId: "task_long_active", turnId: "turn_task_long_active", kind });
+    }
+    bridge.emit("task_reply", { taskId: "task_long_active", text: "finished after the original deadline" });
+
+    expect(await thinking).toEqual({
+      replyText: "finished after the original deadline",
+      failed: false,
+      queued: false,
+    });
+    expect(activities).toEqual(["item_started", "agent_delta", "item_completed"]);
+  });
+
+  test("activity from another task cannot keep a silent owned task alive", async () => {
+    const bridge = new ActivityBridge();
+    const session = { bridge } as unknown as CodexAppServerRuntimeSession;
+    const thinking = codexAppServerThink(session, {
+      taskId: "task_silent",
+      text: "must time out",
+      timeoutMs: 35,
+      queueTimeoutMs: 500,
+      reconciliationIntervalMs: 0,
+    });
+
+    for (let i = 0; i < 3; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 18));
+      bridge.emit("task_activity", { taskId: "different_task", turnId: "turn_other", kind: "agent_delta" });
+    }
+
+    const result = await thinking;
+    expect(result.failed).toBe(true);
+    expect(result.replyText).toContain("无活动");
+  });
+
   test("a started task whose client identity never confirms has a bounded, distinct response timeout", async () => {
     const bridge = new IdentityNeverConfirmedBridge();
     const session = { bridge } as unknown as CodexAppServerRuntimeSession;

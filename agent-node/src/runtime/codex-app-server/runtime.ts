@@ -20,6 +20,7 @@
 import { spawn, type ChildProcess } from "child_process";
 import { CodexAppServerClient, resolveWebSocketCtor } from "../codex-app-server-client";
 import { CodexAppServerBridge } from "../codex-app-server-bridge";
+import type { CodexAppServerTaskActivity } from "../codex-app-server-bridge";
 
 export interface CodexAppServerRuntimeSession {
   client: CodexAppServerClient;
@@ -257,6 +258,8 @@ export function codexAppServerThink(
     log?: (m: string) => void;
     /** Dashboard chat may join the human TUI's current in-flight turn. */
     steerIfExternalTurn?: boolean;
+    /** Exact owned-turn progress; callers may relay a throttled Hub heartbeat. */
+    onActivity?: (event: CodexAppServerTaskActivity) => void;
   },
 ): Promise<CodexAppServerThinkResult> {
   const timeoutMs = opts.timeoutMs ?? 10 * 60_000;
@@ -280,6 +283,7 @@ export function codexAppServerThink(
       bridge.off("task_reply", onReply);
       bridge.off("task_error", onError);
       bridge.off("task_started", onStarted);
+      bridge.off("task_activity", onActivity);
       bridge.off("drain_deferred", onRequeued);
       bridge.off("steer_deferred", onRequeued);
       if (timer) clearTimeout(timer);
@@ -297,15 +301,20 @@ export function codexAppServerThink(
       log(`[codex-app-server] task_error ${ev.taskId}: ${ev.error}`);
       finish({ replyText: `codex-app-server 错误: ${ev.error}`, failed: true, queued: false });
     };
-    const startResponseTimer = () => {
-      if (settled || timer) return;
+    const armResponseIdleTimer = (reset = false) => {
+      if (settled) return;
+      if (timer) {
+        if (!reset) return;
+        clearTimeout(timer);
+        timer = undefined;
+      }
       if (queueTimer) {
         clearTimeout(queueTimer);
         queueTimer = undefined;
       }
       timer = setTimeout(() => {
         finish({
-          replyText: `codex-app-server 错误: 任务 ${opts.taskId} 超时（开始处理后 ${Math.round(timeoutMs / 1000)}s 内无最终回复）`,
+          replyText: `codex-app-server 错误: 任务 ${opts.taskId} 超时（开始处理后连续 ${Math.round(timeoutMs / 1000)}s 无活动；turn 可能仍在后台运行，请先检查共享线程，勿盲目重复派发）`,
           failed: true,
           queued: false,
         });
@@ -326,7 +335,17 @@ export function codexAppServerThink(
     const onStarted = (ev: { taskId: string; turnId: string; steered?: boolean }) => {
       if (ev.taskId !== opts.taskId) return;
       log(`[codex-app-server] task_started ${ev.taskId} turn=${ev.turnId}${ev.steered ? " (steered)" : ""}`);
-      startResponseTimer();
+      armResponseIdleTimer();
+    };
+    const onActivity = (ev: CodexAppServerTaskActivity) => {
+      if (ev.taskId !== opts.taskId || !timer) return;
+      log(`[codex-app-server] task_activity ${ev.taskId} turn=${ev.turnId} kind=${ev.kind}; reset idle deadline`);
+      armResponseIdleTimer(true);
+      try {
+        opts.onActivity?.(ev);
+      } catch (error) {
+        log(`[codex-app-server] activity heartbeat callback failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
     };
 
     // A shared app-server WebSocket can miss an individual terminal
@@ -356,6 +375,7 @@ export function codexAppServerThink(
     bridge.on("task_reply", onReply);
     bridge.on("task_error", onError);
     bridge.on("task_started", onStarted);
+    bridge.on("task_activity", onActivity);
     bridge.on("drain_deferred", onRequeued);
     bridge.on("steer_deferred", onRequeued);
     scheduleReconciliation();
@@ -373,7 +393,7 @@ export function codexAppServerThink(
         // so convert the elapsed admission deadline into the normal bounded
         // model-response wait instead of silently hanging forever.
         log(`[codex-app-server] queue deadline reached after task left FIFO; arming response timeout for ${opts.taskId}`);
-        startResponseTimer();
+        armResponseIdleTimer();
         return;
       }
       finishQueueTimeout();
@@ -389,8 +409,8 @@ export function codexAppServerThink(
       .then((r) => {
         // Compatibility fallback for bridge implementations predating the
         // task_started event. The real bridge emits before this continuation;
-        // startResponseTimer is idempotent, so both paths cannot double-arm.
-        if (r.started) startResponseTimer();
+        // armResponseIdleTimer is idempotent, so both paths cannot double-arm.
+        if (r.started) armResponseIdleTimer();
         if (!r.started) log(`[codex-app-server] task ${opts.taskId} queued (a turn is in flight)`);
         else if (r.steered) log(`[codex-app-server] task ${opts.taskId} steered into human turn ${r.turnId}`);
       })

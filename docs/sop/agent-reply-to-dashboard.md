@@ -35,11 +35,11 @@ Dashboard 聊天窗口。**会不会触发取决于 status**——交互式/协�
 
 补充（同日多次实测）：**commhub_reply 的 task_id 窗口会过期**——回复稍晚就报 `reply_task_not_found`（600s 窗口关闭）。遇到别重试 reply，**直接 send_task 补发**；耗时长的任务从一开始就用 send_task 回。
 
-## 「任务超时（600s 内无最终回复）」自动回复 ≠ 节点死了
+## 「任务连续 600s 无活动」自动回复 ≠ 节点死了
 
-busy 节点（如 codex-app-server 单线程 turn）收到新任务会**排队**（日志：`queued (a turn is in flight)`），排满 600s 就自动回一条「codex-app-server 错误: 任务超时」。**这条超时经常只是排队溢出**——节点可能正健康地跑着一个几小时的大 turn。真实翻车（2026-07-16）：协调者据此差点重启一个正在跑关键任务的节点，capture-pane 才发现它活得好好的。
+codex-app-server 的 FIFO 排队等待和模型执行等待是两个独立期限。任务开始后，桥只接受经 `clientUserMessageId` 确认属于该 task 的 item/delta 作为活动，并据此重置 600s 无活动阈值；另一个 turn 的输出不能替它续命。持续有活动的几小时 turn 不再因总时长被误判，真正连续静默才超时。超时不会取消底层 Codex turn，所以仍可能在后台落下改动。
 
-**判死活标准动作**：先 `tmux capture-pane` 看终端实况 + 查 hub 心跳（updated_at 新鲜=活），**别只凭超时消息下结论**。改进方向（候选）：hub/runtime 把"排队中"与"真超时"区分回复。
+**判死活标准动作**：先 `tmux capture-pane` 看终端实况 + 查 hub 心跳（updated_at 新鲜=活），**别只凭超时消息下结论，也别直接重复派发**。排队超时文案含「在队列中等待」；执行期超时文案含「连续 … 无活动」，两者不要混用。
 
 ### Codex TUI 共存节点的 Dashboard 消息
 

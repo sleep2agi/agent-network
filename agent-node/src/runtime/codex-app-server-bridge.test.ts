@@ -207,6 +207,58 @@ describe("CodexAppServerBridge — bootstrap + task mapping", () => {
     expect(bridge.activeTurn()).toBeNull();
   });
 
+  test("only exact owned-turn item events emit task_activity", async () => {
+    const turnId = await bridge.startTaskTurn({ taskId: "task_activity_owner", text: "work" });
+    const activities: Array<{ taskId: string; turnId: string; kind: string }> = [];
+    bridge.on("task_activity", (event) => activities.push(event as never));
+
+    // A response turn id is not sufficient ownership proof. Activity before
+    // the exact client-id echo must not renew this task's deadline.
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "item/started",
+      params: { threadId: THREAD, turnId, item: { id: "unconfirmed", type: "commandExecution" } },
+    });
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: { threadId: THREAD, turnId, item: { type: "userMessage", clientId: "anet:task_activity_owner" } },
+    });
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "item/started",
+      params: { threadId: THREAD, turnId, item: { id: "tool-1", type: "commandExecution" } },
+    });
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "item/agentMessage/delta",
+      params: { threadId: THREAD, turnId, itemId: "agent-1", delta: "still working" },
+    });
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: { threadId: THREAD, turnId, item: { id: "tool-1", type: "commandExecution" } },
+    });
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "item/agentMessage/delta",
+      params: { threadId: THREAD, turnId: "turn_foreign", itemId: "agent-2", delta: "wrong turn" },
+    });
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "item/started",
+      params: { threadId: "thread_foreign", turnId, item: { id: "tool-2", type: "commandExecution" } },
+    });
+    await tick(10);
+
+    expect(activities).toEqual([
+      { taskId: "task_activity_owner", turnId, kind: "item_completed" },
+      { taskId: "task_activity_owner", turnId, kind: "item_started" },
+      { taskId: "task_activity_owner", turnId, kind: "agent_delta" },
+      { taskId: "task_activity_owner", turnId, kind: "item_completed" },
+    ]);
+  });
+
   test("authenticated Dashboard native /goal text reaches the shared thread unchanged and replies", async () => {
     const exactPayload = "/goal 更新一下文档";
     const turnId = await bridge.startTaskTurn({
