@@ -80,13 +80,11 @@ e2e_select_network "$NETWORK_ID"
 e2e_create_agent e2e-agent codex-sdk gpt-5.4 "$NETWORK_ID"
 CFG=$WORK/project/.anet/nodes/e2e-agent/config.json
 
-if jq -e --arg network "$NETWORK_ID" \
-  '.network_id == $network and (.token | startswith("ntok_")) and (.node_id | startswith("n_"))' \
-  "$CFG" >/dev/null; then
-  pass "single point: generated config is token-bound to selected network"
+if e2e_config_token_bound_to_network "$CFG" "$NETWORK_ID"; then
+  pass "single point: generated ntok is bound by Hub to selected network"
 else
-  jq '{network_id,node_id,token:(.token|if type=="string" then (.[0:5]+"…") else . end)}' "$CFG" >&2 || true
-  fail "single point: generated config is not token-bound to selected network"
+  jq '{node_id,token:(.token|if type=="string" then (.[0:5]+"…") else . end)}' "$CFG" >&2 || true
+  fail "single point: generated token is not Hub-bound to selected network"
   exit 1
 fi
 
@@ -138,10 +136,11 @@ set +e
 MUT1_RC=$?
 set -e
 MUT1_CFG=$WORK/project/.anet/nodes/mut-no-select/config.json
-if [[ $MUT1_RC -ne 0 ]] || ! jq -e --arg network "$NETWORK_ID" '.network_id == $network' "$MUT1_CFG" >/dev/null 2>&1; then
+if [[ $MUT1_RC -ne 0 ]] && \
+   e2e_config_token_bound_to_network "$MUT1_CFG" "$WRONG_NETWORK_ID"; then
   pass "mutation: deleting network selection turns red"
 else
-  fail "mutation: missing network selection still produced a target-bound config"
+  fail "mutation: missing network selection was not proven bound to the wrong network"
 fi
 
 # Mutation 2: deleting the official node creation must fail before agent start.

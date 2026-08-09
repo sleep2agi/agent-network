@@ -21,18 +21,38 @@ e2e_create_agent() {
 
   anet node create "$alias" --runtime "$runtime" --model "$model" >/dev/null || return 1
   [[ -f "$config_path" ]] || return 1
-  python3 - "$config_path" "$network_id" <<'PY'
+  e2e_config_token_bound_to_network "$config_path" "$network_id"
+}
+
+# Node configs intentionally do not persist network_id: the ntok_ binding in
+# Hub is authoritative. Ask Hub with that token and require exactly the
+# expected single network instead of trusting a local snapshot field.
+e2e_config_token_bound_to_network() {
+  local config_path=${1:?config path is required}
+  local expected_network=${2:?network_id is required}
+  local hub token networks
+
+  hub=$(jq -r '.hub // empty' "$config_path") || return 1
+  token=$(jq -r '.token // empty' "$config_path") || return 1
+  [[ $hub == http://* || $hub == https://* ]] || return 1
+  [[ $token == ntok_* ]] || return 1
+  networks=$(curl -fsS "$hub/api/networks" -H "Authorization: Bearer $token") || return 1
+
+  python3 - "$config_path" "$expected_network" "$networks" <<'PY'
 import json
 import sys
 
 config = json.load(open(sys.argv[1], encoding="utf-8"))
 expected_network = sys.argv[2]
+document = json.loads(sys.argv[3])
+networks = document.get("networks", [])
 valid = (
-    config.get("network_id") == expected_network
-    and isinstance(config.get("node_id"), str)
+    isinstance(config.get("node_id"), str)
     and config["node_id"].startswith("n_")
     and isinstance(config.get("token"), str)
     and config["token"].startswith("ntok_")
+    and len(networks) == 1
+    and networks[0].get("network_id") == expected_network
 )
 raise SystemExit(0 if valid else 1)
 PY
