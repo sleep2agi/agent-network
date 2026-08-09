@@ -156,7 +156,9 @@ describe("FeishuAdapter WS lifecycle", () => {
 
   test("inbound handler errors use the same token scrub before health", async () => {
     const h = harness();
-    await h.adapter.init(config());
+    const inboundConfig = config();
+    (inboundConfig.platformConfig as { access: { allowFrom: string[] } }).access.allowFrom = ["ou_test"];
+    await h.adapter.init(inboundConfig);
     const starting = h.adapter.start(async () => {
       throw new Error("inbound t-inbound-token-618 Bearer inbound-bearer-618");
     });
