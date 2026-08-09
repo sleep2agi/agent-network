@@ -27,6 +27,7 @@
  *   M5: agent-node spawn site that forks this worker (see agent-node/cli.ts).
  */
 import { startFeishuBridge } from "./bridge.js";
+import { exitFeishuWorker } from "./worker-lifecycle.js";
 
 interface ParsedArgs {
   channelDir?: string;
@@ -62,13 +63,16 @@ async function main(): Promise<void> {
     await startFeishuBridge({
       channelDir: args.channelDir,
       nodeAlias: args.nodeAlias,
+      onTerminalError: (error) => {
+        exitFeishuWorker(error);
+      },
     });
     process.stderr.write(
       `[feishu:worker] bridge online — node=${args.nodeAlias} dir=${args.channelDir}` +
         ` ipc=${typeof process.send === "function" ? "yes" : "no"}\n`,
     );
   } catch (err) {
-    const msg = err instanceof Error ? err.stack ?? err.message : String(err);
+    const msg = err instanceof Error ? err.message : String(err);
     process.stderr.write(`[feishu:worker] startup failed: ${msg}\n`);
     process.exit(1);
   }

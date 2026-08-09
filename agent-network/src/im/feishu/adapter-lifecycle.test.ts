@@ -1,0 +1,168 @@
+import { describe, expect, test } from "bun:test";
+import type * as lark from "@larksuiteoapi/node-sdk";
+
+import {
+  FeishuAdapter,
+  type FeishuWsClientFactory,
+  type FeishuWsClientLike,
+} from "./adapter.js";
+import type { IMChannelConfig } from "../types.js";
+import { exitFeishuWorker } from "./worker-lifecycle.js";
+
+type WsParams = Parameters<FeishuWsClientFactory>[0];
+
+class FakeWsClient implements FeishuWsClientLike {
+  started = 0;
+  closed = 0;
+
+  async start(): Promise<void> {
+    this.started += 1;
+    // Deliberately resolves before readiness, matching the SDK behavior that
+    // caused #452. The adapter must wait for params.onReady instead.
+  }
+
+  close(): void {
+    this.closed += 1;
+  }
+}
+
+function config(appSecret = "secret-452"): IMChannelConfig {
+  return {
+    platform: "feishu",
+    connectionName: "test-feishu",
+    ingressMode: "socket",
+    groupPolicy: "mention",
+    ackPlaceholder: false,
+    auditRaw: false,
+    taskTimeoutMs: 1_000,
+    platformConfig: {
+      appId: "app-452",
+      appSecret,
+      access: { allowFrom: [], allowChats: [] },
+      groupPolicy: "mention",
+      ackPlaceholder: false,
+      auditRaw: false,
+      taskTimeoutMs: 1_000,
+      outboundRender: "plain",
+      channelDir: "/tmp/test452-channel",
+    },
+  };
+}
+
+function harness(options: {
+  timeoutMs?: number;
+  terminal?: (error: Error) => void;
+} = {}) {
+  let params: WsParams | undefined;
+  const ws = new FakeWsClient();
+  const adapter = new FeishuAdapter({
+    createClient: () =>
+      ({ request: async () => ({ bot: { open_id: "bot-452" } }) }) as unknown as lark.Client,
+    createWsClient: (input) => {
+      params = input;
+      return ws;
+    },
+    wsReadyTimeoutMs: options.timeoutMs ?? 100,
+    onTerminalError: options.terminal,
+  });
+  return { adapter, ws, get params() { return params; } };
+}
+
+const onEvent = async (): Promise<void> => {};
+
+describe("FeishuAdapter WS lifecycle", () => {
+  test("SDK start resolution is not readiness; missing onReady times out fail-closed", async () => {
+    const h = harness({ timeoutMs: 15 });
+    await h.adapter.init(config());
+
+    await expect(h.adapter.start(onEvent)).rejects.toThrow("did not become ready");
+    expect(h.ws.started).toBe(1);
+    expect(h.ws.closed).toBe(1);
+    expect(h.adapter.health().connected).toBe(false);
+  });
+
+  test("onReady is the only initial online authority", async () => {
+    const h = harness();
+    await h.adapter.init(config());
+    const starting = h.adapter.start(onEvent);
+    await Bun.sleep(1);
+    expect(h.adapter.health().connected).toBe(false);
+
+    h.params?.onReady?.();
+    await starting;
+    expect(h.adapter.health()).toMatchObject({ connected: true, lastError: null });
+  });
+
+  test("initial onError rejects and scrubs credentials", async () => {
+    const terminal: Error[] = [];
+    const h = harness({ terminal: (error) => terminal.push(error) });
+    await h.adapter.init(config("do-not-log-me"));
+    const starting = h.adapter.start(onEvent);
+    await Bun.sleep(1);
+    h.params?.onError?.(new Error("bad app-452 / do-not-log-me\ncredential"));
+
+    await expect(starting).rejects.toThrow("bad [redacted] / [redacted] credential");
+    expect(h.adapter.health().connected).toBe(false);
+    expect(h.adapter.health().lastError).not.toContain("do-not-log-me");
+    expect(terminal).toHaveLength(0);
+  });
+
+  test("reconnecting lowers health and reconnected restores it", async () => {
+    const h = harness();
+    await h.adapter.init(config());
+    const starting = h.adapter.start(onEvent);
+    await Bun.sleep(1);
+    h.params?.onReady?.();
+    await starting;
+
+    h.params?.onReconnecting?.();
+    expect(h.adapter.health().connected).toBe(false);
+    h.params?.onReconnected?.();
+    expect(h.adapter.health().connected).toBe(true);
+  });
+
+  test("terminal error after ready lowers health and notifies worker owner once", async () => {
+    const terminal: Error[] = [];
+    const h = harness({ terminal: (error) => terminal.push(error) });
+    await h.adapter.init(config());
+    const starting = h.adapter.start(onEvent);
+    await Bun.sleep(1);
+    h.params?.onReady?.();
+    await starting;
+
+    h.params?.onError?.(new Error("retries exhausted"));
+    h.params?.onError?.(new Error("duplicate terminal callback"));
+    h.params?.onReconnected?.();
+    expect(h.adapter.health()).toMatchObject({
+      connected: false,
+      lastError: "retries exhausted",
+    });
+    expect(terminal.map((error) => error.message)).toEqual(["retries exhausted"]);
+  });
+
+  test("stop closes the public SDK client and invalidates late callbacks", async () => {
+    const h = harness();
+    await h.adapter.init(config());
+    const starting = h.adapter.start(onEvent);
+    await Bun.sleep(1);
+    h.params?.onReady?.();
+    await starting;
+    await h.adapter.stop();
+    expect(h.ws.closed).toBe(1);
+    h.params?.onReconnected?.();
+    expect(h.adapter.health().connected).toBe(false);
+  });
+});
+
+test("worker terminal owner logs safely and exits non-zero", () => {
+  const writes: string[] = [];
+  const exits: number[] = [];
+  exitFeishuWorker(new Error("retries exhausted"), {
+    stderr: { write: (message) => writes.push(message) },
+    exit: (code) => exits.push(code),
+  });
+  expect(writes).toEqual([
+    "[feishu:worker] connection failed after ready: retries exhausted\n",
+  ]);
+  expect(exits).toEqual([1]);
+});
