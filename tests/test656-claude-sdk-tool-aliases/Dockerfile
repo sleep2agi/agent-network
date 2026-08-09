@@ -7,7 +7,7 @@ WORKDIR /repo
 COPY agent-node /repo/agent-node
 COPY tests/test656-claude-sdk-tool-aliases /repo/tests/test656-claude-sdk-tool-aliases
 
-RUN cd /repo/agent-node && bun install
+RUN cd /repo/agent-node && bun install && bun add --no-save typescript@5.9.3
 RUN chmod +x /repo/tests/test656-claude-sdk-tool-aliases/run.sh
 
 ARG TEST656_SOURCE_COMMIT=unknown

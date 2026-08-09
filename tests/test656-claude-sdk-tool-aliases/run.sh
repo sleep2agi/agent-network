@@ -29,6 +29,8 @@ SDK_VERSION=$(bun -e 'console.log((await Bun.file("node_modules/@anthropic-ai/cl
 [[ "$SDK_VERSION" == 0.3.226 ]] && ok "clean install resolved claude-agent-sdk 0.3.226" || bad "unexpected SDK $SDK_VERSION"
 bun test src/claude-tool-aliases.test.ts
 ok "exact alias unit contract"
+./node_modules/.bin/tsc --noEmit --skipLibCheck --moduleResolution bundler --module preserve --target ES2022 "$TEST/sdk-type-probe.ts"
+ok "SDK 0.3.226 publishes Options.toolAliases"
 bun run build >/dev/null
 ok "agent-node bundle builds against SDK 0.3.226"
 
@@ -50,7 +52,7 @@ bun add --no-save @anthropic-ai/claude-agent-sdk@0.2.141 >/dev/null
 OLD_VERSION=$(bun -e 'console.log((await Bun.file("node_modules/@anthropic-ai/claude-agent-sdk/package.json").json()).version)')
 [[ "$OLD_VERSION" == 0.2.141 ]] || bad "downgrade mutation did not install 0.2.141"
 curl -fsS "$ANTHROPIC_BASE_URL/reset" >/dev/null
-expect_red sdk-downgrade bun "$TEST/harness.ts"
+expect_red sdk-type-contract ./node_modules/.bin/tsc --noEmit --skipLibCheck --moduleResolution bundler --module preserve --target ES2022 "$TEST/sdk-type-probe.ts"
 cp /tmp/test656-package.orig package.json
 
 printf 'RESULT pass=%s fail=%s\n' "$PASS" "$FAIL"
