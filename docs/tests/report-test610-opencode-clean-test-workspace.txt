@@ -1,0 +1,25 @@
+# Test 610 — OpenCode Git-state test workspace isolation
+
+Date: 2026-08-09
+
+## Provenance
+
+- Source commit: `706eaac173f56492b39e25f711f9a9a1a2100f1d`
+- Docker image: `anet-test610:dev`
+- Image ID: `sha256:ed4701148d0dd27ddb0ade65a0d785c8ae0fbd849d16fa3631eccdb5f0f37bc6`
+- Embedded `TEST610_SOURCE_COMMIT`: `706eaac173f56492b39e25f711f9a9a1a2100f1d`
+- Runner artifact SHA-256: `28b94dc32317de4fa8e60364516274c38c716e77930c581aba7542af0442e909`
+
+## Result
+
+`RESULT: PASS`
+
+1. `agent-network` typecheck passed.
+2. With an intentionally invalid `/tmp/.git`, all 18 OpenCode runtime-binding tests passed from the isolated workspace root; `/tmp/.git` remained untouched.
+3. An override beneath the contaminated `/tmp` ancestor failed closed before creating its workspace.
+4. The test-owned per-run directory was removed without removing the shared workspace parent or unrelated paths.
+5. Witnessed-red mutation: restoring the old `mkdtempSync(join(tmpdir(), ...))` fixture made the real test fail with `Git repository metadata is invalid`; restoring the isolated fixture returned all 18 tests to green.
+
+## Scope
+
+Test fixture and its Docker regression suite only. Production OpenCode runtime behavior is unchanged.
