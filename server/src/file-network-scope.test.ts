@@ -39,7 +39,7 @@ const MASTER_TOKEN = `master-503-${Date.now()}-${Math.floor(Math.random() * 1000
 // Env must be set before anything pulls in db-adapter.ts (which refuses
 // the default DB under NODE_ENV=test) or server.ts (which freezes
 // DEV_OPEN + AUTH_TOKEN at module load).
-process.env.COMMHUB_DB = SERVER_DB;
+process.env.COMMHUB_DB ||= SERVER_DB;
 process.env.COMMHUB_UPLOADS_DIR = UPLOADS_DIR;
 process.env.HOST = "127.0.0.1";
 process.env.COMMHUB_AUTH_TOKEN = MASTER_TOKEN;

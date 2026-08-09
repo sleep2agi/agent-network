@@ -7,12 +7,12 @@
 // this file already exercises the same code path). The hub binds to
 // an ephemeral port so multiple test runs don't collide.
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
+import "./require-explicit-test-db.js";
 import { mkdtempSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { register, login } from "./auth.js";
 
-const SERVER_DB = mkdtempSync(join(tmpdir(), "anet-upload-http-db-")) + "/commhub.db";
 const UPLOADS_DIR = mkdtempSync(join(tmpdir(), "anet-upload-http-fs-"));
 // #438 corrective: private bootServer({ port: 0 }) instance — the OS
 // assigns the port and BASE is derived from the ACTUAL bound port, so
@@ -28,7 +28,6 @@ beforeAll(async () => {
   // Bootstrap a real admin + token on the temp DB so the server can
   // resolve it via requireAuth (we don't want to short-circuit auth —
   // we want to validate the production code path).
-  process.env.COMMHUB_DB = SERVER_DB;
   process.env.COMMHUB_UPLOADS_DIR = UPLOADS_DIR;
   process.env.HOST = "127.0.0.1";
 
@@ -64,7 +63,6 @@ beforeAll(async () => {
 afterAll(() => {
   try { server?.stop?.(true); } catch {}
   try { rmSync(UPLOADS_DIR, { recursive: true, force: true }); } catch {}
-  try { rmSync(SERVER_DB, { recursive: true, force: true }); } catch {}
 });
 
 function authHeaders(): Record<string, string> {

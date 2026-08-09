@@ -29,7 +29,7 @@ async function tool(token: string, name: string, args: Record<string, unknown>) 
 }
 
 beforeAll(async () => {
-  process.env.COMMHUB_DB = join(dir, "hub.db");
+  process.env.COMMHUB_DB ||= join(dir, "hub.db");
   const owner = register(`skill_owner_${Date.now()}`, "SkillHubOwner123!", undefined, "seed");
   expect(owner.ok).toBe(true);
   ownerToken = owner.token!; networkId = owner.network_id!;

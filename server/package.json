@@ -14,7 +14,7 @@
   "scripts": {
     "start": "bun run src/index.ts",
     "dev": "bun --watch run src/index.ts",
-    "test": "COMMHUB_DB=/tmp/test-commhub-$$.db bun test src/"
+    "test": "bun run scripts/test-aggregate.ts"
   },
   "keywords": [
     "commhub",

@@ -1,13 +1,13 @@
 FROM oven/bun:1.3.14
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends strace \
+  && apt-get install -y --no-install-recommends procps strace \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /work
 
 COPY server/ server/
-COPY agent-node/src/shared/ agent-node/src/shared/
+COPY agent-node/src/ agent-node/src/
 COPY tests/test601-hub-scheduled-tasks/ tests/test601-hub-scheduled-tasks/
 RUN cd server && bun install
 
