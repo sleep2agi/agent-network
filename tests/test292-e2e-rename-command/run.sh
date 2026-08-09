@@ -55,7 +55,7 @@ anet node create test-node --runtime codex-sdk --model gpt-5.4 >/dev/null
 NODE_ID=$(jq -r .node_id .anet/nodes/test-node/config.json)
 RENAME_OUTPUT=$(anet node rename "$NODE_ID" renamed-node 2>&1)
 if [[ -f .anet/nodes/renamed-node/config.json ]] && \
-   jq -e '.node_name == "renamed-node" and .alias == "renamed-node"' .anet/nodes/renamed-node/config.json >/dev/null; then
+   jq -e --arg node_id "$NODE_ID" '.node_name == "renamed-node" and .node_id == $node_id' .anet/nodes/renamed-node/config.json >/dev/null; then
   pass "complete flow: canonical rename updates path and identity"
 else
   printf '%s\n' "$RENAME_OUTPUT" >&2

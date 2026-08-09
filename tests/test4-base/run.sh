@@ -63,7 +63,7 @@ echo ""
 # 5.1 rename + lookup by node_id
 echo "5.1 Testing rename and dual lookup..."
 NODE_ID=$(python3 -c 'import json;print(json.load(open("/tmp/test/.anet/nodes/test-node/config.json"))["node_id"])')
-anet node rename "$NODE_ID" renamed-node 2>&1 | grep -qi "Renamed node" && pass "rename by node_id" || fail "rename by node_id failed"
+anet node rename "$NODE_ID" renamed-node >/tmp/rename-node.out 2>&1 && pass "rename by node_id" || fail "rename by node_id failed"
 [ -f .anet/nodes/renamed-node/config.json ] && pass "renamed config path" || fail "renamed config path missing"
 grep -q '"node_name": "renamed-node"' .anet/nodes/renamed-node/config.json && pass "node_name updated" || fail "node_name not updated"
 anet channel ls "$NODE_ID" 2>&1 >/dev/null && pass "lookup by node_id works" || fail "lookup by node_id failed"
