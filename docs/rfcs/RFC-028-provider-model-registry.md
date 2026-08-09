@@ -529,6 +529,19 @@ async function safelyFetchProbe(baseUrl: string, env: NodeJS.ProcessEnv): Promis
 - `rejectUnauthorized: true` 显式 set (不靠 default); TLS 最低 1.2
 - daemon boot 时 `assertSecureTlsEnv` 检 `NODE_TLS_REJECT_UNAUTHORIZED=0` 等环境变量, 见到 exit; **CI lint guard** 检 daemon 源码 `rejectUnauthorized:.*false` / `tls.checkServerIdentity.*noop` / 等 pattern = 0 命中
 
+**P1.5 implementation note (#310, 2026-08-09):** production no longer
+selects one illustrative `pinIp`. `createPinnedLookup(host, addrs)` retains the
+whole pre-validated A/AAAA set, honors the connector's single-address,
+`family`, and `{all:true}` callback forms, and rejects a different hostname or
+an unavailable family with `ENOTFOUND`. It never falls back to system DNS.
+Node 20 uses an undici Agent. Bun 1.3 is intentionally routed through
+`node:https` because its undici compatibility layer accepts but ignores the
+Agent lookup hook; both transports receive the same pinned lookup callback.
+The URL remains the vendor hostname, so SNI and certificate SAN validation are
+unchanged. `test648-probe-ip-pin` runs a split-horizon real TLS test under both
+runtimes: pre-validation returns `127.0.0.1`, system DNS returns `127.0.0.2`,
+and only the validated endpoint may receive the request.
+
 **关键不变量**:
 - DNS 解析 → 校验 IP → 用 IP 直连 fetch 三步原子, **rebinding window 为 0** (解析后立即固定 IP)
 - IPv4-mapped IPv6 二次校验, 防 `::ffff:10.0.0.1` 绕 v6 list
@@ -796,6 +809,8 @@ dashboard admin-only audit page 直查 (P2)。
 - [ ] **§2.3** `ack_probe_request` 签名删 `error_message?`, 改 `(probe_id, status, latency_ms, raw_status_code?)`
 - [ ] **§4.4.4** 加 `deriveErrorLabel(ack)` hub-side 派生表 (status enum + raw_status_code → 文案)
 - [ ] impl 不变量: grep `error_message` 在 daemon + hub code path = 0 命中
+- [x] **P1.5 / #310** connector lookup pins the validated A/AAAA set; Node 20
+  + Bun split-horizon TLS E2E and pin-removal mutation are load-bearing
 
 ---
 

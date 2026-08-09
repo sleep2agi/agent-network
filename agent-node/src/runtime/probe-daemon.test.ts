@@ -2,9 +2,53 @@ import { describe, expect, test } from "bun:test";
 import {
   assertSecureTlsEnv,
   classifyProbeResponse,
+  createPinnedLookup,
   handleProbeDoorbell,
   safelyFetchProbe,
 } from "./probe-daemon.js";
+
+function callPinnedLookup(
+  lookup: ReturnType<typeof createPinnedLookup>,
+  hostname: string,
+  options: any,
+): Promise<any[]> {
+  return new Promise((resolve) => {
+    (lookup as any)(hostname, options, (...args: any[]) => resolve(args));
+  });
+}
+
+describe("createPinnedLookup — Node/Bun lookup callback contract", () => {
+  const addresses = [
+    { address: "192.0.2.10", family: 4 },
+    { address: "2001:db8::10", family: 6 },
+  ] as const;
+
+  test("single-address callback honors requested family", async () => {
+    const args = await callPinnedLookup(createPinnedLookup("api.example.test", addresses), "api.example.test", { family: 6 });
+    expect(args).toEqual([null, "2001:db8::10", 6]);
+  });
+
+  test("all-address callback returns only pinned copies", async () => {
+    const args = await callPinnedLookup(createPinnedLookup("api.example.test", addresses), "API.EXAMPLE.TEST.", { all: true });
+    expect(args).toEqual([null, [
+      { address: "192.0.2.10", family: 4 },
+      { address: "2001:db8::10", family: 6 },
+    ]]);
+  });
+
+  test("wrong hostname and unavailable family fail closed without fallback", async () => {
+    for (const [hostname, options] of [
+      ["rebound.example.test", {}],
+      ["api.example.test", { family: 6 }],
+    ] as const) {
+      const onlyV4 = createPinnedLookup("api.example.test", [addresses[0]]);
+      const args = await callPinnedLookup(onlyV4, hostname, options);
+      expect(args[0]).toBeInstanceOf(Error);
+      expect(args[0].code).toBe("ENOTFOUND");
+      expect(args).toHaveLength(1);
+    }
+  });
+});
 
 describe("assertSecureTlsEnv (boot guard)", () => {
   test("clean env passes", () => {
