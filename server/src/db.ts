@@ -1061,6 +1061,60 @@ try { db.exec("CREATE INDEX IF NOT EXISTS idx_completions_network ON completions
 // the reply up the chain via parent_task_id.
 try { db.exec("ALTER TABLE tasks ADD COLUMN parent_task_id TEXT"); } catch {}
 try { db.exec("ALTER TABLE tasks ADD COLUMN meta_json TEXT"); } catch {}
+
+// ── Hub scheduled tasks ──────────────────────────────────────────────
+// Scheduling is a Hub concern: clients manage these rows, while agents only
+// receive the ordinary inbox/tasks rows produced for each occurrence.  Keep
+// the occurrence table separate so retries, skips and failures remain
+// auditable without overloading the task lifecycle.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS scheduled_tasks (
+    schedule_id      TEXT PRIMARY KEY,
+    network_id       TEXT NOT NULL,
+    created_by       TEXT,
+    name             TEXT NOT NULL,
+    target_node_id   TEXT NOT NULL,
+    target_alias     TEXT NOT NULL,
+    task_content     TEXT NOT NULL,
+    priority         TEXT NOT NULL DEFAULT 'normal',
+    schedule_type    TEXT NOT NULL,
+    schedule_json    TEXT NOT NULL,
+    timezone         TEXT NOT NULL DEFAULT 'UTC',
+    overlap_policy   TEXT NOT NULL DEFAULT 'skip',
+    status           TEXT NOT NULL DEFAULT 'active',
+    next_run_at      TEXT,
+    last_run_at      TEXT,
+    revision         INTEGER NOT NULL DEFAULT 1,
+    created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_due
+    ON scheduled_tasks(status, next_run_at);
+  CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_network
+    ON scheduled_tasks(network_id, updated_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_target
+    ON scheduled_tasks(network_id, target_node_id);
+
+  CREATE TABLE IF NOT EXISTS scheduled_task_runs (
+    run_id           TEXT PRIMARY KEY,
+    schedule_id      TEXT NOT NULL,
+    network_id       TEXT NOT NULL,
+    scheduled_for    TEXT NOT NULL,
+    task_id          TEXT,
+    status           TEXT NOT NULL,
+    error_code       TEXT,
+    error_message    TEXT,
+    created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at     TEXT,
+    UNIQUE(schedule_id, scheduled_for)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_scheduled_runs_schedule
+    ON scheduled_task_runs(schedule_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_scheduled_runs_network
+    ON scheduled_task_runs(network_id, created_at DESC);
+`);
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id)"); } catch {}
 
 // Helpers
