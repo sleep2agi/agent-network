@@ -1,0 +1,26 @@
+# test606 — `anet node start --help` headless flags
+
+- Date: 2026-08-09
+- Source commit: `e8902ac63194716829df2456614be64eb6e40df2`
+- Image tag: `anet-test606:dev`
+- Image ID: `sha256:4a2052d42685854071305d5989d91e1c888c4469748350168ed5998175edc00b`
+- Embedded image env: `TEST606_SOURCE_COMMIT=e8902ac63194716829df2456614be64eb6e40df2`
+- Runner artifact SHA256: `2c1f40068f4d66750b9817bbe151c0a7837307adf1a029f465af0d58944aa278`
+
+## Result
+
+`RESULT: PASS`
+
+1. `agent-network` TypeScript check: PASS.
+2. Real source CLI `node start --help`: 2 tests, 10 assertions, 0 failures.
+3. Full package build, including the obfuscated `dist/bin/cli.js`: PASS.
+4. Executed the packaged CLI with Node; output includes:
+   - `--accept-dev-channels`;
+   - `Headless / CI / no-TTY`;
+   - detached tmux behavior and the `requires tmux` boundary.
+5. Help execution does not enter node-start business logic.
+6. Restored-source rerun: 2 tests, 10 assertions, 0 failures.
+
+## Witnessed-red evidence
+
+The route from `node start --help` to its dedicated help printer was disabled while leaving the test unchanged. The real CLI test failed (`rc=1`), proving that the assertion covers printed behavior rather than merely grepping a source literal.
