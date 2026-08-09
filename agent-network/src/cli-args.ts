@@ -26,7 +26,7 @@ export const BOOLEAN_FLAGS = new Set([
 ]);
 
 export function parseCliOptions(argv: string[]): ParsedCliOptions {
-  const result: ParsedCliOptions = { _channels: [], _envs: [] };
+  const result = { _channels: [], _envs: [] } as ParsedCliOptions;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--channel" && argv[i + 1]) {
       result._channels.push(argv[++i]);
