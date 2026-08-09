@@ -1,0 +1,71 @@
+# test635 — create-node daemon private state hardening
+
+Date: 2026-08-09
+Issue: #633
+Base: f4d7cc29f2a12adeb0144f3e69fc6b7dbb781201
+Source commit: e4abb8b45ced70dba711811cf0c0af4191b03540
+Docker tag: anet-test635:dev
+Docker image: sha256:ce9409766adff343e6adac4527ad1ed42ca49e69ea9b6d8e1ac6c007dc27db75
+Embedded source: TEST635_SOURCE_COMMIT=e4abb8b45ced70dba711811cf0c0af4191b03540
+Runner artifact SHA256: 0af1a196c5593a07293cf331da4c53dcd84d336766caaa4d3e6bca1bafe05fc7
+
+## Result
+
+- Exact-source Docker: 119 pass / 0 fail / 223 assertions.
+- The three secret-bearing writers in `create-node-daemon.ts` now use the
+  shared private atomic choke point: global `config.json`, child
+  `config.json`, and child `.env.local`.
+- The writer creates an exclusive 0600 temporary inode with no-follow,
+  fsyncs it, and renames it over the destination. A leaf symlink is replaced
+  without writing through to its target.
+- The daemon repairs and validates the global config before reading it.
+  Same-owner legacy mode 0666 converges to file mode 0600 and managed
+  `.anet` directory mode 0700 without losing the existing token.
+- The bilingual upgrade guide documents the fail-closed owner boundary and
+  the supported container migration paths: align process UID with the bind
+  mount owner, or copy state into a container-user-owned `.anet` directory.
+
+## Real non-root ownership boundary
+
+The container entrypoint ran as uid 10001, not root.
+
+- Positive: a uid-10001 legacy config was repaired to owner/mode `10001:600`
+  and its managed parent to `10001:700`.
+- Negative: the same uid-10001 process attempted to repair a real uid-10002,
+  mode-0600 config. The runtime rejected it (`FOREIGN_UID_RED`, rc=1) and the
+  file remained owned by uid 10002 at mode 0600.
+
+This test intentionally does not provide a trust-owner escape hatch. A
+different-uid secret config remains fail-closed.
+
+## Witnessed red
+
+1. Removing the pre-read repair/owner gate makes the daemon accept the leaf
+   symlink path, so the behavior test fails (`preread-repair`, rc=1).
+2. Replacing one enumerated child-config atomic write with a bypass makes the
+   production-writer contract fail (`writer-bypass`, rc=1).
+
+Both mutations ran against copied source inside the non-root container; test
+code was unchanged.
+
+## Read-only fleet preflight
+
+Before proposing rollout, a read-only host scan inspected 10 running Docker
+containers and found zero bind mounts whose destination was an agent
+`config.json` or `.anet` state directory. A separate live-process scan found
+73 agent-node-style `--config` references: 71 existing host-resolvable files
+all had the same uid as their process, and 2 referenced absent files. Of the
+71 existing files, 45 still used a broader legacy mode and would be repaired
+on a new-runtime boot.
+
+Three scanned processes lived in a different mount namespace, so host-path
+resolution alone is not claimed as proof of their container filesystem. The
+separate Docker mount inventory is the relevant evidence for those running
+containers. No config contents, aliases, paths, tokens, or command lines were
+recorded in this report.
+
+## Scope
+
+No production file mode, process, container, service, credential, database,
+global package, or deployment was changed. Evidence was produced only in the
+isolated Docker image; the exact image tag was removed after capture.
