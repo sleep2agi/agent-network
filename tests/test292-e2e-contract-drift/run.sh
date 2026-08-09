@@ -27,13 +27,14 @@ grep -Fq 'response_json_error_is "$GHOST_REPLY" "reply_task_not_found"' "$SCRIPT
   && pass "wiring: ghost reply uses structured SSE/JSON error parsing" \
   || fail "wiring: ghost reply still parses the raw transport as plain JSON"
 
-grep -Fq 'response_json_has_result "$AUTH_MCP"' "$SCRIPT" \
-  && pass "wiring: MCP initialize uses a structured result predicate" \
-  || fail "wiring: MCP initialize still relies on response text tokens"
+grep -Fq 'response_json_error_is "$AUTH_MCP_BODY" "master-token auth is deprecated; use admin utok_"' "$SCRIPT" \
+  && grep -Fq '[ "$AUTH_MCP_STATUS" = "401" ]' "$SCRIPT" \
+  && pass "wiring: legacy master token MCP rejection is exact" \
+  || fail "wiring: aggregate still treats the legacy master token as MCP auth"
 
-grep -Fq 'has("sse_sessions") | not' "$SCRIPT" \
-  && pass "wiring: anonymous health assertion preserves SSE identity redaction" \
-  || fail "wiring: aggregate still expects anonymous SSE session identities"
+[[ $(grep -Fc 'has("sse_sessions") | not' "$SCRIPT") -eq 2 ]] \
+  && pass "wiring: both anonymous health assertions preserve SSE identity redaction" \
+  || fail "wiring: one anonymous health assertion still expects session identities"
 
 grep -Fq '[ "$AUTH_WS_NO" = "404" ]' "$SCRIPT" \
   && pass "wiring: removed tmux WebSocket route expects 404" \
