@@ -15,6 +15,7 @@ import { readFileSync, existsSync, writeFileSync, chmodSync, realpathSync } from
 import { dirname, join, isAbsolute, resolve } from "path";
 import { hostname as osHostname, homedir } from "os";
 import { createCommhubSdkMcpServer } from "./commhub-mcp";
+import { claudeCommhubToolAliases } from "./claude-tool-aliases";
 import { getHostTelemetry } from "./host-telemetry";
 import { getProcessTelemetry, incrementInFlight, decrementInFlight } from "./process-telemetry";
 import { parseGoalCommand } from "./goals/parser";
@@ -2065,6 +2066,7 @@ async function processWithClaude(task: string, from: string, images?: string[]):
   const commhubUrl = process.env.COMMHUB_URL || COMMHUB_URL;
   const commhubToken = process.env.COMMHUB_TOKEN || AUTH_TOKEN;
   const mcpServers: Record<string, any> = {};
+  let hasInProcessCommhubServer = false;
   if (commhubUrl) {
     try {
       // #146 PR-4 — pass the ASYNC getter so every LLM-driven
@@ -2077,6 +2079,7 @@ async function processWithClaude(task: string, from: string, images?: string[]):
       // `aliasResolver.refresh()`; cache hit is microseconds, miss is
       // one round-trip with 2.5 s budget.
       mcpServers["commhub"] = await createCommhubSdkMcpServer(commhubUrl, commhubToken, liveAlias);
+      hasInProcessCommhubServer = true;
     } catch (e: any) {
       log(`[claude] ⚠ commhub SDK MCP server init failed (${e?.message || e}); falling back to type:"http" (known-broken, see #102 smoke).`);
       mcpServers["commhub"] = {
@@ -2198,6 +2201,10 @@ async function processWithClaude(task: string, from: string, images?: string[]):
     // This gives the agent commhub_send_task / get_all_status / etc. so it
     // can actually talk to other agents in the network.
     mcpServers: Object.keys(mcpServers).length ? mcpServers : undefined,
+    // SDK 0.3.x resolves these short names before MCP lookup. Only expose
+    // aliases after the in-process CommHub server was actually created;
+    // the known-broken HTTP fallback must not claim tools it may not load.
+    toolAliases: claudeCommhubToolAliases(hasInProcessCommhubServer),
     pathToClaudeCodeExecutable: claudePath,
     // Layer A of feishu hardening (RFC-020 §13 — Vincent UAT 2026-06-29
     // catch): strip operator secrets (FEISHU_APP_SECRET / ntok_ / utok_ /
