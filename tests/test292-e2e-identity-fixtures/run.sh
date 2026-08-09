@@ -125,11 +125,69 @@ printf '%s' "$TASK" | jq -e '.tasks[0] | .status == "replied" and .result == "do
   && pass "lifecycle: terminal result persisted" \
   || fail "lifecycle: terminal result mismatch"
 
+MUT_ALIAS=$WORK/helper-no-alias-pin.sh
+cp /app/lib/e2e-agent-bootstrap.sh "$MUT_ALIAS"
+sed -i 's/\. + {node_id: \$node_id, alias: \$alias}/. + {node_id: $node_id}/' "$MUT_ALIAS"
+if cmp -s /app/lib/e2e-agent-bootstrap.sh "$MUT_ALIAS"; then
+  fail "mutation: alias-pin anchor did not match"
+else
+  e2e_create_agent mut-alias codex-sdk gpt-5.4 "$NETWORK_ID"
+  set +e
+  MUT_ALIAS_RESULT=$(bash -c '
+    source "$1"
+    cd "$2"
+    e2e_agent_mcp_call mut-alias report_status \
+      "{\"resume_id\":\"mut-alias\",\"alias\":\"escaped-alias\",\"status\":\"idle\"}"
+  ' _ "$MUT_ALIAS" "$WORK/project")
+  MUT_ALIAS_RC=$?
+  set -e
+  if [[ $MUT_ALIAS_RC -eq 0 ]] && response_json_error_is "$MUT_ALIAS_RESULT" alias_identity_mismatch; then
+    pass "mutation: deleting config-bound alias pin turns red"
+  else
+    fail "mutation: missing alias pin did not expose identity mismatch"
+  fi
+fi
+
+MUT_NODE=$WORK/helper-no-node-id.sh
+cp /app/lib/e2e-agent-bootstrap.sh "$MUT_NODE"
+sed -i 's/\. + {node_id: \$node_id, alias: \$alias}/. + {alias: $alias}/' "$MUT_NODE"
+if cmp -s /app/lib/e2e-agent-bootstrap.sh "$MUT_NODE"; then
+  fail "mutation: node-id anchor did not match"
+else
+  e2e_create_agent mut-node codex-sdk gpt-5.4 "$NETWORK_ID"
+  MUT_NODE_ID=$(jq -r '.node_id' "$(e2e_agent_config_path mut-node)")
+  MUT_NODE_RESULT=$(bash -c '
+    source "$1"
+    cd "$2"
+    e2e_agent_mcp_call mut-node report_status \
+      "{\"resume_id\":\"mut-node\",\"status\":\"idle\"}"
+  ' _ "$MUT_NODE" "$WORK/project")
+  MUT_NODES=$(curl -fsS "$BASE/api/nodes" -H "Authorization: Bearer $OWNER_TOKEN")
+  if response_json_ok "$MUT_NODE_RESULT" && \
+     ! printf '%s' "$MUT_NODES" | jq -e --arg node_id "$MUT_NODE_ID" \
+       '.nodes | any(.node_id == $node_id)' >/dev/null; then
+    pass "mutation: deleting stable node_id injection turns red"
+  else
+    fail "mutation: missing node_id did not lose authoritative inventory"
+  fi
+fi
+
 grep -Fq 'e2e_agent_mcp_call "conc-$i" "report_status"' /app/test.sh \
   && grep -Fq 'e2e_agent_mcp_call mock-agent ack_inbox' /app/test.sh \
   && grep -Fq 'e2e_agent_mcp_call stop-verify report_status' /app/test.sh \
   && pass "aggregate: simulated identity paths use token-bound fixtures" \
   || fail "aggregate: one or more identity paths still use the owner token"
+
+MUT_AGGREGATE=$WORK/docker-e2e-owner-ack.sh
+cp /app/test.sh "$MUT_AGGREGATE"
+sed -i 's/e2e_agent_mcp_call mock-agent ack_inbox/mcp_call "ack_inbox"/' "$MUT_AGGREGATE"
+if cmp -s /app/test.sh "$MUT_AGGREGATE"; then
+  fail "mutation: aggregate ack anchor did not match"
+elif grep -Fq 'e2e_agent_mcp_call mock-agent ack_inbox' "$MUT_AGGREGATE"; then
+  fail "mutation: owner-token ack bypass escaped aggregate gate"
+else
+  pass "mutation: restoring owner-token identity write turns red"
+fi
 
 echo "RESULT: $PASS passed, $FAIL failed"
 echo "source_commit=${TEST292_IDENTITY_SOURCE_COMMIT:-unknown}"
