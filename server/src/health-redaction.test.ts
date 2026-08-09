@@ -17,6 +17,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { register, addNetworkMember, removeNetworkMember } from "./auth.js";
 import { db } from "./db.js";
+import { MAX_REQUEST_CONTENT_LENGTH, MAX_UPLOAD_BYTES } from "./uploads.js";
 
 const SERVER_DB = mkdtempSync(join(tmpdir(), "anet-health-red-db-")) + "/commhub.db";
 
@@ -89,6 +90,17 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(typeof body.sessions_count).toBe("number");
     expect(typeof body.sse_connections).toBe("number");
     expect(body.sse_connections).toBeGreaterThanOrEqual(1);
+  });
+
+  test("exposes stable upload limits anonymously without exposing topology", async () => {
+    const res = await fetch(`${BASE}/health`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.limits).toEqual({
+      max_upload_bytes: MAX_UPLOAD_BYTES,
+      max_request_content_length: MAX_REQUEST_CONTENT_LENGTH,
+    });
+    expect(body.limits.max_request_content_length).toBeGreaterThan(body.limits.max_upload_bytes);
   });
 
   test("CLI count source stays truthful: health.sse_connections == /api/stats/sse total (no fake 0)", async () => {
