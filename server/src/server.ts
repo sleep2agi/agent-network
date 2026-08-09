@@ -1366,6 +1366,14 @@ return Bun.serve({
         multi_network: true,
         license: license?.type || "none",
         uptime: Math.floor(process.uptime()),
+        // #496 — public, stable capability data. Dashboard upload proxies
+        // need the Hub's real limits before opening a streaming request;
+        // duplicating these constants client-side creates a silent
+        // lower-limit drift that the Hub can never observe.
+        limits: {
+          max_upload_bytes: MAX_UPLOAD_BYTES,
+          max_request_content_length: MAX_REQUEST_CONTENT_LENGTH,
+        },
       };
       if (scopedSessions !== undefined) body.sse_sessions = scopedSessions;
       return withCors(req, Response.json(body));

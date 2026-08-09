@@ -1,0 +1,32 @@
+Test 607 — Hub authoritative upload limits
+
+Issue: https://github.com/sleep2agi/agent-network/issues/496
+Base commit: 5b2688fdc41e8c5bfa57820645abcf1f09ffe3df
+Source commit: a90c0cf64231702f2c06dd309471653314d579a6
+
+Scope
+- Adds an anonymous, additive `limits` object to `GET /health`.
+- Values are sourced from the same server constants that enforce upload and request limits.
+- Existing health fields and authentication behavior are unchanged.
+
+Docker evidence
+- Image: anet-test607-hub:dev
+- Image ID: sha256:b34d34c6b768ee280dedf5e719e7a8e445fe7d1997b461c0fc8aa8e53a39d895
+- Embedded TEST607_SOURCE_COMMIT: a90c0cf64231702f2c06dd309471653314d579a6
+- Artifact SHA256: 4c792b5a4d0fe6b20cb8241f064130e914df38362e5cbc1c799de49134b3c656
+
+Results
+- Real Hub build: PASS (257 modules, 1.52 MB output)
+- Real HTTP health tests: PASS (2 tests, 9 assertions)
+- Anonymous health response retains watchdog-compatible shape: PASS
+- `max_upload_bytes` equals the enforced Hub upload constant: PASS
+- `max_request_content_length` equals the enforced request constant: PASS
+- Request limit is not lower than upload limit: PASS
+
+Witnessed-red mutation
+- Mutation: replace the exact health response binding
+  `max_upload_bytes: MAX_UPLOAD_BYTES` with `max_upload_bytes: 1`.
+- Result: FAIL (rc=1) on the public health limit assertion.
+- Restored source: PASS (2 tests, 9 assertions).
+
+Final result: PASS
