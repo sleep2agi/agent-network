@@ -3,6 +3,7 @@
  */
 import { db, generateId, hashPassword, verifyPassword, hashToken, generateToken, generateUserToken, generateNetworkToken, uuidv4 } from "./db.js";
 import { WEAK_PASSWORDS } from "./password-dict.js";
+import { NETWORK_REST_COLUMNS, NETWORK_REST_SELECT, sqlColumns } from "./rest-projections.js";
 
 // Round-6 A1 hardening — dummy hash for username-enumeration timing
 // close. We compute ONE scrypt hash of a throwaway password and reuse
@@ -235,7 +236,7 @@ export function resolveToken(token: string): { user: AuthUser; networkId: string
 
 export function getUserNetworks(userId: string) {
   return db.all<any>(
-    "SELECT * FROM networks WHERE owner_id = ?1 ORDER BY created_at",
+    `SELECT ${NETWORK_REST_SELECT} FROM networks WHERE owner_id = ?1 ORDER BY created_at`,
     userId);
 }
 
@@ -280,7 +281,7 @@ export function listTokens(userId: string) {
 }
 
 export function renameNetwork(userId: string, networkId: string, newName: string): { ok: boolean; error?: string } {
-  const net = db.get<any>("SELECT * FROM networks WHERE network_id = ?1", networkId);
+  const net = db.get<any>("SELECT owner_id FROM networks WHERE network_id = ?1", networkId);
   if (!net) return { ok: false, error: "network not found" };
   if (net.owner_id !== userId) return { ok: false, error: "not your network" };
   const dup = db.get<any>("SELECT network_id FROM networks WHERE owner_id = ?1 AND network_name = ?2", userId, newName);
@@ -290,7 +291,7 @@ export function renameNetwork(userId: string, networkId: string, newName: string
 }
 
 export function deleteNetwork(userId: string, networkId: string): { ok: boolean; error?: string } {
-  const net = db.get<any>("SELECT * FROM networks WHERE network_id = ?1", networkId);
+  const net = db.get<any>("SELECT owner_id FROM networks WHERE network_id = ?1", networkId);
   if (!net) return { ok: false, error: "network not found" };
   if (net.owner_id !== userId) return { ok: false, error: "not your network" };
   // Check if any sessions/tasks still reference this network
@@ -449,7 +450,10 @@ export function createInvite(networkId: string, createdBy: string, role: string 
 }
 
 export function joinByInvite(inviteCode: string, userId: string): { ok: boolean; network_id?: string; role?: string; error?: string } {
-  const invite = db.get<any>("SELECT * FROM network_invites WHERE invite_code = ?1", inviteCode);
+  const invite = db.get<any>(
+    "SELECT invite_code, network_id, role, created_by, max_uses, used_count, expires_at, created_at FROM network_invites WHERE invite_code = ?1",
+    inviteCode,
+  );
   if (!invite) return { ok: false, error: "invalid invite code" };
   if (invite.max_uses > 0 && invite.used_count >= invite.max_uses) return { ok: false, error: "invite code fully used" };
   if (invite.expires_at) {
@@ -474,7 +478,7 @@ export function joinByInvite(inviteCode: string, userId: string): { ok: boolean;
 /** Get all networks a user is a member of (replaces owner-only query) */
 export function getUserAllNetworks(userId: string) {
   return db.all<any>(
-    `SELECT n.*, nm.role as member_role
+    `SELECT ${sqlColumns(NETWORK_REST_COLUMNS, "n")}, nm.role as member_role
      FROM networks n JOIN network_members nm ON n.network_id = nm.network_id
      WHERE nm.user_id = ?1 ORDER BY nm.role = 'owner' DESC, n.created_at`,
     userId);

@@ -33,6 +33,14 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync } from "fs
 import { dirname as pathDirname } from "path";
 import { startRetentionSweeper } from "./retention.js";
 import { startStaleSessionSweeper } from "./stale-sweeper.js";
+import {
+  AUDIT_LOG_REST_SELECT,
+  COMPLETION_REST_SELECT,
+  NETWORK_REST_SELECT,
+  SESSION_REST_SELECT,
+  TASK_EVENT_REST_SELECT,
+  TASK_REST_SELECT,
+} from "./rest-projections.js";
 import { resolveRestFromSession } from "./rest-identity.js";
 import { stampTaskAuthOrigin, type TaskAuthOrigin } from "./task-auth-origin.js";
 import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startScheduledTaskScheduler } from "./scheduled-tasks.js";
@@ -851,7 +859,9 @@ return Bun.serve({
 
     // ── V3: License endpoints ──
     if (url.pathname === "/api/license" && req.method === "GET") {
-      const license = db.get<any>("SELECT * FROM licenses ORDER BY created_at LIMIT 1");
+      const license = db.get<any>(
+        "SELECT type, expires_at, max_agents, max_networks, max_tasks_day FROM licenses ORDER BY created_at LIMIT 1",
+      );
       if (!license) return withCors(req, Response.json({ ok: true, status: "no_license" }));
       const now = new Date().toISOString().replace("T", " ").slice(0, 19);
       const expired = license.expires_at && license.expires_at < now;
@@ -1109,7 +1119,7 @@ return Bun.serve({
       // V3.13: ntok_ can only see its bound network; utok_ sees all member networks
       if (resolved.networkId) {
         // ntok_ — only return the bound network
-        const net = db.get<any>("SELECT * FROM networks WHERE network_id = ?1", resolved.networkId);
+        const net = db.get<any>(`SELECT ${NETWORK_REST_SELECT} FROM networks WHERE network_id = ?1`, resolved.networkId);
         return withCors(req, Response.json({ ok: true, networks: net ? [withNetworkNameAlias(net)] : [] }));
       }
       const networks = getUserAllNetworks(resolved.user.user_id).map(withNetworkNameAlias);
@@ -1215,7 +1225,7 @@ return Bun.serve({
       const resolved = resolveToken(token);
       if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
       const networkId = netDetailMatch[1];
-      const network = db.get<any>("SELECT * FROM networks WHERE network_id = ?1", networkId);
+      const network = db.get<any>(`SELECT ${NETWORK_REST_SELECT} FROM networks WHERE network_id = ?1`, networkId);
       if (!network) return withCors(req, Response.json({ ok: false, error: "network not found" }, { status: 404 }));
       // Membership check: must be a member or system admin
       const viewerRole = getUserNetworkRole(resolved.user.user_id, networkId);
@@ -1444,10 +1454,10 @@ return Bun.serve({
       const params: any[] = [];
       let sql = isLight
         ? "SELECT alias, status, agent, task, server, updated_at, network_id FROM sessions WHERE 1=1"
-        : "SELECT * FROM sessions WHERE 1=1";
+        : `SELECT ${SESSION_REST_SELECT} FROM sessions WHERE 1=1`;
       sql = addNetworkScope(sql, params, restScope);
       sql += " ORDER BY updated_at DESC";
-      // `model` comes straight from the sessions row (SELECT *); `runtime` is
+      // `model` comes straight from the explicit sessions projection; `runtime` is
       // derived from the raw `agent` field. Both default to null for old nodes
       // that never reported a model — the dashboard falls back to a placeholder.
       const sessions = db.all(sql, ...params).map((s: any) => {
@@ -1845,7 +1855,7 @@ return Bun.serve({
       }
 
       if (uploadNetId !== null) {
-        const networkRow = db.get<any>("SELECT * FROM networks WHERE network_id = ?1", uploadNetId);
+        const networkRow = db.get<any>("SELECT network_id FROM networks WHERE network_id = ?1", uploadNetId);
         if (!networkRow) {
           if (principal.kind === "admin-utok" || principal.kind === "legacy-master") {
             return earlyReject(Response.json({
@@ -2475,7 +2485,7 @@ return Bun.serve({
       const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 200);
       const action = url.searchParams.get("action");
       const userId = url.searchParams.get("user_id");
-      let sql = "SELECT * FROM audit_log WHERE 1=1";
+      let sql = `SELECT ${AUDIT_LOG_REST_SELECT} FROM audit_log WHERE 1=1`;
       const params: any[] = [];
       // Non-admin can only see own logs
       if (resolved.user.role !== "admin") { sql += ` AND user_id = ?${params.length + 1}`; params.push(resolved.user.user_id); }
@@ -2491,7 +2501,7 @@ return Bun.serve({
     if (url.pathname === "/api/task_events") {
       const taskId = url.searchParams.get("task_id");
       const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 500);
-      let sql = "SELECT * FROM task_events WHERE 1=1";
+      let sql = `SELECT ${TASK_EVENT_REST_SELECT} FROM task_events WHERE 1=1`;
       const params: any[] = [];
       sql = addNetworkScope(sql, params, restScope);
       if (taskId) { sql += ` AND task_id = ?${params.length + 1}`; params.push(taskId); }
@@ -2506,7 +2516,7 @@ return Bun.serve({
     if (nodeDeleteMatch && req.method === "DELETE") {
       const ref = decodeURIComponent(nodeDeleteMatch[1]);
       const params: any[] = [ref, ref, ref];
-      let sql = "SELECT * FROM nodes WHERE (node_id = ?1 OR node_name = ?2 OR alias = ?3)";
+      let sql = "SELECT node_id, node_name, alias, network_id FROM nodes WHERE (node_id = ?1 OR node_name = ?2 OR alias = ?3)";
       sql = addNetworkScope(sql, params, restScope);
       sql += " ORDER BY updated_at DESC LIMIT 1";
       const node = db.get<any>(sql, ...params);
@@ -2929,7 +2939,7 @@ return Bun.serve({
     if (taskPathMatch && req.method === "GET") {
       const taskId = decodeURIComponent(taskPathMatch[1] ?? "");
       const params: any[] = [taskId];
-      let sql = "SELECT * FROM tasks WHERE task_id = ?1";
+      let sql = `SELECT ${TASK_REST_SELECT} FROM tasks WHERE task_id = ?1`;
       sql = addNetworkScope(sql, params, restScope);
       sql += " LIMIT 1";
       const task = db.get(sql, ...params);
@@ -2963,7 +2973,7 @@ return Bun.serve({
       // {ok, tasks, count, stats} shape — backwards-compatible.
       const skipStats = url.searchParams.get("skip_stats") === "1";
 
-      let sql = "SELECT * FROM tasks WHERE 1=1";
+      let sql = `SELECT ${TASK_REST_SELECT} FROM tasks WHERE 1=1`;
       const params: any[] = [];
       sql = addNetworkScope(sql, params, restScope);
       if (taskId) { sql += ` AND task_id = ?${params.length + 1}`; params.push(taskId); }
@@ -2998,7 +3008,7 @@ return Bun.serve({
     if (url.pathname === "/api/completions") {
       const since = url.searchParams.get("since") ?? new Date(Date.now() - 86400000).toISOString();
       const params: any[] = [since];
-      let sql = "SELECT * FROM completions WHERE completed_at >= ?1";
+      let sql = `SELECT ${COMPLETION_REST_SELECT} FROM completions WHERE completed_at >= ?1`;
       sql = addNetworkScope(sql, params, restScope);
       sql += " ORDER BY completed_at DESC LIMIT 100";
       const rows = db.all(sql, ...params);
