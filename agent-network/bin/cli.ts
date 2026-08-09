@@ -1306,7 +1306,10 @@ function listProfileIds(): string[] {
 // ── Parse --key value and repeatable --channel/--env ──
 
 function parseOpts(): Record<string, string> & { _channels: string[]; _envs: string[] } {
-  return parseCliOptions(args);
+  // Preserve the legacy call-site type while the pure parser models its two
+  // repeatable array fields honestly.
+  const parsed = parseCliOptions(args);
+  return parsed as unknown as Record<string, string> & { _channels: string[]; _envs: string[] };
 }
 
 function commandExists(name: string, env?: NodeJS.ProcessEnv): boolean {

@@ -31,7 +31,7 @@ bun run build
 cd /workspace
 grep -Fq 'import { parseCliOptions, positionalArgs } from "../src/cli-args";' \
   agent-network/bin/cli.ts
-grep -Fq 'return parseCliOptions(args);' agent-network/bin/cli.ts
+grep -Fq 'const parsed = parseCliOptions(args);' agent-network/bin/cli.ts
 
 echo "L3 witnessed-red: each formerly missing flag"
 cp agent-network/src/cli-args.ts /tmp/test611-cli-args.ts
@@ -69,7 +69,7 @@ cp /tmp/test611-cli-args.ts agent-network/src/cli-args.ts
 
 echo "L4 witnessed-red: disconnecting the CLI wrapper"
 cp agent-network/bin/cli.ts /tmp/test611-cli.ts
-sed -i 's/return parseCliOptions(args);/return { _channels: [], _envs: [] };/' \
+sed -i 's/const parsed = parseCliOptions(args);/const parsed = { _channels: [], _envs: [] };/' \
   agent-network/bin/cli.ts
 set +e
 bun test agent-network/src/cli-args-wiring.test.ts >/tmp/test611-wiring.log 2>&1

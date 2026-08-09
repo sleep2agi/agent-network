@@ -1,4 +1,5 @@
-export type ParsedCliOptions = Record<string, string> & {
+export type ParsedCliOptions = {
+  [key: string]: string | string[];
   _channels: string[];
   _envs: string[];
 };
@@ -26,7 +27,7 @@ export const BOOLEAN_FLAGS = new Set([
 ]);
 
 export function parseCliOptions(argv: string[]): ParsedCliOptions {
-  const result = { _channels: [], _envs: [] } as ParsedCliOptions;
+  const result: ParsedCliOptions = { _channels: [], _envs: [] };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--channel" && argv[i + 1]) {
       result._channels.push(argv[++i]);

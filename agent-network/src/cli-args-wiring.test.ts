@@ -7,6 +7,6 @@ test("CLI option and positional parsing share cli-args.ts", () => {
   expect(source).toContain(
     'import { parseCliOptions, positionalArgs } from "../src/cli-args";',
   );
-  expect(source).toContain("return parseCliOptions(args);");
+  expect(source).toContain("const parsed = parseCliOptions(args);");
   expect(source).not.toContain("const BOOLEAN_FLAGS = new Set(");
 });
