@@ -52,7 +52,10 @@ jobs:
           set +e
           docker run --rm anet-e2e /app/test-all.sh 2>&1 | tee /tmp/e2e-output.log
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
-        timeout-minutes: 5
+        # The now-restored Loop suites intentionally include real 60-second
+        # scheduler windows plus cooldown checks. Five minutes killed a valid
+        # complete run before it could emit the Final Report.
+        timeout-minutes: 12
 
       - name: Surface verdict (never silent — print suite numbers)
         if: always()
