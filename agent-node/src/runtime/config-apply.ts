@@ -195,6 +195,10 @@ export function computeApplyMode(patch: ConfigPatch): ApplyMode {
  * (caught by cross-agent review on PR B).
  */
 export function atomicWriteJson(path: string, data: unknown): void {
+  atomicWritePrivateText(path, JSON.stringify(data, null, 2) + "\n");
+}
+
+function atomicWritePrivateText(path: string, body: string): void {
   const parent = dirname(path);
   repairPrivateDirectory(parent);
   const tmp = join(parent, `.${basename(path)}.${randomBytes(12).toString("hex")}.tmp`);
@@ -205,7 +209,7 @@ export function atomicWriteJson(path: string, data: unknown): void {
       constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW || 0),
       0o600,
     );
-    writeFileSync(fd, JSON.stringify(data, null, 2) + "\n", "utf8");
+    writeFileSync(fd, body, "utf8");
     fchmodSync(fd, 0o600);
     fsyncSync(fd);
     closeSync(fd);
@@ -265,7 +269,7 @@ export function repairPrivateConfigPermissions(path: string): void {
  * config (first-write case) — caller handles. */
 export function backupConfigPrev(path: string): { backedUp: boolean } {
   if (!existsSync(path)) return { backedUp: false };
-  atomicWriteJson(`${path}.prev`, JSON.parse(readFileSync(path, "utf8")));
+  atomicWritePrivateText(`${path}.prev`, readFileSync(path, "utf8"));
   return { backedUp: true };
 }
 
@@ -296,7 +300,7 @@ export function loadConfigWithSelfHeal(path: string): SelfHealOutcome {
     const prevTxt = readFileSync(prevPath, "utf-8");
     const prevParsed = JSON.parse(prevTxt);
     // Recovery: copy .prev back to primary so the next boot uses it.
-    atomicWriteJson(path, prevParsed);
+    atomicWritePrivateText(path, prevTxt);
     return { config: prevParsed, source: "prev", primaryError };
   } catch (e: any) {
     throw new Error(
