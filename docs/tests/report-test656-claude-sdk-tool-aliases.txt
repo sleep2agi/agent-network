@@ -1,0 +1,94 @@
+# Test 656 — Claude Agent SDK 0.3.x + CommHub tool aliases
+
+Date: 2026-08-10 (Asia/Shanghai)
+Issue: #109
+Base commit: 124fdabb33c2f4c5731d4dbe4d55387fbea211e5
+Source commit under test: 245f85e46842c17a75367b2502262d1855e6b7df
+Docker tag: anet-test656:dev (fixed/reused tag)
+Image ID: sha256:392982b9658a39f8a8aafda8d8486da9fd27f8c73b7b150cd4d512fbfd5b951a
+Image size: 405783858 bytes
+Embedded ENV: TEST656_SOURCE_COMMIT=245f85e46842c17a75367b2502262d1855e6b7df
+
+## Audit findings
+
+- npm `latest` and `next` both resolved to `0.3.226` during the audit.
+- The installed 0.3.226 `Options` type publishes
+  `toolAliases?: Record<string, string>`; aliases are single-hop and resolve
+  before tool-name lookup.
+- The 0.3.142 breaking changes remove the deprecated V2 session API, make MCP
+  connections non-blocking by default, and replace TodoWrite with Task tools in
+  headless/SDK sessions. agent-node uses `query()` and has no SDKSession,
+  unstable_v2, TodoWrite, or TaskCreate consumer, so no removed API is called.
+- 0.3.221 fixed first-turn external MCP readiness. The selected 0.3.226 includes
+  that fix; the real-query test below proves the in-process CommHub tool is
+  available on the first tool-using turn.
+- agent-node intentionally tracks no package lock in this package (`bun.lock`
+  and `package-lock.json` are ignored). The clean Docker install resolved the
+  declared `^0.3.226` range to exactly 0.3.226; no lockfile was hand-edited.
+
+## Exact alias boundary
+
+Aliases are only enabled after `createCommhubSdkMcpServer` succeeds. The known-
+broken HTTP fallback does not receive aliases and cannot claim absent tools.
+The exact six-key set maps short names to the actual SDK names:
+
+- `commhub_send_task` -> `mcp__commhub__send_task`
+- `commhub_send_message` -> `mcp__commhub__send_message`
+- `commhub_get_all_status` -> `mcp__commhub__get_all_status`
+- `commhub_get_session_status` -> `mcp__commhub__get_session_status`
+- `commhub_get_task` -> `mcp__commhub__get_task`
+- `commhub_list_tasks` -> `mcp__commhub__list_tasks`
+
+`commhub_send_reply` is deliberately absent because that agent-facing tool was
+removed as broken. The issue's older doubled target spelling
+`mcp__commhub__commhub_send_task` is not used.
+
+## Docker command
+
+```sh
+sg docker -c 'docker build \
+  --build-arg=TEST656_SOURCE_COMMIT=245f85e46842c17a75367b2502262d1855e6b7df \
+  -t anet-test656:dev \
+  -f tests/test656-claude-sdk-tool-aliases/Dockerfile .'
+
+sg docker -c 'docker run --rm \
+  -v /tmp/test656-final.c6rjA9:/artifacts \
+  anet-test656:dev'
+```
+
+## Result
+
+Final: `RESULT pass=8 fail=0`
+
+- Clean install resolved SDK 0.3.226.
+- Exact alias unit contract: 2 pass / 0 fail / 4 assertions.
+- The 0.3.226 `Options.toolAliases` type probe passed.
+- The complete agent-node bundle built against 0.3.226.
+- Real SDK `query()` + real in-process CommHub MCP + local fake vendor completed
+  two turns. The model emitted `commhub_send_task`; the fake Hub observed exactly
+  one bare `send_task` call with `from_session=sender-test656`, then the query
+  returned `ALIAS_RUNTIME_OK`.
+- Removing alias injection made the same real query reach the final response but
+  produced zero Hub tool calls, so the unchanged behavior assertion turned red.
+- A controlled 0.2.141 install still passed the alias at runtime. This disproves
+  the original assumption that downgrade must make runtime lookup fail; it is an
+  undocumented implementation behavior, not a published 0.2 contract.
+- Under 0.2.141 the unchanged type probe turned red because `Options` has no
+  `toolAliases`. This is the supported-API boundary supplied by 0.3.x.
+
+Runner output SHA256:
+`7c30ce52de1161f45d73b43c0023ea307923990bcf28fef38ca0a0ec7a037121`
+
+Runtime-green artifact SHA256:
+`28e0a876ba79573956de435f544da35eab2a71a231083f0ef8b76e8aa71a2d45`
+
+Witnessed-red artifacts:
+
+1. Alias injection removed: Hub call count became zero.
+   SHA256 `37d076aacbcb922b2ff5f0b3c745a5166cc1c9e252ad40bfaa325b2f87ed68b5`.
+2. SDK downgraded to 0.2.141: unchanged public `Options.toolAliases` type probe
+   failed with TS2353/TS2339.
+   SHA256 `28e55d56cf2e349ce78328961f6c6d75056b130d76407f890051e7d9c81438b2`.
+
+No production endpoint, agent, global package, or credential was used. The vendor
+and Hub boundaries were local deterministic fixtures inside Docker.
