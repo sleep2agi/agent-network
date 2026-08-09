@@ -1,0 +1,49 @@
+# test633 — doctor locale diagnostic
+
+Date: 2026-08-09
+Issue: #68
+Base: a10c835cbfa622c99b97540f9bc2081a632a60af
+Source commit: b118e7ec877be9a24c03c22405ad77a6f90b0860
+Docker tag: anet-test633:dev
+Docker image: sha256:50ee357cb68cd9e808dadf80f8f248b4cae17c433329923d49eba565bbf57a26
+Embedded source: TEST633_SOURCE_COMMIT=b118e7ec877be9a24c03c22405ad77a6f90b0860
+Runner artifact SHA256: e5e6c111d3491bcc23b5fb4fc8eafa62c9a143339bb6ddabb401697335838552
+
+## Result
+
+- Pure locale semantics and production wiring: 7 pass / 0 fail / 19
+  assertions.
+- The real bundled CLI ran `doctor` under `LANG=C LC_ALL=C`; it emitted the
+  warn-only `System locale` diagnostic and the `C.UTF-8` remediation.
+- The same real bundle under `LANG=C.UTF-8 LC_ALL=C.UTF-8` emitted no locale
+  warning.
+- POSIX precedence is explicit: `LC_ALL`, then `LC_CTYPE`, then `LANG`.
+  Common `UTF-8` and `utf8` spellings pass. C, POSIX, other encodings, and an
+  unset POSIX locale warn.
+- Windows does not receive the POSIX export advice because those variables do
+  not define its process Unicode boundary.
+- Locale values are bounded and control characters are replaced before being
+  printed, so a hostile environment value cannot inject terminal control or
+  an unbounded diagnostic line.
+
+## Witnessed red
+
+The pre-implementation tests failed with rc=1 because the helper and doctor
+wiring did not exist. On the exact source commit:
+
+1. Weakening UTF-8 detection so every non-empty locale passes makes the
+   semantic tests fail (`MUTATION_RED: locale-detection rc=1`).
+2. Replacing the production doctor call with a constant non-warning result
+   makes the wiring test fail (`MUTATION_RED: doctor-wiring rc=1`).
+
+## Scope
+
+This is a warn-only diagnostic. It does not mutate locale variables, files,
+processes, credentials, or services, and it does not change the doctor exit
+status. The check observes configured environment strings; it does not prove
+that a named locale is installed in the host locale database. Docker evidence
+proves the Linux behavior and the Windows behavior is a pure platform branch,
+not a Windows-host execution claim.
+
+No production service, global package, credential, database, or existing user
+file was touched.
