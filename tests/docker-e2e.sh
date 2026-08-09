@@ -222,13 +222,13 @@ echo ""
 
 # 12. V2: send_ack updates tasks table
 echo "12. Testing V2 send_ack..."
-ACK_RESP=$(mcp_call "send_ack" "{\"task_id\":\"$TASK_ID\",\"from_session\":\"e2e-agent\"}")
+ACK_RESP=$(e2e_agent_mcp_call e2e-agent send_ack "{\"task_id\":\"$TASK_ID\",\"from_session\":\"e2e-agent\"}")
 response_json_ok "$ACK_RESP" && pass "send_ack accepted" || { echo "$ACK_RESP"; fail "send_ack failed"; }
 echo ""
 
 # 13. V2: send_reply closes task lifecycle
 echo "13. Testing V2 send_reply..."
-REPLY_RESP=$(mcp_call "send_reply" "{\"alias\":\"v2-tester\",\"text\":\"task done\",\"in_reply_to\":\"$TASK_ID\",\"status\":\"replied\",\"from_session\":\"e2e-agent\"}")
+REPLY_RESP=$(e2e_agent_mcp_call e2e-agent send_reply "{\"alias\":\"v2-tester\",\"text\":\"task done\",\"in_reply_to\":\"$TASK_ID\",\"status\":\"replied\",\"from_session\":\"e2e-agent\"}")
 response_json_ok "$REPLY_RESP" && pass "send_reply accepted" || { echo "$REPLY_RESP"; fail "send_reply failed"; }
 echo ""
 
@@ -267,7 +267,7 @@ try:
   print(t.get('message_id',''))
 except: print('')
 " 2>/dev/null)
-FAIL_REPLY=$(mcp_call "send_reply" "{\"alias\":\"fail-tester\",\"text\":\"error occurred\",\"in_reply_to\":\"$FAIL_TID\",\"status\":\"failed\",\"from_session\":\"e2e-agent\"}")
+FAIL_REPLY=$(e2e_agent_mcp_call e2e-agent send_reply "{\"alias\":\"fail-tester\",\"text\":\"error occurred\",\"in_reply_to\":\"$FAIL_TID\",\"status\":\"failed\",\"from_session\":\"e2e-agent\"}")
 response_json_ok "$FAIL_REPLY" && pass "send_reply(failed) accepted" || fail "send_reply(failed) broken"
 # verify task status = failed
 sleep 1
@@ -277,10 +277,10 @@ echo ""
 
 # 17. high priority ordering
 echo "17. Testing priority ordering..."
-anet node create prio-agent --runtime codex-sdk 2>&1 >/dev/null
+e2e_create_agent prio-agent codex-sdk gpt-5.4 "$NETWORK_ID" >/dev/null || fail "prio-agent fixture creation failed"
 mcp_call "send_task" '{"alias":"prio-agent","task":"low prio","from_session":"tester","priority":"low"}' >/dev/null
 mcp_call "send_task" '{"alias":"prio-agent","task":"high prio","from_session":"tester","priority":"high"}' >/dev/null
-INBOX=$(mcp_call "get_inbox" '{"alias":"prio-agent","limit":5}')
+INBOX=$(e2e_agent_mcp_call prio-agent get_inbox '{"alias":"prio-agent","limit":5}')
 # high priority should come first
 FIRST=$(echo "$INBOX" | python3 -c "
 import sys,json
@@ -354,10 +354,17 @@ echo ""
 
 # 23.5 Concurrent registration
 echo "23.5 Testing concurrent operations..."
+# Identity-bearing operations must use one real ntok-bound fixture per agent.
+# Pre-create sequentially through the public CLI, then exercise only the
+# report_status calls concurrently so this remains a concurrency test rather
+# than a token-mint race.
+for i in $(seq 1 5); do
+  e2e_create_agent "conc-$i" codex-sdk gpt-5.4 "$NETWORK_ID" >/dev/null || fail "conc-$i fixture creation failed"
+done
 # Register 5 agents simultaneously
 CONCURRENT_PIDS=()
 for i in $(seq 1 5); do
-  mcp_call "report_status" "{\"resume_id\":\"concurrent-$i\",\"alias\":\"conc-$i\",\"status\":\"idle\",\"server\":\"test\"}" > /dev/null &
+  e2e_agent_mcp_call "conc-$i" "report_status" "{\"resume_id\":\"concurrent-$i\",\"status\":\"idle\",\"server\":\"test\"}" > /dev/null &
   CONCURRENT_PIDS+=("$!")
 done
 for pid in "${CONCURRENT_PIDS[@]}"; do wait "$pid"; done
@@ -378,7 +385,7 @@ for i in $(seq 1 3); do
 done
 for pid in "${CONCURRENT_PIDS[@]}"; do wait "$pid"; done
 sleep 1
-CONC_INBOX=$(mcp_call "get_inbox" '{"alias":"conc-1","limit":10}')
+CONC_INBOX=$(e2e_agent_mcp_call "conc-1" "get_inbox" '{"alias":"conc-1","limit":10}')
 CONC_MSG_COUNT=$(echo "$CONC_INBOX" | python3 -c "
 import sys,json
 raw=sys.stdin.read()
@@ -457,7 +464,7 @@ try:
 except: print('')
 " 2>/dev/null)
 # Fail it
-mcp_call "send_reply" "{\"alias\":\"tester\",\"text\":\"error\",\"in_reply_to\":\"$RETRY_TID\",\"status\":\"failed\",\"from_session\":\"conc-1\"}" > /dev/null
+e2e_agent_mcp_call "conc-1" "send_reply" "{\"alias\":\"tester\",\"text\":\"error\",\"in_reply_to\":\"$RETRY_TID\",\"status\":\"failed\",\"from_session\":\"conc-1\"}" > /dev/null
 sleep 1
 # Verify failed
 RETRY_C1=$(curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:9200/api/tasks?task_id=$RETRY_TID" 2>/dev/null)
@@ -506,8 +513,10 @@ echo ""
 
 # 23.66 Task reassign
 echo "23.66 Testing task reassign..."
-mcp_call "report_status" '{"resume_id":"reassign-src","alias":"agent-a","status":"idle","server":"test"}' > /dev/null
-mcp_call "report_status" '{"resume_id":"reassign-dst","alias":"agent-b","status":"idle","server":"test"}' > /dev/null
+e2e_create_agent agent-a codex-sdk gpt-5.4 "$NETWORK_ID" >/dev/null || fail "agent-a fixture creation failed"
+e2e_create_agent agent-b codex-sdk gpt-5.4 "$NETWORK_ID" >/dev/null || fail "agent-b fixture creation failed"
+e2e_agent_mcp_call agent-a report_status '{"resume_id":"reassign-src","status":"idle","server":"test"}' > /dev/null
+e2e_agent_mcp_call agent-b report_status '{"resume_id":"reassign-dst","status":"idle","server":"test"}' > /dev/null
 RA_SEND=$(mcp_call "send_task" '{"alias":"agent-a","task":"reassign me","from_session":"tester"}')
 RA_TID=$(echo "$RA_SEND" | python3 -c "
 import sys,json
@@ -554,7 +563,7 @@ echo "$EXP_C1" | grep -q '"delivered"' && pass "task initially delivered" || fai
 # Wait for expiration + trigger patrol manually via SQLite (can't wait 5 min in test)
 sleep 3
 # Manually run the expiration query (same as server patrol)
-mcp_call "report_status" '{"resume_id":"patrol-trigger","alias":"patrol","status":"idle"}' > /dev/null
+e2e_agent_mcp_call conc-1 report_status '{"resume_id":"concurrent-1","status":"idle","server":"test"}' > /dev/null
 # The patrol runs in get_all_status, let's call that
 mcp_call "get_all_status" '{}' > /dev/null
 # Check if task expired — patrol may not have run yet, so also do direct check
@@ -636,7 +645,8 @@ echo ""
 # 24k. notifyServerOffline verification
 echo "24k. Testing anet node stop offline effect..."
 # Register a fake agent on main server, then stop it
-mcp_call "report_status" '{"resume_id":"sim-stop-test","alias":"stop-verify","status":"idle","server":"test"}' > /dev/null
+e2e_create_agent stop-verify codex-sdk gpt-5.4 "$NETWORK_ID" >/dev/null || fail "stop-verify fixture creation failed"
+e2e_agent_mcp_call stop-verify report_status '{"resume_id":"sim-stop-test","status":"idle","server":"test"}' > /dev/null
 # Verify it's idle
 STOP_BEFORE=$(curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:9200/api/status" 2>/dev/null | python3 -c "
 import sys,json
@@ -646,7 +656,7 @@ print(s['status'] if s else 'not_found')
 " 2>/dev/null)
 [ "$STOP_BEFORE" = "idle" ] && pass "stop-verify starts as idle" || fail "stop-verify not idle ($STOP_BEFORE)"
 # Set it to offline
-mcp_call "report_status" '{"resume_id":"sim-stop-test","alias":"stop-verify","status":"offline"}' > /dev/null
+e2e_agent_mcp_call stop-verify report_status '{"resume_id":"sim-stop-test","status":"offline"}' > /dev/null
 # Verify it's now offline
 STOP_AFTER=$(curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:9200/api/status" 2>/dev/null | python3 -c "
 import sys,json
@@ -660,7 +670,8 @@ echo ""
 # 25. Full task lifecycle simulation (mock agent)
 echo "25. Simulating full agent lifecycle..."
 # Register a mock agent
-SIM_REG=$(mcp_call "report_status" '{"resume_id":"sim-mock-agent","alias":"mock-agent","status":"idle","server":"test","agent":"mock"}')
+e2e_create_agent mock-agent codex-sdk gpt-5.4 "$NETWORK_ID" >/dev/null || fail "mock-agent fixture creation failed"
+SIM_REG=$(e2e_agent_mcp_call mock-agent report_status '{"resume_id":"sim-mock-agent","status":"idle","server":"test","agent":"mock"}')
 response_json_ok "$SIM_REG" && pass "mock agent registered" || fail "mock agent registration failed"
 
 # Send task to mock agent
@@ -683,11 +694,11 @@ SIM_CHECK1=$(curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:9200/ap
 echo "$SIM_CHECK1" | grep -q '"delivered"' && pass "task status = delivered" || fail "expected delivered"
 
 # Mock agent: pull inbox
-SIM_INBOX=$(mcp_call "get_inbox" '{"alias":"mock-agent","limit":5}')
+SIM_INBOX=$(e2e_agent_mcp_call mock-agent get_inbox '{"alias":"mock-agent","limit":5}')
 echo "$SIM_INBOX" | grep -q 'compute 2+2' && pass "mock agent received task" || fail "mock agent inbox empty"
 
 # Mock agent: ack
-SIM_ACK=$(mcp_call "ack_inbox" "{\"alias\":\"mock-agent\",\"message_id\":\"$SIM_TID\"}")
+SIM_ACK=$(e2e_agent_mcp_call mock-agent ack_inbox "{\"alias\":\"mock-agent\",\"message_id\":\"$SIM_TID\"}")
 response_json_ok "$SIM_ACK" && pass "mock agent acked" || fail "ack failed"
 
 # Verify task = acked
@@ -695,7 +706,7 @@ SIM_CHECK2=$(curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:9200/ap
 echo "$SIM_CHECK2" | grep -q '"acked"' && pass "task status = acked" || fail "expected acked"
 
 # Mock agent: report working
-SIM_WORK=$(mcp_call "report_status" '{"resume_id":"sim-mock-agent","alias":"mock-agent","status":"working","task":"compute 2+2"}')
+SIM_WORK=$(e2e_agent_mcp_call mock-agent report_status '{"resume_id":"sim-mock-agent","status":"working","task":"compute 2+2"}')
 response_json_ok "$SIM_WORK" && pass "mock agent working" || fail "status update failed"
 
 # Verify task = running
@@ -704,7 +715,7 @@ SIM_CHECK3=$(curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:9200/ap
 echo "$SIM_CHECK3" | grep -q '"running"' && pass "task status = running" || fail "expected running"
 
 # Mock agent: send reply with result
-SIM_REPLY=$(mcp_call "send_reply" "{\"alias\":\"orchestrator\",\"text\":\"4\",\"in_reply_to\":\"$SIM_TID\",\"status\":\"replied\",\"from_session\":\"mock-agent\"}")
+SIM_REPLY=$(e2e_agent_mcp_call mock-agent send_reply "{\"alias\":\"orchestrator\",\"text\":\"4\",\"in_reply_to\":\"$SIM_TID\",\"status\":\"replied\",\"from_session\":\"mock-agent\"}")
 response_json_ok "$SIM_REPLY" && pass "mock agent replied" || fail "reply failed"
 
 # Verify task = replied with result
@@ -728,7 +739,7 @@ print('PASS' if ok else 'FAIL')
 " 2>/dev/null | grep -q 'PASS' && pass "all lifecycle timestamps set" || fail "missing timestamps"
 
 # Mock agent: back to idle
-mcp_call "report_status" '{"resume_id":"sim-mock-agent","alias":"mock-agent","status":"idle"}' > /dev/null
+e2e_agent_mcp_call mock-agent report_status '{"resume_id":"sim-mock-agent","status":"idle"}' > /dev/null
 pass "mock agent back to idle"
 
 # Verify task_events audit trail for mock agent task
