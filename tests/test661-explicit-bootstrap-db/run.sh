@@ -17,6 +17,7 @@ expect_red(){
 
 run_cli_e2e(){
   local case_root home explicit_db decoy_db ready capture fixture_pid rc
+  local explicit_value decoy_value captured_path first_arg
   case_root=$(mktemp -d /tmp/test661-e2e.XXXXXX)
   home="$case_root/home"
   explicit_db="$case_root/explicit/hub.db"
@@ -24,8 +25,8 @@ run_cli_e2e(){
   ready="$case_root/ready"
   capture="$case_root/capture"
   mkdir -p "$home"
-  /usr/local/bin/bun "$ROOT/tests/test661-explicit-bootstrap-db/db-tool.ts" seed "$explicit_db"
-  /usr/local/bin/bun "$ROOT/tests/test661-explicit-bootstrap-db/db-tool.ts" seed "$decoy_db"
+  /usr/local/bin/bun "$ROOT/tests/test661-explicit-bootstrap-db/db-tool.ts" seed "$explicit_db" || return 1
+  /usr/local/bin/bun "$ROOT/tests/test661-explicit-bootstrap-db/db-tool.ts" seed "$decoy_db" || return 1
 
   TEST661_PORT=25661 TEST661_READY_FILE="$ready" \
     /usr/local/bin/bun "$ROOT/tests/test661-explicit-bootstrap-db/fixture-server.ts" \
@@ -43,11 +44,17 @@ run_cli_e2e(){
   set -e
   kill "$fixture_pid" 2>/dev/null || true
   wait "$fixture_pid" 2>/dev/null || true
-  [[ "$rc" -eq 0 ]]
-  [[ "$(/usr/local/bin/bun "$ROOT/tests/test661-explicit-bootstrap-db/db-tool.ts" read "$explicit_db")" == 1 ]]
-  [[ "$(/usr/local/bin/bun "$ROOT/tests/test661-explicit-bootstrap-db/db-tool.ts" read "$decoy_db")" == 0 ]]
-  [[ "$(cat "$capture.path")" == "$explicit_db" ]]
-  [[ "$(sed -n '1p' "$capture.argv")" == "-e" ]]
+  explicit_value=$(/usr/local/bin/bun "$ROOT/tests/test661-explicit-bootstrap-db/db-tool.ts" read "$explicit_db") || return 1
+  decoy_value=$(/usr/local/bin/bun "$ROOT/tests/test661-explicit-bootstrap-db/db-tool.ts" read "$decoy_db") || return 1
+  captured_path=$(cat "$capture.path" 2>/dev/null || true)
+  first_arg=$(sed -n '1p' "$capture.argv" 2>/dev/null || true)
+  if [[ "$rc" -ne 0 || "$explicit_value" != 1 || "$decoy_value" != 0 \
+    || "$captured_path" != "$explicit_db" || "$first_arg" != "-e" ]]; then
+    printf 'E2E mismatch rc=%s explicit=%s decoy=%s captured_path=%s first_arg=%s\n' \
+      "$rc" "$explicit_value" "$decoy_value" "$captured_path" "$first_arg" >&2
+    safe_rm_rf "$case_root"
+    return 1
+  fi
   safe_rm_rf "$case_root"
 }
 
