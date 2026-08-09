@@ -1,0 +1,79 @@
+# test292 Layer 2 follow-up — current transport contract assertions
+
+Date: 2026-08-10
+Stacked base: b3d6b494c7ff8371fbe590efbc7fa891196b3f87
+Source under test: dd044709bd010fef8cc36ed3b1962395c1da54ae
+Scope: Base E2E assertions, shared test response parsing, and an isolated real
+Hub test. No production source or runtime was changed.
+
+## Witnessed red
+
+Exact red source: 21d1520c60a453193a43a459c2469e628fcca5a4
+
+The real-Hub run exited 1 with 2 passed / 10 failed. It established both sides
+of the re-bucket:
+
+- real anonymous `/health` already returned an aggregate `sse_connections`
+  count and withheld `sse_sessions` identities;
+- the removed `/ws/tmux/:session` route returned 404;
+- the aggregate still expected the old health and WebSocket contracts;
+- MCP initialize and `reply_task_not_found` arrived as SSE-framed JSON-RPC,
+  with the tool error encoded as JSON inside `result.content[].text`;
+- no strict structured result/error predicates existed;
+- both mutation anchors were absent, so neither mutation could claim coverage.
+
+Red log SHA256:
+a6aa54f54dbd80680419bed8c80897bf64d463521c25c6df7541eba190fd0f4d
+
+## Exact-source Docker run
+
+Build:
+
+    sg docker -c 'docker build --build-arg TEST292_CONTRACT_SOURCE_COMMIT=dd044709bd010fef8cc36ed3b1962395c1da54ae -t anet-test292-contract:dev -f tests/test292-e2e-contract-drift/Dockerfile .'
+
+Run:
+
+    sg docker -c 'docker run --rm anet-test292-contract:dev'
+
+Image ID:
+sha256:2c2282fe6d9905be63d78333471c16673132c5736eb0b008d455e6b0a0a86727
+
+Embedded environment:
+
+    TEST292_CONTRACT_SOURCE_COMMIT=dd044709bd010fef8cc36ed3b1962395c1da54ae
+
+Result: PASS, 12 passed / 0 failed.
+
+Green log SHA256:
+7e60632e7e9275b7c5b733f964589498afc7664b967acc513b1ecb25048ffd7f
+
+Verified behavior:
+
+- the upgrade probe explicitly uses `--no-auto-self --dry-run`, so an E2E
+  assertion cannot trigger a real package replacement;
+- MCP initialize requires an explicit structured JSON-RPC `result`, not a
+  matching word in response text;
+- ghost reply checks the exact `reply_task_not_found` code through SSE,
+  JSON-RPC, content-array, and JSON-string wrappers;
+- an absent result and a different error code are rejected;
+- anonymous health is pinned to count-only SSE observability;
+- the removed tmux WebSocket route is pinned to 404 rather than treated as a
+  live unauthenticated endpoint;
+- broadening result acceptance or accepting any error code independently
+  turns the negative-control gate red.
+
+## Harness correction retained as evidence
+
+The first post-implementation run was 11/1, not counted green. Its result
+mutation did weaken the predicate, but the shell negative-control function
+continued to a second command and overwrote the first failure status. The
+checker was changed to return explicitly after either violation; only then did
+both mutations turn red and the exact-source run reach 12/0. This prevents the
+test intended to remove false positives from carrying its own vacuous gate.
+
+## Honest boundary
+
+This layer updates test expectations to contracts already enforced by the real
+Hub. It does not claim to fix the remaining Base failures in task lifecycle,
+auth scoping, concurrency, network creation, or quickstart. Those remain in
+the #292 re-bucket for later layers.
