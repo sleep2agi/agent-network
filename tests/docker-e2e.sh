@@ -1,5 +1,6 @@
 #!/bin/bash
 source /app/lib/response-json.sh
+source /app/lib/e2e-agent-bootstrap.sh
 # Don't use set -e — we handle errors via pass()/fail()
 PASS=0
 FAIL=0
@@ -63,6 +64,7 @@ fi
 # #63: also `anet login` so subsequent `anet node create / delete / channel add`
 # CLI commands (not just curl) work under V3 auth.
 anet login --hub http://127.0.0.1:9200 --username e2e-bootstrap --password bootstrap-pass-123 > /dev/null 2>&1 || true
+e2e_select_network "$NETWORK_ID" || { echo "FATAL: could not select bootstrap network"; exit 1; }
 echo ""
 
 # ── MCP helper ── (#266 A1 refactor: hoisted to top so all callers go through
@@ -149,14 +151,20 @@ echo ""
 
 # 8. agent-node register to CommHub
 echo "8. Testing agent-node CommHub registration..."
-timeout 8 agent-node --alias e2e-agent --runtime codex-sdk 2>&1 &
-sleep 5
-curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:9200/api/status | python3 -c "
-import sys,json
-data=json.load(sys.stdin)
-found = any(s['alias']=='e2e-agent' for s in data['sessions'])
-print('found' if found else 'not_found')
-" 2>/dev/null | grep -q "found" && pass "agent registered" || fail "agent not registered"
+e2e_create_agent e2e-agent codex-sdk gpt-5.4 "$NETWORK_ID" || { echo "FATAL: could not create token-bound e2e-agent"; exit 1; }
+E2E_AGENT_CONFIG="$(pwd)/.anet/nodes/e2e-agent/config.json"
+agent-node --config "$E2E_AGENT_CONFIG" --alias e2e-agent --runtime codex-sdk > /tmp/e2e-agent.log 2>&1 &
+E2E_AGENT_PID=$!
+E2E_AGENT_REGISTERED=0
+for _i in $(seq 1 40); do
+  E2E_STATUS=$(curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:9200/api/status 2>/dev/null || true)
+  if printf '%s' "$E2E_STATUS" | e2e_status_has_alias e2e-agent; then
+    E2E_AGENT_REGISTERED=1
+    break
+  fi
+  sleep 0.25
+done
+[ "$E2E_AGENT_REGISTERED" = "1" ] && pass "agent registered" || { cat /tmp/e2e-agent.log; fail "agent not registered"; }
 echo ""
 
 # 9. send_task via MCP
@@ -345,10 +353,12 @@ echo ""
 # 23.5 Concurrent registration
 echo "23.5 Testing concurrent operations..."
 # Register 5 agents simultaneously
+CONCURRENT_PIDS=()
 for i in $(seq 1 5); do
   mcp_call "report_status" "{\"resume_id\":\"concurrent-$i\",\"alias\":\"conc-$i\",\"status\":\"idle\",\"server\":\"test\"}" > /dev/null &
+  CONCURRENT_PIDS+=("$!")
 done
-wait
+for pid in "${CONCURRENT_PIDS[@]}"; do wait "$pid"; done
 sleep 1
 CONC_COUNT=$(curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:9200/api/status 2>/dev/null | python3 -c "
 import sys,json
@@ -359,10 +369,12 @@ print(count)
 [ "$CONC_COUNT" = "5" ] && pass "5 concurrent registrations" || fail "concurrent: only $CONC_COUNT/5"
 
 # Concurrent send_task to same agent
+CONCURRENT_PIDS=()
 for i in $(seq 1 3); do
   mcp_call "send_task" "{\"alias\":\"conc-1\",\"task\":\"concurrent task $i\",\"from_session\":\"tester\"}" > /dev/null &
+  CONCURRENT_PIDS+=("$!")
 done
-wait
+for pid in "${CONCURRENT_PIDS[@]}"; do wait "$pid"; done
 sleep 1
 CONC_INBOX=$(mcp_call "get_inbox" '{"alias":"conc-1","limit":10}')
 CONC_MSG_COUNT=$(echo "$CONC_INBOX" | python3 -c "
@@ -858,6 +870,8 @@ echo "$BAD" | grep -q '"ok":false' && pass "invalid key rejected" || fail "bad k
 echo ""
 
 # Summary
+kill "${E2E_AGENT_PID:-}" 2>/dev/null || true
+wait "${E2E_AGENT_PID:-}" 2>/dev/null || true
 echo ""
 echo "========================================="
 echo "  Results: $PASS passed, $FAIL failed"

@@ -1,0 +1,80 @@
+# test292 Layer 2 — real E2E agent registration
+
+Date: 2026-08-10
+Base: 4fb7e9473fe62957672f74bccfc1f9b3ece0c788
+Source under test: 0c0863bbd50d159d3d6764c694a8973a242d4d7a
+Scope: tests/docker-e2e.sh, tests/lib/e2e-agent-bootstrap.sh, and the
+tests/test292-e2e-agent-registration suite. No production source changed.
+
+## Witnessed red
+
+The red source was 6932e66aa18334b3af6a76ce3a0a6541cc6cdaf2.
+Its exact Docker run exited 1 after the real Hub/auth setup with:
+
+    FAIL: e2e agent bootstrap helper is missing
+    FAIL: docker-e2e cannot select the network and pre-create a token-bound agent
+
+Red log SHA256:
+2d7e93897564280fc95cd9dfddbf34449615e419eee4bf464854c8ce7359114c
+
+## Exact-source targeted run
+
+Command:
+
+    sg docker -c 'docker run --rm anet-test292-l2:dev'
+
+Image ID:
+sha256:56230c37c7871ea75d22121d108aefb68798b0ebc5fc2eb68db4955993dace31
+
+Embedded environment:
+
+    TEST292_L2_SOURCE_COMMIT=0c0863bbd50d159d3d6764c694a8973a242d4d7a
+
+Result: PASS, 11 passed / 0 failed.
+
+The image was restamped as a small derivative of the fully built
+50805e267449f68070b172bfc23a87117c475342 image because host disk pressure had
+evicted BuildKit's intermediate dependency cache. Between 50805e26 and the
+source under test, only the three test/helper files copied into the derivative
+changed; product binaries were unchanged. The derivative copied those exact
+0c0863bb files and embedded the full source SHA above.
+
+Green log SHA256:
+8195387c2620c45385db5f30535c851ab627f9ef9a58f989794bc858903c2d7c
+
+Verified behavior:
+
+- a real Hub registers a real user and two networks;
+- the public CLI selects the target network and creates the fixture node;
+- the generated ntok is verified against Hub's authoritative `/api/networks`
+  response, rather than a nonexistent local `network_id` snapshot;
+- a real `agent-node` registers under the exact alias;
+- an alias-targeted `send_task` is routable;
+- deleting network selection, deleting node creation, or weakening exact alias
+  equality each turns red;
+- concurrency waits are PID-scoped and cannot wait forever on the long-lived
+  Hub or agent.
+
+## Full Base E2E re-bucket
+
+Command:
+
+    sg docker -c 'docker run --rm --entrypoint bash anet-test292-l2:dev /app/test.sh'
+
+Result: expected nonzero, 97 passed / 39 failed. The suite completed normally;
+it did not hang on the real agent. Aggregate log SHA256:
+74e4816ab5fdfcc4cf6720f9f98a2e6e0335f4ca750d5351a5ec17090ea80ab0
+
+Layer 2 is now demonstrably green: exact registration and alias-targeted task
+delivery pass. This does not make the legacy aggregate green. The remaining
+failures are retained for later layers, notably:
+
+- the self-upgrade assertion expects a removed legacy message even though the
+  current CLI's detached auto-upgrade behavior changed;
+- rename-by-node-id fails, cascading into the Telegram `.env`, permission, and
+  config assertions that target the missing renamed node;
+- several legacy health, auth, task-lifecycle, and network assertions no longer
+  match current response or scoping contracts.
+
+No production database, Hub, node, npm package, or global installation was
+modified by this test.
