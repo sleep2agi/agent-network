@@ -89,6 +89,11 @@ import {
 } from "../src/grok-copresence-disclosure";
 import { parseCliOptions, positionalArgs } from "../src/cli-args";
 import {
+  formatSecretAssignment,
+  secretPersistenceHeading,
+  secretShellAction,
+} from "../src/secret-shell-guidance";
+import {
   collectClaudeVendorEnvForCreate,
   planPlainSecretEnvRewrites,
 } from "../src/claude-vendor-env";
@@ -2895,11 +2900,10 @@ function rewritePlainSecretsToEnvRef(nodeId: string, profile: Profile): void {
 
   console.log(`\n[anet] 🔐 ${rewrites.length} secret value(s) in env moved out of config.json (envRef shape, #125).`);
   console.log(`[anet]    Persisted to .anet/nodes/${nodeId}/.env (mode 600, gitignored) — \`anet node start\` auto-loads it.`);
-  console.log(`[anet]    For cross-machine / cross-shell portability, also append to ~/.bashrc / ~/.zshrc:`);
+  console.log(`[anet]    ${secretPersistenceHeading(process.platform)}`);
   console.log("");
   for (const { refName, value } of rewrites) {
-    const safe = value.replace(/'/g, `'\\''`);
-    console.log(`    export ${refName}='${safe}'`);
+    console.log(`    ${formatSecretAssignment(process.platform, refName, value)}`);
   }
   console.log("");
 }
@@ -12215,14 +12219,11 @@ async function migrateTokenToEnvRefCommand() {
   // breaks `export NAME=...` interpolation. Pick the ASCII path.
   const nodeIdShort = (profile.node_id || nodeId).replace(/[^A-Za-z0-9_]/g, "_").slice(0, 16);
   const newEnv: any = { ...envMap };
-  const exportLines: string[] = [];
+  const assignmentLines: string[] = [];
   for (const { key, value } of candidates) {
     const refName = `${key}_${nodeIdShort}`.toUpperCase();
     newEnv[key] = { _envRef: refName };
-    // Quote the value: it may contain shell-special chars; single-quote and
-    // escape any literal single quote inside.
-    const safeVal = value.replace(/'/g, `'\\''`);
-    exportLines.push(`export ${refName}='${safeVal}'`);
+    assignmentLines.push(formatSecretAssignment(process.platform, refName, value));
   }
 
   // Backup the original config before overwriting, so users can revert.
@@ -12247,11 +12248,11 @@ async function migrateTokenToEnvRefCommand() {
   console.log(`\n[anet] ✅ Migrated ${candidates.length} env value(s) in node "${nodeId}":`);
   for (const { key } of candidates) console.log(`         env.${key} → { _envRef: "${key}_${nodeIdShort}".toUpperCase() }`);
   console.log(`[anet]    Backup written: ${bakPath}\n`);
-  console.log(`[anet] 🔑 Now export the secret values in your shell BEFORE starting this node:`);
+  console.log(`[anet] 🔑 Now ${secretShellAction(process.platform)} the secret values in your shell BEFORE starting this node:`);
   console.log("");
-  for (const line of exportLines) console.log(`    ${line}`);
+  for (const line of assignmentLines) console.log(`    ${line}`);
   console.log("");
-  console.log(`[anet]    (Append these to ~/.bashrc / ~/.zshrc / your secrets manager for persistence.)`);
+  console.log(`[anet]    (${secretPersistenceHeading(process.platform)})`);
   console.log(`[anet]    The agent-node runtime will refuse to start if any referenced var is unset.`);
   console.log(`[anet]    Restart the node: anet node start ${nodeId}\n`);
 }
