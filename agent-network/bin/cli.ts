@@ -2268,9 +2268,17 @@ function printGrokCopresenceWarning(
 
 function checkRuntimeDependency(runtime: RuntimeName, phase: "create" | "start") {
   if (runtime === "claude-code-cli") {
-    if (!commandExists("claude")) {
+    const claudeInstalled = commandExists("claude");
+    if (!claudeInstalled && phase === "create") {
       console.warn(`[anet] Warning: claude CLI not found in PATH.`);
       console.warn(`[anet] Install: npm install -g @anthropic-ai/claude-code`);
+    }
+    if (!claudeInstalled && phase === "start") {
+      console.error(`[anet] ❌ Cannot start: claude-code-cli requires the Claude Code CLI, but \`claude\` was not found in PATH.`);
+      console.error(`[anet]    Install: npm install -g @anthropic-ai/claude-code`);
+      console.error(`[anet]    Login:   claude auth login`);
+      console.error(`[anet]    No Claude subscription? Recreate the node with \`--runtime claude-agent-sdk\` or \`--runtime codex-sdk\`.`);
+      process.exit(1);
     }
     if (phase === "start") printClaudeCodeNotice();
     return;
