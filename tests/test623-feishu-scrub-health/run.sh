@@ -44,7 +44,7 @@ echo "L2 production bundle"
 cd /workspace/agent-network
 bun run build
 cd /workspace
-test -s agent-network/dist/src/im/feishu/adapter.js
+test -s agent-network/dist/src/im/feishu/worker.js
 
 cp "$ADAPTER" /tmp/test623-adapter.ts
 
