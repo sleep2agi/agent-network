@@ -1,0 +1,26 @@
+# test613 — codex app-server dead endpoint diagnostics
+
+Date: 2026-08-09
+Source commit: b40730981c6333ad66021cb2bcaa27da6162a66e
+Base commit: a8a9497b
+Docker image: anet-test613:dev
+Image ID: sha256:acade7a6eab396e3eafdbd719e273829deb5bc3abe71d5f8787dfeef1365481a
+Embedded ENV: TEST613_SOURCE_COMMIT=b40730981c6333ad66021cb2bcaa27da6162a66e
+
+## Result
+
+PASS
+
+- L0: `codex-app-server-client.test.ts` — 14 pass, 0 fail, 38 assertions.
+- L0 real transport: a loopback listener was allocated, closed, and then used
+  as the client endpoint. Both the rejected `connect()` promise and emitted
+  client error contained the endpoint plus `is it running?` remediation.
+- L0 privacy: query-string credential material was absent from the formatted
+  endpoint while the path remained available for diagnosis.
+- L1: production `agent-node` bundle completed (253 modules).
+- L2 witnessed-red: replacing the production formatter with the raw underlying
+  `Error` made the exact dead-loopback diagnostic test fail (`rc=1`).
+- L3: restoring the implementation returned the same 14 tests to green.
+
+The fix is transport-boundary only. It does not change connection, retry,
+thread, task, or reply semantics.
