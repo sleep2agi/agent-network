@@ -117,8 +117,9 @@ printf '%s' "$SEND_B" | python3 -c 'import json,sys; assert json.load(sys.stdin)
 
 # A valid alias in another network must not make a cross-network write valid.
 CROSS_SEND=$(mcp_call "send_task" "{\"alias\":\"agent-b\",\"task\":\"must not cross\",\"from_session\":\"tester\",\"network_id\":\"$NET_B_ID\"}" "$TOKEN_A" | mcp_text_json)
+echo "  cross-network response: $CROSS_SEND"
 if printf '%s' "$CROSS_SEND" | python3 -c 'import json,sys
-d=json.load(sys.stdin); err=str(d.get("error","")).lower(); assert d.get("ok") is not True and ("network" in err or "permission" in err)'; then
+d=json.load(sys.stdin); assert d.get("ok") is False and d.get("error") == "access_denied" and "network" in str(d.get("message","")).lower()'; then
   pass "user A cannot send into beta network"
 else
   fail "cross-network send was not rejected"
