@@ -2,32 +2,42 @@
 
 Date: 2026-08-09
 Issue: #621
-Source commit: 65a8863233e419888dcaa97e43471eb01c7c3221
+Source commit: 73542ee9c5cfcb2a688e3a3596463e0b1504faf4
 Docker tag: anet-test625:dev
-Docker image: sha256:6150f392f993c3c2f41d3175216c68563fd15f6e822271c7d56aeec7c4f8b9cf
-Embedded source: TEST625_SOURCE_COMMIT=65a8863233e419888dcaa97e43471eb01c7c3221
-Runner artifact SHA256: 5359f3e82baa38f16194eb2ed75dd5631a0a0f138274c03d7c329925cabe39fe
+Docker image: sha256:13d47bbbcf2ff11d17b60d582207d5a15683a1c40a8f7f3ee17e9f48e0718094
+Embedded source: TEST625_SOURCE_COMMIT=73542ee9c5cfcb2a688e3a3596463e0b1504faf4
+Runner artifact SHA256: c01a98c775da963358652e23ec7bd11c19f991438f50b602fb868fef2073d74e
 
 ## Result
 
 - TypeScript `tsc --noEmit`: PASS.
-- Helper contracts: 5 pass / 0 fail / 6 assertions.
+- Helper and writer-wiring contracts: 10 pass / 0 fail / 24 assertions.
 - Production CLI/node-server/worker build: PASS.
 - Real isolated Hub + built CLI rejected a newline-bearing explicit `--env`
   before either `config.json` or `.env` existed.
 - The rejection log did not echo the synthetic injected value.
 - A safe explicit credential still created a mode-600 dotenv containing
   exactly one assignment and no injected key.
-- Removing the validation, rebuilding the real CLI, and repeating the same
-  create command produced a second `INJECTED=...` dotenv line. This is a true
-  behavior mutation, not a source-string assertion.
+- All `.env`-writing create flows converge on `saveCreatedNode` and
+  `rewritePlainSecretsToEnvRef`. The named create reaches the earlier vendor
+  collector; the no-name wizard bypasses that collector but reaches the shared
+  writer preflight. Batch and the legacy missing-profile wizard call
+  `saveProfile` directly and do not write a node `.env`.
+- Disabling only the named-create collector still rejected the malicious value
+  at the shared writer preflight before node directory, `.gitignore`, process
+  environment, config, or dotenv mutation.
+- Disabling both the named-create collector and the writer planner, rebuilding
+  the real CLI, and repeating the command produced a second `INJECTED=...`
+  dotenv line. This is a true behavior mutation, not a source-string assertion.
 - Restoring the validation and rebuilding restored fail-closed behavior with
   no profile or dotenv write.
 
 ```text
-L3 witnessed-red: removing validation injects a second dotenv line
-MUTATION_RED: explicit-env-crlf rc=1 (injected dotenv line witnessed)
-L4 restored green
+L3 defense-in-depth: bypassing direct collection still fails at the writer preflight
+WRITER_PREFLIGHT_PASS: direct collector bypass still rejected before create side effects
+L4 witnessed-red: bypassing both guards injects a second dotenv line
+MUTATION_RED: dotenv-writer-crlf rc=1 (injected dotenv line witnessed)
+L5 restored green
 RESULT: PASS
 ```
 
