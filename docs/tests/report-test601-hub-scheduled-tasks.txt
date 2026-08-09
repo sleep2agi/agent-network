@@ -1,8 +1,8 @@
 # test601 — Hub scheduled tasks
-source_commit=7b54723e4ca30f1344714c4f72c025ffd37766dd
-date=2026-08-09T02:26:30+00:00
+source_commit=8c8d8d653e118d8ca075ed28656cd772eb3a4892
+date=2026-08-09T02:28:48+00:00
 L0 build + additive schema
-Bundled 257 modules in 66ms
+Bundled 257 modules in 62ms
 
   commhub-scheduler.js  1.52 MB  (entry point)
 
@@ -13,20 +13,21 @@ server/src/scheduled-tasks-http.test.ts:
 [commhub] database: /tmp/test601-green.db
 [commhub] 🎉 14-day free trial started!
 [commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
-(pass) Hub scheduled task API and dispatcher > schedule math supports timezone-aware daily and weekly forms [850.26ms]
-(pass) Hub scheduled task API and dispatcher > owner creates; viewer and node token cannot mutate [31.65ms]
-(pass) Hub scheduled task API and dispatcher > network scope hides schedules from foreign users and viewers may read [90.31ms]
-(pass) Hub scheduled task API and dispatcher > due occurrence creates ordinary inbox/task/run atomically and is idempotent [12.27ms]
-[scheduled-tasks] occurrence failed schedule=sched_2376c489-f046-47e3-a6d3-1e30bcbce72a: test601_injected_task_failure
-(pass) Hub scheduled task API and dispatcher > dispatch failure rolls back occurrence, inbox, task, and schedule advance as one unit [18.14ms]
-(pass) Hub scheduled task API and dispatcher > two real Hub processes claim one occurrence exactly once [180.43ms]
-(pass) Hub scheduled task API and dispatcher > non-overlap skips while prior task is open; rename follows stable node_id [16.25ms]
-(pass) Hub scheduled task API and dispatcher > optimistic revision, pause/resume, run-now and cancel preserve history [26.81ms]
+(pass) Hub scheduled task API and dispatcher > schedule math supports timezone-aware daily and weekly forms [892.22ms]
+(pass) Hub scheduled task API and dispatcher > scheduler startup rejects a backend without real transactions [0.47ms]
+(pass) Hub scheduled task API and dispatcher > owner creates; viewer and node token cannot mutate [37.56ms]
+(pass) Hub scheduled task API and dispatcher > network scope hides schedules from foreign users and viewers may read [84.69ms]
+(pass) Hub scheduled task API and dispatcher > due occurrence creates ordinary inbox/task/run atomically and is idempotent [11.93ms]
+[scheduled-tasks] occurrence failed schedule=sched_4bc6ce98-3b16-42a6-a48e-826cac849c37: test601_injected_task_failure
+(pass) Hub scheduled task API and dispatcher > dispatch failure rolls back occurrence, inbox, task, and schedule advance as one unit [17.26ms]
+(pass) Hub scheduled task API and dispatcher > two real Hub processes claim one occurrence exactly once [165.36ms]
+(pass) Hub scheduled task API and dispatcher > non-overlap skips while prior task is open; rename follows stable node_id [16.28ms]
+(pass) Hub scheduled task API and dispatcher > optimistic revision, pause/resume, run-now and cancel preserve history [22.30ms]
 
- 8 pass
+ 9 pass
  0 fail
- 52 expect() calls
-Ran 8 tests across 1 file. [1.91s]
+ 58 expect() calls
+Ran 9 tests across 1 file. [1.94s]
 L6 witnessed-red: node token cannot create persistent schedules
 MUTATION_RED: node-token-write-gate rc=1
 L7 witnessed-red: cross-process occurrence claim is load-bearing
@@ -37,27 +38,30 @@ L9 witnessed-red: optimistic revision rejects stale devices
 MUTATION_RED: optimistic-revision rc=1
 L10 witnessed-red: DST fall-back duplicate suppression is load-bearing
 MUTATION_RED: dst-fallback-single-occurrence rc=1
-L11 restored green
+L11 witnessed-red: non-transactional backend startup gate is load-bearing
+MUTATION_RED: non-transactional-backend-gate rc=1
+L12 restored green
 bun test v1.3.14 (0d9b296a)
 
 server/src/scheduled-tasks-http.test.ts:
 [commhub] database: /tmp/test601-restored.db
 [commhub] 🎉 14-day free trial started!
 [commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
-(pass) Hub scheduled task API and dispatcher > schedule math supports timezone-aware daily and weekly forms [964.22ms]
-(pass) Hub scheduled task API and dispatcher > owner creates; viewer and node token cannot mutate [33.83ms]
-(pass) Hub scheduled task API and dispatcher > network scope hides schedules from foreign users and viewers may read [91.92ms]
-(pass) Hub scheduled task API and dispatcher > due occurrence creates ordinary inbox/task/run atomically and is idempotent [10.02ms]
-[scheduled-tasks] occurrence failed schedule=sched_6617c767-4b2c-40b9-885a-ef81e11d4553: test601_injected_task_failure
-(pass) Hub scheduled task API and dispatcher > dispatch failure rolls back occurrence, inbox, task, and schedule advance as one unit [21.80ms]
-(pass) Hub scheduled task API and dispatcher > two real Hub processes claim one occurrence exactly once [159.94ms]
-(pass) Hub scheduled task API and dispatcher > non-overlap skips while prior task is open; rename follows stable node_id [15.64ms]
-(pass) Hub scheduled task API and dispatcher > optimistic revision, pause/resume, run-now and cancel preserve history [21.55ms]
+(pass) Hub scheduled task API and dispatcher > schedule math supports timezone-aware daily and weekly forms [870.90ms]
+(pass) Hub scheduled task API and dispatcher > scheduler startup rejects a backend without real transactions [0.62ms]
+(pass) Hub scheduled task API and dispatcher > owner creates; viewer and node token cannot mutate [33.92ms]
+(pass) Hub scheduled task API and dispatcher > network scope hides schedules from foreign users and viewers may read [98.04ms]
+(pass) Hub scheduled task API and dispatcher > due occurrence creates ordinary inbox/task/run atomically and is idempotent [8.98ms]
+[scheduled-tasks] occurrence failed schedule=sched_60d8ea83-397b-434e-861f-8141f03edfad: test601_injected_task_failure
+(pass) Hub scheduled task API and dispatcher > dispatch failure rolls back occurrence, inbox, task, and schedule advance as one unit [16.82ms]
+(pass) Hub scheduled task API and dispatcher > two real Hub processes claim one occurrence exactly once [169.63ms]
+(pass) Hub scheduled task API and dispatcher > non-overlap skips while prior task is open; rename follows stable node_id [17.92ms]
+(pass) Hub scheduled task API and dispatcher > optimistic revision, pause/resume, run-now and cancel preserve history [25.36ms]
 
- 8 pass
+ 9 pass
  0 fail
- 52 expect() calls
-Ran 8 tests across 1 file. [2.00s]
+ 58 expect() calls
+Ran 9 tests across 1 file. [1.93s]
 RESULT: PASS
 
 ## Dashboard client — Docker production build
