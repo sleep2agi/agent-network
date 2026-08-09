@@ -120,17 +120,18 @@ describe("FeishuAdapter WS lifecycle", () => {
   });
 
   test("initial onError scrubs arbitrary Lark access-token shapes", async () => {
+    const jwt = "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0NjE4In0.SIG";
     const h = harness();
     await h.adapter.init(config());
     const starting = h.adapter.start(onEvent);
     await Bun.sleep(1);
     h.params?.onError?.(new Error(
       "Bearer bearer-token-618 a-application-token-618 t-tenant-token-618 " +
-      "u-user-token-618 T-UPPERCASE-TOKEN-618 cli_other-app-618 t-shirts u-boat",
+      `u-user-token-618 T-UPPERCASE-TOKEN-618 cli_other-app-618 ${jwt} t-shirts u-boat`,
     ));
 
     await expect(starting).rejects.toThrow(
-      "Bearer [redacted] [redacted] [redacted] [redacted] [redacted] [redacted] t-shirts u-boat",
+      "Bearer [redacted] [redacted] [redacted] [redacted] [redacted] [redacted] [redacted] t-shirts u-boat",
     );
     const lastError = h.adapter.health().lastError ?? "";
     for (const secret of [
@@ -140,6 +141,7 @@ describe("FeishuAdapter WS lifecycle", () => {
       "u-user-token-618",
       "T-UPPERCASE-TOKEN-618",
       "cli_other-app-618",
+      jwt,
     ]) {
       expect(lastError).not.toContain(secret);
     }

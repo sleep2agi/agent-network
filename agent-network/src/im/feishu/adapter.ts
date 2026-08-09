@@ -1457,10 +1457,11 @@ export function sanitizeFeishuWsError(
   }
   // Lark access tokens can be returned by an SDK error even when they are not
   // one of the two configured app credentials. Redact the stable token shapes
-  // before the message reaches health, audit, stderr, or the worker owner.
+  // before the message reaches health, audit, or the worker owner.
   message = message
     .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
     .replace(/\b(?:a|t|u)-[A-Za-z0-9._~+/=-]{12,}/gi, "[redacted]")
+    .replace(/\beyJ[A-Za-z0-9._-]{20,}/g, "[redacted]")
     .replace(/\bcli_[A-Za-z0-9_-]{6,}/g, "[redacted]");
   message = message.trim().slice(0, 500) || "Feishu WebSocket failed";
   return new Error(message);

@@ -59,18 +59,27 @@ fi
 expect_red access-token-scrub 'initial onError scrubs arbitrary Lark access-token shapes'
 cp /tmp/test623-adapter.ts "$ADAPTER"
 
-echo "L4 witnessed-red: inbound errors must not bypass scrub"
+echo "L4 witnessed-red: bare JWT scrub is load-bearing"
+sed -i '/\.replace(.*\\beyJ/d' "$ADAPTER"
+if grep -Fq '.replace(/\beyJ' "$ADAPTER"; then
+  echo "MUTATION_NOT_APPLIED: jwt-token-scrub"
+  exit 1
+fi
+expect_red jwt-token-scrub 'initial onError scrubs arbitrary Lark access-token shapes'
+cp /tmp/test623-adapter.ts "$ADAPTER"
+
+echo "L5 witnessed-red: inbound errors must not bypass scrub"
 sed -i 's/const msg = sanitizeFeishuWsError(err, appId, appSecret).message;/const msg = err instanceof Error ? err.message : String(err); \/\/ MUTATION/' "$ADAPTER"
 grep -Fq 'MUTATION' "$ADAPTER"
 expect_red inbound-error-scrub 'inbound handler errors use the same token scrub before health'
 cp /tmp/test623-adapter.ts "$ADAPTER"
 
-echo "L5 witnessed-red: reconnect cannot become ready before onReady"
+echo "L6 witnessed-red: reconnect cannot become ready before onReady"
 sed -i 's/if (!ready || generation !== this.lifecycleGeneration || terminalDispatched) return;/if (generation !== this.lifecycleGeneration || terminalDispatched) return; \/\/ MUTATION/' "$ADAPTER"
 grep -Fq 'MUTATION' "$ADAPTER"
 expect_red reconnect-prior-ready 'spurious reconnect before first ready cannot mark health connected'
 cp /tmp/test623-adapter.ts "$ADAPTER"
 
-echo "L6 restored green"
+echo "L7 restored green"
 run_lifecycle
 echo "RESULT: PASS"
