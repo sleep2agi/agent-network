@@ -242,6 +242,10 @@ anet hub start --port 9200
 # Terminal 2: start Dashboard
 anet hub dashboard
 
+# Optional: explicitly use the Dashboard already installed on PATH
+# (the CLI never auto-terminates this process)
+ANET_DASHBOARD_LOCAL=1 anet hub dashboard
+
 # Open in browser
 open http://localhost:3000
 ```
@@ -310,6 +314,10 @@ npm i -g @sleep2agi/agent-network@preview
 anet -v                                    # should show 2.3.0-preview.N (current preview channel; latest stable is 2.2.x)
 anet hub dashboard                          # npx auto-pulls the current preview version
 ```
+
+The default mode still starts the channel-matched release through `npx`. The CLI only replaces a stale `npx` Dashboard that it previously recorded and whose PID, birth fingerprint, and command all match exactly. It refuses automatic termination when the port belongs to an unknown process, inspection is incomplete, or a global install is in use. It never uses `pkill`, `killall`, or process-name prefix matching.
+
+To reuse a global installation from PATH, explicitly set `ANET_DASHBOARD_LOCAL=1`. That Dashboard remains operator-managed; rerunning the command does not kill or replace it.
 
 Or bypass the CLI entirely:
 

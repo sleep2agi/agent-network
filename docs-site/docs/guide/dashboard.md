@@ -242,6 +242,9 @@ anet hub start --port 9200
 # 终端 2：启动 Dashboard
 anet hub dashboard
 
+# 可选：显式使用 PATH 中已安装的 Dashboard（不会自动终止该进程）
+ANET_DASHBOARD_LOCAL=1 anet hub dashboard
+
 # 浏览器访问
 open http://localhost:3000
 ```
@@ -310,6 +313,10 @@ npm i -g @sleep2agi/agent-network@preview
 anet -v                                    # 应显示 2.3.0-preview.N（当前 preview 通道；latest 稳定版是 2.2.x）
 anet hub dashboard                          # 自动 npx 拉当前 preview 版本
 ```
+
+默认模式继续按 CLI 通道通过 `npx` 启动匹配版本。CLI 只会自动替换自己记录的、PID/启动时间/命令均精确匹配的旧 `npx` Dashboard；端口由未知进程占用、检查信息不完整或使用全局安装时都会拒绝自动终止。不会使用 `pkill`、`killall` 或进程名前缀匹配。
+
+需要复用 PATH 中的全局安装时，必须显式设置 `ANET_DASHBOARD_LOCAL=1`。全局 Dashboard 由操作者管理；再次运行命令不会自动杀掉或替换它。
 
 或直接绕过 CLI：
 

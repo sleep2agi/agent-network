@@ -107,6 +107,13 @@ import {
   planPlainSecretEnvRewrites,
 } from "../src/claude-vendor-env";
 import { normalizeBatchWorkdir } from "../src/batch-workdir";
+import {
+  decideDashboardListener,
+  parseDashboardLaunchRecord,
+  isDashboardProcessCommand,
+  type DashboardLaunchRecord,
+  type DashboardLaunchSource,
+} from "../src/dashboard-managed-process";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -118,6 +125,7 @@ const opencodeBindingHome = () => home === "~" ? homedir() : home;
 function globalConfigPath() { return join(home, ".anet", "config.json"); }
 function serverConfigPath() { return join(home, ".anet", "server", "config.json"); }
 function adminUtokPath() { return join(home, ".anet", "server", "admin-utok.json"); }
+function dashboardLaunchRecordPath(port: string | number) { return join(home, ".anet", "server", `dashboard-${port}.json`); }
 function nodesDir() { return join(process.cwd(), ".anet", "nodes"); }
 function shellQuote(value: string): string { return `'${value.replace(/'/g, `'\\''`)}'`; }
 function killTmuxSession(sessionName: string) {
@@ -1466,6 +1474,125 @@ function dashboardReleaseTag(): string {
   const envOverride = process.env.ANET_DASHBOARD_VERSION;
   if (envOverride) return envOverride;
   return "preview";
+}
+
+type DashboardPidScan = { ok: true; pids: number[] } | { ok: false; error: string };
+
+function scanDashboardListenerPids(port: string | number): DashboardPidScan {
+  if (!commandExists("lsof")) return { ok: false, error: "lsof is not installed" };
+  try {
+    const out = execFileSync("lsof", ["-t", "-i", `:${port}`, "-sTCP:LISTEN"], { encoding: "utf-8" }).trim();
+    const pids = [...new Set(out.split(/\s+/).filter(Boolean).map(Number).filter(pid => Number.isSafeInteger(pid) && pid > 1))];
+    return { ok: true, pids };
+  } catch (error: any) {
+    // lsof exits 1 when no matching listener exists. Distinguish that from
+    // a missing/broken inspector; commandExists above already proved the
+    // binary exists, and empty stdout is the canonical no-listener result.
+    const stdout = String(error?.stdout || "").trim();
+    if (!stdout && Number(error?.status) === 1) return { ok: true, pids: [] };
+    return { ok: false, error: `lsof failed (${error?.status ?? "unknown"})` };
+  }
+}
+
+function dashboardProcessField(pid: number, field: "lstart" | "command" | "ppid"): string | null {
+  if (!commandExists("ps")) return null;
+  try {
+    const value = execFileSync("ps", ["-p", String(pid), "-o", `${field}=`], { encoding: "utf-8" }).trim();
+    return value || null;
+  } catch { return null; }
+}
+
+function dashboardListenerDescendsFrom(pid: number, ancestorPid: number): boolean {
+  let current = pid;
+  const seen = new Set<number>();
+  for (let depth = 0; depth < 64 && current > 1 && !seen.has(current); depth++) {
+    if (current === ancestorPid) return true;
+    seen.add(current);
+    const raw = dashboardProcessField(current, "ppid");
+    const parent = raw ? Number(raw) : NaN;
+    if (!Number.isSafeInteger(parent) || parent <= 0) return false;
+    current = parent;
+  }
+  return false;
+}
+
+function loadDashboardLaunchRecord(port: string | number): DashboardLaunchRecord | null {
+  try {
+    return parseDashboardLaunchRecord(JSON.parse(readFileSync(dashboardLaunchRecordPath(port), "utf-8")));
+  } catch { return null; }
+}
+
+function sameDashboardLaunchRecord(a: DashboardLaunchRecord | null, b: DashboardLaunchRecord): boolean {
+  return !!a
+    && a.schema === b.schema
+    && a.port === b.port
+    && a.listener_pid === b.listener_pid
+    && a.listener_birth === b.listener_birth
+    && a.source === b.source
+    && a.source_key === b.source_key
+    && a.recorded_at === b.recorded_at;
+}
+
+function revalidateExactManagedDashboard(
+  pid: number,
+  port: string | number,
+  expectedRecord: DashboardLaunchRecord,
+): boolean {
+  const scan = scanDashboardListenerPids(port);
+  if (!scan.ok || scan.pids.length !== 1 || scan.pids[0] !== pid) return false;
+  if (!sameDashboardLaunchRecord(loadDashboardLaunchRecord(port), expectedRecord)) return false;
+  if (dashboardProcessField(pid, "lstart") !== expectedRecord.listener_birth) return false;
+  const command = dashboardProcessField(pid, "command");
+  return !!command && isDashboardProcessCommand(command);
+}
+
+async function dashboardHttpHealthy(host: string, port: string | number): Promise<boolean> {
+  const probeHost = host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host;
+  try {
+    const response = await fetch(`http://${probeHost}:${port}/login`, { signal: AbortSignal.timeout(1500), redirect: "manual" });
+    return response.status >= 200 && response.status < 500;
+  } catch { return false; }
+}
+
+function resolveGlobalDashboardBinary(): string | null {
+  try {
+    const found = execFileSync("which", ["agent-network-dashboard"], { encoding: "utf-8" }).trim();
+    return found ? realpathSync(found) : null;
+  } catch { return null; }
+}
+
+function resolveDashboardNpxVersion(tag: string): string | null {
+  try {
+    const raw = execFileSync("npm", ["view", `@sleep2agi/agent-network-dashboard@${tag}`, "version", "--json"], {
+      encoding: "utf-8",
+      timeout: 8000,
+    }).trim();
+    const parsed = JSON.parse(raw);
+    return typeof parsed === "string" && parsed ? parsed : null;
+  } catch { return null; }
+}
+
+async function stopExactManagedDashboard(
+  pid: number,
+  port: string | number,
+  expectedRecord: DashboardLaunchRecord,
+): Promise<boolean> {
+  // Re-read every identity fact immediately before the signal. The PID may
+  // have exited and been reused after the initial decision was made.
+  if (!revalidateExactManagedDashboard(pid, port, expectedRecord)) return false;
+  try { process.kill(pid, "SIGTERM"); } catch { return false; }
+  for (let i = 0; i < 12; i++) {
+    await new Promise(resolve => setTimeout(resolve, 250));
+    const scan = scanDashboardListenerPids(port);
+    if (scan.ok && !scan.pids.includes(pid)) return true;
+  }
+  // The grace period is another PID-reuse window. Never escalate based on
+  // the pre-SIGTERM observation; authorize the exact PID again.
+  if (!revalidateExactManagedDashboard(pid, port, expectedRecord)) return false;
+  try { process.kill(pid, "SIGKILL"); } catch {}
+  await new Promise(resolve => setTimeout(resolve, 250));
+  const finalScan = scanDashboardListenerPids(port);
+  return finalScan.ok && !finalScan.pids.includes(pid);
 }
 
 // #89 — npx leaves half-baked `.agent-network-dashboard-<rand>` staging dirs in
@@ -5863,11 +5990,65 @@ async function serverCommand() {
     const gc = loadGlobal();
     const hubUrl = gc.hub || "http://127.0.0.1:9200";
     const dashPort = opts.port || "3000";
+    const dashPortNumber = Number(dashPort);
+    if (!Number.isSafeInteger(dashPortNumber) || dashPortNumber < 1 || dashPortNumber > 65535) {
+      console.error(`[anet] Invalid Dashboard port: ${dashPort}`);
+      process.exit(1);
+    }
     // --host / --ip for LAN access; defaults to 127.0.0.1.
     const dashHost = opts.ip || opts.host || process.env.HOSTNAME || "127.0.0.1";
 
+    const globalOptIn = process.env.ANET_DASHBOARD_LOCAL === "1";
+    const tag = dashboardReleaseTag();
+    const globalBinary = globalOptIn ? resolveGlobalDashboardBinary() : null;
+    if (globalOptIn && !globalBinary) {
+      console.error(`[anet] ANET_DASHBOARD_LOCAL=1 requested the global Dashboard, but agent-network-dashboard is not on PATH.`);
+      console.error(`[anet] Install it explicitly or unset ANET_DASHBOARD_LOCAL to keep channel-matched npx startup.`);
+      process.exit(1);
+    }
+    const launchSource: DashboardLaunchSource = globalOptIn ? "global" : "npx";
+    const npxVersion = globalOptIn ? null : resolveDashboardNpxVersion(tag);
+    const sourceKey = globalOptIn
+      ? `global:${globalBinary}`
+      : `npx:${npxVersion || `unresolved-${tag}`}`;
+
     console.log(`[anet] Starting Dashboard on ${dashHost}:${dashPort}...`);
     console.log(`[anet] Connecting to CommHub: ${hubUrl}`);
+
+    const listenerScan = scanDashboardListenerPids(dashPort);
+    if (!listenerScan.ok) {
+      console.warn(`[anet] ⚠ Dashboard listener inspection unavailable: ${listenerScan.error}.`);
+      console.warn(`[anet]   No process will be auto-stopped; an occupied port will fail normally.`);
+    } else if (listenerScan.pids.length > 0) {
+      const listenerPid = listenerScan.pids.length === 1 ? listenerScan.pids[0] : -1;
+      const launchRecord = loadDashboardLaunchRecord(dashPort);
+      const decision = decideDashboardListener({
+        port: dashPortNumber,
+        listenerPids: listenerScan.pids,
+        record: launchRecord,
+        listenerBirth: listenerPid > 1 ? dashboardProcessField(listenerPid, "lstart") : null,
+        listenerCommand: listenerPid > 1 ? dashboardProcessField(listenerPid, "command") : null,
+        desiredSource: launchSource,
+        desiredSourceKey: sourceKey,
+        healthy: await dashboardHttpHealthy(dashHost, dashPort),
+      });
+      if (decision.action === "already_running") {
+        console.log(`[anet] ✅ Dashboard already running on ${dashHost}:${dashPort} (managed pid ${decision.pid}); leaving it untouched.`);
+        return;
+      }
+      if (decision.action === "refuse") {
+        console.error(`[anet] Refusing automatic Dashboard cleanup: ${decision.reason}.`);
+        console.error(`[anet] Inspect the exact listener manually; anet never uses pkill/killall/prefix matching here.`);
+        process.exit(1);
+      }
+      if (decision.action === "terminate_owned_stale") {
+        console.log(`[anet] stopping exact managed stale Dashboard pid ${decision.pid} (${decision.reason})...`);
+        if (!launchRecord || !await stopExactManagedDashboard(decision.pid, dashPort, launchRecord)) {
+          console.error(`[anet] Refusing replacement startup: exact managed pid ${decision.pid} still owns port ${dashPort}.`);
+          process.exit(1);
+        }
+      }
+    }
     const adminUtok = loadAdminUtok();
     const fallbackMaster = process.env.COMMHUB_AUTH_TOKEN;
     const dashboardToken = adminUtok.token || fallbackMaster || "";
@@ -5887,21 +6068,60 @@ async function serverCommand() {
       ...(dashboardToken ? { COMMHUB_AUTH_TOKEN: dashboardToken } : {}),
     };
 
-    // Match dashboard release channel to anet channel (see #61 + dashboardReleaseTag).
-    const tag = dashboardReleaseTag();
+    // Default stays channel-matched (see #61 + dashboardReleaseTag). A global
+    // binary is used only after the explicit ANET_DASHBOARD_LOCAL=1 opt-in.
     cleanStaleNpxDashboardTemp(); // #89 — self-heal npx cache before spawn
-    console.log(`[anet] spawning dashboard @${tag} (anet ${getAnetVersion() || "unknown"})`);
+    console.log(globalOptIn
+      ? `[anet] spawning explicit global Dashboard ${globalBinary} (anet ${getAnetVersion() || "unknown"})`
+      : `[anet] spawning dashboard @${tag}${npxVersion ? ` (${npxVersion})` : ""} (anet ${getAnetVersion() || "unknown"})`);
     // #214 P2.6 — first launch compiles Next.js routes on demand and can
     // take 30-60s on cold caches. Users mistook the silence for a hang and
     // killed the spawn. Surface the expectation up-front.
     console.log(`[anet] note: first launch compiles Next.js routes — expect 30-60s before http://${dashHost}:${dashPort} responds.`);
-    const dashChild = spawn("npx", ["-y", `@sleep2agi/agent-network-dashboard@${tag}`], { env, stdio: "inherit" });
+    const dashChild = globalOptIn
+      ? spawn(globalBinary!, [], { env, stdio: "inherit" })
+      : spawn("npx", ["-y", `@sleep2agi/agent-network-dashboard@${tag}`], { env, stdio: "inherit" });
     dashChild.on("error", () => {
-      console.error(`[anet] Dashboard package not found. Install manually:`);
-      console.error(`  npx @sleep2agi/agent-network-dashboard`);
+      if (globalOptIn) console.error(`[anet] Failed to start explicit global Dashboard: ${globalBinary}`);
+      else {
+        console.error(`[anet] Dashboard package not found. Install manually:`);
+        console.error(`  npx @sleep2agi/agent-network-dashboard`);
+      }
     });
     dashChild.on("exit", (code) => process.exit(code || 0));
     process.on("SIGINT", () => { dashChild.kill(); process.exit(0); });
+
+    // Record the exact listener only after proving it is a descendant of the
+    // child we just spawned. This record + port PID + birth fingerprint are
+    // all required before a future invocation may stop anything.
+    let listenerRecorded = false;
+    for (let i = 0; i < 120; i++) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      const scan = scanDashboardListenerPids(dashPort);
+      if (!scan.ok || scan.pids.length !== 1) continue;
+      const listenerPid = scan.pids[0];
+      if (!dashboardListenerDescendsFrom(listenerPid, dashChild.pid || -1)) continue;
+      if (!await dashboardHttpHealthy(dashHost, dashPort)) continue;
+      const listenerBirth = dashboardProcessField(listenerPid, "lstart");
+      if (!listenerBirth) break;
+      ensurePrivateDirectory(dirname(dashboardLaunchRecordPath(dashPort)));
+      atomicWritePrivateJson(dashboardLaunchRecordPath(dashPort), {
+        schema: 1,
+        port: dashPortNumber,
+        listener_pid: listenerPid,
+        listener_birth: listenerBirth,
+        source: launchSource,
+        source_key: sourceKey,
+        recorded_at: new Date().toISOString(),
+      } satisfies DashboardLaunchRecord);
+      console.log(`[anet] ✅ Dashboard ready; managed listener recorded (pid ${listenerPid}).`);
+      listenerRecorded = true;
+      break;
+    }
+    if (!listenerRecorded) {
+      console.warn(`[anet] ⚠ Dashboard listener could not be ownership-verified; no managed record was written.`);
+      console.warn(`[anet]   Future cleanup will fail closed instead of guessing which process to stop.`);
+    }
 
   } else if (sub === "stop") {
     // #200 — graceful stop: lsof -ti:<port> → SIGTERM each → 3s grace → SIGKILL leftovers.
