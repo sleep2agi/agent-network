@@ -128,13 +128,13 @@ services:
       # whole dir would shadow node_modules.
       - ./playwright/playwright.config.ts:/tests/playwright.config.ts:ro
       - ./playwright/helpers.ts:/tests/helpers.ts:ro
-      - ./playwright/01-register.spec.ts:/tests/01-register.spec.ts:ro
-      - ./playwright/02-create-node.spec.ts:/tests/02-create-node.spec.ts:ro
-      - ./playwright/03-sse-connected.spec.ts:/tests/03-sse-connected.spec.ts:ro
-      - ./playwright/04-send-via-enter.spec.ts:/tests/04-send-via-enter.spec.ts:ro
-      - ./playwright/05-receive-failed-reply.spec.ts:/tests/05-receive-failed-reply.spec.ts:ro
-      - ./playwright/06-refresh-keeps-history.spec.ts:/tests/06-refresh-keeps-history.spec.ts:ro
-      - ./playwright/07-multi-message.spec.ts:/tests/07-multi-message.spec.ts:ro
+      - ./playwright/01-register.pw.ts:/tests/01-register.pw.ts:ro
+      - ./playwright/02-create-node.pw.ts:/tests/02-create-node.pw.ts:ro
+      - ./playwright/03-sse-connected.pw.ts:/tests/03-sse-connected.pw.ts:ro
+      - ./playwright/04-send-via-enter.pw.ts:/tests/04-send-via-enter.pw.ts:ro
+      - ./playwright/05-receive-failed-reply.pw.ts:/tests/05-receive-failed-reply.pw.ts:ro
+      - ./playwright/06-refresh-keeps-history.pw.ts:/tests/06-refresh-keeps-history.pw.ts:ro
+      - ./playwright/07-multi-message.pw.ts:/tests/07-multi-message.pw.ts:ro
       - ./results:/results
       - ./.tmp/test-state.json:/tests/test-state.json:ro
     profiles: ["runner"]
