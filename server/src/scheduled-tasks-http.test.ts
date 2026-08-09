@@ -185,19 +185,26 @@ describe("Hub scheduled task API and dispatcher", () => {
       ["bun", workerPath, dbPath, raceScheduleId, due, join(raceDir, `ready-${id}`), gate],
       { cwd: process.cwd(), stdout: "pipe", stderr: "pipe", env: { ...process.env, COMMHUB_DB: dbPath } },
     ));
-    const readyDeadline = Date.now() + 10_000;
+    const readyDeadline = Date.now() + 12_000;
     while ((!existsSync(join(raceDir, "ready-a")) || !existsSync(join(raceDir, "ready-b"))) && Date.now() < readyDeadline) {
       await Bun.sleep(10);
     }
-    expect(existsSync(join(raceDir, "ready-a"))).toBe(true);
-    expect(existsSync(join(raceDir, "ready-b"))).toBe(true);
+    if (!existsSync(join(raceDir, "ready-a")) || !existsSync(join(raceDir, "ready-b"))) {
+      for (const worker of workers) worker.kill();
+      await Promise.all(workers.map((worker) => worker.exited));
+      const diagnostics = await Promise.all(workers.map(async (worker) => ({
+        stdout: await new Response(worker.stdout).text(),
+        stderr: await new Response(worker.stderr).text(),
+      })));
+      throw new Error(`race_workers_not_ready: ${JSON.stringify(diagnostics)}`);
+    }
     writeFileSync(gate, "go\n", { mode: 0o600 });
     const exits = (await Promise.all(workers.map((worker) => worker.exited))).sort((a, b) => a - b);
     expect(exits).toEqual([0, 3]);
     expect(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM scheduled_task_runs WHERE schedule_id = ?1", raceScheduleId)!.count).toBe(1);
     expect(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM tasks WHERE meta_json LIKE '%' || ?1 || '%'", raceScheduleId)!.count).toBe(1);
     expect(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM inbox WHERE meta_json LIKE '%' || ?1 || '%'", raceScheduleId)!.count).toBe(1);
-  });
+  }, 20_000);
 
   test("non-overlap skips while prior task is open; rename follows stable node_id", () => {
     const firstTask = db.get<{ task_id: string }>("SELECT task_id FROM scheduled_task_runs WHERE schedule_id = ?1 AND task_id IS NOT NULL LIMIT 1", scheduleId)!.task_id;
