@@ -82,8 +82,8 @@ The container entrypoint runs the full bring-up chain: `hub init` → `anet logi
 | `HUB_USER` / `HUB_PASSWORD` | Account on that hub (**non-interactive `anet login --username/--password` runs on every container start, so there is no pre-issued ntok_ to manage**) | ✅ |
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` | The credentials from §2 | ✅ |
 | `ANET_MODEL` + `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` | LLM-backend triple (see §4) | ✅ |
-| `FEISHU_ALLOW_FROM` | One DM sender `open_id` scoped to the **current app** (the Docker bootstrap option does not parse comma-separated lists) | ✅ At least one of these two |
-| `FEISHU_ALLOW_CHATS` | One group `chat_id` scoped to the current app | ✅ At least one of these two |
+| `FEISHU_ALLOW_FROM` | DM sender `open_id` values scoped to the current app (comma-separated) | ✅ At least one of these two |
+| `FEISHU_ALLOW_CHATS` | Group `chat_id` values scoped to the current app (comma-separated) | ✅ At least one of these two |
 | `NODE_ALIAS` | Node alias (default `feishu-agent`) | Optional |
 | `ACK_PLACEHOLDER` | "⏳ 处理中…" placeholder switch (default `true`, see §7) | Optional |
 
@@ -159,7 +159,7 @@ When the picked backend doesn't support images and Feishu delivers an image mess
 
 The bridge does **not** accept messages from the entire network — you must explicitly list allowed **users** (`open_id`) and **groups** (`chat_id`) in `access.json`.
 
-**Docker path** (recommended): before the first startup, set at least one of `.env` `FEISHU_ALLOW_FROM` (one real `open_id` scoped to the current app) or `FEISHU_ALLOW_CHATS` (one `chat_id`). Empty does not mean "allow everyone." Neither bootstrap option parses comma-separated lists, so the current Docker path supports at most one ID of each kind. Do not append more IDs with the CLI inside the container: the entrypoint rewrites `access.json` from `.env` on the next restart. Use the non-Docker manual path below when multiple IDs are required.
+**Docker path** (recommended): before the first startup, set at least one of `.env` `FEISHU_ALLOW_FROM` (real `open_id` values scoped to the current app) or `FEISHU_ALLOW_CHATS` (`chat_id` values). Empty or comma/whitespace-only input does not mean "allow everyone"; the container refuses to start. Separate multiple IDs with commas. The entrypoint trims, removes empty/duplicate entries, and merges the bootstrap IDs into `access.json`. IDs added with `anet channel allow` survive restarts; use the matching `--rm-*` command to remove one.
 
 **Manual `anet` path**: use the CLI to add / remove entries:
 
