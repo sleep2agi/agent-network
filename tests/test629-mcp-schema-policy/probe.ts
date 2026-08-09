@@ -23,6 +23,10 @@ const expectedTools = [
 ];
 
 const toolsSource = readFileSync("src/tools.ts", "utf8");
+const sdkVersion = JSON.parse(
+  readFileSync("node_modules/@modelcontextprotocol/sdk/package.json", "utf8"),
+).version as string;
+assert(/^1\.(?:29|30)\./.test(sdkVersion), `real MCP SDK version is recorded (${sdkVersion})`);
 const registeredTools = [...toolsSource.matchAll(/server\.tool\(\s*\n\s*"([^"]+)"/g)]
   .map(match => match[1]);
 assert(
@@ -84,4 +88,5 @@ assert(
 );
 
 console.log("inventory_count=41");
+console.log(`sdk_version=${sdkVersion}`);
 console.log("recommended_policy=observe-key-shape-then-strip");

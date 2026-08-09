@@ -20,7 +20,8 @@ feasibility probe for the proposed wrapper and a source inventory gate.
 - `server/src/tools.ts` contains **41** `server.tool(...)` registrations.
 - Every top-level registration uses the deprecated raw-shape form. None has an
   explicit top-level unknown-field policy.
-- The installed real `@modelcontextprotocol/sdk` converts a raw shape to a Zod
+- The host install (1.29.x) and the dependency range's clean Docker resolution
+  (1.30.x) both convert a raw shape to a Zod
   object and parses before calling the handler. Its default object policy strips
   unknown keys. `test629` proves `{known, typo}` reaches the handler as
   `{known}` while the call still succeeds.
