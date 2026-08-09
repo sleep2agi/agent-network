@@ -4,10 +4,48 @@ import {
   buildAnetArgsDaemon,
   minimalEnv,
   loadAndVerifyAnetBin,
+  ensureGlobalAnetConfig,
 } from "./create-node-daemon.js";
-import { writeFileSync, mkdirSync, symlinkSync, chmodSync, unlinkSync, rmSync } from "node:fs";
+import { writeFileSync, mkdirSync, symlinkSync, chmodSync, unlinkSync, rmSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
+
+describe("#633 daemon private state", () => {
+  const fixture = "/tmp/anet-test633-daemon-private";
+
+  test("global config repair and replacement converge to private state", () => {
+    rmSync(fixture, { recursive: true, force: true });
+    const parent = join(fixture, ".anet");
+    const config = join(parent, "config.json");
+    mkdirSync(parent, { recursive: true, mode: 0o755 });
+    writeFileSync(config, JSON.stringify({ token: "ntok_fixture", hub: "old" }), { mode: 0o666 });
+    chmodSync(config, 0o666);
+
+    ensureGlobalAnetConfig(fixture, "http://hub.test");
+
+    expect(statSync(parent).mode & 0o777).toBe(0o700);
+    expect(statSync(config).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(readFileSync(config, "utf8"))).toEqual({
+      token: "ntok_fixture",
+      hub: "http://hub.test",
+    });
+    rmSync(fixture, { recursive: true, force: true });
+  });
+
+  test("global config read refuses a symlink without touching its target", () => {
+    rmSync(fixture, { recursive: true, force: true });
+    const parent = join(fixture, ".anet");
+    const config = join(parent, "config.json");
+    const victim = join(fixture, "victim.json");
+    mkdirSync(parent, { recursive: true, mode: 0o700 });
+    writeFileSync(victim, '{"sentinel":"unchanged"}\n', { mode: 0o600 });
+    symlinkSync(victim, config);
+
+    expect(() => ensureGlobalAnetConfig(fixture, "http://hub.test")).toThrow(/linked|refuses/);
+    expect(readFileSync(victim, "utf8")).toBe('{"sentinel":"unchanged"}\n');
+    rmSync(fixture, { recursive: true, force: true });
+  });
+});
 
 describe("§4.2.2 daemon-side flag VALUE validator (BLOCKER #2 — defense in depth)", () => {
   test("permissionMode enum", () => {

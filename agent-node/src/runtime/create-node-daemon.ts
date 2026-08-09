@@ -9,10 +9,15 @@
 // once they hit `anet node start`.
 
 import { execFileSync, spawn } from "node:child_process";
-import { writeFileSync, statSync, realpathSync, readFileSync, mkdirSync } from "node:fs";
+import { statSync, realpathSync, readFileSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { isReservedEnvKey } from "../shared/reserved-env.js";
+import {
+  atomicWriteJson,
+  atomicWritePrivateText,
+  repairPrivateConfigPermissions,
+} from "./config-apply.js";
 
 // ── §4.2.6 B2 — ANET_BIN install-time pin + boot 4-check ──────────
 //
@@ -262,15 +267,16 @@ export interface CreateNodeDeps {
 /** §2.5 step 3 helper — ensure $HOME/.anet/config.json carries the
  *  daemon's hub URL so the spawned `anet node create + start` doesn't
  *  bail with `未找到 CommHub Server`. Idempotent. */
-function ensureGlobalAnetConfig(home: string, hubUrl: string): void {
+export function ensureGlobalAnetConfig(home: string, hubUrl: string): void {
   const dir = join(home, ".anet");
   const path = join(dir, "config.json");
   try { mkdirSync(dir, { recursive: true, mode: 0o700 }); } catch { /* ok */ }
+  repairPrivateConfigPermissions(path);
   let cur: Record<string, any> = {};
   try { cur = JSON.parse(readFileSync(path, "utf-8")); } catch { /* fresh */ }
   if (cur.hub !== hubUrl) {
     cur.hub = hubUrl;
-    writeFileSync(path, JSON.stringify(cur, null, 2), { mode: 0o600 });
+    atomicWriteJson(path, cur);
   }
 }
 
@@ -369,7 +375,7 @@ export async function handleCreateNodeDoorbell(
       token: req.child_token,
       ...(Object.keys(flagsObj).length ? { flags: flagsObj } : {}),
     };
-    writeFileSync(childCfgPath, JSON.stringify(childCfg, null, 2), { mode: 0o600 });
+    atomicWriteJson(childCfgPath, childCfg);
     deps.log(`[create-node] wrote child config: ${childCfgPath}`);
   } catch (e: any) {
     deps.warn(`[create-node] write child config failed: ${e?.message || e}`);
@@ -382,7 +388,7 @@ export async function handleCreateNodeDoorbell(
   if (req.env_blob && Object.keys(req.env_blob).length > 0) {
     const envFile = join(deps.workDir, ".anet", "nodes", req.node_spec.name, ".env.local");
     try {
-      writeFileSync(envFile, deps.serializeEnvLocal(req.env_blob), { mode: 0o600 });
+      atomicWritePrivateText(envFile, deps.serializeEnvLocal(req.env_blob));
     } catch (e: any) {
       deps.warn(`[create-node] env.local write failed: ${e?.message || e}`);
       // not fatal — proceed to start; hub will see status=succeeded but
