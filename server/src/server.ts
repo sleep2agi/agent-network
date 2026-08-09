@@ -1122,8 +1122,23 @@ return Bun.serve({
         const net = db.get<any>(`SELECT ${NETWORK_REST_SELECT} FROM networks WHERE network_id = ?1`, resolved.networkId);
         return withCors(req, Response.json({ ok: true, networks: net ? [withNetworkNameAlias(net)] : [] }));
       }
-      const networks = getUserAllNetworks(resolved.user.user_id).map(withNetworkNameAlias);
-      return withCors(req, Response.json({ ok: true, networks }));
+      // Global Hub admins have cross-network authority throughout the REST
+      // surface, so limiting this discovery endpoint to their membership rows
+      // made otherwise-authorized networks impossible to select (#94). Keep
+      // ordinary utok_ callers membership-scoped; ntok_ returned above stays
+      // bound to exactly one network.
+      const networks = resolved.user.role === "admin"
+        ? db.all<any>(
+            `SELECT ${NETWORK_REST_SELECT},
+                    COALESCE((SELECT nm.role FROM network_members nm
+                              WHERE nm.network_id = networks.network_id
+                                AND nm.user_id = ?1), 'admin') AS member_role
+             FROM networks ORDER BY created_at`,
+            resolved.user.user_id,
+          )
+        : getUserAllNetworks(resolved.user.user_id);
+      const visibleNetworks = networks.map(withNetworkNameAlias);
+      return withCors(req, Response.json({ ok: true, networks: visibleNetworks }));
     }
 
     if (url.pathname === "/api/networks" && req.method === "POST") {
