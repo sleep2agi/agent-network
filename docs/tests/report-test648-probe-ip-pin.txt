@@ -1,0 +1,73 @@
+# test648 — RFC-028 P1.5 pre-validated DNS IP pin
+
+Date: 2026-08-10 (Asia/Shanghai)
+
+## Provenance
+
+- Base: `adc4b94de8fc62a0eafb888c69debcd30e313ab7`
+- Tested source: `7f9e11cbd0895122575617442a8736715982208c`
+- Docker tag: `anet-test648:dev`
+- Image ID: `sha256:98ddc1d3a89eeff6eed34468bf347339d73a887b9b58aa78bc779cb1dbd826ac`
+- Embedded env: `TEST648_SOURCE_COMMIT=7f9e11cbd0895122575617442a8736715982208c`
+- Runner artifact SHA256: `98453745c356f797bb05e1b92c7da7671f1f6e997261c8884704ce66723a0a42`
+- Runtime matrix: Node `v20.20.2`, Bun `1.3.14`
+
+Commands:
+
+```sh
+sg docker -c 'docker build \
+  --build-arg TEST648_SOURCE_COMMIT=7f9e11cbd0895122575617442a8736715982208c \
+  -t anet-test648:dev \
+  -f tests/test648-probe-ip-pin/Dockerfile .'
+sg docker -c 'docker run --rm \
+  -v /tmp/test648-probe-artifacts:/artifacts \
+  anet-test648:dev'
+```
+
+## Result
+
+`RESULT: PASS`
+
+- Production `agent-node` bundle: PASS (256 modules).
+- Existing SSRF/TLS suite plus lookup callback contract: 25 pass, 0 fail,
+  40 assertions.
+- Split-horizon real TLS:
+  - pre-validation was injected as `api.anthropic.com -> 127.0.0.1`;
+  - system connect-time resolution was `/etc/hosts -> 127.0.0.2`;
+  - Node 20 hit the pinned `127.0.0.1` endpoint and returned 200;
+  - Bun 1.3.14 hit the pinned `127.0.0.1` endpoint and returned 200;
+  - pinned endpoint request count was 2; rebound endpoint count was 0;
+  - both requests retained SNI `api.anthropic.com`, so certificate hostname
+    verification was not weakened.
+- Restored implementation repeated Node+Bun green.
+
+## Witnessed-red evidence
+
+1. Removing the Node undici Agent `connect.lookup` made the real Node 20
+   request hit the rebound endpoint (`418`), producing `PIN_FAIL`, rc=3.
+2. Removing the Bun `node:https` lookup made the real Bun request hit the
+   rebound endpoint (`418`), producing `PIN_FAIL`, rc=3.
+
+Both mutations edit the production transport call site, keep the test code
+unchanged, assert that the mutation applied, and are restored before the final
+green run.
+
+## Cross-runtime finding
+
+The initially attempted `undici.fetch(..., { dispatcher })` and subsequent
+lower-level `undici.request(..., { dispatcher })` both honored the lookup hook
+under Node 20 but Bun 1.3.14 still reached the `127.0.0.2` rebound endpoint.
+The final implementation therefore keeps the undici Agent for Node and uses
+Bun's `node:https` compatibility transport with the same fail-closed pinned
+lookup callback. This is not an unpinned fallback: deleting either runtime's
+lookup hook makes its real split-horizon test turn red.
+
+## Security properties exercised
+
+- all pre-resolved A/AAAA addresses are validated before connector creation;
+- hostname mismatch and unavailable address family fail `ENOTFOUND` without
+  consulting DNS;
+- redirects are not followed;
+- TLS verification remains enabled with minimum TLS 1.2;
+- vendor hostname remains in URL/SNI;
+- no API key or response body is written to the report.
