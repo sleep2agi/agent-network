@@ -85,24 +85,24 @@ NETWORK=$(jq -r '.network_id' <<<"$REGISTER")
 [[ "$TOKEN" == utok_* && "$NODE_TOKEN" == ntok_* && "$NETWORK" == net_* ]]
 
 STATUS=$(mcp_call "$NODE_TOKEN" report_status "$(jq -nc --arg net "$NETWORK" \
-  '{resume_id:"test621-resume",alias:"test621-node",status:"idle",network_id:$net}')")
+  '{resume_id:"test621-resume",alias:"test621",status:"idle",network_id:$net}')")
 jq -e '.ok == true' <<<"$STATUS" >/dev/null
 
 DISPATCH=$(curl -fsS -X POST "$HUB/api/task" \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   --data "$(jq -nc --arg net "$NETWORK" \
-    '{alias:"test621-node",task:"hold-open",priority:"normal",network_id:$net}')")
+    '{alias:"test621",task:"hold-open",priority:"normal",network_id:$net}')")
 TASK_ID=$(jq -r '.task_id // .message_id // empty' <<<"$DISPATCH")
 [[ -n "$TASK_ID" ]]
 
-BEFORE=$(mcp_call "$NODE_TOKEN" get_inbox '{"alias":"test621-node","limit":100}')
+BEFORE=$(mcp_call "$NODE_TOKEN" get_inbox '{"alias":"test621","limit":100}')
 jq -e --arg id "$TASK_ID" 'any(.messages[]?; .id == $id)' <<<"$BEFORE" >/dev/null
 
 CANCEL=$(mcp_call "$TOKEN" cancel_task "$(jq -nc --arg id "$TASK_ID" --arg net "$NETWORK" \
   '{task_id:$id,reason:"test621 layer teardown",from_session:"test621",network_id:$net}')")
 jq -e '.ok == true and .cancelled == true' <<<"$CANCEL" >/dev/null
 
-AFTER=$(mcp_call "$NODE_TOKEN" get_inbox '{"alias":"test621-node","limit":100}')
+AFTER=$(mcp_call "$NODE_TOKEN" get_inbox '{"alias":"test621","limit":100}')
 jq -e --arg id "$TASK_ID" 'all(.messages[]?; .id != $id)' <<<"$AFTER" >/dev/null
 curl -fsS "$HUB/api/tasks?task_id=$TASK_ID&network_id=$NETWORK" \
   -H "Authorization: Bearer $TOKEN" \
@@ -110,7 +110,7 @@ curl -fsS "$HUB/api/tasks?task_id=$TASK_ID&network_id=$NETWORK" \
 
 # A second pull models the fresh process reconnect. The row remains absent;
 # cancel_task closed both the task lifecycle and its inbox delivery.
-RESTART_PULL=$(mcp_call "$NODE_TOKEN" get_inbox '{"alias":"test621-node","limit":100}')
+RESTART_PULL=$(mcp_call "$NODE_TOKEN" get_inbox '{"alias":"test621","limit":100}')
 jq -e --arg id "$TASK_ID" 'all(.messages[]?; .id != $id)' <<<"$RESTART_PULL" >/dev/null
 
 echo "L2 witnessed-red: deleting the layer cancellation must fail"
