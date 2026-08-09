@@ -15,10 +15,10 @@ RUN cd /app/agent-node && npm install && npm run build && npm link
 
 COPY tests/docker-e2e-networks.sh /app/test-networks.sh
 COPY tests/docker-config-priority.sh /app/test-config.sh
-COPY tests/test639-test-all-v3-fixtures/run.sh /app/run.sh
+COPY tests/test313-test-all-v3-fixtures/run.sh /app/run.sh
 RUN chmod +x /app/test-networks.sh /app/test-config.sh /app/run.sh
 
-ARG TEST639_SOURCE_COMMIT=unknown
-ENV TEST639_SOURCE_COMMIT=$TEST639_SOURCE_COMMIT
+ARG TEST313_SOURCE_COMMIT=unknown
+ENV TEST313_SOURCE_COMMIT=$TEST313_SOURCE_COMMIT
 
 CMD ["/app/run.sh"]
