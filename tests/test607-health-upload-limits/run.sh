@@ -26,8 +26,8 @@ run_health
 
 echo "L2 witnessed-red: removing the limits field breaks the HTTP contract"
 cp server/src/server.ts /tmp/test607-server.ts
-sed -i '0,/        limits: {/s//        disabled_limits: {/' server/src/server.ts
-grep -Fq 'disabled_limits: {' server/src/server.ts
+sed -i 's/max_upload_bytes: MAX_UPLOAD_BYTES/max_upload_bytes: 1/' server/src/server.ts
+grep -Fq 'max_upload_bytes: 1' server/src/server.ts
 set +e
 run_health >/tmp/test607-red.log 2>&1
 rc=$?
