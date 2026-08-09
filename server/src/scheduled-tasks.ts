@@ -165,7 +165,7 @@ function validateTarget(networkId: string, nodeId: unknown): { node_id: string; 
 
 type DispatchEvent = { alias: string; networkId: string; taskId: string; priority: string; state: "delivered" | "queued" };
 
-function dispatchOccurrence(row: ScheduledRow, scheduledFor: string, advanceSchedule: boolean): { runId: string; taskId?: string; status: string; event?: DispatchEvent } {
+export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: string, advanceSchedule: boolean): { runId: string; taskId?: string; status: string; event?: DispatchEvent } {
   const runId = `srun_${crypto.randomUUID()}`;
   let event: DispatchEvent | undefined;
   let finalStatus = "failed";
@@ -301,7 +301,7 @@ export function runDueScheduledTasks(now = new Date(), limit = 100): { processed
       // tick wins. The unique occurrence key handles a second scheduler.
       const current = db.get<ScheduledRow>("SELECT * FROM scheduled_tasks WHERE schedule_id = ?1 AND status = 'active' AND next_run_at = ?2", row.schedule_id, row.next_run_at);
       if (!current?.next_run_at) continue;
-      dispatchOccurrence(current, current.next_run_at, true);
+      dispatchScheduledOccurrence(current, current.next_run_at, true);
       processed++;
     } catch (e: any) {
       if (/UNIQUE|duplicate key/i.test(String(e?.message))) continue;
@@ -405,7 +405,7 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
   if (sub === "run-now" && req.method === "POST") {
     if (row.status === "cancelled") return jsonError("schedule_cancelled", 409);
     try {
-      const result = dispatchOccurrence(row, iso(new Date()), false);
+      const result = dispatchScheduledOccurrence(row, iso(new Date()), false);
       return Response.json({ ok: true, ...result }, { status: result.status === "failed" ? 409 : 202 });
     } catch (e: any) {
       return jsonError("dispatch_failed", 409, { message: String(e?.message || e).slice(0, 500) });

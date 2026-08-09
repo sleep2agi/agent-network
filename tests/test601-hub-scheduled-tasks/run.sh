@@ -46,18 +46,28 @@ grep -Fq 'if (false && ctx.isNodeToken)' server/src/scheduled-tasks.ts
 expect_red node-token-write-gate /tmp/test601-mut-node.db
 cp /tmp/test601-scheduled-tasks.ts server/src/scheduled-tasks.ts
 
-echo "L7 witnessed-red: overlap check is load-bearing"
+echo "L7 witnessed-red: cross-process occurrence claim is load-bearing"
+cp server/src/db.ts /tmp/test601-db.ts
+perl -0pi -e 's/completed_at     TEXT,\n    UNIQUE\(schedule_id, scheduled_for\)/completed_at     TEXT/' server/src/db.ts
+if grep -Fq 'UNIQUE(schedule_id, scheduled_for)' server/src/db.ts; then
+  echo "MUTATION_NOT_APPLIED: occurrence unique claim"
+  exit 1
+fi
+expect_red cross-process-occurrence-claim /tmp/test601-mut-claim.db
+cp /tmp/test601-db.ts server/src/db.ts
+
+echo "L8 witnessed-red: overlap check is load-bearing"
 sed -i '0,/if (open) {/s//if (false \&\& open) {/' server/src/scheduled-tasks.ts
 grep -Fq 'if (false && open)' server/src/scheduled-tasks.ts
 expect_red no-overlapping-occurrences /tmp/test601-mut-overlap.db
 cp /tmp/test601-scheduled-tasks.ts server/src/scheduled-tasks.ts
 
-echo "L8 witnessed-red: optimistic revision rejects stale devices"
+echo "L9 witnessed-red: optimistic revision rejects stale devices"
 sed -i 's/if (!Number.isSafeInteger(body.revision) || Number(body.revision) !== row.revision)/if (false \&\& (!Number.isSafeInteger(body.revision) || Number(body.revision) !== row.revision))/' server/src/scheduled-tasks.ts
 grep -Fq 'if (false && (!Number.isSafeInteger' server/src/scheduled-tasks.ts
 expect_red optimistic-revision /tmp/test601-mut-revision.db
 cp /tmp/test601-scheduled-tasks.ts server/src/scheduled-tasks.ts
 
-echo "L9 restored green"
+echo "L10 restored green"
 run_real /tmp/test601-restored.db
 echo "RESULT: PASS"

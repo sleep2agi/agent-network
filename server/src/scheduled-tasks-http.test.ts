@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { addNetworkMember, createNetworkTokenForNode, register } from "./auth.js";
@@ -158,6 +158,45 @@ describe("Hub scheduled task API and dispatcher", () => {
     db.run("DROP TRIGGER test601_abort_scheduled_task_insert");
     expect(runDueScheduledTasks().processed).toBe(1);
     expect(db.get("SELECT task_id FROM scheduled_task_runs WHERE schedule_id = ?1", atomicScheduleId)).toBeTruthy();
+  });
+
+  test("two real Hub processes claim one occurrence exactly once", async () => {
+    const created = await api(ownerToken, "/api/scheduled-tasks", {
+      method: "POST",
+      body: JSON.stringify({
+        network_id: networkId,
+        name: "Cross-process claim probe",
+        target_node_id: nodeId,
+        task: "Only one worker may create this task",
+        timezone: "UTC",
+        schedule: { type: "interval", every_seconds: 60 },
+      }),
+    });
+    expect(created.status).toBe(201);
+    const raceScheduleId = created.body.schedule.schedule_id as string;
+    const due = new Date(Date.now() - 5_000).toISOString();
+    db.run("UPDATE scheduled_tasks SET next_run_at = ?1 WHERE schedule_id = ?2", [due, raceScheduleId]);
+
+    const raceDir = mkdtempSync(join(dir, "race-"));
+    const gate = join(raceDir, "go");
+    const workerPath = "tests/test601-hub-scheduled-tasks/race-worker.ts";
+    const dbPath = process.env.COMMHUB_DB!;
+    const workers = ["a", "b"].map((id) => Bun.spawn(
+      ["bun", workerPath, dbPath, raceScheduleId, due, join(raceDir, `ready-${id}`), gate],
+      { cwd: process.cwd(), stdout: "pipe", stderr: "pipe", env: { ...process.env, COMMHUB_DB: dbPath } },
+    ));
+    const readyDeadline = Date.now() + 10_000;
+    while ((!existsSync(join(raceDir, "ready-a")) || !existsSync(join(raceDir, "ready-b"))) && Date.now() < readyDeadline) {
+      await Bun.sleep(10);
+    }
+    expect(existsSync(join(raceDir, "ready-a"))).toBe(true);
+    expect(existsSync(join(raceDir, "ready-b"))).toBe(true);
+    writeFileSync(gate, "go\n", { mode: 0o600 });
+    const exits = (await Promise.all(workers.map((worker) => worker.exited))).sort((a, b) => a - b);
+    expect(exits).toEqual([0, 3]);
+    expect(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM scheduled_task_runs WHERE schedule_id = ?1", raceScheduleId)!.count).toBe(1);
+    expect(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM tasks WHERE meta_json LIKE '%' || ?1 || '%'", raceScheduleId)!.count).toBe(1);
+    expect(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM inbox WHERE meta_json LIKE '%' || ?1 || '%'", raceScheduleId)!.count).toBe(1);
   });
 
   test("non-overlap skips while prior task is open; rename follows stable node_id", () => {
