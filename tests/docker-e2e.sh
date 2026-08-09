@@ -829,10 +829,27 @@ NET_B_ID=$(echo "$NET_B" | python3 -c "import sys,json;print(json.loads(sys.stdi
 TOKEN="$NET_TOKEN"
 NETWORK_ID="$NET_A_ID"
 
+# Delivery now fails closed for unknown aliases. Register one authoritative
+# token-bound fixture in each network so this section tests tenant isolation,
+# not the unrelated alias_not_found guard.
+anet login --hub http://127.0.0.1:9200 --username net-test-user --password test123456 >/dev/null 2>&1
+e2e_select_network "$NET_A_ID" || fail "select net-alpha failed"
+e2e_create_agent alpha-agent codex-sdk gpt-5.4 "$NET_A_ID" >/dev/null \
+  || fail "alpha-agent fixture creation failed"
+e2e_agent_mcp_call alpha-agent report_status \
+  '{"resume_id":"isolation-alpha","status":"idle","server":"test"}' >/dev/null
+e2e_select_network "$NET_B_ID" || fail "select net-beta failed"
+e2e_create_agent beta-agent codex-sdk gpt-5.4 "$NET_B_ID" >/dev/null \
+  || fail "beta-agent fixture creation failed"
+e2e_agent_mcp_call beta-agent report_status \
+  '{"resume_id":"isolation-beta","status":"idle","server":"test"}' >/dev/null
+
 # Send task to each network
-mcp_call "send_task" "{\"alias\":\"alpha-agent\",\"task\":\"alpha task\",\"from_session\":\"tester\",\"network_id\":\"$NET_A_ID\"}" > /dev/null
-mcp_call "send_task" "{\"alias\":\"beta-agent\",\"task\":\"beta task\",\"from_session\":\"tester\",\"network_id\":\"$NET_B_ID\"}" > /dev/null
-pass "tasks sent to different networks"
+SEND_A=$(mcp_call "send_task" "{\"alias\":\"alpha-agent\",\"task\":\"alpha task\",\"from_session\":\"tester\",\"network_id\":\"$NET_A_ID\"}")
+SEND_B=$(mcp_call "send_task" "{\"alias\":\"beta-agent\",\"task\":\"beta task\",\"from_session\":\"tester\",\"network_id\":\"$NET_B_ID\"}")
+response_json_ok "$SEND_A" && response_json_ok "$SEND_B" \
+  && pass "tasks sent to different networks" \
+  || { printf 'alpha=%s\nbeta=%s\n' "$SEND_A" "$SEND_B" >&2; fail "cross-network fixture dispatch failed"; }
 
 # Query network A — should only see alpha task
 TASKS_A=$(curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:9200/api/tasks?network_id=$NET_A_ID" 2>/dev/null)
