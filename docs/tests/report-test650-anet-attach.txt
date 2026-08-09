@@ -1,0 +1,37 @@
+# test650 — exact tmux attach
+
+Date: 2026-08-10 (Asia/Shanghai)
+
+## Provenance
+
+- Base: `9d87873a29f48cc076487d1a304f75f6fd0880e4`
+- Tested source: `94fb6281ec62ad987127a920d076de53c5da1889`
+- Docker tag: `anet-test650:dev`
+- Image ID: `sha256:4b89ed3950c66acd979fd486548d21eb19454c6591a02ff8eebe92c1185db2e3`
+- Embedded env: `TEST650_SOURCE_COMMIT=94fb6281ec62ad987127a920d076de53c5da1889`
+- Runner artifact SHA256: `0adff3d2307af7e400df3d7fdc62d6e26c580804bd15c12e4e1e0df79bc996d7`
+
+## Result
+
+`RESULT: PASS`
+
+- Exact-name helper: 3 pass, 0 fail, 3 assertions.
+- Production CLI bundle built successfully.
+- Real CLI with a fake tmux process proved that `anet attach 测试牛` chose
+  opaque session ID `$2`, even though `$1 / 测试牛-node` appeared first.
+- With only `测试牛-node` and `测试牛-桥` present, the command exited non-zero,
+  printed the explicit prefix-fallback refusal, and never invoked attach.
+- An unknown node exited non-zero before invoking tmux.
+- Help now exposes the top-level attach command.
+- Restored helper, bundle, and real attach check passed again.
+
+## Witnessed red
+
+Changing the production helper from exact equality to `startsWith()` made the
+unchanged prefix-sibling test fail (`rc=1`). This proves the test guards the
+same ambiguity that previously sent users into a `-node`/`-桥` session when the
+TUI session was absent.
+
+The implementation passes tmux's opaque session ID as a direct argv element;
+it performs no shell interpolation and does not use tmux's target prefix
+matching for a user-controlled alias.
