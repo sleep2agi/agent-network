@@ -31,6 +31,7 @@ import { computeNextWakeAt } from "./goals/schedule";
 import { bumpFailure, resetFailure, applyAutoPause, resolveMaxConsecutiveFailures } from "./goals/failure-counter";
 import { formatSelfLoopsBlock } from "./goals/format";
 import { startTelegramWatchdog } from "./telegram-watchdog";
+import { sseAbandonGuidance } from "./sse-recovery-guidance";
 import type { AgentGoal } from "./goals/types";
 import { extractExplicitDelegation } from "./explicit-delegation";
 import { maskedEnv } from "./secret-mask";
@@ -5440,8 +5441,7 @@ async function connectSSE() {
     label: "sse",
     shutdownGate: () => false,  // no in-process shutdown gate for SSE; abandon-after-1h is the bail
     abandonAfterMs: ABANDON_AFTER_MS,
-    onAbandon: () =>
-      error(`SSE 连续 >1h 连不上 hub (${COMMHUB_URL}) — 放弃自动重连。运行 \`anet node start ${ALIAS}\` 手动恢复。`),
+    onAbandon: () => error(sseAbandonGuidance(ALIAS, COMMHUB_URL)),
     onRetryWait: (waitMs) => debug(`SSE reconnecting (${(waitMs / 1000).toFixed(1)}s)...`),
     onError: (err: any) => warn(`SSE error: ${err?.message || err}`),
     runOnce: async (ctrl) => {
