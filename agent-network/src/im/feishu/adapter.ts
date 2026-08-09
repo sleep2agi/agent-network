@@ -44,6 +44,26 @@ import { resolveOutboundRoute } from "./outbound-route.js";
 
 type OnEventHandler = (event: NormalizedIMEvent) => Promise<void>;
 
+export type FeishuWsClientLike = Pick<lark.WSClient, "start" | "close">;
+export type FeishuWsClientFactory = (
+  params: ConstructorParameters<typeof lark.WSClient>[0],
+) => FeishuWsClientLike;
+
+export interface FeishuAdapterOptions {
+  /** @internal Avoids real bot-info HTTP calls in lifecycle tests. */
+  createClient?: (
+    params: ConstructorParameters<typeof lark.Client>[0],
+  ) => lark.Client;
+  /** @internal Test seam; production uses the pinned Lark SDK WSClient. */
+  createWsClient?: FeishuWsClientFactory;
+  /** Independent outer bound in case the SDK promise/callback path stalls. */
+  wsReadyTimeoutMs?: number;
+  /** Called once when an already-ready socket exhausts reconnect attempts. */
+  onTerminalError?: (error: Error) => void;
+}
+
+const DEFAULT_WS_READY_TIMEOUT_MS = 30_000;
+
 export class FeishuAdapter implements IMAdapter {
   readonly platform = "feishu";
   readonly ingressMode: IMIngressMode = "socket";
@@ -51,7 +71,11 @@ export class FeishuAdapter implements IMAdapter {
   private feishuConfig: FeishuChannelConfig | null = null;
   private connectionName_ = "";
   private client: lark.Client | null = null;
-  private wsClient: lark.WSClient | null = null;
+  private wsClient: FeishuWsClientLike | null = null;
+  private lifecycleGeneration = 0;
+  private readonly options: Required<
+    Pick<FeishuAdapterOptions, "createClient" | "createWsClient" | "wsReadyTimeoutMs">
+  > & Pick<FeishuAdapterOptions, "onTerminalError">;
   /**
    * The bot's own open_id, resolved at init() via /open-apis/bot/v3/info.
    * Used to detect real @bot mentions (vs any mention) in group messages.
@@ -67,6 +91,15 @@ export class FeishuAdapter implements IMAdapter {
     lastEventAt: null,
     lastError: null,
   };
+
+  constructor(options: FeishuAdapterOptions = {}) {
+    this.options = {
+      createClient: options.createClient ?? ((params) => new lark.Client(params)),
+      createWsClient: options.createWsClient ?? ((params) => new lark.WSClient(params)),
+      wsReadyTimeoutMs: options.wsReadyTimeoutMs ?? DEFAULT_WS_READY_TIMEOUT_MS,
+      onTerminalError: options.onTerminalError,
+    };
+  }
 
   /**
    * Snapshot of the current `access.allowFrom` list (from access.json).
@@ -105,7 +138,7 @@ export class FeishuAdapter implements IMAdapter {
     }
     this.feishuConfig = fc as FeishuChannelConfig;
     this.connectionName_ = config.connectionName;
-    this.client = new lark.Client({
+    this.client = this.options.createClient({
       appId: fc.appId,
       appSecret: fc.appSecret,
       disableTokenCache: false,
@@ -176,19 +209,85 @@ export class FeishuAdapter implements IMAdapter {
       },
     });
 
-    this.wsClient = new lark.WSClient({
-      appId,
-      appSecret,
-      loggerLevel: lark.LoggerLevel.warn,
+    const generation = ++this.lifecycleGeneration;
+    let ready = false;
+    let settled = false;
+    let terminalDispatched = false;
+
+    const readyPromise = new Promise<void>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const finishError = (rawError: unknown): void => {
+        if (generation !== this.lifecycleGeneration) return;
+        if (ready && terminalDispatched) return;
+        const error = sanitizeFeishuWsError(rawError, appId, appSecret);
+        this.health_ = { ...this.health_, connected: false, lastError: error.message };
+        if (!settled) {
+          settled = true;
+          if (timer) clearTimeout(timer);
+          reject(error);
+          return;
+        }
+        if (ready && !terminalDispatched) {
+          terminalDispatched = true;
+          this.options.onTerminalError?.(error);
+        }
+      };
+
+      timer = setTimeout(() => {
+        if (settled || generation !== this.lifecycleGeneration) return;
+        finishError(
+          new Error(
+            `Feishu WebSocket did not become ready within ${this.options.wsReadyTimeoutMs}ms`,
+          ),
+        );
+        try {
+          this.wsClient?.close({ force: true });
+        } catch {
+          // Best effort; the startup error remains authoritative.
+        }
+      }, this.options.wsReadyTimeoutMs);
+
+      this.wsClient = this.options.createWsClient({
+        appId,
+        appSecret,
+        loggerLevel: lark.LoggerLevel.warn,
+        handshakeTimeoutMs: this.options.wsReadyTimeoutMs,
+        onReady: () => {
+          if (settled || generation !== this.lifecycleGeneration) return;
+          ready = true;
+          settled = true;
+          clearTimeout(timer);
+          this.health_ = { ...this.health_, connected: true, lastError: null };
+          resolve();
+        },
+        onError: finishError,
+        onReconnecting: () => {
+          if (generation !== this.lifecycleGeneration || terminalDispatched) return;
+          this.health_ = { ...this.health_, connected: false };
+        },
+        onReconnected: () => {
+          if (generation !== this.lifecycleGeneration || terminalDispatched) return;
+          this.health_ = { ...this.health_, connected: true, lastError: null };
+        },
+      });
+
+      // SDK start() has historically resolved before the first handshake.
+      // The callback above, not this promise, is the readiness authority.
+      void Promise.resolve(this.wsClient.start({ eventDispatcher: dispatcher })).catch(
+        finishError,
+      );
     });
 
-    await this.wsClient.start({ eventDispatcher: dispatcher });
-    this.health_ = { ...this.health_, connected: true, lastError: null };
+    await readyPromise;
   }
 
   async stop(): Promise<void> {
-    // Lark SDK does not expose a public close on WSClient (as of 1.42); allow
-    // GC + mark health for callers. Worker process exit drops the connection.
+    ++this.lifecycleGeneration;
+    try {
+      this.wsClient?.close({ force: true });
+    } catch {
+      // Best-effort shutdown; worker exit is the final transport boundary.
+    }
     this.health_ = { ...this.health_, connected: false };
     this.wsClient = null;
     this.client = null;
@@ -1333,6 +1432,24 @@ async function uploadFile(
     );
     return null;
   }
+}
+
+/**
+ * Lark errors may echo request/config values. Keep worker logs actionable while
+ * ensuring credentials and multiline payloads never cross the process boundary.
+ */
+export function sanitizeFeishuWsError(
+  rawError: unknown,
+  appId: string,
+  appSecret: string,
+): Error {
+  const raw = rawError instanceof Error ? rawError.message : String(rawError);
+  let message = raw.replace(/[\r\n\t]+/g, " ");
+  for (const secret of [appSecret, appId]) {
+    if (secret) message = message.split(secret).join("[redacted]");
+  }
+  message = message.trim().slice(0, 500) || "Feishu WebSocket failed";
+  return new Error(message);
 }
 
 // ── Internals: bot identity resolution (RFC-020 §4.3 / #179 M5b) ────────

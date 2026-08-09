@@ -54,6 +54,8 @@ export interface FeishuBridgeOptions {
    *   - stderr logger otherwise (standalone smoke debugging).
    */
   onEvent?: (event: NormalizedIMEvent) => Promise<void>;
+  /** Fatal WS failure after initial readiness (for worker lifecycle ownership). */
+  onTerminalError?: (error: Error) => void;
 }
 
 // ── IPC contract with the agent-node parent (M3) ─────────────────────────
@@ -107,7 +109,7 @@ export async function startFeishuBridge(
 ): Promise<FeishuAdapter> {
   const channelConfig = loadFeishuChannelConfig(opts.channelDir);
 
-  const adapter = new FeishuAdapter();
+  const adapter = new FeishuAdapter({ onTerminalError: opts.onTerminalError });
   await adapter.init({
     platform: "feishu",
     connectionName: opts.nodeAlias,

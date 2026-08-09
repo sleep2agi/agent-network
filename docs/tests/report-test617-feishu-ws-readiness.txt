@@ -1,0 +1,42 @@
+# test617 — Feishu WS readiness and worker health
+
+Date: 2026-08-09
+Issue: #452
+Source commit under test: 60de9b7ba9e62d4aaf5739fff8ad4e89b572c4c6
+Docker image: anet-test617:dev
+Docker image ID: sha256:27ce1562854a347a3f66343f2be3ad36cf83150991f03cad2b5e3c7c99028eb3
+Embedded ENV: TEST617_SOURCE_COMMIT=60de9b7ba9e62d4aaf5739fff8ad4e89b572c4c6
+
+Command:
+  sg docker -c 'docker run --rm -v <artifact-dir>:/artifacts anet-test617:dev'
+
+Result: PASS
+
+Layers:
+  L0 TypeScript typecheck: PASS
+  L1 lifecycle matrix: 7 pass / 0 fail / 18 assertions
+  L2 real Feishu worker bundle: PASS (worker.js generated, 2.29 MB)
+  L3 mutation — trust SDK start resolution instead of onReady: RED (rc=1)
+  L4 mutation — remove reconnecting connected=false transition: RED (rc=1)
+  L5 mutation — terminal worker exit 1 changed to exit 0: RED (rc=1)
+  L6 restored source lifecycle matrix: 7 pass / 0 fail / 18 assertions
+
+Behavior pinned:
+  - WSClient.start() resolving does not advertise the bridge online.
+  - Only the SDK onReady callback completes initial startup.
+  - Missing onReady is bounded by a 30-second production timeout and closes
+    the SDK client fail-closed.
+  - Initial onError rejects startup; credentials and multiline payloads are
+    removed from the surfaced error.
+  - onReconnecting immediately marks health disconnected; onReconnected
+    restores it.
+  - Terminal onError after readiness marks health disconnected and makes the
+    worker exit non-zero exactly once.
+  - stop() uses the public WSClient.close() API and invalidates late callbacks.
+
+Scope/limitations:
+  - The test uses the real pinned @larksuiteoapi/node-sdk types and builds the
+    real worker binary, but drives lifecycle callbacks with a deterministic
+    fake WS transport. No Feishu test App credential was available, so a live
+    Feishu handshake is not claimed.
+  - No production process, channel config, or global npm installation changed.
