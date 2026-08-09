@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+case "${1:-}" in
+  list-sessions)
+    if [ "${TMUX_FIXTURE:-full}" = "missing-tui" ]; then
+      printf '$1\t测试牛-node\n$3\t测试牛-桥\n'
+    else
+      printf '$1\t测试牛-node\n$2\t测试牛\n$3\t测试牛-桥\n'
+    fi
+    ;;
+  attach-session)
+    printf '%s\n' "$*" >> "${TMUX_ATTACH_LOG:?}"
+    ;;
+  *) exit 64 ;;
+esac

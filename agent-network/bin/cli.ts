@@ -95,6 +95,7 @@ import {
 } from "../src/grok-copresence-disclosure";
 import { parseCliOptions, positionalArgs } from "../src/cli-args";
 import { parseTokenCreateName } from "../src/token-cli";
+import { findExactTmuxSession, parseTmuxSessions } from "../src/tmux-attach";
 import { diagnoseLocale, formatLocaleSource } from "../src/locale-diagnostic";
 import {
   formatSecretAssignment,
@@ -2325,6 +2326,7 @@ Node Management:
   anet node delete <name>        Delete node and config
   anet node rename <ref> <new>   Rename a node
   anet node ls                   List all nodes
+  anet attach <name>             Attach the node's exact tmux TUI session
   anet info <name>              Detailed node info + server status
   anet status                   Network overview (agents + tasks)
   anet tasks [status]           Query tasks (replied/failed/delivered)
@@ -2422,6 +2424,52 @@ Legacy aliases:
   anet create <name>              Alias for anet node create
   anet start <name>               Alias for anet node start
 `);
+}
+
+function attachCommand() {
+  const ref = args[1];
+  if (!ref || args.length !== 2) {
+    console.error("Usage: anet attach <node-name>");
+    process.exit(1);
+  }
+  const resolved = resolveNodeRef(ref);
+  if (!resolved) {
+    console.error(`Node "${ref}" not found.`);
+    process.exit(1);
+  }
+  const displayName = nodeDisplayName(resolved.id, resolved.profile);
+  let listing: string;
+  try {
+    listing = execFileSync("tmux", ["list-sessions", "-F", "#{session_id}\t#{session_name}"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error: any) {
+    const code = error?.code === "ENOENT" ? "tmux is not installed" : "no tmux server/session is available";
+    console.error(`[anet] Cannot attach ${JSON.stringify(displayName)}: ${code}.`);
+    console.error(`[anet] Start it first: anet node start ${shellQuote(displayName)} --tmux`);
+    process.exit(1);
+  }
+
+  const session = findExactTmuxSession(listing, displayName);
+  if (!session) {
+    const related = parseTmuxSessions(listing)
+      .filter((candidate) => candidate.name.startsWith(`${displayName}-`))
+      .map((candidate) => candidate.name);
+    console.error(`[anet] TUI session ${JSON.stringify(displayName)} is not running.`);
+    if (related.length) {
+      console.error(`[anet] Refusing prefix fallback to related non-TUI session(s): ${related.join(", ")}`);
+    }
+    console.error(`[anet] Start it first: anet node start ${shellQuote(displayName)} --tmux`);
+    process.exit(1);
+  }
+
+  const child = spawnSync("tmux", ["attach-session", "-t", session.id], { stdio: "inherit" });
+  if (child.error) {
+    console.error(`[anet] tmux attach failed: ${child.error.message}`);
+    process.exit(1);
+  }
+  if (child.status !== 0) process.exit(child.status ?? 1);
 }
 
 function printNodeStartHelp() {
@@ -12759,6 +12807,7 @@ switch (command) {
     else await initGlobal();
     break;
   case "create": await createCommand(); break;
+  case "attach": attachCommand(); break;
   case "server": await serverCommand(); break;
   case "hub": await serverCommand(); break; // anet hub start/dashboard/config
   case "node": // anet node create/start/stop/resume/delete/ls/rename
@@ -12852,7 +12901,7 @@ switch (command) {
       // hand-maintained to avoid scanning the switch at runtime; keep in
       // sync if new top-level commands are added.
       const TOP_COMMANDS = [
-        "init", "create", "server", "hub", "node", "project", "start", "resume",
+        "init", "create", "attach", "server", "hub", "node", "project", "start", "resume",
         "rename", "stop", "delete", "import", "channel", "setup", "upgrade",
         "session", "ls", "list", "status", "tasks", "goal", "doctor", "license",
         "activate", "passwd", "token", "demo", "batch", "logs", "info", "config",
