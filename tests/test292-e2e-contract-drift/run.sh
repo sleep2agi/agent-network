@@ -31,6 +31,14 @@ grep -Fq 'response_json_has_result "$AUTH_MCP"' "$SCRIPT" \
   && pass "wiring: MCP initialize uses a structured result predicate" \
   || fail "wiring: MCP initialize still relies on response text tokens"
 
+grep -Fq 'has("sse_sessions") | not' "$SCRIPT" \
+  && pass "wiring: anonymous health assertion preserves SSE identity redaction" \
+  || fail "wiring: aggregate still expects anonymous SSE session identities"
+
+grep -Fq '[ "$AUTH_WS_NO" = "404" ]' "$SCRIPT" \
+  && pass "wiring: removed tmux WebSocket route expects 404" \
+  || fail "wiring: aggregate still treats the removed route as live"
+
 COMMHUB_DB_PATH=$WORK/commhub.db bun run /repo/server/src/index.ts >$WORK-server.log 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 30); do
@@ -90,6 +98,46 @@ if declare -F response_json_error_is >/dev/null && response_json_error_is "$GHOS
 else
   printf '%s\n' "$GHOST" >&2
   fail "real Hub: exact ghost-reply error was not recognized"
+fi
+
+strict_helper_check() {
+  local helper=$1
+  (
+    source "$helper"
+    ! response_json_has_result 'event: message
+data: {"jsonrpc":"2.0","id":1}'
+    ! response_json_error_is 'event: message
+data: {"error":"permission_denied","jsonrpc":"2.0","id":2}' reply_task_not_found
+  )
+}
+
+if declare -F response_json_has_result >/dev/null && declare -F response_json_error_is >/dev/null && \
+   strict_helper_check /repo/tests/lib/response-json.sh; then
+  pass "negative controls: absent result and wrong error stay rejected"
+else
+  fail "negative controls: structured predicates are missing or fail open"
+fi
+
+RESULT_MUTANT=$WORK-result-mutant.sh
+cp /repo/tests/lib/response-json.sh "$RESULT_MUTANT"
+sed -i 's/and "result" in value/and True/' "$RESULT_MUTANT"
+if cmp -s /repo/tests/lib/response-json.sh "$RESULT_MUTANT"; then
+  fail "mutation: result predicate anchor did not match"
+elif strict_helper_check "$RESULT_MUTANT"; then
+  fail "mutation: accepting a response without result stayed green"
+else
+  pass "mutation: accepting a response without result turns red"
+fi
+
+ERROR_MUTANT=$WORK-error-mutant.sh
+cp /repo/tests/lib/response-json.sh "$ERROR_MUTANT"
+sed -i 's/value.get("error") == expected/value.get("error") is not None/' "$ERROR_MUTANT"
+if cmp -s /repo/tests/lib/response-json.sh "$ERROR_MUTANT"; then
+  fail "mutation: exact error predicate anchor did not match"
+elif strict_helper_check "$ERROR_MUTANT"; then
+  fail "mutation: accepting any error code stayed green"
+else
+  pass "mutation: accepting any error code turns red"
 fi
 
 echo "RESULT: $PASS passed, $FAIL failed"
