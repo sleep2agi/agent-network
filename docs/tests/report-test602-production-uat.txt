@@ -1,0 +1,71 @@
+# test602 — scheduled-task misfire production UAT
+
+Date: 2026-08-09
+Result: PASS
+
+## Deployed coordinates
+
+- Hub main/runtime: `78458693070353e30b31a3e17d9b9bf287e5c278` / `runtime-v30-misfire-78458693`
+- Dashboard main/runtime: `79723e419d8549c24dd7e1a5969f923abc241127` / `dashboard-runtime-misfire-79723e41`
+- App main: `30fbe916763b3421c61de99e5340e89638043f29` (source merged; no user-device push)
+- Hub health: HTTP 200; fleet remained online
+- Dashboard `/scheduled-tasks`: HTTP 200
+- Production schema: `misfire_policy TEXT NOT NULL DEFAULT 'catch_up_once'`
+
+Authentication used an owner Dashboard session stored in a same-user `0600` cookie file. No cookie or token value was written to this report, argv output, or CommHub messages.
+
+## Controlled setup
+
+Three isolated interval schedules were created through the authenticated Dashboard proxy and bound to stable node `n_d3afa188` (`A站GrokTUI`). To simulate Hub downtime without stopping the production fleet, only those three schedule rows had `next_run_at` moved inside one exact SQLite transaction:
+
+- catch-up schedule: five minutes overdue
+- skip schedule: five minutes overdue
+- grace schedule: ten seconds overdue
+
+No other production row was changed by the setup.
+
+## UAT-1 — catch up once
+
+- Schedule: `sched_007ef5c0-95d1-4d44-944f-f431de8c482d`
+- Policy: `catch_up_once`
+- Exactly one run was created: `srun_39459386-7b55-48ba-992f-00cab5ce6161`
+- Exactly one task/inbox row was created: `ea8e5bb2-4958-4140-8450-49c98833e9f8`
+- `next_run_at` advanced into the future rather than replaying every missed minute.
+- The target node completed in four seconds with exact result `MISFIRE-CATCHUP-1786249984-ACK`.
+- Task metadata contained `auth_origin=hub_scheduler`.
+
+## UAT-2 — skip an overdue occurrence
+
+- Schedule: `sched_a2d27489-cb64-46da-9713-08a4dccb09fc`
+- Policy: `skip`
+- Run: `srun_8bd00981-75c2-437d-a776-d3a9e9120d58`
+- Run result: `status=skipped`, `error_code=misfire_skipped`, `task_id=NULL`
+- Task rows: 0
+- Inbox rows: 0
+- `last_run_at` remained NULL because no execution occurred.
+- `next_run_at` advanced into the future.
+
+## UAT-3 — 60-second grace window
+
+- Schedule: `sched_729c8a6c-f03c-4aaf-a2a1-b829186c53f1`
+- Policy: `skip`
+- The occurrence was only ten seconds late and therefore dispatched normally.
+- Exactly one run/task/inbox was created.
+- Task: `c4f32553-4cdc-4d5b-9d9b-ce8295cb2a4e`
+- The target node completed in seven seconds with exact result `MISFIRE-GRACE-1786249984-ACK`.
+
+## Dashboard disclosure
+
+The deployed Next.js client chunk contains all three required strings:
+
+- `恢复后补跑一次`
+- `跳过本次`
+- `Hub 延迟超过 60 秒`
+
+The API create responses returned the requested `misfire_policy` values.
+
+## Cleanup and rollback decision
+
+All three UAT schedules were cancelled through the authenticated API. Each ended with `status=cancelled`, `next_run_at=NULL`, and exactly one run; no second occurrence was emitted.
+
+No rollback was required. Prepared rollback coordinates remain the previous Hub `runtime-v29`, its pre-misfire database backup, and the previous Dashboard nav-order runtime.
