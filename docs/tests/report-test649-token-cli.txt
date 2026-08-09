@@ -1,0 +1,45 @@
+# test649 — token CLI argument and audit output
+
+Date: 2026-08-10 (Asia/Shanghai)
+
+## Provenance
+
+- Base: `adc4b94de8fc62a0eafb888c69debcd30e313ab7`
+- Tested source: `b6163161b1c51e3f30c8f2c552894946aafb2e68`
+- Docker tag: `anet-test649:dev`
+- Image ID: `sha256:cc6500cc06dd53f1087fcaf8f0ec4e484fcf039dff848ee2b66554731025498a`
+- Embedded env: `TEST649_SOURCE_COMMIT=b6163161b1c51e3f30c8f2c552894946aafb2e68`
+- Runner artifact SHA256: `525f0a4fb4b411fd673f29e81dfa5a2c7aae917ca99e3700a1691008bc04a68c`
+- Runtime: Bun `1.3.14` (production CLI bundle executed with Node)
+
+## Result
+
+`RESULT: PASS`
+
+- Pure parser: 3 pass, 0 fail, 11 assertions.
+- Production CLI bundle built successfully.
+- Real CLI against an isolated fake Hub:
+  - `token create --name flag-name` posted `{name:"flag-name"}`;
+  - `token create --name=equals-name` posted the equals-form value;
+  - legacy `token create legacy-name` remained compatible;
+  - no argument, missing `--name` value, unknown flag, and extra positional
+    argument all exited non-zero before any Hub request;
+  - `token ls` rendered both `created_at` and `last_used_at` values returned by
+    the Hub;
+  - `token help` made no Hub request.
+- Restored parser, production bundle, create, and list checks passed again.
+
+## Witnessed-red evidence
+
+1. Restoring the former silent `api-token` default made the parser contract
+   fail (`rc=1`).
+2. Bypassing the parsed name at the real POST call site made the real
+   `--name mutation-name` request body differ and turned the wiring gate red
+   (`rc=1`).
+3. Removing `created_at` from the rendered list made the real CLI output gate
+   fail (`rc=1`).
+
+All mutations edit production source, assert that their target was changed,
+leave the test assertions unchanged, and restore source before the final green
+run. No real credential is minted; the isolated server returns a synthetic
+token and the report does not contain its value.
