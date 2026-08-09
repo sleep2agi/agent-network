@@ -189,6 +189,12 @@ else
   fail "aggregate wiring: one or more Layer 2 gates are not wired"
 fi
 
+if grep -Eq '^[[:space:]]*wait[[:space:]]*$' /app/test.sh; then
+  fail "aggregate wiring: bare wait can block on the long-lived Hub or agent"
+else
+  pass "aggregate wiring: concurrency waits are PID-scoped"
+fi
+
 echo "RESULT: $PASS passed, $FAIL failed"
 echo "source_commit=$TEST292_L2_SOURCE_COMMIT"
 [[ $FAIL -eq 0 ]]

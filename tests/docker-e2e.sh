@@ -155,10 +155,6 @@ e2e_create_agent e2e-agent codex-sdk gpt-5.4 "$NETWORK_ID" || { echo "FATAL: cou
 E2E_AGENT_CONFIG="$(pwd)/.anet/nodes/e2e-agent/config.json"
 agent-node --config "$E2E_AGENT_CONFIG" --alias e2e-agent --runtime codex-sdk > /tmp/e2e-agent.log 2>&1 &
 E2E_AGENT_PID=$!
-# The suite contains legacy bare `wait` calls for short-lived concurrency
-# workers. Keep this long-lived fixture out of that job table, then stop it
-# explicitly at the end of the suite.
-disown "$E2E_AGENT_PID" 2>/dev/null || true
 E2E_AGENT_REGISTERED=0
 for _i in $(seq 1 40); do
   E2E_STATUS=$(curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:9200/api/status 2>/dev/null || true)
@@ -357,10 +353,12 @@ echo ""
 # 23.5 Concurrent registration
 echo "23.5 Testing concurrent operations..."
 # Register 5 agents simultaneously
+CONCURRENT_PIDS=()
 for i in $(seq 1 5); do
   mcp_call "report_status" "{\"resume_id\":\"concurrent-$i\",\"alias\":\"conc-$i\",\"status\":\"idle\",\"server\":\"test\"}" > /dev/null &
+  CONCURRENT_PIDS+=("$!")
 done
-wait
+for pid in "${CONCURRENT_PIDS[@]}"; do wait "$pid"; done
 sleep 1
 CONC_COUNT=$(curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:9200/api/status 2>/dev/null | python3 -c "
 import sys,json
@@ -371,10 +369,12 @@ print(count)
 [ "$CONC_COUNT" = "5" ] && pass "5 concurrent registrations" || fail "concurrent: only $CONC_COUNT/5"
 
 # Concurrent send_task to same agent
+CONCURRENT_PIDS=()
 for i in $(seq 1 3); do
   mcp_call "send_task" "{\"alias\":\"conc-1\",\"task\":\"concurrent task $i\",\"from_session\":\"tester\"}" > /dev/null &
+  CONCURRENT_PIDS+=("$!")
 done
-wait
+for pid in "${CONCURRENT_PIDS[@]}"; do wait "$pid"; done
 sleep 1
 CONC_INBOX=$(mcp_call "get_inbox" '{"alias":"conc-1","limit":10}')
 CONC_MSG_COUNT=$(echo "$CONC_INBOX" | python3 -c "
