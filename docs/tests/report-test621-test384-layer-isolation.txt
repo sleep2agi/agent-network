@@ -1,0 +1,45 @@
+# test621 — test384 hold-open layer isolation
+
+Date: 2026-08-09
+Issue: #458
+Source commit: 2ff5921fab8e460eacde933da23e4546ea5f9f76
+Docker tag: anet-test621:dev
+Docker image: sha256:dd51856cfaa6fa1c43c2ffc1e0470b65c5a393a76dab8246e8c3abf6bc48ea81
+Embedded source: TEST621_SOURCE_COMMIT=2ff5921fab8e460eacde933da23e4546ea5f9f76
+Runner artifact SHA256: ad6bdfb4f7e9ae47bd6acc7bc4f5f27786feb5012c153384d53a8d8a93904a4e
+
+## Adjudication
+
+An inbox row is acknowledged only after its model turn and reliable reply
+handoff. If the node exits while the turn is still open, the unacknowledged
+row remains eligible for at-least-once delivery after restart. That product
+behavior is intentional. The `pending-replies: dropped` warning is emitted by
+the separate outbound reply retry queue and does not mean the inbound task was
+dropped or dispatched twice.
+
+The defect in #458 was test orchestration: test384 L5 intentionally stopped a
+node during an unresolved initialize request, then allowed that layer's
+unacknowledged task to enter later layers. The fix cancels the exact L5 task
+after process/orphan cleanup and verifies both terminal `cancelled` state and
+absence from the inbox before L5.5/L6.
+
+## Docker result
+
+```text
+# test621 — test384 hold-open layer isolation
+source_commit=2ff5921fab8e460eacde933da23e4546ea5f9f76
+date=2026-08-09T10:37:41+00:00
+L0 syntax + orchestration contract
+L1 real Hub cancellation removes the unacked row before restart
+L2 witnessed-red: deleting the layer cancellation must fail
+MUTATION_RED: hold-open-layer-cancel rc=1
+RESULT: PASS
+```
+
+L1 used a real isolated Hub process and SQLite database. It created an unacked
+task, observed it in the target inbox, cancelled it through the real MCP tool,
+verified the task was terminal, and verified two subsequent inbox pulls did
+not return the row. L2 removed the exact test384 layer-boundary cancellation;
+the orchestration contract failed non-zero.
+
+No production service, database, node, package, or global install was touched.
