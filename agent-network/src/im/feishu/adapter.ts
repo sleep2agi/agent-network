@@ -48,6 +48,10 @@ export type FeishuWsClientLike = Pick<lark.WSClient, "start" | "close">;
 export type FeishuWsClientFactory = (
   params: ConstructorParameters<typeof lark.WSClient>[0],
 ) => FeishuWsClientLike;
+type FeishuInboundHandler = (rawEvent: unknown) => Promise<unknown>;
+export interface FeishuEventDispatcherLike {
+  register(handlers: Record<string, FeishuInboundHandler>): unknown;
+}
 
 export interface FeishuAdapterOptions {
   /** @internal Avoids real bot-info HTTP calls in lifecycle tests. */
@@ -56,6 +60,8 @@ export interface FeishuAdapterOptions {
   ) => lark.Client;
   /** @internal Test seam; production uses the pinned Lark SDK WSClient. */
   createWsClient?: FeishuWsClientFactory;
+  /** @internal Test seam; production uses the pinned Lark SDK dispatcher. */
+  createEventDispatcher?: () => FeishuEventDispatcherLike;
   /** Independent outer bound in case the SDK promise/callback path stalls. */
   wsReadyTimeoutMs?: number;
   /** Called once when an already-ready socket exhausts reconnect attempts. */
@@ -74,7 +80,7 @@ export class FeishuAdapter implements IMAdapter {
   private wsClient: FeishuWsClientLike | null = null;
   private lifecycleGeneration = 0;
   private readonly options: Required<
-    Pick<FeishuAdapterOptions, "createClient" | "createWsClient" | "wsReadyTimeoutMs">
+    Pick<FeishuAdapterOptions, "createClient" | "createWsClient" | "createEventDispatcher" | "wsReadyTimeoutMs">
   > & Pick<FeishuAdapterOptions, "onTerminalError">;
   /**
    * The bot's own open_id, resolved at init() via /open-apis/bot/v3/info.
@@ -96,6 +102,7 @@ export class FeishuAdapter implements IMAdapter {
     this.options = {
       createClient: options.createClient ?? ((params) => new lark.Client(params)),
       createWsClient: options.createWsClient ?? ((params) => new lark.WSClient(params)),
+      createEventDispatcher: options.createEventDispatcher ?? (() => new lark.EventDispatcher({})),
       wsReadyTimeoutMs: options.wsReadyTimeoutMs ?? DEFAULT_WS_READY_TIMEOUT_MS,
       onTerminalError: options.onTerminalError,
     };
@@ -177,7 +184,7 @@ export class FeishuAdapter implements IMAdapter {
     const mediaDir = this.mediaDir;
     const client = this.client;
 
-    const dispatcher = new lark.EventDispatcher({});
+    const dispatcher = this.options.createEventDispatcher();
     dispatcher.register({
       "im.message.receive_v1": async (rawEvent: unknown): Promise<unknown> => {
         try {
@@ -202,7 +209,7 @@ export class FeishuAdapter implements IMAdapter {
           }
           await onEvent(normalized);
         } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
+          const msg = sanitizeFeishuWsError(err, appId, appSecret).message;
           this.health_ = { ...this.health_, lastError: msg };
           auditLog("error", null, msg);
         }
@@ -266,14 +273,14 @@ export class FeishuAdapter implements IMAdapter {
           this.health_ = { ...this.health_, connected: false };
         },
         onReconnected: () => {
-          if (generation !== this.lifecycleGeneration || terminalDispatched) return;
+          if (!ready || generation !== this.lifecycleGeneration || terminalDispatched) return;
           this.health_ = { ...this.health_, connected: true, lastError: null };
         },
       });
 
       // SDK start() has historically resolved before the first handshake.
       // The callback above, not this promise, is the readiness authority.
-      void Promise.resolve(this.wsClient.start({ eventDispatcher: dispatcher })).catch(
+      void Promise.resolve(this.wsClient.start({ eventDispatcher: dispatcher as lark.EventDispatcher })).catch(
         finishError,
       );
     });
@@ -1448,6 +1455,13 @@ export function sanitizeFeishuWsError(
   for (const secret of [appSecret, appId]) {
     if (secret) message = message.split(secret).join("[redacted]");
   }
+  // Lark access tokens can be returned by an SDK error even when they are not
+  // one of the two configured app credentials. Redact the stable token shapes
+  // before the message reaches health, audit, stderr, or the worker owner.
+  message = message
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/\b(?:t|u)-[A-Za-z0-9._~+/=-]{6,}/g, "[redacted]")
+    .replace(/\bcli_[A-Za-z0-9_-]{6,}/g, "[redacted]");
   message = message.trim().slice(0, 500) || "Feishu WebSocket failed";
   return new Error(message);
 }
