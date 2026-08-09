@@ -30,8 +30,8 @@ enumeration replaces the rejected fixed manifest from draft PR #438, so a new
 test is isolated by default instead of being silently omitted.
 
 `--reverse` reverses the enumerated order, `--verbose` streams child output,
-and `--file=server/src/name.test.ts` runs one exact enumerated file for local
-diagnosis. The default still runs every file. `--timeout-ms=N` can lower or
+and `--file=server/src/name.test.ts` selects an exact enumerated file for local
+diagnosis (repeat the flag to select several). The default still runs every file. `--timeout-ms=N` can lower or
 raise the per-file 90-second limit.
 
 The two real HTTP suites also import `require-explicit-test-db.ts` before their

@@ -29,12 +29,12 @@ const ALLOWED_PARENT_ENV = [
 function parseArgs(argv: string[]) {
   let reverse = false;
   let verbose = false;
-  let file: string | undefined;
+  const selectedFiles: string[] = [];
   let timeoutMs = Number(process.env.ANET_SERVER_TEST_TIMEOUT_MS || DEFAULT_TIMEOUT_MS);
   for (const arg of argv) {
     if (arg === "--reverse") reverse = true;
     else if (arg === "--verbose" || arg === "-v") verbose = true;
-    else if (arg.startsWith("--file=")) file = arg.slice(7);
+    else if (arg.startsWith("--file=")) selectedFiles.push(arg.slice(7));
     else if (arg.startsWith("--timeout-ms=")) timeoutMs = Number(arg.slice(13));
     else if (arg === "--help" || arg === "-h") {
       console.log("usage: bun run test [--reverse] [--verbose] [--file=server/src/x.test.ts] [--timeout-ms=N]");
@@ -42,7 +42,7 @@ function parseArgs(argv: string[]) {
     } else throw new Error(`unknown argument: ${arg}`);
   }
   if (!Number.isFinite(timeoutMs) || timeoutMs < 100) throw new Error("timeout must be at least 100ms");
-  return { reverse, verbose, file, timeoutMs };
+  return { reverse, verbose, selectedFiles, timeoutMs };
 }
 
 function collectTests(dir: string): string[] {
@@ -170,9 +170,11 @@ async function runFile(file: string, runRoot: string, timeoutMs: number, verbose
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   let files = collectTests(SERVER_SRC);
-  if (args.file) {
-    if (!files.includes(args.file)) throw new Error(`--file is not an enumerated server test: ${args.file}`);
-    files = [args.file];
+  if (args.selectedFiles.length > 0) {
+    for (const file of args.selectedFiles) {
+      if (!files.includes(file)) throw new Error(`--file is not an enumerated server test: ${file}`);
+    }
+    files = [...new Set(args.selectedFiles)];
   }
   if (args.reverse) files.reverse();
 
