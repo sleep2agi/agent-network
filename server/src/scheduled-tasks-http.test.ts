@@ -122,6 +122,42 @@ describe("Hub scheduled task API and dispatcher", () => {
     expect(runDueScheduledTasks().processed).toBe(0);
   });
 
+  test("dispatch failure rolls back occurrence, inbox, task, and schedule advance as one unit", async () => {
+    const created = await api(ownerToken, "/api/scheduled-tasks", {
+      method: "POST",
+      body: JSON.stringify({
+        network_id: networkId,
+        name: "Atomic rollback probe",
+        target_node_id: nodeId,
+        task: "This dispatch must be all-or-nothing",
+        timezone: "UTC",
+        schedule: { type: "interval", every_seconds: 60 },
+      }),
+    });
+    expect(created.status).toBe(201);
+    const atomicScheduleId = created.body.schedule.schedule_id as string;
+    const due = new Date(Date.now() - 10_000).toISOString();
+    db.run("UPDATE scheduled_tasks SET next_run_at = ?1 WHERE schedule_id = ?2", [due, atomicScheduleId]);
+
+    // Test-only fault injection at the second durable write. The inbox row has
+    // already been attempted when this aborts, so any missing transaction
+    // boundary leaves an observable half-state.
+    db.run(`CREATE TRIGGER test601_abort_scheduled_task_insert
+      BEFORE INSERT ON tasks
+      WHEN NEW.meta_json LIKE '%${atomicScheduleId}%'
+      BEGIN SELECT RAISE(ABORT, 'test601_injected_task_failure'); END`);
+    const failed = runDueScheduledTasks();
+    expect(failed.failed).toBe(1);
+    expect(db.get("SELECT run_id FROM scheduled_task_runs WHERE schedule_id = ?1", atomicScheduleId)).toBeNull();
+    expect(db.get("SELECT id FROM inbox WHERE meta_json LIKE '%' || ?1 || '%'", atomicScheduleId)).toBeNull();
+    expect(db.get("SELECT task_id FROM tasks WHERE meta_json LIKE '%' || ?1 || '%'", atomicScheduleId)).toBeNull();
+    expect(db.get<{ next_run_at: string }>("SELECT next_run_at FROM scheduled_tasks WHERE schedule_id = ?1", atomicScheduleId)!.next_run_at).toBe(due);
+
+    db.run("DROP TRIGGER test601_abort_scheduled_task_insert");
+    expect(runDueScheduledTasks().processed).toBe(1);
+    expect(db.get("SELECT task_id FROM scheduled_task_runs WHERE schedule_id = ?1", atomicScheduleId)).toBeTruthy();
+  });
+
   test("non-overlap skips while prior task is open; rename follows stable node_id", () => {
     const firstTask = db.get<{ task_id: string }>("SELECT task_id FROM scheduled_task_runs WHERE schedule_id = ?1 AND task_id IS NOT NULL LIMIT 1", scheduleId)!.task_id;
     const due2 = new Date(Date.now() - 60_000).toISOString();
