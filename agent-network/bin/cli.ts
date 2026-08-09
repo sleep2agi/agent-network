@@ -1541,9 +1541,9 @@ function revalidateExactManagedDashboard(
   const scan = scanDashboardListenerPids(port);
   if (!scan.ok || scan.pids.length !== 1 || scan.pids[0] !== pid) return false;
   if (!sameDashboardLaunchRecord(loadDashboardLaunchRecord(port), expectedRecord)) return false;
-  if (dashboardProcessField(pid, "lstart") !== expectedRecord.listener_birth) return false;
+  const birth = dashboardProcessField(pid, "lstart");
   const command = dashboardProcessField(pid, "command");
-  return !!command && isDashboardProcessCommand(command);
+  return birth === expectedRecord.listener_birth && !!command && isDashboardProcessCommand(command);
 }
 
 async function dashboardHttpHealthy(host: string, port: string | number): Promise<boolean> {
