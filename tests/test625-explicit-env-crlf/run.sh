@@ -57,7 +57,19 @@ grep -Fq -- '--env entries cannot contain line breaks' /tmp/test625-rejected.log
 test ! -e .anet/nodes/rejected-node/config.json
 test ! -e .anet/nodes/rejected-node/.env
 
-echo "L2 safe explicit value still creates one env assignment"
+echo "L2 no-name CLI flags cannot enter the interactive wizard"
+set +e
+printf 'wizard-node\n' | PATH="/tmp/test625-bin:$PATH" "${ANET[@]}" node create \
+  --runtime claude-agent-sdk --env "$INJECTED_ENV" >/tmp/test625-wizard-unreachable.log 2>&1
+wizard_rc=$?
+set -e
+test "$wizard_rc" -ne 0
+grep -Fq 'Usage: anet node create <node-name>' /tmp/test625-wizard-unreachable.log
+! grep -Fq 'test625-bad' /tmp/test625-wizard-unreachable.log
+test ! -e .anet/nodes/wizard-node/config.json
+test ! -e .anet/nodes/wizard-node/.env
+
+echo "L3 safe explicit value still creates one env assignment"
 PATH="/tmp/test625-bin:$PATH" "${ANET[@]}" node create safe-node \
   --runtime claude-agent-sdk --env 'ANTHROPIC_API_KEY=test625-safe' >/tmp/test625-safe.log
 SAFE_ENV=.anet/nodes/safe-node/.env
@@ -66,7 +78,7 @@ test "$(stat -c %a "$SAFE_ENV")" = 600
 grep -Eq '^ANTHROPIC_API_KEY_[A-Z0-9_]+=test625-safe$' "$SAFE_ENV"
 ! grep -Fq 'INJECTED=' "$SAFE_ENV"
 
-echo "L3 defense-in-depth: bypassing direct collection still fails at the writer preflight"
+echo "L4 defense-in-depth: bypassing direct collection still fails at the writer preflight"
 cp "$HELPER" /tmp/test625-helper.ts
 cp "$CLI" /tmp/test625-cli.ts
 mkdir -p /tmp/test625-writer-project
@@ -90,7 +102,7 @@ test ! -e .anet/nodes/mutation-node/.env
 test ! -e .gitignore
 echo "WRITER_PREFLIGHT_PASS: direct collector bypass still rejected before create side effects"
 
-echo "L4 witnessed-red: bypassing both guards injects a second dotenv line"
+echo "L5 witnessed-red: bypassing both guards injects a second dotenv line"
 sed -i '0,/if (\/\[\\r\\n\]\/\.test(value))/{s/if (\/\[\\r\\n\]\/\.test(value))/if (false \&\& \/[\\r\\n]\/\.test(value))/}' "$HELPER"
 grep -Fq 'if (false && /[\r\n]/.test(value))' "$HELPER"
 cd /workspace/agent-network
@@ -108,7 +120,7 @@ if [[ "$double_mutant_rc" -ne 0 ]] || ! grep -Fxq 'INJECTED=test625-bad' .anet/n
 fi
 echo "MUTATION_RED: dotenv-writer-crlf rc=1 (injected dotenv line witnessed)"
 
-echo "L5 restored green"
+echo "L6 restored green"
 cp /tmp/test625-helper.ts "$HELPER"
 cp /tmp/test625-cli.ts "$CLI"
 cd /workspace/agent-network
