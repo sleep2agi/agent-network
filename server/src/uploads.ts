@@ -53,6 +53,17 @@ export const UPLOAD_RATE_MAX_ENTRIES = 50_000;
 // traversal.
 export const FILE_ID_REGEX = /^[A-Za-z0-9_-]{8,64}$/;
 
+// Stored extension tokens have one invariant at every path boundary:
+// either no extension, or a leading dot followed by 1-16 ASCII
+// alphanumeric characters. Keep this separate from sanitizeExt(), which
+// parses a client filename and therefore deliberately has different
+// capture/anchoring semantics.
+const EXT_TOKEN_REGEX = /^\.[A-Za-z0-9]{1,16}$/;
+
+function isValidExtToken(ext: unknown): ext is string {
+  return typeof ext === "string" && (ext === "" || EXT_TOKEN_REGEX.test(ext));
+}
+
 export type GeneratedFile = {
   fileId: string;
   ext: string;
@@ -138,7 +149,7 @@ export function isValidCalendarBucket(bucket: unknown): bucket is string {
  */
 export function buildStoragePath(fileId: string, ext: string, opts: { uploadsRoot?: string; now?: Date } = {}): GeneratedFile {
   if (!FILE_ID_REGEX.test(fileId)) throw new Error(`file_id "${fileId}" is invalid`);
-  if (ext && !/^\.[A-Za-z0-9]{1,16}$/.test(ext)) throw new Error(`ext "${ext}" is invalid`);
+  if (!isValidExtToken(ext)) throw new Error(`ext "${ext}" is invalid`);
   const dateBucket = getDateBucket(opts.now);
   const root = opts.uploadsRoot ?? getUploadsRoot();
   const relativePath = join(dateBucket, fileId + ext);
@@ -162,7 +173,7 @@ export function buildStoragePath(fileId: string, ext: string, opts: { uploadsRoo
  */
 export function pathForExistingBlob(dateBucket: string, fileId: string, ext: string, opts: { uploadsRoot?: string } = {}): GeneratedFile {
   if (!FILE_ID_REGEX.test(fileId)) throw new Error(`file_id "${fileId}" is invalid`);
-  if (ext && !/^\.[A-Za-z0-9]{1,16}$/.test(ext)) throw new Error(`ext "${ext}" is invalid`);
+  if (!isValidExtToken(ext)) throw new Error(`ext "${ext}" is invalid`);
   if (typeof dateBucket !== "string" || !DATE_BUCKET_REGEX.test(dateBucket)) {
     throw new Error(`date_bucket "${dateBucket}" is invalid`);
   }
@@ -216,7 +227,7 @@ export function validateIndexEntry(entry: unknown): entry is UploadIndexEntry {
   return (
     typeof e.file_id === "string" && FILE_ID_REGEX.test(e.file_id) &&
     typeof e.date_bucket === "string" && /^\d{4}-\d{2}-\d{2}$/.test(e.date_bucket) &&
-    typeof e.ext === "string" && (e.ext === "" || /^\.[A-Za-z0-9]{1,16}$/.test(e.ext)) &&
+    isValidExtToken(e.ext) &&
     typeof e.size === "number" && e.size >= 0 && e.size <= MAX_UPLOAD_BYTES
   );
 }

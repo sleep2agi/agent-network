@@ -1,23 +1,16 @@
 // Task #25 — regression pins for ext validation in validateIndexEntry.
 //
-// 🔴 SCOPE (lead d505179d): this suite covers ONLY the ext regex copy
-// inside `validateIndexEntry` (uploads.ts). The same-shape regex has
-// FOUR copies in this file:
-//   • L93  sanitizeExt         /\.([A-Za-z0-9]{1,16})$/    (client-name parse; no leading-dot anchor, captures group)
-//   • L141 buildStoragePath    /^\.[A-Za-z0-9]{1,16}$/     (upload-path build)
-//   • L165 pathForExistingBlob /^\.[A-Za-z0-9]{1,16}$/     (download-path build)
-//   • L219 validateIndexEntry  /^\.[A-Za-z0-9]{1,16}$/     ← THIS SUITE
-// Mutation reversal proved the other three copies get ZERO coverage
-// from this suite (each was widened to `/./` in turn — this suite still
-// passed 30/0). See docs/tests/p-25-ext-regression/mutation-red.txt.
-// Do NOT read the file name "ext validation regression" as "the ext
-// validation is regression-protected" — the ext validation exists in
-// four independent copies and only ONE is pinned here.
-// Follow-up issue tracks the dedup/alignment evaluation (see PR body).
+// 🔴 SCOPE: this suite exercises the stored-index boundary through
+// `validateIndexEntry`. Issue #527 removed the three independent copies
+// of the stored extension-token grammar: buildStoragePath,
+// pathForExistingBlob and validateIndexEntry now use one shared private
+// validator. `ext-token-shared.test.ts` separately pins all three call
+// sites. sanitizeExt remains intentionally independent because it parses
+// a client filename rather than validating an already-extracted token.
 //
-// Background (通信龙 d01bb8ce): the current regex `/^\.[A-Za-z0-9]{1,16}$/`
-// in validateIndexEntry (uploads.ts) correctly rejects 11 known malicious
-// ext values (path-escape, traversal, absolute paths, doubles, NUL bytes,
+// Background (通信龙 d01bb8ce): the stored extension-token grammar
+// `/^\.[A-Za-z0-9]{1,16}$/` correctly rejects 11 known malicious ext
+// values (path-escape, traversal, absolute paths, doubles, NUL bytes,
 // backslash forms, over-length, whitespace). Verified via real-run on
 // origin/main by lead — 11/11 malicious values → false.
 //
