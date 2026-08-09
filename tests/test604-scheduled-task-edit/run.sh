@@ -44,7 +44,7 @@ expect_red cancelled-is-terminal /tmp/test604-mut-cancelled.db
 cp /tmp/test604-scheduled-tasks.ts server/src/scheduled-tasks.ts
 
 echo "L3 witnessed-red: metadata edit preserves cadence"
-sed -i 's/const schedulingChanged = body.schedule !== undefined || body.timezone !== undefined;/const schedulingChanged = true;/' server/src/scheduled-tasks.ts
+sed -i 's/const schedulingChanged = scheduleJson !== row.schedule_json || parsed.timezone !== row.timezone;/const schedulingChanged = true;/' server/src/scheduled-tasks.ts
 grep -Fq 'const schedulingChanged = true;' server/src/scheduled-tasks.ts
 expect_red metadata-edit-preserves-next-run /tmp/test604-mut-cadence.db
 cp /tmp/test604-scheduled-tasks.ts server/src/scheduled-tasks.ts

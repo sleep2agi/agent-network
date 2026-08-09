@@ -352,6 +352,10 @@ describe("Hub scheduled task API and dispatcher", () => {
         task: "Summarize only verified release changes",
         priority: "low",
         misfire_policy: "skip",
+        // Dashboard/mobile submit a complete form. Identical scheduling
+        // values still count as a metadata-only edit and must preserve cadence.
+        schedule: current.schedule,
+        timezone: current.timezone,
       }),
     });
     expect(metadataOnly.status).toBe(200);
