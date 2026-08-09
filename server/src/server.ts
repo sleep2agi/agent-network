@@ -5,7 +5,7 @@ import { registerTools } from "./tools.js";
 import { db, logTaskEvent, logAudit } from "./db.js";
 import { createSSEStream, createNetworkObserverStream, pushEvent, pushNetworkObserverEvent, getSSEStats, PRINTABLE_OBSERVER_KEY_PREFIX } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
-import { addNetworkScope, canRestWriteNetwork, getUserNetworkIds, resolveRestNetworkScope, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
+import { addNetworkScope, canRestWriteNetwork, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { validateAvatarUrl } from "./avatar-validate.js";
 import { narrowTags, parseStoredTags, validateScalarAttr } from "./node-attrs-validate.js";
 import { register, login, resolveToken, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, renameNetwork, changePassword, issueUserToken, listTokens, createToken, revokeToken, getNetworkMembers, getUserNetworkRole, addNetworkMember, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
@@ -2121,10 +2121,16 @@ return Bun.serve({
         }
         taskNetId = body.network_id;
       } else {
-        taskNetId = restAuth ? singleNetworkId(restScope) : null;
+        taskNetId = restAuth
+          ? resolveRestWriteNetworkId(restScope, restAuth, isAdmin)
+          : null;
       }
       if (restAuth && !taskNetId) {
-        return withCors(req, Response.json({ ok: false, error: "network_id required for user token when multiple networks are available" }, { status: 400 }));
+        return withCors(req, Response.json({
+          ok: false,
+          error: "network_id_required",
+          message: "network_id is required when the user token has zero or multiple network memberships",
+        }, { status: 400 }));
       }
       if (!canRestWriteNetwork(restAuth, taskNetId, isAdmin)) {
         return withCors(req, Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));

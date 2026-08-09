@@ -72,6 +72,26 @@ export function singleNetworkId(scope: RestNetworkScope): string | null {
   return null;
 }
 
+/**
+ * Resolve one unambiguous network for a REST write.
+ *
+ * Admin read scope is intentionally global (`networkIds=null`), so it cannot
+ * by itself express that an admin happens to have exactly one membership.
+ * Writes must not inherit that ambiguity: use the sole real membership when
+ * one exists, and keep requiring an explicit network for zero or 2+.
+ */
+export function resolveRestWriteNetworkId(
+  scope: RestNetworkScope,
+  authCtx: { userId: string; networkId: string | null } | null,
+  isAdmin: boolean,
+): string | null {
+  const scoped = singleNetworkId(scope);
+  if (scoped) return scoped;
+  if (!authCtx || !isAdmin) return null;
+  const memberships = getUserNetworkIds(authCtx.userId);
+  return memberships.length === 1 ? memberships[0] : null;
+}
+
 export function canRestWriteNetwork(authCtx: { userId: string; networkId: string | null } | null, networkId: string | null, isAdmin: boolean): boolean {
   if (!authCtx) return true; // legacy global token or open dev mode
   if (isAdmin) return true;
