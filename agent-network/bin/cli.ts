@@ -87,6 +87,7 @@ import {
   grokCopresenceDisclosure,
   type GrokCopresenceSessionDisclosure,
 } from "../src/grok-copresence-disclosure";
+import { parseCliOptions, positionalArgs } from "../src/cli-args";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -1305,56 +1306,7 @@ function listProfileIds(): string[] {
 // ── Parse --key value and repeatable --channel/--env ──
 
 function parseOpts(): Record<string, string> & { _channels: string[]; _envs: string[] } {
-  const r: any = { _channels: [], _envs: [] };
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--channel" && args[i + 1]) { r._channels.push(args[++i]); continue; }
-    if (args[i] === "--env" && args[i + 1]) { r._envs.push(args[++i]); continue; }
-    // #P2fix设计裁6 — boolean flags must not swallow the next positional as a
-    // value; `--copresence <alias>` previously assigned `copresence=<alias>`
-    // and callers checking `=== "true"` silently lost the feature. Mirrors
-    // the BOOLEAN_FLAGS handling in positionalArgs() below.
-    if (BOOLEAN_FLAGS.has(args[i])) { r[args[i].slice(2)] = "true"; continue; }
-    if (args[i].startsWith("--") && args[i + 1] && !args[i + 1].startsWith("--")) {
-      r[args[i].slice(2)] = args[++i];
-    } else if (args[i].startsWith("--")) {
-      r[args[i].slice(2)] = "true";
-    }
-  }
-  return r;
-}
-
-// #173 — boolean (no-value) flags must NOT swallow the following token as a
-// value. parseOpts's heuristic ("--flag" + non-"--" token → that token is the
-// value) would otherwise read `anet node start --all foo` as all="foo".
-const BOOLEAN_FLAGS = new Set([
-  "--all",
-  "--tmux",
-  "--new-session",
-  // RFC-030 P2 — co-presence orchestration flags.
-  "--copresence",
-  "--dangerously-allow-full-access",
-  // #P2fix设计裁5 — non-TTY confirmation of danger-full-access requires this
-  // second explicit flag alongside --dangerously-allow-full-access. TTY
-  // callers still use the typed 'yes' prompt.
-  "--yes-danger-full-access",
-  "--grok-headless",
-]);
-
-// #173 — extract the bare positional operands from an argv slice, mirroring
-// parseOpts's flag/value consumption, so `--all`'s mutual exclusion with a
-// positional <alias> can be detected reliably.
-function positionalArgs(argv: string[]): string[] {
-  const out: string[] = [];
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--channel" || a === "--env") { i++; continue; }  // multi-value flags
-    if (a.startsWith("--")) {
-      if (!BOOLEAN_FLAGS.has(a) && argv[i + 1] && !argv[i + 1].startsWith("--")) i++;
-      continue;
-    }
-    out.push(a);
-  }
-  return out;
+  return parseCliOptions(args);
 }
 
 function commandExists(name: string, env?: NodeJS.ProcessEnv): boolean {
@@ -4908,7 +4860,7 @@ async function startCommand() {
 
   // #P2fix设计裁6 — extract alias via positionalArgs so `--copresence <alias>`
   // is not treated as `id=--copresence`. positionalArgs is already boolean-
-  // aware; parseOpts is now too (see BOOLEAN_FLAGS check above).
+  // aware; parseOpts shares the same exact flag set through cli-args.ts.
   const startPositionals = positionalArgs(args.slice(1));
   const id = startPositionals[0];
   if (!id) { showProfiles("start"); return; }
