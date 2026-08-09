@@ -11,6 +11,10 @@ RUN cd /app/agent-network && npm install && npm run build && npm install -g .
 COPY server/ /app/server/
 RUN cd /app/server && bun install
 
+COPY agent-node/ /app/agent-node/
+RUN cd /app/agent-node && npm install && npm run build && npm link && \
+    npm install @openai/codex-sdk 2>/dev/null || true
+
 COPY tests/docker-e2e.sh /app/test.sh
 COPY tests/lib/ /app/lib/
 COPY tests/test292-e2e-identity-fixtures/run.sh /app/run.sh
