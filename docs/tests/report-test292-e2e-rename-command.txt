@@ -1,0 +1,72 @@
+# test292 Layer 2 follow-up — canonical rename command and process inspection
+
+Date: 2026-08-10
+Stacked base: 4ceb99289f7af77c75f51bdb97ef3bd6dc54641b
+Source under test: 2cb4194cf6213b99a41a189ebdd0ea96ae47682b
+Scope: Base E2E test wiring and the isolated test292 rename suite. No product
+source, production database, Hub, node, npm package, or global install changed.
+
+## Witnessed red
+
+The exact red source was b51ece996190990d4dd84cb10c1ffdc8eda02823.
+It retained the legacy aggregate invocation and exited 1 before the live flow:
+
+    FAIL: wiring: docker-e2e.sh still uses the legacy rename command
+    FAIL: wiring: run.sh still uses the legacy rename command
+    RESULT: 0 passed, 2 failed
+
+Red log SHA256:
+9c0be3dfbe4fc76afe3cda4cf1ef1263981e9ee898b5e29d62fbea309487ae90
+
+The first implementation run then exposed two independent stale assumptions
+instead of being counted green: the Base containers lacked `ps`, while rename
+correctly fails closed if it cannot inspect the process table; and the Base
+assertion matched old success prose rather than the command exit status. The
+candidate therefore installs `procps` in both Base environments and verifies
+rename by exit status plus persisted identity, not human-readable wording.
+
+## Exact-source Docker run
+
+Build:
+
+    sg docker -c 'docker build --build-arg TEST292_RENAME_SOURCE_COMMIT=2cb4194cf6213b99a41a189ebdd0ea96ae47682b -t anet-test292-rename:dev -f tests/test292-e2e-rename-command/Dockerfile .'
+
+Run:
+
+    sg docker -c 'docker run --rm anet-test292-rename:dev'
+
+Image ID:
+sha256:94a1fcceb48a841ce7b85a85d47eaa67368f2bd7352fc2a28ca03b7c2bcb2ffb
+
+Embedded environment:
+
+    TEST292_RENAME_SOURCE_COMMIT=2cb4194cf6213b99a41a189ebdd0ea96ae47682b
+
+Result: PASS, 10 passed / 0 failed.
+
+Green log SHA256:
+27d3e57ffde0edca8130fad47afbce12b5e37e85a067d02c3003d6e774cbf19e
+
+Verified behavior:
+
+- both aggregate suites call the canonical `anet node rename` command;
+- both aggregate Docker environments provide the process inspection required
+  by rename's fail-closed ghost-process guard;
+- a real Hub, real login, and selected writable network are used;
+- a node created through the public CLI is renamed by stable node_id;
+- the renamed path, node_name, and stable node_id are persisted;
+- Telegram channel configuration follows the renamed node and its `.env`
+  remains mode 0600;
+- restoring the legacy aggregate command turns the command gate red;
+- deleting `procps` from the aggregate environment turns the environment gate
+  red.
+
+## Honest boundary
+
+This targeted exact-source suite closes the rename/Telegram cascade identified
+by the Layer 2 Base re-bucket. A full Base-image rebuild was not attempted in
+this run because the shared host had only 6.7 GiB free; manufacturing another
+multi-gigabyte image would violate the shared-disk safety constraint. The
+stacked PR's normal CI remains the full aggregate integration gate. Other Base
+E2E drift categories (upgrade wording, health/auth/task/network contracts) are
+not claimed fixed here.
