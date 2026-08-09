@@ -9,8 +9,7 @@
 #   4. `anet node create $NODE_ALIAS --runtime claude-agent-sdk --model $ANET_MODEL`
 #      (only if node not already created — checks .anet/nodes/<alias>/config.json)
 #   5. `anet channel add feishu $NODE_ALIAS --app-id ... --app-secret ... [--allow ...]`
-#      (idempotent — already-added is downgraded to a log line, not a hard
-#      fail)
+#      (idempotent additive merge; any real failure remains fatal)
 #   6. `exec agent-node ...` so the agent runs as PID 1 (under tini) —
 #      SIGTERM from `docker stop` reaches the agent cleanly.
 #
@@ -39,6 +38,35 @@ set -o pipefail
 : "${ANTHROPIC_AUTH_TOKEN:?missing — set ANTHROPIC_AUTH_TOKEN=sk-... in .env}"
 
 NODE_ALIAS="${NODE_ALIAS:-feishu-agent}"
+
+# Docker bootstrap accepts comma-separated IDs. Normalise before any login or
+# node write so whitespace-only / comma-only values fail without side effects.
+parse_csv_unique() {
+  local raw="$1" out_name="$2" item trimmed
+  local -a pieces=()
+  local -A seen=()
+  local -n out="$out_name"
+  out=()
+  IFS=',' read -r -a pieces <<< "$raw"
+  for item in "${pieces[@]}"; do
+    trimmed="${item#"${item%%[![:space:]]*}"}"
+    trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+    [ -n "$trimmed" ] || continue
+    if [ -z "${seen[$trimmed]+x}" ]; then
+      seen[$trimmed]=1
+      out+=("$trimmed")
+    fi
+  done
+}
+
+ALLOW_FROM_IDS=()
+ALLOW_CHAT_IDS=()
+parse_csv_unique "${FEISHU_ALLOW_FROM:-}" ALLOW_FROM_IDS
+parse_csv_unique "${FEISHU_ALLOW_CHATS:-}" ALLOW_CHAT_IDS
+if [ "${#ALLOW_FROM_IDS[@]}" -eq 0 ] && [ "${#ALLOW_CHAT_IDS[@]}" -eq 0 ]; then
+  echo "[feishu-entrypoint] FATAL — at least one valid ID is required in FEISHU_ALLOW_FROM or FEISHU_ALLOW_CHATS"
+  exit 1
+fi
 
 cd /work
 
@@ -90,25 +118,22 @@ else
     2>&1 | sed 's/^/[node] /'
 fi
 
-# ── 4) channel add feishu (idempotent — already-added → log + continue) ──
+# ── 4) channel add feishu (idempotent additive merge; failures are fatal) ──
 ALLOW_FLAGS=()
-if [ -n "${FEISHU_ALLOW_FROM:-}" ]; then
-  ALLOW_FLAGS+=(--allow "$FEISHU_ALLOW_FROM")
+if [ "${#ALLOW_FROM_IDS[@]}" -gt 0 ]; then
+  ALLOW_FROM_CSV="$(IFS=,; echo "${ALLOW_FROM_IDS[*]}")"
+  ALLOW_FLAGS+=(--allow "$ALLOW_FROM_CSV")
 fi
-if [ -n "${FEISHU_ALLOW_CHATS:-}" ]; then
-  ALLOW_FLAGS+=(--allow-chat "$FEISHU_ALLOW_CHATS")
+if [ "${#ALLOW_CHAT_IDS[@]}" -gt 0 ]; then
+  ALLOW_CHAT_CSV="$(IFS=,; echo "${ALLOW_CHAT_IDS[*]}")"
+  ALLOW_FLAGS+=(--allow-chat "$ALLOW_CHAT_CSV")
 fi
 echo "[channel] adding feishu to '${NODE_ALIAS}'${ALLOW_FLAGS:+ (with ${#ALLOW_FLAGS[@]}/2 allow flags)}"
 anet channel add feishu "$NODE_ALIAS" \
     --app-id "$FEISHU_APP_ID" \
     --app-secret "$FEISHU_APP_SECRET" \
     "${ALLOW_FLAGS[@]}" \
-  2>&1 | sed 's/^/[channel] /' || {
-    # Tolerate "already added" — first-run vs restart-run distinction
-    # is in the exit code; for now we always continue and let the agent
-    # decide whether the channel is healthy.
-    echo "[channel] add returned non-zero (likely already-added on restart) — continuing"
-  }
+  2>&1 | sed 's/^/[channel] /'
 
 # ── 5) start agent-node — PID 1 under tini ──────────────────────────────
 echo "[start] exec agent-node alias=${NODE_ALIAS} config=${NODE_CONFIG}"

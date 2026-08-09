@@ -3078,21 +3078,53 @@ function writeFeishuChannelConfig(
   nodeId: string,
   appId: string,
   appSecret: string,
-  allowOpenId: string,
-  allowChatId?: string,
+  allowOpenIds: string[],
+  allowChatIds: string[],
 ): string {
   const channelDir = join(nodesDir(), nodeId, "channels", "feishu");
   mkdirSync(channelDir, { recursive: true });
+  const accessPath = join(channelDir, "access.json");
+  let existing: Record<string, unknown> = {};
+  if (existsSync(accessPath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(accessPath, "utf-8"));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("root must be a JSON object");
+      }
+      existing = parsed as Record<string, unknown>;
+    } catch (error: any) {
+      throw new Error(`refusing to replace malformed ${accessPath}: ${error?.message || error}`);
+    }
+  }
+
+  const existingFrom = parseFeishuAllowlistField(existing.allowFrom, "allowFrom", accessPath);
+  const existingChats = parseFeishuAllowlistField(existing.allowChats, "allowChats", accessPath);
 
   const envPath = join(channelDir, ".env");
   writeFileSync(envPath, `FEISHU_APP_ID=${appId}\nFEISHU_APP_SECRET=${appSecret}\n`);
   try { chmodSync(envPath, 0o600); } catch {}
 
-  writeAccessJsonAtomic(join(channelDir, "access.json"), {
-    allowFrom: allowOpenId ? [allowOpenId] : [],
-    allowChats: allowChatId ? [allowChatId] : [],
+  writeAccessJsonAtomic(accessPath, {
+    ...existing,
+    // Docker bootstrap is additive: preserve ids added through `anet channel
+    // allow`, while normalising the historical single-element CSV shape.
+    allowFrom: [...new Set([...existingFrom, ...allowOpenIds])],
+    allowChats: [...new Set([...existingChats, ...allowChatIds])],
   });
   return channelDir;
+}
+
+function parseFeishuAllowlist(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return [...new Set(raw.split(",").map((value) => value.trim()).filter(Boolean))];
+}
+
+function parseFeishuAllowlistField(raw: unknown, field: string, path: string): string[] {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw) || raw.some((value) => typeof value !== "string")) {
+    throw new Error(`refusing malformed ${path}: ${field} must be a string array`);
+  }
+  return [...new Set(raw.flatMap((value) => parseFeishuAllowlist(value)))];
 }
 
 async function askChoice<T extends string>(title: string, choices: { label: string; value: T; description?: string }[]): Promise<T> {
@@ -7723,12 +7755,14 @@ Examples:
         console.error("Error: --app-id and --app-secret required");
         process.exit(1);
       }
-      if (!allowOpenId && !allowChatId) {
+      const allowOpenIds = parseFeishuAllowlist(allowOpenId);
+      const allowChatIds = parseFeishuAllowlist(allowChatId);
+      if (allowOpenIds.length === 0 && allowChatIds.length === 0) {
         console.error("Error: at least one of --allow <open-id> or --allow-chat <chat-id> required");
         process.exit(1);
       }
 
-      channelDir = writeFeishuChannelConfig(nodeId, appId, appSecret, allowOpenId, allowChatId);
+      channelDir = writeFeishuChannelConfig(nodeId, appId, appSecret, allowOpenIds, allowChatIds);
       attachChannel(storedProfile, "feishu");
     }
 

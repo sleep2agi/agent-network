@@ -82,8 +82,8 @@ docker compose logs -f feishu-agent         # 跟启动 + 运行日志
 | `HUB_USER` / `HUB_PASSWORD` | 该 hub 上的账号（**非交互式 `anet login --username/--password`，每次启动重新登录，不用预签 ntok\_**） | ✅ |
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` | §2 拿到的飞书自建应用凭证 | ✅ |
 | `ANET_MODEL` + `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` | 模型后端三件套（详见 §4） | ✅ |
-| `FEISHU_ALLOW_FROM` | 允许私聊的、**当前 App 下的一个 `open_id`**（Docker 启动参数不支持逗号列表） | ✅ 与下一项至少填一项 |
-| `FEISHU_ALLOW_CHATS` | 允许群聊的、当前 App 下的一个 `chat_id` | ✅ 与上一项至少填一项 |
+| `FEISHU_ALLOW_FROM` | 允许私聊的、当前 App 下的 `open_id`（多个用逗号分隔） | ✅ 与下一项至少填一项 |
+| `FEISHU_ALLOW_CHATS` | 允许群聊的、当前 App 下的 `chat_id`（多个用逗号分隔） | ✅ 与上一项至少填一项 |
 | `NODE_ALIAS` | 节点 alias（默认 `feishu-agent`） | 可选 |
 | `ACK_PLACEHOLDER` | "⏳ 处理中…" 占位开关（默认 `true`，详见 §7） | 可选 |
 
@@ -159,7 +159,7 @@ docker compose up -d
 
 bridge 不接受全网消息——必须在 `access.json` 里把允许的 **人**（`open_id`）和 **群**（`chat_id`）显式列出。
 
-**Docker 路径**（推荐）：第一次启动前，`.env` 的 `FEISHU_ALLOW_FROM`（当前 App 下的一个真实 `open_id`）和 `FEISHU_ALLOW_CHATS`（一个 `chat_id`）**必须至少填一项**；留空不是「允许所有人」。这两个启动参数都**不支持逗号列表**，因此当前 Docker 路径每类最多配置一个 ID。不要在容器里用 CLI 追加更多 ID：entrypoint 会在下次重启时按 `.env` 重写 `access.json`。需要多 ID 时暂用下面的非 Docker 手动路径。
+**Docker 路径**（推荐）：第一次启动前，`.env` 的 `FEISHU_ALLOW_FROM`（当前 App 下的真实 `open_id`）和 `FEISHU_ALLOW_CHATS`（`chat_id`）**必须至少填一项**；留空或只有逗号/空白不是「允许所有人」，容器会直接拒绝启动。多个 ID 用逗号分隔；entrypoint 会 trim、去空、去重并合并到 `access.json`。通过 `anet channel allow` 追加的 ID 会在重启后保留；删除仍使用对应的 `--rm-*` 命令。
 
 **手动 anet 路径**：用 CLI 增删：
 

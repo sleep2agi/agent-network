@@ -24,7 +24,7 @@ HUB_PASSWORD=your-password                 # login is non-interactive via --user
 
 FEISHU_APP_ID=cli_xxxx                     # from https://open.feishu.cn → your app
 FEISHU_APP_SECRET=xxxx
-FEISHU_ALLOW_FROM=ou_xxx                   # one app-scoped open_id; required unless FEISHU_ALLOW_CHATS is set
+FEISHU_ALLOW_FROM=ou_xxx,ou_yyy            # app-scoped open_ids; required unless FEISHU_ALLOW_CHATS is set
 
 ANET_MODEL=deepseek-v4-pro                 # or MiniMax-M3 (vision) / claude-sonnet-4-6 / etc.
 ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
@@ -33,11 +33,11 @@ ANTHROPIC_AUTH_TOKEN=sk-xxxx
 
 Access allowlist (required — set at least one; empty is not allow-all):
 ```bash
-FEISHU_ALLOW_FROM=ou_xxx                   # one sender open_id (DM)
-FEISHU_ALLOW_CHATS=oc_xxx                  # one chat_id (group)
+FEISHU_ALLOW_FROM=ou_xxx,ou_yyy            # sender open_ids (DM), comma-separated
+FEISHU_ALLOW_CHATS=oc_xxx,oc_yyy            # chat_ids (group), comma-separated
 ```
 
-The Docker bootstrap does not split comma-separated values, so it currently supports at most one ID of each kind. Do not append extra IDs with the CLI inside the container: the next restart rewrites `access.json` from `.env`. Use the non-Docker manual setup for multi-ID allowlists until the entrypoint is fixed.
+The Docker bootstrap trims comma-separated values, removes empty entries and duplicates, and merges them into `access.json`. IDs added later with `anet channel allow` survive container restarts; removing an ID still requires the corresponding `anet channel allow ... --rm-*` command.
 
 See `.env.example` for the full annotated list (verified vendor + model combos, NODE_ALIAS override, etc.).
 

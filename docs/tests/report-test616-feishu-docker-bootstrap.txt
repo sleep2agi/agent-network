@@ -1,0 +1,41 @@
+# test616 — Feishu Docker bootstrap allowlist and failure propagation
+
+Date: 2026-08-09
+Issue: #451
+Base: 4980e14f8317a3c94b2684d8a7f710adf21841fe
+Source commit: 0669c4e4ae0b8c7dacb4518d012b463aec2f0277
+Docker tag: anet-test616:dev
+Docker image: sha256:d624100763408319bd895b5ae2bc5689dc4f013f205c3b1c1c7eb588dd506621
+Embedded ENV: TEST616_SOURCE_COMMIT=0669c4e4ae0b8c7dacb4518d012b463aec2f0277
+
+## Command
+
+```sh
+sg docker -c 'docker build \
+  --build-arg SOURCE_COMMIT=0669c4e4ae0b8c7dacb4518d012b463aec2f0277 \
+  -t anet-test616:dev \
+  -f tests/test616-feishu-docker-bootstrap/Dockerfile .'
+sg docker -c 'docker run --rm anet-test616:dev'
+```
+
+## Layer results
+
+- L0: TypeScript typecheck plus Docker/Chinese/English contract checks — PASS.
+- L1: Real source CLI writes trimmed/deduplicated arrays; restart merge preserves
+  IDs added through `anet channel allow`; historical `["a,b"]` shape is repaired
+  and unknown fields are retained — PASS.
+- L2: malformed existing access state and comma/whitespace-only input fail
+  closed; `access.json` and credential `.env` remain byte-identical — PASS.
+- L3: real entrypoint shell forwards one normalized CSV value per allowlist and
+  reaches the agent only after successful bootstrap — PASS.
+- L4: empty bootstrap and synthetic unknown channel-add failure both exit
+  non-zero before agent-node — PASS.
+- L5 witnessed red:
+  - removing `set -o pipefail` lets a failing channel-add reach agent-node;
+  - deleting the CSV split recreates the single-element allowlist defect.
+
+Result: PASS (6 tests, 24 assertions).
+
+No live Feishu app, credential, Hub, message, production PID, or production
+configuration was read or used. All IDs and credentials in this suite are
+synthetic.
