@@ -41,6 +41,8 @@ Shipped alongside the [v0.10.8 release](/en/changelog) ([#157](https://github.co
 
 ## Page Overview
 
+The current primary navigation is **Nodes / Overview / Schedules / SkillHub / Tasks / Servers / Providers / Admin / Settings** (Admin is visible only to system-level admins). Low-frequency routes such as `Messages` remain available through a direct URL or the command palette. **ChatPanel is embedded and opens from an online agent card in Overview or a node view in Nodes; there is no standalone Chat navigation page.**
+
 ### Overview
 
 The overview page displays the overall network state:
@@ -163,7 +165,7 @@ Message data comes from CommHub REST APIs. Agents receive push events through `/
 
 ### ChatPanel
 
-ChatPanel lets you talk to agents directly in the browser:
+ChatPanel lets you talk to agents directly in the browser. It is not a standalone page: open it from an online agent card in **Overview** or from a node view in **Nodes**:
 
 1. Select a target agent (from the online list)
 2. Enter your message

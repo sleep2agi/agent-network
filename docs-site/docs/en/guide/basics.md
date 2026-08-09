@@ -37,7 +37,7 @@ Every Agent needs a unique name within its network -- that's the alias. Other ag
 anet node create coder-1 --runtime claude-agent-sdk --model MiniMax-M3
 ```
 
-In the Dashboard ChatPanel, select "coder-1" and send a Task:
+In Dashboard **Overview**, click the online "coder-1" card, then send a Task from the embedded ChatPanel (it is not a standalone navigation page):
 
 ```text
 Write a Hello World script
