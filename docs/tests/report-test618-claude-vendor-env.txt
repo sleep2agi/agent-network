@@ -1,0 +1,41 @@
+# test618 — explicit claude-agent-sdk vendor env persistence
+
+Date: 2026-08-09
+Issue: #453
+Source commit: f082c87d0b2f25f1b631d40a34dfa8c80aa22a6e
+Docker image: anet-test618:dev
+Image ID: sha256:1c71222b1655f0bdc5f661efb18a97651b1e90e21cc582677c5299547e7a312e
+Embedded ENV: TEST618_SOURCE_COMMIT=f082c87d0b2f25f1b631d40a34dfa8c80aa22a6e
+
+Result: PASS (container rc=0)
+
+Layers:
+- L0 TypeScript + helper/wiring contracts: 5 pass, 0 fail, 7 assertions;
+  full production CLI build passed.
+- L1 isolated real Hub + built CLI: registered/logged in an isolated owner,
+  then `node create --runtime claude-agent-sdk --model vendor-model` inherited
+  an Anthropic-compatible endpoint and non-production credential from its
+  creation shell.
+- L2 persistence/security: config retained runtime/model/endpoint; credential
+  was absent as plaintext and represented by `_envRef`; per-node `.env` existed
+  with mode 0600.
+- L3 fresh-shell start: all original `ANTHROPIC_*` variables were unset before
+  `node start`. A controlled agent-node boundary confirmed that both endpoint
+  and credential were loaded from the node store.
+- L4 witnessed-red: disconnecting the CLI collection assignment from
+  `opts._envs` made the wiring test fail (rc=1).
+- L5 restored source: 5 pass, 0 fail, 7 assertions.
+
+Additional contracts:
+- Explicit `--env KEY=value` wins over an ambient value of the same key.
+- Only the three known Anthropic-compatible vendor keys are captured; unrelated
+  shell secrets and other runtimes are not snapshotted.
+- CR/LF-bearing values fail before profile construction to prevent dotenv line
+  injection.
+- Existing dotenv files are chmod-verified to 0600 after write, not merely
+  created with a mode hint.
+
+No real vendor credential or model request was used. The acceptance boundary
+proven here is create -> unset/new shell -> start env loading; actual vendor
+availability is intentionally outside this deterministic regression suite.
+No production, global npm installation, or host configuration was changed.

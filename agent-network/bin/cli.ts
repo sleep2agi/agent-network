@@ -88,6 +88,7 @@ import {
   type GrokCopresenceSessionDisclosure,
 } from "../src/grok-copresence-disclosure";
 import { parseCliOptions, positionalArgs } from "../src/cli-args";
+import { collectClaudeVendorEnvForCreate } from "../src/claude-vendor-env";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -2873,7 +2874,10 @@ function rewritePlainSecretsToEnvRef(nodeId: string, profile: Profile): void {
     for (const { refName, value } of rewrites) merged[refName] = value;
     const body = Object.entries(merged).map(([k, v]) => `${k}=${v}`).join("\n") + "\n";
     if (isOpencode) writeOpencodePrivateProfileFile(nodeDir, ".env", body);
-    else writeFileSync(dotenvPath, body, { mode: 0o600 });
+    else {
+      writeFileSync(dotenvPath, body, { mode: 0o600 });
+      chmodSync(dotenvPath, 0o600);
+    }
     ensureNodeDotenvGitignore();
   } catch (e: any) {
     console.warn(`[anet] ⚠ could not write per-node .env: ${e?.message || e} — fall back to manual export only.`);
@@ -3819,6 +3823,21 @@ async function createCommand(idOverride?: string) {
         console.log(`[anet] 绑定已有 Claude session: ${picked.slice(0, 8)}…`);
       }
     }
+  }
+
+  // #453 — an explicit claude-agent-sdk create may intentionally inherit its
+  // vendor endpoint/credential from the current shell. Persist only the known
+  // Anthropic-compatible keys into the existing envRef path so a fresh shell
+  // can restart the node. Explicit --env values remain authoritative.
+  try {
+    opts._envs = collectClaudeVendorEnvForCreate({
+      runtime: normalizeRuntime(opts.runtime || "claude-agent-sdk"),
+      explicitEnv: opts._envs || [],
+      shellEnv: process.env,
+    });
+  } catch (error) {
+    console.error(`[anet] ❌ ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
   }
 
   const profile = createProfileFromOpts(id, opts);
