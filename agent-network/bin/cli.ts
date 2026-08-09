@@ -2444,6 +2444,25 @@ Legacy aliases:
 `);
 }
 
+function printNodeStartHelp() {
+  console.log(`
+Usage: anet node start <name> [options]
+       anet node start --all [--stagger <seconds>] [--only a,b] [--exclude x,y]
+
+Options:
+  --tmux                       Start in a tmux session
+  --new-session               Start with a fresh model session
+  --copresence                Start a supported shared human + agent TUI
+  --accept-dev-channels       Headless / CI / no-TTY mode: start in detached
+                              tmux and auto-confirm the dev-channel prompt
+                              (requires tmux)
+  --dangerously-allow-full-access
+                              Request full filesystem/network access for
+                              supported co-presence runtimes
+  --yes-danger-full-access    Required with the previous flag in non-TTY use
+`);
+}
+
 // ── init (global) ──
 
 async function initGlobal() {
@@ -12637,7 +12656,9 @@ if (args.slice(1).some((a) => a === "--help" || a === "-h")) {
       // (examples + interval format) rather than the generic node
       // subcommand list. Other `anet node <sub> --help` calls still
       // get the generic node usage.
-      if (args[1] === "loop") {
+      if (args[1] === "start") {
+        printNodeStartHelp();
+      } else if (args[1] === "loop") {
         args.splice(0, 1); // drop "node" so nodeLoopCommand sees args[1] as alias slot (no alias → prints loop help)
         // strip --help so it's not treated as an alias literal
         const hi = args.indexOf("--help");
@@ -12646,8 +12667,9 @@ if (args.slice(1).some((a) => a === "--help" || a === "-h")) {
         if (hi2 >= 0) args.splice(hi2, 1);
         await nodeLoopCommand();
         process.exit(0);
+      } else {
+        console.log(`Usage: anet node <create|start|stop|restart|resume|delete|ls|rename|loop|migrate-token-to-envref> [name]`);
       }
-      console.log(`Usage: anet node <create|start|stop|restart|resume|delete|ls|rename|loop|migrate-token-to-envref> [name]`);
       break;
     default:
       printHelp();
