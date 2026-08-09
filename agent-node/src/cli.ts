@@ -5606,7 +5606,16 @@ log(`  alias:   ${ALIAS || "(none!)"} [from: ${ALIAS_SOURCE}]`);  // #203 tracea
 // "wrong runtime"). The raw input is kept alongside so the line still
 // answers "did my flag land?".
 log(`  runtime: ${RUNTIME}${RUNTIME_LABEL === RUNTIME ? "" : ` (input: ${RUNTIME_LABEL})`}`);
-log(`  model:   ${MODEL || (RUNTIME === "codex" || RUNTIME === "codex-app-server" ? "gpt-5.5" : RUNTIME === "grok" ? "grok-build" : "claude-sonnet-4-6")} ${MODEL ? "" : "(default)"}`);
+// Grok ACP/CLI does not receive a model flag when MODEL is unset. The Grok
+// process selects from its own config/default, so a runtime-family alias such
+// as `grok-build` must never be presented as a concrete model id (#553).
+const STARTUP_MODEL_LABEL = MODEL
+  || (RUNTIME === "grok"
+    ? "configured by Grok CLI"
+    : RUNTIME === "codex" || RUNTIME === "codex-app-server"
+      ? "gpt-5.5"
+      : "claude-sonnet-4-6");
+log(`  model:   ${STARTUP_MODEL_LABEL} ${MODEL || RUNTIME === "grok" ? "" : "(default)"}`);
 log(`  hub:     ${COMMHUB_URL}${AUTH_TOKEN ? " (auth)" : " (no auth!)"}`);
 // #214 维度 5 A6 — surface the grok ACP idle-timeout resolution so the
 // operator can see at a glance whether their `flags.grokAcpTimeoutMs`

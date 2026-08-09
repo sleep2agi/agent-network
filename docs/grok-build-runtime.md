@@ -44,9 +44,14 @@ Expected startup markers:
 
 ```text
 runtime: grok-build-acp
-model:   grok-build (default)
+model:   configured by Grok CLI
 SSE connected
 ```
+
+When no `--model` is supplied, Agent Network does not pass a model id to the
+ACP child. Grok selects the model from its own configuration/default. The
+runtime name `grok-build-acp` (and its legacy alias `grok-build`) is not a
+model id.
 
 Send a REST task（三个变量都从登录后的 `~/.anet/config.json` 取——`anet login` 会写入；缺 `network_id` 请求会被拒）:
 

@@ -1,0 +1,31 @@
+# test605 — Grok startup model label
+
+- Date: 2026-08-09
+- Source commit: `e47ebf6f3bd779c818be995ea3a5ce8fbaae468d`
+- Image tag: `anet-test605:dev`
+- Image ID: `sha256:8c544e7c8662d28257c9570ccb3d656f1531da34b46cc4144a813ba255167e15`
+- Embedded image env: `TEST605_SOURCE_COMMIT=e47ebf6f3bd779c818be995ea3a5ce8fbaae468d`
+- Runner artifact SHA256: `cae81ebe4380923bb33e2e70104d83335f2f2e427e0022244b9e824791a94e53`
+
+## Result
+
+`RESULT: PASS`
+
+Layered checks:
+
+1. Built the real `agent-node/src/cli.ts` entrypoint: PASS (253 modules, 1.11 MB bundle).
+2. Spawned the real CLI and inspected its startup banner: 6 tests, 14 assertions, 0 failures.
+   - unset Grok ACP model reports `configured by Grok CLI`;
+   - unset Grok CLI/co-presence model reports the same non-versioned ownership statement;
+   - an explicit `grok-4.5` value is preserved exactly;
+   - existing effective-runtime and unknown-runtime fail-closed checks remain green.
+3. Spawned a real fake ACP child and captured argv: exactly `["agent", "stdio"]`; no model flag was invented.
+4. User-facing runtime documentation names the Grok CLI as model owner and no longer presents `grok-build` as a model id.
+5. Restored-source rerun: 6 banner tests + 1 ACP argv test, all green.
+
+## Witnessed-red evidence
+
+- Replaced the truthful Grok ownership label with `grok-build`: banner suite failed (`rc=1`).
+- Added `--model grok-build` to the ACP child argv: argv test failed (`rc=1`).
+
+The first Docker attempt is not counted as evidence: it stopped at a line-sensitive documentation grep. The assertion was corrected in the add-only commit above, the image was rebuilt with the exact new source SHA, and the entire red/green sequence was rerun from scratch.
