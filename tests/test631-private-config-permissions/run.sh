@@ -30,7 +30,7 @@ grep -q 'atomicWritePrivateFile(anetEnvPath, envContent)' agent-network/bin/cli.
 grep -q 'repairPrivateFilePermissions(p);' agent-network/bin/cli.ts
 grep -q 'repairPrivateFilePermissions(path);' agent-network/bin/cli.ts
 test "$(grep -c 'atomicWriteJson(configFilePath, cfg)' agent-node/src/cli.ts)" -eq 4
-test "$(grep -c 'repairPrivateConfigPermissions' agent-node/src/cli.ts)" -eq 4
+test "$(grep -c 'repairPrivateConfigPermissions' agent-node/src/cli.ts)" -eq 5
 grep -A2 'function loadEnvFile(path: string)' agent-node/src/cli.ts | grep -q 'repairPrivateConfigPermissions(path)'
 
 # Witnessed red 1: weakening both creation and fd hardening to 0666 must make
@@ -52,7 +52,7 @@ echo "MUTATION_RED: private-mode rc=$mode_rc"
 cp agent-node/src/cli.ts /tmp/test631-cli-mutated.ts
 sed -i '/repairPrivateConfigPermissions(cfgPath);/d' /tmp/test631-cli-mutated.ts
 set +e
-test "$(grep -c 'repairPrivateConfigPermissions' /tmp/test631-cli-mutated.ts)" -eq 4
+test "$(grep -c 'repairPrivateConfigPermissions' /tmp/test631-cli-mutated.ts)" -eq 5
 repair_rc=$?
 set -e
 test "$repair_rc" -ne 0
