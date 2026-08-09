@@ -1,0 +1,31 @@
+Test 608 — claude-code-cli missing dependency preflight
+
+Issue: https://github.com/sleep2agi/agent-network/issues/485
+Base commit: 8d2674ffa5d9fcbed3d034a130926f106734e2a6
+Source commit: 7aa89b540f99681988b31dee873dd21569f32aef
+
+Behavior
+- `anet node create` keeps the existing non-blocking missing-CLI warning.
+- `anet node start` fails closed when `claude` is absent from PATH.
+- The error names the missing dependency and provides install, login, and alternate-runtime actions.
+- Refusal occurs before MCP config writes, PID writes, tmux, or child-process launch.
+
+Docker provenance
+- Image: anet-test608:dev
+- Image ID: sha256:128b05238d75ba46867f25e0e610f744691ffde2322cf7d53645e0bb4e66aab8
+- Embedded TEST608_SOURCE_COMMIT: 7aa89b540f99681988b31dee873dd21569f32aef
+- Runner artifact SHA256: 42c56099abefdbfacd74675bf991025cd30d52a0f6a948731bd5dac63ca58b6e
+
+Results
+- TypeScript typecheck: PASS
+- Source-order contract: PASS (2 tests, 12 assertions)
+- Real source CLI with missing `claude`: PASS (non-zero, actionable error, zero launch artifacts)
+- Full packaged/obfuscated CLI with missing `claude`: PASS
+- Positive control with an installed fake `claude`: PASS (dependency gate permits progress to the existing TTY gate)
+
+Witnessed-red mutation
+- Disabled only the missing-CLI start gate.
+- The real source CLI probe failed its expected error/zero-side-effect contract (rc=1).
+- Restored source contract and real CLI probe returned PASS.
+
+Final result: PASS
