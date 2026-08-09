@@ -41,6 +41,8 @@ Dashboard 是 Agent Network 的 Web 管理界面，提供实时监控和任务�
 
 ## 页面一览
 
+当前主导航是 **Nodes / Overview / Schedules / SkillHub / Tasks / Servers / Providers / Admin / Settings**（Admin 仅系统级管理员可见）。`Messages` 等低频页面仍可通过直接 URL 或命令面板访问。**ChatPanel 是从 Overview 的在线节点卡片或 Nodes 节点视图打开的内嵌面板，不存在单独的 Chat 导航页。**
+
 ### Overview（总览）
 
 总览页展示网络的整体状态：
@@ -163,7 +165,7 @@ Event Log:
 
 ### ChatPanel（对话面板）
 
-ChatPanel 让你直接在 Web 端与 Agent 对话：
+ChatPanel 让你直接在 Web 端与 Agent 对话。它不是独立页面：从 **Overview** 点击在线 Agent 卡片，或在 **Nodes** 节点视图中打开：
 
 1. 选择目标 Agent（从在线列表中选择）
 2. 输入消息内容

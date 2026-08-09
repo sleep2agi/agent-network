@@ -44,7 +44,7 @@ graph TB
 | Component | Runs On | Port | Purpose | npm Package |
 |-----------|---------|------|---------|-------------|
 | **CommHub Server** | Server (1 machine) | `9200` | Message routing, task management, auth, database | `@sleep2agi/commhub-server` |
-| **Dashboard** | Local or standalone server | `3000` default | Web UI (Overview / Nodes / Tasks / Messages / Chat / Admin / Settings — see the [Dashboard doc](/en/guide/dashboard#page-overview) for per-page detail) | `@sleep2agi/agent-network-dashboard` |
+| **Dashboard** | Local or standalone server | `3000` default | Web UI (primary navigation: Nodes / Overview / Schedules / SkillHub / Tasks / Servers / Providers / Admin / Settings; ChatPanel is embedded in node/overview interactions, not a standalone page — see the [Dashboard doc](/en/guide/dashboard#page-overview)) | `@sleep2agi/agent-network-dashboard` |
 | **anet CLI** | Each client machine | -- | Command-line management tool (full command list: [CLI reference](/en/guide/cli)) | `@sleep2agi/agent-network` |
 | **Agent Node** | Each client machine | -- | AI worker (receives tasks, calls AI, reports results) | `@sleep2agi/agent-node` |
 | **Claude Code** | Client machine | -- | Interactive AI development (joins network via MCP) | Anthropic official |
@@ -130,7 +130,7 @@ Agent Network ships as four npm packages with clear responsibilities:
 | `@sleep2agi/agent-network` | **anet CLI** -- config management, service launcher, status monitoring | `npm i -g @sleep2agi/agent-network` |
 | `@sleep2agi/agent-node` | **Agent runtime** -- AI model + tool calls + task handling | `anet node create` + `anet node start` |
 | `@sleep2agi/commhub-server` | **Communication hub** -- message routing + SSE push + task management | `anet hub start` |
-| `@sleep2agi/agent-network-dashboard` | **Web Dashboard** -- visual monitoring + task management (Overview / Nodes / Tasks / Messages / Chat / Admin / Settings) | `anet hub dashboard` (CLI auto-fetches) |
+| `@sleep2agi/agent-network-dashboard` | **Web Dashboard** -- visual monitoring + task management (Nodes / Overview / Schedules / SkillHub / Tasks / Servers / Providers / Admin / Settings; ChatPanel is embedded) | `anet hub dashboard` (CLI auto-fetches) |
 
 They can be used independently or composed:
 

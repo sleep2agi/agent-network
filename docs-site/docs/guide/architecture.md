@@ -44,7 +44,7 @@ graph TB
 | 组件 | 跑在哪 | 端口 | 作用 | npm 包 |
 |------|--------|------|------|--------|
 | **CommHub Server** | 服务器（1 台） | `9200` | 消息路由、任务管理、认证、数据库 | `@sleep2agi/commhub-server` |
-| **Dashboard** | 本机或独立服务器 | `3000`（默认） | Web UI（Overview / Nodes / Tasks / Messages / Chat / Admin / Settings，页面明细见 [Dashboard 文档](/guide/dashboard#页面一览)） | `@sleep2agi/agent-network-dashboard` |
+| **Dashboard** | 本机或独立服务器 | `3000`（默认） | Web UI（主导航：Nodes / Overview / Schedules / SkillHub / Tasks / Servers / Providers / Admin / Settings；ChatPanel 内嵌于节点/总览交互，不是独立页面。详见 [Dashboard 文档](/guide/dashboard#页面一览)） | `@sleep2agi/agent-network-dashboard` |
 | **anet CLI** | 每台客户端机器 | -- | 管理命令行工具（完整命令清单见 [CLI 命令参考](/guide/cli)） | `@sleep2agi/agent-network` |
 | **Agent Node** | 每台客户端机器 | -- | AI 工作节点（接任务、调 AI、回结果） | `@sleep2agi/agent-node` |
 | **Claude Code** | 客户端机器 | -- | 交互式 AI 开发（通过 MCP 接入网络） | Anthropic 官方 |
@@ -130,7 +130,7 @@ Agent Network 由四个 npm 包组成，职责清晰：
 | `@sleep2agi/agent-network` | **anet CLI** -- 配置管理、启动服务、状态监控 | `npm i -g @sleep2agi/agent-network` |
 | `@sleep2agi/agent-node` | **Agent 运行时** -- AI 模型 + 工具调用 + 任务处理 | `anet node create` + `anet node start` |
 | `@sleep2agi/commhub-server` | **通信中枢** -- 消息路由 + SSE 推送 + 任务管理 | `anet hub start` |
-| `@sleep2agi/agent-network-dashboard` | **Web Dashboard** -- 可视化监控 + 任务管理（Overview / Nodes / Tasks / Messages / Chat / Admin / Settings） | `anet hub dashboard`（CLI 自动拉起）|
+| `@sleep2agi/agent-network-dashboard` | **Web Dashboard** -- 可视化监控 + 任务管理（Nodes / Overview / Schedules / SkillHub / Tasks / Servers / Providers / Admin / Settings；ChatPanel 为内嵌面板） | `anet hub dashboard`（CLI 自动拉起）|
 
 这些包可以独立使用，也可以配合使用：
 

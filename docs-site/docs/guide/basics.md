@@ -39,7 +39,7 @@ ANTHROPIC_AUTH_TOKEN=你的MiniMax-API-Key \
 anet node create 文案1号 --runtime claude-agent-sdk
 ```
 
-在 Dashboard 的 ChatPanel 里选择 "文案1号"，发送 Task：
+在 Dashboard 的 **Overview** 点击在线的“文案1号”卡片，打开内嵌 ChatPanel 后发送 Task（ChatPanel 不是独立导航页）：
 
 ```text
 写一段产品介绍

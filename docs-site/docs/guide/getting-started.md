@@ -115,7 +115,7 @@ anet node start my-bot
 
 回浏览器 `http://localhost:3000`：
 
-1. 进 Chat 页面, 左侧选 `my-bot`
+1. 进 **Overview**, 点击在线的 `my-bot` 卡片，打开内嵌 ChatPanel（Dashboard 没有单独的 Chat 导航页）
 2. 输入框写一句话（"现在几点？" / "做个 hello world"）, 回车
 3. 自己消息立刻乐观回显（`You` 标签）
 4. Agent 调用 LLM 后回复, markdown 完整渲染（`↳ my-bot` 标签）

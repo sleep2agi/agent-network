@@ -115,7 +115,7 @@ Clean a half-baked node with `anet node delete <alias>` (run once without `--for
 
 Back in your browser at `http://localhost:3000`:
 
-1. Go to the Chat page, pick `my-bot` on the left
+1. Open **Overview** and click the online `my-bot` card to open its embedded ChatPanel (there is no standalone Chat navigation page)
 2. Type a message in the input ("what time is it?" / "write hello world"), hit Enter
 3. Your message appears immediately with an optimistic echo (`You` label)
 4. After the agent calls the LLM, the reply appears with full markdown rendering (`↳ my-bot` label)
