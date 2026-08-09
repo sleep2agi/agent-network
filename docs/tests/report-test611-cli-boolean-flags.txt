@@ -1,0 +1,26 @@
+# Test 611 — CLI presence-only boolean flags
+
+Date: 2026-08-09
+
+## Provenance
+
+- Source commit: `da16ad6fc272f20da0491766b5f8951f23331ef4`
+- Docker image: `anet-test611:dev`
+- Image ID: `sha256:1883357bc78b746487f61b3df4e9e875ffcebaa382ca937843b9b0759ccde8a2`
+- Embedded `TEST611_SOURCE_COMMIT`: `da16ad6fc272f20da0491766b5f8951f23331ef4`
+- Runner artifact SHA-256: `365009c79a1f12b96a604a5dec35160b2e352c3cb776941003fc3d49d0e19351`
+
+## Result
+
+`RESULT: PASS`
+
+1. `agent-network` typecheck and the complete packaged/obfuscated CLI build passed.
+2. Parser and wiring tests passed: 23 tests, 49 assertions.
+3. The formerly missing presence-only flags work before and after a positional operand: `accept-dev-channels`, `dev-open`, `dry-run`, `follow`, `no-auto-self`, `no-yolo`, `resume-latest`, `self`, and `f`.
+4. Existing value, repeatable `channel`/`env`, multi-positional, and unsupported `key=value` behavior is pinned without expansion of scope.
+5. Removing each of the nine boolean entries independently made its behavior test fail; all nine witnessed-red mutations returned `rc=1`.
+6. Disconnecting `bin/cli.ts` from the shared parser made the wiring contract fail with `rc=1`; restoring the source returned all tests to green.
+
+## Scope
+
+CLI argument parsing only. No Hub, runtime process, persisted node state, deployment, or production system was changed.
