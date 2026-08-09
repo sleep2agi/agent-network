@@ -11,6 +11,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -19,6 +20,7 @@ import {
   validateLocalPatch,
   computeApplyMode,
   atomicWriteJson,
+  atomicWritePrivateText,
   backupConfigPrev,
   repairPrivateConfigPermissions,
   loadConfigWithSelfHeal,
@@ -38,6 +40,24 @@ afterEach(() => {
 describe("RESTART_SENTINEL — exact value pin", () => {
   test("equals 75 (BSD EX_TEMPFAIL semantics, parent supervisor checks this exact code)", () => {
     expect(RESTART_SENTINEL).toBe(75);
+  });
+});
+
+describe("#633 private text writer", () => {
+  test("replaces a leaf symlink without following it", () => {
+    const managed = join(scratch, ".anet");
+    const victim = join(scratch, "victim.txt");
+    const secret = join(managed, ".env.local");
+    mkdirSync(managed, { recursive: true, mode: 0o700 });
+    writeFileSync(victim, "victim-unchanged\n", { mode: 0o600 });
+    symlinkSync(victim, secret);
+
+    atomicWritePrivateText(secret, "PRIVATE_FIXTURE=1\n");
+
+    expect(readFileSync(victim, "utf8")).toBe("victim-unchanged\n");
+    expect(lstatSync(secret).isSymbolicLink()).toBe(false);
+    expect(readFileSync(secret, "utf8")).toBe("PRIVATE_FIXTURE=1\n");
+    expect(lstatSync(secret).mode & 0o777).toBe(0o600);
   });
 });
 

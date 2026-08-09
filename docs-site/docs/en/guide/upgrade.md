@@ -84,6 +84,17 @@ start can compete for the same alias.
 At minimum, verify the CLI version, a non-blocking `doctor` result, Hub health, and
 the expected online nodes.
 
+### Configuration ownership in containers
+
+Newer `agent-node` versions reject symlinks and a different UID owner before reading
+token-bearing configuration. If Docker or Podman bind-mounts a host `config.json`,
+run the container process with the file owner's UID, or copy the configuration into
+a container-user-owned `.anet` state directory. Do not work around this check by
+loosening permissions: an owner mismatch fails closed at startup.
+
+Legacy configuration owned by the same UID remains compatible. Over-broad file modes
+are repaired to `0600`, and Agent Network-managed `.anet` directories to `0700`.
+
 ## Very old v0.7 installations {#v0-7-v0-8-upgrade-notes-latest}
 
 v0.7 used the legacy global-token model. Current releases retain read compatibility

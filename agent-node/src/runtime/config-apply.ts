@@ -198,7 +198,7 @@ export function atomicWriteJson(path: string, data: unknown): void {
   atomicWritePrivateText(path, JSON.stringify(data, null, 2) + "\n");
 }
 
-function atomicWritePrivateText(path: string, body: string): void {
+export function atomicWritePrivateText(path: string, body: string): void {
   const parent = dirname(path);
   repairPrivateDirectory(parent, isManagedAnetDirectory(parent));
   const tmp = join(parent, `.${basename(path)}.${randomBytes(12).toString("hex")}.tmp`);
