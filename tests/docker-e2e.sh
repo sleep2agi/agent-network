@@ -612,13 +612,19 @@ AUTH_QS=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:9201/api/stat
 AUTH_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9201/health 2>/dev/null)
 [ "$AUTH_HEALTH" = "200" ] && pass "health endpoint no auth needed" || fail "health should not require auth (got $AUTH_HEALTH)"
 
-# 24f. MCP with token
-AUTH_MCP=$(curl -s -X POST http://127.0.0.1:9201/mcp \
+# 24f. Legacy master token remains REST-compatible during migration, but MCP
+# rejects it fail-closed. Agents must authenticate with utok_/ntok_ instead.
+AUTH_MCP=$(curl -s -w $'\n%{http_code}' -X POST http://127.0.0.1:9201/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "Authorization: Bearer test-secret-token" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}')
-response_json_has_result "$AUTH_MCP" && pass "MCP with auth token works" || fail "MCP auth broken"
+AUTH_MCP_STATUS=${AUTH_MCP##*$'\n'}
+AUTH_MCP_BODY=${AUTH_MCP%$'\n'*}
+[ "$AUTH_MCP_STATUS" = "401" ] && \
+  response_json_error_is "$AUTH_MCP_BODY" "master-token auth is deprecated; use admin utok_" \
+  && pass "legacy master token rejected by MCP" \
+  || fail "legacy master token MCP rejection contract broken"
 
 # 24g. MCP without token → 401
 AUTH_MCP_NO=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:9201/mcp \
@@ -849,9 +855,11 @@ echo ""
 
 # 28.5 SSE + Communication reliability
 echo "28.5 Testing communication reliability..."
-# Verify SSE sessions in health endpoint
+# Verify SSE telemetry without leaking session identities.
 HEALTH2=$(curl -s http://127.0.0.1:9200/health 2>/dev/null)
-echo "$HEALTH2" | grep -q '"sse_sessions"' && pass "SSE sessions tracked" || fail "no SSE tracking"
+echo "$HEALTH2" | jq -e '(.sse_connections | type == "number") and (has("sse_sessions") | not)' >/dev/null \
+  && pass "SSE aggregate count tracked without session identities" \
+  || fail "SSE aggregate health contract broken"
 # Verify heartbeat (agent registered earlier should have updated_at)
 STATUS2=$(curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:9200/api/status 2>/dev/null)
 echo "$STATUS2" | python3 -c "
