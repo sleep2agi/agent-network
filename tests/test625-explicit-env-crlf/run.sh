@@ -69,11 +69,12 @@ grep -Eq '^ANTHROPIC_API_KEY_[A-Z0-9_]+=test625-safe$' "$SAFE_ENV"
 echo "L3 defense-in-depth: bypassing direct collection still fails at the writer preflight"
 cp "$HELPER" /tmp/test625-helper.ts
 cp "$CLI" /tmp/test625-cli.ts
+mkdir -p /tmp/test625-writer-project
 sed -i 's/if (\/\[\\r\\n\]\/\.test(entry))/if (false \&\& \/[\\r\\n]\/\.test(entry))/' "$HELPER"
 grep -Fq 'if (false && /[\r\n]/.test(entry))' "$HELPER"
 cd /workspace/agent-network
 bun run build >/tmp/test625-mutant-build.log
-cd /tmp/test625-project
+cd /tmp/test625-writer-project
 set +e
 PATH="/tmp/test625-bin:$PATH" "${ANET[@]}" node create mutation-node \
   --runtime claude-agent-sdk --env "$INJECTED_ENV" >/tmp/test625-mutant.log 2>&1
@@ -94,7 +95,7 @@ sed -i '0,/if (\/\[\\r\\n\]\/\.test(value))/{s/if (\/\[\\r\\n\]\/\.test(value))/
 grep -Fq 'if (false && /[\r\n]/.test(value))' "$HELPER"
 cd /workspace/agent-network
 bun run build >/tmp/test625-double-mutant-build.log
-cd /tmp/test625-project
+cd /tmp/test625-writer-project
 set +e
 PATH="/tmp/test625-bin:$PATH" "${ANET[@]}" node create double-mutation-node \
   --runtime claude-agent-sdk --env "$INJECTED_ENV" >/tmp/test625-double-mutant.log 2>&1
@@ -112,7 +113,7 @@ cp /tmp/test625-helper.ts "$HELPER"
 cp /tmp/test625-cli.ts "$CLI"
 cd /workspace/agent-network
 bun run build >/tmp/test625-restored-build.log
-cd /tmp/test625-project
+cd /tmp/test625-writer-project
 set +e
 PATH="/tmp/test625-bin:$PATH" "${ANET[@]}" node create restored-node \
   --runtime claude-agent-sdk --env "$INJECTED_ENV" >/tmp/test625-restored.log 2>&1
