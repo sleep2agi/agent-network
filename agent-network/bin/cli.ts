@@ -675,7 +675,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   console.log(`[anet]    runtime:   codex-app-server @ ${wsUrl}  (sandbox=${sandboxMode})`);
 }
 
-async function startOpencodeCopresenceOrchestration(nodeId: string): Promise<void> {
+async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?: string): Promise<void> {
   const resolved = resolveNodeRef(nodeId);
   if (!resolved) {
     console.error(`Node "${nodeId}" not found. Create it first: anet node create ${nodeId}`);
@@ -712,7 +712,8 @@ async function startOpencodeCopresenceOrchestration(nodeId: string): Promise<voi
       ? [`export ANET_OPENCODE_SAFE_BASE=${shellQuote(process.env.ANET_OPENCODE_SAFE_BASE)}`]
       : []),
     `export ANET_OPENCODE_MODE=copresence`,
-    `exec ${shellQuote(process.execPath)} ${shellQuote(cliEntry)} node start ${shellQuote(resolved.id)}`,
+    `exec ${shellQuote(process.execPath)} ${shellQuote(cliEntry)} node start ${shellQuote(resolved.id)}`
+      + (hubOverride ? ` --hub ${shellQuote(hubOverride)}` : ""),
   ].join(" ; ");
   execFileSync("tmux", [
     "new-session", "-d", "-s", bridgeSession, "-c", process.cwd(),
@@ -3773,14 +3774,18 @@ async function createCommand(idOverride?: string) {
     }
   }
 
-  // Interactive network selection (if user has multiple writable networks and no --network specified)
-  if (!opts.network && gc.token && gc.hub && process.stdin.isTTY) {
+  // Network selection. A headless bootstrap can safely recover a missing
+  // network_id only when the authenticated user has exactly one writable
+  // network. Multiple candidates are never guessed; interactive callers may
+  // choose, while non-interactive callers get an actionable fail-closed error
+  // below. This also repairs legacy/token-only global configs (#467).
+  if (!opts.network && gc.token && gc.hub) {
     try {
       const nets = await fetch(`${gc.hub}/api/networks`, {
         headers: { Authorization: `Bearer ${gc.token}` },
       }).then(r => r.json() as any);
       const writable = (nets.networks || []).filter((n: any) => ["owner", "admin", "member"].includes(n.member_role));
-      if (writable.length > 1) {
+      if (writable.length > 1 && process.stdin.isTTY) {
         // Multiple writable networks → interactive select
         try {
           const { select: sel } = await import("@inquirer/prompts");
@@ -3867,7 +3872,9 @@ async function createCommand(idOverride?: string) {
     process.exit(1);
   }
   if (!gc.network_id) {
-    console.error(`[anet] ❌ No network selected. Run: anet login`);
+    console.error(`[anet] ❌ Global config is missing network_id; no unique writable network could be selected.`);
+    console.error(`[anet]    Run: anet network ls`);
+    console.error(`[anet]    Then: anet network use <name>`);
     process.exit(1);
   }
   let nodeTokenRes: any;
@@ -4342,7 +4349,7 @@ function maybeWarnChannelResumeBlocker(
   }
 }
 
-async function launchAgent(id: string, forceNewSession = false) {
+async function launchAgent(id: string, forceNewSession = false, hubOverride?: string) {
   const resolved = resolveNodeRef(id);
   if (!resolved) {
     console.error(`Node "${id}" not found. Create it first: anet node create ${id}`);
@@ -4357,6 +4364,11 @@ async function launchAgent(id: string, forceNewSession = false) {
     console.error(`[anet] Refusing to start node ${JSON.stringify(nodeId)}: ${error?.message || error}`);
     process.exit(1);
   }
+  // #467 — an explicit command-line hub is a per-launch override. Keep it
+  // transient (do not rewrite the node profile), but apply it before MCP
+  // materialisation and child-env construction so every runtime observes the
+  // same endpoint. CLI flags conventionally outrank persisted config.
+  if (hubOverride) profile = { ...profile, hub: hubOverride };
   const displayName = nodeDisplayName(nodeId, profile);
   const session = profileSession(profile);
   const willResume = !!session && !forceNewSession;
@@ -4955,11 +4967,11 @@ async function startCommand() {
       `start copresence node ${JSON.stringify(id)}`,
     );
     if (copresenceRuntime === "opencode-cli") {
-      await startOpencodeCopresenceOrchestration(id);
+      await startOpencodeCopresenceOrchestration(id, opts.hub);
       return;
     }
     const codexHomeDefault = join(nodesDir(), resolvedForCopresence.id, "codex-home");
-    const profileHub = (resolvedForCopresence.profile as any).hub || getHub();
+    const profileHub = opts.hub || (resolvedForCopresence.profile as any).hub || getHub();
     const profileTok = resolvedForCopresence.profile.token || "";
     await startCopresenceOrchestration(id, {
       codexBin: opts["codex-bin"] || "codex",
@@ -5009,7 +5021,7 @@ async function startCommand() {
 
   if (!wantTmux && !wantAcceptDevChannels) {
     // Default: spawn the agent runtime in this terminal.
-    await launchAgent(id, forceNewSession);
+    await launchAgent(id, forceNewSession, opts.hub);
     return;
   }
 
@@ -5031,9 +5043,10 @@ async function startCommand() {
       console.log(`[anet] tmux session "${alias}" already running — skipping spawn (use \`anet node stop\` first if you intended a fresh start).`);
       return;
     }
+    const innerHub = opts.hub ? ` --hub ${shellQuote(opts.hub)}` : "";
     const inner = forceNewSession
-      ? `anet node start ${shellQuote(alias)} --new-session`
-      : `anet node start ${shellQuote(alias)}`;
+      ? `anet node start ${shellQuote(alias)} --new-session${innerHub}`
+      : `anet node start ${shellQuote(alias)}${innerHub}`;
     try {
       execFileSync(
         "tmux",
@@ -5093,9 +5106,10 @@ async function startCommand() {
   //   -A  attach if the session already exists (handles the rerun case)
   //   -s  session name (= alias for discoverability)
   //   -c  start in cwd
+  const innerHub = opts.hub ? ` --hub ${shellQuote(opts.hub)}` : "";
   const inner = forceNewSession
-    ? `anet node start ${shellQuote(alias)} --new-session`
-    : `anet node start ${shellQuote(alias)}`;
+    ? `anet node start ${shellQuote(alias)} --new-session${innerHub}`
+    : `anet node start ${shellQuote(alias)}${innerHub}`;
 
   const headless = !process.stdin.isTTY;
   if (headless) {
@@ -9399,7 +9413,17 @@ async function goalCommand() {
 async function registerCommand() {
   const gc = loadGlobal();
   const sc = loadServerConfig();
-  let hub = gc.hub;
+  const opts = parseOpts();
+  let hub = opts.hub || gc.hub;
+
+  // #467 — scripts commonly bootstrap against an explicit remote Hub while
+  // an old global config still exists. Persist the explicit endpoint before
+  // registration so the resulting token/network config is internally
+  // consistent and subsequent commands use the same Hub.
+  if (opts.hub && opts.hub !== gc.hub) {
+    gc.hub = opts.hub;
+    saveGlobal(gc);
+  }
 
   // Auto-detect local hub
   if (!hub) {
@@ -9410,7 +9434,6 @@ async function registerCommand() {
   }
   if (!hub) { console.error("未找到 CommHub Server。请先运行: anet hub start"); return; }
 
-  const opts = parseOpts();
   const username = opts.username || opts.user || await ask("Username");
   const password = opts.password || opts.pass || await ask("Password (min 6)");
   const email = opts.email || ((opts.username || opts.user) ? "" : await ask("Email (optional)"));

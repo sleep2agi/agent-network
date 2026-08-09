@@ -1,0 +1,43 @@
+# test467 — headless bootstrap and explicit Hub precedence
+
+Date: 2026-08-09 (Asia/Shanghai)
+Base: 66a9f91a48ad4a8ae6977e68e00537213155d44b
+Source commit under test: 7d926948590051891fe28f7df001d60a4568ff78
+Docker image: anet-test467:dev
+Docker image ID: sha256:2de07116e0564aa46d5ae5348182c9ded23864b5812d8e4a9abcddef0cd0ad57
+Embedded TEST467_SOURCE_COMMIT: 7d926948590051891fe28f7df001d60a4568ff78
+Raw runner artifact SHA256: 8958bba18795e247a7819ea4d2587b6f12d93cb095094a8addde0b1bb1bdcea6
+Result: PASS
+
+## Witnessed red on base
+
+The same Docker harness was first built from base 66a9f91a. It failed at the
+first behavior gate: a stale configured Hub won over an explicit `register
+--hub`, so the CLI attempted the dead endpoint and printed `Unable to connect`.
+Exit code was 1. This was captured before the implementation change.
+
+## Exact-source green layers
+
+1. `bun run typecheck` for agent-network: PASS.
+2. Real Hub process + fresh SQLite on an isolated loopback port: PASS.
+3. Non-TTY `anet register --hub ... --username ... --password ...` overrides a
+   stale configured Hub, registers successfully, and persists the explicit Hub,
+   a real `utok_`, and the default `network_id`: PASS.
+4. After deleting `network_id`, non-TTY `anet node create` recovers the only
+   writable network, persists it globally, and receives a network-bound `ntok_`:
+   PASS.
+5. With two writable networks and no selected `network_id`, create fails closed,
+   prints `anet network use <name>`, and writes no ambiguous node config: PASS.
+6. A real CLI `node start --hub` reaches a fake `npx`/agent-node boundary; the
+   child process observes the explicit Hub in `COMMHUB_URL` even when both global
+   and node configs contain a stale Hub: PASS.
+
+## Witnessed-red mutations
+
+- Remove register's explicit-Hub precedence: RED, rc=1.
+- Restore the old TTY-only unique-network recovery gate: RED, rc=1.
+- Remove the per-launch profile Hub override: RED, rc=1.
+
+Production source was byte-restored after every mutation. The test uses a fresh
+HOME, project directory, Hub process, and SQLite DB; it does not read or modify
+host/production config, tokens, nodes, or databases.
