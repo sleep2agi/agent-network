@@ -2,12 +2,12 @@
 
 Date: 2026-08-10 (Asia/Shanghai)
 Issue: #91
-Base commit: 6769d267017759cff6de5f2aea84c51a50184f9a
-Source commit under test: 9b1b0112b1d0a0d2292a8fc0d64ad772e6983742
+Base commit: 124fdabb33c2f4c5731d4dbe4d55387fbea211e5
+Source commit under test: 9b1b011200e7a3d4d3c63e7deb473b108ae80531
 Docker tag: anet-test654:dev (fixed/reused tag)
-Image ID: sha256:293772751bb76a548793a584e910f7cda2cf455874f9d240dd0aa1baf2212295
-Image size: 218171447 bytes
-Embedded ENV: TEST654_SOURCE_COMMIT=9b1b0112b1d0a0d2292a8fc0d64ad772e6983742
+Image ID: sha256:08c093e00d0dc71d80a2049d6db893ee7f45a0e21eaf49b1a6afbabde21e6795
+Image size: 218172374 bytes
+Embedded ENV: TEST654_SOURCE_COMMIT=9b1b011200e7a3d4d3c63e7deb473b108ae80531
 
 ## Scope
 
@@ -28,12 +28,12 @@ Embedded ENV: TEST654_SOURCE_COMMIT=9b1b0112b1d0a0d2292a8fc0d64ad772e6983742
 
 ```sh
 sg docker -c 'docker build \
-  --build-arg=TEST654_SOURCE_COMMIT=9b1b0112b1d0a0d2292a8fc0d64ad772e6983742 \
+  --build-arg=TEST654_SOURCE_COMMIT=9b1b011200e7a3d4d3c63e7deb473b108ae80531 \
   -t anet-test654:dev \
   -f tests/test654-dashboard-managed-launch/Dockerfile .'
 
 sg docker -c 'docker run --rm \
-  -v /tmp/test654-followup.kttZlX:/artifacts \
+  -v /tmp/test654-restamp.8VfVHV:/artifacts \
   anet-test654:dev'
 ```
 
@@ -57,24 +57,24 @@ Final: `RESULT pass=14 fail=0`
 - L6: all four safety mutations turned red, followed by a restored green unit run.
 
 Runner output SHA256:
-`f4e5d4083756830f217dd3dff83ce91118fc747e6c3077a3ba77e30ee2189e3e`
+`3e070df99bdb91cc002e91633c0da2d08b88177403d28c388fd100a483e5fa41`
 
 ## Witnessed-red evidence
 
 1. Removed version/source equality from the same-release gate. The version-change test failed
    because the stale 0.6.0 listener was incorrectly treated as already running.
-   Artifact SHA256: `eba392f5c7cf50116d2b5c0749fea1b748b917786db14e8ff76c7b1ebfb22e24`.
+   Artifact SHA256: `248047309c29d13860c777872b4212765e72fc6b58a07c4fe41332d2fd25574d`.
 2. Allowed an unmanaged listener to enter the termination path. The fail-closed matrix failed
    because `record: null` became `terminate_owned_stale` instead of `refuse`.
-   Artifact SHA256: `14c2057fbea414b546a1fdecaf66775ec815de7b352548c9c2ffb2c4895cfbc0`.
+   Artifact SHA256: `0e521d43027f37f7abcb9fa93160dbd301be5205bb96821502ec5d394e68e9a4`.
 3. Removed the immediate pre-SIGTERM revalidation while leaving the race fixture unchanged.
    The fixture changed the birth fingerprint between the authorization decision and signal;
    the mutated CLI killed the still-live listener, so the unchanged test failed.
-   Artifact SHA256: `4e25c425a95ce58d6d06c57ab1c77b37f243db28cf97f9ea5d1899b60df397ba`.
+   Artifact SHA256: `f667af1372837bfe57543c99d9d7322c6fdc62f068485ad45abaa4be7aba7863`.
 4. Removed the same pre-SIGTERM revalidation and ran the distinct same-PID foreign-reuse
    fixture. Its fake process changed both birth fingerprint and command identity after the
    decision; the mutated CLI killed it, so the unchanged test failed.
-   Artifact SHA256: `54f74f0b028f718bc15949454fad0e42b3f11bea8e7e9b22ea08839b47c4bede`.
+   Artifact SHA256: `9fb6009be67e5c33a3cc96b58722e7e6ab31a6892725604f99b20bd2e3d51850`.
 
 These mutations assert behavior, not source-text counts: deleting any authorization or
 pre-signal identity gate causes the unchanged test suite to fail.
