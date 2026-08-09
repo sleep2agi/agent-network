@@ -35,6 +35,7 @@ import { startRetentionSweeper } from "./retention.js";
 import { startStaleSessionSweeper } from "./stale-sweeper.js";
 import { resolveRestFromSession } from "./rest-identity.js";
 import { stampTaskAuthOrigin, type TaskAuthOrigin } from "./task-auth-origin.js";
+import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startScheduledTaskScheduler } from "./scheduled-tasks.js";
 
 const PORT = Number(process.env.PORT) || 9200;
 const HOST = process.env.HOST || "127.0.0.1";
@@ -1348,6 +1349,20 @@ return Bun.serve({
     if (restScope.denied) {
       return withCors(req, Response.json({ ok: false, error: restScope.denied }, { status: 403 }));
     }
+
+    // Hub-owned scheduled tasks. Dashboard and mobile are management
+    // clients only; each occurrence is dispatched as an ordinary task by the
+    // scheduler started in startHub(). Node tokens are rejected in the
+    // handler so an agent cannot grant itself a persistent execution loop.
+    const scheduledResponse = await handleScheduledTaskRequest({
+      req,
+      url,
+      auth: restAuth,
+      isAdmin,
+      isNodeToken: requestToken(req).startsWith("ntok_"),
+      scope: restScope,
+    });
+    if (scheduledResponse) return withCors(req, scheduledResponse);
 
     // ── #473 REST: SSE connection detail (ops-only) ──
     // The per-key breakdown /health used to expose anonymously: keys are
@@ -3062,6 +3077,11 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
       `For an additional throwaway instance use bootServer({ port: 0 }).`
     );
   }
+  // The current PostgreSQL adapter opens a fresh process/connection for each
+  // statement, so its transaction() cannot provide the occurrence claim +
+  // task creation atomicity this scheduler requires. Refuse before opening a
+  // listening socket instead of silently running an unsafe scheduler.
+  assertScheduledTaskBackendSupported();
   const server = bootServer(opts);
 
   // Round-2/4 review ② — periodic retention sweep + incremental VACUUM.
@@ -3095,6 +3115,7 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
     ? Number(process.env.COMMHUB_TASK_PATROL_MS) : 5 * 60 * 1000;
   const rateLimitSweepTimer = setInterval(sweepStaleRateLimits, rateLimitSweepMs);
   const taskPatrolTimer = setInterval(patrolExpiredTasks, taskPatrolMs);
+  const scheduledTaskTimer = startScheduledTaskScheduler();
 
   // The Bun.serve socket is what keeps the process alive; the periodic
   // jobs must not — otherwise a test (or a future caller) that stops the
@@ -3103,6 +3124,7 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   (staleSweeperTimer as any)?.unref?.();
   (rateLimitSweepTimer as any)?.unref?.();
   (taskPatrolTimer as any)?.unref?.();
+  (scheduledTaskTimer as any)?.unref?.();
 
   // ── Graceful shutdown ───────────────────────────────
   function shutdown() {
@@ -3111,6 +3133,7 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
     clearInterval(staleSweeperTimer);
     clearInterval(rateLimitSweepTimer);
     clearInterval(taskPatrolTimer);
+    clearInterval(scheduledTaskTimer);
     db.close();
     process.exit(0);
   }
