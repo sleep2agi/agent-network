@@ -123,6 +123,7 @@ import {
   type CredentialRedactor,
 } from "./credential-redaction";
 import { appendPrivateLogLine, preparePrivateLogDirectory } from "./private-log";
+import { resolveNodeIdSource } from "./runtime/node-id-source";
 
 const home = homedir();
 
@@ -1037,11 +1038,17 @@ async function callCommHub(method: string, params: Record<string, unknown>, retr
   throw lastErr || new Error(`callCommHub(${method}) failed after ${retries} retries`);
 }
 
-// #146 PR-4 — prefer the COMMHUB_NODE_ID env that PR-3 (e0aa4d8) sets on
-// every launched node, fall back to the config field for back-compat with
-// nodes started before PR-3 landed. The env wins because the launcher
-// always knows the canonical node id; a stale config file would mislead.
-const NODE_ID = process.env.COMMHUB_NODE_ID || fileConfig.node_id || "";
+// #532 — config+token is the durable identity pair. COMMHUB_NODE_ID is an
+// internal launcher propagation value, not a public identity override. The
+// standard `anet node start` paths already replace/remove inherited values;
+// direct agent-node and external supervisors can still inherit a stale value.
+// Keep the env only as a legacy fallback when the config has no node_id.
+const { value: NODE_ID } = resolveNodeIdSource({
+  configNodeId: fileConfig.node_id,
+  envNodeId: process.env.COMMHUB_NODE_ID,
+  configPath: configFilePath,
+  warn: (message) => warn(`[identity] ${message}`),
+});
 const NODE_NAME = fileConfig.node_name || "";
 const NETWORK_ID = fileConfig.network_id || process.env.ANET_NETWORK_ID || globalConfig.network_id || "";
 const RESUME_ID = NODE_ID ? `sdk-${NODE_ID}` : `sdk-${ALIAS}-${Date.now().toString(36)}`;
