@@ -1,0 +1,15 @@
+ARG TEST292_RESIDUAL_BASE_IMAGE=anet-test292-identity:dev
+FROM ${TEST292_RESIDUAL_BASE_IMAGE}
+
+COPY tests/docker-e2e-networks.sh /app/test-networks.sh
+COPY tests/docker-e2e-loop-runtime.sh /app/test-loop-runtime.sh
+COPY tests/docker-e2e-loop-npm-pack.sh /app/test-loop-npm-pack.sh
+COPY tests/docker-e2e-loop-self-mgmt.sh /app/test-loop-self-mgmt.sh
+COPY tests/test292-e2e-residual-fixtures/run.sh /app/test292-residual.sh
+RUN chmod +x /app/test-networks.sh /app/test-loop-runtime.sh \
+  /app/test-loop-npm-pack.sh /app/test-loop-self-mgmt.sh /app/test292-residual.sh
+
+ARG TEST292_RESIDUAL_SOURCE_COMMIT=unknown
+ENV TEST292_RESIDUAL_SOURCE_COMMIT=${TEST292_RESIDUAL_SOURCE_COMMIT}
+
+ENTRYPOINT ["bash", "/app/test292-residual.sh"]
