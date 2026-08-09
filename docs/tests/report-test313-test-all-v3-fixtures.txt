@@ -1,0 +1,63 @@
+Test 313 — test-all V3 fixture repair (#313)
+Date: 2026-08-09 Asia/Shanghai
+
+Base commit
+  19952094711babc5259e2b7953deba255304167b
+
+Exact tested source commit
+  b6f58b07b471b9659c966395fc62eaca7d199b6f
+
+Docker evidence
+  tag: anet-test313:dev
+  image id: sha256:2cd326ae065e278cac2f8a9af6095a011dd23de640dadc926ded801df6d2be5b
+  image ENV: TEST313_SOURCE_COMMIT=b6f58b07b471b9659c966395fc62eaca7d199b6f
+  image content size: 890686384 bytes
+
+Scope
+  Production source diff: zero.
+  Changed master-runner inputs:
+    tests/docker-e2e-networks.sh
+    tests/docker-config-priority.sh
+  Added isolated Docker harness:
+    tests/test313-test-all-v3-fixtures/
+
+Witnessed red (pre-fix source 79f0e70651a24f2e41af5b8dd69d0eb60b9bfb89)
+  networks: rc=1, 20 pass / 2 fail; both tasks targeted unregistered aliases,
+            send_task errors were discarded, alpha/beta task assertions failed.
+            log sha256 ee8234b859f67c77a851570039ab7235e5e1b713caae40e33288bc0cf1b9ee03
+  config:   rc=1 before Results; first node create aborted with "Not logged in".
+            log sha256 3702f272337eb0936595956015f82bc13d65544266bb0ae29089faa00b4e332e
+
+Witnessed green (exact source)
+  networks container exit: 0
+    Results: 26 passed, 0 failed
+    - agent-a and agent-b minted network-scoped ntok credentials
+    - report_status registered both aliases before send_task
+    - both legitimate send_task responses asserted ok=true
+    - user A -> beta used a real beta alias and returned:
+      ok=false, error=access_denied, message names requested network
+    - task lists contained only their own network's task
+    log sha256 2905f3120816dfc5e088ca24ccf0c25f01b1b35b071cb6ad02caf6cf598eed3d
+
+  config container exit: 0
+    Results: 16 passed, 0 failed
+    - real register + `anet login` established utok and selected network
+    - real `anet node create` minted project ntok before precedence assertions
+    - global/project/env/CLI precedence assertions all executed
+    - second create proved node config stores scoped ntok, not global utok
+    - each 3-second probe has a 1-second SIGKILL upper bound
+    log sha256 0c9289d1476843ad5c6cf7de17cd518ecffb9d28a6130866f9c6f10f7d766233
+
+Witnessed-red mutations (exact source image, test code unchanged)
+  drop-node-registration:
+    production script rc=1; legitimate sends rejected and both tasks absent;
+    harness rc=0 because expected red was observed.
+    log sha256 cde59c0cefb1748d286dcbad1a96c39b34c6b3535fc2425123f04489c7bb10f8
+  drop-login-bootstrap:
+    production script rc=1 before Results; global config absent at setup gate;
+    harness rc=0 because expected red was observed.
+    log sha256 43275710df4e2b5fe1a839d089d55ab61af45d23d52f44bcfeb429728fc5219b
+
+Verdict
+  PASS. The two aggregate scripts now test authenticated V3 behavior instead
+  of failing during setup or deriving isolation from missing aliases.
