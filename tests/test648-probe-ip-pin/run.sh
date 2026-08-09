@@ -78,6 +78,23 @@ grep -Fq 'PIN_FAIL' /tmp/test648-mutation.log
 grep -q 'request .*status=418 .*sni=api.anthropic.com' /tmp/test648-rebound.log
 echo "MUTATION_RED: connector-pin-removed rc=$mutation_rc rebound-hit=1"
 
+echo "L4b witnessed-red: remove Bun node:https lookup"
+cp agent-node/src/runtime/probe-daemon.ts /tmp/test648-probe-daemon.ts
+sed -i '/^      lookup,$/d' agent-node/src/runtime/probe-daemon.ts
+if grep -Fq '      lookup,' agent-node/src/runtime/probe-daemon.ts; then
+  echo "MUTATION_NOT_APPLIED"
+  exit 1
+fi
+set +e
+NODE_EXTRA_CA_CERTS=/tmp/test648-cert.pem bun tests/test648-probe-ip-pin/runtime-probe.ts >/tmp/test648-bun-mutation.log 2>&1
+bun_mutation_rc=$?
+set -e
+cp /tmp/test648-probe-daemon.ts agent-node/src/runtime/probe-daemon.ts
+test "$bun_mutation_rc" -ne 0
+grep -Fq 'PIN_FAIL' /tmp/test648-bun-mutation.log
+test "$(grep -c 'request .*status=418 .*sni=api.anthropic.com' /tmp/test648-rebound.log)" -ge 2
+echo "MUTATION_RED: bun-https-pin-removed rc=$bun_mutation_rc rebound-hit=1"
+
 echo "L5 restored Node+Bun green"
 bun build tests/test648-probe-ip-pin/runtime-probe.ts --target node --outfile /tmp/test648-restored.js
 NODE_EXTRA_CA_CERTS=/tmp/test648-cert.pem node /tmp/test648-restored.js

@@ -70,12 +70,12 @@ function buildProbeForVendor(vendor: string, baseUrl: string, model: string, api
 
 // ── safelyFetchProbe ───────────────────────────────────────────────
 // DNS-resolve hostname → assert every A/AAAA record is NOT in the
-// forbidden IP set → fetch via undici with manual redirect (3xx →
-// probe_redirect_forbidden). TLS validation is mandatory (dispatcher
-// rejectUnauthorized:true + minVersion TLSv1.2). The connector lookup is
-// pinned to the already-validated address set, closing the DNS-rebinding
-// window between validation and connect while keeping the vendor hostname in
-// the URL for SNI and certificate verification.
+// forbidden IP set → issue a no-redirect TLS request (Node: undici Agent;
+// Bun compatibility fallback: node:https). TLS validation is mandatory
+// (rejectUnauthorized:true + minVersion TLSv1.2). Both transports receive the
+// same connector lookup pinned to the already-validated address set, closing
+// the DNS-rebinding window while keeping the vendor hostname in the URL for
+// SNI and certificate verification.
 
 export interface SafeFetchResult {
   resp?: Response;

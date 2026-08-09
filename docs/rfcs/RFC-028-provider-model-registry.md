@@ -531,13 +531,16 @@ async function safelyFetchProbe(baseUrl: string, env: NodeJS.ProcessEnv): Promis
 
 **P1.5 implementation note (#310, 2026-08-09):** production no longer
 selects one illustrative `pinIp`. `createPinnedLookup(host, addrs)` retains the
-whole pre-validated A/AAAA set, honors undici/Node's single-address,
+whole pre-validated A/AAAA set, honors the connector's single-address,
 `family`, and `{all:true}` callback forms, and rejects a different hostname or
 an unavailable family with `ENOTFOUND`. It never falls back to system DNS.
+Node 20 uses an undici Agent. Bun 1.3 is intentionally routed through
+`node:https` because its undici compatibility layer accepts but ignores the
+Agent lookup hook; both transports receive the same pinned lookup callback.
 The URL remains the vendor hostname, so SNI and certificate SAN validation are
 unchanged. `test648-probe-ip-pin` runs a split-horizon real TLS test under both
-Node 20 and Bun: pre-validation returns `127.0.0.1`, system DNS returns
-`127.0.0.2`, and only the validated endpoint may receive the request.
+runtimes: pre-validation returns `127.0.0.1`, system DNS returns `127.0.0.2`,
+and only the validated endpoint may receive the request.
 
 **关键不变量**:
 - DNS 解析 → 校验 IP → 用 IP 直连 fetch 三步原子, **rebinding window 为 0** (解析后立即固定 IP)
