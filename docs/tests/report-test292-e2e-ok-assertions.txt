@@ -1,0 +1,70 @@
+# Test 292 — Docker E2E structured `ok` assertions
+
+Date: 2026-08-10
+Issue scope: #292, Layer 3 only (test-harness honesty; no production behavior change)
+Base commit: 737fc44bac67f259f3ddc3d31b53ff05ac0b8d3d
+Source commit: 976378c324ddf6fbfd9ac4e7d80013912c9fc2fb
+
+## Change
+
+- Added `tests/lib/response-json.sh` with a fail-closed JSON/SSE/JSON-RPC response parser.
+- Replaced the 16 `grep -q 'ok'` success checks in `tests/docker-e2e.sh`.
+- Success now requires an exact JSON boolean `ok: true`; `ok:false`, JSON-RPC errors,
+  MCP `isError:true`, malformed responses, and empty responses fail.
+- The helper is exported only as a test seam. Production code and wire behavior are unchanged.
+
+## Witnessed red
+
+The pre-change fixture demonstrated that the legacy assertion accepts a failed MCP response:
+
+    data: {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\"ok\":false,\"error\":\"permission_denied\"}"}]}}
+
+`grep -q 'ok'` returned success. The base tree contained 16 such weak assertions and no
+structured parser, so the test292 container exited non-zero.
+
+## Exact-source Docker gate
+
+Image: `anet-test292:dev`
+Image manifest ID: `sha256:e2da3f3b3d9aaaaeea5e7c3f83270257c79247f3f31edf841836deaa7cfea0ec`
+Embedded source: `TEST292_SOURCE_COMMIT=976378c324ddf6fbfd9ac4e7d80013912c9fc2fb`
+
+Result: 11 passed, 0 failed.
+
+Covered direct REST JSON, SSE-wrapped MCP JSON, plain JSON-RPC MCP JSON, explicit false,
+JSON-RPC error, malformed/empty input, source call-site count, and mutation behavior.
+
+Mutation: changing the exact `value is True` predicate to `value is not None` makes the
+`ok:false` fixture fail the suite (rc=1). This proves the exact-true gate is load-bearing.
+
+## Exact-source full aggregate run
+
+Image: `anet-e2e292:dev`
+Image manifest ID: `sha256:03c6ebe701dd5c88e142700470f94c331db445e14c6753e9d2a2aaee5c23e8d1`
+Image label: `org.opencontainers.image.revision=976378c324ddf6fbfd9ac4e7d80013912c9fc2fb`
+Command: `/app/test-all.sh`
+Captured log SHA256: `f9f86410c1b04e479bc1b76283beac384a73daaf7835adebf989e986e7ee3391`
+
+Result (intentionally not green):
+
+- Base E2E: 82 passed, 53 failed
+- V3 Auth: 25 passed, 0 failed
+- V3 Networks: 25 passed, 1 failed
+- Config Priority: 16 passed, 0 failed
+- Loop runtime: 0 ran; suite exited before a Results line
+- Loop npm-pack: 10 passed, 2 failed
+- Loop self-management: 2 passed, 3 failed
+- Aggregate: 160 passed, 60 failed
+
+The current report-only baseline was Base E2E 88 passed / 47 failed. The structured gate
+therefore exposes exactly six prior false-green responses as failures (82/53). This PR does
+not repair or reclassify those underlying E2E failures; that remains subsequent #292 work.
+
+Running `/app/test.sh` directly is not a valid aggregate invocation in this image: it starts
+its own persistent Hub child and reaches a bare `wait`. The repository CI entry point
+`/app/test-all.sh` supplies the expected outer orchestration and is the full-run evidence above.
+
+## Cleanup
+
+The 3.48 GB full-run image was removed by its exact tag after evidence capture because the
+host reached 100% disk usage. No prune or pattern deletion was used. The small exact-source
+`anet-test292:dev` review image remains available.
