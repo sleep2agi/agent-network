@@ -1,0 +1,66 @@
+# test631 — private token configuration permissions
+
+Date: 2026-08-09
+Issue: #472
+Base: f1ea43d511c3b134d6cc0f95e1734aecc0cf0a1c
+Source commit: ccb7b1f32b95e547a0af0dc161723a464b011167
+Docker tag: anet-test631:dev
+Docker image: sha256:80d50ccfa6b1ac950bde77cecfc1ff8d8e1d4bd29dc23d882064cd96530cc694
+Embedded source: TEST631_SOURCE_COMMIT=ccb7b1f32b95e547a0af0dc161723a464b011167
+Runner artifact SHA256: 395fc0d5d358499b6b3ba0c3610c45c0bb076dc73a612d5a9e8b884f83e63406
+
+## Result
+
+- Both production entrypoints bundle with all local modules resolved:
+  `agent-network/bin/cli.ts` (26 modules) and `agent-node/src/cli.ts`
+  (79 modules).
+- Permission behavior: 90 pass / 0 fail / 157 assertions.
+- New files are 0600 and their immediate private directory is 0700 under
+  umask 000, 002, 022, and 077.
+- Replacing an existing 0664 config publishes a new 0600 inode atomically;
+  there is no public target between create and chmod.
+- Existing config, `.prev`, and token `.env` state is repaired with no-follow
+  file descriptors before the secret is read.
+- A leaf symlink is never followed: atomic replacement leaves its target
+  unchanged, while read-time repair rejects it fail-closed.
+- Byte-for-byte `.prev` backup and self-heal behavior remains intact. The
+  first exact-source run caught a re-serialization regression; the writer was
+  changed to preserve raw bytes rather than weakening the existing test.
+
+## Covered production writers
+
+- global user, server, and admin-utok configuration;
+- canonical node profile create/update, daemon init, import, demos, doctor,
+  migration, copresence thread persistence, rename session resync;
+- secret migration backup (`config.json.bak-*`);
+- agent-node session/Grok/Codex thread writeback, RFC-024 apply, `.prev`
+  backup and self-heal;
+- project/node CommHub token `.env`, vendor secret `.env`, Telegram bot token
+  and Feishu app-secret sidecars.
+
+The existing one-shot Codex copresence token writer remains independent: it
+already uses `O_EXCL` (`flag:"wx"`) with mode 0600 and immediate cleanup. The
+non-secret legacy `COMMHUB_ALIAS` sidecar is not classified as credential
+state. Static inventory fails if a direct token-bearing config writer returns.
+
+## Witnessed red
+
+1. Changing both private writers from 0600 to 0666 makes the umask=000
+   assertions fail (`MUTATION_RED: private-mode rc=1`).
+2. Removing the explicit-config startup repair call makes the exact
+   production-path inventory fail (`MUTATION_RED: startup-repair rc=1`).
+
+The inventory originally used a shell `! grep` form that did not act as a
+reliable `set -e` gate and also matched the legitimate Codex `wx` writer. That
+false-green was replaced with explicit fail-closed branching plus an exact
+one-writer positive assertion before recording this report.
+
+## Scope and residual platform boundary
+
+Only the immediate secret-state directories are set to 0700; project/workspace
+ancestors are not changed. The Docker evidence proves POSIX mode behavior on
+Linux. Windows ACL semantics are not represented by Unix mode bits and remain
+outside this claim.
+
+No production service, credential, database, global package, deployment, or
+existing user file was touched.
