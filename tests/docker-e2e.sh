@@ -99,8 +99,8 @@ echo ""
 
 # 2.1 anet upgrade should not self-remove
 echo "2.1 Testing anet upgrade safety..."
-UPGRADE_OUTPUT=$(anet upgrade 2>&1 || true)
-echo "$UPGRADE_OUTPUT" | grep -q "Automatic self-upgrade is disabled" && pass "upgrade skips in-process self-update" || fail "upgrade self-update guard missing"
+UPGRADE_OUTPUT=$(anet upgrade --no-auto-self --dry-run 2>&1 || true)
+echo "$UPGRADE_OUTPUT" | grep -q -- "--dry-run: no install actions performed" && pass "upgrade dry-run performs no install actions" || fail "upgrade dry-run guard missing"
 anet -v 2>&1 | grep -q "anet v" && pass "anet still available after upgrade" || fail "anet missing after upgrade"
 echo ""
 
@@ -313,7 +313,7 @@ echo ""
 # 20. send_reply to non-existent task (graceful)
 echo "20. Testing reply to non-existent task..."
 GHOST_REPLY=$(mcp_call "send_reply" '{"alias":"e2e-agent","text":"ghost reply","in_reply_to":"non-existent-id","from_session":"tester"}')
-echo "$GHOST_REPLY" | jq -e '.ok == false and .error == "reply_task_not_found"' >/dev/null \
+response_json_error_is "$GHOST_REPLY" "reply_task_not_found" \
   && pass "reply to non-existent task returns structured error" || fail "ghost reply contract broken"
 echo ""
 
@@ -327,7 +327,9 @@ echo ""
 echo "22. Testing health endpoint..."
 HEALTH=$(curl -s http://127.0.0.1:9200/health 2>/dev/null)
 echo "$HEALTH" | grep -q '"ok":true' && pass "health ok" || fail "health broken"
-echo "$HEALTH" | grep -q '"sse_sessions"' && pass "health has sse_sessions" || fail "health missing sse_sessions"
+echo "$HEALTH" | jq -e '(.sse_connections | type == "number") and (has("sse_sessions") | not)' >/dev/null \
+  && pass "anonymous health has aggregate SSE count without session identities" \
+  || fail "anonymous health SSE redaction contract broken"
 echo ""
 
 # 22.05 stats API
@@ -601,13 +603,19 @@ AUTH_QS=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:9201/api/stat
 AUTH_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9201/health 2>/dev/null)
 [ "$AUTH_HEALTH" = "200" ] && pass "health endpoint no auth needed" || fail "health should not require auth (got $AUTH_HEALTH)"
 
-# 24f. MCP with token
-AUTH_MCP=$(curl -s -X POST http://127.0.0.1:9201/mcp \
+# 24f. Legacy master token remains REST-compatible during migration, but MCP
+# rejects it fail-closed. Agents must authenticate with utok_/ntok_ instead.
+AUTH_MCP=$(curl -s -w $'\n%{http_code}' -X POST http://127.0.0.1:9201/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "Authorization: Bearer test-secret-token" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}')
-echo "$AUTH_MCP" | grep -q 'serverInfo\|capabilities' && pass "MCP with auth token works" || fail "MCP auth broken"
+AUTH_MCP_STATUS=${AUTH_MCP##*$'\n'}
+AUTH_MCP_BODY=${AUTH_MCP%$'\n'*}
+[ "$AUTH_MCP_STATUS" = "401" ] && \
+  response_json_error_is "$AUTH_MCP_BODY" "master-token auth is deprecated; use admin utok_" \
+  && pass "legacy master token rejected by MCP" \
+  || fail "legacy master token MCP rejection contract broken"
 
 # 24g. MCP without token → 401
 AUTH_MCP_NO=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:9201/mcp \
@@ -624,9 +632,9 @@ AUTH_SSE_NO=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9201/event
 AUTH_SSE_OK=$(timeout 2 curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer test-secret-token" http://127.0.0.1:9201/events/test-agent 2>/dev/null || echo "200")
 [ "$AUTH_SSE_OK" = "200" ] && pass "SSE with token → 200" || pass "SSE with token (timeout ok: $AUTH_SSE_OK)"
 
-# 24j. WebSocket tmux without token → 401
+# 24j. Removed WebSocket tmux route stays unavailable (404, not a live unauthenticated surface)
 AUTH_WS_NO=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9201/ws/tmux/test-session 2>/dev/null)
-[ "$AUTH_WS_NO" = "401" ] && pass "WebSocket tmux without token → 401" || fail "WebSocket tmux should require auth (got $AUTH_WS_NO)"
+[ "$AUTH_WS_NO" = "404" ] && pass "removed WebSocket tmux route → 404" || fail "removed WebSocket tmux route should be 404 (got $AUTH_WS_NO)"
 
 kill $AUTH_PID 2>/dev/null || true
 echo ""
@@ -836,9 +844,11 @@ echo ""
 
 # 28.5 SSE + Communication reliability
 echo "28.5 Testing communication reliability..."
-# Verify SSE sessions in health endpoint
+# Verify SSE telemetry without leaking session identities.
 HEALTH2=$(curl -s http://127.0.0.1:9200/health 2>/dev/null)
-echo "$HEALTH2" | grep -q '"sse_sessions"' && pass "SSE sessions tracked" || fail "no SSE tracking"
+echo "$HEALTH2" | jq -e '(.sse_connections | type == "number") and (has("sse_sessions") | not)' >/dev/null \
+  && pass "SSE aggregate count tracked without session identities" \
+  || fail "SSE aggregate health contract broken"
 # Verify heartbeat (agent registered earlier should have updated_at)
 STATUS2=$(curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:9200/api/status 2>/dev/null)
 echo "$STATUS2" | python3 -c "

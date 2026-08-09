@@ -1,0 +1,79 @@
+# test292 transport-contract drift — standalone main candidate
+
+Date: 2026-08-10
+Base: `4ebffd3832427608e83b79f900839fdae3dba3c2`
+Source under test: `d30f180cd316c6dccb9587b0654841a433c9b73e`
+Scope: test assertions, strict response parsers, and Docker harness only. No
+production source or deployed runtime changed.
+
+## Witnessed red
+
+The earlier exact red run at
+`21d1520c60a453193a43a459c2469e628fcca5a4` used the same real-Hub contract
+probe and finished 2 passed / 10 failed. It proved that the aggregate still
+expected obsolete transport behavior while the real Hub already enforced:
+
+- anonymous health exposes numeric `sse_connections` but no `sse_sessions`;
+- `/ws/tmux/:session` is removed and returns 404;
+- MCP results/errors are SSE-framed JSON-RPC with tool payloads inside
+  `result.content[].text`;
+- the legacy master token remains REST-compatible but MCP rejects it with
+  HTTP 401 and the exact deprecation error.
+
+The standalone branch reproduces the same red-to-green commit sequence on the
+new main base rather than stacking another PR on the already-merged #665/#666
+branches.
+
+## Exact-source Docker evidence
+
+Canonical clean build:
+
+    sg docker -c 'docker build --build-arg TEST292_CONTRACT_SOURCE_COMMIT=d30f180cd316c6dccb9587b0654841a433c9b73e -t anet-test292-contract:dev -f tests/test292-e2e-contract-drift/Dockerfile .'
+
+Because the host had only about 3.4 GB free, this run used the committed
+low-disk derivative Dockerfile. Its base was the already exact, real-Hub
+`anet-test292-identity:dev` image; it replaced only this candidate's test
+scripts and embedded the source SHA. The canonical Dockerfile remains the
+fresh-checkout path for independent review.
+
+Image ID:
+`sha256:e9962767e6a50748a4be3361c4c716303bb6d28f92ad1b5e4bd6d6605c6b304a`
+
+Embedded environment:
+
+    TEST292_CONTRACT_SOURCE_COMMIT=d30f180cd316c6dccb9587b0654841a433c9b73e
+
+Result: **12 passed / 0 failed**.
+
+## Verified behavior
+
+- upgrade probing is explicitly `--no-auto-self --dry-run`;
+- both anonymous health assertions require aggregate counts and reject session
+  identity disclosure;
+- the removed tmux WebSocket route is pinned to 404;
+- legacy master-token MCP use is pinned to HTTP 401 plus the exact error;
+- MCP initialize requires a structured JSON-RPC result;
+- ghost reply requires the exact `reply_task_not_found` tool error through all
+  SSE/JSON/content wrappers;
+- absent results and wrong error codes remain rejected.
+
+## Load-bearing mutations
+
+- broadening the result predicate to accept a response without `result` turns
+  the focused suite red;
+- broadening the error predicate to accept any error code turns it red;
+- both mutations first assert their source anchor changed, so a no-op patch
+  cannot be reported as witnessed red.
+
+## Provenance
+
+Relative to base, the candidate changes exactly five functional test files:
+
+- `tests/docker-e2e.sh`
+- `tests/lib/response-json.sh`
+- `tests/test292-e2e-contract-drift/Dockerfile`
+- `tests/test292-e2e-contract-drift/Dockerfile.derivative`
+- `tests/test292-e2e-contract-drift/run.sh`
+
+This report is a report-only child of the tested source and does not relabel a
+different tree as the source under test.

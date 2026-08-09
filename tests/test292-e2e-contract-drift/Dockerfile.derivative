@@ -1,0 +1,13 @@
+ARG TEST292_CONTRACT_BASE_IMAGE=anet-test292-identity:dev
+FROM ${TEST292_CONTRACT_BASE_IMAGE}
+
+RUN mkdir -p /repo/tests/lib && ln -s /app/server /repo/server
+COPY tests/docker-e2e.sh /repo/tests/docker-e2e.sh
+COPY tests/lib/response-json.sh /repo/tests/lib/response-json.sh
+COPY tests/test292-e2e-contract-drift/run.sh /repo/run.sh
+RUN chmod +x /repo/run.sh
+
+ARG TEST292_CONTRACT_SOURCE_COMMIT=unknown
+ENV TEST292_CONTRACT_SOURCE_COMMIT=${TEST292_CONTRACT_SOURCE_COMMIT}
+
+ENTRYPOINT ["/repo/run.sh"]
