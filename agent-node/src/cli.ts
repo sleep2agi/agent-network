@@ -62,6 +62,10 @@ import {
   resolveAgentNodeDir,
 } from "./runtime/codex-dep-loader";
 import {
+  CLAUDE_LINUX_X64_PACKAGE,
+  installPinnedClaudeNativeBinary,
+} from "./runtime/claude-native-binary";
+import {
   buildResumeHint,
   fetchUnresolvedOutbound,
 } from "./runtime/grok-build-acp/resume-hint";
@@ -1838,11 +1842,15 @@ async function processWithClaude(task: string, from: string, images?: string[]):
   }
   if (!hasBinary && process.platform === "linux") {
     try {
-      const { execSync } = await import("child_process");
-      log(`[claude] no Claude binary found — installing @anthropic-ai/claude-agent-sdk-linux-x64 (glibc) ...`);
-      execSync("npm install --no-save --prefix " + JSON.stringify(__dirname + "/../") + " @anthropic-ai/claude-agent-sdk-linux-x64", {
-        stdio: "pipe", timeout: 60_000,
+      const { execFileSync } = await import("child_process");
+      const install = installPinnedClaudeNativeBinary({
+        prefix: __dirname + "/../",
+        resolvePackage: (specifier) => require.resolve(specifier),
+        runNpm: (args) => execFileSync("npm", args, {
+          stdio: "pipe", timeout: 60_000,
+        }),
       });
+      log(`[claude] no Claude binary found — installed ${CLAUDE_LINUX_X64_PACKAGE}@${install.sdkVersion} (glibc) ...`);
       try {
         const glibcPath2 = require.resolve("@anthropic-ai/claude-agent-sdk-linux-x64/claude");
         if (existsSync(glibcPath2)) {
