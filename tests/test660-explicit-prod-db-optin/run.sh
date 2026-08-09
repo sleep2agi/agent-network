@@ -87,7 +87,18 @@ sed -i 's/process.env.COMMHUB_SERVER = "1";/\/\/ mutation: server capability rem
 expect_red remove-index-optin bash -c '
   mutation_home=$(mktemp -d /tmp/test660-index-mutation.XXXXXX)
   env -u COMMHUB_DB -u DATABASE_URL -u COMMHUB_SERVER HOME="$mutation_home" PORT=25662 HOST=127.0.0.1 COMMHUB_DEV_OPEN=1 \
-    timeout 3 bun run server/src/index.ts > /tmp/test660-index-mutation.log 2>&1
+    bun run server/src/index.ts > /tmp/test660-index-mutation.log 2>&1 &
+  mutation_pid=$!
+  for _ in $(seq 1 60); do
+    kill -0 "$mutation_pid" 2>/dev/null || exit 1
+    if PORT_TO_CHECK=25662 bun -e '\''const r=await fetch(`http://127.0.0.1:${process.env.PORT_TO_CHECK}/health`).catch(()=>null); process.exit(r?.ok?0:1)'\'' >/dev/null 2>&1; then
+      kill "$mutation_pid"; wait "$mutation_pid" 2>/dev/null || true; exit 0
+    fi
+    sleep 0.05
+  done
+  kill "$mutation_pid" 2>/dev/null || true
+  wait "$mutation_pid" 2>/dev/null || true
+  exit 1
 '
 cp /tmp/test660-index.orig server/src/index.ts
 
@@ -96,7 +107,18 @@ sed -i 's/process.env.COMMHUB_SERVER = "1";/\/\/ mutation: server capability rem
 expect_red remove-bin-optin bash -c '
   mutation_home=$(mktemp -d /tmp/test660-bin-mutation.XXXXXX)
   env -u COMMHUB_DB -u DATABASE_URL -u COMMHUB_SERVER HOME="$mutation_home" \
-    timeout 3 bun server/bin/commhub.ts --port 25663 --host 127.0.0.1 --dev-open > /tmp/test660-bin-mutation.log 2>&1
+    bun server/bin/commhub.ts --port 25663 --host 127.0.0.1 --dev-open > /tmp/test660-bin-mutation.log 2>&1 &
+  mutation_pid=$!
+  for _ in $(seq 1 60); do
+    kill -0 "$mutation_pid" 2>/dev/null || exit 1
+    if PORT_TO_CHECK=25663 bun -e '\''const r=await fetch(`http://127.0.0.1:${process.env.PORT_TO_CHECK}/health`).catch(()=>null); process.exit(r?.ok?0:1)'\'' >/dev/null 2>&1; then
+      kill "$mutation_pid"; wait "$mutation_pid" 2>/dev/null || true; exit 0
+    fi
+    sleep 0.05
+  done
+  kill "$mutation_pid" 2>/dev/null || true
+  wait "$mutation_pid" 2>/dev/null || true
+  exit 1
 '
 cp /tmp/test660-bin.orig server/bin/commhub.ts
 
