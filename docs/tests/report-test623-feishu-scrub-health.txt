@@ -1,0 +1,38 @@
+# test623 — Feishu token scrub + prior-ready health gate
+
+Date: 2026-08-09
+Issue: #618
+Source commit: 108d893e1336d835395d750dc5992efe0a883a22
+Docker tag: anet-test623:dev
+Docker image: sha256:31130e15d50674004d50e09b24ccf3cfa3bb155c1b7bed3363431d00afcf94b5
+Embedded source: TEST623_SOURCE_COMMIT=108d893e1336d835395d750dc5992efe0a883a22
+Runner artifact SHA256: 30ac937a8499d85ed31b7f4713eb531c853b06b0a097b59e6b6fbbbafe907c46
+
+## Result
+
+- TypeScript `tsc --noEmit`: PASS.
+- Feishu lifecycle tests: 10 pass / 0 fail / 27 assertions.
+- Production CLI, node-server, and Feishu worker bundle: PASS.
+- Sanitized inbound audit evidence contained only
+  `inbound [redacted] Bearer [redacted]`.
+- Remove arbitrary `t-`/`u-` token scrub: witnessed RED (`rc=1`).
+- Bypass scrub in the inbound dispatcher catch: witnessed RED (`rc=1`).
+- Remove the prior-ready reconnect gate: witnessed RED (`rc=1`).
+- Restored lifecycle suite: 10 pass / 0 fail / 27 assertions.
+
+```text
+L3 witnessed-red: arbitrary access-token scrub is load-bearing
+MUTATION_RED: access-token-scrub rc=1
+L4 witnessed-red: inbound errors must not bypass scrub
+MUTATION_RED: inbound-error-scrub rc=1
+L5 witnessed-red: reconnect cannot become ready before onReady
+MUTATION_RED: reconnect-prior-ready rc=1
+L6 restored green
+10 pass
+0 fail
+27 expect() calls
+RESULT: PASS
+```
+
+All credentials in the fixture are synthetic test strings. No production
+channel, Hub, token, package installation, or deployment was touched.
