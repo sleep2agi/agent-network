@@ -2,6 +2,7 @@ FROM oven/bun:1.3.14
 WORKDIR /workspace
 
 COPY agent-network/src ./agent-network/src
+COPY agent-network/bin ./agent-network/bin
 COPY agent-node/src ./agent-node/src
 COPY tests/test646-config-node-id-precedence/run.sh /run.sh
 
