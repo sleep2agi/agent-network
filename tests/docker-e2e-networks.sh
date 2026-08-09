@@ -189,6 +189,10 @@ NETS_D=$(curl -s -H "Authorization: Bearer $TOKEN_C" http://127.0.0.1:9200/api/n
 echo "$NETS_D" | grep -q 'to-delete' && fail "deleted network still in list" || pass "deleted network gone"
 echo ""
 
+# Deliberate CI-only mutation: the hard-gate candidate must turn the workflow
+# red on a real non-zero suite result. This branch is never mergeable.
+fail "WITNESSED_RED deliberate hard-gate probe"
+
 echo ""
 echo "========================================="
 echo "  Results: $PASS passed, $FAIL failed"
