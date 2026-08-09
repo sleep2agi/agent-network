@@ -1,0 +1,66 @@
+# #292 residual E2E fixture report
+
+Date: 2026-08-10
+Base: `7dc9f8ae` (#668 merged main)
+Source commit: `7adaa1d7d3c05e88be392ca8b9e07dee85a67e26`
+Scope: test harness only; no production/server/runtime behavior changed.
+
+## Witnessed red before this source
+
+Raw full-regression output from GitHub run `31338780878` after #668:
+
+- Base E2E: 136 pass / 0 fail
+- V3 Networks: 25 pass / 1 fail (`A sees B's network!`)
+- Loop runtime: crashed before its Results trailer (`alias_not_found`)
+- Loop npm-pack: 10 pass / 2 fail (`alias_not_found`)
+- Loop self-mgmt: 2 pass / 3 fail (`alias_identity_mismatch`)
+- Reported total: 214 pass / 7 fail
+
+The network test had used the first registered global admin as an ordinary
+tenant. The loop tests had reused the registration node token for different
+node aliases. Current Hub identity checks correctly reject those fixtures.
+No production authorization or identity gate was loosened.
+
+## Exact-source Docker evidence
+
+Low-disk derivative build (production artifacts inherited from the already
+reviewed #668 exact image; this source changes only four copied test scripts
+plus its test runner):
+
+```text
+tag=anet-test292-residual:dev
+image=sha256:4c73933d56451f7db7ee3c3abcdfdaed8375eb27a38335347e0b36fee69cfdc5
+TEST292_RESIDUAL_SOURCE_COMMIT=7adaa1d7d3c05e88be392ca8b9e07dee85a67e26
+base-image=anet-test292-identity:dev
+base-image-id=sha256:2e8938630aef1b4cf31911d10d324fe82d20c2f9d350c08b29ee8c16ebafe8c8
+```
+
+Command:
+
+```sh
+sg docker -c 'docker run --rm anet-test292-residual:dev'
+```
+
+Result:
+
+```text
+PASS: networks: Results: 26 passed, 0 failed
+PASS: npm-pack: Results: 12 passed, 0 failed
+PASS: self-mgmt: Results: 47 passed, 0 failed
+PASS: runtime: Results: 21 passed, 0 failed
+PASS: mutation: restoring admin A turns tenant isolation red
+PASS: mutation: runtime exact-alias identity is load-bearing
+PASS: mutation: npm-pack exact-alias identity is load-bearing
+PASS: mutation: self-mgmt exact-alias identity is load-bearing
+RESULT: PASS=8 FAIL=0
+```
+
+The real 60-second multi-cycle scheduler windows were retained; they were not
+shortened for the focused run.
+
+## Remaining #292 gate
+
+The GitHub workflow still captures `tee`'s exit code for
+`docker run ... | tee` and remains report-only. After this fixture candidate
+merges, a separate narrow follow-up must capture `${PIPESTATUS[0]}` and prove
+the exact full-regression image exits zero before #292 can close.
