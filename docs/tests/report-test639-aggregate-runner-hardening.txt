@@ -1,0 +1,67 @@
+Test 639 — aggregate runner hardening (#639)
+Date: 2026-08-09 Asia/Shanghai
+
+Base commit
+  8894dde5 (merged #638)
+
+Exact tested source commit
+  98992e331259b8617361ebb373731c2c1a5f7976
+
+Docker evidence
+  tag: anet-test639:dev
+  image id: sha256:bee1a623eca9f7240e6eb3edfb79c01b081574cbfa1078cc6221d5f1cfe9189f
+  image ENV: TEST639_SOURCE_COMMIT=98992e331259b8617361ebb373731c2c1a5f7976
+  image content size: 95271612 bytes
+  container exit: 0
+  runner log sha256: 297ace43c44ab7283fe38dd1f2c1f65309fe5fc585d794d647901c1304d3a888
+
+Scope
+  Production Hub/API/DB/agent code diff: zero.
+  Changed only:
+    server/scripts/test-aggregate.ts
+    tests/test638-server-aggregate-isolation/{Dockerfile,run.sh}
+    this report
+
+Baseline regression
+  Three aggregate executions (normal under strace, concurrent normal, concurrent
+  reverse) produced the identical key:
+    57 files / 845 pass / 0 fail / 0 skip / 2579 expects / bad=false
+  Shared inherited DB opened: zero.
+  Per-file DB maps: 57/57 unique.
+  Cross-suite fixture shapes: uploads=1:0, host-supervisor=0:1.
+
+Slug collision gate
+  The runner validates the complete enumerated test tree before applying any
+  --file filter. The injected pair:
+    server/src/test639-collision.test.ts
+    server/src/test639/collision.test.ts
+  maps to one slug. A filtered invocation for only the first file still exited
+  2 and named the slug plus both owners.
+  Removing only assertUniqueSlugs(files) made the same filtered invocation pass
+  (rc=0, 1 test), proving the guard is load-bearing.
+  collision log sha256: d5ad2870be291f805922b7c1884f133f84acace2fbbd5dabe12e9debdc0d5d52
+  mutation log sha256: c9f7dccca9442e79770c5411081f407c4a5a18b0d3d03bece5c037f8c3a2f30e
+
+No-greenwash additions
+  Missing summary:
+    child exited 0 after process.exit(0), emitted 0/0/0 counts; aggregate exited
+    1 with bad=true.
+    log sha256: e0039e7af0bec542e9a217d6b3b984bc50945c838bfae458a1bc5f2634b09156
+  Spawn failure:
+    runner started by absolute Bun with PATH containing no bun; child spawn
+    returned exit=null and 0/0/0 counts; aggregate exited 1 with bad=true.
+    log sha256: 78135df786fde64f476d176935f1c343ba42caa15e82852903607c03561733f1
+  Existing gates remained green:
+    nonzero rc=1, timeout rc=1, signal rc=143, per-file split mutation collapsed
+    to one DB path.
+
+Optional historical red follow-up
+  #639(c) is explicitly optional. A first attempt to recreate the old flat
+  shared-process failure on current main passed, because the final tree contains
+  the post-red test setup changes. It was removed as a gate rather than reported
+  as false witnessed-red. The original pre-rebase red remains honestly recorded
+  in report-test638-server-aggregate-isolation.txt.
+
+Verdict
+  PASS. Runtime slug uniqueness is enforced and all five greenwash modes now
+  have behavior-level evidence without changing production code.
