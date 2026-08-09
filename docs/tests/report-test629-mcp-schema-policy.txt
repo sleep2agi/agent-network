@@ -1,0 +1,42 @@
+# test629 — MCP unknown-field policy audit
+
+Date: 2026-08-09
+Issue: #529
+Source commit: d8e89e5d043972167469a3ce053900da08791fb9
+Docker tag: anet-test629:dev
+Docker image: sha256:742974980c98681e469b9f094dbc49345c29ee188d6df8e35de87c76fa6cb199
+Embedded source: TEST629_SOURCE_COMMIT=d8e89e5d043972167469a3ce053900da08791fb9
+Runner artifact SHA256: f7415096c9bc944cabb024cb87ba8f76f39b2f7b9130c250192d6dd99641a2d3
+
+## Result
+
+- Production inventory: 41 `server.tool(...)` registrations, all explicitly
+  named in source order.
+- Real dependency resolution: `@modelcontextprotocol/sdk` 1.30.0 and Zod 4.4.3.
+- Raw-shape baseline: a call with an unknown field succeeds, while the handler
+  receives only known fields.
+- Global `.strict()`: the same extra field is rejected, demonstrating the
+  compatibility risk rather than assuming it.
+- Telemetry-first feasibility: passthrough preserves unknown key names for
+  observation; logs contain sorted names but not values; a second strip parse
+  produces the same handler payload as today's baseline.
+- Witnessed red: adding an unreviewed 42nd `server.tool` registration makes the
+  inventory gate fail with rc=1. Restoring the source returns PASS.
+
+```text
+MUTATION_RED: unreviewed-tool-inventory rc=1
+PASS: all 41 production MCP registrations are explicitly inventoried in source order
+PASS: real SDK silently strips the unknown field before the handler
+PASS: global strict mode would hard-fail an existing caller with an extra field
+PASS: telemetry never records unknown values
+PASS: telemetry wrapper preserves the current stripped handler contract
+inventory_count=41
+sdk_version=1.30.0
+recommended_policy=observe-key-shape-then-strip
+RESULT: PASS
+```
+
+The fixtures contain only synthetic values. No production service, database,
+token, global package, or deployment was touched. The candidate changes only
+documentation and an isolated Docker audit/probe; it does not change MCP tool
+runtime behavior.
