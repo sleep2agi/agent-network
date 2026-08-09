@@ -42,14 +42,16 @@ run_missing_binary() {
   safe_rm_rf "$root"
   mkdir -p "$root/home" "$root/bin"
   write_fixture "$root"
-  set +e
-  (
+  local rc
+  if (
     cd "$root"
     HOME="$root/home" PATH="$root/bin:/usr/local/bin:/usr/bin:/bin" \
       bun "$cli" node start missing-claude
-  ) >"$log" 2>&1
-  local rc=$?
-  set -e
+  ) >"$log" 2>&1; then
+    rc=0
+  else
+    rc=$?
+  fi
   if [ "$rc" -eq 0 ]; then
     echo "FAIL: missing claude returned success"
     cat "$log"
