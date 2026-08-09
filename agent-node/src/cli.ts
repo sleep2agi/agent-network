@@ -111,6 +111,7 @@ import {
   isInteractiveDashboardTask,
   shouldDrainPendingReplies,
 } from "./inbox-dispatch";
+import { formatInboxSkipLog } from "./inbox-skip-log";
 import { createSingleFlight } from "./util/single-flight";
 import { createCodexSessionManager } from "./runtime/codex-app-server/session-manager";
 import { buildGrokChildEnv } from "./runtime/grok-child-env";
@@ -4532,7 +4533,12 @@ async function processInbox() {
 
       const skip = shouldSkipMessage(from, content, msgType);
       if (skip) {
-        debug(`skip message from ${from}: ${skip}`);
+        log(formatInboxSkipLog({
+          sender: from,
+          reason: skip,
+          taskId: String(msg.id),
+          messageType: msgType,
+        }));
         await ackMessage(msg.id).catch((e: any) => warn(`ack failed for skipped ${msg.id.slice(0, 8)}: ${e.message}`));
         return;
       }
