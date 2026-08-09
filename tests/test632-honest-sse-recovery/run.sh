@@ -31,7 +31,26 @@ bun build agent-node/src/cli.ts \
   --external node-pty
 test -s /tmp/test632-dist/cli.js
 
-echo "L2 witnessed-red: restore the dangerous duplicate-start guidance"
+echo "L2 real supervisor abandon returns without killing the agent process"
+bun tests/test632-honest-sse-recovery/abandon-lifecycle-probe.ts \
+  >/tmp/test632-abandon-probe.log 2>&1 &
+probe_pid=$!
+for _ in $(seq 1 100); do
+  if grep -Fq 'ABANDON_RETURNED_PROCESS_ALIVE' /tmp/test632-abandon-probe.log; then break; fi
+  if ! kill -0 "$probe_pid" 2>/dev/null; then
+    echo "FAIL: abandon probe exited before the parent observed it"
+    cat /tmp/test632-abandon-probe.log
+    exit 1
+  fi
+  sleep 0.02
+done
+grep -Fq 'ON_ABANDON' /tmp/test632-abandon-probe.log
+grep -Fq "ABANDON_RETURNED_PROCESS_ALIVE pid=$probe_pid" /tmp/test632-abandon-probe.log
+kill -0 "$probe_pid"
+kill "$probe_pid"
+wait "$probe_pid" 2>/dev/null || true
+
+echo "L3 witnessed-red: restore the dangerous duplicate-start guidance"
 cp agent-node/src/sse-recovery-guidance.ts /tmp/test632-guidance.ts
 sed -i 's/`当前 agent-node 实例（alias=${alias}）仍在运行；不要另起同 alias 实例，否则会产生重复消费者。`/`运行 `anet node start ${alias}` 手动恢复。`/' agent-node/src/sse-recovery-guidance.ts
 grep -Fq 'anet node start ${alias}' agent-node/src/sse-recovery-guidance.ts
@@ -46,7 +65,7 @@ fi
 echo "MUTATION_RED: duplicate-start-guidance rc=$guidance_rc"
 cp /tmp/test632-guidance.ts agent-node/src/sse-recovery-guidance.ts
 
-echo "L3 witnessed-red: bypass the helper in the production abandon hook"
+echo "L4 witnessed-red: bypass the helper in the production abandon hook"
 cp agent-node/src/cli.ts /tmp/test632-cli.ts
 sed -i 's/onAbandon: () => error(sseAbandonGuidance(ALIAS, COMMHUB_URL))/onAbandon: () => error(`abandoned`)/' agent-node/src/cli.ts
 grep -Fq 'onAbandon: () => error(`abandoned`)' agent-node/src/cli.ts
@@ -61,7 +80,7 @@ fi
 echo "MUTATION_RED: production-hook-bypass rc=$wiring_rc"
 cp /tmp/test632-cli.ts agent-node/src/cli.ts
 
-echo "L4 restored green"
+echo "L5 restored green"
 run_tests
 
 echo "RESULT: PASS"
