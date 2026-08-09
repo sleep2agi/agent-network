@@ -2380,7 +2380,9 @@ Channel:
   anet channel ls [name]        List channels
 
 Setup:
-  anet init                     Configure hub URL (global)
+  anet init [--hub <url>]       Configure hub URL (global; no token prompt)
+  anet init --hub <url> --token <tok>
+                                Legacy master-token compatibility path
   anet init project             Setup project (channel plugin)
   anet setup                    Install runtime dependencies
   anet hub start                 Start CommHub Server + admin bootstrap
@@ -2504,10 +2506,10 @@ async function initGlobal() {
   if (!hub) { closeRL(); console.error("Error: hub URL required"); process.exit(1); }
   hub = hub.replace(/\/+$/, ""); // 去掉结尾斜杠
 
-  let token = opts.token || "";
-  if (!token) {
-    token = await ask("Auth token (legacy, press Enter to skip — most users skip)");
-  }
+  // V3 users authenticate with `anet login`; the legacy master token is an
+  // explicit compatibility path only. Do not make ordinary init look as
+  // though a token is required (#56).
+  const token = opts.token || "";
   closeRL();
   try {
     const res = await fetch(`${hub}/health`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
