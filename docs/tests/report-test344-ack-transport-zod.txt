@@ -1,0 +1,32 @@
+# Test 344 — ack_create_request in-process MCP transport zod gate
+
+Date: 2026-08-09
+Base commit: b169e4fa00bf73b494af9d2d5241d9625b63dddb
+Source commit: 646e4ed6a96958b8d20c50126f9f8f8db86e506c
+Docker tag: anet-test344:dev
+Docker image: sha256:a85a27ab1106947552c72def6f2c2216aaebed77ea3ec2694965a6d32c369f69
+Embedded environment: TEST344_SOURCE_COMMIT=646e4ed6a96958b8d20c50126f9f8f8db86e506c
+Runner artifact SHA256: fff6ebac9deb2a3fa43adde5b418b72d9910c81695735b0777241c615b47d6c3
+
+Command:
+
+    sg docker -c 'docker build -t anet-test344:dev --build-arg SOURCE_COMMIT=646e4ed6a96958b8d20c50126f9f8f8db86e506c -f tests/test344-ack-transport-zod/Dockerfile . && docker run --rm -v /tmp/test344-artifacts:/artifacts anet-test344:dev'
+
+Results:
+
+- Production CommHub bundle: PASS (257 modules, 1.52 MB output).
+- Real `Client` + linked `InMemoryTransport` + registered `McpServer`: 3 passed, 0 failed, 10 assertions.
+- Existing handler/DB regression suite: 10 passed, 0 failed, 30 assertions.
+- Removing `runtime_capability_check_failed` from the zod enum: witnessed red, rc=1.
+- Replacing the runtime string schema with `z.any()`: witnessed red, rc=1.
+- Restored transport suite: 3 passed, 0 failed, 10 assertions.
+
+Wire facts pinned:
+
+- The new terminal status plus a string runtime passes the SDK validation gate and reaches the real handler.
+- Invalid status and non-string runtime are rejected before the handler; the request row remains byte-semantically unchanged at `status=delivered`.
+- SDK input-validation failure is returned as a tool result with `isError=true`, not as a rejected `Client.callTool()` promise.
+
+Initial harness correction:
+
+The first exact Docker run at source `9530e9f154b4d2da07a376e4e7e302b240918fda` expected invalid input to reject the JavaScript promise. Both negative tests failed because the real SDK correctly resolved an MCP tool-error result. No production code was changed; the test was corrected to assert the real wire shape plus DB non-mutation, then rebuilt and rerun at the source commit above.

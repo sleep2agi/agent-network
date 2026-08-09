@@ -13,11 +13,11 @@ import { registerTools } from "./tools.js";
 // `daemon_capability_lied` audit was written when in fact the action wasn't
 // in the audit enum and no insert ran.
 //
-// This handler-driven suite drives the registered MCP tool through
-// registerTools() so a daemon's exact ack shape (status + runtime field)
-// flows through the real zod schema + handler branch + audit insert. It
-// would have caught the lane-recurring "single component passes but cross-
-// component path stays broken" failure mode immediately.
+// This handler-driven suite captures and invokes the registered callback
+// directly. It validates handler branches and DB effects, but deliberately
+// does NOT claim to exercise the MCP SDK's zod transport gate. The
+// complementary in-process transport coverage lives in
+// ack-create-request-transport.test.ts (#344).
 
 const NET = "net_ack_t";
 const DAEMON_NODE_ID = "node_ack_daemon";
