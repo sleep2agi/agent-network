@@ -1,0 +1,42 @@
+# test624 — `/api/tasks` cursor pagination
+
+Date: 2026-08-09
+Issue: #459
+Source commit: d25dcc07e15c5cc36385761d43c2336d96dce11a
+Docker tag: anet-test624:dev
+Docker image: sha256:39964ee986799abd8d3b9e91240f2dd629cb7e587f191ff29329b47032e70c3c
+Embedded source: TEST624_SOURCE_COMMIT=d25dcc07e15c5cc36385761d43c2336d96dce11a
+Runner artifact SHA256: a52f5b37af73e802fb3462b181cc22c6999193d6e6e91f4758e393af83655849
+
+## Result
+
+- Production Hub bundle: PASS.
+- Real isolated Hub + SQLite: 4 pass / 0 fail / 15 assertions.
+- Exclusive `before` cursor excludes the cursor row and all newer rows.
+- Authenticated member sees only its own network; a matching foreign row is
+  absent even when it satisfies `before` and `to_name`.
+- ISO UTC and native SQLite cursor shapes converge on the same query value.
+- `to_name` composes with the cursor.
+- No-cursor response remains `{ok,tasks,count}` under `skip_stats=1`, newest
+  first.
+- Empty, malformed, and rolled-over dates return HTTP 400 `invalid_before`.
+- Remove cursor predicate: witnessed RED (`rc=1`).
+- Change `<` to `<=`: witnessed RED (`rc=1`).
+- Remove malformed-cursor rejection: witnessed RED (`rc=1`).
+- Restored suite: 4 pass / 0 fail / 15 assertions.
+
+```text
+L2 witnessed-red: before predicate is load-bearing
+MUTATION_RED: before-filter rc=1
+L3 witnessed-red: exact cursor row must stay excluded
+MUTATION_RED: exclusive-cursor rc=1
+L4 witnessed-red: malformed cursor rejection is load-bearing
+MUTATION_RED: invalid-cursor rc=1
+L5 restored green
+4 pass
+0 fail
+15 expect() calls
+RESULT: PASS
+```
+
+No production service, database, package, or deployment was touched.
