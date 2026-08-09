@@ -4364,6 +4364,10 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     console.error(`[anet] Refusing to start node ${JSON.stringify(nodeId)}: ${error?.message || error}`);
     process.exit(1);
   }
+  // Keep the resolved persisted profile separate from the per-launch view.
+  // A legacy config may need its canonical node_id repaired below; that write
+  // must not accidentally bake a transient --hub override into config.json.
+  const persistedProfile = profile;
   // #467 — an explicit command-line hub is a per-launch override. Keep it
   // transient (do not rewrite the node profile), but apply it before MCP
   // materialisation and child-env construction so every runtime observes the
@@ -4421,7 +4425,7 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     const rawCfgPath = join(nodesDir(), nodeId, "config.json");
     const rawCfg = JSON.parse(readFileSync(rawCfgPath, "utf-8"));
     if (!rawCfg.node_id && profile.node_id) {
-      saveProfile(nodeId, profile);
+      saveProfile(nodeId, persistedProfile);
       console.log(`[anet] persisted canonical node_id ${profile.node_id} (legacy config had none).`);
     }
   } catch {}
