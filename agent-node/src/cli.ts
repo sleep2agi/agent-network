@@ -40,6 +40,10 @@ import { maskSecretsInText, summarizeHits } from "./outbound-secret-mask";
 import { checkFeishuToolDeny, isFeishuChannelTurn } from "./feishu-tool-deny";
 import { buildAttachmentDescriptors } from "./runtime/feishu-envelope";
 import {
+  buildFeishuWorkerArgs,
+  resolveFeishuOutboundDir,
+} from "./runtime/feishu-outbound-dir";
+import {
   isVendorErrorForUser,
   isTransientVendorError,
   VENDOR_ERROR_REPLACEMENT,
@@ -905,6 +909,8 @@ const TELEGRAM_CHANNELS = CHANNELS.filter(ch => ch.type === "telegram").map(init
 interface FeishuChannel {
   type: "feishu";
   dir: string;
+  /** Exact binding name passed to the worker as its connectionName. */
+  connectionName: string;
 }
 
 function initFeishuChannel(spec: { type: string; path?: string; raw: string }): FeishuChannel {
@@ -919,7 +925,12 @@ function initFeishuChannel(spec: { type: string; path?: string; raw: string }): 
   }
   // .env 权限加固
   try { chmodSync(join(dir, ".env"), 0o600); } catch {}
-  return { type: "feishu", dir };
+  // Today one node owns one Feishu binding, so its canonical connectionName
+  // is the alias passed to the worker. Keep it on the channel object instead
+  // of rediscovering it from ambient env in the legacy-envelope fallback;
+  // that preserves the exact worker/parent value if multi-binding support
+  // later gives each channel its own name.
+  return { type: "feishu", dir, connectionName: ALIAS };
 }
 
 const FEISHU_CHANNELS = CHANNELS.filter(ch => ch.type === "feishu").map(initFeishuChannel);
@@ -4997,7 +5008,7 @@ async function connectFeishu(channel: FeishuChannel): Promise<void> {
     runOnce: async (ctrl) => {
       const child = spawn(
         process.execPath,
-        [workerPath, "--channel-dir", channel.dir, "--node-alias", ALIAS],
+        buildFeishuWorkerArgs(workerPath, channel),
         { stdio: ["ignore", "inherit", "inherit", "ipc"] },
       );
       feishuChildren.add(child);
@@ -5059,10 +5070,11 @@ function wireFeishuChildHandlers(
     // ship `outboundDir` yet (legacy envelopes — the agent's marker would
     // then be rejected by the whitelist on a path mismatch, surfacing as
     // a friendly `[文件附件未发送]` instead of a silent drop).
-    const outboundDir =
-      typeof raw.outboundDir === "string" && raw.outboundDir.length > 0
-        ? raw.outboundDir
-        : `/work/feishu-attachments/${process.env.ANET_NODE_ALIAS || ALIAS || "feishu"}/${(convId !== "?" ? convId : "default").replace(/[^a-zA-Z0-9_-]/g, "_")}/`;
+    const outboundDir = resolveFeishuOutboundDir(
+      raw.outboundDir,
+      channel.connectionName,
+      convId,
+    );
     log(
       `[feishu] event from=${ev.sender?.id ?? "?"} ` +
         `conv=${ev.conversation?.conversationType ?? "?"}:${convId} ` +
