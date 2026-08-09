@@ -37,6 +37,8 @@
 
 SQLite transaction 是当前生产原子边界。仓库现有 PostgreSQL adapter 已明确不提供真实跨语句 transaction；在该 adapter 修复前，不得把 PostgreSQL 宣称为 scheduler 的 production-safe 后端。
 
+多 Hub occurrence 竞争验证针对“进程均已完成数据库初始化”的运行态。独立 Docker 探针发现仓库既有 SQLite adapter 在两个进程完全同时冷启动时，`PRAGMA journal_mode=WAL` 可能先报 `SQLITE_BUSY`；这是 adapter 启动协调的独立既有风险，不能用 scheduler 的 occurrence 唯一键来掩盖，也不计作本 RFC 已修复。
+
 ## 5. 身份与租户边界
 
 - 只有 `utok_` 用户可管理计划；`ntok_` 无论签发者是谁都拒绝，避免节点给自己植入永久执行循环。

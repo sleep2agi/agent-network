@@ -181,15 +181,25 @@ describe("Hub scheduled task API and dispatcher", () => {
     const gate = join(raceDir, "go");
     const workerPath = "tests/test601-hub-scheduled-tasks/race-worker.ts";
     const dbPath = process.env.COMMHUB_DB!;
-    const workers = ["a", "b"].map((id) => Bun.spawn(
+    const spawnWorker = (id: string) => Bun.spawn(
       ["bun", workerPath, dbPath, raceScheduleId, due, join(raceDir, `ready-${id}`), gate],
       { cwd: process.cwd(), stdout: "pipe", stderr: "pipe", env: { ...process.env, COMMHUB_DB: dbPath } },
-    ));
-    const readyDeadline = Date.now() + 12_000;
-    while ((!existsSync(join(raceDir, "ready-a")) || !existsSync(join(raceDir, "ready-b"))) && Date.now() < readyDeadline) {
-      await Bun.sleep(10);
-    }
-    if (!existsSync(join(raceDir, "ready-a")) || !existsSync(join(raceDir, "ready-b"))) {
+    );
+    const waitReady = async (id: string) => {
+      const readyPath = join(raceDir, `ready-${id}`);
+      const deadline = Date.now() + 8_000;
+      while (!existsSync(readyPath) && Date.now() < deadline) await Bun.sleep(10);
+      return existsSync(readyPath);
+    };
+
+    // Start both DB connections before opening the claim gate. Initializing
+    // them sequentially isolates the occurrence race from the repository's
+    // pre-existing simultaneous-cold-start PRAGMA journal_mode=WAL race.
+    const workers = [spawnWorker("a")];
+    const readyA = await waitReady("a");
+    if (readyA) workers.push(spawnWorker("b"));
+    const readyB = readyA && await waitReady("b");
+    if (!readyA || !readyB) {
       for (const worker of workers) worker.kill();
       await Promise.all(workers.map((worker) => worker.exited));
       const diagnostics = await Promise.all(workers.map(async (worker) => ({
