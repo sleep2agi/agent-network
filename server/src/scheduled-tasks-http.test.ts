@@ -91,6 +91,8 @@ describe("Hub scheduled task API and dispatcher", () => {
     expect(created.body.schedule.target_node_id).toBe(nodeId);
     expect(created.body.schedule.target_alias).toBe("scheduler-node");
     expect(created.body.schedule.schedule.type).toBe("interval");
+    expect(created.body.schedule.created_by).toBeUndefined();
+    expect(created.body.schedule.schedule_json).toBeUndefined();
     scheduleId = created.body.schedule.schedule_id;
     revision = created.body.schedule.revision;
   });

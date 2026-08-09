@@ -136,7 +136,8 @@ export function nextOccurrence(spec: ScheduleSpec, timezone: string, after: Date
 function decodeRow(row: ScheduledRow): Record<string, unknown> {
   let schedule: unknown = null;
   try { schedule = JSON.parse(row.schedule_json); } catch {}
-  return { ...row, schedule, schedule_json: undefined };
+  const { created_by: _createdBy, schedule_json: _scheduleJson, ...publicRow } = row;
+  return { ...publicRow, schedule };
 }
 
 function scopedSchedule(scheduleId: string, scope: RestNetworkScope): ScheduledRow | null {
@@ -255,11 +256,18 @@ function dispatchOccurrence(row: ScheduledRow, scheduledFor: string, advanceSche
     event = { alias: node.alias, networkId: row.network_id, taskId, priority: row.priority, state: deliveryState };
   });
 
-  if (createdTaskId) logTaskEvent(createdTaskId, null, "delivered", "hub-scheduler", `schedule=${row.schedule_id} run=${runId}`);
-  if (event) {
-    const pending = db.get<{ cnt: number }>("SELECT COUNT(*) AS cnt FROM inbox WHERE session_name = ?1 AND network_id = ?2 AND acked = 0", event.alias, event.networkId);
-    if (event.state === "delivered") pushEvent(event.alias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority: event.priority, from: "scheduler" }, event.networkId);
-    pushNetworkObserverEvent(event.networkId, { type: "new_task", task_id: event.taskId, from: "scheduler", to: event.alias, status: event.state, priority: event.priority });
+  // Everything below is a post-commit doorbell. A logging/SSE failure must
+  // never turn a durably-created task into an API-level failure: callers may
+  // retry an apparent failure and create a second manual occurrence.
+  try {
+    if (createdTaskId) logTaskEvent(createdTaskId, null, "delivered", "hub-scheduler", `schedule=${row.schedule_id} run=${runId}`);
+    if (event) {
+      const pending = db.get<{ cnt: number }>("SELECT COUNT(*) AS cnt FROM inbox WHERE session_name = ?1 AND network_id = ?2 AND acked = 0", event.alias, event.networkId);
+      if (event.state === "delivered") pushEvent(event.alias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority: event.priority, from: "scheduler" }, event.networkId);
+      pushNetworkObserverEvent(event.networkId, { type: "new_task", task_id: event.taskId, from: "scheduler", to: event.alias, status: event.state, priority: event.priority });
+    }
+  } catch (e: any) {
+    console.error(`[scheduled-tasks] post-commit notification failed schedule=${row.schedule_id} run=${runId}: ${e?.message || e}`);
   }
   return { runId, taskId: createdTaskId, status: finalStatus, event };
 }
@@ -330,7 +338,7 @@ function writeAllowed(ctx: ScheduledRequestContext, networkId: string | null): b
 
 export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): Promise<Response | null> {
   const { req, url } = ctx;
-  if (!url.pathname.startsWith("/api/scheduled-tasks")) return null;
+  if (url.pathname !== "/api/scheduled-tasks" && !url.pathname.startsWith("/api/scheduled-tasks/")) return null;
   if (ctx.isNodeToken) return jsonError("user_token_required", 403);
 
   if (url.pathname === "/api/scheduled-tasks" && req.method === "GET") {
