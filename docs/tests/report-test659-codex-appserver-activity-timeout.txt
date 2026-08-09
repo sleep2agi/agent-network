@@ -2,12 +2,12 @@
 
 Date: 2026-08-10 (Asia/Shanghai)
 Base: 4dacd93a6c441c243ce1537e437d254fbc485da7
-Source commit: 293c5b2b938eb61b864e32f17ef4fdadc5dcb44a
+Source commit: 5b282b5b6f4b2ae73306c1b6c6942fed23c0f38f
 Docker tag: anet-test659:dev
-Image ID: sha256:3d3dcfd756d60dcfcb2e7f2f3b9b8e45049085e79a2003817799080dc75976d5
-Image size: 384070049 bytes
-Embedded TEST659_SOURCE_COMMIT: 293c5b2b938eb61b864e32f17ef4fdadc5dcb44a
-Mutation artifact tar SHA256: 8f2d0b034573cb064227a3e872d78c421d4780566b6d0d127f33720b94f1af4a
+Image ID: sha256:7c2f35f1e52e06e5cd6dd1092e5bca28483c2557cbab9bf16b2e5c2899b0d769
+Image size: 384071715 bytes
+Embedded TEST659_SOURCE_COMMIT: 5b282b5b6f4b2ae73306c1b6c6942fed23c0f38f
+Mutation artifact tar SHA256: 728df05e89fbc7a81ab583ea9d4cd438642e186736dc73b52e4da5639b2b19fa
 
 ## Facts before the change
 
@@ -19,6 +19,7 @@ Mutation artifact tar SHA256: 8f2d0b034573cb064227a3e872d78c421d4780566b6d0d127f
 
 - The bridge emits `task_activity` only after the immutable `clientUserMessageId` echo confirms the exact turn→task owner. The non-authoritative `turn/start` response id alone cannot renew a deadline.
 - Owned item start, agent delta, and item completion renew the response **idle** threshold. Cross-thread, foreign-turn, unconfirmed-turn, and queued events do not.
+- Streamed deltas only update one activity timestamp. The timer checks that timestamp at its deadline and reschedules once for the remaining window, avoiding per-token timer churn and log floods.
 - A task with no activity still fails after the same default 600s threshold; the queue deadline remains separate and unchanged.
 - `agent-node` relays active work through the existing non-terminal `report_status(working)` / status-update path at most once per 30 seconds. It does not create a reply or inbox row.
 - The timeout text explicitly warns that the underlying turn may still run and should be inspected before re-dispatch.
