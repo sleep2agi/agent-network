@@ -29,3 +29,13 @@ export function diagnoseLocale(
 
   return { effectiveVariable: null, effectiveValue: null, shouldWarn: true };
 }
+
+export function formatLocaleSource(diagnostic: LocaleDiagnostic): string {
+  if (!diagnostic.effectiveVariable || diagnostic.effectiveValue === null) {
+    return "LANG/LC_ALL/LC_CTYPE=<unset>";
+  }
+  const safeValue = diagnostic.effectiveValue
+    .replace(/[^\x20-\x7e]/g, "?")
+    .slice(0, 128);
+  return `${diagnostic.effectiveVariable}=${safeValue}`;
+}

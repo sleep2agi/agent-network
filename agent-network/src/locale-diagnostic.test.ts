@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { diagnoseLocale } from "./locale-diagnostic";
+import { diagnoseLocale, formatLocaleSource } from "./locale-diagnostic";
 
 describe("#68 locale diagnostic", () => {
   test("LC_ALL overrides an otherwise UTF-8 LANG", () => {
@@ -36,5 +36,14 @@ describe("#68 locale diagnostic", () => {
       effectiveValue: null,
       shouldWarn: false,
     });
+  });
+
+  test("renders locale values without terminal control or unbounded output", () => {
+    const diagnostic = diagnoseLocale({ LC_ALL: `C\n\u001b[31m${"x".repeat(200)}` }, "linux");
+    const rendered = formatLocaleSource(diagnostic);
+    expect(rendered).toStartWith("LC_ALL=C??[31m");
+    expect(rendered).not.toContain("\n");
+    expect(rendered).not.toContain("\u001b");
+    expect(rendered.length).toBeLessThanOrEqual(7 + 128);
   });
 });

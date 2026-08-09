@@ -88,7 +88,7 @@ import {
   type GrokCopresenceSessionDisclosure,
 } from "../src/grok-copresence-disclosure";
 import { parseCliOptions, positionalArgs } from "../src/cli-args";
-import { diagnoseLocale } from "../src/locale-diagnostic";
+import { diagnoseLocale, formatLocaleSource } from "../src/locale-diagnostic";
 import {
   collectClaudeVendorEnvForCreate,
   planPlainSecretEnvRewrites,
@@ -12433,9 +12433,7 @@ async function doctorCommand() {
 
   const locale = diagnoseLocale(process.env, process.platform);
   if (locale.shouldWarn) {
-    const source = locale.effectiveVariable
-      ? `${locale.effectiveVariable}=${locale.effectiveValue}`
-      : "LANG/LC_ALL/LC_CTYPE=<unset>";
+    const source = formatLocaleSource(locale);
     warning(
       "System locale",
       `${source} is not UTF-8; Unicode aliases and tmux output may be corrupted. Fix: export LANG=C.UTF-8 LC_ALL=C.UTF-8`,
