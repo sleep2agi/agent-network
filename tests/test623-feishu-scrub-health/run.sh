@@ -49,10 +49,10 @@ test -s agent-network/dist/src/im/feishu/worker.js
 cp "$ADAPTER" /tmp/test623-adapter.ts
 
 echo "L3 witnessed-red: arbitrary access-token scrub is load-bearing"
-sed -i '/\.replace(\/\\b(?:t|u)-/,/\.replace(\/\\bcli_/ {
-  /\.replace(\/\\b(?:t|u)-/d
+sed -i '/\.replace(\/\\b(?:a|t|u)-/,/\.replace(\/\\bcli_/ {
+  /\.replace(\/\\b(?:a|t|u)-/d
 }' "$ADAPTER"
-if grep -Fq '.replace(/\b(?:t|u)-' "$ADAPTER"; then
+if grep -Fq '.replace(/\b(?:a|t|u)-' "$ADAPTER"; then
   echo "MUTATION_NOT_APPLIED: access-token-scrub"
   exit 1
 fi

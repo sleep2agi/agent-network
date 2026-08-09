@@ -125,17 +125,20 @@ describe("FeishuAdapter WS lifecycle", () => {
     const starting = h.adapter.start(onEvent);
     await Bun.sleep(1);
     h.params?.onError?.(new Error(
-      "Bearer bearer-token-618 t-tenant-token-618 u-user-token-618 cli_other-app-618",
+      "Bearer bearer-token-618 a-application-token-618 t-tenant-token-618 " +
+      "u-user-token-618 T-UPPERCASE-TOKEN-618 cli_other-app-618 t-shirts u-boat",
     ));
 
     await expect(starting).rejects.toThrow(
-      "Bearer [redacted] [redacted] [redacted] [redacted]",
+      "Bearer [redacted] [redacted] [redacted] [redacted] [redacted] [redacted] t-shirts u-boat",
     );
     const lastError = h.adapter.health().lastError ?? "";
     for (const secret of [
       "bearer-token-618",
+      "a-application-token-618",
       "t-tenant-token-618",
       "u-user-token-618",
+      "T-UPPERCASE-TOKEN-618",
       "cli_other-app-618",
     ]) {
       expect(lastError).not.toContain(secret);
@@ -160,7 +163,7 @@ describe("FeishuAdapter WS lifecycle", () => {
     (inboundConfig.platformConfig as { access: { allowFrom: string[] } }).access.allowFrom = ["ou_test"];
     await h.adapter.init(inboundConfig);
     const starting = h.adapter.start(async () => {
-      throw new Error("inbound t-inbound-token-618 Bearer inbound-bearer-618");
+      throw new Error("inbound a-inbound-token-618 Bearer inbound-bearer-618");
     });
     await Bun.sleep(1);
     h.params?.onReady?.();
