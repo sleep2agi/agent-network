@@ -140,10 +140,10 @@ rm -f -- server/src/test639-missing-summary.test.ts
 mkdir -p /tmp/test639-no-bun
 set +e
 PATH=/tmp/test639-no-bun /usr/local/bin/bun server/scripts/test-aggregate.ts \
-  --file=server/src/db-adapter.test.ts >/tmp/test639-spawn-fail.out 2>&1; spawn_fail_rc=$?
+  --file=server/src/db-adapter-guard.test.ts >/tmp/test639-spawn-fail.out 2>&1; spawn_fail_rc=$?
 set -e
 [[ $spawn_fail_rc -ne 0 ]] || { echo "FAIL: child spawn failure greenwashed"; exit 1; }
-grep -F $'TEST_FILE_RESULT\tserver/src/db-adapter.test.ts\tpass=0\tfail=0\tskip=0\texpects=0\texit=null' /tmp/test639-spawn-fail.out >/dev/null
+grep -F $'TEST_FILE_RESULT\tserver/src/db-adapter-guard.test.ts\tpass=0\tfail=0\tskip=0\texpects=0\texit=null' /tmp/test639-spawn-fail.out >/dev/null
 grep -F 'SERVER_AGGREGATE_RESULT' /tmp/test639-spawn-fail.out | grep -F '"bad":true' >/dev/null
 
 echo "L5b: slug collisions fail before --file filtering"
