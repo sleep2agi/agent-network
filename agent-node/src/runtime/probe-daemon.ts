@@ -13,7 +13,9 @@
 // hub fabricates a base_url, daemon stays strict.
 
 import { promises as dns } from "node:dns";
-import { Agent, fetch as undiciFetch } from "undici";
+import type { LookupAddress } from "node:dns";
+import type { LookupFunction } from "node:net";
+import { Agent, request as undiciRequest } from "undici";
 import {
   isForbiddenIp,
   isLoopbackHost,
@@ -69,15 +71,60 @@ function buildProbeForVendor(vendor: string, baseUrl: string, model: string, api
 // DNS-resolve hostname → assert every A/AAAA record is NOT in the
 // forbidden IP set → fetch via undici with manual redirect (3xx →
 // probe_redirect_forbidden). TLS validation is mandatory (dispatcher
-// rejectUnauthorized:true + minVersion TLSv1.2). The customLookup
-// pin-IP guard against TOCTOU rebinding between our resolve and
-// undici's connect is deferred to P1.5 (undici Agent.connect.lookup
-// API is brittle across Bun + Node versions; see RFC-028 §10 P1.5).
+// rejectUnauthorized:true + minVersion TLSv1.2). The connector lookup is
+// pinned to the already-validated address set, closing the DNS-rebinding
+// window between validation and connect while keeping the vendor hostname in
+// the URL for SNI and certificate verification.
 
 export interface SafeFetchResult {
   resp?: Response;
   errorKind: null | "network_error" | "timeout" | "tls_error" | "redirect_forbidden" | "probe_resolve_unsafe_ip" | "probe_target_forbidden";
   errorDetail?: string;
+}
+
+export type ProbeHostResolver = (hostname: string) => Promise<LookupAddress[]>;
+
+function normalizedHostname(hostname: string): string {
+  return hostname.trim().replace(/\.$/, "").toLowerCase();
+}
+
+/** Build the exact node:dns lookup contract consumed by undici's connector.
+ * The callback can request one address or `{all:true}` and may constrain the
+ * family. It can never fall back to system DNS or answer for a different
+ * hostname. */
+export function createPinnedLookup(
+  expectedHostname: string,
+  validatedAddresses: readonly LookupAddress[],
+): LookupFunction {
+  const expected = normalizedHostname(expectedHostname);
+  const pinned = validatedAddresses.map(({ address, family }) => ({ address, family }));
+  let cursor = 0;
+
+  return ((hostname: string, options: any, callback: (...args: any[]) => void) => {
+    const requested = normalizedHostname(hostname);
+    const family = typeof options === "number" ? options : Number(options?.family || 0);
+    const all = typeof options === "object" && options?.all === true;
+    const eligible = requested === expected
+      ? pinned.filter((entry) => family !== 4 && family !== 6 ? true : entry.family === family)
+      : [];
+
+    queueMicrotask(() => {
+      if (eligible.length === 0) {
+        const error = Object.assign(new Error("probe_pinned_lookup_no_match"), {
+          code: "ENOTFOUND",
+          hostname,
+        });
+        callback(error);
+        return;
+      }
+      if (all) {
+        callback(null, eligible.map((entry) => ({ ...entry })));
+        return;
+      }
+      const selected = eligible[cursor++ % eligible.length];
+      callback(null, selected.address, selected.family);
+    });
+  }) as LookupFunction;
 }
 
 export async function safelyFetchProbe(
@@ -86,6 +133,7 @@ export async function safelyFetchProbe(
   model: string,
   apiKey: string,
   env: NodeJS.ProcessEnv = process.env,
+  resolveHost: ProbeHostResolver = (hostname) => dns.lookup(hostname, { all: true }),
 ): Promise<SafeFetchResult> {
   // Boot TLS env guard (cheap, repeat on every probe in case env
   // was injected after boot).
@@ -99,7 +147,7 @@ export async function safelyFetchProbe(
   // DNS resolve ALL A/AAAA records (anti single-record cherry-pick).
   let addrs: { address: string; family: number }[];
   try {
-    addrs = await dns.lookup(u.hostname, { all: true });
+    addrs = await resolveHost(u.hostname);
   } catch (e: any) {
     return { errorKind: "network_error", errorDetail: e?.message || "dns lookup failed" };
   }
@@ -121,15 +169,16 @@ export async function safelyFetchProbe(
       return { errorKind: "probe_resolve_unsafe_ip", errorDetail: `resolved IP ${a.address} in forbidden range` };
     }
   }
-  // P1 narrows the rebinding window to a single DNS roundtrip (our
-  // dns.lookup validated all records; undici will re-resolve when
-  // connecting). P1.5 will close this with a customLookup that pins
-  // the validated IP set into the connector — see RFC-028 §10.
-  void addrs;
   // Hardened TLS guarded by dispatcher: rejectUnauthorized:true,
-  // minVersion TLSv1.2.
+  // minVersion TLSv1.2. lookup is the only connector resolver: it answers
+  // from the validated set and rejects another hostname/family rather than
+  // consulting DNS again.
   const dispatcher = new Agent({
-    connect: { rejectUnauthorized: true, minVersion: "TLSv1.2" },
+    connect: {
+      lookup: createPinnedLookup(u.hostname, addrs),
+      rejectUnauthorized: true,
+      minVersion: "TLSv1.2",
+    },
     bodyTimeout: 30_000,
     headersTimeout: 30_000,
   });
@@ -138,18 +187,31 @@ export async function safelyFetchProbe(
 
   let resp: any;
   try {
-    resp = await undiciFetch(probeReq.url, {
-      ...probeReq.init,
-      // @ts-expect-error: undici fetch accepts dispatcher option
+    // Bun's `undici.fetch` compatibility surface currently ignores the
+    // dispatcher's connect.lookup hook. The lower-level request API honors
+    // the dispatcher in both Node and Bun; test648's split-horizon socket
+    // probe locks that runtime fact.
+    const wire = await undiciRequest(probeReq.url, {
+      method: probeReq.init.method as any,
+      headers: probeReq.init.headers as any,
+      body: probeReq.init.body as any,
       dispatcher,
-      redirect: "manual",
+      maxRedirections: 0,
       signal: AbortSignal.timeout(30_000),
     });
+    resp = { status: wire.statusCode } as Response;
+    await wire.body.dump();
   } catch (e: any) {
     const msg = String(e?.message || e);
     if (/timeout|abort/i.test(msg)) return { errorKind: "timeout", errorDetail: msg.slice(0, 200) };
     if (/cert|tls|ssl|handshake/i.test(msg)) return { errorKind: "tls_error", errorDetail: msg.slice(0, 200) };
     return { errorKind: "network_error", errorDetail: msg.slice(0, 200) };
+  } finally {
+    // Bun's undici-compatible Agent does not currently expose close(); Node's
+    // real undici Agent does. Close when available without turning cleanup API
+    // drift into a probe failure.
+    const close = (dispatcher as any).close;
+    if (typeof close === "function") await close.call(dispatcher).catch(() => {});
   }
   if (resp.status >= 300 && resp.status < 400) {
     return { errorKind: "redirect_forbidden", errorDetail: `status=${resp.status}` };
