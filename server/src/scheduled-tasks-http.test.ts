@@ -7,6 +7,8 @@ import { db } from "./db.js";
 import { nextOccurrence, runDueScheduledTasks } from "./scheduled-tasks.js";
 
 const dir = mkdtempSync(join(tmpdir(), "anet-scheduler-"));
+const activeDbPath = process.env.COMMHUB_DB;
+if (!activeDbPath) throw new Error("test601 requires COMMHUB_DB before module import");
 let server: any;
 let base = "";
 let ownerToken = "";
@@ -25,7 +27,6 @@ async function api(token: string, path: string, init?: RequestInit) {
 }
 
 beforeAll(async () => {
-  process.env.COMMHUB_DB = join(dir, "hub.db");
   const owner = register(`scheduler_owner_${Date.now()}`, "SchedulerOwner123!", undefined, "seed");
   expect(owner.ok).toBe(true);
   ownerToken = owner.token!;
@@ -180,7 +181,7 @@ describe("Hub scheduled task API and dispatcher", () => {
     const raceDir = mkdtempSync(join(dir, "race-"));
     const gate = join(raceDir, "go");
     const workerPath = "tests/test601-hub-scheduled-tasks/race-worker.ts";
-    const dbPath = process.env.COMMHUB_DB!;
+    const dbPath = activeDbPath;
     const spawnWorker = (id: string) => Bun.spawn(
       ["bun", workerPath, dbPath, raceScheduleId, due, join(raceDir, `ready-${id}`), gate],
       { cwd: process.cwd(), stdout: "pipe", stderr: "pipe", env: { ...process.env, COMMHUB_DB: dbPath } },
