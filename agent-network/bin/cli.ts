@@ -114,6 +114,10 @@ import {
   type DashboardLaunchRecord,
   type DashboardLaunchSource,
 } from "../src/dashboard-managed-process";
+import {
+  buildBootstrapPasswordUpdateInvocation,
+  resolveBootstrapDatabasePath,
+} from "../src/bootstrap-password-db";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -5810,8 +5814,12 @@ async function serverCommand() {
           // password and `anet passwd` works regardless of the flag).
           if (defaultPassIsRandom && reg.user?.user_id) {
             try {
-              const sql = `UPDATE users SET must_change_password = 1 WHERE user_id = '${reg.user.user_id.replace(/'/g, "''")}'`;
-              execFileSync("bun", ["-e", `import { Database } from "bun:sqlite"; const db = new Database(process.env.COMMHUB_DB || (process.env.HOME + "/.commhub/commhub.db")); db.run(${JSON.stringify(sql)});`], { encoding: "utf-8", env: process.env });
+              const dbPath = resolveBootstrapDatabasePath(process.env, home, process.cwd());
+              const invocation = buildBootstrapPasswordUpdateInvocation(reg.user.user_id, dbPath);
+              execFileSync(invocation.argv[0], invocation.argv.slice(1), {
+                encoding: "utf-8",
+                env: invocation.env,
+              });
             } catch (e: any) {
               console.log(`  ⚠ must_change_password flag not set (non-fatal): ${e?.message || e}`);
             }

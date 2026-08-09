@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+
+printf '%s\n' "${ANET_BOOTSTRAP_DB_PATH:-}" > "${TEST661_CAPTURE}.path"
+printf '%s\n' "$@" > "${TEST661_CAPTURE}.argv"
+exec /usr/local/bin/bun "$@"
