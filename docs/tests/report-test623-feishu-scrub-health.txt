@@ -2,35 +2,38 @@
 
 Date: 2026-08-09
 Issue: #618
-Source commit: 22441775c8d0542dd55bc275814fcc4792f9c083
+Source commit: 4c7a64dbabf12ec3af9cbf0607698c6bfac86311
 Docker tag: anet-test623:dev
-Docker image: sha256:b7318ebf54d4faba37be2b93dc4c27098bf546346d803878afb0f40dc46f8c8b
-Embedded source: TEST623_SOURCE_COMMIT=22441775c8d0542dd55bc275814fcc4792f9c083
-Runner artifact SHA256: 6b2e6845cfc3bd2b3c594fae48b9966d5f955d000fe37cc9cb7f0ca668a49c05
+Docker image: sha256:1bc0797732c6e129b8e21e73ad5a6d80e0984698dd64be55ee1cdd9af771b25d
+Embedded source: TEST623_SOURCE_COMMIT=4c7a64dbabf12ec3af9cbf0607698c6bfac86311
+Runner artifact SHA256: 0f2adcf79f39bacf18b0b203110bcc6b6c4123f33ef6fd3c8c3a4c879d60a01e
 
 ## Result
 
 - TypeScript `tsc --noEmit`: PASS.
-- Feishu lifecycle tests: 10 pass / 0 fail / 29 assertions.
+- Feishu lifecycle tests: 10 pass / 0 fail / 30 assertions.
 - Production CLI, node-server, and Feishu worker bundle: PASS.
 - Sanitized inbound audit evidence contained only
   `inbound [redacted] Bearer [redacted]`.
 - Remove arbitrary `a-`/`t-`/`u-` token scrub: witnessed RED (`rc=1`).
+- Remove bare JWT scrub: witnessed RED (`rc=1`).
 - Bypass scrub in the inbound dispatcher catch: witnessed RED (`rc=1`).
 - Remove the prior-ready reconnect gate: witnessed RED (`rc=1`).
-- Restored lifecycle suite: 10 pass / 0 fail / 29 assertions.
+- Restored lifecycle suite: 10 pass / 0 fail / 30 assertions.
 
 ```text
 L3 witnessed-red: arbitrary access-token scrub is load-bearing
 MUTATION_RED: access-token-scrub rc=1
-L4 witnessed-red: inbound errors must not bypass scrub
+L4 witnessed-red: bare JWT scrub is load-bearing
+MUTATION_RED: jwt-token-scrub rc=1
+L5 witnessed-red: inbound errors must not bypass scrub
 MUTATION_RED: inbound-error-scrub rc=1
-L5 witnessed-red: reconnect cannot become ready before onReady
+L6 witnessed-red: reconnect cannot become ready before onReady
 MUTATION_RED: reconnect-prior-ready rc=1
-L6 restored green
+L7 restored green
 10 pass
 0 fail
-29 expect() calls
+30 expect() calls
 RESULT: PASS
 ```
 
