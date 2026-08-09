@@ -1,0 +1,71 @@
+# Issue #336 — Feishu bridge wire binding report
+
+Date: 2026-08-10
+Base: dd502f9f8900957150b60d660fd5d09b7291cb1c
+Source commit under test: e221ca6174fbcf5ae4b01c3dd2386958ea4dcb46
+Branch: fix/336-feishu-bridge-wire
+
+## Scope
+
+- Lock the real `createIPCEventHandler` wire contract: both the outbound IPC
+  envelope and reply-file whitelist use `adapter.connectionName` plus
+  `conversation.conversationId`.
+- Make the agent-node legacy `outboundDir` reconstruction use the explicit
+  Feishu channel binding passed to the worker, never ambient
+  `ANET_NODE_ALIAS` state.
+- Preserve the canonical worker-provided `outboundDir` unchanged.
+
+The bridge production path was already correct at the base revision. Its
+change is test coverage, not a behavior rewrite. The fallback implementation
+now lives in `agent-node/src/cli.ts`, rather than the historical issue text's
+`agent-network/bin/cli.ts` location.
+
+Current channel configuration has one Feishu binding per node. The explicit
+binding is therefore the node alias supplied to the worker. This change does
+not claim or invent multi-binding configuration support.
+
+## Docker provenance
+
+- Dockerfile: `tests/test336-feishu-bridge-wire/Dockerfile`
+- Fixed tag: `anet-test661:dev` (tag retained to avoid another large image
+  while the host was at 98% disk use; the suite directory follows Issue #336)
+- Image ID: `sha256:45c0cd2ea8708818062bc6e91b41a94a58633f70eca270c8f1efac05bfc240c8`
+- Embedded ENV: `TEST336_SOURCE_COMMIT=e221ca6174fbcf5ae4b01c3dd2386958ea4dcb46`
+- Artifact directory: `/tmp/test336-artifacts.ifNpJb`
+
+Dependencies are installed with `bun install --ignore-scripts`. The first
+image build reached the unrelated `node-pty` native postinstall and required
+Python/gyp even though this suite neither loads nor tests node-pty. Skipping
+dependency lifecycle scripts is scoped to this test image; the agent-node
+production bundle is still built below.
+
+## Results
+
+`RESULT pass=8 fail=0`
+
+1. Real `createIPCEventHandler` IPC envelope and reply-file dispatch: PASS.
+2. Existing Feishu bridge acknowledgement/rate-limit regression: 20/20 PASS.
+3. Legacy binding helper unit tests: 4/4 PASS, 4 assertions.
+4. Agent-node production bundle (`bun run build`): PASS, 259 modules.
+5. Mutation — envelope uses `sender.id`: witnessed red.
+6. Mutation — reply whitelist uses `sender.id`: witnessed red.
+7. Mutation — ambient alias overrides explicit binding: witnessed red.
+8. Mutation — worker and fallback binding diverge: witnessed red.
+
+The wire fixture intentionally makes sender ID, event connection ID, adapter
+connection name, and conversation ID all distinct. It writes a real PDF under
+the expected outbound directory and verifies the emitted caption plus file
+dispatch target/path/name/reply-to fields.
+
+## Mutation artifacts
+
+- `envelope-uses-sender-id.log` — 824 bytes —
+  `4cd6ab8f0777a6180999f7d5c0429c1d1638e7d373c095933de451283a281026`
+- `reply-whitelist-uses-sender-id.log` — 938 bytes —
+  `69bb3e66e96e0cebfa809922eff1e0446b49c4dbc55481802b6a4b76dafd47ba`
+- `ambient-alias-overrides-binding.log` — 1176 bytes —
+  `3bbf479b008991b41d38143ef5376ccda0c3743223a6fe31dee02b3bcdbe7fa9`
+- `worker-binding-diverges.log` — 1135 bytes —
+  `0825d189966ba66bc6696d744a81bd3973b08db2c9f8c216ffa73d9ba2094c2c`
+
+No production runtime, global package, Hub, or database was modified.
