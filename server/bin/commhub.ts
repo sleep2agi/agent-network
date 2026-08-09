@@ -54,6 +54,10 @@ Examples:
   }
 }
 
+// Opt into the default production DB path before loading the server graph.
+// Ordinary imports / bun -e probes do not receive this capability.
+process.env.COMMHUB_SERVER = "1";
+
 // Load the server module (side-effect-free since the #438 corrective:
 // importing binds nothing) and start the hub EXPLICITLY. Never rely on
 // import side effects or import.meta.main here — this bin is a dynamic
