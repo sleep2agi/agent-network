@@ -2,11 +2,11 @@
 
 Date: 2026-08-09
 Issue: #621
-Source commit: 73542ee9c5cfcb2a688e3a3596463e0b1504faf4
+Source commit: f04ec2e6baa8e35968c29c54b0f12763b5a65363
 Docker tag: anet-test625:dev
-Docker image: sha256:13d47bbbcf2ff11d17b60d582207d5a15683a1c40a8f7f3ee17e9f48e0718094
-Embedded source: TEST625_SOURCE_COMMIT=73542ee9c5cfcb2a688e3a3596463e0b1504faf4
-Runner artifact SHA256: c01a98c775da963358652e23ec7bd11c19f991438f50b602fb868fef2073d74e
+Docker image: sha256:786b9bc1f21f82a8dbc445627a61c75ec2d4d040181d4b793219a6046fe52025
+Embedded source: TEST625_SOURCE_COMMIT=f04ec2e6baa8e35968c29c54b0f12763b5a65363
+Runner artifact SHA256: 8653db18eebe71e4b2458b060324881d06302d790736f0cce01266a73035f07e
 
 ## Result
 
@@ -19,10 +19,16 @@ Runner artifact SHA256: c01a98c775da963358652e23ec7bd11c19f991438f50b602fb868fef
 - A safe explicit credential still created a mode-600 dotenv containing
   exactly one assignment and no injected key.
 - All `.env`-writing create flows converge on `saveCreatedNode` and
-  `rewritePlainSecretsToEnvRef`. The named create reaches the earlier vendor
-  collector; the no-name wizard bypasses that collector but reaches the shared
-  writer preflight. Batch and the legacy missing-profile wizard call
-  `saveProfile` directly and do not write a node `.env`.
+  `rewritePlainSecretsToEnvRef`. Named create reaches the earlier vendor
+  collector and the shared writer preflight. Batch and the legacy
+  missing-profile wizard call `saveProfile` directly and do not write a node
+  `.env`.
+- The concrete no-name invocation `anet node create --runtime ... --env ...`
+  cannot enter the current interactive wizard: the parser treats `--runtime`
+  as the positional id and rejects usage before prompting or writing state.
+  The Docker test invokes this exact form and verifies nonzero exit, no secret
+  echo, and no node config or dotenv file. The writer-boundary guard remains
+  defense in depth for future or bypass callers that can reach the writer.
 - Disabling only the named-create collector still rejected the malicious value
   at the shared writer preflight before node directory, `.gitignore`, process
   environment, config, or dotenv mutation.
@@ -33,11 +39,12 @@ Runner artifact SHA256: c01a98c775da963358652e23ec7bd11c19f991438f50b602fb868fef
   no profile or dotenv write.
 
 ```text
-L3 defense-in-depth: bypassing direct collection still fails at the writer preflight
+L2 no-name CLI flags cannot enter the interactive wizard
+L4 defense-in-depth: bypassing direct collection still fails at the writer preflight
 WRITER_PREFLIGHT_PASS: direct collector bypass still rejected before create side effects
-L4 witnessed-red: bypassing both guards injects a second dotenv line
+L5 witnessed-red: bypassing both guards injects a second dotenv line
 MUTATION_RED: dotenv-writer-crlf rc=1 (injected dotenv line witnessed)
-L5 restored green
+L6 restored green
 RESULT: PASS
 ```
 
