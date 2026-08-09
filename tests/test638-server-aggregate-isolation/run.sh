@@ -2,8 +2,8 @@
 set -euo pipefail
 
 EXPECTED_SOURCE_COMMIT="${EXPECTED_SOURCE_COMMIT:-}"
-if [[ -z "${TEST638_SOURCE_COMMIT:-}" || -z "$EXPECTED_SOURCE_COMMIT" || "$TEST638_SOURCE_COMMIT" != "$EXPECTED_SOURCE_COMMIT" ]]; then
-  echo "FAIL: source provenance mismatch image=${TEST638_SOURCE_COMMIT:-unset} expected=${EXPECTED_SOURCE_COMMIT:-unset}"
+if [[ -z "${TEST639_SOURCE_COMMIT:-}" || -z "$EXPECTED_SOURCE_COMMIT" || "$TEST639_SOURCE_COMMIT" != "$EXPECTED_SOURCE_COMMIT" ]]; then
+  echo "FAIL: source provenance mismatch image=${TEST639_SOURCE_COMMIT:-unset} expected=${EXPECTED_SOURCE_COMMIT:-unset}"
   exit 1
 fi
 
@@ -196,7 +196,7 @@ mut_maps=$(grep '^TEST_DB_MAP' /tmp/test638-mutation.out | cut -f3 | sort -u | w
 [[ "$upload_db" != "$host_db" ]] || { echo "FAIL: positive isolation precondition missing"; exit 1; }
 rm -f -- server/scripts/test-aggregate-mutation.ts
 
-echo "source_commit=$TEST638_SOURCE_COMMIT"
+echo "source_commit=$TEST639_SOURCE_COMMIT"
 echo "aggregate_key=$key1"
 echo "run1_db_maps=$(grep -c '^TEST_DB_MAP' "$OUT1")"
 echo "cross_suite_shapes=upload[$upload_shape],host[$host_shape]"
