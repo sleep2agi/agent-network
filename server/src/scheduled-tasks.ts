@@ -2,6 +2,7 @@ import { db, logTaskEvent } from "./db.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { addNetworkScope, canRestWriteNetwork, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { pushEvent, pushNetworkObserverEvent } from "./push.js";
+import { SCHEDULED_TASK_STORAGE_SELECT } from "./rest-projections.js";
 
 export type ScheduleSpec =
   | { type: "once"; run_at: string }
@@ -178,7 +179,7 @@ function decodeRow(row: ScheduledRow): Record<string, unknown> {
 
 function scopedSchedule(scheduleId: string, scope: RestNetworkScope): ScheduledRow | null {
   const params: unknown[] = [scheduleId];
-  let sql = "SELECT * FROM scheduled_tasks WHERE schedule_id = ?1";
+  let sql = `SELECT ${SCHEDULED_TASK_STORAGE_SELECT} FROM scheduled_tasks WHERE schedule_id = ?1`;
   sql = addNetworkScope(sql, params, scope);
   return db.get<ScheduledRow>(sql, ...params);
 }
@@ -346,7 +347,7 @@ function skipScheduledMisfire(row: ScheduledRow, scheduledFor: string, now: Date
 
 export function runDueScheduledTasks(now = new Date(), limit = 100): { processed: number; failed: number } {
   const due = db.all<ScheduledRow>(
-    "SELECT * FROM scheduled_tasks WHERE status = 'active' AND next_run_at IS NOT NULL AND next_run_at <= ?1 ORDER BY next_run_at LIMIT ?2",
+    `SELECT ${SCHEDULED_TASK_STORAGE_SELECT} FROM scheduled_tasks WHERE status = 'active' AND next_run_at IS NOT NULL AND next_run_at <= ?1 ORDER BY next_run_at LIMIT ?2`,
     iso(now), limit,
   );
   let processed = 0;
@@ -355,7 +356,7 @@ export function runDueScheduledTasks(now = new Date(), limit = 100): { processed
     try {
       // Re-read inside the claim path so a pause/cancel immediately before the
       // tick wins. The unique occurrence key handles a second scheduler.
-      const current = db.get<ScheduledRow>("SELECT * FROM scheduled_tasks WHERE schedule_id = ?1 AND status = 'active' AND next_run_at = ?2", row.schedule_id, row.next_run_at);
+      const current = db.get<ScheduledRow>(`SELECT ${SCHEDULED_TASK_STORAGE_SELECT} FROM scheduled_tasks WHERE schedule_id = ?1 AND status = 'active' AND next_run_at = ?2`, row.schedule_id, row.next_run_at);
       if (!current?.next_run_at) continue;
       if (current.misfire_policy === "skip" && isMissedOccurrence(current.next_run_at, now)) {
         skipScheduledMisfire(current, current.next_run_at, now);
@@ -406,7 +407,7 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
 
   if (url.pathname === "/api/scheduled-tasks" && req.method === "GET") {
     const params: unknown[] = [];
-    let sql = "SELECT * FROM scheduled_tasks WHERE 1=1";
+    let sql = `SELECT ${SCHEDULED_TASK_STORAGE_SELECT} FROM scheduled_tasks WHERE 1=1`;
     sql = addNetworkScope(sql, params, ctx.scope);
     const status = url.searchParams.get("status");
     if (status) { sql += ` AND status = ?${params.length + 1}`; params.push(status); }
@@ -439,7 +440,7 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'skip', ?12, ?13)`,
         [scheduleId, networkId, ctx.auth?.userId ?? null, name, target.node_id, target.alias, content, priority, spec.type, JSON.stringify(spec), timezone, misfirePolicy, iso(next)],
       );
-      const created = db.get<ScheduledRow>("SELECT * FROM scheduled_tasks WHERE schedule_id = ?1", scheduleId)!;
+      const created = db.get<ScheduledRow>(`SELECT ${SCHEDULED_TASK_STORAGE_SELECT} FROM scheduled_tasks WHERE schedule_id = ?1`, scheduleId)!;
       return Response.json({ ok: true, schedule: decodeRow(created) }, { status: 201 });
     } catch (e: any) {
       const code = String(e?.message || "invalid_schedule");
@@ -525,7 +526,7 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
         [name, target.node_id, target.alias, content, priority, parsed.spec.type, scheduleJson, parsed.timezone, requestedStatus, next ? iso(next) : null, misfirePolicy, row.schedule_id, row.revision],
       );
       if (updated.changes !== 1) return jsonError("revision_conflict", 409);
-      return Response.json({ ok: true, schedule: decodeRow(db.get<ScheduledRow>("SELECT * FROM scheduled_tasks WHERE schedule_id = ?1", row.schedule_id)!) });
+      return Response.json({ ok: true, schedule: decodeRow(db.get<ScheduledRow>(`SELECT ${SCHEDULED_TASK_STORAGE_SELECT} FROM scheduled_tasks WHERE schedule_id = ?1`, row.schedule_id)!) });
     } catch (e: any) {
       const code = String(e?.message || "invalid_schedule");
       return jsonError(code, code === "target_node_not_found" ? 404 : 400);
