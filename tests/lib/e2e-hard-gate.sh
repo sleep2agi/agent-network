@@ -3,7 +3,7 @@ set -euo pipefail
 
 LOG_FILE=${1:-}
 RUNNER_RC=${2:-}
-MIN_PASS=${E2E_MIN_PASS:-175}
+MIN_PASS=${E2E_MIN_PASS:-283}
 
 if [[ -z "$LOG_FILE" || ! -s "$LOG_FILE" ]]; then
   echo "ERROR: test-all.sh produced no output" >&2

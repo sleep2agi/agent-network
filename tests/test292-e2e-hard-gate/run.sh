@@ -26,7 +26,7 @@ expect_file_contains() {
 
 expect_gate_green() {
   local log=$1 rc=$2 name=$3
-  if E2E_MIN_PASS=175 bash "$GATE" "$log" "$rc" >/dev/null 2>&1; then
+  if E2E_MIN_PASS=283 bash "$GATE" "$log" "$rc" >/dev/null 2>&1; then
     pass "$name"
   else
     fail "$name"
@@ -35,7 +35,7 @@ expect_gate_green() {
 
 expect_gate_red() {
   local log=$1 rc=$2 name=$3
-  if E2E_MIN_PASS=175 bash "$GATE" "$log" "$rc" >/dev/null 2>&1; then
+  if E2E_MIN_PASS=283 bash "$GATE" "$log" "$rc" >/dev/null 2>&1; then
     fail "$name"
   else
     pass "$name"
@@ -43,8 +43,8 @@ expect_gate_red() {
 }
 
 printf 'Final Report\nTOTAL: 283 passed, 0 failed\n' > "$TMP_DIR/green.log"
-printf 'Final Report\nTOTAL: 282 passed, 1 failed\n' > "$TMP_DIR/red.log"
-printf 'Final Report\nTOTAL: 174 passed, 0 failed\n' > "$TMP_DIR/short.log"
+printf 'Final Report\nTOTAL: 283 passed, 1 failed\n' > "$TMP_DIR/red.log"
+printf 'Final Report\nTOTAL: 282 passed, 0 failed\n' > "$TMP_DIR/short.log"
 printf 'Final Report\nno total here\n' > "$TMP_DIR/missing.log"
 printf 'TOTAL: 283 passed, 0 failed\nTOTAL: malformed\n' > "$TMP_DIR/duplicate.log"
 
@@ -55,7 +55,7 @@ expect_file_contains "$RUNNER" 'pipeline_status=("${PIPESTATUS[@]}")' 'pipeline 
 expect_file_contains "$RUNNER" 'runner_rc=${pipeline_status[0]}' 'pipeline wrapper captures the runner rather than tee'
 
 bash "$RUNNER" "$TMP_DIR/runner.log" "$TMP_DIR/runner.rc" \
-  bash -c 'echo "TOTAL: 282 passed, 1 failed"; exit 7' >/dev/null
+  bash -c 'echo "TOTAL: 283 passed, 1 failed"; exit 7' >/dev/null
 if [[ $(cat "$TMP_DIR/runner.rc") == 7 ]]; then
   pass 'pipeline wrapper preserves a non-zero command exit through tee'
 else
@@ -92,7 +92,7 @@ else
   pass 'historical tee-masking mutation changed bytes'
 fi
 bash "$TMP_DIR/runner-mutant.sh" "$TMP_DIR/mutant-runner.log" "$TMP_DIR/mutant-runner.rc" \
-  bash -c 'echo "TOTAL: 282 passed, 1 failed"; exit 7' >/dev/null
+  bash -c 'echo "TOTAL: 283 passed, 1 failed"; exit 7' >/dev/null
 if [[ $(cat "$TMP_DIR/mutant-runner.rc") == 7 ]]; then
   fail 'WITNESSED_RED: no pipefail plus $? breaks the capture contract'
 else
@@ -108,7 +108,7 @@ if cmp -s "$GATE" "$TMP_DIR/gate-mutant.sh"; then
 else
   pass 'failed-count mutation changed bytes'
 fi
-if E2E_MIN_PASS=175 bash "$TMP_DIR/gate-mutant.sh" "$TMP_DIR/red.log" 0 >/dev/null 2>&1; then
+if E2E_MIN_PASS=283 bash "$TMP_DIR/gate-mutant.sh" "$TMP_DIR/red.log" 0 >/dev/null 2>&1; then
   pass 'WITNESSED_RED: removing the failed-count gate accepts a red TOTAL'
 else
   fail 'WITNESSED_RED: removing the failed-count gate accepts a red TOTAL'
