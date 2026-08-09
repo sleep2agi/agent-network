@@ -517,6 +517,17 @@ function resolveRestNodeIdForAlias(alias: string, networkId: string | null): str
   return target.state === "not_found" ? null : (target.session?.node_id ?? null);
 }
 
+function withNetworkNameAlias<T extends { network_name?: unknown }>(row: T): T & { name: string | null } {
+  return {
+    ...row,
+    // `network_name` is the canonical V3 storage/API field and remains for
+    // existing CLI/Dashboard clients. `name` is the documented REST-friendly
+    // compatibility alias; never let it drift or serialize as null when the
+    // canonical NOT NULL field is present.
+    name: typeof row.network_name === "string" ? row.network_name : null,
+  };
+}
+
 // ── REST input schema ───────────────────────────────
 const TaskSchema = z.object({
   alias: z.string().min(1).max(200),
@@ -1099,9 +1110,9 @@ return Bun.serve({
       if (resolved.networkId) {
         // ntok_ — only return the bound network
         const net = db.get<any>("SELECT * FROM networks WHERE network_id = ?1", resolved.networkId);
-        return withCors(req, Response.json({ ok: true, networks: net ? [net] : [] }));
+        return withCors(req, Response.json({ ok: true, networks: net ? [withNetworkNameAlias(net)] : [] }));
       }
-      const networks = getUserAllNetworks(resolved.user.user_id);
+      const networks = getUserAllNetworks(resolved.user.user_id).map(withNetworkNameAlias);
       return withCors(req, Response.json({ ok: true, networks }));
     }
 
