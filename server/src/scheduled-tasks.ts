@@ -484,6 +484,10 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
   if (!sub && req.method === "PATCH") {
     let body: Record<string, unknown>;
     try { body = await bodyObject(req); } catch { return jsonError("invalid_json", 400); }
+    // Cancellation/completion are terminal states. Editing must never become
+    // an implicit resurrection path (including by supplying status=active).
+    if (row.status === "cancelled") return jsonError("schedule_cancelled", 409);
+    if (row.status === "completed") return jsonError("schedule_completed", 409);
     if (!Number.isSafeInteger(body.revision) || Number(body.revision) !== row.revision) return jsonError("revision_conflict", 409, { current_revision: row.revision });
     try {
       const name = body.name === undefined ? row.name : String(body.name).trim();
@@ -500,7 +504,18 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
       const requestedStatus = body.status === undefined ? row.status : String(body.status);
       if (!new Set(["active", "paused"]).has(requestedStatus)) throw new Error("invalid_status");
       const misfirePolicy = parseMisfirePolicy(body.misfire_policy, row.misfire_policy);
-      const next = requestedStatus === "active" ? nextOccurrence(parsed.spec, parsed.timezone, new Date()) : null;
+      // Editing descriptive fields must not silently reset the schedule's
+      // cadence. Recompute only when the scheduling inputs change, when a
+      // paused schedule resumes, or when repairing an impossible active row
+      // with no next occurrence. The recompute uses the same DST-safe helper
+      // as creation and dispatch advancement.
+      const schedulingChanged = body.schedule !== undefined || body.timezone !== undefined;
+      const resumed = row.status !== "active" && requestedStatus === "active";
+      const next = requestedStatus !== "active"
+        ? null
+        : schedulingChanged || resumed || !row.next_run_at
+          ? nextOccurrence(parsed.spec, parsed.timezone, new Date())
+          : new Date(row.next_run_at);
       if (requestedStatus === "active" && !next) throw new Error("schedule_has_no_future_occurrence");
       const updated = db.run(
         `UPDATE scheduled_tasks SET name = ?1, target_node_id = ?2, target_alias = ?3, task_content = ?4,
