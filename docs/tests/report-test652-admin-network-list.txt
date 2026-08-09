@@ -1,0 +1,35 @@
+# test652 — global admin `/api/networks` visibility
+
+Date: 2026-08-10 (Asia/Shanghai)
+
+## Provenance
+
+- Base: `afddc6636d4894de0e1bd7f26372674af0e66d48`
+- Tested source: `159b73d0d084286e51d82e6629281508d4e6a873`
+- Docker tag: `anet-test652:dev`
+- Image ID: `sha256:b885b3ea19a7f8c7de8929ea3e59e5304dbaf0a472df5228b63611da3531ab29`
+- Embedded env: `TEST652_SOURCE_COMMIT=159b73d0d084286e51d82e6629281508d4e6a873`
+- Runner artifact SHA256: `fe6888ec10258f9419cccac5f45096eb4505f3e7b828d838f969dc645d34374d`
+- Runtime: Bun `1.3.14`.
+
+## Result
+
+`RESULT: PASS`
+
+- The production Hub entrypoint built successfully.
+- Real HTTP tests used two users with disjoint networks plus one network-bound
+  token: 3 tests, 0 failures, 14 assertions.
+- The global Hub admin saw both networks. Its own membership stayed `owner`;
+  the otherwise-authorized foreign network was labelled `admin`.
+- The response retained exactly the explicit public network projection plus
+  the existing `member_role` and `name` compatibility fields.
+- The ordinary user token saw only its membership network.
+- The node token saw only its bound network.
+- Restoring membership-only behavior for the global admin turned the unchanged
+  test red (`rc=1`).
+- Giving the global listing to an ordinary user turned the unchanged isolation
+  test red (`rc=1`).
+- Restored production source returned all tests to green.
+
+All users, tokens, networks, and databases were generated inside the isolated
+container. No credential value is included in the runner artifact or report.
