@@ -66,10 +66,10 @@ RESULT: PASS
 
 ## Dashboard client — Docker production build
 
-source_commit=ef8708e5fab1c9dfb80e964a43c7b420a92dd72f
-command=sg docker -c 'docker build -t anet-scheduler-dashboard:dev --build-arg SOURCE_COMMIT=ef8708e5fab1c9dfb80e964a43c7b420a92dd72f -f tests/test-scheduled-tasks/Dockerfile . && docker run --rm anet-scheduler-dashboard:dev'
+source_commit=4bbc4ea4b561392e6a0bd43b703cb9fcafb2063f
+command=sg docker -c 'docker build -t anet-scheduler-dashboard:dev --build-arg SOURCE_COMMIT=4bbc4ea4b561392e6a0bd43b703cb9fcafb2063f -f tests/test-scheduled-tasks/Dockerfile . && docker run --rm anet-scheduler-dashboard:dev'
 
-- scheduled-tasks module contract: 11 pass
+- scheduled-tasks module contract: 12 pass
 - TypeScript (`npx tsc --noEmit`): PASS
 - Next.js 16 production build: PASS, 53/53 static pages
 - generated routes include `/scheduled-tasks` and `/api/hub/scheduled-tasks/[[...path]]`
@@ -80,10 +80,10 @@ RESULT: PASS
 
 ## Official App client — Docker Expo 56 export
 
-source_commit=d96bee789a8a323ba5ed5e8711087e740310b92e
-command=sg docker -c 'docker build -t anet-scheduler-app:dev --build-arg SOURCE_COMMIT=d96bee789a8a323ba5ed5e8711087e740310b92e -f tests/test-scheduled-tasks/Dockerfile . && docker run --rm anet-scheduler-app:dev'
+source_commit=be52ae8c63e0b490323e205e9009555f0dd4ff4a
+command=sg docker -c 'docker build -t anet-scheduler-app:dev --build-arg SOURCE_COMMIT=be52ae8c63e0b490323e205e9009555f0dd4ff4a -f tests/test-scheduled-tasks/Dockerfile . && docker run --rm anet-scheduler-app:dev'
 
-- scheduled-tasks API contract: 10 pass
+- scheduled-tasks API contract: 11 pass
 - auth token remains in Authorization header; network and stable node_id are explicit
 - Expo 56 real web export: PASS, 423 modules, `index.html` emitted
 - repository-wide standalone `tsc` remains blocked by pre-existing Buffer typings in `src/attach-download.test.ts`; no scheduler file is in that diagnostic set
