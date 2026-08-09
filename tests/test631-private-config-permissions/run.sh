@@ -4,6 +4,11 @@ set -euo pipefail
 cd /work
 echo "source_commit=$TEST631_SOURCE_COMMIT"
 
+echo "L0 local-module bundle"
+bun build --target bun --packages external agent-network/bin/cli.ts --outfile /tmp/anet-cli.js
+bun build --target bun --packages external agent-node/src/cli.ts --outfile /tmp/agent-node-cli.js
+
+echo "L1 permission behavior"
 bun test agent-network/src/private-state.test.ts agent-node/src/runtime/config-apply.test.ts
 
 # Production-path inventory: every token-preserving config write must use a
