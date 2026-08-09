@@ -53,19 +53,19 @@ run_missing_binary() {
   if [ "$rc" -eq 0 ]; then
     echo "FAIL: missing claude returned success"
     cat "$log"
-    exit 1
+    return 1
   fi
-  grep -Fq 'Cannot start: claude-code-cli requires the Claude Code CLI' "$log"
-  grep -Fq 'npm install -g @anthropic-ai/claude-code' "$log"
-  grep -Fq 'claude auth login' "$log"
-  grep -Fq -- '--runtime claude-agent-sdk' "$log"
+  grep -Fq 'Cannot start: claude-code-cli requires the Claude Code CLI' "$log" || return 1
+  grep -Fq 'npm install -g @anthropic-ai/claude-code' "$log" || return 1
+  grep -Fq 'claude auth login' "$log" || return 1
+  grep -Fq -- '--runtime claude-agent-sdk' "$log" || return 1
   if grep -Fq 'requires an interactive TTY' "$log"; then
     echo "FAIL: launch advanced past the dependency preflight"
     cat "$log"
-    exit 1
+    return 1
   fi
-  test ! -e "$root/.mcp.json"
-  test ! -e "$root/.anet/nodes/n_test608/.pid"
+  test ! -e "$root/.mcp.json" || return 1
+  test ! -e "$root/.anet/nodes/n_test608/.pid" || return 1
 }
 
 echo "L0 typecheck + source contract"
