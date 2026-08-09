@@ -1,0 +1,28 @@
+# test614 — REST single-network task resolution
+
+Date: 2026-08-09
+Source commit: 58748178d0e2abefe6e656e3a8339df51bbee5f6
+Base commit: bdb722c2248a6dbcace724f6ee365e584d1e0b93
+Docker image: anet-test614:dev
+Image ID: sha256:7bdbc4c78e7886afc8640e278992e16cf2ba0d42398c3ad428748fc4b58f3e3b
+Embedded ENV: TEST614_SOURCE_COMMIT=58748178d0e2abefe6e656e3a8339df51bbee5f6
+Raw runner report SHA256: `463fb3a03d169d76fd951fd1457e9fd257aecc9fa048cf8bdc3496c9a850f52e`
+
+## Result
+
+PASS
+
+- L0: real `bootServer()` HTTP matrix — 5 pass, 0 fail, 13 assertions.
+- A system admin with exactly one real network membership omitted
+  `network_id`; the task was accepted and persisted in that network.
+- The existing ordinary single-network user fallback remained green.
+- Admins with zero or multiple memberships received HTTP 400 with the stable
+  `network_id_required` code and factually accurate message.
+- A multi-network admin could still select an explicit network.
+- L1: production Hub bundle completed (257 modules).
+- L2 witnessed-red: deleting only the admin single-membership fallback made
+  its exact HTTP behavior test fail (`rc=1`).
+- L3: restoring the production implementation returned all five tests green.
+
+Read scoping remains unchanged: admins still retain intentional global read
+scope. Only unambiguous REST write-target resolution changes.
