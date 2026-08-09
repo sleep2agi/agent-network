@@ -1,0 +1,78 @@
+# test604 — Hub scheduled-task editing
+
+Date: 2026-08-09 (Asia/Shanghai)
+
+## Exact source coordinates
+
+- Hub base: `0546365dad96aa1d2dca36edbe71761b48aa3ba4`
+- Hub source: `fa6a07b7dd00314e34f6729221a577194a6a80a0`
+- Dashboard base: `79723e419d8549c24dd7e1a5969f923abc241127`
+- Dashboard source: `3c4ed457d5c8f0f05f2ec396577b81ec759bd149`
+- App base: `30fbe916763b3421c61de99e5340e89638043f29`
+- App source: `79eab938229351312e46f00df80af4439f4d80c4`
+
+All three source worktrees were clean after their source commits. No production
+runtime, database, global npm installation, or existing dirty checkout was
+modified.
+
+## Behavior delivered
+
+- Dashboard and Expo App expose Edit only for active/paused schedules.
+- The form restores and can update name, stable target node, task content,
+  priority, schedule, IANA timezone, and misfire policy.
+- PATCH carries the exact row revision. Concurrent editors produce one winner
+  and one `409 revision_conflict`; both clients close stale state, reload the
+  authoritative row, and show a specific retry message.
+- Cancelled and completed schedules are terminal and cannot be edited or
+  revived through PATCH.
+- Target replacement is revalidated against the schedule's network.
+- Invalid misfire policies fail closed.
+- Identical schedule/timezone values do not reset `next_run_at`; actual schedule
+  changes recompute through the existing DST-safe `nextOccurrence` path.
+- Arbitrary valid interval seconds round-trip without silent unit conversion.
+
+## Docker evidence
+
+### Hub — real HTTP server + SQLite
+
+Command:
+
+`sg docker -c 'docker run --rm -v <artifact-dir>:/artifacts anet-test604:dev'`
+
+- Image ID: `sha256:0dd15bb49faf8fc969f5ab96e3e9eaaba50de9cc43072ef79ce0263187759f3c`
+- Embedded `TEST604_SOURCE_COMMIT`: `fa6a07b7dd00314e34f6729221a577194a6a80a0`
+- Green: 12 tests, 106 assertions, 0 failures; restored-green repeated the same result.
+- Witnessed-red mutations (all rc=1):
+  - cancelled schedule resurrection guard removed
+  - unchanged-form cadence preservation removed
+  - edit target network scope removed
+  - edit misfire validation removed
+  - DST-safe edit recompute replaced with naive +60 seconds
+  - optimistic revision precondition removed
+- Final line: `RESULT: PASS`
+
+### Dashboard — contract, TypeScript, production Next build
+
+Command: `sg docker -c 'docker run --rm anet-dashboard-schedule-edit:dev'`
+
+- Image ID: `sha256:0fa9d29ae7dcb634455c07e58e883a517e0459c916fc5d90614375bf72412e45`
+- Embedded `DASHBOARD_SCHEDULER_SOURCE_COMMIT`: `3c4ed457d5c8f0f05f2ec396577b81ec759bd149`
+- Contract: 18 checks passed.
+- `npx tsc --noEmit`: passed.
+- `next build`: 53/53 static pages, `/scheduled-tasks` generated.
+- Final line: `RESULT: PASS`
+
+### Expo App — API contract + real Expo 56 web export
+
+Command: `sg docker -c 'docker run --rm anet-app-schedule-edit:dev'`
+
+- Image ID: `sha256:cbdc408a6568ebc325e1819f4f277acc0fca18ca728c1362060bb22b2c5946e4`
+- Embedded `APP_SCHEDULER_SOURCE_COMMIT`: `79eab938229351312e46f00df80af4439f4d80c4`
+- API/UI contract: 17 checks passed.
+- Expo 56 Metro export: 423 modules, 40 assets, `index.html` present.
+- Final line: `RESULT: PASS`
+
+## Deployment status
+
+Candidate only. Not merged, published, deployed, or applied to production.
+Independent adversarial review and explicit rollout GO remain required.

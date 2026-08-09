@@ -338,6 +338,95 @@ describe("Hub scheduled task API and dispatcher", () => {
     expect(renamedTask.to_name).toBe("scheduler-renamed");
   });
 
+  test("full edit validates target and policy, preserves cadence, and recomputes through DST-safe schedule math", async () => {
+    // Pin a recognizable future occurrence so a metadata-only edit can prove
+    // that it does not silently reset the interval cadence.
+    const pinnedNext = new Date(Date.now() + 45 * 60_000).toISOString();
+    db.run("UPDATE scheduled_tasks SET next_run_at = ?1 WHERE schedule_id = ?2", [pinnedNext, scheduleId]);
+    let current = (await api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`)).body.schedule;
+    const metadataOnly = await api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        revision: current.revision,
+        name: "Edited briefing",
+        task: "Summarize only verified release changes",
+        priority: "low",
+        misfire_policy: "skip",
+        // Dashboard/mobile submit a complete form. Identical scheduling
+        // values still count as a metadata-only edit and must preserve cadence.
+        schedule: current.schedule,
+        timezone: current.timezone,
+      }),
+    });
+    expect(metadataOnly.status).toBe(200);
+    expect(metadataOnly.body.schedule.name).toBe("Edited briefing");
+    expect(metadataOnly.body.schedule.task_content).toBe("Summarize only verified release changes");
+    expect(metadataOnly.body.schedule.priority).toBe("low");
+    expect(metadataOnly.body.schedule.misfire_policy).toBe("skip");
+    expect(metadataOnly.body.schedule.next_run_at).toBe(pinnedNext);
+
+    // A schedule/timezone edit must reuse nextOccurrence's IANA/DST behavior.
+    const beforeEdit = new Date();
+    const dstEdit = await api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        revision: metadataOnly.body.schedule.revision,
+        schedule: { type: "daily", time: "01:30" },
+        timezone: "America/New_York",
+      }),
+    });
+    expect(dstEdit.status).toBe(200);
+    expect(dstEdit.body.schedule.schedule).toEqual({ type: "daily", time: "01:30" });
+    expect(dstEdit.body.schedule.timezone).toBe("America/New_York");
+    const expectedFloor = nextOccurrence({ type: "daily", time: "01:30" }, "America/New_York", beforeEdit)!;
+    expect(new Date(dstEdit.body.schedule.next_run_at).getTime()).toBe(expectedFloor.getTime());
+
+    const invalidPolicy = await api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ revision: dstEdit.body.schedule.revision, misfire_policy: "run_everything" }),
+    });
+    expect(invalidPolicy.status).toBe(400);
+    expect(invalidPolicy.body.error).toBe("invalid_misfire_policy");
+
+    const foreign = register(`scheduler_edit_foreign_${Date.now()}`, "SchedulerEditForeign123!", undefined, "seed");
+    expect(foreign.ok).toBe(true);
+    const foreignNetworkId = foreign.network_id!;
+    const foreignNodeId = `n_foreign_edit_${Date.now()}`;
+    db.run(
+      "INSERT INTO nodes (node_id, node_name, alias, runtime, network_id) VALUES (?1, 'Foreign Edit Node', 'foreign-edit-node', 'codex-sdk', ?2)",
+      [foreignNodeId, foreignNetworkId],
+    );
+    const crossNetwork = await api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ revision: dstEdit.body.schedule.revision, target_node_id: foreignNodeId }),
+    });
+    expect(crossNetwork.status).toBe(404);
+    expect(crossNetwork.body.error).toBe("target_node_not_found");
+    current = (await api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`)).body.schedule;
+    expect(current.target_node_id).toBe(nodeId);
+    expect(current.revision).toBe(dstEdit.body.schedule.revision);
+  });
+
+  test("two editors with one revision produce one winner and one refreshable conflict", async () => {
+    const current = (await api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`)).body.schedule;
+    const [a, b] = await Promise.all([
+      api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ revision: current.revision, name: "Concurrent editor A" }),
+      }),
+      api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ revision: current.revision, name: "Concurrent editor B" }),
+      }),
+    ]);
+    expect([a.status, b.status].sort()).toEqual([200, 409]);
+    const conflict = a.status === 409 ? a : b;
+    expect(conflict.body.error).toBe("revision_conflict");
+    const latest = (await api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`)).body.schedule;
+    expect(latest.revision).toBe(current.revision + 1);
+    expect(["Concurrent editor A", "Concurrent editor B"]).toContain(latest.name);
+  });
+
   test("optimistic revision, pause/resume, run-now and cancel preserve history", async () => {
     const latest = await api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`);
     revision = latest.body.schedule.revision;
@@ -355,6 +444,16 @@ describe("Hub scheduled task API and dispatcher", () => {
     expect(manual.body.taskId).toBeTruthy();
     const cancelled = await api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`, { method: "DELETE" });
     expect(cancelled.body.status).toBe("cancelled");
+    const cancelledRow = (await api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`)).body.schedule;
+    const resurrect = await api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ revision: cancelledRow.revision, status: "active", name: "must not revive" }),
+    });
+    expect(resurrect.status).toBe(409);
+    expect(resurrect.body.error).toBe("schedule_cancelled");
+    const stillCancelled = (await api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`)).body.schedule;
+    expect(stillCancelled.status).toBe("cancelled");
+    expect(stillCancelled.revision).toBe(cancelledRow.revision);
     const runs = await api(ownerToken, `/api/scheduled-tasks/${scheduleId}/runs?network_id=${encodeURIComponent(networkId)}`);
     expect(runs.body.runs.length).toBeGreaterThanOrEqual(4);
   });
