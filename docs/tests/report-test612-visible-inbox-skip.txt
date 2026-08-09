@@ -1,0 +1,26 @@
+# Test 612 — Visible inbox skip diagnostics
+
+Date: 2026-08-09
+
+## Provenance
+
+- Source commit: `9c3708d87bae23b55cfb280f63031b3f24bfea0b`
+- Docker image: `anet-test612:dev`
+- Image ID: `sha256:ded0f9ae44e953498a983105e202c95a254be177832d1b25ae63779acb0b9020`
+- Embedded `TEST612_SOURCE_COMMIT`: `9c3708d87bae23b55cfb280f63031b3f24bfea0b`
+- Runner artifact SHA-256: `dbecf534b2734d75bf5d5f60c2a0c13dbc90de9a1b0aad84e0ad92f58f7c60f0`
+
+## Result
+
+`RESULT: PASS`
+
+1. Formatter and source wiring passed: 4 tests, 19 assertions.
+2. The complete `agent-node` production bundle built successfully.
+3. Self, own-prefix, cooldown, and low-value skip diagnostics identify sender, reason, complete task ID, routing-layer disposition, and acknowledgement without accepting message content.
+4. Witnessed-red mutation: downgrading the call from `log` to `debug` made the INFO-level wiring contract fail with `rc=1`.
+5. Witnessed-red mutation: truncating the task ID to eight characters made the formatter contract fail with `rc=1`.
+6. Restoring the source returned all tests to green.
+
+## Scope
+
+Observability only. Inbox filtering, acknowledgement, model delivery, persistence, Hub behavior, and production processes are unchanged.
