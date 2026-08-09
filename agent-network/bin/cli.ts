@@ -17,6 +17,12 @@ import { homedir } from "os";
 import { spawn, spawnSync, execSync, execFileSync } from "child_process";
 import { createHash, randomBytes, randomUUID } from "crypto";
 import {
+  atomicWritePrivateFile,
+  atomicWritePrivateJson,
+  ensurePrivateDirectory,
+  repairPrivateFilePermissions,
+} from "../src/private-state";
+import {
   writeMarker as writeCopresenceMarker,
   readMarker as readCopresenceMarker,
   removeMarker as removeCopresenceMarker,
@@ -597,7 +603,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   rawCfg.codexAppServerUrl = wsUrl;
   rawCfg.codexThreadId = threadId;
   delete rawCfg.session;
-  writeFileSync(rawCfgPath, JSON.stringify(rawCfg, null, 2) + "\n");
+  atomicWritePrivateJson(rawCfgPath, rawCfg);
 
   // ── piece ② bridge (agent-node adopt mode) ────────────────────────────
   // The bridge re-invokes `anet node start` in foreground under tmux; that
@@ -957,21 +963,21 @@ async function sseAllConnected(hub: string, aliases: string[]): Promise<"yes" | 
 
 function loadGlobal(): Record<string, any> {
   const p = globalConfigPath();
+  repairPrivateFilePermissions(p);
   if (existsSync(p)) try { return JSON.parse(readFileSync(p, "utf-8")); } catch {}
   return {};
 }
 
 function saveGlobal(data: Record<string, any>) {
   const dir = join(home, ".anet");
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  try { chmodSync(dir, 0o700); } catch {}
+  ensurePrivateDirectory(dir);
   const configPath = join(dir, "config.json");
-  writeFileSync(configPath, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
-  try { chmodSync(configPath, 0o600); } catch {}
+  atomicWritePrivateJson(configPath, data);
 }
 
 function loadServerConfig(): Record<string, any> {
   const p = serverConfigPath();
+  repairPrivateFilePermissions(p);
   if (existsSync(p)) try { return JSON.parse(readFileSync(p, "utf-8")); } catch {}
   return {};
 }
@@ -1012,9 +1018,8 @@ function refreshNodeServerJsAt(targetPath: string, opts: { overwrite: boolean })
 function saveServerConfig(data: Record<string, any>) {
   const dir = join(home, ".anet", "server");
   const p = serverConfigPath();
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(p, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
-  try { chmodSync(p, 0o600); } catch {}
+  ensurePrivateDirectory(dir);
+  atomicWritePrivateJson(p, data);
 }
 
 function serverAuthTokenFromConfig(config = loadServerConfig()): string {
@@ -1028,13 +1033,13 @@ function commhubDbPath() {
 function saveAdminUtok(data: Record<string, any>) {
   const dir = join(home, ".anet", "server");
   const p = adminUtokPath();
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(p, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
-  try { chmodSync(p, 0o600); } catch {}
+  ensurePrivateDirectory(dir);
+  atomicWritePrivateJson(p, data);
 }
 
 function loadAdminUtok(): Record<string, any> {
   const p = adminUtokPath();
+  repairPrivateFilePermissions(p);
   if (existsSync(p)) try { return JSON.parse(readFileSync(p, "utf-8")); } catch {}
   return {};
 }
@@ -1173,6 +1178,7 @@ function validateNodeName(name: string) {
 
 function loadProfile(id: string): Profile | null {
   const p = join(nodesDir(), id, "config.json");
+  repairPrivateFilePermissions(p);
   if (!existsSync(p)) return null;
   try {
     const project = JSON.parse(readFileSync(p, "utf-8"));
@@ -1182,6 +1188,7 @@ function loadProfile(id: string): Profile | null {
 
 function loadStoredProfile(id: string): Profile | null {
   const p = join(nodesDir(), id, "config.json");
+  repairPrivateFilePermissions(p);
   if (!existsSync(p)) return null;
   try {
     const project = JSON.parse(readFileSync(p, "utf-8"));
@@ -1247,8 +1254,7 @@ function saveProfile(id: string, profile: Profile) {
     assertOpencodeNodeStateUntracked(dir);
     writeOpencodeRuntimeBinding(dir, opencodeBindingHome());
   } else {
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    try { chmodSync(dir, 0o700); } catch {}
+    ensurePrivateDirectory(dir);
   }
   const normalized = normalizeStoredProfile(id, profile);
   const toSave: Record<string, any> = {
@@ -1296,8 +1302,7 @@ function saveProfile(id: string, profile: Profile) {
     writeOpencodePrivateProfileFile(dir, "config.json", body);
   } else {
     const configPath = join(dir, "config.json");
-    writeFileSync(configPath, body, { mode: 0o600 });
-    try { chmodSync(configPath, 0o600); } catch {}
+    atomicWritePrivateFile(configPath, body);
   }
 }
 
@@ -2516,7 +2521,7 @@ async function initProject() {
   const token = gc.token || "";
   let envContent = `COMMHUB_URL=${hub}\n`;
   if (token) envContent += `COMMHUB_TOKEN=${token}\n`;
-  writeFileSync(envPath, envContent);
+  atomicWritePrivateFile(envPath, envContent);
   console.log(`CommHub URL: ${hub}${token ? " (with token)" : ""}`);
 
   // 4. .mcp.json（指向 .anet/node-server.js）
@@ -2753,6 +2758,7 @@ function resolveProfileEnv(profileEnv: Record<string, any> | undefined, home: st
 // or unreadable. Caller logs the *key count* — never the values.
 function loadNodeDotenv(nodeId: string): Record<string, string> {
   const path = join(nodesDir(), nodeId, ".env");
+  repairPrivateFilePermissions(path);
   if (!existsSync(path)) return {};
   try {
     return parseNodeDotenv(readFileSync(path, "utf-8"));
@@ -2885,8 +2891,7 @@ function rewritePlainSecretsToEnvRef(nodeId: string, profile: Profile): void {
     const body = Object.entries(merged).map(([k, v]) => `${k}=${v}`).join("\n") + "\n";
     if (isOpencode) writeOpencodePrivateProfileFile(nodeDir, ".env", body);
     else {
-      writeFileSync(dotenvPath, body, { mode: 0o600 });
-      chmodSync(dotenvPath, 0o600);
+      atomicWritePrivateFile(dotenvPath, body);
     }
     ensureNodeDotenvGitignore();
   } catch (e: any) {
@@ -3070,8 +3075,7 @@ function writeTelegramChannelConfig(nodeId: string, botToken: string, allowId: s
   mkdirSync(join(channelDir, "inbox"), { recursive: true });
 
   const envPath = join(channelDir, ".env");
-  writeFileSync(envPath, `TELEGRAM_BOT_TOKEN=${botToken}\n`);
-  try { chmodSync(envPath, 0o600); } catch {}
+  atomicWritePrivateFile(envPath, `TELEGRAM_BOT_TOKEN=${botToken}\n`);
 
   writeAccessJsonAtomic(join(channelDir, "access.json"), {
     dmPolicy: "allowlist",
@@ -3115,8 +3119,7 @@ function writeFeishuChannelConfig(
   const existingChats = parseFeishuAllowlistField(existing.allowChats, "allowChats", accessPath);
 
   const envPath = join(channelDir, ".env");
-  writeFileSync(envPath, `FEISHU_APP_ID=${appId}\nFEISHU_APP_SECRET=${appSecret}\n`);
-  try { chmodSync(envPath, 0o600); } catch {}
+  atomicWritePrivateFile(envPath, `FEISHU_APP_ID=${appId}\nFEISHU_APP_SECRET=${appSecret}\n`);
 
   writeAccessJsonAtomic(accessPath, {
     ...existing,
@@ -4143,8 +4146,7 @@ function ensureMcpJson(profile: Profile) {
   const token = profile.token || "";
   let envContent = `COMMHUB_URL=${profile.hub || "http://127.0.0.1:9200"}\n`;
   if (token) envContent += `COMMHUB_TOKEN=${token}\n`;
-  writeFileSync(anetEnvPath, envContent, { mode: 0o600 });
-  chmodSync(anetEnvPath, 0o600);
+  atomicWritePrivateFile(anetEnvPath, envContent);
 
   // #245 codex-sdk fix — only write `.mcp.json` for claude-code-cli. codex-sdk
   // does not read cwd `.mcp.json`; it reads `~/.codex/config.toml [mcp_servers.*]`
@@ -6121,8 +6123,8 @@ async function daemonInitCommand() {
     flags: { dangerouslySkipPermissions: true, teammateMode: true },
   };
   const dir = join(nodesDir(), id);
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "config.json"), JSON.stringify(daemonConfig, null, 2) + "\n");
+  ensurePrivateDirectory(dir);
+  atomicWritePrivateJson(join(dir, "config.json"), daemonConfig);
 
   console.log(`[anet daemon] ✓ ${existing ? "re-initialized" : "created"} host_supervisor daemon "${id}"`);
   console.log(`              config:     .anet/nodes/${id}/config.json`);
@@ -6259,8 +6261,8 @@ async function importCommand() {
       session: s.resume_id,
     };
 
-    mkdirSync(nodeDir, { recursive: true });
-    writeFileSync(configPath, JSON.stringify({
+    ensurePrivateDirectory(nodeDir);
+    atomicWritePrivateJson(configPath, {
       anet_version: config.anet_version,
       node_id: config.node_id,
       node_name: config.node_name,
@@ -6269,7 +6271,7 @@ async function importCommand() {
       env: config.env,
       flags: config.flags,
       session: config.session,
-    }, null, 2) + "\n");
+    });
     console.log(`  ✅ ${s.alias} → ${projectDir}/.anet/nodes/${s.alias}/config.json`);
     created++;
   }
@@ -6868,7 +6870,7 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
         const newCfg = JSON.parse(readFileSync(newCfgPath, "utf-8"));
         if (oldCfg.session && oldCfg.session !== newCfg.session) {
           newCfg.session = oldCfg.session;
-          writeFileSync(newCfgPath, JSON.stringify(newCfg, null, 2) + "\n");
+          atomicWritePrivateJson(newCfgPath, newCfg);
           console.log(`[anet] re-synced session ${String(oldCfg.session).slice(0, 8)}… from old config (post-task writeback) — context preserved.`);
         }
       }
@@ -10247,7 +10249,7 @@ async function demoDebateCommand() {
       const cfgPath = join(nodesRoot, alias, "config.json");
       const cfg = JSON.parse(readFileSync(cfgPath, "utf-8"));
       cfg.systemPrompt = DEBATE_PROMPTS[role](topic);
-      writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+      atomicWritePrivateJson(cfgPath, cfg);
     }
     console.log(`        ✓ 创建/更新 6 个 agent`);
   } finally {
@@ -10638,7 +10640,7 @@ async function demoSocialMediaCommand() {
       const cfgPath = join(nodesRoot, alias, "config.json");
       const cfg = JSON.parse(readFileSync(cfgPath, "utf-8"));
       cfg.systemPrompt = SOCIAL_PROMPTS[role](topic, platform);
-      writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+      atomicWritePrivateJson(cfgPath, cfg);
     }
     console.log(`        ✓ 4 个 agent 就位`);
   } finally {
@@ -11061,7 +11063,7 @@ async function demoPrReviewCommand() {
       const cfgPath = join(nodesRoot, alias, "config.json");
       const cfg = JSON.parse(readFileSync(cfgPath, "utf-8"));
       cfg.systemPrompt = PR_REVIEW_PROMPTS[role]();
-      writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+      atomicWritePrivateJson(cfgPath, cfg);
     }
     console.log(`        ✓ 创建/更新 4 个 agent`);
   } finally {
@@ -12233,7 +12235,7 @@ async function migrateTokenToEnvRefCommand() {
   }
   const bakPath = `${cfgPath}.bak-${Date.now()}`;
   try {
-    writeFileSync(bakPath, readFileSync(cfgPath, "utf-8"));
+    atomicWritePrivateFile(bakPath, readFileSync(cfgPath, "utf-8"));
   } catch (e: any) {
     console.error(`[anet] Failed to write backup ${bakPath}: ${e.message}`);
     process.exit(1);
@@ -12409,7 +12411,7 @@ async function migrateNode(id: string, opts: { hub: string; utok: string; networ
     }
   }
 
-  writeFileSync(p, JSON.stringify(raw, null, 2) + "\n");
+  atomicWritePrivateJson(p, raw);
   return { ok: true, changes };
 }
 

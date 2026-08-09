@@ -17,13 +17,21 @@
 // the path without terminating the test runner.
 
 import {
+  closeSync,
+  constants,
   existsSync,
-  copyFileSync,
+  fchmodSync,
+  fstatSync,
+  fsyncSync,
+  lstatSync,
+  openSync,
   readFileSync,
+  rmSync,
   writeFileSync,
   renameSync,
-  unlinkSync,
 } from "node:fs";
+import { basename, dirname, join, resolve, sep } from "node:path";
+import { randomBytes } from "node:crypto";
 
 /** Sentinel exit code for "supervisor please restart me with the new
  * config" — borrows BSD EX_TEMPFAIL semantics. The parent supervisor
@@ -187,19 +195,85 @@ export function computeApplyMode(patch: ConfigPatch): ApplyMode {
  * (caught by cross-agent review on PR B).
  */
 export function atomicWriteJson(path: string, data: unknown): void {
-  const tmp = `${path}.tmp.${process.pid}.${Date.now()}`;
+  atomicWritePrivateText(path, JSON.stringify(data, null, 2) + "\n");
+}
+
+function atomicWritePrivateText(path: string, body: string): void {
+  const parent = dirname(path);
+  repairPrivateDirectory(parent, isManagedAnetDirectory(parent));
+  const tmp = join(parent, `.${basename(path)}.${randomBytes(12).toString("hex")}.tmp`);
+  let fd: number | undefined;
   try {
-    writeFileSync(tmp, JSON.stringify(data, null, 2) + "\n");
+    fd = openSync(
+      tmp,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW || 0),
+      0o600,
+    );
+    writeFileSync(fd, body, "utf8");
+    fchmodSync(fd, 0o600);
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = undefined;
     renameSync(tmp, path);
   } catch (e) {
-    // Best-effort cleanup; ignore if tmp doesn't exist or unlink fails.
-    // unlinkSync imported at module top — strict-ESM compatible (the
-    // earlier `require("node:fs")` inline would fail under runtimes
-    // without CJS interop).
-    try {
-      if (existsSync(tmp)) unlinkSync(tmp);
-    } catch { /* swallow */ }
+    if (fd !== undefined) try { closeSync(fd); } catch {}
+    rmSync(tmp, { force: true });
     throw e;
+  }
+}
+
+/**
+ * Only Agent Network-owned state below a literal `.anet` path component has
+ * a product contract that its directory is private. `--config` is a public
+ * flag and may point at `$HOME/agent.json`, a project checkout, or another
+ * operator-owned directory; changing that parent to 0700 would be a
+ * destructive, surprising side effect. Files are still repaired/written as
+ * 0600 everywhere, but directory tightening is scoped to managed state.
+ */
+function isManagedAnetDirectory(path: string): boolean {
+  return resolve(path).split(sep).includes(".anet");
+}
+
+function repairPrivateDirectory(path: string, tightenMode: boolean): void {
+  const before = lstatSync(path);
+  if (before.isSymbolicLink() || !before.isDirectory()) {
+    throw new Error(`private config refuses non-directory or linked parent: ${path}`);
+  }
+  const fd = openSync(path, constants.O_RDONLY | (constants.O_DIRECTORY || 0) | (constants.O_NOFOLLOW || 0));
+  try {
+    const opened = fstatSync(fd);
+    const uid = process.getuid?.();
+    if (!opened.isDirectory()
+      || (uid !== undefined && opened.uid !== uid)
+      || opened.dev !== before.dev || opened.ino !== before.ino) {
+      throw new Error(`private config parent is not owner-controlled: ${path}`);
+    }
+    if (tightenMode) fchmodSync(fd, 0o700);
+  } finally { closeSync(fd); }
+}
+
+/** Tighten legacy umask-derived config state before reading any token. */
+export function repairPrivateConfigPermissions(path: string): void {
+  if (!existsSync(path) && !existsSync(`${path}.prev`)) return;
+  const parent = dirname(path);
+  repairPrivateDirectory(parent, isManagedAnetDirectory(parent));
+  for (const candidate of [path, `${path}.prev`]) {
+    if (!existsSync(candidate)) continue;
+    const before = lstatSync(candidate);
+    if (before.isSymbolicLink() || !before.isFile() || before.nlink !== 1) {
+      throw new Error(`private config refuses linked or non-regular file: ${candidate}`);
+    }
+    const fd = openSync(candidate, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+    try {
+      const opened = fstatSync(fd);
+      const uid = process.getuid?.();
+      if (!opened.isFile() || opened.nlink !== 1
+        || (uid !== undefined && opened.uid !== uid)
+        || opened.dev !== before.dev || opened.ino !== before.ino) {
+        throw new Error(`private config is not owner-controlled: ${candidate}`);
+      }
+      fchmodSync(fd, 0o600);
+    } finally { closeSync(fd); }
   }
 }
 
@@ -208,7 +282,7 @@ export function atomicWriteJson(path: string, data: unknown): void {
  * config (first-write case) — caller handles. */
 export function backupConfigPrev(path: string): { backedUp: boolean } {
   if (!existsSync(path)) return { backedUp: false };
-  copyFileSync(path, `${path}.prev`);
+  atomicWritePrivateText(`${path}.prev`, readFileSync(path, "utf8"));
   return { backedUp: true };
 }
 
@@ -239,7 +313,7 @@ export function loadConfigWithSelfHeal(path: string): SelfHealOutcome {
     const prevTxt = readFileSync(prevPath, "utf-8");
     const prevParsed = JSON.parse(prevTxt);
     // Recovery: copy .prev back to primary so the next boot uses it.
-    copyFileSync(prevPath, path);
+    atomicWritePrivateText(path, prevTxt);
     return { config: prevParsed, source: "prev", primaryError };
   } catch (e: any) {
     throw new Error(
