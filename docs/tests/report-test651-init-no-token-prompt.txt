@@ -1,0 +1,32 @@
+# test651 — `anet init` has no implicit legacy-token prompt
+
+Date: 2026-08-10 (Asia/Shanghai)
+
+## Provenance
+
+- Base: `ed608a8c699c8c7676c5b9c3d4f1a2909357dc5f`
+- Tested source: `1ca1e2551e883a9d66c48e5b22f4d330dda639b4`
+- Docker tag: `anet-test651:dev`
+- Image ID: `sha256:f647db9ac24ebef521318388122b506e3c29c80c04359d086d88c709fa07f3be`
+- Embedded env: `TEST651_SOURCE_COMMIT=1ca1e2551e883a9d66c48e5b22f4d330dda639b4`
+- Runner artifact SHA256: `335e96f5030c1042b6f8bd27ea9a7e6dece16c230e5550190f6d1e23c0698eee`
+- Runtime: Bun `1.3.14`; production CLI bundle executed with Node.
+
+## Result
+
+`RESULT: PASS`
+
+- The production CLI bundle built successfully.
+- Default `anet init --hub <url>` made an unauthenticated `/health` request,
+  printed no `Auth token` prompt, and persisted no token field.
+- Explicit `anet init --hub <url> --token <tok>` still sent the legacy Bearer
+  credential and persisted it, preserving the compatibility path requested by
+  issue #56.
+- Restoring the implicit prompt made the unchanged default-path assertion fail
+  (`rc=1`).
+- Discarding the explicit flag made the unchanged legacy compatibility
+  assertion fail (`rc=1`).
+- Restoring production source returned both paths to green.
+
+The isolated fake Hub and temporary HOME contain only synthetic credentials.
+No credential value is printed in the runner artifact or this report.
