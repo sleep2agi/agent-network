@@ -30,7 +30,7 @@ import {
   writeFileSync,
   renameSync,
 } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { randomBytes } from "node:crypto";
 
 /** Sentinel exit code for "supervisor please restart me with the new
@@ -200,7 +200,7 @@ export function atomicWriteJson(path: string, data: unknown): void {
 
 function atomicWritePrivateText(path: string, body: string): void {
   const parent = dirname(path);
-  repairPrivateDirectory(parent);
+  repairPrivateDirectory(parent, isManagedAnetDirectory(parent));
   const tmp = join(parent, `.${basename(path)}.${randomBytes(12).toString("hex")}.tmp`);
   let fd: number | undefined;
   try {
@@ -222,7 +222,19 @@ function atomicWritePrivateText(path: string, body: string): void {
   }
 }
 
-function repairPrivateDirectory(path: string): void {
+/**
+ * Only Agent Network-owned state below a literal `.anet` path component has
+ * a product contract that its directory is private. `--config` is a public
+ * flag and may point at `$HOME/agent.json`, a project checkout, or another
+ * operator-owned directory; changing that parent to 0700 would be a
+ * destructive, surprising side effect. Files are still repaired/written as
+ * 0600 everywhere, but directory tightening is scoped to managed state.
+ */
+function isManagedAnetDirectory(path: string): boolean {
+  return resolve(path).split(sep).includes(".anet");
+}
+
+function repairPrivateDirectory(path: string, tightenMode: boolean): void {
   const before = lstatSync(path);
   if (before.isSymbolicLink() || !before.isDirectory()) {
     throw new Error(`private config refuses non-directory or linked parent: ${path}`);
@@ -236,14 +248,15 @@ function repairPrivateDirectory(path: string): void {
       || opened.dev !== before.dev || opened.ino !== before.ino) {
       throw new Error(`private config parent is not owner-controlled: ${path}`);
     }
-    fchmodSync(fd, 0o700);
+    if (tightenMode) fchmodSync(fd, 0o700);
   } finally { closeSync(fd); }
 }
 
 /** Tighten legacy umask-derived config state before reading any token. */
 export function repairPrivateConfigPermissions(path: string): void {
   if (!existsSync(path) && !existsSync(`${path}.prev`)) return;
-  repairPrivateDirectory(dirname(path));
+  const parent = dirname(path);
+  repairPrivateDirectory(parent, isManagedAnetDirectory(parent));
   for (const candidate of [path, `${path}.prev`]) {
     if (!existsSync(candidate)) continue;
     const before = lstatSync(candidate);

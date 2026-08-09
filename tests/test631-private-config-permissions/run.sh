@@ -33,6 +33,35 @@ test "$(grep -c 'atomicWriteJson(configFilePath, cfg)' agent-node/src/cli.ts)" -
 test "$(grep -c 'repairPrivateConfigPermissions' agent-node/src/cli.ts)" -eq 5
 grep -A2 'function loadEnvFile(path: string)' agent-node/src/cli.ts | grep -q 'repairPrivateConfigPermissions(path)'
 
+# Real startup gate: an existing legacy config must be repaired before the
+# process reaches any Hub/runtime work. Use an isolated HOME + unreachable Hub,
+# then stop only the exact PID we launched.
+startup_repair_gate() {
+  local root="$1"
+  test ! -e "$root"
+  mkdir -p "$root/home" "$root/.anet/nodes/legacy"
+  local cfg="$root/.anet/nodes/legacy/config.json"
+  cat >"$cfg" <<'JSON'
+{"alias":"legacy","node_id":"n_test631","runtime":"claude-agent-sdk","model":"synthetic","hub":"http://127.0.0.1:1","token":"ntok_synthetic"}
+JSON
+  chmod 0644 "$cfg"
+  HOME="$root/home" bun agent-node/src/cli.ts --config "$cfg" --alias legacy \
+    >"$root/start.log" 2>&1 &
+  local pid=$!
+  for _ in $(seq 1 100); do
+    if [ "$(stat -c '%a' "$cfg")" = 600 ]; then break; fi
+    if ! kill -0 "$pid" 2>/dev/null; then break; fi
+    sleep 0.02
+  done
+  local mode
+  mode=$(stat -c '%a' "$cfg")
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  test "$mode" = 600
+}
+
+startup_repair_gate /tmp/test631-startup-green
+
 # Witnessed red 1: weakening both creation and fd hardening to 0666 must make
 # the umask=000 permission tests fail.
 mkdir -p /mutation/agent-network/src /mutation/agent-node/src/runtime
@@ -47,14 +76,15 @@ test "$mode_rc" -ne 0
 grep -Eq 'expected.*384|toBe\(384\)|Expected.*384' /tmp/test631-mode-red.txt
 echo "MUTATION_RED: private-mode rc=$mode_rc"
 
-# Witnessed red 2: deleting the startup repair call is caught by the exact
-# production-path inventory (not by a comment/string count).
-cp agent-node/src/cli.ts /tmp/test631-cli-mutated.ts
-sed -i '/repairPrivateConfigPermissions(cfgPath);/d' /tmp/test631-cli-mutated.ts
+# Witnessed red 2: deleting the startup repair call leaves a real legacy
+# config at 0644. This is a behavior gate, not a source-count proxy.
+cp agent-node/src/cli.ts /tmp/test631-cli-original.ts
+sed -i '/repairPrivateConfigPermissions(cfgPath);/d' agent-node/src/cli.ts
 set +e
-test "$(grep -c 'repairPrivateConfigPermissions' /tmp/test631-cli-mutated.ts)" -eq 5
+startup_repair_gate /tmp/test631-startup-mutated
 repair_rc=$?
 set -e
+cp /tmp/test631-cli-original.ts agent-node/src/cli.ts
 test "$repair_rc" -ne 0
 echo "MUTATION_RED: startup-repair rc=$repair_rc"
 

@@ -130,27 +130,57 @@ describe("#472 private config permissions", () => {
 
   for (const mask of [0o000, 0o002, 0o022, 0o077]) {
     test(`atomic write is 0600 under umask ${mask.toString(8)}`, () => {
-      const path = join(scratch, "config.json");
-      chmodSync(scratch, 0o777);
+      const parent = join(scratch, ".anet", "nodes", "n_test");
+      mkdirSync(parent, { recursive: true });
+      const path = join(parent, "config.json");
+      chmodSync(parent, 0o777);
       const previous = process.umask(mask);
       try { atomicWriteJson(path, { token: "ntok_synthetic" }); }
       finally { process.umask(previous); }
       expect(mode(path)).toBe(0o600);
-      expect(mode(scratch)).toBe(0o700);
+      expect(mode(parent)).toBe(0o700);
     });
   }
 
   test("repairs existing primary, backup, and parent before token read", () => {
-    const path = join(scratch, "config.json");
+    const parent = join(scratch, ".anet", "nodes", "n_test");
+    mkdirSync(parent, { recursive: true });
+    const path = join(parent, "config.json");
     writeFileSync(path, JSON.stringify({ token: "ntok_primary" }));
     writeFileSync(`${path}.prev`, JSON.stringify({ token: "ntok_backup" }));
-    chmodSync(scratch, 0o775);
+    chmodSync(parent, 0o775);
     chmodSync(path, 0o664);
     chmodSync(`${path}.prev`, 0o644);
     repairPrivateConfigPermissions(path);
-    expect(mode(scratch)).toBe(0o700);
+    expect(mode(parent)).toBe(0o700);
     expect(mode(path)).toBe(0o600);
     expect(mode(`${path}.prev`)).toBe(0o600);
+  });
+
+  test("custom --config parent is never chmodded", () => {
+    const parent = join(scratch, "shared-project");
+    mkdirSync(parent);
+    chmodSync(parent, 0o750);
+    const path = join(parent, "agent.json");
+    writeFileSync(path, JSON.stringify({ token: "ntok_custom" }));
+    chmodSync(path, 0o664);
+
+    repairPrivateConfigPermissions(path);
+
+    expect(mode(parent)).toBe(0o750);
+    expect(mode(path)).toBe(0o600);
+  });
+
+  test("atomic custom --config write preserves parent mode", () => {
+    const parent = join(scratch, "shared-project");
+    mkdirSync(parent);
+    chmodSync(parent, 0o755);
+    const path = join(parent, "agent.json");
+
+    atomicWriteJson(path, { token: "ntok_custom" });
+
+    expect(mode(parent)).toBe(0o755);
+    expect(mode(path)).toBe(0o600);
   });
 
   test("backup atomically replaces a legacy broad .prev", () => {
