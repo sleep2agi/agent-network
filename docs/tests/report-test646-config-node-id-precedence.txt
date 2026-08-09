@@ -1,0 +1,49 @@
+# test646 — direct agent-node node_id precedence
+
+Date: 2026-08-09
+Issue: #532
+Base: 47fe27ec8cfa992626a52e89ee738b491b2bc4e5
+Tested source: f21ec7261f490459e52391edf197682d19353c2b
+Docker tag: anet-test646:dev
+Docker image: sha256:26f174c9561408b7989568a93927bd35a1c6e291f24db767e89c3c0767f54dd4
+Embedded source: TEST646_SOURCE_COMMIT=f21ec7261f490459e52391edf197682d19353c2b
+
+## Scope
+
+This is the narrow availability repair approved for #532 option A. For a
+direct `agent-node --config` launch:
+
+- configured `node_id` is authoritative;
+- a different inherited `COMMHUB_NODE_ID` is ignored with an actionable
+  warning containing the env id, config id, and config path;
+- an identical launcher value is accepted silently;
+- `COMMHUB_NODE_ID` remains a compatibility fallback when a legacy config has
+  no `node_id`.
+
+The standard `anet node start` launcher branches were not changed; test646
+shape-pins both existing set/delete boundaries. This change does not claim the
+issue's broader three-value fail-closed diagnostic: token-bound alias
+introspection requires a separately reviewed Hub/API wire extension.
+
+## Docker result
+
+```text
+source_commit=f21ec7261f490459e52391edf197682d19353c2b
+L0: config/env identity resolver
+5 pass
+0 fail
+16 expect() calls
+L1: production CLI integration
+Bundled 81 modules
+L2: witnessed-red env-first mutation
+MUTATION_RED: env-first-precedence rc=1
+RESULT: PASS
+```
+
+The mutation restores the pre-fix env-first ordering. The conflicting fixture
+then resolves `n_foreign532` to `wrong-env-alias` and fails with the explicit
+`ENV_POLLUTION_RESOLVED_WRONG_ALIAS` marker. Restoring config-first returns the
+suite to green.
+
+No Hub, database, installed package, production process, or deployment was
+modified. Fixture identities and paths are synthetic.
