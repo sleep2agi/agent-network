@@ -42,7 +42,9 @@ cp server/src/scheduled-tasks.ts /tmp/test601-scheduled-tasks.ts
 
 echo "L6 witnessed-red: node token cannot create persistent schedules"
 sed -i 's/if (ctx.isNodeToken) return jsonError("user_token_required", 403);/if (false \&\& ctx.isNodeToken) return jsonError("user_token_required", 403);/' server/src/scheduled-tasks.ts
+sed -i 's/return !ctx.isNodeToken \&\& canRestWriteNetwork(ctx.auth, networkId, ctx.isAdmin);/return canRestWriteNetwork(ctx.auth, networkId, ctx.isAdmin);/' server/src/scheduled-tasks.ts
 grep -Fq 'if (false && ctx.isNodeToken)' server/src/scheduled-tasks.ts
+grep -Fq 'return canRestWriteNetwork(ctx.auth, networkId, ctx.isAdmin);' server/src/scheduled-tasks.ts
 expect_red node-token-write-gate /tmp/test601-mut-node.db
 cp /tmp/test601-scheduled-tasks.ts server/src/scheduled-tasks.ts
 
@@ -74,6 +76,12 @@ grep -Fq 'if (false && local.date === alreadyOccurredDate)' server/src/scheduled
 expect_red dst-fallback-single-occurrence /tmp/test601-mut-dst.db
 cp /tmp/test601-scheduled-tasks.ts server/src/scheduled-tasks.ts
 
-echo "L11 restored green"
+echo "L11 witnessed-red: non-transactional backend startup gate is load-bearing"
+sed -i 's/if (db.dialect !== "sqlite") {/if (false \&\& db.dialect !== "sqlite") {/' server/src/scheduled-tasks.ts
+grep -Fq 'if (false && db.dialect !== "sqlite")' server/src/scheduled-tasks.ts
+expect_red non-transactional-backend-gate /tmp/test601-mut-backend.db
+cp /tmp/test601-scheduled-tasks.ts server/src/scheduled-tasks.ts
+
+echo "L12 restored green"
 run_real /tmp/test601-restored.db
 echo "RESULT: PASS"

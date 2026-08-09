@@ -35,7 +35,7 @@ import { startRetentionSweeper } from "./retention.js";
 import { startStaleSessionSweeper } from "./stale-sweeper.js";
 import { resolveRestFromSession } from "./rest-identity.js";
 import { stampTaskAuthOrigin, type TaskAuthOrigin } from "./task-auth-origin.js";
-import { handleScheduledTaskRequest, startScheduledTaskScheduler } from "./scheduled-tasks.js";
+import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startScheduledTaskScheduler } from "./scheduled-tasks.js";
 
 const PORT = Number(process.env.PORT) || 9200;
 const HOST = process.env.HOST || "127.0.0.1";
@@ -3077,6 +3077,11 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
       `For an additional throwaway instance use bootServer({ port: 0 }).`
     );
   }
+  // The current PostgreSQL adapter opens a fresh process/connection for each
+  // statement, so its transaction() cannot provide the occurrence claim +
+  // task creation atomicity this scheduler requires. Refuse before opening a
+  // listening socket instead of silently running an unsafe scheduler.
+  assertScheduledTaskBackendSupported();
   const server = bootServer(opts);
 
   // Round-2/4 review ② — periodic retention sweep + incremental VACUUM.

@@ -49,6 +49,12 @@ const PRIORITIES = new Set(["high", "normal", "low"]);
 const TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const OPEN_TASK_STATUSES = ["created", "delivered", "acked", "running"];
 
+export function assertScheduledTaskBackendSupported(): void {
+  if (db.dialect !== "sqlite") {
+    throw new Error("scheduled_tasks_require_transactional_sqlite_backend");
+  }
+}
+
 function jsonError(error: string, status: number, extra: Record<string, unknown> = {}): Response {
   return Response.json({ ok: false, error, ...extra }, { status });
 }
@@ -253,7 +259,6 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
       scheduled_task_id: row.schedule_id,
       scheduled_run_id: runId,
       scheduled_for: scheduledFor,
-      created_by: row.created_by,
       auth_origin: "hub_scheduler",
     });
     db.run(

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { addNetworkMember, createNetworkTokenForNode, register } from "./auth.js";
 import { db } from "./db.js";
-import { nextOccurrence, runDueScheduledTasks } from "./scheduled-tasks.js";
+import { assertScheduledTaskBackendSupported, nextOccurrence, runDueScheduledTasks } from "./scheduled-tasks.js";
 
 const dir = mkdtempSync(join(tmpdir(), "anet-scheduler-"));
 const activeDbPath = process.env.COMMHUB_DB;
@@ -84,6 +84,17 @@ describe("Hub scheduled task API and dispatcher", () => {
     expect(fallAfterFirst?.toISOString()).toBe("2026-11-02T06:30:00.000Z");
   });
 
+  test("scheduler startup rejects a backend without real transactions", () => {
+    const original = db.dialect;
+    try {
+      (db as any).dialect = "postgres";
+      expect(() => assertScheduledTaskBackendSupported()).toThrow("scheduled_tasks_require_transactional_sqlite_backend");
+    } finally {
+      (db as any).dialect = original;
+    }
+    expect(() => assertScheduledTaskBackendSupported()).not.toThrow();
+  });
+
   test("owner creates; viewer and node token cannot mutate", async () => {
     const input = {
       network_id: networkId,
@@ -99,6 +110,10 @@ describe("Hub scheduled task API and dispatcher", () => {
     const node = await api(nodeToken, "/api/scheduled-tasks", { method: "POST", body: JSON.stringify(input) });
     expect(node.status).toBe(403);
     expect(node.body.error).toBe("user_token_required");
+    const nodeRead = await api(nodeToken, `/api/scheduled-tasks?network_id=${encodeURIComponent(networkId)}`);
+    expect(nodeRead.status).toBe(403);
+    expect(nodeRead.body.error).toBe("user_token_required");
+    expect(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM scheduled_tasks WHERE name = 'Daily briefing'")!.count).toBe(0);
 
     const created = await api(ownerToken, "/api/scheduled-tasks", { method: "POST", body: JSON.stringify(input) });
     expect(created.status).toBe(201);
@@ -134,6 +149,7 @@ describe("Hub scheduled task API and dispatcher", () => {
     expect(task.to_name).toBe("scheduler-node");
     expect(task.from_name).toBe("scheduler");
     expect(JSON.parse(task.meta_json).scheduled_task_id).toBe(scheduleId);
+    expect(JSON.parse(task.meta_json).created_by).toBeUndefined();
     expect(db.get<any>("SELECT id FROM inbox WHERE id = ?1", run.task_id)).toBeTruthy();
     expect(runDueScheduledTasks().processed).toBe(0);
   });
