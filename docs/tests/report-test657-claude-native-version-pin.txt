@@ -1,0 +1,51 @@
+# test657 — Claude SDK native fallback exact-version pin
+
+Issue: #657
+Base: 3bbfceefdd90c8acc83c7751593e54a92ac2dffb
+Source commit: 29cb3d1f5c417ffd81377445e853a80649ae107c
+Date: 2026-08-10
+
+## Scope
+
+- Resolve the version of the installed `@anthropic-ai/claude-agent-sdk`
+  instance that the runtime will actually load.
+- Install `@anthropic-ai/claude-agent-sdk-linux-x64@<exact-version>` via
+  argv, never an unversioned/latest native package.
+- Fail closed when the installed SDK version cannot be attested or is not an
+  exact package version.
+
+## Docker evidence
+
+Command:
+
+    sg docker -c 'docker run --rm -v /tmp/test657-artifacts:/artifacts anet-test657:dev'
+
+Image:
+
+- tag: `anet-test657:dev`
+- image id: `sha256:5f20c157bcc9d9131efcc8f1b498b774df939d2f0d4965f72d23fab5f80a804d`
+- size: `384068315`
+- embedded `TEST657_SOURCE_COMMIT`: `29cb3d1f5c417ffd81377445e853a80649ae107c`
+- artifact tar SHA256: `c4b7fef33a60385a76e9a13f13fc3ab59a74f91bda4a428a330b65738f38515d`
+
+Result:
+
+    PASS fallback unit contract
+    PASS resolver matches real installed SDK 0.3.226
+    PASS agent-node bundle builds with pinned fallback
+    PASS mutation unpin-native-version witnessed red
+    PASS mutation bypass-installed-version witnessed red
+    RESULT pass=5 fail=0
+
+The clean Docker install resolved `@anthropic-ai/claude-agent-sdk@0.3.226`.
+The production resolver independently returned the same version.
+
+## Witnessed-red gates
+
+1. Replacing the native spec with the bare package name produced 3 failing
+   assertions: expected `...linux-x64@0.3.226`, received the unversioned name.
+2. Replacing installed-version resolution with `"latest"` failed before npm
+   invocation with `refusing non-exact Claude SDK native binary version`.
+
+No production process, global npm installation, Hub, Dashboard, or node was
+modified.
