@@ -1,0 +1,25 @@
+# test615 — GET /api/networks name compatibility
+
+Date: 2026-08-09
+Source commit: 1295913240c188541112d3038f502e1d7af26711
+Base commit: aae77dfa
+Docker image: anet-test615:dev
+Image ID: sha256:6cb2b112e276d492f03f99775e955a38594f8c06443c136fe0f2f4f60b7b30ee
+Embedded ENV: TEST615_SOURCE_COMMIT=1295913240c188541112d3038f502e1d7af26711
+Raw runner report SHA256: `325c175ce752ad0faaea1ba577047062e5bfa685e54163dd66f8eac7b8067522`
+
+## Result
+
+PASS
+
+- L0: real Hub HTTP tests — 2 pass, 0 fail, 13 assertions.
+- The user-token list path returned `name === network_name === "default"`.
+- The network-bound node-token path returned the same non-null alias.
+- The canonical `network_name` field remains present for existing clients.
+- L1: production Hub bundle completed (257 modules, 1.52 MB entry point).
+- L2 witnessed-red: forcing the compatibility `name` alias to null made the
+  exact HTTP contract tests fail (`rc=1`).
+- L3: restoring production code returned both tests green.
+
+This is an additive response-field compatibility fix; storage and write APIs
+remain unchanged.
