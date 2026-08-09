@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ARTIFACT_DIR=${ARTIFACT_DIR:-/artifacts}
+REPORT="$ARTIFACT_DIR/report-test34-playwright-discovery.txt"
+mkdir -p "$ARTIFACT_DIR"
+: > "$REPORT"
+exec > >(tee -a "$REPORT") 2>&1
+
 echo "# test34 — isolate Playwright specs from Bun test discovery"
 echo "source_commit=${TEST34_SOURCE_COMMIT:-unknown}"
 echo "date=$(date -Is)"
