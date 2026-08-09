@@ -1,0 +1,53 @@
+# test624 — `/api/tasks` cursor pagination
+
+Date: 2026-08-09
+Issue: #459
+Source commit: bf086cd70f9421413cc7d1a18edeb3fa3d30063b
+Docker tag: anet-test624:dev
+Docker image: sha256:611fea96dfe2fecf297309d4edc78c83d61129bd17246aadabdb51df0530f640
+Embedded source: TEST624_SOURCE_COMMIT=bf086cd70f9421413cc7d1a18edeb3fa3d30063b
+Runner artifact SHA256: 4bb3a5bdb4afa3b787f6087c421f4df160c16d5da2a55002f283e2788f91aa8a
+
+## Result
+
+- Production Hub bundle: PASS.
+- Real isolated Hub + SQLite: 6 pass / 0 fail / 24 assertions.
+- Exclusive `before` cursor excludes the cursor row and all newer rows.
+- Optional `before_task_id` forms a stable compound cursor with `before`, so
+  pagination does not silently drop unreturned rows that share SQLite's
+  one-second `created_at` precision.
+- Authenticated member sees only its own network; a matching foreign row is
+  absent even when it satisfies `before` and `to_name`.
+- ISO UTC and native SQLite cursor shapes converge on the same query value.
+- `to_name` composes with the cursor.
+- No-cursor response remains `{ok,tasks,count}` under `skip_stats=1`, newest
+  first.
+- Empty, malformed, and rolled-over dates return HTTP 400 `invalid_before`.
+- Missing, empty, or oversized compound task cursors fail
+  closed with HTTP 400 `invalid_before_task_id`.
+- Remove cursor predicate: witnessed RED (`rc=1`).
+- Change `<` to `<=`: witnessed RED (`rc=1`).
+- Reverse the compound task-id tie-break: witnessed RED (`rc=1`).
+- Remove malformed-cursor rejection: witnessed RED (`rc=1`).
+- Remove compound-cursor validation: witnessed RED (`rc=1`).
+- Restored suite: 6 pass / 0 fail / 24 assertions.
+
+```text
+L2 witnessed-red: before predicate is load-bearing
+MUTATION_RED: before-filter rc=1
+L3 witnessed-red: exact cursor row must stay excluded
+MUTATION_RED: exclusive-cursor rc=1
+L4 witnessed-red: compound cursor tie-break is load-bearing
+MUTATION_RED: same-second-cursor rc=1
+L5 witnessed-red: malformed cursor rejection is load-bearing
+MUTATION_RED: invalid-cursor rc=1
+L6 witnessed-red: compound cursor validation is load-bearing
+MUTATION_RED: compound-validation rc=1
+L7 restored green
+6 pass
+0 fail
+24 expect() calls
+RESULT: PASS
+```
+
+No production service, database, package, or deployment was touched.

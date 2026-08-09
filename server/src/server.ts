@@ -369,6 +369,26 @@ function parseSqliteTime(value: string | null | undefined): number {
   return Number.isFinite(ts) ? ts : 0;
 }
 
+function normalizeTaskBeforeCursor(value: string): string | null {
+  const cursor = value.trim();
+  if (!cursor) return null;
+  const sqliteShape = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+  if (sqliteShape.test(cursor)) {
+    const parsed = new Date(`${cursor.replace(" ", "T")}Z`);
+    if (!Number.isFinite(parsed.getTime()) || sqliteTime(parsed) !== cursor) return null;
+    return cursor;
+  }
+  const timestamp = Date.parse(cursor);
+  if (!Number.isFinite(timestamp)) return null;
+  return sqliteTime(new Date(timestamp));
+}
+
+function normalizeTaskBeforeTaskId(value: string): string | null {
+  const taskId = value.trim();
+  if (!taskId || taskId.length > 256 || /[\u0000-\u001f\u007f]/.test(taskId)) return null;
+  return taskId;
+}
+
 function cpuPct(load: number | null | undefined, cores: number | null | undefined): number | null {
   if (typeof load !== "number" || typeof cores !== "number" || cores <= 0) return null;
   return Math.round((load / cores) * 1000) / 10;
@@ -2893,6 +2913,16 @@ return Bun.serve({
       const status = url.searchParams.get("status");
       const toName = url.searchParams.get("to_name");
       const fromName = url.searchParams.get("from_name");
+      const rawBefore = url.searchParams.get("before");
+      const before = rawBefore === null ? null : normalizeTaskBeforeCursor(rawBefore);
+      if (rawBefore !== null && before === null) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_before" }, { status: 400 }));
+      }
+      const rawBeforeTaskId = url.searchParams.get("before_task_id");
+      const beforeTaskId = rawBeforeTaskId === null ? null : normalizeTaskBeforeTaskId(rawBeforeTaskId);
+      if (rawBeforeTaskId !== null && (before === null || beforeTaskId === null)) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_before_task_id" }, { status: 400 }));
+      }
       const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 200);
       // #248 — opt-out of the stats GROUP-BY scan. The dashboard chat panel
       // never consumes `stats`; it's a global per-status table scan that
@@ -2908,7 +2938,16 @@ return Bun.serve({
       if (status) { sql += ` AND status = ?${params.length + 1}`; params.push(status); }
       if (toName) { sql += ` AND to_name = ?${params.length + 1}`; params.push(toName); }
       if (fromName) { sql += ` AND from_name = ?${params.length + 1}`; params.push(fromName); }
-      sql += ` ORDER BY created_at DESC LIMIT ?${params.length + 1}`;
+      if (before && beforeTaskId) {
+        const createdAtParam = params.length + 1;
+        const taskIdParam = params.length + 2;
+        sql += ` AND (created_at < ?${createdAtParam} OR (created_at = ?${createdAtParam} AND task_id < ?${taskIdParam}))`;
+        params.push(before, beforeTaskId);
+      } else if (before) {
+        sql += ` AND created_at < ?${params.length + 1}`;
+        params.push(before);
+      }
+      sql += ` ORDER BY created_at DESC, task_id DESC LIMIT ?${params.length + 1}`;
       params.push(limit);
 
       const rows = db.all(sql, ...params);
