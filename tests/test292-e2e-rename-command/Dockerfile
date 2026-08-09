@@ -14,7 +14,9 @@ ARG TEST292_RENAME_SOURCE_COMMIT=unknown
 ENV TEST292_RENAME_SOURCE_COMMIT=${TEST292_RENAME_SOURCE_COMMIT}
 
 COPY tests/docker-e2e.sh /repo/tests/docker-e2e.sh
+COPY tests/Dockerfile /repo/tests/Dockerfile
 COPY tests/test4-base/run.sh /repo/tests/test4-base/run.sh
+COPY tests/test4-base/Dockerfile /repo/tests/test4-base/Dockerfile
 COPY tests/test292-e2e-rename-command/run.sh /repo/run.sh
 RUN chmod +x /repo/run.sh
 

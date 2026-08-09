@@ -23,6 +23,14 @@ for script in /repo/tests/docker-e2e.sh /repo/tests/test4-base/run.sh; do
   fi
 done
 
+for dockerfile in /repo/tests/Dockerfile /repo/tests/test4-base/Dockerfile; do
+  if grep -Eq 'apt-get install[^&]*\bprocps\b' "$dockerfile"; then
+    pass "environment wiring: $(dirname "$dockerfile" | xargs basename)/$(basename "$dockerfile") installs process inspection"
+  else
+    fail "environment wiring: $dockerfile cannot satisfy rename fail-closed process inspection"
+  fi
+done
+
 if [[ $FAIL -ne 0 ]]; then
   echo "RESULT: $PASS passed, $FAIL failed"
   echo "source_commit=$TEST292_RENAME_SOURCE_COMMIT"
@@ -80,6 +88,17 @@ elif grep -Fq 'anet node rename "$NODE_ID" renamed-node' "$MUTATED"; then
   fail "mutation: legacy command still passed the canonical wiring gate"
 else
   pass "mutation: restoring the legacy aggregate command turns red"
+fi
+
+MUTATED_DOCKERFILE=$WORK/Dockerfile-without-procps
+cp /repo/tests/Dockerfile "$MUTATED_DOCKERFILE"
+sed -i 's/ jq procps/ jq/' "$MUTATED_DOCKERFILE"
+if cmp -s /repo/tests/Dockerfile "$MUTATED_DOCKERFILE"; then
+  fail "mutation: process-inspection package anchor did not match"
+elif grep -Eq 'apt-get install[^&]*\bprocps\b' "$MUTATED_DOCKERFILE"; then
+  fail "mutation: aggregate environment still passed without process inspection"
+else
+  pass "mutation: deleting process inspection from the aggregate environment turns red"
 fi
 
 echo "RESULT: $PASS passed, $FAIL failed"
