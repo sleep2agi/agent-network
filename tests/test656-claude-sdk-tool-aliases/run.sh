@@ -54,6 +54,9 @@ bun add --no-save @anthropic-ai/claude-agent-sdk@0.2.141 >/dev/null
 OLD_VERSION=$(bun -e 'console.log((await Bun.file("node_modules/@anthropic-ai/claude-agent-sdk/package.json").json()).version)')
 [[ "$OLD_VERSION" == 0.2.141 ]] || bad "downgrade mutation did not install 0.2.141"
 curl -fsS "$ANTHROPIC_BASE_URL/reset" >/dev/null
+bun "$TEST/harness.ts" >"$ART/sdk-0.2-runtime-observation.log" 2>&1
+ok "SDK 0.2.141 runtime pass-through is observed but not a published type contract"
+curl -fsS "$ANTHROPIC_BASE_URL/reset" >/dev/null
 expect_red sdk-type-contract ./node_modules/.bin/tsc --noEmit --skipLibCheck --moduleResolution bundler --module preserve --target ES2022 "$TYPE_PROBE"
 cp /tmp/test656-package.orig package.json
 rm -f "$TYPE_PROBE"
