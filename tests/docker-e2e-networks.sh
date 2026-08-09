@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 PASS=0; FAIL=0
 pass() { echo "  ✅ $1"; PASS=$((PASS+1)); }
 fail() { echo "  ❌ $1"; FAIL=$((FAIL+1)); }
@@ -11,7 +11,14 @@ echo "========================================="
 echo ""
 
 cd /app/server && bun run src/index.ts &
-sleep 3
+HUB_PID=$!
+cleanup() { kill "$HUB_PID" 2>/dev/null || true; }
+trap cleanup EXIT
+for _ in $(seq 1 30); do
+  curl -fsS http://127.0.0.1:9200/health >/dev/null 2>&1 && break
+  sleep 0.2
+done
+curl -fsS http://127.0.0.1:9200/health >/dev/null
 
 # Setup: register 2 users
 REG_A=$(curl -s -X POST http://127.0.0.1:9200/api/auth/register -H "Content-Type: application/json" -d '{"username":"netuser_a","password":"test123456"}')
@@ -74,9 +81,48 @@ mcp_call() {
     -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"$1\",\"arguments\":$2}}"
 }
 
+mcp_text_json() {
+  python3 -c 'import json,sys
+raw=sys.stdin.read().strip()
+line=next((line[6:] for line in raw.splitlines() if line.startswith("data: ")), raw)
+doc=json.loads(line)
+text=doc.get("result",{}).get("content",[{}])[0].get("text","{}")
+print(json.dumps(json.loads(text)))'
+}
+
+register_agent() {
+  local alias=$1 net=$2 owner_token=$3 resume_id=$4
+  local ntok report parsed
+  ntok=$(curl -fsS -X POST http://127.0.0.1:9200/api/auth/node-token \
+    -H "Authorization: Bearer $owner_token" -H "Content-Type: application/json" \
+    -d "{\"network_id\":\"$net\",\"node_name\":\"$alias\"}" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))')
+  [[ "$ntok" == ntok_* ]] || return 1
+  report=$(mcp_call report_status "{\"resume_id\":\"$resume_id\",\"alias\":\"$alias\",\"status\":\"idle\",\"network_id\":\"$net\"}" "$ntok")
+  parsed=$(printf '%s' "$report" | mcp_text_json)
+  printf '%s' "$parsed" | python3 -c 'import json,sys; assert json.load(sys.stdin).get("ok") is True'
+}
+
+register_agent agent-a "$NET_A_ID" "$TOKEN_A" net-agent-a-resume
+register_agent agent-b "$NET_B_ID" "$TOKEN_B" net-agent-b-resume
+pass "network-scoped target aliases registered"
+
 # Send tasks to different networks — each authenticated as the network owner.
-mcp_call "send_task" "{\"alias\":\"agent-a\",\"task\":\"alpha only\",\"from_session\":\"tester\",\"network_id\":\"$NET_A_ID\"}" "$TOKEN_A" > /dev/null
-mcp_call "send_task" "{\"alias\":\"agent-b\",\"task\":\"beta only\",\"from_session\":\"tester\",\"network_id\":\"$NET_B_ID\"}" "$TOKEN_B" > /dev/null
+SEND_A=$(mcp_call "send_task" "{\"alias\":\"agent-a\",\"task\":\"alpha only\",\"from_session\":\"tester\",\"network_id\":\"$NET_A_ID\"}" "$TOKEN_A" | mcp_text_json)
+SEND_B=$(mcp_call "send_task" "{\"alias\":\"agent-b\",\"task\":\"beta only\",\"from_session\":\"tester\",\"network_id\":\"$NET_B_ID\"}" "$TOKEN_B" | mcp_text_json)
+printf '%s' "$SEND_A" | python3 -c 'import json,sys; assert json.load(sys.stdin).get("ok") is True' \
+  && pass "send_task accepted in alpha" || fail "send_task alpha rejected"
+printf '%s' "$SEND_B" | python3 -c 'import json,sys; assert json.load(sys.stdin).get("ok") is True' \
+  && pass "send_task accepted in beta" || fail "send_task beta rejected"
+
+# A valid alias in another network must not make a cross-network write valid.
+CROSS_SEND=$(mcp_call "send_task" "{\"alias\":\"agent-b\",\"task\":\"must not cross\",\"from_session\":\"tester\",\"network_id\":\"$NET_B_ID\"}" "$TOKEN_A" | mcp_text_json)
+if printf '%s' "$CROSS_SEND" | python3 -c 'import json,sys
+d=json.load(sys.stdin); assert d.get("ok") is not True and "network" in str(d.get("error","")).lower()'; then
+  pass "user A cannot send into beta network"
+else
+  fail "cross-network send was not rejected"
+fi
 
 # Query by network — #64: query auth must match network owner (V3 isolation)
 TASKS_A=$(curl -s -H "Authorization: Bearer $TOKEN_A" "http://127.0.0.1:9200/api/tasks?network_id=$NET_A_ID")

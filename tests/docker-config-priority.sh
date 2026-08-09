@@ -1,7 +1,7 @@
 #!/bin/bash
 # Config Priority E2E Test
 # Verifies: CLI args > env vars > project config > global config > defaults
-set -e
+set -euo pipefail
 PASS=0
 FAIL=0
 
@@ -15,14 +15,32 @@ echo "========================================="
 echo ""
 
 cd /app/server && bun run src/index.ts &
-sleep 3
+HUB_PID=$!
+cleanup() { kill "$HUB_PID" 2>/dev/null || true; }
+trap cleanup EXIT
+for _ in $(seq 1 30); do
+  curl -fsS http://127.0.0.1:9200/health >/dev/null 2>&1 && break
+  sleep 0.2
+done
+curl -fsS http://127.0.0.1:9200/health >/dev/null
 mkdir -p /tmp/cfg-test && cd /tmp/cfg-test
-mkdir -p /root/.anet  # #65: prevent `echo > /root/.anet/config.json` write failure under set -e
+mkdir -p "$HOME/.anet"  # #65: prevent config write failure under set -e
+
+# V3 node creation is an authenticated network operation. Bootstrap through
+# the same register/login path a real CLI user follows before testing local
+# config precedence.
+curl -fsS -X POST http://127.0.0.1:9200/api/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"cfg-user","password":"cfg-test-password"}' >/dev/null
+anet login --hub http://127.0.0.1:9200 --username cfg-user --password cfg-test-password >/tmp/test639-login.log
+python3 -c 'import json,os
+c=json.load(open(os.path.join(os.environ["HOME"],".anet/config.json"))); assert c.get("token") and c.get("network_id")'
+anet node create cfg-test --runtime codex-sdk --model test-model >/tmp/test639-create.log
 
 # 1. Global config baseline
 echo "1. Global hub fallback..."
-echo '{"hub":"http://global-host:9200","token":"global-tok"}' > /root/.anet/config.json
-anet node create cfg-test --runtime codex-sdk --model test-model 2>&1 >/dev/null
+python3 -c 'import json,os
+p=os.path.join(os.environ["HOME"],".anet/config.json"); c=json.load(open(p)); c["hub"]="http://global-host:9200"; c["token"]="global-tok"; json.dump(c,open(p,"w"))'
 # Node has no hub → fallback to global
 HUB=$(timeout 3 agent-node --alias cfg-fb --config .anet/nodes/cfg-test/config.json 2>&1 | grep "hub:" || true)
 echo "$HUB" | grep -q "global-host" && pass "hub fallback to global" || fail "hub fallback: $HUB"
@@ -57,7 +75,8 @@ echo ""
 
 # 5. Token: project > global, env > all
 echo "5. Token priority..."
-echo '{"hub":"http://127.0.0.1:9200","token":"global-tok"}' > /root/.anet/config.json
+python3 -c 'import json,os
+p=os.path.join(os.environ["HOME"],".anet/config.json"); c=json.load(open(p)); c["hub"]="http://127.0.0.1:9200"; c["token"]="global-tok"; json.dump(c,open(p,"w"))'
 python3 -c "import json;c=json.load(open('.anet/nodes/cfg-test/config.json'));c['token']='proj-tok';c['hub']='http://127.0.0.1:9200';json.dump(c,open('.anet/nodes/cfg-test/config.json','w'),indent=2)"
 TK=$(timeout 3 agent-node --alias cfg-tk --config .anet/nodes/cfg-test/config.json 2>&1 | grep "auth" || true)
 echo "$TK" | grep -q "(auth)" && pass "project token used" || fail "token: $TK"
@@ -78,7 +97,7 @@ echo ""
 
 # 7. Defaults
 echo "7. Default values..."
-echo '{}' > /root/.anet/config.json
+echo '{}' > "$HOME/.anet/config.json"
 mkdir -p /tmp/def && cd /tmp/def
 mkdir -p .anet/nodes/def-test
 echo '{"alias":"def-test","node_id":"n_00000000","node_name":"def-test"}' > .anet/nodes/def-test/config.json
@@ -91,9 +110,20 @@ echo ""
 # 8. anet node create doesn't duplicate global token
 echo "8. anet node create token inheritance..."
 cd /tmp/cfg-test
-echo '{"hub":"http://127.0.0.1:9200","token":"should-not-copy"}' > /root/.anet/config.json
-anet node create inherit-test --runtime codex-sdk 2>&1 >/dev/null
-grep -q "should-not-copy" .anet/nodes/inherit-test/config.json && pass "token saved to node config (known behavior)" || pass "token not in node config"
+anet login --hub http://127.0.0.1:9200 --username cfg-user --password cfg-test-password >/tmp/test639-relogin.log
+GLOBAL_TOKEN=$(python3 -c 'import json,os; print(json.load(open(os.path.join(os.environ["HOME"],".anet/config.json")))["token"])')
+anet node create inherit-test --runtime codex-sdk >/tmp/test639-inherit-create.log
+if python3 - "$GLOBAL_TOKEN" <<'PY'
+import json, sys
+c = json.load(open('.anet/nodes/inherit-test/config.json'))
+assert c.get('token', '').startswith('ntok_')
+assert c['token'] != sys.argv[1]
+PY
+then
+  pass "node stores scoped ntok, not global user token"
+else
+  fail "node config inherited global user token"
+fi
 echo ""
 
 echo ""
