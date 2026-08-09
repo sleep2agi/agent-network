@@ -104,10 +104,15 @@ strict_helper_check() {
   local helper=$1
   (
     source "$helper"
-    ! response_json_has_result 'event: message
-data: {"jsonrpc":"2.0","id":1}'
-    ! response_json_error_is 'event: message
-data: {"error":"permission_denied","jsonrpc":"2.0","id":2}' reply_task_not_found
+    if response_json_has_result 'event: message
+data: {"jsonrpc":"2.0","id":1}'; then
+      return 1
+    fi
+    if response_json_error_is 'event: message
+data: {"error":"permission_denied","jsonrpc":"2.0","id":2}' reply_task_not_found; then
+      return 1
+    fi
+    return 0
   )
 }
 
