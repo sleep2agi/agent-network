@@ -1,0 +1,82 @@
+# test601 — Hub scheduled tasks
+source_commit=c4d06f38d58e8288ea16106cf4d3cbcd9194f590
+date=2026-08-09T02:13:44+00:00
+L0 build + additive schema
+Bundled 257 modules in 74ms
+
+  commhub-scheduler.js  1.51 MB  (entry point)
+
+L1-L5 real Hub + SQLite: time, auth, dispatch, recurrence, rename, history
+bun test v1.3.14 (0d9b296a)
+
+server/src/scheduled-tasks-http.test.ts:
+[commhub] database: /tmp/test601-green.db
+[commhub] 🎉 14-day free trial started!
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+(pass) Hub scheduled task API and dispatcher > schedule math supports timezone-aware daily and weekly forms [218.41ms]
+(pass) Hub scheduled task API and dispatcher > owner creates; viewer and node token cannot mutate [45.11ms]
+(pass) Hub scheduled task API and dispatcher > network scope hides schedules from foreign users and viewers may read [91.62ms]
+(pass) Hub scheduled task API and dispatcher > due occurrence creates ordinary inbox/task/run atomically and is idempotent [10.30ms]
+[scheduled-tasks] occurrence failed schedule=sched_4b22dcf0-bf91-45bd-ba9a-94b70439a557: test601_injected_task_failure
+(pass) Hub scheduled task API and dispatcher > dispatch failure rolls back occurrence, inbox, task, and schedule advance as one unit [20.48ms]
+(pass) Hub scheduled task API and dispatcher > non-overlap skips while prior task is open; rename follows stable node_id [15.13ms]
+(pass) Hub scheduled task API and dispatcher > optimistic revision, pause/resume, run-now and cancel preserve history [28.03ms]
+
+ 7 pass
+ 0 fail
+ 42 expect() calls
+Ran 7 tests across 1 file. [1026.00ms]
+L6 witnessed-red: node token cannot create persistent schedules
+MUTATION_RED: node-token-write-gate rc=1
+L7 witnessed-red: overlap check is load-bearing
+MUTATION_RED: no-overlapping-occurrences rc=1
+L8 witnessed-red: optimistic revision rejects stale devices
+MUTATION_RED: optimistic-revision rc=1
+L9 restored green
+bun test v1.3.14 (0d9b296a)
+
+server/src/scheduled-tasks-http.test.ts:
+[commhub] database: /tmp/test601-restored.db
+[commhub] 🎉 14-day free trial started!
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+(pass) Hub scheduled task API and dispatcher > schedule math supports timezone-aware daily and weekly forms [188.69ms]
+(pass) Hub scheduled task API and dispatcher > owner creates; viewer and node token cannot mutate [35.03ms]
+(pass) Hub scheduled task API and dispatcher > network scope hides schedules from foreign users and viewers may read [82.47ms]
+(pass) Hub scheduled task API and dispatcher > due occurrence creates ordinary inbox/task/run atomically and is idempotent [8.61ms]
+[scheduled-tasks] occurrence failed schedule=sched_984f9921-20e3-48a7-88bf-c864fae1546a: test601_injected_task_failure
+(pass) Hub scheduled task API and dispatcher > dispatch failure rolls back occurrence, inbox, task, and schedule advance as one unit [16.27ms]
+(pass) Hub scheduled task API and dispatcher > non-overlap skips while prior task is open; rename follows stable node_id [15.12ms]
+(pass) Hub scheduled task API and dispatcher > optimistic revision, pause/resume, run-now and cancel preserve history [23.02ms]
+
+ 7 pass
+ 0 fail
+ 42 expect() calls
+Ran 7 tests across 1 file. [966.00ms]
+RESULT: PASS
+
+## Dashboard client — Docker production build
+
+source_commit=ef8708e5fab1c9dfb80e964a43c7b420a92dd72f
+command=sg docker -c 'docker build -t anet-scheduler-dashboard:dev --build-arg SOURCE_COMMIT=ef8708e5fab1c9dfb80e964a43c7b420a92dd72f -f tests/test-scheduled-tasks/Dockerfile . && docker run --rm anet-scheduler-dashboard:dev'
+
+- scheduled-tasks module contract: 11 pass
+- TypeScript (`npx tsc --noEmit`): PASS
+- Next.js 16 production build: PASS, 53/53 static pages
+- generated routes include `/scheduled-tasks` and `/api/hub/scheduled-tasks/[[...path]]`
+- selected-network scope is preserved in both `/api/nodes` and the legacy `/api/status` fallback
+- image tag removed by exact name after evidence capture
+
+RESULT: PASS
+
+## Official App client — Docker Expo 56 export
+
+source_commit=d96bee789a8a323ba5ed5e8711087e740310b92e
+command=sg docker -c 'docker build -t anet-scheduler-app:dev --build-arg SOURCE_COMMIT=d96bee789a8a323ba5ed5e8711087e740310b92e -f tests/test-scheduled-tasks/Dockerfile . && docker run --rm anet-scheduler-app:dev'
+
+- scheduled-tasks API contract: 10 pass
+- auth token remains in Authorization header; network and stable node_id are explicit
+- Expo 56 real web export: PASS, 423 modules, `index.html` emitted
+- repository-wide standalone `tsc` remains blocked by pre-existing Buffer typings in `src/attach-download.test.ts`; no scheduler file is in that diagnostic set
+- image tag removed by exact name after evidence capture
+
+RESULT: PASS
