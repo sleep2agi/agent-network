@@ -10,8 +10,9 @@ WORK=/tmp/test654
 HOME_DIR="$WORK/home"
 BIN="$WORK/bin"
 NO_LSOF_BIN="$WORK/no-lsof-bin"
+RACE_BIN="$WORK/race-bin"
 ART=/artifacts
-mkdir -p "$HOME_DIR/.anet/server" "$BIN" "$NO_LSOF_BIN" "$ART"
+mkdir -p "$HOME_DIR/.anet/server" "$BIN" "$NO_LSOF_BIN" "$RACE_BIN" "$ART"
 export HOME="$HOME_DIR"
 export ANET_DASHBOARD_VERSION=preview
 export VERSION_FILE="$WORK/version"
@@ -76,6 +77,49 @@ wait_record_key(){
     sleep 0.1
   done
   return 1
+}
+
+for cmd in bun node npm npx lsof which timeout; do
+  target="$(command -v "$cmd")"
+  ln -sf "$target" "$RACE_BIN/$cmd"
+done
+cat >"$RACE_BIN/ps" <<'SH'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+case " $* " in
+  *" -o lstart= "*)
+    if [[ -e "${RACE_PS_STATE:?}" ]]; then printf 'birth-2\n'; else printf 'birth-1\n'; : >"$RACE_PS_STATE"; fi
+    ;;
+  *" -o command= "*) printf 'node /fixture/agent-network-dashboard/server.js\n' ;;
+  *) exec /usr/bin/ps "$@" ;;
+esac
+SH
+chmod +x "$RACE_BIN/ps"
+
+run_birth_race(){
+  local port="$1" log="$2" pid rc alive=0
+  local record="$HOME/.anet/server/dashboard-$port.json"
+  export RACE_PS_STATE="$WORK/race-ps-$port.state"
+  rm -f "$RACE_PS_STATE" "$record"
+  PORT="$port" HOSTNAME=127.0.0.1 /usr/bin/node "$TEST/agent-network-dashboard/server.js" &
+  pid=$!
+  wait_listener "$port" >/dev/null
+  cat >"$record" <<JSON
+{"schema":1,"port":$port,"listener_pid":$pid,"listener_birth":"birth-1","source":"npx","source_key":"npx:0.5.9","recorded_at":"2026-08-10T00:00:00.000Z"}
+JSON
+  set +e
+  PATH="$RACE_BIN:/usr/local/bin:/usr/bin:/bin" timeout 8 bun "$CLI" hub dashboard --port "$port" >"$log" 2>&1
+  rc=$?
+  set -e
+  kill -0 "$pid" 2>/dev/null && alive=1
+  local safe=1
+  [[ "$rc" -ne 0 && "$alive" -eq 1 ]] && grep -q 'still owns port' "$log" && safe=0
+  for cleanup_pid in $(lsof -t -i ":$port" -sTCP:LISTEN 2>/dev/null || true); do
+    kill "$cleanup_pid" 2>/dev/null || true
+    wait "$cleanup_pid" 2>/dev/null || true
+  done
+  rm -f "$record" "$RACE_PS_STATE"
+  return "$safe"
 }
 
 echo "== L0 unit + typecheck =="
@@ -153,7 +197,12 @@ if ! kill -0 "$FIRST_LISTENER" 2>/dev/null && [[ "${NEW_LISTENER:-}" =~ ^[0-9]+$
   ok "version change kills only exact recorded stale pid and records replacement"
 else bad "managed replacement failed old=$FIRST_LISTENER new=${NEW_LISTENER:-none}"; fi
 
-echo "== L4 missing inspector cannot authorize cleanup =="
+echo "== L4 PID birth is revalidated immediately before kill =="
+if run_birth_race 33105 "$ART/birth-race.log"; then
+  ok "birth change between decision and signal refuses kill; listener remains alive"
+else bad "birth-change race was not stopped before signal"; fi
+
+echo "== L5 missing inspector cannot authorize cleanup =="
 for cmd in bun node npm npx ps which timeout; do target="$(command -v "$cmd")"; ln -sf "$target" "$NO_LSOF_BIN/$cmd"; done
 cat >"$NO_LSOF_BIN/lsof" <<'SH'
 #!/usr/bin/env bash
@@ -172,7 +221,7 @@ if kill -0 "$NOINSPECT_PID" 2>/dev/null && grep -q 'listener inspection unavaila
   ok "missing lsof does not authorize a kill (child may fail on occupied port, rc=$NOINSPECT_RC)"
 else bad "missing-inspector guard failed"; fi
 
-echo "== L5 witnessed-red mutations =="
+echo "== L6 witnessed-red mutations =="
 cp "$ROOT/agent-network/src/dashboard-managed-process.ts" "$WORK/dashboard-managed-process.ts.orig"
 sed -i 's/input\.healthy && record\.source === input\.desiredSource && record\.source_key === input\.desiredSourceKey/input.healthy/' "$ROOT/agent-network/src/dashboard-managed-process.ts"
 expect_red version-gate bun test "$ROOT/agent-network/src/dashboard-managed-process.test.ts"
@@ -181,6 +230,11 @@ sed -i 's/if (!record) return { action: "refuse", reason: `port ${input.port} is
 expect_red unmanaged-gate bun test "$ROOT/agent-network/src/dashboard-managed-process.test.ts"
 cp "$WORK/dashboard-managed-process.ts.orig" "$ROOT/agent-network/src/dashboard-managed-process.ts"
 bun test "$ROOT/agent-network/src/dashboard-managed-process.test.ts"
+
+cp "$CLI" "$WORK/cli.ts.orig"
+sed -i '0,/if (!revalidateExactManagedDashboard(pid, port, expectedRecord)) return false;/{//d;}' "$CLI"
+expect_red birth-recheck run_birth_race 33106 "$ART/birth-recheck-inner.log"
+cp "$WORK/cli.ts.orig" "$CLI"
 
 printf 'RESULT pass=%s fail=%s\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]

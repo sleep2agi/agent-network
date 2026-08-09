@@ -110,6 +110,7 @@ import { normalizeBatchWorkdir } from "../src/batch-workdir";
 import {
   decideDashboardListener,
   parseDashboardLaunchRecord,
+  isDashboardProcessCommand,
   type DashboardLaunchRecord,
   type DashboardLaunchSource,
 } from "../src/dashboard-managed-process";
@@ -1521,6 +1522,30 @@ function loadDashboardLaunchRecord(port: string | number): DashboardLaunchRecord
   } catch { return null; }
 }
 
+function sameDashboardLaunchRecord(a: DashboardLaunchRecord | null, b: DashboardLaunchRecord): boolean {
+  return !!a
+    && a.schema === b.schema
+    && a.port === b.port
+    && a.listener_pid === b.listener_pid
+    && a.listener_birth === b.listener_birth
+    && a.source === b.source
+    && a.source_key === b.source_key
+    && a.recorded_at === b.recorded_at;
+}
+
+function revalidateExactManagedDashboard(
+  pid: number,
+  port: string | number,
+  expectedRecord: DashboardLaunchRecord,
+): boolean {
+  const scan = scanDashboardListenerPids(port);
+  if (!scan.ok || scan.pids.length !== 1 || scan.pids[0] !== pid) return false;
+  if (!sameDashboardLaunchRecord(loadDashboardLaunchRecord(port), expectedRecord)) return false;
+  if (dashboardProcessField(pid, "lstart") !== expectedRecord.listener_birth) return false;
+  const command = dashboardProcessField(pid, "command");
+  return !!command && isDashboardProcessCommand(command);
+}
+
 async function dashboardHttpHealthy(host: string, port: string | number): Promise<boolean> {
   const probeHost = host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host;
   try {
@@ -1547,13 +1572,23 @@ function resolveDashboardNpxVersion(tag: string): string | null {
   } catch { return null; }
 }
 
-async function stopExactManagedDashboard(pid: number, port: string | number): Promise<boolean> {
+async function stopExactManagedDashboard(
+  pid: number,
+  port: string | number,
+  expectedRecord: DashboardLaunchRecord,
+): Promise<boolean> {
+  // Re-read every identity fact immediately before the signal. The PID may
+  // have exited and been reused after the initial decision was made.
+  if (!revalidateExactManagedDashboard(pid, port, expectedRecord)) return false;
   try { process.kill(pid, "SIGTERM"); } catch { return false; }
   for (let i = 0; i < 12; i++) {
     await new Promise(resolve => setTimeout(resolve, 250));
     const scan = scanDashboardListenerPids(port);
     if (scan.ok && !scan.pids.includes(pid)) return true;
   }
+  // The grace period is another PID-reuse window. Never escalate based on
+  // the pre-SIGTERM observation; authorize the exact PID again.
+  if (!revalidateExactManagedDashboard(pid, port, expectedRecord)) return false;
   try { process.kill(pid, "SIGKILL"); } catch {}
   await new Promise(resolve => setTimeout(resolve, 250));
   const finalScan = scanDashboardListenerPids(port);
@@ -5986,10 +6021,11 @@ async function serverCommand() {
       console.warn(`[anet]   No process will be auto-stopped; an occupied port will fail normally.`);
     } else if (listenerScan.pids.length > 0) {
       const listenerPid = listenerScan.pids.length === 1 ? listenerScan.pids[0] : -1;
+      const launchRecord = loadDashboardLaunchRecord(dashPort);
       const decision = decideDashboardListener({
         port: dashPortNumber,
         listenerPids: listenerScan.pids,
-        record: loadDashboardLaunchRecord(dashPort),
+        record: launchRecord,
         listenerBirth: listenerPid > 1 ? dashboardProcessField(listenerPid, "lstart") : null,
         listenerCommand: listenerPid > 1 ? dashboardProcessField(listenerPid, "command") : null,
         desiredSource: launchSource,
@@ -6007,7 +6043,7 @@ async function serverCommand() {
       }
       if (decision.action === "terminate_owned_stale") {
         console.log(`[anet] stopping exact managed stale Dashboard pid ${decision.pid} (${decision.reason})...`);
-        if (!await stopExactManagedDashboard(decision.pid, dashPort)) {
+        if (!launchRecord || !await stopExactManagedDashboard(decision.pid, dashPort, launchRecord)) {
           console.error(`[anet] Refusing replacement startup: exact managed pid ${decision.pid} still owns port ${dashPort}.`);
           process.exit(1);
         }
