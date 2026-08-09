@@ -26,11 +26,11 @@ cd ..
 
 echo "L2 witnessed-red: remove the actionable connection wrapper"
 cp agent-node/src/runtime/codex-app-server-client.ts /tmp/test613-client.ts
-sed -i 's/codexAppServerConnectionError(this.opts.url, extractError(ev, "ws steady-state"))/extractError(ev, "ws steady-state")/' \
+sed -i '/^export function codexAppServerConnectionError/,/^}/c\export function codexAppServerConnectionError(_url: string, cause: unknown): Error {\
+  return cause instanceof Error ? cause : new Error(String(cause));\
+}' \
   agent-node/src/runtime/codex-app-server-client.ts
-sed -i '/const err = codexAppServerConnectionError(/,/        );/c\        const err = extractError(ev, `connect ${this.opts.url}`);' \
-  agent-node/src/runtime/codex-app-server-client.ts
-grep -Fq 'const err = extractError(ev, `connect ${this.opts.url}`);' \
+grep -Fq 'return cause instanceof Error ? cause : new Error(String(cause));' \
   agent-node/src/runtime/codex-app-server-client.ts
 set +e
 bun test agent-node/src/runtime/codex-app-server-client.test.ts \
@@ -42,7 +42,8 @@ if [ "$mutation_rc" -eq 0 ]; then
   echo "MUTATION_FALSE_GREEN: dead-endpoint-wrapper"
   exit 1
 fi
-grep -Fq 'toContain' /tmp/test613-mutation.log
+grep -Fq 'real dead loopback endpoint rejects and emits a non-empty actionable error' \
+  /tmp/test613-mutation.log
 echo "MUTATION_RED: dead-endpoint-wrapper rc=$mutation_rc"
 cp /tmp/test613-client.ts agent-node/src/runtime/codex-app-server-client.ts
 
