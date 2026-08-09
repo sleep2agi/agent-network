@@ -1947,6 +1947,9 @@ curl -X POST http://localhost:9200/api/upload \
 
 ### GET /api/files/:file_id
 
+文件下载只接受 `Authorization: Bearer ...` 请求头。出于凭据泄漏防护，
+此端点不接受 `?token=` URL 参数（包括 `HEAD` 请求）。
+
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
 
 下载 `POST /api/upload` 返回的文件。始终强制 `Content-Disposition: attachment` + `X-Content-Type-Options: nosniff`（浏览器不 inline 渲染，防 XSS）。

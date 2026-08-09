@@ -1839,6 +1839,10 @@ Common errors: `411 length_required` (no `Content-Length`) · `413 payload_too_l
 
 ### GET /api/files/:file_id
 
+File downloads accept only the `Authorization: Bearer ...` header. To prevent
+credential leakage, this endpoint rejects `?token=` URL authentication for both
+`GET` and `HEAD` requests.
+
 > [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)
 
 Downloads a file returned by `POST /api/upload`. Always forces `Content-Disposition: attachment` + `X-Content-Type-Options: nosniff` (the browser won't inline-render it — XSS defense).

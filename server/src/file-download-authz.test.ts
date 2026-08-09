@@ -168,6 +168,10 @@ async function downloadAs(token: string | null, fileId: string): Promise<Respons
   return fetch(`${BASE}/api/files/${fileId}`, { headers });
 }
 
+async function downloadWithQueryToken(token: string, fileId: string): Promise<Response> {
+  return fetch(`${BASE}/api/files/${fileId}?token=${encodeURIComponent(token)}`);
+}
+
 describe.skipIf(!isProdMode)("#495 — GET /api/files/:file_id authorization (owner-only staged)", () => {
   let userBFileId = "";
 
@@ -238,6 +242,13 @@ describe.skipIf(!isProdMode)("#495 — GET /api/files/:file_id authorization (ow
     expect(res.status).toBe(401);
   });
 
+  test("🔴 valid query token is refused on file GET (credential must stay out of URLs)", async () => {
+    const res = await downloadWithQueryToken(userBToken, userBFileId);
+    expect(res.status).toBe(401);
+    const body: any = await res.json();
+    expect(body.error).toBe("unauthorized");
+  });
+
   test("non-owner request for an UNKNOWN file_id → 404 with same shape as owner-denied (no enumeration signal)", async () => {
     const res = await downloadAs(userAToken, "0123456789abcdef0123456789abcdef");
     expect(res.status).toBe(404);
@@ -255,6 +266,10 @@ async function headAs(token: string | null, fileId: string): Promise<Response> {
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;
   return fetch(`${BASE}/api/files/${fileId}`, { method: "HEAD", headers });
+}
+
+async function headWithQueryToken(token: string, fileId: string): Promise<Response> {
+  return fetch(`${BASE}/api/files/${fileId}?token=${encodeURIComponent(token)}`, { method: "HEAD" });
 }
 
 describe.skipIf(!isProdMode)("#500 CR2 — HEAD /api/files/:file_id authorization (parity with GET)", () => {
@@ -293,6 +308,11 @@ describe.skipIf(!isProdMode)("#500 CR2 — HEAD /api/files/:file_id authorizatio
 
   test("HEAD anonymous → 401 (auth still required, symmetric with GET)", async () => {
     const res = await headAs(null, userBFileId);
+    expect(res.status).toBe(401);
+  });
+
+  test("🔴 valid query token is refused on file HEAD (same gate as GET)", async () => {
+    const res = await headWithQueryToken(userBToken, userBFileId);
     expect(res.status).toBe(401);
   });
 
