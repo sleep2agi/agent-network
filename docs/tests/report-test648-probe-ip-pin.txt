@@ -5,18 +5,18 @@ Date: 2026-08-10 (Asia/Shanghai)
 ## Provenance
 
 - Base: `adc4b94de8fc62a0eafb888c69debcd30e313ab7`
-- Tested source: `7f9e11cbd0895122575617442a8736715982208c`
+- Tested source: `7f9e11cb2f0b5938715f7c91ab04fafe414fd49b`
 - Docker tag: `anet-test648:dev`
-- Image ID: `sha256:98ddc1d3a89eeff6eed34468bf347339d73a887b9b58aa78bc779cb1dbd826ac`
-- Embedded env: `TEST648_SOURCE_COMMIT=7f9e11cbd0895122575617442a8736715982208c`
-- Runner artifact SHA256: `98453745c356f797bb05e1b92c7da7671f1f6e997261c8884704ce66723a0a42`
+- Image ID: `sha256:10b9ca65032ceb0799601acf989944f9573648d1663fdfbba1e260d465ad635d`
+- Embedded env: `TEST648_SOURCE_COMMIT=7f9e11cb2f0b5938715f7c91ab04fafe414fd49b`
+- Runner artifact SHA256: `49f260d4a482c95d43b110ed70065facdf8ba269b7d5b89d8f4e662f34277f33`
 - Runtime matrix: Node `v20.20.2`, Bun `1.3.14`
 
 Commands:
 
 ```sh
 sg docker -c 'docker build \
-  --build-arg TEST648_SOURCE_COMMIT=7f9e11cbd0895122575617442a8736715982208c \
+  --build-arg TEST648_SOURCE_COMMIT=7f9e11cb2f0b5938715f7c91ab04fafe414fd49b \
   -t anet-test648:dev \
   -f tests/test648-probe-ip-pin/Dockerfile .'
 sg docker -c 'docker run --rm \
