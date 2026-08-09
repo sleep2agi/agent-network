@@ -14,6 +14,7 @@
 
 import { promises as dns } from "node:dns";
 import type { LookupAddress } from "node:dns";
+import { request as httpsRequest } from "node:https";
 import type { LookupFunction } from "node:net";
 import { Agent, request as undiciRequest } from "undici";
 import {
@@ -151,6 +152,37 @@ async function discardProbeResponseBody(body: any): Promise<void> {
   }
 }
 
+async function requestWithPinnedNodeHttps(
+  probeReq: ProbeReq,
+  lookup: LookupFunction,
+): Promise<number> {
+  const target = new URL(probeReq.url);
+  return await new Promise<number>((resolve, reject) => {
+    const req = httpsRequest({
+      protocol: target.protocol,
+      hostname: target.hostname,
+      port: target.port || undefined,
+      path: `${target.pathname}${target.search}`,
+      method: probeReq.init.method,
+      headers: probeReq.init.headers as any,
+      lookup,
+      servername: target.hostname,
+      rejectUnauthorized: true,
+      minVersion: "TLSv1.2",
+      agent: false,
+      signal: AbortSignal.timeout(30_000),
+    }, (response) => {
+      const status = response.statusCode || 0;
+      response.resume();
+      response.once("end", () => resolve(status));
+      response.once("error", reject);
+    });
+    req.once("error", reject);
+    if (probeReq.init.body != null) req.write(probeReq.init.body as any);
+    req.end();
+  });
+}
+
 export async function safelyFetchProbe(
   vendor: string,
   baseUrl: string,
@@ -211,20 +243,27 @@ export async function safelyFetchProbe(
 
   let resp: any;
   try {
-    // Bun's `undici.fetch` compatibility surface currently ignores the
-    // dispatcher's connect.lookup hook. The lower-level request API honors
-    // the dispatcher in both Node and Bun; test648's split-horizon socket
-    // probe locks that runtime fact.
-    const wire = await undiciRequest(probeReq.url, {
-      method: probeReq.init.method as any,
-      headers: probeReq.init.headers as any,
-      body: probeReq.init.body as any,
-      dispatcher,
-      maxRedirections: 0,
-      signal: AbortSignal.timeout(30_000),
-    });
-    resp = { status: wire.statusCode } as Response;
-    await discardProbeResponseBody(wire.body);
+    const pinnedLookup = createPinnedLookup(u.hostname, addrs);
+    if (typeof (globalThis as any).Bun !== "undefined") {
+      // Bun 1.3's undici compatibility layer accepts `dispatcher` but ignores
+      // its connect.lookup hook (witnessed by test648 against split-horizon
+      // targets). Its node:https implementation does honor the same lookup
+      // callback, preserving hostname SNI/certificate validation. This is a
+      // fail-closed compatibility transport, not an unpinned DNS fallback.
+      const status = await requestWithPinnedNodeHttps(probeReq, pinnedLookup);
+      resp = { status } as Response;
+    } else {
+      const wire = await undiciRequest(probeReq.url, {
+        method: probeReq.init.method as any,
+        headers: probeReq.init.headers as any,
+        body: probeReq.init.body as any,
+        dispatcher,
+        maxRedirections: 0,
+        signal: AbortSignal.timeout(30_000),
+      });
+      resp = { status: wire.statusCode } as Response;
+      await discardProbeResponseBody(wire.body);
+    }
   } catch (e: any) {
     const msg = String(e?.message || e);
     if (/timeout|abort/i.test(msg)) return { errorKind: "timeout", errorDetail: msg.slice(0, 200) };
