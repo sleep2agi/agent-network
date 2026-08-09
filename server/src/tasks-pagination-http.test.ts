@@ -43,6 +43,9 @@ beforeAll(async () => {
   networkB = b.network_id!;
 
   seedTask("a-new", networkA, "agent-a", "2026-01-04 00:00:00");
+  seedTask("tie-z", networkA, "agent-a", "2026-01-05 00:00:00");
+  seedTask("tie-y", networkA, "agent-a", "2026-01-05 00:00:00");
+  seedTask("tie-x", networkA, "agent-a", "2026-01-05 00:00:00");
   seedTask("a-cursor", networkA, "agent-a", "2026-01-03 00:00:00");
   seedTask("a-old-2", networkA, "agent-a", "2026-01-02 00:00:00");
   seedTask("a-old-1", networkA, "agent-b", "2026-01-01 00:00:00");
@@ -79,11 +82,31 @@ describe("GET /api/tasks cursor pagination", () => {
     expect(body.tasks.map((row: any) => row.task_id)).toEqual(["a-old-2"]);
   });
 
+  test("before_task_id preserves rows that share the cursor second", async () => {
+    const first = await list("limit=2");
+    expect(first.body.tasks.map((row: any) => row.task_id)).toEqual(["tie-z", "tie-y"]);
+    const cursor = first.body.tasks.at(-1);
+    const second = await list(
+      `before=${encodeURIComponent(cursor.created_at)}&before_task_id=${encodeURIComponent(cursor.task_id)}&limit=20`,
+    );
+    expect(second.response.status).toBe(200);
+    expect(second.body.tasks.map((row: any) => row.task_id)).toEqual([
+      "tie-x",
+      "a-new",
+      "a-cursor",
+      "a-old-2",
+      "a-old-1",
+    ]);
+  });
+
   test("omitting before preserves the existing response shape and newest-first order", async () => {
     const { body } = await list("limit=20");
     expect(body.ok).toBe(true);
-    expect(body.count).toBe(4);
+    expect(body.count).toBe(7);
     expect(body.tasks.map((row: any) => row.task_id)).toEqual([
+      "tie-z",
+      "tie-y",
+      "tie-x",
       "a-new",
       "a-cursor",
       "a-old-2",
@@ -97,6 +120,18 @@ describe("GET /api/tasks cursor pagination", () => {
       const { response, body } = await list(`before=${encodeURIComponent(cursor)}`);
       expect(response.status).toBe(400);
       expect(body).toEqual({ ok: false, error: "invalid_before" });
+    }
+  });
+
+  test("before_task_id requires a valid timestamp cursor and task id", async () => {
+    for (const query of [
+      "before_task_id=tie-y",
+      "before=2026-01-05%2000%3A00%3A00&before_task_id=",
+      `before=2026-01-05%2000%3A00%3A00&before_task_id=${"x".repeat(257)}`,
+    ]) {
+      const { response, body } = await list(query);
+      expect(response.status).toBe(400);
+      expect(body).toEqual({ ok: false, error: "invalid_before_task_id" });
     }
   });
 });

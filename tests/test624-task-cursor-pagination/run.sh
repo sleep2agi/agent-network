@@ -40,23 +40,35 @@ run_real /tmp/test624-green.db
 cp "$SOURCE" /tmp/test624-server.ts
 
 echo "L2 witnessed-red: before predicate is load-bearing"
-sed -i 's/if (before) { sql += ` AND created_at < ?${params.length + 1}`; params.push(before); }/if (false \&\& before) { sql += ` AND created_at < ?${params.length + 1}`; params.push(before); }/' "$SOURCE"
-grep -Fq 'if (false && before)' "$SOURCE"
+sed -i 's/} else if (before) {/} else if (false \&\& before) {/' "$SOURCE"
+grep -Fq 'else if (false && before)' "$SOURCE"
 expect_red before-filter 'before is exclusive and remains network-scoped'
 cp /tmp/test624-server.ts "$SOURCE"
 
 echo "L3 witnessed-red: exact cursor row must stay excluded"
-sed -i 's/AND created_at < ?${params.length + 1}/AND created_at <= ?${params.length + 1}/' "$SOURCE"
-grep -Fq 'AND created_at <= ?${params.length + 1}' "$SOURCE"
+sed -i 's/sql += ` AND created_at < ?${params.length + 1}`;/sql += ` AND created_at <= ?${params.length + 1}`;/' "$SOURCE"
+grep -Fq 'sql += ` AND created_at <= ?${params.length + 1}`;' "$SOURCE"
 expect_red exclusive-cursor 'before is exclusive and remains network-scoped'
 cp /tmp/test624-server.ts "$SOURCE"
 
-echo "L4 witnessed-red: malformed cursor rejection is load-bearing"
+echo "L4 witnessed-red: compound cursor tie-break is load-bearing"
+sed -i 's/AND task_id < ?${taskIdParam}/AND task_id > ?${taskIdParam}/' "$SOURCE"
+grep -Fq 'AND task_id > ?${taskIdParam}' "$SOURCE"
+expect_red same-second-cursor 'before_task_id preserves rows that share the cursor second'
+cp /tmp/test624-server.ts "$SOURCE"
+
+echo "L5 witnessed-red: malformed cursor rejection is load-bearing"
 sed -i 's/if (rawBefore !== null \&\& before === null)/if (false \&\& rawBefore !== null \&\& before === null)/' "$SOURCE"
 grep -Fq 'if (false && rawBefore' "$SOURCE"
 expect_red invalid-cursor 'empty, malformed, and rolled-over cursors fail closed'
 cp /tmp/test624-server.ts "$SOURCE"
 
-echo "L5 restored green"
+echo "L6 witnessed-red: compound cursor validation is load-bearing"
+sed -i 's/if (rawBeforeTaskId !== null \&\& (before === null || beforeTaskId === null))/if (false \&\& rawBeforeTaskId !== null \&\& (before === null || beforeTaskId === null))/' "$SOURCE"
+grep -Fq 'if (false && rawBeforeTaskId' "$SOURCE"
+expect_red compound-validation 'before_task_id requires a valid timestamp cursor and task id'
+cp /tmp/test624-server.ts "$SOURCE"
+
+echo "L7 restored green"
 run_real /tmp/test624-restored.db
 echo "RESULT: PASS"
