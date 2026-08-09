@@ -1,0 +1,95 @@
+# test292 token-bound identity fixtures — standalone main candidate
+
+Date: 2026-08-10
+Base: `44cff974c66f0d7081d5712d8d2f92f6271a3bd7`
+Source under test: `4ec7db0102a6a7c58c35f4af188a7c13e9596155`
+Scope: Docker E2E fixtures, shared test helper, aggregate assertions, and
+test-only Dockerfiles. Production source was not changed.
+
+## Witnessed-red progression
+
+The same functional fixture sequence was executed before extraction to this
+standalone main branch:
+
+1. Exact source `fef3dc75e9ce2239d1de891e1281d92ff3403b2e`
+   failed after environment/auth with
+   `e2e_agent_config_path: command not found`. No authoritative token-bound
+   simulated-agent helper existed.
+2. After identity and transport closure, exact aggregate source
+   `ec0ead84cadecbf65cbe0ef7972266b7e0c4debd` reached 131/6. The remaining
+   failures exposed stale free-network quota, unknown target aliases, and the
+   intentionally removed `quickstart` command.
+3. After quota/quickstart correction, the aggregate reached 134/2; both
+   failures were `alias_not_found` behavior caused by dispatching to targets
+   that had never registered.
+4. Registering one Hub-authoritative token-bound target in each network
+   produced the final 136/0 aggregate.
+
+The standalone branch cherry-picks that add-only test sequence onto the main
+that already contains #667; it does not stack a PR on an unmerged branch.
+
+## Exact-source Docker evidence
+
+Canonical independent build:
+
+    sg docker -c 'docker build --build-arg TEST292_IDENTITY_SOURCE_COMMIT=4ec7db0102a6a7c58c35f4af188a7c13e9596155 -t anet-test292-identity:dev -f tests/test292-e2e-identity-fixtures/Dockerfile .'
+
+The author run used the committed low-disk derivative because the shared host
+had about 3.4 GB free. Its base was the prior exact identity image; only test
+scripts/helpers were replaced and the standalone source SHA embedded. The
+canonical Dockerfile remains the clean-checkout path for independent review.
+
+Image ID:
+`sha256:2e8938630aef1b4cf31911d10d324fe82d20c2f9d350c08b29ee8c16ebafe8c8`
+
+Embedded environment:
+
+    TEST292_IDENTITY_SOURCE_COMMIT=4ec7db0102a6a7c58c35f4af188a7c13e9596155
+
+Focused real-Hub result: **19 passed / 0 failed**.
+
+Full Base aggregate result: **136 passed / 0 failed**.
+
+The aggregate container installed `procps` at runtime because the historical
+aggregate invokes `ps`. This changed only the one-shot container, not the image
+or production.
+
+## Verified behavior
+
+- fixtures are created by the public CLI and carry a stable `node_id` plus a
+  Hub-issued, network-bound `ntok_`;
+- `report_status` overwrites caller identity with config-bound alias/node ID;
+- a user token cannot impersonate an agent;
+- node-token inbox read, acknowledgement, working status, and terminal reply
+  complete, with the exact node ID persisted in inventory;
+- concurrency, retry, cancel, reassign, expiration, offline, and full mock
+  lifecycle paths no longer perform agent identity writes with an owner token;
+- the free-user isolation test uses registration's default network plus one
+  created network, matching the real two-network free quota;
+- each isolation target is registered in its own network before dispatch, so
+  the test measures tenant isolation instead of `alias_not_found`;
+- positive task visibility and negative cross-network visibility both pass;
+- removed `quickstart` exits non-zero with migration guidance and creates no
+  agent state.
+
+## Load-bearing negative controls
+
+- deleting config-bound alias pinning exposes `alias_identity_mismatch`;
+- deleting stable node-ID injection loses authoritative inventory identity;
+- restoring the owner-token mock acknowledgement path turns the aggregate
+  wiring gate red;
+- the staged aggregate itself gives real behavior red/green evidence for quota,
+  removed-command, and missing-target assumptions.
+
+## Provenance and cleanup
+
+Relative to base, the tested source changes exactly five test files:
+
+- `tests/docker-e2e.sh`
+- `tests/lib/e2e-agent-bootstrap.sh`
+- `tests/test292-e2e-identity-fixtures/Dockerfile`
+- `tests/test292-e2e-identity-fixtures/Dockerfile.derivative`
+- `tests/test292-e2e-identity-fixtures/run.sh`
+
+No production process, database, global package, Hub, Dashboard, or deployed
+node was changed. The report commit is an add-only child of the tested source.

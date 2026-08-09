@@ -1,0 +1,12 @@
+ARG TEST292_IDENTITY_BASE_IMAGE=anet-test292-identity-base:ec0ead84
+FROM ${TEST292_IDENTITY_BASE_IMAGE}
+
+COPY tests/docker-e2e.sh /app/test.sh
+COPY tests/lib/ /app/lib/
+COPY tests/test292-e2e-identity-fixtures/run.sh /app/run.sh
+RUN chmod +x /app/run.sh
+
+ARG TEST292_IDENTITY_SOURCE_COMMIT=unknown
+ENV TEST292_IDENTITY_SOURCE_COMMIT=${TEST292_IDENTITY_SOURCE_COMMIT}
+
+ENTRYPOINT ["bash", "/app/run.sh"]

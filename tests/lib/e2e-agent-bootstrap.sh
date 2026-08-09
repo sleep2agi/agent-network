@@ -24,6 +24,45 @@ e2e_create_agent() {
   e2e_config_token_bound_to_network "$config_path" "$network_id"
 }
 
+e2e_agent_config_path() {
+  local alias=${1:?alias is required}
+  printf '%s/.anet/nodes/%s/config.json\n' "$(pwd)" "$alias"
+}
+
+# Call an identity-bearing MCP tool as the fixture node itself. User tokens
+# may schedule/manage work, but they must never impersonate an arbitrary node
+# for report_status/get_inbox/ack/send_reply. The config produced by
+# e2e_create_agent is the single source of the stable node_id + ntok binding.
+e2e_agent_mcp_call() {
+  local alias=${1:?alias is required}
+  local tool=${2:?tool is required}
+  local args=${3:?arguments JSON is required}
+  local config_path hub token node_id
+
+  config_path=$(e2e_agent_config_path "$alias") || return 1
+  [[ -f "$config_path" ]] || return 1
+  hub=$(jq -r '.hub // empty' "$config_path") || return 1
+  token=$(jq -r '.token // empty' "$config_path") || return 1
+  node_id=$(jq -r '.node_id // empty' "$config_path") || return 1
+  [[ $hub == http://* || $hub == https://* ]] || return 1
+  [[ $token == ntok_* && $node_id == n_* ]] || return 1
+
+  if [[ $tool == report_status ]]; then
+    args=$(printf '%s' "$args" | jq -c --arg node_id "$node_id" --arg alias "$alias" \
+      '. + {node_id: $node_id, alias: $alias}') || return 1
+  fi
+
+  local initialize='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"e2e-fixture","version":"1"}}}'
+  timeout 5 curl -fsS -H "Authorization: Bearer $token" -X POST "$hub/mcp" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -d "$initialize" >/dev/null || return 1
+  timeout 5 curl -fsS -H "Authorization: Bearer $token" -X POST "$hub/mcp" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"$tool\",\"arguments\":$args}}"
+}
+
 # Node configs intentionally do not persist network_id: the ntok_ binding in
 # Hub is authoritative. Ask Hub with that token and require exactly the
 # expected single network instead of trusting a local snapshot field.
