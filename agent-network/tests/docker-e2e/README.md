@@ -104,7 +104,8 @@ dashboard manually.
 - `run-e2e.sh` — orchestration entrypoint
 - `playwright/playwright.config.ts` — runner config (sequential, JUnit + HTML reporters)
 - `playwright/helpers.ts` — auth shortcut + state loader + waitFor()
-- `playwright/0[1-7]-*.spec.ts` — the 7 scenarios
+- `playwright/0[1-7]-*.pw.ts` — the 7 Playwright-only scenarios (the custom
+  suffix keeps Bun's default test discovery from loading Playwright fixtures)
 
 ## Troubleshooting
 

@@ -4,6 +4,9 @@ import { defineConfig } from "@playwright/test";
 // from docker-compose.yml so the runner is hermetic.
 export default defineConfig({
   testDir: ".",
+  // Keep browser scenarios out of Bun's default *.spec.ts discovery. These
+  // files require Playwright's runner/fixtures and are executed only here.
+  testMatch: "**/*.pw.ts",
   // Run sequentially: the agent-node has one inbox shared across all tests.
   // Parallel runs would race for /api/hub/tasks state.
   workers: 1,
