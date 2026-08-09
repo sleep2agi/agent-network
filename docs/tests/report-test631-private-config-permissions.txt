@@ -3,20 +3,21 @@
 Date: 2026-08-09
 Issue: #472
 Base: f1ea43d511c3b134d6cc0f95e1734aecc0cf0a1c
-Source commit: ccb7b1f32b95e547a0af0dc161723a464b011167
+Source commit: 74b4caa08393122dcd4269845d50ee87a0b4441b
 Docker tag: anet-test631:dev
-Docker image: sha256:80d50ccfa6b1ac950bde77cecfc1ff8d8e1d4bd29dc23d882064cd96530cc694
-Embedded source: TEST631_SOURCE_COMMIT=ccb7b1f32b95e547a0af0dc161723a464b011167
-Runner artifact SHA256: 395fc0d5d358499b6b3ba0c3610c45c0bb076dc73a612d5a9e8b884f83e63406
+Docker image: sha256:15afcc6ab8c8a957bf46d7a6df352c6541a47cb621aee077ec902703247e2496
+Embedded source: TEST631_SOURCE_COMMIT=74b4caa08393122dcd4269845d50ee87a0b4441b
+Runner artifact SHA256: cce3f2903ace93ee17eb2fd76641b0c99bc918eba5fb2fd5a67151e287b325d1
 
 ## Result
 
 - Both production entrypoints bundle with all local modules resolved:
   `agent-network/bin/cli.ts` (26 modules) and `agent-node/src/cli.ts`
   (79 modules).
-- Permission behavior: 90 pass / 0 fail / 157 assertions.
-- New files are 0600 and their immediate private directory is 0700 under
-  umask 000, 002, 022, and 077.
+- Permission behavior: 92 pass / 0 fail / 161 assertions.
+- New files are 0600 under umask 000, 002, 022, and 077. Recognized `.anet`
+  state directories are tightened to 0700; an arbitrary custom `--config`
+  parent retains its existing mode while the config itself becomes 0600.
 - Replacing an existing 0664 config publishes a new 0600 inode atomically;
   there is no public target between create and chmod.
 - Existing config, `.prev`, and token `.env` state is repaired with no-follow
@@ -47,8 +48,9 @@ state. Static inventory fails if a direct token-bearing config writer returns.
 
 1. Changing both private writers from 0600 to 0666 makes the umask=000
    assertions fail (`MUTATION_RED: private-mode rc=1`).
-2. Removing the explicit-config startup repair call makes the exact
-   production-path inventory fail (`MUTATION_RED: startup-repair rc=1`).
+2. Removing the explicit-config startup repair call from the real CLI bundle,
+   then starting it against a legacy 0644 config, leaves that file at 0644 and
+   makes the behavior gate fail (`MUTATION_RED: startup-repair rc=1`).
 
 The inventory originally used a shell `! grep` form that did not act as a
 reliable `set -e` gate and also matched the legitimate Codex `wx` writer. That
@@ -57,10 +59,13 @@ one-writer positive assertion before recording this report.
 
 ## Scope and residual platform boundary
 
-Only the immediate secret-state directories are set to 0700; project/workspace
-ancestors are not changed. The Docker evidence proves POSIX mode behavior on
-Linux. Windows ACL semantics are not represented by Unix mode bits and remain
-outside this claim.
+Only recognized `.anet` secret-state directories are set to 0700;
+project/workspace ancestors and arbitrary custom-config parents are not
+changed. Ownership and no-follow checks are fail-closed. A config bind-mounted
+from a different uid is therefore rejected rather than silently repaired;
+operators must align ownership or copy it into managed state. The Docker
+evidence proves POSIX mode behavior on Linux. Windows ACL semantics are not
+represented by Unix mode bits and remain outside this claim.
 
 No production service, credential, database, global package, deployment, or
 existing user file was touched.
