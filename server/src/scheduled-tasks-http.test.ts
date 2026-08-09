@@ -93,6 +93,8 @@ describe("Hub scheduled task API and dispatcher", () => {
       (db as any).dialect = original;
     }
     expect(() => assertScheduledTaskBackendSupported()).not.toThrow();
+    const misfireColumn = db.all<any>("PRAGMA table_info(scheduled_tasks)").find((column: any) => column.name === "misfire_policy");
+    expect(misfireColumn?.dflt_value).toBe("'catch_up_once'");
   });
 
   test("owner creates; viewer and node token cannot mutate", async () => {
@@ -120,6 +122,7 @@ describe("Hub scheduled task API and dispatcher", () => {
     expect(created.body.schedule.target_node_id).toBe(nodeId);
     expect(created.body.schedule.target_alias).toBe("scheduler-node");
     expect(created.body.schedule.schedule.type).toBe("interval");
+    expect(created.body.schedule.misfire_policy).toBe("catch_up_once");
     expect(created.body.schedule.created_by).toBeUndefined();
     expect(created.body.schedule.schedule_json).toBeUndefined();
     scheduleId = created.body.schedule.schedule_id;
@@ -152,6 +155,78 @@ describe("Hub scheduled task API and dispatcher", () => {
     expect(JSON.parse(task.meta_json).created_by).toBeUndefined();
     expect(db.get<any>("SELECT id FROM inbox WHERE id = ?1", run.task_id)).toBeTruthy();
     expect(runDueScheduledTasks().processed).toBe(0);
+  });
+
+  test("misfire policy catches up once by default or skips an overdue occurrence", async () => {
+    const make = async (name: string, misfirePolicy?: string) => api(ownerToken, "/api/scheduled-tasks", {
+      method: "POST",
+      body: JSON.stringify({
+        network_id: networkId,
+        name,
+        target_node_id: nodeId,
+        task: `misfire probe ${name}`,
+        timezone: "UTC",
+        schedule: { type: "interval", every_seconds: 60 },
+        ...(misfirePolicy === undefined ? {} : { misfire_policy: misfirePolicy }),
+      }),
+    });
+
+    const invalid = await make("invalid misfire", "run_everything");
+    expect(invalid.status).toBe(400);
+    expect(invalid.body.error).toBe("invalid_misfire_policy");
+
+    const now = new Date();
+    const overdue = new Date(now.getTime() - 5 * 60_000).toISOString();
+
+    const catchUp = await make("catch up default");
+    expect(catchUp.status).toBe(201);
+    expect(catchUp.body.schedule.misfire_policy).toBe("catch_up_once");
+    const catchUpId = catchUp.body.schedule.schedule_id as string;
+    db.run("UPDATE scheduled_tasks SET next_run_at = ?1 WHERE schedule_id = ?2", [overdue, catchUpId]);
+    expect(runDueScheduledTasks(now).processed).toBe(1);
+    expect(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM tasks WHERE meta_json LIKE '%' || ?1 || '%'", catchUpId)!.count).toBe(1);
+    expect(new Date(db.get<{ next_run_at: string }>("SELECT next_run_at FROM scheduled_tasks WHERE schedule_id = ?1", catchUpId)!.next_run_at).getTime()).toBeGreaterThan(now.getTime());
+
+    const skipped = await make("skip overdue", "skip");
+    expect(skipped.status).toBe(201);
+    expect(skipped.body.schedule.misfire_policy).toBe("skip");
+    const skippedId = skipped.body.schedule.schedule_id as string;
+    db.run("UPDATE scheduled_tasks SET next_run_at = ?1 WHERE schedule_id = ?2", [overdue, skippedId]);
+    expect(runDueScheduledTasks(now).processed).toBe(1);
+    expect(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM tasks WHERE meta_json LIKE '%' || ?1 || '%'", skippedId)!.count).toBe(0);
+    expect(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM inbox WHERE meta_json LIKE '%' || ?1 || '%'", skippedId)!.count).toBe(0);
+    const skippedRun = db.get<any>("SELECT * FROM scheduled_task_runs WHERE schedule_id = ?1", skippedId)!;
+    expect(skippedRun.status).toBe("skipped");
+    expect(skippedRun.error_code).toBe("misfire_skipped");
+    const skippedRow = db.get<any>("SELECT * FROM scheduled_tasks WHERE schedule_id = ?1", skippedId)!;
+    expect(skippedRow.last_run_at).toBeNull();
+    expect(new Date(skippedRow.next_run_at).getTime()).toBeGreaterThan(now.getTime());
+
+    const withinGrace = await make("skip within grace", "skip");
+    const withinGraceId = withinGrace.body.schedule.schedule_id as string;
+    const recent = new Date(now.getTime() - 10_000).toISOString();
+    db.run("UPDATE scheduled_tasks SET next_run_at = ?1 WHERE schedule_id = ?2", [recent, withinGraceId]);
+    expect(runDueScheduledTasks(now).processed).toBe(1);
+    expect(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM tasks WHERE meta_json LIKE '%' || ?1 || '%'", withinGraceId)!.count).toBe(1);
+
+    const once = await api(ownerToken, "/api/scheduled-tasks", {
+      method: "POST",
+      body: JSON.stringify({
+        network_id: networkId,
+        name: "skip missed once",
+        target_node_id: nodeId,
+        task: "this missed one-time task must never run",
+        timezone: "UTC",
+        misfire_policy: "skip",
+        schedule: { type: "once", run_at: new Date(Date.now() + 3600_000).toISOString() },
+      }),
+    });
+    const onceId = once.body.schedule.schedule_id as string;
+    db.run("UPDATE scheduled_tasks SET next_run_at = ?1 WHERE schedule_id = ?2", [overdue, onceId]);
+    expect(runDueScheduledTasks(now).processed).toBe(1);
+    const onceRow = db.get<any>("SELECT status, next_run_at, last_run_at FROM scheduled_tasks WHERE schedule_id = ?1", onceId)!;
+    expect(onceRow).toEqual({ status: "completed", next_run_at: null, last_run_at: null });
+    expect(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM tasks WHERE meta_json LIKE '%' || ?1 || '%'", onceId)!.count).toBe(0);
   });
 
   test("dispatch failure rolls back occurrence, inbox, task, and schedule advance as one unit", async () => {

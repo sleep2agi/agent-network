@@ -1,0 +1,48 @@
+# test602 — Hub scheduled-task misfire policy
+
+Date: 2026-08-09
+Status: PASS (pre-commit source tree; exact commit provenance pending final review build)
+
+## Scope
+
+- Hub schema/API/scheduler support for `misfire_policy=catch_up_once|skip`
+- backward-compatible default `catch_up_once`
+- 60-second grace window for ordinary scheduler jitter
+- skipped occurrence audit without task/inbox creation
+- Dashboard and App creation controls and policy disclosure
+
+## Layer 1 — Hub real SQLite/HTTP tests
+
+Command: `sg docker -c 'docker build -t anet-test602:dev -f tests/test602-scheduled-misfire/Dockerfile . && docker run --rm anet-test602:dev'`
+
+Result:
+
+- 10 tests passed, 0 failed, 81 assertions
+- default/validation/create/read compatibility passed
+- catch-up created exactly one task and advanced into the future
+- skip created no task/inbox, wrote `misfire_skipped`, preserved `last_run_at`, and advanced
+- an occurrence only 10 seconds late remained a normal dispatch
+- a skipped one-shot schedule completed without dispatch
+
+## Mutation
+
+Mutation: replace the production skip decision with an always-false condition.
+
+Result: witnessed red, exit code 1. Restoring production code returned the suite to green.
+
+## Layer 2 — Dashboard
+
+- 14 contract checks passed
+- production Next.js build/typecheck passed
+- 53/53 pages generated
+- both policies are selectable, forwarded to the Hub, explained, and disclosed on schedule cards
+
+## Layer 3 — App
+
+- 13 contract checks passed
+- Expo 56 web export passed (423 modules)
+- both policies are selectable, forwarded to the Hub, and disclosed on schedule cards
+
+## Operational note
+
+The three suites reused the single exact tag `anet-test602:dev`, which was removed after each layer. Docker was paused when host free space fell below 9 GB; no prune or broad image deletion was used. A final exact-commit provenance rebuild is required before merge/deploy.
