@@ -94,6 +94,7 @@ import {
   type GrokCopresenceSessionDisclosure,
 } from "../src/grok-copresence-disclosure";
 import { parseCliOptions, positionalArgs } from "../src/cli-args";
+import { diagnoseLocale, formatLocaleSource } from "../src/locale-diagnostic";
 import {
   collectClaudeVendorEnvForCreate,
   planPlainSecretEnvRewrites,
@@ -12431,6 +12432,15 @@ async function doctorCommand() {
   check("Global config (~/.anet/config.json)", !!gc.hub, gc.hub || "missing — run: anet init");
   if (gc.token) check("Auth token configured", true);
   else warning("Auth token", "not set — agents connect without auth");
+
+  const locale = diagnoseLocale(process.env, process.platform);
+  if (locale.shouldWarn) {
+    const source = formatLocaleSource(locale);
+    warning(
+      "System locale",
+      `${source} is not UTF-8; Unicode aliases and tmux output may be corrupted. Fix: export LANG=C.UTF-8 LC_ALL=C.UTF-8`,
+    );
+  }
 
   // 2. Hub connectivity
   if (gc.hub) {
