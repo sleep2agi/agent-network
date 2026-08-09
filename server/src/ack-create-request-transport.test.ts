@@ -76,10 +76,19 @@ async function connectClient() {
   return { client, server };
 }
 
-function responseJson(result: { content: Array<{ type: string; text?: string }> }) {
+type ToolResult = { content: Array<{ type: string; text?: string }>; isError?: boolean };
+
+function responseJson(result: ToolResult) {
   const first = result.content[0];
-  if (!first || first.type !== "text") throw new Error("missing text tool result");
+  if (!first || first.type !== "text" || typeof first.text !== "string") throw new Error("missing text tool result");
   return JSON.parse(first.text) as { ok?: boolean; status?: string };
+}
+
+function expectTransportValidationError(result: ToolResult) {
+  expect(result.isError).toBe(true);
+  const first = result.content[0];
+  expect(first?.type).toBe("text");
+  expect(first?.text).toMatch(/Input validation error.*ack_create_request/i);
 }
 
 beforeEach(() => {
@@ -117,10 +126,11 @@ describe("#344 ack_create_request real in-process MCP transport", () => {
     seedRequest(requestId);
     const { client, server } = await connectClient();
     try {
-      await expect(client.callTool({
+      const result = await client.callTool({
         name: "ack_create_request",
         arguments: { request_id: requestId, status: "capability_failed_typo", runtime: "codex-sdk" },
-      })).rejects.toThrow(/Input validation error.*ack_create_request/i);
+      });
+      expectTransportValidationError(result);
       expect(db.get<{ status: string }>("SELECT status FROM node_create_requests WHERE request_id = ?1", requestId)?.status)
         .toBe("delivered");
     } finally {
@@ -134,10 +144,11 @@ describe("#344 ack_create_request real in-process MCP transport", () => {
     seedRequest(requestId);
     const { client, server } = await connectClient();
     try {
-      await expect(client.callTool({
+      const result = await client.callTool({
         name: "ack_create_request",
         arguments: { request_id: requestId, status: "runtime_capability_check_failed", runtime: 42 },
-      })).rejects.toThrow(/Input validation error.*ack_create_request/i);
+      });
+      expectTransportValidationError(result);
       expect(db.get<{ status: string }>("SELECT status FROM node_create_requests WHERE request_id = ?1", requestId)?.status)
         .toBe("delivered");
     } finally {
