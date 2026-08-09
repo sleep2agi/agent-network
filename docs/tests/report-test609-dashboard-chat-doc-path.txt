@@ -1,0 +1,24 @@
+# Test 609 — Dashboard ChatPanel documentation path
+
+Date: 2026-08-09
+
+## Provenance
+
+- Source commit: `63e0b0985ff810c219bd40c07a9ce89706882bbd`
+- Docker image: `anet-test609:dev`
+- Image ID: `sha256:94b536555ca9f9bcd9b995bcbea40370c0e9421c2466227367aa63b705495b69`
+- Embedded `TEST609_SOURCE_COMMIT`: `63e0b0985ff810c219bd40c07a9ce89706882bbd`
+- Runner artifact SHA-256: `faadc4f5a57edfa9f220e988d65900a83274caf5080eb08aec62d6c15d899be7`
+
+## Result
+
+`RESULT: PASS`
+
+1. Bilingual route contract passed. The Chinese and English guides point users to the embedded ChatPanel from Overview/Nodes and explicitly state that Dashboard has no standalone Chat page.
+2. The documented primary navigation matches the current Dashboard navigation.
+3. The complete VitePress production build passed and rendered both language variants.
+4. Witnessed-red mutation: removing the no-standalone-page disclosure made the contract fail with `rc=1`; restoring the source returned it to green.
+
+## Scope
+
+Documentation and its regression test only. No Hub, agent runtime, Dashboard runtime, deployment, or production state was changed.
