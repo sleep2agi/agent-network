@@ -26,7 +26,7 @@ expect_file_contains() {
 
 expect_gate_green() {
   local log=$1 rc=$2 name=$3
-  if E2E_MIN_PASS=283 bash "$GATE" "$log" "$rc" >/dev/null 2>&1; then
+  if bash "$GATE" "$log" "$rc" >/dev/null 2>&1; then
     pass "$name"
   else
     fail "$name"
@@ -35,7 +35,7 @@ expect_gate_green() {
 
 expect_gate_red() {
   local log=$1 rc=$2 name=$3
-  if E2E_MIN_PASS=283 bash "$GATE" "$log" "$rc" >/dev/null 2>&1; then
+  if bash "$GATE" "$log" "$rc" >/dev/null 2>&1; then
     fail "$name"
   else
     pass "$name"
@@ -75,6 +75,11 @@ expect_gate_red "$TMP_DIR/red.log" 1 'test failures with non-zero runner status 
 expect_gate_red "$TMP_DIR/red.log" 0 'tee-masked runner status cannot hide TOTAL failures'
 expect_gate_red "$TMP_DIR/green.log" 7 'non-zero runner status cannot hide behind a green TOTAL'
 expect_gate_red "$TMP_DIR/short.log" 0 'truncated suite count fails closed'
+if E2E_MIN_PASS=0 bash "$GATE" "$TMP_DIR/short.log" 0 >/dev/null 2>&1; then
+  fail 'environment cannot lower the pinned regression floor'
+else
+  pass 'environment cannot lower the pinned regression floor'
+fi
 expect_gate_red "$TMP_DIR/missing.log" 0 'missing TOTAL fails closed'
 expect_gate_red "$TMP_DIR/duplicate.log" 0 'duplicate or malformed TOTAL fails closed'
 expect_gate_red "$TMP_DIR/green.log" '' 'missing runner status fails closed'
@@ -108,7 +113,7 @@ if cmp -s "$GATE" "$TMP_DIR/gate-mutant.sh"; then
 else
   pass 'failed-count mutation changed bytes'
 fi
-if E2E_MIN_PASS=283 bash "$TMP_DIR/gate-mutant.sh" "$TMP_DIR/red.log" 0 >/dev/null 2>&1; then
+if bash "$TMP_DIR/gate-mutant.sh" "$TMP_DIR/red.log" 0 >/dev/null 2>&1; then
   pass 'WITNESSED_RED: removing the failed-count gate accepts a red TOTAL'
 else
   fail 'WITNESSED_RED: removing the failed-count gate accepts a red TOTAL'

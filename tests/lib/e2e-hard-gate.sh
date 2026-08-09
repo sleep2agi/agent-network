@@ -3,7 +3,7 @@ set -euo pipefail
 
 LOG_FILE=${1:-}
 RUNNER_RC=${2:-}
-MIN_PASS=${E2E_MIN_PASS:-283}
+readonly MIN_PASS=283
 
 if [[ -z "$LOG_FILE" || ! -s "$LOG_FILE" ]]; then
   echo "ERROR: test-all.sh produced no output" >&2
@@ -13,11 +13,6 @@ if [[ ! "$RUNNER_RC" =~ ^[0-9]+$ ]]; then
   echo "ERROR: invalid or missing runner exit code: ${RUNNER_RC:-<empty>}" >&2
   exit 1
 fi
-if [[ ! "$MIN_PASS" =~ ^[0-9]+$ ]]; then
-  echo "ERROR: invalid minimum pass count: $MIN_PASS" >&2
-  exit 1
-fi
-
 mapfile -t total_lines < <(grep -F 'TOTAL: ' "$LOG_FILE" || true)
 if (( ${#total_lines[@]} != 1 )); then
   echo "ERROR: expected exactly one structured TOTAL line, found ${#total_lines[@]}" >&2
