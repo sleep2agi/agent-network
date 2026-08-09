@@ -1,0 +1,28 @@
+# test643 — transient `--hub` survives legacy node_id repair
+
+Date: 2026-08-09
+Base commit: `5b2688fdc41e8c5bfa57820645abcf1f09ffe3df`
+Source commit: `47d3a16c1bacfa6b4712a1f1830bbc4e637f48c3`
+Docker image: `anet-test643:dev`
+Image ID: `sha256:c962697151952a88dcf9285cba5bb18f5c88adcd8fbeafd2fa168f932f4d80eb`
+Embedded ENV: `TEST643_SOURCE_COMMIT=47d3a16c1bacfa6b4712a1f1830bbc4e637f48c3`
+Raw runner report SHA256: `59b1be513f1123663fd844fd64e77f001d85899d8fa883e844acc2fd42bfc62b`
+
+## Result
+
+PASS
+
+- L0: `agent-network` TypeScript check passed.
+- L1: a real Hub process started against fresh SQLite.
+- L2: a real CLI registration and node creation produced a node token; after
+  removing the stored `node_id`, `node start --hub <new>` sent the spawned
+  process to the new Hub, repaired the canonical `node_id`, and kept the
+  persisted node Hub at its original value.
+- L3 witnessed-red: changing the repair write back from `persistedProfile` to
+  the launch-time `profile` persisted the transient Hub and failed at the
+  intended invariant (`rc=1`).
+- L4: restoring production source returned the same real CLI flow to green.
+
+The change is limited to which resolved profile is used for the one-time
+legacy `node_id` repair. Runtime launch paths still consume the explicit Hub
+override, while global config and the node's persisted Hub remain unchanged.
