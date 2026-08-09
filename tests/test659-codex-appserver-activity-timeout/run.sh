@@ -30,7 +30,7 @@ grep -F 'reportStatus("working", task.slice(0, 200))' src/cli.ts >/dev/null
 ok "Hub working heartbeat is bounded to at most once per 30 seconds"
 
 cp src/runtime/codex-app-server/runtime.ts /tmp/test659-runtime.orig
-sed -i 's/armResponseIdleTimer(true);/\/\/ mutation: idle deadline is not reset/' src/runtime/codex-app-server/runtime.ts
+sed -i '0,/lastResponseActivityAt = Date.now();/! s/lastResponseActivityAt = Date.now();/\/\/ mutation: idle deadline is not reset/' src/runtime/codex-app-server/runtime.ts
 grep -F '// mutation: idle deadline is not reset' src/runtime/codex-app-server/runtime.ts >/dev/null
 expect_red remove-idle-reset bun test src/runtime/codex-app-server/runtime.test.ts
 cp /tmp/test659-runtime.orig src/runtime/codex-app-server/runtime.ts

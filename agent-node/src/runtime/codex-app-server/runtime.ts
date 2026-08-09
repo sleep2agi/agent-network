@@ -275,6 +275,7 @@ export function codexAppServerThink(
     let settled = false;
     let queueDeadlineElapsed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let lastResponseActivityAt = 0;
     let queueTimer: ReturnType<typeof setTimeout> | undefined;
     let reconciliationTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = (r: CodexAppServerThinkResult) => {
@@ -301,24 +302,27 @@ export function codexAppServerThink(
       log(`[codex-app-server] task_error ${ev.taskId}: ${ev.error}`);
       finish({ replyText: `codex-app-server 错误: ${ev.error}`, failed: true, queued: false });
     };
-    const armResponseIdleTimer = (reset = false) => {
-      if (settled) return;
-      if (timer) {
-        if (!reset) return;
-        clearTimeout(timer);
-        timer = undefined;
-      }
+    const armResponseIdleTimer = () => {
+      if (settled || timer) return;
       if (queueTimer) {
         clearTimeout(queueTimer);
         queueTimer = undefined;
       }
-      timer = setTimeout(() => {
+      lastResponseActivityAt = Date.now();
+      const checkResponseIdle = () => {
+        timer = undefined;
+        const idleMs = Date.now() - lastResponseActivityAt;
+        if (idleMs < timeoutMs) {
+          timer = setTimeout(checkResponseIdle, timeoutMs - idleMs);
+          return;
+        }
         finish({
           replyText: `codex-app-server 错误: 任务 ${opts.taskId} 超时（开始处理后连续 ${Math.round(timeoutMs / 1000)}s 无活动；turn 可能仍在后台运行，请先检查共享线程，勿盲目重复派发）`,
           failed: true,
           queued: false,
         });
-      }, timeoutMs);
+      };
+      timer = setTimeout(checkResponseIdle, timeoutMs);
     };
     const finishQueueTimeout = () => finish({
       replyText: `codex-app-server 错误: 任务 ${opts.taskId} 在队列中等待 ${queueTimeoutLabel}仍未开始`,
@@ -339,8 +343,11 @@ export function codexAppServerThink(
     };
     const onActivity = (ev: CodexAppServerTaskActivity) => {
       if (ev.taskId !== opts.taskId || !timer) return;
-      log(`[codex-app-server] task_activity ${ev.taskId} turn=${ev.turnId} kind=${ev.kind}; reset idle deadline`);
-      armResponseIdleTimer(true);
+      // Hot path: streamed deltas may arrive many times per second. Updating
+      // one timestamp avoids clear/set timer churn and per-token log floods;
+      // the existing timer checks the timestamp at the current deadline and
+      // reschedules only once for the remaining idle window.
+      lastResponseActivityAt = Date.now();
       try {
         opts.onActivity?.(ev);
       } catch (error) {
