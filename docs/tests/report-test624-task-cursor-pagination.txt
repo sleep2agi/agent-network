@@ -4,9 +4,9 @@ Date: 2026-08-09
 Issue: #459
 Source commit: bf086cd70f9421413cc7d1a18edeb3fa3d30063b
 Docker tag: anet-test624:dev
-Docker image: sha256:c46ec4b356360a09f24e03447959f5f5ac9c55c2f143915e84186edda7194150
+Docker image: sha256:611fea96dfe2fecf297309d4edc78c83d61129bd17246aadabdb51df0530f640
 Embedded source: TEST624_SOURCE_COMMIT=bf086cd70f9421413cc7d1a18edeb3fa3d30063b
-Runner artifact SHA256: d8d0c3cfcc849c9b5d45ad3d0fd53caac7d468f0a6190aca214dfdf5aa023aca
+Runner artifact SHA256: 4bb3a5bdb4afa3b787f6087c421f4df160c16d5da2a55002f283e2788f91aa8a
 
 ## Result
 
