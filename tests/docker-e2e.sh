@@ -1,4 +1,5 @@
 #!/bin/bash
+source /app/lib/response-json.sh
 # Don't use set -e — we handle errors via pass()/fail()
 PASS=0
 FAIL=0
@@ -161,7 +162,7 @@ echo ""
 # 9. send_task via MCP
 echo "9. Testing send_task..."
 SEND=$(mcp_call "send_task" '{"alias":"e2e-agent","task":"test task","from_session":"tester"}')
-echo "$SEND" | grep -q "ok" && pass "task sent" || fail "task send failed"
+response_json_ok "$SEND" && pass "task sent" || fail "task send failed"
 echo ""
 
 # 10. send_message should not trigger processing
@@ -214,13 +215,13 @@ echo ""
 # 12. V2: send_ack updates tasks table
 echo "12. Testing V2 send_ack..."
 ACK_RESP=$(mcp_call "send_ack" "{\"task_id\":\"$TASK_ID\",\"from_session\":\"e2e-agent\"}")
-echo "$ACK_RESP" | grep -q 'ok' && pass "send_ack accepted" || { echo "$ACK_RESP"; fail "send_ack failed"; }
+response_json_ok "$ACK_RESP" && pass "send_ack accepted" || { echo "$ACK_RESP"; fail "send_ack failed"; }
 echo ""
 
 # 13. V2: send_reply closes task lifecycle
 echo "13. Testing V2 send_reply..."
 REPLY_RESP=$(mcp_call "send_reply" "{\"alias\":\"v2-tester\",\"text\":\"task done\",\"in_reply_to\":\"$TASK_ID\",\"status\":\"replied\",\"from_session\":\"e2e-agent\"}")
-echo "$REPLY_RESP" | grep -q 'ok' && pass "send_reply accepted" || { echo "$REPLY_RESP"; fail "send_reply failed"; }
+response_json_ok "$REPLY_RESP" && pass "send_reply accepted" || { echo "$REPLY_RESP"; fail "send_reply failed"; }
 echo ""
 
 # 14. V2: verify task reached terminal state via REST
@@ -241,7 +242,7 @@ echo ""
 # 15. broadcast
 echo "15. Testing broadcast..."
 BC_RESP=$(mcp_call "broadcast" '{"message":"broadcast test","filter_server":"none"}')
-echo "$BC_RESP" | grep -q 'ok' && pass "broadcast sent" || fail "broadcast failed"
+response_json_ok "$BC_RESP" && pass "broadcast sent" || fail "broadcast failed"
 echo ""
 
 # 16. send_reply with status=failed
@@ -259,7 +260,7 @@ try:
 except: print('')
 " 2>/dev/null)
 FAIL_REPLY=$(mcp_call "send_reply" "{\"alias\":\"fail-tester\",\"text\":\"error occurred\",\"in_reply_to\":\"$FAIL_TID\",\"status\":\"failed\",\"from_session\":\"e2e-agent\"}")
-echo "$FAIL_REPLY" | grep -q 'ok' && pass "send_reply(failed) accepted" || fail "send_reply(failed) broken"
+response_json_ok "$FAIL_REPLY" && pass "send_reply(failed) accepted" || fail "send_reply(failed) broken"
 # verify task status = failed
 sleep 1
 FAIL_CHECK=$(curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:9200/api/tasks?task_id=$FAIL_TID" 2>/dev/null)
@@ -290,7 +291,7 @@ echo ""
 # 18. special characters in task content
 echo "18. Testing special characters..."
 SPECIAL_RESP=$(mcp_call "send_task" '{"alias":"e2e-agent","task":"test <script>alert(1)</script> & \"quotes\" 中文测试","from_session":"tester"}')
-echo "$SPECIAL_RESP" | grep -q 'ok' && pass "special chars in task content" || fail "special chars rejected"
+response_json_ok "$SPECIAL_RESP" && pass "special chars in task content" || fail "special chars rejected"
 echo ""
 
 # 19. tasks query by from_name
@@ -382,7 +383,7 @@ echo ""
 echo "23.6 Testing large content..."
 LARGE_CONTENT=$(python3 -c "print('X' * 5000)")
 LARGE_RESP=$(mcp_call "send_task" "{\"alias\":\"conc-1\",\"task\":\"$LARGE_CONTENT\",\"from_session\":\"tester\"}")
-echo "$LARGE_RESP" | grep -q 'ok' && pass "5KB task content accepted" || fail "large content rejected"
+response_json_ok "$LARGE_RESP" && pass "5KB task content accepted" || fail "large content rejected"
 # Verify round-trip: content stored correctly
 LARGE_TID=$(echo "$LARGE_RESP" | python3 -c "
 import sys,json
@@ -407,7 +408,7 @@ fi
 
 # Boundary: empty-ish content edge
 EMPTY_RESP=$(mcp_call "send_task" '{"alias":"conc-1","task":"x","from_session":"tester"}')
-echo "$EMPTY_RESP" | grep -q 'ok' && pass "minimal 1-char task accepted" || fail "1-char task rejected"
+response_json_ok "$EMPTY_RESP" && pass "minimal 1-char task accepted" || fail "1-char task rejected"
 echo ""
 
 # 23.61 task events audit log
@@ -420,7 +421,7 @@ echo ""
 # 23.62 get_task query
 echo "23.62 Testing get_task..."
 GET_T=$(mcp_call "get_task" "{\"task_id\":\"$TASK_ID\"}")
-echo "$GET_T" | grep -q 'ok' && pass "get_task found" || fail "get_task broken"
+response_json_ok "$GET_T" && pass "get_task found" || fail "get_task broken"
 echo "$GET_T" | grep -q 'status' && pass "get_task shows status" || fail "get_task no status"
 GET_MISS=$(mcp_call "get_task" '{"task_id":"nonexistent"}')
 echo "$GET_MISS" | grep -q 'not found' && pass "get_task 404 for missing" || fail "get_task should 404"
@@ -449,7 +450,7 @@ RETRY_C1=$(curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:9200/api/
 echo "$RETRY_C1" | grep -q '"failed"' && pass "task marked failed" || fail "task not failed"
 # Retry it
 RETRY_RESP=$(mcp_call "retry_task" "{\"task_id\":\"$RETRY_TID\",\"from_session\":\"tester\"}")
-echo "$RETRY_RESP" | grep -q 'ok' && pass "retry_task accepted" || fail "retry_task failed"
+response_json_ok "$RETRY_RESP" && pass "retry_task accepted" || fail "retry_task failed"
 # Verify back to delivered
 sleep 1
 RETRY_C2=$(curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:9200/api/tasks?task_id=$RETRY_TID" 2>/dev/null)
@@ -459,7 +460,7 @@ echo ""
 # 23.63 list_tasks + stats
 echo "23.63 Testing list_tasks..."
 LT_RESP=$(mcp_call "list_tasks" '{"alias":"e2e-agent","limit":5}')
-echo "$LT_RESP" | grep -q 'ok' && pass "list_tasks works" || fail "list_tasks broken"
+response_json_ok "$LT_RESP" && pass "list_tasks works" || fail "list_tasks broken"
 echo "$LT_RESP" | grep -q 'stats' && pass "list_tasks has stats" || fail "no stats"
 # REST stats
 REST_STATS=$(curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:9200/api/tasks?limit=1" 2>/dev/null)
@@ -481,7 +482,7 @@ try:
 except: print('')
 " 2>/dev/null)
 CANCEL_RESP=$(mcp_call "cancel_task" "{\"task_id\":\"$CANCEL_TID\",\"reason\":\"no longer needed\",\"from_session\":\"tester\"}")
-echo "$CANCEL_RESP" | grep -q 'ok' && pass "cancel_task accepted" || fail "cancel_task failed"
+response_json_ok "$CANCEL_RESP" && pass "cancel_task accepted" || fail "cancel_task failed"
 CANCEL_CHECK=$(curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:9200/api/tasks?task_id=$CANCEL_TID" 2>/dev/null)
 echo "$CANCEL_CHECK" | grep -q '"cancelled"' && pass "task status = cancelled" || fail "task not cancelled"
 # Try cancel again (idempotent check — already terminal)
@@ -646,7 +647,7 @@ echo ""
 echo "25. Simulating full agent lifecycle..."
 # Register a mock agent
 SIM_REG=$(mcp_call "report_status" '{"resume_id":"sim-mock-agent","alias":"mock-agent","status":"idle","server":"test","agent":"mock"}')
-echo "$SIM_REG" | grep -q 'ok' && pass "mock agent registered" || fail "mock agent registration failed"
+response_json_ok "$SIM_REG" && pass "mock agent registered" || fail "mock agent registration failed"
 
 # Send task to mock agent
 SIM_TASK=$(mcp_call "send_task" '{"alias":"mock-agent","task":"compute 2+2","from_session":"orchestrator","priority":"normal"}')
@@ -673,7 +674,7 @@ echo "$SIM_INBOX" | grep -q 'compute 2+2' && pass "mock agent received task" || 
 
 # Mock agent: ack
 SIM_ACK=$(mcp_call "ack_inbox" "{\"alias\":\"mock-agent\",\"message_id\":\"$SIM_TID\"}")
-echo "$SIM_ACK" | grep -q 'ok' && pass "mock agent acked" || fail "ack failed"
+response_json_ok "$SIM_ACK" && pass "mock agent acked" || fail "ack failed"
 
 # Verify task = acked
 SIM_CHECK2=$(curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:9200/api/tasks?task_id=$SIM_TID" 2>/dev/null)
@@ -681,7 +682,7 @@ echo "$SIM_CHECK2" | grep -q '"acked"' && pass "task status = acked" || fail "ex
 
 # Mock agent: report working
 SIM_WORK=$(mcp_call "report_status" '{"resume_id":"sim-mock-agent","alias":"mock-agent","status":"working","task":"compute 2+2"}')
-echo "$SIM_WORK" | grep -q 'ok' && pass "mock agent working" || fail "status update failed"
+response_json_ok "$SIM_WORK" && pass "mock agent working" || fail "status update failed"
 
 # Verify task = running
 sleep 1
@@ -690,7 +691,7 @@ echo "$SIM_CHECK3" | grep -q '"running"' && pass "task status = running" || fail
 
 # Mock agent: send reply with result
 SIM_REPLY=$(mcp_call "send_reply" "{\"alias\":\"orchestrator\",\"text\":\"4\",\"in_reply_to\":\"$SIM_TID\",\"status\":\"replied\",\"from_session\":\"mock-agent\"}")
-echo "$SIM_REPLY" | grep -q 'ok' && pass "mock agent replied" || fail "reply failed"
+response_json_ok "$SIM_REPLY" && pass "mock agent replied" || fail "reply failed"
 
 # Verify task = replied with result
 SIM_CHECK4=$(curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:9200/api/tasks?task_id=$SIM_TID" 2>/dev/null)
