@@ -14,6 +14,7 @@
 - 建立单次、固定间隔、每日、每周计划。
 - 每日/每周计划显式记录 IANA timezone；单次时间保存为 UTC ISO 8601。
 - 查看下次/上次执行、暂停、恢复、立即执行、取消和运行历史。
+- 创建时选择错过执行窗口后的处理方式：恢复后补跑一次，或跳过本次等待下一周期。
 - 目标节点改名后仍按 `node_id` 解析当前 alias。
 - 默认 `overlap_policy=skip`：上一轮普通 task 尚未终态时，本轮记 `skipped`，不重复压入节点。
 
@@ -32,8 +33,10 @@
 3. occurrence claim、run row、inbox row、task row及 next occurrence 推进处于同一个数据库 transaction。
 4. commit 后才发送 SSE doorbell。SSE 失败不回滚已持久化任务；节点仍会通过 inbox 拉取。
 5. Hub 长时间停机后，每个到期计划只补一次；下一次从恢复时刻以后计算，禁止补发所有错过的 tick 形成风暴。
-6. 单次计划无论成功投递或因目标失效而失败，均进入 `completed`，不永久自旋。
-7. 目标处于 stop/delete lifecycle 时 fail closed，run 记录失败；普通 offline 仍排队。
+6. `misfire_policy=catch_up_once` 是默认值和旧数据兼容值：恢复后最多补发一条普通任务，再从恢复时刻以后计算下一次。
+7. `misfire_policy=skip` 在超过 60 秒宽限窗口后不创建 `task`/`inbox`，只写一条 `status=skipped,error_code=misfire_skipped` 的可审计 run，再推进到下一次未来 occurrence。60 秒以内仍按正常调度处理，避免把 scheduler tick 抖动误判为停机错过。
+8. 单次计划无论成功投递、按策略跳过或因目标失效而失败，均进入 `completed`，不永久自旋。
+9. 目标处于 stop/delete lifecycle 时 fail closed，run 记录失败；普通 offline 仍排队。
 
 SQLite transaction 是当前生产原子边界。仓库现有 PostgreSQL adapter 已明确不提供真实跨语句 transaction；`startHub()` 会在监听前 fail closed，直到该 adapter 修复，不得把 PostgreSQL 宣称为 scheduler 的 production-safe 后端。
 
@@ -56,6 +59,8 @@ SQLite transaction 是当前生产原子边界。仓库现有 PostgreSQL adapter
 - `POST /api/scheduled-tasks/:schedule_id/run-now`
 
 PATCH 必须携带当前 `revision`；陈旧客户端得到 `409 revision_conflict`，不得覆盖另一设备的新状态。
+
+创建请求中的 `misfire_policy` 只接受 `catch_up_once` 或 `skip`。省略时按 `catch_up_once` 处理；Dashboard 与 App 必须把该选择显式展示给用户，不得用隐式客户端默认值掩盖 Hub 语义。
 
 ## 7. 发布与回滚
 

@@ -9,6 +9,8 @@ export type ScheduleSpec =
   | { type: "daily"; time: string }
   | { type: "weekly"; time: string; weekdays: number[] };
 
+export type MisfirePolicy = "catch_up_once" | "skip";
+
 type ScheduledRow = {
   schedule_id: string;
   network_id: string;
@@ -22,6 +24,7 @@ type ScheduledRow = {
   schedule_json: string;
   timezone: string;
   overlap_policy: "skip" | "allow";
+  misfire_policy: MisfirePolicy;
   status: "active" | "paused" | "completed" | "cancelled";
   next_run_at: string | null;
   last_run_at: string | null;
@@ -48,6 +51,8 @@ export type ScheduledRequestContext = {
 const PRIORITIES = new Set(["high", "normal", "low"]);
 const TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const OPEN_TASK_STATUSES = ["created", "delivered", "acked", "running"];
+const MISFIRE_POLICIES = new Set<MisfirePolicy>(["catch_up_once", "skip"]);
+export const MISFIRE_GRACE_MS = 60_000;
 
 export function assertScheduledTaskBackendSupported(): void {
   if (db.dialect !== "sqlite") {
@@ -70,6 +75,12 @@ function validTimezone(timezone: string): boolean {
   } catch {
     return false;
   }
+}
+
+function parseMisfirePolicy(raw: unknown, fallback: MisfirePolicy = "catch_up_once"): MisfirePolicy {
+  if (raw === undefined) return fallback;
+  if (typeof raw !== "string" || !MISFIRE_POLICIES.has(raw as MisfirePolicy)) throw new Error("invalid_misfire_policy");
+  return raw as MisfirePolicy;
 }
 
 function zonedParts(date: Date, timezone: string): { date: string; time: string; weekday: number } {
@@ -190,7 +201,7 @@ function validateTarget(networkId: string, nodeId: unknown): { node_id: string; 
 
 type DispatchEvent = { alias: string; networkId: string; taskId: string; priority: string; state: "delivered" | "queued" };
 
-export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: string, advanceSchedule: boolean): { runId: string; taskId?: string; status: string; event?: DispatchEvent } {
+export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: string, advanceSchedule: boolean, advanceAfter = new Date()): { runId: string; taskId?: string; status: string; event?: DispatchEvent } {
   const runId = `srun_${crypto.randomUUID()}`;
   let event: DispatchEvent | undefined;
   let finalStatus = "failed";
@@ -220,7 +231,7 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
           "UPDATE scheduled_task_runs SET status = 'skipped', error_code = 'previous_run_active', completed_at = datetime('now') WHERE run_id = ?1",
           [runId],
         );
-        if (advanceSchedule) advance(row, scheduledFor);
+        if (advanceSchedule) advance(row, scheduledFor, advanceAfter);
         return;
       }
     }
@@ -235,7 +246,7 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
         "UPDATE scheduled_task_runs SET status = 'failed', error_code = 'target_node_not_found', error_message = 'The bound node no longer exists in this network', completed_at = datetime('now') WHERE run_id = ?1",
         [runId],
       );
-      if (advanceSchedule) advance(row, scheduledFor);
+      if (advanceSchedule) advance(row, scheduledFor, advanceAfter);
       return;
     }
     const lifecycle = assertNodeActive(node.alias, row.network_id);
@@ -245,7 +256,7 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
         "UPDATE scheduled_task_runs SET status = 'failed', error_code = 'target_not_active', error_message = ?1, completed_at = datetime('now') WHERE run_id = ?2",
         [String((lifecycle as any).error || "target_not_active").slice(0, 500), runId],
       );
-      if (advanceSchedule) advance(row, scheduledFor);
+      if (advanceSchedule) advance(row, scheduledFor, advanceAfter);
       return;
     }
 
@@ -274,7 +285,7 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
     db.run("UPDATE scheduled_task_runs SET task_id = ?1, status = ?2, completed_at = datetime('now') WHERE run_id = ?3", [taskId, deliveryState, runId]);
     db.run("UPDATE sessions SET task = ?1, updated_at = datetime('now') WHERE node_id = ?2 AND network_id = ?3", [row.task_content.slice(0, 200), node.node_id, row.network_id]);
     db.run("UPDATE scheduled_tasks SET target_alias = ?1, last_run_at = ?2, updated_at = datetime('now') WHERE schedule_id = ?3", [node.alias, scheduledFor, row.schedule_id]);
-    if (advanceSchedule) advance({ ...row, target_alias: node.alias }, scheduledFor);
+    if (advanceSchedule) advance({ ...row, target_alias: node.alias }, scheduledFor, advanceAfter);
     createdTaskId = taskId;
     finalStatus = deliveryState;
     event = { alias: node.alias, networkId: row.network_id, taskId, priority: row.priority, state: deliveryState };
@@ -296,20 +307,41 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
   return { runId, taskId: createdTaskId, status: finalStatus, event };
 }
 
-function advance(row: ScheduledRow, scheduledFor: string): void {
+function advance(row: ScheduledRow, scheduledFor: string, after = new Date(), recordLastRun = true): void {
   const spec = JSON.parse(row.schedule_json) as ScheduleSpec;
-  const next = nextOccurrence(spec, row.timezone, new Date());
+  const next = nextOccurrence(spec, row.timezone, after);
+  const lastRunAt = recordLastRun ? scheduledFor : row.last_run_at;
   if (spec.type === "once" || !next) {
     db.run(
       "UPDATE scheduled_tasks SET status = 'completed', next_run_at = NULL, last_run_at = ?1, revision = revision + 1, updated_at = datetime('now') WHERE schedule_id = ?2",
-      [scheduledFor, row.schedule_id],
+      [lastRunAt, row.schedule_id],
     );
   } else {
     db.run(
       "UPDATE scheduled_tasks SET next_run_at = ?1, last_run_at = ?2, revision = revision + 1, updated_at = datetime('now') WHERE schedule_id = ?3",
-      [iso(next), scheduledFor, row.schedule_id],
+      [iso(next), lastRunAt, row.schedule_id],
     );
   }
+}
+
+function isMissedOccurrence(scheduledFor: string, now: Date): boolean {
+  const scheduledAt = new Date(scheduledFor).getTime();
+  return Number.isFinite(scheduledAt) && now.getTime() - scheduledAt > MISFIRE_GRACE_MS;
+}
+
+function skipScheduledMisfire(row: ScheduledRow, scheduledFor: string, now: Date): void {
+  const runId = `srun_${crypto.randomUUID()}`;
+  db.transaction(() => {
+    db.run(
+      `INSERT INTO scheduled_task_runs
+       (run_id, schedule_id, network_id, scheduled_for, status, error_code, error_message, completed_at)
+       VALUES (?1, ?2, ?3, ?4, 'skipped', 'misfire_skipped', 'The occurrence was overdue and the schedule is configured to skip missed runs', datetime('now'))`,
+      [runId, row.schedule_id, row.network_id, scheduledFor],
+    );
+    // A skipped occurrence is auditable but is not an execution: preserve
+    // last_run_at while moving the schedule directly to its next future slot.
+    advance(row, scheduledFor, now, false);
+  });
 }
 
 export function runDueScheduledTasks(now = new Date(), limit = 100): { processed: number; failed: number } {
@@ -325,7 +357,14 @@ export function runDueScheduledTasks(now = new Date(), limit = 100): { processed
       // tick wins. The unique occurrence key handles a second scheduler.
       const current = db.get<ScheduledRow>("SELECT * FROM scheduled_tasks WHERE schedule_id = ?1 AND status = 'active' AND next_run_at = ?2", row.schedule_id, row.next_run_at);
       if (!current?.next_run_at) continue;
-      dispatchScheduledOccurrence(current, current.next_run_at, true);
+      if (current.misfire_policy === "skip" && isMissedOccurrence(current.next_run_at, now)) {
+        skipScheduledMisfire(current, current.next_run_at, now);
+      } else {
+        // catch_up_once is also the compatibility default for pre-migration
+        // rows. Advancing from `now` collapses any number of missed slots into
+        // one task instead of replaying an outage as a dispatch storm.
+        dispatchScheduledOccurrence(current, current.next_run_at, true, now);
+      }
       processed++;
     } catch (e: any) {
       if (/UNIQUE|duplicate key/i.test(String(e?.message))) continue;
@@ -388,6 +427,7 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
       if (!content || content.length > 10_000) throw new Error("invalid_task");
       const priority = typeof body.priority === "string" ? body.priority : "normal";
       if (!PRIORITIES.has(priority)) throw new Error("invalid_priority");
+      const misfirePolicy = parseMisfirePolicy(body.misfire_policy);
       const target = validateTarget(networkId, body.target_node_id);
       const { spec, timezone } = parseScheduleSpec(body.schedule, body.timezone);
       const next = nextOccurrence(spec, timezone, new Date());
@@ -395,9 +435,9 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
       const scheduleId = `sched_${crypto.randomUUID()}`;
       db.run(
         `INSERT INTO scheduled_tasks
-         (schedule_id, network_id, created_by, name, target_node_id, target_alias, task_content, priority, schedule_type, schedule_json, timezone, overlap_policy, next_run_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'skip', ?12)`,
-        [scheduleId, networkId, ctx.auth?.userId ?? null, name, target.node_id, target.alias, content, priority, spec.type, JSON.stringify(spec), timezone, iso(next)],
+         (schedule_id, network_id, created_by, name, target_node_id, target_alias, task_content, priority, schedule_type, schedule_json, timezone, overlap_policy, misfire_policy, next_run_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'skip', ?12, ?13)`,
+        [scheduleId, networkId, ctx.auth?.userId ?? null, name, target.node_id, target.alias, content, priority, spec.type, JSON.stringify(spec), timezone, misfirePolicy, iso(next)],
       );
       const created = db.get<ScheduledRow>("SELECT * FROM scheduled_tasks WHERE schedule_id = ?1", scheduleId)!;
       return Response.json({ ok: true, schedule: decodeRow(created) }, { status: 201 });
@@ -459,13 +499,14 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
       if (!validTimezone(parsed.timezone)) throw new Error("invalid_timezone");
       const requestedStatus = body.status === undefined ? row.status : String(body.status);
       if (!new Set(["active", "paused"]).has(requestedStatus)) throw new Error("invalid_status");
+      const misfirePolicy = parseMisfirePolicy(body.misfire_policy, row.misfire_policy);
       const next = requestedStatus === "active" ? nextOccurrence(parsed.spec, parsed.timezone, new Date()) : null;
       if (requestedStatus === "active" && !next) throw new Error("schedule_has_no_future_occurrence");
       const updated = db.run(
         `UPDATE scheduled_tasks SET name = ?1, target_node_id = ?2, target_alias = ?3, task_content = ?4,
          priority = ?5, schedule_type = ?6, schedule_json = ?7, timezone = ?8, status = ?9, next_run_at = ?10,
-         revision = revision + 1, updated_at = datetime('now') WHERE schedule_id = ?11 AND revision = ?12`,
-        [name, target.node_id, target.alias, content, priority, parsed.spec.type, JSON.stringify(parsed.spec), parsed.timezone, requestedStatus, next ? iso(next) : null, row.schedule_id, row.revision],
+         misfire_policy = ?11, revision = revision + 1, updated_at = datetime('now') WHERE schedule_id = ?12 AND revision = ?13`,
+        [name, target.node_id, target.alias, content, priority, parsed.spec.type, JSON.stringify(parsed.spec), parsed.timezone, requestedStatus, next ? iso(next) : null, misfirePolicy, row.schedule_id, row.revision],
       );
       if (updated.changes !== 1) return jsonError("revision_conflict", 409);
       return Response.json({ ok: true, schedule: decodeRow(db.get<ScheduledRow>("SELECT * FROM scheduled_tasks WHERE schedule_id = ?1", row.schedule_id)!) });

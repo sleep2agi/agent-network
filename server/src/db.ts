@@ -1081,6 +1081,7 @@ db.exec(`
     schedule_json    TEXT NOT NULL,
     timezone         TEXT NOT NULL DEFAULT 'UTC',
     overlap_policy   TEXT NOT NULL DEFAULT 'skip',
+    misfire_policy   TEXT NOT NULL DEFAULT 'catch_up_once',
     status           TEXT NOT NULL DEFAULT 'active',
     next_run_at      TEXT,
     last_run_at      TEXT,
@@ -1115,6 +1116,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_scheduled_runs_network
     ON scheduled_task_runs(network_id, created_at DESC);
 `);
+try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN misfire_policy TEXT NOT NULL DEFAULT 'catch_up_once'"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id)"); } catch {}
 
 // Helpers
