@@ -1,0 +1,38 @@
+# test632 — honest SSE abandon recovery guidance
+
+Date: 2026-08-09
+Issue: #535
+Base: f7e854c3e64eee75cf06c4c8c1563c2c2230be3a
+Source commit: edb034c786c7b140b25fdfd7dd9688b8dd38ab10
+Docker image: anet-test632:dev
+Docker image ID: sha256:02bbb851b4607626754d62dc939e93f0d574f3d98592c2b326fbf6b003848951
+Embedded TEST632_SOURCE_COMMIT: edb034c786c7b140b25fdfd7dd9688b8dd38ab10
+Runner artifact SHA256: 0e842fe67a971d513fbee1380b503be91f6b77063e2e8580be73961feeca8603
+
+## Result
+
+PASS.
+
+- Helper and production-hook contract: 4 pass, 0 fail, 13 assertions.
+- Real agent-node entrypoint bundled successfully (255 modules, 1.92 MB).
+- Guidance states the lifecycle fact: abandoning SSE leaves the current
+  agent-node instance alive.
+- Guidance forbids starting a parallel instance with the same alias and
+  requires stop-and-replace through the original supervisor/launch path.
+- Co-presence recovery explicitly preserves `--copresence` / dedicated
+  config shape; it does not recommend generic `anet node start <alias>`.
+
+## Witnessed red
+
+1. Replaced the duplicate-safe sentence with the former generic
+   `anet node start <alias>` instruction: test suite rc=1.
+2. Bypassed `sseAbandonGuidance` in the production `onAbandon` hook: test
+   suite rc=1.
+
+After restoring both mutations, the full suite returned green.
+
+## Scope
+
+This candidate changes only the operator guidance emitted after the existing
+one-hour SSE abandon threshold. It does not alter retry timing, process
+lifecycle, Hub behavior, runtime selection, or production state.
