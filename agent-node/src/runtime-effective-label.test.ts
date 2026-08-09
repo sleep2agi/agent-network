@@ -83,6 +83,12 @@ function bannerRuntimeLine(stdout: string): string | null {
   return m ? m[1].trim() : null;
 }
 
+/** The `model:` line of the startup banner, without the log prefix. */
+function bannerModelLine(stdout: string): string | null {
+  const m = stdout.match(/^.*\bmodel:\s*(.+)$/m);
+  return m ? m[1].trim() : null;
+}
+
 describe("#491 startup banner reports the EFFECTIVE runtime", () => {
   test("alias input 'codex-tui' → banner names the effective runtime (codex-app-server), not just the raw input", async () => {
     const r = await runCli(["--alias", "p491-node", "--runtime", "codex-tui"]);
@@ -116,5 +122,26 @@ describe("#491 regression lock — unknown runtime fails closed", () => {
     expect(out).toMatch(/codex-sdk/);
     // …and it must NOT have silently started as claude.
     expect(bannerRuntimeLine(r.stdout) ?? "").not.toContain("claude-agent-sdk");
+  }, 30_000);
+});
+
+describe("#553 Grok startup banner reports model ownership truthfully", () => {
+  test("unset model on Grok ACP names the Grok CLI as owner, not the runtime alias as a model id", async () => {
+    const r = await runCli(["--alias", "p553-node", "--runtime", "grok-build-acp"]);
+    const line = bannerModelLine(r.stdout);
+    expect(line).toBe("configured by Grok CLI");
+    expect(line).not.toContain("grok-build");
+  }, 30_000);
+
+  test("unset model on Grok CLI uses the same non-versioned ownership statement", async () => {
+    const r = await runCli(["--alias", "p553-node", "--runtime", "grok-build-cli"]);
+    const line = bannerModelLine(r.stdout);
+    expect(line).toBe("configured by Grok CLI");
+    expect(line).not.toContain("grok-build");
+  }, 30_000);
+
+  test("an explicit Grok model is still reported exactly", async () => {
+    const r = await runCli(["--alias", "p553-node", "--runtime", "grok-build-acp", "--model", "grok-4.5"]);
+    expect(bannerModelLine(r.stdout)).toBe("grok-4.5");
   }, 30_000);
 });

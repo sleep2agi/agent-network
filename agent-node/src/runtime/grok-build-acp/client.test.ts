@@ -1,10 +1,28 @@
 import { describe, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { GrokAcpClient } from "./client";
 
 describe("GrokAcpClient", () => {
+  test("starts the ACP server as `grok agent stdio` without inventing a model flag", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "grok-acp-argv-"));
+    const argsFile = join(cwd, "args.json");
+    const fake = join(cwd, "fake-grok.js");
+    writeFileSync(fake, `#!/usr/bin/env node
+require("fs").writeFileSync(process.env.ARGS_FILE, JSON.stringify(process.argv.slice(2)));
+setTimeout(() => process.exit(0), 20);
+`);
+    chmodSync(fake, 0o755);
+
+    const client = new GrokAcpClient();
+    client.start({ cwd, binary: fake, env: { ...process.env, ARGS_FILE: argsFile } });
+    for (let i = 0; i < 50 && !existsSync(argsFile); i++) await Bun.sleep(10);
+    await client.close();
+
+    expect(JSON.parse(readFileSync(argsFile, "utf8"))).toEqual(["agent", "stdio"]);
+  });
+
   test("handles ACP server-to-client fs and permission requests", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "grok-acp-client-"));
     writeFileSync(join(cwd, "README.md"), "before\n");
