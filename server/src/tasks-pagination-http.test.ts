@@ -31,8 +31,11 @@ function seedTask(
 beforeAll(async () => {
   ({ db } = await import("./db.js"));
   ({ register } = await import("./auth.js"));
-  const a = register(`page_a_${Date.now()}`, "PageTest-A-Strong!", undefined, "seed-a");
   const b = register(`page_b_${Date.now()}`, "PageTest-B-Strong!", undefined, "seed-b");
+  // The first registered user is the instance admin and may read all
+  // networks. Register the foreign fixture first so tokenA exercises the
+  // ordinary member-scoped path rather than the admin bypass.
+  const a = register(`page_a_${Date.now()}`, "PageTest-A-Strong!", undefined, "seed-a");
   expect(a.ok).toBe(true);
   expect(b.ok).toBe(true);
   tokenA = a.token!;
