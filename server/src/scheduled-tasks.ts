@@ -66,9 +66,12 @@ function validTimezone(timezone: string): boolean {
   }
 }
 
-function zonedParts(date: Date, timezone: string): { time: string; weekday: number } {
+function zonedParts(date: Date, timezone: string): { date: string; time: string; weekday: number } {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
     hourCycle: "h23",
     hour: "2-digit",
     minute: "2-digit",
@@ -76,7 +79,7 @@ function zonedParts(date: Date, timezone: string): { time: string; weekday: numb
   }).formatToParts(date);
   const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value || "";
   const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(value("weekday"));
-  return { time: `${value("hour")}:${value("minute")}`, weekday };
+  return { date: `${value("year")}-${value("month")}-${value("day")}`, time: `${value("hour")}:${value("minute")}`, weekday };
 }
 
 /** Parse and validate the public schedule shape. No cron expressions: the
@@ -123,11 +126,27 @@ export function nextOccurrence(spec: ScheduleSpec, timezone: string, after: Date
   }
   if (spec.type === "interval") return new Date(after.getTime() + spec.every_seconds * 1000);
 
+  // A wall-clock time can occur twice when DST falls back. If today's local
+  // occurrence already happened at or before `after`, skip every duplicate
+  // carrying that same local date. Otherwise a "daily 01:30" schedule runs
+  // twice on the fall-back day.
+  const afterLocal = zonedParts(after, timezone);
+  let alreadyOccurredDate: string | null = null;
+  const backward = new Date(Math.floor(after.getTime() / 60000) * 60000);
+  for (let i = 0; i <= 26 * 60; i++, backward.setTime(backward.getTime() - 60000)) {
+    const local = zonedParts(backward, timezone);
+    if (local.date === afterLocal.date && local.time === spec.time && (spec.type === "daily" || spec.weekdays.includes(local.weekday))) {
+      alreadyOccurredDate = local.date;
+      break;
+    }
+  }
+
   const cursor = new Date(Math.floor(after.getTime() / 60000) * 60000 + 60000);
   const max = 8 * 24 * 60;
   for (let i = 0; i < max; i++, cursor.setTime(cursor.getTime() + 60000)) {
     const local = zonedParts(cursor, timezone);
     if (local.time !== spec.time) continue;
+    if (local.date === alreadyOccurredDate) continue;
     if (spec.type === "daily" || spec.weekdays.includes(local.weekday)) return new Date(cursor);
   }
   throw new Error("next_occurrence_unresolvable");

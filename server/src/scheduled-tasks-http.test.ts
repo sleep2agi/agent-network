@@ -69,6 +69,19 @@ describe("Hub scheduled task API and dispatcher", () => {
     expect(daily?.toISOString()).toBe("2026-08-10T01:30:00.000Z");
     const weekly = nextOccurrence({ type: "weekly", time: "09:30", weekdays: [1] }, "Asia/Shanghai", new Date("2026-08-09T02:00:00Z"));
     expect(weekly?.toISOString()).toBe("2026-08-10T01:30:00.000Z");
+
+    // America/New_York skips 02:30 on 2026-03-08, so the next valid wall
+    // clock occurrence is the following day rather than an offset guess.
+    const springGap = nextOccurrence({ type: "daily", time: "02:30" }, "America/New_York", new Date("2026-03-08T05:00:00Z"));
+    expect(springGap?.toISOString()).toBe("2026-03-09T06:30:00.000Z");
+
+    // 01:30 occurs twice on the fall-back day. Before the first occurrence we
+    // select it; after it has run, the duplicate instant on the same local
+    // date is skipped so a daily schedule remains once-per-day.
+    const fallFirst = nextOccurrence({ type: "daily", time: "01:30" }, "America/New_York", new Date("2026-11-01T04:00:00Z"));
+    expect(fallFirst?.toISOString()).toBe("2026-11-01T05:30:00.000Z");
+    const fallAfterFirst = nextOccurrence({ type: "daily", time: "01:30" }, "America/New_York", fallFirst!);
+    expect(fallAfterFirst?.toISOString()).toBe("2026-11-02T06:30:00.000Z");
   });
 
   test("owner creates; viewer and node token cannot mutate", async () => {

@@ -68,6 +68,12 @@ grep -Fq 'if (false && (!Number.isSafeInteger' server/src/scheduled-tasks.ts
 expect_red optimistic-revision /tmp/test601-mut-revision.db
 cp /tmp/test601-scheduled-tasks.ts server/src/scheduled-tasks.ts
 
-echo "L10 restored green"
+echo "L10 witnessed-red: DST fall-back duplicate suppression is load-bearing"
+sed -i 's/if (local.date === alreadyOccurredDate) continue;/if (false \&\& local.date === alreadyOccurredDate) continue;/' server/src/scheduled-tasks.ts
+grep -Fq 'if (false && local.date === alreadyOccurredDate)' server/src/scheduled-tasks.ts
+expect_red dst-fallback-single-occurrence /tmp/test601-mut-dst.db
+cp /tmp/test601-scheduled-tasks.ts server/src/scheduled-tasks.ts
+
+echo "L11 restored green"
 run_real /tmp/test601-restored.db
 echo "RESULT: PASS"
