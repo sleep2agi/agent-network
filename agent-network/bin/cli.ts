@@ -94,6 +94,7 @@ import {
   type GrokCopresenceSessionDisclosure,
 } from "../src/grok-copresence-disclosure";
 import { parseCliOptions, positionalArgs } from "../src/cli-args";
+import { parseTokenCreateName } from "../src/token-cli";
 import { diagnoseLocale, formatLocaleSource } from "../src/locale-diagnostic";
 import {
   formatSecretAssignment,
@@ -9882,15 +9883,35 @@ function logsCommand() {
 // ── token ──
 
 async function tokenCommand() {
+  const sub = args[1];
+
+  if (sub === "--help" || sub === "-h" || sub === "help") {
+    console.log(`
+anet token <command>
+
+  ls                    List all tokens
+  create <name>         Create a new API token (legacy positional form)
+  create --name <name>  Create a new API token
+  revoke <token-id>     Revoke a token by ID
+`);
+    return;
+  }
+
+  const createName = sub === "create" ? parseTokenCreateName(args.slice(2)) : null;
+  if (createName && !createName.ok) {
+    console.error(`Invalid token create arguments: ${createName.error}`);
+    console.error("Usage: anet token create --name <name>");
+    process.exit(1);
+  }
+
   const gc = loadGlobal();
   const hub = gc.hub;
   const token = gc.token;
   if (!hub || !token) { console.error("Not logged in. Run: anet login"); return; }
   const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
-  const sub = args[1];
 
   if (sub === "create") {
-    const name = args[2] || "api-token";
+    const name = createName!.name;
     try {
       const res = await fetch(`${hub}/api/auth/tokens`, { method: "POST", headers, body: JSON.stringify({ name }) }).then(r => r.json() as any);
       if (res.ok) {
@@ -9914,27 +9935,16 @@ async function tokenCommand() {
     return;
   }
 
-  if (sub === "--help" || sub === "-h" || sub === "help") {
-    console.log(`
-anet token <command>
-
-  ls                    List all tokens
-  create <name>         Create a new API token
-  revoke <token-id>     Revoke a token by ID
-`);
-    return;
-  }
-
   // Default: list tokens (same as "ls")
   try {
     const res = await fetch(`${hub}/api/auth/tokens`, { headers }).then(r => r.json() as any);
     if (!res.ok) { console.error(res.error); return; }
     if (!res.tokens?.length) { console.log("\n  No tokens. Create one: anet token create <name>\n"); return; }
     console.log("\n  API Tokens:\n");
-    console.log("  ID                   NAME           LAST USED");
-    console.log("  ──────────────────── ────────────── ──────────────────");
+    console.log("  ID                   NAME           CREATED                  LAST USED");
+    console.log("  ──────────────────── ────────────── ──────────────────────── ────────────────────────");
     for (const t of res.tokens) {
-      console.log(`  ${(t.token_id || "?").padEnd(22)} ${(t.name || "?").padEnd(14)} ${t.last_used_at || "never"}`);
+      console.log(`  ${(t.token_id || "?").padEnd(22)} ${(t.name || "?").padEnd(14)} ${(t.created_at || "?").padEnd(24)} ${t.last_used_at || "never"}`);
     }
     console.log();
   } catch (e: any) { console.error(friendlyError(e)); }
