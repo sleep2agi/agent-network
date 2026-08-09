@@ -249,12 +249,57 @@ describe("CodexAppServerClient — dead shared endpoint diagnostics (#455)", () 
     expect(err.message).not.toContain("secret-value");
   });
 
-  test("real dead loopback endpoint rejects and emits a non-empty actionable error", async () => {
+  test("scrubs nested causes and bearer credentials independently of runtime shape", () => {
+    const inner = new Error(
+      "dial ws://user:pass@127.0.0.1:4500/rpc?token=nested-secret failed; Bearer header-secret",
+    );
+    const outer = new Error("transport failed", { cause: inner });
+    const err = codexAppServerConnectionError(
+      "ws://127.0.0.1:4500/rpc?token=config-secret",
+      outer,
+      ["header-secret"],
+    );
+    expect(err.message).toContain("transport failed");
+    expect(err.message).toContain("ws://127.0.0.1:4500/rpc");
+    for (const leaked of ["nested-secret", "config-secret", "header-secret", "user:pass"]) {
+      expect(err.message).not.toContain(leaked);
+    }
+  });
+
+  test("synchronous WebSocket constructor failure uses the same safe boundary", async () => {
+    const rawUrl = "ws://127.0.0.1:4500/rpc?token=sync-secret";
+    class ThrowingWebSocket {
+      constructor(url: string) {
+        throw new Error(`invalid websocket URL ${url}`);
+      }
+    }
+    const client = new CodexAppServerClient({
+      url: rawUrl,
+      authToken: "header-sync-secret",
+      webSocketCtor: ThrowingWebSocket,
+    });
+    let caught: Error | undefined;
+    try {
+      await client.connect();
+    } catch (error) {
+      caught = error as Error;
+    }
+    expect(caught?.message).toContain("Cannot connect to codex app-server");
+    expect(caught?.message).not.toContain("sync-secret");
+    expect(caught?.message).not.toContain("header-sync-secret");
+  });
+
+  test("real dead loopback with query credential rejects/emits without leaking it", async () => {
     const listener = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
     const port = listener.port;
     listener.stop(true);
 
-    const client = new CodexAppServerClient({ url: `ws://127.0.0.1:${port}` });
+    const querySecret = "real-dead-query-secret";
+    const headerSecret = "real-dead-header-secret";
+    const client = new CodexAppServerClient({
+      url: `ws://127.0.0.1:${port}/rpc?token=${querySecret}`,
+      authToken: headerSecret,
+    });
     const emitted: Error[] = [];
     client.on("error", (error) => emitted.push(error as Error));
 
@@ -263,6 +308,10 @@ describe("CodexAppServerClient — dead shared endpoint diagnostics (#455)", () 
     expect(emitted[0].message).toContain(`ws://127.0.0.1:${port}`);
     expect(emitted[0].message).toContain("is it running?");
     expect(emitted[0].message.trim().length).toBeGreaterThan(40);
+    for (const error of emitted) {
+      expect(error.message).not.toContain(querySecret);
+      expect(error.message).not.toContain(headerSecret);
+    }
   });
 });
 

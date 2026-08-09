@@ -107,6 +107,8 @@ export interface CodexAppServerClientOptions {
   defaultTimeoutMs?: number;
   /** Debug label for logs / errors. */
   clientLabel?: string;
+  /** @internal Deterministic constructor seam for transport failure tests. */
+  webSocketCtor?: any;
 }
 
 function safeWebSocketEndpoint(rawUrl: string): string {
@@ -125,23 +127,54 @@ function safeWebSocketEndpoint(rawUrl: string): string {
   }
 }
 
-function errorDetail(cause: unknown): string {
+function scrubTransportDetail(
+  detail: string,
+  rawUrl: string,
+  secrets: readonly string[],
+): string {
+  let safe = detail.replace(/[\r\n\t]+/g, " ");
+  const replacements = [rawUrl, ...secrets].filter(Boolean);
+  for (const secret of replacements) safe = safe.split(secret).join("[redacted]");
+  // Runtime error shapes vary. Sanitize every URL independently rather than
+  // assuming the configured URL is the only one the implementation echoes.
+  safe = safe.replace(/\b(?:wss?|https?):\/\/[^\s)'"<>]+/gi, (candidate) =>
+    safeWebSocketEndpoint(candidate),
+  );
+  safe = safe.replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+/gi, "Bearer [redacted]");
+  return safe.trim().slice(0, 500);
+}
+
+function errorDetail(cause: unknown, rawUrl: string, secrets: readonly string[]): string {
   if (cause instanceof Error) {
-    const own = cause.message.trim() || cause.name.trim();
-    const nested = errorDetail((cause as Error & { cause?: unknown }).cause);
+    const own = scrubTransportDetail(
+      cause.message.trim() || cause.name.trim(),
+      rawUrl,
+      secrets,
+    );
+    const nested = errorDetail(
+      (cause as Error & { cause?: unknown }).cause,
+      rawUrl,
+      secrets,
+    );
     if (nested && nested !== own && nested !== "WebSocket connection failed") {
       return own ? `${own}: ${nested}` : nested;
     }
     return own || "WebSocket connection failed";
   }
-  if (typeof cause === "string" && cause.trim()) return cause.trim();
+  if (typeof cause === "string" && cause.trim()) {
+    return scrubTransportDetail(cause, rawUrl, secrets);
+  }
   return "WebSocket connection failed";
 }
 
 /** Actionable, non-empty and credential-safe transport failure for operators. */
-export function codexAppServerConnectionError(url: string, cause: unknown): Error {
+export function codexAppServerConnectionError(
+  url: string,
+  cause: unknown,
+  secrets: readonly string[] = [],
+): Error {
   return new Error(
-    `Cannot connect to codex app-server at ${safeWebSocketEndpoint(url)} — is it running? (${errorDetail(cause)})`,
+    `Cannot connect to codex app-server at ${safeWebSocketEndpoint(url)} — is it running? (${errorDetail(cause, url, secrets)})`,
   );
 }
 
@@ -198,10 +231,24 @@ export class CodexAppServerClient extends EventEmitter {
     // WebSocket, which accepts an options bag as the third argument. If the
     // runtime doesn't, callers should embed the token in the URL query.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const WS: any = resolveWebSocketCtor();
-    this.ws = new WS(this.opts.url, undefined, headers.Authorization ? { headers } : undefined);
-
     return new Promise<void>((resolve, reject) => {
+      try {
+        const WS: any = this.opts.webSocketCtor ?? resolveWebSocketCtor();
+        this.ws = new WS(
+          this.opts.url,
+          undefined,
+          headers.Authorization ? { headers } : undefined,
+        );
+      } catch (cause) {
+        reject(
+          codexAppServerConnectionError(
+            this.opts.url,
+            cause,
+            this.opts.authToken ? [this.opts.authToken] : [],
+          ),
+        );
+        return;
+      }
       const onOpen = () => {
         this.ws!.removeEventListener("error", onErrorInit);
         this.emit("open");
@@ -212,6 +259,7 @@ export class CodexAppServerClient extends EventEmitter {
         const err = codexAppServerConnectionError(
           this.opts.url,
           extractError(ev, `connect ${safeWebSocketEndpoint(this.opts.url)}`),
+          this.opts.authToken ? [this.opts.authToken] : [],
         );
         this.ws!.removeEventListener("open", onOpen);
         reject(err);
@@ -234,7 +282,11 @@ export class CodexAppServerClient extends EventEmitter {
       this.ws!.addEventListener("error", (ev: Event) => {
         this.emit(
           "error",
-          codexAppServerConnectionError(this.opts.url, extractError(ev, "ws steady-state")),
+          codexAppServerConnectionError(
+            this.opts.url,
+            extractError(ev, "ws steady-state"),
+            this.opts.authToken ? [this.opts.authToken] : [],
+          ),
         );
       });
     });
