@@ -47,7 +47,7 @@ run_acp_argv_test
 echo "L2 user-facing documentation"
 grep -Fq 'model:   configured by Grok CLI' docs/grok-build-runtime.md
 ! grep -Fq 'model:   grok-build (default)' docs/grok-build-runtime.md
-grep -Fq 'is not a model id' docs/grok-build-runtime.md
+grep -Fq 'model id.' docs/grok-build-runtime.md
 
 cp agent-node/src/cli.ts /tmp/test605-cli.ts
 cp agent-node/src/runtime/grok-build-acp/client.ts /tmp/test605-client.ts
