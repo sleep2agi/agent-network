@@ -127,6 +127,30 @@ export function createPinnedLookup(
   }) as LookupFunction;
 }
 
+async function discardProbeResponseBody(body: any): Promise<void> {
+  // Node's undici BodyReadable exposes dump(); Bun's compatible request API
+  // currently returns a Web ReadableStream instead. Probe classification only
+  // needs the status, so release either representation without assuming one
+  // runtime's private body surface.
+  if (typeof body?.dump === "function") {
+    await body.dump();
+    return;
+  }
+  if (typeof body?.cancel === "function") {
+    await body.cancel();
+    return;
+  }
+  if (typeof body?.getReader === "function") {
+    await body.getReader().cancel();
+    return;
+  }
+  if (body?.[Symbol.asyncIterator]) {
+    for await (const _chunk of body) {
+      // Drain unknown compatible stream shapes to release the connection.
+    }
+  }
+}
+
 export async function safelyFetchProbe(
   vendor: string,
   baseUrl: string,
@@ -200,7 +224,7 @@ export async function safelyFetchProbe(
       signal: AbortSignal.timeout(30_000),
     });
     resp = { status: wire.statusCode } as Response;
-    await wire.body.dump();
+    await discardProbeResponseBody(wire.body);
   } catch (e: any) {
     const msg = String(e?.message || e);
     if (/timeout|abort/i.test(msg)) return { errorKind: "timeout", errorDetail: msg.slice(0, 200) };
