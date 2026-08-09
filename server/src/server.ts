@@ -127,19 +127,22 @@ function createServer(clientIP?: string, enforceNetworkId?: string | null, enfor
 }
 
 // ── Auth helper ─────────────────────────────────────
-function requestToken(req: Request): string {
+type RequestTokenOptions = { allowQueryToken?: boolean };
+
+function requestToken(req: Request, options: RequestTokenOptions = {}): string {
   const header = req.headers.get("Authorization")?.replace("Bearer ", "");
+  if (options.allowQueryToken === false) return header || "";
   const url = new URL(req.url);
   return header || url.searchParams.get("token") || "";
 }
 
-function isLegacyAuthToken(req: Request): boolean {
-  const token = requestToken(req);
+function isLegacyAuthToken(req: Request, options: RequestTokenOptions = {}): boolean {
+  const token = requestToken(req, options);
   return !!AUTH_TOKEN && token === AUTH_TOKEN;
 }
 
-function requireAuth(req: Request): Response | null {
-  const token = requestToken(req);
+function requireAuth(req: Request, options: RequestTokenOptions = {}): Response | null {
+  const token = requestToken(req, options);
 
   // V3: check api_tokens first
   if (token) {
@@ -212,8 +215,8 @@ function requireTmuxAccess(req: Request, server?: any): Response | null {
 }
 
 // Extract user + network + token-binding identity from request token.
-function resolveRequestAuth(req: Request): { userId: string; networkId: string | null; username: string; tokenName: string | null; tokenId: string | null } | null {
-  const token = requestToken(req);
+function resolveRequestAuth(req: Request, options: RequestTokenOptions = {}): { userId: string; networkId: string | null; username: string; tokenName: string | null; tokenId: string | null } | null {
+  const token = requestToken(req, options);
   if (!token) return null;
   const resolved = resolveToken(token);
   if (!resolved) return null;
@@ -232,14 +235,14 @@ export type Principal =
   | { kind: "ntok"; userId: string; boundNetworkId: string }
   | { kind: "admin-utok"; userId: string; username: string };
 
-export function resolvePrincipal(req: Request): Principal {
-  const authCtx = resolveRequestAuth(req);
+export function resolvePrincipal(req: Request, options: RequestTokenOptions = {}): Principal {
+  const authCtx = resolveRequestAuth(req, options);
   if (!authCtx) {
-    if (isLegacyAuthToken(req)) return { kind: "legacy-master" };
+    if (isLegacyAuthToken(req, options)) return { kind: "legacy-master" };
     if (DEV_OPEN) return { kind: "dev-open-anon" };
     return { kind: "anonymous" };
   }
-  const token = requestToken(req);
+  const token = requestToken(req, options);
   const resolved = token ? resolveToken(token) : null;
   const isAdmin = !!resolved && resolved.user.role === "admin";
   // Bound network wins over admin classification: a ntok_ issued BY an
@@ -1957,7 +1960,11 @@ return Bun.serve({
     // allow-list inline, or the branches will drift.
     const fileMatch = url.pathname.match(/^\/api\/files\/(.+)$/);
     if (fileMatch && (req.method === "GET" || req.method === "HEAD")) {
-      const authErr = requireAuth(req);
+      // #501: file credentials must never travel in the URL. Query tokens
+      // leak through browser history, access/proxy logs, copied links, and
+      // Referer. SSE/EventSource compatibility keeps the global query-token
+      // fallback for now; file GET/HEAD deliberately opt out here.
+      const authErr = requireAuth(req, { allowQueryToken: false });
       if (authErr) return withCors(req, authErr);
 
       const fileId = decodeURIComponent(fileMatch[1]);
@@ -1988,7 +1995,7 @@ return Bun.serve({
       // "no such file". Both branches return the same 404 shape
       // for BOTH GET and HEAD (HEAD honours body-omission but the
       // status code and headers are the authoritative signal).
-      if (!authorizeFileDownload(resolvePrincipal(req), normalizeEntry(entry))) {
+      if (!authorizeFileDownload(resolvePrincipal(req, { allowQueryToken: false }), normalizeEntry(entry))) {
         return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
       }
 
