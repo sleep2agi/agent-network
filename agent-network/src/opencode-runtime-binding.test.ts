@@ -9,14 +9,15 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   readdirSync,
   rmSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
 } from "fs";
-import { tmpdir } from "os";
-import { dirname, join } from "path";
+import { homedir, tmpdir } from "os";
+import { dirname, join, resolve } from "path";
 import {
   assertExactOpencodeRuntimeBinding,
   assertOpencodeNodeStateUntracked,
@@ -26,6 +27,30 @@ import {
   removeOpencodeRuntimeBinding,
   writeOpencodeRuntimeBinding,
 } from "./opencode-runtime-binding";
+
+function assertNoGitMarkerInAncestors(start: string): void {
+  let current = resolve(start);
+  while (true) {
+    if (existsSync(join(current, ".git"))) {
+      throw new Error(`OpenCode test workspace has Git metadata in its ancestor chain: ${current}`);
+    }
+    const parent = dirname(current);
+    if (parent === current) return;
+    current = parent;
+  }
+}
+
+function createIsolatedGitStateTestRoot(): string {
+  const workspaceParent = resolve(
+    process.env.OPENCODE_TEST_WORKSPACE_ROOT
+      || join(homedir(), ".opencode-test-workspaces"),
+  );
+  assertNoGitMarkerInAncestors(workspaceParent);
+  mkdirSync(workspaceParent, { recursive: true, mode: 0o700 });
+  const canonicalWorkspaceParent = realpathSync(workspaceParent);
+  assertNoGitMarkerInAncestors(canonicalWorkspaceParent);
+  return mkdtempSync(join(canonicalWorkspaceParent, `run-${process.pid}-`));
+}
 
 describe("external OpenCode runtime binding", () => {
   let root: string;
@@ -291,12 +316,12 @@ describe("external OpenCode runtime binding", () => {
 });
 
 describe("assertOpencodeNodeStateUntracked", () => {
-  let root: string;
+  let root = "";
   let project: string;
   let node: string;
 
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), "opencode-git-state-"));
+    root = createIsolatedGitStateTestRoot();
     chmodSync(root, 0o700);
     project = join(root, "project");
     node = join(project, ".anet", "nodes", "node-a");
@@ -306,7 +331,8 @@ describe("assertOpencodeNodeStateUntracked", () => {
   });
 
   afterEach(() => {
-    rmSync(root, { recursive: true, force: true });
+    if (root) rmSync(root, { recursive: true, force: true });
+    root = "";
   });
 
   test("allows ordinary non-Git projects", () => {
