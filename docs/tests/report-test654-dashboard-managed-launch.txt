@@ -1,0 +1,66 @@
+# Test 654 — managed Dashboard launch / exact zombie cleanup
+
+Date: 2026-08-10 (Asia/Shanghai)
+Issue: #91
+Base commit: 6769d267017759cff6de5f2aea84c51a50184f9a
+Source commit under test: b2099448950e04633905bc6f234f67f182f551b7
+Docker tag: anet-test654:dev (fixed/reused tag)
+Image ID: sha256:b06374a30a98b84e3308256aae934396af2d71148f1cafb4ee8580641baa569f
+Image size: 218170701 bytes
+Embedded ENV: TEST654_SOURCE_COMMIT=b2099448950e04633905bc6f234f67f182f551b7
+
+## Scope
+
+- Default behavior remains channel-matched `npx` startup.
+- `ANET_DASHBOARD_LOCAL=1` is the explicit opt-in for the Dashboard binary on PATH.
+- A healthy managed `npx` release is left untouched.
+- Replacement is authorized only for one exact listener whose port, PID, birth fingerprint,
+  recorded source/version, and Dashboard command identity all match.
+- Unmanaged, ambiguous, reused-PID, foreign-command, global-install, and uninspectable
+  listeners fail closed. The implementation never uses `pkill`, `killall`, or prefix matching.
+- No production process, port, config, or global package was touched. All listener tests used
+  isolated container ports 33101-33104 and fake Dashboard/npm/npx fixtures.
+
+## Commands
+
+```sh
+sg docker -c 'docker build \
+  --build-arg=TEST654_SOURCE_COMMIT=b2099448950e04633905bc6f234f67f182f551b7 \
+  -t anet-test654:dev \
+  -f tests/test654-dashboard-managed-launch/Dockerfile .'
+
+sg docker -c 'docker run --rm \
+  -v /tmp/test654-exact.zltVSs:/artifacts \
+  anet-test654:dev'
+```
+
+## Result
+
+Final: `RESULT pass=10 fail=0`
+
+- L0: helper unit tests 4 pass / 0 fail / 16 assertions; agent-network TypeScript
+  `tsc --noEmit` passed.
+- L1: an unmanaged exact-port listener was refused and remained alive.
+- L2: missing global binary failed closed; explicit global binary launched and was recorded;
+  rerun refused to auto-kill the live global Dashboard.
+- L3: exact listener PID/version was recorded; same healthy release remained untouched;
+  version change terminated only the exact previously recorded stale PID and recorded the
+  replacement.
+- L4: a deliberately broken `lsof` could not authorize cleanup; the unrelated listener
+  remained alive.
+- L5: both safety mutations turned red, followed by a restored green unit run.
+
+Runner output SHA256:
+`74c4cf1e4dffaca0be4277f3c8d15835e7cd85f3dc8691ca23e5f0d06e92768f`
+
+## Witnessed-red evidence
+
+1. Removed version/source equality from the same-release gate. The version-change test failed
+   because the stale 0.6.0 listener was incorrectly treated as already running.
+   Artifact SHA256: `268daf489ad4d1a371fed9821aa7cf79720c8c3c3700e7a4ca5a977761625418`.
+2. Allowed an unmanaged listener to enter the termination path. The fail-closed matrix failed
+   because `record: null` became `terminate_owned_stale` instead of `refuse`.
+   Artifact SHA256: `9e04c8833a58e202d469668e5f545fc71b3094c18fdf1f4f508302393f547dd0`.
+
+These mutations assert behavior, not source-text counts: deleting either authorization gate
+causes the unchanged test suite to fail.
