@@ -16,10 +16,10 @@ describe("resolveNodeIdSource", () => {
       warn: (message) => warnings.push(message),
     });
 
-    expect(resolved).toEqual({ value: "n_config532", source: "config" });
     if (aliasByNodeId[resolved.value] === "wrong-env-alias") {
       throw new Error("ENV_POLLUTION_RESOLVED_WRONG_ALIAS");
     }
+    expect(resolved).toEqual({ value: "n_config532", source: "config" });
     expect(aliasByNodeId[resolved.value]).toBe("config-alias");
     expect(aliasByNodeId[resolved.value]).not.toBe("wrong-env-alias");
     expect(warnings).toHaveLength(1);
