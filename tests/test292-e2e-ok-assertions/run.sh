@@ -14,6 +14,7 @@ DIRECT_TRUE='{"ok":true,"message_id":"m1"}'
 DIRECT_FALSE='{"ok":false,"error":"alias_not_found"}'
 SSE_TRUE='data: {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\"ok\":true,\"message_id\":\"m2\"}"}]}}'
 SSE_FALSE='data: {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\"ok\":false,\"error\":\"permission_denied\"}"}]}}'
+BARE_FALSE='{"ok":false}'
 PLAIN_MCP_TRUE='{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\"ok\":true}"}]}}'
 RPC_ERROR='data: {"jsonrpc":"2.0","id":2,"error":{"code":-32602,"message":"Invalid arguments"}}'
 
@@ -78,15 +79,18 @@ fi
 MUT=$(mktemp -d /tmp/test292-mut.XXXXXX)
 trap 'safe_rm_rf "$MUT"' EXIT
 cp "$ROOT/tests/lib/response-json.sh" "$MUT/response-json.sh"
-sed -i 's/value is True/value is not None/' "$MUT/response-json.sh"
+sed -i 's/value.get("ok") is True/value.get("ok") is not None/' "$MUT/response-json.sh"
+if cmp -s "$ROOT/tests/lib/response-json.sh" "$MUT/response-json.sh"; then
+  fail "mutation: exact true predicate was not changed"
+fi
 set +e
-bash -c 'source "$1"; response_json_ok "$2"' _ "$MUT/response-json.sh" "$SSE_FALSE"
+bash -c 'source "$1"; response_json_ok "$2"' _ "$MUT/response-json.sh" "$BARE_FALSE"
 MUT_RC=$?
 set -e
-if [[ "$MUT_RC" -ne 0 ]]; then
+if [[ "$MUT_RC" -eq 0 ]]; then
   pass "mutation: weakening exact true check turns red"
 else
-  fail "mutation: weakened parser accepted ok:false"
+  fail "mutation: weakened parser still rejected bare ok:false"
 fi
 
 echo "RESULT: $PASS passed, $FAIL failed"
