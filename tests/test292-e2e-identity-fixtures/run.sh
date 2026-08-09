@@ -159,9 +159,12 @@ fi
 
 grep -Fq 'NET_A_ID=$(echo "$REG_A"' /app/test.sh \
   && ! grep -Fq '"name":"net-alpha"' /app/test.sh \
+  && grep -Fq 'e2e_create_agent alpha-agent' /app/test.sh \
+  && grep -Fq 'e2e_create_agent beta-agent' /app/test.sh \
+  && grep -Fq 'response_json_ok "$SEND_A" && response_json_ok "$SEND_B"' /app/test.sh \
   && grep -Fq 'removed quickstart fails with migration guidance' /app/test.sh \
-  && pass "aggregate: V3 quota and removed-command contracts are wired" \
-  || fail "aggregate: stale V3 or quickstart contract remains"
+  && pass "aggregate: V3 quota, target identity, and removed-command contracts are wired" \
+  || fail "aggregate: stale V3 isolation or quickstart contract remains"
 
 MUT_ALIAS=$WORK/helper-no-alias-pin.sh
 cp /app/lib/e2e-agent-bootstrap.sh "$MUT_ALIAS"
