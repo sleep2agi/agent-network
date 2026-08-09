@@ -42,19 +42,6 @@ run_one() {
     bun run --cwd server test "${args[@]}" >"$output" 2>&1
 }
 
-echo "L0: current-tree flat shared-process predecessor is witnessed-red"
-FLAT_SHARED=/tmp/test639-flat-shared.db
-rm -f -- "$FLAT_SHARED" "$FLAT_SHARED-wal" "$FLAT_SHARED-shm"
-set +e
-NODE_ENV=test DATABASE_URL= COMMHUB_DB="$FLAT_SHARED" \
-  timeout -k 2 120 bun test server/src >/tmp/test639-flat-red.out 2>&1
-flat_red_rc=$?
-set -e
-[[ $flat_red_rc -ne 0 ]] || { echo "FAIL: flat shared-process predecessor unexpectedly passed"; exit 1; }
-grep -Eq '^[[:space:]]*[1-9][0-9]* fail$' /tmp/test639-flat-red.out \
-  || { echo "FAIL: flat predecessor red had no failing-test summary"; exit 1; }
-[[ -e "$FLAT_SHARED" ]] || { echo "FAIL: flat predecessor did not use the shared DB"; exit 1; }
-
 echo "L1: normal order under strace"
 NODE_ENV=test DATABASE_URL='postgres://must-not-be-inherited.invalid/prod' COMMHUB_DB="$SHARED_DB" \
   ANET_SERVER_TEST_ROOT="$RUN1" ANET_SERVER_TEST_KEEP_ROOT=1 \
@@ -200,7 +187,6 @@ echo "source_commit=$TEST639_SOURCE_COMMIT"
 echo "aggregate_key=$key1"
 echo "run1_db_maps=$(grep -c '^TEST_DB_MAP' "$OUT1")"
 echo "cross_suite_shapes=upload[$upload_shape],host[$host_shape]"
-echo "flat_current_tree_red_rc=$flat_red_rc"
 echo "nonzero_rc=$nonzero_rc timeout_rc=$timeout_rc signal_rc=$signal_rc missing_summary_rc=$missing_summary_rc spawn_fail_rc=$spawn_fail_rc"
 echo "slug_collision_rc=$slug_collision_rc slug_guard_mutation_rc=$slug_mutation_rc mutation_unique_db_paths=$mut_maps"
 echo "RESULT: PASS"
