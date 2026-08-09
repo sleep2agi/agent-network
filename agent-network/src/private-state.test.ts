@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { atomicWritePrivateFile, atomicWritePrivateJson } from "./private-state";
+import { atomicWritePrivateFile, atomicWritePrivateJson, repairPrivateFilePermissions } from "./private-state";
 
 const roots: string[] = [];
 const mode = (path: string) => lstatSync(path).mode & 0o777;
@@ -49,5 +49,26 @@ describe("#472 private state writer", () => {
     expect(readFileSync(victim, "utf8")).toBe("unchanged");
     expect(lstatSync(path).isSymbolicLink()).toBe(false);
     expect(mode(path)).toBe(0o600);
+  });
+
+  test("repairs a legacy file and parent before reading", () => {
+    const dir = root();
+    const path = join(dir, "config.json");
+    writeFileSync(path, "secret");
+    chmodSync(dir, 0o775);
+    chmodSync(path, 0o664);
+    repairPrivateFilePermissions(path);
+    expect(mode(dir)).toBe(0o700);
+    expect(mode(path)).toBe(0o600);
+  });
+
+  test("read repair refuses a symlink instead of chmod-following it", () => {
+    const dir = root();
+    const victim = join(dir, "victim");
+    const path = join(dir, "config.json");
+    writeFileSync(victim, "unchanged", { mode: 0o644 });
+    symlinkSync(victim, path);
+    expect(() => repairPrivateFilePermissions(path)).toThrow(/linked path/);
+    expect(mode(victim)).toBe(0o644);
   });
 });

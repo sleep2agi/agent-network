@@ -20,6 +20,7 @@ import {
   atomicWritePrivateFile,
   atomicWritePrivateJson,
   ensurePrivateDirectory,
+  repairPrivateFilePermissions,
 } from "../src/private-state";
 import {
   writeMarker as writeCopresenceMarker,
@@ -962,6 +963,7 @@ async function sseAllConnected(hub: string, aliases: string[]): Promise<"yes" | 
 
 function loadGlobal(): Record<string, any> {
   const p = globalConfigPath();
+  repairPrivateFilePermissions(p);
   if (existsSync(p)) try { return JSON.parse(readFileSync(p, "utf-8")); } catch {}
   return {};
 }
@@ -975,6 +977,7 @@ function saveGlobal(data: Record<string, any>) {
 
 function loadServerConfig(): Record<string, any> {
   const p = serverConfigPath();
+  repairPrivateFilePermissions(p);
   if (existsSync(p)) try { return JSON.parse(readFileSync(p, "utf-8")); } catch {}
   return {};
 }
@@ -1036,6 +1039,7 @@ function saveAdminUtok(data: Record<string, any>) {
 
 function loadAdminUtok(): Record<string, any> {
   const p = adminUtokPath();
+  repairPrivateFilePermissions(p);
   if (existsSync(p)) try { return JSON.parse(readFileSync(p, "utf-8")); } catch {}
   return {};
 }
@@ -1174,6 +1178,7 @@ function validateNodeName(name: string) {
 
 function loadProfile(id: string): Profile | null {
   const p = join(nodesDir(), id, "config.json");
+  repairPrivateFilePermissions(p);
   if (!existsSync(p)) return null;
   try {
     const project = JSON.parse(readFileSync(p, "utf-8"));
@@ -1183,6 +1188,7 @@ function loadProfile(id: string): Profile | null {
 
 function loadStoredProfile(id: string): Profile | null {
   const p = join(nodesDir(), id, "config.json");
+  repairPrivateFilePermissions(p);
   if (!existsSync(p)) return null;
   try {
     const project = JSON.parse(readFileSync(p, "utf-8"));
@@ -2752,6 +2758,7 @@ function resolveProfileEnv(profileEnv: Record<string, any> | undefined, home: st
 // or unreadable. Caller logs the *key count* — never the values.
 function loadNodeDotenv(nodeId: string): Record<string, string> {
   const path = join(nodesDir(), nodeId, ".env");
+  repairPrivateFilePermissions(path);
   if (!existsSync(path)) return {};
   try {
     return parseNodeDotenv(readFileSync(path, "utf-8"));

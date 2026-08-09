@@ -822,6 +822,7 @@ function clearGrokSession(reason: string) {
 // ── Channel config ──
 function loadEnvFile(path: string) {
   if (!existsSync(path)) return;
+  repairPrivateConfigPermissions(path);
   for (const rawLine of readFileSync(path, "utf-8").split("\n")) {
     const line = rawLine.trim();
     if (!line || line.startsWith("#")) continue;

@@ -27,8 +27,11 @@ grep -q 'atomicWritePrivateFile(bakPath' agent-network/bin/cli.ts
 test "$(grep -c 'atomicWritePrivateFile(envPath' agent-network/bin/cli.ts)" -eq 3
 grep -q 'atomicWritePrivateFile(dotenvPath, body)' agent-network/bin/cli.ts
 grep -q 'atomicWritePrivateFile(anetEnvPath, envContent)' agent-network/bin/cli.ts
+grep -q 'repairPrivateFilePermissions(p);' agent-network/bin/cli.ts
+grep -q 'repairPrivateFilePermissions(path);' agent-network/bin/cli.ts
 test "$(grep -c 'atomicWriteJson(configFilePath, cfg)' agent-node/src/cli.ts)" -eq 4
 test "$(grep -c 'repairPrivateConfigPermissions' agent-node/src/cli.ts)" -eq 4
+grep -A2 'function loadEnvFile(path: string)' agent-node/src/cli.ts | grep -q 'repairPrivateConfigPermissions(path)'
 
 # Witnessed red 1: weakening both creation and fd hardening to 0666 must make
 # the umask=000 permission tests fail.

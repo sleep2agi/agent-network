@@ -77,3 +77,16 @@ export function atomicWritePrivateFile(path: string, body: string): void {
 export function atomicWritePrivateJson(path: string, value: unknown): void {
   atomicWritePrivateFile(path, JSON.stringify(value, null, 2) + "\n");
 }
+
+/** Repair a legacy umask-derived private file before reading its secret. */
+export function repairPrivateFilePermissions(path: string): void {
+  let present = true;
+  try { lstatSync(path); } catch (error: any) {
+    if (error?.code === "ENOENT") present = false;
+    else throw error;
+  }
+  if (!present) return;
+  ensurePrivateDirectory(dirname(path));
+  const fd = openOwned(path, constants.O_RDONLY, "file");
+  try { fchmodSync(fd, 0o600); } finally { closeSync(fd); }
+}
