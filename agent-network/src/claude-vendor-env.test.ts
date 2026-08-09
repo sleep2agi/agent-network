@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import { collectClaudeVendorEnvForCreate } from "./claude-vendor-env.js";
+import {
+  collectClaudeVendorEnvForCreate,
+  planPlainSecretEnvRewrites,
+} from "./claude-vendor-env.js";
 
 describe("collectClaudeVendorEnvForCreate", () => {
   test("captures known vendor endpoint and credential for claude-agent-sdk", () => {
@@ -59,5 +62,30 @@ describe("collectClaudeVendorEnvForCreate", () => {
         shellEnv: {},
       })).toThrow("--env entries cannot contain line breaks");
     }
+  });
+});
+
+describe("planPlainSecretEnvRewrites", () => {
+  test("plans the exact dotenv assignment without mutating the profile", () => {
+    const env = {
+      ANTHROPIC_API_KEY: "safe-value",
+      NON_SECRET_SETTING: "kept-in-config",
+    };
+    expect(planPlainSecretEnvRewrites({ env, nodeId: "n_test-1" })).toEqual([{
+      key: "ANTHROPIC_API_KEY",
+      refName: "ANTHROPIC_API_KEY_N_TEST_1",
+      value: "safe-value",
+    }]);
+    expect(env).toEqual({
+      ANTHROPIC_API_KEY: "safe-value",
+      NON_SECRET_SETTING: "kept-in-config",
+    });
+  });
+
+  test("rejects a secret dotenv value with CRLF before any caller mutation", () => {
+    expect(() => planPlainSecretEnvRewrites({
+      env: { ANTHROPIC_API_KEY: "safe\r\nINJECTED=bad" },
+      nodeId: "n_test",
+    })).toThrow("ANTHROPIC_API_KEY contains a line break");
   });
 });

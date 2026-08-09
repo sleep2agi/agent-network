@@ -4,6 +4,7 @@ set -euo pipefail
 ARTIFACT_DIR=${ARTIFACT_DIR:-/artifacts}
 REPORT="$ARTIFACT_DIR/report-test625-explicit-env-crlf.txt"
 HELPER=/workspace/agent-network/src/claude-vendor-env.ts
+CLI=/workspace/agent-network/bin/cli.ts
 mkdir -p "$ARTIFACT_DIR"
 : >"$REPORT"
 exec > >(tee -a "$REPORT") 2>&1
@@ -15,7 +16,7 @@ echo "date=$(date -Is)"
 echo "L0 typecheck + helper contracts + production build"
 cd /workspace/agent-network
 bun run typecheck
-bun test src/claude-vendor-env.test.ts
+bun test src/claude-vendor-env.test.ts src/claude-vendor-env-wiring.test.ts
 bun run build >/tmp/test625-build.log
 cd /workspace
 
@@ -65,8 +66,9 @@ test "$(stat -c %a "$SAFE_ENV")" = 600
 grep -Eq '^ANTHROPIC_API_KEY_[A-Z0-9_]+=test625-safe$' "$SAFE_ENV"
 ! grep -Fq 'INJECTED=' "$SAFE_ENV"
 
-echo "L3 witnessed-red: removing validation injects a second dotenv line"
+echo "L3 defense-in-depth: bypassing direct collection still fails at the writer preflight"
 cp "$HELPER" /tmp/test625-helper.ts
+cp "$CLI" /tmp/test625-cli.ts
 sed -i 's/if (\/\[\\r\\n\]\/\.test(entry))/if (false \&\& \/[\\r\\n]\/\.test(entry))/' "$HELPER"
 grep -Fq 'if (false && /[\r\n]/.test(entry))' "$HELPER"
 cd /workspace/agent-network
@@ -77,15 +79,37 @@ PATH="/tmp/test625-bin:$PATH" "${ANET[@]}" node create mutation-node \
   --runtime claude-agent-sdk --env "$INJECTED_ENV" >/tmp/test625-mutant.log 2>&1
 mutant_rc=$?
 set -e
-if [[ "$mutant_rc" -ne 0 ]] || ! grep -Fxq 'INJECTED=test625-bad' .anet/nodes/mutation-node/.env; then
-  echo "MUTATION_FALSE_GREEN: explicit-env-crlf"
+if [[ "$mutant_rc" -eq 0 ]] || ! grep -Fq 'ANTHROPIC_API_KEY contains a line break' /tmp/test625-mutant.log; then
+  echo "WRITER_PREFLIGHT_FALSE_GREEN: direct collector bypass"
   sed -n '1,160p' /tmp/test625-mutant.log
   exit 1
 fi
-echo "MUTATION_RED: explicit-env-crlf rc=1 (injected dotenv line witnessed)"
+test ! -e .anet/nodes/mutation-node/config.json
+test ! -e .anet/nodes/mutation-node/.env
+test ! -e .gitignore
+echo "WRITER_PREFLIGHT_PASS: direct collector bypass still rejected before create side effects"
 
-echo "L4 restored green"
+echo "L4 witnessed-red: bypassing both guards injects a second dotenv line"
+sed -i '0,/if (\/\[\\r\\n\]\/\.test(value))/{s/if (\/\[\\r\\n\]\/\.test(value))/if (false \&\& \/[\\r\\n]\/\.test(value))/}' "$HELPER"
+grep -Fq 'if (false && /[\r\n]/.test(value))' "$HELPER"
+cd /workspace/agent-network
+bun run build >/tmp/test625-double-mutant-build.log
+cd /tmp/test625-project
+set +e
+PATH="/tmp/test625-bin:$PATH" "${ANET[@]}" node create double-mutation-node \
+  --runtime claude-agent-sdk --env "$INJECTED_ENV" >/tmp/test625-double-mutant.log 2>&1
+double_mutant_rc=$?
+set -e
+if [[ "$double_mutant_rc" -ne 0 ]] || ! grep -Fxq 'INJECTED=test625-bad' .anet/nodes/double-mutation-node/.env; then
+  echo "MUTATION_FALSE_GREEN: dotenv-writer-crlf"
+  sed -n '1,160p' /tmp/test625-double-mutant.log
+  exit 1
+fi
+echo "MUTATION_RED: dotenv-writer-crlf rc=1 (injected dotenv line witnessed)"
+
+echo "L5 restored green"
 cp /tmp/test625-helper.ts "$HELPER"
+cp /tmp/test625-cli.ts "$CLI"
 cd /workspace/agent-network
 bun run build >/tmp/test625-restored-build.log
 cd /tmp/test625-project

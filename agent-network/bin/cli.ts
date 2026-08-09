@@ -88,7 +88,10 @@ import {
   type GrokCopresenceSessionDisclosure,
 } from "../src/grok-copresence-disclosure";
 import { parseCliOptions, positionalArgs } from "../src/cli-args";
-import { collectClaudeVendorEnvForCreate } from "../src/claude-vendor-env";
+import {
+  collectClaudeVendorEnvForCreate,
+  planPlainSecretEnvRewrites,
+} from "../src/claude-vendor-env";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -2810,6 +2813,14 @@ function ensureAnetInRootGitignore(): void {
 }
 
 function saveCreatedNode(id: string, profile: Profile) {
+  // Preflight the exact values that rewritePlainSecretsToEnvRef will persist
+  // before any node directory, gitignore, process.env, config, or dotenv
+  // mutation. This is the shared create choke-point used by both the named
+  // command and the no-name interactive wizard.
+  planPlainSecretEnvRewrites({
+    env: (profile as any).env,
+    nodeId: ((profile as any).node_id || id),
+  });
   if (normalizeRuntime(profile) === "opencode-cli") {
     // This must be the first node-state operation: the envRef rewrite and
     // saveProfile both carry credentials. Reject node/leaf symlinks first.
@@ -2839,21 +2850,20 @@ function saveCreatedNode(id: string, profile: Profile) {
 function rewritePlainSecretsToEnvRef(nodeId: string, profile: Profile): void {
   const env: any = (profile as any).env;
   if (!env || typeof env !== "object") return;
-  const SECRET_KEY_RX = /(_TOKEN|_KEY|_SECRET|AUTH)$/i;
-  const SECRET_VAL_RX = /^(sk-|utok_|ntok_|atok_|ak-|gsk_|key-|Bearer\s)/i;
-  const nodeIdShort = ((profile as any).node_id || nodeId).replace(/[^A-Za-z0-9_]/g, "_").slice(0, 16);
-  const rewrites: { key: string; refName: string; value: string }[] = [];
-  for (const [k, v] of Object.entries(env)) {
-    if (typeof v !== "string") continue; // already envRef
-    if (!(SECRET_KEY_RX.test(k) || SECRET_VAL_RX.test(v))) continue;
-    const refName = `${k}_${nodeIdShort}`.toUpperCase();
-    rewrites.push({ key: k, refName, value: v });
-    env[k] = { _envRef: refName };
+  // Re-run the side-effect-free planner at the actual writer boundary. The
+  // saveCreatedNode preflight guarantees zero create-side effects; this call
+  // is defense in depth for any future caller that reaches the writer directly.
+  const rewrites = planPlainSecretEnvRewrites({
+    env,
+    nodeId: ((profile as any).node_id || nodeId),
+  });
+  for (const { key, refName, value } of rewrites) {
+    env[key] = { _envRef: refName };
     // Also surface the value in the *current* process.env so this very
     // session's downstream (e.g. spawning the agent right after create) can
     // start without the user having to re-`export`. Persistent storage is
     // still the user's responsibility (.bashrc / secrets manager).
-    if (!process.env[refName]) process.env[refName] = v;
+    if (!process.env[refName]) process.env[refName] = value;
   }
   if (rewrites.length === 0) return;
 
