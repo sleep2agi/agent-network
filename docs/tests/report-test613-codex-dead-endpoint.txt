@@ -1,0 +1,30 @@
+# test613 — codex app-server dead endpoint diagnostics
+
+Date: 2026-08-09
+Source commit: 7d40e14e0fc73a67f3d746903c27c48b2b9488d4
+Base commit: a8a9497b
+Docker image: anet-test613:dev
+Image ID: sha256:56455012c1c5a85d83e1ac4bc0e55e38bf310c24e984b377a330d783a0e2a3cf
+Embedded ENV: TEST613_SOURCE_COMMIT=7d40e14e0fc73a67f3d746903c27c48b2b9488d4
+
+## Result
+
+PASS
+
+- L0: `codex-app-server-client.test.ts` — 16 pass, 0 fail, 49 assertions.
+- L0 real transport: a loopback listener was allocated, closed, and then used
+  as a query-bearing client endpoint. Both the rejected `connect()` promise
+  and emitted client error contained the safe endpoint plus `is it running?`
+  remediation; neither exposed the query token or bearer token.
+- L0 privacy: nested causes, runtime-returned URLs, URL userinfo, bearer text,
+  explicit secrets, and synchronous WebSocket-constructor failures all pass
+  through the same bounded credential scrub. The path remains diagnostic.
+- L1: production `agent-node` bundle completed (253 modules).
+- L2 witnessed-red: replacing the production formatter with the raw underlying
+  `Error` made the exact dead-loopback diagnostic test fail (`rc=1`).
+- L3 witnessed-red: bypassing transport-detail scrubbing made the nested-cause
+  credential test fail (`rc=1`).
+- L4: restoring the implementation returned the same 16 tests to green.
+
+The fix is transport-boundary only. It does not change connection, retry,
+thread, task, or reply semantics.
