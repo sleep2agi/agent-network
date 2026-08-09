@@ -1,0 +1,97 @@
+# Test 292 — Docker E2E structured `ok` assertions
+
+Date: 2026-08-10
+Issue scope: #292, Layer 3 only (test-harness honesty; no production behavior change)
+Base commit: 737fc44bac67f259f3ddc3d31b53ff05ac0b8d3d
+Source commit: f3b62101b6b9f2919800cb14b74c85ee4afa86a2
+
+## Change
+
+- Added `tests/lib/response-json.sh` with a fail-closed JSON/SSE/JSON-RPC response parser.
+- Replaced the 16 `grep -q 'ok'` success checks in `tests/docker-e2e.sh`.
+- Success now requires an exact JSON boolean `ok: true`; `ok:false`, JSON-RPC errors,
+  MCP `isError:true`, malformed responses, and empty responses fail.
+- The helper is exported only as a test seam. Production code and wire behavior are unchanged.
+
+## Witnessed red
+
+The pre-change fixture demonstrated that the legacy assertion accepts a failed MCP response:
+
+    data: {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\"ok\":false,\"error\":\"permission_denied\"}"}]}}
+
+`grep -q 'ok'` returned success. The base tree contained 16 such weak assertions and no
+structured parser, so the test292 container exited non-zero.
+
+## Exact-source Docker gate
+
+Image: `anet-test292:dev`
+Image manifest ID: `sha256:2af10bcaff4a65e38fa69eb9370d71d4a7660e0f66a297c61567ab2453995e72`
+Embedded source: `TEST292_SOURCE_COMMIT=f3b62101b6b9f2919800cb14b74c85ee4afa86a2`
+Runner output SHA256: `1c5d8ee67502ca9d27cf414e4259c8b84a63e9d3a32a62a7966729b0777a4ecd`
+
+Result: 11 passed, 0 failed.
+
+Covered direct REST JSON, SSE-wrapped MCP JSON, plain JSON-RPC MCP JSON, explicit false,
+JSON-RPC error, malformed/empty input, source call-site count, and mutation behavior.
+
+Mutation: changing the exact `value.get("ok") is True` predicate to
+`value.get("ok") is not None` makes the weakened parser accept a bare `{"ok":false}`
+fixture. The harness first verifies that the mutated parser differs byte-for-byte, then
+turns red if that false response is accepted. The fixture intentionally has no `error`
+field, so no independent failure predicate can mask the weakened `ok` check. This proves
+the exact-true gate is load-bearing rather than a no-op mutation.
+
+## Exact-source full aggregate run
+
+Image: `anet-e2e292:dev` (run at source `976378c324ddf6fbfd9ac4e7d80013912c9fc2fb`;
+the subsequent source delta changes only the mutation harness)
+Image manifest ID: `sha256:03c6ebe701dd5c88e142700470f94c331db445e14c6753e9d2a2aaee5c23e8d1`
+Image label: `org.opencontainers.image.revision=976378c324ddf6fbfd9ac4e7d80013912c9fc2fb`
+Command: `/app/test-all.sh`
+Captured log SHA256: `f9f86410c1b04e479bc1b76283beac384a73daaf7835adebf989e986e7ee3391`
+
+Result (intentionally not green):
+
+- Base E2E: 82 passed, 53 failed
+- V3 Auth: 25 passed, 0 failed
+- V3 Networks: 25 passed, 1 failed
+- Config Priority: 16 passed, 0 failed
+- Loop runtime: 0 ran; suite exited before a Results line
+- Loop npm-pack: 10 passed, 2 failed
+- Loop self-management: 2 passed, 3 failed
+- Aggregate: 160 passed, 60 failed
+
+The current report-only baseline was Base E2E 88 passed / 47 failed. The structured gate
+therefore exposes exactly six prior false-green responses as failures (82/53). This PR does
+not repair or reclassify those underlying E2E failures; that remains subsequent #292 work.
+
+Running `/app/test.sh` directly is not a valid aggregate invocation in this image: it starts
+its own persistent Hub child and reaches a bare `wait`. The repository CI entry point
+`/app/test-all.sh` supplies the expected outer orchestration and is the full-run evidence above.
+
+## Layer 2 diagnostic probe (not an implementation claim)
+
+A controlled, uncommitted probe against the same full image changed only the E2E bootstrap:
+
+- selected the newly created network with `anet network use`;
+- pre-created `e2e-agent` through the official CLI, yielding a stable node ID and node token;
+- started `agent-node` from that generated config; and
+- required exact `found` output rather than substring-matching `not_found`.
+
+The Base E2E result changed from 82 passed / 53 failed to 97 passed / 39 failed. Registration,
+`send_task`, task lookup, ack, reply, and the special-content path became green. This is evidence
+for the next #292 layer, not part of this PR: without selecting the network, node creation used
+the default network while the process was injected with the new network ID; without pre-creation,
+`report_status` failed with `network_token_required`. The original registration assertion also
+accepted `not_found` because it searched for the substring `found`.
+
+Original detailed log SHA256:
+`0fcf7a8d6357f92c819ae0ea5156bc554f45ec295b9aba1ca015707b5eae5f84`.
+Controlled probe log SHA256:
+`6a2cb8296adbb86361bfbfad251954b67e3e53c4213c7fc2d67d2bb98bd26a86`.
+
+## Cleanup
+
+The 3.48 GB full-run image was removed by its exact tag after evidence capture because the
+host reached 100% disk usage. No prune or pattern deletion was used. The small exact-source
+`anet-test292:dev` review image remains available.
