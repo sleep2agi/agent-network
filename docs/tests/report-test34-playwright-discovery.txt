@@ -1,0 +1,41 @@
+# test34 — isolate Playwright specs from Bun test discovery
+
+Date: 2026-08-09 (Asia/Shanghai)
+Base: 66a9f91a48ad4a8ae6977e68e00537213155d44b
+Source commit under test: b69b0b58e72ed7fe56ac3d3938002091d42f8e3b
+Docker image: anet-test34:dev
+Docker image ID: sha256:6bf18b4bc01ac51fb20a8a9c8b1ef22591a1ceb3e54a81de3c7f592db43f081c
+Embedded TEST34_SOURCE_COMMIT: b69b0b58e72ed7fe56ac3d3938002091d42f8e3b
+Raw runner artifact SHA256: ea4b6b4b51e33196beb131031a78b77f60d0bcf4e0e39814ec6da82f80c9f954
+Result: PASS
+
+## Witnessed red on base
+
+With the seven browser scenarios named `*.spec.ts`, the root command
+`bun test src/client.test.ts tests/docker-e2e/playwright` collected all seven
+Playwright files. The real output was 1 pass / 7 fail / 7 module-resolution
+errors (`Cannot find module '@playwright/test'`), exit code 1.
+
+Installing the nested Playwright dependency is not a valid fix: a controlled
+probe changed the failure to `Playwright Test did not expect test() to be called
+here`, because Playwright fixtures require the Playwright runner rather than
+Bun's runner.
+
+## Exact-source green
+
+- `agent-network` TypeScript check: PASS.
+- Bun runner with the ordinary client test plus the browser directory: 1 pass,
+  0 fail; no Playwright file collected.
+- Real Node/Playwright 1.49 runner `test --list`: exactly 7 tests in 7 files.
+- Docker Compose paths and Playwright config both use the `.pw.ts` suffix.
+
+## Witnessed-red mutations
+
+- Rename one `.pw.ts` scenario back to `.spec.ts`: Bun collects it and the gate
+  turns red, rc=1.
+- Remove the explicit `testMatch: "**/*.pw.ts"`: Playwright reports no tests and
+  the gate turns red, rc=1.
+
+The suite uses Node for the Playwright CLI (matching the project's Playwright
+Docker image) and Bun only for Bun discovery. No browser, Hub, production state,
+or host config is touched.
