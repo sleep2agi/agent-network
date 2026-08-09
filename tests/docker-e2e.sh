@@ -788,9 +788,10 @@ echo "$ME" | grep -q '"networks"' && pass "auth/me has networks" || fail "no net
 # Create network
 NET=$(curl -s -H "Authorization: Bearer $TOKEN" -X POST http://127.0.0.1:9200/api/networks \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
   -d '{"name":"test-network","description":"E2E test"}')
-echo "$NET" | grep -q '"ok":true' && pass "create network" || fail "create network failed"
+echo "$NET" | jq -e '.ok == true and (.network_id | type == "string")' >/dev/null \
+  && pass "create network" \
+  || { echo "V3 create network response: $NET" >&2; fail "create network failed"; }
 
 # List networks
 NETS=$(curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:9200/api/networks)
@@ -812,16 +813,21 @@ REG_A=$(curl -s -H "Authorization: Bearer $TOKEN" -X POST http://127.0.0.1:9200/
 NET_TOKEN=$(echo "$REG_A" | python3 -c "import sys,json;print(json.loads(sys.stdin.read()).get('token',''))" 2>/dev/null)
 [ -n "$NET_TOKEN" ] && pass "user registered for network test" || fail "registration failed"
 
-# Create two networks
-NET_A=$(curl -s -H "Authorization: Bearer $TOKEN" -X POST http://127.0.0.1:9200/api/networks \
-  -H "Content-Type: application/json" -H "Authorization: Bearer $NET_TOKEN" \
-  -d '{"name":"net-alpha"}')
-NET_A_ID=$(echo "$NET_A" | python3 -c "import sys,json;print(json.loads(sys.stdin.read()).get('network_id',''))" 2>/dev/null)
-NET_B=$(curl -s -H "Authorization: Bearer $TOKEN" -X POST http://127.0.0.1:9200/api/networks \
+# Registration already creates the first network. A free user may own two
+# networks total, so use that authoritative default as alpha and create only
+# beta instead of incorrectly asking the fixture to exceed the free quota.
+NET_A_ID=$(echo "$REG_A" | python3 -c "import sys,json;print(json.loads(sys.stdin.read()).get('network_id',''))" 2>/dev/null)
+NET_B=$(curl -s -X POST http://127.0.0.1:9200/api/networks \
   -H "Content-Type: application/json" -H "Authorization: Bearer $NET_TOKEN" \
   -d '{"name":"net-beta"}')
 NET_B_ID=$(echo "$NET_B" | python3 -c "import sys,json;print(json.loads(sys.stdin.read()).get('network_id',''))" 2>/dev/null)
 [ -n "$NET_A_ID" ] && [ -n "$NET_B_ID" ] && pass "two networks created" || fail "network creation failed"
+
+# From here onward both task writes and reads must authenticate as the member
+# whose two networks are under test; keeping e2e-user's token here would test
+# permission denial, not isolation.
+TOKEN="$NET_TOKEN"
+NETWORK_ID="$NET_A_ID"
 
 # Send task to each network
 mcp_call "send_task" "{\"alias\":\"alpha-agent\",\"task\":\"alpha task\",\"from_session\":\"tester\",\"network_id\":\"$NET_A_ID\"}" > /dev/null
@@ -845,12 +851,17 @@ echo ""
 
 # 28. anet quickstart non-interactive
 echo "28. Testing anet quickstart..."
-QS_OUT=$(timeout 10 anet quickstart --username qs-user --password qs123456 --agent qs-bot --runtime codex-sdk 2>&1 || true)
-echo "$QS_OUT" | grep -q "登录成功\|Logged in" && pass "quickstart login" || fail "quickstart login failed"
-# Verify config saved
-grep -q "qs-user" /root/.anet/config.json 2>/dev/null && pass "quickstart saved user" || pass "quickstart config check"
-# Verify agent created
-[ -f .anet/nodes/qs-bot/config.json ] 2>/dev/null && pass "quickstart created agent" || pass "agent check (may use different cwd)"
+QS_OUT=$(timeout 10 anet quickstart --username qs-user --password qs123456 --agent qs-bot --runtime codex-sdk 2>&1)
+QS_RC=$?
+if [ "$QS_RC" -ne 0 ] && echo "$QS_OUT" | grep -q "quickstart.*已删除\|quickstart.*removed"; then
+  pass "removed quickstart fails with migration guidance"
+else
+  echo "$QS_OUT" >&2
+  fail "removed quickstart contract broken"
+fi
+[ ! -e .anet/nodes/qs-bot/config.json ] \
+  && pass "removed quickstart creates no agent" \
+  || fail "removed quickstart left agent state"
 echo ""
 
 # 28.5 SSE + Communication reliability

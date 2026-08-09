@@ -125,6 +125,44 @@ printf '%s' "$TASK" | jq -e '.tasks[0] | .status == "replied" and .result == "do
   && pass "lifecycle: terminal result persisted" \
   || fail "lifecycle: terminal result mismatch"
 
+QUOTA_REGISTER=$(curl -fsS -X POST "$BASE/api/auth/register" \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"quota-user","password":"quota-pass-123"}')
+QUOTA_TOKEN=$(printf '%s' "$QUOTA_REGISTER" | jq -r '.token // empty')
+QUOTA_DEFAULT=$(printf '%s' "$QUOTA_REGISTER" | jq -r '.network_id // empty')
+QUOTA_SECOND=$(curl -fsS -X POST "$BASE/api/networks" \
+  -H "Authorization: Bearer $QUOTA_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"quota-second"}')
+QUOTA_SECOND_ID=$(printf '%s' "$QUOTA_SECOND" | jq -r '.network_id // empty')
+QUOTA_THIRD=$(curl -sS -X POST "$BASE/api/networks" \
+  -H "Authorization: Bearer $QUOTA_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"quota-third"}')
+if [[ -n $QUOTA_DEFAULT && -n $QUOTA_SECOND_ID ]] && \
+   printf '%s' "$QUOTA_THIRD" | jq -e '.ok == false and (.error | contains("quota exceeded"))' >/dev/null; then
+  pass "contract: free-user isolation fixture uses default plus one created network"
+else
+  fail "contract: free-network quota fixture is not authoritative"
+fi
+
+set +e
+QUICKSTART_OUT=$(cd "$WORK/project" && anet quickstart --username removed-user \
+  --password removed-pass-123 --agent removed-agent --runtime codex-sdk 2>&1)
+QUICKSTART_RC=$?
+set -e
+if [[ $QUICKSTART_RC -ne 0 ]] && \
+   printf '%s' "$QUICKSTART_OUT" | grep -q 'quickstart.*已删除\|quickstart.*removed' && \
+   [[ ! -e $WORK/project/.anet/nodes/removed-agent/config.json ]]; then
+  pass "contract: removed quickstart fails with guidance and no agent state"
+else
+  fail "contract: removed quickstart behavior drifted"
+fi
+
+grep -Fq 'NET_A_ID=$(echo "$REG_A"' /app/test.sh \
+  && ! grep -Fq '"name":"net-alpha"' /app/test.sh \
+  && grep -Fq 'removed quickstart fails with migration guidance' /app/test.sh \
+  && pass "aggregate: V3 quota and removed-command contracts are wired" \
+  || fail "aggregate: stale V3 or quickstart contract remains"
+
 MUT_ALIAS=$WORK/helper-no-alias-pin.sh
 cp /app/lib/e2e-agent-bootstrap.sh "$MUT_ALIAS"
 sed -i 's/\. + {node_id: \$node_id, alias: \$alias}/. + {node_id: $node_id}/' "$MUT_ALIAS"
