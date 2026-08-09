@@ -15,9 +15,13 @@ bun test agent-network/src/private-state.test.ts agent-node/src/runtime/config-a
 # private choke point. These assertions deliberately name each direct path so
 # a new bypass cannot hide behind an aggregate green count.
 ! grep -nE 'writeFileSync\((rawCfgPath|configFilePath|newCfgPath|cfgPath)' agent-network/bin/cli.ts agent-node/src/cli.ts
+! grep -nE 'writeFileSync\((envPath|dotenvPath|anetEnvPath)' agent-network/bin/cli.ts
 grep -q 'atomicWritePrivateJson(rawCfgPath, rawCfg)' agent-network/bin/cli.ts
 grep -q 'atomicWritePrivateJson(join(dir, "config.json"), daemonConfig)' agent-network/bin/cli.ts
 grep -q 'atomicWritePrivateFile(bakPath' agent-network/bin/cli.ts
+test "$(grep -c 'atomicWritePrivateFile(envPath' agent-network/bin/cli.ts)" -eq 3
+grep -q 'atomicWritePrivateFile(dotenvPath, body)' agent-network/bin/cli.ts
+grep -q 'atomicWritePrivateFile(anetEnvPath, envContent)' agent-network/bin/cli.ts
 test "$(grep -c 'atomicWriteJson(configFilePath, cfg)' agent-node/src/cli.ts)" -eq 4
 test "$(grep -c 'repairPrivateConfigPermissions' agent-node/src/cli.ts)" -eq 4
 

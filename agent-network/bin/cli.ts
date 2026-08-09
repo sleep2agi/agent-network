@@ -1015,9 +1015,8 @@ function refreshNodeServerJsAt(targetPath: string, opts: { overwrite: boolean })
 function saveServerConfig(data: Record<string, any>) {
   const dir = join(home, ".anet", "server");
   const p = serverConfigPath();
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(p, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
-  try { chmodSync(p, 0o600); } catch {}
+  ensurePrivateDirectory(dir);
+  atomicWritePrivateJson(p, data);
 }
 
 function serverAuthTokenFromConfig(config = loadServerConfig()): string {
@@ -1031,9 +1030,8 @@ function commhubDbPath() {
 function saveAdminUtok(data: Record<string, any>) {
   const dir = join(home, ".anet", "server");
   const p = adminUtokPath();
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(p, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
-  try { chmodSync(p, 0o600); } catch {}
+  ensurePrivateDirectory(dir);
+  atomicWritePrivateJson(p, data);
 }
 
 function loadAdminUtok(): Record<string, any> {
@@ -2517,7 +2515,7 @@ async function initProject() {
   const token = gc.token || "";
   let envContent = `COMMHUB_URL=${hub}\n`;
   if (token) envContent += `COMMHUB_TOKEN=${token}\n`;
-  writeFileSync(envPath, envContent);
+  atomicWritePrivateFile(envPath, envContent);
   console.log(`CommHub URL: ${hub}${token ? " (with token)" : ""}`);
 
   // 4. .mcp.json（指向 .anet/node-server.js）
@@ -2886,8 +2884,7 @@ function rewritePlainSecretsToEnvRef(nodeId: string, profile: Profile): void {
     const body = Object.entries(merged).map(([k, v]) => `${k}=${v}`).join("\n") + "\n";
     if (isOpencode) writeOpencodePrivateProfileFile(nodeDir, ".env", body);
     else {
-      writeFileSync(dotenvPath, body, { mode: 0o600 });
-      chmodSync(dotenvPath, 0o600);
+      atomicWritePrivateFile(dotenvPath, body);
     }
     ensureNodeDotenvGitignore();
   } catch (e: any) {
@@ -3071,8 +3068,7 @@ function writeTelegramChannelConfig(nodeId: string, botToken: string, allowId: s
   mkdirSync(join(channelDir, "inbox"), { recursive: true });
 
   const envPath = join(channelDir, ".env");
-  writeFileSync(envPath, `TELEGRAM_BOT_TOKEN=${botToken}\n`);
-  try { chmodSync(envPath, 0o600); } catch {}
+  atomicWritePrivateFile(envPath, `TELEGRAM_BOT_TOKEN=${botToken}\n`);
 
   writeAccessJsonAtomic(join(channelDir, "access.json"), {
     dmPolicy: "allowlist",
@@ -3116,8 +3112,7 @@ function writeFeishuChannelConfig(
   const existingChats = parseFeishuAllowlistField(existing.allowChats, "allowChats", accessPath);
 
   const envPath = join(channelDir, ".env");
-  writeFileSync(envPath, `FEISHU_APP_ID=${appId}\nFEISHU_APP_SECRET=${appSecret}\n`);
-  try { chmodSync(envPath, 0o600); } catch {}
+  atomicWritePrivateFile(envPath, `FEISHU_APP_ID=${appId}\nFEISHU_APP_SECRET=${appSecret}\n`);
 
   writeAccessJsonAtomic(accessPath, {
     ...existing,
@@ -4144,8 +4139,7 @@ function ensureMcpJson(profile: Profile) {
   const token = profile.token || "";
   let envContent = `COMMHUB_URL=${profile.hub || "http://127.0.0.1:9200"}\n`;
   if (token) envContent += `COMMHUB_TOKEN=${token}\n`;
-  writeFileSync(anetEnvPath, envContent, { mode: 0o600 });
-  chmodSync(anetEnvPath, 0o600);
+  atomicWritePrivateFile(anetEnvPath, envContent);
 
   // #245 codex-sdk fix — only write `.mcp.json` for claude-code-cli. codex-sdk
   // does not read cwd `.mcp.json`; it reads `~/.codex/config.toml [mcp_servers.*]`
