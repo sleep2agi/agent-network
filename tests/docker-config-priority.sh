@@ -36,6 +36,10 @@ anet login --hub http://127.0.0.1:9200 --username cfg-user --password cfg-test-p
 python3 -c 'import json,os
 c=json.load(open(os.path.join(os.environ["HOME"],".anet/config.json"))); assert c.get("token") and c.get("network_id")'
 anet node create cfg-test --runtime codex-sdk --model test-model >/tmp/test639-create.log
+# The authenticated create path records the current Hub. Remove only that
+# project value so step 1 still exercises the documented global fallback.
+python3 -c 'import json
+p=".anet/nodes/cfg-test/config.json"; c=json.load(open(p)); c.pop("hub",None); json.dump(c,open(p,"w"),indent=2)'
 
 # 1. Global config baseline
 echo "1. Global hub fallback..."
