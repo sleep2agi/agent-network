@@ -31,6 +31,7 @@ type safe_rm_rf > /dev/null 2>&1 || {
   echo "FATAL: safe-rm.sh not found — refusing to run with bare rm -rf"
   exit 99
 }
+source /app/lib/e2e-agent-bootstrap.sh
 
 PASS=0
 FAIL=0
@@ -114,24 +115,25 @@ curl -s http://127.0.0.1:9211/health | grep -q '"ok":true' \
 REG=$(curl -s -X POST http://127.0.0.1:9211/api/auth/register \
   -H "Content-Type: application/json" \
   -d '{"username":"pack-test","password":"PackTestPw123","display_name":"pack test"}')
-NET_TOKEN=$(echo "$REG" | python3 -c "import sys,json;print(json.load(sys.stdin).get('network_token',''))")
+USER_TOKEN=$(echo "$REG" | python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))")
 NET_ID=$(echo "$REG" | python3 -c "import sys,json;print(json.load(sys.stdin).get('network_id',''))")
 
 ALIAS="pack-test-claude"
 WORKDIR="/tmp/pack-test-claude"
-safe_rm_rf "$WORKDIR"
-mkdir -p "$WORKDIR/.anet/nodes/$ALIAS"
-cat > "$WORKDIR/.anet/nodes/$ALIAS/config.json" <<EOF
-{
-  "alias": "$ALIAS",
-  "runtime": "claude-agent-sdk",
-  "hub": "http://127.0.0.1:9211",
-  "model": "claude-sonnet-4-6",
-  "token": "$NET_TOKEN",
-  "network_id": "$NET_ID",
-  "flags": { "dangerouslySkipPermissions": true, "teammateMode": true, "goalTickMs": "5000" }
-}
-EOF
+export HOME=/tmp/pack-test-home
+safe_rm_rf "$HOME" "$WORKDIR"
+mkdir -p "$HOME" "$WORKDIR"
+anet login --hub http://127.0.0.1:9211 --username pack-test --password PackTestPw123 >/dev/null
+e2e_select_network "$NET_ID"
+cd "$WORKDIR"
+e2e_create_agent "$ALIAS" claude-agent-sdk claude-sonnet-4-6 "$NET_ID"
+CONFIG=$(e2e_agent_config_path "$ALIAS")
+CONFIG_TMP="${CONFIG}.tmp"
+jq '.flags = {dangerouslySkipPermissions:true, teammateMode:true, goalTickMs:"5000"}' \
+  "$CONFIG" > "$CONFIG_TMP"
+chmod 600 "$CONFIG_TMP"
+mv "$CONFIG_TMP" "$CONFIG"
+e2e_config_token_bound_to_network "$CONFIG" "$NET_ID"
 
 cd "$WORKDIR"
 ANTHROPIC_API_KEY="test-no-real-call" \
@@ -149,7 +151,7 @@ done
 
 # THE LOAD-BEARING CHECK: real installed `anet` binary on real
 # installed agent-node, real user CLI flow.
-COMMHUB_TOKEN="$NET_TOKEN" COMMHUB_URL="http://127.0.0.1:9211" \
+COMMHUB_TOKEN="$USER_TOKEN" COMMHUB_URL="http://127.0.0.1:9211" \
   anet node loop "$ALIAS" "pack-install probe" --every 5m \
   > /tmp/pack-cli.log 2>&1 || true
 

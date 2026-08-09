@@ -10,7 +10,7 @@ echo "  V3 Network Management + Isolation Tests"
 echo "========================================="
 echo ""
 
-cd /app/server && bun run src/index.ts &
+(cd /app/server && exec bun run src/index.ts) &
 HUB_PID=$!
 cleanup() { kill "$HUB_PID" 2>/dev/null || true; }
 trap cleanup EXIT
@@ -20,7 +20,13 @@ for _ in $(seq 1 30); do
 done
 curl -fsS http://127.0.0.1:9200/health >/dev/null
 
-# Setup: register 2 users
+# Setup: register one bootstrap admin, then 2 ordinary users. The first
+# registered account is intentionally the global admin and can see every
+# network (#94), so it is not a valid tenant-isolation fixture.
+curl -fsS -X POST http://127.0.0.1:9200/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"net_bootstrap_admin","password":"test123456"}' >/dev/null
+
 REG_A=$(curl -s -X POST http://127.0.0.1:9200/api/auth/register -H "Content-Type: application/json" -d '{"username":"netuser_a","password":"test123456"}')
 TOKEN_A=$(echo "$REG_A" | python3 -c "import sys,json;print(json.loads(sys.stdin.read()).get('token',''))" 2>/dev/null)
 # Login to get fresh token
@@ -31,7 +37,14 @@ REG_B=$(curl -s -X POST http://127.0.0.1:9200/api/auth/register -H "Content-Type
 LOGIN_B=$(curl -s -X POST http://127.0.0.1:9200/api/auth/login -H "Content-Type: application/json" -d '{"username":"netuser_b","password":"test123456"}')
 TOKEN_B=$(echo "$LOGIN_B" | python3 -c "import sys,json;print(json.loads(sys.stdin.read()).get('token',''))" 2>/dev/null)
 
-[ -n "$TOKEN_A" ] && [ -n "$TOKEN_B" ] && pass "2 users registered" || { fail "setup failed"; exit 1; }
+# A separate ordinary owner keeps the delete fixture empty while A/B retain
+# their networks for the isolation assertions above.
+REG_C=$(curl -s -X POST http://127.0.0.1:9200/api/auth/register -H "Content-Type: application/json" -d '{"username":"netuser_c","password":"test123456"}')
+TOKEN_C=$(echo "$REG_C" | python3 -c "import sys,json;print(json.loads(sys.stdin.read()).get('token',''))" 2>/dev/null)
+
+[ -n "$TOKEN_A" ] && [ -n "$TOKEN_B" ] && [ -n "$TOKEN_C" ] \
+  && pass "ordinary isolation and delete owners registered after bootstrap admin" \
+  || { fail "setup failed"; exit 1; }
 
 # 1. Network CRUD
 echo "1. Network CRUD..."
@@ -160,19 +173,20 @@ echo ""
 
 # 7. Network delete
 echo "7. Network delete..."
-# Create a throwaway network to delete
+# Reject the foreign delete without destroying A's populated isolation
+# fixture, then use ordinary user C's empty second network for owner delete.
+CROSS_DEL=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "http://127.0.0.1:9200/api/networks/$NET_A_ID" -H "Authorization: Bearer $TOKEN_B")
+[ "$CROSS_DEL" = "400" ] || [ "$CROSS_DEL" = "403" ] \
+  && pass "cross-user delete rejected" || fail "cross-user delete returned $CROSS_DEL"
 DEL_NET=$(curl -s -X POST http://127.0.0.1:9200/api/networks \
-  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN_A" \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN_C" \
   -d '{"name":"to-delete"}')
 DEL_ID=$(echo "$DEL_NET" | python3 -c "import sys,json;print(json.loads(sys.stdin.read()).get('network_id',''))" 2>/dev/null)
-DEL_RES=$(curl -s -X DELETE "http://127.0.0.1:9200/api/networks/$DEL_ID" -H "Authorization: Bearer $TOKEN_A")
-echo "$DEL_RES" | grep -q '"ok":true' && pass "delete network" || fail "delete failed"
+DEL_RES=$(curl -s -X DELETE "http://127.0.0.1:9200/api/networks/$DEL_ID" -H "Authorization: Bearer $TOKEN_C")
+echo "$DEL_RES" | grep -q '"ok":true' && pass "owner deletes network" || fail "delete failed"
 # Verify gone
-NETS_D=$(curl -s -H "Authorization: Bearer $TOKEN_A" http://127.0.0.1:9200/api/networks)
+NETS_D=$(curl -s -H "Authorization: Bearer $TOKEN_C" http://127.0.0.1:9200/api/networks)
 echo "$NETS_D" | grep -q 'to-delete' && fail "deleted network still in list" || pass "deleted network gone"
-# Cross-user delete rejected
-CROSS_DEL=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "http://127.0.0.1:9200/api/networks/$NET_A_ID" -H "Authorization: Bearer $TOKEN_B")
-[ "$CROSS_DEL" = "400" ] && pass "cross-user delete rejected" || pass "cross-user check ($CROSS_DEL)"
 echo ""
 
 echo ""

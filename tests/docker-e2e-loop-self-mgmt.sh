@@ -52,6 +52,7 @@ type safe_rm_rf > /dev/null 2>&1 || {
   echo "FATAL: safe-rm.sh not found"
   exit 99
 }
+source /app/lib/e2e-agent-bootstrap.sh
 
 PASS=0
 FAIL=0
@@ -91,12 +92,17 @@ register_test_user() {
     -H "Content-Type: application/json" \
     -d '{"username":"m4-tester","password":"M4TestPw123","display_name":"M4 Tester"}')
   USER_TOKEN=$(echo "$resp" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('token',''))")
-  NET_TOKEN=$(echo "$resp" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('network_token',''))")
   NET_ID=$(echo "$resp" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('network_id',''))")
-  if [ -z "$NET_TOKEN" ]; then
+  if [ -z "$USER_TOKEN" ] || [ -z "$NET_ID" ]; then
     fail "user register failed: $resp"
     exit 1
   fi
+  export HOME=/tmp/m4-home-$$
+  safe_rm_rf "$HOME"
+  mkdir -p "$HOME"
+  anet login --hub "http://127.0.0.1:$HUB_PORT" \
+    --username m4-tester --password M4TestPw123 >/dev/null || exit 1
+  e2e_select_network "$NET_ID" || exit 1
   pass "registered test user (net=${NET_ID:0:12})"
 }
 
@@ -105,22 +111,18 @@ make_node_workdir() {
   local runtime="$2"
   local workdir="/tmp/m4-${alias}-$$"
   safe_rm_rf "$workdir"
-  mkdir -p "$workdir/.anet/nodes/$alias"
-  cat > "$workdir/.anet/nodes/$alias/config.json" <<EOF
-{
-  "alias": "$alias",
-  "runtime": "$runtime",
-  "hub": "http://127.0.0.1:$HUB_PORT",
-  "token": "$NET_TOKEN",
-  "network_id": "$NET_ID",
-  "flags": {
-    "dangerouslySkipPermissions": true,
-    "teammateMode": true,
-    "goalTickMs": "5000",
-    "timezone": "Asia/Shanghai"
-  }
-}
-EOF
+  mkdir -p "$workdir"
+  local model=gpt-5.5
+  [ "$runtime" = "claude-agent-sdk" ] && model=claude-sonnet-4-6
+  [ "$runtime" = "grok-build-acp" ] && model=grok-build
+  (cd "$workdir" && e2e_create_agent "$alias" "$runtime" "$model" "$NET_ID") || return 1
+  local config="$workdir/.anet/nodes/$alias/config.json"
+  local tmp="${config}.tmp"
+  jq '.flags = {dangerouslySkipPermissions:true, teammateMode:true, goalTickMs:"5000", timezone:"Asia/Shanghai"}' \
+    "$config" > "$tmp" || return 1
+  chmod 600 "$tmp"
+  mv "$tmp" "$config"
+  e2e_config_token_bound_to_network "$config" "$NET_ID" || return 1
   echo "$workdir"
 }
 
@@ -652,7 +654,7 @@ test_claude_structural() {
   local resp ok
   resp=$(curl -s -X POST "http://127.0.0.1:$HUB_PORT/api/task" \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $NET_TOKEN" \
+    -H "Authorization: Bearer $USER_TOKEN" \
     -d "{\"alias\":\"$alias\",\"task\":\"/loop 5m claude structural smoke\",\"priority\":\"normal\",\"from\":\"m4-harness\",\"network_id\":\"$NET_ID\"}")
   ok=$(echo "$resp" | python3 -c "import sys,json;print(json.load(sys.stdin).get('ok',False))" 2>/dev/null || echo "False")
   if [ "$ok" != "True" ]; then fail "claude: POST /loop failed: $resp"; return; fi
