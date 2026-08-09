@@ -62,7 +62,7 @@ do
     echo "MUTATION_FALSE_GREEN: boolean-${flag}"
     exit 1
   fi
-  grep -Fq 'expect(received).toEqual(expected)' /tmp/test611-${flag}.log
+  grep -Fq 'expect(received).toBe(expected)' /tmp/test611-${flag}.log
   echo "MUTATION_RED: boolean-${flag} rc=$mutation_rc"
 done
 cp /tmp/test611-cli-args.ts agent-network/src/cli-args.ts
