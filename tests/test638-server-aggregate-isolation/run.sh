@@ -2,8 +2,8 @@
 set -euo pipefail
 
 EXPECTED_SOURCE_COMMIT="${EXPECTED_SOURCE_COMMIT:-}"
-if [[ -z "${TEST638_SOURCE_COMMIT:-}" || -z "$EXPECTED_SOURCE_COMMIT" || "$TEST638_SOURCE_COMMIT" != "$EXPECTED_SOURCE_COMMIT" ]]; then
-  echo "FAIL: source provenance mismatch image=${TEST638_SOURCE_COMMIT:-unset} expected=${EXPECTED_SOURCE_COMMIT:-unset}"
+if [[ -z "${TEST639_SOURCE_COMMIT:-}" || -z "$EXPECTED_SOURCE_COMMIT" || "$TEST639_SOURCE_COMMIT" != "$EXPECTED_SOURCE_COMMIT" ]]; then
+  echo "FAIL: source provenance mismatch image=${TEST639_SOURCE_COMMIT:-unset} expected=${EXPECTED_SOURCE_COMMIT:-unset}"
   exit 1
 fi
 
@@ -20,10 +20,14 @@ PROBES=(
   server/src/test638-nonzero.test.ts
   server/src/test638-timeout.test.ts
   server/src/test638-signal.test.ts
+  server/src/test639-missing-summary.test.ts
+  server/src/test639-collision.test.ts
+  server/src/test639/collision.test.ts
   server/scripts/test-aggregate-mutation.ts
 )
 cleanup() {
   rm -f -- "${PROBES[@]}"
+  rmdir server/src/test639 2>/dev/null || true
 }
 trap cleanup EXIT
 rm -rf -- /tmp/test638-run1 /tmp/test638-run2 /tmp/test638-run3
@@ -95,7 +99,7 @@ set -e
 grep -F 'explicit_test_database_required' /tmp/test638-no-db-upload.out >/dev/null
 grep -F 'explicit_test_database_required' /tmp/test638-no-db-host.out >/dev/null
 
-echo "L5: nonzero, timeout, and signal cannot greenwash"
+echo "L5: nonzero, timeout, signal, missing summary, and spawn failure cannot greenwash"
 printf '%s\n' 'import {test} from "bun:test";' 'test("nonzero",()=>{throw new Error("test638_expected_nonzero")});' > server/src/test638-nonzero.test.ts
 set +e
 bun run --cwd server test --file=server/src/test638-nonzero.test.ts >/tmp/test638-nonzero.out 2>&1; nonzero_rc=$?
@@ -124,6 +128,47 @@ sleep 0.2
 ! ps -eo args | grep -F 'bun test server/src/test638-signal.test.ts' | grep -v grep >/dev/null
 rm -f -- server/src/test638-signal.test.ts
 
+printf '%s\n' 'process.exit(0);' > server/src/test639-missing-summary.test.ts
+set +e
+bun run --cwd server test --file=server/src/test639-missing-summary.test.ts >/tmp/test639-missing-summary.out 2>&1; missing_summary_rc=$?
+set -e
+[[ $missing_summary_rc -ne 0 ]] || { echo "FAIL: missing child summary greenwashed"; exit 1; }
+grep -F $'TEST_FILE_RESULT\tserver/src/test639-missing-summary.test.ts\tpass=0\tfail=0\tskip=0' /tmp/test639-missing-summary.out >/dev/null
+grep -F 'SERVER_AGGREGATE_RESULT' /tmp/test639-missing-summary.out | grep -F '"bad":true' >/dev/null
+rm -f -- server/src/test639-missing-summary.test.ts
+
+mkdir -p /tmp/test639-no-bun
+set +e
+PATH=/tmp/test639-no-bun /usr/local/bin/bun server/scripts/test-aggregate.ts \
+  --file=server/src/db-adapter-guard.test.ts >/tmp/test639-spawn-fail.out 2>&1; spawn_fail_rc=$?
+set -e
+[[ $spawn_fail_rc -ne 0 ]] || { echo "FAIL: child spawn failure greenwashed"; exit 1; }
+grep -F $'TEST_FILE_RESULT\tserver/src/db-adapter-guard.test.ts\tpass=0\tfail=0\tskip=0\texpects=0\texit=null' /tmp/test639-spawn-fail.out >/dev/null
+grep -F 'SERVER_AGGREGATE_RESULT' /tmp/test639-spawn-fail.out | grep -F '"bad":true' >/dev/null
+
+echo "L5b: slug collisions fail before --file filtering"
+printf '%s\n' 'import {test,expect} from "bun:test";' 'test("flat collision fixture",()=>expect(true).toBe(true));' > server/src/test639-collision.test.ts
+mkdir -p server/src/test639
+printf '%s\n' 'import {test,expect} from "bun:test";' 'test("nested collision fixture",()=>expect(true).toBe(true));' > server/src/test639/collision.test.ts
+set +e
+bun run --cwd server test --file=server/src/test639-collision.test.ts >/tmp/test639-slug-collision.out 2>&1; slug_collision_rc=$?
+set -e
+[[ $slug_collision_rc -ne 0 ]] || { echo "FAIL: colliding test paths shared a slug"; exit 1; }
+grep -F 'test slug collision "server-src-test639-collision.test.ts"' /tmp/test639-slug-collision.out >/dev/null
+grep -F 'server/src/test639-collision.test.ts' /tmp/test639-slug-collision.out >/dev/null
+grep -F 'server/src/test639/collision.test.ts' /tmp/test639-slug-collision.out >/dev/null
+
+cp server/scripts/test-aggregate.ts server/scripts/test-aggregate-mutation.ts
+sed -i '/^[[:space:]]*assertUniqueSlugs(files);$/d' server/scripts/test-aggregate-mutation.ts
+! grep -F 'assertUniqueSlugs(files);' server/scripts/test-aggregate-mutation.ts >/dev/null
+set +e
+bun server/scripts/test-aggregate-mutation.ts --file=server/src/test639-collision.test.ts >/tmp/test639-slug-mutation.out 2>&1; slug_mutation_rc=$?
+set -e
+[[ $slug_mutation_rc -eq 0 ]] || { echo "FAIL: slug-guard mutation did not bypass collision gate"; exit 1; }
+grep -F $'TEST_FILE_RESULT\tserver/src/test639-collision.test.ts\tpass=1\tfail=0' /tmp/test639-slug-mutation.out >/dev/null
+rm -f -- server/src/test639-collision.test.ts server/src/test639/collision.test.ts server/scripts/test-aggregate-mutation.ts
+rmdir server/src/test639
+
 echo "L6: deletion of per-file DB split is witnessed-red"
 cp server/scripts/test-aggregate.ts server/scripts/test-aggregate-mutation.ts
 sed -i 's/const suiteRoot = join(runRoot, slugFor(file));/const suiteRoot = join(runRoot, "shared");/' server/scripts/test-aggregate-mutation.ts
@@ -138,9 +183,10 @@ mut_maps=$(grep '^TEST_DB_MAP' /tmp/test638-mutation.out | cut -f3 | sort -u | w
 [[ "$upload_db" != "$host_db" ]] || { echo "FAIL: positive isolation precondition missing"; exit 1; }
 rm -f -- server/scripts/test-aggregate-mutation.ts
 
-echo "source_commit=$TEST638_SOURCE_COMMIT"
+echo "source_commit=$TEST639_SOURCE_COMMIT"
 echo "aggregate_key=$key1"
 echo "run1_db_maps=$(grep -c '^TEST_DB_MAP' "$OUT1")"
 echo "cross_suite_shapes=upload[$upload_shape],host[$host_shape]"
-echo "nonzero_rc=$nonzero_rc timeout_rc=$timeout_rc signal_rc=$signal_rc mutation_unique_db_paths=$mut_maps"
+echo "nonzero_rc=$nonzero_rc timeout_rc=$timeout_rc signal_rc=$signal_rc missing_summary_rc=$missing_summary_rc spawn_fail_rc=$spawn_fail_rc"
+echo "slug_collision_rc=$slug_collision_rc slug_guard_mutation_rc=$slug_mutation_rc mutation_unique_db_paths=$mut_maps"
 echo "RESULT: PASS"

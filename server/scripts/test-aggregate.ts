@@ -64,6 +64,18 @@ function slugFor(file: string): string {
   return file.replace(/[^A-Za-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
+function assertUniqueSlugs(files: string[]) {
+  const ownerBySlug = new Map<string, string>();
+  for (const file of files) {
+    const slug = slugFor(file);
+    const previous = ownerBySlug.get(slug);
+    if (previous !== undefined && previous !== file) {
+      throw new Error(`test slug collision ${JSON.stringify(slug)}: ${previous} and ${file}`);
+    }
+    ownerBySlug.set(slug, file);
+  }
+}
+
 function parseCounts(output: string): Counts {
   const last = (pattern: RegExp) => {
     const matches = [...output.matchAll(pattern)];
@@ -170,6 +182,9 @@ async function runFile(file: string, runRoot: string, timeoutMs: number, verbose
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   let files = collectTests(SERVER_SRC);
+  // Validate the complete enumerated tree before applying --file filters. A
+  // filtered run must not hide a future path pair that would share one DB.
+  assertUniqueSlugs(files);
   if (args.selectedFiles.length > 0) {
     for (const file of args.selectedFiles) {
       if (!files.includes(file)) throw new Error(`--file is not an enumerated server test: ${file}`);

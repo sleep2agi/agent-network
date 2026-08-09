@@ -14,7 +14,7 @@ RUN cd server && bun install
 COPY tests/test638-server-aggregate-isolation/run.sh /work/run.sh
 RUN chmod +x /work/run.sh
 
-ARG TEST638_SOURCE_COMMIT
-ENV TEST638_SOURCE_COMMIT=${TEST638_SOURCE_COMMIT}
+ARG TEST639_SOURCE_COMMIT
+ENV TEST639_SOURCE_COMMIT=${TEST639_SOURCE_COMMIT}
 
 CMD ["/work/run.sh"]
