@@ -952,5 +952,5 @@ tmux attach -t =<alias>
 - 接管字段已支持 `anet node create --codex-app-server-url <ws> --codex-thread-id <id>`；推荐的人机共存路径是 `anet node start <alias> --copresence` 自动生成并写回字段，不再要求手改 config。
 - `codex resume --remote` 接入时必须带 `codexThreadId`；省略会进入历史会话 picker，容易接错 thread。
 - 每个节点必须使用独立 app-server：CommHub bearer token 是 app-server 进程级环境，不能在多个节点之间复用。
-- 当前任务等待最终回复默认 600s（可由 runtime 选项覆盖），超时不证明 turn 已死，也不会取消底层 Codex turn。
+- 当前任务在 `task_started` 后采用默认 600s 的**无活动阈值**（可由 runtime 选项覆盖），而非总时长硬上限。精确归属于该 task 的 `item/started`、agent delta、`item/completed` 会续期；无关 thread/turn 不会续期。活动状态最多每 30s 通过常规 `report_status(working)` 上报一次。连续静默超时仍不证明 turn 已死，也不会取消底层 Codex turn，错误提示会要求先检查共享线程、不要盲目重复派发。
 - codex-app-server 内层 codex 的 loops MCP（自管 /loop 工具）接线为后续增强; 派工闭环不依赖它。

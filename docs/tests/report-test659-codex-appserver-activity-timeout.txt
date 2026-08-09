@@ -1,0 +1,44 @@
+# test659 — codex-app-server owned-turn activity timeout (#445)
+
+Date: 2026-08-10 (Asia/Shanghai)
+Base: 4dacd93a6c441c243ce1537e437d254fbc485da7
+Source commit: 5b282b5b6f4b2ae73306c1b6c6942fed23c0f38f
+Docker tag: anet-test659:dev
+Image ID: sha256:7c2f35f1e52e06e5cd6dd1092e5bca28483c2557cbab9bf16b2e5c2899b0d769
+Image size: 384071715 bytes
+Embedded TEST659_SOURCE_COMMIT: 5b282b5b6f4b2ae73306c1b6c6942fed23c0f38f
+Mutation artifact tar SHA256: 728df05e89fbc7a81ab583ea9d4cd438642e186736dc73b52e4da5639b2b19fa
+
+## Facts before the change
+
+- `codexAppServerThink()` armed one model-response timer at `task_started` and never renewed it.
+- The bridge already consumed `item/started`, `item/agentMessage/delta`, and `item/completed`, but did not expose task-scoped activity.
+- Controlled pre-implementation run: 57 pass / 3 fail. The three red assertions were: a long active task still timed out, no `task_activity` events were emitted, and the timeout still claimed "no final reply" instead of inactivity.
+
+## Implemented boundary
+
+- The bridge emits `task_activity` only after the immutable `clientUserMessageId` echo confirms the exact turn→task owner. The non-authoritative `turn/start` response id alone cannot renew a deadline.
+- Owned item start, agent delta, and item completion renew the response **idle** threshold. Cross-thread, foreign-turn, unconfirmed-turn, and queued events do not.
+- Streamed deltas only update one activity timestamp. The timer checks that timestamp at its deadline and reschedules once for the remaining window, avoiding per-token timer churn and log floods.
+- A task with no activity still fails after the same default 600s threshold; the queue deadline remains separate and unchanged.
+- `agent-node` relays active work through the existing non-terminal `report_status(working)` / status-update path at most once per 30 seconds. It does not create a reply or inbox row.
+- The timeout text explicitly warns that the underlying turn may still run and should be inspected before re-dispatch.
+
+## Docker result
+
+Command:
+
+    sg docker -c 'docker run --rm -v /tmp/test659-artifacts:/artifacts anet-test659:dev'
+
+Result: PASS (6 gates, 0 failures)
+
+- 60 unit tests / 209 assertions passed across the real bridge and runtime source.
+- Agent-node production bundle built successfully.
+- Hub working-heartbeat wiring and 30s rate limit were present in the built source.
+- Mutation `remove-idle-reset`: witnessed red.
+- Mutation `trust-unconfirmed-response-turn`: witnessed red.
+- Mutation `remove-activity-listener`: witnessed red.
+
+## Honest scope
+
+The Docker suite uses the repository's WebSocket fake app-server to drive the same JSON-RPC notification handlers; it does not spend vendor quota on a literal >600s Codex turn. Prior production/runtime evidence established these real-wire event shapes. This candidate proves task scoping, idle renewal, continued silent timeout, queue separation, buildability, and mutation sensitivity; production rollout remains outside this candidate.
