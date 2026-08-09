@@ -186,6 +186,40 @@ submit_task() {
   [[ -n "$TASK_ID" ]]
 }
 
+mcp_call() {
+  local tool_name="$1"
+  local tool_args="$2"
+  local body
+  body=$(jq -nc --arg name "$tool_name" --argjson args "$tool_args" \
+    '{jsonrpc:"2.0",id:1,method:"tools/call",params:{name:$name,arguments:$args}}')
+  curl -fsS -X POST "$HUB/mcp" \
+    -H "Authorization: Bearer $USER_TOKEN" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -H 'MCP-Protocol-Version: 2025-03-26' \
+    --data "$body" \
+    | sed -n 's/^data: //p' | head -1 \
+    | jq -r '.result.content[0].text // empty'
+}
+
+cancel_layer_task() {
+  local task_id="$1"
+  local cancel_result inbox_result
+  cancel_result=$(mcp_call cancel_task "$(jq -nc --arg id "$task_id" --arg network "$NETWORK_ID" \
+    '{task_id:$id,reason:"test384 layer teardown",from_session:"test384",network_id:$network}')")
+  jq -e '.ok == true and .cancelled == true' <<<"$cancel_result" >/dev/null
+
+  # Cancellation is the layer boundary: it must also acknowledge the inbox
+  # row, otherwise the next node start can legitimately redeliver it under
+  # the Hub's at-least-once contract and make a later layer model-dependent.
+  inbox_result=$(mcp_call get_inbox "$(jq -nc --arg alias "$LIVE_ALIAS" '{alias:$alias,limit:100}')")
+  jq -e --arg id "$task_id" \
+    '.ok == true and all(.messages[]?; .id != $id)' <<<"$inbox_result" >/dev/null
+  curl -fsS "$HUB/api/tasks?task_id=$task_id&network_id=$NETWORK_ID" \
+    -H "Authorization: Bearer $USER_TOKEN" \
+    | jq -e '.tasks[0].status == "cancelled"' >/dev/null
+}
+
 wait_task_replied() {
   local expected_text="${1:-}"
   TASK_ROW=""
@@ -788,11 +822,13 @@ echo "PASS: child that rejected initialize and stayed alive was explicitly reape
 
 start_fake_node hang "$ROOT/node-fake-hang.log"
 submit_task "Hold the ACP initialize request open until supervisor shutdown."
+HOLD_OPEN_TASK_ID="$TASK_ID"
 wait_fake_started hang
 stop_node
 wait_fake_gone hang
 assert_no_opencode_transient_roots "$OPENAI_NODE"
-echo "PASS: SIGTERM during unresolved initialize reaped agent-node + opening OpenCode child"
+cancel_layer_task "$HOLD_OPEN_TASK_ID"
+echo "PASS: SIGTERM during unresolved initialize reaped agent-node + opening OpenCode child; layer task cancelled and absent from inbox"
 
 CURRENT_LAYER="L5.5 external safe-base ancestor candidate pre-spawn refusal"
 echo
