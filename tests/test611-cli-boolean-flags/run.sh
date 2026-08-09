@@ -54,7 +54,7 @@ do
   fi
   set +e
   bun test agent-network/src/cli-args.test.ts \
-    -t "--${flag} does not swallow a following positional operand" \
+    -t "${flag} does not swallow a following positional operand" \
     >/tmp/test611-${flag}.log 2>&1
   mutation_rc=$?
   set -e
