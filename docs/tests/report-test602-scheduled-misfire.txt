@@ -1,7 +1,12 @@
 # test602 — Hub scheduled-task misfire policy
 
 Date: 2026-08-09
-Status: PASS (pre-commit source tree; exact commit provenance pending final review build)
+Status: PASS (exact source commit)
+
+Source commit: `cea39d266aa2250ced3fc513383d0fae70a1ba75`
+Image ID: `sha256:acc73084294bb18d2290e011b6774c060ae70f8170b76e66cb96360be0cf5de0`
+Embedded environment: `TEST602_SOURCE_COMMIT=cea39d266aa2250ced3fc513383d0fae70a1ba75`
+Runner artifact SHA256: `2ec9b9b835c5874d4169c47a6c7068c36c50004b86568fdf713148df3cfc3883`
 
 ## Scope
 
@@ -13,7 +18,7 @@ Status: PASS (pre-commit source tree; exact commit provenance pending final revi
 
 ## Layer 1 — Hub real SQLite/HTTP tests
 
-Command: `sg docker -c 'docker build -t anet-test602:dev -f tests/test602-scheduled-misfire/Dockerfile . && docker run --rm anet-test602:dev'`
+Command: `sg docker -c 'docker build --build-arg SOURCE_COMMIT=cea39d266aa2250ced3fc513383d0fae70a1ba75 -t anet-test602:dev -f tests/test602-scheduled-misfire/Dockerfile . && docker run --rm -v /tmp/test602-exact-artifacts:/artifacts anet-test602:dev'`
 
 Result:
 
@@ -23,6 +28,7 @@ Result:
 - skip created no task/inbox, wrote `misfire_skipped`, preserved `last_run_at`, and advanced
 - an occurrence only 10 seconds late remained a normal dispatch
 - a skipped one-shot schedule completed without dispatch
+- node-token GET and POST both returned `403 user_token_required`
 
 ## Mutation
 
@@ -45,4 +51,4 @@ Result: witnessed red, exit code 1. Restoring production code returned the suite
 
 ## Operational note
 
-The three suites reused the single exact tag `anet-test602:dev`, which was removed after each layer. Docker was paused when host free space fell below 9 GB; no prune or broad image deletion was used. A final exact-commit provenance rebuild is required before merge/deploy.
+The three suites reused the single exact tag `anet-test602:dev`. The final exact-source image was removed by that exact tag after evidence capture. No prune or broad image deletion was used; host free space remained 11 GB after cleanup.
