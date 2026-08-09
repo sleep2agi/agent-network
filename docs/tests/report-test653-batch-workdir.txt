@@ -1,0 +1,46 @@
+# test653 — #178 batch workdir normalization
+
+Date: 2026-08-10 (Asia/Shanghai)
+Base: `4a23a4f46c6455ab567227e63c2f2795283d27b2`
+Tested source commit: `29e1fc90f31225025c1c0e1024ece697b045b209`
+Docker tag: `anet-test653:dev`
+Docker image: `sha256:0d6f99acd51f41b25c5a27abd23c2c1013ce12db7d639d69b059719ce4a30b88`
+Embedded env: `TEST653_SOURCE_COMMIT=29e1fc90f31225025c1c0e1024ece697b045b209`
+Runner artifact SHA256: `a1f0833280c32895e8406c96c0d8b40a82b08683a16ce48198b1fb860ca0d12d`
+
+## Fact audit
+
+- Production status contained 203 sessions; 198 reported `project_dir`.
+- 15 historical offline rows contained literal `~` segments, including increasing forms such as:
+  - `/Users/vansin/code/VideoNode/~/code/VideoNode/...`
+  - `/home/vansin/design/~/design/...`
+- All 15 suspicious rows were already offline; this change does not rewrite or delete historical rows.
+- Every current producer reports `process.cwd()`. The corruption source was the batch CLI accepting a literal or relative workdir, then changing cwd inside its node loop. A value such as `~/design` was therefore resolved again from each previous node cwd.
+
+## Change
+
+- Added one `normalizeBatchWorkdir()` choke point.
+- `~` and `~/...` expand to the current user's home.
+- Relative workdirs are anchored once to the caller cwd before any loop.
+- Absolute workdirs remain absolute.
+- Unsupported `~other/...` and empty input fail closed.
+- Batch cleanup uses the same normalization, so create and cleanup resolve the same root.
+
+## Docker evidence
+
+- Production CLI bundle built successfully under Bun 1.3.14.
+- Unit/wiring layer: 6 pass, 0 fail, 16 assertions.
+- Real CLI create layer:
+  - isolated HOME, fake Hub only for node-token issuance, fake tmux only for cwd capture;
+  - `anet create --batch --workdir '~/design' --count 2` created exactly:
+    - `<HOME>/design/node1/.anet/nodes/worker1号/config.json`
+    - `<HOME>/design/node2/.anet/nodes/worker2号/config.json`
+  - tmux launch cwd values were exactly `<HOME>/design/node1` and `<HOME>/design/node2`;
+  - no literal `~` directory appeared below the invocation cwd.
+- Real CLI cleanup layer removed the same expanded `<HOME>/design` tree.
+- Mutation witnessed-red:
+  - delete create normalization: rc=1 and the real CLI recreated `start/~/design/node1` nesting;
+  - replace cleanup normalization with raw input: rc=1 and the intended home tree remained untouched.
+- Restored source reran all layers green.
+
+Final result: `PASS`.
