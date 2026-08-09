@@ -14,8 +14,13 @@ bun test agent-network/src/private-state.test.ts agent-node/src/runtime/config-a
 # Production-path inventory: every token-preserving config write must use a
 # private choke point. These assertions deliberately name each direct path so
 # a new bypass cannot hide behind an aggregate green count.
-! grep -nE 'writeFileSync\((rawCfgPath|configFilePath|newCfgPath|cfgPath)' agent-network/bin/cli.ts agent-node/src/cli.ts
-! grep -nE 'writeFileSync\((envPath|dotenvPath|anetEnvPath)' agent-network/bin/cli.ts
+if grep -nE 'writeFileSync\((rawCfgPath|configFilePath|newCfgPath|cfgPath)' agent-network/bin/cli.ts agent-node/src/cli.ts; then
+  echo "FAIL: direct token-bearing config writer bypass" >&2
+  exit 1
+fi
+env_direct="$(grep -nE 'writeFileSync\((envPath|dotenvPath|anetEnvPath)' agent-network/bin/cli.ts || true)"
+test "$(printf '%s\n' "$env_direct" | grep -c .)" -eq 1
+printf '%s\n' "$env_direct" | grep -q 'mode: 0o600, flag: "wx"'
 grep -q 'atomicWritePrivateJson(rawCfgPath, rawCfg)' agent-network/bin/cli.ts
 grep -q 'atomicWritePrivateJson(join(dir, "config.json"), daemonConfig)' agent-network/bin/cli.ts
 grep -q 'atomicWritePrivateFile(bakPath' agent-network/bin/cli.ts
