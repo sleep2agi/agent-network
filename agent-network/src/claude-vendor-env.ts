@@ -16,6 +16,11 @@ export function collectClaudeVendorEnvForCreate(input: {
   shellEnv: Readonly<Record<string, string | undefined>>;
 }): string[] {
   const out = [...input.explicitEnv];
+  for (const entry of out) {
+    if (/[\r\n]/.test(entry)) {
+      throw new Error("--env entries cannot contain line breaks");
+    }
+  }
   if (input.runtime !== "claude-agent-sdk") return out;
 
   const explicitKeys = new Set(

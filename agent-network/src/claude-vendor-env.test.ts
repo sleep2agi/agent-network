@@ -47,4 +47,17 @@ describe("collectClaudeVendorEnvForCreate", () => {
       shellEnv: { ANTHROPIC_AUTH_TOKEN: "safe\nINJECTED=value" },
     })).toThrow("contains a line break");
   });
+
+  test("rejects line breaks in explicit --env for every runtime", () => {
+    for (const [runtime, entry] of [
+      ["claude-agent-sdk", "ANTHROPIC_API_KEY=safe\nINJECTED=value"],
+      ["codex-sdk", "OPENAI_API_KEY=safe\rINJECTED=value"],
+    ] as const) {
+      expect(() => collectClaudeVendorEnvForCreate({
+        runtime,
+        explicitEnv: [entry],
+        shellEnv: {},
+      })).toThrow("--env entries cannot contain line breaks");
+    }
+  });
 });
