@@ -1,0 +1,94 @@
+# test292 Layer 3 — token-bound simulated agents and current aggregate contracts
+
+Date: 2026-08-10
+Final source under test: `03d7346b54286ca4f01cedcd7c7fb29f4c0f61f3`
+Scope: Docker E2E fixtures, shared test helpers, aggregate assertions, and
+test-only Dockerfiles. Production source was not changed.
+
+## Witnessed red
+
+Exact initial red source:
+`fef3dc75e9ce2239d1de891e1281d92ff3403b2e`
+
+The real-Hub focused run failed after environment/auth with
+`e2e_agent_config_path: command not found`. This proved that the aggregate had
+no helper capable of creating a stable `node_id` plus Hub-issued, network-bound
+`ntok_` fixture.
+
+After implementing the identity helper, the exact aggregate at
+`ec0ead84cadecbf65cbe0ef7972266b7e0c4debd` produced 131 passed / 6 failed.
+The six remaining failures were all stale test contracts:
+
+- a free user was asked to create two additional networks despite registration
+  already creating its first network;
+- the isolation test dispatched to aliases that had never been registered;
+- `anet quickstart` was still expected to log in although it was intentionally
+  removed by issue #45.
+
+An intermediate run after quota/quickstart correction produced 134/2; both
+remaining failures were the expected `alias_not_found` consequence. Registering
+one authoritative token-bound target per network closed that final gap.
+
+## Exact-source Docker evidence
+
+The final runner is a low-disk derivative of the previously exact
+`ec0ead84` image. The base contains the same production binaries and
+dependencies; the derivative replaces only test scripts/helpers and embeds the
+final source SHA. This avoids rebuilding a ~1 GB image while the host is at 99%
+disk use. `git diff ec0ead84..03d7346b` contains test/report/Dockerfile changes
+only.
+
+Image tag: `anet-test292-identity:dev`
+
+Image ID:
+`sha256:37754db8f3a5fab00b7afc7667c24cad0485764e6a8c9fceea7086b0608b9a61`
+
+Embedded environment:
+
+    TEST292_IDENTITY_SOURCE_COMMIT=03d7346b54286ca4f01cedcd7c7fb29f4c0f61f3
+
+Focused result: **19 passed / 0 failed**.
+
+Full aggregate result: **136 passed / 0 failed**.
+
+The aggregate container installed `procps` at runtime because the historical
+aggregate script invokes `ps`; this was a one-shot container change and not a
+second image or production modification.
+
+## Verified behavior
+
+- every simulated agent identity write uses a CLI-created config containing a
+  stable `node_id` and Hub-issued, network-bound `ntok_`;
+- the helper overwrites caller-supplied report identity with the config-bound
+  alias and node ID;
+- user tokens cannot impersonate an agent through `report_status`;
+- inbox read, acknowledgement, status, and terminal reply complete under the
+  node token, and inventory stores the exact stable node ID;
+- concurrency, retry, cancel, reassign, expiration, stop/offline, and full mock
+  lifecycle paths use authoritative fixtures rather than owner-token identity
+  writes;
+- legacy master-token MCP rejection and both anonymous health assertions match
+  the real Hub transport contract;
+- the free-user isolation fixture uses registration's default network plus one
+  created network, registers one target in each, and proves both positive
+  visibility and negative cross-network isolation;
+- removed `quickstart` exits non-zero with migration guidance and creates no
+  agent state.
+
+## Load-bearing negative controls
+
+- deleting the config-bound alias pin exposes `alias_identity_mismatch`;
+- deleting stable node-ID injection causes authoritative inventory lookup to
+  fail;
+- restoring the owner-token mock acknowledgement path turns the aggregate
+  wiring gate red;
+- the staged real aggregate itself supplied witnessed-red evidence for both
+  stale quota/quickstart assumptions and missing target registration before the
+  final 136/0 run.
+
+## Safety and cleanup
+
+No production process, database, global package, Hub, Dashboard, or deployed
+node was changed. The isolated diagnostic container was removed by exact name.
+The temporary base image tag was removed by exact name; no Docker prune or
+pattern deletion was used.

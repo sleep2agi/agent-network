@@ -77,3 +77,20 @@ This layer updates test expectations to contracts already enforced by the real
 Hub. It does not claim to fix the remaining Base failures in task lifecycle,
 auth scoping, concurrency, network creation, or quickstart. Those remain in
 the #292 re-bucket for later layers.
+
+## Subsequent add-only closure
+
+Add-only commit `eccd16012dfe68f69747d5ffe4159baf35cae102` closed two
+duplicate aggregate assertions that the first focused layer did not cover:
+
+- the second health assertion now also requires numeric `sse_connections` and
+  absence of `sse_sessions`;
+- legacy `COMMHUB_AUTH_TOKEN` remains REST-compatible but is pinned to the
+  real MCP contract: HTTP 401 with exact error
+  `master-token auth is deprecated; use admin utok_`.
+
+These assertions were rerun as part of the exact-source identity image at
+`03d7346b54286ca4f01cedcd7c7fb29f4c0f61f3`; the full aggregate finished
+136 passed / 0 failed. The original 12/0 evidence above remains the evidence
+for source `dd044709...`; this addendum does not relabel that older image as
+having tested the later commit.
