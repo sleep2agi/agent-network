@@ -1,0 +1,67 @@
+# test637 — inherited DATABASE_URL test guard
+
+Date: 2026-08-09
+Issue: #435
+Base: 8e74f6e1e0e73664dbcd3c04202de41d11db6a70
+Witnessed-red commit: 65ace517cc4921e2f17512d548e378470e0e8037
+Source commit: 30532ade619423b3d15be7ce2f70fe2b2af2a3e0
+Production implementation commit: 125bcc13c92fbcffe4d113a9cc91216c1e1ae09f
+Docker tag: anet-test637:dev
+Docker image: sha256:f123e587d3768ab5f11656614eef2b7ea8f782ccb11e4ec84ca141bad4b2de0c
+Embedded source: TEST637_SOURCE_COMMIT=30532ade619423b3d15be7ce2f70fe2b2af2a3e0
+Runner artifact SHA256: ec5c068a84e10c66b1aa271c326f81359e9257f4c0d0f7c3a9a1001ab6154196
+
+## Root cause and result
+
+`createAdapter()` previously selected and constructed `PgAdapter` before the
+existing `NODE_ENV=test` SQLite guard. An inherited production
+`DATABASE_URL` therefore bypassed that guard and could make a test process
+open a real PostgreSQL socket.
+
+The new `assertSafeTestDatabaseEnv(process.env)` is the first executable line
+of `createAdapter()`. Under `NODE_ENV=test`, any non-empty `DATABASE_URL` is
+rejected before target selection, banner output, DNS, adapter construction,
+or socket activity. There is no opt-in bypass.
+
+Target selection is also exposed as a pure function so tests prove that
+production/unset `NODE_ENV` still selects PostgreSQL and explicit
+`COMMHUB_DB` still selects SQLite without constructing either adapter.
+
+## Real socket evidence
+
+The Docker suite installs real `pg`, Node, and `strace`. It starts a real TCP
+listener on loopback, then invokes the real `createAdapter()` in a subprocess
+with a PostgreSQL URL aimed at that listener.
+
+- Base `65ace517` (test-only, production code unchanged): the PostgreSQL
+  banner appeared, `strace` recorded `connect()` to the listener, and the
+  listener accepted the socket. This is the witnessed red for the original
+  ordering bug.
+- Fixed `30532ade`: the subprocess returned the actionable DATABASE_URL
+  refusal, emitted no PostgreSQL banner, `strace` contained no connect to the
+  listener, and the listener accepted nothing.
+- Mutation: deleting only the earliest production guard from the fixed source
+  restored the PostgreSQL banner and a real accepted `connect()`; the gate
+  turned red.
+
+The mutation copy intentionally remains below `/work`, so its real
+`require("pg")` resolves the installed package. An earlier `/tmp` mutation
+failed on module resolution before dialing and was rejected as false evidence.
+
+## Unit matrix
+
+Exact-source Docker: 8 pass / 0 fail / 10 assertions.
+
+- `postgres://`, `postgresql://`, and a non-Postgres scheme all fail closed
+  when inherited under `NODE_ENV=test`.
+- DATABASE_URL refusal wins even when a safe `COMMHUB_DB` is also present.
+- With DATABASE_URL unset, the existing missing-COMMHUB_DB SQLite guard still
+  owns its original error path.
+- Production and unset NODE_ENV preserve PostgreSQL selection.
+- Test and production modes preserve explicit SQLite selection.
+
+## Scope
+
+This change does not modify production credentials, databases, adapters,
+services, global packages, or deployment state. It does not mix in #434 test
+aggregation work. The fixed Docker tag was removed after evidence capture.
