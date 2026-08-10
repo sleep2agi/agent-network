@@ -4227,7 +4227,7 @@ async function tryHandleExplicitDelegation(
     }
     if (childStatus === "replied" || childStatus === "failed" || childStatus === "cancelled") {
       emitTrace(childStatus === "replied" ? "replied" : "failed", childTaskId, {
-        ...(childStatus === "replied" ? {} : { errorCode: `task_${childStatus}` }),
+        ...(childStatus === "replied" ? {} : { errorCode: `task_${childStatus}`, event: "task.failed" }),
       });
       const result = row?.result || latest?.result || JSON.stringify(latest);
       return [

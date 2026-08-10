@@ -38,4 +38,18 @@ describe("task trace contract", () => {
     expect(lines.join("\n")).toContain("task_id=task_wire");
     expect(lines.join("\n")).not.toContain("missing_task_id");
   });
+
+  it("uses stable event names for send and observed lifecycle phases", () => {
+    const base = {
+      from_alias: "sender", to_alias: "worker", task_id: "task_1", parent_task_id: null,
+      network_id: null, transport: "mcp_http" as const, duration_ms: 1,
+      lifecycle_tracking: "tracked" as const,
+    };
+    expect(taskTraceEvent({ ...base, status: "sending" }).event).toBe("task.send.start");
+    expect(taskTraceEvent({ ...base, status: "delivered" }).event).toBe("task.send.delivered");
+    expect(taskTraceEvent({ ...base, status: "acked" }).event).toBe("task.ack");
+    expect(taskTraceEvent({ ...base, status: "started" }).event).toBe("task.started");
+    expect(taskTraceEvent({ ...base, status: "replied" }).event).toBe("task.replied");
+    expect(taskTraceEvent({ ...base, status: "expired" }).event).toBe("task.expired");
+  });
 });

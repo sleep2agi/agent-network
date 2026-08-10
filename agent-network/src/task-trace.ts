@@ -34,5 +34,14 @@ export function renderTaskTrace(event: TaskTraceEvent, json = process.env.ANET_T
 }
 
 export function taskTraceEvent(input: Omit<TaskTraceEvent, "event">): TaskTraceEvent {
-  return { event: `task.send.${input.status}`, ...input };
+  const names: Record<TaskTraceStatus, string> = {
+    sending: "task.send.start",
+    delivered: "task.send.delivered",
+    failed: "task.send.failed",
+    acked: "task.ack",
+    started: "task.started",
+    replied: "task.replied",
+    expired: "task.expired",
+  };
+  return { event: names[input.status], ...input };
 }
