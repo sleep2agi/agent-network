@@ -1,0 +1,47 @@
+# test687 — B4 owner-gated external schedule write contract (red phase)
+
+Date: 2026-08-10
+Base: 953ca37fb5d0dc205ad16fedd6f2039616b2c17b (#185 merged main)
+Source commit: 0026644078bc6cc1a09fdd72542f275487d7cff5
+Docker image: anet-test687:dev
+Docker image ID: sha256:c6c710111e2334b8776a9caf43cf73a1b11204b6f95b941902492e9bf2b73ddd
+Embedded TEST687_SOURCE_COMMIT: 0026644078bc6cc1a09fdd72542f275487d7cff5
+
+Scope: contract and security gates only. No production implementation, merge,
+publish, or deployment is included.
+
+Command:
+
+```sh
+sg docker -c 'docker build \
+  --build-arg TEST687_SOURCE_COMMIT=0026644078bc6cc1a09fdd72542f275487d7cff5 \
+  -t anet-test687:dev \
+  -f tests/test687-owner-gated-schedule-write-red/Dockerfile .'
+sg docker -c 'docker run --rm \
+  -v /tmp/test687-main2-artifacts:/artifacts anet-test687:dev'
+```
+
+Observed result:
+
+```text
+L0 current read-only manifest baseline
+L1-L3 required contract is absent before implementation
+WITNESSED_RED gate=owner-anchor rc=1 reason=RED owner_user_id is absent from nodes
+WITNESSED_RED gate=intent-journal rc=1 reason=RED external_schedule_edits journal is absent
+WITNESSED_RED gate=editable-revision rc=1 reason=unknown schedule key
+L4 existing reader already rejects command injection
+RESULT: WITNESSED RED (implementation intentionally absent)
+```
+
+Interpretation:
+
+- The merged #185 read-only inventory is a working base.
+- The authoritative owner anchor, durable single-use intent journal, and
+  editable/revision wire contract do not yet exist; all three gates genuinely
+  fail on the exact source commit.
+- The existing strict reader already refuses a `command` key. B4 must preserve
+  this safety property while adding timing/enable edits.
+- These are red-phase gates, not evidence that the feature works. Green evidence
+  must later exercise real Hub + SQLite and a controlled fake-crontab adapter;
+  mocks cannot replace the true-Hub layer.
+
