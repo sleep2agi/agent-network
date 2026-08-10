@@ -56,3 +56,17 @@ This is #167 layer A only. A lifecycle watcher for proxy-originated tasks,
 Dashboard lifecycle presentation beyond its existing task-id association, and
 artifact structured events remain layer B. No artifact or Dashboard code was
 changed, and layer A does not claim those surfaces are complete.
+
+The layer-A denominator is exactly these three delegation entry classes, not
+every call site whose wire operation happens to be named `send_task`. Two known
+production call sites remain outside this layer:
+
+1. RFC-030 peer reply routing in `agent-node/src/cli.ts`, which deliberately
+   creates a new routable task to wake another agent;
+2. the public `AgentClient.send()` method in `agent-network/src/client.ts`.
+
+They are recorded as known-uncovered rather than being silently counted as
+observed. In addition, the explicit-delegation polling code emits observed
+ack/start/reply/expiry and stale warnings, but test679 drives only its real-Hub
+send start/delivered boundary. A runtime test that drives the polling loop and
+makes deletion of each later lifecycle event turn red belongs to layer B.
