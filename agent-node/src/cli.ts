@@ -34,6 +34,11 @@ import { formatSelfLoopsBlock } from "./goals/format";
 import { startTelegramWatchdog } from "./telegram-watchdog";
 import { sseAbandonGuidance } from "./sse-recovery-guidance";
 import {
+  appendReadableAttachmentPaths,
+  attachmentDescriptorsForRuntime,
+  runtimeNeedsReadableAttachmentPrompt,
+} from "./runtime/readable-attachment-prompt";
+import {
   createTaskRuntimeEvidenceReporter,
   logicalTaskIdFromInbox,
   type TaskRuntimeEvidenceReporter,
@@ -4333,18 +4338,26 @@ async function extractImagePaths(msg: any): Promise<string[]> {
   // per-cwd, so a node started from a different cwd still hits the
   // same cache). chmod 700 + chmod 600 enforced in fetch-attachment.ts.
   const cacheDir = join(home, ".anet", "cache", "attachments", ALIAS || "default");
+  const resolvableAttachments = attachmentDescriptorsForRuntime(RUNTIME, imageAttachments);
+  if (resolvableAttachments.length !== imageAttachments.length) {
+    warn(`[attachment] refused ${imageAttachments.length - resolvableAttachments.length} sender-local path attachment(s) for ${RUNTIME}; preserving text-only references`);
+  }
   const resolved: string[] = [];
-  for (const a of imageAttachments) {
-    const r = await resolveAttachmentToLocalPath(a, {
-      hubUrl: COMMHUB_URL,
-      authToken: AUTH_TOKEN,
-      cacheDir,
-    });
-    if (r.ok) {
-      log(`[attachment] resolved file_id=${a.file_id || "(none)"} → ${r.localPath} (${r.cached ? "cache hit" : "fetched"} ${r.bytes}B)`);
-      resolved.push(r.localPath);
-    } else {
-      warn(`[attachment] resolve failed (code=${r.code}): ${r.error} — dropping image (file_id=${a.file_id || "?"} path=${a.path || "?"})`);
+  for (const a of resolvableAttachments) {
+    try {
+      const r = await resolveAttachmentToLocalPath(a, {
+        hubUrl: COMMHUB_URL,
+        authToken: AUTH_TOKEN,
+        cacheDir,
+      });
+      if (r.ok) {
+        log(`[attachment] resolved file_id=${a.file_id || "(none)"} → ${r.localPath} (${r.cached ? "cache hit" : "fetched"} ${r.bytes}B)`);
+        resolved.push(r.localPath);
+      } else {
+        warn(`[attachment] resolve failed (code=${r.code}): ${r.error} — preserving text-only task (file_id=${a.file_id || "?"} path=${a.path || "?"})`);
+      }
+    } catch (error) {
+      warn(`[attachment] unexpected resolver failure: ${error instanceof Error ? error.message : String(error)} — preserving text-only task`);
     }
   }
   return resolved;
@@ -4705,8 +4718,11 @@ async function processInbox() {
       }
 
       // (3b) Run the LLM turn.
+      const runtimeContent = runtimeNeedsReadableAttachmentPrompt(RUNTIME)
+        ? appendReadableAttachmentPaths(content, images)
+        : content;
       const taskOutcome = await processTask(
-        content,
+        runtimeContent,
         from,
         logicalTaskId,
         images,

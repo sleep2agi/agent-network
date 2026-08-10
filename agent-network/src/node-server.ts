@@ -19,6 +19,11 @@ import { hostname } from "os";
 import { execSync } from "child_process";
 import { encodeCwd } from "./project-key";
 import { loadOwnerOnlyEnvFile } from "./owner-env-file";
+import {
+  appendChannelAttachmentPaths,
+  channelAttachmentCacheDir,
+  downloadChannelImageAttachments,
+} from "./channel-attachments";
 
 // ── .env loader helper ────────────────────────────────
 function loadEnvFile(path: string): void {
@@ -514,6 +519,22 @@ async function handleSSEEvent(event: any) {
 
     if (inbox?.ok && inbox.messages?.length > 0) {
       for (const msg of inbox.messages) {
+        let channelContent = String(msg.content || "");
+        try {
+          const attachments = await downloadChannelImageAttachments(msg, {
+            hubUrl: COMMHUB_URL,
+            authToken: AUTH_TOKEN,
+            cacheDir: channelAttachmentCacheDir(HOME, ALIAS),
+          });
+          channelContent = appendChannelAttachmentPaths(channelContent, attachments.paths);
+          for (const failure of attachments.failures) {
+            log(`attachment ${failure.fileId || "(legacy)"} not surfaced (${failure.code}): ${failure.message}`);
+          }
+        } catch (error) {
+          // Attachments are additive. Never drop or fail the text task when a
+          // cache/fetch implementation hits an unexpected host error.
+          log(`attachment resolver failed unexpectedly; preserving text-only task: ${error instanceof Error ? error.message : String(error)}`);
+        }
         const meta: Record<string, string> = {
           sender: msg.from_session || "hub",
           sender_id: "commhub",
@@ -527,7 +548,7 @@ async function handleSSEEvent(event: any) {
         await mcp.notification({
           method: "notifications/claude/channel",
           params: {
-            content: msg.content,
+            content: channelContent,
             meta,
           },
         });

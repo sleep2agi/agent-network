@@ -1,0 +1,56 @@
+# Test 520 — Dashboard/CommHub image attachments for Read-capable runtimes
+
+Date: 2026-08-10
+Source commit: ca00f2766176e19042ea4f2017f0cde35576bf1e
+Original stacked base: 00db74b1e01491d0df5d6d1326571269c9d73c88 (`feat/520-runtime-consumption`, PR #674)
+Retarget-main provenance merge: c18abb50a04db0d5e9274fa1fb9ac750c4570242 (tree byte-identical before/after)
+Docker tag: `anet-test520-attachments:dev`
+Docker image ID: `sha256:ffd7a2a7ea4192bf258376e546e4f2ca40baa04e02e64d8d4c6c907bd60a1fc9`
+Embedded source: `TEST520_ATTACHMENT_SOURCE_COMMIT=ca00f2766176e19042ea4f2017f0cde35576bf1e`
+Runner artifact SHA256: `78250846804bb6b5c8edf55cd1eb60a04815f65f46eb6781a65b2feb651b91d0`
+
+## Result
+
+PASS.
+
+- `agent-network` TypeScript typecheck: PASS.
+- Production `agent-network/src/node-server.ts` bundle: PASS.
+- Production `agent-node/src/cli.ts` bundle: PASS.
+- Attachment helper: 5 tests / 23 assertions, PASS.
+- Runtime resolver, prompt, and existing #520 wiring: 34 tests / 124 assertions, PASS.
+- Real production Claude-channel bundle against a controllable Hub `/mcp`, `/events`, and authenticated `/api/files` fixture: 14 assertions, PASS.
+- Mutations: 6/6 witnessed red.
+
+## Proved behavior
+
+1. The actual `claude-code-cli` ingress is `agent-network/src/node-server.ts`, not `agent-node/src/cli.ts`. A Dashboard image with a Hub `file_id` is fetched with the node bearer token, cached at mode `0600`, and its absolute local path is appended to the real `notifications/claude/channel` payload.
+2. A file `404` is fail-safe: the original task text is delivered byte-identically and ACK still occurs. No fake local path is added.
+3. Sender-controlled `attachment.path` is never surfaced to a Read-capable model. Only an authenticated Hub `file_id` may become a local path.
+4. The path-prompt runtime set is exact: `codex-app-server` and `opencode`. Claude Agent SDK and Codex SDK/direct-stdio retain their pre-existing structured-image lanes. Grok's default reviewed profile denies filesystem tools, so it is not falsely advertised as Read-capable.
+5. Attachment paths are JSON-quoted, deduplicated, and explicitly labelled as untrusted input rather than system instructions.
+6. The bearer token appears neither in the model-facing channel payload nor stderr.
+7. For path-prompt runtimes, legacy attachments containing only a sender-controlled local `path` are retained as text but never surfaced as a Read path.
+8. Cache directories are derived from a hash of the exact alias; distinct and path-shaped aliases remain inside distinct owner cache roots.
+9. The shared legacy resolver is also hardened at its root: a path-only attachment must resolve to a regular non-symlink file beneath the node cache, `/work/feishu-attachments`, or the locally configured `ANET_FEISHU_MEDIA_DIR`. Existing files outside those roots and symlink escapes are rejected. This preserves the real Feishu/local-cache compatibility lane while closing the pre-existing structured-image host-file disclosure.
+
+## Load-bearing mutations
+
+- Removing the production Claude-channel `channelContent` injection makes the real wire harness red.
+- Bypassing `runtimeContent` in `agent-node` makes the inbox choke-point contract red.
+- Adding a structured/denied runtime to the path-prompt exact set makes the isolation test red.
+- Trusting a sender-provided local path makes the hostile-path test red.
+- Bypassing the path-prompt runtime's `file_id` requirement makes its hostile-existing-path test red.
+- Replacing the shared resolver's trusted-root check with a raw existence check makes the outside-root disclosure test red.
+
+Every mutation helper requires one exact anchor and a byte-different source before executing the test.
+
+## Scope and exclusions
+
+- No Hub, Dashboard, schema, token, or production deployment change.
+- No generic `download_attachment` MCP tool in this candidate. The immediate user-visible path is implemented at the two real inbound choke points without widening the model tool surface.
+- The branch began stacked on PR #674 because both changes touched `agent-node/src/cli.ts`. After #674 merged, an `ours` provenance merge made `origin/main` an ancestor without changing the candidate tree, and PR #675 was retargeted to `main`.
+- The final image was rebuilt with the repository's canonical Dockerfile at the final source SHA after disk space recovered; no incremental-image result is used as the final PASS evidence.
+
+## Additional witnessed finding
+
+The first real bundled-channel run exposed mojibake in newly introduced non-ASCII prompt literals while runtime-delivered Dashboard text remained intact. The prompt block was changed to ASCII English, rebuilt at the final exact source SHA, and the real wire assertion then passed. The final result above is from that rebuilt image, not the earlier failing image.

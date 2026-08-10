@@ -23,7 +23,7 @@ import {
   DEFAULT_MAX_BYTES,
   CACHE_TTL_MS,
 } from "./fetch-attachment";
-import { mkdirSync, writeFileSync, existsSync, statSync, rmSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, statSync, rmSync, readFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 
 const TEST_ROOT = "/tmp/fetch-attachment-test";
@@ -201,8 +201,8 @@ describe("resolveAttachmentToLocalPath — size cap (🔴 通信龙 nit: BYTE un
   });
 });
 
-describe("resolveAttachmentToLocalPath — local path fallback (single-host / feishu compat)", () => {
-  test("no file_id + path exists → returns the path as-is, no HTTP call", async () => {
+describe("resolveAttachmentToLocalPath — trusted local path fallback (single-host / feishu compat)", () => {
+  test("no file_id + path inside cache root → returns canonical path, no HTTP call", async () => {
     const cacheDir = freshCacheDir();
     const localFile = join(cacheDir, "single-host.png");
     writeFileSync(localFile, Buffer.from([1, 2, 3, 4, 5]));
@@ -217,6 +217,53 @@ describe("resolveAttachmentToLocalPath — local path fallback (single-host / fe
     expect(r.cached).toBe(true);
     expect(r.bytes).toBe(5);
     expect(called).toBe(false);
+  });
+
+  test("configured Feishu root remains a compatible trusted drop-zone", async () => {
+    const cacheDir = freshCacheDir();
+    const feishuRoot = join(TEST_ROOT, "configured-feishu");
+    mkdirSync(feishuRoot, { recursive: true });
+    const localFile = join(feishuRoot, "inbound.png");
+    writeFileSync(localFile, Buffer.from([6, 7, 8]));
+    const r = await resolveAttachmentToLocalPath(
+      { path: localFile, mime: "image/png" },
+      { hubUrl: "http://hub.test:9200", authToken: "ntok_x", cacheDir, trustedLocalRoots: [cacheDir, feishuRoot] },
+    );
+    if (!r.ok) throw new Error(`expected ok, got: ${r.error}`);
+    expect(r.localPath).toBe(localFile);
+    expect(r.bytes).toBe(3);
+  });
+
+  test("existing file outside trusted roots is rejected", async () => {
+    const cacheDir = freshCacheDir();
+    const outsideDir = join(TEST_ROOT, "outside");
+    mkdirSync(outsideDir, { recursive: true });
+    const outside = join(outsideDir, "host-secret.txt");
+    writeFileSync(outside, "host secret");
+    const r = await resolveAttachmentToLocalPath(
+      { path: outside, mime: "image/png" },
+      { hubUrl: "http://hub.test:9200", authToken: "ntok_x", cacheDir, trustedLocalRoots: [cacheDir] },
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.code).toBe("untrusted_local_path");
+  });
+
+  test("symlink inside a trusted root cannot escape to another host file", async () => {
+    const cacheDir = freshCacheDir();
+    const outsideDir = join(TEST_ROOT, "outside-symlink");
+    mkdirSync(outsideDir, { recursive: true });
+    const outside = join(outsideDir, "host-secret.txt");
+    writeFileSync(outside, "host secret");
+    const link = join(cacheDir, "looks-like-image.png");
+    symlinkSync(outside, link);
+    const r = await resolveAttachmentToLocalPath(
+      { path: link, mime: "image/png" },
+      { hubUrl: "http://hub.test:9200", authToken: "ntok_x", cacheDir, trustedLocalRoots: [cacheDir] },
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.code).toBe("untrusted_local_path");
   });
 
   test("no file_id + path does NOT exist → not_found error", async () => {
