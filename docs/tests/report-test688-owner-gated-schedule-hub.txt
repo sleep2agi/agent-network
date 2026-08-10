@@ -1,0 +1,75 @@
+# test688 — RFC-036 owner-gated external schedule Hub
+
+Date: 2026-08-10
+Base: 953ca37fb5d0dc205ad16fedd6f2039616b2c17b
+Source commit under test: bf72f0e5201d9957dbb2255a391676a5e225c27c
+Docker tag: anet-test688:dev
+Docker image id: sha256:04ed23fd1d7d2413e7a915ad0849d2c77b8c7752387625c0f97e944abc3c448d
+Embedded ENV: TEST688_SOURCE_COMMIT=bf72f0e5201d9957dbb2255a391676a5e225c27c
+Runner artifact: /tmp/test688-final-n2jxBq/report-test688-owner-gated-schedule-hub.txt
+Runner artifact SHA256: ab989113c810ff1e24c6b876a947e0cab2ca11c7bdea2fb2237238dca9ae566e
+
+## Result
+
+PASS. The exact source commit was copied into a fresh Docker image and run
+against real Bun HTTP serving plus a real SQLite database. No production Hub,
+Dashboard, agent-node, token, config, or database was touched.
+
+- RFC-036 HTTP contract: 10 tests, 77 assertions, 0 failures.
+- Restored-green replay: 10 tests, 77 assertions, 0 failures.
+- Existing SEC1 compatibility: 47 tests, 87 assertions, 0 failures.
+- Existing REST projection compatibility: 5 tests, 30 assertions, 0 failures.
+- Existing Hub scheduler compatibility: 12 tests, 106 assertions, 0 failures.
+- Existing file/network isolation compatibility: 49 tests, 147 assertions, 0 failures.
+- Total normal-path executions: 133 tests, 524 assertions, 0 failures.
+- Witnessed-red mutations: 12/12 returned non-zero, followed by restored green.
+
+## Security properties exercised
+
+1. `owner_user_id` is stamped in the same SQLite transaction that mints the
+   first node-bound ntok; the owner claim is audited before plaintext return.
+2. Existing legacy `owner_user_id=NULL` nodes remain read-only and cannot be
+   claimed by refreshing a token or by `report_status`.
+3. A network owner/admin/member who is not the exact node owner receives 403;
+   there is no admin bypass. Node tokens cannot call the owner write endpoint.
+4. The write body accepts only `enabled` and a strict five-field cron timing.
+   Command, path, env, `@reboot`, sixth fields, CR/LF, invalid ranges, empty
+   patches, and unknown authority fields are rejected before persistence.
+5. Two concurrent owner requests leave exactly one pending intent through a
+   partial UNIQUE index, and stale snapshot revisions create no intent.
+6. Pull requires the exact `bound_node_id`, network and immutable owner tuple.
+   A repeated pull by the same token recovers the same delivered intent.
+7. ACK requires the expected result revision. Only a semantically identical
+   terminal retry is idempotent; a contradictory replay returns 409.
+8. Pending and delivered intents expire with the same bounded TTL so a dead or
+   rotated consumer cannot wedge single-flight forever.
+9. Public history omits user ids, token ids, network ids, command/path/env and
+   storage-only patch fields. Audit details contain ids, revisions, bounded
+   error codes and changed field names only.
+
+## Witnessed-red matrix
+
+Each mutation first verified its source anchor and then ran the unchanged real
+HTTP test. Every mutation failed:
+
+- exact owner equality removed;
+- legacy NULL-owner read-only gate removed;
+- owner-claim audit action removed;
+- structured patch allowlist weakened;
+- bound-node token tuple reduced to token existence;
+- both preflight and in-transaction revision checks removed;
+- SQLite single-flight UNIQUE changed to a non-unique index;
+- lifecycle audit writer disabled;
+- delivered-intent TTL expiration reduced to pending-only;
+- contradictory terminal ACK accepted as idempotent;
+- report-status owner verification removed;
+- `/api/auth/node-token` stopped forwarding `node_id` to atomic mint.
+
+## Honest boundary
+
+This is the Hub/backend segment only. It accepts and delivers a bounded edit
+intent but does not claim that agent-node has applied host state. Agent-node's
+process-level owner-control consumer, managed-cron journal/rollback and the
+Dashboard editor remain separate follow-on segments and are not represented as
+implemented by this report. Natural-language IM/Feishu/CommHub messages receive
+no schedule-write tool or executable path in this segment.
