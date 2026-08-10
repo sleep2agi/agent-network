@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-exec bun /app/agent-node/src/cli.ts "$@"
+exec /root/.bun/bin/bun /app/agent-node/src/cli.ts "$@"
