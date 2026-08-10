@@ -29,6 +29,7 @@
 // inside processWithClaude for the same reason — keep that pattern.)
 import type { McpSdkServerConfigWithInstance, SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
+import { renderTaskTrace, safeTaskTraceError, taskTraceEvent } from "./task-trace";
 
 interface CallToolContent { type: "text"; text: string }
 
@@ -50,10 +51,43 @@ const COMMHUB_CALL_TIMEOUT_MS = 30_000;
 // invocation. Stateless: each call gets a fresh MCP session (commhub-server
 // has no per-session sticky state for tool calls). Slight overhead (2 HTTP
 // roundtrips per LLM call) but predictable and isolated.
-async function forwardToCommhub(
+export async function forwardToCommhub(
   hubUrl: string, token: string | undefined,
   toolName: string, args: unknown,
   ): Promise<{ content: CallToolContent[]; isError?: boolean }> {
+  const traceArgs = args && typeof args === "object" && !Array.isArray(args)
+    ? args as Record<string, unknown>
+    : {};
+  const traceStartedAt = Date.now();
+  const isTaskSend = toolName === "send_task";
+  const emitTrace = (status: "sending" | "delivered" | "failed", taskId: string | null, error?: unknown) => {
+    if (!isTaskSend) return;
+    process.stderr.write(`${renderTaskTrace(taskTraceEvent({
+      from_alias: String(traceArgs.from_session || "<unknown>"),
+      to_alias: String(traceArgs.alias || "<unknown>"),
+      task_id: taskId,
+      parent_task_id: typeof traceArgs.parent_task_id === "string" ? traceArgs.parent_task_id : null,
+      network_id: typeof traceArgs.network_id === "string" ? traceArgs.network_id : null,
+      transport: "sdk_mcp_proxy",
+      status,
+      duration_ms: Date.now() - traceStartedAt,
+      lifecycle_tracking: "not_tracked",
+      ...(error ? { error_code: "proxy_error", error_message: safeTaskTraceError(error) } : {}),
+    }))}\n`);
+  };
+  const finish = (result: { content: CallToolContent[]; isError?: boolean }) => {
+    if (isTaskSend) {
+      const text = result.content?.[0]?.text || "";
+      let taskId: string | null = null;
+      try {
+        const parsed = JSON.parse(text);
+        taskId = parsed?.task_id || parsed?.message_id || parsed?.id || null;
+      } catch {}
+      emitTrace(result.isError ? "failed" : "delivered", taskId, result.isError ? text : undefined);
+    }
+    return result;
+  };
+  emitTrace("sending", null);
   try {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -78,7 +112,7 @@ async function forwardToCommhub(
     });
     if (!initRes.ok) {
       const t = await initRes.text().catch(() => "");
-      return { isError: true, content: [{ type: "text", text: `commhub MCP initialize failed: HTTP ${initRes.status} ${t.slice(0, 200)}` }] };
+      return finish({ isError: true, content: [{ type: "text", text: `commhub MCP initialize failed: HTTP ${initRes.status} ${t.slice(0, 200)}` }] });
     }
     const sessionId = initRes.headers.get("mcp-session-id") || initRes.headers.get("Mcp-Session-Id");
     const callHeaders = { ...headers, ...(sessionId ? { "mcp-session-id": sessionId } : {}) };
@@ -105,25 +139,25 @@ async function forwardToCommhub(
       }
     }
     if (!envelope) {
-      return { isError: true, content: [{ type: "text", text: `commhub MCP tools/call: empty response (HTTP ${callRes.status})` }] };
+      return finish({ isError: true, content: [{ type: "text", text: `commhub MCP tools/call: empty response (HTTP ${callRes.status})` }] });
     }
     if (envelope.error) {
-      return { isError: true, content: [{ type: "text", text: `commhub MCP error: ${JSON.stringify(envelope.error).slice(0, 400)}` }] };
+      return finish({ isError: true, content: [{ type: "text", text: `commhub MCP error: ${JSON.stringify(envelope.error).slice(0, 400)}` }] });
     }
     const result = envelope.result;
     if (result && Array.isArray(result.content)) {
       // Pass commhub's content blocks through verbatim (preserves the
       // existing JSON-stringified payloads from commhub tools).
-      return { content: result.content as CallToolContent[], isError: result.isError === true };
+      return finish({ content: result.content as CallToolContent[], isError: result.isError === true });
     }
-    return { content: [{ type: "text", text: JSON.stringify(result ?? envelope) }] };
+    return finish({ content: [{ type: "text", text: JSON.stringify(result ?? envelope) }] });
   } catch (e: any) {
     // AbortError surfaces with name "TimeoutError" from AbortSignal.timeout
     // (or "AbortError" in some runtimes); name the timeout case so the LLM
     // can reason about retrying versus surfacing to the operator.
     const isTimeout = e?.name === "TimeoutError" || e?.name === "AbortError";
     const label = isTimeout ? "commhub MCP timeout" : "commhub MCP transport error";
-    return { isError: true, content: [{ type: "text", text: `${label}: ${e?.message || String(e)}` }] };
+    return finish({ isError: true, content: [{ type: "text", text: `${label}: ${e?.message || String(e)}` }] });
   }
 }
 

@@ -24,6 +24,7 @@ import {
   channelAttachmentCacheDir,
   downloadChannelAttachments,
 } from "./channel-attachments";
+import { sendChannelTaskWithTrace } from "./channel-task-trace";
 
 // ── .env loader helper ────────────────────────────────
 function loadEnvFile(path: string): void {
@@ -351,13 +352,17 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req: any) => {
 
   if (name === "commhub_send_task") {
     const { alias, task, priority } = args as any;
-    const result = await callCommHub("send_task", {
-      alias,
-      task,
-      priority: priority || "normal",
-      from_session: ALIAS,
+    const result = await sendChannelTaskWithTrace({
+      alias: String(alias || ""), task: String(task || ""), priority,
+      fromAlias: ALIAS,
+      networkId: process.env.ANET_NETWORK_ID || ANET_CONFIG.network_id || null,
+    }, {
+      send: (sendArgs) => callCommHub("send_task", sendArgs),
+      log: (line) => process.env.ANET_TASK_TRACE_FORMAT === "json"
+        ? process.stderr.write(`${line}\n`)
+        : log(line),
     });
-    return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    return { content: [{ type: "text", text: JSON.stringify(result) }], ...(result?.ok === false || result?.error ? { isError: true } : {}) };
   }
 
   if (name === "commhub_send_message") {
