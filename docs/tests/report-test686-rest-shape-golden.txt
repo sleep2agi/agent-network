@@ -1,0 +1,73 @@
+================================================================
+test686 — independent REST response-key golden (#31 / #311 follow-up)
+================================================================
+
+Date: 2026-08-10
+Base: 936a41107d2e314fb932b4a40541959a0a7055c4 (origin/main)
+Source commit: 9043c4b0694adb1b9e5c4282045053c074e6f611
+Branch: test/31-rest-shape-golden
+Production source delta: none
+
+Docker image:
+  tag: anet-test686:dev
+  image id: sha256:ff7693a3fea7f8b9f9f12f6d3a2946e0bad5e3888f1475e7a8cd1c0520aee357
+  embedded TEST686_SOURCE_COMMIT:
+    9043c4b0694adb1b9e5c4282045053c074e6f611
+
+Result:
+  green: 5 pass / 0 fail / 29 assertions
+  mutation: drop-task-created-at rc=1 witnessed-red
+  restored: 5 pass / 0 fail / 29 assertions
+  RESULT: PASS
+
+Problem closed by this test
+---------------------------
+
+The #311 explicit-projection test previously derived its expected response
+keys from the same production projection constants used by the SQL query.
+That proved the constants were internally self-consistent and blocked future
+SELECT-star widening, but it could not detect a public key accidentally being
+deleted from a projection: the key disappeared from both response and
+expectation, leaving the suite green.
+
+Change
+------
+
+The real-Hub HTTP test now owns an independent, static golden for these public
+row contracts:
+
+- network list and detail;
+- status session rows;
+- task list and detail;
+- audit logs;
+- task events;
+- completions;
+- scheduled tasks.
+
+The expected keys are no longer imported from `rest-projections.ts`. Future
+intentional API changes must update the wire golden explicitly; accidental
+projection shrinkage turns red.
+
+Witnessed-red
+-------------
+
+The mutator removes the historically public `created_at` field from
+`TASK_REST_COLUMNS`, while leaving the independent test golden untouched.
+The real HTTP task list/detail test fails with rc=1 and names `created_at` in
+the diff. Restoring the production projection returns the same suite to green.
+
+The mutation requires exactly one source anchor and verifies a byte change,
+so a no-op sed/anchor miss cannot count as evidence.
+
+Scope limits
+------------
+
+- Test and report only; no production runtime, API, schema, or deployment
+  behavior changes.
+- This complements rather than replaces test647's future-column sentinel:
+  test647 blocks accidental widening, while this golden blocks accidental
+  narrowing.
+- No credentials, private hosts, or user data appear in fixtures or report.
+
+Verdict: PASS. Candidate remains unmerged and undeployed pending review.
+================================================================
