@@ -362,7 +362,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req: any) => {
         ? process.stderr.write(`${line}\n`)
         : log(line),
     });
-    return { content: [{ type: "text", text: JSON.stringify(result) }], ...(result?.ok === false || result?.error ? { isError: true } : {}) };
+    return { content: [{ type: "text", text: JSON.stringify(result) }] };
   }
 
   if (name === "commhub_send_message") {
