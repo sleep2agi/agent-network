@@ -24,10 +24,11 @@
 
 ## Quick start
 
-Requires Node.js ≥ 22.13.
+Requires Node.js ≥ 22.13.0. `anet -v` does not need Bun; starting the Hub (`anet hub start`) requires Bun ≥ 1.2.0.
 
 ```bash
-npm install -g bun @sleep2agi/agent-network @sleep2agi/agent-node
+npm install -g @sleep2agi/agent-network@latest
+anet -v
 
 # Terminal 1
 anet hub start
