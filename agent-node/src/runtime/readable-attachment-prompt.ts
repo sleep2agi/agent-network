@@ -16,6 +16,21 @@ export function runtimeNeedsReadableAttachmentPrompt(runtime: string): boolean {
   return PATH_PROMPT_RUNTIME_SET.has(runtime);
 }
 
+/**
+ * A sender-provided legacy `path` is not a trust root for a Read-capable
+ * runtime. Structured-image lanes retain their historical resolver behavior,
+ * while path-prompt lanes surface only attachments that the Hub can authorize
+ * by file_id.
+ */
+export function attachmentDescriptorsForRuntime<T extends { file_id?: unknown }>(
+  runtime: string,
+  attachments: readonly T[],
+): T[] {
+  if (!runtimeNeedsReadableAttachmentPrompt(runtime)) return [...attachments];
+  return attachments.filter((attachment) =>
+    typeof attachment.file_id === "string" && attachment.file_id.length > 0);
+}
+
 /** Add owner-local paths as data, never as instructions supplied by sender. */
 export function appendReadableAttachmentPaths(
   task: string,

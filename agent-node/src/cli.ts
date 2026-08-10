@@ -35,6 +35,7 @@ import { startTelegramWatchdog } from "./telegram-watchdog";
 import { sseAbandonGuidance } from "./sse-recovery-guidance";
 import {
   appendReadableAttachmentPaths,
+  attachmentDescriptorsForRuntime,
   runtimeNeedsReadableAttachmentPrompt,
 } from "./runtime/readable-attachment-prompt";
 import {
@@ -4337,8 +4338,12 @@ async function extractImagePaths(msg: any): Promise<string[]> {
   // per-cwd, so a node started from a different cwd still hits the
   // same cache). chmod 700 + chmod 600 enforced in fetch-attachment.ts.
   const cacheDir = join(home, ".anet", "cache", "attachments", ALIAS || "default");
+  const resolvableAttachments = attachmentDescriptorsForRuntime(RUNTIME, imageAttachments);
+  if (resolvableAttachments.length !== imageAttachments.length) {
+    warn(`[attachment] refused ${imageAttachments.length - resolvableAttachments.length} sender-local path attachment(s) for ${RUNTIME}; preserving text-only references`);
+  }
   const resolved: string[] = [];
-  for (const a of imageAttachments) {
+  for (const a of resolvableAttachments) {
     try {
       const r = await resolveAttachmentToLocalPath(a, {
         hubUrl: COMMHUB_URL,

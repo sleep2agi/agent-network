@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   appendReadableAttachmentPaths,
+  attachmentDescriptorsForRuntime,
   runtimeNeedsReadableAttachmentPrompt,
 } from "./readable-attachment-prompt";
 
@@ -36,9 +37,21 @@ describe("readable attachment prompt", () => {
     expect(appendReadableAttachmentPaths("original", [])).toBe("original");
   });
 
+  test("path-prompt runtimes reject sender-local paths while structured lanes retain legacy behavior", () => {
+    const attachments = [
+      { file_id: "file_authorized_520", path: "/tmp/hub-machine.png" },
+      { path: "/etc/passwd" },
+    ];
+    expect(attachmentDescriptorsForRuntime("opencode", attachments)).toEqual([attachments[0]]);
+    expect(attachmentDescriptorsForRuntime("codex-app-server", attachments)).toEqual([attachments[0]]);
+    expect(attachmentDescriptorsForRuntime("claude", attachments)).toEqual(attachments);
+    expect(attachmentDescriptorsForRuntime("codex", attachments)).toEqual(attachments);
+  });
+
   test("the inbox choke point feeds the augmented text into processTask", () => {
     const cli = readFileSync(join(import.meta.dir, "..", "cli.ts"), "utf8");
     expect(cli).toContain("const runtimeContent = runtimeNeedsReadableAttachmentPrompt(RUNTIME)");
+    expect(cli).toContain("attachmentDescriptorsForRuntime(RUNTIME, imageAttachments)");
     expect(cli).toContain("appendReadableAttachmentPaths(content, images)");
     expect(cli).toContain("processTask(\n        runtimeContent,");
   });

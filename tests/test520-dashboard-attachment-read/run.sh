@@ -76,9 +76,16 @@ expect_mutation_red \
   'return { ok: true, path: String(attachment.path || "") };' \
   'cd /workspace/agent-network && bun test src/channel-attachments.test.ts'
 
-if [[ $MUTATIONS -ne 4 ]]; then
-  echo "mutation denominator mismatch: $MUTATIONS/4" >&2
+expect_mutation_red \
+  readable-runtime-host-path-rejection \
+  agent-node/src/runtime/readable-attachment-prompt.ts \
+  '  if (!runtimeNeedsReadableAttachmentPrompt(runtime)) return [...attachments];' \
+  '  if (runtimeNeedsReadableAttachmentPrompt(runtime)) return [...attachments];' \
+  'cd /workspace/agent-node && bun test src/runtime/readable-attachment-prompt.test.ts'
+
+if [[ $MUTATIONS -ne 5 ]]; then
+  echo "mutation denominator mismatch: $MUTATIONS/5" >&2
   exit 1
 fi
-echo "mutation_red=$MUTATIONS/4"
+echo "mutation_red=$MUTATIONS/5"
 echo "RESULT: PASS"

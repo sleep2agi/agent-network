@@ -14,6 +14,17 @@ afterEach(() => {
 });
 
 describe("Claude channel attachments", () => {
+  test("cache roots are alias-isolated even for path-shaped aliases", () => {
+    const root = "/tmp/channel-cache-root";
+    const first = channelAttachmentCacheDir(root, "owner-a");
+    const second = channelAttachmentCacheDir(root, "owner-b");
+    const hostile = channelAttachmentCacheDir(root, "../../escape");
+    expect(first).not.toBe(second);
+    expect(first.startsWith(`${root}/.anet/cache/attachments/channel/`)).toBe(true);
+    expect(hostile.startsWith(`${root}/.anet/cache/attachments/channel/`)).toBe(true);
+    expect(hostile).not.toContain("../");
+  });
+
   test("downloads an authenticated Dashboard PNG and surfaces an owner-local Read path", async () => {
     const root = mkdtempSync(join(tmpdir(), "channel-attachment-"));
     roots.push(root);
