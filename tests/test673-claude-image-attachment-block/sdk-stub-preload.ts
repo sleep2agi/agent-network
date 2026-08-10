@@ -17,6 +17,9 @@
 // image content block carrying the downloaded bytes reaches query().
 import { mock } from "bun:test";
 import * as fs from "fs";
+import { createRequire } from "node:module";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const CAPTURE = process.env.TEST673_CAPTURE_FILE || "/tmp/test673-capture.json";
 
@@ -80,8 +83,26 @@ function fakeTool(..._a: any[]) {
   return {} as any;
 }
 
-mock.module("@anthropic-ai/claude-agent-sdk", () => ({
+const sdkFactory = () => ({
   query: fakeQuery,
   createSdkMcpServer: fakeCreateSdkMcpServer,
   tool: fakeTool,
-}));
+});
+
+// Bun keys a module mock by the importer's resolved module identity. The
+// bare-name mock is enough in a source checkout whose package is hoisted, but
+// the Docker install resolves the CLI import to agent-node/node_modules/.../
+// sdk.mjs. Register both the public specifier and the package-root-resolved
+// entrypoint so the exact installed SDK cannot silently bypass the harness.
+// This is test-only; production module resolution is untouched.
+const repo = process.env.REPO || "/app";
+try {
+  const requireFromAgentNode = createRequire(join(repo, "agent-node", "package.json"));
+  const resolvedSdk = requireFromAgentNode.resolve("@anthropic-ai/claude-agent-sdk");
+  mock.module(resolvedSdk, sdkFactory);
+  mock.module(pathToFileURL(resolvedSdk).href, sdkFactory);
+} catch {
+  // The host debug path may use a hoisted dependency; the bare registration
+  // below remains authoritative there.
+}
+mock.module("@anthropic-ai/claude-agent-sdk", sdkFactory);
