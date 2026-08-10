@@ -1,0 +1,61 @@
+# test671 — Hub task runtime evidence
+
+Date: 2026-08-10 (Asia/Shanghai)
+
+## Provenance
+
+- Base: `51bdb84a417c9a2a1fd8f07f871e307e50da80a5`
+- Tested source: `18ec93d866bb531df7bf074a9b56bceb77326d55`
+- Docker tag: `anet-test671:dev` (fixed/reused tag)
+- Docker image ID: `sha256:edb1973cdcfb54214bde2eeba3215ab5a192b092beae2daf0a76163f0809b51b`
+- Embedded image environment: `TEST671_SOURCE_COMMIT=18ec93d866bb531df7bf074a9b56bceb77326d55`
+
+An earlier image used a manually expanded, nonexistent SHA and is invalid evidence. It was discarded and the fixed tag was rebuilt from the exact value returned by `git rev-parse HEAD`; only the image and results above count.
+
+## Scope
+
+This layer covers the Hub half of issue #520 only:
+
+- additive `runtime_submitted_at` and `consumed_at` task fields;
+- node-token-only, exact-task-ID runtime evidence tools;
+- atomic all-or-nothing batch ownership checks;
+- retry/reassignment clearing both attempt-scoped timestamps;
+- REST/tool projections and bilingual lifecycle documentation;
+- SQLite-backed mutation and behavior gates.
+
+Agent runtime wiring is deliberately excluded from this candidate layer while the overlapping image-delivery change is being coordinated. Nothing was merged, deployed, published, or written to production.
+
+## Normal path
+
+Command:
+
+```sh
+sg docker -c 'docker run --rm -v /tmp/test671-artifacts:/artifacts anet-test671:dev'
+```
+
+Result:
+
+- `server/src/task-consumption.test.ts`: 7 tests passed, 49 assertions passed;
+- production Hub bundle built successfully;
+- RFC and Chinese/English field-boundary documentation checks passed;
+- suite summary: `RESULT pass=8 fail=0`.
+
+The behavior tests establish that connection, enqueue, delivery, ACK, and the legacy `sessions.task` preview leave both evidence fields NULL; runtime submission marks only `runtime_submitted_at`; authoritative consumption marks both fields; duplicate reports are idempotent; foreign/missing mixed batches write nothing; user tokens cannot report evidence; and retry/reassignment starts a clean attempt.
+
+## Witnessed-red mutations
+
+Each mutation changed the tested implementation and made the behavior suite fail before the unmodified source returned green.
+
+| Mutation | Artifact SHA256 |
+| --- | --- |
+| Remove node ownership enforcement | `881879053c3edf95a5f8a60f1786855ea2025b4a9c77779f51b731bd84d3f4b3` |
+| Collapse runtime submission into consumption | `a62b23c4da5d8be2c5d519209f9665c4f99adb7b355e4296cf211a4145697ab3` |
+| Stop consumption from implying submission | `60376500122b825fabc9d9050f37c9fc36d32871e0e88f7f3c092a470e7c3f38` |
+| Remove `runtime_submitted_at` attempt reset | `059ed5fdd45635ec47f3856ccee9592726f08510ce71e06e32411bca09074444` |
+| Remove `consumed_at` attempt reset | `035e18297da851b35e84c009e5dc677e7a1841f7841915b1aa7f694852c998e7` |
+
+Artifacts are the corresponding `.log` files under `/tmp/test671-artifacts`.
+
+## Result
+
+PASS for the Hub-only task runtime evidence layer at source `18ec93d866bb531df7bf074a9b56bceb77326d55`. Agent-node reporting remains a separate pending layer and this report does not claim end-to-end runtime consumption is complete.
