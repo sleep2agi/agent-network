@@ -1,0 +1,4 @@
+{"in_substring":"review","out":"broad review response"}
+{"in_substring":"review security","out":"narrow response that must lose to the first rule"}
+{"in_substring":"step-1 introduce yourself","out":"Hi, I am reviewer A."}
+{"in_substring":"step-2 yesterday","out":"Yesterday I reviewed PR 42."}

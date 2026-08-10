@@ -8,10 +8,9 @@
 #   - fetchPrDiff --diff path resolves a local file (good-pr.diff)
 #   - command sanely refuses unknown options / invalid diff source
 #
-# Full L0 (unit prompt assertions) + L1 (CLI input parse) + L2 (Docker E2E
-# with mock LLM) coverage waits on issue #30 (MOCK-LLM-PROTOCOL.md). When
-# that lands, extend this runner to assert against
-# expected/assertions.json structure.
+# Full deterministic fan-out/barrier/Markdown coverage uses the shared mock
+# protocol in tests/test30-mock-llm-smoke. This suite remains the structural
+# and fixture-specific smoke for the pr-review demo.
 
 set -Eeuo pipefail
 
@@ -86,4 +85,4 @@ node -e "JSON.parse(require('fs').readFileSync('$ASSERT_FILE', 'utf-8'))" \
 pass "assertions.json valid"
 
 echo ""
-echo "RESULT: PASS (structural smoke; L2 Docker E2E with mock LLM waits on issue #30)"
+echo "RESULT: PASS (structural smoke; deterministic L2 is test30-mock-llm-smoke)"
