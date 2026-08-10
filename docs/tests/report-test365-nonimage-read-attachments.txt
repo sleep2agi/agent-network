@@ -1,0 +1,86 @@
+# test365 — authenticated non-image attachments for Read-capable runtimes
+
+Date: 2026-08-10
+Base: ccf23458228d8c1a9f43d20b0ab3c95a5c972bee
+Source commit: 1925cf89e09faa2aeaa152328fd63698e53ed176
+Image tag: anet-test365:dev
+Image ID: sha256:9484a17ca4cb7301063b15dfa664b855086c73cfa846d4541338f720ec9ba5ef
+Embedded ENV: TEST365_SOURCE_COMMIT=1925cf89e09faa2aeaa152328fd63698e53ed176
+
+Scope
+-----
+- Preserve the existing structured-image lanes as image-only.
+- For exact Read-path runtimes (`codex-app-server`, `opencode`), surface only
+  allowlisted attachments with a Hub `file_id`; sender-provided host paths are
+  never promoted into the prompt.
+- Extend the Claude channel receiver to download allowlisted non-image Hub
+  attachments to its alias-isolated cache and append their owner-local paths.
+- Keep download failures fail-safe: original task text remains available and
+  the task is still acknowledged.
+
+The readable extension set is pinned exactly to:
+`.bmp .csv .docx .gif .jpeg .jpg .json .md .pdf .png .txt .webp`.
+The corresponding MIME set is exact as well. This type list is a capability
+boundary, not an authenticity claim about sender-supplied metadata. The actual
+download trust boundary is a validated `file_id` fetched from Hub with the
+receiver's token; the resulting local file is mode 0600.
+
+Witnessed red
+-------------
+Before the production change, the new PDF unit case ran against the image-only
+implementation and failed: 5 pass / 1 fail, with zero resolved PDF paths.
+The final suite also applies six byte-changing production mutations. Every
+mutation exits non-zero:
+
+1. restore the Claude channel's image-only filter;
+2. restore the Read-path runtime's image-only filter;
+3. admit non-images into structured multimodal lanes;
+4. weaken the channel extension allowlist to any non-empty suffix;
+5. weaken the runtime extension allowlist to any non-empty suffix;
+6. admit a sender-provided local path into a Read-path prompt.
+
+Exact-source Docker run
+-----------------------
+Commands:
+
+    sg docker -c 'docker build \
+      --build-arg TEST365_SOURCE_COMMIT=1925cf89e09faa2aeaa152328fd63698e53ed176 \
+      -t anet-test365:dev \
+      -f tests/test365-nonimage-read-attachments/Dockerfile .'
+    sg docker -c 'docker run --rm anet-test365:dev'
+
+Result:
+
+- agent-network typecheck: PASS
+- agent-network attachment tests: 8 pass / 0 fail / 31 assertions
+- agent-node build: PASS
+- agent-node attachment tests: 25 pass / 0 fail / 84 assertions
+- real Hub wire harness: 15 assertions PASS
+- mutations: 6 witnessed red / 0 survived
+- final: RESULT: PASS
+
+The wire harness starts the real Hub with SQLite, registers a user, obtains the
+real network, mints a token-bound node identity, uploads deterministic PDF
+bytes, sends a real task carrying the returned `file_id`, and observes the real
+Claude channel notification. It verifies exact bytes, `.pdf` local path, mode
+0600, original-text preservation, and zero token disclosure in payload/stderr.
+
+Compatibility gate
+------------------
+The pre-existing test520 suite was rebuilt at the same source commit after its
+mutation anchor was updated for the exact allowlist:
+
+- agent-network: 8 pass / 0 fail / 31 assertions
+- agent-node: 35 pass / 0 fail / 125 assertions
+- real channel harness: 14 assertions PASS
+- existing attachment mutations: 6/6 witnessed red
+- final: RESULT: PASS
+
+Honest boundaries
+-----------------
+- This change does not make PDF/docx/text into structured image blocks.
+- It does not trust a filename or MIME value as proof of file content.
+- It does not grant cross-network access; Hub authorization remains the
+  authority for `/api/files/<file_id>`.
+- It does not surface arbitrary file types or arbitrary sender host paths.
+- No production deployment or npm publication was performed.
