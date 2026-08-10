@@ -511,8 +511,10 @@ send_task({
       "status": "replied",
       "content": "写排序算法",
       "result": "使用快排实现...",
-      "created_at": "2026-04-12 10:00:00",
-      "completed_at": "2026-04-12 10:00:15"
+    "created_at": "2026-04-12 10:00:00",
+    "runtime_submitted_at": "2026-04-12 10:00:03",
+    "consumed_at": "2026-04-12 10:00:04",
+    "completed_at": "2026-04-12 10:00:15"
     }
   ],
   "count": 1,
@@ -525,7 +527,7 @@ send_task({
 ```
 
 ::: tip `list_tasks` 的行是 `get_task` 的子集
-`list_tasks` 每行只 SELECT **9 列**（[`tools.ts:776`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L776)）：`task_id` / `from_name` / `to_name` / `priority` / `status` / `content` / `result` / `created_at` / `completed_at`。**不含** `delivered_at` / `started_at` / `expires_at` / `network_id` / `requires_response` / `parent_task_id` —— 要这些字段用 [`get_task`](#get-task)（`SELECT *`）。`count` 是本次返回的行数（≤ `limit`），`stats` 是**整个 scope 内**按 status 分组的计数（不受 filter 影响）。
+`list_tasks` 每行包含任务身份、收发方、状态、内容/结果和时间摘要。`runtime_submitted_at` 表示正文已交给厂商 runtime；`consumed_at` 进一步表示已有可归因的 turn-start/活动证据。**不含** `delivered_at` / `started_at` / `expires_at` / `network_id` / `requires_response` / `parent_task_id` —— 要这些字段用 [`get_task`](#get-task)（`SELECT *`）。`count` 是本次返回的行数（≤ `limit`），`stats` 是**整个 scope 内**按 status 分组的计数（不受 filter 影响）。两级证据与旧字段的语义区别见 [Task 生命周期](/concepts/task-lifecycle#runtime_submitted_at-与-consumed_at两级运行时证据)。
 :::
 
 ---

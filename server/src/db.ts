@@ -162,6 +162,11 @@ for (const col of [
   { name: "scope", def: "TEXT DEFAULT 'single'" },
   { name: "meta_json", def: "TEXT" },
   { name: "node_id", def: "TEXT" },
+  // #520 — explicit logical task identity.  Initial deliveries historically
+  // used inbox.id == tasks.task_id, while retry/reassign generate a fresh
+  // inbox row id.  Keep transport-row identity and logical-task identity
+  // separate so runtime evidence/replies survive those redeliveries.
+  { name: "task_id", def: "TEXT" },
 ]) {
   try { db.exec(`ALTER TABLE inbox ADD COLUMN ${col.name} ${col.def}`); } catch {}
 }
@@ -191,6 +196,8 @@ db.exec(`
     created_at        TEXT NOT NULL DEFAULT (datetime('now')),
     delivered_at      TEXT,
     started_at        TEXT,
+    runtime_submitted_at TEXT,
+    consumed_at       TEXT,
     completed_at      TEXT,
     expires_at        TEXT
   );
@@ -1061,6 +1068,13 @@ try { db.exec("CREATE INDEX IF NOT EXISTS idx_completions_network ON completions
 // the reply up the chain via parent_task_id.
 try { db.exec("ALTER TABLE tasks ADD COLUMN parent_task_id TEXT"); } catch {}
 try { db.exec("ALTER TABLE tasks ADD COLUMN meta_json TEXT"); } catch {}
+// #520 — two monotonic evidence levels for this exact task:
+// runtime_submitted_at means agent-node handed the body to the vendor runtime;
+// consumed_at requires an attributable turn-start/first-activity signal.
+// Both stay separate from delivered_at (enqueue), acked (process receipt), and
+// started_at (legacy report_status/content matching). Old binaries ignore them.
+try { db.exec("ALTER TABLE tasks ADD COLUMN runtime_submitted_at TEXT"); } catch {}
+try { db.exec("ALTER TABLE tasks ADD COLUMN consumed_at TEXT"); } catch {}
 
 // ── Hub scheduled tasks ──────────────────────────────────────────────
 // Scheduling is a Hub concern: clients manage these rows, while agents only

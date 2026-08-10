@@ -34,7 +34,7 @@ export const TASK_EVENT_REST_COLUMNS = [
 export const TASK_REST_COLUMNS = [
   "task_id", "from_node_id", "from_name", "to_node_id", "to_name", "priority",
   "status", "content", "result", "in_reply_to", "requires_response", "scope",
-  "created_at", "delivered_at", "started_at", "completed_at", "expires_at",
+  "created_at", "delivered_at", "started_at", "runtime_submitted_at", "consumed_at", "completed_at", "expires_at",
   "network_id", "parent_task_id", "meta_json",
 ] as const;
 

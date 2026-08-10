@@ -588,6 +588,8 @@ curl "http://localhost:9200/api/tasks?status=running&limit=10" \
       "created_at": "2026-04-12 10:00:00",
       "delivered_at": "2026-04-12 10:00:01",
       "started_at": "2026-04-12 10:00:02",
+      "runtime_submitted_at": "2026-04-12 10:00:03",
+      "consumed_at": "2026-04-12 10:00:04",
       "completed_at": "2026-04-12 10:00:15",
       "expires_at": "2026-04-12 11:00:00"
     }
@@ -600,7 +602,7 @@ curl "http://localhost:9200/api/tasks?status=running&limit=10" \
 }
 ```
 
-字段对照 `tasks` 表 schema ([`server/src/db.ts:87-105`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L87)) `SELECT *`：主键是 `task_id` 不是 `message_id`；任务完成时间字段是 `completed_at` 不是 `replied_at`；TTL 字段是 `expires_at` 绝对时间不是 `ttl_seconds` 相对秒（`ttl_seconds` 仅 send_task **入参**用，写入时算成 `expires_at`）。`anet tasks` CLI 用 `from_name` / `to_name` / `status` / `created_at` / `content` 渲染表格 (cli.ts L2810-2817)。
+字段对照 `tasks` 表 schema ([`server/src/db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts))：主键是 `task_id` 不是 `message_id`；任务完成时间字段是 `completed_at` 不是 `replied_at`；TTL 字段是 `expires_at` 绝对时间不是 `ttl_seconds` 相对秒（`ttl_seconds` 仅 send_task **入参**用，写入时算成 `expires_at`）。`runtime_submitted_at` / `consumed_at` 是 token-bound agent-node 写入的两级运行时证据，和入队 `delivered_at`、进程 ACK、兼容 `started_at` 不同；详见 [Task 生命周期](/concepts/task-lifecycle#runtime_submitted_at-与-consumed_at两级运行时证据)。`anet tasks` CLI 用 `from_name` / `to_name` / `status` / `created_at` / `content` 渲染表格。
 
 ---
 
