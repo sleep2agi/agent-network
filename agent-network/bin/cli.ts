@@ -32,7 +32,6 @@ import {
   reapMarkerGroups,
   prepareIdentityForStart,
   anchorsFromMarker,
-  markerFilePath as copresenceMarkerFilePath,
   type SessionInfo,
 } from "../src/copresence-identity";
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
@@ -7415,12 +7414,12 @@ Stop a running agent node.
     // ran --copresence).
   } catch (e: any) {
     console.error(`[anet] ⚠ identity gate check crashed: ${e?.message || e}`);
-    if (existsSync(copresenceMarkerFilePath(nodesDir(), resolved.id))) {
-      console.error(`[anet]    Marker still exists; refusing the legacy tmux-name sweep.`);
-      process.exitCode = 1;
-      return;
-    }
-    console.error(`[anet]    No marker exists; retaining the ordinary-node legacy stop path.`);
+    // readMarker represents a normal missing marker as {cause:"MISSING"};
+    // reaching this catch means the ownership check itself failed.  Never
+    // reinterpret that failure as permission to kill by name.
+    console.error(`[anet]    Refusing the legacy tmux-name sweep: identity check did not complete.`);
+    process.exitCode = 1;
+    return;
   }
 
   // RFC-030 P2 legacy path — nodes without an identity marker may own three
