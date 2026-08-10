@@ -43,6 +43,7 @@ import {
 } from "./rest-projections.js";
 import { resolveRestFromSession } from "./rest-identity.js";
 import { stampTaskAuthOrigin, type TaskAuthOrigin } from "./task-auth-origin.js";
+import { diagnoseTask } from "./task-diagnostic.js";
 import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startScheduledTaskScheduler } from "./scheduled-tasks.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
 import { recordDeliveredStaleEvents } from "./task-lifecycle-watcher.js";
@@ -2997,7 +2998,38 @@ return Bun.serve({
       if (!task) {
         return withCors(req, Response.json({ ok: false, error: "task_not_found", task_id: taskId }, { status: 404 }));
       }
-      return withCors(req, Response.json({ ok: true, task }));
+      const taskNetworkId = typeof task.network_id === "string" ? task.network_id : null;
+      const canonicalTarget = task.to_node_id
+        ? null
+        : resolveCanonicalAlias(taskNetworkId, String(task.to_name ?? "")).alias;
+      const targetParams: unknown[] = [];
+      let targetSql = "SELECT alias, status FROM sessions WHERE ";
+      if (task.to_node_id) {
+        targetSql += "node_id = ?1";
+        targetParams.push(task.to_node_id);
+      } else {
+        targetSql += "alias = ?1";
+        targetParams.push(canonicalTarget);
+      }
+      if (taskNetworkId) {
+        targetSql += " AND network_id = ?2";
+        targetParams.push(taskNetworkId);
+      } else {
+        targetSql += " AND network_id IS NULL";
+      }
+      targetSql += " ORDER BY updated_at DESC LIMIT 1";
+      const targetSession = db.get<{ alias: string; status: string }>(targetSql, ...targetParams);
+      const targetAlias = targetSession?.alias ?? canonicalTarget ?? String(task.to_name ?? "");
+      const liveSseConnections = getSSEStats().sessions[`${taskNetworkId || "global"}:${targetAlias}`] ?? 0;
+      const diagnostic = diagnoseTask({
+        status: String(task.status ?? "unknown"),
+        runtimeSubmittedAt: typeof task.runtime_submitted_at === "string" ? task.runtime_submitted_at : null,
+        consumedAt: typeof task.consumed_at === "string" ? task.consumed_at : null,
+        targetSessionStatus: targetSession?.status ?? null,
+        targetSessionExists: Boolean(targetSession),
+        liveSseConnections,
+      });
+      return withCors(req, Response.json({ ok: true, task, diagnostic }));
     }
 
     // ── REST: tasks table (V2) ──
