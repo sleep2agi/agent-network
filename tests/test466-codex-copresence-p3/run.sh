@@ -17,6 +17,7 @@ NODE_DIR="$WORK/project/.anet/nodes/$ALIAS"
 MARKER="$NODE_DIR/copresence-identity.json"
 CODEX_WRAPPER="$TEST_DIR/codex-marker-wrapper"
 LOG="$WORK/run.log"
+export TEST466_BRIDGE_LOG="$WORK/bridge.log"
 HUB_LOG="$WORK/hub.log"
 
 PASS=0; FAIL=0; HUB_PID=""
@@ -84,6 +85,7 @@ start_triplet() {
     if ! session_alive "$s"; then
       echo "missing tmux session: $s"
       tmux list-panes -a -F '#{session_name}|#{pane_dead}|#{pane_current_command}|#{pane_pid}' 2>/dev/null || true
+      [[ -s "$TEST466_BRIDGE_LOG" ]] && { echo "--- bridge log ---"; tail -120 "$TEST466_BRIDGE_LOG"; }
       tail -80 "$LOG"
       return 1
     fi
