@@ -5,10 +5,10 @@ Date: 2026-08-10 (Asia/Shanghai)
 ## Provenance
 
 - Base: `51bdb84a417c9a2a1fd8f07f871e307e50da80a5`
-- Tested source: `3b243c9b94b428ff960b390e518d6ee1c295b769`
+- Tested source: `8528c23c7db674ed129f6b6c153fd694d38ddc94`
 - Docker tag: `anet-test671:dev` (fixed/reused tag)
-- Docker image ID: `sha256:f52142069c30d946f7a6d36fb9efee2387cdb73fbd9dffd47ef2c30bd6b68efa`
-- Embedded image environment: `TEST671_SOURCE_COMMIT=3b243c9b94b428ff960b390e518d6ee1c295b769`
+- Docker image ID: `sha256:deaca0c9dafa9f0a4829ff148642224a66aae916b8f66ece25da5017cdedccb8`
+- Embedded image environment: `TEST671_SOURCE_COMMIT=8528c23c7db674ed129f6b6c153fd694d38ddc94`
 
 An earlier image used a manually expanded, nonexistent SHA and is invalid evidence. It was discarded and the fixed tag was rebuilt from the exact value returned by `git rev-parse HEAD`; only the image and results above count.
 
@@ -35,7 +35,7 @@ Agent runtime wiring is deliberately excluded from this candidate layer while th
 Command:
 
 ```sh
-sg docker -c 'docker run --rm -v /tmp/test671-3b243c-GcqLGn:/artifacts anet-test671:dev'
+sg docker -c 'docker run --rm -v /tmp/test671-8528c2-E0UJKl:/artifacts anet-test671:dev'
 ```
 
 Result:
@@ -54,18 +54,18 @@ Each mutation changed the tested implementation and made the behavior suite fail
 
 | Mutation | Artifact SHA256 |
 | --- | --- |
-| Remove immutable node ownership enforcement | `2b34b93b9a1a77562618a476ca0da5a801e29a6e02fa8366f14699cc97a3e3ad` |
-| Remove legacy/direct canonical-alias ownership | `b313e9d239eb2a9e2ec683272406017c3f8e93f1f958d00585d6e14157d39193` |
-| Collapse runtime submission into consumption | `4ba02d46394647bddb100a1ee455486a3cb049066b2074034c03bf9ace12963c` |
-| Stop consumption from implying submission | `e17806db0e9b0ad030ed69b7a0a6449a866911b9f14792979ee25329bf098e7c` |
-| Unlink a redelivery inbox row from its logical task | `bf3ae238486efabdbadf1d517ecb2a72c124f8069181b0e6ded210d7006db294` |
-| Remove logical-task ACK support | `56e35a3b09862b77b66670b2d9a02ab6ac17c2a6fe0bc7a9bcce9ac919ff000c` |
-| Clear task-lifetime evidence on retry | `694cdef1d553090fdd7b34e3484af651eb7e1481385a09c03393af743a780ded` |
-| Unlink scheduler delivery from its logical task | `7ebd02df7c2dc023834efda88db51100e86a5de5fcb6e0e48e1c51315cef6765` |
-| Unlink REST initial delivery from its logical task | `e3c3adeae104c6c5d11205d97f7a517cf9145b1a5fd941b05087da07fa08e0db` |
+| Remove immutable node ownership enforcement | `85605a634ed5b92b0220dcef6911b88225537e71ea7e2f102a4986cff7513e3f` |
+| Remove legacy/direct canonical-alias ownership | `ff07aaaef2125333c61543512a726f20f4e70e9c540e889886a519fccf153b15` |
+| Collapse runtime submission into consumption | `e2597162abd36e0b2232e3cb7967cbe4901f000fda2e3db8646cf41720a37d3e` |
+| Stop consumption from implying submission | `5c82cc27b3d4b973019fbc1c85ac6c3a6317b003a786f85b198a7a51be16a0ff` |
+| Unlink a redelivery inbox row from its logical task | `2c027ea6ec125f9cff7905f2b9bae76b2df82c08220e2b556cc5e9f6fe726926` |
+| Remove logical-task ACK support | `1b52e92cef816ef95891e0a5f2bdb8d93dce11d29e58e867543b0d51c25510eb` |
+| Clear task-lifetime evidence on retry | `84ba895d7793a282ef40b44d53ca1d302e8eb1e7ce022df7e1808c8c0c287ee6` |
+| Unlink scheduler delivery from its logical task | `3feb8189e62a98bc3140632a54b6c70825223a2ea6de20db3502996c2864b8f0` |
+| Unlink REST initial delivery from its logical task | `11267c8d574572416efab69ff40c98b90f342ebaf95df69210ad2bc9e02d11ff` |
 
-Artifacts are the corresponding `.log` files under `/tmp/test671-3b243c-GcqLGn`.
+Artifacts are the corresponding `.log` files under `/tmp/test671-8528c2-E0UJKl`.
 
 ## Result
 
-PASS for the Hub-only task runtime evidence layer at source `3b243c9b94b428ff960b390e518d6ee1c295b769`. Agent-node reporting remains a separate pending layer and this report does not claim end-to-end runtime consumption is complete.
+PASS for the Hub-only task runtime evidence layer at source `8528c23c7db674ed129f6b6c153fd694d38ddc94`. Agent-node reporting remains a separate pending layer and this report does not claim end-to-end runtime consumption is complete.
