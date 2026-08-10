@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Preserve the real Codex process and protocol.  For the app-server only,
+# add one marker-bearing setsid descendant that survives loss of the tmux
+# pane.  That makes orphan reclamation observable instead of self-green.
+if [[ "${1:-}" == "app-server" && "${TEST466_SPAWN_DETACHED:-0}" == "1" ]]; then
+  : "${ANET_NODE_MARKER:?missing marker on real app-server launch}"
+  : "${TEST466_ORPHAN_PID_FILE:?missing orphan pid file}"
+  setsid env ANET_NODE_MARKER="$ANET_NODE_MARKER" \
+    bash -c 'echo $$ > "$TEST466_ORPHAN_PID_FILE"; trap "exit 0" TERM INT HUP; exec sleep 600' &
+fi
+
+exec codex "$@"

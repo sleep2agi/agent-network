@@ -1,0 +1,87 @@
+# test466 — Codex co-presence identity-exclusive teardown
+
+Date: 2026-08-10
+Issue: #466
+Base commit: 8be1c9748bd6d627265fc0729937daf5bbe230db
+Tested source commit: 2def43ef3303dd192754d275d3d77f3fc4e66823
+Docker tag: anet-test466:dev
+Docker image ID: sha256:ae1351f0aab675cec40178c4aca880bd1892f41ea86902218b7b63cc76d97d3d
+Embedded TEST466_SOURCE_COMMIT: 2def43ef3303dd192754d275d3d77f3fc4e66823
+
+## Scope
+
+This test closes the issue #466 P3 teardown race without changing the
+co-presence startup contract.  When an identity marker exists, teardown is
+identity-exclusive: it reaps only processes proven to carry that marker and
+never falls through to a tmux-name sweep.  A missing marker retains the legacy
+ordinary-node cleanup path.  An unreadable, corrupt, incomplete, or
+self-referential identity proof fails closed.
+
+The test runs an isolated real Hub, real agent-node bridge, installed Codex
+0.147.0 app-server, and installed Codex remote TUI.  It mounts no production
+config, token, database, port, session, or process.
+
+## Commands
+
+```sh
+sg docker -c 'docker build \
+  --build-arg TEST466_SOURCE_COMMIT=2def43ef3303dd192754d275d3d77f3fc4e66823 \
+  -t anet-test466:dev \
+  -f tests/test466-codex-copresence-p3/Dockerfile .'
+
+sg docker -c 'docker run --rm anet-test466:dev'
+```
+
+Runtime inventory from the exact image:
+
+```text
+codex-cli 0.147.0
+bun 1.3.14
+node v22.23.2
+```
+
+## Result
+
+```text
+RESULT: PASS=43 FAIL=0
+MUTATION RESULT: PASS=4 FAIL=0
+```
+
+Verified behavior:
+
+- the real isolated Hub minted a network-scoped node token;
+- normal three-piece co-presence stop reaped the complete marker generation,
+  including a detached marker-bearing descendant;
+- after the real app-server session disappeared, a hostile different-marker
+  process using the same tmux name remained alive while the real generation
+  was reaped;
+- after an exact marker-validated bridge PID received SIGKILL, external stop
+  still completed and removed all identity-owned state;
+- a stop invoked from marker-bearing TUI ancestry returned rc=2 and preserved
+  the running generation;
+- corrupt and incomplete marker proofs returned non-zero, preserved their
+  marker, and did not authorize a same-name kill;
+- marker-missing ordinary nodes retained legacy tmux cleanup.
+
+## Witnessed-red mutations
+
+All mutations changed source bytes and turned a previously green invariant
+red while the test code remained unchanged:
+
+1. delete the identity/name ownership gate;
+2. delete the real `/proc` marker scan;
+3. delete the post-rescan unreadable-process gate;
+4. delete the corrupt-marker fail-closed return.
+
+The first mutation proves the security-bearing TOCTOU case: if teardown falls
+through to name ownership after seeing a real marker, it kills the hostile
+same-name process and the suite fails.  The fourth proves that corrupt marker
+state cannot silently regain the legacy name sweep.
+
+## Provenance
+
+The build argument is declared after dependency installation, so changing the
+tested source commit does not invalidate dependency layers.  The final image
+configuration contains the exact tested source commit shown above.  This
+report is an add-only evidence commit after that source; it does not alter the
+tested production or test implementation.

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+if [[ "${1:-}" == "node" && "${2:-}" == "start" && "$*" != *"--copresence"* && -n "${TEST466_BRIDGE_LOG:-}" ]]; then
+  exec /root/.bun/bin/bun /app/agent-network/bin/cli.ts "$@" >>"$TEST466_BRIDGE_LOG" 2>&1
+fi
+exec /root/.bun/bin/bun /app/agent-network/bin/cli.ts "$@"
