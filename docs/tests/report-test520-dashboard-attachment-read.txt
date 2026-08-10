@@ -1,12 +1,13 @@
 # Test 520 — Dashboard/CommHub image attachments for Read-capable runtimes
 
 Date: 2026-08-10
-Source commit: 777b4c2c11130c85f9a156794650a032cd6d7cf3
-Stacked base: 00db74b1e01491d0df5d6d1326571269c9d73c88 (`feat/520-runtime-consumption`, PR #674)
+Source commit: ca16164ab8d9e94d730e0780672115ad92457651
+Original stacked base: 00db74b1e01491d0df5d6d1326571269c9d73c88 (`feat/520-runtime-consumption`, PR #674)
+Retarget-main provenance merge: c18abb50a04db0d5e9274fa1fb9ac750c4570242 (tree byte-identical before/after)
 Docker tag: `anet-test520-attachments:dev`
-Docker image ID: `sha256:290bf97381c29b1770e7dc6f93b9edb6772597f5b783566595f1549159562905`
-Embedded source: `TEST520_ATTACHMENT_SOURCE_COMMIT=777b4c2c11130c85f9a156794650a032cd6d7cf3`
-Runner artifact SHA256: `794aff738af6d4a1d444e5f2578e0c59632ac8047a1845e895898237dde282fc`
+Docker image ID: `sha256:ff5869b63cb7be28ba07ee024affa37a5267442ebf9c9ad96a085f89363095fd`
+Embedded source: `TEST520_ATTACHMENT_SOURCE_COMMIT=ca16164ab8d9e94d730e0780672115ad92457651`
+Runner artifact SHA256: `559bd1c00221397ed474d9656d14e84acde3350b7aa015722362cdd817f8f165`
 
 ## Result
 
@@ -15,10 +16,10 @@ PASS.
 - `agent-network` TypeScript typecheck: PASS.
 - Production `agent-network/src/node-server.ts` bundle: PASS.
 - Production `agent-node/src/cli.ts` bundle: PASS.
-- Attachment helper: 4 tests / 19 assertions, PASS.
-- Runtime prompt and existing #520 wiring: 14 tests / 53 assertions, PASS.
+- Attachment helper: 5 tests / 23 assertions, PASS.
+- Runtime prompt and existing #520 wiring: 15 tests / 58 assertions, PASS.
 - Real production Claude-channel bundle against a controllable Hub `/mcp`, `/events`, and authenticated `/api/files` fixture: 14 assertions, PASS.
-- Mutations: 4/4 witnessed red.
+- Mutations: 5/5 witnessed red.
 
 ## Proved behavior
 
@@ -28,6 +29,8 @@ PASS.
 4. The path-prompt runtime set is exact: `codex-app-server` and `opencode`. Claude Agent SDK and Codex SDK/direct-stdio retain their pre-existing structured-image lanes. Grok's default reviewed profile denies filesystem tools, so it is not falsely advertised as Read-capable.
 5. Attachment paths are JSON-quoted, deduplicated, and explicitly labelled as untrusted input rather than system instructions.
 6. The bearer token appears neither in the model-facing channel payload nor stderr.
+7. For path-prompt runtimes, legacy attachments containing only a sender-controlled local `path` are retained as text but never surfaced as a Read path. The pre-existing structured-image lanes retain their legacy resolver behavior unchanged.
+8. Cache directories are derived from a hash of the exact alias; distinct and path-shaped aliases remain inside distinct owner cache roots.
 
 ## Load-bearing mutations
 
@@ -35,6 +38,7 @@ PASS.
 - Bypassing `runtimeContent` in `agent-node` makes the inbox choke-point contract red.
 - Adding a structured/denied runtime to the path-prompt exact set makes the isolation test red.
 - Trusting a sender-provided local path makes the hostile-path test red.
+- Bypassing the path-prompt runtime's `file_id` requirement makes its hostile-existing-path test red.
 
 Every mutation helper requires one exact anchor and a byte-different source before executing the test.
 
@@ -42,7 +46,7 @@ Every mutation helper requires one exact anchor and a byte-different source befo
 
 - No Hub, Dashboard, schema, token, or production deployment change.
 - No generic `download_attachment` MCP tool in this candidate. The immediate user-visible path is implemented at the two real inbound choke points without widening the model tool surface.
-- This branch is intentionally stacked on PR #674 because both changes touch `agent-node/src/cli.ts`; it must be retargeted/rebased after #674 merges, without rewriting the reviewed source evidence.
+- The branch began stacked on PR #674 because both changes touched `agent-node/src/cli.ts`. After #674 merged, an `ours` provenance merge made `origin/main` an ancestor without changing the candidate tree, and PR #675 was retargeted to `main`.
 
 ## Additional witnessed finding
 
