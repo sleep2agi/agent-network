@@ -82,8 +82,8 @@ expect_mutation_red \
 expect_mutation_red \
   readable-runtime-host-path-rejection \
   agent-node/src/runtime/readable-attachment-prompt.ts \
-  '  if (!runtimeNeedsReadableAttachmentPrompt(runtime)) return [...attachments];' \
-  '  if (runtimeNeedsReadableAttachmentPrompt(runtime)) return [...attachments];' \
+  $'    return attachments.filter((attachment) =>\n      typeof attachment.file_id === "string" && attachment.file_id.length > 0\n      && isAllowlistedReadableAttachment(attachment));' \
+  '    return [...attachments];' \
   'cd /workspace/agent-node && bun test src/runtime/readable-attachment-prompt.test.ts'
 
 expect_mutation_red \
