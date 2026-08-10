@@ -2,10 +2,10 @@
 
 Date: 2026-08-10
 Base: `45ca09853922f1be8574b84e932b404b9cc2f778`
-Source commit: `f8521d58b32efc96558cbfb67df38a7bcc6a17ae`
+Source commit: `3dc31f2d9258521be975d5317c48d3865928d6cf`
 Docker image: `anet-test167-b1:dev`
-Image ID: `sha256:13143a4a84849b327236d05173e9d152c8545cf858d9c4e9da894275c3d5bf25`
-Embedded ENV: `TEST681_SOURCE_COMMIT=f8521d58b32efc96558cbfb67df38a7bcc6a17ae`
+Image ID: `sha256:26386c8f5e8801339b2855963024603ec684f6de091fec4ed6b432887add21de`
+Embedded ENV: `TEST681_SOURCE_COMMIT=3dc31f2d9258521be975d5317c48d3865928d6cf`
 
 ## Witnessed red
 
@@ -20,7 +20,7 @@ whose late polling emissions were unexercised.
 
 `RESULT: PASS`
 
-- Production state-machine contract: 4 tests, 14 assertions.
+- Production state-machine contract: 5 tests, 18 assertions.
 - `delivered -> acked -> running -> replied` emits exactly
   `task.ack`, `task.started`, and `task.replied` through the existing formatter.
 - A permanently delivered task emits the bounded 30s and 60s warnings, then
@@ -41,6 +41,10 @@ patch, and runs the unchanged tests. All exited rc=1:
 4. 60-second stale warning event renamed;
 5. expiry event mapped to failed;
 6. production lifecycle emitter replaced with a no-op.
+7. timeout default changed from 120 seconds;
+8. polling default changed from 2 seconds;
+9. first stale threshold changed from 30 seconds;
+10. second stale threshold changed from 60 seconds.
 
 ## Behavior boundary
 
