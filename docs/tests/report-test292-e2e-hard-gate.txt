@@ -1,0 +1,107 @@
+Test 292 — full-regression CI hard gate
+=======================================
+
+Scope
+-----
+
+Base commit: 1efeeb4306ed70347ebef2579247dfe9ff92bd78
+Tested source commit: 32daa2138703b2d8cf26610733af39c9efe34575
+Draft PR: https://github.com/sleep2agi/agent-network/pull/670
+
+The source changes only the Docker E2E workflow and test infrastructure. It
+does not change server, CLI, agent runtime, authentication, or production
+behavior.
+
+Invariants
+----------
+
+1. The command to the left of tee is captured from PIPESTATUS, rather than
+   trusting tee's status.
+2. A tee/log write failure is represented by a non-numeric fail-closed status.
+3. The verdict requires exactly one structured TOTAL line, at least 283
+   passes, zero failures, and runner exit code zero. The regression floor is
+   fixed in the gate and cannot be lowered through the environment.
+4. Empty, incomplete, malformed, duplicated, or truncated reports fail closed.
+5. The Dockerized contract is invoked by the workflow itself, so deleting the
+   helpers or their workflow wiring is not an untested refactor.
+
+Exact-source Docker evidence
+----------------------------
+
+Image tag: anet-test292-hard-gate:dev
+Image ID: sha256:7b40f2686384c9863ea7bd9ee740779d3d3af18ca8af17ed02f2b4e8138f23f5
+Embedded environment:
+  TEST292_HARD_GATE_SOURCE_COMMIT=32daa2138703b2d8cf26610733af39c9efe34575
+
+Command:
+  sg docker -c 'docker run --rm anet-test292-hard-gate:dev'
+
+Result:
+  RESULT: PASS=23 FAIL=0
+
+The contract covers a green complete result, real test failures, a test failure
+whose runner status was masked to zero, a non-zero runner with a green TOTAL,
+minimum-count truncation, missing/duplicate/malformed TOTAL, missing runner
+status, and tee failure.
+It also verifies that setting E2E_MIN_PASS=0 cannot lower the fixed floor.
+
+Local witnessed-red mutations
+-------------------------------
+
+All mutations first assert that bytes changed.
+
+1. Restore the historical pair: remove pipefail and replace the runner status
+   with `$?` after tee. The behavioral status-preservation contract turns red.
+   Mutating only one half is intentionally not claimed as red because either
+   PIPESTATUS or pipefail is independently sufficient.
+2. Remove the `failed > 0` rejection. The masked-status red TOTAL is accepted,
+   so the gate contract turns red.
+3. Remove the workflow call to e2e-hard-gate.sh. The workflow-wiring contract
+   turns red.
+
+Real GitHub Actions witnessed-green
+-----------------------------------
+
+Candidate head: 32daa2138703b2d8cf26610733af39c9efe34575
+Run: https://github.com/sleep2agi/agent-network/actions/runs/31343034003
+Conclusion: SUCCESS
+
+Observed from the raw job log:
+  Verify full-regression hard gate contract: RESULT: PASS=23 FAIL=0
+  runner exit code: 0
+  TOTAL: 283 passed, 0 failed
+  PASS: full Docker E2E regression is complete and green
+
+The Actions contract container prints `source_commit=unembedded` because this
+workflow step deliberately bind-mounts the checked-out Actions commit into the
+already-built aggregate image. The run's authoritative head SHA above pins the
+checkout. The separate focused Docker image carries the embedded exact source
+SHA.
+
+Real GitHub Actions witnessed-red
+---------------------------------
+
+Mutation branch head: 7558b3d64d9278f541d0bb44d2bb9babddb792e9
+Parent: 32daa2138703b2d8cf26610733af39c9efe34575
+Mutation: add exactly one deliberate `fail` call to
+  tests/docker-e2e-networks.sh
+Run: https://github.com/sleep2agi/agent-network/actions/runs/31343099705
+Conclusion: FAILURE
+
+Observed from the raw job log:
+  Verify full-regression hard gate contract: RESULT: PASS=22 FAIL=0
+  runner exit code: 1
+  TOTAL: 283 passed, 1 failed
+  ERROR: Docker E2E reported 1 failing tests
+
+The focused contract and rename-ghost job remained green. Only `Enforce full
+regression verdict` turned red, proving the failure is attributed to the full
+regression gate rather than a build, typecheck, or unrelated gate failure. The
+mutation branch is evidence-only and is not a merge candidate.
+
+Verdict
+-------
+
+PASS. The same workflow source is green for the restored 283/0 regression and
+turns red for an otherwise identical 283/1 run. PR #670 remains draft and is
+not self-merged or deployed; independent review is still required.

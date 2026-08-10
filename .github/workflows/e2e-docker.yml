@@ -37,67 +37,59 @@ jobs:
         run: docker build -t anet-e2e -f tests/Dockerfile .
         timeout-minutes: 10
 
-      # Report-only by design (#266 endgame, 2026-06-28):
-      # Same SOP as `anet QA (v0)` and the release-gate workflow — surface
-      # the verdict, never silently green-wash. Bucket A (~45 Base E2E
-      # fails) is pre-existing test-infra cascade tracked separately for
-      # v0.12 quality work; gating the merge bus on that 12-day-old red
-      # was blocking shipping without buying any product safety. The
-      # verdict step below prints per-suite pass/fail + total so a
-      # reviewer can SEE the state at a glance instead of trusting a
-      # green check that hides 45 fails.
-      - name: Run full regression (186 tests, report-only)
-        id: regression
+      - name: Verify full-regression hard gate contract
         run: |
-          set +e
-          docker run --rm anet-e2e /app/test-all.sh 2>&1 | tee /tmp/e2e-output.log
-          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          docker run --rm \
+            -e ROOT=/repo \
+            -v "$PWD:/repo:ro" \
+            anet-e2e \
+            bash /repo/tests/test292-e2e-hard-gate/run.sh
+        timeout-minutes: 2
+
+      # #292 restored the legacy fixtures to current identity/auth contracts.
+      # Preserve the Docker runner's real exit status across tee, then make the
+      # following step enforce both that status and the structured TOTAL line.
+      - name: Run full regression (hard-gated)
+        run: |
+          bash tests/lib/run-piped-command.sh \
+            /tmp/e2e-output.log \
+            /tmp/e2e-exit-code \
+            docker run --rm anet-e2e /app/test-all.sh
         # The now-restored Loop suites intentionally include real 60-second
         # scheduler windows plus cooldown checks. Five minutes killed a valid
         # complete run before it could emit the Final Report.
         timeout-minutes: 12
 
-      - name: Surface verdict (never silent — print suite numbers)
+      - name: Enforce full regression verdict
         if: always()
         run: |
           set -e
-          ec='${{ steps.regression.outputs.exit_code }}'
           echo
           echo "════════════════════════════════════════════════════════════"
-          echo "  Docker E2E verdict (report-only — see #266 for context)"
+          echo "  Docker E2E verdict (hard gate)"
           echo "════════════════════════════════════════════════════════════"
-          if [ ! -s /tmp/e2e-output.log ]; then
-            echo "::error::test-all.sh produced no output — likely infra/build issue, not test fail"
-            exit 1
-          fi
           # Pull the Final Report block + TOTAL line so the verdict is
           # visible in the Actions UI without expanding the run-step log.
-          awk '/Final Report/,/^$/' /tmp/e2e-output.log | tail -20
-          total_line=$(grep -E 'TOTAL: ' /tmp/e2e-output.log | tail -1)
-          [ -n "$total_line" ] || { echo "::error::no TOTAL line — test-all.sh did not complete"; exit 1; }
-          echo
-          echo "regression step exit code: $ec"
-          echo "$total_line"
-          # Non-zero exit code with output present = real test fails, NOT
-          # infra. Surface as a workflow-level warning so the PR check shows
-          # informational without false-passing a regression-day.
-          if [ "$ec" != "0" ]; then
-            echo "::warning::Docker E2E reported test fails (Bucket A cascade — tracked in #279, plan in #266)."
-            echo "::warning::This workflow is report-only by design (#266 endgame): the green tick means the harness ran and emitted a verdict, NOT that all 186 tests passed. Read the TOTAL line above."
+          if [ -s /tmp/e2e-output.log ]; then
+            awk '/Final Report/,/^$/' /tmp/e2e-output.log | tail -20
           fi
-          # Always exit 0 — report-only.
-          exit 0
+          [ -s /tmp/e2e-exit-code ] || {
+            echo "::error::runner exit-code file missing — test timed out or did not start"
+            exit 1
+          }
+          bash tests/lib/e2e-hard-gate.sh \
+            /tmp/e2e-output.log \
+            "$(cat /tmp/e2e-exit-code)"
 
   rename-ghost-gate:
-    # #180 regression gate — HARD FAIL (not report-only).
+    # #180 regression gate — standalone HARD FAIL for a focused signal.
     #
     # The rename-ghost test suite (`tests/qa-180-rename-ghost/`) reproduces the
     # exact ghost-process shape that #374 fixed: rename --force on a running
     # claude-code-cli node → old process + its MCP stdio subprocess must ALL
     # be reaped, and `/api/status` must lose the old alias immediately.
     #
-    # Why this needs its own hard gate (not folded into the report-only block
-    # above):
+    # Why this remains its own gate rather than relying only on the aggregate:
     #   - The fix relies on `sweepMcpOrphansForAlias` scanning
     #     `/proc/<pid>/environ` for `COMMHUB_ALIAS=<oldAlias>`. Delete that
     #     sweep or narrow its match set and the ghost silently returns.
