@@ -184,11 +184,14 @@ describe("CodexAppServerBridge — bootstrap + task mapping", () => {
   });
 
   test("startTaskTurn returns the server-assigned turnId and marks bridge working", async () => {
+    const submitted: Array<{ taskId: string; steered: boolean }> = [];
+    bridge.on("task_runtime_submitted", (event) => submitted.push(event as never));
     const turnId = await bridge.startTaskTurn({ taskId: "task_1", text: "please help" });
     expect(turnId).toBeTypeOf("string");
     expect(bridge.currentStatus()).toBe("working");
     expect(bridge.activeTurn()).toBe(turnId);
     expect(bridge.pendingTurnCount()).toBe(1);
+    expect(submitted).toEqual([{ taskId: "task_1", steered: false }]);
   });
 
   test("turn/completed for OUR turn fires task_reply mapped back to the task_id", async () => {

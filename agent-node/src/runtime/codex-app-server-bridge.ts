@@ -280,11 +280,16 @@ export class CodexAppServerBridge extends EventEmitter {
 
     let resp: unknown;
     try {
-      resp = await this.client.request("turn/start", {
+      const request = this.client.request("turn/start", {
         threadId: this.threadId,
         clientUserMessageId,
         input: [{ type: "text", text: promptPrefix + input.text }],
       });
+      // request() has synchronously accepted the exact body for transport.
+      // This is weaker than task_started (model activity) but stronger than
+      // FIFO admission, which never reaches this branch.
+      this.emit("task_runtime_submitted", { taskId: input.taskId, steered: false });
+      resp = await request;
     } catch (e) {
       // If the server accepted the turn but the RPC response was lost, the
       // echoed user-message client id is stronger evidence than the failed
@@ -429,11 +434,17 @@ export class CodexAppServerBridge extends EventEmitter {
       ? `[Agent Network/from=${fromLabel}/task=${input.taskId}] `
       : `[Agent Network/task=${input.taskId}] `;
     try {
-      const response = await this.client.request("turn/steer", {
+      const request = this.client.request("turn/steer", {
         threadId: this.threadId,
         input: [{ type: "text", text: promptPrefix + input.text }],
         expectedTurnId,
       });
+      this.emit("task_runtime_submitted", {
+        taskId: input.taskId,
+        turnId: expectedTurnId,
+        steered: true,
+      });
+      const response = await request;
       const acceptedTurnId = extractTurnId(response);
       if (acceptedTurnId !== expectedTurnId) {
         throw new Error(

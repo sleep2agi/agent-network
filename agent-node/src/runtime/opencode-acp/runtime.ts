@@ -79,6 +79,10 @@ export interface OpencodeThinkOptions {
   /** Logger. Falls back to `console.log` / `console.warn`. */
   log?: (msg: string) => void;
   warn?: (msg: string) => void;
+  /** Exact session/prompt request was accepted by the runtime client. */
+  onSubmitted?: () => void;
+  /** Exact session/prompt response completed; session notifications alone are insufficient. */
+  onConsumed?: () => void;
   /** #383 rescue toggle. Falls through to the process env if unset. */
   disableThinkingOnlyRescue?: boolean;
 }
@@ -350,10 +354,13 @@ export async function opencodeThink(
 
   let response: any;
   try {
-    response = await runtime.client.requestWithIdleTimeout("session/prompt", {
+    const request = runtime.client.requestWithIdleTimeout("session/prompt", {
       sessionId: runtime.sessionId,
       prompt: [{ type: "text", text: opts.prompt }],
     }, idleTimeoutMs);
+    opts.onSubmitted?.();
+    response = await request;
+    opts.onConsumed?.();
   } catch (error) {
     await killFailedTurnChild("session/prompt failure");
     throw error;

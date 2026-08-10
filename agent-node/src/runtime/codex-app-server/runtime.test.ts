@@ -179,6 +179,10 @@ class IdentityNeverConfirmedBridge extends EventEmitter {
 
 class ActivityBridge extends EventEmitter {
   async submitTask(input: { taskId: string }): Promise<{ started: true; turnId: string }> {
+    this.emit("task_runtime_submitted", {
+      taskId: input.taskId,
+      steered: false,
+    });
     this.emit("task_started", {
       taskId: input.taskId,
       turnId: `turn_${input.taskId}`,
@@ -197,6 +201,48 @@ class ActivityBridge extends EventEmitter {
 }
 
 describe("codexAppServerThink — terminal-event reconciliation watchdog", () => {
+  test("FIFO admission reports neither submission nor consumption", async () => {
+    const bridge = new DeferredStartBridge();
+    const session = { bridge } as unknown as CodexAppServerRuntimeSession;
+    const evidence: string[] = [];
+    const thinking = codexAppServerThink(session, {
+      taskId: "task_waiting_fifo",
+      text: "must remain without runtime evidence while queued",
+      queueTimeoutMs: 20,
+      reconciliationIntervalMs: 0,
+      onSubmitted: () => evidence.push("submitted"),
+      onConsumed: () => evidence.push("consumed"),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(evidence).toEqual([]);
+    expect((await thinking).queued).toBe(true);
+    expect(evidence).toEqual([]);
+  });
+
+  test("exact runtime submission and task_started report each level once", async () => {
+    const bridge = new ActivityBridge();
+    const session = { bridge } as unknown as CodexAppServerRuntimeSession;
+    const evidence: string[] = [];
+    const thinking = codexAppServerThink(session, {
+      taskId: "task_exact_evidence",
+      text: "bind exact runtime evidence",
+      timeoutMs: 100,
+      queueTimeoutMs: 500,
+      reconciliationIntervalMs: 0,
+      onSubmitted: (event) => evidence.push(`submitted:${event.taskId}`),
+      onConsumed: (event) => evidence.push(`consumed:${event.taskId}`),
+    });
+    bridge.emit("task_runtime_submitted", { taskId: "other_task" });
+    bridge.emit("task_started", { taskId: "other_task", turnId: "other_turn" });
+    bridge.emit("task_started", { taskId: "task_exact_evidence", turnId: "duplicate" });
+    bridge.emit("task_reply", { taskId: "task_exact_evidence", text: "done" });
+    await thinking;
+    expect(evidence).toEqual([
+      "submitted:task_exact_evidence",
+      "consumed:task_exact_evidence",
+    ]);
+  });
+
   test("exact task activity resets the response idle deadline for a long-running turn", async () => {
     const bridge = new ActivityBridge();
     const session = { bridge } as unknown as CodexAppServerRuntimeSession;

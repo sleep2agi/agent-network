@@ -1253,6 +1253,50 @@ describe("Grok copresence runtime integration", () => {
     }
   }, 10_000);
 
+  test("reports exact submission and trusted consumption, never queued admission", async () => {
+    const fixture = new RuntimeFixture();
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await fixture.open();
+      const firstEvidence: string[] = [];
+      const queuedEvidence: string[] = [];
+      const first = runtime.submit({
+        taskId: "evidence-active",
+        from: "reviewer",
+        text: "HOLD_OPEN",
+        timeoutMs: 4_000,
+        onSubmitted: () => firstEvidence.push("submitted"),
+        onConsumed: () => firstEvidence.push("consumed"),
+      });
+      await waitFor(() => firstEvidence.join(",") === "submitted,consumed");
+
+      const queued = runtime.submit({
+        taskId: "evidence-queued",
+        from: "reviewer",
+        text: "event-first multi assistant",
+        timeoutMs: 4_000,
+        onSubmitted: () => queuedEvidence.push("submitted"),
+        onConsumed: () => queuedEvidence.push("consumed"),
+      });
+      await Bun.sleep(75);
+      expect(queuedEvidence).toEqual([]);
+
+      const sessionDir = grokSessionDirectory(fixture.grokHome, fixture.cwd, SESSION);
+      appendJson(join(sessionDir, "chat_history.jsonl"), {
+        type: "assistant",
+        content: "FINAL evidence-active",
+      });
+      appendJson(join(sessionDir, "events.jsonl"), { type: "turn_ended", outcome: "completed" });
+      expect((await first).replyText).toBe("FINAL evidence-active");
+      expect((await queued).replyText).toBe("FINAL evidence-queued");
+      expect(firstEvidence).toEqual(["submitted", "consumed"]);
+      expect(queuedEvidence).toEqual(["submitted", "consumed"]);
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 10_000);
+
   test("arbitrates a live PTY, settles final JSONL, attaches once, and resumes", async () => {
     const fixture = new RuntimeFixture();
     let runtime: GrokCopresenceRuntimeSession | undefined;

@@ -35,6 +35,10 @@ export interface GrokCliTurnOptions {
   /** Paths the model must not read through built-in Read/Grep tools. */
   protectedPaths?: readonly string[];
   signal?: AbortSignal;
+  /** The exact prompt worker was spawned successfully. */
+  onSubmitted?: () => void;
+  /** The first parsed JSONL event from this per-turn worker. */
+  onConsumed?: () => void;
   onEvent?: (event: GrokCliEvent) => void;
   onStderr?: (line: string) => void;
 }
@@ -240,6 +244,7 @@ export async function runGrokCliTurn(opts: GrokCliTurnOptions): Promise<GrokCliT
       reject(error);
       return;
     }
+    opts.onSubmitted?.();
 
     let stdoutBuffer = "";
     let stderrBuffer = "";
@@ -250,6 +255,7 @@ export async function runGrokCliTurn(opts: GrokCliTurnOptions): Promise<GrokCliT
     let stopReason: string | undefined;
     let requestId: string | undefined;
     let eventCount = 0;
+    let consumptionReported = false;
     let sawEnd = false;
     let idleTimer: ReturnType<typeof setTimeout> | undefined;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
@@ -317,6 +323,10 @@ export async function runGrokCliTurn(opts: GrokCliTurnOptions): Promise<GrokCliT
         return;
       }
       armIdleTimer();
+      if (!consumptionReported) {
+        consumptionReported = true;
+        opts.onConsumed?.();
+      }
       opts.onEvent?.(event);
       if (event.type === "error") {
         cliError = typeof event.message === "string" ? event.message : "unknown Grok CLI error";

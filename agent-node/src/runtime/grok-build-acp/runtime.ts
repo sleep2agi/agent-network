@@ -80,6 +80,10 @@ export interface GrokAcpTurnOptions {
   mcpServers?: AcpMcpServerEntry[];
   onSession?: (sessionId: string) => void | Promise<void>;
   onEvent?: (event: GrokAcpNotification, state: GrokTurnState) => void;
+  /** Exact session/prompt request entered the ACP client. */
+  onSubmitted?: () => void;
+  /** Exact session/prompt response completed. Session-wide notifications alone are insufficient. */
+  onConsumed?: () => void;
   /**
    * #204 preview.4 — Grok agent's stderr stream (handshake errors, MCP
    * subprocess crash logs, etc.). Caller routes this to agent-node's
@@ -255,10 +259,13 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
     // turns no longer get falsely killed mid-flight, but a genuinely
     // stuck agent (no frames for `timeoutMs`) still surfaces an error
     // with a hint that the work may still be running in the background.
-    const promptResponse = await client.requestWithIdleTimeout("session/prompt", {
+    const promptRequest = client.requestWithIdleTimeout("session/prompt", {
       sessionId,
       prompt: [{ type: "text", text: opts.prompt }],
     }, timeoutMs);
+    opts.onSubmitted?.();
+    const promptResponse = await promptRequest;
+    opts.onConsumed?.();
     await waitForPromptDrain(state, drainMs);
 
     return {

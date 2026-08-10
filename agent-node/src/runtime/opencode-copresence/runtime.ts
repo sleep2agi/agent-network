@@ -63,7 +63,12 @@ export interface OpenCodeCopresenceSession {
   readonly attachScriptPath: string;
   readonly isRunning: boolean;
   notify(message: string, timeoutMs?: number, sender?: string): Promise<void>;
-  submit(prompt: string, timeoutMs?: number, sender?: string): Promise<OpenCodeCopresenceSubmitResult>;
+  submit(
+    prompt: string,
+    timeoutMs?: number,
+    sender?: string,
+    evidence?: { onSubmitted?: () => void; onConsumed?: () => void },
+  ): Promise<OpenCodeCopresenceSubmitResult>;
   close(): Promise<void>;
 }
 
@@ -478,7 +483,12 @@ export async function openVettedOpenCodeCopresence(
           }, timeoutMs);
         })();
       },
-      submit(prompt: string, timeoutMs = 300_000, sender?: string) {
+      submit(
+        prompt: string,
+        timeoutMs = 300_000,
+        sender?: string,
+        evidence?: { onSubmitted?: () => void; onConsumed?: () => void },
+      ) {
         const operation = queue.then(async () => {
           if (!session.isRunning) throw new Error("OpenCode copresence server is not running");
           await waitUntilSessionIdle(url, password, created.id, timeoutMs);
@@ -518,6 +528,12 @@ export async function openVettedOpenCodeCopresence(
           if (message?.info?.role !== "assistant" || message?.info?.parentID !== messageId) {
             throw new Error("OpenCode reply was not owned by the submitted network message");
           }
+          // OpenCode 1.18.1 exposes no exact per-message start event on this
+          // REST lane. The causally-parented assistant response is later but
+          // authoritative; report both evidence levels here rather than at
+          // idle admission or before an unconfirmed POST.
+          evidence?.onSubmitted?.();
+          evidence?.onConsumed?.();
           const replyText = parseMessageReply(message);
           if (!replyText) {
             throw new Error("OpenCode POST /session/:id/message returned no assistant text");
@@ -641,7 +657,8 @@ export async function openOpenCodeCopresenceRuntime(
       get attachScriptPath() { return core!.attachScriptPath; },
       get isRunning() { return core!.isRunning; },
       notify: (message, timeoutMs, sender) => core!.notify(message, timeoutMs, sender),
-      submit: (prompt, timeoutMs, sender) => core!.submit(prompt, timeoutMs, sender),
+      submit: (prompt, timeoutMs, sender, evidence) =>
+        core!.submit(prompt, timeoutMs, sender, evidence),
       async close() {
         await core!.close();
         if (!cleanup()) {
