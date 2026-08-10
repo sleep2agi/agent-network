@@ -1,0 +1,40 @@
+# test185 — external node schedule inventory
+
+Date: 2026-08-10
+Issue: #185
+Base: 936a4110354ee26efcda7455554f202365743e2a
+Source commit: 80132996f265c0ca8f95d501e1134f525064c140
+Image: anet-test185:dev
+Image ID: sha256:66e1feb7e3298d56bbb9b1f154f7e8be19de63dcb5f67abf7e07ae731b806c4a
+Embedded TEST185_SOURCE_COMMIT: 80132996f265c0ca8f95d501e1134f525064c140
+
+## Result
+
+PASS — 8 checks.
+
+- A real Hub and real agent-node heartbeat carried a bounded external-schedule snapshot.
+- The Hub response exposed only the manifest contract and a basename `log_ref`; the supplied host path was absent.
+- A missing manifest produced an explicit empty inventory, distinct from a legacy node that omitted the capability.
+- Unknown manifest fields failed closed and did not leak a command string.
+- Unit tests: 4 pass / 9 assertions.
+- REST projection tests: 5 pass / 30 assertions.
+- Removing both production heartbeat wiring anchors made the real-wire assertion fail (`witnessed-red`).
+- The agent-node production build completed in the image.
+
+Command:
+
+    sg docker -c 'docker build -f tests/test185-external-schedules/Dockerfile --build-arg TEST185_SOURCE_COMMIT=80132996f265c0ca8f95d501e1134f525064c140 -t anet-test185:dev .'
+    sg docker -c 'docker run --rm anet-test185:dev'
+
+## Security and semantics
+
+- The input is a fixed `external-schedules.json` beside the selected node config; Agent Network does not inspect cron, systemd, or tmux automatically.
+- The schema is exact, capped at 64 KiB / 64 entries, and rejects duplicate IDs, unknown keys, symlinks, non-files, invalid timestamps, and invalid enum values.
+- No command is accepted. `log_path` is reduced to a basename `log_ref` before it leaves the node.
+- The snapshot is stored on the token-bound session inside the existing status transaction.
+- Omitted heartbeat data preserves the prior value for backward compatibility; an explicit empty list clears it.
+- Dashboard/API wording must treat the data as node-reported inventory, not verified execution state.
+
+## Honest limitation
+
+The repository-wide server TypeScript command is not a usable candidate gate on this base: it reports numerous pre-existing rootDir, MCP SDK, BlobPart, and test-tree errors. Runtime server tests and the real Hub wire test above passed; this report does not claim the repository-wide server typecheck passed.

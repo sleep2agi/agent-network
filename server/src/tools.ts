@@ -483,6 +483,22 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         uptime_seconds: z.number().nullable().optional(),
         in_flight_count: z.number().nullable().optional(),
       }).optional().describe("Per-agent process telemetry reported by agent-node"),
+      external_schedules: z.object({
+        observed_at: z.string().datetime({ offset: true }).max(64),
+        schedules: z.array(z.object({
+          id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/),
+          name: z.string().min(1).max(200),
+          kind: z.enum(["cron", "systemd", "tmux", "playwright", "custom"]),
+          frequency: z.string().min(1).max(120),
+          last_run_at: z.string().datetime({ offset: true }).max(64).nullable(),
+          last_status: z.enum(["success", "failed", "running", "unknown"]),
+          last_error: z.string().max(500).nullable(),
+          next_run_at: z.string().datetime({ offset: true }).max(64).nullable(),
+          log_ref: z.string().min(1).max(255).nullable(),
+          enabled: z.boolean(),
+        }).strict()).max(64),
+        error: z.enum(["invalid_manifest", "unsafe_manifest", "read_failed"]).optional(),
+      }).strict().optional().describe("Bounded node-reported external schedule snapshot; never includes host paths or commands"),
       // RFC-024 B6 — masked snapshot of the node's effective config
       // (model + 6 dashboard-editable flags). Secrets ARE NOT in this
       // shape (env._envRef stays on host); the dashboard reads this
@@ -513,7 +529,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         }).optional(),
       }).optional().describe("RFC-024 — masked node config snapshot"),
     },
-    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, config_snapshot: cfgSnap }) => {
+    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap }) => {
       const effectiveNetId = getNetworkId(netId);
       const sessionNetId = effectiveNetId ?? "default";
       if (!callerTokenIsNetwork || !enforceNetworkId) {
@@ -598,6 +614,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const processCpuPct = typeof proc?.cpu_pct === "number" ? proc.cpu_pct : null;
       const processUptimeSeconds = typeof proc?.uptime_seconds === "number" ? proc.uptime_seconds : null;
       const processInFlightCount = typeof proc?.in_flight_count === "number" ? proc.in_flight_count : null;
+      const externalSchedulesJson = externalSchedules === undefined ? null : JSON.stringify(externalSchedules);
       const statusHostTelemetry = host ? {
         hostname: hostHostname,
         ip: hostIp,
@@ -622,8 +639,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // Only delete same-alias sessions within the same network
         db.run("DELETE FROM sessions WHERE alias = ?1 AND resume_id != ?2 AND network_id = ?3", [effectiveAlias, resume_id, sessionNetId]);
         db.run(
-          `INSERT INTO sessions (resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version, status, task, output, progress, score, node_id, session_id, config_path, channels, network_id, model, cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb, disk_used_gb, disk_avail_gb, process_rss_bytes, process_rss_mb, process_cpu_pct, process_uptime_seconds, process_in_flight_count, last_seen_at, updated_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, datetime('now'), datetime('now'))
+          `INSERT INTO sessions (resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version, status, task, output, progress, score, node_id, session_id, config_path, channels, network_id, model, cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb, disk_used_gb, disk_avail_gb, process_rss_bytes, process_rss_mb, process_cpu_pct, process_uptime_seconds, process_in_flight_count, external_schedules, last_seen_at, updated_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, datetime('now'), datetime('now'))
            ON CONFLICT(resume_id) DO UPDATE SET
              alias = COALESCE(?2, sessions.alias), tmux_name = COALESCE(?3, sessions.tmux_name),
              server = COALESCE(?4, sessions.server), ip = COALESCE(?5, sessions.ip),
@@ -648,8 +665,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
              process_cpu_pct = COALESCE(?31, sessions.process_cpu_pct),
              process_uptime_seconds = COALESCE(?32, sessions.process_uptime_seconds),
              process_in_flight_count = COALESCE(?33, sessions.process_in_flight_count),
+             external_schedules = COALESCE(?34, sessions.external_schedules),
              last_seen_at = datetime('now'), updated_at = datetime('now')`,
-          [resume_id, effectiveAlias, tmux ?? null, srv ?? null, hostIp, hostHostname, ag ?? null, pd ?? null, ver ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null, sessionNetId, mdl ?? null, cpuLoad1m, cpuCores, memTotalGb, memUsedGb, memAvailGb, diskTotalGb, diskUsedGb, diskAvailGb, processRssBytes, processRssMb, processCpuPct, processUptimeSeconds, processInFlightCount]
+          [resume_id, effectiveAlias, tmux ?? null, srv ?? null, hostIp, hostHostname, ag ?? null, pd ?? null, ver ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null, sessionNetId, mdl ?? null, cpuLoad1m, cpuCores, memTotalGb, memUsedGb, memAvailGb, diskTotalGb, diskUsedGb, diskAvailGb, processRssBytes, processRssMb, processCpuPct, processUptimeSeconds, processInFlightCount, externalSchedulesJson]
         );
         if (host || proc) {
           db.run(

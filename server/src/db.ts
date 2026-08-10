@@ -89,6 +89,7 @@ for (const col of [
   { name: "process_cpu_pct", def: "REAL" },
   { name: "process_uptime_seconds", def: "REAL" },
   { name: "process_in_flight_count", def: "INTEGER" },
+  { name: "external_schedules", def: "TEXT" },
 ]) {
   try { db.exec(`ALTER TABLE sessions ADD COLUMN ${col.name} ${col.def}`); } catch {}
 }
