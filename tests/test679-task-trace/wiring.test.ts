@@ -30,7 +30,12 @@ describe("#167 three-entry trace denominator", () => {
 
   it("keeps the channel MCP response shape byte-compatible", () => {
     const channel = read("agent-network/src/node-server.ts");
-    expect(channel).toContain('return { content: [{ type: "text", text: JSON.stringify(result) }] };');
+    expect(channel).toContain([
+      '    return { content: [{ type: "text", text: JSON.stringify(result) }] };',
+      '  }',
+      '',
+      '  if (name === "commhub_send_message")',
+    ].join("\n"));
     expect(channel).not.toContain('...(result?.ok === false || result?.error ? { isError: true } : {})');
   });
 });
