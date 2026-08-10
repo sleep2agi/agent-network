@@ -21,13 +21,13 @@ COPY server /app/server
 COPY agent-network /app/agent-network
 COPY agent-node /app/agent-node
 COPY tests/lib /app/tests/lib
-COPY tests/test466-codex-copresence-p3 /app/tests/test466-codex-copresence-p3
 
 RUN cd /app/server && bun install --silent
 # node-pty is unrelated to the tmux-managed co-presence path under test.
 # Keep its native postinstall out of this image, as the other CLI E2E suites do.
 RUN cd /app/agent-network && bun install --silent --ignore-scripts
 RUN cd /app/agent-node && bun install --silent --ignore-scripts
+COPY tests/test466-codex-copresence-p3 /app/tests/test466-codex-copresence-p3
 RUN install -m 0755 /app/tests/test466-codex-copresence-p3/anet-local /usr/local/bin/anet \
     && install -m 0755 /app/tests/test466-codex-copresence-p3/agent-node-local /usr/local/bin/agent-node \
     && chmod +x /app/tests/test466-codex-copresence-p3/run.sh \
