@@ -24,7 +24,7 @@
 ## 1. 安装 CLI
 
 ```bash
-npm install -g @sleep2agi/agent-network
+npm install -g bun @sleep2agi/agent-network@latest
 ```
 
 验证：
@@ -91,14 +91,6 @@ stable 版 `anet node create` 列出正式版的 runtime（`claude-agent-sdk` / 
 
 启动节点：
 
-::: warning 全新安装选了 claude-agent-sdk / codex-sdk？先装 agent-node
-这两个 runtime 依赖 `agent-node` 包。首次 `node start` 的 npx 自动拉取需要约 1 分钟，当前版本的启动检查**不等它拉完**就报 `agent-node is not installed or cannot report a version` 退出（真机复现，[#450](https://github.com/sleep2agi/agent-network/issues/450) 精确立案，#237 为同族）。先跑一句再启动即可：
-
-```bash
-npm install -g @sleep2agi/agent-node
-```
-:::
-
 ```bash
 anet node start my-bot
 ```
@@ -139,7 +131,6 @@ anet node start my-bot
 :::
 
 ::: warning 带坑 / 未验证 (请自行评估)
-- **`claude-agent-sdk` / `codex-sdk` 的首次 `node start`**：latest 上 `agent-node` 懒加载没拉完就退（`agent-node is not installed...`，[#450](https://github.com/sleep2agi/agent-network/issues/450)）。先 `npm i -g @sleep2agi/agent-node` 再启动即可（见上方步骤 4 提示）。
 - `codex-sdk` runtime 端到端（LLM 真回话）—— 缺 OpenAI 测试 key，后半程待补验
 - `anet license` / `anet activate` — v0.6 legacy, OSS 用户无需操作（详 [troubleshooting](/troubleshooting#license-expired-授权过期-legacy-行为)）
 - `anet network create` 跨用户网络共享 — 代码已合并但未做 E2E 回归

@@ -24,7 +24,7 @@ With both installed, `commhub-server` / `agent-node` are auto-fetched on first u
 ## 1. Install the CLI
 
 ```bash
-npm install -g @sleep2agi/agent-network
+npm install -g bun @sleep2agi/agent-network@latest
 ```
 
 Verify:
@@ -91,14 +91,6 @@ On stable, `anet node create` lists **4 production runtimes** (`claude-agent-sdk
 
 Start the node:
 
-::: warning Fresh install + claude-agent-sdk / codex-sdk? Install agent-node first
-These runtimes depend on the `agent-node` package. The first `node start` triggers an npx auto-fetch that takes ~1 minute, but the current startup check **doesn't wait for it** and exits with `agent-node is not installed or cannot report a version` (reproduced on real hardware, [#450](https://github.com/sleep2agi/agent-network/issues/450) (precise filing; #237 is the umbrella)). Run this once before starting:
-
-```bash
-npm install -g @sleep2agi/agent-node
-```
-:::
-
 ```bash
 anet node start my-bot
 ```
@@ -139,7 +131,6 @@ Detailed test reports: [Changelog](/en/changelog) + [test reports](https://githu
 :::
 
 ::: warning Has caveats / not verified (use at your own risk)
-- **`claude-agent-sdk` / `codex-sdk` first `node start`**: on latest, `agent-node`'s lazy-fetch isn't awaited and it exits early (`agent-node is not installed...`, [#450](https://github.com/sleep2agi/agent-network/issues/450)). Run `npm i -g @sleep2agi/agent-node` first, then start (see the Step 4 note above).
 - `codex-sdk` runtime end-to-end (real LLM reply) — no OpenAI test key yet, the second half is pending verification
 - `anet license` / `anet activate` — v0.6 legacy, OSS users don't need to touch these (see [troubleshooting](/en/troubleshooting#license-expired-license-expired-legacy-behavior))
 - `anet network create` and cross-user network sharing — code merged but no E2E regression

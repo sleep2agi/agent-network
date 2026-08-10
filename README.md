@@ -27,7 +27,7 @@
 需要 Node.js ≥ 22.13.0。`anet -v` 不需要 Bun；启动 Hub（`anet hub start`）需要 Bun ≥ 1.2.0。
 
 ```bash
-npm install -g @sleep2agi/agent-network@latest
+npm install -g bun @sleep2agi/agent-network@latest
 anet -v
 
 # 终端 1
