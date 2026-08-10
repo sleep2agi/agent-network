@@ -115,6 +115,28 @@ describe("buildGrokCliArgs", () => {
 });
 
 describe("runGrokCliTurn", () => {
+  it("reports spawn submission before first exact JSONL event consumption", async () => {
+    const { root, binary } = fakeGrok(`
+      setTimeout(() => {
+        process.stdout.write(JSON.stringify({type:"text",data:"DONE"}) + "\\n");
+        process.stdout.write(JSON.stringify({type:"end",stopReason:"EndTurn",sessionId:"session-evidence"}) + "\\n");
+      }, 25);
+    `);
+    const evidence: string[] = [];
+    const turn = runGrokCliTurn({
+      prompt: "exact evidence",
+      cwd: root,
+      binary,
+      idleTimeoutMs: 1_000,
+      onSubmitted: () => evidence.push("submitted"),
+      onConsumed: () => evidence.push("consumed"),
+    });
+    await Bun.sleep(5);
+    expect(evidence).toEqual(["submitted"]);
+    await turn;
+    expect(evidence).toEqual(["submitted", "consumed"]);
+  });
+
   it("reduces streaming JSON text and persists the end-event session", async () => {
     const { root, binary } = fakeGrok(`
       process.stdout.write(JSON.stringify({type:"thought",data:"hidden"}) + "\\n");

@@ -178,6 +178,10 @@ export interface GrokCopresenceThinkOptions {
   from: string;
   text: string;
   timeoutMs?: number;
+  /** Called after this exact task is written into the owned TUI. */
+  onSubmitted?: () => void;
+  /** Called after the exact trusted network_user envelope appears in JSONL. */
+  onConsumed?: () => void;
 }
 
 export interface GrokCopresenceThinkResult {
@@ -608,6 +612,10 @@ interface PendingTask {
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
   queued: boolean;
+  submitted: boolean;
+  consumed: boolean;
+  onSubmitted?: () => void;
+  onConsumed?: () => void;
 }
 
 interface ApprovalInputAction {
@@ -920,6 +928,10 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         reject: rejectTask,
         timer,
         queued: wasBusy,
+        submitted: false,
+        consumed: false,
+        onSubmitted: opts.onSubmitted,
+        onConsumed: opts.onConsumed,
       });
       // Yield one event-loop turn so a human key already readable on the
       // attach socket can claim the composer before network injection.
@@ -1703,6 +1715,15 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           taskId: effect.task.taskId,
         });
         this.pty.write(formatNetworkTuiInput(effect.task));
+        const pending = this.pending.get(effect.task.taskId);
+        if (pending && !pending.submitted) {
+          pending.submitted = true;
+          try {
+            pending.onSubmitted?.();
+          } catch (error) {
+            this.warn(`[grok-copresence] runtime-submitted callback failed: ${errorMessage(error)}`);
+          }
+        }
         this.log(`[grok-copresence] injected network task ${effect.task.taskId} from=${effect.task.from}`);
       } catch (error) {
         unregisterOwnedNetworkTask(this.logState, effect.task.taskId);
@@ -1852,6 +1873,16 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         const active = this.arbitration.activeTurn;
         if (active?.owner !== "network" || active.task.taskId !== event.task.taskId) {
           this.warn(`[grok-copresence] dropped mismatched network user log task=${event.task.taskId}`);
+          return;
+        }
+        const pending = this.pending.get(event.task.taskId);
+        if (pending && !pending.consumed) {
+          pending.consumed = true;
+          try {
+            pending.onConsumed?.();
+          } catch (error) {
+            this.warn(`[grok-copresence] consumed callback failed: ${errorMessage(error)}`);
+          }
         }
         return;
       }

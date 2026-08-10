@@ -260,6 +260,10 @@ export function codexAppServerThink(
     steerIfExternalTurn?: boolean;
     /** Exact owned-turn progress; callers may relay a throttled Hub heartbeat. */
     onActivity?: (event: CodexAppServerTaskActivity) => void;
+    /** Exact body entered turn/start or turn/steer; FIFO admission is excluded. */
+    onSubmitted?: (event: { taskId: string; turnId?: string; steered?: boolean }) => void;
+    /** Exact task_started identity proof; queue admission alone is not enough. */
+    onConsumed?: (event: { taskId: string; turnId: string; steered?: boolean }) => void;
   },
 ): Promise<CodexAppServerThinkResult> {
   const timeoutMs = opts.timeoutMs ?? 10 * 60_000;
@@ -274,6 +278,8 @@ export function codexAppServerThink(
   return new Promise<CodexAppServerThinkResult>((resolve) => {
     let settled = false;
     let queueDeadlineElapsed = false;
+    let submittedReported = false;
+    let consumedReported = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let lastResponseActivityAt = 0;
     let queueTimer: ReturnType<typeof setTimeout> | undefined;
@@ -283,6 +289,7 @@ export function codexAppServerThink(
       settled = true;
       bridge.off("task_reply", onReply);
       bridge.off("task_error", onError);
+      bridge.off("task_runtime_submitted", onSubmitted);
       bridge.off("task_started", onStarted);
       bridge.off("task_activity", onActivity);
       bridge.off("drain_deferred", onRequeued);
@@ -336,9 +343,26 @@ export function codexAppServerThink(
       // it immediately instead of leaving a ghost row behind a model timer.
       if (bridge.cancelQueuedTask(opts.taskId)) finishQueueTimeout();
     };
+    const onSubmitted = (ev: { taskId: string; turnId?: string; steered?: boolean }) => {
+      if (ev.taskId !== opts.taskId || submittedReported) return;
+      submittedReported = true;
+      try {
+        opts.onSubmitted?.(ev);
+      } catch (error) {
+        log(`[codex-app-server] runtime-submitted callback failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    };
     const onStarted = (ev: { taskId: string; turnId: string; steered?: boolean }) => {
       if (ev.taskId !== opts.taskId) return;
       log(`[codex-app-server] task_started ${ev.taskId} turn=${ev.turnId}${ev.steered ? " (steered)" : ""}`);
+      if (!consumedReported) {
+        consumedReported = true;
+        try {
+          opts.onConsumed?.(ev);
+        } catch (error) {
+          log(`[codex-app-server] consumed callback failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
       armResponseIdleTimer();
     };
     const onActivity = (ev: CodexAppServerTaskActivity) => {
@@ -381,6 +405,7 @@ export function codexAppServerThink(
 
     bridge.on("task_reply", onReply);
     bridge.on("task_error", onError);
+    bridge.on("task_runtime_submitted", onSubmitted);
     bridge.on("task_started", onStarted);
     bridge.on("task_activity", onActivity);
     bridge.on("drain_deferred", onRequeued);

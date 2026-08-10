@@ -245,12 +245,24 @@ describe("OpenCode native serve+attach copresence", () => {
 
       await runtime.notify("notice:dashboard-message", 5_000);
 
-      const [one, two] = await Promise.all([
-        runtime.submit("one", 5_000),
-        runtime.submit("two", 5_000),
-      ]);
+      const oneEvidence: string[] = [];
+      const twoEvidence: string[] = [];
+      const first = runtime.submit("one", 5_000, undefined, {
+        onSubmitted: () => oneEvidence.push("submitted"),
+        onConsumed: () => oneEvidence.push("consumed"),
+      });
+      const second = runtime.submit("two", 5_000, undefined, {
+        onSubmitted: () => twoEvidence.push("submitted"),
+        onConsumed: () => twoEvidence.push("consumed"),
+      });
+      // FIFO admission and idle checks are not runtime evidence.
+      expect(oneEvidence).toEqual([]);
+      expect(twoEvidence).toEqual([]);
+      const [one, two] = await Promise.all([first, second]);
       expect(one.replyText).toBe("FAKE_REPLY:one");
       expect(two.replyText).toBe("FAKE_REPLY:two");
+      expect(oneEvidence).toEqual(["submitted", "consumed"]);
+      expect(twoEvidence).toEqual(["submitted", "consumed"]);
       expect(runtime.isRunning).toBe(true);
     } finally {
       await runtime?.close();

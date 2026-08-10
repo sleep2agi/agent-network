@@ -335,6 +335,57 @@ process.stdin.on("data", (chunk) => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  test("reports submission before exact prompt-response consumption", async () => {
+    const root = mkdtempSync(join(tmpdir(), "opencode-runtime-evidence-"));
+    const launchBase = makeLaunchBase("runtime-evidence");
+    const workDir = join(root, "node");
+    const binary = makeStubBinary(launchBase, `
+      let buf = "";
+      process.stdin.on("data", (chunk) => {
+        buf += chunk;
+        while (buf.includes("\\n")) {
+          const idx = buf.indexOf("\\n");
+          const line = buf.slice(0, idx).trim();
+          buf = buf.slice(idx + 1);
+          if (!line) continue;
+          const req = JSON.parse(line);
+          if (req.method === "initialize") {
+            process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: req.id, result: {} }) + "\\n");
+          } else if (req.method === "session/new") {
+            process.stdout.write(JSON.stringify({
+              jsonrpc: "2.0", id: req.id, result: { sessionId: "ses_evidence" },
+            }) + "\\n");
+          } else if (req.method === "session/prompt") {
+            setTimeout(() => process.stdout.write(JSON.stringify({
+              jsonrpc: "2.0", id: req.id, result: { stopReason: "end_turn" },
+            }) + "\\n"), 20);
+          }
+        }
+      });
+    `);
+    let session: Awaited<ReturnType<typeof openOpencodeRuntime>> | null = null;
+    const evidence: string[] = [];
+    try {
+      mkdirSync(workDir, { mode: 0o700 });
+      session = await openOpencodeRuntime({ cwd: root, workDir, binary, launchBase });
+      const thinking = opencodeThink(session, {
+        prompt: "consume this exact prompt",
+        cwd: root,
+        workDir,
+        onSubmitted: () => evidence.push("submitted"),
+        onConsumed: () => evidence.push("consumed"),
+      });
+      await Bun.sleep(5);
+      expect(evidence).toEqual(["submitted"]);
+      await thinking;
+      expect(evidence).toEqual(["submitted", "consumed"]);
+    } finally {
+      if (session?.client.isRunning) await session.client.stop("SIGKILL");
+      rmSync(launchBase, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("openOpencodeRuntime — opening lifecycle", () => {

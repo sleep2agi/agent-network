@@ -33,6 +33,11 @@ import { bumpFailure, resetFailure, applyAutoPause, resolveMaxConsecutiveFailure
 import { formatSelfLoopsBlock } from "./goals/format";
 import { startTelegramWatchdog } from "./telegram-watchdog";
 import { sseAbandonGuidance } from "./sse-recovery-guidance";
+import {
+  createTaskRuntimeEvidenceReporter,
+  logicalTaskIdFromInbox,
+  type TaskRuntimeEvidenceReporter,
+} from "./task-runtime-evidence";
 import type { AgentGoal } from "./goals/types";
 import { extractExplicitDelegation } from "./explicit-delegation";
 import { maskedEnv } from "./secret-mask";
@@ -1808,7 +1813,12 @@ if (NEW_SESSION && RUNTIME === "grok" && GROK_EXECUTION_MODE === "cli") {
 const HAD_GROK_SESSION_AT_BOOT = RUNTIME === "grok" && !!SESSION_ID;
 let grokResumeHintFired = false;
 
-async function processWithClaude(task: string, from: string, images?: string[]): Promise<string> {
+async function processWithClaude(
+  task: string,
+  from: string,
+  images?: string[],
+  evidence?: TaskRuntimeEvidenceReporter,
+): Promise<string> {
   // #259 Y (2026-06-25, 通信龙 GO after MiniMax-M3 real-call verified):
   // image capability is per-MODEL (not per-vendor) — the create wizard
   // writes `flags.modelImageCapable: true` when the picked model is on
@@ -2327,7 +2337,10 @@ async function processWithClaude(task: string, from: string, images?: string[]):
         const forward = () => ac.abort();
         signal.addEventListener("abort", forward, { once: true });
         try {
-          for await (const message of query({ prompt, options })) {
+          const messages = query({ prompt, options });
+          evidence?.submitted();
+          for await (const message of messages) {
+            evidence?.consumed();
             const m = message as any;
             if (m.type === "system" && m.subtype === "init") {
               claudeSessionId = m.session_id;
@@ -2610,7 +2623,12 @@ const CODEX_CONFIG = new Proxy({} as Record<string, any>, {
   getOwnPropertyDescriptor: (_t, prop) => Object.getOwnPropertyDescriptor(getCodexConfig(), prop),
 });
 
-async function processWithCodex(task: string, from: string, images?: string[]): Promise<string> {
+async function processWithCodex(
+  task: string,
+  from: string,
+  images?: string[],
+  evidence?: TaskRuntimeEvidenceReporter,
+): Promise<string> {
   // Ensure system-installed codex binary is found (npm global bin)
   try {
     const { execSync } = await import("child_process");
@@ -2685,10 +2703,12 @@ async function processWithCodex(task: string, from: string, images?: string[]): 
     const outcome = await withTimeout(
       async (signal) => {
         const { events } = await codexThread.runStreamed(input, { signal });
+        evidence?.submitted();
         let finalResponse = "";
         let usage: any = null;
         let itemCount = 0;
         for await (const ev of events) {
+          evidence?.consumed();
           if (ev.type === "item.started") {
             const it = ev.item as any;
             debug(`[codex] ${it.type}${it.command ? `: ${it.command.slice(0, 60)}` : it.tool ? `: ${it.server}/${it.tool}` : ""}`);
@@ -2793,7 +2813,12 @@ async function ensureCodexStdio(): Promise<import("./runtime/codex-stdio-client"
   return client;
 }
 
-async function processWithCodexStdio(task: string, _from: string, images?: string[]): Promise<string> {
+async function processWithCodexStdio(
+  task: string,
+  _from: string,
+  images?: string[],
+  evidence?: TaskRuntimeEvidenceReporter,
+): Promise<string> {
   const client = await ensureCodexStdio();
   if (!codexStdioThreadId) {
     // Note on wire conventions (see #120 R225 + Phase 1.4 smoke discovery):
@@ -2848,6 +2873,11 @@ async function processWithCodexStdio(task: string, _from: string, images?: strin
       const tStart = Date.now();
       const turnResp = await client.request<{ turn?: { id?: string }; turnId?: string }>("turn/start", { threadId: codexStdioThreadId, input });
       pendingTurnId = (turnResp?.turn?.id ?? turnResp?.turnId) || null;
+      // Direct stdio does not yet send/echo clientUserMessageId, so the
+      // response turn id is admission evidence only (the #587 race proved it
+      // is not authoritative ownership). Report submitted, never consumed,
+      // until this lane grows an exact identity echo.
+      evidence?.submitted();
       log(`[codex-stdio] turn/start → ${pendingTurnId ?? "(no id)"} ${(Date.now() - tStart)}ms`);
     } catch (e: any) {
       client.off("item/completed", onItemCompleted);
@@ -2941,11 +2971,19 @@ function sanitizeGrokCommhubLeak(text: string): string {
 // Stable string marker for release tarball inspection. Bun minifies function
 // identifiers, so keep an independently reachable literal in the bundle.
 const OPENCODE_PROCESS_BUNDLE_MARKER = "processWithOpencode";
-async function processWithOpencode(task: string, _from: string, _images?: string[]): Promise<string> {
+async function processWithOpencode(
+  task: string,
+  _from: string,
+  _images?: string[],
+  evidence?: TaskRuntimeEvidenceReporter,
+): Promise<string> {
   debug(`[${OPENCODE_PROCESS_BUNDLE_MARKER}] dispatch`);
   if (opencodeMode === "copresence") {
     const runtime = await ensureOpencodeCopresenceRuntime();
-    const outcome = await runtime.submit(task, undefined, _from);
+    const outcome = await runtime.submit(task, undefined, _from, {
+      onSubmitted: evidence?.submitted,
+      onConsumed: evidence?.consumed,
+    });
     log(`[opencode-copresence] turn done | reply=${outcome.replyText.length}ch session=${runtime.sessionId.slice(0, 12)}`);
     return outcome.replyText || "（无回复）";
   }
@@ -3002,6 +3040,8 @@ async function processWithOpencode(task: string, _from: string, _images?: string
     sessionId: opencodeRuntimeSession.sessionId,
     log,
     warn,
+    onSubmitted: evidence?.submitted,
+    onConsumed: evidence?.consumed,
   });
 
   const u = outcome.state.usage;
@@ -3106,6 +3146,7 @@ async function processWithCodexAppServer(
   _from: string,
   taskId: string | null,
   steerIfExternalTurn = false,
+  evidence?: TaskRuntimeEvidenceReporter,
 ): Promise<string> {
   const { openCodexAppServerRuntime, codexAppServerThink, codexAppServerReplyOrThrow } =
     await import("./runtime/codex-app-server/runtime");
@@ -3173,6 +3214,8 @@ async function processWithCodexAppServer(
         debug(`[codex-app-server] activity report_status failed: ${error instanceof Error ? error.message : String(error)}`);
       });
     },
+    onSubmitted: evidence?.submitted,
+    onConsumed: evidence?.consumed,
   });
 
   // Throw failed outcomes into processTask's existing failure path so the Hub
@@ -3180,7 +3223,12 @@ async function processWithCodexAppServer(
   return codexAppServerReplyOrThrow(outcome);
 }
 
-async function processWithGrok(task: string, from: string, images?: string[]): Promise<string> {
+async function processWithGrok(
+  task: string,
+  from: string,
+  images?: string[],
+  evidence?: TaskRuntimeEvidenceReporter,
+): Promise<string> {
   if (images?.length) {
     warn(`[grok] image attachments received but Grok ACP fixture reports promptCapabilities.image=false; sending text-only prompt`);
   }
@@ -3358,6 +3406,8 @@ async function processWithGrok(task: string, from: string, images?: string[]): P
           debug(`[grok] skipped replay chunks=${state.skippedReplay}`);
         }
       },
+      onSubmitted: evidence?.submitted,
+      onConsumed: evidence?.consumed,
       // #204 preview.4 — surface Grok stderr (carries MCP subprocess
       // handshake / spawn errors). Lines tagged so `anet logs` filtering
       // is obvious. Severity routing: lines mentioning error/fail/cannot
@@ -3803,6 +3853,7 @@ async function processWithGrokCopresence(
   from: string,
   taskId: string | null,
   images?: string[],
+  evidence?: TaskRuntimeEvidenceReporter,
 ): Promise<string> {
   if (images?.length) {
     warn(`[grok-copresence] image attachments are not wired into the shared TUI; sending text-only task`);
@@ -3820,6 +3871,8 @@ async function processWithGrokCopresence(
       from,
       text: task,
       timeoutMs: grokCopresenceTimeoutMs(),
+      onSubmitted: evidence?.submitted,
+      onConsumed: evidence?.consumed,
     });
     return sanitizeGrokCommhubLeak(result.replyText || "（无回复）");
   } catch (error) {
@@ -3847,7 +3900,12 @@ async function processWithGrokCopresence(
   }
 }
 
-async function processWithGrokCli(task: string, from: string, images?: string[]): Promise<string> {
+async function processWithGrokCli(
+  task: string,
+  from: string,
+  images?: string[],
+  evidence?: TaskRuntimeEvidenceReporter,
+): Promise<string> {
   if (images?.length) {
     warn(`[grok-cli] image attachments are not wired into --prompt-json yet; sending text-only prompt`);
   }
@@ -4018,6 +4076,8 @@ async function processWithGrokCli(task: string, from: string, images?: string[])
           "/proc",
         ],
         signal: controller.signal,
+        onSubmitted: evidence?.submitted,
+        onConsumed: evidence?.consumed,
         onEvent: (event) => {
           if (event.type === "end") debug(`[grok-cli] end stopReason=${event.stopReason || "unknown"}`);
         },
@@ -4176,6 +4236,7 @@ function think(
   taskId: string | null,
   images?: string[],
   steerIfExternalTurn = false,
+  evidence?: TaskRuntimeEvidenceReporter,
 ): Promise<string> {
   if (configApplyDraining) {
     // Don't accept new work during a restart drain. The error string
@@ -4204,24 +4265,24 @@ function think(
         // Preview.N+1 (after Vincent macOS verify) will flip the default
         // and switch the toggle to ANET_CODEX_LEGACY_SDK=1 opt-out.
         if (process.env.ANET_CODEX_STDIO_DIRECT === "1") {
-          return await processWithCodexStdio(task, from, images);
+          return await processWithCodexStdio(task, from, images, evidence);
         }
-        return await processWithCodex(task, from, images);
+        return await processWithCodex(task, from, images, evidence);
       }
       if (RUNTIME === "grok") {
         return GROK_EXECUTION_MODE === "cli"
           ? GROK_COPRESENCE
-            ? await processWithGrokCopresence(task, from, taskId, images)
-            : await processWithGrokCli(task, from, images)
-          : await processWithGrok(task, from, images);
+            ? await processWithGrokCopresence(task, from, taskId, images, evidence)
+            : await processWithGrokCli(task, from, images, evidence)
+          : await processWithGrok(task, from, images, evidence);
       }
       if (RUNTIME === "opencode") {
-        return await processWithOpencode(task, from, images);
+        return await processWithOpencode(task, from, images, evidence);
       }
       if (RUNTIME === "codex-app-server") {
-        return await processWithCodexAppServer(task, from, taskId, steerIfExternalTurn);
+        return await processWithCodexAppServer(task, from, taskId, steerIfExternalTurn, evidence);
       }
-      return await processWithClaude(task, from, images);
+      return await processWithClaude(task, from, images, evidence);
     } finally {
       if (prev !== undefined) process.env.CURRENT_TASK_ID = prev; else delete process.env.CURRENT_TASK_ID;
       decrementInFlight();
@@ -4234,7 +4295,7 @@ function think(
   // its own process environment and task identity is carried in the prompt.
   if (RUNTIME === "codex-app-server") {
     incrementInFlight();
-    return processWithCodexAppServer(task, from, taskId, steerIfExternalTurn)
+    return processWithCodexAppServer(task, from, taskId, steerIfExternalTurn, evidence)
       .finally(() => {
         decrementInFlight();
       });
@@ -4344,12 +4405,20 @@ async function processTask(
   let failed = false;
   let grokFailureCode: string | null = null;
   let grokFailureSubcode: string | null = null;
+  const runtimeEvidence = createTaskRuntimeEvidenceReporter({
+    taskId,
+    report: (level, exactTaskId) => callCommHub(
+      level === "submitted" ? "mark_tasks_runtime_submitted" : "mark_tasks_consumed",
+      { task_ids: [exactTaskId] },
+    ),
+    debug,
+  });
   try {
     // Every inbound network task must be visible in the shared Grok TUI. A2
     // delegation is intentionally human-only, so the legacy network-side
     // wrapper is skipped for copresence and remains unchanged elsewhere.
     text = (GROK_COPRESENCE ? null : await tryHandleExplicitDelegation(augmentedTask, from, taskId))
-      || await think(augmentedTask, from, taskId, images, steerIfExternalTurn);
+      || await think(augmentedTask, from, taskId, images, steerIfExternalTurn, runtimeEvidence);
   } catch (err: any) {
     text = `${RUNTIME} 错误: ${err.message}`;
     failed = true;
@@ -4407,7 +4476,7 @@ async function processTask(
     );
     await new Promise((r) => setTimeout(r, backoff));
     try {
-      const retried = await think(augmentedTask, from, taskId, images, steerIfExternalTurn);
+      const retried = await think(augmentedTask, from, taskId, images, steerIfExternalTurn, runtimeEvidence);
       text = retried;
       failed = false;
       if (GROK_COPRESENCE) {
@@ -4570,6 +4639,10 @@ async function processInbox() {
       const from = msg.from_session || "hub";
       const content = msg.content as string;
       const msgType = msg.type || "task";
+      // inbox.id identifies this delivery row. task_id identifies the stable
+      // logical task across retry/reassign. Keep ACK on the transport row,
+      // but bind runtime evidence and replies to the logical task.
+      const logicalTaskId = logicalTaskIdFromInbox(msg);
       const images = await extractImagePaths(msg);
       const inboundLogSuffix = GROK_EXECUTION_MODE === "cli"
         ? ` (${content.length} chars; content withheld)`
@@ -4594,7 +4667,7 @@ async function processInbox() {
         log(formatInboxSkipLog({
           sender: from,
           reason: skip,
-          taskId: String(msg.id),
+          taskId: logicalTaskId,
           messageType: msgType,
         }));
         await ackMessage(msg.id).catch((e: any) => warn(`ack failed for skipped ${msg.id.slice(0, 8)}: ${e.message}`));
@@ -4615,7 +4688,7 @@ async function processInbox() {
         try {
           // Goal state is durable and bypasses processTask. Keep the Grok
           // preview's redact-before-persistence invariant on this branch too.
-          const created = await createScheduledGoal(persistenceSafeContent, from, msg.id);
+          const created = await createScheduledGoal(persistenceSafeContent, from, logicalTaskId);
           replyText = `[${ALIAS}] ${created}`;
         } catch (e: any) {
           replyText = `[${ALIAS}] /aloop 创建失败：${e.message}`;
@@ -4626,7 +4699,7 @@ async function processInbox() {
           persistenceSafeContent,
           interactiveDashboardTask,
         );
-        await deliverReplyReliably(from, replyText, msg.id, goalFailed);
+        await deliverReplyReliably(from, replyText, logicalTaskId, goalFailed);
         await ackMessage(msg.id).catch((e: any) => warn(`ack failed for goal ${msg.id.slice(0, 8)}: ${e.message}`));
         return;
       }
@@ -4635,7 +4708,7 @@ async function processInbox() {
       const taskOutcome = await processTask(
         content,
         from,
-        msg.id,
+        logicalTaskId,
         images,
         interactiveDashboardTask,
       );
@@ -4668,7 +4741,7 @@ async function processInbox() {
 
       // (3c-e) Persist + ack + try send.
       const replyBody = `[${ALIAS}] ${result.slice(0, 2000)}`;
-      await deliverReplyReliably(from, replyBody, msg.id, failed);
+      await deliverReplyReliably(from, replyBody, logicalTaskId, failed);
       await ackMessage(msg.id).catch((e: any) => warn(`ack failed for ${msg.id.slice(0, 8)}: ${e.message}`));
     } finally {
       inflightMessageIds.delete(msg.id);
