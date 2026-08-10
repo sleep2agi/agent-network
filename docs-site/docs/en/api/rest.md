@@ -1314,13 +1314,48 @@ curl -X POST http://localhost:9200/api/task \
 | `priority` | enum | | `high` / `normal` (default) / `low` |
 | `from` | string | | Sender identifier (default `"api"`) |
 | `network_id` | string | | Target network (utok\_ caller; ntok\_ is force-bound) |
+| `parent_task_id` | string | | Parent task for automatic reply chaining. Omit it when no authoritative current task id is available. |
 | `ttl_seconds` | number | | Expiry in seconds (default 3600). Not part of the schema — server reads it directly from `body.ttl_seconds` at [`index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts). |
 
 **Response** (success):
 
 ```json
-{ "ok": true, "message_id": "uuid-xxx" }
+{ "ok": true, "task_id": "uuid-xxx", "message_id": "uuid-xxx" }
 ```
+
+`task_id` is the canonical task identifier. `message_id` is retained as a
+compatibility alias and currently has the same value.
+
+### MCP-first delegation and REST fallback
+
+Use the CommHub MCP `send_task` / `get_task` tools when the current model
+session actually exposes them. If they are absent, use the authenticated REST
+path explicitly; do not invent a tool call or claim that chaining is present:
+
+```bash
+TASK_ID=$(curl -fsS -X POST http://localhost:9200/api/task \
+  -H "Authorization: Bearer $COMMHUB_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"alias":"coder-1","task":"Inspect the failure","priority":"normal"}' \
+  | jq -r '.task_id')
+
+curl -fsS "http://localhost:9200/api/tasks/$TASK_ID" \
+  -H "Authorization: Bearer $COMMHUB_TOKEN"
+```
+
+When an authoritative current task id is available, include it as
+`parent_task_id`; otherwise omit the field. Omitting it means the child result
+will not automatically chain back to an upstream task.
+
+The single-task response includes a top-level `diagnostic` object. Its `code`,
+`action_hint`, and `evidence` report only facts the Hub can observe: task
+lifecycle state, target registration/status, network-scoped live SSE count,
+and authoritative runtime submission/consumption timestamps. A diagnostic
+does not prove whether MCP tools are mounted in an external model session, nor
+does it prove the root cause of a stalled task.
+
+Both routes are network-scoped. Use an `Authorization` header; do not put a
+token in the query string.
 
 **Common 4xx errors**:
 

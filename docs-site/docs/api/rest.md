@@ -1377,13 +1377,44 @@ curl -X POST http://localhost:9200/api/task \
 | `priority` | enum | | `high` / `normal`（默认）/ `low` |
 | `from` | string | | 发送者标识（默认 `"api"`） |
 | `network_id` | string | | 目标 network（utok\_ 调用时；ntok\_ 调用强制绑定） |
+| `parent_task_id` | string | | 用于自动回串结果的父任务 ID；没有权威当前任务 ID 时应省略。 |
 | `ttl_seconds` | number | | 过期秒数（默认 3600；非 schema 字段，server 在 [`index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) 直接取 `body.ttl_seconds`） |
 
 **响应**（成功）：
 
 ```json
-{ "ok": true, "message_id": "uuid-xxx" }
+{ "ok": true, "task_id": "uuid-xxx", "message_id": "uuid-xxx" }
 ```
+
+`task_id` 是 canonical task identifier；`message_id` 为兼容旧调用方保留，
+当前与 `task_id` 相同。
+
+### MCP 优先与 REST fallback
+
+当前模型会话确实挂载 CommHub MCP 时，优先使用 `send_task` / `get_task`。
+若工具面板没有这些工具，应显式走带认证的 REST 路径，不得虚构工具调用，
+也不得声称任务链已经建立：
+
+```bash
+TASK_ID=$(curl -fsS -X POST http://localhost:9200/api/task \
+  -H "Authorization: Bearer $COMMHUB_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"alias":"代码1号","task":"排查这个故障","priority":"normal"}' \
+  | jq -r '.task_id')
+
+curl -fsS "http://localhost:9200/api/tasks/$TASK_ID" \
+  -H "Authorization: Bearer $COMMHUB_TOKEN"
+```
+
+只有拿到权威的当前任务 ID 时才传 `parent_task_id`；否则省略。省略意味着
+子任务结果不会自动回串到上游任务。
+
+单任务响应包含顶层 `diagnostic`。其中 `code`、`action_hint` 和 `evidence`
+只陈述 Hub 可观测事实：任务生命周期、目标注册/状态、按 network 隔离的实时
+SSE 连接数，以及权威 runtime submission/consumption 时间戳。它不能证明外部模型会话是否挂载了 MCP tools，也不能把相关性冒充为卡住任务的根因。
+
+两个 REST endpoint 都受 network scope 约束。认证请使用 `Authorization` header，
+不要把 token 放进 URL query。
 
 **常见 4xx**：
 
