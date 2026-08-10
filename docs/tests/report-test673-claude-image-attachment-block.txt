@@ -1,0 +1,111 @@
+================================================================
+test673 — Claude SDK multimodal image-block wiring (#259)
+================================================================
+
+Date: 2026-08-10
+Base: 0bd599db232cadedaaca471d798ae23e3430ebb7 (origin/main)
+Source commit: 16e8df78643846f1c3399a6707feb436fa17e501
+Scope: tests/test673-claude-image-attachment-block/** only
+Production source delta: none
+
+Docker image:
+  tag: anet-test259:dev
+  image id: sha256:c3e7b3a40c2f4978c6ee655bb72864cd7f3e66b33ed22ffa52ee7786db800044
+  embedded TEST673_SOURCE_COMMIT:
+    16e8df78643846f1c3399a6707feb436fa17e501
+
+Final result:
+  PASS=32
+  FAIL=0
+
+What the final Docker run exercised
+------------------------------------
+
+The harness starts the real CommHub server and the real agent-node CLI.
+Only the external claude-agent-sdk query call is replaced with a preload
+stub; the production CLI, Hub HTTP/SSE flow, upload/download resolver,
+processTask/think dispatch and prompt construction are not reimplemented.
+
+1. A real 1x1 PNG is uploaded to the real Hub and represented by file_id.
+2. A real /api/task delivery reaches agent-node over SSE.
+3. agent-node downloads the exact PNG bytes through /api/files/:file_id.
+4. processWithClaude receives the resolved image and constructs an
+   AsyncIterable<SDKUserMessage>.
+5. query({prompt}) receives one base64 image block with media_type=image/png,
+   byte-identical to the upload, plus the text block.
+6. A task without attachments reaches query({prompt}) as the historical
+   string prompt and retains its unique task marker.
+7. The same image delivery with flags.modelImageCapable=false reaches query
+   as a string with zero image blocks. The unverified profile cannot receive
+   image bytes merely because an attachment exists.
+
+Witnessed-red mutations
+-----------------------
+
+Both mutations require an exact production anchor and assert a byte change
+before running. The production file is restored after each phase.
+
+1. Dispatch threading:
+   processWithClaude(task, from, images, evidence)
+     -> processWithClaude(task, from, undefined, evidence)
+
+   The task still arrives and query still runs, but its prompt changes to a
+   string with image_block_count=0. This proves the images argument is the
+   load-bearing link, rather than the red result coming from a dead task.
+
+2. Per-model capability gate:
+   if (hasImages && modelImageCapable)
+     -> if (hasImages)
+
+   A profile explicitly configured modelImageCapable=false then receives the
+   image block. This is the intended safety-contract violation and proves the
+   negative gate is load-bearing.
+
+Harness hardening found during this run
+---------------------------------------
+
+The inherited, previously unmerged test673 was not accepted as evidence.
+Two concrete harness failures were found and fixed before the final run:
+
+- It killed only a shell PID and left Bun node processes orphaned. Those stale
+  processes made later phases consume tasks and caused false green/red results.
+  The final harness starts Hub and node under their own exact process groups,
+  sends TERM then bounded KILL fallback, waits the exact group leader, and
+  leaves no test673 process behind. Six pre-existing test673 orphan PIDs were
+  individually inspected and terminated; no name-pattern kill was used.
+- Its bare-name Bun module mock worked in the host dependency layout but did
+  not intercept the installed SDK entrypoint inside Docker. The failed Docker
+  probe therefore reached the real SDK with a literal fake key and was stopped;
+  it is not counted as PASS. The final preload resolves the SDK from
+  agent-node/package.json and registers both the installed entrypoint identity
+  and public specifier. The final canonical Docker run proves the stub is used.
+- The old Dockerfile omitted unzip, which the Bun installer requires. The
+  failed build is not counted; the final image declares the dependency.
+- Bare rm -rf was replaced with the repository safe_rm_rf guard.
+
+Scope and evidence limits
+-------------------------
+
+- This is a deterministic orchestration/wire test. It proves the actual SDK
+  message shape delivered by the production CLI, not a new vendor capability.
+- The historical production commit 1eaaf622 records the real MiniMax-M3 red
+  and blue PNG calls and their correct visual descriptions; that is the real
+  vendor evidence behind the imageCapable registry entry. This test does not
+  reuse or expose the vendor credential.
+- Models not explicitly marked imageCapable remain on the text-only path.
+- No production CLI/runtime/server source changed in this candidate.
+
+Commands
+--------
+
+  sg docker -c 'docker build \
+    --build-arg TEST673_SOURCE_COMMIT=16e8df78643846f1c3399a6707feb436fa17e501 \
+    -f tests/test673-claude-image-attachment-block/Dockerfile \
+    -t anet-test259:dev .'
+
+  sg docker -c 'docker run --rm anet-test259:dev'
+
+Verdict: PASS. The previously untested #259 query-wiring and capability
+boundary are now protected by exact-SHA Docker behavior and two non-vacuous
+mutations. Candidate remains unmerged pending independent review.
+================================================================
