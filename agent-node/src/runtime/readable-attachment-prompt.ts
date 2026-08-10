@@ -2,7 +2,6 @@ import { resolve } from "node:path";
 
 const PATH_PROMPT_RUNTIME_SET = new Set([
   "codex-app-server",
-  "grok",
   "opencode",
 ]);
 

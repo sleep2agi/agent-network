@@ -66,7 +66,7 @@ expect_mutation_red \
   structured-image-lane-isolation \
   agent-node/src/runtime/readable-attachment-prompt.ts \
   $'  "opencode",\n]);' \
-  $'  "opencode",\n  "claude",\n]);' \
+  $'  "opencode",\n  "grok",\n]);' \
   'cd /workspace/agent-node && bun test src/runtime/readable-attachment-prompt.test.ts'
 
 expect_mutation_red \

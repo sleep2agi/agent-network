@@ -10,15 +10,14 @@ describe("readable attachment prompt", () => {
   test("pins the exact runtime set without changing structured-image SDK lanes", () => {
     expect([
       "codex-app-server",
-      "grok",
       "opencode",
     ].filter(runtimeNeedsReadableAttachmentPrompt)).toEqual([
       "codex-app-server",
-      "grok",
       "opencode",
     ]);
     expect(runtimeNeedsReadableAttachmentPrompt("claude")).toBe(false);
     expect(runtimeNeedsReadableAttachmentPrompt("codex")).toBe(false);
+    expect(runtimeNeedsReadableAttachmentPrompt("grok")).toBe(false);
   });
 
   test("injects absolute deduplicated paths and escapes control characters", () => {
