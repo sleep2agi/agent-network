@@ -2,10 +2,10 @@
 
 Date: 2026-08-10
 Base: a1d6831d9b31e8d5742f0eb01fd4b80fdd2464c3
-Source commit: 6548ffe30ac5a5832de08dedb2a0c49bcbb66495
+Source commit: da7292700ea0d5be4067cf6b7ec15021d26de3f4
 Image: anet-test689:dev
-Image ID: sha256:4a26c38f0485f439495239e45935a871fb81e0c5f6ae1b84534cc2ce9aa413d5
-Embedded TEST689_SOURCE_COMMIT: 6548ffe30ac5a5832de08dedb2a0c49bcbb66495
+Image ID: sha256:a5e06452f269c84e96a4de706d21c1adf0f252ddc6262d8fccf08d60c631f885
+Embedded TEST689_SOURCE_COMMIT: da7292700ea0d5be4067cf6b7ec15021d26de3f4
 
 ## Result
 
@@ -16,6 +16,7 @@ PASS. No production deployment, merge, npm publish, global install, or host cron
 - Production `agent-node` bundle: PASS (268 modules).
 - Restored green after mutations: 18 pass, 0 fail, 84 assertions.
 - Hub/agent strict cron parser files: byte-identical.
+- Repository destructive-rm guard: PASS. Mutation cleanup uses the shared fail-closed `safe_rm_rf` helper.
 
 ## Security properties exercised
 
@@ -29,7 +30,7 @@ PASS. No production deployment, merge, npm publish, global install, or host cron
 
 ## Witnessed-red mutations
 
-All eight mutations changed source bytes and produced a non-empty failing log before the normal source was restored:
+All eight mutations passed an explicit before/after SHA-256 byte-change guard and produced a non-empty failing log before the normal source was restored:
 
 1. bypass command fingerprint
 2. bypass revision CAS
