@@ -311,6 +311,16 @@ try {
   if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
 }
 
+// RFC-036 / B4 — immutable per-node owner. New nodes receive this value in
+// the same transaction that mints their node token. Heartbeats may verify the
+// binding but must never first-claim or replace it. Legacy NULL rows remain
+// read-only for external-schedule writes.
+try {
+  db.exec(`ALTER TABLE nodes ADD COLUMN owner_user_id TEXT`);
+} catch (e: any) {
+  if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+}
+
 // RFC-026 §9 / #338 PR2 — daemon self-declare fields promoted from
 // config_snapshot to first-class indexable columns. The hub
 // `list_host_supervisors` MCP tool reads these directly without parsing
@@ -505,6 +515,7 @@ for (const ddl of [
   "ALTER TABLE api_tokens ADD COLUMN request_id TEXT",
   "ALTER TABLE api_tokens ADD COLUMN revoked_at TEXT",
   "ALTER TABLE api_tokens ADD COLUMN role TEXT",
+  "ALTER TABLE api_tokens ADD COLUMN bound_node_id TEXT",
 ]) {
   try { db.exec(ddl); }
   catch (e: any) {
@@ -513,6 +524,8 @@ for (const ddl of [
 }
 try { db.exec(`CREATE INDEX IF NOT EXISTS idx_tokens_request ON api_tokens(request_id)`); }
 catch (e: any) { /* index may already exist */ void e; }
+try { db.exec(`CREATE INDEX IF NOT EXISTS idx_tokens_bound_node ON api_tokens(bound_node_id)`); }
+catch (e: any) { void e; }
 
 // RFC-026 v4 §2.5 + §4.4 — node_create_requests. Metadata only;
 // env_blob NEVER lives in this table (F1 mint-stream-evict — secret
@@ -1142,6 +1155,39 @@ db.exec(`
     ON scheduled_task_runs(network_id, created_at DESC);
 `);
 try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN misfire_policy TEXT NOT NULL DEFAULT 'catch_up_once'"); } catch {}
+
+// RFC-036 / B4 — owner-authorized edits of node-host managed schedules.
+// This is intentionally separate from Hub scheduled_tasks: these rows are
+// one-shot control intents consumed by the exact token-bound node. The partial
+// unique index makes the single-flight promise survive multiple Hub workers.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS external_schedule_edits (
+    intent_id          TEXT PRIMARY KEY,
+    network_id         TEXT NOT NULL,
+    node_id            TEXT NOT NULL,
+    schedule_id        TEXT NOT NULL,
+    base_revision      INTEGER NOT NULL,
+    patch_json         TEXT NOT NULL,
+    status             TEXT NOT NULL DEFAULT 'pending',
+    expires_at         INTEGER NOT NULL,
+    created_at         INTEGER NOT NULL,
+    delivered_at       INTEGER,
+    acked_at           INTEGER,
+    created_by_user    TEXT NOT NULL,
+    created_by_token   TEXT NOT NULL,
+    consumed_by_token  TEXT,
+    result_revision    INTEGER,
+    error_code         TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_external_schedule_edits_node
+    ON external_schedule_edits(network_id, node_id, status, created_at);
+  CREATE INDEX IF NOT EXISTS idx_external_schedule_edits_owner
+    ON external_schedule_edits(created_by_user, created_at DESC);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_external_schedule_edits_singleflight
+    ON external_schedule_edits(node_id, schedule_id)
+    WHERE status IN ('pending', 'delivered');
+`);
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id)"); } catch {}
 
 // Helpers

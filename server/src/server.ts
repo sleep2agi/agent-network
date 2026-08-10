@@ -44,6 +44,7 @@ import {
 import { resolveRestFromSession } from "./rest-identity.js";
 import { stampTaskAuthOrigin, type TaskAuthOrigin } from "./task-auth-origin.js";
 import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startScheduledTaskScheduler } from "./scheduled-tasks.js";
+import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
 import { recordDeliveredStaleEvents } from "./task-lifecycle-watcher.js";
 
 const PORT = Number(process.env.PORT) || 9200;
@@ -1025,7 +1026,7 @@ return Bun.serve({
       try {
         const body = await req.json() as any;
         if (!body.network_id || !body.node_name) return withCors(req, Response.json({ ok: false, error: "network_id and node_name required" }, { status: 400 }));
-        const result = createNetworkTokenForNode(resolved.user.user_id, body.network_id, body.node_name);
+        const result = createNetworkTokenForNode(resolved.user.user_id, body.network_id, body.node_name, body.node_id);
         if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "node_token_created", "network", body.network_id, body.node_name);
         return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
       } catch (e: any) {
@@ -1428,6 +1429,19 @@ return Bun.serve({
     if (restScope.denied) {
       return withCors(req, Response.json({ ok: false, error: restScope.denied }, { status: 403 }));
     }
+
+    // RFC-036 owner-gated host schedule edits. This handler independently
+    // verifies exact node ownership and node-token binding; network admin is
+    // deliberately not an override.
+    const requestCredential = requestToken(req);
+    const externalScheduleEditResponse = await handleExternalScheduleEditRequest({
+      req,
+      url,
+      auth: restAuth,
+      isUserToken: requestCredential.startsWith("utok_"),
+      isNodeToken: requestCredential.startsWith("ntok_"),
+    });
+    if (externalScheduleEditResponse) return withCors(req, externalScheduleEditResponse);
 
     // Hub-owned scheduled tasks. Dashboard and mobile are management
     // clients only; each occurrence is dispatched as an ordinary task by the
