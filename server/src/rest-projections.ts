@@ -27,8 +27,8 @@ export const AUDIT_LOG_REST_COLUMNS = [
 ] as const;
 
 export const TASK_EVENT_REST_COLUMNS = [
-  "id", "task_id", "from_status", "to_status", "actor", "detail", "created_at",
-  "network_id",
+  "id", "task_id", "from_status", "to_status", "event_type", "actor", "detail",
+  "created_at", "network_id",
 ] as const;
 
 export const TASK_REST_COLUMNS = [

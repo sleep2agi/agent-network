@@ -244,6 +244,8 @@ db.exec(`
     task_id       TEXT NOT NULL,
     from_status   TEXT,
     to_status     TEXT NOT NULL,
+    event_type    TEXT,
+    event_key     TEXT,
     actor         TEXT NOT NULL DEFAULT 'system',
     detail        TEXT,
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
@@ -781,6 +783,14 @@ try {
 for (const table of ["sessions", "nodes", "tasks", "inbox", "task_events", "completions"]) {
   try { db.exec(`ALTER TABLE ${table} ADD COLUMN network_id TEXT`); } catch {}
 }
+
+// #167 — stable lifecycle event names plus an internal idempotency key.
+// Ordinary status transitions keep event_key NULL, so retries and repeated
+// transitions remain auditable. Watcher warnings set a stable key; the unique
+// index makes every (task, threshold) write-once across patrol rounds/workers.
+try { db.exec("ALTER TABLE task_events ADD COLUMN event_type TEXT"); } catch {}
+try { db.exec("ALTER TABLE task_events ADD COLUMN event_key TEXT"); } catch {}
+try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_task_events_task_key ON task_events(task_id, event_key)"); } catch {}
 
 // PR-1 (#146): durable node identity on historical inbox/tasks rows. Some
 // existing databases created `tasks` before from_node_id/to_node_id were in the
@@ -1484,12 +1494,25 @@ export function chainReplyToParent(
   return { chained };
 }
 
+function taskEventTypeForStatus(toStatus: string): string {
+  switch (toStatus) {
+    case "delivered": return "task.send.delivered";
+    case "acked": return "task.ack";
+    case "running": return "task.started";
+    case "replied": return "task.replied";
+    case "expired": return "task.expired";
+    case "failed":
+    case "cancelled": return "task.failed";
+    default: return `task.status.${toStatus}`;
+  }
+}
+
 export function logTaskEvent(taskId: string, fromStatus: string | null, toStatus: string, actor: string, detail?: string) {
   try {
     db.run(
-      `INSERT INTO task_events (task_id, from_status, to_status, actor, detail, network_id)
-       VALUES (?1, ?2, ?3, ?4, ?5, (SELECT network_id FROM tasks WHERE task_id = ?1))`,
-      [taskId, fromStatus, toStatus, actor, detail ?? null]
+      `INSERT INTO task_events (task_id, from_status, to_status, event_type, actor, detail, network_id)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, (SELECT network_id FROM tasks WHERE task_id = ?1))`,
+      [taskId, fromStatus, toStatus, taskEventTypeForStatus(toStatus), actor, detail ?? null]
     );
   } catch {}
 }

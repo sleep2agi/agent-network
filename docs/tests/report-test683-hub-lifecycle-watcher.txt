@@ -1,0 +1,89 @@
+# test683 — Hub lifecycle watcher (#167 B3-A backend)
+
+Date: 2026-08-10 (Asia/Shanghai)
+Base: b214a7f9954acea9fda0d134ca3cfbd8019abc7a
+Source commit: ea197924a2f5aad9522f757ab9821b067cb36be4
+Docker image: anet-test167-b3:dev
+Docker image ID: sha256:bbd28103ea17c215e3e547b49cdb7564a50877a90a532e3c3dd36c22bb9b0691
+Embedded TEST683_SOURCE_COMMIT: ea197924a2f5aad9522f757ab9821b067cb36be4
+Runner artifact SHA256: 3412721dbbea41506574f35113e7f2a2399746da855eb3fe44b6955c1d77a1e9
+
+## Scope
+
+This is the backend-only B3-A increment. It reuses the existing `task_events`
+audit table and adds:
+
+- standard `event_type` names for ordinary Hub lifecycle transitions;
+- a Hub-owned 30s/60s delivered-stale watcher;
+- an internal `event_key` protected by a unique `(task_id, event_key)` index,
+  making each stale threshold write-once across patrol rounds, restarts, and
+  workers;
+- an additive legacy-database migration for both columns and the index;
+- an explicit REST projection which exposes `event_type` but not `event_key`.
+
+The watcher only reads tasks whose authoritative Hub status remains
+`delivered`, inherits the task's `network_id`, and runs under `startHub` every
+five seconds (environment-overridable for tests). It does not change task
+status, inbox state, delivery, retries, or the existing expiration patrol.
+
+This commit does not touch Dashboard code or artifact metadata. In particular,
+it does not expose host-local artifact paths.
+
+## Witnessed red
+
+The test-only commit `db6bc7238c1ba5d672d1f4e189d2e20266a387b5`
+was built and run in Docker before production code existed. It failed with
+rc=1 because `task-lifecycle-watcher.js` did not exist (0 pass / 1 fail / 1
+module error). That proves the pre-change tree did not already satisfy this
+suite; the load-bearing gates below additionally isolate individual behavior.
+
+## Exact-source Docker result
+
+Commands:
+
+    sg docker -c 'docker build --build-arg TEST683_SOURCE_COMMIT=ea197924a2f5aad9522f757ab9821b067cb36be4 -t anet-test167-b3:dev -f tests/test683-hub-lifecycle-watcher/Dockerfile .'
+    sg docker -c 'docker run --rm -v /tmp/test683-exact.T8BcMD:/artifacts anet-test167-b3:dev'
+
+Result: PASS
+
+- Production Bun bundle: PASS (259 modules).
+- Legacy `task_events` migration: PASS; existing row bytes were not rewritten.
+- Real Hub + real SQLite: 5 pass / 0 fail / 26 assertions.
+- 29s stays silent; exact 30s emits only the 30s event; exact 60s emits both.
+- Non-delivered and missing-delivery-time tasks stay silent.
+- A second patrol inserts zero rows; total remains one row per task/threshold.
+- Standard delivered/ack/started/replied/failed/expired event names: PASS.
+- REST returns `event_type`, keeps internal `event_key` absent: PASS.
+- A real child `startHub` process crosses the threshold after startup and the
+  periodic watcher persists the event: PASS.
+- Canonical aggregate runner, filtered to this new suite: 5 pass / 0 fail / 26
+  assertions, `bad=false`.
+
+The complete repository aggregate is not claimed by this narrow image; it is
+left to the pull request's ordinary CI because several unrelated server tests
+require agent-node and test fixture trees that this Dockerfile intentionally
+does not copy.
+
+## Load-bearing mutations
+
+All eight mutations required one exact anchor and a production byte change.
+The unchanged test suite turned red for each:
+
+1. remove `(task_id, event_key)` conflict suppression: rc=1;
+2. move the 30-second threshold to 31 seconds: rc=1;
+3. admit `acked` tasks to the watcher: rc=1;
+4. drop task `network_id` propagation: rc=1;
+5. remove public `event_type`: rc=1;
+6. leak internal `event_key` through REST: rc=1;
+7. map `acked` to the wrong standard event name: rc=1;
+8. remove the live `startHub` watcher timer: rc=1.
+
+The restored production tree returned to 5 pass / 0 fail / 26 assertions.
+
+## Honest boundary
+
+This backend increment provides durable lifecycle/stale events. The separate
+Dashboard follow-up may fix its existing TaskDrawer field mapping, with
+before/after screenshots and no change to the top four-step timeline semantics.
+Artifact presentation remains held for a separate privacy-reviewed design;
+host absolute paths are explicitly out of scope.
