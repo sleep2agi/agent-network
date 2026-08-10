@@ -1,0 +1,55 @@
+# test30 — deterministic mock LLM protocol
+
+Date: 2026-08-10
+Base: a88deb227f021f8194ef5b7e2c89abdfd2b35f29
+Source commit: ec7f1b52592fe4442b73c043e2818a4ab4e922b4
+Docker tag: anet-test30-mock-llm:dev
+Docker image ID: sha256:ca8a9f1a683e6dbcc882dd8d889b7707cc7a6be44d5f9475747fa58f7f69ecc9
+Embedded ENV: TEST30_SOURCE_COMMIT=ec7f1b52592fe4442b73c043e2818a4ab4e922b4
+Runner artifact SHA256: b989948f90d70ff3ed3389fe44e5b76b386920bedff5faee856019ee06dbbb38
+
+Command:
+
+    sg docker -c 'docker build -t anet-test30-mock-llm:dev \
+      --build-arg SOURCE_COMMIT=ec7f1b52592fe4442b73c043e2818a4ab4e922b4 \
+      -f tests/test30-mock-llm-smoke/Dockerfile .'
+    sg docker -c 'docker run --rm -v <artifact-dir>:/artifacts \
+      anet-test30-mock-llm:dev'
+
+Result: PASS=13 FAIL=0
+
+Passing gates:
+
+1. agent-network TypeScript typecheck.
+2. Reference HTTP server starts and reports its immutable rule count.
+3. First matching substring wins in file order.
+4. step-N discriminators select independent replies.
+5. Repeated prompts return the same reply without cursor state.
+6. Unmatched prompts return the exact fallback and warn on stderr.
+7. Invalid request JSON returns HTTP 400.
+8. Malformed fixture JSON fails before listen.
+9. Unknown fixture keys fail before listen.
+10. Duplicate fixture keys fail before listen.
+11. Non-string fixture values fail before listen.
+12. Real `anet demo pr-review` runs the shared reviewer fan-out, barrier,
+    judge, and Markdown renderer with deterministic replies.
+13. An unset `MOCK_LLM_REPLIES_FILE` preserves the real Hub preflight and
+    never enters mock mode.
+
+Witnessed-red mutations:
+
+- `findIndex` -> `findLastIndex`: the broad-first fixture no longer returns
+  rule 0 (`MUTATION_RED: first-match`).
+- Remove unmatched-prompt warning: stderr warning assertion fails
+  (`MUTATION_RED: fallback-warning`).
+- Force mock mode without explicit env opt-in: the unset-env real-path gate
+  fails and the missing fixture is rejected
+  (`MUTATION_RED: mock-opt-in`).
+
+Boundary:
+
+This suite proves deterministic demo orchestration and the shared mock
+protocol. It does not prove a real LLM vendor endpoint, credential, model,
+network path, or general agent runtime. Mock mode is scoped to
+`anet demo pr-review`; other commands and agent-node runtimes do not consume
+the opt-in variable.
