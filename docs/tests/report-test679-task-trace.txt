@@ -1,0 +1,54 @@
+# test679 — #167 send_task trace A-layer
+
+Date: 2026-08-10
+Base: `0fe8040394276637c60707fdc7fafd362606bc4b`
+Source commit: `032070ff1b15bbe124c54810a0bb881eb62f28ca`
+Docker image: `anet-test167:dev`
+Image ID: `sha256:91488a6b49a342e02517ae2b1f2fda3ffca13e26bb33ea70d2a9b5df60525ded`
+Embedded ENV: `TEST679_SOURCE_COMMIT=032070ff1b15bbe124c54810a0bb881eb62f28ca`
+
+## Result
+
+`RESULT: PASS`
+
+- True CommHub process + true SQLite: three independent tasks persisted through
+  `mcp_http`, `sdk_mcp_proxy`, and `channel_mcp_proxy`.
+- True-Hub entry denominator: 3/3; 17 wire assertions.
+- Wiring contract: 3 tests, 7 assertions.
+- Existing MCP identity + trace contract: 8 tests, 13 assertions.
+- `agent-node` production bundle: PASS.
+- `agent-network` typecheck, production bundles, declarations, and obfuscation: PASS.
+- Shared formatter drift gate: the two independently published package copies
+  are byte-identical.
+
+## Witnessed-red mutations
+
+All mutations first verify an exact one-count anchor and a byte-changing patch.
+Each then runs the unchanged denominator contract and exits non-zero:
+
+1. explicit entry `mcp_http` label changed — rc=1.
+2. SDK proxy `sdk_mcp_proxy` label changed — rc=1.
+3. channel proxy `channel_mcp_proxy` label changed — rc=1.
+4. SDK proxy `not_tracked` changed to `tracked` — rc=1.
+5. channel proxy `not_tracked` changed to `tracked` — rc=1.
+
+## Security and compatibility
+
+- Trace payload never includes task content, bearer token, or credential fields.
+- Credential-shaped error fragments are redacted; human fields neutralize
+  control characters; JSON mode emits parseable JSON.
+- An absent parent task is recorded as `parent_task_id=<missing>` rather than
+  silently omitted.
+- The two proxy entries explicitly emit `lifecycle=not_tracked` and never
+  fabricate ack/started/replied/stale observations.
+- The explicit-delegation path records observed ack/running/replied/failure,
+  bounded 30s/60s delivered-stale warnings, and the existing 120s timeout.
+- Send payloads, retry policy, Hub API, database, and task transition semantics
+  are unchanged.
+
+## Honest scope boundary
+
+This is #167 layer A only. A lifecycle watcher for proxy-originated tasks,
+Dashboard lifecycle presentation beyond its existing task-id association, and
+artifact structured events remain layer B. No artifact or Dashboard code was
+changed, and layer A does not claim those surfaces are complete.
