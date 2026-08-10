@@ -161,7 +161,7 @@ try {
   const success = await dispatch();
   const successContent = String(success.params?.content || "");
   assert(successContent.startsWith(originalSuccess), "original Dashboard attachment text is preserved");
-  assert(successContent.includes("[Agent Network 本地附件]"), "production channel injects a local attachment block");
+  assert(successContent.includes("[Agent Network local attachments]"), "production channel injects a local attachment block");
   const pathLine = successContent.split("\n").find((line) => line.startsWith('- "/'));
   const localPath = pathLine ? JSON.parse(pathLine.slice(2)) : "";
   assert(Boolean(localPath) && existsSync(localPath), "injected attachment path exists");

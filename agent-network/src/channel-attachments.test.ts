@@ -40,7 +40,7 @@ describe("Claude channel attachments", () => {
     const content = appendChannelAttachmentPaths("[Dashboard 附件] image.png", result.paths);
     expect(content).toContain("[Dashboard 附件] image.png");
     expect(content).toContain(JSON.stringify(result.paths[0]));
-    expect(content).toContain("请使用 Read 工具");
+    expect(content).toContain("Use the Read tool");
     expect(content).not.toContain("ntok_test_secret");
   });
 
