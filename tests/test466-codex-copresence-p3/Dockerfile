@@ -15,16 +15,19 @@ RUN npm install -g --no-audit --no-fund @openai/codex@0.147.0
 
 WORKDIR /app
 
-COPY server /app/server
-COPY agent-network /app/agent-network
-COPY agent-node /app/agent-node
-COPY tests/lib /app/tests/lib
-
+COPY server/package.json /app/server/package.json
+COPY agent-network/package.json agent-network/package-lock.json /app/agent-network/
+COPY agent-node/package.json /app/agent-node/package.json
 RUN cd /app/server && bun install --silent
 # node-pty is unrelated to the tmux-managed co-presence path under test.
 # Keep its native postinstall out of this image, as the other CLI E2E suites do.
 RUN cd /app/agent-network && bun install --silent --ignore-scripts
 RUN cd /app/agent-node && bun install --silent --ignore-scripts
+
+COPY server /app/server
+COPY agent-network /app/agent-network
+COPY agent-node /app/agent-node
+COPY tests/lib /app/tests/lib
 ARG TEST466_SOURCE_COMMIT=unknown
 ENV TEST466_SOURCE_COMMIT=${TEST466_SOURCE_COMMIT}
 COPY tests/test466-codex-copresence-p3 /app/tests/test466-codex-copresence-p3
