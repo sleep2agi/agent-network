@@ -143,12 +143,15 @@ tmux kill-session -t "=$ALIAS-appsrv" 2>/dev/null || true
 section "3. bridge SIGKILL then exact identity stop"
 start_triplet || { bad "bridge-kill setup failed"; exit 1; }
 UUID=$(jq -r '.marker' "$MARKER")
-BRIDGE_PANE=$(tmux list-panes -a -F '#{session_name}|#{pane_pid}' \
-  | awk -F'|' -v expected="$ALIAS-桥" '$1 == expected { print $2 }')
-if [[ "$BRIDGE_PANE" =~ ^[0-9]+$ ]]; then
+BRIDGE_PANE=$(jq -r '.sessions.bridge.pid // empty' "$MARKER")
+if [[ "$BRIDGE_PANE" =~ ^[0-9]+$ ]] \
+  && kill -0 "$BRIDGE_PANE" 2>/dev/null \
+  && tr '\0' '\n' <"/proc/$BRIDGE_PANE/environ" 2>/dev/null \
+    | grep -Fxq "ANET_NODE_MARKER=$UUID"; then
+  ok "marker bridge hint resolves an exact live identity process"
   kill -KILL "$BRIDGE_PANE"
 else
-  bad "could not resolve exact bridge pane pid"
+  bad "marker bridge hint did not resolve an exact live identity process"
   [[ -s "$TEST466_BRIDGE_LOG" ]] && tail -120 "$TEST466_BRIDGE_LOG"
 fi
 for _ in $(seq 1 30); do ! session_alive "$ALIAS-桥" && break; sleep 0.1; done
