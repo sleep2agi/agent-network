@@ -144,6 +144,7 @@ import {
 import { appendPrivateLogLine, preparePrivateLogDirectory } from "./private-log";
 import { resolveNodeIdSource } from "./runtime/node-id-source";
 import { emitExplicitTaskTrace, sendExplicitTaskWithTrace, waitForExplicitTaskLifecycle, type ExplicitTaskTraceContext } from "./explicit-task-trace";
+import { sendPeerReplyTaskWithTrace } from "./peer-reply-task-trace";
 
 const home = homedir();
 
@@ -1375,12 +1376,16 @@ async function sendReply(
     },
   }) === "send_task") {
     const replyTask = buildCodexAppServerReplyTask(message, failed);
-    const taskResult = await callCommHub("send_task", {
+    const taskResult = await sendPeerReplyTaskWithTrace({
       alias: target,
       task: replyTask.task,
       priority: replyTask.priority,
-      from_session: fromAlias,
-      parent_task_id: taskId || undefined,
+      fromAlias,
+      parentTaskId: taskId || null,
+      networkId: NETWORK_ID || null,
+    }, {
+      log: taskTraceLog,
+      send: (args) => callCommHub("send_task", args),
     });
     return { delivered: true, reply_id: taskResult?.message_id ?? taskResult?.task_id, payload: taskResult };
   }
