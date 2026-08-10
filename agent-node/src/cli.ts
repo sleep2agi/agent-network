@@ -19,6 +19,7 @@ import { claudeCommhubToolAliases } from "./claude-tool-aliases";
 import { getHostTelemetry } from "./host-telemetry";
 import { getProcessTelemetry, incrementInFlight, decrementInFlight } from "./process-telemetry";
 import { readExternalSchedulesSnapshot } from "./external-schedules";
+import { createOwnerScheduleConsumer, type OwnerScheduleConsumer } from "./owner-schedule-consumer";
 import { parseGoalCommand } from "./goals/parser";
 import {
   appendLegacyScheduledGoalNotice,
@@ -748,6 +749,9 @@ function reloadNodeToken(): boolean {
 }
 const LOG_DIR = opts["log-dir"] || join(process.cwd(), ".anet", "nodes", ALIAS, "logs");
 const NODE_DIR = configFilePath ? dirname(configFilePath) : join(process.cwd(), ".anet", "nodes", ALIAS);
+// RFC-036 B4 — immutable for this process lifetime. Runtime/model turns never
+// get to enable this capability; the launcher must opt the node in before boot.
+const OWNER_SCHEDULE_CONTROL_ENABLED = fileConfig.flags?.ownerScheduleControl === true;
 const GOALS_PATH = opts["goals-path"] || fileConfig.flags?.goalsPath || fileConfig.goalsPath || join(NODE_DIR, "goals.json");
 const GOAL_TICK_MS = Math.max(10_000, parseInt(opts["goal-tick-ms"] || process.env.ANET_GOAL_TICK_MS || fileConfig.flags?.goalTickMs || "30000"));
 const goalStore = new GoalStore(GOALS_PATH, GROK_EXECUTION_MODE === "cli"
@@ -1271,7 +1275,9 @@ const register = async () => {
     network_id: NETWORK_ID || undefined,
     host: getHostTelemetry(),
     process_telemetry: getProcessTelemetry(),
-    external_schedules: readExternalSchedulesSnapshot(configFilePath),
+    external_schedules: readExternalSchedulesSnapshot(configFilePath, undefined, {
+      ownerControlEnabled: OWNER_SCHEDULE_CONTROL_ENABLED,
+    }),
   });
   // Server is authoritative: if it told us a canonical alias different
   // from what we just sent, treat that as a snapshot update so the
@@ -1302,7 +1308,9 @@ const reportStatus = async (status: string, task?: string) => {
     network_id: NETWORK_ID || undefined,
     host: getHostTelemetry(),
     process_telemetry: getProcessTelemetry(),
-    external_schedules: readExternalSchedulesSnapshot(configFilePath),
+    external_schedules: readExternalSchedulesSnapshot(configFilePath, undefined, {
+      ownerControlEnabled: OWNER_SCHEDULE_CONTROL_ENABLED,
+    }),
     // RFC-024 N6 — masked snapshot of effective model+flags so dashboard
     // can show the current state without touching per-node files.
     // config_update_capable signals whether this process runs under a
@@ -5693,6 +5701,11 @@ async function connectSSE() {
                 warn(`restart-apply failed: ${e?.message || e}`),
               );
             }
+            if (ev.type === "external_schedule_edit") {
+              log(`← SSE external_schedule_edit ${ev.intent_id || ""}`);
+              // Doorbell only: the authenticated pull response is authoritative.
+              void ownerScheduleConsumer?.trigger();
+            }
             // RFC-026 P1 — daemon-only doorbell. host_supervisor nodes
             // process this; non-daemons silently ignore (config gate).
             if (ev.type === "create_node" && fileConfig.role === "host_supervisor") {
@@ -5893,6 +5906,21 @@ if (GROK_COPRESENCE) {
 }
 await register();
 log("已注册到 CommHub");
+let ownerScheduleConsumer: OwnerScheduleConsumer | null = null;
+try {
+  ownerScheduleConsumer = createOwnerScheduleConsumer({
+    enabled: OWNER_SCHEDULE_CONTROL_ENABLED,
+    hubUrl: COMMHUB_URL,
+    token: () => AUTH_TOKEN,
+    nodeId: NODE_ID || "",
+    configPath: configFilePath,
+    log: (message) => warn(`[owner-schedule] ${message}`),
+  });
+  if (ownerScheduleConsumer.enabled) log("  owner schedule control: enabled (process-pinned)");
+} catch (startupError: any) {
+  error(`[owner-schedule] startup refused: ${startupError?.message || startupError}`);
+  process.exit(1);
+}
 scheduleWorkInboxDrain();
 scheduleInformationalInboxDrain();
 // RFC-024 — fire a reportStatus immediately on startup so the
@@ -6008,6 +6036,7 @@ let shuttingDown = false;
 const shutdown = async () => {
   if (shuttingDown) return;
   shuttingDown = true;
+  ownerScheduleConsumer?.stop();
   log("shutting down...");
   await closeOpencodeRuntime("signal shutdown");
   await grokCopresenceRuntimeSession?.close().catch((e: any) => {

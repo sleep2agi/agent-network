@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
 import { parseExternalSchedulesManifest, readExternalSchedulesSnapshot } from "./external-schedules";
+import type { CrontabAdapter } from "./owner-schedule-control";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -64,5 +65,29 @@ describe("external schedule manifest", () => {
     expect(readExternalSchedulesSnapshot(config, "2026-08-10T02:00:00Z")).toEqual({
       observed_at: "2026-08-10T02:00:00Z", schedules: [], error: "unsafe_manifest",
     });
+  });
+
+  test("editable/revision are derived only from a verified managed crontab under the process gate", () => {
+    const { manifest, config } = fixture();
+    writeFileSync(manifest, JSON.stringify({ external_schedules: [{
+      id: "news-pull", name: "News", kind: "cron", frequency: "stale",
+      enabled: false,
+    }] }));
+    const commandTail = " /usr/bin/grok-news --latest";
+    const hash = new Bun.CryptoHasher("sha256").update(commandTail).digest("hex");
+    const adapter: CrontabAdapter = {
+      read: () => [
+        `# ANET-MANAGED-SCHEDULE id=news-pull revision=7 command_sha256=${hash}`,
+        `0 */6 * * *${commandTail}`,
+        "# ANET-MANAGED-SCHEDULE-END id=news-pull",
+        "",
+      ].join("\n"),
+      install: () => { throw new Error("not used"); },
+    };
+    const disabled = readExternalSchedulesSnapshot(config, "2026-08-10T02:00:00Z", { crontabAdapter: adapter })!;
+    expect(disabled.schedules[0].editable).toBeUndefined();
+    expect(disabled.schedules[0].revision).toBeUndefined();
+    const enabled = readExternalSchedulesSnapshot(config, "2026-08-10T02:00:00Z", { ownerControlEnabled: true, crontabAdapter: adapter })!;
+    expect(enabled.schedules[0]).toMatchObject({ frequency: "0 */6 * * *", enabled: true, editable: true, revision: 7 });
   });
 });

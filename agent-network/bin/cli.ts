@@ -2506,6 +2506,7 @@ Grok co-presence (preview only):
                                 Opt into general web search (supports basic X URL search)
   anet grok attach <name>       Attach this terminal (Ctrl-] detaches)
   --grok-headless               Use legacy per-turn grok-build-cli instead
+  --owner-schedule-control      Opt this node into owner-gated managed-cron edits
   WARNING: network tasks drive the same TUI; use trusted tasks/networks only
 
 Channel:
@@ -2880,6 +2881,9 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
         : {}),
       ...(runtime === "claude-code-cli" ? { teammateMode: opts["teammate-mode"] || "in-process" } : {}),
       ...(opts["max-turns"] ? { maxTurns: parseInt(opts["max-turns"]) } : {}),
+      // RFC-036 B4: explicit process-level opt-in. No per-turn/model path can
+      // enable it; Hub still requires an exact owner-bound edit intent.
+      ...(opts["owner-schedule-control"] === "true" ? { ownerScheduleControl: true } : {}),
       // #149/#156 — codex-sdk fast/yolo flags via shared helper (was inline
       // here only; #156 batch path missed it because of duplication).
       ...(runtime === "codex-sdk" ? codexSdkYoloFlags(opts["no-yolo"] === "true") : {}),
@@ -3112,7 +3116,7 @@ async function requestNodeToken(profile: Profile, id: string): Promise<string> {
   const res = await fetch(`${hub}/api/auth/node-token`, {
     method: "POST",
     headers: { Authorization: `Bearer ${userToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ network_id: networkId, node_name: nodeName }),
+    body: JSON.stringify({ network_id: networkId, node_name: nodeName, node_id: profile.node_id }),
   });
   const body = await res.json() as any;
   if (!body?.ok || !body.token) {
@@ -4066,7 +4070,7 @@ async function createCommand(idOverride?: string) {
     nodeTokenRes = await fetch(`${gc.hub}/api/auth/node-token`, {
       method: "POST",
       headers: { Authorization: `Bearer ${gc.token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ network_id: gc.network_id, node_name: id }),
+      body: JSON.stringify({ network_id: gc.network_id, node_name: id, node_id: profile.node_id }),
     }).then(r => r.json() as any);
   } catch (e: any) {
     console.error(`[anet] ❌ Could not reach hub: ${e.message}`);
@@ -12823,7 +12827,7 @@ async function migrateNode(id: string, opts: { hub: string; utok: string; networ
       const res = await fetch(`${opts.hub}/api/auth/node-token`, {
         method: "POST",
         headers: { Authorization: `Bearer ${opts.utok}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ network_id: opts.networkId, node_name: raw.node_name }),
+        body: JSON.stringify({ network_id: opts.networkId, node_name: raw.node_name, node_id: raw.node_id }),
       });
       const body = await res.json() as any;
       if (!body?.ok || !body.token) {
@@ -12991,7 +12995,7 @@ async function doctorCommand() {
           const r = await fetch(`${gc.hub}/api/auth/node-token`, {
             method: "POST",
             headers: { Authorization: `Bearer ${gc.token}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ network_id: gc.network_id, node_name: nodeName }),
+            body: JSON.stringify({ network_id: gc.network_id, node_name: nodeName, node_id: p.node_id }),
           });
           const body = await r.json() as any;
           if (body?.ok && body.token) {

@@ -1,5 +1,6 @@
 import { lstatSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { managedCronInventory, type CrontabAdapter } from "./owner-schedule-control.js";
 
 const MAX_MANIFEST_BYTES = 64 * 1024;
 const MAX_SCHEDULES = 64;
@@ -22,6 +23,8 @@ export interface ExternalScheduleReport {
   next_run_at: string | null;
   log_ref: string | null;
   enabled: boolean;
+  editable?: boolean;
+  revision?: number;
 }
 
 export interface ExternalSchedulesSnapshot {
@@ -45,7 +48,11 @@ function timestamp(value: unknown, field: string): string | null {
   return new Date(text).toISOString();
 }
 
-export function parseExternalSchedulesManifest(raw: string, observedAt = new Date().toISOString()): ExternalSchedulesSnapshot {
+export function parseExternalSchedulesManifest(
+  raw: string,
+  observedAt = new Date().toISOString(),
+  managed = new Map<string, { cron: string; enabled: boolean; revision: number }>(),
+): ExternalSchedulesSnapshot {
   const parsed = JSON.parse(raw) as unknown;
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("manifest must be an object");
   const root = parsed as Record<string, unknown>;
@@ -68,11 +75,12 @@ export function parseExternalSchedulesManifest(raw: string, observedAt = new Dat
     const logRef = logPath ? basename(logPath) : null;
     if (logPath && (!logRef || logRef === "." || logRef === "..")) throw new Error(`invalid log_path ${index}`);
     if (row.enabled !== undefined && typeof row.enabled !== "boolean") throw new Error(`invalid enabled ${index}`);
+    const controlled = kind === "cron" ? managed.get(id) : undefined;
     return {
       id,
       name: boundedString(row.name, "name", 200)!,
       kind: kind as ExternalScheduleReport["kind"],
-      frequency: boundedString(row.frequency, "frequency", 120)!,
+      frequency: controlled?.cron ?? boundedString(row.frequency, "frequency", 120)!,
       last_run_at: timestamp(row.last_run_at, "last_run_at"),
       last_status: lastStatus as ExternalScheduleReport["last_status"],
       last_error: row.last_error == null ? null : boundedString(row.last_error, "last_error", 500, true),
@@ -80,7 +88,8 @@ export function parseExternalSchedulesManifest(raw: string, observedAt = new Dat
       // Never report a host path. The basename is enough to identify the log
       // locally without exposing the node's directory layout to Hub clients.
       log_ref: logRef,
-      enabled: row.enabled === undefined ? true : row.enabled === true,
+      enabled: controlled?.enabled ?? (row.enabled === undefined ? true : row.enabled === true),
+      ...(controlled ? { editable: true, revision: controlled.revision } : {}),
     };
   });
   return { observed_at: timestamp(observedAt, "observed_at")!, schedules };
@@ -89,6 +98,7 @@ export function parseExternalSchedulesManifest(raw: string, observedAt = new Dat
 export function readExternalSchedulesSnapshot(
   configPath: string,
   observedAt = new Date().toISOString(),
+  options: { ownerControlEnabled?: boolean; crontabAdapter?: CrontabAdapter } = {},
 ): ExternalSchedulesSnapshot | undefined {
   if (!configPath) return undefined;
   const manifestPath = join(dirname(configPath), "external-schedules.json");
@@ -97,7 +107,13 @@ export function readExternalSchedulesSnapshot(
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_MANIFEST_BYTES) {
       return { observed_at: observedAt, schedules: [], error: "unsafe_manifest" };
     }
-    return parseExternalSchedulesManifest(readFileSync(manifestPath, "utf8"), observedAt);
+    let managed = new Map<string, { cron: string; enabled: boolean; revision: number }>();
+    if (options.ownerControlEnabled) {
+      try { managed = managedCronInventory(options.crontabAdapter); } catch {
+        // Inventory remains honestly read-only when crontab cannot be verified.
+      }
+    }
+    return parseExternalSchedulesManifest(readFileSync(manifestPath, "utf8"), observedAt, managed);
   } catch (error: any) {
     if (error?.code === "ENOENT") return { observed_at: observedAt, schedules: [] };
     if (error instanceof SyntaxError || /^invalid |^unknown |manifest /.test(String(error?.message || ""))) {
