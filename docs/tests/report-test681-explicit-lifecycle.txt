@@ -1,0 +1,56 @@
+# test681 — #167 explicit delegation lifecycle trace gate
+
+Date: 2026-08-10
+Base: `45ca09853922f1be8574b84e932b404b9cc2f778`
+Source commit: `f8521d58b32efc96558cbfb67df38a7bcc6a17ae`
+Docker image: `anet-test167-b1:dev`
+Image ID: `sha256:13143a4a84849b327236d05173e9d152c8545cf858d9c4e9da894275c3d5bf25`
+Embedded ENV: `TEST681_SOURCE_COMMIT=f8521d58b32efc96558cbfb67df38a7bcc6a17ae`
+
+## Witnessed red
+
+Before the lifecycle helper existed, the unchanged Docker test exited rc=1:
+
+`Export named 'waitForExplicitTaskLifecycle' not found`
+
+This establishes that the test does not pass against the #679 implementation
+whose late polling emissions were unexercised.
+
+## Result
+
+`RESULT: PASS`
+
+- Production state-machine contract: 4 tests, 14 assertions.
+- `delivered -> acked -> running -> replied` emits exactly
+  `task.ack`, `task.started`, and `task.replied` through the existing formatter.
+- A permanently delivered task emits the bounded 30s and 60s warnings, then
+  `task.expired` with `lifecycle_timeout` at the existing 120s bound.
+- `failed` and `cancelled` remain terminal and emit `task.failed` without retry.
+- The production `tryHandleExplicitDelegation` path is pinned to the tested
+  state machine; the test is not a disconnected helper-only contract.
+- The production agent-node bundle builds successfully.
+
+## Witnessed-red mutations
+
+Each mutation requires an exact one-count anchor, verifies a byte-changing
+patch, and runs the unchanged tests. All exited rc=1:
+
+1. ack event mapped to started;
+2. replied event mapped to failed;
+3. 30-second stale warning event renamed;
+4. 60-second stale warning event renamed;
+5. expiry event mapped to failed;
+6. production lifecycle emitter replaced with a no-op.
+
+## Behavior boundary
+
+The extraction preserves the existing production defaults: 2-second polling,
+30/60-second delivered warnings, 120-second timeout, status mapping, result
+formatting, and CommHub `get_task` transport. Clock/sleep thresholds are
+injectable only at the internal test seam so the real-duration state machine is
+covered without a two-minute test.
+
+This closes the explicit-delegation late-lifecycle test gap recorded after
+#679. It does not add proxy lifecycle watchers, Dashboard lifecycle UI, artifact
+events, or coverage for the two known-uncovered `send_task` call sites; those
+remain #167 layer B work.
