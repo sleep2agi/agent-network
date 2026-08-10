@@ -143,8 +143,14 @@ tmux kill-session -t "=$ALIAS-appsrv" 2>/dev/null || true
 section "3. bridge SIGKILL then exact identity stop"
 start_triplet || { bad "bridge-kill setup failed"; exit 1; }
 UUID=$(jq -r '.marker' "$MARKER")
-BRIDGE_PANE=$(tmux display-message -p -t "=$ALIAS-桥" '#{pane_pid}')
-kill -KILL "$BRIDGE_PANE"
+BRIDGE_PANE=$(tmux list-panes -a -F '#{session_name}|#{pane_pid}' \
+  | awk -F'|' -v expected="$ALIAS-桥" '$1 == expected { print $2 }')
+if [[ "$BRIDGE_PANE" =~ ^[0-9]+$ ]]; then
+  kill -KILL "$BRIDGE_PANE"
+else
+  bad "could not resolve exact bridge pane pid"
+  [[ -s "$TEST466_BRIDGE_LOG" ]] && tail -120 "$TEST466_BRIDGE_LOG"
+fi
 for _ in $(seq 1 30); do ! session_alive "$ALIAS-桥" && break; sleep 0.1; done
 if stop_external; then ok "stop succeeds after bridge SIGKILL"; else bad "stop failed after bridge SIGKILL"; fi
 assert_real_generation_gone "$UUID" "bridge SIGKILL"

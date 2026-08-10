@@ -7419,15 +7419,13 @@ Stop a running agent node.
         // Fail closed. The marker remains the only trustworthy ownership
         // handle; neither tmux names nor the pidfile may replace it after an
         // incomplete identity proof.
-        process.exitCode = 1;
-        return;
+        process.exit(1);
       }
     } else if (markerResult.cause !== "MISSING") {
       allowLegacyTmuxNameSweep = false;
       console.error(`[anet] ⚠ copresence marker present but refused (${markerResult.cause}): ${markerResult.detail}`);
       console.error(`[anet]    Refusing the legacy tmux-name sweep: identity could not be proven.`);
-      process.exitCode = 1;
-      return;
+      process.exit(1);
     }
     // markerResult.cause === "MISSING" is the ordinary-node path: silent
     // fall-through to legacy sweep (zero-diff for every runtime that never
@@ -7438,8 +7436,7 @@ Stop a running agent node.
     // reaching this catch means the ownership check itself failed.  Never
     // reinterpret that failure as permission to kill by name.
     console.error(`[anet]    Refusing the legacy tmux-name sweep: identity check did not complete.`);
-    process.exitCode = 1;
-    return;
+    process.exit(1);
   }
 
   // RFC-030 P2 legacy path — nodes without an identity marker may own three
@@ -7460,8 +7457,7 @@ Stop a running agent node.
     : clearStoppedIdentityPidFile(resolved.id);
   if (stopResult.status === "survived") {
     console.error(`[anet] could not confirm that "${displayName}" exited (pid ${stopResult.pid}); pidfile retained and PID was not signalled.`);
-    process.exitCode = 1;
-    return;
+    process.exit(1);
   }
   const killed = stopResult.status === "stopped";
   // Always notify server — even if PID file missing, server may have stale session

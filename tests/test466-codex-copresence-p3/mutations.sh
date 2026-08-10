@@ -69,11 +69,7 @@ restore
 # falls through and kills an unrelated same-name session.
 COUNT=$(grep -Fc 'Refusing the legacy tmux-name sweep: identity could not be proven.' "$CLI")
 [[ "$COUNT" == "1" ]] || { echo "M4 anchor count=$COUNT"; exit 1; }
-sed -i '/} else if (markerResult.cause !== "MISSING") {/,/^    }/ { \
-  /allowLegacyTmuxNameSweep = false;/d; \
-  /process.exitCode = 1;/d; \
-  /^      return;$/d; \
-}' "$CLI"
+sed -i 's/} else if (markerResult.cause !== "MISSING") {/} else if (false \&\& markerResult.cause !== "MISSING") {/' "$CLI"
 cmp -s "$CLI" "$WORK/cli.orig" && { echo "M4 no-op"; exit 1; }
 ALIAS=mut466corrupt
 NODE_DIR="${HOME}/project/.anet/nodes/$ALIAS"
