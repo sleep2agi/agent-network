@@ -44,6 +44,7 @@ import {
 import { resolveRestFromSession } from "./rest-identity.js";
 import { stampTaskAuthOrigin, type TaskAuthOrigin } from "./task-auth-origin.js";
 import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startScheduledTaskScheduler } from "./scheduled-tasks.js";
+import { recordDeliveredStaleEvents } from "./task-lifecycle-watcher.js";
 
 const PORT = Number(process.env.PORT) || 9200;
 const HOST = process.env.HOST || "127.0.0.1";
@@ -645,6 +646,17 @@ function patrolExpiredTasks(): void {
       for (const t of expired) logTaskEvent(t.task_id, null, "expired", "patrol");
     }
   } catch {}
+}
+
+function patrolDeliveredStaleTasks(): void {
+  try {
+    const result = recordDeliveredStaleEvents();
+    if (result.inserted > 0) {
+      console.warn(`[patrol] recorded ${result.inserted} delivered-stale task warning(s)`);
+    }
+  } catch (error: any) {
+    console.error(`[patrol] delivered-stale watcher failed: ${error?.message || error}`);
+  }
 }
 
 // #434 — test-safety seam, same signature as PR #438 so the two branches
@@ -3209,8 +3221,12 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
     ? Number(process.env.COMMHUB_RATELIMIT_SWEEP_MS) : 300000;
   const taskPatrolMs = Number(process.env.COMMHUB_TASK_PATROL_MS) > 0
     ? Number(process.env.COMMHUB_TASK_PATROL_MS) : 5 * 60 * 1000;
+  const deliveredStalePatrolMs = Number(process.env.COMMHUB_DELIVERED_STALE_PATROL_MS) > 0
+    ? Number(process.env.COMMHUB_DELIVERED_STALE_PATROL_MS) : 5 * 1000;
   const rateLimitSweepTimer = setInterval(sweepStaleRateLimits, rateLimitSweepMs);
   const taskPatrolTimer = setInterval(patrolExpiredTasks, taskPatrolMs);
+  patrolDeliveredStaleTasks();
+  const deliveredStalePatrolTimer = setInterval(patrolDeliveredStaleTasks, deliveredStalePatrolMs);
   const scheduledTaskTimer = startScheduledTaskScheduler();
 
   // The Bun.serve socket is what keeps the process alive; the periodic
@@ -3220,6 +3236,7 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   (staleSweeperTimer as any)?.unref?.();
   (rateLimitSweepTimer as any)?.unref?.();
   (taskPatrolTimer as any)?.unref?.();
+  (deliveredStalePatrolTimer as any)?.unref?.();
   (scheduledTaskTimer as any)?.unref?.();
 
   // ── Graceful shutdown ───────────────────────────────
@@ -3229,6 +3246,7 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
     clearInterval(staleSweeperTimer);
     clearInterval(rateLimitSweepTimer);
     clearInterval(taskPatrolTimer);
+    clearInterval(deliveredStalePatrolTimer);
     clearInterval(scheduledTaskTimer);
     db.close();
     process.exit(0);
