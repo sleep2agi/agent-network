@@ -5,10 +5,10 @@ Date: 2026-08-10 (Asia/Shanghai)
 ## Provenance
 
 - Base: `51bdb84a417c9a2a1fd8f07f871e307e50da80a5`
-- Tested source: `91e45ba185a10e24da526b76052b5dd0444b0a90`
+- Tested source: `727564d800d5a72ed56e5f8c707aced41fd6b614`
 - Docker tag: `anet-test671:dev` (fixed/reused tag)
-- Docker image ID: `sha256:3a34b7d347a36d19ccc791bae93f14d86eb6508cace5862d44f07262330e5152`
-- Embedded image environment: `TEST671_SOURCE_COMMIT=91e45ba185a10e24da526b76052b5dd0444b0a90`
+- Docker image ID: `sha256:54174ae5dc8eb1d2dc8883c18f36f0a2a62b6d1065e617bfbd1a1a34048966f0`
+- Embedded image environment: `TEST671_SOURCE_COMMIT=727564d800d5a72ed56e5f8c707aced41fd6b614`
 
 An earlier image used a manually expanded, nonexistent SHA and is invalid evidence. It was discarded and the fixed tag was rebuilt from the exact value returned by `git rev-parse HEAD`; only the image and results above count.
 
@@ -20,7 +20,7 @@ This layer covers the Hub half of issue #520 only:
 - node-token-only, exact-task-ID runtime evidence tools;
 - atomic all-or-nothing batch ownership checks;
 - task-lifetime monotonic evidence preserved through retry/reassignment;
-- explicit `inbox.task_id` linkage across fresh transport-row IDs;
+- explicit `inbox.task_id` linkage across MCP, REST, scheduler, retry, and reassignment delivery paths;
 - logical-task ACK for new consumers plus exact `inbox.id` compatibility for old consumers;
 - immutable node ownership with a canonical-alias fallback only for legacy/direct tasks whose `to_node_id` is NULL;
 - REST/tool projections and bilingual lifecycle documentation;
@@ -33,17 +33,18 @@ Agent runtime wiring is deliberately excluded from this candidate layer while th
 Command:
 
 ```sh
-sg docker -c 'docker run --rm -v /tmp/test671-91e45-IIOWOF:/artifacts anet-test671:dev'
+sg docker -c 'docker run --rm -v /tmp/test671-727564-e40sgZ:/artifacts anet-test671:dev'
 ```
 
 Result:
 
-- `server/src/task-consumption.test.ts`: 10 tests passed, 77 assertions passed;
+- `server/src/task-consumption.test.ts`: 11 tests passed, 80 assertions passed;
+- `server/src/task-auth-origin-http.test.ts`: 2 tests passed, 8 assertions passed;
 - production Hub bundle built successfully;
 - RFC and Chinese/English field-boundary documentation checks passed;
-- suite summary: `RESULT pass=10 fail=0`.
+- suite summary: `RESULT pass=13 fail=0`.
 
-The behavior tests establish that connection, enqueue, delivery, ACK, and the legacy `sessions.task` preview leave both evidence fields NULL; runtime submission marks only `runtime_submitted_at`; authoritative consumption marks both fields; duplicate reports are idempotent; foreign/missing mixed batches write nothing; user tokens cannot report evidence; legacy/direct NULL-node tasks remain usable only through their authenticated canonical alias; and retry/reassignment preserve task-lifetime evidence while fresh inbox rows continue to expose and ACK the original logical task ID.
+The behavior tests establish that connection, enqueue, delivery, ACK, and the legacy `sessions.task` preview leave both evidence fields NULL; runtime submission marks only `runtime_submitted_at`; authoritative consumption marks both fields; duplicate reports are idempotent; foreign/missing mixed batches write nothing; user tokens cannot report evidence; legacy/direct NULL-node tasks remain usable only through their authenticated canonical alias; and MCP, REST, scheduler, retry, and reassignment deliveries expose the original logical task ID. Retry/reassignment preserve task-lifetime evidence while fresh transport rows continue to ACK and report against that logical task.
 
 ## Witnessed-red mutations
 
@@ -51,16 +52,18 @@ Each mutation changed the tested implementation and made the behavior suite fail
 
 | Mutation | Artifact SHA256 |
 | --- | --- |
-| Remove immutable node ownership enforcement | `5dc1363404568873dfb9f90af2ce161df1e867f51b6de8eb398786b0833a1f63` |
-| Remove legacy/direct canonical-alias ownership | `c007846747e7892129bc6b70c552327d1269d1212da1fe83b5884d36d8d08ded` |
-| Collapse runtime submission into consumption | `b887163006ca2bb52fb688f8dc03ff7c005e9cf0b7cf04998331b3f1c2e59867` |
-| Stop consumption from implying submission | `77bb1746e1775f0f3ae21169a4b69156a1d8de5bbd12bedd4d6ede6296089724` |
-| Unlink a redelivery inbox row from its logical task | `7aaee1e63a34c5c11490399e2b0fe88f17e35f3815fc843e956af29eca9851d0` |
-| Remove logical-task ACK support | `e00ea83f4df69cd897d7852ae57794e48a8c29aa91e86b822d3e4baec08eeb22` |
-| Clear task-lifetime evidence on retry | `fdcb7a7c1e9cea199dd72ee6ed584789ae33390828a31b1518ab1b805640f314` |
+| Remove immutable node ownership enforcement | `a1e7a4a0164b8dae753abbe74db43c49eee1579252ab137ed606975e24ad1df6` |
+| Remove legacy/direct canonical-alias ownership | `132d150012da0d66c19c44fd23bbf83b4da46e7ada12c94cb95b236aea0589ab` |
+| Collapse runtime submission into consumption | `70cd1e3c4be9eda72118412b1effa550fbb66f6698dd344516a218d2d76385de` |
+| Stop consumption from implying submission | `5e82a49082336dfca363d39b706c8795bf04eaecc9925a3ef6828b4a6ec731e6` |
+| Unlink a redelivery inbox row from its logical task | `e3aaaf0414ca9797ffdd55a23126d13475c8b0e46ade9993169f4c256cb30f97` |
+| Remove logical-task ACK support | `f2877034ec8d16c4df2dfa70e6dab948b8303e2cd3e40d8d88d8fed38401e84b` |
+| Clear task-lifetime evidence on retry | `a42b3e7c575ca6abeebbb2b9ae1f793763d276815ca7def904c30125e51245ac` |
+| Unlink scheduler delivery from its logical task | `dee17714c66ed284a98504c2bc608da5e4ba860ffea40336966427f2b45b963d` |
+| Unlink REST initial delivery from its logical task | `223f239dd5d73f4947088ea604cfeaba631c6cd0acb1e3bec88323e5701e2421` |
 
-Artifacts are the corresponding `.log` files under `/tmp/test671-91e45-IIOWOF`.
+Artifacts are the corresponding `.log` files under `/tmp/test671-727564-e40sgZ`.
 
 ## Result
 
-PASS for the Hub-only task runtime evidence layer at source `91e45ba185a10e24da526b76052b5dd0444b0a90`. Agent-node reporting remains a separate pending layer and this report does not claim end-to-end runtime consumption is complete.
+PASS for the Hub-only task runtime evidence layer at source `727564d800d5a72ed56e5f8c707aced41fd6b614`. Agent-node reporting remains a separate pending layer and this report does not claim end-to-end runtime consumption is complete.
