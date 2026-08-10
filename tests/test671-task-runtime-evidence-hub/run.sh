@@ -32,6 +32,24 @@ ok "two-level task runtime evidence contract"
 COMMHUB_DB=/tmp/test671-rest.db bun test server/src/task-auth-origin-http.test.ts
 ok "REST initial task delivery writes logical inbox task_id"
 
+bun -e '
+const files = ["server/src/tools.ts", "server/src/server.ts", "server/src/scheduled-tasks.ts"];
+let taskInserts = 0;
+for (const file of files) {
+  const source = await Bun.file(file).text();
+  for (const match of source.matchAll(/INSERT INTO inbox\s*\(([^)]*)\)\s*VALUES\s*\(([^)]*)\)/g)) {
+    if (!match[2].includes("task")) continue;
+    taskInserts += 1;
+    const columns = match[1].split(",").map((value) => value.trim());
+    if (!columns.includes("task_id")) {
+      throw new Error(`task inbox INSERT without task_id linkage: ${file}`);
+    }
+  }
+}
+if (taskInserts !== 5) throw new Error(`expected 5 production task inbox INSERT paths, found ${taskInserts}`);
+'
+ok "all production task inbox INSERT paths carry logical task_id"
+
 bun build server/src/index.ts --target bun --outdir /tmp/test671-server-build >/dev/null
 ok "production Hub bundle builds"
 
