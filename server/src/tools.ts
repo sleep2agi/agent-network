@@ -963,12 +963,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
 
       const placeholders = uniqueTaskIds.map((_, i) => `?${i + 2}`).join(", ");
-      const canonicalCaller = resolveCanonicalAlias(enforceNetworkId, callerAlias).alias;
 
       // Keep ownership preflight and every stamp in one SQLite transaction.
       // This closes the cross-process preflight→UPDATE race: no other writer
       // can reassign a task between the identity decision and the write.
       const outcome = db.transaction(() => {
+        const canonicalCaller = resolveCanonicalAlias(enforceNetworkId, callerAlias).alias;
         const callerSession = db.get<{ node_id: string | null }>(
           `SELECT node_id FROM sessions
            WHERE network_id = ?1 AND alias = ?2
