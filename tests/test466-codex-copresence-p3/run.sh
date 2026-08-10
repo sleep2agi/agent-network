@@ -80,9 +80,16 @@ start_triplet() {
     >"$LOG" 2>&1)
   local rc=$?
   [[ "$rc" -eq 0 ]] || { echo "start rc=$rc"; tail -80 "$LOG"; return 1; }
-  for s in "$ALIAS" "$ALIAS-appsrv" "$ALIAS-桥"; do session_alive "$s" || return 1; done
-  [[ -s "$MARKER" ]] || return 1
-  [[ -s "$TEST466_ORPHAN_PID_FILE" ]] || return 1
+  for s in "$ALIAS" "$ALIAS-appsrv" "$ALIAS-桥"; do
+    if ! session_alive "$s"; then
+      echo "missing tmux session: $s"
+      tmux list-panes -a -F '#{session_name}|#{pane_dead}|#{pane_current_command}|#{pane_pid}' 2>/dev/null || true
+      tail -80 "$LOG"
+      return 1
+    fi
+  done
+  [[ -s "$MARKER" ]] || { echo "missing identity marker: $MARKER"; return 1; }
+  [[ -s "$TEST466_ORPHAN_PID_FILE" ]] || { echo "missing detached marker descendant fixture"; return 1; }
 }
 
 stop_external() {
