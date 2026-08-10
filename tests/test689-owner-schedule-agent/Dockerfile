@@ -8,6 +8,7 @@ RUN cd agent-node && bun install --ignore-scripts
 COPY agent-node ./agent-node
 COPY agent-network ./agent-network
 COPY server/src/shared/external-schedule-contract.ts ./server/src/shared/external-schedule-contract.ts
+COPY tests/lib/safe-rm.sh ./tests/lib/safe-rm.sh
 COPY tests/test689-owner-schedule-agent ./tests/test689-owner-schedule-agent
 ARG SOURCE_COMMIT
 ENV TEST689_SOURCE_COMMIT=$SOURCE_COMMIT
