@@ -5,7 +5,7 @@ Scope
 -----
 
 Base commit: 1efeeb4306ed70347ebef2579247dfe9ff92bd78
-Tested source commit: 35f594ccbfa2451257fed2cf7896b20fcf3b4bd9
+Tested source commit: 32daa2138703b2d8cf26610733af39c9efe34575
 Draft PR: https://github.com/sleep2agi/agent-network/pull/670
 
 The source changes only the Docker E2E workflow and test infrastructure. It
@@ -18,8 +18,9 @@ Invariants
 1. The command to the left of tee is captured from PIPESTATUS, rather than
    trusting tee's status.
 2. A tee/log write failure is represented by a non-numeric fail-closed status.
-3. The verdict requires exactly one structured TOTAL line, at least 175
-   passes, zero failures, and runner exit code zero.
+3. The verdict requires exactly one structured TOTAL line, at least 283
+   passes, zero failures, and runner exit code zero. The regression floor is
+   fixed in the gate and cannot be lowered through the environment.
 4. Empty, incomplete, malformed, duplicated, or truncated reports fail closed.
 5. The Dockerized contract is invoked by the workflow itself, so deleting the
    helpers or their workflow wiring is not an untested refactor.
@@ -28,20 +29,21 @@ Exact-source Docker evidence
 ----------------------------
 
 Image tag: anet-test292-hard-gate:dev
-Image ID: sha256:3ab0fbed9f979d9c75c08d387514194b9d7da00783ac9200bd155dd0b3910ace
+Image ID: sha256:7b40f2686384c9863ea7bd9ee740779d3d3af18ca8af17ed02f2b4e8138f23f5
 Embedded environment:
-  TEST292_HARD_GATE_SOURCE_COMMIT=35f594ccbfa2451257fed2cf7896b20fcf3b4bd9
+  TEST292_HARD_GATE_SOURCE_COMMIT=32daa2138703b2d8cf26610733af39c9efe34575
 
 Command:
   sg docker -c 'docker run --rm anet-test292-hard-gate:dev'
 
 Result:
-  RESULT: PASS=22 FAIL=0
+  RESULT: PASS=23 FAIL=0
 
 The contract covers a green complete result, real test failures, a test failure
 whose runner status was masked to zero, a non-zero runner with a green TOTAL,
 minimum-count truncation, missing/duplicate/malformed TOTAL, missing runner
 status, and tee failure.
+It also verifies that setting E2E_MIN_PASS=0 cannot lower the fixed floor.
 
 Local witnessed-red mutations
 -------------------------------
@@ -60,12 +62,12 @@ All mutations first assert that bytes changed.
 Real GitHub Actions witnessed-green
 -----------------------------------
 
-Candidate head: 35f594ccbfa2451257fed2cf7896b20fcf3b4bd9
-Run: https://github.com/sleep2agi/agent-network/actions/runs/31342289105
+Candidate head: 32daa2138703b2d8cf26610733af39c9efe34575
+Run: https://github.com/sleep2agi/agent-network/actions/runs/31343034003
 Conclusion: SUCCESS
 
 Observed from the raw job log:
-  Verify full-regression hard gate contract: RESULT: PASS=22 FAIL=0
+  Verify full-regression hard gate contract: RESULT: PASS=23 FAIL=0
   runner exit code: 0
   TOTAL: 283 passed, 0 failed
   PASS: full Docker E2E regression is complete and green
@@ -79,11 +81,11 @@ SHA.
 Real GitHub Actions witnessed-red
 ---------------------------------
 
-Mutation branch head: bdf806ac8abd055fef4553c1241b62faa3ab16aa
-Parent: 35f594ccbfa2451257fed2cf7896b20fcf3b4bd9
+Mutation branch head: 7558b3d64d9278f541d0bb44d2bb9babddb792e9
+Parent: 32daa2138703b2d8cf26610733af39c9efe34575
 Mutation: add exactly one deliberate `fail` call to
   tests/docker-e2e-networks.sh
-Run: https://github.com/sleep2agi/agent-network/actions/runs/31342301920
+Run: https://github.com/sleep2agi/agent-network/actions/runs/31343099705
 Conclusion: FAILURE
 
 Observed from the raw job log:
