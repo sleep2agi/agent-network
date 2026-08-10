@@ -143,6 +143,7 @@ import {
 } from "./credential-redaction";
 import { appendPrivateLogLine, preparePrivateLogDirectory } from "./private-log";
 import { resolveNodeIdSource } from "./runtime/node-id-source";
+import { emitExplicitTaskTrace, sendExplicitTaskWithTrace, type ExplicitTaskTraceContext } from "./explicit-task-trace";
 
 const home = homedir();
 
@@ -1001,6 +1002,14 @@ const log = (msg: string) => _log("info", 1, msg);
 const debug = (msg: string) => _log("debug", 0, msg);
 const warn = (msg: string) => _log("warn", 2, msg);
 const error = (msg: string) => _log("error", 3, msg);
+const taskTraceLog = (line: string) => {
+  if (process.env.ANET_TASK_TRACE_FORMAT !== "json") return log(line);
+  console.log(line);
+  try {
+    const date = new Date().toISOString().slice(0, 10);
+    appendFileSync(join(LOG_DIR, `${date}.log`), line + "\n");
+  } catch {}
+};
 
 // ── CommHub MCP 调用 (with retry) ──
 //
@@ -4174,15 +4183,17 @@ async function tryHandleExplicitDelegation(
 
   // #146 PR-4 — fresh alias on the explicit-delegation wrapper path.
   const fromAlias = await liveAlias();
+  const traceContext: ExplicitTaskTraceContext = {
+    fromAlias, toAlias: parsed.alias, parentTaskId: taskId || null,
+    networkId: NETWORK_ID || null, startedAt: Date.now(), log: taskTraceLog,
+  };
+  const emitTrace = (status: Parameters<typeof emitExplicitTaskTrace>[1], childId: string | null, extra?: Parameters<typeof emitExplicitTaskTrace>[3]) =>
+    emitExplicitTaskTrace(traceContext, status, childId, extra);
   let sendRes: any;
   try {
-    sendRes = parseToolJson(await callCommHub("send_task", {
-      alias: parsed.alias,
-      task: parsed.childTask,
-      priority: "normal",
-      from_session: fromAlias,
-      parent_task_id: taskId || undefined,
-    }));
+    sendRes = parseToolJson(await sendExplicitTaskWithTrace({
+      alias: parsed.alias, task: parsed.childTask, priority: "normal",
+    }, traceContext, (sendArgs) => callCommHub("send_task", sendArgs)));
   } catch (e: any) {
     // #230 — if the real send_task still gets rejected by the server
     // (e.g. a TOCTOU race where the precheck saw the session but it
@@ -4203,11 +4214,21 @@ async function tryHandleExplicitDelegation(
 
   const deadline = Date.now() + 120_000;
   let latest: any = null;
+  const observed = new Set<string>();
+  let warned30 = false;
+  let warned60 = false;
   while (Date.now() < deadline) {
     latest = parseToolJson(await callCommHub("get_task", { task_id: childTaskId }));
     const row = latest?.task || latest;
     const childStatus = row?.status;
+    if ((childStatus === "acked" || childStatus === "running" || childStatus === "processing") && !observed.has(childStatus)) {
+      observed.add(childStatus);
+      emitTrace(childStatus === "acked" ? "acked" : "started", childTaskId);
+    }
     if (childStatus === "replied" || childStatus === "failed" || childStatus === "cancelled") {
+      emitTrace(childStatus === "replied" ? "replied" : "failed", childTaskId, {
+        ...(childStatus === "replied" ? {} : { errorCode: `task_${childStatus}`, event: "task.failed" }),
+      });
       const result = row?.result || latest?.result || JSON.stringify(latest);
       return [
         `已通过 CommHub 给 ${parsed.alias} 派发子任务并等到结果。`,
@@ -4217,9 +4238,19 @@ async function tryHandleExplicitDelegation(
         String(result).slice(0, 1600),
       ].join("\n");
     }
+    const elapsed = Date.now() - traceContext.startedAt;
+    if (!warned30 && elapsed >= 30_000 && childStatus === "delivered") {
+      warned30 = true;
+      emitTrace("delivered", childTaskId, { event: "task.warning.delivered_stale_30s" });
+    }
+    if (!warned60 && elapsed >= 60_000 && childStatus === "delivered") {
+      warned60 = true;
+      emitTrace("delivered", childTaskId, { event: "task.warning.delivered_stale_60s" });
+    }
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
 
+  emitTrace("expired", childTaskId, { errorCode: "lifecycle_timeout" });
   return `已给 ${parsed.alias} 派发子任务 ${childTaskId}，但 120 秒内未等到 replied/failed。最新状态：${JSON.stringify(latest).slice(0, 1000)}`;
 }
 
