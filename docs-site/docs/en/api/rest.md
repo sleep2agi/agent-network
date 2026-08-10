@@ -588,6 +588,8 @@ curl "http://localhost:9200/api/tasks?status=running&limit=10" \
       "created_at": "2026-04-12 10:00:00",
       "delivered_at": "2026-04-12 10:00:01",
       "started_at": "2026-04-12 10:00:02",
+      "runtime_submitted_at": "2026-04-12 10:00:03",
+      "consumed_at": "2026-04-12 10:00:04",
       "completed_at": "2026-04-12 10:00:15",
       "expires_at": "2026-04-12 11:00:00"
     }
@@ -600,7 +602,7 @@ curl "http://localhost:9200/api/tasks?status=running&limit=10" \
 }
 ```
 
-Field mapping to the `tasks` table schema ([`server/src/db.ts:87-105`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L87)) via `SELECT *`: the primary key is `task_id` (not `message_id`); the completion timestamp is `completed_at` (not `replied_at`); the TTL field is `expires_at` (an absolute timestamp), not `ttl_seconds` — `ttl_seconds` is **input-only** on `send_task` and converted to `expires_at` when the row is written. The `anet tasks` CLI uses `from_name` / `to_name` / `status` / `created_at` / `content` to render the table (cli.ts L2810-2817).
+Field mapping follows the `tasks` table schema ([`server/src/db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts)): the primary key is `task_id` (not `message_id`); the completion timestamp is `completed_at` (not `replied_at`); the TTL field is `expires_at` (an absolute timestamp), not `ttl_seconds` — `ttl_seconds` is **input-only** on `send_task` and converted to `expires_at` when the row is written. `runtime_submitted_at` / `consumed_at` are the two token-bound runtime evidence levels; they differ from queue-time `delivered_at`, process ACK, and compatibility `started_at`. See [Task lifecycle](/en/concepts/task-lifecycle#runtime_submitted_at-and-consumed_at-two-runtime-evidence-levels). The `anet tasks` CLI uses `from_name` / `to_name` / `status` / `created_at` / `content` to render the table.
 
 ---
 

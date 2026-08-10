@@ -903,6 +903,134 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     }
   );
 
+  // #520 — two monotonic runtime-evidence levels for exact tasks.
+  //
+  // runtime_submitted_at means agent-node handed the body to the vendor
+  // runtime. consumed_at is stronger: an attributable turn-start or first
+  // activity event came back. Merely fetching/acking an inbox row sets neither.
+  // Node identity comes exclusively from the ntok; callers cannot self-report
+  // an alias or node_id. A consumed mark also fills runtime_submitted_at because
+  // that stronger fact logically implies submission.
+  const markTaskRuntimeEvidence = (
+    taskIds: string[],
+    level: "submitted" | "consumed",
+  ) => {
+    const task_ids = taskIds;
+    if (!callerTokenIsNetwork || !callerAlias || !enforceNetworkId) {
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "node_token_required" }) }],
+      };
+    }
+    // PgAdapter.transaction currently opens a fresh subprocess/connection
+    // per statement. The all-or-nothing batch promise cannot be made there;
+    // refuse evidence rather than publish a partially stamped batch.
+    if (db.dialect !== "sqlite") {
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({
+          ok: false,
+          error: "task_runtime_evidence_backend_unsupported",
+        }) }],
+      };
+    }
+
+      const uniqueTaskIds = [...new Set(task_ids)];
+      if (uniqueTaskIds.length !== task_ids.length) {
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "duplicate_task_id" }) }],
+        };
+      }
+
+      const canonicalCaller = resolveCanonicalAlias(enforceNetworkId, callerAlias).alias;
+      const callerSession = db.get<{ node_id: string | null }>(
+        "SELECT node_id FROM sessions WHERE network_id = ?1 AND alias = ?2",
+        enforceNetworkId,
+        canonicalCaller,
+      );
+      if (!callerSession?.node_id) {
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "node_identity_unavailable" }) }],
+        };
+      }
+
+      const placeholders = uniqueTaskIds.map((_, i) => `?${i + 2}`).join(", ");
+      const rows = db.all<{ task_id: string; to_node_id: string | null }>(
+        `SELECT task_id, to_node_id FROM tasks
+         WHERE network_id = ?1 AND task_id IN (${placeholders})`,
+        enforceNetworkId,
+        ...uniqueTaskIds,
+      );
+      const owned = new Map(rows.map((row) => [row.task_id, row.to_node_id]));
+      const rejectedTaskId = uniqueTaskIds.find(
+        (taskId) => owned.get(taskId) !== callerSession.node_id,
+      );
+      if (rejectedTaskId) {
+        // One foreign/missing row rejects the whole batch.  Partial marking
+        // would make a single agent wake look different depending on input
+        // order and would hide an identity/configuration fault.
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({ ok: false, error: "task_not_owned", task_id: rejectedTaskId }),
+          }],
+        };
+      }
+
+      const evidenceRows = db.transaction(() => {
+        for (const taskId of uniqueTaskIds) {
+          if (level === "consumed") {
+            db.run(
+              `UPDATE tasks SET
+                 runtime_submitted_at = COALESCE(runtime_submitted_at, datetime('now')),
+                 consumed_at = COALESCE(consumed_at, datetime('now'))
+               WHERE network_id = ?1 AND task_id = ?2 AND to_node_id = ?3`,
+              [enforceNetworkId, taskId, callerSession.node_id],
+            );
+          } else {
+            db.run(
+              `UPDATE tasks SET runtime_submitted_at = COALESCE(runtime_submitted_at, datetime('now'))
+               WHERE network_id = ?1 AND task_id = ?2 AND to_node_id = ?3`,
+              [enforceNetworkId, taskId, callerSession.node_id],
+            );
+          }
+        }
+        return db.all<{
+          task_id: string;
+          runtime_submitted_at: string;
+          consumed_at: string | null;
+        }>(
+          `SELECT task_id, runtime_submitted_at, consumed_at FROM tasks
+           WHERE network_id = ?1 AND task_id IN (${placeholders})`,
+          enforceNetworkId,
+          ...uniqueTaskIds,
+        );
+      });
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({ ok: true, tasks: evidenceRows }),
+        }],
+      };
+  };
+
+  const taskRuntimeEvidenceSchema = {
+    task_ids: z.array(z.string().min(1).max(200)).min(1).max(100),
+  };
+
+  server.tool(
+    "mark_tasks_runtime_submitted",
+    "Internal agent-node signal: exact task bodies were submitted to this token-bound node's vendor runtime.",
+    taskRuntimeEvidenceSchema,
+    async ({ task_ids }) => markTaskRuntimeEvidence(task_ids, "submitted"),
+  );
+
+  server.tool(
+    "mark_tasks_consumed",
+    "Internal agent-node signal: exact tasks produced attributable turn-start/activity evidence in this token-bound node's runtime.",
+    taskRuntimeEvidenceSchema,
+    async ({ task_ids }) => markTaskRuntimeEvidence(task_ids, "consumed"),
+  );
+
   // ═══════════════════════════════════════════
   //  Hub Tools (5)
   // ═══════════════════════════════════════════
@@ -1572,7 +1700,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       db.transaction(() => {
         // Reset task status
         const updateParams: any[] = [task_id];
-        let updateSql = `UPDATE tasks SET status = 'delivered', result = NULL, completed_at = NULL, started_at = NULL, delivered_at = datetime('now'), expires_at = datetime('now', '+1 hour')
+        let updateSql = `UPDATE tasks SET status = 'delivered', result = NULL, completed_at = NULL, started_at = NULL, runtime_submitted_at = NULL, consumed_at = NULL, delivered_at = datetime('now'), expires_at = datetime('now', '+1 hour')
            WHERE task_id = ?1`;
         updateSql = addScope(updateSql, updateParams, effectiveNetId);
         db.run(updateSql, updateParams);
@@ -1632,7 +1760,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     async ({ alias, status, from_name, from_node_id, network_id: netId, limit }) => {
       const readScope = resolveReadScope(netId);
       if (readScope.denied) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: readScope.denied }) }] };
-      let sql = "SELECT task_id, from_node_id, from_name, to_node_id, to_name, priority, status, content, result, created_at, completed_at FROM tasks WHERE 1=1";
+      let sql = "SELECT task_id, from_node_id, from_name, to_node_id, to_name, priority, status, content, result, created_at, runtime_submitted_at, consumed_at, completed_at FROM tasks WHERE 1=1";
       const params: any[] = [];
       sql = addReadScope(sql, params, readScope);
       if (alias) { sql += ` AND to_name = ?${params.length + 1}`; params.push(alias); }
@@ -1732,7 +1860,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         db.run(inboxSql, inboxParams);
 
         const updateParams: any[] = [reassignedAlias, newNodeId, task_id];
-        let updateSql = "UPDATE tasks SET to_name = ?1, to_node_id = ?2, status = 'delivered', started_at = NULL, delivered_at = datetime('now') WHERE task_id = ?3";
+        let updateSql = "UPDATE tasks SET to_name = ?1, to_node_id = ?2, status = 'delivered', started_at = NULL, runtime_submitted_at = NULL, consumed_at = NULL, delivered_at = datetime('now') WHERE task_id = ?3";
         updateSql = addScope(updateSql, updateParams, effectiveNetId);
         db.run(updateSql, updateParams);
 

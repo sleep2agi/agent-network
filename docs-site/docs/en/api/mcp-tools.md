@@ -511,8 +511,10 @@ Query task list with multi-dimensional filtering.
       "status": "replied",
       "content": "Write a sorting algorithm",
       "result": "Implemented with quicksort...",
-      "created_at": "2026-04-12 10:00:00",
-      "completed_at": "2026-04-12 10:00:15"
+    "created_at": "2026-04-12 10:00:00",
+    "runtime_submitted_at": "2026-04-12 10:00:03",
+    "consumed_at": "2026-04-12 10:00:04",
+    "completed_at": "2026-04-12 10:00:15"
     }
   ],
   "count": 1,
@@ -525,7 +527,7 @@ Query task list with multi-dimensional filtering.
 ```
 
 ::: tip `list_tasks` rows are a subset of `get_task`
-Each `list_tasks` row SELECTs only **9 columns** ([`tools.ts:776`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L776)): `task_id` / `from_name` / `to_name` / `priority` / `status` / `content` / `result` / `created_at` / `completed_at`. It does **not** include `delivered_at` / `started_at` / `expires_at` / `network_id` / `requires_response` / `parent_task_id` — use [`get_task`](#get-task) (`SELECT *`) for those. `count` is the number of rows returned this call (≤ `limit`); `stats` is the status-grouped count for the **entire scope** (not affected by the filters).
+Each `list_tasks` row includes task identity, sender/recipient, status, content/result, and summary timestamps. `runtime_submitted_at` means the body was handed to the vendor runtime; `consumed_at` additionally requires attributable turn-start/activity evidence. It does **not** include `delivered_at` / `started_at` / `expires_at` / `network_id` / `requires_response` / `parent_task_id` — use [`get_task`](#get-task) (`SELECT *`) for those. `count` is the number of rows returned this call (≤ `limit`); `stats` is the status-grouped count for the **entire scope** (not affected by the filters). See [Task lifecycle](/en/concepts/task-lifecycle#runtime_submitted_at-and-consumed_at-two-runtime-evidence-levels) for the distinction from legacy fields.
 :::
 
 ---

@@ -52,6 +52,18 @@ stateDiagram-v2
 | `cancelled` | 已取消 | `cancel_task` | 可重试 |
 | `expired` | TTL 超时 | 自动检测 | 可重试 |
 
+### `runtime_submitted_at` 与 `consumed_at`：两级运行时证据
+
+状态字段和消费证据是两条不同的轴。`delivered_at` 只证明 Hub 已把任务写入投递队列，`acked` 只证明常驻的 agent-node 进程取走了 inbox 行；二者都不能证明模型轮次已经开始。`started_at` 由兼容的 `report_status(working)` 路径维护，可能早于厂商运行时真正接手任务，因此不能单独用于判断“节点已唤醒模型”。
+
+`runtime_submitted_at` 表示 agent-node 已把正文交给厂商 runtime（例如发出 prompt/turn 请求或写入受控共存会话），但尚不承诺模型已经开始推理。`consumed_at` 是更强的、只写一次的证据：agent-node 只有在当前 `task_id` 能归因到厂商运行时的 turn-start 或第一条活动事件后，才用自身 token-bound 身份上报。任务仍在 agent-node 本地队列中、仅完成 ACK、或进程在线但正文尚未交给 runtime 时，两个字段都保持 `null`；已经提交但尚无权威活动时只有 `runtime_submitted_at` 有值。重试或转派会同时清空它们，等待新一轮证据。
+
+不同运行时可提供的最早可靠信号不同；例如 Codex app-server 使用精确 `task_started`，Grok 共存桥使用精确匹配当前网络任务的 `network_user` 事件，而缺少可归因 start 事件的 OpenCode 共存模式要等到精确关联的 assistant response。后者更晚，但不会把“已入队”误报成“模型已接手”。
+
+::: warning 不要用 `sessions.task` 判断模型是否已接手
+兼容字段 `sessions.task` 同时会被派单路径写入任务原文、也会被节点的 `report_status(task=...)` 写入，并可能保留历史值。它是一个旧版展示字段，不是当前模型轮次的身份或消费确认。逐任务诊断请读取 `tasks.runtime_submitted_at` / `tasks.consumed_at`；节点存活只看心跳字段。
+:::
+
 ### 终态（Terminal States）
 
 以下状态是终态，不能再变更（除了 retry）：
@@ -82,6 +94,11 @@ sequenceDiagram
 
     A->>S: report_status(status="working", task="写排序算法")
     Note over S: 状态: acked → running
+
+    A->>S: mark_tasks_runtime_submitted(task_ids=["t_xxx"])
+    Note over S: runtime_submitted_at 首次写入
+    A->>S: mark_tasks_consumed(task_ids=["t_xxx"])
+    Note over S: consumed_at 首次写入（token-bound + 精确 task_id）
 
     Note over A: AI 处理中...
 
@@ -153,7 +170,7 @@ retry_task(task_id="t_xxx")
 
 1. 验证任务状态为 `failed` / `cancelled` / `expired`
 2. 重置任务状态为 `delivered`
-3. 清除 result、completed_at、started_at
+3. 清除 result、completed_at、started_at、runtime_submitted_at、consumed_at
 4. 重设 expires_at（+1 小时）
 5. 创建新的 inbox 条目
 6. SSE 推送 new_task
