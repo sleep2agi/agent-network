@@ -496,6 +496,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           next_run_at: z.string().datetime({ offset: true }).max(64).nullable(),
           log_ref: z.string().min(1).max(255).nullable(),
           enabled: z.boolean(),
+          // RFC-036 — only agent-node managed cron markers advertise write
+          // capability. Legacy/other kinds omit these fields and stay read-only.
+          editable: z.boolean().optional(),
+          revision: z.number().int().min(0).optional(),
         }).strict()).max(64),
         error: z.enum(["invalid_manifest", "unsafe_manifest", "read_failed"]).optional(),
       }).strict().optional().describe("Bounded node-reported external schedule snapshot; never includes host paths or commands"),
@@ -717,6 +721,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           upsertNodeWithSec1Guard({
             node_id,
             callerNetworkId: effectiveNetId ?? null,
+            callerUserId: enforceUserId ?? null,
+            callerTokenId: callerTokenId ?? null,
             node_name: nn || effectiveAlias,
             alias: effectiveAlias,
             runtime: nodeRuntime,
@@ -3956,6 +3962,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 export interface UpsertNodeWithSec1GuardInput {
   node_id: string;
   callerNetworkId: string | null;
+  callerUserId?: string | null;
+  callerTokenId?: string | null;
   node_name?: string | null;
   alias?: string | null;
   runtime?: string | null;
@@ -3968,18 +3976,37 @@ export interface UpsertNodeWithSec1GuardInput {
 }
 export type UpsertNodeOutcome =
   | { result: "inserted" | "updated"; node_id: string }
-  | { result: "refused"; reason: "cross_network"; existingNet: string | null; callerNet: string | null }
+  | { result: "refused"; reason: "cross_network" | "token_node_mismatch" | "owner_mismatch"; existingNet: string | null; callerNet: string | null }
   | { result: "skipped"; reason: "missing_node_id" };
 
 const _norm = (x: string | null | undefined) => (x === null || x === undefined ? "default" : x);
 
 export function upsertNodeWithSec1Guard(input: UpsertNodeWithSec1GuardInput): UpsertNodeOutcome {
   if (!input.node_id) return { result: "skipped", reason: "missing_node_id" };
-  const existing = db.get<{ network_id: string | null }>(
-    "SELECT network_id FROM nodes WHERE node_id = ?1",
+  const existing = db.get<{ network_id: string | null; owner_user_id: string | null }>(
+    "SELECT network_id, owner_user_id FROM nodes WHERE node_id = ?1",
     input.node_id,
   );
   const callerNet = input.callerNetworkId;
+
+  // RFC-036 — when a token was minted with a node_id binding, a heartbeat may
+  // report only that exact node. Legacy unbound ntok rows remain compatible,
+  // but they can never consume owner-gated schedule intents.
+  if (input.callerTokenId) {
+    const token = db.get<{ bound_node_id: string | null; user_id: string; network_id: string | null }>(
+      "SELECT bound_node_id, user_id, network_id FROM api_tokens WHERE token_id = ?1",
+      input.callerTokenId,
+    );
+    if (token?.bound_node_id && token.bound_node_id !== input.node_id) {
+      return { result: "refused", reason: "token_node_mismatch", existingNet: existing?.network_id ?? null, callerNet };
+    }
+    if (token?.network_id && _norm(token.network_id) !== _norm(callerNet)) {
+      return { result: "refused", reason: "cross_network", existingNet: existing?.network_id ?? null, callerNet };
+    }
+  }
+  if (existing?.owner_user_id && input.callerUserId !== existing.owner_user_id) {
+    return { result: "refused", reason: "owner_mismatch", existingNet: existing.network_id, callerNet };
+  }
 
   // Legacy / first-write paths: row missing OR network_id NULL → claim.
   const isLegacy = !existing

@@ -192,18 +192,67 @@ export function login(username: string, password: string): AuthResult {
   };
 }
 
-/** Create a network-scoped token (ntok_) for a specific node */
-export function createNetworkTokenForNode(userId: string, networkId: string, nodeName: string): { ok: boolean; token?: string; error?: string } {
+/**
+ * Create a network-scoped token (ntok_) for a specific node.
+ *
+ * RFC-036: callers that provide nodeId atomically establish the immutable
+ * node-owner binding before the plaintext token is returned. The 3-argument
+ * legacy form remains available for old clients, but its token has no bound
+ * node id and therefore cannot consume external-schedule edit intents.
+ */
+export function createNetworkTokenForNode(userId: string, networkId: string, nodeName: string, nodeId?: string): { ok: boolean; token?: string; token_id?: string; node_id?: string; error?: string } {
   // Verify user is a member of this network with write access
   const role = getUserNetworkRole(userId, networkId);
   if (!role || role === "viewer") return { ok: false, error: "no write access to this network" };
+  if (!nodeName || nodeName.length > 200) return { ok: false, error: "invalid_node_name" };
+  if (nodeId !== undefined && (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(nodeId))) {
+    return { ok: false, error: "invalid_node_id" };
+  }
   const token = generateNetworkToken();
   const tokenId = generateId("tok");
-  db.run(
-    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-    [tokenId, hashToken(token), userId, networkId, `node:${nodeName}`, "network"]
-  );
-  return { ok: true, token };
+  try {
+    db.transaction(() => {
+      if (nodeId) {
+        const existing = db.get<{ network_id: string | null; owner_user_id: string | null }>(
+          "SELECT network_id, owner_user_id FROM nodes WHERE node_id = ?1",
+          nodeId,
+        );
+        if (existing?.network_id && existing.network_id !== networkId) throw new Error("cross_network_node");
+        // Existing pre-RFC-036 rows have no trustworthy owner anchor. A token
+        // refresh must not turn knowledge of a legacy node_id into ownership.
+        // They remain read-only until a separately authorized migration.
+        if (existing && !existing.owner_user_id) throw new Error("node_owner_unclaimed");
+        if (existing?.owner_user_id && existing.owner_user_id !== userId) throw new Error("node_owner_mismatch");
+        db.run(
+          `INSERT INTO nodes (node_id, node_name, alias, network_id, owner_user_id, updated_at)
+           VALUES (?1, ?2, ?2, ?3, ?4, datetime('now'))
+           ON CONFLICT(node_id) DO UPDATE SET
+             node_name = COALESCE(nodes.node_name, ?2),
+             alias = COALESCE(nodes.alias, ?2),
+             network_id = COALESCE(nodes.network_id, ?3),
+             owner_user_id = COALESCE(nodes.owner_user_id, ?4),
+             updated_at = datetime('now')`,
+          [nodeId, nodeName, networkId, userId],
+        );
+        if (!existing) {
+          db.run(
+            `INSERT INTO audit_log (user_id, action, target_type, target_id, detail, network_id)
+             VALUES (?1, 'external_schedule.owner_claimed', 'node', ?2, ?3, ?4)`,
+            [userId, nodeId, JSON.stringify({ node_id: nodeId, network_id: networkId }), networkId],
+          );
+        }
+      }
+      db.run(
+        "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, bound_node_id) VALUES (?1, ?2, ?3, ?4, ?5, 'network', ?6)",
+        [tokenId, hashToken(token), userId, networkId, `node:${nodeName}`, nodeId ?? null],
+      );
+    });
+  } catch (error: any) {
+    const code = String(error?.message || "node_token_create_failed");
+    if (code === "cross_network_node" || code === "node_owner_unclaimed" || code === "node_owner_mismatch") return { ok: false, error: code };
+    throw error;
+  }
+  return { ok: true, token, token_id: tokenId, ...(nodeId ? { node_id: nodeId } : {}) };
 }
 
 export function resolveToken(token: string): { user: AuthUser; networkId: string | null; tokenName: string | null; tokenId: string | null } | null {
