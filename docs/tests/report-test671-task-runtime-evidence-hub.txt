@@ -5,10 +5,10 @@ Date: 2026-08-10 (Asia/Shanghai)
 ## Provenance
 
 - Base: `51bdb84a417c9a2a1fd8f07f871e307e50da80a5`
-- Tested source: `7aabeb796800568d646133631258fc68e7b960ba`
+- Tested source: `3b243c9b94b428ff960b390e518d6ee1c295b769`
 - Docker tag: `anet-test671:dev` (fixed/reused tag)
-- Docker image ID: `sha256:e3e8764e3834ae8c7f607b4d2d20ed2409c79bff37e9701c3a5207f3fcf05209`
-- Embedded image environment: `TEST671_SOURCE_COMMIT=7aabeb796800568d646133631258fc68e7b960ba`
+- Docker image ID: `sha256:f52142069c30d946f7a6d36fb9efee2387cdb73fbd9dffd47ef2c30bd6b68efa`
+- Embedded image environment: `TEST671_SOURCE_COMMIT=3b243c9b94b428ff960b390e518d6ee1c295b769`
 
 An earlier image used a manually expanded, nonexistent SHA and is invalid evidence. It was discarded and the fixed tag was rebuilt from the exact value returned by `git rev-parse HEAD`; only the image and results above count.
 
@@ -19,6 +19,7 @@ This layer covers the Hub half of issue #520 only:
 - additive `runtime_submitted_at` and `consumed_at` task fields;
 - node-token-only, exact-task-ID runtime evidence tools;
 - atomic all-or-nothing batch ownership checks;
+- caller session identity, task ownership preflight, and evidence stamps in one SQLite transaction;
 - task-lifetime monotonic evidence preserved through retry/reassignment;
 - explicit `inbox.task_id` linkage across MCP, REST, scheduler, retry, and reassignment delivery paths;
 - a denominator gate that enumerates all five production task-inbox INSERT paths and rejects any path without `task_id`;
@@ -34,7 +35,7 @@ Agent runtime wiring is deliberately excluded from this candidate layer while th
 Command:
 
 ```sh
-sg docker -c 'docker run --rm -v /tmp/test671-7aabeb-ZA8Fq0:/artifacts anet-test671:dev'
+sg docker -c 'docker run --rm -v /tmp/test671-3b243c-GcqLGn:/artifacts anet-test671:dev'
 ```
 
 Result:
@@ -53,18 +54,18 @@ Each mutation changed the tested implementation and made the behavior suite fail
 
 | Mutation | Artifact SHA256 |
 | --- | --- |
-| Remove immutable node ownership enforcement | `88c4a49df3989e6352bf97213b30708556eafd809d20dfa373ff716a553fa6f4` |
-| Remove legacy/direct canonical-alias ownership | `ce065a6b8ef94d13368baba40c4c31bcc1d0e295b7e65d5acdec2140c81f68f8` |
-| Collapse runtime submission into consumption | `5a519b68d958c2351889e3b4f9b8ffca0faa598295062c9694d4198cce540f05` |
-| Stop consumption from implying submission | `f079b72bef8a819dcc9c3efbdf0c3860c04e7a5c62de8865862a9ee2ef4bf45b` |
-| Unlink a redelivery inbox row from its logical task | `fe89e89b6e7b36acf6f0330a84e0e07b25be9e60f641036018987dbcf4f4594c` |
-| Remove logical-task ACK support | `3bd8606d86d1867f73a4415757aee5c51eaf0a8194f4904438946a355ae6875f` |
-| Clear task-lifetime evidence on retry | `2bbd2788b85f0859690eb2a53f46a8aef45181406487582c2f81a10451060b42` |
-| Unlink scheduler delivery from its logical task | `d654202bf10caefb5858876e899e23dd2fb76189ecbfed27ac9b8edd1a465d75` |
-| Unlink REST initial delivery from its logical task | `5faf53f217161c7797d92f61333947e61442ffea485f8d1578a474944ecf499b` |
+| Remove immutable node ownership enforcement | `2b34b93b9a1a77562618a476ca0da5a801e29a6e02fa8366f14699cc97a3e3ad` |
+| Remove legacy/direct canonical-alias ownership | `b313e9d239eb2a9e2ec683272406017c3f8e93f1f958d00585d6e14157d39193` |
+| Collapse runtime submission into consumption | `4ba02d46394647bddb100a1ee455486a3cb049066b2074034c03bf9ace12963c` |
+| Stop consumption from implying submission | `e17806db0e9b0ad030ed69b7a0a6449a866911b9f14792979ee25329bf098e7c` |
+| Unlink a redelivery inbox row from its logical task | `bf3ae238486efabdbadf1d517ecb2a72c124f8069181b0e6ded210d7006db294` |
+| Remove logical-task ACK support | `56e35a3b09862b77b66670b2d9a02ab6ac17c2a6fe0bc7a9bcce9ac919ff000c` |
+| Clear task-lifetime evidence on retry | `694cdef1d553090fdd7b34e3484af651eb7e1481385a09c03393af743a780ded` |
+| Unlink scheduler delivery from its logical task | `7ebd02df7c2dc023834efda88db51100e86a5de5fcb6e0e48e1c51315cef6765` |
+| Unlink REST initial delivery from its logical task | `e3c3adeae104c6c5d11205d97f7a517cf9145b1a5fd941b05087da07fa08e0db` |
 
-Artifacts are the corresponding `.log` files under `/tmp/test671-7aabeb-ZA8Fq0`.
+Artifacts are the corresponding `.log` files under `/tmp/test671-3b243c-GcqLGn`.
 
 ## Result
 
-PASS for the Hub-only task runtime evidence layer at source `7aabeb796800568d646133631258fc68e7b960ba`. Agent-node reporting remains a separate pending layer and this report does not claim end-to-end runtime consumption is complete.
+PASS for the Hub-only task runtime evidence layer at source `3b243c9b94b428ff960b390e518d6ee1c295b769`. Agent-node reporting remains a separate pending layer and this report does not claim end-to-end runtime consumption is complete.
