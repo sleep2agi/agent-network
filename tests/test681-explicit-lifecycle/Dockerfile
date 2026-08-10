@@ -5,7 +5,8 @@ ENV PATH="/root/.bun/bin:${PATH}"
 WORKDIR /app
 ARG TEST681_SOURCE_COMMIT=red
 ENV TEST681_SOURCE_COMMIT=${TEST681_SOURCE_COMMIT}
-COPY agent-node /app/agent-node
+COPY agent-node/package.json /app/agent-node/package.json
 RUN cd /app/agent-node && bun install --silent
+COPY agent-node /app/agent-node
 COPY tests/test681-explicit-lifecycle /app/tests/test681-explicit-lifecycle
 CMD ["/app/tests/test681-explicit-lifecycle/run.sh"]

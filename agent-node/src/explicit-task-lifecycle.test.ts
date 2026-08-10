@@ -12,13 +12,23 @@ function harness(statuses: Array<Record<string, unknown>>, options: {
   let now = options.startedAt ?? 0;
   let index = 0;
   const emissions: ExplicitTaskLifecycleEmission[] = [];
+  const emissionTimes: number[] = [];
+  const sleepDelays: number[] = [];
   return {
     emissions,
+    emissionTimes,
+    sleepDelays,
     run: () => waitForExplicitTaskLifecycle("task_child", options.startedAt ?? 0, {
       getTask: async () => statuses[Math.min(index++, statuses.length - 1)],
-      emit: (status, taskId, extra) => emissions.push({ status, taskId, extra }),
+      emit: (status, taskId, extra) => {
+        emissions.push({ status, taskId, extra });
+        emissionTimes.push(now);
+      },
       now: () => now,
-      sleep: async (ms) => { now += ms; },
+      sleep: async (ms) => {
+        sleepDelays.push(ms);
+        now += ms;
+      },
       timeoutMs: options.timeoutMs,
       pollIntervalMs: options.pollIntervalMs,
       stale30Ms: options.stale30Ms,
@@ -67,6 +77,15 @@ describe("explicit delegation lifecycle trace", () => {
       "expired",
     ]);
     expect(h.emissions.at(-1)?.extra?.errorCode).toBe("lifecycle_timeout");
+  });
+
+  it("pins the production poll, stale-warning, and timeout defaults", async () => {
+    const h = harness([{ task: { status: "delivered" } }]);
+    const outcome = await h.run();
+    expect(outcome.kind).toBe("expired");
+    expect(h.sleepDelays).toHaveLength(60);
+    expect(new Set(h.sleepDelays)).toEqual(new Set([2_000]));
+    expect(h.emissionTimes).toEqual([30_000, 60_000, 120_000]);
   });
 
   it("maps failed and cancelled terminal states to a failed trace without retrying", async () => {

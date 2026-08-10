@@ -34,5 +34,9 @@ mutate_expect_red src/explicit-task-trace.ts 'event: "task.warning.delivered_sta
 mutate_expect_red src/explicit-task-trace.ts 'event: "task.warning.delivered_stale_60s"' 'event: "task.warning.deleted"' stale-60-event
 mutate_expect_red src/explicit-task-trace.ts 'emit("expired", taskId, { errorCode: "lifecycle_timeout" });' 'emit("failed", taskId, { errorCode: "lifecycle_timeout" });' expiry-event
 mutate_expect_red src/cli.ts '    emit: emitTrace,' '    emit: () => {},' production-wiring
+mutate_expect_red src/explicit-task-trace.ts 'dependencies.timeoutMs ?? 120_000' 'dependencies.timeoutMs ?? 121_000' timeout-default
+mutate_expect_red src/explicit-task-trace.ts 'dependencies.pollIntervalMs ?? 2_000' 'dependencies.pollIntervalMs ?? 3_000' poll-default
+mutate_expect_red src/explicit-task-trace.ts 'dependencies.stale30Ms ?? 30_000' 'dependencies.stale30Ms ?? 31_000' stale-30-default
+mutate_expect_red src/explicit-task-trace.ts 'dependencies.stale60Ms ?? 60_000' 'dependencies.stale60Ms ?? 61_000' stale-60-default
 
 echo "RESULT: PASS"
