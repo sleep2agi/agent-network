@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
 import { createHash } from "node:crypto";
-import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, generateNetworkToken } from "./db.js";
+import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, generateNetworkToken, syncScheduledRunForTask } from "./db.js";
 import { pushEvent, pushNetworkObserverEvent } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { getUserNetworkRole, createNetworkTokenForNode } from "./auth.js";
@@ -814,6 +814,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         } else {
           updatedTaskId = task;
         }
+        if (updatedTaskId) syncScheduledRunForTask(updatedTaskId, effectiveNetId);
       });
       // Log event after transaction
       if (updatedTaskId) logTaskEvent(updatedTaskId, null, "replied", alias, "report_completion");
@@ -1588,6 +1589,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             console.log(`[${ts()}] ⚠ send_reply: task ${in_reply_to?.slice(0, 8)} not found or already terminal`);
             return false;
           }
+          syncScheduledRunForTask(in_reply_to, effectiveNetId);
           return true;
         }
         return false;
@@ -1760,6 +1762,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
            WHERE task_id = ?1`;
         updateSql = addScope(updateSql, updateParams, effectiveNetId);
         db.run(updateSql, updateParams);
+        syncScheduledRunForTask(task_id, effectiveNetId ?? task.network_id ?? null);
         // Re-queue in inbox with new ID (original ID may already exist)
         const retryInboxId = uuidv4();
         db.run(
@@ -1861,15 +1864,19 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       let updateSql = `UPDATE tasks SET status = 'cancelled', result = ?1, completed_at = datetime('now')
          WHERE task_id = ?2 AND status IN ('created', 'delivered', 'acked', 'running')`;
       updateSql = addScope(updateSql, updateParams, effectiveNetId);
-      const result = db.run(updateSql, updateParams);
-      // Also ack the inbox entry to prevent agent from picking it up
-      if (result.changes > 0) {
-        const inboxParams: any[] = [task_id];
-        let inboxSql = "UPDATE inbox SET acked = 1 WHERE COALESCE(task_id, id) = ?1 AND acked = 0";
-        inboxSql = addScope(inboxSql, inboxParams, effectiveNetId);
-        db.run(inboxSql, inboxParams);
-        logTaskEvent(task_id, null, "cancelled", from_session, reason || undefined);
-      }
+      const result = db.transaction(() => {
+        const updated = db.run(updateSql, updateParams);
+        // Also ack the inbox entry to prevent agent from picking it up.
+        if (updated.changes > 0) {
+          const inboxParams: any[] = [task_id];
+          let inboxSql = "UPDATE inbox SET acked = 1 WHERE COALESCE(task_id, id) = ?1 AND acked = 0";
+          inboxSql = addScope(inboxSql, inboxParams, effectiveNetId);
+          db.run(inboxSql, inboxParams);
+          syncScheduledRunForTask(task_id, effectiveNetId);
+        }
+        return updated;
+      });
+      if (result.changes > 0) logTaskEvent(task_id, null, "cancelled", from_session, reason || undefined);
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ ok: result.changes > 0, task_id, cancelled: result.changes > 0 }) }],
       };

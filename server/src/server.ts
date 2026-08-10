@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
-import { db, logTaskEvent, logAudit } from "./db.js";
+import { db, logTaskEvent, logAudit, syncScheduledRunForTask } from "./db.js";
 import { createSSEStream, createNetworkObserverStream, pushEvent, pushNetworkObserverEvent, getSSEStats, PRINTABLE_OBSERVER_KEY_PREFIX } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { addNetworkScope, canRestWriteNetwork, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
@@ -632,19 +632,30 @@ const wsTmuxIntervals = new Map<object, ReturnType<typeof setInterval>>();
 // Registered in startHub() (#476): this WRITES the DB, so it must never
 // run as an import side effect — a tool/test importing this module with
 // COMMHUB_DB unset would patrol the production database.
-function patrolExpiredTasks(): void {
+export function patrolExpiredTasks(): void {
   try {
-    const result = db.run(
-      `UPDATE tasks SET status = 'expired', completed_at = datetime('now')
-       WHERE expires_at IS NOT NULL AND expires_at < datetime('now')
-         AND status IN ('created', 'delivered')`
-    );
-    if (result.changes > 0) {
-      console.log(`[patrol] expired ${result.changes} stale task(s)`);
-      // Log events for expired tasks
-      const expired = db.all<{ task_id: string }>(
-        "SELECT task_id FROM tasks WHERE status = 'expired' AND completed_at >= datetime('now', '-1 minute')");
-      for (const t of expired) logTaskEvent(t.task_id, null, "expired", "patrol");
+    const expired = db.transaction(() => {
+      const due = db.all<{ task_id: string; network_id: string | null }>(
+        `SELECT task_id, network_id FROM tasks
+          WHERE expires_at IS NOT NULL AND expires_at < datetime('now')
+            AND status IN ('created', 'delivered')`,
+      );
+      const changed: Array<{ task_id: string; network_id: string | null }> = [];
+      for (const task of due) {
+        const result = db.run(
+          `UPDATE tasks SET status = 'expired', completed_at = datetime('now')
+            WHERE task_id = ?1 AND status IN ('created', 'delivered')`,
+          [task.task_id],
+        );
+        if (result.changes !== 1) continue;
+        syncScheduledRunForTask(task.task_id, task.network_id);
+        changed.push(task);
+      }
+      return changed;
+    });
+    if (expired.length > 0) {
+      console.log(`[patrol] expired ${expired.length} stale task(s)`);
+      for (const task of expired) logTaskEvent(task.task_id, null, "expired", "patrol");
     }
   } catch {}
 }

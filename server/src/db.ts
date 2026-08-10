@@ -1496,38 +1496,40 @@ export function chainReplyToParent(
     const marker = `\n\n[via ${childAlias} 子任务结果]\n${currentReply}`;
     const newResult = parent.result ? parent.result + marker : `[via ${childAlias} 子任务结果]\n${currentReply}`;
 
-    // Bump parent status to replied if still open. If it was already replied
-    // (e.g. 指挥室 sent an early status update), we still want to update the
-    // result so the dashboard can render the final chained answer — but keep
-    // status as replied (it was already terminal).
-    if (parent.status === "delivered" || parent.status === "acked" || parent.status === "running" || parent.status === "created") {
-      db.run(
-        "UPDATE tasks SET status = ?1, result = ?2, completed_at = datetime('now') WHERE task_id = ?3",
-        [replyStatus, newResult.slice(0, 8000), parent.task_id]
-      );
-      logTaskEvent(parent.task_id, parent.status, replyStatus, "auto-chain", `from ${childAlias}`);
-    } else {
-      db.run(
-        "UPDATE tasks SET result = ?1, completed_at = datetime('now') WHERE task_id = ?2",
-        [newResult.slice(0, 8000), parent.task_id]
-      );
-      logTaskEvent(parent.task_id, parent.status, parent.status, "auto-chain-append", `from ${childAlias}`);
-    }
-
-    if (parent.from_name && parent.from_name !== "hub" && parent.from_name !== "api") {
-      try {
-        const notifyId = `chain_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
-        const notifyNode = db.get<{ node_id: string | null }>(
-          "SELECT node_id FROM sessions WHERE alias = ?1 AND COALESCE(network_id, 'default') = COALESCE(?2, 'default') ORDER BY updated_at DESC LIMIT 1",
-          [parent.from_name, parent.network_id ?? null]
-        );
+    db.transaction(() => {
+      // Bump parent status to replied if still open. The task transition and
+      // its scheduler-run mirror share this transaction, so a crash cannot
+      // leave one terminal while the other remains delivered.
+      if (parent.status === "delivered" || parent.status === "acked" || parent.status === "running" || parent.status === "created") {
         db.run(
-          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, in_reply_to, requires_response, network_id)
-           VALUES (?1, ?2, ?3, 'reply', 'normal', ?4, ?5, ?6, 'none', ?7)`,
-          [notifyId, parent.from_name, notifyNode?.node_id ?? null, `[${childAlias} 子任务完成]\n${currentReply.slice(0, 4000)}`, parent.to_name, parent.task_id, parent.network_id ?? null]
+          "UPDATE tasks SET status = ?1, result = ?2, completed_at = datetime('now') WHERE task_id = ?3",
+          [replyStatus, newResult.slice(0, 8000), parent.task_id]
         );
-      } catch {}
-    }
+        syncScheduledRunForTask(parent.task_id, parent.network_id);
+        logTaskEvent(parent.task_id, parent.status, replyStatus, "auto-chain", `from ${childAlias}`);
+      } else {
+        db.run(
+          "UPDATE tasks SET result = ?1, completed_at = datetime('now') WHERE task_id = ?2",
+          [newResult.slice(0, 8000), parent.task_id]
+        );
+        logTaskEvent(parent.task_id, parent.status, parent.status, "auto-chain-append", `from ${childAlias}`);
+      }
+
+      if (parent.from_name && parent.from_name !== "hub" && parent.from_name !== "api") {
+        try {
+          const notifyId = `chain_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+          const notifyNode = db.get<{ node_id: string | null }>(
+            "SELECT node_id FROM sessions WHERE alias = ?1 AND COALESCE(network_id, 'default') = COALESCE(?2, 'default') ORDER BY updated_at DESC LIMIT 1",
+            [parent.from_name, parent.network_id ?? null]
+          );
+          db.run(
+            `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, in_reply_to, requires_response, network_id)
+             VALUES (?1, ?2, ?3, 'reply', 'normal', ?4, ?5, ?6, 'none', ?7)`,
+            [notifyId, parent.from_name, notifyNode?.node_id ?? null, `[${childAlias} 子任务完成]\n${currentReply.slice(0, 4000)}`, parent.to_name, parent.task_id, parent.network_id ?? null]
+          );
+        } catch {}
+      }
+    });
 
     // This iteration actually wrote a parent row (and possibly an
     // inbox notification). Record that so the caller can gate its
@@ -1539,6 +1541,79 @@ export function chainReplyToParent(
     currentReply = newResult;
   }
   return { chained };
+}
+
+const SCHEDULED_RUN_TERMINAL_STATUSES = new Set(["replied", "failed", "cancelled", "expired"]);
+
+type ScheduledTaskLifecycleRow = {
+  task_id: string;
+  network_id: string | null;
+  status: string;
+  completed_at: string | null;
+};
+
+type ScheduledTaskBinding = { run_id: string; schedule_id: string };
+
+/**
+ * Mirror an exact scheduler-created task's lifecycle into its run row.
+ *
+ * The status is always read back from `tasks`; callers cannot supply one.
+ * The scheduler's storage binding is the four-part tuple
+ * (run_id, schedule_id, task_id, network_id). It is read from
+ * `scheduled_task_runs`, not caller-controlled task metadata (which may also
+ * legitimately be replaced by reply attachment metadata).
+ *
+ * Terminal states close the run. `retry_task` calls this after resetting the
+ * same logical task_id to delivered, which deliberately reopens that run so
+ * the history reflects the current retry rather than the first failed attempt.
+ */
+export function syncScheduledRunForTask(taskId: string, expectedNetworkId?: string | null): { matched: boolean; status?: string } {
+  const task = db.get<ScheduledTaskLifecycleRow>(
+    `SELECT task_id, network_id, status, completed_at
+       FROM tasks
+      WHERE task_id = ?1
+        AND (?2 IS NULL OR network_id = ?2)`,
+    taskId,
+    expectedNetworkId ?? null,
+  );
+  if (!task?.network_id) return { matched: false };
+  const bindings = db.all<ScheduledTaskBinding>(
+    `SELECT run_id, schedule_id FROM scheduled_task_runs
+      WHERE task_id = ?1 AND network_id = ?2`,
+    task.task_id,
+    task.network_id,
+  );
+  // One task belongs to at most one scheduled occurrence. Fail closed if a
+  // corrupt/legacy database violates that invariant rather than fanning one
+  // lifecycle transition into multiple runs.
+  if (bindings.length !== 1) return { matched: false };
+  const binding = bindings[0];
+
+  if (SCHEDULED_RUN_TERMINAL_STATUSES.has(task.status)) {
+    const errorCode = task.status === "replied" ? null : `task_${task.status}`;
+    const updated = db.run(
+      `UPDATE scheduled_task_runs
+          SET status = ?1,
+              error_code = ?2,
+              error_message = NULL,
+              completed_at = COALESCE(?3, datetime('now'))
+        WHERE run_id = ?4 AND task_id = ?5 AND network_id = ?6 AND schedule_id = ?7`,
+      [task.status, errorCode, task.completed_at, binding.run_id, task.task_id, task.network_id, binding.schedule_id],
+    );
+    return { matched: updated.changes === 1, status: task.status };
+  }
+
+  if (task.status === "delivered") {
+    const updated = db.run(
+      `UPDATE scheduled_task_runs
+          SET status = 'delivered', error_code = NULL, error_message = NULL, completed_at = NULL
+        WHERE run_id = ?1 AND task_id = ?2 AND network_id = ?3 AND schedule_id = ?4`,
+      [binding.run_id, task.task_id, task.network_id, binding.schedule_id],
+    );
+    return { matched: updated.changes === 1, status: task.status };
+  }
+
+  return { matched: false };
 }
 
 function taskEventTypeForStatus(toStatus: string): string {
