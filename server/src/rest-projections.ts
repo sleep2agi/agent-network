@@ -19,6 +19,7 @@ export const SESSION_REST_COLUMNS = [
   "process_rss_mb", "process_cpu_pct", "process_uptime_seconds",
   "process_in_flight_count", "network_id", "registered_at", "updated_at",
   "node_id", "session_id", "config_path", "channels", "last_seen_at", "model",
+  "external_schedules",
 ] as const;
 
 export const AUDIT_LOG_REST_COLUMNS = [

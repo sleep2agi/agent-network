@@ -49,9 +49,9 @@ beforeAll(async () => {
   }
 
   db.run(
-    `INSERT INTO sessions (resume_id, alias, status, agent, model, network_id)
-     VALUES ('resume-rest-shape', 'rest-shape-node', 'idle', 'agent-node:codex', 'gpt-shape', ?1)`,
-    [networkId],
+    `INSERT INTO sessions (resume_id, alias, status, agent, model, network_id, external_schedules)
+     VALUES ('resume-rest-shape', 'rest-shape-node', 'idle', 'agent-node:codex', 'gpt-shape', ?1, ?2)`,
+    [networkId, JSON.stringify({ observed_at: "2026-08-10T02:00:00.000Z", schedules: [] })],
   );
   db.run(
     `INSERT INTO tasks (task_id, from_name, to_name, status, content, priority, network_id, parent_task_id, meta_json)
@@ -110,6 +110,7 @@ describe("#311 REST response projections are stable across future ALTER TABLE", 
     const row = body.sessions.find((item: any) => item.alias === "rest-shape-node");
     expect(sortedKeys(row)).toEqual(sorted([...SESSION_REST_COLUMNS, "runtime", "host", "process_telemetry"]));
     expect(row[INTERNAL_SENTINEL]).toBeUndefined();
+    expect(row.external_schedules).toEqual({ observed_at: "2026-08-10T02:00:00.000Z", schedules: [] });
   });
 
   test("task list and task detail expose the same explicit contract", async () => {

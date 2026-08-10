@@ -1500,8 +1500,14 @@ return Bun.serve({
             network_id: s.network_id ?? null,
           };
         }
+        const externalSchedules = (() => {
+          if (typeof s.external_schedules !== "string") return null;
+          try { return JSON.parse(s.external_schedules); } catch { return null; }
+        })();
+        const { external_schedules: _externalSchedulesJson, ...publicSession } = s;
         return {
-          ...s,
+          ...publicSession,
+          external_schedules: externalSchedules,
           model: s.model ?? null,
           runtime: normalizeRuntime(s.agent),
           host: {
@@ -1618,7 +1624,7 @@ return Bun.serve({
       if (detailKind === "agents") {
         const params: any[] = [host, host];
         let sql = `
-          SELECT alias, agent, status, task, progress, model, hostname, ip,
+          SELECT alias, agent, status, task, progress, model, hostname, ip, external_schedules,
                  cpu_load_1min, cpu_cores, mem_avail_gb, mem_used_gb, mem_total_gb,
                  disk_avail_gb, disk_used_gb, disk_total_gb,
                  process_rss_bytes, process_rss_mb, process_cpu_pct, process_uptime_seconds, process_in_flight_count,
@@ -1636,6 +1642,10 @@ return Bun.serve({
           status: s.status ?? "offline",
           task: s.task ?? null,
           progress: s.progress ?? 0,
+          external_schedules: (() => {
+            if (typeof s.external_schedules !== "string") return null;
+            try { return JSON.parse(s.external_schedules); } catch { return null; }
+          })(),
           last_seen: s.last_seen ?? null,
           health: agentHealthChip(s.status, s.last_seen),
           hostname: s.hostname ?? null,

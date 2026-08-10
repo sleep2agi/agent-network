@@ -18,6 +18,7 @@ import { createCommhubSdkMcpServer } from "./commhub-mcp";
 import { claudeCommhubToolAliases } from "./claude-tool-aliases";
 import { getHostTelemetry } from "./host-telemetry";
 import { getProcessTelemetry, incrementInFlight, decrementInFlight } from "./process-telemetry";
+import { readExternalSchedulesSnapshot } from "./external-schedules";
 import { parseGoalCommand } from "./goals/parser";
 import {
   appendLegacyScheduledGoalNotice,
@@ -1270,6 +1271,7 @@ const register = async () => {
     network_id: NETWORK_ID || undefined,
     host: getHostTelemetry(),
     process_telemetry: getProcessTelemetry(),
+    external_schedules: readExternalSchedulesSnapshot(configFilePath),
   });
   // Server is authoritative: if it told us a canonical alias different
   // from what we just sent, treat that as a snapshot update so the
@@ -1300,6 +1302,7 @@ const reportStatus = async (status: string, task?: string) => {
     network_id: NETWORK_ID || undefined,
     host: getHostTelemetry(),
     process_telemetry: getProcessTelemetry(),
+    external_schedules: readExternalSchedulesSnapshot(configFilePath),
     // RFC-024 N6 — masked snapshot of effective model+flags so dashboard
     // can show the current state without touching per-node files.
     // config_update_capable signals whether this process runs under a
