@@ -66,7 +66,12 @@ async function postTask(token: string, from: string, marker: string) {
   expect([200, 202]).toContain(response.status);
   const taskId = body.task_id ?? body.message_id;
   expect(taskId).toBeTruthy();
-  return JSON.parse(db.get<{ meta_json: string }>("SELECT meta_json FROM inbox WHERE id = ?1", [taskId])!.meta_json);
+  const inbox = db.get<{ meta_json: string; task_id: string }>(
+    "SELECT meta_json, task_id FROM inbox WHERE id = ?1",
+    [taskId],
+  )!;
+  expect(inbox.task_id).toBe(taskId);
+  return JSON.parse(inbox.meta_json);
 }
 
 describe("POST /api/task server-authenticated origin", () => {

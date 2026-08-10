@@ -274,8 +274,8 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
       auth_origin: "hub_scheduler",
     });
     db.run(
-      `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, requires_response, network_id, meta_json)
-       VALUES (?1, ?2, ?3, 'task', ?4, ?5, 'scheduler', 'reply', ?6, ?7)`,
+      `INSERT INTO inbox (id, task_id, session_name, node_id, type, priority, content, from_session, requires_response, network_id, meta_json)
+       VALUES (?1, ?1, ?2, ?3, 'task', ?4, ?5, 'scheduler', 'reply', ?6, ?7)`,
       [taskId, node.alias, node.node_id, row.priority, row.task_content, row.network_id, metaJson],
     );
     db.run(

@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { db } from "./db.js";
+import { dispatchScheduledOccurrence } from "./scheduled-tasks.js";
 import { registerTools } from "./tools.js";
 
 const NET = "net_task_consumption";
@@ -11,7 +12,7 @@ const NODE_B = "node_consumption_b";
 type ToolHandler = (args: any) => Promise<{ content: Array<{ type: "text"; text: string }> }>;
 
 function cleanup() {
-  for (const table of ["tasks", "inbox", "task_events", "sessions", "nodes"]) {
+  for (const table of ["scheduled_task_runs", "scheduled_tasks", "tasks", "inbox", "task_events", "sessions", "nodes"]) {
     try { db.run(`DELETE FROM ${table} WHERE network_id = ?1`, [NET]); } catch {}
   }
   try { db.run("DELETE FROM network_members WHERE network_id = ?1", [NET]); } catch {}
@@ -274,5 +275,55 @@ describe("task consumed_at identity and lifecycle", () => {
       task_id: taskId,
     });
     expect((await call(newOwnerTools.mark_tasks_consumed, { task_ids: [taskId] })).ok).toBe(true);
+  });
+
+  test("scheduler delivery writes and exposes the same logical task id", async () => {
+    const scheduleId = `sched_${crypto.randomUUID()}`;
+    const scheduledFor = new Date(Date.now() + 60_000).toISOString();
+    const row = {
+      schedule_id: scheduleId,
+      network_id: NET,
+      created_by: USER,
+      name: "task linkage schedule",
+      target_node_id: `id_${NODE_A}`,
+      target_alias: NODE_A,
+      task_content: "scheduler must preserve logical task identity",
+      priority: "normal",
+      schedule_type: "once",
+      schedule_json: JSON.stringify({ type: "once", run_at: scheduledFor }),
+      timezone: "UTC",
+      overlap_policy: "skip",
+      misfire_policy: "catch_up_once",
+      status: "active",
+      next_run_at: scheduledFor,
+      last_run_at: null,
+      revision: 1,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    } as any;
+    db.run(
+      `INSERT INTO scheduled_tasks
+       (schedule_id, network_id, created_by, name, target_node_id, target_alias,
+        task_content, priority, schedule_type, schedule_json, timezone,
+        overlap_policy, misfire_policy, status, next_run_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)`,
+      [scheduleId, NET, USER, row.name, row.target_node_id, NODE_A, row.task_content,
+       row.priority, row.schedule_type, row.schedule_json, row.timezone,
+       row.overlap_policy, row.misfire_policy, row.status, row.next_run_at],
+    );
+
+    const dispatched = dispatchScheduledOccurrence(row, scheduledFor, false);
+    expect(dispatched.taskId).toBeTruthy();
+    const inbox = db.get<{ id: string; task_id: string }>(
+      "SELECT id, task_id FROM inbox WHERE id = ?1",
+      [dispatched.taskId],
+    );
+    expect(inbox).toEqual({ id: dispatched.taskId!, task_id: dispatched.taskId! });
+    const pending = await call(
+      toolsFor({ alias: NODE_A, nodeToken: true }).get_inbox,
+      { alias: NODE_A, limit: 20 },
+    );
+    expect(pending.messages.find((message: any) => message.id === dispatched.taskId)?.task_id)
+      .toBe(dispatched.taskId);
   });
 });

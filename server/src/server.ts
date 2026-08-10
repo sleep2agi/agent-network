@@ -2274,8 +2274,8 @@ return Bun.serve({
       // dispatched via REST (anet demo, dashboard Dispatch button, etc.).
       db.transaction(() => {
         db.run(
-          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, requires_response, network_id, meta_json)
-           VALUES (?1, ?2, ?3, 'task', ?4, ?5, ?6, 'reply', ?7, ?8)`,
+          `INSERT INTO inbox (id, task_id, session_name, node_id, type, priority, content, from_session, requires_response, network_id, meta_json)
+           VALUES (?1, ?1, ?2, ?3, 'task', ?4, ?5, ?6, 'reply', ?7, ?8)`,
           [id, targetAlias, targetNodeId, body.priority, body.task, fromSession, taskNetId, metaJson]
         );
         db.run(

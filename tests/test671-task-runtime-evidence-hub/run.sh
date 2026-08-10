@@ -29,6 +29,9 @@ cd "$ROOT"
 COMMHUB_DB=/tmp/test671-hub.db bun test server/src/task-consumption.test.ts
 ok "two-level task runtime evidence contract"
 
+COMMHUB_DB=/tmp/test671-rest.db bun test server/src/task-auth-origin-http.test.ts
+ok "REST initial task delivery writes logical inbox task_id"
+
 bun build server/src/index.ts --target bun --outdir /tmp/test671-server-build >/dev/null
 ok "production Hub bundle builds"
 
@@ -102,6 +105,34 @@ else
     bun test server/src/task-consumption.test.ts
 fi
 cp /tmp/test671-tools.orig server/src/tools.ts
+
+cp server/src/scheduled-tasks.ts /tmp/test671-scheduled.orig
+if [[ "$(grep -F "VALUES (?1, ?1, ?2, ?3, 'task'" server/src/scheduled-tasks.ts | wc -l)" -ne 1 ]]; then
+  bad "scheduler task-id mutation anchor count changed"
+else
+  sed -i "s/VALUES (?1, ?1, ?2, ?3, 'task'/VALUES (?1, NULL, ?2, ?3, 'task'/" server/src/scheduled-tasks.ts
+  if cmp -s /tmp/test671-scheduled.orig server/src/scheduled-tasks.ts; then
+    bad "unlink-scheduler-task-id mutation did not change source"
+  else
+    expect_red unlink-scheduler-task-id env COMMHUB_DB=/tmp/test671-mut-scheduler-link.db \
+      bun test server/src/task-consumption.test.ts
+  fi
+fi
+cp /tmp/test671-scheduled.orig server/src/scheduled-tasks.ts
+
+cp server/src/server.ts /tmp/test671-server.orig
+if [[ "$(grep -F "VALUES (?1, ?1, ?2, ?3, 'task'" server/src/server.ts | wc -l)" -ne 1 ]]; then
+  bad "REST task-id mutation anchor count changed"
+else
+  sed -i "s/VALUES (?1, ?1, ?2, ?3, 'task'/VALUES (?1, NULL, ?2, ?3, 'task'/" server/src/server.ts
+  if cmp -s /tmp/test671-server.orig server/src/server.ts; then
+    bad "unlink-rest-task-id mutation did not change source"
+  else
+    expect_red unlink-rest-task-id env COMMHUB_DB=/tmp/test671-mut-rest-link.db \
+      bun test server/src/task-auth-origin-http.test.ts
+  fi
+fi
+cp /tmp/test671-server.orig server/src/server.ts
 
 printf 'RESULT pass=%s fail=%s\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]
