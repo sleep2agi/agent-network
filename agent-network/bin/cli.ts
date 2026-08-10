@@ -107,6 +107,7 @@ import {
   planPlainSecretEnvRewrites,
 } from "../src/claude-vendor-env";
 import { normalizeBatchWorkdir } from "../src/batch-workdir";
+import { loadMockLlmRules, resolveMockLlmReply } from "../src/mock-llm";
 import {
   decideDashboardListener,
   parseDashboardLaunchRecord,
@@ -11209,6 +11210,93 @@ async function fetchPrDiff(opts: Record<string, string>): Promise<{ diff: string
   throw new Error(`需要 --diff <file> / --ref <ref> / --pr <github-url> 之一`);
 }
 
+type PrReviewSection = { role: string; alias: string; text: string; durationMs: number };
+
+async function runPrReviewOrchestration(input: {
+  diff: string;
+  diffSource: string;
+  diffKb: string;
+  suffix: string;
+  outPath: string;
+  keep: boolean;
+  roleAliases: Record<string, string>;
+  invoke: (role: string, alias: string, prompt: string) => Promise<string>;
+}): Promise<void> {
+  const reviewerOutputs: PrReviewSection[] = [];
+  let judgeOutput = "";
+  const reviewerRoles = ["reviewer-security", "reviewer-performance", "reviewer-style"];
+  const t0Run = Date.now();
+
+  try {
+    console.log(`  [3/6] 广播 review task 给 3 reviewer (parallel)...`);
+    const reviewerTask = `请审查以下 diff（按你专精的维度）：\n\n\`\`\`diff\n${input.diff}\n\`\`\``;
+    const t0Fanout = Date.now();
+    const fanouts = reviewerRoles.map(async role => {
+      const alias = input.roleAliases[role];
+      const t0 = Date.now();
+      const reply = await input.invoke(role, alias, reviewerTask);
+      const dt = Date.now() - t0;
+      console.log(`        ✓ ${alias.padEnd(28)} ${Math.round(dt / 1000).toString().padStart(3)}s, ${reply.length} 字`);
+      return { role, alias, text: reply, durationMs: dt };
+    });
+    const results = await Promise.all(fanouts);
+    reviewerOutputs.push(...results);
+    const fanoutDt = Date.now() - t0Fanout;
+    const serialEstimate = results.reduce((sum, result) => sum + result.durationMs, 0);
+    console.log(`        ─ 并行总耗时 ${Math.round(fanoutDt / 1000)}s (估串行 ${Math.round(serialEstimate / 1000)}s, 节省 ~${Math.max(0, Math.round((serialEstimate - fanoutDt) / 1000))}s)`);
+
+    console.log(`  [4/6] barrier 收齐 3 份 review，整包派给 judge...`);
+    const judgePackage = [
+      `## diff 摘要`,
+      `- 来源: ${input.diffSource}`,
+      `- 大小: ${input.diffKb} KB`,
+      ``,
+      `## reviewer-security 输出`,
+      reviewerOutputs.find(output => output.role === "reviewer-security")?.text || "(无)",
+      ``,
+      `## reviewer-performance 输出`,
+      reviewerOutputs.find(output => output.role === "reviewer-performance")?.text || "(无)",
+      ``,
+      `## reviewer-style 输出`,
+      reviewerOutputs.find(output => output.role === "reviewer-style")?.text || "(无)",
+    ].join("\n");
+
+    console.log(`  [5/6] judge 整合 + 终审...`);
+    const judgeAlias = input.roleAliases.judge;
+    const t0Judge = Date.now();
+    judgeOutput = await input.invoke("judge", judgeAlias, `请整合三份 review 输出最终 PR review：\n\n${judgePackage}`);
+    console.log(`        ✓ ${judgeAlias} ${Math.round((Date.now() - t0Judge) / 1000)}s, ${judgeOutput.length} 字`);
+  } catch (error: any) {
+    console.error(`\n  ❌ 流程失败: ${error.message}`);
+    if (!input.keep) console.log(`     (--keep 未指定,稍后会清理 agent)`);
+  }
+
+  console.log(`  [6/6] 写入 review: ${input.outPath}`);
+  const finalMd = [
+    `# PR Review`,
+    ``,
+    `**来源**: ${input.diffSource}`,
+    `**大小**: ${input.diffKb} KB`,
+    `**时间**: ${new Date().toLocaleString()}`,
+    `**Run**: ${input.suffix}`,
+    `**总耗时**: ${Math.round((Date.now() - t0Run) / 1000)}s`,
+    ``,
+    judgeOutput || "(judge 没输出，看上面错误)",
+    ``,
+    `---`,
+    `## 附：3 reviewer 原始输出`,
+    ``,
+    ...reviewerOutputs.flatMap(output => [
+      `### ${output.role} (${output.alias}, ${Math.round(output.durationMs / 1000)}s)`,
+      ``,
+      output.text,
+      ``,
+    ]),
+  ].join("\n");
+  writeFileSync(input.outPath, finalMd);
+  console.log(`        ✓ ${finalMd.length} 字写入 ${input.outPath}`);
+}
+
 async function demoPrReviewCommand() {
   const opts = parseOpts();
   const help = args.includes("--help") || args.includes("-h");
@@ -11236,6 +11324,9 @@ async function demoPrReviewCommand() {
     --no-network      跑在当前/default network 内
     --network <id>    指定已存在的 network
 
+  测试专用:
+    MOCK_LLM_REPLIES_FILE=<jsonl>  用确定性 fixture 替代 4 次 LLM 回复；不连接 Hub
+
   Examples:
     anet demo pr-review --diff ./my-pr.diff
     anet demo pr-review --ref origin/main
@@ -11252,10 +11343,15 @@ async function demoPrReviewCommand() {
     return;
   }
 
+  // Explicit presence is the opt-in boundary. An unset variable must retain
+  // the real Hub/agent/vendor path byte-for-byte; an explicitly empty value
+  // is a malformed mock configuration and fails closed in the shared parser.
+  const mockMode = Object.prototype.hasOwnProperty.call(process.env, "MOCK_LLM_REPLIES_FILE");
+  const mockRepliesFile = process.env.MOCK_LLM_REPLIES_FILE ?? "";
   const gc = loadGlobal();
   const hub = gc.hub;
-  if (!hub) { console.error("  ❌ 没有 hub. 先 'anet init' 或 'anet hub start'."); return; }
-  if (!gc.token) { console.error("  ❌ 没有 token. 先 'anet login'."); return; }
+  if (!mockMode && !hub) { console.error("  ❌ 没有 hub. 先 'anet init' 或 'anet hub start'."); return; }
+  if (!mockMode && !gc.token) { console.error("  ❌ 没有 token. 先 'anet login'."); return; }
 
   // 1. Resolve diff source
   let diff = "";
@@ -11275,7 +11371,7 @@ async function demoPrReviewCommand() {
   }
 
   const minimaxKey = opts.key || process.env.MINIMAX_KEY || process.env.ANTHROPIC_AUTH_TOKEN || "";
-  if (!minimaxKey) {
+  if (!mockMode && !minimaxKey) {
     console.error("  ❌ 需要 MiniMax key. 用 --key 或 export MINIMAX_KEY=sk-cp-...");
     return;
   }
@@ -11284,6 +11380,33 @@ async function demoPrReviewCommand() {
   const keep = args.includes("--keep");
   const suffix = opts.suffix || Math.random().toString(16).slice(2, 6);
   const outPath = opts.out || `./pr-review-${suffix}-${Date.now()}.md`;
+  const roleAliases: Record<string, string> = {};
+  for (const role of PR_REVIEW_ROLES) roleAliases[role] = `${role}-${suffix}`;
+
+  if (mockMode) {
+    const rules = loadMockLlmRules(mockRepliesFile);
+    console.log(`\n  🔍 PR diff: ${diffSource}`);
+    console.log(`  📏 Size:   ${diffKb} KB`);
+    console.log(`  🧪 Mock:   ${mockRepliesFile} (${rules.length} rules)`);
+    console.log(`  🆔 Run:    ${suffix}\n`);
+    console.log(`  [1/6] 使用确定性 mock LLM（不创建 agent）`);
+    console.log(`  [2/6] 本地 mock ready`);
+    await runPrReviewOrchestration({
+      diff,
+      diffSource,
+      diffKb,
+      suffix,
+      outPath,
+      keep: true,
+      roleAliases,
+      // The real path distinguishes reviewers with their per-node system
+      // prompts. The deterministic path supplies the same role discriminator
+      // directly to the stateless matcher.
+      invoke: async (role, _alias, prompt) => resolveMockLlmReply(rules, `${role}\n${prompt}`).reply,
+    });
+    console.log(`\n  🏁 完成！review: ${outPath}\n`);
+    return;
+  }
 
   // Network selection: same convention as demo debate (default = create
   // dedicated `pr-review-<suffix>` network; --no-network = use default;
@@ -11331,9 +11454,6 @@ async function demoPrReviewCommand() {
       return;
     }
   }
-
-  const roleAliases: Record<string, string> = {};
-  for (const r of PR_REVIEW_ROLES) roleAliases[r] = `${r}-${suffix}`;
 
   console.log(`\n  🔍 PR diff: ${diffSource}`);
   console.log(`  📏 Size:   ${diffKb} KB`);
@@ -11443,80 +11563,19 @@ async function demoPrReviewCommand() {
     throw new Error(`timeout waiting for ${alias} reply`);
   }
 
-  type ReviewSection = { role: string; alias: string; text: string; durationMs: number };
-  const reviewerOutputs: ReviewSection[] = [];
-  let judgeOutput = "";
-  const reviewerRoles = ["reviewer-security", "reviewer-performance", "reviewer-style"];
-  const t0Run = Date.now();
-
-  try {
-    // 5. Parallel fan-out to 3 reviewers
-    console.log(`  [3/6] 广播 review task 给 3 reviewer (parallel)...`);
-    const reviewerTask = `请审查以下 diff（按你专精的维度）：\n\n\`\`\`diff\n${diff}\n\`\`\``;
-    const t0Fanout = Date.now();
-    const fanouts = reviewerRoles.map(async role => {
-      const alias = roleAliases[role];
-      const t0 = Date.now();
-      const msgId = await postTask(alias, reviewerTask);
-      const reply = await waitReply(msgId, alias, stepTimeout);
-      const dt = Date.now() - t0;
-      console.log(`        ✓ ${alias.padEnd(28)} ${Math.round(dt / 1000).toString().padStart(3)}s, ${reply.length} 字`);
-      return { role, alias, text: reply, durationMs: dt };
-    });
-    const results = await Promise.all(fanouts);
-    reviewerOutputs.push(...results);
-    const fanoutDt = Date.now() - t0Fanout;
-    const serialEstimate = results.reduce((s, r) => s + r.durationMs, 0);
-    console.log(`        ─ 并行总耗时 ${Math.round(fanoutDt / 1000)}s (估串行 ${Math.round(serialEstimate / 1000)}s, 节省 ~${Math.max(0, Math.round((serialEstimate - fanoutDt) / 1000))}s)`);
-
-    // 6. Barrier → judge
-    console.log(`  [4/6] barrier 收齐 3 份 review，整包派给 judge...`);
-    const judgePackage = [
-      `## diff 摘要`,
-      `- 来源: ${diffSource}`,
-      `- 大小: ${diffKb} KB`,
-      ``,
-      `## reviewer-security 输出`,
-      reviewerOutputs.find(o => o.role === "reviewer-security")?.text || "(无)",
-      ``,
-      `## reviewer-performance 输出`,
-      reviewerOutputs.find(o => o.role === "reviewer-performance")?.text || "(无)",
-      ``,
-      `## reviewer-style 输出`,
-      reviewerOutputs.find(o => o.role === "reviewer-style")?.text || "(无)",
-    ].join("\n");
-
-    console.log(`  [5/6] judge 整合 + 终审...`);
-    const judgeAlias = roleAliases["judge"];
-    const t0Judge = Date.now();
-    const judgeMsgId = await postTask(judgeAlias, `请整合三份 review 输出最终 PR review：\n\n${judgePackage}`);
-    judgeOutput = await waitReply(judgeMsgId, judgeAlias, stepTimeout);
-    console.log(`        ✓ ${judgeAlias} ${Math.round((Date.now() - t0Judge) / 1000)}s, ${judgeOutput.length} 字`);
-  } catch (e: any) {
-    console.error(`\n  ❌ 流程失败: ${e.message}`);
-    if (!keep) console.log(`     (--keep 未指定,稍后会清理 agent)`);
-  }
-
-  // 7. Write output markdown
-  console.log(`  [6/6] 写入 review: ${outPath}`);
-  const finalMd = [
-    `# PR Review`,
-    ``,
-    `**来源**: ${diffSource}`,
-    `**大小**: ${diffKb} KB`,
-    `**时间**: ${new Date().toLocaleString()}`,
-    `**Run**: ${suffix}`,
-    `**总耗时**: ${Math.round((Date.now() - t0Run) / 1000)}s`,
-    ``,
-    judgeOutput || "(judge 没输出，看上面错误)",
-    ``,
-    `---`,
-    `## 附：3 reviewer 原始输出`,
-    ``,
-    ...reviewerOutputs.flatMap(o => [`### ${o.role} (${o.alias}, ${Math.round(o.durationMs / 1000)}s)`, ``, o.text, ``]),
-  ].join("\n");
-  writeFileSync(outPath, finalMd);
-  console.log(`        ✓ ${finalMd.length} 字写入 ${outPath}`);
+  await runPrReviewOrchestration({
+    diff,
+    diffSource,
+    diffKb,
+    suffix,
+    outPath,
+    keep,
+    roleAliases,
+    invoke: async (_role, alias, prompt) => {
+      const msgId = await postTask(alias, prompt);
+      return await waitReply(msgId, alias, stepTimeout);
+    },
+  });
 
   // 8. Cleanup unless --keep
   if (!keep) {
