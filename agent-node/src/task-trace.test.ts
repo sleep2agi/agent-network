@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { renderTaskTrace, safeTaskTraceError, taskTraceEvent } from "./task-trace";
+import { sendExplicitTaskWithTrace } from "./explicit-task-trace";
 
 describe("task trace contract", () => {
   it("renders missing parent and lifecycle scope honestly", () => {
@@ -25,5 +26,16 @@ describe("task trace contract", () => {
     });
     expect(JSON.parse(renderTaskTrace(event, true))).toEqual(event);
     expect(renderTaskTrace(event, false)).not.toContain("\n");
+  });
+
+  it("recognizes the real MCP content envelope before cli parsing", async () => {
+    const lines: string[] = [];
+    await sendExplicitTaskWithTrace({ alias: "worker", task: "x" }, {
+      fromAlias: "sender", toAlias: "worker", parentTaskId: null, networkId: null,
+      startedAt: Date.now(), log: (line) => lines.push(line),
+    }, async () => ({ content: [{ type: "text", text: JSON.stringify({ ok: true, task_id: "task_wire" }) }] }));
+    expect(lines.join("\n")).toContain("delivered");
+    expect(lines.join("\n")).toContain("task_id=task_wire");
+    expect(lines.join("\n")).not.toContain("missing_task_id");
   });
 });

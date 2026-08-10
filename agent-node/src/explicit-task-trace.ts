@@ -9,6 +9,19 @@ export interface ExplicitTaskTraceContext {
   log: (line: string) => void;
 }
 
+function taskIdFromResponse(result: any): string | null {
+  const direct = result?.task_id || result?.message_id || result?.id;
+  if (direct) return String(direct);
+  const text = result?.content?.[0]?.text;
+  if (typeof text !== "string") return null;
+  try {
+    const parsed = JSON.parse(text);
+    return parsed?.task_id || parsed?.message_id || parsed?.id || null;
+  } catch {
+    return null;
+  }
+}
+
 export function emitExplicitTaskTrace(
   context: ExplicitTaskTraceContext,
   status: TaskTraceStatus,
@@ -46,7 +59,7 @@ export async function sendExplicitTaskWithTrace(
       from_session: context.fromAlias,
       parent_task_id: context.parentTaskId || undefined,
     });
-    const taskId = result?.task_id || result?.message_id || result?.id || null;
+    const taskId = taskIdFromResponse(result);
     if (!taskId) {
       emitExplicitTaskTrace(context, "failed", null, { errorCode: "missing_task_id", errorMessage: "CommHub response omitted task_id" });
     } else {
