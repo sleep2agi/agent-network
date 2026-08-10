@@ -1,0 +1,47 @@
+# test689 — owner-gated external schedule agent apply
+
+Date: 2026-08-10
+Base: a1d6831d9b31e8d5742f0eb01fd4b80fdd2464c3
+Source commit: 6548ffe30ac5a5832de08dedb2a0c49bcbb66495
+Image: anet-test689:dev
+Image ID: sha256:4a26c38f0485f439495239e45935a871fb81e0c5f6ae1b84534cc2ce9aa413d5
+Embedded TEST689_SOURCE_COMMIT: 6548ffe30ac5a5832de08dedb2a0c49bcbb66495
+
+## Result
+
+PASS. No production deployment, merge, npm publish, global install, or host crontab change was performed.
+
+- Unit/wiring: 18 pass, 0 fail, 84 assertions.
+- Real container crontab: 1 pass, 0 fail, 3 assertions. The test used the image-local `crontab -l` / `crontab -` implementation and removed that container crontab afterwards.
+- Production `agent-node` bundle: PASS (268 modules).
+- Restored green after mutations: 18 pass, 0 fail, 84 assertions.
+- Hub/agent strict cron parser files: byte-identical.
+
+## Security properties exercised
+
+- Process-level opt-in is pinned once from `flags.ownerScheduleControl === true`; ordinary model turns and IM messages receive no schedule-write tool.
+- The consumer ignores SSE payload authority and pulls the intent using the node ntok.
+- Managed markers bind both exact `node_id` and `schedule_id`; a same-UID sibling node with the same schedule id cannot see or edit the entry.
+- Only strict five-field cron timing and `enabled` change. Command bytes and unmanaged crontab bytes remain exact.
+- Command fingerprint, revision CAS, journal-before-write, install readback, exact rollback, ACK-after-apply, and lost-ACK idempotency are covered.
+- Recovery journal and local audit are private files. The persistent audit contains no command, host path, credential, owner UUID, or network id.
+- New token mint paths send immutable node_id. Legacy ownerless nodes are not first-claimed by heartbeat/reporting.
+
+## Witnessed-red mutations
+
+All eight mutations changed source bytes and produced a non-empty failing log before the normal source was restored:
+
+1. bypass command fingerprint
+2. bypass revision CAS
+3. bypass exact node marker
+4. delete exact rollback install
+5. delete lost-ACK idempotent recovery
+6. admit `@reboot` through the strict cron parser
+7. delete the process-level enable gate
+8. drift the shared Hub/agent parser copy
+
+Final runner output ended with `RESULT: PASS`.
+
+## Honest boundary
+
+This segment implements and verifies Hub-intent consumption plus local managed-cron application. It does not create arbitrary cron commands or retrofit unmanaged/legacy crontabs. A schedule is editable only when an operator has already installed the exact ANET managed marker containing this node's immutable node_id and the command fingerprint. Dashboard authoring is a later segment.
