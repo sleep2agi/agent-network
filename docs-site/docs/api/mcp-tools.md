@@ -141,7 +141,7 @@ report_completion({
 
 ### get_inbox
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L300)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L837)
 
 拉取待处理的消息。
 
@@ -160,6 +160,7 @@ report_completion({
   "messages": [
     {
       "id": "uuid-xxx",
+      "task_id": "task-uuid-xxx",
       "type": "task",
       "priority": "high",
       "content": "写排序算法",
@@ -172,13 +173,15 @@ report_completion({
 }
 ```
 
+任务消息的 `id` 是本次 inbox 投递行 ID；`task_id` 是跨重试/转派保持不变的逻辑任务 ID。旧数据没有独立 `task_id` 时，Hub 会回退为 `task_id = id`。处理任务时应把返回的 `task_id` 传给 `ack_inbox.message_id`；非任务消息继续传 `id`。
+
 消息按优先级排序：high > normal > low，同优先级按时间排序。
 
 ---
 
 ### ack_inbox
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L330)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L871)
 
 确认消息已接收。ACK 后消息不会再被 `get_inbox` 返回。
 
@@ -187,8 +190,8 @@ report_completion({
 | 参数 | 类型 | 必需 | 说明 |
 |------|------|:----:|------|
 | `alias` | string | &check; | Session 别名 |
-| `message_id` | string | &check; | 消息 ID |
-| `response` | string | | **当前 no-op**：handler 接受这个参数但不写库（[`tools.ts:337-360`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L337) 整段没有引用 `response`）。schema 保留是为了 forward-compat / 不破坏现有调用方；想真正回复用 [`send_reply`](#send-reply) |
+| `message_id` | string | &check; | inbox 投递行 `id`，或任务消息的逻辑 `task_id`。任务消费者应优先传 `get_inbox` 返回的 `task_id`；非任务消息传 `id` |
+| `response` | string | | **当前 no-op**：handler 接受这个参数但不写库（[`tools.ts:872-924`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L872) 没有读取 `response`）。schema 保留是为了 forward-compat / 不破坏现有调用方；想真正回复用 [`send_reply`](#send-reply) |
 | `network_id` | string | | Network 范围。utok_ 恰好 1 个成员网络时自动解析，可省略；跨多网络必须显式传（#517） |
 
 **返回值**：
@@ -197,10 +200,10 @@ report_completion({
 { "ok": true }
 ```
 
-**错误**：`message_id` 不存在或不属于该 alias → `{ok: false, error: "message not found or not yours"}`。
+**错误**：找不到属于该 alias 的待确认投递 → `message not found or already acknowledged`；投递在查询后不再可写 → `message not found or not yours`。
 
 ::: tip 副作用：tasks 表状态机
-ack 成功还会把 `tasks` 表里 `task_id = message_id` 的行从 `status='delivered'` UPDATE 到 `'acked'`（[`tools.ts:354`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L354)；**仅** `delivered` 起跳，跟 hub 端 [`send_ack`](#send-ack)（接受 `created` / `delivered`）不同 —— 详见 [Task 生命周期 — `created` 状态](/concepts/task-lifecycle#状态机)）。
+Hub 先用 `id = message_id`，或对任务消息用 `task_id = message_id`，解析出当前未确认的 inbox 行并只 ACK 那一行。若它是任务消息，再用该行解析出的稳定逻辑 `task_id` 把 `tasks` 从 `status='delivered'` UPDATE 到 `'acked'`（[`tools.ts:884-920`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L884)）。因此 retry/reassign 产生新 inbox `id` 后，仍能 ACK 原任务；旧消费者继续传 inbox `id` 也兼容。任务状态**仅**从 `delivered` 起跳，跟 hub 端 [`send_ack`](#send-ack)（接受 `created` / `delivered`）不同 —— 详见 [Task 生命周期 — `created` 状态](/concepts/task-lifecycle#状态机)。
 :::
 
 ---

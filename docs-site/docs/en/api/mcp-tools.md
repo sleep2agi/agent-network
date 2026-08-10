@@ -141,7 +141,7 @@ Compared to [`send_reply`](#send-reply): `send_reply` is a hub tool that require
 
 ### get_inbox
 
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L300)
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L837)
 
 Fetch pending messages.
 
@@ -160,6 +160,7 @@ Fetch pending messages.
   "messages": [
     {
       "id": "uuid-xxx",
+      "task_id": "task-uuid-xxx",
       "type": "task",
       "priority": "high",
       "content": "Write sorting algorithm",
@@ -172,13 +173,15 @@ Fetch pending messages.
 }
 ```
 
+For task messages, `id` identifies this inbox delivery row while `task_id` is the stable logical task identity across retry and reassignment. For legacy rows without a separate task ID, the Hub returns `task_id = id`. Task consumers should pass the returned `task_id` to `ack_inbox.message_id`; non-task consumers should continue to pass `id`.
+
 Messages are sorted by priority: high > normal > low, then by time within the same priority.
 
 ---
 
 ### ack_inbox
 
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L330)
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L871)
 
 Acknowledge message receipt. After ACK, the message won't be returned by `get_inbox`.
 
@@ -187,8 +190,8 @@ Acknowledge message receipt. After ACK, the message won't be returned by `get_in
 | Parameter | Type | Required | Description |
 |------|------|:----:|------|
 | `alias` | string | &check; | Session alias |
-| `message_id` | string | &check; | Message ID |
-| `response` | string | | **Currently a no-op**: the handler accepts this parameter but never writes it to the database ([`tools.ts:337-360`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L337) never references `response`). The schema is kept for forward-compat / to avoid breaking existing callers; if you want to actually reply, use [`send_reply`](#send-reply). |
+| `message_id` | string | &check; | The inbox delivery-row `id`, or a task message's logical `task_id`. Task consumers should prefer the `task_id` returned by `get_inbox`; use `id` for non-task messages. |
+| `response` | string | | **Currently a no-op**: the handler accepts this parameter but never writes it to the database ([`tools.ts:872-924`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L872) does not read `response`). The schema is kept for forward-compat / to avoid breaking existing callers; if you want to actually reply, use [`send_reply`](#send-reply). |
 | `network_id` | string | | Network scope. Auto-resolved for utok_ callers with exactly one membership — optional then; required when the caller spans multiple networks (#517) |
 
 **Response**:
@@ -197,10 +200,10 @@ Acknowledge message receipt. After ACK, the message won't be returned by `get_in
 { "ok": true }
 ```
 
-**Error**: `message_id` not found or not owned by this alias → `{ok: false, error: "message not found or not yours"}`.
+**Errors**: no pending delivery owned by the alias → `message not found or already acknowledged`; the resolved delivery becomes unwritable after lookup → `message not found or not yours`.
 
 ::: tip Side effect: tasks-table state machine
-A successful ack also UPDATEs the `tasks` row where `task_id = message_id` from `status='delivered'` to `'acked'` ([`tools.ts:354`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L354); **only** transitions from `delivered`, unlike the hub-side [`send_ack`](#send-ack) which also accepts `created` — see [Task lifecycle — the `created` state](/en/concepts/task-lifecycle#state-machine)).
+The Hub first resolves the current unacknowledged inbox row by `id = message_id`, or for a task message by `task_id = message_id`, and ACKs only that row. For task messages it then uses the row's resolved stable logical `task_id` to UPDATE the matching `tasks` row from `status='delivered'` to `'acked'` ([`tools.ts:884-920`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L884)). Retry/reassign deliveries can therefore have a new inbox `id` while still ACKing the original task; legacy callers that pass an inbox `id` remain compatible. The task transition **only** accepts `delivered`, unlike the hub-side [`send_ack`](#send-ack), which also accepts `created` — see [Task lifecycle — the `created` state](/en/concepts/task-lifecycle#state-machine).
 :::
 
 ---

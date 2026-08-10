@@ -1,0 +1,53 @@
+Test 520 docs follow-up — ack_inbox logical task identity
+Date: 2026-08-10
+Base: c1fde003fb501693088a5dfae3717b7e153f36e2
+Source commit: 90522e636a636920d313394c9acc5044a65596c4
+Image: anet-test520-docs:dev
+Image ID: sha256:9fc99684e50418c6e599a4563deb7d4d2dd2274ee0c8637c4409707ac89c9475
+Embedded ENV: TEST520_DOCS_SOURCE_COMMIT=90522e636a636920d313394c9acc5044a65596c4
+
+Scope
+-----
+- Chinese and English MCP get_inbox / ack_inbox documentation
+- A Docker contract test that checks the documentation against the merged Hub wire
+- No production source, API, runtime, schema, or deployment changes
+
+Contract checks
+---------------
+The runner checks all of these against the same source archive:
+
+1. get_inbox exposes stable logical task_id with legacy COALESCE(id)
+2. ack_inbox resolves a pending row by transport id or task task_id
+3. ack_inbox updates the resolved inbox row id
+4. the resolved logical task advances delivered -> acked
+5. Chinese and English examples include task_id
+6. both languages explain stability across retry/reassign
+7. both languages explain legacy inbox-id compatibility
+8. the old direct task_id = message_id claim is absent in both languages
+9. the complete VitePress site builds and renders both MCP reference pages
+
+Exact-source command
+--------------------
+
+  sg docker -c 'docker build -t anet-test520-docs:dev \
+    -f tests/test520-ack-inbox-docs/Dockerfile \
+    --build-arg TEST520_DOCS_SOURCE_COMMIT=90522e636a636920d313394c9acc5044a65596c4 .'
+  sg docker -c 'docker run --rm anet-test520-docs:dev'
+
+Result
+------
+
+  source_commit=90522e636a636920d313394c9acc5044a65596c4
+  VitePress client/server bundles: PASS
+  VitePress page rendering: PASS
+  RESULT: PASS (13 checks)
+
+An earlier docs-build attempt failed with `spawn git ENOENT` because the slim
+test image omitted git. That environment failure was not counted as product
+evidence; the image was corrected and the full build rerun successfully.
+
+Conclusion
+----------
+PASS. The MCP reference now matches the merged dual-capability wire: task
+consumers ACK with the stable logical task_id, non-task and legacy consumers
+may use the inbox id, and retry/reassign no longer make the documentation lie.
