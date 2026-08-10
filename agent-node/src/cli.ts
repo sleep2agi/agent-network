@@ -143,7 +143,7 @@ import {
 } from "./credential-redaction";
 import { appendPrivateLogLine, preparePrivateLogDirectory } from "./private-log";
 import { resolveNodeIdSource } from "./runtime/node-id-source";
-import { emitExplicitTaskTrace, sendExplicitTaskWithTrace, type ExplicitTaskTraceContext } from "./explicit-task-trace";
+import { emitExplicitTaskTrace, sendExplicitTaskWithTrace, waitForExplicitTaskLifecycle, type ExplicitTaskTraceContext } from "./explicit-task-trace";
 
 const home = homedir();
 
@@ -4212,46 +4212,21 @@ async function tryHandleExplicitDelegation(
     return `已尝试给 ${parsed.alias} 派任务，但 CommHub 未返回 task_id：${JSON.stringify(sendRes).slice(0, 1000)}`;
   }
 
-  const deadline = Date.now() + 120_000;
-  let latest: any = null;
-  const observed = new Set<string>();
-  let warned30 = false;
-  let warned60 = false;
-  while (Date.now() < deadline) {
-    latest = parseToolJson(await callCommHub("get_task", { task_id: childTaskId }));
-    const row = latest?.task || latest;
-    const childStatus = row?.status;
-    if ((childStatus === "acked" || childStatus === "running" || childStatus === "processing") && !observed.has(childStatus)) {
-      observed.add(childStatus);
-      emitTrace(childStatus === "acked" ? "acked" : "started", childTaskId);
-    }
-    if (childStatus === "replied" || childStatus === "failed" || childStatus === "cancelled") {
-      emitTrace(childStatus === "replied" ? "replied" : "failed", childTaskId, {
-        ...(childStatus === "replied" ? {} : { errorCode: `task_${childStatus}`, event: "task.failed" }),
-      });
-      const result = row?.result || latest?.result || JSON.stringify(latest);
-      return [
-        `已通过 CommHub 给 ${parsed.alias} 派发子任务并等到结果。`,
-        `子任务：${childTaskId}`,
-        `状态：${childStatus}`,
-        ``,
-        String(result).slice(0, 1600),
-      ].join("\n");
-    }
-    const elapsed = Date.now() - traceContext.startedAt;
-    if (!warned30 && elapsed >= 30_000 && childStatus === "delivered") {
-      warned30 = true;
-      emitTrace("delivered", childTaskId, { event: "task.warning.delivered_stale_30s" });
-    }
-    if (!warned60 && elapsed >= 60_000 && childStatus === "delivered") {
-      warned60 = true;
-      emitTrace("delivered", childTaskId, { event: "task.warning.delivered_stale_60s" });
-    }
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+  const lifecycle = await waitForExplicitTaskLifecycle(childTaskId, traceContext.startedAt, {
+    getTask: async (id) => parseToolJson(await callCommHub("get_task", { task_id: id })),
+    emit: emitTrace,
+  });
+  if (lifecycle.kind === "terminal") {
+    const result = lifecycle.row?.result || lifecycle.latest?.result || JSON.stringify(lifecycle.latest);
+    return [
+      `已通过 CommHub 给 ${parsed.alias} 派发子任务并等到结果。`,
+      `子任务：${childTaskId}`,
+      `状态：${lifecycle.status}`,
+      ``,
+      String(result).slice(0, 1600),
+    ].join("\n");
   }
-
-  emitTrace("expired", childTaskId, { errorCode: "lifecycle_timeout" });
-  return `已给 ${parsed.alias} 派发子任务 ${childTaskId}，但 120 秒内未等到 replied/failed。最新状态：${JSON.stringify(latest).slice(0, 1000)}`;
+  return `已给 ${parsed.alias} 派发子任务 ${childTaskId}，但 120 秒内未等到 replied/failed。最新状态：${JSON.stringify(lifecycle.latest).slice(0, 1000)}`;
 }
 
 // ══════════════════════════════════════
