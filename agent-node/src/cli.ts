@@ -1277,6 +1277,7 @@ const register = async () => {
     process_telemetry: getProcessTelemetry(),
     external_schedules: readExternalSchedulesSnapshot(configFilePath, undefined, {
       ownerControlEnabled: OWNER_SCHEDULE_CONTROL_ENABLED,
+      ownerNodeId: NODE_ID || undefined,
     }),
   });
   // Server is authoritative: if it told us a canonical alias different
@@ -1310,6 +1311,7 @@ const reportStatus = async (status: string, task?: string) => {
     process_telemetry: getProcessTelemetry(),
     external_schedules: readExternalSchedulesSnapshot(configFilePath, undefined, {
       ownerControlEnabled: OWNER_SCHEDULE_CONTROL_ENABLED,
+      ownerNodeId: NODE_ID || undefined,
     }),
     // RFC-024 N6 — masked snapshot of effective model+flags so dashboard
     // can show the current state without touching per-node files.

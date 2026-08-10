@@ -20,12 +20,13 @@ const JOURNAL_NAME = ".external-schedule-edit-journal.json";
 const AUDIT_NAME = ".external-schedule-edit-audit.jsonl";
 const MAX_AUDIT_BYTES = 1024 * 1024;
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-const BEGIN_RE = /^# ANET-MANAGED-SCHEDULE id=([A-Za-z0-9][A-Za-z0-9._-]{0,127}) revision=(\d+) command_sha256=([0-9a-f]{64})$/;
+const BEGIN_RE = /^# ANET-MANAGED-SCHEDULE node_id=([A-Za-z0-9][A-Za-z0-9._-]{0,199}) id=([A-Za-z0-9][A-Za-z0-9._-]{0,127}) revision=(\d+) command_sha256=([0-9a-f]{64})$/;
 const DISABLED_PREFIX = "# ANET-DISABLED ";
 
 export class OwnerScheduleSafetyError extends Error {}
 
 export type ManagedCronEntry = {
+  nodeId: string;
   id: string;
   revision: number;
   enabled: boolean;
@@ -133,7 +134,10 @@ function removeJournal(path: string): void {
   try { fsyncSync(parentFd); } finally { closeSync(parentFd); }
 }
 
-export function parseManagedCrontab(content: string): Map<string, ManagedCronEntry> {
+export function parseManagedCrontab(content: string, expectedNodeId: string): Map<string, ManagedCronEntry> {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(expectedNodeId)) {
+    throw new OwnerScheduleSafetyError("invalid managed cron node id");
+  }
   if (Buffer.byteLength(content) > MAX_CRONTAB_BYTES || /[\r\0]/.test(content)) {
     throw new OwnerScheduleSafetyError("unsafe crontab content");
   }
@@ -142,10 +146,11 @@ export function parseManagedCrontab(content: string): Map<string, ManagedCronEnt
   for (let index = 0; index < lines.length; index += 1) {
     const begin = lines[index].match(BEGIN_RE);
     if (!begin) continue;
-    const id = begin[1];
-    const revision = Number(begin[2]);
-    const commandSha256 = begin[3];
-    if (!Number.isSafeInteger(revision) || result.has(id) || index + 2 >= lines.length) {
+    const nodeId = begin[1];
+    const id = begin[2];
+    const revision = Number(begin[3]);
+    const commandSha256 = begin[4];
+    if (!Number.isSafeInteger(revision) || index + 2 >= lines.length) {
       throw new OwnerScheduleSafetyError("invalid managed cron marker");
     }
     const rawJob = lines[index + 1];
@@ -155,9 +160,15 @@ export function parseManagedCrontab(content: string): Map<string, ManagedCronEnt
     if (!match) throw new OwnerScheduleSafetyError("managed cron must contain exactly one job line");
     const cron = parseManagedCronExpression(match[1].replace(/[ \t]+/g, " "));
     if (sha256(match[2]) !== commandSha256) throw new OwnerScheduleSafetyError("managed cron command fingerprint mismatch");
-    const end = `# ANET-MANAGED-SCHEDULE-END id=${id}`;
+    const end = `# ANET-MANAGED-SCHEDULE-END node_id=${nodeId} id=${id}`;
     if (lines[index + 2] !== end) throw new OwnerScheduleSafetyError("invalid managed cron end marker");
+    if (nodeId !== expectedNodeId) {
+      index += 2;
+      continue;
+    }
+    if (result.has(id)) throw new OwnerScheduleSafetyError("duplicate managed cron marker");
     result.set(id, {
+      nodeId,
       id,
       revision,
       enabled,
@@ -193,7 +204,7 @@ function renderEdit(content: string, entry: ManagedCronEntry, patch: ExternalSch
   const cron = patch.cron ?? entry.cron;
   const enabled = patch.enabled ?? entry.enabled;
   const job = `${cron}${entry.commandTail}`;
-  lines[entry.beginLine] = `# ANET-MANAGED-SCHEDULE id=${entry.id} revision=${entry.revision + 1} command_sha256=${entry.commandSha256}`;
+  lines[entry.beginLine] = `# ANET-MANAGED-SCHEDULE node_id=${entry.nodeId} id=${entry.id} revision=${entry.revision + 1} command_sha256=${entry.commandSha256}`;
   lines[entry.jobLine] = enabled ? job : `${DISABLED_PREFIX}${job}`;
   return lines.join("\n");
 }
@@ -230,7 +241,7 @@ export function applyOwnerScheduleIntent(options: {
   }
 
   const before = existingJournal?.before_content ?? adapter.read();
-  const entry = parseManagedCrontab(before).get(intent.schedule_id);
+  const entry = parseManagedCrontab(before, expectedNodeId).get(intent.schedule_id);
   if (!entry) throw new OwnerScheduleSafetyError("schedule is not managed");
   if (entry.revision !== intent.base_revision) throw new OwnerScheduleSafetyError("revision conflict");
   const after = existingJournal?.after_content ?? renderEdit(before, entry, patch);
@@ -325,9 +336,9 @@ export function recordOwnerScheduleAudit(configPath: string, entry: {
   } finally { closeSync(fd); }
 }
 
-export function managedCronInventory(adapter: CrontabAdapter = systemCrontabAdapter()): Map<string, Pick<ManagedCronEntry, "cron" | "enabled" | "revision">> {
+export function managedCronInventory(expectedNodeId: string, adapter: CrontabAdapter = systemCrontabAdapter()): Map<string, Pick<ManagedCronEntry, "cron" | "enabled" | "revision">> {
   const result = new Map<string, Pick<ManagedCronEntry, "cron" | "enabled" | "revision">>();
-  for (const [id, entry] of parseManagedCrontab(adapter.read())) {
+  for (const [id, entry] of parseManagedCrontab(adapter.read(), expectedNodeId)) {
     result.set(id, { cron: entry.cron, enabled: entry.enabled, revision: entry.revision });
   }
   return result;

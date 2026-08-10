@@ -77,9 +77,9 @@ describe("external schedule manifest", () => {
     const hash = new Bun.CryptoHasher("sha256").update(commandTail).digest("hex");
     const adapter: CrontabAdapter = {
       read: () => [
-        `# ANET-MANAGED-SCHEDULE id=news-pull revision=7 command_sha256=${hash}`,
+        `# ANET-MANAGED-SCHEDULE node_id=n_owner_schedule id=news-pull revision=7 command_sha256=${hash}`,
         `0 */6 * * *${commandTail}`,
-        "# ANET-MANAGED-SCHEDULE-END id=news-pull",
+        "# ANET-MANAGED-SCHEDULE-END node_id=n_owner_schedule id=news-pull",
         "",
       ].join("\n"),
       install: () => { throw new Error("not used"); },
@@ -87,7 +87,7 @@ describe("external schedule manifest", () => {
     const disabled = readExternalSchedulesSnapshot(config, "2026-08-10T02:00:00Z", { crontabAdapter: adapter })!;
     expect(disabled.schedules[0].editable).toBeUndefined();
     expect(disabled.schedules[0].revision).toBeUndefined();
-    const enabled = readExternalSchedulesSnapshot(config, "2026-08-10T02:00:00Z", { ownerControlEnabled: true, crontabAdapter: adapter })!;
+    const enabled = readExternalSchedulesSnapshot(config, "2026-08-10T02:00:00Z", { ownerControlEnabled: true, ownerNodeId: "n_owner_schedule", crontabAdapter: adapter })!;
     expect(enabled.schedules[0]).toMatchObject({ frequency: "0 */6 * * *", enabled: true, editable: true, revision: 7 });
   });
 });

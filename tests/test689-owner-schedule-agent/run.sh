@@ -46,12 +46,20 @@ sed -i 's/if (entry.revision !== intent.base_revision)/if (false)/' "$CONTROL"
 expect_red revision-cas bash -lc "cd '$MUT_ROOT' && bun test agent-node/src/owner-schedule-control.test.ts"
 
 cp agent-node/src/owner-schedule-control.ts "$CONTROL"
+sed -i 's/if (nodeId !== expectedNodeId)/if (false)/' "$CONTROL"
+expect_red exact-node-marker bash -lc "cd '$MUT_ROOT' && bun test agent-node/src/owner-schedule-control.test.ts"
+
+cp agent-node/src/owner-schedule-control.ts "$CONTROL"
 sed -i '0,/adapter.install(before);/s//\/\/ rollback removed/' "$CONTROL"
 expect_red exact-rollback bash -lc "cd '$MUT_ROOT' && bun test agent-node/src/owner-schedule-control.test.ts"
 
 cp agent-node/src/owner-schedule-control.ts "$CONTROL"
 sed -i 's/if (currentHash === existingJournal.after_sha256)/if (false)/' "$CONTROL"
 expect_red lost-ack-idempotency bash -lc "cd '$MUT_ROOT' && bun test agent-node/src/owner-schedule-control.test.ts"
+
+cp agent-node/src/shared/external-schedule-contract.ts "$MUT_ROOT/agent-node/src/shared/external-schedule-contract.ts"
+sed -i 's/if (fields.length !== 5)/if (raw.trim() === "@reboot") return "@reboot"; if (fields.length !== 5)/' "$MUT_ROOT/agent-node/src/shared/external-schedule-contract.ts"
+expect_red cron-alias-gate bash -lc "cd '$MUT_ROOT' && bun test agent-node/src/owner-schedule-control.test.ts"
 
 cp agent-node/src/owner-schedule-consumer.ts "$CONSUMER"
 sed -i 's/if (!options.enabled) return/if (false) return/' "$CONSUMER"

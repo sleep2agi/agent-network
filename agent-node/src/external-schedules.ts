@@ -98,7 +98,7 @@ export function parseExternalSchedulesManifest(
 export function readExternalSchedulesSnapshot(
   configPath: string,
   observedAt = new Date().toISOString(),
-  options: { ownerControlEnabled?: boolean; crontabAdapter?: CrontabAdapter } = {},
+  options: { ownerControlEnabled?: boolean; ownerNodeId?: string; crontabAdapter?: CrontabAdapter } = {},
 ): ExternalSchedulesSnapshot | undefined {
   if (!configPath) return undefined;
   const manifestPath = join(dirname(configPath), "external-schedules.json");
@@ -108,8 +108,8 @@ export function readExternalSchedulesSnapshot(
       return { observed_at: observedAt, schedules: [], error: "unsafe_manifest" };
     }
     let managed = new Map<string, { cron: string; enabled: boolean; revision: number }>();
-    if (options.ownerControlEnabled) {
-      try { managed = managedCronInventory(options.crontabAdapter); } catch {
+    if (options.ownerControlEnabled && options.ownerNodeId) {
+      try { managed = managedCronInventory(options.ownerNodeId, options.crontabAdapter); } catch {
         // Inventory remains honestly read-only when crontab cannot be verified.
       }
     }

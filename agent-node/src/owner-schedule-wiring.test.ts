@@ -19,6 +19,7 @@ describe("owner schedule process wiring", () => {
     expect(cli).toContain('if (ev.type === "external_schedule_edit")');
     expect(cli).toContain("void ownerScheduleConsumer?.trigger()");
     expect(cli).toContain("ownerControlEnabled: OWNER_SCHEDULE_CONTROL_ENABLED");
+    expect(cli).toContain("ownerNodeId: NODE_ID || undefined");
     expect((cli.match(/ownerControlEnabled: OWNER_SCHEDULE_CONTROL_ENABLED/g) ?? []).length).toBe(2);
   });
 
