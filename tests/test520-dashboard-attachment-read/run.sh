@@ -17,7 +17,10 @@ bun test src/channel-attachments.test.ts
 
 cd "$ROOT/agent-node"
 bun run build
-bun test src/runtime/readable-attachment-prompt.test.ts src/task-runtime-evidence.test.ts
+bun test \
+  src/runtime/fetch-attachment.test.ts \
+  src/runtime/readable-attachment-prompt.test.ts \
+  src/task-runtime-evidence.test.ts
 
 cd "$ROOT"
 CHANNEL_BUNDLE=/tmp/test520-node-server.js bun tests/test520-dashboard-attachment-read/channel-harness.ts
@@ -83,9 +86,16 @@ expect_mutation_red \
   '  if (runtimeNeedsReadableAttachmentPrompt(runtime)) return [...attachments];' \
   'cd /workspace/agent-node && bun test src/runtime/readable-attachment-prompt.test.ts'
 
-if [[ $MUTATIONS -ne 5 ]]; then
-  echo "mutation denominator mismatch: $MUTATIONS/5" >&2
+expect_mutation_red \
+  resolver-trusted-root-gate \
+  agent-node/src/runtime/fetch-attachment.ts \
+  '    const localPath = trustedRegularLocalPath(attachment.path, deps);' \
+  '    const localPath = existsSync(attachment.path) ? attachment.path : null;' \
+  'cd /workspace/agent-node && bun test src/runtime/fetch-attachment.test.ts'
+
+if [[ $MUTATIONS -ne 6 ]]; then
+  echo "mutation denominator mismatch: $MUTATIONS/6" >&2
   exit 1
 fi
-echo "mutation_red=$MUTATIONS/5"
+echo "mutation_red=$MUTATIONS/6"
 echo "RESULT: PASS"

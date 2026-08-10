@@ -18,11 +18,11 @@
 // solution: any agent with a valid ntok can pull any file the hub holds
 // for the agent's network.
 //
-// Single-host fallback: when there is NO file_id (legacy senders, MCP
-// `send_task` that bypassed the REST validator, etc.) but the supplied
-// `path` exists on the local fs, use the path directly. Preserves
-// existing single-host behaviour without forcing every sender to
-// upload through /api/upload.
+// Single-host fallback: when there is NO file_id, accept a local path only
+// when its canonical realpath is a regular non-symlink file beneath a
+// locally trusted attachment root. This preserves the Feishu drop-zone and
+// node cache paths without letting sender-controlled metadata exfiltrate an
+// arbitrary host file such as /etc/passwd.
 //
 // Size safety per team rule (assume-unit-before-threshold): cap is in
 // BYTES, not chunks or kb. Pre-check Content-Length header; if absent
@@ -46,8 +46,8 @@
 // Mirrors deleted-sweeper.ts pattern. Caller (cli.ts boot) wires the
 // sweep timer; this module exports the once-pass for test injection.
 
-import { mkdirSync, statSync, writeFileSync, chmodSync, readdirSync, rmSync, existsSync, createWriteStream } from "node:fs";
-import { join, extname, dirname } from "node:path";
+import { mkdirSync, statSync, writeFileSync, chmodSync, readdirSync, rmSync, existsSync, createWriteStream, lstatSync, realpathSync } from "node:fs";
+import { join, extname, dirname, isAbsolute, relative, sep } from "node:path";
 
 export const DEFAULT_MAX_BYTES = (() => {
   const env = process.env.COMMHUB_ATTACHMENT_MAX_BYTES;
@@ -81,17 +81,51 @@ export interface ResolveAttachmentDeps {
   fetch?: typeof fetch;
   /** Test-only: override Date.now for cache TTL math. */
   now?: () => number;
+  /** Override trusted path-only roots. Production derives these locally. */
+  trustedLocalRoots?: string[];
 }
 
 export type ResolveResult =
   | { ok: true; localPath: string; cached: boolean; bytes: number }
-  | { ok: false; error: string; code: "no_file_id_no_path" | "file_id_invalid" | "size_exceeded" | "fetch_failed" | "write_failed" | "auth_failed" | "not_found" };
+  | { ok: false; error: string; code: "no_file_id_no_path" | "file_id_invalid" | "size_exceeded" | "fetch_failed" | "write_failed" | "auth_failed" | "not_found" | "untrusted_local_path" };
+
+function trustedLocalRoots(deps: ResolveAttachmentDeps): string[] {
+  if (deps.trustedLocalRoots) return deps.trustedLocalRoots;
+  return [
+    deps.cacheDir,
+    "/work/feishu-attachments",
+    ...(process.env.ANET_FEISHU_MEDIA_DIR?.trim()
+      ? [process.env.ANET_FEISHU_MEDIA_DIR.trim()]
+      : []),
+  ];
+}
+
+function trustedRegularLocalPath(path: string, deps: ResolveAttachmentDeps): string | null {
+  let fileReal: string;
+  try {
+    const lst = lstatSync(path);
+    if (!lst.isFile() || lst.isSymbolicLink()) return null;
+    fileReal = realpathSync(path);
+  } catch {
+    return null;
+  }
+  for (const root of trustedLocalRoots(deps)) {
+    try {
+      const rootReal = realpathSync(root);
+      const rel = relative(rootReal, fileReal);
+      if (rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) {
+        return fileReal;
+      }
+    } catch { /* missing/unreadable roots are not trust roots */ }
+  }
+  return null;
+}
 
 /**
  * Resolve one attachment to a local-fs path the LLM runtime can open.
  * Strategy:
  *   1. file_id present → fetch from hub /api/files/<file_id> (cache key)
- *   2. else if path present and exists locally → return path as-is
+ *   2. else if path is a trusted owner-local regular file → canonical path
  *   3. else → error (caller should drop the attachment with a log)
  */
 export async function resolveAttachmentToLocalPath(
@@ -123,10 +157,17 @@ export async function resolveAttachmentToLocalPath(
 
   // Path 2 — local path fallback (single-host legacy / MCP-passthrough)
   if (typeof attachment.path === "string" && attachment.path.length > 0) {
-    if (existsSync(attachment.path)) {
+    const localPath = trustedRegularLocalPath(attachment.path, deps);
+    if (localPath) {
       let bytes = 0;
-      try { bytes = statSync(attachment.path).size; } catch { /* ok */ }
-      return { ok: true, localPath: attachment.path, cached: true, bytes };
+      try { bytes = statSync(localPath).size; } catch { /* ok */ }
+      return { ok: true, localPath, cached: true, bytes };
+    }
+    if (existsSync(attachment.path)) {
+      return {
+        ok: false, code: "untrusted_local_path",
+        error: "attachment.path exists but is outside trusted local attachment roots or is a symlink",
+      };
     }
     // Path was provided but doesn't exist here — cross-host scenario
     // without file_id. Fail loud so caller logs the gap.
