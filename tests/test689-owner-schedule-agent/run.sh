@@ -16,6 +16,9 @@ bun test \
 echo "L2 production agent-node bundle"
 (cd agent-node && bun run build)
 
+echo "L2b real container crontab read/install/readback"
+bun test agent-node/src/owner-schedule-system-crontab.test.ts
+
 echo "L3 witnessed-red mutations"
 MUT_ROOT="$(mktemp -d)"
 trap 'rm -rf "$MUT_ROOT"' EXIT

@@ -1,4 +1,7 @@
 FROM oven/bun:1.3.14
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends cron \
+ && rm -rf /var/lib/apt/lists/*
 WORKDIR /workspace
 COPY agent-node/package.json ./agent-node/package.json
 RUN cd agent-node && bun install --ignore-scripts
