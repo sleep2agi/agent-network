@@ -162,6 +162,11 @@ for (const col of [
   { name: "scope", def: "TEXT DEFAULT 'single'" },
   { name: "meta_json", def: "TEXT" },
   { name: "node_id", def: "TEXT" },
+  // #520 — explicit logical task identity.  Initial deliveries historically
+  // used inbox.id == tasks.task_id, while retry/reassign generate a fresh
+  // inbox row id.  Keep transport-row identity and logical-task identity
+  // separate so runtime evidence/replies survive those redeliveries.
+  { name: "task_id", def: "TEXT" },
 ]) {
   try { db.exec(`ALTER TABLE inbox ADD COLUMN ${col.name} ${col.def}`); } catch {}
 }

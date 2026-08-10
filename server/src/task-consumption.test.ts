@@ -98,6 +98,9 @@ describe("task consumed_at identity and lifecycle", () => {
       NODE_A,
     );
     const taskId = await createTask(content);
+    const nodeTools = toolsFor({ alias: NODE_A, nodeToken: true });
+    const pending = await call(nodeTools.get_inbox, { alias: NODE_A, limit: 20 });
+    expect(pending.messages.find((row: any) => row.id === taskId)?.task_id).toBe(taskId);
     expect(runtimeSubmittedAt(taskId)).toBeNull();
     expect(consumedAt(taskId)).toBeNull();
     const queued = db.get<{ last_seen_at: string; task: string | null }>(
@@ -111,7 +114,6 @@ describe("task consumed_at identity and lifecycle", () => {
     expect(queued?.task).toBe(content);
     expect(queued?.last_seen_at).toBe(before?.last_seen_at);
 
-    const nodeTools = toolsFor({ alias: NODE_A, nodeToken: true });
     expect((await call(nodeTools.ack_inbox, { alias: NODE_A, message_id: taskId })).ok).toBe(true);
     expect(runtimeSubmittedAt(taskId)).toBeNull();
     expect(consumedAt(taskId)).toBeNull();
@@ -184,21 +186,87 @@ describe("task consumed_at identity and lifecycle", () => {
     expect(consumedAt(taskId)).toBeNull();
   });
 
-  test("retry and reassign clear evidence from the previous delivery attempt", async () => {
-    const taskId = await createTask("attempt-scoped evidence");
-    const nodeTools = toolsFor({ alias: NODE_A, nodeToken: true });
-    expect((await call(nodeTools.mark_tasks_consumed, { task_ids: [taskId] })).ok).toBe(true);
+  test("token-bound canonical alias is the fail-closed fallback only for tasks without node_id", async () => {
+    const taskId = await createTask("legacy direct session has no immutable node id");
+    db.run("UPDATE tasks SET to_node_id = NULL WHERE task_id = ?1", [taskId]);
+    db.run("UPDATE sessions SET node_id = NULL WHERE network_id = ?1 AND alias = ?2", [NET, NODE_A]);
+
+    const ownerResult = await call(
+      toolsFor({ alias: NODE_A, nodeToken: true }).mark_tasks_consumed,
+      { task_ids: [taskId] },
+    );
+    expect(ownerResult.ok).toBe(true);
     expect(typeof consumedAt(taskId)).toBe("string");
+
+    const foreignTask = await createTask("alias fallback must not cross target aliases", NODE_A);
+    db.run("UPDATE tasks SET to_node_id = NULL WHERE task_id = ?1", [foreignTask]);
+    const foreignResult = await call(
+      toolsFor({ alias: NODE_B, nodeToken: true }).mark_tasks_consumed,
+      { task_ids: [foreignTask] },
+    );
+    expect(foreignResult).toEqual({ ok: false, error: "task_not_owned", task_id: foreignTask });
+    expect(consumedAt(foreignTask)).toBeNull();
+  });
+
+  test("retry keeps task-lifetime evidence and exposes the logical task id on the new inbox row", async () => {
+    const taskId = await createTask("task-lifetime evidence");
+    const nodeTools = toolsFor({ alias: NODE_A, nodeToken: true });
+    expect((await call(nodeTools.ack_inbox, { alias: NODE_A, message_id: taskId })).ok).toBe(true);
+    expect((await call(nodeTools.mark_tasks_consumed, { task_ids: [taskId] })).ok).toBe(true);
+    const submitted = runtimeSubmittedAt(taskId);
+    const consumed = consumedAt(taskId);
+    expect(typeof submitted).toBe("string");
+    expect(typeof consumed).toBe("string");
 
     db.run("UPDATE tasks SET status = 'failed' WHERE task_id = ?1", [taskId]);
     expect((await call(toolsFor().retry_task, { task_id: taskId })).ok).toBe(true);
-    expect(runtimeSubmittedAt(taskId)).toBeNull();
-    expect(consumedAt(taskId)).toBeNull();
+    expect(runtimeSubmittedAt(taskId)).toBe(submitted);
+    expect(consumedAt(taskId)).toBe(consumed);
 
-    expect((await call(nodeTools.mark_tasks_consumed, { task_ids: [taskId] })).ok).toBe(true);
+    const retriedInbox = await call(nodeTools.get_inbox, { alias: NODE_A, limit: 20 });
+    const retryRow = retriedInbox.messages.find((row: any) => row.id !== taskId && row.task_id === taskId);
+    expect(retryRow).toBeDefined();
+    expect((await call(nodeTools.ack_inbox, { alias: NODE_A, message_id: retryRow.id })).ok).toBe(true);
+    expect(db.get<{ status: string }>("SELECT status FROM tasks WHERE task_id = ?1", taskId)?.status).toBe("acked");
+  });
+
+  test("an unconsumed first attempt can report against the linked task after retry", async () => {
+    const taskId = await createTask("retry must not lose logical task identity");
+    const nodeTools = toolsFor({ alias: NODE_A, nodeToken: true });
+    expect((await call(nodeTools.ack_inbox, { alias: NODE_A, message_id: taskId })).ok).toBe(true);
+    db.run("UPDATE tasks SET status = 'failed' WHERE task_id = ?1", [taskId]);
+    expect((await call(toolsFor().retry_task, { task_id: taskId })).ok).toBe(true);
+
+    const retriedInbox = await call(nodeTools.get_inbox, { alias: NODE_A, limit: 20 });
+    const retryRow = retriedInbox.messages.find((row: any) => row.id !== taskId && row.task_id === taskId);
+    expect(retryRow).toBeDefined();
+    expect((await call(nodeTools.mark_tasks_consumed, { task_ids: [retryRow.task_id] })).ok).toBe(true);
+    expect(typeof runtimeSubmittedAt(taskId)).toBe("string");
     expect(typeof consumedAt(taskId)).toBe("string");
+  });
+
+  test("reassign preserves task-lifetime evidence and binds the new inbox row to the same task", async () => {
+    const taskId = await createTask("reassign keeps logical task evidence");
+    const oldOwnerTools = toolsFor({ alias: NODE_A, nodeToken: true });
+    expect((await call(oldOwnerTools.ack_inbox, { alias: NODE_A, message_id: taskId })).ok).toBe(true);
+    expect((await call(oldOwnerTools.mark_tasks_consumed, { task_ids: [taskId] })).ok).toBe(true);
+    const submitted = runtimeSubmittedAt(taskId);
+    const consumed = consumedAt(taskId);
+
     expect((await call(toolsFor().reassign_task, { task_id: taskId, new_alias: NODE_B })).ok).toBe(true);
-    expect(runtimeSubmittedAt(taskId)).toBeNull();
-    expect(consumedAt(taskId)).toBeNull();
+    expect(runtimeSubmittedAt(taskId)).toBe(submitted);
+    expect(consumedAt(taskId)).toBe(consumed);
+
+    const newOwnerTools = toolsFor({ alias: NODE_B, nodeToken: true });
+    const reassignedInbox = await call(newOwnerTools.get_inbox, { alias: NODE_B, limit: 20 });
+    const row = reassignedInbox.messages.find((message: any) => message.task_id === taskId);
+    expect(row).toBeDefined();
+    expect(row.id).not.toBe(taskId);
+    expect(await call(oldOwnerTools.mark_tasks_consumed, { task_ids: [taskId] })).toEqual({
+      ok: false,
+      error: "task_not_owned",
+      task_id: taskId,
+    });
+    expect((await call(newOwnerTools.mark_tasks_consumed, { task_ids: [taskId] })).ok).toBe(true);
   });
 });

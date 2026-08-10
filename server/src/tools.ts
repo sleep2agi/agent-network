@@ -850,7 +850,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const rows0 = db.get<{ cnt: number }>(countSql, ...countParams);
       console.log(`[${ts()}] ${alias} → get_inbox: ${rows0?.cnt ?? 0} pending messages`);
       const rowsParams: any[] = [alias];
-      let rowsSql = `SELECT id, type, priority, content, context, from_session, created_at, network_id, meta_json
+      let rowsSql = `SELECT id, type, priority, content, context, from_session, created_at, network_id, meta_json,
+         CASE WHEN type = 'task' THEN COALESCE(task_id, id) ELSE task_id END AS task_id
          FROM inbox WHERE session_name = ?1 AND acked = 0`;
       rowsSql = addReadScope(rowsSql, rowsParams, readScope);
       rowsSql += ` ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, created_at
@@ -883,6 +884,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const ackParams: any[] = [message_id, alias];
       let ackSql = "UPDATE inbox SET acked = 1 WHERE id = ?1 AND session_name = ?2";
       ackSql = addScope(ackSql, ackParams, effectiveNetId);
+      const inboxTaskParams: any[] = [message_id, alias];
+      let inboxTaskSql = "SELECT type, COALESCE(task_id, id) AS task_id FROM inbox WHERE id = ?1 AND session_name = ?2";
+      inboxTaskSql = addScope(inboxTaskSql, inboxTaskParams, effectiveNetId);
+      const inboxTask = db.get<{ type: string; task_id: string }>(inboxTaskSql, ...inboxTaskParams);
       const result = db.run(ackSql, ackParams);
       if (result.changes === 0) {
         return {
@@ -891,11 +896,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
       // V2: sync tasks table — ack_inbox means delivered→acked
       try {
-        const taskParams: any[] = [message_id];
+        if (inboxTask?.type !== "task") {
+          return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true }) }] };
+        }
+        const taskParams: any[] = [inboxTask?.task_id ?? message_id];
         let taskSql = "UPDATE tasks SET status = 'acked' WHERE task_id = ?1 AND status = 'delivered'";
         taskSql = addScope(taskSql, taskParams, effectiveNetId);
         const ackResult = db.run(taskSql, taskParams);
-        if (ackResult.changes > 0) logTaskEvent(message_id, "delivered", "acked", alias);
+        if (ackResult.changes > 0) logTaskEvent(inboxTask?.task_id ?? message_id, "delivered", "acked", alias);
       } catch {}
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ ok: true }) }],
@@ -940,60 +948,69 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         };
       }
 
+      const placeholders = uniqueTaskIds.map((_, i) => `?${i + 2}`).join(", ");
       const canonicalCaller = resolveCanonicalAlias(enforceNetworkId, callerAlias).alias;
       const callerSession = db.get<{ node_id: string | null }>(
-        "SELECT node_id FROM sessions WHERE network_id = ?1 AND alias = ?2",
+        `SELECT node_id FROM sessions
+         WHERE network_id = ?1 AND alias = ?2
+         ORDER BY updated_at DESC LIMIT 1`,
         enforceNetworkId,
         canonicalCaller,
       );
-      if (!callerSession?.node_id) {
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "node_identity_unavailable" }) }],
-        };
-      }
 
-      const placeholders = uniqueTaskIds.map((_, i) => `?${i + 2}`).join(", ");
-      const rows = db.all<{ task_id: string; to_node_id: string | null }>(
-        `SELECT task_id, to_node_id FROM tasks
-         WHERE network_id = ?1 AND task_id IN (${placeholders})`,
-        enforceNetworkId,
-        ...uniqueTaskIds,
-      );
-      const owned = new Map(rows.map((row) => [row.task_id, row.to_node_id]));
-      const rejectedTaskId = uniqueTaskIds.find(
-        (taskId) => owned.get(taskId) !== callerSession.node_id,
-      );
-      if (rejectedTaskId) {
-        // One foreign/missing row rejects the whole batch.  Partial marking
-        // would make a single agent wake look different depending on input
-        // order and would hide an identity/configuration fault.
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify({ ok: false, error: "task_not_owned", task_id: rejectedTaskId }),
-          }],
-        };
-      }
+      // Keep ownership preflight and every stamp in one SQLite transaction.
+      // This closes the cross-process preflight→UPDATE race: no other writer
+      // can reassign a task between the identity decision and the write.
+      const outcome = db.transaction(() => {
+        const rows = db.all<{ task_id: string; to_node_id: string | null; to_name: string }>(
+          `SELECT task_id, to_node_id, to_name FROM tasks
+           WHERE network_id = ?1 AND task_id IN (${placeholders})`,
+          enforceNetworkId,
+          ...uniqueTaskIds,
+        );
+        const owned = new Map(rows.map((row) => [row.task_id, row]));
+        const rejectedTaskId = uniqueTaskIds.find((taskId) => {
+          const row = owned.get(taskId);
+          if (!row) return true;
+          // Prefer immutable node identity whenever the task has one.  Direct
+          // and legacy token-bound sessions legitimately have NULL node_id;
+          // only that shape may fall back to the canonical token alias.
+          if (row.to_node_id) return row.to_node_id !== callerSession?.node_id;
+          return resolveCanonicalAlias(enforceNetworkId, row.to_name).alias !== canonicalCaller;
+        });
+        if (rejectedTaskId) {
+          return { ok: false as const, error: "task_not_owned", task_id: rejectedTaskId };
+        }
 
-      const evidenceRows = db.transaction(() => {
         for (const taskId of uniqueTaskIds) {
+          const row = owned.get(taskId)!;
+          const ownershipSql = row.to_node_id
+            ? "to_node_id = ?3"
+            : "to_node_id IS NULL AND to_name = ?3";
+          const ownerValue = row.to_node_id ?? row.to_name;
+          let updateResult;
           if (level === "consumed") {
-            db.run(
+            updateResult = db.run(
               `UPDATE tasks SET
                  runtime_submitted_at = COALESCE(runtime_submitted_at, datetime('now')),
                  consumed_at = COALESCE(consumed_at, datetime('now'))
-               WHERE network_id = ?1 AND task_id = ?2 AND to_node_id = ?3`,
-              [enforceNetworkId, taskId, callerSession.node_id],
+               WHERE network_id = ?1 AND task_id = ?2 AND ${ownershipSql}`,
+              [enforceNetworkId, taskId, ownerValue],
             );
           } else {
-            db.run(
+            updateResult = db.run(
               `UPDATE tasks SET runtime_submitted_at = COALESCE(runtime_submitted_at, datetime('now'))
-               WHERE network_id = ?1 AND task_id = ?2 AND to_node_id = ?3`,
-              [enforceNetworkId, taskId, callerSession.node_id],
+               WHERE network_id = ?1 AND task_id = ?2 AND ${ownershipSql}`,
+              [enforceNetworkId, taskId, ownerValue],
             );
           }
+          if (updateResult.changes !== 1) {
+            // A zero-row write after a successful preflight is an invariant
+            // failure, never a successful evidence report.
+            throw new Error(`task_runtime_evidence_write_race:${taskId}`);
+          }
         }
-        return db.all<{
+        const evidenceRows = db.all<{
           task_id: string;
           runtime_submitted_at: string;
           consumed_at: string | null;
@@ -1003,12 +1020,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           enforceNetworkId,
           ...uniqueTaskIds,
         );
+        return { ok: true as const, tasks: evidenceRows };
       });
 
       return {
         content: [{
           type: "text" as const,
-          text: JSON.stringify({ ok: true, tasks: evidenceRows }),
+          text: JSON.stringify(outcome),
         }],
       };
   };
@@ -1272,8 +1290,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // 报告冲突）。
       db.transaction(() => {
         db.run(
-          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, context, from_session, requires_response, network_id, meta_json)
-           VALUES (?1, ?2, ?3, 'task', ?4, ?5, ?6, ?7, 'reply', ?8, ?9)`,
+          `INSERT INTO inbox (id, task_id, session_name, node_id, type, priority, content, context, from_session, requires_response, network_id, meta_json)
+           VALUES (?1, ?1, ?2, ?3, 'task', ?4, ?5, ?6, ?7, 'reply', ?8, ?9)`,
           [id, targetAlias, targetNodeId, priority, task, context ?? null, from_session, effectiveNetId ?? null, metaJson]
         );
         db.run(
@@ -1700,16 +1718,16 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       db.transaction(() => {
         // Reset task status
         const updateParams: any[] = [task_id];
-        let updateSql = `UPDATE tasks SET status = 'delivered', result = NULL, completed_at = NULL, started_at = NULL, runtime_submitted_at = NULL, consumed_at = NULL, delivered_at = datetime('now'), expires_at = datetime('now', '+1 hour')
+        let updateSql = `UPDATE tasks SET status = 'delivered', result = NULL, completed_at = NULL, started_at = NULL, delivered_at = datetime('now'), expires_at = datetime('now', '+1 hour')
            WHERE task_id = ?1`;
         updateSql = addScope(updateSql, updateParams, effectiveNetId);
         db.run(updateSql, updateParams);
         // Re-queue in inbox with new ID (original ID may already exist)
         const retryInboxId = uuidv4();
         db.run(
-          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, requires_response, network_id)
-           VALUES (?1, ?2, ?3, 'task', ?4, ?5, ?6, 'reply', ?7)`,
-          [retryInboxId, task.to_name, task.to_node_id ?? resolveNodeIdForAlias(task.to_name, effectiveNetId ?? task.network_id ?? null), task.priority, task.content, from_session, effectiveNetId ?? task.network_id ?? null]
+          `INSERT INTO inbox (id, task_id, session_name, node_id, type, priority, content, from_session, requires_response, network_id)
+           VALUES (?1, ?2, ?3, ?4, 'task', ?5, ?6, ?7, 'reply', ?8)`,
+          [retryInboxId, task_id, task.to_name, task.to_node_id ?? resolveNodeIdForAlias(task.to_name, effectiveNetId ?? task.network_id ?? null), task.priority, task.content, from_session, effectiveNetId ?? task.network_id ?? null]
         );
       });
       logTaskEvent(task_id, task.status, "delivered", from_session, "retry");
@@ -1809,7 +1827,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // Also ack the inbox entry to prevent agent from picking it up
       if (result.changes > 0) {
         const inboxParams: any[] = [task_id];
-        let inboxSql = "UPDATE inbox SET acked = 1 WHERE id = ?1 AND acked = 0";
+        let inboxSql = "UPDATE inbox SET acked = 1 WHERE COALESCE(task_id, id) = ?1 AND acked = 0";
         inboxSql = addScope(inboxSql, inboxParams, effectiveNetId);
         db.run(inboxSql, inboxParams);
         logTaskEvent(task_id, null, "cancelled", from_session, reason || undefined);
@@ -1855,18 +1873,18 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       db.transaction(() => {
         // Ack old inbox to prevent original agent from picking it up
         const inboxParams: any[] = [task_id];
-        let inboxSql = "UPDATE inbox SET acked = 1 WHERE id = ?1 AND acked = 0";
+        let inboxSql = "UPDATE inbox SET acked = 1 WHERE COALESCE(task_id, id) = ?1 AND acked = 0";
         inboxSql = addScope(inboxSql, inboxParams, effectiveNetId);
         db.run(inboxSql, inboxParams);
 
         const updateParams: any[] = [reassignedAlias, newNodeId, task_id];
-        let updateSql = "UPDATE tasks SET to_name = ?1, to_node_id = ?2, status = 'delivered', started_at = NULL, runtime_submitted_at = NULL, consumed_at = NULL, delivered_at = datetime('now') WHERE task_id = ?3";
+        let updateSql = "UPDATE tasks SET to_name = ?1, to_node_id = ?2, status = 'delivered', started_at = NULL, delivered_at = datetime('now') WHERE task_id = ?3";
         updateSql = addScope(updateSql, updateParams, effectiveNetId);
         db.run(updateSql, updateParams);
 
         const newInboxId = uuidv4();
-        db.run("INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, requires_response, network_id) VALUES (?1, ?2, ?3, 'task', ?4, ?5, ?6, 'reply', ?7)",
-          [newInboxId, reassignedAlias, newNodeId, task.priority, task.content, from_session, effectiveNetId ?? task.network_id ?? null]);
+        db.run("INSERT INTO inbox (id, task_id, session_name, node_id, type, priority, content, from_session, requires_response, network_id) VALUES (?1, ?2, ?3, ?4, 'task', ?5, ?6, ?7, 'reply', ?8)",
+          [newInboxId, task_id, reassignedAlias, newNodeId, task.priority, task.content, from_session, effectiveNetId ?? task.network_id ?? null]);
       });
       logTaskEvent(task_id, task.status, "delivered", from_session, `reassign: ${oldAlias} → ${reassignedAlias}`);
       pushEvent(reassignedAlias, { type: "new_task", inbox_count: 1, priority: task.priority, from: from_session, ...(canonical.renamed ? { renamed_from: new_alias } : {}) }, effectiveNetId ?? task.network_id ?? null);

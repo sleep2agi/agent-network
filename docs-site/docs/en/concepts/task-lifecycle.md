@@ -56,7 +56,7 @@ stateDiagram-v2
 
 Lifecycle status and consumption evidence are separate axes. `delivered_at` proves only that Hub wrote the task to the delivery queue, while `acked` proves only that the long-running agent-node process fetched the inbox row. Neither proves that a model turn began. `started_at` is maintained by the compatibility `report_status(working)` path and may precede the vendor runtime actually accepting the task, so it is not authoritative evidence that the model was awakened.
 
-`runtime_submitted_at` means agent-node handed the body to the vendor runtime (for example, issued a prompt/turn request or wrote it into the controlled copresence session), but it does not claim that model inference began. `consumed_at` is the stronger, write-once signal: agent-node reports it with its token-bound identity only after the current `task_id` can be attributed to a vendor turn-start or first activity event. Both remain `null` while a task is queued inside agent-node, merely acknowledged, or held by an online process that has not submitted the body. After submission but before authoritative activity, only `runtime_submitted_at` is populated. Retry and reassignment clear both so the next attempt requires fresh evidence.
+`runtime_submitted_at` means agent-node handed the body to the vendor runtime (for example, issued a prompt/turn request or wrote it into the controlled copresence session), but it does not claim that model inference began. `consumed_at` is the stronger, write-once signal: agent-node reports it with its token-bound identity only after the current `task_id` can be attributed to a vendor turn-start or first activity event. Both remain `null` while a task is queued inside agent-node, merely acknowledged, or held by an online process that has not submitted the body. After submission but before authoritative activity, only `runtime_submitted_at` is populated. Both are monotonic for the logical task lifetime; retry and reassignment preserve existing values. A fresh inbox delivery row keeps the original logical `task_id`, so delayed callbacks cannot be mistaken for another task or erase a fact that already occurred.
 
 The earliest reliable signal differs by runtime. For example, Codex app-server uses exact `task_started`, Grok copresence uses the `network_user` event matching the active network task, and OpenCode copresence—whose wire protocol lacks an attributable start event—waits for the exact linked assistant response. The last signal is later, but it never reports “model consumed” merely because the task entered a queue.
 
@@ -170,9 +170,9 @@ Retry flow:
 
 1. Verify task status is `failed` / `cancelled` / `expired`
 2. Reset task status to `delivered`
-3. Clear result, completed_at, started_at, runtime_submitted_at, consumed_at
+3. Clear result, completed_at, and started_at; preserve task-lifetime runtime_submitted_at and consumed_at
 4. Reset expires_at (+1 hour)
-5. Create a new inbox entry
+5. Create a new inbox entry linked to the original logical task_id
 6. SSE push new_task
 
 ```mermaid

@@ -21,7 +21,7 @@ must not be collapsed into one optimistic timestamp.
 
 ## Decision
 
-Add two nullable, attempt-scoped columns to `tasks`:
+Add two nullable, task-lifetime columns to `tasks`:
 
 - `runtime_submitted_at`: agent-node handed this exact task body to the vendor
   runtime. This may be set at a prompt/turn request or controlled copresence
@@ -30,10 +30,18 @@ Add two nullable, attempt-scoped columns to `tasks`:
   attributable activity signal for this exact task. A consumed mark also fills
   `runtime_submitted_at`, because consumption implies submission.
 
-Both fields are monotonic within one delivery attempt (`COALESCE(existing,
-now)`). `retry_task` and `reassign_task` clear both. Existing lifecycle status,
-`delivered_at`, `started_at`, and `sessions.task` retain their old semantics for
-backward compatibility.
+Both fields are monotonic for the lifetime of the logical task
+(`COALESCE(existing, now)`). `retry_task` and `reassign_task` preserve them:
+issue #520 asks whether this logical task ever crossed each runtime boundary,
+and a delayed callback from an earlier delivery must never overwrite or erase
+that fact. Existing lifecycle status, `delivered_at`, `started_at`, and
+`sessions.task` retain their old semantics for backward compatibility.
+
+Transport-row identity is separate from logical-task identity. Initial
+deliveries historically used `inbox.id == tasks.task_id`; retry/reassign create
+a fresh `inbox.id`. The additive nullable `inbox.task_id` column links every
+redelivery back to the logical task. `get_inbox` exposes that logical `task_id`
+for task rows, while ACK/cancel/reassign use the same linkage.
 
 ## Hub write boundary
 
@@ -47,10 +55,13 @@ Both tools:
 1. require a network-bound node token (`ntok_`);
 2. derive network, canonical alias, and immutable `node_id` from authenticated
    server state—not request fields;
-3. preflight every task and require `tasks.to_node_id` to equal that node;
+3. preflight every task and require `tasks.to_node_id` to equal that node when
+   present; legacy/direct token-bound tasks with `to_node_id=NULL` may fall back
+   only to the authenticated canonical alias;
 4. reject a foreign/missing/duplicate member without partially marking the
    batch;
-5. write only once per attempt.
+5. keep identity preflight and all writes in one SQLite transaction, and write
+   each logical-task field only once for its lifetime.
 
 The current synchronous PostgreSQL adapter cannot keep multiple statements on
 one backend connection. Until that adapter gains real transactions, both tools
@@ -111,8 +122,11 @@ license to weaken the database evidence: a toast or log line is not
    idempotency.
 3. Batch mark multiple exact owned tasks; a mixed owned/foreign batch must
    reject with zero writes.
-4. Retry/reassign must clear both attempt-scoped timestamps.
+4. Retry/reassign must preserve both task-lifetime timestamps, expose the
+   original logical `task_id` on the fresh inbox row, and ACK that row against
+   the original task.
 5. Queue-heavy runtime fixtures must prove FIFO admission alone stays blank;
    exact start/activity must turn the corresponding field green once.
-6. Mutating any identity check, attempt reset, or exact runtime callback must
+6. Mutating any identity check, logical-task linkage, monotonic preservation,
+   or exact runtime callback must
    turn a behavioral test red.

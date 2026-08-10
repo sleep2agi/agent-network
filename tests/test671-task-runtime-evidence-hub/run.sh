@@ -34,16 +34,32 @@ ok "production Hub bundle builds"
 
 grep -F 'runtime_submitted_at' docs/rfcs/RFC-035-task-runtime-evidence.md >/dev/null
 grep -F 'task_runtime_evidence_backend_unsupported' docs/rfcs/RFC-035-task-runtime-evidence.md >/dev/null
+grep -F 'monotonic for the lifetime of the logical task' docs/rfcs/RFC-035-task-runtime-evidence.md >/dev/null
 grep -F '不要用 `sessions.task` 判断模型是否已接手' docs-site/docs/concepts/task-lifecycle.md >/dev/null
+grep -F '逻辑任务全生命周期的单调证据' docs-site/docs/concepts/task-lifecycle.md >/dev/null
 grep -F 'Do not use `sessions.task` as model-consumption evidence' docs-site/docs/en/concepts/task-lifecycle.md >/dev/null
+grep -F 'monotonic for the logical task lifetime' docs-site/docs/en/concepts/task-lifecycle.md >/dev/null
 ok "RFC and bilingual field-boundary documentation"
 
 cp server/src/tools.ts /tmp/test671-tools.orig
 
-sed -i 's/(taskId) => owned.get(taskId) !== callerSession.node_id/(taskId) => false/' server/src/tools.ts
-grep -F '(taskId) => false' server/src/tools.ts >/dev/null
-expect_red remove-node-ownership env COMMHUB_DB=/tmp/test671-mut-owner.db \
-  bun test server/src/task-consumption.test.ts
+sed -i 's/if (row.to_node_id) return row.to_node_id !== callerSession?.node_id;/if (row.to_node_id) return false;/' server/src/tools.ts
+if cmp -s /tmp/test671-tools.orig server/src/tools.ts; then
+  bad "remove-node-ownership mutation did not change source"
+else
+  grep -F 'if (row.to_node_id) return false;' server/src/tools.ts >/dev/null
+  expect_red remove-node-ownership env COMMHUB_DB=/tmp/test671-mut-owner.db \
+    bun test server/src/task-consumption.test.ts
+fi
+cp /tmp/test671-tools.orig server/src/tools.ts
+
+sed -i 's/return resolveCanonicalAlias(enforceNetworkId, row.to_name).alias !== canonicalCaller;/return false;/' server/src/tools.ts
+if cmp -s /tmp/test671-tools.orig server/src/tools.ts; then
+  bad "remove-legacy-alias-ownership mutation did not change source"
+else
+  expect_red remove-legacy-alias-ownership env COMMHUB_DB=/tmp/test671-mut-alias.db \
+    bun test server/src/task-consumption.test.ts
+fi
 cp /tmp/test671-tools.orig server/src/tools.ts
 
 sed -i "s/UPDATE tasks SET runtime_submitted_at = COALESCE(runtime_submitted_at, datetime('now'))/UPDATE tasks SET runtime_submitted_at = COALESCE(runtime_submitted_at, datetime('now')), consumed_at = COALESCE(consumed_at, datetime('now'))/" server/src/tools.ts
@@ -57,20 +73,22 @@ expect_red consumed-no-longer-implies-submitted env COMMHUB_DB=/tmp/test671-mut-
   bun test server/src/task-consumption.test.ts
 cp /tmp/test671-tools.orig server/src/tools.ts
 
-if [[ "$(grep -o 'runtime_submitted_at = NULL' server/src/tools.ts | wc -l)" -ne 2 ]]; then
-  bad "runtime-submitted reset anchor count changed"
+sed -i "s/CASE WHEN type = 'task' THEN COALESCE(task_id, id) ELSE task_id END AS task_id/CASE WHEN type = 'task' THEN id ELSE task_id END AS task_id/" server/src/tools.ts
+if cmp -s /tmp/test671-tools.orig server/src/tools.ts; then
+  bad "unlink-redelivery-task-id mutation did not change source"
 else
-  sed -i 's/runtime_submitted_at = NULL, //g' server/src/tools.ts
-  expect_red remove-submission-attempt-reset env COMMHUB_DB=/tmp/test671-mut-submit-reset.db \
+  grep -F "CASE WHEN type = 'task' THEN id ELSE task_id END AS task_id" server/src/tools.ts >/dev/null
+  expect_red unlink-redelivery-task-id env COMMHUB_DB=/tmp/test671-mut-link.db \
     bun test server/src/task-consumption.test.ts
 fi
 cp /tmp/test671-tools.orig server/src/tools.ts
 
-if [[ "$(grep -o 'consumed_at = NULL' server/src/tools.ts | wc -l)" -ne 2 ]]; then
-  bad "consumed reset anchor count changed"
+sed -i "s/status = 'delivered', result = NULL, completed_at = NULL, started_at = NULL, delivered_at/status = 'delivered', result = NULL, completed_at = NULL, started_at = NULL, runtime_submitted_at = NULL, consumed_at = NULL, delivered_at/" server/src/tools.ts
+if cmp -s /tmp/test671-tools.orig server/src/tools.ts; then
+  bad "clear-task-lifetime-evidence-on-retry mutation did not change source"
 else
-  sed -i 's/consumed_at = NULL, //g' server/src/tools.ts
-  expect_red remove-consumed-attempt-reset env COMMHUB_DB=/tmp/test671-mut-consumed-reset.db \
+  grep -F "started_at = NULL, runtime_submitted_at = NULL, consumed_at = NULL, delivered_at" server/src/tools.ts >/dev/null
+  expect_red clear-task-lifetime-evidence-on-retry env COMMHUB_DB=/tmp/test671-mut-lifetime.db \
     bun test server/src/task-consumption.test.ts
 fi
 cp /tmp/test671-tools.orig server/src/tools.ts
