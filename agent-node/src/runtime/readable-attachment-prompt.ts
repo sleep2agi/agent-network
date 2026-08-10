@@ -22,13 +22,22 @@ export function runtimeNeedsReadableAttachmentPrompt(runtime: string): boolean {
  * while path-prompt lanes surface only attachments that the Hub can authorize
  * by file_id.
  */
-export function attachmentDescriptorsForRuntime<T extends { file_id?: unknown }>(
+export function attachmentDescriptorsForRuntime<T extends {
+  file_id?: unknown;
+  path?: unknown;
+  type?: unknown;
+  mime?: unknown;
+}>(
   runtime: string,
   attachments: readonly T[],
 ): T[] {
-  if (!runtimeNeedsReadableAttachmentPrompt(runtime)) return [...attachments];
+  if (runtimeNeedsReadableAttachmentPrompt(runtime)) {
+    return attachments.filter((attachment) =>
+      typeof attachment.file_id === "string" && attachment.file_id.length > 0);
+  }
   return attachments.filter((attachment) =>
-    typeof attachment.file_id === "string" && attachment.file_id.length > 0);
+    (attachment.type === "image" || String(attachment.mime || "").startsWith("image/"))
+    && (typeof attachment.file_id === "string" || typeof attachment.path === "string"));
 }
 
 /** Add owner-local paths as data, never as instructions supplied by sender. */

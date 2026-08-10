@@ -55,6 +55,28 @@ describe("Claude channel attachments", () => {
     expect(content).not.toContain("ntok_test_secret");
   });
 
+  test("downloads an authenticated non-image file for the Read-capable channel", async () => {
+    const root = mkdtempSync(join(tmpdir(), "channel-file-attachment-"));
+    roots.push(root);
+    const pdf = Uint8Array.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37]);
+    const result = await downloadChannelImageAttachments({
+      meta: { attachments: [{ type: "file", file_id: "file_pdf_365", name: "brief.pdf", mime: "application/pdf", size: pdf.length }] },
+    }, {
+      hubUrl: "http://hub.invalid",
+      authToken: "ntok_test",
+      cacheDir: channelAttachmentCacheDir(root, "reader"),
+      fetch: (async () => new Response(pdf, {
+        headers: { "content-length": String(pdf.length), "content-type": "application/pdf" },
+      })) as typeof fetch,
+    });
+
+    expect(result.failures).toEqual([]);
+    expect(result.paths).toHaveLength(1);
+    expect(result.paths[0]).toEndWith(".pdf");
+    expect([...readFileSync(result.paths[0]!)]).toEqual([...pdf]);
+    expect(statSync(result.paths[0]!).mode & 0o777).toBe(0o600);
+  });
+
   test("download failure preserves the original text and exposes no token", async () => {
     const root = mkdtempSync(join(tmpdir(), "channel-attachment-fail-"));
     roots.push(root);

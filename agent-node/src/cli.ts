@@ -4310,37 +4310,34 @@ function think(
   return next;
 }
 
-/** #222 cross-host attachment resolution — replaces the legacy
- *  sync `extractImagePaths`. For each attachment, prefer file_id
+/** #222/#365 cross-host attachment resolution. For each attachment, prefer file_id
  *  (fetch via hub /api/files/<id>, cache locally, hand temp path
  *  to LLM); fall back to host-local `path` for single-host setups.
  *  Drops attachments that fail to resolve (with warn) so a partial
  *  failure doesn't crash the whole message processing path.
- *  Filter logic preserved: only image attachments are surfaced
- *  (matched by `type === "image"` OR `mime` starting "image/").
- *  Non-image attachments (PDF/docx/etc) are still silently dropped
- *  today — broader file-type support is a follow-up. */
-async function extractImagePaths(msg: any): Promise<string[]> {
+ *  Structured multimodal lanes receive images only. Read-path lanes
+ *  (Codex app-server and OpenCode) may receive any authenticated Hub
+ *  file_id, but never a sender-local path. */
+async function extractRuntimeAttachmentPaths(msg: any): Promise<string[]> {
   const meta = msg?.meta || (() => {
     try { return msg?.meta_json ? JSON.parse(msg.meta_json) : null; } catch { return null; }
   })();
   const attachments = Array.isArray(meta?.attachments) ? meta.attachments : [];
-  const imageAttachments = attachments.filter(
+  const attachmentDescriptors = attachments.filter(
     (a: any) =>
       a && typeof a === "object" &&
-      (a.type === "image" || String(a.mime || "").startsWith("image/")) &&
       (typeof a.file_id === "string" || typeof a.path === "string"),
   );
-  if (imageAttachments.length === 0) return [];
+  if (attachmentDescriptors.length === 0) return [];
   const { resolveAttachmentToLocalPath } = await import("./runtime/fetch-attachment.js");
   // Cache lives under the user's home, keyed by alias — mirrors
   // ~/.anet/deleted root chosen by RFC-027 D7 (host-level scope, not
   // per-cwd, so a node started from a different cwd still hits the
   // same cache). chmod 700 + chmod 600 enforced in fetch-attachment.ts.
   const cacheDir = join(home, ".anet", "cache", "attachments", ALIAS || "default");
-  const resolvableAttachments = attachmentDescriptorsForRuntime(RUNTIME, imageAttachments);
-  if (resolvableAttachments.length !== imageAttachments.length) {
-    warn(`[attachment] refused ${imageAttachments.length - resolvableAttachments.length} sender-local path attachment(s) for ${RUNTIME}; preserving text-only references`);
+  const resolvableAttachments = attachmentDescriptorsForRuntime(RUNTIME, attachmentDescriptors);
+  if (resolvableAttachments.length !== attachmentDescriptors.length) {
+    warn(`[attachment] refused ${attachmentDescriptors.length - resolvableAttachments.length} unsupported or sender-local attachment(s) for ${RUNTIME}; preserving text-only references`);
   }
   const resolved: string[] = [];
   for (const a of resolvableAttachments) {
@@ -4656,11 +4653,11 @@ async function processInbox() {
       // logical task across retry/reassign. Keep ACK on the transport row,
       // but bind runtime evidence and replies to the logical task.
       const logicalTaskId = logicalTaskIdFromInbox(msg);
-      const images = await extractImagePaths(msg);
+      const images = await extractRuntimeAttachmentPaths(msg);
       const inboundLogSuffix = GROK_EXECUTION_MODE === "cli"
         ? ` (${content.length} chars; content withheld)`
         : ` ${content.slice(0, 100)}`;
-      log(`← [${from}] (${msgType}/${msg.priority || "normal"})${images.length ? ` +${images.length} image(s)` : ""}${inboundLogSuffix}`);
+      log(`← [${from}] (${msgType}/${msg.priority || "normal"})${images.length ? ` +${images.length} attachment(s)` : ""}${inboundLogSuffix}`);
 
       // Other non-task / non-broadcast messages retain their historical
       // ack-only behavior; send_message never implies an LLM response.

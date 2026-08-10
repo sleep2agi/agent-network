@@ -22,7 +22,7 @@ import { loadOwnerOnlyEnvFile } from "./owner-env-file";
 import {
   appendChannelAttachmentPaths,
   channelAttachmentCacheDir,
-  downloadChannelImageAttachments,
+  downloadChannelAttachments,
 } from "./channel-attachments";
 
 // ── .env loader helper ────────────────────────────────
@@ -521,7 +521,7 @@ async function handleSSEEvent(event: any) {
       for (const msg of inbox.messages) {
         let channelContent = String(msg.content || "");
         try {
-          const attachments = await downloadChannelImageAttachments(msg, {
+          const attachments = await downloadChannelAttachments(msg, {
             hubUrl: COMMHUB_URL,
             authToken: AUTH_TOKEN,
             cacheDir: channelAttachmentCacheDir(HOME, ALIAS),

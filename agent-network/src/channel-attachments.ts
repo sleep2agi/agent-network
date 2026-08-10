@@ -41,12 +41,11 @@ function messageMeta(message: any): any {
   try { return JSON.parse(message.meta_json); } catch { return null; }
 }
 
-export function imageAttachmentsFromInbox(message: any): AttachmentDescriptor[] {
+export function readableAttachmentsFromInbox(message: any): AttachmentDescriptor[] {
   const attachments = messageMeta(message)?.attachments;
   if (!Array.isArray(attachments)) return [];
   return attachments.filter((attachment: AttachmentDescriptor) =>
     attachment && typeof attachment === "object"
-    && (attachment.type === "image" || String(attachment.mime || "").startsWith("image/"))
     && (typeof attachment.file_id === "string" || typeof attachment.path === "string"));
 }
 
@@ -67,6 +66,11 @@ function extensionFor(attachment: AttachmentDescriptor): string {
     "image/gif": ".gif",
     "image/webp": ".webp",
     "image/bmp": ".bmp",
+    "application/pdf": ".pdf",
+    "text/plain": ".txt",
+    "text/csv": ".csv",
+    "application/json": ".json",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
   };
   return byMime[mime] || "";
 }
@@ -171,13 +175,13 @@ async function fetchOne(
   return { ok: true, path };
 }
 
-export async function downloadChannelImageAttachments(
+export async function downloadChannelAttachments(
   message: any,
   deps: ChannelAttachmentDeps,
 ): Promise<ChannelAttachmentResult> {
   const paths: string[] = [];
   const failures: ChannelAttachmentResult["failures"] = [];
-  for (const attachment of imageAttachmentsFromInbox(message)) {
+  for (const attachment of readableAttachmentsFromInbox(message)) {
     const result = await fetchOne(attachment, deps);
     if (result.ok) {
       if (!paths.includes(result.path)) paths.push(result.path);
@@ -191,6 +195,11 @@ export async function downloadChannelImageAttachments(
   }
   return { paths, failures };
 }
+
+// Compatibility for callers compiled against the image-only implementation.
+// The channel is Read-capable, so the implementation now accepts any
+// authenticated file_id while retaining the old exported name.
+export const downloadChannelImageAttachments = downloadChannelAttachments;
 
 export function appendChannelAttachmentPaths(content: string, paths: readonly string[]): string {
   if (paths.length === 0) return content;
