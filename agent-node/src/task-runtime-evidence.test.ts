@@ -103,10 +103,10 @@ describe("agent-node inbox wiring", () => {
     const branch = cli.slice(start, end);
 
     expect(branch).toContain("const logicalTaskId = logicalTaskIdFromInbox(msg)");
-    expect(branch).toContain("processTask(\n        content,\n        from,\n        logicalTaskId,");
+    expect(branch).toContain("processTask(\n        runtimeContent,\n        from,\n        logicalTaskId,");
     expect(branch).toContain("deliverReplyReliably(from, replyBody, logicalTaskId, failed)");
     expect(branch).toContain("ackMessage(msg.id)");
-    expect(branch).not.toContain("processTask(\n        content,\n        from,\n        msg.id,");
+    expect(branch).not.toContain("processTask(\n        runtimeContent,\n        from,\n        msg.id,");
   });
 
   test("all runtime dispatch families receive the same task-lifetime reporter", () => {
