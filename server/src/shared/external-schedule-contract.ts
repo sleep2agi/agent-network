@@ -58,4 +58,3 @@ export function parseExternalSchedulePatch(raw: unknown): ExternalSchedulePatch 
   if (obj.cron !== undefined) patch.cron = parseManagedCronExpression(obj.cron);
   return patch;
 }
-
