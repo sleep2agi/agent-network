@@ -881,13 +881,27 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const effectiveNetId = getNetworkId(netId);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
       console.log(`[${ts()}] ${alias} → ack_inbox: ${message_id.slice(0, 8)}`);
-      const ackParams: any[] = [message_id, alias];
-      let ackSql = "UPDATE inbox SET acked = 1 WHERE id = ?1 AND session_name = ?2";
-      ackSql = addScope(ackSql, ackParams, effectiveNetId);
+      // New task consumers ACK by the logical tasks.task_id exposed by
+      // get_inbox. Keep exact inbox.id support for legacy consumers and for
+      // non-task messages. Restrict the lookup to pending rows: after a retry
+      // the original row can have id == task_id but is already ACKed, while
+      // the current row has a fresh transport id and the same logical task_id.
       const inboxTaskParams: any[] = [message_id, alias];
-      let inboxTaskSql = "SELECT type, COALESCE(task_id, id) AS task_id FROM inbox WHERE id = ?1 AND session_name = ?2";
+      let inboxTaskSql = `SELECT id, type, COALESCE(task_id, id) AS task_id
+         FROM inbox
+         WHERE session_name = ?2 AND acked = 0
+           AND (id = ?1 OR (type = 'task' AND task_id = ?1))`;
       inboxTaskSql = addScope(inboxTaskSql, inboxTaskParams, effectiveNetId);
-      const inboxTask = db.get<{ type: string; task_id: string }>(inboxTaskSql, ...inboxTaskParams);
+      inboxTaskSql += " ORDER BY created_at DESC LIMIT 1";
+      const inboxTask = db.get<{ id: string; type: string; task_id: string }>(inboxTaskSql, ...inboxTaskParams);
+      if (!inboxTask) {
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "message not found or already acknowledged" }) }],
+        };
+      }
+      const ackParams: any[] = [inboxTask.id, alias];
+      let ackSql = "UPDATE inbox SET acked = 1 WHERE id = ?1 AND session_name = ?2 AND acked = 0";
+      ackSql = addScope(ackSql, ackParams, effectiveNetId);
       const result = db.run(ackSql, ackParams);
       if (result.changes === 0) {
         return {
@@ -899,11 +913,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         if (inboxTask?.type !== "task") {
           return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true }) }] };
         }
-        const taskParams: any[] = [inboxTask?.task_id ?? message_id];
+        const taskParams: any[] = [inboxTask.task_id];
         let taskSql = "UPDATE tasks SET status = 'acked' WHERE task_id = ?1 AND status = 'delivered'";
         taskSql = addScope(taskSql, taskParams, effectiveNetId);
         const ackResult = db.run(taskSql, taskParams);
-        if (ackResult.changes > 0) logTaskEvent(inboxTask?.task_id ?? message_id, "delivered", "acked", alias);
+        if (ackResult.changes > 0) logTaskEvent(inboxTask.task_id, "delivered", "acked", alias);
       } catch {}
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ ok: true }) }],

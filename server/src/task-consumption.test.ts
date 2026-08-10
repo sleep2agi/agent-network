@@ -226,7 +226,8 @@ describe("task consumed_at identity and lifecycle", () => {
     const retriedInbox = await call(nodeTools.get_inbox, { alias: NODE_A, limit: 20 });
     const retryRow = retriedInbox.messages.find((row: any) => row.id !== taskId && row.task_id === taskId);
     expect(retryRow).toBeDefined();
-    expect((await call(nodeTools.ack_inbox, { alias: NODE_A, message_id: retryRow.id })).ok).toBe(true);
+    expect((await call(nodeTools.ack_inbox, { alias: NODE_A, message_id: retryRow.task_id })).ok).toBe(true);
+    expect(db.get<{ acked: number }>("SELECT acked FROM inbox WHERE id = ?1", retryRow.id)?.acked).toBe(1);
     expect(db.get<{ status: string }>("SELECT status FROM tasks WHERE task_id = ?1", taskId)?.status).toBe("acked");
   });
 
@@ -240,6 +241,9 @@ describe("task consumed_at identity and lifecycle", () => {
     const retriedInbox = await call(nodeTools.get_inbox, { alias: NODE_A, limit: 20 });
     const retryRow = retriedInbox.messages.find((row: any) => row.id !== taskId && row.task_id === taskId);
     expect(retryRow).toBeDefined();
+    // Backward compatibility: an older consumer may still ACK the transport
+    // inbox.id even though all task lifecycle operations use logical task_id.
+    expect((await call(nodeTools.ack_inbox, { alias: NODE_A, message_id: retryRow.id })).ok).toBe(true);
     expect((await call(nodeTools.mark_tasks_consumed, { task_ids: [retryRow.task_id] })).ok).toBe(true);
     expect(typeof runtimeSubmittedAt(taskId)).toBe("string");
     expect(typeof consumedAt(taskId)).toBe("string");
@@ -262,6 +266,8 @@ describe("task consumed_at identity and lifecycle", () => {
     const row = reassignedInbox.messages.find((message: any) => message.task_id === taskId);
     expect(row).toBeDefined();
     expect(row.id).not.toBe(taskId);
+    expect((await call(newOwnerTools.ack_inbox, { alias: NODE_B, message_id: row.task_id })).ok).toBe(true);
+    expect(db.get<{ acked: number }>("SELECT acked FROM inbox WHERE id = ?1", row.id)?.acked).toBe(1);
     expect(await call(oldOwnerTools.mark_tasks_consumed, { task_ids: [taskId] })).toEqual({
       ok: false,
       error: "task_not_owned",

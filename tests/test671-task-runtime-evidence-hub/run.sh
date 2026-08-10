@@ -83,6 +83,16 @@ else
 fi
 cp /tmp/test671-tools.orig server/src/tools.ts
 
+sed -i "s/AND (id = ?1 OR (type = 'task' AND task_id = ?1))/AND id = ?1/" server/src/tools.ts
+if cmp -s /tmp/test671-tools.orig server/src/tools.ts; then
+  bad "remove-logical-task-ack mutation did not change source"
+else
+  grep -F "AND id = ?1" server/src/tools.ts >/dev/null
+  expect_red remove-logical-task-ack env COMMHUB_DB=/tmp/test671-mut-logical-ack.db \
+    bun test server/src/task-consumption.test.ts
+fi
+cp /tmp/test671-tools.orig server/src/tools.ts
+
 sed -i "s/status = 'delivered', result = NULL, completed_at = NULL, started_at = NULL, delivered_at/status = 'delivered', result = NULL, completed_at = NULL, started_at = NULL, runtime_submitted_at = NULL, consumed_at = NULL, delivered_at/" server/src/tools.ts
 if cmp -s /tmp/test671-tools.orig server/src/tools.ts; then
   bad "clear-task-lifetime-evidence-on-retry mutation did not change source"
