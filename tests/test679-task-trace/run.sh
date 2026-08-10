@@ -36,6 +36,7 @@ mutate_expect_red /app/agent-node/src/commhub-mcp.ts 'transport: "sdk_mcp_proxy"
 mutate_expect_red /app/agent-network/src/channel-task-trace.ts 'transport: "channel_mcp_proxy"' 'transport: "mcp_http"' channel-transport
 mutate_expect_red /app/agent-node/src/commhub-mcp.ts 'lifecycle_tracking: "not_tracked"' 'lifecycle_tracking: "tracked"' sdk-lifecycle
 mutate_expect_red /app/agent-network/src/channel-task-trace.ts 'lifecycle_tracking: "not_tracked"' 'lifecycle_tracking: "tracked"' channel-lifecycle
+mutate_expect_red /app/agent-network/src/node-server.ts 'return { content: [{ type: "text", text: JSON.stringify(result) }] };' 'return { content: [{ type: "text", text: JSON.stringify(result) }], isError: true };' channel-response-shape
 cd /app/agent-node
 bun test src/task-trace.test.ts src/commhub-mcp.test.ts
 bun run build
