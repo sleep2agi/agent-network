@@ -1,0 +1,49 @@
+# Test 520 — Dashboard/CommHub image attachments for Read-capable runtimes
+
+Date: 2026-08-10
+Source commit: 777b4c2c11130c85f9a156794650a032cd6d7cf3
+Stacked base: 00db74b1e01491d0df5d6d1326571269c9d73c88 (`feat/520-runtime-consumption`, PR #674)
+Docker tag: `anet-test520-attachments:dev`
+Docker image ID: `sha256:290bf97381c29b1770e7dc6f93b9edb6772597f5b783566595f1549159562905`
+Embedded source: `TEST520_ATTACHMENT_SOURCE_COMMIT=777b4c2c11130c85f9a156794650a032cd6d7cf3`
+Runner artifact SHA256: `794aff738af6d4a1d444e5f2578e0c59632ac8047a1845e895898237dde282fc`
+
+## Result
+
+PASS.
+
+- `agent-network` TypeScript typecheck: PASS.
+- Production `agent-network/src/node-server.ts` bundle: PASS.
+- Production `agent-node/src/cli.ts` bundle: PASS.
+- Attachment helper: 4 tests / 19 assertions, PASS.
+- Runtime prompt and existing #520 wiring: 14 tests / 53 assertions, PASS.
+- Real production Claude-channel bundle against a controllable Hub `/mcp`, `/events`, and authenticated `/api/files` fixture: 14 assertions, PASS.
+- Mutations: 4/4 witnessed red.
+
+## Proved behavior
+
+1. The actual `claude-code-cli` ingress is `agent-network/src/node-server.ts`, not `agent-node/src/cli.ts`. A Dashboard image with a Hub `file_id` is fetched with the node bearer token, cached at mode `0600`, and its absolute local path is appended to the real `notifications/claude/channel` payload.
+2. A file `404` is fail-safe: the original task text is delivered byte-identically and ACK still occurs. No fake local path is added.
+3. Sender-controlled `attachment.path` is never surfaced to a Read-capable model. Only an authenticated Hub `file_id` may become a local path.
+4. The path-prompt runtime set is exact: `codex-app-server` and `opencode`. Claude Agent SDK and Codex SDK/direct-stdio retain their pre-existing structured-image lanes. Grok's default reviewed profile denies filesystem tools, so it is not falsely advertised as Read-capable.
+5. Attachment paths are JSON-quoted, deduplicated, and explicitly labelled as untrusted input rather than system instructions.
+6. The bearer token appears neither in the model-facing channel payload nor stderr.
+
+## Load-bearing mutations
+
+- Removing the production Claude-channel `channelContent` injection makes the real wire harness red.
+- Bypassing `runtimeContent` in `agent-node` makes the inbox choke-point contract red.
+- Adding a structured/denied runtime to the path-prompt exact set makes the isolation test red.
+- Trusting a sender-provided local path makes the hostile-path test red.
+
+Every mutation helper requires one exact anchor and a byte-different source before executing the test.
+
+## Scope and exclusions
+
+- No Hub, Dashboard, schema, token, or production deployment change.
+- No generic `download_attachment` MCP tool in this candidate. The immediate user-visible path is implemented at the two real inbound choke points without widening the model tool surface.
+- This branch is intentionally stacked on PR #674 because both changes touch `agent-node/src/cli.ts`; it must be retargeted/rebased after #674 merges, without rewriting the reviewed source evidence.
+
+## Additional witnessed finding
+
+The first real bundled-channel run exposed mojibake in newly introduced non-ASCII prompt literals while runtime-delivered Dashboard text remained intact. The prompt block was changed to ASCII English, rebuilt at the final exact source SHA, and the real wire assertion then passed. The final result above is from that rebuilt image, not the earlier failing image.
