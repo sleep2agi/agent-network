@@ -5,10 +5,10 @@ Date: 2026-08-10 (Asia/Shanghai)
 ## Provenance
 
 - Base: `51bdb84a417c9a2a1fd8f07f871e307e50da80a5`
-- Tested source: `727564d800d5a72ed56e5f8c707aced41fd6b614`
+- Tested source: `7aabeb796800568d646133631258fc68e7b960ba`
 - Docker tag: `anet-test671:dev` (fixed/reused tag)
-- Docker image ID: `sha256:54174ae5dc8eb1d2dc8883c18f36f0a2a62b6d1065e617bfbd1a1a34048966f0`
-- Embedded image environment: `TEST671_SOURCE_COMMIT=727564d800d5a72ed56e5f8c707aced41fd6b614`
+- Docker image ID: `sha256:e3e8764e3834ae8c7f607b4d2d20ed2409c79bff37e9701c3a5207f3fcf05209`
+- Embedded image environment: `TEST671_SOURCE_COMMIT=7aabeb796800568d646133631258fc68e7b960ba`
 
 An earlier image used a manually expanded, nonexistent SHA and is invalid evidence. It was discarded and the fixed tag was rebuilt from the exact value returned by `git rev-parse HEAD`; only the image and results above count.
 
@@ -21,6 +21,7 @@ This layer covers the Hub half of issue #520 only:
 - atomic all-or-nothing batch ownership checks;
 - task-lifetime monotonic evidence preserved through retry/reassignment;
 - explicit `inbox.task_id` linkage across MCP, REST, scheduler, retry, and reassignment delivery paths;
+- a denominator gate that enumerates all five production task-inbox INSERT paths and rejects any path without `task_id`;
 - logical-task ACK for new consumers plus exact `inbox.id` compatibility for old consumers;
 - immutable node ownership with a canonical-alias fallback only for legacy/direct tasks whose `to_node_id` is NULL;
 - REST/tool projections and bilingual lifecycle documentation;
@@ -33,7 +34,7 @@ Agent runtime wiring is deliberately excluded from this candidate layer while th
 Command:
 
 ```sh
-sg docker -c 'docker run --rm -v /tmp/test671-727564-e40sgZ:/artifacts anet-test671:dev'
+sg docker -c 'docker run --rm -v /tmp/test671-7aabeb-ZA8Fq0:/artifacts anet-test671:dev'
 ```
 
 Result:
@@ -42,7 +43,7 @@ Result:
 - `server/src/task-auth-origin-http.test.ts`: 2 tests passed, 8 assertions passed;
 - production Hub bundle built successfully;
 - RFC and Chinese/English field-boundary documentation checks passed;
-- suite summary: `RESULT pass=13 fail=0`.
+- suite summary: `RESULT pass=14 fail=0`.
 
 The behavior tests establish that connection, enqueue, delivery, ACK, and the legacy `sessions.task` preview leave both evidence fields NULL; runtime submission marks only `runtime_submitted_at`; authoritative consumption marks both fields; duplicate reports are idempotent; foreign/missing mixed batches write nothing; user tokens cannot report evidence; legacy/direct NULL-node tasks remain usable only through their authenticated canonical alias; and MCP, REST, scheduler, retry, and reassignment deliveries expose the original logical task ID. Retry/reassignment preserve task-lifetime evidence while fresh transport rows continue to ACK and report against that logical task.
 
@@ -52,18 +53,18 @@ Each mutation changed the tested implementation and made the behavior suite fail
 
 | Mutation | Artifact SHA256 |
 | --- | --- |
-| Remove immutable node ownership enforcement | `a1e7a4a0164b8dae753abbe74db43c49eee1579252ab137ed606975e24ad1df6` |
-| Remove legacy/direct canonical-alias ownership | `132d150012da0d66c19c44fd23bbf83b4da46e7ada12c94cb95b236aea0589ab` |
-| Collapse runtime submission into consumption | `70cd1e3c4be9eda72118412b1effa550fbb66f6698dd344516a218d2d76385de` |
-| Stop consumption from implying submission | `5e82a49082336dfca363d39b706c8795bf04eaecc9925a3ef6828b4a6ec731e6` |
-| Unlink a redelivery inbox row from its logical task | `e3aaaf0414ca9797ffdd55a23126d13475c8b0e46ade9993169f4c256cb30f97` |
-| Remove logical-task ACK support | `f2877034ec8d16c4df2dfa70e6dab948b8303e2cd3e40d8d88d8fed38401e84b` |
-| Clear task-lifetime evidence on retry | `a42b3e7c575ca6abeebbb2b9ae1f793763d276815ca7def904c30125e51245ac` |
-| Unlink scheduler delivery from its logical task | `dee17714c66ed284a98504c2bc608da5e4ba860ffea40336966427f2b45b963d` |
-| Unlink REST initial delivery from its logical task | `223f239dd5d73f4947088ea604cfeaba631c6cd0acb1e3bec88323e5701e2421` |
+| Remove immutable node ownership enforcement | `88c4a49df3989e6352bf97213b30708556eafd809d20dfa373ff716a553fa6f4` |
+| Remove legacy/direct canonical-alias ownership | `ce065a6b8ef94d13368baba40c4c31bcc1d0e295b7e65d5acdec2140c81f68f8` |
+| Collapse runtime submission into consumption | `5a519b68d958c2351889e3b4f9b8ffca0faa598295062c9694d4198cce540f05` |
+| Stop consumption from implying submission | `f079b72bef8a819dcc9c3efbdf0c3860c04e7a5c62de8865862a9ee2ef4bf45b` |
+| Unlink a redelivery inbox row from its logical task | `fe89e89b6e7b36acf6f0330a84e0e07b25be9e60f641036018987dbcf4f4594c` |
+| Remove logical-task ACK support | `3bd8606d86d1867f73a4415757aee5c51eaf0a8194f4904438946a355ae6875f` |
+| Clear task-lifetime evidence on retry | `2bbd2788b85f0859690eb2a53f46a8aef45181406487582c2f81a10451060b42` |
+| Unlink scheduler delivery from its logical task | `d654202bf10caefb5858876e899e23dd2fb76189ecbfed27ac9b8edd1a465d75` |
+| Unlink REST initial delivery from its logical task | `5faf53f217161c7797d92f61333947e61442ffea485f8d1578a474944ecf499b` |
 
-Artifacts are the corresponding `.log` files under `/tmp/test671-727564-e40sgZ`.
+Artifacts are the corresponding `.log` files under `/tmp/test671-7aabeb-ZA8Fq0`.
 
 ## Result
 
-PASS for the Hub-only task runtime evidence layer at source `727564d800d5a72ed56e5f8c707aced41fd6b614`. Agent-node reporting remains a separate pending layer and this report does not claim end-to-end runtime consumption is complete.
+PASS for the Hub-only task runtime evidence layer at source `7aabeb796800568d646133631258fc68e7b960ba`. Agent-node reporting remains a separate pending layer and this report does not claim end-to-end runtime consumption is complete.
