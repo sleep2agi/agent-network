@@ -7315,6 +7315,26 @@ async function stopNode(nodeId: string): Promise<StopNodeResult> {
   return { status: "survived", pid };
 }
 
+// Marker-bearing co-presence generations are stopped exclusively by the
+// identity reaper.  After it succeeds, the pidfile is bookkeeping only: we
+// may remove a dead/stale entry, but must never signal an alive PID through
+// this second authority (it may already have been reused by an unrelated
+// process after the marker generation exited).
+function clearStoppedIdentityPidFile(nodeId: string): StopNodeResult {
+  const pidFile = join(nodesDir(), nodeId, ".pid");
+  if (!existsSync(pidFile)) return { status: "not-running" };
+  const pid = parseInt(readFileSync(pidFile, "utf-8").trim());
+  if (isNaN(pid)) {
+    rmSync(pidFile, { force: true });
+    return { status: "not-running" };
+  }
+  if (!pidAlive(pid)) {
+    rmSync(pidFile, { force: true });
+    return { status: "not-running", pid };
+  }
+  return { status: "survived", pid };
+}
+
 async function stopCommand() {
   const ref = args[1];
   if (!ref) {
@@ -7435,9 +7455,11 @@ Stop a running agent node.
   if (tmuxAppsrvKilled) killTmuxSession(copresenceSessions.appsrv);
   if (tmuxBridgeKilled) killTmuxSession(copresenceSessions.bridge);
   const tmuxKilled = identityTeardownKilled || tmuxTuiKilled || tmuxAppsrvKilled || tmuxBridgeKilled;
-  const stopResult = await stopNode(resolved.id);
+  const stopResult = allowLegacyTmuxNameSweep
+    ? await stopNode(resolved.id)
+    : clearStoppedIdentityPidFile(resolved.id);
   if (stopResult.status === "survived") {
-    console.error(`[anet] could not confirm that "${displayName}" exited (pid ${stopResult.pid}); pidfile retained.`);
+    console.error(`[anet] could not confirm that "${displayName}" exited (pid ${stopResult.pid}); pidfile retained and PID was not signalled.`);
     process.exitCode = 1;
     return;
   }

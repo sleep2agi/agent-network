@@ -65,5 +65,33 @@ RC=$?
 [[ "$RC" -ne 0 ]] && ok "M3 delete post-rescan unreadable gate" || bad "M3 post-rescan mutation stayed green"
 restore
 
+# M4 — delete the corrupt-marker fail-closed branch.  The old behavior then
+# falls through and kills an unrelated same-name session.
+COUNT=$(grep -Fc 'Refusing the legacy tmux-name sweep: identity could not be proven.' "$CLI")
+[[ "$COUNT" == "1" ]] || { echo "M4 anchor count=$COUNT"; exit 1; }
+sed -i '/} else if (markerResult.cause !== "MISSING") {/,/^    }/ { \
+  /allowLegacyTmuxNameSweep = false;/d; \
+  /process.exitCode = 1;/d; \
+  /^      return;$/d; \
+}' "$CLI"
+cmp -s "$CLI" "$WORK/cli.orig" && { echo "M4 no-op"; exit 1; }
+ALIAS=mut466corrupt
+NODE_DIR="${HOME}/project/.anet/nodes/$ALIAS"
+mkdir -p "$NODE_DIR"
+cat >"$NODE_DIR/config.json" <<'JSON'
+{"node_name":"mut466corrupt","runtime":"claude-code-cli","hub":"http://127.0.0.1:1","token":"ntok_mutation_fixture"}
+JSON
+printf '{not-json\n' >"$NODE_DIR/copresence-identity.json"
+chmod 600 "$NODE_DIR/copresence-identity.json"
+tmux new-session -d -s "$ALIAS-appsrv" -e ANET_NODE_MARKER=foreign-generation bash -c 'exec sleep 600'
+(cd "${HOME}/project" && anet node stop "$ALIAS" >"$WORK/m4.log" 2>&1) || true
+if tmux has-session -t "=$ALIAS-appsrv" 2>/dev/null; then
+  bad "M4 deleting corrupt-marker refusal did not expose a name kill"
+  tmux kill-session -t "=$ALIAS-appsrv" 2>/dev/null || true
+else
+  ok "M4 delete corrupt-marker fail-closed return"
+fi
+restore
+
 echo "MUTATION RESULT: PASS=$PASS FAIL=$FAIL"
-[[ "$PASS" -eq 3 && "$FAIL" -eq 0 ]]
+[[ "$PASS" -eq 4 && "$FAIL" -eq 0 ]]

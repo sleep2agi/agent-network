@@ -155,7 +155,43 @@ session_alive "$ALIAS-appsrv" && ok "self-kill refusal leaves real app-server al
 stop_external || bad "external cleanup after self-stop failed"
 assert_real_generation_gone "$UUID" "post self-refusal external stop"
 
-section "5. ordinary marker-missing node retains legacy stop"
+section "5. corrupt marker fails closed without a name kill"
+printf '{not-json\n' >"$MARKER"
+chmod 600 "$MARKER"
+tmux new-session -d -s "$ALIAS-appsrv" -e ANET_NODE_MARKER=foreign-corrupt-case bash -c 'exec sleep 600'
+(cd "$WORK/project" && anet node stop "$ALIAS" >"$WORK/corrupt.log" 2>&1)
+RC=$?
+[[ "$RC" -ne 0 ]] && ok "corrupt marker returns non-zero" || bad "corrupt marker returned success"
+[[ -e "$MARKER" ]] && ok "corrupt marker is preserved" || bad "corrupt marker was removed"
+session_alive "$ALIAS-appsrv" && ok "corrupt marker did not authorize same-name kill" || bad "corrupt marker fell through to name kill"
+tmux kill-session -t "=$ALIAS-appsrv" 2>/dev/null || true
+rm -f "$MARKER"
+
+section "6. incomplete identity proof fails closed without a name kill"
+INCOMPLETE_PID_FILE="$WORK/incomplete.pid"
+setsid env ANET_NODE_MARKER=incomplete-real \
+  bash -c 'echo $$ > "$1"; env -u ANET_NODE_MARKER sleep 600 & wait' _ "$INCOMPLETE_PID_FILE" &
+INCOMPLETE_LAUNCH=$!
+for _ in $(seq 1 30); do [[ -s "$INCOMPLETE_PID_FILE" ]] && break; sleep 0.1; done
+INCOMPLETE_PID=$(cat "$INCOMPLETE_PID_FILE")
+BOOT=$(cat /proc/sys/kernel/random/boot_id)
+cat >"$MARKER" <<JSON
+{"marker":"incomplete-real","boot_id":"$BOOT","started_at_epoch_ms":$(date +%s000),"owner_uid":$(id -u),"sessions":{}}
+JSON
+chmod 600 "$MARKER"
+tmux new-session -d -s "$ALIAS-appsrv" -e ANET_NODE_MARKER=foreign-incomplete-case bash -c 'exec sleep 600'
+(cd "$WORK/project" && anet node stop "$ALIAS" >"$WORK/incomplete.log" 2>&1)
+RC=$?
+[[ "$RC" -ne 0 ]] && ok "incomplete identity proof returns non-zero" || bad "incomplete identity proof returned success"
+[[ -e "$MARKER" ]] && ok "incomplete identity marker is preserved" || bad "incomplete marker was removed"
+kill -0 "$INCOMPLETE_PID" 2>/dev/null && ok "mixed marker pgroup was not partially killed" || bad "incomplete identity killed its mixed group"
+session_alive "$ALIAS-appsrv" && ok "incomplete identity did not authorize same-name kill" || bad "incomplete identity fell through to name kill"
+tmux kill-session -t "=$ALIAS-appsrv" 2>/dev/null || true
+kill -TERM -- "-$INCOMPLETE_PID" 2>/dev/null || true
+wait "$INCOMPLETE_LAUNCH" 2>/dev/null || true
+rm -f "$MARKER"
+
+section "7. ordinary marker-missing node retains legacy stop"
 ORD="test466-ordinary"
 mkdir -p "$WORK/project/.anet/nodes/$ORD"
 cat >"$WORK/project/.anet/nodes/$ORD/config.json" <<JSON
@@ -165,9 +201,9 @@ tmux new-session -d -s "$ORD" bash -c 'exec sleep 600'
 if (cd "$WORK/project" && anet node stop "$ORD" >>"$LOG" 2>&1); then ok "ordinary legacy stop returned success"; else bad "ordinary legacy stop failed"; fi
 session_alive "$ORD" && bad "ordinary marker-missing tmux survived" || ok "ordinary marker-missing tmux still uses legacy cleanup"
 
-section "6. non-vacuous identity mutations"
+section "8. non-vacuous identity mutations"
 if "$TEST_DIR/mutations.sh"; then
-  ok "three identity/name/rescan mutations turn red"
+  ok "four identity/name/rescan/fail-closed mutations turn red"
 else
   bad "one or more identity mutations failed to turn red"
 fi
