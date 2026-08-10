@@ -4,7 +4,7 @@ set -eu
 test "${TEST166_SOURCE_COMMIT:-unknown}" != unknown
 cd /workspace/server
 
-bun test src/task-diagnostic.test.ts
+bun test src/task-diagnostic.test.ts src/task-diagnostic-http.test.ts
 
 cp src/task-diagnostic.ts /tmp/task-diagnostic.orig
 node /workspace/tests/test166-task-diagnostics/mutate.mjs src/task-diagnostic.ts
