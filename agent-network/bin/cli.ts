@@ -32,6 +32,7 @@ import {
   reapMarkerGroups,
   prepareIdentityForStart,
   anchorsFromMarker,
+  markerFilePath as copresenceMarkerFilePath,
   type SessionInfo,
 } from "../src/copresence-identity";
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
@@ -7333,6 +7334,8 @@ Stop a running agent node.
   }
 
   const displayName = nodeDisplayName(resolved.id, resolved.profile);
+  let allowLegacyTmuxNameSweep = true;
+  let identityTeardownKilled = false;
   // #122 — auto-tmux on start needs symmetric cleanup on stop. Kill the
   // tmux session first (idempotent — has-session check guards), then SIGTERM
   // the recorded PID and notify the hub. Order matters: killing tmux kills
@@ -7354,6 +7357,11 @@ Stop a running agent node.
   try {
     const markerResult = readCopresenceMarker(nodesDir(), resolved.id);
     if (markerResult.kind === "ok") {
+      // #466 — once a marker exists, identity owns teardown exclusively.
+      // Falling through to the legacy name sweep would let an unrelated
+      // process race in under the same tmux session name and be killed even
+      // though it does not carry this node's marker.
+      allowLegacyTmuxNameSweep = false;
       const uuid = markerResult.marker.marker;
       console.log(`[anet] copresence node — identity-gated teardown (uuid=${uuid.slice(0, 8)}…)`);
       const enumer = realEnumerator();
@@ -7379,6 +7387,7 @@ Stop a running agent node.
       });
       if (reapResult.kind === "success") {
         removeCopresenceMarker(nodesDir(), resolved.id);
+        identityTeardownKilled = reapResult.killedPgids.length > 0;
         console.log(`[anet] identity teardown OK (killed ${reapResult.killedPgids.length} pgroup(s))`);
       } else {
         console.error(`[anet] ⚠ identity teardown incomplete: ${reapResult.detail}`);
@@ -7388,31 +7397,45 @@ Stop a running agent node.
             console.error(`[anet]    SKIPPED pgid=${s.pgid} — ${s.reason}`);
           }
         }
+        // Fail closed. The marker remains the only trustworthy ownership
+        // handle; neither tmux names nor the pidfile may replace it after an
+        // incomplete identity proof.
+        process.exitCode = 1;
+        return;
       }
     } else if (markerResult.cause !== "MISSING") {
+      allowLegacyTmuxNameSweep = false;
       console.error(`[anet] ⚠ copresence marker present but refused (${markerResult.cause}): ${markerResult.detail}`);
-      console.error(`[anet]    Falling through to legacy tmux-name sweep. Investigate the marker file for corruption.`);
+      console.error(`[anet]    Refusing the legacy tmux-name sweep: identity could not be proven.`);
+      process.exitCode = 1;
+      return;
     }
     // markerResult.cause === "MISSING" is the ordinary-node path: silent
     // fall-through to legacy sweep (zero-diff for every runtime that never
     // ran --copresence).
   } catch (e: any) {
     console.error(`[anet] ⚠ identity gate check crashed: ${e?.message || e}`);
-    console.error(`[anet]    Falling through to legacy tmux-name sweep.`);
+    if (existsSync(copresenceMarkerFilePath(nodesDir(), resolved.id))) {
+      console.error(`[anet]    Marker still exists; refusing the legacy tmux-name sweep.`);
+      process.exitCode = 1;
+      return;
+    }
+    console.error(`[anet]    No marker exists; retaining the ordinary-node legacy stop path.`);
   }
 
-  // RFC-030 P2 — co-presence nodes own three tmux sessions
-  // (`<alias>`, `<alias>-appsrv`, `<alias>-桥`). Sweep all three
-  // unconditionally: has-session guards make the extra kills no-op for
-  // non-copresence nodes, so this stays safe for every runtime.
+  // RFC-030 P2 legacy path — nodes without an identity marker may own three
+  // tmux sessions (`<alias>`, `<alias>-appsrv`, `<alias>-桥`). Sweep those
+  // names only when marker absence proves this is the ordinary legacy path.
+  // A marker-bearing generation was already handled above by exact identity;
+  // name matching after that point would re-open #466's same-name kill race.
   const copresenceSessions = copresenceTmuxSessions(displayName);
-  const tmuxTuiKilled = tmuxSessionRunning(copresenceSessions.tui);
-  const tmuxAppsrvKilled = tmuxSessionRunning(copresenceSessions.appsrv);
-  const tmuxBridgeKilled = tmuxSessionRunning(copresenceSessions.bridge);
+  const tmuxTuiKilled = allowLegacyTmuxNameSweep && tmuxSessionRunning(copresenceSessions.tui);
+  const tmuxAppsrvKilled = allowLegacyTmuxNameSweep && tmuxSessionRunning(copresenceSessions.appsrv);
+  const tmuxBridgeKilled = allowLegacyTmuxNameSweep && tmuxSessionRunning(copresenceSessions.bridge);
   if (tmuxTuiKilled) killTmuxSession(copresenceSessions.tui);
   if (tmuxAppsrvKilled) killTmuxSession(copresenceSessions.appsrv);
   if (tmuxBridgeKilled) killTmuxSession(copresenceSessions.bridge);
-  const tmuxKilled = tmuxTuiKilled || tmuxAppsrvKilled || tmuxBridgeKilled;
+  const tmuxKilled = identityTeardownKilled || tmuxTuiKilled || tmuxAppsrvKilled || tmuxBridgeKilled;
   const stopResult = await stopNode(resolved.id);
   if (stopResult.status === "survived") {
     console.error(`[anet] could not confirm that "${displayName}" exited (pid ${stopResult.pid}); pidfile retained.`);
@@ -7424,6 +7447,7 @@ Stop a running agent node.
   await notifyServerOffline(resolved.profile, resolved.id);
   if (killed || tmuxKilled) {
     const tmuxLabels: string[] = [];
+    if (identityTeardownKilled) tmuxLabels.push("identity");
     if (tmuxTuiKilled) tmuxLabels.push("tui");
     if (tmuxAppsrvKilled) tmuxLabels.push("appsrv");
     if (tmuxBridgeKilled) tmuxLabels.push("bridge");
