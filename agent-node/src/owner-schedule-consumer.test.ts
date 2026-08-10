@@ -18,9 +18,9 @@ function fixture() {
   const tail = " /usr/bin/grok-news --latest";
   const commandHash = createHash("sha256").update(tail).digest("hex");
   let current = [
-    `# ANET-MANAGED-SCHEDULE id=news-pull revision=7 command_sha256=${commandHash}`,
+    `# ANET-MANAGED-SCHEDULE node_id=n_owner_schedule id=news-pull revision=7 command_sha256=${commandHash}`,
     `0 */6 * * *${tail}`,
-    "# ANET-MANAGED-SCHEDULE-END id=news-pull",
+    "# ANET-MANAGED-SCHEDULE-END node_id=n_owner_schedule id=news-pull",
     "",
   ].join("\n");
   let installs = 0;
