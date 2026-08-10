@@ -2,10 +2,10 @@
 
 Date: 2026-08-10
 Base: `0fe8040394276637c60707fdc7fafd362606bc4b`
-Source commit: `032070ff1b15bbe124c54810a0bb881eb62f28ca`
+Source commit: `a6bb605ccc7d8bd196a1edca30424e3068c1b7c1`
 Docker image: `anet-test167:dev`
-Image ID: `sha256:91488a6b49a342e02517ae2b1f2fda3ffca13e26bb33ea70d2a9b5df60525ded`
-Embedded ENV: `TEST679_SOURCE_COMMIT=032070ff1b15bbe124c54810a0bb881eb62f28ca`
+Image ID: `sha256:980404b4247c204517ab16663fbc257d23dabe29c7993c01fa9ad85198d8bcca`
+Embedded ENV: `TEST679_SOURCE_COMMIT=a6bb605ccc7d8bd196a1edca30424e3068c1b7c1`
 
 ## Result
 
@@ -15,7 +15,8 @@ Embedded ENV: `TEST679_SOURCE_COMMIT=032070ff1b15bbe124c54810a0bb881eb62f28ca`
   `mcp_http`, `sdk_mcp_proxy`, and `channel_mcp_proxy`.
 - True-Hub entry denominator: 3/3; 17 wire assertions.
 - Wiring contract: 3 tests, 7 assertions.
-- Existing MCP identity + trace contract: 8 tests, 13 assertions.
+- Existing MCP identity + trace contract: 9 tests, 19 assertions, including
+  exact stable event-name mapping.
 - `agent-node` production bundle: PASS.
 - `agent-network` typecheck, production bundles, declarations, and obfuscation: PASS.
 - Shared formatter drift gate: the two independently published package copies
