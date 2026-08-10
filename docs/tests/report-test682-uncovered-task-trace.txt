@@ -1,0 +1,86 @@
+# test682 — #167 remaining one-shot send_task trace sites
+
+Date: 2026-08-10 (Asia/Shanghai)
+Base: b5350c1db849f9f85ac63f7c51b1013b50ce2e77
+Source commit: 2dc0284c5de4f5fa14c654db67373c92758a91b3
+Docker image: anet-test167-b2:dev
+Docker image ID: sha256:63e5909a2f84e4b839a89b88ba335cd2e04b0313c42c8f5efabda9b75074f879
+Embedded TEST682_SOURCE_COMMIT: 2dc0284c5de4f5fa14c654db67373c92758a91b3
+
+## Scope
+
+This add-only B2 increment instruments the two send_task sites that the #679
+report explicitly left uncovered:
+
+1. agent-node RFC-030 peer reply-as-new-task in sendReply;
+2. public agent-network CommHub/AgentClient send().
+
+Both emit only task.send.start, task.send.delivered, or task.send.failed and
+declare transport=mcp_http plus lifecycle=not_tracked. They do not claim ack,
+started, replied, stale, or expired lifecycle evidence. The RFC-030 path keeps
+its real parent_task_id and network_id. The public client honestly records both
+as missing because its API has neither field.
+
+The send payloads, return objects, thrown error identity, retries, Hub API and
+database behavior are unchanged. A Hub response carrying a canonical task id
+is authoritative delivery evidence even when ok=false/queued=true for an
+offline target; only a rejection without a canonical id is logged failed.
+Trace output contains no task body or credential.
+
+## Witnessed red baseline
+
+Before the production wrappers existed, the wiring suite failed 0 pass / 2
+fail because both named trace call sites were absent. This was run in Docker
+against the pre-change tree; it was not inferred from source shape alone.
+
+## Exact-source Docker result
+
+Command:
+
+    sg docker -c 'docker build --build-arg TEST682_SOURCE_COMMIT=2dc0284c5de4f5fa14c654db67373c92758a91b3 -t anet-test167-b2:dev -f tests/test682-uncovered-task-trace/Dockerfile .'
+    sg docker -c 'docker run --rm anet-test167-b2:dev'
+
+Result: PASS
+
+- Unit/wiring: 9 pass / 0 fail / 28 assertions.
+- True Hub + true SQLite: 2/2 uncovered production entry classes persisted a
+  real task; 16 wire/database assertions.
+- agent-node production build: PASS.
+- agent-network tsc --noEmit + production build: PASS.
+- The two task-trace implementations are byte-identical: PASS.
+
+The true-Hub probe invokes public CommHub.send() for the client path and the
+same peer wrapper wired by cli.ts for RFC-030. It verifies canonical ids,
+persisted tasks, the exact peer parent link, mcp_http, not_tracked, missing
+client parent, and zero credentials. The Hub's real online-success wire shape
+uses message_id as its canonical task id; the probe separately confirms the
+same value is persisted as tasks.task_id.
+
+The existing three #679 entry implementations are byte-unchanged from base:
+`agent-node/src/explicit-task-trace.ts`, the SDK proxy wrapper, and
+`agent-network/src/channel-task-trace.ts` have an empty base-to-source diff.
+
+## Load-bearing mutations
+
+All eleven mutations changed production bytes and made the unchanged tests red:
+
+1. peer wrapper call removed: rc=1;
+2. public client wrapper call removed: rc=1;
+3. peer transport mcp_http changed: rc=1;
+4. client transport mcp_http changed: rc=1;
+5. peer lifecycle not_tracked changed: rc=1;
+6. client lifecycle not_tracked changed: rc=1;
+7. transport exception swallowed instead of rethrown: rc=1;
+8. missing-task-id failure code removed: rc=1;
+9. queued durable task id mislabeled as rejected: rc=1.
+10. peer wrapper changed its return object: rc=1.
+11. public client wrapper changed its return object: rc=1.
+
+Each mutation requires an anchor count of exactly one and a byte-difference
+check before running, preventing a no-op sed false green.
+
+## Honest boundary
+
+This closes only the two known one-shot send sites. It does not fabricate late
+lifecycle observations for them. Hub/Dashboard lifecycle watcher and artifact
+structured events remain separate #167 work.

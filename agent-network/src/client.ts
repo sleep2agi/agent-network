@@ -7,6 +7,7 @@
 
 import { EventEmitter } from "events";
 import { hostname as osHostname } from "os";
+import { sendClientTaskWithTrace } from "./client-task-trace";
 
 // ── Types ──
 
@@ -135,11 +136,14 @@ export class CommHub extends EventEmitter {
 
   /** Send a task to another session */
   async send(targetAlias: string, content: string, priority: "high" | "normal" | "low" = "normal") {
-    return this.call("send_task", {
-      alias: targetAlias,
-      task: content,
-      priority,
-      from_session: this.alias,
+    return sendClientTaskWithTrace({ alias: targetAlias, fromAlias: this.alias }, {
+      log: (line) => console.log(line),
+      send: () => this.call("send_task", {
+        alias: targetAlias,
+        task: content,
+        priority,
+        from_session: this.alias,
+      }),
     });
   }
 

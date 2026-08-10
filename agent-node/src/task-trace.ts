@@ -45,3 +45,74 @@ export function taskTraceEvent(input: Omit<TaskTraceEvent, "event">): TaskTraceE
   };
   return { event: names[input.status], ...input };
 }
+
+export interface SendTaskTraceInput {
+  fromAlias: string;
+  toAlias: string;
+  parentTaskId: string | null;
+  networkId: string | null;
+  transport: TaskTraceTransport;
+  lifecycleTracking: "tracked" | "not_tracked";
+}
+
+export interface SendTaskTraceDependencies {
+  send: () => Promise<any>;
+  log: (line: string) => void;
+  now?: () => number;
+}
+
+function taskIdFromSendResult(result: any): string | null {
+  const direct = result?.task_id || result?.message_id || result?.id;
+  if (direct) return String(direct);
+  const text = result?.content?.[0]?.text;
+  if (typeof text !== "string") return null;
+  try {
+    const parsed = JSON.parse(text);
+    return parsed?.task_id || parsed?.message_id || parsed?.id || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function sendTaskWithTrace(
+  input: SendTaskTraceInput,
+  dependencies: SendTaskTraceDependencies,
+): Promise<any> {
+  const now = dependencies.now ?? Date.now;
+  const startedAt = now();
+  const emit = (status: "sending" | "delivered" | "failed", taskId: string | null, failure?: unknown, errorCode?: string) => {
+    dependencies.log(renderTaskTrace(taskTraceEvent({
+      from_alias: input.fromAlias,
+      to_alias: input.toAlias,
+      task_id: taskId,
+      parent_task_id: input.parentTaskId,
+      network_id: input.networkId,
+      transport: input.transport,
+      status,
+      duration_ms: now() - startedAt,
+      lifecycle_tracking: input.lifecycleTracking,
+      ...(failure !== undefined ? { error_code: errorCode || "send_failed", error_message: safeTaskTraceError(failure) } : {}),
+    })));
+  };
+
+  emit("sending", null);
+  try {
+    const result = await dependencies.send();
+    const taskId = taskIdFromSendResult(result);
+    if (taskId) {
+      // Hub returns ok:false + queued:true for an offline target after the
+      // task has already been durably inserted. A canonical id is therefore
+      // the authoritative delivery receipt; do not mislabel queued work as a
+      // send failure merely because immediate wake-up was unavailable.
+      emit("delivered", taskId);
+    } else if (result?.ok === false || result?.error) {
+      emit("failed", taskId, result?.error || "CommHub rejected task", "send_rejected");
+    } else {
+      emit("failed", null, "CommHub response omitted task_id", "missing_task_id");
+    }
+    return result;
+  } catch (error) {
+    emit("failed", null, error, "send_failed");
+    throw error;
+  }
+}
