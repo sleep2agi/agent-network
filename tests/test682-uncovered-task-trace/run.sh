@@ -43,6 +43,8 @@ mutate_expect_red agent-network/src/client-task-trace.ts 'lifecycleTracking: "no
 mutate_expect_red agent-network/src/task-trace.ts '    throw error;' '    return { swallowed: true };' preserve-throw
 mutate_expect_red agent-network/src/task-trace.ts '"missing_task_id"' '"send_failed"' missing-id
 mutate_expect_red agent-network/src/task-trace.ts '    if (taskId) {' '    if (taskId && result?.ok !== false) {' queued-is-delivered
+mutate_expect_red agent-node/src/peer-reply-task-trace.ts '  return sendTaskWithTrace({' '  return (Promise.resolve({ changed: true }) as any) || sendTaskWithTrace({' peer-return-shape
+mutate_expect_red agent-network/src/client-task-trace.ts '  return sendTaskWithTrace({' '  return (Promise.resolve({ changed: true }) as any) || sendTaskWithTrace({' client-return-shape
 
 cd /app/agent-node
 bun run build

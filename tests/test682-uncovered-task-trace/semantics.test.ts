@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { sendTaskWithTrace } from "/app/agent-network/src/task-trace";
+import { sendClientTaskWithTrace } from "/app/agent-network/src/client-task-trace";
+import { sendPeerReplyTaskWithTrace } from "/app/agent-node/src/peer-reply-task-trace";
 
 const input = {
   fromAlias: "sender",
@@ -11,6 +13,32 @@ const input = {
 };
 
 describe("one-shot task trace semantics", () => {
+  it("preserves the public client response object and exact send invocation", async () => {
+    const result = { ok: true, message_id: "client_shape" };
+    let calls = 0;
+    expect(await sendClientTaskWithTrace({ alias: "target", fromAlias: "sender" }, {
+      log: () => {},
+      send: async () => { calls += 1; return result; },
+    })).toBe(result);
+    expect(calls).toBe(1);
+  });
+
+  it("preserves the peer response object and exact RFC-030 send arguments", async () => {
+    const result = { ok: true, message_id: "peer_shape" };
+    let args: Record<string, unknown> | null = null;
+    expect(await sendPeerReplyTaskWithTrace({
+      alias: "target", task: "reply body", priority: "high", fromAlias: "sender",
+      parentTaskId: "parent_exact", networkId: "network_exact",
+    }, {
+      log: () => {},
+      send: async (value) => { args = value; return result; },
+    })).toBe(result);
+    expect(args).toEqual({
+      alias: "target", task: "reply body", priority: "high",
+      from_session: "sender", parent_task_id: "parent_exact",
+    });
+  });
+
   it("returns a successful MCP envelope unchanged and records its canonical task id", async () => {
     const result = { content: [{ type: "text", text: JSON.stringify({ ok: true, task_id: "task_envelope" }) }] };
     const lines: string[] = [];

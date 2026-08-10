@@ -1,6 +1,8 @@
 import { CommHub } from "/app/agent-network/src/client";
 import { sendPeerReplyTaskWithTrace } from "/app/agent-node/src/peer-reply-task-trace";
 
+process.env.ANET_TASK_TRACE_FORMAT = "json";
+
 const hub = process.env.HUB_BASE || "http://127.0.0.1:9682";
 
 async function json(path: string, init: RequestInit = {}) {
@@ -67,15 +69,22 @@ for (const [name, result, lines] of [
   ["peer", peerResult, peerLines],
 ] as const) {
   if (!(result?.task_id || result?.message_id)) throw new Error(`${name} result lost canonical id: ${JSON.stringify(result)}`);
-  const joined = lines.join("\n");
-  if (!joined.includes("transport=mcp_http")) throw new Error(`${name} transport missing: ${joined}`);
-  if (!joined.includes("lifecycle=not_tracked")) throw new Error(`${name} lifecycle scope missing: ${joined}`);
-  if (!joined.includes("sending") || !joined.includes("delivered")) throw new Error(`${name} send trace incomplete: ${joined}`);
-  if (/\b(replied|delivered_stale)\b/.test(joined)) throw new Error(`${name} fabricated lifecycle: ${joined}`);
+  const events = lines.filter((line) => line.startsWith("{")).map((line) => JSON.parse(line));
+  if (events.length !== 2) throw new Error(`${name} expected exactly start+delivery: ${lines.join("\n")}`);
+  if (events.some((event) => event.transport !== "mcp_http")) throw new Error(`${name} transport missing: ${JSON.stringify(events)}`);
+  if (events.some((event) => event.lifecycle_tracking !== "not_tracked")) throw new Error(`${name} lifecycle scope missing: ${JSON.stringify(events)}`);
+  if (events.map((event) => event.status).join(",") !== "sending,delivered") throw new Error(`${name} send trace incomplete: ${JSON.stringify(events)}`);
+  if (events.some((event) => ["acked", "started", "replied", "expired"].includes(event.status) || String(event.event).includes("stale"))) {
+    throw new Error(`${name} fabricated lifecycle: ${JSON.stringify(events)}`);
+  }
 }
-if (!clientLines.join("\n").includes("parent_task_id=<missing>")) throw new Error("client missing parent was hidden");
-if (!peerLines.join("\n").includes(`parent_task_id=${parentTaskId}`)) throw new Error("peer parent task was lost");
-if (/ntok_|utok_|Bearer\s/.test([...clientLines, ...peerLines].join("\n"))) throw new Error("trace leaked credentials");
+const clientEvents = clientLines.filter((line) => line.startsWith("{")).map((line) => JSON.parse(line));
+const peerEvents = peerLines.map((line) => JSON.parse(line));
+if (clientEvents.some((event) => event.parent_task_id !== null || event.network_id !== null)) throw new Error("client missing scope was hidden or fabricated");
+if (peerEvents.some((event) => event.parent_task_id !== parentTaskId || event.network_id !== networkId)) throw new Error("peer parent/network scope was lost");
+const allTrace = [...clientLines, ...peerLines].join("\n");
+if (/ntok_|utok_|Bearer\s/.test(allTrace)) throw new Error("trace leaked credentials");
+if (allTrace.includes("client true hub") || allTrace.includes("peer true hub")) throw new Error("trace leaked task content");
 
 const tasks = await json(`/api/tasks?network_id=${encodeURIComponent(networkId)}`, { headers: { Authorization: `Bearer ${utok}` } });
 const rows = tasks.tasks || tasks || [];
