@@ -1,9 +1,33 @@
-import { resolve } from "node:path";
+import { extname, resolve } from "node:path";
 
 const PATH_PROMPT_RUNTIME_SET = new Set([
   "codex-app-server",
   "opencode",
 ]);
+const READABLE_EXTENSION_SET = new Set([
+  ".bmp", ".csv", ".docx", ".gif", ".jpeg", ".jpg", ".json",
+  ".md", ".pdf", ".png", ".txt", ".webp",
+]);
+const READABLE_MIME_SET = new Set([
+  "application/json",
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "image/bmp",
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "text/csv",
+  "text/markdown",
+  "text/plain",
+]);
+
+function isAllowlistedReadableAttachment(attachment: { name?: unknown; mime?: unknown }): boolean {
+  const mime = typeof attachment.mime === "string" ? attachment.mime.toLowerCase() : "";
+  if (READABLE_MIME_SET.has(mime)) return true;
+  const extension = typeof attachment.name === "string" ? extname(attachment.name).toLowerCase() : "";
+  return READABLE_EXTENSION_SET.has(extension);
+}
 
 /**
  * Runtime buckets whose current adapter does not carry `images[]` as native
@@ -27,13 +51,15 @@ export function attachmentDescriptorsForRuntime<T extends {
   path?: unknown;
   type?: unknown;
   mime?: unknown;
+  name?: unknown;
 }>(
   runtime: string,
   attachments: readonly T[],
 ): T[] {
   if (runtimeNeedsReadableAttachmentPrompt(runtime)) {
     return attachments.filter((attachment) =>
-      typeof attachment.file_id === "string" && attachment.file_id.length > 0);
+      typeof attachment.file_id === "string" && attachment.file_id.length > 0
+      && isAllowlistedReadableAttachment(attachment));
   }
   return attachments.filter((attachment) =>
     (attachment.type === "image" || String(attachment.mime || "").startsWith("image/"))

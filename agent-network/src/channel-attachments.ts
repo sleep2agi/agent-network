@@ -12,6 +12,23 @@ import { extname, join } from "node:path";
 
 const FILE_ID = /^[A-Za-z0-9_-]{8,64}$/;
 const DEFAULT_MAX_BYTES = 50 * 1024 * 1024;
+const READABLE_EXTENSION_SET = new Set([
+  ".bmp", ".csv", ".docx", ".gif", ".jpeg", ".jpg", ".json",
+  ".md", ".pdf", ".png", ".txt", ".webp",
+]);
+const READABLE_MIME_EXTENSION: Readonly<Record<string, string>> = {
+  "application/json": ".json",
+  "application/pdf": ".pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+  "image/bmp": ".bmp",
+  "image/gif": ".gif",
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "image/webp": ".webp",
+  "text/csv": ".csv",
+  "text/markdown": ".md",
+  "text/plain": ".txt",
+};
 
 interface AttachmentDescriptor {
   type?: unknown;
@@ -46,7 +63,8 @@ export function readableAttachmentsFromInbox(message: any): AttachmentDescriptor
   if (!Array.isArray(attachments)) return [];
   return attachments.filter((attachment: AttachmentDescriptor) =>
     attachment && typeof attachment === "object"
-    && (typeof attachment.file_id === "string" || typeof attachment.path === "string"));
+    && (typeof attachment.file_id === "string" || typeof attachment.path === "string")
+    && extensionFor(attachment) !== null);
 }
 
 export function channelAttachmentCacheDir(home: string, alias: string): string {
@@ -54,25 +72,13 @@ export function channelAttachmentCacheDir(home: string, alias: string): string {
   return join(home, ".anet", "cache", "attachments", "channel", ownerKey);
 }
 
-function extensionFor(attachment: AttachmentDescriptor): string {
+function extensionFor(attachment: AttachmentDescriptor): string | null {
   if (typeof attachment.name === "string") {
-    const ext = extname(attachment.name);
-    if (/^\.[A-Za-z0-9]{1,8}$/.test(ext)) return ext.toLowerCase();
+    const extension = extname(attachment.name).toLowerCase();
+    if (READABLE_EXTENSION_SET.has(extension)) return extension;
   }
   const mime = typeof attachment.mime === "string" ? attachment.mime.toLowerCase() : "";
-  const byMime: Record<string, string> = {
-    "image/png": ".png",
-    "image/jpeg": ".jpg",
-    "image/gif": ".gif",
-    "image/webp": ".webp",
-    "image/bmp": ".bmp",
-    "application/pdf": ".pdf",
-    "text/plain": ".txt",
-    "text/csv": ".csv",
-    "application/json": ".json",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
-  };
-  return byMime[mime] || "";
+  return READABLE_MIME_EXTENSION[mime] ?? null;
 }
 
 function existingRegularFile(path: string, expectedSize?: number): boolean {
@@ -108,7 +114,11 @@ async function fetchOne(
     && attachment.size >= 0
     ? attachment.size
     : undefined;
-  const path = join(deps.cacheDir, `${fileId}${extensionFor(attachment)}`);
+  const extension = extensionFor(attachment);
+  if (extension === null) {
+    return { ok: false, code: "unsupported_type", message: "attachment type is not in the readable allowlist" };
+  }
+  const path = join(deps.cacheDir, `${fileId}${extension}`);
   if (existingRegularFile(path, expectedSize)) return { ok: true, path };
 
   const controller = new AbortController();
@@ -198,7 +208,7 @@ export async function downloadChannelAttachments(
 
 // Compatibility for callers compiled against the image-only implementation.
 // The channel is Read-capable, so the implementation now accepts any
-// authenticated file_id while retaining the old exported name.
+// allowlisted, authenticated file_id while retaining the old exported name.
 export const downloadChannelImageAttachments = downloadChannelAttachments;
 
 export function appendChannelAttachmentPaths(content: string, paths: readonly string[]): string {

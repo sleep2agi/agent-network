@@ -66,8 +66,8 @@ expect_red \
 expect_red \
   path-runtime-restores-image-only-filter \
   agent-node/src/runtime/readable-attachment-prompt.ts \
-  $'    return attachments.filter((attachment) =>\n      typeof attachment.file_id === "string" && attachment.file_id.length > 0);' \
-  $'    return attachments.filter((attachment) =>\n      (attachment.type === "image" || String(attachment.mime || "").startsWith("image/"))\n      && typeof attachment.file_id === "string" && attachment.file_id.length > 0);' \
+  $'    return attachments.filter((attachment) =>\n      typeof attachment.file_id === "string" && attachment.file_id.length > 0\n      && isAllowlistedReadableAttachment(attachment));' \
+  $'    return attachments.filter((attachment) =>\n      (attachment.type === "image" || String(attachment.mime || "").startsWith("image/"))\n      && typeof attachment.file_id === "string" && attachment.file_id.length > 0\n      && isAllowlistedReadableAttachment(attachment));' \
   'cd /workspace/agent-node && bun test src/runtime/readable-attachment-prompt.test.ts'
 
 expect_red \
@@ -77,6 +77,27 @@ expect_red \
   '  return [...attachments];' \
   'cd /workspace/agent-node && bun test src/runtime/readable-attachment-prompt.test.ts'
 
-[[ $MUTATIONS -eq 3 ]] || { echo "mutation denominator mismatch: $MUTATIONS/3" >&2; exit 1; }
+expect_red \
+  channel-extension-allowlist-weakened \
+  agent-network/src/channel-attachments.ts \
+  '    if (READABLE_EXTENSION_SET.has(extension)) return extension;' \
+  '    if (extension.length > 0) return extension;' \
+  'cd /workspace/agent-network && bun test src/channel-attachments.test.ts'
+
+expect_red \
+  runtime-extension-allowlist-weakened \
+  agent-node/src/runtime/readable-attachment-prompt.ts \
+  '  return READABLE_EXTENSION_SET.has(extension);' \
+  '  return extension.length > 0;' \
+  'cd /workspace/agent-node && bun test src/runtime/readable-attachment-prompt.test.ts'
+
+expect_red \
+  sender-path-enters-read-prompt \
+  agent-node/src/runtime/readable-attachment-prompt.ts \
+  '      typeof attachment.file_id === "string" && attachment.file_id.length > 0' \
+  '      (typeof attachment.file_id === "string" || typeof attachment.path === "string")' \
+  'cd /workspace/agent-node && bun test src/runtime/readable-attachment-prompt.test.ts'
+
+[[ $MUTATIONS -eq 6 ]] || { echo "mutation denominator mismatch: $MUTATIONS/6" >&2; exit 1; }
 echo "MUTATION RESULT: PASS=$MUTATIONS FAIL=0"
 echo "RESULT: PASS"

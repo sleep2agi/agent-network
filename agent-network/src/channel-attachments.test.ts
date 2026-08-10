@@ -6,6 +6,7 @@ import {
   appendChannelAttachmentPaths,
   channelAttachmentCacheDir,
   downloadChannelImageAttachments,
+  readableAttachmentsFromInbox,
 } from "./channel-attachments";
 
 const roots: string[] = [];
@@ -14,6 +15,25 @@ afterEach(() => {
 });
 
 describe("Claude channel attachments", () => {
+  test("pins the readable extension allowlist as an exact value set", () => {
+    const allowed = [
+      ".bmp", ".csv", ".docx", ".gif", ".jpeg", ".jpg", ".json",
+      ".md", ".pdf", ".png", ".txt", ".webp",
+    ];
+    const attachments = [
+      ...allowed.map((extension, index) => ({
+        type: "file",
+        file_id: `file_allowed_${index}`,
+        name: `attachment${extension}`,
+        mime: "application/octet-stream",
+      })),
+      { type: "file", file_id: "file_near_pdfx", name: "attachment.pdfx", mime: "application/octet-stream" },
+      { type: "file", file_id: "file_near_exe", name: "attachment.txt.exe", mime: "application/octet-stream" },
+    ];
+    expect(readableAttachmentsFromInbox({ meta: { attachments } }))
+      .toEqual(attachments.slice(0, allowed.length));
+  });
+
   test("cache roots are alias-isolated even for path-shaped aliases", () => {
     const root = "/tmp/channel-cache-root";
     const first = channelAttachmentCacheDir(root, "owner-a");
@@ -75,6 +95,20 @@ describe("Claude channel attachments", () => {
     expect(result.paths[0]).toEndWith(".pdf");
     expect([...readFileSync(result.paths[0]!)]).toEqual([...pdf]);
     expect(statSync(result.paths[0]!).mode & 0o777).toBe(0o600);
+  });
+
+  test("does not fetch or inject a non-allowlisted file type", async () => {
+    let fetches = 0;
+    const result = await downloadChannelImageAttachments({
+      meta: { attachments: [{ type: "file", file_id: "file_exe_365", name: "payload.exe", mime: "application/octet-stream" }] },
+    }, {
+      hubUrl: "http://hub.invalid",
+      authToken: "ntok_test",
+      cacheDir: "/tmp/test365-unsupported",
+      fetch: (async () => { fetches++; return new Response("bad"); }) as typeof fetch,
+    });
+    expect(fetches).toBe(0);
+    expect(result.paths).toEqual([]);
   });
 
   test("download failure preserves the original text and exposes no token", async () => {
