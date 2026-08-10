@@ -1,0 +1,67 @@
+# #520 agent-node per-runtime evidence — Docker report
+
+Date: 2026-08-10
+Base: 3cebc82e8465bcb9475dd38df54529e96449de19
+Source commit: 0013abd50d0ed61cfb8db72e9f0051c5c668fb46
+Branch: feat/520-runtime-consumption
+Image: anet-test520-runtime:dev
+Image ID: sha256:07cee82825dcf3293d352df870c168b04b2dbec020c67a33173731175b13f585
+Embedded TEST520_SOURCE_COMMIT: 0013abd50d0ed61cfb8db72e9f0051c5c668fb46
+Runner artifact SHA256: 2b3579056149f2c5e59a5dcd8af8f4312a0b322edd12267dfc8fb3a0066783eb
+
+## Result
+
+PASS.
+
+- Production `agent-node` bundle: PASS (260 modules, 1.12 MB bundle).
+- Serial runtime tests: 128 pass / 0 fail / 683 assertions.
+- Isolated Grok copresence evidence case: 1 pass / 0 fail / 5 assertions.
+- Total: 129 pass / 0 fail / 688 assertions.
+- Witnessed-red mutations: 11 / 11.
+
+## Semantics verified
+
+- Queue/FIFO admission and inbox ACK do not report runtime evidence.
+- `runtime_submitted_at` is reported only after an exact runtime adapter
+  accepts the task body for submission.
+- `consumed_at` is reported only from an exact turn-start or attributable
+  runtime event. A runtime without such an identity signal leaves it NULL.
+- Direct Codex stdio is intentionally submitted-only: the #587 race proved
+  its `turn/start` response turn ID is not authoritative ownership evidence.
+- Retry/reassign uses stable `inbox.task_id`; ACK remains bound to the exact
+  transport `inbox.id` row.
+- Evidence is task-lifetime monotonic and one-shot across a transient retry.
+- Old-Hub/reporting failures are visible but do not repeat the model turn.
+
+Runtime coverage: Claude Agent SDK, Codex SDK, direct Codex stdio,
+Codex app-server, OpenCode ACP, OpenCode copresence, Grok ACP, Grok CLI,
+and Grok copresence.
+
+## Mutation matrix
+
+Each mutation changed source bytes and made its targeted test fail:
+
+1. stable logical task ID -> transport inbox ID
+2. reporter dispatch removed
+3. Codex app-server exact consumed callback removed
+4. Grok copresence trusted consumed callback removed
+5. OpenCode ACP consumed callback removed
+6. Grok ACP consumed callback removed
+7. Grok CLI first-event consumed callback removed
+8. OpenCode copresence attributable-response callback removed
+9. Claude SDK first-event callback removed
+10. Codex SDK first-event callback removed
+11. direct Codex stdio submission callback removed
+
+## Controlled harness findings
+
+Two pre-commit harness failures were not counted as product evidence:
+
+- Running the whole Grok copresence file beside the other runtime files caused
+  its existing process-wide project-lock fixtures to cascade. The new case was
+  therefore run alone, preserving the real production runtime.
+- The first Docker image omitted the cross-tree
+  `agent-network/src/grok-attach-client.ts` test dependency. The image was
+  corrected to copy that source file; production code was unchanged.
+
+No Hub, Dashboard, production runtime, npm package, or deployment was changed.
