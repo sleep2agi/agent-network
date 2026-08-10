@@ -1,0 +1,41 @@
+# test690 — scheduled run terminal lifecycle
+
+Date: 2026-08-10
+Issue: https://github.com/sleep2agi/agent-network/issues/690
+Source commit: d63da5a272742228eaf01f610204c1eac081b1a1
+Base lineage: bf962ae0d7b2230e3656bdd38b2abea24dc4b27f + origin/main 065a550fa7a604fc45606bafbff34203de594341
+Image: anet-test690:dev
+Image ID: sha256:a9f9189112e0477c6e95af41c3ce680442f69f4ad9e00a5360494a3a81b96b44
+Embedded ENV: TEST690_SOURCE_COMMIT=d63da5a272742228eaf01f610204c1eac081b1a1
+Runner artifact SHA256: ef3d8b0c95ae3fc2f2251bad6bd72509a11ad85a8c599262c5d21971fdfb44fc
+
+Command:
+
+    sg docker -c 'docker build -t anet-test690:dev --build-arg SOURCE_COMMIT=d63da5a272742228eaf01f610204c1eac081b1a1 -f tests/test690-scheduled-run-terminal/Dockerfile .'
+    sg docker -c 'docker run --rm -v /tmp/test690-artifacts:/artifacts anet-test690:dev'
+
+Result: PASS
+
+Layers:
+
+- L0: Bun production bundle succeeds (262 modules, 1.59 MB).
+- L1: real SQLite lifecycle suite: 9 pass / 0 fail / 28 assertions.
+- L1b: existing scheduler regression matrix: 12 pass / 0 fail / 106 assertions.
+- L2: disabling `syncScheduledRunForTask` turns the lifecycle suite red (rc=1).
+- L3: removing the exact task_id binding from lookup + CAS turns the forged-binding test red (rc=1).
+- L4: removing the exact network_id binding from lookup + CAS turns the foreign-network test red (rc=1).
+- L5: restored source returns to 9 pass / 0 fail / 28 assertions.
+
+Behavior proved:
+
+1. Successful dispatch leaves `scheduled_task_runs.completed_at=NULL`; dispatch is not reported as completion.
+2. `send_reply`, `report_completion`, cancel, expiry patrol and child-to-parent auto-chain mirror the task's actual terminal status into the exact run.
+3. The task terminal write and run terminal write share one SQLite transaction. An injected trigger failure on the run update rolls back the task update and reply inbox insert too.
+4. `retry_task` reuses the logical task_id and deliberately reopens the same run as `delivered,completed_at=NULL`; the retry's final outcome closes it again. Reassign remains non-terminal and does not change the binding.
+5. Matching is fail-closed and exact on run_id + schedule_id + task_id + network_id. Forged task metadata, another task_id, another network, or ambiguous duplicate bindings cannot close a run.
+6. Reply attachment metadata may replace task meta_json without breaking the run lifecycle because the authoritative binding is read from `scheduled_task_runs`, not caller-controlled metadata.
+7. Existing scheduler DST, misfire, multi-process claim, non-overlap, edit CAS, tenant isolation and run-history tests remain green.
+
+Pre-fix witnessed red (same Docker suite before production changes): 1 pass / 5 fail. Dispatch had a non-null completed_at and reply/cancel/report_completion/child-chain all left runs at `delivered`.
+
+No production deployment, merge, npm publish or global install was performed by this test.

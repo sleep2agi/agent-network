@@ -22,7 +22,7 @@
 
 `scheduled_tasks` 是计划真相：network、创建人、稳定目标、任务正文、计划规格、状态、next/last time 与 optimistic `revision`。
 
-`scheduled_task_runs` 是每个 occurrence 的不可混淆记录。`UNIQUE(schedule_id, scheduled_for)` 是多 Hub 进程竞争时的幂等 claim。run 只引用普通 `task_id`，不复制 task lifecycle。
+`scheduled_task_runs` 是每个 occurrence 的不可混淆记录。`UNIQUE(schedule_id, scheduled_for)` 是多 Hub 进程竞争时的幂等 claim。run 通过 `run_id + task_id + network_id + schedule_id` 精确绑定普通 task；它不是第二套 lifecycle 真相源，但会投影该 task 的当前终态，供运行历史直接判断真实成功、失败、取消或过期。
 
 历史取消不物理删除：计划标记 `cancelled`，run history 保留。
 
@@ -37,6 +37,9 @@
 7. `misfire_policy=skip` 在超过 60 秒宽限窗口后不创建 `task`/`inbox`，只写一条 `status=skipped,error_code=misfire_skipped` 的可审计 run，再推进到下一次未来 occurrence。60 秒以内仍按正常调度处理，避免把 scheduler tick 抖动误判为停机错过。
 8. 单次计划无论成功投递、按策略跳过或因目标失效而失败，均进入 `completed`，不永久自旋。
 9. 目标处于 stop/delete lifecycle 时 fail closed，run 记录失败；普通 offline 仍排队。
+10. `inbox`/`tasks` 持久化成功只代表派发：run 的 `completed_at` 必须保持 `NULL`。仅当精确绑定的 task 进入 `replied/failed/cancelled/expired` 时，才在同一 transaction 写入 run 的终态和 `completed_at`。
+11. `retry_task` 复用原 logical `task_id`，因此会把同一 run 重新打开为 `delivered, completed_at=NULL`；重试后的新终态再关闭该 run。`reassign_task` 只允许非终态 task，保持 run 开放且不换绑定。
+12. agent 子任务的结果通过 parent chain 回终 scheduler task 时，parent task 与 run 的终态必须同事务提交；不能把“子任务已回复、父 run 仍 delivered”当作完成。
 
 SQLite transaction 是当前生产原子边界。仓库现有 PostgreSQL adapter 已明确不提供真实跨语句 transaction；`startHub()` 会在监听前 fail closed，直到该 adapter 修复，不得把 PostgreSQL 宣称为 scheduler 的 production-safe 后端。
 
