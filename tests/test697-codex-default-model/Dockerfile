@@ -4,6 +4,7 @@ WORKDIR /workspace
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends curl jq ripgrep \
+  && command -v script >/dev/null \
   && rm -rf /var/lib/apt/lists/*
 
 COPY server/package.json server/bun.lock* ./server/

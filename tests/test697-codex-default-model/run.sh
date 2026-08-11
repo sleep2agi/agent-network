@@ -125,16 +125,43 @@ set -e
 grep -Fq 'model:   gpt-5.6-sol (default)' <<<"$DEFAULT_START"
 grep -Fq 'model:   operator-custom-model' <<<"$CUSTOM_START"
 
-echo "L7 actual interactive picker ordering selects the supported default"
+echo "L7 real PTY drives production inquirer and Enter selects the supported default"
+PTY_PROBE_SEQ=0
 probe_picker_default() {
-  local output
-  output=$(ANET_INTERNAL_PROBE_CODEX_PICKER_DEFAULT=1 \
-    HOME="$HOME_DIR" bun run "$ROOT/agent-network/bin/cli.ts")
-  jq -e '
-    .vendorKey == "codex" and
-    .runtime == "codex-sdk" and
-    .model == "gpt-5.6-sol"
-  ' <<<"$output" >/dev/null
+  PTY_PROBE_SEQ=$((PTY_PROBE_SEQ + 1))
+  local name="pty-codex-$PTY_PROBE_SEQ"
+  local transcript="/tmp/test697-pty-$PTY_PROBE_SEQ.typescript"
+  local stdout="/tmp/test697-pty-$PTY_PROBE_SEQ.stdout"
+  local command
+  command="cd '$PROJECT_DIR' && HOME='$HOME_DIR' PATH='$FAKE_BIN:$PATH' bun run '$ROOT/agent-network/bin/cli.ts' node create '$name' --runtime claude-agent-sdk"
+  # The vendor picker begins on Intern. Five Down keys select Codex; the
+  # first Enter accepts that visible vendor row and the second Enter accepts
+  # the model row that production inquirer actually preselects.
+  local rc=0
+  {
+    sleep 0.5
+    printf '\033[B\033[B\033[B\033[B\033[B\r'
+    sleep 0.5
+    printf '\r'
+  } | timeout 20 script -qfec "$command" "$transcript" >"$stdout" 2>&1 || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    echo "PTY_PICKER_FAILED rc=$rc"
+    cat "$stdout"
+    cat "$transcript" 2>/dev/null || true
+    return 1
+  fi
+  local cfg="$PROJECT_DIR/.anet/nodes/$name/config.json"
+  if ! jq -e '.runtime == "codex-sdk" and .model == "gpt-5.6-sol"' "$cfg" >/dev/null; then
+    echo "PTY_PICKER_WRONG_CONFIG"
+    cat "$cfg" 2>/dev/null || true
+    cat "$transcript" 2>/dev/null || true
+    return 1
+  fi
+  if ! grep -Fq 'Codex / GPT' "$transcript" || ! grep -Fq 'gpt-5.6-sol' "$transcript"; then
+    echo "PTY_PICKER_TRANSCRIPT_MISSING_SELECTION"
+    cat "$transcript" 2>/dev/null || true
+    return 1
+  fi
 }
 probe_picker_default
 
@@ -215,6 +242,14 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
     "$ROOT/agent-network/bin/cli.ts" \
     '(b.default ? 1 : 0) - (a.default ? 1 : 0)' \
     '(a.default ? 1 : 0) - (b.default ? 1 : 0)' probe_picker_default
+  run_mutation picker-display-order-reversed L7 \
+    "$ROOT/agent-network/bin/cli.ts" \
+    'choices: choices.map((choice) => ({' \
+    'choices: [...choices].reverse().map((choice) => ({' probe_picker_default
+  run_mutation picker-vendor-value-miswired L7 \
+    "$ROOT/agent-network/bin/cli.ts" \
+    'choices: VENDORS.map(v => ({ value: v.key, name: v.label }))' \
+    'choices: VENDORS.map(v => ({ value: v.runtime, name: v.label }))' probe_picker_default
   run_mutation explicit-model-overwritten L5 \
     "$ROOT/agent-network/bin/cli.ts" \
     '...(opts.model || defaultModel ? { model: opts.model || defaultModel } : {}),' \
