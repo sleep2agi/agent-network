@@ -1391,6 +1391,13 @@ async function sendReply(
           send: (legacyArgs) => callCommHub("send_task", legacyArgs),
         });
       },
+      sendLegacyReply: (args) => callCommHub("send_reply", {
+        alias: args.target,
+        text: args.text,
+        from_session: args.fromAlias,
+        in_reply_to: args.taskId,
+        status: args.failed ? "failed" : "replied",
+      }),
     }, peerReplyCapabilityCache)
     : { route: "atomic" as const, payload: await callCommHub("send_reply", {
       alias: target,

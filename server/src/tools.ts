@@ -1580,7 +1580,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
               return { ok: false as const, error: "reply_target_mismatch" as const };
             }
             if (!taskBefore.from_node_id) {
-              return { ok: false as const, error: "peer_reply_unsupported" as const };
+              // Dashboard/human/hub/scheduler origins have no immutable node
+              // identity. They are not peer agents and therefore must fall
+              // back to the established send_reply terminalization path,
+              // never to send_task(alias), which cannot address a user.
+              return { ok: false as const, error: "peer_reply_origin_not_node" as const };
             }
             const recipient = db.get<{ peer_reply_inbox_capable: number }>(
               `SELECT peer_reply_inbox_capable FROM sessions
@@ -1651,6 +1655,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           reply_task_terminal: `cannot apply reply: task is already terminal (${taskStatus})`,
           peer_reply_node_token_required: "atomic peer reply requires a node token",
           peer_reply_unsupported: "recipient or caller does not support atomic peer replies",
+          peer_reply_origin_not_node: "original task sender is not a node; use send_reply",
           reply_node_identity_unbound: "cannot apply reply: node identity is not token-bound",
           reply_task_not_owned: "cannot apply reply: task is not owned by this node",
           reply_target_mismatch: "cannot apply reply: target is not the original task sender",

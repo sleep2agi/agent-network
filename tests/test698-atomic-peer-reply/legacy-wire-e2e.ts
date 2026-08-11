@@ -77,6 +77,9 @@ const result = await sendPeerReplyCompatible({
     fallbackReason = args.fallbackReason || "";
     return { task_id: "legacy_fallback_once" };
   },
+  sendLegacyReply: async () => {
+    throw new Error("old Hub node-to-node fallback must not use send_reply");
+  },
 });
 
 if (result.route !== "legacy" || atomicCalls !== 1 || legacyCalls !== 1) {

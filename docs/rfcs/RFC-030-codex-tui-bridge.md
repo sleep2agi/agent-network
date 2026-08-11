@@ -937,6 +937,13 @@ token 重新绑定造成 `reply_task_not_owned` / `peer_reply_node_token_require
 自报 node_id 或历史 node 快照都不能冒充。旧 sender 若仍调用 `send_reply` 给
 agent target，Hub 保留 #498 warning，Dashboard 的 hub/api 回复不带该提示。
 
+Dashboard、人类用户、`hub/api` 与 scheduler 发起的 task 没有 `from_node_id`，
+不属于 peer-agent 协议。Hub 对这类原任务返回独立的
+`peer_reply_origin_not_node` 零写信号；sender 必须回退到原有 `send_reply`，
+从而终结原 task 并向 Dashboard 推送 `new_reply`。不得把它们降级为
+`send_task(alias)`：用户 alias 没有 agent session，这会造成 `alias_not_found`、
+本地 pending reply 被丢弃且原 task 永久停在 running。
+
 部署必须 recipient-first：先升级 Hub，再升级接收 reply 的普通节点，确认它们的
 当前 session heartbeat 明确声明能力且 SSE 在线，最后才升级
 `codex-app-server` sender。任一阶段观测到 legacy fallback 增长，应停止扩面；

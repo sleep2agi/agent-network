@@ -166,13 +166,63 @@ try {
     "SELECT status FROM sessions WHERE alias=?1 AND network_id=?2",
   ).get("receiver", networkId)?.status === "idle", "receiver session");
 
+  // A Dashboard/user-originated task has no from_node_id. The production
+  // sender must fall back to send_reply (not send_task to the user alias),
+  // terminalize the original, and deliver exactly one Dashboard reply.
+  const dashboardDispatch = await mcp(userToken, "send_task", {
+    alias: "receiver",
+    task: "dashboard request requiring a terminal reply",
+    from_session: "admin",
+    network_id: networkId,
+  });
+  const dashboardTask = dashboardDispatch.task_id || dashboardDispatch.message_id;
+  const dashboardOrigin = direct.query<{ from_node_id: string | null }, [string]>(
+    "SELECT from_node_id FROM tasks WHERE task_id=?1",
+  ).get(dashboardTask);
+  if (!dashboardOrigin || dashboardOrigin.from_node_id !== null) {
+    throw new Error(`Dashboard fixture unexpectedly has node identity: ${JSON.stringify(dashboardOrigin)}`);
+  }
+  await waitFor(() => direct.query<{ status: string }, [string]>(
+    "SELECT status FROM tasks WHERE task_id=?1",
+  ).get(dashboardTask)?.status === "replied", "Dashboard task terminalization", 300);
+  const dashboardReplies = direct.query<{ n: number }, [string]>(
+    "SELECT COUNT(*) AS n FROM inbox WHERE in_reply_to=?1 AND type='reply' AND session_name='admin'",
+  ).get(dashboardTask)?.n;
+  const dashboardChildren = direct.query<{ n: number }, [string]>(
+    "SELECT COUNT(*) AS n FROM tasks WHERE parent_task_id=?1",
+  ).get(dashboardTask)?.n;
+  if (dashboardReplies !== 1 || dashboardChildren !== 0) {
+    throw new Error(`Dashboard reply misrouted replies=${dashboardReplies} children=${dashboardChildren}`);
+  }
+
+  // Force the actual cli.ts legacy-node path and inspect the production meta,
+  // rather than round-tripping a test-authored literal.
+  const legacyOriginTask = await mcp(dispatcher.token, "send_task", {
+    alias: "receiver", task: "legacy recipient marker probe", from_session: "dispatcher",
+  });
+  const legacyOriginTaskId = legacyOriginTask.task_id || legacyOriginTask.message_id;
+  await waitFor(() => (direct.query<{ n: number }, [string]>(
+    "SELECT COUNT(*) AS n FROM tasks WHERE parent_task_id=?1",
+  ).get(legacyOriginTaskId)?.n ?? 0) === 1, "production legacy fallback task", 300);
+  const legacyMeta = direct.query<{ meta_json: string | null }, [string]>(
+    "SELECT meta_json FROM tasks WHERE parent_task_id=?1",
+  ).get(legacyOriginTaskId)?.meta_json;
+  const parsedLegacyMeta = legacyMeta ? JSON.parse(legacyMeta) : null;
+  if (parsedLegacyMeta?.peer_reply_legacy_fallback !== true
+      || parsedLegacyMeta?.peer_reply_fallback_reason !== "recipient_unsupported") {
+    throw new Error(`production fallback marker missing: ${legacyMeta}`);
+  }
+
+  const sendReplyCountBeforeTerminal = ((await Bun.file(`${work}/server.log`).text())
+    .match(/receiver → send_reply/g) || []).length;
+
   const outbound = await mcp(receiver.token, "send_task", {
     alias: "dispatcher", task: "request whose result wakes receiver", from_session: "receiver",
   });
   const liveTaskId = outbound.task_id || outbound.message_id;
   const reply = await mcp(dispatcher.token, "send_reply", {
     alias: "receiver",
-    text: "live terminal result",
+    text: "done",
     in_reply_to: liveTaskId,
     status: "replied",
     from_session: "dispatcher",
@@ -180,11 +230,17 @@ try {
   const liveInboxId = reply.message_id;
   await waitFor(() => direct.query<{ acked: number }, [string]>("SELECT acked FROM inbox WHERE id=?1").get(liveInboxId)?.acked === 1, "new_reply SSE ACK", 60);
 
+  await waitFor(async () => {
+    const file = Bun.file(`${work}/sdk-capture.json`);
+    if (!(await file.exists())) return false;
+    const capture = await file.json().catch(() => null);
+    return capture?.kind === "string" && String(capture?.textPreview || "").includes("done");
+  }, "live terminal reply reaches runtime", 60);
   const capture = await Bun.file(`${work}/sdk-capture.json`).json();
-  if (capture?.kind !== "string") throw new Error(`reply did not reach runtime: ${JSON.stringify(capture)}`);
   await Bun.sleep(100);
   const hubLog = await Bun.file(`${work}/server.log`).text();
-  if (hubLog.includes("receiver → send_reply")) {
+  const sendReplyCountAfterTerminal = (hubLog.match(/receiver → send_reply/g) || []).length;
+  if (sendReplyCountAfterTerminal !== sendReplyCountBeforeTerminal) {
     throw new Error("terminal reply triggered an outbound send_reply from the real cli.ts path");
   }
   console.log("CLI_WIRING_E2E_PASS startup_reply=no_egress new_reply=runtime+ack");

@@ -12,6 +12,7 @@ export interface PeerReplySendArgs {
 export interface PeerReplySendDeps {
   sendAtomic: (args: PeerReplySendArgs) => Promise<any>;
   sendLegacy: (args: PeerReplySendArgs) => Promise<any>;
+  sendLegacyReply: (args: PeerReplySendArgs) => Promise<any>;
 }
 
 export interface PeerReplyCapabilityCache {
@@ -38,6 +39,7 @@ function isUnknownTool(error: unknown): boolean {
 export function isPeerReplyCapabilityUnavailable(error: unknown): boolean {
   if (!(error instanceof CommHubError)) return false;
   return error.code === "peer_reply_unsupported"
+    || error.code === "peer_reply_origin_not_node"
     || error.code === "reply_task_not_owned"
     || error.code === "peer_reply_node_token_required"
     || isUnknownTool(error);
@@ -47,13 +49,16 @@ export async function sendPeerReplyCompatible(
   args: PeerReplySendArgs,
   deps: PeerReplySendDeps,
   cache: PeerReplyCapabilityCache = createPeerReplyCapabilityCache(),
-): Promise<{ route: "atomic" | "legacy"; payload: any }> {
+): Promise<{ route: "atomic" | "legacy" | "legacy-reply"; payload: any }> {
   try {
     const payload = await deps.sendAtomic(args);
     cache.hubSupportsTool = true;
     return { route: "atomic", payload };
   } catch (error) {
     if (!isPeerReplyCapabilityUnavailable(error)) throw error;
+    if (error instanceof CommHubError && error.code === "peer_reply_origin_not_node") {
+      return { route: "legacy-reply", payload: await deps.sendLegacyReply(args) };
+    }
     const fallbackReason = isUnknownTool(error)
       ? "old_hub_unknown_tool" as const
       : error instanceof CommHubError

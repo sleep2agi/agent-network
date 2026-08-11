@@ -97,13 +97,45 @@ run_cli_mutation() {
   echo "MUTATION_RED: $name rc=$rc"
 }
 
+run_server_wiring_mutation() {
+  local name="$1" sed_expr="$2"
+  local file=/workspace/server/src/tools.ts
+  local backup="/tmp/test698-${name}.bak"
+  cp "$file" "$backup"
+  local before after rc
+  before="$(sha256sum "$file" | cut -d' ' -f1)"
+  sed -i "$sed_expr" "$file"
+  after="$(sha256sum "$file" | cut -d' ' -f1)"
+  if [ "$before" = "$after" ]; then
+    echo "MUTATION_NOOP: $name"
+    mv "$backup" "$file"
+    exit 1
+  fi
+  set +e
+  bun /workspace/tests/test698-atomic-peer-reply/cli-wiring-e2e.ts \
+    >"/tmp/test698-mutation-${name}.log" 2>&1
+  rc=$?
+  set -e
+  mv "$backup" "$file"
+  if [ "$rc" -eq 0 ]; then
+    echo "MUTATION_SURVIVED: $name"
+    cat "/tmp/test698-mutation-${name}.log"
+    exit 1
+  fi
+  echo "MUTATION_RED: $name rc=$rc"
+}
+
 echo "L3 witnessed-red product gates"
 run_cli_mutation "cli-reply-type-lost" \
-  's/const msgType = msg.type || "task";/const msgType = "task";/'
+  's/ || msgType === "reply"//'
 run_cli_mutation "cli-terminal-reply-egress-restored" \
   's/if (inboxTurn.kind === "terminal_peer_reply") return;/if (false) return;/'
 run_cli_mutation "cli-new-reply-wake-disabled" \
   's/routePeerReplySse(ev, scheduleWorkInboxDrain);/if (false) routePeerReplySse(ev, scheduleWorkInboxDrain);/'
+run_cli_mutation "cli-fallback-reason-lost" \
+  's/peer_reply_fallback_reason: args.fallbackReason/peer_reply_fallback_reason: undefined/'
+run_server_wiring_mutation "dashboard-origin-misrouted-to-task" \
+  's/error: "peer_reply_origin_not_node" as const/error: "peer_reply_unsupported" as const/'
 run_mutation "terminal-reply-replies-again" \
   /workspace/agent-node/src/peer-reply-inbox.ts \
   's/if (replyExpected) return/if (true) return/' \

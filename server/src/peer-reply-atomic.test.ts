@@ -204,7 +204,11 @@ describe("#698 atomic peer reply", () => {
       const result = await call(toolsFor(B).send_peer_reply, {
         alias: A, text: "must fall back", in_reply_to: taskId, status: "replied",
       });
-      expect(result).toEqual(expect.objectContaining({ ok: false, error: "peer_reply_unsupported", reply_queued: false }));
+      expect(result).toEqual(expect.objectContaining({
+        ok: false,
+        error: mode === "legacy-task-origin" ? "peer_reply_origin_not_node" : "peer_reply_unsupported",
+        reply_queued: false,
+      }));
       expect(task(taskId)).toEqual(expect.objectContaining({ status: "delivered", result: null }));
       expect(replies(taskId)).toHaveLength(0);
     }
@@ -245,6 +249,9 @@ describe("#698 atomic peer reply", () => {
             log: () => {},
             send: (legacyArgs) => callOrThrow(tools.send_task, legacyArgs),
           });
+        },
+        sendLegacyReply: async () => {
+          throw new Error("node-to-node capability fallback must not use send_reply");
         },
       });
       expect(routed.route).toBe("legacy");
@@ -303,6 +310,9 @@ describe("#698 atomic peer reply", () => {
           log: () => {},
           send: (legacyArgs) => callOrThrow(tools.send_task, legacyArgs),
         });
+      },
+      sendLegacyReply: async () => {
+        throw new Error("identity rotation fallback must not use send_reply");
       },
     });
 

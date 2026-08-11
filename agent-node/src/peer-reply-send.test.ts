@@ -10,12 +10,17 @@ const args = {
   fromAlias: "worker",
 };
 
+const rejectUnexpectedLegacyReply = async () => {
+  throw new Error("unexpected send_reply fallback");
+};
+
 describe("peer reply capability fallback", () => {
   test("new Hub + capable recipient uses the atomic tool only", async () => {
     const calls: string[] = [];
     const result = await sendPeerReplyCompatible(args, {
       sendAtomic: async () => { calls.push("atomic"); return { message_id: "reply_1" }; },
       sendLegacy: async () => { calls.push("legacy"); },
+      sendLegacyReply: rejectUnexpectedLegacyReply,
     });
     expect(result.route).toBe("atomic");
     expect(calls).toEqual(["atomic"]);
@@ -39,6 +44,7 @@ describe("peer reply capability fallback", () => {
           fallbackReason = legacyArgs.fallbackReason;
           return { task_id: "legacy_1" };
         },
+        sendLegacyReply: rejectUnexpectedLegacyReply,
       });
       expect(result.route).toBe("legacy");
       expect(calls).toEqual(["atomic", "legacy"]);
@@ -62,6 +68,7 @@ describe("peer reply capability fallback", () => {
           fallbackReason = legacyArgs.fallbackReason;
           return { task_id: "legacy_after_rotation" };
         },
+        sendLegacyReply: rejectUnexpectedLegacyReply,
       });
       expect(result.route).toBe("legacy");
       expect(calls).toEqual(["atomic", "legacy"]);
@@ -76,6 +83,7 @@ describe("peer reply capability fallback", () => {
         });
       },
       sendLegacy: async () => { legacyCalls++; },
+      sendLegacyReply: rejectUnexpectedLegacyReply,
     })).rejects.toThrow("reply_target_mismatch");
     expect(legacyCalls).toBe(0);
   });
@@ -90,6 +98,7 @@ describe("peer reply capability fallback", () => {
         throw new CommHubError("unknown send_peer_reply", { code: -32601 });
       },
       sendLegacy: async () => { legacy++; },
+      sendLegacyReply: rejectUnexpectedLegacyReply,
     };
     await sendPeerReplyCompatible(args, unknownDeps, unknownCache);
     await sendPeerReplyCompatible(args, unknownDeps, unknownCache);
@@ -105,6 +114,7 @@ describe("peer reply capability fallback", () => {
         });
       },
       sendLegacy: async () => {},
+      sendLegacyReply: rejectUnexpectedLegacyReply,
     };
     await sendPeerReplyCompatible(args, recipientDeps, recipientCache);
     await sendPeerReplyCompatible(args, recipientDeps, recipientCache);
@@ -127,9 +137,29 @@ describe("peer reply capability fallback", () => {
       await expect(sendPeerReplyCompatible(args, {
         sendAtomic: async () => { throw error; },
         sendLegacy: async () => { legacyCalls++; },
+        sendLegacyReply: rejectUnexpectedLegacyReply,
       })).rejects.toThrow();
       expect(legacyCalls).toBe(0);
       expect(isPeerReplyCapabilityUnavailable(error)).toBe(false);
     }
+  });
+
+  test("non-node origin uses send_reply fallback, never send_task", async () => {
+    const calls: string[] = [];
+    const result = await sendPeerReplyCompatible(args, {
+      sendAtomic: async () => {
+        calls.push("atomic");
+        throw new CommHubError("app-level rejection: peer_reply_origin_not_node", {
+          code: "peer_reply_origin_not_node", appLevel: true,
+        });
+      },
+      sendLegacy: async () => { calls.push("legacy-task"); },
+      sendLegacyReply: async () => {
+        calls.push("legacy-reply");
+        return { message_id: "reply_dashboard" };
+      },
+    });
+    expect(result.route).toBe("legacy-reply");
+    expect(calls).toEqual(["atomic", "legacy-reply"]);
   });
 });
