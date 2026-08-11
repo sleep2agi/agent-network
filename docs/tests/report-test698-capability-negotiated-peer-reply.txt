@@ -2,24 +2,24 @@
 
 Date: 2026-08-12 Asia/Shanghai
 Base: 17b8223f9d7fd25fcc435b40e7fa1fc0823ea1de
-SOURCE_COMMIT: 07a69d05599930cdd5414f348846dacf1bfa9925
+SOURCE_COMMIT: 73d8f5738bd275dc7fd8b74c850c9687508cc7ff
 Scope: Hub + agent-node protocol/runtime wiring + isolated Docker tests.
 Production deployment: NOT PERFORMED.
 
 ## Exact-source image
 
-- image: `anet-test698:07a69d05`
+- image: `anet-test698:73d8f573`
 - image id:
-  `sha256:bede190906e827f69e9421c98782a21728037d25eeb97b155ed56c0f05317b81`
+  `sha256:8c231f83f2e097e0e52c255e18cc2f39a58f748786361cd97c1f77c604d362ab`
 - image env:
-  `TEST698_SOURCE_COMMIT=07a69d05599930cdd5414f348846dacf1bfa9925`
-- the nine executable/test files changed by the final source delta matched
-  `git show SOURCE_COMMIT:<path>` byte-for-byte after `docker create` and
-  `docker cp`: 9/9. The test673 preload is intentionally copied to the
-  test698 path by the Dockerfile and was compared using that mapping.
-- focused result: 178 pass / 0 fail / 522 expect calls.
+  `TEST698_SOURCE_COMMIT=73d8f5738bd275dc7fd8b74c850c9687508cc7ff`
+- all 22 changed agent/server/test runtime files that exist at the same path
+  inside the image matched `git show SOURCE_COMMIT:<path>` byte-for-byte
+  after `docker create` and `docker cp`: 22/22. Dockerfiles, docs, and the
+  intentionally remapped test673 preload are outside this same-path count.
+- focused result: 180 pass / 0 fail / 528 expect calls.
 - exact main-run artifact digest:
-  `sha256:402791210a021c44590b142226a2de7c988bab2d452f178b6f689b9d820b2993`.
+  `sha256:346516ab994447c8a5d5258118d3733cf512a3ae2537bbdf1729dcbf8e047dd1`.
   This records one timestamped run and is not claimed reproducible or used
   as source provenance.
 
@@ -50,6 +50,15 @@ Production deployment: NOT PERFORMED.
    carrying `peer_reply_legacy_fallback=true` and a production-computed reason.
    Ambiguous transport and identity-query failures remain pending rather than
    choosing a potentially lossy route.
+7. A real node-token task was dispatched while the receiver was offline, then
+   the origin session was deleted before the real receiver process drained its
+   inbox. Atomic capability negotiation returned unsupported; legacy
+   `send_task` returned the structured, no-write `alias_not_found`; the sender
+   then used `send_reply`. The immutable original task became `replied`, exactly
+   one no-response reply row was stored for the deleted origin, and no child
+   task was created. Only app-level `alias_not_found` permits this second
+   route; transport ambiguity and every other application rejection remain
+   thrown so the pending reply is retained.
 
 ## Real old-Hub wire and exact task identity
 
@@ -83,7 +92,7 @@ image and the same old-Hub production-CLI E2E turns red:
 `MUTATION_RED: old-hub-exact-task-lookup-lost rc=1`
 
 Exact old-Hub run artifact digest:
-`sha256:d6e0b408961ef22af43b9f0fd3703eaf1c56ec7de50bd88f8c46bb447bd65764`.
+`sha256:741ca0946872ac93c9f9e17983ff8b8e70c82b99ceb43e347f865b7afd73b122`.
 It records one run only and is not used as reproducible provenance.
 
 ## Witnessed-red mutations
@@ -97,12 +106,12 @@ production mutation above (26 total):
 - cli-new-reply-wake-disabled
 - cli-fallback-reason-lost
 - cli-failed-status-lost
-- dashboard-origin-misrouted-to-task
+- dashboard-origin-misclassified
 - dashboard-origin-checked-after-capability
-- dashboard-null-target-origin-order-lost
 - terminal-reply-replies-again
 - new-reply-wake-removed
 - old-hub-fallback-removed
+- deleted-origin-terminal-wiring-removed
 - legacy-mcp-code-lost
 - identity-rotation-fallback-removed
 - capability-provenance-bypassed
@@ -119,11 +128,14 @@ production mutation above (26 total):
 - legacy-agent-warning-removed
 - old-hub-exact-task-lookup-lost (separate archived-old-Hub runner)
 
-The first eight target production `cli.ts` or `server/src/tools.ts` and rerun
-real-process behavior. In particular, disabling SSE wake, restoring terminal
-reply egress, losing failed status, moving non-node origin behind capability,
-or conditioning it on `to_node_id` all fail on observed task/inbox/runtime
-facts rather than source-string checks. The alias-binding mutation fails the
+The first five target production `cli.ts` and rerun real-process behavior.
+Disabling SSE wake, restoring terminal reply egress, or losing failed status
+fails on observed task/inbox/runtime facts rather than source-string checks.
+The two Dashboard-origin protocol mutations run the focused real Hub
+transaction matrix and assert its exact structured classification. The
+deleted-origin mutation changes the production compatibility condition and
+reruns the real Hub + real receiver process; it turns red because the original
+task never reaches a terminal state. The alias-binding mutation fails the
 focused Hub behavior test. The final mutation targets production legacy
 identity lookup and exercises the actual old Hub response.
 
@@ -139,5 +151,9 @@ identity lookup and exercises the actual old Hub response.
 - The old-Hub identity query is performed on every unknown-tool fallback and
   is not negatively cached. If it cannot prove the exact task origin, the
   sender does not guess from a live/stale alias roster.
+- A deleted origin can no longer receive a wake task. The sender uses
+  terminal `send_reply` only after the Hub has explicitly rejected that
+  attempted compatibility write as app-level `alias_not_found`; this is not
+  a general fallback for transport errors.
 - SSE emission occurs after transaction commit. Reconnect drains missed inbox
   rows, but there is no independent periodic polling guarantee.
