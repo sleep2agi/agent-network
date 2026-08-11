@@ -251,6 +251,7 @@ GOALS_PATH=/tmp/test697-goals.json
 CODEX_CAPTURE=/tmp/test697-codex-capture.jsonl
 STDIO_CAPTURE=/tmp/test697-stdio-capture.jsonl
 RUNTIME_LOG=/tmp/test697-runtime.log
+EXPECTED_RUNTIME_MODEL="${TEST697_RUNTIME_MODEL:-gpt-5.6-sol}"
 CODEX_SDK_ENTRY="$ROOT/agent-node/node_modules/@openai/codex-sdk/dist/index.js"
 [[ -f "$CODEX_SDK_ENTRY" ]] || { echo "CODEX_SDK_ENTRY_MISSING $CODEX_SDK_ENTRY"; exit 1; }
 cp "$ROOT/tests/test697-codex-default-model/fake-codex-sdk.mjs" "$CODEX_SDK_ENTRY"
@@ -316,7 +317,7 @@ probe_goal_wake_model() {
 JSON
   start_runtime_node wake || return 1
   wait_for_capture '"kind":"startThread"' "$CODEX_CAPTURE" || { stop_runtime_node; return 1; }
-  jq -se 'map(select(.kind=="startThread")) | length >= 1 and all(.[]; .value.model=="gpt-5.6-sol")' "$CODEX_CAPTURE" >/dev/null || {
+  jq -se --arg model "$EXPECTED_RUNTIME_MODEL" 'map(select(.kind=="startThread")) | length >= 1 and all(.[]; .value.model==$model)' "$CODEX_CAPTURE" >/dev/null || {
     echo "WAKE_MODEL_INJECTION_WRONG"; cat "$CODEX_CAPTURE"; stop_runtime_node; return 1;
   }
   stop_runtime_node
@@ -328,10 +329,10 @@ probe_sdk_task_models() {
   start_runtime_node sdk TEST697_CODEX_FAIL_FIRST=1 || return 1
   send_runtime_task sdk || { stop_runtime_node; return 1; }
   wait_for_capture '"kind":"run"' "$CODEX_CAPTURE" || { stop_runtime_node; return 1; }
-  jq -se 'map(select(.kind=="startThread")) | length >= 2 and all(.[]; .value.model=="gpt-5.6-sol")' "$CODEX_CAPTURE" >/dev/null || {
+  jq -se --arg model "$EXPECTED_RUNTIME_MODEL" 'map(select(.kind=="startThread")) | length >= 2 and all(.[]; .value.model==$model)' "$CODEX_CAPTURE" >/dev/null || {
     echo "SDK_THREAD_MODEL_INJECTION_WRONG"; cat "$CODEX_CAPTURE"; stop_runtime_node; return 1;
   }
-  grep -Fq '[codex] model=gpt-5.6-sol' "$RUNTIME_LOG" || {
+  grep -Fq "[codex] model=$EXPECTED_RUNTIME_MODEL" "$RUNTIME_LOG" || {
     echo "SDK_LOG_MODEL_INJECTION_WRONG"; cat "$RUNTIME_LOG"; stop_runtime_node; return 1;
   }
   stop_runtime_node
@@ -355,12 +356,12 @@ probe_sdk_resume_model() {
     rm -f "$backup"
     return 1
   fi
-  if ! jq -se '
+  if ! jq -se --arg model "$EXPECTED_RUNTIME_MODEL" '
     map(select(.kind == "startThread" or .kind == "resumeThread"))
     | length >= 1
       and all(.[];
-        if .kind == "resumeThread" then .value.opts.model == "gpt-5.6-sol"
-        else .value.model == "gpt-5.6-sol"
+        if .kind == "resumeThread" then .value.opts.model == $model
+        else .value.model == $model
         end)
   ' "$CODEX_CAPTURE" >/dev/null; then
     echo "SDK_RESUME_MODEL_INJECTION_WRONG"
@@ -383,7 +384,7 @@ probe_stdio_task_model() {
   start_runtime_node stdio ANET_CODEX_STDIO_DIRECT=1 || return 1
   send_runtime_task stdio || { stop_runtime_node; return 1; }
   wait_for_capture '"model"' "$STDIO_CAPTURE" || { stop_runtime_node; return 1; }
-  jq -se 'length >= 1 and all(.[]; .model=="gpt-5.6-sol")' "$STDIO_CAPTURE" >/dev/null || {
+  jq -se --arg model "$EXPECTED_RUNTIME_MODEL" 'length >= 1 and all(.[]; .model==$model)' "$STDIO_CAPTURE" >/dev/null || {
     echo "STDIO_MODEL_INJECTION_WRONG"; cat "$STDIO_CAPTURE"; stop_runtime_node; return 1;
   }
   stop_runtime_node
@@ -394,6 +395,27 @@ probe_goal_wake_model
 probe_sdk_task_models
 probe_sdk_resume_model
 probe_stdio_task_model
+
+probe_explicit_runtime_models() {
+  local backup previous_expected
+  backup=$(mktemp /tmp/test697-runtime-config.XXXXXX)
+  cp "$RUNTIME_CFG" "$backup"
+  jq '.model="o3" | del(.session)' "$backup" > "$RUNTIME_CFG"
+  previous_expected=$EXPECTED_RUNTIME_MODEL
+  EXPECTED_RUNTIME_MODEL=o3
+  probe_goal_wake_model \
+    && probe_sdk_task_models \
+    && probe_sdk_resume_model \
+    && probe_stdio_task_model
+  local rc=$?
+  EXPECTED_RUNTIME_MODEL=$previous_expected
+  cp "$backup" "$RUNTIME_CFG"
+  rm -f "$backup"
+  return "$rc"
+}
+
+echo "L7e explicit configured model crosses every agent-node runtime injection lane"
+probe_explicit_runtime_models
 
 if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
   echo "L8 witnessed-red mutations"
@@ -454,6 +476,50 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
         if (source.includes(marker)) process.exit(2);
         writeFileSync(file, source.replace(from1, marker).replace(from2, to2).replace(marker, to1));
       '
+    after=$(sha256sum "$file" | awk '{print $1}')
+    if [[ "$before" == "$after" ]]; then
+      echo "MUTATION_NOOP $name"
+      cp "$backup" "$file"
+      rm -f "$backup"
+      exit 1
+    fi
+    set +e
+    "$probe" >/tmp/test697-mut-"$name".log 2>&1
+    rc=$?
+    set -e
+    cp "$backup" "$file"
+    rm -f "$backup"
+    if [[ "$rc" -eq 0 ]]; then
+      echo "MUTATION_SURVIVED $name"
+      cat /tmp/test697-mut-"$name".log
+      exit 1
+    fi
+    echo "MUTATION_RED $name layer=$expected_layer rc=$rc"
+  }
+
+  run_mutation_all() {
+    local name=$1 expected_layer=$2 file=$3 from=$4 to=$5 expected_count=$6 probe=$7
+    local backup
+    backup=$(mktemp /tmp/test697-mutation.XXXXXX)
+    cp "$file" "$backup"
+    local before after rc count
+    before=$(sha256sum "$file" | awk '{print $1}')
+    count=$(MUTATION_FILE="$file" MUTATION_FROM="$from" bun -e '
+      import { readFileSync } from "node:fs";
+      const source = readFileSync(process.env.MUTATION_FILE!, "utf8");
+      console.log(source.split(process.env.MUTATION_FROM!).length - 1);
+    ')
+    if [[ "$count" -ne "$expected_count" ]]; then
+      echo "MUTATION_DENOMINATOR_MISMATCH $name expected=$expected_count actual=$count"
+      cp "$backup" "$file"
+      rm -f "$backup"
+      exit 1
+    fi
+    MUTATION_FILE="$file" MUTATION_FROM="$from" MUTATION_TO="$to" bun -e '
+      import { readFileSync, writeFileSync } from "node:fs";
+      const file = process.env.MUTATION_FILE!;
+      writeFileSync(file, readFileSync(file, "utf8").split(process.env.MUTATION_FROM!).join(process.env.MUTATION_TO!));
+    '
     after=$(sha256sum "$file" | awk '{print $1}')
     if [[ "$before" == "$after" ]]; then
       echo "MUTATION_NOOP $name"
@@ -610,6 +676,10 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
     $'      model: resolveCodexModel(MODEL),\n      approvalPolicy: "on-request",' \
     $'      model: MODEL || "gpt-4.1-legacy",\n      approvalPolicy: "on-request",' \
     probe_stdio_task_model
+  run_mutation_all explicit-runtime-model-ignored L7e \
+    "$ROOT/agent-node/src/cli.ts" \
+    'resolveCodexModel(MODEL)' 'resolveCodexModel(undefined)' 5 \
+    probe_explicit_runtime_models
 fi
 
 kill "$SERVER_PID" >/dev/null 2>&1 || true
