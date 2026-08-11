@@ -122,6 +122,18 @@ for name in sdk-default app-default; do
   }
 done
 
+echo "L4b non-Codex creation does not inherit a Codex model"
+for runtime in claude-agent-sdk claude-code-cli grok-build-acp opencode-cli; do
+  name="noncodex-${runtime}"
+  create_node "$name" "$runtime"
+  cfg="$PROJECT_DIR/.anet/nodes/$name/config.json"
+  jq -e '.model == null' "$cfg" >/dev/null || {
+    echo "NON_CODEX_MODEL_LEAK runtime=$runtime"
+    cat "$cfg"
+    exit 1
+  }
+done
+
 echo "L5 explicit model remains authoritative"
 create_node explicit-model codex-sdk --model operator-custom-model
 jq -e '.model == "operator-custom-model"' \
@@ -207,25 +219,32 @@ grep -Fq -- "-c model='gpt-5.6-sol'" "$FAKE_TMUX_LOG" || {
 }
 
 echo "L7c real --batch --preset codex resolves the supported registry default"
-probe_batch_preset_default() {
-  local seq=${1:-base}
+probe_batch_preset() {
+  local seq=$1 preset=$2 expected_model=$3
   local batch_root="$PROJECT_DIR/batch-$seq"
   safe_rm_rf "$batch_root"
   mkdir -p "$batch_root"
   (
     cd "$PROJECT_DIR"
     HOME="$HOME_DIR" PATH="$FAKE_BIN:$PATH" \
-      "${ANET[@]}" create --batch --preset codex --workdir "$batch_root" \
+      "${ANET[@]}" create --batch --preset "$preset" --workdir "$batch_root" \
         --workdir-mode separate --prefix "preset-$seq" --count 1 \
         --leader-alias "preset-$seq" --description test697
   ) >/tmp/test697-batch-"$seq".log 2>&1
   local cfg
   cfg=$(find "$batch_root" -name config.json -type f -print -quit)
   [[ -n "$cfg" ]] || { cat /tmp/test697-batch-"$seq".log; return 1; }
-  jq -e '.runtime == "codex-sdk" and .model == "gpt-5.6-sol"' "$cfg" >/dev/null
+  jq -e --arg model "$expected_model" \
+    '.runtime == "codex-sdk" and .model == $model' "$cfg" >/dev/null
 }
-probe_batch_preset_default base
-probe_batch_preset_mutation() { probe_batch_preset_default mutation; }
+probe_batch_preset default codex gpt-5.6-sol
+probe_batch_preset explicit o3 o3
+probe_batch_preset_default_mutation() {
+  probe_batch_preset default-mutation codex gpt-5.6-sol
+}
+probe_batch_preset_explicit_mutation() {
+  probe_batch_preset explicit-mutation o3 o3
+}
 
 RUNTIME_CFG=/tmp/test697-runtime-config.json
 GOALS_PATH=/tmp/test697-goals.json
@@ -318,6 +337,44 @@ probe_sdk_task_models() {
   stop_runtime_node
 }
 
+probe_sdk_resume_model() {
+  local backup
+  backup=$(mktemp /tmp/test697-runtime-config.XXXXXX)
+  cp "$RUNTIME_CFG" "$backup"
+  jq '.session="thread-test697-resume"' "$backup" > "$RUNTIME_CFG"
+  : > "$CODEX_CAPTURE"
+  printf '%s\n' '{"version":1,"goals":[]}' > "$GOALS_PATH"
+  if ! start_runtime_node resume; then
+    cp "$backup" "$RUNTIME_CFG"
+    rm -f "$backup"
+    return 1
+  fi
+  if ! send_runtime_task resume || ! wait_for_capture '"kind":"resumeThread"' "$CODEX_CAPTURE"; then
+    stop_runtime_node
+    cp "$backup" "$RUNTIME_CFG"
+    rm -f "$backup"
+    return 1
+  fi
+  if ! jq -se '
+    map(select(.kind == "startThread" or .kind == "resumeThread"))
+    | length >= 1
+      and all(.[];
+        if .kind == "resumeThread" then .value.opts.model == "gpt-5.6-sol"
+        else .value.model == "gpt-5.6-sol"
+        end)
+  ' "$CODEX_CAPTURE" >/dev/null; then
+    echo "SDK_RESUME_MODEL_INJECTION_WRONG"
+    cat "$CODEX_CAPTURE"
+    stop_runtime_node
+    cp "$backup" "$RUNTIME_CFG"
+    rm -f "$backup"
+    return 1
+  fi
+  stop_runtime_node
+  cp "$backup" "$RUNTIME_CFG"
+  rm -f "$backup"
+}
+
 probe_stdio_task_model() {
   : > "$STDIO_CAPTURE"
   printf '%s\n' '{"version":1,"goals":[]}' > "$GOALS_PATH"
@@ -335,6 +392,7 @@ probe_stdio_task_model() {
 echo "L7d real agent-node executes every default-model injection lane with fake transports"
 probe_goal_wake_model
 probe_sdk_task_models
+probe_sdk_resume_model
 probe_stdio_task_model
 
 if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
@@ -427,6 +485,15 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
     jq -e '.model == "operator-custom-model"' \
       "$PROJECT_DIR/.anet/nodes/mutation-explicit/config.json" >/dev/null
   }
+  probe_non_codex_model_absent() {
+    local runtime name cfg
+    for runtime in claude-agent-sdk grok-build-acp; do
+      name="mutation-noncodex-${runtime}"
+      create_node "$name" "$runtime"
+      cfg="$PROJECT_DIR/.anet/nodes/$name/config.json"
+      jq -e '.model == null' "$cfg" >/dev/null
+    done
+  }
   probe_help_text() {
     bun build "$ROOT/agent-node/src/cli.ts" --outfile /tmp/test697-mut-help.js --target node \
       --external @anthropic-ai/claude-agent-sdk \
@@ -465,6 +532,11 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
   run_mutation default-regressed L4 \
     "$ROOT/agent-network/src/codex-model-default.ts" \
     'DEFAULT_CODEX_MODEL = "gpt-5.6-sol"' 'DEFAULT_CODEX_MODEL = "gpt-5.5"' probe_create_default
+  run_mutation non-codex-default-leak L4b \
+    "$ROOT/agent-network/bin/cli.ts" \
+    'const defaultModel = defaultCodexModelForRuntime(runtime);' \
+    'const defaultModel = defaultCodexModelForRuntime("codex-sdk");' \
+    probe_non_codex_model_absent
   run_mutation picker-default-regressed L7 \
     "$ROOT/agent-network/bin/cli.ts" \
     '(b.default ? 1 : 0) - (a.default ? 1 : 0)' \
@@ -506,7 +578,11 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
   run_mutation batch-preset-default-regressed L7c \
     "$ROOT/agent-network/bin/cli.ts" \
     'vendor.models.find(m => m.default)' 'vendor.models.find(m => !m.default)' \
-    probe_batch_preset_mutation
+    probe_batch_preset_default_mutation
+  run_mutation batch-preset-explicit-overwritten L7c \
+    "$ROOT/agent-network/bin/cli.ts" \
+    '        model: modelId,' '        model: defaultCodexModelForRuntime(vendor.runtime) || modelId,' \
+    probe_batch_preset_explicit_mutation
   run_mutation wake-model-injection-regressed L7d \
     "$ROOT/agent-node/src/cli.ts" \
     'model: resolveCodexModel(MODEL),' 'model: MODEL || "gpt-4.1-legacy",' \
@@ -515,6 +591,11 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
     "$ROOT/agent-node/src/cli.ts" \
     'const codexModel = resolveCodexModel(MODEL);' 'const codexModel = MODEL || "gpt-4.1-legacy";' \
     probe_sdk_task_models
+  run_mutation sdk-resume-model-injection-regressed L7d \
+    "$ROOT/agent-node/src/cli.ts" \
+    'codexThread = codex.resumeThread(SESSION_ID, codexOpts);' \
+    'codexThread = codex.resumeThread(SESSION_ID, { ...codexOpts, model: "gpt-4.1-legacy" });' \
+    probe_sdk_resume_model
   run_mutation sdk-log-model-injection-regressed L7d \
     "$ROOT/agent-node/src/cli.ts" \
     'const codexModelName = resolveCodexModel(MODEL);' 'const codexModelName = MODEL || "gpt-4.1-legacy";' \
