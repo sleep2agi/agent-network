@@ -5,7 +5,7 @@ echo "# test698 — atomic peer reply lifecycle"
 echo "source_commit=${TEST698_SOURCE_COMMIT:-unknown}"
 
 echo "L0 policy + focused Hub lifecycle tests"
-bun test \
+COMMHUB_DB=/tmp/test698-atomic-peer-reply.sqlite bun test \
   /workspace/agent-node/src/inbox-message-policy.test.ts \
   /workspace/server/src/peer-reply-atomic.test.ts \
   /workspace/server/src/send-reply-agent-warning.test.ts \
