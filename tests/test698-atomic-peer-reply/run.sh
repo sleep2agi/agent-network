@@ -183,6 +183,18 @@ run_mutation "old-hub-fallback-removed" \
   /workspace/agent-node/src/peer-reply-send.ts \
   's/if (!isPeerReplyCapabilityUnavailable(error)) throw error;/if (true) throw error;/' \
   /workspace/agent-node/src/peer-reply-send.test.ts
+run_mutation "old-hub-task-not-found-drops-pending" \
+  /workspace/agent-node/src/peer-reply-send.ts \
+  's/throw oldHubIdentityUnavailable(error);/throw error;/' \
+  /workspace/agent-node/src/peer-reply-send.test.ts
+run_mutation "old-hub-task-id-mismatch-accepted" \
+  /workspace/agent-node/src/peer-reply-send.ts \
+  's/task.task_id !== args.taskId/false/' \
+  /workspace/agent-node/src/peer-reply-send.test.ts
+run_mutation "old-hub-origin-shape-accepted" \
+  /workspace/agent-node/src/peer-reply-send.ts \
+  's/(task.from_node_id !== null && typeof task.from_node_id !== "string")/false/' \
+  /workspace/agent-node/src/peer-reply-send.test.ts
 run_agent_wiring_mutation "deleted-origin-terminal-wiring-removed" \
   /workspace/agent-node/src/peer-reply-send.ts \
   's/legacyError.code === "alias_not_found"/legacyError.code === "alias_missing_for_test"/'

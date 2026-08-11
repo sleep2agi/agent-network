@@ -32,6 +32,43 @@ export function createPeerReplyCapabilityCache(): PeerReplyCapabilityCache {
   return { hubSupportsTool: null };
 }
 
+function oldHubIdentityUnavailable(cause?: unknown): CommHubError {
+  return new CommHubError(
+    "old Hub task identity unavailable; preserving pending reply",
+    {
+      code: "old_hub_task_identity_unavailable",
+      ...(cause instanceof CommHubError ? { payload: cause.payload } : {}),
+    },
+  );
+}
+
+/**
+ * Resolve the immutable origin kind from the exact old-Hub task row. Every
+ * failure is deliberately reclassified as retryable: get_task's app-level
+ * task-not-found must not reach PendingReplyQueue's drop-loud branch.
+ *
+ * A historical NULL from_node_id is conservatively treated as "no proven
+ * node identity" and therefore uses terminal send_reply. Guessing from a
+ * current alias roster could wake an unrelated replacement node.
+ */
+export async function resolveOldHubTaskOrigin(
+  args: PeerReplySendArgs,
+  loadTask: (taskId: string) => Promise<any>,
+): Promise<boolean> {
+  let result: any;
+  try {
+    result = await loadTask(args.taskId);
+  } catch (error) {
+    throw oldHubIdentityUnavailable(error);
+  }
+  const task = result?.task;
+  if (!result?.ok || !task || task.task_id !== args.taskId
+      || (task.from_node_id !== null && typeof task.from_node_id !== "string")) {
+    throw oldHubIdentityUnavailable();
+  }
+  return typeof task.from_node_id === "string" && task.from_node_id.length > 0;
+}
+
 function isUnknownTool(error: unknown): boolean {
   if (!(error instanceof CommHubError)) return false;
   if (error.code === -32601) return true;

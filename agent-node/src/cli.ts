@@ -143,7 +143,7 @@ import { resolveNodeIdSource } from "./runtime/node-id-source";
 import { emitExplicitTaskTrace, sendExplicitTaskWithTrace, waitForExplicitTaskLifecycle, type ExplicitTaskTraceContext } from "./explicit-task-trace";
 import { inboxDeliveryPolicy } from "./inbox-message-policy";
 import { routePeerReplySse, runInboxTurnByReplyPolicy } from "./peer-reply-inbox";
-import { createPeerReplyCapabilityCache, sendPeerReplyCompatible } from "./peer-reply-send";
+import { createPeerReplyCapabilityCache, resolveOldHubTaskOrigin, sendPeerReplyCompatible } from "./peer-reply-send";
 import { sendPeerReplyTaskWithTrace } from "./peer-reply-task-trace";
 
 const home = homedir();
@@ -1398,15 +1398,10 @@ async function sendReply(
         in_reply_to: args.taskId,
         status: args.failed ? "failed" : "replied",
       }),
-      isOldHubOriginNode: async (args) => {
-        const result = parseToolJson(await callCommHub("get_task", { task_id: args.taskId }));
-        const task = result?.task;
-        if (!result?.ok || !task || task.task_id !== args.taskId
-            || (task.from_node_id !== null && typeof task.from_node_id !== "string")) {
-          throw new CommHubError("old Hub task identity unavailable; preserving pending reply");
-        }
-        return typeof task.from_node_id === "string" && task.from_node_id.length > 0;
-      },
+      isOldHubOriginNode: (args) => resolveOldHubTaskOrigin(
+        args,
+        async (taskId) => parseToolJson(await callCommHub("get_task", { task_id: taskId })),
+      ),
     }, peerReplyCapabilityCache)
     : { route: "atomic" as const, payload: await callCommHub("send_reply", {
       alias: target,

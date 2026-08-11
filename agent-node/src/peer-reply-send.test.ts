@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { CommHubError } from "./reply-reliability";
-import { createPeerReplyCapabilityCache, isPeerReplyCapabilityUnavailable, sendPeerReplyCompatible } from "./peer-reply-send";
+import {
+  createPeerReplyCapabilityCache,
+  isPeerReplyCapabilityUnavailable,
+  resolveOldHubTaskOrigin,
+  sendPeerReplyCompatible,
+} from "./peer-reply-send";
 
 const args = {
   target: "dispatcher",
@@ -256,5 +261,49 @@ describe("peer reply capability fallback", () => {
       })).rejects.toThrow(legacyError.message);
       expect(calls).toEqual(["atomic", "legacy-task"]);
     }
+  });
+
+  test("old Hub exact-task resolver fails retryable on missing, mismatched, or malformed identity", async () => {
+    for (const payload of [
+      { ok: false, error: "task not found" },
+      { ok: true, task: { task_id: "different", from_node_id: "n_origin" } },
+      { ok: true, task: { task_id: args.taskId } },
+      { ok: true, task: { task_id: args.taskId, from_node_id: 42 } },
+    ]) {
+      try {
+        await resolveOldHubTaskOrigin(args, async () => payload);
+        throw new Error("expected identity rejection");
+      } catch (error) {
+        expect(error).toBeInstanceOf(CommHubError);
+        expect((error as CommHubError).code).toBe("old_hub_task_identity_unavailable");
+        expect((error as CommHubError).appLevel).toBe(false);
+      }
+    }
+  });
+
+  test("old Hub app-level get_task rejection is reclassified so pending is retained", async () => {
+    try {
+      await resolveOldHubTaskOrigin(args, async () => {
+        throw new CommHubError("app-level rejection: task not found", {
+          code: "task not found",
+          payload: { ok: false, error: "task not found" },
+          appLevel: true,
+        });
+      });
+      throw new Error("expected identity rejection");
+    } catch (error) {
+      expect(error).toBeInstanceOf(CommHubError);
+      expect((error as CommHubError).code).toBe("old_hub_task_identity_unavailable");
+      expect((error as CommHubError).appLevel).toBe(false);
+    }
+  });
+
+  test("old Hub NULL origin is conservative terminal reply; proven node stays wake-task", async () => {
+    expect(await resolveOldHubTaskOrigin(args, async () => ({
+      ok: true, task: { task_id: args.taskId, from_node_id: null },
+    }))).toBe(false);
+    expect(await resolveOldHubTaskOrigin(args, async () => ({
+      ok: true, task: { task_id: args.taskId, from_node_id: "n_origin" },
+    }))).toBe(true);
   });
 });
