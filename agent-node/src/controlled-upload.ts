@@ -4,30 +4,38 @@
  * Security boundary (hard gates):
  *  1. Cross-host: bytes travel over HTTP multipart; Hub never reads agent FS.
  *  2. Identity: caller supplies the node's bearer token; ntok binds network.
- *  3. Path safety: realpath + allowlisted roots only; reject .., symlink
- *     escape, non-regular files, arbitrary absolute paths outside roots.
- *  4. Size ≤ 12 MiB; filename/MIME normalized; non-files rejected.
+ *  3. Path safety: realpath + allowlisted roots; reject NUL, symlink, traversal.
+ *  4. Size ≤ 12 MiB enforced with same-fd fstat + bounded read (no full slurp).
  *  5. Hub /api/upload is the sole write surface (atomic on hub side).
  *
- * Prefer this over send_reply path auto-upload (scheme B): security boundary
- * is explicit, and Hub file_id gate stays untouched.
+ * Adversarial add-only (#694 DO-NOT-MERGE fixes):
+ *  - TOCTOU: open O_NOFOLLOW → fstat(fd) → read(fd) only; no re-open by path.
+ *  - Bounded read: never allocate/read past CONTROLLED_UPLOAD_MAX_BYTES.
+ *  - NUL guard is live and reachable before any fs call.
  */
 
 import {
+  closeSync,
+  constants as fsConstants,
   existsSync,
-  lstatSync,
-  readFileSync,
+  fstatSync,
+  openSync,
+  readSync,
   realpathSync,
-  statSync,
+  readlinkSync,
 } from "node:fs";
-import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { homedir } from "node:os";
 
 /** Mirrors server/src/uploads.ts MAX_UPLOAD_BYTES. */
 export const CONTROLLED_UPLOAD_MAX_BYTES = 12 * 1024 * 1024;
 
+/** Chunk size for bounded streaming read from a single fd. */
+export const CONTROLLED_UPLOAD_READ_CHUNK = 64 * 1024;
+
 export type ControlledUploadErrorCode =
   | "path_required"
+  | "path_nul"
   | "path_not_found"
   | "path_untrusted"
   | "path_symlink"
@@ -61,14 +69,10 @@ export type ControlledUploadResult = ControlledUploadOk | ControlledUploadFail;
 export interface ControlledUploadDeps {
   hubUrl: string;
   authToken: string;
-  /** Override allowlist roots (tests). */
   allowedRoots?: string[];
-  /** Alias used only to derive default cache root — never sent to hub as owner. */
   alias?: string;
-  /** Node work dir (e.g. ~/.anet/nodes/<id>). */
   nodeDir?: string;
   fetch?: typeof fetch;
-  /** Test-only home override. */
   home?: string;
 }
 
@@ -99,10 +103,6 @@ export function normalizeUploadName(input: string | undefined | null, fallback =
   return cleaned || fallback;
 }
 
-/**
- * Default controlled roots for a token-bound node. Never trusts arbitrary
- * absolute paths. Callers may extend via ANET_UPLOAD_ROOTS (colon-separated).
- */
 export function defaultControlledUploadRoots(opts: {
   home?: string;
   alias?: string;
@@ -119,20 +119,16 @@ export function defaultControlledUploadRoots(opts: {
   }
   roots.push(join(home, ".anet", "cache", "attachments"));
   if (opts.nodeDir) roots.push(opts.nodeDir);
-  // Grok Build ACP generated assets (images/videos under session dirs)
   roots.push(join(home, ".grok", "sessions"));
   roots.push(join(home, ".grok", "images"));
-  // Feishu inbound drop zones
   roots.push("/work/feishu-attachments");
   if (env.ANET_FEISHU_MEDIA_DIR?.trim()) roots.push(env.ANET_FEISHU_MEDIA_DIR.trim());
-  // Explicit operator allowlist
   if (env.ANET_UPLOAD_ROOTS?.trim()) {
     for (const part of env.ANET_UPLOAD_ROOTS.split(":")) {
       const p = part.trim();
       if (p) roots.push(p);
     }
   }
-  // Cwd only when it sits under home/.anet or home/.grok (never whole $HOME)
   const cwd = opts.cwd ?? process.cwd();
   try {
     const cwdReal = realpathSync(cwd);
@@ -145,10 +141,27 @@ export function defaultControlledUploadRoots(opts: {
   return roots;
 }
 
+/** True iff canonicalPath is strictly inside one of the allowlisted roots. */
+export function isPathInsideAllowedRoots(canonicalPath: string, allowedRoots: string[]): boolean {
+  for (const root of allowedRoots) {
+    if (!root) continue;
+    try {
+      if (!existsSync(root)) continue;
+      const rootReal = realpathSync(root);
+      const rel = relative(rootReal, canonicalPath);
+      if (rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) {
+        return true;
+      }
+    } catch {
+      /* unreadable roots are not trust roots */
+    }
+  }
+  return false;
+}
+
 /**
- * Resolve a user-supplied path to a canonical regular file under an
- * allowlisted root. Uses lstat to reject symlinks at the leaf, then
- * realpath + relative boundary check against each root.
+ * Resolve a user-supplied path to a canonical path under an allowlisted root.
+ * Does not open the file for reading — open+fstat+read is a separate same-fd step.
  */
 export function resolveControlledUploadPath(
   rawPath: string,
@@ -157,63 +170,167 @@ export function resolveControlledUploadPath(
   if (!rawPath || typeof rawPath !== "string" || !rawPath.trim()) {
     return { ok: false, error: "path_required", message: "path is required" };
   }
+  // LIVE NUL guard — must run before any fs syscall (adversarial finding #4).
+  if (rawPath.includes("\0")) {
+    return {
+      ok: false,
+      error: "path_nul",
+      message: "path must not contain NUL bytes",
+    };
+  }
   const input = rawPath.trim();
-  // Reject null bytes and obvious traversal tokens before fs access
-  if (input.includes("\0") || input.includes("..")) {
-    // Still allow ".." only if final realpath stays in root — but reject
-    // explicit ".." segments early for defense-in-depth against partial
-    // realpath failures. Full boundary is enforced below on canonical path.
+  if (!input) {
+    return { ok: false, error: "path_required", message: "path is required" };
   }
+  // Note: NUL already rejected on rawPath above (must stay single live gate so
+  // witnessed-red mutation that disables it is non-vacuous).
 
-  let lst: ReturnType<typeof lstatSync>;
-  try {
-    lst = lstatSync(input);
-  } catch {
-    return { ok: false, error: "path_not_found", message: "path does not exist" };
-  }
-  if (lst.isSymbolicLink()) {
-    return { ok: false, error: "path_symlink", message: "symlink paths are not allowed for upload" };
-  }
-  if (!lst.isFile()) {
-    return { ok: false, error: "path_not_regular", message: "path is not a regular file" };
-  }
-
+  // Reject symlink leaves before realpath via open(O_NOFOLLOW) path in reader;
+  // here we only realpath for allowlist placement of non-symlink paths.
+  // realpath follows intermediate symlink dirs; final leaf is re-checked at open.
   let fileReal: string;
   try {
     fileReal = realpathSync(input);
   } catch {
-    return { ok: false, error: "path_not_found", message: "path cannot be realpath'd" };
+    return { ok: false, error: "path_not_found", message: "path does not exist or cannot be realpath'd" };
   }
 
-  // Re-check after realpath (symlink parents are resolved)
+  if (!isPathInsideAllowedRoots(fileReal, allowedRoots)) {
+    return {
+      ok: false,
+      error: "path_untrusted",
+      message: "path is outside this node's controlled upload roots (generated assets / attachment cache only)",
+    };
+  }
+  return { ok: true, canonicalPath: fileReal };
+}
+
+export type ControlledFileBytes =
+  | { ok: true; bytes: Buffer; size: number; canonicalPath: string }
+  | ControlledUploadFail;
+
+/**
+ * Open → fstat(fd) → bounded read(fd) on the **same fd** (TOCTOU hard gate).
+ * Uses O_NOFOLLOW when available so a symlink swap at open is rejected.
+ * Never uses path-based readFileSync after the initial open.
+ */
+export function openFstatBoundedReadControlledFile(
+  canonicalPath: string,
+  allowedRoots: string[],
+  maxBytes: number = CONTROLLED_UPLOAD_MAX_BYTES,
+): ControlledFileBytes {
+  // Re-assert allowlist on the path we are about to open (defense in depth).
+  if (!isPathInsideAllowedRoots(canonicalPath, allowedRoots)) {
+    return {
+      ok: false,
+      error: "path_untrusted",
+      message: "path is outside this node's controlled upload roots",
+    };
+  }
+
+  const flags =
+    fsConstants.O_RDONLY
+    | (typeof fsConstants.O_NOFOLLOW === "number" ? fsConstants.O_NOFOLLOW : 0)
+    | (typeof (fsConstants as any).O_CLOEXEC === "number" ? (fsConstants as any).O_CLOEXEC : 0);
+
+  let fd: number;
   try {
-    const st = statSync(fileReal);
-    if (!st.isFile()) {
-      return { ok: false, error: "path_not_regular", message: "resolved path is not a regular file" };
+    fd = openSync(canonicalPath, flags);
+  } catch (e: any) {
+    const msg = e?.message ?? String(e);
+    // Linux ELOOP / EINVAL when O_NOFOLLOW hits a symlink leaf
+    if (e?.code === "ELOOP" || /symlink|ELOOP/i.test(msg)) {
+      return { ok: false, error: "path_symlink", message: "symlink paths are not allowed for upload" };
     }
-  } catch {
-    return { ok: false, error: "path_not_found", message: "resolved path missing" };
+    return { ok: false, error: "path_not_found", message: msg };
   }
 
-  for (const root of allowedRoots) {
-    if (!root) continue;
+  try {
+    // Same-fd identity: prefer /proc/self/fd/N real target when available.
     try {
-      if (!existsSync(root)) continue;
-      const rootReal = realpathSync(root);
-      const rel = relative(rootReal, fileReal);
-      if (rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) {
-        return { ok: true, canonicalPath: fileReal };
+      const viaProc = readlinkSync(`/proc/self/fd/${fd}`);
+      if (viaProc && !isPathInsideAllowedRoots(viaProc, allowedRoots)) {
+        return {
+          ok: false,
+          error: "path_untrusted",
+          message: "opened fd resolved outside controlled roots",
+        };
       }
     } catch {
-      /* unreadable roots are not trust roots */
+      /* non-Linux or restricted /proc — fstat + O_NOFOLLOW still apply */
     }
-  }
 
-  return {
-    ok: false,
-    error: "path_untrusted",
-    message: "path is outside this node's controlled upload roots (generated assets / attachment cache only)",
-  };
+    const st = fstatSync(fd);
+    if (st.isSymbolicLink?.() === true) {
+      return { ok: false, error: "path_symlink", message: "symlink fd rejected" };
+    }
+    if (!st.isFile()) {
+      return { ok: false, error: "path_not_regular", message: "path is not a regular file" };
+    }
+    if (st.size <= 0) {
+      return { ok: false, error: "path_empty", message: "file is empty" };
+    }
+    // Pre-check from fstat — still enforce again during read in case of growth.
+    if (st.size > maxBytes) {
+      return {
+        ok: false,
+        error: "payload_too_large",
+        message: `file exceeds ${maxBytes} byte limit (observed ${st.size})`,
+      };
+    }
+
+    // Bounded read from the same fd only. Never allocate more than maxBytes.
+    const chunks: Buffer[] = [];
+    let total = 0;
+    const chunk = Buffer.alloc(Math.min(CONTROLLED_UPLOAD_READ_CHUNK, maxBytes));
+    while (total < maxBytes) {
+      const toRead = Math.min(chunk.length, maxBytes - total);
+      let n: number;
+      try {
+        n = readSync(fd, chunk, 0, toRead, total);
+      } catch (e: any) {
+        return { ok: false, error: "read_failed", message: e?.message ?? "read failed" };
+      }
+      if (n === 0) break;
+      chunks.push(Buffer.from(chunk.subarray(0, n)));
+      total += n;
+      if (total > maxBytes) {
+        return {
+          ok: false,
+          error: "payload_too_large",
+          message: `file exceeds ${maxBytes} byte limit during read`,
+        };
+      }
+    }
+    // If we filled maxBytes, probe one more byte — file may have grown or lied.
+    if (total >= maxBytes) {
+      const probe = Buffer.alloc(1);
+      let extra = 0;
+      try {
+        extra = readSync(fd, probe, 0, 1, total);
+      } catch {
+        extra = 0;
+      }
+      if (extra > 0) {
+        return {
+          ok: false,
+          error: "payload_too_large",
+          message: `file exceeds ${maxBytes} byte limit (extra bytes after cap)`,
+        };
+      }
+    }
+    if (total <= 0) {
+      return { ok: false, error: "path_empty", message: "file is empty" };
+    }
+    return {
+      ok: true,
+      bytes: Buffer.concat(chunks, total),
+      size: total,
+      canonicalPath,
+    };
+  } finally {
+    try { closeSync(fd); } catch { /* ignore */ }
+  }
 }
 
 /**
@@ -238,45 +355,23 @@ export async function uploadControlledLocalFile(
     alias: deps.alias,
     nodeDir: deps.nodeDir,
   });
+
+  // NUL / allowlist resolve first (no open yet).
   const resolved = resolveControlledUploadPath(rawPath, roots);
   if (!resolved.ok) return resolved;
 
-  let size = 0;
-  try {
-    size = statSync(resolved.canonicalPath).size;
-  } catch (e: any) {
-    return { ok: false, error: "read_failed", message: e?.message ?? "stat failed" };
-  }
-  if (size <= 0) {
-    return { ok: false, error: "path_empty", message: "file is empty" };
-  }
-  if (size > CONTROLLED_UPLOAD_MAX_BYTES) {
-    return {
-      ok: false,
-      error: "payload_too_large",
-      message: `file exceeds ${CONTROLLED_UPLOAD_MAX_BYTES} byte limit (observed ${size})`,
-    };
-  }
+  // Same-fd fstat + bounded read (closes TOCTOU + full-slurp findings).
+  const file = openFstatBoundedReadControlledFile(
+    resolved.canonicalPath,
+    roots,
+    CONTROLLED_UPLOAD_MAX_BYTES,
+  );
+  if (!file.ok) return file;
 
-  let buf: Buffer;
-  try {
-    buf = readFileSync(resolved.canonicalPath);
-  } catch (e: any) {
-    return { ok: false, error: "read_failed", message: e?.message ?? "read failed" };
-  }
-  // belt: re-check after read
-  if (buf.byteLength > CONTROLLED_UPLOAD_MAX_BYTES) {
-    return {
-      ok: false,
-      error: "payload_too_large",
-      message: `file exceeds ${CONTROLLED_UPLOAD_MAX_BYTES} byte limit`,
-    };
-  }
-
-  const name = normalizeUploadName(opts.name ?? basename(resolved.canonicalPath));
+  const name = normalizeUploadName(opts.name ?? basename(file.canonicalPath));
   const mime = (opts.mime && opts.mime.slice(0, 100)) || sniffMime(name);
   const form = new FormData();
-  form.append("file", new Blob([new Uint8Array(buf)], { type: mime }), name);
+  form.append("file", new Blob([new Uint8Array(file.bytes)], { type: mime }), name);
 
   const url = `${deps.hubUrl.replace(/\/+$/, "")}/api/upload`;
   const fetchFn = deps.fetch ?? fetch;
@@ -320,7 +415,7 @@ export async function uploadControlledLocalFile(
     file_id: fileId,
     name: typeof body?.name === "string" && body.name ? normalizeUploadName(body.name, name) : name,
     mime: typeof body?.mime === "string" && body.mime ? body.mime.slice(0, 100) : mime,
-    size: typeof body?.size === "number" ? body.size : buf.byteLength,
+    size: typeof body?.size === "number" ? body.size : file.size,
     url: typeof body?.url === "string" ? body.url : `/api/files/${fileId}`,
   };
 }

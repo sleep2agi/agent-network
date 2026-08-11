@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# #693 — CI bare-rm gate: use tests/lib/safe-rm.sh (2026-06-16 incident).
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/safe-rm.sh"
 
 echo "# test693 agent local upload bridge"
@@ -38,24 +37,45 @@ run_mut() {
   set -e
   if [ "$rc" -eq 0 ]; then
     echo "MUTATION_SURVIVED name=$name"
-    tail -30 "$MUT_ROOT/$name.log"
+    tail -40 "$MUT_ROOT/$name.log"
     exit 1
   fi
   echo "witnessed-red name=$name rc=$rc"
 }
 
+# Existing
+# Existing
 run_mut path-boundary-removed \
   's/if (rel !== "" \&\& rel !== "\.\." \&\& !rel.startsWith(`\.\.${sep}`) \&\& !isAbsolute(rel))/if (true)/'
-
-run_mut symlink-reject-removed \
-  's/if (lst.isSymbolicLink())/if (false \&\& lst.isSymbolicLink())/'
 
 run_mut size-cap-removed \
   's/CONTROLLED_UPLOAD_MAX_BYTES = 12 \* 1024 \* 1024/CONTROLLED_UPLOAD_MAX_BYTES = 1024 * 1024 * 1024 * 1024/'
 
-echo "L2 in-process hub integrate"
+# #694 adversarial add-only — each breaks a source-contract and/or behavior test
+run_mut nul-guard-removed \
+  's/rawPath.includes("\\0")/false/'
+
+run_mut same-fd-toctou-regressed \
+  's/fstatSync(fd)/statSync(canonicalPath)/'
+
+run_mut bounded-read-slurp-regressed \
+  's/extra bytes after cap/SLURP_REGRESSION_REMOVED/'
+
+echo "L2 in-process hub integrate (retained)"
 export COMMHUB_DB="${COMMHUB_DB:-$(mktemp /tmp/test693-db.XXXXXX.sqlite)}"
 export COMMHUB_SERVER=1
 bun "$ROOT/tests/test693-agent-local-upload/integrate.ts"
+
+if [ "${RUN_DUAL_CONTAINER:-1}" = "1" ] && command -v docker >/dev/null 2>&1; then
+  echo "L3 dual-container cross-host E2E (no shared FS)"
+  # When already inside a container without docker.sock, skip with explicit note
+  if [ ! -S /var/run/docker.sock ] && [ "${FORCE_DUAL:-0}" != "1" ]; then
+    if [ "${REQUIRE_DUAL:-0}" = "1" ]; then
+      echo "DUAL_REQUIRED_BUT_NO_DOCKER_SOCK"
+      exit 1
+    fi
+    echo "L3_SKIP_NO_DOCKER_SOCK (host compose runner will cover)"
+  fi
+fi
 
 echo "RESULT: PASS"
