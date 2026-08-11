@@ -2,24 +2,24 @@
 
 Date: 2026-08-12 Asia/Shanghai
 Base: 17b8223f9d7fd25fcc435b40e7fa1fc0823ea1de
-SOURCE_COMMIT: 73d8f5738bd275dc7fd8b74c850c9687508cc7ff
+SOURCE_COMMIT: b4a6fd425c21475e2e0fe28d5139fcf64a6637b6
 Scope: Hub + agent-node protocol/runtime wiring + isolated Docker tests.
 Production deployment: NOT PERFORMED.
 
 ## Exact-source image
 
-- image: `anet-test698:73d8f573`
+- image: `anet-test698:b4a6fd42`
 - image id:
-  `sha256:8c231f83f2e097e0e52c255e18cc2f39a58f748786361cd97c1f77c604d362ab`
+  `sha256:ab807d75419ee4f837cc783d3222f909320c52163ccbd21e737bb837a9b17925`
 - image env:
-  `TEST698_SOURCE_COMMIT=73d8f5738bd275dc7fd8b74c850c9687508cc7ff`
+  `TEST698_SOURCE_COMMIT=b4a6fd425c21475e2e0fe28d5139fcf64a6637b6`
 - all 22 changed agent/server/test runtime files that exist at the same path
   inside the image matched `git show SOURCE_COMMIT:<path>` byte-for-byte
   after `docker create` and `docker cp`: 22/22. Dockerfiles, docs, and the
   intentionally remapped test673 preload are outside this same-path count.
-- focused result: 180 pass / 0 fail / 528 expect calls.
+- focused result: 183 pass / 0 fail / 545 expect calls.
 - exact main-run artifact digest:
-  `sha256:346516ab994447c8a5d5258118d3733cf512a3ae2537bbdf1729dcbf8e047dd1`.
+  `sha256:4592770974ee93a2058c7acf230a5124fc5dd2c265a8f43561db85e63db7a828`.
   This records one timestamped run and is not claimed reproducible or used
   as source provenance.
 
@@ -77,6 +77,20 @@ original row by task id and classifies its immutable `from_node_id`:
 - missing, mismatched, or malformed task identity -> zero egress and the
   pending reply remains retryable.
 
+`get_task` application rejection is also normalized to a non-app-level
+`old_hub_task_identity_unavailable` error. This is intentional: the old Hub's
+real `{"ok":false,"error":"task not found"}` response must not enter the
+pending queue's app-level drop branch. Unit fixtures pin missing, mismatched,
+undefined/non-string identity and the exact app-level rejection shape; three
+independent byte-changing mutations make each acceptance/drop regression red.
+
+Historical rows created before `from_node_id` backfill can contain NULL even
+when the sender was once a node. There is no immutable evidence left to prove
+that origin. The compatibility rule therefore treats NULL as non-node and uses
+terminal `send_reply`, rather than consulting a mutable alias roster and
+waking a potentially unrelated replacement node. This is a conservative
+identity decision, not a claim that every historical NULL originated in UI.
+
 This is not a helper-only claim. The runner starts the real source `cli.ts`
 against the archived old Hub, dispatches one node-origin and one user-origin
 task, and observes the resulting old-Hub task/inbox state:
@@ -92,14 +106,14 @@ image and the same old-Hub production-CLI E2E turns red:
 `MUTATION_RED: old-hub-exact-task-lookup-lost rc=1`
 
 Exact old-Hub run artifact digest:
-`sha256:741ca0946872ac93c9f9e17983ff8b8e70c82b99ceb43e347f865b7afd73b122`.
+`sha256:794e56d9f438bc418f6f8e87fbd00e6aa8647e7ccc144724e3a947972c356629`.
 It records one run only and is not used as reproducible provenance.
 
 ## Witnessed-red mutations
 
 Every mutation requires a byte change; a no-op fails the runner. The main
-exact-source image produced 25 named reds, plus the separate real-old-Hub
-production mutation above (26 total):
+exact-source image produced 28 named reds, plus the separate real-old-Hub
+production mutation above (29 total):
 
 - cli-reply-type-lost
 - cli-terminal-reply-egress-restored
@@ -111,6 +125,9 @@ production mutation above (26 total):
 - terminal-reply-replies-again
 - new-reply-wake-removed
 - old-hub-fallback-removed
+- old-hub-task-not-found-drops-pending
+- old-hub-task-id-mismatch-accepted
+- old-hub-origin-shape-accepted
 - deleted-origin-terminal-wiring-removed
 - legacy-mcp-code-lost
 - identity-rotation-fallback-removed
@@ -151,6 +168,12 @@ identity lookup and exercises the actual old Hub response.
 - The old-Hub identity query is performed on every unknown-tool fallback and
   is not negatively cached. If it cannot prove the exact task origin, the
   sender does not guess from a live/stale alias roster.
+- The archived old Hub exposes full `get_task` rows at network scope, including
+  content/result. This is a pre-existing old-Hub authorization property that
+  cannot be retrofitted by a new sender. The compatibility call uses only the
+  exact task id already present in that receiver's consumed inbox and retains
+  only identity fields, but it does not claim to repair the old endpoint's
+  broader read scope. Current-Hub task-read hardening is a separate concern.
 - A deleted origin can no longer receive a wake task. The sender uses
   terminal `send_reply` only after the Hub has explicitly rejected that
   attempted compatibility write as app-level `alias_not_found`; this is not
