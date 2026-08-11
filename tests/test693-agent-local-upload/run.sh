@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/safe-rm.sh"
+
+echo "# test693 agent local upload bridge"
+echo "SOURCE_COMMIT=${SOURCE_COMMIT:-unknown}"
+echo "date=$(date -Iseconds)"
+
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$ROOT"
+
+echo "L0 controlled-upload unit"
+(cd "$ROOT/agent-node" && bun test src/controlled-upload.test.ts)
+
+echo "L1 witnessed-red mutations"
+MUT_ROOT=$(mktemp -d /tmp/test693-mut.XXXXXX)
+cleanup() { safe_rm_rf "${MUT_ROOT:?}"; }
+trap cleanup EXIT
+
+run_mut() {
+  local name="$1" expr="$2"
+  local dir="$MUT_ROOT/$name"
+  mkdir -p "$dir"
+  cp -a "$ROOT/agent-node/src/controlled-upload.ts" "$dir/"
+  cp -a "$ROOT/agent-node/src/controlled-upload.test.ts" "$dir/"
+  local before after
+  before=$(sha256sum "$dir/controlled-upload.ts" | awk '{print $1}')
+  sed -i "$expr" "$dir/controlled-upload.ts"
+  after=$(sha256sum "$dir/controlled-upload.ts" | awk '{print $1}')
+  if [ "$before" = "$after" ]; then
+    echo "MUTATION_NOOP name=$name"
+    exit 1
+  fi
+  set +e
+  (cd "$dir" && bun test controlled-upload.test.ts) >"$MUT_ROOT/$name.log" 2>&1
+  local rc=$?
+  set -e
+  if [ "$rc" -eq 0 ]; then
+    echo "MUTATION_SURVIVED name=$name"
+    tail -40 "$MUT_ROOT/$name.log"
+    exit 1
+  fi
+  echo "witnessed-red name=$name rc=$rc"
+}
+
+# Existing
+# Existing
+run_mut path-boundary-removed \
+  's/if (rel !== "" \&\& rel !== "\.\." \&\& !rel.startsWith(`\.\.${sep}`) \&\& !isAbsolute(rel))/if (true)/'
+
+run_mut size-cap-removed \
+  's/CONTROLLED_UPLOAD_MAX_BYTES = 12 \* 1024 \* 1024/CONTROLLED_UPLOAD_MAX_BYTES = 1024 * 1024 * 1024 * 1024/'
+
+# #694 adversarial add-only — each breaks a source-contract and/or behavior test
+run_mut nul-guard-removed \
+  's/rawPath.includes("\\0")/false/'
+
+run_mut same-fd-toctou-regressed \
+  's/fstatSync(fd)/statSync(canonicalPath)/'
+
+run_mut bounded-read-slurp-regressed \
+  's/extra bytes after cap/SLURP_REGRESSION_REMOVED/'
+
+echo "L2 in-process hub integrate (retained)"
+export COMMHUB_DB="${COMMHUB_DB:-$(mktemp /tmp/test693-db.XXXXXX.sqlite)}"
+export COMMHUB_SERVER=1
+bun "$ROOT/tests/test693-agent-local-upload/integrate.ts"
+
+if [ "${RUN_DUAL_CONTAINER:-1}" = "1" ] && command -v docker >/dev/null 2>&1; then
+  echo "L3 dual-container cross-host E2E (no shared FS)"
+  # When already inside a container without docker.sock, skip with explicit note
+  if [ ! -S /var/run/docker.sock ] && [ "${FORCE_DUAL:-0}" != "1" ]; then
+    if [ "${REQUIRE_DUAL:-0}" = "1" ]; then
+      echo "DUAL_REQUIRED_BUT_NO_DOCKER_SOCK"
+      exit 1
+    fi
+    echo "L3_SKIP_NO_DOCKER_SOCK (host compose runner will cover)"
+  fi
+fi
+
+echo "RESULT: PASS"

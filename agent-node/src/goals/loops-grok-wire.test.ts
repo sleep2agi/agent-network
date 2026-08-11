@@ -88,3 +88,25 @@ describe("grok ACP MCP injection — RFC-025 M3 wire", () => {
     expect(commhubAuth).not.toBe(loopsAuth);
   });
 });
+
+describe("grok ACP MCP injection — #693 upload stdio", () => {
+  test("adds stdio commhub_upload when uploadMcpCommand provided", () => {
+    const servers = buildGrokMcpServers({
+      commhubUrl: "http://127.0.0.1:9200",
+      alias: "g1",
+      authToken: "ntok_abc",
+      uploadMcpCommand: "bun",
+      uploadMcpArgs: ["/app/upload-file-mcp-stdio.js"],
+      nodeDir: "/home/x/.anet/nodes/n1",
+    });
+    expect(servers.length).toBe(2);
+    const up = servers[1] as any;
+    expect(up.name).toBe("commhub_upload");
+    expect(up.command).toBe("bun");
+    expect(up.args).toEqual(["/app/upload-file-mcp-stdio.js"]);
+    expect(up.env.some((e: any) => e.name === "COMMHUB_TOKEN" && e.value === "ntok_abc")).toBe(true);
+    expect(up.env.some((e: any) => e.name === "ANET_NODE_DIR")).toBe(true);
+    // no type field on stdio variant
+    expect(up.type).toBeUndefined();
+  });
+});

@@ -29,7 +29,7 @@ import {
   validateAttachments,
   validateIndexEntry,
 } from "./uploads.js";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync } from "fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync, unlinkSync, renameSync } from "fs";
 import { dirname as pathDirname } from "path";
 import { startRetentionSweeper } from "./retention.js";
 import { startStaleSessionSweeper } from "./stale-sweeper.js";
@@ -1985,14 +1985,14 @@ return Bun.serve({
       try {
         mkdirSync(pathDirname(storage.absolutePath), { recursive: true });
         const buf = Buffer.from(await file.arrayBuffer());
-        writeFileSync(storage.absolutePath, buf);
+        // #693 — write blob to .tmp then rename for crash-safe durability.
+        const tmpPath = storage.absolutePath + ".tmp";
+        writeFileSync(tmpPath, buf);
         // Defense-in-depth: after writing, confirm the path still sits
         // inside the uploads root (catches a symlink swap or root env
         // poisoning across processes).
-        if (!isPathInsideUploadsRoot(storage.absolutePath)) {
-          // Refuse to acknowledge a write that landed outside the root.
-          // Don't try to clean up — better to keep evidence on disk than
-          // chase a symlink for cleanup.
+        if (!isPathInsideUploadsRoot(tmpPath) || !isPathInsideUploadsRoot(storage.absolutePath)) {
+          try { unlinkSync(tmpPath); } catch { /* best-effort */ }
           console.error("[/api/upload] write escaped uploads root:", storage.absolutePath);
           return withCors(req, Response.json({ ok: false, error: "internal_path_escape" }, { status: 500 }));
         }
@@ -2015,6 +2015,18 @@ return Bun.serve({
             ...(uploadNetId ? { network_id: uploadNetId } : {}),
             uploaded_at: new Date().toISOString(),
           }, null, 2));
+        } else {
+          // No index path → refuse to leave an unindexed blob.
+          try { unlinkSync(tmpPath); } catch { /* best-effort */ }
+          return withCors(req, Response.json({ ok: false, error: "index_path_error" }, { status: 500 }));
+        }
+        // Index first, then publish blob via rename — if rename fails, drop index.
+        try {
+          renameSync(tmpPath, storage.absolutePath);
+        } catch (renameErr: any) {
+          try { unlinkSync(tmpPath); } catch { /* best-effort */ }
+          try { if (idxPath) unlinkSync(idxPath); } catch { /* best-effort */ }
+          throw renameErr;
         }
       } catch (e: any) {
         console.error("[/api/upload] write failed:", e?.message);

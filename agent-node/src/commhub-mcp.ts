@@ -30,6 +30,11 @@
 import type { McpSdkServerConfigWithInstance, SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { renderTaskTrace, safeTaskTraceError, taskTraceEvent } from "./task-trace";
+import {
+  defaultControlledUploadRoots,
+  uploadControlledLocalFile,
+} from "./controlled-upload";
+
 
 interface CallToolContent { type: "text"; text: string }
 
@@ -233,26 +238,55 @@ export async function createCommhubSdkMcpServer(
         },
         fwd("send_message"),
       ),
-      // NOTE: `send_reply` tool removed (2026-06-28, 通信龙 dispatch).
-      //
-      // The agent-facing schema declared `{task_id, text, status}` but the
-      // server's send_reply MCP tool expects `{alias, in_reply_to, text,
-      // status}`. The forwarder (`injectAgentFromSession`) only injects
-      // `from_session` — it doesn't remap `task_id → in_reply_to` or
-      // synthesize the required `alias` arg. So every agent invocation
-      // bounced with JSON-RPC -32602 "Invalid arguments" before reaching
-      // any server-side code path. Dead-on-arrival since 2026-05-15.
-      //
-      // The agent does NOT need this tool: every task it receives is
-      // auto-replied via cli.ts:806 `sendReply()` (the runtime calls the
-      // server-side send_reply with the correct shape after `processTask`
-      // returns). For peer-to-peer dispatch chaining the agent uses
-      // `send_task` (which IS wired correctly). CLAUDE.md already
-      // documents this. Keeping the broken tool only confused LLMs into
-      // failing tool calls.
-      //
-      // Server-side send_reply (server/src/tools.ts) is UNCHANGED — the
-      // auto-reply path uses it and works.
+      // #693 — re-introduced with CORRECT hub schema (alias + in_reply_to +
+      // attachments). Prior schema used task_id and was dead-on-arrival.
+      // Prefer auto-reply for text-only; use this when attaching file_id(s)
+      // from upload_file so Dashboard shows real attachments.
+      tool(
+        "send_reply",
+        "Reply to a Dashboard/UI task with optional attachments. attachments items MUST use type:\"file\" and a hub file_id from upload_file — raw local paths are rejected. For agent-to-agent replies prefer send_task.",
+        {
+          alias: z.string().describe("Target session alias (usually the task originator)"),
+          text: z.string().describe("Reply text"),
+          in_reply_to: z.string().optional().describe("Original task_id"),
+          status: z.enum(["replied", "failed", "cancelled"]).optional(),
+          attachments: z.any().optional().describe("[{type:\"file\", file_id, name?, mime?, size?}] from upload_file"),
+          meta: z.any().optional(),
+        },
+        fwd("send_reply"),
+      ),
+      tool(
+        "upload_file",
+        "Upload a controlled local file (generated image/attachment under this node\'s allowlisted dirs) to CommHub Hub. Returns {file_id,name,mime,size}. Then pass file_id into send_reply/send_task attachments — NEVER pass raw local paths. Rejects path traversal, symlinks, and files outside controlled roots. Max 12 MiB. Cross-host safe.",
+        {
+          path: z.string().describe("Local path under controlled roots (e.g. generated image path)"),
+          name: z.string().optional().describe("Optional display filename"),
+          mime: z.string().optional().describe("Optional MIME type"),
+        },
+        async (args: unknown) => {
+          const a = (args && typeof args === "object" && !Array.isArray(args))
+            ? args as Record<string, unknown>
+            : {};
+          const alias = await resolveAlias();
+          const result = await uploadControlledLocalFile(String(a.path ?? ""), {
+            hubUrl,
+            authToken: token || "",
+            alias,
+            nodeDir: process.env.ANET_NODE_DIR || undefined,
+            allowedRoots: defaultControlledUploadRoots({
+              alias,
+              nodeDir: process.env.ANET_NODE_DIR || undefined,
+            }),
+          }, {
+            name: typeof a.name === "string" ? a.name : undefined,
+            mime: typeof a.mime === "string" ? a.mime : undefined,
+          });
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify(result) }],
+            isError: !result.ok,
+          };
+        },
+      ),
       tool(
         "get_all_status",
         "Get status of all sessions in the current network (or globally for admin tokens). Use this to see who is online before send_task.",

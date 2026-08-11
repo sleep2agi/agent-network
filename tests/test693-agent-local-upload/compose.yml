@@ -1,0 +1,52 @@
+# #693 dual-container cross-host E2E — agent FS ≠ hub FS; only HTTP.
+services:
+  hub:
+    image: anet-test693:dev
+    environment:
+      SOURCE_COMMIT: ${SOURCE_COMMIT:-unknown}
+      PORT: "9200"
+      HOST: "0.0.0.0"
+      COMMHUB_SERVER: "1"
+      COMMHUB_DB: /hub-data/commhub.db
+      COMMHUB_UPLOADS_DIR: /hub-data/uploads
+    volumes:
+      - hub_data:/hub-data
+    # deliberately NOT mounting agent volume
+    networks: [test693net]
+    command: ["bash", "/workspace/tests/test693-agent-local-upload/hub-entrypoint.sh"]
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:9200/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 1s
+      timeout: 3s
+      retries: 60
+
+  agent:
+    image: anet-test693:dev
+    environment:
+      SOURCE_COMMIT: ${SOURCE_COMMIT:-unknown}
+      COMMHUB_URL: http://hub:9200
+      AGENT_DATA_DIR: /agent-data
+      HOME: /agent-data
+    volumes:
+      - agent_data:/agent-data
+    # deliberately NOT mounting hub_data
+    networks: [test693net]
+    depends_on:
+      hub:
+        condition: service_healthy
+    command:
+      - bash
+      - -lc
+      - |
+        set -euo pipefail
+        # Prove hub volume is not present
+        if [ -d /hub-data ]; then echo SHARED_FS_LEAK; exit 1; fi
+        bun /workspace/tests/test693-agent-local-upload/agent-e2e.ts
+
+networks:
+  test693net:
+    driver: bridge
+
+volumes:
+  hub_data:
+  agent_data:

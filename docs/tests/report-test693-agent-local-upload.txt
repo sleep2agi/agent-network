@@ -1,0 +1,57 @@
+Agent Network #693/#694 — controlled upload bridge (FROZEN after adversarial add-only)
+Date: 2026-08-11
+
+Repository: sleep2agi/agent-network
+Branch: fix/693-agent-local-upload-bridge
+Draft PR: https://github.com/sleep2agi/agent-network/pull/694
+Base: d5199bc96bf72643a1ed34f476572394995725cb
+Source commit under test (FROZEN): 662539bdcfea0760870cdce6e8f861a829b8dcce
+Docker tag: anet-test693:dev
+Docker image ID: sha256:ad7dcaa23cf4419033fed344839af1a87efd8d21c83db269de69869af0ec9497
+Embedded ENV: SOURCE_COMMIT=662539bdcfea0760870cdce6e8f861a829b8dcce
+Runner output SHA256: 30ba2cbef4e9abc17f10a148ec5aadddc6309e008e07810813d72162631584c2
+
+Commands:
+  docker build -t anet-test693:dev --build-arg SOURCE_COMMIT=662539bdcfea0760870cdce6e8f861a829b8dcce -f tests/test693-agent-local-upload/Dockerfile .
+  docker run --rm -e SOURCE_COMMIT=662539bdcfea0760870cdce6e8f861a829b8dcce anet-test693:dev
+  SOURCE_COMMIT=662539bdcfea0760870cdce6e8f861a829b8dcce bash tests/test693-agent-local-upload/run-dual.sh
+
+Result: PASS
+
+## Adversarial #694 DO-NOT-MERGE fixes (this freeze)
+
+1. Dual-container true HTTP, no shared FS
+   - compose.yml: hub volume hub_data only; agent volume agent_data only
+   - agent asserts /hub-data absent; upload→file_id→send_reply→download sha256 match
+   - DUAL_CONTAINER_E2E_PASS
+
+2. TOCTOU same-fd
+   - openSync(O_RDONLY|O_NOFOLLOW) → fstatSync(fd) → readSync(fd, …)
+   - no path-based readFileSync/stat after open in reader
+
+3. 12 MiB bounded read
+   - chunked read with maxBytes cap + extra-byte probe ("extra bytes after cap")
+   - oversize rejected via fstat pre-check and mid-read probe
+
+4. Live NUL guard
+   - rawPath.includes("\0") → error path_nul before any fs syscall
+
+## Assertions
+  L0 unit: 21 pass / 0 fail / 51 expect()
+  L1 witnessed-red (byte-change guarded):
+    path-boundary-removed rc=1
+    size-cap-removed rc=1
+    nul-guard-removed rc=1
+    same-fd-toctou-regressed rc=1
+    bounded-read-slurp-regressed rc=1
+  L2 in-process hub integrate: PASS
+  L3 dual-container E2E: DUAL_CONTAINER_E2E_PASS
+
+## NOT COVERED (unchanged policy)
+  - Live Grok image_gen production UAT (post Vincent GO)
+  - Concurrent rate-limit storm idempotency (reviewer discretion)
+  - Full multi-arch matrix
+
+Production boundary: no production assets modified. HOLD pending Vincent GO.
+Coordinates FROZEN — implementer will not move without gatekeeper request.
+Report contains no tokens or host private paths.
