@@ -20,6 +20,11 @@ import { execSync } from "child_process";
 import { encodeCwd } from "./project-key";
 import { loadOwnerOnlyEnvFile } from "./owner-env-file";
 import {
+  defaultControlledUploadRoots,
+  uploadControlledLocalFile,
+} from "./controlled-upload";
+
+import {
   appendChannelAttachmentPaths,
   channelAttachmentCacheDir,
   downloadChannelAttachments,
@@ -168,6 +173,7 @@ const OUTBOUND_TOOL_NAMES = new Set([
   "commhub_send_task",
   "commhub_send_message",
   "commhub_get_all_status",
+  "commhub_upload_file",
 ]);
 
 mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -236,6 +242,19 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: "object" as const,
         properties: {},
+      },
+    },
+    {
+      name: "commhub_upload_file",
+      description: "Upload a controlled local file to CommHub (returns file_id for attachments). Max 12 MiB. Rejects path traversal/symlinks/untrusted roots. Cross-host: streams bytes to Hub /api/upload.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          path: { type: "string", description: "Local path under controlled roots" },
+          name: { type: "string", description: "Optional display filename" },
+          mime: { type: "string", description: "Optional MIME type" },
+        },
+        required: ["path"],
       },
     },
   ].filter((tool) => !OUTBOUND_ONLY || OUTBOUND_TOOL_NAMES.has(tool.name)),
@@ -378,6 +397,27 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req: any) => {
   if (name === "commhub_get_all_status") {
     const result = await callCommHub("get_all_status", {});
     return { content: [{ type: "text", text: JSON.stringify(result) }] };
+  }
+
+  if (name === "commhub_upload_file") {
+    const { path: filePath, name: fileName, mime } = args as any;
+    const result = await uploadControlledLocalFile(String(filePath || ""), {
+      hubUrl: COMMHUB_URL,
+      authToken: AUTH_TOKEN || "",
+      alias: ALIAS,
+      nodeDir: process.env.ANET_NODE_DIR || undefined,
+      allowedRoots: defaultControlledUploadRoots({
+        alias: ALIAS,
+        nodeDir: process.env.ANET_NODE_DIR || undefined,
+      }),
+    }, {
+      name: typeof fileName === "string" ? fileName : undefined,
+      mime: typeof mime === "string" ? mime : undefined,
+    });
+    return {
+      isError: !result.ok,
+      content: [{ type: "text", text: JSON.stringify(result) }],
+    };
   }
 
   return { content: [{ type: "text", text: JSON.stringify({ error: "unknown tool" }) }] };

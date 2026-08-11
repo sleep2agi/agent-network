@@ -3318,12 +3318,23 @@ async function processWithGrok(
   // a cli.ts edit would silently drift past the wire tests). All env/
   // ALIAS/AUTH_TOKEN/COMMHUB_URL reads stay here; the helper is pure.
   const { buildGrokMcpServers } = await import("./goals/loops-grok-wire");
+  // #693 — local stdio MCP: controlled path → Hub file_id (cross-host upload bridge)
+  const uploadMcpHere = new URL(".", import.meta.url).pathname;
+  const uploadMcpEntry = [
+    join(uploadMcpHere, "upload-file-mcp-stdio.js"),
+    join(uploadMcpHere, "upload-file-mcp-stdio.ts"),
+  ].find((c) => existsSync(c));
   const grokMcpServers = buildGrokMcpServers({
     commhubUrl: COMMHUB_URL,
     alias: ALIAS,
     authToken: AUTH_TOKEN || undefined,
     loopsUrl: process.env.LOOPS_MCP_URL,
     loopsToken: process.env.LOOPS_MCP_TOKEN,
+    uploadMcpCommand: uploadMcpEntry
+      ? (uploadMcpEntry.endsWith(".ts") ? (process.env.BUN_BIN || "bun") : process.execPath)
+      : undefined,
+    uploadMcpArgs: uploadMcpEntry ? [uploadMcpEntry] : undefined,
+    nodeDir: typeof NODE_DIR === "string" ? NODE_DIR : undefined,
   });
 
   // #204 preview.7 — per-node isolated cwd. preview.2 → preview.6 chain

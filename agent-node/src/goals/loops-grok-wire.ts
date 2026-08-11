@@ -15,12 +15,20 @@ export interface GrokMcpHeader {
   value: string;
 }
 
-export interface GrokMcpServerEntry {
-  type: "http";
-  name: string;
-  url: string;
-  headers: GrokMcpHeader[];
-}
+export type GrokMcpServerEntry =
+  | {
+      type: "http";
+      name: string;
+      url: string;
+      headers: GrokMcpHeader[];
+    }
+  | {
+      // ACP Stdio variant — no `type` discriminator (untagged enum).
+      name: string;
+      command: string;
+      args: string[];
+      env: GrokMcpHeader[]; // reused {name,value} shape
+    };
 
 export interface BuildGrokMcpServersOpts {
   commhubUrl: string;
@@ -28,6 +36,10 @@ export interface BuildGrokMcpServersOpts {
   authToken?: string;
   loopsUrl?: string;
   loopsToken?: string;
+  /** #693 — absolute path to upload-file-mcp-stdio entry (bun/node script). */
+  uploadMcpCommand?: string;
+  uploadMcpArgs?: string[];
+  nodeDir?: string;
 }
 
 export function buildGrokMcpServers(opts: BuildGrokMcpServersOpts): GrokMcpServerEntry[] {
@@ -46,6 +58,26 @@ export function buildGrokMcpServers(opts: BuildGrokMcpServersOpts): GrokMcpServe
     url: `${opts.commhubUrl}/mcp`,
     headers: commhubHeaders,
   }];
+
+  // #693 — local stdio MCP: controlled path → Hub /api/upload → file_id.
+  // Path safety stays on the agent host; Hub never assumes shared FS.
+  if (opts.uploadMcpCommand) {
+    const env: GrokMcpHeader[] = [
+      { name: "COMMHUB_URL", value: opts.commhubUrl },
+    ];
+    if (opts.authToken) env.push({ name: "COMMHUB_TOKEN", value: opts.authToken });
+    if (opts.alias) {
+      env.push({ name: "COMMHUB_ALIAS", value: opts.alias });
+      env.push({ name: "ANET_UPLOAD_ALIAS", value: opts.alias });
+    }
+    if (opts.nodeDir) env.push({ name: "ANET_NODE_DIR", value: opts.nodeDir });
+    servers.push({
+      name: "commhub_upload",
+      command: opts.uploadMcpCommand,
+      args: opts.uploadMcpArgs ?? [],
+      env,
+    });
+  }
 
   if (opts.loopsUrl && opts.loopsToken) {
     const loopHeaders: GrokMcpHeader[] = [
