@@ -1,0 +1,111 @@
+# test698 — capability-negotiated atomic peer reply
+
+Date: 2026-08-12 Asia/Shanghai
+Base: 17b8223f9d7fd25fcc435b40e7fa1fc0823ea1de
+SOURCE_COMMIT: 61772bcc1f4f4bdae465d945a5c8882bf7639e6b
+Scope: Hub + agent-node protocol/runtime wiring + RFC + isolated Docker tests.
+Production deployment: NOT PERFORMED.
+
+## Exact-source image
+
+- image: `anet-test698:61772bcc`
+- image id: `sha256:1e503f535c6882b8b88c93d63263a2f628cb3f28f42d4a5a6ef26f7069f0c6ca`
+- image env: `TEST698_SOURCE_COMMIT=61772bcc1f4f4bdae465d945a5c8882bf7639e6b`
+- changed executable/test files inside the image compared with
+  `git show SOURCE_COMMIT:<path>`: 24/24 byte-identical (RFC excluded because
+  the image deliberately does not copy docs).
+- No reproducible runner-log digest is claimed. The runner embeds timestamps
+  and random test identifiers; a local digest would change on an honest rerun.
+
+Focused result: 175 pass / 0 fail / 512 expect calls.
+
+## Product behavior evidence
+
+1. `send_peer_reply` performs one transaction containing exact node-token
+   ownership validation, terminal task update, scheduled-run terminalization,
+   and one `requires_response=none` inbox result. Injected task/run failures
+   roll all three data surfaces back.
+2. Recipient capability is current-session authority only: every token-bound
+   heartbeat writes 1 or 0, historical node snapshots are not authoritative,
+   and a live SSE connection is required.
+3. A task dispatched before node-id/token rotation receives an atomic
+   `reply_task_not_owned` with zero writes, then exactly one legacy task marked
+   `peer_reply_legacy_fallback=true` and reason `identity_changed`. A wrong
+   reply target remains a hard error and never falls back.
+4. Dashboard/human/hub/scheduler task origins have `from_node_id=NULL`. The Hub
+   returns the distinct zero-write signal `peer_reply_origin_not_node`; the
+   real sender then uses `send_reply`, terminalizes the original task, delivers
+   exactly one Dashboard reply, and creates zero child task rows. It never
+   attempts `send_task` to a user alias.
+5. The real `agent-node/src/cli.ts` ran against an isolated real Hub with a
+   deterministic SDK preload. A short terminal reply (`done`) arrived while
+   the peer cooldown was armed, overwrote the capture with its own prompt,
+   entered the runtime, and was ACKed without any reply egress.
+6. The real cli legacy-node path created one fallback task whose DB-read meta
+   contained `peer_reply_legacy_fallback=true` and the production-computed
+   reason `recipient_unsupported`; the test does not author that meta literal.
+7. #498 remains: legacy `send_reply` to an agent returns a migration warning;
+   hub/api Dashboard targets remain warning-free.
+
+## Real old-Hub wire
+
+`run-legacy-wire.sh` archives and builds the actual base
+`17b8223f9d7fd25fcc435b40e7fa1fc0823ea1de`, starts it on an isolated Docker
+network, and sends a real MCP `tools/call` for the absent `send_peer_reply`.
+The old Hub returned its real wire form:
+
+`result.isError: MCP error -32602: Tool send_peer_reply not found`
+
+The exact-source sender preserved code `-32602` and performed atomic=1,
+legacy-task=1 with reason `old_hub_unknown_tool`.
+
+Result: `LEGACY_HUB_WIRE_PASS code=-32602 atomic=1 legacy=1`
+
+## Witnessed-red mutations
+
+All mutations require a byte change; a no-op mutation fails the runner. All 21
+mutations returned non-zero for their named assertion:
+
+- cli-reply-type-lost
+- cli-terminal-reply-egress-restored
+- cli-new-reply-wake-disabled
+- cli-fallback-reason-lost
+- dashboard-origin-misrouted-to-task
+- terminal-reply-replies-again
+- new-reply-wake-removed
+- old-hub-fallback-removed
+- legacy-mcp-code-lost
+- identity-rotation-fallback-removed
+- capability-provenance-bypassed
+- recipient-capability-gate-removed
+- rollback-capability-clear-removed
+- legacy-fallback-marker-removed
+- reply-rename-canonicalization-removed
+- node-ownership-check-removed
+- task-terminalization-removed
+- reply-requires-response
+- scheduled-run-sync-removed
+- capability-advertisement-removed
+- legacy-agent-warning-removed
+
+The first four mutate production `cli.ts` and rerun the real-process behavior
+E2E. The fifth mutates the production Hub origin classifier and reruns the same
+real-process E2E. In particular, the reviewer-designed comparator-equivalent
+breakages (dropping reply actionability and dropping production fallback
+reason) now turn red for DB/runtime facts, not source strings.
+
+## Deployment and honest limits
+
+- Mixed-version order remains recipient-first: Hub, ordinary reply recipients
+  with a current capable heartbeat and live SSE, then codex-app-server senders.
+- New sender + old Hub node-to-node fallback is tested. New sender on an old
+  Hub cannot use the new origin-kind signal; deployment therefore must remain
+  Hub-first before any new sender is started.
+- No production DB, token, node, runtime, or fleet process was read or changed.
+- No live fleet rollout, production traffic cost measurement, or long-duration
+  SSE outage test was performed.
+- SSE emission occurs after transaction commit. Reconnect drains missed inbox
+  rows, but there is no independent periodic polling guarantee.
+- Legacy node-to-node fallback intentionally preserves the old two-task shape
+  during mixed-version/identity-transition cases. Its production metadata makes
+  the residual countable; it is not represented as atomic.
