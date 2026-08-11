@@ -1,6 +1,6 @@
 # test697 — Codex default model migration
 
-SOURCE_COMMIT=a9a5429edf1ffd9de498de0d62e2662b94591a8c
+SOURCE_COMMIT=56fa18d4d5dddd8b9de47ac772c92c4560eaefef
 BASE_COMMIT=17b8223f9d7fd25fcc435b40e7fa1fc0823ea1de
 DATE=2026-08-12 Asia/Shanghai
 
@@ -16,13 +16,13 @@ Scope
 
 Exact-source Docker evidence
 ----------------------------
-- image: `anet-test697:a9a5429e`
-- image id: `sha256:78d9c0982320e56e9bf2ae0f1cbff64fa3310fd35ff59faf9317ce48090ddc76`
-- image env: `TEST697_SOURCE_COMMIT=a9a5429edf1ffd9de498de0d62e2662b94591a8c`
+- image: `anet-test697:56fa18d4`
+- image id: `sha256:ff99b4d777079d1a53458765ec484f466a0d96339f4141b03596d10fe091870d`
+- image env: `TEST697_SOURCE_COMMIT=56fa18d4d5dddd8b9de47ac772c92c4560eaefef`
 - all 21 files changed from BASE through SOURCE matched their `/workspace`
   image copy byte-for-byte (21/21).
 - main run artifact digest:
-  `sha256:cbd4400b815640820073eda5dd9d36c1f545a9a2c2583fedeaa676254744130c`.
+  `sha256:764ea03c5cd24f451144e94c360fdf7a50ae7413f09c10371b7f28dbecd2a688`.
   It records this run only; timestamps and temporary paths make it
   intentionally non-reproducible and it is not used as provenance.
 
@@ -65,8 +65,14 @@ Main layered suite: PASS
   line-delimited fake app-server captures the direct-stdio `thread/start`
   params. All captured models are `gpt-5.6-sol`; neither fake transport
   contacts a vendor.
+- L7e: the same five production injection sites run again with the persisted
+  node model explicitly set to `o3`. Goal wake, normal SDK cold start,
+  persisted-session resume, forced retry, runtime log, and direct stdio all
+  preserve `o3` at the package/process boundary. This closes the distinction
+  between "the config and startup label retain an override" and "the model
+  actually sent by each task lane retains it".
 
-Twenty non-vacuous witnessed-red mutations: PASS
+Twenty-one non-vacuous witnessed-red mutations: PASS
 -------------------------------------------------
 - `denominator-retired-default` -> L1 production denominator.
 - `default-regressed` -> L4 real Hub create/config readback.
@@ -104,6 +110,11 @@ Twenty non-vacuous witnessed-red mutations: PASS
   turns red.
 - `stdio-model-injection-regressed` -> changes direct-stdio `thread/start`
   only; the fake app-server captures the wrong wire params and L7d turns red.
+- `explicit-runtime-model-ignored` -> requires exactly five production
+  occurrences and changes all five from `resolveCodexModel(MODEL)` to
+  `resolveCodexModel(undefined)`; config readback and startup label still look
+  correct, but L7e observes `gpt-5.6-sol` instead of explicit `o3` at the
+  package/process boundary and turns red.
 
 Every mutation requires a byte change; a no-op is a runner failure. The two
 label/value attacks use a two-anchor mutation helper with both anchors required,
@@ -114,7 +125,7 @@ Codex app-server timeout regression evidence on the exact image: PASS
 - This is a separate explicit Docker command against the exact image, not
   output produced by `tests/test697-codex-default-model/run.sh`.
 - Separate-command artifact digest:
-  `sha256:9771cdd2691edd222800c2e917ceb9b6c653129ab8294d03cc4f7669fb86dd2a`.
+  `sha256:d6684989b8dd63b37d2f1954270826fbe1bd89a8debd12bcacf03ed1c6140ef6`.
 - `runtime.test.ts`: 23 tests, 0 failures, 59 assertions.
 - app-server client/bridge/session-manager: 60 tests, 0 failures,
   224 assertions.
