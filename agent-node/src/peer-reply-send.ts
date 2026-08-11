@@ -13,6 +13,14 @@ export interface PeerReplySendDeps {
   sendAtomic: (args: PeerReplySendArgs) => Promise<any>;
   sendLegacy: (args: PeerReplySendArgs) => Promise<any>;
   sendLegacyReply: (args: PeerReplySendArgs) => Promise<any>;
+  /**
+   * An old Hub cannot classify the original task for us because it lacks
+   * send_peer_reply. Resolve the target against that Hub's live roster:
+   * agent target -> send_task wake path; non-agent target -> send_reply
+   * terminalization. Throw when the roster is unavailable so an ambiguous
+   * reply stays pending instead of choosing a lossy route.
+   */
+  isOldHubTargetAgent: (args: PeerReplySendArgs) => Promise<boolean>;
 }
 
 export interface PeerReplyCapabilityCache {
@@ -59,7 +67,11 @@ export async function sendPeerReplyCompatible(
     if (error instanceof CommHubError && error.code === "peer_reply_origin_not_node") {
       return { route: "legacy-reply", payload: await deps.sendLegacyReply(args) };
     }
-    const fallbackReason = isUnknownTool(error)
+    const oldHub = isUnknownTool(error);
+    if (oldHub && !(await deps.isOldHubTargetAgent(args))) {
+      return { route: "legacy-reply", payload: await deps.sendLegacyReply(args) };
+    }
+    const fallbackReason = oldHub
       ? "old_hub_unknown_tool" as const
       : error instanceof CommHubError
         && (error.code === "reply_task_not_owned" || error.code === "peer_reply_node_token_required")

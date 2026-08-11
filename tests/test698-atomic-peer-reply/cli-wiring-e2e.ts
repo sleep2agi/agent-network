@@ -195,6 +195,32 @@ try {
     throw new Error(`Dashboard reply misrouted replies=${dashboardReplies} children=${dashboardChildren}`);
   }
 
+  // The task origin is authoritative even when a legacy receiver token has
+  // no bound_node_id. This is a production-shaped regression fixture for the
+  // ordering bug where capability was checked before from_node_id=NULL and a
+  // Dashboard task became permanently stuck as peer_reply_unsupported.
+  direct.query("UPDATE api_tokens SET bound_node_id=NULL WHERE token_id=?1").run(receiver.token_id);
+  const unboundDashboardDispatch = await mcp(userToken, "send_task", {
+    alias: "receiver",
+    task: "Dashboard request answered by a legacy unbound receiver token",
+    from_session: "admin",
+    network_id: networkId,
+  });
+  const unboundDashboardTask = unboundDashboardDispatch.task_id || unboundDashboardDispatch.message_id;
+  await waitFor(() => direct.query<{ status: string }, [string]>(
+    "SELECT status FROM tasks WHERE task_id=?1",
+  ).get(unboundDashboardTask)?.status === "replied", "unbound Dashboard task terminalization", 300);
+  const unboundDashboardReplies = direct.query<{ n: number }, [string]>(
+    "SELECT COUNT(*) AS n FROM inbox WHERE in_reply_to=?1 AND type='reply' AND session_name='admin'",
+  ).get(unboundDashboardTask)?.n;
+  const unboundDashboardChildren = direct.query<{ n: number }, [string]>(
+    "SELECT COUNT(*) AS n FROM tasks WHERE parent_task_id=?1",
+  ).get(unboundDashboardTask)?.n;
+  if (unboundDashboardReplies !== 1 || unboundDashboardChildren !== 0) {
+    throw new Error(`unbound Dashboard reply misrouted replies=${unboundDashboardReplies} children=${unboundDashboardChildren}`);
+  }
+  direct.query("UPDATE api_tokens SET bound_node_id=?1 WHERE token_id=?2").run(receiver.node_id, receiver.token_id);
+
   // Force the actual cli.ts legacy-node path and inspect the production meta,
   // rather than round-tripping a test-authored literal.
   const legacyOriginTask = await mcp(dispatcher.token, "send_task", {
@@ -243,7 +269,7 @@ try {
   if (sendReplyCountAfterTerminal !== sendReplyCountBeforeTerminal) {
     throw new Error("terminal reply triggered an outbound send_reply from the real cli.ts path");
   }
-  console.log("CLI_WIRING_E2E_PASS startup_reply=no_egress new_reply=runtime+ack");
+  console.log("CLI_WIRING_E2E_PASS startup_reply=no_egress dashboard_bound+unbound=terminal new_reply=runtime+ack");
   direct.close();
 } catch (error) {
   for (const name of ["server.log", "agent.log"]) {

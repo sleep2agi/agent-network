@@ -1559,6 +1559,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           // transaction before any inbox/task/run write. Legacy/unbound rows
           // fail toward the sender's old send_task path, never toward silence.
           if (peerCapabilityRequired) {
+            if (!taskBefore.from_node_id) {
+              // Origin type is an intrinsic property of the task and must be
+              // decided before caller capability. A Dashboard/human task still
+              // needs the established send_reply terminalization path when the
+              // replying node uses a legacy/unbound token.
+              return { ok: false as const, error: "peer_reply_origin_not_node" as const };
+            }
             if (!callerTokenIsNetwork || !callerTokenId || !enforceNetworkId) {
               return { ok: false as const, error: "peer_reply_node_token_required" as const };
             }
@@ -1578,13 +1585,6 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             const canonicalOrigin = resolveCanonicalAlias(enforceNetworkId, taskBefore.from_name).alias;
             if (canonicalTarget !== canonicalOrigin) {
               return { ok: false as const, error: "reply_target_mismatch" as const };
-            }
-            if (!taskBefore.from_node_id) {
-              // Dashboard/human/hub/scheduler origins have no immutable node
-              // identity. They are not peer agents and therefore must fall
-              // back to the established send_reply terminalization path,
-              // never to send_task(alias), which cannot address a user.
-              return { ok: false as const, error: "peer_reply_origin_not_node" as const };
             }
             const recipient = db.get<{ peer_reply_inbox_capable: number }>(
               `SELECT peer_reply_inbox_capable FROM sessions

@@ -136,6 +136,8 @@ run_cli_mutation "cli-fallback-reason-lost" \
   's/peer_reply_fallback_reason: args.fallbackReason/peer_reply_fallback_reason: undefined/'
 run_server_wiring_mutation "dashboard-origin-misrouted-to-task" \
   's/error: "peer_reply_origin_not_node" as const/error: "peer_reply_unsupported" as const/'
+run_server_wiring_mutation "dashboard-origin-checked-after-capability" \
+  's/if (!taskBefore.from_node_id) {/if (!taskBefore.from_node_id \&\& !peerCapabilityRequired) {/'
 run_mutation "terminal-reply-replies-again" \
   /workspace/agent-node/src/peer-reply-inbox.ts \
   's/if (replyExpected) return/if (true) return/' \

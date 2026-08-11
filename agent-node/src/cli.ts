@@ -1398,6 +1398,13 @@ async function sendReply(
         in_reply_to: args.taskId,
         status: args.failed ? "failed" : "replied",
       }),
+      isOldHubTargetAgent: async (args) => {
+        const status = parseToolJson(await callCommHub("get_all_status", {}));
+        if (!Array.isArray(status?.sessions)) {
+          throw new CommHubError("old Hub roster unavailable; preserving pending reply");
+        }
+        return status.sessions.some((session: any) => session?.alias === args.target);
+      },
     }, peerReplyCapabilityCache)
     : { route: "atomic" as const, payload: await callCommHub("send_reply", {
       alias: target,

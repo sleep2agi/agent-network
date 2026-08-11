@@ -253,6 +253,7 @@ describe("#698 atomic peer reply", () => {
         sendLegacyReply: async () => {
           throw new Error("node-to-node capability fallback must not use send_reply");
         },
+        isOldHubTargetAgent: async () => true,
       });
       expect(routed.route).toBe("legacy");
       expect([atomicCalls, legacyCalls]).toEqual([1, 1]);
@@ -314,6 +315,7 @@ describe("#698 atomic peer reply", () => {
       sendLegacyReply: async () => {
         throw new Error("identity rotation fallback must not use send_reply");
       },
+      isOldHubTargetAgent: async () => true,
     });
 
     expect(routed.route).toBe("legacy");
