@@ -117,6 +117,7 @@ import {
   type ConfigUpdate,
   type ConfigPatch,
 } from "./runtime/config-apply";
+import { DEFAULT_CODEX_MODEL, resolveCodexModel } from "./codex-model-default";
 import { resolveTelegramAccess, buildEmptyAllowlistWarn, loadTelegramAccess } from "./util/access-resolve";
 import {
   backupOpencodeConfig,
@@ -201,7 +202,7 @@ for (let i = 0; i < argv.length; i++) {
   --config <path>     配置文件 (.anet/nodes/<name>/config.json)
   --alias <name>      Agent 别名 / CommHub alias (必需)
   --runtime <type>    claude-agent-sdk (default) | claude-code-cli | codex-sdk | codex-app-server | grok-build-acp | grok-build-cli | opencode-cli
-  --model <name>      AI 模型 (codex 默认: gpt-5.5, claude-agent-sdk 默认: claude-sonnet-4-6)
+  --model <name>      AI 模型 (codex 默认: ${DEFAULT_CODEX_MODEL}, claude-agent-sdk 默认: claude-sonnet-4-6)
   --hub <url>         CommHub URL
   --tools <list>      工具列表，逗号分隔 ("all" = 全部)
   --max-turns <n>     每任务最大轮次 (default: 50)
@@ -1721,7 +1722,7 @@ function buildCodexWakeDeps(): CodexWakeDeps {
       return {
         skipGitRepoCheck: cfgFlags.skipGitRepoCheck === false ? false : true,
         approvalPolicy: typeof cfgFlags.approvalPolicy === "string" ? cfgFlags.approvalPolicy : "never",
-        model: MODEL || "gpt-5.5",
+        model: resolveCodexModel(MODEL),
         sandboxMode: typeof cfgFlags.sandboxMode === "string" ? cfgFlags.sandboxMode : "danger-full-access",
         modelReasoningEffort: "low" as const,
       };
@@ -2696,7 +2697,7 @@ async function processWithCodex(
 
   if (!codexThread) {
     const codex = new Codex({ config: CODEX_CONFIG });
-    const codexModel = MODEL || "gpt-5.5";
+    const codexModel = resolveCodexModel(MODEL);
     // #149 (Vincent 5448) — yolo flags now read from config.json `flags` block
     // (written by anet wizard for codex-sdk runtime), fall back to hardcoded
     // defaults if config flags absent. This keeps current runtime behavior
@@ -2718,7 +2719,7 @@ async function processWithCodex(
     }
   }
 
-  const codexModelName = MODEL || "gpt-5.5";
+  const codexModelName = resolveCodexModel(MODEL);
   log(`[codex] model=${codexModelName} thread=${codexThread?.id || "new"}`);
   const promptText = task; // developer_instructions 已包含行为规则
   // Codex SDK 支持 structured input: text + local_image
@@ -2807,7 +2808,7 @@ async function processWithCodex(
     codexThread = codex.startThread({
       skipGitRepoCheck: true,
       approvalPolicy: "never" as const,
-      model: MODEL || "gpt-5.5",
+      model: resolveCodexModel(MODEL),
       sandboxMode: "danger-full-access" as const,
       modelReasoningEffort: "low" as const,
     });
@@ -2862,7 +2863,7 @@ async function processWithCodexStdio(
     // listed, so if a future codex version renames any of these the next
     // smoke run will pinpoint exactly which one.
     const opts: Record<string, unknown> = {
-      model: MODEL || "gpt-5.5",
+      model: resolveCodexModel(MODEL),
       approvalPolicy: "on-request",
       sandboxPolicy: { type: "dangerFullAccess" },
     };
@@ -5803,7 +5804,7 @@ const STARTUP_MODEL_LABEL = MODEL
   || (RUNTIME === "grok"
     ? "configured by Grok CLI"
     : RUNTIME === "codex" || RUNTIME === "codex-app-server"
-      ? "gpt-5.5"
+      ? DEFAULT_CODEX_MODEL
       : "claude-sonnet-4-6");
 log(`  model:   ${STARTUP_MODEL_LABEL} ${MODEL || RUNTIME === "grok" ? "" : "(default)"}`);
 log(`  hub:     ${COMMHUB_URL}${AUTH_TOKEN ? " (auth)" : " (no auth!)"}`);
