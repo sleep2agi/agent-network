@@ -3,25 +3,17 @@ import { db } from "./db.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerTools } from "./tools.js";
 
-// #498 regression — the send_reply hub response gains a `warning` field
-// pointing at commhub_send_task ONLY when the target alias resolves to
-// a real agent node (i.e. not hub / not api / not an unbound alias).
-// Silence-affirms the Dashboard path.
-//
-// Why this test exists (通信龙 2026-07-30 裁定): the warning is a pure
-// hint — deleting it doesn't break any behavior, so it's exactly the
-// kind of code a future refactor drops silently. This test is the
-// tripwire: if the branch goes away, this test turns red.
-//
-// witnessed-red methodology (`feedback_witnessed_red_before_witnessed_green`):
-// I confirmed both assertions fail cleanly when the `warning` branch is
-// reverted (see docs/tests/p-498-reply-warning/witnessed-red.txt), so
-// this suite genuinely catches regressions rather than green-when-empty.
+// #698 supersedes the old #498 warning-only posture. send_reply is now the
+// atomic peer primitive: it closes the original task and writes one
+// requires_response=none reply inbox row. No follow-up send_task warning is
+// emitted because creating a second requires-response task is the bug.
 
 const NET_ID = "net_498_warn";
 const USER_ID = "u_498_warn";
 const NODE_ID = "node_498_warn";
 const AGENT_ALIAS = "peer-agent-498";
+const DISPATCHER_NODE_ID = "node_498_dispatcher";
+const DISPATCHER_ALIAS = "dispatcher";
 const AGENT_TOK_ID = "tok_498_warn";
 
 interface ToolHandler {
@@ -58,9 +50,19 @@ function seed() {
     [USER_ID, USER_ID],
   );
   db.run(
+    `INSERT INTO nodes (node_id, node_name, alias, network_id, hostname, created_at, updated_at, lifecycle_state)
+     VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'), datetime('now'), 'active')`,
+    [DISPATCHER_NODE_ID, DISPATCHER_ALIAS, DISPATCHER_ALIAS, NET_ID, `host-${DISPATCHER_ALIAS}`],
+  );
+  db.run(
     `INSERT INTO networks (network_id, network_name, owner_id, created_at)
      VALUES (?1, ?2, ?3, datetime('now'))`,
     [NET_ID, NET_ID, USER_ID],
+  );
+  db.run(
+    `INSERT INTO sessions (resume_id, alias, status, node_id, network_id, updated_at, last_seen_at)
+     VALUES (?1, ?2, 'idle', ?3, ?4, datetime('now'), datetime('now'))`,
+    [`res_${DISPATCHER_ALIAS}`, DISPATCHER_ALIAS, DISPATCHER_NODE_ID, NET_ID],
   );
   db.run(
     `INSERT INTO network_members (user_id, network_id, role, joined_at)
@@ -84,12 +86,12 @@ function seed() {
   );
 }
 
-function makeTask(to: string): string {
+function makeTask(from: string): string {
   const id = "t_" + Math.random().toString(36).slice(2, 14);
   db.run(
-    `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at, network_id)
-     VALUES (?1, ?2, ?3, 'normal', 'delivered', 'test', 'reply', datetime('now'), ?4)`,
-    [id, "dispatcher", to, NET_ID],
+    `INSERT INTO tasks (task_id, from_name, to_name, to_node_id, priority, status, content, requires_response, created_at, network_id)
+     VALUES (?1, ?2, ?3, ?4, 'normal', 'delivered', 'test', 'reply', datetime('now'), ?5)`,
+    [id, from, AGENT_ALIAS, NODE_ID, NET_ID],
   );
   return id;
 }
@@ -127,38 +129,33 @@ async function call(handler: ToolHandler, args: any): Promise<Reply> {
   return JSON.parse(r.content[0].text) as Reply;
 }
 
-describe("send_reply warning field (#498)", () => {
-  test("target alias resolves to a real agent → response includes `warning` field", async () => {
+describe("send_reply atomic peer reply (#698 supersedes #498 warning)", () => {
+  test("agent reply closes the original and enqueues one no-response peer result", async () => {
     seed();
     const tools = buildHandlers();
     const sendReply = tools["send_reply"];
     expect(sendReply).toBeDefined();
 
-    const taskId = makeTask(AGENT_ALIAS);
+    const taskId = makeTask(DISPATCHER_ALIAS);
     const reply = await call(sendReply, {
-      alias: AGENT_ALIAS,
-      text: "peer reply (should trigger warning)",
+      alias: DISPATCHER_ALIAS,
+      text: "peer reply (atomic)",
       in_reply_to: taskId,
       status: "replied",
       from_session: AGENT_ALIAS,
     });
 
     expect(reply.ok).toBe(true);
-    expect(reply.warning).toBeDefined();
-    expect(typeof reply.warning).toBe("string");
-    const w = reply.warning as string;
-    // Action-pointing content — witnessed-red methodology means each
-    // assertion here must be one a future revert would break, not a
-    // shape-only check that passes on empty string.
-    expect(w).toContain("commhub_send_task");
-    // Alias value is INLINED (not just "<alias>") so the LLM has a
-    // copy-pasteable next command. This is the specific design 通信龙
-    // called out on 2026-07-30.
-    expect(w).toContain(`alias="${AGENT_ALIAS}"`);
-    expect(w).toContain("agent peers");
-    expect(w).toContain("not see this reply in real time");
-    expect(w).toContain("RFC-030");
-    expect(w).toContain("全网规则");
+    expect(reply.warning).toBeUndefined();
+    expect(db.get<{ status: string; result: string }>(
+      "SELECT status, result FROM tasks WHERE task_id = ?1", taskId,
+    )).toEqual(expect.objectContaining({ status: "replied", result: "peer reply (atomic)" }));
+    expect(db.all<{ type: string; requires_response: string; session_name: string }>(
+      "SELECT type, requires_response, session_name FROM inbox WHERE in_reply_to = ?1", taskId,
+    )).toEqual([{ type: "reply", requires_response: "none", session_name: DISPATCHER_ALIAS }]);
+    expect(db.get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM tasks WHERE parent_task_id = ?1", taskId,
+    )?.n).toBe(0);
   });
 
   test("target alias is `hub` (Dashboard path) → NO warning field", async () => {

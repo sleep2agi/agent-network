@@ -162,7 +162,7 @@ describe("#507 — send_reply attachments (positive)", () => {
     const a1 = att("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", { name: "one.pdf" });
     const a2 = att("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", { name: "two.png" });
     const reply = await callReply(handler, {
-      alias: AGENT_ALIAS,
+      alias: "hub",
       text: "here you go",
       in_reply_to: taskId,
       status: "replied" as const,
@@ -187,7 +187,7 @@ describe("#507 — send_reply attachments (positive)", () => {
     const handler = await getSendReplyHandler();
     const a1 = att("cccccccccccccccccccccccccccccccc");
     const reply = await callReply(handler, {
-      alias: AGENT_ALIAS,
+      alias: "hub",
       text: "nested-form",
       in_reply_to: taskId,
       status: "replied" as const,
@@ -206,7 +206,7 @@ describe("#507 — send_reply attachments (positive)", () => {
     const topLevel = att("dddddddddddddddddddddddddddddddd", { name: "wins.pdf" });
     const nested = att("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", { name: "loses.pdf" });
     const reply = await callReply(handler, {
-      alias: AGENT_ALIAS,
+      alias: "hub",
       text: "conflict resolution",
       in_reply_to: taskId,
       status: "replied" as const,
@@ -228,7 +228,7 @@ describe("#507 — reverse (e): no-attachments call is byte-identical to pre-#50
     const { taskId } = seed();
     const handler = await getSendReplyHandler();
     const reply = await callReply(handler, {
-      alias: AGENT_ALIAS,
+      alias: "hub",
       text: "no attachments here",
       in_reply_to: taskId,
       status: "replied" as const,
@@ -245,7 +245,7 @@ describe("#507 — reverse (e): no-attachments call is byte-identical to pre-#50
     const { taskId } = seed();
     const handler = await getSendReplyHandler();
     const reply = await callReply(handler, {
-      alias: AGENT_ALIAS,
+      alias: "hub",
       text: "explicit undefined",
       in_reply_to: taskId,
       status: "replied" as const,
@@ -259,7 +259,7 @@ describe("#507 — reverse (e): no-attachments call is byte-identical to pre-#50
     const { taskId } = seed();
     const handler = await getSendReplyHandler();
     const reply = await callReply(handler, {
-      alias: AGENT_ALIAS,
+      alias: "hub",
       text: "explicit empty array",
       in_reply_to: taskId,
       status: "replied" as const,
@@ -280,7 +280,7 @@ describe("#507 — reverse (e): no-attachments call is byte-identical to pre-#50
       taskId,
     ]);
     const reply = await callReply(handler, {
-      alias: AGENT_ALIAS,
+      alias: "hub",
       text: "no attachments — must not clobber existing meta",
       in_reply_to: taskId,
       status: "replied" as const,
@@ -297,7 +297,7 @@ describe("#507 — negative: malformed attachments explicitly rejected (bad_atta
     const { taskId } = seed();
     const handler = await getSendReplyHandler();
     const reply = await callReply(handler, {
-      alias: AGENT_ALIAS,
+      alias: "hub",
       text: "malformed",
       in_reply_to: taskId,
       status: "replied" as const,
@@ -317,7 +317,7 @@ describe("#507 — negative: malformed attachments explicitly rejected (bad_atta
     // 21 valid-shape attachments
     const many = Array.from({ length: 21 }, (_, i) => att("a".repeat(32).slice(0, 30) + (i < 10 ? "0" + i : "" + i)));
     const reply = await callReply(handler, {
-      alias: AGENT_ALIAS,
+      alias: "hub",
       text: "too many",
       in_reply_to: taskId,
       status: "replied" as const,
@@ -332,7 +332,7 @@ describe("#507 — negative: malformed attachments explicitly rejected (bad_atta
     const { taskId } = seed();
     const handler = await getSendReplyHandler();
     const reply = await callReply(handler, {
-      alias: AGENT_ALIAS,
+      alias: "hub",
       text: "bad file_id",
       in_reply_to: taskId,
       status: "replied" as const,
@@ -347,7 +347,7 @@ describe("#507 — negative: malformed attachments explicitly rejected (bad_atta
     const { taskId } = seed();
     const handler = await getSendReplyHandler();
     const reply = await callReply(handler, {
-      alias: AGENT_ALIAS,
+      alias: "hub",
       text: "bad type",
       in_reply_to: taskId,
       status: "replied" as const,
@@ -362,7 +362,7 @@ describe("#507 — negative: malformed attachments explicitly rejected (bad_atta
     const { taskId } = seed();
     const handler = await getSendReplyHandler();
     const reply = await callReply(handler, {
-      alias: AGENT_ALIAS,
+      alias: "hub",
       text: "too big",
       in_reply_to: taskId,
       status: "replied" as const,
@@ -377,7 +377,7 @@ describe("#507 — negative: malformed attachments explicitly rejected (bad_atta
     const { taskId } = seed();
     const handler = await getSendReplyHandler();
     const reply = await callReply(handler, {
-      alias: AGENT_ALIAS,
+      alias: "hub",
       text: "long name",
       in_reply_to: taskId,
       status: "replied" as const,
@@ -392,7 +392,7 @@ describe("#507 — negative: malformed attachments explicitly rejected (bad_atta
     const { taskId } = seed();
     const handler = await getSendReplyHandler();
     const reply = await callReply(handler, {
-      alias: AGENT_ALIAS,
+      alias: "hub",
       text: "junk item",
       in_reply_to: taskId,
       status: "replied" as const,
@@ -413,7 +413,7 @@ describe("#507 — echo integrity (read-back-from-DB, not in-memory)", () => {
       size: 4096,
     });
     const reply = await callReply(handler, {
-      alias: AGENT_ALIAS,
+      alias: "hub",
       text: "roundtrip check",
       in_reply_to: taskId,
       status: "replied" as const,

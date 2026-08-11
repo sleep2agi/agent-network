@@ -1464,7 +1464,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // ── V2: send_reply (关联 task_id，不触发 think) ──
   server.tool(
     "send_reply",
-    "Send a reply to a Dashboard/UI-originated task (updates task row, emits new_reply SSE — Dashboard reads it). ⚠ NOT for agent-to-agent replies: agent nodes only log new_reply and do not processInbox on it, so the peer will not see the reply in real time. Use send_task for peer-to-peer replies (RFC-030, Vincent 2026-07-28 全网规则). If the target alias resolves to a live agent node, the response includes a `warning` field pointing to send_task.",
+    "Atomically finalize an original task and enqueue one requires_response=none reply for its originator. Dashboard reads new_reply directly; current agent nodes consume the reply as actionable context without replying again.",
     {
       alias: z.string().min(1).max(200).describe("Target session alias"),
       text: z.string().min(1).max(10000).describe("Reply content"),
@@ -1514,49 +1514,62 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
       console.log(`[${ts()}] ${from_session} → send_reply (${replyStatus}) → ${alias}: ${text.slice(0, 60)}${attachmentsResult.attachments.length ? ` [+${attachmentsResult.attachments.length} attachments]` : ""}`);
       const id = uuidv4();
-      let taskBefore: { status: string } | null = null;
-      if (in_reply_to) {
-        const taskParams: any[] = [in_reply_to];
-        let taskSql = "SELECT status FROM tasks WHERE task_id = ?1";
-        taskSql = addScope(taskSql, taskParams, effectiveNetId);
-        taskBefore = db.get<{ status: string }>(taskSql, ...taskParams) ?? null;
-        if (!taskBefore) {
-          return {
-            content: [{
-              type: "text" as const,
-              text: JSON.stringify({
-                ok: false,
-                error: "reply_task_not_found",
-                message: `cannot apply reply: task not found (${in_reply_to})`,
-                in_reply_to,
-                reply_queued: false,
-              }),
-            }],
-          };
-        }
-        if (!["created", "delivered", "acked", "running"].includes(taskBefore.status)) {
-          return {
-            content: [{
-              type: "text" as const,
-              text: JSON.stringify({
-                ok: false,
-                error: "reply_task_terminal",
-                message: `cannot apply reply: task is already terminal (${taskBefore.status})`,
-                in_reply_to,
-                task_status: taskBefore.status,
-                reply_queued: false,
-              }),
-            }],
-          };
-        }
-      }
       const replyTargetNodeId = resolveNodeIdForAlias(alias, effectiveNetId);
       // RFC-027 §2.3 inbox-enqueue lifecycle guard (PR1.1 site 3/6).
       {
         const lc = assertNodeActive(alias, effectiveNetId ?? null);
         if (!lc.ok) return { content: [{ type: "text" as const, text: JSON.stringify(lc) }] };
       }
-      const replyLogged = db.transaction(() => {
+      const replyOutcome = db.transaction(() => {
+        type ReplyTask = {
+          status: string;
+          from_name: string;
+          to_name: string;
+          to_node_id: string | null;
+        };
+        let taskBefore: ReplyTask | null = null;
+        let canonicalCaller: string | null = null;
+        let callerNodeId: string | null = null;
+        if (in_reply_to) {
+          const taskParams: any[] = [in_reply_to];
+          let taskSql = "SELECT status, from_name, to_name, to_node_id FROM tasks WHERE task_id = ?1";
+          taskSql = addScope(taskSql, taskParams, effectiveNetId);
+          taskBefore = db.get<ReplyTask>(taskSql, ...taskParams) ?? null;
+          if (!taskBefore) return { ok: false as const, error: "reply_task_not_found" as const };
+          if (!["created", "delivered", "acked", "running"].includes(taskBefore.status)) {
+            return { ok: false as const, error: "reply_task_terminal" as const, taskStatus: taskBefore.status };
+          }
+
+          // A node token may terminalize only a task addressed to that exact
+          // immutable node. Legacy rows without to_node_id fall back to the
+          // token-bound canonical alias; caller-supplied identity is never
+          // trusted. Keep this preflight in the same SQLite transaction as the
+          // UPDATE and reply inbox INSERT so reassignment cannot race it.
+          if (callerTokenIsNetwork) {
+            if (!callerAlias || !enforceNetworkId) {
+              return { ok: false as const, error: "reply_node_identity_unbound" as const };
+            }
+            canonicalCaller = resolveCanonicalAlias(enforceNetworkId, callerAlias).alias;
+            callerNodeId = db.get<{ node_id: string | null }>(
+              `SELECT node_id FROM sessions
+               WHERE network_id = ?1 AND alias = ?2
+               ORDER BY updated_at DESC LIMIT 1`,
+              enforceNetworkId,
+              canonicalCaller,
+            )?.node_id ?? null;
+            const ownsTask = taskBefore.to_node_id
+              ? taskBefore.to_node_id === callerNodeId
+              : resolveCanonicalAlias(enforceNetworkId, taskBefore.to_name).alias === canonicalCaller;
+            if (!ownsTask) return { ok: false as const, error: "reply_task_not_owned" as const };
+
+            const canonicalTarget = resolveCanonicalAlias(enforceNetworkId, alias).alias;
+            const canonicalOrigin = resolveCanonicalAlias(enforceNetworkId, taskBefore.from_name).alias;
+            if (canonicalTarget !== canonicalOrigin) {
+              return { ok: false as const, error: "reply_target_mismatch" as const };
+            }
+          }
+        }
+
         // #507 — write meta_json on inbox insert (parity with send_task L952).
         // Prior to this the attachments field on a send_reply call was
         // silently stripped by MCP Zod, leaving `ok:true` with no persisted
@@ -1583,32 +1596,50 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
                  completed_at = datetime('now'),
                  meta_json = COALESCE(?3, meta_json)
              WHERE task_id = ?4 AND status IN ('created', 'delivered', 'acked', 'running')`;
+          if (callerTokenIsNetwork && taskBefore) {
+            if (taskBefore.to_node_id) {
+              updateParams.push(callerNodeId);
+              updateSql += ` AND to_node_id = ?${updateParams.length}`;
+            } else {
+              updateParams.push(taskBefore.to_name);
+              updateSql += ` AND to_node_id IS NULL AND to_name = ?${updateParams.length}`;
+            }
+          }
           updateSql = addScope(updateSql, updateParams, effectiveNetId);
           const result = db.run(updateSql, updateParams);
           if (result.changes === 0) {
-            console.log(`[${ts()}] ⚠ send_reply: task ${in_reply_to?.slice(0, 8)} not found or already terminal`);
-            return false;
+            throw new Error(`reply_atomic_cas_failed:${in_reply_to}`);
           }
           syncScheduledRunForTask(in_reply_to, effectiveNetId);
-          return true;
+          return { ok: true as const, replyLogged: true };
         }
-        return false;
+        return { ok: true as const, replyLogged: false };
       });
 
-      if (in_reply_to && !replyLogged) {
+      if (!replyOutcome.ok) {
+        const taskStatus = "taskStatus" in replyOutcome ? replyOutcome.taskStatus : undefined;
+        const messages: Record<string, string> = {
+          reply_task_not_found: `cannot apply reply: task not found (${in_reply_to})`,
+          reply_task_terminal: `cannot apply reply: task is already terminal (${taskStatus})`,
+          reply_node_identity_unbound: "cannot apply reply: node identity is not token-bound",
+          reply_task_not_owned: "cannot apply reply: task is not owned by this node",
+          reply_target_mismatch: "cannot apply reply: target is not the original task sender",
+        };
         return {
           content: [{
             type: "text" as const,
             text: JSON.stringify({
               ok: false,
-              error: "reply_not_applied",
-              message: "reply was not applied to task",
+              error: replyOutcome.error,
+              message: messages[replyOutcome.error],
               in_reply_to,
+              ...(taskStatus ? { task_status: taskStatus } : {}),
               reply_queued: false,
             }),
           }],
         };
       }
+      const replyLogged = replyOutcome.replyLogged;
 
       // Log event after commit (outside transaction)
       if (replyLogged && in_reply_to) logTaskEvent(in_reply_to, null, replyStatus, from_session, text.slice(0, 200));
@@ -1650,17 +1681,6 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // #461 network observer summary — ids + routing only, no reply text.
       pushNetworkObserverEvent(effectiveNetId, { type: "new_reply", task_id: in_reply_to ?? null, message_id: id, from: from_session, to: alias, status: replyStatus });
 
-      // #498 — When the reply target is a live agent node (not Dashboard/UI),
-      // warn the caller that agent peers only log new_reply and do not
-      // processInbox on it. Points at the correct next action (send_task)
-      // so a follow-up turn corrects course rather than "why didn't they
-      // respond" spelunking. Absent field when target is Dashboard/hub/api
-      // (the correct path for commhub_reply) — silence is affirmation.
-      const targetIsAgent = replyTargetNodeId !== null && alias !== "hub" && alias !== "api";
-      const warning = targetIsAgent
-        ? `Target "${alias}" is an agent node. commhub_reply/send_reply does NOT wake agent peers (they only log new_reply, they do not processInbox on it) — the peer will not see this reply in real time. For agent-to-agent replies, use commhub_send_task(alias="${alias}", task="<your reply>") so the peer wakes via new_task SSE and processes it. (RFC-030, Vincent 2026-07-28 全网规则.)`
-        : undefined;
-
       // #507 — echo attachments READ BACK FROM DB (lead 2b5f6634): the point
       // of the echo is to prove attachments actually landed in storage, not
       // to reflect the in-memory variable we tried to write. Reading
@@ -1691,7 +1711,6 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             ok: true,
             message_id: id,
             session_status: session?.status ?? "unknown",
-            ...(warning ? { warning } : {}),
             ...(attachmentsSaved !== null ? { attachments_saved: attachmentsSaved } : {}),
           }),
         }],
