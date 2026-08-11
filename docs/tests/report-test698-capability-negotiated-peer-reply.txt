@@ -2,22 +2,26 @@
 
 Date: 2026-08-12 Asia/Shanghai
 Base: 17b8223f9d7fd25fcc435b40e7fa1fc0823ea1de
-SOURCE_COMMIT: 04731f5d89c15b014709b2726df761d9f081c9d8
+SOURCE_COMMIT: 07a69d05599930cdd5414f348846dacf1bfa9925
 Scope: Hub + agent-node protocol/runtime wiring + isolated Docker tests.
 Production deployment: NOT PERFORMED.
 
 ## Exact-source image
 
-- image: `anet-test698:04731f5d`
-- image id: `sha256:5d4b3b2e17c5d74a19731fbb00b4eaac9098e72bd98458b9d7d10c4d0796c246`
-- image env: `TEST698_SOURCE_COMMIT=04731f5d89c15b014709b2726df761d9f081c9d8`
-- all nine files changed since the prior frozen source and copied into the
-  image matched `git show SOURCE_COMMIT:<path>` byte-for-byte: 9/9.
-- focused result: 177 pass / 0 fail / 518 expect calls.
-- local main-run artifact digest:
-  `sha256:915cf9a89d2ffe1e47adcfb19ca7a6ac3db3761a45e57a21f4d55ad7ca1305d8`.
-  This digest records this run only; timestamps and random IDs make it
-  intentionally non-reproducible and it is not used as provenance.
+- image: `anet-test698:07a69d05`
+- image id:
+  `sha256:bede190906e827f69e9421c98782a21728037d25eeb97b155ed56c0f05317b81`
+- image env:
+  `TEST698_SOURCE_COMMIT=07a69d05599930cdd5414f348846dacf1bfa9925`
+- the nine executable/test files changed by the final source delta matched
+  `git show SOURCE_COMMIT:<path>` byte-for-byte after `docker create` and
+  `docker cp`: 9/9. The test673 preload is intentionally copied to the
+  test698 path by the Dockerfile and was compared using that mapping.
+- focused result: 178 pass / 0 fail / 522 expect calls.
+- exact main-run artifact digest:
+  `sha256:402791210a021c44590b142226a2de7c988bab2d452f178b6f689b9d820b2993`.
+  This records one timestamped run and is not claimed reproducible or used
+  as source provenance.
 
 ## Product behavior evidence
 
@@ -26,26 +30,28 @@ Production deployment: NOT PERFORMED.
    terminalization, and one `requires_response=none` inbox result. Injected
    task/run failures roll all three data surfaces back.
 2. Recipient capability is current-session authority only: every token-bound
-   heartbeat writes 1 or 0, historical node snapshots are not authoritative,
-   and a live SSE connection is required.
+   heartbeat writes 1 or 0, the exact canonical alias is part of the query,
+   historical node snapshots are not authoritative, and a live SSE connection
+   is required. A second alias on the same node cannot lend capability.
 3. A task dispatched before node-id/token rotation receives an atomic
    `reply_task_not_owned` with zero writes, then exactly one marked legacy
    task. A wrong reply target remains a hard error and never falls back.
 4. Origin kind is decided from the persisted task before caller capability.
-   Real-process fixtures prove both a bound and a deliberately unbound
-   receiver ntok answer a Dashboard-origin task (`from_node_id=NULL`) through
-   `send_reply`: the original becomes `replied`, exactly one Dashboard reply
-   is stored, and zero child task rows are created.
+   Real-process fixtures prove bound and unbound receiver tokens, plus a
+   legacy row whose `to_node_id` is NULL, all answer a Dashboard-origin task
+   through `send_reply`: the original terminalizes, exactly one Dashboard
+   reply is stored, and zero child task rows are created.
 5. The real `agent-node/src/cli.ts` ran against an isolated real Hub with a
    deterministic SDK preload. A terminal peer reply entered the runtime and
-   was ACKed without reply egress; disabling SSE wake or restoring automatic
-   terminal-reply egress makes the real-process gate fail.
+   was ACKed without reply egress. A forced vendor failure remained `failed`
+   through the production legacy `send_reply` wiring rather than being
+   mislabeled `replied`.
 6. Capability/identity downgrade remains observable through a legacy task
    carrying `peer_reply_legacy_fallback=true` and a production-computed reason.
-   Ambiguous transport and roster failures remain pending rather than choosing
-   a potentially lossy fallback.
+   Ambiguous transport and identity-query failures remain pending rather than
+   choosing a potentially lossy route.
 
-## Real old-Hub wire and roster routing
+## Real old-Hub wire and exact task identity
 
 `run-legacy-wire.sh` archives and builds the actual base
 `17b8223f9d7fd25fcc435b40e7fa1fc0823ea1de`, starts it on an isolated Docker
@@ -54,33 +60,46 @@ The old Hub returned its real wire form:
 
 `result.isError: MCP error -32602: Tool send_peer_reply not found`
 
-The exact-source sender then queried that same old Hub's real `get_all_status`
-roster. Its token-bound `dispatcher` session routed once through `send_task`;
-the non-session `admin` target routed once through `send_reply`.
+That same old Hub exposes `get_task`. The exact-source sender reads the exact
+original row by task id and classifies its immutable `from_node_id`:
 
-Result:
-`LEGACY_HUB_WIRE_PASS code=-32602 roster_agent=task roster_user=reply`
+- node origin (`from_node_id` non-null) -> one legacy `send_task` wake path;
+- Dashboard/user origin (`from_node_id` null) -> terminal `send_reply`;
+- missing, mismatched, or malformed task identity -> zero egress and the
+  pending reply remains retryable.
 
-A byte-changing source mutation hardcoded every old-Hub target as an agent,
-rebuilt a separate image, and failed this exact old-Hub wire test:
-`MUTATION_RED: old-hub-roster-route-hardcoded rc=1`.
+This is not a helper-only claim. The runner starts the real source `cli.ts`
+against the archived old Hub, dispatches one node-origin and one user-origin
+task, and observes the resulting old-Hub task/inbox state:
 
-Local old-Hub artifact digest:
-`sha256:026fdb1fab7d1fb2eaebe473a0bfc276548184322129eb4298476081ba1fb945`.
-It records this run only and is not used as reproducible provenance.
+`LEGACY_HUB_WIRE_PASS code=-32602 exact_task_node=task exact_task_user=reply`
+
+`LEGACY_CLI_E2E_PASS exact_get_task node=task user=reply`
+
+A byte-changing mutation changes the production `cli.ts` lookup from
+`get_task(task_id)` to `get_all_status`. It rebuilds a separate exact-source
+image and the same old-Hub production-CLI E2E turns red:
+
+`MUTATION_RED: old-hub-exact-task-lookup-lost rc=1`
+
+Exact old-Hub run artifact digest:
+`sha256:d6e0b408961ef22af43b9f0fd3703eaf1c56ec7de50bd88f8c46bb447bd65764`.
+It records one run only and is not used as reproducible provenance.
 
 ## Witnessed-red mutations
 
-All mutations require a byte change; a no-op mutation fails the runner. The
-main exact-source image produced 22 named reds, plus the real-old-Hub source
-mutation above (23 total):
+Every mutation requires a byte change; a no-op fails the runner. The main
+exact-source image produced 25 named reds, plus the separate real-old-Hub
+production mutation above (26 total):
 
 - cli-reply-type-lost
 - cli-terminal-reply-egress-restored
 - cli-new-reply-wake-disabled
 - cli-fallback-reason-lost
+- cli-failed-status-lost
 - dashboard-origin-misrouted-to-task
 - dashboard-origin-checked-after-capability
+- dashboard-null-target-origin-order-lost
 - terminal-reply-replies-again
 - new-reply-wake-removed
 - old-hub-fallback-removed
@@ -88,6 +107,7 @@ mutation above (23 total):
 - identity-rotation-fallback-removed
 - capability-provenance-bypassed
 - recipient-capability-gate-removed
+- recipient-capability-alias-binding-removed
 - rollback-capability-clear-removed
 - legacy-fallback-marker-removed
 - reply-rename-canonicalization-removed
@@ -97,25 +117,27 @@ mutation above (23 total):
 - scheduled-run-sync-removed
 - capability-advertisement-removed
 - legacy-agent-warning-removed
-- old-hub-roster-route-hardcoded (separate exact old-Hub runner)
+- old-hub-exact-task-lookup-lost (separate archived-old-Hub runner)
 
-The first six mutate production `cli.ts` or `server/src/tools.ts` and rerun
-the real-process behavior E2E. In particular, moving Dashboard origin
-classification behind capability makes the deliberately unbound ntok fixture
-fail instead of terminalizing the task. The final mutation rebuilds production
-sender code and exercises the actual old Hub response and roster; it is not a
-unit-authored protocol fixture.
+The first eight target production `cli.ts` or `server/src/tools.ts` and rerun
+real-process behavior. In particular, disabling SSE wake, restoring terminal
+reply egress, losing failed status, moving non-node origin behind capability,
+or conditioning it on `to_node_id` all fail on observed task/inbox/runtime
+facts rather than source-string checks. The alias-binding mutation fails the
+focused Hub behavior test. The final mutation targets production legacy
+identity lookup and exercises the actual old Hub response.
 
 ## Deployment and honest limits
 
-- No production DB, token, node, runtime, or fleet process was read or changed.
-- No live fleet rollout, production traffic cost measurement, or long-duration
+- No production DB, token, node, runtime, fleet process, or network endpoint
+  was read or changed.
+- No live fleet rollout, production traffic/cost measurement, or long-duration
   SSE outage test was performed.
-- Old-Hub target classification uses an exact live roster lookup on every
-  fallback. No negative roster result is cached. If the roster is absent or
-  unreadable, the reply stays pending; the sender does not guess.
-- Mixed-version fallback intentionally preserves the old two-task shape for
-  node-to-node replies. Its metadata makes that residue countable. Dashboard
-  and other non-session targets use terminal `send_reply` instead.
+- Mixed-version fallback intentionally preserves the old two-task shape only
+  for an exact node-origin task. Its metadata makes that residue countable.
+  Dashboard and other non-node origins use terminal `send_reply` instead.
+- The old-Hub identity query is performed on every unknown-tool fallback and
+  is not negatively cached. If it cannot prove the exact task origin, the
+  sender does not guess from a live/stale alias roster.
 - SSE emission occurs after transaction commit. Reconnect drains missed inbox
   rows, but there is no independent periodic polling guarantee.
