@@ -17,7 +17,7 @@ type ToolHandler = (args: any) => Promise<{ content: Array<{ type: "text"; text:
 function cleanup() {
   try { db.exec("DROP TRIGGER IF EXISTS test698_abort_terminal"); } catch {}
   try { db.exec("DROP TRIGGER IF EXISTS test698_abort_run"); } catch {}
-  for (const table of ["scheduled_task_runs", "scheduled_tasks", "tasks", "inbox", "task_events", "sessions", "api_tokens", "nodes"]) {
+  for (const table of ["scheduled_task_runs", "scheduled_tasks", "tasks", "inbox", "task_events", "sessions", "api_tokens", "nodes", "rename_txn"]) {
     try { db.run(`DELETE FROM ${table} WHERE network_id = ?1`, [NET]); } catch {}
   }
   try { db.run("DELETE FROM network_members WHERE network_id = ?1", [NET]); } catch {}
@@ -121,6 +121,26 @@ describe("#698 atomic peer reply", () => {
     });
     expect(result.ok).toBe(true);
     expect(task(taskId).status).toBe("replied");
+  });
+
+  test("origin rename during work routes the terminal reply to the canonical alias and stable node", async () => {
+    const taskId = await dispatch(A, B, "origin will rename");
+    const renamed = `${A}-renamed`;
+    db.run(
+      `INSERT INTO rename_txn (txn_id, network_id, old_alias, new_alias, status, committed_at)
+       VALUES (?1, ?2, ?3, ?4, 'committed', datetime('now'))`,
+      [`rtxn-${crypto.randomUUID()}`, NET, A, renamed],
+    );
+    db.run("UPDATE nodes SET alias = ?1 WHERE node_id = ?2 AND network_id = ?3", [renamed, A_ID, NET]);
+    db.run("UPDATE sessions SET alias = ?1 WHERE node_id = ?2 AND network_id = ?3", [renamed, A_ID, NET]);
+    const result = await call(toolsFor(B).send_peer_reply, {
+      alias: A, text: "reply after rename", in_reply_to: taskId, status: "replied",
+    });
+    expect(result.ok).toBe(true);
+    expect(task(taskId).status).toBe("replied");
+    expect(replies(taskId)).toEqual([
+      expect.objectContaining({ session_name: renamed, node_id: A_ID, requires_response: "none" }),
+    ]);
   });
 
   test("legacy caller or recipient capability downgrade returns unsupported with zero writes", async () => {

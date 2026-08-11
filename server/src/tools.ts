@@ -1515,12 +1515,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         : meta;
       const metaJson = normalizeMetaJson(mergedMeta);
 
-      console.log(`[${ts()}] ${from_session} → send_reply (${replyStatus}) → ${alias}: ${text.slice(0, 60)}${attachmentsResult.attachments.length ? ` [+${attachmentsResult.attachments.length} attachments]` : ""}`);
+      const canonicalReplyTarget = resolveCanonicalAlias(effectiveNetId, alias);
+      const replyTargetAlias = canonicalReplyTarget.alias;
+      console.log(`[${ts()}] ${from_session} → send_reply (${replyStatus}) → ${replyTargetAlias}: ${text.slice(0, 60)}${attachmentsResult.attachments.length ? ` [+${attachmentsResult.attachments.length} attachments]` : ""}${canonicalReplyTarget.renamed ? ` [renamed from ${alias}]` : ""}`);
       const id = uuidv4();
-      const replyTargetNodeId = resolveNodeIdForAlias(alias, effectiveNetId);
+      const replyTargetNodeId = resolveNodeIdForAlias(replyTargetAlias, effectiveNetId);
       // RFC-027 §2.3 inbox-enqueue lifecycle guard (PR1.1 site 3/6).
       {
-        const lc = assertNodeActive(alias, effectiveNetId ?? null);
+        const lc = assertNodeActive(replyTargetAlias, effectiveNetId ?? null);
         if (!lc.ok) return { content: [{ type: "text" as const, text: JSON.stringify(lc) }] };
       }
       const replyOutcome = db.transaction(() => {
@@ -1563,7 +1565,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
               return { ok: false as const, error: "reply_task_not_owned" as const };
             }
             callerNodeId = token.bound_node_id;
-            const canonicalTarget = resolveCanonicalAlias(enforceNetworkId, alias).alias;
+            const canonicalTarget = replyTargetAlias;
             const canonicalOrigin = resolveCanonicalAlias(enforceNetworkId, taskBefore.from_name).alias;
             if (canonicalTarget !== canonicalOrigin) {
               return { ok: false as const, error: "reply_target_mismatch" as const };
@@ -1594,7 +1596,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         db.run(
           `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, in_reply_to, requires_response, network_id, meta_json)
            VALUES (?1, ?2, ?3, 'reply', 'normal', ?4, ?5, ?6, 'none', ?7, ?8)`,
-          [id, alias, replyTargetNodeId, text, from_session, in_reply_to ?? null, effectiveNetId ?? null, metaJson]
+          [id, replyTargetAlias, replyTargetNodeId, text, from_session, in_reply_to ?? null, effectiveNetId ?? null, metaJson]
         );
 
         // 更新 tasks 表
@@ -1695,10 +1697,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         }
       }
 
-      const session = scopedSessionStatus(alias, effectiveNetId);
-      pushEvent(alias, { type: "new_reply", from: from_session, message_id: id, in_reply_to, status: replyStatus }, effectiveNetId);
+      const session = scopedSessionStatus(replyTargetAlias, effectiveNetId);
+      pushEvent(replyTargetAlias, { type: "new_reply", from: from_session, message_id: id, in_reply_to, status: replyStatus }, effectiveNetId);
       // #461 network observer summary — ids + routing only, no reply text.
-      pushNetworkObserverEvent(effectiveNetId, { type: "new_reply", task_id: in_reply_to ?? null, message_id: id, from: from_session, to: alias, status: replyStatus });
+      pushNetworkObserverEvent(effectiveNetId, { type: "new_reply", task_id: in_reply_to ?? null, message_id: id, from: from_session, to: replyTargetAlias, status: replyStatus });
 
       // #507 — echo attachments READ BACK FROM DB (lead 2b5f6634): the point
       // of the echo is to prove attachments actually landed in storage, not

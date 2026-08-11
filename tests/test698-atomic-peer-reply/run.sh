@@ -86,6 +86,10 @@ run_mutation "recipient-capability-gate-removed" \
   /workspace/server/src/tools.ts \
   's/if (!recipientCapable) {/if (false) {/' \
   /workspace/server/src/peer-reply-atomic.test.ts
+run_mutation "reply-rename-canonicalization-removed" \
+  /workspace/server/src/tools.ts \
+  's/const replyTargetAlias = canonicalReplyTarget.alias;/const replyTargetAlias = alias;/' \
+  /workspace/server/src/peer-reply-atomic.test.ts
 run_mutation "node-ownership-check-removed" \
   /workspace/server/src/tools.ts \
   's/if (token.bound_node_id !== taskBefore.to_node_id) {/if (false) {/' \
