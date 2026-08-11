@@ -115,6 +115,49 @@ try {
     node_id: dispatcher.node_id,
   });
 
+  // Reproduce a routine Dashboard node deletion without a race: dispatch
+  // from a real node token while the receiver is offline, then remove only
+  // the origin session before the receiver starts draining its real inbox.
+  // The immutable task retains from_node_id/from_name, but send_task back to
+  // the deleted alias returns alias_not_found. Production cli.ts must then
+  // use send_reply to terminalize the original task instead of dropping the
+  // pending reply and leaving the task delivered forever.
+  await mcp(receiver.token, "report_status", {
+    resume_id: "resume-test698-receiver-prestart",
+    alias: "receiver",
+    status: "idle",
+    node_id: receiver.node_id,
+    peer_reply_inbox_capable: true,
+  });
+  const deletedOrigin = await json("/api/auth/node-token", {
+    method: "POST", headers: auth,
+    body: JSON.stringify({ network_id: networkId, node_name: "deleted-origin", node_id: "n_test698_deleted_origin" }),
+  });
+  deletedOrigin.node_id = boundNodeId(deletedOrigin.token_id);
+  if (!deletedOrigin.token || !deletedOrigin.node_id) {
+    throw new Error(`deleted-origin token missing identity: ${JSON.stringify(deletedOrigin)}`);
+  }
+  await mcp(deletedOrigin.token, "report_status", {
+    resume_id: "resume-test698-deleted-origin",
+    alias: "deleted-origin",
+    status: "idle",
+    node_id: deletedOrigin.node_id,
+    peer_reply_inbox_capable: false,
+  });
+  const deletedOriginDispatch = await mcp(deletedOrigin.token, "send_task", {
+    alias: "receiver",
+    task: "reply after the origin session is deleted",
+    from_session: "deleted-origin",
+    network_id: networkId,
+  });
+  const deletedOriginTask = deletedOriginDispatch.task_id || deletedOriginDispatch.message_id;
+  const deleted = direct.query(
+    "DELETE FROM sessions WHERE alias=?1 AND network_id=?2",
+  ).run("deleted-origin", networkId);
+  if (deleted.changes !== 1) {
+    throw new Error(`deleted-origin fixture removed ${deleted.changes} sessions`);
+  }
+
   const startupTask = "task_test698_startup_reply";
   const startupInbox = "inbox_test698_startup_reply";
   direct.query(`INSERT INTO tasks
@@ -185,6 +228,19 @@ try {
   await waitFor(() => direct.query<{ status: string }, [string, string]>(
     "SELECT status FROM sessions WHERE alias=?1 AND network_id=?2",
   ).get("receiver", networkId)?.status === "idle", "receiver session");
+
+  await waitFor(() => direct.query<{ status: string }, [string]>(
+    "SELECT status FROM tasks WHERE task_id=?1",
+  ).get(deletedOriginTask)?.status === "replied", "deleted-origin task terminalization", 300);
+  const deletedOriginReplies = direct.query<{ n: number }, [string]>(
+    "SELECT COUNT(*) AS n FROM inbox WHERE in_reply_to=?1 AND type='reply' AND session_name='deleted-origin'",
+  ).get(deletedOriginTask)?.n;
+  const deletedOriginChildren = direct.query<{ n: number }, [string]>(
+    "SELECT COUNT(*) AS n FROM tasks WHERE parent_task_id=?1",
+  ).get(deletedOriginTask)?.n;
+  if (deletedOriginReplies !== 1 || deletedOriginChildren !== 0) {
+    throw new Error(`deleted-origin reply lost/misrouted replies=${deletedOriginReplies} children=${deletedOriginChildren}`);
+  }
 
   // A Dashboard/user-originated task has no from_node_id. The production
   // sender must fall back to send_reply (not send_task to the user alias),
@@ -327,7 +383,7 @@ try {
   if (sendReplyCountAfterTerminal !== sendReplyCountBeforeTerminal) {
     throw new Error("terminal reply triggered an outbound send_reply from the real cli.ts path");
   }
-  console.log("CLI_WIRING_E2E_PASS startup_reply=no_egress dashboard_bound+unbound+null-target=terminal failed=failed new_reply=runtime+ack");
+  console.log("CLI_WIRING_E2E_PASS startup_reply=no_egress deleted-origin=terminal dashboard_bound+unbound+null-target=terminal failed=failed new_reply=runtime+ack");
   direct.close();
 } catch (error) {
   for (const name of ["server.log", "agent.log"]) {

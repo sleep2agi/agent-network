@@ -202,4 +202,59 @@ describe("peer reply capability fallback", () => {
     })).rejects.toThrow("task identity unavailable");
     expect(egressCalls).toBe(0);
   });
+
+  test("deleted origin session falls back from alias_not_found to terminal send_reply", async () => {
+    const calls: string[] = [];
+    const result = await sendPeerReplyCompatible(args, {
+      sendAtomic: async () => {
+        calls.push("atomic");
+        throw new CommHubError("legacy recipient", {
+          code: "peer_reply_unsupported", appLevel: true,
+        });
+      },
+      sendLegacy: async () => {
+        calls.push("legacy-task");
+        throw new CommHubError("app-level rejection: alias_not_found", {
+          code: "alias_not_found", appLevel: true,
+        });
+      },
+      sendLegacyReply: async () => {
+        calls.push("legacy-reply");
+        return { message_id: "terminal_after_delete" };
+      },
+      isOldHubOriginNode: oldHubOriginIsNode,
+    });
+    expect(result.route).toBe("legacy-reply");
+    expect(calls).toEqual(["atomic", "legacy-task", "legacy-reply"]);
+  });
+
+  test("non-alias legacy rejection is retained instead of trying a second egress", async () => {
+    for (const legacyError of [
+      new CommHubError("app-level rejection: node_lifecycle_inactive", {
+        code: "node_lifecycle_inactive", appLevel: true,
+      }),
+      new CommHubError("ambiguous alias_not_found transport response", {
+        code: "alias_not_found", appLevel: false,
+      }),
+    ]) {
+      const calls: string[] = [];
+      await expect(sendPeerReplyCompatible(args, {
+        sendAtomic: async () => {
+          calls.push("atomic");
+          throw new CommHubError("legacy recipient", {
+            code: "peer_reply_unsupported", appLevel: true,
+          });
+        },
+        sendLegacy: async () => {
+          calls.push("legacy-task");
+          throw legacyError;
+        },
+        sendLegacyReply: async () => {
+          calls.push("legacy-reply");
+        },
+        isOldHubOriginNode: oldHubOriginIsNode,
+      })).rejects.toThrow(legacyError.message);
+      expect(calls).toEqual(["atomic", "legacy-task"]);
+    }
+  });
 });

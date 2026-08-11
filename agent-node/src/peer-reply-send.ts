@@ -80,6 +80,22 @@ export async function sendPeerReplyCompatible(
         : "recipient_unsupported" as const;
     // Negative capability observations are deliberately not cached. A Hub
     // upgrade or recipient restart may make the next attempt capable.
-    return { route: "legacy", payload: await deps.sendLegacy({ ...args, fallbackReason }) };
+    try {
+      return { route: "legacy", payload: await deps.sendLegacy({ ...args, fallbackReason }) };
+    } catch (legacyError) {
+      // A routine Dashboard node deletion removes the original sender's
+      // session after dispatch. In that exact shape the compatibility
+      // send_task has an authoritative no-write result (alias_not_found),
+      // while send_reply can still terminalize the immutable original task.
+      // Fall back only for that structured rejection. Ambiguous transport
+      // failures and every other application error stay thrown so the
+      // pending-reply queue retains them instead of risking a second write.
+      if (legacyError instanceof CommHubError
+          && legacyError.appLevel
+          && legacyError.code === "alias_not_found") {
+        return { route: "legacy-reply", payload: await deps.sendLegacyReply(args) };
+      }
+      throw legacyError;
+    }
   }
 }

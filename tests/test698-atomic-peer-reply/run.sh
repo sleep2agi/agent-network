@@ -97,6 +97,33 @@ run_cli_mutation() {
   echo "MUTATION_RED: $name rc=$rc"
 }
 
+run_agent_wiring_mutation() {
+  local name="$1" file="$2" sed_expr="$3"
+  local backup="/tmp/test698-${name}.bak"
+  cp "$file" "$backup"
+  local before after rc
+  before="$(sha256sum "$file" | cut -d' ' -f1)"
+  sed -i "$sed_expr" "$file"
+  after="$(sha256sum "$file" | cut -d' ' -f1)"
+  if [ "$before" = "$after" ]; then
+    echo "MUTATION_NOOP: $name"
+    mv "$backup" "$file"
+    exit 1
+  fi
+  set +e
+  bun /workspace/tests/test698-atomic-peer-reply/cli-wiring-e2e.ts \
+    >"/tmp/test698-mutation-${name}.log" 2>&1
+  rc=$?
+  set -e
+  mv "$backup" "$file"
+  if [ "$rc" -eq 0 ]; then
+    echo "MUTATION_SURVIVED: $name"
+    cat "/tmp/test698-mutation-${name}.log"
+    exit 1
+  fi
+  echo "MUTATION_RED: $name rc=$rc"
+}
+
 run_server_wiring_mutation() {
   local name="$1" sed_expr="$2"
   local file=/workspace/server/src/tools.ts
@@ -154,6 +181,9 @@ run_mutation "old-hub-fallback-removed" \
   /workspace/agent-node/src/peer-reply-send.ts \
   's/if (!isPeerReplyCapabilityUnavailable(error)) throw error;/if (true) throw error;/' \
   /workspace/agent-node/src/peer-reply-send.test.ts
+run_agent_wiring_mutation "deleted-origin-terminal-wiring-removed" \
+  /workspace/agent-node/src/peer-reply-send.ts \
+  's/legacyError.code === "alias_not_found"/legacyError.code === "alias_missing_for_test"/'
 run_mutation "legacy-mcp-code-lost" \
   /workspace/agent-node/src/reply-reliability.ts \
   's/...(mcpCode !== undefined ? { code: Number(mcpCode) } : {}),/...{},/' \
