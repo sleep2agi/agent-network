@@ -163,8 +163,10 @@ run_cli_mutation "cli-fallback-reason-lost" \
   's/peer_reply_fallback_reason: args.fallbackReason/peer_reply_fallback_reason: undefined/'
 run_cli_mutation "cli-failed-status-lost" \
   '/sendLegacyReply:/,/      }),/ s/status: args.failed ? "failed" : "replied"/status: "replied"/'
-run_server_wiring_mutation "dashboard-origin-misrouted-to-task" \
-  's/error: "peer_reply_origin_not_node" as const/error: "peer_reply_unsupported" as const/'
+run_mutation "dashboard-origin-misclassified" \
+  /workspace/server/src/tools.ts \
+  's/error: "peer_reply_origin_not_node" as const/error: "peer_reply_unsupported" as const/' \
+  /workspace/server/src/peer-reply-atomic.test.ts
 run_server_wiring_mutation "dashboard-origin-checked-after-capability" \
   's/if (!taskBefore.from_node_id) {/if (!taskBefore.from_node_id \&\& !peerCapabilityRequired) {/'
 run_server_wiring_mutation "dashboard-null-target-origin-order-lost" \
