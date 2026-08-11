@@ -105,6 +105,26 @@ describe("#698 atomic peer reply", () => {
     expect(replies(taskId)).toHaveLength(1);
   });
 
+  test("all declared peer reply outcomes become exact terminal task states", async () => {
+    for (const status of ["replied", "failed", "cancelled"] as const) {
+      const taskId = await dispatch(A, B, `terminal-${status}`);
+      const result = await call(toolsFor(B).send_reply, {
+        alias: A,
+        text: `result-${status}`,
+        in_reply_to: taskId,
+        status,
+      });
+      expect(result.ok).toBe(true);
+      expect(task(taskId)).toEqual(expect.objectContaining({
+        status,
+        result: `result-${status}`,
+      }));
+      expect(task(taskId).completed_at).toBeTruthy();
+      expect(replies(taskId)).toHaveLength(1);
+      expect(replies(taskId)[0].requires_response).toBe("none");
+    }
+  });
+
   test("foreign node and wrong origin target are rejected with zero writes", async () => {
     const taskId = await dispatch(A, B, "owned by B");
     const foreign = await call(toolsFor(A).send_reply, { alias: A, text: "forge", in_reply_to: taskId, status: "replied" });

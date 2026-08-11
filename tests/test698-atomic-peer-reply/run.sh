@@ -8,6 +8,7 @@ echo "L0 policy + focused Hub lifecycle tests"
 COMMHUB_DB=/tmp/test698-atomic-peer-reply.sqlite bun test \
   /workspace/agent-node/src/inbox-message-policy.test.ts \
   /workspace/server/src/peer-reply-atomic.test.ts \
+  /workspace/server/src/scheduled-run-terminal.test.ts \
   /workspace/server/src/send-reply-agent-warning.test.ts \
   /workspace/server/src/send-reply-attachments.test.ts
 
@@ -19,8 +20,8 @@ bun build /workspace/agent-node/src/cli.ts \
   --external @openai/codex-sdk --external node-pty >/tmp/test698-build.log
 
 echo "L2 structural denominator"
-! rg -n 'REPLY_VIA_SEND_TASK|sendPeerReplyTaskWithTrace' /workspace/agent-node/src/cli.ts
-rg -Fq 'scheduleWorkInboxDrain();' /workspace/agent-node/src/cli.ts
-rg -Fq 'requires_response, network_id, meta_json' /workspace/server/src/tools.ts
+! grep -En 'REPLY_VIA_SEND_TASK|sendPeerReplyTaskWithTrace' /workspace/agent-node/src/cli.ts
+grep -Fq 'scheduleWorkInboxDrain();' /workspace/agent-node/src/cli.ts
+grep -Fq 'requires_response, network_id, meta_json' /workspace/server/src/tools.ts
 
 echo "RESULT: PASS"
