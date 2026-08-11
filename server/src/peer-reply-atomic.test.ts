@@ -4,6 +4,9 @@ import { db } from "./db.js";
 import { registerTools } from "./tools.js";
 import { CommHubError } from "../../agent-node/src/reply-reliability.js";
 import { sendPeerReplyCompatible } from "../../agent-node/src/peer-reply-send.js";
+import { sendPeerReplyTaskWithTrace } from "../../agent-node/src/peer-reply-task-trace.js";
+import { __resetSSEClientsForTest, createSSEStream } from "./push.js";
+import { eventBus } from "./event_bus.js";
 
 const NET = "net_peer_reply_698";
 const USER = "user_peer_reply_698";
@@ -15,6 +18,7 @@ const B_ID = "node-peer-b-698";
 type ToolHandler = (args: any) => Promise<{ content: Array<{ type: "text"; text: string }> }>;
 
 function cleanup() {
+  __resetSSEClientsForTest();
   try { db.exec("DROP TRIGGER IF EXISTS test698_abort_terminal"); } catch {}
   try { db.exec("DROP TRIGGER IF EXISTS test698_abort_run"); } catch {}
   for (const table of ["scheduled_task_runs", "scheduled_tasks", "tasks", "inbox", "task_events", "sessions", "api_tokens", "nodes", "rename_txn"]) {
@@ -35,9 +39,10 @@ function seed() {
       [nodeId, alias, NET, JSON.stringify({ peer_reply_inbox_capable: true })],
     );
     db.run(
-      "INSERT INTO sessions (resume_id, alias, status, node_id, network_id, updated_at, last_seen_at) VALUES (?1, ?2, 'idle', ?3, ?4, datetime('now'), datetime('now'))",
+      "INSERT INTO sessions (resume_id, alias, status, node_id, network_id, peer_reply_inbox_capable, updated_at, last_seen_at) VALUES (?1, ?2, 'idle', ?3, ?4, 1, datetime('now'), datetime('now'))",
       [`resume-${alias}`, alias, nodeId, NET],
     );
+    createSSEStream(alias, NET);
     db.run(
       "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, bound_node_id) VALUES (?1, ?2, ?3, ?4, ?5, 'network', ?6)",
       [`token-${alias}`, `hash-token-${alias}`, USER, NET, `node:${alias}`, nodeId],
@@ -123,6 +128,45 @@ describe("#698 atomic peer reply", () => {
     expect(task(taskId).status).toBe("replied");
   });
 
+  test("a rollback heartbeat clears the current-session capability before any peer write", async () => {
+    const tools = toolsFor(A);
+    await call(tools.report_status, {
+      resume_id: `resume-${A}`, alias: A, status: "idle", node_id: A_ID,
+      config_snapshot: { config_update_capable: true, peer_reply_inbox_capable: true },
+    });
+    expect(db.get<any>(
+      "SELECT peer_reply_inbox_capable FROM sessions WHERE alias = ?1 AND network_id = ?2",
+      A, NET,
+    ).peer_reply_inbox_capable).toBe(1);
+    await call(tools.report_status, {
+      resume_id: `resume-${A}`, alias: A, status: "idle", node_id: A_ID,
+      config_snapshot: { config_update_capable: true },
+    });
+    expect(db.get<any>(
+      "SELECT peer_reply_inbox_capable FROM sessions WHERE alias = ?1 AND network_id = ?2",
+      A, NET,
+    ).peer_reply_inbox_capable).toBe(0);
+
+    const taskId = await dispatch(A, B, "recipient rolled back");
+    const result = await call(toolsFor(B).send_peer_reply, {
+      alias: A, text: "must use legacy", in_reply_to: taskId, status: "replied",
+    });
+    expect(result).toEqual(expect.objectContaining({ ok: false, error: "peer_reply_unsupported" }));
+    expect(task(taskId).status).toBe("delivered");
+    expect(replies(taskId)).toHaveLength(0);
+  });
+
+  test("a capable but disconnected recipient fails toward legacy with zero writes", async () => {
+    const taskId = await dispatch(A, B, "recipient disconnected");
+    __resetSSEClientsForTest();
+    const result = await call(toolsFor(B).send_peer_reply, {
+      alias: A, text: "must use legacy", in_reply_to: taskId, status: "replied",
+    });
+    expect(result).toEqual(expect.objectContaining({ ok: false, error: "peer_reply_unsupported" }));
+    expect(task(taskId).status).toBe("delivered");
+    expect(replies(taskId)).toHaveLength(0);
+  });
+
   test("origin rename during work routes the terminal reply to the canonical alias and stable node", async () => {
     const taskId = await dispatch(A, B, "origin will rename");
     const renamed = `${A}-renamed`;
@@ -133,6 +177,9 @@ describe("#698 atomic peer reply", () => {
     );
     db.run("UPDATE nodes SET alias = ?1 WHERE node_id = ?2 AND network_id = ?3", [renamed, A_ID, NET]);
     db.run("UPDATE sessions SET alias = ?1 WHERE node_id = ?2 AND network_id = ?3", [renamed, A_ID, NET]);
+    eventBus.emit("rename-committed", {
+      networkId: NET, old_alias: A, new_alias: renamed, node_id: A_ID,
+    });
     const result = await call(toolsFor(B).send_peer_reply, {
       alias: A, text: "reply after rename", in_reply_to: taskId, status: "replied",
     });
@@ -150,7 +197,7 @@ describe("#698 atomic peer reply", () => {
       if (mode === "caller-unbound") {
         db.run("UPDATE api_tokens SET bound_node_id = NULL WHERE token_id = ?1", `token-${B}`);
       } else if (mode === "recipient-downgraded") {
-        db.run("UPDATE nodes SET config_snapshot = '{}' WHERE node_id = ?1", A_ID);
+        db.run("UPDATE sessions SET peer_reply_inbox_capable = 0 WHERE node_id = ?1 AND network_id = ?2", [A_ID, NET]);
       } else {
         db.run("UPDATE tasks SET from_node_id = NULL WHERE task_id = ?1", taskId);
       }
@@ -168,7 +215,7 @@ describe("#698 atomic peer reply", () => {
       cleanup(); seed();
       const taskId = await dispatch(A, B, `mixed-${mode}`);
       if (mode === "legacy-recipient") {
-        db.run("UPDATE nodes SET config_snapshot = '{}' WHERE node_id = ?1", A_ID);
+        db.run("UPDATE sessions SET peer_reply_inbox_capable = 0 WHERE node_id = ?1 AND network_id = ?2", [A_ID, NET]);
       }
       const tools = toolsFor(B);
       let atomicCalls = 0;
@@ -187,11 +234,16 @@ describe("#698 atomic peer reply", () => {
         },
         sendLegacy: async (args) => {
           legacyCalls++;
-          return callOrThrow(tools.send_task, {
-            alias: args.target,
-            task: args.text,
-            priority: "normal",
-            parent_task_id: args.taskId,
+          return sendPeerReplyTaskWithTrace({
+            alias: args.target, task: args.text, priority: "normal",
+            fromAlias: B, parentTaskId: args.taskId, networkId: NET,
+            meta: {
+              peer_reply_legacy_fallback: true,
+              peer_reply_fallback_reason: args.fallbackReason,
+            },
+          }, {
+            log: () => {},
+            send: (legacyArgs) => callOrThrow(tools.send_task, legacyArgs),
           });
         },
       });
@@ -203,6 +255,16 @@ describe("#698 atomic peer reply", () => {
         "SELECT COUNT(*) AS n FROM tasks WHERE parent_task_id = ?1 AND requires_response = 'reply'",
         taskId,
       )?.n).toBe(1);
+      const legacyTask = db.get<{ meta_json: string }>(
+        "SELECT meta_json FROM tasks WHERE parent_task_id = ?1",
+        taskId,
+      );
+      expect(JSON.parse(legacyTask!.meta_json)).toEqual(expect.objectContaining({
+        peer_reply_legacy_fallback: true,
+        peer_reply_fallback_reason: mode === "old-hub"
+          ? "old_hub_unknown_tool"
+          : "recipient_unsupported",
+      }));
     }
   });
 

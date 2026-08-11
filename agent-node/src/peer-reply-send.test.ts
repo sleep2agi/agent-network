@@ -31,16 +31,24 @@ describe("peer reply capability fallback", () => {
       }),
     ]) {
       const calls: string[] = [];
+      let fallbackReason: string | undefined;
       const result = await sendPeerReplyCompatible(args, {
         sendAtomic: async () => { calls.push("atomic"); throw error; },
-        sendLegacy: async () => { calls.push("legacy"); return { task_id: "legacy_1" }; },
+        sendLegacy: async (legacyArgs) => {
+          calls.push("legacy");
+          fallbackReason = legacyArgs.fallbackReason;
+          return { task_id: "legacy_1" };
+        },
       });
       expect(result.route).toBe("legacy");
       expect(calls).toEqual(["atomic", "legacy"]);
+      expect(fallbackReason).toBe(error.code === -32601
+        ? "old_hub_unknown_tool"
+        : "recipient_unsupported");
     }
   });
 
-  test("old Hub detection is cached, but a legacy recipient is rechecked", async () => {
+  test("negative capability observations are rechecked on every attempt", async () => {
     const unknownCache = createPeerReplyCapabilityCache();
     let unknownAtomic = 0;
     let legacy = 0;
@@ -53,7 +61,7 @@ describe("peer reply capability fallback", () => {
     };
     await sendPeerReplyCompatible(args, unknownDeps, unknownCache);
     await sendPeerReplyCompatible(args, unknownDeps, unknownCache);
-    expect([unknownAtomic, legacy]).toEqual([1, 2]);
+    expect([unknownAtomic, legacy]).toEqual([2, 2]);
 
     const recipientCache = createPeerReplyCapabilityCache();
     let recipientAtomic = 0;

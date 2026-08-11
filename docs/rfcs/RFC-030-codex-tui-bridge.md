@@ -920,14 +920,18 @@ task 又可能触发 reply-to-reply 循环，Dashboard 的积压统计因此持�
 当前协议使用独立 MCP `send_peer_reply`。只有以下条件在 Hub 的同一事务中
 全部成立时，Hub 才会终结原 task 并写一条 `requires_response=none` 的 reply
 inbox 行：调用者使用绑定到原 task 接收节点的 ntok；原 task 带权威
-`from_node_id/to_node_id`；原发起节点最近一次 token-bound heartbeat 明确
-声明 `peer_reply_inbox_capable=true`。接收端把该 reply 注入 runtime 后 ACK，
+`from_node_id/to_node_id`；原发起节点的**当前 session**由 exact token-bound
+heartbeat 明确声明 `peer_reply_inbox_capable=true`，且该 session 的 SSE 当前
+在线。能力不从历史 node 快照继承；旧 runtime 回滚后的首次 heartbeat 会
+显式清零。接收端把该 reply 注入 runtime 后 ACK，
 但结构上不具备再次回复它的出口。
 
 混合版本按安全方向降级：旧 Hub 不认识 `send_peer_reply`，或新 Hub 判断
 任一端缺少能力时，发送端才回退到历史 `send_task`；传输错误、身份错误和
-其他业务拒绝绝不回退，避免一次不确定写后再造第二条 task。能力由绑定
-node token 的 heartbeat 提供，alias、自报 node_id 或 session 行都不能冒充。
+其他业务拒绝绝不回退，避免一次不确定写后再造第二条 task。负向能力结果
+不永久缓存，下次回复重新探测。每次 legacy 回退 task 都在 meta 标记 reason，
+便于统计残留 pair 的收敛。能力由绑定 node token 的 heartbeat 提供，alias、
+自报 node_id 或历史 node 快照都不能冒充。
 
 ### 18.4b CommHub 作为原生 MCP（codex 直接调 `commhub_*` 工具）
 

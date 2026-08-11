@@ -6,6 +6,7 @@ export interface PeerReplySendArgs {
   taskId: string;
   failed: boolean;
   fromAlias: string;
+  fallbackReason?: "old_hub_unknown_tool" | "recipient_unsupported";
 }
 
 export interface PeerReplySendDeps {
@@ -14,7 +15,7 @@ export interface PeerReplySendDeps {
 }
 
 export interface PeerReplyCapabilityCache {
-  hubSupportsTool: boolean | null;
+  hubSupportsTool: true | null;
 }
 
 export function createPeerReplyCapabilityCache(): PeerReplyCapabilityCache {
@@ -44,16 +45,17 @@ export async function sendPeerReplyCompatible(
   deps: PeerReplySendDeps,
   cache: PeerReplyCapabilityCache = createPeerReplyCapabilityCache(),
 ): Promise<{ route: "atomic" | "legacy"; payload: any }> {
-  if (cache.hubSupportsTool === false) {
-    return { route: "legacy", payload: await deps.sendLegacy(args) };
-  }
   try {
     const payload = await deps.sendAtomic(args);
     cache.hubSupportsTool = true;
     return { route: "atomic", payload };
   } catch (error) {
     if (!isPeerReplyCapabilityUnavailable(error)) throw error;
-    if (isUnknownTool(error)) cache.hubSupportsTool = false;
-    return { route: "legacy", payload: await deps.sendLegacy(args) };
+    const fallbackReason = isUnknownTool(error)
+      ? "old_hub_unknown_tool" as const
+      : "recipient_unsupported" as const;
+    // Negative capability observations are deliberately not cached. A Hub
+    // upgrade or recipient restart may make the next attempt capable.
+    return { route: "legacy", payload: await deps.sendLegacy({ ...args, fallbackReason }) };
   }
 }

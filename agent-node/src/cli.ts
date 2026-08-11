@@ -1382,6 +1382,10 @@ async function sendReply(
           fromAlias: args.fromAlias,
           parentTaskId: args.taskId,
           networkId: NETWORK_ID || null,
+          meta: {
+            peer_reply_legacy_fallback: true,
+            peer_reply_fallback_reason: args.fallbackReason,
+          },
         }, {
           log: taskTraceLog,
           send: (legacyArgs) => callCommHub("send_task", legacyArgs),

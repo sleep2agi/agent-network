@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
 import { createHash } from "node:crypto";
 import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, generateNetworkToken, syncScheduledRunForTask } from "./db.js";
-import { pushEvent, pushNetworkObserverEvent } from "./push.js";
+import { getSSEStats, pushEvent, pushNetworkObserverEvent } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { getUserNetworkRole, createNetworkTokenForNode } from "./auth.js";
 import { canRestWriteNetwork, getUserNetworkIds, singleNetworkId } from "./network-scope.js";
@@ -620,6 +620,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const processUptimeSeconds = typeof proc?.uptime_seconds === "number" ? proc.uptime_seconds : null;
       const processInFlightCount = typeof proc?.in_flight_count === "number" ? proc.in_flight_count : null;
       const externalSchedulesJson = externalSchedules === undefined ? null : JSON.stringify(externalSchedules);
+      const trustedCurrentSnapshot = node_id
+        ? trustedConfigSnapshotForNode(cfgSnap ?? null, callerTokenId ?? null, node_id)
+        : null;
+      const peerReplyInboxCapable = !!(
+        trustedCurrentSnapshot
+        && typeof trustedCurrentSnapshot === "object"
+        && (trustedCurrentSnapshot as Record<string, unknown>).peer_reply_inbox_capable === true
+      );
       const statusHostTelemetry = host ? {
         hostname: hostHostname,
         ip: hostIp,
@@ -644,8 +652,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // Only delete same-alias sessions within the same network
         db.run("DELETE FROM sessions WHERE alias = ?1 AND resume_id != ?2 AND network_id = ?3", [effectiveAlias, resume_id, sessionNetId]);
         db.run(
-          `INSERT INTO sessions (resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version, status, task, output, progress, score, node_id, session_id, config_path, channels, network_id, model, cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb, disk_used_gb, disk_avail_gb, process_rss_bytes, process_rss_mb, process_cpu_pct, process_uptime_seconds, process_in_flight_count, external_schedules, last_seen_at, updated_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, datetime('now'), datetime('now'))
+          `INSERT INTO sessions (resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version, status, task, output, progress, score, node_id, session_id, config_path, channels, network_id, model, cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb, disk_used_gb, disk_avail_gb, process_rss_bytes, process_rss_mb, process_cpu_pct, process_uptime_seconds, process_in_flight_count, external_schedules, peer_reply_inbox_capable, last_seen_at, updated_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, datetime('now'), datetime('now'))
            ON CONFLICT(resume_id) DO UPDATE SET
              alias = COALESCE(?2, sessions.alias), tmux_name = COALESCE(?3, sessions.tmux_name),
              server = COALESCE(?4, sessions.server), ip = COALESCE(?5, sessions.ip),
@@ -671,8 +679,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
              process_uptime_seconds = COALESCE(?32, sessions.process_uptime_seconds),
              process_in_flight_count = COALESCE(?33, sessions.process_in_flight_count),
              external_schedules = COALESCE(?34, sessions.external_schedules),
+             peer_reply_inbox_capable = ?35,
              last_seen_at = datetime('now'), updated_at = datetime('now')`,
-          [resume_id, effectiveAlias, tmux ?? null, srv ?? null, hostIp, hostHostname, ag ?? null, pd ?? null, ver ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null, sessionNetId, mdl ?? null, cpuLoad1m, cpuCores, memTotalGb, memUsedGb, memAvailGb, diskTotalGb, diskUsedGb, diskAvailGb, processRssBytes, processRssMb, processCpuPct, processUptimeSeconds, processInFlightCount, externalSchedulesJson]
+          [resume_id, effectiveAlias, tmux ?? null, srv ?? null, hostIp, hostHostname, ag ?? null, pd ?? null, ver ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null, sessionNetId, mdl ?? null, cpuLoad1m, cpuCores, memTotalGb, memUsedGb, memAvailGb, diskTotalGb, diskUsedGb, diskAvailGb, processRssBytes, processRssMb, processCpuPct, processUptimeSeconds, processInFlightCount, externalSchedulesJson, peerReplyInboxCapable ? 1 : 0]
         );
         if (host || proc) {
           db.run(
@@ -1573,16 +1582,16 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             if (!taskBefore.from_node_id) {
               return { ok: false as const, error: "peer_reply_unsupported" as const };
             }
-            const recipient = db.get<{ config_snapshot: string | null }>(
-              "SELECT config_snapshot FROM nodes WHERE node_id = ?1 AND network_id = ?2",
+            const recipient = db.get<{ peer_reply_inbox_capable: number }>(
+              `SELECT peer_reply_inbox_capable FROM sessions
+               WHERE node_id = ?1 AND network_id = ?2 AND alias = ?3
+               ORDER BY updated_at DESC LIMIT 1`,
               taskBefore.from_node_id,
               enforceNetworkId,
+              canonicalOrigin,
             );
-            let recipientCapable = false;
-            try {
-              recipientCapable = JSON.parse(recipient?.config_snapshot || "null")?.peer_reply_inbox_capable === true;
-            } catch {}
-            if (!recipientCapable) {
+            const liveSse = getSSEStats().sessions[`${enforceNetworkId}:${canonicalOrigin}`] ?? 0;
+            if (recipient?.peer_reply_inbox_capable !== 1 || liveSse < 1) {
               return { ok: false as const, error: "peer_reply_unsupported" as const };
             }
           }

@@ -7,6 +7,7 @@ export async function sendPeerReplyTaskWithTrace(input: {
   fromAlias: string;
   parentTaskId: string | null;
   networkId: string | null;
+  meta?: Record<string, unknown>;
 }, dependencies: {
   send: (args: Record<string, unknown>) => Promise<any>;
   log: (line: string) => void;
@@ -26,6 +27,7 @@ export async function sendPeerReplyTaskWithTrace(input: {
       priority: input.priority,
       from_session: input.fromAlias,
       parent_task_id: input.parentTaskId || undefined,
+      ...(input.meta ? { meta: input.meta } : {}),
     }),
   });
 }

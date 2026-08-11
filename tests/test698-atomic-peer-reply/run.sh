@@ -84,7 +84,15 @@ run_mutation "capability-provenance-bypassed" \
   /workspace/server/src/peer-reply-capability.test.ts
 run_mutation "recipient-capability-gate-removed" \
   /workspace/server/src/tools.ts \
-  's/if (!recipientCapable) {/if (false) {/' \
+  's/if (recipient?.peer_reply_inbox_capable !== 1 || liveSse < 1) {/if (false) {/' \
+  /workspace/server/src/peer-reply-atomic.test.ts
+run_mutation "rollback-capability-clear-removed" \
+  /workspace/server/src/tools.ts \
+  's/externalSchedulesJson, peerReplyInboxCapable ? 1 : 0]/externalSchedulesJson, 1]/' \
+  /workspace/server/src/peer-reply-atomic.test.ts
+run_mutation "legacy-fallback-marker-removed" \
+  /workspace/agent-node/src/peer-reply-task-trace.ts \
+  's/...(input.meta ? { meta: input.meta } : {}),/...{},/' \
   /workspace/server/src/peer-reply-atomic.test.ts
 run_mutation "reply-rename-canonicalization-removed" \
   /workspace/server/src/tools.ts \
