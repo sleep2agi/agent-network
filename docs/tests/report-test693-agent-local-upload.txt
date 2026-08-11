@@ -1,0 +1,49 @@
+AI Insight / Agent Network #693 — agent controlled local upload bridge
+Date: 2026-08-11
+
+Repository: sleep2agi/agent-network
+Branch: fix/693-agent-local-upload-bridge
+Base: origin/main @ d5199bc96bf72643a1ed34f476572394995725cb
+Source commit under test: 0339619716dfc1be208e4b0a4fac8db68180db3f
+Docker tag: anet-test693:dev
+Docker image ID: sha256:47db7f62d57a1a4ad4558b3d8ca72631fa6dc05b2638eee376cb4bdb7c3d32ad
+Embedded ENV: SOURCE_COMMIT=0339619716dfc1be208e4b0a4fac8db68180db3f
+Runner output SHA256: 349a2d42d8b09d703e3febd3f822e52edad10939426b607c02fa851eb8522e83
+
+Command:
+  docker build -t anet-test693:dev --build-arg SOURCE_COMMIT=0339619716dfc1be208e4b0a4fac8db68180db3f -f tests/test693-agent-local-upload/Dockerfile .
+  docker run --rm -e SOURCE_COMMIT=0339619716dfc1be208e4b0a4fac8db68180db3f anet-test693:dev
+
+Result: PASS
+
+Design: Scheme A (MCP upload_file) — see docs/design/693-agent-local-upload-bridge.md
+  - Agent host validates controlled path (realpath + roots)
+  - Streams bytes to Hub POST /api/upload (existing authz/network scope)
+  - Returns file_id; send_reply still requires file_id (no bare path)
+
+Assertions:
+  L0 controlled-upload unit: 13 pass / 0 fail / 31 expect()
+  L1 witnessed-red mutations (byte-change guarded):
+    path-boundary-removed rc=1
+    symlink-reject-removed rc=1
+    size-cap-removed rc=1
+  L2 in-process hub:
+    reject /etc/passwd (path_untrusted)
+    reject symlink leaf (path_symlink)
+    reject >12 MiB (payload_too_large)
+    PNG fixture upload → file_id
+    send_reply attachments_saved with file_id
+    raw path attachment → bad_attachments
+    GET /api/files/:id returns PNG bytes
+    cross-network utok → 404
+
+NOT COVERED (residual):
+  - Full multi-container cross-host Docker (agent container ≠ hub container) — L2 uses in-process hub with HTTP path (same code as cross-host; network isolation simulated via separate tokens)
+  - Live Grok image_gen → Dashboard UAT on production nodes
+  - Concurrent upload idempotency under hub rate limit storms
+  - Independent adversarial review (required before merge)
+
+Production boundary:
+  - No production file, crontab, Hub runtime, token, webhook, or database modified.
+  - Production rollout requires Vincent direct GO.
+  - Report contains no tokens or host private paths.
