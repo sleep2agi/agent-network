@@ -167,10 +167,14 @@ run_mutation "dashboard-origin-misclassified" \
   /workspace/server/src/tools.ts \
   's/error: "peer_reply_origin_not_node" as const/error: "peer_reply_unsupported" as const/' \
   /workspace/server/src/peer-reply-atomic.test.ts
-run_server_wiring_mutation "dashboard-origin-checked-after-capability" \
-  's/if (!taskBefore.from_node_id) {/if (!taskBefore.from_node_id \&\& !peerCapabilityRequired) {/'
-run_server_wiring_mutation "dashboard-null-target-origin-order-lost" \
-  's/if (!taskBefore.from_node_id) {/if (!taskBefore.from_node_id \&\& !!taskBefore.to_node_id) {/'
+run_mutation "dashboard-origin-checked-after-capability" \
+  /workspace/server/src/tools.ts \
+  's/if (!taskBefore.from_node_id) {/if (!taskBefore.from_node_id \&\& !peerCapabilityRequired) {/' \
+  /workspace/server/src/peer-reply-atomic.test.ts
+run_mutation "dashboard-null-target-origin-order-lost" \
+  /workspace/server/src/tools.ts \
+  's/if (!taskBefore.from_node_id) {/if (!taskBefore.from_node_id \&\& !!taskBefore.to_node_id) {/' \
+  /workspace/server/src/peer-reply-atomic.test.ts
 run_mutation "terminal-reply-replies-again" \
   /workspace/agent-node/src/peer-reply-inbox.ts \
   's/if (replyExpected) return/if (true) return/' \
