@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# #693 — CI bare-rm gate: use tests/lib/safe-rm.sh (2026-06-16 incident).
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/safe-rm.sh"
+
 echo "# test693 agent local upload bridge"
 echo "SOURCE_COMMIT=${SOURCE_COMMIT:-unknown}"
 echo "date=$(date -Iseconds)"
@@ -12,7 +15,7 @@ echo "L0 controlled-upload unit"
 
 echo "L1 witnessed-red mutations"
 MUT_ROOT=$(mktemp -d /tmp/test693-mut.XXXXXX)
-cleanup() { rm -rf -- "${MUT_ROOT:?}"; }
+cleanup() { safe_rm_rf "${MUT_ROOT:?}"; }
 trap cleanup EXIT
 
 run_mut() {
@@ -51,7 +54,6 @@ run_mut size-cap-removed \
   's/CONTROLLED_UPLOAD_MAX_BYTES = 12 \* 1024 \* 1024/CONTROLLED_UPLOAD_MAX_BYTES = 1024 * 1024 * 1024 * 1024/'
 
 echo "L2 in-process hub integrate"
-# require-explicit-test-db needs COMMHUB_DB or similar
 export COMMHUB_DB="${COMMHUB_DB:-$(mktemp /tmp/test693-db.XXXXXX.sqlite)}"
 export COMMHUB_SERVER=1
 bun "$ROOT/tests/test693-agent-local-upload/integrate.ts"
