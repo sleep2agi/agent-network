@@ -1,29 +1,31 @@
-AI Insight / Agent Network #693 — agent controlled local upload bridge
+Agent Network #693 — agent controlled local upload bridge (FROZEN)
 Date: 2026-08-11
 
 Repository: sleep2agi/agent-network
 Branch: fix/693-agent-local-upload-bridge
 Base: origin/main @ d5199bc96bf72643a1ed34f476572394995725cb
-Source commit under test: 0339619716dfc1be208e4b0a4fac8db68180db3f
+Source commit under test (FROZEN): 03bd70ee83f84352b5fd435c4cdc6d56121b4cf1
+  lineage: 03396197 (feature) + a2d80c05 (prior report) + 03bd70ee (safe_rm_rf CI gate fix)
 Docker tag: anet-test693:dev
-Docker image ID: sha256:47db7f62d57a1a4ad4558b3d8ca72631fa6dc05b2638eee376cb4bdb7c3d32ad
-Embedded ENV: SOURCE_COMMIT=0339619716dfc1be208e4b0a4fac8db68180db3f
-Runner output SHA256: 349a2d42d8b09d703e3febd3f822e52edad10939426b607c02fa851eb8522e83
+Docker image ID: sha256:1516fce54944d60e52ad7428c5ed51523de781674f55478105d6b8671e3454e1
+Embedded ENV: SOURCE_COMMIT=03bd70ee83f84352b5fd435c4cdc6d56121b4cf1
+Runner output SHA256: 4b5474793030dd0cf6c80b0f1f3d44486be444c9bae12737042c8c3b07ee00f7
 
 Command:
-  docker build -t anet-test693:dev --build-arg SOURCE_COMMIT=0339619716dfc1be208e4b0a4fac8db68180db3f -f tests/test693-agent-local-upload/Dockerfile .
-  docker run --rm -e SOURCE_COMMIT=0339619716dfc1be208e4b0a4fac8db68180db3f anet-test693:dev
+  docker build -t anet-test693:dev --build-arg SOURCE_COMMIT=03bd70ee83f84352b5fd435c4cdc6d56121b4cf1 -f tests/test693-agent-local-upload/Dockerfile .
+  docker run --rm -e SOURCE_COMMIT=03bd70ee83f84352b5fd435c4cdc6d56121b4cf1 anet-test693:dev
 
 Result: PASS
 
-Design: Scheme A (MCP upload_file) — see docs/design/693-agent-local-upload-bridge.md
-  - Agent host validates controlled path (realpath + roots)
-  - Streams bytes to Hub POST /api/upload (existing authz/network scope)
-  - Returns file_id; send_reply still requires file_id (no bare path)
+CI bare-rm gate:
+  Fixed tests/test693-agent-local-upload/run.sh to source tests/lib/safe-rm.sh
+  and use safe_rm_rf (lint-no-bare-rm-rf.sh clean on host).
+
+Design: Scheme A — docs/design/693-agent-local-upload-bridge.md
 
 Assertions:
   L0 controlled-upload unit: 13 pass / 0 fail / 31 expect()
-  L1 witnessed-red mutations (byte-change guarded):
+  L1 witnessed-red (byte-change guarded):
     path-boundary-removed rc=1
     symlink-reject-removed rc=1
     size-cap-removed rc=1
@@ -31,19 +33,19 @@ Assertions:
     reject /etc/passwd (path_untrusted)
     reject symlink leaf (path_symlink)
     reject >12 MiB (payload_too_large)
-    PNG fixture upload → file_id
+    PNG upload → file_id
     send_reply attachments_saved with file_id
-    raw path attachment → bad_attachments
-    GET /api/files/:id returns PNG bytes
-    cross-network utok → 404
+    raw path → bad_attachments
+    GET /api/files PNG bytes
+    cross-network 404
 
-NOT COVERED (residual):
-  - Full multi-container cross-host Docker (agent container ≠ hub container) — L2 uses in-process hub with HTTP path (same code as cross-host; network isolation simulated via separate tokens)
-  - Live Grok image_gen → Dashboard UAT on production nodes
-  - Concurrent upload idempotency under hub rate limit storms
-  - Independent adversarial review (required before merge)
+NOT COVERED:
+  - Multi-container agent≠hub topology (reviewer may require)
+  - Live Grok image_gen production UAT (post Vincent GO)
+  - Concurrent rate-limit storm idempotency (reviewer may require)
+  - Independent adversarial review (pending after freeze)
 
 Production boundary:
-  - No production file, crontab, Hub runtime, token, webhook, or database modified.
-  - Production rollout requires Vincent direct GO.
+  - No production assets modified. HOLD pending Vincent GO.
   - Report contains no tokens or host private paths.
+  - Coordinates FROZEN — implementer will not move source/report without gatekeeper request.
