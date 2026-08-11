@@ -130,6 +130,26 @@ try {
             datetime('now'), ?2, 'none', ?3, ?4, ?2)`)
     .run(startupInbox, startupTask, networkId, receiver.node_id);
 
+  // Seed a second initial message without to_node_id. Direct insertion is
+  // intentional: this reproduces legacy/scheduler rows before the receiver
+  // connects, so the initial inbox drain (rather than an artificial SSE)
+  // exercises the production route.
+  const nullTargetTask = `task_test698_null_target_${crypto.randomUUID()}`;
+  const nullTargetInbox = `inbox_test698_null_target_${crypto.randomUUID()}`;
+  direct.query(`INSERT INTO tasks
+    (task_id, from_name, from_node_id, to_name, to_node_id, priority, status, content,
+     requires_response, created_at, network_id)
+    VALUES (?1, 'admin', NULL, 'receiver', NULL, 'normal', 'delivered',
+            'Dashboard request with a legacy NULL target node id', 'reply', datetime('now'), ?2)`)
+    .run(nullTargetTask, networkId);
+  direct.query(`INSERT INTO inbox
+    (id, session_name, type, priority, content, from_session, acked, created_at,
+     in_reply_to, requires_response, network_id, node_id, task_id)
+    VALUES (?1, 'receiver', 'task', 'normal',
+            'Dashboard request with a legacy NULL target node id', 'admin', 0,
+            datetime('now'), ?2, 'reply', ?3, NULL, ?2)`)
+    .run(nullTargetInbox, nullTargetTask, networkId);
+
   const configPath = `${work}/home/.anet/nodes/receiver/config.json`;
   writeFileSync(configPath, JSON.stringify({
     alias: "receiver",
@@ -221,6 +241,44 @@ try {
   }
   direct.query("UPDATE api_tokens SET bound_node_id=?1 WHERE token_id=?2").run(receiver.node_id, receiver.token_id);
 
+  // Some legacy/scheduler rows deliberately have no to_node_id. Origin type
+  // is still authoritative: a Dashboard-originated task must reach the
+  // established send_reply path instead of being pre-empted by the caller
+  // capability check and silently discarded as send_task("admin").
+  await waitFor(() => direct.query<{ status: string }, [string]>(
+    "SELECT status FROM tasks WHERE task_id=?1",
+  ).get(nullTargetTask)?.status === "replied", "NULL-target Dashboard task terminalization", 300);
+  const nullTargetReplies = direct.query<{ n: number }, [string]>(
+    "SELECT COUNT(*) AS n FROM inbox WHERE in_reply_to=?1 AND type='reply' AND session_name='admin'",
+  ).get(nullTargetTask)?.n;
+  const nullTargetChildren = direct.query<{ n: number }, [string]>(
+    "SELECT COUNT(*) AS n FROM tasks WHERE parent_task_id=?1",
+  ).get(nullTargetTask)?.n;
+  if (nullTargetReplies !== 1 || nullTargetChildren !== 0) {
+    throw new Error(`NULL-target Dashboard reply misrouted replies=${nullTargetReplies} children=${nullTargetChildren}`);
+  }
+
+  // Preserve the processTask failure bit through the real cli.ts
+  // sendLegacyReply wiring. A constant "replied" status here would turn a
+  // vendor failure into a false success while all message text still looks
+  // plausible.
+  const failedDashboardDispatch = await mcp(userToken, "send_task", {
+    alias: "receiver",
+    task: "FORCE_FAILED_STATUS_698",
+    from_session: "admin",
+    network_id: networkId,
+  });
+  const failedDashboardTask = failedDashboardDispatch.task_id || failedDashboardDispatch.message_id;
+  await waitFor(() => direct.query<{ status: string }, [string]>(
+    "SELECT status FROM tasks WHERE task_id=?1",
+  ).get(failedDashboardTask)?.status === "failed", "Dashboard failed status propagation", 300);
+  const failedDashboardReplies = direct.query<{ n: number }, [string]>(
+    "SELECT COUNT(*) AS n FROM inbox WHERE in_reply_to=?1 AND type='reply' AND session_name='admin'",
+  ).get(failedDashboardTask)?.n;
+  if (failedDashboardReplies !== 1) {
+    throw new Error(`failed Dashboard reply missing count=${failedDashboardReplies}`);
+  }
+
   // Force the actual cli.ts legacy-node path and inspect the production meta,
   // rather than round-tripping a test-authored literal.
   const legacyOriginTask = await mcp(dispatcher.token, "send_task", {
@@ -269,7 +327,7 @@ try {
   if (sendReplyCountAfterTerminal !== sendReplyCountBeforeTerminal) {
     throw new Error("terminal reply triggered an outbound send_reply from the real cli.ts path");
   }
-  console.log("CLI_WIRING_E2E_PASS startup_reply=no_egress dashboard_bound+unbound=terminal new_reply=runtime+ack");
+  console.log("CLI_WIRING_E2E_PASS startup_reply=no_egress dashboard_bound+unbound+null-target=terminal failed=failed new_reply=runtime+ack");
   direct.close();
 } catch (error) {
   for (const name of ["server.log", "agent.log"]) {

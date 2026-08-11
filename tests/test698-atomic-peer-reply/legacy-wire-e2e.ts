@@ -1,14 +1,16 @@
 import { classifyCommHubResponse } from "../../agent-node/src/reply-reliability";
 import { sendPeerReplyCompatible } from "../../agent-node/src/peer-reply-send";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 
 const hub = process.argv[2];
 const adminToken = process.argv[3];
 if (!hub || !adminToken) throw new Error("usage: legacy-wire-e2e.ts <hub> <admin-token>");
 
+const username = `legacy-wire-${Date.now()}`;
 const register = await fetch(`${hub}/api/auth/register`, {
   method: "POST",
   headers: { authorization: `Bearer ${adminToken}`, "content-type": "application/json" },
-  body: JSON.stringify({ username: `legacy-wire-${Date.now()}`, password: "pass123456" }),
+  body: JSON.stringify({ username, password: "pass123456" }),
 }).then((r) => r.json() as Promise<any>);
 if (!register?.token) throw new Error(`legacy register failed: ${JSON.stringify(register)}`);
 const userHeaders = { authorization: `Bearer ${register.token}`, "content-type": "application/json" };
@@ -22,12 +24,25 @@ const minted = await fetch(`${hub}/api/auth/node-token`, {
 }).then((r) => r.json() as Promise<any>);
 if (!minted?.token) throw new Error(`legacy node token failed: ${JSON.stringify(minted)}`);
 const token = minted.token;
+const receiverMinted = await fetch(`${hub}/api/auth/node-token`, {
+  method: "POST", headers: userHeaders,
+  body: JSON.stringify({ network_id: network.network_id, node_name: "receiver", node_id: "n_legacy_receiver" }),
+}).then((r) => r.json() as Promise<any>);
+if (!receiverMinted?.token) throw new Error(`legacy receiver token failed: ${JSON.stringify(receiverMinted)}`);
 
-async function oldHubTool(name: string, args: Record<string, unknown>) {
+async function waitFor(predicate: () => Promise<boolean>, label: string, attempts = 160) {
+  for (let i = 0; i < attempts; i++) {
+    if (await predicate()) return;
+    await Bun.sleep(100);
+  }
+  throw new Error(`timeout waiting for ${label}`);
+}
+
+async function oldHubTool(authToken: string, name: string, args: Record<string, unknown>) {
   const response = await fetch(`${hub}/mcp`, {
     method: "POST",
     headers: {
-      authorization: `Bearer ${token}`,
+      authorization: `Bearer ${authToken}`,
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
     },
@@ -47,7 +62,7 @@ async function oldHubTool(name: string, args: Record<string, unknown>) {
   return classified.payload;
 }
 
-await oldHubTool("report_status", {
+await oldHubTool(token, "report_status", {
   alias: "dispatcher",
   node_id: "n_legacy_wire",
   status: "idle",
@@ -89,15 +104,37 @@ if (classified.error.code !== -32602) {
   throw new Error(`legacy MCP code lost: ${String(classified.error.code)}`);
 }
 
-const rosterTargetIsAgent = async (target: string) => {
-  const status = await oldHubTool("get_all_status", {});
-  if (!Array.isArray(status?.sessions)) throw new Error("old Hub roster missing sessions");
-  return status.sessions.some((session: any) => session?.alias === target);
+const nodeOrigin = await oldHubTool(token, "send_task", {
+  alias: "dispatcher",
+  task: "old-Hub node-origin task",
+  from_session: "dispatcher",
+  network_id: network.network_id,
+});
+const userOrigin = await oldHubTool(register.token, "send_task", {
+  alias: "dispatcher",
+  task: "old-Hub Dashboard-origin task",
+  from_session: username,
+  network_id: network.network_id,
+});
+const nodeOriginTaskId = nodeOrigin.task_id || nodeOrigin.message_id;
+const userOriginTaskId = userOrigin.task_id || userOrigin.message_id;
+if (!nodeOriginTaskId || !userOriginTaskId) {
+  throw new Error(`old Hub send_task omitted ids: ${JSON.stringify({ nodeOrigin, userOrigin })}`);
+}
+
+const exactTaskOriginIsNode = async (taskId: string) => {
+  const result = await oldHubTool(token, "get_task", { task_id: taskId });
+  const task = result?.task;
+  if (!result?.ok || !task || task.task_id !== taskId
+      || (task.from_node_id !== null && typeof task.from_node_id !== "string")) {
+    throw new Error("old Hub task identity unavailable");
+  }
+  return typeof task.from_node_id === "string" && task.from_node_id.length > 0;
 };
 
 for (const fixture of [
-  { target: "dispatcher", expectedRoute: "legacy", expectedEgress: "task" },
-  { target: "admin", expectedRoute: "legacy-reply", expectedEgress: "reply" },
+  { target: "dispatcher", taskId: nodeOriginTaskId, expectedRoute: "legacy", expectedEgress: "task" },
+  { target: username, taskId: userOriginTaskId, expectedRoute: "legacy-reply", expectedEgress: "reply" },
 ] as const) {
   let atomicCalls = 0;
   let legacyCalls = 0;
@@ -106,7 +143,7 @@ for (const fixture of [
   const result = await sendPeerReplyCompatible({
     target: fixture.target,
     text: "legacy wire probe",
-    taskId: "task_legacy_wire",
+    taskId: fixture.taskId,
     failed: false,
     fromAlias: "worker",
   }, {
@@ -123,7 +160,7 @@ for (const fixture of [
       legacyReplyCalls++;
       return { message_id: "legacy_reply_once" };
     },
-    isOldHubTargetAgent: async (args) => rosterTargetIsAgent(args.target),
+    isOldHubOriginNode: async (args) => exactTaskOriginIsNode(args.taskId),
   });
 
   const expectedTaskCalls = fixture.expectedEgress === "task" ? 1 : 0;
@@ -136,4 +173,85 @@ for (const fixture of [
     throw new Error(`bad fallback reason: ${fallbackReason}`);
   }
 }
-console.log("LEGACY_HUB_WIRE_PASS code=-32602 roster_agent=task roster_user=reply");
+console.log("LEGACY_HUB_WIRE_PASS code=-32602 exact_task_node=task exact_task_user=reply");
+
+// Exercise the real production cli.ts wiring against that same archived old
+// Hub. This closes the gap where a test-authored classifier was correct but
+// cli.ts still queried the alias roster (or hardcoded a route).
+const work = "/tmp/test698-legacy-cli";
+rmSync(work, { recursive: true, force: true });
+mkdirSync(`${work}/home/.anet/nodes/receiver`, { recursive: true });
+const configPath = `${work}/home/.anet/nodes/receiver/config.json`;
+writeFileSync(configPath, JSON.stringify({
+  alias: "receiver",
+  node_name: "receiver",
+  node_id: "n_legacy_receiver",
+  runtime: "claude-agent-sdk",
+  model: "claude-test-stub",
+  hub,
+  token: receiverMinted.token,
+  network_id: network.network_id,
+  env: { ANTHROPIC_API_KEY: "test-only-placeholder" },
+}, null, 2));
+const agent = Bun.spawn([
+  "bun", "--preload", "/workspace/tests/test698-atomic-peer-reply/sdk-stub-preload.ts",
+  "/workspace/agent-node/src/cli.ts", "--config", configPath, "--alias", "receiver",
+], {
+  cwd: "/workspace",
+  env: { ...process.env, HOME: `${work}/home`, REPO: "/workspace", TEST673_CAPTURE_FILE: `${work}/sdk-capture.json` },
+  stdout: Bun.file(`${work}/agent.log`),
+  stderr: Bun.file(`${work}/agent.log`),
+});
+
+try {
+  await waitFor(async () => {
+    const status = await oldHubTool(token, "get_all_status", {});
+    return Array.isArray(status?.sessions)
+      && status.sessions.some((session: any) => session?.alias === "receiver");
+  }, "legacy receiver session");
+
+  const liveNodeOrigin = await oldHubTool(token, "send_task", {
+    alias: "receiver", task: "production old-Hub node-origin reply", from_session: "dispatcher",
+    network_id: network.network_id,
+  });
+  const liveUserOrigin = await oldHubTool(register.token, "send_task", {
+    alias: "receiver", task: "production old-Hub Dashboard-origin reply", from_session: username,
+    network_id: network.network_id,
+  });
+  const liveNodeOriginTaskId = liveNodeOrigin.task_id || liveNodeOrigin.message_id;
+  const liveUserOriginTaskId = liveUserOrigin.task_id || liveUserOrigin.message_id;
+  if (!liveNodeOriginTaskId || !liveUserOriginTaskId) {
+    throw new Error(`old Hub live send_task omitted ids: ${JSON.stringify({ liveNodeOrigin, liveUserOrigin })}`);
+  }
+
+  await waitFor(async () => {
+    const state = await oldHubTool(token, "get_task", { task_id: liveUserOriginTaskId });
+    return state?.task?.status === "replied";
+  }, "old-Hub Dashboard task terminalization", 300);
+  await waitFor(async () => {
+    const inbox = await oldHubTool(register.token, "get_inbox", { alias: username, limit: 20 });
+    return Array.isArray(inbox?.messages)
+      && inbox.messages.some((message: any) => message?.type === "reply"
+        && message?.from_session === "receiver"
+        && message?.content?.includes("TEST673_STUB_OK"));
+  }, "old-Hub Dashboard reply delivery", 300);
+  await waitFor(async () => {
+    const inbox = await oldHubTool(token, "get_inbox", { alias: "dispatcher", limit: 20 });
+    return Array.isArray(inbox?.messages)
+      && inbox.messages.some((message: any) => message?.type === "task"
+        && message?.from_session === "receiver"
+        && message?.content?.includes("TEST673_STUB_OK"));
+  }, "old-Hub node-origin fallback task", 300);
+  const nodeState = await oldHubTool(token, "get_task", { task_id: liveNodeOriginTaskId });
+  if (!nodeState?.task || ["replied", "failed"].includes(nodeState.task.status)) {
+    throw new Error(`old-Hub node-origin task unexpectedly terminalized: ${JSON.stringify(nodeState)}`);
+  }
+  console.log("LEGACY_CLI_E2E_PASS exact_get_task node=task user=reply");
+} catch (error) {
+  const log = Bun.file(`${work}/agent.log`);
+  if (await log.exists()) console.error(`--- legacy agent log ---\n${await log.text()}`);
+  throw error;
+} finally {
+  agent.kill();
+  await agent.exited;
+}

@@ -167,6 +167,27 @@ describe("#698 atomic peer reply", () => {
     expect(replies(taskId)).toHaveLength(0);
   });
 
+  test("recipient capability is bound to the exact canonical alias, not another session on the same node", async () => {
+    const taskId = await dispatch(A, B, "same node must not lend capability across aliases");
+    db.run(
+      "UPDATE sessions SET peer_reply_inbox_capable = 0 WHERE alias = ?1 AND network_id = ?2",
+      [A, NET],
+    );
+    db.run(
+      `INSERT INTO sessions
+         (resume_id, alias, status, node_id, network_id, peer_reply_inbox_capable, updated_at, last_seen_at)
+       VALUES ('resume-wrong-alias-698', 'wrong-alias-698', 'idle', ?1, ?2, 1,
+               datetime('now', '+1 minute'), datetime('now', '+1 minute'))`,
+      [A_ID, NET],
+    );
+    const result = await call(toolsFor(B).send_peer_reply, {
+      alias: A, text: "must not borrow wrong alias capability", in_reply_to: taskId, status: "replied",
+    });
+    expect(result).toEqual(expect.objectContaining({ ok: false, error: "peer_reply_unsupported" }));
+    expect(task(taskId)).toEqual(expect.objectContaining({ status: "delivered", result: null }));
+    expect(replies(taskId)).toHaveLength(0);
+  });
+
   test("origin rename during work routes the terminal reply to the canonical alias and stable node", async () => {
     const taskId = await dispatch(A, B, "origin will rename");
     const renamed = `${A}-renamed`;
@@ -253,7 +274,7 @@ describe("#698 atomic peer reply", () => {
         sendLegacyReply: async () => {
           throw new Error("node-to-node capability fallback must not use send_reply");
         },
-        isOldHubTargetAgent: async () => true,
+        isOldHubOriginNode: async () => true,
       });
       expect(routed.route).toBe("legacy");
       expect([atomicCalls, legacyCalls]).toEqual([1, 1]);
@@ -315,7 +336,7 @@ describe("#698 atomic peer reply", () => {
       sendLegacyReply: async () => {
         throw new Error("identity rotation fallback must not use send_reply");
       },
-      isOldHubTargetAgent: async () => true,
+      isOldHubOriginNode: async () => true,
     });
 
     expect(routed.route).toBe("legacy");

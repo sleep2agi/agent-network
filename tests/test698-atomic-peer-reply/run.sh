@@ -134,10 +134,14 @@ run_cli_mutation "cli-new-reply-wake-disabled" \
   's/routePeerReplySse(ev, scheduleWorkInboxDrain);/if (false) routePeerReplySse(ev, scheduleWorkInboxDrain);/'
 run_cli_mutation "cli-fallback-reason-lost" \
   's/peer_reply_fallback_reason: args.fallbackReason/peer_reply_fallback_reason: undefined/'
+run_cli_mutation "cli-failed-status-lost" \
+  '/sendLegacyReply:/,/      }),/ s/status: args.failed ? "failed" : "replied"/status: "replied"/'
 run_server_wiring_mutation "dashboard-origin-misrouted-to-task" \
   's/error: "peer_reply_origin_not_node" as const/error: "peer_reply_unsupported" as const/'
 run_server_wiring_mutation "dashboard-origin-checked-after-capability" \
   's/if (!taskBefore.from_node_id) {/if (!taskBefore.from_node_id \&\& !peerCapabilityRequired) {/'
+run_server_wiring_mutation "dashboard-null-target-origin-order-lost" \
+  's/if (!taskBefore.from_node_id) {/if (!taskBefore.from_node_id \&\& !!taskBefore.to_node_id) {/'
 run_mutation "terminal-reply-replies-again" \
   /workspace/agent-node/src/peer-reply-inbox.ts \
   's/if (replyExpected) return/if (true) return/' \
@@ -166,6 +170,10 @@ run_mutation "capability-provenance-bypassed" \
 run_mutation "recipient-capability-gate-removed" \
   /workspace/server/src/tools.ts \
   's/if (recipient?.peer_reply_inbox_capable !== 1 || liveSse < 1) {/if (false) {/' \
+  /workspace/server/src/peer-reply-atomic.test.ts
+run_mutation "recipient-capability-alias-binding-removed" \
+  /workspace/server/src/tools.ts \
+  's/WHERE node_id = ?1 AND network_id = ?2 AND alias = ?3/WHERE node_id = ?1 AND network_id = ?2 AND ?3 IS NOT NULL/' \
   /workspace/server/src/peer-reply-atomic.test.ts
 run_mutation "rollback-capability-clear-removed" \
   /workspace/server/src/tools.ts \

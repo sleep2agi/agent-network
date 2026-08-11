@@ -14,13 +14,14 @@ export interface PeerReplySendDeps {
   sendLegacy: (args: PeerReplySendArgs) => Promise<any>;
   sendLegacyReply: (args: PeerReplySendArgs) => Promise<any>;
   /**
-   * An old Hub cannot classify the original task for us because it lacks
-   * send_peer_reply. Resolve the target against that Hub's live roster:
-   * agent target -> send_task wake path; non-agent target -> send_reply
-   * terminalization. Throw when the roster is unavailable so an ambiguous
-   * reply stays pending instead of choosing a lossy route.
+   * An old Hub lacks send_peer_reply but still exposes get_task. Read the
+   * exact original task and classify its immutable from_node_id:
+   * node origin -> send_task wake path; non-node origin -> send_reply
+   * terminalization. Throw when the task identity is unavailable or
+   * malformed so an ambiguous reply stays pending instead of guessing from
+   * an alias roster that may be stale or contain a same-name user.
    */
-  isOldHubTargetAgent: (args: PeerReplySendArgs) => Promise<boolean>;
+  isOldHubOriginNode: (args: PeerReplySendArgs) => Promise<boolean>;
 }
 
 export interface PeerReplyCapabilityCache {
@@ -68,7 +69,7 @@ export async function sendPeerReplyCompatible(
       return { route: "legacy-reply", payload: await deps.sendLegacyReply(args) };
     }
     const oldHub = isUnknownTool(error);
-    if (oldHub && !(await deps.isOldHubTargetAgent(args))) {
+    if (oldHub && !(await deps.isOldHubOriginNode(args))) {
       return { route: "legacy-reply", payload: await deps.sendLegacyReply(args) };
     }
     const fallbackReason = oldHub

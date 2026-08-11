@@ -39,16 +39,16 @@ docker run --rm --network "$NET" --entrypoint bun "$CURRENT_IMAGE" \
   /workspace/tests/test698-atomic-peer-reply/legacy-wire-e2e.ts \
   "http://${HUB_CONTAINER}:9200" test698-legacy-auth
 
-echo "legacy-wire mutation: hardcode every old-Hub target as agent"
+echo "legacy-wire mutation: production cli loses exact-task identity lookup"
 MUT_ROOT="$TMP/mutated-current"
 mkdir -p "$MUT_ROOT"
 git -C "$ROOT" archive "$SOURCE_COMMIT" | tar -x -C "$MUT_ROOT"
-MUT_FILE="$MUT_ROOT/agent-node/src/peer-reply-send.ts"
+MUT_FILE="$MUT_ROOT/agent-node/src/cli.ts"
 BEFORE=$(sha256sum "$MUT_FILE" | cut -d' ' -f1)
-sed -i 's/if (oldHub && !(await deps.isOldHubTargetAgent(args))) {/if (oldHub \&\& false) {/' "$MUT_FILE"
+sed -i 's/callCommHub("get_task", { task_id: args.taskId })/callCommHub("get_all_status", {})/' "$MUT_FILE"
 AFTER=$(sha256sum "$MUT_FILE" | cut -d' ' -f1)
 if [ "$BEFORE" = "$AFTER" ]; then
-  echo "MUTATION_NOOP: old-hub-roster-route-hardcoded"
+  echo "MUTATION_NOOP: old-hub-exact-task-lookup-lost"
   exit 1
 fi
 docker build -t "$MUTATED_IMAGE" \
@@ -63,8 +63,8 @@ docker run --rm --network "$NET" --entrypoint bun "$MUTATED_IMAGE" \
 MUT_RC=$?
 set -e
 if [ "$MUT_RC" -eq 0 ]; then
-  echo "MUTATION_SURVIVED: old-hub-roster-route-hardcoded"
+  echo "MUTATION_SURVIVED: old-hub-exact-task-lookup-lost"
   cat /tmp/test698-legacy-mutated-run.log
   exit 1
 fi
-echo "MUTATION_RED: old-hub-roster-route-hardcoded rc=$MUT_RC"
+echo "MUTATION_RED: old-hub-exact-task-lookup-lost rc=$MUT_RC"

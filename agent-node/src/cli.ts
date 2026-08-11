@@ -1398,12 +1398,14 @@ async function sendReply(
         in_reply_to: args.taskId,
         status: args.failed ? "failed" : "replied",
       }),
-      isOldHubTargetAgent: async (args) => {
-        const status = parseToolJson(await callCommHub("get_all_status", {}));
-        if (!Array.isArray(status?.sessions)) {
-          throw new CommHubError("old Hub roster unavailable; preserving pending reply");
+      isOldHubOriginNode: async (args) => {
+        const result = parseToolJson(await callCommHub("get_task", { task_id: args.taskId }));
+        const task = result?.task;
+        if (!result?.ok || !task || task.task_id !== args.taskId
+            || (task.from_node_id !== null && typeof task.from_node_id !== "string")) {
+          throw new CommHubError("old Hub task identity unavailable; preserving pending reply");
         }
-        return status.sessions.some((session: any) => session?.alias === args.target);
+        return typeof task.from_node_id === "string" && task.from_node_id.length > 0;
       },
     }, peerReplyCapabilityCache)
     : { route: "atomic" as const, payload: await callCommHub("send_reply", {

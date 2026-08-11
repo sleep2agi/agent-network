@@ -13,7 +13,7 @@ const args = {
 const rejectUnexpectedLegacyReply = async () => {
   throw new Error("unexpected send_reply fallback");
 };
-const oldHubTargetIsAgent = async () => true;
+const oldHubOriginIsNode = async () => true;
 
 describe("peer reply capability fallback", () => {
   test("new Hub + capable recipient uses the atomic tool only", async () => {
@@ -22,7 +22,7 @@ describe("peer reply capability fallback", () => {
       sendAtomic: async () => { calls.push("atomic"); return { message_id: "reply_1" }; },
       sendLegacy: async () => { calls.push("legacy"); },
       sendLegacyReply: rejectUnexpectedLegacyReply,
-      isOldHubTargetAgent: oldHubTargetIsAgent,
+      isOldHubOriginNode: oldHubOriginIsNode,
     });
     expect(result.route).toBe("atomic");
     expect(calls).toEqual(["atomic"]);
@@ -47,7 +47,7 @@ describe("peer reply capability fallback", () => {
           return { task_id: "legacy_1" };
         },
         sendLegacyReply: rejectUnexpectedLegacyReply,
-        isOldHubTargetAgent: oldHubTargetIsAgent,
+        isOldHubOriginNode: oldHubOriginIsNode,
       });
       expect(result.route).toBe("legacy");
       expect(calls).toEqual(["atomic", "legacy"]);
@@ -72,7 +72,7 @@ describe("peer reply capability fallback", () => {
           return { task_id: "legacy_after_rotation" };
         },
         sendLegacyReply: rejectUnexpectedLegacyReply,
-        isOldHubTargetAgent: oldHubTargetIsAgent,
+        isOldHubOriginNode: oldHubOriginIsNode,
       });
       expect(result.route).toBe("legacy");
       expect(calls).toEqual(["atomic", "legacy"]);
@@ -88,7 +88,7 @@ describe("peer reply capability fallback", () => {
       },
       sendLegacy: async () => { legacyCalls++; },
       sendLegacyReply: rejectUnexpectedLegacyReply,
-      isOldHubTargetAgent: oldHubTargetIsAgent,
+      isOldHubOriginNode: oldHubOriginIsNode,
     })).rejects.toThrow("reply_target_mismatch");
     expect(legacyCalls).toBe(0);
   });
@@ -104,7 +104,7 @@ describe("peer reply capability fallback", () => {
       },
       sendLegacy: async () => { legacy++; },
       sendLegacyReply: rejectUnexpectedLegacyReply,
-      isOldHubTargetAgent: oldHubTargetIsAgent,
+      isOldHubOriginNode: oldHubOriginIsNode,
     };
     await sendPeerReplyCompatible(args, unknownDeps, unknownCache);
     await sendPeerReplyCompatible(args, unknownDeps, unknownCache);
@@ -121,7 +121,7 @@ describe("peer reply capability fallback", () => {
       },
       sendLegacy: async () => {},
       sendLegacyReply: rejectUnexpectedLegacyReply,
-      isOldHubTargetAgent: oldHubTargetIsAgent,
+      isOldHubOriginNode: oldHubOriginIsNode,
     };
     await sendPeerReplyCompatible(args, recipientDeps, recipientCache);
     await sendPeerReplyCompatible(args, recipientDeps, recipientCache);
@@ -145,7 +145,7 @@ describe("peer reply capability fallback", () => {
         sendAtomic: async () => { throw error; },
         sendLegacy: async () => { legacyCalls++; },
         sendLegacyReply: rejectUnexpectedLegacyReply,
-        isOldHubTargetAgent: oldHubTargetIsAgent,
+        isOldHubOriginNode: oldHubOriginIsNode,
       })).rejects.toThrow();
       expect(legacyCalls).toBe(0);
       expect(isPeerReplyCapabilityUnavailable(error)).toBe(false);
@@ -166,13 +166,13 @@ describe("peer reply capability fallback", () => {
         calls.push("legacy-reply");
         return { message_id: "reply_dashboard" };
       },
-      isOldHubTargetAgent: oldHubTargetIsAgent,
+      isOldHubOriginNode: oldHubOriginIsNode,
     });
     expect(result.route).toBe("legacy-reply");
     expect(calls).toEqual(["atomic", "legacy-reply"]);
   });
 
-  test("old Hub routes by its live roster instead of hardcoding one lossy fallback", async () => {
+  test("old Hub routes by the exact task origin instead of a stale alias roster", async () => {
     const unknownTool = new CommHubError(
       "tool isError: MCP error -32602: Tool send_peer_reply not found",
       { code: -32602 },
@@ -183,14 +183,14 @@ describe("peer reply capability fallback", () => {
         sendAtomic: async () => { calls.push("atomic"); throw unknownTool; },
         sendLegacy: async () => { calls.push("legacy-task"); return { task_id: "legacy_peer" }; },
         sendLegacyReply: async () => { calls.push("legacy-reply"); return { message_id: "legacy_user" }; },
-        isOldHubTargetAgent: async () => targetIsAgent,
+        isOldHubOriginNode: async () => targetIsAgent,
       });
       expect(result.route).toBe(targetIsAgent ? "legacy" : "legacy-reply");
       expect(calls).toEqual(["atomic", targetIsAgent ? "legacy-task" : "legacy-reply"]);
     }
   });
 
-  test("old Hub roster failure preserves the pending reply instead of guessing a route", async () => {
+  test("old Hub task-identity failure preserves the pending reply instead of guessing a route", async () => {
     let egressCalls = 0;
     await expect(sendPeerReplyCompatible(args, {
       sendAtomic: async () => {
@@ -198,8 +198,8 @@ describe("peer reply capability fallback", () => {
       },
       sendLegacy: async () => { egressCalls++; },
       sendLegacyReply: async () => { egressCalls++; },
-      isOldHubTargetAgent: async () => { throw new Error("roster unavailable"); },
-    })).rejects.toThrow("roster unavailable");
+      isOldHubOriginNode: async () => { throw new Error("task identity unavailable"); },
+    })).rejects.toThrow("task identity unavailable");
     expect(egressCalls).toBe(0);
   });
 });
