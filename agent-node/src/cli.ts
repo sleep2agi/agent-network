@@ -142,8 +142,12 @@ import { appendPrivateLogLine, preparePrivateLogDirectory } from "./private-log"
 import { resolveNodeIdSource } from "./runtime/node-id-source";
 import { emitExplicitTaskTrace, sendExplicitTaskWithTrace, waitForExplicitTaskLifecycle, type ExplicitTaskTraceContext } from "./explicit-task-trace";
 import { inboxDeliveryPolicy } from "./inbox-message-policy";
+import { routePeerReplySse, runInboxTurnByReplyPolicy } from "./peer-reply-inbox";
+import { createPeerReplyCapabilityCache, sendPeerReplyCompatible } from "./peer-reply-send";
+import { sendPeerReplyTaskWithTrace } from "./peer-reply-task-trace";
 
 const home = homedir();
+const peerReplyCapabilityCache = createPeerReplyCapabilityCache();
 
 // Capture the launcher boundary before config.json `env` is merged below.
 // A node profile may intentionally override PATH for other runtimes, but it
@@ -1360,23 +1364,42 @@ async function sendReply(
   // viewer would see as an orphaned reply from a non-existent sender).
   const fromAlias = await liveAlias();
 
-  // Hub send_reply is the single final-reply primitive for every runtime.
-  // It atomically terminalizes the original task and writes one
-  // requires_response=none reply inbox row. Agent peers consume that row as
-  // actionable context without replying to it, so wake and lifecycle closure
-  // no longer require a second requires-response task.
-  const result = await callCommHub("send_reply", {
-    alias: target,
-    text: message,
-    from_session: fromAlias,
-    in_reply_to: taskId || undefined,
-    status: failed ? "failed" : "replied",
-  });
+  const result = taskId
+    ? await sendPeerReplyCompatible({ target, text: message, taskId, failed, fromAlias }, {
+      sendAtomic: (args) => callCommHub("send_peer_reply", {
+        alias: args.target,
+        text: args.text,
+        from_session: args.fromAlias,
+        in_reply_to: args.taskId,
+        status: args.failed ? "failed" : "replied",
+      }, 0),
+      sendLegacy: async (args) => {
+        const taskText = args.failed ? `⚠️ ${args.text}` : args.text;
+        return sendPeerReplyTaskWithTrace({
+          alias: args.target,
+          task: taskText,
+          priority: args.failed ? "high" : "normal",
+          fromAlias: args.fromAlias,
+          parentTaskId: args.taskId,
+          networkId: NETWORK_ID || null,
+        }, {
+          log: taskTraceLog,
+          send: (legacyArgs) => callCommHub("send_task", legacyArgs),
+        });
+      },
+    }, peerReplyCapabilityCache)
+    : { route: "atomic" as const, payload: await callCommHub("send_reply", {
+      alias: target,
+      text: message,
+      from_session: fromAlias,
+      status: failed ? "failed" : "replied",
+    }) };
   // callCommHub now throws on every failure shape (transport, JSON-RPC
   // error envelope, MCP isError, app-level ok:false). Reaching here means
   // the server accepted the reply. Surface the message id so the caller
   // can log it for traceability.
-  return { delivered: true, reply_id: result?.message_id, payload: result };
+  const payload = result.payload;
+  return { delivered: true, reply_id: payload?.message_id ?? payload?.task_id, payload };
 }
 
 // #168 RC-B1 retry-queue. When sendReply fails after retries we DO NOT
@@ -4717,13 +4740,22 @@ async function processInbox() {
       const runtimeContent = runtimeNeedsReadableAttachmentPrompt(RUNTIME)
         ? appendReadableAttachmentPaths(content, images)
         : content;
-      const taskOutcome = await processTask(
-        runtimeContent,
-        from,
-        logicalTaskId,
-        images,
-        interactiveDashboardTask,
+      const inboxTurn = await runInboxTurnByReplyPolicy(
+        { id: msg.id, from, content: runtimeContent, taskId: logicalTaskId },
+        deliveryPolicy.replyExpected,
+        {
+          deliverToRuntime: () => processTask(
+            runtimeContent,
+            from,
+            logicalTaskId,
+            images,
+            interactiveDashboardTask,
+          ),
+          acknowledge: (id) => ackMessage(id),
+        },
       );
+      if (inboxTurn.kind === "terminal_peer_reply") return;
+      const taskOutcome = inboxTurn.result;
       const failed = taskOutcome.failed;
       const preparedReply = prepareDashboardNativeSlashReply(
         taskOutcome.text,
@@ -4737,15 +4769,6 @@ async function processInbox() {
         log(`processTask returned (${result.length} chars, content withheld, failed=${failed})`);
       } else {
         log(`processTask returned: "${result.slice(0, 80)}" (${result.length} chars, failed=${failed})`);
-      }
-
-      // A peer reply is a terminal result notification, not new work asking
-      // for another answer. It still enters the runtime (so an orchestrator
-      // can act on it), but is acked without any egress to prevent A↔B reply
-      // recursion and unbounded task growth.
-      if (!deliveryPolicy.replyExpected) {
-        await ackMessage(msg.id).catch((e: any) => warn(`ack failed for peer reply ${msg.id.slice(0, 8)}: ${e.message}`));
-        return;
       }
 
       // Low-value successful replies are dropped (preserve previous
@@ -5669,7 +5692,7 @@ async function connectSSE() {
             }
             if (ev.type === "new_reply") {
               log(`← SSE reply from ${ev.from || "?"}${ev.in_reply_to ? ` (task ${ev.in_reply_to.slice(0, 8)})` : ""}`);
-              scheduleWorkInboxDrain();
+              routePeerReplySse(ev, scheduleWorkInboxDrain);
             }
             // RFC-024 N1 — config-apply doorbell. Hub posted a desired-
             // config patch for this node; pull + validate + apply.

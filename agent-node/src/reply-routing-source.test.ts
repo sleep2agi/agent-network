@@ -3,13 +3,20 @@ import { describe, expect, test } from "bun:test";
 const source = await Bun.file(new URL("./cli.ts", import.meta.url)).text();
 
 describe("#698 peer reply runtime wiring", () => {
-  test("all runtime replies use Hub send_reply rather than a requires-response task", () => {
-    expect(source).toContain('const result = await callCommHub("send_reply", {');
+  test("peer replies negotiate the atomic tool and retain an explicit legacy task fallback", () => {
+    expect(source).toContain('sendAtomic: (args) => callCommHub("send_peer_reply", {');
+    expect(source).toContain("sendLegacy: async (args) => {");
+    expect(source).toContain("sendPeerReplyTaskWithTrace({");
     expect(source).not.toContain("REPLY_VIA_SEND_TASK");
-    expect(source).not.toContain("sendPeerReplyTaskWithTrace");
+  });
+
+  test("every actionable inbox turn crosses the behavior-tested reply-policy seam", () => {
+    expect(source).toContain("const inboxTurn = await runInboxTurnByReplyPolicy(");
+    expect(source).toContain("if (inboxTurn.kind === \"terminal_peer_reply\") return;");
+    expect(source).toContain("const taskOutcome = inboxTurn.result;");
   });
 
   test("new_reply SSE events wake the actionable work inbox", () => {
-    expect(source).toMatch(/if \(ev\.type === "new_reply"\) \{[\s\S]{0,300}scheduleWorkInboxDrain\(\);/);
+    expect(source).toContain("routePeerReplySse(ev, scheduleWorkInboxDrain);");
   });
 });

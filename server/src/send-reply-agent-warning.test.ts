@@ -3,10 +3,10 @@ import { db } from "./db.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerTools } from "./tools.js";
 
-// #698 supersedes the old #498 warning-only posture. send_reply is now the
-// atomic peer primitive: it closes the original task and writes one
-// requires_response=none reply inbox row. No follow-up send_task warning is
-// emitted because creating a second requires-response task is the bug.
+// #698 leaves the established send_reply surface compatible for Dashboard and
+// legacy callers. Capability-negotiated agents use send_peer_reply instead;
+// these tests pin that the old primitive's response shape does not grow a
+// warning or silently enqueue a second requires-response task.
 
 const NET_ID = "net_498_warn";
 const USER_ID = "u_498_warn";
@@ -129,8 +129,8 @@ async function call(handler: ToolHandler, args: any): Promise<Reply> {
   return JSON.parse(r.content[0].text) as Reply;
 }
 
-describe("send_reply atomic peer reply (#698 supersedes #498 warning)", () => {
-  test("agent reply closes the original and enqueues one no-response peer result", async () => {
+describe("send_reply legacy/Dashboard compatibility (#698)", () => {
+  test("legacy call still closes the original and enqueues one no-response result", async () => {
     seed();
     const tools = buildHandlers();
     const sendReply = tools["send_reply"];

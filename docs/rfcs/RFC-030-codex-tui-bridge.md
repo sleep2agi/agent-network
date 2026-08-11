@@ -910,11 +910,24 @@ tmux attach -t =<alias>
 
 该命令取代早期 `.demo/setup-copresence.sh` 手工编排，一次创建独立 app-server、bridge、TUI 三个 tmux session，并写回 `codexAppServerUrl` / `codexThreadId`。它仅存在于 preview，npm latest 完全没有 `codex-app-server` / `--copresence`。
 
-### 18.4 回复走 send_task（实测决策）
+### 18.4 回复走能力协商的原子协议
 
-实测（隔离 hub e2e）：hub 的 `send_reply` 会把回复塞进发起方收件箱（`type='reply'`）, **但不会 SSE 唤醒直接发起方**（只有 chain 到 parent 才 push）——对端 agent 只能等下一次轮询才看到。而 `send_task` 会立刻发 `new_task` SSE 唤醒。
+历史实现为了解决 `send_reply` 未及时唤醒发起节点的问题，让
+`codex-app-server` 把回复改发成新的 `send_task`。这能唤醒对端，却把一次
+请求/回复变成两个需要回复的 task：原 task 长期停在 running/acked，新
+task 又可能触发 reply-to-reply 循环，Dashboard 的积压统计因此持续漂移。
 
-因此 **`codex-app-server` 节点回复派工用 `send_task`**（`REPLY_VIA_SEND_TASK`, 仅对该 runtime 生效, 不改其他 runtime 的 `send_reply` 任务生命周期语义）。这与全网「回复指挥室用 `commhub_send_task`」的约定一致。收发两个方向都是 `send_task`。
+当前协议使用独立 MCP `send_peer_reply`。只有以下条件在 Hub 的同一事务中
+全部成立时，Hub 才会终结原 task 并写一条 `requires_response=none` 的 reply
+inbox 行：调用者使用绑定到原 task 接收节点的 ntok；原 task 带权威
+`from_node_id/to_node_id`；原发起节点最近一次 token-bound heartbeat 明确
+声明 `peer_reply_inbox_capable=true`。接收端把该 reply 注入 runtime 后 ACK，
+但结构上不具备再次回复它的出口。
+
+混合版本按安全方向降级：旧 Hub 不认识 `send_peer_reply`，或新 Hub 判断
+任一端缺少能力时，发送端才回退到历史 `send_task`；传输错误、身份错误和
+其他业务拒绝绝不回退，避免一次不确定写后再造第二条 task。能力由绑定
+node token 的 heartbeat 提供，alias、自报 node_id 或 session 行都不能冒充。
 
 ### 18.4b CommHub 作为原生 MCP（codex 直接调 `commhub_*` 工具）
 

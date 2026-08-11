@@ -516,6 +516,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         flags: z.record(z.unknown()).optional(),
         config_revision: z.number().int().min(0).optional(),
         config_update_capable: z.boolean().optional(),
+        peer_reply_inbox_capable: z.literal(true).optional(),
         // RFC-026 P2 / #338 — daemon role surfaced for hub /api/nodes
         // discovery (#337 extracts this field). "host_supervisor" =
         // anet daemon. Default-stripping zod would drop this otherwise.
@@ -1461,11 +1462,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     }
   );
 
-  // ── V2: send_reply (关联 task_id，不触发 think) ──
-  server.tool(
-    "send_reply",
-    "Atomically finalize an original task and enqueue one requires_response=none reply for its originator. Dashboard reads new_reply directly; current agent nodes consume the reply as actionable context without replying again.",
-    {
+  // ── V2/V3 reply primitives ──
+  const replyToolSchema = {
       alias: z.string().min(1).max(200).describe("Target session alias"),
       text: z.string().min(1).max(10000).describe("Reply content"),
       in_reply_to: z.string().max(200).optional().describe("Original task/message ID"),
@@ -1482,10 +1480,15 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // both `attachments` (top-level) and `meta.attachments` are supplied,
       // top-level wins (same rule as REST /api/task L2101).
       meta: z.any().optional().describe("Optional structured reply metadata, e.g. { attachments: [...] }."),
-    },
-    async ({ alias, text, in_reply_to, status: replyStatus, from_session: _fromIn, network_id: netId, attachments, meta }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
+    };
+  const handleReply = async (args: any, peerCapabilityRequired: boolean) => {
+      const { alias, text, in_reply_to, status: replyStatus = "replied", from_session: _fromIn, network_id: netId, attachments, meta } = args;
+      const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(netId);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
+      if (peerCapabilityRequired && !in_reply_to) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "peer_reply_task_required" }) }] };
+      }
 
       // #507 — validate attachments BEFORE any DB write. Rejects malformed
       // input (bad file_id, >20 items, size > cap, non-object item, wrong
@@ -1523,16 +1526,16 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const replyOutcome = db.transaction(() => {
         type ReplyTask = {
           status: string;
+          from_node_id: string | null;
           from_name: string;
           to_name: string;
           to_node_id: string | null;
         };
         let taskBefore: ReplyTask | null = null;
-        let canonicalCaller: string | null = null;
         let callerNodeId: string | null = null;
         if (in_reply_to) {
           const taskParams: any[] = [in_reply_to];
-          let taskSql = "SELECT status, from_name, to_name, to_node_id FROM tasks WHERE task_id = ?1";
+          let taskSql = "SELECT status, from_node_id, from_name, to_name, to_node_id FROM tasks WHERE task_id = ?1";
           taskSql = addScope(taskSql, taskParams, effectiveNetId);
           taskBefore = db.get<ReplyTask>(taskSql, ...taskParams) ?? null;
           if (!taskBefore) return { ok: false as const, error: "reply_task_not_found" as const };
@@ -1540,34 +1543,48 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             return { ok: false as const, error: "reply_task_terminal" as const, taskStatus: taskBefore.status };
           }
 
-          // A node token may terminalize only a task addressed to that exact
-          // immutable node. Legacy rows without to_node_id fall back to the
-          // token-bound canonical alias; caller-supplied identity is never
-          // trusted. Keep this preflight in the same SQLite transaction as the
-          // UPDATE and reply inbox INSERT so reassignment cannot race it.
-          if (callerTokenIsNetwork) {
-            if (!callerAlias || !enforceNetworkId) {
-              return { ok: false as const, error: "reply_node_identity_unbound" as const };
+          // V3 atomic peer replies are capability-negotiated. Both identity
+          // bindings and the recipient capability are re-read inside this
+          // transaction before any inbox/task/run write. Legacy/unbound rows
+          // fail toward the sender's old send_task path, never toward silence.
+          if (peerCapabilityRequired) {
+            if (!callerTokenIsNetwork || !callerTokenId || !enforceNetworkId) {
+              return { ok: false as const, error: "peer_reply_node_token_required" as const };
             }
-            canonicalCaller = resolveCanonicalAlias(enforceNetworkId, callerAlias).alias;
-            callerNodeId = db.get<{ node_id: string | null }>(
-              `SELECT node_id FROM sessions
-               WHERE network_id = ?1 AND alias = ?2
-               ORDER BY updated_at DESC LIMIT 1`,
+            const token = db.get<{ bound_node_id: string | null }>(
+              "SELECT bound_node_id FROM api_tokens WHERE token_id = ?1 AND network_id = ?2",
+              callerTokenId,
               enforceNetworkId,
-              canonicalCaller,
-            )?.node_id ?? null;
-            const ownsTask = taskBefore.to_node_id
-              ? taskBefore.to_node_id === callerNodeId
-              : resolveCanonicalAlias(enforceNetworkId, taskBefore.to_name).alias === canonicalCaller;
-            if (!ownsTask) return { ok: false as const, error: "reply_task_not_owned" as const };
-
+            );
+            if (!token?.bound_node_id || !taskBefore.to_node_id) {
+              return { ok: false as const, error: "peer_reply_unsupported" as const };
+            }
+            if (token.bound_node_id !== taskBefore.to_node_id) {
+              return { ok: false as const, error: "reply_task_not_owned" as const };
+            }
+            callerNodeId = token.bound_node_id;
             const canonicalTarget = resolveCanonicalAlias(enforceNetworkId, alias).alias;
             const canonicalOrigin = resolveCanonicalAlias(enforceNetworkId, taskBefore.from_name).alias;
             if (canonicalTarget !== canonicalOrigin) {
               return { ok: false as const, error: "reply_target_mismatch" as const };
             }
+            if (!taskBefore.from_node_id) {
+              return { ok: false as const, error: "peer_reply_unsupported" as const };
+            }
+            const recipient = db.get<{ config_snapshot: string | null }>(
+              "SELECT config_snapshot FROM nodes WHERE node_id = ?1 AND network_id = ?2",
+              taskBefore.from_node_id,
+              enforceNetworkId,
+            );
+            let recipientCapable = false;
+            try {
+              recipientCapable = JSON.parse(recipient?.config_snapshot || "null")?.peer_reply_inbox_capable === true;
+            } catch {}
+            if (!recipientCapable) {
+              return { ok: false as const, error: "peer_reply_unsupported" as const };
+            }
           }
+
         }
 
         // #507 — write meta_json on inbox insert (parity with send_task L952).
@@ -1596,7 +1613,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
                  completed_at = datetime('now'),
                  meta_json = COALESCE(?3, meta_json)
              WHERE task_id = ?4 AND status IN ('created', 'delivered', 'acked', 'running')`;
-          if (callerTokenIsNetwork && taskBefore) {
+          if (peerCapabilityRequired && callerTokenIsNetwork && taskBefore) {
             if (taskBefore.to_node_id) {
               updateParams.push(callerNodeId);
               updateSql += ` AND to_node_id = ?${updateParams.length}`;
@@ -1621,6 +1638,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         const messages: Record<string, string> = {
           reply_task_not_found: `cannot apply reply: task not found (${in_reply_to})`,
           reply_task_terminal: `cannot apply reply: task is already terminal (${taskStatus})`,
+          peer_reply_node_token_required: "atomic peer reply requires a node token",
+          peer_reply_unsupported: "recipient or caller does not support atomic peer replies",
           reply_node_identity_unbound: "cannot apply reply: node identity is not token-bound",
           reply_task_not_owned: "cannot apply reply: task is not owned by this node",
           reply_target_mismatch: "cannot apply reply: target is not the original task sender",
@@ -1715,7 +1734,19 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           }),
         }],
       };
-    }
+    };
+
+  server.tool(
+    "send_reply",
+    "Reply to a Dashboard/UI-originated task. Agent peers use send_peer_reply so mixed-version delivery can fail safely toward the legacy send_task path.",
+    replyToolSchema,
+    (args) => handleReply(args, false),
+  );
+  server.tool(
+    "send_peer_reply",
+    "Atomically finalize one node-owned task and enqueue one no-response result only when the exact recipient advertises peer_reply_inbox_capable. Returns peer_reply_unsupported with zero writes for legacy peers.",
+    replyToolSchema,
+    (args) => handleReply(args, true),
   );
 
   // ── V2: send_ack (不入 inbox，仅更新状态) ──
@@ -4007,6 +4038,28 @@ export type UpsertNodeOutcome =
 
 const _norm = (x: string | null | undefined) => (x === null || x === undefined ? "default" : x);
 
+/**
+ * A capability that changes peer delivery semantics is trusted only when the
+ * authenticating ntok is immutably bound to the exact reported node. Legacy
+ * alias-only tokens may still heartbeat, but cannot opt a node into #698.
+ */
+export function trustedConfigSnapshotForNode(
+  snapshot: unknown | null | undefined,
+  callerTokenId: string | null | undefined,
+  nodeId: string,
+): unknown | null | undefined {
+  if (!snapshot || typeof snapshot !== "object") return snapshot;
+  const copy = { ...(snapshot as Record<string, unknown>) };
+  const token = callerTokenId
+    ? db.get<{ bound_node_id: string | null }>(
+      "SELECT bound_node_id FROM api_tokens WHERE token_id = ?1",
+      callerTokenId,
+    )
+    : null;
+  if (token?.bound_node_id !== nodeId) delete copy.peer_reply_inbox_capable;
+  return copy;
+}
+
 export function upsertNodeWithSec1Guard(input: UpsertNodeWithSec1GuardInput): UpsertNodeOutcome {
   if (!input.node_id) return { result: "skipped", reason: "missing_node_id" };
   const existing = db.get<{ network_id: string | null; owner_user_id: string | null }>(
@@ -4079,7 +4132,12 @@ export function upsertNodeWithSec1Guard(input: UpsertNodeWithSec1GuardInput): Up
       callerNet ?? null,
     ],
   );
-  if (input.config_snapshot) {
+  const trustedSnapshot = trustedConfigSnapshotForNode(
+    input.config_snapshot,
+    input.callerTokenId,
+    input.node_id,
+  );
+  if (trustedSnapshot) {
     // RFC-026 §9.3 / #338 PR2+PR3 — promote daemon self-declare fields
     // to first-class indexable columns alongside the snapshot blob.
     // The snapshot stays the source of truth for non-list reads; the
@@ -4093,7 +4151,7 @@ export function upsertNodeWithSec1Guard(input: UpsertNodeWithSec1GuardInput): Up
     // tools.ts:2010/2075). PR2 ate from top-level keys, which the
     // hub create_node path never read → max_concurrent_children
     // backpressure was dead config + allowlist enforcement bypassed.
-    const snap = input.config_snapshot as Record<string, unknown> | null;
+    const snap = trustedSnapshot as Record<string, unknown> | null;
     const caps = (snap?.daemon_capabilities ?? null) as Record<string, unknown> | null;
     const runtimesRaw = caps?.runtimes_supported;
     const allowedRaw = caps?.allowed_secret_keys;
@@ -4105,7 +4163,7 @@ export function upsertNodeWithSec1Guard(input: UpsertNodeWithSec1GuardInput): Up
       : null;
     db.run(
       `UPDATE nodes SET config_snapshot = ?1, runtimes_supported = ?2, allowed_secret_keys = ?3 WHERE node_id = ?4`,
-      [JSON.stringify(input.config_snapshot), runtimesJson, allowedJson, input.node_id],
+      [JSON.stringify(trustedSnapshot), runtimesJson, allowedJson, input.node_id],
     );
     // RFC-024 — finalize any pending/restarting update whose target
     // patch is now reflected in the snapshot. Closes the
@@ -4115,7 +4173,7 @@ export function upsertNodeWithSec1Guard(input: UpsertNodeWithSec1GuardInput): Up
     // update_id to call ack_config_update(applied) itself. Hub does
     // it on the new child's behalf by content-matching the patch
     // against the reported snapshot.
-    finalizePendingMatchingUpdates(input.node_id, input.config_snapshot);
+    finalizePendingMatchingUpdates(input.node_id, trustedSnapshot);
   }
   // RFC-026 §2.5 step 4 — on every register/report_status, opportunistically
   // close out any pending create_node request whose child_name matches

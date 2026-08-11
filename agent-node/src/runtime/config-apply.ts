@@ -392,6 +392,9 @@ export interface MaskedSnapshot {
   flags: Record<string, unknown>;
   config_revision?: number;
   config_update_capable: boolean;
+  /** #698 protocol capability. The Hub stores this bit only when the
+   * reporting ntok is immutably bound to this exact node_id. */
+  peer_reply_inbox_capable: true;
   /** Node role surfaced to hub /api/nodes for daemon discovery (#337).
    * "host_supervisor" = anet daemon (receives create_node dispatches);
    * undefined / other values = regular agent-node. Read from config.json's
@@ -433,6 +436,7 @@ export function buildConfigSnapshot(
     flags: {},
     config_revision: revision,
     config_update_capable: configUpdateCapable,
+    peer_reply_inbox_capable: true,
     role: typeof fileConfig?.role === "string" ? fileConfig.role : null,
     // Always emit — see MaskedSnapshot.channels comment. Sort +
     // dedup so the hub's Set-equality content-match doesn't care
