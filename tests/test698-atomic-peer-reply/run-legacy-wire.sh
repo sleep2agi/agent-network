@@ -45,7 +45,7 @@ mkdir -p "$MUT_ROOT"
 git -C "$ROOT" archive "$SOURCE_COMMIT" | tar -x -C "$MUT_ROOT"
 MUT_FILE="$MUT_ROOT/agent-node/src/cli.ts"
 BEFORE=$(sha256sum "$MUT_FILE" | cut -d' ' -f1)
-sed -i 's/callCommHub("get_task", { task_id: args.taskId })/callCommHub("get_all_status", {})/' "$MUT_FILE"
+sed -i 's/callCommHub("get_task", { task_id: taskId })/callCommHub("get_all_status", {})/' "$MUT_FILE"
 AFTER=$(sha256sum "$MUT_FILE" | cut -d' ' -f1)
 if [ "$BEFORE" = "$AFTER" ]; then
   echo "MUTATION_NOOP: old-hub-exact-task-lookup-lost"
