@@ -1,0 +1,65 @@
+# test697 — Codex default model migration
+
+SOURCE_COMMIT=5279edd2a6d453d17ec198f04a8bcb6c5367c9fd
+BASE_COMMIT=17b8223f9d7fd25fcc435b40e7fa1fc0823ea1de
+DATE=2026-08-12 Asia/Shanghai
+
+Scope
+-----
+- Centralize the supported Codex default as gpt-5.6-sol.
+- Apply it to non-interactive create, the actual interactive picker, help text,
+  and agent-node startup resolution while preserving explicit --model values.
+- Production-source denominator for the retired literal gpt-5.5 is zero.
+- This change does NOT add or accept codex-app-server-sdk as a persisted
+  runtime spelling. Strict runtime boundaries and RUNTIME_MAP are unchanged.
+
+Exact-source Docker evidence
+----------------------------
+Image: anet-test697:5279edd2
+Image ID: sha256:d60dc69a30a1acd6e565b09ecd0e45fa221aa30ad7fbaffb92a533f400923cc4
+Image env: TEST697_SOURCE_COMMIT=5279edd2
+Every changed agent-network/agent-node/docs/test697 file inside the image
+matched git show SOURCE_COMMIT:<path> by SHA-256. No runner-log hash is
+claimed as independently reproducible: the log contains date and mktemp paths.
+
+Main layered suite: PASS
+- L0: 35 tests, 0 failures, 52 assertions.
+- L1: retired-model production denominator is zero.
+- L2: real agent-node bundle help advertises gpt-5.6-sol.
+- L3: isolated real Hub starts and registers a test user.
+- L4: real non-interactive node create writes gpt-5.6-sol.
+- L5: explicit operator model remains byte-authoritative in config.json.
+- L6: real agent-node startup output reports the default and explicit model.
+- L7: a dependency-injected prompt seam executes the actual production
+  selectVendorAndModel() picker. It chooses Codex, applies the production
+  default-order comparator, and resolves codex-sdk/gpt-5.6-sol.
+
+Five non-vacuous witnessed-red mutations: PASS
+- default-regressed -> L4 real Hub create/config readback turns red.
+- picker-default-regressed -> reverses the production default-order comparator;
+  the actual picker returns o3 and L7 turns red.
+- explicit-model-overwritten -> L5 real Hub create/config readback turns red.
+- help-advertises-retired-default -> L2 real bundle/help probe turns red.
+- startup-label-regressed -> L6 real bundle/startup-output probe turns red.
+Each mutation has a byte-change guard and is judged by its named product layer.
+The picker mutation dies at L7, not in a source-string or sibling-helper test.
+
+Codex app-server timeout regression evidence on the same exact image: PASS
+- runtime.test.ts: 23 tests, 0 failures, 59 assertions.
+- app-server client/bridge/session-manager: 60 tests, 0 failures,
+  224 assertions.
+- Covered behavior includes a distinct finite queue deadline, response timeout
+  armed only after exact task start, exact task activity renewal, authoritative
+  thread/read recovery of missed terminal events, FIFO drain, and no attribution
+  from another task. This is evidence for the existing current-main fix; it does
+  not claim that changing the default model alone repairs old deployed runtimes.
+
+Honest limits
+-------------
+- The five resolveCodexModel(MODEL) vendor-call sites are not exercised against
+  a real Codex vendor in this Docker suite. Their real-vendor wire result is
+  NOT COVERED; L6 proves startup resolution/labeling, not vendor acceptance.
+- No production Hub, token, database, node, or fleet migration was touched.
+
+Result: PASS
+Production deployment/fleet migration: NOT PERFORMED.
