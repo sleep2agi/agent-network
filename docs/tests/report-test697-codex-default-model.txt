@@ -1,6 +1,6 @@
 # test697 — Codex default model migration
 
-SOURCE_COMMIT=5279edd2a6d453d17ec198f04a8bcb6c5367c9fd
+SOURCE_COMMIT=685fc7b002a4195fc1a2504e10cee573dd0de1af
 BASE_COMMIT=17b8223f9d7fd25fcc435b40e7fa1fc0823ea1de
 DATE=2026-08-12 Asia/Shanghai
 
@@ -15,11 +15,11 @@ Scope
 
 Exact-source Docker evidence
 ----------------------------
-Image: anet-test697:5279edd2
-Image ID: sha256:d60dc69a30a1acd6e565b09ecd0e45fa221aa30ad7fbaffb92a533f400923cc4
-Image env: TEST697_SOURCE_COMMIT=5279edd2
-Every changed agent-network/agent-node/docs/test697 file inside the image
-matched git show SOURCE_COMMIT:<path> by SHA-256. No runner-log hash is
+Image: anet-test697:685fc7b0
+Image ID: sha256:db3540b0b575a4d9c3a8dd31f74ec5ee5ec3a051fc39853e09a99f96770484d0
+Image env: TEST697_SOURCE_COMMIT=685fc7b002a4195fc1a2504e10cee573dd0de1af
+All 18 files changed from BASE_COMMIT through SOURCE_COMMIT matched the
+corresponding /workspace file inside the image by SHA-256. No runner-log hash is
 claimed as independently reproducible: the log contains date and mktemp paths.
 
 Main layered suite: PASS
@@ -30,19 +30,26 @@ Main layered suite: PASS
 - L4: real non-interactive node create writes gpt-5.6-sol.
 - L5: explicit operator model remains byte-authoritative in config.json.
 - L6: real agent-node startup output reports the default and explicit model.
-- L7: a dependency-injected prompt seam executes the actual production
-  selectVendorAndModel() picker. It chooses Codex, applies the production
-  default-order comparator, and resolves codex-sdk/gpt-5.6-sol.
+- L7: a real PTY runs the production CLI and production @inquirer/prompts IO.
+  Five Down keys select the visible Codex row; Enter accepts it, then a second
+  Enter accepts the model row actually preselected by inquirer. The resulting
+  config.json is codex-sdk/gpt-5.6-sol. No internal picker probe or dependency-
+  injected selection seam remains in production code.
 
-Five non-vacuous witnessed-red mutations: PASS
+Seven non-vacuous witnessed-red mutations: PASS
 - default-regressed -> L4 real Hub create/config readback turns red.
 - picker-default-regressed -> reverses the production default-order comparator;
-  the actual picker returns o3 and L7 turns red.
+  the real PTY picker writes o3 and L7 turns red.
+- picker-display-order-reversed -> reverses choices inside production
+  askChoice(); real inquirer visibly preselects o3, config readback turns red.
+- picker-vendor-value-miswired -> maps a displayed vendor row to runtime rather
+  than vendor key; the real wizard falls off the Codex path and L7 turns red.
 - explicit-model-overwritten -> L5 real Hub create/config readback turns red.
 - help-advertises-retired-default -> L2 real bundle/help probe turns red.
 - startup-label-regressed -> L6 real bundle/startup-output probe turns red.
 Each mutation has a byte-change guard and is judged by its named product layer.
-The picker mutation dies at L7, not in a source-string or sibling-helper test.
+All three picker mutations die at the real PTY/config-readback L7, not in a
+source-string, sibling helper, or injected selection seam.
 
 Codex app-server timeout regression evidence on the same exact image: PASS
 - runtime.test.ts: 23 tests, 0 failures, 59 assertions.
@@ -60,6 +67,9 @@ Honest limits
   a real Codex vendor in this Docker suite. Their real-vendor wire result is
   NOT COVERED; L6 proves startup resolution/labeling, not vendor acceptance.
 - No production Hub, token, database, node, or fleet migration was touched.
+- PTY keystrokes intentionally depend on the current production vendor order:
+  Intern is first and Codex is five Down keys away. A vendor-list reorder must
+  update the explicit operator journey rather than silently changing its target.
 
 Result: PASS
 Production deployment/fleet migration: NOT PERFORMED.
