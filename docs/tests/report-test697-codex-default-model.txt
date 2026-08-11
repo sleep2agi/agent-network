@@ -1,6 +1,6 @@
 # test697 — Codex default model migration
 
-SOURCE_COMMIT=7b9c8da6cd121a5769d2e11451f6c966f512f8c7
+SOURCE_COMMIT=a9a5429edf1ffd9de498de0d62e2662b94591a8c
 BASE_COMMIT=17b8223f9d7fd25fcc435b40e7fa1fc0823ea1de
 DATE=2026-08-12 Asia/Shanghai
 
@@ -16,13 +16,13 @@ Scope
 
 Exact-source Docker evidence
 ----------------------------
-- image: `anet-test697:7b9c8da6`
-- image id: `sha256:828a15c4d57a7aa8ba2f518fe21bd06d115a53109b8d7066c156200681003c46`
-- image env: `TEST697_SOURCE_COMMIT=7b9c8da6cd121a5769d2e11451f6c966f512f8c7`
+- image: `anet-test697:a9a5429e`
+- image id: `sha256:78d9c0982320e56e9bf2ae0f1cbff64fa3310fd35ff59faf9317ce48090ddc76`
+- image env: `TEST697_SOURCE_COMMIT=a9a5429edf1ffd9de498de0d62e2662b94591a8c`
 - all 21 files changed from BASE through SOURCE matched their `/workspace`
   image copy byte-for-byte (21/21).
 - main run artifact digest:
-  `sha256:f9fa6786dffeb68b6893d667807223727af2292c62c158b33d262b4d90a74111`.
+  `sha256:cbd4400b815640820073eda5dd9d36c1f545a9a2c2583fedeaa676254744130c`.
   It records this run only; timestamps and temporary paths make it
   intentionally non-reproducible and it is not used as provenance.
 
@@ -37,8 +37,10 @@ Main layered suite: PASS
 - L4: real non-interactive `node create` writes `gpt-5.6-sol` for codex-sdk
   and codex-app-server.
 - L4b: real non-interactive creation of claude-agent-sdk, claude-code-cli,
-  grok-build-acp, and opencode-cli nodes leaves `config.model` absent. This is
-  the negative half of the runtime discriminator, not merely a helper test.
+  grok-build-acp, and opencode-cli nodes leaves `config.model` absent. The
+  assertion is `has("model") | not`, so an explicitly present null field does
+  not masquerade as absence. This is the negative half of the runtime
+  discriminator, not merely a helper test.
 - L5: an explicit operator model remains authoritative in `config.json`.
 - L6: real agent-node startup output reports the default and explicit model.
 - L7: a real PTY runs production CLI + production `@inquirer/prompts`. Five
