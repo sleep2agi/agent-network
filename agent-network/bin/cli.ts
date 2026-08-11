@@ -3562,17 +3562,27 @@ function findVendorByModel(modelId: string): VendorSelection | null {
 // All three create flows migrate to this in B2. Returns null when the
 // interactive picker is unavailable (non-TTY / inquirer load failure) so
 // callers can fall back to their existing default-runtime behavior.
-async function selectVendorAndModel(): Promise<VendorSelection | null> {
+type VendorPickerDeps = {
+  selectVendor?: (choices: Array<{ value: string; name: string }>) => Promise<string>;
+  selectModel?: (title: string, choices: Array<{ label: string; value: string }>) => Promise<string>;
+};
+
+async function selectVendorAndModel(deps: VendorPickerDeps = {}): Promise<VendorSelection | null> {
   let vendorKey: string;
-  try {
-    const { select: sel } = await import("@inquirer/prompts");
-    vendorKey = await sel({
-      message: "选择供应商 (vendor):",
-      choices: VENDORS.map(v => ({ value: v.key, name: v.label })),
-    });
-  } catch (e: any) {
-    console.log(`[anet] ⚠ Vendor selector unavailable: ${e?.message || e}`);
-    return null;
+  const vendorChoices = VENDORS.map(v => ({ value: v.key, name: v.label }));
+  if (deps.selectVendor) {
+    vendorKey = await deps.selectVendor(vendorChoices);
+  } else {
+    try {
+      const { select: sel } = await import("@inquirer/prompts");
+      vendorKey = await sel({
+        message: "选择供应商 (vendor):",
+        choices: vendorChoices,
+      });
+    } catch (e: any) {
+      console.log(`[anet] ⚠ Vendor selector unavailable: ${e?.message || e}`);
+      return null;
+    }
   }
   const vendor = VENDORS.find(v => v.key === vendorKey);
   if (!vendor) return null;
@@ -3588,8 +3598,10 @@ async function selectVendorAndModel(): Promise<VendorSelection | null> {
   } else if (vendor.models.length > 1) {
     // default-marked model sorted first so the picker preselects it.
     const ordered = [...vendor.models].sort((a, b) => (b.default ? 1 : 0) - (a.default ? 1 : 0));
-    model = await askChoice(`选择 ${vendor.label} 模型:`,
-      ordered.map(m => ({ label: m.label || m.id, value: m.id })));
+    const modelChoices = ordered.map(m => ({ label: m.label || m.id, value: m.id }));
+    model = deps.selectModel
+      ? await deps.selectModel(`选择 ${vendor.label} 模型:`, modelChoices)
+      : await askChoice(`选择 ${vendor.label} 模型:`, modelChoices);
   } else if (!vendor.requiresAuth) {
     // freeform model (custom): ask the user for an exact model id.
     model = (await ask("Model id")) || undefined;
@@ -13094,11 +13106,14 @@ async function doctorCommand() {
 // fixes (process.exit in createInteractiveCommand / dispatch end) didn't
 // help because they don't change the module's top-level await profile.
 async function main() {
-  // Internal product-layer probe used by test697. This deliberately executes
-  // the same VENDORS -> default model resolution as the interactive picker;
-  // it is not a second copy of the registry or its selection rule.
+  // Internal product-layer probe used by test697. It executes the real
+  // selectVendorAndModel() ordering rule with deterministic prompt answers:
+  // select Codex, then accept the first model shown by the picker.
   if (process.env.ANET_INTERNAL_PROBE_CODEX_PICKER_DEFAULT === "1") {
-    const selection = resolveVendorSelection("codex");
+    const selection = await selectVendorAndModel({
+      selectVendor: async () => "codex",
+      selectModel: async (_title, choices) => choices[0]?.value || "",
+    });
     process.stdout.write(JSON.stringify({
       vendorKey: selection?.vendorKey ?? null,
       runtime: selection?.runtime ?? null,

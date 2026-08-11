@@ -125,7 +125,7 @@ set -e
 grep -Fq 'model:   gpt-5.6-sol (default)' <<<"$DEFAULT_START"
 grep -Fq 'model:   operator-custom-model' <<<"$CUSTOM_START"
 
-echo "L7 real picker registry resolves the supported default"
+echo "L7 actual interactive picker ordering selects the supported default"
 probe_picker_default() {
   local output
   output=$(ANET_INTERNAL_PROBE_CODEX_PICKER_DEFAULT=1 \
@@ -213,7 +213,8 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
     'DEFAULT_CODEX_MODEL = "gpt-5.6-sol"' 'DEFAULT_CODEX_MODEL = "gpt-5.5"' probe_create_default
   run_mutation picker-default-regressed L7 \
     "$ROOT/agent-network/bin/cli.ts" \
-    'models: [...CODEX_MODEL_CHOICES],' 'models: [{ id: "o3", default: true }],' probe_picker_default
+    '(b.default ? 1 : 0) - (a.default ? 1 : 0)' \
+    '(a.default ? 1 : 0) - (b.default ? 1 : 0)' probe_picker_default
   run_mutation explicit-model-overwritten L5 \
     "$ROOT/agent-network/bin/cli.ts" \
     '...(opts.model || defaultModel ? { model: opts.model || defaultModel } : {}),' \
