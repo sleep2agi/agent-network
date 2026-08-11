@@ -27,5 +27,6 @@ COPY tests/test697-codex-default-model ./tests/test697-codex-default-model
 ARG SOURCE_COMMIT
 ENV TEST697_SOURCE_COMMIT=$SOURCE_COMMIT
 
-RUN chmod 0755 /workspace/tests/test697-codex-default-model/run.sh
+RUN chmod 0755 /workspace/tests/test697-codex-default-model/run.sh \
+  /workspace/tests/test697-codex-default-model/fake-codex-app-server.mjs
 ENTRYPOINT ["/workspace/tests/test697-codex-default-model/run.sh"]

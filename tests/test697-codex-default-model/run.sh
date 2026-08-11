@@ -19,7 +19,9 @@ PROJECT_DIR=$(mktemp -d /tmp/test697-project.XXXXXX)
 DB_PATH=$(mktemp /tmp/test697-db.XXXXXX.sqlite)
 FAKE_BIN=$(mktemp -d /tmp/test697-bin.XXXXXX)
 SERVER_PID=""
+NODE_PID=""
 cleanup() {
+  if [[ -n "$NODE_PID" ]]; then kill -TERM -- "-$NODE_PID" >/dev/null 2>&1 || true; wait "$NODE_PID" 2>/dev/null || true; fi
   if [[ -n "$SERVER_PID" ]]; then kill "$SERVER_PID" >/dev/null 2>&1 || true; fi
   safe_rm_rf "$HOME_DIR" "$PROJECT_DIR" "$FAKE_BIN"
   rm -f "$DB_PATH" "$DB_PATH-wal" "$DB_PATH-shm"
@@ -204,6 +206,137 @@ grep -Fq -- "-c model='gpt-5.6-sol'" "$FAKE_TMUX_LOG" || {
   exit 1
 }
 
+echo "L7c real --batch --preset codex resolves the supported registry default"
+probe_batch_preset_default() {
+  local seq=${1:-base}
+  local batch_root="$PROJECT_DIR/batch-$seq"
+  safe_rm_rf "$batch_root"
+  mkdir -p "$batch_root"
+  (
+    cd "$PROJECT_DIR"
+    HOME="$HOME_DIR" PATH="$FAKE_BIN:$PATH" \
+      "${ANET[@]}" create --batch --preset codex --workdir "$batch_root" \
+        --workdir-mode separate --prefix "preset-$seq" --count 1 \
+        --leader-alias "preset-$seq" --description test697
+  ) >/tmp/test697-batch-"$seq".log 2>&1
+  local cfg
+  cfg=$(find "$batch_root" -name config.json -type f -print -quit)
+  [[ -n "$cfg" ]] || { cat /tmp/test697-batch-"$seq".log; return 1; }
+  jq -e '.runtime == "codex-sdk" and .model == "gpt-5.6-sol"' "$cfg" >/dev/null
+}
+probe_batch_preset_default base
+probe_batch_preset_mutation() { probe_batch_preset_default mutation; }
+
+RUNTIME_CFG=/tmp/test697-runtime-config.json
+GOALS_PATH=/tmp/test697-goals.json
+CODEX_CAPTURE=/tmp/test697-codex-capture.jsonl
+STDIO_CAPTURE=/tmp/test697-stdio-capture.jsonl
+RUNTIME_LOG=/tmp/test697-runtime.log
+CODEX_SDK_ENTRY="$ROOT/agent-node/node_modules/@openai/codex-sdk/dist/index.js"
+[[ -f "$CODEX_SDK_ENTRY" ]] || { echo "CODEX_SDK_ENTRY_MISSING $CODEX_SDK_ENTRY"; exit 1; }
+cp "$ROOT/tests/test697-codex-default-model/fake-codex-sdk.mjs" "$CODEX_SDK_ENTRY"
+jq 'del(.model) | .runtime="codex-sdk"' \
+  "$PROJECT_DIR/.anet/nodes/sdk-default/config.json" > "$RUNTIME_CFG"
+chmod 0600 "$RUNTIME_CFG"
+
+stop_runtime_node() {
+  local pid="$NODE_PID"
+  NODE_PID=""
+  [[ -n "$pid" ]] || return 0
+  kill -TERM -- "-$pid" >/dev/null 2>&1 || true
+  for _ in $(seq 1 40); do [[ ! -e "/proc/$pid" ]] && break; sleep 0.1; done
+  [[ ! -e "/proc/$pid" ]] || kill -KILL -- "-$pid" >/dev/null 2>&1 || true
+  wait "$pid" 2>/dev/null || true
+}
+
+start_runtime_node() {
+  local mode=$1
+  shift
+  : > "$RUNTIME_LOG"
+  (
+    cd "$PROJECT_DIR"
+    exec setsid env HOME="$HOME_DIR" PATH="$FAKE_BIN:$PATH" \
+      TEST697_ROOT="$ROOT" TEST697_CODEX_CAPTURE="$CODEX_CAPTURE" \
+      TEST697_STDIO_CAPTURE="$STDIO_CAPTURE" "$@" \
+      bun "$ROOT/agent-node/src/cli.ts" \
+        --alias sdk-default --config "$RUNTIME_CFG" --runtime codex-sdk \
+        --goals-path "$GOALS_PATH"
+  ) >"$RUNTIME_LOG" 2>&1 &
+  NODE_PID=$!
+  for _ in $(seq 1 80); do
+    grep -Fq '已注册到 CommHub' "$RUNTIME_LOG" && return 0
+    [[ -e "/proc/$NODE_PID" ]] || break
+    sleep 0.25
+  done
+  echo "RUNTIME_NODE_START_FAILED mode=$mode"
+  cat "$RUNTIME_LOG"
+  return 1
+}
+
+send_runtime_task() {
+  local suffix=$1
+  curl -fsS -X POST http://127.0.0.1:9697/api/task \
+    -H "Authorization: Bearer $(jq -r '.token' "$HOME_DIR/.anet/config.json")" \
+    -H 'Content-Type: application/json' \
+    -d "{\"alias\":\"sdk-default\",\"task\":\"test697 runtime model $suffix $(date +%s%N)\",\"priority\":\"normal\"}" >/tmp/test697-task.json
+}
+
+wait_for_capture() {
+  local pattern=$1 file=$2
+  for _ in $(seq 1 80); do grep -Fq "$pattern" "$file" 2>/dev/null && return 0; sleep 0.25; done
+  echo "CAPTURE_TIMEOUT pattern=$pattern file=$file"
+  cat "$file" 2>/dev/null || true
+  cat "$RUNTIME_LOG"
+  return 1
+}
+
+probe_goal_wake_model() {
+  : > "$CODEX_CAPTURE"
+  cat > "$GOALS_PATH" <<JSON
+{"version":1,"goals":[{"goal_id":"69700000-0000-4000-8000-000000000001","text":"test697 wake","status":"active","interval_ms":3600000,"next_wake_at":"2000-01-01T00:00:00.000Z","parent_task_id":"task-test697","report_to":"admin","runtime":"codex-sdk","created_at":"2000-01-01T00:00:00.000Z","updated_at":"2000-01-01T00:00:00.000Z","progress_log":[]}]}
+JSON
+  start_runtime_node wake || return 1
+  wait_for_capture '"kind":"startThread"' "$CODEX_CAPTURE" || { stop_runtime_node; return 1; }
+  jq -se 'map(select(.kind=="startThread")) | length >= 1 and all(.[]; .value.model=="gpt-5.6-sol")' "$CODEX_CAPTURE" >/dev/null || {
+    echo "WAKE_MODEL_INJECTION_WRONG"; cat "$CODEX_CAPTURE"; stop_runtime_node; return 1;
+  }
+  stop_runtime_node
+}
+
+probe_sdk_task_models() {
+  : > "$CODEX_CAPTURE"
+  printf '%s\n' '{"version":1,"goals":[]}' > "$GOALS_PATH"
+  start_runtime_node sdk TEST697_CODEX_FAIL_FIRST=1 || return 1
+  send_runtime_task sdk || { stop_runtime_node; return 1; }
+  wait_for_capture '"kind":"run"' "$CODEX_CAPTURE" || { stop_runtime_node; return 1; }
+  jq -se 'map(select(.kind=="startThread")) | length >= 2 and all(.[]; .value.model=="gpt-5.6-sol")' "$CODEX_CAPTURE" >/dev/null || {
+    echo "SDK_THREAD_MODEL_INJECTION_WRONG"; cat "$CODEX_CAPTURE"; stop_runtime_node; return 1;
+  }
+  grep -Fq '[codex] model=gpt-5.6-sol' "$RUNTIME_LOG" || {
+    echo "SDK_LOG_MODEL_INJECTION_WRONG"; cat "$RUNTIME_LOG"; stop_runtime_node; return 1;
+  }
+  stop_runtime_node
+}
+
+probe_stdio_task_model() {
+  : > "$STDIO_CAPTURE"
+  printf '%s\n' '{"version":1,"goals":[]}' > "$GOALS_PATH"
+  cp "$ROOT/tests/test697-codex-default-model/fake-codex-app-server.mjs" "$FAKE_BIN/codex"
+  chmod 0755 "$FAKE_BIN/codex"
+  start_runtime_node stdio ANET_CODEX_STDIO_DIRECT=1 || return 1
+  send_runtime_task stdio || { stop_runtime_node; return 1; }
+  wait_for_capture '"model"' "$STDIO_CAPTURE" || { stop_runtime_node; return 1; }
+  jq -se 'length >= 1 and all(.[]; .model=="gpt-5.6-sol")' "$STDIO_CAPTURE" >/dev/null || {
+    echo "STDIO_MODEL_INJECTION_WRONG"; cat "$STDIO_CAPTURE"; stop_runtime_node; return 1;
+  }
+  stop_runtime_node
+}
+
+echo "L7d real agent-node executes every default-model injection lane with fake transports"
+probe_goal_wake_model
+probe_sdk_task_models
+probe_stdio_task_model
+
 if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
   echo "L8 witnessed-red mutations"
   run_mutation() {
@@ -370,6 +503,32 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
     "$ROOT/agent-network/bin/cli.ts" \
     'const model = opts.model || DEFAULT_CODEX_MODEL;' \
     'const model = opts.model || "gpt-4.1-legacy";' probe_copresence_default
+  run_mutation batch-preset-default-regressed L7c \
+    "$ROOT/agent-network/bin/cli.ts" \
+    'vendor.models.find(m => m.default)' 'vendor.models.find(m => !m.default)' \
+    probe_batch_preset_mutation
+  run_mutation wake-model-injection-regressed L7d \
+    "$ROOT/agent-node/src/cli.ts" \
+    'model: resolveCodexModel(MODEL),' 'model: MODEL || "gpt-4.1-legacy",' \
+    probe_goal_wake_model
+  run_mutation sdk-thread-model-injection-regressed L7d \
+    "$ROOT/agent-node/src/cli.ts" \
+    'const codexModel = resolveCodexModel(MODEL);' 'const codexModel = MODEL || "gpt-4.1-legacy";' \
+    probe_sdk_task_models
+  run_mutation sdk-log-model-injection-regressed L7d \
+    "$ROOT/agent-node/src/cli.ts" \
+    'const codexModelName = resolveCodexModel(MODEL);' 'const codexModelName = MODEL || "gpt-4.1-legacy";' \
+    probe_sdk_task_models
+  run_mutation sdk-retry-model-injection-regressed L7d \
+    "$ROOT/agent-node/src/cli.ts" \
+    $'      model: resolveCodexModel(MODEL),\n      sandboxMode: "danger-full-access" as const,' \
+    $'      model: MODEL || "gpt-4.1-legacy",\n      sandboxMode: "danger-full-access" as const,' \
+    probe_sdk_task_models
+  run_mutation stdio-model-injection-regressed L7d \
+    "$ROOT/agent-node/src/cli.ts" \
+    $'      model: resolveCodexModel(MODEL),\n      approvalPolicy: "on-request",' \
+    $'      model: MODEL || "gpt-4.1-legacy",\n      approvalPolicy: "on-request",' \
+    probe_stdio_task_model
 fi
 
 kill "$SERVER_PID" >/dev/null 2>&1 || true
