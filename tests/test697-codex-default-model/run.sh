@@ -127,7 +127,7 @@ for runtime in claude-agent-sdk claude-code-cli grok-build-acp opencode-cli; do
   name="noncodex-${runtime}"
   create_node "$name" "$runtime"
   cfg="$PROJECT_DIR/.anet/nodes/$name/config.json"
-  jq -e '.model == null' "$cfg" >/dev/null || {
+  jq -e 'has("model") | not' "$cfg" >/dev/null || {
     echo "NON_CODEX_MODEL_LEAK runtime=$runtime"
     cat "$cfg"
     exit 1
@@ -491,7 +491,7 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
       name="mutation-noncodex-${runtime}"
       create_node "$name" "$runtime"
       cfg="$PROJECT_DIR/.anet/nodes/$name/config.json"
-      jq -e '.model == null' "$cfg" >/dev/null
+      jq -e 'has("model") | not' "$cfg" >/dev/null
     done
   }
   probe_help_text() {
