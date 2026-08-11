@@ -18,7 +18,7 @@ const network = await fetch(`${hub}/api/networks`, {
 if (!network?.network_id) throw new Error(`legacy network failed: ${JSON.stringify(network)}`);
 const minted = await fetch(`${hub}/api/auth/node-token`, {
   method: "POST", headers: userHeaders,
-  body: JSON.stringify({ network_id: network.network_id, node_name: "legacy-wire-node", node_id: "n_legacy_wire" }),
+  body: JSON.stringify({ network_id: network.network_id, node_name: "dispatcher", node_id: "n_legacy_wire" }),
 }).then((r) => r.json() as Promise<any>);
 if (!minted?.token) throw new Error(`legacy node token failed: ${JSON.stringify(minted)}`);
 const token = minted.token;
