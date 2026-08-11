@@ -33,12 +33,24 @@ bun test \
   "$ROOT/agent-node/src/codex-model-default.test.ts"
 
 echo "L1 full production denominator has no retired default"
-if rg -n 'gpt-5\.5' \
-  "$ROOT/agent-network/bin/cli.ts" "$ROOT/agent-network/src" "$ROOT/agent-node/src" \
-  --glob '!*.test.ts'; then
-  echo "RETIRED_CODEX_DEFAULT_REMAINS"
-  exit 1
-fi
+PRODUCTION_ROOTS=(
+  "$ROOT/agent-network/bin/cli.ts"
+  "$ROOT/agent-network/src"
+  "$ROOT/agent-node/src"
+)
+for production_root in "${PRODUCTION_ROOTS[@]}"; do
+  [[ -e "$production_root" ]] || { echo "PRODUCTION_DENOMINATOR_MISSING $production_root"; exit 1; }
+done
+probe_production_denominator() {
+  if rg -n 'gpt-5\.5' "${PRODUCTION_ROOTS[@]}" --glob '!*.test.ts'; then
+    echo "RETIRED_CODEX_DEFAULT_REMAINS"
+    return 1
+  fi
+  # A zero-result retired-model scan is meaningful only if the same explicit
+  # production roots contain the replacement. This also catches path drift.
+  rg -n 'gpt-5\.6-sol' "${PRODUCTION_ROOTS[@]}" --glob '!*.test.ts' >/dev/null
+}
+probe_production_denominator
 if rg -n 'gpt-5\.5' \
   "$ROOT/docs/batch.md" \
   "$ROOT/docs-site/docs/guide/batch.md" \
@@ -157,13 +169,40 @@ probe_picker_default() {
     cat "$transcript" 2>/dev/null || true
     return 1
   fi
-  if ! grep -Fq 'Codex / GPT' "$transcript" || ! grep -Fq 'gpt-5.6-sol' "$transcript"; then
-    echo "PTY_PICKER_TRANSCRIPT_MISSING_SELECTION"
+  if ! bun "$ROOT/tests/test697-codex-default-model/assert-pty-selection.ts" "$transcript" "$cfg"; then
+    echo "PTY_PICKER_DISPLAY_VALUE_MISMATCH"
     cat "$transcript" 2>/dev/null || true
     return 1
   fi
 }
 probe_picker_default
+
+echo "L7b copresence production entry passes the supported default to tmux"
+create_node copresence-default codex-app-server
+FAKE_TMUX_LOG=/tmp/test697-fake-tmux.log
+: > "$FAKE_TMUX_LOG"
+cat > "$FAKE_BIN/tmux" <<'SH'
+#!/usr/bin/env sh
+printf '%s\n' "$*" >> "${FAKE_TMUX_LOG:?}"
+case "$1" in
+  -V) echo 'tmux 3.4'; exit 0 ;;
+  has-session) exit 1 ;;
+  *) exit 0 ;;
+esac
+SH
+chmod 0755 "$FAKE_BIN/tmux"
+(
+  cd "$PROJECT_DIR"
+  HOME="$HOME_DIR" PATH="$FAKE_BIN:$PATH" FAKE_TMUX_LOG="$FAKE_TMUX_LOG" \
+    timeout 5 "${ANET[@]}" node start copresence-default --copresence \
+      --codex-bin "$FAKE_BIN/codex"
+) >/tmp/test697-copresence.log 2>&1 || true
+grep -Fq -- "-c model='gpt-5.6-sol'" "$FAKE_TMUX_LOG" || {
+  echo "COPRESENCE_DEFAULT_MODEL_NOT_WIRED"
+  cat "$FAKE_TMUX_LOG"
+  cat /tmp/test697-copresence.log
+  exit 1
+}
 
 if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
   echo "L8 witnessed-red mutations"
@@ -182,6 +221,48 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
       const source = readFileSync(file, "utf8");
       writeFileSync(file, source.replace(from, to));
     '
+    after=$(sha256sum "$file" | awk '{print $1}')
+    if [[ "$before" == "$after" ]]; then
+      echo "MUTATION_NOOP $name"
+      cp "$backup" "$file"
+      rm -f "$backup"
+      exit 1
+    fi
+    set +e
+    "$probe" >/tmp/test697-mut-"$name".log 2>&1
+    rc=$?
+    set -e
+    cp "$backup" "$file"
+    rm -f "$backup"
+    if [[ "$rc" -eq 0 ]]; then
+      echo "MUTATION_SURVIVED $name"
+      cat /tmp/test697-mut-"$name".log
+      exit 1
+    fi
+    echo "MUTATION_RED $name layer=$expected_layer rc=$rc"
+  }
+
+  run_mutation_pair() {
+    local name=$1 expected_layer=$2 file=$3 from1=$4 to1=$5 from2=$6 to2=$7 probe=$8
+    local backup
+    backup=$(mktemp /tmp/test697-mutation.XXXXXX)
+    cp "$file" "$backup"
+    local before after rc
+    before=$(sha256sum "$file" | awk '{print $1}')
+    MUTATION_FILE="$file" MUTATION_FROM1="$from1" MUTATION_TO1="$to1" \
+      MUTATION_FROM2="$from2" MUTATION_TO2="$to2" bun -e '
+        import { readFileSync, writeFileSync } from "node:fs";
+        const file = process.env.MUTATION_FILE!;
+        const from1 = process.env.MUTATION_FROM1!;
+        const to1 = process.env.MUTATION_TO1!;
+        const from2 = process.env.MUTATION_FROM2!;
+        const to2 = process.env.MUTATION_TO2!;
+        const source = readFileSync(file, "utf8");
+        if (!source.includes(from1) || !source.includes(from2)) process.exit(2);
+        const marker = "__TEST697_PAIR_MUTATION_MARKER__";
+        if (source.includes(marker)) process.exit(2);
+        writeFileSync(file, source.replace(from1, marker).replace(from2, to2).replace(marker, to1));
+      '
     after=$(sha256sum "$file" | awk '{print $1}')
     if [[ "$before" == "$after" ]]; then
       echo "MUTATION_NOOP $name"
@@ -234,7 +315,20 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
     grep -Fq 'model:   gpt-5.6-sol (default)' <<<"$output"
     ! grep -Fq 'gpt-5.5' <<<"$output"
   }
+  probe_copresence_default() {
+    : > "$FAKE_TMUX_LOG"
+    (
+      cd "$PROJECT_DIR"
+      HOME="$HOME_DIR" PATH="$FAKE_BIN:$PATH" FAKE_TMUX_LOG="$FAKE_TMUX_LOG" \
+        timeout 5 "${ANET[@]}" node start copresence-default --copresence \
+          --codex-bin "$FAKE_BIN/codex"
+    ) >/tmp/test697-mut-copresence.log 2>&1 || true
+    grep -Fq -- "-c model='gpt-5.6-sol'" "$FAKE_TMUX_LOG"
+  }
 
+  run_mutation denominator-retired-default L1 \
+    "$ROOT/agent-network/src/codex-model-default.ts" \
+    'DEFAULT_CODEX_MODEL = "gpt-5.6-sol"' 'DEFAULT_CODEX_MODEL = "gpt-5.5"' probe_production_denominator
   run_mutation default-regressed L4 \
     "$ROOT/agent-network/src/codex-model-default.ts" \
     'DEFAULT_CODEX_MODEL = "gpt-5.6-sol"' 'DEFAULT_CODEX_MODEL = "gpt-5.5"' probe_create_default
@@ -250,6 +344,18 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
     "$ROOT/agent-network/bin/cli.ts" \
     'choices: VENDORS.map(v => ({ value: v.key, name: v.label }))' \
     'choices: VENDORS.map(v => ({ value: v.runtime, name: v.label }))' probe_picker_default
+  run_mutation_pair picker-vendor-labels-swapped L7 \
+    "$ROOT/agent-network/bin/cli.ts" \
+    'key: "intern", label: "上海 AI Lab 书生 (Intern)",' \
+    'key: "intern", label: "Codex / GPT (海外，需 codex login)",' \
+    'key: "codex", label: "Codex / GPT (海外，需 codex login)",' \
+    'key: "codex", label: "上海 AI Lab 书生 (Intern)",' probe_picker_default
+  run_mutation_pair picker-model-label-value-decoupled L7 \
+    "$ROOT/agent-network/bin/cli.ts" \
+    'choices: choices.map((choice) => ({' \
+    'choices: choices.map((choice, idx) => ({' \
+    'name: choice.label,' \
+    'name: choices[choices.length - 1 - idx].label,' probe_picker_default
   run_mutation explicit-model-overwritten L5 \
     "$ROOT/agent-network/bin/cli.ts" \
     '...(opts.model || defaultModel ? { model: opts.model || defaultModel } : {}),' \
@@ -260,6 +366,10 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
   run_mutation startup-label-regressed L6 \
     "$ROOT/agent-node/src/cli.ts" \
     '? DEFAULT_CODEX_MODEL' '? "gpt-5.5"' probe_startup_label
+  run_mutation copresence-default-regressed L7b \
+    "$ROOT/agent-network/bin/cli.ts" \
+    'const model = opts.model || DEFAULT_CODEX_MODEL;' \
+    'const model = opts.model || "gpt-4.1-legacy";' probe_copresence_default
 fi
 
 kill "$SERVER_PID" >/dev/null 2>&1 || true
