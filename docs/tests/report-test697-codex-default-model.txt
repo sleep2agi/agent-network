@@ -1,6 +1,6 @@
 # test697 — Codex default model migration
 
-SOURCE_COMMIT=9712b2d9e6f98eb949f81657964996fe9cb151c5
+SOURCE_COMMIT=1853321ef252669ea3a96d5de7b5a4cf43591e81
 BASE_COMMIT=17b8223f9d7fd25fcc435b40e7fa1fc0823ea1de
 DATE=2026-08-12 Asia/Shanghai
 
@@ -16,13 +16,13 @@ Scope
 
 Exact-source Docker evidence
 ----------------------------
-- image: `anet-test697:9712b2d9`
-- image id: `sha256:e1025bff8a676e7be02cb8f0f9663b84bf936a08fee1166b2e2024be6901913c`
-- image env: `TEST697_SOURCE_COMMIT=9712b2d9e6f98eb949f81657964996fe9cb151c5`
-- all 19 files changed from BASE through SOURCE matched their `/workspace`
-  image copy byte-for-byte (19/19).
+- image: `anet-test697:1853321e`
+- image id: `sha256:7ae10665807b8510b5c2592ca98fff91dc80b9393584ec3957968fde81007cee`
+- image env: `TEST697_SOURCE_COMMIT=1853321ef252669ea3a96d5de7b5a4cf43591e81`
+- all 21 files changed from BASE through SOURCE matched their `/workspace`
+  image copy byte-for-byte (21/21).
 - main run artifact digest:
-  `sha256:893a4a3fd058bc3236f35e2b581db32b5430cbc25c2c9705b2833edd79811ddc`.
+  `sha256:bb98e3a42dedbc8365280995422693207fc7d9df044a7a1b77eb857abf550662`.
   It records this run only; timestamps and temporary paths make it
   intentionally non-reproducible and it is not used as provenance.
 
@@ -48,9 +48,18 @@ Main layered suite: PASS
 - L7b: real `anet node start <alias> --copresence` reaches production
   orchestration. A fake tmux records the exact production `new-session` argv;
   it contains `-c model='gpt-5.6-sol'` when no model override is supplied.
+- L7c: real `anet create --batch --preset codex` executes
+  `resolveVendorSelection`; the resulting node config is `codex-sdk` with
+  `model=gpt-5.6-sol`.
+- L7d: real agent-node processes execute every default-model injection site.
+  A disposable in-image Codex SDK package body captures goal-wake startThread,
+  normal-task startThread, the forced retry startThread, and the runtime model
+  log. A line-delimited fake app-server captures the direct-stdio
+  `thread/start` params. All captured models are `gpt-5.6-sol`; neither fake
+  transport contacts a vendor.
 
-Eleven non-vacuous witnessed-red mutations: PASS
--------------------------------------------------
+Seventeen non-vacuous witnessed-red mutations: PASS
+---------------------------------------------------
 - `denominator-retired-default` -> L1 production denominator.
 - `default-regressed` -> L4 real Hub create/config readback.
 - `picker-default-regressed` -> L7 real PTY.
@@ -65,6 +74,19 @@ Eleven non-vacuous witnessed-red mutations: PASS
 - `startup-label-regressed` -> L6 real bundle/startup output.
 - `copresence-default-regressed` -> changes only the co-presence production
   default to a different wrong model; L7b tmux-argv behavior turns red.
+- `batch-preset-default-regressed` -> flips the registry default predicate;
+  L7c persists `o3` and turns red.
+- `wake-model-injection-regressed` -> changes the goal-wake call site only;
+  L7d captures the wrong startThread model and turns red.
+- `sdk-thread-model-injection-regressed` -> changes the normal SDK thread
+  construction only; L7d captures the wrong initial model and turns red.
+- `sdk-log-model-injection-regressed` -> changes the runtime-selected model
+  log only; L7d's actual node log assertion turns red.
+- `sdk-retry-model-injection-regressed` -> changes the post-failure retry
+  startThread only; L7d forces that catch path, captures the wrong model, and
+  turns red.
+- `stdio-model-injection-regressed` -> changes direct-stdio `thread/start`
+  only; the fake app-server captures the wrong wire params and L7d turns red.
 
 Every mutation requires a byte change; a no-op is a runner failure. The two
 label/value attacks use a two-anchor mutation helper with both anchors required,
@@ -90,8 +112,13 @@ Honest limits
   pickers, their highlighted rows, confirmations, and resulting config are.
 - L7b proves the default model reaches production tmux argv. Fake tmux does not
   start a real Codex app-server; live vendor acceptance is not claimed.
-- Five `resolveCodexModel(MODEL)` vendor-call sites are not exercised against a
-  real Codex vendor. Their real-vendor wire result is NOT COVERED.
+- All five `resolveCodexModel(MODEL)` production injection sites are executed
+  with deterministic fake transports. Real Codex vendor acceptance remains
+  NOT COVERED; this is a vendor-response gap, not a call-site execution gap.
+- Co-presence L7b covers the no-override default passed to tmux. The pre-existing
+  behavior where `node start --copresence` reads `opts.model` rather than the
+  created node's persisted `config.json` model is NOT COVERED and is not
+  claimed fixed here.
 - PTY keystrokes intentionally depend on current vendor order. A list reorder
   fails closed and requires updating the explicit operator journey.
 - No production Hub, token, database, node, runtime, or fleet was touched.
