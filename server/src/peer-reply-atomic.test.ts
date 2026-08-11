@@ -268,6 +268,58 @@ describe("#698 atomic peer reply", () => {
     }
   });
 
+  test("node-id rotation leaves atomic state untouched and creates one marked legacy fallback", async () => {
+    const taskId = await dispatch(A, B, "rotate B after dispatch");
+    const rotatedNodeId = `${B_ID}-rotated`;
+    db.run(
+      "INSERT INTO nodes (node_id, node_name, alias, network_id, hostname, config_snapshot, created_at, updated_at, lifecycle_state) VALUES (?1, ?2, ?2, ?3, 'host-rotated', ?4, datetime('now'), datetime('now'), 'active')",
+      [rotatedNodeId, B, NET, JSON.stringify({ peer_reply_inbox_capable: true })],
+    );
+    db.run("UPDATE api_tokens SET bound_node_id = ?1 WHERE token_id = ?2", [rotatedNodeId, `token-${B}`]);
+    db.run("UPDATE sessions SET node_id = ?1 WHERE alias = ?2 AND network_id = ?3", [rotatedNodeId, B, NET]);
+
+    const tools = toolsFor(B);
+    let atomicCalls = 0;
+    let legacyCalls = 0;
+    const routed = await sendPeerReplyCompatible({
+      target: A, text: "result after identity rotation", taskId, failed: false, fromAlias: B,
+    }, {
+      sendAtomic: async (args) => {
+        atomicCalls++;
+        return callOrThrow(tools.send_peer_reply, {
+          alias: args.target, text: args.text, in_reply_to: args.taskId, status: "replied",
+        });
+      },
+      sendLegacy: async (args) => {
+        legacyCalls++;
+        return sendPeerReplyTaskWithTrace({
+          alias: args.target, task: args.text, priority: "normal",
+          fromAlias: B, parentTaskId: args.taskId, networkId: NET,
+          meta: {
+            peer_reply_legacy_fallback: true,
+            peer_reply_fallback_reason: args.fallbackReason,
+          },
+        }, {
+          log: () => {},
+          send: (legacyArgs) => callOrThrow(tools.send_task, legacyArgs),
+        });
+      },
+    });
+
+    expect(routed.route).toBe("legacy");
+    expect([atomicCalls, legacyCalls]).toEqual([1, 1]);
+    expect(task(taskId)).toEqual(expect.objectContaining({ status: "delivered", result: null }));
+    expect(replies(taskId)).toHaveLength(0);
+    const fallback = db.get<{ meta_json: string; requires_response: string }>(
+      "SELECT meta_json, requires_response FROM tasks WHERE parent_task_id = ?1", taskId,
+    );
+    expect(fallback?.requires_response).toBe("reply");
+    expect(JSON.parse(fallback!.meta_json)).toEqual(expect.objectContaining({
+      peer_reply_legacy_fallback: true,
+      peer_reply_fallback_reason: "identity_changed",
+    }));
+  });
+
   test("owner node terminalizes exact original and emits one no-response reply without a task row", async () => {
     const taskId = await dispatch(A, B, "do work");
     const result = await call(toolsFor(B).send_peer_reply, {

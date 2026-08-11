@@ -78,6 +78,23 @@ describe("classifyCommHubResponse", () => {
     }
   });
 
+  test("real legacy Hub unknown-tool result preserves the MCP code", () => {
+    const data = {
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        isError: true,
+        content: [{ type: "text", text: "MCP error -32602: Tool send_peer_reply not found" }],
+      },
+    };
+    const r = classifyCommHubResponse(data);
+    expect(r.kind).toBe("retryable");
+    if (r.kind === "retryable") {
+      expect(r.error.code).toBe(-32602);
+      expect(r.error.message).toContain("send_peer_reply not found");
+    }
+  });
+
   test("application-level ok:false → appLevel CommHubError (NON-retryable)", () => {
     // Exactly the shape #212 dedup returns. Treating this as success
     // (the previous silent-lost) is the #168 RC-B2 bug; treating it as

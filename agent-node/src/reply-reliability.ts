@@ -109,9 +109,18 @@ export function classifyCommHubResponse(data: any): ClassifyResult {
   // and permanent (app reject) lives in the content, not the flag.
   if (data?.result?.isError === true) {
     const text = data?.result?.content?.[0]?.text || "tool returned isError";
+    // Older MCP servers surface an unknown tool as a successful JSON-RPC
+    // envelope whose tool result isError text contains the protocol code,
+    // e.g. `MCP error -32602: Tool send_peer_reply not found`. Preserve that
+    // code so capability negotiation can distinguish a genuinely old Hub
+    // from a transient tool failure without retrying forever.
+    const mcpCode = typeof text === "string"
+      ? text.match(/\bMCP error\s+(-?\d+)\s*:/i)?.[1]
+      : undefined;
     return {
       kind: "retryable",
       error: new CommHubError(`tool isError: ${text.slice(0, 200)}`, {
+        ...(mcpCode !== undefined ? { code: Number(mcpCode) } : {}),
         payload: data.result,
       }),
     };

@@ -48,6 +48,38 @@ describe("peer reply capability fallback", () => {
     }
   });
 
+  test("node identity rotation falls back once, but target mismatch stays hard", async () => {
+    for (const code of ["reply_task_not_owned", "peer_reply_node_token_required"] as const) {
+      const calls: string[] = [];
+      let fallbackReason: string | undefined;
+      const result = await sendPeerReplyCompatible(args, {
+        sendAtomic: async () => {
+          calls.push("atomic");
+          throw new CommHubError(`app-level rejection: ${code}`, { code, appLevel: true });
+        },
+        sendLegacy: async (legacyArgs) => {
+          calls.push("legacy");
+          fallbackReason = legacyArgs.fallbackReason;
+          return { task_id: "legacy_after_rotation" };
+        },
+      });
+      expect(result.route).toBe("legacy");
+      expect(calls).toEqual(["atomic", "legacy"]);
+      expect(fallbackReason).toBe("identity_changed");
+    }
+
+    let legacyCalls = 0;
+    await expect(sendPeerReplyCompatible(args, {
+      sendAtomic: async () => {
+        throw new CommHubError("app-level rejection: reply_target_mismatch", {
+          code: "reply_target_mismatch", appLevel: true,
+        });
+      },
+      sendLegacy: async () => { legacyCalls++; },
+    })).rejects.toThrow("reply_target_mismatch");
+    expect(legacyCalls).toBe(0);
+  });
+
   test("negative capability observations are rechecked on every attempt", async () => {
     const unknownCache = createPeerReplyCapabilityCache();
     let unknownAtomic = 0;
@@ -85,6 +117,9 @@ describe("peer reply capability fallback", () => {
       new CommHubError("JSON-RPC error: -32602: invalid params", { code: -32602 }),
       new CommHubError("app-level rejection: reply_task_terminal", {
         code: "reply_task_terminal", appLevel: true,
+      }),
+      new CommHubError("app-level rejection: reply_target_mismatch", {
+        code: "reply_target_mismatch", appLevel: true,
       }),
       new Error("socket reset"),
     ]) {

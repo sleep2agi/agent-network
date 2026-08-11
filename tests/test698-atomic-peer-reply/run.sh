@@ -8,6 +8,7 @@ AGENT_TESTS=(
   /workspace/agent-node/src/inbox-message-policy.test.ts
   /workspace/agent-node/src/peer-reply-inbox.test.ts
   /workspace/agent-node/src/peer-reply-send.test.ts
+  /workspace/agent-node/src/reply-reliability.test.ts
   /workspace/agent-node/src/reply-routing-source.test.ts
   /workspace/agent-node/src/runtime/config-apply.test.ts
 )
@@ -28,6 +29,9 @@ bun build /workspace/agent-node/src/cli.ts \
   --external @anthropic-ai/claude-agent-sdk \
   --external '@anthropic-ai/claude-agent-sdk-*' \
   --external @openai/codex-sdk --external node-pty >/tmp/test698-build.log
+
+echo "L1b real cli.ts receiver wiring"
+bun /workspace/tests/test698-atomic-peer-reply/cli-wiring-e2e.ts
 
 echo "L2 production denominator"
 test "$(grep -Fc 'server.tool(' /workspace/server/src/tools.ts)" -gt 0
@@ -65,7 +69,41 @@ run_mutation() {
   echo "MUTATION_RED: $name rc=$rc"
 }
 
+run_cli_mutation() {
+  local name="$1" sed_expr="$2"
+  local file=/workspace/agent-node/src/cli.ts
+  local backup="/tmp/test698-${name}.bak"
+  cp "$file" "$backup"
+  local before after rc
+  before="$(sha256sum "$file" | cut -d' ' -f1)"
+  sed -i "$sed_expr" "$file"
+  after="$(sha256sum "$file" | cut -d' ' -f1)"
+  if [ "$before" = "$after" ]; then
+    echo "MUTATION_NOOP: $name"
+    mv "$backup" "$file"
+    exit 1
+  fi
+  set +e
+  bun /workspace/tests/test698-atomic-peer-reply/cli-wiring-e2e.ts \
+    >"/tmp/test698-mutation-${name}.log" 2>&1
+  rc=$?
+  set -e
+  mv "$backup" "$file"
+  if [ "$rc" -eq 0 ]; then
+    echo "MUTATION_SURVIVED: $name"
+    cat "/tmp/test698-mutation-${name}.log"
+    exit 1
+  fi
+  echo "MUTATION_RED: $name rc=$rc"
+}
+
 echo "L3 witnessed-red product gates"
+run_cli_mutation "cli-reply-type-lost" \
+  's/const msgType = msg.type || "task";/const msgType = "task";/'
+run_cli_mutation "cli-terminal-reply-egress-restored" \
+  's/if (inboxTurn.kind === "terminal_peer_reply") return;/if (false) return;/'
+run_cli_mutation "cli-new-reply-wake-disabled" \
+  's/routePeerReplySse(ev, scheduleWorkInboxDrain);/if (false) routePeerReplySse(ev, scheduleWorkInboxDrain);/'
 run_mutation "terminal-reply-replies-again" \
   /workspace/agent-node/src/peer-reply-inbox.ts \
   's/if (replyExpected) return/if (true) return/' \
@@ -78,6 +116,15 @@ run_mutation "old-hub-fallback-removed" \
   /workspace/agent-node/src/peer-reply-send.ts \
   's/if (!isPeerReplyCapabilityUnavailable(error)) throw error;/if (true) throw error;/' \
   /workspace/agent-node/src/peer-reply-send.test.ts
+run_mutation "legacy-mcp-code-lost" \
+  /workspace/agent-node/src/reply-reliability.ts \
+  's/...(mcpCode !== undefined ? { code: Number(mcpCode) } : {}),/...{},/' \
+  /workspace/agent-node/src/reply-reliability.test.ts
+run_mutation "identity-rotation-fallback-removed" \
+  /workspace/agent-node/src/peer-reply-send.ts \
+  's/|| error.code === "reply_task_not_owned"/|| false/' \
+  /workspace/agent-node/src/peer-reply-send.test.ts \
+  /workspace/server/src/peer-reply-atomic.test.ts
 run_mutation "capability-provenance-bypassed" \
   /workspace/server/src/tools.ts \
   's/if (token?.bound_node_id !== nodeId) delete copy.peer_reply_inbox_capable;/if (false) delete copy.peer_reply_inbox_capable;/' \
@@ -118,5 +165,9 @@ run_mutation "capability-advertisement-removed" \
   /workspace/agent-node/src/runtime/config-apply.ts \
   's/peer_reply_inbox_capable: true,/peer_reply_inbox_capable: undefined,/' \
   /workspace/agent-node/src/runtime/config-apply.test.ts
+run_mutation "legacy-agent-warning-removed" \
+  /workspace/server/src/tools.ts \
+  's/...(warning ? { warning } : {}),/...{},/' \
+  /workspace/server/src/send-reply-agent-warning.test.ts
 
 echo "RESULT: PASS"

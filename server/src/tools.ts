@@ -1711,6 +1711,18 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // #461 network observer summary — ids + routing only, no reply text.
       pushNetworkObserverEvent(effectiveNetId, { type: "new_reply", task_id: in_reply_to ?? null, message_id: id, from: from_session, to: replyTargetAlias, status: replyStatus });
 
+      // #498 compatibility tripwire. Legacy send_reply is intentionally kept
+      // for old agents and Dashboard callers during rollout, but it is not the
+      // capability-negotiated atomic peer primitive. Warn only for an actual
+      // agent target; Dashboard hub/api replies remain quiet. New agents call
+      // send_peer_reply and never see this warning.
+      const targetIsAgent = replyTargetNodeId !== null
+        && replyTargetAlias !== "hub"
+        && replyTargetAlias !== "api";
+      const warning = !peerCapabilityRequired && targetIsAgent
+        ? `Target "${replyTargetAlias}" is an agent node. Legacy commhub_reply/send_reply is not the atomic peer-result path. Prefer commhub_send_peer_reply; if the peer is on an older runtime, use commhub_send_task(alias="${replyTargetAlias}", task="<your reply>") so it wakes via new_task SSE. (RFC-030 mixed-version rollout.)`
+        : undefined;
+
       // #507 — echo attachments READ BACK FROM DB (lead 2b5f6634): the point
       // of the echo is to prove attachments actually landed in storage, not
       // to reflect the in-memory variable we tried to write. Reading
@@ -1741,6 +1753,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             ok: true,
             message_id: id,
             session_status: session?.status ?? "unknown",
+            ...(warning ? { warning } : {}),
             ...(attachmentsSaved !== null ? { attachments_saved: attachmentsSaved } : {}),
           }),
         }],

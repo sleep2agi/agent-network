@@ -11,6 +11,7 @@ RUN cd agent-node && bun install --ignore-scripts
 COPY server ./server
 COPY agent-node ./agent-node
 COPY tests/test698-atomic-peer-reply ./tests/test698-atomic-peer-reply
+COPY tests/test673-claude-image-attachment-block/sdk-stub-preload.ts ./tests/test698-atomic-peer-reply/sdk-stub-preload.ts
 
 ARG SOURCE_COMMIT
 ENV TEST698_SOURCE_COMMIT=$SOURCE_COMMIT

@@ -927,11 +927,20 @@ heartbeat 明确声明 `peer_reply_inbox_capable=true`，且该 session 的 SSE 
 但结构上不具备再次回复它的出口。
 
 混合版本按安全方向降级：旧 Hub 不认识 `send_peer_reply`，或新 Hub 判断
-任一端缺少能力时，发送端才回退到历史 `send_task`；传输错误、身份错误和
-其他业务拒绝绝不回退，避免一次不确定写后再造第二条 task。负向能力结果
-不永久缓存，下次回复重新探测。每次 legacy 回退 task 都在 meta 标记 reason，
+任一端缺少能力时，发送端才回退到历史 `send_task`。任务派发后节点重装、
+token 重新绑定造成 `reply_task_not_owned` / `peer_reply_node_token_required` 时，
+原子工具保证零写后也允许一次带 `identity_changed` 标记的 legacy 回退，避免
+结果在本地 pending-replies 被永久丢弃。`reply_target_mismatch`、task terminal、
+跨网拒绝与传输错误仍绝不回退，避免一次不确定写后再造第二条 task。负向能力
+结果不永久缓存，下次回复重新探测。每次 legacy 回退 task 都在 meta 标记 reason，
 便于统计残留 pair 的收敛。能力由绑定 node token 的 heartbeat 提供，alias、
-自报 node_id 或历史 node 快照都不能冒充。
+自报 node_id 或历史 node 快照都不能冒充。旧 sender 若仍调用 `send_reply` 给
+agent target，Hub 保留 #498 warning，Dashboard 的 hub/api 回复不带该提示。
+
+部署必须 recipient-first：先升级 Hub，再升级接收 reply 的普通节点，确认它们的
+当前 session heartbeat 明确声明能力且 SSE 在线，最后才升级
+`codex-app-server` sender。任一阶段观测到 legacy fallback 增长，应停止扩面；
+不得把 report 的 mixed-version 限制当作免责声明后直接全舰队切换。
 
 ### 18.4b CommHub 作为原生 MCP（codex 直接调 `commhub_*` 工具）
 

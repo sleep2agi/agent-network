@@ -3,10 +3,10 @@ import { db } from "./db.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerTools } from "./tools.js";
 
-// #698 leaves the established send_reply surface compatible for Dashboard and
-// legacy callers. Capability-negotiated agents use send_peer_reply instead;
-// these tests pin that the old primitive's response shape does not grow a
-// warning or silently enqueue a second requires-response task.
+// #498 compatibility warning remains load-bearing during the mixed-version
+// rollout. Capability-negotiated agents use send_peer_reply; old send_reply
+// callers targeting an agent get explicit migration guidance while Dashboard
+// targets stay quiet.
 
 const NET_ID = "net_498_warn";
 const USER_ID = "u_498_warn";
@@ -146,7 +146,10 @@ describe("send_reply legacy/Dashboard compatibility (#698)", () => {
     });
 
     expect(reply.ok).toBe(true);
-    expect(reply.warning).toBeUndefined();
+    expect(reply.warning).toContain("commhub_send_peer_reply");
+    expect(reply.warning).toContain("commhub_send_task");
+    expect(reply.warning).toContain(`alias="${DISPATCHER_ALIAS}"`);
+    expect(reply.warning).toContain("mixed-version");
     expect(db.get<{ status: string; result: string }>(
       "SELECT status, result FROM tasks WHERE task_id = ?1", taskId,
     )).toEqual(expect.objectContaining({ status: "replied", result: "peer reply (atomic)" }));

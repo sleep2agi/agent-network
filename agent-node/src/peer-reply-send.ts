@@ -6,7 +6,7 @@ export interface PeerReplySendArgs {
   taskId: string;
   failed: boolean;
   fromAlias: string;
-  fallbackReason?: "old_hub_unknown_tool" | "recipient_unsupported";
+  fallbackReason?: "old_hub_unknown_tool" | "recipient_unsupported" | "identity_changed";
 }
 
 export interface PeerReplySendDeps {
@@ -37,7 +37,10 @@ function isUnknownTool(error: unknown): boolean {
  */
 export function isPeerReplyCapabilityUnavailable(error: unknown): boolean {
   if (!(error instanceof CommHubError)) return false;
-  return error.code === "peer_reply_unsupported" || isUnknownTool(error);
+  return error.code === "peer_reply_unsupported"
+    || error.code === "reply_task_not_owned"
+    || error.code === "peer_reply_node_token_required"
+    || isUnknownTool(error);
 }
 
 export async function sendPeerReplyCompatible(
@@ -53,7 +56,10 @@ export async function sendPeerReplyCompatible(
     if (!isPeerReplyCapabilityUnavailable(error)) throw error;
     const fallbackReason = isUnknownTool(error)
       ? "old_hub_unknown_tool" as const
-      : "recipient_unsupported" as const;
+      : error instanceof CommHubError
+        && (error.code === "reply_task_not_owned" || error.code === "peer_reply_node_token_required")
+        ? "identity_changed" as const
+        : "recipient_unsupported" as const;
     // Negative capability observations are deliberately not cached. A Hub
     // upgrade or recipient restart may make the next attempt capable.
     return { route: "legacy", payload: await deps.sendLegacy({ ...args, fallbackReason }) };
