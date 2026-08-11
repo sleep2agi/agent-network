@@ -125,12 +125,18 @@ set -e
 grep -Fq 'model:   gpt-5.6-sol (default)' <<<"$DEFAULT_START"
 grep -Fq 'model:   operator-custom-model' <<<"$CUSTOM_START"
 
-echo "L7 picker data is centralized and uniquely defaults to the same model"
-bun -e '
-  import { CODEX_MODEL_CHOICES, DEFAULT_CODEX_MODEL } from "'"$ROOT"'/agent-network/src/codex-model-default.ts";
-  const defaults = CODEX_MODEL_CHOICES.filter((x) => x.default === true);
-  if (defaults.length !== 1 || defaults[0].id !== DEFAULT_CODEX_MODEL || DEFAULT_CODEX_MODEL !== "gpt-5.6-sol") process.exit(1);
-'
+echo "L7 real picker registry resolves the supported default"
+probe_picker_default() {
+  local output
+  output=$(ANET_INTERNAL_PROBE_CODEX_PICKER_DEFAULT=1 \
+    HOME="$HOME_DIR" bun run "$ROOT/agent-network/bin/cli.ts")
+  jq -e '
+    .vendorKey == "codex" and
+    .runtime == "codex-sdk" and
+    .model == "gpt-5.6-sol"
+  ' <<<"$output" >/dev/null
+}
+probe_picker_default
 
 if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
   echo "L8 witnessed-red mutations"
@@ -175,13 +181,6 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
     jq -e '.model == "gpt-5.6-sol"' \
       "$PROJECT_DIR/.anet/nodes/mutation-default/config.json" >/dev/null
   }
-  probe_picker_default() {
-    bun -e '
-      import { CODEX_MODEL_CHOICES, DEFAULT_CODEX_MODEL } from "'"$ROOT"'/agent-network/src/codex-model-default.ts";
-      const defaults = CODEX_MODEL_CHOICES.filter((x) => x.default === true);
-      if (defaults.length !== 1 || defaults[0].id !== DEFAULT_CODEX_MODEL || DEFAULT_CODEX_MODEL !== "gpt-5.6-sol") process.exit(1);
-    '
-  }
   probe_explicit_model() {
     create_node mutation-explicit codex-sdk --model operator-custom-model
     jq -e '.model == "operator-custom-model"' \
@@ -213,8 +212,8 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
     "$ROOT/agent-network/src/codex-model-default.ts" \
     'DEFAULT_CODEX_MODEL = "gpt-5.6-sol"' 'DEFAULT_CODEX_MODEL = "gpt-5.5"' probe_create_default
   run_mutation picker-default-regressed L7 \
-    "$ROOT/agent-network/src/codex-model-default.ts" \
-    '{ id: DEFAULT_CODEX_MODEL, default: true }' '{ id: "gpt-5.5", default: true }' probe_picker_default
+    "$ROOT/agent-network/bin/cli.ts" \
+    'models: [...CODEX_MODEL_CHOICES],' 'models: [{ id: "o3", default: true }],' probe_picker_default
   run_mutation explicit-model-overwritten L5 \
     "$ROOT/agent-network/bin/cli.ts" \
     '...(opts.model || defaultModel ? { model: opts.model || defaultModel } : {}),' \

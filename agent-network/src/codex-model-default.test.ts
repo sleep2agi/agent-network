@@ -15,7 +15,7 @@ describe("Codex model defaults", () => {
     expect(defaultCodexModelForRuntime("opencode-cli")).toBeUndefined();
   });
 
-  test("interactive picker has exactly one default and it matches the constant", () => {
+  test("shared Codex choice catalog has one supported default", () => {
     expect(DEFAULT_CODEX_MODEL).toBe("gpt-5.6-sol");
     expect(CODEX_MODEL_CHOICES.filter((choice) => choice.default === true)).toEqual([
       { id: DEFAULT_CODEX_MODEL, default: true },

@@ -13094,6 +13094,18 @@ async function doctorCommand() {
 // fixes (process.exit in createInteractiveCommand / dispatch end) didn't
 // help because they don't change the module's top-level await profile.
 async function main() {
+  // Internal product-layer probe used by test697. This deliberately executes
+  // the same VENDORS -> default model resolution as the interactive picker;
+  // it is not a second copy of the registry or its selection rule.
+  if (process.env.ANET_INTERNAL_PROBE_CODEX_PICKER_DEFAULT === "1") {
+    const selection = resolveVendorSelection("codex");
+    process.stdout.write(JSON.stringify({
+      vendorKey: selection?.vendorKey ?? null,
+      runtime: selection?.runtime ?? null,
+      model: selection?.model ?? null,
+    }) + "\n");
+    return;
+  }
 // #215 (P0) — universal --help / -h intercept: never let a subcommand's
 // `--help` argv slip into business logic. Without this, `anet token create
 // --help` SIGNS a real token, `anet run --help` STARTS a real SSE listener
