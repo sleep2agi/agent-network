@@ -1,0 +1,188 @@
+# test697 — Codex default model migration
+
+SOURCE_COMMIT=ccbe5bba5983b19bcc1d4a43ea8f8049d9d336a9
+BASE_COMMIT=17b8223f9d7fd25fcc435b40e7fa1fc0823ea1de
+DATE=2026-08-12 Asia/Shanghai
+
+Scope
+-----
+- Centralize the supported Codex default as `gpt-5.6-sol`.
+- Apply it to non-interactive create, the real interactive picker, co-presence
+  startup, help text, and agent-node startup resolution while preserving an
+  explicit operator `--model`.
+- Production-source denominator for the retired literal `gpt-5.5` is zero.
+- This change does not add or accept `codex-app-server-sdk` as a persisted
+  runtime spelling. Strict runtime boundaries and `RUNTIME_MAP` are unchanged.
+
+Exact-source Docker evidence
+----------------------------
+- image: `anet-test697:ccbe5bba-exact`
+- image id: `sha256:aba2cb63c46544cf71d147d2cf46d8223f59e872269e7d7f091817a5e3fe1963`
+- image env: `TEST697_SOURCE_COMMIT=ccbe5bba5983b19bcc1d4a43ea8f8049d9d336a9`
+- all 22 files changed from BASE through SOURCE matched their `/workspace`
+  image copy byte-for-byte (22/22).
+- main run artifact digest:
+  `sha256:0a64b6dbadb311458ecc9d9515897d0a3018e1e7466600afe9bc03afd48e2471`.
+  It records this run only; timestamps and temporary paths make it
+  intentionally non-reproducible and it is not used as provenance.
+
+Main layered suite: PASS
+------------------------
+- L0: 35 tests, 0 failures, 55 assertions.
+- L1: explicit production roots exist, contain the replacement-model floor,
+  and contain zero retired-default literals. A dedicated mutation proves this
+  denominator itself turns red rather than silently passing on missing paths.
+- L2: the real agent-node bundle help advertises `gpt-5.6-sol`.
+- L3: an isolated real Hub starts and registers a test user.
+- L4: real non-interactive `node create` writes `gpt-5.6-sol` for codex-sdk
+  and codex-app-server.
+- L4b: real non-interactive creation of claude-agent-sdk, claude-code-cli,
+  grok-build-acp, grok-build-cli, and opencode-cli nodes leaves
+  `config.model` absent. The negative set is derived at runtime from the
+  production `SUPPORTED_RUNTIME_NAMES` catalog minus the two Codex runtimes;
+  the unit test derives the same set instead of maintaining another list. The
+  assertion is `has("model") | not`, so an explicitly present null field does
+  not masquerade as absence. This is the negative half of the runtime
+  discriminator, not merely a helper test.
+- L5: an explicit operator model remains authoritative in `config.json`.
+- L6: real agent-node startup output reports the default and explicit model.
+- L7: a real PTY runs production CLI + production `@inquirer/prompts`. Five
+  Down keys reach the Codex row and Enter accepts the preselected model.
+- L7 display/value binding: the runner removes terminal escape sequences,
+  parses the last `❯` highlighted row immediately before each `✔` confirmation,
+  and cross-checks highlighted label, confirmed label, and persisted
+  runtime/model. The exact result was:
+  `PTY_DISPLAY_VALUE_PASS vendor=Codex / GPT (海外，需 codex login) runtime=codex-sdk model=gpt-5.6-sol`.
+- L7b: real `anet node start <alias> --copresence` reaches production
+  orchestration. A fake tmux records the exact production `new-session` argv;
+  it contains `-c model='gpt-5.6-sol'` when no model override is supplied and
+  `-c model='o3'` when the operator explicitly supplies `--model o3`.
+- L7c: real `anet create --batch --preset codex` executes
+  `resolveVendorSelection`; the resulting node config is `codex-sdk` with
+  `model=gpt-5.6-sol`. A second real batch run with `--preset o3` executes
+  `findVendorByModel` and preserves the explicit operator selection as `o3`.
+- L7d: real agent-node processes execute every default-model injection site.
+  A disposable in-image Codex SDK package body captures goal-wake startThread,
+  normal-task startThread, a persisted-session resumeThread, the forced retry
+  startThread, and the runtime model log. The resumed lane asserts the model in
+  `resumeThread(...opts)` rather than filtering it out as a non-start event. A
+  line-delimited fake app-server captures the direct-stdio `thread/start`
+  params. All captured models are `gpt-5.6-sol`; neither fake transport
+  contacts a vendor.
+- L7e: the same five production injection sites run again with the persisted
+  node model explicitly set to `o3`. Goal wake, normal SDK cold start,
+  persisted-session resume, forced retry, runtime log, and direct stdio all
+  preserve `o3` at the package/process boundary. This closes the distinction
+  between "the config and startup label retain an override" and "the model
+  actually sent by each task lane retains it".
+- L7f: those five production injection sites run with no persisted model and
+  `MODEL=o3` in the real agent-node process environment. Goal wake, SDK cold
+  start, persisted-session resume, forced retry, runtime log, and direct stdio
+  all preserve `o3` at the package/process boundary.
+- L7g: a real `claude-agent-sdk` node processes a Hub task through the
+  production agent-node runtime. A preload at the SDK package boundary records
+  the production options object and proves `model` is absent/null; a Codex
+  default is not injected into the non-Codex runtime.
+
+Twenty-five baseline-green witnessed-red mutations: PASS
+---------------------------------------------------------
+- Before changing production bytes, every mutation runs its assigned probe on
+  the unmodified source and requires exit zero. A red baseline is reported as
+  `MUTATION_BASELINE_RED` and fails the suite. This closes the earlier false
+  evidence where session writeback made three probes red even with no mutation.
+- Runtime probes remove any prior persisted session before cold-start and
+  direct-stdio checks; the resume probe alone installs its explicit session.
+  Therefore one probe cannot silently change the lane exercised by the next.
+- `denominator-retired-default` -> L1 production denominator.
+- `default-regressed` -> L4 real Hub create/config readback.
+- `non-codex-default-leak` -> changes the production runtime discriminator to
+  ask for the Codex default unconditionally; the catalog-derived L4b probe
+  observes a model leak across the complete five-runtime negative set and
+  turns red.
+- `picker-default-regressed` -> L7 real PTY.
+- `picker-display-order-reversed` -> L7 real PTY.
+- `picker-vendor-value-miswired` -> L7 real PTY.
+- `picker-vendor-labels-swapped` -> exact reviewer attack: swap only Intern and
+  Codex labels while retaining values/order; L7 display/value binding turns red.
+- `picker-model-label-value-decoupled` -> exact reviewer attack: reverse only
+  displayed model labels while retaining values; L7 turns red.
+- `explicit-model-overwritten` -> L5 real create/config readback.
+- `help-advertises-retired-default` -> L2 real bundle/help.
+- `startup-label-regressed` -> L6 real bundle/startup output.
+- `copresence-default-regressed` -> changes only the co-presence production
+  default to a different wrong model; L7b tmux-argv behavior turns red.
+- `copresence-explicit-overwritten` -> drops only the production
+  `opts.model` handoff; a real `node start --copresence --model o3` reaches fake
+  tmux with the default instead, so L7b turns red.
+- `batch-preset-default-regressed` -> flips the registry default predicate;
+  L7c persists `o3` and turns red.
+- `batch-preset-explicit-overwritten` -> changes only `findVendorByModel` so an
+  explicit `--preset o3` is replaced by the runtime default; the second L7c
+  batch config readback turns red.
+- `wake-model-injection-regressed` -> changes the goal-wake call site only;
+  L7d captures the wrong startThread model and turns red.
+- `sdk-thread-model-injection-regressed` -> changes the normal SDK thread
+  construction only; L7d captures the wrong initial model and turns red.
+- `sdk-resume-model-injection-regressed` -> changes only the production
+  `resumeThread` call to override its options with a retired model; the
+  persisted-session L7d run captures the wrong resumed model and turns red.
+- `sdk-log-model-injection-regressed` -> changes the runtime-selected model
+  log only; L7d's actual node log assertion turns red.
+- `sdk-retry-model-injection-regressed` -> changes the post-failure retry
+  startThread only; L7d forces that catch path, captures the wrong model, and
+  turns red.
+- `stdio-model-injection-regressed` -> changes direct-stdio `thread/start`
+  only; the fake app-server captures the wrong wire params and L7d turns red.
+- `explicit-runtime-model-ignored` -> requires exactly five production
+  occurrences and changes all five from `resolveCodexModel(MODEL)` to
+  `resolveCodexModel(undefined)`; config readback and startup label still look
+  correct, but L7e observes `gpt-5.6-sol` instead of explicit `o3` at the
+  package/process boundary and turns red.
+- `persisted-runtime-model-ignored` -> removes only `fileConfig.model` from the
+  production agent-node model precedence. The same five L7e package/process
+  observations receive the default instead of persisted `o3` and turn red.
+- `environment-runtime-model-ignored` -> deletes `process.env.MODEL` immediately
+  before the production precedence expression. L7f observes the default instead
+  of environment-selected `o3` across every agent-node Codex injection lane and
+  turns red.
+- `non-codex-runtime-default-injected` -> changes the production Claude SDK
+  options object from `MODEL || undefined` to `MODEL || DEFAULT_CODEX_MODEL`.
+  L7g captures the leaked Codex model at the real Claude SDK package boundary
+  and turns red.
+
+Every mutation requires both a green unmodified probe and a byte change before
+the mutated probe may count as witnessed-red; a baseline failure, no-op, or
+surviving mutation fails the runner. Creation probes use a fresh alias and
+require the create command itself to succeed before reading config, so stale
+config cannot satisfy them. The two label/value attacks use a two-anchor
+mutation helper with both anchors required, so a partial or stale mutation
+cannot masquerade as a red.
+
+Honest limits
+-------------
+- The PTY entry supplies `--runtime claude-agent-sdk` to enter the unified
+  vendor picker directly. The earlier bare-runtime selection prompt of a naked
+  `anet node create <name>` is not exercised; the production vendor and model
+  pickers, their highlighted rows, confirmations, and resulting config are.
+- L7b proves the default model reaches production tmux argv. Fake tmux does not
+  start a real Codex app-server; live vendor acceptance is not claimed.
+- All five `resolveCodexModel(MODEL)` production injection sites are executed
+  with deterministic fake transports, and both cold-start and persisted-session
+  resume paths are observed at the SDK package boundary. Real Codex vendor
+  acceptance remains NOT COVERED; this is a vendor-response gap, not a
+  call-site execution gap.
+- The non-Codex L7g path executes production agent-node and its real
+  `claude-agent-sdk` branch, but replaces the external SDK package at its module
+  boundary. It proves the options object does not receive a Codex model; it
+  does not contact Anthropic.
+- Co-presence L7b covers both the no-override default and an explicit `--model`
+  passed to tmux. The pre-existing
+  behavior where `node start --copresence` reads `opts.model` rather than the
+  created node's persisted `config.json` model is NOT COVERED and is not
+  claimed fixed here.
+- PTY keystrokes intentionally depend on current vendor order. A list reorder
+  fails closed and requires updating the explicit operator journey.
+- No production Hub, token, database, node, runtime, or fleet was touched.
+
+Result: PASS
+Production deployment/fleet migration: NOT PERFORMED.

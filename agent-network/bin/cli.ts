@@ -119,6 +119,11 @@ import {
   buildBootstrapPasswordUpdateInvocation,
   resolveBootstrapDatabasePath,
 } from "../src/bootstrap-password-db";
+import {
+  CODEX_MODEL_CHOICES,
+  DEFAULT_CODEX_MODEL,
+  defaultCodexModelForRuntime,
+} from "../src/codex-model-default";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -520,7 +525,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   const wsUrl = `ws://127.0.0.1:${port}`;
   const approvalPolicy = opts.dangerFullAccess ? "never" : "on-request";
   const sandboxMode = opts.dangerFullAccess ? "danger-full-access" : "read-only";
-  const model = opts.model || "gpt-5.5";
+  const model = opts.model || DEFAULT_CODEX_MODEL;
 
   // ── piece ① codex app-server (loopback WS + commhub MCP) ──────────────
   // #P2fix必修1 — token to 0600 file, sourced-then-removed inside the tmux
@@ -2833,8 +2838,7 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
   // (MiniMax/DeepSeek/GLM/Kimi/Anthropic). claude-code-cli only works for Max/Pro
   // subscribers and was a poor default that left non-subscribers with broken nodes.
   const runtime = runtimeForExecution(opts.runtime, "create node");
-  const defaultModel =
-    runtime === "codex-sdk" || runtime === "codex-app-server" ? "gpt-5.5" : undefined;
+  const defaultModel = defaultCodexModelForRuntime(runtime);
   const nodeId = generateNodeId();
   const grokHeadless = opts["grok-headless"] === "true";
   if (grokHeadless && runtime !== "grok-build-cli") {
@@ -3488,10 +3492,7 @@ const VENDORS: Vendor[] = [
   {
     key: "codex", label: "Codex / GPT (海外，需 codex login)",
     runtime: "codex-sdk", requiresAuth: "codex",
-    models: [
-      { id: "gpt-5.5", default: true },
-      { id: "o3" },
-    ],
+    models: [...CODEX_MODEL_CHOICES],
   },
   {
     // claude-code-cli uses the Claude Code subscription's model; no model picker.
