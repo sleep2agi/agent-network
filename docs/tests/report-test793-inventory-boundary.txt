@@ -1,0 +1,51 @@
+Test 793 — semantic fleet inventory boundary
+Date: 2026-08-13
+
+Verdict: PASS
+
+Coordinates
+- Base: 446ae57bc89d64c4fa7c8b698633aae29fed1179
+- Source under test: 603f93db2708c55d54c8521a822a63c225e80505
+- Image: sha256:4f926b6f25ea10ab871e3bc2b75fea9bd69b8cd4ee9fb89cae1f7273d43e0a03
+- Image label org.opencontainers.image.revision: 603f93db2708c55d54c8521a822a63c225e80505
+
+Scope
+- Changed only tests/test736-pm2-fleet-rebuild/run.sh.
+- Replaced stale numeric inventory assertions with semantic assertions.
+- No production inventory, launcher, service unit, runtime, or deployment file changed.
+
+Semantic boundary
+- schema_version is 1 and apps is a non-empty array;
+- app names are non-empty and unique;
+- every app has non-empty name, kind, and recovery_status;
+- external services have a canonical GitHub repository URL or explicitly carry a not-covered recovery status;
+- null authority and notes that say recovery is not covered remain paired with an explicit not-covered status;
+- secret-looking JSON field names and common token/credential value shapes are rejected.
+
+Docker result (two consecutive runs)
+  L1 PM2_FLEET_REBUILD_PASS
+  MUTATION_RED live-fleet-noop-removed
+  MUTATION_RED malformed-jlist-as-empty
+  MUTATION_RED missing-recovery-status
+  MUTATION_RED secret-like-field
+  RESULT: PASS
+
+The two run logs are byte-identical:
+- run 1 sha256: 9f2811425ee9ba2b111815f78ad711fa530b1446a336243e7f52e75643a57612
+- run 2 sha256: 9f2811425ee9ba2b111815f78ad711fa530b1446a336243e7f52e75643a57612
+- build log sha256: 0757940f2fc3d4de06e88bb339b71342af7fa0eb34b902f373917c7bd87f3eff
+
+Witnessed-red details
+- missing-recovery-status appends an external-service fixture without recovery_status; the baseline inventory assertion rejects it.
+- secret-like-field appends an api_token field with a fabricated ghp_ fixture value; both the key and value policy reject it.
+- The unmodified inventory suite runs before mutations, so a pre-existing red cannot be counted as a mutation red.
+
+Byte provenance
+- Image /app/run.sh sha256: 2dd6c90abcac347e78d9633cf6015b87d135245f7573809aae7da000292142c4
+- git show SOURCE:tests/test736-pm2-fleet-rebuild/run.sh sha256: 2dd6c90abcac347e78d9633cf6015b87d135245f7573809aae7da000292142c4
+- Result: 1/1 MATCH
+
+Honest limits
+- This gate validates the committed inventory contract; it does not prove external private repositories, secrets, databases, or host-local state are recoverable.
+- A canonical GitHub URL proves machine-locatable code authority, not access, backup, or secret availability.
+- The token-pattern scan is a tripwire for common credential shapes, not a general-purpose secret scanner.
