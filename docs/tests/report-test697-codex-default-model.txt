@@ -1,6 +1,6 @@
 # test697 — Codex default model migration
 
-SOURCE_COMMIT=56fa18d4d5dddd8b9de47ac772c92c4560eaefef
+SOURCE_COMMIT=24fa803617643c77401f4be90460e28450be86c3
 BASE_COMMIT=17b8223f9d7fd25fcc435b40e7fa1fc0823ea1de
 DATE=2026-08-12 Asia/Shanghai
 
@@ -16,13 +16,13 @@ Scope
 
 Exact-source Docker evidence
 ----------------------------
-- image: `anet-test697:56fa18d4`
-- image id: `sha256:ff99b4d777079d1a53458765ec484f466a0d96339f4141b03596d10fe091870d`
-- image env: `TEST697_SOURCE_COMMIT=56fa18d4d5dddd8b9de47ac772c92c4560eaefef`
+- image: `anet-test697:24fa8036-exact`
+- image id: `sha256:bc0579a872510658ad110481e30cba3eeca13a940b03eeac0ae8d78318180806`
+- image env: `TEST697_SOURCE_COMMIT=24fa803617643c77401f4be90460e28450be86c3`
 - all 21 files changed from BASE through SOURCE matched their `/workspace`
   image copy byte-for-byte (21/21).
 - main run artifact digest:
-  `sha256:764ea03c5cd24f451144e94c360fdf7a50ae7413f09c10371b7f28dbecd2a688`.
+  `sha256:ad5b84d5a0393403f2d59941bcc9097a29276f92a25ce7f6b96755635e0751e4`.
   It records this run only; timestamps and temporary paths make it
   intentionally non-reproducible and it is not used as provenance.
 
@@ -52,7 +52,8 @@ Main layered suite: PASS
   `PTY_DISPLAY_VALUE_PASS vendor=Codex / GPT (海外，需 codex login) runtime=codex-sdk model=gpt-5.6-sol`.
 - L7b: real `anet node start <alias> --copresence` reaches production
   orchestration. A fake tmux records the exact production `new-session` argv;
-  it contains `-c model='gpt-5.6-sol'` when no model override is supplied.
+  it contains `-c model='gpt-5.6-sol'` when no model override is supplied and
+  `-c model='o3'` when the operator explicitly supplies `--model o3`.
 - L7c: real `anet create --batch --preset codex` executes
   `resolveVendorSelection`; the resulting node config is `codex-sdk` with
   `model=gpt-5.6-sol`. A second real batch run with `--preset o3` executes
@@ -72,8 +73,15 @@ Main layered suite: PASS
   between "the config and startup label retain an override" and "the model
   actually sent by each task lane retains it".
 
-Twenty-one non-vacuous witnessed-red mutations: PASS
--------------------------------------------------
+Twenty-three baseline-green witnessed-red mutations: PASS
+--------------------------------------------------------
+- Before changing production bytes, every mutation runs its assigned probe on
+  the unmodified source and requires exit zero. A red baseline is reported as
+  `MUTATION_BASELINE_RED` and fails the suite. This closes the earlier false
+  evidence where session writeback made three probes red even with no mutation.
+- Runtime probes remove any prior persisted session before cold-start and
+  direct-stdio checks; the resume probe alone installs its explicit session.
+  Therefore one probe cannot silently change the lane exercised by the next.
 - `denominator-retired-default` -> L1 production denominator.
 - `default-regressed` -> L4 real Hub create/config readback.
 - `non-codex-default-leak` -> changes the production runtime discriminator to
@@ -91,6 +99,9 @@ Twenty-one non-vacuous witnessed-red mutations: PASS
 - `startup-label-regressed` -> L6 real bundle/startup output.
 - `copresence-default-regressed` -> changes only the co-presence production
   default to a different wrong model; L7b tmux-argv behavior turns red.
+- `copresence-explicit-overwritten` -> drops only the production
+  `opts.model` handoff; a real `node start --copresence --model o3` reaches fake
+  tmux with the default instead, so L7b turns red.
 - `batch-preset-default-regressed` -> flips the registry default predicate;
   L7c persists `o3` and turns red.
 - `batch-preset-explicit-overwritten` -> changes only `findVendorByModel` so an
@@ -115,17 +126,39 @@ Twenty-one non-vacuous witnessed-red mutations: PASS
   `resolveCodexModel(undefined)`; config readback and startup label still look
   correct, but L7e observes `gpt-5.6-sol` instead of explicit `o3` at the
   package/process boundary and turns red.
+- `persisted-runtime-model-ignored` -> removes only `fileConfig.model` from the
+  production agent-node model precedence. The same five L7e package/process
+  observations receive the default instead of persisted `o3` and turn red.
 
-Every mutation requires a byte change; a no-op is a runner failure. The two
-label/value attacks use a two-anchor mutation helper with both anchors required,
-so a partial or stale mutation cannot masquerade as a red.
+Every mutation requires both a green unmodified probe and a byte change before
+the mutated probe may count as witnessed-red; a baseline failure, no-op, or
+surviving mutation fails the runner. Creation probes use a fresh alias and
+require the create command itself to succeed before reading config, so stale
+config cannot satisfy them. The two label/value attacks use a two-anchor
+mutation helper with both anchors required, so a partial or stale mutation
+cannot masquerade as a red.
+
+Reviewer counterexample replay: PASS
+------------------------------------
+- A derivative image, `anet-test697-inert:24fa8036`
+  (`sha256:01499d6313cca79e72e58add3d8cd06e79ba4ad030cf18fabe39a28dc241bd4e`),
+  changes only the inert comment on the SDK prompt line and injects that change
+  as an additional mutation using `probe_sdk_task_models`.
+- The unmodified baseline probe passes; after the comment-only byte change the
+  same probe still passes, so the runner reports
+  `MUTATION_SURVIVED inert-comment-only` and the overall container exits 1.
+- Artifact digest:
+  `sha256:1651b7a2dca84bfda576c8514028934cd483ca34004d57519d3fc4ccd873b06d`.
+  This derived negative-control run is evidence about the runner only; it is
+  not offered as the exact source image or as an additional witnessed-red
+  product mutation.
 
 Codex app-server timeout regression evidence on the exact image: PASS
 ---------------------------------------------------------------------
 - This is a separate explicit Docker command against the exact image, not
   output produced by `tests/test697-codex-default-model/run.sh`.
 - Separate-command artifact digest:
-  `sha256:d6684989b8dd63b37d2f1954270826fbe1bd89a8debd12bcacf03ed1c6140ef6`.
+  `sha256:510259c971c0138f8e970688b3225ec9158cc500861880c9ce429d9cfcc7fd1d`.
 - `runtime.test.ts`: 23 tests, 0 failures, 59 assertions.
 - app-server client/bridge/session-manager: 60 tests, 0 failures,
   224 assertions.
@@ -149,7 +182,8 @@ Honest limits
   resume paths are observed at the SDK package boundary. Real Codex vendor
   acceptance remains NOT COVERED; this is a vendor-response gap, not a
   call-site execution gap.
-- Co-presence L7b covers the no-override default passed to tmux. The pre-existing
+- Co-presence L7b covers both the no-override default and an explicit `--model`
+  passed to tmux. The pre-existing
   behavior where `node start --copresence` reads `opts.model` rather than the
   created node's persisted `config.json` model is NOT COVERED and is not
   claimed fixed here.
