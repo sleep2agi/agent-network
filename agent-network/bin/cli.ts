@@ -3878,6 +3878,20 @@ async function createCommand(idOverride?: string) {
   // (issue #55, Vincent 4335). All other create flows fall through to the
   // existing single-node create path below.
   if (!idOverride && args.includes("--batch")) {
+    // 🔴 --batch 向导的 runtime **只**来自 VENDORS 表(cli.ts 内 findVendorByModel /
+    // resolveVendorSelection / selectVendorAndModel 三个入口全读它),而该表只能产出
+    // claude-agent-sdk / claude-code-cli / codex-sdk。所以 --runtime 在这条路上
+    // 会被**静默丢弃**,用户显式表达的意图无声消失,然后掉进一个表达不了该运行时的向导。
+    // 与其丢弃,不如明说二者不能同用,并指向真正可用的写法(#765)。
+    if (args.includes("--runtime")) {
+      console.error(`\n  ❌ --batch 与 --runtime 不能同用。`);
+      console.error(`\n     --batch 多节点向导的运行时只能来自内置 vendor 预设`);
+      console.error(`     (claude-agent-sdk / claude-code-cli / codex-sdk),它无法表达`);
+      console.error(`     opencode-cli、grok-build-acp、grok-build-cli、codex-app-server。`);
+      console.error(`\n     要指定这些运行时,去掉 --batch,按单节点创建:`);
+      console.error(`       anet node create <name> --runtime <runtime>\n`);
+      process.exit(1);
+    }
     return await createBatchWizardCommand();
   }
   const id = idOverride || args[1];
@@ -12343,7 +12357,13 @@ async function createBatchWizardCommand() {
     const sel = await selectVendorAndModel();
     if (!sel) {
       closeRL();
-      console.error(`[anet] vendor selector 不可用（非交互终端？用 --preset <model-id> 指定）。`);
+      // 原文案无条件推荐 --preset,但 --preset 只能选到 VENDORS 表里的运行时;
+      // 对 opencode-cli / grok-build-* / codex-app-server,--preset **永远无解**,
+      // 照着提示反复试是走不通的(#765)。所以把另一条真正可用的路一起给出来。
+      console.error(`[anet] vendor selector 不可用（非交互终端？）。`);
+      console.error(`[anet]   预设运行时(claude-agent-sdk / claude-code-cli / codex-sdk):用 --preset <model-id>`);
+      console.error(`[anet]   其它运行时(opencode-cli / grok-build-acp / grok-build-cli / codex-app-server):`);
+      console.error(`[anet]     去掉 --batch,用 anet node create <name> --runtime <runtime>`);
       return;
     }
     runtime = sel.runtime; model = sel.model; baseUrl = sel.baseUrl;
