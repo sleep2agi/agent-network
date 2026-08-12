@@ -7,6 +7,27 @@ PM2、systemd、cron 看门狗不能同时管理同一个 Hub。多个守护者�
 让它们争用同一个端口和 SQLite 数据库。
 :::
 
+## 先决条件(按顺序,每一道都会挡住你)
+
+在干净机器上实测出来的完整链条。三道门都是 fail-closed 且报错可执行,
+但文档此前没把它们连起来写,只能一次撞一个:
+
+| 顺序 | 缺了会看到 | 怎么办 |
+|---|---|---|
+| 1. **Bun ≥ 1.2** | `❌ anet hub start requires the Bun runtime (commhub-server is bun-only — uses Bun.serve + bun:sqlite, no Node fallback)` | `npm i -g bun` 或 `curl -fsSL https://bun.sh/install \| bash`,然后**重开 shell** 让 PATH 生效 |
+| 2. **Hub 在跑** | `未找到 CommHub Server。请先运行: anet hub start` | `anet hub start`(约 3 秒起来) |
+| 3. **已登录且有 network_id** | `未登录或缺少 network_id。请运行: anet login` | `anet register` 建账号,或 `anet login` |
+
+::: warning `anet daemon` 和本文说的「守护」不是一回事
+本文讲的是**用 PM2 守护 `anet hub start`**(让 Hub 常驻)。
+
+而 `anet daemon init` / `up` 是**另一件事** —— 创建并启动一个
+`host_supervisor` 节点(RFC-026)。两者名字相近、做的事不同。
+
+另外 `anet daemon --help` 目前会打出全局帮助;要看子命令请直接敲
+`anet daemon`(不带参数)。
+:::
+
 ## 推荐入口
 
 守护 `anet hub start`，不要在配置里钉死 `commhub-server` 的 preview 版本。

@@ -8,6 +8,28 @@ Do not let PM2, systemd, and a cron watchdog manage the same Hub. Competing
 supervisors can start two processes against one port and one SQLite database.
 :::
 
+## Prerequisites (in order — each one will stop you)
+
+Measured on a clean machine. All three fail closed with an actionable
+message, but the docs never showed them as one chain, so you hit them one at
+a time:
+
+| # | What you see if it is missing | Fix |
+|---|---|---|
+| 1. **Bun ≥ 1.2** | `❌ anet hub start requires the Bun runtime (commhub-server is bun-only — uses Bun.serve + bun:sqlite, no Node fallback)` | `npm i -g bun`, then **restart your shell** so PATH picks it up |
+| 2. **Hub running** | `未找到 CommHub Server。请先运行: anet hub start` | `anet hub start` (up in ~3s) |
+| 3. **Logged in with a network_id** | `未登录或缺少 network_id。请运行: anet login` | `anet register`, or `anet login` |
+
+::: warning `anet daemon` is not what this page daemonizes
+This page is about **keeping the Hub alive with PM2** (`anet hub start`).
+
+`anet daemon init` / `up` is a different thing: it creates and starts a
+`host_supervisor` node (RFC-026). Similar names, different jobs.
+
+Also note `anet daemon --help` currently prints the global help — run
+`anet daemon` with no arguments to see its subcommands.
+:::
+
 ## Recommended entry point
 
 Supervise `anet hub start`; do not pin an old `commhub-server` preview in the
