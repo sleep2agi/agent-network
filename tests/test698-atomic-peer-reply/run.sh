@@ -163,6 +163,8 @@ run_cli_mutation "cli-fallback-reason-lost" \
   's/peer_reply_fallback_reason: args.fallbackReason/peer_reply_fallback_reason: undefined/'
 run_cli_mutation "cli-failed-status-lost" \
   '/sendLegacyReply:/,/      }),/ s/status: args.failed ? "failed" : "replied"/status: "replied"/'
+run_cli_mutation "cli-atomic-failed-status-lost" \
+  '/sendAtomic:/,/      }, 0),/ s/status: args.failed ? "failed" : "replied"/status: "replied"/'
 run_mutation "dashboard-origin-misclassified" \
   /workspace/server/src/tools.ts \
   's/error: "peer_reply_origin_not_node" as const/error: "peer_reply_unsupported" as const/' \

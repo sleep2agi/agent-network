@@ -99,6 +99,7 @@ try {
   });
   const direct = new Database(dbPath);
   direct.exec("PRAGMA busy_timeout=5000");
+  const dispatcherSseAbort = new AbortController();
   const boundNodeId = (tokenId: string) => direct.query<{ bound_node_id: string }, [string]>(
     "SELECT bound_node_id FROM api_tokens WHERE token_id=?1",
   ).get(tokenId)?.bound_node_id;
@@ -335,6 +336,61 @@ try {
     throw new Error(`failed Dashboard reply missing count=${failedDashboardReplies}`);
   }
 
+  // Exercise the other production failed-status branch: a node-origin task
+  // whose exact recipient is capability-advertised and SSE-live must use
+  // sendAtomic. A Dashboard-origin failure above reaches sendLegacyReply, so
+  // it cannot detect a regression that hard-codes only the atomic status to
+  // "replied" while logs/config still say failed.
+  const dispatcherSse = await fetch(`${hub}/events/dispatcher`, {
+    headers: {
+      authorization: `Bearer ${dispatcher.token}`,
+      accept: "text/event-stream",
+      "cache-control": "no-cache",
+    },
+    signal: dispatcherSseAbort.signal,
+  });
+  if (!dispatcherSse.ok || !dispatcherSse.body) {
+    throw new Error(`dispatcher SSE unavailable status=${dispatcherSse.status}`);
+  }
+  await mcp(dispatcher.token, "report_status", {
+    resume_id: "resume-test698-dispatcher",
+    alias: "dispatcher",
+    status: "idle",
+    node_id: dispatcher.node_id,
+    config_snapshot: { peer_reply_inbox_capable: true },
+  });
+  const dispatcherCapability = direct.query<{ peer_reply_inbox_capable: number }, [string, string]>(
+    "SELECT peer_reply_inbox_capable FROM sessions WHERE alias=?1 AND network_id=?2",
+  ).get("dispatcher", networkId)?.peer_reply_inbox_capable;
+  if (dispatcherCapability !== 1) {
+    throw new Error(`dispatcher capability not persisted: ${dispatcherCapability}`);
+  }
+  const failedAtomicDispatch = await mcp(dispatcher.token, "send_task", {
+    alias: "receiver",
+    task: "FORCE_FAILED_STATUS_698",
+    from_session: "dispatcher",
+    network_id: networkId,
+  });
+  const failedAtomicTask = failedAtomicDispatch.task_id || failedAtomicDispatch.message_id;
+  await waitFor(() => direct.query<{ status: string }, [string]>(
+    "SELECT status FROM tasks WHERE task_id=?1",
+  ).get(failedAtomicTask)?.status === "failed", "atomic node failure status propagation", 300);
+  const failedAtomicReplies = direct.query<{ n: number }, [string]>(
+    "SELECT COUNT(*) AS n FROM inbox WHERE in_reply_to=?1 AND type='reply' AND session_name='dispatcher' AND requires_response='none'",
+  ).get(failedAtomicTask)?.n;
+  const failedAtomicChildren = direct.query<{ n: number }, [string]>(
+    "SELECT COUNT(*) AS n FROM tasks WHERE parent_task_id=?1",
+  ).get(failedAtomicTask)?.n;
+  if (failedAtomicReplies !== 1 || failedAtomicChildren !== 0) {
+    throw new Error(`atomic failed reply misrouted replies=${failedAtomicReplies} children=${failedAtomicChildren}`);
+  }
+  await mcp(dispatcher.token, "report_status", {
+    resume_id: "resume-test698-dispatcher",
+    alias: "dispatcher",
+    status: "idle",
+    node_id: dispatcher.node_id,
+  });
+
   // Force the actual cli.ts legacy-node path and inspect the production meta,
   // rather than round-tripping a test-authored literal.
   const legacyOriginTask = await mcp(dispatcher.token, "send_task", {
@@ -383,7 +439,8 @@ try {
   if (sendReplyCountAfterTerminal !== sendReplyCountBeforeTerminal) {
     throw new Error("terminal reply triggered an outbound send_reply from the real cli.ts path");
   }
-  console.log("CLI_WIRING_E2E_PASS startup_reply=no_egress deleted-origin=terminal dashboard_bound+unbound+null-target=terminal failed=failed new_reply=runtime+ack");
+  dispatcherSseAbort.abort();
+  console.log("CLI_WIRING_E2E_PASS startup_reply=no_egress deleted-origin=terminal dashboard_bound+unbound+null-target=terminal dashboard_failed=failed atomic_node_failed=failed new_reply=runtime+ack");
   direct.close();
 } catch (error) {
   for (const name of ["server.log", "agent.log"]) {
