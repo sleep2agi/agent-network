@@ -1,0 +1,50 @@
+# qa-cli-02 pinned Bun evidence
+
+Date: 2026-08-13 (Asia/Shanghai)
+Base: 43137f68fcc4f709e11ec39b8809cde6f527e6c3
+Source: ae33b8688216cdbb462ce2ca3d56c73f4d703031
+
+## Trigger
+
+PR #757's unchanged L0/L1 workflow failed twice at the same build layer:
+
+    tests/qa-cli-02-network-create/Dockerfile:4
+    RUN curl -fsSL https://bun.sh/install | bash
+    exit code: 1
+
+All other L1 suites in both attempts passed. This is one concrete member of
+the unpinned installer denominator tracked by #728; it is not attributed to
+PR #757 product bytes.
+
+## Change
+
+Only the qa-cli-02 Dockerfile changes in the source commit. It installs Bun
+1.3.14 from the versioned GitHub release archive, retries fail-closed, verifies
+the archive with sha256sum --check --strict, creates the bunx argv-0 symlink,
+and verifies both bun and bunx report the exact version.
+
+The checksum was independently read from the upstream Bun v1.3.14
+SHASUMS256.txt entry for bun-linux-x64.zip:
+
+    951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f
+
+## Docker evidence
+
+- Exact image: sha256:3dc61c6bbe4bbb6729954a3c27573d532b161c06605d68e7918e14d0636b33bd
+- Archive verification printed: /tmp/bun-linux-x64.zip: OK
+- Full qa-cli-02 lifecycle: PASS
+- Runner log SHA256: 59cb0e146aa8a71e686f251516d2274d78174722d9dabdde015974f461544bd5
+- Wrong-checksum control: Docker build rc=1 at sha256sum, with
+  "computed checksum did NOT match"
+
+The first diagnostic archive-only build omitted the bunx symlink. Its image
+built, but the real lifecycle correctly failed when anet's preflight could not
+spawn bunx. The final source adds and version-checks that symlink; the complete
+network-create lifecycle then passes. This correction is included to avoid
+misrepresenting a successful binary download as a successful user journey.
+
+## Scope boundary
+
+No npm package, release, production process, configuration, database, secret,
+or repository setting was changed. This fixes one Dockerfile only; the
+remaining #728 denominator stays open.
