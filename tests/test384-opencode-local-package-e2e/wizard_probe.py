@@ -21,6 +21,7 @@ RUNTIMES = [
     "codex-sdk",
     "codex-app-server",
     "grok-build-acp",
+    "grok-build-cli",
     "opencode-cli",
 ]
 PRESETS = ["Anthropic 原生 API", "OpenAI"]
@@ -123,7 +124,7 @@ def main() -> None:
     finish(named, "wizard-openai")
 
     print(
-        "PEXPECT_PASS runtime_choices=6 exact_order=yes "
+        "PEXPECT_PASS runtime_choices=7 exact_order=yes "
         "unnamed=opencode-cli/anthropic named=opencode-cli/openai"
     )
 

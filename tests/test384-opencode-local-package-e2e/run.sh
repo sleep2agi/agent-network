@@ -14,8 +14,8 @@ ADMIN_PASSWORD='Test384-Strong-Password!'
 LIVE_ALIAS=wizard-openai
 FREE_MODEL="${OPENCODE_FREE_MODEL:-opencode/deepseek-v4-flash-free}"
 EXPECTED_OPENCODE="${OPENCODE_VERSION_UNDER_TEST:-1.18.1}"
-EXPECTED_NETWORK="${AGENT_NETWORK_VERSION_UNDER_TEST:-2.3.0-preview.34}"
-EXPECTED_NODE="${AGENT_NODE_VERSION_UNDER_TEST:-2.5.0-preview.28}"
+EXPECTED_NETWORK="${AGENT_NETWORK_VERSION_UNDER_TEST:-2.3.0-preview.39}"
+EXPECTED_NODE="${AGENT_NODE_VERSION_UNDER_TEST:-2.5.0-preview.31}"
 REAL_PATH="$PATH"
 FAKE_BIN_DIR=/test384/fake-bin
 FAKE_CANONICAL_BIN=/test384/fake-global/node_modules/opencode-ai/bin/opencode.exe
@@ -556,7 +556,7 @@ CURRENT_LAYER="L2 real PTY picker, both create entry points"
 echo
 echo "## L2 — real pexpect picker: unnamed/Anthropic + named/OpenAI"
 python3 /test384/wizard_probe.py
-echo "PASS: both installed-bundle picker paths rendered the exact 6-choice canonical-main set/order, selected opencode-cli, and exited 0"
+echo "PASS: both installed-bundle picker paths rendered the exact 7-choice canonical-main set/order, selected opencode-cli, and exited 0"
 
 CURRENT_LAYER="L3 preset materialization"
 echo

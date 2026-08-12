@@ -6956,6 +6956,14 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
     // dst at 0700 even when src is 0755. Structural fix, no post-cpSync chmod
     // (would be TOCTOU vs the预检's own identity-bound fchmod branch).
     mkdirSync(newDir, { mode: 0o700, recursive: false });
+    // cpSync also creates nested directories through the process umask. For
+    // OpenCode profiles that would turn the private .config/.local/cache tree
+    // into 0755 and make PHASE 1 reject its own copy. Establish and validate
+    // every private root before copying; cpSync preserves an existing target
+    // directory, so no post-copy chmod or check-then-repair window is needed.
+    if (normalizeRuntime(stored) === "opencode-cli") {
+      prepareOpencodeNodeForProfileWrite(newDir);
+    }
     cpSync(oldDir, newDir, { recursive: true });
     const newLock = join(newDir, "rename.lock");
     if (existsSync(newLock)) rmSync(newLock, { force: true });  // lock belongs to oldDir only
