@@ -32,7 +32,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #
 # 触发这次修改的实证:2026-08-13 本门在 PR #740 上红,失败原因正是
 #   process "/bin/sh -c curl -fsSL https://bun.sh/install | bash" ... exit code: 1
-# 这是硬门(非 report-only),所以上游 bun.sh 的任何抖动都会卡住每一个 PR。
+# 这个门是 hard-fail 型(失败即红,不是 report-only),所以上游 bun.sh 的任何抖动
+# 都会让每一个 PR 亮红。
+# 🔴 措辞更正:main **没有 branch protection**
+#    (GET /repos/…/branches/main/protection → 404 "Branch not protected"),
+#    所以它并不由机制阻止合并 —— 拦住的是纪律,不是 GitHub。
+#    原注释写「卡住每一个 PR」,把「会亮红」说成了「合不了」,不准确。
 RUN installed=0; \
     for i in 1 2 3; do \
       rm -f /tmp/bun-install.sh; \
