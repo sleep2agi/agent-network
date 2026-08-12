@@ -134,3 +134,46 @@ for p in /proc/[0-9]*; do readlink $p/cwd 2>/dev/null | grep -q dashboard-runtim
 保留:**当前在跑的** + **上一版(回滚用)**。其余可删。
 曾实测发现一个 11 天前起的、监听在另一个端口上的旧实例仍持有某个目录 ——
 所以这一步不能凭目录名判断,必须实际扫 cwd。
+
+---
+
+## 八、这份 runbook 哪些实测过、哪些没有
+
+规则要求「未经演练,不宣称可恢复」。以下如实标注,**不要把未演练的部分当成已验证**。
+
+### ✅ 已实测(2026-08-12,发布 `0.6.3-preview.55` 时真跑过)
+
+第二、三、四节里**从已发布 npm 包到一个可用实例**这一段是端到端验证过的:
+
+```
+mkdir ~/.commhub/dashboard-runtime-v55 + package.json 钉版本 + npm install
+  → node_modules/@sleep2agi/agent-network-dashboard/package.json = 0.6.3-preview.55
+PORT=3009 HOST=127.0.0.1 ./node_modules/.bin/agent-network-dashboard
+  → /login 200   /scheduled-tasks 200   footer 自报 preview.55
+  → .next/BUILD_COMMIT == 发版 commit
+换版后:readlink /proc/<listen_pid>/cwd 含 dashboard-runtime-v55
+       服务出去的 chunk 里 grep 到本次新增的字符串
+       监听 pid 追祖先链到 pm2 当前 pid(非孤儿)
+```
+
+第五节两类孤儿进程也是实测的 —— 当天两种都遇到了,包括那个只攥 `ESTAB`
+继续给已打开标签页发旧 bundle 的,正是它造成了「部署完成但用户看到旧界面」。
+
+### ❌ 尚未演练(**不要据此宣称可恢复**)
+
+- **从一台空机器完整重建** —— 未做。Caddy 配置、frp 隧道配置、pm2 app 的创建与
+  saved-env 注入,**这三样目前都不在 repo 里**,本 PR 只覆盖了启动器本身。
+  也就是说:照现在的 repo,你能把 dashboard 进程跑起来,
+  **但配不出那两个公网入口**。
+- **数据恢复** —— 完全未覆盖。Hub 的 SQLite 内容不在 repo,依赖独立备份,
+  且备份恢复流程本身也没演练过。
+- **回滚** —— 第六节的步骤是按当前脚本结构推出来的,**没有真正执行过一次回滚**。
+
+### 下一步(补齐的顺序)
+
+1. 把 Caddy / frp / pm2 的配置模板收进 repo(**只放变量名与占位符,不放任何值**)
+2. 在隔离环境(Docker 或一台空机)按本文档从零走一遍,把过程与结果记进 `docs/tests/`
+3. 演练一次真实回滚
+4. 单独演练数据恢复,并明确 RPO/RTO
+
+**在第 2 步完成之前,本文档的地位是「已知正确的操作手册」,不是「已验证的灾难恢复方案」。**
