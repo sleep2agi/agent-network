@@ -38,5 +38,6 @@ test("the dotenv writer itself reuses the side-effect-free planner", () => {
   expect(writerStart).toBeGreaterThan(0);
   expect(planner).toBeGreaterThan(0);
   expect(body.indexOf("process.env[refName] = value")).toBeGreaterThan(planner);
-  expect(body.indexOf("writeFileSync(dotenvPath, body")).toBeGreaterThan(planner);
+  expect(body.indexOf('writeOpencodePrivateProfileFile(nodeDir, ".env", body)')).toBeGreaterThan(planner);
+  expect(body.indexOf("atomicWritePrivateFile(dotenvPath, body)")).toBeGreaterThan(planner);
 });

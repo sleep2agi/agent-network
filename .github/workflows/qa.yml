@@ -20,6 +20,7 @@ on:
       - 'docs/qa/**'
       - '.github/workflows/qa.yml'
       - 'tests/test725-agent-node-unit-ci/**'
+      - 'tests/test745-agent-network-unit-ci/**'
   push:
     branches: [main]
     paths:
@@ -30,6 +31,7 @@ on:
       - 'scripts/qa.sh'
       - '.github/workflows/qa.yml'
       - 'tests/test725-agent-node-unit-ci/**'
+      - 'tests/test745-agent-network-unit-ci/**'
 
 # Older runs on the same ref get cancelled — saves minutes when a PR is
 # updated rapidly. main pushes run independently.
@@ -38,6 +40,23 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  agent-network-unit:
+    name: agent-network unit (Docker, non-root)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build exact agent-network unit image
+        run: |
+          docker build \
+            --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-test745-agent-network-unit \
+            -f tests/test745-agent-network-unit-ci/Dockerfile .
+
+      - name: Run complete agent-network unit domain
+        run: docker run --rm anet-test745-agent-network-unit
+
   agent-node-unit:
     name: agent-node unit (Docker, non-root)
     runs-on: ubuntu-latest
