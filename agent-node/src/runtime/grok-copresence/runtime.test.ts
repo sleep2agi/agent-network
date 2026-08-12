@@ -1112,11 +1112,12 @@ describe("Grok copresence runtime integration", () => {
     fixture.blockTuiSpawns.add(2);
     let runtime: GrokCopresenceRuntimeSession | undefined;
     let retainedLocks: Array<{ release(): Promise<void> }> = [];
+    let blocked: string | undefined;
     try {
       runtime = await fixture.open();
       await fixture.crashCurrent();
       await waitFor(() => fixture.blockedTuiSpawnNumber === 2, 5_000);
-      const blocked = join(fixture.grokHome, "sandbox-blocked-dir.43");
+      blocked = join(fixture.grokHome, "sandbox-blocked-dir.43");
       mkdirSync(blocked, { mode: 0o000 });
 
       const closing = runtime.close();
@@ -1147,6 +1148,7 @@ describe("Grok copresence runtime integration", () => {
     } finally {
       fixture.releaseRecoverySpawn();
       await runtime?.close();
+      if (blocked && existsSync(blocked)) chmodSync(blocked, 0o700);
       await fixture.close();
       for (const lock of retainedLocks.reverse()) await lock.release().catch(() => {});
     }
