@@ -1720,6 +1720,10 @@ function detectInstalledPackages() {
     commhubServer: detectCommandVersion("commhub-server", "commhub-server", "global"),
     claude: detectCommandVersion("claude", "claude CLI"),
     codex: detectCommandVersion("codex", "codex CLI"),
+    // Bun 不是「可选运行时」,它是本机跑 hub 的硬前置:`anet hub start` 在
+    // 缺 bun/bunx 时直接 process.exit(1)(见 hub start 里的前置校验)。
+    // 此前自报里完全不提它,用户只能撞上去才知道 —— 这正是本次要修的。
+    bun: detectCommandVersion("bun", "Bun"),
   };
 
   if (versions.agentNode.state !== "ok") {
@@ -1743,6 +1747,16 @@ function formatLazyComponent(pkg: DetectedVersion): string {
   if (pkg.state === "ok" && pkg.version) return `✓ ${pkg.displayName} v${pkg.version}`;
   if (pkg.state === "unknown") return `✓ ${pkg.displayName} installed`;
   return `○ ${pkg.displayName} — not installed yet (will fetch via npx on first use)`;
+}
+
+/** Bun 的自报行。与 formatOptionalRuntime 分开,因为缺失时的语义完全不同:
+ *  可选运行时缺了只是少一种 runtime,Bun 缺了 `anet hub start` 直接失败,
+ *  所以这里要给出可直接执行的安装命令,而不是一句 "only needed for …"。 */
+function formatRequiredBun(pkg: DetectedVersion): string {
+  if (pkg.state === "ok" && pkg.version) return `✓ ${pkg.displayName} v${pkg.version}`;
+  if (pkg.state === "unknown") return `✓ ${pkg.displayName} installed`;
+  return `✗ ${pkg.displayName} not found — \`anet hub start\` will fail without it `
+    + `(commhub-server is bun-only). Install: curl -fsSL https://bun.sh/install | bash`;
 }
 
 function formatOptionalRuntime(pkg: DetectedVersion, reason: string): string {
@@ -1782,6 +1796,11 @@ function printVersionReport() {
   }
   console.log(`  ${formatLazyComponent(versions.commhubServer)}`);
 
+  // Bun 单独一节,不能混进 "Optional runtimes" —— 它不是可选的。
+  // 措辞限定在「本机跑 hub」:节点连远程 hub 不需要 Bun,说成笼统必需是过度声称。
+  console.log("\nRequired to run a hub on this machine:");
+  console.log(`  ${formatRequiredBun(versions.bun)}`);
+
   console.log("\nOptional runtimes (install only what you'll use):");
   console.log(`  ${formatOptionalRuntime(versions.claude, "the claude-code-cli runtime")}`);
   console.log(`  ${formatOptionalRuntime(versions.codex, "the codex-sdk runtime")}`);
@@ -1791,6 +1810,11 @@ function printVersionReport() {
     console.log("\nNothing is broken — components are fetched the first time you run:");
     console.log("  anet hub start          # bootstraps commhub-server");
     console.log("  anet node start <name>  # bootstraps agent-node");
+    // 缺 Bun 时上面这句会误导:`anet hub start` 不会「自动拉取后正常工作」,
+    // 它会在前置校验处 exit 1。所以这里必须把话收回来。
+    if (!isInstalled(versions.bun)) {
+      console.log("\n  ⚠️  but `anet hub start` will not succeed until Bun is installed — see above.");
+    }
     console.log("\nDocs: https://anet.sh/guide/getting-started");
   }
 }
