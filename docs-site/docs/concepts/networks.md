@@ -52,9 +52,15 @@ graph TB
 anet network create dev
 anet network create prod --description "生产环境"
 
-# 注册时自动创建 default 网络
-anet register  # → 自动创建 default 网络，角色 owner
+# 注册时自动创建一个属于你的网络，名字就是你的用户名
+anet register  # → 自动创建网络 "<你的用户名>"，角色 owner
 ```
+
+::: tip 旧 hub 上这个网络叫 "default"
+按用户名命名是后来才有的。早于该改动的 hub 会把每个用户的自动网络都叫 `default`，
+于是 Dashboard 侧栏会出现一串同名条目。升级 hub 即可；已存在的网络名字不会被自动改写，
+需要时用 `anet network rename` 自行改。
+:::
 
 ### 切换
 

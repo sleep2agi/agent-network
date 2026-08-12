@@ -99,7 +99,7 @@ curl -X POST http://localhost:9200/api/auth/register \
 }
 ```
 
-The `user` object's 5 fields match [`server/src/auth.ts:7-13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L7) `AuthUser` interface (`display_name` / `email` may be `null`); `token` is the `utok_` for CLI/Dashboard; `network_token` is the `ntok_` for agents in the auto-created default network.
+The `user` object's 5 fields match [`server/src/auth.ts:7-13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L7) `AuthUser` interface (`display_name` / `email` may be `null`); `token` is the `utok_` for CLI/Dashboard; `network_token` is the `ntok_` for agents in the network auto-created at registration.
 
 **Common 4xx errors** (verify [`auth.ts register()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts)):
 
@@ -329,9 +329,9 @@ curl http://localhost:9200/api/networks \
   "networks": [
     {
       "network_id": "net_abc123",
-      "network_name": "default",
+      "network_name": "alice",
       "owner_id": "u_abc123",
-      "description": "Auto-created default network",
+      "description": "Auto-created network for alice",
       "settings": null,
       "visibility": "private",
       "max_members": 50,

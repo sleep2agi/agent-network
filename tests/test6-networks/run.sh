@@ -101,9 +101,19 @@ REN=$(curl -s -X PUT "http://127.0.0.1:9200/api/networks/$NET_A_ID" \
 echo "$REN" | grep -q '"ok":true' && pass "rename network" || fail "rename failed"
 NETS_R=$(curl -s -H "Authorization: Bearer $TOKEN_A" http://127.0.0.1:9200/api/networks)
 echo "$NETS_R" | grep -q 'alpha-renamed' && pass "renamed name in list" || fail "rename not reflected"
+# Collide with a network this user ALREADY owns, and read its name back from
+# the API instead of assuming what registration called it.
+#
+# Creating a throwaway network for the collision does not work: the free plan
+# caps max_networks_owned at 2 (auth.ts QUOTAS) and this user is already at
+# the cap here (auto-created + alpha), so the create returns
+# "quota exceeded" and the collision never exists.
+DUP_NAME=$(curl -s -H "Authorization: Bearer $TOKEN_A" http://127.0.0.1:9200/api/networks \
+  | python3 -c "import json,sys; ns=json.load(sys.stdin).get('networks',[]); print(next((n['network_name'] for n in ns if n['network_id']!='$NET_A_ID'),''))" 2>/dev/null)
+[ -n "$DUP_NAME" ] && pass "found an owned network to collide with ($DUP_NAME)" || fail "no second owned network — collision premise absent"
 DUP_REN=$(curl -s -X PUT "http://127.0.0.1:9200/api/networks/$NET_A_ID" \
   -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN_A" \
-  -d '{"name":"default"}')
+  -d "{\"name\":\"$DUP_NAME\"}")
 echo "$DUP_REN" | grep -q '"ok":false' && pass "rename to existing name rejected" || fail "dup rename accepted"
 echo ""
 

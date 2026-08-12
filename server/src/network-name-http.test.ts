@@ -11,10 +11,11 @@ let base = "";
 let userToken = "";
 let nodeToken = "";
 let networkId = "";
+let username = "";
 
 beforeAll(async () => {
   process.env.COMMHUB_DB = process.env.COMMHUB_DB || join(PRIVATE_DB_DIR, "hub.db");
-  const username = `network_name_${Date.now()}_${process.pid}`;
+  username = `network_name_${Date.now()}_${process.pid}`;
   const registered = register(username, "NetworkName123!", undefined, "seed");
   expect(registered.ok).toBe(true);
   userToken = registered.token!;
@@ -51,15 +52,19 @@ describe("GET /api/networks name compatibility (#449)", () => {
     const rows = await networks(userToken);
     expect(rows).toHaveLength(1);
     expect(rows[0].network_id).toBe(networkId);
-    expect(rows[0].network_name).toBe("default");
-    expect(rows[0].name).toBe("default");
+    // #449 is about `name` and `network_name` agreeing and being non-null.
+    // Pin them to the registered username rather than the literal "default":
+    // the auto-created network is named after its owner, so hardcoding the
+    // old literal would test the naming scheme instead of the compat shim.
+    expect(rows[0].network_name).toBe(username);
+    expect(rows[0].name).toBe(username);
   });
 
   test("network-bound ntok rows expose the same alias", async () => {
     const rows = await networks(nodeToken);
     expect(rows).toHaveLength(1);
     expect(rows[0].network_id).toBe(networkId);
-    expect(rows[0].network_name).toBe("default");
+    expect(rows[0].network_name).toBe(username);
     expect(rows[0].name).toBe(rows[0].network_name);
     expect(rows[0].name).not.toBeNull();
   });

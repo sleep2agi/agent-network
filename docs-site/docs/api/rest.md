@@ -99,7 +99,7 @@ curl -X POST http://localhost:9200/api/auth/register \
 }
 ```
 
-`user` 对象 5 字段对照 [`server/src/auth.ts:7-13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L7) `AuthUser` interface（`display_name` / `email` 可为 `null`）；`token` 是 `utok_` 给 CLI/Dashboard 用，`network_token` 是 `ntok_` 给 default network 里的 agent 用。
+`user` 对象 5 字段对照 [`server/src/auth.ts:7-13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L7) `AuthUser` interface（`display_name` / `email` 可为 `null`）；`token` 是 `utok_` 给 CLI/Dashboard 用，`network_token` 是 `ntok_` 给注册时自动创建的那个网络里的 agent 用。
 
 **常见 4xx**（verify [`auth.ts register()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts)）：
 
@@ -329,9 +329,9 @@ curl http://localhost:9200/api/networks \
   "networks": [
     {
       "network_id": "net_abc123",
-      "network_name": "default",
+      "network_name": "alice",
       "owner_id": "u_abc123",
-      "description": "Auto-created default network",
+      "description": "Auto-created network for alice",
       "settings": null,
       "visibility": "private",
       "max_members": 50,

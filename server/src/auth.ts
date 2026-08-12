@@ -88,11 +88,32 @@ export function register(username: string, password: string, email?: string, dis
     [userId, username, pwHash, email || null, displayName || username, isFirstUser ? "admin" : "user"]
   );
 
-  // Auto-create default network + add as owner member
+  // Auto-create the user's own network + add as owner member.
+  //
+  // Name it after the user rather than the literal "default". Every
+  // registration used to mint a network called "default", so a hub with N
+  // users showed N identical "default" rows in the Dashboard sidebar with
+  // no way to tell them apart (23 of them on the live hub, 22 empty).
+  // Three CLI call sites (bin/cli.ts debate / demo-social / pr-review) resolve
+  // a network as:
+  //     me.user.default_network_id
+  //       || networks.find(n => n.network_name === "default")
+  //       || networks[0]
+  // Checked against the live hub: GET /api/auth/me returns
+  // {user_id, username, display_name, email, role} — there is no
+  // default_network_id field, and nothing in server/ ever writes one. So the
+  // first term is always undefined and the name lookup is the operative path,
+  // not a fallback.
+  //
+  // After this change that lookup misses for new users and they land on
+  // networks[0]. That still resolves to this network because listNetworks()
+  // is `ORDER BY created_at` ascending (auth.ts:296) and this row is the
+  // user's oldest. Reordering that query would silently point those three
+  // commands at the wrong network.
   const networkId = generateId("net");
   db.run(
     "INSERT INTO networks (network_id, network_name, owner_id, description) VALUES (?1, ?2, ?3, ?4)",
-    [networkId, "default", userId, "Auto-created default network"]
+    [networkId, username, userId, `Auto-created network for ${username}`]
   );
   db.run(
     "INSERT INTO network_members (network_id, user_id, role) VALUES (?1, ?2, 'owner')",
