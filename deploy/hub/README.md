@@ -15,6 +15,16 @@
 副本的 `RUNTIME_DIR` 和变更历史，不能只改服务器孤本。
 
 ```bash
+# 0. bun —— hub-daemon.sh 对它是硬依赖,缺了会 fail-closed 停在
+#    「找不到 bun」。这一步此前只写在脚本注释里,不在步骤里(#778)。
+#
+#    🔴 装在 nvm 的**当前 node** 下,因为脚本优先解析
+#       ~/.nvm/versions/node/<ver>/bin/bun —— 换 node 版本后需要重装。
+npm i -g bun                      # 或按 https://bun.sh/docs/installation
+command -v bun && bun --version   # 记下路径:换 node 版本后要重来
+#    (不要用 `curl … | bash` 一行流:管道退出码只反映 consumer,
+#     curl 失败会被吞掉 —— 见 #729 / #733 / #743。)
+
 install -d -m 700 "$HOME/.local/bin" "$HOME/.commhub"
 install -m 700 deploy/hub/hub-daemon.sh "$HOME/.local/bin/hub-daemon.sh"
 
