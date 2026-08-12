@@ -39,10 +39,34 @@ Production deployment: NOT PERFORMED.
   worktree. The base commit supplies the old Hub context; the exact source
   commit separately supplies `Dockerfile.legacy-hub` into that temporary
   context. This is required because the base predates the test698 directory.
-- The first attempted reproduction that assumed the Dockerfile existed in
-  the base archive failed loudly and is not counted as PASS. All recorded
+- The first attempted reproduction assumed the Dockerfile existed in the
+  base archive. It printed `fatal: not a tree object` and
+  `tar: Exiting with failure status` to stderr, but the outer pipeline still
+  exited `0` because `| tee` ran without `pipefail`. The failure was therefore
+  indistinguishable from success to automated exit-code evaluation, which is
+  why that run was initially recorded as PASS. Reproducing the same failure
+  gave exit `0` without outer `pipefail` and exit `2` with
+  `set -o pipefail`. Noise on stderr is not failure detection; the pipeline
+  exit status is the contract. That invalid run is not counted as PASS. All
   PASS evidence below comes from the corrected exact-source runner with
   shell `pipefail` enabled at the evidence-capture boundary.
+
+## Evidence-capture limitations and operational notes
+
+1. The two archived-old-Hub log digests below identify timestamped runs with
+   random task ids. They are not reproducible digests and are not used as
+   source provenance, just like the main run artifact digest above.
+2. The archived old-Hub build no longer reads its Dockerfile from the live
+   worktree, but the runner is not fully independent of that worktree:
+   `run-legacy-wire.sh` still sources `tests/lib/safe-rm.sh` through `$ROOT`.
+3. `safe_rm_rf` permits `/tmp/`, while `mktemp -d` follows `TMPDIR`. With
+   `TMPDIR=/var/tmp`, cleanup is refused and the temporary directory is left
+   behind. This does not turn a failing run green or a passing run red, but it
+   can leak test artifacts.
+4. The archived old-Hub image tag encodes `BASE_COMMIT`, but not the separate
+   `SOURCE_COMMIT` that supplies `Dockerfile.legacy-hub`. The runner rebuilds
+   and retags the image each time, so no stale-image failure was observed;
+   the tag alone is nevertheless an incomplete provenance label.
 
 ## Product behavior
 
