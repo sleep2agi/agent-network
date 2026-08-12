@@ -68,6 +68,7 @@ register() {
 # @sleep2agi/agent-network — 用户安装入口
 register "@sleep2agi/agent-network" "docs-site/docs/guide/runtimes.md"
 register "@sleep2agi/agent-network" "docs-site/docs/en/guide/runtimes.md"
+register "@sleep2agi/agent-network" "agent-network/src/opencode-agent-node-pair.ts:OPENCODE_AGENT_NETWORK_VERSION"
 
 # @sleep2agi/agent-node — runtime + SDK 行号锚点
 register "@sleep2agi/agent-node" "docs-site/docs/guide/runtimes.md"
@@ -76,6 +77,7 @@ register "@sleep2agi/agent-node" "docs-site/docs/guide/agent-node.md"
 register "@sleep2agi/agent-node" "docs-site/docs/en/guide/agent-node.md"
 register "@sleep2agi/agent-node" "docs-site/docs/guide/sdk-deep-dive.md"
 register "@sleep2agi/agent-node" "docs-site/docs/en/guide/sdk-deep-dive.md"
+register "@sleep2agi/agent-node" "agent-network/src/opencode-agent-node-pair.ts:OPENCODE_AGENT_NODE_VERSION"
 
 # @sleep2agi/commhub-server — agent-network CLI 内 PINNED_SERVER_VERSION 常量
 register "@sleep2agi/commhub-server" "agent-network/bin/cli.ts:PINNED_SERVER_VERSION"
@@ -121,12 +123,13 @@ md_pattern() {
     "$pkg_no_scope" "$ESCAPED_VERSION"
 }
 
-# cli.ts PINNED 常量模板：仅替换 `const NAME = "..."` 字串字面值
+# PINNED 常量模板：仅替换 `const NAME = "..."` 或
+# `export const NAME = "..."` 的字串字面值。
 # 不动 declaration 周围 logic、不动 NAME 之外的同字串引用、不改类型/作用域
 ts_pinned_pattern() {
   local const_name="$1"
-  # 严格锚定 `const <NAME> = "x.y.z..."`，保留引号 + 行内其它内容
-  printf 's#\\(const %s = \\)"[^"]*"#\\1"%s"#g' \
+  # 严格锚定可选 export + `const <NAME> = "x.y.z..."`，保留其它内容。
+  printf 's#\\(\\(export \\)\\?const %s = \\)"[^"]*"#\\1"%s"#g' \
     "$const_name" "$ESCAPED_VERSION"
 }
 
@@ -139,19 +142,20 @@ apply_or_preview() {
     return
   fi
   local before
-  before="$(cat "$file")"
+  # Command substitution strips trailing newlines. Append a sentinel before
+  # capture, then remove only that sentinel so a release sync never changes
+  # the target file's EOF shape as a side effect.
+  before="$(cat "$file"; printf '\036')"
+  before="${before%$'\036'}"
   local after
-  after="$(sed "$sed_expr" "$file")"
+  after="$(sed "$sed_expr" "$file"; printf '\036')"
+  after="${after%$'\036'}"
   if [[ "$before" == "$after" ]]; then
     echo "  unchanged: $file"
     return
   fi
   if [[ "$MODE" == "apply" ]]; then
     printf '%s' "$after" > "$file"
-    # 原文件如果以换行结尾，保留
-    if [[ "${before: -1}" == $'\n' && "${after: -1}" != $'\n' ]]; then
-      printf '\n' >> "$file"
-    fi
     echo "  WROTE: $file"
     CHANGED_FILES+=("$file")
   else

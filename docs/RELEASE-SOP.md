@@ -194,7 +194,10 @@ for p in agent-network agent-node server; do
 done
 # ② PINNED 链（见 §3 第 2 条）
 git show origin/main:agent-network/bin/cli.ts | grep 'PINNED_SERVER_VERSION *='
-# ③ 与 npm 上的 preview tag 逐一比对，必须相等
+# ③ OpenCode 精确配对 pin（两个常量必须分别等于对应包的 preview tag）
+git show origin/main:agent-network/src/opencode-agent-node-pair.ts | \
+  grep -E 'OPENCODE_AGENT_(NETWORK|NODE)_VERSION *='
+# ④ 与 npm 上的 preview tag 逐一比对，必须相等
 npm view @sleep2agi/<pkg>@preview version
 ```
 
