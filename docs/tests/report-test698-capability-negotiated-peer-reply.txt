@@ -2,148 +2,99 @@
 
 Date: 2026-08-12 Asia/Shanghai
 Base: 17b8223f9d7fd25fcc435b40e7fa1fc0823ea1de
-SOURCE_COMMIT: fdc88318ee69c7fbc5f8895c9b6e7a72ea295cae
+SOURCE_COMMIT: 69ad300884bc91d82fff87234cd195aa3f3bb284
 Scope: Hub + agent-node protocol/runtime wiring + isolated Docker tests.
 Production deployment: NOT PERFORMED.
 
 ## Exact-source image
 
-- image: `anet-test698:fdc88318-exact`
-- image id:
-  `sha256:9b5fb50a9ea6a6b3d0c2c25c8df768eb0c3bcee8b1d991b2c668ffe6efce9638`
+- image: `anet-test698:69ad3008-exact`
+- image id: `sha256:138e382803aa8df022174979ba2e3a4cc3e2cf3f3f1892f8ff2bb6317f1d6edc`
 - image env:
-  `TEST698_SOURCE_COMMIT=fdc88318ee69c7fbc5f8895c9b6e7a72ea295cae`
-- all 23 changed agent/server/test runtime files that exist at the same path
-  inside the image matched `git show SOURCE_COMMIT:<path>` byte-for-byte
-  after `docker create` and `docker cp`: 23/23. Dockerfiles, docs, and the
-  intentionally remapped test673 preload are outside this same-path count.
-- focused result: 184 pass / 0 fail / 549 expect calls.
-- exact main-run artifact digest:
-  `sha256:248b55696ae3bbbb7dda09efc8c1d3f22f89508627c93c994f1e1b84f52b1892`.
+  `TEST698_SOURCE_COMMIT=69ad300884bc91d82fff87234cd195aa3f3bb284`
+- same-path source/image byte comparison: 25/25 MATCH (agent-node,
+  server, and test698 files changed since base). Docs are intentionally not
+  copied into the image; the test673 preload is intentionally remapped into
+  the test698 directory and is not counted as a same-path file.
+- focused main result: 178 pass / 0 fail / 518 expect calls.
+- main runner: 28/28 named mutations witnessed red; `RESULT: PASS`.
+- main run artifact digest:
+  `5e292976df68f616e61d053b700bd51a2e29233899b5b27f07ee0780d7c24c84`.
   This records one timestamped run and is not claimed reproducible or used
   as source provenance.
 
-## Product behavior evidence
+## Product behavior
 
 1. `send_peer_reply` performs one synchronous SQLite transaction containing
-   exact node-token ownership validation, terminal task update, scheduled-run
+   exact token-bound ownership validation, terminal task update, scheduled-run
    terminalization, and one `requires_response=none` inbox result. Injected
    task/run failures roll all three data surfaces back.
-2. Recipient capability is current-session authority only: every token-bound
-   heartbeat writes 1 or 0, the exact canonical alias is part of the query,
-   historical node snapshots are not authoritative, and a live SSE connection
-   is required. A second alias on the same node cannot lend capability.
-3. A task dispatched before node-id/token rotation receives an atomic
-   `reply_task_not_owned` with zero writes, then exactly one marked legacy
-   task. A wrong reply target remains a hard error and never falls back.
-4. Origin kind is decided from the persisted task before caller capability.
-   Real-process fixtures prove bound and unbound receiver tokens, plus a
-   legacy row whose `to_node_id` is NULL, all answer a Dashboard-origin task
-   through `send_reply`: the original terminalizes, exactly one Dashboard
-   reply is stored, and zero child task rows are created.
-5. The real `agent-node/src/cli.ts` ran against an isolated real Hub with a
-   deterministic SDK preload. A terminal peer reply entered the runtime and
-   was ACKed without reply egress. Forced vendor failures remained `failed`
-   through both production branches: Dashboard origin used legacy
-   `send_reply`, while a node-origin task with an exact capability-advertised,
-   SSE-live recipient used atomic `send_peer_reply`. Each path terminalized
-   the original, stored exactly one no-response reply, created zero child
-   tasks, and was independently protected against a `replied` hard-code.
-6. Capability/identity downgrade remains observable through a legacy task
-   carrying `peer_reply_legacy_fallback=true` and a production-computed reason.
-   Ambiguous transport and identity-query failures remain pending rather than
-   choosing a potentially lossy route.
-7. A real node-token task was dispatched while the receiver was offline, then
-   the origin session was deleted before the real receiver process drained its
-   inbox. Atomic capability negotiation returned unsupported; legacy
-   `send_task` returned the structured, no-write `alias_not_found`; the sender
-   then used `send_reply`. The immutable original task became `replied`, exactly
-   one no-response reply row was stored for the deleted origin, and no child
-   task was created. Only app-level `alias_not_found` permits this second
-   route; transport ambiguity and every other application rejection remain
-   thrown so the pending reply is retained.
-8. Every legacy wake task carries a stable, visible original-task marker:
-   `[peer-reply in_reply_to=<task_id>]`. Old Hubs deduplicate `send_task` by
-   sender, recipient, and content only. The marker preserves dedup for retries
-   of one original task while preventing two distinct originals with the same
-   reply text from colliding. A real old-Hub + real-cli fixture dispatched two
-   source tasks that produced the same SDK-stub result and observed exactly
-   two wake tasks, each tied to its own original task id.
+2. Recipient capability is current-session authority only. Every exact
+   token-bound heartbeat writes 1 or 0; the query binds node, network, and
+   canonical alias. Historical node snapshots cannot lend capability.
+3. SSE is a doorbell, not a commit precondition. A capable but disconnected
+   recipient still gets an atomically stored no-response reply; reconnect
+   drains the durable inbox row.
+4. Every explicit capability downgrade uses terminal `send_reply`, never
+   `send_task`: archived old Hub unknown-tool, recipient rollback, unbound
+   caller, non-node origin, and post-dispatch node-id rotation all preserve
+   the exact original task lifecycle. No fallback creates a child task.
+5. Current-Hub compatibility `send_reply` from a node token is alias-bound:
+   the authenticated caller alias must be the original assignee, and the
+   target must be the immutable original sender. This permits legitimate
+   node-id rotation while rejecting a foreign node and a wrong target with
+   zero writes.
+6. Dashboard/user-origin tasks continue through terminal `send_reply`.
+   Bound, unbound, and legacy NULL-target fixtures each become terminal with
+   exactly one reply and zero child tasks.
+7. The real `agent-node/src/cli.ts` ran against an isolated real current Hub
+   with a deterministic SDK preload. It proved Dashboard and capability
+   downgrade terminalization, atomic failed-status propagation, `new_reply`
+   runtime delivery + ACK, and no reply-to-reply egress.
+8. Ambiguous transport errors and unrelated application errors never choose
+   a second route. A failed compatibility terminalization remains visible to
+   the durable pending-reply queue instead of being reported as delivered.
 
-## Real old-Hub wire and exact task identity
+## Archived real old-Hub wire
 
-`run-legacy-wire.sh` archives and builds the actual base
-`17b8223f9d7fd25fcc435b40e7fa1fc0823ea1de`, starts it on an isolated Docker
-network, and sends a real MCP `tools/call` for its absent `send_peer_reply`.
-The old Hub returned its real wire form:
+`run-legacy-wire.sh` archives and builds the actual base Hub, starts it on an
+isolated Docker network, and calls its absent `send_peer_reply`. The real wire
+response is `result.isError` with MCP code `-32602`; the production classifier
+preserves that code and selects terminal `send_reply`.
 
-`result.isError: MCP error -32602: Tool send_peer_reply not found`
+The pristine runner then starts the real source `cli.ts` twice against that
+Hub. Its acceptance condition uses only committed final Hub state, never a
+transient pending-queue observation:
 
-That same old Hub exposes `get_task`. The exact-source sender reads the exact
-original row by task id and classifies its immutable `from_node_id`:
+```
+LEGACY_HUB_WIRE_PASS code=-32602 node=terminal-reply user=terminal-reply
+LEGACY_CLI_E2E_PASS node=terminal-reply user=terminal-reply
+LEGACY_CLI_TERMINAL_PASS originals=2 terminal=2 replies=2 child_tasks=0
+```
 
-- node origin (`from_node_id` non-null) -> one legacy `send_task` wake path;
-- Dashboard/user origin (`from_node_id` null) -> terminal `send_reply`;
-- missing, mismatched, or malformed task identity -> zero egress and the
-  pending reply remains retryable.
+The two source tasks deliberately produce identical SDK-stub result text.
+Both originals become terminal because compatibility uses `send_reply`; the
+5-minute `send_task` content deduplicator is not in this path.
 
-`get_task` application rejection is also normalized to a non-app-level
-`old_hub_task_identity_unavailable` error. This is intentional: the old Hub's
-real `{"ok":false,"error":"task not found"}` response must not enter the
-pending queue's app-level drop branch. Unit fixtures pin missing, mismatched,
-undefined/non-string identity and the exact app-level rejection shape; three
-independent byte-changing mutations make each acceptance/drop regression red.
+Two separately rebuilt mutations are deterministic final-state failures:
 
-Historical rows created before `from_node_id` backfill can contain NULL even
-when the sender was once a node. There is no immutable evidence left to prove
-that origin. The compatibility rule therefore treats NULL as non-node and uses
-terminal `send_reply`, rather than consulting a mutable alias roster and
-waking a potentially unrelated replacement node. This is a conservative
-identity decision, not a claim that every historical NULL originated in UI.
+- `old-hub-terminal-fallback-skipped`
+- `old-hub-capability-fallback-removed`
 
-This is not a helper-only claim. The runner starts the real source `cli.ts`
-against the archived old Hub, dispatches one node-origin and one user-origin
-task, and observes the resulting old-Hub task/inbox state:
+Each turns red because the pristine final-state tuple (2 terminal originals,
+2 replies, 0 child tasks) cannot be reached. There is no identity-lookup race,
+deleted-task timing window, legacy marker, or `send_task` child-row oracle.
 
-`LEGACY_HUB_WIRE_PASS code=-32602 exact_task_node=task exact_task_user=reply`
+Archived-old-Hub pristine log digest:
+`b64f9d264f39f3856f4485723cc3805941a2bf09e434f81637b49818c1f65abd`.
+Full archived-old-Hub runner log digest (including both mutation builds):
+`502ff7f91e7eb78c787ad959a0cd143cc328704a31c67605b61f5d3a5a9797ba`.
 
-`LEGACY_CLI_E2E_PASS exact_get_task node=task user=reply`
-
-The real-cli failure matrix registers the receiver without starting it,
-enqueues two ordinary node-origin tasks plus a third task, then deletes only
-the third authoritative task row from the isolated old-Hub SQLite database
-before starting production `cli.ts`. It proves both compatibility hazards in
-one controlled run:
-
-`LEGACY_CLI_FAILURE_PASS equal_replies=2 identity_egress=0 pending=1`
-
-The equal replies remain distinct through the stable original-task marker.
-The missing identity produces no task/reply egress and remains exactly once in
-the disk-backed pending queue; it is not guessed from the live alias roster.
-Every invocation uses timestamp-derived dispatcher and receiver aliases, so a
-previous archived-Hub run cannot contaminate the process-wide content-dedup
-index or make a mutation red for a stale fixture collision.
-
-A byte-changing mutation changes the production `cli.ts` lookup from
-`get_task(task_id)` to `get_all_status`. It rebuilds a separate exact-source
-image and the same old-Hub production-CLI E2E turns red:
-
-`MUTATION_RED: old-hub-exact-task-lookup-lost rc=1`
-
-Exact old-Hub run artifact digest:
-`sha256:e96be996d4effe76007680cf8e2bcf63ab85a4ca130583ee4b81ea73619e993a`.
-It records one run only and is not used as reproducible provenance.
-
-## Witnessed-red mutations
-
-Every mutation requires a byte change; a no-op fails the runner. The main
-exact-source image produced 29 named reds, plus three separate real-old-Hub
-production mutations (32 total):
+## Main witnessed-red mutations (28)
 
 - cli-reply-type-lost
 - cli-terminal-reply-egress-restored
 - cli-new-reply-wake-disabled
-- cli-fallback-reason-lost
 - cli-failed-status-lost
 - cli-atomic-failed-status-lost
 - dashboard-origin-misclassified
@@ -151,70 +102,47 @@ production mutations (32 total):
 - terminal-reply-replies-again
 - new-reply-wake-removed
 - old-hub-fallback-removed
-- old-hub-task-not-found-drops-pending
-- old-hub-task-id-mismatch-accepted
-- old-hub-origin-shape-accepted
-- deleted-origin-terminal-wiring-removed
+- legacy-terminal-fallback-replaced-by-task
 - legacy-mcp-code-lost
 - identity-rotation-fallback-removed
 - capability-provenance-bypassed
 - recipient-capability-gate-removed
+- recipient-disconnect-restores-legacy-fallback
 - recipient-capability-alias-binding-removed
 - rollback-capability-clear-removed
-- legacy-fallback-marker-removed
+- legacy-terminal-fallback-silently-cleared
 - reply-rename-canonicalization-removed
 - node-ownership-check-removed
+- compat-reply-assignee-check-removed
+- compat-reply-target-check-removed
 - task-terminalization-removed
 - reply-requires-response
 - scheduled-run-sync-removed
 - capability-advertisement-removed
 - legacy-agent-warning-removed
-- old-hub-exact-task-lookup-lost (separate archived-old-Hub runner)
-- legacy-equal-replies-deduplicated (separate archived-old-Hub runner)
-- old-hub-identity-failure-egresses (separate archived-old-Hub runner)
 
-The first six target production `cli.ts` and rerun real-process behavior.
-Disabling SSE wake, restoring terminal reply egress, or losing failed status
-fails on observed task/inbox/runtime facts rather than source-string checks.
-The two failed-status mutations separately corrupt legacy and atomic egress;
-the atomic mutation turns red only after a token-bound capability heartbeat
-and a live recipient SSE force the real `sendAtomic` branch.
-The two Dashboard-origin protocol mutations run the focused real Hub
-transaction matrix and assert its exact structured classification. The
-deleted-origin mutation changes the production compatibility condition and
-reruns the real Hub + real receiver process; it turns red because the original
-task never reaches a terminal state. The alias-binding mutation fails the
-focused Hub behavior test. The three final mutations exercise the actual old
-Hub response and production CLI: exact-task lookup removal, stable marker
-removal (the second equal reply is deduplicated), and identity-error guessing
-(the deleted task incorrectly produces egress instead of remaining pending).
+Every mutation must change bytes or the runner fails. The pristine suite runs
+first and must be green. CLI mutations rerun the real-process wiring fixture;
+Hub mutations rerun behavior tests against fresh per-mutation SQLite files.
+The disconnected-recipient mutation specifically restores the rejected
+live-SSE gate and turns red. The two compatibility ownership mutations each
+turn red on committed task/inbox state, not source-string matching.
 
 ## Deployment and honest limits
 
-- No production DB, token, node, runtime, fleet process, or network endpoint
-  was read or changed.
-- No live fleet rollout, production traffic/cost measurement, or long-duration
-  SSE outage test was performed.
-- Mixed-version fallback intentionally preserves the old two-task shape only
-  for an exact node-origin task. Its metadata makes that residue countable.
-  Dashboard and other non-node origins use terminal `send_reply` instead.
-- The old-Hub identity query is performed on every unknown-tool fallback and
-  is not negatively cached. If it cannot prove the exact task origin, the
-  sender does not guess from a live/stale alias roster.
-- The archived old Hub exposes full `get_task` rows at network scope, including
-  content/result. This is a pre-existing old-Hub authorization property that
-  cannot be retrofitted by a new sender. The compatibility call uses only the
-  exact task id already present in that receiver's consumed inbox and retains
-  only identity fields, but it does not claim to repair the old endpoint's
-  broader read scope. Current-Hub task-read hardening is a separate concern.
-- A deleted origin can no longer receive a wake task. The sender uses
-  terminal `send_reply` only after the Hub has explicitly rejected that
-  attempted compatibility write as app-level `alias_not_found`; this is not
-  a general fallback for transport errors.
-- SSE emission occurs after transaction commit. Reconnect drains missed inbox
-  rows, but there is no independent periodic polling guarantee.
-- The ordinary runtime reply path deliberately prefixes the alias and bounds
-  the model result with `result.slice(0, 2000)` before compatibility routing.
-  Therefore this report does not claim a 10,000-character legacy-task boundary
-  test: an attempted fixture for that shape was rejected because it never
-  reached production `legacyPeerReplyTaskText` with a 10,000-character body.
+- No production DB, token, node, runtime, fleet process, or endpoint was read
+  or changed.
+- No live rollout, production traffic/cost measurement, or long-duration SSE
+  outage was performed.
+- Mixed versions retain one-task lifecycle semantics: old Hub and incapable
+  current recipients use terminal `send_reply`; capable current peers use the
+  stricter atomic primitive.
+- The new Hub strengthens node-token `send_reply` authorization. A caller with
+  a legitimate alias but a rotated node id can finish its assigned task; a
+  different alias cannot. Old Hubs cannot receive that server-side hardening.
+- SSE emission occurs after commit. Reconnect drains missed inbox rows, but
+  there is no independent periodic polling guarantee.
+- The ordinary runtime reply path bounds model result text to 2,000 chars.
+  The prior 9,938-character legacy-marker edge is unreachable after removal
+  of the legacy `send_task` marker path and is not claimed as a tested product
+  boundary.
