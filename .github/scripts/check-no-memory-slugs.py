@@ -88,6 +88,7 @@ ALLOWLIST_PATH_PREFIXES = (
 
 def scan(root: Path) -> list[tuple[str, int, str]]:
     findings: list[tuple[str, int, str]] = []
+    scanned = 0
     for dirpath, dirnames, filenames in os.walk(root):
         # Mutate dirnames in-place so os.walk doesn't descend into pruned dirs.
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
@@ -106,10 +107,11 @@ def scan(root: Path) -> list[tuple[str, int, str]]:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
+            scanned += 1
             for lineno, line in enumerate(text.splitlines(), start=1):
                 for match in SLUG_RE.finditer(line):
                     findings.append((rel, lineno, match.group(0)))
-    return findings
+    return findings, scanned
 
 
 def main() -> int:
@@ -117,7 +119,22 @@ def main() -> int:
     if not root.exists():
         print(f"error: scan root does not exist: {root}", file=sys.stderr)
         return 2
-    findings = scan(root)
+    findings, scanned = scan(root)
+    # 🔴 报分母。"0 处违规" 只有在 "读了 N 个文件" 旁边才有意义:
+    #    扫了 0 个文件与扫了几千个干净文件,原本打印的是**逐字相同**的一行 OK。
+    #    实测(2026-08-13):对一个空目录跑本脚本 → rc=0 + "OK: no internal
+    #    memory-slug references found",与真正的干净通过无法区分。
+    print(f"scanned {scanned} file(s) under {root}")
+    if scanned == 0:
+        # 这道门守的是"内部 memory slug 不得泄漏进公开仓"这条红线。
+        # 零覆盖的守卫与坏掉的守卫无法区分,所以零覆盖必须是失败。
+        print(
+            "FAIL: scanned 0 files — the scan scope is empty. "
+            "Either the root is wrong or the include/exclude rules now match nothing; "
+            "a zero-scope guard cannot be distinguished from a broken one.",
+            file=sys.stderr,
+        )
+        return 3
     if not findings:
         print("OK: no internal memory-slug references found")
         return 0
