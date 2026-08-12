@@ -12,9 +12,8 @@
 set -uo pipefail
 
 PKG="@sleep2agi/agent-network-dashboard"
-VERSION="0.6.3-preview.55"
-# 部署时按本机 node 安装位置设置，例如 NODE_BIN=$HOME/.nvm/versions/node/v20.20.0/bin
-NODE_BIN="${NODE_BIN:-$(dirname "$(command -v node)")}"
+VERSION="0.6.3-preview.56"
+NODE_BIN="/home/vansin/.nvm/versions/node/v20.20.0/bin"
 
 # 端口/地址允许被环境变量覆盖，默认即生产值。
 # 为什么要可覆盖：否则任何"验证这个脚本能不能跑"的尝试都会去抢生产的 3001，
@@ -59,7 +58,7 @@ log() { echo "[dash-start $(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 # 2026-08-04: Dashboard Chat HA (#82), source/build commit 54150269.
 # The npm version remains preview.54; this pinned runtime is built from the
 # reviewed main commit, so the directory name is the deployment identity.
-RUNTIME_BIN="$HOME/.commhub/dashboard-runtime-v55/node_modules/.bin/agent-network-dashboard"
+RUNTIME_BIN="$HOME/.commhub/dashboard-runtime-v56/node_modules/.bin/agent-network-dashboard"
 
 if ! resolved="$("$NODE_BIN/npm" view "${PKG}@${VERSION}" version 2>/dev/null)" || [ -z "$resolved" ]; then
   if [ -x "$RUNTIME_BIN" ]; then

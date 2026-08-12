@@ -116,6 +116,23 @@ P=<listen_pid>; while [ -n "$P" ] && [ "$P" != 1 ]; do
 🔴 这类孤儿**有活连接时不要 kill** —— 杀掉就是打断正在看页面的人。
 等它自然排空;确实要立刻生效时再按**精确 PID** 终止(绝不用 `pkill -f`)。
 
+## 五点五、从空 PM2 恢复进程定义
+
+README 里其它地方写的是 `pm2 restart anet-dashboard` —— 那**假定 app 已经存在**。
+空机上它不存在,所以要先从仓里把定义建出来:
+
+```bash
+pm2 start deploy/dashboard/ecosystem.config.cjs --only anet-dashboard
+pm2 save
+```
+
+🔴 该文件**只含非敏感定义**。`COMMHUB_TOKEN` 等由 PM2 的 saved-env 注入,
+不在仓里 —— 所以恢复后仍需按上文补回环境变量,且
+**`pm2 restart` 不要带 `--update-env`**(带了会丢 saved-env)。
+
+(这一步是 #778 纸面演练在 dashboard 链上发现的缺口:hub 有 `ecosystem.config.cjs`,
+dashboard 此前没有。)
+
 ## 六、回滚
 
 把 `VERSION=` 和 `RUNTIME_BIN=` **两处**改回上一版即可 ——
