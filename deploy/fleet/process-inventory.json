@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "captured_at": "2026-08-13",
-  "process_manager": "pm2",
+  "process_manager": "pm2 + systemd + unsupervised",
   "apps": [
     {
       "name": "commhub-hub",
       "kind": "hub",
       "authority": "deploy/hub/hub-daemon.sh",
-      "recovery_status": "repo-authority-proposed-in-pr-738"
+      "recovery_status": "repo-authority-present"
     },
     {
       "name": "anet-dashboard",
@@ -32,6 +32,22 @@
       "kind": "external-service",
       "authority": null,
       "recovery_status": "not-covered-external-repository-and-commit-unknown"
+    },
+    {
+      "name": "frpc",
+      "kind": "tunnel",
+      "manager": "systemd(system)",
+      "authority": "deploy/tunnel/frpc.service",
+      "recovery_status": "repo-authority-present"
+    },
+    {
+      "name": "frpc-visitor",
+      "kind": "tunnel",
+      "manager": "none",
+      "authority": null,
+      "recovery_status": "not-covered-runs-from-tmp-without-supervisor",
+      "note": "cwd=/tmp/frp_<ver>_linux_amd64,父进程是普通 bash。/tmp 清理会连二进制带配置一起删,且用相对路径无法原地重启。详见 deploy/tunnel/README.md。"
     }
-  ]
+  ],
+  "scope_note": "此前本清单只覆盖 pm2。生产上还有 systemd 托管的 frpc,以及一个完全无 supervisor、跑在 /tmp 的 frpc visitor —— 它们同样属于「机器没了要能重建」的范围,故一并登记。"
 }
