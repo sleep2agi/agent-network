@@ -1,0 +1,120 @@
+# Test 745 — OpenCode exact-pair release gate and rename recovery
+
+Date: 2026-08-13 (Asia/Shanghai)
+Base commit: e0c27341ea004a46da3ff7abfaba2fd2cc165bc5
+Source commit: 03fa958a3261d2ae59a34883670a69e083af4e14
+Scope: OpenCode agent-network/agent-node exact-pair pins, release synchronization,
+test384/test386 fixtures, and the private-root rename lifecycle required by test384.
+
+## Result
+
+PASS. No production deployment, npm publication, registry tag mutation, database
+write, or running-node change was performed.
+
+The exact preview pair observed in the public registry and pinned by this source is:
+
+- @sleep2agi/agent-network@2.3.0-preview.39
+- @sleep2agi/agent-node@2.5.0-preview.31
+- opencode-ai@1.18.1 (the test384 OpenCode dependency)
+
+## Why the lifecycle fix is in the same source
+
+Updating only the pair constants did not make the committed release gate pass.
+The diagnostic progression was:
+
+1. The base test384 Dockerfile failed before the product test because run.sh
+   sourced tests/lib/safe-rm.sh but the image did not contain that file.
+2. After supplying that dependency, the wizard fixture still modeled six runtime
+   choices and selected the wrong entry after grok-build-cli had become a seventh
+   production choice.
+3. With those fixture defects repaired, the real rename lifecycle reached L8 and
+   failed because the copied OpenCode tree contained a nested .config directory
+   with mode 0755. The existing rename code pre-created only the destination root
+   at 0700; cpSync could create nested private roots with a wider mode.
+4. The source now calls prepareOpencodeNodeForProfileWrite(newDir) before cpSync,
+   so .config, .local/share, and .local/state are created or validated as private
+   roots before any recursive copy. The normal and deliberately slowed lifecycle
+   both pass.
+
+This is the same reproducible failure family tracked by issue #457. It is not a
+post-copy chmod repair and does not create a permissions-widening interval.
+
+## Registry artifact capability smoke
+
+A clean node:22-bookworm-slim environment installed the exact public-registry
+versions above. The observed versions were exact, agent-node was executable,
+agent-node help exposed opencode-cli, anet --version reported network preview.39
+with node preview.31, and the OpenCode ACP help path succeeded.
+
+Marker: REGISTRY_PAIR_CAPABILITY_SMOKE_PASS
+
+This smoke verifies installability and command/help capabilities only. It did not
+run a real CommHub task through the npm registry artifacts.
+
+## Docker evidence
+
+All commands were run from the clean source worktree with Docker via sg docker.
+
+### test384 — local-package OpenCode E2E
+
+- Image: sha256:90b67da6f0d5cb51109db38c9194ced6e2af36d35880e452d363a317d70d20ed
+- Runner log SHA256: 5b843feda25c7752dc859b9176b058449964f24a5611bedad6413acc608bb448
+- Result: OVERALL PASS
+- Exact local tarballs: network preview.39 / node preview.31
+- Real picker: seven runtime choices, OpenCode selected
+- Security: private roots and keys checked; hostile configurations rejected
+- Runtime: real OpenCode 1.18.1 task reached replied; zero orphan task
+- Lifecycle: rename preserved node_id and binding, then delete completed
+
+The same image was run with bash -x to perturb timing:
+
+- Slow runner log SHA256: 0423ca20c2aea5fe48447f33829778e4a1e531044bb95180d759d8a2dff9d15c
+- Result: OVERALL PASS, including L8 rename/delete lifecycle
+
+### test386 — exact agent-node selection gate
+
+- Image: sha256:aa446982ccd0682e879d00d1c515aa6edff5431911175949354786a405f79c18
+- Runner log SHA256: 76df79d692c173221bd5480601be71f44b21018838574271e62674872d6bf2f2
+- Result: OVERALL PASS
+- Exact expectations and fixtures: network preview.39 / node preview.31
+
+### test621 — test384 hold-open layer isolation
+
+- Image: sha256:6d95199da9d04f7031a5b7bba6035781dd4d76678f99e465040f29d5a5e565a6
+- Image env TEST621_SOURCE_COMMIT: 03fa958a3261d2ae59a34883670a69e083af4e14
+- Runner log SHA256: e555485489e6306c56b7313ecc7dccba78eb4a3a6680edf39b395c21b2669979
+- Result: PASS
+- Witnessed red: hold-open-layer-cancel, rc=1
+
+## Release synchronization behavior
+
+scripts/sync-pinned-versions.sh now treats the two exported OpenCode pair
+constants as release pins. A diagnostic apply run first reverted both constants,
+then updated each to the exact package version. It also verified that the source
+file still ended in byte 0a. The implementation preserves a trailing newline
+through command substitution by adding and removing an explicit sentinel.
+
+docs/RELEASE-SOP.md now requires reading both OpenCode constants back from
+origin/main and matching them to the preview tags before release.
+
+## Provenance boundary
+
+The source commit contains two implementation commits. The report is added only
+after that frozen source; no source or test file is changed by the report commit.
+The local image IDs and runner digests above are execution evidence, not a claim
+that logs containing generated IDs or model output are reproducible byte-for-byte.
+
+## Honest limits
+
+- No Windows execution was performed.
+- No npm publish, GitHub release, deployment, production DB access, or fleet
+  restart was performed.
+- The registry smoke was non-interactive capability verification only.
+- The real replied-task E2E used source-built local tarballs, not the npm registry
+  artifacts.
+- test384 uses a live free OpenCode model; response content and generated IDs are
+  nondeterministic. Its runner digest is an integrity record for this run, not a
+  reproducible provenance anchor.
+- A mandatory CI gate for the complete agent-network unit-test domain remains
+  NOT COVERED. That governance/CI tail remains tracked by issue #745 and is not
+  represented as solved by this source.
