@@ -2,24 +2,24 @@
 
 Date: 2026-08-12 Asia/Shanghai
 Base: 17b8223f9d7fd25fcc435b40e7fa1fc0823ea1de
-SOURCE_COMMIT: b4a6fd425c21475e2e0fe28d5139fcf64a6637b6
+SOURCE_COMMIT: 6cb8ae116eb8f7c023d1fac6283752f27ccad84d
 Scope: Hub + agent-node protocol/runtime wiring + isolated Docker tests.
 Production deployment: NOT PERFORMED.
 
 ## Exact-source image
 
-- image: `anet-test698:b4a6fd42`
+- image: `anet-test698:6cb8ae11`
 - image id:
-  `sha256:ab807d75419ee4f837cc783d3222f909320c52163ccbd21e737bb837a9b17925`
+  `sha256:a119b9ad6edacc4aa07fa29fd187fb9f846d049e0d1e763c3c16ca30578db347`
 - image env:
-  `TEST698_SOURCE_COMMIT=b4a6fd425c21475e2e0fe28d5139fcf64a6637b6`
+  `TEST698_SOURCE_COMMIT=6cb8ae116eb8f7c023d1fac6283752f27ccad84d`
 - all 22 changed agent/server/test runtime files that exist at the same path
   inside the image matched `git show SOURCE_COMMIT:<path>` byte-for-byte
   after `docker create` and `docker cp`: 22/22. Dockerfiles, docs, and the
   intentionally remapped test673 preload are outside this same-path count.
 - focused result: 183 pass / 0 fail / 545 expect calls.
 - exact main-run artifact digest:
-  `sha256:4592770974ee93a2058c7acf230a5124fc5dd2c265a8f43561db85e63db7a828`.
+  `sha256:f152ff6a4eaaee10a4b0dc4b6c20fbcb2032b1ca88b36ebc38f9ec9bcac16204`.
   This records one timestamped run and is not claimed reproducible or used
   as source provenance.
 
@@ -43,9 +43,12 @@ Production deployment: NOT PERFORMED.
    reply is stored, and zero child task rows are created.
 5. The real `agent-node/src/cli.ts` ran against an isolated real Hub with a
    deterministic SDK preload. A terminal peer reply entered the runtime and
-   was ACKed without reply egress. A forced vendor failure remained `failed`
-   through the production legacy `send_reply` wiring rather than being
-   mislabeled `replied`.
+   was ACKed without reply egress. Forced vendor failures remained `failed`
+   through both production branches: Dashboard origin used legacy
+   `send_reply`, while a node-origin task with an exact capability-advertised,
+   SSE-live recipient used atomic `send_peer_reply`. Each path terminalized
+   the original, stored exactly one no-response reply, created zero child
+   tasks, and was independently protected against a `replied` hard-code.
 6. Capability/identity downgrade remains observable through a legacy task
    carrying `peer_reply_legacy_fallback=true` and a production-computed reason.
    Ambiguous transport and identity-query failures remain pending rather than
@@ -106,20 +109,21 @@ image and the same old-Hub production-CLI E2E turns red:
 `MUTATION_RED: old-hub-exact-task-lookup-lost rc=1`
 
 Exact old-Hub run artifact digest:
-`sha256:794e56d9f438bc418f6f8e87fbd00e6aa8647e7ccc144724e3a947972c356629`.
+`sha256:eee2f6ab399a5aad9dac6d5cfb99cf980e854b8fbf43687fadcf2d952183c63c`.
 It records one run only and is not used as reproducible provenance.
 
 ## Witnessed-red mutations
 
 Every mutation requires a byte change; a no-op fails the runner. The main
-exact-source image produced 28 named reds, plus the separate real-old-Hub
-production mutation above (29 total):
+exact-source image produced 29 named reds, plus the separate real-old-Hub
+production mutation above (30 total):
 
 - cli-reply-type-lost
 - cli-terminal-reply-egress-restored
 - cli-new-reply-wake-disabled
 - cli-fallback-reason-lost
 - cli-failed-status-lost
+- cli-atomic-failed-status-lost
 - dashboard-origin-misclassified
 - dashboard-origin-checked-after-capability
 - terminal-reply-replies-again
@@ -145,9 +149,12 @@ production mutation above (29 total):
 - legacy-agent-warning-removed
 - old-hub-exact-task-lookup-lost (separate archived-old-Hub runner)
 
-The first five target production `cli.ts` and rerun real-process behavior.
+The first six target production `cli.ts` and rerun real-process behavior.
 Disabling SSE wake, restoring terminal reply egress, or losing failed status
 fails on observed task/inbox/runtime facts rather than source-string checks.
+The two failed-status mutations separately corrupt legacy and atomic egress;
+the atomic mutation turns red only after a token-bound capability heartbeat
+and a live recipient SSE force the real `sendAtomic` branch.
 The two Dashboard-origin protocol mutations run the focused real Hub
 transaction matrix and assert its exact structured classification. The
 deleted-origin mutation changes the production compatibility condition and
