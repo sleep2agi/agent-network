@@ -1,0 +1,43 @@
+# frpc 客户端配置模板 —— 把本机的内网端口暴露到公网
+#
+# 这份文件的存在理由:公网入口是部署拓扑的一部分,而它此前只存在于
+# 机器上的 ~/.frp/frpc.toml。机器没了,没人知道 :3100 是怎么来的。
+# 实测教训:曾因为不知道这条隧道,把「部署完成但用户看到旧界面」
+# 判断成「另一台机器上另有一套部署」,方向完全错了。
+#
+# 用法:复制为 frpc.toml,填入自己的值,放在持久路径下(不要放 /tmp)。
+# 🔴 填好值的那份【绝不入库】—— 它含 token。
+
+# frps 服务端地址与端口
+serverAddr = "${FRP_SERVER_ADDR}"     # 例:你的公网跳板机地址
+serverPort = 7000
+
+# 认证:token 从密钥来源获取,不要写进任何入库文件
+auth.method = "token"
+auth.token  = "${FRP_AUTH_TOKEN}"
+
+# ─────────────────────────────────────────────────────────
+# 每个 proxy = 一条「本机端口 → 公网端口」的映射。
+# remotePort 是别人访问的端口,localPort 是本机实际监听的端口。
+# ─────────────────────────────────────────────────────────
+
+[[proxies]]
+name       = "ssh"
+type       = "tcp"
+localIP    = "127.0.0.1"
+localPort  = 22
+remotePort = 222        # 公网 :222 → 本机 SSH
+
+[[proxies]]
+name       = "hub"
+type       = "tcp"
+localIP    = "127.0.0.1"
+localPort  = 9200       # CommHub
+remotePort = 9300
+
+[[proxies]]
+name       = "dashboard"
+type       = "tcp"
+localIP    = "127.0.0.1"
+localPort  = 3001       # Next.js dashboard(pm2 托管,见 deploy/dashboard/)
+remotePort = 3100
