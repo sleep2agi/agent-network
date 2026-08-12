@@ -2579,6 +2579,15 @@ Daemon (host_supervisor — required by the dashboard's node-creation wizard):
   anet daemon start <name>      Start an existing daemon
   anet daemon list              List locally-configured daemons
 
+Config & tokens:
+  anet config get|set <k> [v]   Read/write node or global config
+  anet token ls|create|revoke   Manage API tokens
+  anet batch <file>             Run a batch spec (multi-node)
+
+OpenCode:
+  anet opencode upgrade-pin <v> Verify + pin the exact opencode-ai release
+  anet opencode auth-login <n>  API-key login for an opencode-cli node
+
 Other:
   anet import [alias]           Import sessions from CommHub
   anet register                  Create new account
