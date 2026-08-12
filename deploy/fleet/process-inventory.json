@@ -24,16 +24,16 @@
     {
       "name": "weixin-listen",
       "kind": "external-service",
-      "authority": "github.com/vansin/weixin-bot (PRIVATE, 个人账号,不在 sleep2agi 组)",
+      "authority": "https://github.com/vansin/weixin-bot",
       "recovery_status": "code-in-external-private-repo-secrets-not-covered",
-      "note": "代码已知且已推送:本地 HEAD == 远端 main(fda9105a…),scripts/listen.js 与 scripts/admin.js 均已纳入 git。仍未覆盖:① 仓在个人账号且 PRIVATE,组织级恢复不含它;② 运行依赖 .env(键名含 ADMIN_TOKEN / CDN_OSS_* 等,未跟踪、不该入仓);③ session.json、.mcp.json、部分二维码图片未跟踪,仅存在于本机。"
+      "note": "2026-08-13 盘点时远端 main 指向 fda9105a184c6eda0276780f6f03593980ff4e1d,scripts/listen.js 与 scripts/admin.js 均已纳入 git。仍未覆盖:① 仓在个人账号且 PRIVATE,不在 sleep2agi 组,组织级恢复不含它;② 运行依赖 .env(键名含 ADMIN_TOKEN / CDN_OSS_* 等,未跟踪、不该入仓);③ session.json、.mcp.json、部分二维码图片未跟踪,仅存在于本机。"
     },
     {
       "name": "weixin-admin",
       "kind": "external-service",
-      "authority": "github.com/vansin/weixin-bot (PRIVATE, 个人账号,不在 sleep2agi 组)",
+      "authority": "https://github.com/vansin/weixin-bot",
       "recovery_status": "code-in-external-private-repo-secrets-not-covered",
-      "note": "代码已知且已推送:本地 HEAD == 远端 main(fda9105a…),scripts/listen.js 与 scripts/admin.js 均已纳入 git。仍未覆盖:① 仓在个人账号且 PRIVATE,组织级恢复不含它;② 运行依赖 .env(键名含 ADMIN_TOKEN / CDN_OSS_* 等,未跟踪、不该入仓);③ session.json、.mcp.json、部分二维码图片未跟踪,仅存在于本机。"
+      "note": "2026-08-13 盘点时远端 main 指向 fda9105a184c6eda0276780f6f03593980ff4e1d,scripts/listen.js 与 scripts/admin.js 均已纳入 git。仍未覆盖:① 仓在个人账号且 PRIVATE,不在 sleep2agi 组,组织级恢复不含它;② 运行依赖 .env(键名含 ADMIN_TOKEN / CDN_OSS_* 等,未跟踪、不该入仓);③ session.json、.mcp.json、部分二维码图片未跟踪,仅存在于本机。"
     },
     {
       "name": "frpc",
