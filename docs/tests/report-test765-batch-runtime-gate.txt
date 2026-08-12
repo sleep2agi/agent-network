@@ -1,0 +1,155 @@
+# test765 — batch/runtime conflict behavior gate
+
+Date: 2026-08-13 (Asia/Shanghai)
+Base commit: 33b58211f2b96b201eb610c231311eb23a20fd84
+SOURCE_COMMIT: f4875c23131fcfc4e63306bd7061446a8b81f8e7
+Scope: test/CI-only; no product, package, dist, deployment, configuration, or database changes
+
+## Result
+
+PASS.
+
+The committed gate closes the remaining evidence gap for issue #765 while
+testing the product behavior already merged by PR #769:
+
+1. the real CLI entry `create --batch --runtime opencode-cli` exits nonzero,
+   prints the usable non-batch runtime command, and creates no node config;
+2. plain `create --batch` still reaches the selector-unavailable fallback,
+   distinguishes preset-supported runtimes from the non-batch path, and
+   creates no node config;
+3. three product mutations each turn the named behavior red.
+
+## Exact focused Docker run
+
+Command shape:
+
+```text
+docker build \
+  --build-arg TEST765_SOURCE_COMMIT=f4875c23131fcfc4e63306bd7061446a8b81f8e7 \
+  -t anet-test765:f4875c23 \
+  -f tests/test765-batch-runtime-gate/Dockerfile .
+docker run --rm anet-test765:f4875c23
+```
+
+Result:
+
+```text
+source_commit=f4875c23131fcfc4e63306bd7061446a8b81f8e7
+PASS conflicting flags fail fast and plain batch retains truthful fallback
+PASS agent-network production build
+PASS mutation conflict-guard-removed witnessed red at its named behavior
+PASS mutation plain-batch-wrongly-rejected witnessed red at its named behavior
+PASS mutation fallback-loses-nonbatch-route witnessed red at its named behavior
+RESULT pass=5 fail=0
+FOCUSED_RC=0 WALL_SECONDS=52
+```
+
+Focused runner log SHA256:
+
+```text
+ba10bf87a0902cceb74d87a36b4b62849a2b4acd8ba037effc1838f1fef416f6
+```
+
+This log digest records this run; it is not claimed reproducible because build
+logs contain timing and progress output.
+
+## Active L1 denominator
+
+`bash scripts/qa.sh --l1` ran the complete active L1 list after registering
+test765. The registry snapshot was:
+
+```text
+@sleep2agi/agent-network@preview -> 2.3.0-preview.39
+@sleep2agi/agent-node@preview -> 2.5.0-preview.31
+@sleep2agi/commhub-server@preview -> 0.9.0-preview.29
+```
+
+All 16 active suites passed, including:
+
+```text
+L1 test686-rest-shape-golden (RESULT: PASS)
+L1 test765-batch-runtime-gate (RESULT pass=5 fail=0)
+L1 test766-bunx-preflight (RESULT pass=4 fail=0)
+ALL PASS in 130s
+L1_RC=0 WALL_SECONDS=131
+```
+
+Full L1 log SHA256:
+
+```text
+e39e1e8e8be67cf06da044a26057a6d2144d0853450be86ac90c6a8536c9b091
+```
+
+This digest likewise records this run and is not claimed reproducible.
+
+## Mutation evidence
+
+The mutations operate on the production CLI inside the ephemeral Docker
+filesystem and restore the original source after each case:
+
+- `conflict-guard-removed`: changes the sole runtime conflict guard to
+  `false && ...`; the conflicting invocation no longer exits at the guard and
+  the conflict probe turns red.
+- `plain-batch-wrongly-rejected`: changes it to `true || ...`; plain batch is
+  incorrectly rejected and the plain-batch probe turns red.
+- `fallback-loses-nonbatch-route`: replaces the usable non-batch command with
+  another `--preset` instruction; the guidance assertion turns red.
+
+Every mutation first requires its exact production target to occur once and
+then verifies the changed bytes are present. The baseline probes run before
+mutation, so the witnessed-red cases are not baseline-self-red.
+
+## Image/source provenance
+
+Exact image ID:
+
+```text
+sha256:ddd672f958446f4b7f15b94d2a272739b6f13126410fd8f0eecd76d292e68e00
+```
+
+Image environment includes:
+
+```text
+TEST765_SOURCE_COMMIT=f4875c23131fcfc4e63306bd7061446a8b81f8e7
+```
+
+Files copied back from the image and compared to SOURCE_COMMIT worktree:
+
+```text
+Dockerfile ae4cf500a592930acf15e17029c2ea0d0d96bd8b8980d5e0f3e336851246f7b3 MATCH
+README.md  1e822fee7eb62aa07663488e06f578aa500327627665f8ac7a038aa470bebb6f MATCH
+run.sh     7b72ef66fd4a15e511737ece4d37d393fd2fcef11a3665e0008d93bae5556e09 MATCH
+TOTAL=3 FAIL=0
+```
+
+`scripts/qa.sh` is the host-side L1 dispatcher and is not copied into the
+focused image; its behavior is evidenced by the complete 16-suite L1 run.
+
+## Corrections made while establishing the gate
+
+- Redirecting an interactive selector from `/dev/null` did not reach fallback:
+  Bun rendered the selector and exited 0. That was rejected as evidence.
+- Sending SIGINT to a FIFO-backed selector produced exit 130, also without
+  reaching the fallback. That nonexistent behavior was not encoded in the
+  gate.
+- Removing `@inquirer/prompts` made Bun fail during module linking before the
+  CLI branch ran. The final fixture instead provides the same exported module
+  surface and makes `select()` throw, so the real production catch and fallback
+  execute. The original installed package is restored after every probe.
+- An initial full-L1 command guessed a nonexistent `tests/qa/Dockerfile` and
+  failed before testing. It was discarded; the recorded full run uses the
+  repository's actual `bash scripts/qa.sh --l1` entrypoint.
+
+## Honest limits
+
+- This PR does not change or re-decide the #765 product behavior; it only
+  commits the missing behavior gate.
+- The selector-unavailable case uses a controlled dependency fixture. It does
+  not claim that every non-TTY environment makes Inquirer throw.
+- The suite does not test an operator completing the interactive vendor picker;
+  that is outside the #765 conflict/fallback contract.
+- Most older L1 suites resolve published preview packages. Their exact versions
+  are therefore recorded above; test765 itself copies and runs this commit's
+  source.
+- No production host, token, package release, database, or deployment was
+  touched.
