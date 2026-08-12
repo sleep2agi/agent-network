@@ -33,8 +33,18 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 
 ### B. Frozen snapshots（永不动）
 
-每条记录都是某个历史时刻的快照，跟着 release sync 改反而失真。`sync-pinned-versions.sh`
-**主动跳过**这些路径：
+每条记录都是某个历史时刻的快照，跟着 release sync 改反而失真。
+
+🔴 **机制说明(此前这里写的是「脚本主动跳过」,不准确)**:
+`sync-pinned-versions.sh` **没有跳过名单** —— 它是**白名单式**的,只改被
+`register <pkg> <file>` 显式登记过的文件。所以下面这些路径之所以安全,
+是因为**它们从来没被 register**,不是因为有一条规则在挡它们。
+
+这个区别很实际:**往下面这张表里加一条,不会产生任何保护效果** ——
+真正要做的是「不要 register 它」。反过来,一旦有人 register 了某个路径,
+这张表拦不住。
+
+下列路径当前未被 register:
 
 - `docs-site/docs/changelog.md` / `docs-site/docs/en/changelog.md`
 - `docs-site/docs/v0.8.0/**`（整套历史归档版本的 docs）
@@ -215,11 +225,11 @@ npm view @sleep2agi/<pkg>@preview version
 #    此时不要把它的输出当作"所有版本位都已同步"的证据。
 ```
 
-🔴 **但注册表不等于全集。** 有些 pin 是**故意不自动同步**的：
+🔴 **注册表与「手动 pin」的边界已经变了,以下是当前事实(2026-08-13 核对):**
 
 | pin | 为什么不自动同步 |
 |---|---|
-| `agent-network/src/opencode-agent-node-pair.ts` | 它的语义是「**已验证可共存**的精确配对」，不是「当前版本」。自动跟随会把那条 `intentionally fails when either package is bumped independently` 的绊线抹平 —— 该配对必须**重新验证过**才能改。见 #745。 |
+| `agent-network/src/opencode-agent-node-pair.ts` | ⚠️ **已改为自动同步** —— 脚本第 71 / 80 行现在 register 了 `OPENCODE_AGENT_NETWORK_VERSION` 与 `OPENCODE_AGENT_NODE_VERSION`。此前本表写「故意不自动同步」,理由是自动跟随会抹平那条 `intentionally fails when either package is bumped independently` 的绊线。**两种做法各有取舍,当前生效的是自动同步**;若要恢复「必须重新验证才能改」的语义,需要把那两行 register 去掉,并在此说明。见 #745。 |
 
 所以 Step 10 的完整做法是：**跑一遍注册表同步（看它是否非零退出）+ 单独确认上表里的手动 pin**。
 
