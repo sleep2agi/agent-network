@@ -1,6 +1,6 @@
 # test697 — Codex default model migration
 
-SOURCE_COMMIT=be594ff48c017afb728205f911f128dbc0325269
+SOURCE_COMMIT=ccbe5bba5983b19bcc1d4a43ea8f8049d9d336a9
 BASE_COMMIT=17b8223f9d7fd25fcc435b40e7fa1fc0823ea1de
 DATE=2026-08-12 Asia/Shanghai
 
@@ -16,13 +16,13 @@ Scope
 
 Exact-source Docker evidence
 ----------------------------
-- image: `anet-test697:be594ff4-exact`
-- image id: `sha256:b31a1159e69bd282a939749c6381b4bf8018cce23a1f34b0410114f2414c467d`
-- image env: `TEST697_SOURCE_COMMIT=be594ff48c017afb728205f911f128dbc0325269`
-- all 21 files changed from BASE through SOURCE matched their `/workspace`
-  image copy byte-for-byte (21/21).
+- image: `anet-test697:ccbe5bba-exact`
+- image id: `sha256:aba2cb63c46544cf71d147d2cf46d8223f59e872269e7d7f091817a5e3fe1963`
+- image env: `TEST697_SOURCE_COMMIT=ccbe5bba5983b19bcc1d4a43ea8f8049d9d336a9`
+- all 22 files changed from BASE through SOURCE matched their `/workspace`
+  image copy byte-for-byte (22/22).
 - main run artifact digest:
-  `sha256:f2684f370f58c0a9db5f4593f8f385ee6aadbcf4571744c4dfea9037df0f2130`.
+  `sha256:0a64b6dbadb311458ecc9d9515897d0a3018e1e7466600afe9bc03afd48e2471`.
   It records this run only; timestamps and temporary paths make it
   intentionally non-reproducible and it is not used as provenance.
 
@@ -75,9 +75,17 @@ Main layered suite: PASS
   preserve `o3` at the package/process boundary. This closes the distinction
   between "the config and startup label retain an override" and "the model
   actually sent by each task lane retains it".
+- L7f: those five production injection sites run with no persisted model and
+  `MODEL=o3` in the real agent-node process environment. Goal wake, SDK cold
+  start, persisted-session resume, forced retry, runtime log, and direct stdio
+  all preserve `o3` at the package/process boundary.
+- L7g: a real `claude-agent-sdk` node processes a Hub task through the
+  production agent-node runtime. A preload at the SDK package boundary records
+  the production options object and proves `model` is absent/null; a Codex
+  default is not injected into the non-Codex runtime.
 
-Twenty-three baseline-green witnessed-red mutations: PASS
---------------------------------------------------------
+Twenty-five baseline-green witnessed-red mutations: PASS
+---------------------------------------------------------
 - Before changing production bytes, every mutation runs its assigned probe on
   the unmodified source and requires exit zero. A red baseline is reported as
   `MUTATION_BASELINE_RED` and fails the suite. This closes the earlier false
@@ -133,6 +141,14 @@ Twenty-three baseline-green witnessed-red mutations: PASS
 - `persisted-runtime-model-ignored` -> removes only `fileConfig.model` from the
   production agent-node model precedence. The same five L7e package/process
   observations receive the default instead of persisted `o3` and turn red.
+- `environment-runtime-model-ignored` -> deletes `process.env.MODEL` immediately
+  before the production precedence expression. L7f observes the default instead
+  of environment-selected `o3` across every agent-node Codex injection lane and
+  turns red.
+- `non-codex-runtime-default-injected` -> changes the production Claude SDK
+  options object from `MODEL || undefined` to `MODEL || DEFAULT_CODEX_MODEL`.
+  L7g captures the leaked Codex model at the real Claude SDK package boundary
+  and turns red.
 
 Every mutation requires both a green unmodified probe and a byte change before
 the mutated probe may count as witnessed-red; a baseline failure, no-op, or
@@ -141,52 +157,6 @@ require the create command itself to succeed before reading config, so stale
 config cannot satisfy them. The two label/value attacks use a two-anchor
 mutation helper with both anchors required, so a partial or stale mutation
 cannot masquerade as a red.
-
-Reviewer `grok-build-cli` denominator attack replay: PASS
----------------------------------------------------------
-- The exact reviewer mutation adds `grok-build-cli` to
-  `defaultCodexModelForRuntime`. Against the exact image, the catalog-derived
-  L0 test fails with received `gpt-5.6-sol` where `undefined` is required
-  (artifact `sha256:95a70f44bc82a826c059b6a1051e517121db7f2f94e5a5cd946f5c2f57fc454a`).
-- A decoupled production-call mutation asks for the Codex default only when
-  runtime is `grok-build-cli`. The real L4b create/readback path fails with
-  `NON_CODEX_MODEL_LEAK runtime=grok-build-cli` and shows the leaked model in
-  config (artifact
-  `sha256:4e0749d281bf0303c21fb27a95fe9eacd84a939425256608a8a01120c5d23d2f`).
-- These are derived negative controls, not extra product mutations. The main
-  runner still contains exactly twenty-three baseline-green witnessed-red
-  mutations.
-
-Reviewer counterexample replay: PASS
-------------------------------------
-- A derivative image, `anet-test697-inert:be594ff4`
-  (`sha256:19c7c174189e6a3b89f473d9a8cad6c558f5068fb949caab82c30feac881cf0e`),
-  changes only the inert comment on the SDK prompt line and injects that change
-  as an additional mutation using `probe_sdk_task_models`.
-- The unmodified baseline probe passes; after the comment-only byte change the
-  same probe still passes, so the runner reports
-  `MUTATION_SURVIVED inert-comment-only` and the overall container exits 1.
-- Artifact digest:
-  `sha256:a118c91965e72349d6c905e3d6de64bbbe1c01cc5f30dc9fe49b38dfd78f86dc`.
-  This derived negative-control run is evidence about the runner only; it is
-  not offered as the exact source image or as an additional witnessed-red
-  product mutation.
-
-Codex app-server timeout regression evidence on the exact image: PASS
----------------------------------------------------------------------
-- This is a separate explicit Docker command against the exact image, not
-  output produced by `tests/test697-codex-default-model/run.sh`.
-- Separate-command artifact digest:
-  `sha256:a57dfabb9385cc4419e6a5b6c7f6c6dc30e2e1c38559d161be2aeeb55e6dfe73`.
-- `runtime.test.ts`: 23 tests, 0 failures, 59 assertions.
-- app-server client/bridge/session-manager: 60 tests, 0 failures,
-  224 assertions.
-- total: 83 tests, 0 failures, 283 assertions.
-- Covered current-main behavior includes a finite queue deadline, response
-  timeout armed only after exact task start, exact-task activity renewal,
-  authoritative thread/read terminal recovery, FIFO drain, and no attribution
-  from another task. This does not claim that changing the default model alone
-  repairs an old deployed runtime.
 
 Honest limits
 -------------
@@ -201,6 +171,10 @@ Honest limits
   resume paths are observed at the SDK package boundary. Real Codex vendor
   acceptance remains NOT COVERED; this is a vendor-response gap, not a
   call-site execution gap.
+- The non-Codex L7g path executes production agent-node and its real
+  `claude-agent-sdk` branch, but replaces the external SDK package at its module
+  boundary. It proves the options object does not receive a Codex model; it
+  does not contact Anthropic.
 - Co-presence L7b covers both the no-override default and an explicit `--model`
   passed to tmux. The pre-existing
   behavior where `node start --copresence` reads `opts.model` rather than the
