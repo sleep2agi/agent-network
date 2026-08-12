@@ -4,7 +4,7 @@ ARG SOURCE_COMMIT
 ENV TEST725_SOURCE_COMMIT=$SOURCE_COMMIT
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends bash build-essential ca-certificates cron curl python3 util-linux \
+  && apt-get install -y --no-install-recommends bash build-essential ca-certificates cron curl python3 unzip util-linux \
   && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://bun.sh/install | bash \
