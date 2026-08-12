@@ -95,6 +95,11 @@ and unit, verify their hashes, `daemon-reload`, and rerun the same behavior
 checks. Never use `pm2 kill`, broad `pkill`, or an `ExecStop` that tears down the
 whole fleet as a rollback shortcut.
 
+The checked-in launcher deliberately fails closed when `pm2 jlist` fails or
+returns malformed JSON. It must never translate an unknown PM2 state into an
+empty fleet and call `resurrect`; issue #742 records the captured production
+defect that led to this guard.
+
 ## Honest status
 
 The boot script behavior is exercised by the Docker gate in

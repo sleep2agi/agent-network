@@ -16,11 +16,18 @@ install_fake_pm2() {
 set -euo pipefail
 case "${1:-}" in
   jlist)
-    if [ "${FAKE_PM2_COUNT:-0}" -gt 0 ]; then
-      printf '[{"name":"existing"}]\n'
-    else
-      printf '[]\n'
-    fi
+    case "${FAKE_PM2_JLIST_MODE:-valid}" in
+      error) exit 9 ;;
+      malformed) printf '{not-json\n' ;;
+      valid)
+        if [ "${FAKE_PM2_COUNT:-0}" -gt 0 ]; then
+          printf '[{"name":"existing"}]\n'
+        else
+          printf '[]\n'
+        fi
+        ;;
+      *) exit 10 ;;
+    esac
     ;;
   resurrect)
     printf 'resurrect\n' >> "$FAKE_PM2_LOG"
@@ -51,6 +58,7 @@ invoke() {
     PM2_HOME="$dir/pm2" \
     FAKE_PM2_LOG="$dir/pm2.log" \
     FAKE_PM2_COUNT="${FAKE_PM2_COUNT:-0}" \
+    FAKE_PM2_JLIST_MODE="${FAKE_PM2_JLIST_MODE:-valid}" \
     "$@" \
     bash "$script" > "$dir/output.log" 2>&1
 }
@@ -86,6 +94,32 @@ assert_empty_pm2_resurrects_once() {
   grep -Fq 'resurrect 退出码 0' "$dir/output.log"
 }
 
+assert_jlist_error_rejected() {
+  local script="$1" dir rc
+  dir="$(fixture jlist-error)"
+  printf '[]\n' > "$dir/pm2/dump.pm2"
+  set +e
+  FAKE_PM2_JLIST_MODE=error invoke "$script" "$dir"
+  rc=$?
+  set -e
+  test "$rc" -ne 0
+  test ! -e "$dir/pm2.log"
+  grep -Fq '无法确认现有进程数；拒绝 resurrect' "$dir/output.log"
+}
+
+assert_malformed_jlist_rejected() {
+  local script="$1" dir rc
+  dir="$(fixture malformed-jlist)"
+  printf '[]\n' > "$dir/pm2/dump.pm2"
+  set +e
+  FAKE_PM2_JLIST_MODE=malformed invoke "$script" "$dir"
+  rc=$?
+  set -e
+  test "$rc" -ne 0
+  test ! -e "$dir/pm2.log"
+  grep -Fq '无法解析的进程清单；拒绝 resurrect' "$dir/output.log"
+}
+
 assert_unit_shape() {
   grep -Fxq 'Type=oneshot' "$UNIT"
   grep -Fxq 'RemainAfterExit=yes' "$UNIT"
@@ -110,6 +144,8 @@ run_suite() {
   assert_existing_processes_noop "$script"
   assert_missing_dump_fails "$script"
   assert_empty_pm2_resurrects_once "$script"
+  assert_jlist_error_rejected "$script"
+  assert_malformed_jlist_rejected "$script"
   assert_unit_shape
   assert_inventory_boundary
 }
@@ -130,4 +166,17 @@ if assert_existing_processes_noop "$MUTANT"; then
   exit 1
 fi
 echo 'MUTATION_RED live-fleet-noop-removed'
+
+MUTANT_PARSE="$ROOT/pm2-fleet-malformed-as-empty.sh"
+cp "$SCRIPT" "$MUTANT_PARSE"
+before="$(sha256sum "$MUTANT_PARSE" | cut -d' ' -f1)"
+sed -i 's/catch{process.exit(2)}/catch{process.stdout.write("0")}/' "$MUTANT_PARSE"
+after="$(sha256sum "$MUTANT_PARSE" | cut -d' ' -f1)"
+test "$before" != "$after" || { echo 'MUTATION_NOOP malformed-jlist-as-empty'; exit 1; }
+
+if assert_malformed_jlist_rejected "$MUTANT_PARSE"; then
+  echo 'MUTATION_SURVIVED malformed-jlist-as-empty'
+  exit 1
+fi
+echo 'MUTATION_RED malformed-jlist-as-empty'
 echo 'RESULT: PASS'

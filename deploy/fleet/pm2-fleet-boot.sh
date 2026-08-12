@@ -10,8 +10,18 @@ export PATH="/home/vansin/.nvm/versions/node/v20.20.0/bin:$PATH"
 PM2="/home/vansin/.nvm/versions/node/v20.20.0/bin/pm2"
 log() { echo "[pm2-fleet-boot $(date '+%F %T')] $*"; }
 
-n=$("$PM2" jlist 2>/dev/null | "/home/vansin/.nvm/versions/node/v20.20.0/bin/node" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).length)}catch{console.log(0)}})' 2>/dev/null || echo 0)
-n=${n:-0}
+jlist=$("$PM2" jlist 2>/dev/null)
+jlist_rc=$?
+if [ "$jlist_rc" -ne 0 ]; then
+  log "🔴 pm2 jlist 失败（rc=$jlist_rc），无法确认现有进程数；拒绝 resurrect"
+  exit 1
+fi
+n=$(printf '%s' "$jlist" | "/home/vansin/.nvm/versions/node/v20.20.0/bin/node" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const v=JSON.parse(s);if(!Array.isArray(v))throw new Error("not array");process.stdout.write(String(v.length))}catch{process.exit(2)}})')
+parse_rc=$?
+if [ "$parse_rc" -ne 0 ] || ! [[ "$n" =~ ^[0-9]+$ ]]; then
+  log "🔴 pm2 jlist 返回无法解析的进程清单；拒绝 resurrect"
+  exit 1
+fi
 if [ "$n" -gt 0 ] 2>/dev/null; then
   log "pm2 已有 $n 个进程在跑 → no-op 退出（不做 resurrect，避免重复拉起占端口）"
   exit 0
