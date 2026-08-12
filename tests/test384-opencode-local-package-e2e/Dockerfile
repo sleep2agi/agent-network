@@ -1,8 +1,8 @@
 FROM node:22-bookworm-slim
 
 ARG OPENCODE_VERSION=1.18.1
-ARG AGENT_NETWORK_VERSION=2.3.0-preview.34
-ARG AGENT_NODE_VERSION=2.5.0-preview.28
+ARG AGENT_NETWORK_VERSION=2.3.0-preview.39
+ARG AGENT_NODE_VERSION=2.5.0-preview.31
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       bash ca-certificates curl jq procps python3 python3-pexpect ripgrep unzip \
@@ -49,6 +49,7 @@ RUN npm install -g --omit=optional "opencode-ai@${OPENCODE_VERSION}" --silent \
     && timeout 20 opencode acp --help >/dev/null
 
 WORKDIR /test384
+COPY tests/lib/safe-rm.sh /lib/safe-rm.sh
 COPY tests/test384-opencode-local-package-e2e/run.sh /test384/run.sh
 COPY tests/test384-opencode-local-package-e2e/wizard_probe.py /test384/wizard_probe.py
 COPY tests/test384-opencode-local-package-e2e/auth_login_probe.py /test384/auth_login_probe.py

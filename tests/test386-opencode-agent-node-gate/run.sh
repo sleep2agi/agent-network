@@ -217,7 +217,7 @@ jq -e '
 [ ! -e /tmp/test386-profile-coverage ] \
   || fail "profile NODE_V8_COVERAGE wrote outside the node state boundary"
 [ ! -e /tmp/test386-npx-args ] || fail "exact global resolution unexpectedly executed npx"
-grep -Fq 'using installed exact @sleep2agi/agent-node@2.5.0-preview.28' \
+grep -Fq 'using installed exact @sleep2agi/agent-node@2.5.0-preview.31' \
   /tmp/test386-success.log || fail "exact installed agent-node diagnostic is missing"
 pass "stale global bypassed; later exact global received protected PATH/binary/version/base; npx was not executed"
 
@@ -294,7 +294,7 @@ mask_log < /tmp/test386-project-explicit.log >> "$REPORT"
   || fail "explicit project-local rejection unexpectedly launched another agent-node"
 [ ! -e /tmp/test386-npx-args ] \
   || fail "explicit project-local rejection unexpectedly executed npx"
-grep -Fq 'ANET_AGENT_NODE_BIN is not the exact trusted @sleep2agi/agent-node@2.5.0-preview.28' \
+grep -Fq 'ANET_AGENT_NODE_BIN is not the exact trusted @sleep2agi/agent-node@2.5.0-preview.31' \
   /tmp/test386-project-explicit.log \
   || fail "explicit project-local rejection omitted the exact-pair diagnostic"
 grep -Fq 'project/node-local agent-node package payload is not trusted' \
@@ -336,7 +336,7 @@ jq -e '.executable == "/test/exact-global/node_modules/@sleep2agi/agent-node/dis
   /tmp/test386-exact-preview-launch.json >/dev/null \
   || fail "capable-looking preview.21 was not bypassed for the later exact global"
 [ ! -e /tmp/test386-npx-args ] || fail "preview.21 bypass unexpectedly executed npx"
-pass "capable-looking global preview.21 rejected; later exact global preview.26 launched without npx"
+pass "capable-looking global preview.21 rejected; later exact global preview.31 launched without npx"
 
 # An explicit override is not permission to bypass the exact release pair.
 rm -rf /tmp/test386-work-explicit /tmp/test386-home-explicit \
@@ -362,7 +362,7 @@ mask_log < /tmp/test386-explicit.log >> "$REPORT"
 [ "$explicit_rc" -ne 0 ] || fail "stale explicit agent-node override unexpectedly started"
 [ ! -e /tmp/test386-stale-capable-global-was-launched ] \
   || fail "stale explicit preview.21 was launched"
-grep -Fq 'ANET_AGENT_NODE_BIN is not the exact trusted @sleep2agi/agent-node@2.5.0-preview.28' \
+grep -Fq 'ANET_AGENT_NODE_BIN is not the exact trusted @sleep2agi/agent-node@2.5.0-preview.31' \
   /tmp/test386-explicit.log \
   || fail "explicit override exact-version diagnostic is missing"
 pass "ANET_AGENT_NODE_BIN cannot bypass the exact hardened pair"
@@ -395,7 +395,7 @@ mask_log < /tmp/test386-fail.log >> "$REPORT"
 grep -Fq 'automatic npx execution is disabled for opencode-cli' \
   /tmp/test386-fail.log \
   || fail "hard-fail omitted the disabled-npx diagnostic"
-grep -Fq 'npm install -g @sleep2agi/agent-network@2.3.0-preview.34 @sleep2agi/agent-node@2.5.0-preview.28' \
+grep -Fq 'npm install -g @sleep2agi/agent-network@2.3.0-preview.39 @sleep2agi/agent-node@2.5.0-preview.31' \
   /tmp/test386-fail.log \
   || fail "hard-fail omitted the exact dual-package install command"
 grep -Fq 'Refusing to start: an unsupported agent-node could silently select another runtime.' \
