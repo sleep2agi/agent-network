@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT=$(git rev-parse --show-toplevel)
+source "$ROOT/tests/lib/safe-rm.sh"
 BASE_COMMIT="${TEST698_BASE_COMMIT:-17b8223f9d7fd25fcc435b40e7fa1fc0823ea1de}"
 CURRENT_IMAGE="${TEST698_CURRENT_IMAGE:?set TEST698_CURRENT_IMAGE to the exact-source test image}"
 SOURCE_COMMIT="${TEST698_SOURCE_COMMIT:?set TEST698_SOURCE_COMMIT to the exact source commit}"
@@ -15,13 +16,13 @@ mkdir -p "$DB_DIR"
 cleanup() {
   docker rm -f "$HUB_CONTAINER" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
-  rm -rf -- "$TMP"
+  safe_rm_rf "$TMP"
 }
 trap cleanup EXIT
 
 git -C "$ROOT" archive "$BASE_COMMIT" | tar -x -C "$TMP"
 docker build -t "$OLD_IMAGE" \
-  -f "$ROOT/tests/test698-atomic-peer-reply/Dockerfile.legacy-hub" "$TMP" >/tmp/test698-legacy-build.log
+  -f "$TMP/tests/test698-atomic-peer-reply/Dockerfile.legacy-hub" "$TMP" >/tmp/test698-legacy-build.log
 docker network create "$NET" >/dev/null
 docker run -d --name "$HUB_CONTAINER" --network "$NET" \
   -e COMMHUB_AUTH_TOKEN=test698-legacy-auth \
