@@ -74,6 +74,8 @@ describe("readable attachment prompt", () => {
     expect(cli).toContain("const runtimeContent = runtimeNeedsReadableAttachmentPrompt(RUNTIME)");
     expect(cli).toContain("attachmentDescriptorsForRuntime(RUNTIME, attachmentDescriptors)");
     expect(cli).toContain("appendReadableAttachmentPaths(content, images)");
-    expect(cli).toContain("processTask(\n        runtimeContent,");
+    expect(cli).toMatch(
+      /deliverToRuntime:\s*\(\)\s*=>\s*processTask\(\s*runtimeContent,/,
+    );
   });
 });
