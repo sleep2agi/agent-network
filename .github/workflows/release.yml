@@ -295,6 +295,8 @@ jobs:
           [ -f "$cli" ] || { echo "::error::no $cli — cannot audit pins"; exit 1; }
 
           missing=0
+          audited=0
+          audited_names=""
           while IFS=$'\t' read -r var ver; do
             case "$var" in
               PINNED_SERVER_VERSION)    pkg='@sleep2agi/commhub-server' ;;
@@ -303,6 +305,8 @@ jobs:
               *) continue ;;
             esac
             echo "audit $var=$ver → $pkg"
+            audited=$((audited+1))
+            audited_names="$audited_names $var"
             if ! npm view "$pkg@$ver" version > /dev/null 2>&1; then
               echo "::error::$var=$ver not published on npm for $pkg"
               missing=$((missing+1))
@@ -311,7 +315,20 @@ jobs:
                    | sed -E 's/.*PINNED_(SERVER|NODE|DASHBOARD)_VERSION[^"]*"([^"]+)".*/PINNED_\1_VERSION\t\2/')
 
           [ "$missing" -eq 0 ] || { echo "::error::$missing PINNED_* pin(s) point at unpublished versions"; exit 1; }
-          echo "✅ Gate 2 — all PINNED_* versions exist on npm"
+          # 🔴 命中为零时这道门是**恒真**的:grep 找不到任何 pin,循环一次都不跑,
+          #    missing 保持 0,然后打印一行 ✅。而「这个仓不再钉任何版本」与
+          #    「grep 坏了 / 常量被改名」在输出上完全一样 —— 而后者正是本门要防的
+          #    #194 类 bug 的温床。所以零覆盖必须是失败,不是通过。
+          if [ "$audited" -eq 0 ]; then
+            echo "::error::Gate 2 audited 0 pins — no PINNED_*_VERSION matched in $cli."
+            echo "::error::Either the constants were renamed/removed, or the grep no longer matches."
+            echo "::error::A zero-scope audit cannot be distinguished from a broken one; refusing to pass."
+            exit 1
+          fi
+          # 报分母:成功文案必须说清**审了哪几个**,而不是笼统说 "all PINNED_*"。
+          # 这道门按设计只审 cli.ts 里真实存在的 pin(见上方注释),
+          # 所以「全部通过」永远只对被审的那几个成立。
+          echo "✅ Gate 2 — $audited pin(s) audited and published on npm:$audited_names"
 
   gate-3-release-notes:
     name: gate 3 — release notes shape (Install + Upgrade)
