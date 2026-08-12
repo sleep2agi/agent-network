@@ -110,6 +110,8 @@ sed_escape() {
 ESCAPED_VERSION="$(sed_escape "$NEW_VERSION")"
 
 CHANGED_FILES=()
+# 注册表里"已不存在的目标"计数;>0 时脚本以非零退出,让漂移可见而不是静默。
+MISSING_TARGETS=0
 
 # md / ts 通用模板：把 `@sleep2agi/<pkg>@<old>` 替换成新版本。
 # pkg 字面值不带尾随字符歧义（agent-network vs agent-network-dashboard），所以加 `[^a-zA-Z0-9_-]`
@@ -143,6 +145,18 @@ apply_or_preview() {
   local after
   after="$(sed "$sed_expr" "$file")"
   if [[ "$before" == "$after" ]]; then
+    # 🔴 "无变化" 有两种完全不同的原因,旧版把它们混成同一行 `unchanged:`:
+    #   (a) 目标在,且已经是目标版本            → 真的没事
+    #   (b) 目标**根本不在这个文件里**(被删/改名) → 注册表已与现实脱节
+    # (b) 读起来像 (a),于是这份清单会静默失去覆盖 —— 而 RELEASE-SOP
+    # 恰恰让人把它当作"硬编码版本位"的权威枚举。实例:
+    # `agent-network/bin/cli.ts:PINNED_DASHBOARD_VERSION` 已从 cli.ts 消失,
+    # 但注册表里还留着,同步时只会打印一行 unchanged。
+    if [[ -n "${3:-}" ]] && ! grep -q "const ${3} = " "$file"; then
+      echo "  🔴 MISSING TARGET: $file 里找不到 \`const ${3} = ...\` —— 注册表已过期"
+      MISSING_TARGETS=$((MISSING_TARGETS + 1))
+      return
+    fi
     echo "  unchanged: $file"
     return
   fi
@@ -177,7 +191,7 @@ for target in "${TARGETS[@]}"; do
     const_name="${target#*:}"
     echo ""
     echo "[$PKG → $file ($const_name)]"
-    apply_or_preview "$file" "$(ts_pinned_pattern "$const_name")"
+    apply_or_preview "$file" "$(ts_pinned_pattern "$const_name")" "$const_name"
   else
     echo ""
     echo "[$PKG → $target]"
@@ -204,4 +218,15 @@ if [[ "$MODE" == "apply" ]]; then
 else
   echo "dry-run 完成。如果上面 diff 看着对，加 --apply 实跑。"
   echo "  ./scripts/sync-pinned-versions.sh $PKG $NEW_VERSION --apply"
+fi
+
+# 注册表与现实脱节时以非零退出。理由:RELEASE-SOP 让人把这份注册表当作
+# "硬编码版本位"的权威枚举,所以它失去覆盖必须是**可见**的,而不是一行
+# 读起来像"已经是对的"的 unchanged。
+if [[ "$MISSING_TARGETS" -gt 0 ]]; then
+  echo ""
+  echo "🔴 $MISSING_TARGETS 个注册目标在文件里已不存在 —— 这份注册表不再覆盖它们。"
+  echo "   要么把常量改回来,要么从本脚本顶部的 register 区删掉那一行。"
+  echo "   在此之前不要把本脚本的输出当作'所有版本位都已同步'的证据。"
+  exit 6
 fi

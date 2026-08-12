@@ -199,6 +199,26 @@ npm view @sleep2agi/<pkg>@preview version
 ```
 
 **判据是「远端 main 上是什么」，不是「我提了 bump PR」。**
+
+#### ③ 枚举版本位要用注册表，不要手写
+
+上面的 ①② 是**手写的子集**，而手写子集会漏 —— 2026-08-13 就漏了一处
+（`agent-network/src/opencode-agent-node-pair.ts`，详见 #745）。
+权威枚举在 `scripts/sync-pinned-versions.sh` 顶部的 `register` 区：
+
+```bash
+./scripts/sync-pinned-versions.sh <pkg> <新版本>     # 默认 dry-run
+# 🔴 非零退出 = 注册表里有目标已从文件里消失，这份清单不再覆盖它们。
+#    此时不要把它的输出当作"所有版本位都已同步"的证据。
+```
+
+🔴 **但注册表不等于全集。** 有些 pin 是**故意不自动同步**的：
+
+| pin | 为什么不自动同步 |
+|---|---|
+| `agent-network/src/opencode-agent-node-pair.ts` | 它的语义是「**已验证可共存**的精确配对」，不是「当前版本」。自动跟随会把那条 `intentionally fails when either package is bumped independently` 的绊线抹平 —— 该配对必须**重新验证过**才能改。见 #745。 |
+
+所以 Step 10 的完整做法是：**跑一遍注册表同步（看它是否非零退出）+ 单独确认上表里的手动 pin**。
 实测踩过：bump PR 开着没合的那段时间，npm 上 server 已经是新版，
 但 `main` 上 `PINNED_SERVER_VERSION` 还是旧版——**任何人从 main 切一次版，
 CLI 都会去拉旧 server，这次发版等于白发，且不产生任何报错**。
