@@ -337,8 +337,9 @@ try {
   }
 
   // Exercise the other production failed-status branch: a node-origin task
-  // whose exact recipient is capability-advertised and SSE-live must use
-  // sendAtomic. A Dashboard-origin failure above reaches sendLegacyReply, so
+  // whose exact recipient is capability-advertised must use sendAtomic. SSE
+  // is only a doorbell; a disconnected recipient drains the committed inbox
+  // row after reconnect. A Dashboard-origin failure above reaches sendLegacyReply, so
   // it cannot detect a regression that hard-codes only the atomic status to
   // "replied" while logs/config still say failed.
   const dispatcherSse = await fetch(`${hub}/events/dispatcher`, {
@@ -391,22 +392,24 @@ try {
     node_id: dispatcher.node_id,
   });
 
-  // Force the actual cli.ts legacy-node path and inspect the production meta,
-  // rather than round-tripping a test-authored literal.
+  // Force the actual cli.ts recipient-capability downgrade. It must use the
+  // terminal send_reply compatibility primitive: original task terminal,
+  // exactly one no-response reply, and no child task row.
   const legacyOriginTask = await mcp(dispatcher.token, "send_task", {
-    alias: "receiver", task: "legacy recipient marker probe", from_session: "dispatcher",
+    alias: "receiver", task: "legacy recipient terminal fallback probe", from_session: "dispatcher",
   });
   const legacyOriginTaskId = legacyOriginTask.task_id || legacyOriginTask.message_id;
-  await waitFor(() => (direct.query<{ n: number }, [string]>(
+  await waitFor(() => direct.query<{ status: string }, [string]>(
+    "SELECT status FROM tasks WHERE task_id=?1",
+  ).get(legacyOriginTaskId)?.status === "replied", "production legacy fallback terminalization", 300);
+  const legacyReplies = direct.query<{ n: number }, [string]>(
+    "SELECT COUNT(*) AS n FROM inbox WHERE in_reply_to=?1 AND type='reply' AND requires_response='none'",
+  ).get(legacyOriginTaskId)?.n;
+  const legacyChildren = direct.query<{ n: number }, [string]>(
     "SELECT COUNT(*) AS n FROM tasks WHERE parent_task_id=?1",
-  ).get(legacyOriginTaskId)?.n ?? 0) === 1, "production legacy fallback task", 300);
-  const legacyMeta = direct.query<{ meta_json: string | null }, [string]>(
-    "SELECT meta_json FROM tasks WHERE parent_task_id=?1",
-  ).get(legacyOriginTaskId)?.meta_json;
-  const parsedLegacyMeta = legacyMeta ? JSON.parse(legacyMeta) : null;
-  if (parsedLegacyMeta?.peer_reply_legacy_fallback !== true
-      || parsedLegacyMeta?.peer_reply_fallback_reason !== "recipient_unsupported") {
-    throw new Error(`production fallback marker missing: ${legacyMeta}`);
+  ).get(legacyOriginTaskId)?.n;
+  if (legacyReplies !== 1 || legacyChildren !== 0) {
+    throw new Error(`production terminal fallback misrouted replies=${legacyReplies} children=${legacyChildren}`);
   }
 
   const sendReplyCountBeforeTerminal = ((await Bun.file(`${work}/server.log`).text())

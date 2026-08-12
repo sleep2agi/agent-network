@@ -122,24 +122,12 @@ if (!nodeOriginTaskId || !userOriginTaskId) {
   throw new Error(`old Hub send_task omitted ids: ${JSON.stringify({ nodeOrigin, userOrigin })}`);
 }
 
-const exactTaskOriginIsNode = async (taskId: string) => {
-  const result = await oldHubTool(token, "get_task", { task_id: taskId });
-  const task = result?.task;
-  if (!result?.ok || !task || task.task_id !== taskId
-      || (task.from_node_id !== null && typeof task.from_node_id !== "string")) {
-    throw new Error("old Hub task identity unavailable");
-  }
-  return typeof task.from_node_id === "string" && task.from_node_id.length > 0;
-};
-
 for (const fixture of [
-  { target: "dispatcher", taskId: nodeOriginTaskId, expectedRoute: "legacy", expectedEgress: "task" },
-  { target: username, taskId: userOriginTaskId, expectedRoute: "legacy-reply", expectedEgress: "reply" },
+  { target: "dispatcher", taskId: nodeOriginTaskId },
+  { target: username, taskId: userOriginTaskId },
 ] as const) {
   let atomicCalls = 0;
-  let legacyCalls = 0;
   let legacyReplyCalls = 0;
-  let fallbackReason = "";
   const result = await sendPeerReplyCompatible({
     target: fixture.target,
     text: "legacy wire probe",
@@ -151,33 +139,21 @@ for (const fixture of [
       atomicCalls++;
       throw classified.error;
     },
-    sendLegacy: async (args) => {
-      legacyCalls++;
-      fallbackReason = args.fallbackReason || "";
-      return { task_id: "legacy_fallback_once" };
-    },
     sendLegacyReply: async () => {
       legacyReplyCalls++;
       return { message_id: "legacy_reply_once" };
     },
-    isOldHubOriginNode: async (args) => exactTaskOriginIsNode(args.taskId),
   });
 
-  const expectedTaskCalls = fixture.expectedEgress === "task" ? 1 : 0;
-  const expectedReplyCalls = fixture.expectedEgress === "reply" ? 1 : 0;
-  if (result.route !== fixture.expectedRoute || atomicCalls !== 1
-      || legacyCalls !== expectedTaskCalls || legacyReplyCalls !== expectedReplyCalls) {
-    throw new Error(`bad ${fixture.target} route=${result.route} atomic=${atomicCalls} task=${legacyCalls} reply=${legacyReplyCalls}`);
-  }
-  if (fixture.expectedEgress === "task" && fallbackReason !== "old_hub_unknown_tool") {
-    throw new Error(`bad fallback reason: ${fallbackReason}`);
+  if (result.route !== "legacy-reply" || atomicCalls !== 1 || legacyReplyCalls !== 1) {
+    throw new Error(`bad ${fixture.target} route=${result.route} atomic=${atomicCalls} reply=${legacyReplyCalls}`);
   }
 }
-console.log("LEGACY_HUB_WIRE_PASS code=-32602 exact_task_node=task exact_task_user=reply");
+console.log("LEGACY_HUB_WIRE_PASS code=-32602 node=terminal-reply user=terminal-reply");
 
 // Exercise the real production cli.ts wiring against that same archived old
 // Hub. This closes the gap where a test-authored classifier was correct but
-// cli.ts still queried the alias roster (or hardcoded a route).
+// cli.ts still emitted a compatibility task (or hardcoded a route).
 const work = "/tmp/test698-legacy-cli";
 rmSync(work, { recursive: true, force: true });
 mkdirSync(`${work}/home/.anet/nodes/receiver`, { recursive: true });
@@ -225,9 +201,12 @@ try {
   }
 
   await waitFor(async () => {
-    const state = await oldHubTool(token, "get_task", { task_id: liveUserOriginTaskId });
-    return state?.task?.status === "replied";
-  }, "old-Hub Dashboard task terminalization", 300);
+    const [nodeState, userState] = await Promise.all([
+      oldHubTool(token, "get_task", { task_id: liveNodeOriginTaskId }),
+      oldHubTool(token, "get_task", { task_id: liveUserOriginTaskId }),
+    ]);
+    return nodeState?.task?.status === "replied" && userState?.task?.status === "replied";
+  }, "both old-Hub tasks terminalize", 300);
   await waitFor(async () => {
     const inbox = await oldHubTool(register.token, "get_inbox", { alias: username, limit: 20 });
     return Array.isArray(inbox?.messages)
@@ -238,15 +217,15 @@ try {
   await waitFor(async () => {
     const inbox = await oldHubTool(token, "get_inbox", { alias: "dispatcher", limit: 20 });
     return Array.isArray(inbox?.messages)
-      && inbox.messages.some((message: any) => message?.type === "task"
+      && inbox.messages.some((message: any) => message?.type === "reply"
         && message?.from_session === "receiver"
         && message?.content?.includes("TEST673_STUB_OK"));
-  }, "old-Hub node-origin fallback task", 300);
+  }, "old-Hub node-origin terminal reply", 300);
   const nodeState = await oldHubTool(token, "get_task", { task_id: liveNodeOriginTaskId });
-  if (!nodeState?.task || ["replied", "failed"].includes(nodeState.task.status)) {
-    throw new Error(`old-Hub node-origin task unexpectedly terminalized: ${JSON.stringify(nodeState)}`);
+  if (nodeState?.task?.status !== "replied") {
+    throw new Error(`old-Hub node-origin task not terminal: ${JSON.stringify(nodeState)}`);
   }
-  console.log("LEGACY_CLI_E2E_PASS exact_get_task node=task user=reply");
+  console.log("LEGACY_CLI_E2E_PASS node=terminal-reply user=terminal-reply");
 } catch (error) {
   const log = Bun.file(`${work}/agent.log`);
   if (await log.exists()) console.error(`--- legacy agent log ---\n${await log.text()}`);

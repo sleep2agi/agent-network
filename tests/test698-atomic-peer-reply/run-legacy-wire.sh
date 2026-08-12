@@ -9,9 +9,6 @@ TMP=$(mktemp -d)
 NET="test698-legacy-$RANDOM-$$"
 HUB_CONTAINER="${NET}-hub"
 OLD_IMAGE="anet-test698-legacy-hub:${BASE_COMMIT:0:8}"
-MUTATED_IMAGE="anet-test698-legacy-route-mut:${SOURCE_COMMIT:0:8}"
-DEDUP_MUTATED_IMAGE="anet-test698-legacy-dedup-mut:${SOURCE_COMMIT:0:8}"
-IDENTITY_MUTATED_IMAGE="anet-test698-legacy-identity-mut:${SOURCE_COMMIT:0:8}"
 DB_DIR="$TMP/oldhubdb"
 mkdir -p "$DB_DIR"
 
@@ -41,102 +38,56 @@ done
 docker exec "$HUB_CONTAINER" bun -e \
   "fetch('http://127.0.0.1:9200/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-docker run --rm --network "$NET" --entrypoint bun "$CURRENT_IMAGE" \
-  /workspace/tests/test698-atomic-peer-reply/legacy-wire-e2e.ts \
-  "http://${HUB_CONTAINER}:9200" test698-legacy-auth
-docker run --rm --network "$NET" --entrypoint bun \
-  -v "$DB_DIR:/test698-oldhubdb" "$CURRENT_IMAGE" \
-  /workspace/tests/test698-atomic-peer-reply/legacy-cli-failure-e2e.ts \
-  "http://${HUB_CONTAINER}:9200" test698-legacy-auth /test698-oldhubdb/hub.db
+run_wire() {
+  local image="$1" log="$2"
+  docker run --rm --network "$NET" --entrypoint bun "$image" \
+    /workspace/tests/test698-atomic-peer-reply/legacy-wire-e2e.ts \
+    "http://${HUB_CONTAINER}:9200" test698-legacy-auth >"$log" 2>&1
+  docker run --rm --network "$NET" --entrypoint bun "$image" \
+    /workspace/tests/test698-atomic-peer-reply/legacy-cli-failure-e2e.ts \
+    "http://${HUB_CONTAINER}:9200" test698-legacy-auth >>"$log" 2>&1
+}
 
-echo "legacy-wire mutation: production cli loses exact-task identity lookup"
-MUT_ROOT="$TMP/mutated-current"
-mkdir -p "$MUT_ROOT"
-git -C "$ROOT" archive "$SOURCE_COMMIT" | tar -x -C "$MUT_ROOT"
-MUT_FILE="$MUT_ROOT/agent-node/src/cli.ts"
-BEFORE=$(sha256sum "$MUT_FILE" | cut -d' ' -f1)
-sed -i 's/callCommHub("get_task", { task_id: taskId })/callCommHub("get_all_status", {})/' "$MUT_FILE"
-AFTER=$(sha256sum "$MUT_FILE" | cut -d' ' -f1)
-if [ "$BEFORE" = "$AFTER" ]; then
-  echo "MUTATION_NOOP: old-hub-exact-task-lookup-lost"
-  exit 1
-fi
-docker build -t "$MUTATED_IMAGE" \
-  --build-arg SOURCE_COMMIT="$SOURCE_COMMIT-mut-old-hub-route" \
-  -f "$MUT_ROOT/tests/test698-atomic-peer-reply/Dockerfile" "$MUT_ROOT" \
-  >/tmp/test698-legacy-mutated-build.log
-set +e
-docker run --rm --network "$NET" --entrypoint bun "$MUTATED_IMAGE" \
-  /workspace/tests/test698-atomic-peer-reply/legacy-wire-e2e.ts \
-  "http://${HUB_CONTAINER}:9200" test698-legacy-auth \
-  >/tmp/test698-legacy-mutated-run.log 2>&1
-MUT_RC=$?
-set -e
-if [ "$MUT_RC" -eq 0 ]; then
-  echo "MUTATION_SURVIVED: old-hub-exact-task-lookup-lost"
-  cat /tmp/test698-legacy-mutated-run.log
-  exit 1
-fi
-echo "MUTATION_RED: old-hub-exact-task-lookup-lost rc=$MUT_RC"
+run_wire "$CURRENT_IMAGE" /tmp/test698-legacy-pristine.log
+grep -Fq 'LEGACY_HUB_WIRE_PASS' /tmp/test698-legacy-pristine.log
+grep -Fq 'LEGACY_CLI_TERMINAL_PASS originals=2 terminal=2 replies=2 child_tasks=0' /tmp/test698-legacy-pristine.log
+echo "LEGACY_PRISTINE_PASS"
 
-echo "legacy-wire mutation: stable peer identity marker removed"
-DEDUP_MUT_ROOT="$TMP/mutated-dedup"
-mkdir -p "$DEDUP_MUT_ROOT"
-git -C "$ROOT" archive "$SOURCE_COMMIT" | tar -x -C "$DEDUP_MUT_ROOT"
-DEDUP_MUT_FILE="$DEDUP_MUT_ROOT/agent-node/src/cli.ts"
-BEFORE=$(sha256sum "$DEDUP_MUT_FILE" | cut -d' ' -f1)
-sed -i 's/const taskText = legacyPeerReplyTaskText(args);/const taskText = args.failed ? `⚠️ ${args.text}` : args.text;/' "$DEDUP_MUT_FILE"
-AFTER=$(sha256sum "$DEDUP_MUT_FILE" | cut -d' ' -f1)
-if [ "$BEFORE" = "$AFTER" ]; then
-  echo "MUTATION_NOOP: legacy-equal-replies-deduplicated"
-  exit 1
-fi
-docker build -t "$DEDUP_MUTATED_IMAGE" \
-  --build-arg SOURCE_COMMIT="$SOURCE_COMMIT-mut-legacy-dedup" \
-  -f "$DEDUP_MUT_ROOT/tests/test698-atomic-peer-reply/Dockerfile" "$DEDUP_MUT_ROOT" \
-  >/tmp/test698-legacy-dedup-mutated-build.log
-set +e
-docker run --rm --network "$NET" --entrypoint bun \
-  -v "$DB_DIR:/test698-oldhubdb" "$DEDUP_MUTATED_IMAGE" \
-  /workspace/tests/test698-atomic-peer-reply/legacy-cli-failure-e2e.ts \
-  "http://${HUB_CONTAINER}:9200" test698-legacy-auth /test698-oldhubdb/hub.db \
-  >/tmp/test698-legacy-dedup-mutated-run.log 2>&1
-DEDUP_MUT_RC=$?
-set -e
-if [ "$DEDUP_MUT_RC" -eq 0 ]; then
-  echo "MUTATION_SURVIVED: legacy-equal-replies-deduplicated"
-  cat /tmp/test698-legacy-dedup-mutated-run.log
-  exit 1
-fi
-echo "MUTATION_RED: legacy-equal-replies-deduplicated rc=$DEDUP_MUT_RC"
+run_legacy_mutation() {
+  local name="$1" file="$2" sed_expr="$3"
+  local root="$TMP/mut-$name" image="anet-test698-legacy-mut:${SOURCE_COMMIT:0:8}-$name"
+  mkdir -p "$root"
+  git -C "$ROOT" archive "$SOURCE_COMMIT" | tar -x -C "$root"
+  local target="$root/$file" before after rc
+  before=$(sha256sum "$target" | cut -d' ' -f1)
+  sed -i "$sed_expr" "$target"
+  after=$(sha256sum "$target" | cut -d' ' -f1)
+  if [ "$before" = "$after" ]; then
+    echo "MUTATION_NOOP: $name"
+    exit 1
+  fi
+  docker build -t "$image" --build-arg SOURCE_COMMIT="$SOURCE_COMMIT-mut-$name" \
+    -f "$root/tests/test698-atomic-peer-reply/Dockerfile" "$root" >/tmp/test698-legacy-mut-build.log
+  set +e
+  run_wire "$image" "/tmp/test698-legacy-mut-$name.log"
+  rc=$?
+  set -e
+  if [ "$rc" -eq 0 ]; then
+    echo "MUTATION_SURVIVED: $name"
+    cat "/tmp/test698-legacy-mut-$name.log"
+    exit 1
+  fi
+  echo "MUTATION_RED: $name rc=$rc"
+}
 
-echo "legacy-wire mutation: old-Hub task-identity failure guesses node route"
-IDENTITY_MUT_ROOT="$TMP/mutated-identity"
-mkdir -p "$IDENTITY_MUT_ROOT"
-git -C "$ROOT" archive "$SOURCE_COMMIT" | tar -x -C "$IDENTITY_MUT_ROOT"
-IDENTITY_MUT_FILE="$IDENTITY_MUT_ROOT/agent-node/src/cli.ts"
-BEFORE=$(sha256sum "$IDENTITY_MUT_FILE" | cut -d' ' -f1)
-sed -i '/isOldHubOriginNode:/,/      ),/ s/      ),/      ).catch(() => true),/' "$IDENTITY_MUT_FILE"
-AFTER=$(sha256sum "$IDENTITY_MUT_FILE" | cut -d' ' -f1)
-if [ "$BEFORE" = "$AFTER" ]; then
-  echo "MUTATION_NOOP: old-hub-identity-failure-egresses"
-  exit 1
-fi
-docker build -t "$IDENTITY_MUTATED_IMAGE" \
-  --build-arg SOURCE_COMMIT="$SOURCE_COMMIT-mut-old-hub-identity" \
-  -f "$IDENTITY_MUT_ROOT/tests/test698-atomic-peer-reply/Dockerfile" "$IDENTITY_MUT_ROOT" \
-  >/tmp/test698-legacy-identity-mutated-build.log
-set +e
-docker run --rm --network "$NET" --entrypoint bun \
-  -v "$DB_DIR:/test698-oldhubdb" "$IDENTITY_MUTATED_IMAGE" \
-  /workspace/tests/test698-atomic-peer-reply/legacy-cli-failure-e2e.ts \
-  "http://${HUB_CONTAINER}:9200" test698-legacy-auth /test698-oldhubdb/hub.db \
-  >/tmp/test698-legacy-identity-mutated-run.log 2>&1
-IDENTITY_MUT_RC=$?
-set -e
-if [ "$IDENTITY_MUT_RC" -eq 0 ]; then
-  echo "MUTATION_SURVIVED: old-hub-identity-failure-egresses"
-  cat /tmp/test698-legacy-identity-mutated-run.log
-  exit 1
-fi
-echo "MUTATION_RED: old-hub-identity-failure-egresses rc=$IDENTITY_MUT_RC"
+# Deterministic final-state witnesses: pristine always observes two terminal
+# originals and zero child tasks. These mutations cannot pass on a transient
+# pending-reply state because the probe only accepts committed Hub rows.
+run_legacy_mutation "old-hub-terminal-fallback-skipped" \
+  agent-node/src/peer-reply-send.ts \
+  's/payload: await deps.sendLegacyReply(args)/payload: { ok: true, silently_dropped: true }/'
+run_legacy_mutation "old-hub-capability-fallback-removed" \
+  agent-node/src/peer-reply-send.ts \
+  's/if (!isPeerReplyCapabilityUnavailable(error)) throw error;/if (true) throw error;/'
+
+echo "LEGACY_WIRE_RESULT: PASS"

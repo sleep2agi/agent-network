@@ -3,10 +3,11 @@ import { describe, expect, test } from "bun:test";
 const source = await Bun.file(new URL("./cli.ts", import.meta.url)).text();
 
 describe("#698 peer reply runtime wiring", () => {
-  test("peer replies negotiate the atomic tool and retain an explicit legacy task fallback", () => {
+  test("peer replies negotiate the atomic tool and retain only a terminal legacy fallback", () => {
     expect(source).toContain('sendAtomic: (args) => callCommHub("send_peer_reply", {');
-    expect(source).toContain("sendLegacy: async (args) => {");
-    expect(source).toContain("sendPeerReplyTaskWithTrace({");
+    expect(source).toContain('sendLegacyReply: (args) => callCommHub("send_reply", {');
+    expect(source).not.toContain("sendLegacy: async (args) => {");
+    expect(source).not.toContain("sendPeerReplyTaskWithTrace({");
     expect(source).not.toContain("REPLY_VIA_SEND_TASK");
   });
 

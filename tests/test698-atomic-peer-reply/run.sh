@@ -159,8 +159,6 @@ run_cli_mutation "cli-terminal-reply-egress-restored" \
   's/if (inboxTurn.kind === "terminal_peer_reply") return;/if (false) return;/'
 run_cli_mutation "cli-new-reply-wake-disabled" \
   's/routePeerReplySse(ev, scheduleWorkInboxDrain);/if (false) routePeerReplySse(ev, scheduleWorkInboxDrain);/'
-run_cli_mutation "cli-fallback-reason-lost" \
-  's/peer_reply_fallback_reason: args.fallbackReason/peer_reply_fallback_reason: undefined/'
 run_cli_mutation "cli-failed-status-lost" \
   '/sendLegacyReply:/,/      }),/ s/status: args.failed ? "failed" : "replied"/status: "replied"/'
 run_cli_mutation "cli-atomic-failed-status-lost" \
@@ -185,21 +183,8 @@ run_mutation "old-hub-fallback-removed" \
   /workspace/agent-node/src/peer-reply-send.ts \
   's/if (!isPeerReplyCapabilityUnavailable(error)) throw error;/if (true) throw error;/' \
   /workspace/agent-node/src/peer-reply-send.test.ts
-run_mutation "old-hub-task-not-found-drops-pending" \
-  /workspace/agent-node/src/peer-reply-send.ts \
-  's/throw oldHubIdentityUnavailable(error);/throw error;/' \
-  /workspace/agent-node/src/peer-reply-send.test.ts
-run_mutation "old-hub-task-id-mismatch-accepted" \
-  /workspace/agent-node/src/peer-reply-send.ts \
-  's/task.task_id !== args.taskId/false/' \
-  /workspace/agent-node/src/peer-reply-send.test.ts
-run_mutation "old-hub-origin-shape-accepted" \
-  /workspace/agent-node/src/peer-reply-send.ts \
-  's/(task.from_node_id !== null && typeof task.from_node_id !== "string")/false/' \
-  /workspace/agent-node/src/peer-reply-send.test.ts
-run_agent_wiring_mutation "deleted-origin-terminal-wiring-removed" \
-  /workspace/agent-node/src/peer-reply-send.ts \
-  's/legacyError.code === "alias_not_found"/legacyError.code === "alias_missing_for_test"/'
+run_cli_mutation "legacy-terminal-fallback-replaced-by-task" \
+  '/sendLegacyReply:/,/      }),/ s/callCommHub("send_reply"/callCommHub("send_task"/'
 run_mutation "legacy-mcp-code-lost" \
   /workspace/agent-node/src/reply-reliability.ts \
   's/...(mcpCode !== undefined ? { code: Number(mcpCode) } : {}),/...{},/' \
@@ -215,7 +200,11 @@ run_mutation "capability-provenance-bypassed" \
   /workspace/server/src/peer-reply-capability.test.ts
 run_mutation "recipient-capability-gate-removed" \
   /workspace/server/src/tools.ts \
-  's/if (recipient?.peer_reply_inbox_capable !== 1 || liveSse < 1) {/if (false) {/' \
+  's/if (recipient?.peer_reply_inbox_capable !== 1) {/if (false) {/' \
+  /workspace/server/src/peer-reply-atomic.test.ts
+run_mutation "recipient-disconnect-restores-legacy-fallback" \
+  /workspace/server/src/tools.ts \
+  's/if (recipient?.peer_reply_inbox_capable !== 1) {/if (recipient?.peer_reply_inbox_capable !== 1 || getSSEStats().total === 0) {/' \
   /workspace/server/src/peer-reply-atomic.test.ts
 run_mutation "recipient-capability-alias-binding-removed" \
   /workspace/server/src/tools.ts \
@@ -225,9 +214,9 @@ run_mutation "rollback-capability-clear-removed" \
   /workspace/server/src/tools.ts \
   's/externalSchedulesJson, peerReplyInboxCapable ? 1 : 0]/externalSchedulesJson, 1]/' \
   /workspace/server/src/peer-reply-atomic.test.ts
-run_mutation "legacy-fallback-marker-removed" \
-  /workspace/agent-node/src/peer-reply-task-trace.ts \
-  's/...(input.meta ? { meta: input.meta } : {}),/...{},/' \
+run_mutation "legacy-terminal-fallback-silently-cleared" \
+  /workspace/agent-node/src/peer-reply-send.ts \
+  's/payload: await deps.sendLegacyReply(args)/payload: { ok: true, silently_dropped: true }/' \
   /workspace/server/src/peer-reply-atomic.test.ts
 run_mutation "reply-rename-canonicalization-removed" \
   /workspace/server/src/tools.ts \
@@ -236,6 +225,14 @@ run_mutation "reply-rename-canonicalization-removed" \
 run_mutation "node-ownership-check-removed" \
   /workspace/server/src/tools.ts \
   's/if (token.bound_node_id !== taskBefore.to_node_id) {/if (false) {/' \
+  /workspace/server/src/peer-reply-atomic.test.ts
+run_mutation "compat-reply-assignee-check-removed" \
+  /workspace/server/src/tools.ts \
+  's/if (canonicalCaller !== canonicalAssignee) {/if (false) {/' \
+  /workspace/server/src/peer-reply-atomic.test.ts
+run_mutation "compat-reply-target-check-removed" \
+  /workspace/server/src/tools.ts \
+  's/if (replyTargetAlias !== canonicalOrigin) {/if (false) {/' \
   /workspace/server/src/peer-reply-atomic.test.ts
 run_mutation "task-terminalization-removed" \
   /workspace/server/src/tools.ts \

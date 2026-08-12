@@ -4,7 +4,6 @@ import { db } from "./db.js";
 import { registerTools } from "./tools.js";
 import { CommHubError } from "../../agent-node/src/reply-reliability.js";
 import { sendPeerReplyCompatible } from "../../agent-node/src/peer-reply-send.js";
-import { sendPeerReplyTaskWithTrace } from "../../agent-node/src/peer-reply-task-trace.js";
 import { __resetSSEClientsForTest, createSSEStream } from "./push.js";
 import { eventBus } from "./event_bus.js";
 
@@ -156,15 +155,15 @@ describe("#698 atomic peer reply", () => {
     expect(replies(taskId)).toHaveLength(0);
   });
 
-  test("a capable but disconnected recipient fails toward legacy with zero writes", async () => {
+  test("a capable but disconnected recipient commits atomically for reconnect drain", async () => {
     const taskId = await dispatch(A, B, "recipient disconnected");
     __resetSSEClientsForTest();
     const result = await call(toolsFor(B).send_peer_reply, {
-      alias: A, text: "must use legacy", in_reply_to: taskId, status: "replied",
+      alias: A, text: "stored for reconnect", in_reply_to: taskId, status: "replied",
     });
-    expect(result).toEqual(expect.objectContaining({ ok: false, error: "peer_reply_unsupported" }));
-    expect(task(taskId).status).toBe("delivered");
-    expect(replies(taskId)).toHaveLength(0);
+    expect(result).toEqual(expect.objectContaining({ ok: true }));
+    expect(task(taskId)).toEqual(expect.objectContaining({ status: "replied", result: "stored for reconnect" }));
+    expect(replies(taskId)).toHaveLength(1);
   });
 
   test("recipient capability is bound to the exact canonical alias, not another session on the same node", async () => {
@@ -235,7 +234,7 @@ describe("#698 atomic peer reply", () => {
     }
   });
 
-  test("new sender falls back exactly once for an old Hub or legacy recipient", async () => {
+  test("old Hub or legacy recipient falls back once and terminalizes the original", async () => {
     for (const mode of ["old-hub", "legacy-recipient"] as const) {
       cleanup(); seed();
       const taskId = await dispatch(A, B, `mixed-${mode}`);
@@ -244,7 +243,7 @@ describe("#698 atomic peer reply", () => {
       }
       const tools = toolsFor(B);
       let atomicCalls = 0;
-      let legacyCalls = 0;
+      let legacyReplyCalls = 0;
       const routed = await sendPeerReplyCompatible({
         target: A, text: `fallback-${mode}`, taskId, failed: false, fromAlias: B,
       }, {
@@ -257,47 +256,25 @@ describe("#698 atomic peer reply", () => {
             alias: args.target, text: args.text, in_reply_to: args.taskId, status: "replied",
           });
         },
-        sendLegacy: async (args) => {
-          legacyCalls++;
-          return sendPeerReplyTaskWithTrace({
-            alias: args.target, task: args.text, priority: "normal",
-            fromAlias: B, parentTaskId: args.taskId, networkId: NET,
-            meta: {
-              peer_reply_legacy_fallback: true,
-              peer_reply_fallback_reason: args.fallbackReason,
-            },
-          }, {
-            log: () => {},
-            send: (legacyArgs) => callOrThrow(tools.send_task, legacyArgs),
+        sendLegacyReply: async (args) => {
+          legacyReplyCalls++;
+          return callOrThrow(tools.send_reply, {
+            alias: args.target, text: args.text, in_reply_to: args.taskId, status: "replied",
           });
         },
-        sendLegacyReply: async () => {
-          throw new Error("node-to-node capability fallback must not use send_reply");
-        },
-        isOldHubOriginNode: async () => true,
       });
-      expect(routed.route).toBe("legacy");
-      expect([atomicCalls, legacyCalls]).toEqual([1, 1]);
-      expect(task(taskId).status).toBe("delivered");
-      expect(replies(taskId)).toHaveLength(0);
+      expect(routed.route).toBe("legacy-reply");
+      expect([atomicCalls, legacyReplyCalls]).toEqual([1, 1]);
+      expect(task(taskId)).toEqual(expect.objectContaining({ status: "replied", result: `fallback-${mode}` }));
+      expect(replies(taskId)).toHaveLength(1);
       expect(db.get<{ n: number }>(
         "SELECT COUNT(*) AS n FROM tasks WHERE parent_task_id = ?1 AND requires_response = 'reply'",
         taskId,
-      )?.n).toBe(1);
-      const legacyTask = db.get<{ meta_json: string }>(
-        "SELECT meta_json FROM tasks WHERE parent_task_id = ?1",
-        taskId,
-      );
-      expect(JSON.parse(legacyTask!.meta_json)).toEqual(expect.objectContaining({
-        peer_reply_legacy_fallback: true,
-        peer_reply_fallback_reason: mode === "old-hub"
-          ? "old_hub_unknown_tool"
-          : "recipient_unsupported",
-      }));
+      )?.n).toBe(0);
     }
   });
 
-  test("node-id rotation leaves atomic state untouched and creates one marked legacy fallback", async () => {
+  test("node-id rotation falls back to alias-bound terminal send_reply", async () => {
     const taskId = await dispatch(A, B, "rotate B after dispatch");
     const rotatedNodeId = `${B_ID}-rotated`;
     db.run(
@@ -309,7 +286,7 @@ describe("#698 atomic peer reply", () => {
 
     const tools = toolsFor(B);
     let atomicCalls = 0;
-    let legacyCalls = 0;
+    let legacyReplyCalls = 0;
     const routed = await sendPeerReplyCompatible({
       target: A, text: "result after identity rotation", taskId, failed: false, fromAlias: B,
     }, {
@@ -319,38 +296,44 @@ describe("#698 atomic peer reply", () => {
           alias: args.target, text: args.text, in_reply_to: args.taskId, status: "replied",
         });
       },
-      sendLegacy: async (args) => {
-        legacyCalls++;
-        return sendPeerReplyTaskWithTrace({
-          alias: args.target, task: args.text, priority: "normal",
-          fromAlias: B, parentTaskId: args.taskId, networkId: NET,
-          meta: {
-            peer_reply_legacy_fallback: true,
-            peer_reply_fallback_reason: args.fallbackReason,
-          },
-        }, {
-          log: () => {},
-          send: (legacyArgs) => callOrThrow(tools.send_task, legacyArgs),
+      sendLegacyReply: async (args) => {
+        legacyReplyCalls++;
+        return callOrThrow(tools.send_reply, {
+          alias: args.target, text: args.text, in_reply_to: args.taskId, status: "replied",
         });
       },
-      sendLegacyReply: async () => {
-        throw new Error("identity rotation fallback must not use send_reply");
-      },
-      isOldHubOriginNode: async () => true,
     });
 
-    expect(routed.route).toBe("legacy");
-    expect([atomicCalls, legacyCalls]).toEqual([1, 1]);
+    expect(routed.route).toBe("legacy-reply");
+    expect([atomicCalls, legacyReplyCalls]).toEqual([1, 1]);
+    expect(task(taskId)).toEqual(expect.objectContaining({ status: "replied", result: "result after identity rotation" }));
+    expect(replies(taskId)).toHaveLength(1);
+    expect(db.get<{ n: number }>("SELECT COUNT(*) AS n FROM tasks WHERE parent_task_id = ?1", taskId)?.n).toBe(0);
+  });
+
+  test("compatibility send_reply cannot terminalize another node's task or target a third party", async () => {
+    const taskId = await dispatch(A, B, "compatibility ownership boundary");
+
+    const foreign = await call(toolsFor(A).send_reply, {
+      alias: A, text: "foreign close attempt", in_reply_to: taskId, status: "replied",
+    });
+    expect(foreign).toEqual(expect.objectContaining({ ok: false, error: "reply_task_not_owned" }));
     expect(task(taskId)).toEqual(expect.objectContaining({ status: "delivered", result: null }));
     expect(replies(taskId)).toHaveLength(0);
-    const fallback = db.get<{ meta_json: string; requires_response: string }>(
-      "SELECT meta_json, requires_response FROM tasks WHERE parent_task_id = ?1", taskId,
-    );
-    expect(fallback?.requires_response).toBe("reply");
-    expect(JSON.parse(fallback!.meta_json)).toEqual(expect.objectContaining({
-      peer_reply_legacy_fallback: true,
-      peer_reply_fallback_reason: "identity_changed",
-    }));
+
+    const wrongTarget = await call(toolsFor(B).send_reply, {
+      alias: B, text: "wrong target attempt", in_reply_to: taskId, status: "replied",
+    });
+    expect(wrongTarget).toEqual(expect.objectContaining({ ok: false, error: "reply_target_mismatch" }));
+    expect(task(taskId)).toEqual(expect.objectContaining({ status: "delivered", result: null }));
+    expect(replies(taskId)).toHaveLength(0);
+
+    const valid = await call(toolsFor(B).send_reply, {
+      alias: A, text: "valid compatibility close", in_reply_to: taskId, status: "replied",
+    });
+    expect(valid.ok).toBe(true);
+    expect(task(taskId)).toEqual(expect.objectContaining({ status: "replied", result: "valid compatibility close" }));
+    expect(replies(taskId)).toHaveLength(1);
   });
 
   test("owner node terminalizes exact original and emits one no-response reply without a task row", async () => {

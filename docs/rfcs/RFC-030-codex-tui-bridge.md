@@ -921,21 +921,24 @@ task 又可能触发 reply-to-reply 循环，Dashboard 的积压统计因此持�
 全部成立时，Hub 才会终结原 task 并写一条 `requires_response=none` 的 reply
 inbox 行：调用者使用绑定到原 task 接收节点的 ntok；原 task 带权威
 `from_node_id/to_node_id`；原发起节点的**当前 session**由 exact token-bound
-heartbeat 明确声明 `peer_reply_inbox_capable=true`，且该 session 的 SSE 当前
-在线。能力不从历史 node 快照继承；旧 runtime 回滚后的首次 heartbeat 会
+heartbeat 明确声明 `peer_reply_inbox_capable=true`。SSE 只是 doorbell，不是
+持久化能力或正确性的前置条件；收件方暂时断线时 reply 仍原子落 inbox，重连后
+drain。能力不从历史 node 快照继承；旧 runtime 回滚后的首次 heartbeat 会
 显式清零。接收端把该 reply 注入 runtime 后 ACK，
 但结构上不具备再次回复它的出口。
 
 混合版本按安全方向降级：旧 Hub 不认识 `send_peer_reply`，或新 Hub 判断
-任一端缺少能力时，发送端才回退到历史 `send_task`。任务派发后节点重装、
-token 重新绑定造成 `reply_task_not_owned` / `peer_reply_node_token_required` 时，
-原子工具保证零写后也允许一次带 `identity_changed` 标记的 legacy 回退，避免
-结果在本地 pending-replies 被永久丢弃。`reply_target_mismatch`、task terminal、
-跨网拒绝与传输错误仍绝不回退，避免一次不确定写后再造第二条 task。负向能力
-结果不永久缓存，下次回复重新探测。每次 legacy 回退 task 都在 meta 标记 reason，
-便于统计残留 pair 的收敛。能力由绑定 node token 的 heartbeat 提供，alias、
-自报 node_id 或历史 node 快照都不能冒充。旧 sender 若仍调用 `send_reply` 给
-agent target，Hub 保留 #498 warning，Dashboard 的 hub/api 回复不带该提示。
+任一端缺少能力时，发送端回退到兼容 `send_reply`，**绝不**回退到
+`send_task`。两条路径都终结同一个原 task，并只产生一条
+`requires_response=none` reply，因此不会留下 running 原任务或重开回复循环。
+任务派发后节点重装、token 重新绑定造成 `reply_task_not_owned` /
+`peer_reply_node_token_required` 时，原子工具保证零写后可降级到 alias-bound
+`send_reply`；新 Hub 会再次校验调用者 alias 是原 task 的接收方、目标 alias 是
+原始发送方。`reply_target_mismatch`、task terminal、跨网拒绝与传输错误仍绝不
+二次尝试，避免不确定写后的重复。负向能力结果不永久缓存，下次回复重新探测。
+能力由绑定 node token 的 heartbeat 提供，alias、自报 node_id 或历史 node
+快照都不能冒充。旧 sender 若仍调用 `send_reply` 给 agent target，Hub 保留
+#498 warning，Dashboard 的 hub/api 回复不带该提示。
 
 Dashboard、人类用户、`hub/api` 与 scheduler 发起的 task 没有 `from_node_id`，
 不属于 peer-agent 协议。Hub 对这类原任务返回独立的
@@ -944,10 +947,10 @@ Dashboard、人类用户、`hub/api` 与 scheduler 发起的 task 没有 `from_n
 `send_task(alias)`：用户 alias 没有 agent session，这会造成 `alias_not_found`、
 本地 pending reply 被丢弃且原 task 永久停在 running。
 
-部署必须 recipient-first：先升级 Hub，再升级接收 reply 的普通节点，确认它们的
-当前 session heartbeat 明确声明能力且 SSE 在线，最后才升级
-`codex-app-server` sender。任一阶段观测到 legacy fallback 增长，应停止扩面；
-不得把 report 的 mixed-version 限制当作免责声明后直接全舰队切换。
+部署必须 Hub-first：先升级 Hub，再单节点升级接收方与发送方，确认当前 session
+heartbeat 明确声明能力、断线重连仍能 drain 已提交 reply，最后才逐步扩面。
+旧 Hub 或未声明能力的节点只走 terminal `send_reply` 兼容路径；任一阶段观测到
+原 task 非终态增长都应停止扩面并回滚，不得把 mixed-version 限制当作免责声明。
 
 ### 18.4b CommHub 作为原生 MCP（codex 直接调 `commhub_*` 工具）
 

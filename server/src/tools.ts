@@ -1557,7 +1557,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           // V3 atomic peer replies are capability-negotiated. Both identity
           // bindings and the recipient capability are re-read inside this
           // transaction before any inbox/task/run write. Legacy/unbound rows
-          // fail toward the sender's old send_task path, never toward silence.
+          // fail toward compatibility send_reply, which terminalizes the
+          // original task instead of creating a second response-requiring row.
           if (peerCapabilityRequired) {
             if (!taskBefore.from_node_id) {
               // Origin type is an intrinsic property of the task and must be
@@ -1594,9 +1595,23 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
               enforceNetworkId,
               canonicalOrigin,
             );
-            const liveSse = getSSEStats().sessions[`${enforceNetworkId}:${canonicalOrigin}`] ?? 0;
-            if (recipient?.peer_reply_inbox_capable !== 1 || liveSse < 1) {
+            if (recipient?.peer_reply_inbox_capable !== 1) {
               return { ok: false as const, error: "peer_reply_unsupported" as const };
+            }
+          } else if (callerTokenIsNetwork && enforceNetworkId) {
+            // Compatibility send_reply is still an exact task transition for
+            // node callers. Bind it to the token-authenticated assignee alias
+            // and immutable original sender. Alias binding survives a
+            // legitimate node-id rotation without letting another node close
+            // the task.
+            const canonicalCaller = resolveCanonicalAlias(enforceNetworkId, from_session).alias;
+            const canonicalAssignee = resolveCanonicalAlias(enforceNetworkId, taskBefore.to_name).alias;
+            if (canonicalCaller !== canonicalAssignee) {
+              return { ok: false as const, error: "reply_task_not_owned" as const };
+            }
+            const canonicalOrigin = resolveCanonicalAlias(enforceNetworkId, taskBefore.from_name).alias;
+            if (replyTargetAlias !== canonicalOrigin) {
+              return { ok: false as const, error: "reply_target_mismatch" as const };
             }
           }
 
@@ -1725,7 +1740,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         && replyTargetAlias !== "hub"
         && replyTargetAlias !== "api";
       const warning = !peerCapabilityRequired && targetIsAgent
-        ? `Target "${replyTargetAlias}" is an agent node. Legacy commhub_reply/send_reply is not the atomic peer-result path. Prefer commhub_send_peer_reply; if the peer is on an older runtime, use commhub_send_task(alias="${replyTargetAlias}", task="<your reply>") so it wakes via new_task SSE. (RFC-030 mixed-version rollout.)`
+        ? `Target "${replyTargetAlias}" is an agent node. Legacy commhub_reply/send_reply terminalized the original task; upgraded peers should prefer commhub_send_peer_reply for capability-negotiated delivery. (RFC-030 mixed-version rollout.)`
         : undefined;
 
       // #507 — echo attachments READ BACK FROM DB (lead 2b5f6634): the point
@@ -1767,13 +1782,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "send_reply",
-    "Reply to a Dashboard/UI-originated task. Agent peers use send_peer_reply so mixed-version delivery can fail safely toward the legacy send_task path.",
+    "Reply to a Dashboard/UI-originated task. Also serves as the terminal legacy fallback when atomic peer reply capability is unavailable.",
     replyToolSchema,
     (args) => handleReply(args, false),
   );
   server.tool(
     "send_peer_reply",
-    "Atomically finalize one node-owned task and enqueue one no-response result only when the exact recipient advertises peer_reply_inbox_capable. Returns peer_reply_unsupported with zero writes for legacy peers.",
+    "Atomically finalize one node-owned task and enqueue one no-response result when the exact recipient advertises peer_reply_inbox_capable. Stored capability survives transient SSE disconnects; legacy peers return peer_reply_unsupported with zero writes.",
     replyToolSchema,
     (args) => handleReply(args, true),
   );

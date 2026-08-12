@@ -143,8 +143,7 @@ import { resolveNodeIdSource } from "./runtime/node-id-source";
 import { emitExplicitTaskTrace, sendExplicitTaskWithTrace, waitForExplicitTaskLifecycle, type ExplicitTaskTraceContext } from "./explicit-task-trace";
 import { inboxDeliveryPolicy } from "./inbox-message-policy";
 import { routePeerReplySse, runInboxTurnByReplyPolicy } from "./peer-reply-inbox";
-import { createPeerReplyCapabilityCache, legacyPeerReplyTaskText, resolveOldHubTaskOrigin, sendPeerReplyCompatible } from "./peer-reply-send";
-import { sendPeerReplyTaskWithTrace } from "./peer-reply-task-trace";
+import { createPeerReplyCapabilityCache, sendPeerReplyCompatible } from "./peer-reply-send";
 
 const home = homedir();
 const peerReplyCapabilityCache = createPeerReplyCapabilityCache();
@@ -1373,24 +1372,6 @@ async function sendReply(
         in_reply_to: args.taskId,
         status: args.failed ? "failed" : "replied",
       }, 0),
-      sendLegacy: async (args) => {
-        const taskText = legacyPeerReplyTaskText(args);
-        return sendPeerReplyTaskWithTrace({
-          alias: args.target,
-          task: taskText,
-          priority: args.failed ? "high" : "normal",
-          fromAlias: args.fromAlias,
-          parentTaskId: args.taskId,
-          networkId: NETWORK_ID || null,
-          meta: {
-            peer_reply_legacy_fallback: true,
-            peer_reply_fallback_reason: args.fallbackReason,
-          },
-        }, {
-          log: taskTraceLog,
-          send: (legacyArgs) => callCommHub("send_task", legacyArgs),
-        });
-      },
       sendLegacyReply: (args) => callCommHub("send_reply", {
         alias: args.target,
         text: args.text,
@@ -1398,10 +1379,6 @@ async function sendReply(
         in_reply_to: args.taskId,
         status: args.failed ? "failed" : "replied",
       }),
-      isOldHubOriginNode: (args) => resolveOldHubTaskOrigin(
-        args,
-        async (taskId) => parseToolJson(await callCommHub("get_task", { task_id: taskId })),
-      ),
     }, peerReplyCapabilityCache)
     : { route: "atomic" as const, payload: await callCommHub("send_reply", {
       alias: target,
