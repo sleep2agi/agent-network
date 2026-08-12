@@ -1,0 +1,59 @@
+Test 735 — production Hub launcher Git authority and rebuild gate
+================================================================
+Captured: 2026-08-12T18:59:49Z
+
+Coordinates
+-----------
+SOURCE_COMMIT=83fe6c1fb4583e65787358c5502d6c0c62021964
+Base=c7ac3c200bc067a1512d84885c743cd2f31c7e80
+Image=sha256:0dfd45d3171bb6479dca9b2db35cced1e7e03ebfce51b104190329239d36da71
+Image label org.opencontainers.image.revision=83fe6c1fb4583e65787358c5502d6c0c62021964
+Exact runner log SHA256=3c2dc0e9870e8447f1e869de3fc8ea6c793fc7fc9729a5eaec37e9271706b593
+
+Live-to-Git capture
+-------------------
+At capture time, the production deployment copy
+`/home/vansin/.local/bin/hub-daemon.sh` and the new Git authority
+`deploy/hub/hub-daemon.sh` were byte-identical:
+
+  SHA256 34c66d06ff3ab15538d2debb203b6a8b88277dab7b15ad1c5e6fff72cd1024d4
+
+This is a read-only capture. The production launcher, PM2 process, runtime,
+database, and secrets were not changed.
+
+Docker gate
+-----------
+The suite ran as a non-root user in `node:22-bookworm-slim` and exercised the
+real launcher against isolated fake runtime, env, bun, socket inspection, and
+port state. It verified:
+
+- success starts the pinned sibling runtime with the requested host/port;
+- a missing vault key is rejected before bun starts;
+- missing runtime, missing explicit `ss`, missing bun, and occupied port fail;
+- the checked-in PM2 definition retains the captured non-secret process shape;
+- deleting the vault-key gate is a byte-changing witnessed-red mutation.
+
+Exact output:
+
+  L1 HUB_DAEMON_REBUILD_PASS
+  MUTATION_RED vault-gate-removed
+  RESULT: PASS
+
+Image-to-source provenance
+--------------------------
+Files copied back out of the exact image matched `git show SOURCE_COMMIT:<path>`
+byte for byte:
+
+  MATCH 34c66d06ff3ab15538d2debb203b6a8b88277dab7b15ad1c5e6fff72cd1024d4 deploy/hub/hub-daemon.sh
+  MATCH 650b3e1364e6a077d88312c00641bff7202773f33ff9a7c8fc034f1e1add95d5 deploy/hub/ecosystem.config.cjs
+  MATCH c8d821b824969b58a7dc68d6fa4825dde827b0b275ed480f7ddaf1b56786d642 tests/test735-hub-daemon-rebuild/run.sh
+
+Honest limits
+-------------
+- No production deployment or PM2 restart was performed.
+- No live database restore or full empty-host recovery was performed.
+- Database contents are backup material, not Git-reproducible source.
+- The vault-key value is intentionally absent from Git. The exact encrypted
+  backup/vault record name remains NOT COVERED and must be supplied by owner.
+- The Docker test proves launcher behavior and process-definition shape; it
+  does not claim that `pm2 online` alone proves a restored Hub is usable.

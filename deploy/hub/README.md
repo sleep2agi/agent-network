@@ -7,6 +7,49 @@
 (`0.9.0-preview.27 → 0.9.0-preview.29`),证据见 `docs/tests/report-hub-upgrade-preview29.txt`。
 这是 `deploy/` 下目前唯一不是「未演练」的一份。
 
+## Git 权威副本与空机安装
+
+生产机上的 `~/.local/bin/hub-daemon.sh` 是**部署副本**；权威源是本目录的
+[`hub-daemon.sh`](./hub-daemon.sh)。PM2 的非敏感进程定义在
+[`ecosystem.config.cjs`](./ecosystem.config.cjs)。换版本时必须在同一个变更里更新 Git
+副本的 `RUNTIME_DIR` 和变更历史，不能只改服务器孤本。
+
+```bash
+install -d -m 700 "$HOME/.local/bin" "$HOME/.commhub"
+install -m 700 deploy/hub/hub-daemon.sh "$HOME/.local/bin/hub-daemon.sh"
+
+# 部署后必须证明机器副本等于 Git 权威；不是只看 bash -n。
+test "$(git hash-object deploy/hub/hub-daemon.sh)" = \
+     "$(git hash-object "$HOME/.local/bin/hub-daemon.sh")"
+bash -n "$HOME/.local/bin/hub-daemon.sh"
+```
+
+### secret 与数据不在 Git
+
+`$HOME/.commhub/hub.env` 必须是 owner-only（建议 `0600`），至少提供非空的
+`ANET_HUB_SECRET_VAULT_KEY`。**只记录变量名，不把值提交到仓库、PM2 配置或日志。**
+它是解密既有 vault 密文所需的恢复材料：空机恢复必须从独立加密备份或由网络 owner
+安全交付**原值**；若只重新生成一个新值，旧密文不会恢复。该恢复材料的具体保险库记录名
+目前仍是 NOT COVERED，补齐前不得宣称数据恢复闭环。
+
+生产 SQLite 内容同样不在 Git。用本 runbook 的 `VACUUM INTO` 一致性备份恢复，或接受
+空库后重新注册节点；不得把活跃 WAL 库当普通文件 `cp`。
+
+### 从空 PM2 恢复进程定义
+
+先完成 sibling runtime 安装、`hub.env`/DB 恢复和上面的 launcher 安装，再执行：
+
+```bash
+pm2 start deploy/hub/ecosystem.config.cjs --only commhub-hub
+pm2 save
+```
+
+当前生产定义的非敏感坐标是：`bash` interpreter、fork mode、autorestart、
+`min_uptime=20000`、`max_restarts=20`、指数退避起点 `200ms`、cwd=`~/.commhub`。
+环境值由 launcher 的 `hub.env` 加载，不复制进 ecosystem 文件。
+
+恢复后仍必须跑下文五条验证；`pm2 online` 不是恢复成功判据。
+
 ## 拓扑
 
 ```
