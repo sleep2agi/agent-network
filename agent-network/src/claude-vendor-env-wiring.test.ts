@@ -38,5 +38,10 @@ test("the dotenv writer itself reuses the side-effect-free planner", () => {
   expect(writerStart).toBeGreaterThan(0);
   expect(planner).toBeGreaterThan(0);
   expect(body.indexOf("process.env[refName] = value")).toBeGreaterThan(planner);
-  expect(body.indexOf("writeFileSync(dotenvPath, body")).toBeGreaterThan(planner);
+  // 写盘边界在 #? 之后从裸 writeFileSync 换成了加固写入(原子 + 私有权限);
+  // 断言两条分支都在 planner 之后,并禁止退回裸 writeFileSync ——
+  // 这条测试在 #792 之前没有任何 CI 会跑,所以它带着旧的调用名烂了一段时间。
+  expect(body.indexOf("atomicWritePrivateFile(dotenvPath, body")).toBeGreaterThan(planner);
+  expect(body.indexOf('writeOpencodePrivateProfileFile(nodeDir, ".env", body)')).toBeGreaterThan(planner);
+  expect(body).not.toContain("writeFileSync(dotenvPath");
 });
