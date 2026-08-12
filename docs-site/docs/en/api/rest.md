@@ -34,7 +34,6 @@ curl http://localhost:9200/health
   "transport": "streamable-http",
   "sessions_count": 0,
   "sse_connections": 0,
-  "sse_sessions": {},
   "auth": "user-token",
   "security": "secured",
   "tmux": "disabled",
@@ -44,6 +43,12 @@ curl http://localhost:9200/health
   "uptime": 3600
 }
 ```
+
+Anonymous requests receive only the aggregate fields above and do not include
+`sse_sessions`. With a valid token, a system admin, legacy master, or DEV_OPEN
+caller can receive the full map; regular `utok_` / `ntok_` callers receive only
+sessions from networks they may access (or an empty object when they belong to
+none).
 
 ::: tip The `license` field is a v0.6 legacy
 `license: "trial"` is a leftover from the v0.6 era 14-day trial mechanism. After the Apache 2.0 OSS transition it is **no longer a commercial feature gate** (self-hosted has no notion of "expired"). The `send_task` path still runs the trial check only for backward compatibility (verify [`server/src/tools.ts:521`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L521) where `license_expired` is still emitted); if you hit it, see [troubleshooting](/en/troubleshooting). **The v0.9.x and v0.10.x scopes did not touch this** (Recovery & Observability took priority); full removal is queued for v0.11+ / unscheduled.
@@ -707,7 +712,7 @@ The `nodes` table is **persistent node identity** (written at creation, deleted 
 
 > [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
 
-Delete a node from the hub server side — removes the persistent identity row in `nodes` and the heartbeat row in `sessions` (same transaction), and pushes a `node_deleted` SSE event to the alias channel and the network channel so dashboards refresh in real time. Shipped via PR #86 "node delete cascade and node_deleted SSE".
+Delete a node from the hub server side — removes the persistent identity row in `nodes` and the heartbeat row in `sessions` (same transaction), then pushes a `node_deleted` SSE event to the alias channel. Shipped via PR #86 "node delete cascade and node_deleted SSE".
 
 ```bash
 # :ref accepts node_id / node_name / alias (URL-encoded)
@@ -734,9 +739,10 @@ curl -X DELETE "http://localhost:9200/api/nodes/%E4%BB%A3%E7%A0%811%E5%8F%B7" \
 }
 ```
 
-**SSE side effect**: after the delete, a `node_deleted` event is pushed to **two SSE channels** ([`server/src/server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
-- The alias's own SSE channel (if any subscribers remain)
-- The user-level SSE channel for the `network_id` (so every network member sees the deletion immediately)
+**SSE side effect**: after deletion, `node_deleted` is pushed only to the
+alias's own SSE channel (if a listener remains). The current handler does not
+emit a second network/user-channel deletion event; clients must not depend on
+one.
 
 ```json
 // node_deleted SSE event payload
@@ -844,7 +850,7 @@ curl "http://localhost:9200/api/server/$(python3 -c 'import urllib.parse; print(
   "hostname": "dev-machine",
   "ip": "192.168.1.42",
   "agent_count": 7,
-  "alert_level": "ok",
+  "alert_level": "green",
   "alerts": [],
   "latest": {
     "cpu_load_1min": 0.42,
@@ -870,8 +876,8 @@ curl "http://localhost:9200/api/server/$(python3 -c 'import urllib.parse; print(
 |------|------|
 | `host` | The host value from the request path |
 | `agent_count` | Active session count on this host (window over the latest row's `COUNT(*) OVER ()`) |
-| `alert_level` | `ok` / `warn` / `critical` (computed by `serverAlertLevel(latest)`; from v0.10.2 onwards, `disk_avail_gb < 1` triggers `critical` and `< 5` triggers `warn` — verify [`server/src/server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)) |
-| `alerts` | Active alert list, non-empty when `alert_level != ok` |
+| `alert_level` | `green` / `yellow` / `red` (computed by `serverAlertLevel(latest)`; `disk_avail_gb < 1` triggers `red` and `< 5` triggers `yellow`) |
+| `alerts` | Active alert list, non-empty when `alert_level != green` |
 | `latest` | Most recent heartbeat instant telemetry (CPU / mem / disk + `last_seen`) |
 | `latest.disk_total_gb` / `disk_used_gb` / `disk_avail_gb` | **Available from v0.10.2** (agent-node `2.4.1+`, [`host-telemetry.ts readDiskStats()`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/host-telemetry.ts)) — sampled via `execFileSync('df', ['-k', '/'])`; the POSIX `-k` flag shares one parse path across Linux + macOS; on Windows or parse failure, all three fields gracefully fall back to `null` (the dashboard renders `—` rather than a misleading `0`). Older agents (`< 2.4.1`) emit `null` for all three. |
 | `history.5m` | Last 5 min, **1 min bucket** (from the `agent_telemetry` history table) |

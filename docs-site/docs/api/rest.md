@@ -34,7 +34,6 @@ curl http://localhost:9200/health
   "transport": "streamable-http",
   "sessions_count": 0,
   "sse_connections": 0,
-  "sse_sessions": {},
   "auth": "user-token",
   "security": "secured",
   "tmux": "disabled",
@@ -44,6 +43,10 @@ curl http://localhost:9200/health
   "uptime": 3600
 }
 ```
+
+未认证请求只返回上述聚合数据，不包含 `sse_sessions`。携带有效 token 时：
+- system-admin、legacy master 或 DEV_OPEN 调用方可看到完整 `sse_sessions`；
+- 普通 `utok_` / `ntok_` 只看到其有权访问网络的 session；无网络成员关系时返回空对象。
 
 ::: tip `license` 字段是 v0.6 legacy
 `license: "trial"` 是 v0.6 时代 14 天试用机制的残留字段，Apache 2.0 OSS 后**不再作为商业功能门控**（自部署没有"过期"概念）。`send_task` 路径仍跑 trial 检查仅为后向兼容（verify [`server/src/tools.ts:521`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L521) `license_expired` 仍 emit），若命中见 [troubleshooting](/troubleshooting)。**v0.9.x / v0.10.x scope 都未动**（Recovery & Observability 主题为先），整段移除排到 v0.11+ / 未排期。
@@ -707,7 +710,7 @@ curl http://localhost:9200/api/nodes \
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
 
-删除节点（hub server 端）—— 从 `nodes` 表删持久身份 + 从 `sessions` 表删运行时心跳记录（同一个 transaction），并往 alias channel + network channel 推 `node_deleted` SSE 事件让 dashboard 实时刷新。配套 PR #86「node delete cascade and node_deleted SSE」。
+删除节点（hub server 端）—— 从 `nodes` 表删持久身份 + 从 `sessions` 表删运行时心跳记录（同一个 transaction），并向 alias channel 推 `node_deleted` SSE 事件。配套 PR #86「node delete cascade and node_deleted SSE」。
 
 ```bash
 # :ref 接受 node_id / node_name / alias 任一（URL-encoded）
@@ -734,9 +737,7 @@ curl -X DELETE "http://localhost:9200/api/nodes/%E4%BB%A3%E7%A0%811%E5%8F%B7" \
 }
 ```
 
-**SSE 副作用**：删完往**两个 SSE channel** 推 `node_deleted` event（[`server/src/server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)）：
-- `alias` 自身的 SSE channel（如果还有订阅者）
-- 该 `network_id` 的 user 级 SSE channel（每个网络成员都能立刻看到）
+**SSE 副作用**：删完只向 `alias` 自身的 SSE channel 推 `node_deleted` event（如果还有订阅者）。当前 handler 没有向 network/user channel 再推一份；客户端不能依赖第二条删除广播。
 
 ```json
 // node_deleted SSE event payload
@@ -907,7 +908,7 @@ curl "http://localhost:9200/api/server/$(python3 -c 'import urllib.parse; print(
   "hostname": "dev-machine",
   "ip": "192.168.1.42",
   "agent_count": 7,
-  "alert_level": "ok",
+  "alert_level": "green",
   "alerts": [],
   "latest": {
     "cpu_load_1min": 0.42,
@@ -933,8 +934,8 @@ curl "http://localhost:9200/api/server/$(python3 -c 'import urllib.parse; print(
 |------|------|
 | `host` | 请求路径里传入的 host 值 |
 | `agent_count` | 该 host 上活跃 session 数（窗口取最新一行的 `COUNT(*) OVER ()`）|
-| `alert_level` | `ok` / `warn` / `critical`（取 `serverAlertLevel(latest)` 计算；v0.10.2+ 加 `disk_avail_gb < 1 → critical` / `< 5 → warn` 触发，verify [`server/src/server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)）|
-| `alerts` | 当前命中告警列表，`alert_level != ok` 时非空 |
+| `alert_level` | `green` / `yellow` / `red`（取 `serverAlertLevel(latest)` 计算；`disk_avail_gb < 1 → red` / `< 5 → yellow`）|
+| `alerts` | 当前命中告警列表，`alert_level != green` 时非空 |
 | `latest` | 该 host 最近一次心跳的瞬时 telemetry（CPU / mem / disk + `last_seen`）|
 | `latest.disk_total_gb` / `disk_used_gb` / `disk_avail_gb` | **v0.10.2 起**（agent-node `2.4.1+`，[`host-telemetry.ts readDiskStats()`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/host-telemetry.ts)）—— 通过 `execFileSync('df', ['-k', '/'])` 采样，POSIX `-k` Linux + macOS 同 parse 路径；Windows / 解析失败 graceful `null`（dashboard 渲染 `—` 不误导成 0）。老 agent (`< 2.4.1`) 不带字段时三字段都 `null` |
 | `history.5m` | 最近 5min，**1 min bucket**（取自 `agent_telemetry` 历史表）|
