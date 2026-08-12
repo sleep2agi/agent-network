@@ -1,0 +1,47 @@
+# PR #546 current-main factual correction replay
+
+Date: 2026-08-13 (Asia/Shanghai)
+
+## Coordinates
+
+- Base: `b7d1289bc67081ab597f17fba7034506394757ce`
+- Source: `c011a0601a08ad823ef746dd5e14bb5a8b243218`
+- Changed source files: `docs-site/docs/api/rest.md`,
+  `docs-site/docs/en/api/rest.md`
+
+## Corrections verified against current source
+
+1. Anonymous `GET /health` omits `sse_sessions`. Authenticated callers may
+   receive a full or network-filtered map according to their principal.
+2. `DELETE /api/nodes/:ref` calls `pushEvent(node.alias, ...)` once. The
+   handler does not emit a second network/user-channel deletion event.
+3. `serverAlertLevel()` returns `green`, `yellow`, or `red`; the REST examples
+   and field descriptions no longer claim `ok`, `warn`, or `critical`.
+
+Static negative scan over both pages found zero occurrences of the retired
+two-channel and old alert-level claims. Positive scans found the corrected
+bilingual descriptions and response examples.
+
+## Docker documentation build
+
+The first attempted command used a nonexistent `docs-site/Dockerfile` and
+failed before building. It is not counted as evidence. The successful run used
+the repository's existing Bun/VitePress Docker authority:
+
+```sh
+sg docker -c 'docker build -t anet-docs546:c011a060 -f tests/test596-goal-loop-docs/Dockerfile .'
+sg docker -c 'docker run --rm --entrypoint bash anet-docs546:c011a060 -ceu "cd /workspace/docs-site && bun run build"'
+```
+
+Result: VitePress client/server bundles and rendered pages completed
+successfully in `39.91s`. The existing large-chunk warning remains non-fatal.
+
+## Scope and limits
+
+- Documentation and report only; no server code, API, schema, database,
+  package, production config, or deployment changed.
+- This is a narrow replay of the still-valid factual corrections from old PR
+  #546. It does not resurrect that branch's deletion-heavy full rewrite.
+- The Docker build proves the changed Markdown renders; it does not deploy the
+  docs site.
+
