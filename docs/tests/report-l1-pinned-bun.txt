@@ -1,0 +1,72 @@
+# L1 contract-suite pinned Bun evidence
+
+Date: 2026-08-13 (Asia/Shanghai)
+Base: 05d4b73e9efe42421700e56e163164759a361eb0
+Source: 2c95173b112c7721c7777f7e444dff72bf1f2dc3
+
+## Trigger and denominator
+
+The unchanged L1 workflow failed twice on PR #757 while building
+qa-cli-02-network-create at `curl -fsSL https://bun.sh/install | bash`.
+A first one-file correction made qa-cli-02 pass, after which the same workflow
+immediately failed at the identical line in qa-dash-07-auth-boundary. That A/B
+proved the failure belonged to the L1 installer denominator, not one isolated
+test or PR #757 product bytes.
+
+`scripts/qa.sh --list` currently names 14 L1 Docker suites:
+
+- 13 Node-based images now use tests/lib/install-bun-pinned.sh;
+- test686-rest-shape-golden already starts from oven/bun:1.3.14;
+- 0/14 L1 Dockerfiles retain bun.sh/install.
+
+This closes the L1 subset only. The larger #728 repository denominator remains
+open for Dockerfiles outside scripts/qa.sh --l1.
+
+## Installation contract
+
+The shared helper:
+
+- accepts only the x86_64 architecture used by these CI images;
+- pins Bun 1.3.14;
+- downloads the versioned GitHub release archive with fail-closed retries;
+- verifies SHA256 with `sha256sum --check --strict` before extraction;
+- installs `bun` and its required `bunx` argv-0 symlink;
+- requires both commands to report exactly 1.3.14.
+
+The checksum was independently read from Bun v1.3.14 SHASUMS256.txt:
+
+    951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f  bun-linux-x64.zip
+
+## Docker evidence
+
+Command (host Docker group boundary preserved):
+
+    sg docker -c 'bash scripts/qa.sh --l1'
+
+Result:
+
+- 14/14 named L1 suites PASS;
+- aggregate: `ALL PASS in 102s`;
+- exit code: 0;
+- runner log SHA256:
+  `7f2663d628bc4c6bf0b2b26e46f92cde51fd2693d315e4afb238e2d9289b8321`.
+
+Witnessed-red control used qa-dash-07 with an all-zero
+BUN_LINUX_X64_SHA256 build argument. Docker build exited 1 at the shared
+helper's checksum gate and printed both `FAILED` and
+`computed checksum did NOT match`.
+
+The earlier one-file diagnostic is intentionally superseded by this complete
+L1 denominator. It also caught a real integration requirement: installing the
+archive binary without a bunx symlink allowed the image to build but made the
+actual anet hub lifecycle fail. The shared helper creates and version-checks
+that symlink, and all real L1 journeys pass.
+
+## Honest limits
+
+- The GitHub release archive remains an external network input; it is pinned,
+  retried, and verified, not vendored.
+- This does not make all repository Dockerfiles hermetic and does not close
+  #728.
+- No npm package, release, production process/config/database, secret, or
+  repository protection setting was changed.
