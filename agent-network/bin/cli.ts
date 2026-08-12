@@ -2580,13 +2580,14 @@ Daemon (host_supervisor — required by the dashboard's node-creation wizard):
   anet daemon list              List locally-configured daemons
 
 Config & tokens:
-  anet config get|set <k> [v]   Read/write node or global config
+  anet config [path|json]       Show config summary, path, or raw JSON
   anet token ls|create|revoke   Manage API tokens
-  anet batch <file>             Run a batch spec (multi-node)
+  anet batch <verb> [prefix]    Manage groups created by create --batch
 
 OpenCode:
   anet opencode upgrade-pin <v> Verify + pin the exact opencode-ai release
-  anet opencode auth-login <n>  API-key login for an opencode-cli node
+  anet opencode auth-login <n> --provider <anthropic|openai>
+                                API-key login for an opencode-cli node
 
 Other:
   anet import [alias]           Import sessions from CommHub
