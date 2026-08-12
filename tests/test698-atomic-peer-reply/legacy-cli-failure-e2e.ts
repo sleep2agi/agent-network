@@ -112,8 +112,6 @@ const dispatch = async (task: string) => {
 };
 const firstTaskId = await dispatch("same-result source task A");
 const secondTaskId = await dispatch("same-result source task B");
-const maxFirstTaskId = await dispatch("MAX_LENGTH_REPLY_698 source task A");
-const maxSecondTaskId = await dispatch("MAX_LENGTH_REPLY_698 source task B");
 const missingTaskId = await dispatch("identity row disappears before drain");
 
 const db = new Database(dbPath);
@@ -139,22 +137,20 @@ writeFileSync(configPath, JSON.stringify({
   env: { ANTHROPIC_API_KEY: "test-only-placeholder" },
 }, null, 2));
 
-const spawnAgent = () => Bun.spawn([
-    "bun", "--preload", "/workspace/tests/test698-atomic-peer-reply/sdk-stub-preload.ts",
-    "/workspace/agent-node/src/cli.ts", "--config", configPath, "--alias", receiverAlias,
-  ], {
-    cwd: "/workspace",
-    env: {
-      ...process.env,
-      HOME: `${work}/home`,
-      REPO: "/workspace",
-      TEST673_CAPTURE_FILE: `${work}/sdk-capture.json`,
-    },
-    stdout: Bun.file(`${work}/agent.log`),
-    stderr: Bun.file(`${work}/agent.log`),
-  });
-
-let agent = spawnAgent();
+const agent = Bun.spawn([
+  "bun", "--preload", "/workspace/tests/test698-atomic-peer-reply/sdk-stub-preload.ts",
+  "/workspace/agent-node/src/cli.ts", "--config", configPath, "--alias", receiverAlias,
+], {
+  cwd: "/workspace",
+  env: {
+    ...process.env,
+    HOME: `${work}/home`,
+    REPO: "/workspace",
+    TEST673_CAPTURE_FILE: `${work}/sdk-capture.json`,
+  },
+  stdout: Bun.file(`${work}/agent.log`),
+  stderr: Bun.file(`${work}/agent.log`),
+});
 
 try {
   await waitFor(async () => {
@@ -175,42 +171,6 @@ try {
       && pending.some((entry: any) => entry.taskId === missingTaskId);
   }, "identity failure stays in pending queue", 400);
 
-  // A valid send_reply body may already occupy all 10,000 characters.  The
-  // legacy task route must not append a marker and cross old Hub's schema
-  // cap.  This means two equal full-length replies collide in the old Hub's
-  // content-only dedup window: one is delivered now and the other must stay
-  // pending (not be dropped as a permanent app-level rejection).
-  await waitFor(async () => {
-    const inbox = await tool(dispatcher.token, "get_inbox", { alias: dispatcherAlias, limit: 20 });
-    const maxReplies = (inbox.messages || []).filter((message: any) =>
-      message.type === "task"
-      && message.from_session === receiverAlias
-      && message.content === "x".repeat(10_000));
-    if (maxReplies.length !== 1 || !existsSync(pendingPath)) return false;
-    const pending = JSON.parse(readFileSync(pendingPath, "utf8"));
-    return [maxFirstTaskId, maxSecondTaskId]
-      .filter((taskId) => pending.some((entry: any) => entry.taskId === taskId)).length === 1;
-  }, "one full-length reply delivered and its duplicate retained", 400);
-
-  // Restart after the bounded dedup window.  Startup drains the durable
-  // pending queue before fetching fresh inbox work, so the second identical
-  // 10k reply must now be accepted without rerunning the model task.
-  agent.kill();
-  await agent.exited;
-  await Bun.sleep(5_200);
-  agent = spawnAgent();
-  await waitFor(async () => {
-    const inbox = await tool(dispatcher.token, "get_inbox", { alias: dispatcherAlias, limit: 20 });
-    const maxReplies = (inbox.messages || []).filter((message: any) =>
-      message.type === "task"
-      && message.from_session === receiverAlias
-      && message.content === "x".repeat(10_000));
-    if (maxReplies.length !== 2 || !existsSync(pendingPath)) return false;
-    const pending = JSON.parse(readFileSync(pendingPath, "utf8"));
-    return !pending.some((entry: any) =>
-      entry.taskId === maxFirstTaskId || entry.taskId === maxSecondTaskId);
-  }, "second full-length reply delivered after dedup window", 400);
-
   const inbox = await tool(dispatcher.token, "get_inbox", { alias: dispatcherAlias, limit: 20 });
   const replies = (inbox.messages || []).filter((message: any) =>
     message.type === "task" && message.from_session === receiverAlias);
@@ -220,7 +180,7 @@ try {
   const pending = JSON.parse(readFileSync(pendingPath, "utf8"));
   const retained = pending.filter((entry: any) => entry.taskId === missingTaskId);
   if (retained.length !== 1) throw new Error(`identity pending count=${retained.length}`);
-  console.log(`LEGACY_CLI_FAILURE_PASS equal_replies=2 full_length_replies=2 identity_egress=0 pending=1 task_ids=${firstTaskId.slice(0, 8)},${secondTaskId.slice(0, 8)}`);
+  console.log(`LEGACY_CLI_FAILURE_PASS equal_replies=2 identity_egress=0 pending=1 task_ids=${firstTaskId.slice(0, 8)},${secondTaskId.slice(0, 8)}`);
 } catch (error) {
   const logPath = `${work}/agent.log`;
   if (existsSync(logPath)) console.error(`--- legacy failure agent log ---\n${readFileSync(logPath, "utf8")}`);

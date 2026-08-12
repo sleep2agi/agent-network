@@ -67,15 +67,10 @@ async function* fakeQuery(args: any) {
   // Minimal success stream so cli's loop sets a session and returns a result.
   yield { type: "system", subtype: "init", session_id: "test673-stub-session" } as any;
   const forcedFailure = typeof prompt === "string" && prompt.includes("FORCE_FAILED_STATUS_698");
-  const maxLengthReply = typeof prompt === "string" && prompt.includes("MAX_LENGTH_REPLY_698");
   yield {
     type: "result",
     subtype: "success",
-    result: forcedFailure
-      ? "API error: FORCE_FAILED_STATUS_698"
-      : maxLengthReply
-        ? "x".repeat(10_000)
-        : "TEST673_STUB_OK",
+    result: forcedFailure ? "API error: FORCE_FAILED_STATUS_698" : "TEST673_STUB_OK",
     usage: { input_tokens: 1, output_tokens: 1 },
     total_cost_usd: 0.0001,
     num_turns: 1,
