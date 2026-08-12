@@ -5704,7 +5704,21 @@ async function serverCommand() {
       // The post-spawn 15s /health poll then a Bun-missing check (see
       // ~30 lines down) cannot rescue this — spawn ENOENT throws before
       // the poll loop ever runs.
-      if (!commandExists("bunx") && !commandExists("bun")) {
+      // 🔴 判据必须等于**真实需求**。下面唯一的启动方式是 `spawn("bunx", …)`
+      // (cli.ts 内 commhub-server 只有这一个 spawn 点),所以「有 bun 就放行」是错的:
+      // bun 单独从来不够。原来的 OR 会让 bun-only 的机器通过前置检查,
+      // 然后在 spawn 处失败,并报「it disappeared from PATH」—— 而它从来没在过。
+      // 实测:release zip 装的 bun 不带 bunx;只加一条 bunx 软链,hub 立刻起来(#766)。
+      if (!commandExists("bunx")) {
+        // bun 在、bunx 不在 —— 这是最常见也最容易被误诊的一种,单独给话术。
+        if (commandExists("bun")) {
+          console.error(`\n  ❌ 找到了 bun,但没有 bunx —— anet hub start 用 \`bunx\` 启动 commhub-server。`);
+          console.error(`\n     bunx 通常由官方安装器创建。补一条即可:`);
+          console.error(`       ln -s "$(command -v bun)" "$(dirname "$(command -v bun)")/bunx"`);
+          console.error(`\n     或改用带 bunx 的安装方式:  npm i -g bun`);
+          console.error(`\n     Then re-run: anet hub start\n`);
+          process.exit(1);
+        }
         console.error(`\n  ❌ anet hub start requires the Bun runtime (commhub-server is bun-only — uses Bun.serve + bun:sqlite, no Node fallback).`);
         console.error(`\n     Install Bun first:`);
         // 刻意不给 `curl … | bash` 一行流:那正是 #729/#733/#743 在修的 fail-open
@@ -5734,7 +5748,9 @@ async function serverCommand() {
       // preflight's UX promise. Log + exit gracefully.
       child.on("error", (err: any) => {
         if (err?.code === "ENOENT") {
-          console.error(`\n  ❌ Failed to spawn bunx — it disappeared from PATH after the preflight check.`);
+          console.error(`\n  ❌ Failed to spawn bunx.`);
+          // 不再说 "disappeared from PATH":那条归因会把人引去查 PATH 与
+          // 「谁卸载了 bun」,而绝大多数情况是这台机器从来没有过 bunx(#766)。
           console.error(`     This usually means Bun was uninstalled or PATH changed mid-process.`);
           console.error(`     Try: which bunx && bunx --version`);
         } else {
