@@ -143,7 +143,7 @@ import { resolveNodeIdSource } from "./runtime/node-id-source";
 import { emitExplicitTaskTrace, sendExplicitTaskWithTrace, waitForExplicitTaskLifecycle, type ExplicitTaskTraceContext } from "./explicit-task-trace";
 import { inboxDeliveryPolicy } from "./inbox-message-policy";
 import { routePeerReplySse, runInboxTurnByReplyPolicy } from "./peer-reply-inbox";
-import { createPeerReplyCapabilityCache, resolveOldHubTaskOrigin, sendPeerReplyCompatible } from "./peer-reply-send";
+import { createPeerReplyCapabilityCache, legacyPeerReplyTaskText, resolveOldHubTaskOrigin, sendPeerReplyCompatible } from "./peer-reply-send";
 import { sendPeerReplyTaskWithTrace } from "./peer-reply-task-trace";
 
 const home = homedir();
@@ -1374,7 +1374,7 @@ async function sendReply(
         status: args.failed ? "failed" : "replied",
       }, 0),
       sendLegacy: async (args) => {
-        const taskText = args.failed ? `⚠️ ${args.text}` : args.text;
+        const taskText = legacyPeerReplyTaskText(args);
         return sendPeerReplyTaskWithTrace({
           alias: args.target,
           task: taskText,

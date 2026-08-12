@@ -32,6 +32,21 @@ export function createPeerReplyCapabilityCache(): PeerReplyCapabilityCache {
   return { hubSupportsTool: null };
 }
 
+/**
+ * Give every legacy peer-reply task a stable identity-bearing body.
+ *
+ * Old Hubs deduplicate send_task by (from, to, content) only. Two unrelated
+ * source tasks can legitimately produce the same reply text (for example
+ * "done"). Without the original task id in the content, the second reply is
+ * rejected as duplicate_send and its pending entry is dropped. The marker is
+ * stable for retries of one source task, so ambiguous retries remain covered
+ * by the old Hub's dedup guard while distinct source tasks cannot collide.
+ */
+export function legacyPeerReplyTaskText(args: Pick<PeerReplySendArgs, "text" | "taskId" | "failed">): string {
+  const body = args.failed ? `⚠️ ${args.text}` : args.text;
+  return `${body}\n\n[peer-reply in_reply_to=${args.taskId}]`;
+}
+
 function oldHubIdentityUnavailable(cause?: unknown): CommHubError {
   return new CommHubError(
     "old Hub task identity unavailable; preserving pending reply",

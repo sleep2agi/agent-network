@@ -3,6 +3,7 @@ import { CommHubError } from "./reply-reliability";
 import {
   createPeerReplyCapabilityCache,
   isPeerReplyCapabilityUnavailable,
+  legacyPeerReplyTaskText,
   resolveOldHubTaskOrigin,
   sendPeerReplyCompatible,
 } from "./peer-reply-send";
@@ -21,6 +22,17 @@ const rejectUnexpectedLegacyReply = async () => {
 const oldHubOriginIsNode = async () => true;
 
 describe("peer reply capability fallback", () => {
+  test("legacy task bodies are stable per original task and distinct across equal replies", () => {
+    const first = legacyPeerReplyTaskText(args);
+    const retry = legacyPeerReplyTaskText(args);
+    const second = legacyPeerReplyTaskText({ ...args, taskId: "task_699" });
+    expect(first).toBe("done\n\n[peer-reply in_reply_to=task_698]");
+    expect(retry).toBe(first);
+    expect(second).not.toBe(first);
+    expect(legacyPeerReplyTaskText({ ...args, failed: true }))
+      .toBe("⚠️ done\n\n[peer-reply in_reply_to=task_698]");
+  });
+
   test("new Hub + capable recipient uses the atomic tool only", async () => {
     const calls: string[] = [];
     const result = await sendPeerReplyCompatible(args, {
