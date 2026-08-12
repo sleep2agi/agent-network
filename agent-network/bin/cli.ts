@@ -6253,7 +6253,7 @@ Options:
 Options:
   --port <port>      Port (default: 9200 for server, 3000 for dashboard)
   --username <user>  Bootstrap admin username
-  --password <pass>  Bootstrap admin password (default: anethub)
+  --password <pass>  Bootstrap admin password (default: a random anet-xxxx, printed once)
 
 Example:
   anet hub start                     # Start server + bootstrap admin account
@@ -9866,14 +9866,19 @@ async function loginCommand() {
       console.error(`👉 首次用这个 hub? 试一下:`);
       console.error(`     anet register                              # 在 hub 上建新账号`);
       console.error("");
-      console.error(`👉 自己刚起的本地 hub? 默认 admin:`);
-      console.error(`     anet login --username admin --password anethub`);
+      console.error(`👉 自己刚起的本地 hub?`);
+      console.error(`     密码是 anet hub start 启动时【打印过一次】的随机串(形如 anet-xxxxxxxx),`);
+      console.error(`     不是固定的 anethub —— 见 #261 P0-2。翻一下 hub 的启动输出。`);
+      console.error(`     管理员凭据落在: ~/.anet/server/admin-utok.json`);
       console.error("");
       console.error(`👉 自己 hub 忘了密码? 在 hub host 上跑:`);
       console.error(`     # 必须在 hub server 那台机器上跑 (--i-am-on-the-hub-host 是 safety flag, 防误删别人 DB):`);
       console.error(`     anet hub admin reset-user --username admin --i-am-on-the-hub-host true`);
     }
-    return;
+    // A failed login used to `return`, which exits 0. Any script, CI step or
+    // deploy automation that ran `anet login` therefore continued as if it
+    // had succeeded. Fail loudly enough for a shell to notice.
+    process.exit(1);
   }
   // res.ok === true from here — login succeeded.
   try {
