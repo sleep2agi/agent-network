@@ -35,7 +35,10 @@ NTOK=$(echo "$REG" | python3 -c "import json,sys; print(json.load(sys.stdin).get
 # 3. Auto-created network
 echo "3. Default network"
 NETS=$(curl -s "$BASE/api/networks" -H "$REST_AUTH")
-echo "$NETS" | grep -q '"default"' && pass "default network created" || fail "no default network"
+# The auto-created network is named after its owner, not the literal
+# "default" — assert on the registered username so this stays a test of
+# "a network was auto-created" rather than of what it happens to be called.
+echo "$NETS" | grep -q '"newuser"' && pass "auto-created network named after owner" || fail "no auto-created network"
 NET_ID=$(echo "$NETS" | python3 -c "import json,sys; print(json.load(sys.stdin).get('networks',[])[0]['network_id'])" 2>/dev/null)
 [ -n "$NET_ID" ] && pass "network_id present" || fail "no network_id"
 

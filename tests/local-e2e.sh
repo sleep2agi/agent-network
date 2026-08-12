@@ -121,7 +121,8 @@ echo ""
 # ═══════════════════════════════════════════
 echo "4. Network Management"
 R=$(curl -s "$BASE/api/networks" -H "$V3H")
-echo "$R" | grep -q 'default' && pass "GET /api/networks (has default)" || fail "list networks"
+# Auto-created network is named after its owner (registered as "e2euser").
+echo "$R" | grep -q 'e2euser' && pass "GET /api/networks (has owner-named network)" || fail "list networks"
 NET_ID=$(echo "$R" | python3 -c "import json,sys; print(json.load(sys.stdin)[0]['network_id'])" 2>/dev/null)
 
 R=$(curl -s -X POST "$BASE/api/networks" -H "$V3H" -H "Content-Type: application/json" -d '{"name":"test-net-2","description":"e2e test"}')

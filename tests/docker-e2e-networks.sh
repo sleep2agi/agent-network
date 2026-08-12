@@ -165,9 +165,15 @@ echo "$REN" | grep -q '"ok":true' && pass "rename network" || fail "rename faile
 NETS_R=$(curl -s -H "Authorization: Bearer $TOKEN_A" http://127.0.0.1:9200/api/networks)
 echo "$NETS_R" | grep -q 'alpha-renamed' && pass "renamed name in list" || fail "rename not reflected"
 # Duplicate name rejected
+# Seed the collision explicitly instead of borrowing whatever the
+# auto-created network is called.
+DUP_SEED=$(curl -s -X POST http://127.0.0.1:9200/api/networks \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN_A" \
+  -d '{"name":"dup-target"}')
+echo "$DUP_SEED" | grep -q '"ok":true' && pass "seeded dup-target for collision" || fail "dup-target seed failed"
 DUP_REN=$(curl -s -X PUT "http://127.0.0.1:9200/api/networks/$NET_A_ID" \
   -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN_A" \
-  -d '{"name":"default"}')
+  -d '{"name":"dup-target"}')
 echo "$DUP_REN" | grep -q '"ok":false' && pass "rename to existing name rejected" || fail "dup rename accepted"
 echo ""
 
