@@ -56,6 +56,13 @@ anet network create prod --description "Production environment"
 anet register  # → Auto-creates network "<your-username>", role: owner
 ```
 
+::: tip On older hubs this network is called "default"
+Naming it after the owner came later. Hubs predating that change name every user's
+auto-created network `default`, which is why the Dashboard sidebar can show a run of
+identically named entries. Upgrading the hub fixes new registrations; existing networks
+keep their current names — rename them with `anet network rename` if you want.
+:::
+
 ### Switch
 
 ```bash
