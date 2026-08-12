@@ -31,7 +31,15 @@ test "$(git hash-object deploy/fleet/pm2-fleet-boot.sh)" = \
 systemd-analyze --user verify "$HOME/.config/systemd/user/pm2-fleet.service"
 systemctl --user daemon-reload
 systemctl --user enable pm2-fleet.service
-loginctl show-user "$USER" -p Linger
+
+# 🔴 linger 是这条链能否在开机时起来的**前提**,不是可选项。
+#    pm2-fleet.service 是 **user** unit(WantedBy=default.target):没有 linger,
+#    user manager 只在该用户登录期间存在 —— 机器重启后没人登录,单元根本不会跑,
+#    而 `systemctl --user is-enabled` 仍然显示 enabled,看不出问题。
+#    此前这里只有下面那条 show-user(**查看**),没有启用步骤:
+#    照着走会看到 Linger=no,然后手册没有下一句。
+loginctl enable-linger "$USER"
+loginctl show-user "$USER" -p Linger      # 必须是 Linger=yes
 ```
 
 Do not start the unit until the process inventory and recovery inputs below are
