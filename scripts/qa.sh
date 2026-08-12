@@ -70,6 +70,7 @@ L1_TESTS=(
   "qa-hub-09-task-state-machine"
   "qa-node-02-success-reply"
   "qa-node-03b-task-events"
+  "test686-rest-shape-golden"
 )
 
 if [[ "${1:-}" == "--list" ]]; then
@@ -139,7 +140,11 @@ if [[ $RUN_L1 -eq 1 ]]; then
   for t in "${L1_TESTS[@]}"; do
     # Build (cached if recent)
     note "build $t"
-    if ! dockerrun "docker build -q -t anet-$t -f tests/$t/Dockerfile ." >/tmp/qa-l1-$t-build.log 2>&1; then
+    build_args=""
+    if [[ "$t" == "test686-rest-shape-golden" ]]; then
+      build_args="--build-arg TEST686_SOURCE_COMMIT=$(git rev-parse HEAD)"
+    fi
+    if ! dockerrun "docker build -q $build_args -t anet-$t -f tests/$t/Dockerfile ." >/tmp/qa-l1-$t-build.log 2>&1; then
       fail "L1 $t — build failed, see /tmp/qa-l1-$t-build.log"
       FAILED=$((FAILED+1))
       continue

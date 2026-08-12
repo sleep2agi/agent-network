@@ -2,15 +2,6 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  AUDIT_LOG_REST_COLUMNS,
-  COMPLETION_REST_COLUMNS,
-  NETWORK_REST_COLUMNS,
-  SESSION_REST_COLUMNS,
-  TASK_EVENT_REST_COLUMNS,
-  TASK_REST_COLUMNS,
-  SCHEDULED_TASK_STORAGE_COLUMNS,
-} from "./rest-projections.js";
 
 const PRIVATE_DB_DIR = mkdtempSync(join(tmpdir(), "anet-rest-columns-"));
 process.env.COMMHUB_DB ||= join(PRIVATE_DB_DIR, "hub.db");
@@ -24,6 +15,54 @@ let networkId = "";
 const INTERNAL_SENTINEL = "future_internal_only";
 const sortedKeys = (value: Record<string, unknown>): string[] => Object.keys(value).sort();
 const sorted = (values: readonly string[]): string[] => [...values].sort();
+
+// Independent wire-contract golden. Do not derive these expectations from
+// rest-projections.ts: doing so makes a deleted projection column disappear
+// from both the response and the expected value, producing a false green.
+const GOLDEN_RESPONSE_KEYS = {
+  networkList: [
+    "network_id", "network_name", "owner_id", "description", "settings",
+    "created_at", "updated_at", "visibility", "max_members", "member_role", "name",
+  ],
+  networkDetail: [
+    "network_id", "network_name", "owner_id", "description", "settings",
+    "created_at", "updated_at", "visibility", "max_members",
+  ],
+  statusSession: [
+    "resume_id", "alias", "tmux_name", "server", "ip", "hostname", "agent",
+    "project_dir", "version", "status", "task", "output", "progress", "score",
+    "cpu_load_1min", "cpu_cores", "mem_total_gb", "mem_used_gb", "mem_avail_gb",
+    "disk_total_gb", "disk_used_gb", "disk_avail_gb", "process_rss_bytes",
+    "process_rss_mb", "process_cpu_pct", "process_uptime_seconds",
+    "process_in_flight_count", "network_id", "registered_at", "updated_at",
+    "node_id", "session_id", "config_path", "channels", "last_seen_at", "model",
+    "external_schedules", "runtime", "host", "process_telemetry",
+  ],
+  task: [
+    "task_id", "from_node_id", "from_name", "to_node_id", "to_name", "priority",
+    "status", "content", "result", "in_reply_to", "requires_response", "scope",
+    "created_at", "delivered_at", "started_at", "runtime_submitted_at", "consumed_at",
+    "completed_at", "expires_at", "network_id", "parent_task_id", "meta_json",
+  ],
+  audit: [
+    "id", "user_id", "username", "action", "target_type", "target_id", "detail",
+    "ip", "network_id", "created_at",
+  ],
+  taskEvent: [
+    "id", "task_id", "from_status", "to_status", "event_type", "actor", "detail",
+    "created_at", "network_id",
+  ],
+  completion: [
+    "id", "session_name", "task", "result", "artifacts", "score",
+    "duration_minutes", "network_id", "completed_at",
+  ],
+  scheduledTask: [
+    "schedule_id", "network_id", "name", "target_node_id", "target_alias",
+    "task_content", "priority", "schedule_type", "timezone", "overlap_policy",
+    "misfire_policy", "status", "next_run_at", "last_run_at", "revision",
+    "created_at", "updated_at", "schedule",
+  ],
+} as const;
 
 async function api(path: string): Promise<any> {
   const response = await fetch(`${base}${path}`, {
@@ -97,51 +136,50 @@ describe("#311 REST response projections are stable across future ALTER TABLE", 
   test("network list and detail preserve their existing public keys", async () => {
     const list = await api("/api/networks");
     const row = list.networks.find((item: any) => item.network_id === networkId);
-    expect(sortedKeys(row)).toEqual(sorted([...NETWORK_REST_COLUMNS, "member_role", "name"]));
+    expect(sortedKeys(row)).toEqual(sorted(GOLDEN_RESPONSE_KEYS.networkList));
     expect(row[INTERNAL_SENTINEL]).toBeUndefined();
 
     const detail = await api(`/api/networks/${networkId}`);
-    expect(sortedKeys(detail.network)).toEqual(sorted(NETWORK_REST_COLUMNS));
+    expect(sortedKeys(detail.network)).toEqual(sorted(GOLDEN_RESPONSE_KEYS.networkDetail));
     expect(detail.network[INTERNAL_SENTINEL]).toBeUndefined();
   });
 
   test("full status preserves telemetry compatibility without storage drift", async () => {
     const body = await api(`/api/status?network_id=${networkId}`);
     const row = body.sessions.find((item: any) => item.alias === "rest-shape-node");
-    expect(sortedKeys(row)).toEqual(sorted([...SESSION_REST_COLUMNS, "runtime", "host", "process_telemetry"]));
+    expect(sortedKeys(row)).toEqual(sorted(GOLDEN_RESPONSE_KEYS.statusSession));
     expect(row[INTERNAL_SENTINEL]).toBeUndefined();
     expect(row.external_schedules).toEqual({ observed_at: "2026-08-10T02:00:00.000Z", schedules: [] });
   });
 
   test("task list and task detail expose the same explicit contract", async () => {
     const list = await api(`/api/tasks?network_id=${networkId}&task_id=task-rest-shape&skip_stats=1`);
-    expect(sortedKeys(list.tasks[0])).toEqual(sorted(TASK_REST_COLUMNS));
+    expect(sortedKeys(list.tasks[0])).toEqual(sorted(GOLDEN_RESPONSE_KEYS.task));
     expect(list.tasks[0][INTERNAL_SENTINEL]).toBeUndefined();
 
     const detail = await api(`/api/tasks/task-rest-shape?network_id=${networkId}`);
-    expect(sortedKeys(detail.task)).toEqual(sorted(TASK_REST_COLUMNS));
+    expect(sortedKeys(detail.task)).toEqual(sorted(GOLDEN_RESPONSE_KEYS.task));
     expect(detail.task[INTERNAL_SENTINEL]).toBeUndefined();
   });
 
   test("audit, task-event, and completion rows are explicit", async () => {
     const audit = await api("/api/audit-log?action=shape_action");
-    expect(sortedKeys(audit.logs[0])).toEqual(sorted(AUDIT_LOG_REST_COLUMNS));
+    expect(sortedKeys(audit.logs[0])).toEqual(sorted(GOLDEN_RESPONSE_KEYS.audit));
     expect(audit.logs[0][INTERNAL_SENTINEL]).toBeUndefined();
 
     const events = await api(`/api/task_events?network_id=${networkId}&task_id=task-rest-shape`);
-    expect(sortedKeys(events.events[0])).toEqual(sorted(TASK_EVENT_REST_COLUMNS));
+    expect(sortedKeys(events.events[0])).toEqual(sorted(GOLDEN_RESPONSE_KEYS.taskEvent));
     expect(events.events[0][INTERNAL_SENTINEL]).toBeUndefined();
 
     const completions = await api(`/api/completions?network_id=${networkId}&since=2000-01-01T00:00:00.000Z`);
-    expect(sortedKeys(completions.completions[0])).toEqual(sorted(COMPLETION_REST_COLUMNS));
+    expect(sortedKeys(completions.completions[0])).toEqual(sorted(GOLDEN_RESPONSE_KEYS.completion));
     expect(completions.completions[0][INTERNAL_SENTINEL]).toBeUndefined();
   });
 
   test("scheduled-task decoding keeps storage-only identity and JSON private", async () => {
     const body = await api(`/api/scheduled-tasks?network_id=${networkId}`);
     const row = body.schedules.find((item: any) => item.schedule_id === "schedule-rest-shape");
-    const publicColumns = SCHEDULED_TASK_STORAGE_COLUMNS.filter((key) => key !== "created_by" && key !== "schedule_json");
-    expect(sortedKeys(row)).toEqual(sorted([...publicColumns, "schedule"]));
+    expect(sortedKeys(row)).toEqual(sorted(GOLDEN_RESPONSE_KEYS.scheduledTask));
     expect(row.created_by).toBeUndefined();
     expect(row.schedule_json).toBeUndefined();
     expect(row[INTERNAL_SENTINEL]).toBeUndefined();

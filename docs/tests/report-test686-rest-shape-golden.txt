@@ -1,0 +1,72 @@
+# test686 — current-main independent REST response-key golden
+
+Date: 2026-08-13 (Asia/Shanghai)
+
+## Provenance
+
+- Base commit: `b7d1289bc67081ab597f17fba7034506394757ce`
+- Source commit under test: `f41b3d4b57cd34f1b09dd8aa72d35b34f2b0be8a`
+- Exact Docker image: `sha256:81a7b9b8d0f01ed3c65e517bd1cef6728b0672495513c8963321dd507810ca54`
+- Runner log SHA256: `491972910fde8fc009f4ecc339d46affb4725965d826698de55195ebbd02ced5`
+- Bun image: `oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4`
+
+The runner-log digest identifies one execution; it is not source provenance.
+The source commit is the authority for the production test and Docker fixture.
+
+## Why this current-main replay exists
+
+The earlier PR #686 correctly identified a self-derived-test problem: the HTTP
+test imported the same projection arrays used by production SQL, so deleting a
+public key could change both the response and the expected value and remain
+green. That branch predated the public `external_schedules` session key and
+could not be merged as-is.
+
+This source replays the narrow fix on current main. The static wire golden now
+includes `external_schedules`, and the new Docker suite is explicitly listed in
+`scripts/qa.sh`'s `L1_TESTS`; it is not an unreferenced test directory.
+
+## Results
+
+Exact command:
+
+```sh
+sg docker -c 'docker build --build-arg TEST686_SOURCE_COMMIT=f41b3d4b57cd34f1b09dd8aa72d35b34f2b0be8a -t anet-test686:f41b3d4b57cd34f1b09dd8aa72d35b34f2b0be8a -f tests/test686-rest-shape-golden/Dockerfile .'
+sg docker -c 'docker run --rm anet-test686:f41b3d4b57cd34f1b09dd8aa72d35b34f2b0be8a'
+```
+
+- L0 independent golden: `5 pass / 0 fail / 30 expect()`
+- L1 mutation `drop-task-created-at`: `rc=1 witnessed-red`
+- L2 restored source: `5 pass / 0 fail / 30 expect()`
+- Final runner status: `RESULT: PASS`, exit `0`
+- Full `scripts/qa.sh --l1`: all 14 suites passed in 89 seconds, including
+  `test686-rest-shape-golden (RESULT: PASS)`.
+
+The mutation removes `tasks.created_at` from the production projection. The
+test remains anchored to the independent static response-key golden, so the
+task list/detail contract test fails and names `created_at`. The runner rejects
+a missing or duplicate mutation anchor and rejects a byte-identical mutation.
+
+## Scope and honest limits
+
+- Test, Docker fixture, QA inventory, and report only; no production runtime,
+  API implementation, schema, database, package publication, or deployment is
+  changed.
+- The golden covers the seven response shapes exercised by
+  `rest-explicit-columns-http.test.ts`; it is not a claim that every REST route
+  has a static key golden.
+- An intentional future public wire-key addition must update this golden in the
+  same reviewed change. An unreviewed projection narrowing must turn this test
+  red.
+- The first GitHub PR run exposed the missing QA build argument described
+  below. The corrected source passed the exact Docker gate and the full local
+  L1 path; the new-head GitHub result must still be reviewed separately.
+
+## CI integration correction
+
+The first PR run built this suite through the generic QA loop without passing
+`TEST686_SOURCE_COMMIT`. The container correctly failed closed at startup with
+the default value `unknown`, before any product assertion ran. The source fix
+keeps that fail-closed guard and teaches `scripts/qa.sh` to pass the checked-out
+Git HEAD only for this suite. A subsequent full local L1 run exercised the same
+QA path and passed all 14 suites; the new GitHub run remains the authoritative
+remote CI result.
