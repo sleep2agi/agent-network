@@ -21,6 +21,7 @@ cleanup() {
 trap cleanup EXIT
 
 git -C "$ROOT" archive "$BASE_COMMIT" | tar -x -C "$TMP"
+git -C "$ROOT" archive "$SOURCE_COMMIT" tests/test698-atomic-peer-reply/Dockerfile.legacy-hub | tar -x -C "$TMP"
 docker build -t "$OLD_IMAGE" \
   -f "$TMP/tests/test698-atomic-peer-reply/Dockerfile.legacy-hub" "$TMP" >/tmp/test698-legacy-build.log
 docker network create "$NET" >/dev/null
