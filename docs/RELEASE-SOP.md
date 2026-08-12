@@ -222,6 +222,34 @@ npm view @sleep2agi/<pkg>@preview version
 | `agent-network/src/opencode-agent-node-pair.ts` | 它的语义是「**已验证可共存**的精确配对」，不是「当前版本」。自动跟随会把那条 `intentionally fails when either package is bumped independently` 的绊线抹平 —— 该配对必须**重新验证过**才能改。见 #745。 |
 
 所以 Step 10 的完整做法是：**跑一遍注册表同步（看它是否非零退出）+ 单独确认上表里的手动 pin**。
+
+#### ④ 发布之后,核对**已发布产物**里的 pin(①②③ 都只看源码)
+
+🔴 前面三条查的全是**源码**。源码对了不等于**用户装到的包**对了 ——
+发布是在某个时刻打包的,之后合进 `main` 的 pin 修复**不会**回到已发布的产物里。
+
+2026-08-13 实测:`main` 上 opencode 配对 pin 已修成 `.39/.31`、绊线测试全绿,
+而 `npm pack @sleep2agi/agent-network@preview` 拆开,
+`dist/src/opencode-agent-node-pair.d.ts` 里仍是 `agent-node@2.5.0-preview.28` ——
+**因为那个 preview 是在修复之前发布的**。当时 issue 已按「fixed」收口,
+而用户装上去仍然起不来。
+
+```bash
+./scripts/verify-published-pins.sh preview      # 或 latest
+# 0 一致 / 1 有不一致 / 2 取不到产物 / 3 零覆盖
+```
+
+它有三条刻意的性质,别绕过:
+
+- **只采信阳性命中** —— 已发布 `dist/cli.js` 是 minified 的,
+  「找不到」不可信(拿已知必在的常量做对照会命中 0);`.d.ts` 才保留完整字面量。
+  拿不准时它报「无法判定」,不会假装一致;
+- **报分母**,并在一个 pin 都没抽到时 `exit 3` —— 零覆盖的检查与坏掉的检查
+  在输出上无法区分;
+- pin 清单**从源文件抽取**,不手写子集(手写子集正是 ③ 里说的那次漏)。
+
+**判据:发版收尾时 ①②③ 全绿、但 ④ 非零,说明这次发的包里没有那条修复 ——
+要么补发,要么在相关 issue 里把「fixed」限定为「fixed on main, not yet published」。**
 实测踩过：bump PR 开着没合的那段时间，npm 上 server 已经是新版，
 但 `main` 上 `PINNED_SERVER_VERSION` 还是旧版——**任何人从 main 切一次版，
 CLI 都会去拉旧 server，这次发版等于白发，且不产生任何报错**。
