@@ -1,0 +1,21 @@
+[Unit]
+Description=pm2 fleet resurrect (commhub-hub / anet-dashboard / weixin-*)
+Documentation=https://github.com/sleep2agi/agent-network
+# 🔴 这里故意不写 After/Wants=network-online.target：那是 system manager 的
+#    target，user manager 里不存在（`systemctl --user status network-online.target`
+#    → "could not be found"）。写了不报错但是**无效的**，会让人以为有网络就绪
+#    保证。hub 绑 0.0.0.0:9200、dashboard 绑 127.0.0.1:3001，都只需要接口存在
+#    而不需要"网络在线"，所以不需要这个排序；真需要时应在脚本里显式等待。
+After=basic.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=%h/.local/bin/pm2-fleet-boot.sh
+# 🔴 故意不设 ExecStop：systemd 停这个单元时绝不能顺手杀掉整支军团。
+#    pm2 官方生成的单元带 ExecStop=pm2 kill，那是一把上了膛的枪 —— 一次误 stop
+#    就是 hub + dashboard + weixin 全灭。开机拉起是我们要的，拆掉不是。
+TimeoutStartSec=180
+
+[Install]
+WantedBy=default.target
