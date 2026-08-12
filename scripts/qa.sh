@@ -71,6 +71,7 @@ L1_TESTS=(
   "qa-node-02-success-reply"
   "qa-node-03b-task-events"
   "test686-rest-shape-golden"
+  "test765-batch-runtime-gate"
   "test766-bunx-preflight"
 )
 
@@ -144,6 +145,8 @@ if [[ $RUN_L1 -eq 1 ]]; then
     build_args=""
     if [[ "$t" == "test686-rest-shape-golden" ]]; then
       build_args="--build-arg TEST686_SOURCE_COMMIT=$(git rev-parse HEAD)"
+    elif [[ "$t" == "test765-batch-runtime-gate" ]]; then
+      build_args="--build-arg TEST765_SOURCE_COMMIT=$(git rev-parse HEAD)"
     elif [[ "$t" == "test766-bunx-preflight" ]]; then
       build_args="--build-arg TEST766_SOURCE_COMMIT=$(git rev-parse HEAD)"
     fi
