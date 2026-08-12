@@ -1,0 +1,122 @@
+# test745 — complete agent-network unit CI signal
+
+Date: 2026-08-13 (Asia/Shanghai)
+Issue: https://github.com/sleep2agi/agent-network/issues/745
+Base: 1f4cbf49cf1b03ba3dd9d7ea81c2778b318d0cce
+Source commit: b4e13f45f032dbcf12ffc0b1d0c736571385702b
+Image: sha256:484e6b482816e36daf0a05385b7d09944786661eba17da973ff2c329fe7ce415
+Image env: TEST745_SOURCE_COMMIT=b4e13f45f032dbcf12ffc0b1d0c736571385702b
+
+## Result
+
+PASS. The complete `agent-network/src/**/*.test.ts` domain now has a
+dedicated Docker/non-root CI signal, parallel to the existing agent-node
+unit job.
+
+Two exact-image runs produced the same aggregate result:
+
+```
+test_files=46
+438 pass
+0 fail
+1333 expect() calls
+Ran 438 tests across 46 files.
+MUTATION_RED stale-config-help rc=1
+RESULT: PASS
+```
+
+The image uses Bun 1.3.14 from the pinned release archive with SHA256
+`951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f`.
+The suite runs as uid 1000 and includes Git and Python because current tests
+exercise real Git worktrees and real Linux `/proc` fixtures.
+
+## Baseline corrections required before the aggregate signal could be honest
+
+Current main initially produced `435 pass / 3 fail / 1331 expect` after Git
+was present. (A first environment probe without Git produced `432/6`; the
+three extra failures were exact `Executable not found in $PATH: "git"`
+errors and were not classified as product or test failures.)
+
+The remaining three failures were stale or environment-incorrect tests, not
+product regressions:
+
+1. The dotenv wiring test still required the retired direct
+   `writeFileSync(dotenvPath, body...)` shape. Production now uses both
+   `writeOpencodePrivateProfileFile(...)` and `atomicWritePrivateFile(...)`.
+   The test now requires both post-planner write paths.
+2. The OpenCode co-presence wiring test required the old one-argument call.
+   Production now forwards the operator's hub override as
+   `startOpencodeCopresenceOrchestration(id, opts.hub)`; the test now pins
+   that stronger contract.
+3. The real `/proc` reap test used `kill(pid, 0)` as its sole death test.
+   Minimal container PID 1 may retain an orphaned child in state `Z`, where
+   the PID exists but no executable process remains. Production already
+   treats zombies as non-live during marker scans. The assertion now requires
+   every carrier to be absent or state `Z`, and separately still requires the
+   marker scan to be empty.
+
+No product source file changed.
+
+## Witnessed red
+
+After the aggregate green run, the runner changes the single production help
+line `anet config [path|json]` back to the previously incorrect
+`anet config get|set` form. It verifies an exact one-occurrence target and a
+non-empty byte change, then runs the real subprocess help-contract test.
+
+The mutated run exits non-zero at the named assertion:
+
+```
+Expected to contain: "anet config [path|json]"
+MUTATION_RED stale-config-help rc=1
+```
+
+The baseline aggregate run occurs before the mutation, so a self-red or an
+unrelated startup failure cannot satisfy this gate.
+
+## CI wiring
+
+`.github/workflows/qa.yml` adds `agent-network unit (Docker, non-root)` and
+path coverage for `tests/test745-agent-network-unit-ci/**`. The job builds
+with `SOURCE_COMMIT=$GITHUB_SHA` and the runner rejects a missing or non-full
+SHA.
+
+The repository's QA workflow remains report-only and main currently has no
+branch protection. A red check is a visible signal, not a GitHub-enforced
+merge prohibition; governance enforcement remains tracked separately by
+#725.
+
+## Provenance
+
+Five files copied from the exact image matched `git show <source>:<path>`
+byte-for-byte:
+
+```
+MATCH agent-network/src/claude-vendor-env-wiring.test.ts
+MATCH agent-network/src/copresence-identity.real.test.ts
+MATCH agent-network/src/opencode-copresence-cli.test.ts
+MATCH agent-network/bin/cli.ts
+MATCH tests/test745-agent-network-unit-ci/run.sh
+PROVENANCE total=5 fail=0
+```
+
+Artifact digests (diagnostic logs contain timing and are not claimed to be
+reproducible):
+
+```
+4d07008e8f578775c4c9115267b32d489e8d957bee71e589bf377bc938ad70e2  test745-exact-build.log
+c213dba3132db08d41e70fcaa5a752aa0a89c1bb6b2452e3d9897446bc182dab  test745-exact-run1.log
+39f282f0fc77106060abe05b91aaecbe21fc0c64fe7170a1a329baf65a8c6dfc  test745-exact-run2.log
+```
+
+## Honest limits
+
+- This is the complete agent-network unit domain, not Hub/network/package
+  Docker E2E and not a production rollout.
+- The Docker build still needs network access for the pinned Bun archive and
+  `npm ci`; failure remains fail-closed.
+- The witnessed mutation proves the aggregate image consumes production
+  source and detects a named contract regression. It does not claim mutation
+  coverage for every one of the 438 tests.
+- No release, deployment, repository setting, token, or production state was
+  changed.
