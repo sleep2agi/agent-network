@@ -1,11 +1,12 @@
+FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 AS bun-runtime
+
 FROM node:20-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends bash curl ca-certificates jq unzip procps && rm -rf /var/lib/apt/lists/*
-ARG BUN_VERSION=1.3.14
-ARG BUN_LINUX_X64_SHA256=951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f
-COPY tests/lib/install-bun-pinned.sh /usr/local/libexec/install-bun-pinned.sh
-RUN BUN_VERSION="$BUN_VERSION" BUN_LINUX_X64_SHA256="$BUN_LINUX_X64_SHA256" \
-    bash /usr/local/libexec/install-bun-pinned.sh
+COPY --from=bun-runtime /usr/local/bin/bun /usr/local/bin/bun
+RUN ln -sf /usr/local/bin/bun /usr/local/bin/bunx \
+    && test "$(bun --version)" = "1.3.14" \
+    && test "$(bunx --version)" = "1.3.14"
 
 WORKDIR /app
 COPY tests/qa-dash-10-incremental-poll/run.sh /app/run.sh
