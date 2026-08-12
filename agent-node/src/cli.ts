@@ -3938,7 +3938,7 @@ async function processWithGrokCli(
   debug(`[grok-cli] cwd=${grokCwd}`);
 
   const { execFileSync } = await import("child_process");
-  const { runGrokCliTurn, assertGrokCliFeatures, assertGrokCliVersion } = await import("./runtime/grok-build-cli");
+  const { runGrokCliTurn, assertGrokCliFeatures, assertGrokCliVersion, assertUnprivilegedUserNsUsable } = await import("./runtime/grok-build-cli");
   const {
     prepareGrokCliHome,
     assertNoDiscoveredGrokHooks,
@@ -3954,6 +3954,11 @@ async function processWithGrokCli(
     throw new Error("grok-build-cli secure turn supervision currently requires Linux user/PID namespaces");
   }
   const unshareBinary = process.env.UNSHARE_BINARY || "unshare";
+  // 上面的 platform 判断是**必要不充分**的:是 Linux 不等于非特权 userns 可用。
+  // Ubuntu 24.04+ 默认禁写 uid_map,而这个 runtime 每个 turn 都依赖它。
+  // 在这里挡下来,才能给出「换 grok-build-acp」这种可执行建议;
+  // 否则失败推迟到第一个 turn,以内核层 errno 出现,把人引去查权限。
+  assertUnprivilegedUserNsUsable(unshareBinary);
   const flockBinary = process.env.FLOCK_BINARY || "flock";
   const setprivBinary = process.env.SETPRIV_BINARY || "setpriv";
   const grokTurnLauncher = {
