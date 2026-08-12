@@ -16,7 +16,10 @@ It is **not** for users who already have anet installed — that's [Getting Star
 | **Bun** | ≥ 1.2.0 | `npm i -g bun` or `curl -fsSL https://bun.sh/install \| bash` |
 
 ::: warning Bun is non-optional
-`commhub-server` is Bun-shebang TypeScript (launched via `bunx --bun`). **Without Bun, `anet hub start` is refused before it launches anything**, printing `❌ anet hub start requires the Bun runtime` and exiting with code 1. This is bug #1 from the fresh-server retro; before [#235](https://github.com/sleep2agi/agent-network/issues/235) it hard-crashed with `spawn bunx ENOENT`, which it no longer does.
+`commhub-server` is Bun-shebang TypeScript (launched via `bunx --bun`). **Without Bun, `anet hub start` always fails** — bug #1 from the fresh-server retro. How it fails depends on the channel:
+
+- **latest (currently `2.2.21`)**: a bare `Error: spawn bunx ENOENT` plus a Node stack trace — the [#235](https://github.com/sleep2agi/agent-network/issues/235) preflight **has not reached latest yet**;
+- **preview (`2.3.0-preview.x`)**: refused before launch with `❌ anet hub start requires the Bun runtime`, exit code 1.
 
 Verify:
 ```bash

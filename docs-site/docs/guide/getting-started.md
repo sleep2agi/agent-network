@@ -15,7 +15,9 @@
 **前置**（两个都要装）：
 
 - **Node.js ≥ 22.13.0**
-- **Bun ≥ 1.2.0** —— 装法 `npm i -g bun`（或 `curl -fsSL https://bun.sh/install | bash`）。第 2 步 `anet hub start` 底层用 `bunx` 起 `commhub-server`，**没装 Bun 时第 2 步会在启动前被拦下**，报 `❌ anet hub start requires the Bun runtime`（退出码 1，不是崩溃）。装完 `bun --version` 应有输出。
+- **Bun ≥ 1.2.0** —— 装法 `npm i -g bun`（或 `curl -fsSL https://bun.sh/install | bash`）。第 2 步 `anet hub start` 底层用 `bunx` 起 `commhub-server`，**没装 Bun 时第 2 步一定失败**，但表现分两条线:
+  · **latest(当前 `2.2.21`)**:裸崩 `Error: spawn bunx ENOENT` + Node 堆栈；
+  · **preview(`2.3.0-preview.x`)**:启动前被拦下，报 `❌ anet hub start requires the Bun runtime`（退出码 1）。装完 `bun --version` 应有输出。
 
 这俩装好就行；`commhub-server` / `agent-node` 首次用时自动拉取，不用手动装。
 

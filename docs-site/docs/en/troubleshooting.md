@@ -26,7 +26,7 @@ Before sharing logs, remove tokens, API keys, passwords, cookies, complete envir
 
 ### `requires the Bun runtime` / `spawn bunx ENOENT` / Bun not found
 
-Current versions refuse before launch with a clear message:
+The **preview** channel (`2.3.0-preview.x`) refuses before launch with a clear message:
 
 ```
 ❌ anet hub start requires the Bun runtime (commhub-server is bun-only …)
