@@ -88,11 +88,6 @@ import {
 import { CurrentAliasResolver } from "./runtime/current-alias";
 import { delegationTargetExists } from "./runtime/delegation-precheck";
 import {
-  buildCodexAppServerReplyTask,
-  createReplyRouteCache,
-  resolveReplyRoute,
-} from "./runtime/reply-routing";
-import {
   isRateLimitOrQuotaError,
   quotaRemediationHint,
 } from "./runtime/claude-error-classify";
@@ -146,9 +141,12 @@ import {
 import { appendPrivateLogLine, preparePrivateLogDirectory } from "./private-log";
 import { resolveNodeIdSource } from "./runtime/node-id-source";
 import { emitExplicitTaskTrace, sendExplicitTaskWithTrace, waitForExplicitTaskLifecycle, type ExplicitTaskTraceContext } from "./explicit-task-trace";
-import { sendPeerReplyTaskWithTrace } from "./peer-reply-task-trace";
+import { inboxDeliveryPolicy } from "./inbox-message-policy";
+import { routePeerReplySse, runInboxTurnByReplyPolicy } from "./peer-reply-inbox";
+import { createPeerReplyCapabilityCache, sendPeerReplyCompatible } from "./peer-reply-send";
 
 const home = homedir();
+const peerReplyCapabilityCache = createPeerReplyCapabilityCache();
 
 // Capture the launcher boundary before config.json `env` is merged below.
 // A node profile may intentionally override PATH for other runtimes, but it
@@ -512,13 +510,6 @@ if (RUNTIME === "opencode") {
   if (INITIAL_OPENCODE_SAFE_BASE === undefined) delete process.env.ANET_OPENCODE_SAFE_BASE;
   else process.env.ANET_OPENCODE_SAFE_BASE = INITIAL_OPENCODE_SAFE_BASE;
 }
-
-// RFC-030 — codex-app-server nodes reply to dispatched tasks with send_task
-// (immediate SSE wake + actionable) instead of send_reply (inbox-only, no
-// wake for the immediate originator). See sendReply() for the empirical
-// rationale. Other runtimes keep the send_reply task-lifecycle-close path.
-const REPLY_VIA_SEND_TASK = RUNTIME === "codex-app-server";
-const replyRouteCache = createReplyRouteCache();
 
 const COMMHUB_URL = opts.url || opts.hub || process.env.COMMHUB_URL || fileConfig.hub || "http://127.0.0.1:9200";
 const MODEL = opts.model || process.env.MODEL || fileConfig.model;
@@ -1372,49 +1363,35 @@ async function sendReply(
   // viewer would see as an orphaned reply from a non-existent sender).
   const fromAlias = await liveAlias();
 
-  // RFC-030 — codex-app-server replies to real agent sessions via send_task
-  // (immediate SSE wake + actionable), but dashboard/API senders are not
-  // routable sessions. Probe the roster instead of hardcoding sender names:
-  // if tomorrow dashboard changes from_name from "admin" to any other
-  // non-session label, this still falls back to send_reply and closes the
-  // original task lifecycle.
-  if (await resolveReplyRoute({
-    target,
-    taskId,
-    replyViaSendTask: REPLY_VIA_SEND_TASK,
-    cache: replyRouteCache,
-    loadSessions: async () => {
-      const status = parseToolJson(await callCommHub("get_all_status", {}));
-      return status?.sessions;
-    },
-  }) === "send_task") {
-    const replyTask = buildCodexAppServerReplyTask(message, failed);
-    const taskResult = await sendPeerReplyTaskWithTrace({
+  const result = taskId
+    ? await sendPeerReplyCompatible({ target, text: message, taskId, failed, fromAlias }, {
+      sendAtomic: (args) => callCommHub("send_peer_reply", {
+        alias: args.target,
+        text: args.text,
+        from_session: args.fromAlias,
+        in_reply_to: args.taskId,
+        status: args.failed ? "failed" : "replied",
+      }, 0),
+      sendLegacyReply: (args) => callCommHub("send_reply", {
+        alias: args.target,
+        text: args.text,
+        from_session: args.fromAlias,
+        in_reply_to: args.taskId,
+        status: args.failed ? "failed" : "replied",
+      }),
+    }, peerReplyCapabilityCache)
+    : { route: "atomic" as const, payload: await callCommHub("send_reply", {
       alias: target,
-      task: replyTask.task,
-      priority: replyTask.priority,
-      fromAlias,
-      parentTaskId: taskId || null,
-      networkId: NETWORK_ID || null,
-    }, {
-      log: taskTraceLog,
-      send: (args) => callCommHub("send_task", args),
-    });
-    return { delivered: true, reply_id: taskResult?.message_id ?? taskResult?.task_id, payload: taskResult };
-  }
-
-  const result = await callCommHub("send_reply", {
-    alias: target,
-    text: message,
-    from_session: fromAlias,
-    in_reply_to: taskId || undefined,
-    status: failed ? "failed" : "replied",
-  });
+      text: message,
+      from_session: fromAlias,
+      status: failed ? "failed" : "replied",
+    }) };
   // callCommHub now throws on every failure shape (transport, JSON-RPC
   // error envelope, MCP isError, app-level ok:false). Reaching here means
   // the server accepted the reply. Surface the message id so the caller
   // can log it for traceability.
-  return { delivered: true, reply_id: result?.message_id, payload: result };
+  const payload = result.payload;
+  return { delivered: true, reply_id: payload?.message_id ?? payload?.task_id, payload };
 }
 
 // #168 RC-B1 retry-queue. When sendReply fails after retries we DO NOT
@@ -4627,16 +4604,17 @@ function isLowValueText(text: string, isReply = false): boolean {
 function shouldSkipMessage(from: string, content: string, msgType?: string): string | null {
   if (from === ALIAS) return "self";
   if (content.startsWith(`[${ALIAS}]`)) return "own-prefix";
+  const actionable = msgType === "task" || msgType === "broadcast" || msgType === "reply";
   // Don't cooldown explicit tasks — humans often send rapid follow-ups from
-  // Dashboard, and task messages must be answered even when they arrive back
-  // to back. Apply cooldown only to non-task chatter.
-  if (msgType !== "task" && msgType !== "broadcast" && from !== "hub" && from !== "api") {
+  // Dashboard, and terminal peer replies must reach the runtime even when
+  // short or rapid. Apply cooldown only to non-actionable chatter.
+  if (!actionable && from !== "hub" && from !== "api") {
     const now = Date.now();
     if (lastReplyTime[from] && now - lastReplyTime[from] < COOLDOWN_MS) return "cooldown";
   }
   // Only apply low-value/agent-chatter filter to non-task types. Tasks are
   // explicit human or system requests and must always be processed.
-  if (msgType !== "task" && msgType !== "broadcast" && isLowValueText(content)) {
+  if (!actionable && isLowValueText(content)) {
     return "low-value-inbound";
   }
   return null;
@@ -4684,6 +4662,7 @@ async function processInbox() {
       const from = msg.from_session || "hub";
       const content = msg.content as string;
       const msgType = msg.type || "task";
+      const deliveryPolicy = inboxDeliveryPolicy(msgType);
       // inbox.id identifies this delivery row. task_id identifies the stable
       // logical task across retry/reassign. Keep ACK on the transport row,
       // but bind runtime evidence and replies to the logical task.
@@ -4696,7 +4675,7 @@ async function processInbox() {
 
       // Other non-task / non-broadcast messages retain their historical
       // ack-only behavior; send_message never implies an LLM response.
-      if (msgType !== "task" && msgType !== "broadcast") {
+      if (!deliveryPolicy.deliverToRuntime) {
         // This used to be debug(), i.e. a plain message was acked and discarded
         // with no trace at the default log level while the SENDER saw a
         // successful delivery. Surface it at INFO so a dropped message is at
@@ -4753,13 +4732,22 @@ async function processInbox() {
       const runtimeContent = runtimeNeedsReadableAttachmentPrompt(RUNTIME)
         ? appendReadableAttachmentPaths(content, images)
         : content;
-      const taskOutcome = await processTask(
-        runtimeContent,
-        from,
-        logicalTaskId,
-        images,
-        interactiveDashboardTask,
+      const inboxTurn = await runInboxTurnByReplyPolicy(
+        { id: msg.id, from, content: runtimeContent, taskId: logicalTaskId },
+        deliveryPolicy.replyExpected,
+        {
+          deliverToRuntime: () => processTask(
+            runtimeContent,
+            from,
+            logicalTaskId,
+            images,
+            interactiveDashboardTask,
+          ),
+          acknowledge: (id) => ackMessage(id),
+        },
       );
+      if (inboxTurn.kind === "terminal_peer_reply") return;
+      const taskOutcome = inboxTurn.result;
       const failed = taskOutcome.failed;
       const preparedReply = prepareDashboardNativeSlashReply(
         taskOutcome.text,
@@ -5696,6 +5684,7 @@ async function connectSSE() {
             }
             if (ev.type === "new_reply") {
               log(`← SSE reply from ${ev.from || "?"}${ev.in_reply_to ? ` (task ${ev.in_reply_to.slice(0, 8)})` : ""}`);
+              routePeerReplySse(ev, scheduleWorkInboxDrain);
             }
             // RFC-024 N1 — config-apply doorbell. Hub posted a desired-
             // config patch for this node; pull + validate + apply.

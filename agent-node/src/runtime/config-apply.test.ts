@@ -325,6 +325,7 @@ describe("buildConfigSnapshot — pure helper contract (#290 final, drain-omit g
     expect(s.flags.maxTurns).toBe(50);
     expect(s.config_revision).toBe(3);
     expect(s.config_update_capable).toBe(true);
+    expect(s.peer_reply_inbox_capable).toBe(true);
   });
 });
 
@@ -362,6 +363,7 @@ describe("buildConfigSnapshot — masked report (no secrets)", () => {
     expect(snap.flags.dangerouslySkipPermissions).toBe(true);
     expect("mysteryFlag" in snap.flags).toBe(false);
     expect(snap.config_update_capable).toBe(true);
+    expect(snap.peer_reply_inbox_capable).toBe(true);
     expect(snap.config_revision).toBe(3);
     // Critical: no env / token leak.
     expect("env" in snap).toBe(false);

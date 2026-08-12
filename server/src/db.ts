@@ -90,6 +90,7 @@ for (const col of [
   { name: "process_uptime_seconds", def: "REAL" },
   { name: "process_in_flight_count", def: "INTEGER" },
   { name: "external_schedules", def: "TEXT" },
+  { name: "peer_reply_inbox_capable", def: "INTEGER NOT NULL DEFAULT 0" },
 ]) {
   try { db.exec(`ALTER TABLE sessions ADD COLUMN ${col.name} ${col.def}`); } catch {}
 }
