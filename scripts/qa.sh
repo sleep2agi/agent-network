@@ -70,6 +70,7 @@ L1_TESTS=(
   "qa-hub-09-task-state-machine"
   "qa-node-02-success-reply"
   "qa-node-03b-task-events"
+  "test686-rest-shape-golden"
 )
 
 if [[ "${1:-}" == "--list" ]]; then
