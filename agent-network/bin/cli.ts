@@ -5707,7 +5707,10 @@ async function serverCommand() {
       if (!commandExists("bunx") && !commandExists("bun")) {
         console.error(`\n  ❌ anet hub start requires the Bun runtime (commhub-server is bun-only — uses Bun.serve + bun:sqlite, no Node fallback).`);
         console.error(`\n     Install Bun first:`);
-        console.error(`       curl -fsSL https://bun.sh/install | bash`);
+        // 刻意不给 `curl … | bash` 一行流:那正是 #729/#733/#743 在修的 fail-open
+        // 形状(管道退出码只反映 consumer)。CI 里当缺陷修,就不该在 CLI 里教用户。
+        console.error(`       npm i -g bun`);
+        console.error(`       # 或按 https://bun.sh/docs/installation 安装`);
         console.error(`       # restart your shell so PATH picks up ~/.bun/bin`);
         console.error(`\n     Then re-run: anet hub start`);
         console.error(`\n     More info: https://bun.sh/install\n`);
@@ -5754,10 +5757,15 @@ async function serverCommand() {
         // commhub-server is TypeScript w/ a bun shebang; it requires Bun.
         // Most Node-only systems hit this exact failure.
         let bunInstalled = false;
-        try { execSync("command -v bun", { stdio: "pipe" }); bunInstalled = true; } catch {}
+        // 判据与上面那道守卫同源:bunx **或** bun 任一存在即可。
+        // 只探 bun 会在 bunx-only 的 PATH 上假报(同 #761 修的那处)。
+        for (const probe of ["command -v bun", "command -v bunx"]) {
+          try { execSync(probe, { stdio: "pipe" }); bunInstalled = true; break; } catch {}
+        }
         if (!bunInstalled) {
           console.error(`  ❌ Bun is required to run commhub-server. Install with:`);
-          console.error(`     curl -fsSL https://bun.sh/install | bash`);
+          console.error(`     npm i -g bun`);
+          console.error(`     # 或按 https://bun.sh/docs/installation 安装`);
           console.error(`     # then re-run: anet hub start`);
         } else {
           console.error(`  ❌ Server failed to start. Check the bunx output above for the real error.`);
@@ -8508,11 +8516,13 @@ function selfUpgradeDetached(channel: ReleaseChannel): never {
   console.log(`[anet]   Log: ${errLog}`);
   console.log(`[anet]   When npm finishes, open a NEW terminal (or 'source ~/.bashrc') and run \`anet --version\` to verify ${channel}.`);
   console.log(`[anet]   The current shell's \`anet\` binary will keep pointing at the old version until you do.`);
-  if (!commandExists("bun")) {
+  // 同源判据:hub start 的守卫接受 bunx **或** bun,这里必须一致,
+  // 否则 bunx-only 的机器会收到一条「will fail」的假警报(同 #761)。
+  if (!commandExists("bun") && !commandExists("bunx")) {
     // #214 P2.7 — anet hub start needs bun (commhub-server is bun-only).
     // Surface this now so users don't hit it on next `anet hub start`.
     console.log(`[anet]   note: bun is not installed; \`anet hub start\` will fail without it.`);
-    console.log(`[anet]         Install: curl -fsSL https://bun.sh/install | bash`);
+    console.log(`[anet]         Install: npm i -g bun  (或 https://bun.sh/docs/installation)`);
   }
   console.log(`[anet]   (Use \`anet upgrade --no-auto-self\` next time if you prefer to manage the install yourself.)`);
   try {
