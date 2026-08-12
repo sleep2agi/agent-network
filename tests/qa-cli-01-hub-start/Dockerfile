@@ -1,30 +1,12 @@
+FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 AS bun-runtime
+
 FROM node:20-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends bash curl ca-certificates jq unzip procps && rm -rf /var/lib/apt/lists/*
-# The bun installer downloads the release from github.com; a single hiccup
-# there fails the whole image build, and the resulting CI red reads as if the
-# code under test broke (#728 — this exact line took three L1 images down and
-# blocked merges repeatedly). Retry with backoff so a transient fetch does not
-# masquerade as a test failure.
-#
-# Note this only removes the transient half. The install is still unpinned and
-# unverified, so what lands in the image depends on what bun.sh serves that
-# day; pinning across all 43 test images is tracked separately in #728.
-RUN installed=0; \
-    for i in 1 2 3; do \
-      rm -f /tmp/bun-install.sh; \
-      if curl -fsSL https://bun.sh/install -o /tmp/bun-install.sh \
-          && bash /tmp/bun-install.sh; then \
-        installed=1; \
-        break; \
-      fi; \
-      echo "bun install attempt $i failed; retrying in $((i*5))s"; \
-      sleep $((i*5)); \
-    done; \
-    rm -f /tmp/bun-install.sh; \
-    test "$installed" = 1 && test -x "$HOME/.bun/bin/bun" \
-      || { echo "bun install failed after 3 attempts"; exit 1; }
-ENV PATH="/root/.bun/bin:${PATH}"
+COPY --from=bun-runtime /usr/local/bin/bun /usr/local/bin/bun
+RUN ln -sf /usr/local/bin/bun /usr/local/bin/bunx \
+    && test "$(bun --version)" = "1.3.14" \
+    && test "$(bunx --version)" = "1.3.14"
 
 WORKDIR /app
 COPY tests/qa-cli-01-hub-start/run.sh /app/run.sh

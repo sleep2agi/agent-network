@@ -1,0 +1,81 @@
+# L1 contract-suite pinned Bun evidence
+
+Date: 2026-08-13 (Asia/Shanghai)
+Base: 05d4b73e9efe42421700e56e163164759a361eb0
+Original source: 2c95173b112c7721c7777f7e444dff72bf1f2dc3
+Final source: 79e4acea0ff8e91d3772040da7d41fe1c02905e7
+
+## Trigger and denominator
+
+The unchanged L1 workflow failed twice on PR #757 while building
+qa-cli-02-network-create at `curl -fsSL https://bun.sh/install | bash`.
+A first one-file correction made qa-cli-02 pass, after which the same workflow
+immediately failed at the identical line in qa-dash-07-auth-boundary. That A/B
+proved the failure belonged to the L1 installer denominator, not one isolated
+test or PR #757 product bytes.
+
+`scripts/qa.sh --list` currently names 14 L1 Docker suites:
+
+- all 14 images use the official Bun 1.3.14 image pinned to OCI index digest
+  `sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4`;
+- 13 Node-based images copy `/usr/local/bin/bun` from that immutable stage,
+  create the required `bunx` argv-0 symlink, and require both commands to
+  report exactly 1.3.14;
+- test686-rest-shape-golden uses the same digest-pinned image directly;
+- 0/14 L1 Dockerfiles retain bun.sh/install.
+
+This closes the L1 subset only. The larger #728 repository denominator remains
+open for Dockerfiles outside scripts/qa.sh --l1.
+
+## Installation contract and CI correction
+
+The first source used a shared helper which downloaded the checksum-pinned Bun
+archive independently in each of 13 Docker builds. It passed the complete local
+L1 suite, but CI exposed a denominator-level availability flaw:
+
+- attempt 1 failed qa-cli-01 and qa-cli-02 while the other 11 helper users passed;
+- attempt 2 failed qa-cli-01 and qa-hub-05 while the other 11 helper users passed;
+- each failure was the helper's curl exit 22; the failing suite moved between
+  attempts, so rerunning could not establish a reliable gate.
+
+The final source therefore removes that helper and its 13 independent GitHub
+archive fetches. Docker resolves one official immutable Bun image through its
+content digest; every Node-based final image still version-checks both `bun`
+and `bunx`. The multi-arch index digest was independently read with
+`docker buildx imagetools inspect oven/bun:1.3.14`; its linux/amd64 manifest is
+`sha256:50317d83cd5a5ae1d8b35b3379c69f57ce1a0dbf4def91f0965653d767851834`.
+
+This correction keeps the runtime images on `node:20-slim`; only the Bun binary
+is copied from the pinned official stage.
+
+## Docker evidence
+
+Command (host Docker group boundary preserved):
+
+    sg docker -c 'bash scripts/qa.sh --l1'
+
+Result:
+
+- 14/14 named L1 suites PASS;
+- aggregate after the final digest-pinned correction: `ALL PASS in 115s`;
+- exit code: 0;
+
+Witnessed-red control replaced qa-dash-07's Bun image digest with 64 zeroes.
+Docker build exited 1 before any test layer and reported the exact digest as
+`not found`. This proves the content-addressed source is load-bearing.
+
+The earlier one-file diagnostic and the archive-helper source are intentionally
+superseded by this complete L1 denominator. The archive-helper experiment also
+caught a real integration requirement: a Bun binary without a bunx symlink
+allowed the image to build but made the actual anet hub lifecycle fail. The
+final source creates and version-checks that symlink, and all real L1 journeys
+pass.
+
+## Honest limits
+
+- The official Bun image remains an external registry input; its bytes are
+  content-addressed by digest, not vendored in this repository.
+- This does not make all repository Dockerfiles hermetic and does not close
+  #728.
+- No npm package, release, production process/config/database, secret, or
+  repository protection setting was changed.
