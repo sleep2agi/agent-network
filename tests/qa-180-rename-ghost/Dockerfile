@@ -21,7 +21,32 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sqlite3 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL https://bun.sh/install | bash
+# bun 安装:重试 + fail-closed。与 tests/qa-cli-01-hub-start/Dockerfile 同一写法(#733)。
+#
+# 原来是 `curl -fsSL https://bun.sh/install | bash`,有两个坑:
+#   1. Docker 用 /bin/sh 执行,没有 pipefail —— 管道的退出码只反映 bash(consumer),
+#      curl(producer)失败会被吃掉,层照样通过;
+#   2. 光靠事后 `test -x` 也分不清「本次装成功」和「上一次失败尝试留下的二进制」。
+# 所以这里先把安装脚本下载到临时文件,curl 成功才执行,两步都成功才置 installed=1,
+# 最后要求 installed=1 且二进制存在 —— 否则构建失败,不放行。
+#
+# 触发这次修改的实证:2026-08-13 本门在 PR #740 上红,失败原因正是
+#   process "/bin/sh -c curl -fsSL https://bun.sh/install | bash" ... exit code: 1
+# 这是硬门(非 report-only),所以上游 bun.sh 的任何抖动都会卡住每一个 PR。
+RUN installed=0; \
+    for i in 1 2 3; do \
+      rm -f /tmp/bun-install.sh; \
+      if curl -fsSL https://bun.sh/install -o /tmp/bun-install.sh \
+          && bash /tmp/bun-install.sh; then \
+        installed=1; \
+        break; \
+      fi; \
+      echo "bun install attempt $i failed; retrying in $((i*5))s"; \
+      sleep $((i*5)); \
+    done; \
+    rm -f /tmp/bun-install.sh; \
+    test "$installed" = 1 && test -x "$HOME/.bun/bin/bun" \
+      || { echo "bun install failed after 3 attempts"; exit 1; }
 ENV PATH="/root/.bun/bin:${PATH}"
 
 WORKDIR /app
