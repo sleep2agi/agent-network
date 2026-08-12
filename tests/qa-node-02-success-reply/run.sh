@@ -86,7 +86,7 @@ echo "$RS" | jq -e '.ok == true' >/dev/null || { echo "FAIL: report_status not o
 echo "[5] admin sends task to mock-echo"
 TASK_RESP=$(curl -fsS -X POST "$HUB_BASE/api/task" \
   -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' \
-  -d "{\"alias\":\"mock-echo\",\"task\":\"ping-r6\",\"priority\":\"normal\",\"network_id\":\"$NET_ID\"}")
+  -d "{\"alias\":\"mock-echo\",\"task\":\"ping-r6\",\"priority\":\"normal\",\"network_id\":\"$NET_ID\",\"from\":\"admin\"}")
 TASK_ID=$(echo "$TASK_RESP" | jq -r '.message_id')
 [[ -n "$TASK_ID" && "$TASK_ID" != "null" ]] || { echo "FAIL: no task id, resp=$TASK_RESP"; exit 1; }
 echo "  task_id=$TASK_ID"
