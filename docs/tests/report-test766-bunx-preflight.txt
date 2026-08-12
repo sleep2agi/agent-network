@@ -1,0 +1,83 @@
+test766 — Bun package-runner preflight behavior gate
+Date: 2026-08-13 Asia/Shanghai
+
+Verdict: PASS
+
+Coordinates
+-----------
+BASE_COMMIT=3b049160b2db542d06a32988a530f0b21f773c96
+SOURCE_COMMIT=885a74d7c5418d0ee20de46c728396a367ec41cf
+IMAGE_ID=sha256:60994c0f0a088167e7f5ed77f74fc5fefbde57be414bd9a23b1764f48dc746bc
+FOCUSED_RUN_LOG_SHA256=1779a95c74afdd17670d2311dc99f09605b671ff1ecfc8dac9a209c4b0de55f8
+L1_RUN_LOG_SHA256=fca1054ab0b7604a0d86e2a1f212e7d78b7214c2702c53e0e4d4a62d7b310a03
+
+Scope
+-----
+- Test/CI only: no product, package, dist, deployment, database, or runtime
+  configuration changes.
+- Adds test766 to the active scripts/qa.sh L1 list.
+- Pins the behavior selected by #767; it does not decide whether #766 should
+  later adopt the separately tested automatic `bun x` fallback design.
+
+Focused Docker result
+---------------------
+The image used Bun 1.3.14 pinned by digest:
+  oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4
+
+Observed output:
+  source_commit=885a74d7c5418d0ee20de46c728396a367ec41cf
+  PASS bun-only, neither, and bunx behavior matrix
+  PASS agent-network production build
+  PASS mutation old-or-allows-bun-only witnessed red at its named behavior
+  PASS mutation valid-bunx-blocked witnessed red at its named behavior
+  RESULT pass=4 fail=0
+
+Behavior matrix
+---------------
+1. `bun` without `bunx`: nonzero before spawn, precise bun-only diagnosis and
+   manual symlink remediation, with no healthy-start banner.
+2. Neither executable: nonzero with the generic Bun installation guidance,
+   without the bun-only diagnosis or healthy-start banner.
+3. `bunx` available: the production CLI crosses the preflight, passes exact
+   argv `--bun @sleep2agi/commhub-server@0.9.0-preview.29`, and reaches the
+   healthy-Hub banner against the fixture server.
+
+Witnessed-red mutations
+-----------------------
+- `old-or-allows-bun-only`: restores the former permissive
+  `!bunx && !bun` guard. The clean bun-only probe is green; the mutation reaches
+  spawn and fails the named preflight behavior.
+- `valid-bunx-blocked`: forces the guard to reject a valid bunx installation.
+  The clean bunx probe is green; the mutation prevents runner capture and the
+  healthy banner, so the named behavior turns red.
+- Each mutation first requires an exact single production target and confirms
+  the changed text. A missing or duplicated target fails before classification.
+
+Active L1 regression
+--------------------
+Command:
+  bash scripts/qa.sh --l1
+
+Result on SOURCE_COMMIT:
+  15/15 active L1 suites passed
+  test766: RESULT pass=4 fail=0
+  ALL PASS in 107s
+  measured wall time: 107.24s
+
+Provenance
+----------
+- The focused image recorded TEST766_SOURCE_COMMIT equal to SOURCE_COMMIT.
+- The six files copied into the focused image under
+  tests/test766-bunx-preflight were compared byte-for-byte with SOURCE_COMMIT:
+  PROVENANCE total=6 fail=0.
+- scripts/qa.sh is exercised by the host L1 runner and is not copied into the
+  focused image; its inclusion of test766 is proven by the 15-suite output.
+
+Honest limits
+-------------
+- The healthy path uses an HTTP fixture after the real CLI has selected and
+  invoked bunx. It proves preflight and argv wiring, not registry download or
+  the full commhub-server implementation; existing Hub E2E suites remain the
+  authority for those behaviors.
+- This report does not claim a production rollout, npm publication, or a final
+  product decision for bun-only installations.
