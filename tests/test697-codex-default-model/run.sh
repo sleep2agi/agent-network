@@ -110,6 +110,19 @@ create_node() {
   ) >/tmp/test697-create-"$name".log 2>&1
 }
 
+# Derive the negative discriminator directly from the production runtime
+# catalog.  A new supported runtime must enter this denominator automatically
+# instead of relying on three hand-maintained shell/test lists.
+mapfile -t NON_CODEX_RUNTIMES < <(
+  bun -e 'import { SUPPORTED_RUNTIME_NAMES } from "./agent-network/src/normalize-runtime.ts";
+    const codex = new Set(["codex-sdk", "codex-app-server"]);
+    for (const runtime of SUPPORTED_RUNTIME_NAMES) if (!codex.has(runtime)) console.log(runtime);'
+)
+if [[ "${#NON_CODEX_RUNTIMES[@]}" -ne 5 ]]; then
+  echo "NON_CODEX_RUNTIME_DENOMINATOR_WRONG count=${#NON_CODEX_RUNTIMES[@]} values=${NON_CODEX_RUNTIMES[*]}"
+  exit 1
+fi
+
 echo "L4 real non-interactive creation uses one supported default"
 create_node sdk-default codex-sdk
 create_node app-default codex-app-server
@@ -123,7 +136,7 @@ for name in sdk-default app-default; do
 done
 
 echo "L4b non-Codex creation does not inherit a Codex model"
-for runtime in claude-agent-sdk claude-code-cli grok-build-acp opencode-cli; do
+for runtime in "${NON_CODEX_RUNTIMES[@]}"; do
   name="noncodex-${runtime}"
   create_node "$name" "$runtime"
   cfg="$PROJECT_DIR/.anet/nodes/$name/config.json"
@@ -604,7 +617,7 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
   }
   probe_non_codex_model_absent() {
     local runtime name cfg
-    for runtime in claude-agent-sdk grok-build-acp; do
+    for runtime in "${NON_CODEX_RUNTIMES[@]}"; do
       next_mutation_name "mutation-noncodex-${runtime}" name
       create_node "$name" "$runtime" || return 1
       cfg="$PROJECT_DIR/.anet/nodes/$name/config.json"
