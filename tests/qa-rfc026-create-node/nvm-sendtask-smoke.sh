@@ -154,7 +154,7 @@ GRANDCHILDREN=$(pgrep -P "$CHILD_PID" 2>/dev/null || echo "")
 if [[ -n "$GRANDCHILDREN" ]]; then
   ok "child has live grandchild agent-node process(es): $GRANDCHILDREN (full process tree intact)"
 else
-  bad "child has NO grandchild — starter alive but agent-node process missing (the [[feedback_commit_presence_not_functional_proof]] pattern: 'alive' != 'wired')"
+  bad "child has NO grandchild — starter alive but agent-node process missing (the 「提交存在不等于功能可用」这条判据 pattern: 'alive' != 'wired')"
 fi
 
 note "Stage 7 — send-task三连 third leg:真 dispatch + verify child processes"
