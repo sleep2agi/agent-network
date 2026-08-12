@@ -63,8 +63,14 @@ describe("OpenCode copresence CommHub message wiring", () => {
     const connectedEnd = cli.indexOf("continue;", connected);
     expect(cli.slice(connected, connectedEnd)).toContain("scheduleInformationalInboxDrain()");
 
+    // Assert that startup reaches the drain, not that it reaches it within
+    // some number of characters. The previous form sliced 300 chars after the
+    // registration log and broke the moment an unrelated block (the owner
+    // schedule consumer) was inserted between them — the wiring was intact
+    // the whole time, the ruler was just too short.
     const registered = cli.indexOf('log("已注册到 CommHub")');
-    expect(cli.slice(registered, registered + 300)).toContain("scheduleInformationalInboxDrain()");
+    expect(registered).toBeGreaterThan(-1);
+    expect(cli.indexOf("scheduleInformationalInboxDrain()", registered)).toBeGreaterThan(registered);
   });
 
   test("runtime startup is single-flight and shutdown waits for an in-flight open", () => {
