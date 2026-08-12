@@ -46,7 +46,7 @@ describe("OpenCode co-presence CLI wiring", () => {
   test("the generic --copresence dispatcher selects OpenCode by stored runtime", () => {
     const dispatch = cli.indexOf('if (copresenceRuntime === "opencode-cli")');
     expect(dispatch).toBeGreaterThan(-1);
-    expect(cli.slice(dispatch, dispatch + 240)).toContain("startOpencodeCopresenceOrchestration(id)");
+    expect(cli.slice(dispatch, dispatch + 240)).toContain("startOpencodeCopresenceOrchestration(id, opts.hub)");
   });
 
   test("operator help names the create, attach, and stop commands", () => {

@@ -277,9 +277,14 @@ describe("REAL /proc integration (Linux only)", () => {
       });
       if (res.kind !== "success") console.log("[F] reap logs:\n" + logs.join("\n") + "\ndetail=" + res.detail);
       expect(res.kind).toBe("success");
-      // And the processes are actually gone — "success" must mean reality.
-      const gone = await waitFor(() => carriers.every((p) => !alive(p)), 3000);
-      expect(gone).toBe(true);
+      // And no carrier remains executable. A minimal container's PID 1 may
+      // leave an orphaned child as a zombie indefinitely; kill(pid, 0) still
+      // sees that PID even though state Z has no executable process behind it.
+      const noLiveCarrier = await waitFor(
+        () => carriers.every((p) => !alive(p) || readState(p) === "Z"),
+        3000,
+      );
+      expect(noLiveCarrier).toBe(true);
       expect(scanEnvironForMarker(enumer, uuid)).toEqual([]);
     } finally {
       killTree(spawned);
