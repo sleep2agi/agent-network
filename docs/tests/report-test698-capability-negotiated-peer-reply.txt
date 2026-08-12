@@ -2,24 +2,24 @@
 
 Date: 2026-08-12 Asia/Shanghai
 Base: 17b8223f9d7fd25fcc435b40e7fa1fc0823ea1de
-SOURCE_COMMIT: 6cb8ae116eb8f7c023d1fac6283752f27ccad84d
+SOURCE_COMMIT: 890c4d92581331b6b5fefd9d66fa6b89a77c4d46
 Scope: Hub + agent-node protocol/runtime wiring + isolated Docker tests.
 Production deployment: NOT PERFORMED.
 
 ## Exact-source image
 
-- image: `anet-test698:6cb8ae11`
+- image: `anet-test698:890c4d92`
 - image id:
-  `sha256:a119b9ad6edacc4aa07fa29fd187fb9f846d049e0d1e763c3c16ca30578db347`
+  `sha256:48b0f40dc9562984ab1cfdb10782b49541969bc02aba2c51e2da1075e9b9b1cc`
 - image env:
-  `TEST698_SOURCE_COMMIT=6cb8ae116eb8f7c023d1fac6283752f27ccad84d`
-- all 22 changed agent/server/test runtime files that exist at the same path
+  `TEST698_SOURCE_COMMIT=890c4d92581331b6b5fefd9d66fa6b89a77c4d46`
+- all 23 changed agent/server/test runtime files that exist at the same path
   inside the image matched `git show SOURCE_COMMIT:<path>` byte-for-byte
-  after `docker create` and `docker cp`: 22/22. Dockerfiles, docs, and the
+  after `docker create` and `docker cp`: 23/23. Dockerfiles, docs, and the
   intentionally remapped test673 preload are outside this same-path count.
-- focused result: 183 pass / 0 fail / 545 expect calls.
+- focused result: 184 pass / 0 fail / 549 expect calls.
 - exact main-run artifact digest:
-  `sha256:f152ff6a4eaaee10a4b0dc4b6c20fbcb2032b1ca88b36ebc38f9ec9bcac16204`.
+  `sha256:028ebb2a2e08ae95eee5fbfb0c8a344c77257c43d35ac02ed85a3155a454f6ea`.
   This records one timestamped run and is not claimed reproducible or used
   as source provenance.
 
@@ -62,6 +62,13 @@ Production deployment: NOT PERFORMED.
    task was created. Only app-level `alias_not_found` permits this second
    route; transport ambiguity and every other application rejection remain
    thrown so the pending reply is retained.
+8. Every legacy wake task carries a stable, visible original-task marker:
+   `[peer-reply in_reply_to=<task_id>]`. Old Hubs deduplicate `send_task` by
+   sender, recipient, and content only. The marker preserves dedup for retries
+   of one original task while preventing two distinct originals with the same
+   reply text from colliding. A real old-Hub + real-cli fixture dispatched two
+   source tasks that produced the same SDK-stub result and observed exactly
+   two wake tasks, each tied to its own original task id.
 
 ## Real old-Hub wire and exact task identity
 
@@ -102,6 +109,18 @@ task, and observes the resulting old-Hub task/inbox state:
 
 `LEGACY_CLI_E2E_PASS exact_get_task node=task user=reply`
 
+The real-cli failure matrix registers the receiver without starting it,
+enqueues two ordinary node-origin tasks plus a third task, then deletes only
+the third authoritative task row from the isolated old-Hub SQLite database
+before starting production `cli.ts`. It proves both compatibility hazards in
+one controlled run:
+
+`LEGACY_CLI_FAILURE_PASS equal_replies=2 identity_egress=0 pending=1`
+
+The equal replies remain distinct through the stable original-task marker.
+The missing identity produces no task/reply egress and remains exactly once in
+the disk-backed pending queue; it is not guessed from the live alias roster.
+
 A byte-changing mutation changes the production `cli.ts` lookup from
 `get_task(task_id)` to `get_all_status`. It rebuilds a separate exact-source
 image and the same old-Hub production-CLI E2E turns red:
@@ -109,14 +128,14 @@ image and the same old-Hub production-CLI E2E turns red:
 `MUTATION_RED: old-hub-exact-task-lookup-lost rc=1`
 
 Exact old-Hub run artifact digest:
-`sha256:eee2f6ab399a5aad9dac6d5cfb99cf980e854b8fbf43687fadcf2d952183c63c`.
+`sha256:533664597fcebdd6f7bfeee51266b66d6e83b8e7af670528a76570c8818f86f4`.
 It records one run only and is not used as reproducible provenance.
 
 ## Witnessed-red mutations
 
 Every mutation requires a byte change; a no-op fails the runner. The main
-exact-source image produced 29 named reds, plus the separate real-old-Hub
-production mutation above (30 total):
+exact-source image produced 29 named reds, plus three separate real-old-Hub
+production mutations (32 total):
 
 - cli-reply-type-lost
 - cli-terminal-reply-egress-restored
@@ -148,6 +167,8 @@ production mutation above (30 total):
 - capability-advertisement-removed
 - legacy-agent-warning-removed
 - old-hub-exact-task-lookup-lost (separate archived-old-Hub runner)
+- legacy-equal-replies-deduplicated (separate archived-old-Hub runner)
+- old-hub-identity-failure-egresses (separate archived-old-Hub runner)
 
 The first six target production `cli.ts` and rerun real-process behavior.
 Disabling SSE wake, restoring terminal reply egress, or losing failed status
@@ -160,8 +181,10 @@ transaction matrix and assert its exact structured classification. The
 deleted-origin mutation changes the production compatibility condition and
 reruns the real Hub + real receiver process; it turns red because the original
 task never reaches a terminal state. The alias-binding mutation fails the
-focused Hub behavior test. The final mutation targets production legacy
-identity lookup and exercises the actual old Hub response.
+focused Hub behavior test. The three final mutations exercise the actual old
+Hub response and production CLI: exact-task lookup removal, stable marker
+removal (the second equal reply is deduplicated), and identity-error guessing
+(the deleted task incorrectly produces egress instead of remaining pending).
 
 ## Deployment and honest limits
 
