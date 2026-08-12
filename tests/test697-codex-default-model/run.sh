@@ -310,7 +310,16 @@ wait_for_capture() {
   return 1
 }
 
+reset_runtime_session() {
+  local next
+  next=$(mktemp /tmp/test697-runtime-config.XXXXXX)
+  jq 'del(.session)' "$RUNTIME_CFG" > "$next"
+  mv "$next" "$RUNTIME_CFG"
+  chmod 0600 "$RUNTIME_CFG"
+}
+
 probe_goal_wake_model() {
+  reset_runtime_session
   : > "$CODEX_CAPTURE"
   cat > "$GOALS_PATH" <<JSON
 {"version":1,"goals":[{"goal_id":"69700000-0000-4000-8000-000000000001","text":"test697 wake","status":"active","interval_ms":3600000,"next_wake_at":"2000-01-01T00:00:00.000Z","parent_task_id":"task-test697","report_to":"admin","runtime":"codex-sdk","created_at":"2000-01-01T00:00:00.000Z","updated_at":"2000-01-01T00:00:00.000Z","progress_log":[]}]}
@@ -324,6 +333,7 @@ JSON
 }
 
 probe_sdk_task_models() {
+  reset_runtime_session
   : > "$CODEX_CAPTURE"
   printf '%s\n' '{"version":1,"goals":[]}' > "$GOALS_PATH"
   start_runtime_node sdk TEST697_CODEX_FAIL_FIRST=1 || return 1
@@ -377,6 +387,7 @@ probe_sdk_resume_model() {
 }
 
 probe_stdio_task_model() {
+  reset_runtime_session
   : > "$STDIO_CAPTURE"
   printf '%s\n' '{"version":1,"goals":[]}' > "$GOALS_PATH"
   cp "$ROOT/tests/test697-codex-default-model/fake-codex-app-server.mjs" "$FAKE_BIN/codex"
@@ -424,7 +435,17 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
     local backup
     backup=$(mktemp /tmp/test697-mutation.XXXXXX)
     cp "$file" "$backup"
-    local before after rc
+    local before after rc baseline_rc
+    set +e
+    "$probe" >/tmp/test697-baseline-"$name".log 2>&1
+    baseline_rc=$?
+    set -e
+    if [[ "$baseline_rc" -ne 0 ]]; then
+      echo "MUTATION_BASELINE_RED $name rc=$baseline_rc"
+      cat /tmp/test697-baseline-"$name".log
+      rm -f "$backup"
+      exit 1
+    fi
     before=$(sha256sum "$file" | awk '{print $1}')
     MUTATION_FILE="$file" MUTATION_FROM="$from" MUTATION_TO="$to" bun -e '
       import { readFileSync, writeFileSync } from "node:fs";
@@ -460,7 +481,17 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
     local backup
     backup=$(mktemp /tmp/test697-mutation.XXXXXX)
     cp "$file" "$backup"
-    local before after rc
+    local before after rc baseline_rc
+    set +e
+    "$probe" >/tmp/test697-baseline-"$name".log 2>&1
+    baseline_rc=$?
+    set -e
+    if [[ "$baseline_rc" -ne 0 ]]; then
+      echo "MUTATION_BASELINE_RED $name rc=$baseline_rc"
+      cat /tmp/test697-baseline-"$name".log
+      rm -f "$backup"
+      exit 1
+    fi
     before=$(sha256sum "$file" | awk '{print $1}')
     MUTATION_FILE="$file" MUTATION_FROM1="$from1" MUTATION_TO1="$to1" \
       MUTATION_FROM2="$from2" MUTATION_TO2="$to2" bun -e '
@@ -502,7 +533,17 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
     local backup
     backup=$(mktemp /tmp/test697-mutation.XXXXXX)
     cp "$file" "$backup"
-    local before after rc count
+    local before after rc count baseline_rc
+    set +e
+    "$probe" >/tmp/test697-baseline-"$name".log 2>&1
+    baseline_rc=$?
+    set -e
+    if [[ "$baseline_rc" -ne 0 ]]; then
+      echo "MUTATION_BASELINE_RED $name rc=$baseline_rc"
+      cat /tmp/test697-baseline-"$name".log
+      rm -f "$backup"
+      exit 1
+    fi
     before=$(sha256sum "$file" | awk '{print $1}')
     count=$(MUTATION_FILE="$file" MUTATION_FROM="$from" bun -e '
       import { readFileSync } from "node:fs";
@@ -541,21 +582,31 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
     echo "MUTATION_RED $name layer=$expected_layer rc=$rc"
   }
 
+  MUTATION_CREATE_SEQ=0
+  next_mutation_name() {
+    local prefix=$1 outvar=$2
+    MUTATION_CREATE_SEQ=$((MUTATION_CREATE_SEQ + 1))
+    printf -v "$outvar" '%s-%s' "$prefix" "$MUTATION_CREATE_SEQ"
+  }
   probe_create_default() {
-    create_node mutation-default codex-sdk
+    local name
+    next_mutation_name mutation-default name
+    create_node "$name" codex-sdk || return 1
     jq -e '.model == "gpt-5.6-sol"' \
-      "$PROJECT_DIR/.anet/nodes/mutation-default/config.json" >/dev/null
+      "$PROJECT_DIR/.anet/nodes/$name/config.json" >/dev/null
   }
   probe_explicit_model() {
-    create_node mutation-explicit codex-sdk --model operator-custom-model
+    local name
+    next_mutation_name mutation-explicit name
+    create_node "$name" codex-sdk --model operator-custom-model || return 1
     jq -e '.model == "operator-custom-model"' \
-      "$PROJECT_DIR/.anet/nodes/mutation-explicit/config.json" >/dev/null
+      "$PROJECT_DIR/.anet/nodes/$name/config.json" >/dev/null
   }
   probe_non_codex_model_absent() {
     local runtime name cfg
     for runtime in claude-agent-sdk grok-build-acp; do
-      name="mutation-noncodex-${runtime}"
-      create_node "$name" "$runtime"
+      next_mutation_name "mutation-noncodex-${runtime}" name
+      create_node "$name" "$runtime" || return 1
       cfg="$PROJECT_DIR/.anet/nodes/$name/config.json"
       jq -e 'has("model") | not' "$cfg" >/dev/null
     done
@@ -590,6 +641,16 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
           --codex-bin "$FAKE_BIN/codex"
     ) >/tmp/test697-mut-copresence.log 2>&1 || true
     grep -Fq -- "-c model='gpt-5.6-sol'" "$FAKE_TMUX_LOG"
+  }
+  probe_copresence_explicit() {
+    : > "$FAKE_TMUX_LOG"
+    (
+      cd "$PROJECT_DIR"
+      HOME="$HOME_DIR" PATH="$FAKE_BIN:$PATH" FAKE_TMUX_LOG="$FAKE_TMUX_LOG" \
+        timeout 5 "${ANET[@]}" node start copresence-default --copresence \
+          --model o3 --codex-bin "$FAKE_BIN/codex"
+    ) >/tmp/test697-mut-copresence-explicit.log 2>&1 || true
+    grep -Fq -- "-c model='o3'" "$FAKE_TMUX_LOG"
   }
 
   run_mutation denominator-retired-default L1 \
@@ -641,6 +702,9 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
     "$ROOT/agent-network/bin/cli.ts" \
     'const model = opts.model || DEFAULT_CODEX_MODEL;' \
     'const model = opts.model || "gpt-4.1-legacy";' probe_copresence_default
+  run_mutation copresence-explicit-overwritten L7b \
+    "$ROOT/agent-network/bin/cli.ts" \
+    'model: opts.model,' 'model: undefined,' probe_copresence_explicit
   run_mutation batch-preset-default-regressed L7c \
     "$ROOT/agent-network/bin/cli.ts" \
     'vendor.models.find(m => m.default)' 'vendor.models.find(m => !m.default)' \
@@ -679,6 +743,11 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
   run_mutation_all explicit-runtime-model-ignored L7e \
     "$ROOT/agent-node/src/cli.ts" \
     'resolveCodexModel(MODEL)' 'resolveCodexModel(undefined)' 5 \
+    probe_explicit_runtime_models
+  run_mutation persisted-runtime-model-ignored L7e \
+    "$ROOT/agent-node/src/cli.ts" \
+    'const MODEL = opts.model || process.env.MODEL || fileConfig.model;' \
+    'const MODEL = opts.model || process.env.MODEL;' \
     probe_explicit_runtime_models
 fi
 
