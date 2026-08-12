@@ -16,7 +16,10 @@
 | **Bun** | ≥ 1.2.0 | `npm i -g bun` 或 `curl -fsSL https://bun.sh/install \| bash` |
 
 ::: warning Bun 必装
-`commhub-server` 是 Bun-shebang TypeScript（用 `bunx --bun` 起），**没装 Bun 时 `anet hub start` 会在启动前被拦下**，报 `❌ anet hub start requires the Bun runtime` 并以退出码 1 结束。是新机部署 8 坑里第 1 坑；[#235](https://github.com/sleep2agi/agent-network/issues/235) 之前它是裸崩 `spawn bunx ENOENT`，现在不会了。
+`commhub-server` 是 Bun-shebang TypeScript（用 `bunx --bun` 起），**没装 Bun 时 `anet hub start` 一定失败**，是新机部署 8 坑里第 1 坑。表现分两条线:
+
+- **latest(当前 `2.2.21`)**:裸崩 `Error: spawn bunx ENOENT` + Node 堆栈——[#235](https://github.com/sleep2agi/agent-network/issues/235) 的 preflight **尚未进入 latest**;
+- **preview(`2.3.0-preview.x`)**:启动前被拦下，报 `❌ anet hub start requires the Bun runtime`，退出码 1。
 
 验证：
 ```bash
