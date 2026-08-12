@@ -1,0 +1,32 @@
+test702 — explicit primary-network resolution (#702)
+Date: 2026-08-12
+Environment: Docker, oven/bun:1.3.14
+Scope: agent-network/src/primary-network.ts and the three CLI --no-network call sites
+
+GREEN
+Command:
+  sg docker -c 'docker build --build-arg SOURCE_COMMIT=$(git rev-parse HEAD) -f tests/test702-primary-network/Dockerfile -t anet-test702:local . && docker run --rm anet-test702:local'
+Result:
+  - primary-network behavior + CLI wiring: 4 pass, 0 fail
+  - TypeScript typecheck: PASS
+  - package build: PASS
+  - container exit: 0
+
+WITNESSED RED
+Mutation:
+  Replace the resolver's read of body.current_network with an empty string.
+Command:
+  Build and run the same Docker test gate with SOURCE_COMMIT=witnessed-red-no-current-network.
+Result:
+  - "uses current_network even when the network list is reversed and renamed": FAIL
+  - 3 pass, 1 fail
+  - container exit: 1
+  - failure was PrimaryNetworkResolutionError: Hub did not return current_network
+
+RESTORATION
+  Restored the current_network read exactly. The final green gate was rerun before commit.
+
+BOUNDARIES
+  - No production DB, node config, or process was touched.
+  - No live Hub request was required; transport behavior is deterministic via injected fetch.
+  - This test does not validate a production deployment or npm publication.

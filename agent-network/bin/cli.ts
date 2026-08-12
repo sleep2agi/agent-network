@@ -124,6 +124,7 @@ import {
   DEFAULT_CODEX_MODEL,
   defaultCodexModelForRuntime,
 } from "../src/codex-model-default";
+import { resolvePrimaryNetwork } from "../src/primary-network";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -10518,17 +10519,12 @@ async function demoDebateCommand() {
     networkLabel = `(provided ${explicitNetwork.slice(0, 16)})`;
   } else if (useDefaultNetwork) {
     try {
-      const me = await fetch(`${hub}/api/auth/me`, { headers: authHeaders() }).then(r => r.json() as any);
-      networkId = me?.user?.default_network_id || "";
-    } catch {}
-    if (!networkId) {
-      try {
-        const nets = await fetch(`${hub}/api/networks`, { headers: authHeaders() }).then(r => r.json() as any);
-        const def = (nets?.networks || []).find((n: any) => n.network_name === "default") || nets?.networks?.[0];
-        networkId = def?.network_id || "";
-      } catch {}
+      networkId = await resolvePrimaryNetwork(hub, authHeaders());
+    } catch (e: any) {
+      console.error(`  ❌ ${e?.message || "无法读取当前 network"}`);
+      return;
     }
-    networkLabel = `(default network)`;
+    networkLabel = `(current network)`;
   } else {
     const netName = `debate-${suffix}`;
     console.log(`  ⏳ 正在创建独立 network: ${netName}...`);
@@ -10922,17 +10918,12 @@ async function demoSocialMediaCommand() {
     networkLabel = `(provided ${explicitNetwork.slice(0, 16)})`;
   } else if (useDefaultNetwork) {
     try {
-      const me = await fetch(`${hub}/api/auth/me`, { headers: authHeaders() }).then(r => r.json() as any);
-      networkId = me?.user?.default_network_id || "";
-    } catch {}
-    if (!networkId) {
-      try {
-        const nets = await fetch(`${hub}/api/networks`, { headers: authHeaders() }).then(r => r.json() as any);
-        const def = (nets?.networks || []).find((n: any) => n.network_name === "default") || nets?.networks?.[0];
-        networkId = def?.network_id || "";
-      } catch {}
+      networkId = await resolvePrimaryNetwork(hub, authHeaders());
+    } catch (e: any) {
+      console.error(`  ❌ ${e?.message || "无法读取当前 network"}`);
+      return;
     }
-    networkLabel = `(default network)`;
+    networkLabel = `(current network)`;
   } else {
     const netName = `demo-social-${suffix}`;
     try {
@@ -11468,17 +11459,12 @@ async function demoPrReviewCommand() {
     networkLabel = `(provided ${explicitNetwork.slice(0, 16)})`;
   } else if (useDefaultNetwork) {
     try {
-      const me = await fetch(`${hub}/api/auth/me`, { headers: authHeaders() }).then(r => r.json() as any);
-      networkId = me?.user?.default_network_id || "";
-    } catch {}
-    if (!networkId) {
-      try {
-        const nets = await fetch(`${hub}/api/networks`, { headers: authHeaders() }).then(r => r.json() as any);
-        const def = (nets?.networks || []).find((n: any) => n.network_name === "default") || nets?.networks?.[0];
-        networkId = def?.network_id || "";
-      } catch {}
+      networkId = await resolvePrimaryNetwork(hub, authHeaders());
+    } catch (e: any) {
+      console.error(`  ❌ ${e?.message || "无法读取当前 network"}`);
+      return;
     }
-    networkLabel = `(default network)`;
+    networkLabel = `(current network)`;
   } else {
     const netName = `pr-review-${suffix}`;
     console.log(`  ⏳ 正在创建独立 network: ${netName}...`);
