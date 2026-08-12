@@ -5,8 +5,8 @@
 # .tgz artifact that `npm publish` uploads, so installing from .tgz
 # proves the user-install path WITHOUT needing to actually publish to
 # the registry. This catches "source builds work but the user's npm
-# install is broken" regressions (per [[feedback_docker_smoke_gate_before_ship]]
-# / [[feedback_anet_node_behavior_stale_install]]).
+# install is broken" regressions (per 「发版前必须过 Docker 冒烟门」这条判据
+# / 「旧的全局安装会让 anet 行为与文档不符」那类事故).
 #
 # Pass criteria:
 #   1. npm pack succeeds for agent-network, agent-node, server

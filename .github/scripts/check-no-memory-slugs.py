@@ -44,7 +44,9 @@ from pathlib import Path
 # - closing `\]\]`
 SLUG_RE = re.compile(r"\[\[(feedback|project|reference|user)_[a-z0-9_-]+(?:\.md)?\]\]")
 
-EXTENSIONS = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".md", ".yml", ".yaml"}
+# .sh / .py 同样是公开仓里可见的文件,此前不在覆盖内 —— 实测 2026-08-13,
+# 三处真 slug 就藏在 tests/ 下的 shell 脚本里,门扫 898 个文件却看不见它们。
+EXTENSIONS = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".md", ".yml", ".yaml", ".sh", ".py"}
 
 # Walk-relative dir names to prune entirely.
 SKIP_DIRS = {
