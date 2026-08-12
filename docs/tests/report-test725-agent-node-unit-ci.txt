@@ -1,0 +1,89 @@
+# test725 — complete agent-node unit CI domain
+
+Date: 2026-08-13 Asia/Shanghai
+Base: 028be50fc54337e31001c6dac3b205585ac7438f
+SOURCE_COMMIT: c01e205b114b10325b39214238f6ee34b6502f45
+Scope: agent-node test fixtures + one independent Docker suite + CI wiring.
+Production deployment: NOT PERFORMED.
+
+## Exact-source image
+
+- image: `anet-test725:c01e205b-exact`
+- image id: `sha256:6b75d6a62b062f13ddd1f6a17e0544f501accfdfcfe2e4c7263dd45c2106c1e4`
+- image env:
+  `TEST725_SOURCE_COMMIT=c01e205b114b10325b39214238f6ee34b6502f45`
+- the three changed files copied into the image were compared against
+  `git show SOURCE_COMMIT:<path>`: 3/3 byte-for-byte MATCH.
+- the workflow and Dockerfile are build inputs, not files copied into the
+  image; their behavior is covered by the exact build and run rather than
+  claimed as same-path image provenance.
+- Bun is pinned to 1.3.14. Its Linux x64 release archive is verified against
+  the committed SHA-256 before extraction, and the installed version is
+  checked during the image build.
+
+## Result
+
+The suite ran the complete `agent-node/src/` test domain as uid 1000 in an
+independent Docker image with Bun 1.3.14, Node v22.23.2, `crontab`, and a
+real non-root XDG runtime directory:
+
+```text
+1277 pass
+0 fail
+4357 expect() calls
+Ran 1277 tests across 91 files. [117.16s]
+```
+
+The runner then changed the unique production call from
+`deliverToRuntime: () => processTask(runtimeContent, ...)` to
+`processTask(content, ...)`. The focused behavior test failed and the runner
+required the named assertion to appear in the mutation log:
+
+```text
+MUTATION_RED readable-attachment-runtime-disconnected rc=1
+RESULT: PASS
+```
+
+Full run log digest:
+`12d0736d1e279f6975734b5716cf2e08751a4f350824d0243d70b6e858f08d7d`.
+This identifies one run and is not used as source provenance.
+
+## Corrections made while establishing the gate
+
+1. The first image build failed before tests because the Bun installer
+   requires `unzip`; the Dockerfile now declares that dependency.
+2. A candidate image embedded a guessed 40-character source suffix after a
+   correct short prefix. It is invalid provenance and is not counted as
+   evidence. Accepted images embed the exact output of `git rev-parse HEAD`,
+   which is read back and compared before execution.
+3. The first exact non-root run removed 41 environment failures by providing
+   `/run/user/<uid>`, then exposed one test-fixture cleanup bug: a Grok test
+   intentionally created a mode-000 directory but did not restore permission
+   before recursive cleanup. The fixture now restores mode 0700 in `finally`;
+   the security assertion and production code are unchanged.
+4. The readable-attachment test no longer pins whitespace and indentation.
+   It asserts the production `deliverToRuntime` behavior and has the
+   witnessed-red result above.
+5. A first green image still fetched the current Bun release through
+   `curl | bash`. It is not the frozen evidence image because that does not
+   reproduce one runtime from Git. The final image downloads Bun 1.3.14 as a
+   separate fail-closed step, verifies the archive hash, and then installs it.
+
+## CI behavior
+
+- `.github/workflows/qa.yml` has an independent
+  `agent-node unit (Docker, non-root)` job.
+- the job builds this suite with `SOURCE_COMMIT=$GITHUB_SHA` and runs the
+  exact image.
+- dependency or environment failures stop before the behavior mutation;
+  a non-empty pass denominator and exact zero-failure aggregate are required.
+
+## Honest limits
+
+- No production service, node, database, npm package, or global install was
+  changed.
+- This suite covers the complete agent-node unit domain and one focused
+  wiring mutation. It does not replace the repository's multi-container Hub,
+  network, or package compatibility E2E suites.
+- The npm audit output reported existing dependency advisories during image
+  construction; this test does not claim to remediate or assess them.
