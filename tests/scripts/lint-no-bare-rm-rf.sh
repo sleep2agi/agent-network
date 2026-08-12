@@ -39,6 +39,31 @@ cd "$REPO_ROOT"
 
 PATTERN='rm -rf [^/]*\$[A-Za-z_{]'
 
+# 🔴 先确认扫描范围非空,再谈"没找到违规"。
+#
+# 下面的 grep 带 `2>/dev/null`,所以扫描根一旦改名/移走,报错会被吞掉,
+# violations 为空,脚本直接打印 "✓ clean" 并 exit 0 —— 与"真的没有违规"
+# **输出完全一样**。这道门守的是 2026-06-16 那次 $HOME 回落到真实
+# /home/<user>、把项目目录抹掉的事故,零覆盖地显示绿色是不可接受的。
+#
+# 同族纪律见 tests/scripts/lint-no-hardcoded-from-session.py:
+# "a guard that reads 0 lines and a guard that reads 12000 clean ones
+#  both print OK otherwise"。
+SCAN_ROOTS=(tests agent-network/tests)
+for d in "${SCAN_ROOTS[@]}"; do
+  [ -d "$d" ] || {
+    echo "❌ [lint-no-bare-rm-rf] scan root missing: $d — 范围已变,更新 SCAN_ROOTS" >&2
+    exit 3
+  }
+done
+SCANNED=$(find "${SCAN_ROOTS[@]}" \
+  \( -name node_modules -o -name dist -o -name .git \) -prune -o \
+  -type f \( -name '*.sh' -o -name '*.bash' -o -name '*.zsh' \) -print 2>/dev/null | wc -l | tr -d ' ')
+if [ "${SCANNED:-0}" -eq 0 ]; then
+  echo "❌ [lint-no-bare-rm-rf] 扫描到 0 个 shell 文件 —— 零覆盖的守卫与坏掉的守卫无法区分,拒绝通过。" >&2
+  exit 3
+fi
+
 violations=$(grep -rnE \
   --include='*.sh' --include='*.bash' --include='*.zsh' \
   --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.git \
@@ -65,5 +90,6 @@ if [ -n "$violations" ]; then
   exit 1
 fi
 
-echo "✓ [lint-no-bare-rm-rf] clean — no bare rm -rf \$VAR in tests/ or agent-network/tests/"
+# 报分母:"0 处违规" 只有在 "读了 N 个文件" 旁边才有意义。
+echo "✓ [lint-no-bare-rm-rf] clean — scanned $SCANNED shell file(s) in ${SCAN_ROOTS[*]}, no bare rm -rf \$VAR"
 exit 0
