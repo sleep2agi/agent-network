@@ -147,8 +147,8 @@ describe("send_reply legacy/Dashboard compatibility (#698)", () => {
 
     expect(reply.ok).toBe(true);
     expect(reply.warning).toContain("commhub_send_peer_reply");
-    expect(reply.warning).toContain("commhub_send_task");
-    expect(reply.warning).toContain(`alias="${DISPATCHER_ALIAS}"`);
+    expect(reply.warning).toContain("terminalized the original task");
+    expect(reply.warning).not.toContain("commhub_send_task");
     expect(reply.warning).toContain("mixed-version");
     expect(db.get<{ status: string; result: string }>(
       "SELECT status, result FROM tasks WHERE task_id = ?1", taskId,
