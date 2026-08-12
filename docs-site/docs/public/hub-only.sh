@@ -89,6 +89,21 @@ if [ "$(id -u)" -eq 0 ]; then
     [ -x "$USER_BUN" ] && cp "$USER_BUN" /usr/local/bin/bun && chmod +x /usr/local/bin/bun
   fi
 
+  # `|| true` 是有意的:非 root 用户装 bun 允许失败,不该让整个安装中止。
+  # 但**失败后保持沉默不是有意的** —— 上面这步已经知道 bun 在不在,
+  # 却什么都不说,脚本继续往下并宣告安装完成。用户要等到
+  # `anet hub start` 才会撞上 "requires the Bun runtime"。
+  # commhub-server 是 bun-only,所以这里必须明说,并给出可执行的补救。
+  if ! command -v bun >/dev/null 2>&1; then
+    echo ""
+    echo "  [!] Bun 未能自动安装 —— commhub-server 是 bun-only,"
+    echo "      在装上之前 'anet hub start' 不会成功。"
+    echo "      补救(任选其一):"
+    echo "        npm i -g bun"
+    echo "        或按 https://bun.sh/docs/installation 安装后重跑本脚本"
+    echo ""
+  fi
+
   if [ "$AUTOSTART" = "1" ] || [ "$AUTOSTART" = "true" ]; then
     echo "[root 4/4] enable-linger ($USERNAME systemd 不依赖登录)..."
     loginctl enable-linger "$USERNAME"
