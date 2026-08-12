@@ -1,6 +1,6 @@
 # test697 — Codex default model migration
 
-SOURCE_COMMIT=24fa803617643c77401f4be90460e28450be86c3
+SOURCE_COMMIT=be594ff48c017afb728205f911f128dbc0325269
 BASE_COMMIT=17b8223f9d7fd25fcc435b40e7fa1fc0823ea1de
 DATE=2026-08-12 Asia/Shanghai
 
@@ -16,19 +16,19 @@ Scope
 
 Exact-source Docker evidence
 ----------------------------
-- image: `anet-test697:24fa8036-exact`
-- image id: `sha256:bc0579a872510658ad110481e30cba3eeca13a940b03eeac0ae8d78318180806`
-- image env: `TEST697_SOURCE_COMMIT=24fa803617643c77401f4be90460e28450be86c3`
+- image: `anet-test697:be594ff4-exact`
+- image id: `sha256:b31a1159e69bd282a939749c6381b4bf8018cce23a1f34b0410114f2414c467d`
+- image env: `TEST697_SOURCE_COMMIT=be594ff48c017afb728205f911f128dbc0325269`
 - all 21 files changed from BASE through SOURCE matched their `/workspace`
   image copy byte-for-byte (21/21).
 - main run artifact digest:
-  `sha256:ad5b84d5a0393403f2d59941bcc9097a29276f92a25ce7f6b96755635e0751e4`.
+  `sha256:f2684f370f58c0a9db5f4593f8f385ee6aadbcf4571744c4dfea9037df0f2130`.
   It records this run only; timestamps and temporary paths make it
   intentionally non-reproducible and it is not used as provenance.
 
 Main layered suite: PASS
 ------------------------
-- L0: 35 tests, 0 failures, 52 assertions.
+- L0: 35 tests, 0 failures, 55 assertions.
 - L1: explicit production roots exist, contain the replacement-model floor,
   and contain zero retired-default literals. A dedicated mutation proves this
   denominator itself turns red rather than silently passing on missing paths.
@@ -37,7 +37,10 @@ Main layered suite: PASS
 - L4: real non-interactive `node create` writes `gpt-5.6-sol` for codex-sdk
   and codex-app-server.
 - L4b: real non-interactive creation of claude-agent-sdk, claude-code-cli,
-  grok-build-acp, and opencode-cli nodes leaves `config.model` absent. The
+  grok-build-acp, grok-build-cli, and opencode-cli nodes leaves
+  `config.model` absent. The negative set is derived at runtime from the
+  production `SUPPORTED_RUNTIME_NAMES` catalog minus the two Codex runtimes;
+  the unit test derives the same set instead of maintaining another list. The
   assertion is `has("model") | not`, so an explicitly present null field does
   not masquerade as absence. This is the negative half of the runtime
   discriminator, not merely a helper test.
@@ -85,8 +88,9 @@ Twenty-three baseline-green witnessed-red mutations: PASS
 - `denominator-retired-default` -> L1 production denominator.
 - `default-regressed` -> L4 real Hub create/config readback.
 - `non-codex-default-leak` -> changes the production runtime discriminator to
-  ask for the Codex default unconditionally; L4b observes a model leak in real
-  non-Codex configs and turns red.
+  ask for the Codex default unconditionally; the catalog-derived L4b probe
+  observes a model leak across the complete five-runtime negative set and
+  turns red.
 - `picker-default-regressed` -> L7 real PTY.
 - `picker-display-order-reversed` -> L7 real PTY.
 - `picker-vendor-value-miswired` -> L7 real PTY.
@@ -138,17 +142,32 @@ config cannot satisfy them. The two label/value attacks use a two-anchor
 mutation helper with both anchors required, so a partial or stale mutation
 cannot masquerade as a red.
 
+Reviewer `grok-build-cli` denominator attack replay: PASS
+---------------------------------------------------------
+- The exact reviewer mutation adds `grok-build-cli` to
+  `defaultCodexModelForRuntime`. Against the exact image, the catalog-derived
+  L0 test fails with received `gpt-5.6-sol` where `undefined` is required
+  (artifact `sha256:95a70f44bc82a826c059b6a1051e517121db7f2f94e5a5cd946f5c2f57fc454a`).
+- A decoupled production-call mutation asks for the Codex default only when
+  runtime is `grok-build-cli`. The real L4b create/readback path fails with
+  `NON_CODEX_MODEL_LEAK runtime=grok-build-cli` and shows the leaked model in
+  config (artifact
+  `sha256:4e0749d281bf0303c21fb27a95fe9eacd84a939425256608a8a01120c5d23d2f`).
+- These are derived negative controls, not extra product mutations. The main
+  runner still contains exactly twenty-three baseline-green witnessed-red
+  mutations.
+
 Reviewer counterexample replay: PASS
 ------------------------------------
-- A derivative image, `anet-test697-inert:24fa8036`
-  (`sha256:01499d6313cca79e72e58add3d8cd06e79ba4ad030cf18fabe39a28dc241bd4e`),
+- A derivative image, `anet-test697-inert:be594ff4`
+  (`sha256:19c7c174189e6a3b89f473d9a8cad6c558f5068fb949caab82c30feac881cf0e`),
   changes only the inert comment on the SDK prompt line and injects that change
   as an additional mutation using `probe_sdk_task_models`.
 - The unmodified baseline probe passes; after the comment-only byte change the
   same probe still passes, so the runner reports
   `MUTATION_SURVIVED inert-comment-only` and the overall container exits 1.
 - Artifact digest:
-  `sha256:1651b7a2dca84bfda576c8514028934cd483ca34004d57519d3fc4ccd873b06d`.
+  `sha256:a118c91965e72349d6c905e3d6de64bbbe1c01cc5f30dc9fe49b38dfd78f86dc`.
   This derived negative-control run is evidence about the runner only; it is
   not offered as the exact source image or as an additional witnessed-red
   product mutation.
@@ -158,7 +177,7 @@ Codex app-server timeout regression evidence on the exact image: PASS
 - This is a separate explicit Docker command against the exact image, not
   output produced by `tests/test697-codex-default-model/run.sh`.
 - Separate-command artifact digest:
-  `sha256:510259c971c0138f8e970688b3225ec9158cc500861880c9ce429d9cfcc7fd1d`.
+  `sha256:a57dfabb9385cc4419e6a5b6c7f6c6dc30e2e1c38559d161be2aeeb55e6dfe73`.
 - `runtime.test.ts`: 23 tests, 0 failures, 59 assertions.
 - app-server client/bridge/session-manager: 60 tests, 0 failures,
   224 assertions.
