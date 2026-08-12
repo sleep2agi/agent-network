@@ -90,7 +90,7 @@ ARG=$(jq -nc --arg net "$ALICE_NET" \
 TASK_ID=$(mcp_call "$ALICE_NTOK" "send_task" "$ARG" | jq -r '.message_id')
 [[ -n "$TASK_ID" && "$TASK_ID" != "null" ]] || { echo "FAIL: no task id"; exit 1; }
 ARG=$(jq -nc --arg t "$TASK_ID" \
-  '{alias:"alice",text:"alice-private-reply-text",in_reply_to:$t,status:"replied",from_session:"alice-secret-agent"}')
+  '{alias:"alice-secret-agent",text:"alice-private-reply-text",in_reply_to:$t,status:"replied",from_session:"alice-secret-agent"}')
 mcp_call "$ALICE_NTOK" "send_reply" "$ARG" | jq -e '.ok == true' >/dev/null \
   || { echo "FAIL: alice send_reply"; exit 1; }
 

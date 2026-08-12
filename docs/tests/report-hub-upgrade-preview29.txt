@@ -1,0 +1,71 @@
+生产 Hub 升级演练报告 — 0.9.0-preview.27 → 0.9.0-preview.29
+=============================================================
+日期      2026-08-13 00:58 – 01:10(UTC 16:58 – 17:10)
+对象      pm2 app `commhub-hub`,全网唯一的生产 Hub
+载荷      #698(peer reply 终结原任务,服务端半边:删掉 `liveSse < 1` 这个 capability 条件)
+          #697 / #699 的服务端部分
+
+这是 deploy/ 下第一份【真做过】的演练报告。其余几份(dashboard / tunnel / docs-site)
+均如实标注为「未演练」。
+
+回滚坐标(升级前记录)
+---------------------
+pm2 app        commhub-hub  (pid 3676384, uptime 35h, restarts 12)
+script         ~/.local/bin/hub-daemon.sh
+RUNTIME_DIR    $HOME/.commhub/runtime-v33-upload-bridge-17b8223f
+version        0.9.0-preview.27
+sessions       213
+
+备份
+----
+脚本   ~/.local/bin/hub-daemon.sh.bak-preview27-20260813-005811
+DB     ~/.commhub/commhub.db.bak-prehubupgrade-20260813-005811  (VACUUM INTO,非 cp)
+       PRAGMA integrity_check = ok
+       sessions = 213   tasks = 24081   大小 210M
+
+旁路验证(生产未受影响)
+------------------------
+端口   127.0.0.1:9291        库  /tmp/hubverify3.db(备份的副本,非生产库)
+起来   ~6s
+health {"ok":true,"version":"0.9.0-preview.29",...,"sessions_count":213}
+数据   GET /api/status 正确返回真实 session 列表
+其他   retention sweep 正常执行(telemetry=948)
+验完   按精确 PID 停止,验证库已删除
+
+切换
+----
+只改 RUNTIME_DIR 一行 → runtime-v34-preview29
+并按脚本自身惯例追加变更历史 + 回滚目标
+bash -n 通过
+pm2 restart commhub-hub          【不带 --update-env】
+
+结果
+----
+停机时长        ~6 秒
+新 pid          274158
+cmdline         bun ~/.commhub/runtime-v34-preview29/.../bin/commhub.ts   ← 权威核验
+health          version 0.9.0-preview.29, sessions_count 213, sse_connections 103
+祖先链          274158 ← 58349 (PM2) ← 1 (systemd)   非孤儿
+vault 报错      0 行            ← 证明 saved-env 未丢
+unstable        0
+
+舰团健康(升级前 → 后)
+-----------------------
+近 5 分钟心跳   108 → 106      (近 2 分钟同样 106,说明持续在跳而非残留)
+SSE 连接        —   → 103      (舰团已重连)
+
+混版验证(旧节点 × 新 Hub)—— 这是 #698 独审反复攻的场景
+--------------------------------------------------------
+升级后 9 分钟窗口:
+  任务终态      acked 6 / replied 1 / failed 1
+  卡在 running 或 delivered 超过 5 分钟 = 0     ← #698 的症状,未出现
+  节点侧 task.ack 事件 = 7,涉及 3 个不同节点   ← 旧节点持续正常工作
+注:节点仍为 agent-node 2.4.13(latest 稳定线),Hub 已到 preview 线。
+    按 C2 契约这是预期的混版状态,不是事故。
+
+未覆盖
+------
+- 未做真实回滚演练(回滚路径是推出来的,没执行过)
+- 未升级任何节点 —— 那是稳定线→预览线的通道迁移,属于单独的发布决策
+- #698 的 agent-node 半边(legacy 回退改成 terminal send_reply)尚未上线,
+  因此「任务卡在 running」应减轻但不会完全消失
