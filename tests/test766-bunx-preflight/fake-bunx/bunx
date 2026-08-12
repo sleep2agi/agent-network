@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+
+capture=${TEST766_CAPTURE:?TEST766_CAPTURE is required}
+printf '%s\n' "$@" > "$capture"
+exec /usr/local/bin/bun /repo/tests/test766-bunx-preflight/fixture-server.ts "$@"
