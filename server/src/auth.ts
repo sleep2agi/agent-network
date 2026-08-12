@@ -88,11 +88,19 @@ export function register(username: string, password: string, email?: string, dis
     [userId, username, pwHash, email || null, displayName || username, isFirstUser ? "admin" : "user"]
   );
 
-  // Auto-create default network + add as owner member
+  // Auto-create the user's own network + add as owner member.
+  //
+  // Name it after the user rather than the literal "default". Every
+  // registration used to mint a network called "default", so a hub with N
+  // users showed N identical "default" rows in the Dashboard sidebar with
+  // no way to tell them apart (23 of them on the live hub, 22 empty).
+  // The three CLI call sites that look for a network named "default" all
+  // fall back to `networks[0]`, and a freshly registered user owns exactly
+  // one network, so they resolve to the same network as before.
   const networkId = generateId("net");
   db.run(
     "INSERT INTO networks (network_id, network_name, owner_id, description) VALUES (?1, ?2, ?3, ?4)",
-    [networkId, "default", userId, "Auto-created default network"]
+    [networkId, username, userId, `Auto-created network for ${username}`]
   );
   db.run(
     "INSERT INTO network_members (network_id, user_id, role) VALUES (?1, ?2, 'owner')",
