@@ -2,24 +2,24 @@
 
 Date: 2026-08-12 Asia/Shanghai
 Base: 17b8223f9d7fd25fcc435b40e7fa1fc0823ea1de
-SOURCE_COMMIT: 890c4d92581331b6b5fefd9d66fa6b89a77c4d46
+SOURCE_COMMIT: fdc88318ee69c7fbc5f8895c9b6e7a72ea295cae
 Scope: Hub + agent-node protocol/runtime wiring + isolated Docker tests.
 Production deployment: NOT PERFORMED.
 
 ## Exact-source image
 
-- image: `anet-test698:890c4d92`
+- image: `anet-test698:fdc88318-exact`
 - image id:
-  `sha256:48b0f40dc9562984ab1cfdb10782b49541969bc02aba2c51e2da1075e9b9b1cc`
+  `sha256:9b5fb50a9ea6a6b3d0c2c25c8df768eb0c3bcee8b1d991b2c668ffe6efce9638`
 - image env:
-  `TEST698_SOURCE_COMMIT=890c4d92581331b6b5fefd9d66fa6b89a77c4d46`
+  `TEST698_SOURCE_COMMIT=fdc88318ee69c7fbc5f8895c9b6e7a72ea295cae`
 - all 23 changed agent/server/test runtime files that exist at the same path
   inside the image matched `git show SOURCE_COMMIT:<path>` byte-for-byte
   after `docker create` and `docker cp`: 23/23. Dockerfiles, docs, and the
   intentionally remapped test673 preload are outside this same-path count.
 - focused result: 184 pass / 0 fail / 549 expect calls.
 - exact main-run artifact digest:
-  `sha256:028ebb2a2e08ae95eee5fbfb0c8a344c77257c43d35ac02ed85a3155a454f6ea`.
+  `sha256:248b55696ae3bbbb7dda09efc8c1d3f22f89508627c93c994f1e1b84f52b1892`.
   This records one timestamped run and is not claimed reproducible or used
   as source provenance.
 
@@ -120,6 +120,9 @@ one controlled run:
 The equal replies remain distinct through the stable original-task marker.
 The missing identity produces no task/reply egress and remains exactly once in
 the disk-backed pending queue; it is not guessed from the live alias roster.
+Every invocation uses timestamp-derived dispatcher and receiver aliases, so a
+previous archived-Hub run cannot contaminate the process-wide content-dedup
+index or make a mutation red for a stale fixture collision.
 
 A byte-changing mutation changes the production `cli.ts` lookup from
 `get_task(task_id)` to `get_all_status`. It rebuilds a separate exact-source
@@ -128,7 +131,7 @@ image and the same old-Hub production-CLI E2E turns red:
 `MUTATION_RED: old-hub-exact-task-lookup-lost rc=1`
 
 Exact old-Hub run artifact digest:
-`sha256:533664597fcebdd6f7bfeee51266b66d6e83b8e7af670528a76570c8818f86f4`.
+`sha256:e96be996d4effe76007680cf8e2bcf63ab85a4ca130583ee4b81ea73619e993a`.
 It records one run only and is not used as reproducible provenance.
 
 ## Witnessed-red mutations
@@ -210,3 +213,8 @@ removal (the second equal reply is deduplicated), and identity-error guessing
   a general fallback for transport errors.
 - SSE emission occurs after transaction commit. Reconnect drains missed inbox
   rows, but there is no independent periodic polling guarantee.
+- The ordinary runtime reply path deliberately prefixes the alias and bounds
+  the model result with `result.slice(0, 2000)` before compatibility routing.
+  Therefore this report does not claim a 10,000-character legacy-task boundary
+  test: an attempted fixture for that shape was rejected because it never
+  reached production `legacyPeerReplyTaskText` with a 10,000-character body.
