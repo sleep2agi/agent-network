@@ -24,7 +24,15 @@ Before sharing logs, remove tokens, API keys, passwords, cookies, complete envir
 
 ## Installation and startup
 
-### `spawn bunx ENOENT` / Bun not found
+### `requires the Bun runtime` / `spawn bunx ENOENT` / Bun not found
+
+Current versions refuse before launch with a clear message:
+
+```
+❌ anet hub start requires the Bun runtime (commhub-server is bun-only …)
+```
+
+and exit with code 1. `spawn bunx ENOENT` is the **pre-[#235](https://github.com/sleep2agi/agent-network/issues/235)** behaviour — the string is kept in this heading so people arriving from older versions still find this section.
 
 Agent Network CLI requires Node.js ≥ 22.13, and the Hub requires Bun ≥ 1.2:
 

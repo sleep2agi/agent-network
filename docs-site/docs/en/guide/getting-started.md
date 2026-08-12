@@ -15,7 +15,7 @@ Skip this page and go to the [Upgrade Guide](/en/guide/upgrade) (usually `anet u
 **Prerequisites** (install both):
 
 - **Node.js ≥ 22.13.0**
-- **Bun ≥ 1.2.0** — install with `npm i -g bun` (or `curl -fsSL https://bun.sh/install | bash`). Step 2's `anet hub start` launches `commhub-server` via `bunx`, so **without Bun the very first step crashes with `spawn bunx ENOENT`**. After installing, `bun --version` should print a version.
+- **Bun ≥ 1.2.0** — install with `npm i -g bun` (or `curl -fsSL https://bun.sh/install | bash`). Step 2's `anet hub start` launches `commhub-server` via `bunx`, so **without Bun that step is refused before launch** with `❌ anet hub start requires the Bun runtime` (exit code 1, not a crash). After installing, `bun --version` should print a version.
 
 With both installed, `commhub-server` / `agent-node` are auto-fetched on first use — you don't install them manually.
 
