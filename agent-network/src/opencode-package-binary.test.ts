@@ -190,3 +190,68 @@ describe("validateOpencodePackageBinary", () => {
     })).toThrow("unsafe file ownership or mode");
   });
 });
+
+// #739 — cwd 参与信任判定,而这一点此前没有任何测试覆盖。
+//
+// 🔴 本 describe 里带「缺陷现状」标记的断言记录的是**当前行为,不是期望行为**。
+//    修 #739 时它们应当转红 —— 那正是它们存在的意义:让修复有一个红→绿的信号,
+//    而不是靠人回来重读 issue。
+//
+// 实测复现(同一容器镜像,只改 cwd,包/版本/PATH/二进制路径全部相同):
+//   cwd=/            ❌ project/node-local opencode-ai package payload is not trusted
+//   cwd=/usr/local   ❌ 同上
+//   cwd=/tmp         ✅ smoke passed
+//   cwd=/root        ✅ smoke passed
+describe("#739 cwd 参与信任判定", () => {
+  test("缺陷现状:cwd 为文件系统根时,禁止根含 / —— 与任何包路径都重叠", () => {
+    // 机制层面的事实:discoverOpencodeForbiddenRoots 无条件把 cwd 本身放进结果集。
+    expect(discoverOpencodeForbiddenRoots("/")).toContain("/");
+  });
+
+  test("缺陷现状:cwd=/ 时,一个各方面都合法的包也会被拒", () => {
+    const fixture = makePackage(safeTestBase());
+
+    // 基线对照 —— 先证明这个 fixture 本身是可信的,否则下面的红是无意义的:
+    // 如果它本来就不合法,再怎么改 forbiddenRoots 都会失败,断言就成了同义反复。
+    expect(validateOpencodePackageBinary(fixture.binary, {
+      expectedVersion: "1.18.1",
+    })).toBe(fixture.binary);
+
+    // 只多传一个 forbiddenRoots: ["/"],同一个 fixture 就被拒了。
+    // 变量只有这一个,所以拒因确实来自 cwd,不是来自包本身。
+    expect(() => validateOpencodePackageBinary(fixture.binary, {
+      expectedVersion: "1.18.1",
+      forbiddenRoots: ["/"],
+    })).toThrow("project/node-local");
+  });
+
+  test("缺陷现状:cwd 是全局安装前缀的祖先时,全局安装的包被判成项目本地", () => {
+    // 复刻 `npm i -g` 的形状:<prefix>/lib/node_modules/opencode-ai,
+    // 而用户恰好在 <prefix> 或其祖先下执行 anet(容器里 cwd=/usr/local 就是这种)。
+    const prefix = join(safeTestBase(), "usr-local");
+    mkdirSync(join(prefix, "lib"), { recursive: true, mode: 0o755 });
+    const fixture = makePackage(join(prefix, "lib"));
+
+    expect(validateOpencodePackageBinary(fixture.binary, {
+      expectedVersion: "1.18.1",
+    })).toBe(fixture.binary);
+
+    expect(() => validateOpencodePackageBinary(fixture.binary, {
+      expectedVersion: "1.18.1",
+      forbiddenRoots: [prefix],
+    })).toThrow("project/node-local");
+  });
+
+  test("这条守卫要防的东西必须继续被防住(修 #739 时不许放宽它)", () => {
+    // 这一条**不是**缺陷现状,是必须永远为真的安全属性:
+    // checkout 里放一个同版本的 opencode-ai 冒充者,必须被拒。
+    // 任何针对 #739 的放宽如果让这条转绿→红,那个修法就是错的。
+    const project = join(safeTestBase(), "project");
+    mkdirSync(project, { mode: 0o700 });
+    const impostor = makePackage(project);
+    expect(() => validateOpencodePackageBinary(impostor.binary, {
+      expectedVersion: "1.18.1",
+      forbiddenRoots: [project],
+    })).toThrow("project/node-local");
+  });
+});
