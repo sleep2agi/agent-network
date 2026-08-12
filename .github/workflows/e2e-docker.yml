@@ -50,6 +50,8 @@ jobs:
       # Preserve the Docker runner's real exit status across tee, then make the
       # following step enforce both that status and the structured TOTAL line.
       - name: Run full regression (hard-gated)
+        # id 供下面的 verdict 区分「跑了但没产出退出码」与「压根没轮到它跑」。
+        id: run
         run: |
           bash tests/lib/run-piped-command.sh \
             /tmp/e2e-output.log \
@@ -73,10 +75,26 @@ jobs:
           if [ -s /tmp/e2e-output.log ]; then
             awk '/Final Report/,/^$/' /tmp/e2e-output.log | tail -20
           fi
-          [ -s /tmp/e2e-exit-code ] || {
-            echo "::error::runner exit-code file missing — test timed out or did not start"
+          # 这一步是 if: always(),所以前面任何一步失败时它也会跑。
+          # 缺 exit-code 文件有两种完全不同的原因,旧文案把它们混成一句
+          #   "test timed out or did not start"
+          # —— 读到的人会去查测试超时,而真因往往在两三步之前
+          # (实测:Setup Bun 从 GitHub releases 拉 bun 时 503,见 #746)。
+          # 这里用 steps.run.outcome 把两种情况分开报。
+          if [ ! -s /tmp/e2e-exit-code ]; then
+            case "${{ steps.run.outcome }}" in
+              skipped)
+                echo "::error::the regression step never ran — an earlier step in this job failed."
+                echo "::error::Look ABOVE this step (Setup Bun / dependency install / docker build), not at the tests."
+                echo "::error::This is NOT a test timeout."
+                ;;
+              *)
+                echo "::error::the regression step ran (outcome: ${{ steps.run.outcome }}) but produced no exit-code file"
+                echo "::error::— it timed out or was killed. Check the 12-minute step timeout and the tail of the run log."
+                ;;
+            esac
             exit 1
-          }
+          fi
           bash tests/lib/e2e-hard-gate.sh \
             /tmp/e2e-output.log \
             "$(cat /tmp/e2e-exit-code)"
