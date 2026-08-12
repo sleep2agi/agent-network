@@ -18,10 +18,14 @@
 # 0. bun —— hub-daemon.sh 对它是硬依赖,缺了会 fail-closed 停在
 #    「找不到 bun」。这一步此前只写在脚本注释里,不在步骤里(#778)。
 #
-#    🔴 装在 nvm 的**当前 node** 下,因为脚本优先解析
-#       ~/.nvm/versions/node/<ver>/bin/bun —— 换 node 版本后需要重装。
-npm i -g bun                      # 或按 https://bun.sh/docs/installation
-command -v bun && bun --version   # 记下路径:换 node 版本后要重来
+#    当前生产用 nvm 的 npm 安装,所以 binary 落在当前 node 的 bin 下；换
+#    node 版本后通常要重装。若采用其它布局,必须让 command -v bun 可见,
+#    或在 hub.env 显式设置可执行的 BUN_BIN。
+BUN_VERSION=1.3.14
+npm i -g "bun@$BUN_VERSION"
+BUN_BIN="$(command -v bun)"
+test -x "$BUN_BIN"
+test "$("$BUN_BIN" --version)" = "$BUN_VERSION"  # 版本不符即停,不拿 future latest 冒充当前运行时
 #    (不要用 `curl … | bash` 一行流:管道退出码只反映 consumer,
 #     curl 失败会被吞掉 —— 见 #729 / #733 / #743。)
 
