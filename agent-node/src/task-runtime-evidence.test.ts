@@ -102,11 +102,20 @@ describe("agent-node inbox wiring", () => {
     expect(end).toBeGreaterThan(start);
     const branch = cli.slice(start, end);
 
+    // The invariant is the argument ORDER — the transport id (msg.id) must not
+    // reach processTask, which takes the stable logicalTaskId. Match on
+    // whitespace-normalised source so that reindenting or wrapping the call
+    // cannot fail this: #698 moved it inside runInboxTurnByReplyPolicy's
+    // deliverToRuntime closure, which changed nothing but the indentation and
+    // broke the old literal that pinned eight spaces per line.
+    const norm = (s: string) => s.replace(/\s+/g, " ");
+    const branchN = norm(branch);
+
     expect(branch).toContain("const logicalTaskId = logicalTaskIdFromInbox(msg)");
-    expect(branch).toContain("processTask(\n        runtimeContent,\n        from,\n        logicalTaskId,");
+    expect(branchN).toContain(norm("processTask( runtimeContent, from, logicalTaskId,"));
     expect(branch).toContain("deliverReplyReliably(from, replyBody, logicalTaskId, failed)");
     expect(branch).toContain("ackMessage(msg.id)");
-    expect(branch).not.toContain("processTask(\n        runtimeContent,\n        from,\n        msg.id,");
+    expect(branchN).not.toContain(norm("processTask( runtimeContent, from, msg.id,"));
   });
 
   test("all runtime dispatch families receive the same task-lifetime reporter", () => {
