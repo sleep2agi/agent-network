@@ -4753,7 +4753,7 @@ async function processInbox() {
       const preparedReply = prepareDashboardNativeSlashReply(
         taskOutcome.text,
         persistenceSafeContent,
-        interactiveDashboardTask,
+        { messageType: msgType, interactiveDashboardTask },
         failed,
         (text) => isLowValueText(text, true),
       );
@@ -4764,10 +4764,10 @@ async function processInbox() {
         log(`processTask returned: "${result.slice(0, 80)}" (${result.length} chars, failed=${failed})`);
       }
 
-      // Low-value successful replies are dropped (preserve previous
+      // Low-value successful agent chatter is dropped (preserve previous
       // behaviour — codex / claude often emit "done." / "✅" for trivial
-      // confirmations). Failures ALWAYS surface so the dispatcher sees
-      // the real error instead of silence.
+      // confirmations). Authenticated Dashboard human tasks and failures
+      // ALWAYS surface so the dispatcher sees a reply instead of silence.
       if (!preparedReply.shouldDeliver) {
         log(GROK_EXECUTION_MODE === "cli"
           ? `skip reply: low-value (${result.length} chars; content withheld)`

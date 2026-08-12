@@ -1,0 +1,39 @@
+test696 — authenticated human short replies are not silently dropped (#696)
+Date: 2026-08-13
+Environment: Docker, oven/bun:1.3.14
+Scope: agent-node outbound low-value filtering and authenticated Dashboard provenance wiring
+
+GREEN
+Command:
+  sg docker -c 'docker build --build-arg SOURCE_COMMIT=$(git rev-parse HEAD) -f tests/test696-human-low-value-reply/Dockerfile -t anet-test696:local . && docker run --rm anet-test696:local'
+Result:
+  - routing and authenticated provenance tests: 27 pass, 0 fail
+  - production CLI provenance wiring: PASS
+  - production bundle build: PASS
+  - container exit: 0
+
+WITNESSED RED
+Pre-fix result:
+  - "在线吗?" -> "在线。" from an authenticated Dashboard task: FAIL
+  - received { shouldDeliver: false }, expected { shouldDeliver: true }
+  - agent-to-agent task reply "收到": PASS (remained filtered)
+  - targeted suite: 13 pass, 1 fail; exit 1
+
+BROAD NON-GATE ATTEMPT
+  A generic `bun test src` run in the narrow test696 image produced 1198 pass,
+  25 fail, and 2 setup errors. It is not a valid full-suite gate: that image
+  intentionally omits the agent-network tree, crontab, Grok fixtures/binary,
+  OpenCode runtime, and root ownership required by those suites. No failing
+  assertion involved the new reply-provenance behavior. The dedicated Docker
+  gate and production bundle build are the acceptance evidence for this PR.
+
+GREEN INVARIANTS
+  - Authenticated Dashboard task/broadcast short replies bypass low-value filtering.
+  - Agent-to-agent task replies do not bypass filtering merely because type=task.
+  - A provenance flag paired with a non-task type does not bypass filtering.
+  - Failed replies and Dashboard native slash notices retain their prior delivery behavior.
+
+BOUNDARIES
+  - No production DB, node configuration, or process was touched.
+  - No live Hub request was required; the gate uses the Hub-stamped provenance predicate tests.
+  - This test does not validate a production deployment or npm publication.

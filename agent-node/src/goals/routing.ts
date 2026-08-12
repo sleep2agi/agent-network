@@ -2,6 +2,11 @@ import { parseGoalCommand } from "./parser";
 
 export type GoalRoutingRuntime = "claude" | "codex" | "grok" | "opencode" | "codex-app-server";
 
+export interface ReplyMessageProvenance {
+  messageType: string;
+  interactiveDashboardTask: boolean;
+}
+
 const ANET_SCHEDULE_COMMAND_RE = /^\s*\/(?:agoal|aloop)\b/i;
 const LEGACY_SCHEDULE_COMMAND_RE = /^\s*\/(?:goal|loop)\b/i;
 
@@ -62,10 +67,15 @@ export function appendDashboardNativeScheduleNotice(
 export function prepareDashboardNativeSlashReply(
   replyText: string,
   content: string,
-  interactiveDashboardTask: boolean,
+  provenance: ReplyMessageProvenance,
   failed: boolean,
   isLowValueReply: (text: string) => boolean,
 ): { text: string; shouldDeliver: boolean } {
+  const { interactiveDashboardTask, messageType } = provenance;
   const text = appendDashboardNativeScheduleNotice(replyText, content, interactiveDashboardTask);
-  return { text, shouldDeliver: failed || !isLowValueReply(text) };
+  // The Hub-stamped Dashboard provenance is the authorization fact here; an
+  // agent alias or task type alone is not enough to bypass chatter filtering.
+  const humanDashboardRequest = interactiveDashboardTask
+    && (messageType === "task" || messageType === "broadcast");
+  return { text, shouldDeliver: failed || humanDashboardRequest || !isLowValueReply(text) };
 }

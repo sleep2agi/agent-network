@@ -85,7 +85,7 @@ describe("Dashboard native slash migration notice", () => {
     const prepared = prepareDashboardNativeSlashReply(
       "收到",
       "/loop 5m work",
-      true,
+      { messageType: "task", interactiveDashboardTask: true },
       false,
       (text) => text === "收到",
     );
@@ -99,11 +99,51 @@ describe("Dashboard native slash migration notice", () => {
     const prepared = prepareDashboardNativeSlashReply(
       "native failed",
       "/loop 5m work",
-      true,
+      { messageType: "task", interactiveDashboardTask: true },
       true,
       () => false,
     );
     expect(prepared.shouldDeliver).toBe(true);
     expect(prepared.text).toBe(`${DASHBOARD_NATIVE_SCHEDULE_NOTICE}\n\nnative failed`);
+  });
+});
+
+describe("reply filtering uses authenticated message provenance", () => {
+  test("a short presence reply to an authenticated Dashboard human task is delivered", () => {
+    for (const messageType of ["task", "broadcast"]) {
+      const prepared = prepareDashboardNativeSlashReply(
+        "在线。",
+        "在线吗?",
+        { messageType, interactiveDashboardTask: true },
+        false,
+        () => true,
+      );
+
+      expect(prepared).toEqual({ text: "在线。", shouldDeliver: true });
+    }
+  });
+
+  test("the same low-value class remains filtered for agent-to-agent tasks", () => {
+    const prepared = prepareDashboardNativeSlashReply(
+      "收到",
+      "同步状态",
+      { messageType: "task", interactiveDashboardTask: false },
+      false,
+      () => true,
+    );
+
+    expect(prepared).toEqual({ text: "收到", shouldDeliver: false });
+  });
+
+  test("a provenance flag cannot bypass filtering for a non-task message type", () => {
+    const prepared = prepareDashboardNativeSlashReply(
+      "收到",
+      "同步状态",
+      { messageType: "message", interactiveDashboardTask: true },
+      false,
+      () => true,
+    );
+
+    expect(prepared).toEqual({ text: "收到", shouldDeliver: false });
   });
 });
