@@ -175,6 +175,34 @@ commhub_send_task(alias="通信文档马",
         请走 R 系列 round 同步 docs-site changelog + release notes")
 ```
 
+🔴 **文档 PR 合进 `main` ≠ 文档上线。** `docs-site` 那个 Vercel 项目**没接 git 自动部署**，
+必须有人手动跑一次 `vercel --prod`，步骤见 [`deploy/docs-site/README.md`](../deploy/docs-site/README.md)。
+漏了不会报错，只会让 anet.sh 和 `main` 静默分叉——实测发生过停在 36 小时前、
+以及冻结近 14 天。所以 Step 9 的**终点是站点上线**，不是 PR 被合。
+
+### Step 10：发版收尾——取远端核（🔴 缺了这步的发版可能是零效果）
+
+前面所有步骤都在**本地**或**某个 release 分支**上。发版真正结束的判据只有一个：
+**这些改动已经在 `origin/main` 上**。
+
+```bash
+git fetch origin main
+# ① 三个包的版本号
+for p in agent-network agent-node server; do
+  git show origin/main:$p/package.json | python3 -c \
+    "import json,sys;d=json.load(sys.stdin);print(d['name'],d['version'])"
+done
+# ② PINNED 链（见 §3 第 2 条）
+git show origin/main:agent-network/bin/cli.ts | grep 'PINNED_SERVER_VERSION *='
+# ③ 与 npm 上的 preview tag 逐一比对，必须相等
+npm view @sleep2agi/<pkg>@preview version
+```
+
+**判据是「远端 main 上是什么」，不是「我提了 bump PR」。**
+实测踩过：bump PR 开着没合的那段时间，npm 上 server 已经是新版，
+但 `main` 上 `PINNED_SERVER_VERSION` 还是旧版——**任何人从 main 切一次版，
+CLI 都会去拉旧 server，这次发版等于白发，且不产生任何报错**。
+
 ---
 
 ## 3. 跨包同时发版
@@ -184,7 +212,12 @@ commhub_send_task(alias="通信文档马",
 1. 每个包 **分别** 跑一遍 Step 1～Step 5（每包一个 commit）。
 2. push 后 **顺序 publish**：先发底层依赖（commhub-server → agent-node → agent-network），
    后发上层。理由：anet CLI 用 `PINNED_SERVER_VERSION` fetch 一个**已存在**的 server 版本。
-3. 升 latest 同样按依赖顺序进。
+3. 🔴 **发了 commhub-server 就必须同步改 `PINNED_SERVER_VERSION`**
+   （`agent-network/bin/cli.ts`）。`anet hub start` 拉哪个 server 由这个常量决定，
+   **只发包不改常量 = 这次 server 发版零效果**：用户升级 CLI 后 CLI 仍然拉旧 server。
+   所以顺序是**先发 server → 改 pin → 再发 CLI**（反过来 CLI 会拉到不存在的版本，
+   `bunx` 报 ETARGET）。改完按 Step 10 取远端核。
+4. 升 latest 同样按依赖顺序进。
 
 ---
 
