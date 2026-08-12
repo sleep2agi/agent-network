@@ -2,16 +2,16 @@
 
 Date: 2026-08-12 Asia/Shanghai
 Base: 17b8223f9d7fd25fcc435b40e7fa1fc0823ea1de
-SOURCE_COMMIT: 69ad300884bc91d82fff87234cd195aa3f3bb284
+SOURCE_COMMIT: 63f64a7a671f395d597fc37151011134f2304fdd
 Scope: Hub + agent-node protocol/runtime wiring + isolated Docker tests.
 Production deployment: NOT PERFORMED.
 
 ## Exact-source image
 
-- image: `anet-test698:69ad3008-exact`
-- image id: `sha256:138e382803aa8df022174979ba2e3a4cc3e2cf3f3f1892f8ff2bb6317f1d6edc`
+- image: `anet-test698:63f64a7a-exact`
+- image id: `sha256:ba9b392f743cdcd61f20218e6999c5c76a20f9b7bce3f63b72002eac7abe43fe`
 - image env:
-  `TEST698_SOURCE_COMMIT=69ad300884bc91d82fff87234cd195aa3f3bb284`
+  `TEST698_SOURCE_COMMIT=63f64a7a671f395d597fc37151011134f2304fdd`
 - same-path source/image byte comparison: 25/25 MATCH (agent-node,
   server, and test698 files changed since base). Docs are intentionally not
   copied into the image; the test673 preload is intentionally remapped into
@@ -19,7 +19,7 @@ Production deployment: NOT PERFORMED.
 - focused main result: 178 pass / 0 fail / 518 expect calls.
 - main runner: 28/28 named mutations witnessed red; `RESULT: PASS`.
 - main run artifact digest:
-  `5e292976df68f616e61d053b700bd51a2e29233899b5b27f07ee0780d7c24c84`.
+  `dae82664971179fe2c393b357f1a9a1aea93977f263a2f3796a87759604340b1`.
   This records one timestamped run and is not claimed reproducible or used
   as source provenance.
 
@@ -62,6 +62,13 @@ isolated Docker network, and calls its absent `send_peer_reply`. The real wire
 response is `result.isError` with MCP code `-32602`; the production classifier
 preserves that code and selects terminal `send_reply`.
 
+The runner does not read its legacy Dockerfile from the checkout. It extracts
+the exact `Dockerfile.legacy-hub` bytes from `SOURCE_COMMIT` into the archived
+base context. This was rerun from a detached `17b8223f` worktree where the
+entire `tests/test698-atomic-peer-reply/` directory is absent. Cleanup sources
+`tests/lib/safe-rm.sh`; the real run used `TMP=/tmp/tmp.aZUOTfQDvB`, matched the
+default `/tmp/` allow-list, returned zero, and removed that directory.
+
 The pristine runner then starts the real source `cli.ts` twice against that
 Hub. Its acceptance condition uses only committed final Hub state, never a
 transient pending-queue observation:
@@ -86,9 +93,9 @@ Each turns red because the pristine final-state tuple (2 terminal originals,
 deleted-task timing window, legacy marker, or `send_task` child-row oracle.
 
 Archived-old-Hub pristine log digest:
-`b64f9d264f39f3856f4485723cc3805941a2bf09e434f81637b49818c1f65abd`.
+`b3d4273b023f82f3f783ed399a9ceb9bd1830c34b36fb5ffa7b66afcb5f9f93c`.
 Full archived-old-Hub runner log digest (including both mutation builds):
-`502ff7f91e7eb78c787ad959a0cd143cc328704a31c67605b61f5d3a5a9797ba`.
+`2e43794fd0b6b63e5cf0d7a052e9b46cef44fac067cdc855a50c541fee31fe03`.
 
 ## Main witnessed-red mutations (28)
 
