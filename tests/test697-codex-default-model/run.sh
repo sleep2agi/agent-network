@@ -263,8 +263,14 @@ RUNTIME_CFG=/tmp/test697-runtime-config.json
 GOALS_PATH=/tmp/test697-goals.json
 CODEX_CAPTURE=/tmp/test697-codex-capture.jsonl
 STDIO_CAPTURE=/tmp/test697-stdio-capture.jsonl
+CLAUDE_CAPTURE=/tmp/test697-claude-capture.json
 RUNTIME_LOG=/tmp/test697-runtime.log
 EXPECTED_RUNTIME_MODEL="${TEST697_RUNTIME_MODEL:-gpt-5.6-sol}"
+RUNTIME_NODE_ALIAS=sdk-default
+RUNTIME_NODE_RUNTIME=codex-sdk
+RUNTIME_NODE_CONFIG="$RUNTIME_CFG"
+RUNTIME_PRELOAD=""
+EXTRA_RUNTIME_ENV=()
 CODEX_SDK_ENTRY="$ROOT/agent-node/node_modules/@openai/codex-sdk/dist/index.js"
 [[ -f "$CODEX_SDK_ENTRY" ]] || { echo "CODEX_SDK_ENTRY_MISSING $CODEX_SDK_ENTRY"; exit 1; }
 cp "$ROOT/tests/test697-codex-default-model/fake-codex-sdk.mjs" "$CODEX_SDK_ENTRY"
@@ -285,15 +291,19 @@ stop_runtime_node() {
 start_runtime_node() {
   local mode=$1
   shift
+  local -a runtime_cmd=(bun)
+  [[ -n "$RUNTIME_PRELOAD" ]] && runtime_cmd+=(--preload "$RUNTIME_PRELOAD")
+  runtime_cmd+=("$ROOT/agent-node/src/cli.ts"
+    --alias "$RUNTIME_NODE_ALIAS" --config "$RUNTIME_NODE_CONFIG" --runtime "$RUNTIME_NODE_RUNTIME"
+    --goals-path "$GOALS_PATH")
   : > "$RUNTIME_LOG"
   (
     cd "$PROJECT_DIR"
     exec setsid env HOME="$HOME_DIR" PATH="$FAKE_BIN:$PATH" \
       TEST697_ROOT="$ROOT" TEST697_CODEX_CAPTURE="$CODEX_CAPTURE" \
-      TEST697_STDIO_CAPTURE="$STDIO_CAPTURE" "$@" \
-      bun "$ROOT/agent-node/src/cli.ts" \
-        --alias sdk-default --config "$RUNTIME_CFG" --runtime codex-sdk \
-        --goals-path "$GOALS_PATH"
+      TEST697_STDIO_CAPTURE="$STDIO_CAPTURE" TEST697_CLAUDE_CAPTURE="$CLAUDE_CAPTURE" \
+      "${EXTRA_RUNTIME_ENV[@]}" "$@" \
+      "${runtime_cmd[@]}"
   ) >"$RUNTIME_LOG" 2>&1 &
   NODE_PID=$!
   for _ in $(seq 1 80); do
@@ -311,7 +321,7 @@ send_runtime_task() {
   curl -fsS -X POST http://127.0.0.1:9697/api/task \
     -H "Authorization: Bearer $(jq -r '.token' "$HOME_DIR/.anet/config.json")" \
     -H 'Content-Type: application/json' \
-    -d "{\"alias\":\"sdk-default\",\"task\":\"test697 runtime model $suffix $(date +%s%N)\",\"priority\":\"normal\"}" >/tmp/test697-task.json
+    -d "{\"alias\":\"$RUNTIME_NODE_ALIAS\",\"task\":\"test697 runtime model $suffix $(date +%s%N)\",\"priority\":\"normal\"}" >/tmp/test697-task.json
 }
 
 wait_for_capture() {
@@ -440,6 +450,76 @@ probe_explicit_runtime_models() {
 
 echo "L7e explicit configured model crosses every agent-node runtime injection lane"
 probe_explicit_runtime_models
+
+probe_env_runtime_models() {
+  local backup previous_expected
+  backup=$(mktemp /tmp/test697-runtime-config.XXXXXX)
+  cp "$RUNTIME_CFG" "$backup"
+  jq 'del(.model, .session)' "$backup" > "$RUNTIME_CFG"
+  previous_expected=$EXPECTED_RUNTIME_MODEL
+  EXPECTED_RUNTIME_MODEL=o3
+  EXTRA_RUNTIME_ENV=(MODEL=o3)
+  probe_goal_wake_model \
+    && probe_sdk_task_models \
+    && probe_sdk_resume_model \
+    && probe_stdio_task_model
+  local rc=$?
+  EXTRA_RUNTIME_ENV=()
+  EXPECTED_RUNTIME_MODEL=$previous_expected
+  cp "$backup" "$RUNTIME_CFG"
+  rm -f "$backup"
+  return "$rc"
+}
+
+echo "L7f MODEL env override crosses every agent-node Codex injection lane"
+probe_env_runtime_models
+
+probe_non_codex_runtime_model_absent() {
+  local config="$PROJECT_DIR/.anet/nodes/noncodex-claude-agent-sdk/config.json"
+  local probe_config=/tmp/test697-claude-runtime-config.json
+  jq 'del(.model, .session)' "$config" > "$probe_config"
+  chmod 0600 "$probe_config"
+  : > "$CLAUDE_CAPTURE"
+  printf '%s\n' '{"version":1,"goals":[]}' > "$GOALS_PATH"
+  RUNTIME_NODE_ALIAS=noncodex-claude-agent-sdk
+  RUNTIME_NODE_RUNTIME=claude-agent-sdk
+  RUNTIME_NODE_CONFIG="$probe_config"
+  RUNTIME_PRELOAD="$ROOT/tests/test697-codex-default-model/fake-claude-sdk-preload.ts"
+  if ! start_runtime_node noncodex-claude; then
+    RUNTIME_NODE_ALIAS=sdk-default
+    RUNTIME_NODE_RUNTIME=codex-sdk
+    RUNTIME_NODE_CONFIG="$RUNTIME_CFG"
+    RUNTIME_PRELOAD=""
+    return 1
+  fi
+  if ! send_runtime_task noncodex-claude \
+      || ! wait_for_capture '"runtime_probe":"claude-agent-sdk"' "$CLAUDE_CAPTURE"; then
+    stop_runtime_node
+    RUNTIME_NODE_ALIAS=sdk-default
+    RUNTIME_NODE_RUNTIME=codex-sdk
+    RUNTIME_NODE_CONFIG="$RUNTIME_CFG"
+    RUNTIME_PRELOAD=""
+    return 1
+  fi
+  if ! jq -e '.runtime_probe == "claude-agent-sdk" and .model == null' "$CLAUDE_CAPTURE" >/dev/null; then
+    echo "NON_CODEX_RUNTIME_MODEL_INJECTED"
+    cat "$CLAUDE_CAPTURE"
+    stop_runtime_node
+    RUNTIME_NODE_ALIAS=sdk-default
+    RUNTIME_NODE_RUNTIME=codex-sdk
+    RUNTIME_NODE_CONFIG="$RUNTIME_CFG"
+    RUNTIME_PRELOAD=""
+    return 1
+  fi
+  stop_runtime_node
+  RUNTIME_NODE_ALIAS=sdk-default
+  RUNTIME_NODE_RUNTIME=codex-sdk
+  RUNTIME_NODE_CONFIG="$RUNTIME_CFG"
+  RUNTIME_PRELOAD=""
+}
+
+echo "L7g non-Codex agent-node runtime does not receive the Codex default"
+probe_non_codex_runtime_model_absent
 
 if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
   echo "L8 witnessed-red mutations"
@@ -762,6 +842,16 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
     'const MODEL = opts.model || process.env.MODEL || fileConfig.model;' \
     'const MODEL = opts.model || process.env.MODEL;' \
     probe_explicit_runtime_models
+  run_mutation environment-runtime-model-ignored L7f \
+    "$ROOT/agent-node/src/cli.ts" \
+    'const MODEL = opts.model || process.env.MODEL || fileConfig.model;' \
+    $'delete process.env.MODEL;\nconst MODEL = opts.model || process.env.MODEL || fileConfig.model;' \
+    probe_env_runtime_models
+  run_mutation non-codex-runtime-default-injected L7g \
+    "$ROOT/agent-node/src/cli.ts" \
+    $'  const options: any = {\n    model: MODEL || undefined,' \
+    $'  const options: any = {\n    model: MODEL || DEFAULT_CODEX_MODEL,' \
+    probe_non_codex_runtime_model_absent
 fi
 
 kill "$SERVER_PID" >/dev/null 2>&1 || true
