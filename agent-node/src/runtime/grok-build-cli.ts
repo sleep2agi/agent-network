@@ -103,6 +103,51 @@ export function assertGrokCliVersion(version: string): void {
 }
 
 /** Translate the node profile's Claude-style names to Grok's internal IDs. */
+/** grok-build-cli 每个 turn 都在 `unshare --user --map-root-user` 下跑。
+ *  调用方已经挡掉了非 Linux,但**「是 Linux」不等于「非特权 userns 可用」**:
+ *  Ubuntu 24.04+ 默认 `kernel.apparmor_restrict_unprivileged_userns=1`,
+ *  此时写 /proc/self/uid_map 会被拒。
+ *
+ *  实测(2026-08-13,Ubuntu 24.04.3):
+ *    unshare --user --map-root-user … /bin/true
+ *      → rc=1  "unshare: write failed /proc/self/uid_map: Operation not permitted"
+ *    unshare --user /bin/true
+ *      → rc=0   ← 命名空间本身能建,被拒的**只是 uid_map 那一步**
+ *
+ *  没有这道预检,失败会推迟到第一个 turn,并以内核层的 errno 出现 ——
+ *  读到的人会去查内核/权限,而不是「这个 runtime 在这台机上用不了」。
+ *
+ *  🔴 判据是**真跑一次那个操作**,不是读 sysctl。sysctl 只是一个代理值:
+ *  发行版、容器、seccomp、LSM 都可能让两者不一致,而真正决定成败的是操作本身。
+ *
+ *  `run` 可注入,便于测试;默认用 execFileSync。 */
+export function assertUnprivilegedUserNsUsable(
+  unshareBinary: string,
+  run?: (bin: string, args: string[]) => { ok: boolean; stderr: string },
+): void {
+  const exec = run ?? ((bin: string, args: string[]) => {
+    try {
+      require("child_process").execFileSync(bin, args, { stdio: ["ignore", "ignore", "pipe"], timeout: 10_000 });
+      return { ok: true, stderr: "" };
+    } catch (e: any) {
+      return { ok: false, stderr: String(e?.stderr ?? e?.message ?? e) };
+    }
+  });
+  const probe = exec(unshareBinary, ["--user", "--map-root-user", "/bin/true"]);
+  if (probe.ok) return;
+  throw new Error(
+    "grok-build-cli cannot start: this machine refuses unprivileged user-namespace uid_map writes"
+    + (probe.stderr.trim() ? ` (${probe.stderr.trim().split("\n")[0]})` : "")
+    + ".\n"
+    + "  Ubuntu 24.04+ ships kernel.apparmor_restrict_unprivileged_userns=1, which blocks the\n"
+    + "  `unshare --map-root-user` this runtime uses for every turn.\n"
+    + "  Check with: sysctl kernel.apparmor_restrict_unprivileged_userns\n"
+    + "  Preferred fix: use the `grok-build-acp` runtime instead — it does not need user namespaces.\n"
+    + "  (Relaxing the sysctl weakens a host-wide security boundary; that is an operator decision,\n"
+    + "   not something this node should require.)",
+  );
+}
+
 export function normalizeGrokCliTools(tools: readonly string[]): string[] {
   const mapped: string[] = [];
   const unknown: string[] = [];

@@ -1,8 +1,8 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, test } from "bun:test";
 import { chmodSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { assertGrokCliFeatures, assertGrokCliVersion, buildGrokCliArgs, normalizeGrokCliTools, runGrokCliTurn } from "./grok-build-cli";
+import { assertGrokCliFeatures, assertGrokCliVersion, assertUnprivilegedUserNsUsable, buildGrokCliArgs, normalizeGrokCliTools, runGrokCliTurn } from "./grok-build-cli";
 import { buildGrokChildEnv } from "./grok-child-env";
 
 const roots: string[] = [];
@@ -357,5 +357,45 @@ describe("runGrokCliTurn", () => {
       idleTimeoutMs: 30,
     })).rejects.toThrow("idle for 30ms");
     expect(Date.now() - started).toBeLessThan(2_000);
+  });
+});
+
+describe("assertUnprivilegedUserNsUsable (#grok userns preflight)", () => {
+  test("passes when the probe succeeds", () => {
+    let seen: { bin: string; args: string[] } | null = null;
+    expect(() => assertUnprivilegedUserNsUsable("unshare", (bin, args) => {
+      seen = { bin, args };
+      return { ok: true, stderr: "" };
+    })).not.toThrow();
+    // 探针必须是**真实那个操作**,不是读 sysctl 之类的代理值。
+    expect(seen).toEqual({ bin: "unshare", args: ["--user", "--map-root-user", "/bin/true"] });
+  });
+
+  test("throws with the real stderr and an actionable next step when uid_map is refused", () => {
+    // 这段 stderr 是 2026-08-13 在 Ubuntu 24.04.3 上实测到的原文。
+    const real = "unshare: write failed /proc/self/uid_map: Operation not permitted";
+    let msg = "";
+    try {
+      assertUnprivilegedUserNsUsable("unshare", () => ({ ok: false, stderr: real }));
+    } catch (e: any) { msg = String(e.message); }
+    expect(msg).toContain("write failed /proc/self/uid_map");
+    // 必须指出可执行的出路,而不是只报「失败了」。
+    expect(msg).toContain("grok-build-acp");
+    // 必须给出自查命令。
+    expect(msg).toContain("sysctl kernel.apparmor_restrict_unprivileged_userns");
+    // 🔴 不能把「放宽 sysctl」说成推荐做法 —— 那是削弱全机安全边界的运维决策。
+    expect(msg).toContain("operator decision");
+  });
+
+  test("still throws when the probe fails with no stderr at all", () => {
+    // 兜底:拿不到 stderr 也必须 fail-closed,不能因为「没有证据」就放行。
+    expect(() => assertUnprivilegedUserNsUsable("unshare", () => ({ ok: false, stderr: "" })))
+      .toThrow(/refuses unprivileged user-namespace uid_map writes/);
+  });
+
+  test("honours a custom unshare binary path", () => {
+    let bin = "";
+    assertUnprivilegedUserNsUsable("/opt/util-linux/bin/unshare", (b) => { bin = b; return { ok: true, stderr: "" }; });
+    expect(bin).toBe("/opt/util-linux/bin/unshare");
   });
 });
