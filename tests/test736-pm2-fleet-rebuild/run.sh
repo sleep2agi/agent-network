@@ -132,10 +132,42 @@ assert_unit_shape() {
 }
 
 assert_inventory_boundary() {
-  jq -e '.schema_version == 1 and (.apps | length) == 5' "$INVENTORY" >/dev/null
-  jq -e '[.apps[] | select(.kind == "external-service" and .authority == null)] | length == 2' "$INVENTORY" >/dev/null
-  jq -e '[.apps[] | select(.recovery_status | startswith("not-covered"))] | length == 2' "$INVENTORY" >/dev/null
-  jq -e '[paths(scalars) as $p | ($p[-1] | tostring) | select(test("token|secret|password"; "i"))] | length == 0' "$INVENTORY" >/dev/null
+  local inventory="${1:-$INVENTORY}"
+  jq -e '
+    .schema_version == 1
+    and ((.apps | type) == "array" and (.apps | length) > 0)
+    and ([.apps[].name] as $names
+      | ($names | length) == ($names | unique | length))
+    and all(.apps[];
+      ((.name | type) == "string" and (.name | length) > 0)
+      and ((.kind | type) == "string" and (.kind | length) > 0)
+      and ((.recovery_status | type) == "string" and (.recovery_status | length) > 0))
+    and all(.apps[] | select(.kind == "external-service");
+      (((.authority | type) == "string")
+        and (.authority | test("^https://github\\.com/[^/]+/[^/]+/?$")))
+      or (.authority == null and (.recovery_status | contains("not-covered"))))
+    and all(.apps[] | select(.authority == null);
+      (.recovery_status | contains("not-covered")))
+    and all(.apps[] | select((.note? // "") | test("未覆盖|NOT COVERED"; "i"));
+      (.recovery_status | contains("not-covered")))
+    and ([paths as $p
+      | ($p[-1] | tostring)
+      | select(test("token|secret|password|credential|api[_-]?key"; "i"))]
+      | length == 0)
+    and ([.. | strings
+      | select(test("(gh[pousr]_|ntok_|utok_|atok_|Bearer\\s+|sk-[A-Za-z0-9]|https?://[^/@\\s]+:[^/@\\s]+@)"; "i"))]
+      | length == 0)
+  ' "$inventory" >/dev/null
+}
+
+expect_inventory_red() {
+  local name="$1" inventory="$2" log
+  log="$ROOT/$name.log"
+  if assert_inventory_boundary "$inventory" >"$log" 2>&1; then
+    echo "MUTATION_SURVIVED $name"
+    return 1
+  fi
+  echo "MUTATION_RED $name"
 }
 
 run_suite() {
@@ -179,4 +211,14 @@ if assert_malformed_jlist_rejected "$MUTANT_PARSE"; then
   exit 1
 fi
 echo 'MUTATION_RED malformed-jlist-as-empty'
+
+MUTANT_INVENTORY_MISSING="$ROOT/inventory-missing-recovery-status.json"
+jq '.apps += [{"name":"fixture-missing-recovery","kind":"external-service","authority":"https://github.com/example/fixture"}]' \
+  "$INVENTORY" > "$MUTANT_INVENTORY_MISSING"
+expect_inventory_red missing-recovery-status "$MUTANT_INVENTORY_MISSING"
+
+MUTANT_INVENTORY_SECRET="$ROOT/inventory-secret-field.json"
+jq '.apps[0].api_token = "ghp_fixture_secret_must_be_rejected"' \
+  "$INVENTORY" > "$MUTANT_INVENTORY_SECRET"
+expect_inventory_red secret-like-field "$MUTANT_INVENTORY_SECRET"
 echo 'RESULT: PASS'
