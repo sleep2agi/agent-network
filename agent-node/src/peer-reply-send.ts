@@ -28,6 +28,8 @@ export interface PeerReplyCapabilityCache {
   hubSupportsTool: true | null;
 }
 
+const LEGACY_SEND_TASK_MAX_CHARS = 10_000;
+
 export function createPeerReplyCapabilityCache(): PeerReplyCapabilityCache {
   return { hubSupportsTool: null };
 }
@@ -44,7 +46,22 @@ export function createPeerReplyCapabilityCache(): PeerReplyCapabilityCache {
  */
 export function legacyPeerReplyTaskText(args: Pick<PeerReplySendArgs, "text" | "taskId" | "failed">): string {
   const body = args.failed ? `⚠️ ${args.text}` : args.text;
-  return `${body}\n\n[peer-reply in_reply_to=${args.taskId}]`;
+  const marker = `\n\n[peer-reply in_reply_to=${args.taskId}]`;
+  if (body.length + marker.length <= LEGACY_SEND_TASK_MAX_CHARS) return `${body}${marker}`;
+  // Preserve the model's complete reply.  An old Hub accepts at most 10k
+  // characters for send_task, so appending metadata to an already-full
+  // reply would turn a valid send_reply payload into a permanent schema
+  // rejection.  The duplicate_send branch below keeps this rare unmarked
+  // fallback queued until the old Hub's five-minute dedup window expires.
+  if (args.text.length <= LEGACY_SEND_TASK_MAX_CHARS) return args.text;
+  return body;
+}
+
+function retryableLegacyDuplicate(error: CommHubError): CommHubError {
+  return new CommHubError(
+    "legacy Hub dedup window still active; preserving pending reply",
+    { code: error.code, payload: error.payload },
+  );
 }
 
 function oldHubIdentityUnavailable(cause?: unknown): CommHubError {
@@ -135,6 +152,16 @@ export async function sendPeerReplyCompatible(
     try {
       return { route: "legacy", payload: await deps.sendLegacy({ ...args, fallbackReason }) };
     } catch (legacyError) {
+      // Two distinct full-length replies cannot carry the identity marker
+      // without crossing old Hub's 10k send_task limit.  If their bodies are
+      // equal, retain the second pending entry and retry after the bounded
+      // server-side dedup window instead of treating duplicate_send as a
+      // permanent application rejection and silently clearing the reply.
+      if (legacyError instanceof CommHubError
+          && legacyError.appLevel
+          && legacyError.code === "duplicate_send") {
+        throw retryableLegacyDuplicate(legacyError);
+      }
       // A routine Dashboard node deletion removes the original sender's
       // session after dispatch. In that exact shape the compatibility
       // send_task has an authoritative no-write result (alias_not_found),

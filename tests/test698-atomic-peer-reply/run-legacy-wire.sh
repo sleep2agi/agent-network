@@ -12,6 +12,8 @@ OLD_IMAGE="anet-test698-legacy-hub:${BASE_COMMIT:0:8}"
 MUTATED_IMAGE="anet-test698-legacy-route-mut:${SOURCE_COMMIT:0:8}"
 DEDUP_MUTATED_IMAGE="anet-test698-legacy-dedup-mut:${SOURCE_COMMIT:0:8}"
 IDENTITY_MUTATED_IMAGE="anet-test698-legacy-identity-mut:${SOURCE_COMMIT:0:8}"
+MAX_CAP_MUTATED_IMAGE="anet-test698-legacy-max-cap-mut:${SOURCE_COMMIT:0:8}"
+DUP_RETRY_MUTATED_IMAGE="anet-test698-legacy-dup-retry-mut:${SOURCE_COMMIT:0:8}"
 DB_DIR="$TMP/oldhubdb"
 mkdir -p "$DB_DIR"
 
@@ -28,6 +30,7 @@ docker build -t "$OLD_IMAGE" \
 docker network create "$NET" >/dev/null
 docker run -d --name "$HUB_CONTAINER" --network "$NET" \
   -e COMMHUB_AUTH_TOKEN=test698-legacy-auth \
+  -e COMMHUB_SEND_DEDUP_WINDOW_MS=5000 \
   -e COMMHUB_DB=/test698-oldhubdb/hub.db \
   -v "$DB_DIR:/test698-oldhubdb" "$OLD_IMAGE" >/dev/null
 
@@ -140,3 +143,65 @@ if [ "$IDENTITY_MUT_RC" -eq 0 ]; then
   exit 1
 fi
 echo "MUTATION_RED: old-hub-identity-failure-egresses rc=$IDENTITY_MUT_RC"
+
+echo "legacy-wire mutation: full-length reply exceeds old-Hub send_task cap"
+MAX_CAP_MUT_ROOT="$TMP/mutated-max-cap"
+mkdir -p "$MAX_CAP_MUT_ROOT"
+git -C "$ROOT" archive "$SOURCE_COMMIT" | tar -x -C "$MAX_CAP_MUT_ROOT"
+MAX_CAP_MUT_FILE="$MAX_CAP_MUT_ROOT/agent-node/src/peer-reply-send.ts"
+BEFORE=$(sha256sum "$MAX_CAP_MUT_FILE" | cut -d' ' -f1)
+sed -i 's/if (body.length + marker.length <= LEGACY_SEND_TASK_MAX_CHARS)/if (true)/' "$MAX_CAP_MUT_FILE"
+AFTER=$(sha256sum "$MAX_CAP_MUT_FILE" | cut -d' ' -f1)
+if [ "$BEFORE" = "$AFTER" ]; then
+  echo "MUTATION_NOOP: legacy-full-length-crosses-schema-cap"
+  exit 1
+fi
+docker build -t "$MAX_CAP_MUTATED_IMAGE" \
+  --build-arg SOURCE_COMMIT="$SOURCE_COMMIT-mut-legacy-max-cap" \
+  -f "$MAX_CAP_MUT_ROOT/tests/test698-atomic-peer-reply/Dockerfile" "$MAX_CAP_MUT_ROOT" \
+  >/tmp/test698-legacy-max-cap-mutated-build.log
+set +e
+docker run --rm --network "$NET" --entrypoint bun \
+  -v "$DB_DIR:/test698-oldhubdb" "$MAX_CAP_MUTATED_IMAGE" \
+  /workspace/tests/test698-atomic-peer-reply/legacy-cli-failure-e2e.ts \
+  "http://${HUB_CONTAINER}:9200" test698-legacy-auth /test698-oldhubdb/hub.db \
+  >/tmp/test698-legacy-max-cap-mutated-run.log 2>&1
+MAX_CAP_MUT_RC=$?
+set -e
+if [ "$MAX_CAP_MUT_RC" -eq 0 ]; then
+  echo "MUTATION_SURVIVED: legacy-full-length-crosses-schema-cap"
+  cat /tmp/test698-legacy-max-cap-mutated-run.log
+  exit 1
+fi
+echo "MUTATION_RED: legacy-full-length-crosses-schema-cap rc=$MAX_CAP_MUT_RC"
+
+echo "legacy-wire mutation: duplicate_send clears the pending full-length reply"
+DUP_RETRY_MUT_ROOT="$TMP/mutated-dup-retry"
+mkdir -p "$DUP_RETRY_MUT_ROOT"
+git -C "$ROOT" archive "$SOURCE_COMMIT" | tar -x -C "$DUP_RETRY_MUT_ROOT"
+DUP_RETRY_MUT_FILE="$DUP_RETRY_MUT_ROOT/agent-node/src/peer-reply-send.ts"
+BEFORE=$(sha256sum "$DUP_RETRY_MUT_FILE" | cut -d' ' -f1)
+sed -i 's/legacyError.code === "duplicate_send"/legacyError.code === "duplicate_send_disabled"/' "$DUP_RETRY_MUT_FILE"
+AFTER=$(sha256sum "$DUP_RETRY_MUT_FILE" | cut -d' ' -f1)
+if [ "$BEFORE" = "$AFTER" ]; then
+  echo "MUTATION_NOOP: legacy-duplicate-send-drops-pending"
+  exit 1
+fi
+docker build -t "$DUP_RETRY_MUTATED_IMAGE" \
+  --build-arg SOURCE_COMMIT="$SOURCE_COMMIT-mut-legacy-dup-retry" \
+  -f "$DUP_RETRY_MUT_ROOT/tests/test698-atomic-peer-reply/Dockerfile" "$DUP_RETRY_MUT_ROOT" \
+  >/tmp/test698-legacy-dup-retry-mutated-build.log
+set +e
+docker run --rm --network "$NET" --entrypoint bun \
+  -v "$DB_DIR:/test698-oldhubdb" "$DUP_RETRY_MUTATED_IMAGE" \
+  /workspace/tests/test698-atomic-peer-reply/legacy-cli-failure-e2e.ts \
+  "http://${HUB_CONTAINER}:9200" test698-legacy-auth /test698-oldhubdb/hub.db \
+  >/tmp/test698-legacy-dup-retry-mutated-run.log 2>&1
+DUP_RETRY_MUT_RC=$?
+set -e
+if [ "$DUP_RETRY_MUT_RC" -eq 0 ]; then
+  echo "MUTATION_SURVIVED: legacy-duplicate-send-drops-pending"
+  cat /tmp/test698-legacy-dup-retry-mutated-run.log
+  exit 1
+fi
+echo "MUTATION_RED: legacy-duplicate-send-drops-pending rc=$DUP_RETRY_MUT_RC"

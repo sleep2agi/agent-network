@@ -33,6 +33,12 @@ describe("peer reply capability fallback", () => {
       .toBe("⚠️ done\n\n[peer-reply in_reply_to=task_698]");
   });
 
+  test("legacy task body never pushes an otherwise valid 10k reply over the old-Hub schema cap", () => {
+    const full = "x".repeat(10_000);
+    expect(legacyPeerReplyTaskText({ ...args, text: full })).toBe(full);
+    expect(legacyPeerReplyTaskText({ ...args, text: full, failed: true })).toBe(full);
+  });
+
   test("new Hub + capable recipient uses the atomic tool only", async () => {
     const calls: string[] = [];
     const result = await sendPeerReplyCompatible(args, {
@@ -272,6 +278,31 @@ describe("peer reply capability fallback", () => {
         isOldHubOriginNode: oldHubOriginIsNode,
       })).rejects.toThrow(legacyError.message);
       expect(calls).toEqual(["atomic", "legacy-task"]);
+    }
+  });
+
+  test("old-Hub duplicate_send is retryable so the pending reply survives the dedup window", async () => {
+    try {
+      await sendPeerReplyCompatible(args, {
+        sendAtomic: async () => {
+          throw new CommHubError("unknown tool", { code: -32601 });
+        },
+        sendLegacy: async () => {
+          throw new CommHubError("app-level rejection: duplicate_send", {
+            code: "duplicate_send",
+            payload: { ok: false, error: "duplicate_send" },
+            appLevel: true,
+          });
+        },
+        sendLegacyReply: rejectUnexpectedLegacyReply,
+        isOldHubOriginNode: oldHubOriginIsNode,
+      });
+      throw new Error("expected retryable duplicate rejection");
+    } catch (error) {
+      expect(error).toBeInstanceOf(CommHubError);
+      expect((error as CommHubError).code).toBe("duplicate_send");
+      expect((error as CommHubError).appLevel).toBe(false);
+      expect((error as CommHubError).message).toContain("preserving pending reply");
     }
   });
 

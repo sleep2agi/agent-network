@@ -56,6 +56,8 @@ async function tool(token: string, name: string, args: Record<string, unknown>) 
 }
 
 const username = `legacy-failure-${Date.now()}`;
+const dispatcherAlias = `${username}-dispatcher`;
+const receiverAlias = `${username}-receiver`;
 const registered = await json("/api/auth/register", adminToken, {
   method: "POST",
   body: JSON.stringify({ username, password: "pass123456" }),
@@ -68,7 +70,7 @@ const dispatcher = await json("/api/auth/node-token", registered.token, {
   method: "POST",
   body: JSON.stringify({
     network_id: network.network_id,
-    node_name: "failure-dispatcher",
+    node_name: dispatcherAlias,
     node_id: "n_test698_failure_dispatcher",
   }),
 });
@@ -76,13 +78,13 @@ const receiver = await json("/api/auth/node-token", registered.token, {
   method: "POST",
   body: JSON.stringify({
     network_id: network.network_id,
-    node_name: "failure-receiver",
+    node_name: receiverAlias,
     node_id: "n_test698_failure_receiver",
   }),
 });
 
 await tool(dispatcher.token, "report_status", {
-  alias: "failure-dispatcher",
+  alias: dispatcherAlias,
   node_id: "n_test698_failure_dispatcher",
   status: "idle",
   resume_id: `resume-${username}-dispatcher`,
@@ -91,7 +93,7 @@ await tool(dispatcher.token, "report_status", {
 // test enqueue all three tasks and delete one authoritative task row before
 // production cli.ts drains the corresponding inbox records.
 await tool(receiver.token, "report_status", {
-  alias: "failure-receiver",
+  alias: receiverAlias,
   node_id: "n_test698_failure_receiver",
   status: "idle",
   resume_id: `resume-${username}-receiver-prestart`,
@@ -99,9 +101,9 @@ await tool(receiver.token, "report_status", {
 
 const dispatch = async (task: string) => {
   const sent = await tool(dispatcher.token, "send_task", {
-    alias: "failure-receiver",
+    alias: receiverAlias,
     task,
-    from_session: "failure-dispatcher",
+    from_session: dispatcherAlias,
     network_id: network.network_id,
   });
   const taskId = sent.task_id || sent.message_id;
@@ -110,6 +112,8 @@ const dispatch = async (task: string) => {
 };
 const firstTaskId = await dispatch("same-result source task A");
 const secondTaskId = await dispatch("same-result source task B");
+const maxFirstTaskId = await dispatch("MAX_LENGTH_REPLY_698 source task A");
+const maxSecondTaskId = await dispatch("MAX_LENGTH_REPLY_698 source task B");
 const missingTaskId = await dispatch("identity row disappears before drain");
 
 const db = new Database(dbPath);
@@ -124,8 +128,8 @@ mkdirSync(nodeDir, { recursive: true });
 const configPath = `${nodeDir}/config.json`;
 const pendingPath = `${nodeDir}/pending-replies.json`;
 writeFileSync(configPath, JSON.stringify({
-  alias: "failure-receiver",
-  node_name: "failure-receiver",
+  alias: receiverAlias,
+  node_name: receiverAlias,
   node_id: "n_test698_failure_receiver",
   runtime: "claude-agent-sdk",
   model: "claude-test-stub",
@@ -135,27 +139,29 @@ writeFileSync(configPath, JSON.stringify({
   env: { ANTHROPIC_API_KEY: "test-only-placeholder" },
 }, null, 2));
 
-const agent = Bun.spawn([
-  "bun", "--preload", "/workspace/tests/test698-atomic-peer-reply/sdk-stub-preload.ts",
-  "/workspace/agent-node/src/cli.ts", "--config", configPath, "--alias", "failure-receiver",
-], {
-  cwd: "/workspace",
-  env: {
-    ...process.env,
-    HOME: `${work}/home`,
-    REPO: "/workspace",
-    TEST673_CAPTURE_FILE: `${work}/sdk-capture.json`,
-  },
-  stdout: Bun.file(`${work}/agent.log`),
-  stderr: Bun.file(`${work}/agent.log`),
-});
+const spawnAgent = () => Bun.spawn([
+    "bun", "--preload", "/workspace/tests/test698-atomic-peer-reply/sdk-stub-preload.ts",
+    "/workspace/agent-node/src/cli.ts", "--config", configPath, "--alias", receiverAlias,
+  ], {
+    cwd: "/workspace",
+    env: {
+      ...process.env,
+      HOME: `${work}/home`,
+      REPO: "/workspace",
+      TEST673_CAPTURE_FILE: `${work}/sdk-capture.json`,
+    },
+    stdout: Bun.file(`${work}/agent.log`),
+    stderr: Bun.file(`${work}/agent.log`),
+  });
+
+let agent = spawnAgent();
 
 try {
   await waitFor(async () => {
-    const inbox = await tool(dispatcher.token, "get_inbox", { alias: "failure-dispatcher", limit: 20 });
+    const inbox = await tool(dispatcher.token, "get_inbox", { alias: dispatcherAlias, limit: 20 });
     const replies = (inbox.messages || []).filter((message: any) =>
       message.type === "task"
-      && message.from_session === "failure-receiver"
+      && message.from_session === receiverAlias
       && message.content?.includes("TEST673_STUB_OK"));
     return replies.length === 2
       && replies.some((message: any) => message.content.includes(firstTaskId))
@@ -169,16 +175,52 @@ try {
       && pending.some((entry: any) => entry.taskId === missingTaskId);
   }, "identity failure stays in pending queue", 400);
 
-  const inbox = await tool(dispatcher.token, "get_inbox", { alias: "failure-dispatcher", limit: 20 });
+  // A valid send_reply body may already occupy all 10,000 characters.  The
+  // legacy task route must not append a marker and cross old Hub's schema
+  // cap.  This means two equal full-length replies collide in the old Hub's
+  // content-only dedup window: one is delivered now and the other must stay
+  // pending (not be dropped as a permanent app-level rejection).
+  await waitFor(async () => {
+    const inbox = await tool(dispatcher.token, "get_inbox", { alias: dispatcherAlias, limit: 20 });
+    const maxReplies = (inbox.messages || []).filter((message: any) =>
+      message.type === "task"
+      && message.from_session === receiverAlias
+      && message.content === "x".repeat(10_000));
+    if (maxReplies.length !== 1 || !existsSync(pendingPath)) return false;
+    const pending = JSON.parse(readFileSync(pendingPath, "utf8"));
+    return [maxFirstTaskId, maxSecondTaskId]
+      .filter((taskId) => pending.some((entry: any) => entry.taskId === taskId)).length === 1;
+  }, "one full-length reply delivered and its duplicate retained", 400);
+
+  // Restart after the bounded dedup window.  Startup drains the durable
+  // pending queue before fetching fresh inbox work, so the second identical
+  // 10k reply must now be accepted without rerunning the model task.
+  agent.kill();
+  await agent.exited;
+  await Bun.sleep(5_200);
+  agent = spawnAgent();
+  await waitFor(async () => {
+    const inbox = await tool(dispatcher.token, "get_inbox", { alias: dispatcherAlias, limit: 20 });
+    const maxReplies = (inbox.messages || []).filter((message: any) =>
+      message.type === "task"
+      && message.from_session === receiverAlias
+      && message.content === "x".repeat(10_000));
+    if (maxReplies.length !== 2 || !existsSync(pendingPath)) return false;
+    const pending = JSON.parse(readFileSync(pendingPath, "utf8"));
+    return !pending.some((entry: any) =>
+      entry.taskId === maxFirstTaskId || entry.taskId === maxSecondTaskId);
+  }, "second full-length reply delivered after dedup window", 400);
+
+  const inbox = await tool(dispatcher.token, "get_inbox", { alias: dispatcherAlias, limit: 20 });
   const replies = (inbox.messages || []).filter((message: any) =>
-    message.type === "task" && message.from_session === "failure-receiver");
+    message.type === "task" && message.from_session === receiverAlias);
   if (replies.some((message: any) => message.content?.includes(missingTaskId))) {
     throw new Error("identity-unavailable task produced legacy egress");
   }
   const pending = JSON.parse(readFileSync(pendingPath, "utf8"));
   const retained = pending.filter((entry: any) => entry.taskId === missingTaskId);
   if (retained.length !== 1) throw new Error(`identity pending count=${retained.length}`);
-  console.log(`LEGACY_CLI_FAILURE_PASS equal_replies=2 identity_egress=0 pending=1 task_ids=${firstTaskId.slice(0, 8)},${secondTaskId.slice(0, 8)}`);
+  console.log(`LEGACY_CLI_FAILURE_PASS equal_replies=2 full_length_replies=2 identity_egress=0 pending=1 task_ids=${firstTaskId.slice(0, 8)},${secondTaskId.slice(0, 8)}`);
 } catch (error) {
   const logPath = `${work}/agent.log`;
   if (existsSync(logPath)) console.error(`--- legacy failure agent log ---\n${readFileSync(logPath, "utf8")}`);
