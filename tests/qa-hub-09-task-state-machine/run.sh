@@ -58,7 +58,7 @@ send_task() {
   local utok="$1" net="$2" alias="$3" text="$4"
   curl -fsS -X POST "$HUB_BASE/api/task" \
     -H "Authorization: Bearer $utok" -H 'Content-Type: application/json' \
-    -d "{\"alias\":\"$alias\",\"task\":\"$text\",\"priority\":\"normal\",\"network_id\":\"$net\"}" \
+    -d "{\"alias\":\"$alias\",\"task\":\"$text\",\"priority\":\"normal\",\"network_id\":\"$net\",\"from\":\"admin\"}" \
     | jq -r '.message_id'
 }
 
