@@ -141,7 +141,7 @@ A：`anet whoami` 输出的 `Role:` 是**系统级 role**（`users.role` —— 
 A：能。同一个 user 在 networkA 是 admin，在 networkB 是 viewer，完全 OK。每个 network 独立 role。
 
 **Q：首次启动创建的 `admin` 账号是什么 role？**
-A：first-run 创建时自动是 hub 全局 admin + default network 的 owner。
+A：first-run 创建时自动是 hub 全局 admin + 自己那个自动创建的网络的 owner。
 
 **Q：能不能让一个 user 只在某个 network 是 admin、在 hub 全局不是？**
 A：能。把他设为该 network 的 `admin` 即可；系统级 `users.role` 不会随之改变。

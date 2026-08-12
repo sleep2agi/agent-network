@@ -52,8 +52,8 @@ graph TB
 anet network create dev
 anet network create prod --description "Production environment"
 
-# Registration auto-creates a default network
-anet register  # → Auto-creates default network, role: owner
+# Registration auto-creates a network named after you
+anet register  # → Auto-creates network "<your-username>", role: owner
 ```
 
 ### Switch

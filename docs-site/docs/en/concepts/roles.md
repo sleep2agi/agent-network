@@ -142,7 +142,7 @@ To check your role **within the current network** (owner/admin/member/viewer), r
 A: Yes. Roles are per-network.
 
 **Q: What role does the first-start `admin` account have?**
-A: First-run creation sets it as hub-global admin + owner of the default network.
+A: First-run creation sets it as hub-global admin + owner of its auto-created network.
 
 **Q: Can a user be admin in just one network without being hub-global admin?**
 A: Yes. Give them the network's `admin` role; their system-level `users.role` remains unchanged.

@@ -135,7 +135,7 @@ anet init --hub http://your-server-IP:9200    # configure hub URL
 anet register                                 # create account (auto-logged in on success)
 ```
 
-After registration, they get their own default network. To add them to your network, create an invite code:
+After registration, they get their own network (named after them). To add them to your network, create an invite code:
 
 ```bash
 # You create an invite code

@@ -52,8 +52,8 @@ graph TB
 anet network create dev
 anet network create prod --description "生产环境"
 
-# 注册时自动创建 default 网络
-anet register  # → 自动创建 default 网络，角色 owner
+# 注册时自动创建一个属于你的网络，名字就是你的用户名
+anet register  # → 自动创建网络 "<你的用户名>"，角色 owner
 ```
 
 ### 切换
