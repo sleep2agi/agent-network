@@ -1,23 +1,29 @@
 Test 736 — PM2 fleet boot Git authority and recovery boundary
 ==============================================================
-Captured: 2026-08-12T19:13:31Z
+Captured: 2026-08-12T19:17:14Z
 
 Coordinates
 -----------
 Base=3b03ca117040c21b358fa027092fdf4080ce111c
-SOURCE_COMMIT=d9342bc5eb65496d07e76df4f64846f094e9ea04
-Image=sha256:f85368c9d35427b22b764e3041dfdc236424725565f1bc09f104b32e483d0e0d
-Image label org.opencontainers.image.revision=d9342bc5eb65496d07e76df4f64846f094e9ea04
-Exact runner log SHA256=1f2e8a9b718541812eeac48ec6c59aca21b9e416370ebbf45ebfa220ff62c383
+SOURCE_COMMIT=21f8424e59e745ea549ee23156d8b0375f86cb7c
+Image=sha256:20a747bd2630527f27436bae243185865e418bdb8df51831f2ea95e50f32e8c1
+Image label org.opencontainers.image.revision=21f8424e59e745ea549ee23156d8b0375f86cb7c
+Exact runner log SHA256=bffb6a0b1b68a2e0ebea415a497e94a51b472af7095d560acf9f95c551eaf42e
 
 Read-only production-shape capture
 ----------------------------------
 No process, systemd unit, PM2 state, config, database, or secret was changed.
 
-The production deployment copies and Git authorities were byte-identical at
-capture time:
+The initial captured production launcher and source commit `d9342bc5` were
+byte-identical at SHA256
+`1f80e8c722ab2b2d962e8a080d631a8c9dbf15a0f6a03e4af3b711931b502863`.
+Self-review then proved that malformed/failed `pm2 jlist` was treated as an
+empty daemon and could call `resurrect` over a live fleet (issue #742). The
+frozen source above adds a fail-closed guard and therefore intentionally no
+longer claims launcher byte identity with the undeployed production copy.
 
-  MATCH 1f80e8c722ab2b2d962e8a080d631a8c9dbf15a0f6a03e4af3b711931b502863 deploy/fleet/pm2-fleet-boot.sh
+The production systemd unit and Git authority remained byte-identical:
+
   MATCH 37ec1dcba738180bd4e3fe1f8a04d753ce17f3b1b76a29f006dcb25e424aca13 deploy/fleet/pm2-fleet.service
 
 The user systemd unit was active/exited and enabled, with linger enabled. Its
@@ -39,31 +45,37 @@ an isolated fake PM2 binary and no production credentials. It verified:
 - an already-live PM2 list is a strict no-op even when a dump exists;
 - an empty PM2 list without a dump fails loudly;
 - an empty PM2 list with a dump invokes `resurrect` exactly once;
+- failed or malformed `pm2 jlist` exits non-zero without invoking resurrect;
 - the systemd unit has the captured safe shape and no fleet-wide ExecStop;
 - the inventory has exactly five entries and honestly retains two external
   NOT COVERED authorities;
 - removing the live-fleet no-op guard is a byte-changing witnessed-red
-  mutation that attempts resurrection instead of passing the baseline.
+  mutation that attempts resurrection instead of passing the baseline;
+- converting malformed JSON back into count zero is a second witnessed-red
+  mutation.
 
 Exact result:
 
   L1 PM2_FLEET_REBUILD_PASS
   MUTATION_RED live-fleet-noop-removed
+  MUTATION_RED malformed-jlist-as-empty
   RESULT: PASS
 
 Image-to-source provenance
 --------------------------
 Files copied back from the exact image matched the frozen source byte for byte:
 
-  MATCH 1f80e8c722ab2b2d962e8a080d631a8c9dbf15a0f6a03e4af3b711931b502863 deploy/fleet/pm2-fleet-boot.sh
+  MATCH b1a1aaa78ef735a7f0f904d5abf07a49a88c0c143caa4a54401cd4d9225b0ac3 deploy/fleet/pm2-fleet-boot.sh
   MATCH 37ec1dcba738180bd4e3fe1f8a04d753ce17f3b1b76a29f006dcb25e424aca13 deploy/fleet/pm2-fleet.service
   MATCH 20c1ac2b5854c80272e37fd56659f6d15ce620405b6fbc26791d37b80237f1b5 deploy/fleet/process-inventory.json
-  MATCH f757bf62f6bb4b87ded8611613c31e8fb46133abd1f7db56beb2bdd188f5adf9 tests/test736-pm2-fleet-rebuild/run.sh
+  MATCH 34b6cb14a4d02baa8d3ab1b03c3984d2f4cc006200516a6b5d11774850a92ace tests/test736-pm2-fleet-rebuild/run.sh
 
 Honest limits
 -------------
 - No full empty-host recovery, real systemd start, PM2 daemon restart, node
   restart, or production rollout was performed.
+- The production deployment copy still has the fail-open `jlist` behavior at
+  capture time. Merging this source is not a deployment authorization.
 - `dump.pm2`, node configs/sessions, databases, and secret values are not
   Git-reproducible source. They require approved encrypted backup or fresh
   registration.
