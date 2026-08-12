@@ -13103,6 +13103,22 @@ if (args.slice(1).some((a) => a === "--help" || a === "-h")) {
     case "grok":
       console.log("Usage: anet grok attach <node>");
       break;
+    case "daemon":
+      // #717 — daemonCommand() already prints its own subcommand help for
+      // bare `anet daemon`, but this intercept ran first and bounced to the
+      // global printHelp(), so `anet daemon --help` showed the top-level
+      // command list. A user following the near-universal `<cmd> --help`
+      // convention concluded `anet daemon` had no subcommands and never
+      // found init/start/up/list. Drop the help flag and let daemonCommand
+      // take the bare-invocation path, which is the help it already has.
+      {
+        for (const flag of ["--help", "-h"]) {
+          const i = args.indexOf(flag);
+          if (i >= 0) args.splice(i, 1);
+        }
+      }
+      await daemonCommand();
+      process.exit(0);
     case "node":
       // #144 — if it's `anet node loop --help` specifically, delegate
       // to nodeLoopCommand so the user sees the loop-specific help
