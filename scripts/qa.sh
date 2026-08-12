@@ -116,6 +116,24 @@ fi
 
 if [[ $RUN_L1 -eq 1 ]]; then
   sec "L1 — Docker contract tests (用户视角，并行)"
+
+  # L1 的多数用例在容器里 `npm install -g @sleep2agi/<pkg>@preview`,也就是说
+  # 它们测的是【此刻 registry 上 preview 指向什么】,不是【这个 commit 是什么】。
+  #
+  # 后果实测过(#726):main 在 bec372c8 上 L1 全绿;之后没有任何 commit 变动,
+  # 只因为有人发布了新的 preview,同一份代码的 L1 就红了。反方向同样成立 ——
+  # 一个真把东西改坏的 PR,只要 @preview 还指着旧的好版本,它照样能绿。
+  #
+  # 把三个包此刻解析到的版本记下来,这样任何一次红都能立刻区分
+  # 「代码改坏了」还是「registry 动了」。这里【只记录不改行为】——
+  # 是否改成钉死版本涉及 49 个测试文件的语义,留给单独决定。
+  {
+    echo "L1 registry snapshot @ $(date -u +%FT%TZ)"
+    for pkg in agent-network agent-node commhub-server; do
+      v=$(npm view "@sleep2agi/$pkg" dist-tags.preview 2>/dev/null || echo "?")
+      echo "  @sleep2agi/$pkg@preview -> $v"
+    done
+  } | tee /tmp/qa-l1-registry-snapshot.txt
   pids=()
   declare -A pid_to_test
   for t in "${L1_TESTS[@]}"; do
