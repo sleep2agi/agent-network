@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-08-13",
+  "process_manager": "pm2",
+  "apps": [
+    {
+      "name": "commhub-hub",
+      "kind": "hub",
+      "authority": "deploy/hub/hub-daemon.sh",
+      "recovery_status": "repo-authority-proposed-in-pr-738"
+    },
+    {
+      "name": "anet-dashboard",
+      "kind": "dashboard",
+      "authority": "deploy/dashboard/dash-start.sh",
+      "recovery_status": "repo-authority-present"
+    },
+    {
+      "name": "opencode-node-测试1号",
+      "kind": "agent-node",
+      "authority": "agent-network/scripts/pm2-opencode.config.cjs",
+      "recovery_status": "software-recreatable-node-config-requires-backup-or-registration"
+    },
+    {
+      "name": "weixin-listen",
+      "kind": "external-service",
+      "authority": null,
+      "recovery_status": "not-covered-external-repository-and-commit-unknown"
+    },
+    {
+      "name": "weixin-admin",
+      "kind": "external-service",
+      "authority": null,
+      "recovery_status": "not-covered-external-repository-and-commit-unknown"
+    }
+  ]
+}

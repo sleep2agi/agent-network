@@ -11,7 +11,7 @@ The startup recipe for an opencode agent-node under pm2 supervision. Source of t
 
 `opencode-node-start.sh` here is **the source of truth**. Reviews land against this copy. But **pm2 references** `/home/vansin/.local/bin/opencode-node-start.sh`, **not this file**.
 
-The reason ([issue #526 same class](../../docs/tests/p-526-rename-ghost-harness/README.md), same lesson): any pm2/systemd/cron path that points inside a git worktree becomes a booby trap. When the branch merges, the worktree is cleaned; the reference goes dead; the daemon fails silently on next restart (`pm2 list` still shows the app). We put the *runtime* copy at `~/.local/bin/` alongside the other host daemons (`dash-start.sh`, `hub-daemon.sh`, `pm2-fleet-boot.sh`) so this class of failure is out of scope.
+The reason ([issue #526 same class](../../docs/tests/p-526-rename-ghost-harness/README.md), same lesson): any pm2/systemd/cron path that points inside a git worktree becomes a booby trap. When the branch merges, the worktree is cleaned; the reference goes dead; the daemon fails silently on next restart (`pm2 list` still shows the app). We put the *runtime* copy at `~/.local/bin/` alongside the other host daemons (`dash-start.sh`, `hub-daemon.sh`, `pm2-fleet-boot.sh`) so this class of failure is out of scope. Their Git authorities live under `deploy/`; the fleet boot chain and its data/secret boundary are documented in [`deploy/fleet/README.md`](../../deploy/fleet/README.md).
 
 ## Install / upgrade
 
