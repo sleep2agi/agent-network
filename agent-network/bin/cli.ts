@@ -1723,7 +1723,19 @@ function detectInstalledPackages() {
     // Bun 不是「可选运行时」,它是本机跑 hub 的硬前置:`anet hub start` 在
     // 缺 bun/bunx 时直接 process.exit(1)(见 hub start 里的前置校验)。
     // 此前自报里完全不提它,用户只能撞上去才知道 —— 这正是本次要修的。
-    bun: detectCommandVersion("bun", "Bun"),
+    // 🔴 判据必须与 hub 守卫同源。守卫是
+    //     if (!commandExists("bunx") && !commandExists("bun"))
+    // —— **任一存在即放行**。所以只探 `bun` 会在「只有 bunx」的 PATH 上
+    // 假报 "hub start will fail",而实际 hub 能起来。假警报比不报更糟:
+    // 它会让人去装一个本来就不需要装的东西,并开始怀疑其它自报信息。
+    // (通信牛在 #744 源码审里指出,已复验:cli.ts 的守卫确实是 OR。)
+    bun: (() => {
+      const direct = detectCommandVersion("bun", "Bun");
+      if (direct.state === "ok" || direct.state === "unknown") return direct;
+      // bun 不在 PATH 但 bunx 在 —— 守卫会放行,自报也必须放行。
+      const viaBunx = detectCommandVersion("bunx", "Bun (via bunx)");
+      return viaBunx.state === "ok" || viaBunx.state === "unknown" ? viaBunx : direct;
+    })(),
   };
 
   if (versions.agentNode.state !== "ok") {
@@ -1755,8 +1767,14 @@ function formatLazyComponent(pkg: DetectedVersion): string {
 function formatRequiredBun(pkg: DetectedVersion): string {
   if (pkg.state === "ok" && pkg.version) return `✓ ${pkg.displayName} v${pkg.version}`;
   if (pkg.state === "unknown") return `✓ ${pkg.displayName} installed`;
+  // 🔴 这里刻意**不**给 `curl … | bash` 一行流。
+  // 那正是 #729/#733/#743/#728 一整条线在修的 fail-open 形状:
+  // 管道的退出码只反映 consumer,producer(curl)失败会被吞掉。
+  // 我们自己在 CI 里把它当缺陷修掉,就不该在 CLI 里教用户这么做。
+  // 给包管理器安装(有校验、可回滚)+ 官方安装页,由用户选。
   return `✗ ${pkg.displayName} not found — \`anet hub start\` will fail without it `
-    + `(commhub-server is bun-only). Install: curl -fsSL https://bun.sh/install | bash`;
+    + `(commhub-server is bun-only). Install with: npm i -g bun `
+    + `— or follow https://bun.sh/docs/installation`;
 }
 
 function formatOptionalRuntime(pkg: DetectedVersion, reason: string): string {
