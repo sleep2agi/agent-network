@@ -73,6 +73,7 @@ L1_TESTS=(
   "test686-rest-shape-golden"
   "test765-batch-runtime-gate"
   "test766-bunx-preflight"
+  "test746-setup-bun-pin"
 )
 
 if [[ "${1:-}" == "--list" ]]; then
@@ -149,6 +150,8 @@ if [[ $RUN_L1 -eq 1 ]]; then
       build_args="--build-arg TEST765_SOURCE_COMMIT=$(git rev-parse HEAD)"
     elif [[ "$t" == "test766-bunx-preflight" ]]; then
       build_args="--build-arg TEST766_SOURCE_COMMIT=$(git rev-parse HEAD)"
+    elif [[ "$t" == "test746-setup-bun-pin" ]]; then
+      build_args="--build-arg TEST746_SOURCE_COMMIT=$(git rev-parse HEAD)"
     fi
     if ! dockerrun "docker build -q $build_args -t anet-$t -f tests/$t/Dockerfile ." >/tmp/qa-l1-$t-build.log 2>&1; then
       fail "L1 $t — build failed, see /tmp/qa-l1-$t-build.log"
