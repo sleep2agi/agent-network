@@ -149,6 +149,17 @@ jobs:
             anet-test224-grok-preview-security \
             2>&1 | tee "$RUNNER_TEMP/suite-artifacts/test224.log"
 
+      # 三个 suite 都是 root 容器写进 bind mount 的,产物属主 root、mode 0600。
+      # upload-artifact 以 runner 用户打包 → EACCES: permission denied,
+      # 于是「门全绿但 job 判红」,而且证据也归档不了。实测报错:
+      #   Error: EACCES: permission denied, open '.../suite-artifacts/report-test224.txt'
+      # if: always() —— 前面步骤红时更需要把证据传出来。
+      - name: Normalize recovered-suite artifact permissions
+        if: always()
+        run: |
+          sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/suite-artifacts"
+          chmod -R u+rw "$RUNNER_TEMP/suite-artifacts"
+
       - name: Upload recovered-suite artifacts
         # if: always() —— 套件红了才最需要看它的输出
         if: always()
