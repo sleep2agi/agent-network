@@ -1,0 +1,42 @@
+# 每个 workflow 的每个 job,是不是真的会执行点什么。
+#
+# 起因(2026-08-13 实测,不是设想):把两个各自新增一个 job 的分支合到一起时,
+# git 把它们共享的 `runs-on` / `timeout-minutes` / `steps:` /
+# `- uses: actions/checkout@v4` 判成公共上下文、只保留一份 —— 那几行逐字相同。
+# 按「冲突块取并集」解完之后,前一个 job 只剩一行 `name`,五个 step 全归了后一个。
+#
+# 🔴 那个文件是合法 YAML。GitHub 接受它,job 名字出现在检查列表里、显示绿色 ——
+#    一道从不执行的门,和一道执行且通过的门,在 PR 页面上长得一模一样。
+#    当时仓里所有门都是绿的,因为没有任何一道门检查 workflow 文件本身。
+#
+# 单独一个 workflow 文件、不动 qa.yml —— qa.yml 眼下有五个 PR 在改,
+# 往里塞会让合并更难,而这道门本身就是为了少制造这类问题。
+#
+# Python 而不是 in-yml 的 bash 循环,与 no-memory-slugs.yml /
+# public-script-safety.yml 同一模式。
+
+name: lint (workflow structure)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - '.github/scripts/check-workflow-structure.py'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+      - '.github/scripts/check-workflow-structure.py'
+
+jobs:
+  structure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install --quiet pyyaml
+      # 打印扫到的 workflow 数与 job 数,空范围直接红 ——
+      # 「0 个问题」和「压根没扫到」不能长成同一片绿。
+      - run: python3 .github/scripts/check-workflow-structure.py
