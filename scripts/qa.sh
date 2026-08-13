@@ -156,8 +156,13 @@ if [[ $RUN_L1 -eq 1 ]]; then
     # 逐字相同;新加的 test224/test597 用的是不带前缀的 ARG SOURCE_COMMIT,
     # 正是原链无法表达、只能再加分支的那种形状。
     build_args=""
+    # `|| true` 不是装饰:本脚本是 set -euo pipefail,而多数套件的 Dockerfile
+    # 根本没有 ARG SOURCE_COMMIT —— grep 无命中退 1,pipefail 把它传给整个
+    # 命令替换,set -e 于是在第一个这样的套件上把 runner 打死。
+    # 第一版就是这么挂的:CI 在 `build qa-cli-01-hub-start` 处 exit 1,
+    # 一个套件都没跑成,而失败看起来像「L1 挂了」而不是「参数推导写错了」。
     arg_name=$(grep -oE '^ARG (SOURCE_COMMIT|TEST[0-9]+_SOURCE_COMMIT)' \
-      "tests/$t/Dockerfile" 2>/dev/null | head -1 | awk '{print $2}')
+      "tests/$t/Dockerfile" 2>/dev/null | head -1 | awk '{print $2}' || true)
     if [[ -n "$arg_name" ]]; then
       build_args="--build-arg $arg_name=$(git rev-parse HEAD)"
     fi
