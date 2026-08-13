@@ -203,14 +203,14 @@ register() → callCommHub("report_status", {
 
 **实际数据变更**:
 1. **本地**: `rmSync(.anet/nodes/<id>/, { recursive: true, force: true })` —— 删整个目录（含 config.json、channels/、logs/；目录名是 alias / node_name，不是内部 node_id 字段；R209 chain 一致）
-2. **CommHub session**: `notifyServerOffline` 调用 `report_status(offline)`（[cli.ts:2725-2750](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2725)）—— **只把 sessions row.status 改成 offline，不 DELETE**。这一行 session 会一直留在 db 里（10 分钟 stale cutoff 触发时也只是再次 mark offline）。
+2. **CommHub session**: `notifyServerOffline` 调用 `report_status(offline)`（[`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) —— 搜 `async function notifyServerOffline(`）—— **只把 sessions row.status 改成 offline，不 DELETE**。这一行 session 会一直留在 db 里（10 分钟 stale cutoff 触发时也只是再次 mark offline）。
 3. **CommHub inbox**: **不清理** —— 残留 inbox 消息会一直留着。如果之后用同 alias 再 `anet node start`，新进程会从 `getInbox` 拉到旧消息（注意：旧消息可能跟新进程 session 上下文无关）。
 
 ::: warning 旧 doc P1 设计未采纳
 原 doc 写「DELETE FROM sessions / DELETE FROM inbox」是设计草稿意图，**未实施**。实际只 mark offline + 删本地目录，不清服务端 row（v0.8.2 起验证，至当前 stable 未变）。
 :::
 
-**确认流程**（[cli.ts:2831-2835](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2831)）：
+**确认流程**（[`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) —— 搜 `This will delete "${displayName}" (node_id:`）：
 
 ```
 $ anet node delete 指挥室
@@ -380,7 +380,7 @@ anet node rename 指挥室 总指挥
 
 ### anet 识别 node 的逻辑
 
-实际函数名 `resolveNodeRef`（[`cli.ts:198`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L198)）：
+实际函数名 `resolveNodeRef`（[`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) —— 搜 `function resolveNodeRef(`）：
 
 ```typescript
 function resolveNodeRef(ref: string) {

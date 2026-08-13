@@ -313,7 +313,7 @@ await startServer({
 
 1. 从 npm 包 (`dist/src/node-server.js` 优先 / `src/node-server.ts` 兜底) 复制到 `{项目}/.anet/node-server.js`（**注意：是 `.js` 不是 `.ts`** —— [R216 chain](https://github.com/sleep2agi/agent-network/issues/10#issuecomment-4438192170)）
 2. 安装依赖（`@modelcontextprotocol/sdk ^1.12.0` 通过 `bun install`）
-3. 写入 `.mcp.json`：`commhub → .anet/node-server.js`（[cli.ts:1724](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1724)）
+3. 写入 `.mcp.json`：`commhub → .anet/node-server.js`（[`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) —— 搜 `.mcp.json: commhub → .anet/node-server.js`）
 
 ```
 {项目}/
@@ -323,9 +323,9 @@ await startServer({
     └── package.json         # @modelcontextprotocol/sdk ^1.12.0
 ```
 
-已配置过且内容一致直接跳过（compare-by-content：`if (src !== dst) writeFileSync(...)`，[cli.ts:1679-1680](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1679)）。`anet init project` 也做同样的事（另外还写 CLAUDE.md）。
+已配置过且内容一致直接跳过（compare-by-content：`if (src !== dst) writeFileSync(...)`，[`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) —— 搜 `if (src !== dst)`）。`anet init project` 也做同样的事（另外还写 CLAUDE.md）。
 
-R221 校准：原 doc 写「`runtime: "claude-code"`」+「`.anet/node-server.ts`」+「`.mcp.json args:[".anet/node-server.ts"]`」三处都是 V2 早期命名/文件名，当前 runtime name 是 `claude-code-cli`（[RuntimeName type cli.ts:145](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L145)），落盘文件名是 `.js`。
+R221 校准：原 doc 写「`runtime: "claude-code"`」+「`.anet/node-server.ts`」+「`.mcp.json args:[".anet/node-server.ts"]`」三处都是 V2 早期命名/文件名，当前 runtime name 是 `claude-code-cli`（RuntimeName type —— 已移出 cli.ts,现在在 [`agent-network/src/normalize-runtime.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/src/normalize-runtime.ts),搜 `export type RuntimeName =`），落盘文件名是 `.js`。
 
 ---
 
