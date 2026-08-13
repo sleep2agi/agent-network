@@ -1,33 +1,40 @@
 # report-test831 — doc source-pin floor gate
-# docker run --rm --network none anet-t831  (镜像按 SOURCE_COMMIT=b6168cc700268a30a4325f49832e894d35d17e55 构建)
+# docker run --rm --network none anet-t831  (镜像按 SOURCE_COMMIT=c6338f272a0474d84dc7f22c0fd482b9ca5de77a 构建)
 # 本文件为套件原样输出,未手工编辑。
 
 # test831 — doc source-pin floor gate
-source_commit=b6168cc700268a30a4325f49832e894d35d17e55
-runsh_blob=8820cffe8cd3c95006e2389912bcb7263961a4cf
+source_commit=c6338f272a0474d84dc7f22c0fd482b9ca5de77a
+runsh_blob=b4ab91d3c5ef2016562657237c133ea70623aff9
 python=Python 3.12.13
 [L0] denominator
   listing_mode=walk
   scanned_doc_files=106
-  pin_occurrences=107
-  pin_doc_pairs=105
-  unique_pins=53
-  broken_pins=23
-  baseline_entries=23
+  pin_occurrences=141
+  pins_on_immutable_ref=0
+  pin_doc_pairs=139
+  unique_pins=70
+  broken_pins=32
+  baseline_entries=32
   
-  OK: 失效 pin 23 个,与基线完全一致 —— 没有新增,也没有该清的残留。
+  OK: 失效 pin 32 个,基线 32 条 —— 没有新增,也没有该清的残留。
   注意:这只说明已知失效的那批没变多。它抓不到「锚点指着一行正常代码、
   只是不是声称的那一行」—— 实测召回率 5/10,详见本文件头部。
-  OK  walk 路径与 git 路径给出同一份清单(106 文件 / 53 唯一 pin / 107 处)
+  OK  walk 路径与 git 路径给出同一份清单(106 文件 / 70 唯一 pin / 141 处)
 [L1] clean tree passes
-  OK rc=0  broken_pins=23(全部在基线里)
+  OK rc=0  broken_pins=32(全部在基线里)
 [L2] witnessed-red: a NEW broken pin must turn it red
   MUTATION_RED new-out-of-range-pin rc=1
   复原后回绿 ✓
-[L3] witnessed-red: a baseline entry that is no longer broken must turn it red
+[L3] witnessed-red: a baseline entry whose link no longer exists must turn it red
   MUTATION_RED stale-baseline-entry rc=1
   复原后回绿 ✓
 [L4] the known blind spots are still blind (so the documented recall stays honest)
   OK  3 条已知盲区仍未被判据覆盖(与文档里 5/10 的召回率一致)
+[L5] the four review findings each have an assertion
+  ① 不可变 ref 被排除且单独计数(pins_on_immutable_ref=1),门仍绿
+  ② #L0 判为 line-out-of-range rc=1
+  ④ 仓库外路径判为 path-escapes-repo rc=1
+  ③ 引用仍在文档里时不判为可删,并给出 drifted 警告(pin=agent-network/bin/cli.ts#L61)
+  复原后回绿 ✓
 RESULT: PASS
 exit_code=0
