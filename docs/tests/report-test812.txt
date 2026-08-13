@@ -1,9 +1,11 @@
 # report-test812 — tmux target semantics
-# docker run --rm --network none anet-t812  (镜像按 SOURCE_COMMIT=a5a1222e9535b666ec7329d5c07c9842e5ee4f38 构建)
+# docker run --rm --network none anet-t812  (镜像按 SOURCE_COMMIT=287e9b895e487b637aa8e7ffe319c0b264fb2d23 构建)
 # 本文件为套件原样输出,未手工编辑。
 
 # test812 — tmux target semantics, bound to the doc's own commands
-source_commit=a5a1222e9535b666ec7329d5c07c9842e5ee4f38
+source_commit=287e9b895e487b637aa8e7ffe319c0b264fb2d23
+runsh_blob=9c02fa752a3f73bde3a0fc403a6de934232b6822
+doc_blob=31cf46eb27ca89a561fce6721c11f5d05caa42c9
 tmux=tmux 3.4
 [L0] extract the commands from the doc
   doc_capture=tmux capture-pane -p -t "=${node}-桥:0" | tail -20
