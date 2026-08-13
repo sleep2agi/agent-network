@@ -61,8 +61,19 @@ commhub_get_all_status()
   1. **项目自营的生产实例**(权威):`公网 ─ Caddy :3000 / frpc :3100 → 127.0.0.1:3001`
      (Next.js,pm2 托管)。拓扑与运维见 `deploy/dashboard/README.md`、`deploy/tunnel/README.md`。
      **要判断「Dashboard 正不正常」,看这个。**
-  2. **自己起的**:`anet hub dashboard`(CLI 走 `npx @sleep2agi/agent-network-dashboard@<tag>`,
-     见 `docs-site/docs/guide/dashboard.md`)。绑定地址取 `--ip` → `--host` → `$HOSTNAME` → `127.0.0.1`
+     ⚠️ 但**仓里查不到它的实际地址** —— `deploy/tunnel/caddy.example` 是 `${PUBLIC_DOMAIN}`、
+     `frpc.example.toml` 是 `${FRP_SERVER_ADDR}`,都是占位符(仓库政策不写死真实域名)。
+     **在部署机上按权威来源查,不要猜、也不要退回那个 Vercel 页:**
+     ```bash
+     pm2 jlist | python3 -c "import json,sys;[print(a['name']) for a in json.load(sys.stdin)]"   # 确认 anet-dashboard 在跑
+     curl -s http://127.0.0.1:2019/config/apps/http/servers                                       # Caddy admin:实际路由(权威)
+     curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3001                              # 直连上游,绕开入口层
+     ```
+     不在部署机上时:**不要凭猜测下结论**,找该机器的负责人要地址。
+  2. **自己起的**:`anet hub dashboard`。默认走 `npx @sleep2agi/agent-network-dashboard@<tag>`;
+     但 `ANET_DASHBOARD_LOCAL=1` 时改为直接 spawn 全局二进制(`agent-network/bin/cli.ts` 的
+     `globalOptIn` 分支)—— **诊断"装的是哪一份"之前先看这个变量**,否则会去查错的产物。
+     见 `docs-site/docs/guide/dashboard.md`。绑定地址取 `--ip` → `--host` → `$HOSTNAME` → `127.0.0.1`
      (`agent-network/bin/cli.ts` 的 `dashHost`)。**容器里 `HOSTNAME` 通常有值,会绑到容器主机名而不是回环**
      —— 这是记录在案的发版门坑(`docs/tests/release-gate-playbook.md`「dashboard binds to hostname not 0.0.0.0」)。
      所以别假设任何默认地址,判断前先看 `dashHost` 实际取到什么。
