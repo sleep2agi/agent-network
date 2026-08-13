@@ -161,6 +161,18 @@ Grok vendor doctor 兼容。随后 test813 增加了只读挂载的精确 Grok 0
 两侧都必须修改，而 PR 实际只在 test725 收紧该断言；最终回执必须用 PR body 和 exact source
 纠正这种由任务措辞产生的过判。
 
+第三个真实 PR delta 评审任务 `04f6800a-8adb-46bb-912e-68573a58be5d` 使用 PR #803 的
+`source=aeec4b9c130e6439feb622b1d2213f9f8f61d1fb`，在 1 分 25 秒内终态 `replied`。
+它识别出 `recovered-suites` 虽是独立 job，但内部六个 build/run step 串行，前一套件失败会让
+后两套件不再执行；这不会造成假绿，却意味着“job 已接入”不能表述成“每次三个诊断信号都
+齐全”。exact source 交叉核同时确认：test224/test597 使用裸 `SOURCE_COMMIT`，test679 使用
+`TEST679_SOURCE_COMMIT`；test224 的 run 确实带 `--network none`，build 保持联网；三个套件
+的全部 COPY 输入在 pull 与 push 两侧均有 path trigger。`qa.sh` 当前十七个 L1 套件中，十三
+个无对应 ARG，其余四个推导结果与旧硬编码链逐字一致，`|| true` 正确避免无 ARG 时被
+`pipefail` 提前终止。任务后节点仍为 idle、`in_flight=0`，node/TUI pane 均存活。这证明它能
+连续处理 runner、GitHub Actions 与安全前提的组合审查；同样要求 exact source 复核其因正文
+未包含 Dockerfile 而暂列 NOT COVERED 的部分。
+
 ## 从 Git 恢复软件
 
 当前 `grok-build-cli` 是 source-only 路径。宿主部署副本
