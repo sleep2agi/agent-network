@@ -1,7 +1,6 @@
 FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436
 
 ARG SOURCE_COMMIT
-ENV TEST813_SOURCE_COMMIT=$SOURCE_COMMIT
 ARG BUN_VERSION=1.3.14
 ARG BUN_LINUX_X64_SHA256=951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f
 
@@ -27,6 +26,8 @@ COPY --chown=node:node agent-node/package.json ./agent-node/
 COPY --chown=node:node agent-network/package.json agent-network/package-lock.json ./agent-network/
 RUN cd agent-node && npm install --include=optional \
   && cd ../agent-network && npm ci
+
+ENV TEST813_SOURCE_COMMIT=$SOURCE_COMMIT
 
 COPY --chown=node:node agent-network/src ./agent-network/src
 COPY --chown=node:node agent-node/src ./agent-node/src
