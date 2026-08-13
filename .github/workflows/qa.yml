@@ -25,6 +25,7 @@ on:
       - 'tests/test224-grok-preview-security/**'
       - 'tests/test597-dashboard-slash-namespace/**'
       - 'tests/test679-task-trace/**'
+      - 'tests/lib/**'
   push:
     branches: [main]
     paths:
@@ -40,6 +41,7 @@ on:
       - 'tests/test224-grok-preview-security/**'
       - 'tests/test597-dashboard-slash-namespace/**'
       - 'tests/test679-task-trace/**'
+      - 'tests/lib/**'
 
 # Older runs on the same ref get cancelled — saves minutes when a PR is
 # updated rapidly. main pushes run independently.
@@ -97,7 +99,11 @@ jobs:
             -f tests/test224-grok-preview-security/Dockerfile .
 
       - name: Run test224-grok-preview-security
-        run: docker run --rm anet-test224-grok-preview-security
+        # 🔴 --network none 不是可选项:tests/test224-.../Dockerfile 第 13 行明写
+        # 「the actual gate is run with --network none」,而 run.sh 会打印
+        # 「runtime executed with network disabled」。不带这个 flag,那句话就是假的 ——
+        # 实测两种跑法都 PASS 且都打印同一句,套件自己不会拦住这个错误。
+        run: docker run --rm --network none anet-test224-grok-preview-security
 
       - name: Build test597-dashboard-slash-namespace
         run: |
