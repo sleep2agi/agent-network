@@ -75,12 +75,12 @@ stop_fake_leaders() {
 if [ "$mode" = all ] || [ "$mode" = negative ]; then
   before=$(sha256sum "$config" | cut -d' ' -f1)
   run_agent /usr/bin:/bin /definitely/missing/bun "$root/negative.log"
-  grep -Fq 'grok copresence CommHub MCP command could not be resolved or executed' "$root/negative.log" || {
+  grep -Fxq 'Error: grok copresence CommHub MCP command could not be resolved or executed' "$root/negative.log" || {
     echo "NEGATIVE_RUNTIME_GATE_NOT_REACHED" >&2
     sed -n '1,100p' "$root/negative.log" >&2
     exit 1
   }
-  ! grep -Fq '已注册到 CommHub' "$root/negative.log" || {
+  ! grep -Eq '^\[[0-9]{2}:[0-9]{2}:[0-9]{2}\] \[INFO \] \[test813-dog\] 已注册到 CommHub$' "$root/negative.log" || {
     echo "FAIL: missing-Bun product path registered before its runtime gate" >&2
     exit 1
   }
@@ -95,12 +95,12 @@ fi
 if [ "$mode" = all ] || [ "$mode" = recovery ]; then
   node -e 'const fs=require("fs");const p=process.argv[1];const c=JSON.parse(fs.readFileSync(p));delete c.grokCliSession;fs.writeFileSync(p,JSON.stringify(c)+"\n",{mode:0o600})' "$config"
   run_agent /usr/local/bin:/usr/bin:/bin /usr/local/bin/bun "$root/first.log"
-  grep -Fq '[grok-copresence] TUI ready session=' "$root/first.log" || {
+  grep -Eq '^\[[0-9]{2}:[0-9]{2}:[0-9]{2}\] \[INFO \] \[test813-dog\] \[grok-copresence\] TUI ready session=[0-9a-f]{8} attach=/.+$' "$root/first.log" || {
     echo "FAIL: canonical-Bun product path did not reach TUI readiness" >&2
     sed -n '1,120p' "$root/first.log" >&2
     exit 1
   }
-  grep -Fq '[grok-copresence] grok 0.2.93' "$root/first.log" || {
+  grep -Eq '^\[[0-9]{2}:[0-9]{2}:[0-9]{2}\] \[INFO \] \[test813-dog\] \[grok-copresence\] grok 0\.2\.93 \(f00f96316d\); attach with anet grok attach test813-dog$' "$root/first.log" || {
     echo "FAIL: canonical-Bun product path did not complete the real doctor/startup boundary" >&2
     exit 1
   }
@@ -124,7 +124,7 @@ if [ "$mode" = all ] || [ "$mode" = recovery ]; then
   done
 
   run_agent /usr/local/bin:/usr/bin:/bin /usr/local/bin/bun "$root/second.log"
-  grep -Fq '[grok-copresence] TUI ready session=' "$root/second.log" || {
+  grep -Eq '^\[[0-9]{2}:[0-9]{2}:[0-9]{2}\] \[INFO \] \[test813-dog\] \[grok-copresence\] TUI ready session=[0-9a-f]{8} attach=/.+$' "$root/second.log" || {
     echo "FAIL: product recovery did not return to TUI readiness" >&2
     sed -n '1,120p' "$root/second.log" >&2
     exit 1
