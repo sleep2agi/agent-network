@@ -1,10 +1,10 @@
 # report-test831 — doc source-pin floor gate
-# docker run --rm --network none anet-t831  (镜像按 SOURCE_COMMIT=cb8d96e621197ee5d1382bf99090d00b919c02f9 构建)
+# docker run --rm --network none anet-t831  (镜像按 SOURCE_COMMIT=89e454ba564defbe98784e94d1f87cd46c74d3ac 构建)
 # 本文件为套件原样输出,未手工编辑。
 
 # test831 — doc source-pin floor gate
-source_commit=cb8d96e621197ee5d1382bf99090d00b919c02f9
-runsh_blob=314f8f6cb4e0b214aea614a65e22ca034e0d3c7e
+source_commit=89e454ba564defbe98784e94d1f87cd46c74d3ac
+runsh_blob=3a3d9b0d74e88a38bafc55bbe716477e4b7693f1
 python=Python 3.12.13
 [L0] denominator
   listing_mode=walk
@@ -36,5 +36,15 @@ python=Python 3.12.13
   ④ 仓库外路径判为 path-escapes-repo rc=1
   ③ 引用仍在文档里时不判为可删,并给出 drifted 警告(pin=agent-network/bin/cli.ts#L61)
   复原后回绿 ✓
+[L6] symbol anchors land in the tool section they claim
+  tool_registrations=46
+  checked_docs=2
+  anchors_checked=67
+  mismatches=0
+  
+  OK: 67 条锚串全部落在它们声称的 tool 段里。
+  注意:这只管「落在对的段」。锚串在段内是否指着文档声称的那件事,仍要人读。
+  MUTATION_RED broadcast-anchored-to-ack-inbox rc=1
+  复原后回绿 ✓  (anchors_checked=67, tool_registrations=46)
 RESULT: PASS
 exit_code=0
