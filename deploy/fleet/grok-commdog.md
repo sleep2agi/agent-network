@@ -267,6 +267,19 @@ app-server 的 codex 节点就是此故障”应收窄为契约上预期有 apps
 故障类。它还把 queued→600 秒只支持排队与超时、不能单独证明唯一因果列为边界。该结果已用
 `send_message` 回传维护者；它是完整语义审查证据，仍不是 merge authority。
 
+PR #815 新增 267 行自检方法论文档，超过单条任务正文的可靠长度；编排者没有截断后冒充全文
+审查，而是把原文按完整章节边界分成 A（1–145 行）与 B（146–267 行），再要求同一 Grok
+session 做跨段综合。任务分别为 `32646fab-6d92-4a32-9d8f-0cc4c00907f7`、
+`962d7068-24a2-42ed-b7af-b37364ea4195` 与
+`be4e1544-faed-44ff-9ddf-20f17c8d5155`，三条均禁止外部工具并以
+`NO_EXTERNAL_TOOL_USED` 收尾。A 段为 `MAJOR`、B 段为 `MINOR`，全文综合仍为 `MAJOR`：文档
+一边规定 report-only 子提交位于被测 `SRC` 之上，一边又强制报告锚点等于当前 `HEAD`，会把
+合法 report-only/stack 拓扑系统性判成假红。最小修法是要求锚点唯一且等于实际被测/build-arg
+`SRC`，同时明确报告提交后的 `HEAD` 可以位于 `SRC` 之上。`git show | grep` 只能作为必要非
+充分条件、109 条日志不等于 109 个独立任务、`import` 不等于路径覆盖，以及破坏性删测 mutation
+必须在隔离 worktree 等边界也被准确分层为 `MINOR`。这证明 `通信狗` 已能在有长度约束时完成
+分段审查和跨段矛盾综合；事实坐标仍须 exact Git 审查者复验。
+
 针对 Grok TUI 出站假健康的 #813 已从旧候选分出新 Draft PR
 [#825](https://github.com/sleep2agi/agent-network/pull/825)：冻结 source
 `8186b79de8e2f904c28bec268d93a523503a6845`，新增产品链 doctor 4→3 反向门，并把 TUI-ready
