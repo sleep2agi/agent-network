@@ -44,6 +44,34 @@ expect_red stale-three-tool-doctor 'readiness failed: 3 tools discovered' \
 
 probe
 
+bash tests/test813-grok-mcp-readiness/product-path.sh all
+
+cp agent-node/src/cli.ts /tmp/test813-cli.orig
+target='process.env.BUN_BIN || "bun",'
+[ "$(grep -Fc "$target" agent-node/src/cli.ts)" -eq 1 ] || {
+  echo "FAIL: product-path mutation target cardinality changed" >&2
+  exit 1
+}
+sed -i 's/process\.env\.BUN_BIN || "bun",/"\/usr\/local\/bin\/bun",/' agent-node/src/cli.ts
+grep -Fq '"/usr/local/bin/bun",' agent-node/src/cli.ts || {
+  echo "FAIL: product-path mutation did not change production source" >&2
+  exit 1
+}
+if bash tests/test813-grok-mcp-readiness/product-path.sh negative >/tmp/test813-product-mutation.log 2>&1; then
+  echo "FAIL: mutation survived: bun-resolver-bypassed" >&2
+  cat /tmp/test813-product-mutation.log >&2
+  exit 1
+fi
+grep -Fq 'NEGATIVE_RUNTIME_GATE_NOT_REACHED' /tmp/test813-product-mutation.log || {
+  echo "FAIL: product-path mutation died for the wrong reason" >&2
+  cat /tmp/test813-product-mutation.log >&2
+  exit 1
+}
+cp /tmp/test813-cli.orig agent-node/src/cli.ts
+echo "MUTATION_RED bun-resolver-bypassed"
+
+bash tests/test813-grok-mcp-readiness/product-path.sh all
+
 if [ "${RUN_VENDOR_GROK:-0}" = 1 ]; then
   real_bin=${TEST813_REAL_GROK_BIN:-/host-grok/grok-0.2.93}
   [ -x "$real_bin" ] || {
