@@ -11,9 +11,9 @@ identity、tmux 和 Grok attach socket：
 
 | alias | node_id | session_id | workspace | tmux |
 | --- | --- | --- | --- | --- |
-| `通信狗` | `n_72be30e0` | `58df4026-95be-4610-a45c-194478727cc9` | `/home/vansin/grok-commdog-workspace` | `通信狗-node` |
-| `A站狗` | `n_b2c53d33` | `0bff8e47-ead8-4628-bea7-74b58335785a` | `/home/vansin/grok-astation-dog-workspace` | `A站狗-node` |
-| `P站狗` | `n_6fe8f9c0` | `f36fe2d9-166a-4b3e-b9c3-7ad065f60bc0` | `/home/vansin/grok-pstation-dog-workspace` | `P站狗-node` |
+| `通信狗` | `n_72be30e0` | `58df4026-95be-4610-a45c-194478727cc9` | `/home/vansin/grok-commdog-workspace` | `通信狗` |
+| `A站狗` | `n_b2c53d33` | `0bff8e47-ead8-4628-bea7-74b58335785a` | `/home/vansin/grok-astation-dog-workspace` | `A站狗` |
+| `P站狗` | `n_6fe8f9c0` | `f36fe2d9-166a-4b3e-b9c3-7ad065f60bc0` | `/home/vansin/grok-pstation-dog-workspace` | `P站狗` |
 
 ### Runtime 身份：TUI 共存，不是 ACP runtime
 
@@ -43,7 +43,7 @@ pstree -ap "$pid"
 | runtime / model | `grok-build-cli` / `grok-4.5` |
 | node / session | `n_72be30e0` / `58df4026-95be-4610-a45c-194478727cc9` |
 | workspace | `/home/vansin/grok-commdog-workspace` |
-| tmux | `通信狗-node` |
+| tmux | `通信狗` |
 | source commit | `a7865a4316a17d38e4c8dfc4c2cebaceaba2c62c` |
 | agent-network package | `2.3.0-preview.37`, tarball SHA-256 `56fdefbc14cba8de28f7bc037bc4d0911f7c79d16213152cc40167fa9ffe3743` |
 | agent-node package | `2.5.0-preview.29`, tarball SHA-256 `6e4e434df475fa88b20557188d0f553116a92d7181b440d2c76a6eec377d844c` |
@@ -150,7 +150,7 @@ export GROK_BINARY=/absolute/path/to/grok-0.2.93
 export ANET_AGENT_NODE_BIN="$ANET_RELEASE/agent-node/dist/cli.js"
 
 cd /home/vansin/grok-commdog-workspace
-tmux new-session -d -s 通信狗-node -n node \
+tmux new-session -d -s 通信狗 -n node \
   "env GROK_BINARY='$GROK_BINARY' \
        ANET_AGENT_NODE_BIN='$ANET_AGENT_NODE_BIN' \
        node '$ANET_RELEASE/agent-network/dist/bin/cli.js' \
@@ -165,15 +165,15 @@ for _ in $(seq 1 60); do
 done
 test -S "$ATTACH_SOCKET" || { echo "Grok attach socket not ready" >&2; exit 1; }
 
-# 让 `tmux attach -t 通信狗-node` 默认进入真实 TUI，而不是节点日志窗口。
-tmux new-window -d -t 通信狗-node -n tui \
+# 让 `tmux attach -t 通信狗` 默认进入真实 TUI，而不是节点日志窗口。
+tmux new-window -d -t 通信狗 -n tui \
   -c /home/vansin/grok-commdog-workspace \
   "exec node '$ANET_RELEASE/agent-network/dist/bin/cli.js' grok attach 通信狗"
-tmux select-window -t 通信狗-node:tui
+tmux select-window -t 通信狗:tui
 ```
 
 该布局中 `0:node` 是常驻通信节点，`1:tui` 是同一 Grok session 的交互界面；两者不是两套
-模型会话。运维者进入 `tmux attach -t 通信狗-node` 后应直接看到
+模型会话。运维者进入 `tmux attach -t 通信狗` 后应直接看到
 `attached to Grok TUI "通信狗"`。用 `Ctrl-b 0` 查看节点日志、`Ctrl-b 1` 回到 TUI；
 TUI 内 `Ctrl-]` 只断开 attach，不停止节点。`A站狗`、`P站狗` 使用相同两窗口布局，只替换
 alias、workspace 与 tmux 名。
@@ -181,10 +181,10 @@ alias、workspace 与 tmux 名。
 不要仅凭命令退出码或 tmux 名称宣告成功。启动后至少核对：
 
 ```bash
-tmux has-session -t 通信狗-node
-tmux list-windows -t 通信狗-node \
+tmux has-session -t 通信狗
+tmux list-windows -t 通信狗 \
   -F '#{window_index} #{window_name} active=#{window_active} panes=#{window_panes}'
-tmux capture-pane -t 通信狗-node:tui -p -S -80
+tmux capture-pane -t 通信狗:tui -p -S -80
 ps -eo pid,ppid,lstart,args | grep '[a]gent-node.*--alias 通信狗'
 sha256sum "$ANET_RELEASE/agent-network/dist/bin/cli.js" \
           "$ANET_RELEASE/agent-node/dist/cli.js" \
@@ -200,7 +200,7 @@ sha256sum "$ANET_RELEASE/agent-network/dist/bin/cli.js" \
 保留配置与会话供取证，不删除 workspace，不重建 Hub，不碰其它节点：
 
 ```bash
-tmux send-keys -t 通信狗-node:node C-c
+tmux send-keys -t 通信狗:node C-c
 # 确认该 alias 的 agent-node 退出；若仍在，记录 PID 后只对精确 PID 做 TERM。
 ps -eo pid,ppid,lstart,args | grep '[a]gent-node.*--alias 通信狗'
 ```
@@ -215,10 +215,10 @@ CONFIG=/home/vansin/grok-commdog-workspace/.anet/nodes/通信狗/config.json
 SESSION_BEFORE="$(jq -er '.grokCliSession' "$CONFIG")"
 
 # 仅在上面的精确进程退出核验通过后，清掉该 alias 的残留 tmux attach 窗。
-tmux has-session -t 通信狗-node 2>/dev/null && tmux kill-session -t 通信狗-node
+tmux has-session -t 通信狗 2>/dev/null && tmux kill-session -t 通信狗
 
 # 只重建目标节点；env 与二进制路径沿用“首次建机”一节，但不得带 --new-session。
-tmux new-session -d -s 通信狗-node -n node \
+tmux new-session -d -s 通信狗 -n node \
   "env GROK_BINARY='$GROK_BINARY' \
        ANET_AGENT_NODE_BIN='$ANET_AGENT_NODE_BIN' \
        node '$ANET_RELEASE/agent-network/dist/bin/cli.js' \
