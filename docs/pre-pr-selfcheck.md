@@ -408,6 +408,54 @@ git ls-files <目录> | wc -l      # 分母是多少
 # 窗口:两侧都试一遍,别只试你写代码时想到的那一侧
 ```
 
+### 只描述症状的规则拦不住我 —— 这几条要有替代写法
+
+§13 的第一版只列了七种形态,没给任何替代命令。结果:写完当天我又在其中一条
+(输出的截断)上栽了两次。**「知道会漏」和「手边有个不漏的写法」是两回事。**
+
+#### 看检查器/门的输出:别用 `head` / `tail`
+
+```bash
+#  ✘  会把 FAIL 列表的开头截掉,于是"4 条"看成"3 条"
+python3 scripts/check-xxx.py . 2>&1 | tail -14
+
+#  ✔  按标记段落取,取全
+python3 scripts/check-xxx.py . 2>&1 | sed -n '/FAIL/,/^$/p'
+#  ✔  或者干脆全打,再单独把计数行挑出来断言
+out=$(python3 scripts/check-xxx.py . 2>&1); printf '%s\n' "$out"
+printf '%s' "$out" | grep -E '^[a-z_]+=[0-9]+'
+```
+
+实测对照(一段 `FAIL: 4 条` + 四行条目 + 空行 + 一行尾部信息):
+
+```
+tail -5                     →  b / c / d / (空) / tail_info=1     ← 标题和第一条都没了
+sed -n '/FAIL/,/^$/p'       →  FAIL: 4 条 / a / b / c / d          ← 完整
+```
+
+#### 搜索命令:`2>/dev/null` 会把「我的命令坏了」变成「没有结果」
+
+```bash
+#  ✘  command 是 shell 内建,xargs 找不到这个可执行文件
+git ls-files docs-site | xargs command grep -ln 'xxx' 2>/dev/null
+```
+
+实测:这条**并不静默** —— 它 `rc=127`,并往 stderr 写
+`xargs: command: No such file or directory`。**是那个 `2>/dev/null` 把它变哑的**,
+于是空的 stdout 被我读成了「文件里没有」。
+
+```bash
+#  ✔  别在搜索上吞 stderr;要吞也先不吞地跑一次
+git ls-files docs-site | xargs grep -ln 'xxx'
+#  ✔  或者绕开 xargs,用 git 自己的搜索
+git grep -ln 'xxx' -- docs-site
+#  ✔  管道里还要留意 rc 是最后一个命令的;要判前面那个就用 PIPESTATUS 或 pipefail
+```
+
+**推广:任何一条「用来证明某物不存在」的命令,先在它一定有命中的输入上跑一次。**
+这就是 §8 说的「已知阳性 + 已知阴性各一条」,只是这里的阳性用来验证**管道本身**
+是通的,不是验证判据。
+
 ### 一条最省事的经验
 
 **同一份数据用两种方法各量一次,数字对不上就说明至少有一次范围错了。**
