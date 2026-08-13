@@ -335,6 +335,24 @@ describe("Grok copresence launch and injection policy", () => {
     expect(() => assertGrokCopresenceApprovalOwnership(JSON.stringify({
       ...cleanInspection,
     }), home)).not.toThrow();
+    const canonicalBun = "/opt/runtime/bin/bun";
+    const canonicalInspection = {
+      ...cleanInspection,
+      mcpServers: [{
+        ...cleanInspection.mcpServers[0],
+        target: canonicalBun,
+      }],
+    };
+    expect(() => assertGrokCopresenceApprovalOwnership(
+      JSON.stringify(canonicalInspection),
+      home,
+      canonicalBun,
+    )).not.toThrow();
+    expect(() => assertGrokCopresenceApprovalOwnership(
+      JSON.stringify(canonicalInspection),
+      home,
+      "/different/bun",
+    )).toThrow("runtime-owned commhub");
     expect(() => assertGrokCopresenceApprovalOwnership(JSON.stringify({
       ...cleanInspection,
       permissions: {

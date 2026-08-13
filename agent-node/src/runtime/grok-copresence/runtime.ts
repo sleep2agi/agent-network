@@ -481,6 +481,7 @@ export function assertGrokCopresenceVersion(version: string): void {
 export function assertGrokCopresenceApprovalOwnership(
   inspectionJson: string,
   isolatedGrokHome: string,
+  expectedCommhubTarget = "bun",
 ): void {
   let inspection: Record<string, unknown>;
   try {
@@ -544,7 +545,7 @@ export function assertGrokCopresenceApprovalOwnership(
   if (
     commhubRecord.name !== "commhub"
     || commhubRecord.transport !== "stdio"
-    || commhubRecord.target !== "bun"
+    || commhubRecord.target !== expectedCommhubTarget
     || !source
     || typeof source !== "object"
     || Array.isArray(source)
