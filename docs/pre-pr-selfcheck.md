@@ -24,6 +24,33 @@ git show <anchor>:<被测文件> | grep -c '<报告里出现的关键输出>'   
 写解释性正文提到旧锚点时,**不要写成 `key=value` 形式** —— 否则 grep 会在同一文件里
 找到第二个锚点。我第一版就差点这么写。
 
+**同一根因发作了两次,第二次是「ref 对、时机错」:**
+
+| 次数 | 我传给 `--build-arg SOURCE_COMMIT` 的是 | 错在哪 |
+|---|---|---|
+| 一 | `$(git rev-parse origin/main)` | **ref 错**:那是主干,不是分支 |
+| 二 | `$(git rev-parse HEAD)`,但在 `git commit` **之前**取 | **时机错**:镜像里跑的是工作区(含改动)的代码,戳进日志的却是改动前的 SHA |
+
+第二次尤其阴:证据本身**有效**(跑的确实是新代码),但它**自称的锚点指向一个不含该改动的提交**。
+校对时会看到同一份报告里出现两个不同的 `source_commit` —— 一个在抬头(对),
+一个在嵌入的运行输出里(错)。
+
+**所以顺序是固定的,不能颠倒:**
+
+```bash
+git add -A && git commit …          # 1. 先把被测改动提交掉
+SRC=$(git rev-parse HEAD)           # 2. 再取 SHA —— 此刻它才真的指向被跑的那份字节
+docker build --build-arg SOURCE_COMMIT="$SRC" …
+docker run  …  > run.log            # 3. 跑,证据里带上这个 SHA
+#    报告作为 report-only 子提交落在 SRC 之上
+```
+
+自检一行(应当只输出一个值):
+
+```bash
+grep -oE 'source_commit=[0-9a-f]{40}' <报告> | sort -u
+```
+
 ## 2. 验了零件,还要验装配
 
 **案发:** 我把 `qa.sh` 的 build-arg 从硬编码链改成从 Dockerfile 推导,并对 7 个套件
