@@ -57,5 +57,10 @@ commhub_get_all_status()
 ## 项目信息
 
 - 仓库：https://github.com/sleep2agi/agent-network
-- Dashboard：https://agent-network-dashboard.vercel.app
+- Dashboard：**自托管,没有官方托管入口**。`anet hub dashboard` 起在 `http://<服务器IP>:3000`
+  （CLI 通过 `npx @sleep2agi/agent-network-dashboard@<tag>` 拉起,见 `docs-site/docs/guide/dashboard.md`）。
+  ⚠️ `agent-network-dashboard.vercel.app` **不是产品形态** —— 它能打开、标题也对,
+  但 CDN 缓存年龄约 61 天(2026-08-13 实测),即约两个月未重新部署。
+  它在 `docs/rfcs/RFC-022` 里被当作现存部署引用,而该 RFC 与其原型自
+  2026-06-11 起无功能推进(见 #220)。**别拿它判断「Dashboard 正常不正常」。**
 - npm 包：@sleep2agi/agent-network / @sleep2agi/agent-node / @sleep2agi/commhub-server
