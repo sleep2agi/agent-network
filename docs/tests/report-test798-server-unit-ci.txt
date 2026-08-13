@@ -1,0 +1,29 @@
+# test798 — server 聚合单测门
+source_commit=92d9612949a4207eae4facab2b337c1f23de65e0
+
+## 落地前的实测(为什么需要它,以及踩过的三层坑)
+server/src 69 个测试,CI 此前只点名跑 6 个(L0_TESTS 5 + test686 引用 1)。
+
+第一版(共享一个 DB、cwd=server/):895 pass / 6 fail。逐条查下来全不是产品坏:
+  - 5 条 harness:hub↔daemon 漂移门要读 agent-node/src/shared,镜像里没有
+  - 1 条 harness:task-lifecycle-watcher 用 process.cwd() 拼 ./server/src/db.js,要求 cwd=仓根
+  - 3 条 harness:scheduled-tasks 要 tests/test601-.../race-worker.ts
+  - 剩下的是共享 DB 造成的跨文件污染(单跑全绿,聚合红)
+
+第二版(按既有契约逐文件独立 DB):红的换成另外 2 个,与第一版不相交 ——
+它们跨包 import agent-node 的 reply-reliability / inbox-dispatch,镜像里没带。
+补齐后 69/69 全绿。
+
+## 最终输出
+```
+# test798 — complete server unit domain
+source_commit=92d9612949a4207eae4facab2b337c1f23de65e0
+bun=1.3.14 node=v22.23.2 uid=1000
+commhub_db=/tmp/test798-server-unit.db
+test_files=69
+[L0] every server/src unit file, one DB each, as non-root (cwd=repo root)
+executed_files=69 discovered_files=69 failed_files=0
+[L1] witnessed-red: weaken the registration password floor
+MUTATION_RED registration-password-floor-weakened rc=1
+RESULT: PASS
+```
