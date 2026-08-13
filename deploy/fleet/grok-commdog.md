@@ -15,6 +15,25 @@ identity、tmux 和 Grok attach socket：
 | `A站狗` | `n_b2c53d33` | `0bff8e47-ead8-4628-bea7-74b58335785a` | `/home/vansin/grok-astation-dog-workspace` | `A站狗-node` |
 | `P站狗` | `n_6fe8f9c0` | `f36fe2d9-166a-4b3e-b9c3-7ad065f60bc0` | `/home/vansin/grok-pstation-dog-workspace` | `P站狗-node` |
 
+### Runtime 身份：TUI 共存，不是 ACP runtime
+
+三个 config 的权威字段均为 `runtime="grok-build-cli"`、`grokCopresence=true`；它们不使用
+Agent Network 的 `grok-build-acp` runtime，也不启动 `grok agent stdio`。实际进程链是
+`agent-node → grok --leader → grok agent leader`，并通过 owner-only attach socket 把同一个
+Grok TUI 暴露给 `anet grok attach`。`grok agent leader` 以及 Grok 日志中的内部 relay/ACP
+事件名是 Grok CLI 的 TUI leader 实现细节，不能据此把节点误报成 `grok-build-acp`。
+
+验真必须限定到目标 alias 的 config 与进程子树。不要用全舰队 `pgrep`/`grep` 搜索
+`grok-build-acp`：宿主上其它历史节点会污染结果。最低核验形态为：
+
+```bash
+jq '{runtime, model, grokCopresence}' "$CONFIG_PATH"
+pid="$(pgrep -af "agent-node.*--alias $ALIAS .*--runtime grok-build-cli" | awk 'NR==1{print $1}')"
+test -n "$pid"
+pstree -ap "$pid"
+! pstree -ap "$pid" | grep -E 'grok-build-acp|grok agent stdio'
+```
+
 下面是三者共享的软件坐标；其中 alias、node/session、workspace 与 tmux 行仅是
 `通信狗` 的首轮详细记录：
 
@@ -116,11 +135,14 @@ chmod 600 .anet/nodes/通信狗/config.json
 网络选择必须由 owner 会话完成。不要加 `--batch` 来绕过交互选择：2026-08-13 的实测中，
 该组合仍进入 vendor selector，不能当成无人值守恢复接口。
 
-## 精确启动
+## 首次建机的精确启动
 
 `agent-network` CLI 与 `agent-node` 必须来自同一冻结 release。若省略
 `ANET_AGENT_NODE_BIN`，宿主可能误用不支持 `grok-build-cli` 的旧全局 agent-node，出现
 命令返回但节点未上线的假成功。
+
+下面的 `--new-session` **只用于首次创建 Grok CLI 会话**。已有 config/session 的故障恢复
+不得照抄该参数；恢复路径见下一节。
 
 ```bash
 export ANET_RELEASE=/absolute/release
@@ -128,18 +150,41 @@ export GROK_BINARY=/absolute/path/to/grok-0.2.93
 export ANET_AGENT_NODE_BIN="$ANET_RELEASE/agent-node/dist/cli.js"
 
 cd /home/vansin/grok-commdog-workspace
-tmux new-session -d -s 通信狗-node \
+tmux new-session -d -s 通信狗-node -n node \
   "env GROK_BINARY='$GROK_BINARY' \
        ANET_AGENT_NODE_BIN='$ANET_AGENT_NODE_BIN' \
        node '$ANET_RELEASE/agent-network/dist/bin/cli.js' \
        node start 通信狗 --new-session"
+
+# attach socket 是最低就绪门；有 tmux 窗口但 socket 未就绪不能算 TUI 共存。
+CONFIG=/home/vansin/grok-commdog-workspace/.anet/nodes/通信狗/config.json
+ATTACH_SOCKET="$(jq -er '.grokAttachSocket' "$CONFIG")"
+for _ in $(seq 1 60); do
+  test -S "$ATTACH_SOCKET" && break
+  sleep 0.5
+done
+test -S "$ATTACH_SOCKET" || { echo "Grok attach socket not ready" >&2; exit 1; }
+
+# 让 `tmux attach -t 通信狗-node` 默认进入真实 TUI，而不是节点日志窗口。
+tmux new-window -d -t 通信狗-node -n tui \
+  -c /home/vansin/grok-commdog-workspace \
+  "exec node '$ANET_RELEASE/agent-network/dist/bin/cli.js' grok attach 通信狗"
+tmux select-window -t 通信狗-node:tui
 ```
+
+该布局中 `0:node` 是常驻通信节点，`1:tui` 是同一 Grok session 的交互界面；两者不是两套
+模型会话。运维者进入 `tmux attach -t 通信狗-node` 后应直接看到
+`attached to Grok TUI "通信狗"`。用 `Ctrl-b 0` 查看节点日志、`Ctrl-b 1` 回到 TUI；
+TUI 内 `Ctrl-]` 只断开 attach，不停止节点。`A站狗`、`P站狗` 使用相同两窗口布局，只替换
+alias、workspace 与 tmux 名。
 
 不要仅凭命令退出码或 tmux 名称宣告成功。启动后至少核对：
 
 ```bash
 tmux has-session -t 通信狗-node
-tmux capture-pane -t 通信狗-node -p -S -80
+tmux list-windows -t 通信狗-node \
+  -F '#{window_index} #{window_name} active=#{window_active} panes=#{window_panes}'
+tmux capture-pane -t 通信狗-node:tui -p -S -80
 ps -eo pid,ppid,lstart,args | grep '[a]gent-node.*--alias 通信狗'
 sha256sum "$ANET_RELEASE/agent-network/dist/bin/cli.js" \
           "$ANET_RELEASE/agent-node/dist/cli.js" \
@@ -155,13 +200,40 @@ sha256sum "$ANET_RELEASE/agent-network/dist/bin/cli.js" \
 保留配置与会话供取证，不删除 workspace，不重建 Hub，不碰其它节点：
 
 ```bash
-tmux send-keys -t 通信狗-node C-c
+tmux send-keys -t 通信狗-node:node C-c
 # 确认该 alias 的 agent-node 退出；若仍在，记录 PID 后只对精确 PID 做 TERM。
 ps -eo pid,ppid,lstart,args | grep '[a]gent-node.*--alias 通信狗'
 ```
 
 不要使用宽泛 `pkill`、fleet restart、数据库清理或 `docker prune` 作为回滚。重新上线时仍按
 “同一 source commit → 制品哈希 → 单节点 → 真实任务”的顺序执行。
+
+故障恢复必须先记录已有会话，再用**不带 `--new-session`** 的相同启动命令恢复：
+
+```bash
+CONFIG=/home/vansin/grok-commdog-workspace/.anet/nodes/通信狗/config.json
+SESSION_BEFORE="$(jq -er '.grokCliSession' "$CONFIG")"
+
+# 仅在上面的精确进程退出核验通过后，清掉该 alias 的残留 tmux attach 窗。
+tmux has-session -t 通信狗-node 2>/dev/null && tmux kill-session -t 通信狗-node
+
+# 只重建目标节点；env 与二进制路径沿用“首次建机”一节，但不得带 --new-session。
+tmux new-session -d -s 通信狗-node -n node \
+  "env GROK_BINARY='$GROK_BINARY' \
+       ANET_AGENT_NODE_BIN='$ANET_AGENT_NODE_BIN' \
+       node '$ANET_RELEASE/agent-network/dist/bin/cli.js' \
+       node start 通信狗"
+
+SESSION_AFTER="$(jq -er '.grokCliSession' "$CONFIG")"
+test "$SESSION_AFTER" = "$SESSION_BEFORE" || {
+  echo "unexpected Grok session replacement" >&2
+  exit 1
+}
+```
+
+随后仍需等待 attach socket、创建 `tui` 窗，并完成 `capture-pane` 与 Hub 真任务终态核验。
+**反向见证**是：把恢复命令误改为带 `--new-session` 时，会话保持断言必须转红；若只看
+tmux 窗口存在而仍判成功，该验收就是空门。
 
 ## 渐进参与边界
 
