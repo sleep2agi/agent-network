@@ -93,7 +93,10 @@ set -e
   echo "FAIL: attachment wiring mutation survived" >&2
   exit 1
 }
-grep -Fq 'the inbox choke point feeds the augmented text into processTask' /tmp/test725-mutation.log || {
+# 🔴 锚在 (fail) 行:bun test 对每个用例都打 `(pass) <名字>` / `(fail) <名字>`,
+# 只 grep 名字的话那条用例**通过**时也会命中,断言就只证明了它存在。
+# A/B 见 #798:松版会收下一个根本没打中指名行为的 mutation。
+grep -Eq '^\(fail\).*the inbox choke point feeds the augmented text into processTask' /tmp/test725-mutation.log || {
   cat /tmp/test725-mutation.log
   echo "FAIL: mutation red did not reach the named wiring assertion" >&2
   exit 1
