@@ -61,6 +61,13 @@ jobs:
       - name: Run complete agent-network unit domain
         run: docker run --rm anet-test745-agent-network-unit
 
+  server-unit:
+    name: server unit (Docker, non-root)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Build exact server unit image
         run: |
           docker build \
