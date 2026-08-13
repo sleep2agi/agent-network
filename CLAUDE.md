@@ -57,8 +57,12 @@ commhub_get_all_status()
 ## 项目信息
 
 - 仓库：https://github.com/sleep2agi/agent-network
-- Dashboard：**自托管,没有官方托管入口**。`anet hub dashboard` 起在 `http://<服务器IP>:3000`
-  （CLI 通过 `npx @sleep2agi/agent-network-dashboard@<tag>` 拉起,见 `docs-site/docs/guide/dashboard.md`）。
+- Dashboard：**自托管,没有官方托管入口**。`anet hub dashboard` 拉起
+  （CLI 走 `npx @sleep2agi/agent-network-dashboard@<tag>`,见 `docs-site/docs/guide/dashboard.md`）。
+  **默认只绑回环**:绑定地址取 `--ip` → `--host` → `$HOSTNAME` → `127.0.0.1`
+  （`agent-network/bin/cli.ts` 里 `dashHost` 一行)。所以默认情况下**别的机器连不上**,
+  也别默认它是 `http://<服务器IP>:3000` —— 要远程访问得显式 `--ip 0.0.0.0` 或走反代。
+  注意 `$HOSTNAME` 在链上:**实际绑到哪,随环境变**,判断前先看 `dashHost` 实际取值。
   ⚠️ `agent-network-dashboard.vercel.app` **不是产品形态** —— 它能打开、标题也对,
   但 CDN 缓存年龄约 61 天(2026-08-13 实测),即约两个月未重新部署。
   它在 `docs/rfcs/RFC-022` 里被当作现存部署引用,而该 RFC 与其原型自
