@@ -96,7 +96,10 @@ def tracked_docs() -> tuple[list[str], str]:
     return (walked, "walk")
 
 
-def collect_pins(files: list[str]) -> tuple[dict[tuple[str, int], set[str]], int]:
+IMMUTABLE_REF = re.compile(r"^[0-9a-f]{7,40}$")
+
+
+def collect_pins(files: list[str]) -> tuple[dict[tuple[str, int], set[str]], int, int]:
     """返回 (pin → 引用它的文档集合, 原始出现次数)。
 
     两个数是不一样的,别混:同一个 pin 在同一个文档里出现两次,前者只记一次。
@@ -106,29 +109,49 @@ def collect_pins(files: list[str]) -> tuple[dict[tuple[str, int], set[str]], int
     """
     pins: dict[tuple[str, int], set[str]] = {}
     occurrences = 0
+    pinned_to_sha = 0
     for rel in files:
         try:
             text = (REPO / rel).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
         for match in PIN.finditer(text):
-            _ref, path, line = match.groups()
-            pins.setdefault((path, int(line)), set()).add(rel)
+            ref, path, line = match.groups()
             occurrences += 1
-    return pins, occurrences
+            # 🔴 审查指出的:第一版把 ref 丢掉,一律拿当前检出去解析。那会让
+            #    「按本工具的建议改成钉不可变 commit」的引用被误判 —— 那条链接
+            #    在它自己的 commit 上是对的,在 HEAD 上未必。反过来,一条在历史
+            #    版本里就错的链接,也可能因为 HEAD 恰好长得对而蒙混过关。
+            #    这道门管的是**会漂的引用**;钉了 SHA 的不在范围内,单独计数。
+            if IMMUTABLE_REF.match(ref):
+                pinned_to_sha += 1
+                continue
+            pins.setdefault((path, int(line)), set()).add(rel)
+    return pins, occurrences, pinned_to_sha
 
 
 def classify(path: str, line: int) -> tuple[str, str] | None:
     """返回 (失效类别, 那一行的内容);指不出问题时返回 None。"""
+    # 🔴 文档里写 `blob/main/../../etc/passwd#L1` 时,直接拼到 REPO 上会读出
+    #    仓库外的文件,而 /etc/passwd 第一行非平凡 —— 一个根本不指向本仓的链接
+    #    就被判成健康。先拒绝绝对路径与 .. 分量,再核解析后仍在 REPO 之下。
+    if path.startswith("/") or ".." in Path(path).parts:
+        return ("path-escapes-repo", path)
     target = REPO / path
+    try:
+        target.resolve().relative_to(REPO)
+    except ValueError:
+        return ("path-escapes-repo", path)
     if not target.is_file():
         return ("missing-file", "")
     try:
         content = target.read_text(encoding="utf-8").split("\n")
     except (OSError, UnicodeDecodeError):
         return ("unreadable", "")
-    if line > len(content):
-        return ("line-out-of-range", f"(文件只有 {len(content)} 行)")
+    # 行号是 1-based。第一版只挡了上界,#L0 会走到 content[-1] 读最后一行,
+    # 于是一个畸形锚点在最后一行非平凡时被判成健康。
+    if line < 1 or line > len(content):
+        return ("line-out-of-range", f"(行号 {line},文件 {len(content)} 行)")
     text = content[line - 1]
     if TRIVIAL.match(text):
         return ("trivial-line", text.strip())
@@ -148,10 +171,11 @@ def read_baseline() -> set[str]:
 
 def main() -> int:
     files, mode = tracked_docs()
-    pins, occurrences = collect_pins(files)
+    pins, occurrences, pinned_to_sha = collect_pins(files)
     print(f"listing_mode={mode}")
     print(f"scanned_doc_files={len(files)}")
     print(f"pin_occurrences={occurrences}")
+    print(f"pins_on_immutable_ref={pinned_to_sha}")
     print(f"pin_doc_pairs={sum(len(v) for v in pins.values())}")
     print(f"unique_pins={len(pins)}")
 
@@ -172,8 +196,26 @@ def main() -> int:
     baseline = read_baseline()
     print(f"baseline_entries={len(baseline)}")
 
+    # 🔴 审查指出的第三条,这里的语义第一版是错的。
+    #    原来写的是 fixed = baseline - broken:只要判据不再标某条,就叫人删基线。
+    #    但代码一漂,一个仍然错的锚点会从「平凡行」挪到「普通但不相干的一行」,
+    #    判据就不标它了 —— 而文档一个字没动,链接还是错的。照原来的规则,CI 会
+    #    主动要求把这条已知缺陷从基线里删掉,等于把它推进本工具自己的盲区。
+    #
+    #    正确的语义:基线条目只在**文档里那个引用不存在了**时才该删。
+    present = {f"{path}#L{line}" for (path, line) in pins}
     new = sorted(set(broken) - baseline)
-    fixed = sorted(baseline - set(broken))
+    gone = sorted(baseline - present)
+    # 仍被文档引用、但判据已经标不出来的 —— 不删,也不算绿,单独列出来。
+    drifted = sorted((baseline & present) - set(broken))
+
+    if drifted:
+        print()
+        print(f"⚠️  {len(drifted)} 个基线条目仍被文档引用,但判据已经标不出它们了：")
+        for key in drifted:
+            print(f"  {key}")
+        print("  这通常意味着源码漂移把锚点从「平凡行」挪到了「普通但不相干的一行」——")
+        print("  链接**仍然是错的**,只是这套判据看不见了。保留在基线里,别删。")
 
     if new:
         print()
@@ -185,19 +227,19 @@ def main() -> int:
         print("  改法:把行号锚点换成符号锚点(读者用 git grep 定位,重构改不坏),", file=sys.stderr)
         print("  或者钉一个不可变的 commit SHA。别把新条目加进基线 —— 基线只许缩小。", file=sys.stderr)
 
-    if fixed:
+    if gone:
         print()
-        print(f"FAIL: {len(fixed)} 个基线条目已经不再失效,请从基线里删掉", file=sys.stderr)
-        for key in fixed:
+        print(f"FAIL: {len(gone)} 个基线条目对应的引用已经不在文档里了,请从基线里删掉", file=sys.stderr)
+        for key in gone:
             print(f"  {key}", file=sys.stderr)
         print(file=sys.stderr)
         print("  不删的话基线会变成坟场:修好的和没修的混在一起,数字再也不说明任何事。", file=sys.stderr)
 
-    if new or fixed:
+    if new or gone:
         return 1
 
     print()
-    print(f"OK: 失效 pin {len(broken)} 个,与基线完全一致 —— 没有新增,也没有该清的残留。")
+    print(f"OK: 失效 pin {len(broken)} 个,基线 {len(baseline)} 条 —— 没有新增,也没有该清的残留。")
     print("注意:这只说明已知失效的那批没变多。它抓不到「锚点指着一行正常代码、")
     print("只是不是声称的那一行」—— 实测召回率 5/10,详见本文件头部。")
     return 0

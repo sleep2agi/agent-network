@@ -99,7 +99,7 @@ echo "  复原后回绿 ✓"
 # L3 — witnessed-red ②:基线里塞一条并不失效的条目,必须红。
 #      这一条守的是「基线只许缩小」:没有它,基线会慢慢变成坟场。
 # ---------------------------------------------------------------------------
-echo "[L3] witnessed-red: a baseline entry that is no longer broken must turn it red"
+echo "[L3] witnessed-red: a baseline entry whose link no longer exists must turn it red"
 cp "$BASELINE" /tmp/baseline.bak
 printf 'server/src/auth.ts#L1\n' >> "$BASELINE"
 set +e
@@ -107,8 +107,10 @@ mut2=$(python3 "$CHECK" "$ROOT" 2>&1); rc2=$?
 set -e
 cp /tmp/baseline.bak "$BASELINE"
 [[ "$rc2" -ne 0 ]] || fail "基线里混进一条不失效的条目,门却是绿的"
-printf '%s' "$mut2" | grep -qF "已经不再失效" \
-  || fail "红了,但不是红在「基线条目已不再失效」上"
+# 注意文案:#843 的审查之后,判据改成「引用还在不在文档里」,不再是
+# 「判据还标不标它」。塞进去的 auth.ts#L1 任何文档都没引用,所以走这条。
+printf '%s' "$mut2" | grep -qF "对应的引用已经不在文档里了" \
+  || fail "红了,但不是红在「基线条目对应的引用已不在文档里」上:$(printf '%s' "$mut2" | head -3)"
 echo "  MUTATION_RED stale-baseline-entry rc=$rc2"
 
 python3 "$CHECK" "$ROOT" >/dev/null || fail "复原基线后没有回绿"
@@ -131,5 +133,70 @@ for pin in "server/src/tools.ts#L286" "server/src/tools.ts#L646" "server/src/too
   blind_ok=$((blind_ok+1))
 done
 echo "  OK  $blind_ok 条已知盲区仍未被判据覆盖(与文档里 5/10 的召回率一致)"
+
+# ---------------------------------------------------------------------------
+# L5 — #843 审查提的四条,各自一个断言。修了判据却没有断言,等于没修。
+#      每条都用"注入 → 期望的红/绿 → 复原 → 回绿"的形状。
+# ---------------------------------------------------------------------------
+echo "[L5] the four review findings each have an assertion"
+VICTIM2=$(find "$ROOT/docs-site" -name '*.md' | sort | head -1)
+cp "$VICTIM2" /tmp/victim2.bak
+restore2() { cp /tmp/victim2.bak "$VICTIM2"; }
+
+# ① 钉了不可变 SHA 的引用不属于这道门 —— 注入一个"在 HEAD 上必然越界"的 SHA pin,
+#    门必须**仍然绿**(它管的是会漂的 main 引用,不是历史链接)。
+printf '\n[sha](https://github.com/sleep2agi/agent-network/blob/0123456789abcdef0123456789abcdef01234567/server/src/index.ts#L99999)\n' >> "$VICTIM2"
+set +e; out5=$(python3 "$CHECK" "$ROOT" 2>&1); rc5=$?; set -e
+restore2
+[[ "$rc5" -eq 0 ]] || fail "① 钉 SHA 的引用被当成漂移失效了(rc=$rc5)—— 那会惩罚按本工具建议做出的修改"
+printf '%s' "$out5" | grep -q "pins_on_immutable_ref=1" \
+  || fail "① 钉 SHA 的引用没有被单独计数:$(printf '%s' "$out5" | grep pins_on_immutable || true)"
+echo "  ① 不可变 ref 被排除且单独计数(pins_on_immutable_ref=1),门仍绿"
+
+# ② #L0 必须判成越界。第一版只挡上界,content[-1] 会读到最后一行。
+printf '\n[zero](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L0)\n' >> "$VICTIM2"
+set +e; out6=$(python3 "$CHECK" "$ROOT" 2>&1); rc6=$?; set -e
+restore2
+[[ "$rc6" -ne 0 ]] || fail "② #L0 没被判成失效 —— 行号是 1-based,0 会读到最后一行"
+printf '%s' "$out6" | grep -q "line-out-of-range" || fail "② #L0 红了但类别不是 line-out-of-range"
+echo "  ② #L0 判为 line-out-of-range rc=$rc6"
+
+# ④ 路径穿越:仓库外的文件不能被当成健康锚点。
+printf '\n[esc](https://github.com/sleep2agi/agent-network/blob/main/../../etc/passwd#L1)\n' >> "$VICTIM2"
+set +e; out7=$(python3 "$CHECK" "$ROOT" 2>&1); rc7=$?; set -e
+restore2
+[[ "$rc7" -ne 0 ]] || fail "④ ../../etc/passwd 被判成健康锚点了"
+printf '%s' "$out7" | grep -q "path-escapes-repo" || fail "④ 红了但类别不是 path-escapes-repo"
+echo "  ④ 仓库外路径判为 path-escapes-repo rc=$rc7"
+
+# ③ 基线语义:条目只在"文档里那个引用没了"时才该删。
+#    造法:把一条基线条目对应的引用留在文档里,但让判据标不出它 ——
+#    直接往基线里塞一条指向非平凡行、且文档里确实引用着的 pin。
+#    期望:不红(它没消失),但要出现 drifted 警告。
+DRIFT_PIN=$(python3 - "$ROOT" <<'PYX'
+import re,sys,pathlib
+root=pathlib.Path(sys.argv[1])
+PIN=re.compile(r"blob/main/([^\s)#\"']+)#L(\d+)")
+base={l.strip() for l in (root/'docs/doc-source-pins-baseline.txt').read_text(encoding='utf-8').splitlines()
+      if l.strip() and not l.lstrip().startswith('#')}
+for f in (root/'docs-site').rglob('*.md'):
+    for m in PIN.finditer(f.read_text(encoding='utf-8')):
+        k=f"{m.group(1)}#L{m.group(2)}"
+        if k not in base:
+            print(k); sys.exit(0)
+PYX
+)
+[[ -n "$DRIFT_PIN" ]] || fail "③ 找不到一个「文档引用着但不在基线里」的 pin 来造场景"
+cp "$BASELINE" /tmp/baseline2.bak
+printf '%s\n' "$DRIFT_PIN" >> "$BASELINE"
+set +e; out8=$(python3 "$CHECK" "$ROOT" 2>&1); rc8=$?; set -e
+cp /tmp/baseline2.bak "$BASELINE"
+[[ "$rc8" -eq 0 ]] || fail "③ 引用仍在文档里、只是判据标不出来,不该红(rc=$rc8):$(printf '%s' "$out8" | head -3)"
+printf '%s' "$out8" | grep -qF "仍被文档引用" \
+  || fail "③ 没有给出 drifted 警告 —— 这条会被悄悄当成'修好了'"
+echo "  ③ 引用仍在文档里时不判为可删,并给出 drifted 警告(pin=$DRIFT_PIN)"
+
+python3 "$CHECK" "$ROOT" >/dev/null || fail "L5 复原之后没有回绿"
+echo "  复原后回绿 ✓"
 
 echo "RESULT: PASS"
