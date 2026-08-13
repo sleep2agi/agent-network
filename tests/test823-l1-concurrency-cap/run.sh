@@ -19,6 +19,22 @@ ROOT=/workspace
 SRC=${TEST823_SOURCE_COMMIT:-}
 [[ "$SRC" =~ ^[0-9a-f]{40}$ ]] || { echo "FAIL: TEST823_SOURCE_COMMIT 必须是一个完整的小写 SHA(收到 '${SRC}')" >&2; exit 1; }
 
+# 🔴 光验格式不够 —— 任何 40 位十六进制都能通过,而报告里那个 SHA 可能
+#    根本不含镜像里被测的文件。这正是 #801 上那条 P1 说的病,我建这个
+#    套件时原样犯了一遍。
+#    做法:构建时把 run.sh 在该 commit 下的 git blob 哈希作为 build-arg
+#    传进来,这里就地重算镜像内文件的 blob 哈希并比对。git blob 哈希 =
+#    sha1("blob <len>\0" + 内容),不需要容器里装 git。
+EXPECT=${TEST823_RUNSH_BLOB:-}
+[[ "$EXPECT" =~ ^[0-9a-f]{40}$ ]] || { echo "FAIL: TEST823_RUNSH_BLOB 缺失或格式不对 —— 无法把 SOURCE_COMMIT 绑到被测字节" >&2; exit 1; }
+self=/workspace/run.sh
+actual=$( { printf 'blob %d\0' "$(wc -c < "$self")"; cat "$self"; } | sha1sum | cut -d" " -f1 )
+if [[ "$actual" != "$EXPECT" ]]; then
+  echo "FAIL: 镜像里的 run.sh 与 SOURCE_COMMIT=$SRC 声称的不是同一份" >&2
+  echo "      期望 blob $EXPECT,实际 $actual" >&2
+  exit 1
+fi
+
 BIN=/tmp/t823-bin
 EV=/tmp/t823-events
 mkdir -p "$BIN"
@@ -31,7 +47,9 @@ cat > "$BIN/docker" <<'STUB'
 # build 是同步的、run 是后台的 —— 只有 run 会重叠。若两者同样耗时,
 # run 之间几乎不重叠,峰值恒为 1,高上限下断言就失去分辨力(第一版如此)。
 # 所以 build 尽量快,run 拉长,让并发真正显现出来。
-if [ "${1:-}" = "build" ]; then exit 0; fi
+# 只有真正的 `docker run` 才记事件。任何其它子命令(build/ps/rmi…)
+# 都不该计入并发峰值 —— 否则峰值会被无关调用抬高,断言就不再是在测闸门。
+[ "${1:-}" = "run" ] || exit 0
 printf 'S %s %s\n' "$(date +%s%N)" "$$" >> "$T823_EV"
 sleep 1.2
 printf 'E %s %s\n' "$(date +%s%N)" "$$" >> "$T823_EV"
@@ -113,6 +131,10 @@ check octal_eff "$eff" 8 "按十进制解释,不是八进制报错/不限"
 IFS='|' read -r p eff warned <<< "$(run_case zero 0)"
 say "- 0(不限)   峰值=$p 生效值=$eff 告警=$warned"
 check zero_eff "$eff" 0 "0 保留为「不限」的逃生口"
+# 只断言"生效值是 0"不够 —— 那只证明它被这么解析,没证明它真的放开了并发。
+# 拿 cap=2 的峰值当对照:不限时必须明显更高。
+if [[ "$p" -gt 2 ]]; then say "  ok   zero_conc: 不限时峰值 $p > cap2 的 2,确实放开了并发"
+else say "  FAIL zero_conc: 不限时峰值只有 $p,与 cap=2 无区别 —— 「不限」没有被验证"; fails=$((fails+1)); fi
 
 say ""
 say "failures=$fails"
