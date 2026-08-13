@@ -109,6 +109,7 @@ export interface GrokCliHome {
   oidcIssuer?: string;
   oidcClientId?: string;
   readOnlyProfile: string;
+  strictProfile: string;
   workspaceProfile: string;
   /** Absolute runtime-owned profile passed through the TUI-effective --agent flag. */
   copresenceAgentProfile?: string;
@@ -1399,6 +1400,7 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
   }
 
   const readOnlyProfile = `${profileId}-read-only`;
+  const strictProfile = `${profileId}-strict`;
   const workspaceProfile = `${profileId}-workspace`;
   const existingSecretPaths = resolvedDenyPaths.filter((path) => existsSync(path));
   if (!existingSecretPaths.length) {
@@ -1509,7 +1511,7 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
 
   if (opts.useLeader === true) {
     // This runtime deliberately uses the pinned CLI's always-approve mode for
-    // its fixed three-tool profile. Keep the user-tier requirements file from
+    // its exact runtime-owned profile. Keep the user-tier requirements file from
     // accidentally disabling that mode.
     writeGeneratedFile(join(stateHome, "requirements.toml"), [
       "[ui]",
@@ -1521,6 +1523,15 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
   writeGeneratedFile(join(stateHome, "sandbox.toml"), [
     `[profiles.${JSON.stringify(readOnlyProfile)}]`,
     'extends = "read-only"',
+    `deny = [${denyToml}]`,
+    "",
+    `[profiles.${JSON.stringify(strictProfile)}]`,
+    'extends = "strict"',
+    `read_only = [${[
+      sourceHome,
+      ...(commhubMcp ? [commhubMcp.command] : []),
+      ...(stagedCommhubMcp ? [stagedCommhubMcp.credentialDir] : []),
+    ].map((path) => JSON.stringify(path)).join(", ")}]`,
     `deny = [${denyToml}]`,
     "",
     `[profiles.${JSON.stringify(workspaceProfile)}]`,
@@ -1549,6 +1560,7 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
     ...(oidcIssuer && oidcClientId ? { oidcIssuer, oidcClientId } : {}),
     ...(stagedCommhubMcp ? { commhubCredentialDir: stagedCommhubMcp.credentialDir } : {}),
     readOnlyProfile,
+    strictProfile,
     workspaceProfile,
     ...(opts.useLeader === true ? { copresenceAgentProfile } : {}),
   };

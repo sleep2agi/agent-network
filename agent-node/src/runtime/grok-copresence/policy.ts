@@ -15,16 +15,19 @@ import { readPinnedGrokCopresenceCapabilityProfile } from "./profile-selection";
  * therefore uses one runtime-owned agent profile and verifies the effective
  * request inventory independently.  The two MCP dispatcher tools are useful
  * only because startup separately proves that exactly one runtime-owned
- * `commhub` server was discovered.  Filesystem, process, web/media, subagent,
- * and scheduler tools remain absent.
+ * `commhub` server was discovered. The repo-read profile adds only the three
+ * read-only project tools; process, write, web/media, subagent, and scheduler
+ * tools remain absent, while protected credential paths stay hard-denied.
  */
 export const GROK_COPRESENCE_CAPABILITY_PROFILE = readPinnedGrokCopresenceCapabilityProfile();
 export const GROK_COPRESENCE_WEB_SEARCH_ENABLED = GROK_COPRESENCE_CAPABILITY_PROFILE === "x-search";
+export const GROK_COPRESENCE_REPO_READ_ENABLED = GROK_COPRESENCE_CAPABILITY_PROFILE === "repo-read";
 export const GROK_COPRESENCE_EFFECTIVE_TOOLS = Object.freeze([
   "todo_write",
   "search_tool",
   "use_tool",
   ...(GROK_COPRESENCE_WEB_SEARCH_ENABLED ? ["web_search"] : []),
+  ...(GROK_COPRESENCE_REPO_READ_ENABLED ? ["read_file", "grep", "list_dir"] : []),
 ]);
 
 export const GROK_COPRESENCE_AGENT_NAME = "anet-copresence-preview";
@@ -44,7 +47,9 @@ export function renderGrokCopresenceAgentProfile(): string {
     "---",
     GROK_COPRESENCE_WEB_SEARCH_ENABLED
       ? `${GROK_COPRESENCE_PROFILE_MARKER}: Answer the current user directly. The runtime-owned outbound-only commhub MCP integration and general web_search are available; do not claim inbound CommHub, lifecycle/presence ownership, filesystem, shell, web-fetch/media, or subagent access. Web search is not an x.com-only network sandbox.`
-      : `${GROK_COPRESENCE_PROFILE_MARKER}: Answer the current user directly. Only the runtime-owned outbound-only commhub MCP integration is available; do not claim inbound CommHub, lifecycle/presence ownership, filesystem, shell, web/media, or subagent access.`,
+      : GROK_COPRESENCE_REPO_READ_ENABLED
+        ? `${GROK_COPRESENCE_PROFILE_MARKER}: Answer the current user directly. The runtime-owned outbound-only commhub MCP integration plus read_file, grep, and list_dir are available under Grok's strict sandbox: project tree plus essential system paths only; protected credential paths remain denied. Do not claim shell, write/edit, web/media, lifecycle/presence ownership, or subagent access.`
+        : `${GROK_COPRESENCE_PROFILE_MARKER}: Answer the current user directly. Only the runtime-owned outbound-only commhub MCP integration is available; do not claim inbound CommHub, lifecycle/presence ownership, filesystem, shell, web/media, or subagent access.`,
     "",
   ].join("\n");
 }

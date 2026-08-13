@@ -2101,7 +2101,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         }
       } else if (isAutomaticApprovalLifecycleEvent(event)) {
         // Expected for the pinned `--always-approve` launch. Explicit deny
-        // rules and the fixed three-tool profile remain authoritative.
+        // rules and the exact runtime-owned profile remain authoritative.
         continue;
       }
     }

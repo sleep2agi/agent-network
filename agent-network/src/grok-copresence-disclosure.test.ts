@@ -22,8 +22,23 @@ describe("grok co-presence disclosure", () => {
     expect(text).not.toContain("No filesystem, shell, web,");
   });
 
+  test("repo-read profile reports only sandboxed project reads", () => {
+    const disclosure = grokCopresenceDisclosure(["Read", "Grep", "Glob"], "new");
+    const text = disclosure.lines.join("\n");
+    expect(disclosure.profile).toBe("repo-read");
+    expect(text).toContain("[todo_write,search_tool,use_tool,read_file,grep,list_dir]");
+    expect(text).toContain("strict sandbox");
+    expect(text).toContain("essential system paths");
+    expect(text).toContain("protected credential paths");
+    expect(text).toContain("shell, writes, web/media");
+    expect(text).not.toContain("web_search is enabled");
+  });
+
   test("near-match tools are disclosed as invalid rather than a reviewed profile", () => {
-    for (const tools of [["websearch"], ["WebSearch", "Bash"], [" WebSearch"]]) {
+    for (const tools of [
+      ["websearch"], ["WebSearch", "Bash"], [" WebSearch"],
+      ["Read", "Glob", "Grep"], ["Read", "Grep"],
+    ]) {
       const disclosure = grokCopresenceDisclosure(tools, "configured");
       expect(disclosure.profile).toBe("invalid");
       expect(disclosure.lines.join("\n")).toContain("startup will fail closed");
