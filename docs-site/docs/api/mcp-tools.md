@@ -43,7 +43,7 @@ CommHub Server 共注册约 40 个 MCP Tools；本页文档化其中 agent 日�
 | `project_dir` | string | | 工作目录 |
 | `version` | string | | Agent 版本 |
 | `tmux_name` | string | | tmux session 名 |
-| `node_id` | string | | 节点稳定标识。**注意**：传了 `node_id` 才会把 `model` / `node_name` / `runtime`（从 `agent` 字段拆）upsert 到 `nodes` 表（[`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 搜 `INSERT INTO nodes`）。`model` 参数本身**不依赖 `node_id`** —— `report_status` 的 `sessions` upsert 无条件写 `sessions.model = COALESCE(model, 旧值)`（[`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 搜 `INSERT INTO sessions` 与 `model = COALESCE(?20, sessions.model)`）；只有 `node_name` 没有 `sessions` 列、必须靠 `node_id` 走 `nodes` 表 |
+| `node_id` | string | | 节点稳定标识。**注意**：传了 `node_id` 才会把 `model` / `node_name` / `runtime`（从 `agent` 字段拆）upsert 到 `nodes` 表（[`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 搜 `upsertNodeWithSec1Guard`（`report_status` 段内 `if (node_id)` 之下的调用点，以及 registerTools 之后的同名 helper））。`model` 参数本身**不依赖 `node_id`** —— `report_status` 的 `sessions` upsert 无条件写 `sessions.model = COALESCE(model, 旧值)`（[`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 在 `report_status` 段搜 `INSERT INTO sessions`（写这几列的是 `report_status`，不是本节这个 tool） 与 `model = COALESCE(?20, sessions.model)`）；只有 `node_name` 没有 `sessions` 列、必须靠 `node_id` 走 `nodes` 表 |
 | `session_id` | string | | 运行时 session/thread ID |
 | `config_path` | string | | 配置文件路径 |
 | `channels` | string | | Channel 列表（JSON 数组字符串） |
@@ -574,7 +574,7 @@ send_task({
 ```
 
 ::: warning `sessions` 行**没有** `model` 字段
-`get_all_status` 走 `SELECT * FROM sessions`（[`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 搜 `SELECT * FROM sessions WHERE 1=1`，无 JOIN）。`sessions` 表 schema（[`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) 搜 `CREATE TABLE IF NOT EXISTS sessions` + V2 migration [`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) 搜 `ALTER TABLE sessions ADD COLUMN`）**有 `model` 列** —— V2 migration `ALTER TABLE sessions ADD COLUMN model`，且 `report_status` 的 `sessions` upsert 无条件写 `sessions.model = COALESCE(model, 旧值)`（[`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 搜 `INSERT INTO sessions` 与 `model = COALESCE(?20, sessions.model)`）。所以 `get_all_status` 直接返回每个 session 的 `model`（agent 没传 `model` 参数时为 `null`）。`nodes` 表里也有一份 `model`（传 `node_id` 时由 `report_status` 同步），是更持久的来源。`summary` 是按 status 分组的全 scope 计数（同 `list_tasks` 的 `stats`）。
+`get_all_status` 走 `SELECT * FROM sessions`（[`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 搜 `SELECT * FROM sessions WHERE 1=1`，无 JOIN）。`sessions` 表 schema（[`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) 搜 `CREATE TABLE IF NOT EXISTS sessions` + V2 migration [`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) 搜 `ALTER TABLE sessions ADD COLUMN`）**有 `model` 列** —— V2 migration `ALTER TABLE sessions ADD COLUMN model`，且 `report_status` 的 `sessions` upsert 无条件写 `sessions.model = COALESCE(model, 旧值)`（[`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 在 `report_status` 段搜 `INSERT INTO sessions`（写这几列的是 `report_status`，不是本节这个 tool） 与 `model = COALESCE(?20, sessions.model)`）。所以 `get_all_status` 直接返回每个 session 的 `model`（agent 没传 `model` 参数时为 `null`）。`nodes` 表里也有一份 `model`（传 `node_id` 时由 `report_status` 同步），是更持久的来源。`summary` 是按 status 分组的全 scope 计数（同 `list_tasks` 的 `stats`）。
 :::
 
 ---
@@ -673,7 +673,7 @@ send_task({
 
 向所有在线 Agent 广播消息。**broadcast 与 `task` 同样会触发收件方 AI 处理**（[`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) 只对 `task` 和 `broadcast` 类型 think；其余 `reply` / `message` / `ack` 只展示）；如果只是想群发通知不要求 AI 回复，用循环 `send_message` 替代。完整消息类型对照见 [Task 生命周期 — 消息类型](/concepts/task-lifecycle#消息类型)。
 
-**参数**（verify [`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 搜 `"ack_inbox"`）：
+**参数**（verify [`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 搜 `"Send a message to multiple sessions."`（`broadcast` 的注册描述，全仓唯一；参数 schema 紧随其后））：
 
 | 参数 | 类型 | 必需 | 说明 |
 |------|------|:----:|------|
