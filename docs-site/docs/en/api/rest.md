@@ -56,13 +56,18 @@ curl http://localhost:9200/health
 > | `sse_sessions` | **returned even unauthenticated** (empty `{}`) | not returned unauthenticated |
 > | `limits` | absent | present |
 >
-> The other 13 keys exist on both. Note row one: on preview the key is absent
+> The other 13 keys were present on both **in this capture** — one sample per
+> channel, not a permanent contract. Note row one: on preview the key is absent
 > entirely, while on latest `0.8.8` the key is still emitted with an empty object.
 > The empty object leaks no session data, but code that treats *key presence* as
 > an authorization signal will behave differently across the two channels.
 
-Anonymous requests receive only the aggregate fields above and do not include
-`sse_sessions`. With a valid token, a system admin, legacy master, or DEV_OPEN
+Anonymous requests receive only the aggregate fields above and carry no
+`sse_sessions` **payload**. Read that per channel, per the table above: on
+preview the key is absent entirely, while on latest `0.8.8` the key is still
+emitted — as an empty object.
+
+With a valid token, a system admin, legacy master, or DEV_OPEN
 caller can receive the full map; regular `utok_` / `ntok_` callers receive only
 sessions from networks they may access (or an empty object when they belong to
 none).
