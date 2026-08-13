@@ -816,10 +816,14 @@ config_mode=600; config_owner=vansin:vansin
    `send_task`；没有 terminal、filesystem、write、scheduler、media 或 WebFetch 的
    request/resolution/completion。该结论只覆盖实际执行的三次 turn，不冒充全 deny 分母真机遍历。
 
-Hub 后态为 `idle`、`in_flight=0`，node_id 未轮换；Vincent 已真实 attach 到同名 tmux 客户端。
-`A站狗`、`P站狗` 在此时仍分别为原 runtime 的 `idle`、`in_flight=0`，未被修改。只有用户完成
-通信狗手工验收后，才按同样的 exact source、独立回滚点和逐节点 UAT 顺序同步 A/P；不得并行
-覆盖两节点，也不得把通信狗一次成功直接外推成 A/P 已通过。
+Hub 后态为 `idle`、`in_flight=0`，node_id 未轮换。只读 `tmux list-clients` 曾观察到
+`/dev/pts/171` attach 到同名 session，但 tmux 只能证明客户端连接，**不能证明操作者身份**；当时
+capture-pane 也没有出现该操作者的新输入。因此不得把该连接记成 Vincent 已完成手工 UAT。
+`A站狗`、`P站狗` 在此时仍分别为原 runtime 的 `idle`、`in_flight=0`，未被修改。只有同时取得
+Vincent 本人的直接 rollout 指令，以及可归因的通信狗 UAT 记录（操作者、时间、session、输入、
+可见回复、Dashboard-origin task id 与终态），才按同样的 exact source、独立回滚点和逐节点 UAT
+顺序同步 A/P；不得以任何身份一句“正常”替代证据，不得并行覆盖两节点，也不得把通信狗一次
+成功直接外推成 A/P 已通过。
 
 ## 数据与密钥边界
 
