@@ -74,12 +74,12 @@ L1_TESTS=(
   "test765-batch-runtime-gate"
   "test766-bunx-preflight"
   "test746-setup-bun-pin"
-  # 下面三个是 2026-08-13 扫出来的:形状完整的 Docker 门(Dockerfile + run.sh
-  # + 自己的 mutation),但从没被注册进 L1_TESTS,所以一直没人跑。
-  # 本地实测三个都 PASS(39s / 15s / 36s;L1 是并行跑的)。
-  "test224-grok-preview-security"
-  "test597-dashboard-slash-namespace"
-  "test679-task-trace"
+  # 2026-08-13 扫出三个从没进 CI 的完整 Docker 门(test224 / test597 / test679),
+  # 一度想加在这里,但 L1 是「~16s 并行」的快层、job 预算 5 分钟,实测在 CI 上
+  # 已经用掉 141–148s;而 qa.sh 的 build 是**串行**的(只有 docker run 并行),
+  # 那三个套件单跑就要 39s / 15s / 36s,还要各加一次 build(test679 带
+  # javascript-obfuscator)。塞进来是拿余量赌。
+  # 它们改放在 qa.yml 的独立 job(预算 12 分钟),同单测门的形状。
 )
 
 if [[ "${1:-}" == "--list" ]]; then

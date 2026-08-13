@@ -22,6 +22,9 @@ on:
       - 'tests/test725-agent-node-unit-ci/**'
       - 'tests/test745-agent-network-unit-ci/**'
       - 'tests/test746-setup-bun-pin/**'
+      - 'tests/test224-grok-preview-security/**'
+      - 'tests/test597-dashboard-slash-namespace/**'
+      - 'tests/test679-task-trace/**'
   push:
     branches: [main]
     paths:
@@ -34,6 +37,9 @@ on:
       - 'tests/test725-agent-node-unit-ci/**'
       - 'tests/test745-agent-network-unit-ci/**'
       - 'tests/test746-setup-bun-pin/**'
+      - 'tests/test224-grok-preview-security/**'
+      - 'tests/test597-dashboard-slash-namespace/**'
+      - 'tests/test679-task-trace/**'
 
 # Older runs on the same ref get cancelled — saves minutes when a PR is
 # updated rapidly. main pushes run independently.
@@ -75,6 +81,43 @@ jobs:
 
       - name: Run complete agent-node unit domain
         run: docker run --rm anet-test725-agent-node-unit
+
+  recovered-suites:
+    name: recovered suites (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build test224-grok-preview-security
+        run: |
+          docker build \
+            --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-test224-grok-preview-security \
+            -f tests/test224-grok-preview-security/Dockerfile .
+
+      - name: Run test224-grok-preview-security
+        run: docker run --rm anet-test224-grok-preview-security
+
+      - name: Build test597-dashboard-slash-namespace
+        run: |
+          docker build \
+            --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-test597-dashboard-slash-namespace \
+            -f tests/test597-dashboard-slash-namespace/Dockerfile .
+
+      - name: Run test597-dashboard-slash-namespace
+        run: docker run --rm anet-test597-dashboard-slash-namespace
+
+      - name: Build test679-task-trace
+        run: |
+          docker build \
+            --build-arg TEST679_SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-test679-task-trace \
+            -f tests/test679-task-trace/Dockerfile .
+
+      - name: Run test679-task-trace
+        run: docker run --rm anet-test679-task-trace
 
   qa:
     name: L0 + L1 (report-only)
