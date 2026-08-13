@@ -725,6 +725,12 @@ request/resolution/completion，且磁盘、网络与 scheduler 侧不得产生�
 旧 `f407ed96/78a6de9c` 的独立 `CLEAN` 已被 durable supersede；只有针对当前
 `433b4af4/d51a4473` 坐标的新独立裁定才可作为审查门。
 
+当前坐标的独立只读审查随后裁定 `CLEAN`（无 BLOCKER/MAJOR/MINOR），durable comment 为
+`https://github.com/sleep2agi/agent-network/pull/830#issuecomment-5277364559`。审查从远端 Git
+对象重新核了 base/source/report 拓扑、25-name 分母、三 profile 的 allow/deny partition、七条
+named-red、数字/provenance、secret sweep 与 merge-tree；没有复用旧候选的结论。技术审查通过
+仍不等于合并、发布或 pilot 授权。
+
 恢复取证完成后，节点仍运行未修复字节；继续在线会让后续任务再次触发同一 shell 面。因此在
 14:38 CST 对 PID `2067974` 发送精确停止，进程在 barrier 内退出，未使用 `pkill`、未修改配置、
 未触碰其它节点。当前安全终态是 tmux session `通信狗` 保留、`node` pane `%1107` dead、Hub
