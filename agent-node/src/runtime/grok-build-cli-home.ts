@@ -4,6 +4,7 @@ import {
   chmodSync,
   closeSync,
   constants,
+  accessSync,
   existsSync,
   fchmodSync,
   fstatSync,
@@ -22,7 +23,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "fs";
-import { basename, dirname, isAbsolute, join, parse, relative, resolve } from "path";
+import { basename, delimiter, dirname, isAbsolute, join, parse, relative, resolve } from "path";
 import { homedir } from "os";
 import { buildGrokHelperEnv } from "./grok-child-env";
 import {
@@ -49,12 +50,17 @@ export interface GrokCommhubMcpConfig {
   resumeId: string;
 }
 
+interface StagedGrokCommhubMcpConfig extends GrokCommhubMcpConfig {
+  command: string;
+}
+
 export interface GrokCliHome {
   home: string;
   authPath: string;
   oidcIssuer?: string;
   oidcClientId?: string;
   readOnlyProfile: string;
+  strictProfile: string;
   workspaceProfile: string;
   /** Absolute runtime-owned profile passed through the TUI-effective --agent flag. */
   copresenceAgentProfile?: string;
@@ -1042,7 +1048,7 @@ function stageCommhubMcpConfig(
   config: GrokCommhubMcpConfig,
   stateRoot: string,
   stateHome: string,
-): { config: GrokCommhubMcpConfig; credentialDir: string } {
+): { config: StagedGrokCommhubMcpConfig; credentialDir: string } {
   const readStable = (path: string, label: string, expectedMode?: number): string => {
     const before = lstatSync(path);
     const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
@@ -1073,9 +1079,30 @@ function stageCommhubMcpConfig(
   ensurePrivateDirectory(credentialDir, "commhub MCP credential directory");
   const serverPath = join(runtimeDir, "node-server.js");
   const envFile = join(credentialDir, ".env");
+  const command = resolvePinnedRuntimeExecutable("bun");
   writeGeneratedFile(serverPath, readStable(config.serverPath, "server"));
   writeGeneratedFile(envFile, readStable(config.envFile, "environment", 0o600));
-  return { config: { ...config, serverPath, envFile }, credentialDir };
+  return { config: { ...config, command, serverPath, envFile }, credentialDir };
+}
+
+function resolvePinnedRuntimeExecutable(name: string): string {
+  if (!/^[A-Za-z0-9._-]+$/.test(name)) {
+    throw new Error("grok-build-cli MCP runtime executable name is invalid");
+  }
+  for (const entry of (process.env.PATH || "").split(delimiter)) {
+    if (!entry || !isAbsolute(entry)) continue;
+    const candidate = join(entry, name);
+    try {
+      accessSync(candidate, constants.X_OK);
+      const canonical = realpathSync(candidate);
+      const stat = statSync(canonical);
+      const uid = process.getuid?.();
+      if (!stat.isFile() || (stat.mode & 0o022) !== 0
+        || (uid !== undefined && stat.uid !== uid && stat.uid !== 0)) continue;
+      return canonical;
+    } catch {}
+  }
+  throw new Error(`grok-build-cli cannot resolve a trusted ${name} executable for CommHub MCP`);
 }
 
 function trustedProjectDirectory(projectCwd: string, protectedPaths: readonly string[]): string {
@@ -1337,6 +1364,7 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
   }
 
   const readOnlyProfile = `${profileId}-read-only`;
+  const strictProfile = `${profileId}-strict`;
   const workspaceProfile = `${profileId}-workspace`;
   const existingSecretPaths = resolvedDenyPaths.filter((path) => existsSync(path));
   if (!existingSecretPaths.length) {
@@ -1388,7 +1416,7 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
     "",
     ...(commhubMcp ? [
       "[mcp_servers.commhub]",
-      'command = "bun"',
+      `command = ${JSON.stringify(commhubMcp.command)}`,
       `args = [${JSON.stringify(commhubMcp.serverPath)}]`,
       `env = { ANET_COMMHUB_ENV_FILE = ${JSON.stringify(commhubMcp.envFile)}, ANET_COMMHUB_MODE = "outbound-only", COMMHUB_ALIAS = ${JSON.stringify(commhubMcp.alias)}, COMMHUB_RESUME_ID = ${JSON.stringify(commhubMcp.resumeId)} }`,
       "enabled = true",
@@ -1447,7 +1475,7 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
 
   if (opts.useLeader === true) {
     // This runtime deliberately uses the pinned CLI's always-approve mode for
-    // its fixed three-tool profile. Keep the user-tier requirements file from
+    // its exact runtime-owned profile. Keep the user-tier requirements file from
     // accidentally disabling that mode.
     writeGeneratedFile(join(stateHome, "requirements.toml"), [
       "[ui]",
@@ -1459,6 +1487,15 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
   writeGeneratedFile(join(stateHome, "sandbox.toml"), [
     `[profiles.${JSON.stringify(readOnlyProfile)}]`,
     'extends = "read-only"',
+    `deny = [${denyToml}]`,
+    "",
+    `[profiles.${JSON.stringify(strictProfile)}]`,
+    'extends = "strict"',
+    `read_only = [${[
+      sourceHome,
+      ...(commhubMcp ? [commhubMcp.command] : []),
+      ...(stagedCommhubMcp ? [stagedCommhubMcp.credentialDir] : []),
+    ].map((path) => JSON.stringify(path)).join(", ")}]`,
     `deny = [${denyToml}]`,
     "",
     `[profiles.${JSON.stringify(workspaceProfile)}]`,
@@ -1487,6 +1524,7 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
     ...(oidcIssuer && oidcClientId ? { oidcIssuer, oidcClientId } : {}),
     ...(stagedCommhubMcp ? { commhubCredentialDir: stagedCommhubMcp.credentialDir } : {}),
     readOnlyProfile,
+    strictProfile,
     workspaceProfile,
     ...(opts.useLeader === true ? { copresenceAgentProfile } : {}),
   };

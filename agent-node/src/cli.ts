@@ -71,6 +71,7 @@ import { resolveGrokAcpTimeout } from "./runtime/grok-build-acp/timeout-resolve"
 import {
   GROK_COPRESENCE_PROFILE_ENV,
   selectGrokCopresenceCapabilityProfile,
+  selectGrokCopresenceSandboxProfile,
 } from "./runtime/grok-copresence/profile-selection";
 import {
   defaultNpmInstall,
@@ -549,7 +550,7 @@ if (GROK_COPRESENCE) {
   console.warn(
     `[agent-node] EXPERIMENTAL/DANGEROUS grok-build-cli co-presence is enabled `
     + `(process profile=${GROK_COPRESENCE_CAPABILITY_PROFILE}); the shared human TUI must receive `
-    + "tasks only from trusted senders. MCP is CommHub-only; WebSearch is available only in the explicit x-search profile.",
+    + "tasks only from trusted senders. MCP is CommHub-only; WebSearch and repo reads are available only in their explicit profiles.",
   );
 }
 // Default 50 turns. The old default of 5 was way too low — Claude Agent SDK
@@ -3569,7 +3570,7 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
       );
     }
     // The generic tools option is not forwarded. It was already reduced at
-    // process boot to one of two exact profiles; any other value failed before
+    // process boot to one exact runtime-owned profile; any other value failed before
     // the runtime module was loaded.
     if (
       MAX_TURNS_CLI !== undefined
@@ -3745,9 +3746,15 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
       alias: currentAlias(),
       model: MODEL || undefined,
       agentProfile: grokCliHome.copresenceAgentProfile,
-      // The runtime always approves its fixed three-tool profile. Filesystem,
-      // shell, web, host/project MCP and subagent capabilities remain absent.
-      sandboxProfile: grokCliHome.workspaceProfile,
+      // Repo-read is the only profile with filesystem tools. Pinned 0.2.93
+      // documents workspace as read-everywhere, so repo-read must use the
+      // kernel-enforced strict base (CWD + essential system paths). A resumed
+      // workspace session cannot change sandbox and therefore requires an
+      // explicit new session before repo-read can start.
+      sandboxProfile: selectGrokCopresenceSandboxProfile(
+        GROK_COPRESENCE_CAPABILITY_PROFILE,
+        grokCliHome,
+      ),
       protectedPaths: [
         grokCliHome.home,
         grokCliHome.commhubCredentialDir || "",
@@ -5853,7 +5860,7 @@ if (AUTH_TOKEN) {
 }
 
 // #101 fix: log resolved toolset shape. Co-presence reduces the generic config
-// to one of two runtime-owned process profiles verified for the pinned TUI.
+// to one runtime-owned process profile verified for the pinned TUI.
 const requestedToolsSummary =
   Array.isArray(TOOLS)
     ? (TOOLS.length ? `[${TOOLS.join(",")}]` : "(none)")
@@ -5861,7 +5868,9 @@ const requestedToolsSummary =
 log(`  tools:   ${GROK_COPRESENCE
   ? GROK_COPRESENCE_CAPABILITY_PROFILE === "x-search"
     ? "fixed x-search profile [todo_write,search_tool,use_tool,web_search] (general web; no web-fetch/filesystem/shell/media/subagents)"
-    : "fixed commhub-only profile [todo_write,search_tool,use_tool] (no filesystem/shell/web/media/subagents)"
+    : GROK_COPRESENCE_CAPABILITY_PROFILE === "repo-read"
+      ? "fixed repo-read profile [todo_write,search_tool,use_tool,read_file,grep,list_dir] (strict CWD reads; no shell/write/web/media/subagents)"
+      : "fixed commhub-only profile [todo_write,search_tool,use_tool] (no filesystem/shell/web/media/subagents)"
   : requestedToolsSummary}`);
 log(`  channels:${[
   TELEGRAM_CHANNELS.length ? `telegram(${TELEGRAM_CHANNELS.map(ch => ch.dir).join(",")})` : "",

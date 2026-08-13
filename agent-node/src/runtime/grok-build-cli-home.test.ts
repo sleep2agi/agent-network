@@ -96,6 +96,7 @@ describe("prepareGrokCliHome", () => {
 
     expect(first).toEqual(second);
     expect(first.readOnlyProfile).toMatch(/^anet-[a-f0-9]{24}-read-only$/);
+    expect(first.strictProfile).toMatch(/^anet-[a-f0-9]{24}-strict$/);
     expect(first.authPath).toBe(join(sourceHome, "auth.json"));
     expect(first.oidcIssuer).toBe("https://auth.example.test");
     expect(first.oidcClientId).toBe("client-123");
@@ -115,6 +116,7 @@ describe("prepareGrokCliHome", () => {
     expect(sandbox).toContain(secretDir);
     expect(sandbox).toContain(join(sourceHome, "auth.json"));
     expect(sandbox).toContain('extends = "read-only"');
+    expect(sandbox).toContain('extends = "strict"');
     expect(sandbox).toContain('extends = "workspace"');
   });
 
@@ -808,7 +810,7 @@ describe("prepareGrokCliHome", () => {
     expect(config).toContain('[ui]\ndefault_selected_permission = "always_allow_all_sessions"');
     expect(config).toContain("remember_tool_approvals = true");
     expect(config).toContain("[mcp_servers.commhub]");
-    expect(config).toContain('command = "bun"');
+    expect(config).toMatch(/command = ".*\/bun(?:\.exe)?"/);
     const stagedServer = join(stateHome, "runtime-mcp", "node-server.js");
     const stagedEnv = join(dirname(dirname(stateHome)), ".anet-grok-credentials", basename(stateHome), ".env");
     expect(config).toContain(`args = [${JSON.stringify(stagedServer)}]`);
@@ -820,6 +822,12 @@ describe("prepareGrokCliHome", () => {
     expect(statSync(stagedEnv).mode & 0o777).toBe(0o600);
     expect(config).toContain('COMMHUB_ALIAS = "指挥狗"');
     expect(config).not.toContain("ntok_test");
+    const strictSandbox = readFileSync(join(stateHome, "sandbox.toml"), "utf8");
+    const strictBlock = strictSandbox.split('extends = "strict"')[1]?.split("[profiles.")[0] || "";
+    const command = config.match(/^command = (.+)$/m)?.[1] || "";
+    expect(strictBlock).toContain(JSON.stringify(sourceHome));
+    expect(strictBlock).toContain(JSON.stringify(dirname(stagedEnv)));
+    expect(strictBlock).toContain(command);
     expect(readFileSync(join(stateHome, "requirements.toml"), "utf8"))
       .toBe("[ui]\ndisable_bypass_permissions_mode = false\n");
     const trustStore = join(stateHome, "trusted_folders.toml");
