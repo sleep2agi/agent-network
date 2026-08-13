@@ -80,7 +80,26 @@ agent-network/bin/cli.ts        capture-pane workaround 仍在
 
 带「待确认前提」的 issue,复核结论应该是**先去做那个确认**,而不是给它排期。
 
-### 6. 判不了就写明判不了
+### 6. 查代码里有没有指向这条 issue 的注释
+
+很多陈旧 issue 不是被遗忘的 —— **代码里留着指针**,只是没人回来更新 issue。
+
+```bash
+git grep -nE '#(<issue 号>)\b' origin/main -- '*.ts' '*.sh' '*.yml'
+```
+
+对这 30 条跑一遍:**6 条被源码按编号引用**(#31 / #166 / #182 / #191 / #246 / #338)。
+
+🔴 **但 6 是下界。** #332 和 #207 也被代码引用,却抓不到 —— 因为它们的注释是描述式的、不带编号:
+
+```
+agent-node/src/feishu-tool-deny.ts:250   … a bubblewrap sandbox follow-up tracks the …
+agent-node/src/cli.ts:3450               … Cross-machine artifact distribution is a P2 follow-up.
+```
+
+所以这一步要两样都做:**按编号 grep**,再**读你正在核的那块代码的注释**。只做前者会漏掉「代码知道、但没写号」的那些 —— 而那些恰恰是最该保留的:它们证明这条 issue 还活着,不是没人管。
+
+### 7. 判不了就写明判不了
 
 #177 的可行性要实机试 Claude Code 的 managed-settings 行为,仓库里验证不了。**这种时候写「我没能力从仓库验证这一点」,比给一个软判断有用。**
 
@@ -109,5 +128,9 @@ agent-network/bin/cli.ts        capture-pane workaround 仍在
 | #166 REST fallback 等 | 已交付 | 三个点名端点各注册 1 处;`cli.ts:4273-4310` 在跑运行时前注入 `CURRENT_TASK_ID`、跑完恢复;`tests/test166-task-diagnostics` 在 main |
 | #114 token 用量 | 未交付,缺口明确 | 采集已完成(`cli.ts:2363/2373/2742`),但 `completions`/`tasks` 无用量列;`docs/rfcs/RFC-015-token-usage-telemetry.md` 已写明剩余设计 |
 | #177 channel plugin | 未交付,前提存疑 | `cli.ts:5038` 仍在 push dev-channel flag;全仓无 `plugin:commhub` 实现;正文的 managed-settings 可行性至今未确认 |
+
+| #332 feishu Layer F sandbox | 未交付 | 全仓 `bubblewrap\|bwrap\|nsjail` 8 个文件命中,无一实现;`feishu-tool-deny.ts:250` 的注释把它标为 follow-up |
+| #195 vendor 并发闸 + 429 退避 | 未交付 | 有通用 retry-with-backoff 与 inbox 层 `maxConcurrent=20`,但 `agent-node` 全域 grep `Retry-After` **命中 0** —— 429 只被分类,没被遵守 |
+| #207 grok 跨机 artifact | 未交付,但传输层已有 | `cli.ts:3450` 注释自称「P2 follow-up. No fs mutation here.」;而 `tests/qa-222-cross-host-attachments` 证明 `/api/upload` + `/api/files/<id>` 的跨机取文件链路已完成 |
 
 #166 那条还有一个值得学的细节:我本来准备指出「REST fallback 存在 ≠ MCP 没挂载这个根因解决了」,但 `tests/test166-task-diagnostics/run.sh` 里已经断言文档必须写着「不能证明外部模型会话是否挂载了 MCP tools」。**有人已经把这层边界写进文档并用测试钉住了** —— 复核时先看套件断言什么,可能省掉一次重复发现。
