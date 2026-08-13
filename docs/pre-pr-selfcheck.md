@@ -466,6 +466,113 @@ git grep -ln 'xxx' -- docs-site
 
 ---
 
+## 14. 解冲突时,`<<<`/`>>>` 之外的「公共上下文」可能属于双方
+
+**案发:** 我给出了一条合并解法(「冲突块取并集」),公开发在 PR 上,一轮之后干跑
+才发现它会产出一个**看起来正常、实际有一个 CI job 永远不执行**的文件。
+
+两个新增的 GitHub Actions job 长得很像,git 给出的冲突区是这样的:
+
+```
+<<<<<<< HEAD
+  doc-source-pins:
+    name: doc source-pin floor (Docker)
+=======
+  doc-claims:
+    name: doc claim freshness (Docker)
+>>>>>>>
+    runs-on: ubuntu-latest          ← 不在冲突标记里
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+<<<<<<< HEAD
+      …test831 的步骤…
+=======
+      …test846 的步骤…
+>>>>>>>
+```
+
+中间那 5 行在两个 job 里**逐字相同**,所以 git 把它判成公共上下文、只留一份。
+**但它语义上属于两个 job 各一份。**
+
+于是「冲突块取并集」的结果是:
+
+```yaml
+  doc-source-pins:
+    name: doc source-pin floor (Docker)     ← 到此为止
+  doc-claims:
+    name: doc claim freshness (Docker)
+    runs-on: ubuntu-latest
+    steps: …（5 个 step 全在这里)
+```
+
+`doc-source-pins` 只剩一行 `name`:没有 `runs-on`、没有 `steps`。
+
+### 为什么这个错特别难发现
+
+1. **它是合法 YAML。** 解析通过,GitHub 接受,job 名字出现在检查列表里、显示绿色 ——
+   **一道从不执行的门,和一道执行且通过的门,在 PR 页面上长得一模一样。**
+2. **换一个合并顺序,坏的是另一个 job。** 两种顺序各有一个 job 变空,互为镜像 ——
+   看起来像"顺序敏感",实际两种都是坏的。
+3. **当时仓库里所有的门都是绿的。** 因为没有任何一道门检查 workflow 文件本身
+   (实测 `.github/`、`scripts/`、`tests/` 里 `yamllint`/`actionlint` 命中 = 0)。
+
+### 正确解法
+
+每个结构 = **自己的头 + 公共块(复制一份)+ 自己的体**:
+
+```yaml
+  doc-source-pins:
+    name: …
+    runs-on: ubuntu-latest        ← 复制
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      …test831 的步骤…
+
+  doc-claims:
+    name: …
+    runs-on: ubuntu-latest        ← 复制
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      …test846 的步骤…
+```
+
+而**列表型的冲突块**(这里是 `on.paths`)取并集仍然是对的 —— 同一次冲突里,
+不同的块要用不同的解法,不能一刀切。
+
+### 自查
+
+```bash
+# 解完冲突之后,不要只看「有没有残留的 <<<<<<< 」
+grep -c '<<<<<<<\|>>>>>>>' <file>        # 必要,但远远不够
+
+# 结构断言:每个块都还完整吗
+python3 -c "
+import yaml; d=yaml.safe_load(open('.github/workflows/qa.yml'))
+for k,j in d['jobs'].items():
+    assert j.get('runs-on'), f'{k} 没有 runs-on'
+    assert j.get('steps'),   f'{k} 的 steps 为空'
+"
+```
+
+**坏掉的那版能通过 `yaml.safe_load`。** 只有后面这两条断言拦得住它。
+
+### 这条不只发生在 YAML
+
+任何「两个结构相邻、样板部分逐字相同」的文件都会这样:两个相似的测试用例、两个
+相似的路由处理器、两段相似的 Dockerfile stage。**样板越标准,git 越可能把它判成
+公共上下文,而它越可能属于双方。**
+
+### 它和 §13 是同一族
+
+§13 说的是「我操作的范围比我以为的宽或窄」。这条是它的一个具体形态:
+**我以为解冲突的操作范围是标记之间,实际范围包含标记之外的共享行。**
+
+---
+
 ## Shell 层的三个具体坑(当天各栽过一次)
 
 - **反引号**:证据文本 / 提交信息里用 `` ` `` 包代码,会被当命令替换执行,**把内容吞成空**。
