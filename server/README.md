@@ -175,11 +175,16 @@ Two things, and the second one is not obvious:
 
    ```bash
    rc=0
-   for f in server/src/*.test.ts; do
-     db=/tmp/anet-$(basename "$f" .test.ts).db
+   # 用 find 而不是 `server/src/*.test.ts` —— glob 不进子目录,会漏掉
+   # server/src/shared/ 下的 3 个(实测:深度 1 是 66 个,递归是 69 个)。
+   # scripts/qa.sh 与 test798 用的就是 find,这里保持一致。
+   while IFS= read -r f; do
+     # 用完整路径派生库名,不用 basename:加入子目录之后,
+     # 两个不同目录下的同名文件会派生出同一个库(原来只扫单层时不可能)。
+     db=/tmp/anet-$(printf '%s' "${f%.test.ts}" | tr '/.' '--').db
      rm -f "$db" "$db-wal" "$db-shm"
      COMMHUB_DB="$db" bun test "$f" || { echo "FAILED: $f"; rc=1; }
-   done
+   done < <(find server/src -type f -name '*.test.ts' | sort)
    [ "$rc" -eq 0 ]
    ```
 
