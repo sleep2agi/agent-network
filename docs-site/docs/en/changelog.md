@@ -709,7 +709,7 @@ Release flow follows the [v0.9.0 split-brain lessons #126](https://github.com/sl
 
 ### Fix
 
-[`agent-network/bin/cli.ts:61` `PINNED_SERVER_VERSION`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L61) was never bumped across the v0.9.x + v0.10.0 promotes — it stayed hardcoded at `0.8.0`. That meant `anet hub start` was actually running `bunx --bun @sleep2agi/commhub-server@0.8.0` ([cli.ts:2589](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2589)) — the old server, not the v0.10.0-shipped `0.8.2`. Direct impact:
+[`agent-network/bin/cli.ts:61` `PINNED_SERVER_VERSION`](https://github.com/sleep2agi/agent-network/blob/3a387204/agent-network/bin/cli.ts#L61) was never bumped across the v0.9.x + v0.10.0 promotes — it stayed hardcoded at `0.8.0`. That meant `anet hub start` was actually running `bunx --bun @sleep2agi/commhub-server@0.8.0` ([cli.ts:2589](https://github.com/sleep2agi/agent-network/blob/3a387204/agent-network/bin/cli.ts#L2589)) — the old server, not the v0.10.0-shipped `0.8.2`. Direct impact:
 
 - The [#99](https://github.com/sleep2agi/agent-network/issues/99) per-server daemon endpoints `GET /api/server/:host/health` + `GET /api/server/:host/agents` don't exist in 0.8.0 → **404**
 - [#142](https://github.com/sleep2agi/agent-network/issues/142) server schema alignment for `process_telemetry` isn't wired in 0.8.0 → the older schema silently drops the field
