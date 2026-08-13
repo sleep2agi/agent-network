@@ -423,6 +423,10 @@ export function buildGrokCopresenceArgs(opts: BuildGrokCopresenceArgsOptions): s
     // The shared process must read its owner-only GROK_AUTH_PATH after its
     // sandbox re-exec. Shell access would bypass path-specific Read/Grep/Edit
     // rules, so the experimental preview gives up terminal tools entirely.
+    // Pinned Grok 0.2.93 emits `run_terminal_command` in its permission
+    // lifecycle. `Bash` is only the cross-runtime policy alias and does not
+    // deny that vendor-native tool name by itself.
+    "--deny", "run_terminal_command",
     "--deny", "Bash",
     "--deny", "Write",
     "--deny", "WebFetch",
