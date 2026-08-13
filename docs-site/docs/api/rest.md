@@ -49,7 +49,7 @@ curl http://localhost:9200/health
 - 普通 `utok_` / `ntok_` 只看到其有权访问网络的 session；无网络成员关系时返回空对象。
 
 ::: tip `license` 字段是 v0.6 legacy
-`license: "trial"` 是 v0.6 时代 14 天试用机制的残留字段，Apache 2.0 OSS 后**不再作为商业功能门控**（自部署没有"过期"概念）。`send_task` 路径仍跑 trial 检查仅为后向兼容（verify [`server/src/tools.ts:521`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L521) `license_expired` 仍 emit），若命中见 [troubleshooting](/troubleshooting)。**v0.9.x / v0.10.x scope 都未动**（Recovery & Observability 主题为先），整段移除排到 v0.11+ / 未排期。
+`license: "trial"` 是 v0.6 时代 14 天试用机制的残留字段，Apache 2.0 OSS 后**不再作为商业功能门控**（自部署没有"过期"概念）。`send_task` 路径仍跑 trial 检查仅为后向兼容（verify [`server/src/tools.ts:521`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) `license_expired` 仍 emit），若命中见 [troubleshooting](/troubleshooting)。**v0.9.x / v0.10.x scope 都未动**（Recovery & Observability 主题为先），整段移除排到 v0.11+ / 未排期。
 :::
 
 ---
@@ -393,7 +393,7 @@ curl -X POST http://localhost:9200/api/networks \
 | 状态 | `error` 值 | 触发条件 |
 |------|------------|---------|
 | 400 | `network name already exists` | 同一 owner 名下已有同名 network（`UNIQUE(owner_id, network_name)` 约束） |
-| 400 | `quota exceeded: max N networks for free plan` | 触发 plan quota 配额限制（v0.8 起 admin 用户豁免；free plan 默认 max_networks_owned=2，**当前 quota 仍在 `auth.ts` 的 `createNetwork()` 里 enforced**（原文钉的 `184-189` 已漂到发 token 的代码上，所以这里改钉函数名），跟 networks 表的 `max_members` 不同：那个 dormant、这个 active） |
+| 400 | `quota exceeded: max N networks for free plan` | 触发 plan quota 配额限制（v0.8 起 admin 用户豁免；free plan 默认 max_networks_owned=2，**真正会拒绝建网的是 plan 配额** —— `auth.ts` 的 `createNetwork()` 按 `max_networks_owned` 校验(free=2,admin 豁免)。注意它与 `/api/license` 的 `limits` 不是一回事:后者(trial 默认 `max_agents=5` / `max_networks=3` / `max_tasks_day=500`)**是软限额**,服务端只存储和返回、不做任何拦截(CLI 里直接标作 `Soft limits`),而且两者的 networks 数字不同(3 vs 2)—— 以实际生效的 plan 配额为准（原文钉的 `184-189` 已漂到发 token 的代码上，所以这里改钉函数名），跟 networks 表的 `max_members` 不同：那个 dormant、这个 active） |
 | 401 | `token required` / `invalid token` | 未提供 / 提供了无效 utok_ |
 
 ---
@@ -1539,10 +1539,10 @@ curl -N "http://localhost:9200/events/代码1号?token=ntok_xxx"
 | `new_message` | 收到新消息（`send_message`） | `{from, message_id}` |
 | `new_reply` | 收到 reply（`send_reply`） | `{from, message_id, in_reply_to, status}` |
 | `broadcast` | 收到广播（`broadcast` 工具） | `{inbox_count}` |
-| `chained_reply` | 子任务完成自动串回上游父任务发起者 ([`tools.ts:286/646`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L286)) | `{parent_task_id, child_task_id, child_alias}` |
+| `chained_reply` | 子任务完成自动串回上游父任务发起者 ([`tools.ts:286/646`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts)) | `{parent_task_id, child_task_id, child_alias}` |
 | `node.renamed` | RFC-010 节点改名 COMMIT 时广播（[`rename.ts:100-123`](https://github.com/sleep2agi/agent-network/blob/main/server/src/rename.ts#L100)），推给 old + new 两个 alias 流 **+ 每个网络成员的 user channel**（dashboard 订阅的是 `/events/<username>` user channel、不是 per-alias 流，#84 SSE channel fix） | `{txn_id, alias(=new_alias), network_id, data:{old_alias, new_alias, surfaces_updated[], history_policy:"preserve"}}` |
 
-> 旧 doc 在 `new_message` 上写过 `message` 字段、`broadcast` 上写过 `{content, from}` —— 都不对。verify [`tools.ts:571 + 911`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L571) 实际 payload 以上表为准。另注：`new_task` / `new_message` 在目标 alias **刚被改名**时会额外带一个 `renamed_from` 字段（指向旧 alias，`tools.ts` 的 `canonical.renamed` 分支）。
+> 旧 doc 在 `new_message` 上写过 `message` 字段、`broadcast` 上写过 `{content, from}` —— 都不对。verify [`tools.ts:571 + 911`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 实际 payload 以上表为准。另注：`new_task` / `new_message` 在目标 alias **刚被改名**时会额外带一个 `renamed_from` 字段（指向旧 alias，`tools.ts` 的 `canonical.renamed` 分支）。
 >
 > **校正**：原表列过 `heartbeat` event with `{time}` payload，源码不发这个事件。[`push.ts:38-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L38) 实际发 SSE **comment 行** `: keepalive\n\n`（每 30s 一次，纯粹是给 proxy / LB 防 idle timeout 用），不会被 EventSource `onmessage` / `addEventListener` 触发，也不带 JSON payload。`connected` event 才是真正每次连接发一次的初始事件（agent-node 在 [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) 显式处理它）。
 
