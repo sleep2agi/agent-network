@@ -644,6 +644,28 @@ read/edit denied**，不能声明整个路径对模型不可见。真 vendor pil
 递归深度、symlink 跟随、size/mtime 元数据和拒绝错误是否回显绝对路径，在真 Grok 行为前均为
 `NOT COVERED`，不得用 argv 单测代替。
 
+2026-08-13 在任何切换前完成了一次只读 dry-run baseline，未建备份目录、未停止或重启进程、
+未读取 token/env 值。结果如下，后续 pilot 必须以这些值作切换前复核与回滚基线：
+
+```text
+node_id=n_72be30e0
+session_id=c47d3225-6d87-48a2-8c84-6c11db20a455
+runtime=agent-node:grok-build-cli
+model=grok-4.5
+workspace=/home/vansin/grok-commdog-workspace
+tmux=通信狗; windows=0:node,1:tui; panes=%1107,%1108; dead=0,0
+config=/home/vansin/grok-commdog-workspace/.anet/nodes/通信狗/config.json
+config_mode=600
+config_sha256=a8cbc30dc7d2466073c27f2e8499db598a8fc23c310ec121bb458919f775230b
+agent_network_cli_sha256=af3847dd1ddb75dd1265e995b1f2bd215df064e1b6c7e7aa823a1a96b270d7da
+agent_node_cli_sha256=03e9bed6630530e8fb03420dba32c6e06a90ae8cbe3fcdf33541a047708a7bb4
+```
+
+进程树实测为 `agent-node -> bwrap -> Grok TUI leader -> Grok agent leader`，并存在 MCP Bun
+子进程；这证明当前基线是真 TUI 共存，不是 ACP runtime。配置的非密钥投影仍为
+`copresence=true`、`tools=[WebSearch]`，repo-read 尚未上线。切换时不得重新读取或回显配置中的
+token/env 值，只能核 mode、hash 与上述非密钥字段。
+
 ## 数据与密钥边界
 
 Git 只恢复软件和非密钥流程，不恢复以下数据：Hub 数据库、node token、Grok 登录/会员状态、
