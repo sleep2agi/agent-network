@@ -36,8 +36,10 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > 所以 R367 没有、也不该把它们清掉。代价是:**latest 或 preview 一发布,它们立刻变成假的**,
 > 而且是危险的那种假 —— 会告诉用户一道已经存在的安全 preflight 不存在。
 >
-> 逐次发版必须重新核对的位置(**8 个路径**,下表 8 行 = 8 个文件 ——
-> 不要把 zh/en 合成一行数,分母数错会漏核):
+> 逐次发版必须重新核对的位置(**12 个路径**,下表 12 行 = 12 个文件 ——
+> 不要把 zh/en 合成一行数,分母数错会漏核。
+> 这张表的分母被修正过两次:7 → 8 → 12。**加新的信道断言时,同时把它加进这张表**,
+> 否则下一个人照着一份"看起来完整"的清单去核,漏掉的那几页永远不会被发现):
 >
 > | 文件 | 行 | 断言 |
 > |---|---|---|
@@ -49,6 +51,10 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > | `docs-site/docs/en/troubleshooting.md` | 29、37 | 同上(英文) |
 > | `docs-site/docs/guide/versioning.md` | 11 | `anet -v` 顶行示例 `anet v2.2.21` |
 > | `docs-site/docs/en/guide/versioning.md` | 11 | 同上(英文) |
+> | `docs-site/docs/guide/windows.md` | 102 | 跨盘 `anet --version` 崩溃是哪个通道的现状 |
+> | `docs-site/docs/en/guide/windows.md` | 102 | 同上(英文) |
+> | `docs-site/docs/guide/dashboard.md` | 313、328 | `anet -v` 应显示 `2.3.0-preview.N` / preview 不自动 promote |
+> | `docs-site/docs/en/guide/dashboard.md` | 314、329 | 同上(英文) |
 >
 > **核对方法不是 grep,是真机装。但不同断言要各跑各的 —— 一次探针不能替所有:**
 >
@@ -61,8 +67,19 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > 🔴 **那次探针只证明了第一行。** 把它当成「整张表都成立」是证据越权 ——
 > **一次运行只能证明它实际执行过的那条路径。**
 >
-> 当前坐标(便于下次比对):latest `2.2.21`、preview `0.9.0-preview.29`(commhub-server)。
+> 当前坐标(便于下次比对)—— **注意是哪个包**:
+>
+> | 包 | latest | preview | 为什么是它 |
+> |---|---|---|---|
+> | `@sleep2agi/agent-network` | `2.2.21` | `2.3.0-preview.39` | **preflight 实现在 `agent-network/bin/cli.ts`,上表断言核的就是它** |
+> | `@sleep2agi/commhub-server` | `0.8.8` | `0.9.0-preview.29` | 只在 preflight 通过之后才相关,**不是上表断言的坐标** |
+>
+> 我第一版在这里记的是 commhub-server 的版本 —— **记错了包**。被核的是 CLI 的
+> preflight,却钉了 server 的 dist-tag,下次比对会比错对象。
 > preview 版本每次发版都变,重核时以 npm dist-tag 实际值为准,别照抄这里。
+>
+> 上表第一行的实测证据:`docs/tests/report-latest-channel-preflight.txt`
+> (含复现命令、两个通道的原始输出、以及它**不覆盖**哪两条断言)。
 :::
 
 ### B. Frozen snapshots（永不动）
