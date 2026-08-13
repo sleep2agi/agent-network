@@ -412,6 +412,41 @@ tmux 窗口存在而仍判成功，该验收就是空门。
 `通信狗` 自己执行，必须按“扩权是新能力”另行设计、测试和授权，不能把正文里出现过代码等同于
 已经获得仓库能力。
 
+### 阶段 2 repo-read 候选（未部署）
+
+Draft PR [#820](https://github.com/sleep2agi/agent-network/pull/820) 提供一个单独的
+`repo-read` 候选。权威源码锚为
+`8929fc281022c89eed42975a40480ed4f13045fe`，report-only 子提交为
+`94d89dfa08c386ad9157ecc12eeee62c3e5d94fd`。该候选只接受配置中的精确工具向量
+`["Read","Grep","Glob"]`；顺序变化、缺项、增项和近似拼写全部 fail-closed。模型工具库存为
+`todo_write/search_tool/use_tool/read_file/grep/list_dir`，不含 shell、写文件、Web、媒体或子代理。
+
+Grok CLI 0.2.93 的 `workspace` sandbox 允许读取工作区外路径，因此 repo-read **不得**沿用
+阶段 1 的 workspace profile。#820 将它映射到生成的 custom strict profile。exact-source Docker
+门为 `1282 pass / 0 fail / 4398 expect / 91 files`；把 repo-read 错接回 workspace 的 mutation
+命名红为 `Expected: "anet-strict" / Received: "anet-workspace"`。隔离的真实 Grok TUI PTY
+实验中，custom strict 报 `ProfileApplied`、`enforced=true`，项目内读取成功，项目外、kernel deny
+路径与模型侧凭证读取均失败。完整证据与限制在
+`docs/tests/report-grok-copresence-repo-read-stage2.txt`。
+
+这只是候选，不是上线授权。当前 live `通信狗` 仍使用已验的 x-search profile。repo-read pilot
+必须同时满足：
+
+1. #820 经过独立对抗审，source/report 坐标未漂，并按正常流程合并、发版；不得把源码 worktree
+   直接覆盖到 live 节点。
+2. 只对 `通信狗` 建 owner-only 配置、session 与启动坐标回滚点；node_id、workspace、tmux 名
+   `通信狗` 均保持，绝不动 `A站狗`、`P站狗` 或其它舰团节点。
+3. 因 Grok resume 不能改变固定 sandbox/tool inventory，切换时必须显式新建一个 Grok session；
+   旧 session 保留作回滚与审计，不得伪称“保 session 且扩权”。
+4. 启动后先从 TUI 事件核到 `ProfileApplied` 且 `enforced=true`，再核 banner/tool inventory 精确；
+   任一缺失立即停目标节点并回旧 runtime/session。
+5. 行为门须同时证明：仓内合成 marker 可读、仓外 sibling marker 不可读、受保护凭证 marker
+   不可读、shell/写文件/Web 工具不存在。只看工具名或配置文本不算通过。
+6. 最后用真实 Dashboard-origin 任务完成“读仓内指定文件 → 只用 `file:line` 回答 → 通过
+   CommHub 回执”，并核 Hub 终态、`in_flight=0`、tmux node/TUI 两窗仍存活。
+7. pilot 通过后仍只放行只读源码审查；编辑 patch、Docker、GitHub 写入、merge、deploy、生产
+   DB、密钥或云资源权限都要另立能力门，不能从 repo-read 成功自动继承。
+
 ## 数据与密钥边界
 
 Git 只恢复软件和非密钥流程，不恢复以下数据：Hub 数据库、node token、Grok 登录/会员状态、
