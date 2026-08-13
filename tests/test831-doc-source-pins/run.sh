@@ -203,4 +203,48 @@ echo "  ③ 引用仍在文档里时不判为可删,并给出 drifted 警告(pin
 python3 "$CHECK" "$ROOT" >/dev/null || fail "L5 复原之后没有回绿"
 echo "  复原后回绿 ✓"
 
+# ---------------------------------------------------------------------------
+# L6 — 符号锚点是否落在它声称的那个 tool 段。
+#
+#      #831 把行号锚点换成了「文件链接 + 可 grep 的串」,解决了行号会漂,却引入
+#      一个更隐蔽的失效:**锚串确实存在,只是落在别的 tool 段**。「锚串存在」
+#      这个检查放行不了它。#845 里连着出了两例,都不是靠工具发现的:
+#        reassign_task 段 → 锚到 send_message / cancel_task 里的串
+#        broadcast    段 → 锚到 "ack_inbox"
+#      第一例我自己抓到就改了、没做全量审计,于是第二例由审查者发现。
+#      这一层就是那次审计固化下来的 —— 一次性脚本抓到的错,下次还会漏。
+# ---------------------------------------------------------------------------
+echo "[L6] symbol anchors land in the tool section they claim"
+SYMCHECK="$ROOT/scripts/check-doc-symbol-anchors.py"
+[[ -f "$SYMCHECK" ]] || fail "L6 的脚本不在镜像里:$SYMCHECK"
+out9=$(python3 "$SYMCHECK" "$ROOT") || fail "干净树上 L6 就红了:$(printf '%s' "$out9" | tail -4)"
+printf '%s\n' "$out9" | sed 's/^/  /'
+anch=$(printf '%s' "$out9" | sed -nE 's/^anchors_checked=([0-9]+)$/\1/p')
+regs=$(printf '%s' "$out9" | sed -nE 's/^tool_registrations=([0-9]+)$/\1/p')
+[[ "${anch:-0}" -gt 0 ]] || fail "L6 一条锚串都没检查到 —— 分母塌了"
+[[ "${regs:-0}" -gt 0 ]] || fail "L6 没解析出任何 tool 注册点 —— 分母塌了"
+
+# witnessed-red:把 #845 里真实发生过的那个错重新注入 —— broadcast 段的参数表
+# 锚到 "ack_inbox"。必须红,且红在 broadcast 那一行上。
+BC=$(grep -n '^#\{2,4\} \?`\?broadcast`\?$' "$ROOT/docs-site/docs/api/mcp-tools.md" | head -1 | cut -d: -f1)
+[[ -n "$BC" ]] || fail "找不到 broadcast 章节,无法造 L6 的变异"
+cp "$ROOT/docs-site/docs/api/mcp-tools.md" /tmp/mcp.bak
+python3 - "$ROOT/docs-site/docs/api/mcp-tools.md" "$BC" <<'PYX'
+import sys, pathlib
+path, start = pathlib.Path(sys.argv[1]), int(sys.argv[2])
+lines = path.read_text(encoding="utf-8").split("\n")
+# 在 broadcast 章节里插一条锚到 ack_inbox 的引用 —— 这正是 #845 的原错
+lines.insert(start, '参数（verify [`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 搜 `"ack_inbox"`）：')
+path.write_text("\n".join(lines), encoding="utf-8")
+PYX
+set +e; out10=$(python3 "$SYMCHECK" "$ROOT" 2>&1); rc10=$?; set -e
+cp /tmp/mcp.bak "$ROOT/docs-site/docs/api/mcp-tools.md"
+[[ "$rc10" -ne 0 ]] || fail "把 broadcast 的锚串写成 \"ack_inbox\" 之后 L6 仍然绿"
+printf '%s' "$out10" | grep -qF "MISMATCH" || fail "L6 红了但没打出 MISMATCH"
+printf '%s' "$out10" | grep -q "broadcast" || fail "L6 红了但没指出是 broadcast 那条"
+echo "  MUTATION_RED broadcast-anchored-to-ack-inbox rc=$rc10"
+
+python3 "$SYMCHECK" "$ROOT" >/dev/null || fail "L6 复原之后没有回绿"
+echo "  复原后回绿 ✓  (anchors_checked=$anch, tool_registrations=$regs)"
+
 echo "RESULT: PASS"
