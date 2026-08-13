@@ -256,9 +256,16 @@ PR #809 的真实 source `d9e5f50fbc38670fef8a33a9ffa169409cae6d99` 通过任务
 [#826](https://github.com/sleep2agi/agent-network/pull/826)，冻结 source
 `449683586a5a2ba44e99eb8c595be25d7467c967`。其 exact-source Docker 证据为 agent-node
 `1284 pass / 0 fail / 4406 expect / 91 files`，#813 readiness 四条 mutation 全红，repo-read
-selector 命名 mutation 也红，镜像回取文件 `17/17 MATCH`。两条均仍等待独立审和合并；当前
-live `通信狗` 继续使用已验证的 `x-search`/CommHub-only 边界，**不得**因 Draft PR 或本段记录
-提前改成 repo-read。
+selector 命名 mutation 也红，镜像回取文件 `17/17 MATCH`。该证据生成时两条均等待独立审
+和合并；live `通信狗` 继续使用已验证的 `x-search`/CommHub-only 边界，**不得**因 Draft PR
+或本段记录提前改成 repo-read。
+
+独立审随后闭环：#825 裁定 `CLEAN`，durable comment 为
+`https://github.com/sleep2agi/agent-network/pull/825#issuecomment-5276444160`；#826 stacked 裁定
+同为 `CLEAN`，durable comment 为
+`https://github.com/sleep2agi/agent-network/pull/826#issuecomment-5276485812`。#826 的 Hosted CI
+也已全部通过。审查确认 #825 source 是 #826 的 ancestor，且 #826 不得先于 #825 合并；两条
+Draft 截至该裁定仍未合并、未发布。技术门通过不等于 rollout 授权，live profile 仍不得改变。
 
 ### repo-read pilot 前的只读基线
 
