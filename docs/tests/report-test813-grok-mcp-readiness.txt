@@ -1,0 +1,108 @@
+# test813 — Grok copresence CommHub MCP readiness and product startup
+
+Date: 2026-08-13
+Base: 034f00647d42d38d5086d7fc057eb7824a441791
+Source commit: 91cf020609e519a1d580dcb7b5ee22026a5a182d
+Source tree: 1add9f9d1096bc0c8dca9b6c09c5e5596c16b528
+Readiness image: anet-test813-readiness:91cf0206
+Readiness image ID: sha256:981f63ab162a9a3db605ae02188ba3fdb4dc40795c83cd9226263cfdf9d67465
+Unit image: anet-test813-unit:91cf0206
+Unit image ID: sha256:392c91572bce988835b6d7130632c8b39e5edb9ea2e59561bc02fd586c22180f
+
+## Result
+
+PASS. Both images were built from `git archive` of the exact source commit.
+The readiness image emitted:
+
+    MCP_READINESS_PASS tools=commhub_get_all_status,commhub_send_message,commhub_send_task,commhub_upload_file
+    MUTATION_RED upload-tool-removed
+    MUTATION_RED stale-three-tool-doctor
+    PRODUCT_PATH_NEGATIVE_PASS registration=absent session=unchanged
+    PRODUCT_PATH_RECOVERY_PASS session=preserved
+    MUTATION_RED bun-resolver-bypassed
+    PRODUCT_PATH_NEGATIVE_PASS registration=absent session=unchanged
+    PRODUCT_PATH_RECOVERY_PASS session=preserved
+    RESULT: PASS source_commit=91cf020609e519a1d580dcb7b5ee22026a5a182d
+
+The full exact-source agent-node domain emitted:
+
+    1283 pass
+    0 fail
+    4373 expect() calls
+    Ran 1283 tests across 91 files.
+    MUTATION_RED readable-attachment-runtime-disconnected rc=1
+    RESULT: PASS
+
+## What the readiness gate executes
+
+The first layer starts production `agent-network/src/node-server.ts` over MCP
+stdio, performs `initialize`, `notifications/initialized`, and `tools/list`,
+and requires the exact four-tool outbound set. The production
+`assertGrokCommhubMcpDoctor` parser must accept exactly the four named health
+checks and reject the old three-tool shape.
+
+The product-path layer builds and runs the real production
+`agent-node/dist/cli.js` as non-root with the reviewed test225 Grok 0.2.93-shaped
+PTY fixture. The fixture is a process boundary, not a dependency-injection
+replacement: production CLI code resolves Bun, generates and stages the MCP,
+runs the real MCP subprocess handshake, opens the PTY/Leader, writes the
+session, and reaches TUI readiness.
+
+The negative lane launches Node by absolute path while giving the agent a slim
+PATH and an invalid explicit `BUN_BIN`. It requires the production runtime gate
+to reject before the `已注册到 CommHub` line, and proves the config checksum is
+unchanged. The recovery lane uses canonical `/usr/local/bin/bun`, reaches TUI
+readiness, then starts the same product entry again and requires the persisted
+Grok session UUID to remain identical.
+
+Both lanes use an unreachable loopback Hub so registration cannot accidentally
+be mistaken for success. The reviewed fake reproduces native Grok's temporary
+0444 project placeholders; because the probe stops at that unreachable Hub
+boundary rather than through the normal launcher, it validates the exact tuple
+before performing the launcher's cleanup between recovery generations.
+
+## Witnessed-red mutations
+
+1. `upload-tool-removed` deletes `commhub_upload_file` from the production
+   outbound allowlist. The MCP wire result fails at `TOOL_SET_MISMATCH`.
+2. `stale-three-tool-doctor` changes the production doctor requirement back to
+   `3 tools discovered`. The exact four-tool response fails at the named
+   readiness assertion.
+3. `bun-resolver-bypassed` replaces the one product call-site input
+   `process.env.BUN_BIN || "bun"` with `/usr/local/bin/bun`. The slim-PATH lane
+   then gets past the intended resolver; the gate fails specifically at
+   `NEGATIVE_RUNTIME_GATE_NOT_REACHED`.
+
+The unmodified readiness and product probes run before and after the mutations.
+Every mutation changes production source in the disposable container, has a
+target-cardinality/post-change guard, and restores the exact original file.
+
+## Provenance
+
+    readiness build log sha256 c763d52572007f6f6e63847a054c41711ba5c199415b124dcae2f3a2e4a7c1ad
+    readiness run log   sha256 76e1f51ad8452e6adc38e62a1e2e4f89a2f450ff464d2afec784071b2dfa847d
+    unit build log      sha256 e1c5d4c0caaf3aa0ec11a969b89b975a1eb5d0871c8c27c277d727b2811ba2d2
+    unit run log        sha256 4f575b4eee23e369df0792729d3feeeca26af47b3f6307f4ac3c1add503477e0
+
+The log digests record this run; they are not claimed byte-reproducible because
+Docker progress/timing and test timing vary. The source/tree/image coordinates
+are the reproducible anchors.
+
+## Honest limits
+
+- The deterministic product fixture exercises the production CLI, PTY,
+  Leader, MCP child and session writeback, but it does not call a model or a
+  remote Hub.
+- The earlier real Grok 0.2.93 keyless vendor-doctor evidence belonged to
+  source `ce8184a5`; it motivated and validated the parser shape, but is not
+  claimed as evidence for this new source because that old binary is no longer
+  present on the host. The current installed Grok is 1.0.3 and was not
+  substituted for the pinned compatibility claim.
+- Upload bytes, authenticated Hub lifecycle, continuous human attach, and a
+  real model turn remain in their own suites or the eventual single-node
+  pilot.
+- The three other bare-Bun writers are tracked separately in issue #821. A
+  12-process live sample currently resolves Bun through inherited nvm PATH;
+  they are latent slim-PATH risks, not a blocker or a current fleet outage.
+- No package was published and no production process, config, database or node
+  was changed by this test.
