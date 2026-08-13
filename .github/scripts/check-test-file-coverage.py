@@ -54,6 +54,38 @@ SUITE_PREFIX = "tests/"
 
 
 
+WORKFLOW = REPO / ".github" / "workflows" / "qa.yml"
+
+
+def gate_is_wired(gate: str) -> tuple[bool, str]:
+    """这道门有没有真的被 CI 构建并运行。
+
+    原来只验了两件事:门文件存在、门声明了扫描范围。**都不等于它会跑。**
+    独立审(codex P1)指出:qa.yml 一旦删掉或改名某个 job、或不再 build/run
+    它的 Dockerfile,本脚本照样发绿 —— 因为它从没看过 qa.yml。
+    这正是本门要防的那类问题(有门、没人跑),所以不能留在自己身上。
+
+    判据是 qa.yml 里同时出现:
+      - `-f tests/<suite>/Dockerfile`(真的构建了它)
+      - `docker run … <这次 build 打的 tag>`(真的跑了那个产物)
+    只比 tag 字符串,不解析 YAML —— 但两条都要中,单独一条不算。
+    """
+    suite = Path(gate).parent.name
+    if not WORKFLOW.is_file():
+        return False, "qa.yml 不存在"
+    wf = WORKFLOW.read_text(encoding="utf-8")
+    build = re.search(rf'-f\s+tests/{re.escape(suite)}/Dockerfile', wf)
+    if not build:
+        return False, f"qa.yml 里没有 build tests/{suite}/Dockerfile"
+    tags = re.findall(rf'-t\s+(\S+)\s+\\?\s*\n?\s*-f\s+tests/{re.escape(suite)}/Dockerfile', wf)
+    if not tags:
+        return False, f"qa.yml 里 build tests/{suite} 时没有 -t <tag>"
+    tag = tags[0]
+    if not re.search(rf'docker run[^\n]*\b{re.escape(tag)}\b', wf):
+        return False, f"qa.yml 构建了 {tag} 但没有 docker run 它"
+    return True, tag
+
+
 def suite_is_real(path: str) -> bool:
     """`tests/<suite>/x.test.ts` 只有在那个套件真的是一套门时才豁免。
 
@@ -136,6 +168,11 @@ def main() -> int:
                 f"门 {gate} 没有把 '{root}' 声明为扫描范围 —— "
                 "覆盖声明与门的实际范围已经不一致"
             )
+        wired, why = gate_is_wired(gate)
+        # 一道门可能覆盖多个根(test745 覆盖 src 和 tests),接线问题只报一次
+        msg = f"门 {gate} 没有接进 CI:{why}"
+        if not wired and msg not in failures:
+            failures.append(msg)
 
     files = tracked_test_files()
     print(f"tracked_test_files={len(files)}")
