@@ -98,20 +98,58 @@ def main() -> int:
             bad += 1
             continue
 
+        # 🔴 顶层触发器:没有 on 的 workflow 永远不会跑。独立审查用负向 fixture
+        # 实测过:缺 on 的文件在旧版这里直接放行,jobs_checked=1 / problems=0。
+        if not (doc.get("on") or doc.get(True)):
+            print(f"FAIL: [no-trigger] {rel} 没有顶层 on: —— 这个 workflow 永远不会被触发", file=sys.stderr)
+            bad += 1
+
         for name, job in jobs.items():
             total_jobs += 1
             if not isinstance(job, dict):
                 print(f"FAIL: [job-not-a-mapping] {rel} :: {name}", file=sys.stderr)
                 bad += 1
                 continue
-            # reusable workflow 调用:只有 uses,没有 runs-on/steps,是合法写法
+            # reusable workflow 调用:只有 uses,没有 runs-on/steps,是合法写法。
+            # 🔴 旧版写的是 `if "uses" in job: continue` —— **只看键在不在**。
+            # 于是 `uses:`(值为 None)、以及误缩进到 job 级的 `- uses: checkout`
+            # 都被当成合法的 reusable 调用放行。实测两者都绿。
+            # 现在要求它是一个非空字符串。
             if "uses" in job:
+                # 🔴 真正的 reusable-workflow 调用不会同时带 runs-on / steps。
+                # 两者并存的典型来源是**把 step 级的 `- uses: actions/checkout@v4`
+                # 误缩进到了 job 级** —— 那个 job 于是既像调用又像 runner job,
+                # 而旧版(以及我上一版只查「uses 是非空字符串」)都会放行它。
+                if isinstance(job["uses"], str) and job["uses"].strip():
+                    extra = [k for k in ("runs-on", "steps") if k in job]
+                    if extra:
+                        print(
+                            f"FAIL: [uses-with-runner-keys] {rel} :: {name} —— "
+                            f"reusable 调用不该同时有 {extra};"
+                            f"这通常是 step 级的 uses 被误缩进到了 job 级",
+                            file=sys.stderr,
+                        )
+                        bad += 1
+                    continue
+                print(
+                    f"FAIL: [bad-uses] {rel} :: {name} —— uses 必须是非空字符串"
+                    f"(收到 {type(job['uses']).__name__}),否则这不是一次 reusable 调用",
+                    file=sys.stderr,
+                )
+                bad += 1
                 continue
             if not job.get("runs-on"):
                 print(f"FAIL: [no-runs-on] {rel} :: {name}", file=sys.stderr)
                 bad += 1
-            if not job.get("steps"):
-                print(f"FAIL: [empty-steps] {rel} :: {name} —— 这个 job 什么都不会做", file=sys.stderr)
+            # 🔴 旧版是 `if not job.get("steps")` —— 只测真值。
+            # `steps: "随便一个字符串"` 是真值,照样绿。要求它是非空**列表**。
+            steps = job.get("steps")
+            if not isinstance(steps, list) or not steps:
+                print(
+                    f"FAIL: [bad-steps] {rel} :: {name} —— steps 必须是非空列表"
+                    f"(收到 {type(steps).__name__}),这个 job 什么都不会做",
+                    file=sys.stderr,
+                )
                 bad += 1
 
     print(f"jobs_checked={total_jobs}")

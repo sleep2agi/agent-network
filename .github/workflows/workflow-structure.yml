@@ -22,11 +22,13 @@ on:
     paths:
       - '.github/workflows/**'
       - '.github/scripts/check-workflow-structure.py'
+      - '.github/scripts/requirements-workflow-structure.txt'
   push:
     branches: [main]
     paths:
       - '.github/workflows/**'
       - '.github/scripts/check-workflow-structure.py'
+      - '.github/scripts/requirements-workflow-structure.txt'
 
 jobs:
   structure:

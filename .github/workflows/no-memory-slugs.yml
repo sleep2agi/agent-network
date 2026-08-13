@@ -28,6 +28,7 @@ on:
       - '**/*.yaml'
       - '.github/scripts/check-no-memory-slugs.py'
       - '.github/workflows/no-memory-slugs.yml'
+      - '.github/scripts/requirements-workflow-structure.txt'
   push:
     branches: [main]
     paths:
@@ -42,6 +43,7 @@ on:
       - '**/*.yaml'
       - '.github/scripts/check-no-memory-slugs.py'
       - '.github/workflows/no-memory-slugs.yml'
+      - '.github/scripts/requirements-workflow-structure.txt'
 
 concurrency:
   group: lint-slugs-${{ github.workflow }}-${{ github.ref }}
