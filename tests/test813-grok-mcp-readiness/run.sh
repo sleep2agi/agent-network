@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source tests/lib/safe-rm.sh
 
 SOURCE_COMMIT=${TEST813_SOURCE_COMMIT:-}
 [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
@@ -42,4 +43,41 @@ expect_red stale-three-tool-doctor 'readiness failed: 3 tools discovered' \
   sed -i 's/"4 tools discovered"/"3 tools discovered"/' agent-node/src/runtime/grok-build-cli-home.ts
 
 probe
+
+if [ "${RUN_VENDOR_GROK:-0}" = 1 ]; then
+  real_bin=${TEST813_REAL_GROK_BIN:-/host-grok/grok-0.2.93}
+  [ -x "$real_bin" ] || {
+    echo "FAIL: pinned Grok binary is not executable: $real_bin" >&2
+    exit 1
+  }
+  [[ "$("$real_bin" --version)" =~ ^grok\ 0\.2\.93\ \(f00f96316d\)(\ \[stable\])?$ ]] || {
+    echo "FAIL: vendor doctor requires exact Grok 0.2.93" >&2
+    exit 1
+  }
+  vendor_root=$(mktemp -d /tmp/test813-vendor.XXXXXX)
+  chmod 700 "$vendor_root"
+  printf '%s\n' \
+    'COMMHUB_URL=http://127.0.0.1:9' \
+    'COMMHUB_TOKEN=fixture-token' >"$vendor_root/commhub.env"
+  chmod 600 "$vendor_root/commhub.env"
+  printf '%s\n' \
+    '[mcp_servers.commhub]' \
+    'command = "/usr/local/bin/bun"' \
+    'args = ["/workspace/agent-network/src/node-server.ts"]' \
+    "env = { ANET_COMMHUB_ENV_FILE = \"$vendor_root/commhub.env\", ANET_COMMHUB_MODE = \"outbound-only\", COMMHUB_ALIAS = \"test813-dog\", COMMHUB_RESUME_ID = \"test813-resume\" }" \
+    'enabled = true' >"$vendor_root/config.toml"
+  chmod 600 "$vendor_root/config.toml"
+  vendor_report="$vendor_root/doctor.json"
+  if ! env -i \
+    PATH=/usr/local/bin:/usr/bin:/bin \
+    HOME="$vendor_root" GROK_HOME="$vendor_root" GROK_AUTH_PATH="$vendor_root/auth.json" \
+    "$real_bin" mcp doctor commhub --json >"$vendor_report" 2>"$vendor_root/doctor.stderr"; then
+    echo "FAIL: real Grok vendor doctor failed" >&2
+    sed -n '1,80p' "$vendor_root/doctor.stderr" >&2
+    exit 1
+  fi
+  bun tests/test813-grok-mcp-readiness/validate-vendor-doctor.ts "$vendor_report"
+  safe_rm_rf "$vendor_root"
+fi
+
 echo "RESULT: PASS source_commit=$SOURCE_COMMIT"
