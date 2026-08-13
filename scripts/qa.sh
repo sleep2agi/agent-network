@@ -57,6 +57,9 @@ L0_TESTS=(
   # 它的 CI 归属是会安装依赖的层级；本地跑法见该文件头注释的门禁命令。
 )
 L1_TESTS=(
+  # 这道闸门自己的回归。放在最前:它跑的是本脚本,若闸门坏了应当最先暴露。
+  # (注册这一步不是可选的 —— 一个没被任何东西调用的套件等于不存在。)
+  "test823-l1-concurrency-cap"
   "qa-cli-01-hub-start"
   "qa-cli-02-network-create"
   "qa-dash-07-auth-boundary"
