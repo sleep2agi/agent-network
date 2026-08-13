@@ -45,6 +45,7 @@ import {
 import {
   assertGrokCopresenceAgentProfile,
   GROK_COPRESENCE_EFFECTIVE_TOOLS,
+  GROK_COPRESENCE_REPO_READ_ENABLED,
   GROK_COPRESENCE_VENDOR_DENY_TOOLS,
   GROK_COPRESENCE_WEB_SEARCH_ENABLED,
 } from "./policy";
@@ -421,6 +422,10 @@ export function buildGrokCopresenceArgs(opts: BuildGrokCopresenceArgsOptions): s
   for (const tool of GROK_COPRESENCE_VENDOR_DENY_TOOLS) {
     args.push("--deny", tool);
   }
+  if (!GROK_COPRESENCE_REPO_READ_ENABLED) {
+    for (const tool of ["read_file", "grep", "list_dir"]) args.push("--deny", tool);
+  }
+  if (!GROK_COPRESENCE_WEB_SEARCH_ENABLED) args.push("--deny", "web_search");
   args.push(
     // The shared process must read its owner-only GROK_AUTH_PATH after its
     // sandbox re-exec. Shell access would bypass path-specific Read/Grep/Edit

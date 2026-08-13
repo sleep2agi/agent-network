@@ -22,6 +22,10 @@ function probe(profile: "commhub-only" | "x-search" | "repo-read"): ProbeResult 
   return JSON.parse(child.stdout);
 }
 
+function deniedTools(result: ProbeResult): string[] {
+  return result.args.flatMap((value, index) => result.args[index - 1] === "--deny" ? [value] : []);
+}
+
 describe("Grok co-presence profile is pinned for the whole process", () => {
   test("same input yields three exact, non-overlapping process capabilities", () => {
     const restricted = probe("commhub-only");
@@ -67,17 +71,40 @@ describe("Grok co-presence profile is pinned for the whole process", () => {
     ]);
 
     for (const result of [restricted, xSearch, repoRead]) {
-      const denied = result.args.flatMap((value, index) => result.args[index - 1] === "--deny" ? [value] : []);
+      const denied = deniedTools(result);
       for (const tool of [
         "run_terminal_command", "run_terminal_cmd", "search_replace", "write_file",
-        "edit_file", "apply_patch", "web_fetch", "http_request", "image_gen",
-        "generate_image", "video_gen", "generate_video", "browser", "computer", "screenshot",
+        "edit_file", "apply_patch", "write", "kill_command_or_subagent",
+        "get_command_or_subagent_output", "wait_commands_or_subagents", "scheduler_create",
+        "scheduler_delete", "scheduler_list", "monitor", "update_goal", "enter_plan_mode",
+        "exit_plan_mode", "ask_user_question", "web_fetch", "http_request", "image_gen",
+        "image_edit", "generate_image", "video_gen", "generate_video", "browser", "computer",
+        "screenshot",
       ]) expect(denied).toContain(tool);
+      for (const tool of [
+        "run_terminal_command", "read_file", "search_replace", "list_dir", "grep",
+        "kill_command_or_subagent", "todo_write", "get_command_or_subagent_output",
+        "wait_commands_or_subagents", "scheduler_create", "scheduler_delete", "scheduler_list",
+        "monitor", "search_tool", "use_tool", "update_goal", "enter_plan_mode", "exit_plan_mode",
+        "ask_user_question", "web_search", "web_fetch", "image_gen", "image_edit", "video_gen",
+        "write",
+      ]) {
+        expect(result.tools.includes(tool) || denied.includes(tool)).toBe(true);
+      }
       expect(denied).toContain("Bash");
       expect(denied).toContain("Write");
       expect(denied).toContain("WebFetch");
       expect(denied).toContain("Read(/runtime/private)");
       expect(denied).toContain("Grep(/runtime/private/**)");
     }
+    for (const tool of ["read_file", "grep", "list_dir", "web_search"]) {
+      expect(deniedTools(restricted)).toContain(tool);
+    }
+    for (const tool of ["read_file", "grep", "list_dir"]) expect(deniedTools(xSearch)).toContain(tool);
+    expect(deniedTools(xSearch)).not.toContain("web_search");
+    expect(deniedTools(repoRead)).not.toContain("read_file");
+    expect(deniedTools(repoRead)).not.toContain("grep");
+    expect(deniedTools(repoRead)).not.toContain("list_dir");
+    expect(deniedTools(repoRead)).toContain("web_search");
   });
 });
