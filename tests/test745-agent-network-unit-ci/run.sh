@@ -37,6 +37,17 @@ grep -Eq 'Ran [1-9][0-9]* tests across [1-9][0-9]* files\.' /tmp/test745-green.l
   exit 1
 }
 
+# 上面那条只要求"跑过的文件数非零" —— 磁盘上有 46 个、bun 只跑了 1 个,
+# 它照样绿。test_files 这个分母算出来了却没承重,而"跑了 1 个全绿"和
+# "跑了 46 个全绿"打印出来是同一片绿色。把两个数绑在一起,让范围被悄悄
+# 收窄(glob 改了、测试挪进子目录、bun 配置多了个 exclude)这件事自己变红。
+executed=$(grep -Eo 'across [0-9]+ files' /tmp/test745-green.log | grep -Eo '[0-9]+' | tail -1)
+echo "executed_files=${executed:-unknown} discovered_files=$test_files"
+[[ -n "$executed" && "$executed" -ge "$test_files" ]] || {
+  echo "FAIL: bun executed ${executed:-?} file(s) but $test_files exist under src/" >&2
+  exit 1
+}
+
 echo "[L1] witnessed-red: top-level config help must match the implemented parser"
 TARGET='  anet config [path|json]       Show config summary, path, or raw JSON'
 MUTATED='  anet config get|set          Inspect or edit config'
