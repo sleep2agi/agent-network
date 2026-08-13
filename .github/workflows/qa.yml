@@ -22,6 +22,10 @@ on:
       - 'tests/test725-agent-node-unit-ci/**'
       - 'tests/test745-agent-network-unit-ci/**'
       - 'tests/test746-setup-bun-pin/**'
+      - 'docs-site/**'
+      - 'docs/doc-source-pins-baseline.txt'
+      - 'scripts/check-doc-source-pins.py'
+      - 'tests/test831-doc-source-pins/**'
   push:
     branches: [main]
     paths:
@@ -34,6 +38,10 @@ on:
       - 'tests/test725-agent-node-unit-ci/**'
       - 'tests/test745-agent-network-unit-ci/**'
       - 'tests/test746-setup-bun-pin/**'
+      - 'docs-site/**'
+      - 'docs/doc-source-pins-baseline.txt'
+      - 'scripts/check-doc-source-pins.py'
+      - 'tests/test831-doc-source-pins/**'
 
 # Older runs on the same ref get cancelled — saves minutes when a PR is
 # updated rapidly. main pushes run independently.
@@ -105,3 +113,25 @@ jobs:
             echo "================ $f ================"
             tail -60 "$f"
           done
+
+  doc-source-pins:
+    name: doc source-pin floor (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      # 🔴 这道门守的是下限,不是正确性:它只保证「已知失效的行号 pin 不再变多」。
+      #    实测召回率 5/10 —— 抓不到「锚点指着一行正常代码、只是不是它声称的那
+      #    一行」。见 #831 与 scripts/check-doc-source-pins.py 的文件头。
+      #    别拿这个 job 的绿色去论证 #831 已解决。
+      - name: Build test831-doc-source-pins
+        run: |
+          docker build \
+            --build-arg TEST831_SOURCE_COMMIT="$GITHUB_SHA" \
+            --build-arg TEST831_RUNSH_BLOB="$(git rev-parse "HEAD:tests/test831-doc-source-pins/run.sh")" \
+            -t anet-test831-doc-source-pins \
+            -f tests/test831-doc-source-pins/Dockerfile .
+
+      - name: Run test831-doc-source-pins
+        run: docker run --rm --network none anet-test831-doc-source-pins
