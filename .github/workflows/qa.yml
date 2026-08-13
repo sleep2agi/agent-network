@@ -80,6 +80,7 @@ jobs:
         run: |
           docker build \
             --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            --build-arg RUNSH_BLOB="$(git rev-parse HEAD:tests/test798-server-unit-ci/run.sh)" \
             -t anet-test798-server-unit \
             -f tests/test798-server-unit-ci/Dockerfile .
 
