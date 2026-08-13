@@ -76,8 +76,10 @@ So the difference between channels is not "key present / key absent":
 
 - **latest `0.8.8`** — anonymous callers can read the full live-session breakdown
   (which is empty only on an idle hub);
-- **preview `0.9.0-preview.x`** — anonymous callers get aggregate counts only; the
-  breakdown moved behind auth at `GET /api/stats/sse`.
+- **preview `0.9.0-preview.22` and later** — anonymous callers get aggregate counts
+  only; the breakdown moved behind auth at `GET /api/stats/sse`;
+- ⚠️ **preview `0.9.0-preview.0` through `.21` leak just like `0.8.8`** — published
+  2026-06-28 … 07-04, i.e. **before the fix**. Do not treat "preview" as safe wholesale.
 
 Confirm this before exposing a `0.8.8` hub to the public internet.
 :::
