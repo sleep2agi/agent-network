@@ -46,6 +46,37 @@ probe
 
 bash tests/test813-grok-mcp-readiness/product-path.sh all
 
+# A stack trace from minified dist/cli.js contains source string literals.
+# The product gate must recognize a timestamped runtime log event, not merely
+# find `TUI ready session=` anywhere in a failed stack dump.
+cp tests/test813-grok-mcp-readiness/fake-grok.mjs /tmp/test813-fake-grok.orig
+doctor_target='          { label: "4 tools discovered", passed: toolNames.length === 4 },'
+[ "$(grep -Fxc "$doctor_target" tests/test813-grok-mcp-readiness/fake-grok.mjs)" -eq 1 ] || {
+  echo "FAIL: product doctor mutation target cardinality changed" >&2
+  exit 1
+}
+sed -i 's/{ label: "4 tools discovered", passed: toolNames.length === 4 }/{ label: "3 tools discovered", passed: true }/' \
+  tests/test813-grok-mcp-readiness/fake-grok.mjs
+if bash tests/test813-grok-mcp-readiness/product-path.sh recovery >/tmp/test813-product-doctor-mutation.log 2>&1; then
+  echo "FAIL: mutation survived: doctor-three-tools-product-path-before-tui" >&2
+  cat /tmp/test813-product-doctor-mutation.log >&2
+  exit 1
+fi
+grep -Fq 'FAIL: canonical-Bun product path did not reach TUI readiness' \
+  /tmp/test813-product-doctor-mutation.log || {
+    echo "FAIL: product doctor mutation did not die at the anchored TUI readiness gate" >&2
+    cat /tmp/test813-product-doctor-mutation.log >&2
+    exit 1
+  }
+grep -Fq 'GrokCopresenceFailure: grok copresence pre-spawn audit failed: grok copresence CommHub MCP readiness failed: 4 tools discovered' \
+  /tmp/test813-product-doctor-mutation.log || {
+    echo "FAIL: product doctor mutation died for the wrong reason" >&2
+    cat /tmp/test813-product-doctor-mutation.log >&2
+    exit 1
+  }
+cp /tmp/test813-fake-grok.orig tests/test813-grok-mcp-readiness/fake-grok.mjs
+echo "MUTATION_RED doctor-three-tools-product-path-before-tui"
+
 cp agent-node/src/cli.ts /tmp/test813-cli.orig
 target='process.env.BUN_BIN || "bun",'
 [ "$(grep -Fc "$target" agent-node/src/cli.ts)" -eq 1 ] || {
