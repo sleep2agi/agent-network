@@ -174,12 +174,20 @@ Two things, and the second one is not obvious:
    整套跑法:
 
    ```bash
+   rc=0
    for f in server/src/*.test.ts; do
      db=/tmp/anet-$(basename "$f" .test.ts).db
-     rm -f "$db"
-     COMMHUB_DB="$db" bun test "$f" || echo "FAILED: $f"
+     rm -f "$db" "$db-wal" "$db-shm"
+     COMMHUB_DB="$db" bun test "$f" || { echo "FAILED: $f"; rc=1; }
    done
+   [ "$rc" -eq 0 ]
    ```
+
+   ⚠️ 最后那行 `[ "$rc" -eq 0 ]` 不是装饰,是这段的**门**。写成
+   `bun test "$f" || echo "FAILED: $f"` 会让循环打印一行然后继续,
+   整段的退出码恒为 0 —— **测试全红,脚本报绿**。用 `[ ... ]` 而不是
+   `exit "$rc"`,是为了这段直接粘进终端时不会把你的 shell 关掉;
+   存成脚本跑时,它是最后一条命令,脚本退出码就等于它。
 
    ⚠️ 别把 `$name` 之类的占位符原样抄进命令行 —— 未定义的变量会展开成空串,
    于是每个文件都写进**同一个** `/tmp/…-.db`,正好是这一节要避免的事。
