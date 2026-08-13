@@ -149,6 +149,18 @@ Grok vendor doctor 兼容。随后 test813 增加了只读挂载的精确 Grok 0
 当前实现缺陷。该记录证明它能参与有边界的真实 PR 审查，但最终裁定仍须由可读取 exact Git
 对象的独立审查者作出。
 
+第二个真实 PR delta 评审任务 `012ce584-cf36-4b48-8986-0f2fdb8c1b9d` 使用 PR #800 的
+`source=1e9e75dab635dc03d12636232ebc2ac117c2dee6`，在 1 分 38 秒内终态 `replied`。它指出
+两个 runner 的 `find ... -maxdepth 1` 不覆盖未来嵌套测试，因此 #800 单独不能保证整棵
+`tests/` 永久完整；该角由依赖它的 #801 元门负责闭合，故合并顺序是证据的一部分。它还指出
+`grep -q 'bun:test'` 是粗分类器。exact source 交叉核确认当前没有嵌套测试，现有 25 个文件也
+全部正确分成 agent-node 六个脚本式，以及 agent-network 十六个脚本式和三个 `bun:test`；
+现行 CI 两个 unit job 均绿。因此前者是当前真实的跨 PR 依赖，后者是未来脆弱性，不应冒充
+当前误分缺陷。任务后 Hub 回到 idle、`in_flight=0`，tmux 的 node/TUI 两个 pane 仍存活。
+这次结果同时暴露了 advisory 的边界：任务目标中“mutation 命名红收紧”被模型过度理解为
+两侧都必须修改，而 PR 实际只在 test725 收紧该断言；最终回执必须用 PR body 和 exact source
+纠正这种由任务措辞产生的过判。
+
 ## 从 Git 恢复软件
 
 当前 `grok-build-cli` 是 source-only 路径。宿主部署副本
