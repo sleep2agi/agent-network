@@ -1,0 +1,90 @@
+# test746 — pin setup-bun across active workflows
+
+Date: 2026-08-13 (Asia/Shanghai)
+Issue: https://github.com/sleep2agi/agent-network/issues/746
+Base: 92d9612949a4207eae4facab2b337c1f23de65e0
+Source commit: c15df58f58a8a4bae2d637504b4ec98320a49aca
+Image: sha256:a8faddf90133b9f68280792e5045f89722f8c33c16a848d7370669f6896d331c
+Image label: org.opencontainers.image.revision=c15df58f58a8a4bae2d637504b4ec98320a49aca
+
+## Result
+
+PASS. Every active `oven-sh/setup-bun@v2` step in the repository's workflow
+domain now explicitly selects Bun 1.3.14. Two runs of the exact source image
+produced byte-identical logs:
+
+```
+setup_bun_occurrences=3 expected_version=1.3.14
+e2e-docker.yml.jobs.e2e.steps[1] bun-version=1.3.14
+qa.yml.jobs.qa.steps[1] bun-version=1.3.14
+release.yml.jobs.build-tarball.steps[1] bun-version=1.3.14
+L1 SETUP_BUN_PIN_PASS
+MUTATION_RED release-pin-removed
+RESULT: PASS
+```
+
+Both run logs have SHA256
+`abda2b39247e0d1bf1f079fa5d2c1208881a2938eebbc237a08a8bc8440f9d8c`.
+
+## Denominator and witnessed red
+
+The gate parses every `.yml` and `.yaml` file directly under
+`.github/workflows/`, recursively finds every step whose exact action is
+`oven-sh/setup-bun@v2`, and requires:
+
+- exactly three occurrences; and
+- `with.bun-version` to equal `1.3.14` for every occurrence.
+
+The runner first proves the unmodified baseline green. It then copies the
+workflow domain into an ephemeral directory, requires one exact mutation
+target in `release.yml`, removes only that step's version pin, and verifies a
+non-empty byte change. The mutated parser run must fail with both the affected
+filename and the named mismatch:
+
+```
+release.yml.jobs.build-tarball.steps[1] bun-version=None, expected 1.3.14
+```
+
+`scripts/qa.sh` includes this suite in active L1, passes the full source SHA,
+and `.github/workflows/qa.yml` covers changes to the suite on both pull
+requests and main pushes. The QA workflow remains report-only; absent branch
+protection, a red result is a signal rather than a GitHub-enforced merge ban.
+
+## Corrections while establishing the gate
+
+The first Docker run failed before the product assertion because the
+`python:3.12-slim-bookworm` image resolves `python3` to `/usr/local/bin`, while
+Debian's `python3-yaml` package installs for `/usr/bin/python3`. The runner now
+uses `/usr/bin/python3` explicitly. A second attempt exposed that the helper
+redirected only stdout, leaving the named mutation error outside its evidence
+log; the helper now captures stdout and stderr together. Neither failed
+attempt was recorded as a passing gate.
+
+## Provenance
+
+Four files copied into the exact image have the same SHA256 as their source
+files:
+
+```
+MATCH tests/test746-setup-bun-pin/run.sh
+MATCH .github/workflows/e2e-docker.yml
+MATCH .github/workflows/qa.yml
+MATCH .github/workflows/release.yml
+PROVENANCE total=4 fail=0
+```
+
+The source commit is a direct child of the recorded base, and the fetched
+`origin/main` was still exactly the recorded base when the image was built.
+
+## Honest limits
+
+- This change fixes the unpinned-version half of #746. It does not add retry,
+  caching, checksum verification inside the third-party action, or a manual
+  fallback for setup-bun download failures. Issue #746 must remain open for
+  that remaining reliability work.
+- The action reference remains `oven-sh/setup-bun@v2`; this gate pins the Bun
+  runtime version, not the action implementation to a commit SHA.
+- The test statically verifies workflow configuration in Docker. It does not
+  emulate GitHub-hosted runner networking or tool-cache behavior.
+- No package was published and no production service, node, database,
+  repository setting, credential, or branch protection was changed.
