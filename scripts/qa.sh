@@ -171,7 +171,19 @@ if [[ $RUN_L1 -eq 1 ]]; then
     # qa-*-... 形态不匹配,和以前一样不传(它们的门不要这个变量)。
     build_args=""
     if [[ "$t" =~ ^test([0-9]+)- ]]; then
-      build_args="--build-arg TEST${BASH_REMATCH[1]}_SOURCE_COMMIT=$(git rev-parse HEAD)"
+      # 🔴 仓里并存两套 build-arg 命名,必须都供给,否则名字对不上就是空串:
+      #   旧:test686/765/766/746 的 Dockerfile 收 TESTNNN_SOURCE_COMMIT
+      #   新:test823（以及 test798/test831）的 Dockerfile 收 SOURCE_COMMIT + RUNSH_BLOB
+      # 我上一版只按套件名推导出 TESTNNN_SOURCE_COMMIT,test823 收的是 SOURCE_COMMIT,
+      # 于是照旧红在 "TEST823_SOURCE_COMMIT 收到 ''"。
+      # 未被 Dockerfile 声明的 build-arg 只会产生一条警告,不影响构建,所以两套都传。
+      _qa_sha="$(git rev-parse HEAD)"
+      build_args="--build-arg TEST${BASH_REMATCH[1]}_SOURCE_COMMIT=$_qa_sha --build-arg SOURCE_COMMIT=$_qa_sha"
+      # blob 绑定:把 SOURCE_COMMIT 钉到被测的那份 run.sh 字节上(git blob object id)
+      if [ -f "tests/$t/run.sh" ]; then
+        _qa_blob="$(git rev-parse "HEAD:tests/$t/run.sh" 2>/dev/null || true)"
+        [ -n "$_qa_blob" ] && build_args="$build_args --build-arg RUNSH_BLOB=$_qa_blob"
+      fi
     fi
     if ! dockerrun "docker build -q $build_args -t anet-$t -f tests/$t/Dockerfile ." >/tmp/qa-l1-$t-build.log 2>&1; then
       fail "L1 $t — build failed, see /tmp/qa-l1-$t-build.log"
