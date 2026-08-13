@@ -248,6 +248,25 @@ PR #809 的真实 source `d9e5f50fbc38670fef8a33a9ffa169409cae6d99` 通过任务
 `59147851-0e10-496c-a75f-9285887ea721` 取得最终等级与边界。这是任务编排约束，不是模型推理
 失败。
 
+PR #805 随后把真实缺陷修到 head
+`c6d2c78ff1a94e91094fd18a5f3100e5dab459ec`。复核任务
+`668d04b5-2204-4ee1-9d71-3894577170af` 仍只提供 exact delta，并禁止外部工具；`通信狗`
+判为 `CLEAN（附 MINOR）`：任一 `bun test` 失败只会把累计 `rc` 置为 1，后续成功不会清零，
+末尾 `[ "$rc" -eq 0 ]` 因而在脚本中返回非零，在交互 shell 中也可由 `$?` 读取而不会退出
+操作者的 shell。无 `trap`、只做跑前的 DB/WAL/SHM 清理，以及 nullglob、文件名前缀与
+`qa.sh` 同步仍是 `MINOR`/`NOT COVERED`。该闭环证明 `通信狗` 能复核作者是否真正关闭自己
+先前指出的缺陷，而不是只会首次挑错。
+
+完整 75 行节点判活文档 PR #812 通过任务
+`b6503c90-8dfe-4533-9fb0-1ac92351b2e6` 做了下一档 prompt-contained 审查。输入钉死
+`base=034f00647d42d38d5086d7fc057eb7824a441791` 与
+`head=7b1855fc227a68af017e2b6baef08edf369c24fb`，并包含全文而非摘要。`通信狗` 在约 35 秒内
+返回 `MINOR`：主线“看产物推进，不看进程数/started”自洽；但 `task_events.actor`“伪造不了”
+没有鉴权、重放或 DB 写入证据，`capture-pane | tail` 可能回显任务正文，而“有桥、无
+app-server 的 codex 节点就是此故障”应收窄为契约上预期有 appsrv 且长期缺失时的高度可疑
+故障类。它还把 queued→600 秒只支持排队与超时、不能单独证明唯一因果列为边界。该结果已用
+`send_message` 回传维护者；它是完整语义审查证据，仍不是 merge authority。
+
 针对 Grok TUI 出站假健康的 #813 已从旧候选分出新 Draft PR
 [#825](https://github.com/sleep2agi/agent-network/pull/825)：冻结 source
 `8186b79de8e2f904c28bec268d93a523503a6845`，新增产品链 doctor 4→3 反向门，并把 TUI-ready
