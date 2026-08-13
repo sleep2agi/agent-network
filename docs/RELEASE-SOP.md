@@ -36,7 +36,8 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > 所以 R367 没有、也不该把它们清掉。代价是:**latest 或 preview 一发布,它们立刻变成假的**,
 > 而且是危险的那种假 —— 会告诉用户一道已经存在的安全 preflight 不存在。
 >
-> 逐次发版必须重新核对的位置(2026-08-13 实测,共 7 个文件):
+> 逐次发版必须重新核对的位置(**8 个路径**,下表 8 行 = 8 个文件 ——
+> 不要把 zh/en 合成一行数,分母数错会漏核):
 >
 > | 文件 | 行 | 断言 |
 > |---|---|---|
@@ -46,11 +47,22 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > | `docs-site/docs/en/deploy/clean-server.md` | 21–22 | 同上(英文) |
 > | `docs-site/docs/troubleshooting.md` | 29、37 | preview 有 preflight / latest 没有 |
 > | `docs-site/docs/en/troubleshooting.md` | 29、37 | 同上(英文) |
-> | `docs-site/docs/guide/versioning.md` + `en/` 对应 | 11 | `anet -v` 顶行示例 `anet v2.2.21` |
+> | `docs-site/docs/guide/versioning.md` | 11 | `anet -v` 顶行示例 `anet v2.2.21` |
+> | `docs-site/docs/en/guide/versioning.md` | 11 | 同上(英文) |
 >
-> 核对方法不是 grep,是**真机装**:`npm i -g @sleep2agi/agent-network@latest` 进干净容器,
-> 不装 bun 跑一次 `anet hub start`,看它到底裸崩还是被拦。今天实测 `2.2.21` 仍是裸崩
-> (`syscall: 'spawn bunx'`, `code: 'ENOENT'`),所以上述断言现在全部成立 —— 发版后就不一定了。
+> **核对方法不是 grep,是真机装。但不同断言要各跑各的 —— 一次探针不能替所有:**
+>
+> | 断言 | 核法 | 2026-08-13 状态 |
+> |---|---|---|
+> | latest 裸崩 / preview 被 preflight 拦 | 干净容器装对应通道、**不装 bun**,跑 `anet hub start` | **已实测**:latest `2.2.21` 仍裸崩(`syscall: 'spawn bunx'`, `code: 'ENOENT'`);preview 被拦 |
+> | `anet -v` 顶行示例 | 装 latest 后跑 **`anet -v`**,比对顶行 | **未实测** |
+> | 安装命令里的版本 pin | 比对 npm dist-tag 与文中命令 | **未实测** |
+>
+> 🔴 **那次探针只证明了第一行。** 把它当成「整张表都成立」是证据越权 ——
+> **一次运行只能证明它实际执行过的那条路径。**
+>
+> 当前坐标(便于下次比对):latest `2.2.21`、preview `0.9.0-preview.29`(commhub-server)。
+> preview 版本每次发版都变,重核时以 npm dist-tag 实际值为准,别照抄这里。
 :::
 
 ### B. Frozen snapshots（永不动）
