@@ -1,0 +1,114 @@
+# Grok co-presence native effectful-tool deny — exact-source evidence
+
+Date: 2026-08-13
+Base: 114967626f20c7ef036c3d0e0dab295e1f983a89 (#826 report head)
+Source commit: 40da92b7c3a850264603b09554e791c94d8493e3
+Image: anet-test830:40da92b7
+Image ID / repo digest: sha256:376dca2042d7b11b44b30dc0880bdcec8603165aeca6347d5b0c332c8c5dedbd
+
+## Live trigger that motivated the fix
+
+A prompt-contained PR review explicitly prohibited tools and the pinned Grok 0.2.93 TUI rendered
+`Run No-op; review is prompt-only`. Its `events.jsonl` nevertheless emitted this exact lifecycle:
+
+```text
+permission_requested tool_name=run_terminal_command
+permission_resolved tool_name=run_terminal_command decision=allow wait_ms=0
+tool_completed tool_name=run_terminal_command outcome=success
+```
+
+The pre-fix argv denied only the cross-runtime name `Bash`. The co-presence supervisor subsequently failed
+closed with `grok_failure:approval_boundary` and stopped the TUI, but that happened after the vendor had already
+reported the terminal tool as completed. The previous claim that shell was unavailable was therefore false.
+
+The affected node is intentionally offline until a reviewed build is published and an authorized single-node
+pilot completes. This report does not treat the earlier recovery as proof of post-fix deny behavior.
+
+## Source delta and denominator
+
+Pinned Grok 0.2.93 ignores `--tools` in its interactive TUI, so the generated agent profile is not an authority
+for the complete native tool inventory. The source now adds an explicit vendor-native deny set at the final argv
+boundary while retaining the compatibility aliases `Bash`, `Write`, and `WebFetch`:
+
+```text
+run_terminal_command  run_terminal_cmd  search_replace  write_file  edit_file  apply_patch
+web_fetch  http_request  image_gen  generate_image  video_gen  generate_video
+browser  computer  screenshot
+```
+
+The set is derived from the pinned binary's observable strings plus the repository's existing Grok alias map.
+Only `run_terminal_command` has been observed in a live permission lifecycle; the other entries are preventive
+denies, not claims that every name is currently reachable. Both the direct launch-policy test and the
+three-profile process test carry a literal expected set independent of the production constant.
+
+Changed source files and SHA-256 values:
+
+```text
+c6857a2a738256355b8c36aa8a6019b32efed1cc3b6cce092a51e92c5b78e7ac  agent-node/src/runtime/grok-copresence/policy.ts
+dc82633d1fd3d728373aeae7f1f8dc85e6ce3ace9795e33b7c62b1a9203b425a  agent-node/src/runtime/grok-copresence/runtime.ts
+96e88200c7204f868ac523a94c71e11ac4c556e51a4490a816af4bcb5cb4e298  agent-node/src/runtime/grok-copresence/runtime.test.ts
+7442180a6853be08bf764a1974f8c9d66ab6259a1bb04f63f2545321271f05d5  agent-node/src/runtime/grok-copresence/profile-process.test.ts
+```
+
+## Docker evidence
+
+The image was built from source commit `40da92b7c3a850264603b09554e791c94d8493e3` with
+`tests/test725-agent-node-unit-ci/Dockerfile` and pinned Bun 1.3.14.
+
+Full non-root agent-node unit domain:
+
+```text
+1284 pass
+0 fail
+4466 expect() calls
+Ran 1284 tests across 91 files. [115.54s]
+MUTATION_RED readable-attachment-runtime-disconnected rc=1
+RESULT: PASS
+```
+
+Focused clean run:
+
+```text
+54 pass
+0 fail
+512 expect() calls
+Ran 54 tests across 2 files. [60.71s]
+```
+
+Four independent product mutations changed exactly one production deny name after a byte-change check. Each
+mutation ran the two named policy tests in a fresh container; the zero-mutation control above was green. Each
+mutation produced two failures whose text named the missing expected tool:
+
+```text
+MUTATION_RED run_terminal_command rc=1  # terminal
+MUTATION_RED search_replace rc=1         # write/edit
+MUTATION_RED web_fetch rc=1              # network fetch
+MUTATION_RED image_gen rc=1               # media generation
+```
+
+Representative raw aggregate and named failure:
+
+```text
+Expected to contain: "run_terminal_command"
+0 pass
+52 filtered out
+2 fail
+41 expect() calls
+Ran 2 tests across 2 files. [275.00ms]
+RC=1
+```
+
+An unrelated failure or a byte-only no-op did not count as witnessed-red.
+
+## Honest limits
+
+- NOT COVERED: a released build has not yet been run against the real pinned Grok 0.2.93 vendor after this
+  change. The decisive pilot must use a fresh session and attempt prompt-only review plus representative
+  terminal, write, fetch, and media requests. The event stream must contain no request/resolution/completion for
+  the denied tools, and no filesystem/network side effect may occur.
+- The Docker evidence proves exact argv construction and regression sensitivity. It does not prove that a future
+  Grok binary preserves the same permission-rule vocabulary; the exact version pin remains required.
+- The deny list is an explicit boundary for the pinned build, not a claim that string inspection discovers every
+  future native tool. A Grok version change requires a fresh inventory and witnessed pilot before rollout.
+- This delta does not broaden repo-read capability, grant merge/publish authority, or authorize any production
+  restart. The communication-dog node remains offline pending review, release approval, and rollback-bound pilot.
