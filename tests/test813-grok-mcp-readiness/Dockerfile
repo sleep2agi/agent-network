@@ -14,5 +14,6 @@ RUN cd agent-network && bun install --ignore-scripts
 COPY agent-network/src ./agent-network/src
 COPY agent-node/src ./agent-node/src
 COPY tests/test813-grok-mcp-readiness ./tests/test813-grok-mcp-readiness
+COPY tests/lib/safe-rm.sh ./tests/lib/safe-rm.sh
 
 ENTRYPOINT ["bash", "tests/test813-grok-mcp-readiness/run.sh"]
