@@ -666,6 +666,47 @@ agent_node_cli_sha256=03e9bed6630530e8fb03420dba32c6e06a90ae8cbe3fcdf33541a04770
 `copresence=true`、`tools=[WebSearch]`，repo-read 尚未上线。切换时不得重新读取或回显配置中的
 token/env 值，只能核 mode、hash 与上述非密钥字段。
 
+### 2026-08-13 `run_terminal_command` 事故与恢复
+
+一条明确要求 prompt-only、禁止外部工具的 PR #810 文档审查仍让 Grok TUI 显示
+`Run No-op; review is prompt-only`。该 session 的 `events.jsonl` 给出决定性顺序：
+
+```text
+permission_requested tool_name=run_terminal_command
+permission_resolved tool_name=run_terminal_command decision=allow wait_ms=0
+tool_completed tool_name=run_terminal_command outcome=success
+```
+
+当时启动 argv 只拒绝跨 runtime 的策略名 `Bash`，没有拒绝 Grok 0.2.93 实际上报的 vendor
+tool name `run_terminal_command`。监督层随后以 `grok_failure:approval_boundary` fail-closed 并停止
+TUI，但发生在工具已报告成功之后。因此此前“shell unavailable”的 banner/文档声明被实证推翻；
+在修复经真 vendor pilot 前，不再向该节点派任何工作任务。
+
+恢复只涉及 `通信狗`。旧配置备份在 owner-only 目录
+`/home/vansin/.commhub/rollback-commdog-approval-boundary-20260813T061442Z/`，其中
+`config.json.old` mode 600、SHA-256 为
+`a8cbc30dc7d2466073c27f2e8499db598a8fc23c310ec121bb458919f775230b`。精确停止旧 PIDs 后，使用
+`/home/vansin/.grok/bin/grok-0.2.93`（`grok 0.2.93 (f00f96316d)`）和原 agent-node 构建创建新
+session `890fdcee-96d1-429e-991f-5bc09ad97722`。恢复后 tmux 仍严格名为 `通信狗`，`node/tui`
+两窗为 `%1107/%1109` 且 `dead=0`。
+
+新 session 会按设计把 `grokCliSession` 写回配置，所以恢复后的 live config SHA-256 是
+`719aec58f991816c524e7890fafcaf8744b6cc368e6e6b416e97bec736d07220`；不能把“非密钥能力字段
+未变”误写成“配置逐字节未变”。后态仍是 `runtime=grok-build-cli`、`model=grok-4.5`、
+`grokCopresence=true`、`tools=[WebSearch]`、mode 600。
+
+修复 Draft PR 为 #830，严格堆叠顺序是 #825 → #826 → #830：
+
+```text
+source=f407ed961bc9f0e146657439a9fbfb113604362e
+report-only=78a6de9c9d1277936326ce31db0561bc90f07151
+```
+
+Docker 证明完整 unit domain 为 `1284 pass / 0 fail / 91 files`，聚焦门为 `54/0`；删掉唯一
+`--deny run_terminal_command` 生产 argv 后，两条独立断言变成 `52 pass / 2 fail`。这些只证明
+argv 构造，不冒充真 vendor：上线前必须用新 session 重放同型任务，并断言 events 中不存在该
+工具的 request/resolution/completion。
+
 ## 数据与密钥边界
 
 Git 只恢复软件和非密钥流程，不恢复以下数据：Hub 数据库、node token、Grok 登录/会员状态、
