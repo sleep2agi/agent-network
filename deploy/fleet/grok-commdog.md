@@ -4,10 +4,24 @@
 宿主机上的安装目录与 tmux 会话只是部署副本；Git 中的 source commit 与本文才是
 恢复依据。本文不授权批量升级、生产数据库操作或其它舰团节点变更。
 
-## 当前已验状态（2026-08-13）
+## 当前安全终态（2026-08-13 15:42 CST）
 
-三个节点使用相同的冻结软件制品，但每个节点拥有独立 workspace、node config、node/session
-identity、tmux 和 Grok attach socket：
+以下是本轮只读回查得到的**存活状态**，优先级高于后文按时间记录的历史基线：
+
+| alias | Hub 状态 | 当前 session_id | tmux 状态 |
+| --- | --- | --- | --- |
+| `通信狗` | `offline` | `890fdcee-96d1-429e-991f-5bc09ad97722` | session `通信狗` 保留；`0:node` pane `%1107` 为 `dead=1`；无 live TUI window |
+| `A站狗` | `idle` | `0bff8e47-ead8-4628-bea7-74b58335785a` | session `A站狗`；`0:node` + `1:tui`，均 `dead=0` |
+| `P站狗` | `idle` | `f36fe2d9-166a-4b3e-b9c3-7ad065f60bc0` | session `P站狗`；`0:node` + `1:tui`，均 `dead=0` |
+
+`通信狗` 是事故后的故意停机状态，必须等待已审修复发布并完成单节点 pilot；不得用后文旧
+session、旧 pane 或旧 runtime 字节直接恢复。`A站狗`、`P站狗` 不在该 pilot 的变更范围内。
+
+### 首轮已验软件坐标（历史证据，不是当前存活坐标）
+
+三个节点曾使用相同的冻结软件制品，但每个节点拥有独立 workspace、node config、node/session
+identity、tmux 和 Grok attach socket。下表保留首轮验收坐标用于审计；其中 `通信狗` 的 session
+后来已被替换，不能作为当前启动参数：
 
 | alias | node_id | session_id | workspace | tmux |
 | --- | --- | --- | --- | --- |
@@ -105,8 +119,8 @@ agent-node、Hub SSE 和 tmux `0:node` 仍在线。这再次证明“节点 onli
 
 Grok CLI 0.2.93 在恢复日志中明确警告：会话创建后工具库存固定，resume 不能应用已经变化的
 工具 profile。保存旧 config、session 与进程坐标后，本次只对 `通信狗` 执行一次受控
-`--new-session`，得到当前 session `c47d3225-6d87-48a2-8c84-6c11db20a455`；旧 session 保留为
-事故证据，不是当前运行坐标。owner-only 回滚点为
+`--new-session`，得到当时的新 session `c47d3225-6d87-48a2-8c84-6c11db20a455`；旧 session 保留为
+事故证据。该 session 后来又被替换，不是当前运行坐标。owner-only 回滚点为
 `/home/vansin/.commhub/rollback-commdog-tui-20260813T025425Z/`。
 
 新 session 的最小 CommHub-only 行为验收任务
@@ -181,12 +195,12 @@ nvm-only 生产观测、跨平台/旧配置边界与三套行为门固化到 iss
 其次，操作者在 tmux `通信狗` 的真实 `1:tui` 输入框中直接要求模型调用
 `commhub_send_message`。TUI 搜索到 CommHub 工具并在 6.3 秒内向 `通信龙` 发送慰问，返回 Hub
 message id `948b5add-0f49-41e2-9e4b-3721866b2ec5`，完成后仍停在可交互提示符。这个验收没有
-经过 agent-node 的任务回执代发路径，直接证明当前 TUI 会话的出站 CommHub MCP 工具可见且
+经过 agent-node 的任务回执代发路径，直接证明当时 TUI 会话的出站 CommHub MCP 工具可见且
 可调用，关闭了此前“入站任务正常、TUI 搜不到 CommHub 工具”的用户侧故障。它仍不代替
 #822 的 exact-source Docker 证据、CI 或独立源码终审。
 
 下一档真实舰团只读巡检任务 `fc7bdc50-7d5d-4786-960c-8bb0b6cffe24` 要求
-`commhub_get_all_status` 只核对三个狗节点，并明确禁止终端、文件和写操作。当前工具没有 alias
+`commhub_get_all_status` 只核对三个狗节点，并明确禁止终端、文件和写操作。当时该工具没有 alias
 过滤，返回全舰团后模型可见结果被截断；模型随后错误地尝试用 Run 解析落盘结果，运行时安全门
 以 `[grok_failure:approval_boundary]` 终止 turn 和 TUI。没有发生写操作，证明安全门有效；同时也
 证明当前工具形状不适合让受限模型直接做大舰团巡检。缺口已登记为 issue
@@ -289,7 +303,7 @@ session 做跨段综合。任务分别为 `32646fab-6d92-4a32-9d8f-0cc4c00907f7`
 `449683586a5a2ba44e99eb8c595be25d7467c967`。其 exact-source Docker 证据为 agent-node
 `1284 pass / 0 fail / 4406 expect / 91 files`，#813 readiness 四条 mutation 全红，repo-read
 selector 命名 mutation 也红，镜像回取文件 `17/17 MATCH`。该证据生成时两条均等待独立审
-和合并；live `通信狗` 继续使用已验证的 `x-search`/CommHub-only 边界，**不得**因 Draft PR
+和合并；在该证据生成时，live `通信狗` 继续使用已验证的 `x-search`/CommHub-only 边界，**不得**因 Draft PR
 或本段记录提前改成 repo-read。
 
 独立审随后闭环：#825 裁定 `CLEAN`，durable comment 为
@@ -321,7 +335,7 @@ node_pane=%1107
 tui_pane=%1108
 ```
 
-当前部署副本与哈希：
+该时点的部署副本与哈希：
 
 ```text
 /home/vansin/commniu-grok-candidate-a7865a43/runtime/node_modules/@sleep2agi/agent-network/dist/bin/cli.js
@@ -612,7 +626,8 @@ registry 对上述 preview 只返回 tarball/integrity，未返回可用 `gitHea
 再发布 preview，并用远端 immutable tag 回读验证它剥出的 SHA 等于构建 commit；不得只验本地
 tag，也不得从未提交工作区发包。仓内校验器为 `scripts/verify-release-tag.sh`。
 
-这只是候选，不是上线授权。当前 live `通信狗` 仍使用已验的 x-search profile。repo-read pilot
+这只是候选，不是上线授权。在下述 dry-run baseline 采集时，live `通信狗` 仍使用已验的
+x-search profile；事故后的当前安全终态是停机。repo-read pilot
 必须同时满足：
 
 1. #825 与 #826 依次经过独立对抗审，source/report 坐标未漂，并按正常流程合并、发版；不得
