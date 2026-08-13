@@ -1,0 +1,83 @@
+# test728 — pin Bun in the active rename-ghost E2E gate
+
+Date: 2026-08-13 (Asia/Shanghai)
+Issue: https://github.com/sleep2agi/agent-network/issues/728
+Base: d4283a229dbdcd85d0e4ceb9f715c84607a521b4
+Source commit: eb16765c6f2d39872cdd12635226c03cc473c11c
+Image: sha256:bffa2ea7463ab1c13bfab718dbe75ef39ab102f8200d171c7da8dd4e3adcfea9
+
+## Result
+
+PASS. The only remaining `bun.sh` Dockerfile directly built by every pull
+request's GitHub E2E workflow now copies Bun from the reviewed digest-pinned
+1.3.14 image instead of executing the mutable network installer.
+
+The exact-source image completed the real rename-ghost regression:
+
+```
+issue #180 rename ghost e2e — PASS=20 FAIL=0
+```
+
+Both foreground and tmux-detached rename lanes completed. In each lane the
+old alias disappeared, the new alias process was alive, and no old-alias MCP
+subprocess remained.
+
+The Dockerfile also verifies both executable entry points during build:
+
+```
+test "$(bun --version)" = "1.3.14"
+test "$(bunx --version)" = "1.3.14"
+```
+
+## Supply-chain witnessed red
+
+An ephemeral copy of the source Dockerfile changed only the Bun image digest
+to 64 zeroes. Building the same context failed before any test layer with:
+
+```
+MUTATION_RC=1
+oven/bun:1.3.14@sha256:0000...0000: not found
+failed to resolve source metadata
+```
+
+This shows the digest is consumed by Docker's source resolver and is not a
+decorative comment or unused build argument.
+
+## Current denominator
+
+A current-main read found 30 remaining Dockerfiles containing a bun.sh/curl
+installer:
+
+- 15 directories named `tests/qa-*`;
+- 15 historical directories named `tests/test*`;
+- 0 overlap with `scripts/qa.sh`'s active L1 list (that denominator was
+  already closed by #762);
+- 1 direct GitHub workflow build: `tests/qa-180-rename-ghost/Dockerfile`.
+
+This change intentionally fixes that single always-on CI member first. It
+does not mechanically rewrite the 29 ad-hoc or historical suites before
+their invocation and compatibility requirements are classified.
+
+## Scope and provenance
+
+The source commit changes exactly one file:
+`tests/qa-180-rename-ghost/Dockerfile`. The base file's retry/fail-closed
+bun.sh block is replaced by one digest-pinned stage, one binary copy, a bunx
+symlink, and two exact-version assertions. No product source, workflow,
+package metadata, or production file changes.
+
+The full run log SHA256 is
+`285afa9b513b6ccefef93cabf8eb6ad12c8a7fc2068a3169cf90e95a66c07c2a`.
+It contains random test IDs and timings and is diagnostic, not claimed to be
+reproducible.
+
+## Honest limits
+
+- Issue #728 remains open for the other 29 non-L1 Dockerfiles.
+- The runtime image is digest-pinned, but `node:22-bookworm-slim` remains a
+  moving tag inherited from the existing Dockerfile; this PR does not claim
+  the entire image is byte-reproducible.
+- The E2E uses a mock Claude process and does not prove real-vendor behavior;
+  that is an existing limit of the rename-ghost suite.
+- No npm package, GitHub release, node, production service, database,
+  credential, or repository setting was changed.
