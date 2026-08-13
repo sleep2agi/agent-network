@@ -27,8 +27,11 @@ COMM_DOG_TURN_OK alias=通信狗 model=grok-4.5
 CHECK=2+3=5
 ```
 
-这证明了该次节点注册、入站消费、真实 Grok turn 与 Hub 终态回执。它不证明长期稳定性、
-heavy 会员的完整配额，也不授权生产写操作。
+第二次任务复用了同一 session：节点正确还原上一轮 `CHECK=2+3=5`，运行日志出现真实
+`tool_running` 阶段，并在 10 秒内返回官方页面 `https://x.ai/grok` 与 terminal reply。
+
+这证明了该次节点注册、入站消费、连续 Grok turn、会话上下文、WebSearch 和 Hub 终态回执。
+它不证明长期稳定性、heavy 会员的完整配额，也不授权生产写操作。
 
 ## 从 Git 恢复软件
 
