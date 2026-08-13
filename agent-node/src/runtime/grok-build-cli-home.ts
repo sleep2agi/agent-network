@@ -86,7 +86,7 @@ export function assertGrokCommhubMcpDoctor(doctorJson: string): void {
   const server = Array.isArray(report?.servers)
     ? report.servers.find((candidate: any) => candidate?.name === "commhub")
     : undefined;
-  const requiredChecks = ["command found", "server started", "handshake OK", "3 tools discovered"];
+  const requiredChecks = ["command found", "server started", "handshake OK", "4 tools discovered"];
   const checks = Array.isArray(server?.checks) ? server.checks : [];
   const missing = requiredChecks.filter((label) => !checks.some(
     (check: any) => check?.label === label && check?.passed === true,
