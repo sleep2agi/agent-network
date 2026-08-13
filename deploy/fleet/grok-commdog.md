@@ -698,23 +698,25 @@ session `890fdcee-96d1-429e-991f-5bc09ad97722`。恢复后 tmux 仍严格名为 
 修复 Draft PR 为 #830，严格堆叠顺序是 #825 → #826 → #830：
 
 ```text
-source=40da92b7c3a850264603b09554e791c94d8493e3
-report-only=8d20ba20f0e731ece3e2925b967cce78e468e84c
-image=sha256:376dca2042d7b11b44b30dc0880bdcec8603165aeca6347d5b0c332c8c5dedbd
+source=433b4af44bdcc09145c75b697634f74aec42a7df
+report-only=d51a4473f6aea75547437150dba729524506062b
+image=sha256:df3b83526409d21ece60f0a5a12589e0fc0933616af617ea83abd6e1416deb1c
 ```
 
 后续核验还证明 Grok agent profile 的 `tools` 列表不是完整的 native tool 权威边界。最终 source
-因此不是只补一个名称，而是在最后的启动 argv 中显式拒绝 pinned 0.2.93 可观察到的 15 个
-effectful 名称，覆盖 terminal、write/edit、fetch、media 与 browser/computer 类，同时保留
-`Bash`、`Write`、`WebFetch` 兼容别名。只有 `run_terminal_command` 已在 live lifecycle 中出现；
-其余是从 pinned binary 字符串与仓内 alias map 得出的预防性拒绝，不能写成“已证明可达”。
+以 pinned 0.2.93 的真实 `AvailableCommandsUpdate._meta.tools` 25-name 清单为分母：每个名称必须
+属于所选 profile 的明确允许集，或在最后启动 argv 中被明确拒绝。18 个非 read/search 名称进入
+common deny，另有 10 个 binary/repository alias 作预防性拒绝；`commhub-only`、`x-search`、
+`repo-read` 再分别约束 read_file/grep/list_dir/web_search。只有 `run_terminal_command` 已在 live
+lifecycle 中出现；其余规则不能写成“已证明每个名称可达”。
 
-Docker 证明完整 unit domain 为 `1284 pass / 0 fail / 4466 expect / 91 files`，聚焦门为
-`54 pass / 0 fail / 512 expect / 2 files`。四个独立 production mutation 分别破坏
-`run_terminal_command`、`search_replace`、`web_fetch`、`image_gen`，每条均在 fresh container
-中让两条命名断言精确变成 `0 pass / 2 fail`。这些仍只证明 argv 构造，不冒充真 vendor：上线
-前必须用新 session 重放 prompt-only 审查并探测 terminal/write/fetch/media 四类请求，events
-不得出现被拒工具的 request/resolution/completion，且磁盘与网络侧不得产生副作用。
+Docker 证明完整 unit domain 为 `1284 pass / 0 fail / 4609 expect / 91 files`，聚焦门为
+`54 pass / 0 fail / 655 expect / 2 files`。七个独立 production mutation 分别破坏 common
+`run_terminal_command`、`write`、`scheduler_create`、`web_fetch`、`image_edit` 和 profile-specific
+`read_file`、`web_search`；每条均在 fresh container 中按缺失工具名转红。这些仍只证明 argv
+构造，不冒充真 vendor：上线前必须用新 session 重放 prompt-only 审查并覆盖 terminal、write、
+scheduler/control、fetch、media、read 与 web-search 行为，events 不得出现被拒工具的
+request/resolution/completion，且磁盘、网络与 scheduler 侧不得产生副作用。
 
 恢复取证完成后，节点仍运行未修复字节；继续在线会让后续任务再次触发同一 shell 面。因此在
 14:38 CST 对 PID `2067974` 发送精确停止，进程在 barrier 内退出，未使用 `pkill`、未修改配置、
