@@ -21,6 +21,7 @@ on:
       - '.github/workflows/qa.yml'
       - 'tests/test725-agent-node-unit-ci/**'
       - 'tests/test745-agent-network-unit-ci/**'
+      - 'tests/test746-setup-bun-pin/**'
   push:
     branches: [main]
     paths:
@@ -32,6 +33,7 @@ on:
       - '.github/workflows/qa.yml'
       - 'tests/test725-agent-node-unit-ci/**'
       - 'tests/test745-agent-network-unit-ci/**'
+      - 'tests/test746-setup-bun-pin/**'
 
 # Older runs on the same ref get cancelled — saves minutes when a PR is
 # updated rapidly. main pushes run independently.
@@ -83,6 +85,8 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
 
       - name: Show QA test inventory
         run: bash scripts/qa.sh --list
