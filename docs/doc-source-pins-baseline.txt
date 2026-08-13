@@ -13,17 +13,8 @@
 # 修一条就把它从这里删掉 —— 门会检查这一点,不删会红。
 # 修法见 #831:优先把行号锚点换成符号锚点(读者用 git grep 定位,重构改不坏)。
 
-server/src/auth.ts#L7
-server/src/auth.ts#L99
-server/src/auth.ts#L102
 server/src/auth.ts#L184
-server/src/auth.ts#L243
-server/src/auth.ts#L269
-server/src/auth.ts#L374
-server/src/db.ts#L168
 server/src/index.ts#L253
-server/src/push.ts#L11
-server/src/push.ts#L35
 server/src/push.ts#L38
 server/src/tools.ts#L521
 server/src/tools.ts#L571
