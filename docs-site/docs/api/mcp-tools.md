@@ -22,7 +22,7 @@ CommHub Server 共注册约 40 个 MCP Tools；本页文档化其中 agent 日�
 
 ### report_status
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L88)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— 搜 `"report_status"`（注册点在 `server/src/tools.ts`，全仓唯一）
 
 上报 Agent 状态。同时用作心跳（建议每 3 分钟调用一次）。
 
@@ -89,7 +89,7 @@ report_status({
 
 ### report_completion
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L213)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— 搜 `"report_completion"`（注册点在 `server/src/tools.ts`，全仓唯一）
 
 汇报任务完成。会自动更新 session 状态为 idle。
 
@@ -141,7 +141,7 @@ report_completion({
 
 ### get_inbox
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L837)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— 搜 `"get_inbox"`（注册点在 `server/src/tools.ts`，全仓唯一）
 
 拉取待处理的消息。
 
@@ -181,7 +181,7 @@ report_completion({
 
 ### ack_inbox
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L871)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— 搜 `"ack_inbox"`（注册点在 `server/src/tools.ts`，全仓唯一）
 
 确认消息已接收。ACK 后消息不会再被 `get_inbox` 返回。
 
@@ -212,7 +212,7 @@ Hub 先用 `id = message_id`，或对任务消息用 `task_id = message_id`，�
 
 ### send_task
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L450)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— 搜 `"send_task"`（注册点在 `server/src/tools.ts`，全仓唯一）
 
 派发任务到指定 Agent 的 inbox。**`send_task` 会触发收件方 AI 处理**（跟 [`broadcast`](#broadcast) 同款；`send_message` / `send_reply` / `send_ack` 不触发，详见 [Task 生命周期 — 消息类型](/concepts/task-lifecycle#消息类型)）。
 
@@ -261,7 +261,7 @@ send_task({
 
 ### send_message
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L550)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— 搜 `"send_message"`（注册点在 `server/src/tools.ts`，全仓唯一）
 
 发消息（不触发 AI 处理，只展示）。
 
@@ -288,7 +288,7 @@ send_task({
 
 ### send_reply
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L589)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— 搜 `"send_reply"`（注册点在 `server/src/tools.ts`，全仓唯一）
 
 回复任务。关联到原始 task_id，不触发对方 AI 处理。
 
@@ -317,7 +317,7 @@ send_task({
 
 ### send_ack
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L667)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— 搜 `"send_ack"`（注册点在 `server/src/tools.ts`，全仓唯一）
 
 确认收到任务（轻量级，不入 inbox）。
 
@@ -343,7 +343,7 @@ send_task({
 
 ### retry_task
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L693)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— 搜 `"retry_task"`（注册点在 `server/src/tools.ts`，全仓唯一）
 
 重试失败/取消/过期的任务。
 
@@ -375,7 +375,7 @@ send_task({
 
 ### cancel_task
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L803)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— 搜 `"cancel_task"`（注册点在 `server/src/tools.ts`，全仓唯一）
 
 取消待处理的任务。
 
@@ -408,7 +408,7 @@ send_task({
 
 ### reassign_task
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L835)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— 搜 `"reassign_task"`（注册点在 `server/src/tools.ts`，全仓唯一）
 
 将任务转给另一个 Agent。
 
@@ -446,7 +446,7 @@ send_task({
 
 ### get_task
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L740)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— 搜 `"get_task"`（注册点在 `server/src/tools.ts`，全仓唯一）
 
 查询任务详情。
 
@@ -485,7 +485,7 @@ send_task({
 
 ### list_tasks
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L763)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— 搜 `"list_tasks"`（注册点在 `server/src/tools.ts`，全仓唯一）
 
 查询任务列表，支持多维度过滤。
 
@@ -537,7 +537,7 @@ send_task({
 
 ### get_all_status
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L369)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— 搜 `"get_all_status"`（注册点在 `server/src/tools.ts`，全仓唯一）
 
 获取所有 Session 状态。超过 10 分钟无心跳的自动标记为 offline。
 
@@ -581,7 +581,7 @@ send_task({
 
 ### get_session_status
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L415)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— 搜 `"get_session_status"`（注册点在 `server/src/tools.ts`，全仓唯一）
 
 获取单个 Session 的详细状态，包括 inbox 待处理数和最近完成记录。
 
@@ -627,7 +627,7 @@ send_task({
 
 ### get_completions
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L925)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— 搜 `"get_completions"`（注册点在 `server/src/tools.ts`，全仓唯一）
 
 获取完成记录列表。
 
@@ -669,7 +669,7 @@ send_task({
 
 ### broadcast
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L878)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— 搜 `"broadcast"`（注册点在 `server/src/tools.ts`，全仓唯一）
 
 向所有在线 Agent 广播消息。**broadcast 与 `task` 同样会触发收件方 AI 处理**（[`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) 只对 `task` 和 `broadcast` 类型 think；其余 `reply` / `message` / `ack` 只展示）；如果只是想群发通知不要求 AI 回复，用循环 `send_message` 替代。完整消息类型对照见 [Task 生命周期 — 消息类型](/concepts/task-lifecycle#消息类型)。
 

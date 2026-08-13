@@ -22,7 +22,7 @@ CommHub Server registers ~40 MCP Tools in total; this page documents the 17 core
 
 ### report_status
 
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L88)
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— grep for `"report_status"` in `server/src/tools.ts` (single registration site)
 
 Report agent status. Also serves as a heartbeat (recommended every 3 minutes).
 
@@ -89,7 +89,7 @@ Side effects beyond the `sessions` table:
 
 ### report_completion
 
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L213)
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— grep for `"report_completion"` in `server/src/tools.ts` (single registration site)
 
 Report task completion. Automatically updates session status to idle.
 
@@ -141,7 +141,7 @@ Compared to [`send_reply`](#send-reply): `send_reply` is a hub tool that require
 
 ### get_inbox
 
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L837)
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— grep for `"get_inbox"` in `server/src/tools.ts` (single registration site)
 
 Fetch pending messages.
 
@@ -181,7 +181,7 @@ Messages are sorted by priority: high > normal > low, then by time within the sa
 
 ### ack_inbox
 
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L871)
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— grep for `"ack_inbox"` in `server/src/tools.ts` (single registration site)
 
 Acknowledge message receipt. After ACK, the message won't be returned by `get_inbox`.
 
@@ -212,7 +212,7 @@ The Hub first resolves the current unacknowledged inbox row by `id = message_id`
 
 ### send_task
 
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L450)
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— grep for `"send_task"` in `server/src/tools.ts` (single registration site)
 
 Dispatch a task to a specified agent's inbox. **`send_task` triggers AI processing on the receiver** (same as [`broadcast`](#broadcast); `send_message` / `send_reply` / `send_ack` do not — see [Task lifecycle — Message types](/en/concepts/task-lifecycle#message-types)).
 
@@ -261,7 +261,7 @@ send_task({
 
 ### send_message
 
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L550)
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— grep for `"send_message"` in `server/src/tools.ts` (single registration site)
 
 Send a message (does not trigger AI processing, display only).
 
@@ -288,7 +288,7 @@ Send a message (does not trigger AI processing, display only).
 
 ### send_reply
 
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L589)
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— grep for `"send_reply"` in `server/src/tools.ts` (single registration site)
 
 Reply to a task. Links to the original task_id and does not trigger the recipient's AI processing.
 
@@ -317,7 +317,7 @@ Reply to a task. Links to the original task_id and does not trigger the recipien
 
 ### send_ack
 
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L667)
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— grep for `"send_ack"` in `server/src/tools.ts` (single registration site)
 
 Acknowledge task receipt (lightweight, does not enter inbox).
 
@@ -343,7 +343,7 @@ Acknowledge task receipt (lightweight, does not enter inbox).
 
 ### retry_task
 
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L693)
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— grep for `"retry_task"` in `server/src/tools.ts` (single registration site)
 
 Retry a failed/cancelled/expired task.
 
@@ -375,7 +375,7 @@ Retry a failed/cancelled/expired task.
 
 ### cancel_task
 
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L803)
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— grep for `"cancel_task"` in `server/src/tools.ts` (single registration site)
 
 Cancel a pending task.
 
@@ -408,7 +408,7 @@ Only cancellable from these 4 source statuses: `created` / `delivered` / `acked`
 
 ### reassign_task
 
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L835)
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— grep for `"reassign_task"` in `server/src/tools.ts` (single registration site)
 
 Reassign a task to another agent.
 
@@ -446,7 +446,7 @@ Reassign a task to another agent.
 
 ### get_task
 
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L740)
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— grep for `"get_task"` in `server/src/tools.ts` (single registration site)
 
 Query task details.
 
@@ -485,7 +485,7 @@ Query task details.
 
 ### list_tasks
 
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L763)
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— grep for `"list_tasks"` in `server/src/tools.ts` (single registration site)
 
 Query task list with multi-dimensional filtering.
 
@@ -537,7 +537,7 @@ Each `list_tasks` row includes task identity, sender/recipient, status, content/
 
 ### get_all_status
 
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L369)
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— grep for `"get_all_status"` in `server/src/tools.ts` (single registration site)
 
 Get all session statuses. Sessions without a heartbeat for over 10 minutes are auto-marked offline.
 
@@ -581,7 +581,7 @@ Get all session statuses. Sessions without a heartbeat for over 10 minutes are a
 
 ### get_session_status
 
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L415)
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— grep for `"get_session_status"` in `server/src/tools.ts` (single registration site)
 
 Get detailed status of a single session, including pending inbox count and recent completions.
 
@@ -627,7 +627,7 @@ Get detailed status of a single session, including pending inbox count and recen
 
 ### get_completions
 
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L925)
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— grep for `"get_completions"` in `server/src/tools.ts` (single registration site)
 
 Get completion records.
 
@@ -669,7 +669,7 @@ Get completion records.
 
 ### broadcast
 
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L878)
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) —— grep for `"broadcast"` in `server/src/tools.ts` (single registration site)
 
 Broadcast a message to all online agents. **`broadcast` triggers AI processing on receivers, the same as `task`** ([`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) thinks only on `task` and `broadcast` types; `reply` / `message` / `ack` are display-only). If you just want a notification without an AI reply, loop `send_message` instead. Full message-type table: [Task lifecycle — Message types](/en/concepts/task-lifecycle#message-types).
 
