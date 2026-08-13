@@ -34,6 +34,7 @@ curl http://localhost:9200/health
   "transport": "streamable-http",
   "sessions_count": 0,
   "sse_connections": 0,
+  "sse_sessions": {},
   "auth": "user-token",
   "security": "secured",
   "tmux": "disabled",
@@ -43,6 +44,22 @@ curl http://localhost:9200/health
   "uptime": 3600
 }
 ```
+
+> 🔴 **This sample was captured, not hand-written** — on 2026-08-13, from
+> `bunx --bun @sleep2agi/commhub-server@0.8.8` in a clean container, as the raw
+> response to an **unauthenticated** `curl /health`.
+>
+> **The two channels return different keys** — parse `/health` per channel:
+>
+> | Key | latest `0.8.8` | preview `0.9.0-preview.29` |
+> |---|---|---|
+> | `sse_sessions` | **returned even unauthenticated** (empty `{}`) | not returned unauthenticated |
+> | `limits` | absent | present |
+>
+> The other 13 keys exist on both. Note row one: on preview the key is absent
+> entirely, while on latest `0.8.8` the key is still emitted with an empty object.
+> The empty object leaks no session data, but code that treats *key presence* as
+> an authorization signal will behave differently across the two channels.
 
 Anonymous requests receive only the aggregate fields above and do not include
 `sse_sessions`. With a valid token, a system admin, legacy master, or DEV_OPEN

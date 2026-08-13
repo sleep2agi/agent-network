@@ -34,6 +34,7 @@ curl http://localhost:9200/health
   "transport": "streamable-http",
   "sessions_count": 0,
   "sse_connections": 0,
+  "sse_sessions": {},
   "auth": "user-token",
   "security": "secured",
   "tmux": "disabled",
@@ -44,7 +45,23 @@ curl http://localhost:9200/health
 }
 ```
 
-未认证请求只返回上述聚合数据，不包含 `sse_sessions`。携带有效 token 时：
+> 🔴 **这份样例是实测抓的,不是手写的** —— 2026-08-13 在干净容器里
+> `bunx --bun @sleep2agi/commhub-server@0.8.8`,未认证 `curl /health` 的原样响应。
+>
+> **两条线的键不一样,解析 `/health` 的脚本要按信道分别处理:**
+>
+> | 键 | latest `0.8.8` | preview `0.9.0-preview.29` |
+> |---|---|---|
+> | `sse_sessions` | **未认证也会返回**(空对象 `{}`) | 未认证不返回 |
+> | `limits` | 没有 | 有 |
+>
+> 其余 13 个键两条线都有。
+>
+> 注意第一行:下面「未认证不含 `sse_sessions` 内容」这条**在 preview 上是键都不出现**,
+> 而在 latest `0.8.8` 上**键仍然出现、值为空对象**。空对象不泄露任何 session 数据,
+> 但如果你的解析代码用「键是否存在」来判断权限,两条线的行为不同。
+
+未认证请求只返回聚合数据，**不含 `sse_sessions` 的内容**。携带有效 token 时：
 - system-admin、legacy master 或 DEV_OPEN 调用方可看到完整 `sse_sessions`；
 - 普通 `utok_` / `ntok_` 只看到其有权访问网络的 session；无网络成员关系时返回空对象。
 
