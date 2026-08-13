@@ -123,6 +123,13 @@ CommHub-only 协作；在新 session 的安全工具库存得到独立行为核�
 停在可交互提示符。该结果证明它可在正文材料充分时参与受限运维分析，仍不证明 repo 读取或
 生产执行能力。
 
+随后任务 `c52fc921-61b9-49a0-8a01-35ab803df0de` 只允许 Grok 自带 WebSearch，检索 MCP
+官方规范。它在 47 秒内终态 `replied`，TUI 显示只执行搜索并在完成后保持可交互。返回的
+2025-11-25 lifecycle 与 tools 官方页面经独立回读确认：`initialize` 是首次交互，成功后 client
+发送 `notifications/initialized`；`tools/list` 只负责发现，而 `tools/call` 才负责调用。该任务
+证明当前新 session 的受限公开资料检索可用，不能外推成 WebFetch、任意 URL 读取或工具业务
+调用已经验证。
+
 ## 从 Git 恢复软件
 
 当前 `grok-build-cli` 是 source-only 路径。宿主部署副本
