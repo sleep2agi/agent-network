@@ -225,6 +225,24 @@ message id `948b5add-0f49-41e2-9e4b-3721866b2ec5`，完成后仍停在可交互�
 `createNetwork` 是否执行 `max_agents/max_tasks_day`、REST 映射和作者的 0.8.8 动态探测列为
 NOT COVERED，没有冒充独立复验。全过程外部工具调用为零。
 
+随后两条审查暴露了一个更重要的派单纪律：**正文必须是冻结 PR 的真实 delta，不能用“等价但
+更强”的示例替代。** 首次派给 `通信狗` 的 PR #805 任务
+`117975b4-d8ad-41a3-9939-fc90f0c9f434` 误把实际 shell 示例改写成了带名称清洗、
+`-wal/-shm` 清理和退出码保留的理想版本；它给出的 `MINOR` 只说明该虚构输入内部自洽，已
+明确撤销，**不得**作为 #805 的审查证据。按真实 source
+`d570b957073e0876c36a6a41fc257646dddd6d0a` 重派任务
+`3ff39711-f52e-4106-902d-6275641c13dc` 后，`通信狗` 判为 `MAJOR`：文档的整套循环使用
+`bun test "$f" || echo "FAILED: $f"`，单测失败后脚本仍可能以 0 退出，把失败冒充成功。最窄
+修复是累计失败并最终非 0，或首败直接非 0；只删主 DB、不清 sidecar、无 trap 和同 basename
+碰撞另列为 `MINOR`。
+
+PR #809 的真实 source `d9e5f50fbc38670fef8a33a9ffa169409cae6d99` 通过任务
+`c2c3d09f-2ed1-4d2b-a3d8-426f874d09ab` 审查，同样得到 `MAJOR`：英文同页新增样例和表格
+说 latest 0.8.8 未认证返回 `sse_sessions: {}`，旧正文却仍写 anonymous 请求不包含
+`sse_sessions`。中文“键可出现但无 session 载荷”的方向正确，空对象不等于泄漏；“其余十三
+个键都有”只能作为带版本和日期的单次 capture 观测，不能冒充永恒 API 契约。两条任务均明确
+禁止外部工具并以 `NO_EXTERNAL_TOOL_USED` 收尾。
+
 该任务同时实测到当前任务回执正文约 2000 字符后会被截断。后续长审查必须要求分段或先给
 短结论，不能把截断后的半段当完整裁定；本轮用不超过 350 字的收口任务
 `59147851-0e10-496c-a75f-9285887ea721` 取得最终等级与边界。这是任务编排约束，不是模型推理
@@ -483,26 +501,26 @@ tmux 窗口存在而仍判成功，该验收就是空门。
 
 ### 阶段 2 repo-read 候选（未部署）
 
-Draft PR [#820](https://github.com/sleep2agi/agent-network/pull/820) 提供一个单独的
-`repo-read` 候选。权威源码锚为
-`8929fc281022c89eed42975a40480ed4f13045fe`，report-only 子提交为
-`94d89dfa08c386ad9157ecc12eeee62c3e5d94fd`。该候选只接受配置中的精确工具向量
+旧 Draft PR #820 已被重放后的 [#826](https://github.com/sleep2agi/agent-network/pull/826)
+取代，不再是合并或部署坐标。#826 严格依赖 #825；权威源码锚为
+`449683586a5a2ba44e99eb8c595be25d7467c967`，report-only 子提交为
+`114967626f20c7ef036c3d0e0dab295e1f983a89`。该候选只接受配置中的精确工具向量
 `["Read","Grep","Glob"]`；顺序变化、缺项、增项和近似拼写全部 fail-closed。模型工具库存为
 `todo_write/search_tool/use_tool/read_file/grep/list_dir`，不含 shell、写文件、Web、媒体或子代理。
 
 Grok CLI 0.2.93 的 `workspace` sandbox 允许读取工作区外路径，因此 repo-read **不得**沿用
-阶段 1 的 workspace profile。#820 将它映射到生成的 custom strict profile。exact-source Docker
-门为 `1282 pass / 0 fail / 4398 expect / 91 files`；把 repo-read 错接回 workspace 的 mutation
+阶段 1 的 workspace profile。#826 将它映射到生成的 custom strict profile。exact-source Docker
+门为 `1284 pass / 0 fail / 4406 expect / 91 files`；把 repo-read 错接回 workspace 的 mutation
 命名红为 `Expected: "anet-strict" / Received: "anet-workspace"`。隔离的真实 Grok TUI PTY
-实验中，custom strict 报 `ProfileApplied`、`enforced=true`，项目内读取成功，项目外、kernel deny
-路径与模型侧凭证读取均失败。完整证据与限制在
+实验属于旧 source，不能冒充 #826 的真 vendor 证据；#826 当前只继承 exact-source Docker 与
+selector 行为门。完整证据与限制在
 `docs/tests/report-grok-copresence-repo-read-stage2.txt`。
 
 这只是候选，不是上线授权。当前 live `通信狗` 仍使用已验的 x-search profile。repo-read pilot
 必须同时满足：
 
-1. #820 经过独立对抗审，source/report 坐标未漂，并按正常流程合并、发版；不得把源码 worktree
-   直接覆盖到 live 节点。
+1. #825 与 #826 依次经过独立对抗审，source/report 坐标未漂，并按正常流程合并、发版；不得
+   把源码 worktree 直接覆盖到 live 节点。
 2. 只对 `通信狗` 建 owner-only 配置、session 与启动坐标回滚点；node_id、workspace、tmux 名
    `通信狗` 均保持，绝不动 `A站狗`、`P站狗` 或其它舰团节点。
 3. 因 Grok resume 不能改变固定 sandbox/tool inventory，切换时必须显式新建一个 Grok session；
