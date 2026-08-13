@@ -1,23 +1,20 @@
-# test798 — server 聚合单测门
-source_commit=92d9612949a4207eae4facab2b337c1f23de65e0
+# test798 —— server 聚合单测门
+source_commit=2617987e75a6d5f3c0af3abc41709fad20176960
+base(current main)=034f00647d42d38d5086d7fc057eb7824a441791
+本文件是该源码提交的 report-only 子提交;锚定源码提交,与 PR 的 virtual-merge SHA 不同。
 
-## 落地前的实测(为什么需要它,以及踩过的三层坑)
-server/src 69 个测试,CI 此前只点名跑 6 个(L0_TESTS 5 + test686 引用 1)。
+## 三个 mutation 维度(全部双向验过)
+① 削弱被测代码:auth.ts 密码下限 < 8 → < 1 ⇒ MUTATION_RED,且断言锚在 (fail) 行
+② 断言宽容度:把命名断言指向一条该 mutation 下不会红的用例
+   松版 grep -Fq '<名字>' → rc=0 RESULT: PASS(收下不合规);严版 ^\(fail\).* → rc=1
+③ 分母缩水:删 59/69 个测试文件(保留 mutation 靶点所在文件)
+   加下限前 → test_files=10 executed=10 failed=0 MUTATION_RED RESULT: PASS(rc=0)
+   加下限后 → rc=1 FAIL: only 10 server test file(s) under src/, floor is 60
 
-第一版(共享一个 DB、cwd=server/):895 pass / 6 fail。逐条查下来全不是产品坏:
-  - 5 条 harness:hub↔daemon 漂移门要读 agent-node/src/shared,镜像里没有
-  - 1 条 harness:task-lifecycle-watcher 用 process.cwd() 拼 ./server/src/db.js,要求 cwd=仓根
-  - 3 条 harness:scheduled-tasks 要 tests/test601-.../race-worker.ts
-  - 剩下的是共享 DB 造成的跨文件污染(单跑全绿,聚合红)
-
-第二版(按既有契约逐文件独立 DB):红的换成另外 2 个,与第一版不相交 ——
-它们跨包 import agent-node 的 reply-reliability / inbox-dispatch,镜像里没带。
-补齐后 69/69 全绿。
-
-## 最终输出
+## 本次输出(在真源码提交上重跑)
 ```
 # test798 — complete server unit domain
-source_commit=92d9612949a4207eae4facab2b337c1f23de65e0
+source_commit=2617987e75a6d5f3c0af3abc41709fad20176960
 bun=1.3.14 node=v22.23.2 uid=1000
 commhub_db=/tmp/test798-server-unit.db
 test_files=69
