@@ -1,0 +1,21 @@
+# 注册三个孤儿 Docker 门 + build-arg 改推导
+source_commit=034f00647d42d38d5086d7fc057eb7824a441791
+
+## 三个孤儿门(形状完整、从没进 L1_TESTS)
+按 qa.sh 的真实调用形态验证(只传 --build-arg,run 不带 -e):
+  test224-grok-preview-security      SOURCE_COMMIT          rc=0 Summary: PASS   39s
+  test597-dashboard-slash-namespace  SOURCE_COMMIT          rc=0 RESULT: PASS    15s
+  test679-task-trace                 TEST679_SOURCE_COMMIT  rc=0 RESULT: PASS    36s
+
+## build_args 推导的等价性(替换硬编码 if/elif 前先核)
+  test686-rest-shape-golden      硬编码=TEST686_SOURCE_COMMIT  推导=TEST686_SOURCE_COMMIT  一致
+  test765-batch-runtime-gate     硬编码=TEST765_SOURCE_COMMIT  推导=TEST765_SOURCE_COMMIT  一致
+  test766-bunx-preflight         硬编码=TEST766_SOURCE_COMMIT  推导=TEST766_SOURCE_COMMIT  一致
+  test746-setup-bun-pin          硬编码=TEST746_SOURCE_COMMIT  推导=TEST746_SOURCE_COMMIT  一致
+
+## 推导是否承重(不传 build-arg 时)
+  test224 → rc=1 FAIL: SOURCE_COMMIT must bind this gate to one full lowercase Git SHA  ← fail-closed
+  test597 → rc=0 RESULT: PASS   ← 不强制
+  test679 → rc=0 RESULT: PASS   ← 不强制
+所以推导只在 test224 上是承重的;另两个门声明了 SOURCE_COMMIT 却不强制,
+这是它们自己的弱点,本 PR 不修,记在 NOT COVERED。

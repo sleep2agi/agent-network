@@ -74,6 +74,12 @@ L1_TESTS=(
   "test765-batch-runtime-gate"
   "test766-bunx-preflight"
   "test746-setup-bun-pin"
+  # 下面三个是 2026-08-13 扫出来的:形状完整的 Docker 门(Dockerfile + run.sh
+  # + 自己的 mutation),但从没被注册进 L1_TESTS,所以一直没人跑。
+  # 本地实测三个都 PASS(39s / 15s / 36s;L1 是并行跑的)。
+  "test224-grok-preview-security"
+  "test597-dashboard-slash-namespace"
+  "test679-task-trace"
 )
 
 if [[ "${1:-}" == "--list" ]]; then
@@ -143,15 +149,17 @@ if [[ $RUN_L1 -eq 1 ]]; then
   for t in "${L1_TESTS[@]}"; do
     # Build (cached if recent)
     note "build $t"
+    # 从套件自己的 Dockerfile 推导 SOURCE_COMMIT 参数名,而不是维护一条硬编码
+    # 的 if/elif 链 —— 链的失效方式是静默的:把套件加进 L1_TESTS 却忘了加分支,
+    # 它会在**没有 SHA 绑定**的情况下跑,而输出看起来一切正常。
+    # 等价性已核:对原链覆盖的 test686/765/766/746 四个套件,推导结果与硬编码
+    # 逐字相同;新加的 test224/test597 用的是不带前缀的 ARG SOURCE_COMMIT,
+    # 正是原链无法表达、只能再加分支的那种形状。
     build_args=""
-    if [[ "$t" == "test686-rest-shape-golden" ]]; then
-      build_args="--build-arg TEST686_SOURCE_COMMIT=$(git rev-parse HEAD)"
-    elif [[ "$t" == "test765-batch-runtime-gate" ]]; then
-      build_args="--build-arg TEST765_SOURCE_COMMIT=$(git rev-parse HEAD)"
-    elif [[ "$t" == "test766-bunx-preflight" ]]; then
-      build_args="--build-arg TEST766_SOURCE_COMMIT=$(git rev-parse HEAD)"
-    elif [[ "$t" == "test746-setup-bun-pin" ]]; then
-      build_args="--build-arg TEST746_SOURCE_COMMIT=$(git rev-parse HEAD)"
+    arg_name=$(grep -oE '^ARG (SOURCE_COMMIT|TEST[0-9]+_SOURCE_COMMIT)' \
+      "tests/$t/Dockerfile" 2>/dev/null | head -1 | awk '{print $2}')
+    if [[ -n "$arg_name" ]]; then
+      build_args="--build-arg $arg_name=$(git rev-parse HEAD)"
     fi
     if ! dockerrun "docker build -q $build_args -t anet-$t -f tests/$t/Dockerfile ." >/tmp/qa-l1-$t-build.log 2>&1; then
       fail "L1 $t — build failed, see /tmp/qa-l1-$t-build.log"
