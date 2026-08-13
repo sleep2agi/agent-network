@@ -31,6 +31,12 @@ _actual=$( { printf 'blob %d\0' "$(wc -c < "$_self")"; cat "$_self"; } | sha1sum
 
 echo "# test812 — tmux target semantics, bound to the doc's own commands"
 echo "source_commit=$SOURCE_COMMIT"
+# 把校验过的 blob 打进报告 —— 否则读报告的人只能看到一个 SHA,无法独立确认
+# 这次跑真的把它绑到了被测字节上。有了这一行,任何人都能用
+#   git rev-parse <source_commit>:tests/test812-tmux-target-semantics/run.sh
+# 自己比对。
+echo "runsh_blob=$_actual"
+echo "doc_blob=$( { printf 'blob %d\0' "$(wc -c < "$DOC")"; cat "$DOC"; } | sha1sum | cut -d' ' -f1 )"
 echo "tmux=$(tmux -V)"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
