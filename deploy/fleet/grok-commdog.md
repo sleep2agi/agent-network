@@ -74,6 +74,24 @@ CHECK=2+3=5
 owner-only 配置回滚点为
 `/home/vansin/.commhub/rollback-commdog-boundary-20260813T014843Z/`。
 
+随后又发现一个独立的“半恢复”形态：节点仍能从 Hub 接收入站任务，attach socket 与 TUI
+也都存活，但恢复进程的 `PATH` 不包含 Bun。运行时生成的 CommHub MCP 配置使用
+`command = "bun"`，因此 TUI 内搜索不到 `commhub_send_message` / `send_task`，而节点表面仍
+显示在线或 idle。`grok mcp doctor commhub --json` 给出的决定性错误是 `command not found: bun`。
+
+三个节点均已用包含固定 Bun 目录的 `PATH` 做单节点恢复，未使用 `--new-session`；配置哈希和
+`grokCliSession` 保持不变。修复后每个节点从自己的 workspace 运行 MCP doctor，均得到
+`healthy_count=1`、`failing_count=0`、`3 tools discovered`。`通信狗` 又从可见 TUI 真实调用
+`commhub_send_message` 给 `通信龙`，Hub 落库的 message id 为
+`16466c5f-7318-4126-bd4e-d211822a6831`。这证明的是 TUI 出站 CommHub 路径，不是仅靠进程或
+静态配置推断。
+
+本轮 owner-only 回滚坐标为：
+
+- `/home/vansin/.commhub/rollback-commdog-mcp-path-20260813T021822Z/`
+- `/home/vansin/.commhub/rollback-A站狗-mcp-path-20260813T022143Z/`
+- `/home/vansin/.commhub/rollback-P站狗-mcp-path-20260813T022239Z/`
+
 ## 从 Git 恢复软件
 
 当前 `grok-build-cli` 是 source-only 路径。宿主部署副本
@@ -148,10 +166,18 @@ chmod 600 .anet/nodes/通信狗/config.json
 export ANET_RELEASE=/absolute/release
 export GROK_BINARY=/absolute/path/to/grok-0.2.93
 export ANET_AGENT_NODE_BIN="$ANET_RELEASE/agent-node/dist/cli.js"
+export BUN_DIR=/absolute/directory/containing/verified-bun
+export NODE_DIR=/absolute/directory/containing/verified-node
+export PATH="$BUN_DIR:/absolute/directory/containing/grok:$NODE_DIR:/usr/local/bin:/usr/bin:/bin"
+
+command -v bun
+test "$(bun --version)" = "1.3.14"
+command -v node
+command -v "$GROK_BINARY"
 
 cd /home/vansin/grok-commdog-workspace
 tmux new-session -d -s 通信狗 -n node \
-  "env GROK_BINARY='$GROK_BINARY' \
+  "env PATH='$PATH' GROK_BINARY='$GROK_BINARY' \
        ANET_AGENT_NODE_BIN='$ANET_AGENT_NODE_BIN' \
        node '$ANET_RELEASE/agent-network/dist/bin/cli.js' \
        node start 通信狗 --new-session"
@@ -194,6 +220,32 @@ sha256sum "$ANET_RELEASE/agent-network/dist/bin/cli.js" \
 再从 Hub/Dashboard 核对 alias 在线、runtime=`grok-build-cli`、model=`grok-4.5`、
 `node_id` 与配置一致，并派一条无副作用任务验证真实 turn 与 terminal reply。
 
+### CommHub MCP 是独立就绪门
+
+attach socket、TUI 和 Hub 入站任务都正常，仍不能证明 TUI 的出站 CommHub MCP 正常。必须从
+**目标节点自己的 workspace**（不是任意 cwd）运行 doctor；Grok 的 folder trust 会使错误 cwd
+产生无关失败：
+
+```bash
+cd /home/vansin/grok-commdog-workspace
+GROK_HOME=/absolute/grok-home-for-this-node \
+PATH="$PATH" \
+  "$GROK_BINARY" mcp doctor commhub --json > /tmp/commdog-mcp-doctor.json
+
+jq -e '
+  .healthy_count == 1 and
+  .failing_count == 0 and
+  ([.servers[] | select(.name == "commhub")][0].healthy == true) and
+  ([.servers[] | select(.name == "commhub")][0].checks |
+    any(.label == "3 tools discovered" and .passed == true))
+' /tmp/commdog-mcp-doctor.json
+```
+
+最后从可见 TUI 发一条无副作用 `commhub_send_message`，并从 Hub 侧按返回的 message id 回读
+`from_session`、`session_name`、`type=message`。只有 doctor 与真实出站消息都通过，才可宣告
+TUI/节点通信共存恢复完成。反向见证应移除 Bun 所在目录后确认 doctor 在
+`command found` 这一项转红；不能只检查 MCP 配置文件里出现了 `command = "bun"`。
+
 ## 停用与回滚
 
 这是新增节点，没有需要恢复的旧 `通信狗` 运行时。失败时的安全回滚是只停该 tmux/进程、
@@ -219,7 +271,7 @@ tmux has-session -t 通信狗 2>/dev/null && tmux kill-session -t 通信狗
 
 # 只重建目标节点；env 与二进制路径沿用“首次建机”一节，但不得带 --new-session。
 tmux new-session -d -s 通信狗 -n node \
-  "env GROK_BINARY='$GROK_BINARY' \
+  "env PATH='$PATH' GROK_BINARY='$GROK_BINARY' \
        ANET_AGENT_NODE_BIN='$ANET_AGENT_NODE_BIN' \
        node '$ANET_RELEASE/agent-network/dist/bin/cli.js' \
        node start 通信狗"
@@ -231,7 +283,8 @@ test "$SESSION_AFTER" = "$SESSION_BEFORE" || {
 }
 ```
 
-随后仍需等待 attach socket、创建 `tui` 窗，并完成 `capture-pane` 与 Hub 真任务终态核验。
+随后仍需等待 attach socket、创建 `tui` 窗，并完成 `capture-pane`、CommHub MCP doctor 与 Hub
+真任务终态核验。
 **反向见证**是：把恢复命令误改为带 `--new-session` 时，会话保持断言必须转红；若只看
 tmux 窗口存在而仍判成功，该验收就是空门。
 
