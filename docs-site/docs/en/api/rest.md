@@ -395,7 +395,7 @@ curl -X POST http://localhost:9200/api/networks \
 | Status | `error` value | Trigger |
 |------|------------|---------|
 | 400 | `network name already exists` | Same owner already has a network with this name (`UNIQUE(owner_id, network_name)` constraint) |
-| 400 | `quota exceeded: max N networks for free plan` | Plan quota gate ([`auth.ts:184-189`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L184); admins are exempt; free plan default `max_networks_owned = 2`). Note this gate **is** enforced, unlike the `max_members` column, which is dormant |
+| 400 | `quota exceeded: max N networks for free plan` | Plan quota gate — enforced in [`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) `createNetwork()` (the old `L184-189` pin has drifted onto token-issuing code, so this now pins the function name; admins are exempt; free plan default `max_networks_owned = 2`). Note this gate **is** enforced, unlike the `max_members` column, which is dormant |
 | 401 | `token required` / `invalid token` | Missing / invalid utok_ |
 
 ---
@@ -2083,7 +2083,7 @@ curl http://localhost:9200/api/license
 {
   "ok": true,
   "license": { "type": "trial", "expires_at": "2026-04-25 12:00:00", "days_left": 12, "expired": false },
-  "limits": { "max_agents": 5, "max_networks": 1, "max_tasks_day": 100 }
+  "limits": { "max_agents": 5, "max_networks": 3, "max_tasks_day": 500 }
 }
 ```
 
