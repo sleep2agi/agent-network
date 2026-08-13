@@ -169,9 +169,9 @@ register() → callCommHub("report_status", {
 
 **触发**: `anet node rename <old> <new>` [`--force`]
 
-**前置条件**: rename 需要 hub + token + network_id（`anet login` 后才有，缺则 `process.exit(1)`）。运行中的 node **必须加 `--force`** —— [`cli.ts:2629-2631 renameCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2629) 检测到 `.pid` 进程存活且没 `--force` 时直接退出；运行中改名走 RFC-010 §4.4 active rename，**不杀进程**。
+**前置条件**: rename 需要 hub + token + network_id（`anet login` 后才有，缺则 `process.exit(1)`）。运行中的 node **必须加 `--force`** —— [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) —— 搜 `async function renameCommand(` 检测到 `.pid` 进程存活且没 `--force` 时直接退出；运行中改名走 RFC-010 §4.4 active rename，**不杀进程**。
 
-**RFC-010 两阶段事务** —— R481 校准：旧 doc 的「P0 只改本地 `renameSync` + P1 CommHub rename API 未采纳」已过时，当前 [`cli.ts:2583-2721 renameCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2583) 实现的是带 CommHub 协同的两阶段事务：
+**RFC-010 两阶段事务** —— R481 校准：旧 doc 的「P0 只改本地 `renameSync` + P1 CommHub rename API 未采纳」已过时，当前 [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) —— 搜 `async function renameCommand(` 实现的是带 CommHub 协同的两阶段事务：
 
 - **PHASE 1 — PREPARE（全程可回滚，old node 原封不动）**：写 `rename.lock` → `cpSync(oldDir → newDir)`（**copy 不是 move**）→ 更新 `newProfile.node_name` / `alias` + `saveProfile` → POST `/api/node-rename/prepare` 拿 `txn_id`。任一步失败 → 回滚（删 newDir + POST `/api/node-rename/abort` + 删 lock），`old` 完全不变。
 - **PHASE 2 — COMMIT（顺序敏感）**：
@@ -199,7 +199,7 @@ register() → callCommHub("report_status", {
 
 **触发**: `anet node delete <node-name>` （首次提示，再加 `--force` 才真删）
 
-**前置条件**: 不强制 offline —— `anet node delete` 会先 `stopNode(nodeId)` 杀进程 + `await notifyServerOffline(...)` 通知 hub 后再删本地目录（[cli.ts:2800-2840 deleteCommand](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2800)）。
+**前置条件**: 不强制 offline —— `anet node delete` 会先 `stopNode(nodeId)` 杀进程 + `await notifyServerOffline(...)` 通知 hub 后再删本地目录（[`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) —— 搜 `async function deleteCommand(`）。
 
 **实际数据变更**:
 1. **本地**: `rmSync(.anet/nodes/<id>/, { recursive: true, force: true })` —— 删整个目录（含 config.json、channels/、logs/；目录名是 alias / node_name，不是内部 node_id 字段；R209 chain 一致）

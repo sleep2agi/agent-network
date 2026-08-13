@@ -76,7 +76,7 @@ for await (const message of query({ prompt, options })) { /* ... */ }
 默认值（hub=http://127.0.0.1:9200, runtime=claude-agent-sdk）
 ```
 
-verify [`cli.ts:228 loadProfile`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L228):
+verify [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) —— 搜 `function loadProfile(`:
 ```ts
 const p = join(nodesDir(), id, "config.json");  // .anet/nodes/<id>/config.json
 ```
@@ -121,7 +121,7 @@ const p = join(nodesDir(), id, "config.json");  // .anet/nodes/<id>/config.json
 
 > 上例是 `anet node create 开发马 --runtime claude-agent-sdk --model <id>`（已登录）实际生成的最小集。条件字段：`teammateMode`（仅 `claude-code-cli`）、`session`（仅 `claude-code-cli` 或 `--session`）、`maxTurns`（仅 `--max-turns`）、`tools`（仅 `--tools`）；`logLevel` 是 **top-level** 字段（不在 `flags` 里），且 `createCommand` 不写它（用户可选加）。
 
-verify [`cli.ts:246-273 saveProfile`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L246):
+verify [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) —— 搜 `function saveProfile(`:
 ```ts
 const toSave: Record<string, any> = {
   anet_version, node_id, node_name, runtime,
@@ -191,7 +191,7 @@ anet server [--port 9200] [--token xxx] [--db path] [--cors origins]
 
 ### `anet setup`
 
-R511 校准：旧 doc 写「`anet setup --hub --alias --type`，配置新 Agent 加入网络」是 V2 早期签名 —— 当前 `anet setup`（[`cli.ts:556 setupCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L556)）是**交互式 runtime 依赖安装器**，不带参数，也不写网络配置（入网走 `anet node create`）。
+R511 校准：旧 doc 写「`anet setup --hub --alias --type`，配置新 Agent 加入网络」是 V2 早期签名 —— 当前 `anet setup`（[`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) —— 搜 `async function setupCommand(`）是**交互式 runtime 依赖安装器**，不带参数，也不写网络配置（入网走 `anet node create`）。
 
 ```bash
 anet setup
@@ -207,7 +207,7 @@ anet setup
 
 ### `anet run`
 
-R511 校准：旧 doc 写的 `[--handler script.ts]` flag + 「handler 协议」是 V2 设计草稿，**当前不存在**。当前 `anet run`（[`cli.ts:2044 runCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2044)）是用 Client SDK 起的**极简 standalone SSE agent**：连 hub、监听 task、自动 echo「收到」回复 —— **不跑 LLM**，区别于 `anet node start`（跑真实 AI runtime）。
+R511 校准：旧 doc 写的 `[--handler script.ts]` flag + 「handler 协议」是 V2 设计草稿，**当前不存在**。当前 `anet run`（[`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) —— 搜 `async function runCommand(`）是用 Client SDK 起的**极简 standalone SSE agent**：连 hub、监听 task、自动 echo「收到」回复 —— **不跑 LLM**，区别于 `anet node start`（跑真实 AI runtime）。
 
 ```bash
 anet run --alias <name> [--hub <url>]
@@ -309,7 +309,7 @@ await startServer({
 
 ## 5. Channel 插件自动配置 — R221 校准
 
-`anet node start` 检测到 `runtime: "claude-code-cli"` 时，自动确保 Channel 插件可用（[`cli.ts:1644 ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1644)）：
+`anet node start` 检测到 `runtime: "claude-code-cli"` 时，自动确保 Channel 插件可用（[`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) —— 搜 `function ensureMcpJson(`）：
 
 1. 从 npm 包 (`dist/src/node-server.js` 优先 / `src/node-server.ts` 兜底) 复制到 `{项目}/.anet/node-server.js`（**注意：是 `.js` 不是 `.ts`** —— [R216 chain](https://github.com/sleep2agi/agent-network/issues/10#issuecomment-4438192170)）
 2. 安装依赖（`@modelcontextprotocol/sdk ^1.12.0` 通过 `bun install`）
@@ -443,9 +443,9 @@ R223 校准：旧 doc 只写 `bun build src/client.ts bin/cli.ts --outdir dist -
 - ⚠️ 旧 `COMMHUB_AUTH_TOKEN` 仅 `/api/*` 读类兼容（v1.0 移除）
 
 ### 配置安全 — R223 校准
-- `~/.anet/server/admin-utok.json` 自动 chmod 600（[`cli.ts:105-111 saveAdminUtok`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L105) `writeFileSync(..., {mode: 0o600})` + `chmodSync(..., 0o600)`，v0.8 bootstrap 写入 admin token）
-- `~/.anet/server/config.json` 自动 chmod 600（[`cli.ts:89-95 saveServerConfig`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L89)）
-- ⚠️ `~/.anet/config.json` **不是 600** —— [`cli.ts:77-81 saveGlobal`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L77) 用默认 `writeFileSync` 无 mode 选项，实际权限通常 `644` (`rw-r--r--`)。在多用户机器上其他本地用户可读你的 utok_。**单用户 host 影响有限，多用户共享 host 建议手动 `chmod 600 ~/.anet/config.json`**（v0.9 RFC 待修）
+- `~/.anet/server/admin-utok.json` 自动 chmod 600（[`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) —— 搜 `function saveAdminUtok(` `writeFileSync(..., {mode: 0o600})` + `chmodSync(..., 0o600)`，v0.8 bootstrap 写入 admin token）
+- `~/.anet/server/config.json` 自动 chmod 600（[`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) —— 搜 `function saveServerConfig(`）
+- ⚠️ `~/.anet/config.json` **不是 600** —— [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) —— 搜 `function saveGlobal(` 用默认 `writeFileSync` 无 mode 选项，实际权限通常 `644` (`rw-r--r--`)。在多用户机器上其他本地用户可读你的 utok_。**单用户 host 影响有限，多用户共享 host 建议手动 `chmod 600 ~/.anet/config.json`**（v0.9 RFC 待修）
 - 项目 `.anet/nodes/<alias>/config.json` 不应包含 token（放全局配置；R222 chain 说明项目 config 用 hub/token 字段覆盖全局是 advanced use case）
 - `.anet/` 应加入 `.gitignore` 防止提交
 
@@ -517,7 +517,7 @@ R256 校准：旧 doc 用 `send_task(hub, result)` 回复任务结果 —— 这
 
 ## 10. Web Dashboard
 
-> **R220 校准（2026-05-13）**：本节的「内置轻量 UI」+「`http://YOUR_IP:9200/dashboard`」是 V2 早期设计草稿，**v0.8 实际未实现** —— commhub-server `server/src/index.ts` 没有 `/dashboard` 路由（[全 source grep `/dashboard` 0 hit](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)）。当前**唯一 Dashboard 是独立的 Next.js 包 `@sleep2agi/agent-network-dashboard`**，通过 `anet hub dashboard` 子命令拉起（[`agent-network/bin/cli.ts:2386`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2386) `sub === "dashboard"` 分支，默认端口 3000；版本不再 hardcode pin —— [`dashboardReleaseTag()` cli.ts:347](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L347) 默认拉 `@preview` tag，可用 `ANET_DASHBOARD_VERSION` env 覆盖，跟 anet release channel 对齐 — 见 #61）。最新部署方式见 [anet.sh/guide/dashboard](https://anet.sh/guide/dashboard)。下面的「两种 Dashboard」/「内置 UI 设计原则」/「实现方案」/「HTML 结构」全是 V2 设计草稿，仅保留历史背景，**当前不适用**。
+> **R220 校准（2026-05-13）**：本节的「内置轻量 UI」+「`http://YOUR_IP:9200/dashboard`」是 V2 早期设计草稿，**v0.8 实际未实现** —— commhub-server `server/src/index.ts` 没有 `/dashboard` 路由（[全 source grep `/dashboard` 0 hit](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)）。当前**唯一 Dashboard 是独立的 Next.js 包 `@sleep2agi/agent-network-dashboard`**，通过 `anet hub dashboard` 子命令拉起（[`agent-network/bin/cli.ts:2386`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2386) `sub === "dashboard"` 分支，默认端口 3000；版本不再 hardcode pin —— [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) —— 搜 `function dashboardReleaseTag(` 默认拉 `@preview` tag，可用 `ANET_DASHBOARD_VERSION` env 覆盖，跟 anet release channel 对齐 — 见 #61）。最新部署方式见 [anet.sh/guide/dashboard](https://anet.sh/guide/dashboard)。下面的「两种 Dashboard」/「内置 UI 设计原则」/「实现方案」/「HTML 结构」全是 V2 设计草稿，仅保留历史背景，**当前不适用**。
 
 ### 当前 Dashboard
 
