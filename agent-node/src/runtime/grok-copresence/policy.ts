@@ -31,10 +31,13 @@ export const GROK_COPRESENCE_EFFECTIVE_TOOLS = Object.freeze([
 ]);
 
 /**
- * Vendor-native effectful tools that must remain unavailable even when the
- * pinned interactive TUI ignores the agent profile's `tools` inventory.
- * Keep the Claude-compatible aliases in runtime argv too, but never rely on
- * them as translations for Grok's lifecycle names.
+ * Vendor-native effectful/control tools that must remain unavailable even
+ * when the pinned interactive TUI ignores the agent profile's `tools`
+ * inventory. This includes every non-read/non-search name observed in the
+ * pinned 0.2.93 AvailableCommandsUpdate inventory, plus conservative native
+ * aliases seen in the binary/repository. Keep the Claude-compatible aliases
+ * in runtime argv too, but never rely on them as translations for Grok's
+ * lifecycle names.
  */
 export const GROK_COPRESENCE_VENDOR_DENY_TOOLS = Object.freeze([
   "run_terminal_command",
@@ -43,9 +46,22 @@ export const GROK_COPRESENCE_VENDOR_DENY_TOOLS = Object.freeze([
   "write_file",
   "edit_file",
   "apply_patch",
+  "write",
+  "kill_command_or_subagent",
+  "get_command_or_subagent_output",
+  "wait_commands_or_subagents",
+  "scheduler_create",
+  "scheduler_delete",
+  "scheduler_list",
+  "monitor",
+  "update_goal",
+  "enter_plan_mode",
+  "exit_plan_mode",
+  "ask_user_question",
   "web_fetch",
   "http_request",
   "image_gen",
+  "image_edit",
   "generate_image",
   "video_gen",
   "generate_video",
