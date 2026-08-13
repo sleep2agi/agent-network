@@ -23,6 +23,10 @@ on:
       - 'tests/test745-agent-network-unit-ci/**'
       - 'tests/test746-setup-bun-pin/**'
       - 'tests/test798-server-unit-ci/**'
+      # test798 的镜像 COPY 了 test601 的 race-worker.ts,
+      # 且 server/src/scheduled-tasks-http.test.ts 会执行它做「两个真 Hub 抢同一 occurrence」——
+      # 只改那个 worker 的 PR 不该跳过这道门(codex P2,核过属实)
+      - 'tests/test601-hub-scheduled-tasks/**'
   push:
     branches: [main]
     paths:
@@ -36,6 +40,10 @@ on:
       - 'tests/test745-agent-network-unit-ci/**'
       - 'tests/test746-setup-bun-pin/**'
       - 'tests/test798-server-unit-ci/**'
+      # test798 的镜像 COPY 了 test601 的 race-worker.ts,
+      # 且 server/src/scheduled-tasks-http.test.ts 会执行它做「两个真 Hub 抢同一 occurrence」——
+      # 只改那个 worker 的 PR 不该跳过这道门(codex P2,核过属实)
+      - 'tests/test601-hub-scheduled-tasks/**'
 
 # Older runs on the same ref get cancelled — saves minutes when a PR is
 # updated rapidly. main pushes run independently.
