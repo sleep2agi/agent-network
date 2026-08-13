@@ -28,7 +28,29 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 
 未来加新 doc 时**不要再写硬版本号**（reviewer 拦截，rationale：每 release drift 一次维护负担，让 doc 引导用户去 npm 包页查最新 latest 比 doc 自己钉死可靠）。
 
-~~例外（保留快照）：sdk-deep-dive.md L14 用 `agent-node@2.3.1-preview.0` 做 snapshot pin~~ —— **R367 (2026-05-14) 已取消该例外**：[`docs-site/docs/guide/sdk-deep-dive.md` L14](https://github.com/sleep2agi/agent-network/blob/main/docs-site/docs/guide/sdk-deep-dive.md#L14) 的 `cli.ts:NNN` 行号引用改成「对照 GitHub `main` 校准」（不再 pin 具体 preview 版本），跟其余 doc 一致。现在 **没有 docs 还 pin npm 版本号**了。
+~~例外（保留快照）：sdk-deep-dive.md L14 用 `agent-node@2.3.1-preview.0` 做 snapshot pin~~ —— **R367 (2026-05-14) 已取消该例外**：[`docs-site/docs/guide/sdk-deep-dive.md` L14](https://github.com/sleep2agi/agent-network/blob/main/docs-site/docs/guide/sdk-deep-dive.md#L14) 的 `cli.ts:NNN` 行号引用改成「对照 GitHub `main` 校准」（不再 pin 具体 preview 版本），跟其余 doc 一致。现在 **没有 docs 还在安装命令里 pin npm 版本号**了。
+
+> 🔴 **但「没有任何 doc 提版本号」是错的,别照这句话跳过检查。**
+> 有一类版本号是**故意**留着的:限定信道的**行为断言** ——「在 latest `2.2.21` 上
+> 你会看到裸崩,在 preview 上会被 preflight 拦下」。这类断言**去掉版本号就失去意义**,
+> 所以 R367 没有、也不该把它们清掉。代价是:**latest 或 preview 一发布,它们立刻变成假的**,
+> 而且是危险的那种假 —— 会告诉用户一道已经存在的安全 preflight 不存在。
+>
+> 逐次发版必须重新核对的位置(2026-08-13 实测,共 7 个文件):
+>
+> | 文件 | 行 | 断言 |
+> |---|---|---|
+> | `docs-site/docs/guide/getting-started.md` | 19–20 | latest `2.2.21` 裸崩 / preview `2.3.0-preview.x` 被拦 |
+> | `docs-site/docs/en/guide/getting-started.md` | 19–20 | 同上(英文) |
+> | `docs-site/docs/deploy/clean-server.md` | 21–22 | 同上 |
+> | `docs-site/docs/en/deploy/clean-server.md` | 21–22 | 同上(英文) |
+> | `docs-site/docs/troubleshooting.md` | 29、37 | preview 有 preflight / latest 没有 |
+> | `docs-site/docs/en/troubleshooting.md` | 29、37 | 同上(英文) |
+> | `docs-site/docs/guide/versioning.md` + `en/` 对应 | 11 | `anet -v` 顶行示例 `anet v2.2.21` |
+>
+> 核对方法不是 grep,是**真机装**:`npm i -g @sleep2agi/agent-network@latest` 进干净容器,
+> 不装 bun 跑一次 `anet hub start`,看它到底裸崩还是被拦。今天实测 `2.2.21` 仍是裸崩
+> (`syscall: 'spawn bunx'`, `code: 'ENOENT'`),所以上述断言现在全部成立 —— 发版后就不一定了。
 :::
 
 ### B. Frozen snapshots（永不动）
