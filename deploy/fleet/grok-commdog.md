@@ -542,8 +542,9 @@ tmux 窗口存在而仍判成功，该验收就是空门。
 三个狗节点按证据逐级参与 AgentNetwork，不因会员额度增加而自动扩大权限：
 
 1. **阶段 0（已通过）**：单轮回复、身份/模型/终态回执。
-2. **阶段 1**：通用公开资料检索，或审查任务正文中直接提供的 issue/PR 材料，报告事实与
-   NOT COVERED；当前不允许任意 URL/PR 抓取，禁止写 GitHub。
+2. **阶段 1**：任务明确授权时可用 `WebSearch` 做通用公开资料检索，或审查任务正文中直接
+   提供的 issue/PR 材料，报告事实与 NOT COVERED；当前不允许打开任意 URL、WebFetch 或
+   PR 抓取，禁止写 GitHub。`WebSearch` 不是通用网页浏览授权。
 3. **阶段 2**：在独立 clean worktree 起草 patch，Docker 验证并由另一节点独审；禁止自行合并。
 4. **阶段 3**：经明确授权后执行一个有回滚点的单点运维动作，先回 preflight、后切换。
 5. **舰团级动作**：批量配置、批量重启、发布、生产 DB、云资源与密钥操作始终需要单独授权，
@@ -554,21 +555,28 @@ tmux 窗口存在而仍判成功，该验收就是空门。
 
 ### `通信狗` 常规评审值班契约
 
-截至 2026-08-13，`通信狗` 已连续完成三次真实 PR delta 评审，任务后 node/TUI 均存活；它可
-进入阶段 1 的常规评审队列，但**尚未进入阶段 2**。派单必须满足以下条件：
+截至 2026-08-13，`通信狗` 已连续完成至少三次真实 PR delta 评审，任务后 node/TUI 均存活；
+后续次数以本文任务记录和 Hub task 为准。它可进入阶段 1 的常规评审队列，但**尚未进入阶段
+2**。派单必须满足以下条件：
 
 1. 正文钉死 base、source 与 report-only 的完整 SHA；报告提交不能冒充被测源码。
 2. 把判定所需的完整实现 delta 和目标声明放进正文。只给局部 hunk 时，缺失 context 必须记
    `NOT COVERED`，不得据此给实现下 BLOCKER。
-3. 明确禁止终端、文件、任意网页、GitHub 写入、合并、部署和生产操作；允许的工具以 TUI
-   启动 banner 中的固定 inventory 为准。
-4. 输出至少分 `BLOCKER / MAJOR / MINOR / NOT COVERED`，并区分“当前实现缺陷”“未来脆弱性”
+3. 若完整材料超过单条任务的可靠正文长度，必须按完整章节/文件边界编号分段，并在每段明确
+   “非全文裁定”；未收齐全部分段不得给全文 `FINAL/CLEAN`。回执疑似被截断时先取短收口，
+   不得把半段当完整结论。
+4. 明确禁止终端、文件、任意 URL/WebFetch/PR 抓取、GitHub 写入、合并、部署和生产操作；仅当
+   任务明示阶段 1 公开检索时允许 `WebSearch`。允许的工具以 TUI 启动 banner 中的固定
+   inventory 为准。
+5. 输出至少分 `BLOCKER / MAJOR / MINOR / NOT COVERED`，并区分“当前实现缺陷”“未来脆弱性”
    “任务声称证据不足”，不能把三者混成同一等级。
-5. 回执后由具备 exact Git 对象读取能力的审查者核当前 PR head、完整 context、分母与 CI；
+6. 回执后由具备 exact Git 对象读取能力的审查者核当前 PR head、完整 context、分母与 CI；
    `通信狗` 的结果是 advisory，不是 merge authority。
-6. 每个任务验收同时核 Hub 终态、`in_flight=0`、tmux `0:node` 与 `1:tui` 均 `dead=0`。只收到
-   文本而 TUI 已退出，或 Hub idle 但 TUI 不在，都算失败。
-7. 发现缺口时用 `send_message` 向维护者回报事实与证据边界；状态同步不得再制造一条审查任务。
+7. 每个任务验收同时核 Hub 终态、`in_flight=0`、tmux `0:node` 与 `1:tui` 均 `dead=0`。只收到
+   文本而 TUI 已退出，或 Hub idle 但 TUI 不在，都算失败；若任务依赖 CommHub 工具，还要用
+   MCP doctor 或一个限定目标的真实出站探针证明工具面可用。#824 落地前不得用全量
+   `get_all_status` 充当该探针。
+8. 发现缺口时用 `send_message` 向维护者回报事实与证据边界；状态同步不得再制造一条审查任务。
 
 以下任一情况都不得直接派给当前 profile：需要 checkout/repo 搜索、运行 Docker、编辑 patch、
 读取任意 URL、访问凭证或改变外部状态。此类任务先由具备对应能力的节点提取最小材料；若要让
