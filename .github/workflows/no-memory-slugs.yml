@@ -57,3 +57,13 @@ jobs:
 
       - name: Run check-no-memory-slugs.py
         run: python3 .github/scripts/check-no-memory-slugs.py .
+
+      # 🔴 互验:workflow 结构门主要由 workflow-structure.yml 跑。但那个文件自己
+      #    被合坏时(同一次合并把它的 runs-on/steps 抽走),它就再也不会被调用 ——
+      #    而那正是它要抓的那种「空壳 job」。所以这里再跑一遍。
+      #    这个 job 兜得住它,是因为本 workflow 的触发含 '**/*.yml':任何
+      #    workflow 文件的改动都会到这里。
+      - name: Run check-workflow-structure.py (mutual validation)
+        run: |
+          pip install --quiet --require-hashes -r .github/scripts/requirements-workflow-structure.txt
+          python3 .github/scripts/check-workflow-structure.py .

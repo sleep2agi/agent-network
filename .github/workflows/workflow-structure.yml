@@ -36,7 +36,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install --quiet pyyaml
+      # 钉死版本:不钉的话每次冷跑都解析成当时的最新版,同一个 commit 在不同
+      # 时间可能得到不同的解析器 —— 那正是本仓在 npm 侧用 npm ci 取代 npm install
+      # 的同一个理由(#841 / #842)。
+      - run: pip install --quiet --require-hashes -r .github/scripts/requirements-workflow-structure.txt
       # 打印扫到的 workflow 数与 job 数,空范围直接红 ——
       # 「0 个问题」和「压根没扫到」不能长成同一片绿。
       - run: python3 .github/scripts/check-workflow-structure.py

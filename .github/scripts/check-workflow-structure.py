@@ -122,9 +122,11 @@ def main() -> int:
         return 1
     if bad:
         print(file=sys.stderr)
-        print("  最常见的成因是合并时把两个相邻 job 的公共部分只保留了一份 ——", file=sys.stderr)
-        print("  见 docs/pre-pr-selfcheck.md §14。解法不是「冲突块取并集」,", file=sys.stderr)
-        print("  而是把属于同一个 job 的碎片拼回完整块。", file=sys.stderr)
+        print("  最常见的成因:合并两个相邻 job 时,git 把它们逐字相同的公共部分", file=sys.stderr)
+        print("  (runs-on / timeout-minutes / steps: / - uses: actions/checkout@v4)", file=sys.stderr)
+        print("  判成公共上下文、只保留了一份 —— 于是前一个 job 只剩 name。", file=sys.stderr)
+        print("  解法不是「冲突块取并集」,而是把属于同一个 job 的碎片拼回完整块:", file=sys.stderr)
+        print("  每个 job = 自己的头 + 公共块(各复制一份)+ 自己的体。", file=sys.stderr)
         return 1
 
     print()
