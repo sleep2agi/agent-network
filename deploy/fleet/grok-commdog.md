@@ -11,7 +11,7 @@ identity、tmux 和 Grok attach socket：
 
 | alias | node_id | session_id | workspace | tmux |
 | --- | --- | --- | --- | --- |
-| `通信狗` | `n_72be30e0` | `58df4026-95be-4610-a45c-194478727cc9` | `/home/vansin/grok-commdog-workspace` | `通信狗` |
+| `通信狗` | `n_72be30e0` | `c47d3225-6d87-48a2-8c84-6c11db20a455` | `/home/vansin/grok-commdog-workspace` | `通信狗` |
 | `A站狗` | `n_b2c53d33` | `0bff8e47-ead8-4628-bea7-74b58335785a` | `/home/vansin/grok-astation-dog-workspace` | `A站狗` |
 | `P站狗` | `n_6fe8f9c0` | `f36fe2d9-166a-4b3e-b9c3-7ad065f60bc0` | `/home/vansin/grok-pstation-dog-workspace` | `P站狗` |
 
@@ -41,7 +41,7 @@ pstree -ap "$pid"
 | --- | --- |
 | alias | `通信狗` |
 | runtime / model | `grok-build-cli` / `grok-4.5` |
-| node / session | `n_72be30e0` / `58df4026-95be-4610-a45c-194478727cc9` |
+| node / session | `n_72be30e0` / `c47d3225-6d87-48a2-8c84-6c11db20a455` |
 | workspace | `/home/vansin/grok-commdog-workspace` |
 | tmux | `通信狗` |
 | source commit | `a7865a4316a17d38e4c8dfc4c2cebaceaba2c62c` |
@@ -91,6 +91,30 @@ owner-only 配置回滚点为
 - `/home/vansin/.commhub/rollback-commdog-mcp-path-20260813T021822Z/`
 - `/home/vansin/.commhub/rollback-A站狗-mcp-path-20260813T022143Z/`
 - `/home/vansin/.commhub/rollback-P站狗-mcp-path-20260813T022239Z/`
+
+### 旧会话工具库存与 TUI 假健康事故
+
+`通信狗` 后续执行 issue #811 的只读审查任务
+`113210ae-54fb-46d3-925f-ad6091d9ee09` 时，旧 Grok session
+`58df4026-95be-4610-a45c-194478727cc9` 仍带有历史工具库存。Grok 请求
+`run_terminal_command` / `grep`，事件流出现
+`permission_requested` 后立即 `permission_resolved decision=allow wait_ms=0`；Agent Network 以
+`[grok_failure:approval_boundary]` 拒绝该 turn。随后 TUI/leader 子进程退出，但常驻
+agent-node、Hub SSE 和 tmux `0:node` 仍在线。这再次证明“节点 online/idle”不能代替 TUI
+进程、attach socket 和真行为探针。
+
+Grok CLI 0.2.93 在恢复日志中明确警告：会话创建后工具库存固定，resume 不能应用已经变化的
+工具 profile。保存旧 config、session 与进程坐标后，本次只对 `通信狗` 执行一次受控
+`--new-session`，得到当前 session `c47d3225-6d87-48a2-8c84-6c11db20a455`；旧 session 保留为
+事故证据，不是当前运行坐标。owner-only 回滚点为
+`/home/vansin/.commhub/rollback-commdog-tui-20260813T025425Z/`。
+
+新 session 的最小 CommHub-only 行为验收任务
+`ad2b376f-86ee-4bbf-b15f-d17d94c77ead` 在 7 秒内终态 `replied`。可见 TUI 只执行
+`Commhub Send Message`，向 `通信龙` 落库 message id
+`cd18fb21-51ce-4fde-bb79-30760749225f`，随后仍停在可交互提示符。该证据只放行
+CommHub-only 协作；在新 session 的安全工具库存得到独立行为核验前，仍不得派发需要 shell、
+文件系统或任意 PR/URL 读取的任务。
 
 ## 从 Git 恢复软件
 
@@ -260,7 +284,7 @@ ps -eo pid,ppid,lstart,args | grep '[a]gent-node.*--alias 通信狗'
 不要使用宽泛 `pkill`、fleet restart、数据库清理或 `docker prune` 作为回滚。重新上线时仍按
 “同一 source commit → 制品哈希 → 单节点 → 真实任务”的顺序执行。
 
-故障恢复必须先记录已有会话，再用**不带 `--new-session`** 的相同启动命令恢复：
+普通故障恢复必须先记录已有会话，再用**不带 `--new-session`** 的相同启动命令恢复：
 
 ```bash
 CONFIG=/home/vansin/grok-commdog-workspace/.anet/nodes/通信狗/config.json
@@ -287,6 +311,11 @@ test "$SESSION_AFTER" = "$SESSION_BEFORE" || {
 真任务终态核验。
 **反向见证**是：把恢复命令误改为带 `--new-session` 时，会话保持断言必须转红；若只看
 tmux 窗口存在而仍判成功，该验收就是空门。
+
+唯一例外是：事件日志已经证明旧 session 的固定工具库存违反当前安全 profile，且对应 Grok
+版本明确报告 resume 无法应用工具变化。此时必须先保留旧 config/session/事件证据与回滚坐标，
+再对**单一 alias**执行一次 `--new-session`。新 session 不是自动成功：仍须重建 `0:node` +
+`1:tui`，核 node_id 不变，并通过受限的真行为任务；不得借该例外批量换 session。
 
 ## 渐进参与边界
 
