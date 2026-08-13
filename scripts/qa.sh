@@ -138,6 +138,8 @@ if [[ $RUN_L1 -eq 1 ]]; then
       echo "  @sleep2agi/$pkg@preview -> $v"
     done
   } | tee /tmp/qa-l1-registry-snapshot.txt
+  QA_L1_MAX_PAR="${QA_L1_MAX_PAR:-$(nproc 2>/dev/null || echo 4)}"
+  note "L1 并发上限 = ${QA_L1_MAX_PAR}(0 = 不限;用 QA_L1_MAX_PAR 覆盖)"
   pids=()
   declare -A pid_to_test
   for t in "${L1_TESTS[@]}"; do
@@ -158,7 +160,28 @@ if [[ $RUN_L1 -eq 1 ]]; then
       FAILED=$((FAILED+1))
       continue
     fi
-    # Run in background
+    # Run in background —— 但要有并发上限。
+    #
+    # 原来这里是无节制后台化:L1_TESTS 有多少条,就同时拉起多少个容器。
+    # 在专用 CI runner 上没问题;在开发/生产共用的机器上不行 ——
+    # 实测本机(8 核,同时跑着生产 hub、dashboard 与 ~200 个 agent session)
+    # 一次 `qa.sh --l1` 把 load1 顶到 58,即 7.3x 超订。
+    #
+    # 默认上限取 nproc(而不是更激进的 nproc/2),因为要同时满足两件事:
+    # 在小核 CI runner 上尽量不拖慢现有耗时,在大核共享机上把超订压下来。
+    # 需要时用 QA_L1_MAX_PAR 覆盖;设成 0 表示不限(恢复旧行为)。
+    # 注意:这里**不能**用 `$(jobs -rp | wc -l)` —— 命令替换会开子 shell,
+    # 而 `jobs` 的作业表不跨子 shell 继承,那样数出来恒为 0、闸门形同虚设。
+    # 实测过:用 jobs 版本、上限设 2,`docker ps` 采到的 anet-* 峰值仍是 3。
+    # 改成在父 shell 里用 kill -0 数还活着的 pid。
+    while [[ "$QA_L1_MAX_PAR" -gt 0 ]]; do
+      live=0
+      for _p in "${pids[@]:-}"; do
+        [[ -n "$_p" ]] && kill -0 "$_p" 2>/dev/null && live=$((live+1))
+      done
+      (( live < QA_L1_MAX_PAR )) && break
+      sleep 0.2
+    done
     (dockerrun "docker run --rm anet-$t" >/tmp/qa-l1-$t-run.log 2>&1) &
     pid=$!
     pids+=("$pid")
