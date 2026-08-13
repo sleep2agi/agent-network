@@ -161,6 +161,15 @@ Grok vendor doctor 兼容。随后 test813 增加了只读挂载的精确 Grok 0
 两侧都必须修改，而 PR 实际只在 test725 收紧该断言；最终回执必须用 PR body 和 exact source
 纠正这种由任务措辞产生的过判。
 
+运维设计审任务 `100c530e-e405-493b-828b-ac4672e33db3` 让 `通信狗` 判断 #813 的 Grok MCP
+假健康修复是否应顺带吞入另外三处裸 `command="bun"` 生成点。它在 1 分 9 秒内终态
+`replied`，正确区分了 Grok TUI 的 canonical Bun + vendor doctor 门、Claude `.mcp.json` 的落盘与
+迁移语义、以及 Codex config 的进程继承边界；建议 #813 保持 Grok-only，另外三处按消费路径
+各配真实 subprocess witnessed-red。exact source 只读核确认三个坐标均存在，随后已将分母、
+nvm-only 生产观测、跨平台/旧配置边界与三套行为门固化到 issue
+[#821](https://github.com/sleep2agi/agent-network/issues/821)。这是又一条从正文 advisory 形成持久
+工程输入的证据；它仍不代替实现、Docker 门或独立源码终审。
+
 第三个真实 PR delta 评审任务 `04f6800a-8adb-46bb-912e-68573a58be5d` 使用 PR #803 的
 `source=aeec4b9c130e6439feb622b1d2213f9f8f61d1fb`，在 1 分 25 秒内终态 `replied`。
 它识别出 `recovered-suites` 虽是独立 job，但内部六个 build/run step 串行，前一套件失败会让
