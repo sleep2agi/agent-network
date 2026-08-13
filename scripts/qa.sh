@@ -139,6 +139,20 @@ if [[ $RUN_L1 -eq 1 ]]; then
     done
   } | tee /tmp/qa-l1-registry-snapshot.txt
   QA_L1_MAX_PAR="${QA_L1_MAX_PAR:-$(nproc 2>/dev/null || echo 4)}"
+  # 🔴 必须先校验再用。下面的闸门条件是 `[[ "$QA_L1_MAX_PAR" -gt 0 ]]`,而 bash
+  # 在算术上下文里把非数字当 0 —— 而 0 的语义恰好是「不限」。于是一个笔误
+  # (`QA_L1_MAX_PAR=two`、`=4x`)会**静默恢复本节要消除的无上限行为**,
+  # 而下面那行 note 还会照打「L1 并发上限 = two」,输出主动确认一个不存在的上限。
+  # 这里 fail-closed:值不合法就退回默认,并大声说出来。
+  if [[ ! "$QA_L1_MAX_PAR" =~ ^[0-9]+$ ]]; then
+    _bad="$QA_L1_MAX_PAR"
+    QA_L1_MAX_PAR="$(nproc 2>/dev/null || echo 4)"
+    note "⚠ QA_L1_MAX_PAR='${_bad}' 不是非负整数 —— 已退回默认 ${QA_L1_MAX_PAR}(否则闸门会静默失效)"
+  fi
+  # 全数字还不够:bash 把前导零当八进制,`[[ "08" -gt 0 ]]` 会报
+  # `value too great for base` 并返回非零 —— 闸门照样静默失效。
+  # 这个洞是写完上面那段校验之后、跑对照表时才发现的(用例里放了 08)。
+  QA_L1_MAX_PAR=$((10#$QA_L1_MAX_PAR))
   note "L1 并发上限 = ${QA_L1_MAX_PAR}(0 = 不限;用 QA_L1_MAX_PAR 覆盖)"
   pids=()
   declare -A pid_to_test
