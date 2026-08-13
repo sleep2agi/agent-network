@@ -137,6 +137,18 @@ Grok vendor doctor 兼容。随后 test813 增加了只读挂载的精确 Grok 0
 `4 tools discovered`，再由生产 parser 验证通过。这是首条由 `通信狗` 的评审直接促成测试增强
 并关闭证据缺口的记录；它仍是 prompt-contained advisory，不冒充独立源码审。
 
+首个完整真实 PR delta 评审任务 `b79f3aa8-627a-42fb-a935-de4c2108c394` 使用 PR #798 的冻结
+`source=2617987e75a6d5f3c0af3abc41709fad20176960`，把完整实现 diff 直接放进任务正文，并禁止
+终端、文件与网页工具。`通信狗` 在 2 分 49 秒内终态 `replied`；任务后 tmux `通信狗` 的
+`0:node` 与活动窗口 `1:tui` 均存活，Hub 为 idle、`in_flight=0`。它正确核出了逐文件 runner
+的分母、mutation 命名红、串行独立 DB 与非 root/cwd 约束，同时把完整 workflow 旧 context
+中不可见的 path 触发项列为待核。随后对 exact source 的独立 Git 对象核确认：69 个
+`server/src/**/*.test.ts` 没有重复 basename；`pull_request` 与 `push` 两侧均已有 `server/**`
+和 `agent-node/**`，本 PR 又补齐 `test798/**` 与 `test601/**`，所以 Dockerfile 的四类 COPY
+输入全部被覆盖。前两项疑点因此分别是潜在结构风险与 prompt 边界下的 NOT COVERED，不是
+当前实现缺陷。该记录证明它能参与有边界的真实 PR 审查，但最终裁定仍须由可读取 exact Git
+对象的独立审查者作出。
+
 ## 从 Git 恢复软件
 
 当前 `grok-build-cli` 是 source-only 路径。宿主部署副本
