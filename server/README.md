@@ -149,6 +149,43 @@ DATABASE_URL=postgres://user:pass@host:5432/commhub bunx @sleep2agi/commhub-serv
 | `COMMHUB_DB` | `~/.commhub/commhub.db` | SQLite path |
 | `DATABASE_URL` | (none) | switches to PostgreSQL when set (unverified) |
 
+## Running the unit tests
+
+Two things, and the second one is not obvious:
+
+1. **`COMMHUB_DB` must be set.** It is not optional — `~/.commhub/commhub.db` is a
+   *live* database on any machine that has ever run a hub. This one is enforced:
+   with `NODE_ENV=test` (which `bun test` sets) and no `COMMHUB_DB`, the adapter
+   refuses with `REFUSING to open the default SQLite database`.
+
+2. **Each test *file* needs its own database.** This is *not* enforced — a single
+   shared `COMMHUB_DB` passes the guard above and then fails a handful of tests
+   for reasons that look like product bugs but are not. `scripts/qa.sh` encodes
+   the real contract:
+
+   ```bash
+   COMMHUB_DB=/tmp/qa-l0-$name.db bun test server/src/<one-file>.test.ts
+   ```
+
+   Symptom if you ignore it: `bun test src/` under one database turns
+   `admin-networks-http` and `scheduled-tasks-http` red. Both are **global-count
+   assertions that are correct under the contract**:
+
+   ```ts
+   // admin-networks-http.test.ts — the admin sees EXACTLY this file's two networks
+   expect(new Set(rows.map((row) => row.network_id)))
+     .toEqual(new Set([adminNetworkId, memberNetworkId]));
+
+   // scheduled-tasks-http.test.ts — EXACTLY one due occurrence was processed
+   expect(runDueScheduledTasks().processed).toBe(1);
+   ```
+
+   Share a database and other files' networks and due schedules join the count.
+   Nothing is broken; the run violated the contract.
+
+   The CI gate that runs this suite (`tests/test798-server-unit-ci`) iterates
+   file-by-file with a fresh database each time, for exactly this reason.
+
 ## Auth modes
 
 1. **V3 user system (default)** — `POST /api/auth/register` and `/api/auth/login` issue `utok_…` tokens; nodes get `ntok_…`.
