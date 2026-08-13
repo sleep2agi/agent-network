@@ -55,6 +55,14 @@ while IFS= read -r f; do
 done < <(find "$ROOT/agent-node/tests" -maxdepth 1 -type f -name '*.test.ts' | sort)
 
 echo "tests_dir_executed=$tdir_ran tests_dir_discovered=$tdir_total tests_dir_failed=$tdir_failed"
+# 🔴 绝对下限:`executed == discovered` 只能抓「runner 跳过了文件」,
+# 抓不到「文件消失了」—— 分母会跟着现实自动缩水。见 #798 的实测:
+# 删掉 85% 的测试后,只比数量的门照样 PASS。真删了测试就故意改这个数。
+AGENT_NODE_TESTS_FLOOR=5
+[[ "$tdir_total" -ge "$AGENT_NODE_TESTS_FLOOR" ]] || {
+  echo "FAIL: only $tdir_total file(s) under agent-node/tests, floor is $AGENT_NODE_TESTS_FLOOR" >&2
+  exit 1
+}
 [[ "$tdir_ran" -eq "$tdir_total" && "$tdir_total" -gt 0 ]] || {
   echo "FAIL: ran $tdir_ran of $tdir_total files under agent-node/tests" >&2
   exit 1
