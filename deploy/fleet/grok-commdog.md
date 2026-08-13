@@ -170,6 +170,21 @@ nvm-only 生产观测、跨平台/旧配置边界与三套行为门固化到 iss
 [#821](https://github.com/sleep2agi/agent-network/issues/821)。这是又一条从正文 advisory 形成持久
 工程输入的证据；它仍不代替实现、Docker 门或独立源码终审。
 
+在 #813 冻结实现进入 Draft PR
+[#822](https://github.com/sleep2agi/agent-network/pull/822) 后，`通信狗` 又完成了两层相互独立的
+验收。首先，prompt-contained 对抗审任务 `30a03669-81fe-4e83-9ba2-6626cc6cd111` 在 1 分 22 秒
+内终态 `replied`；它正确区分了“Bun 无法解析时不假注册”与“doctor/工具面必须在 TUI ready
+之前真实通过”，并建议用 doctor 假健康或少工具的反向 mutation 攻击产品链。冻结测试已有
+`upload-tool-removed` 与 `stale-three-tool-doctor` 两条 witnessed-red，因此终审焦点被收窄为：
+这些纯探针是否还需进一步绑到真实 `dist/cli → doctor → TUI spawn` 链，而不是重复字符串门。
+
+其次，操作者在 tmux `通信狗` 的真实 `1:tui` 输入框中直接要求模型调用
+`commhub_send_message`。TUI 搜索到 CommHub 工具并在 6.3 秒内向 `通信龙` 发送慰问，返回 Hub
+message id `948b5add-0f49-41e2-9e4b-3721866b2ec5`，完成后仍停在可交互提示符。这个验收没有
+经过 agent-node 的任务回执代发路径，直接证明当前 TUI 会话的出站 CommHub MCP 工具可见且
+可调用，关闭了此前“入站任务正常、TUI 搜不到 CommHub 工具”的用户侧故障。它仍不代替
+#822 的 exact-source Docker 证据、CI 或独立源码终审。
+
 第三个真实 PR delta 评审任务 `04f6800a-8adb-46bb-912e-68573a58be5d` 使用 PR #803 的
 `source=aeec4b9c130e6439feb622b1d2213f9f8f61d1fb`，在 1 分 25 秒内终态 `replied`。
 它识别出 `recovered-suites` 虽是独立 job，但内部六个 build/run step 串行，前一套件失败会让
