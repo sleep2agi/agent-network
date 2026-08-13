@@ -1,20 +1,57 @@
-# 三个孤儿门:改放独立 job,不塞 L1
-source_commit=034f00647d42d38d5086d7fc057eb7824a441791
+# 三个孤儿门:独立 job recovered-suites
+source_commit=aeec4b9c130e6439feb622b1d2213f9f8f61d1fb
+base(current main)=034f00647d42d38d5086d7fc057eb7824a441791
 
-## 为什么不放 L1(证据)
-CI 上 L0+L1 job 的真实耗时(main 近四次):141s / 135s / 118s(失败那次) / 148s,预算 300s。
-qa.sh 的 build 是串行的(只有 docker run 并行),三个套件要各加一次 build,
-其中 test679 带 javascript-obfuscator;单跑 run 已是 39s / 15s / 36s。
-L1 自称「~16s parallel」,是快层 —— 这三个不该进去。
+锚点即被测代码那一版;本文件是它的 report-only 子提交。
 
-## 独立 job 的验证(按 job 里逐字相同的命令:只传 --build-arg,run 不带 -e)
-  test224  --build-arg SOURCE_COMMIT          rc=0  Summary: PASS
-  test597  --build-arg SOURCE_COMMIT          rc=0  RESULT: PASS
-  test679  --build-arg TEST679_SOURCE_COMMIT  rc=0  RESULT: PASS
+## 本次按 CI job 里逐字相同的命令跑(test224 带 --network none)
+### test224-grok-preview-security
+```
+PASS: targeted Docker context contains no host auth/config state
+[L1] exact child environment + durable text boundaries
+PASS: real child env equals the reviewed set; text boundaries redact; config/session dirs are 0700 and files are 0600
+[L2] build candidate package payloads without network
+PASS: candidate tarballs contain runnable entrypoints and force publishConfig.tag=preview
+[L3] synthetic credential leakage scan
+PASS: tarballs, extracted payloads, build output, test output, and report contain zero synthetic marker bytes
+candidate_tarball_sha256=0577f72aa6f629039770491af4996006d4b3a26a1a57ab7e3674899b834cb3af file=sleep2agi-agent-node-2.5.0-preview.31.tgz
+candidate_tarball_sha256=1d07a3b3831a4ababeb028e34a503e310f431e5202650a43f1ea393bc9c9c30c file=sleep2agi-agent-network-2.3.0-preview.39.tgz
+Summary: PASS (Docker-only; runtime executed with network disabled; no real credential was read)
+```
+### test597-dashboard-slash-namespace
+```
+(pass) Dashboard native slash migration notice > failed native replies still surface the migration notice and the failure [0.09ms]
+(pass) reply filtering uses authenticated message provenance > a short presence reply to an authenticated Dashboard human task is delivered [0.12ms]
+(pass) reply filtering uses authenticated message provenance > the same low-value class remains filtered for agent-to-agent tasks [0.07ms]
+(pass) reply filtering uses authenticated message provenance > a provenance flag cannot bypass filtering for a non-task message type [0.05ms]
 
-## build_args 推导仍保留在 qa.sh(独立成立)
-原硬编码 if/elif 链的失效是静默的:套件加进 L1_TESTS 却忘了加分支,
-它会在没有 SHA 绑定的情况下跑。等价性核过(test686/765/766/746 四个逐字相同)。
-第一版漏了 || true,被 pipefail 打死在第一个套件,witnessed-red:
-  去掉 || true → rc=1,日志停在 '· build qa-cli-01-hub-start',与 CI 症状逐字一致
-  加回      → 三种 Dockerfile 形状各取一个跑真 qa.sh --l1,ALL PASS in 84s
+ 18 pass
+ 0 fail
+ 117 expect() calls
+Ran 18 tests across 3 files. [1.88s]
+RESULT: PASS
+```
+### test679-task-trace
+```
+
+  worker.js  2.29 MB  (entry point)
+
+
+[javascript-obfuscator-cli] Obfuscating file: dist/bin/cli.js... 
+
+[javascript-obfuscator-cli] Obfuscating file: dist/src/client.js... 
+
+[javascript-obfuscator-cli] Obfuscating file: dist/src/node-server.js... 
+RESULT: PASS
+```
+## --network none 的对照(为什么这个 flag 必须有)
+同一镜像,带与不带 --network none 两次都 rc=0,且都打印
+「Summary: PASS (Docker-only; runtime executed with network disabled; ...)」,
+差异只有时间戳和 tarball sha256。套件用一行硬编码 log "network: disabled by runner"
+**声明**前提而不探测它 —— 所以「网络确实被禁用」这件事只能由调用方保证。
+
+## NOT COVERED
+1. 上面那条「声明而不验证」我没改,那是改别人的门,交 owner;
+2. test224/test597 用可变 oven/bun tag 而非 pinned digest(codex P1,成立,属套件自身);
+3. 套件写在容器内的 report 被 --rm 丢掉,CI 未挂载/上传(codex P1,成立,属套件自身);
+4. 不传 build-arg 时只有 test224 fail-closed,test597/test679 声明了 SOURCE_COMMIT 却不强制。
