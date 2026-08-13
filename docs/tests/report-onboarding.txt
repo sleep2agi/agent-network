@@ -1,0 +1,108 @@
+Agent Network stable onboarding smoke — isolated Docker evidence
+Date: 2026-07-13 (Asia/Shanghai)
+Execution: independent test agent; evidence reviewed by the coordinator
+Verdict: REQUEST CHANGES — the public stable README path is not zero-friction.
+
+Scope and isolation
+-------------------
+- Public README snapshot: sleep2agi/agent-network main at d4188621c0d9bf5f95e9b1ac9b5d0aafea91c6e3.
+- Fresh image: node:22.13.1-bookworm-slim@sha256:83fdfa2a4de32d7f8d79829ea259bd6a4821f8b2d123204ac467fbe3966450fc.
+- Node 22.13.1, npm 10.9.2. Bun, git, curl, anet state, Codex state, and Claude state were absent at start.
+- No host mounts, no published ports, no host credential/config directories, and no production Hub URL.
+- Hub URL was loopback-only. Bridge networking was used only for public package/runtime endpoints.
+- Stable npm tag only: @sleep2agi/agent-network 2.2.21. No local source or preview package was used.
+- Test ran as root because that is the default user of the selected official image. It does not prove that a non-root global npm install avoids EACCES.
+- Dashboard was deliberately excluded because the requested endpoint was "one node online", not browser UI readiness.
+
+Strict online criterion
+-----------------------
+"One node online" required all three at the same time:
+1. agent-node emitted "SSE connected";
+2. `anet status` reported 1 idle, 0 offline and 1 SSE connected;
+3. loopback Hub health returned HTTP 200 with sessions_count=1 and sse_connections=1.
+
+This criterion was reached. It proves Hub registration/SSE presence only, not
+that the selected model can answer.
+
+Requested README path vs. actual path
+-------------------------------------
+For the requested online-node flow (Dashboard excluded), the README supplies
+five shell commands:
+1. npm install -g @sleep2agi/agent-network
+2. anet hub start
+3. anet login --username [BOOTSTRAP_USER] --password [REDACTED]
+4. anet node create newbie-bot
+5. anet node start newbie-bot
+
+The actual run required 11 command invocations because two advertised
+lazy-fetch paths failed:
+1. Install anet: exit 0, 2.87 s, installed stable 2.2.21.
+2. Start Hub: exit 1, 0.33 s, failed with `spawn bunx ENOENT`.
+3. README-external remediation: globally install Bun: exit 0, 12.39 s, Bun 1.3.14.
+4. Retry Hub: exit 0, 4.06 s; loopback health then returned 200.
+5. Login with the local bootstrap account: exit 0, 0.39 s.
+6. Create node interactively: exit 0, 15.98 s.
+7. Start node: exit 1, 1.77 s; `agent-node is not installed or cannot report a version`.
+8. Run the command suggested by that error, `anet upgrade`: exit 0, 5.78 s, but it explicitly skipped agent-node as "lazy".
+9. Retry node start: exit 1, 1.93 s with the same error.
+10. README-external remediation: globally install @sleep2agi/agent-node: exit 0, 17.02 s, installed 2.4.13.
+11. Retry node start: the strict online criterion became true about 2 s after launch.
+
+Elapsed time
+------------
+- First install start to first "SSE connected": 2 min 49 s wall-clock, including prompt reading and the two remediations.
+- Sum of load-bearing command runtimes to first online signal: about 1 min 5 s.
+- The README's "30 seconds" was not reproduced in this clean Node-only image.
+- A harness timeout kept the foreground node alive for 60.18 s and then stopped it; timeout exit 124 was intentional, not a startup failure.
+
+Interaction and friction points
+-------------------------------
+1. Bun is an undeclared effective prerequisite for stable 2.2.21 Hub startup in this environment. The CLI/help says components can be fetched with bunx/npx, but Hub startup attempted bunx only.
+2. The one-package promise did not hold: node start did not lazy-fetch agent-node through npx. `anet upgrade` claimed it would remain lazy and did not repair the failure. A second global package install was required.
+3. `anet hub start` returned after spawning the server, while the README describes a terminal that must remain open. In this run the Hub stayed healthy after the command returned; documentation and behavior do not match.
+4. `anet node start` is foreground. The node remained online only while that process stayed alive; Ctrl-C/timeout shut it down.
+5. `anet hub --help`, `anet node --help`, and `anet node create --help` all printed the same generic help rather than command-specific flags.
+6. The create wizard presented four inputs: runtime, vendor, model, API key. It did not advertise a keyless/free option.
+7. The default Intern path explicitly told the user to register and create an API key. Leaving the key blank was accepted and the node was still created, so the wizard does not fail early.
+8. The created node emits a broad-tool/dangerously-skip warning. This is useful but substantial text for a new user to evaluate before starting.
+
+Keyless/free-model attempt
+--------------------------
+- Selected the default claude-agent-sdk runtime, default Intern vendor, and default Intern preview model.
+- The public wizard offered no keyless/free-model entry. At the API-key prompt, an empty value was submitted.
+- The node did register and appear online because model access is lazy.
+- A minimal isolated task was queued to that node. It attempted execution three times and each attempt failed with `Not logged in · Please run /login`.
+- The node returned an error text to the task origin. Therefore "online without a key" must not be described as "usable keyless model access".
+- The runtime log labeled intermediate attempts as "success" before reporting the model error, and the final error text was sent with reply status rather than a failed task status. This may confuse users and monitoring.
+
+codex-app-server on stable 2.2.21
+--------------------------------
+Tested exactly:
+  anet node create codex-smoke --runtime codex-app-server
+  anet node start codex-smoke
+
+Observed:
+- Create exited 0 but did not preserve the requested runtime. It silently created a claude-code-cli node.
+- A redacted config projection confirmed runtime=claude-code-cli, not codex-app-server.
+- Start then attempted the Claude CLI, failed because it was absent, printed a spawn error, but still exited 0.
+
+Verdict: codex-app-server is unsupported on npm stable 2.2.21, and the
+unsupported flag silently falls back instead of failing closed. This is more
+hazardous than a clear unsupported-runtime error. No codex-app-server node was
+started or registered. The separate RFC-030 CLI candidate does not change this
+stable-package result.
+
+Objective conclusion
+--------------------
+- Zero-friction onboarding: FAIL in the tested clean Docker environment.
+- One node online: PASS only after two README-external global installs (Bun and agent-node).
+- One node able to answer keylessly: FAIL.
+- Stable codex-app-server entry: FAIL/unsupported with silent runtime fallback.
+- Most likely novice blockers, in order: undeclared Bun requirement; broken agent-node lazy fetch plus ineffective suggested upgrade; API-key ambiguity/blank acceptance; runtime fallback and success exit codes on actual failures.
+
+Evidence review and limitations
+-------------------------------
+- The coordinator independently rechecked the command logs, timing arithmetic, strict online evidence, runtime config projection, isolation metadata, cleanup, and SHA-256 manifest.
+- Raw traces are intentionally not committed: product output includes generated credential prefixes and throwaway filesystem paths. The published report contains neither.
+- The container was removed after capture. No production service or local user configuration was read or changed.
+- This run did not test a non-root npm install, Dashboard onboarding, a valid provider key, actual Codex authentication, or preview builds.
