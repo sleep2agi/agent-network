@@ -151,7 +151,35 @@ DATABASE_URL=postgres://user:pass@host:5432/commhub bunx @sleep2agi/commhub-serv
 
 ## Running the unit tests
 
-Two things, and the second one is not obvious:
+### 先说该走哪条路:Docker
+
+仓库规约是测试在 Docker 里跑(`CLAUDE.md`「所有测试在 Docker 里跑:不碰本地
+环境,不改生产」)。`server/src` 的测试在 `tests/` 下已经有 **24 个**按主题分片的
+套件覆盖(实测:遍历 main 上 204 个套件目录,run.sh 里跑 `server/src/*.test.ts`
+的有 24 个),每个都在容器内自带 `COMMHUB_DB`。跑其中任意一个都是这个形状:
+
+```bash
+# 从仓根跑
+docker build --build-arg SOURCE_COMMIT="$(git rev-parse HEAD)" \
+  -t anet-test624 -f tests/test624-task-cursor-pagination/Dockerfile .
+docker run --rm anet-test624
+```
+
+（实跑过:退出码 0,`6 pass / 0 fail`,`RESULT: PASS`。换成 `tests/` 下别的
+`test*-*/Dockerfile` 同理,但 **build-arg 的名字要照抄那个 Dockerfile** ——
+main 上 66 处写的是 `SOURCE_COMMIT`,另有若干写成 `TEST<编号>_SOURCE_COMMIT`
+(如 `TEST686_SOURCE_COMMIT`、`TEST765_SOURCE_COMMIT`)。传错名字不会报错,
+只会让套件收到 `unknown` 然后按它自己的规则红或绿 —— 这不是你想要的那种绿。）
+
+> ⚠️ **目前没有一个套件跑「`server/src` 下的全部」单测。** 上面那些是按主题
+> 分片的;聚合门在 #798 里,尚未合入 main。所以「所有分片套件都绿」**不等于**
+> 69 个单测文件都跑过 —— 在 #798 合入之前,不要把前者当成后者。
+
+### 直接在宿主上跑时的两条契约
+
+下面这两条是上面那些套件在容器内**已经替你满足**的东西。你只有在本地迭代
+单个文件时才需要自己处理它们 —— 而那种跑法不构成任何门禁证据。
+
 
 1. **`COMMHUB_DB` must be set.** It is not optional — `~/.commhub/commhub.db` is a
    *live* database on any machine that has ever run a hub. This one is enforced:
