@@ -247,4 +247,75 @@ echo "  MUTATION_RED broadcast-anchored-to-ack-inbox rc=$rc10"
 python3 "$SYMCHECK" "$ROOT" >/dev/null || fail "L6 复原之后没有回绿"
 echo "  复原后回绿 ✓  (anchors_checked=$anch, tool_registrations=$regs)"
 
+# ---------------------------------------------------------------------------
+# L7 — --write-baseline 只许缩小。
+#
+#      起因:#810 / #834 这类 PR 会让基线里某些条目对应的引用消失,门于是红在
+#      「请从基线里删掉」。让人手工数该删哪几条,是把一个机械操作交给记忆力。
+#      加了 --write-baseline 之后,那一步变成一条命令。
+#
+#      但这个开关天然危险:它离「一键把门变绿」只差一个条件判断。所以这一层
+#      两个方向都要断言 —— 该删的时候要删得对,不该写的时候要拒绝。
+# ---------------------------------------------------------------------------
+echo "[L7] --write-baseline shrinks only"
+cp "$BASELINE" /tmp/bl7.bak
+VICTIM3=$(find "$ROOT/docs-site" -name '*.md' | sort | head -1)
+cp "$VICTIM3" /tmp/v7.bak
+
+# ① 干净树上无事可做
+out11=$(python3 "$CHECK" "$ROOT" --write-baseline) || fail "干净树上 --write-baseline 竟然非零"
+printf '%s' "$out11" | grep -qF "基线已经是最新的" \
+  || fail "干净树上应报「基线已经是最新的」,实际:$(printf '%s' "$out11" | tail -3)"
+cmp -s "$BASELINE" /tmp/bl7.bak || fail "① 干净树上它却改写了基线"
+echo "  ① 干净树:不改写,报「已是最新」"
+
+# ② 出现新失效时必须拒绝写 —— 这是这个开关最危险的方向
+printf '\n[l7](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L99999)\n' >> "$VICTIM3"
+set +e; out12=$(python3 "$CHECK" "$ROOT" --write-baseline 2>&1); rc12=$?; set -e
+cp /tmp/v7.bak "$VICTIM3"
+[[ "$rc12" -ne 0 ]] || fail "② 有新失效 pin 时 --write-baseline 竟然成功了"
+printf '%s' "$out12" | grep -qF "拒绝写基线" || fail "② 红了但不是红在「拒绝写基线」上"
+cmp -s "$BASELINE" /tmp/bl7.bak || fail "② 它拒绝了,却还是把基线写了"
+echo "  MUTATION_RED write-baseline-refuses-new-failure rc=$rc12"
+
+# ③ 引用消失时要删对,并保留表头注释
+BL_BEFORE=$(grep -cv '^\s*#\|^\s*$' "$BASELINE")
+python3 - "$ROOT" <<'PYX'
+import sys, pathlib
+root = pathlib.Path(sys.argv[1])
+# 造一个「引用消失」:把基线里某条 pin 的所有引用改锚到不可变 SHA
+base = [l.strip() for l in (root/'docs/doc-source-pins-baseline.txt').read_text(encoding='utf-8').splitlines()
+        if l.strip() and not l.lstrip().startswith('#')]
+target = base[0]
+old = f"blob/main/{target}"
+new = f"blob/22ed1886/{target}"
+n = 0
+for f in (root/'docs-site').rglob('*.md'):
+    t = f.read_text(encoding='utf-8')
+    if old in t:
+        f.write_text(t.replace(old, new), encoding='utf-8'); n += t.count(old)
+print(f"    (造场景:把 {target} 的 {n} 处引用改钉 SHA)")
+PYX
+out13=$(python3 "$CHECK" "$ROOT" --write-baseline) || fail "③ 有该删的条目时 --write-baseline 却非零"
+printf '%s' "$out13" | grep -qF "已改写基线" || fail "③ 没报告改写"
+BL_AFTER=$(grep -cv '^\s*#\|^\s*$' "$BASELINE")
+[[ "$BL_AFTER" -lt "$BL_BEFORE" ]] || fail "③ 基线没有变小($BL_BEFORE → $BL_AFTER)"
+head -1 "$BASELINE" | grep -q '^#' || fail "③ 改写把表头注释弄丢了"
+python3 "$CHECK" "$ROOT" >/dev/null || fail "③ 改写之后门没有转绿"
+echo "  ③ 引用消失时删对了($BL_BEFORE → $BL_AFTER),表头保留,门转绿"
+
+# 复原:文档与基线都还原
+cd "$ROOT" && git status >/dev/null 2>&1 || true
+python3 - "$ROOT" <<'PYX'
+import sys, pathlib
+root = pathlib.Path(sys.argv[1])
+for f in (root/'docs-site').rglob('*.md'):
+    t = f.read_text(encoding='utf-8')
+    if 'blob/22ed1886/' in t:
+        f.write_text(t.replace('blob/22ed1886/', 'blob/main/'), encoding='utf-8')
+PYX
+cp /tmp/bl7.bak "$BASELINE"
+python3 "$CHECK" "$ROOT" >/dev/null || fail "L7 复原之后没有回绿"
+echo "  复原后回绿 ✓"
+
 echo "RESULT: PASS"

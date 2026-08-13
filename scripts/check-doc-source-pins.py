@@ -49,7 +49,19 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else Path.cwd()
+ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
+FLAGS = {a for a in sys.argv[1:] if a.startswith("--")}
+REPO = Path(ARGS[0]).resolve() if ARGS else Path.cwd()
+
+# --write-baseline:把基线重算成当前树的样子。
+#
+# 🔴 它**只许缩小**。如果重算会引入基线里没有的条目(也就是出现了新的失效
+#    pin),它会拒绝写并退出非零 —— 那种情况该做的是把链接改对,不是把新失效
+#    追认进基线。没有这条限制,这个开关就是一键把门变绿的按钮。
+#
+# 存在的理由:#810 / #834 这类 PR 会让基线里的条目对应的引用消失,于是门红在
+# 「请从基线里删掉」。让人手工去数该删哪几条,是在把一个机械操作交给记忆力。
+WRITE_BASELINE = "--write-baseline" in FLAGS
 BASELINE = REPO / "docs" / "doc-source-pins-baseline.txt"
 DOC_ROOT = "docs-site"
 
@@ -227,6 +239,38 @@ def main() -> int:
         print("  改法:把行号锚点换成符号锚点(读者用 git grep 定位,重构改不坏),", file=sys.stderr)
         print("  或者钉一个不可变的 commit SHA。别把新条目加进基线 —— 基线只许缩小。", file=sys.stderr)
 
+    if WRITE_BASELINE:
+        if new:
+            print()
+            print(f"FAIL: 拒绝写基线 —— 有 {len(new)} 个新的失效 pin", file=sys.stderr)
+            for key in new:
+                kind, text = broken[key]
+                print(f"  [{kind}] {key}  {text}", file=sys.stderr)
+            print(file=sys.stderr)
+            print("  --write-baseline 只许缩小。新出现的失效要去把链接改对,", file=sys.stderr)
+            print("  不是追认进基线 —— 否则这个开关就是一键把门变绿的按钮。", file=sys.stderr)
+            return 1
+        if not gone:
+            print()
+            print("基线已经是最新的,无需改写。")
+            return 0
+        header = []
+        if BASELINE.is_file():
+            for raw in BASELINE.read_text(encoding="utf-8").splitlines():
+                if raw.lstrip().startswith("#") or not raw.strip():
+                    header.append(raw)
+                else:
+                    break
+        body = sorted(set(broken))
+        BASELINE.write_text("\n".join(header + body) + "\n", encoding="utf-8")
+        print()
+        print(f"已改写基线:删掉 {len(gone)} 条,保留 {len(body)} 条。删掉的是:")
+        for key in gone:
+            print(f"  - {key}")
+        print("请把这次改动和让这些引用消失的那次文档改动放在同一个提交里 ——")
+        print("分开提交的话,中间那个 commit 上的 CI 是红的。")
+        return 0
+
     if gone:
         print()
         print(f"FAIL: {len(gone)} 个基线条目对应的引用已经不在文档里了,请从基线里删掉", file=sys.stderr)
@@ -234,6 +278,7 @@ def main() -> int:
             print(f"  {key}", file=sys.stderr)
         print(file=sys.stderr)
         print("  不删的话基线会变成坟场:修好的和没修的混在一起,数字再也不说明任何事。", file=sys.stderr)
+        print("  可以直接跑:python3 scripts/check-doc-source-pins.py . --write-baseline", file=sys.stderr)
 
     if new or gone:
         return 1
