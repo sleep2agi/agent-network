@@ -185,6 +185,22 @@ message id `948b5add-0f49-41e2-9e4b-3721866b2ec5`，完成后仍停在可交互�
 可调用，关闭了此前“入站任务正常、TUI 搜不到 CommHub 工具”的用户侧故障。它仍不代替
 #822 的 exact-source Docker 证据、CI 或独立源码终审。
 
+下一档真实舰团只读巡检任务 `fc7bdc50-7d5d-4786-960c-8bb0b6cffe24` 要求
+`commhub_get_all_status` 只核对三个狗节点，并明确禁止终端、文件和写操作。当前工具没有 alias
+过滤，返回全舰团后模型可见结果被截断；模型随后错误地尝试用 Run 解析落盘结果，运行时安全门
+以 `[grok_failure:approval_boundary]` 终止 turn 和 TUI。没有发生写操作，证明安全门有效；同时也
+证明当前工具形状不适合让受限模型直接做大舰团巡检。缺口已登记为 issue
+[#824](https://github.com/sleep2agi/agent-network/issues/824)：要求服务端在序列化前按 alias/node_id
+过滤并支持紧凑字段投影，不能把客户端后过滤冒充成防截断。
+
+本次只恢复 `通信狗`，未动另外两个节点。配置 SHA-256 在恢复前后均为
+`a8cbc30dc7d2466073c27f2e8499db598a8fc23c310ec121bb458919f775230b`，session 仍为
+`c47d3225-6d87-48a2-8c84-6c11db20a455`；tmux 恢复为同名 `通信狗`，`0:node` 与 `1:tui`
+均存活。owner-only 回滚点为
+`/home/vansin/.commhub/rollback-commdog-fleet-audit-20260813T050200Z/`。在 #824 落地前，
+不得把全量 `get_all_status` 直接派给通信狗；应由受控编排者先做服务端/可信侧过滤，再把小分母
+事实交给它分析。
+
 第三个真实 PR delta 评审任务 `04f6800a-8adb-46bb-912e-68573a58be5d` 使用 PR #803 的
 `source=aeec4b9c130e6439feb622b1d2213f9f8f61d1fb`，在 1 分 25 秒内终态 `replied`。
 它识别出 `recovered-suites` 虽是独立 job，但内部六个 build/run step 串行，前一套件失败会让
