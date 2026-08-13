@@ -1,8 +1,8 @@
 # 陈旧 issue 怎么复核
 
-写这份的直接原因:仓里 79 个 open issue,**30 个超过 30 天没动,而这 30 个没有一个被任何 open PR 引用**。我手工核了其中四条(#175 / #166 / #114 / #177),四条各花了十几分钟,而方法没留下来 —— 剩下 26 条又得从头想一遍。
+写这份的直接原因:仓里 79 个 open issue,**30 个超过 30 天没动,而这 30 个没有一个被任何 open PR 引用**。我手工核了其中七条(#175 / #166 / #114 / #177 / #332 / #195 / #207),各花十几分钟,而方法没留下来 —— 剩下 23 条又得从头想一遍。
 
-这份文档不是流程规范,是那四次的做法加上踩到的坑。
+这份文档不是流程规范,是那几次的做法加上踩到的坑。
 
 ## 为什么「陈旧」本身不是判据
 
@@ -120,7 +120,7 @@ agent-node/src/cli.ts:3450               … Cross-machine artifact distribution
 
 我核 #175 时就明确写了:证据只覆盖「node.team 列存在」,正文里的「详细方案」没有逐条比对。这种情况下关掉它,等于用一个窄证据关掉一个宽承诺。
 
-## 四次复核的结果(可作为样例)
+## 七次复核的结果(可作为样例)
 
 | issue | 结论 | 决定性证据 |
 |---|---|---|
@@ -128,7 +128,6 @@ agent-node/src/cli.ts:3450               … Cross-machine artifact distribution
 | #166 REST fallback 等 | 已交付 | 三个点名端点各注册 1 处;`cli.ts:4273-4310` 在跑运行时前注入 `CURRENT_TASK_ID`、跑完恢复;`tests/test166-task-diagnostics` 在 main |
 | #114 token 用量 | 未交付,缺口明确 | 采集已完成(`cli.ts:2363/2373/2742`),但 `completions`/`tasks` 无用量列;`docs/rfcs/RFC-015-token-usage-telemetry.md` 已写明剩余设计 |
 | #177 channel plugin | 未交付,前提存疑 | `cli.ts:5038` 仍在 push dev-channel flag;全仓无 `plugin:commhub` 实现;正文的 managed-settings 可行性至今未确认 |
-
 | #332 feishu Layer F sandbox | 未交付 | 全仓 `bubblewrap\|bwrap\|nsjail` 8 个文件命中,无一实现;`feishu-tool-deny.ts:250` 的注释把它标为 follow-up |
 | #195 vendor 并发闸 + 429 退避 | 未交付 | 有通用 retry-with-backoff 与 inbox 层 `maxConcurrent=20`,但 `agent-node` 全域 grep `Retry-After` **命中 0** —— 429 只被分类,没被遵守 |
 | #207 grok 跨机 artifact | 未交付,但传输层已有 | `cli.ts:3450` 注释自称「P2 follow-up. No fs mutation here.」;而 `tests/qa-222-cross-host-attachments` 证明 `/api/upload` + `/api/files/<id>` 的跨机取文件链路已完成 |
