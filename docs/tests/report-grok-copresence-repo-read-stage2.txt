@@ -1,0 +1,130 @@
+# Grok TUI co-presence repo-read stage-2 evidence
+
+Date: 2026-08-13 (Asia/Shanghai)
+
+## Provenance
+
+source_commit=8929fc281022c89eed42975a40480ed4f13045fe
+base_commit=034f00647d42d38d5086d7fc057eb7824a441791
+image_id=sha256:4113ccef12abba0c42117154feab00ea54b121720b4b68e806a5ae3b5eb3a7af
+image_tag=anet-grok-repo-read:8929fc28
+dockerfile=tests/test725-agent-node-unit-ci/Dockerfile
+
+The image was built from `git archive`-equivalent source at the exact source
+commit with `SOURCE_COMMIT` set to that same commit. No live node, global npm
+package, production database, or production configuration was changed.
+
+Pinned Grok TUI under behavioral test:
+
+```
+path=/home/vansin/.grok/bin/grok-0.2.93
+sha256=4e0738d3b5550f3c842bc0ae69f468815c6329c008a110d0c27a694dc3401135
+```
+
+## Intended boundary
+
+The new profile is admitted only for the exact configured tool vector:
+
+```
+["Read", "Grep", "Glob"]
+```
+
+It maps to the process-owned `repo-read` profile and to a generated Grok
+custom strict sandbox. The model-visible tools are exactly:
+
+```
+todo_write search_tool use_tool read_file grep list_dir
+```
+
+There is no shell, file-write, web, media, or subagent tool in this profile.
+Reordered, missing, additional, whitespace-mutated, or otherwise near-match
+configuration vectors fail closed.
+
+The custom strict profile gives the kernel sandbox read access to the project
+and only the runtime dependencies needed to start the pinned Grok binary and
+CommHub MCP. Grok permission rules separately deny model access to protected
+credential paths. `repo-read` is never selected per turn; it is pinned once at
+process startup. Because Grok resume does not change the sandbox, enabling the
+profile requires a new Grok session.
+
+## Docker verification
+
+Exact-source complete agent-node unit domain, non-root, Bun 1.3.14:
+
+```
+1282 pass
+0 fail
+4398 expect() calls
+Ran 1282 tests across 91 files. [116.90s]
+MUTATION_RED readable-attachment-runtime-disconnected rc=1
+RESULT: PASS
+```
+
+Targeted repo-read verification in the same exact-source image:
+
+```
+agent-node targeted: 43 pass / 0 fail / 349 expect
+agent-node build: PASS
+agent-network disclosure: 5 pass / 0 fail / 30 expect
+agent-network tsc --noEmit: PASS
+```
+
+Named witnessed-red mutation on the exact-source image changed only the
+repo-read selector from the strict profile to the workspace profile:
+
+```
+2 pass
+1 fail
+Expected: "anet-strict"
+Received: "anet-workspace"
+MUTATION_RC=1
+```
+
+This proves that the new test is carrying the strict-selection behavior rather
+than merely observing a non-zero mutation exit.
+
+## Real pinned-vendor sandbox observations
+
+All probes used an isolated Debian container with synthetic project, outside,
+and credential markers. No host repository or unrelated host credential store
+was mounted.
+
+1. Headless, without a PTY, pinned Grok 0.2.93 reported `ApplyFailed` and
+   `enforced=false` because `/dev/tty` was absent; an outside read then
+   succeeded. This is a fail-open vendor behavior and is why this feature is
+   restricted to true TUI co-presence with a PTY.
+2. With a PTY and the built-in strict profile, Grok reported `ProfileApplied`
+   and `enforced=true`; the project was readable and an outside sibling read
+   was denied with `FsViolation`. Authentication outside the project was also
+   unavailable, so the process waited for OAuth.
+3. With a custom strict profile granting the runtime read-only access to the
+   synthetic auth directory, plus explicit Grok permission denies for that
+   directory, Grok authenticated, read the project marker, denied the outside
+   sibling, and did not emit the credential marker.
+4. With a production-shaped custom strict profile and a non-empty kernel deny,
+   an ordinary Docker container where bubblewrap could not establish the
+   namespace exited non-zero. It did not silently run unsandboxed.
+5. The same profile in a privileged but otherwise isolated fixture reported
+   `ProfileApplied`, `enforced=true`, read the project marker, denied the
+   outside marker, denied the kernel-protected credential marker, and denied
+   the auth path through Grok's permission rules.
+
+No real credential value was printed or copied into this report. Marker values
+were synthetic.
+
+## Honest limits / rollout gate
+
+- NOT COVERED: production CommHub MCP startup under this strict profile using
+  the live staged binary, canonical Bun path, and live token-bound MCP.
+- NOT COVERED: a live Dashboard-origin task proving repo read plus CommHub
+  reply in the same TUI session.
+- NOT COVERED: independent adversarial review of this source/report pair.
+- NOT COVERED: non-Linux and multi-architecture execution; Linux is the current
+  deployment target.
+- The live `通信狗` node remains on its previously validated `x-search` profile.
+  It was not restarted or upgraded by this work.
+- No rollout is authorized by this report. A pilot requires backup and rollback
+  coordinates, a fresh Grok session, observed `ProfileApplied` with
+  `enforced=true`, exact tool inventory, inside/outside/credential behavioral
+  probes, and a real CommHub round trip before deeper participation.
+
