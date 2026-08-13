@@ -199,7 +199,9 @@ message id `948b5add-0f49-41e2-9e4b-3721866b2ec5`，完成后仍停在可交互�
 均存活。owner-only 回滚点为
 `/home/vansin/.commhub/rollback-commdog-fleet-audit-20260813T050200Z/`。在 #824 落地前，
 不得把全量 `get_all_status` 直接派给通信狗；应由受控编排者先做服务端/可信侧过滤，再把小分母
-事实交给它分析。
+事实交给它分析。恢复后的 TUI 又在 5.7 秒内直接调用 `commhub_send_message` 向 `通信牛`
+发送恢复 ACK，返回 message id `9e3609d9-616c-4efa-b434-d242d9fc8811`；这排除了仅有 node/tmux
+进程复活而 MCP 工具仍丢失的假恢复。
 
 第三个真实 PR delta 评审任务 `04f6800a-8adb-46bb-912e-68573a58be5d` 使用 PR #803 的
 `source=aeec4b9c130e6439feb622b1d2213f9f8f61d1fb`，在 1 分 25 秒内终态 `replied`。
