@@ -68,7 +68,11 @@ describe("Grok co-presence profile is pinned for the whole process", () => {
 
     for (const result of [restricted, xSearch, repoRead]) {
       const denied = result.args.flatMap((value, index) => result.args[index - 1] === "--deny" ? [value] : []);
-      expect(denied).toContain("run_terminal_command");
+      for (const tool of [
+        "run_terminal_command", "run_terminal_cmd", "search_replace", "write_file",
+        "edit_file", "apply_patch", "web_fetch", "http_request", "image_gen",
+        "generate_image", "video_gen", "generate_video", "browser", "computer", "screenshot",
+      ]) expect(denied).toContain(tool);
       expect(denied).toContain("Bash");
       expect(denied).toContain("Write");
       expect(denied).toContain("WebFetch");

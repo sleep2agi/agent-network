@@ -235,7 +235,11 @@ describe("Grok copresence launch and injection policy", () => {
     expect(args).toContain("--always-approve");
     expect(args).not.toContain("MCPTool");
     const denied = args.flatMap((value, index) => args[index - 1] === "--deny" ? [value] : []);
-    expect(denied).toContain("run_terminal_command");
+    for (const tool of [
+      "run_terminal_command", "run_terminal_cmd", "search_replace", "write_file",
+      "edit_file", "apply_patch", "web_fetch", "http_request", "image_gen",
+      "generate_image", "video_gen", "generate_video", "browser", "computer", "screenshot",
+    ]) expect(denied).toContain(tool);
     expect(denied).toContain("Bash");
     expect(denied).toContain("Write");
     expect(denied).toContain("WebFetch");
