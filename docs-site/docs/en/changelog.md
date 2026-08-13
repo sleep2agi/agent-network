@@ -657,7 +657,7 @@ See the [v0.10.3 release notes](https://github.com/sleep2agi/agent-network/relea
 - `HostTelemetry` interface gains `disk_total_gb` / `disk_used_gb` / `disk_avail_gb`; `getHostTelemetry()` composes disk via `toGb()` on the same path as mem/cpu
 - **Backward compat**: older servers silently drop unknown keys; agents and servers upgrade independently
 
-Wires through [RFC-014](https://github.com/sleep2agi/agent-network/issues/99) — `GET /api/server/:host/health` now returns disk's three fields, the 24h bucketed history includes `disk_avail_min` / `disk_used_max`, and `alert_level` adds `disk < 1GB critical / < 5GB warn` triggers ([`server/src/index.ts:253-258`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L253)).
+Wires through [RFC-014](https://github.com/sleep2agi/agent-network/issues/99) — `GET /api/server/:host/health` now returns disk's three fields, the 24h bucketed history includes `disk_avail_min` / `disk_used_max`, and `alert_level` adds `disk < 1GB critical / < 5GB warn` triggers ([`server/src/index.ts:253-258`](https://github.com/sleep2agi/agent-network/blob/22ed1886/server/src/index.ts#L253)).
 
 Test lead Docker Linux smoke 3/3 PASS (disk 299.8 GB total / 216 used / 71.5 avail, alert green, backward compat verified).
 
