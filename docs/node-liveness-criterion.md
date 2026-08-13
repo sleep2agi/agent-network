@@ -52,14 +52,23 @@ codex app-server                                        ← 不存在
 ## 只读排查顺序
 
 ```bash
+# 先把节点名放进变量,后面三步都用它 —— 不要把 <占位符> 原样敲进命令行,
+# 未替换的占位符会匹配到零条,让你误判「桥没跑」。
+node=TM汇报牛
+
 # 1. 桥在不在(不要用 pkill -f 之类的模式匹配去动它)
-ps -eo pid,etimes,args --no-headers | grep -F '<节点配置路径>' | grep -v grep
+ps -eo pid,etimes,args --no-headers | grep -F "$node" | grep -v grep
 
 # 2. app-server 在不在 —— 用结构性对照,不是看单个节点
-tmux list-panes -a -F '#{session_name}|#{pane_current_command}' | grep -E '桥$|appsrv'
+#    注意分隔符:输出是 `会话名|命令`,行尾是**命令**,所以不能写 '桥$'。
+#    本机实测:'桥$|appsrv' 命中 20 行,'桥\||appsrv' 命中 41 行 ——
+#    前者一个桥都匹配不到,而这一步的全部意义就是桥与 appsrv 的对照。
+tmux list-panes -a -F '#{session_name}|#{pane_current_command}' | grep -E '桥\||appsrv'
 
-# 3. 桥最近在做什么(tmux 目标要用 = 精确匹配,否则会前缀命中别人)
-tmux capture-pane -p -t '=<节点名>-桥' | tail -20
+# 3. 桥最近在做什么
+#    -t 要用 = 精确匹配(否则会前缀命中别人),并且**要带窗口索引**:
+#    实测 `-t '=名字-桥'` 会报 can't find pane,`-t '=名字-桥:0'` 才可用。
+tmux capture-pane -p -t "=${node}-桥:0" | tail -20
 ```
 
 三步都是只读的。**看完再决定动不动**,而且「起回缺失的 app-server」和
