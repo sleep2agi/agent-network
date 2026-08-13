@@ -164,8 +164,25 @@ Two things, and the second one is not obvious:
    the real contract:
 
    ```bash
-   COMMHUB_DB=/tmp/qa-l0-$name.db bun test server/src/<one-file>.test.ts
+   # 从仓根跑(见下),每个文件一个全新的库
+   f=server/src/auth-validate.test.ts
+   db=/tmp/anet-$(basename "$f" .test.ts).db
+   rm -f "$db"                       # 复用上一次的库同样会破坏隔离
+   COMMHUB_DB="$db" bun test "$f"
    ```
+
+   整套跑法:
+
+   ```bash
+   for f in server/src/*.test.ts; do
+     db=/tmp/anet-$(basename "$f" .test.ts).db
+     rm -f "$db"
+     COMMHUB_DB="$db" bun test "$f" || echo "FAILED: $f"
+   done
+   ```
+
+   ⚠️ 别把 `$name` 之类的占位符原样抄进命令行 —— 未定义的变量会展开成空串,
+   于是每个文件都写进**同一个** `/tmp/…-.db`,正好是这一节要避免的事。
 
    Symptom if you ignore it: `bun test src/` under one database turns
    `admin-networks-http` and `scheduled-tasks-http` red. Both are **global-count
@@ -183,8 +200,9 @@ Two things, and the second one is not obvious:
    Share a database and other files' networks and due schedules join the count.
    Nothing is broken; the run violated the contract.
 
-   The CI gate that runs this suite (`tests/test798-server-unit-ci`) iterates
-   file-by-file with a fresh database each time, for exactly this reason.
+   `scripts/qa.sh` 的 L0 目前只点名跑 5 个 server 测试(白名单),不是全量;
+   把 `server/src` 全域逐文件跑起来的那道 CI 门还在评审中(`#798`),
+   未进 `main` —— 所以本节描述的是**契约**,不是「已经有东西在替你执行它」。
 
 ## Auth modes
 
