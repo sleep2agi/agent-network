@@ -707,6 +707,11 @@ Docker 证明完整 unit domain 为 `1284 pass / 0 fail / 91 files`，聚焦门�
 argv 构造，不冒充真 vendor：上线前必须用新 session 重放同型任务，并断言 events 中不存在该
 工具的 request/resolution/completion。
 
+恢复取证完成后，节点仍运行未修复字节；继续在线会让后续任务再次触发同一 shell 面。因此在
+14:38 CST 对 PID `2067974` 发送精确停止，进程在 barrier 内退出，未使用 `pkill`、未修改配置、
+未触碰其它节点。当前安全终态是 tmux session `通信狗` 保留、`node` pane `%1107` dead、Hub
+节点等待修复发布后重启；不是“在线可用”。不得为了恢复绿色状态用未审源码覆盖 live runtime。
+
 ## 数据与密钥边界
 
 Git 只恢复软件和非密钥流程，不恢复以下数据：Hub 数据库、node token、Grok 登录/会员状态、
