@@ -13,6 +13,9 @@ on:
   pull_request:
     paths:
       - 'server/**'
+      - 'docs/stale-issue-review.md'
+      - 'scripts/check-doc-claims.py'
+      - 'tests/test846-doc-claims/**'
       - 'agent-network/**'
       - 'agent-node/**'
       - 'tests/qa-*/**'
@@ -22,13 +25,13 @@ on:
       - 'tests/test725-agent-node-unit-ci/**'
       - 'tests/test745-agent-network-unit-ci/**'
       - 'tests/test746-setup-bun-pin/**'
-      - 'docs/stale-issue-review.md'
-      - 'scripts/check-doc-claims.py'
-      - 'tests/test846-doc-claims/**'
   push:
     branches: [main]
     paths:
       - 'server/**'
+      - 'docs/stale-issue-review.md'
+      - 'scripts/check-doc-claims.py'
+      - 'tests/test846-doc-claims/**'
       - 'agent-network/**'
       - 'agent-node/**'
       - 'tests/qa-*/**'
@@ -37,9 +40,6 @@ on:
       - 'tests/test725-agent-node-unit-ci/**'
       - 'tests/test745-agent-network-unit-ci/**'
       - 'tests/test746-setup-bun-pin/**'
-      - 'docs/stale-issue-review.md'
-      - 'scripts/check-doc-claims.py'
-      - 'tests/test846-doc-claims/**'
 
 # Older runs on the same ref get cancelled — saves minutes when a PR is
 # updated rapidly. main pushes run independently.
@@ -48,6 +48,27 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  doc-claims:
+    name: doc claim freshness (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      # 🔴 这道门只证明 docs/stale-issue-review.md 里引的行号还没漂。
+      #    正文的结论对不对、引用之外的散文,它都不检查。
+      #    见 #846 与 scripts/check-doc-claims.py 的文件头。
+      - name: Build test846-doc-claims
+        run: |
+          docker build \
+            --build-arg TEST846_SOURCE_COMMIT="$GITHUB_SHA" \
+            --build-arg TEST846_RUNSH_BLOB="$(git rev-parse "HEAD:tests/test846-doc-claims/run.sh")" \
+            -t anet-test846-doc-claims \
+            -f tests/test846-doc-claims/Dockerfile .
+
+      - name: Run test846-doc-claims
+        run: docker run --rm --network none anet-test846-doc-claims
+
   agent-network-unit:
     name: agent-network unit (Docker, non-root)
     runs-on: ubuntu-latest
@@ -111,24 +132,3 @@ jobs:
             echo "================ $f ================"
             tail -60 "$f"
           done
-
-  doc-claims:
-    name: doc claim freshness (Docker)
-    runs-on: ubuntu-latest
-    timeout-minutes: 8
-    steps:
-      - uses: actions/checkout@v4
-
-      # 🔴 这道门只证明 docs/stale-issue-review.md 里引的行号还没漂。
-      #    正文的结论对不对、引用之外的散文,它都不检查。
-      #    见 #846 与 scripts/check-doc-claims.py 的文件头。
-      - name: Build test846-doc-claims
-        run: |
-          docker build \
-            --build-arg TEST846_SOURCE_COMMIT="$GITHUB_SHA" \
-            --build-arg TEST846_RUNSH_BLOB="$(git rev-parse "HEAD:tests/test846-doc-claims/run.sh")" \
-            -t anet-test846-doc-claims \
-            -f tests/test846-doc-claims/Dockerfile .
-
-      - name: Run test846-doc-claims
-        run: docker run --rm --network none anet-test846-doc-claims
