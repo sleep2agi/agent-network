@@ -260,6 +260,43 @@ selector 命名 mutation 也红，镜像回取文件 `17/17 MATCH`。两条均�
 live `通信狗` 继续使用已验证的 `x-search`/CommHub-only 边界，**不得**因 Draft PR 或本段记录
 提前改成 repo-read。
 
+### repo-read pilot 前的只读基线
+
+2026-08-13 13:48 CST 在未停止进程、未创建备份、未读取 token 的条件下，live `通信狗` 基线为：
+
+```text
+config=/home/vansin/grok-commdog-workspace/.anet/nodes/通信狗/config.json
+config_sha256=a8cbc30dc7d2466073c27f2e8499db598a8fc23c310ec121bb458919f775230b
+config_owner=vansin:vansin
+config_mode=0600
+node_id=n_72be30e0
+runtime=grok-build-cli
+model=grok-4.5
+tools=[WebSearch]
+grok_session=c47d3225-6d87-48a2-8c84-6c11db20a455
+cwd=/home/vansin/grok-commdog-workspace
+parent_pid=1933093
+agent_node_pid=1933163
+tmux=通信狗
+node_pane=%1107
+tui_pane=%1108
+```
+
+当前部署副本与哈希：
+
+```text
+/home/vansin/commniu-grok-candidate-a7865a43/runtime/node_modules/@sleep2agi/agent-network/dist/bin/cli.js
+sha256=af3847dd1ddb75dd1265e995b1f2bd215df064e1b6c7e7aa823a1a96b270d7da
+
+/home/vansin/commniu-grok-candidate-a7865a43/runtime/node_modules/@sleep2agi/agent-node/dist/cli.js
+sha256=03e9bed6630530e8fb03420dba32c6e06a90ae8cbe3fcdf33541a047708a7bb4
+```
+
+PID 与 pane id 只是该时点的观察值，不能当重建身份；恢复权威仍是 config/node_id/session、部署
+副本路径与文件哈希。该快照**不是** pilot 备份或启动许可。真正切换前还必须创建 owner-only
+rollback 目录，字节复制 config，记录旧启动命令和当前进程出生时间，并回报绝对路径后再停
+单一 `通信狗`；任何一项与本快照不符都应先解释漂移，而不是照抄旧 PID 操作。
+
 ## 从 Git 恢复软件
 
 当前 `grok-build-cli` 是 source-only 路径。宿主部署副本
