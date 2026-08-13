@@ -729,7 +729,10 @@ request/resolution/completion，且磁盘、网络与 scheduler 侧不得产生�
 `https://github.com/sleep2agi/agent-network/pull/830#issuecomment-5277364559`。审查从远端 Git
 对象重新核了 base/source/report 拓扑、25-name 分母、三 profile 的 allow/deny partition、七条
 named-red、数字/provenance、secret sweep 与 merge-tree；没有复用旧候选的结论。技术审查通过
-仍不等于合并、发布或 pilot 授权。
+仍不等于合并、发布或 pilot 授权。原审查评论曾误写 `28=25+3`，其 append-only 纠错
+`https://github.com/sleep2agi/agent-network/pull/830#issuecomment-5277409033` 已独立复算并确认正确
+集合为 `25 captured = 7 allowed + 18 observed denied`、`28 vendor denies = 18 observed + 10
+preventive aliases`；该错误只在审查转述，不在报告或实现中。
 
 恢复取证完成后，节点仍运行未修复字节；继续在线会让后续任务再次触发同一 shell 面。因此在
 14:38 CST 对 PID `2067974` 发送精确停止，进程在 barrier 内退出，未使用 `pkill`、未修改配置、
