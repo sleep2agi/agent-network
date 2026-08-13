@@ -32,8 +32,17 @@ echo "commhub_db=$COMMHUB_DB"
 
 test_files=$(find "$ROOT/server/src" -type f -name '*.test.ts' | wc -l | tr -d ' ')
 echo "test_files=$test_files"
-[[ "$test_files" -gt 0 ]] || {
-  echo "FAIL: server test-file denominator is empty" >&2
+# 🔴 绝对下限,不是 > 0。`executed >= discovered` 只能抓「runner 跳过了文件」,
+# 抓不到「文件消失了」—— 分母会跟着现实自动缩水。
+# 实测:删掉 69 个里的 59 个(保留 mutation 靶点所在的 auth-validate),
+# 这道门报 test_files=10 / executed=10 / failed=0 / MUTATION_RED / RESULT: PASS,
+# rc=0 —— 也就是放行了一个删掉 85% server 单测的改动。
+#
+# 下限要**故意**改:真删了测试就在这里调,并在 PR 里说明为什么。
+SERVER_TEST_FLOOR=60
+[[ "$test_files" -ge "$SERVER_TEST_FLOOR" ]] || {
+  echo "FAIL: only $test_files server test file(s) under src/, floor is $SERVER_TEST_FLOOR" >&2
+  echo "      若确实删除/迁移了测试,请连同本 floor 一起改,并在 PR 里说明。" >&2
   exit 1
 }
 
