@@ -130,6 +130,13 @@ CommHub-only 协作；在新 session 的安全工具库存得到独立行为核�
 证明当前新 session 的受限公开资料检索可用，不能外推成 WebFetch、任意 URL 读取或工具业务
 调用已经验证。
 
+在迭代评审任务 `f15552b3-5d97-4732-b01c-8e63a52819ee` 中，正文提供 #813 的真实关键
+代码片段。`通信狗` 指出测试自行构造 doctor JSON 可能与生产 parser 形成自洽假绿，不能证明
+Grok vendor doctor 兼容。随后 test813 增加了只读挂载的精确 Grok 0.2.93 keyless doctor 步骤；
+新 exact-archive 运行由 vendor 原样返回 `command found`、`server started`、`handshake OK`、
+`4 tools discovered`，再由生产 parser 验证通过。这是首条由 `通信狗` 的评审直接促成测试增强
+并关闭证据缺口的记录；它仍是 prompt-contained advisory，不冒充独立源码审。
+
 ## 从 Git 恢复软件
 
 当前 `grok-build-cli` 是 source-only 路径。宿主部署副本
