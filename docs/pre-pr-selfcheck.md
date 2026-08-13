@@ -56,12 +56,35 @@ git show "$SRC":<被测文件> | grep -c '<报告里出现的关键输出>'   # 
 ```bash
 git add -A && git commit …          # 1. 先把被测改动提交掉
 SRC=$(git rev-parse HEAD)           # 2. 再取 SHA —— 此刻它才真的指向被跑的那份字节
-sg docker -c "docker build --build-arg SOURCE_COMMIT=$SRC …"
-sg docker -c "docker run …"  > run.log   # 3. 跑,证据里带上这个 SHA
-#    本仓的 Docker 访问是通过组切换授予的 —— 直接 docker … 会以
-#    「连不上 daemon」失败。照抄本清单时别把 sg docker -c 去掉。
+docker build --build-arg SOURCE_COMMIT="$SRC" …   # 见下:先确认你这台怎么授予 Docker
+docker run  …  > run.log            # 3. 跑,证据里带上这个 SHA
 #    报告作为 report-only 子提交落在 SRC 之上
 ```
+
+> ⚠️ **跑 Docker 之前,先确认这台机器是怎么授予 Docker 访问的 —— 三种情况配方不同。**
+> 我第一版按审查意见把命令写成了 `sg docker -c "…"`,并注明「本仓通过组切换授予」。
+> **那句话对我自己这台就不成立**:
+>
+> ```
+> id -Gn                → …,docker        ← 我在 docker 组里
+> docker ps             → 可用            ← 裸命令就行
+> sg docker -c 'docker ps' → 也可用        ← sg 只是无害的多余一层
+> /var/run/docker.sock  → 660 root:docker
+> ```
+>
+> 而在另一台环境上,`sg docker -c` **同样失败** —— 因为那台**连 docker 组都没有**
+> (对 #828 的一次实现回应就卡在这里,它的 Docker 契约套件因此从没跑过)。
+>
+> 所以判据不是「用不用 `sg`」,而是先跑一行:
+>
+> ```bash
+> id -Gn | tr ' ' '\n' | grep -qx docker && echo "在组里:裸 docker 即可" \
+>   || { docker ps >/dev/null 2>&1 && echo "不在组但可用:socket 权限/rootless" \
+>        || echo "跑不了 Docker —— 别把「套件没跑」写成「套件通过」"; }
+> ```
+>
+> **第三种情况最要紧**:它意味着你写的 Docker 门在这台机器上**根本不会执行**。
+> 这时唯一正确的做法是**如实标注它没跑过**,而不是把它当成已验证的证据交付。
 
 自检一行(应当只输出一个值):
 
