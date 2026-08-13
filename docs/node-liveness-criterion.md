@@ -152,8 +152,10 @@ ps -eo pid,etimes,args --no-headers | grep -F "$node" | grep -v grep
 tmux list-panes -a -F '#{session_name}|#{pane_current_command}' | grep -E '桥\||appsrv'
 
 # 3. 桥最近在做什么
-#    -t 要用 = 精确匹配(否则会前缀命中别人),并且**要带窗口索引**:
-#    实测 `-t '=名字-桥'` 会报 can't find pane,`-t '=名字-桥:0'` 才可用。
+#    -t 要用 = 精确匹配,并且**要带窗口索引**:
+#    `-t '=名字-桥'` 会报 can't find pane,`-t '=名字-桥:0'` 才可用。
+#    这两条都由 tests/test812-tmux-target-semantics 在容器里跑出来,
+#    报告在 docs/tests/report-test812.txt。
 tmux capture-pane -p -t "=${node}-桥:0" | tail -20
 ```
 
@@ -164,6 +166,32 @@ tmux capture-pane -p -t "=${node}-桥:0" | tail -20
 > 内部地址、他人对话。**别把它整段贴进 issue / 聊天 / 汇报**;要引用就只引你确实
 > 需要的那一两行,并先看一眼有没有该遮的东西。
 > (写这一条时我自己就没打印那 71 行 —— 只报了退出码和行数。)
+
+> 🔴 **`=` 挡的到底是什么(实测,别按直觉猜)**
+>
+> 它**不是**在防「节点名互为前缀」。`A站狗-桥` 并不是 `A站狗2-桥` 的前缀 ——
+> 这套 `<别名>-桥` 命名本身就把那个危险削掉了,两种写法都会红。
+> 名字歧义要靠上面第 2 步的 session 名对照解决。
+>
+> 它防的是**残留 session**:存在 `<节点>-桥-old` 而 `<节点>-桥` 已经没了。
+> 这时不带 `=` 的前缀匹配会解析到那个残留 session,**退出码 0**,
+> 把一个陈旧 pane 的内容当成活节点的现状交给你:
+>
+> ```
+> 只存在 A站狗-桥-old 时
+>   -t  'A站狗-桥:0'   rc=0   ← 静默抓到 A站狗-桥-old
+>   -t '=A站狗-桥:0'   rc=1   can't find session: A站狗-桥
+> ```
+>
+> `=` 顺带还会关掉 fnmatch:`-t '甲-*:0'` 能命中 `甲-桥`,`-t '=甲-*:0'` 不会。
+>
+> 以上每一条都是 `tests/test812-tmux-target-semantics` 的断言,去掉 `=` 那道
+> witnessed-red 会让「静默抓错」重新出现。
+
+> 🔴 **别把 `capture-pane` 换成 `display-message`。**
+> 同一个缺 `:0` 的畸形 target,`capture-pane` 是 rc=1 报错,而
+> `display-message` 是 **rc=0 + 空输出** —— 一个响一个哑。哑的那个会让
+> 「查不到」看起来像「查到了、内容是空」。
 
 > ⚠️ 另外两条使用边界:
 > - 第 1 步的 `grep -F "$node"` 是**子串匹配**,节点名互为前缀时会互相命中
