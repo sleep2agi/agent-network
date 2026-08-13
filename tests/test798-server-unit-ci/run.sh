@@ -112,7 +112,13 @@ set -e
   exit 1
 }
 # 红必须落在指名的那条行为上,而不是红在导入失败之类的别处。
-grep -Fq 'rejects 7-char password' /tmp/test798-mutation.log || {
+#
+# 🔴 必须锚在 (fail) 行上。bun test 对每个用例都打 `(pass) <名字>` 或
+# `(fail) <名字>` —— 只 grep 名字的话,那条用例**通过**时也会命中,
+# 断言就只证明了「这条用例存在」,而不是「红落在它身上」。
+# 这是宽容断言:配上 mutation_rc != 0 看起来很像样,但如果 mutation 实际
+# 打红的是别的用例,这一对断言照样全过。
+grep -Eq '^\(fail\).*rejects 7-char password' /tmp/test798-mutation.log || {
   cat /tmp/test798-mutation.log
   echo "FAIL: mutation red did not reach the named password-floor assertion" >&2
   exit 1
