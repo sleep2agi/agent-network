@@ -11,8 +11,27 @@ set -euo pipefail
 
 ROOT=/workspace
 SOURCE_COMMIT=${TEST798_SOURCE_COMMIT:-}
+# 🔴 光验格式不够:任何 40 位十六进制都能通过,而报告里那个 SHA 可能根本不含
+#    镜像里被测的文件。审查指出提交进来的 report 就写着一个早于本套件自身的
+#    修订号 —— 那份证据无法从它自称的版本复现。
+#    做法(与 test823 同):构建时把 run.sh 在该 commit 下的 git blob 哈希作为
+#    build-arg 传入,这里就地重算镜像内文件的 blob 哈希并比对。
+#    blob 哈希 = sha1("blob <len>\0" + 内容),不需要容器里装 git。
 [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
   echo "FAIL: SOURCE_COMMIT must be one full lowercase Git SHA" >&2
+  exit 1
+}
+
+RUNSH_BLOB=${TEST798_RUNSH_BLOB:-}
+[[ "$RUNSH_BLOB" =~ ^[0-9a-f]{40}$ ]] || {
+  echo "FAIL: TEST798_RUNSH_BLOB 缺失或格式不对 —— 无法把 SOURCE_COMMIT 绑到被测字节" >&2
+  exit 1
+}
+_self="$ROOT/tests/test798-server-unit-ci/run.sh"
+_actual=$( { printf 'blob %d\0' "$(wc -c < "$_self")"; cat "$_self"; } | sha1sum | cut -d' ' -f1 )
+[[ "$_actual" == "$RUNSH_BLOB" ]] || {
+  echo "FAIL: 镜像里的 run.sh 与 SOURCE_COMMIT=$SOURCE_COMMIT 声称的不是同一份" >&2
+  echo "      期望 blob $RUNSH_BLOB,实际 $_actual" >&2
   exit 1
 }
 

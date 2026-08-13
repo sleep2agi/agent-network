@@ -35,7 +35,11 @@ COPY tests/test601-hub-scheduled-tasks ./tests/test601-hub-scheduled-tasks
 COPY tests/test798-server-unit-ci/run.sh ./tests/test798-server-unit-ci/run.sh
 
 ARG SOURCE_COMMIT
+ARG RUNSH_BLOB
 ENV TEST798_SOURCE_COMMIT=$SOURCE_COMMIT
+# run.sh 在 SOURCE_COMMIT 下的 git blob 哈希 —— 让容器内能验证「报告里的 SHA
+# 确实对应镜像里被测的字节」,而不是只验 SHA 的格式。
+ENV TEST798_RUNSH_BLOB=$RUNSH_BLOB
 
 RUN chmod 0755 ./tests/test798-server-unit-ci/run.sh \
   && install -d -o node -g node -m 0700 "/run/user/$(id -u node)" \
