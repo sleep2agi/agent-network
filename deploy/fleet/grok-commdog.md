@@ -592,6 +592,18 @@ Grok CLI 0.2.93 的 `workspace` sandbox 允许读取工作区外路径，因此 
 selector 行为门。完整证据与限制在
 `docs/tests/report-grok-copresence-repo-read-stage2.txt`。
 
+发布前的只读版本核验必须从冻结 Git 对象读取，不能从共享脏 worktree 读取。2026-08-13 的
+`origin/main`、#825 source 与 #826 source 三者均为 `agent-network=2.3.0-preview.39`、
+`agent-node=2.5.0-preview.31`、`commhub-server=0.9.0-preview.29`，并与当时 npm preview
+dist-tag 一致；共享 worktree 因未解决冲突一度显示旧的 `.22/.20/.13`，该值不是发布坐标。
+#825/#826 改动 CLI/runtime 的 C1 契约，因此新 preview 必须让 agent-node 与 agent-network
+一起升版，server 不因本次改动重发；具体下一个版本仍须在发布瞬间重新查询 registry 防竞态。
+
+registry 对上述 preview 只返回 tarball/integrity，未返回可用 `gitHead`，所以 npm metadata 不能
+代替 Git provenance。release 必须在 fresh worktree 先形成包含版本与兼容矩阵的构建 commit，
+再发布 preview，并用远端 immutable tag 回读验证它剥出的 SHA 等于构建 commit；不得只验本地
+tag，也不得从未提交工作区发包。仓内校验器为 `scripts/verify-release-tag.sh`。
+
 这只是候选，不是上线授权。当前 live `通信狗` 仍使用已验的 x-search profile。repo-read pilot
 必须同时满足：
 
