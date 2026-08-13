@@ -718,6 +718,13 @@ Docker 证明完整 unit domain 为 `1284 pass / 0 fail / 4609 expect / 91 files
 scheduler/control、fetch、media、read 与 web-search 行为，events 不得出现被拒工具的
 request/resolution/completion，且磁盘、网络与 scheduler 侧不得产生副作用。
 
+同一冻结 head `d51a4473f6aea75547437150dba729524506062b` 的 GitHub Hosted CI 随后全部通过：
+两条完整 E2E 分别为 `10m36s` 与 `10m20s`，L0/L1、agent-network unit、agent-node unit、
+两条 rename-ghost gate 和两条 lint gate 均为 `pass`。这补充证明该 stack 没有破坏仓库当前的
+自动化回归门，但仍不代替 pinned Grok 真机行为验收，也不构成合并、发布或节点重启授权。
+旧 `f407ed96/78a6de9c` 的独立 `CLEAN` 已被 durable supersede；只有针对当前
+`433b4af4/d51a4473` 坐标的新独立裁定才可作为审查门。
+
 恢复取证完成后，节点仍运行未修复字节；继续在线会让后续任务再次触发同一 shell 面。因此在
 14:38 CST 对 PID `2067974` 发送精确停止，进程在 barrier 内退出，未使用 `pkill`、未修改配置、
 未触碰其它节点。当前安全终态是 tmux session `通信狗` 保留、`node` pane `%1107` dead、Hub
