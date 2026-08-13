@@ -30,6 +30,30 @@ export const GROK_COPRESENCE_EFFECTIVE_TOOLS = Object.freeze([
   ...(GROK_COPRESENCE_REPO_READ_ENABLED ? ["read_file", "grep", "list_dir"] : []),
 ]);
 
+/**
+ * Vendor-native effectful tools that must remain unavailable even when the
+ * pinned interactive TUI ignores the agent profile's `tools` inventory.
+ * Keep the Claude-compatible aliases in runtime argv too, but never rely on
+ * them as translations for Grok's lifecycle names.
+ */
+export const GROK_COPRESENCE_VENDOR_DENY_TOOLS = Object.freeze([
+  "run_terminal_command",
+  "run_terminal_cmd",
+  "search_replace",
+  "write_file",
+  "edit_file",
+  "apply_patch",
+  "web_fetch",
+  "http_request",
+  "image_gen",
+  "generate_image",
+  "video_gen",
+  "generate_video",
+  "browser",
+  "computer",
+  "screenshot",
+]);
+
 export const GROK_COPRESENCE_AGENT_NAME = "anet-copresence-preview";
 export const GROK_COPRESENCE_AGENT_FILE = `${GROK_COPRESENCE_AGENT_NAME}.md`;
 export const GROK_COPRESENCE_PROFILE_MARKER = "ANET_COPRESENCE_PROFILE_V1";

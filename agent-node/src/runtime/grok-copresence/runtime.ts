@@ -47,6 +47,7 @@ import {
 import {
   assertGrokCopresenceAgentProfile,
   GROK_COPRESENCE_EFFECTIVE_TOOLS,
+  GROK_COPRESENCE_VENDOR_DENY_TOOLS,
   GROK_COPRESENCE_WEB_SEARCH_ENABLED,
 } from "./policy";
 import {
@@ -419,14 +420,15 @@ export function buildGrokCopresenceArgs(opts: BuildGrokCopresenceArgsOptions): s
   // filesystem/process/web-fetch escape routes remain denied. The explicit
   // x-search process profile may expose general web_search; it is not a
   // domain-restricted network sandbox.
+  for (const tool of GROK_COPRESENCE_VENDOR_DENY_TOOLS) {
+    args.push("--deny", tool);
+  }
   args.push(
     // The shared process must read its owner-only GROK_AUTH_PATH after its
     // sandbox re-exec. Shell access would bypass path-specific Read/Grep/Edit
     // rules, so the experimental preview gives up terminal tools entirely.
-    // Pinned Grok 0.2.93 emits `run_terminal_command` in its permission
-    // lifecycle. `Bash` is only the cross-runtime policy alias and does not
-    // deny that vendor-native tool name by itself.
-    "--deny", "run_terminal_command",
+    // These are compatibility aliases, not translations for the exact
+    // vendor-native names appended above.
     "--deny", "Bash",
     "--deny", "Write",
     "--deny", "WebFetch",
