@@ -1,10 +1,22 @@
-# 通信狗（GrokTUI）单节点恢复与渐进授权
+# GrokTUI 狗节点恢复与渐进授权
 
-本文记录 `通信狗` 的非密钥软件坐标、启动方式、行为验收、回滚和授权边界。
+本文记录 `通信狗`、`A站狗` 与 `P站狗` 的非密钥软件坐标、启动方式、行为验收、回滚和授权边界。
 宿主机上的安装目录与 tmux 会话只是部署副本；Git 中的 source commit 与本文才是
 恢复依据。本文不授权批量升级、生产数据库操作或其它舰团节点变更。
 
 ## 当前已验状态（2026-08-13）
+
+三个节点使用相同的冻结软件制品，但每个节点拥有独立 workspace、node config、node/session
+identity、tmux 和 Grok attach socket：
+
+| alias | node_id | session_id | workspace | tmux |
+| --- | --- | --- | --- | --- |
+| `通信狗` | `n_72be30e0` | `58df4026-95be-4610-a45c-194478727cc9` | `/home/vansin/grok-commdog-workspace` | `通信狗-node` |
+| `A站狗` | `n_b2c53d33` | `0bff8e47-ead8-4628-bea7-74b58335785a` | `/home/vansin/grok-astation-dog-workspace` | `A站狗-node` |
+| `P站狗` | `n_6fe8f9c0` | `f36fe2d9-166a-4b3e-b9c3-7ad065f60bc0` | `/home/vansin/grok-pstation-dog-workspace` | `P站狗-node` |
+
+下面是三者共享的软件坐标；其中 alias、node/session、workspace 与 tmux 行仅是
+`通信狗` 的首轮详细记录：
 
 | 项 | 观测值 |
 | --- | --- |
@@ -32,6 +44,16 @@ CHECK=2+3=5
 
 这证明了该次节点注册、入站消费、连续 Grok turn、会话上下文、WebSearch 和 Hub 终态回执。
 它不证明长期稳定性、heavy 会员的完整配额，也不授权生产写操作。
+
+一次直接读取 GitHub PR 的试验触发了 `approval_boundary`：Grok 尝试
+`run_terminal_command`，安全边界拒绝后 TUI 子进程退出，而 agent-node 一度仍显示 idle；
+紧接着的无工具任务也失败。因此当前的阶段 1 能力只包括通用 WebSearch 和任务中直接提供的
+审查材料，**不包括**任意 URL/PR 内容读取。不能把 Hub 的 idle 状态单独当成可用性证明。
+
+该故障仅重启 `通信狗`，配置 SHA-256 保持不变、`grokCliSession` 仍为原值；重启后的
+无工具行为探针在 2 秒内返回 `RECOVERED_AFTER_BOUNDARY session_preserved`。本次本地
+owner-only 配置回滚点为
+`/home/vansin/.commhub/rollback-commdog-boundary-20260813T014843Z/`。
 
 ## 从 Git 恢复软件
 
@@ -143,10 +165,11 @@ ps -eo pid,ppid,lstart,args | grep '[a]gent-node.*--alias 通信狗'
 
 ## 渐进参与边界
 
-通信狗按证据逐级参与 AgentNetwork，不因会员额度增加而自动扩大权限：
+三个狗节点按证据逐级参与 AgentNetwork，不因会员额度增加而自动扩大权限：
 
 1. **阶段 0（已通过）**：单轮回复、身份/模型/终态回执。
-2. **阶段 1**：公开资料检索、issue/PR 只读复核、报告事实与 NOT COVERED；禁止写 GitHub。
+2. **阶段 1**：通用公开资料检索，或审查任务正文中直接提供的 issue/PR 材料，报告事实与
+   NOT COVERED；当前不允许任意 URL/PR 抓取，禁止写 GitHub。
 3. **阶段 2**：在独立 clean worktree 起草 patch，Docker 验证并由另一节点独审；禁止自行合并。
 4. **阶段 3**：经明确授权后执行一个有回滚点的单点运维动作，先回 preflight、后切换。
 5. **舰团级动作**：批量配置、批量重启、发布、生产 DB、云资源与密钥操作始终需要单独授权，
@@ -160,3 +183,25 @@ ps -eo pid,ppid,lstart,args | grep '[a]gent-node.*--alias 通信狗'
 Git 只恢复软件和非密钥流程，不恢复以下数据：Hub 数据库、node token、Grok 登录/会员状态、
 `grokCliSession`、任务历史与用户生成内容。它们必须来自经过批准的备份或重新注册。
 文档只记录密钥来源和恢复动作，永不记录密钥值。
+
+## A站狗与 P站狗的首轮证据
+
+两节点均以 `grok-build-cli` / `grok-4.5` / `WebSearch` 创建并在独立 tmux 中启动。
+Hub 显示各自的 `project_dir` 与上表一致，真实任务分别完成：
+
+```text
+ASTATION_DOG_OK alias=A站狗 model=grok-4.5
+CHECK=7+8=15
+
+PSTATION_DOG_OK alias=P站狗 model=grok-4.5
+CHECK=9+6=15
+```
+
+任务完成后两个 tmux pane 均 `dead=0`，两条独立 attach socket 均仍为 Unix socket，证明
+节点通信与可 attach 的 Grok TUI 同时存活，而非“任务跑完后 TUI 被替换”。
+
+`A站狗` 创建时曾把 config 写入全局 `~/.anet/nodes/A站狗`，从独立 workspace 启动会
+fail-closed 报 `Node "A站狗" not found`。配置经 SHA-256 字节比对后迁入目标 workspace；
+未使用的原始全局副本保存在 owner-only 回滚坐标
+`/home/vansin/.commhub/rollback-Astationdog-global-config-20260813T015544Z/`。恢复时必须核对
+实际 `config_path`，不能只采信 create 命令的成功文案。
