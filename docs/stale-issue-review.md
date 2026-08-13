@@ -133,11 +133,37 @@ agent-node/src/cli.ts:3450               … Cross-machine artifact distribution
 
 另两条是:计数示例没记范围与 flag(已补,见上文第 3 步),以及本仓要求所有改动跑 Docker E2E —— 这一条见下。
 
-## 关于「文档改动也要跑 Docker E2E」
+## 这份文档的行号引用有一道门看着
 
-`AGENTS.md` 要求所有改动先跑 Docker E2E。这份文档没有可执行断言,所以没有对应套件。我能做的是让它的事实**逐条可手工复验**:文中每个行号、符号、计数都附了能直接跑的命令与范围。
+`AGENTS.md` 要求所有改动先跑 Docker E2E。#846 的审查提了这一条,当时我的回答是「可以像 `tests/test831-doc-source-pins` 那样把它变成门,但那是独立改动」。现在补上了。
 
-**这不等同于 E2E,我不假装它是。** 如果要把它变成门,可行的形态是像 `tests/test831-doc-source-pins` 那样,扫这份文档里引用的 `<文件>:<行号>`,核它们在 `origin/main` 上仍指着声称的内容 —— 那是一次独立的改动,不在本 PR 里。
+`tests/test846-doc-claims` 会读下面这个清单,逐条打开那个文件的那一行,确认它包含声称的子串。行号一漂就红。
+
+```doc-claims
+server/src/db.ts :: 393 :: ADD COLUMN team
+agent-network/bin/cli.ts :: 5038 :: dangerously-load-development-channels
+agent-node/src/cli.ts :: 3450 :: video_gen
+agent-node/src/cli.ts :: 4273 :: Expose CURRENT_TASK_ID
+agent-node/src/cli.ts :: 2363 :: total_cost_usd
+agent-node/src/feishu-tool-deny.ts :: 250 :: bubblewrap
+server/src/tools.ts :: 3867 :: list_providers
+server/src/server.ts :: 2979 :: addNetworkScope
+```
+
+### 为什么是显式清单,不是从正文正则抽
+
+正文里的引用是**裸文件名**:`cli.ts:3450`、`db.ts:393`。而 `cli.ts` 在
+`agent-network/bin/` 和 `agent-node/src/` 各有一个 —— 正则抽出来根本不知道该开哪个文件。
+第一版我想直接从正文抽,试到这里才发现。
+
+代价说清楚:**清单和正文可能各写各的。** 门检查的是清单。加条目时顺手核一下正文里确实引用过它。
+
+### 🔴 这道门不检查什么
+
+- **不检查正文的结论对不对。** 「`db.ts:393` 有 `ADD COLUMN team`」成立,不代表「#175 已交付」成立 —— 后者要人读 issue 正文。
+- **不检查引用之外的散文。**
+
+和 `scripts/check-doc-source-pins.py` 的边界同类:**门缩小了错误的种类,没有消灭错误。**
 
 ## 🔴 不要替 owner 关别人的 issue
 
