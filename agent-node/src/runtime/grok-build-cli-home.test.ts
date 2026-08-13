@@ -66,7 +66,7 @@ describe("prepareGrokCliHome", () => {
           { label: "command found", passed: true },
           { label: "server started", passed: true },
           { label: "handshake OK", passed: true },
-          { label: "3 tools discovered", passed: true },
+          { label: "4 tools discovered", passed: true },
         ],
       }],
     });
@@ -81,7 +81,7 @@ describe("prepareGrokCliHome", () => {
     const missingTools = JSON.parse(healthy);
     missingTools.servers[0].checks.pop();
     expect(() => assertGrokCommhubMcpDoctor(JSON.stringify(missingTools)))
-      .toThrow("3 tools discovered");
+      .toThrow("4 tools discovered");
     expect(() => assertGrokCommhubMcpDoctor("not-json")).toThrow("invalid JSON");
   });
 
