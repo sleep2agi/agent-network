@@ -215,6 +215,33 @@ message id `948b5add-0f49-41e2-9e4b-3721866b2ec5`，完成后仍停在可交互�
 连续处理 runner、GitHub Actions 与安全前提的组合审查；同样要求 exact source 复核其因正文
 未包含 Dockerfile 而暂列 NOT COVERED 的部分。
 
+首个按“完整坐标 + 完整 delta + 权威事实”格式派发的纯文档语义审查是 PR #810，任务
+`0336d126-7b3b-450e-9a3a-90a43c098197`。输入内含完整 base/source SHA、两个文档文件的四行
+改动、`licenses` schema、`createNetwork()` 配额分支与旧行号实际落在发 token 代码上的事实；
+同时硬禁终端、文件、Web、舰团状态和写工具。`通信狗` 给出 `CLEAN（附 MINOR）`：四处变更
+均受输入事实支持，但中文“quota 在 createNetwork 里 enforced”范围过宽，容易把 license trial
+的 `max_networks=3` 与 free plan 建网门 `max_networks_owned=2` 混成一层。它建议显式拆成
+“建网配额按 plan 的 max_networks_owned 校验；trial limits 默认来自 licenses”。它还把
+`createNetwork` 是否执行 `max_agents/max_tasks_day`、REST 映射和作者的 0.8.8 动态探测列为
+NOT COVERED，没有冒充独立复验。全过程外部工具调用为零。
+
+该任务同时实测到当前任务回执正文约 2000 字符后会被截断。后续长审查必须要求分段或先给
+短结论，不能把截断后的半段当完整裁定；本轮用不超过 350 字的收口任务
+`59147851-0e10-496c-a75f-9285887ea721` 取得最终等级与边界。这是任务编排约束，不是模型推理
+失败。
+
+针对 Grok TUI 出站假健康的 #813 已从旧候选分出新 Draft PR
+[#825](https://github.com/sleep2agi/agent-network/pull/825)：冻结 source
+`8186b79de8e2f904c28bec268d93a523503a6845`，新增产品链 doctor 4→3 反向门，并把 TUI-ready
+判据锚定为完整时间戳日志行，避免 minified source stack 里的同名字面量骗过 grep。repo-read
+阶段 2 随后重放为依赖 #825 的 Draft PR
+[#826](https://github.com/sleep2agi/agent-network/pull/826)，冻结 source
+`449683586a5a2ba44e99eb8c595be25d7467c967`。其 exact-source Docker 证据为 agent-node
+`1284 pass / 0 fail / 4406 expect / 91 files`，#813 readiness 四条 mutation 全红，repo-read
+selector 命名 mutation 也红，镜像回取文件 `17/17 MATCH`。两条均仍等待独立审和合并；当前
+live `通信狗` 继续使用已验证的 `x-search`/CommHub-only 边界，**不得**因 Draft PR 或本段记录
+提前改成 repo-read。
+
 ## 从 Git 恢复软件
 
 当前 `grok-build-cli` 是 source-only 路径。宿主部署副本
