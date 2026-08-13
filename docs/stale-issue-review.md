@@ -43,10 +43,17 @@ git ls-tree -d --name-only origin/main tests/<套件名>
 
 最容易骗自己的一步。
 
+```bash
+# 🔴 范围和 flag 必须记全,否则这两个数没人能复现 —— 这一条是被审查抓出来的:
+#    同样的模式在全仓跑分别是 26 和 123,不是 5 和 38。
+git grep -lE 'tokens_used|input_tokens|output_tokens|total_tokens' \
+  origin/main -- 'server/src/*.ts' 'agent-node/src/*.ts' | wc -l     # → 5
+git grep -lE 'channelPlugin|channel-plugin|allowlist' \
+  origin/main -- 'server/src/*.ts' 'agent-node/src/*.ts' | wc -l     # → 38
 ```
-#114  grep tokens_used|input_tokens|total_tokens → 命中 5 个文件
-#177  grep channelPlugin|channel-plugin|allowlist → 命中 38 个文件
-```
+
+(`-lE` 区分大小写;换成 `-liE` 第二条会变成 39 —— 多出来的是
+`agent-node/src/runtime/readable-attachment-prompt.ts`。**flag 也算范围。**)
 
 这两个数当时看起来都像「做了」。实际:
 
@@ -114,6 +121,24 @@ agent-node/src/cli.ts:3450               … Cross-machine artifact distribution
 | 未交付,前提存疑 | 点出那个未验证的前提,建议先做确认再定去留 |
 | 判不了 | 写明缺什么才能判,不给软结论 |
 
+## 🔴 这份文档的第一版自己违反了它写的规则
+
+审查(#846)提了五条,其中三条是**样例表在示范本文警告的错误**,值得原样留在这里:
+
+1. **#175 我标成「已交付」,而结论表把「已交付」等同于「建议关闭」** —— 可上文第 2 段刚说过证据只覆盖标题那一句。**这正是「用窄证据关闭宽承诺」。** 已改成「部分核验」。
+2. **#166 我标成「已交付」,而上文刚警告过「四件事里做了三件会被判成做完了」** —— 我列的恰好是三项证据。已改成「四项中三项已交付」,并写明第四项的实际状态。
+3. **#114 我用错了判据。** 我拿「`completions`/`tasks` 没有用量列」当决定性证据,但 RFC-015 设计的是**独立的 `agent_token_usage` 表**,根本不改那两张表 —— 也就是说**即使将来完全按 RFC 实现,我那条证据依然成立,却会把它误判成未交付**。改成核验 RFC 点名的三个符号(结论不变,证据换了,而且更硬)。
+
+第 3 条尤其值得记:**判据要对着「做完之后会长什么样」设计,不是对着「我猜它会改哪里」。** 我当时没读 RFC-015 的存储设计就选了判据,而那份 RFC 就在仓里。
+
+另两条是:计数示例没记范围与 flag(已补,见上文第 3 步),以及本仓要求所有改动跑 Docker E2E —— 这一条见下。
+
+## 关于「文档改动也要跑 Docker E2E」
+
+`AGENTS.md` 要求所有改动先跑 Docker E2E。这份文档没有可执行断言,所以没有对应套件。我能做的是让它的事实**逐条可手工复验**:文中每个行号、符号、计数都附了能直接跑的命令与范围。
+
+**这不等同于 E2E,我不假装它是。** 如果要把它变成门,可行的形态是像 `tests/test831-doc-source-pins` 那样,扫这份文档里引用的 `<文件>:<行号>`,核它们在 `origin/main` 上仍指着声称的内容 —— 那是一次独立的改动,不在本 PR 里。
+
 ## 🔴 不要替 owner 关别人的 issue
 
 给证据、给建议,不代行。关 issue 是外向动作,信号不可逆 —— 而复核者拿到的证据往往只覆盖标题那一句,正文里的细节条款未必逐条对过。
@@ -124,9 +149,9 @@ agent-node/src/cli.ts:3450               … Cross-machine artifact distribution
 
 | issue | 结论 | 决定性证据 |
 |---|---|---|
-| #175 node.team | 已交付 | `db.ts:393` 有 `ALTER TABLE nodes ADD COLUMN team TEXT`;`api-nodes-shape.test.ts` 把 `team` 写进 `/api/nodes` 投影断言 |
-| #166 REST fallback 等 | 已交付 | 三个点名端点各注册 1 处;`cli.ts:4273-4310` 在跑运行时前注入 `CURRENT_TASK_ID`、跑完恢复;`tests/test166-task-diagnostics` 在 main |
-| #114 token 用量 | 未交付,缺口明确 | 采集已完成(`cli.ts:2363/2373/2742`),但 `completions`/`tasks` 无用量列;`docs/rfcs/RFC-015-token-usage-telemetry.md` 已写明剩余设计 |
+| #175 node.team | **部分核验** | `db.ts:393` 有 `ALTER TABLE nodes ADD COLUMN team TEXT`;`api-nodes-shape.test.ts` 把 `team` 写进 `/api/nodes` 投影断言。**只覆盖标题那一句;正文的「详细方案」未逐条比对,因此不建议据此关闭** |
+| #166 REST fallback 等 | **四项中三项已交付** | 三个点名端点各注册 1 处;`cli.ts:4273-4310` 注入并恢复 `CURRENT_TASK_ID`;`tests/test166-task-diagnostics` 在 main。**第四项「MCP 可用性本身」没有交付证据** —— 仓库改不了外部会话的工具面板,现状是把这条边界写进文档并用测试钉住(见文末) |
+| #114 token 用量 | 未交付,缺口明确 | 采集已完成(`cli.ts:2363/2373/2742`);**RFC-015 指定的 `agent_token_usage` 表 / `usage_event_id` / `token_usage_delta` 三个符号在全仓各只命中 1 个文件 —— 就是 RFC 自己**,即设计一行未落 |
 | #177 channel plugin | 未交付,前提存疑 | `cli.ts:5038` 仍在 push dev-channel flag;全仓无 `plugin:commhub` 实现;正文的 managed-settings 可行性至今未确认 |
 | #332 feishu Layer F sandbox | 未交付 | 全仓 `bubblewrap\|bwrap\|nsjail` 8 个文件命中,无一实现;`feishu-tool-deny.ts:250` 的注释把它标为 follow-up |
 | #195 vendor 并发闸 + 429 退避 | 未交付 | 有通用 retry-with-backoff 与 inbox 层 `maxConcurrent=20`,但 `agent-node` 全域 grep `Retry-After` **命中 0** —— 429 只被分类,没被遵守 |
