@@ -57,14 +57,18 @@ commhub_get_all_status()
 ## 项目信息
 
 - 仓库：https://github.com/sleep2agi/agent-network
-- Dashboard：**自托管,没有官方托管入口**。`anet hub dashboard` 拉起
-  （CLI 走 `npx @sleep2agi/agent-network-dashboard@<tag>`,见 `docs-site/docs/guide/dashboard.md`）。
-  **默认只绑回环**:绑定地址取 `--ip` → `--host` → `$HOSTNAME` → `127.0.0.1`
-  （`agent-network/bin/cli.ts` 里 `dashHost` 一行)。所以默认情况下**别的机器连不上**,
-  也别默认它是 `http://<服务器IP>:3000` —— 要远程访问得显式 `--ip 0.0.0.0` 或走反代。
-  注意 `$HOSTNAME` 在链上:**实际绑到哪,随环境变**,判断前先看 `dashHost` 实际取值。
-  ⚠️ `agent-network-dashboard.vercel.app` **不是产品形态** —— 它能打开、标题也对,
-  但 CDN 缓存年龄约 61 天(2026-08-13 实测),即约两个月未重新部署。
-  它在 `docs/rfcs/RFC-022` 里被当作现存部署引用,而该 RFC 与其原型自
-  2026-06-11 起无功能推进(见 #220)。**别拿它判断「Dashboard 正常不正常」。**
+- Dashboard：**分三种,别混**(这一层最容易判断错,见 `deploy/tunnel/README.md` 顶部的红字警告)
+  1. **项目自营的生产实例**(权威):`公网 ─ Caddy :3000 / frpc :3100 → 127.0.0.1:3001`
+     (Next.js,pm2 托管)。拓扑与运维见 `deploy/dashboard/README.md`、`deploy/tunnel/README.md`。
+     **要判断「Dashboard 正不正常」,看这个。**
+  2. **自己起的**:`anet hub dashboard`(CLI 走 `npx @sleep2agi/agent-network-dashboard@<tag>`,
+     见 `docs-site/docs/guide/dashboard.md`)。绑定地址取 `--ip` → `--host` → `$HOSTNAME` → `127.0.0.1`
+     (`agent-network/bin/cli.ts` 的 `dashHost`)。**容器里 `HOSTNAME` 通常有值,会绑到容器主机名而不是回环**
+     —— 这是记录在案的发版门坑(`docs/tests/release-gate-playbook.md`「dashboard binds to hostname not 0.0.0.0」)。
+     所以别假设任何默认地址,判断前先看 `dashHost` 实际取到什么。
+  3. **没有面向外部用户的 SaaS 产品 URL。**
+  ⚠️ `agent-network-dashboard.vercel.app` 不属于以上任何一种,别拿它判断线上状态。
+  它在 `docs/rfcs/RFC-022` 里被当作现存部署引用,而该 RFC 与其原型自 2026-06-11 起无功能推进(见 #220)。
+  实测只有一条:2026-08-13 取到它的 HTTP `Age` ≈ 61 天(**这是缓存年龄,不等于部署年龄**,
+  要判断是否停更需查 Vercel 部署记录或产物里的 build id)。
 - npm 包：@sleep2agi/agent-network / @sleep2agi/agent-node / @sleep2agi/commhub-server
