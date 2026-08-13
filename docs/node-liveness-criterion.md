@@ -35,9 +35,47 @@
 写入点 `markTaskRuntimeEvidence()`(`server/src/tools.ts`);读出侧 `server/src/server.ts`
 有 `consumedAt` 投影。**这里刻意只钉符号不钉行号** —— 行号每次重构都会漂,见 [#831](https://github.com/sleep2agi/agent-network/issues/831)。
 
-> 🔴 **`consumed_at` 只在正方向可信。**
-> **有值且新** → 运行时确实开工了,可跨 vantage,不需要 SSH。
-> **为空** → **不能推出任何结论**,原因见下一节。
+> 🔴 **`consumed_at` 只在正方向可信,而且它指向的是「任务」不是「节点」。**
+> **有值且新** → **这个任务**确实被某个当时的属主开工过,可跨 vantage,不需要 SSH。
+> **为空** → **不能推出任何结论**,原因见下面第二节。
+> **要把它算到某个具体节点头上,先读下面第一节。**
+
+### 归属:`consumed_at` 不跟着任务改派走
+
+`reassign_task` 改派任务时,只动归属与投递字段,**不清运行时证据**
+(`server/src/tools.ts`,那条 `UPDATE tasks SET to_name = ?1, to_node_id = ?2,
+status = 'delivered', started_at = NULL, delivered_at = datetime('now')`):
+
+```
+to_name / to_node_id   → 改成新属主
+started_at             → 置 NULL
+delivered_at           → 刷新
+runtime_submitted_at   → 不动    ← 仍是旧属主盖的
+consumed_at            → 不动    ← 仍是旧属主盖的
+```
+
+这不是疏漏,是被测试钉住的契约 —— `server/src/task-consumption.test.ts` 的
+「reassign preserves task-lifetime evidence and binds the new inbox row to the
+same task」逐字断言改派后 `consumedAt(taskId)` 与改派前**相等**。
+
+**后果:一个任务可以同时满足「`consumed_at` 新鲜」和「当前属主一次都没开工」。**
+按上面那条判据去看,新属主会被判成正在干活,于是该做的恢复被压掉。
+盖章本身是有权限的(只有当前属主能盖 —— 旧属主改派后再调
+`mark_tasks_consumed` 会拿到 `task_not_owned`),但**已经盖下的章会留在原地**。
+
+> 🔴 **所以准确的读法是:`consumed_at` 证明「这个逻辑任务被消费过至少一次」,
+> 不证明「`to_name` 现在指的那个节点开过工」。**
+> 拿它判某个节点是否存活之前,先确认这个任务**没有被改派过**。
+
+一条**尚未验证**的线索:改派会把 `started_at` 置 NULL,而正常开工路径会把它写成
+`datetime('now')`(同文件那条 `UPDATE tasks SET status = 'running', started_at = datetime('now')`)。
+所以「`consumed_at` 有值 + `started_at` 为空」**看起来**能识别出「章是前任盖的」。
+**但我没有测过它**,而且 requeue 路径也会把 `started_at` 置 NULL ——
+**在有人真正测出它之前,不要把这条当判据用。**
+
+这一段是审查指出来的,不是我自己查出来的;第一版把一个任务级的时间戳当成了
+节点级的判据 —— 与本文末尾「第一版为什么全错」里那个根因**是同一个**:
+没有回到源码确认这个字段是谁写的、跟着谁走。
 
 ## 为什么「`consumed_at` 为空」现在不能当故障证据
 
