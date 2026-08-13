@@ -162,15 +162,16 @@ if [[ $RUN_L1 -eq 1 ]]; then
   for t in "${L1_TESTS[@]}"; do
     # Build (cached if recent)
     note "build $t"
+    # 🔴 原来这里是一串逐套件的 elif。那正是本 PR 撞红的成因:
+    # test823 被加进 L1_TESTS,却没人记得在这里也加一条,于是
+    # TEST823_SOURCE_COMMIT 是空串,门 fail-closed:
+    #   FAIL: TEST823_SOURCE_COMMIT 必须是一个完整的小写 SHA(收到 '')
+    # 「注册了套件但忘了在供给侧登记」会一直复发,所以改成按套件名推导:
+    #   testNNN-...  →  --build-arg TESTNNN_SOURCE_COMMIT=<HEAD>
+    # qa-*-... 形态不匹配,和以前一样不传(它们的门不要这个变量)。
     build_args=""
-    if [[ "$t" == "test686-rest-shape-golden" ]]; then
-      build_args="--build-arg TEST686_SOURCE_COMMIT=$(git rev-parse HEAD)"
-    elif [[ "$t" == "test765-batch-runtime-gate" ]]; then
-      build_args="--build-arg TEST765_SOURCE_COMMIT=$(git rev-parse HEAD)"
-    elif [[ "$t" == "test766-bunx-preflight" ]]; then
-      build_args="--build-arg TEST766_SOURCE_COMMIT=$(git rev-parse HEAD)"
-    elif [[ "$t" == "test746-setup-bun-pin" ]]; then
-      build_args="--build-arg TEST746_SOURCE_COMMIT=$(git rev-parse HEAD)"
+    if [[ "$t" =~ ^test([0-9]+)- ]]; then
+      build_args="--build-arg TEST${BASH_REMATCH[1]}_SOURCE_COMMIT=$(git rev-parse HEAD)"
     fi
     if ! dockerrun "docker build -q $build_args -t anet-$t -f tests/$t/Dockerfile ." >/tmp/qa-l1-$t-build.log 2>&1; then
       fail "L1 $t — build failed, see /tmp/qa-l1-$t-build.log"
