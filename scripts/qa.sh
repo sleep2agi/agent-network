@@ -177,12 +177,19 @@ if [[ $RUN_L1 -eq 1 ]]; then
       # 我上一版只按套件名推导出 TESTNNN_SOURCE_COMMIT,test823 收的是 SOURCE_COMMIT,
       # 于是照旧红在 "TEST823_SOURCE_COMMIT 收到 ''"。
       # 未被 Dockerfile 声明的 build-arg 只会产生一条警告,不影响构建,所以两套都传。
-      _qa_sha="$(git rev-parse HEAD)"
-      build_args="--build-arg TEST${BASH_REMATCH[1]}_SOURCE_COMMIT=$_qa_sha --build-arg SOURCE_COMMIT=$_qa_sha"
-      # blob 绑定:把 SOURCE_COMMIT 钉到被测的那份 run.sh 字节上(git blob object id)
-      if [ -f "tests/$t/run.sh" ]; then
-        _qa_blob="$(git rev-parse "HEAD:tests/$t/run.sh" 2>/dev/null || true)"
-        [ -n "$_qa_blob" ] && build_args="$build_args --build-arg RUNSH_BLOB=$_qa_blob"
+      # 🔴 git 调用必须是非致命的。qa.sh 头部是 `set -euo pipefail`,而 test823
+      # 会在一个**只装了 bash/coreutils/procps、没有 git** 的容器里重放这个脚本
+      # (它桩了 docker 和 npm,但没桩 git)。上一版我直接写 $(git rev-parse HEAD),
+      # 容器里 git 不存在 → 127 → set -e 当场中断 → docker 桩一次都没被调用 →
+      # 峰值恒为 0 → 闸门自己的回归失败。这是我改出来的回归,不是被测代码的问题。
+      _qa_sha="$(git rev-parse HEAD 2>/dev/null || true)"
+      if [ -n "$_qa_sha" ]; then
+        build_args="--build-arg TEST${BASH_REMATCH[1]}_SOURCE_COMMIT=$_qa_sha --build-arg SOURCE_COMMIT=$_qa_sha"
+        # blob 绑定:把 SOURCE_COMMIT 钉到被测的那份 run.sh 字节上(git blob object id)
+        if [ -f "tests/$t/run.sh" ]; then
+          _qa_blob="$(git rev-parse "HEAD:tests/$t/run.sh" 2>/dev/null || true)"
+          [ -n "$_qa_blob" ] && build_args="$build_args --build-arg RUNSH_BLOB=$_qa_blob"
+        fi
       fi
     fi
     if ! dockerrun "docker build -q $build_args -t anet-$t -f tests/$t/Dockerfile ." >/tmp/qa-l1-$t-build.log 2>&1; then
