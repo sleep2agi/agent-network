@@ -65,7 +65,9 @@ commhub_get_all_status()
      `frpc.example.toml` 是 `${FRP_SERVER_ADDR}`,都是占位符(仓库政策不写死真实域名)。
      **在部署机上按权威来源查,不要猜、也不要退回那个 Vercel 页:**
      ```bash
-     pm2 jlist | python3 -c "import json,sys;[print(a['name']) for a in json.load(sys.stdin)]"   # 确认 anet-dashboard 在跑
+     # ⚠ 必须看 status,不能只看名字:停掉/崩掉的应用照样留在 pm2 jlist 里
+     pm2 jlist | python3 -c "import json,sys;[print(a['name'],a['pm2_env']['status'],'restarts='+str(a['pm2_env'].get('restart_time',0))) for a in json.load(sys.stdin)]"
+     # online 之外,还要看「本次已连续运行多久」—— 重启次数没有时间跨度判断不了任何事
      curl -s http://127.0.0.1:2019/config/apps/http/servers                                       # Caddy admin:实际路由(权威)
      curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3001                              # 直连上游,绕开入口层
      ```
