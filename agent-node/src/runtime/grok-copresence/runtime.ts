@@ -651,22 +651,36 @@ function firstApprovalInputAction(data: Buffer): ApprovalInputAction | null {
   return null;
 }
 
-function knownComposerNavigationLength(data: Buffer): number {
+type ComposerNavigation = {
+  length: number;
+  kind: "edit" | "history" | "viewport";
+};
+
+function knownComposerNavigation(data: Buffer): ComposerNavigation | null {
   if (data.length >= 3 && data[0] === 0x1b && data[1] === 0x4f) {
-    return "ABCDHF".includes(String.fromCharCode(data[2])) ? 3 : 0;
+    const final = String.fromCharCode(data[2]);
+    if ("AB".includes(final)) return { length: 3, kind: "history" };
+    if ("CDHF".includes(final)) return { length: 3, kind: "edit" };
+    return null;
   }
-  if (data.length < 3 || data[0] !== 0x1b || data[1] !== 0x5b) return 0;
+  if (data.length < 3 || data[0] !== 0x1b || data[1] !== 0x5b) return null;
   const limit = Math.min(data.length, 16);
   for (let index = 2; index < limit; index++) {
     const byte = data[index];
     if (byte < 0x40 || byte > 0x7e) continue;
     const final = String.fromCharCode(byte);
     const params = data.subarray(2, index).toString("ascii");
-    if ("ABCDHF".includes(final)) return index + 1;
-    if (final === "~" && /^(?:1|3|4|5|6|7|8)(?:;\d+)*$/.test(params)) return index + 1;
-    return 0;
+    if ("AB".includes(final)) return { length: index + 1, kind: "history" };
+    if ("CDHF".includes(final)) return { length: index + 1, kind: "edit" };
+    if (final === "~" && /^(?:1|3|4|7|8)(?:;\d+)*$/.test(params)) {
+      return { length: index + 1, kind: "edit" };
+    }
+    if (final === "~" && /^(?:5|6)(?:;\d+)*$/.test(params)) {
+      return { length: index + 1, kind: "viewport" };
+    }
+    return null;
   }
-  return 0;
+  return null;
 }
 
 class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
@@ -696,6 +710,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   private composerPending = Buffer.alloc(0);
   private humanComposerAudit = "";
   private humanComposerAuditTainted = false;
+  private humanComposerAuditUnsafe = false;
   private humanComposerAuditOverflow = false;
   private humanComposerSawSlash = false;
   private humanComposerLeadingSlash = false;
@@ -1523,8 +1538,21 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           continue;
         }
         if (!this.humanPasteMode) {
-          const navigationLength = knownComposerNavigationLength(remainder);
-          if (navigationLength > 0) {
+          const navigation = knownComposerNavigation(remainder);
+          if (navigation) {
+            if (navigation.kind === "history") {
+              // History can recall a slash command that never crossed this
+              // input proxy. Keep it out of the policy-owning TUI entirely.
+              this.warnBlockedPermissionModeChange("composer history navigation");
+              return;
+            }
+            if (navigation.kind === "viewport") {
+              // Scrolling rendered output does not edit or submit the
+              // composer and must not claim human turn ownership.
+              this.writeHumanBytes(remainder.subarray(0, navigation.length));
+              offset += navigation.length;
+              continue;
+            }
             if (this.humanComposerSawSlash) {
               this.writeHumanBytes(Buffer.from("\x03", "binary"));
               this.resetHumanComposerAudit();
@@ -1536,9 +1564,9 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
               return;
             }
             if (this.arbitration.phase === "idle") this.transition({ type: "human_input_started" });
-            this.writeHumanBytes(remainder.subarray(0, navigationLength));
+            this.writeHumanBytes(remainder.subarray(0, navigation.length));
             this.humanComposerAuditTainted = true;
-            offset += navigationLength;
+            offset += navigation.length;
             continue;
           }
           // Unknown CSI/SS3/Alt sequences include enhanced keyboard encodings
@@ -1650,6 +1678,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         this.humanComposerAudit = this.humanComposerAudit.slice(-8_192);
         this.humanComposerAuditOverflow = true;
         this.humanComposerAuditTainted = true;
+        this.humanComposerAuditUnsafe = true;
       }
     }
   }
@@ -1659,15 +1688,16 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     // `/always-approve`, so filtering only the final literal command is not
     // sufficient. Keep the shared security posture immutable by disabling
     // slash-command submission on this proxy altogether.
-    // Navigation/history makes the real editor content unknowable (Up can
-    // recall an old `/auto`). A tainted or overflowed composer must be cleared
-    // with Ctrl-U/Ctrl-C and retyped before any submit key is accepted.
-    return this.humanComposerLeadingSlash || this.humanComposerAuditTainted;
+    // History never reaches the TUI, and safe cursor edits reject any slash
+    // before or after cursor divergence. Overflow remains unsafe because the
+    // complete editor contents can no longer be reconstructed.
+    return this.humanComposerLeadingSlash || this.humanComposerAuditUnsafe;
   }
 
   private resetHumanComposerAudit(): void {
     this.humanComposerAudit = "";
     this.humanComposerAuditTainted = false;
+    this.humanComposerAuditUnsafe = false;
     this.humanComposerAuditOverflow = false;
     this.humanComposerSawSlash = false;
     this.humanComposerLeadingSlash = false;
