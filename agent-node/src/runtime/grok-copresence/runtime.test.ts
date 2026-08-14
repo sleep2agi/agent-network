@@ -1370,6 +1370,12 @@ describe("Grok copresence runtime integration", () => {
         handshakeTimeoutMs: 500,
       })).rejects.toThrow("already attached");
 
+      input.write("AC");
+      await waitFor(() => runtime!.state.phase === "human_editing");
+      input.write("\x1b[D");
+      input.write("B\r");
+      await waitFor(() => fixture.humanPrompts.includes("ABC"));
+
       input.write("\x0f");
       input.write("\x1b[Z");
       input.write("\x1b[111;5u");
@@ -1400,7 +1406,7 @@ describe("Grok copresence runtime integration", () => {
       await waitFor(() => fixture.humanPrompts.includes("queued"));
       input.write("lf-human\n");
       await waitFor(() => fixture.humanPrompts.includes("lf-human"));
-      expect(fixture.humanPrompts).toEqual(["first\rsecond", "queued", "lf-human"]);
+      expect(fixture.humanPrompts).toEqual(["ABC", "first\rsecond", "queued", "lf-human"]);
 
       const approvalPromise = runtime.submit({
         taskId: "approval-1",
@@ -2355,6 +2361,7 @@ class FakePty implements GrokPtyLike {
   private dataListeners: Array<(data: string) => void> = [];
   private exitListeners: Array<(event: { exitCode: number; signal?: number }) => void> = [];
   private composer = "";
+  private composerCursor = 0;
   private paste = false;
   private awaitingApprovalTask = "";
   private lateCrashTask = "";
@@ -2866,6 +2873,16 @@ class FakePty implements GrokPtyLike {
         index += 6;
         continue;
       }
+      if (!this.paste && data.startsWith("\x1b[D", index)) {
+        this.composerCursor = Math.max(0, this.composerCursor - 1);
+        index += 3;
+        continue;
+      }
+      if (!this.paste && data.startsWith("\x1b[C", index)) {
+        this.composerCursor = Math.min(this.composer.length, this.composerCursor + 1);
+        index += 3;
+        continue;
+      }
       const char = data[index++];
       if (this.awaitingApprovalTask && /^[1-9]$/.test(char)) {
         this.resolveApproval();
@@ -2873,14 +2890,19 @@ class FakePty implements GrokPtyLike {
       }
       if (char === "\x03" && !this.paste) {
         this.composer = "";
+        this.composerCursor = 0;
         continue;
       }
       if ((char !== "\r" && char !== "\n") || this.paste) {
-        this.composer += char;
+        this.composer = this.composer.slice(0, this.composerCursor)
+          + char
+          + this.composer.slice(this.composerCursor);
+        this.composerCursor += char.length;
         continue;
       }
       const submitted = this.composer;
       this.composer = "";
+      this.composerCursor = 0;
       if (this.awaitingApprovalTask) {
         this.resolveApproval();
       } else if (submitted) {
