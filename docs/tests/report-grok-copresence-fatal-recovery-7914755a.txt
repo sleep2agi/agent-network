@@ -1,9 +1,9 @@
 # Grok co-presence fatal-runtime recovery and repo-read pilot
 
-date=2026-08-14T15:51:32+08:00
-source_commit=7914755a60d694cd4f7fa9d6ee6fa575b04fa0cd
-candidate_image=sha256:78aa159165ffa9713f948fc04d5a10694bb23c7e9e4b1d72cba5b0dd445c2eef
-candidate_agent_node_cli_sha256=481182aecd11b0f0d0563053786542aa7c1761a4b8c68807c7d5e3d70f8aee7e
+date=2026-08-14T16:10:39+08:00
+source_commit=b830403b82a97a98ec004e59c86eb294ddfd1771
+candidate_image=sha256:261ade0fd44147370df56a7377f409c840f3e65a07aa472174e7761184b45ecb
+candidate_agent_node_cli_sha256=5c0d5cbcfb0350af1eb27e78de1ccd5902c5ba22be732df415fe26851c269a45
 
 ## Incident reproduced from production evidence
 
@@ -12,6 +12,14 @@ though the x-search launch argv denied `list_dir`. The co-presence bridge
 correctly failed closed, but agent-node retained that terminal runtime in its
 process cache. Every later task therefore inherited `runtime_closed` instead
 of opening a fresh TUI.
+
+The subsequent repo-read pilot exposed a second, distinct ordering bug. The
+real Grok event stream emitted three automatic permission requests first
+(`search_tool`, `list_dir`, `search_tool`) and then resolved them in the order
+`search_tool`, `search_tool`, `list_dir`. The bridge kept only one scalar
+automatic request and incorrectly treated this valid batched lifecycle as an
+approval-boundary violation. Six queued tasks then failed within seconds; no
+model turn was allowed to proceed after the first fatal boundary.
 
 ## Product changes
 
@@ -22,6 +30,11 @@ of opening a fresh TUI.
   for a terminal runtime.
 - A blocked human slash command returns arbitration to idle; the integration
   test immediately submits and completes a following network task.
+- Exact fixed-profile automatic permissions are now correlated as a bounded
+  multiset by tool name. Multiple same-tool requests and out-of-request-order
+  resolutions are accepted while manual approval overlap, unmatched
+  resolutions/rejections, overflow, malformed events, and terminal completion
+  with unresolved requests still fail closed.
 - The pre-spawn MCP audit binds the inspected CommHub target to the exact
   already-resolved Bun executable. It still requires one stdio server named
   `commhub`, sourced from the isolated `config.toml`, and rejects any other
@@ -46,6 +59,24 @@ from source commit 7914755a:
     464 expect() calls
     Ran 56 tests across 2 files. [64.01s]
 
+The batched-permission regression was first witnessed red against the prior
+runtime (`duplicate preview automatic permission request`). From exact source
+commit b830403b, the focused runtime/profile/near-miss layer then passed:
+
+    84 pass
+    0 fail
+    694 expect() calls
+    Ran 84 tests across 3 files.
+
+The exact archive image then passed the full test725 unit domain:
+
+    1288 pass
+    0 fail
+    4633 expect() calls
+    Ran 1288 tests across 92 files.
+    MUTATION_RED readable-attachment-runtime-disconnected rc=1
+    RESULT: PASS
+
 The archive-built test225 package gate passed its packed-source boundary and,
 before its unrelated existing L4 failure, passed the real package path:
 
@@ -66,14 +97,22 @@ therefore a pre-existing gate failure and is not claimed as green here.
   tasks. The strict sandbox permits only `read_file`, `grep`, and `list_dir` in
   addition to fixed runtime tools; shell, write, web, media, scheduler, and
   subagent tools remain denied.
-- startup reached TUI-ready, input-ready, CommHub registration, and SSE
-  connection. No task was synthesized or retried during this pilot.
+- source b830403b was deployed only to this node. Startup reached TUI-ready,
+  input-ready, CommHub registration, and SSE connection with new Grok session
+  `4055ed56-09e1-47a2-9666-277763ef6e63`; Hub reported idle, node_id
+  `n_72be30e0`, and zero pending/in-flight tasks.
+- The first start failed closed because the previous generation's interrupted
+  cleanup had left five empty, owner-held mode-0444 sandbox placeholder files.
+  Their exact metadata was verified and they were moved intact into the
+  owner-only rollback directory before the successful retry. No user file or
+  policy content was removed.
+- No task was synthesized, retried, or sent during this pilot.
 
 Rollback coordinates:
 
-    old runtime: /home/vansin/.commhub/runtime-commdog-grok-433b4af4
-    rollback dir: /home/vansin/.commhub/rollback-commdog-bf0d3134-20260814T154100CST
-    candidate runtime: /home/vansin/.commhub/runtime-commdog-grok-7914755a
+    previous runtime: /home/vansin/.commhub/runtime-commdog-grok-7914755a
+    rollback dir: /home/vansin/.commhub/rollback-commdog-b830403b-20260814T161000CST
+    candidate runtime: /home/vansin/.commhub/runtime-commdog-grok-b830403b
 
 ## Honest limits
 
