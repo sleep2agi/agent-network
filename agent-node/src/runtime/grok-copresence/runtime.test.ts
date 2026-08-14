@@ -1370,6 +1370,17 @@ describe("Grok copresence runtime integration", () => {
         handshakeTimeoutMs: 500,
       })).rejects.toThrow("already attached");
 
+      input.write("/model\r");
+      await waitFor(() => runtime!.state.phase === "idle");
+      const afterBlockedSlash = await runtime.submit({
+        taskId: "network-after-blocked-slash",
+        from: "dashboard",
+        text: "after blocked slash",
+        timeoutMs: 4_000,
+      });
+      expect(afterBlockedSlash.replyText).toBe("FINAL network-after-blocked-slash");
+      expect(fixture.humanPrompts).not.toContain("/model");
+
       input.write("AC");
       await waitFor(() => runtime!.state.phase === "human_editing");
       input.write("\x1b[D");
