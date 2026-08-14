@@ -335,6 +335,15 @@ describe("Grok copresence launch and injection policy", () => {
     expect(() => assertGrokCopresenceApprovalOwnership(JSON.stringify({
       ...cleanInspection,
     }), home)).not.toThrow();
+    const absoluteCommand = "/opt/anet/bin/bun";
+    expect(() => assertGrokCopresenceApprovalOwnership(JSON.stringify({
+      ...cleanInspection,
+      mcpServers: [{ ...cleanInspection.mcpServers[0], target: absoluteCommand }],
+    }), home, absoluteCommand)).not.toThrow();
+    expect(() => assertGrokCopresenceApprovalOwnership(JSON.stringify({
+      ...cleanInspection,
+      mcpServers: [{ ...cleanInspection.mcpServers[0], target: "/tmp/other-bun" }],
+    }), home, absoluteCommand)).toThrow("runtime-owned commhub");
     expect(() => assertGrokCopresenceApprovalOwnership(JSON.stringify({
       ...cleanInspection,
       permissions: {
