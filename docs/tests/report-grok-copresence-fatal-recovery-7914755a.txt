@@ -1,0 +1,87 @@
+# Grok co-presence fatal-runtime recovery and repo-read pilot
+
+date=2026-08-14T15:51:32+08:00
+source_commit=7914755a60d694cd4f7fa9d6ee6fa575b04fa0cd
+candidate_image=sha256:78aa159165ffa9713f948fc04d5a10694bb23c7e9e4b1d72cba5b0dd445c2eef
+candidate_agent_node_cli_sha256=481182aecd11b0f0d0563053786542aa7c1761a4b8c68807c7d5e3d70f8aee7e
+
+## Incident reproduced from production evidence
+
+The pinned Grok 0.2.93 TUI auto-resolved a `list_dir` permission request even
+though the x-search launch argv denied `list_dir`. The co-presence bridge
+correctly failed closed, but agent-node retained that terminal runtime in its
+process cache. Every later task therefore inherited `runtime_closed` instead
+of opening a fresh TUI.
+
+## Product changes
+
+- A stopped terminal co-presence runtime is closed, retired with a CAS against
+  the cached instance, and its persisted Grok session is cleared before the
+  next task opens a fresh TUI.
+- A normal PTY recovery (`phase=recovering`) is retained and is not mistaken
+  for a terminal runtime.
+- A blocked human slash command returns arbitration to idle; the integration
+  test immediately submits and completes a following network task.
+- The pre-spawn MCP audit binds the inspected CommHub target to the exact
+  already-resolved Bun executable. It still requires one stdio server named
+  `commhub`, sourced from the isolated `config.toml`, and rejects any other
+  command or MCP server.
+
+## Docker evidence
+
+test725 exact source image, full agent-node unit domain:
+
+    1287 pass
+    0 fail
+    4627 expect() calls
+    Ran 1287 tests across 92 files. [116.74s]
+    MUTATION_RED readable-attachment-runtime-disconnected rc=1
+    RESULT: PASS
+
+After the exact-command audit correction, the focused runtime layer was rerun
+from source commit 7914755a:
+
+    56 pass
+    0 fail
+    464 expect() calls
+    Ran 56 tests across 2 files. [64.01s]
+
+The archive-built test225 package gate passed its packed-source boundary and,
+before its unrelated existing L4 failure, passed the real package path:
+
+    PASS: create -> start -> register -> Hub task -> real tmux attach live render -> reply
+    PASS: Hub session registration reports agent-node:grok-build-cli
+    PASS: Grok child env is filtered; state is 0700/0600
+
+The same test225 L4 failure (`installed candidate Feishu refusal lacked the
+fixed explanation`) was reproduced unchanged on parent source a9df8dba. It is
+therefore a pre-existing gate failure and is not claimed as green here.
+
+## Single-node pilot
+
+- tmux session remains exactly `通信狗`, with windows `0:node` and `1:tui`.
+- runtime remains `grok-build-cli`; pinned Grok remains 0.2.93.
+- capability profile changed from x-search to the already reviewed repo-read
+  profile (`Read`, `Grep`, `Glob`) because this node receives repository review
+  tasks. The strict sandbox permits only `read_file`, `grep`, and `list_dir` in
+  addition to fixed runtime tools; shell, write, web, media, scheduler, and
+  subagent tools remain denied.
+- startup reached TUI-ready, input-ready, CommHub registration, and SSE
+  connection. No task was synthesized or retried during this pilot.
+
+Rollback coordinates:
+
+    old runtime: /home/vansin/.commhub/runtime-commdog-grok-433b4af4
+    rollback dir: /home/vansin/.commhub/rollback-commdog-bf0d3134-20260814T154100CST
+    candidate runtime: /home/vansin/.commhub/runtime-commdog-grok-7914755a
+
+## Honest limits
+
+- No owner-origin Dashboard task was sent after the pilot because task traffic
+  was explicitly paused while the approval-boundary incident was investigated.
+- `/model` remains intentionally blocked in this preview. It is a model-picker
+  control turn rather than an ordinary model response, and the current FIFO
+  ownership protocol cannot yet prove when that interactive control has
+  returned to the composer. The TUI now reports the block instead of silently
+  leaving the queue stuck; changing the persisted model still requires a
+  controlled config update and restart.
