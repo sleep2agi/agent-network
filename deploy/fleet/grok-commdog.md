@@ -886,6 +886,39 @@ Vincent 本人的直接 rollout 指令，以及可归因的通信狗 UAT 记录�
 顺序同步 A/P；不得以任何身份一句“正常”替代证据，不得并行覆盖两节点，也不得把通信狗一次
 成功直接外推成 A/P 已通过。
 
+### 2026-08-14 `通信狗` 模型切换到 Grok 4.6
+
+Vincent 直接要求把 `通信狗` 从 `grok-4.5` 切换到 `grok-4.6`。切换前先用当前固定的
+Grok 0.2.93 二进制执行 `grok --no-auto-update models`；厂商返回的可用模型清单包含
+`grok-4.6 (default)` 与 `grok-4.5`，因此目标 model ID 来自运行时权威输出，不是手工猜测。
+
+Dashboard 当时无法完成修改，原因是该单节点恢复候选以 agent-node CLI 直接启动，Hub session
+没有上报 `config_revision` / `config_update_capable`；受控 `update_node_config` 路径因缺少可比较的
+revision 而不能使用。这里不伪造 revision，也不绕过 Hub 的并发控制。经 owner 直接授权后，对
+本机权威 config 做单字段、可回滚修改，并精确重启 `通信狗` 的 node 与 TUI 两个 pane：
+
+```text
+rollback=/home/vansin/.commhub/rollback-commdog-model46-20260814T150600Z
+old_config_sha256=40dfba78b146a09a8c21b2b8e8e7259dc69d70612567ec20926c2cb3353376d0
+new_config_sha256=ebf4d664acb7664a162e329bb92e46b924c9e4fb6c3fc3ca0f5edcfb0c06df37
+changed_field=model: grok-4.5 -> grok-4.6
+node_id=n_72be30e0
+session_id=9acd87e4-bd49-4b14-95c2-646fa8a91a27
+tmux=通信狗; windows=0:node,1:tui; active=1:tui; dead=0,0
+grok_binary=/home/vansin/.commhub/grok-pins/0.2.93/grok
+grok_binary_sha256=4e0738d3b5550f3c842bc0ae69f468815c6329c008a110d0c27a694dc3401135
+```
+
+后态证据互相独立：node 启动日志打印 `model: grok-4.6`；Hub `get_session_status` 回读
+`model=grok-4.6`；可见 TUI 底栏显示 `Grok 4.6 (high)`；真实 `send_task`
+`37754bbe-90cd-4b1e-bf2c-c57a12b6d44a` 在 5 秒内终态 `replied`，结果为
+`[通信狗] COMM_DOG_MODEL46_OK`。两个 Unix socket `attach.sock` / `leader.sock` 均在，新 TUI
+attach 到同一新 session。该动作没有修改 `A站狗`、`P站狗` 或任何其它节点。
+
+若需回滚，只恢复上述 owner-only 目录中的 `config.json.old`，确认 SHA-256 后，按同一精确
+双 pane 流程创建新 session；不得只改 Hub 展示值或只重启 TUI，因为那两种做法都不能改变
+agent-node 实际传给 Grok 的 model。
+
 ## 数据与密钥边界
 
 Git 只恢复软件和非密钥流程，不恢复以下数据：Hub 数据库、node token、Grok 登录/会员状态、
