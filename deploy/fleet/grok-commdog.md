@@ -4,7 +4,68 @@
 宿主机上的安装目录与 tmux 会话只是部署副本；Git 中的 source commit 与本文才是
 恢复依据。本文不授权批量升级、生产数据库操作或其它舰团节点变更。
 
-## 当前安全终态（2026-08-13 15:42 CST）
+## 最新单节点终态（2026-08-14 14:33 CST）
+
+`通信狗` 已按单节点范围恢复为真实 TUI 共存；`A站狗`、`P站狗` 未改动。当前可复核坐标为：
+
+- tmux session 严格名为 `通信狗`，窗口为 `0:node` 与 `1:tui`，默认活动窗口是 `1:tui`；
+- config 为 `/home/vansin/grok-commdog-workspace/.anet/nodes/通信狗/config.json`，SHA-256
+  `40dfba78b146a09a8c21b2b8e8e7259dc69d70612567ec20926c2cb3353376d0`；
+- `node_id=n_72be30e0`，Grok session 为 `272e16a7-42f1-4e1d-b8ec-19044b5f3cfc`；
+- source commit 为 `433b4af44bdcc09145c75b697634f74aec42a7df`；
+- `agent-network=2.3.0-preview.39`，CLI SHA-256
+  `d34c71a0763323273f2983a03e23d7fc2cb2da4d1297271456bcc85159ad48a0`；
+- `agent-node=2.5.0-preview.31`，CLI SHA-256
+  `8b7db0c2494f701989c51f3ad51a91fd9150fac4b7bafe6b64781ccb8cdf215a`；
+- Grok `0.2.93 (f00f96316d)` 的冻结二进制 SHA-256 为
+  `4e0738d3b5550f3c842bc0ae69f468815c6329c008a110d0c27a694dc3401135`。
+
+### 固定版本必须脱离供应商自动更新目录
+
+本轮根因不是简单的 tmux 窗口丢失。旧启动命令把 `GROK_BINARY` 指向
+`~/.grok/bin/grok-0.2.93`；Grok 自动更新在 2026-08-14 11:34 CST 把该文件删除并把默认
+`grok` 切到 `1.0.4`。原 0.2.93 会话随后停在工具执行后的 `waiting_for_model`，TUI、leader 与
+两个 socket 消失，但 agent-node 继续连接 Hub，形成“online/idle 但不可派活”的假在线。之后
+用同一路径重启又确定性得到 `spawnSync ... ENOENT`。
+
+恢复时从仍运行的 0.2.93 进程映像取回同哈希二进制，部署到 CommHub 自有路径
+`~/.commhub/grok-pins/0.2.93/grok`。该机器路径仍只是部署副本；空机恢复时必须从受控制品源
+取得上面记录的同 SHA-256 字节，先执行 `--version` 与 `sha256sum` 双验，再作为
+`GROK_BINARY`。**不得**把供应商会自动增删的 `~/.grok/bin/` 当成不可变版本仓库。
+
+节点启动 pane 的等价关键部分是：
+
+```bash
+GROK_BINARY="$HOME/.commhub/grok-pins/0.2.93/grok" \
+BUN_BIN="$HOME/.nvm/versions/node/v20.20.0/bin/bun" \
+PATH="$HOME/.commhub/grok-pins/0.2.93:$HOME/.nvm/versions/node/v20.20.0/bin:/usr/local/bin:/usr/bin:/bin" \
+node "$RUNTIME/node_modules/@sleep2agi/agent-node/dist/cli.js" \
+  --config "$CONFIG" --alias 通信狗 --runtime grok-build-cli --new-session
+```
+
+`$RUNTIME` 与 `$CONFIG` 必须在恢复清单中解析为上面的绝对路径；不能把未解析占位符直接复制到
+生产命令。node pane 与 attach pane 都应设置 tmux `remain-on-exit on`，使进程退出后保留退出码
+与屏幕，而不是把唯一故障现场随窗口一起回收。
+
+### 本轮行为验收与仍存在的限制
+
+可见 `1:tui` 内真实调用 `web_search`，得到 `TOOL_TUI_OK OpenAI | Research & Deployment`。
+同一会话随后消费 CommHub `send_task` `398d11bd-edad-4eea-9418-0d241841ffff`，任务终态
+`replied`，结果为 `[通信狗] COMM_DOG_POST_PIN_OK`。完成后 node、TUI、`attach.sock` 与
+`leader.sock` 仍同时存活。这四项是本轮“人工 TUI + 节点通信共存”的正证。
+
+当前输入代理仍不是完整的原生 TUI：普通文本和 Enter 可用，但方向键等 composer navigation
+会把审计状态标成 tainted，随后的 Enter 被安全层当作潜在 slash 权限命令而阻断。实测“输入
+`AC`、左移、插入 `B`、提交”没有进入模型，并记录 `slash command was blocked`。这是安全层
+把正常编辑能力与权限姿态保护耦合造成的产品缺口，不得在报告中写成“完整 TUI 已覆盖”。在
+修复并用行为反向门证明前，操作者应使用纯文本直输、退格、Ctrl-U 与 Enter，不应依赖方向键、
+历史召回或 slash palette。
+
+判活必须同时满足：目标 agent-node 子树存在；`run/attach.sock` 与 `run/leader.sock` 均为 socket；
+`1:tui` pane 存活；最后一次 `TUI ready` 晚于最后一次 fatal/boundary；并完成一条可归因的真实
+行为探针。Hub 的 online/idle、单独的 agent-node PID 或旧 `TUI ready` 日志都不能单独判活。
+
+## 历史安全终态（2026-08-13 15:42 CST）
 
 以下是本轮只读回查得到的**存活状态**，优先级高于后文按时间记录的历史基线：
 
@@ -215,7 +276,8 @@ message id `948b5add-0f49-41e2-9e4b-3721866b2ec5`，完成后仍停在可交互�
 不得把全量 `get_all_status` 直接派给通信狗；应由受控编排者先做服务端/可信侧过滤，再把小分母
 事实交给它分析。恢复后的 TUI 又在 5.7 秒内直接调用 `commhub_send_message` 向 `通信牛`
 发送恢复 ACK，返回 message id `9e3609d9-616c-4efa-b434-d242d9fc8811`；这排除了仅有 node/tmux
-进程复活而 MCP 工具仍丢失的假恢复。
+进程复活而 MCP 工具仍丢失的假恢复。该记录只是历史探针；当前运维契约已改用带生命周期的
+`send_task`，不再用 `send_message` 作为交付或收发正常的判据。
 
 第三个真实 PR delta 评审任务 `04f6800a-8adb-46bb-912e-68573a58be5d` 使用 PR #803 的
 `source=aeec4b9c130e6439feb622b1d2213f9f8f61d1fb`，在 1 分 25 秒内终态 `replied`。
@@ -495,13 +557,14 @@ jq -e '
   .failing_count == 0 and
   ([.servers[] | select(.name == "commhub")][0].healthy == true) and
   ([.servers[] | select(.name == "commhub")][0].checks |
-    any(.label == "3 tools discovered" and .passed == true))
+    any(.label == "4 tools discovered" and .passed == true))
 ' /tmp/commdog-mcp-doctor.json
 ```
 
-最后从可见 TUI 发一条无副作用 `commhub_send_message`，并从 Hub 侧按返回的 message id 回读
-`from_session`、`session_name`、`type=message`。只有 doctor 与真实出站消息都通过，才可宣告
-TUI/节点通信共存恢复完成。反向见证应移除 Bun 所在目录后确认 doctor 在
+最后从可见 TUI 发一条无副作用 `send_task`，并从 Hub 侧按返回的 task id 回读
+`from_node_id`、`from_name`、目标 alias 与任务生命周期；入站任务还必须达到 `replied` 终态。
+`send_message` 没有任务生命周期，不能替代这条门。只有 doctor、入站终态与真实 TUI 出站任务
+都通过，才可宣告 TUI/节点通信共存恢复完成。反向见证应移除 Bun 所在目录后确认 doctor 在
 `command found` 这一项转红；不能只检查 MCP 配置文件里出现了 `command = "bun"`。
 
 ## 停用与回滚
@@ -590,7 +653,8 @@ tmux 窗口存在而仍判成功，该验收就是空门。
    文本而 TUI 已退出，或 Hub idle 但 TUI 不在，都算失败；若任务依赖 CommHub 工具，还要用
    MCP doctor 或一个限定目标的真实出站探针证明工具面可用。#824 落地前不得用全量
    `get_all_status` 充当该探针。
-8. 发现缺口时用 `send_message` 向维护者回报事实与证据边界；状态同步不得再制造一条审查任务。
+8. 发现缺口时用 `send_task` 向维护者回报事实与证据边界，并回读 task lifecycle；当前不使用
+   `send_message`。状态同步任务必须短小、限定目标且禁止派生，避免制造队列自激。
 
 以下任一情况都不得直接派给当前 profile：需要 checkout/repo 搜索、运行 Docker、编辑 patch、
 读取任意 URL、访问凭证或改变外部状态。此类任务先由具备对应能力的节点提取最小材料；若要让
@@ -753,6 +817,107 @@ preventive aliases`；该错误只在审查转述，不在报告或实现中。
 14:38 CST 对 PID `2067974` 发送精确停止，进程在 barrier 内退出，未使用 `pkill`、未修改配置、
 未触碰其它节点。当前安全终态是 tmux session `通信狗` 保留、`node` pane `%1107` dead、Hub
 节点等待修复发布后重启；不是“在线可用”。不得为了恢复绿色状态用未审源码覆盖 live runtime。
+
+### 2026-08-13 `通信狗` 单节点 TUI/CommHub 恢复验收
+
+Vincent 随后要求先恢复 `通信狗` 的真 Grok TUI、键盘输入与 Dashboard/CommHub 收发，待其亲自
+进入 tmux 验收后再把同一能力同步到 `A站狗`、`P站狗`。本轮仍未合并 #825/#826/#830、未发布
+npm preview，也未改 A/P；使用冻结 stack 的 exact build 只制作了单节点候选和 owner-only 回滚点。
+
+第一次候选启动在 pre-spawn ownership audit 上 fail-closed：#825 已把 MCP command 固化为绝对
+Bun 路径，而 #830 仍把 doctor target 与历史字面量 `bun` 比较。最窄兼容修复以独立 stacked
+Draft PR [#836](https://github.com/sleep2agi/agent-network/pull/836) 固化，不移动 #830 已审 head：
+
+```text
+base/report_head=d51a4473f6aea75547437150dba729524506062b
+source=fc221fc5f783d0a09e1fa427860f7c88a5825919
+agent_node_cli_sha256=8b7db0c2494f701989c51f3ad51a91fd9150fac4b7bafe6b64781ccb8cdf215a
+```
+
+该修复把 resolver 得到的 `commhubMcpCommand` 传入 ownership audit，并要求 doctor 的首个 target
+精确等于该绝对命令；另有 mismatch 反例测试。聚焦 runtime test 与 exact build 均在 Docker
+通过。它是对真机恢复中发现的 compatibility gap 的 Git 权威副本，不是合并或发布授权。
+
+第二次启动又在 doctor 的 `4 tools discovered` 门 fail-closed。原因不是 vendor 假绿，而是
+workspace 里的 `.anet/node-server.js` 仍是旧三工具字节。恢复前保存旧副本，再从 #830 配套的
+agent-network source 构建并安装 exact node-server；这条配对是软件恢复依赖，不能只换
+agent-node 而沿用未知 workspace helper：
+
+```text
+node_server_sha256=af41b6231fb608a959ca4ba21b65049ec9ae64e88a0b6a42fd00b212cc4a71f5
+rollback=/home/vansin/.commhub/rollback-commdog-grok-tui-20260813T082300Z
+```
+
+第三次启动创建新 Grok session（旧 session 与配置备份保留），当前权威运行坐标为：
+
+```text
+node_id=n_72be30e0
+session_id=bb0b01f0-a7db-421c-a1bb-1121c2cc7959
+runtime=agent-node:grok-build-cli
+model=grok-4.5
+tmux=通信狗; windows=0:node,1:tui; dead=0,0
+config=/home/vansin/grok-commdog-workspace/.anet/nodes/通信狗/config.json
+config_mode=600; config_owner=vansin:vansin
+```
+
+`tmux attach -t 通信狗` 的默认 active window 已设为 `1:tui`；可用 `Ctrl-b 0` 看 node 日志、
+`Ctrl-b 1` 回 TUI。真机 UAT 分开覆盖各条路径，未用一个探针冒充全链：
+
+1. doctor 在目标进程的 `GROK_HOME`、workspace 和 PATH 下真跑，结果
+   `healthy_count=1`、`failing_count=0`；command found、server started、handshake OK、
+   `4 tools discovered` 全通过，target 是 canonical absolute Bun + runtime node-server。
+2. 人工键盘通过 tmux 输入 prompt，Grok 4.5 TUI 在 1.5 秒内精确返回 `TUI_HUMAN_OK`。
+3. 入站 `send_task` `f769e1d3-64a6-4c54-a5a7-73ed5e63ce28` 依次出现 delivered、
+   runtime_submitted、consumed，最后 `replied`，结果为 `[通信狗] COMM_DOG_INBOUND_OK`。
+4. 可见 TUI 明确调用 `commhub_send_task`（同时明确禁止 `send_message`），生成出站 task
+   `61850611-3524-4486-afce-74c5f7e9f485`，Hub 回读的发送方 node_id 正是
+   `n_72be30e0`，目标为 `通信龙`。vendor `events.jsonl` 同时记录
+   `mcp_server_connected tool_count=4` 与 `mcp_tool_call_completed success=true`。
+5. 新 session 的三次 turn 事件只出现 prompt、`search_tool`、`use_tool` 与该 CommHub
+   `send_task`；没有 terminal、filesystem、write、scheduler、media 或 WebFetch 的
+   request/resolution/completion。该结论只覆盖实际执行的三次 turn，不冒充全 deny 分母真机遍历。
+
+Hub 后态为 `idle`、`in_flight=0`，node_id 未轮换。只读 `tmux list-clients` 曾观察到
+`/dev/pts/171` attach 到同名 session，但 tmux 只能证明客户端连接，**不能证明操作者身份**；当时
+capture-pane 也没有出现该操作者的新输入。因此不得把该连接记成 Vincent 已完成手工 UAT。
+`A站狗`、`P站狗` 在此时仍分别为原 runtime 的 `idle`、`in_flight=0`，未被修改。只有同时取得
+Vincent 本人的直接 rollout 指令，以及可归因的通信狗 UAT 记录（操作者、时间、session、输入、
+可见回复、Dashboard-origin task id 与终态），才按同样的 exact source、独立回滚点和逐节点 UAT
+顺序同步 A/P；不得以任何身份一句“正常”替代证据，不得并行覆盖两节点，也不得把通信狗一次
+成功直接外推成 A/P 已通过。
+
+### 2026-08-14 `通信狗` 模型切换到 Grok 4.6
+
+Vincent 直接要求把 `通信狗` 从 `grok-4.5` 切换到 `grok-4.6`。切换前先用当前固定的
+Grok 0.2.93 二进制执行 `grok --no-auto-update models`；厂商返回的可用模型清单包含
+`grok-4.6 (default)` 与 `grok-4.5`，因此目标 model ID 来自运行时权威输出，不是手工猜测。
+
+Dashboard 当时无法完成修改，原因是该单节点恢复候选以 agent-node CLI 直接启动，Hub session
+没有上报 `config_revision` / `config_update_capable`；受控 `update_node_config` 路径因缺少可比较的
+revision 而不能使用。这里不伪造 revision，也不绕过 Hub 的并发控制。经 owner 直接授权后，对
+本机权威 config 做单字段、可回滚修改，并精确重启 `通信狗` 的 node 与 TUI 两个 pane：
+
+```text
+rollback=/home/vansin/.commhub/rollback-commdog-model46-20260814T150600Z
+old_config_sha256=40dfba78b146a09a8c21b2b8e8e7259dc69d70612567ec20926c2cb3353376d0
+new_config_sha256=ebf4d664acb7664a162e329bb92e46b924c9e4fb6c3fc3ca0f5edcfb0c06df37
+changed_field=model: grok-4.5 -> grok-4.6
+node_id=n_72be30e0
+session_id=9acd87e4-bd49-4b14-95c2-646fa8a91a27
+tmux=通信狗; windows=0:node,1:tui; active=1:tui; dead=0,0
+grok_binary=/home/vansin/.commhub/grok-pins/0.2.93/grok
+grok_binary_sha256=4e0738d3b5550f3c842bc0ae69f468815c6329c008a110d0c27a694dc3401135
+```
+
+后态证据互相独立：node 启动日志打印 `model: grok-4.6`；Hub `get_session_status` 回读
+`model=grok-4.6`；可见 TUI 底栏显示 `Grok 4.6 (high)`；真实 `send_task`
+`37754bbe-90cd-4b1e-bf2c-c57a12b6d44a` 在 5 秒内终态 `replied`，结果为
+`[通信狗] COMM_DOG_MODEL46_OK`。两个 Unix socket `attach.sock` / `leader.sock` 均在，新 TUI
+attach 到同一新 session。该动作没有修改 `A站狗`、`P站狗` 或任何其它节点。
+
+若需回滚，只恢复上述 owner-only 目录中的 `config.json.old`，确认 SHA-256 后，按同一精确
+双 pane 流程创建新 session；不得只改 Hub 展示值或只重启 TUI，因为那两种做法都不能改变
+agent-node 实际传给 Grok 的 model。
 
 ## 数据与密钥边界
 
