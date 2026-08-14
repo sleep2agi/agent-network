@@ -73,6 +73,7 @@ import {
   selectGrokCopresenceCapabilityProfile,
   selectGrokCopresenceSandboxProfile,
 } from "./runtime/grok-copresence/profile-selection";
+import { retireStoppedGrokCopresenceRuntime } from "./runtime/grok-copresence/runtime-retirement";
 import {
   defaultNpmInstall,
   loadCodexSdk,
@@ -3515,6 +3516,19 @@ let grokCopresenceRuntimeSession: GrokCopresenceSession | null = null;
 let grokCopresenceRuntimeOpening: Promise<GrokCopresenceSession> | null = null;
 let grokCopresenceLocalTaskSequence = 0;
 
+async function retireCachedGrokCopresenceRuntime(): Promise<void> {
+  const stopped = grokCopresenceRuntimeSession;
+  await retireStoppedGrokCopresenceRuntime(stopped, {
+    warn: (message) => warn(message),
+    retire: (retired) => {
+      if (grokCopresenceRuntimeSession !== retired) return;
+      grokCopresenceRuntimeSession = null;
+      clearGrokSession("fatal co-presence boundary; next task requires a fresh session");
+      warn("[grok-copresence] retired stopped TUI; next task will open a fresh session");
+    },
+  });
+}
+
 function grokCopresenceTimeoutMs(): number {
   const raw = process.env.GROK_CLI_TIMEOUT_MS
     || fileConfig.flags?.grokCliTimeoutMs
@@ -3556,6 +3570,7 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
   if (process.platform !== "linux") {
     throw new Error("grok co-presence preview currently requires Linux PTY, /proc, and Unix sockets");
   }
+  await retireCachedGrokCopresenceRuntime();
   if (grokCopresenceRuntimeSession) return grokCopresenceRuntimeSession;
   if (grokCopresenceRuntimeOpening) return grokCopresenceRuntimeOpening;
 
