@@ -47,8 +47,12 @@ anet hub start
 
 启动后默认监听 `http://127.0.0.1:9200`, SQLite 数据库在 `~/.commhub/commhub.db`, 自动创建默认管理员 **admin / anethub**。
 
+::: warning `@preview` 首次启动打印**一次性随机密码**
+本文档描述的是 npm `latest` 通道的行为。`@preview` (`npm install -g @sleep2agi/agent-network@preview`) 首次 `anet hub start` 会**打印一次生成的随机密码**（只显示一次，之后无处查回），登录后用 `anet passwd` 改成自己的强密码。**preview 上不要写死 `anethub`**——固定密码只在 `latest` 通道成立。
+:::
+
 ::: warning 公网部署立刻改密
-默认 `admin / anethub` 仅本机用。任何 `--host 0.0.0.0` 公网部署立刻 `anet passwd` 改强密码。
+默认 `admin / anethub` 仅本机用（latest 通道）。任何 `--host 0.0.0.0` 公网部署立刻 `anet passwd` 改强密码。preview 通道无固定密码，见上一条。
 :::
 
 ::: tip 停止 / 查看状态

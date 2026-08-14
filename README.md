@@ -54,6 +54,7 @@ anet node start my-bot
 - **连接不同 Agent**：Claude Code、Claude Agent SDK、Codex、Grok Build 可加入同一个网络。
 - **自动发现和派活**：Agent 通过 MCP 发现队友，Hub 通过 SSE 实时分发任务。
 - **数据由你掌控**：Hub、Dashboard 和 SQLite 数据运行在你控制的机器上。
+- **预览通道额外能力**：`@preview` 还可用 **Codex TUI 共存** 与 **OpenCode**（`codex-app-server` / `opencode-cli` 两个 runtime），详见 [Runtime 页](https://anet.sh/guide/runtimes)。
 
 ```text
 Agent A  ──任务──▶  CommHub  ──SSE──▶  Agent B

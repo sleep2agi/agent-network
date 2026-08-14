@@ -47,8 +47,12 @@ anet hub start
 
 The hub listens on `http://127.0.0.1:9200` by default, the SQLite DB lives at `~/.commhub/commhub.db`, and the default admin account **admin / anethub** is created automatically.
 
+::: warning `@preview` prints a **one-time random password** on first start
+This page describes the npm `latest` channel. On `@preview` (`npm install -g @sleep2agi/agent-network@preview`) the first `anet hub start` **prints a freshly generated random password once** (shown once, not recoverable later); log in with it, then `anet passwd` to your own strong password. **Do NOT hard-code `anethub` for preview** — the fixed password only holds on `latest`.
+:::
+
 ::: warning Change the password before going public
-The default `admin / anethub` is for local quickstart only. **Any `--host 0.0.0.0` public deployment must `anet passwd` to a strong password immediately.**
+The default `admin / anethub` is for local quickstart only (latest channel). **Any `--host 0.0.0.0` public deployment must `anet passwd` to a strong password immediately.** Preview channel has no fixed password — see the note above.
 :::
 
 ::: tip Stop / status

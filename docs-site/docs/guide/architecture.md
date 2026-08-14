@@ -10,7 +10,7 @@
 graph TB
     subgraph "服务器（1 台）"
         S["CommHub Server<br/>消息路由 + 任务管理<br/>端口 9200"]
-        DB[(SQLite WAL<br/>14 张表)]
+        DB[(SQLite WAL<br/>20+ 张表)]
         S --- DB
     end
 
@@ -88,7 +88,7 @@ graph TB
         SSE["/events/:alias<br/>SSE 实时推送"]
         REST["/api/*<br/>REST API"]
         AUTH[Auth Module<br/>Token + Rate Limit]
-        DB[(SQLite WAL<br/>14 张表)]
+        DB[(SQLite WAL<br/>20+ 张表)]
     end
 
     subgraph "Agent 节点"
@@ -201,7 +201,7 @@ CommHub 为 agent 提供 17 个核心 MCP Tools，分为两组：
 
 ### 数据库设计
 
-SQLite WAL 模式，14 张表：
+SQLite WAL 模式，20+ 张表（含 sessions / tasks / nodes / users / networks / SkillHub / providers / vault 等，实数按 schema 版本浮动）：
 
 ```mermaid
 erDiagram
