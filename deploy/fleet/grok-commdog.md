@@ -4,7 +4,68 @@
 宿主机上的安装目录与 tmux 会话只是部署副本；Git 中的 source commit 与本文才是
 恢复依据。本文不授权批量升级、生产数据库操作或其它舰团节点变更。
 
-## 当前安全终态（2026-08-13 15:42 CST）
+## 最新单节点终态（2026-08-14 14:33 CST）
+
+`通信狗` 已按单节点范围恢复为真实 TUI 共存；`A站狗`、`P站狗` 未改动。当前可复核坐标为：
+
+- tmux session 严格名为 `通信狗`，窗口为 `0:node` 与 `1:tui`，默认活动窗口是 `1:tui`；
+- config 为 `/home/vansin/grok-commdog-workspace/.anet/nodes/通信狗/config.json`，SHA-256
+  `40dfba78b146a09a8c21b2b8e8e7259dc69d70612567ec20926c2cb3353376d0`；
+- `node_id=n_72be30e0`，Grok session 为 `272e16a7-42f1-4e1d-b8ec-19044b5f3cfc`；
+- source commit 为 `433b4af44bdcc09145c75b697634f74aec42a7df`；
+- `agent-network=2.3.0-preview.39`，CLI SHA-256
+  `d34c71a0763323273f2983a03e23d7fc2cb2da4d1297271456bcc85159ad48a0`；
+- `agent-node=2.5.0-preview.31`，CLI SHA-256
+  `8b7db0c2494f701989c51f3ad51a91fd9150fac4b7bafe6b64781ccb8cdf215a`；
+- Grok `0.2.93 (f00f96316d)` 的冻结二进制 SHA-256 为
+  `4e0738d3b5550f3c842bc0ae69f468815c6329c008a110d0c27a694dc3401135`。
+
+### 固定版本必须脱离供应商自动更新目录
+
+本轮根因不是简单的 tmux 窗口丢失。旧启动命令把 `GROK_BINARY` 指向
+`~/.grok/bin/grok-0.2.93`；Grok 自动更新在 2026-08-14 11:34 CST 把该文件删除并把默认
+`grok` 切到 `1.0.4`。原 0.2.93 会话随后停在工具执行后的 `waiting_for_model`，TUI、leader 与
+两个 socket 消失，但 agent-node 继续连接 Hub，形成“online/idle 但不可派活”的假在线。之后
+用同一路径重启又确定性得到 `spawnSync ... ENOENT`。
+
+恢复时从仍运行的 0.2.93 进程映像取回同哈希二进制，部署到 CommHub 自有路径
+`~/.commhub/grok-pins/0.2.93/grok`。该机器路径仍只是部署副本；空机恢复时必须从受控制品源
+取得上面记录的同 SHA-256 字节，先执行 `--version` 与 `sha256sum` 双验，再作为
+`GROK_BINARY`。**不得**把供应商会自动增删的 `~/.grok/bin/` 当成不可变版本仓库。
+
+节点启动 pane 的等价关键部分是：
+
+```bash
+GROK_BINARY="$HOME/.commhub/grok-pins/0.2.93/grok" \
+BUN_BIN="$HOME/.nvm/versions/node/v20.20.0/bin/bun" \
+PATH="$HOME/.commhub/grok-pins/0.2.93:$HOME/.nvm/versions/node/v20.20.0/bin:/usr/local/bin:/usr/bin:/bin" \
+node "$RUNTIME/node_modules/@sleep2agi/agent-node/dist/cli.js" \
+  --config "$CONFIG" --alias 通信狗 --runtime grok-build-cli --new-session
+```
+
+`$RUNTIME` 与 `$CONFIG` 必须在恢复清单中解析为上面的绝对路径；不能把未解析占位符直接复制到
+生产命令。node pane 与 attach pane 都应设置 tmux `remain-on-exit on`，使进程退出后保留退出码
+与屏幕，而不是把唯一故障现场随窗口一起回收。
+
+### 本轮行为验收与仍存在的限制
+
+可见 `1:tui` 内真实调用 `web_search`，得到 `TOOL_TUI_OK OpenAI | Research & Deployment`。
+同一会话随后消费 CommHub `send_task` `398d11bd-edad-4eea-9418-0d241841ffff`，任务终态
+`replied`，结果为 `[通信狗] COMM_DOG_POST_PIN_OK`。完成后 node、TUI、`attach.sock` 与
+`leader.sock` 仍同时存活。这四项是本轮“人工 TUI + 节点通信共存”的正证。
+
+当前输入代理仍不是完整的原生 TUI：普通文本和 Enter 可用，但方向键等 composer navigation
+会把审计状态标成 tainted，随后的 Enter 被安全层当作潜在 slash 权限命令而阻断。实测“输入
+`AC`、左移、插入 `B`、提交”没有进入模型，并记录 `slash command was blocked`。这是安全层
+把正常编辑能力与权限姿态保护耦合造成的产品缺口，不得在报告中写成“完整 TUI 已覆盖”。在
+修复并用行为反向门证明前，操作者应使用纯文本直输、退格、Ctrl-U 与 Enter，不应依赖方向键、
+历史召回或 slash palette。
+
+判活必须同时满足：目标 agent-node 子树存在；`run/attach.sock` 与 `run/leader.sock` 均为 socket；
+`1:tui` pane 存活；最后一次 `TUI ready` 晚于最后一次 fatal/boundary；并完成一条可归因的真实
+行为探针。Hub 的 online/idle、单独的 agent-node PID 或旧 `TUI ready` 日志都不能单独判活。
+
+## 历史安全终态（2026-08-13 15:42 CST）
 
 以下是本轮只读回查得到的**存活状态**，优先级高于后文按时间记录的历史基线：
 
