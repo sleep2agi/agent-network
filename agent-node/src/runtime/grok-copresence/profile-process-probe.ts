@@ -22,9 +22,9 @@ const args = buildGrokCopresenceArgs({
 });
 const automaticTool = (tool: string, turnOwner: "human" | "network") => isGrokPreviewAutomaticResolution({
   requestTool: tool,
-  activeRequestId: `tool:${tool}`,
+  pendingRequestCount: 1,
   humanDecisionDispatched: false,
-  waitingHuman: true,
+  waitingHuman: false,
   turnOwner,
   terminalEventSeen: false,
   event: {

@@ -64,6 +64,7 @@ const MAX_DEFERRED_HUMAN_BYTES = 128 * 1024;
 const MAX_TUI_READINESS_BUFFER = 128 * 1024;
 const MAX_TAIL_READ_BYTES = 4 * 1024 * 1024;
 const MAX_LIFECYCLE_LINE_BYTES = 256 * 1024;
+const MAX_PENDING_AUTOMATIC_PERMISSIONS = 64;
 const MAX_RESUME_AUDIT_BYTES = 64 * 1024 * 1024;
 const UNIX_SOCKET_PATH_MAX_BYTES = 100;
 const GROK_TUI_READY_TEXT = "Shift+Tab:mode";
@@ -729,7 +730,8 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   private quarantinedNetworkTaskId = "";
   private approvalDecisionDispatched = false;
   private activePermissionRequestId: string | null = null;
-  private activePermissionExactPreviewTool: string | null = null;
+  private pendingAutomaticPermissions = new Map<string, number>();
+  private pendingAutomaticPermissionTotal = 0;
   private activeTurnTerminalEventSeen = false;
   private spawnEnv: NodeJS.ProcessEnv;
   private readonly controlledSpawnEnv: NodeJS.ProcessEnv;
@@ -1207,7 +1209,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         this.lifecycleBuffer = "";
         this.approvalDecisionDispatched = false;
         this.activePermissionRequestId = null;
-        this.activePermissionExactPreviewTool = null;
+        this.clearAutomaticPermissionCorrelation();
         this.resetHumanComposerAudit();
         this.completionPendingSince = 0;
         this.lastChatActivityAt = 0;
@@ -2078,14 +2080,42 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           ));
           return;
         }
-        if (this.activePermissionRequestId) {
-          if (this.activePermissionExactPreviewTool) {
+        const exactPreviewTool = exactPreviewAutomaticPermissionRequestTool(event);
+        if (exactPreviewTool) {
+          if (
+            this.activePermissionRequestId
+            || this.arbitration.waitingHuman
+            || (this.arbitration.activeTurn?.owner !== "network"
+              && this.arbitration.activeTurn?.owner !== "human")
+          ) {
             void this.failFatal(new GrokCopresenceFailure(
               "approval_boundary",
-              "grok copresence observed a duplicate preview automatic permission request",
+              "grok copresence could not correlate an automatic permission request to the active turn",
             ));
             return;
           }
+          if (this.pendingAutomaticPermissionTotal >= MAX_PENDING_AUTOMATIC_PERMISSIONS) {
+            void this.failFatal(new GrokCopresenceFailure(
+              "approval_boundary",
+              "grok copresence observed too many pending automatic permission requests",
+            ));
+            return;
+          }
+          this.pendingAutomaticPermissions.set(
+            exactPreviewTool,
+            (this.pendingAutomaticPermissions.get(exactPreviewTool) ?? 0) + 1,
+          );
+          this.pendingAutomaticPermissionTotal += 1;
+          continue;
+        }
+        if (this.pendingAutomaticPermissionTotal > 0) {
+          void this.failFatal(new GrokCopresenceFailure(
+            "approval_boundary",
+            "grok copresence observed a manual permission request overlapping an automatic batch",
+          ));
+          return;
+        }
+        if (this.activePermissionRequestId) {
           if (this.activePermissionRequestId !== requestId) {
             void this.failFatal(new GrokCopresenceFailure(
               "approval_boundary",
@@ -2097,7 +2127,6 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           // gate after an Enter/Ctrl-C decision has already been dispatched.
           continue;
         }
-        const exactPreviewTool = exactPreviewAutomaticPermissionRequestTool(event);
         const transition = this.transition({ type: "approval_requested" });
         if (!transition.accepted) {
           void this.failFatal(new GrokCopresenceFailure(
@@ -2107,7 +2136,6 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           return;
         }
         this.activePermissionRequestId = requestId;
-        this.activePermissionExactPreviewTool = exactPreviewTool;
         this.approvalDecisionDispatched = false;
         if (this.deferredHuman.length) {
           // Pre-approval keystrokes are never consent. Drop them instead of
@@ -2122,9 +2150,12 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         }
       } else if (event?.type === "permission_resolved") {
         const requestId = lifecyclePermissionIdentity(event);
+        const eventTool = lifecyclePermissionTool(event);
         if (isGrokPreviewAutomaticResolution({
-          requestTool: this.activePermissionExactPreviewTool,
-          activeRequestId: this.activePermissionRequestId,
+          requestTool: eventTool,
+          pendingRequestCount: eventTool
+            ? (this.pendingAutomaticPermissions.get(eventTool) ?? 0)
+            : 0,
           humanDecisionDispatched: this.approvalDecisionDispatched,
           waitingHuman: this.arbitration.waitingHuman,
           turnOwner: this.arbitration.activeTurn?.owner ?? null,
@@ -2147,9 +2178,15 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           // preview-local completion.  Do not derive this exception from the
           // profile array: adding a future tool must never grant it the same
           // behavior accidentally.
-          this.clearApprovalCorrelation();
-          this.transition({ type: "preview_todo_resolved_automatically" });
+          this.resolveAutomaticPermission(eventTool!);
           continue;
+        }
+        if (this.pendingAutomaticPermissionTotal > 0) {
+          void this.failFatal(new GrokCopresenceFailure(
+            "approval_boundary",
+            "grok copresence observed an unmatched automatic permission resolution",
+          ));
+          return;
         }
         if (
           !requestId
@@ -2166,6 +2203,18 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         this.transition({ type: "approval_resolved_by_human" });
       } else if (event?.type === "permission_rejected" || event?.type === "permission_cancelled") {
         const requestId = lifecyclePermissionIdentity(event);
+        const eventTool = lifecyclePermissionTool(event);
+        if (eventTool && (this.pendingAutomaticPermissions.get(eventTool) ?? 0) > 0) {
+          this.resolveAutomaticPermission(eventTool);
+          continue;
+        }
+        if (this.pendingAutomaticPermissionTotal > 0) {
+          void this.failFatal(new GrokCopresenceFailure(
+            "approval_boundary",
+            "grok copresence observed an unmatched automatic permission rejection",
+          ));
+          return;
+        }
         // Automatic denial is safe, but it may release this input gate only
         // when it correlates to the currently visible request.
         if (requestId && requestId === this.activePermissionRequestId) {
@@ -2277,12 +2326,26 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
 
   private clearApprovalCorrelation(_clearSettled = false): void {
     this.activePermissionRequestId = null;
-    this.activePermissionExactPreviewTool = null;
     this.approvalDecisionDispatched = false;
+    if (_clearSettled) this.clearAutomaticPermissionCorrelation();
   }
 
   private hasUnresolvedApproval(): boolean {
-    return this.activePermissionRequestId !== null || this.arbitration.waitingHuman;
+    return this.activePermissionRequestId !== null
+      || this.arbitration.waitingHuman
+      || this.pendingAutomaticPermissionTotal > 0;
+  }
+
+  private resolveAutomaticPermission(tool: string): void {
+    const count = this.pendingAutomaticPermissions.get(tool) ?? 0;
+    if (count <= 1) this.pendingAutomaticPermissions.delete(tool);
+    else this.pendingAutomaticPermissions.set(tool, count - 1);
+    this.pendingAutomaticPermissionTotal -= 1;
+  }
+
+  private clearAutomaticPermissionCorrelation(): void {
+    this.pendingAutomaticPermissions.clear();
+    this.pendingAutomaticPermissionTotal = 0;
   }
 
   private broadcastState(): void {
@@ -3178,6 +3241,18 @@ function lifecyclePermissionIdentity(event: {
   return toolName && Buffer.byteLength(toolName, "utf8") <= 512 ? `tool:${toolName}` : null;
 }
 
+function lifecyclePermissionTool(event: {
+  tool_name?: unknown;
+  toolName?: unknown;
+}): string | null {
+  const toolName = typeof event.tool_name === "string"
+    ? event.tool_name
+    : typeof event.toolName === "string"
+      ? event.toolName
+      : "";
+  return toolName && Buffer.byteLength(toolName, "utf8") <= 512 ? toolName : null;
+}
+
 function exactPreviewAutomaticPermissionRequestTool(event: {
   type?: unknown;
   ts?: unknown;
@@ -3225,7 +3300,7 @@ function isExactPreviewAutomaticPermissionResolution(event: {
 /** Exact preview exception; exported so every rejected dimension has a pure mutation test. */
 export function isGrokPreviewAutomaticResolution(input: {
   requestTool: string | null;
-  activeRequestId: string | null;
+  pendingRequestCount: number;
   humanDecisionDispatched: boolean;
   waitingHuman: boolean;
   turnOwner: "human" | "network" | null;
@@ -3244,10 +3319,11 @@ export function isGrokPreviewAutomaticResolution(input: {
   const requestId = lifecyclePermissionIdentity(input.event);
   return input.requestTool !== null
     && (GROK_COPRESENCE_EFFECTIVE_TOOLS as readonly string[]).includes(input.requestTool)
-    && input.activeRequestId === `tool:${input.requestTool}`
-    && requestId === input.activeRequestId
+    && Number.isSafeInteger(input.pendingRequestCount)
+    && input.pendingRequestCount > 0
+    && requestId === `tool:${input.requestTool}`
     && !input.humanDecisionDispatched
-    && input.waitingHuman
+    && !input.waitingHuman
     // The pinned process-level --always-approve mode applies to the shared
     // Grok process, not to anet's logical turn owner. Human turns therefore
     // emit the same exact automatic resolution lifecycle. Accepting that exact

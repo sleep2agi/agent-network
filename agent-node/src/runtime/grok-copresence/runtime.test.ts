@@ -52,9 +52,9 @@ describe("Grok copresence launch and injection policy", () => {
   test("keeps the fixed-tool auto-resolution exception exact and limited to active turns", () => {
     const exact = {
       requestTool: "todo_write",
-      activeRequestId: "tool:todo_write",
+      pendingRequestCount: 1,
       humanDecisionDispatched: false,
-      waitingHuman: true,
+      waitingHuman: false,
       turnOwner: "network" as const,
       terminalEventSeen: false,
       event: {
@@ -72,9 +72,9 @@ describe("Grok copresence launch and injection policy", () => {
     })).toBe(true);
     for (const mutation of [
       { ...exact, requestTool: null },
-      { ...exact, activeRequestId: "tool:read_file" },
+      { ...exact, pendingRequestCount: 0 },
       { ...exact, humanDecisionDispatched: true },
-      { ...exact, waitingHuman: false },
+      { ...exact, waitingHuman: true },
       { ...exact, turnOwner: null },
       { ...exact, terminalEventSeen: true },
       { ...exact, event: { ...exact.event, decision: "allow_once" } },
@@ -93,9 +93,9 @@ describe("Grok copresence launch and injection policy", () => {
     for (const tool of ["todo_write", "search_tool", "use_tool"]) {
       const exact = {
         requestTool: tool,
-        activeRequestId: `tool:${tool}`,
+        pendingRequestCount: 1,
         humanDecisionDispatched: false,
-        waitingHuman: true,
+        waitingHuman: false,
         turnOwner: "human" as const,
         terminalEventSeen: false,
         event: {
@@ -116,9 +116,9 @@ describe("Grok copresence launch and injection policy", () => {
     for (const tool of ["read_file", "Bash", "commhub_send_task"]) {
       expect(isGrokPreviewAutomaticResolution({
         requestTool: tool,
-        activeRequestId: `tool:${tool}`,
+        pendingRequestCount: 1,
         humanDecisionDispatched: false,
-        waitingHuman: true,
+        waitingHuman: false,
         turnOwner: "human",
         terminalEventSeen: false,
         event: {
@@ -1667,7 +1667,9 @@ describe("Grok copresence runtime integration", () => {
           from: "reviewer",
           text: `AUTO_RESOLVE_TODO_${mutation}`,
           timeoutMs: 3_000,
-        }), mutation).rejects.toThrow(/permission request|automatically resolved/);
+        }), mutation).rejects.toThrow(
+          /permission request|automatically resolved|unmatched automatic|human approval/,
+        );
         await waitFor(() => !runtime!.isRunning);
       } finally {
         await runtime?.close();
@@ -1762,6 +1764,27 @@ describe("Grok copresence runtime integration", () => {
       expect(result.replyText).toBe("TODO TWICE preview-todo-order-twice");
       expect(runtime.isRunning).toBe(true);
       expect(existsSync(fixture.attachSocket)).toBe(true);
+      expect(fixture.approvalDecisionCount()).toBe(0);
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 8_000);
+
+  test("allows a pinned tool batch whose automatic resolutions are not request ordered", async () => {
+    const fixture = new RuntimeFixture();
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await fixture.open();
+      const result = await runtime.submit({
+        taskId: "preview-batched-order",
+        from: "reviewer",
+        text: "AUTO_RESOLVE_BATCHED",
+        timeoutMs: 3_000,
+      });
+      expect(result.replyText).toBe("BATCHED preview-batched-order");
+      expect(runtime.isRunning).toBe(true);
+      expect(runtime.state.waitingHuman).toBe(false);
       expect(fixture.approvalDecisionCount()).toBe(0);
     } finally {
       await runtime?.close();
@@ -2671,6 +2694,36 @@ class FakePty implements GrokPtyLike {
       }, 150);
       return;
     }
+    if (message === "AUTO_RESOLVE_BATCHED") {
+      appendJson(join(this.sessionDir, "chat_history.jsonl"), {
+        type: "user",
+        content: `<user_query>[Agent Network/from=${from}/task=${taskId}] ${message}</user_query>`,
+      });
+      const eventsPath = join(this.sessionDir, "events.jsonl");
+      appendJson(eventsPath, { type: "turn_started", turn_number: 15 });
+      for (const tool_name of ["search_tool", "use_tool", "search_tool"]) {
+        appendJson(eventsPath, {
+          type: "permission_requested",
+          tool_name,
+          ts: `preview-${tool_name}-requested`,
+        });
+      }
+      for (const tool_name of ["search_tool", "search_tool", "use_tool"]) {
+        appendJson(eventsPath, {
+          type: "permission_resolved",
+          tool_name,
+          decision: "allow",
+          ts: `preview-${tool_name}-resolved`,
+          wait_ms: 0,
+        });
+      }
+      appendJson(join(this.sessionDir, "chat_history.jsonl"), {
+        type: "assistant",
+        content: `BATCHED ${taskId}`,
+      });
+      appendJson(eventsPath, { type: "turn_ended", outcome: "completed" });
+      return;
+    }
     if (
       message === "AUTO_RESOLVE_TODO_COALESCED"
       || message === "AUTO_RESOLVE_TODO_FRAGMENTED"
@@ -2785,6 +2838,23 @@ class FakePty implements GrokPtyLike {
                 ts: "preview-todo-requested-duplicate",
               }),
         });
+        if (message.endsWith("_DUPLICATE") && !message.endsWith("CHANGED_DUPLICATE")) {
+          appendJson(join(this.sessionDir, "events.jsonl"), {
+            type: "permission_resolved",
+            tool_name: "todo_write",
+            decision: "allow",
+            ts: "preview-todo-resolved-once",
+            wait_ms: 0,
+          });
+          appendJson(join(this.sessionDir, "chat_history.jsonl"), {
+            type: "assistant",
+            content: "must not complete with one unresolved automatic request",
+          });
+          appendJson(join(this.sessionDir, "events.jsonl"), {
+            type: "turn_ended",
+            outcome: "completed",
+          });
+        }
         return;
       }
       const resolved = message.endsWith("CAMEL_CASE")
