@@ -5,11 +5,27 @@
  * 前置：CommHub Server 在 9210 端口运行
  *   PORT=9210 bun run server/src/index.ts
  *
- * 运行：node tests/message-lifecycle.test.mjs
+ * 运行：node tests/archive/message-lifecycle.integration.mjs
+ *
+ * 🔴 文件名里**不带 `.test.`** 是有意的。它原名 `message-lifecycle.test.mjs`，
+ *    于是被 `bun test` 的默认 glob 捞进套件 —— 而它是个顶层脚本，末尾有
+ *    `process.exit(failed > 0 ? 1 : 0)`。**在被 runner 加载的文件里调
+ *    process.exit 会杀掉整个 runner。**
+ *    实测:把前置检查改成"跳过时 process.exit(0)"之后，整套件只跑到第 7 个
+ *    文件就结束，却给出 rc=0 —— 108 个文件里 6% 都不到，外面看是一片绿。
+ *    它一直没炸，只是因为每次都先崩在 TypeError 上，**从没执行到那一行**。
+ *    ⇒ 这个文件本来就该按它自己文档说的那样用 node 单独跑。
  */
 
 const HUB = "http://127.0.0.1:9210";
-const HEADERS = { "Content-Type": "application/json", Accept: "application/json, text/event-stream" };
+// 这个 hub 现在是要鉴权的(`security: "secured"`, `v3_auth: true`)。本文件写于鉴权之前，
+// 一直不带凭据地调 API，于是每次都拿 401、读回空数组。给它一个 token 入口。
+const HUB_TOKEN = process.env.ANET_TEST_HUB_TOKEN || "";
+const HEADERS = {
+  "Content-Type": "application/json",
+  Accept: "application/json, text/event-stream",
+  ...(HUB_TOKEN ? { Authorization: `Bearer ${HUB_TOKEN}` } : {}),
+};
 
 let passed = 0;
 let failed = 0;
@@ -49,12 +65,41 @@ async function getStatus(alias) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// ── Check CommHub is running ──
+// ── 前置:hub 得**用得了**，不只是"有人接 TCP" ──
+//
+// 🔴 原来这里是 `try { await fetch(HUB + "/health") } catch { exit(1) }`。
+//    两处不成立:
+//      - `fetch` **只在网络层出错才 throw** —— 401 / 500 都不 throw；
+//      - `/health` 是免鉴权的，稳定返 200。
+//    所以它实际只验证了"有人接 TCP"，放行了一个本测试根本用不了的 hub，
+//    然后在 200 行开外崩成 `undefined is not an object`，
+//    报出来的东西和真因(401)毫无关系。
+//    ⇒ 前置必须打一个**需要鉴权**的端点，并按状态码分开三种结局。
+function skip(reason, hint) {
+  console.log("╔═══════════════════════════════════════════╗");
+  console.log("║  SKIPPED — 依赖未就绪，未执行任何断言     ║");
+  console.log("╚═══════════════════════════════════════════╝");
+  console.log(`  原因: ${reason}`);
+  console.log(`  如何跑起来: ${hint}`);
+  // 依赖没备好不是产品缺陷 —— 报红会训练人忽略这一行。
+  // 但**必须吵**:上面那三行是无条件打印的，不存在"安静地跳过"。
+  process.exit(0);
+}
+
+let preflight;
 try {
-  await fetch(`${HUB}/health`);
+  preflight = await fetch(`${HUB}/api/status`, { headers: HEADERS });
 } catch {
-  console.error(`CommHub not running on ${HUB}. Start with: PORT=9210 bun run server/src/index.ts`);
-  process.exit(1);
+  skip(`CommHub 不在 ${HUB} 上`, `PORT=9210 bun run server/src/index.ts`);
+}
+if (preflight.status === 401) {
+  skip(
+    `${HUB} 活着但拒绝本测试的凭据(HTTP 401)`,
+    `ANET_TEST_HUB_TOKEN=<user token> node tests/archive/message-lifecycle.test.mjs`,
+  );
+}
+if (!preflight.ok) {
+  skip(`${HUB}/api/status 返回 HTTP ${preflight.status}`, `先确认那个 hub 是本测试预期的版本`);
 }
 
 console.log("╔═══════════════════════════════════════════╗");
@@ -238,8 +283,8 @@ for (let i = 0; i < 3; i++) {
 await sleep(500);
 const inbox4 = await getInbox(AGENT);
 assert(inbox4.length === 3, `3 条 task 入 inbox: ${inbox4.length}`);
-assert(inbox4[0].content === "task 0", "顺序正确: task 0");
-assert(inbox4[2].content === "task 2", "顺序正确: task 2");
+assert(inbox4[0]?.content === "task 0", "顺序正确: task 0");
+assert(inbox4[2]?.content === "task 2", "顺序正确: task 2");
 await ackAll(AGENT);
 
 // Test 7: auto-compact 阈值 (单元测试)
