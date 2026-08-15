@@ -33,7 +33,7 @@ sg docker -c 'docker run --rm anet-qa-node-03b'
 
 **`/api/task` REST 端点不写 task_events，只有 MCP `send_task` 写。**
 
-[index.ts /api/task 处理器](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L771) 直接 INSERT inbox+tasks，但**不调 `logTaskEvent("delivered", ...)`**。
+[server.ts /api/task 处理器](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) 直接 INSERT inbox+tasks，但**不调 `logTaskEvent("delivered", ...)`**。
 而 [MCP send_task L517](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L517) 调用。
 
 **含义**：通过 Dashboard 派单（走 REST `/api/task`）的任务在 task_events 表里**没有 delivered 事件**！

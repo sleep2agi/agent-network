@@ -39,7 +39,7 @@ sg docker -c 'docker run --rm anet-qa-hub-06b'
 
 [auth.ts createNetwork](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L182)：
 建网络时在 `network_members` 表写一行 owner。
-[index.ts /api/networks GET](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) 通过 `getUserAllNetworks(user_id)` 过滤。
+[server.ts /api/networks GET](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) 通过 `getUserAllNetworks(user_id)` 过滤。
 bob 不是 alice-private 的成员 → 看不到。
 
 #### 2. /api/tasks 默认按 user 可见 network 过滤
@@ -49,7 +49,7 @@ bob 没参与 alice 的 network → 查询返空。
 
 #### 3. 直接传 `network_id=<alice_net>` 也防住
 
-[index.ts /api/task POST L788](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L788)：
+[server.ts /api/task POST](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)：
 ```ts
 if (restAuth && !isAdmin && !getUserNetworkRole(restAuth.userId, body.network_id)) {
   return Response.json({ ok: false, error: "access denied to requested network" }, { status: 403 });
