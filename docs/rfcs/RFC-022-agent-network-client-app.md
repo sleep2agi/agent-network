@@ -3,8 +3,8 @@
 | 项 | 值 |
 |----|----|
 | **作者** | 通信SDK马 |
-| **状态** | Draft v0.1 (RFC + 原型骨架同 commit ship, 待 通信龙 review + Vincent 拍板下一步 scope ramp) |
-| **关联 issue** | TBD (通信龙 cross-link 后回填) |
+| **状态** | Draft v0.1 · **通信龙 review 已完成(2026-08-16，见 [#886](https://github.com/sleep2agi/agent-network/issues/886))** —— 仅待 Vincent 拍板 scope。§3 有两处事实已按 review 更正 |
+| **关联 issue** | [#886](https://github.com/sleep2agi/agent-network/issues/886)(通信龙 review + 事实更正) |
 | **关联 RFC** | [RFC-012](RFC-012-codex-mobile-bridge.md) (codex Mobile bridge — complementary, 不是 supersede) · RFC-017 (dashboard 现状) —— ⚠️ **这份 RFC 从未提交进本仓**(`git ls-files docs/rfcs | grep RFC-017` 无命中),原来那个链接是坏的,故此处不再链 · [RFC-020](RFC-020-im-platform-integration.md) (IM 接入 — 共享 chat 抽象) |
 | **关联 backlog** | [#107](https://github.com/sleep2agi/agent-network/issues/107) (codex Mobile + remote-control 调研, R237 已 pending) |
 | **创建** | 2026-05-30 北京 (UTC+8) |
@@ -116,11 +116,26 @@
 | 一对一 chat — 发送 | `POST /api/task` | ✅ | utok_ + network_id |
 | 一对一 chat — 收回复 | `GET /events/<my-alias>` (SSE) | ✅ | ntok_ scoped to network |
 | 一对一 chat — 历史 | `GET /api/messages?alias=<me>` | ✅ | utok_ |
-| Live log | `GET /api/tmux/<alias>` | ✅ | utok_(需 `COMMHUB_ENABLE_TMUX=1` server-side) |
+| Live log | `GET /api/tmux/<alias>` | ⚠️ 端点在，**但 APP 调不通** | 🔴 **admin + IP 白名单**，不是 utok_ —— `requireTmuxAccess()` 三道闸:`COMMHUB_ENABLE_TMUX=1` / `isTmuxAllowedIP()` / `requireAdminAuth()`。见 #886 |
 
 **Server 端结论: 0 LOC 新增**(MVP 阶段)。所有所需 endpoints 已 ship。
 
-**唯一可选 server tweak**(P2 不阻塞 MVP):
+~~**唯一可选 server tweak**(P2 不阻塞 MVP):~~ **已不需要 —— #247 做掉了**
+
+> **2026-08-16 更正(通信龙 review，#886):** 这条不再成立。`server.ts` 的 SSE 路由现在有三条 auth 路径，
+> 其中 **Path 3(#247)明确接受 `utok_`**，注释写着 pre-#247 只收 `ntok_` 的做法
+> "broke real-time chat updates"。**APP 直接用 `utok_` 订阅 SSE 即可，不必再换 `ntok_`。**
+>
+> **同轮补充:RFC 漏了一个更合适的端点。** `GET /events/network/:network_id` ——
+> 网络级摘要事件(只有路由元数据、无内容)，Dashboard 已用它**退役了 15s 软轮询**。
+> §2.1 的"看在线节点"页目前打算轮询 `GET /api/status`，**改用它可以直接做成实时的**。
+>
+> **一条 APP 必须理解的授权语义:** membership 是**无条件检查**的;`removeNetworkMember`
+> 删成员行但**不吊销 ntok**，所以 `network_members` 查询本身就是吊销机制。
+> ⇒ 踢出网络 = 立即失去 SSE，但 token 仍然有效。**APP 必须把 SSE 403 当成"你已不在这个网络"，
+> 不能当成"登录过期"** —— 后者会把用户导去重新登录，而重新登录解决不了问题。
+
+~~原文:~~
 - `GET /events/<user-alias>` 现要 ntok_ 强制(避免他人窃听他人 SSE)。APP 端可在 login 后立即 `POST /api/auth/node-token` 拿一个 `ntok_` 给 SSE 用; 不需 server 改。
 
 ---
