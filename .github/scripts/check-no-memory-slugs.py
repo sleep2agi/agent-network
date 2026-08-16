@@ -56,6 +56,29 @@ from pathlib import Path
 #   一道隐私门,漏的正是最可能出现的写法。
 SLUG_RE = re.compile(r"\[\[(feedback|project|reference|user)[_-][a-z0-9_-]+(?:\.md)?\]\]")
 
+# 🔴 同一个泄漏，换一种写法就绕过了上面那条。2026-08-16 实测:本仓有四处
+#    指向私有 memory 库的引用，**一处都没被上面那条命中** —— 因为它们不是
+#    `[[slug]]`，而是 markdown 链接和反引号路径:
+#      docs/research/…:183   [`feedback_…`](../../agent-orchestra/memory/feedback_….md)
+#      docs/rfcs/RFC-029…:9  [RFC-006 (project memory)](../../.claude/memory/)
+#      docs/sop/methodology.md:555      `~/.claude/projects/-home-…/memory/`
+#      docs/team-collab-playbook.md:368 `/home/<user>/.claude/projects/…/memory/MEMORY.md`
+#    前三处在 ALLOWLIST 树里(那是有意的历史豁免)，**第四处不在** ——
+#    它带着完整绝对路径和用户名，躺在一个本该被这道门守着的文件里，而门是绿的。
+#
+#    教训:一条按**形状**写的判据，只挡得住那个形状。同一件事换个语法就穿过去，
+#    而且穿过去的时候门还是绿的 —— 绿在这里的含义是"没有那个形状"，
+#    不是"没有那件事"。
+#
+#    这条只认**memory 库路径**这一种形态，故意不去认"任何绝对家目录"：
+#    后者全仓 114 处，绝大多数是正当的(测试夹具 /home/tester、
+#    agent-network/scripts 里记录的真实部署路径)。一道在正当写法上常红的门，
+#    只会教会所有人忽略它的输出 —— 那笔账在 oss-readiness-report 里另记。
+MEMORY_PATH_RE = re.compile(
+    r"(?:~|/home/[^/\s]+|/Users/[^/\s]+)?/?\.claude/(?:projects/[^/\s`)]+/)?memory/"
+    r"|agent-orchestra/memory/"
+)
+
 # .sh / .py 同样是公开仓里可见的文件,此前不在覆盖内 —— 实测 2026-08-13,
 # 三处真 slug 就藏在 tests/ 下的 shell 脚本里,门扫 898 个文件却看不见它们。
 EXTENSIONS = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".md", ".yml", ".yaml", ".sh", ".py"}
@@ -100,6 +123,26 @@ ALLOWLIST_PATH_PREFIXES = (
 )
 
 
+# 🔴 这道门的 FAIL 输出会**原样打印命中的那一段**，而 GitHub Actions 的日志
+#    在公开仓里是**公开的**。命中的路径里带着机器用户名(`/home/<user>/…`)——
+#    也就是说，一道防泄漏的门，会在报告泄漏的同时把它印进一个公开日志。
+#    脱敏放在**入 findings 之前**，不是打印前:只要原值进过列表，
+#    后面任何一处打印都可能漏掉那层处理。
+#    ⚠️ 第一版只脱了 `/home/<user>/` 这一种写法，跑出来是
+#       `/home/<user>/.claude/projects/-home-vansin-agent-orchestra/memory/`
+#       —— **同一个用户名在同一个串里出现了两次**，Claude 的 project 目录名
+#       就是把家目录路径用连字符编码了一遍。脱掉看得见的那处，剩下的那处
+#       长得不像路径，就被漏掉了。
+#       **脱一半和没脱，在"用户名有没有进公开日志"这件事上是同一个结果。**
+_HOME_RE = re.compile(r"(?<![A-Za-z0-9])(home|Users)([/-])[^/\s-]+")
+
+
+def redact(snippet: str) -> str:
+    """把家目录用户名换掉。两种写法都要:路径形 `/home/x/`，和 Claude
+    project 目录名里连字符编码的那份 `-home-x-agent-…`。"""
+    return _HOME_RE.sub(r"\1\2<user>", snippet)
+
+
 def scan(root: Path) -> list[tuple[str, int, str]]:
     findings: list[tuple[str, int, str]] = []
     scanned = 0
@@ -123,8 +166,9 @@ def scan(root: Path) -> list[tuple[str, int, str]]:
                 continue
             scanned += 1
             for lineno, line in enumerate(text.splitlines(), start=1):
-                for match in SLUG_RE.finditer(line):
-                    findings.append((rel, lineno, match.group(0)))
+                for regex in (SLUG_RE, MEMORY_PATH_RE):
+                    for match in regex.finditer(line):
+                        findings.append((rel, lineno, redact(match.group(0))))
     return findings, scanned
 
 
@@ -156,7 +200,7 @@ def main() -> int:
         f"FAIL: found {len(findings)} internal memory-slug reference(s). "
         "These are private agent-memory pointers and must not leak into "
         "public OSS files — rewrite the comment to convey the intent "
-        "directly without the [[slug]] form.",
+        "directly without the [[slug]] form or a path into the memory store.",
         file=sys.stderr,
     )
     for rel, lineno, snippet in findings:

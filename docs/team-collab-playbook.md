@@ -365,4 +365,4 @@ Vincent 报"拓扑图丑" → 一边开 #112 修一处一边开 #113 修一处 �
 ---
 
 *维护：通信龙 · 团队：anet*
-*相关 memory：见 `/home/vansin/.claude/projects/-home-vansin-agent-orchestra/memory/MEMORY.md`*
+*相关 memory：维护者本地的 agent 记忆库（不在本仓内，路径随机器而异）*
