@@ -87,6 +87,7 @@ import {
 } from "./runtime/grok-build-acp/resume-hint";
 import { CurrentAliasResolver } from "./runtime/current-alias";
 import { delegationTargetExists } from "./runtime/delegation-precheck";
+import { grokCliDenyPaths } from "./runtime/grok-cli-deny-paths";
 import {
   isRateLimitOrQuotaError,
   quotaRemediationHint,
@@ -3667,12 +3668,11 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
           alias: currentAlias(),
           resumeId: `grok-cli-${NODE_ID || grokHomeKey}`,
         },
-        denyPaths: [
-          join(grokCwd, ".anet"),
-          join(home, ".anet"),
-          configFilePath || "",
-          join(grokCwd, ".mcp.json"),
-        ],
+        denyPaths: grokCliDenyPaths({
+          projectCwd: grokCwd,
+          userHome: home,
+          nodeConfigPath: configFilePath,
+        }),
       });
       const env = buildGrokChildEnv({
         parentEnv: process.env,
@@ -4021,12 +4021,11 @@ async function processWithGrokCli(
       stateRoot: stateGrokRoot,
       stateHome: stateGrokHome,
       projectCwd: grokCwd,
-      denyPaths: [
-        join(grokCwd, ".anet"),
-        join(home, ".anet"),
-        configFilePath || "",
-        join(grokCwd, ".mcp.json"),
-      ],
+      denyPaths: grokCliDenyPaths({
+        projectCwd: grokCwd,
+        userHome: home,
+        nodeConfigPath: configFilePath,
+      }),
     });
     // Build from an empty object. The worker never receives CommHub identity,
     // routing state, arbitrary config envRef values, or ambient cloud creds.
