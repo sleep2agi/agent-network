@@ -75,6 +75,12 @@ L1_TESTS=(
   "test765-batch-runtime-gate"
   "test766-bunx-preflight"
   "test746-setup-bun-pin"
+  # 2026-08-13 扫出三个从没进 CI 的完整 Docker 门(test224 / test597 / test679),
+  # 一度想加在这里,但 L1 是「~16s 并行」的快层、job 预算 5 分钟,实测在 CI 上
+  # 已经用掉 141–148s;而 qa.sh 的 build 是**串行**的(只有 docker run 并行),
+  # 那三个套件单跑就要 39s / 15s / 36s,还要各加一次 build(test679 带
+  # javascript-obfuscator)。塞进来是拿余量赌。
+  # 它们改放在 qa.yml 的独立 job(预算 12 分钟),同单测门的形状。
 )
 
 if [[ "${1:-}" == "--list" ]]; then
@@ -144,15 +150,22 @@ if [[ $RUN_L1 -eq 1 ]]; then
   for t in "${L1_TESTS[@]}"; do
     # Build (cached if recent)
     note "build $t"
+    # 从套件自己的 Dockerfile 推导 SOURCE_COMMIT 参数名,而不是维护一条硬编码
+    # 的 if/elif 链 —— 链的失效方式是静默的:把套件加进 L1_TESTS 却忘了加分支,
+    # 它会在**没有 SHA 绑定**的情况下跑,而输出看起来一切正常。
+    # 等价性已核:对原链覆盖的 test686/765/766/746 四个套件,推导结果与硬编码
+    # 逐字相同;新加的 test224/test597 用的是不带前缀的 ARG SOURCE_COMMIT,
+    # 正是原链无法表达、只能再加分支的那种形状。
     build_args=""
-    if [[ "$t" == "test686-rest-shape-golden" ]]; then
-      build_args="--build-arg TEST686_SOURCE_COMMIT=$(git rev-parse HEAD)"
-    elif [[ "$t" == "test765-batch-runtime-gate" ]]; then
-      build_args="--build-arg TEST765_SOURCE_COMMIT=$(git rev-parse HEAD)"
-    elif [[ "$t" == "test766-bunx-preflight" ]]; then
-      build_args="--build-arg TEST766_SOURCE_COMMIT=$(git rev-parse HEAD)"
-    elif [[ "$t" == "test746-setup-bun-pin" ]]; then
-      build_args="--build-arg TEST746_SOURCE_COMMIT=$(git rev-parse HEAD)"
+    # `|| true` 不是装饰:本脚本是 set -euo pipefail,而多数套件的 Dockerfile
+    # 根本没有 ARG SOURCE_COMMIT —— grep 无命中退 1,pipefail 把它传给整个
+    # 命令替换,set -e 于是在第一个这样的套件上把 runner 打死。
+    # 第一版就是这么挂的:CI 在 `build qa-cli-01-hub-start` 处 exit 1,
+    # 一个套件都没跑成,而失败看起来像「L1 挂了」而不是「参数推导写错了」。
+    arg_name=$(grep -oE '^ARG (SOURCE_COMMIT|TEST[0-9]+_SOURCE_COMMIT)' \
+      "tests/$t/Dockerfile" 2>/dev/null | head -1 | awk '{print $2}' || true)
+    if [[ -n "$arg_name" ]]; then
+      build_args="--build-arg $arg_name=$(git rev-parse HEAD)"
     fi
     if ! dockerrun "docker build -q $build_args -t anet-$t -f tests/$t/Dockerfile ." >/tmp/qa-l1-$t-build.log 2>&1; then
       fail "L1 $t — build failed, see /tmp/qa-l1-$t-build.log"
