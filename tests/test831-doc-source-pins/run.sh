@@ -215,7 +215,7 @@ echo "  复原后回绿 ✓"
 #      这一层就是那次审计固化下来的 —— 一次性脚本抓到的错,下次还会漏。
 # ---------------------------------------------------------------------------
 echo "[L6] symbol anchors land in the tool section they claim"
-SYMCHECK="$ROOT/scripts/check-doc-symbol-anchors.py"
+SYMCHECK="$ROOT/scripts/check-mcp-tool-anchor-sections.py"
 [[ -f "$SYMCHECK" ]] || fail "L6 的脚本不在镜像里:$SYMCHECK"
 out9=$(python3 "$SYMCHECK" "$ROOT") || fail "干净树上 L6 就红了:$(printf '%s' "$out9" | tail -4)"
 printf '%s\n' "$out9" | sed 's/^/  /'

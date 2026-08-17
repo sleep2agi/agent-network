@@ -77,7 +77,7 @@ if (src !== dst) {
 }
 ```
 
-verify [`agent-network/bin/cli.ts:1658-1674`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1658) `candidates` 数组：源文件搜索顺序为
+verify [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) —— 搜 `// dist/src/node-server.js（npm 包混淆后产物，优先）` `candidates` 数组：源文件搜索顺序为
 1. `dist/src/node-server.js`（npm 包混淆后产物，优先）
 2. `src/node-server.ts`（开发环境源码）
 3. `npm root -g/@sleep2agi/agent-network/...` 全局安装路径兜底

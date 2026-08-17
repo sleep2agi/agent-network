@@ -296,6 +296,10 @@ anet 暂未 ship 官方 `--daemon` flag，下面给两条可选路径：tmux 临
 - 每个节点: `tmux new -s anet-<alias>` + `anet node start <alias>`
 - 想接 `@reboot` crontab 也行，但 PATH / nvm 这些非交互 shell 问题要先解决（见 [第 0 节 nvm 提示](#_0-前置)）
 
+::: tip 复核节点真起来 —— 别只看 stdout ✅
+起完每个节点跑一条：`tmux has-session -t "=<alias>"; echo $?` 应输出 `0`（**`=` 必须**，裸名字是前缀匹配会命中别的 session 假报绿）。**[#895](https://github.com/sleep2agi/agent-network/pull/895) 之前的版本**（含当前 npm `@preview` = `2.3.0-preview.39`；**#895 已合入 main, 未发 npm**）在 detached 场景可能打 `✅ started detached (tmux session live)` `exit 0` 但 tmux 里没进程。批量起用 `anet project up`，退出码自 [#896](https://github.com/sleep2agi/agent-network/pull/896) 起可信（同样待 npm 发布）。
+:::
+
 ### 7.2 systemd unit（生产 / 开机自启）
 
 下面这套 unit 文件**未经官方测试**、按你的实际 `node` 路径（`which anet`）+ 运行用户改一下就能用。改完跑 `systemctl daemon-reload` + `enable --now`。
@@ -367,7 +371,8 @@ sudo systemctl status anet-hub anet-node@my-bot
 | 2 | `anet node create` 选完 runtime → `FATAL: TypeError: fetch failed` | 建节点要连本地 hub，但 hub 没起（多半因为坑 1） | 另开终端先 `anet hub start`，再回这条重试。**[#237](https://github.com/sleep2agi/agent-network/issues/237)** 主条跟进给 fetch 分类报错 |
 | 3 | 一路 Enter 落到要填 vendor + API Key 的复杂路径 | runtime 菜单默认高亮 `claude-agent-sdk`，不是最易上手的 `claude-code-cli` | 建节点时**手动选 `claude-code-cli`**（已 `claude auth login` 直接复用订阅）。中断 vendor 选择如果留下半成品节点，用 `anet node delete <alias>` 清掉重来 |
 | 4 | 建完节点 Telegram 不工作，但向导开头说"optional Telegram channel" | 向导根本不问 Telegram，那行是误导文案 | Telegram 用 `anet channel add telegram <node> --bot-token <tok> --allow <uid>` 单独配（见 [第 6 节](#_6-配-telegram-channel-可选)） |
-| 5 | `anet node start` (codex-sdk / claude-agent-sdk) → `agent-node is not installed or cannot report a version` | npx 懒加载没拉到 `@sleep2agi/agent-node` | `npm i -g @sleep2agi/agent-node`；然后 `agent-node --version` 应输出 |
+| 5 | `anet node start` (codex-sdk / claude-agent-sdk) → `agent-node is not installed or cannot report a version` | npx 懒加载没拉到 `@sleep2agi/agent-node`；bug 存于 `@latest` (2.2.21) 与 preview ≤ 2.3.0-preview.37 | 短路: `npm i -g @sleep2agi/agent-node` 让二进制就位；长期: 升到 `@sleep2agi/agent-network@preview`（含 [PR #239](https://github.com/sleep2agi/agent-network/pull/239) fix, `1eff3a4d`, 2026-06-28）。issue [#450](https://github.com/sleep2agi/agent-network/issues/450) 仍 open —— 待 4 项 gate 后 promote latest |
+| 5.5 | `anet node start` 打 `✅ started detached (tmux session live)` `exit 0`，但 `tmux ls` 找不到 session、进程也不在 | detached 路径的假绿 bug；存于含 [#895](https://github.com/sleep2agi/agent-network/pull/895) 之前的版本，含 npm `@preview` = `2.3.0-preview.39`（**#895 已合 main 未发 npm**） | 真判据: `tmux has-session -t "=<alias>"; echo $?` 应输 `0`（`=` 必须）。批量场景用 `anet project up`（退出码自 [#896](https://github.com/sleep2agi/agent-network/pull/896) 起可信，同待 npm 发布）。装含 fix 的构建前，用 has-session 复核每次启动 |
 | 6 | `claude-code-cli` 节点起来后卡 offline / pane 卡在确认框 | Claude Code 的 `--dangerously-load-development-channels` 确认框等人按 Enter | 用 tmux 前台跑一次手动按 `1` + Enter；后续就不弹了 |
 | 7 | systemd / cron / 新用户启动报一连串 `command not found` | nvm + Bun 各自按用户装，非交互 shell 不加载 | 把 node/npm/bun 软链到 `/usr/local/bin/`，或启动脚本里显式 `source ~/.nvm/nvm.sh` |
 | 8 | 机器重启全部掉线 | hub + 节点都靠手动 tmux 挂着 | 配 systemd 开机自启，参考 [§7.2 systemd unit](#_7-2-systemd-unit-生产-开机自启) 里的模板 |

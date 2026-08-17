@@ -1,6 +1,22 @@
 #!/usr/bin/env python3
 """符号锚点指的是不是它声称的那个 tool。
 
+⚠️ 仓里有**两道**关于符号锚点的门,判据不同,不要弄混(本文件原名
+   `check-doc-symbol-anchors.py`,与另一道重名,合并时改成了现在这个名字):
+
+   .github/scripts/check-doc-symbol-anchors.py   —— 宽而浅
+       范围:docs/ + docs-site/ 下**所有** md,锚点可指向**任意**源码文件
+       判据:锚串在它左边那个链接指向的文件里**存在**
+
+   scripts/check-mcp-tool-anchor-sections.py(本文件) —— 窄而深
+       范围:只有 mcp-tools.md → server/src/tools.ts
+       判据:锚串落在它声称的那个 **tool 段**里
+
+   两者不能互相替代,这是实测出来的:把 `report_completion` 段的锚串换成
+   `"send_task"` —— **本文件报 mismatches=1(红),那道宽的门照过**
+   (因为那个串确实存在于 tools.ts)。反过来,一条指向 cli.ts 的坏锚点,
+   本文件根本不看。
+
 #831 把 `mcp-tools.md` 里的行号锚点换成了「文件链接 + 可 grep 的串」。那解决了
 「行号会漂」,但引入了一个新的失效形态,而且它比行号漂移更隐蔽:
 
