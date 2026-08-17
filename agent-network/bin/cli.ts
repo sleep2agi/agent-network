@@ -1539,6 +1539,25 @@ function getAnetVersion(): string {
 // promote 0.4.5 → @latest 后 swap anet@latest 路径回 @latest (🅗1)。
 // TODO(#61 phase-2): swap anet@latest fallback "preview" → "latest" once
 //   @sleep2agi/agent-network-dashboard promotes 0.4.5 stable.
+//
+// 🔴 2026-08-18 — that condition passed a long time ago and nobody re-checked
+// it. Measured against the live registry today:
+//
+//     latest  = 0.6.0
+//     preview = 0.6.3-preview.56
+//
+// The blocker this fallback was written for (latest pinned at 0.4.2 while
+// preview had 0.4.5) no longer exists; `latest` is now many minors past the
+// version the TODO waits for. The fallback outlived its own stated expiry.
+//
+// It is NOT flipped here on purpose: doing so changes what every stable-channel
+// user's `anet hub dashboard` fetches (0.6.0 instead of 0.6.3-preview.56), and
+// whether 0.6.0 is feature-complete enough is a product call, not a cleanup.
+// See #866 for the numbers and the decision.
+//
+// The general shape, worth naming: a temporary workaround that WRITES DOWN its
+// expiry condition is better than one that doesn't — but only if someone
+// re-reads it. Nothing re-evaluates a condition stored in a comment.
 function dashboardReleaseTag(): string {
   const envOverride = process.env.ANET_DASHBOARD_VERSION;
   if (envOverride) return envOverride;
@@ -6299,8 +6318,19 @@ async function serverCommand() {
       ...(dashboardToken ? { COMMHUB_AUTH_TOKEN: dashboardToken } : {}),
     };
 
-    // Default stays channel-matched (see #61 + dashboardReleaseTag). A global
-    // binary is used only after the explicit ANET_DASHBOARD_LOCAL=1 opt-in.
+    // 🔴 The default is NOT channel-matched — this comment used to say it was.
+    // dashboardReleaseTag() returns "preview" for every caller (see its own
+    // comment for the #61 reason), so a user on the stable `anet` channel gets
+    // the preview Dashboard. That is a deliberate temporary decision, but the
+    // sentence here claimed the opposite and was the only thing most readers
+    // of this call site would see.
+    //
+    // The runtime output is honest — the spawn line below prints the actual
+    // `@${tag}` — so this was a comment that disagreed with both the code and
+    // the program's own output.
+    //
+    // A global binary is used only after the explicit ANET_DASHBOARD_LOCAL=1
+    // opt-in.
     cleanStaleNpxDashboardTemp(); // #89 — self-heal npx cache before spawn
     console.log(globalOptIn
       ? `[anet] spawning explicit global Dashboard ${globalBinary} (anet ${getAnetVersion() || "unknown"})`
