@@ -2313,8 +2313,26 @@ function resolvePreviewAgentNodeEntrypoint(resolverEnv: NodeJS.ProcessEnv): stri
         env: resolverEnv,
       },
     );
-  } catch {
-    throw new Error("could not install and resolve @sleep2agi/agent-node@preview");
+  } catch (e: any) {
+    // 🔴 这里以前是 `catch { throw new Error("could not install and resolve …") }`
+    // —— 把 npx 说的话整个丢掉。而这是**全新安装的第一次 start** 必经的一步
+    // (agent-node 按设计由 npx 懒取,见 checkRuntimeDependency 里那句 note),
+    // 所以它失败时用户拿到的是一句没有原因的话,而真正的原因就在被丢掉的 stderr 里:
+    // registry 不可达 / 权限 / 磁盘满 / 120s 超时 —— 每一种的下一步动作都不同。
+    //
+    // 同一个形状在 docs-site/docs/public/install.sh 上修过一次(#908):那次是
+    // `>/dev/null 2>&1` 吞掉首次尝试的 stderr,然后把每一种失败都叙述成
+    // 「registry 失败」。这里更进一步 —— 它连一个猜测都不给。
+    const detail = [e?.stderr, e?.stdout, e?.message]
+      .map((v: unknown) => (typeof v === "string" ? v : v ? String(v) : ""))
+      .find((v: string) => v.trim().length > 0) ?? "";
+    const trimmed = detail.trim().split(/\r?\n/).slice(-8).join("\n").slice(0, 1200);
+    const isTimeout = e?.code === "ETIMEDOUT" || e?.signal === "SIGTERM";
+    throw new Error(
+      `could not install and resolve @sleep2agi/agent-node@preview`
+      + (isTimeout ? ` (npx exceeded the 120s budget)` : ``)
+      + (trimmed ? `\n--- npx said ---\n${trimmed}` : `\n(npx produced no output — check that \`npx\` itself works)`),
+    );
   }
 
   const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
