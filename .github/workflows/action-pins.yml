@@ -1,0 +1,34 @@
+# Third-party GitHub Actions must be pinned to a commit SHA.
+#
+# `uses: some-org/some-action@v2` runs whatever that tag points at today, and
+# the tag is writable by the action's owner. The code it resolves to executes
+# here with this repository's checkout and secrets in scope, and it can change
+# without any commit in this repo for anyone to review.
+#
+# Scope is deliberate and narrow: `actions/*` (GitHub's own) stay on tags —
+# that is the near-universal convention, and changing it is a separate policy
+# call rather than something to smuggle in under a third-party guard.
+#
+# 🔴 This does NOT fix flaky downloads. On 2026-08-17 a `L0 + L1` job here died
+#    on three consecutive 429s fetching oven-sh/setup-bun, and a SHA pin would
+#    not have changed that — the request still goes to codeload. Pinning is
+#    about knowing WHAT ran. Selling it as a flakiness fix would be selling a
+#    benefit it does not deliver.
+#
+# 🔴 No `paths:` filter, for the same reason as qa-trigger-coverage: this guards
+#    the workflow directory, and gating it on that directory would let a change
+#    there slip past the check that watches it.
+
+name: lint (action pins)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 .github/scripts/check-action-pins.py
