@@ -18,8 +18,11 @@ RUN curl --fail --silent --show-error --location \
   && rm -f /tmp/bun-linux-x64.zip
 
 WORKDIR /workspace
-COPY server/package.json ./server/
-RUN cd server && npm install
+COPY server/package.json server/package-lock.json ./server/
+# 🔴 npm ci 而不是 npm install:ci 严格按 lockfile 装,install 会按 caret 解析
+# 「当下最新的兼容版本」。后者意味着同一个 commit 在不同时间构建出不同依赖图 ——
+# 上游发一个兼容版本就能让这道门变红或改变被测行为,而仓库一个字节都没动。
+RUN cd server && npm ci
 
 COPY server ./server
 # RFC-026 G9 / RFC-028 P1 的漂移门比对 hub 与 daemon 的同名共享源码,
@@ -35,7 +38,11 @@ COPY tests/test601-hub-scheduled-tasks ./tests/test601-hub-scheduled-tasks
 COPY tests/test798-server-unit-ci/run.sh ./tests/test798-server-unit-ci/run.sh
 
 ARG SOURCE_COMMIT
+ARG RUNSH_BLOB
 ENV TEST798_SOURCE_COMMIT=$SOURCE_COMMIT
+# run.sh 在 SOURCE_COMMIT 下的 git blob 哈希 —— 让容器内能验证「报告里的 SHA
+# 确实对应镜像里被测的字节」,而不是只验 SHA 的格式。
+ENV TEST798_RUNSH_BLOB=$RUNSH_BLOB
 
 RUN chmod 0755 ./tests/test798-server-unit-ci/run.sh \
   && install -d -o node -g node -m 0700 "/run/user/$(id -u node)" \

@@ -16,6 +16,25 @@ SOURCE_COMMIT=${TEST798_SOURCE_COMMIT:-}
   exit 1
 }
 
+# 🔴 光验 SOURCE_COMMIT 的格式不够:任何 40 位十六进制都能通过,而那个 SHA 可能
+# 根本不含镜像里被测的文件 —— 提交进仓的 report 就出现过写着一个早于套件自身的
+# 修订号,那份证据无法从它自称的版本复现。
+# 做法(与 test823 同):构建时把 run.sh 在该 commit 下的 git blob 哈希作为
+# build-arg 传进来,这里就地重算镜像内文件的 blob 哈希并比对。
+# blob 哈希 = sha1("blob <len>\0" + 内容),容器里不需要装 git。
+RUNSH_BLOB=${TEST798_RUNSH_BLOB:-}
+[[ "$RUNSH_BLOB" =~ ^[0-9a-f]{40}$ ]] || {
+  echo "FAIL: TEST798_RUNSH_BLOB 缺失或格式不对 —— 无法把 SOURCE_COMMIT 绑到被测字节" >&2
+  exit 1
+}
+_self="$ROOT/tests/test798-server-unit-ci/run.sh"
+_actual=$( { printf 'blob %d\0' "$(wc -c < "$_self")"; cat "$_self"; } | sha1sum | cut -d' ' -f1 )
+[[ "$_actual" == "$RUNSH_BLOB" ]] || {
+  echo "FAIL: 镜像里的 run.sh 与 SOURCE_COMMIT=$SOURCE_COMMIT 声称的不是同一份" >&2
+  echo "      期望 blob $RUNSH_BLOB,实际 $_actual" >&2
+  exit 1
+}
+
 # 🔴 红线:COMMHUB_DB 不设的话默认指向生产库。容器里够不到宿主的库,
 # 但不能靠"够不到"来保证 —— 显式钉到容器内临时路径,并断言它真的被钉住了。
 # 31/69 个 server 测试引用了 sqlite/COMMHUB_DB,这条不是形式主义。
