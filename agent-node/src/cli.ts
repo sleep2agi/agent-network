@@ -97,6 +97,7 @@ import {
   formatClassificationForUser,
   formatClassificationForLog,
 } from "./runtime/classify-result";
+import { formatAttemptOutcome } from "./runtime/attempt-log-outcome";
 import { withTimeout, TimeoutError, resolveTimeoutMs } from "./util/timeout";
 import { superviseChild } from "./util/supervise-child";
 import {
@@ -2360,19 +2361,29 @@ async function processWithClaude(
             if (m.type === "result") {
               const dt = Date.now() - t0;
               const u = m.usage || {};
-              log(`[claude] ${m.subtype} | ${dt}ms | $${m.total_cost_usd?.toFixed(4) || "?"} | in=${u.input_tokens || 0} out=${u.output_tokens || 0} | turns=${m.num_turns}${attempt > 0 ? ` | attempt=${attempt + 1}` : ""}`);
-              if (m.subtype === "success") {
-                // #261 P1 redirect (2026-06-28) — delegate to classifyRuntimeResult
-                // which folds the empty-result rule from #267 + the in=0 & out=0
-                // & cost=0 silent-reject rule into one decision shared with
-                // codex / grok. Pre-fix `m.result || "任务完成"` silently
-                // rebranded an empty vendor reply as "task complete" — the M3
-                // incident shape. Now a non-success classification surfaces a
-                // soft-fail string the upstream caller can act on.
-                const cls = classifyRuntimeResult(
-                  { result: m.result, usage: m.usage, totalCostUsd: m.total_cost_usd },
-                  { baseUrl: process.env.ANTHROPIC_BASE_URL },
-                );
+              // #261 P1 redirect (2026-06-28) — delegate to classifyRuntimeResult
+              // which folds the empty-result rule from #267 + the in=0 & out=0
+              // & cost=0 silent-reject rule into one decision shared with
+              // codex / grok. Pre-fix `m.result || "任务完成"` silently
+              // rebranded an empty vendor reply as "task complete" — the M3
+              // incident shape. Now a non-success classification surfaces a
+              // soft-fail string the upstream caller can act on.
+              //
+              // Computed BEFORE the log line on purpose: it used to sit after,
+              // so the line printed the vendor's `subtype` verbatim. A node
+              // pointed at a nonexistent model logged `success | $0.0000 | in=0
+              // out=0` three times in a row and then `✗ all 3 attempts failed`
+              // (TMCode副责人, 2026-08-18). The verdict already existed one line
+              // below; it just wasn't the thing being printed.
+              const cls =
+                m.subtype === "success"
+                  ? classifyRuntimeResult(
+                      { result: m.result, usage: m.usage, totalCostUsd: m.total_cost_usd },
+                      { baseUrl: process.env.ANTHROPIC_BASE_URL },
+                    )
+                  : null;
+              log(`[claude] ${formatAttemptOutcome(m.subtype, cls)} | ${dt}ms | $${m.total_cost_usd?.toFixed(4) || "?"} | in=${u.input_tokens || 0} out=${u.output_tokens || 0} | turns=${m.num_turns}${attempt > 0 ? ` | attempt=${attempt + 1}` : ""}`);
+              if (m.subtype === "success" && cls) {
                 if (cls.kind === "success") {
                   inner = m.result;
                 } else {
