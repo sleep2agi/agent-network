@@ -97,6 +97,7 @@ import { parseCliOptions, positionalArgs } from "../src/cli-args";
 import { parseTokenCreateName } from "../src/token-cli";
 import { findExactTmuxSession, parseTmuxSessions } from "../src/tmux-attach";
 import { classifyPanePrompt, extractStartFailureReason } from "../src/tmux-pane-prompt";
+import { describeUnsafePath } from "../src/unsafe-package-path-reason";
 import { diagnoseLocale, formatLocaleSource } from "../src/locale-diagnostic";
 import {
   formatSecretAssignment,
@@ -2279,7 +2280,17 @@ function resolvePreviewAgentNodeEntrypoint(resolverEnv: NodeJS.ProcessEnv): stri
   for (const path of [entrypoint, packageJsonPath]) {
     const stat = statSync(path);
     if (!stat.isFile() || (uid !== undefined && stat.uid !== uid) || (stat.mode & 0o022) !== 0) {
-      throw new Error("resolved agent-node package has unsafe ownership or mode");
+      // Name the condition that fired. "unsafe ownership or mode" sent every
+      // reader looking at ownership, while on a stock Debian/Ubuntu box
+      // (umask 0002 → npm extracts 0775/0664) it is always the group-write
+      // bit — which is why grok-build-cli was unstartable on this machine
+      // and the error said nothing about umask.
+      throw new Error(
+        stat.isFile()
+          ? `resolved agent-node package has unsafe ownership or mode — ` +
+            describeUnsafePath(path, { uid: stat.uid, mode: stat.mode, processUid: uid ?? stat.uid })
+          : `${path} is not a regular file`,
+      );
     }
   }
   return entrypoint;
