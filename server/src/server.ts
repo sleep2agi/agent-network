@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { resolvePort } from "./resolve-port.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
@@ -48,7 +49,7 @@ import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startS
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
 import { recordDeliveredStaleEvents } from "./task-lifecycle-watcher.js";
 
-const PORT = Number(process.env.PORT) || 9200;
+const PORT = resolvePort(process.env.PORT);
 const HOST = process.env.HOST || "127.0.0.1";
 const AUTH_TOKEN = process.env.COMMHUB_AUTH_TOKEN;
 const DEV_OPEN = process.argv.includes("--dev-open") || process.env.COMMHUB_DEV_OPEN === "1";
