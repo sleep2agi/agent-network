@@ -99,6 +99,7 @@ import { findExactTmuxSession, parseTmuxSessions } from "../src/tmux-attach";
 import { classifyPanePrompt, extractStartFailureReason } from "../src/tmux-pane-prompt";
 import { describeUnsafePath } from "../src/unsafe-package-path-reason";
 import { describeUmaskRisk, judgeUmask, rejectedPayloads } from "../src/package-mode-preflight";
+import { exactSession } from "../src/tmux-exact-target";
 import { diagnoseLocale, formatLocaleSource } from "../src/locale-diagnostic";
 import {
   formatSecretAssignment,
@@ -142,8 +143,15 @@ function adminUtokPath() { return join(home, ".anet", "server", "admin-utok.json
 function dashboardLaunchRecordPath(port: string | number) { return join(home, ".anet", "server", `dashboard-${port}.json`); }
 function nodesDir() { return join(process.cwd(), ".anet", "nodes"); }
 function shellQuote(value: string): string { return `'${value.replace(/'/g, `'\\''`)}'`; }
-function killTmuxSession(sessionName: string) {
-  try { execFileSync("tmux", ["kill-session", "-t", sessionName], { stdio: "pipe" }); } catch {}
+/** Kill a session and report whether it is actually gone afterwards. */
+function killTmuxSession(sessionName: string): boolean {
+  try { execFileSync("tmux", ["kill-session", "-t", exactSession(sessionName)], { stdio: "pipe" }); } catch {}
+  // Asking is not killing. `kill-session` failing is swallowed on purpose (a
+  // session that is already gone is the common case and not an error), which
+  // means the only way to know is to look afterwards — otherwise `node stop`
+  // prints "tmux(tui) killed" and notifies the hub offline while the session
+  // is still running.
+  return !tmuxSessionRunning(sessionName);
 }
 function startNodeTmuxSession(sessionName: string, alias: string) {
   // #117 helper used by `anet project up/restart` + the debate/social/PR-review
@@ -152,7 +160,7 @@ function startNodeTmuxSession(sessionName: string, alias: string) {
   execFileSync("tmux", ["new-session", "-d", "-s", sessionName, `anet node start ${shellQuote(alias)}`], { stdio: "pipe" });
 }
 function tmuxSessionRunning(name: string): boolean {
-  try { execFileSync("tmux", ["has-session", "-t", name], { stdio: "pipe" }); return true; }
+  try { execFileSync("tmux", ["has-session", "-t", exactSession(name)], { stdio: "pipe" }); return true; }
   catch { return false; }
 }
 // #122 — gate auto-tmux on tmux actually being installed. The CLI never
@@ -204,7 +212,7 @@ function waitForTmuxPaneText(sessionName: string, needle: string, timeoutMs: num
   return new Promise((resolve) => {
     const poll = () => {
       try {
-        const out = execFileSync("tmux", ["capture-pane", "-t", sessionName, "-p"], {
+        const out = execFileSync("tmux", ["capture-pane", "-t", exactSession(sessionName), "-p"], {
           stdio: ["ignore", "pipe", "pipe"], encoding: "utf8",
         });
         if (out.includes(needle)) { resolve(true); return; }
@@ -772,7 +780,7 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
   if (!existsSync(attachScript)) {
     let tail = "";
     try {
-      tail = execFileSync("tmux", ["capture-pane", "-p", "-t", bridgeSession, "-S", "-80"], {
+      tail = execFileSync("tmux", ["capture-pane", "-p", "-t", exactSession(bridgeSession), "-S", "-80"], {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       }).slice(-3_000);
@@ -7643,9 +7651,24 @@ Stop a running agent node.
   const tmuxTuiKilled = allowLegacyTmuxNameSweep && tmuxSessionRunning(copresenceSessions.tui);
   const tmuxAppsrvKilled = allowLegacyTmuxNameSweep && tmuxSessionRunning(copresenceSessions.appsrv);
   const tmuxBridgeKilled = allowLegacyTmuxNameSweep && tmuxSessionRunning(copresenceSessions.bridge);
-  if (tmuxTuiKilled) killTmuxSession(copresenceSessions.tui);
-  if (tmuxAppsrvKilled) killTmuxSession(copresenceSessions.appsrv);
-  if (tmuxBridgeKilled) killTmuxSession(copresenceSessions.bridge);
+  // The three flags above say a session WAS running, which is the condition for
+  // trying. Whether the kill landed is a second question, and reporting the
+  // first as if it answered the second is how "Stopped X (tmux(tui) killed)"
+  // could print over a session that is still up.
+  const stillUp: string[] = [];
+  for (const [wanted, session] of [
+    [tmuxTuiKilled, copresenceSessions.tui],
+    [tmuxAppsrvKilled, copresenceSessions.appsrv],
+    [tmuxBridgeKilled, copresenceSessions.bridge],
+  ] as Array<[boolean, string]>) {
+    if (wanted && !killTmuxSession(session)) stillUp.push(session);
+  }
+  if (stillUp.length > 0) {
+    console.error(`[anet] ❌ tmux kill-session did not take for: ${stillUp.join(", ")}`);
+    console.error(`[anet]    "${displayName}" is NOT stopped; the hub was not notified offline.`);
+    console.error(`[anet]    Look: tmux attach -t ${shellQuote(`=${stillUp[0]}`)}`);
+    process.exit(1);
+  }
   const tmuxKilled = identityTeardownKilled || tmuxTuiKilled || tmuxAppsrvKilled || tmuxBridgeKilled;
   const stopResult = allowLegacyTmuxNameSweep
     ? await stopNode(resolved.id)
@@ -7845,7 +7868,7 @@ async function dismissDevChannelPrompt(sessionName: string, timeoutMs: number): 
       // Discard tmux's stderr: polling a session that has already exited is a
       // normal outcome here, and letting `can't find pane: X` through made the
       // CLI print an alarming line right before an unrelated verdict.
-      pane = execFileSync("tmux", ["capture-pane", "-p", "-t", sessionName], {
+      pane = execFileSync("tmux", ["capture-pane", "-p", "-t", exactSession(sessionName)], {
         encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"],
       }).toString();
     } catch {
@@ -7855,7 +7878,7 @@ async function dismissDevChannelPrompt(sessionName: string, timeoutMs: number): 
     if (prompt === "folder-trust" && !trustAnswered) {
       // Settle briefly so Ink's input handler is fully attached, then accept.
       await new Promise(r => setTimeout(r, 700));
-      try { execFileSync("tmux", ["send-keys", "-t", sessionName, "Enter"], { stdio: "ignore" }); } catch {}
+      try { execFileSync("tmux", ["send-keys", "-t", exactSession(sessionName), "Enter"], { stdio: "ignore" }); } catch {}
       trustAnswered = true;
       deadline = Date.now() + timeoutMs;  // fresh window for the prompt we came for
       await new Promise(r => setTimeout(r, 1000));
@@ -7865,7 +7888,7 @@ async function dismissDevChannelPrompt(sessionName: string, timeoutMs: number): 
       // Prompt is rendered and waiting. Settle briefly so Ink's input handler
       // is fully attached, then confirm with a single Enter.
       await new Promise(r => setTimeout(r, 700));
-      try { execFileSync("tmux", ["send-keys", "-t", sessionName, "Enter"], { stdio: "ignore" }); } catch {}
+      try { execFileSync("tmux", ["send-keys", "-t", exactSession(sessionName), "Enter"], { stdio: "ignore" }); } catch {}
       return true;
     }
     await new Promise(r => setTimeout(r, 1000));
@@ -7877,7 +7900,7 @@ async function dismissDevChannelPrompt(sessionName: string, timeoutMs: number): 
 // on the failure path, where the pane holds the inner command's own words.
 function capturePaneReason(sessionName: string): string | null {
   try {
-    const pane = execFileSync("tmux", ["capture-pane", "-p", "-t", sessionName], {
+    const pane = execFileSync("tmux", ["capture-pane", "-p", "-t", exactSession(sessionName)], {
       encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"],
     }).toString();
     return extractStartFailureReason(pane);
