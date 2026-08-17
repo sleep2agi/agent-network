@@ -19,6 +19,16 @@ test_files=$(find "$ROOT/agent-network/src" -type f -name '*.test.ts' | wc -l | 
 }
 echo "test_files=$test_files"
 
+# 🔴 绝对下限:上面那条 `[[ "$test_files" =~ ^[1-9][0-9]*$ ]]` 只要求分母非零,
+# 下面 :L0 的 `executed >= test_files` 也只能抓「runner 少跑了文件」—— 两个数
+# 会跟着现实一起缩水。#817 实测:删掉 46 个 src 测试里的 40 个,test_files=6、
+# executed=6,这道门照样 PASS rc=0。所以真删了测试就故意改这个数。
+AGENT_NETWORK_SRC_FLOOR=40
+[[ "$test_files" -ge "$AGENT_NETWORK_SRC_FLOOR" ]] || {
+  echo "FAIL: only $test_files test file(s) under agent-network/src, floor is $AGENT_NETWORK_SRC_FLOOR" >&2
+  exit 1
+}
+
 echo "[L0] full agent-network/src unit suite as non-root"
 runuser -u node -- env HOME=/home/node \
   bash -lc 'cd /workspace/agent-network && bun test src/' \
@@ -76,6 +86,14 @@ while IFS= read -r f; do
 done < <(find "$ROOT/agent-network/tests" -maxdepth 1 -type f -name '*.test.ts' | sort)
 
 echo "tests_dir_executed=$tdir_ran tests_dir_discovered=$tdir_total tests_dir_failed=$tdir_failed"
+# 🔴 绝对下限:`executed == discovered` 只能抓「runner 跳过了文件」,
+# 抓不到「文件消失了」—— 分母会跟着现实自动缩水。见 #798 的实测:
+# 删掉 85% 的测试后,只比数量的门照样 PASS。真删了测试就故意改这个数。
+AGENT_NETWORK_TESTS_FLOOR=15
+[[ "$tdir_total" -ge "$AGENT_NETWORK_TESTS_FLOOR" ]] || {
+  echo "FAIL: only $tdir_total file(s) under agent-network/tests, floor is $AGENT_NETWORK_TESTS_FLOOR" >&2
+  exit 1
+}
 [[ "$tdir_ran" -eq "$tdir_total" && "$tdir_total" -gt 0 ]] || {
   echo "FAIL: ran $tdir_ran of $tdir_total files under agent-network/tests" >&2
   exit 1

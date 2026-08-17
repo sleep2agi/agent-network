@@ -13,6 +13,20 @@ echo "source_commit=$SOURCE_COMMIT"
 echo "bun=$(bun --version) node=$(node --version) uid=$(id -u node)"
 command -v crontab >/dev/null || { echo "FAIL: crontab dependency missing" >&2; exit 1; }
 
+# #817:这道门原本连 src 的分母都没有 —— 只有一行 `bun test src/`,
+# 删光测试文件它也不会红。补上分母 + 绝对下限,和 test745 对齐。
+test_files=$(find "$ROOT/agent-node/src" -type f -name '*.test.ts' | wc -l | tr -d ' ')
+[[ "$test_files" =~ ^[1-9][0-9]*$ ]] || {
+  echo "FAIL: agent-node test-file denominator is empty" >&2
+  exit 1
+}
+echo "test_files=$test_files"
+AGENT_NODE_SRC_FLOOR=80
+[[ "$test_files" -ge "$AGENT_NODE_SRC_FLOOR" ]] || {
+  echo "FAIL: only $test_files test file(s) under agent-node/src, floor is $AGENT_NODE_SRC_FLOOR" >&2
+  exit 1
+}
+
 echo "[L0] full agent-node/src unit suite as non-root"
 runuser -u node -- env HOME=/home/node \
   bash -lc 'cd /workspace/agent-node && bun test src/' \
@@ -27,6 +41,14 @@ grep -Eq '^[[:space:]]*0 fail$' /tmp/test725-green.log || {
   exit 1
 }
 
+# 把「磁盘上有几个」和「bun 跑了几个」绑在一起:范围被悄悄收窄(glob 改了、
+# 测试挪进子目录、bun 配置多了个 exclude)时自己变红。
+executed=$(grep -Eo 'across [0-9]+ files' /tmp/test725-green.log | grep -Eo '[0-9]+' | tail -1)
+echo "executed_files=${executed:-unknown} discovered_files=$test_files"
+[[ -n "$executed" && "$executed" -ge "$test_files" ]] || {
+  echo "FAIL: bun executed ${executed:-?} file(s) but $test_files exist under src/" >&2
+  exit 1
+}
 
 # tests/ 下还有 6 个文件,直到现在没有任何 CI 会跑 —— 而这道门的抬头写着
 # "complete agent-node unit domain"。补上,让那句话变成真的。
@@ -55,6 +77,14 @@ while IFS= read -r f; do
 done < <(find "$ROOT/agent-node/tests" -maxdepth 1 -type f -name '*.test.ts' | sort)
 
 echo "tests_dir_executed=$tdir_ran tests_dir_discovered=$tdir_total tests_dir_failed=$tdir_failed"
+# 🔴 绝对下限:`executed == discovered` 只能抓「runner 跳过了文件」,
+# 抓不到「文件消失了」—— 分母会跟着现实自动缩水。见 #798 的实测:
+# 删掉 85% 的测试后,只比数量的门照样 PASS。真删了测试就故意改这个数。
+AGENT_NODE_TESTS_FLOOR=5
+[[ "$tdir_total" -ge "$AGENT_NODE_TESTS_FLOOR" ]] || {
+  echo "FAIL: only $tdir_total file(s) under agent-node/tests, floor is $AGENT_NODE_TESTS_FLOOR" >&2
+  exit 1
+}
 [[ "$tdir_ran" -eq "$tdir_total" && "$tdir_total" -gt 0 ]] || {
   echo "FAIL: ran $tdir_ran of $tdir_total files under agent-node/tests" >&2
   exit 1
@@ -93,7 +123,10 @@ set -e
   echo "FAIL: attachment wiring mutation survived" >&2
   exit 1
 }
-grep -Fq 'the inbox choke point feeds the augmented text into processTask' /tmp/test725-mutation.log || {
+# 🔴 锚在 (fail) 行:bun test 对每个用例都打 `(pass) <名字>` / `(fail) <名字>`,
+# 只 grep 名字的话那条用例**通过**时也会命中,断言就只证明了它存在。
+# A/B 见 #798:松版会收下一个根本没打中指名行为的 mutation。
+grep -Eq '^\(fail\).*the inbox choke point feeds the augmented text into processTask' /tmp/test725-mutation.log || {
   cat /tmp/test725-mutation.log
   echo "FAIL: mutation red did not reach the named wiring assertion" >&2
   exit 1

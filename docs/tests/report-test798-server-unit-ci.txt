@@ -1,21 +1,20 @@
 # test798 —— server 聚合单测门
-source_commit=46e752c3d9815a31902c5cc0a57b34deb898ffa2
+source_commit=2617987e75a6d5f3c0af3abc41709fad20176960
 base(current main)=034f00647d42d38d5086d7fc057eb7824a441791
+本文件是该源码提交的 report-only 子提交;锚定源码提交,与 PR 的 virtual-merge SHA 不同。
 
-锚点即被测代码那一版:本文件是它的 report-only 子提交。
-早先两份报告的锚点分别是 92d96129… 和 ecf4679c…(此处刻意不写成 key=value 形式),
-都不是当时的分支 head —— 前者是我把 --build-arg 传成了 origin/main,后者是 rebase 后失效。
+## 三个 mutation 维度(全部双向验过)
+① 削弱被测代码:auth.ts 密码下限 < 8 → < 1 ⇒ MUTATION_RED,且断言锚在 (fail) 行
+② 断言宽容度:把命名断言指向一条该 mutation 下不会红的用例
+   松版 grep -Fq '<名字>' → rc=0 RESULT: PASS(收下不合规);严版 ^\(fail\).* → rc=1
+③ 分母缩水:删 59/69 个测试文件(保留 mutation 靶点所在文件)
+   加下限前 → test_files=10 executed=10 failed=0 MUTATION_RED RESULT: PASS(rc=0)
+   加下限后 → rc=1 FAIL: only 10 server test file(s) under src/, floor is 60
 
-## 落地前那两轮红(没有一条是产品缺陷)
-第一版(共享 DB、cwd=server/)895 pass / 6 fail:5 条 harness(缺 agent-node/src/shared)、
-1 条 cwd 契约(process.cwd() 拼 ./server/src/db.js)、3 条缺 test601 race-worker、余下共享 DB 污染。
-第二版(逐文件独立 DB)红的换成另外 2 个、与第一版不相交(跨包 import reply-reliability / inbox-dispatch)。
-补齐后 69/69 全绿。
-
-## 本次输出
+## 本次输出(在真源码提交上重跑)
 ```
 # test798 — complete server unit domain
-source_commit=46e752c3d9815a31902c5cc0a57b34deb898ffa2
+source_commit=2617987e75a6d5f3c0af3abc41709fad20176960
 bun=1.3.14 node=v22.23.2 uid=1000
 commhub_db=/tmp/test798-server-unit.db
 test_files=69

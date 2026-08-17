@@ -8,14 +8,14 @@
 
 ## 0. TL;DR
 
-飞书 bot = agent-node fork 一个 worker，用飞书 `@larksuiteoapi/node-sdk` 的 **WSClient 长连接**收事件，跑在 **claude-agent-sdk** runtime。当前生产实例：
+飞书 bot = agent-node fork 一个 worker，用飞书 `@larksuiteoapi/node-sdk` 的 **WSClient 长连接**收事件，跑在 **claude-agent-sdk** runtime。当前生产实例（**as-of 2026-07-01 部署快照** — 生产真机版号请到部署机 `docker exec anet-feishu-local anet -v` 复核；本页 IM 运维交接后写死数已过期风险高）：
 
 | 项 | 值 |
 |---|---|
 | 容器 | `anet-feishu-local`（docker，CMD 靠 entrypoint + `tail -f`） |
 | 节点 alias | `TMWork小助手`（**唯一** feishu 连接；2026-07-01 从 `feishu-local` 改的，见 §12 rename history） |
-| agent-network | `2.3.0-preview.17`（含 #362 inbound file download + 官方 #324 图片修复） |
-| agent-node | `2.5.0-preview.16` |
+| agent-network | `2.3.0-preview.17`（部署时值，含 #362 inbound file download + 官方 #324 图片修复；当前 preview 头 2026-08-17 快照为 `2.3.0-preview.39`，见 [`release-plan.md`](../plans/release-plan.md)） |
+| agent-node | `2.5.0-preview.16`（部署时值；当前 preview 头 2026-08-17 快照为 `2.5.0-preview.31`） |
 | 补丁 | **无**（跑官方发布版） |
 | app | `<cli_...>`（TMWork小助手） |
 | model | `MiniMax-M3`，endpoint `https://api.minimaxi.com/anthropic` |

@@ -11,17 +11,17 @@ set -euo pipefail
 
 ROOT=/workspace
 SOURCE_COMMIT=${TEST798_SOURCE_COMMIT:-}
-# 🔴 光验格式不够:任何 40 位十六进制都能通过,而报告里那个 SHA 可能根本不含
-#    镜像里被测的文件。审查指出提交进来的 report 就写着一个早于本套件自身的
-#    修订号 —— 那份证据无法从它自称的版本复现。
-#    做法(与 test823 同):构建时把 run.sh 在该 commit 下的 git blob 哈希作为
-#    build-arg 传入,这里就地重算镜像内文件的 blob 哈希并比对。
-#    blob 哈希 = sha1("blob <len>\0" + 内容),不需要容器里装 git。
 [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
   echo "FAIL: SOURCE_COMMIT must be one full lowercase Git SHA" >&2
   exit 1
 }
 
+# 🔴 光验 SOURCE_COMMIT 的格式不够:任何 40 位十六进制都能通过,而那个 SHA 可能
+# 根本不含镜像里被测的文件 —— 提交进仓的 report 就出现过写着一个早于套件自身的
+# 修订号,那份证据无法从它自称的版本复现。
+# 做法(与 test823 同):构建时把 run.sh 在该 commit 下的 git blob 哈希作为
+# build-arg 传进来,这里就地重算镜像内文件的 blob 哈希并比对。
+# blob 哈希 = sha1("blob <len>\0" + 内容),容器里不需要装 git。
 RUNSH_BLOB=${TEST798_RUNSH_BLOB:-}
 [[ "$RUNSH_BLOB" =~ ^[0-9a-f]{40}$ ]] || {
   echo "FAIL: TEST798_RUNSH_BLOB 缺失或格式不对 —— 无法把 SOURCE_COMMIT 绑到被测字节" >&2
@@ -51,8 +51,21 @@ echo "commhub_db=$COMMHUB_DB"
 
 test_files=$(find "$ROOT/server/src" -type f -name '*.test.ts' | wc -l | tr -d ' ')
 echo "test_files=$test_files"
-[[ "$test_files" -gt 0 ]] || {
-  echo "FAIL: server test-file denominator is empty" >&2
+# 🔴 绝对下限,不是 > 0。`executed >= discovered` 只能抓「runner 跳过了文件」,
+# 抓不到「文件消失了」—— 分母会跟着现实自动缩水。
+# 实测:删掉 69 个里的 59 个(保留 mutation 靶点所在的 auth-validate),
+# 这道门报 test_files=10 / executed=10 / failed=0 / MUTATION_RED / RESULT: PASS,
+# rc=0 —— 也就是放行了一个删掉 85% server 单测的改动。
+#
+# 下限要**故意**改:真删了测试就在这里调,并在 PR 里说明为什么。
+# 合并 main 时重算:本 PR 写下时 server/src 有 69 个,现在是 72(#798 之后又进了
+# rest-write-network-resolution 等)。floor 60 对 72 意味着**可以静默删掉 12 个**——
+# 而删测试正是这道门唯一挡得住的事。floor 抬到 70:留 2 个的合并余量,再多就必须
+# 在 PR 里显式改这一行。
+SERVER_TEST_FLOOR=70
+[[ "$test_files" -ge "$SERVER_TEST_FLOOR" ]] || {
+  echo "FAIL: only $test_files server test file(s) under src/, floor is $SERVER_TEST_FLOOR" >&2
+  echo "      若确实删除/迁移了测试,请连同本 floor 一起改,并在 PR 里说明。" >&2
   exit 1
 }
 
@@ -131,7 +144,13 @@ set -e
   exit 1
 }
 # 红必须落在指名的那条行为上,而不是红在导入失败之类的别处。
-grep -Fq 'rejects 7-char password' /tmp/test798-mutation.log || {
+#
+# 🔴 必须锚在 (fail) 行上。bun test 对每个用例都打 `(pass) <名字>` 或
+# `(fail) <名字>` —— 只 grep 名字的话,那条用例**通过**时也会命中,
+# 断言就只证明了「这条用例存在」,而不是「红落在它身上」。
+# 这是宽容断言:配上 mutation_rc != 0 看起来很像样,但如果 mutation 实际
+# 打红的是别的用例,这一对断言照样全过。
+grep -Eq '^\(fail\).*rejects 7-char password' /tmp/test798-mutation.log || {
   cat /tmp/test798-mutation.log
   echo "FAIL: mutation red did not reach the named password-floor assertion" >&2
   exit 1
