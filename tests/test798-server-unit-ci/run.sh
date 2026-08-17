@@ -39,7 +39,11 @@ echo "test_files=$test_files"
 # rc=0 —— 也就是放行了一个删掉 85% server 单测的改动。
 #
 # 下限要**故意**改:真删了测试就在这里调,并在 PR 里说明为什么。
-SERVER_TEST_FLOOR=60
+# 合并 main 时重算:本 PR 写下时 server/src 有 69 个,现在是 72(#798 之后又进了
+# rest-write-network-resolution 等)。floor 60 对 72 意味着**可以静默删掉 12 个**——
+# 而删测试正是这道门唯一挡得住的事。floor 抬到 70:留 2 个的合并余量,再多就必须
+# 在 PR 里显式改这一行。
+SERVER_TEST_FLOOR=70
 [[ "$test_files" -ge "$SERVER_TEST_FLOOR" ]] || {
   echo "FAIL: only $test_files server test file(s) under src/, floor is $SERVER_TEST_FLOOR" >&2
   echo "      若确实删除/迁移了测试,请连同本 floor 一起改,并在 PR 里说明。" >&2

@@ -14,8 +14,16 @@ ADMIN_PASSWORD='Test384-Strong-Password!'
 LIVE_ALIAS=wizard-openai
 FREE_MODEL="${OPENCODE_FREE_MODEL:-opencode/deepseek-v4-flash-free}"
 EXPECTED_OPENCODE="${OPENCODE_VERSION_UNDER_TEST:-1.18.1}"
-EXPECTED_NETWORK="${AGENT_NETWORK_VERSION_UNDER_TEST:-2.3.0-preview.39}"
-EXPECTED_NODE="${AGENT_NODE_VERSION_UNDER_TEST:-2.5.0-preview.31}"
+# 默认值从源码常量派生,不写死:release 升常量时这里跟着走,不需要有人记得改。
+# (2026-08-17:走 RELEASE-SOP 的 preview.40 dry-run 时发现 sync 脚本不碰这个文件,
+#  于是照 SOP 发版会让这里默认测到上一个版本 —— 测的是旧产物,却看起来在测新版。)
+PAIR_SRC=/repo/agent-network/src/opencode-agent-node-pair.ts
+SRC_NETWORK=$(sed -n 's/^export const OPENCODE_AGENT_NETWORK_VERSION = "\([^"]*\)";$/\1/p' "$PAIR_SRC" 2>/dev/null)
+SRC_NODE=$(sed -n 's/^export const OPENCODE_AGENT_NODE_VERSION = "\([^"]*\)";$/\1/p' "$PAIR_SRC" 2>/dev/null)
+EXPECTED_NETWORK="${AGENT_NETWORK_VERSION_UNDER_TEST:-${SRC_NETWORK}}"
+EXPECTED_NODE="${AGENT_NODE_VERSION_UNDER_TEST:-${SRC_NODE}}"
+[ -n "$EXPECTED_NETWORK" ] || { echo "FAIL: cannot resolve expected agent-network version" >&2; exit 1; }
+[ -n "$EXPECTED_NODE" ]    || { echo "FAIL: cannot resolve expected agent-node version" >&2; exit 1; }
 REAL_PATH="$PATH"
 FAKE_BIN_DIR=/test384/fake-bin
 FAKE_CANONICAL_BIN=/test384/fake-global/node_modules/opencode-ai/bin/opencode.exe
