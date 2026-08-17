@@ -23,9 +23,22 @@ expected = os.environ["EXPECTED_VERSION"]
 found = []
 bad = []
 
+# Match the ACTION, not one particular ref of it. This used to compare against
+# the literal "oven-sh/setup-bun@v2", so SHA-pinning the action (a separate,
+# desirable change) made this find zero occurrences and fail — the guard could
+# not tell "the pin was removed" from "the pin was written differently".
+#
+# It failing closed on zero was right; matching on the ref was not. This guard
+# owns ONE fact: every setup-bun invocation carries the expected bun-version.
+# Whether the action itself is SHA-pinned is a different fact, owned by
+# .github/scripts/check-action-pins.py. One guard, one fact — two guards on the
+# same fact drift apart, and then one of them is wrong and still green.
+SETUP_BUN = "oven-sh/setup-bun@"
+
 def walk(value, path):
     if isinstance(value, dict):
-        if value.get("uses") == "oven-sh/setup-bun@v2":
+        uses = value.get("uses")
+        if isinstance(uses, str) and uses.startswith(SETUP_BUN):
             version = (value.get("with") or {}).get("bun-version")
             found.append((path, version))
             if str(version) != expected:
