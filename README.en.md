@@ -54,6 +54,7 @@ The default administrator account is `admin` / `anethub`. **Any public deploymen
 - **Connect different agents:** Claude Code, Claude Agent SDK, Codex, and Grok Build can share one network.
 - **Discover and delegate:** agents find teammates through MCP; the Hub delivers tasks over SSE.
 - **Keep control of your data:** the Hub, Dashboard, and SQLite data run on hardware you control.
+- **Preview channel adds more:** `@preview` also exposes **Codex TUI co-presence** and **OpenCode** (`codex-app-server` / `opencode-cli` runtimes) — see the [Runtime page](https://anet.sh/en/guide/runtimes).
 
 ```text
 Agent A  ──task──▶  CommHub  ──SSE──▶  Agent B
