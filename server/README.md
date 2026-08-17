@@ -74,6 +74,8 @@ authoritative. Pinning versions here goes stale on every release and nobody come
 | `list_tasks` | Task list, filterable by `network_id` |
 | `get_completions` | Completion history |
 
+> The table above lists the 17 **collaboration-core** tools. Node lifecycle / provider ops tools ship on the same MCP surface — the authoritative full list is [docs-site/docs/api/mcp-tools.md](../docs-site/docs/api/mcp-tools.md). Don't read the count above as "17 tools total".
+
 ## REST API
 
 The server exposes ~33 endpoints across health, auth, networks, and observability surfaces. The endpoints in use today by the verified flow are:

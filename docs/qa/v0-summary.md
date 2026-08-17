@@ -7,7 +7,7 @@
 
 **16 条 R 系列 QA 测试 + CI workflow 上线 + 11 条 SDK 设计 finding 抠出。**
 3 persona 用户视角包圆（CLI / commhub / dashboard），1 persona 用户视角 4/6（agent-node），代码视角 3/5。
-本地一键跑 ~93s，CI ~40s。不改任何业务代码。
+本地一键跑 ~93s（**2026-05 首次测量的墙钟值**；下面逐条表串行相加是 156s，差额来自并行。你这台机上的真值跑 `time bash scripts/qa.sh`），CI ~40s。不改任何业务代码。
 
 ## 测试库（16 条 R 系列 + 历史保护资产）
 
