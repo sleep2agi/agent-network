@@ -162,13 +162,25 @@ restore2() { cp /tmp/victim2.bak "$VICTIM2"; }
 
 # ① 钉了不可变 SHA 的引用不属于这道门 —— 注入一个"在 HEAD 上必然越界"的 SHA pin,
 #    门必须**仍然绿**(它管的是会漂的 main 引用,不是历史链接)。
+#
+# 🔴 断言的是**增量**,不是绝对值。原来这里写死 `pins_on_immutable_ref=1`,
+#    那只在「仓里一条钉 SHA 的引用都没有」时成立 —— 写下它的时候确实成立,
+#    所以它当时是对的。2026-08-18 之后仓里有 6 条(#851 三条 ×2 语言、#834
+#    一条 ×2 语言),注入第 7 条,写死的 1 就红了 —— 而红的原因是**别人按这
+#    道门的建议把行号 pin 钉成了提交**,也就是它自己想要的进展。
+#
+#    一个「只有在某个背景事实恰好为 0 时才成立」的断言,和一个正确的断言,
+#    在当时的输出上完全一样。所以先量基线,再断言恰好 +1。
+base_imm=$(python3 "$CHECK" "$ROOT" 2>/dev/null | sed -nE 's/^pins_on_immutable_ref=([0-9]+)$/\1/p')
+[[ -n "$base_imm" ]] || fail "① 拿不到注入前的 pins_on_immutable_ref 基线"
 printf '\n[sha](https://github.com/sleep2agi/agent-network/blob/0123456789abcdef0123456789abcdef01234567/server/src/index.ts#L99999)\n' >> "$VICTIM2"
 set +e; out5=$(python3 "$CHECK" "$ROOT" 2>&1); rc5=$?; set -e
 restore2
 [[ "$rc5" -eq 0 ]] || fail "① 钉 SHA 的引用被当成漂移失效了(rc=$rc5)—— 那会惩罚按本工具建议做出的修改"
-printf '%s' "$out5" | grep -q "pins_on_immutable_ref=1" \
-  || fail "① 钉 SHA 的引用没有被单独计数:$(printf '%s' "$out5" | grep pins_on_immutable || true)"
-echo "  ① 不可变 ref 被排除且单独计数(pins_on_immutable_ref=1),门仍绿"
+after_imm=$(printf '%s' "$out5" | sed -nE 's/^pins_on_immutable_ref=([0-9]+)$/\1/p')
+[[ "$after_imm" -eq $((base_imm + 1)) ]] \
+  || fail "① 钉 SHA 的引用没有被单独计数:注入前 $base_imm,注入后 $after_imm(应为 $((base_imm + 1)))"
+echo "  ① 不可变 ref 被排除且单独计数(${base_imm} → ${after_imm}),门仍绿"
 
 # ② #L0 必须判成越界。第一版只挡上界,content[-1] 会读到最后一行。
 printf '\n[zero](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L0)\n' >> "$VICTIM2"
