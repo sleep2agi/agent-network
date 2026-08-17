@@ -98,6 +98,7 @@ import { parseTokenCreateName } from "../src/token-cli";
 import { findExactTmuxSession, parseTmuxSessions } from "../src/tmux-attach";
 import { classifyPanePrompt, extractStartFailureReason } from "../src/tmux-pane-prompt";
 import { describeUnsafePath } from "../src/unsafe-package-path-reason";
+import { describeUmaskRisk, judgeUmask, rejectedPayloads } from "../src/package-mode-preflight";
 import { diagnoseLocale, formatLocaleSource } from "../src/locale-diagnostic";
 import {
   formatSecretAssignment,
@@ -13069,6 +13070,39 @@ async function migrateNode(id: string, opts: { hub: string; utok: string; networ
   return { ok: true, changes };
 }
 
+// Read the process umask without leaving it changed: POSIX only exposes it via
+// a set-and-return call, so set it to something arbitrary, keep the old value,
+// and immediately put it back.
+function readProcessUmask(): number {
+  const previous = process.umask(0o022);
+  process.umask(previous);
+  return previous;
+}
+
+// Payloads npm/npx already extracted for @sleep2agi/agent-node. Read-only scan
+// of local caches; doctor must never fetch, so an empty result means "nothing
+// extracted yet", not "safe".
+function findExtractedAgentNodePayloads(): { path: string; uid: number; mode: number }[] {
+  const roots: string[] = [];
+  const npxRoot = join(homedir(), ".npm", "_npx");
+  if (existsSync(npxRoot)) {
+    for (const entry of readdirSync(npxRoot)) {
+      roots.push(join(npxRoot, entry, "node_modules", "@sleep2agi", "agent-node"));
+    }
+  }
+  const out: { path: string; uid: number; mode: number }[] = [];
+  for (const root of roots) {
+    for (const rel of [["dist", "cli.js"], ["package.json"]]) {
+      const path = join(root, ...rel);
+      try {
+        const st = statSync(path);
+        if (st.isFile()) out.push({ path, uid: st.uid, mode: st.mode });
+      } catch { /* not extracted here */ }
+    }
+  }
+  return out;
+}
+
 async function doctorCommand() {
   const fix = args.includes("--fix");
   console.log(`\nanet doctor — System Diagnostic${fix ? " (auto-fix mode)" : ""}\n`);
@@ -13093,6 +13127,29 @@ async function doctorCommand() {
       "System locale",
       `${source} is not UTF-8; Unicode aliases and tmux output may be corrupted. Fix: export LANG=C.UTF-8 LC_ALL=C.UTF-8`,
     );
+  }
+
+  // The grok-build-cli / opencode-cli payload check refuses any resolved
+  // agent-node whose mode has a group- or other-write bit. npm creates files
+  // as `0o666 & ~umask`, so a stock Debian/Ubuntu umask of 0002 guarantees
+  // 0775/0664 and guarantees the refusal — which surfaces to the operator as
+  // "Incompatible grok-build-cli runtime" and says nothing about umask. Say it
+  // here, before anyone spends an evening on it. Local state only: the process
+  // umask plus whatever is already extracted; doctor never fetches.
+  const umaskVerdict = judgeUmask(readProcessUmask());
+  const umaskRisk = describeUmaskRisk(umaskVerdict);
+  if (umaskRisk) warning("Package file modes", umaskRisk);
+  const extracted = findExtractedAgentNodePayloads();
+  const rejected = rejectedPayloads(extracted, process.getuid?.() ?? 0);
+  if (rejected.length > 0) {
+    warning(
+      "Resolved agent-node payload",
+      `${rejected.length} already-extracted file(s) would be rejected right now, e.g. ` +
+      `${rejected[0].path} (mode ${(rejected[0].mode & 0o777).toString(8)}). ` +
+      `Fix: chmod -R g-w,o-w ${dirname(dirname(rejected[0].path))}`,
+    );
+  } else if (extracted.length > 0) {
+    check("Resolved agent-node payload", true, `${extracted.length} file(s) pass the mode check`);
   }
 
   // 2. Hub connectivity
