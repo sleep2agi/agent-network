@@ -20,7 +20,11 @@ module.exports = {
       interpreter: "bash",
       exec_mode: "fork",
       autorestart: true,
-      min_uptime: 20_000,
+      // min_uptime 必须大于「进程失败退出所需时间」。低于它，PM2 会把这次启动
+      // 算成功、不计入失败，backoff 永不触发 —— 崩溃循环看起来像正常重启。
+      // 这里原本是 20_000，比 docs-site/docs/deploy/daemon.md 记录的 45000 小，
+      // 照本仓重建出来的 dashboard 会正好落进那个盲区。对齐到 45000。
+      min_uptime: 45000,
       max_restarts: 20,
       exp_backoff_restart_delay: 200,
     },
