@@ -658,7 +658,7 @@ v0.10.4 Vincent 紧急 ship 跳过 测试团队 Docker smoke gate（不在生产
 - `HostTelemetry` interface 加 `disk_total_gb` / `disk_used_gb` / `disk_avail_gb`，`getHostTelemetry()` 通过 `toGb()` 同 mem/cpu 同 path 合成
 - **Backward compat**：老 server 端 schema silent-drop unknown keys；agent / server 可独立升
 
-接 [RFC-014](https://github.com/sleep2agi/agent-network/issues/99) — `/api/server/:host/health` 响应现在带 disk 三字段 + 24h 分桶 history 也含 `disk_avail_min` / `disk_used_max`；`alert_level` 加 `disk < 1GB critical / < 5GB warn` 触发（[`server/src/index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)（当时在 253-258 行；行号已漂，按当时的符号名搜））。
+接 [RFC-014](https://github.com/sleep2agi/agent-network/issues/99) — `/api/server/:host/health` 响应现在带 disk 三字段 + 24h 分桶 history 也含 `disk_avail_min` / `disk_used_max`；`alert_level` 加 `disk < 1GB critical / < 5GB warn` 触发（[`server/src/index.ts:253-258`](https://github.com/sleep2agi/agent-network/blob/22ed1886/server/src/index.ts#L253)，钉在当时的提交 `22ed1886`；该文件此后已被拆分，main 上只剩 16 行，所以这里不指向 main）。
 
 测试团队 Docker Linux smoke 3/3 PASS（disk 299.8 GB total / 216 used / 71.5 avail，alert green，backward compat verified）。
 
