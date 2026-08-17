@@ -13,6 +13,7 @@
  */
 
 import { readFileSync, existsSync } from "fs";
+import { OUTBOUND_TOOL_NAMES } from "./outbound-tool-names";
 import { randomUUID } from "crypto";
 import { join } from "path";
 import { hostname } from "os";
@@ -169,12 +170,6 @@ const mcp = new Server(
 );
 
 // ── Tools ───────────────────────────────────────────
-const OUTBOUND_TOOL_NAMES = new Set([
-  "commhub_send_task",
-  "commhub_send_message",
-  "commhub_get_all_status",
-  "commhub_upload_file",
-]);
 
 mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
