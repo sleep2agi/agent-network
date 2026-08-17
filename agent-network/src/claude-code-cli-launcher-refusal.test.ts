@@ -65,9 +65,14 @@ describe("#909 claude-code-cli is refused AT THE LAUNCHER, before agent-node is 
     // The refusal is the launcher's own #909 branch…
     expect(r.out).toContain("#909");
     expect(r.out).toContain("provisioned here"); // unique to bin/cli.ts's assertStartCompatibility branch
-    // …and agent-node was NOT spawned: neither its generic typo error nor its OWN #909 wording appears.
-    // Removing the launcher branch flips both of these (early-return → launchAgent → agent-node wording).
+    // …and agent-node was NOT spawned. 🔴 The robust check is STRUCTURAL, not wording-coupled
+    // (通信龙): agent-node prefixes ALL its output with `[<ALIAS>]`; the launcher uses `[anet]` (and
+    // names the node only in quotes, `"p909launcher"`). So if agent-node started at all, the bracketed
+    // `[p909launcher]` prefix appears. This survives any future rewording of agent-node's messages —
+    // notably step 2, when the lane is built and agent-node's #909 wording changes; a negative assertion
+    // coupled to that wording would silently go green there while agent-node was in fact spawned.
+    expect(r.out).not.toContain("[p909launcher]");
+    // belt: agent-node's generic typo error is stable-shaped, so keep it too.
     expect(r.out).not.toContain(`Unsupported runtime "claude-code-cli"`);
-    expect(r.out).not.toContain("provisioned by `anet`");
   }, 45_000);
 });
