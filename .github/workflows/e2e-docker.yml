@@ -1,7 +1,23 @@
 name: Docker E2E Tests
 
 on:
+  # 🔴 `branches: [main]` 不是可选的装饰 —— 没有它,这个 workflow 会在**任何**分支
+  # 的 push 上跑,于是每个 PR 都跑两遍:一遍 push、一遍 pull_request。
+  #
+  # 实测(2026-08-17,同一分支 fix/909-help-text-agent-node):run #2327 与 #2328
+  # 是同一个 commit 的两次完整 e2e,各约 10 分钟,结论相同。
+  #
+  # 三个代价:
+  #   1. 全仓最贵的 job 跑两遍;
+  #   2. PR 的等待时间由「最慢的一次」变成「两次都跑完」——合并前要多等一轮;
+  #   3. 两次都产出名为 `e2e` 的 check,**分支保护的 required check 只能按名字指定**,
+  #      两个同名 run 让「哪一个必须绿」无法确定。这和 #916 修掉的四个 job 都叫
+  #      `scan` 是同一类问题,只是这次重名发生在同一个 workflow 的两个触发器之间。
+  #
+  # 仓里其它 workflow(qa.yml / action-pins.yml / lint-from-session.yml …)的 push
+  # 触发器全部写了 `branches: [main]`,只有这个漏了。
   push:
+    branches: [main]
     paths:
       - 'agent-network/**'
       - 'agent-node/**'
