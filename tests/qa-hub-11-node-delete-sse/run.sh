@@ -41,6 +41,21 @@ register_user() {
     -d "{\"username\":\"$username\",\"password\":\"$password\"}"
 }
 
+# #203/#376 之后,report_status 的 alias 必须与 token 绑定的 alias 一致
+# (server.ts:733 从 api_tokens.name='node:<alias>' 推导 callerAlias;
+#  注册时拿到的 network_token 名字不是 node:…，会回落成**用户名**，
+#  于是用它上报任意 alias 一律 alias_identity_mismatch)。
+# 所以每个要上报的 alias 都得先铸一个属于它自己的 node token。
+# 取法与已注册且长期绿的 qa-hub-05-roundtrip 完全一致。
+node_token() {
+  local utok="$1" net="$2" alias="$3" tok
+  tok=$(curl -fsS -X POST "$HUB_BASE/api/auth/node-token" \
+    -H "Authorization: Bearer $utok" -H 'Content-Type: application/json' \
+    -d "{\"network_id\":\"$net\",\"node_name\":\"$alias\"}" | jq -r '.token // empty')
+  [[ "$tok" == ntok_* ]] || { echo "FAIL: node_token($alias) shape wrong: $tok" >&2; exit 1; }
+  printf '%s' "$tok"
+}
+
 wait_for_log() {
   local pattern="$1" file="$2" label="$3"
   for _ in {1..30}; do
@@ -88,8 +103,12 @@ ARG_A=$(jq -nc --arg net "$NET_A" \
   '{resume_id:"00000000-aaaa-bbbb-cccc-000000000074",alias:"delete-me",status:"idle",network_id:$net,node_id:"node-a-74",node_name:"delete-me",agent:"agent-node:claude-agent",model:"test-model"}')
 ARG_B=$(jq -nc --arg net "$NET_B" \
   '{resume_id:"00000000-aaaa-bbbb-cccc-000000000075",alias:"delete-me",status:"idle",network_id:$net,node_id:"node-b-74",node_name:"delete-me",agent:"agent-node:claude-agent",model:"test-model"}')
-RS_A=$(mcp_call "$NTOK_A" "report_status" "$ARG_A")
-RS_B=$(mcp_call "$NTOK_B" "report_status" "$ARG_B")
+# 同一 alias 在两个网络各产生一条独立 node 行 —— 本套件要测的语义。
+# #203 之后每个网络里的那个同名节点要各自持有自己的 token(见 node_token 注释)。
+NODE_TOK_A=$(node_token "$UTOK_A" "$NET_A" "delete-me")
+NODE_TOK_B=$(node_token "$UTOK_B" "$NET_B" "delete-me")
+RS_A=$(mcp_call "$NODE_TOK_A" "report_status" "$ARG_A")
+RS_B=$(mcp_call "$NODE_TOK_B" "report_status" "$ARG_B")
 echo "$RS_A" | jq -e '.ok == true' >/dev/null || { echo "FAIL: report_status A: $RS_A"; exit 1; }
 echo "$RS_B" | jq -e '.ok == true' >/dev/null || { echo "FAIL: report_status B: $RS_B"; exit 1; }
 

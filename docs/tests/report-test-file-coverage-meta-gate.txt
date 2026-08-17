@@ -1,0 +1,30 @@
+# 元门 check-test-file-coverage.py
+source_commit=9626c98e4d301d88822cbb3031753fd94a946ed8
+base(current main)=034f00647d42d38d5086d7fc057eb7824a441791
+stack: 含 #798 与 #800 的源码
+
+## 基线
+tracked_test_files=236
+  covered  agent-network/src      46
+  covered  agent-network/tests    19
+  covered  agent-node/src         91
+  covered  agent-node/tests       6
+  covered  server/src             69
+  suite-owned (tests/<suite>/)      5
+      tests/test224-grok-preview-security/security-gate.test.ts
+      tests/test597-dashboard-slash-namespace/cli-wire.test.ts
+      tests/test679-task-trace/wiring.test.ts
+      tests/test682-uncovered-task-trace/semantics.test.ts
+      tests/test682-uncovered-task-trace/wiring.test.ts
+
+OK: 236 个测试文件,231 个在聚合门范围内,5 个套件自带,0 个漏网
+rc=0
+
+## mutation(七条,全部双向验过)
+A 落在任何根之外的新文件                → rc=1 点名
+B find 范围改成 nonexistent             → rc=1「没有把 server/src 声明为扫描范围」
+C bun test src/ 收窄成单文件            → rc=1(加结尾锚定后才红,第一版活下来过)
+D 伪套件 tests/test999-example/         → rc=1;补 Dockerfile+run.sh 后 rc=0
+E 子目录 agent-network/tests/sub/       → rc=1;直属文件 rc=0(独立审抓出的,不是我自己发现的)
+F1 删掉 server-unit 的 docker run       → rc=1「构建了但没有 docker run 它」
+F2 build -f 路径改名                     → rc=1「没有 build tests/…/Dockerfile」

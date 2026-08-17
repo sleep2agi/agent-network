@@ -26,26 +26,30 @@ agent-network/
 └── README.md
 ```
 
+> ⚠️ 上面这棵目录树写于 V2 早期，**已不完整**（例如未列 `dist/bin/cli.cjs`、preview 期新增的 runtime 拆分文件等）。**以仓库当前实际布局为准**（`git ls-tree HEAD -- agent-network/`），本树只作历史背景。
+
 **设计原则**：client.ts 是核心（零外部依赖），server.ts 是薄包装（委托给 `../../server/src/index.ts`），cli.ts 是粘合层。
 
-### 四个 runtime
+### Runtime 列表
 
-Profile 的 `runtime` 字段有四个取值。其中 **`claude-agent-sdk` / `codex-sdk` / `grok-build-acp` 由 `@sleep2agi/agent-node` 驱动**（agent-node 的 `RUNTIME_MAP` 见 `agent-node/src/cli.ts`）；**`claude-code-cli` 不走 agent-node** —— `anet node start` 直接 spawn 本机 `claude` 二进制：
+Profile 的 `runtime` 字段：**stable 4 runtime + preview 额外 2 runtime**。**`claude-agent-sdk` / `codex-sdk` / `grok-build-acp` / `codex-app-server` / `opencode-cli` 由 `@sleep2agi/agent-node` 驱动**（`RUNTIME_MAP` 见 `agent-node/src/cli.ts`）；**`claude-code-cli` 不走 agent-node** —— `anet node start` 直接 spawn 本机 `claude` 二进制。**权威表（stable + preview）以 [anet.sh/guide/runtimes](https://anet.sh/guide/runtimes) 为准**，下面只作背景速览：
 
-| Runtime | 说明 | 模型 |
+| Runtime | 通道 | 说明 |
 |------|------|------|
-| `claude-agent-sdk`（**默认**） | Anthropic Claude Agent SDK + Anthropic 兼容 API | Claude / MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter 等（完整 provider 表见 [anet.sh / multi-model](https://anet.sh/guide/multi-model)） |
-| `codex-sdk` | OpenAI Codex SDK | OpenAI Codex（最新 model id 查官方文档） |
-| `claude-code-cli` | Claude Code CLI（要 Claude Pro 订阅） | Claude（通过本地 CLI 调用） |
-| `grok-build-acp` | xAI Grok Build ACP server（spawn 本机 `grok` 二进制 + ACP 协议） | xAI Grok（grok-build 系列；[详细 runtime 指南 ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)） |
+| `claude-code-cli` | stable | Claude Code CLI（用本机 Claude Pro/Team/Max 订阅，零配置最稳） |
+| `claude-agent-sdk` | stable | Anthropic Agent SDK + 任意 Anthropic 兼容 endpoint（provider 表见 [anet.sh / multi-model](https://anet.sh/guide/multi-model)） |
+| `codex-sdk` | stable | OpenAI Codex SDK（`codex login`） |
+| `grok-build-acp` | stable | xAI Grok Build ACP server（`grok login`） |
+| `codex-app-server` | preview | Codex app-server 桥接（RFC-030 in-flight） |
+| `opencode-cli` | preview | OpenCode CLI 共存（RFC-029 in-flight） |
 
-Profile 中通过 `runtime` 字段选择。早期文档里的 `claude-code` / `codex` / `agent-sdk` 已重命名（doctor `anet doctor --fix` 自动迁移）。
+早期文档里的 `claude-code` / `codex` / `agent-sdk` 已重命名（`anet doctor --fix` 自动迁移）。
 
 > R268 校准：原本这里另列了一段 4 行「支持的模型列表」(MiniMax M2.7 / 书生 Intern-S1-Pro / Claude / Codex)，跟上方 runtime 表重复且写死了 `M2.7` 这种快速 rotate 的版本号（违反 R175/R245/R253/R257 chain「doc 不 pin model 版本」规则）。删；完整 provider × runtime 列表见上表 + [anet.sh / multi-model](https://anet.sh/guide/multi-model)。
 
 ### 隔离策略
 
-agent-node 调 claude-agent-sdk 的 `query()` 时传 `settingSources: []`，隔离 SDK 防止读取用户全局配置（[`agent-node/src/cli.ts:558-598`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L558)）：
+agent-node 调 claude-agent-sdk 的 `query()` 时传 `settingSources: []`，隔离 SDK 防止读取用户全局配置（[`agent-node/src/cli.ts:558-598`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)）：
 
 ```typescript
 const options = {
