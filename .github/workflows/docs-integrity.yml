@@ -41,4 +41,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Collector first. If this gate stops seeing a whole spelling of relative
+      # link, the scan below still prints a count and still exits 0 — a false
+      # green byte-identical to a real one. That happened: bare `](file.md)`
+      # targets were invisible, and both broken links in scope were among them.
+      - run: python3 .github/scripts/check-docs-integrity.py --selftest
       - run: python3 .github/scripts/check-docs-integrity.py
