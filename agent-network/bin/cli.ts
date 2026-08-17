@@ -2431,6 +2431,20 @@ function assertStartCompatibility(runtime: RuntimeName) {
     return;
   }
 
+  // #909 — `claude-code-cli` is provisioned here (Claude Code CLI install + `claude auth login`
+  // + PATH check) but agent-node has NO execution lane for it yet. Refuse cleanly at start,
+  // BEFORE launchAgent spawns agent-node — otherwise the user installs the CLI, logs in, and then
+  // hits a bare "Unsupported runtime" from agent-node that is byte-identical to a typo. This also
+  // closes a gap in this very guard: its purpose is to stop an unsupported agent-node from silently
+  // selecting another runtime, yet the early-return below skipped the one provisioned runtime that
+  // most needed it (a guard existing and being wired is not the same as it firing on this input).
+  if (runtime === "claude-code-cli") {
+    console.error(`[anet] Runtime "claude-code-cli" is not yet implemented in agent-node (no execution lane) — known gap, see #909.`);
+    console.error(`[anet] It is provisioned here (Claude Code CLI + \`claude auth login\`), but starting a node with it is not wired yet.`);
+    console.error(`[anet] Use --runtime claude-agent-sdk for now.`);
+    process.exit(1);
+  }
+
   if (runtime !== "codex-sdk" && runtime !== "claude-agent-sdk") return;
 
   const versions = detectInstalledPackages();

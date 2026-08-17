@@ -451,6 +451,16 @@ const RUNTIME_MAP: Record<string, string> = {
   // `codex-app-server` (canonical) / `codex-tui` / `codex-appserver`.
   "codex-app-server": "codex-app-server", "codex-appserver": "codex-app-server", "codex-tui": "codex-app-server",
 };
+// #909 — `claude-code-cli` is provisioned by `anet` (it installs @anthropic-ai/claude-code
+// and requires `claude` in PATH) but has NO execution lane in agent-node yet. Report the gap
+// by name instead of the generic "Unsupported runtime" below, which is byte-identical to a typo
+// and sends users chasing a spelling error that isn't there. This is a distinct branch from
+// "unrecognized" on purpose: the fix for the missing lane is a separate step (a new bucket, not
+// an alias to "claude"=SDK, which would silently downgrade CLI-login users to the SDK channel).
+if (rawRuntime === "claude-code-cli") {
+  console.error(`[${ALIAS}] Runtime "claude-code-cli" is provisioned by \`anet\` but not yet implemented in agent-node (no execution lane). This is a known gap, not a typo — see #909. Use --runtime claude-agent-sdk for now.`);
+  process.exit(1);
+}
 if (!Object.prototype.hasOwnProperty.call(RUNTIME_MAP, rawRuntime)) {
   const supported = [...new Set(Object.keys(RUNTIME_MAP))].join(", ");
   console.error(`[${ALIAS}] Unsupported runtime "${rawRuntime}". Supported: ${supported}`);
