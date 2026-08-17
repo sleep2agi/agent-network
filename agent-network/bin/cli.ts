@@ -99,7 +99,7 @@ import { findExactTmuxSession, parseTmuxSessions } from "../src/tmux-attach";
 import { classifyPanePrompt, extractStartFailureReason } from "../src/tmux-pane-prompt";
 import { describeUnsafePath } from "../src/unsafe-package-path-reason";
 import { describeUmaskRisk, judgeUmask, rejectedPayloads } from "../src/package-mode-preflight";
-import { exactSession } from "../src/tmux-exact-target";
+import { exactSession, PANE_LIST_FORMAT, paneTargetFor } from "../src/tmux-exact-target";
 import { diagnoseLocale, formatLocaleSource } from "../src/locale-diagnostic";
 import {
   formatSecretAssignment,
@@ -143,6 +143,30 @@ function adminUtokPath() { return join(home, ".anet", "server", "admin-utok.json
 function dashboardLaunchRecordPath(port: string | number) { return join(home, ".anet", "server", `dashboard-${port}.json`); }
 function nodesDir() { return join(process.cwd(), ".anet", "nodes"); }
 function shellQuote(value: string): string { return `'${value.replace(/'/g, `'\\''`)}'`; }
+/**
+ * Pane target (`<session>:<window>.<pane>`) for a session, or null.
+ *
+ * 🔴 Do NOT use `=name` for capture-pane / send-keys. tmux 3.4 resolves `=name`
+ *    for session-targeting commands but not for pane-targeting ones when the
+ *    name is non-ASCII, and this fleet's session names are nearly all Chinese:
+ *
+ *      capture-pane -t '=zz中文探针'  → rc=1  can't find pane
+ *      capture-pane -t 'zz中文探针'   → rc=0
+ *
+ *    So the exact form for a pane is the coordinate, with the session matched by
+ *    string equality in our own code rather than by tmux's prefix rules.
+ */
+function tmuxPaneTarget(sessionName: string): string | null {
+  try {
+    const out = execFileSync("tmux", ["list-panes", "-a", "-F", PANE_LIST_FORMAT], {
+      encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"],
+    }).toString();
+    return paneTargetFor(out, sessionName);
+  } catch {
+    return null;  // no server / no panes
+  }
+}
+
 /** Kill a session and report whether it is actually gone afterwards. */
 function killTmuxSession(sessionName: string): boolean {
   try { execFileSync("tmux", ["kill-session", "-t", exactSession(sessionName)], { stdio: "pipe" }); } catch {}
@@ -212,7 +236,9 @@ function waitForTmuxPaneText(sessionName: string, needle: string, timeoutMs: num
   return new Promise((resolve) => {
     const poll = () => {
       try {
-        const out = execFileSync("tmux", ["capture-pane", "-t", exactSession(sessionName), "-p"], {
+        const paneTarget = tmuxPaneTarget(sessionName);
+        if (!paneTarget) return false;
+        const out = execFileSync("tmux", ["capture-pane", "-t", paneTarget, "-p"], {
           stdio: ["ignore", "pipe", "pipe"], encoding: "utf8",
         });
         if (out.includes(needle)) { resolve(true); return; }
@@ -780,10 +806,11 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
   if (!existsSync(attachScript)) {
     let tail = "";
     try {
-      tail = execFileSync("tmux", ["capture-pane", "-p", "-t", exactSession(bridgeSession), "-S", "-80"], {
+      const bridgePane = tmuxPaneTarget(bridgeSession);
+      tail = bridgePane ? execFileSync("tmux", ["capture-pane", "-p", "-t", bridgePane, "-S", "-80"], {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
-      }).slice(-3_000);
+      }).slice(-3_000) : "";
     } catch {}
     killTmuxSession(bridgeSession);
     console.error(`[anet] ❌ OpenCode copresence server did not produce its attach launcher within 30s.`);
@@ -7891,11 +7918,21 @@ async function dismissDevChannelPrompt(sessionName: string, timeoutMs: number): 
   let trustAnswered = false;
   while (Date.now() < deadline) {
     let pane = "";
+    // Resolve the pane coordinate each iteration: the session may not have a
+    // pane yet on the first poll, and a coordinate captured once could go stale.
+    const paneTarget = tmuxPaneTarget(sessionName);
+    if (!paneTarget) {
+      // No pane for this exact session — it has not appeared yet, or it exited.
+      // Keep waiting rather than declaring the prompt absent; the deadline ends
+      // the loop.
+      await new Promise(r => setTimeout(r, 1000));
+      continue;
+    }
     try {
       // Discard tmux's stderr: polling a session that has already exited is a
       // normal outcome here, and letting `can't find pane: X` through made the
       // CLI print an alarming line right before an unrelated verdict.
-      pane = execFileSync("tmux", ["capture-pane", "-p", "-t", exactSession(sessionName)], {
+      pane = execFileSync("tmux", ["capture-pane", "-p", "-t", paneTarget], {
         encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"],
       }).toString();
     } catch {
@@ -7905,7 +7942,7 @@ async function dismissDevChannelPrompt(sessionName: string, timeoutMs: number): 
     if (prompt === "folder-trust" && !trustAnswered) {
       // Settle briefly so Ink's input handler is fully attached, then accept.
       await new Promise(r => setTimeout(r, 700));
-      try { execFileSync("tmux", ["send-keys", "-t", exactSession(sessionName), "Enter"], { stdio: "ignore" }); } catch {}
+      try { execFileSync("tmux", ["send-keys", "-t", paneTarget, "Enter"], { stdio: "ignore" }); } catch {}
       trustAnswered = true;
       deadline = Date.now() + timeoutMs;  // fresh window for the prompt we came for
       await new Promise(r => setTimeout(r, 1000));
@@ -7915,7 +7952,7 @@ async function dismissDevChannelPrompt(sessionName: string, timeoutMs: number): 
       // Prompt is rendered and waiting. Settle briefly so Ink's input handler
       // is fully attached, then confirm with a single Enter.
       await new Promise(r => setTimeout(r, 700));
-      try { execFileSync("tmux", ["send-keys", "-t", exactSession(sessionName), "Enter"], { stdio: "ignore" }); } catch {}
+      try { execFileSync("tmux", ["send-keys", "-t", paneTarget, "Enter"], { stdio: "ignore" }); } catch {}
       return true;
     }
     await new Promise(r => setTimeout(r, 1000));
@@ -7927,7 +7964,9 @@ async function dismissDevChannelPrompt(sessionName: string, timeoutMs: number): 
 // on the failure path, where the pane holds the inner command's own words.
 function capturePaneReason(sessionName: string): string | null {
   try {
-    const pane = execFileSync("tmux", ["capture-pane", "-p", "-t", exactSession(sessionName)], {
+    const paneTarget = tmuxPaneTarget(sessionName);
+    if (!paneTarget) return null;  // session already reaped
+    const pane = execFileSync("tmux", ["capture-pane", "-p", "-t", paneTarget], {
       encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"],
     }).toString();
     return extractStartFailureReason(pane);
@@ -7940,11 +7979,25 @@ function capturePaneReason(sessionName: string): string | null {
 // claude-code-cli nodes (only those carry a `server:` channel and hit the
 // prompt), so `node start --all` / `project up|restart` stay zero-interaction.
 async function autoConfirmDevChannels(spawned: ProjectNode[]): Promise<void> {
-  const claudeNodes = spawned.filter(n =>
-    n.profile && normalizeRuntime(n.profile) === "claude-code-cli" &&
-    !!n.profile.channels?.some(c => c.startsWith("server:")));
-  if (claudeNodes.length === 0) return;
-  await Promise.all(claudeNodes.map(n => dismissDevChannelPrompt(n.alias, 45000)));
+  // What decides whether the prompt appears is the `server:` channel, NOT the
+  // runtime. This filter used to also require runtime === "claude-code-cli",
+  // which silently excluded every claude-agent-sdk node — and `claude-code`
+  // normalizes to claude-agent-sdk, so legacy-named nodes were excluded too.
+  // Those nodes then sat on the confirm box forever during `project up` /
+  // `node start --all`, with no watcher ever looking at them.
+  //
+  // The same file already had the correct predicate: the #494 warning on the
+  // `--tmux` path keys purely on `server:` channels with no runtime test. Two
+  // places deciding the same question, one of them narrower, and the narrow one
+  // was the one doing the work.
+  //
+  // Widening is safe because dismissDevChannelPrompt is detection-gated: it
+  // sends Enter only when the prompt's exact text is on screen, so a node that
+  // never shows it simply times out without a keystroke being sent.
+  const promptedNodes = spawned.filter(n =>
+    !!n.profile?.channels?.some(c => typeof c === "string" && c.startsWith("server:")));
+  if (promptedNodes.length === 0) return;
+  await Promise.all(promptedNodes.map(n => dismissDevChannelPrompt(n.alias, 45000)));
 }
 
 async function projectCommand() {
