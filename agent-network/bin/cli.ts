@@ -672,6 +672,16 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
     process.exit(1);
   }
+  // The OpenCode co-presence twin checks its TUI session before calling the
+  // node ready; this path did not, so `③ TUI … ready to attach` and the 就绪
+  // line below were printed on the strength of `new-session` not throwing. A
+  // TUI that exits during startup (bad codex binary, unusable CODEX_HOME) left
+  // both lines saying ready. Keep the two paths aligned.
+  if (!tmuxSessionRunning(tuiSession)) {
+    console.error(`[anet] ❌ TUI tmux session ${tuiSession} exited during startup.`);
+    console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
+    process.exit(1);
+  }
   console.log(`[anet] ③ TUI tmux=${tuiSession} ready to attach`);
 
   // #P3fix复审 finding #5 — best-effort marker-file update with bridge/tui
@@ -688,6 +698,16 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       tui:    harvestSession(tuiSession),
     });
   } catch { /* best-effort observability update; appsrv-only marker still governs reap */ }
+
+  // 就绪 covers three tmux sessions, so it has to be true of all three at the
+  // moment it is printed — ① proved itself by its listening line, but that was
+  // several seconds and two spawns ago.
+  const dead = [appsrvSession, bridgeSession, tuiSession].filter(s => !tmuxSessionRunning(s));
+  if (dead.length > 0) {
+    console.error(`[anet] ❌ 共存节点 ${displayName} 没起来 — 这些 tmux 会话已经不在了: ${dead.join(", ")}`);
+    console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
+    process.exit(1);
+  }
 
   const hubBase = opts.hub.replace(/\/+$/, "");
   console.log("");
@@ -5416,6 +5436,19 @@ async function startCommand() {
   const inner = forceNewSession
     ? `anet node start ${shellQuote(alias)} --new-session${innerHub}`
     : `anet node start ${shellQuote(alias)}${innerHub}`;
+
+  // Same refuse-before-spawning check the --accept-dev-channels path does. The
+  // liveness poll below cannot substitute for it: tmux registers the session
+  // before the inner command has finished failing, so an unstartable node
+  // sails through the 2 s window and the session is gone a moment later —
+  // measured as `✅ tmux session "X" started detached` + exit 0 for a runtime
+  // this build does not support.
+  try {
+    resolveStartProfile(resolved.id, resolved.profile);
+  } catch (error: any) {
+    console.error(`[anet] ❌ Refusing to start node ${JSON.stringify(alias)}: ${error?.message || error}`);
+    process.exit(1);
+  }
 
   const headless = !process.stdin.isTTY;
   if (headless) {
