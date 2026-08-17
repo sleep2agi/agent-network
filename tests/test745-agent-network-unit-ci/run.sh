@@ -58,6 +58,51 @@ echo "executed_files=${executed:-unknown} discovered_files=$test_files"
   exit 1
 }
 
+
+# tests/ 下还有 19 个文件,直到现在没有任何 CI 会跑 —— 而这道门的抬头写着
+# "complete agent-network unit domain"。补上,让那句话变成真的。
+#
+# 这个目录里混着两种测试,任何单一命令都跑不全:
+#   - 脚本式:自己打 "N/N passed",失败时 process.exit(1),必须 `bun <file>`;
+#     用 `bun test` 跑会因为 top-level 的 process.exit 把整个 run 打断在第一个文件。
+#   - bun:test 式:describe/it,必须 `bun test <file>`;用 `bun <file>` 跑会报
+#     "Cannot use describe outside of the test runner"。
+# 所以按文件内容分派。
+echo "[L0b] every agent-network/tests file, dispatched by kind"
+tdir_total=$(find "$ROOT/agent-network/tests" -maxdepth 1 -type f -name '*.test.ts' | wc -l | tr -d ' ')
+tdir_ran=0; tdir_failed=0; tdir_names=""
+while IFS= read -r f; do
+  rel=${f#"$ROOT"/agent-network/}
+  if grep -q 'bun:test' "$f"; then cmd="bun test $rel"; else cmd="bun $rel"; fi
+  if runuser -u node -- env HOME=/home/node \
+       bash -lc "cd $ROOT/agent-network && $cmd" >"/tmp/test745-tests-$(basename "$f" .test.ts).log" 2>&1; then
+    tdir_ran=$((tdir_ran+1))
+  else
+    tdir_ran=$((tdir_ran+1)); tdir_failed=$((tdir_failed+1))
+    tdir_names="$tdir_names $(basename "$f" .test.ts)"
+    echo "--- FAILED: agent-network/$rel ---"
+    tail -20 "/tmp/test745-tests-$(basename "$f" .test.ts).log"
+  fi
+done < <(find "$ROOT/agent-network/tests" -maxdepth 1 -type f -name '*.test.ts' | sort)
+
+echo "tests_dir_executed=$tdir_ran tests_dir_discovered=$tdir_total tests_dir_failed=$tdir_failed"
+# 🔴 绝对下限:`executed == discovered` 只能抓「runner 跳过了文件」,
+# 抓不到「文件消失了」—— 分母会跟着现实自动缩水。见 #798 的实测:
+# 删掉 85% 的测试后,只比数量的门照样 PASS。真删了测试就故意改这个数。
+AGENT_NETWORK_TESTS_FLOOR=15
+[[ "$tdir_total" -ge "$AGENT_NETWORK_TESTS_FLOOR" ]] || {
+  echo "FAIL: only $tdir_total file(s) under agent-network/tests, floor is $AGENT_NETWORK_TESTS_FLOOR" >&2
+  exit 1
+}
+[[ "$tdir_ran" -eq "$tdir_total" && "$tdir_total" -gt 0 ]] || {
+  echo "FAIL: ran $tdir_ran of $tdir_total files under agent-network/tests" >&2
+  exit 1
+}
+[[ "$tdir_failed" -eq 0 ]] || {
+  echo "FAIL: $tdir_failed file(s) failed under agent-network/tests:$tdir_names" >&2
+  exit 1
+}
+
 echo "[L1] witnessed-red: top-level config help must match the implemented parser"
 TARGET='  anet config [path|json]       Show config summary, path, or raw JSON'
 MUTATED='  anet config get|set          Inspect or edit config'
