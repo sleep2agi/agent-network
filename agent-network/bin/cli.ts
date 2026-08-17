@@ -238,7 +238,15 @@ function waitForTmuxPaneText(sessionName: string, needle: string, timeoutMs: num
       try {
         const paneTarget = tmuxPaneTarget(sessionName);
         if (!paneTarget) return false;
-        const out = execFileSync("tmux", ["capture-pane", "-t", paneTarget, "-p"], {
+        // 🔴 `-S -200`:不带它,capture-pane 只返回**当前可见区**。
+        // 一行「listening on: …」被后续日志顶出屏幕之后,这个轮询就再也看不到它了,
+        // 于是等满 timeout 判失败 —— 而服务其实早就绑上了(#849 实测 1.1s 绑上、
+        // 25s 判失败)。本地复现:同一个 pane,先打 needle 再刷 200 行日志,
+        //   capture-pane -p          → includes = false
+        //   capture-pane -p -S -500  → includes = true
+        // 这个函数找的是**一次性出现过**的那一行,不是「此刻屏幕上有什么」,
+        // 所以它必须看回滚。(同文件 :810 早就带了 `-S -80`——正确写法一直在。)
+        const out = execFileSync("tmux", ["capture-pane", "-t", paneTarget, "-p", "-S", "-200"], {
           stdio: ["ignore", "pipe", "pipe"], encoding: "utf8",
         });
         if (out.includes(needle)) { resolve(true); return; }
@@ -7962,6 +7970,12 @@ async function dismissDevChannelPrompt(sessionName: string, timeoutMs: number): 
       // Discard tmux's stderr: polling a session that has already exited is a
       // normal outcome here, and letting `can't find pane: X` through made the
       // CLI print an alarming line right before an unrelated verdict.
+      //
+      // 🔴 这里**故意不加 `-S`**,和 #849 修的那两处相反 —— 因为问题不同:
+      // 那两处找的是「**曾经出现过**的一行」(就绪信号 / 失败原因),必须看回滚;
+      // 这里判的是「**此刻屏幕上有没有一个等人回答的提示框**」。加上回滚,一个
+      // 早就被答掉、已经滚走的提示框会被重新识别成待处理,于是往一个并没有显示
+      // 它的会话里 send-keys。**同一个 flag,这三处里两处该加、一处不该。**
       pane = execFileSync("tmux", ["capture-pane", "-p", "-t", paneTarget], {
         encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"],
       }).toString();
@@ -7996,7 +8010,10 @@ function capturePaneReason(sessionName: string): string | null {
   try {
     const paneTarget = tmuxPaneTarget(sessionName);
     if (!paneTarget) return null;  // session already reaped
-    const pane = execFileSync("tmux", ["capture-pane", "-p", "-t", paneTarget], {
+    // 🔴 同 #849:找的是「**曾经出现过**的那一行拒绝原因」,不是「此刻屏幕上有什么」。
+    // 一个已经死掉的 pane,它的报错很可能已被后续输出顶出可见区 —— 不带 `-S` 就会
+    // 拿到 null,调用方回退到一句泛化的失败文案,而真正的原因明明还在回滚里。
+    const pane = execFileSync("tmux", ["capture-pane", "-p", "-t", paneTarget, "-S", "-200"], {
       encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"],
     }).toString();
     return extractStartFailureReason(pane);
