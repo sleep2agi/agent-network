@@ -27,6 +27,8 @@
 
 ## 进度快照（自主推进中 · 每步滚动更新）
 
+> ⚠️ **本段是 2026-07-05 快照** —— 6 周前的 GA-gate GREEN 状态 + 版本号（`preview.20/.19/.21` / dashboard `preview.9`），**当前 preview 已远超此数字**。真值以 [`docs/plans/release-plan.md`](../../plans/release-plan.md) 里的 `npm view` 表为准（snapshot 2026-08-14: agent-network `2.3.0-preview.39` / agent-node `2.5.0-preview.31` / commhub-server `0.9.0-preview.29`）。本段仅保留作 GA-gate 里程碑历史锚点。
+>
 > 最后更新：2026-07-05（北京）· **🟢 GA-gate GREEN (23/23) — GA-ready, 等 Vincent 拍 latest**: agent-network 2.3.0-preview.20 / agent-node 2.5.0-preview.19 / commhub-server 0.9.0-preview.21 / dashboard **0.6.3-preview.9**· Vincent msg9799 自主执行模式。
 > **2026-07-05 dashboard #393 迭代**：Vincent 真机反馈 → 供应商预设目录（DeepSeek/MiniMax/GLM/Claude 选一下 base_url 自动填 + 模型勾选 + 只填 key）已发 **preview.8**，型号修对（DeepSeek v4-pro/flash · MiniMax api.minimaxi.com+M2.7 · Claude opus-4-8/sonnet-5/haiku-4-5）发 **preview.9**（GLM 待 Vincent 给准型号）。**同时把线上 dm.vansin.top 实例从卡死的 preview.4（僵尸占 :3001 崩溃循环 34k 次）救活并升到 preview.9**。dashboard PR #35。
 > **📌 详细滚动进度追踪 → [tracking issue #403](https://github.com/sleep2agi/agent-network/issues/403)**（本 plan 是总文档/spec，详细每步日志记在 issue，二者互链）。
