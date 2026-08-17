@@ -35,35 +35,26 @@ test("node-server.ts consumes the shared constant rather than redeclaring it", (
   expect(src).not.toMatch(/const OUTBOUND_TOOL_NAMES\s*=\s*new Set/);
 });
 
-test.skipIf(!existsSync(HARNESS))("test235's harness derives its expectation instead of copying the names", () => {
-  const harness = readFileSync(HARNESS, "utf8");
-  expect(harness).toContain('from "../../agent-network/src/outbound-tool-names"');
-  expect(harness).toContain("[...OUTBOUND_TOOL_NAMES].sort()");
-  // The old copy asserted exactly three names and went stale when the fourth
-  // shipped; nothing noticed, because no CI job runs test235.
-  expect(harness).not.toContain('JSON.stringify(["commhub_send_task", "commhub_send_message", "commhub_get_all_status"])');
-});
-
-// 🔴 Why skipIf rather than a plain test: this file also runs inside
-// tests/test745-agent-network-unit-ci, whose image copies ONLY agent-network/
-// (plus agent-node/package.json and its own run.sh). Reaching across to
-// tests/test235-.../socket-harness.ts passes on a full checkout and fails with
-// ENOENT in that container — which is exactly what happened on the first CI run
-// of this branch.
+// 🔴 The harness assertion used to live here and does not any more.
 //
-// Skipping when the file is absent is a fail-open, so it is paired with a check
-// that says so out loud instead of quietly reporting a pass: in a full checkout
-// the file must be there, and its absence there is a real regression.
-test("the harness assertion is not silently skipped in a full checkout", () => {
-  const fullCheckout = existsSync(join(import.meta.dir, "..", "..", "tests"));
-  if (fullCheckout) {
-    expect(existsSync(HARNESS)).toBe(true);
-  } else {
-    // Package-scoped container. Say which assertion did not run, so a green
-    // here is never mistaken for "the harness was checked".
-    console.warn(
-      "[outbound-tool-names.test] tests/ is not present — the socket-harness " +
-      "assertion did NOT run in this image. It runs on a full checkout.",
-    );
-  }
-});
+// tests/test745-agent-network-unit-ci's image copies ONLY agent-network/ (plus
+// agent-node/package.json and its own run.sh), so reading
+// tests/test235-.../socket-harness.ts from this suite is ENOENT there. I tried
+// two ways to be clever about that and got both wrong:
+//
+//   1. read it unconditionally      → ENOENT in the container
+//   2. skip when `tests/` is absent → the container HAS a `tests/` directory
+//                                     (test745's own run.sh lives in it), so the
+//                                     probe said "full checkout" and asserted
+//                                     anyway
+//
+// The second failure is the same mistake twice: probing an incidental feature
+// ("is there a tests/ directory") instead of the thing itself. Rather than build
+// a third detector, this suite now asserts only what is inside its own package.
+//
+// The consequence is stated rather than papered over: NOTHING gates the fact
+// that socket-harness.ts derives its expectation from OUTBOUND_TOOL_NAMES. That
+// is not a new gap introduced here — no workflow and neither of qa.sh's L0/L1
+// lists runs test235 at all, which is why its assertion could be wrong on main
+// for as long as it was. Wiring test235 into CI is the fix for that, and it is a
+// separate change: it needs a real hub and a socket harness, not a unit runner.
