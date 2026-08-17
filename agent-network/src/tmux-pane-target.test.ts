@@ -81,3 +81,31 @@ test("cli.ts sends pane commands to coordinates and session commands to the = fo
   expect(source).toContain('["kill-session", "-t", exactSession(sessionName)]');
   expect(source).toContain('["has-session", "-t", exactSession(name)]');
 });
+
+// The dev-channels auto-confirm used to filter on runtime, not on the thing
+// that actually causes the prompt.
+test("auto-confirm selects nodes by their server: channel, not by runtime", () => {
+  const source = readFileSync(join(import.meta.dir, "..", "bin", "cli.ts"), "utf8");
+  const a = source.indexOf("async function autoConfirmDevChannels(");
+  expect(a).toBeGreaterThan(-1);
+  const raw = source.slice(a, source.indexOf("\n}", a));
+  // Strip comments before asserting absence: the explanation of the old,
+  // narrower predicate quotes it verbatim, and a prefix-free `toContain` would
+  // match the comment and fail on the fixed code. Assert about the code.
+  const body = raw.split("\n").filter(l => !l.trim().startsWith("//")).join("\n");
+  expect(body).toContain('startsWith("server:")');
+  // A runtime test here excluded every claude-agent-sdk node — and `claude-code`
+  // normalizes to claude-agent-sdk, so legacy names were excluded too.
+  expect(body).not.toContain('=== "claude-code-cli"');
+  expect(body).not.toContain("normalizeRuntime(");
+});
+
+test("the #494 warning and the auto-confirm agree on the predicate", () => {
+  const source = readFileSync(join(import.meta.dir, "..", "bin", "cli.ts"), "utf8");
+  // Both must key on server: channels. Two places answering the same question
+  // with different rules is how the narrow one silently did the work.
+  const warn = source.indexOf("this node loads dev channels");
+  expect(warn).toBeGreaterThan(-1);
+  const warnGuard = source.slice(Math.max(0, warn - 300), warn);
+  expect(warnGuard).toContain('startsWith("server:")');
+});

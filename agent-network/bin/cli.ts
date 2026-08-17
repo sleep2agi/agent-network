@@ -7979,11 +7979,25 @@ function capturePaneReason(sessionName: string): string | null {
 // claude-code-cli nodes (only those carry a `server:` channel and hit the
 // prompt), so `node start --all` / `project up|restart` stay zero-interaction.
 async function autoConfirmDevChannels(spawned: ProjectNode[]): Promise<void> {
-  const claudeNodes = spawned.filter(n =>
-    n.profile && normalizeRuntime(n.profile) === "claude-code-cli" &&
-    !!n.profile.channels?.some(c => c.startsWith("server:")));
-  if (claudeNodes.length === 0) return;
-  await Promise.all(claudeNodes.map(n => dismissDevChannelPrompt(n.alias, 45000)));
+  // What decides whether the prompt appears is the `server:` channel, NOT the
+  // runtime. This filter used to also require runtime === "claude-code-cli",
+  // which silently excluded every claude-agent-sdk node — and `claude-code`
+  // normalizes to claude-agent-sdk, so legacy-named nodes were excluded too.
+  // Those nodes then sat on the confirm box forever during `project up` /
+  // `node start --all`, with no watcher ever looking at them.
+  //
+  // The same file already had the correct predicate: the #494 warning on the
+  // `--tmux` path keys purely on `server:` channels with no runtime test. Two
+  // places deciding the same question, one of them narrower, and the narrow one
+  // was the one doing the work.
+  //
+  // Widening is safe because dismissDevChannelPrompt is detection-gated: it
+  // sends Enter only when the prompt's exact text is on screen, so a node that
+  // never shows it simply times out without a keystroke being sent.
+  const promptedNodes = spawned.filter(n =>
+    !!n.profile?.channels?.some(c => typeof c === "string" && c.startsWith("server:")));
+  if (promptedNodes.length === 0) return;
+  await Promise.all(promptedNodes.map(n => dismissDevChannelPrompt(n.alias, 45000)));
 }
 
 async function projectCommand() {
