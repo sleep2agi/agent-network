@@ -34,11 +34,14 @@ dashboard 跟 commhub 的 REST 契约（C3）要版本约束——纳入本文�
 
 > 每次「一起测过」的组合记一行。装的时候四列尽量取同一行。四个都是 npm 包，dashboard 列也记 npm 版本。
 
+> ⚠️ **前三行是 2026-06 preview 迭代期的历史快照**（数字 `preview.14/.18/.19/.20`，已远早于当前 preview 头）。当前已发布 preview 数字见 [`docs/plans/release-plan.md`](../plans/release-plan.md) 与 `npm view <pkg> dist-tags` 实测；下面单独加一行 **已发布 preview 头（snapshot 2026-08-17）** 作为最新真值参考。
+
 | 组合 | agent-network | agent-node | commhub-server | dashboard | 状态 |
 |------|--------------|-----------|----------------|-----------|------|
-| 当前线上飞书舰队 | 2.3.0-preview.18 | 2.5.0-preview.18 | 0.9.0-preview.14 | 0.6.3-preview.4 | ✅ 实跑中（#383 rescue + Kimi） |
-| 已发布 preview 头 | 2.3.0-preview.19 | 2.5.0-preview.18 | 0.9.0-preview.20 | 0.6.3-preview.4 | ⚠️ 未整体 e2e，agent-node 不含 opencode |
-| 下一发（含 opencode） | 2.3.0-preview.20 | 2.5.0-preview.19 | 0.9.0-preview.20 | 0.6.3-preview.4 | 🔜 待切（见 §6，dashboard 本发不动） |
+| 当前线上飞书舰队（2026-06 快照） | 2.3.0-preview.18 | 2.5.0-preview.18 | 0.9.0-preview.14 | 0.6.3-preview.4 | ✅ 当时实跑中（#383 rescue + Kimi）；生产真机版号请复核 |
+| 已发布 preview 头（2026-06 快照） | 2.3.0-preview.19 | 2.5.0-preview.18 | 0.9.0-preview.20 | 0.6.3-preview.4 | ⚠️ 未整体 e2e，agent-node 不含 opencode |
+| 下一发（2026-06 快照，含 opencode） | 2.3.0-preview.20 | 2.5.0-preview.19 | 0.9.0-preview.20 | 0.6.3-preview.4 | 🔜 待切（见 §6，dashboard 本发不动） |
+| **已发布 preview 头（snapshot 2026-08-17）** | **2.3.0-preview.39** | **2.5.0-preview.31** | **0.9.0-preview.29** | 0.6.3-preview（浮动） | ⚠️ `npm view @preview` 实测；`preview.39` 二进制内嵌 `.d.ts` pair 仍指 `agent-node@2.5.0-preview.28`（main-源码 vs binary 差） |
 | v2.3.0 GA 目标 | 2.3.0 | 2.5.0 | 0.9.0 | 0.7.0（含 #260） | 🎯 整行测绿才升 |
 | latest（稳定线） | 2.2.21 | 2.4.13 | 0.8.8 | 0.6.x | ✅ 旧稳定，无 opencode/无 #383 |
 
