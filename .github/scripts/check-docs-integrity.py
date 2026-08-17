@@ -15,10 +15,24 @@ Both were live in docs/qa/weekly/2026-W19.md on 2026-08-17:
 Neither shows up in a build: Markdown has no compiler, so a dead link and a live
 one look the same until a reader clicks. Both are cheap to check mechanically.
 
+A third, narrower rule: no line-anchored `blob/main/...#L<n>` links inside the
+changelogs. A changelog entry describes a state that was true at some past
+release; a `#L` anchor into `main` resolves against today's code. Those two
+facts are incompatible by construction — the link is wrong after the next commit
+that touches the file, and nothing tells anyone. Measured 2026-08-17: of six such
+links, `cli.ts#L61` (documented as `PINNED_SERVER_VERSION`) now lands on
+`} from "../src/opencode-preset";` and `cli.ts#L2589` on a line of help text.
+
+Deliberately NOT extended to the rest of docs/: `docs-site/docs/api/mcp-tools.md`
+carries 44 of these and all 44 are still in range with plausible content, i.e.
+they are maintained. Reddening on ~100 maintained links would make this a
+backlog canary that dies the day the backlog clears.
+
 Scope is deliberately narrow and stated: UTF-8 validity across every tracked
-.md, link resolution for docs/qa/** only (where the defect was found). Widening
-the link check to all docs is a separate decision — some files link to generated
-or gitignored paths, and a guard that cries wolf gets disabled.
+.md, link resolution for docs/qa/** only (where the defect was found), and the
+changelog anchor rule. Widening the link check to all docs is a separate
+decision — some files link to generated or gitignored paths, and a guard that
+cries wolf gets disabled.
 
 Fail-closed: an empty file list exits 2 rather than reporting a clean run.
 """
@@ -29,6 +43,8 @@ import sys
 
 RELATIVE_LINK = re.compile(r"\]\((\.{1,2}/[^)\s]*)")
 LINK_SCOPE = "docs/qa"
+CHANGELOG_GLOB = "changelog.md"
+MAIN_LINE_ANCHOR = re.compile(r"blob/main/[\w./-]+#L\d+")
 
 
 def tracked(pathspec: str) -> list[str]:
@@ -75,8 +91,24 @@ def main() -> int:
                 print(f"::error file={f}::relative link '{target}' resolves to "
                       f"'{resolved}', which does not exist")
 
+    # 3. Changelogs must not line-anchor into main.
+    changelogs = [f for f in md if f.endswith("/" + CHANGELOG_GLOB) or f == CHANGELOG_GLOB]
+    if not changelogs:
+        print(f"::error::no tracked {CHANGELOG_GLOB} found — scope regression, refusing to pass")
+        return 2
+    anchors = 0
+    for f in changelogs:
+        for m in MAIN_LINE_ANCHOR.finditer(open(f, encoding="utf-8", errors="replace").read()):
+            problems += 1
+            anchors += 1
+            print(f"::error file={f}::`{m.group(0)}` line-anchors into main from a changelog. "
+                  f"The entry describes a past release; the anchor resolves against today's "
+                  f"code, so it is wrong after the next commit that touches that file and "
+                  f"nothing reports it. Link the file without `#L`, and name the symbol.")
+
     print(f"checked {len(md)} tracked .md for UTF-8 validity; "
-          f"{links} relative link(s) across {len(scoped)} file(s) under {LINK_SCOPE}/")
+          f"{links} relative link(s) across {len(scoped)} file(s) under {LINK_SCOPE}/; "
+          f"{len(changelogs)} changelog(s) for main line-anchors ({anchors} found)")
 
     if problems:
         print(f"\n{problems} problem(s).")
