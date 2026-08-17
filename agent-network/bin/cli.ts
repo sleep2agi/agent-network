@@ -96,6 +96,7 @@ import {
 import { parseCliOptions, positionalArgs } from "../src/cli-args";
 import { parseTokenCreateName } from "../src/token-cli";
 import { findExactTmuxSession, parseTmuxSessions } from "../src/tmux-attach";
+import { classifyPanePrompt, extractStartFailureReason } from "../src/tmux-pane-prompt";
 import { diagnoseLocale, formatLocaleSource } from "../src/locale-diagnostic";
 import {
   formatSecretAssignment,
@@ -5307,6 +5308,21 @@ async function startCommand() {
     const inner = forceNewSession
       ? `anet node start ${shellQuote(alias)} --new-session${innerHub}`
       : `anet node start ${shellQuote(alias)}${innerHub}`;
+    // Refuse here, in the caller, for anything the inner `anet node start`
+    // would refuse on. Detaching first and discovering it afterwards is how
+    // this path used to lie: tmux happily creates a session, the inner command
+    // exits 1 a moment later, tmux reaps the session, and the reason dies with
+    // the pane. resolveStartProfile is the same check launchAgent runs, so the
+    // message the user gets is the real one, on stderr, with exit 1.
+    try {
+      resolveStartProfile(resolved.id, resolved.profile);
+    } catch (error: any) {
+      console.error(`[anet] ❌ Refusing to start node ${JSON.stringify(alias)}: ${error?.message || error}`);
+      process.exit(1);
+    }
+    // verifyNodeUp reads .anet/nodes/<id>/.pid; a pid left behind by an earlier
+    // run would otherwise be mistaken for this launch's process.
+    rmSync(join(nodesDir(), resolved.id, ".pid"), { force: true });
     try {
       execFileSync(
         "tmux",
@@ -5319,12 +5335,42 @@ async function startCommand() {
     }
     // Concurrently watch the new tmux pane and send Enter when the
     // dev-channels prompt appears. Returns false if the prompt never
-    // shows within the window — that's a non-claude node or a node that
-    // came up past the prompt already; either way we're done.
+    // shows within the window — that's a non-claude node, a node that came up
+    // past the prompt already, or a node that died. Which of those it was is
+    // decided below by looking at the node, not by assuming.
     const dismissed = await dismissDevChannelPrompt(alias, 45_000);
+
+    // Everything above only proves tmux accepted a command. Whether a node is
+    // actually running is a separate fact, and it has to be measured:
+    // `tmux new-session -d` succeeds even when the inner `anet node start`
+    // refuses and exits 1 a moment later, so printing success here on the
+    // strength of the spawn call used to report dead nodes as started. Batch
+    // callers believed it — a 97-node restore on 2026-08-17 reported 64/64 up
+    // when 6 had never started, and the two outputs were byte-identical.
+    const verdict = await verifyNodeUp(resolved.id, 20_000);
+    if (!verdict.ok) {
+      // The pane is the only place the inner command's own words survive, and
+      // only while tmux has not reaped the session yet — so read it first and
+      // fall back to the pid-based verdict when it is already gone.
+      const paneReason = capturePaneReason(alias);
+      console.error(`[anet] ❌ node "${alias}" did not start — ${paneReason || verdict.reason}`);
+      if (paneReason) console.error(`[anet]    (${verdict.reason})`);
+      // Deliberately do NOT kill the session. A node stuck on a prompt is
+      // rescued by one keypress, and a runtime that comes up without writing
+      // .pid would be destroyed here for failing a check it never opted into —
+      // an 89-node fleet is not the place to act on a guess. But say plainly
+      // that the session outlives this failure, because `tmux has-session` is
+      // the criterion batch callers use and it will answer yes for this node.
+      if (tmuxSessionRunning(alias)) {
+        console.error(`[anet]    tmux session "${alias}" is still up — attach and look: tmux attach -t ${shellQuote(alias)}`);
+        console.error(`[anet]    (\`tmux has-session\` will say yes for it; this exit code is the one that means "started")`);
+      }
+      console.error(`[anet]    debug: anet logs ${shellQuote(alias)}  |  anet info ${shellQuote(alias)}`);
+      process.exit(1);
+    }
     console.log(
-      `[anet] ✅ node "${alias}" started detached (tmux session live; ` +
-        `dev-channels prompt ${dismissed ? "auto-confirmed" : "did not appear within 45 s"}).`,
+      `[anet] ✅ node "${alias}" started detached (${verdict.reason}; ` +
+        `dev-channels prompt ${dismissed ? "auto-confirmed" : "did not appear"}).`,
     );
     return;
   }
@@ -7735,18 +7781,42 @@ async function verifySpawnedNodes(spawned: ProjectNode[], failed: { alias: strin
 // send a single Enter to confirm it. Detection-gated — if the prompt never
 // appears (non-claude node, already past it) nothing is ever sent, so a stray
 // Enter can never land on a normal Claude UI. Best-effort.
+//
+// A workspace Claude Code has not seen before shows its folder-trust prompt
+// BEFORE the dev-channels one. This watcher used to know only the dev-channels
+// markers, so it spent its whole window staring at a trust prompt it would not
+// answer; the dev-channels prompt then appeared after the window had already
+// closed and nobody ever confirmed it. The node hung silently and the hub
+// showed it offline — the failure mode looked identical to a node that was
+// merely slow. So: answer the trust prompt too, and restart the clock when we
+// do, because the window is meant to bound how long we wait for ONE prompt,
+// not how long the whole trust-then-channels sequence takes.
 async function dismissDevChannelPrompt(sessionName: string, timeoutMs: number): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
+  let deadline = Date.now() + timeoutMs;
+  let trustAnswered = false;
   while (Date.now() < deadline) {
     let pane = "";
     try {
-      pane = execFileSync("tmux", ["capture-pane", "-p", "-t", sessionName], { encoding: "utf-8" }).toString();
+      // Discard tmux's stderr: polling a session that has already exited is a
+      // normal outcome here, and letting `can't find pane: X` through made the
+      // CLI print an alarming line right before an unrelated verdict.
+      pane = execFileSync("tmux", ["capture-pane", "-p", "-t", sessionName], {
+        encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"],
+      }).toString();
     } catch {
       return false;  // session gone / tmux error — nothing to confirm
     }
-    // Both markers are unique to this exact prompt — they cannot appear
-    // incidentally in normal Claude Code UI or agent output.
-    if (pane.includes("I am using this for local development") || pane.includes("Loading development channels")) {
+    const prompt = classifyPanePrompt(pane);
+    if (prompt === "folder-trust" && !trustAnswered) {
+      // Settle briefly so Ink's input handler is fully attached, then accept.
+      await new Promise(r => setTimeout(r, 700));
+      try { execFileSync("tmux", ["send-keys", "-t", sessionName, "Enter"], { stdio: "ignore" }); } catch {}
+      trustAnswered = true;
+      deadline = Date.now() + timeoutMs;  // fresh window for the prompt we came for
+      await new Promise(r => setTimeout(r, 1000));
+      continue;
+    }
+    if (prompt === "dev-channels") {
       // Prompt is rendered and waiting. Settle briefly so Ink's input handler
       // is fully attached, then confirm with a single Enter.
       await new Promise(r => setTimeout(r, 700));
@@ -7756,6 +7826,19 @@ async function dismissDevChannelPrompt(sessionName: string, timeoutMs: number): 
     await new Promise(r => setTimeout(r, 1000));
   }
   return false;  // prompt never appeared within the window
+}
+
+// Read a dead/live pane and turn it into the reason the start failed. Used only
+// on the failure path, where the pane holds the inner command's own words.
+function capturePaneReason(sessionName: string): string | null {
+  try {
+    const pane = execFileSync("tmux", ["capture-pane", "-p", "-t", sessionName], {
+      encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"],
+    }).toString();
+    return extractStartFailureReason(pane);
+  } catch {
+    return null;  // session already reaped — caller falls back to a generic reason
+  }
 }
 
 // #176 — concurrently auto-confirm the dev-channels prompt for the just-spawned
