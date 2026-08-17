@@ -27,6 +27,11 @@ on:
 
 jobs:
   scan:
+    # 这个 name 就是 GitHub 上那个 check 的名字，也是分支保护里 required check
+    # 唯一能写的标识符。它必须全仓唯一 —— 2026-08-18 之前，四个 workflow 的
+    # job 全叫 `scan`，于是四道门在 check 列表里挤成同一个名字：required 里
+    # 写 `scan` 指的是哪一道无法确定，而按名字统计覆盖率会把四道门算成一道。
+    name: public-script-safety
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
