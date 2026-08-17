@@ -7763,6 +7763,33 @@ function parseStaggerMs(): number {
   return Math.round(n * 1000);
 }
 
+/**
+ * Make the exit code agree with the summary that was just printed.
+ *
+ * `project up` / `project restart` already measure each node with
+ * verifySpawnedNodes and print every failure — the TEXT was honest. The exit
+ * code was not: both returned normally, so a run that brought up 60 of 74 nodes
+ * exited 0. Any caller that scripts this (a boot-time sweep, CI, a watchdog)
+ * therefore had to re-derive the outcome itself, and one that trusted `$?` was
+ * told the fleet was fine. Same defect class as #895's single-node path, one
+ * level up.
+ *
+ * `invalid` counts too: a node whose config cannot start was never attempted,
+ * so reporting success would hide it just as effectively as a crash.
+ */
+function exitFromProjectOutcome(
+  failed: { alias: string; reason: string }[],
+  invalid: { alias: string; reason: string }[] = [],
+) {
+  if (failed.length === 0 && invalid.length === 0) return;
+  console.error(
+    `[anet] ❌ exiting non-zero: ${failed.length} node(s) failed to come up` +
+      (invalid.length ? `, ${invalid.length} with unstartable config` : "") +
+      ` — see the list above.`,
+  );
+  process.exit(1);
+}
+
 function printProjectSummary(
   total: number,
   up: number,
@@ -7994,6 +8021,7 @@ async function projectUp(invokedAs = "anet project up") {
     autoConfirmDevChannels(spawned),
   ]);
   printProjectSummary(nodes.length, alreadyUp + started, failed, invalid);
+  exitFromProjectOutcome(failed, invalid);
 }
 
 async function projectRestart() {
@@ -8050,6 +8078,7 @@ async function projectRestart() {
     autoConfirmDevChannels(spawned),
   ]);
   printProjectSummary(nodes.length, started, failed, invalid);
+  exitFromProjectOutcome(failed, invalid);
 }
 
 async function projectDown() {
