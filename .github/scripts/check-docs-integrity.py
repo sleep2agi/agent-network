@@ -41,7 +41,34 @@ import re
 import subprocess
 import sys
 
-RELATIVE_LINK = re.compile(r"\]\((\.{1,2}/[^)\s]*)")
+# Every markdown link target, then filter. The earlier version matched only
+# targets that begin `./` or `../`, which is not "a relative link" — it is one
+# way of spelling one. A bare `](v0-summary.md)` is equally relative and was
+# invisible to this gate.
+#
+# 🔴 That blind spot lived in how the gate COLLECTED, not in what it judged, so
+# nothing about the output looked wrong: the run printed a link count, said "no
+# problems", and exited 0 — byte-identical to a genuinely clean run. Measured on
+# 2026-08-18: 16 of the 96 in-scope relative links were bare filenames, and both
+# of the broken links in docs/qa/ were among the 16. The gate had been reporting
+# "80 relative link(s)" as if that were the denominator.
+#
+# It stayed invisible because the file this gate was written from (W19, 2026-08-17)
+# happened to spell all 24 of its links with `../`. A fixture that exercises one
+# spelling cannot reveal that the other spelling is unhandled.
+MD_LINK = re.compile(r"\]\(([^)\s]+)\)")
+
+
+def is_repo_relative(target: str) -> bool:
+    """True for link targets that must resolve to a file in this repo.
+
+    Excluded: absolute URLs, in-page anchors, mail links, and site-absolute
+    routes (`/guide/feishu`) — the last are resolved by the docs site's router,
+    not the filesystem, so checking them here would report noise as rot.
+    """
+    if not target or target.startswith(("http://", "https://", "#", "mailto:", "/")):
+        return False
+    return True
 LINK_SCOPE = "docs/qa"
 CHANGELOG_GLOB = "changelog.md"
 MAIN_LINE_ANCHOR = re.compile(r"blob/main/[\w./-]+#L\d+")
@@ -83,7 +110,9 @@ def main() -> int:
     for f in scoped:
         body = open(f, encoding="utf-8", errors="replace").read()
         base = os.path.dirname(f)
-        for target in RELATIVE_LINK.findall(body):
+        for target in MD_LINK.findall(body):
+            if not is_repo_relative(target):
+                continue
             links += 1
             resolved = os.path.normpath(os.path.join(base, target.split("#")[0]))
             if not os.path.exists(resolved):
@@ -117,5 +146,41 @@ def main() -> int:
     return 0
 
 
+def selftest() -> int:
+    """Pin the collector, because that is where this gate was blind.
+
+    Not the judge — `os.path.exists` was never the problem. What failed was the
+    step before it: deciding which strings on the page are links this gate owns.
+    A guard whose collector silently drops a whole spelling reports a smaller
+    denominator and a clean run, and both look exactly like success.
+    """
+    page = (
+        "see [a](v0-summary.md) and [b](../qa/x.md) and [c](./y.md)\n"
+        "[d](https://example.com/z.md) [e](#anchor) [f](/guide/feishu)\n"
+        "[g](v0-summary.md#some-anchor)\n"
+    )
+    found = [t for t in MD_LINK.findall(page) if is_repo_relative(t)]
+    cases = [
+        ("bare filename is collected", "v0-summary.md" in found),
+        ("bare filename with anchor is collected", "v0-summary.md#some-anchor" in found),
+        ("../ form still collected", "../qa/x.md" in found),
+        ("./ form still collected", "./y.md" in found),
+        ("absolute URL excluded", "https://example.com/z.md" not in found),
+        ("in-page anchor excluded", "#anchor" not in found),
+        ("site-absolute route excluded", "/guide/feishu" not in found),
+        ("exactly the four repo-relative targets", len(found) == 4),
+    ]
+    bad = [name for name, ok in cases if not ok]
+    for name, ok in cases:
+        print(f"  {'ok  ' if ok else 'FAIL'} {name}")
+    if bad:
+        print(f"::error::collector selftest failed: {len(bad)} case(s)")
+        return 1
+    print(f"collector selftest: {len(cases)}/{len(cases)} ok")
+    return 0
+
+
 if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        sys.exit(selftest())
     sys.exit(main())
