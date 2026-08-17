@@ -19,6 +19,16 @@ test_files=$(find "$ROOT/agent-network/src" -type f -name '*.test.ts' | wc -l | 
 }
 echo "test_files=$test_files"
 
+# 🔴 绝对下限:上面那条 `[[ "$test_files" =~ ^[1-9][0-9]*$ ]]` 只要求分母非零,
+# 下面 :L0 的 `executed >= test_files` 也只能抓「runner 少跑了文件」—— 两个数
+# 会跟着现实一起缩水。#817 实测:删掉 46 个 src 测试里的 40 个,test_files=6、
+# executed=6,这道门照样 PASS rc=0。所以真删了测试就故意改这个数。
+AGENT_NETWORK_SRC_FLOOR=40
+[[ "$test_files" -ge "$AGENT_NETWORK_SRC_FLOOR" ]] || {
+  echo "FAIL: only $test_files test file(s) under agent-network/src, floor is $AGENT_NETWORK_SRC_FLOOR" >&2
+  exit 1
+}
+
 echo "[L0] full agent-network/src unit suite as non-root"
 runuser -u node -- env HOME=/home/node \
   bash -lc 'cd /workspace/agent-network && bun test src/' \
