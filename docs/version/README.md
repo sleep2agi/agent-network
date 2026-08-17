@@ -6,11 +6,13 @@
 
 ## 版本矩阵
 
+> preview 一行是 `npm view <pkg>@preview version` 的映射（浮动）；每次改前用 `npm view` 核一遍。最后回填时间：2026-08-14。
+
 | 整体版本 | 状态 | agent-network | agent-node | commhub-server | dashboard | 规划 |
 |---|---|---|---|---|---|---|
 | **v0.10.15** | 当前 stable | 2.2.21 | 2.4.13 | 0.8.8 | 0.6.0 | —（已发布） |
 | **v0.10.16** | 热修·筹备 | 2.2.22（待发） | 2.4.13 | 0.8.8 | 0.6.0 | [plan](./0.10.16/) |
-| **v0.11.0** | 迭代中（**canonical preview .34/.26 已发布**） | 2.3.0-preview.34 | 2.5.0-preview.26 | 0.9.0（现 preview） | 0.7.0（现 0.6.3-preview） | [plan](./0.11.0/) |
+| **v0.11.0** | 迭代中（preview 泡验期） | 2.3.0-preview.39（现 preview） | 2.5.0-preview.31（现 preview） | 0.9.0-preview.29（现 preview） | 0.7.0（现 0.6.3-preview） | [plan](./0.11.0/) |
 
 ## 规则
 

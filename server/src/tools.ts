@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
+import { parseAliasFilter } from "./alias-filter.js";
 import { createHash } from "node:crypto";
 import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, generateNetworkToken, syncScheduledRunForTask } from "./db.js";
 import { getSSEStats, pushEvent, pushNetworkObserverEvent } from "./push.js";
@@ -1104,16 +1105,25 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "get_all_status",
-    "Get status of all sessions. Hub uses this for the patrol loop.",
+    "Get status of all sessions. Hub uses this for the patrol loop. " +
+      "Pass filter_alias (comma-separated) when you only care about specific " +
+      "nodes — the unfiltered result is one row per session with 31 columns and " +
+      "is large enough on a real fleet that callers cannot read it.",
     {
       filter_status: z.string().max(50).optional(),
       filter_server: z.string().max(200).optional(),
+      // 2026-08-17: on a 222-session hub the unfiltered response is ~259 KB, past
+      // what an MCP client can take in one result — so the caller that wanted the
+      // status of THREE nodes could not get it from this tool at all. The patrol
+      // loop still wants everything, hence optional rather than required.
+      filter_alias: z.string().max(2000).optional()
+        .describe("One alias, or several separated by commas. Exact matches only."),
       network_id: z.string().max(200).optional().describe("Filter by network"),
     },
-    async ({ filter_status, filter_server, network_id: netId }) => {
+    async ({ filter_status, filter_server, filter_alias, network_id: netId }) => {
       const readScope = resolveReadScope(netId);
       if (readScope.denied) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: readScope.denied }) }] };
-      console.log(`[${ts()}] hub → get_all_status${filter_status ? ": filter=" + filter_status : ""}${readScope.networkId ? " net=" + readScope.networkId.slice(0, 12) : ""}`);
+      console.log(`[${ts()}] hub → get_all_status${filter_status ? ": filter=" + filter_status : ""}${filter_alias ? " alias=" + filter_alias.slice(0, 80) : ""}${readScope.networkId ? " net=" + readScope.networkId.slice(0, 12) : ""}`);
 
       // Round-2/4 review ③: stale-marking moved to startStaleSessionSweeper()
       // (background timer, ~60s cadence). Read path no longer fires UPDATE.
@@ -1122,20 +1132,42 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       sql = addReadScope(sql, params, readScope);
       if (filter_status) { sql += " AND status = ?"; params.push(filter_status); }
       if (filter_server) { sql += " AND server = ?"; params.push(filter_server); }
+      const aliasFilter = parseAliasFilter(filter_alias);
+      const aliases = aliasFilter.aliases;
+      if (aliasFilter.sql) {
+        sql += aliasFilter.sql;
+        params.push(...aliases);
+      }
       sql += " ORDER BY updated_at DESC";
       const sessions = db.all(sql, ...params);
 
+      // `summary` has always counted every session in the read scope, ignoring
+      // filter_status / filter_server — and now filter_alias. That is fine for
+      // the patrol loop, but a caller who asked about three aliases and gets
+      // back three rows plus "idle: 96" can easily read the 96 as being about
+      // their three. A count that does not say what it counted invites exactly
+      // that. So the response now says so, rather than the semantics changing
+      // under existing callers.
       const summaryParams: any[] = [];
       let summarySql = "SELECT status, COUNT(*) as count FROM sessions WHERE 1=1";
       summarySql = addReadScope(summarySql, summaryParams, readScope);
       summarySql += " GROUP BY status";
       const summary = db.all(summarySql, ...summaryParams);
 
+      const filtered = !!(filter_status || filter_server || aliases.length > 0);
       return {
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify({ ok: true, sessions, summary }),
+            text: JSON.stringify({
+              ok: true,
+              sessions,
+              summary,
+              summary_scope: filtered
+                ? "every session in the read scope — NOT narrowed by the filters applied to `sessions`"
+                : "every session in the read scope",
+              sessions_returned: sessions.length,
+            }),
           },
         ],
       };
