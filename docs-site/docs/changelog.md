@@ -710,7 +710,7 @@ anet project restart                             # 重启项目（拉新 agent-n
 
 ### Fix
 
-[`agent-network/bin/cli.ts` 的 `PINNED_SERVER_VERSION`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)（当时在 61 行） 跨 v0.9.x + v0.10.0 promote 漏 bump，仍 hardcode `0.8.0` —— `anet hub start` 实际 `bunx --bun @sleep2agi/commhub-server@0.8.0` 启服务（[`cli.ts` 里 `anet hub start` 的 `bunx --bun @sleep2agi/commhub-server@…` 那处](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)（当时在 2589 行）），跑的是老 server 不是 v0.10.0 ship 的 `0.8.2`。直接影响：
+[`agent-network/bin/cli.ts` 的 `PINNED_SERVER_VERSION`](https://github.com/sleep2agi/agent-network/blob/3a387204/agent-network/bin/cli.ts#L61)（钉在当时的提交 `3a387204`，第 61 行） 跨 v0.9.x + v0.10.0 promote 漏 bump，仍 hardcode `0.8.0` —— `anet hub start` 实际 `bunx --bun @sleep2agi/commhub-server@0.8.0` 启服务（[`cli.ts` 里 `anet hub start` 的 `bunx --bun @sleep2agi/commhub-server@…` 那处](https://github.com/sleep2agi/agent-network/blob/3a387204/agent-network/bin/cli.ts#L2589)（同一提交，第 2589 行）），跑的是老 server 不是 v0.10.0 ship 的 `0.8.2`。直接影响：
 
 - [#99](https://github.com/sleep2agi/agent-network/issues/99) 守护节点 endpoint family `GET /api/server/:host/health` + `GET /api/server/:host/agents` 在 0.8.0 不存在 → **404**
 - [#142](https://github.com/sleep2agi/agent-network/issues/142) server schema align `process_telemetry` 字段在 0.8.0 没接 → 老 schema silent-drop 字段
