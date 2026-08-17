@@ -96,6 +96,10 @@ import {
 import { parseCliOptions, positionalArgs } from "../src/cli-args";
 import { parseTokenCreateName } from "../src/token-cli";
 import { findExactTmuxSession, parseTmuxSessions } from "../src/tmux-attach";
+import { classifyPanePrompt, extractStartFailureReason } from "../src/tmux-pane-prompt";
+import { describeUnsafePath } from "../src/unsafe-package-path-reason";
+import { describeUmaskRisk, judgeUmask, rejectedPayloads } from "../src/package-mode-preflight";
+import { exactSession } from "../src/tmux-exact-target";
 import { diagnoseLocale, formatLocaleSource } from "../src/locale-diagnostic";
 import {
   formatSecretAssignment,
@@ -139,8 +143,15 @@ function adminUtokPath() { return join(home, ".anet", "server", "admin-utok.json
 function dashboardLaunchRecordPath(port: string | number) { return join(home, ".anet", "server", `dashboard-${port}.json`); }
 function nodesDir() { return join(process.cwd(), ".anet", "nodes"); }
 function shellQuote(value: string): string { return `'${value.replace(/'/g, `'\\''`)}'`; }
-function killTmuxSession(sessionName: string) {
-  try { execFileSync("tmux", ["kill-session", "-t", sessionName], { stdio: "pipe" }); } catch {}
+/** Kill a session and report whether it is actually gone afterwards. */
+function killTmuxSession(sessionName: string): boolean {
+  try { execFileSync("tmux", ["kill-session", "-t", exactSession(sessionName)], { stdio: "pipe" }); } catch {}
+  // Asking is not killing. `kill-session` failing is swallowed on purpose (a
+  // session that is already gone is the common case and not an error), which
+  // means the only way to know is to look afterwards — otherwise `node stop`
+  // prints "tmux(tui) killed" and notifies the hub offline while the session
+  // is still running.
+  return !tmuxSessionRunning(sessionName);
 }
 function startNodeTmuxSession(sessionName: string, alias: string) {
   // #117 helper used by `anet project up/restart` + the debate/social/PR-review
@@ -149,7 +160,7 @@ function startNodeTmuxSession(sessionName: string, alias: string) {
   execFileSync("tmux", ["new-session", "-d", "-s", sessionName, `anet node start ${shellQuote(alias)}`], { stdio: "pipe" });
 }
 function tmuxSessionRunning(name: string): boolean {
-  try { execFileSync("tmux", ["has-session", "-t", name], { stdio: "pipe" }); return true; }
+  try { execFileSync("tmux", ["has-session", "-t", exactSession(name)], { stdio: "pipe" }); return true; }
   catch { return false; }
 }
 // #122 — gate auto-tmux on tmux actually being installed. The CLI never
@@ -201,7 +212,7 @@ function waitForTmuxPaneText(sessionName: string, needle: string, timeoutMs: num
   return new Promise((resolve) => {
     const poll = () => {
       try {
-        const out = execFileSync("tmux", ["capture-pane", "-t", sessionName, "-p"], {
+        const out = execFileSync("tmux", ["capture-pane", "-t", exactSession(sessionName), "-p"], {
           stdio: ["ignore", "pipe", "pipe"], encoding: "utf8",
         });
         if (out.includes(needle)) { resolve(true); return; }
@@ -671,6 +682,16 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
     process.exit(1);
   }
+  // The OpenCode co-presence twin checks its TUI session before calling the
+  // node ready; this path did not, so `③ TUI … ready to attach` and the 就绪
+  // line below were printed on the strength of `new-session` not throwing. A
+  // TUI that exits during startup (bad codex binary, unusable CODEX_HOME) left
+  // both lines saying ready. Keep the two paths aligned.
+  if (!tmuxSessionRunning(tuiSession)) {
+    console.error(`[anet] ❌ TUI tmux session ${tuiSession} exited during startup.`);
+    console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
+    process.exit(1);
+  }
   console.log(`[anet] ③ TUI tmux=${tuiSession} ready to attach`);
 
   // #P3fix复审 finding #5 — best-effort marker-file update with bridge/tui
@@ -687,6 +708,16 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       tui:    harvestSession(tuiSession),
     });
   } catch { /* best-effort observability update; appsrv-only marker still governs reap */ }
+
+  // 就绪 covers three tmux sessions, so it has to be true of all three at the
+  // moment it is printed — ① proved itself by its listening line, but that was
+  // several seconds and two spawns ago.
+  const dead = [appsrvSession, bridgeSession, tuiSession].filter(s => !tmuxSessionRunning(s));
+  if (dead.length > 0) {
+    console.error(`[anet] ❌ 共存节点 ${displayName} 没起来 — 这些 tmux 会话已经不在了: ${dead.join(", ")}`);
+    console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
+    process.exit(1);
+  }
 
   const hubBase = opts.hub.replace(/\/+$/, "");
   console.log("");
@@ -749,7 +780,7 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
   if (!existsSync(attachScript)) {
     let tail = "";
     try {
-      tail = execFileSync("tmux", ["capture-pane", "-p", "-t", bridgeSession, "-S", "-80"], {
+      tail = execFileSync("tmux", ["capture-pane", "-p", "-t", exactSession(bridgeSession), "-S", "-80"], {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       }).slice(-3_000);
@@ -2258,7 +2289,17 @@ function resolvePreviewAgentNodeEntrypoint(resolverEnv: NodeJS.ProcessEnv): stri
   for (const path of [entrypoint, packageJsonPath]) {
     const stat = statSync(path);
     if (!stat.isFile() || (uid !== undefined && stat.uid !== uid) || (stat.mode & 0o022) !== 0) {
-      throw new Error("resolved agent-node package has unsafe ownership or mode");
+      // Name the condition that fired. "unsafe ownership or mode" sent every
+      // reader looking at ownership, while on a stock Debian/Ubuntu box
+      // (umask 0002 → npm extracts 0775/0664) it is always the group-write
+      // bit — which is why grok-build-cli was unstartable on this machine
+      // and the error said nothing about umask.
+      throw new Error(
+        stat.isFile()
+          ? `resolved agent-node package has unsafe ownership or mode — ` +
+            describeUnsafePath(path, { uid: stat.uid, mode: stat.mode, processUid: uid ?? stat.uid })
+          : `${path} is not a regular file`,
+      );
     }
   }
   return entrypoint;
@@ -5307,6 +5348,21 @@ async function startCommand() {
     const inner = forceNewSession
       ? `anet node start ${shellQuote(alias)} --new-session${innerHub}`
       : `anet node start ${shellQuote(alias)}${innerHub}`;
+    // Refuse here, in the caller, for anything the inner `anet node start`
+    // would refuse on. Detaching first and discovering it afterwards is how
+    // this path used to lie: tmux happily creates a session, the inner command
+    // exits 1 a moment later, tmux reaps the session, and the reason dies with
+    // the pane. resolveStartProfile is the same check launchAgent runs, so the
+    // message the user gets is the real one, on stderr, with exit 1.
+    try {
+      resolveStartProfile(resolved.id, resolved.profile);
+    } catch (error: any) {
+      console.error(`[anet] ❌ Refusing to start node ${JSON.stringify(alias)}: ${error?.message || error}`);
+      process.exit(1);
+    }
+    // verifyNodeUp reads .anet/nodes/<id>/.pid; a pid left behind by an earlier
+    // run would otherwise be mistaken for this launch's process.
+    rmSync(join(nodesDir(), resolved.id, ".pid"), { force: true });
     try {
       execFileSync(
         "tmux",
@@ -5319,12 +5375,42 @@ async function startCommand() {
     }
     // Concurrently watch the new tmux pane and send Enter when the
     // dev-channels prompt appears. Returns false if the prompt never
-    // shows within the window — that's a non-claude node or a node that
-    // came up past the prompt already; either way we're done.
+    // shows within the window — that's a non-claude node, a node that came up
+    // past the prompt already, or a node that died. Which of those it was is
+    // decided below by looking at the node, not by assuming.
     const dismissed = await dismissDevChannelPrompt(alias, 45_000);
+
+    // Everything above only proves tmux accepted a command. Whether a node is
+    // actually running is a separate fact, and it has to be measured:
+    // `tmux new-session -d` succeeds even when the inner `anet node start`
+    // refuses and exits 1 a moment later, so printing success here on the
+    // strength of the spawn call used to report dead nodes as started. Batch
+    // callers believed it — a 97-node restore on 2026-08-17 reported 64/64 up
+    // when 6 had never started, and the two outputs were byte-identical.
+    const verdict = await verifyNodeUp(resolved.id, 20_000);
+    if (!verdict.ok) {
+      // The pane is the only place the inner command's own words survive, and
+      // only while tmux has not reaped the session yet — so read it first and
+      // fall back to the pid-based verdict when it is already gone.
+      const paneReason = capturePaneReason(alias);
+      console.error(`[anet] ❌ node "${alias}" did not start — ${paneReason || verdict.reason}`);
+      if (paneReason) console.error(`[anet]    (${verdict.reason})`);
+      // Deliberately do NOT kill the session. A node stuck on a prompt is
+      // rescued by one keypress, and a runtime that comes up without writing
+      // .pid would be destroyed here for failing a check it never opted into —
+      // an 89-node fleet is not the place to act on a guess. But say plainly
+      // that the session outlives this failure, because `tmux has-session` is
+      // the criterion batch callers use and it will answer yes for this node.
+      if (tmuxSessionRunning(alias)) {
+        console.error(`[anet]    tmux session "${alias}" is still up — attach and look: tmux attach -t ${shellQuote(alias)}`);
+        console.error(`[anet]    (\`tmux has-session\` will say yes for it; this exit code is the one that means "started")`);
+      }
+      console.error(`[anet]    debug: anet logs ${shellQuote(alias)}  |  anet info ${shellQuote(alias)}`);
+      process.exit(1);
+    }
     console.log(
-      `[anet] ✅ node "${alias}" started detached (tmux session live; ` +
-        `dev-channels prompt ${dismissed ? "auto-confirmed" : "did not appear within 45 s"}).`,
+      `[anet] ✅ node "${alias}" started detached (${verdict.reason}; ` +
+        `dev-channels prompt ${dismissed ? "auto-confirmed" : "did not appear"}).`,
     );
     return;
   }
@@ -5370,6 +5456,19 @@ async function startCommand() {
   const inner = forceNewSession
     ? `anet node start ${shellQuote(alias)} --new-session${innerHub}`
     : `anet node start ${shellQuote(alias)}${innerHub}`;
+
+  // Same refuse-before-spawning check the --accept-dev-channels path does. The
+  // liveness poll below cannot substitute for it: tmux registers the session
+  // before the inner command has finished failing, so an unstartable node
+  // sails through the 2 s window and the session is gone a moment later —
+  // measured as `✅ tmux session "X" started detached` + exit 0 for a runtime
+  // this build does not support.
+  try {
+    resolveStartProfile(resolved.id, resolved.profile);
+  } catch (error: any) {
+    console.error(`[anet] ❌ Refusing to start node ${JSON.stringify(alias)}: ${error?.message || error}`);
+    process.exit(1);
+  }
 
   const headless = !process.stdin.isTTY;
   if (headless) {
@@ -7552,9 +7651,24 @@ Stop a running agent node.
   const tmuxTuiKilled = allowLegacyTmuxNameSweep && tmuxSessionRunning(copresenceSessions.tui);
   const tmuxAppsrvKilled = allowLegacyTmuxNameSweep && tmuxSessionRunning(copresenceSessions.appsrv);
   const tmuxBridgeKilled = allowLegacyTmuxNameSweep && tmuxSessionRunning(copresenceSessions.bridge);
-  if (tmuxTuiKilled) killTmuxSession(copresenceSessions.tui);
-  if (tmuxAppsrvKilled) killTmuxSession(copresenceSessions.appsrv);
-  if (tmuxBridgeKilled) killTmuxSession(copresenceSessions.bridge);
+  // The three flags above say a session WAS running, which is the condition for
+  // trying. Whether the kill landed is a second question, and reporting the
+  // first as if it answered the second is how "Stopped X (tmux(tui) killed)"
+  // could print over a session that is still up.
+  const stillUp: string[] = [];
+  for (const [wanted, session] of [
+    [tmuxTuiKilled, copresenceSessions.tui],
+    [tmuxAppsrvKilled, copresenceSessions.appsrv],
+    [tmuxBridgeKilled, copresenceSessions.bridge],
+  ] as Array<[boolean, string]>) {
+    if (wanted && !killTmuxSession(session)) stillUp.push(session);
+  }
+  if (stillUp.length > 0) {
+    console.error(`[anet] ❌ tmux kill-session did not take for: ${stillUp.join(", ")}`);
+    console.error(`[anet]    "${displayName}" is NOT stopped; the hub was not notified offline.`);
+    console.error(`[anet]    Look: tmux attach -t ${shellQuote(`=${stillUp[0]}`)}`);
+    process.exit(1);
+  }
   const tmuxKilled = identityTeardownKilled || tmuxTuiKilled || tmuxAppsrvKilled || tmuxBridgeKilled;
   const stopResult = allowLegacyTmuxNameSweep
     ? await stopNode(resolved.id)
@@ -7735,27 +7849,64 @@ async function verifySpawnedNodes(spawned: ProjectNode[], failed: { alias: strin
 // send a single Enter to confirm it. Detection-gated — if the prompt never
 // appears (non-claude node, already past it) nothing is ever sent, so a stray
 // Enter can never land on a normal Claude UI. Best-effort.
+//
+// A workspace Claude Code has not seen before shows its folder-trust prompt
+// BEFORE the dev-channels one. This watcher used to know only the dev-channels
+// markers, so it spent its whole window staring at a trust prompt it would not
+// answer; the dev-channels prompt then appeared after the window had already
+// closed and nobody ever confirmed it. The node hung silently and the hub
+// showed it offline — the failure mode looked identical to a node that was
+// merely slow. So: answer the trust prompt too, and restart the clock when we
+// do, because the window is meant to bound how long we wait for ONE prompt,
+// not how long the whole trust-then-channels sequence takes.
 async function dismissDevChannelPrompt(sessionName: string, timeoutMs: number): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
+  let deadline = Date.now() + timeoutMs;
+  let trustAnswered = false;
   while (Date.now() < deadline) {
     let pane = "";
     try {
-      pane = execFileSync("tmux", ["capture-pane", "-p", "-t", sessionName], { encoding: "utf-8" }).toString();
+      // Discard tmux's stderr: polling a session that has already exited is a
+      // normal outcome here, and letting `can't find pane: X` through made the
+      // CLI print an alarming line right before an unrelated verdict.
+      pane = execFileSync("tmux", ["capture-pane", "-p", "-t", exactSession(sessionName)], {
+        encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"],
+      }).toString();
     } catch {
       return false;  // session gone / tmux error — nothing to confirm
     }
-    // Both markers are unique to this exact prompt — they cannot appear
-    // incidentally in normal Claude Code UI or agent output.
-    if (pane.includes("I am using this for local development") || pane.includes("Loading development channels")) {
+    const prompt = classifyPanePrompt(pane);
+    if (prompt === "folder-trust" && !trustAnswered) {
+      // Settle briefly so Ink's input handler is fully attached, then accept.
+      await new Promise(r => setTimeout(r, 700));
+      try { execFileSync("tmux", ["send-keys", "-t", exactSession(sessionName), "Enter"], { stdio: "ignore" }); } catch {}
+      trustAnswered = true;
+      deadline = Date.now() + timeoutMs;  // fresh window for the prompt we came for
+      await new Promise(r => setTimeout(r, 1000));
+      continue;
+    }
+    if (prompt === "dev-channels") {
       // Prompt is rendered and waiting. Settle briefly so Ink's input handler
       // is fully attached, then confirm with a single Enter.
       await new Promise(r => setTimeout(r, 700));
-      try { execFileSync("tmux", ["send-keys", "-t", sessionName, "Enter"], { stdio: "ignore" }); } catch {}
+      try { execFileSync("tmux", ["send-keys", "-t", exactSession(sessionName), "Enter"], { stdio: "ignore" }); } catch {}
       return true;
     }
     await new Promise(r => setTimeout(r, 1000));
   }
   return false;  // prompt never appeared within the window
+}
+
+// Read a dead/live pane and turn it into the reason the start failed. Used only
+// on the failure path, where the pane holds the inner command's own words.
+function capturePaneReason(sessionName: string): string | null {
+  try {
+    const pane = execFileSync("tmux", ["capture-pane", "-p", "-t", exactSession(sessionName)], {
+      encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"],
+    }).toString();
+    return extractStartFailureReason(pane);
+  } catch {
+    return null;  // session already reaped — caller falls back to a generic reason
+  }
 }
 
 // #176 — concurrently auto-confirm the dev-channels prompt for the just-spawned
@@ -12942,6 +13093,39 @@ async function migrateNode(id: string, opts: { hub: string; utok: string; networ
   return { ok: true, changes };
 }
 
+// Read the process umask without leaving it changed: POSIX only exposes it via
+// a set-and-return call, so set it to something arbitrary, keep the old value,
+// and immediately put it back.
+function readProcessUmask(): number {
+  const previous = process.umask(0o022);
+  process.umask(previous);
+  return previous;
+}
+
+// Payloads npm/npx already extracted for @sleep2agi/agent-node. Read-only scan
+// of local caches; doctor must never fetch, so an empty result means "nothing
+// extracted yet", not "safe".
+function findExtractedAgentNodePayloads(): { path: string; uid: number; mode: number }[] {
+  const roots: string[] = [];
+  const npxRoot = join(homedir(), ".npm", "_npx");
+  if (existsSync(npxRoot)) {
+    for (const entry of readdirSync(npxRoot)) {
+      roots.push(join(npxRoot, entry, "node_modules", "@sleep2agi", "agent-node"));
+    }
+  }
+  const out: { path: string; uid: number; mode: number }[] = [];
+  for (const root of roots) {
+    for (const rel of [["dist", "cli.js"], ["package.json"]]) {
+      const path = join(root, ...rel);
+      try {
+        const st = statSync(path);
+        if (st.isFile()) out.push({ path, uid: st.uid, mode: st.mode });
+      } catch { /* not extracted here */ }
+    }
+  }
+  return out;
+}
+
 async function doctorCommand() {
   const fix = args.includes("--fix");
   console.log(`\nanet doctor — System Diagnostic${fix ? " (auto-fix mode)" : ""}\n`);
@@ -12966,6 +13150,29 @@ async function doctorCommand() {
       "System locale",
       `${source} is not UTF-8; Unicode aliases and tmux output may be corrupted. Fix: export LANG=C.UTF-8 LC_ALL=C.UTF-8`,
     );
+  }
+
+  // The grok-build-cli / opencode-cli payload check refuses any resolved
+  // agent-node whose mode has a group- or other-write bit. npm creates files
+  // as `0o666 & ~umask`, so a stock Debian/Ubuntu umask of 0002 guarantees
+  // 0775/0664 and guarantees the refusal — which surfaces to the operator as
+  // "Incompatible grok-build-cli runtime" and says nothing about umask. Say it
+  // here, before anyone spends an evening on it. Local state only: the process
+  // umask plus whatever is already extracted; doctor never fetches.
+  const umaskVerdict = judgeUmask(readProcessUmask());
+  const umaskRisk = describeUmaskRisk(umaskVerdict);
+  if (umaskRisk) warning("Package file modes", umaskRisk);
+  const extracted = findExtractedAgentNodePayloads();
+  const rejected = rejectedPayloads(extracted, process.getuid?.() ?? 0);
+  if (rejected.length > 0) {
+    warning(
+      "Resolved agent-node payload",
+      `${rejected.length} already-extracted file(s) would be rejected right now, e.g. ` +
+      `${rejected[0].path} (mode ${(rejected[0].mode & 0o777).toString(8)}). ` +
+      `Fix: chmod -R g-w,o-w ${dirname(dirname(rejected[0].path))}`,
+    );
+  } else if (extracted.length > 0) {
+    check("Resolved agent-node payload", true, `${extracted.length} file(s) pass the mode check`);
   }
 
   // 2. Hub connectivity
