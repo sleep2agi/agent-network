@@ -45,3 +45,61 @@ export function isExactTarget(target: string): boolean {
 export function ensureExactSession(nameOrTarget: string): string {
   return isExactTarget(nameOrTarget) ? nameOrTarget : exactSession(nameOrTarget);
 }
+
+// ── pane targeting ────────────────────────────────────────────────────────
+//
+// 🔴 `=name` works for SESSION-targeting commands but NOT for pane-targeting
+//    ones when the session name is non-ASCII. Measured on tmux 3.4 with a
+//    session literally named `zz中文探针`:
+//
+//      tmux has-session   -t 'zz中文探针'   rc=0     -t '=zz中文探针'   rc=0  ✅
+//      tmux kill-session  -t 'zz中文探针'   rc=0     -t '=zz中文探针'   rc=0  ✅
+//      tmux capture-pane  -t 'zz中文探针'   rc=0     -t '=zz中文探针'   rc=1  ❌ can't find pane
+//      tmux send-keys     -t 'zz中文探针'   rc=0     -t '=zz中文探针'   rc=1  ❌ can't find pane
+//
+//    This fleet's session names are overwhelmingly Chinese, so applying the
+//    `=` prefix to capture-pane/send-keys silently disabled both: capture-pane
+//    throws, the prompt watcher treats that as "session gone" and gives up, and
+//    the dev-channels box is never confirmed. That is worse than the prefix
+//    ambiguity the prefix was added to fix.
+//
+// The exact-and-portable form for a pane is the coordinate
+// `<session>:<window>.<pane>`, which tmux resolves without prefix matching and
+// which works for non-ASCII names. Get it by listing panes and matching the
+// session name EXACTLY in code, where string equality is unambiguous — rather
+// than asking tmux to disambiguate for us.
+
+/** One row of `tmux list-panes -a -F '#{session_name}\t#{window_index}.#{pane_index}'`. */
+export interface PaneRow {
+  session: string;
+  /** `window.pane`, e.g. `0.0`. */
+  coord: string;
+}
+
+export function parsePaneRows(listOutput: string): PaneRow[] {
+  const rows: PaneRow[] = [];
+  for (const line of listOutput.split("\n")) {
+    if (!line) continue;
+    // Split on the LAST tab: a session name may itself contain a tab only if
+    // someone worked hard at it, and the coordinate never does.
+    const i = line.lastIndexOf("\t");
+    if (i <= 0) continue;
+    rows.push({ session: line.slice(0, i), coord: line.slice(i + 1).trim() });
+  }
+  return rows;
+}
+
+/**
+ * Pane target for a session, or null when that exact session has no pane.
+ *
+ * Matching is exact string equality on the session name — the whole point is to
+ * not hand tmux a name it might prefix-match, and to not hand it a `=` form it
+ * cannot resolve for non-ASCII names.
+ */
+export function paneTargetFor(listOutput: string, sessionName: string): string | null {
+  const row = parsePaneRows(listOutput).find(r => r.session === sessionName);
+  return row ? `${sessionName}:${row.coord}` : null;
+}
+
+/** The format string the two functions above expect. */
+export const PANE_LIST_FORMAT = "#{session_name}\t#{window_index}.#{pane_index}";
