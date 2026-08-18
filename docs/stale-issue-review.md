@@ -141,13 +141,13 @@ agent-node/src/cli.ts:3450               … Cross-machine artifact distribution
 
 ```doc-claims
 server/src/db.ts :: 393 :: ADD COLUMN team
-agent-network/bin/cli.ts :: 5038 :: dangerously-load-development-channels
-agent-node/src/cli.ts :: 3450 :: video_gen
-agent-node/src/cli.ts :: 4273 :: Expose CURRENT_TASK_ID
-agent-node/src/cli.ts :: 2363 :: total_cost_usd
+agent-network/bin/cli.ts :: 5151 :: dangerously-load-development-channels
+agent-node/src/cli.ts :: 3468 :: video_gen
+agent-node/src/cli.ts :: 4291 :: Expose CURRENT_TASK_ID
+agent-node/src/cli.ts :: 2388 :: total_cost_usd
 agent-node/src/feishu-tool-deny.ts :: 250 :: bubblewrap
-server/src/tools.ts :: 3867 :: list_providers
-server/src/server.ts :: 2979 :: addNetworkScope
+server/src/tools.ts :: 3899 :: list_providers
+server/src/server.ts :: 9 :: addNetworkScope
 ```
 
 ### 为什么是显式清单,不是从正文正则抽
