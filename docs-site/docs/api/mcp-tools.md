@@ -577,6 +577,27 @@ send_task({
 `get_all_status` 走 `SELECT * FROM sessions`（[`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 搜 `SELECT * FROM sessions WHERE 1=1`，无 JOIN）。`sessions` 表 schema（[`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) 搜 `CREATE TABLE IF NOT EXISTS sessions` + V2 migration [`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) 搜 `ALTER TABLE sessions ADD COLUMN`）**有 `model` 列** —— V2 migration `ALTER TABLE sessions ADD COLUMN model`，且 `report_status` 的 `sessions` upsert 无条件写 `sessions.model = COALESCE(model, 旧值)`（[`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 在 `report_status` 段搜 `INSERT INTO sessions`（写这几列的是 `report_status`，不是本节这个 tool） 与 `model = COALESCE(?20, sessions.model)`）。所以 `get_all_status` 直接返回每个 session 的 `model`（agent 没传 `model` 参数时为 `null`）。`nodes` 表里也有一份 `model`（传 `node_id` 时由 `report_status` 同步），是更持久的来源。`summary` 是按 status 分组的全 scope 计数（同 `list_tasks` 的 `stats`）。
 :::
 
+
+::: danger 🔴 `status` 回答的是「它上次上报时是什么」,不是「它现在在不在干活」
+`sessions.status` / `progress` **只在节点主动调 `report_status` 的那一刻更新**([`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 在 `report_status` 段搜 `INSERT INTO sessions`),`report_completion` 会把它复位成 idle([`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 在 `report_completion` 段搜 `UPDATE sessions SET status = 'idle', task = NULL, progress = 0`)。
+
+**中间没有任何东西会替节点改它。** 所以 `status: "idle"` 至少对应三种现实:
+
+| | 现实 | 面板长相 |
+|---|---|---|
+| ① | 真的空闲 | `idle` |
+| ② | 收到了任务但没消费(卡死 / 循环没醒) | `idle` |
+| ③ | **正在跑一个长任务,中途不上报** | `idle` |
+
+🔴 **实测(2026-08-18)**:一个节点连续 75 分钟显示 `status=idle` / `progress=100` / 心跳每次都 <2.5 分钟,而它自己回执说那段时间一直在跑一条长同步线 —— **落在 ③**。
+
+**`task` 更容易误读:它可能是发送方自己写上去的。** `send_task` 在自己的事务里就把任务前 200 字盖到目标 session 上([`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 在 `send_task` 段搜 `UPDATE sessions SET task = ?1`);`report_status` 也能写同一列(`COALESCE`,不传就保留旧值)。
+
+⇒ **在 `task` 里看到你刚发的内容,只证明 hub 记下了你发过,不证明节点读到了。那是你自己动作的回声。**
+
+**要判断一个节点在不在干活,只有一种在结构上答得了的办法:发一条要回执的消息,看它回不回。** 状态面板答不了这个 —— 不是数据不够新,是这些字段的写入时机决定了它们答不了。
+:::
+
 ---
 
 ### get_session_status
