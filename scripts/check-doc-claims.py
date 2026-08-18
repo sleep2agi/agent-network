@@ -7,11 +7,27 @@
 
 ## 它检查什么
 
-文档里嵌一个 ```doc-claims 代码块,每行三列(制表符或 ` :: ` 分隔):
+文档里嵌一个 ```doc-claims 代码块,每行 **两列或三列**(` :: ` 分隔):
 
-    <相对路径> :: <行号> :: <该行必须包含的子串>
+    <相对路径> :: <该行必须包含的子串>            ← 推荐:靠「唯一」定位,不写行号
+    <相对路径> :: <行号> :: <该行必须包含的子串>   ← 旧式:靠行号定位
 
-门逐条打开 `<相对路径>` 的第 `<行号>` 行,确认它包含 `<子串>`。
+三列式:打开第 `<行号>` 行,确认它包含 `<子串>`。
+两列式:在整个文件里找 `<子串>`,**必须恰好出现一次** —— 唯一性就是定位。
+
+🔴 为什么加两列式(2026-08-18,三天里漂了两次):
+   行号 pin 会被**上方任何增删**打漂,而漂了之后的红,和「文档说错了」的红
+   **在输出上长得一样**。两次实例:
+     #950  在 ~:462 插了 12 行 → 三条 cli.ts pin 整体 +12
+     #984  对 cli.ts 净 +1 行   → 同样三条被打散成 +1 / -1 / +1（两个方向都有）
+   第二次尤其说明问题:**一个净 +1 行的改动,让三条本来正确的引用同时变错。**
+
+   两列式把「唯一」当定位,所以上方增删不影响它。代价是子串必须够长到唯一 ——
+   这不是缺点:`addNetworkScope` 在 server.ts 里出现 24 次,拿它当锚点本来就
+   什么都没钉住,行号只是掩盖了这一点。
+
+   两种写法都留着:行号式在「就是要盯这一行」时仍然有意义,而且 test846 的
+   drifted 变异用的就是它。
 
 ## 为什么要显式清单,而不是从正文正则抽
 
@@ -46,17 +62,21 @@ DOCS = ARGS[1:] if len(ARGS) > 1 else ["docs/stale-issue-review.md"]
 BLOCK = re.compile(r"^```doc-claims\s*$(.*?)^```\s*$", re.M | re.S)
 
 
-def parse(text: str) -> list[tuple[str, int, str]]:
-    out: list[tuple[str, int, str]] = []
+def parse(text: str) -> list[tuple[str, int | None, str]]:
+    """两列 → (路径, None, 子串);三列 → (路径, 行号, 子串)。"""
+    out: list[tuple[str, int | None, str]] = []
     for block in BLOCK.findall(text):
         for raw in block.splitlines():
             line = raw.strip()
             if not line or line.startswith("#"):
                 continue
             parts = [p.strip() for p in line.split("::")]
-            if len(parts) != 3:
-                raise SystemExit(f"FAIL: 清单行格式不对(需要三列 :: 分隔):{raw!r}")
-            out.append((parts[0], int(parts[1]), parts[2]))
+            if len(parts) == 2:
+                out.append((parts[0], None, parts[1]))
+            elif len(parts) == 3:
+                out.append((parts[0], int(parts[1]), parts[2]))
+            else:
+                raise SystemExit(f"FAIL: 清单行格式不对(需要两列或三列 :: 分隔):{raw!r}")
     return out
 
 
@@ -87,7 +107,20 @@ def main() -> int:
                 print(f"FAIL: [missing-file] {path}:{line_no}", file=sys.stderr)
                 bad += 1
                 continue
-            content = target.read_text(encoding="utf-8").split("\n")
+            body = target.read_text(encoding="utf-8")
+            if line_no is None:
+                # 两列式:唯一性就是定位。0 次 = 引用失效;>1 次 = 这个锚点本来就
+                # 没钉住任何地方,行号只是把这件事掩盖了。
+                hits = body.count(needle)
+                if hits == 0:
+                    print(f"FAIL: [not-found] {path} 里找不到 «{needle}»", file=sys.stderr)
+                    bad += 1
+                elif hits > 1:
+                    print(f"FAIL: [ambiguous] {path} 里 «{needle}» 出现 {hits} 次 —— "
+                          f"锚点必须唯一,请加长子串", file=sys.stderr)
+                    bad += 1
+                continue
+            content = body.split("\n")
             if line_no < 1 or line_no > len(content):
                 print(
                     f"FAIL: [line-out-of-range] {path}:{line_no} (文件 {len(content)} 行)",
