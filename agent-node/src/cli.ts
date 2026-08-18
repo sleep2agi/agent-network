@@ -1000,6 +1000,17 @@ if (TELEGRAM_CHANNELS.length > 0 && RUNTIME !== "codex" && RUNTIME !== "codex-ap
 
 // ── 日志：终端 + 文件 ──
 import { appendFileSync, mkdirSync } from "fs";
+
+// #1019 —— 节点自己的版本号。sessions.version 这一列一直是空的:
+// 服务端早就收(report_status 的 schema 里有 `version`)也早就写
+// (`version = COALESCE(?9, sessions.version)`),缺的只有这一半 —— 节点从来不发。
+// 后果是「哪些节点还跑着旧码」这个问题在 Hub 上没有任何数据能答。
+//
+// 用 import 而不是运行时读 package.json:`bun build --minify` 会把 JSON
+// 在**构建期**内联,于是这个常量表示的是「这份 dist 是从哪个版本构建出来的」——
+// 正是我们想问的那件事。运行时去找 package.json 反而会受安装布局影响。
+import agentNodePackage from "../package.json";
+const AGENT_NODE_VERSION: string = agentNodePackage.version;
 const PRIVATE_LOG_DIR = GROK_EXECUTION_MODE === "cli"
   ? preparePrivateLogDirectory(LOG_DIR, persistenceRedactorHandle)
   : LOG_DIR;
@@ -1280,6 +1291,7 @@ const register = async () => {
     resume_id: RESUME_ID, alias, status: "idle",
     server: osHostname(), hostname: osHostname(),
     agent: RUNTIME_AGENT_LABEL, project_dir: process.cwd(),
+    version: AGENT_NODE_VERSION,
     node_id: NODE_ID || undefined,
     node_name: NODE_NAME || undefined,
     session_id: activeSessionId,
@@ -2855,7 +2867,7 @@ async function ensureCodexStdio(): Promise<import("./runtime/codex-stdio-client"
   });
   client.on("error", (err: Error) => log(`[codex-stdio] subprocess error: ${err.message}`));
   client.start({ cwd: process.cwd() });
-  await client.request("initialize", { clientInfo: { name: "anet/agent-node", version: "2.3.10" } });
+  await client.request("initialize", { clientInfo: { name: "anet/agent-node", version: AGENT_NODE_VERSION } });
   codexStdio = client;
   return client;
 }
