@@ -89,14 +89,29 @@ if (argv.includes("--help")) {
 
 if (argv[0] === "inspect" && argv.includes("--json")) {
   recordEnvironment("inspect");
+  // 🔴 target 必须从 config.toml 的 command 读出来，**不能写死**。
+  //    2026-08-19 拿钉死的 grok 0.2.93 离线实测（容器里 --network none）：
+  //        config.toml:  command = "/usr/local/bin/fake-bun"
+  //        grok inspect --json →  "target": "/usr/local/bin/fake-bun"
+  //    也就是 target 就是 command，逐字、绝对路径、不含 args。
+  //
+  //    这里原来写死成 `"bun"`。后果不是「夹具不够真」，是**它让一个真实的不一致
+  //    在 CI 里永远看不见**：审计要求 target === "bun"，夹具就报 "bun"，两者恒相符，
+  //    而产品生成的 config.toml 里是绝对路径 —— 三者里只有夹具和审计互相同意。
+  //    #1016 那条 P0 就是这么被藏住的（详见 #1011）。
+  const inspectConfigPath = `${process.env.GROK_HOME}/config.toml`;
+  const inspectTarget = parseTomlJsonValue(
+    fs.readFileSync(inspectConfigPath, "utf8"),
+    "command",
+  );
   process.stdout.write(JSON.stringify({
     hooks: [],
     plugins: [],
     mcpServers: [{
       name: "commhub",
       transport: "stdio",
-      target: "bun",
-      source: { type: "configToml", path: `${process.env.GROK_HOME}/config.toml` },
+      target: inspectTarget,
+      source: { type: "configToml", path: inspectConfigPath },
     }],
     lspServers: [],
     agents: [

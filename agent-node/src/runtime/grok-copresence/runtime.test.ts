@@ -335,6 +335,24 @@ describe("Grok copresence launch and injection policy", () => {
     expect(() => assertGrokCopresenceApprovalOwnership(JSON.stringify({
       ...cleanInspection,
     }), home)).not.toThrow();
+    // 🔴 #1016：产品生成的 config.toml 里 command 是 realpath 之后的绝对路径，
+    //    而钉死的 grok 0.2.93 把 target 逐字报成那个 command（2026-08-19 容器内实测）。
+    //    所以审计必须和「产品自己算出来的命令」比，不能和裸 "bun" 比。
+    //    下面第三条是 #1016 那个不一致本身：target 是裸 "bun" 而产品算出的是绝对路径。
+    const absoluteBun = "/opt/anet/bin/bun";
+    const absoluteInspection = {
+      ...cleanInspection,
+      mcpServers: [{ ...cleanInspection.mcpServers[0], target: absoluteBun }],
+    };
+    expect(() => assertGrokCopresenceApprovalOwnership(
+      JSON.stringify(absoluteInspection), home, absoluteBun,
+    )).not.toThrow();
+    expect(() => assertGrokCopresenceApprovalOwnership(
+      JSON.stringify(absoluteInspection), home, "/somewhere/else/bun",
+    )).toThrow("runtime-owned commhub");
+    expect(() => assertGrokCopresenceApprovalOwnership(
+      JSON.stringify(cleanInspection), home, absoluteBun,
+    )).toThrow("runtime-owned commhub");
     expect(() => assertGrokCopresenceApprovalOwnership(JSON.stringify({
       ...cleanInspection,
       permissions: {

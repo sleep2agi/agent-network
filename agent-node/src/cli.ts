@@ -3784,7 +3784,11 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
         );
       }
       assertNoDiscoveredGrokHooks(inspection);
-      assertGrokCopresenceApprovalOwnership(inspection, auditRuntime.grokCliHome.home);
+      assertGrokCopresenceApprovalOwnership(
+        inspection,
+        auditRuntime.grokCliHome.home,
+        commhubMcpCommand,
+      );
       let doctor: string;
       try {
         doctor = execFileSync(grokBinary, ["mcp", "doctor", "commhub", "--json"], {
