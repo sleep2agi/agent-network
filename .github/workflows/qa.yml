@@ -64,6 +64,12 @@ on:
       - 'tests/test660-explicit-prod-db-optin/**'
       - 'tests/test661-explicit-bootstrap-db/**'
       - 'tests/test683-hub-lifecycle-watcher/**'
+      - 'tests/qa-hub-17-rename-canonicalization/**'
+      - 'tests/qa-hub-19-login-guard/**'
+      - 'tests/test635-daemon-private-state/**'
+      - 'tests/test643-transient-hub-legacy-repair/**'
+      - 'tests/test671-task-runtime-evidence-hub/**'
+      - 'tests/test688-owner-gated-schedule-hub/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
       - 'agent-node/src/cli.ts'
@@ -126,6 +132,12 @@ on:
       - 'tests/test660-explicit-prod-db-optin/**'
       - 'tests/test661-explicit-bootstrap-db/**'
       - 'tests/test683-hub-lifecycle-watcher/**'
+      - 'tests/qa-hub-17-rename-canonicalization/**'
+      - 'tests/qa-hub-19-login-guard/**'
+      - 'tests/test635-daemon-private-state/**'
+      - 'tests/test643-transient-hub-legacy-repair/**'
+      - 'tests/test671-task-runtime-evidence-hub/**'
+      - 'tests/test688-owner-gated-schedule-hub/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
       - 'agent-node/src/cli.ts'
@@ -625,3 +637,46 @@ jobs:
             -t anet-${{ matrix.suite }} \
             -f tests/${{ matrix.suite }}/Dockerfile .
           docker run --rm -e ARTIFACT_DIR=/tmp/art anet-${{ matrix.suite }}
+
+  hub-orphan-gates:
+    # 名字说得出它管什么：改名规范化 / 登录闸 / daemon 私有状态 / 遗留修复 / 任务证据 / owner 门控调度。
+    name: hub semantics + guards (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - qa-hub-17-rename-canonicalization
+          - qa-hub-19-login-guard
+          - test635-daemon-private-state
+          - test643-transient-hub-legacy-repair
+          - test671-task-runtime-evidence-hub
+          - test688-owner-gated-schedule-hub
+    steps:
+      - uses: actions/checkout@v4
+
+      # 🔴 **从 Dockerfile 里读 ARG 名，不硬编码**。这六个套件有四种形状：
+      #     qa-hub-17 / qa-hub-19        无 ARG
+      #     test643 / test688            SOURCE_COMMIT
+      #     test635                      TEST635_SOURCE_COMMIT
+      #     test671                      TEST671_SOURCE_COMMIT
+      #   我在 test638 上栽过一次：它的 ARG 叫 `TEST639_SOURCE_COMMIT`（目录 638、变量 639），
+      #   我按 `SOURCE_COMMIT` 传，套件报
+      #     FAIL: source provenance mismatch image=unset expected=unset
+      #   —— 那是**调用错了**，不是套件坏了。硬编码 ARG 名会让这类误用反复发生。
+      #
+      #   ⚠️ 不加 `--network none`：基线就是这么跑的，不写没验证过的变体
+      #      （test631 那次 rc=1 就是我自己加这个限制造成的）。
+      - name: Build + run ${{ matrix.suite }}
+        run: |
+          set -euo pipefail
+          DF="tests/${{ matrix.suite }}/Dockerfile"
+          BUILD_ARGS=()
+          while read -r name; do
+            [ -n "$name" ] && BUILD_ARGS+=(--build-arg "$name=$GITHUB_SHA")
+          done < <(grep -oE '^ARG [A-Z0-9_]+' "$DF" | awk '{print $2}')
+          echo "detected build args: ${BUILD_ARGS[*]:-(none)}"
+          docker build "${BUILD_ARGS[@]}" -t "anet-${{ matrix.suite }}" -f "$DF" .
+          docker run --rm -e EXPECTED_SOURCE_COMMIT="$GITHUB_SHA" \
+            -e ARTIFACT_DIR=/tmp/art "anet-${{ matrix.suite }}"
