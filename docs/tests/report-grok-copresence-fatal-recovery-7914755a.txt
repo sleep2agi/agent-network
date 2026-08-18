@@ -110,9 +110,9 @@ therefore a pre-existing gate failure and is not claimed as green here.
 
 Rollback coordinates:
 
-    previous runtime: /home/vansin/.commhub/runtime-commdog-grok-7914755a
-    rollback dir: /home/vansin/.commhub/rollback-commdog-b830403b-20260814T161000CST
-    candidate runtime: /home/vansin/.commhub/runtime-commdog-grok-b830403b
+    previous runtime: ~/.commhub/runtime-commdog-grok-7914755a
+    rollback dir: ~/.commhub/rollback-commdog-b830403b-20260814T161000CST
+    candidate runtime: ~/.commhub/runtime-commdog-grok-b830403b
 
 ## Honest limits
 
