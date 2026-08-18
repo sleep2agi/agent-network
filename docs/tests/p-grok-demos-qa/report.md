@@ -68,7 +68,7 @@ Both git tree and filesystem confirm: `fetcher/` directory, `.env.x.example`, an
 > Verified: 5/5 `curl -I` HTTP 200 against the URLs the LLM returned for "find @sama's recent AGI posts" in the [E2E probe report].
 
 **README line 84** (verbatim):
-> All five URLs return HTTP 200 — see [`basic-urls.txt`](../../docs/tests/p-grok-native-xsearch-e2e/basic-urls.txt) for the verbatim list.
+> All five URLs return HTTP 200 — see [`basic-urls.txt`](../p-grok-native-xsearch-e2e/basic-urls.txt) for the verbatim list.
 
 **Live 2026-06-06 re-verify:**
 ```
