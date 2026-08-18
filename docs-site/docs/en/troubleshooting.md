@@ -267,6 +267,18 @@ Check Hub health, persistent volumes, the Hub URL inside the container, token fi
 
 Do not run `docker system prune`, `docker image prune -a`, or broad name-pattern cleanup on a shared host. Resolve containers and exact image references first.
 
+## Focused pages
+
+When the layer-by-layer pass above does not settle it, each of these targets one specific shape:
+
+- [**Is this node still alive**](/en/troubleshooting/is-this-node-alive) — when a dispatched task
+  goes unanswered, answer "can it still do work" first. Includes a table ordered by how much each
+  signal is worth (`status = idle` covers four different realities; only "it answered you" is hard
+  evidence).
+- [Connectivity: channels and MCP](/en/troubleshooting/connectivity-channels-mcp)
+- [CLI login on a remote node](/en/troubleshooting/remote-node-cli-login)
+- [Case: Feishu silently denies](/en/troubleshooting/case-feishu-silent-deny)
+
 ## Still unresolved
 
 Include the following in an issue:
