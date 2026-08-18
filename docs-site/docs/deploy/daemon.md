@@ -24,8 +24,24 @@ PM2、systemd、cron 看门狗不能同时管理同一个 Hub。多个守护者�
 而 `anet daemon init` / `up` 是**另一件事** —— 创建并启动一个
 `host_supervisor` 节点(RFC-026)。两者名字相近、做的事不同。
 
-另外 `anet daemon --help` 目前会打出全局帮助;要看子命令请直接敲
-`anet daemon`(不带参数)。
+🔴 **而且 `anet daemon` 只在 `preview` 通道上存在。** 按文档站首推的 `install.sh`
+装到的是 `latest`,在它上面敲这条命令得到的是:
+
+```
+$ anet daemon
+Unknown command "daemon". Did you mean: anet demo?
+（退出码 1）
+```
+
+实测 2026-08-18,用 npm 上真正的 `@sleep2agi/agent-network@2.2.21`(当时的 `latest`)
+跑二进制得到 —— 不是读 dist 猜的(那是字符串表混淆产物,grep 不作数)。
+`preview`(当时 `2.3.0-preview.39`)上同一条命令打印 `Usage: anet daemon <subcommand> …`。
+
+**所以下面这句只在 preview 上成立:** `anet daemon --help` 目前会打出全局帮助;
+要看子命令请直接敲 `anet daemon`(不带参数)。在 `latest` 上你会拿到上面那个
+`Unknown command` —— **那不是你装错了。**
+
+需要 `anet daemon` 的话,先切到 preview 通道:`npm i -g @sleep2agi/agent-network@preview`。
 :::
 
 ## 推荐入口

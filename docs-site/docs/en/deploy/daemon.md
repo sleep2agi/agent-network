@@ -26,8 +26,26 @@ This page is about **keeping the Hub alive with PM2** (`anet hub start`).
 `anet daemon init` / `up` is a different thing: it creates and starts a
 `host_supervisor` node (RFC-026). Similar names, different jobs.
 
-Also note `anet daemon --help` currently prints the global help — run
-`anet daemon` with no arguments to see its subcommands.
+🔴 **`anet daemon` only exists on the `preview` channel.** The `install.sh` this site
+recommends installs `latest`, where the command prints:
+
+```
+$ anet daemon
+Unknown command "daemon". Did you mean: anet demo?
+(exit code 1)
+```
+
+Measured 2026-08-18 by running the binary from the real npm tarball of
+`@sleep2agi/agent-network@2.2.21` (`latest` at the time) — not by reading `dist`, which
+is string-array-obfuscated and cannot be grepped for this. On `preview`
+(`2.3.0-preview.39` at the time) the same command prints `Usage: anet daemon <subcommand> …`.
+
+**So the next sentence only holds on preview:** `anet daemon --help` currently prints the
+global help — run `anet daemon` with no arguments to see its subcommands. On `latest` you
+get the `Unknown command` above — **that is not a broken install.**
+
+If you need `anet daemon`, switch channels first:
+`npm i -g @sleep2agi/agent-network@preview`.
 :::
 
 ## Recommended entry point
