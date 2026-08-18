@@ -317,7 +317,10 @@ cmp -s "$BASELINE" /tmp/bl7.bak || fail "② 它拒绝了,却还是把基线写�
 echo "  MUTATION_RED write-baseline-refuses-new-failure rc=$rc12"
 
 # ③ 引用消失时要删对,并保留表头注释
-BL_BEFORE=$(grep -cv '^\s*#\|^\s*$' "$BASELINE")
+# 🔴 `grep -c` 在计数为 0 时退出码是 1,而这一段 set -e 是开着的
+# ⇒ `VAR=$(grep -c …)` 会**静默**终止整个脚本(没有任何 FAIL 输出)。
+# 而计数为 0 恰恰是这道门**清干净了**才会出现的状态 —— 又一次「门赢了自己就坏」。
+BL_BEFORE=$(grep -cv '^\s*#\|^\s*$' "$BASELINE" || true)
 # 🔴 造场景用的 SHA 必须是**仓里不可能出现的**合成值,不能借用一个真实提交。
 #    原来这里用 22ed1886 —— 而 #834 之后 changelog 里**真的**有
 #    `blob/22ed1886/server/src/index.ts#L253`,于是下面的复原(全局把
@@ -346,7 +349,7 @@ print(f"    (造场景:把 {target} 的 {n} 处引用改钉合成 SHA,涉及 {le
 PYX
 out13=$(python3 "$CHECK" "$ROOT" --write-baseline) || fail "③ 有该删的条目时 --write-baseline 却非零"
 printf '%s' "$out13" | grep -qF "已改写基线" || fail "③ 没报告改写"
-BL_AFTER=$(grep -cv '^\s*#\|^\s*$' "$BASELINE")
+BL_AFTER=$(grep -cv '^\s*#\|^\s*$' "$BASELINE" || true)
 [[ "$BL_AFTER" -lt "$BL_BEFORE" ]] || fail "③ 基线没有变小($BL_BEFORE → $BL_AFTER)"
 head -1 "$BASELINE" | grep -q '^#' || fail "③ 改写把表头注释弄丢了"
 python3 "$CHECK" "$ROOT" >/dev/null || fail "③ 改写之后门没有转绿"
