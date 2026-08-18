@@ -36,6 +36,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      # 判据自检先跑。扫真实脚本那一步唯一的绿是「6 个脚本里没有危险行」——
+      # 正则被改坏之后打印的也是同一句 `0 findings`。--selftest 用正反例把判据
+      # 本身钉住（负控是这些脚本里真实存在的 `tmux kill-session` 和已经 -u
+      # 限定的 pkill：规则宽到把它们也报出来，这一步当场红）。
+      - run: python3 .github/scripts/check-public-script-safety.py --selftest
       # Prints the number of scripts scanned and exits 2 on an empty scope,
       # so "0 findings" can never be confused with "never ran".
       - run: python3 .github/scripts/check-public-script-safety.py
