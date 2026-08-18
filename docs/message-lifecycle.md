@@ -196,7 +196,7 @@ if (["new_task", "broadcast"].includes(ev.type)) {
 |---|------|--------|------|
 | 1 | sendReply 用 send_message | agent-node | ✅ v1.4.2 |
 | 2 | SSE 只响应 new_task / broadcast | agent-node | ✅ [cli.ts:1102 `["new_task", "broadcast"].includes(ev.type)`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1102)；`new_reply` 单独走日志记录 cli.ts:1106 |
-| 3 | 低价值消息过滤 | agent-node | ✅ v1.4.0；当前在 [cli.ts:4639 `shouldSkipMessage`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L4639) |
+| 3 | 低价值消息过滤 | agent-node | ✅ v1.4.0；当前在 [cli.ts:4657 `shouldSkipMessage`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L4657) |
 | 4 | CLAUDE.md 不对 message 回复 | 各项目 CLAUDE.md | ✅ R195 chain 模板已加 |
 | 5 | developer_instructions 安静规则 | agent-node | ✅ v1.4.1 |
 
