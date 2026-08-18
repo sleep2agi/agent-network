@@ -58,6 +58,9 @@ L0_TESTS=(
   # 它的 CI 归属是会安装依赖的层级；本地跑法见该文件头注释的门禁命令。
 )
 L1_TESTS=(
+  # 这道闸门自己的回归。放在最前:它跑的是本脚本,若闸门坏了应当最先暴露。
+  # (注册这一步不是可选的 —— 一个没被任何东西调用的套件等于不存在。)
+  "test823-l1-concurrency-cap"
   "qa-cli-01-hub-start"
   "qa-cli-02-network-create"
   "qa-dash-07-auth-boundary"
@@ -166,22 +169,35 @@ if [[ $RUN_L1 -eq 1 ]]; then
   for t in "${L1_TESTS[@]}"; do
     # Build (cached if recent)
     note "build $t"
-    # 从套件自己的 Dockerfile 推导 SOURCE_COMMIT 参数名,而不是维护一条硬编码
-    # 的 if/elif 链 —— 链的失效方式是静默的:把套件加进 L1_TESTS 却忘了加分支,
+    # build-arg 的名字**从套件自己的 Dockerfile 里读**,不靠套件名推导 ——
+    # 硬编码 if/elif 链的失效方式是静默的:把套件加进 L1_TESTS 却忘了加分支,
     # 它会在**没有 SHA 绑定**的情况下跑,而输出看起来一切正常。
     # 等价性已核:对原链覆盖的 test686/765/766/746 四个套件,推导结果与硬编码
-    # 逐字相同;新加的 test224/test597 用的是不带前缀的 ARG SOURCE_COMMIT,
+    # 逐字相同;test224/test597 用的是不带前缀的 ARG SOURCE_COMMIT,
     # 正是原链无法表达、只能再加分支的那种形状。
-    build_args=""
-    # `|| true` 不是装饰:本脚本是 set -euo pipefail,而多数套件的 Dockerfile
+    #
+    # 🔴 `|| true` 不是装饰:本脚本是 set -euo pipefail,而多数套件的 Dockerfile
     # 根本没有 ARG SOURCE_COMMIT —— grep 无命中退 1,pipefail 把它传给整个
     # 命令替换,set -e 于是在第一个这样的套件上把 runner 打死。
     # 第一版就是这么挂的:CI 在 `build qa-cli-01-hub-start` 处 exit 1,
     # 一个套件都没跑成,而失败看起来像「L1 挂了」而不是「参数推导写错了」。
+    build_args=""
     arg_name=$(grep -oE '^ARG (SOURCE_COMMIT|TEST[0-9]+_SOURCE_COMMIT)' \
       "tests/$t/Dockerfile" 2>/dev/null | head -1 | awk '{print $2}' || true)
-    if [[ -n "$arg_name" ]]; then
-      build_args="--build-arg $arg_name=$(git rev-parse HEAD)"
+    # 🔴 git 调用必须是非致命的。test823 会在一个**只装了 bash/coreutils/procps、
+    # 没有 git** 的容器里重放这个脚本(它桩了 docker 和 npm,但没桩 git)。
+    # 直接写 $(git rev-parse HEAD):容器里 git 不存在 → 127 → set -e 当场中断
+    # → docker 桩一次都没被调用 → 峰值恒为 0 → 闸门自己的回归「通过」得毫无意义。
+    _qa_sha="$(git rev-parse HEAD 2>/dev/null || true)"
+    if [[ -n "$arg_name" && -n "$_qa_sha" ]]; then
+      build_args="--build-arg $arg_name=$_qa_sha"
+    fi
+    # blob 绑定:光验 SOURCE_COMMIT 的格式不够(任何 40 位十六进制都能过,
+    # 而那个 SHA 可能根本不含镜像里被测的文件)。套件的 Dockerfile 声明了
+    # ARG RUNSH_BLOB 时才供给 —— 同样从 Dockerfile 读,不猜。
+    if grep -qE '^ARG RUNSH_BLOB' "tests/$t/Dockerfile" 2>/dev/null; then
+      _qa_blob="$(git rev-parse "HEAD:tests/$t/run.sh" 2>/dev/null || true)"
+      [ -n "$_qa_blob" ] && build_args="$build_args --build-arg RUNSH_BLOB=$_qa_blob"
     fi
     if ! dockerrun "docker build -q $build_args -t anet-$t -f tests/$t/Dockerfile ." >/tmp/qa-l1-$t-build.log 2>&1; then
       fail "L1 $t — build failed, see /tmp/qa-l1-$t-build.log"

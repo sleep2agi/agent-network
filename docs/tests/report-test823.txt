@@ -1,0 +1,36 @@
+# report-test823 — L1 concurrency cap gate
+
+Date:   2026-08-13 (Asia/Shanghai)
+Base:   034f00647d42d38d5086d7fc057eb7824a441791
+Source: 76c12e98379b67eb074a2a42e2a170e6aa94db1f
+run.sh blob: 7c4e3ebb4ecf13710d166d9a0d3f26eb43d8d9d1  (容器内就地重算并比对,不只验 SHA 格式)
+Run:    docker build --build-arg SOURCE_COMMIT=$SRC --build-arg RUNSH_BLOB=$BLOB … && docker run --rm --network none …
+Exit:   0
+
+## 本次运行
+```
+- cap=2      峰值=2 生效值=2 告警=0
+  ok   cap2: 生效上限 (= 2)
+  ok   cap2: 峰值 2 ≤ 2
+- 非法值 two  峰值=8 生效值=8 告警=1
+  ok   bad_warn: 必须告警 (= 1)
+  ok   bad_eff: 退回默认(不是静默不限) (= 8)
+- 前导零 08   峰值=8 生效值=8 告警=0
+  ok   octal_eff: 按十进制解释,不是八进制报错/不限 (= 8)
+- 0(不限)   峰值=13 生效值=0 告警=0
+  ok   zero_eff: 0 保留为「不限」的逃生口 (= 0)
+  ok   zero_conc: 不限时峰值 13 > cap2 的 2,确实放开了并发
+failures=0
+RESULT: PASS
+- cap=2      峰值=2 生效值=2 告警=0
+```
+
+## 见证红(三种)
+```
+1. 去掉 qa.sh 的取值校验段:
+  FAIL bad_warn: 必须告警 —— 期望 1,实测 0
+  FAIL bad_eff: 退回默认(不是静默不限) —— 期望 8,实测 ?
+  FAIL octal_eff: 按十进制解释,不是八进制报错/不限 —— 期望 8,实测 08
+2. 传错的 run.sh blob 哈希      → FAIL: 镜像里的 run.sh 与 SOURCE_COMMIT 声称的不是同一份 (exit 1)
+3. blob 参数对但文件被篡改      → 同上 (exit 1)
+```
