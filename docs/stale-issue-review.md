@@ -139,12 +139,18 @@ agent-node/src/cli.ts:3450               … Cross-machine artifact distribution
 
 `tests/test846-doc-claims` 会读下面这个清单,逐条打开那个文件的那一行,确认它包含声称的子串。行号一漂就红。
 
+<!-- 🔴 2026-08-18：这三条 agent-node/src/cli.ts 的行号被 #950 撞漂了 —— 那个 PR 在
+     ~:462 处插了 12 行，下面所有行号整体 +12（3468→3480 / 4291→4303 / 2388→2400）。
+     数字对得上插入量，所以是纯位移，不是内容变了。
+     这正是 #857 用「符号锚点」替换行号 pin 想解决的那件事，而这份清单还是行号制：
+     任何在上方的插入都会让它红，而红的原因和「文档说错了」在输出上长得一样。
+     换成符号锚点要动 tests/test846-doc-claims 的判据，属于另一条。 -->
 ```doc-claims
 server/src/db.ts :: 393 :: ADD COLUMN team
 agent-network/bin/cli.ts :: 5151 :: dangerously-load-development-channels
-agent-node/src/cli.ts :: 3468 :: video_gen
-agent-node/src/cli.ts :: 4291 :: Expose CURRENT_TASK_ID
-agent-node/src/cli.ts :: 2388 :: total_cost_usd
+agent-node/src/cli.ts :: 3480 :: video_gen
+agent-node/src/cli.ts :: 4303 :: Expose CURRENT_TASK_ID
+agent-node/src/cli.ts :: 2400 :: total_cost_usd
 agent-node/src/feishu-tool-deny.ts :: 250 :: bubblewrap
 server/src/tools.ts :: 3899 :: list_providers
 server/src/server.ts :: 9 :: addNetworkScope
