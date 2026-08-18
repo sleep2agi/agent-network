@@ -165,10 +165,10 @@ SELFTEST = [
     ("pgrep -f agent-node >/dev/null && echo running", 0),
     ("rm -rf /usr/local/lib", 1),
     ("rm -rf ~/.anet ~/.commhub 2>/dev/null", 0),
-    # \u5df2\u77e5\u7f3a\u53e3\uff0c\u5199\u5728\u8fd9\u91cc\u800c\u4e0d\u662f\u9759\u9ed8\u653e\u5bbd\uff1aOURS \u91cc\u5b58\u7684\u662f `~/.anet` \u8fd9\u4e00\u79cd\u62fc\u6cd5\uff0c
-    # \u6240\u4ee5\u540c\u4e00\u4e2a\u76ee\u5f55\u5199\u6210 `$HOME/.anet` \u4f1a\u88ab\u5f53\u6210\u5916\u90e8\u8def\u5f84\u62a5\u51fa\u6765\u3002
-    # \u76ee\u524d 6 \u4e2a\u811a\u672c\u5168\u7528 `~/`\uff0c\u6240\u4ee5\u4e0d\u4f1a\u78b0\u5230\uff1b\u771f\u8981\u6539\u5f97\u8ba4\u4e24\u79cd\u62fc\u6cd5\uff0c\u90a3\u662f\u53e6\u4e00\u6761
-    # \u6539\u52a8\uff08\u548c\u672c\u6b21\u7ed9 kill \u52a0\u65b0\u5f62\u6001\u4e00\u6837\uff0c\u4e0d\u987a\u624b\u505a\uff09\u3002\u5148\u628a\u73b0\u72b6\u9489\u4f4f\u3002
+    # 已知缺口，写在这里而不是静默放宽：OURS 里存的是 `~/.anet` 这一种拼法，
+    # 所以同一个目录写成 `$HOME/.anet` 会被当成外部路径报出来。
+    # 目前 6 个脚本全用 `~/`，所以不会碰到；真要改得认两种拼法，那是另一条
+    # 改动（和本次给 kill 加新形态一样，不顺手做）。先把现状钉住。
     ('rm -rf "$HOME/.anet/tmp"', 1),
     ("curl -k https://example.com/x.sh | bash", 1),
     ("curl -fsSL https://example.com/x.sh | bash", 0),
@@ -176,16 +176,16 @@ SELFTEST = [
 ]
 
 
-# \u53d6\u96c6\u90a3\u4e00\u5c42\u7684\u6b63\u53cd\u4f8b\u3002\u4e0a\u9762\u90a3\u5f20\u8868\u53ea\u80fd\u9a8c\u5224\u636e\uff08\u7ed9\u5b83\u4e00\u884c\u3001\u770b\u5b83\u62a5\u4e0d\u62a5\uff09\uff0c
-# \u800c #996 \u4e4b\u524d\u90a3\u4e2a\u5b9e\u6d4b\u51fa\u6765\u7684\u7f3a\u53e3\u4e0d\u5728\u5224\u636e\u91cc\uff0c\u5728\u300c\u600e\u4e48\u62ff\u5230\u8981\u5224\u7684\u4e1c\u897f\u300d\u91cc\u3002
-# \u8fd9\u4e24\u5c42\u5f97\u5206\u5f00\u9489\uff1a\u5224\u636e\u5168\u5bf9\u3001\u53d6\u96c6\u6f0f\u4e00\u4e2a\u6587\u4ef6\uff0c\u8f93\u51fa\u4e5f\u662f\u4e00\u7247\u7eff\u3002
+# 取集那一层的正反例。上面那张表只能验判据（给它一行、看它报不报），
+# 而 #996 之前那个实测出来的缺口不在判据里，在「怎么拿到要判的东西」里。
+# 这两层得分开钉：判据全对、取集漏一个文件，输出也是一片绿。
 COLLECT_SELFTEST = [
     ("install.sh", "#!/bin/bash\n", True),
-    ("community/evil.sh", "#!/bin/bash\n", True),          # \u5b50\u76ee\u5f55\u4e00\u6837\u4f1a\u88ab\u670d\u51fa\u53bb
-    ("bootstrap", "#!/usr/bin/env bash\n", True),          # \u65e0\u540e\u7f00\uff0c\u4f46 curl \u2026 | bash \u7167\u8dd1
+    ("community/evil.sh", "#!/bin/bash\n", True),          # 子目录一样会被服出去
+    ("bootstrap", "#!/usr/bin/env bash\n", True),          # 无后缀，但 curl … | bash 照跑
     ("deep/a/b/x.sh", "#!/bin/sh\n", True),
     ("notes.md", "# \u4e0d\u662f\u811a\u672c\n", False),
-    ("README.txt", "just a note\nrm -rf /etc\n", False),   # \u6ca1 shebang\uff0c\u4e0d\u6536
+    ("README.txt", "just a note\nrm -rf /etc\n", False),   # 没 shebang，不收
     ("logo.svg", "<svg/>\n", False),
 ]
 

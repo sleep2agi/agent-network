@@ -1,0 +1,32 @@
+# Python 注释里不许出现字面 `\uXXXX`。
+#
+# 2026-08-18 我在 #996 / #997 里连着两次写出这种注释并合进了 main。同一个
+# `\uXXXX` 写在**字符串字面量**里是对的（Python 解析时就解成了字符，selftest
+# 打印的中文完全正常），**只有注释不会被任何东西解码**。于是这个错的两副面孔里，
+# 看起来没问题的那份本来就没问题，而躺在那里的那份恰恰是唯一给人读的。
+#
+# 判据在 .github/scripts/check-no-escaped-comments.py，用 tokenize 取 COMMENT
+# token，不按行 grep —— 行里可能有字符串内的 `#`。
+
+name: lint (no escaped comments)
+
+on:
+  # 与本仓其它守卫一致：刻意不加 paths。带 paths 的 workflow 在不匹配的 PR 上
+  # 不产生 check-run，永远做不了 required check。
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  no-escaped-comments:
+    # 全仓唯一的 job name —— 分支保护里的 required check 只能按这个名字写。
+    name: no-escaped-comments
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # 打印扫过的文件数，并在取集为空时退 2 —— "0 escaped" 不能和 "根本没跑" 同形。
+      - run: python3 .github/scripts/check-no-escaped-comments.py
