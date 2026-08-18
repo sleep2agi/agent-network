@@ -40,6 +40,29 @@ PIN = re.compile(
     r"([0-9a-zA-Z._-]+)/([^\s)#\"']+)#L(\d+)\)"
 )
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
+# 🔴 #1024 —— ref 一直被捕获但从没被用过(那个组以前就叫 `_ref`)。
+#    后果:钉在历史 commit 上的 pin 会被拿**当前工作树**去校验。
+#    实例:docs-site/docs/changelog.md 把 `PINNED_SERVER_VERSION` 钉在
+#    blob/3a387204/agent-network/bin/cli.ts#L61 —— 在 3a387204 上确实是第 61 行
+#    (`61:const PINNED_SERVER_VERSION = "0.8.0";`),而当前 main 上它在 874 行。
+#    这条现在不红,只是因为这道门根本没扫 docs-site/(取集问题,另一步)。
+#    先把 ref 认对,再谈扩取集 —— 顺序反了会造出一批假红。
+IMMUTABLE_REF = re.compile(r"^[0-9a-f]{7,40}$")
+
+
+def content_at_ref(repo: Path, ref: str, rel: str) -> list[str] | None:
+    """按 pin 声明的那个 commit 取文件内容。取不到返回 None —— 不回落到工作树。
+
+    回落到工作树正是这个 bug 本身:它会让「我没拿到那个版本」
+    伪装成「我检查过了」。浅克隆里取不到历史 commit 是常态,
+    所以这种情况必须能和「检查通过」区分开。
+    """
+    try:
+        out = subprocess.run(["git", "-C", str(repo), "show", f"{ref}:{rel}"],
+                             capture_output=True, text=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return out.split("\n")
 # 锚文本里几乎总会出现的词，它们不是符号名。
 STOPWORDS = {
     "src", "bin", "dist", "lib", "docs", "main", "the", "and", "for", "see",
@@ -84,6 +107,40 @@ def candidate_symbols(anchor: str, rel: str) -> list[str]:
     return out
 
 
+
+def judge(doc: Path, repo: Path, anchor: str, rel: str, n: int,
+          lines: list[str], findings: list[str]) -> bool:
+    """判一条 pin。返回 True=判定过了(不管漂没漂),False=没能判定。
+
+    🔴 两条路径(ref=分支 / ref=commit)共用这一份判据。
+       分成两份写的话,以后只会有一份被改到 —— 而两份的输出长得一样。
+    """
+    symbols = candidate_symbols(anchor, rel)
+    judged = False
+    for sym in symbols:
+        # 🔴 词边界，不是子串。2026-08-18 实测:`createNetwork` 用子串匹配会命中
+        #    `createNetworkTokenForNode`,于是这道门给出的「现在在第 224 行」
+        #    指向的是**另一个函数**,而真正的 createNetwork 在 320 行。
+        #    判漂移时它只会让判据变松;但那句提示是给人照抄的,**一个会被照抄的
+        #    错行号,比不给提示更糟**。
+        where = [i + 1 for i, line in enumerate(lines) if re.search(rf"\b{re.escape(sym)}\b", line)]
+        if not where:
+            continue  # 改名了还是根本不是符号——分不清，不猜
+        if len(where) > UBIQUITOUS:
+            # 出现几百次的词定位不到任何东西,拿它判漂移只会制造噪音。
+            continue
+        judged = True
+        if any(abs(w - n) <= WINDOW for w in where):
+            break
+        near = min(where, key=lambda w: abs(w - n))
+        findings.append(
+            f"  🔴 {doc.relative_to(repo)}  锚文本点名 `{sym}`，钉在 {rel}#L{n}，"
+            f"但那一行是:\n       {lines[n - 1].strip()[:100]}\n"
+            f"       `{sym}` 现在在第 {near} 行（共 {len(where)} 处）")
+        break
+    return judged
+
+
 def main() -> int:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     doc_root = "docs"
@@ -91,15 +148,25 @@ def main() -> int:
         doc_root = sys.argv[sys.argv.index("--doc-root") + 1]
     repo = Path(args[0]).resolve() if args else Path.cwd()
 
-    pins = skipped = 0
+    pins = skipped = unresolved = 0
     findings: list[str] = []
     for doc in tracked_docs(repo, doc_root):
         try:
             text = doc.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        for anchor, _ref, rel, lineno in PIN.findall(text):
+        for anchor, ref, rel, lineno in PIN.findall(text):
             pins += 1
+            if IMMUTABLE_REF.match(ref):
+                # 钉在具体 commit 上 —— 拿那个 commit 的内容判,不拿工作树。
+                lines_at_ref = content_at_ref(repo, ref, rel)
+                if lines_at_ref is None:
+                    unresolved += 1
+                    continue
+                judged_here = judge(doc, repo, anchor, rel, int(lineno), lines_at_ref, findings)
+                if not judged_here:
+                    skipped += 1
+                continue
             target = repo / rel
             if not target.is_file():
                 # 文件不存在是另一道门的活（check-doc-source-pins.py），
@@ -115,31 +182,9 @@ def main() -> int:
             if not (1 <= n <= len(lines)):
                 skipped += 1  # 越界同样归另一道门
                 continue
-            symbols = candidate_symbols(anchor, rel)
-            judged = False
-            for sym in symbols:
-                # 🔴 词边界，不是子串。2026-08-18 实测:`createNetwork` 用子串匹配会命中
-                #    `createNetworkTokenForNode`,于是这道门给出的「现在在第 224 行」
-                #    指向的是**另一个函数**,而真正的 createNetwork 在 320 行。
-                #    判漂移时它只会让判据变松;但那句提示是给人照抄的,**一个会被照抄的
-                #    错行号,比不给提示更糟**。
-                where = [i + 1 for i, line in enumerate(lines) if re.search(rf"\b{re.escape(sym)}\b", line)]
-                if not where:
-                    continue  # 改名了还是根本不是符号——分不清，不猜
-                if len(where) > UBIQUITOUS:
-                    # 出现几百次的词定位不到任何东西,拿它判漂移只会制造噪音。
-                    continue
-                judged = True
-                if any(abs(w - n) <= WINDOW for w in where):
-                    break
-                near = min(where, key=lambda w: abs(w - n))
-                findings.append(
-                    f"  🔴 {doc.relative_to(repo)}  锚文本点名 `{sym}`，钉在 {rel}#L{n}，"
-                    f"但那一行是:\n       {lines[n - 1].strip()[:100]}\n"
-                    f"       `{sym}` 现在在第 {near} 行（共 {len(where)} 处）")
-                break
-            if not judged:
+            if not judge(doc, repo, anchor, rel, n, lines, findings):
                 skipped += 1
+
 
     if pins == 0:
         print(f"::error::SYMBOL-PIN: 在 {doc_root}/ 下一个 blob 行号引用都没扫到 —— 范围塌了，拒绝通过")
@@ -147,8 +192,14 @@ def main() -> int:
     for f in findings:
         print(f)
     verdict = "RED" if findings else "OK"
-    print(f"SYMBOL-PIN: {verdict}（扫到 {pins} 个 pin，判定 {pins - skipped} 个，"
-          f"跳过 {skipped} 个，漂移 {len(findings)} 个）")
+    print(f"SYMBOL-PIN: {verdict}（扫到 {pins} 个 pin，判定 {pins - skipped - unresolved} 个，"
+          f"跳过 {skipped} 个，取不到 ref {unresolved} 个，漂移 {len(findings)} 个）")
+    if unresolved:
+        # 🔴 单列一格,不并进「跳过」。「我没拿到那个 commit」和「锚文本没点名符号」
+        #    是两件事,并成一个数之后,浅克隆导致的**全体取不到**会伪装成
+        #    「都跳过了,没问题」—— 而那正是这道门最该报警的时候。
+        print(f"🔴 有 {unresolved} 条 pin 钉在取不到的 commit 上(浅克隆?)——"
+              f"它们**没有被检查**,不是通过。CI 上出现这个数就该去看 fetch-depth。")
     print("🔴 跳过的那些不是通过 —— 锚文本没点名符号，或符号在目标文件里一次都没出现，"
           "机器分不清「改名了」和「那个词本来就不是符号」。")
     return 1 if findings else 0
