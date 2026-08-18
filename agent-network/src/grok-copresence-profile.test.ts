@@ -16,6 +16,7 @@ import {
   grokCopresenceSocketPaths,
   grokPreviewResolverConfigPaths,
   prepareGrokPreviewResolverConfigs,
+  resolveGrokAttachTarget,
 } from "./grok-copresence-profile";
 
 const cleanup: string[] = [];
@@ -179,5 +180,31 @@ describe("Grok copresence profile defaults", () => {
     expect(paths.leaderSocket.startsWith("/tmp/anet-u5678/g/")).toBe(true);
     expect(Buffer.byteLength(paths.leaderSocket)).toBeLessThanOrEqual(GROK_UNIX_SOCKET_PATH_MAX_BYTES);
     expect(Buffer.byteLength(paths.attachSocket)).toBeLessThanOrEqual(GROK_UNIX_SOCKET_PATH_MAX_BYTES);
+  });
+
+  test("anet grok attach is the only join path and requires copresence + an absolute socket", () => {
+    const dir = mkdtempSync(join(tmpdir(), "anet-grok-attach-"));
+    cleanup.push(dir);
+    const socketPath = join(dir, "attach.sock");
+    expect(resolveGrokAttachTarget({
+      runtime: "grok-build-cli",
+      grokCopresence: true,
+      grokAttachSocket: socketPath,
+    })).toEqual({ ok: true, socketPath });
+    expect(resolveGrokAttachTarget({
+      runtime: "grok-build-acp",
+      grokCopresence: true,
+      grokAttachSocket: socketPath,
+    })).toEqual({ ok: false, reason: "not_grok_build_cli" });
+    expect(resolveGrokAttachTarget({
+      runtime: "grok-build-cli",
+      grokCopresence: false,
+      grokAttachSocket: socketPath,
+    })).toEqual({ ok: false, reason: "headless" });
+    expect(resolveGrokAttachTarget({
+      runtime: "grok-build-cli",
+      grokCopresence: true,
+      grokAttachSocket: "attach.sock",
+    })).toEqual({ ok: false, reason: "missing_attach_socket" });
   });
 });

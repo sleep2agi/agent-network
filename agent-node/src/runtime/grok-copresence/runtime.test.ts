@@ -4,6 +4,7 @@ import {
   existsSync,
   fstatSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -17,9 +18,13 @@ import {
 import { PassThrough } from "stream";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
-import { join, resolve } from "path";
+import { basename, join, resolve } from "path";
 import { describe, expect, test } from "bun:test";
 import { connectGrokAttach } from "../../../../agent-network/src/grok-attach-client";
+import {
+  describeGrokCopresenceLiveness,
+  resolveGrokCopresenceHubStatus,
+} from "./liveness";
 import {
   assertGrokCopresenceApprovalOwnership,
   assertGrokCopresenceVersion,
@@ -544,6 +549,83 @@ describe("Grok copresence runtime integration", () => {
       await fixture.close();
     }
   }, 8_000);
+
+  test("start reports attach=, injects a mapped reply, and a dead TUI is not idle", async () => {
+    const fixture = new RuntimeFixture();
+    const logs: string[] = [];
+    let readyIdleReports = 0;
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await openGrokCopresenceRuntime({
+        ...fixture.options(),
+        log: (message) => logs.push(message),
+        onTuiReady: () => { readyIdleReports += 1; },
+      });
+      expect(logs.some((line) => (
+        line.includes("TUI ready") && line.includes(`attach=${fixture.attachSocket}`)
+      ))).toBe(true);
+      expect(basename(fixture.attachSocket)).toBe("attach.sock");
+      expect(basename(fixture.leaderSocket)).toBe("leader.sock");
+      await waitFor(() => runtime!.tuiReady);
+      expect(lstatSync(fixture.attachSocket).isSocket()).toBe(true);
+      expect(lstatSync(fixture.leaderSocket).isSocket()).toBe(true);
+      expect(resolveGrokCopresenceHubStatus(runtime.liveness(), "idle")).toBe("idle");
+      expect(readyIdleReports).toBe(1);
+
+      let submitted = false;
+      const result = await runtime.submit({
+        taskId: "define-1",
+        from: "reviewer",
+        text: "mapped reply",
+        timeoutMs: 4_000,
+        onSubmitted: () => { submitted = true; },
+      });
+      expect(submitted).toBe(true);
+      expect(result.replyText).toBe("FINAL define-1");
+      expect(fixture.writes.join("")).toContain("[Agent Network/from=reviewer/task=define-1]");
+
+      const attached = await connectGrokAttach({
+        socketPath: fixture.attachSocket,
+        input: new PassThrough(),
+        output: new PassThrough(),
+        signalSource: fixture.signals,
+      });
+      attached.detach();
+      await attached.closed;
+
+      await runtime.close();
+      expect(runtime.isRunning).toBe(false);
+      expect(runtime.tuiReady).toBe(false);
+      expect(resolveGrokCopresenceHubStatus(
+        describeGrokCopresenceLiveness(runtime),
+        "idle",
+      )).toBe("blocked");
+      runtime = undefined;
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 10_000);
+
+  test("a TUI child mid-recovery is not reported idle", async () => {
+    const fixture = new RuntimeFixture();
+    fixture.blockRecoverySpawn = true;
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await fixture.open();
+      await waitFor(() => runtime!.tuiReady);
+      expect(resolveGrokCopresenceHubStatus(runtime.liveness(), "idle")).toBe("idle");
+      await fixture.crashCurrent();
+      await waitFor(() => fixture.recoverySpawnBlocked, 5_000);
+      expect(runtime.isRunning).toBe(false);
+      expect(resolveGrokCopresenceHubStatus(runtime.liveness(), "idle")).toBe("blocked");
+      expect(resolveGrokCopresenceHubStatus(runtime.liveness(), "working")).toBe("blocked");
+    } finally {
+      fixture.releaseRecoverySpawn();
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 10_000);
 
   test("maps keyless fake-writer file mutations to exact value-free tail subcodes", async () => {
     const cases = [

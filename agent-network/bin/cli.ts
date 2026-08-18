@@ -88,6 +88,7 @@ import {
   buildGrokPreviewResolverEnv,
   grokBuildCliCreationFields,
   prepareGrokPreviewResolverConfigs,
+  resolveGrokAttachTarget,
 } from "../src/grok-copresence-profile";
 import {
   grokCopresenceDisclosure,
@@ -4577,20 +4578,23 @@ async function grokCommand() {
     process.exit(1);
   }
   const { id: nodeId, profile } = resolved;
-  if (normalizeRuntime(profile) !== "grok-build-cli") {
-    console.error(`[anet] Node "${nodeDisplayName(nodeId, profile)}" is not a grok-build-cli node.`);
+  const attachTarget = resolveGrokAttachTarget({
+    runtime: normalizeRuntime(profile),
+    grokCopresence: profile.grokCopresence,
+    grokAttachSocket: profile.grokAttachSocket,
+  });
+  if (!attachTarget.ok) {
+    if (attachTarget.reason === "not_grok_build_cli") {
+      console.error(`[anet] Node "${nodeDisplayName(nodeId, profile)}" is not a grok-build-cli node.`);
+    } else if (attachTarget.reason === "headless") {
+      console.error(`[anet] Node "${nodeDisplayName(nodeId, profile)}" uses legacy headless grok-build-cli mode.`);
+      console.error(`[anet] Create a new grok-build-cli node or migrate its config explicitly.`);
+    } else {
+      console.error(`[anet] Node config is missing an absolute grokAttachSocket; refusing to guess the bridge identity.`);
+    }
     process.exit(1);
   }
-  if (profile.grokCopresence !== true) {
-    console.error(`[anet] Node "${nodeDisplayName(nodeId, profile)}" uses legacy headless grok-build-cli mode.`);
-    console.error(`[anet] Create a new grok-build-cli node or migrate its config explicitly.`);
-    process.exit(1);
-  }
-  const socketPath = profile.grokAttachSocket;
-  if (!socketPath || !isAbsolute(socketPath)) {
-    console.error(`[anet] Node config is missing an absolute grokAttachSocket; refusing to guess the bridge identity.`);
-    process.exit(1);
-  }
+  const socketPath = attachTarget.socketPath;
   if (!process.stdin.isTTY || !process.stdout.isTTY || typeof process.stdin.setRawMode !== "function") {
     console.error("[anet] grok attach requires an interactive TTY on stdin and stdout.");
     process.exit(1);

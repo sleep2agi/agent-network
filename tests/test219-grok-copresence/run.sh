@@ -54,9 +54,10 @@ log "[L2] single-PTY runtime integration"
 bun test \
   src/runtime/grok-copresence/runtime.test.ts \
   src/runtime/grok-copresence/leader-lifecycle.test.ts \
+  src/runtime/grok-copresence/liveness.test.ts \
   >>"$REPORT" 2>&1 \
   || fail "runtime integration tests"
-pass "FIFO/human arbitration + final reply + approval + reconnect + single bridge"
+pass "FIFO/human arbitration + final reply + approval + reconnect + single bridge + liveness"
 
 log "[L3] package build and CLI integration"
 npm run build >>"$REPORT" 2>&1 || fail "agent-node build"

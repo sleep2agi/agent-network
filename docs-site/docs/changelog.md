@@ -1,11 +1,17 @@
 # 更新日志
 
+## grok-tui liveness — Hub 不再把死 TUI 报成 idle（#1005）
+
+`runtime=grok-build-cli` + `grokCopresence`：心跳 / 任务收尾的 `report_status("idle")` 现在走 liveness 快照。TUI 子进程不在、composer 未就绪、或缺少按名存在的 `attach.sock` / `leader.sock` 时，Hub 状态是 `blocked` 而不是 `idle`。composer 就绪后再报一次 `idle`。`anet grok attach` 的资格判断抽成 `resolveGrokAttachTarget`。
+
+---
+
 ::: info 版本号体系说明
 本日志按时间倒序排列，**版本号经历过一次重新规划**：
 - **2026-05 起**：采用 v0.6 → v0.7 → v0.8 → v0.9 → v0.10 → v0.11 渐进发布，`v0.X.Y` 格式对齐 `commhub-server` 的 `0.X.Y` semver 风格
 - **2026-04 之前**：曾使用 `v1.0.0-preview.N` / `v2.1` 等过度承诺型版本号，已废弃
 - **当前 stable**：npm `latest` tag（按 [版本号体系](/guide/versioning) 查 npm latest 即为权威）；v0.8.1 是 Apache 2.0 OSS 首发版本
-- **当前 preview**：以 npm `preview` dist-tag 为准；当前发布包不含 `grok-build-cli` / `anet grok attach`。Grok TUI 状态见 [Issue #537](https://github.com/sleep2agi/agent-network/issues/537)
+- **当前 preview**：以 npm `preview` dist-tag 为准。2026-08-18 实测 `agent-node@2.5.0-preview.31` 的 `--help` 已列出 `grok-build-cli` + `ANET_CAPABILITY_GROK_COPRESENCE_V2`，`anet@2.3.0-preview.39 grok` 打印 `Usage: anet grok attach <node>`；`@latest` 仍无该命令。Hub idle 诚实度见 #1005。Grok TUI 状态见 [Issue #537](https://github.com/sleep2agi/agent-network/issues/537) / [#1005](https://github.com/sleep2agi/agent-network/issues/1005)
 - 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
 :::
 

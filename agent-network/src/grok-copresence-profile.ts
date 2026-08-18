@@ -215,6 +215,32 @@ export function grokCopresenceSocketPaths(
   throw new Error("cannot allocate a Grok copresence socket path shorter than 100 bytes");
 }
 
+export type GrokAttachTarget =
+  | { ok: true; socketPath: string }
+  | { ok: false; reason: "not_grok_build_cli" | "headless" | "missing_attach_socket" };
+
+/**
+ * `anet grok attach` eligibility. The CLI is the only human join path;
+ * this is the shipped decision so tests can drive it without a TTY.
+ */
+export function resolveGrokAttachTarget(input: {
+  runtime: string;
+  grokCopresence?: unknown;
+  grokAttachSocket?: unknown;
+}): GrokAttachTarget {
+  if (input.runtime !== "grok-build-cli") {
+    return { ok: false, reason: "not_grok_build_cli" };
+  }
+  if (input.grokCopresence !== true) {
+    return { ok: false, reason: "headless" };
+  }
+  const socketPath = input.grokAttachSocket;
+  if (typeof socketPath !== "string" || !isAbsolute(socketPath) || socketPath.includes("\0")) {
+    return { ok: false, reason: "missing_attach_socket" };
+  }
+  return { ok: true, socketPath };
+}
+
 export function grokBuildCliCreationFields(
   runtime: string,
   nodeId: string,
