@@ -116,6 +116,121 @@ if (argv[0] === "inspect" && argv.includes("--json")) {
   process.exit(0);
 }
 
+function parseTomlJsonValue(content, key) {
+  const line = content.split("\n").find((candidate) => candidate.startsWith(`${key} = `));
+  if (!line) throw new Error(`missing ${key}`);
+  return JSON.parse(line.slice(key.length + 3));
+}
+
+function parseTomlEnv(content) {
+  const line = content.split("\n").find((candidate) => candidate.startsWith("env = { "));
+  if (!line?.endsWith(" }")) throw new Error("missing env");
+  const result = {};
+  for (const pair of line.slice(8, -2).split(", ")) {
+    const at = pair.indexOf(" = ");
+    if (at < 1) throw new Error("invalid env");
+    result[pair.slice(0, at)] = JSON.parse(pair.slice(at + 3));
+  }
+  return result;
+}
+
+async function mcpRequest(child, payload) {
+  return await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`MCP timeout for ${payload.method}`)), 5_000);
+    let buffer = "";
+    const onData = (chunk) => {
+      buffer += chunk.toString("utf8");
+      for (;;) {
+        const newline = buffer.indexOf("\n");
+        if (newline < 0) break;
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+        try {
+          const message = JSON.parse(line);
+          if (message.id !== payload.id) continue;
+          clearTimeout(timer);
+          child.stdout.off("data", onData);
+          if (message.error) reject(new Error(String(message.error.message || message.error.code)));
+          else resolve(message.result);
+          return;
+        } catch {}
+      }
+    };
+    child.stdout.on("data", onData);
+    child.stdin.write(`${JSON.stringify(payload)}\n`);
+  });
+}
+
+if (argv[0] === "mcp" && argv[1] === "doctor" && argv[2] === "commhub" && argv.includes("--json")) {
+  const configPath = path.join(process.env.GROK_HOME || process.env.HOME || "", "config.toml");
+  let child;
+  try {
+    const content = fs.readFileSync(configPath, "utf8");
+    const command = parseTomlJsonValue(content, "command");
+    const args = parseTomlJsonValue(content, "args");
+    const mcpEnv = parseTomlEnv(content);
+    const canonicalCommand = fs.realpathSync(command);
+    if (!path.isAbsolute(command) || canonicalCommand !== command) throw new Error("command not canonical");
+    fs.accessSync(command, fs.constants.X_OK);
+    child = spawn(command, args, {
+      cwd: process.cwd(),
+      env: { ...process.env, ...mcpEnv },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const initialized = await mcpRequest(child, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-03-26",
+        capabilities: {},
+        clientInfo: { name: "test225-fake-grok-doctor", version: "1.0.0" },
+      },
+    });
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
+    const listed = await mcpRequest(child, {
+      jsonrpc: "2.0", id: 2, method: "tools/list", params: {},
+    });
+    const toolNames = (listed?.tools || []).map((tool) => tool?.name).sort();
+    const expectedTools = [
+      "commhub_get_all_status",
+      "commhub_send_message",
+      "commhub_send_task",
+      "commhub_upload_file",
+    ];
+    if (JSON.stringify(toolNames) !== JSON.stringify(expectedTools)) {
+      throw new Error(`unexpected tools: ${toolNames.join(",")}`);
+    }
+    recordEnvironment("mcp-doctor", {
+      commandAbsolute: path.isAbsolute(command),
+      commandCanonical: canonicalCommand === command,
+      toolNames,
+    });
+    process.stdout.write(JSON.stringify({
+      servers: [{
+        name: "commhub",
+        transport: "stdio",
+        healthy: true,
+        checks: [
+          { label: "command found", passed: true },
+          { label: "server started", passed: true },
+          { label: "handshake OK", passed: Boolean(initialized?.serverInfo) },
+          { label: "4 tools discovered", passed: toolNames.length === 4 },
+        ],
+      }],
+      healthy_count: 1,
+      failing_count: 0,
+    }) + "\n");
+    child.stdin.end();
+    child.kill("SIGTERM");
+    process.exit(0);
+  } catch (error) {
+    try { child?.kill("SIGTERM"); } catch {}
+    process.stderr.write(`fake grok: MCP doctor failed: ${error?.message || error}\n`);
+    process.exit(71);
+  }
+}
+
 function valueAfter(flag) {
   const index = argv.indexOf(flag);
   return index >= 0 ? argv[index + 1] : "";

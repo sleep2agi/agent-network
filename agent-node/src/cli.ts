@@ -3621,8 +3621,10 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
     const {
       prepareGrokCliHome,
       assertNoDiscoveredGrokHooks,
+      assertGrokCommhubMcpDoctor,
       grokCliStateKey,
       grokProjectPolicyPaths,
+      resolveGrokCommhubMcpCommand,
     } = await import("./runtime/grok-build-cli-home");
     const {
       assertGrokCopresenceFeatures,
@@ -3654,6 +3656,10 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
     if (leaderSocket === attachSocket) {
       throw new Error("grok leader and attach sockets must use different paths");
     }
+    const commhubMcpCommand = resolveGrokCommhubMcpCommand(
+      process.env.BUN_BIN || "bun",
+      process.env.PATH || "",
+    );
 
     const prepareRuntime = () => {
       const grokCliHome = prepareGrokCliHome({
@@ -3663,6 +3669,7 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
         projectCwd: grokCwd,
         useLeader: true,
         commhubMcp: {
+          command: commhubMcpCommand,
           serverPath: commhubMcpServer,
           envFile: commhubMcpEnv,
           alias: currentAlias(),
@@ -3755,6 +3762,22 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
       }
       assertNoDiscoveredGrokHooks(inspection);
       assertGrokCopresenceApprovalOwnership(inspection, auditRuntime.grokCliHome.home);
+      let doctor: string;
+      try {
+        doctor = execFileSync(grokBinary, ["mcp", "doctor", "commhub", "--json"], {
+          encoding: "utf-8",
+          stdio: ["ignore", "pipe", "pipe"],
+          timeout: 10_000,
+          maxBuffer: 2 * 1024 * 1024,
+          cwd: grokCwd,
+          env: auditRuntime.env,
+        });
+      } catch (error: any) {
+        throw new Error(
+          `grok copresence CommHub MCP readiness preflight failed (${error?.code || error?.status || "doctor error"})`,
+        );
+      }
+      assertGrokCommhubMcpDoctor(doctor);
       // Clear runtime-owned executable state once more after the inspector.
       return prepareRuntime();
     };

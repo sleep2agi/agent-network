@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "crypto";
 import { spawn } from "child_process";
 import {
+  accessSync,
   chmodSync,
   closeSync,
   constants,
@@ -22,7 +23,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "fs";
-import { basename, dirname, isAbsolute, join, parse, relative, resolve } from "path";
+import { basename, delimiter, dirname, isAbsolute, join, parse, relative, resolve } from "path";
 import { homedir } from "os";
 import { buildGrokHelperEnv } from "./grok-child-env";
 import {
@@ -43,10 +44,63 @@ export interface PrepareGrokCliHomeOptions {
 }
 
 export interface GrokCommhubMcpConfig {
+  /** Absolute, preflighted Bun executable used by the runtime-owned MCP. */
+  command: string;
   serverPath: string;
   envFile: string;
   alias: string;
   resumeId: string;
+}
+
+/**
+ * Resolve the runtime-owned CommHub MCP executable before the TUI can become
+ * ready. A bare `command = "bun"` makes recovery depend on whichever PATH
+ * happened to launch tmux, producing a false-healthy inbound-only node.
+ */
+export function resolveGrokCommhubMcpCommand(command: string, pathEnv: string): string {
+  if (!command || command.includes("\0") || command.includes("\r") || command.includes("\n")) {
+    throw new Error("grok copresence CommHub MCP command is invalid");
+  }
+  const candidates = isAbsolute(command)
+    ? [command]
+    : pathEnv.split(delimiter).filter(Boolean).map((directory) => resolve(directory, command));
+  for (const candidate of candidates) {
+    try {
+      const canonical = realpathSync(candidate);
+      if (!statSync(canonical).isFile()) continue;
+      accessSync(canonical, constants.X_OK);
+      return canonical;
+    } catch {}
+  }
+  throw new Error("grok copresence CommHub MCP command could not be resolved or executed");
+}
+
+/** Fail closed unless Grok actually starts and handshakes the one MCP server. */
+export function assertGrokCommhubMcpDoctor(doctorJson: string): void {
+  let report: any;
+  try {
+    report = JSON.parse(doctorJson);
+  } catch {
+    throw new Error("grok copresence CommHub MCP doctor returned invalid JSON");
+  }
+  const server = Array.isArray(report?.servers)
+    ? report.servers.find((candidate: any) => candidate?.name === "commhub")
+    : undefined;
+  const requiredChecks = ["command found", "server started", "handshake OK", "4 tools discovered"];
+  const checks = Array.isArray(server?.checks) ? server.checks : [];
+  const missing = requiredChecks.filter((label) => !checks.some(
+    (check: any) => check?.label === label && check?.passed === true,
+  ));
+  if (
+    report?.healthy_count !== 1
+    || report?.failing_count !== 0
+    || server?.healthy !== true
+    || missing.length > 0
+  ) {
+    throw new Error(
+      `grok copresence CommHub MCP readiness failed${missing.length ? `: ${missing.join(", ")}` : ""}`,
+    );
+  }
 }
 
 export interface GrokCliHome {
@@ -996,15 +1050,23 @@ function validateCommhubMcpConfig(
   projectCwd: string,
 ): GrokCommhubMcpConfig {
   const projectAnet = join(projectCwd, ".anet");
+  const command = resolve(config.command);
   const serverPath = resolve(config.serverPath);
   const envFile = resolve(config.envFile);
   if (
-    config.serverPath !== serverPath
+    config.command !== command
+    || config.serverPath !== serverPath
     || config.envFile !== envFile
     || serverPath !== join(projectAnet, "node-server.js")
     || envFile !== join(projectAnet, ".env")
   ) {
     throw new Error("grok-build-cli commhub MCP paths must be the canonical project .anet artifacts");
+  }
+  try {
+    if (!statSync(command).isFile() || realpathSync(command) !== command) throw new Error("not canonical");
+    accessSync(command, constants.X_OK);
+  } catch {
+    throw new Error("grok-build-cli commhub MCP command is not a canonical executable file");
   }
   const uid = process.getuid?.();
   for (const [path, label, expectedMode] of [
@@ -1028,7 +1090,7 @@ function validateCommhubMcpConfig(
       throw new Error(`grok-build-cli commhub MCP ${label} is invalid`);
     }
   }
-  return { serverPath, envFile, alias: config.alias, resumeId: config.resumeId };
+  return { command, serverPath, envFile, alias: config.alias, resumeId: config.resumeId };
 }
 
 /**
@@ -1404,7 +1466,7 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
     "",
     ...(commhubMcp ? [
       "[mcp_servers.commhub]",
-      'command = "bun"',
+      `command = ${JSON.stringify(commhubMcp.command)}`,
       `args = [${JSON.stringify(commhubMcp.serverPath)}]`,
       `env = { ANET_COMMHUB_ENV_FILE = ${JSON.stringify(commhubMcp.envFile)}, ANET_COMMHUB_MODE = "outbound-only", COMMHUB_ALIAS = ${JSON.stringify(commhubMcp.alias)}, COMMHUB_RESUME_ID = ${JSON.stringify(commhubMcp.resumeId)} }`,
       "enabled = true",
