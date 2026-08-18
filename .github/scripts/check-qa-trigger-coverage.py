@@ -31,9 +31,32 @@ TESTS_DIR = Path("tests")
 WORKFLOWS = Path(".github/workflows")
 
 
+def _strip_comments(text: str) -> str:
+    """去掉每行的 `#` 注释。
+
+    🔴 这不是洁癖,是一个**取集**缺陷的修复。下面的数组正则用 `[^)]*`,
+    它在遇到第一个 `)` 时停下 —— 而 bash 数组里**注释是合法的**,注释里出现
+    `)` 也是合法的:
+
+        L1_TESTS=(
+          # (注册这一步不是可选的 —— 一个没被调用的套件等于不存在。)
+          "test823-l1-concurrency-cap"
+          ...
+        )
+
+    正则在那个中文注释的 `)` 处截断,捕获到的内容里**一个套件名都没有**,
+    于是 `l1_suites()` 返回 [] —— 判据完全正确,取集塌了。
+
+    这次它 fail-closed(exit 2「parse regression」)所以被看见了。同一个洞
+    如果长在一个「没找到就当没有」的检查里,就是一片安静的假绿。
+    数组里的元素不会含 `#`(套件名是 kebab-case),所以按行剥注释是安全的。
+    """
+    return "\n".join(line.split("#", 1)[0] for line in text.split("\n"))
+
+
 def bash_array(text: str, name: str) -> list[str]:
     """Entries of a `NAME=( "a" "b" )` bash array, or [] when absent."""
-    m = re.search(rf"{name}=\(([^)]*)\)", text, re.S)
+    m = re.search(rf"{name}=\(([^)]*)\)", _strip_comments(text), re.S)
     return re.findall(r'"([^"]+)"', m.group(1)) if m else []
 
 
