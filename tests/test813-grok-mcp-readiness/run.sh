@@ -19,6 +19,16 @@ expect_red() {
   cp agent-network/src/node-server.ts /tmp/test813-node-server.orig
   cp agent-node/src/runtime/grok-build-cli-home.ts /tmp/test813-home.orig
   "$@"
+  # 🔴 变异必须真的改到东西。一条 sed 模式过期之后是**静默**的：它退出 0、
+  #    什么都没改，探针照常 PASS，于是打印出来的是「mutation survived」——
+  #    读起来像「产品没拦住」，实际是「根本没变异」。这两种结论指向完全不同的下一步
+  #    （去改产品 vs 去改测试），所以必须分开报。
+  if cmp -s agent-network/src/node-server.ts /tmp/test813-node-server.orig \
+     && cmp -s agent-node/src/runtime/grok-build-cli-home.ts /tmp/test813-home.orig; then
+    echo "FAIL: mutation was a no-op: $name —— 两个源文件都没被改动，" >&2
+    echo "      说明 sed 模式已经和源码对不上了（不是产品没拦住）。" >&2
+    exit 1
+  fi
   if probe >"$log" 2>&1; then
     echo "FAIL: mutation survived: $name" >&2
     cat "$log" >&2
@@ -36,8 +46,12 @@ expect_red() {
 
 probe
 
+# 🔴 2026-08-18：这条变异从写下起就是空的。原模式要求整行只有 `"commhub_upload_file",`，
+#    而真实那行是 `      name: "commhub_upload_file",`（对象字面量的字段），命中 0。
+#    套件当时不在任何 CI 里，所以没人见过它红 —— 接进 CI 的第一次运行就是它现形的时刻。
+#    删整行会破坏对象字面量语法，所以改名而不是删行。
 expect_red upload-tool-removed TOOL_SET_MISMATCH \
-  sed -i '/^[[:space:]]*"commhub_upload_file",[[:space:]]*$/d' agent-network/src/node-server.ts
+  sed -i 's/name: "commhub_upload_file"/name: "commhub_upload_file_MUT"/' agent-network/src/node-server.ts
 
 expect_red stale-three-tool-doctor 'readiness failed: 3 tools discovered' \
   sed -i 's/"4 tools discovered"/"3 tools discovered"/' agent-node/src/runtime/grok-build-cli-home.ts
