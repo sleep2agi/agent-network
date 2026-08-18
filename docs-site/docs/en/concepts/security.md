@@ -40,6 +40,30 @@ graph TB
 The server enforces network binding and membership. `api_tokens.scope` is recorded, but current authorization primarily relies on the token's user/network binding and `network_members`; do not treat the `scope` string alone as proof of permission.
 :::
 
+
+## 🔴 Known: the `latest` channel's `/health` discloses live agents to anonymous callers
+
+::: danger Do not run `bunx @sleep2agi/commhub-server` without a version
+Without a version this resolves to the npm `latest` dist-tag, and **`latest` is currently `0.8.8` (published 2026-06-24)**.
+
+On `0.8.8` an anonymous `GET /health` **returns the `{networkId}:{alias}` of every live SSE connection** — no token required.
+The redaction fix is [`7bacb729`](https://github.com/sleep2agi/agent-network/commit/7bacb729) (`security(#473)`, **2026-07-29**),
+**35 days after** `0.8.8` shipped, so `0.8.8` does not contain it.
+
+**Pin a version, or use the preview channel:**
+
+```bash
+bunx --bun @sleep2agi/commhub-server@preview      # contains the redaction fix
+```
+
+Or use the supported path, `anet hub start`, which pulls the version in `PINNED_SERVER_VERSION` rather than `latest`.
+
+Self-check: `curl -sS http://<host>:9200/health | jq 'has("sse_sessions")'` — `true` means you are on an affected build.
+:::
+
+The regression test lives at `server/src/health-redaction.test.ts` (on `main`).
+This section describes the state of a **release channel**, not of the code — the code was fixed on 2026-07-29.
+
 ## Authentication
 
 ### Token System

@@ -4,7 +4,7 @@
 **Status**: living doc — additive per P0 catch
 **Last update**: 2026-05-16
 **Vincent 5315 强调**: 「不要弄的太重」—— total 30 min/run, P3 不做 CI matrix
-**Per [`feedback_docker_smoke_real_tty`]** — Docker `--rm` isolation + real-TTY pexpect drive
+**判据** — Docker `--rm` 隔离 + 真 TTY(pexpect 驱动)
 
 ---
 
@@ -166,12 +166,12 @@ p.expect(r"选择 runtime"); p.sendline("")  # default
 
 ## 6. Anti-patterns (lessons from v0.9.0 → v0.10.9 cycles)
 
-1. **bash backticks in echo strings** ([R9 preview.6 catch](report-test-v092-preview6.md)) → cmd substitution spawns interactive wizard → container hang. Use `'` single quotes or escape `\`...\``.
-2. **`wait` without specific PIDs** ([R7 preview.5 catch](report-test-v092-preview5.md)) → blocks on long-running agent-node bg processes. Track curl PIDs: `wait "${CURL_PIDS[@]}"`.
+1. **bash backticks in echo strings** (R9 preview.6 catch — 该轮报告未进仓) → cmd substitution spawns interactive wizard → container hang. Use `'` single quotes or escape `\`...\``.
+2. **`wait` without specific PIDs** (R7 preview.5 catch — 该轮报告未进仓) → blocks on long-running agent-node bg processes. Track curl PIDs: `wait "${CURL_PIDS[@]}"`.
 3. **`kill -0 $!` on nohup intermediate** → nohup wrapper exits, child stays alive. Use commhub `/api/status` to probe liveness.
 4. **`docker run -e KEY=val`** ([v0.9.0 R5 catch](https://github.com/sleep2agi/agent-network/issues/132)) → keys visible in host `ps aux`. Use `--env-file mode 600`.
 5. **Trust dist-tag without tarball curl** ([v0.9.0 R5 catch](https://github.com/sleep2agi/agent-network/issues/132)) → `npm view ... dist-tags.latest` may be ahead of actual tarball upload. Always `curl -sI .../-/<pkg>-<ver>.tgz` first.
-6. **Trust pane visual over commhub** (preview.4 catch per 通信龙 self-correction in [feedback_pane_vs_commhub_truth](../../memory)) → pane snapshot can lag commhub HIGH messages. Commhub `mcp__commhub__get_all_status` is truth.
+6. **Trust pane visual over commhub** (preview.4,通信龙 自我更正) → pane snapshot can lag commhub HIGH messages. Commhub `mcp__commhub__get_all_status` is truth.
 7. **Use alpine for claude-agent-sdk tests** ([v0.10.0 preview.0 catch](https://github.com/sleep2agi/agent-network/issues/141)) → alpine musl-libc + glibc-only claude binary = "claude binary not found". Use slim OR `alpine + apk add gcompat libc6-compat`.
 8. **One-shot `docker run` 缺 USER node** ([v0.10.0 preview.1 R12 catch](https://github.com/sleep2agi/agent-network/issues/140#issuecomment-4466735967)) → default root user → `claude 错误: 当前以 root 用户运行,Claude Code 拒绝 --dangerously-skip-permissions` → agent-node fast-fails before MCP call. R9/R8/R7/R10 used Dockerfile `USER node` and worked; one-shot `docker run sh -c '...'` pattern dropped it. Fix: `docker run --user node ...` OR bake `USER node` into a pre-built test image. Family C cases ALL require non-root user.
 9. **runuser heredoc 默认 cwd = `/`** ([v0.10.0 R13 catch](https://github.com/sleep2agi/agent-network/issues/140#issuecomment-4466836503)) → `anet node create test-x` writes to `/.anet/nodes/test-x/`; `anet node ls` is cwd-relative and looks at `.anet/nodes/` from `/`, so node "appears missing" (B2 chain FAIL surface). **Fix**: runuser heredoc 必显式 `cd /home/node` (或 `cd ~`). agent-network 2.2.0 起 `anet create` + `anet ls` 都依赖 cwd-relative storage layout.
@@ -213,14 +213,15 @@ p.expect(r"选择 runtime"); p.sendline("")  # default
 
 **Author-Agent**: 通信测试马
 **Reviewer**: 通信龙
-**Refs**: [v010 chain-test baseline](v010-chain-test-baseline.md), [Round 9 preview.7 6/6 PASS](report-test-v092-preview7.md)
+**Refs**: v010 chain-test baseline、Round 9 preview.7 6/6 PASS —— 这两份报告**从未进过仓**
+(`git log --all --diff-filter=A` 对两个文件名都是 0 次新增),所以这里不给链接。
 
 ---
 
 ## 9. Evidence Provenance Gate (常设规则, 07-29 P3-A 事故固化)
 
 **Scope (MUST apply to)**: Docker E2E, preview smoke, 安全 gate (RFC-030 P3 identity/security), release promote (preview → latest).
-**Enforcement**: **缺 provenance manifest 不得执行对应的 transition** — 具体见 §9.8 (merge to main / preview ship / promote to latest, per pipeline)。作者自报 (author-generated report, tests committed in candidate tree) 不构成独立证据 (per [[feedback_gate_evidence_must_be_runner_generated]]).
+**Enforcement**: **缺 provenance manifest 不得执行对应的 transition** — 具体见 §9.8 (merge to main / preview ship / promote to latest, per pipeline)。作者自报(author-generated report,测试随候选树一起提交)**不构成独立证据** —— 证据必须由 runner 在被检对象之外产出,否则「被检的东西」和「检它的东西」来自同一次提交,红不了。
 
 ### 9.1 Runner requirements (MUST)
 

@@ -1,0 +1,39 @@
+# Keep qa.yml's path filter in sync with the tests CI actually runs.
+#
+# qa.yml fires on a path filter. A test directory that CI executes but that is
+# missing from the filter can be edited without its own gate re-running — the
+# change ships against whatever the gate last said, and the run looks exactly
+# like a gate that passed on the new code.
+#
+# Found on 2026-08-17: four such directories (test292-e2e-hard-gate,
+# test686-rest-shape-golden, test765-batch-runtime-gate, test766-bunx-preflight).
+# Easy to miss because tests/ holds ~166 directories and only a handful are
+# wired into CI, so "most tests are absent from the filter" is the correct
+# normal state — which is what hid the few that should not be.
+#
+# 🔴 This workflow deliberately has NO `paths:` filter. It is the guard for a
+#    path filter; gating it on paths would let a change to qa.yml's filter or to
+#    scripts/qa.sh L1_TESTS slip past the very check that watches them, and it
+#    would be the same class of blind spot the guard exists to catch.
+#
+# Python rather than an in-yml bash loop, per the team's CI-guard pattern
+# (same reasoning as public-script-safety.yml and no-memory-slugs.yml).
+
+name: lint (qa trigger coverage)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  scan:
+    # 这个 name 就是 GitHub 上那个 check 的名字，也是分支保护里 required check
+    # 唯一能写的标识符。它必须全仓唯一 —— 2026-08-18 之前，四个 workflow 的
+    # job 全叫 `scan`，于是四道门在 check 列表里挤成同一个名字：required 里
+    # 写 `scan` 指的是哪一道无法确定，而按名字统计覆盖率会把四道门算成一道。
+    name: qa-trigger-coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 .github/scripts/check-qa-trigger-coverage.py

@@ -47,10 +47,35 @@ say ""
 
 # --- Install ---
 say "${CYAN}>${RESET} Installing ${YELLOW}@sleep2agi/agent-network${RESET} globally..."
-npm install -g @sleep2agi/agent-network >/dev/null 2>&1 || {
-  say "${YELLOW}!${RESET} Default registry failed, retrying via npmmirror..."
-  npm install -g @sleep2agi/agent-network --registry https://registry.npmmirror.com
-}
+# Keep the first attempt's stderr. It used to be discarded with `2>&1` to
+# /dev/null and EVERY failure was then reported as "Default registry failed" —
+# so a permission error, a full disk, or an unsupported Node version all told
+# the reader to blame the registry, and the npmmirror retry failed the same way
+# a moment later. The reader was left with a confident, wrong story.
+NPM_LOG="$(mktemp -t anet-install.XXXXXX)"
+if ! npm install -g @sleep2agi/agent-network >"$NPM_LOG" 2>&1; then
+  # Only claim "registry" when the output actually looks like a fetch problem.
+  # Anything else is shown verbatim, because a wrong diagnosis sends the reader
+  # somewhere there is nothing to find.
+  if grep -qiE 'ETIMEDOUT|ENOTFOUND|ECONNRESET|ECONNREFUSED|EAI_AGAIN|network|registry|fetch failed|socket hang up' "$NPM_LOG"; then
+    say "${YELLOW}!${RESET} Default registry looks unreachable, retrying via npmmirror..."
+    if ! npm install -g @sleep2agi/agent-network --registry https://registry.npmmirror.com; then
+      say ""
+      say "${YELLOW}!${RESET} The mirror failed too. First attempt said:"
+      tail -n 20 "$NPM_LOG" >&2
+      rm -f "$NPM_LOG"
+      fail "npm install failed against both registries — see the output above."
+    fi
+  else
+    say ""
+    say "${YELLOW}!${RESET} npm install failed, and it does not look like a registry problem."
+    say "  Retrying a different registry would fail the same way, so here is what npm said:"
+    tail -n 20 "$NPM_LOG" >&2
+    rm -f "$NPM_LOG"
+    fail "npm install failed — see the output above."
+  fi
+fi
+rm -f "$NPM_LOG"
 
 # --- Verify ---
 if ! command -v anet >/dev/null 2>&1; then

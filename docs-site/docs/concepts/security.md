@@ -40,6 +40,31 @@ graph TB
 网络绑定和 membership 由 Server 强制检查。`api_tokens.scope` 会被记录，但当前权限判定主要依赖 token 的用户/网络绑定与 `network_members`，不要把 `scope` 字符串单独当作授权证明。
 :::
 
+
+## 🔴 已知:`latest` 通道的 `/health` 会向匿名调用方泄露在线 agent
+
+::: danger 不要不带版本地跑 `bunx @sleep2agi/commhub-server`
+不带版本会解析到 npm 的 `latest` dist-tag,而 **`latest` 目前是 `0.8.8`(发布于 2026-06-24)**。
+
+`0.8.8` 的匿名 `GET /health` 会**返回每个活跃 SSE 连接的 `{networkId}:{alias}` 明细** ——
+不需要任何 token。脱敏修复是
+[`7bacb729`](https://github.com/sleep2agi/agent-network/commit/7bacb729)(`security(#473)`,**2026-07-29**),
+比 `0.8.8` 晚 **35 天**,所以 `0.8.8` 不含它。
+
+**改用固定版本或 preview 通道:**
+
+```bash
+bunx --bun @sleep2agi/commhub-server@preview      # 已含脱敏修复
+```
+
+或走受支持的路径 `anet hub start`(它按 `PINNED_SERVER_VERSION` 拉固定版本,不走 `latest`)。
+
+自查:`curl -sS http://<host>:9200/health | jq 'has("sse_sessions")'` —— 返回 `true` 就是受影响的版本。
+:::
+
+回归测试见 `server/src/health-redaction.test.ts`(在 main 上)。
+本节记录的是**发布通道**的状态,不是代码的状态 —— 代码里这个问题 2026-07-29 就修了。
+
 ## 认证（Authentication）
 
 ### Token 体系
