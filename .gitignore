@@ -37,3 +37,10 @@ docs/dashboard-screenshots/
 
 # RFC-030 live demo (hub db + node config w/ ntok — never commit)
 .demo/
+
+# 🔴 本仓的门都是 .github/scripts/*.py。用 `python3 <script>` 跑不会产生 __pycache__，
+#    但只要有人 import 它们（生成基线、写 selftest、在别的脚本里复用判据）就会产生。
+#    2026-08-18 我生成 bun-pin 基线时就撞了一次 —— 当时是手动 rm 掉的，
+#    而「靠人记得手动删」不是一个能长期成立的安排。
+__pycache__/
+*.pyc
