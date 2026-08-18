@@ -32,7 +32,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
+      # 🔴 fetch-depth: 0 是必需的（#1024）。钉在具体 commit 上的 pin 现在会用
+      #    `git show <ref>:<path>` 去取那个版本的内容 —— 默认的浅克隆（depth 1）
+      #    里那些 commit 不存在，脚本会把它们全部记进「取不到 ref」并**不做检查**。
+      #    那种情况下这道门看起来仍然是绿的，只是它什么都没查。
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -40,3 +46,11 @@ jobs:
       # 它同时打印**跳过了多少** —— 一个只说「0 处漂移」不说「跳过 10 处」的门，
       # 读起来像「全都查过了」。
       - run: python3 scripts/check-doc-symbol-pins.py .
+
+      # 🔴 #1024 —— docs-site/ 之前完全在这道门的取集之外。
+      #    实测：44 条 pin 里 28 条在 docs-site/（其中 22 条 ref=main，会漂），
+      #    而 docs-site/ 正是对外发布的那份文档；docs/ 是仓内给开发者看的。
+      #    也就是说被守住的是开发者读的那份，没被守住的是用户撞上的那份。
+      #    扩进来当场抓到 4 条真漂移（changePassword L267->L417、logAudit L447->L1394，
+      #    各有中英两份），已在本 PR 一并修掉。
+      - run: python3 scripts/check-doc-symbol-pins.py . --doc-root docs-site

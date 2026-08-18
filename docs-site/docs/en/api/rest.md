@@ -345,7 +345,7 @@ curl -X POST http://localhost:9200/api/auth/password \
 
 `revoked` is the number of utok\_/atok\_ tokens on **other devices** that were just revoked (it does **not** include the caller's own token — that one is revoked separately by `revokeToken(resolved.user.user_id, resolved.tokenId)` in the password-change handler in `server.ts`).
 
-**Key side effects** (verify [`auth.ts:267-282 changePassword + revokeOtherUserTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L267) + [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
+**Key side effects** (verify [`auth.ts:267-282 changePassword + revokeOtherUserTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L417) + [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
 1. **The caller's `utok_`** (`resolved.tokenId`) is revoked immediately ([`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) `revokeToken(...)` explicit delete)
 2. **All other devices' `utok_` / `atok_`** are also revoked in one shot ([`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) — grep `network_id IS NULL AND token_id != ` `DELETE ... WHERE user_id=? AND network_id IS NULL AND token_id != ?currentTokenId`) — the count is returned in the `revoked` field
 3. **`ntok_` tokens are unaffected** (`revokeOtherUserTokens` filters on `network_id IS NULL`, so agent nodes using `ntok_` keep running through a password change; matches the [account-system / Change Password](/en/guide/account-system#change-password) narrative)

@@ -335,7 +335,7 @@ curl -X POST http://localhost:9200/api/auth/password \
 
 `revoked` 字段是**其他设备**上被撤销的 utok\_/atok\_ 数量（不含本次调用方自己的 token，那个由 `server.ts` 改密处理函数里的 `revokeToken(resolved.user.user_id, resolved.tokenId)` 单独撤销）。
 
-**关键副作用** (verify [`auth.ts:267-282 changePassword + revokeOtherUserTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L267) + [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
+**关键副作用** (verify [`auth.ts:267-282 changePassword + revokeOtherUserTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L417) + [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
 1. **当前调用方的 `utok_`** (`resolved.tokenId`) 立即撤销（[`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) `revokeToken(...)` 显式删）
 2. **其他设备的所有 `utok_` / `atok_`** 同步撤销（[`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) 搜 `network_id IS NULL AND token_id != ` `DELETE ... WHERE user_id=? AND network_id IS NULL AND token_id != ?currentTokenId` 一锅端）—— 计数返回到 `revoked` 字段
 3. **`ntok_` 不受影响**（`revokeOtherUserTokens` 只删 `network_id IS NULL` 的 token，agent node 用 `ntok_` 跑着的不会被改密打断；跟 [account-system 改密码副作用](/guide/account-system#修改密码) ZH 描述一致）
