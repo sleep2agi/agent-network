@@ -577,6 +577,29 @@ Get all session statuses. Sessions without a heartbeat for over 10 minutes are a
 `get_all_status` runs `SELECT * FROM sessions` ([`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) — grep `SELECT * FROM sessions WHERE 1=1`, no JOIN). The `sessions` table schema ([`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) — grep `CREATE TABLE IF NOT EXISTS sessions` + V2 migration [`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) — grep `ALTER TABLE sessions ADD COLUMN`) **has a `model` column** — the V2 migration runs `ALTER TABLE sessions ADD COLUMN model`, and `report_status`'s `sessions` upsert unconditionally writes `sessions.model = COALESCE(model, old)` ([`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) — grep `INSERT INTO sessions` inside `report_status` (these columns are written by `report_status`, not by the tool documented in this section) and `model = COALESCE(?20, sessions.model)`). So `get_all_status` returns each session's `model` directly (`null` if the agent never passed a `model` parameter). The `nodes` table also keeps a copy of `model` (synced by `report_status` when `node_id` is passed) as the more durable source. `summary` is the status-grouped count over the entire scope (same as `list_tasks`'s `stats`).
 :::
 
+
+::: danger 🔴 `status` answers "what it last reported", not "is it working right now"
+`sessions.status` / `progress` are updated **only at the moment a node calls `report_status`**
+([`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 搜 `INSERT INTO sessions` inside `report_status`), and `report_completion`
+resets them to idle ([`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 搜 `UPDATE sessions SET status = 'idle', task = NULL, progress = 0` inside `report_completion`).
+
+**Nothing in between updates it on the node's behalf.** So `status: "idle"` covers at least three different realities:
+
+| | Reality | What the panel shows |
+|---|---|---|
+| ① | Genuinely idle | `idle` |
+| ② | Got a task but never consumed it (wedged / loop not waking) | `idle` |
+| ③ | **Running a long task and not reporting mid-way** | `idle` |
+
+🔴 **Measured 2026-08-18**: a node showed `status=idle` / `progress=100` with a heartbeat under 2.5 minutes old for 75 straight minutes, and its own reply said it had been running a long sync the whole time — case ③.
+
+**`task` is even easier to misread: it may be something the *sender* wrote.** `send_task` stamps the first 200 chars of the task onto the target session inside its own transaction ([`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 搜 `UPDATE sessions SET task = ?1` inside `send_task`); `report_status` can write the same column too (`COALESCE` — omitting it keeps the old value).
+
+⇒ **Seeing your own text in `task` proves the hub recorded that you sent it. It does not prove the node read it. That is the echo of your own action.**
+
+**There is exactly one structurally sound way to tell whether a node is working: send something that requires a reply, and see whether it replies.** The status panel cannot answer this — not because the data is stale, but because of *when* these columns are written.
+:::
+
 ---
 
 ### get_session_status
