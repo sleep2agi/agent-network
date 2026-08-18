@@ -507,6 +507,22 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     process.exit(1);
   }
 
+  // 🔴 凭据不在隔离 HOME 里时，codex TUI 会**静默**停在登录选择页(issue #853)：
+  //    人 attach 上去只看到 "Sign in with ChatGPT / …"，没有任何东西说明为什么。
+  //    本仓另外两条路径都做了凭据物化(grok 用 ensureCredentialLink 符号链接、
+  //    opencode 用 writeOpencodePresetIfRequested 写独立文件)，只有 codex 这条没有。
+  //    "补哪一种"是个隔离取向的决定(共享刷新 vs 真隔离)，不在这里定；
+  //    但**让失败说出原因**不需要等那个决定。
+  try {
+    const isolatedAuth = join(opts.codexHome, "auth.json");
+    const defaultAuth = join(homedir(), ".codex", "auth.json");
+    if (!existsSync(isolatedAuth) && existsSync(defaultAuth)) {
+      console.error(`[anet] ⚠ ${isolatedAuth} 不存在，而 ${defaultAuth} 存在。`);
+      console.error(`[anet]   codex TUI 会停在登录选择页，且不会说明原因（#853）。`);
+      console.error(`[anet]   要用现有登录态，把凭据放进这个隔离 HOME；或先在该 HOME 下登录一次。`);
+    }
+  } catch { /* 这只是提示，取不到就算了，绝不因此拦住启动 */ }
+
   const { appsrv: appsrvSession, bridge: bridgeSession, tui: tuiSession } =
     copresenceTmuxSessions(displayName);
 
