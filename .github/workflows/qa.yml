@@ -58,6 +58,7 @@ on:
       - 'tests/test233-grok-main-integration/**'
       - 'tests/test234-grok-profile-disclosure/**'
       - 'tests/test235-grok-mcp-outbound-only/**'
+      - 'tests/test219-grok-copresence/**'
   push:
     branches: [main]
     paths:
@@ -106,6 +107,7 @@ on:
       - 'tests/test233-grok-main-integration/**'
       - 'tests/test234-grok-profile-disclosure/**'
       - 'tests/test235-grok-mcp-outbound-only/**'
+      - 'tests/test219-grok-copresence/**'
 
 # Older runs on the same ref get cancelled — saves minutes when a PR is
 # updated rapidly. main pushes run independently.
@@ -477,3 +479,21 @@ jobs:
             -f tests/test235-grok-mcp-outbound-only/Dockerfile .
           docker run --rm --network none -e ARTIFACT_DIR=/tmp/art \
             anet-test235-grok-mcp-outbound-only
+
+      # 🔴 这个套件是本批里最重的一格 —— 它一次跑 **311 个测试**：
+      #     Summary: PASS (311 tests, 0 failures; all validation ran inside Docker)
+      #     PASS: FIFO/human arbitration + final reply + approval + reconnect + single bridge + liveness
+      #   覆盖的是共存运行时的核心行为(FIFO 仲裁 / 最终回复 / 审批 / 重连 / 单桥 / 存活判定)，
+      #   而对着 origin/main 数，它的 CI 引用数是 **0** —— 一次都没跑过。
+      #   这不是「有些测试没跑」，是「共存核心行为的 311 条断言没跑」。
+      #
+      #   直接做阻塞门，不套 known-failure 棘轮：基线跑过，它是**真绿**的。
+      #   `--network none -e ARTIFACT_DIR=/tmp/art` 是那次基线用的**同一条命令**，
+      #   不往 workflow 里写没验证过的变体。
+      - name: Build + run test219-grok-copresence
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-test219-grok-copresence \
+            -f tests/test219-grok-copresence/Dockerfile .
+          docker run --rm --network none -e ARTIFACT_DIR=/tmp/art \
+            anet-test219-grok-copresence
