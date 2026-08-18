@@ -13,17 +13,15 @@
 name: lint (public script safety)
 
 on:
+  # 🔴 同样刻意不加 paths。原来只在 `docs-site/docs/public/**` 变化时触发 ——
+  # 而这道门要防的是「公开仓里出现危险脚本」,**危险脚本不会只出现在那一个目录**。
+  # 去掉过滤后它对每个 PR 都跑,也才具备做 required check 的资格
+  # (带 paths 的 workflow 在不匹配的 PR 上不产生 check-run,会永远挂在 Expected)。
+  #
+  # 代价实测:main 上最近三次运行 11s / 13s / 9s。
   pull_request:
-    paths:
-      - 'docs-site/docs/public/**'
-      - '.github/scripts/check-public-script-safety.py'
-      - '.github/workflows/public-script-safety.yml'
   push:
     branches: [main]
-    paths:
-      - 'docs-site/docs/public/**'
-      - '.github/scripts/check-public-script-safety.py'
-      - '.github/workflows/public-script-safety.yml'
 
 jobs:
   scan:
