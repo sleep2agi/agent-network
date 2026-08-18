@@ -88,7 +88,15 @@ def read_sources() -> dict[str, str]:
         return {}
     return {
         str(p): p.read_text(encoding="utf-8", errors="replace")
-        for p in sorted(SRC_DIR.glob("*.ts"))
+        # 🔴 rglob，不是 glob。2026-08-18 实测（当时是非递归）：顶层 105 个 .ts，
+        # 递归 111 个 —— `server/src/shared/` 下那 6 个在这道棘轮外面。
+        # 棘轮的输出是一个**数**（bypassing_helper=11），所以一个写在子目录里、
+        # 直读 `?token=` 的新调用点不会把数抬高：它根本不在分母里，打印出来的
+        # 和真绿逐字相同。分母从同一个 glob 算，永远自洽，也永远看不见 glob 外面。
+        # 放宽后分母 36 → 39（shared/ 那 6 个里 3 个是 .test.ts，本来就排除；
+        # 剩下 3 个非测试文件今天一条命中都没有），三个计数一个不变，绿起点，
+        # 基线不动。
+        for p in sorted(SRC_DIR.rglob("*.ts"))
         if not p.name.endswith(".test.ts")
     }
 
