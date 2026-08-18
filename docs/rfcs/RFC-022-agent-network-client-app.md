@@ -5,7 +5,7 @@
 | **作者** | 通信SDK马 |
 | **状态** | Draft v0.1 (RFC + 原型骨架同 commit ship, 待 通信龙 review + Vincent 拍板下一步 scope ramp) |
 | **关联 issue** | TBD (通信龙 cross-link 后回填) |
-| **关联 RFC** | [RFC-012](RFC-012-codex-mobile-bridge.md) (codex Mobile bridge — complementary, 不是 supersede) · [RFC-017](RFC-017-dashboard-org-chart-view.md) (dashboard 现状) · [RFC-020](RFC-020-im-platform-integration.md) (IM 接入 — 共享 chat 抽象) |
+| **关联 RFC** | [RFC-012](RFC-012-codex-mobile-bridge.md) (codex Mobile bridge — complementary, 不是 supersede) · RFC-017 (dashboard 现状) —— ⚠️ **这份 RFC 从未提交进本仓**(`git ls-files docs/rfcs | grep RFC-017` 无命中),原来那个链接是坏的,故此处不再链 · [RFC-020](RFC-020-im-platform-integration.md) (IM 接入 — 共享 chat 抽象) |
 | **关联 backlog** | [#107](https://github.com/sleep2agi/agent-network/issues/107) (codex Mobile + remote-control 调研, R237 已 pending) |
 | **创建** | 2026-05-30 北京 (UTC+8) |
 | **依据** | commhub-server 现 HTTP/SSE API surface (40+ endpoints) + dashboard 复用模式 + ntok_/utok_ 双 token 体系 |

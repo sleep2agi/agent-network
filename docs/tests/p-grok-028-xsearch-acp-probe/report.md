@@ -76,7 +76,7 @@ video_gen in list? YES
 
 ### 3. R83 X-search re-audit 实证 — LLM 实际行为(0.2.8 alpha 上)
 
-参考 [`docs/research/grok-x-search-capability-probe.md`](../../research/grok-x-search-capability-probe.md) erratum 区块 + [`probe.log`](../../../tests/p-grok-x-reaudit) (session `019e6ed8`):
+参考 [`docs/research/grok-x-search-capability-probe.md`](../../research/grok-x-search-capability-probe.md) erratum 区块 + `probe.log`(session `019e6ed8`,⚠️ 原文链到 `tests/p-grok-x-reaudit`,该路径全仓不存在 —— 那份日志没有进仓):
 
 ```
 [tool_call] title="web_search" rawInputKeys=["query","allowed_domains"]
