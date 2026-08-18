@@ -17,6 +17,7 @@ import { dirname, isAbsolute, join, resolve } from "path";
 import { setTimeout as delay } from "timers/promises";
 import { StringDecoder } from "string_decoder";
 import { startGrokAttachServer, type GrokAttachServer } from "./attach";
+import { describeStuckPhase } from "./stuck-phase-alarm";
 import {
   newGrokJsonlState,
   flushPendingGrokNetworkReply,
@@ -662,6 +663,10 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   readonly attachSocket: string;
 
   private arbitration = newGrokCopresenceState();
+  // issue #870: when the arbitration phase entered its current value. Only
+  // moved on an actual phase change, so receiving a task while busy cannot
+  // reset the clock that is supposed to reveal being stuck.
+  private phaseSince = Date.now();
   private logState: GrokJsonlState = newGrokJsonlState();
   private pty: GrokPtyLike | null = null;
   private activeTui: GrokTuiGeneration | null = null;
@@ -937,7 +942,23 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       // attach socket can claim the composer before network injection.
       setImmediate(() => this.scheduleNetworkIfIdle());
       this.broadcastState();
-      if (wasBusy) this.log(`[grok-copresence] queued network task ${opts.taskId}`);
+      if (wasBusy) {
+        // issue #870: `queued network task <id>` on its own reads exactly like
+        // an ordinary busy node. The two facts that separate "busy" from
+        // "stuck" — which phase, and for how long — were already known here and
+        // were simply not being said.
+        const phaseAgeMs = Date.now() - this.phaseSince;
+        this.log(`[grok-copresence] queued network task ${opts.taskId} `
+          + `(phase=${this.arbitration.phase}, ${Math.round(phaseAgeMs / 1000)}s in phase, `
+          + `${this.arbitration.queue.length} queued)`);
+        const stuck = describeStuckPhase({
+          phase: this.arbitration.phase,
+          phaseAgeMs,
+          alreadyQueued: Math.max(0, this.arbitration.queue.length - 1),
+          taskTimeoutMs: timeoutMs,
+        });
+        if (stuck) this.warn(`[grok-copresence] ${stuck}`);
+      }
     });
   }
 
@@ -2188,8 +2209,10 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   }
 
   private transition(event: GrokCopresenceEvent) {
+    const previousPhase = this.arbitration.phase;
     const result = reduceGrokCopresenceState(this.arbitration, event);
     this.arbitration = result.state;
+    if (result.state.phase !== previousPhase) this.phaseSince = Date.now();
     if (result.accepted && event.type === "schedule_network") {
       this.activeTurnTerminalEventSeen = false;
     } else if (result.accepted && event.type === "human_input_submitted") {
