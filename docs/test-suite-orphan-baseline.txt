@@ -121,7 +121,6 @@ test618-claude-vendor-env
 test621-test384-layer-isolation
 test624-task-cursor-pagination
 test625-explicit-env-crlf
-test629-mcp-schema-policy
 test632-honest-sse-recovery
 test633-doctor-locale
 test637-database-url-guard

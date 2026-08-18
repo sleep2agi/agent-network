@@ -10,16 +10,16 @@ function assert(condition: unknown, message: string): asserts condition {
 const expectedTools = [
   "submit_skill", "list_skills", "get_skill", "review_skill",
   "report_status", "report_completion", "get_inbox", "ack_inbox",
-  "get_all_status", "get_session_status", "send_task", "send_message",
-  "send_reply", "send_ack", "retry_task", "get_task", "list_tasks",
+  "mark_tasks_runtime_submitted", "mark_tasks_consumed", "get_all_status", "get_session_status",
+  "send_task", "send_message", "send_reply", "send_peer_reply",
+  "send_ack", "retry_task", "get_task", "list_tasks",
   "cancel_task", "reassign_task", "broadcast", "get_completions",
-  "update_node_config", "get_config_update", "ack_config_update",
-  "restart_node", "list_host_supervisors", "create_node",
-  "get_create_request", "ack_create_request", "stop_node", "delete_node",
-  "get_stop_request", "ack_stop_request", "list_my_children",
-  "upsert_network_secret", "list_network_secrets", "upsert_provider",
-  "list_providers", "probe_provider_model", "get_probe_results",
-  "get_probe_request",
+  "update_node_config", "get_config_update", "ack_config_update", "restart_node",
+  "list_host_supervisors", "create_node", "get_create_request", "ack_create_request",
+  "stop_node", "delete_node", "get_stop_request", "ack_stop_request",
+  "list_my_children", "upsert_network_secret", "list_network_secrets", "upsert_provider",
+  "update_provider", "list_providers", "probe_provider_model", "get_probe_results",
+  "get_probe_request", "ack_probe_request",
 ];
 
 const toolsSource = readFileSync("src/tools.ts", "utf8");
@@ -27,11 +27,11 @@ const sdkVersion = JSON.parse(
   readFileSync("node_modules/@modelcontextprotocol/sdk/package.json", "utf8"),
 ).version as string;
 assert(/^1\.(?:29|30)\./.test(sdkVersion), `real MCP SDK version is recorded (${sdkVersion})`);
-const registeredTools = [...toolsSource.matchAll(/server\.tool\(\s*\n\s*"([^"]+)"/g)]
+const registeredTools = [...toolsSource.matchAll(/server\.(?:tool|registerTool)\(\s*\n\s*"([^"]+)"/g)]
   .map(match => match[1]);
 assert(
   JSON.stringify(registeredTools) === JSON.stringify(expectedTools),
-  "all 41 production MCP registrations are explicitly inventoried in source order",
+  `all ${expectedTools.length} production MCP registrations are explicitly inventoried in source order`,
 );
 
 // This is the production registration style today: a raw Zod shape passed to
@@ -87,6 +87,6 @@ assert(
   "telemetry wrapper preserves the current stripped handler contract",
 );
 
-console.log("inventory_count=41");
+console.log(`inventory_count=${expectedTools.length}`);
 console.log(`sdk_version=${sdkVersion}`);
 console.log("recommended_policy=observe-key-shape-then-strip");
