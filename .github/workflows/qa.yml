@@ -103,6 +103,9 @@ on:
       - 'tests/test625-explicit-env-crlf/**'
       - 'tests/test632-honest-sse-recovery/**'
       - 'tests/test633-doctor-locale/**'
+      - 'tests/test166-task-diagnostics/**'
+      - 'tests/test365-nonimage-read-attachments/**'
+      - 'tests/test585-codex-runtime-singleflight/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
       - 'agent-node/src/cli.ts'
@@ -204,6 +207,9 @@ on:
       - 'tests/test625-explicit-env-crlf/**'
       - 'tests/test632-honest-sse-recovery/**'
       - 'tests/test633-doctor-locale/**'
+      - 'tests/test166-task-diagnostics/**'
+      - 'tests/test365-nonimage-read-attachments/**'
+      - 'tests/test585-codex-runtime-singleflight/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
       - 'agent-node/src/cli.ts'
@@ -752,6 +758,9 @@ jobs:
           - test625-explicit-env-crlf
           - test632-honest-sse-recovery
           - test633-doctor-locale
+          - test166-task-diagnostics
+          - test365-nonimage-read-attachments
+          - test585-codex-runtime-singleflight
     steps:
       - uses: actions/checkout@v4
 
