@@ -114,3 +114,54 @@ The boot script behavior is exercised by the Docker gate in
 `tests/test736-pm2-fleet-rebuild/`. A full empty-host production recovery has
 not been performed. External Weixin authority, secret backup record names, and
 production data restoration remain NOT COVERED.
+
+## 第二层:agent 节点(`anet-nodes-boot.service`)
+
+🔴 **这一层此前只存在于那台机器上。** 仓里有 `pm2-fleet.*`,没有它 —— 于是从仓库看,
+「~100 个 agent 节点没有任何开机托管」是一个**看起来完全成立**的结论(#839 就是这么写的),
+而实际上托管层一直在跑。**机器没了,这 281 行就没了。**
+
+| | 管什么 | 单元 |
+|---|---|---|
+| 第一层 | `commhub-hub` / `anet-dashboard` / `weixin-*` | `pm2-fleet.service` |
+| **第二层** | **跨 ~20 个 project 的 agent 节点** | **`anet-nodes-boot.service`** |
+
+二层 `After=pm2-fleet.service` —— hub 必须先起来,节点才注册得上。
+
+### 判据的演进(这段历史比脚本本身更值钱)
+
+脚本头部的 v2.2 → v2.5 记着四次**判据从松改紧**,每一次都是「存在 ≠ 可用」的一个新形状:
+
+- **v2.2** 137 个目录里 18 个没有 `config.json` ⇒ 分母改成「有 config.json」;
+- **v2.3** 全域重名检测 —— 同一个 alias 有两份 config;
+- **v2.4** 分母收窄到「有 config 且 `config.token` 非空」;
+- **v2.5** 🔴 `token` **存在**还不够,要看**类型**:有的节点拿的是 `utok_`(用户 token)
+  而 SSE 需要 `ntok_`(节点 token)⇒ 判据收紧到三条件
+  `(a) 有 config.json` + `(b) runtime ∈ 支持集` + `(c) token 以 ntok_ 开头`。
+
+### 已知缺陷(committed 时就是红的,不假装它是绿的)
+
+`2026-08-18 00:39:16` 那次 `exit 1`:
+
+```
+🔴 sweep 未达成：still_missing=6 fail_projects=0 conflict=1 → exit 1
+   缺失示例：opencode测试1号 指挥狗 通信狗 P站狗 mino A站狗
+```
+
+逐个核过(tmux / pm2 / hub 心跳三个视角):**5 个是真的没起来,1 个是假红。**
+
+- **假红**:`opencode测试1号` 由 **pm2** 托管(`opencode-node-测试1号`,online,心跳新鲜),
+  而 post-flight 只枚举 tmux ⇒ **一个正确运行的节点让整个单元 exit 1**。
+- 🔴 **同一个判据的另一个方向更危险**:`指挥狗` 的 tmux session(`opencode-指挥狗`)当时**还在**,
+  而它在 hub 上已经 offline 41 小时。它被判缺失**纯粹因为 session 名带了前缀、精确匹配没命中**
+  —— **是被一个拼写差异救回来的,不是被判据救回来的**。命名一旦统一,这类「壳在、人没了」
+  的节点就会被判成「在」。
+
+⇒ **post-flight 应该改判 hub 上该 alias 的心跳新鲜度**,那是唯一与托管方式(tmux / pm2 / 别的)
+无关的事实。本次提交**不改判据**,只把东西放进仓里 —— 改判据要单独一条,并且要有能红的夹具。
+
+### 还没被验证过的那一格
+
+`anet-nodes-boot.service` **从未经历过一次真实开机**:机器 `2026-08-17 07:06:39` 起来,
+而已知的那次运行是 `2026-08-18 00:36`,差 17.5 小时。**开机链路(linger + WantedBy=default.target)
+本身是通的,但「开机时它会不会成功」没有观测。**

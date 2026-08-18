@@ -1,0 +1,21 @@
+[Unit]
+Description=anet agent nodes boot sweep (~/*/.anet + ~/.anet, per-alias idempotent, retry up to 2)
+Documentation=https://github.com/sleep2agi/agent-network
+# 🔴 二层依赖一层：hub / dashboard 必须先起来才能注册节点
+After=pm2-fleet.service
+Wants=pm2-fleet.service
+# 🔴 network-online.target 不写（user manager 无此 target；fleet 单元里已注释过原因）
+After=basic.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=%h/.local/bin/anet-nodes-boot.sh
+# 🔴 故意不设 ExecStop：跟 pm2-fleet.service 同款 —— stop 单元时绝不能顺手关 90 节点。
+#    要拆节点走 anet project down 显式操作。
+# 🔴 v2 放宽到 1800s：单 project timeout 按节点数动态算（60 + 25n），
+#    tmteam 22 节点得 610s；最多 2 轮重试；20 project + retry 需要更大兜底。
+TimeoutStartSec=1800
+
+[Install]
+WantedBy=default.target
