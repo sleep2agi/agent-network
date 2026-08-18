@@ -139,22 +139,27 @@ agent-node/src/cli.ts:3450               … Cross-machine artifact distribution
 
 `tests/test846-doc-claims` 会读下面这个清单,逐条打开那个文件的那一行,确认它包含声称的子串。行号一漂就红。
 
-<!-- 🔴 2026-08-18（第二次）：这三条 agent-node/src/cli.ts 的行号又漂了。
-     第一次是 #950 在 ~:462 插了 12 行，整体 +12（3468→3480 / 4291→4303 / 2388→2400）。
-     第二次是 #885 那道 deny 名单门（PR #984）：cli.ts 的两个 denyPaths 调用点从内联
-     字面量改成 grokCliDenyPaths(...)，净变化只有 +1 行，却把三条 pin 打散成
-     3480→3481 / 4303→4302 / 2400→2401 —— **两个方向都有**，因为增删发生在不同位置。
-     🔴 值得记的是量级：一次 +12/-11 的改动，让三条本来正确的文档引用同时变错。
-     这正是 #857 用「符号锚点」替换行号 pin 想解决的那件事，而这份清单还是行号制：
-     任何在上方的增删都会让它红，而红的原因和「文档说错了」在输出上长得一样。
-     换成符号锚点要动 tests/test846-doc-claims 的判据，属于另一条（#852 已把
-     docs/ 的符号锚点门建起来了，这份清单是它还没覆盖到的最后一处行号制）。 -->
+<!-- 🔴 这三条 agent-node/src/cli.ts 原本是行号式，三天里漂了两次：
+       #950  在 ~:462 插了 12 行 → 三条整体 +12（3468→3480 / 4291→4303 / 2388→2400）
+       #984  对 cli.ts 净 +1 行   → 同样三条被打散成 3480→3481 / 4303→4302 / 2400→2401
+     第二次尤其说明问题：**一个净 +1 行的改动，让三条本来正确的引用同时变错，
+     而且两个方向都有**（增删发生在不同位置）。而漂掉之后的红，和「文档说错了」
+     的红在输出上长得一样。
+     所以这三条改成**两列式**：靠子串唯一定位，不写行号（见 scripts/check-doc-claims.py
+     头部）。`total_cost_usd` 在 cli.ts 里有 3 处，所以加长成 `totalCostUsd: m.total_cost_usd`
+     —— 顺带说明行号式掩盖了什么：一个不唯一的子串，本来就没钉住任何地方。
+     其余几条保持行号式：它们的子串本来就唯一，而且 test846 的 drifted 变异打的就是
+     清单里 db.ts 的那一条（`ADD COLUMN team`）。
+     🔴 这段注释第一版把那条清单行**逐字抄了一遍**，于是同一个串在文档里出现两次，
+     而 test846 的变异是 `t.count(old) == 1` + `replace(..., 1)` —— 它会打中我这段
+     注释而不是清单，变异静默失效、门照绿。是我自己跑变异③时它没红才发现的。
+     **写注释引用一条被机器匹配的行时，不要逐字复制它。** -->
 ```doc-claims
 server/src/db.ts :: 393 :: ADD COLUMN team
 agent-network/bin/cli.ts :: 5151 :: dangerously-load-development-channels
-agent-node/src/cli.ts :: 3481 :: video_gen
-agent-node/src/cli.ts :: 4302 :: Expose CURRENT_TASK_ID
-agent-node/src/cli.ts :: 2401 :: total_cost_usd
+agent-node/src/cli.ts :: video_gen
+agent-node/src/cli.ts :: Expose CURRENT_TASK_ID
+agent-node/src/cli.ts :: totalCostUsd: m.total_cost_usd
 agent-node/src/feishu-tool-deny.ts :: 250 :: bubblewrap
 server/src/tools.ts :: 3899 :: list_providers
 server/src/server.ts :: 9 :: addNetworkScope
