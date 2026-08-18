@@ -267,6 +267,17 @@ docker compose logs --tail=200 <service>
 
 不要用 `docker system prune`、`docker image prune -a` 或宽泛名称匹配清理共享宿主机；先逐个确认容器和精确镜像引用。
 
+## 专项排查页
+
+上面按层排查解决不了时，这几页各针对一个具体形态：
+
+- [**这个节点还活着吗**](/troubleshooting/is-this-node-alive) —— 派出去的任务没有回音时，
+  先回答「它还能不能干活」。附一张按可信度排序的判据表（`status = idle` 覆盖四种现实，
+  只有「它自己回一句话」算硬证据）。
+- [连通性：Channel 与 MCP](/troubleshooting/connectivity-channels-mcp)
+- [远端节点的 CLI 登录](/troubleshooting/remote-node-cli-login)
+- [案例：飞书静默拒绝](/troubleshooting/case-feishu-silent-deny)
+
 ## 仍未解决
 
 提交 Issue 时附：
