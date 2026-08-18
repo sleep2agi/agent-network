@@ -32,6 +32,13 @@ on:
 
 jobs:
   structure:
+    # 这个 name 就是 GitHub 上 check 的名字,也是分支保护里 required check 唯一能写的
+    # 标识符,必须全仓唯一且看得出是哪一道门。不写 name 的话会退化成 job id
+    # `structure` —— 泛到无法辨认,正是 2026-08-18 之前四个 workflow 的 job 全叫
+    # `scan` 造成的那种局面(required 里写 `scan` 指的是哪一道无法确定)。
+    # 🔴 这道门讲的就是「一道不执行的 job 和一道执行的长得一样」——
+    #    一个认不出的 check 名是同一个问题的另一面。
+    name: workflow-structure
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
