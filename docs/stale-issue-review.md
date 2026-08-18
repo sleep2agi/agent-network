@@ -139,18 +139,22 @@ agent-node/src/cli.ts:3450               … Cross-machine artifact distribution
 
 `tests/test846-doc-claims` 会读下面这个清单,逐条打开那个文件的那一行,确认它包含声称的子串。行号一漂就红。
 
-<!-- 🔴 2026-08-18：这三条 agent-node/src/cli.ts 的行号被 #950 撞漂了 —— 那个 PR 在
-     ~:462 处插了 12 行，下面所有行号整体 +12（3468→3480 / 4291→4303 / 2388→2400）。
-     数字对得上插入量，所以是纯位移，不是内容变了。
+<!-- 🔴 2026-08-18（第二次）：这三条 agent-node/src/cli.ts 的行号又漂了。
+     第一次是 #950 在 ~:462 插了 12 行，整体 +12（3468→3480 / 4291→4303 / 2388→2400）。
+     第二次是 #885 那道 deny 名单门（PR #984）：cli.ts 的两个 denyPaths 调用点从内联
+     字面量改成 grokCliDenyPaths(...)，净变化只有 +1 行，却把三条 pin 打散成
+     3480→3481 / 4303→4302 / 2400→2401 —— **两个方向都有**，因为增删发生在不同位置。
+     🔴 值得记的是量级：一次 +12/-11 的改动，让三条本来正确的文档引用同时变错。
      这正是 #857 用「符号锚点」替换行号 pin 想解决的那件事，而这份清单还是行号制：
-     任何在上方的插入都会让它红，而红的原因和「文档说错了」在输出上长得一样。
-     换成符号锚点要动 tests/test846-doc-claims 的判据，属于另一条。 -->
+     任何在上方的增删都会让它红，而红的原因和「文档说错了」在输出上长得一样。
+     换成符号锚点要动 tests/test846-doc-claims 的判据，属于另一条（#852 已把
+     docs/ 的符号锚点门建起来了，这份清单是它还没覆盖到的最后一处行号制）。 -->
 ```doc-claims
 server/src/db.ts :: 393 :: ADD COLUMN team
 agent-network/bin/cli.ts :: 5151 :: dangerously-load-development-channels
-agent-node/src/cli.ts :: 3480 :: video_gen
-agent-node/src/cli.ts :: 4303 :: Expose CURRENT_TASK_ID
-agent-node/src/cli.ts :: 2400 :: total_cost_usd
+agent-node/src/cli.ts :: 3481 :: video_gen
+agent-node/src/cli.ts :: 4302 :: Expose CURRENT_TASK_ID
+agent-node/src/cli.ts :: 2401 :: total_cost_usd
 agent-node/src/feishu-tool-deny.ts :: 250 :: bubblewrap
 server/src/tools.ts :: 3899 :: list_providers
 server/src/server.ts :: 9 :: addNetworkScope

@@ -10,12 +10,12 @@ describe("grokCliDenyPaths", () => {
   test("hides the two .anet directories, the node config, and project .mcp.json", () => {
     expect(grokCliDenyPaths({
       projectCwd: "/srv/project",
-      userHome: "/home/dev",
-      nodeConfigPath: "/home/dev/.anet/nodes/n1/config.json",
+      userHome: "/home/user",
+      nodeConfigPath: "/home/user/.anet/nodes/n1/config.json",
     })).toEqual([
       "/srv/project/.anet",
-      "/home/dev/.anet",
-      "/home/dev/.anet/nodes/n1/config.json",
+      "/home/user/.anet",
+      "/home/user/.anet/nodes/n1/config.json",
       "/srv/project/.mcp.json",
     ]);
   });
@@ -24,7 +24,7 @@ describe("grokCliDenyPaths", () => {
     // prepareGrokCliHome filters falsy entries; the caller has always passed
     // `configFilePath || ""`, so preserve that shape rather than quietly
     // changing the arity of what the callee receives.
-    const paths = grokCliDenyPaths({ projectCwd: "/srv/p", userHome: "/home/d" });
+    const paths = grokCliDenyPaths({ projectCwd: "/srv/p", userHome: "/home/user" });
     expect(paths).toHaveLength(4);
     expect(paths[2]).toBe("");
   });
@@ -42,8 +42,8 @@ describe("grokCliDenyPaths", () => {
     // reviewed as a behaviour change.
     const paths = grokCliDenyPaths({
       projectCwd: "/srv/p",
-      userHome: "/home/d",
-      nodeConfigPath: "/home/d/.anet/nodes/n1/config.json",
+      userHome: "/home/user",
+      nodeConfigPath: "/home/user/.anet/nodes/n1/config.json",
     });
     expect(paths.some((p) => p.includes(".anet-grok"))).toBe(false);
   });
