@@ -1,0 +1,45 @@
+# docs 里的「符号锚点」必须在它自己点名的那个文件里真实存在。
+#
+# 2026-08-18,#857 把 docs 里 13 条 `cli.ts:228 loadProfile` 这样的行号 pin 换成了
+# `[cli.ts](…) —— 搜 \`function loadProfile(\`` 这样的符号锚点。换的理由是行号会漂:
+# 那 13 条逐条对下来 **13 条全错** —— `loadProfile` 实际在 1274 行(doc 写 228),
+# `runCommand` 在 5812(doc 写 2044),`ensureMcpJson` 那一行是空行。而它们全都
+# 长得像有效引用:格式对、行号在文件范围内、点开能打开。
+#
+# 符号锚点不会因为「上面插了几行」而失效,但**会因为改名而失效** —— 而失效之后,
+# 在这道门之前,没有任何东西会喊。#843 那道门在数行号 pin(守住不再变多),
+# 符号锚点在变多,却一直没人看。
+#
+# 起点是绿的:main 上 21 条锚点,21 条全部命中(与手工核对的数字一致)。
+# 它不是积压金丝雀 —— 红了就意味着刚刚有东西被改坏,而不是「还有一堆没清」。
+#
+# 🔴 关于触发范围,这里做了一个刻意的选择:**不加 paths 过滤。**
+#
+# 这道门的主要失效场景是「有人在 cli.ts 里把一个函数改名」,而不是「有人改了 doc」。
+# 如果按 `docs/**` 过滤,那么改源码的 PR 不会触发它 —— 门还在、判据也对,但在
+# 最需要它的那一类改动上**永远不会被触发**。整个脚本跑完不到一秒,省这点没有意义。
+#
+# (锚点当前指向 agent-network/bin/cli.ts、agent-network/src/normalize-runtime.ts、
+#  server/src/index.ts。把这几条写进 paths 也能工作,但下一条锚点指向新文件时
+#  就会静默漏掉 —— 那正是「改扫描范围让门悄悄失效」的形状。)
+
+name: lint (doc symbol anchors)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  scan:
+    # 这个 name 是 GitHub 上 check 的名字,也是分支保护里 required check 唯一能写的
+    # 标识符,必须全仓唯一。
+    name: doc-symbol-anchors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 先跑取集自检。这道门最可能的坏法不是判据写错,是**一条锚点都没扫到**
+      # 然后打印一片绿 —— 那种假绿和真绿逐字相同。selftest 里第 8 条专门钉
+      # 「没有锚点时计数必须是 0」,而主程序据此 exit 2 而不是 exit 0。
+      - run: python3 .github/scripts/check-doc-symbol-anchors.py --selftest
+      - run: python3 .github/scripts/check-doc-symbol-anchors.py

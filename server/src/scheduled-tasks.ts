@@ -451,7 +451,7 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
     }
   }
 
-  const match = url.pathname.match(/^\/api\/scheduled-tasks\/([^/]+)(?:\/(runs|run-now))?$/);
+  const match = url.pathname.match(/^\/api\/scheduled-tasks\/([^/]+)(?:\/(runs|run-now|cancel))?$/);
   if (!match) return jsonError("not_found", 404);
   const scheduleId = decodeURIComponent(match[1]);
   const sub = match[2] || null;
@@ -479,7 +479,18 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
     }
   }
 
-  if (!sub && req.method === "DELETE") {
+  // Cancel — accept two spellings for the same operation:
+  //   DELETE /api/scheduled-tasks/:id            (original)
+  //   POST   /api/scheduled-tasks/:id/cancel     (added because some reverse
+  //                                              proxies swallow DELETE and
+  //                                              return 405 HTML; POST is
+  //                                              universally allowed)
+  // Idempotent: re-cancelling an already-cancelled row is a 200 no-op, not a
+  // 409, because a client that just saw the row (still on screen as
+  // "cancelled" between polls) should get the same outcome whether it's the
+  // first click or a retry.
+  if ((!sub && req.method === "DELETE") || (sub === "cancel" && req.method === "POST")) {
+    if (row.status === "cancelled") return Response.json({ ok: true, status: "cancelled" });
     db.run("UPDATE scheduled_tasks SET status = 'cancelled', next_run_at = NULL, revision = revision + 1, updated_at = datetime('now') WHERE schedule_id = ?1", [row.schedule_id]);
     return Response.json({ ok: true, status: "cancelled" });
   }

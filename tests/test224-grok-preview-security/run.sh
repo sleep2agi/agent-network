@@ -71,7 +71,21 @@ scan_tree_for_markers() {
 
 log "# test224 — Grok preview credential and package gate"
 log "date: $(date -Is)"
-log "network: disabled by runner"
+# 🔴 这一行以前是 `log "network: disabled by runner"` —— 一句**声明**,不是断言。
+# 它挨着的每一条(`[ ! -e "$ROOT/.git" ] || fail …`)都真的在验,只有它在复述一个
+# 别人应该做过的事。而 [L2] 那一步的全部意义是「在没有网络的情况下构建」——
+# 如果 runner 忘了 `--network none`,那一步照样绿,而它证明的东西并不成立。
+#
+# 判据用直接观察:`--network none` 的容器里 /sys/class/net 只有 lo。
+# 有任何第二个接口,就说明这一轮的「无网络」前提是假的,后面的绿都不作数。
+net_ifaces=$(ls /sys/class/net 2>/dev/null | tr '\n' ' ' | sed 's/ *$//')
+if [ -z "$net_ifaces" ]; then
+  fail "cannot read /sys/class/net — cannot establish whether the network is off; refusing to claim it is"
+fi
+if [ "$net_ifaces" != "lo" ]; then
+  fail "network is NOT disabled: /sys/class/net has [$net_ifaces], expected only [lo]. Run this suite with --network none; [L2] claims to build without network and that claim is void here."
+fi
+pass "network is off (verified: /sys/class/net = [$net_ifaces])"
 log "source_commit=$SOURCE_COMMIT"
 
 log "[L0] isolated, synthetic-only environment"

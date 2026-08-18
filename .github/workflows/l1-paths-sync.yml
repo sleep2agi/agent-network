@@ -1,0 +1,32 @@
+# scripts/qa.sh decides WHICH L1 suites run; qa.yml's `paths:` decides WHEN the
+# workflow that runs them fires. Nothing keeps those two lists in sync, and the
+# drift is silent: a suite added to L1_TESTS without a matching `paths:` entry is
+# never triggered by edits to itself, while the gate keeps reporting green.
+#
+# That already happened once (#860 — test686 / test765 / test766).
+#
+# 🔴 No `paths:` filter here, on purpose. This guard watches trigger coverage; if
+# it were itself gated on a path, a change to the very files it watches could slip
+# past it. Same reasoning as action-pins.yml and qa-trigger-coverage.yml — and it
+# is what makes this job a candidate for a required check (#828), since it reports
+# on every pull request rather than only on the ones that touch certain files.
+
+name: lint (L1 trigger sync)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  scan:
+    # Unique across the repo — a check name is the only identifier a branch
+    # protection rule can name (#916).
+    name: l1-paths-sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Parsers first: if either list stops being readable, the scan below would
+      # still print a count and exit 0 on an empty denominator.
+      - run: python3 .github/scripts/check-l1-paths-sync.py --selftest
+      - run: python3 .github/scripts/check-l1-paths-sync.py

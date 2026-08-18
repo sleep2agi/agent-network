@@ -13,7 +13,9 @@ The current preview channel = **v0.11-preview2** (npm `@preview` tag). This rele
 The specific `preview.N` numbers below are a **2026-06-28 snapshot**; the preview channel keeps iterating (it's now well past preview.1). **Always install / upgrade the current preview via the `@preview` tag** (the install commands below already do), rather than copying a specific version number.
 :::
 
-## Current preview = canonical (2.3.0-preview.34 / 2.5.0-preview.26, 2026-07-16)
+## Current preview channel canonical build (snapshot 2026-08-17)
+
+> **Snapshot 2026-08-17**: `@preview` currently resolves to `@sleep2agi/agent-network@2.3.0-preview.39` / `@sleep2agi/agent-node@2.5.0-preview.31` / `@sleep2agi/commhub-server@0.9.0-preview.29` (what main source requires). The published `preview.39` binary's embedded `.d.ts` pair still names `agent-node@2.5.0-preview.28` (published-binary requirement ≠ main-source requirement; in auto-sync mode the main-source constant advances ahead of the npm-published artifact). **Always install / upgrade the current preview via the `@preview` tag** (the install commands below already do); do NOT hand-copy version numbers from here — both tags keep drifting; re-check with `npm view <pkg> dist-tags` before editing.
 
 @preview now points at the **canonical build** (published from the exact tgz after real-Windows verification; independent Linux gate re-run in progress — latest promotion gated on true green):
 
