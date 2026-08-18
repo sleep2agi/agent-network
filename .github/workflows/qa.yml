@@ -55,6 +55,8 @@ on:
       #    而 CI 从头到尾没有执行过这个套件。job 存在、挂上、会被触发是三件事,
       #    漏的就是第三件。
       - 'tests/test225-grok-preview-package-live/**'
+      - 'tests/test233-grok-main-integration/**'
+      - 'tests/test234-grok-profile-disclosure/**'
   push:
     branches: [main]
     paths:
@@ -100,6 +102,8 @@ on:
       #    而 CI 从头到尾没有执行过这个套件。job 存在、挂上、会被触发是三件事,
       #    漏的就是第三件。
       - 'tests/test225-grok-preview-package-live/**'
+      - 'tests/test233-grok-main-integration/**'
+      - 'tests/test234-grok-profile-disclosure/**'
 
 # Older runs on the same ref get cancelled — saves minutes when a PR is
 # updated rapidly. main pushes run independently.
@@ -421,3 +425,39 @@ jobs:
           name: test225-report
           path: ${{ runner.temp }}/art225/
           if-no-files-found: warn
+
+  grok-green-suites:
+    name: grok suites (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # 🔴 这两个套件是**直接做阻塞门**,不套 known-failure 棘轮。
+      #    棘轮是给「已经红、但必须先接进来才知道它是真绿还是假绿」的情况用的
+      #    (test225 那种)。这两个我先跑了基线,是真绿:
+      #        test233  Summary: PASS (Docker-only integration regression)
+      #        test234  Summary: PASS (4 unit tests; CLI build; runbook/wiring gates; mutation red)
+      #    对真绿的套件套棘轮只会让它以后变红时**不红**,那是反的。
+      #
+      #    接它们的理由和 test225 同一条:对着 origin/main 数,12 个 grok 套件里
+      #    此前只有 3 个在 CI 里。一个长期不跑的套件,真绿和假绿输出逐字相同。
+      #
+      #    `--network none` 是**实测过**的,不是照抄别处:两个套件在运行期都不需要网络
+      #    (test233 只在 docker build 阶段要)。`-e ARTIFACT_DIR=/tmp/art` 同样是
+      #    我跑基线时用的那条命令 —— 不写未验证过的变体。
+      - name: Build + run test233-grok-main-integration
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-test233-grok-main-integration \
+            -f tests/test233-grok-main-integration/Dockerfile .
+          docker run --rm --network none -e ARTIFACT_DIR=/tmp/art \
+            anet-test233-grok-main-integration
+
+      - name: Build + run test234-grok-profile-disclosure
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-test234-grok-profile-disclosure \
+            -f tests/test234-grok-profile-disclosure/Dockerfile .
+          docker run --rm --network none -e ARTIFACT_DIR=/tmp/art \
+            anet-test234-grok-profile-disclosure
