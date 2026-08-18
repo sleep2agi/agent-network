@@ -234,7 +234,23 @@ function isManagedAnetDirectory(path: string): boolean {
   return resolve(path).split(sep).includes(".anet");
 }
 
-function repairPrivateDirectory(path: string, tightenMode: boolean): void {
+// 🔴 #874 —— Windows 上 `fchmodSync` 抛 EPERM，而这段是 fail-closed，
+//    于是 `agent-node@preview` 在 Windows 上**任何 runtime 都起不来**：
+//        [agent-node] Refusing unsafe global config: EPERM: operation not permitted, fchmod
+//    （`@latest` 正常 —— 是 preview 相对 latest 的回归。）
+//
+//    只跳过 `fchmodSync` 这一步，别的一个都不动：
+//      · symlink / 非目录 / 非普通文件 / nlink 的拒绝    —— 保留（跨平台都有意义）
+//      · 打开后用 fstat 复核 dev+ino 与 lstat 一致        —— 保留（防 TOCTOU 换靶）
+//      · uid 相等                                        —— 原本就用 `uid !== undefined` 守着，
+//                                                           Windows 上 `process.getuid` 不存在，本来就跳过
+//    **Windows 上因此没有 mode 收紧保证** —— 但那不是本次改动造成的：
+//    POSIX mode 在 Windows 上本来就不是权限模型（Node 的 chmod 在那里只认只读位）。
+//    改之前是「崩掉」，改之后是「不收紧」；从没有过「在 Windows 上收紧成功」这个状态。
+//
+//    platform 做成可注入，是为了能在 Linux 上验 win32 分支 ——
+//    我没有 Windows 机器，不能拿「我试过了」当证据。
+function repairPrivateDirectory(path: string, tightenMode: boolean, platform: NodeJS.Platform = process.platform): void {
   const before = lstatSync(path);
   if (before.isSymbolicLink() || !before.isDirectory()) {
     throw new Error(`private config refuses non-directory or linked parent: ${path}`);
@@ -248,15 +264,15 @@ function repairPrivateDirectory(path: string, tightenMode: boolean): void {
       || opened.dev !== before.dev || opened.ino !== before.ino) {
       throw new Error(`private config parent is not owner-controlled: ${path}`);
     }
-    if (tightenMode) fchmodSync(fd, 0o700);
+    if (tightenMode && platform !== "win32") fchmodSync(fd, 0o700);
   } finally { closeSync(fd); }
 }
 
 /** Tighten legacy umask-derived config state before reading any token. */
-export function repairPrivateConfigPermissions(path: string): void {
+export function repairPrivateConfigPermissions(path: string, platform: NodeJS.Platform = process.platform): void {
   if (!existsSync(path) && !existsSync(`${path}.prev`)) return;
   const parent = dirname(path);
-  repairPrivateDirectory(parent, isManagedAnetDirectory(parent));
+  repairPrivateDirectory(parent, isManagedAnetDirectory(parent), platform);
   for (const candidate of [path, `${path}.prev`]) {
     if (!existsSync(candidate)) continue;
     const before = lstatSync(candidate);
@@ -272,7 +288,7 @@ export function repairPrivateConfigPermissions(path: string): void {
         || opened.dev !== before.dev || opened.ino !== before.ino) {
         throw new Error(`private config is not owner-controlled: ${candidate}`);
       }
-      fchmodSync(fd, 0o600);
+      if (platform !== "win32") fchmodSync(fd, 0o600);
     } finally { closeSync(fd); }
   }
 }

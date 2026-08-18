@@ -203,6 +203,47 @@ describe("#472 private config permissions", () => {
     expect(mode(path)).toBe(0o600);
   });
 
+  // 🔴 #874 —— Windows 上 fchmodSync 抛 EPERM，fail-closed 把所有 runtime 挡死。
+  //    我没有 Windows 机器，所以**注入 platform** 来验分支被走到，
+  //    而不是拿「我试过了」当证据。这两条测的是：
+  //      · win32 分支不再抛（改之前这里会 throw，节点因此起不来）
+  //      · POSIX 分支的行为**一个字节都没变**（下面那条是现有测试的 win32 对照）
+  test("#874 win32: does not throw, and leaves modes untouched", () => {
+    const parent = join(scratch, ".anet", "nodes", "n_win");
+    mkdirSync(parent, { recursive: true });
+    const path = join(parent, "config.json");
+    writeFileSync(path, JSON.stringify({ token: "ntok_win" }));
+    chmodSync(parent, 0o775);
+    chmodSync(path, 0o664);
+
+    // 🔴 这一行在 Linux 上几乎是免费的 —— `fchmodSync` 在这里本来就不会抛。
+    //    它记录意图，但**不承重**。
+    expect(() => repairPrivateConfigPermissions(path, "win32")).not.toThrow();
+
+    // 🔴 承重的是下面两行：win32 分支**确实跳过了 chmod**（撤掉守卫后正是这里红）。
+    //    必须说清它证明了什么、没证明什么：
+    //      证明了 —— platform="win32" 时不再调用 fchmod
+    //      **没证明** —— 在真 Windows 上不再抛 EPERM（那要一台 Windows 机）
+    //    Windows 上没有 mode 收紧保证，但那不是本次改动造成的：
+    //    改之前是崩掉，从来没有过「在 Windows 上收紧成功」这个状态。
+    expect(mode(parent)).toBe(0o775);
+    expect(mode(path)).toBe(0o664);
+  });
+
+  test("#874 posix branch is unchanged (same fixture, platform=linux)", () => {
+    const parent = join(scratch, ".anet", "nodes", "n_posix");
+    mkdirSync(parent, { recursive: true });
+    const path = join(parent, "config.json");
+    writeFileSync(path, JSON.stringify({ token: "ntok_posix" }));
+    chmodSync(parent, 0o775);
+    chmodSync(path, 0o664);
+
+    repairPrivateConfigPermissions(path, "linux");
+
+    expect(mode(parent)).toBe(0o700);
+    expect(mode(path)).toBe(0o600);
+  });
+
   test("backup atomically replaces a legacy broad .prev", () => {
     const path = join(scratch, "config.json");
     writeFileSync(path, JSON.stringify({ token: "ntok_fresh" }), { mode: 0o600 });
