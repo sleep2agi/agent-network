@@ -28,6 +28,41 @@ bash scripts/qa.sh --list    # 列测试名 + 文件路径
 
 [.github/workflows/qa.yml](../../.github/workflows/qa.yml) — PR / push to main 时自动跑（路径过滤）。
 
+### CI 侧的实测成本（2026-08-18，`L1_TESTS` = 22 个套件）
+
+上面那段说的是「你这台机」。**CI 是另一个对象,数字不能互相套用** —— 所以单独记一次,
+并且把条件写全,否则下次它又会变成一个没人知道怎么来的死数字:
+
+```
+job            L0 + L1 (report-only)      GitHub Actions ubuntu-latest
+最近 8 次 main  137 / 151 / 157 / 158 / 165 / 177 / 180 / 188 s     中位 162s
+job 预算        timeout 300 s              最长的一次仍余 37%
+L1 并发上限     4                          日志里那行 `· L1 并发上限 = 4（0 = 不限;用 QA_L1_MAX_PAR 覆盖）`
+Docker 缓存     冷                          GHA runner 每次都是干净的
+L1 成员数       22                          `bash scripts/qa.sh --list` 可自数
+```
+
+🔴 **给的是区间不是单点,这是有意的。** 8 次里最短 137s、最长 188s,**差 37%** ——
+只报中间那一个数,下一个人拿它当基线时会以为自己的运行「异常慢」。
+
+🔴 **别把这个数和本机的对照。** 三处不同:CI 每次冷启动(要重新 build 镜像)、
+run 阶段有 4 路并行、而 `qa.sh` 的 **build 是串行的**。同一份脚本在两种环境下
+的耗时结构完全不一样。
+
+**怎么自己重新量(不要抄上面这个数):**
+
+```bash
+# 取最近一次 main 上的该 job 时长
+gh run list --workflow=qa.yml --branch=main --limit 5 --json databaseId --jq '.[].databaseId' |
+while read id; do
+  gh api "repos/sleep2agi/agent-network/actions/runs/$id/jobs" \
+    --jq '.jobs[] | select(.name|test("L0 . L1")) | "\(.name) \(.started_at) \(.completed_at)"'
+done
+```
+
+⚠️ **要 step 的时长就取 `.steps[]`,不要拿 job 时长去比 step 上的 `timeout-minutes`** ——
+job 里还含 checkout / Setup Bun / 依赖安装,那些不受那个上限管(#924 上踩过两次)。
+
 **Report-only**：失败时 PR 显示红 ✕，但**不阻塞合并**（branch protection 未加这个 check）。
 目的是让大家看见结果，不当拦路虎。详见 [strategy.md §4](strategy.md#4-ci-gate渐进三档)。
 
