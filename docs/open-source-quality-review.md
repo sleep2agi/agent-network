@@ -334,7 +334,7 @@ try { db.exec("ALTER TABLE ...") } catch {}
 
 `server/src/index.ts:234-243` 在 `COMMHUB_CORS_ORIGINS` 之外还硬编码允许：
 
-- 一个作者私有域名（具体见 [`server/src/index.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) `additionalAllow` 列表）
+- 一个作者私有域名（具体见 [`server/src/server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) `additionalAllow` 列表）
 - 一个 Vercel 部署域名（dashboard staging）
 
 如果用户显式设置了自己的 CORS origins，一般预期是覆盖默认值，而不是仍然允许官方域名。对开源/自托管项目来说，这种"隐藏默认允许"会降低可审计性。**v0.8 后 OSS 转向不做 SaaS 托管**，建议把作者私有域名从硬编码列表里移除（root cause 在 server 代码，本 doc fix 不彻底）。

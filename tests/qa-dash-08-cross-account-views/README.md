@@ -50,7 +50,7 @@ sg docker -c 'docker run --rm anet-qa-dash-08'
 
 ## 锁住的契约
 
-`addNetworkScope` 应用于**所有**列表查询（[index.ts](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) 各端点 SQL inject）：
+`addNetworkScope` 应用于**所有**列表查询（[server.ts](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) 各端点 SQL inject）：
 
 ```sql
 WHERE network_id IN (SELECT network_id FROM network_members WHERE user_id = ?)

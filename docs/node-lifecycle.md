@@ -193,7 +193,7 @@ register() → callCommHub("report_status", {
 - config.json: 不变（session 已写回）
 - 进程退出
 
-**CommHub 超时检测**: 心跳 3 分钟间隔（[`agent-node/src/cli.ts:1159`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1159) `setInterval(() => reportStatus("idle"), 3 * 60 * 1000)`），超过 **10 分钟**无心跳 → 自动标记 offline（[`server/src/index.ts:816-821`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L816) `Date.now() - 10 * 60 * 1000` cutoff，惰性触发于 `/api/status` 调用时）。R219 校准：原 doc 5 分钟错。
+**CommHub 超时检测**: 心跳 3 分钟间隔（[`agent-node/src/cli.ts:1159`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1159) `setInterval(() => reportStatus("idle"), 3 * 60 * 1000)`），超过 **10 分钟**无心跳 → 自动标记 offline（[`server/src/server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) `Date.now() - 10 * 60 * 1000` cutoff，惰性触发于 `/api/status` 调用时）。R219 校准：原 doc 5 分钟错。
 
 ### 9. 删除 (deleted) — R219 校准
 

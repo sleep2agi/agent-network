@@ -39,7 +39,7 @@ sg docker -c 'docker run --rm anet-qa-dash-07'
 
 #### 1. `requireAuth` 中央门卫
 
-[index.ts L98-122](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L98)：
+[server.ts 鉴权入口](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)：
 - 没 token → 401 "unauthorized"
 - token 但 resolveToken 找不到 → 401 "invalid token"
 - 老的 master token + dev_open 模式仍 fallback（legacy）
@@ -48,7 +48,7 @@ sg docker -c 'docker run --rm anet-qa-dash-07'
 
 #### 2. admin-only 端点单独二审 (`requireAdminAuth`)
 
-[index.ts L138-143](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L138)：先校 token，再查 `user.role === "admin"`。
+[server.ts admin 角色校验](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)：先校 token，再查 `user.role === "admin"`。
 non-admin → 403。例：`/api/server-logs`（含用户名 + task 内容，admin-only）。
 
 #### 3. SSE + MCP 同样 401
