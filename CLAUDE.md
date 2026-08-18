@@ -57,5 +57,31 @@ commhub_get_all_status()
 ## 项目信息
 
 - 仓库：https://github.com/sleep2agi/agent-network
-- Dashboard：https://agent-network-dashboard.vercel.app
+- Dashboard：**分三种,别混**(这一层最容易判断错,见 `deploy/tunnel/README.md` 顶部的红字警告)
+  1. **项目自营的生产实例**(权威):`公网 ─ Caddy :3000 / frpc :3100 → 127.0.0.1:3001`
+     (Next.js,pm2 托管)。拓扑与运维见 `deploy/dashboard/README.md`、`deploy/tunnel/README.md`。
+     **要判断「Dashboard 正不正常」,看这个。**
+     ⚠️ 但**仓里查不到它的实际地址** —— `deploy/tunnel/caddy.example` 是 `${PUBLIC_DOMAIN}`、
+     `frpc.example.toml` 是 `${FRP_SERVER_ADDR}`,都是占位符(仓库政策不写死真实域名)。
+     **在部署机上按权威来源查,不要猜、也不要退回那个 Vercel 页:**
+     ```bash
+     # ⚠ 必须看 status,不能只看名字:停掉/崩掉的应用照样留在 pm2 jlist 里
+     pm2 jlist | python3 -c "import json,sys;[print(a['name'],a['pm2_env']['status'],'restarts='+str(a['pm2_env'].get('restart_time',0))) for a in json.load(sys.stdin)]"
+     # online 之外,还要看「本次已连续运行多久」—— 重启次数没有时间跨度判断不了任何事
+     curl -s http://127.0.0.1:2019/config/apps/http/servers                                       # Caddy admin:实际路由(权威)
+     curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3001                              # 直连上游,绕开入口层
+     ```
+     不在部署机上时:**不要凭猜测下结论**,找该机器的负责人要地址。
+  2. **自己起的**:`anet hub dashboard`。默认走 `npx @sleep2agi/agent-network-dashboard@<tag>`;
+     但 `ANET_DASHBOARD_LOCAL=1` 时改为直接 spawn 全局二进制(`agent-network/bin/cli.ts` 的
+     `globalOptIn` 分支)—— **诊断"装的是哪一份"之前先看这个变量**,否则会去查错的产物。
+     见 `docs-site/docs/guide/dashboard.md`。绑定地址取 `--ip` → `--host` → `$HOSTNAME` → `127.0.0.1`
+     (`agent-network/bin/cli.ts` 的 `dashHost`)。**容器里 `HOSTNAME` 通常有值,会绑到容器主机名而不是回环**
+     —— 这是记录在案的发版门坑(`docs/tests/release-gate-playbook.md`「dashboard binds to hostname not 0.0.0.0」)。
+     所以别假设任何默认地址,判断前先看 `dashHost` 实际取到什么。
+  3. **没有面向外部用户的 SaaS 产品 URL。**
+  ⚠️ `agent-network-dashboard.vercel.app` 不属于以上任何一种,别拿它判断线上状态。
+  它在 `docs/rfcs/RFC-022` 里被当作现存部署引用,而该 RFC 与其原型自 2026-06-11 起无功能推进(见 #220)。
+  实测只有一条:2026-08-13 取到它的 HTTP `Age` ≈ 61 天(**这是缓存年龄,不等于部署年龄**,
+  要判断是否停更需查 Vercel 部署记录或产物里的 build id)。
 - npm 包：@sleep2agi/agent-network / @sleep2agi/agent-node / @sleep2agi/commhub-server
