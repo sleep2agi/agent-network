@@ -28,6 +28,34 @@ Rows tagged `(preview)` below are **preview-only** and not selectable on stable.
 
 > ⚠️ **`opencode-cli` is preview-channel only** (RFC-029, still iterating): npm **latest does not include it yet** — after installing latest, `anet node create` shows only the production runtimes (`claude-code-cli` / `claude-agent-sdk` / `codex-sdk` / `grok-build-acp`). It lands in latest once stable.
 
+> 🔴 **By default it cannot run `bash` — that is the design, not a fault.** `opencode-cli`'s safe
+> default disables **every local tool**: `bash` / `read` / `glob` / `grep` / `edit` / `write` /
+> `list` / `task` / `skill`, plus `question` (unattended, it would wait forever for an interactive
+> answer). So a task that says "run this command" is one this node **has no capability to execute**.
+>
+> The policy lives in [`child-env.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/runtime/opencode-acp/child-env.ts) — 搜 `buildOpencodePermissionPolicy` (`搜` is this repo's machine-checked anchor marker, i.e. "search for"); the ACP and copresence paths read the same switch
+> (`agent-node/src/cli.ts`).
+>
+> ```
+> flags.opencodeUnsafeTools = true    ← enables local tools; trusted tasks only
+> ```
+>
+> `anet node create` prints the policy on the spot (verbatim):
+>
+> ```
+> [anet]    Built-in disabled: bash / read / glob / grep / edit / write / list / task / skill / question
+> [anet]    Cwd:      external disposable workspace (removed after child exit)
+> [anet]    Intended for communication and text-only tasks.
+> ```
+>
+> ⚠️ **Enabling it is not a sandbox** — the product's own wording is `This is not a security
+> sandbox; use Docker/VM for process and filesystem isolation.`
+>
+> **Why this needs its own paragraph**: a missing capability does not look like a failure in the
+> result. See [#943](https://github.com/sleep2agi/agent-network/issues/943) — a task needing `bash`
+> came back as **raw, unexecuted tool-call text**, recorded by the hub as `failed=false`
+> (completed normally). **The dispatcher only finds out by reading the content.**
+
 > OpenCode's built-in Anthropic client sends `x-api-key`. Anthropic-compatible gateways that accept only Bearer authentication, such as Kimi coding, return 401 on that preset; use an OpenCode plugin or custom path that supports the gateway's authentication instead.
 
 > Agent Node does not read environment variables literally named `TOOLS` or `SYSTEM_PROMPT`. Set tools with `--tools` or config `tools`, and the system prompt with `--prompt` or config `systemPrompt`.
