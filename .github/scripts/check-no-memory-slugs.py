@@ -117,11 +117,12 @@ SELF_ALLOWLIST = {
 ALLOWLIST_PATH_PREFIXES = (
     "docs/sop/",
     "docs/rfcs/",
-    "docs/tests/",
 )
-# 2026-08-18 —— `docs/research/`(3 条)与 `docs/troubleshooting/`(2 条)已审完并清空,
-# 两条前缀从此删除,这两棵树从现在起真的被这道门覆盖。
-# 剩下三棵各自的存量:docs/sop/ 24 · docs/rfcs/ 24 · docs/tests/ 4。
+# 2026-08-18 —— 三棵树已审完并清空,前缀依次删除:
+#   docs/research/(3 条) · docs/troubleshooting/(2 条) · docs/tests/(4 条)
+# 剩下两棵的存量:docs/sop/ 24 · docs/rfcs/ 24。这两棵大得多,
+# 而且 RFC 里有相当一部分是「某个决定的来源就是那条记录」——清它们要先想清楚
+# 替代写法,不是顺手能做完的,所以留在这里。
 # 🔴 只往下走。**要加回一条前缀,等于说「这棵树又可以泄漏了」** —— 那不是维护动作,
 #    是把已经收回来的覆盖面重新让出去,应该单独立案而不是顺手加。
 

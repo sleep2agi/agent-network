@@ -110,7 +110,7 @@ LLM 看到这个结构化 error 后, 中文 hint 可以直接 reason / rewrite �
 
 ## 不做的事 (per 红线)
 
-- ❌ 不本机起测试节点(per [[feedback_no_host_test_nodes]])
+- ❌ 不本机起测试节点(红线:测试节点不在宿主上起 —— 它拿到的是真 HOME 和真工作树)
 - ❌ A站Grok 保持停机不动
 - ❌ 不连 prod hub
 - ❌ 不擅自改 grok session 状态文件

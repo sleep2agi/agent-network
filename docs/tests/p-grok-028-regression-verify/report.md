@@ -15,7 +15,7 @@
 | **#204 preview.6 HTTP MCP transport (HTTP variant in ACP session/new mcpServers)** | ✅ HOLD | R75 + R77 + R83 三次 0.2.8 alpha session 接受了 HTTP variant payload, ACP `session/new` 不返 -32602 |
 | **#204 preview.7 isolated cwd + grok-isolated-cwd helper** | ✅ HOLD | bun test 11/11 pass (`grok-isolated-cwd.test.ts`); R75 image-to-video probe 的 mp4 落在隔离 cwd 的 grok session 目录 (`~/.grok/sessions/%2Ftmp%2Fp205-img2vid-v2/.../videos/1.mp4`) — 隔离机制端到端 work |
 
-**结论**: 0.2.8 alpha **可以放心 ship**, 但 Vincent 升 stable 之前**仍 hold preview** (per [[feedback_release_preview_first]] + [[feedback_vendor_verify_before_hardcode]])。
+**结论**: 0.2.8 alpha **可以放心 ship**, 但 Vincent 升 stable 之前**仍 hold preview** (两条既定纪律:**先发 preview 并由 Vincent 亲自 UAT,再谈 stable**;以及 **vendor 能力表不照抄文档,发一次真实调用再记录返回**)。
 
 ## 验证矩阵
 
@@ -74,7 +74,7 @@ Ran 87 tests across 8 files. [656.00ms]
 - ❌ 不起 Docker compose 2 节点跑端到端 (heavy, host harness 涵盖)
 - ❌ 不连本机产线 commhub
 - ❌ 不浪费新 LLM quota tick (existing R75 + R77 + R83 已是 0.2.8 alpha 充分证据)
-- ❌ 不 ship preview (per [[feedback_release_preview_first]] — 等 0.2.8 stable + Vincent 自己 UAT pass)
+- ❌ 不 ship preview (纪律:先发 preview 并由 Vincent 亲自 UAT —— 等 0.2.8 stable + Vincent 自己 UAT pass)
 
 ## 后续建议 (P3 / 后续触发)
 
