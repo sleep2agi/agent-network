@@ -77,6 +77,25 @@ on:
       - 'tests/test599-skillhub/**'
       - 'tests/test600-public-skillhub/**'
       - 'tests/test659-codex-appserver-activity-timeout/**'
+      - 'tests/test336-feishu-bridge-wire/**'
+      - 'tests/test344-ack-transport-zod/**'
+      - 'tests/test467-headless-bootstrap/**'
+      - 'tests/test527-ext-validator-dedup/**'
+      - 'tests/test602-scheduled-misfire/**'
+      - 'tests/test604-scheduled-task-edit/**'
+      - 'tests/test606-node-start-help/**'
+      - 'tests/test607-health-upload-limits/**'
+      - 'tests/test609-dashboard-chat-doc-path/**'
+      - 'tests/test637-database-url-guard/**'
+      - 'tests/test649-token-cli/**'
+      - 'tests/test651-init-no-token-prompt/**'
+      - 'tests/test5-auth/**'
+      - 'tests/test610-opencode-clean-test-workspace/**'
+      - 'tests/test611-cli-boolean-flags/**'
+      - 'tests/test612-visible-inbox-skip/**'
+      - 'tests/test613-codex-dead-endpoint/**'
+      - 'tests/test614-rest-single-network/**'
+      - 'tests/test615-network-name/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
       - 'agent-node/src/cli.ts'
@@ -152,6 +171,25 @@ on:
       - 'tests/test599-skillhub/**'
       - 'tests/test600-public-skillhub/**'
       - 'tests/test659-codex-appserver-activity-timeout/**'
+      - 'tests/test336-feishu-bridge-wire/**'
+      - 'tests/test344-ack-transport-zod/**'
+      - 'tests/test467-headless-bootstrap/**'
+      - 'tests/test527-ext-validator-dedup/**'
+      - 'tests/test602-scheduled-misfire/**'
+      - 'tests/test604-scheduled-task-edit/**'
+      - 'tests/test606-node-start-help/**'
+      - 'tests/test607-health-upload-limits/**'
+      - 'tests/test609-dashboard-chat-doc-path/**'
+      - 'tests/test637-database-url-guard/**'
+      - 'tests/test649-token-cli/**'
+      - 'tests/test651-init-no-token-prompt/**'
+      - 'tests/test5-auth/**'
+      - 'tests/test610-opencode-clean-test-workspace/**'
+      - 'tests/test611-cli-boolean-flags/**'
+      - 'tests/test612-visible-inbox-skip/**'
+      - 'tests/test613-codex-dead-endpoint/**'
+      - 'tests/test614-rest-single-network/**'
+      - 'tests/test615-network-name/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
       - 'agent-node/src/cli.ts'
@@ -674,6 +712,25 @@ jobs:
           - test599-skillhub
           - test600-public-skillhub
           - test659-codex-appserver-activity-timeout
+          - test336-feishu-bridge-wire
+          - test344-ack-transport-zod
+          - test467-headless-bootstrap
+          - test527-ext-validator-dedup
+          - test602-scheduled-misfire
+          - test604-scheduled-task-edit
+          - test606-node-start-help
+          - test607-health-upload-limits
+          - test609-dashboard-chat-doc-path
+          - test637-database-url-guard
+          - test649-token-cli
+          - test651-init-no-token-prompt
+          - test5-auth
+          - test610-opencode-clean-test-workspace
+          - test611-cli-boolean-flags
+          - test612-visible-inbox-skip
+          - test613-codex-dead-endpoint
+          - test614-rest-single-network
+          - test615-network-name
     steps:
       - uses: actions/checkout@v4
 
