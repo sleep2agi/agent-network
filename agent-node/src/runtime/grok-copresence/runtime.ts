@@ -54,6 +54,10 @@ import {
   terminateOwnedGrokLeader,
   type OwnedGrokLeaderIdentity,
 } from "./leader-lifecycle";
+import {
+  describeGrokCopresenceLiveness,
+  type GrokCopresenceLiveness,
+} from "./liveness";
 
 // Keep enough headroom for Grok's XML wrapper plus JSON string escaping; the
 // reducer's hard JSONL line cap is 1 MiB.
@@ -171,6 +175,8 @@ export interface GrokCopresenceOpenOptions {
     NodeJS.ProcessEnv | void | Promise<NodeJS.ProcessEnv | void>;
   onSession?: (sessionId: string) => void | Promise<void>;
   onHumanPrompt?: (prompt: string) => void | Promise<void>;
+  /** Fires when the pinned TUI composer footer is seen (inject is allowed). */
+  onTuiReady?: () => void;
   log?: (message: string) => void;
   warn?: (message: string) => void;
 }
@@ -359,7 +365,9 @@ export interface GrokCopresenceRuntimeSession {
   readonly leaderSocket: string;
   readonly attachSocket: string;
   readonly isRunning: boolean;
+  readonly tuiReady: boolean;
   readonly state: GrokCopresenceState;
+  liveness(): GrokCopresenceLiveness;
   submit(opts: GrokCopresenceThinkOptions): Promise<GrokCopresenceThinkResult>;
   close(): Promise<void>;
 }
@@ -715,7 +723,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   private readonly log: (message: string) => void;
   private readonly warn: (message: string) => void;
   private tuiReadinessBuffer = "";
-  private tuiReady = false;
+  private tuiComposerReady = false;
 
   constructor(private readonly opts: GrokCopresenceOpenOptions) {
     this.sessionId = opts.sessionId || randomUUID();
@@ -729,6 +737,14 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
 
   get isRunning(): boolean {
     return this.opened && !this.closing && !this.recovering && this.pty !== null;
+  }
+
+  get tuiReady(): boolean {
+    return this.tuiComposerReady;
+  }
+
+  liveness(): GrokCopresenceLiveness {
+    return describeGrokCopresenceLiveness(this);
   }
 
   get state(): GrokCopresenceState {
@@ -1023,7 +1039,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     }
     const generation = ++this.ptyGeneration;
     this.leaderOwnerNonce = randomUUID();
-    this.tuiReady = false;
+    this.tuiComposerReady = false;
     this.tuiReadinessBuffer = "";
     const binary = this.opts.binary ?? "grok";
     const args = buildGrokCopresenceArgs({
@@ -1074,7 +1090,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       tui.exited = true;
       resolveExit();
       if (this.activeTui !== tui || generation !== this.ptyGeneration || this.closing) return;
-      this.tuiReady = false;
+      this.tuiComposerReady = false;
       this.tuiReadinessBuffer = "";
       // The outer recovery attempt owns this generation until it either
       // reconnects or confirms teardown. Replacing recoveryPromise here would
@@ -1351,7 +1367,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     if (!tui || this.activeTui !== tui) return;
     this.activeTui = null;
     this.pty = null;
-    this.tuiReady = false;
+    this.tuiComposerReady = false;
     this.tuiReadinessBuffer = "";
     if (this.ptyGeneration === tui.generation) this.ptyGeneration += 1;
   }
@@ -1724,20 +1740,25 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   }
 
   private observeTuiReadiness(generation: number, data: string): void {
-    if (generation !== this.ptyGeneration || this.tuiReady || this.closing) return;
+    if (generation !== this.ptyGeneration || this.tuiComposerReady || this.closing) return;
     this.tuiReadinessBuffer = `${this.tuiReadinessBuffer}${data}`
       .slice(-MAX_TUI_READINESS_BUFFER);
     if (!hasGrokTuiReadyMarker(this.tuiReadinessBuffer)) return;
 
-    this.tuiReady = true;
+    this.tuiComposerReady = true;
     this.tuiReadinessBuffer = "";
     this.log(`[grok-copresence] TUI input ready generation=${generation}`);
     this.broadcastState();
+    try {
+      this.opts.onTuiReady?.();
+    } catch (error) {
+      this.warn(`[grok-copresence] onTuiReady callback failed: ${errorMessage(error)}`);
+    }
     if (!this.recovering) setImmediate(() => this.scheduleNetworkIfIdle());
   }
 
   private scheduleNetworkIfIdle(): void {
-    if (!this.pty || !this.tuiReady || this.recovering || this.closing) return;
+    if (!this.pty || !this.tuiComposerReady || this.recovering || this.closing) return;
     const transition = this.transition({ type: "schedule_network" });
     for (const effect of transition.effects) {
       if (effect.type !== "inject_network_task") continue;
@@ -2255,7 +2276,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       phase: this.arbitration.phase,
       revision: this.arbitration.revision,
       waitingHuman: this.arbitration.waitingHuman,
-      tuiReady: this.tuiReady,
+      tuiReady: this.tuiComposerReady,
       queueLength: this.arbitration.queue.length,
       queuedTaskIds: this.arbitration.queue.slice(0, 16).map((task) => task.taskId),
       active: active?.owner === "network"

@@ -11,7 +11,8 @@ preview 2.3.0-preview.39    anet grok attach → Usage: anet grok attach <node>
 ```
 
 ⇒ **这个命令在 `preview` 里是存在的**,只是 `latest` 里没有。
-**但「命令存在」不等于「这条共存路径可用」** —— 我只验到命令注册,没有验端到端可用性。
+**但「命令存在」不等于「这条共存路径可用」** —— 命令注册不等于端到端可用。
+Hub 不得把死掉/未就绪的 TUI 报成 `idle`（#1005：liveness 快照，缺 named socket 或 composer 未就绪时为 `blocked`）。
 本页其余的告诫仍然成立:它仍在重新验收,不要当已发布功能用。
 :::
 

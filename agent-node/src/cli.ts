@@ -73,6 +73,11 @@ import {
   selectGrokCopresenceCapabilityProfile,
 } from "./runtime/grok-copresence/profile-selection";
 import {
+  describeGrokCopresenceLiveness,
+  isGrokCopresenceHubStatus,
+  resolveGrokCopresenceHubStatus,
+} from "./runtime/grok-copresence/liveness";
+import {
   defaultNpmInstall,
   loadCodexSdk,
   resolveAgentNodeDir,
@@ -1309,7 +1314,7 @@ const reportStatus = async (status: string, task?: string) => {
       ? claudeSessionId
       : SESSION_ID || undefined;
   return callCommHub("report_status", {
-    resume_id: RESUME_ID, alias, status, task,
+    resume_id: RESUME_ID, alias, status: resolveReportedStatus(status), task,
     node_id: NODE_ID || undefined,
     session_id: activeSessionId,
     config_path: configFilePath || undefined,
@@ -3545,6 +3550,14 @@ let grokCopresenceRuntimeSession: GrokCopresenceSession | null = null;
 let grokCopresenceRuntimeOpening: Promise<GrokCopresenceSession> | null = null;
 let grokCopresenceLocalTaskSequence = 0;
 
+function resolveReportedStatus(status: string): string {
+  if (!GROK_COPRESENCE || !isGrokCopresenceHubStatus(status)) return status;
+  return resolveGrokCopresenceHubStatus(
+    describeGrokCopresenceLiveness(grokCopresenceRuntimeSession),
+    status,
+  );
+}
+
 function grokCopresenceTimeoutMs(): number {
   const raw = process.env.GROK_CLI_TIMEOUT_MS
     || fileConfig.flags?.grokCliTimeoutMs
@@ -3792,6 +3805,11 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
       beforeSpawn: () => auditAndPrepareRuntime().env,
       onSession: (sessionId) => writebackGrokSession(sessionId),
       onHumanPrompt: handleGrokCopresenceHumanPrompt,
+      onTuiReady: () => {
+        void reportStatus("idle").catch((error: any) => {
+          warn(`[grok-copresence] ready-idle report failed: ${error?.message || error}`);
+        });
+      },
       log: (message) => log(message),
       warn: (message) => warn(message),
     });
