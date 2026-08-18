@@ -1,20 +1,26 @@
 # test225 已知失败基线 —— 棘轮，不是豁免清单
 #
-# 这个文件存在的理由：test225 现在是红的（2 条），但它在 CI 之外待了太久，
-# 期间没人知道它是真绿还是假绿。实测已经证明它之前那个绿是**假绿**：
-# 旧夹具硬写 target="bun"，恰好等于旧审计硬写的期望值，两个错误互相同意。
-# （三方单变量实验见 #861 / #1011 的评论。）
-#
-# 所以先把它接进 CI，判据是「FAIL 集合等于下面这份」：
+# 判据：「FAIL 集合等于下面这份」
 #   · 多出任何一条  → 红（新伤）
 #   · 少了任何一条  → 不红，但会打印「该更新基线了」（修好是好事，不该被门拦住）
 #
 # 每一条都必须有一个 issue，否则这里就变成了一张藏东西的清单。
 #
+# ---- 本次变更（2026-08-19）----
+# 删掉两条：
+#   "real auth evidence scan failed; closed target-role diagnostic retained"
+#       **它根本不是失败**。那是两处**负向自检**的预期输出:自检把 stdout 重定向到了
+#       捕获文件,但 `log()` 是 `printf | tee -a "$REPORT"` —— tee 无视 stdout 重定向,
+#       照样写进共享报告。我当初照着这行建了基线并挂了 #1021,那条基线是错的。
+#       已在同一 PR 里给两处自检的子 shell 加 `REPORT=/dev/null`。
+#   "installed candidate Feishu refusal lacked the fixed explanation"
+#       已修（#1020）。真因是夹具把 config 放在 /tmp 下,节点在走到飞书拒绝**之前**
+#       就先拒绝了配置本身（父目录属 root,不是 owner-controlled）。产品是对的。
+#
+# 加一条：见下。
+#
 # 条目 -> issue：
-#   real auth evidence scan failed ...          -> #1021
-#   installed candidate Feishu refusal ...      -> #1020
+#   headless node survived a node stop ...   -> #1027
 #
 # ---- 条目：FAIL 后面那句原文，逐字 ----
-real auth evidence scan failed; closed target-role diagnostic retained
-installed candidate Feishu refusal lacked the fixed explanation
+headless node survived a node stop that reported success (#1027)

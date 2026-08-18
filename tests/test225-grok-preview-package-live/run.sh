@@ -885,6 +885,28 @@ fail_if_task_terminal_error() {
   fail "$label reached a terminal error before a valid reply"
 }
 
+# 🔴 #1027 —— 等一个**本脚本自己起的** PID 退出,带上界。
+#    原来那行是 `wait "$HEADLESS_PID" 2>/dev/null || true`,**没有任何上界**。
+#    实测:`anet node stop` 对非 tmux 启动的节点会打印
+#        [anet] "<alias>" is not running locally (server notified offline)
+#    **并返回 0** —— 于是 stop_node_checked 认为停成功,往下走到 wait,
+#    而那个进程根本没被停,wait 永远不返回。在 CI 上这会把 job 的超时耗光,
+#    而且**不产出任何诊断**:报告停在 `[L4] ...` 那一行,既没 FAIL 也没 PASS,
+#    看起来像「跑到一半机器炸了」。
+#    这里只把静默挂死换成有上界、带证据的失败;`anet node stop` 该不该在没停掉的
+#    情况下通知服务端 offline,是产品侧的决定,不在本套件里改。
+wait_pid_gone() {
+  local pid=$1 tries=$2 i cmd
+  for ((i = 0; i < tries; i++)); do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 0.1
+  done
+  # 还活着 —— 把它是什么打出来。这正是我当初必须 docker exec 进容器手挖的东西。
+  cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || echo "(cmdline 读不到)")
+  log "diagnostic: pid $pid 在 stop 之后仍存活 ${tries} × 0.1s —— cmdline: $cmd"
+  return 1
+}
+
 stop_node_checked() {
   local alias label output
   alias=$1
@@ -1460,7 +1482,16 @@ chmod 600 "$REAL_AUTH_PATTERNS" "$REAL_AUTH_UNSAFE_PATTERNS" \
   "$REAL_AUTH_METADATA_MANIFEST"
 real_turn_scan_inputs_valid \
   || fail "auth evidence role self-test scan inputs are not owner-only"
-if (trap - EXIT; HOME="$AUTH_ROLE_SELFTEST/home"; export HOME; \
+# 🔴 REPORT=/dev/null —— 这两段是**负向自检**:故意喂一份合成的失败夹具,
+#    断言这道门必须失败。它们已经把 stdout 重定向到 $AUTH_ROLE_* 捕获文件了,
+#    但 `log()` 是 `printf | tee -a "$REPORT"` —— **tee 无视 stdout 重定向**,
+#    照样往共享报告里追加。于是自检那句预期中的
+#        FAIL: real auth evidence scan failed; closed target-role diagnostic retained
+#    出现在 report-test225.txt 里,读起来和一次真失败**逐字相同**。
+#    (我自己就照它建了一条 known-failures 基线并挂了 issue —— 那条基线是错的。)
+#    tee 的目标是变量,所以在子 shell 里改掉它就够了;stdout 仍然照常被捕获,
+#    下面那些 grep/jq 断言不受影响。
+if (trap - EXIT; REPORT=/dev/null; HOME="$AUTH_ROLE_SELFTEST/home"; export HOME; \
   run_real_auth_evidence_gate final_scan \
   "$AUTH_ROLE_CURRENT_HOME" "$AUTH_ROLE_SESSION_ID" "$AUTH_ROLE_CWD" \
   "$AUTH_ROLE_LEADER" "$AUTH_ROLE_ATTACH" \
@@ -1495,7 +1526,8 @@ printf '%s\n' clean >"$AUTH_ROLE_SESSION_DIR/chat_history.jsonl"
 printf '%s\n' clean >"$AUTH_ROLE_CURRENT_HOME/unreviewed.data"
 safe_rm_rf "$AUTH_ROLE_PRIOR_HOME"
 rm -f "$AUTH_ROLE_SESSION_DIR/agent_id" "$AUTH_ROLE_CURRENT_HOME/unreviewed.link"
-if ! (trap - EXIT; HOME="$AUTH_ROLE_SELFTEST/home"; export HOME; \
+# 同上:这一段也是自检(验 WARNING 分支),同样不该写进共享报告。
+if ! (trap - EXIT; REPORT=/dev/null; HOME="$AUTH_ROLE_SELFTEST/home"; export HOME; \
   run_real_auth_evidence_gate final_scan \
   "$AUTH_ROLE_CURRENT_HOME" "$AUTH_ROLE_SESSION_ID" "$AUTH_ROLE_CWD" \
   "$AUTH_ROLE_LEADER" "$AUTH_ROLE_ATTACH" \
@@ -2019,7 +2051,8 @@ scan_fixed_file /tmp/test225-markers "$HEADLESS_LOG" \
 scan_fixed_file /tmp/test225-live-credentials "$HEADLESS_LOG" \
   || fail "headless start output exposed a Hub credential"
 stop_node_checked "$HEADLESS_ALIAS" headless
-wait "$HEADLESS_PID" 2>/dev/null || true
+wait_pid_gone "$HEADLESS_PID" 100 \
+  || fail "headless node survived a node stop that reported success (#1027)"
 HEADLESS_PID=""
 rm -f "$HEADLESS_LOG"
 pass "persisted co-presence true/false and socket identities override stale ambient env"
