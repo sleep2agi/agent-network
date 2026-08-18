@@ -70,6 +70,7 @@ on:
       - 'tests/test643-transient-hub-legacy-repair/**'
       - 'tests/test671-task-runtime-evidence-hub/**'
       - 'tests/test688-owner-gated-schedule-hub/**'
+      - 'tests/test629-mcp-schema-policy/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
       - 'agent-node/src/cli.ts'
@@ -138,6 +139,7 @@ on:
       - 'tests/test643-transient-hub-legacy-repair/**'
       - 'tests/test671-task-runtime-evidence-hub/**'
       - 'tests/test688-owner-gated-schedule-hub/**'
+      - 'tests/test629-mcp-schema-policy/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
       - 'agent-node/src/cli.ts'
@@ -653,6 +655,7 @@ jobs:
           - test643-transient-hub-legacy-repair
           - test671-task-runtime-evidence-hub
           - test688-owner-gated-schedule-hub
+          - test629-mcp-schema-policy
     steps:
       - uses: actions/checkout@v4
 
