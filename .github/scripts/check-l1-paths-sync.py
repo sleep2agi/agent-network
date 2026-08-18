@@ -39,9 +39,32 @@ QA_SH = "scripts/qa.sh"
 QA_YML = ".github/workflows/qa.yml"
 
 
+def _strip_comments(text: str) -> str:
+    """去掉每行的 `#` 注释。
+
+    🔴 这不是洁癖,是一个**取集**缺陷的修复。下面的数组正则用 `[^)]*`,
+    它在遇到第一个 `)` 时停下 —— 而 bash 数组里**注释是合法的**,注释里出现
+    `)` 也是合法的:
+
+        L1_TESTS=(
+          # (注册这一步不是可选的 —— 一个没被调用的套件等于不存在。)
+          "test823-l1-concurrency-cap"
+          ...
+        )
+
+    正则在那个中文注释的 `)` 处截断,捕获到的内容里**一个套件名都没有**,
+    于是 `l1_suites()` 返回 [] —— 判据完全正确,取集塌了。
+
+    这次它 fail-closed(exit 2「parse regression」)所以被看见了。同一个洞
+    如果长在一个「没找到就当没有」的检查里,就是一片安静的假绿。
+    数组里的元素不会含 `#`(套件名是 kebab-case),所以按行剥注释是安全的。
+    """
+    return "\n".join(line.split("#", 1)[0] for line in text.split("\n"))
+
+
 def l1_suites(text: str) -> list[str]:
     """Suite names from qa.sh's L1_TESTS array."""
-    m = re.search(r"L1_TESTS=\(([^)]*)\)", text, re.S)
+    m = re.search(r"L1_TESTS=\(([^)]*)\)", _strip_comments(text), re.S)
     if not m:
         return []
     return re.findall(r'"([^"]+)"', m.group(1))
@@ -116,6 +139,18 @@ def selftest() -> int:
     }
     cases = [
         ("L1_TESTS parsed in full", l1_suites(sh) == ["qa-a", "test-b"]),
+        # 🔴 见 _strip_comments:数组里一条**含右括号的注释**会让 `[^)]*` 提前截断,
+        # 捕获内容里一个套件名都没有。这条夹具照着实际撞红的那次写(#835 往
+        # L1_TESTS 里加了一行「(注册这一步不是可选的 …)」)。
+        (
+            "注释里的 ) 不截断数组",
+            l1_suites('L1_TESTS=(\n  # (注册不是可选的)\n  "qa-a"\n  "test-b"\n)\n')
+            == ["qa-a", "test-b"],
+        ),
+        (
+            "数组后面别处的 ) 不影响",
+            l1_suites('L1_TESTS=(\n  "qa-a"\n)\nfoo() { :; }\n') == ["qa-a"],
+        ),
         ("missing array yields empty (→ exit 2 upstream)", l1_suites("no array here") == []),
         ("paths read from on.pull_request", len(pr_paths(yml)) == 3),
         ("bare `on:` parsed as True still works", len(pr_paths({True: yml["on"]})) == 3),
