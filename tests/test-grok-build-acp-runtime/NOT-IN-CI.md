@@ -1,5 +1,12 @@
 # 为什么 test-grok-build-acp-runtime 不进 CI
 
+<!-- 🔴 下面两行是**机器读的**。散文里写撤销条件没有用 —— 没有任何东西会重新
+     评估一个存在于注释/正文里的条件（这句话是仓里 dashboardReleaseTag() 上方的原话）。
+     check-test-suite-registration.py 缺这两行会判红，并把 Verified 的天数
+     打进每次都会出现的汇总行。-->
+Verified: 2026-08-19
+Revisit-when: 满足任一 —— (a) 套件在缺凭据时以**非 0**退出；(b) 报告里带分母（执行 N / 跳过 M / 共 K），让「一条都没跑」在输出里可见；(c) CI 上有了安全提供 Grok 凭据的通道。
+
 **它在没有凭据时 `rc=0`，但一条断言都不执行。**
 
 ## 实测（2026-08-19，`origin/main` = `55e86d1c`，本地 Docker）

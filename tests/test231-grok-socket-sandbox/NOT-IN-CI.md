@@ -1,5 +1,12 @@
 # 为什么 test231-grok-socket-sandbox 不进 CI
 
+<!-- 🔴 下面两行是**机器读的**。散文里写撤销条件没有用 —— 没有任何东西会重新
+     评估一个存在于注释/正文里的条件（这句话是仓里 dashboardReleaseTag() 上方的原话）。
+     check-test-suite-registration.py 缺这两行会判红，并把 Verified 的天数
+     打进每次都会出现的汇总行。-->
+Verified: 2026-08-19
+Revisit-when: CI 上有了**不带凭据**的方式拿到钉住版本的 Grok 二进制（例如可公开下载的产物 + 公布的校验和）——那时这份豁免就该撤掉。
+
 **它需要宿主挂载 `/host-grok/grok-0.2.93` —— 而 CI runner 上没有，也不该有。**
 
 ## 实测（2026-08-19，`origin/main` = `55e86d1c`，本地 Docker）

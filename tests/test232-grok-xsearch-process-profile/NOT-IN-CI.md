@@ -1,5 +1,12 @@
 # 为什么 test232-grok-xsearch-process-profile 不进 CI
 
+<!-- 🔴 下面两行是**机器读的**。散文里写撤销条件没有用 —— 没有任何东西会重新
+     评估一个存在于注释/正文里的条件（这句话是仓里 dashboardReleaseTag() 上方的原话）。
+     check-test-suite-registration.py 缺这两行会判红，并把 Verified 的天数
+     打进每次都会出现的汇总行。-->
+Verified: 2026-08-19
+Revisit-when: CI 上有了安全提供真 Grok 登录凭据的通道，或套件改成不依赖 /host-grok/auth.json 也能断言其被测行为。
+
 **它需要宿主挂载 `/host-grok/auth.json` —— 而 CI runner 上没有，也不该有。**
 
 ## 实测（2026-08-19，`origin/main` = `55e86d1c`，本地 Docker）

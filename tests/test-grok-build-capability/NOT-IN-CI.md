@@ -1,5 +1,12 @@
 # 为什么 test-grok-build-capability 不进 CI
 
+<!-- 🔴 下面两行是**机器读的**。散文里写撤销条件没有用 —— 没有任何东西会重新
+     评估一个存在于注释/正文里的条件（这句话是仓里 dashboardReleaseTag() 上方的原话）。
+     check-test-suite-registration.py 缺这两行会判红，并把 Verified 的天数
+     打进每次都会出现的汇总行。-->
+Verified: 2026-08-19
+Revisit-when: #1033 修好之后 —— 末尾加 `[ "$FAIL" -eq 0 ] || exit 1`，并把 run.sh:194 / :210 那两处 `exit 0` 换成同一条判据。在退出码能承载 $FAIL 之前，接它进 CI 没有任何意义。
+
 **它打印 `FAIL:` 然后退出 0 —— 这个套件在任何输入下都不可能失败。** 见 #1033。
 
 ## 实测（2026-08-19，`origin/main` = `55e86d1c`，本地 Docker）
