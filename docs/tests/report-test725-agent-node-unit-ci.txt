@@ -1,10 +1,51 @@
 # test725 — complete agent-node unit CI domain
 
 Date: 2026-08-13 Asia/Shanghai
-Base: 028be50fc54337e31001c6dac3b205585ac7438f
-SOURCE_COMMIT: c01e205b114b10325b39214238f6ee34b6502f45
+SOURCE_COMMIT: 16e4879536d3e89c58898fc3e383aadc6a04c537
 Scope: agent-node test fixtures + one independent Docker suite + CI wiring.
 Production deployment: NOT PERFORMED.
+
+本文件记录两次跑。上面这个 SOURCE_COMMIT 是当前的那次(#841,依赖钉死之后);
+建门那次(SOURCE_COMMIT c01e205b / Base 028be50f)完整保留在文末附录里 ——
+它不是过期垃圾,是这道门当初为什么长成这样的记录。
+
+## 依赖钉死之后的重跑(#841)
+
+审查指出:#841 把 agent-node 的装依赖方式从 `npm install` 换成了 `npm ci`,
+这改变了 test725 所用的依赖图,而这份报告当时仍记着 `npm install` 那版镜像的
+`SOURCE_COMMIT c01e205b` —— 仓里因此没有新路径的留存证据。指控成立,这一节是补的。
+
+- image: `anet-test725:16e48795-exact`
+- image id: `sha256:eede6a7efd28358c4b04cf41878018c7f323ab65fed4ac1aa308504fa0fcda28`
+- 镜像内实测 `TEST725_SOURCE_COMMIT=16e4879536d3e89c58898fc3e383aadc6a04c537`
+  （读回来比对过,不是构建参数的复述）
+- 镜像内实际装到的 `@anthropic-ai/claude-agent-sdk` = **0.3.231**,与
+  `agent-node/package-lock.json` 锁的版本一致 —— 这一步证明 `npm ci` 真的走了
+  lockfile。**套件全绿本身不证明这件事**:lockfile 改了而构建缓存没失效、或
+  Dockerfile 没 COPY lockfile,都会给出一模一样的绿。
+
+```text
+source_commit=16e4879536d3e89c58898fc3e383aadc6a04c537
+ 1281 pass
+ 0 fail
+ 4365 expect() calls
+Ran 1281 tests across 91 files. [118.67s]
+MUTATION_RED readable-attachment-runtime-disconnected rc=1
+RESULT: PASS
+退出码 0
+```
+
+本次运行日志摘要:`c333093e98f940a64da965eedac1c4cf3ae1715853225cc8c62a3325539bb69f`。它标识这一次运行,不作为来源凭据。
+
+与建门那次相比,pass 数从 1277 变成 1281(+4)。差异来自 main 在两次之间前进,
+不是本次改动引入的 —— 本次改动只动 lockfile、.gitignore 与 Dockerfile 三个文件。
+
+> ⚠️ 这份报告的 SOURCE_COMMIT 指向 `16e48795`,而提交这份报告本身会产生一个
+> 更新的 commit。二者之间只差这一个文件;`run.sh` 与 Dockerfile 的 blob 未变。
+
+---
+
+## 附录:建门那次(SOURCE_COMMIT c01e205b / Base 028be50f)
 
 ## Exact-source image
 

@@ -1,8 +1,13 @@
 FROM node:22-bookworm-slim
 
 ARG OPENCODE_VERSION=1.18.1
-ARG AGENT_NETWORK_VERSION=2.3.0-preview.39
-ARG AGENT_NODE_VERSION=2.5.0-preview.31
+# 🔴 故意留空:下面 line 72-73 把这两个 ARG 灌进 ENV *_UNDER_TEST,而 run.sh 用
+#    ${*_UNDER_TEST:-<从源码常量派生>}。ARG 一旦有硬编码默认值,ENV 就永远非空,
+#    run.sh 的派生分支永远不会执行 —— 那个"改成派生"的修改会是一次空转,而且
+#    表现和生效完全一样(测试照跑照绿,只是测的是上一个版本)。
+#    留空 → ENV 为空 → :- 走派生。要测特定版本仍可 --build-arg 显式覆盖。
+ARG AGENT_NETWORK_VERSION=
+ARG AGENT_NODE_VERSION=
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       bash ca-certificates curl jq procps python3 python3-pexpect ripgrep unzip \

@@ -201,7 +201,7 @@ CommHub provides 17 core MCP Tools for agents, in two groups:
 
 ### Database Design
 
-SQLite with WAL mode, 14 tables:
+SQLite with WAL mode, 20+ tables (sessions / tasks / nodes / users / networks / SkillHub / providers / vault etc.; exact count floats with schema version):
 
 ```mermaid
 erDiagram
