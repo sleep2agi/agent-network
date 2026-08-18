@@ -37,6 +37,21 @@ on:
     # the same minute as every other scheduled job on the runners.
     - cron: '17 3 * * *'
   workflow_dispatch:
+    # release-tag 需要三个参数（它校验的是「tag 剥出的 commit == 打包用的 commit」，
+    # 而"打包用的 commit"只有发版的人知道，定时跑推不出来）。留空则跳过该 job。
+    inputs:
+      release_repo:
+        description: 'release-tag: owner/name（留空则跳过 release-tag 这个 job）'
+        required: false
+        default: ''
+      release_tag:
+        description: 'release-tag: tag 名，例如 v1.2.3'
+        required: false
+        default: ''
+      build_sha:
+        description: 'release-tag: 打包用的完整 commit SHA'
+        required: false
+        default: ''
   push:
     branches: [main]
     paths:
@@ -65,15 +80,41 @@ jobs:
           esac
 
   release-tag:
-    # Only meaningful when a tag is what triggered us, or on demand.
-    if: github.event_name == 'workflow_dispatch'
+    # 🔴 两处此前都是错的，而且互相遮掩：
+    #
+    #   (1) 原注释说「when a tag is what triggered us, or on demand」——
+    #       但这个 workflow 的 push 触发只写了 `branches: [main]`，**没有 tags**。
+    #       那半个说法从来不成立。
+    #   (2) 原来那行是 `bash scripts/verify-release-tag.sh`，**一个参数都没传**，
+    #       而脚本第一行就是 `REPO="${1:?repo, e.g. owner/name}"` ——
+    #       真跑起来会立刻死在 `line 16: 1: repo, e.g. owner/name`，
+    #       和「tag 真的漂了」在 job 状态上都是一个红。
+    #
+    # 因为 (1) 让它从来没被触发过，(2) 就一直没人发现。实测：published artifact
+    # drift 最近 3 次运行，这个 job 全部 skipped。
+    #
+    # 为什么不做成定时跑：脚本校验的是「tag 剥出的 commit == 打包用的 commit」，
+    # 而"打包用的 commit"只有发版的人手上有，定时跑推不出来。所以它只能是
+    # on-demand，参数从 workflow_dispatch inputs 来。
+    if: github.event_name == 'workflow_dispatch' && inputs.release_repo != ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: verify release tags point at the commit they were built from
-        run: bash scripts/verify-release-tag.sh
+        run: |
+          set -euo pipefail
+          # 三个都必须非空 —— 缺一个就让它明确失败，而不是让脚本吐
+          # `${1:?...}` 那种看起来像脚本坏了的信息。
+          : "${RELEASE_REPO:?release_repo is required}"
+          : "${RELEASE_TAG:?release_tag is required}"
+          : "${BUILD_SHA:?build_sha is required}"
+          bash scripts/verify-release-tag.sh "$RELEASE_REPO" "$RELEASE_TAG" "$BUILD_SHA"
+        env:
+          RELEASE_REPO: ${{ inputs.release_repo }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          BUILD_SHA: ${{ inputs.build_sha }}
 
   docs-site-drift:
     # anet.sh 没有接 git 自动部署:合并进 main 不会让站点更新,必须有人手动
