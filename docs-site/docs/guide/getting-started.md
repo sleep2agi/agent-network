@@ -47,8 +47,12 @@ anet hub start
 
 启动后默认监听 `http://127.0.0.1:9200`, SQLite 数据库在 `~/.commhub/commhub.db`, 自动创建默认管理员 **admin / anethub**。
 
+::: warning `@preview` 首次启动打印**一次性随机密码**
+本文档描述的是 npm `latest` 通道的行为。`@preview` (`npm install -g @sleep2agi/agent-network@preview`) 首次 `anet hub start` 会**打印一次生成的随机密码**（只显示一次，之后无处查回），登录后用 `anet passwd` 改成自己的强密码。**preview 上不要写死 `anethub`**——固定密码只在 `latest` 通道成立。
+:::
+
 ::: warning 公网部署立刻改密
-默认 `admin / anethub` 仅本机用。任何 `--host 0.0.0.0` 公网部署立刻 `anet passwd` 改强密码。
+默认 `admin / anethub` 仅本机用（latest 通道）。任何 `--host 0.0.0.0` 公网部署立刻 `anet passwd` 改强密码。preview 通道无固定密码，见上一条。
 :::
 
 ::: tip 停止 / 查看状态
@@ -94,7 +98,7 @@ stable 版 `anet node create` 列出正式版的 runtime（`claude-agent-sdk` / 
 启动节点：
 
 ::: warning 全新安装选了 claude-agent-sdk / codex-sdk？先装 agent-node
-这两个 runtime 依赖 `agent-node` 包。首次 `node start` 的 npx 自动拉取需要约 1 分钟，当前版本的启动检查**不等它拉完**就报 `agent-node is not installed or cannot report a version` 退出（真机复现，[#450](https://github.com/sleep2agi/agent-network/issues/450) 精确立案，#237 为同族）。先跑一句再启动即可：
+这两个 runtime 依赖 `agent-node` 包。首次 `node start` 的 npx 自动拉取需要约 1 分钟，而 **stable `@latest`（当前 `2.2.21`）与 preview `≤ 2.3.0-preview.37`** 的启动检查**不等它拉完**就报 `agent-node is not installed or cannot report a version` 退出（真机复现，[#450](https://github.com/sleep2agi/agent-network/issues/450) 精确立案，#237 为同族）。**根因修复**见 [PR #239](https://github.com/sleep2agi/agent-network/pull/239)（commit `1eff3a4d`, merged 2026-06-28），Vincent 2026-08-09 audit 在 `2.3.0-preview.38` 隔离 Docker 里 verified 抵达 SSE connected；**当前 `@preview` (`2.3.0-preview.39`) 已含此 fix，`@latest` 未含** —— [#450](https://github.com/sleep2agi/agent-network/issues/450) 仍 `open`，因 promote 到 latest 待 4 项 acceptance gate 真绿。**变通**（按 verified 强度）：升到 `@sleep2agi/agent-network@preview`；或用 `@latest` 但先跑一句让二进制预先就位：
 
 ```bash
 npm install -g @sleep2agi/agent-node

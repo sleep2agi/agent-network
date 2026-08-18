@@ -2,7 +2,7 @@
 
 > 包版本映射：agent-network 2.3.0 / agent-node 2.5.0 / commhub-server 0.9.0 / dashboard 0.7.0（见 [版本矩阵](../README.md)）。
 
-> 状态：进行中（preview 泡验期）。**发布锚点：世界人工智能大会（WAIC，7 月下旬）前完成 promote——v0.11.0 就是 WAIC 发布物**（[WAIC 发布规划](./waic-release.md)）。
+> 状态：进行中（preview 泡验期）。**~~发布锚点：世界人工智能大会（WAIC，7 月下旬）前完成 promote~~**（**过期**：WAIC 7 月下旬窗口已过）——当前 promote 状态见下面的进度快照 + [release-plan](../../plans/release-plan.md)；WAIC 相关背景与决策档案见 [WAIC 发布规划](./waic-release.md)。
 >
 > ## 🎯 本版最大目标：**收敛与可靠，不是新功能**
 >
@@ -16,20 +16,19 @@
 > 下表的"功能"多数是**收敛既有在飞项**（RFC-029/030 早已开工），不是新开口子。真正的新功能一律排下一版。
 > **范围已冻结**：不在下表里的功能一律排 2.4.0+，防失控。新想法 → 开 issue 打 `2.4.0-candidate` 标签，不插队。
 
-## 📍 进度快照（2026-07-16 晚）
+## 📍 进度快照（2026-08-14 · npm view 实测）
 
-**一句话：核心已发布在泡验（preview .34/.26），发布后自审又抓出一批真问题正在修，promote 冻结中——收口期。**
+**一句话：canonical preview 已推进至 .39/.31，`npm view <pkg>@preview` 是当前口径；promote 仍冻结。**
 
 | 线 | 状态 |
 |---|---|
 | 功能盘点（0号工作流） | ✅ 收官：7 旅程全结论（[记分板](./feature-audit.md)）+1 盲区补记（daemon 向导） |
-| canonical 发布 | ✅ `.34`/`.26` 已上 @preview（真 Windows 复验过；latest 未动） |
-| Linux 七套门禁 | 1-6 ✅ 真绿；**7 ❌ 抓出真 P1**（#457 rename 缺 0700）——三处测试期望滞后已全修，最后剩的是真 bug，说明门禁在干活 |
-| 修复批 `.35`/`.27`（进行中，owner: release ops） | 四合一：stop 孤儿窗 P0 + create git-gate + batch fail-closed + rename-0700（#457）；draft PR 后全套重跑门禁 |
+| canonical 发布 | 🔄 `npm view @preview`：agent-network `2.3.0-preview.39` / agent-node `2.5.0-preview.31` / commhub-server `0.9.0-preview.29` |
+| Linux 七套门禁 | 1-6 ✅ 真绿；7 曾抓出 #457 rename 缺 0700，修复批已进 preview 链——门禁在干活 |
+| 修复批（进行中，owner: release ops） | 四合一：stop 孤儿窗 P0 + create git-gate + batch fail-closed + rename-0700（#457）；draft PR 后全套重跑门禁 |
 | dashboard | #15/#36/#37 三绿键 PR 等"合"；P0 痛点批（长消息折叠+密度+底部锚定增量）随后；hub 翻页游标已立案 #459 |
 | promote latest | 🔒 冻结。解冻 = 7/7 真绿（含修复批重跑）+ Windows 复验 |
-| 本日 issue 台账 | #446-#459 共 14 个，全带复现证据；其中 #446 已修已发已验 |
-| WAIC | 锚点不变（[发布规划](./waic-release.md)）；关键路径 = 修复批 → 门禁 → promote |
+| WAIC 锚点 | ⚠️ **过期**（7 月下旬窗口已过）；档案在 [发布规划](./waic-release.md)；关键路径不变 = 修复批 → 门禁 → promote |
 
 ## 0号工作流（本版核心）：现有功能靠谱度盘点 ✅ 走查阶段收官（2026-07-16）
 

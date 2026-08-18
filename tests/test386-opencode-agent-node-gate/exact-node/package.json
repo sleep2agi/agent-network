@@ -1,4 +1,5 @@
 {
+  "_note": "run.sh 在用它之前会把 version 改写成 agent-network/src/opencode-agent-node-pair.ts 里 OPENCODE_AGENT_NODE_VERSION 的当前值。这里这个数字只是占位,不要手动改它去追常量。",
   "name": "@sleep2agi/agent-node",
   "version": "2.5.0-preview.31",
   "type": "module",
