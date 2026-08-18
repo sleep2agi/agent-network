@@ -98,6 +98,7 @@ import {
   formatClassificationForUser,
   formatClassificationForLog,
 } from "./runtime/classify-result";
+import { formatAttemptOutcome } from "./runtime/attempt-log-outcome";
 import { withTimeout, TimeoutError, resolveTimeoutMs } from "./util/timeout";
 import { superviseChild } from "./util/supervise-child";
 import {
@@ -200,7 +201,8 @@ for (let i = 0; i < argv.length; i++) {
 选项:
   --config <path>     配置文件 (.anet/nodes/<name>/config.json)
   --alias <name>      Agent 别名 / CommHub alias (必需)
-  --runtime <type>    claude-agent-sdk (default) | claude-code-cli | codex-sdk | codex-app-server | grok-build-acp | grok-build-cli | opencode-cli
+  --runtime <type>    claude-agent-sdk (default) | codex-sdk | codex-app-server | grok-build-acp | grok-build-cli | opencode-cli
+                      (claude-code-cli is NOT here: it runs via \`anet node start\`, not by passing --runtime to agent-node — see the Runtime section)
   --model <name>      AI 模型 (codex 默认: ${DEFAULT_CODEX_MODEL}, claude-agent-sdk 默认: claude-sonnet-4-6)
   --hub <url>         CommHub URL
   --tools <list>      工具列表，逗号分隔 ("all" = 全部)
@@ -215,7 +217,7 @@ for (let i = 0; i < argv.length; i++) {
 
 Runtime:
   claude-agent-sdk  Claude Agent SDK — Claude/MiniMax/Anthropic 兼容 API
-  claude-code-cli   Claude Code CLI — 复用 Claude Code 登录态
+  claude-code-cli   Claude Code CLI — 由 \`anet\` 提供并启动(\`anet node start\`);不能直接传给 agent-node
   codex-sdk         Codex SDK — GPT-5.4，复用 codex 登录态
   codex-app-server  Codex app-server — Codex TUI bridge
   grok-build-acp    Grok Build ACP — xAI Grok Build via "grok agent stdio"
@@ -452,6 +454,12 @@ const RUNTIME_MAP: Record<string, string> = {
   // `codex-app-server` (canonical) / `codex-tui` / `codex-appserver`.
   "codex-app-server": "codex-app-server", "codex-appserver": "codex-app-server", "codex-tui": "codex-app-server",
 };
+// 🔴 `claude-code-cli` is intentionally NOT a key here (#909). Its execution lane lives in the LAUNCHER
+//    (`agent-network/bin/cli.ts` — `anet node start` → launchAgent → spawns the real `claude` CLI, ~:5096)
+//    and never routes through agent-node. So agent-node rejecting it below is CORRECT behaviour, not a gap
+//    — do NOT "fix" it by adding a key. Aliasing it to "claude" would silently run the SDK instead of the
+//    CLI (CLI-login users downgraded to the SDK channel). The e2e that owns this path is qa-180-rename-ghost.
+//    (The `--help` above lists it only in the Runtime section, marked as anet-provided, for exactly this reason.)
 if (!Object.prototype.hasOwnProperty.call(RUNTIME_MAP, rawRuntime)) {
   const supported = [...new Set(Object.keys(RUNTIME_MAP))].join(", ");
   console.error(`[${ALIAS}] Unsupported runtime "${rawRuntime}". Supported: ${supported}`);
@@ -2361,19 +2369,29 @@ async function processWithClaude(
             if (m.type === "result") {
               const dt = Date.now() - t0;
               const u = m.usage || {};
-              log(`[claude] ${m.subtype} | ${dt}ms | $${m.total_cost_usd?.toFixed(4) || "?"} | in=${u.input_tokens || 0} out=${u.output_tokens || 0} | turns=${m.num_turns}${attempt > 0 ? ` | attempt=${attempt + 1}` : ""}`);
-              if (m.subtype === "success") {
-                // #261 P1 redirect (2026-06-28) — delegate to classifyRuntimeResult
-                // which folds the empty-result rule from #267 + the in=0 & out=0
-                // & cost=0 silent-reject rule into one decision shared with
-                // codex / grok. Pre-fix `m.result || "任务完成"` silently
-                // rebranded an empty vendor reply as "task complete" — the M3
-                // incident shape. Now a non-success classification surfaces a
-                // soft-fail string the upstream caller can act on.
-                const cls = classifyRuntimeResult(
-                  { result: m.result, usage: m.usage, totalCostUsd: m.total_cost_usd },
-                  { baseUrl: process.env.ANTHROPIC_BASE_URL },
-                );
+              // #261 P1 redirect (2026-06-28) — delegate to classifyRuntimeResult
+              // which folds the empty-result rule from #267 + the in=0 & out=0
+              // & cost=0 silent-reject rule into one decision shared with
+              // codex / grok. Pre-fix `m.result || "任务完成"` silently
+              // rebranded an empty vendor reply as "task complete" — the M3
+              // incident shape. Now a non-success classification surfaces a
+              // soft-fail string the upstream caller can act on.
+              //
+              // Computed BEFORE the log line on purpose: it used to sit after,
+              // so the line printed the vendor's `subtype` verbatim. A node
+              // pointed at a nonexistent model logged `success | $0.0000 | in=0
+              // out=0` three times in a row and then `✗ all 3 attempts failed`
+              // (TMCode副责人, 2026-08-18). The verdict already existed one line
+              // below; it just wasn't the thing being printed.
+              const cls =
+                m.subtype === "success"
+                  ? classifyRuntimeResult(
+                      { result: m.result, usage: m.usage, totalCostUsd: m.total_cost_usd },
+                      { baseUrl: process.env.ANTHROPIC_BASE_URL },
+                    )
+                  : null;
+              log(`[claude] ${formatAttemptOutcome(m.subtype, cls)} | ${dt}ms | $${m.total_cost_usd?.toFixed(4) || "?"} | in=${u.input_tokens || 0} out=${u.output_tokens || 0} | turns=${m.num_turns}${attempt > 0 ? ` | attempt=${attempt + 1}` : ""}`);
+              if (m.subtype === "success" && cls) {
                 if (cls.kind === "success") {
                   inner = m.result;
                 } else {

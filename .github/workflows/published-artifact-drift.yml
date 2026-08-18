@@ -1,0 +1,75 @@
+# Run the two verifiers that already existed and that nothing called.
+#
+# scripts/verify-published-pins.sh and scripts/verify-release-tag.sh were both
+# committed, both executable, both documented with the incident that motivated
+# them — and `grep -rl` across .github/ and scripts/ found ZERO callers. A guard
+# that is never invoked protects nothing, and its presence in the tree reads as
+# if the risk were covered.
+#
+# Running verify-published-pins.sh by hand on 2026-08-17, for the first time,
+# reported a live drift on its first invocation:
+#
+#   ❌ OPENCODE_AGENT_NODE_VERSION 期望 2.5.0-preview.31,
+#      产物里是: 2.5.0-preview.28
+#   1 个 pin 与已发布产物不一致 —— main 修了但用户装到的包没修
+#
+# That is the exact distinction the script's own header says bit this repo three
+# times in one day, and it had been sitting undetected in the published preview.
+#
+# Why scheduled rather than per-PR: it inspects the PUBLISHED artifact, which a
+# PR does not change, and it needs the npm registry. Running it on every PR
+# would add a network dependency to every merge while telling us nothing new
+# about the PR. Once a day plus manual dispatch matches what it measures.
+#
+# 🔴 Exit codes are mapped deliberately, because "could not measure" and
+#    "measured and it is fine" must not collapse into the same green:
+#      0 → pass
+#      1 → fail (real drift)
+#      2 → fail-soft with a loud notice (registry unreachable — NOT evidence of
+#          agreement; the run reports that it could not measure)
+#      3 → fail (zero pins compared — the script went blind)
+
+name: published artifact drift
+
+on:
+  schedule:
+    # 03:17 UTC. Off the hour and off :00/:30 so this repo does not pile onto
+    # the same minute as every other scheduled job on the runners.
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/verify-published-pins.sh'
+      - 'scripts/verify-release-tag.sh'
+      - '.github/workflows/published-artifact-drift.yml'
+
+jobs:
+  published-pins:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: verify published pins match source
+        run: |
+          set +e
+          bash scripts/verify-published-pins.sh preview
+          rc=$?
+          set -e
+          case "$rc" in
+            0) echo "pins agree with the published preview artifact." ;;
+            2) echo "::warning::could not fetch the published artifact (rc=2). This run"\
+                    "did NOT verify anything — treat it as unknown, not as agreement." ; exit 1 ;;
+            3) echo "::error::the verifier compared ZERO pins (rc=3) — it went blind." ; exit 1 ;;
+            *) echo "::error::published artifact drifted from source (rc=$rc)." ; exit 1 ;;
+          esac
+
+  release-tag:
+    # Only meaningful when a tag is what triggered us, or on demand.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: verify release tags point at the commit they were built from
+        run: bash scripts/verify-release-tag.sh

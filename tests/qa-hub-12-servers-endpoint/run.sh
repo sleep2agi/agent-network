@@ -38,6 +38,30 @@ register_user() {
     -d "{\"username\":\"$username\",\"password\":\"$password\"}"
 }
 
+# #203/#376 之后,report_status 的 alias 必须与 token 绑定的 alias 一致
+# (server.ts:733 从 api_tokens.name='node:<alias>' 推导 callerAlias;
+#  注册时拿到的 network_token 名字不是 node:…，会回落成**用户名**，
+#  于是用它上报任意 alias 一律 alias_identity_mismatch)。
+# 所以每个要上报的 alias 都得先铸一个属于它自己的 node token。
+# 取法与已注册且长期绿的 qa-hub-05-roundtrip 完全一致。
+node_token() {
+  local utok="$1" net="$2" alias="$3" tok
+  tok=$(curl -fsS -X POST "$HUB_BASE/api/auth/node-token" \
+    -H "Authorization: Bearer $utok" -H 'Content-Type: application/json' \
+    -d "{\"network_id\":\"$net\",\"node_name\":\"$alias\"}" | jq -r '.token // empty')
+  [[ "$tok" == ntok_* ]] || { echo "FAIL: node_token($alias) shape wrong: $tok" >&2; exit 1; }
+  printf '%s' "$tok"
+}
+
+# 每次 report_status 都以「args 里那个 alias 自己的 node token」发出。
+# 直接从 args 取 alias,循环/多 alias 的调用点不必逐个改,也不会漏。
+report_as() {
+  local utok="$1" net="$2" args="$3" alias tok
+  alias=$(printf '%s' "$args" | jq -r '.alias')
+  tok=$(node_token "$utok" "$net" "$alias")
+  mcp_call "$tok" report_status "$args"
+}
+
 echo "[0] start local hub from repository source"
 safe_rm_rf "$HOME/.commhub" "$HOME/.anet/server"
 cd /app/server
@@ -65,19 +89,19 @@ ARG_A2=$(jq -nc --arg net "$NET_A" '{resume_id:"119-a-2",alias:"agent-a2",status
 ARG_A3=$(jq -nc --arg net "$NET_A" '{resume_id:"119-a-3",alias:"agent-a3",status:"idle",network_id:$net,host:{hostname:"box-b",ip:"10.0.0.11",cpu_load_1min:null,cpu_cores:4,mem_total_gb:16.0,mem_used_gb:2.0,mem_avail_gb:14.0}}')
 ARG_A4=$(jq -nc --arg net "$NET_A" '{resume_id:"119-a-4",alias:"agent-a4",status:"idle",network_id:$net,host:{hostname:"box-a",ip:"127.0.0.1",cpu_load_1min:null,cpu_cores:null,mem_total_gb:null,mem_used_gb:null,mem_avail_gb:null}}')
 for args in "$ARG_A1"; do
-  out=$(mcp_call "$NTOK_A" report_status "$args")
+  out=$(report_as "$UTOK_A" "$NET_A" "$args")
   echo "$out" | jq -e '.ok == true' >/dev/null || { echo "FAIL: report_status A: $out"; exit 1; }
 done
 # Ensure "latest host metrics" has a deterministic timestamp newer than A1.
 sleep 1.1
 for args in "$ARG_A2" "$ARG_A3" "$ARG_A4"; do
-  out=$(mcp_call "$NTOK_A" report_status "$args")
+  out=$(report_as "$UTOK_A" "$NET_A" "$args")
   echo "$out" | jq -e '.ok == true' >/dev/null || { echo "FAIL: report_status A: $out"; exit 1; }
 done
 
 echo "[3] report same hostname/ip in network B to verify REST network isolation"
 ARG_B1=$(jq -nc --arg net "$NET_B" '{resume_id:"119-b-1",alias:"agent-b1",status:"idle",network_id:$net,host:{hostname:"box-a",ip:"10.0.0.10",cpu_load_1min:9.9,cpu_cores:64,mem_total_gb:128.0,mem_used_gb:64.0,mem_avail_gb:64.0}}')
-out=$(mcp_call "$NTOK_B" report_status "$ARG_B1")
+out=$(report_as "$UTOK_B" "$NET_B" "$ARG_B1")
 echo "$out" | jq -e '.ok == true' >/dev/null || { echo "FAIL: report_status B: $out"; exit 1; }
 
 echo "[4] /api/servers aggregates network A only"

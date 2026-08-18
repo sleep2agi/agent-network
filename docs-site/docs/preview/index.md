@@ -13,7 +13,9 @@
 下方具体 `preview.N` 版本号是 **2026-06-28 快照**，preview channel 一直在迭代（现已远超 preview.1）。**装 / 升当前 preview 一律用 `@preview` tag**（下方安装命令已用），不要照抄具体版本号。
 :::
 
-## 当前 preview = canonical（2.3.0-preview.34 / 2.5.0-preview.26，2026-07-16）
+## 当前 preview channel canonical build（snapshot 2026-08-17）
+
+> **snapshot 2026-08-17**：`@preview` 当前指向 `@sleep2agi/agent-network@2.3.0-preview.39` / `@sleep2agi/agent-node@2.5.0-preview.31` / `@sleep2agi/commhub-server@0.9.0-preview.29`（main 源码要求）。已发布 `preview.39` 二进制内嵌 `.d.ts` pair 仍指 `agent-node@2.5.0-preview.28`（binary 要求 ≠ main 源码要求；auto-sync 模式下 main 源码常量会先于 npm 发布产物推进）。**装 / 升当前 preview 请一律走 `@preview` tag**（下方安装命令已用），不要手动复制此处版本号 —— 两个 tag 都在持续漂移，改前用 `npm view <pkg> dist-tags` 核一遍。
 
 @preview 现在指向 **canonical 合并版**（真 Windows 复验 PASS 后从验证过的 tgz 发布；Linux 门禁独立复跑中，latest promote 以真全绿为前提）：
 
