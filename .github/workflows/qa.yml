@@ -51,6 +51,10 @@ on:
       - 'scripts/check-doc-source-pins.py'
       - 'tests/test831-doc-source-pins/**'
       - 'tests/test813-grok-mcp-readiness/**'
+      # 🔴 加这一条的直接原因:#1017 改了 test225 的夹具,27 个 check 全绿,
+      #    而 CI 从头到尾没有执行过这个套件。job 存在、挂上、会被触发是三件事,
+      #    漏的就是第三件。
+      - 'tests/test225-grok-preview-package-live/**'
   push:
     branches: [main]
     paths:
@@ -92,6 +96,10 @@ on:
       - 'scripts/check-doc-source-pins.py'
       - 'tests/test831-doc-source-pins/**'
       - 'tests/test813-grok-mcp-readiness/**'
+      # 🔴 加这一条的直接原因:#1017 改了 test225 的夹具,27 个 check 全绿,
+      #    而 CI 从头到尾没有执行过这个套件。job 存在、挂上、会被触发是三件事,
+      #    漏的就是第三件。
+      - 'tests/test225-grok-preview-package-live/**'
 
 # Older runs on the same ref get cancelled — saves minutes when a PR is
 # updated rapidly. main pushes run independently.
@@ -335,3 +343,81 @@ jobs:
 
       - name: Run test831-doc-source-pins
         run: docker run --rm --network none anet-test831-doc-source-pins
+
+  test225-known-failures:
+    name: test225 known-failure ratchet (Docker)
+    runs-on: ubuntu-latest
+    # 完整跑一次 ~8 分钟(装依赖 + 起容器内 Hub + 真 tmux attach)。
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 需要完整历史才能 git archive 出一个不可变上下文。
+          fetch-depth: 0
+
+      # 🔴 test225 **不能**用 `docker build ... .` 那种可变检出上下文 ——
+      #    它自己第一件事就是拦下来:
+      #        FAIL: test225 build context must come from git archive, not a mutable checkout
+      #    因为 source-commit.txt 里是 `$Format:%H$`,只有 git archive 会替换它。
+      #    照抄别的 job 的写法会在这里立刻红,而且红得让人以为是套件坏了。
+      - name: Build test225 from an immutable git-archive context
+        run: |
+          set -euo pipefail
+          CTX=$(mktemp -d)
+          git archive "$GITHUB_SHA" | tar -x -C "$CTX"
+          test "$(cat "$CTX/tests/test225-grok-preview-package-live/source-commit.txt")" = "$GITHUB_SHA" \
+            || { echo "::error::git archive 没有替换 source-commit.txt —— export-subst 没生效"; exit 1; }
+          docker build \
+            --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-test225-grok-preview \
+            -f "$CTX/tests/test225-grok-preview-package-live/Dockerfile" "$CTX"
+
+      # 这一步**预期非 0** —— test225 现在有 2 条已知失败(#1020 / #1021)。
+      # 判定不在这里,在下一步的棘轮。所以这里必须容错,
+      # 但报告必须真的产出来,否则下一步会因为「报告不存在」而红(那是对的)。
+      # 🔴 产物目录这一步踩了两个坑,都写在这里,别再照抄回去:
+      #
+      #    ① 把宿主目录挂进 /artifacts —— 容器是 `USER node`(uid 1000),
+      #       而 runner 上 $RUNNER_TEMP 属主是 uid 1001,挂进去写不了,套件报
+      #           FAIL: could not atomically create a private report
+      #       并且**一个报告都不产出**,棘轮只能看到「报告不存在」。
+      #       我本地跑这一版是绿的,纯粹因为宿主 uid 恰好也是 1000 ——
+      #       绿依赖了一个偶然的 uid 巧合,换台机器就红。
+      #
+      #    ② 干脆不挂卷 —— 也不行,只是换个错法:node 用户在 `/` 下建不了目录
+      #           mkdir: cannot create directory '/artifacts': Permission denied
+      #
+      #    所以把 ARTIFACT_DIR 指到容器内 node 自己的目录,再 cp 出来。
+      #    /test225-work 在 Dockerfile 里 chown 给了 node,而且不触碰 run.sh 的守卫
+      #    (禁止 $HOME / $WORK 子树、/tmp/test225-*、/ 及其祖先 —— 都不沾)。
+      - name: Run test225 (预期红;判定交给棘轮)
+        run: |
+          set -uo pipefail
+          docker run --name test225-run -e ARTIFACT_DIR=/test225-work/artifacts \
+            anet-test225-grok-preview \
+            || echo "  (套件退出码非 0 —— 这一步不判定,继续)"
+          mkdir -p "$RUNNER_TEMP/art225"
+          docker cp test225-run:/test225-work/artifacts/. "$RUNNER_TEMP/art225/" \
+            || echo "::warning::无法从容器取出产物 —— 下一步会因报告不存在而红,那是对的"
+          docker rm -f test225-run >/dev/null 2>&1 || true
+          ls -la "$RUNNER_TEMP/art225/" || true
+
+      # 🔴 判据在这里,不在上一步。
+      #    比的是 FAIL 的**集合**不是个数:实测里有一组 FAIL 个数同样是 2、
+      #    内容却完全不同({auth evidence, attach socket} vs {auth evidence, Feishu}),
+      #    只比个数会得出「没差别」。
+      #    另外有一条 PASS 地板,防的是「构建成功但立刻崩掉」——
+      #    那种运行产出 0 个 FAIL,而 0 个 FAIL 在只比 FAIL 的判据下是最漂亮的绿。
+      - name: 棘轮 —— FAIL 集合必须等于已知基线
+        run: |
+          python3 tests/test225-grok-preview-package-live/check-known-failures.py \
+            "$RUNNER_TEMP/art225/report-test225.txt" \
+            tests/test225-grok-preview-package-live/known-failures.txt
+
+      - name: 保留报告(失败时最有用的那份)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test225-report
+          path: ${{ runner.temp }}/art225/
+          if-no-files-found: warn
