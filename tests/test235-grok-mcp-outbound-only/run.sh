@@ -28,7 +28,7 @@ run production-build bun build /workspace/agent-network/src/node-server.ts \
   --outfile /tmp/node-server.js --target bun
 
 run production-socket-harness env MCP_BUNDLE=/tmp/node-server.js \
-  bun /test235/socket-harness.ts
+  bun /workspace/tests/test235-grok-mcp-outbound-only/socket-harness.ts
 
 # Witnessed-red: remove the exact runtime mode gate while leaving the harness
 # unchanged. The MCP then registers presence and opens its own SSE connection;
@@ -40,7 +40,7 @@ run mutation-build bun build /workspace/agent-network/src/node-server.ts \
   --outfile /tmp/node-server-mutated.js --target bun
 cp /tmp/node-server-original.ts /workspace/agent-network/src/node-server.ts
 set +e
-EXPECT_MUTATION=1 MCP_BUNDLE=/tmp/node-server-mutated.js bun /test235/socket-harness.ts > /tmp/mutation.out 2>&1
+EXPECT_MUTATION=1 MCP_BUNDLE=/tmp/node-server-mutated.js bun /workspace/tests/test235-grok-mcp-outbound-only/socket-harness.ts > /tmp/mutation.out 2>&1
 mutation_rc=$?
 set -e
 cat /tmp/mutation.out | tee -a "$REPORT"
