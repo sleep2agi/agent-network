@@ -53,7 +53,6 @@ test2-collab
 test20-cli-ux
 test203-alias-crossover-repro
 test21-quickstart-ux
-test219-grok-copresence
 test22-agent-ux
 test226-opencode-preview-release
 test227-opencode-tui-copresence
