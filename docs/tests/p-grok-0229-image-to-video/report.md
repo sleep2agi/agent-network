@@ -27,4 +27,4 @@ Result: **fired cleanly on first try, ~1m5s turn.** Output:
 1. `imagine` skill in `0.2.29` exposes `image_gen` / `image_edit` / `image_to_video` / `reference_to_video`.
 2. The video demo (`demos/grok-video-gen/`) flow = `image_to_video`, **works reliably on `0.2.29`** (first-try fire, real output).
 3. Demo README updated: correct tool name (`image_to_video`, not `video_gen`/`grok-imagine-video`), state it is image-conditioned (no text-to-video), and replace "alpha flaky" with "verified reliable on `0.2.29`; pin to `0.2.29`+".
-4. Lesson reinforced: capability claims pinned to one CLI version + one test angle age fast; re-verify live on the current version. ([[feedback_schema_introspection_not_capability_proof]])
+4. Lesson reinforced: capability claims pinned to one CLI version + one test angle age fast; re-verify live on the current version. (same pattern as the X-search probe: schema introspection proves a tool is *declared*, never that invoking it does anything)
