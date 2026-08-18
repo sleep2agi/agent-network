@@ -1,0 +1,32 @@
+# grok 共存的能力档位必须在任何 policy/runtime 模块被求值之前钉死。
+#
+# `policy.ts` 的顶层就读 `ANET_INTERNAL_GROK_COPRESENCE_PROFILE`;而 `cli.ts` 在
+# 启动时把它无条件覆盖成从节点配置校验出来的值。cli.ts 里那段注释写着
+# 「Policy/runtime modules are dynamically imported only after this boot-time pin」——
+# **整个能力边界的正确性挂在这句话上,而在这道门之前没有任何东西在守它。**
+#
+# 🔴 ESM 的静态 import 是提升的:写在文件哪一行都一样,被导入模块的顶层会在
+#    cli.ts 的第一条语句之前执行。所以只要有人加一条静态 import(编辑器的
+#    auto-import 会自动这么做),档位就会从 **ambient 环境变量** 算出来。
+#    它是静默的:照样编译、类型照样对、单测里先设 env 再 import 也照样绿。
+#
+# 不加 paths 过滤:这道门要防的正是「有人在 cli.ts 顶部随手加了一行 import」,
+# 而那种改动的 diff 里未必包含 grok-copresence 目录。脚本跑完不到一秒。
+
+name: lint (copresence profile pin)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  pin:
+    name: copresence-profile-pin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 先跑取集自检:这道门的坏法是「一条 import 都没扫到然后打印一片绿」,
+      # 而那种假绿和真绿逐字相同。selftest 里第 3、6 条专门钉这两种。
+      - run: python3 .github/scripts/check-copresence-profile-pin.py --selftest
+      - run: python3 .github/scripts/check-copresence-profile-pin.py
