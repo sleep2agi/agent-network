@@ -50,6 +50,7 @@ on:
       - 'docs/doc-source-pins-baseline.txt'
       - 'scripts/check-doc-source-pins.py'
       - 'tests/test831-doc-source-pins/**'
+      - 'tests/test813-grok-mcp-readiness/**'
   push:
     branches: [main]
     paths:
@@ -90,6 +91,7 @@ on:
       - 'docs/doc-source-pins-baseline.txt'
       - 'scripts/check-doc-source-pins.py'
       - 'tests/test831-doc-source-pins/**'
+      - 'tests/test813-grok-mcp-readiness/**'
 
 # Older runs on the same ref get cancelled — saves minutes when a PR is
 # updated rapidly. main pushes run independently.
@@ -308,6 +310,21 @@ jobs:
       # 🔴 这一步已搬到 .github/workflows/doc-symbol-pins.yml（无 paths 过滤）。
       #    留在这里跑不到该跑的时候：qa.yml 的 paths 里没有 docs/architecture.md，
       #    而那正是行号漂得最多的文件（#1001 一次抓到三处）。
+      # test813 —— #825 加的 Grok CommHub MCP 就绪门。接进来的理由很直接：
+      # 那条 PR 的目的是「MCP 没就绪时 fail closed」，而验证这件事的套件
+      # 如果不进 CI，fail-closed 这个保证就没有任何东西持续守着它。
+      # Dockerfile 的 build-arg 名是 SOURCE_COMMIT（不是 831 的 TEST831_SOURCE_COMMIT），
+      # 容器里由 ENV TEST813_SOURCE_COMMIT 承接 —— 照抄 831 的参数名会静默拿不到值。
+      - name: Build test813-grok-mcp-readiness
+        run: |
+          docker build \
+            --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-test813-grok-mcp-readiness \
+            -f tests/test813-grok-mcp-readiness/Dockerfile .
+
+      - name: Run test813-grok-mcp-readiness
+        run: docker run --rm --network none anet-test813-grok-mcp-readiness
+
       - name: Build test831-doc-source-pins
         run: |
           docker build \
