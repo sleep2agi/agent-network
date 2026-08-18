@@ -31,8 +31,11 @@
 ## 项目结构
 
 - `server/src/` — CommHub Server (Bun + SQLite)
-- `agent-network/bin/cli.ts` — anet CLI (39 命令)
-- `agent-node/src/cli.ts` — Agent 运行时 (4 runtime: claude-agent-sdk / claude-code-cli / codex-sdk / grok-build-acp)
+- `agent-network/bin/cli.ts` — anet CLI (完整命令清单以 [`docs-site/docs/guide/cli.md`](./docs-site/docs/guide/cli.md) 为准；数字会漂，不硬编)
+- `agent-node/src/cli.ts` — Agent 运行时
+  - **stable 4 runtime**：`claude-code-cli` / `claude-agent-sdk` / `codex-sdk` / `grok-build-acp`
+  - **`@preview` 额外**：`codex-app-server` / `opencode-cli`
+  - `grok-build-cli` 仍在开发，尚未发布任何通道
 - `tests/testN-xxx/` — 独立 Docker 测试套件 (每个有 Dockerfile + run.sh)
 - `docs/` — 设计文档 + 测试报告
 

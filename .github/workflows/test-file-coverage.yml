@@ -1,0 +1,49 @@
+# 元门:新增的 *.test.ts 不能落在所有聚合门的扫描范围之外。
+#
+# 起因是 2026-08-13 手工扫出的三处盲区(server/src 69 个 CI 只跑 6 个、
+# agent-network/src 46 个 0 被引用、两个门自称 complete 却漏了 tests/ 下 25 个)。
+# 那三处都补掉了,但补完剩下的问题是:下一个新增的测试文件会不会又静默漏掉。
+# 靠人再扫一遍不是答案,所以有了这道门。
+#
+# 判据和两条防空转见 .github/scripts/check-test-file-coverage.py 的文档串。
+# 用 Python 而不是 yml 里的 bash 循环,同 no-memory-slugs.yml 的理由。
+
+name: lint (every test file is covered by a gate)
+
+on:
+  pull_request:
+    paths:
+      - '**/*.test.ts'
+      - 'tests/test725-agent-node-unit-ci/**'
+      - 'tests/test745-agent-network-unit-ci/**'
+      - 'tests/test798-server-unit-ci/**'
+      # qa.yml 决定这三个门到底跑不跑 —— 它一改,本门的前提就可能塌(codex P1)
+      - '.github/workflows/qa.yml'
+      - '.github/scripts/check-test-file-coverage.py'
+      - '.github/workflows/test-file-coverage.yml'
+  push:
+    branches: [main]
+    paths:
+      - '**/*.test.ts'
+      - 'tests/test725-agent-node-unit-ci/**'
+      - 'tests/test745-agent-network-unit-ci/**'
+      - 'tests/test798-server-unit-ci/**'
+      # qa.yml 决定这三个门到底跑不跑 —— 它一改,本门的前提就可能塌(codex P1)
+      - '.github/workflows/qa.yml'
+      - '.github/scripts/check-test-file-coverage.py'
+      - '.github/workflows/test-file-coverage.yml'
+
+concurrency:
+  group: lint-test-coverage-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  test-file-coverage:
+    name: every test file is covered by a gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run check-test-file-coverage.py
+        run: python3 .github/scripts/check-test-file-coverage.py

@@ -442,9 +442,28 @@ describe("Hub scheduled task API and dispatcher", () => {
     const manual = await api(ownerToken, `/api/scheduled-tasks/${scheduleId}/run-now?network_id=${encodeURIComponent(networkId)}`, { method: "POST", body: "{}" });
     expect(manual.status).toBe(202);
     expect(manual.body.taskId).toBeTruthy();
-    const cancelled = await api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`, { method: "DELETE" });
+    // Cancel via POST /cancel (the path the dashboard uses, since some
+    // reverse proxies rewrite DELETE to 405). Then verify the legacy
+    // DELETE endpoint is still accepted and idempotent when the row is
+    // already cancelled — both spellings must reach the same state.
+    const cancelled = await api(ownerToken, `/api/scheduled-tasks/${scheduleId}/cancel?network_id=${encodeURIComponent(networkId)}`, { method: "POST", body: "{}" });
+    expect(cancelled.status).toBe(200);
     expect(cancelled.body.status).toBe("cancelled");
     const cancelledRow = (await api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`)).body.schedule;
+    const revisionAfterCancel = cancelledRow.revision;
+    // Idempotency: DELETE on an already-cancelled row must be 200 with the
+    // same revision, not 409, and must not bump revision again.
+    const reCancelledDelete = await api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`, { method: "DELETE" });
+    expect(reCancelledDelete.status).toBe(200);
+    expect(reCancelledDelete.body.status).toBe("cancelled");
+    const afterDelete = (await api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`)).body.schedule;
+    expect(afterDelete.revision).toBe(revisionAfterCancel);
+    // And POST /cancel on an already-cancelled row is also idempotent.
+    const reCancelledPost = await api(ownerToken, `/api/scheduled-tasks/${scheduleId}/cancel?network_id=${encodeURIComponent(networkId)}`, { method: "POST", body: "{}" });
+    expect(reCancelledPost.status).toBe(200);
+    expect(reCancelledPost.body.status).toBe("cancelled");
+    const afterPost = (await api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`)).body.schedule;
+    expect(afterPost.revision).toBe(revisionAfterCancel);
     const resurrect = await api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`, {
       method: "PATCH",
       body: JSON.stringify({ revision: cancelledRow.revision, status: "active", name: "must not revive" }),

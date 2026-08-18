@@ -35,7 +35,7 @@
 - ACP 内核活体已跑通 **free model**（真 ACP session + 真流式 + 真计费 token + 子进程真收）。真 vendor（Anthropic/OpenAI）活体 + 正式主打**留到后续**。
 
 ## 升级 / 部署注意
-- **Channel 编辑走 restart-tier**：应用通道变更会触发节点 `exit(75)` 重启，**需要外部 supervisor 拉回进程**（`anet node start` / host_supervisor daemon / systemd `Restart=always` / docker `restart:always`）。手动 spawn（裸 `nohup`）的节点没 supervisor 不会自动重启。详见 [troubleshooting/remote-node-cli-login](../../docs-site/docs/troubleshooting/remote-node-cli-login.md) 与 RFC-024 §6.7.1。
+- **Channel 编辑走 restart-tier**：应用通道变更会触发节点 `exit(75)` 重启，**需要外部 supervisor 拉回进程**（`anet node start` / host_supervisor daemon / systemd `Restart=always` / docker `restart:always`）。手动 spawn（裸 `nohup`）的节点没 supervisor 不会自动重启。详见 [troubleshooting/remote-node-cli-login](../../../docs-site/docs/troubleshooting/remote-node-cli-login.md) 与 RFC-024 §6.7.1。
 - **多机 auth**：跨机建节点优先走 **API key 路线**（key 跟 config/vault 走）；claude-code-cli 订阅登录态机器绑定不可移植，远程 host 需各自 `claude login`。
 
 ## 验证
