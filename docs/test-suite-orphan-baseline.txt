@@ -93,12 +93,6 @@ test588-codex-turn-clientid-rebind
 test596-goal-loop-docs
 test6-networks
 test608-claude-cli-dependency
-test610-opencode-clean-test-workspace
-test611-cli-boolean-flags
-test612-visible-inbox-skip
-test613-codex-dead-endpoint
-test614-rest-single-network
-test615-network-name
 test616-feishu-docker-bootstrap
 test617-feishu-ws-readiness
 test618-claude-vendor-env

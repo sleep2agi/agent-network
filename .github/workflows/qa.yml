@@ -90,6 +90,12 @@ on:
       - 'tests/test649-token-cli/**'
       - 'tests/test651-init-no-token-prompt/**'
       - 'tests/test5-auth/**'
+      - 'tests/test610-opencode-clean-test-workspace/**'
+      - 'tests/test611-cli-boolean-flags/**'
+      - 'tests/test612-visible-inbox-skip/**'
+      - 'tests/test613-codex-dead-endpoint/**'
+      - 'tests/test614-rest-single-network/**'
+      - 'tests/test615-network-name/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
       - 'agent-node/src/cli.ts'
@@ -178,6 +184,12 @@ on:
       - 'tests/test649-token-cli/**'
       - 'tests/test651-init-no-token-prompt/**'
       - 'tests/test5-auth/**'
+      - 'tests/test610-opencode-clean-test-workspace/**'
+      - 'tests/test611-cli-boolean-flags/**'
+      - 'tests/test612-visible-inbox-skip/**'
+      - 'tests/test613-codex-dead-endpoint/**'
+      - 'tests/test614-rest-single-network/**'
+      - 'tests/test615-network-name/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
       - 'agent-node/src/cli.ts'
@@ -713,6 +725,12 @@ jobs:
           - test649-token-cli
           - test651-init-no-token-prompt
           - test5-auth
+          - test610-opencode-clean-test-workspace
+          - test611-cli-boolean-flags
+          - test612-visible-inbox-skip
+          - test613-codex-dead-endpoint
+          - test614-rest-single-network
+          - test615-network-name
     steps:
       - uses: actions/checkout@v4
 
