@@ -116,6 +116,29 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag }}
           BUILD_SHA: ${{ inputs.build_sha }}
 
+  published-build-paths:
+    # 已发布的产物里不许内联构建机的绝对路径（#732）。
+    #
+    # 🔴 判据必须包含**解码**这一层。dist 是 javascript-obfuscator 处理过、且
+    #    --string-array-encoding base64 的，对它裸 grep '/home/' 必然得 0 ——
+    #    而那个 0 的含义是「没有那个形状」，不是「没有那件事」。
+    #
+    # 放在定时面而不是 per-PR：它检查的是**已发布产物**，PR 改不动它；而且要联网
+    # 取包，per-PR 会给每次合并加一条网络依赖。这和同一个 workflow 里另外三个 job
+    # 的理由一致。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 先跑判据自检。这道门最可能的坏法不是判据写错，是**第三层没接上**然后打印
+      # 一片绿 —— selftest 里那条 base64 藏匿夹具专门钉这一格。
+      - run: python3 .github/scripts/check-published-build-paths.py --selftest
+      - run: |
+          python3 .github/scripts/check-published-build-paths.py \
+            @sleep2agi/agent-network@latest \
+            @sleep2agi/agent-network@preview \
+            @sleep2agi/agent-node@latest \
+            @sleep2agi/agent-node@preview
+
   docs-site-drift:
     # anet.sh 没有接 git 自动部署:合并进 main 不会让站点更新,必须有人手动
     # 跑 `vercel --prod`。这条链路的失败方式是**静默分叉** —— 站点照常 200,
