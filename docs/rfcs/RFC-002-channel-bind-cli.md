@@ -34,7 +34,7 @@ anet channel add telegram <node-id>
 anet channel ls [node-id]
 ```
 
-参考实现：[`agent-network/bin/cli.ts:2685-2788`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2685)。
+参考实现：[`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) —— 搜 `async function channelCommand(`。
 
 效果：
 - 在 `.anet/nodes/<node-id>/channels/telegram/` 落两份配置：
