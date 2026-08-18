@@ -41,7 +41,28 @@ the explicit preview policy; it remains a blocker to claiming production or
 
 - Linux with procfs mounted at `/proc` (including `/proc/self/fd`).
 - `@sleep2agi/agent-network` from the `preview` channel once the candidate is published.
-- The exact Grok CLI build `grok 0.2.93 (f00f96316d)`; the known stable installer may append ` [stable]` to that output.
+- The exact Grok CLI build `grok 0.2.93 (f00f96316d)`. The co-presence runtime also accepts the
+  ` [stable]` suffix on that same build — see
+  [`runtime.ts`](../agent-node/src/runtime/grok-copresence/runtime.ts) —— 搜 `requires exactly grok`.
+  (Symbol anchor, not a line number: #857 replaced 13 line pins here after finding **13 of 13 had drifted**.)
+
+  🔴 **The unversioned installer does not give you this build.** `https://x.ai/cli/stable` returned
+  `1.0.4` when #876 was filed and `1.0.5` on 2026-08-18 — it keeps moving, and the pin does not.
+  Pass the version explicitly:
+
+  ```bash
+  curl -fsSL https://x.ai/cli/install.sh | bash -s 0.2.93
+  grok --version   # must print: grok 0.2.93 (f00f96316d)
+  ```
+
+  `bash -s <version>` is the installer's own first positional argument (`TARGET="$1"`), so this is the
+  supported path rather than a hand-assembled artifact URL. Measured 2026-08-18 in an isolated `HOME`:
+  the command above printed `Grok 0.2.93 installed to …/.grok/bin/grok`, and `grok --version` printed
+  `grok 0.2.93 (f00f96316d)` — byte-identical to the pinned string.
+
+  🔴 That installer performs **no checksum verification** of what it downloads (`grep -nE 'sha256|checksum'`
+  on it returns nothing). That is xAI's installer, not ours; it is stated here so the trust boundary is
+  explicit rather than assumed.
 - A completed Grok CLI login for the same operating-system user that runs `anet`.
 - Two terminals on the same machine and user account: one owns the node process; one attaches to its local TUI socket.
 - A trusted CommHub and trusted task senders.
@@ -243,7 +264,14 @@ fallback if the native TUI path fails.
 
 ## Common errors
 
-`grok copresence requires exactly grok 0.2.93 (f00f96316d)` means the installed Grok binary is not the captured build. Install the pinned build; do not bypass the check.
+`grok copresence requires exactly grok 0.2.93 (f00f96316d)` means the installed Grok binary is not the
+captured build — most often because the unversioned installer was used and it now ships a much newer
+stable. Install the pinned build; do not bypass the check:
+
+```bash
+curl -fsSL https://x.ai/cli/install.sh | bash -s 0.2.93
+grok --version   # grok 0.2.93 (f00f96316d)
+```
 
 `Node ... uses legacy headless grok-build-cli mode` means the profile was created with `--grok-headless`. Create a new co-presence profile explicitly rather than editing socket/session fields by hand.
 
