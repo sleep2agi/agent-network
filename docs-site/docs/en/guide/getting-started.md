@@ -47,8 +47,12 @@ anet hub start
 
 The hub listens on `http://127.0.0.1:9200` by default, the SQLite DB lives at `~/.commhub/commhub.db`, and the default admin account **admin / anethub** is created automatically.
 
+::: warning `@preview` prints a **one-time random password** on first start
+This page describes the npm `latest` channel. On `@preview` (`npm install -g @sleep2agi/agent-network@preview`) the first `anet hub start` **prints a freshly generated random password once** (shown once, not recoverable later); log in with it, then `anet passwd` to your own strong password. **Do NOT hard-code `anethub` for preview** — the fixed password only holds on `latest`.
+:::
+
 ::: warning Change the password before going public
-The default `admin / anethub` is for local quickstart only. **Any `--host 0.0.0.0` public deployment must `anet passwd` to a strong password immediately.**
+The default `admin / anethub` is for local quickstart only (latest channel). **Any `--host 0.0.0.0` public deployment must `anet passwd` to a strong password immediately.** Preview channel has no fixed password — see the note above.
 :::
 
 ::: tip Stop / status
@@ -94,7 +98,7 @@ On stable, `anet node create` lists **4 production runtimes** (`claude-agent-sdk
 Start the node:
 
 ::: warning Fresh install + claude-agent-sdk / codex-sdk? Install agent-node first
-These runtimes depend on the `agent-node` package. The first `node start` triggers an npx auto-fetch that takes ~1 minute, but the current startup check **doesn't wait for it** and exits with `agent-node is not installed or cannot report a version` (reproduced on real hardware, [#450](https://github.com/sleep2agi/agent-network/issues/450) (precise filing; #237 is the umbrella)). Run this once before starting:
+These runtimes depend on the `agent-node` package. The first `node start` triggers an npx auto-fetch that takes ~1 minute, but on **stable `@latest` (currently `2.2.21`) and preview `≤ 2.3.0-preview.37`** the startup check **doesn't wait for it** and exits with `agent-node is not installed or cannot report a version` (reproduced on real hardware — [#450](https://github.com/sleep2agi/agent-network/issues/450) is the precise filing, #237 is the umbrella). **Root fix** is [PR #239](https://github.com/sleep2agi/agent-network/pull/239) (commit `1eff3a4d`, merged 2026-06-28); Vincent's 2026-08-09 audit verified the fix in an isolated Docker probe on `2.3.0-preview.38` reaching SSE connected. **The current `@preview` (`2.3.0-preview.39`) contains this fix; `@latest` does not** — [#450](https://github.com/sleep2agi/agent-network/issues/450) is still `open` pending 4 acceptance gates before latest promotion. **Workarounds** (in verified-strength order): upgrade to `@sleep2agi/agent-network@preview`; or stay on `@latest` but pre-install `agent-node` so the binary is already there:
 
 ```bash
 npm install -g @sleep2agi/agent-node

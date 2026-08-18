@@ -85,6 +85,22 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > (含复现命令、两个通道的原始输出、以及它**不覆盖**哪两条断言)。
 :::
 
+::: tip R? 校准（2026-08-17）：测试套件里的版本号已改为「从源码常量派生」，不再需要 release sync
+
+`tests/test386-opencode-agent-node-gate` 与 `tests/test384-opencode-local-package-e2e` 原先各自
+硬编码了 `OPENCODE_AGENT_NETWORK_VERSION` / `OPENCODE_AGENT_NODE_VERSION` 这一对
+（test386 有 5 处断言 + 3 处夹具，test384 有 run.sh 默认值 + Dockerfile ARG）。
+
+走 preview.40 的 dry-run 时发现：**sync 脚本会升常量，但不碰这些文件，所以照本 SOP 发版
+必然产生一个红**——而最省力的「修法」是把断言里的数字改成新的，那等于让测试永远只抄一遍
+当前值、不再检查任何东西。
+
+现在它们在运行时从 `agent-network/src/opencode-agent-node-pair.ts` 读常量（读不到就
+fail-closed，不拿空串去 grep——空串 grep 恒真会把断言变成永远通过），夹具的 `version`
+由 run.sh 在使用前改写。**不要把它们加进 Live versions 表**：加进去等于给已经自洽的东西
+再钉一份，反而会漂。
+:::
+
 ### B. Frozen snapshots（永不动）
 
 每条记录都是某个历史时刻的快照，跟着 release sync 改反而失真。

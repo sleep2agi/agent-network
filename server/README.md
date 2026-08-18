@@ -11,6 +11,23 @@ The supported path is to install the `anet` CLI (`@sleep2agi/agent-network`) and
 
 ## Quick start (verified)
 
+> ⚠️ **Do not run `bunx @sleep2agi/commhub-server` without a version**
+> Without a version this resolves to the npm `latest` dist-tag, and **`latest` is currently `0.8.8` (published 2026-06-24)**.
+> 
+> On `0.8.8` an anonymous `GET /health` **returns the `{networkId}:{alias}` of every live SSE connection** — no token required.
+> The redaction fix is [`7bacb729`](https://github.com/sleep2agi/agent-network/commit/7bacb729) (`security(#473)`, **2026-07-29**),
+> **35 days after** `0.8.8` shipped, so `0.8.8` does not contain it.
+> 
+> **Pin a version, or use the preview channel:**
+> 
+> ```bash
+> bunx --bun @sleep2agi/commhub-server@preview      # contains the redaction fix
+> ```
+> 
+> Or use the supported path, `anet hub start`, which pulls the version in `PINNED_SERVER_VERSION` rather than `latest`.
+> 
+> Self-check: `curl -sS http://<host>:9200/health | jq 'has("sse_sessions")'` — `true` means you are on an affected build.
+
 ```bash
 # Recommended — through the anet CLI
 npm install -g @sleep2agi/agent-network
@@ -73,6 +90,8 @@ authoritative. Pinning versions here goes stale on every release and nobody come
 | `broadcast` | Group send |
 | `list_tasks` | Task list, filterable by `network_id` |
 | `get_completions` | Completion history |
+
+> The table above lists the 17 **collaboration-core** tools. Node lifecycle / provider ops tools ship on the same MCP surface — the authoritative full list is [docs-site/docs/api/mcp-tools.md](../docs-site/docs/api/mcp-tools.md). Don't read the count above as "17 tools total".
 
 ## REST API
 

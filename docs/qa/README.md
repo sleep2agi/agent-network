@@ -6,11 +6,21 @@
 ## 一键跑
 
 ```bash
-bash scripts/qa.sh           # L0 + L1 全跑 (~16s warm)
+bash scripts/qa.sh           # L0 + L1 全跑
 bash scripts/qa.sh --l0      # 只跑 L0 单测 (~0.1s)
-bash scripts/qa.sh --l1      # 只跑 L1 contract 测试 (~16s)
+bash scripts/qa.sh --l1      # 只跑 L1 contract 测试
 bash scripts/qa.sh --list    # 列测试名 + 文件路径
 ```
+
+> **关于耗时**:本页此前写「~16s warm」,`v0-summary.md` 写「本地一键 ~93s」,
+> 而 `v0-summary.md` 自己那张逐条表加起来是 **156s**。三个数字都没说明自己量的是
+> 什么条件,所以谁都不能拿来对照。已把死数字去掉 —— **要知道现在多久,就跑一次**:
+>
+> ```bash
+> time bash scripts/qa.sh          # 你这台机、这个 Docker 缓存状态下的真实耗时
+> ```
+>
+> 156s 是**逐条串行相加**;低于它的墙钟数意味着有并行。冷启动(需要拉镜像)会显著更久。
 
 退出码：`0` 全过；`1` 至少一个 fail；`2` 环境问题（docker 不可用等）。
 

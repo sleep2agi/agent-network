@@ -1,7 +1,10 @@
 # dependencies
 node_modules/
 bun.lock
-package-lock.json
+# package-lock.json 不在这里 —— 它是被提交的。理由与 agent-network 相同:
+# tests/test725-agent-node-unit-ci 用 npm ci 装 agent-node 的依赖,而 ci 需要
+# lockfile 在仓里。这一行原本来自初始发布提交的模板块,是 5 个包里唯一一处 ——
+# agent-network 的同一个块只挡 bun.lock,它的 package-lock.json 是提交的。
 
 # build output
 dist/

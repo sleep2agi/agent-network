@@ -47,7 +47,7 @@
 
 | 档 | 触发点 | 跑什么 | 阻塞合并？ | 状态 |
 |----|--------|--------|-----------|------|
-| **1** | PR + push to main（路径过滤） | `bash scripts/qa.sh` = L0 + L1（~16s warm，GH Actions ~1-2min 含 setup） | **否，仅报告** | ✅ R8 上线 [.github/workflows/qa.yml](../../.github/workflows/qa.yml) |
+| **1** | PR + push to main（路径过滤） | `bash scripts/qa.sh` = L0 + L1（耗时随机器与 Docker 缓存状态变化，跑 `time bash scripts/qa.sh` 实测；GH Actions ~1-2min 含 setup） | **否，仅报告** | ✅ R8 上线 [.github/workflows/qa.yml](../../.github/workflows/qa.yml) |
 | 2 | 主路径文件变更（auth.ts / db.ts / cli.ts） | L0 + L1 contract | 否（先观察稳定性） | 未启用，待 R10+ |
 | 3 | Release tag | 全套 L0+L1+L2+L3 | **是** | 未启用，等本地稳了再谈 |
 
