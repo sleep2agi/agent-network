@@ -18,9 +18,14 @@ RUN curl --fail --silent --show-error --location \
   && rm -f /tmp/bun-linux-x64.zip
 
 WORKDIR /workspace
-COPY agent-node/package.json ./agent-node/
+COPY agent-node/package.json agent-node/package-lock.json ./agent-node/
 COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
-RUN cd agent-node && npm install --include=optional \
+# 🔴 两边都用 npm ci。原来 agent-node 走的是 npm install —— 而它旁边的
+# agent-network 在同一条 RUN 里已经在用 ci 了,只是 agent-node 没有 lockfile。
+# install 会按 caret 解析"当下最新的兼容版本",意味着同一个 commit 在不同
+# 时间构建出不同依赖图:上游发一个兼容版本就能让这道门变红或改变被测行为,
+# 而仓库一个字节都没动。
+RUN cd agent-node && npm ci --include=optional \
   && cd ../agent-network && npm ci
 
 ARG SOURCE_COMMIT

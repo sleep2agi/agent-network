@@ -34,6 +34,7 @@ curl http://localhost:9200/health
   "transport": "streamable-http",
   "sessions_count": 0,
   "sse_connections": 0,
+  "sse_sessions": {},
   "auth": "user-token",
   "security": "secured",
   "tmux": "disabled",
@@ -44,8 +45,54 @@ curl http://localhost:9200/health
 }
 ```
 
-Anonymous requests receive only the aggregate fields above and do not include
-`sse_sessions`. With a valid token, a system admin, legacy master, or DEV_OPEN
+> 🔴 **This sample was captured, not hand-written** — on 2026-08-13, from
+> `bunx --bun @sleep2agi/commhub-server@0.8.8` in a clean container, as the raw
+> response to an **unauthenticated** `curl /health`.
+>
+> **The two channels return different keys** — parse `/health` per channel:
+>
+> | Key | latest `0.8.8` | preview `0.9.0-preview.29` |
+> |---|---|---|
+> | `sse_sessions` | **returned even unauthenticated, and unredacted** | not returned unauthenticated |
+> | `limits` | absent | present |
+>
+> The other 13 keys were present on both **in this capture** — one sample per
+> channel, not a permanent contract.
+
+::: danger On latest `0.8.8`, `sse_sessions` exposes every connected agent to anonymous callers
+The sample above shows `{}` **only because that clean container had zero SSE
+connections**. **Do not read it as "latest leaks nothing."**
+
+`/health` redaction landed in [#473](https://github.com/sleep2agi/agent-network/issues/473)
+on **2026-07-29** (`7bacb729`). `commhub-server@0.8.8` was published **2026-06-24** —
+**35 days earlier, so `0.8.8` does not contain the fix.**
+
+On a `0.8.8` hub with live connections, anonymous `GET /health` returns the
+per-connection `{networkId}:{alias}` breakdown. The public-hub audit on 2026-07-30
+retrieved the network id plus **all 95 agent aliases** in one unauthenticated
+request; see `server/src/health-redaction.test.ts`.
+
+So the difference between channels is not "key present / key absent":
+
+- **latest `0.8.8`** — anonymous callers can read the full live-session breakdown
+  (which is empty only on an idle hub);
+- **preview `0.9.0-preview.22` and later** — anonymous callers get aggregate counts
+  only; the breakdown moved behind auth at `GET /api/stats/sse`;
+- ⚠️ **preview `0.9.0-preview.0` through `.21` leak just like `0.8.8`** — published
+  2026-06-28 … 07-04, i.e. **before the fix**. Do not treat "preview" as safe wholesale.
+
+Confirm this before exposing a `0.8.8` hub to the public internet.
+:::
+
+Code that treats *key presence* as an authorization signal will also behave
+differently across the two channels.
+
+Read the anonymous response **per channel**, per the table and the warning above:
+on preview the key is absent entirely and anonymous callers get aggregate counts
+only; on latest `0.8.8` the key is emitted **unredacted** — empty on an idle hub,
+and a full `{networkId}:{alias}` breakdown as soon as anything connects.
+
+With a valid token, a system admin, legacy master, or DEV_OPEN
 caller can receive the full map; regular `utok_` / `ntok_` callers receive only
 sessions from networks they may access (or an empty object when they belong to
 none).

@@ -145,6 +145,22 @@ if [[ $RUN_L1 -eq 1 ]]; then
       echo "  @sleep2agi/$pkg@preview -> $v"
     done
   } | tee /tmp/qa-l1-registry-snapshot.txt
+  QA_L1_MAX_PAR="${QA_L1_MAX_PAR:-$(nproc 2>/dev/null || echo 4)}"
+  # 🔴 必须先校验再用。下面的闸门条件是 `[[ "$QA_L1_MAX_PAR" -gt 0 ]]`,而 bash
+  # 在算术上下文里把非数字当 0 —— 而 0 的语义恰好是「不限」。于是一个笔误
+  # (`QA_L1_MAX_PAR=two`、`=4x`)会**静默恢复本节要消除的无上限行为**,
+  # 而下面那行 note 还会照打「L1 并发上限 = two」,输出主动确认一个不存在的上限。
+  # 这里 fail-closed:值不合法就退回默认,并大声说出来。
+  if [[ ! "$QA_L1_MAX_PAR" =~ ^[0-9]+$ ]]; then
+    _bad="$QA_L1_MAX_PAR"
+    QA_L1_MAX_PAR="$(nproc 2>/dev/null || echo 4)"
+    note "⚠ QA_L1_MAX_PAR='${_bad}' 不是非负整数 —— 已退回默认 ${QA_L1_MAX_PAR}(否则闸门会静默失效)"
+  fi
+  # 全数字还不够:bash 把前导零当八进制,`[[ "08" -gt 0 ]]` 会报
+  # `value too great for base` 并返回非零 —— 闸门照样静默失效。
+  # 这个洞是写完上面那段校验之后、跑对照表时才发现的(用例里放了 08)。
+  QA_L1_MAX_PAR=$((10#$QA_L1_MAX_PAR))
+  note "L1 并发上限 = ${QA_L1_MAX_PAR}(0 = 不限;用 QA_L1_MAX_PAR 覆盖)"
   pids=()
   declare -A pid_to_test
   for t in "${L1_TESTS[@]}"; do
@@ -172,7 +188,36 @@ if [[ $RUN_L1 -eq 1 ]]; then
       FAILED=$((FAILED+1))
       continue
     fi
-    # Run in background
+    # Run in background —— 但要有并发上限。
+    #
+    # 原来这里是无节制后台化:L1_TESTS 有多少条,就同时拉起多少个容器。
+    # 在专用 CI runner 上没问题;在开发/生产共用的机器上不行 ——
+    # 实测本机(8 核,同时跑着生产 hub、dashboard 与 ~200 个 agent session)
+    # 一次 `qa.sh --l1` 把 load1 顶到 58,即 7.3x 超订。
+    #
+    # 默认上限取 nproc(而不是更激进的 nproc/2),因为要同时满足两件事:
+    # 在小核 CI runner 上尽量不拖慢现有耗时,在大核共享机上把超订压下来。
+    # 需要时用 QA_L1_MAX_PAR 覆盖;设成 0 表示不限(恢复旧行为)。
+    # 注意:这里**不能**用 `$(jobs -rp | wc -l)` —— 它在这个位置**系统性少数**,
+    # 于是上限 N 实际表现成 N+1/N+2。实测过:用 jobs 版本、上限设 2,
+    # `docker ps` 采到的 anet-* 峰值仍是 3。
+    #
+    # 合并时复核了一次这条注释的**机制**部分(bash 5.2.21,脚本非交互):
+    # 原文写「数出来恒为 0」——不准确。同样的循环里采样序列是
+    # `0 1 1 1 0 1 0 1`:它**不是恒 0,而是从来到不了上限值**,
+    # 所以 `(( n < MAX ))` 永远为真、闸门永远放行。
+    # 结论和修法都不变(少数就够坏了),但机制说清楚一点,免得下一个人
+    # 照着「恒为 0」去排查,发现不是 0 就以为这条注释过时了。
+    # 改成在父 shell 里用 kill -0 数还活着的 pid —— 它数的是进程本身,
+    # 不依赖 shell 的作业表。
+    while [[ "$QA_L1_MAX_PAR" -gt 0 ]]; do
+      live=0
+      for _p in "${pids[@]:-}"; do
+        [[ -n "$_p" ]] && kill -0 "$_p" 2>/dev/null && live=$((live+1))
+      done
+      (( live < QA_L1_MAX_PAR )) && break
+      sleep 0.2
+    done
     (dockerrun "docker run --rm anet-$t" >/tmp/qa-l1-$t-run.log 2>&1) &
     pid=$!
     pids+=("$pid")
