@@ -47,6 +47,9 @@ printf 'Final Report\nTOTAL: 283 passed, 1 failed\n' > "$TMP_DIR/red.log"
 printf 'Final Report\nTOTAL: 282 passed, 0 failed\n' > "$TMP_DIR/short.log"
 printf 'Final Report\nno total here\n' > "$TMP_DIR/missing.log"
 printf 'TOTAL: 283 passed, 0 failed\nTOTAL: malformed\n' > "$TMP_DIR/duplicate.log"
+# #924 —— 「某个套件压根没跑」和「用例数真的少了」必须红在不同的话上。
+# 两条夹具的 TOTAL 都低于下限，旧门对它们说的是同一句 below minimum。
+printf 'Final Report\n⚠️ Loop runtime e2e (20): SKIPPED/CRASHED (0 ran — Results line missing, suite likely exited early)\nTOTAL: 263 passed, 0 failed\n' > "$TMP_DIR/crashed.log"
 
 expect_file_contains "$WORKFLOW" 'tests/lib/run-piped-command.sh' 'workflow uses the tested pipeline wrapper'
 expect_file_contains "$WORKFLOW" 'tests/lib/e2e-hard-gate.sh' 'workflow invokes the tested hard gate'
@@ -82,6 +85,26 @@ else
 fi
 expect_gate_red "$TMP_DIR/missing.log" 0 'missing TOTAL fails closed'
 expect_gate_red "$TMP_DIR/duplicate.log" 0 'duplicate or malformed TOTAL fails closed'
+
+# 🔴 #924：不只是「要红」，是「红得说得出是哪一种」。
+# short.log（用例真的少了）和 crashed.log（套件没跑）在旧门里是同一句话。
+expect_gate_red "$TMP_DIR/crashed.log" 0 'a suite that never ran fails closed'
+# 🔴 先把输出收进变量再判，不要 `bash "$GATE" … | grep -q`：
+#    本文件顶上是 `set -euo pipefail`，而 $GATE 在这些用例里**本来就该非零退出**，
+#    pipefail 会把那个 1 当成整条管道的结果 —— 于是 grep 明明命中了，`if` 仍然走
+#    else 分支。第一版就是这么写的，结果 25 PASS / 1 FAIL，而那一条 FAIL 是假的。
+crashed_out=$(bash "$GATE" "$TMP_DIR/crashed.log" 0 2>&1 || true)
+if printf '%s' "$crashed_out" | grep -Fq 'never ran'; then
+  pass 'a crashed suite is named as such, not reported as a missing test'
+else
+  fail 'a crashed suite is named as such, not reported as a missing test'
+fi
+short_out=$(bash "$GATE" "$TMP_DIR/short.log" 0 2>&1 || true)
+if printf '%s' "$short_out" | grep -Fq 'never ran'; then
+  fail 'a genuinely short count must NOT be blamed on a crashed suite'
+else
+  pass 'a genuinely short count must NOT be blamed on a crashed suite'
+fi
 expect_gate_red "$TMP_DIR/green.log" '' 'missing runner status fails closed'
 expect_gate_red "$TMP_DIR/green.log" tee_failed_1 'tee failure status fails closed'
 
