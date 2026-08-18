@@ -154,6 +154,16 @@ agent-node/src/cli.ts:3450               … Cross-machine artifact distribution
      行号解决的是「指得到指不到」，**两者是两个问题**。这一条也改成两列式了；
      子串加长成整行 `claudeArgs.push("--dangerously-load-development-channels", ch)`，
      因为裸的 `dangerously-load-development-channels` 在该文件里有 4 处。
+     🔴 收尾（同一个 PR 里）：不再等第四次，剩下三条也改成两列式 ——
+     feishu-tool-deny.ts / tools.ts / server.ts。理由就是上面第三次那条:
+     **唯一性解决「指得准不准」，行号解决「指得到指不到」，这是两个问题**，
+     上一轮把它们混成一件，于是留下了一颗三天内第三次爆的雷。
+     加长的两条：`list_providers` 在 tools.ts 里 2 处、`addNetworkScope` 在
+     server.ts 里 **24 处** —— 后者尤其说明行号式掩盖了什么：一个出现 24 次的词
+     本来就没钉住任何地方，行号只是让人看不出来。
+     **只留 db.ts 那一条仍是行号式**，因为 tests/test846-doc-claims/run.sh 的
+     drifted 变异打的就是它；改它等于顺手改动那道门的判据，属于另一条。
+     ⇒ 清单里恰好保留一条行号式，它同时是那道门的 witnessed-red 夹具。
      其余几条保持行号式：它们的子串本来就唯一，而且 test846 的 drifted 变异打的就是
      清单里 db.ts 的那一条（`ADD COLUMN team`）。
      🔴 这段注释第一版把那条清单行**逐字抄了一遍**，于是同一个串在文档里出现两次，
@@ -166,9 +176,9 @@ agent-network/bin/cli.ts :: claudeArgs.push("--dangerously-load-development-chan
 agent-node/src/cli.ts :: video_gen
 agent-node/src/cli.ts :: Expose CURRENT_TASK_ID
 agent-node/src/cli.ts :: totalCostUsd: m.total_cost_usd
-agent-node/src/feishu-tool-deny.ts :: 250 :: bubblewrap
-server/src/tools.ts :: 3899 :: list_providers
-server/src/server.ts :: 9 :: addNetworkScope
+agent-node/src/feishu-tool-deny.ts :: bubblewrap
+server/src/tools.ts ::     "list_providers",
+server/src/server.ts :: import { addNetworkScope, canRestWriteNetwork
 ```
 
 ### 为什么是显式清单,不是从正文正则抽
