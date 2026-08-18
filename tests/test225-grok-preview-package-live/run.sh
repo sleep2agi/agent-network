@@ -120,7 +120,18 @@ node /test225/artifact-report.mjs "$REPORT" \
   || { printf 'FAIL: could not atomically create a private report\n' >&2; exit 1; }
 
 log() { printf '%s\n' "$*" | tee -a "$REPORT"; }
-fail() { log "FAIL: $*"; exit 1; }
+# 🔴 #1026 —— fail() 退出整个套件,于是它下游的判据本次一条都不会跑。
+#    这件事以前在报告里**完全不可见**:报告只说「FAIL: xxx」,读起来像
+#    「其余都查过了」。实测这个套件长期红在第 1954 行 / 共 2482 行 ——
+#    下游 527 行、85 条断言(其中 30 条涉凭据)从未执行,而报告一个字都没提。
+#    ${BASH_LINENO[0]} 是**调用方**的行号(不是 fail 自己的),所以这个数就是
+#    早停的确切位置。这不修 fail-fast 本身,只是让它丢掉的量变成可见的。
+TOTAL_LINES=$(wc -l < "$0")
+fail() {
+  log "FAIL: $*"
+  log "diagnostic: 早停于 run.sh:${BASH_LINENO[0]} / 共 ${TOTAL_LINES} 行 —— 该行之后的判据本次**未执行**,不是通过"
+  exit 1
+}
 pass() { log "PASS: $*"; }
 
 PROJECT_SANDBOX_PLACEHOLDER_NAMES=(.grok .claude .cursor .mcp.json .envrc)
@@ -874,6 +885,28 @@ fail_if_task_terminal_error() {
   fail "$label reached a terminal error before a valid reply"
 }
 
+# 🔴 #1027 —— 等一个**本脚本自己起的** PID 退出,带上界。
+#    原来那行是 `wait "$HEADLESS_PID" 2>/dev/null || true`,**没有任何上界**。
+#    实测:`anet node stop` 对非 tmux 启动的节点会打印
+#        [anet] "<alias>" is not running locally (server notified offline)
+#    **并返回 0** —— 于是 stop_node_checked 认为停成功,往下走到 wait,
+#    而那个进程根本没被停,wait 永远不返回。在 CI 上这会把 job 的超时耗光,
+#    而且**不产出任何诊断**:报告停在 `[L4] ...` 那一行,既没 FAIL 也没 PASS,
+#    看起来像「跑到一半机器炸了」。
+#    这里只把静默挂死换成有上界、带证据的失败;`anet node stop` 该不该在没停掉的
+#    情况下通知服务端 offline,是产品侧的决定,不在本套件里改。
+wait_pid_gone() {
+  local pid=$1 tries=$2 i cmd
+  for ((i = 0; i < tries; i++)); do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 0.1
+  done
+  # 还活着 —— 把它是什么打出来。这正是我当初必须 docker exec 进容器手挖的东西。
+  cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || echo "(cmdline 读不到)")
+  log "diagnostic: pid $pid 在 stop 之后仍存活 ${tries} × 0.1s —— cmdline: $cmd"
+  return 1
+}
+
 stop_node_checked() {
   local alias label output
   alias=$1
@@ -1449,7 +1482,16 @@ chmod 600 "$REAL_AUTH_PATTERNS" "$REAL_AUTH_UNSAFE_PATTERNS" \
   "$REAL_AUTH_METADATA_MANIFEST"
 real_turn_scan_inputs_valid \
   || fail "auth evidence role self-test scan inputs are not owner-only"
-if (trap - EXIT; HOME="$AUTH_ROLE_SELFTEST/home"; export HOME; \
+# 🔴 REPORT=/dev/null —— 这两段是**负向自检**:故意喂一份合成的失败夹具,
+#    断言这道门必须失败。它们已经把 stdout 重定向到 $AUTH_ROLE_* 捕获文件了,
+#    但 `log()` 是 `printf | tee -a "$REPORT"` —— **tee 无视 stdout 重定向**,
+#    照样往共享报告里追加。于是自检那句预期中的
+#        FAIL: real auth evidence scan failed; closed target-role diagnostic retained
+#    出现在 report-test225.txt 里,读起来和一次真失败**逐字相同**。
+#    (我自己就照它建了一条 known-failures 基线并挂了 issue —— 那条基线是错的。)
+#    tee 的目标是变量,所以在子 shell 里改掉它就够了;stdout 仍然照常被捕获,
+#    下面那些 grep/jq 断言不受影响。
+if (trap - EXIT; REPORT=/dev/null; HOME="$AUTH_ROLE_SELFTEST/home"; export HOME; \
   run_real_auth_evidence_gate final_scan \
   "$AUTH_ROLE_CURRENT_HOME" "$AUTH_ROLE_SESSION_ID" "$AUTH_ROLE_CWD" \
   "$AUTH_ROLE_LEADER" "$AUTH_ROLE_ATTACH" \
@@ -1484,7 +1526,8 @@ printf '%s\n' clean >"$AUTH_ROLE_SESSION_DIR/chat_history.jsonl"
 printf '%s\n' clean >"$AUTH_ROLE_CURRENT_HOME/unreviewed.data"
 safe_rm_rf "$AUTH_ROLE_PRIOR_HOME"
 rm -f "$AUTH_ROLE_SESSION_DIR/agent_id" "$AUTH_ROLE_CURRENT_HOME/unreviewed.link"
-if ! (trap - EXIT; HOME="$AUTH_ROLE_SELFTEST/home"; export HOME; \
+# 同上:这一段也是自检(验 WARNING 分支),同样不该写进共享报告。
+if ! (trap - EXIT; REPORT=/dev/null; HOME="$AUTH_ROLE_SELFTEST/home"; export HOME; \
   run_real_auth_evidence_gate final_scan \
   "$AUTH_ROLE_CURRENT_HOME" "$AUTH_ROLE_SESSION_ID" "$AUTH_ROLE_CWD" \
   "$AUTH_ROLE_LEADER" "$AUTH_ROLE_ATTACH" \
@@ -1935,7 +1978,15 @@ rm -f "$GLOBAL_INSTALL_LOG"
 # forked worker or Grok TUI starts, with a fixed explanation and no channel
 # credential in output.
 FEISHU_DIR=/tmp/test225-feishu-refused
-FEISHU_CONFIG=/tmp/test225-feishu-refused-config.json
+# 🔴 #1020 真因 —— 这份 config 原来直接放在 /tmp 下,于是节点**在走到飞书拒绝之前**
+#    就先拒绝了配置本身:
+#        [agent-node] Refusing unsafe config state: private config parent is not owner-controlled: /tmp
+#    产品那条检查在 agent-node/src/runtime/config-apply.ts:256,只看**直接父目录**
+#    (`const parent = dirname(path)`),判据是 `opened.uid !== uid` ——
+#    /tmp 属 root(0),容器里进程是 node(1000),所以必然不过。**产品是对的。**
+#    本套件其它 config 一直放在 $WORK 下(`CONFIG="$WORK/.anet/nodes/$ALIAS/config.json"`,
+#    $WORK 建出来就 chmod 700),只有这一份是例外。按本文件自己的约定改回去。
+FEISHU_CONFIG="$WORK/test225-feishu-refused-config.json"
 FEISHU_LOG=/tmp/test225-feishu-refused.raw.log
 mkdir -p "$FEISHU_DIR"
 chmod 700 "$FEISHU_DIR"
@@ -1950,12 +2001,28 @@ if env -i HOME="$HOME" PATH="$PATH" GROK_BINARY="$FAKE_GROK" \
   > "$FEISHU_LOG" 2>&1; then
   fail "installed candidate accepted an unsupported Feishu channel"
 fi
-grep -Fq 'grok-build-cli preview currently refuses Feishu channels' "$FEISHU_LOG" \
-  || fail "installed candidate Feishu refusal lacked the fixed explanation"
+# 🔴 #1020 —— 顺序:凭据扫描必须排在功能断言**之前**。
+#    原来那句 `grep -Fq ... || fail` 排在两条 scan_fixed_file 前面,而 `fail()` 是
+#    `log "FAIL: $*"; exit 1` —— 一旦那句 grep 不过(它已经红了至少两个 commit),
+#    这两条**安全检查根本不会执行**。也就是说:在唯一一种「拒绝路径没按预期走完」的
+#    现实里,我们恰好放弃了检查它有没有把凭据打进日志。
+#    把安全检查挡在功能检查后面,等于让功能回归顺手关掉安全回归。
 scan_fixed_file /tmp/test225-markers "$FEISHU_LOG" \
   || fail "Feishu refusal output exposed a synthetic credential marker"
 scan_fixed_file /tmp/test225-live-credentials "$FEISHU_LOG" \
   || fail "Feishu refusal output exposed a Hub credential"
+if ! grep -Fq 'grok-build-cli preview currently refuses Feishu channels' "$FEISHU_LOG"; then
+  # 到这里为止,上面两条扫描已经证明这份日志里没有凭据 —— 所以可以安全地把
+  # 产品自己打的那几行原样带出来。只带 `[agent-node] ` 前缀的行:
+  # 它们是产品的错误消息,而拒绝语句之前有 **17 处** process.exit(1),
+  # 「退出码非 0」这半边判据被其中任意一条满足,区分不出是哪一条。
+  # 不带这几行的话,这条 FAIL 只能说明「不是因为飞书被拒而退的」,不能说明因为什么。
+  log "diagnostic: feishu_refusal actual [agent-node] output follows (credential-scanned above)"
+  grep -F '[agent-node] ' "$FEISHU_LOG" | head -5 | while IFS= read -r line; do
+    log "  | $line"
+  done
+  fail "installed candidate Feishu refusal lacked the fixed explanation"
+fi
 [ "$(matching_process_count '/test225/fake-grok.mjs')" -eq 0 ] \
   || fail "Feishu refusal started Grok before closing the channel boundary"
 safe_rm_rf "$FEISHU_DIR" "$FEISHU_CONFIG" "$FEISHU_LOG"
@@ -1984,7 +2051,8 @@ scan_fixed_file /tmp/test225-markers "$HEADLESS_LOG" \
 scan_fixed_file /tmp/test225-live-credentials "$HEADLESS_LOG" \
   || fail "headless start output exposed a Hub credential"
 stop_node_checked "$HEADLESS_ALIAS" headless
-wait "$HEADLESS_PID" 2>/dev/null || true
+wait_pid_gone "$HEADLESS_PID" 100 \
+  || fail "headless node survived a node stop that reported success (#1027)"
 HEADLESS_PID=""
 rm -f "$HEADLESS_LOG"
 pass "persisted co-presence true/false and socket identities override stale ambient env"
