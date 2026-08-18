@@ -61,6 +61,9 @@ on:
       - 'tests/test219-grok-copresence/**'
       - 'tests/test605-grok-startup-model-label/**'
       - 'tests/test735-hub-daemon-rebuild/**'
+      - 'tests/test631-private-config-permissions/**'
+      - 'tests/test646-config-node-id-precedence/**'
+      - 'agent-node/src/cli.ts'
       - 'deploy/hub/hub-daemon.sh'
   push:
     branches: [main]
@@ -113,6 +116,9 @@ on:
       - 'tests/test219-grok-copresence/**'
       - 'tests/test605-grok-startup-model-label/**'
       - 'tests/test735-hub-daemon-rebuild/**'
+      - 'tests/test631-private-config-permissions/**'
+      - 'tests/test646-config-node-id-precedence/**'
+      - 'agent-node/src/cli.ts'
       - 'deploy/hub/hub-daemon.sh'
 
 # Older runs on the same ref get cancelled — saves minutes when a PR is
@@ -547,3 +553,35 @@ jobs:
             -f tests/test735-hub-daemon-rebuild/Dockerfile .
           docker run --rm --network none -e ARTIFACT_DIR=/tmp/art \
             anet-test735-hub-daemon-rebuild
+
+  private-config-gates:
+    # 独立 job：这两个套件守的是**凭据落盘的私有写入边界**，和 grok / hub 都不是一回事，
+    # 名字必须说得出它管什么。
+    name: private config write boundary (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # 🔴 test631 的判据里有一段「生产路径清单」，逐条点名每一个直写路径，
+      #   原文写着理由：a new bypass cannot hide behind an aggregate green count.
+      #   它还自带两条见证红：private-mode / startup-repair。
+      #
+      #   ⚠️ **不要加 `--network none`**。它有一段要真起节点（isolated HOME + unreachable Hub），
+      #      断网会让它 rc=1 —— 那是**跑法造成的红**，不是套件缺陷。我踩过一次。
+      - name: Build + run test631-private-config-permissions
+        run: |
+          docker build --build-arg TEST631_SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-test631-private-config-permissions \
+            -f tests/test631-private-config-permissions/Dockerfile .
+          docker run --rm -e ARTIFACT_DIR=/tmp/art \
+            anet-test631-private-config-permissions
+
+      # 自带见证红：MUTATION_RED: env-first-precedence
+      - name: Build + run test646-config-node-id-precedence
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-test646-config-node-id-precedence \
+            -f tests/test646-config-node-id-precedence/Dockerfile .
+          docker run --rm --network none -e ARTIFACT_DIR=/tmp/art \
+            anet-test646-config-node-id-precedence
