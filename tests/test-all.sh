@@ -26,6 +26,22 @@ run_suite() {
     TOTAL_FAIL=$((TOTAL_FAIL + 1))
     SUITES+=("$STATUS $NAME: SKIPPED/CRASHED (0 ran — Results line missing, suite likely exited early)")
     echo "  $STATUS WARNING: 0 ran (suite crashed or Results line missing)"
+    # 🔴 0 ran 时把 suite 自己的输出吐出来。
+    #
+    #    这个分支此前只说「它崩了」，不说崩在哪 —— 而 OUTPUT 是被捕获的，
+    #    于是唯一知道原因的那份内容被丢掉了。2026-08-18 一次 PR 让 5 个 suite
+    #    同时 0 ran，日志里「━━━ Base E2E ━━━」和「⚠️ 0 ran」之间**一行都没有**，
+    #    排查只能靠猜。
+    #
+    #    只在 0 ran 这条路径上打印，正常/失败路径都不受影响：绿的时候不刷屏，
+    #    而真的崩了时，日志里第一次有了可读的原因。
+    #    尾部 40 行足够看到 shell 的最后一句错；开头 10 行用来分辨
+    #    「一开始就没起来」和「跑到一半死了」——两者的下一步完全不同。
+    echo "  ── suite 自己的输出（前 10 行）──"
+    printf '%s\n' "$OUTPUT" | head -10 | sed 's/^/  | /'
+    echo "  ── suite 自己的输出（后 40 行）──"
+    printf '%s\n' "$OUTPUT" | tail -40 | sed 's/^/  | /'
+    echo "  ── 输出共 $(printf '%s\n' "$OUTPUT" | wc -l) 行 ──"
     echo ""
     return
   fi
