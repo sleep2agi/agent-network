@@ -37,7 +37,16 @@
 > "在外面用手机给通信工程马派任务,看他干完了没;晚上回家用电脑接着看他干。" (Vincent 7010 telegram)
 
 现有 anet 用户端入口:
-- **dashboard** (`agent-network-dashboard.vercel.app`) — Next.js, 公开只读 + 管理员私有, 但**没有 chat UI**, 只 list + observability
+- **dashboard** — Next.js, 公开只读 + 管理员私有, 但**没有 chat UI**, 只 list + observability
+
+  > 🔴 **本行原来把 `agent-network-dashboard.vercel.app` 写成了这个入口的地址,那是错的(#829)。**
+  > 项目自营的生产 Dashboard 是**自托管**的(`Caddy :3000 / frpc :3100 → 127.0.0.1:3001`,
+  > pm2 托管),拓扑见 `deploy/dashboard/README.md`;仓库政策不写死真实域名。
+  > `agent-network-dashboard.vercel.app` **不是它**,也不是任何面向外部用户的 SaaS 入口 ——
+  > 判断线上状态时不要用它。判断方法见 `CLAUDE.md`「项目信息 → Dashboard:分三种,别混」。
+  >
+  > (下文 §「生产域名建议」和「待定问题」里仍然提到这个域名 —— **那两处是提案,不是现状陈述**,
+  > 保留原样。这条告示只改这一处:**它当时是在描述"现有入口"**。)
 - **MCP tools** (`commhub_send_task` 等) — 走 Claude Code / codex MCP server 配置, **要装 CLI 才能用**
 - **CLI** (`anet send`) — 同上, 要装
 - **IM 接入**(RFC-020 飞书/WhatsApp/企微/Slack) — 走第三方 IM, 用户**必须先有该 IM 账号 + bot 安装**
