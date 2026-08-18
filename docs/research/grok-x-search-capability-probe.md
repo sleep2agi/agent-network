@@ -25,7 +25,7 @@ Erratum 2 的"两档"分级源自 R83 trace 看 LLM 调了 17 次 `run_terminal_
 **修正决策**:
 - ✅ 删 `demos/grok-x-search/fetcher/` + `.env.x.example` 整套 twitterapi.io 模板
 - ✅ scenario doc 改 "两档" 为 "单档 native + 诚实边界 + 如果你真要 faves 集成自己写"
-- ✅ RFC-021 §14 banked: "schema-introspection 是必要但不充分", agent-action E2E 才是 capability claim final gate (第 3 次同模式 lesson, [[feedback_schema_introspection_not_capability_proof]])
+- ✅ RFC-021 §14 banked: "schema-introspection 是必要但不充分", agent-action E2E 才是 capability claim final gate (第 3 次同模式 —— schema 自省只能证明某个工具**被声明了**,永远证明不了调用它会发生什么)
 - ❌ **不 ship 任何特定第三方 X 商业 API 适配作 anet 默认** — 用户按需自集成
 
 ---

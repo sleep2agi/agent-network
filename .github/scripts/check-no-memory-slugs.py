@@ -117,10 +117,13 @@ SELF_ALLOWLIST = {
 ALLOWLIST_PATH_PREFIXES = (
     "docs/sop/",
     "docs/rfcs/",
-    "docs/research/",
-    "docs/troubleshooting/",
     "docs/tests/",
 )
+# 2026-08-18 —— `docs/research/`(3 条)与 `docs/troubleshooting/`(2 条)已审完并清空,
+# 两条前缀从此删除,这两棵树从现在起真的被这道门覆盖。
+# 剩下三棵各自的存量:docs/sop/ 24 · docs/rfcs/ 24 · docs/tests/ 4。
+# 🔴 只往下走。**要加回一条前缀,等于说「这棵树又可以泄漏了」** —— 那不是维护动作,
+#    是把已经收回来的覆盖面重新让出去,应该单独立案而不是顺手加。
 
 
 # 🔴 这道门的 FAIL 输出会**原样打印命中的那一段**，而 GitHub Actions 的日志

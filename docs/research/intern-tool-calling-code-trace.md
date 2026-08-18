@@ -180,4 +180,5 @@ node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts:1233–1238   ToolsField pr
 - SDK马's curl A/B + hotfix validation: [`docs/research/intern-tool-calling-investigation.md`](./intern-tool-calling-investigation.md)
 - The #101 root-cause fix that ships with the TOOLS_PRESET sentinel: [issue #101](https://github.com/sleep2agi/agent-network/issues/101)
 - The #130 hotfix scope: [issue #130](https://github.com/sleep2agi/agent-network/issues/130)
-- The vendor table source of truth (Vincent 4227 verify-with-real-call SOP): [`feedback_vendor_verify_before_hardcode`](../../agent-orchestra/memory/feedback_vendor_verify_before_hardcode.md)
+- The vendor table source of truth is Vincent's verify-with-a-real-call SOP: **do not hardcode a vendor's
+  capability table from its docs — issue one real call and record what came back.**

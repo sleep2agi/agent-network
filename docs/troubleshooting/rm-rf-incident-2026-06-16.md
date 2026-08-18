@@ -64,5 +64,7 @@ Two-layer:
 - `tests/lib/safe-rm.sh` (defense)
 - `tests/scripts/lint-no-bare-rm-rf.sh` (regression prevention)
 - `docs/rfcs/RFC-023-destructive-command-guardrail.md` (LLM Bash tool variant)
-- `[[feedback_no_host_test_nodes]]` (sibling red line — "don't run test nodes on the host")
-- `[[feedback_default_flags]]` (`--dangerouslySkipPermissions` default)
+- Sibling red line: **don't run test nodes on the host** — they get a real HOME and a real
+  working tree, so a destructive command inside one is a destructive command on the machine.
+- Sibling red line: `--dangerouslySkipPermissions` **must not be a default** — it removes the
+  last thing standing between a generated command and the filesystem.
