@@ -40,6 +40,7 @@ on:
   push:
     branches: [main]
     paths:
+      - '.github/scripts/check-docs-site-drift.py'
       - 'scripts/verify-published-pins.sh'
       - 'scripts/verify-release-tag.sh'
       - '.github/workflows/published-artifact-drift.yml'
@@ -73,3 +74,23 @@ jobs:
           fetch-depth: 0
       - name: verify release tags point at the commit they were built from
         run: bash scripts/verify-release-tag.sh
+
+  docs-site-drift:
+    # anet.sh 没有接 git 自动部署:合并进 main 不会让站点更新,必须有人手动
+    # 跑 `vercel --prod`。这条链路的失败方式是**静默分叉** —— 站点照常 200,
+    # 只是内容停在某次部署。仓里记录过停 36 小时、以及冻结近 14 天。
+    #
+    # 🔴 和上面两个 job 同一个理由放在定时里:它检查的是**已部署的站点**,
+    #    PR 不改变它,而且需要外网。放进 per-PR 只会给每次合并加一个网络依赖。
+    #
+    # 红了指向的动作是唯一且明确的:从 origin/main 的 worktree 跑 `vercel --prod`。
+    name: docs-site-drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 需要历史才能取「最近新增的行」——指纹只从那里选,见脚本注释。
+          fetch-depth: 80
+      - run: python3 .github/scripts/check-docs-site-drift.py --selftest
+      - run: python3 .github/scripts/check-docs-site-drift.py
