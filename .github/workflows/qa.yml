@@ -31,6 +31,9 @@ on:
       - 'tests/test686-rest-shape-golden/**'
       - 'tests/test765-batch-runtime-gate/**'
       - 'tests/test766-bunx-preflight/**'
+      # test823 是这道 L1 并发闸门自己的回归,跑的是真的 scripts/qa.sh
+      # (把 docker/npm 换成 PATH 上的桩)。改它必须能重跑跑它的 workflow。
+      - 'tests/test823-l1-concurrency-cap/**'
       - 'tests/test798-server-unit-ci/**'
       # test798 的镜像 COPY 了 test601 的 race-worker.ts,
       # 且 server/src/scheduled-tasks-http.test.ts 会执行它做「两个真 Hub 抢同一 occurrence」——
@@ -61,6 +64,9 @@ on:
       - 'tests/test686-rest-shape-golden/**'
       - 'tests/test765-batch-runtime-gate/**'
       - 'tests/test766-bunx-preflight/**'
+      # test823 是这道 L1 并发闸门自己的回归,跑的是真的 scripts/qa.sh
+      # (把 docker/npm 换成 PATH 上的桩)。改它必须能重跑跑它的 workflow。
+      - 'tests/test823-l1-concurrency-cap/**'
       - 'tests/test798-server-unit-ci/**'
       # test798 的镜像 COPY 了 test601 的 race-worker.ts,
       # 且 server/src/scheduled-tasks-http.test.ts 会执行它做「两个真 Hub 抢同一 occurrence」——
