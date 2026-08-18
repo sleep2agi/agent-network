@@ -375,11 +375,32 @@ jobs:
       # 这一步**预期非 0** —— test225 现在有 2 条已知失败(#1020 / #1021)。
       # 判定不在这里,在下一步的棘轮。所以这里必须容错,
       # 但报告必须真的产出来,否则下一步会因为「报告不存在」而红(那是对的)。
+      # 🔴 产物目录这一步踩了两个坑,都写在这里,别再照抄回去:
+      #
+      #    ① 把宿主目录挂进 /artifacts —— 容器是 `USER node`(uid 1000),
+      #       而 runner 上 $RUNNER_TEMP 属主是 uid 1001,挂进去写不了,套件报
+      #           FAIL: could not atomically create a private report
+      #       并且**一个报告都不产出**,棘轮只能看到「报告不存在」。
+      #       我本地跑这一版是绿的,纯粹因为宿主 uid 恰好也是 1000 ——
+      #       绿依赖了一个偶然的 uid 巧合,换台机器就红。
+      #
+      #    ② 干脆不挂卷 —— 也不行,只是换个错法:node 用户在 `/` 下建不了目录
+      #           mkdir: cannot create directory '/artifacts': Permission denied
+      #
+      #    所以把 ARTIFACT_DIR 指到容器内 node 自己的目录,再 cp 出来。
+      #    /test225-work 在 Dockerfile 里 chown 给了 node,而且不触碰 run.sh 的守卫
+      #    (禁止 $HOME / $WORK 子树、/tmp/test225-*、/ 及其祖先 —— 都不沾)。
       - name: Run test225 (预期红;判定交给棘轮)
         run: |
-          mkdir -p "$RUNNER_TEMP/art225"
-          docker run --rm -v "$RUNNER_TEMP/art225:/artifacts" anet-test225-grok-preview \
+          set -uo pipefail
+          docker run --name test225-run -e ARTIFACT_DIR=/test225-work/artifacts \
+            anet-test225-grok-preview \
             || echo "  (套件退出码非 0 —— 这一步不判定,继续)"
+          mkdir -p "$RUNNER_TEMP/art225"
+          docker cp test225-run:/test225-work/artifacts/. "$RUNNER_TEMP/art225/" \
+            || echo "::warning::无法从容器取出产物 —— 下一步会因报告不存在而红,那是对的"
+          docker rm -f test225-run >/dev/null 2>&1 || true
+          ls -la "$RUNNER_TEMP/art225/" || true
 
       # 🔴 判据在这里,不在上一步。
       #    比的是 FAIL 的**集合**不是个数:实测里有一组 FAIL 个数同样是 2、
