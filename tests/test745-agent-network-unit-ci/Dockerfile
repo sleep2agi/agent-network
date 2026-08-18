@@ -22,13 +22,18 @@ COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
 RUN cd agent-network && npm ci
 
 COPY agent-node/package.json ./agent-node/package.json
+# tests/feishu-envelope-compat.test.ts 跨包 import agent-node 的 runtime 源码。
+COPY agent-node/src ./agent-node/src
 COPY agent-network ./agent-network
 COPY tests/test745-agent-network-unit-ci/run.sh ./tests/test745-agent-network-unit-ci/run.sh
 
 ARG SOURCE_COMMIT
 ENV TEST745_SOURCE_COMMIT=$SOURCE_COMMIT
 
-RUN chmod 0755 ./tests/test745-agent-network-unit-ci/run.sh \
+# tests/feishu-bridge-ipc.test.ts 把附件落在硬编码的 /work/feishu-attachments 下,
+# 不是 workspace 相对路径。给 node 建出来,否则它红在 EACCES 上、看着像产品坏。
+RUN install -d -o node -g node -m 0755 /work \
+ && chmod 0755 ./tests/test745-agent-network-unit-ci/run.sh \
   && install -d -o node -g node -m 0700 "/run/user/$(id -u node)" \
   && chown -R node:node /workspace
 

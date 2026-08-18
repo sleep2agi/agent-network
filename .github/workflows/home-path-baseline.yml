@@ -1,0 +1,40 @@
+# This repository is public. A hardcoded `/home/<someone>/` in it exposes a real
+# person's login name, and on 2026-08-18 there were 203 of them across 71 tracked
+# files — and the number had grown since the issue was opened (#894).
+#
+# 🔴 The gate is a BASELINE, not zero. Many of the existing hits are part of an
+# incident record where the real path is what makes the evidence reproducible;
+# scrubbing those is a per-file judgement call, not something CI can drive. A gate
+# that demanded zero would be red from day one, and a gate red only from backlog
+# stops meaning anything the moment the backlog clears.
+#
+# No `paths:` filter, on purpose: a new home path can land in any file in the repo,
+# so gating this on a subdirectory would be exactly the blind spot it exists to
+# prevent. That also makes it a candidate for a required check (#828).
+
+name: lint (home path baseline)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  scan:
+    # Unique across the repo — a check name is the only identifier a branch
+    # protection rule can name (#916).
+    name: home-path-baseline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # `git grep` and `git ls-files` need the real tree, and the default
+          # shallow checkout is enough for both — but fetch-depth 0 keeps the
+          # baseline comparable if this ever grows a "compare against merge-base"
+          # mode. Cheap here; this repo is small.
+          fetch-depth: 0
+      # The classifier decides WHAT gets counted, so it decides the number. If it
+      # silently stops recognising a name shape, the scan below still prints a
+      # count and exits 0.
+      - run: python3 .github/scripts/check-home-path-baseline.py --selftest
+      - run: python3 .github/scripts/check-home-path-baseline.py

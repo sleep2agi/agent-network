@@ -87,6 +87,9 @@ anet node create my-agent --runtime claude-code-cli
 | `claude-code-cli` **⭐ recommended** | Claude Code CLI (reuses your subscription) | `npm i -g @anthropic-ai/claude-code` + `claude auth login` (Claude Pro/Team/Max) — zero config, most stable |
 | `claude-agent-sdk` | Anthropic / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter (any Anthropic-compatible endpoint) | API key in env or via `anet node create` prompts; on `latest`, first `node start` needs `agent-node` installed first ([#450](https://github.com/sleep2agi/agent-network/issues/450)) |
 | `codex-sdk` | Codex | `codex login` |
+| `grok-build-acp` | xAI Grok Build (ACP) | `grok login` |
+
+`@preview` additionally exposes `codex-app-server` and `opencode-cli`. The authoritative full runtime table (stable + preview) is at [anet.sh/guide/runtimes](https://anet.sh/guide/runtimes).
 
 For the full provider endpoint table (each provider's `ANTHROPIC_BASE_URL` etc.), see [docs-site/guide/multi-model](https://anet.sh/guide/multi-model).
 
@@ -131,7 +134,7 @@ anet token revoke x  # Revoke a token
 ## Managing Agents
 
 ```bash
-anet ls              # List all nodes + status
+anet node ls         # List all nodes + status
 anet info my-agent   # Detailed node info
 anet logs my-agent   # View agent logs
 anet node stop my-agent   # Stop agent

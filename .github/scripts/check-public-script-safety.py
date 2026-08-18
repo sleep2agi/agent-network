@@ -15,7 +15,15 @@ On 2026-07-31 four such scripts were found to contain, between them:
 
 All four were found by hand. This guard exists so the next one is not.
 
-Scope note: only two rules, both unambiguous. A guard that cries wolf gets
+  * (added 2026-08-17) nothing yet — this third rule is preventive. Every one
+    of these scripts is fetched over https and piped into bash, so TLS
+    verification is the reader's only defence against a tampered download.
+    `curl -k` / `--insecure` / `wget --no-check-certificate` removes it, which
+    is why it belongs with the other two rather than with human review: there
+    is no legitimate reason for a script published at a public https URL to
+    skip verifying that URL.
+
+Scope note: three rules, all unambiguous. A guard that cries wolf gets
 disabled, and then it protects nothing. Deliberately NOT flagged here:
   * printing a documented default password (correct for the stable channel,
     which is what these scripts install)
@@ -35,6 +43,13 @@ OURS = ("~/.anet", "~/.commhub", "~/anodes/.anet",
 RM_RF = re.compile(r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*f?\s+(?P<targets>[^\n;&|]+)")
 KILL = re.compile(r"\b(pkill|killall)\b(?P<args>[^\n;&|]*)")
 USER_SCOPED = re.compile(r"-u\s+\S")
+# TLS verification is the only thing standing between the reader and a tampered
+# download, and these scripts are meant to be piped straight into bash.
+INSECURE_TLS = re.compile(
+    r"\b(?:curl\b[^\n;&|]*?(?:\s-{1,2}(?:k|insecure)\b)"
+    r"|wget\b[^\n;&|]*?--no-check-certificate\b"
+    r"|(?:NODE_TLS_REJECT_UNAUTHORIZED|PYTHONHTTPSVERIFY)\s*=\s*0)"
+)
 
 
 def check(path: Path):
@@ -55,6 +70,9 @@ def check(path: Path):
         k = KILL.search(line)
         if k and not USER_SCOPED.search(k.group("args")):
             out.append((i, "unscoped-process-kill", line.strip()[:90]))
+
+        if INSECURE_TLS.search(line):
+            out.append((i, "tls-verification-disabled", line.strip()[:90]))
     return out
 
 
@@ -81,14 +99,30 @@ def main():
         print(f"0 findings across {len(scripts)} script(s).")
         return 0
 
+    # Keyed by rule, not by an if/else that falls through: a new rule reaching
+    # the `else` branch would print another rule's remediation, which is worse
+    # than printing none — the reader follows advice for a problem they do not
+    # have. (Caught exactly that while adding the TLS rule.)
+    HINTS = {
+        "rm-rf-outside-product":
+            "path is not owned by this product — wiping it damages unrelated "
+            "tools on the user's machine. Remove it, or narrow to a path we own.",
+        "unscoped-process-kill":
+            "pattern-matched kill hits same-named processes owned by anyone. "
+            'Scope it: pkill -u "$(id -u)" -f ...',
+        "tls-verification-disabled":
+            "this script is fetched over https and piped into bash; skipping "
+            "certificate verification removes the reader's only protection "
+            "against a tampered download. Drop the flag.",
+    }
+    unknown = sorted({rule for _, _, rule, _ in findings} - HINTS.keys())
+    if unknown:
+        print(f"::error::rule(s) with no remediation text: {', '.join(unknown)} — "
+              "add one to HINTS rather than letting it borrow another rule's advice")
+        return 2
+
     for s, line_no, rule, text in findings:
-        if rule == "rm-rf-outside-product":
-            hint = ("path is not owned by this product — wiping it damages unrelated "
-                    "tools on the user's machine. Remove it, or narrow to a path we own.")
-        else:
-            hint = ("pattern-matched kill hits same-named processes owned by anyone. "
-                    'Scope it: pkill -u "$(id -u)" -f ...')
-        print(f"::error file={s},line={line_no}::[{rule}] {text}\n    {hint}")
+        print(f"::error file={s},line={line_no}::[{rule}] {text}\n    {HINTS[rule]}")
 
     print(f"\n{len(findings)} finding(s) across {len(scripts)} scanned script(s).")
     return 1
