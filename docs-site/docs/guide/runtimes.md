@@ -28,6 +28,34 @@
 
 > ⚠️ **`opencode-cli` 仅 preview 渠道**（RFC-029 迭代中）：npm **latest 尚未包含**——装 latest 后 `anet node create` 选单只有正式版的那几个 runtime（`claude-code-cli` / `claude-agent-sdk` / `codex-sdk` / `grok-build-acp`）。稳定后再进 latest。
 
+> 🔴 **默认它跑不了 `bash`,这不是坏了,是设计。** `opencode-cli` 的安全默认把**全部本机工具**
+> 关掉 —— `bash` / `read` / `glob` / `grep` / `edit` / `write` / `list` / `task` / `skill`,外加
+> `question`(无人值守下它会永远等一个交互回答)。所以派给它「跑一条命令」这类任务时,
+> 它**没有能力执行**。
+>
+> 判据在 [`child-env.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/runtime/opencode-acp/child-env.ts) —— 搜 `buildOpencodePermissionPolicy`;
+> ACP 与 copresence 两条路径读的是同一个开关(`agent-node/src/cli.ts`)。
+>
+> ```
+> flags.opencodeUnsafeTools = true    ← 打开本机工具；仅用于可信任务
+> ```
+>
+> `anet node create` 当场会把这条政策打印出来(逐字):
+>
+> ```
+> [anet]    Built-in disabled: bash / read / glob / grep / edit / write / list / task / skill / question
+> [anet]    Cwd:      external disposable workspace (removed after child exit)
+> [anet]    Intended for communication and text-only tasks.
+> ```
+>
+> ⚠️ **开了之后不是沙箱** —— 产品自己的措辞是 `This is not a security sandbox; use Docker/VM
+> for process and filesystem isolation.`
+>
+> **为什么值得单独写一段**:能力缺失在结果里长得不像「做不到」。见
+> [#943](https://github.com/sleep2agi/agent-network/issues/943) —— 一个需要 `bash` 的任务回来的是
+> 一段**没被执行的工具调用原文**,而 hub 侧记的是 `failed=false`(正常完成)。
+> **派工的人只有读了内容才知道它其实没干活。**
+
 > OpenCode 内置 Anthropic client 发送 `x-api-key`。只接受 Bearer 的 Anthropic 兼容网关（例如 Kimi coding）会返回 401；这类网关要使用支持对应鉴权的 OpenCode plugin 或自定义路径，不能直接套内置 Anthropic preset。
 
 > Agent Node 不读取名为 `TOOLS` 或 `SYSTEM_PROMPT` 的环境变量。工具列表请用 `--tools` 或配置项 `tools`；系统提示词请用 `--prompt` 或配置项 `systemPrompt`。
