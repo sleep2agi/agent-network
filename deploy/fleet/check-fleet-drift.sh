@@ -52,12 +52,15 @@ selftest() {
     if [ "$got" = "$2" ]; then pass=$((pass+1)); echo "  ok   $1"
     else fail=$((fail+1)); echo "  FAIL $1  (期望 $2,得到 $got)"; fi
   }
-  printf 'x=/home/alice/.anet\n'  > "$tmp/a"
-  printf 'x=/home/bob/.anet\n'    > "$tmp/b"
+  printf 'x=/home/user/.anet\n'     > "$tmp/a"
+  printf 'x=/home/example/.anet\n'  > "$tmp/b"
+  # 🔴 夹具名用 user / example,不用 alice / bob —— check-home-path-baseline.py
+  #    分不出「编造的人名」和「真人」,对一个公开仓来说那是**正确**的判法。
+  #    (我第一版就是用 alice/bob 写的,被那道门拦下来了,拦得对。)
   chk "不同用户名的同一路径 → 归一化后相同" same "$tmp/a" "$tmp/b"
 
-  printf 'x=/home/alice/.anet\ny=1\n' > "$tmp/c"
-  printf 'x=/home/bob/.anet\ny=2\n'   > "$tmp/d"
+  printf 'x=/home/user/.anet\ny=1\n'    > "$tmp/c"
+  printf 'x=/home/example/.anet\ny=2\n' > "$tmp/d"
   chk "路径同但内容真的不同 → 仍判分叉"   diff "$tmp/c" "$tmp/d"
 
   printf '[ "$skp" = "vansin" ]\n'                 > "$tmp/e"
