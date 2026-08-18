@@ -164,7 +164,7 @@ agent-node sendReply → send_message（已改 v1.4.2）
 
 | # | 改动 | 状态 | 落地位置 |
 |---|------|------|------|
-| 1 | CommHub server 加 `send_reply` / `send_ack` 工具 | ✅ shipped | [server/src/tools.ts:589 send_reply](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L589) + [tools.ts:668 send_ack](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L668) |
+| 1 | CommHub server 加 `send_reply` / `send_ack` 工具 | ✅ shipped | [server/src/tools.ts:1816 send_reply](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L1816) + [tools.ts:1830 send_ack](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L1830) |
 | 2 | inbox 表加 `in_reply_to` 字段 | ✅ shipped | [server/src/db.ts:72 + db.ts:98](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L72)（字段名实际叫 `in_reply_to` 不是设计草稿里的 `reply_to`） |
 | 3 | agent-node `sendReply` 改用 `send_reply` | ✅ shipped | agent-node 用 `send_reply` MCP tool 关联 task_id |
 | 4 | commhub-channel.ts 带 `type` 标记 | ❌ **未采纳** | XML 不带 `type=`；类型区分靠 SSE event type + inbox row.`type` 字段（见上节 ::: warning） |
@@ -196,7 +196,7 @@ if (["new_task", "broadcast"].includes(ev.type)) {
 |---|------|--------|------|
 | 1 | sendReply 用 send_message | agent-node | ✅ v1.4.2 |
 | 2 | SSE 只响应 new_task / broadcast | agent-node | ✅ [cli.ts:1102 `["new_task", "broadcast"].includes(ev.type)`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1102)；`new_reply` 单独走日志记录 cli.ts:1106 |
-| 3 | 低价值消息过滤 | agent-node | ✅ v1.4.0；当前在 [cli.ts:836 `shouldSkipMessage`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L836) |
+| 3 | 低价值消息过滤 | agent-node | ✅ v1.4.0；当前在 [cli.ts:4639 `shouldSkipMessage`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L4639) |
 | 4 | CLAUDE.md 不对 message 回复 | 各项目 CLAUDE.md | ✅ R195 chain 模板已加 |
 | 5 | developer_instructions 安静规则 | agent-node | ✅ v1.4.1 |
 

@@ -297,6 +297,16 @@ jobs:
       #    实测召回率 5/10 —— 抓不到「锚点指着一行正常代码、只是不是它声称的那
       #    一行」。见 #831 与 scripts/check-doc-source-pins.py 的文件头。
       #    别拿这个 job 的绿色去论证 #831 已解决。
+
+      # 🔴 下面这一步补的正是上面那句「抓不到」的一小块(#852):锚文本里**点了名的
+      #    符号**,必须真的在钉住的那一行附近。2026-08-18 首次对 main 跑,抓到 4 处 ——
+      #    四处钉住的行分别是 `}`、`text: JSON.stringify({`、`model = COALESCE(...)`、
+      #    `if (!configFilePath || !threadId) return;`,**全都长得像正常代码**,所以
+      #    读者点进去连怀疑都不会产生。四处已在同一个 PR 里改对,这一步因此起点是绿的。
+      #    它同时打印**跳过了多少** —— 一个只说「0 处漂移」不说「跳过 10 处」的门,
+      #    读起来像「全都查过了」。
+      - name: 符号级行号 pin（#852，补 source-pin 抓不到的那一类）
+        run: python3 scripts/check-doc-symbol-pins.py .
       - name: Build test831-doc-source-pins
         run: |
           docker build \
