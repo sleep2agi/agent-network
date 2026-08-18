@@ -1,0 +1,31 @@
+# 新增的 Dockerfile 不许再用未钉版本的 `bun.sh/install`。见 #728。
+#
+# 🔴 刻意不加 paths 过滤。
+#
+#   这道门要挡的是「有人新写了一个 Dockerfile」,而新 Dockerfile 可能出现在任何目录
+#   （实测 225 个 tracked Dockerfile 散在 tests/ docker/ docs/ deploy/ 下）。
+#   按路径过滤等于提前假设它们会出现在哪儿 —— 而那正是「改扫描范围让门悄悄失效」的形状。
+#   脚本本身不联网、跑完不到一秒，省这点没有意义。
+#
+#   另一个理由:带 paths 过滤的 workflow **结构上当不了 required check** ——
+#   它在不匹配的 PR 上根本不产生 check，分支保护会永远停在 "Expected — Waiting for status"。
+
+name: lint (bun install pin)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  scan:
+    # 这个 name 是 GitHub 上 check 的名字，也是分支保护里 required check 唯一能写的
+    # 标识符，必须全仓唯一。
+    name: bun-install-pin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 先跑判据自检。这道门最可能的坏法不是判据写错，是**一个 Dockerfile 都没扫到**
+      # 然后打印一片绿 —— 那种假绿和真绿逐字相同。主程序对此 exit 2 而不是 exit 0。
+      - run: python3 .github/scripts/check-bun-install-pin.py --selftest
+      - run: python3 .github/scripts/check-bun-install-pin.py

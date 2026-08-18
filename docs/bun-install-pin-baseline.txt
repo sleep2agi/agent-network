@@ -1,0 +1,43 @@
+# 每行一个：**当前**仍用未钉版本 `bun.sh/install` 的 Dockerfile。
+# 这是一个**上限**，不是目标。它存在的意义是让「新增」变红，而不是让「存量」变红——
+# 一道只因积压而红的门，等积压清完就再也不会红，到时没人知道它还有没有效。
+# 钉好某个文件之后，把它这一行删掉，楼层就只会往下走、不会悄悄回填。
+# 生成于 origin/main，2026-08-18：37 个未钉 / 共扫 225 个 Dockerfile。
+# 样板见 tests/test679-task-trace/Dockerfile（BUN_VERSION + sha256sum -c + --retry）。
+docker/feishu/Dockerfile
+docs/tests/p-214-dim12-harness/Dockerfile.node22
+docs/tests/p-214-dim12-harness/Dockerfile.node24
+docs/tests/p-214-dim12-harness/Dockerfile.upgrade
+docs/tests/p-214-wave2-harness/Dockerfile.7fix
+docs/tests/p-214-wave2-harness/Dockerfile.node22
+docs/tests/p-214-wave2-harness/Dockerfile.node24
+docs/tests/p-214-wave2-harness/Dockerfile.upgrade
+docs/tests/p-ga2-compat-repro/Dockerfile.aligned
+docs/tests/p-ga2-compat-repro/Dockerfile.mixed
+tests/qa-222-cross-host-attachments/Dockerfile
+tests/qa-anet-daemon-cmd/Dockerfile
+tests/qa-hub-10-network-scope-regressions/Dockerfile
+tests/qa-hub-11-node-delete-sse/Dockerfile
+tests/qa-hub-12-servers-endpoint/Dockerfile
+tests/qa-hub-13-server-health-agents/Dockerfile
+tests/qa-hub-16-rest-task-api/Dockerfile
+tests/qa-hub-18-delivery-semantics/Dockerfile
+tests/qa-hub-19-login-guard/Dockerfile
+tests/qa-node-04-codex-app-server-reply-routing/Dockerfile
+tests/qa-rfc024-config-apply/Dockerfile
+tests/qa-rfc026-create-node/Dockerfile
+tests/qa-rfc027-stop-delete/Dockerfile
+tests/qa-rfc028-provider-probe/Dockerfile
+tests/test-goal-cli/Dockerfile
+tests/test-grok-build-acp-runtime/Dockerfile
+tests/test185-external-schedules/Dockerfile
+tests/test219-grok-copresence/Dockerfile
+tests/test225-grok-preview-package-live/Dockerfile
+tests/test28-demo-debate-v2.1.2/Dockerfile
+tests/test28-pr-review-room/Dockerfile
+tests/test30-v0.8-auth-deprecation/Dockerfile
+tests/test380-daemon-telemetry-probe/Dockerfile
+tests/test384-opencode-local-package-e2e/Dockerfile
+tests/test466-codex-copresence-p3/Dockerfile
+tests/test673-claude-image-attachment-block/Dockerfile
+tests/test681-explicit-lifecycle/Dockerfile
