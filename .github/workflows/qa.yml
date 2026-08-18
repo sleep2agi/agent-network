@@ -61,6 +61,9 @@ on:
       - 'tests/test219-grok-copresence/**'
       - 'tests/test605-grok-startup-model-label/**'
       - 'tests/test735-hub-daemon-rebuild/**'
+      - 'tests/test660-explicit-prod-db-optin/**'
+      - 'tests/test661-explicit-bootstrap-db/**'
+      - 'tests/test683-hub-lifecycle-watcher/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
       - 'agent-node/src/cli.ts'
@@ -120,6 +123,9 @@ on:
       - 'tests/test219-grok-copresence/**'
       - 'tests/test605-grok-startup-model-label/**'
       - 'tests/test735-hub-daemon-rebuild/**'
+      - 'tests/test660-explicit-prod-db-optin/**'
+      - 'tests/test661-explicit-bootstrap-db/**'
+      - 'tests/test683-hub-lifecycle-watcher/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
       - 'agent-node/src/cli.ts'
@@ -453,81 +459,36 @@ jobs:
   grok-green-suites:
     name: grok suites (Docker)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    # 🔴 改成矩阵的理由是量出来的，不是「应该更快」。
+    #    改之前这 5 个套件在**一个 job 里串行**，从 CI 日志逐步骤量：
+    #      test233  1m15s   test234  4s   test235  24s   test219  1m56s   test605  1m56s
+    #      合计 5m35s（+checkout ≈ 5m45s）
+    #    而整个 qa.yml 在 main 上是 20:48:41→20:56:03，这个 job 结束于 20:56:02 ——
+    #    **它就是关键路径，比整个 run 只早 1 秒**。一个 4 秒的套件排在 1m15s 后面等。
+    #    并行之后这一格 ≈ 最长那个（1m56s）+ 每 job 的 checkout 开销。
+    #    `fail-fast: false` —— 一个套件红不该掩盖其余四个的结果。
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - test233-grok-main-integration
+          - test234-grok-profile-disclosure
+          - test235-grok-mcp-outbound-only
+          - test219-grok-copresence
+          - test605-grok-startup-model-label
     steps:
       - uses: actions/checkout@v4
 
-      # 🔴 这两个套件是**直接做阻塞门**,不套 known-failure 棘轮。
-      #    棘轮是给「已经红、但必须先接进来才知道它是真绿还是假绿」的情况用的
-      #    (test225 那种)。这两个我先跑了基线,是真绿:
-      #        test233  Summary: PASS (Docker-only integration regression)
-      #        test234  Summary: PASS (4 unit tests; CLI build; runbook/wiring gates; mutation red)
-      #    对真绿的套件套棘轮只会让它以后变红时**不红**,那是反的。
-      #
-      #    接它们的理由和 test225 同一条:对着 origin/main 数,12 个 grok 套件里
-      #    此前只有 3 个在 CI 里。一个长期不跑的套件,真绿和假绿输出逐字相同。
-      #
-      #    `--network none` 是**实测过**的,不是照抄别处:两个套件在运行期都不需要网络
-      #    (test233 只在 docker build 阶段要)。`-e ARTIFACT_DIR=/tmp/art` 同样是
-      #    我跑基线时用的那条命令 —— 不写未验证过的变体。
-      - name: Build + run test233-grok-main-integration
+      # 这些套件都是先跑过基线确认真绿才接进来的，所以是**阻塞门**，不套 known-failure 棘轮。
+      # `--network none -e ARTIFACT_DIR=/tmp/art` 是跑基线时用的那条命令原样。
+      - name: Build + run ${{ matrix.suite }}
         run: |
           docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
-            -t anet-test233-grok-main-integration \
-            -f tests/test233-grok-main-integration/Dockerfile .
+            -t anet-${{ matrix.suite }} \
+            -f tests/${{ matrix.suite }}/Dockerfile .
           docker run --rm --network none -e ARTIFACT_DIR=/tmp/art \
-            anet-test233-grok-main-integration
-
-      - name: Build + run test234-grok-profile-disclosure
-        run: |
-          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
-            -t anet-test234-grok-profile-disclosure \
-            -f tests/test234-grok-profile-disclosure/Dockerfile .
-          docker run --rm --network none -e ARTIFACT_DIR=/tmp/art \
-            anet-test234-grok-profile-disclosure
-
-      # 这个套件此前基线是**红**的，红在相对 import 够不着 agent-network
-      # （容器把它拷到 /test235，而 `../../` 从那里解析成 `/`）。
-      # 本 PR 把容器布局改成与仓库同构之后它是真绿的：
-      #   Summary: PASS (real MCP child; zero long-lived Hub sockets; 40/40 outer ownership; 12 outbound calls; mutation red)
-      # 自带一条见证红：PASS: witnessed-red outbound-only mutation rc=1
-      # `--network none` 同样是**实测过**的那条命令。
-      - name: Build + run test235-grok-mcp-outbound-only
-        run: |
-          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
-            -t anet-test235-grok-mcp-outbound-only \
-            -f tests/test235-grok-mcp-outbound-only/Dockerfile .
-          docker run --rm --network none -e ARTIFACT_DIR=/tmp/art \
-            anet-test235-grok-mcp-outbound-only
-
-      # 🔴 这个套件是本批里最重的一格 —— 它一次跑 **311 个测试**：
-      #     Summary: PASS (311 tests, 0 failures; all validation ran inside Docker)
-      #     PASS: FIFO/human arbitration + final reply + approval + reconnect + single bridge + liveness
-      #   覆盖的是共存运行时的核心行为(FIFO 仲裁 / 最终回复 / 审批 / 重连 / 单桥 / 存活判定)，
-      #   而对着 origin/main 数，它的 CI 引用数是 **0** —— 一次都没跑过。
-      #   这不是「有些测试没跑」，是「共存核心行为的 311 条断言没跑」。
-      #
-      #   直接做阻塞门，不套 known-failure 棘轮：基线跑过，它是**真绿**的。
-      #   `--network none -e ARTIFACT_DIR=/tmp/art` 是那次基线用的**同一条命令**，
-      #   不往 workflow 里写没验证过的变体。
-      - name: Build + run test219-grok-copresence
-        run: |
-          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
-            -t anet-test219-grok-copresence \
-            -f tests/test219-grok-copresence/Dockerfile .
-          docker run --rm --network none -e ARTIFACT_DIR=/tmp/art \
-            anet-test219-grok-copresence
-
-      # 基线：Ran 1 test across 1 file. RESULT: PASS —— 真绿，直接做阻塞门。
-      # 命令是基线用的那一条原样（--network none -e ARTIFACT_DIR=/tmp/art）。
-      - name: Build + run test605-grok-startup-model-label
-        run: |
-          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
-            -t anet-test605-grok-startup-model-label \
-            -f tests/test605-grok-startup-model-label/Dockerfile .
-          docker run --rm --network none -e ARTIFACT_DIR=/tmp/art \
-            anet-test605-grok-startup-model-label
-
+            anet-${{ matrix.suite }}
   hub-daemon-gate:
     # 🔴 单独一个 job，不塞进 grok-green-suites —— 那个名字会对它包含的内容说谎。
     #    （改已有 job 的名字会动分支保护里的 required check，风险更高，所以新开。）
@@ -630,3 +591,37 @@ jobs:
           docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-test30 \
             -f tests/test30-v0.8-auth-deprecation/Dockerfile .
           docker run --rm -e ARTIFACT_DIR=/tmp/art anet-test30
+
+  hub-boundary-gates:
+    # 名字说得出它管什么：这三条守的是**生产 DB 边界与 hub 生命周期**。
+    name: prod-db boundary + hub lifecycle (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - test660-explicit-prod-db-optin
+          - test661-explicit-bootstrap-db
+          - test683-hub-lifecycle-watcher
+    steps:
+      - uses: actions/checkout@v4
+
+      # 🔴 test660 / test661 守的正是「必须显式 opt-in 才能碰生产 DB」这条边界，
+      #    而它们此前的 CI 引用是 **0** —— 守边界的机制本身没有任何持续验证。
+      #    基线（容器内，未碰任何生产 DB）：
+      #      test660  pass=8 fail=0  含 3 条见证红
+      #                remove-default-path-guard / remove-index-optin / remove-bin-optin
+      #      test661  pass=6 fail=0  含 3 条见证红
+      #                child-restores-home-fallback / postgres-invents-sqlite / cli-bypasses-explicit-selection
+      #      test683  5 pass 0 fail
+      #    `postgres-invents-sqlite` 那条尤其值得留着：它防的是
+      #    「配置写着 postgres、实际却建了个 sqlite」—— 表现是「一切正常，只是数据写在别处」。
+      #
+      #    ⚠️ 不加 `--network none`：基线就是这么跑的，不写没验证过的变体。
+      - name: Build + run ${{ matrix.suite }}
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-${{ matrix.suite }} \
+            -f tests/${{ matrix.suite }}/Dockerfile .
+          docker run --rm -e ARTIFACT_DIR=/tmp/art anet-${{ matrix.suite }}
