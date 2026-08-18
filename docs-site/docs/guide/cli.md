@@ -200,8 +200,8 @@ Channel 配置不会热加载，修改后需要重启节点。`anet channel add 
 
 | 命令 | 作用 |
 |---|---|
-| `anet daemon up [name]` | 创建并启动 `host_supervisor` |
-| `anet daemon init <name>` / `start <name>` / `list` | 管理本机 daemon |
+| `anet daemon up [name]` | 创建并启动 `host_supervisor` —— **仅 preview 通道** |
+| `anet daemon init <name>` / `start <name>` / `list` | 管理本机 daemon —— **仅 preview 通道** |
 | `anet node start <name> --copresence` | 启动 Codex app-server、桥和共享 TUI |
 | `anet opencode ...` | 管理 OpenCode preview 集成 |
 
