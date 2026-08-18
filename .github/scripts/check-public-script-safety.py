@@ -45,10 +45,24 @@ KILL = re.compile(r"\b(pkill|killall)\b(?P<args>[^\n;&|]*)")
 USER_SCOPED = re.compile(r"-u\s+\S")
 # TLS verification is the only thing standing between the reader and a tampered
 # download, and these scripts are meant to be piped straight into bash.
+# 🔴 curl 的短选项是**可以粘连**的，所以不能只认「以 k 开头的那一段」。
+#    2026-08-19 实测这道门在 main 上的表现：
+#        curl -k …            抓到
+#        curl --insecure …    抓到
+#        curl -fsSLk …        **放行**   ← 而这正是最现实的一种写法
+#    往一行已有的 `curl -fsSL https://…` 上加一个字母 `k`，这道门看不见 ——
+#    关掉证书校验**不破坏任何东西**，只是把「你下到的是我们发的东西」这个前提
+#    悄悄取消了，而这个管道的另一头正以用户权限执行。
+#
+#    另外补两个同类开关（同样实测过在 main 上放行）：
+#        npm config set strict-ssl false
+#        GIT_SSL_NO_VERIFY=1 git clone …
 INSECURE_TLS = re.compile(
-    r"\b(?:curl\b[^\n;&|]*?(?:\s-{1,2}(?:k|insecure)\b)"
+    r"\b(?:curl\b[^\n;&|]*?\s-(?:-insecure\b|[A-Za-z]*k[A-Za-z]*(?=\s|$))"
     r"|wget\b[^\n;&|]*?--no-check-certificate\b"
-    r"|(?:NODE_TLS_REJECT_UNAUTHORIZED|PYTHONHTTPSVERIFY)\s*=\s*0)"
+    r"|(?:NODE_TLS_REJECT_UNAUTHORIZED|PYTHONHTTPSVERIFY)\s*=\s*0"
+    r"|strict-ssl[\s=]+false"
+    r"|GIT_SSL_NO_VERIFY\s*=\s*(?:1|true))"
 )
 
 
