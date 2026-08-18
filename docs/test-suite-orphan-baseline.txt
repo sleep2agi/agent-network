@@ -84,14 +84,11 @@ test573-codex-turn-reconcile
 test575-opencode-reply-ownership
 test583-dashboard-chat-idempotency
 test584-dashboard-codex-delivery
-test586-codex-successor-reconcile
 test587-codex-start-relative-timeout
 test588-codex-turn-clientid-rebind
-test596-goal-loop-docs
 test6-networks
 test608-claude-cli-dependency
 test616-feishu-docker-bootstrap
-test638-server-aggregate-isolation
 test647-rest-explicit-columns
 test648-probe-ip-pin
 test650-anet-attach
