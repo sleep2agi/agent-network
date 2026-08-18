@@ -4,23 +4,26 @@
 #   · 多出任何一条  → 红（新伤）
 #   · 少了任何一条  → 不红，但会打印「该更新基线了」（修好是好事，不该被门拦住）
 #
-# 每一条都必须有一个 issue，否则这里就变成了一张藏东西的清单。
+# ---- 现在这份是**空的**。2026-08-19 全量跑：Summary: PASS，0 条 FAIL，11 条 PASS ----
 #
-# ---- 本次变更（2026-08-19）----
-# 删掉两条：
+# 曾经在这里、已经删掉的三条，各自的去向：
+#
 #   "real auth evidence scan failed; closed target-role diagnostic retained"
-#       **它根本不是失败**。那是两处**负向自检**的预期输出:自检把 stdout 重定向到了
-#       捕获文件,但 `log()` 是 `printf | tee -a "$REPORT"` —— tee 无视 stdout 重定向,
-#       照样写进共享报告。我当初照着这行建了基线并挂了 #1021,那条基线是错的。
-#       已在同一 PR 里给两处自检的子 shell 加 `REPORT=/dev/null`。
+#       **它从来就不是失败**。那是两处负向自检的预期输出:自检把 stdout 重定向到了
+#       捕获文件,但 `log()` 是 `printf | tee -a "$REPORT"` —— tee 无视 stdout 重定向。
+#       我当初照着这行建了基线并挂了 #1021,那条基线是错的。已给自检子 shell 加
+#       `REPORT=/dev/null`。
+#
 #   "installed candidate Feishu refusal lacked the fixed explanation"
 #       已修（#1020）。真因是夹具把 config 放在 /tmp 下,节点在走到飞书拒绝**之前**
 #       就先拒绝了配置本身（父目录属 root,不是 owner-controlled）。产品是对的。
 #
-# 加一条：见下。
+#   "headless node survived a node stop that reported success (#1027)"
+#       **只观测到一次,后续跑没有复现**（那次同时跑着 2~3 个容器,可能是资源竞争）。
+#       没有稳定复现之前不放进基线 —— 基线里放一条偶发项,会让它「消失」时看起来像修好了。
+#       #1027 仍然 open,而且 `wait_pid_gone` 的上界留着:再发生一次,
+#       10 秒内就会带着幸存进程的 cmdline 报出来,而不是静默挂死 25 分钟。
 #
-# 条目 -> issue：
-#   headless node survived a node stop ...   -> #1027
+# 加新条目时：每一条都必须有一个 issue，否则这里就变成了一张藏东西的清单。
 #
-# ---- 条目：FAIL 后面那句原文，逐字 ----
-headless node survived a node stop that reported success (#1027)
+# ---- 条目：FAIL 后面那句原文，逐字（当前无） ----

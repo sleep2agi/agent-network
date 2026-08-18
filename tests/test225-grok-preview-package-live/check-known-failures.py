@@ -78,8 +78,15 @@ def main() -> int:
 
     if rc == 0 and not new:
         print(f"  OK: FAIL 集合与基线一致({len(actual)} 条),没有新伤。")
-        print(f"  注意:这**不**表示 test225 是绿的。它现在有 {len(baseline)} 条已知失败,")
-        print(f"        每条都挂着 issue。这道门守的是「不要再多」,不是「已经没有」。")
+        # 🔴 原来这里无条件打印「这不表示 test225 是绿的」。
+        #    在**全部修好**那一刻,那句话就是假的 —— 而那恰恰是最该说清楚的一刻。
+        #    一个在成功路径上说假话的提示,比没有提示更糟:它会让人以为还有欠账。
+        if not actual and not baseline:
+            print("  这次报告里 0 条 FAIL,基线也是空的 —— test225 现在是真绿的。")
+            print("  这道门从此守的是「不许出现新的失败」。")
+        else:
+            print(f"  注意:这**不**表示 test225 是绿的。它现在有 {len(baseline)} 条已知失败,")
+            print(f"        每条都挂着 issue。这道门守的是「不要再多」,不是「已经没有」。")
     return rc
 
 
