@@ -1788,7 +1788,15 @@ jq -e '.agent == "agent-node:grok-build-cli"' \
   || fail "Hub session did not retain the registered grok-build-cli agent identity"
 jq -e '.status == "idle"' <<<"$STATUS_ROW" >/dev/null \
   || fail "Hub session was not idle after the replied task"
-pass "Hub session registration reports agent-node:grok-build-cli"
+# 🔴 #1019 —— 判的是 Hub 那一行里的**数据**,不是源码里有没有写那一行。
+#    sessions.version 长期为空(一次只读快照:223/225 是 null)。服务端一直是收也写的:
+#    report_status 的 schema 里有 `version`,upsert 里 `version = COALESCE(?9, sessions.version)`。
+#    缺的只有节点不发这一半 —— 而「源码里加了一行 version:」和「那一行真的到了库里」
+#    是两件事,COALESCE 意味着漏发时旧值会被静默保留,看起来和"没变化"一模一样。
+#    所以判据必须落在 /api/status 真返回的那一行上。
+jq -e --arg v "$AGENT_NODE_VERSION" '.version == $v' <<<"$STATUS_ROW" >/dev/null \
+  || fail "Hub session did not record the node's own agent-node version (expected $AGENT_NODE_VERSION, got $(jq -r '.version // "null"' <<<"$STATUS_ROW"))"
+pass "Hub session registration reports agent-node:grok-build-cli and its own version"
 
 log "[L3] exact child-env and persisted-output checks"
 grep -Fq "CANDIDATE_PACKUMENT version=$AGENT_NODE_VERSION" "$LOCAL_REGISTRY_LOG" \
