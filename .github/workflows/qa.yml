@@ -64,6 +64,10 @@ on:
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
       - 'agent-node/src/cli.ts'
+      - 'tests/test630-file-download-header-auth/**'
+      - 'tests/test634-windows-secret-guidance/**'
+      - 'tests/test623-feishu-scrub-health/**'
+      - 'tests/test30-v0.8-auth-deprecation/**'
       - 'deploy/hub/hub-daemon.sh'
   push:
     branches: [main]
@@ -119,6 +123,10 @@ on:
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
       - 'agent-node/src/cli.ts'
+      - 'tests/test630-file-download-header-auth/**'
+      - 'tests/test634-windows-secret-guidance/**'
+      - 'tests/test623-feishu-scrub-health/**'
+      - 'tests/test30-v0.8-auth-deprecation/**'
       - 'deploy/hub/hub-daemon.sh'
 
 # Older runs on the same ref get cancelled — saves minutes when a PR is
@@ -585,3 +593,40 @@ jobs:
             -f tests/test646-config-node-id-precedence/Dockerfile .
           docker run --rm --network none -e ARTIFACT_DIR=/tmp/art \
             anet-test646-config-node-id-precedence
+  security-orphan-gates:
+    # 名字说得出它管什么：这四个套件守的是**鉴权 / 凭据下发 / 泄漏清洗**这一族。
+    name: auth + secret hygiene (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # 🔴 这一批**都不加 `--network none`** —— 基线就是这么跑的。
+      #   我在 test631 上踩过一次：断网让它 rc=1，那是**跑法造成的红**，不是套件缺陷。
+      #   不往 workflow 里写没验证过的变体。
+      - name: Build + run test630-file-download-header-auth
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-test630 \
+            -f tests/test630-file-download-header-auth/Dockerfile .
+          docker run --rm -e ARTIFACT_DIR=/tmp/art anet-test630
+
+      # 它的见证红做的正是 `sed 's/platform === "win32"/false/g'` ——
+      # 「把 win32 分支改成恒假会不会被发现」这件事由它守着。
+      - name: Build + run test634-windows-secret-guidance
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-test634 \
+            -f tests/test634-windows-secret-guidance/Dockerfile .
+          docker run --rm -e ARTIFACT_DIR=/tmp/art anet-test634
+
+      - name: Build + run test623-feishu-scrub-health
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-test623 \
+            -f tests/test623-feishu-scrub-health/Dockerfile .
+          docker run --rm -e ARTIFACT_DIR=/tmp/art anet-test623
+
+      # 它此前 rc=1，红在 Dockerfile 没拷 tests/lib/safe-rm.sh（本 PR 一并补上）。
+      - name: Build + run test30-v0.8-auth-deprecation
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-test30 \
+            -f tests/test30-v0.8-auth-deprecation/Dockerfile .
+          docker run --rm -e ARTIFACT_DIR=/tmp/art anet-test30
