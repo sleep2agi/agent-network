@@ -9,9 +9,9 @@
 //      each other under ~/.claude/;
 //   2. Windows callers don't crash — the previous `cwd.replace(/\//g, "-")`
 //      left backslash and drive colon in the key, and `mkdirSync` on
-//      `~/.claude/channels/commhub/C:\Users\wenxing_hu3/.env` ENOENTs on
-//      Windows because `:` is illegal in a path segment. Reported by
-//      user wenxing_hu3 against preview.18;
+//      `~/.claude/channels/commhub/C:\Users\your_user/.env` ENOENTs on
+//      Windows because `:` is illegal in a path segment. Reported by a
+//      user against preview.18;
 //   3. POSIX behavior is preserved for keys that were already unaffected
 //      (`/home/vansin/agent-orchestra` still becomes
 //      `-home-vansin-agent-orchestra`). Paths that contain `.` on POSIX
