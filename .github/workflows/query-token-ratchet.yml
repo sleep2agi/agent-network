@@ -1,0 +1,32 @@
+# `?token=` 的接受点只许减少,不许增加。
+#
+# server/src/server.ts 的 auth helper **默认接受 URL 查询串里的 token**,要关必须
+# 每个调用点显式写 `allowQueryToken: false`。而 query 里的凭据会进访问日志和
+# Referer(#501)。
+#
+# 🔴 「逐调用点 opt-out」的问题是:**默认值决定了未来新增的调用点是安全还是不安全,
+#    而新增调用点的人不会收到任何提示。** 今天新加一个端点,它默认就接受 `?token=`。
+#
+# 把默认翻成拒绝是正确方向,但那会影响 SSE / 下载链接等真实路径,要单独评估。
+# **这道门不改任何行为,只保证这件事不再变糟** —— 今天的数字是上限,不是起点。
+#
+# 不加 paths 过滤:它守的是 server/src 的一个不变量,而秒级脚本没有省的必要。
+
+name: lint (query-token ratchet)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  ratchet:
+    name: query-token-ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # selftest 先跑:这道门的坏法是「圈错 helper 的范围」——
+      # 圈大了会把绕过点算成 helper 内部(漏报),圈小了会把 helper 自己算成绕过(误报)。
+      # 第 6 条夹具专门钉多行函数体的范围。
+      - run: python3 .github/scripts/check-query-token-ratchet.py --selftest
+      - run: python3 .github/scripts/check-query-token-ratchet.py
