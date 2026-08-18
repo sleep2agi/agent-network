@@ -25,6 +25,13 @@ curl -fsSL https://x.ai/cli/install.sh | bash
 grok
 ```
 
+🔴 This unversioned installer is correct **for `grok-build-acp`, which this document covers** — that
+runtime is not pinned to a specific Grok build. It is **not** correct for the `grok-build-cli`
+co-presence runtime, which fails closed on anything other than `grok 0.2.93 (f00f96316d)`. If you are
+setting up co-presence, install the pinned build instead (`bash -s 0.2.93`) — see
+[grok-build-cli-preview.md](./grok-build-cli-preview.md). The two documents were individually correct
+and jointly misleading; see #876.
+
 The xAI Build documentation describes Grok Build as usable through an interactive TUI, headless scripts, or ACP integrations. It also documents `grok inspect` for checking discovered config, skills, plugins, hooks, and MCP servers.
 
 References:
