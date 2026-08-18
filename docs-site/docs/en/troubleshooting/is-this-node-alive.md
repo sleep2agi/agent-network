@@ -14,10 +14,31 @@ failures — it answers that single question, and **only the last row gives a de
 | `status = idle` | **Weak** | `idle` only means "not busy". Measured, it covers at least four different realities (below). |
 | Fresh heartbeat (`last_seen_at`) | **Weak** | The heartbeat comes from the outer process. The outer process can be alive while the inner reasoning process is dead. |
 | `send_task` returns `ok` rather than `alias_offline` | **Moderate** | Routing works and the message is queued. **It says nothing about anyone processing it.** |
+| `status = offline` | **moderate (not conclusive)** | Carries more than `idle`, but it is **not enough to conclude the node is dead**. At least one path marks a live node offline — see below. |
 | 🔴 **It answered you** | **Hard evidence** | The only signal that does not depend on the observer's vantage point. |
 
 **So: only the last row counts.** All four rows above can be green on a dead node; all four can
 look dim on a node that simply has not been spoken to.
+
+## `status = offline` is not conclusive either
+
+Observed once (2026-08-19, in a container, [#1027](https://github.com/sleep2agi/agent-network/issues/1027)):
+a node that was **alive, registered with CommHub, and SSE-connected** produced this from `anet node stop`:
+
+    [anet] "<alias>" is not running locally (server notified offline)
+
+**and it exited 0** — while its two processes were still there nine minutes later.
+
+Mechanism: that node was not started under tmux (the test started it as a bare background
+process), and `anet node stop` decides "is it running locally" by tmux session, so it could not
+see it — and then **told the server to mark it offline**.
+
+So: **a node shown as offline in the Hub may be working normally.**
+
+⚠️ This was seen **once**; a later full run of the same path did not reproduce it
+(2–3 containers were running concurrently that time; whether that is the cause is unproven).
+It is written here not because it is common, but because **`offline` is not proof that a node is dead** —
+as with every other row, the verdict still has to come from the last one.
 
 ## The four realities behind `status = idle` (measured)
 
