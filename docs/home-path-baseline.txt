@@ -35,7 +35,6 @@ docs/research/sdk-concurrency-investigation.md	1
 docs/rfcs/RFC-005-codex-code-cli-runtime.md	1
 docs/runbooks/opencode-tui-copresence.md	1
 docs/sdk-upgrade-2026-05-12-baseline.md	4
-docs/team-collab-playbook.md	1
 docs/tests/p-498-reply-warning/witnessed-red.txt	1
 docs/tests/p-517-mcp-write-scope/witnessed-red-p2-ghost.txt	3
 docs/tests/p-517-mcp-write-scope/witnessed-red-pins-sabotage.txt	21

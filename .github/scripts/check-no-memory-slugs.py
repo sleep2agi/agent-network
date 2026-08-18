@@ -138,7 +138,7 @@ _HOME_RE = re.compile(r"(?<![A-Za-z0-9])(home|Users)([/-])[^/\s-]+")
 
 
 def redact(snippet: str) -> str:
-    """把家目录用户名换掉。两种写法都要:路径形 `/home/x/`，和 Claude
+    """把家目录用户名换掉。两种写法都要:路径形 `/home/<user>/`，和 Claude
     project 目录名里连字符编码的那份 `-home-x-agent-…`。"""
     return _HOME_RE.sub(r"\1\2<user>", snippet)
 
@@ -208,5 +208,48 @@ def main() -> int:
     return 1
 
 
+
+# ---------------------------------------------------------------------------
+# selftest —— 没有它,这道门的「更宽了」是一句无法验证的话。
+#
+# 🔴 为什么用合成串而不是提交夹具文件:一个含真实形状的夹具文件**自己就是命中**,
+#    提交进来要么让门永远红,要么得进 allowlist —— 而进了 allowlist 就再也
+#    测不到它。所以夹具在代码里造,不落盘。
+#
+# 三条红夹具的形状,来自 2026-08-16 在本仓实测到的三种真实写法
+# (它们当时**一条都没被 SLUG_RE 命中**):
+#     markdown 链接 / 反引号裸路径 / 带用户名的绝对路径
+# ---------------------------------------------------------------------------
+def _selftest() -> int:
+    cases = []
+
+    def ck(name, text, want_hit):
+        hit = bool(SLUG_RE.search(text)) or bool(MEMORY_PATH_RE.search(text))
+        ok = hit == want_hit
+        cases.append((name, ok, f"hit={hit} want={want_hit}"))
+
+    # —— 红:四种形状都必须命中 ——
+    ck("[[slug]] 原形",              "见 [[" + "feedback_no_test_on_prod]]", True)
+    ck("markdown 链接指向 memory 库", "see [m](../.claude/memory/x.md)", True)
+    ck("反引号裸路径(~ 开头)",        "见 `~/.claude/memory/MEMORY.md`", True)
+    ck("绝对路径带用户名",            "见 `/home/someone/.claude/projects/-home-someone-x/memory/MEMORY.md`", True)
+    ck("agent-orchestra/memory/ 形态", "(../../agent-orchestra/memory/feedback_x.md)", True)
+
+    # —— 绿:这些**不该**命中,否则门会在正当写法上常红,然后被所有人忽略 ——
+    ck("普通家目录路径(与 memory 无关)", "/home/testuser/project/src/main.ts", False)
+    ck("普通 .claude 配置路径",          "~/.claude/settings.json", False)
+    ck("只是提到 memory 这个词",         "the agent memory design is documented here", False)
+    ck("别的 memory 目录",               "src/memory/store.ts", False)
+
+    for n, ok, d in cases:
+        print(f"  {'ok  ' if ok else 'FAIL'} {n}   [{d}]")
+    bad = sum(1 for _n, ok, _d in cases if not ok)
+    print(f"selftest: {len(cases) - bad}/{len(cases)} ok")
+    return 1 if bad else 0
+
+
 if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        sys.exit(_selftest())
+
     sys.exit(main())
