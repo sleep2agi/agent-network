@@ -484,6 +484,17 @@ export function assertGrokCopresenceVersion(version: string): void {
 export function assertGrokCopresenceApprovalOwnership(
   inspectionJson: string,
   isolatedGrokHome: string,
+  // 🔴 2026-08-19：这一格必须是**产品自己算出来的那个命令**，不能写死。
+  //    实测（钉死的 grok 0.2.93，容器内 --network none）：
+  //        config.toml:  command = "/usr/local/bin/fake-bun"
+  //        grok inspect --json →  "target": "/usr/local/bin/fake-bun"
+  //    target 逐字等于 config.toml 的 command。而生成侧
+  //    grok-build-cli-home.ts 的 resolveGrokCommhubMcpCommand() 只可能返回
+  //    realpath 之后的绝对路径（或抛错），所以拿裸 "bun" 去比**永远不成立**。
+  //
+  //    这个不一致由 #1004 落了生成侧、#1010 摘了审计侧造成（见 #1016）。
+  //    默认值 "bun" 只为兼容尚未传参的调用点；生产路径必须显式传。
+  expectedCommhubCommand = "bun",
 ): void {
   let inspection: Record<string, unknown>;
   try {
@@ -547,7 +558,10 @@ export function assertGrokCopresenceApprovalOwnership(
   if (
     commhubRecord.name !== "commhub"
     || commhubRecord.transport !== "stdio"
-    || commhubRecord.target !== "bun"
+    // resolve() 两侧各做一次：生成侧写进 config.toml 的已是 canonical 绝对路径
+    // （grok-build-cli-home.ts:1067 强制 realpathSync(command) === command），
+    // 所以这里只需防 "/a/./b" 这类等价写法，不需要再解一次符号链接。
+    || resolve(String(commhubRecord.target || "")) !== resolve(expectedCommhubCommand)
     || !source
     || typeof source !== "object"
     || Array.isArray(source)
