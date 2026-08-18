@@ -1,0 +1,42 @@
+# 符号级行号 pin：锚文本里点了名的符号，必须真的在钉住的那一行。
+#
+# 这道门原来是 qa.yml 里的一个 step。2026-08-18 发现它**不会在该触发的时候触发**：
+#
+#   qa.yml 的 paths 是 server/** · agent-network/** · agent-node/** · docs/qa/** …
+#   **`docs/architecture.md` 不在里面。**
+#
+# 于是「改 architecture.md 的 PR 从来不跑这道 pin 门」，那个文件里的行号锚点可以
+# 自由漂移。实测漂了三处（#1001）：URL 写 cli.ts#L1569、锚文本写 cli.ts:347、
+# 真值 1585；另一处写 cli.ts:2386 声称是 `sub === "dashboard"` 分支，真值 6279。
+# 它只在**被指向的文件**（agent-network/**）变动时才有机会红，而那时红的是别人的
+# PR、理由却在 architecture.md 里 —— 门存在、也挂上了，但不在该触发的时候触发。
+#
+# 拆出来而不是往 qa.yml 的 paths 里加 `docs/**`：qa.yml 很重（跑 docker 构建的
+# 多个测试套件），为一个几百毫秒的 python 检查把它拉起来不划算；而且**带 paths 的
+# workflow 在不匹配的 PR 上不产生 check-run，永远做不了 required check**
+# （会卡在 Expected — Waiting for status）。和 no-memory-slugs / public-script-safety
+# 这些守卫保持同构。
+
+name: lint (doc symbol pins)
+
+on:
+  # 刻意不加 paths —— 这道门要防的就是「锚点漂了而改动落在过滤之外」。
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  doc-symbol-pins:
+    # 全仓唯一的 job name —— 分支保护里的 required check 只能按这个名字写。
+    name: doc-symbol-pins
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # 参数 `.` 与它在 qa.yml 里的原调用一致（脚本用 argv[1] 定位仓根）。
+      # 它同时打印**跳过了多少** —— 一个只说「0 处漂移」不说「跳过 10 处」的门，
+      # 读起来像「全都查过了」。
+      - run: python3 scripts/check-doc-symbol-pins.py .

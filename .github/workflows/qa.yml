@@ -305,8 +305,9 @@ jobs:
       #    读者点进去连怀疑都不会产生。四处已在同一个 PR 里改对,这一步因此起点是绿的。
       #    它同时打印**跳过了多少** —— 一个只说「0 处漂移」不说「跳过 10 处」的门,
       #    读起来像「全都查过了」。
-      - name: 符号级行号 pin（#852，补 source-pin 抓不到的那一类）
-        run: python3 scripts/check-doc-symbol-pins.py .
+      # 🔴 这一步已搬到 .github/workflows/doc-symbol-pins.yml（无 paths 过滤）。
+      #    留在这里跑不到该跑的时候：qa.yml 的 paths 里没有 docs/architecture.md，
+      #    而那正是行号漂得最多的文件（#1001 一次抓到三处）。
       - name: Build test831-doc-source-pins
         run: |
           docker build \
