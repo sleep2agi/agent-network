@@ -127,7 +127,6 @@ test624-task-cursor-pagination
 test625-explicit-env-crlf
 test629-mcp-schema-policy
 test630-file-download-header-auth
-test631-private-config-permissions
 test632-honest-sse-recovery
 test633-doctor-locale
 test634-windows-secret-guidance
@@ -135,7 +134,6 @@ test635-daemon-private-state
 test637-database-url-guard
 test638-server-aggregate-isolation
 test643-transient-hub-legacy-repair
-test646-config-node-id-precedence
 test647-rest-explicit-columns
 test648-probe-ip-pin
 test649-token-cli
@@ -162,7 +160,6 @@ test697-codex-default-model
 test698-atomic-peer-reply
 test7-config
 test702-primary-network
-test735-hub-daemon-rebuild
 test736-pm2-fleet-rebuild
 test8-runtime
 test9-permissions
