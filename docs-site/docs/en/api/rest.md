@@ -104,7 +104,7 @@ curl -X POST http://localhost:9200/api/auth/register \
 }
 ```
 
-The `user` object's 5 fields match [`server/src/auth.ts:7-13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L7) `AuthUser` interface (`display_name` / `email` may be `null`); `token` is the `utok_` for CLI/Dashboard; `network_token` is the `ntok_` for agents in the network auto-created at registration.
+The `user` object's 5 fields match [`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) — grep `interface AuthUser` `AuthUser` interface (`display_name` / `email` may be `null`); `token` is the `utok_` for CLI/Dashboard; `network_token` is the `ntok_` for agents in the network auto-created at registration.
 
 **Common 4xx errors** (verify [`auth.ts register()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts)):
 
@@ -157,13 +157,13 @@ curl -X POST http://localhost:9200/api/auth/login \
 }
 ```
 
-The `user` object's 5 fields match the register response (note `email` may be `null`); `network_id` is the default network the user owns ([`auth.ts:113-115`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L113) does `ORDER BY role = 'owner' DESC LIMIT 1`). Each login issues a **brand-new** `utok_` (existing tokens are not rotated, so multiple devices can log in independently — see [`auth.ts:102-110`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L102)).
+The `user` object's 5 fields match the register response (note `email` may be `null`); `network_id` is the default network the user owns ([`auth.ts:113-115`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L113) does `ORDER BY role = 'owner' DESC LIMIT 1`). Each login issues a **brand-new** `utok_` (existing tokens are not rotated, so multiple devices can log in independently — see [`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) — grep `// User token (utok_) — not bound to network, for CLI/Dashboard login`).
 
 **Common 4xx errors** (verify [`auth.ts login()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts)):
 
 | Status | `error` value | Trigger |
 |------|------------|---------|
-| 401 | `invalid username or password` | Username doesn't exist **or** password hash mismatch ([`auth.ts:99-100`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L99) intentionally collapses both into the same message to avoid username enumeration); the server also writes a `login_failed` audit row |
+| 401 | `invalid username or password` | Username doesn't exist **or** password hash mismatch ([`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) — grep `invalid username or password` (2 sites) intentionally collapses both into the same message to avoid username enumeration); the server also writes a `login_failed` audit row |
 | 429 | `rate_limited` | Exceeded 10/min IP rate limit ([`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts); on hit the server writes a `login_rate_limited` audit row with the client IP) |
 
 **Rate limit**: 10 requests/minute per IP.
@@ -300,7 +300,7 @@ curl -X POST http://localhost:9200/api/auth/password \
 
 **Key side effects** (verify [`auth.ts:267-282 changePassword + revokeOtherUserTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L267) + [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
 1. **The caller's `utok_`** (`resolved.tokenId`) is revoked immediately ([`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) `revokeToken(...)` explicit delete)
-2. **All other devices' `utok_` / `atok_`** are also revoked in one shot ([`auth.ts:269-270`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L269) `DELETE ... WHERE user_id=? AND network_id IS NULL AND token_id != ?currentTokenId`) — the count is returned in the `revoked` field
+2. **All other devices' `utok_` / `atok_`** are also revoked in one shot ([`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) — grep `network_id IS NULL AND token_id != ` `DELETE ... WHERE user_id=? AND network_id IS NULL AND token_id != ?currentTokenId`) — the count is returned in the `revoked` field
 3. **`ntok_` tokens are unaffected** (`revokeOtherUserTokens` filters on `network_id IS NULL`, so agent nodes using `ntok_` keep running through a password change; matches the [account-system / Change Password](/en/guide/account-system#change-password) narrative)
 4. **A fresh `utok_`** (`issued.token`) is minted for the caller and returned in this response — the caller must overwrite local storage with the new token right away
 5. Writes audit log: `action='password_changed'`
@@ -359,7 +359,7 @@ curl http://localhost:9200/api/networks \
 }
 ```
 
-Each row in `networks` has 10 fields: the 9 `networks` table columns ([`server/src/db.ts:168-177`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L168), including the v3 migrations `visibility` + `max_members`) plus the joined `member_role` ([`auth.ts:382-388`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L382) joins `network_members`). Sort order: owner first, then by `created_at` (`ORDER BY nm.role = 'owner' DESC, n.created_at`). `settings` / `description` may be `null`. An `ntok_` caller sees only the bound network (not the full list); a `utok_` caller sees every network they belong to.
+Each row in `networks` has 10 fields: the 9 `networks` table columns ([`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) — grep `CREATE TABLE IF NOT EXISTS networks`, including the v3 migrations `visibility` + `max_members`) plus the joined `member_role` ([`auth.ts:382-388`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L382) joins `network_members`). Sort order: owner first, then by `created_at` (`ORDER BY nm.role = 'owner' DESC, n.created_at`). `settings` / `description` may be `null`. An `ntok_` caller sees only the bound network (not the full list); a `utok_` caller sees every network they belong to.
 
 ---
 
@@ -1466,7 +1466,7 @@ curl -X POST http://localhost:9200/mcp \
 
 > [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
 
-SSE real-time push endpoint. Clients receive events via a long-lived connection. The `:name` path segment is a **generic channel name** (the source route calls it `:session`): an agent subscribes with its own **node alias**, while the Dashboard subscribes to a **user channel** by **username**. The SSE layer itself is just a per-channel-name `Map` ([`push.ts:11` `clients`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L11)) — it does not distinguish alias from username; `pushEvent(name, ...)` reaches whoever registered that name (e.g. `node.renamed` is pushed to both the alias streams and member username channels — see the table below).
+SSE real-time push endpoint. Clients receive events via a long-lived connection. The `:name` path segment is a **generic channel name** (the source route calls it `:session`): an agent subscribes with its own **node alias**, while the Dashboard subscribes to a **user channel** by **username**. The SSE layer itself is just a per-channel-name `Map` ([`push.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts) — grep `const clients = new Map<string, SSEClient[]>()`) — it does not distinguish alias from username; `pushEvent(name, ...)` reaches whoever registered that name (e.g. `node.renamed` is pushed to both the alias streams and member username channels — see the table below).
 
 ```bash
 # Recommended: Authorization header (keeps the token out of proxies / browser history / access logs)
@@ -1480,7 +1480,7 @@ curl -N "http://localhost:9200/events/coder-1?token=ntok_xxx"
 
 | Event | Trigger | Data |
 |------|---------|------|
-| `connected` | Initial connection handshake ([`push.ts:35`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L35); emitted once per SSE client when the stream opens) | `{session, network_id}` |
+| `connected` | Initial connection handshake ([`push.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts) — grep `{ type: "connected", session: sessionName`; emitted once per SSE client when the stream opens) | `{session, network_id}` |
 | `new_task` | New task received (`send_task` / `retry_task` / `reassign_task` / REST `POST /api/task`) | `{inbox_count, priority, from}` |
 | `new_message` | New chat message (`send_message`) | `{from, message_id}` |
 | `new_reply` | Reply to a task (`send_reply`) | `{from, message_id, in_reply_to, status}` |
@@ -1573,7 +1573,7 @@ The `token` field is the plaintext token, **returned exactly once at creation** 
 :::
 
 ::: info This endpoint creates the legacy `atok_`
-This path goes through [`auth.ts:243` `generateToken()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L243), which issues an `atok_` prefix + `scope='full'` token — a V2-era compatibility path, not the v0.8 mainline (`utok_` / `ntok_`). For new code:
+This path goes through [`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) — grep `generateToken` (3 sites), which issues an `atok_` prefix + `scope='full'` token — a V2-era compatibility path, not the v0.8 mainline (`utok_` / `ntok_`). For new code:
 - **`utok_` (user token)**: issued automatically by [POST /api/auth/login](#post-api-auth-login) or [POST /api/auth/register](#post-api-auth-register)
 - **`ntok_` (network token)**: created via [POST /api/auth/node-token](#post-api-auth-node-token) (bound to a network + node alias)
 
@@ -1859,7 +1859,7 @@ curl -X POST http://localhost:9200/api/networks/join \
 | 400 | `invite code expired` | `expires_at < now()` (omit `expires_days` to create a never-expire code) |
 | 400 | `already a member of this network` | Caller is already a member |
 
-After receiving this response, the `anet network join` CLI auto-switches to the joined network (updating the `network_id` field in `~/.anet/config.json` to `res.network_id`) and prints `Joined network as <role>`. The server also auto-issues a network-bound token for the joiner ([`auth.ts:374-377`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L374), `name='auto-join' scope='full'`) and writes a `network_joined` audit row.
+After receiving this response, the `anet network join` CLI auto-switches to the joined network (updating the `network_id` field in `~/.anet/config.json` to `res.network_id`) and prints `Joined network as <role>`. The server also auto-issues a network-bound token for the joiner ([`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) — grep `"auto-join", "full"`, `name='auto-join' scope='full'`) and writes a `network_joined` audit row.
 
 ---
 

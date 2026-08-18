@@ -27,6 +27,7 @@ COPY server /repo/server
 COPY agent-network /repo/agent-network
 COPY docs/doc-source-pins-baseline.txt /repo/docs/doc-source-pins-baseline.txt
 COPY scripts/check-doc-source-pins.py /repo/scripts/check-doc-source-pins.py
+COPY scripts/check-mcp-tool-anchor-sections.py /repo/scripts/check-mcp-tool-anchor-sections.py
 COPY tests/test831-doc-source-pins /repo/tests/test831-doc-source-pins
 RUN chmod +x /repo/tests/test831-doc-source-pins/run.sh
 

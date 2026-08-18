@@ -13,7 +13,7 @@
 > - 首个用户自动 admin
 > - users.plan 字段 + networks.visibility/max_members 字段
 > - **RFC-001 Phase 1**：COMMHUB_AUTH_TOKEN 软废弃，仅 `/api/*` 只读 + deprecation warning
-> - **RFC-001 Phase 2**：admin utok_ bootstrap（`~/.anet/server/admin-utok.json` chmod 600，R224 校准：实际路径是 `~/.anet/server/` 不是 `~/.commhub/`，verify [`cli.ts:28 adminUtokPath`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L28)）、`anet passwd` / `anet hub admin reset-user`、密码强度 ≥ 8 + 弱密码字典、`anet doctor --fix` 探测并重发 ntok_
+> - **RFC-001 Phase 2**：admin utok_ bootstrap（`~/.anet/server/admin-utok.json` chmod 600，R224 校准：实际路径是 `~/.anet/server/` 不是 `~/.commhub/`，verify [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) —— 搜 `function adminUtokPath(`）、`anet passwd` / `anet hub admin reset-user`、密码强度 ≥ 8 + 弱密码字典、`anet doctor --fix` 探测并重发 ntok_
 > 
 > ❌ 未实现（目标态，排到 v0.9+）：
 > - MCP 写操作的**细粒度**网络角色检查 —— `canWrite` (tools.ts:24 `role !== "viewer"`) 只挡 viewer，owner/admin/member 一视同仁；且**无 per-task ownership 检查**（member 能 cancel/reassign 网络里任何任务，不限自己派的）。注：viewer 已经**不能** send_task（canWrite 拦住），缺的是更细的角色/归属门控

@@ -29,6 +29,45 @@ write_opencode_binding() {
     '
 }
 
+# 🔴 这两个版本号从源码常量派生,不写死。
+#
+# 之前 5 处断言各自硬编码了 `2.3.0-preview.39` / `2.5.0-preview.31`。它们断言的
+# 恰恰是 opencodeExactPairInstallCommand() 用这两个常量生成的字符串,所以每次
+# release 升常量,这 5 条 grep -Fq 就会一起红 —— 而修它的最省力办法是把断言里的
+# 数字改成新的,那等于让测试永远只是抄一遍当前值,不再检查任何东西。
+#
+# 2026-08-17 走 RELEASE-SOP 的 preview.40 dry-run 时撞到这一点:sync 脚本会升
+# 常量,但不碰这个文件,于是照 SOP 发版必然产生一个红。
+#
+# 派生 + fail-closed:读不到常量就直接失败,不能静默拿空串去 grep(空串 grep 恒真,
+# 那会把这几条断言变成永远通过)。
+PAIR_SRC=/repo/agent-network/src/opencode-agent-node-pair.ts
+[ -f "$PAIR_SRC" ] || fail "cannot find $PAIR_SRC — refusing to assert against an unknown pair"
+EXPECT_NETWORK=$(sed -n 's/^export const OPENCODE_AGENT_NETWORK_VERSION = "\([^"]*\)";$/\1/p' "$PAIR_SRC")
+EXPECT_NODE=$(sed -n 's/^export const OPENCODE_AGENT_NODE_VERSION = "\([^"]*\)";$/\1/p' "$PAIR_SRC")
+[ -n "$EXPECT_NETWORK" ] || fail "could not read OPENCODE_AGENT_NETWORK_VERSION from $PAIR_SRC"
+[ -n "$EXPECT_NODE" ]    || fail "could not read OPENCODE_AGENT_NODE_VERSION from $PAIR_SRC"
+printf -- '- expected pair (from source): agent-network@%s + agent-node@%s\n' \
+  "$EXPECT_NETWORK" "$EXPECT_NODE" >> "$REPORT"
+
+# 夹具里的版本号同样从常量派生。它们代表「被信任的那个确切版本」,写死的话
+# release 一升常量,夹具就不再是「确切版本」,而这个失败看起来像产品坏了。
+export EXPECT_NODE_SPEC="@sleep2agi/agent-node@$EXPECT_NODE"
+for fixture in /repo/tests/test386-opencode-agent-node-gate/exact-node/package.json \
+               /repo/tests/test386-opencode-agent-node-gate/project-agent-node/package.json; do
+  [ -f "$fixture" ] || fail "fixture missing: $fixture"
+  tmp=$(mktemp)
+  EXPECT_NODE="$EXPECT_NODE" node -e '
+    const fs = require("fs");
+    const p = process.argv[1];
+    const j = JSON.parse(fs.readFileSync(p, "utf8"));
+    j.version = process.env.EXPECT_NODE;
+    fs.writeFileSync(process.argv[2], JSON.stringify(j, null, 2) + "\n");
+  ' "$fixture" "$tmp" || fail "could not rewrite fixture version: $fixture"
+  mv "$tmp" "$fixture"
+done
+printf -- '- fixtures pinned to agent-node@%s\n' "$EXPECT_NODE" >> "$REPORT"
+
 printf '# Test 386 — opencode-cli stale agent-node launch gate\n\n' >> "$REPORT"
 printf -- '- date: %s\n' "$(date -Iseconds)" >> "$REPORT"
 
@@ -217,7 +256,7 @@ jq -e '
 [ ! -e /tmp/test386-profile-coverage ] \
   || fail "profile NODE_V8_COVERAGE wrote outside the node state boundary"
 [ ! -e /tmp/test386-npx-args ] || fail "exact global resolution unexpectedly executed npx"
-grep -Fq 'using installed exact @sleep2agi/agent-node@2.5.0-preview.31' \
+grep -Fq "using installed exact @sleep2agi/agent-node@$EXPECT_NODE" \
   /tmp/test386-success.log || fail "exact installed agent-node diagnostic is missing"
 pass "stale global bypassed; later exact global received protected PATH/binary/version/base; npx was not executed"
 
@@ -294,7 +333,7 @@ mask_log < /tmp/test386-project-explicit.log >> "$REPORT"
   || fail "explicit project-local rejection unexpectedly launched another agent-node"
 [ ! -e /tmp/test386-npx-args ] \
   || fail "explicit project-local rejection unexpectedly executed npx"
-grep -Fq 'ANET_AGENT_NODE_BIN is not the exact trusted @sleep2agi/agent-node@2.5.0-preview.31' \
+grep -Fq "ANET_AGENT_NODE_BIN is not the exact trusted @sleep2agi/agent-node@$EXPECT_NODE" \
   /tmp/test386-project-explicit.log \
   || fail "explicit project-local rejection omitted the exact-pair diagnostic"
 grep -Fq 'project/node-local agent-node package payload is not trusted' \
@@ -336,7 +375,7 @@ jq -e '.executable == "/test/exact-global/node_modules/@sleep2agi/agent-node/dis
   /tmp/test386-exact-preview-launch.json >/dev/null \
   || fail "capable-looking preview.21 was not bypassed for the later exact global"
 [ ! -e /tmp/test386-npx-args ] || fail "preview.21 bypass unexpectedly executed npx"
-pass "capable-looking global preview.21 rejected; later exact global preview.31 launched without npx"
+pass "capable-looking global preview.21 rejected; later exact global $EXPECT_NODE launched without npx"
 
 # An explicit override is not permission to bypass the exact release pair.
 rm -rf /tmp/test386-work-explicit /tmp/test386-home-explicit \
@@ -362,7 +401,7 @@ mask_log < /tmp/test386-explicit.log >> "$REPORT"
 [ "$explicit_rc" -ne 0 ] || fail "stale explicit agent-node override unexpectedly started"
 [ ! -e /tmp/test386-stale-capable-global-was-launched ] \
   || fail "stale explicit preview.21 was launched"
-grep -Fq 'ANET_AGENT_NODE_BIN is not the exact trusted @sleep2agi/agent-node@2.5.0-preview.31' \
+grep -Fq "ANET_AGENT_NODE_BIN is not the exact trusted @sleep2agi/agent-node@$EXPECT_NODE" \
   /tmp/test386-explicit.log \
   || fail "explicit override exact-version diagnostic is missing"
 pass "ANET_AGENT_NODE_BIN cannot bypass the exact hardened pair"
@@ -395,7 +434,7 @@ mask_log < /tmp/test386-fail.log >> "$REPORT"
 grep -Fq 'automatic npx execution is disabled for opencode-cli' \
   /tmp/test386-fail.log \
   || fail "hard-fail omitted the disabled-npx diagnostic"
-grep -Fq 'npm install -g @sleep2agi/agent-network@2.3.0-preview.39 @sleep2agi/agent-node@2.5.0-preview.31' \
+grep -Fq "npm install -g @sleep2agi/agent-network@$EXPECT_NETWORK @sleep2agi/agent-node@$EXPECT_NODE" \
   /tmp/test386-fail.log \
   || fail "hard-fail omitted the exact dual-package install command"
 grep -Fq 'Refusing to start: an unsupported agent-node could silently select another runtime.' \

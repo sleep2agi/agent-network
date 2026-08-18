@@ -40,6 +40,30 @@ register_user() {
     -d "{\"username\":\"$username\",\"password\":\"$password\"}"
 }
 
+# #203/#376 之后,report_status 的 alias 必须与 token 绑定的 alias 一致
+# (server.ts:733 从 api_tokens.name='node:<alias>' 推导 callerAlias;
+#  注册时拿到的 network_token 名字不是 node:…，会回落成**用户名**，
+#  于是用它上报任意 alias 一律 alias_identity_mismatch)。
+# 所以每个要上报的 alias 都得先铸一个属于它自己的 node token。
+# 取法与已注册且长期绿的 qa-hub-05-roundtrip 完全一致。
+node_token() {
+  local utok="$1" net="$2" alias="$3" tok
+  tok=$(curl -fsS -X POST "$HUB_BASE/api/auth/node-token" \
+    -H "Authorization: Bearer $utok" -H 'Content-Type: application/json' \
+    -d "{\"network_id\":\"$net\",\"node_name\":\"$alias\"}" | jq -r '.token // empty')
+  [[ "$tok" == ntok_* ]] || { echo "FAIL: node_token($alias) shape wrong: $tok" >&2; exit 1; }
+  printf '%s' "$tok"
+}
+
+# 每次 report_status 都以「args 里那个 alias 自己的 node token」发出。
+# 直接从 args 取 alias,循环/多 alias 的调用点不必逐个改,也不会漏。
+report_as() {
+  local utok="$1" net="$2" args="$3" alias tok
+  alias=$(printf '%s' "$args" | jq -r '.alias')
+  tok=$(node_token "$utok" "$net" "$alias")
+  mcp_call "$tok" report_status "$args"
+}
+
 wait_for_log() {
   local pattern="$1" file="$2" label="$3"
   for _ in {1..30}; do
@@ -87,16 +111,16 @@ ARG_A1=$(jq -nc --arg net "$NET_A" \
   '{resume_id:"140-a-1",alias:"hero-a1",status:"idle",task:"standby",progress:10,agent:"agent-node:claude",model:"intern-s1-pro",network_id:$net,host:{hostname:"hero-box",ip:"10.10.0.5",cpu_load_1min:1.0,cpu_cores:4,mem_total_gb:16,mem_used_gb:15.2,mem_avail_gb:0.8,disk_total_gb:100,disk_used_gb:92,disk_avail_gb:8},process_telemetry:{rss_bytes:123456789,rss_mb:117.7,cpu_pct:12.5,uptime_seconds:100,in_flight_count:0}}')
 ARG_A2=$(jq -nc --arg net "$NET_A" \
   '{resume_id:"140-a-2",alias:"hero-a2",status:"working",task:"compute",progress:66,agent:"agent-node:codex",model:"gpt-5.4",network_id:$net,host:{hostname:"hero-box",ip:"10.10.0.5",cpu_load_1min:3.6,cpu_cores:4,mem_total_gb:16,mem_used_gb:15.6,mem_avail_gb:0.4,disk_total_gb:100,disk_used_gb:99.2,disk_avail_gb:0.8},process_telemetry:{rss_bytes:223456789,rss_mb:213.1,cpu_pct:80.1,uptime_seconds:200,in_flight_count:2}}')
-out=$(mcp_call "$NTOK_A" report_status "$ARG_A1")
+out=$(report_as "$UTOK_A" "$NET_A" "$ARG_A1")
 echo "$out" | jq -e '.ok == true' >/dev/null || { echo "FAIL: report_status A1: $out"; exit 1; }
 sleep 1.1
-out=$(mcp_call "$NTOK_A" report_status "$ARG_A2")
+out=$(report_as "$UTOK_A" "$NET_A" "$ARG_A2")
 echo "$out" | jq -e '.ok == true' >/dev/null || { echo "FAIL: report_status A2: $out"; exit 1; }
 
 echo "[3] report same host in network B to guard cross-network scope"
 ARG_B1=$(jq -nc --arg net "$NET_B" \
   '{resume_id:"140-b-1",alias:"hero-b1",status:"idle",network_id:$net,host:{hostname:"hero-box",ip:"10.10.0.5",cpu_load_1min:0.1,cpu_cores:64,mem_total_gb:128,mem_used_gb:8,mem_avail_gb:120,disk_total_gb:1000,disk_used_gb:100,disk_avail_gb:900},process_telemetry:{rss:999,cpu_pct:1,uptime_seconds:9,in_flight_count:0}}')
-out=$(mcp_call "$NTOK_B" report_status "$ARG_B1")
+out=$(report_as "$UTOK_B" "$NET_B" "$ARG_B1")
 echo "$out" | jq -e '.ok == true' >/dev/null || { echo "FAIL: report_status B1: $out"; exit 1; }
 
 echo "[4] /api/server/:host/health exposes latest alert + history for network A only"
@@ -141,7 +165,7 @@ echo "$STATUS_A" | jq -e '.ok == true and (.sessions[] | select(.alias=="hero-a2
 echo "[5b] old clients without process_telemetry surface nulls"
 LEGACY_ARG=$(jq -nc --arg net "$NET_A" \
   '{resume_id:"140-legacy",alias:"legacy-agent",status:"idle",network_id:$net,host:{hostname:"legacy-box",ip:"10.10.0.6",cpu_load_1min:0.1,cpu_cores:2,mem_total_gb:4,mem_used_gb:1,mem_avail_gb:3}}')
-out=$(mcp_call "$NTOK_A" report_status "$LEGACY_ARG")
+out=$(report_as "$UTOK_A" "$NET_A" "$LEGACY_ARG")
 echo "$out" | jq -e '.ok == true' >/dev/null || { echo "FAIL: legacy report_status: $out"; exit 1; }
 LEGACY_AGENTS=$(curl -fsS "$HUB_BASE/api/server/legacy-box/agents?network_id=$NET_A" -H "Authorization: Bearer $UTOK_A")
 echo "$LEGACY_AGENTS" | jq -e '.ok == true and .agents[0].process_telemetry.rss_bytes == null and .agents[0].process_telemetry.cpu_pct == null and .agents[0].process_telemetry.in_flight_count == null' >/dev/null || {
@@ -159,8 +183,11 @@ echo "$SERVERS_A" | jq -e 'type=="array" and length==2 and (.[] | select(.hostna
 }
 
 echo "[7] /api/messages returns promptly after task write"
+# send 侧对称检查(fromIdentityMismatchReply):用 network token 发送时
+# from_session 必须等于该 token 绑定的 alias,所以发送方也要有自己的 node token。
+SENDER_TOK=$(node_token "$UTOK_A" "$NET_A" "dashboard-smoke")
 TASK_A=$(jq -nc '{alias:"hero-a1",task:"message-smoke",from_session:"dashboard-smoke"}')
-SEND_A=$(mcp_call "$NTOK_A" send_task "$TASK_A")
+SEND_A=$(mcp_call "$SENDER_TOK" send_task "$TASK_A")
 echo "$SEND_A" | jq -e '.ok == true' >/dev/null || { echo "FAIL: send_task for messages: $SEND_A"; exit 1; }
 MESSAGES_A=$(curl -fsS --max-time 2 "$HUB_BASE/api/messages?network_id=$NET_A&limit=10" -H "Authorization: Bearer $UTOK_A")
 echo "$MESSAGES_A" | jq -e '.ok == true and (.messages[] | select(.from_alias=="dashboard-smoke" and .to_alias=="hero-a1"))' >/dev/null || {
@@ -180,7 +207,7 @@ wait_for_log '"type":"connected"' /tmp/sse-a.log "SSE A connected"
 wait_for_log '"type":"connected"' /tmp/sse-b.log "SSE B connected"
 STATUS_UPDATE_ARG=$(jq -nc --arg net "$NET_A" \
   '{resume_id:"140-a-1",alias:"hero-a1",status:"idle",progress:11,agent:"agent-node:claude",network_id:$net,host:{hostname:"hero-box",ip:"10.10.0.5",cpu_load_1min:1.1,cpu_cores:4,mem_total_gb:16,mem_used_gb:15.1,mem_avail_gb:0.9,disk_total_gb:100,disk_used_gb:92,disk_avail_gb:8},process_telemetry:{rss_bytes:133456789,rss_mb:127.3,cpu_pct:13.5,uptime_seconds:110,in_flight_count:1}}')
-out=$(mcp_call "$NTOK_A" report_status "$STATUS_UPDATE_ARG")
+out=$(report_as "$UTOK_A" "$NET_A" "$STATUS_UPDATE_ARG")
 echo "$out" | jq -e '.ok == true' >/dev/null || { echo "FAIL: status update report_status: $out"; exit 1; }
 wait_for_log '"type":"status_update"' /tmp/sse-a.log "status update SSE"
 wait_for_log '"process_telemetry"' /tmp/sse-a.log "process telemetry SSE"
