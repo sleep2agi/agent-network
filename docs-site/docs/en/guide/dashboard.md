@@ -315,7 +315,11 @@ anet -v                                    # should show 2.3.0-preview.N (curren
 anet hub dashboard                          # npx auto-pulls the current preview version
 ```
 
-The default mode still starts the channel-matched release through `npx`. The CLI only replaces a stale `npx` Dashboard that it previously recorded and whose PID, birth fingerprint, and command all match exactly. It refuses automatic termination when the port belongs to an unknown process, inspection is incomplete, or a global install is in use. It never uses `pkill`, `killall`, or process-name prefix matching.
+The default mode still starts through `npx` — but **it does not pull a release matched to your CLI channel**.
+`dashboardReleaseTag()` returns `preview` for every caller (see the table at the top of this page), so
+**a user on the stable CLI channel also gets the preview Dashboard**. Pin a version with `ANET_DASHBOARD_VERSION`.
+(A deliberate temporary decision — see #866. This sentence used to claim the opposite of what the code does.)
+ The CLI only replaces a stale `npx` Dashboard that it previously recorded and whose PID, birth fingerprint, and command all match exactly. It refuses automatic termination when the port belongs to an unknown process, inspection is incomplete, or a global install is in use. It never uses `pkill`, `killall`, or process-name prefix matching.
 
 To reuse a global installation from PATH, explicitly set `ANET_DASHBOARD_LOCAL=1`. That Dashboard remains operator-managed; rerunning the command does not kill or replace it.
 
