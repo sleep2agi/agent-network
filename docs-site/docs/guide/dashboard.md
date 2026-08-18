@@ -314,7 +314,11 @@ anet -v                                    # 应显示 2.3.0-preview.N（当前 
 anet hub dashboard                          # 自动 npx 拉当前 preview 版本
 ```
 
-默认模式继续按 CLI 通道通过 `npx` 启动匹配版本。CLI 只会自动替换自己记录的、PID/启动时间/命令均精确匹配的旧 `npx` Dashboard；端口由未知进程占用、检查信息不完整或使用全局安装时都会拒绝自动终止。不会使用 `pkill`、`killall` 或进程名前缀匹配。
+默认模式继续通过 `npx` 启动 —— 但**它拉的不是「与你的 CLI 通道匹配」的版本**。
+`dashboardReleaseTag()` 对每一个调用者都返回 `preview`(见本页开头那张表),所以
+**装了稳定版 CLI 的用户起出来的也是 preview Dashboard**。要固定版本用 `ANET_DASHBOARD_VERSION`。
+(这是一个有意的临时决定,见 #866;这里原来写的是「按通道匹配」,与代码不符。)
+CLI 只会自动替换自己记录的、PID/启动时间/命令均精确匹配的旧 `npx` Dashboard；端口由未知进程占用、检查信息不完整或使用全局安装时都会拒绝自动终止。不会使用 `pkill`、`killall` 或进程名前缀匹配。
 
 需要复用 PATH 中的全局安装时，必须显式设置 `ANET_DASHBOARD_LOCAL=1`。全局 Dashboard 由操作者管理；再次运行命令不会自动杀掉或替换它。
 

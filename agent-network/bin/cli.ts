@@ -6279,7 +6279,10 @@ async function serverCommand() {
     const globalBinary = globalOptIn ? resolveGlobalDashboardBinary() : null;
     if (globalOptIn && !globalBinary) {
       console.error(`[anet] ANET_DASHBOARD_LOCAL=1 requested the global Dashboard, but agent-network-dashboard is not on PATH.`);
-      console.error(`[anet] Install it explicitly or unset ANET_DASHBOARD_LOCAL to keep channel-matched npx startup.`);
+      // 🔴 NOT "channel-matched" — dashboardReleaseTag() returns "preview" for
+      //    every caller. The comment at the spawn site was corrected already;
+      //    this string is the same false claim in the one place a *user* reads it.
+      console.error(`[anet] Install it explicitly, or unset ANET_DASHBOARD_LOCAL to fall back to npx @sleep2agi/agent-network-dashboard@${tag} (currently "${tag}" for every CLI channel).`);
       process.exit(1);
     }
     const launchSource: DashboardLaunchSource = globalOptIn ? "global" : "npx";
