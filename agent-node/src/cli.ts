@@ -1009,6 +1009,9 @@ import { appendFileSync, mkdirSync } from "fs";
 // 用 import 而不是运行时读 package.json:`bun build --minify` 会把 JSON
 // 在**构建期**内联,于是这个常量表示的是「这份 dist 是从哪个版本构建出来的」——
 // 正是我们想问的那件事。运行时去找 package.json 反而会受安装布局影响。
+// 🔴 给写 Dockerfile 的人：**任何构建 cli.ts 的镜像都必须同时拷 agent-node/package.json**，
+//    只拷 src/ 会 `error: Could not resolve: "../package.json"`。
+//    这条不是假设 —— test631 / test646 就是这么红的（它们当时都不在 CI 里，所以没人看见）。
 import agentNodePackage from "../package.json";
 const AGENT_NODE_VERSION: string = agentNodePackage.version;
 const PRIVATE_LOG_DIR = GROK_EXECUTION_MODE === "cli"
