@@ -15,39 +15,22 @@
 name: lint (no internal memory-slug leak)
 
 on:
+  # 🔴 刻意不加 paths 过滤。原来这里列了 12 条(`**/*.ts` `**/*.md` `**/*.yml` …),
+  # 而**脚本自己扫的后缀集合里还有 `.sh` 和 `.py`** —— 它们不在触发列表里。
+  # 实测这个缺口的大小:仓里 2032 个跟踪文件中,**改动它不会触发这道门**的有 999 个,
+  # 其中 `.sh` 288 个、`.py` 22 个 —— 而这两类**正是脚本会扫的**。
+  #
+  # 也就是说:一个只改 .sh 的 PR 里,内部记忆 slug 可以直接进公开仓,
+  # 而这道门**不是判错,是压根不会被触发**。
+  #
+  # 去掉过滤同时解决第二件事:带 paths 的 workflow 在不匹配的 PR 上不产生 check-run,
+  # 于是**永远做不了 required check**(会卡在 Expected — Waiting for status)。
+  # 这是一道隐私门,应当能进 required。
+  #
+  # 代价实测:main 上最近三次运行 11s / 10s / 14s。
   pull_request:
-    paths:
-      - '**/*.ts'
-      - '**/*.tsx'
-      - '**/*.js'
-      - '**/*.jsx'
-      - '**/*.mjs'
-      - '**/*.cjs'
-      - '**/*.md'
-      - '**/*.yml'
-      - '**/*.yaml'
-      - '.github/scripts/check-no-memory-slugs.py'
-      - '.github/workflows/no-memory-slugs.yml'
-      - '.github/scripts/requirements-workflow-structure.txt'
   push:
     branches: [main]
-    paths:
-      - '**/*.ts'
-      - '**/*.tsx'
-      - '**/*.js'
-      - '**/*.jsx'
-      - '**/*.mjs'
-      - '**/*.cjs'
-      - '**/*.md'
-      - '**/*.yml'
-      - '**/*.yaml'
-      - '.github/scripts/check-no-memory-slugs.py'
-      - '.github/workflows/no-memory-slugs.yml'
-      - '.github/scripts/requirements-workflow-structure.txt'
-
-concurrency:
-  group: lint-slugs-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   no-memory-slugs:
