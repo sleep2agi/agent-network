@@ -67,6 +67,19 @@ npm run app:desktop:pack                                                  # 打�
 
 **macOS / Windows 的安装包，在有人在对应平台上真打出来之前，本页不会声称它们可用。**
 
+::: tip 上面这句只针对 Dashboard 那个壳
+还有**另一条独立的客户端线**：[`sleep2agi/agent-network-app`](https://github.com/sleep2agi/agent-network-app)
+（`desktop/` + `src-tauri/`，Tauri）。它有自己的打包流水线，**其中 macOS 那条是在真的
+`macos-14` runner 上跑的**，产出 `.dmg` 与 `.app` zip，实测成功过（最近一次 2026-06-17）。
+
+所以「有没有 Mac 安装包」这个问题的答案是**有**，只是不在本页说的这个壳里。
+两条线目前并存，本页不判断哪条是主线 —— 见 [issue #233](https://github.com/sleep2agi/agent-network/issues/233)。
+
+**Windows 是三个仓里唯一真正为零的那格**：所有 workflow 里都没有 Windows 打包。
+Dashboard 的 `electron-builder.json` 里**配置**了 `win: nsis`，但没有任何 CI 跑它 ——
+**配置存在不等于产物存在。**
+:::
+
 ## 我该用哪一种
 
 - 只是想在手机上看看 → **PWA**，不需要任何构建；
