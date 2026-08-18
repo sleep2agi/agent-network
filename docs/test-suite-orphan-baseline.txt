@@ -55,17 +55,11 @@ test203-alias-crossover-repro
 test21-quickstart-ux
 test219-grok-copresence
 test22-agent-ux
-test225-grok-preview-package-live
 test226-opencode-preview-release
 test227-opencode-tui-copresence
 test228-opencode-inbox-concurrency
 test23-codex-telegram
 test230-opencode-sender-label
-test231-grok-socket-sandbox
-test232-grok-xsearch-process-profile
-test233-grok-main-integration
-test234-grok-profile-disclosure
-test235-grok-mcp-outbound-only
 test236-dashboard-codex-goal
 test24-codex-commander
 test25-agent-telegram
@@ -117,7 +111,6 @@ test6-networks
 test600-public-skillhub
 test602-scheduled-misfire
 test604-scheduled-task-edit
-test605-grok-startup-model-label
 test606-node-start-help
 test607-health-upload-limits
 test608-claude-cli-dependency
