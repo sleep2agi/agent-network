@@ -60,6 +60,8 @@ on:
       - 'tests/test235-grok-mcp-outbound-only/**'
       - 'tests/test219-grok-copresence/**'
       - 'tests/test605-grok-startup-model-label/**'
+      - 'tests/test735-hub-daemon-rebuild/**'
+      - 'deploy/hub/hub-daemon.sh'
   push:
     branches: [main]
     paths:
@@ -110,6 +112,8 @@ on:
       - 'tests/test235-grok-mcp-outbound-only/**'
       - 'tests/test219-grok-copresence/**'
       - 'tests/test605-grok-startup-model-label/**'
+      - 'tests/test735-hub-daemon-rebuild/**'
+      - 'deploy/hub/hub-daemon.sh'
 
 # Older runs on the same ref get cancelled — saves minutes when a PR is
 # updated rapidly. main pushes run independently.
@@ -509,3 +513,37 @@ jobs:
             -f tests/test605-grok-startup-model-label/Dockerfile .
           docker run --rm --network none -e ARTIFACT_DIR=/tmp/art \
             anet-test605-grok-startup-model-label
+
+  hub-daemon-gate:
+    # 🔴 单独一个 job，不塞进 grok-green-suites —— 那个名字会对它包含的内容说谎。
+    #    （改已有 job 的名字会动分支保护里的 required check，风险更高，所以新开。）
+    name: hub daemon fail-closed (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # 这一格守的是**全军团单点**：`deploy/hub/hub-daemon.sh` 是生产 CommHub 的启动脚本
+      # （pm2 守着；脚本自己的头里记着 2026-07-29 那次误杀导致 95 个 agent 掉线）。
+      # test735 覆盖的正是它的 fail-closed 约束：
+      #   assert_missing_secret_rejected   缺 vault 密钥必须拒绝启动
+      #   assert_occupied_port_rejected    端口已被监听必须拒绝（防第二个 hub 抢同一个 DB）
+      #   assert_missing_ss_rejected       看不见端口就拒绝启动
+      #   assert_missing_runtime_rejected / assert_missing_bun_rejected / assert_success_path
+      #
+      # 对着 origin/main 数，它此前的 CI 引用是 **0** —— 这份测试从没在 CI 上跑过。
+      #
+      # 基线（Docker、--network none，不碰生产 hub）：
+      #   L1 HUB_DAEMON_REBUILD_PASS
+      #   MUTATION_RED vault-gate-removed      ← 自带见证红：去掉 vault 闸门它会红
+      #   RESULT: PASS
+      # 真绿 + 自带变异，所以直接做阻塞门，不套 known-failure 棘轮。
+      #
+      # `--network none -e ARTIFACT_DIR=/tmp/art` 是跑基线时用的**同一条命令**。
+      - name: Build + run test735-hub-daemon-rebuild
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-test735-hub-daemon-rebuild \
+            -f tests/test735-hub-daemon-rebuild/Dockerfile .
+          docker run --rm --network none -e ARTIFACT_DIR=/tmp/art \
+            anet-test735-hub-daemon-rebuild
