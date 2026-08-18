@@ -7,7 +7,7 @@
 > **Changelog：**
 > - v1：初版 5 agent + docker-compose 草案
 > - v2：通信龙 review 通过 — 砍 dispatcher agent / 切 CLI 模式 / 清理流程对齐 debate
-> - **v3：通信龙 pivot ack — 加 §UX 反馈 (在控感) + §测试规格（Vincent 2026-05-12 定调 "用户能掌控多 agent + 充分测试"，refs [[feedback-demo-quality-over-count]]）**
+> - **v3：通信龙 pivot ack — 加 §UX 反馈 (在控感) + §测试规格（Vincent 2026-05-12 定调 "用户能掌控多 agent + 充分测试"——即「宁可少做几个、每个都做扎实」,不以数量论）**
 
 ## 一句话定位
 

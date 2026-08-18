@@ -37,12 +37,24 @@ import re
 import sys
 from pathlib import Path
 
-# `\[\[(feedback|project|reference|user)_[a-z0-9_-]+\]\]`
+# `\[\[(feedback|project|reference|user)[_-][a-z0-9_-]+\]\]`
 # - leading `\[\[` to require the memory-link shape (not arbitrary `[x]`)
 # - one of the four category prefixes (the agent memory types)
-# - underscore separator + slug body (kebab/snake/digit chars)
+# - 分隔符是 `[_-]`,**两种都收** —— 见下
 # - closing `\]\]`
-SLUG_RE = re.compile(r"\[\[(feedback|project|reference|user)_[a-z0-9_-]+(?:\.md)?\]\]")
+#
+# 🔴 2026-08-18:分隔符原来只写了 `_`,于是**连字符形式整类漏过**:
+#
+#     [[feedback_kebab_probe_underscore]]   → 拦住   rc=1
+#     [[feedback-kebab-probe-hyphen]]       → **放行** rc=0
+#
+#   (用真脚本实测的,不是读正则读出来的。)
+#
+#   而这不是一个边缘写法 —— **记忆条目自己的 `name:` 字段用的就是连字符形式**
+#   (`name: feedback-a-bug-plus-a-lucky-fact-looks-exactly-like-correct`)。
+#   也就是说:**最自然的引用方式(把 name: 的值抄进 [[ ]])恰好是这道门看不见的那一种。**
+#   一道隐私门,漏的正是最可能出现的写法。
+SLUG_RE = re.compile(r"\[\[(feedback|project|reference|user)[_-][a-z0-9_-]+(?:\.md)?\]\]")
 
 # .sh / .py 同样是公开仓里可见的文件,此前不在覆盖内 —— 实测 2026-08-13,
 # 三处真 slug 就藏在 tests/ 下的 shell 脚本里,门扫 898 个文件却看不见它们。
