@@ -1,0 +1,20 @@
+# test225 已知失败基线 —— 棘轮，不是豁免清单
+#
+# 这个文件存在的理由：test225 现在是红的（2 条），但它在 CI 之外待了太久，
+# 期间没人知道它是真绿还是假绿。实测已经证明它之前那个绿是**假绿**：
+# 旧夹具硬写 target="bun"，恰好等于旧审计硬写的期望值，两个错误互相同意。
+# （三方单变量实验见 #861 / #1011 的评论。）
+#
+# 所以先把它接进 CI，判据是「FAIL 集合等于下面这份」：
+#   · 多出任何一条  → 红（新伤）
+#   · 少了任何一条  → 不红，但会打印「该更新基线了」（修好是好事，不该被门拦住）
+#
+# 每一条都必须有一个 issue，否则这里就变成了一张藏东西的清单。
+#
+# 条目 -> issue：
+#   real auth evidence scan failed ...          -> #1021
+#   installed candidate Feishu refusal ...      -> #1020
+#
+# ---- 条目：FAIL 后面那句原文，逐字 ----
+real auth evidence scan failed; closed target-role diagnostic retained
+installed candidate Feishu refusal lacked the fixed explanation
