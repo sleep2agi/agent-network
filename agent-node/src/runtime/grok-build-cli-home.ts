@@ -1113,6 +1113,21 @@ export async function acquireGrokProjectTurnLock(
 ): Promise<GrokProjectTurnLock> {
   const lexicalRoot = grokProjectWalk(cwd).root;
   const projectRoot = realpathSync(lexicalRoot);
+  // issue #884: the walk goes *up*, so a caller under a directory that happens
+  // to sit below someone else's `.anet` silently shares that project's lock.
+  // Test fixtures under `tmpdir()` are the usual victim: every fixture lands on
+  // one lock and they serialize against each other. Remember whether the root
+  // came from above the caller so the busy message can say so — "project is
+  // busy" on its own sends people hunting for a process to kill.
+  // The walk returns `cwd` itself or one of its ancestors, so plain inequality
+  // is the whole test. Resolving `cwd` can throw if it was removed underneath
+  // us; that is not worth failing a lock over, so fall back to "not above".
+  let rootIsAboveCaller = false;
+  try {
+    rootIsAboveCaller = realpathSync(cwd) !== projectRoot;
+  } catch {
+    rootIsAboveCaller = false;
+  }
   const projectStat = statSync(projectRoot);
   if (!projectStat.isDirectory()) throw new Error(`grok-build-cli project root is not a directory: ${projectRoot}`);
 
@@ -1184,7 +1199,8 @@ export async function acquireGrokProjectTurnLock(
       holder.once("exit", (code) => {
         if (!settled) {
           fail(code === 1
-            ? "grok-build-cli project is busy; concurrent turns are refused"
+            ? `grok-build-cli project is busy; concurrent turns are refused (lock ${lockPath}${
+              rootIsAboveCaller ? `, resolved by walking up from ${cwd} — see issue #884` : ""})`
             : `grok-build-cli flock holder exited before acquisition (${code ?? "signal"}${stderr ? `: ${stderr.trim()}` : ""})`);
         }
       });

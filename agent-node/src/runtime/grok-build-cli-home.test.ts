@@ -1392,6 +1392,13 @@ describe("prepareGrokCliHome", () => {
     let busy = "";
     try { await acquireGrokProjectTurnLock(alias); } catch (error: any) { busy = error?.message || String(error); }
     expect(busy).toContain("project is busy");
+    // issue #884: "busy" alone points at a process to kill. When the root came
+    // from walking *up* out of the caller's directory, the message has to say
+    // which lock it took and where the root came from — that is the whole
+    // difference between a 5-minute fix and an hour of hunting.
+    expect(busy).toContain(join(project, ".anet", ".grok-build-cli-turn.lock"));
+    expect(busy).toContain("resolved by walking up from");
+    expect(busy).toContain("#884");
     await first.release();
     const second = await acquireGrokProjectTurnLock(alias);
     await second.release();
