@@ -71,6 +71,12 @@ on:
       - 'tests/test671-task-runtime-evidence-hub/**'
       - 'tests/test688-owner-gated-schedule-hub/**'
       - 'tests/test629-mcp-schema-policy/**'
+      - 'tests/qa-anet-daemon-cmd/**'
+      - 'tests/qa-hub-16-rest-task-api/**'
+      - 'tests/qa-node-04-codex-app-server-reply-routing/**'
+      - 'tests/test599-skillhub/**'
+      - 'tests/test600-public-skillhub/**'
+      - 'tests/test659-codex-appserver-activity-timeout/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
       - 'agent-node/src/cli.ts'
@@ -140,6 +146,12 @@ on:
       - 'tests/test671-task-runtime-evidence-hub/**'
       - 'tests/test688-owner-gated-schedule-hub/**'
       - 'tests/test629-mcp-schema-policy/**'
+      - 'tests/qa-anet-daemon-cmd/**'
+      - 'tests/qa-hub-16-rest-task-api/**'
+      - 'tests/qa-node-04-codex-app-server-reply-routing/**'
+      - 'tests/test599-skillhub/**'
+      - 'tests/test600-public-skillhub/**'
+      - 'tests/test659-codex-appserver-activity-timeout/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
       - 'agent-node/src/cli.ts'
@@ -656,6 +668,12 @@ jobs:
           - test671-task-runtime-evidence-hub
           - test688-owner-gated-schedule-hub
           - test629-mcp-schema-policy
+          - qa-anet-daemon-cmd
+          - qa-hub-16-rest-task-api
+          - qa-node-04-codex-app-server-reply-routing
+          - test599-skillhub
+          - test600-public-skillhub
+          - test659-codex-appserver-activity-timeout
     steps:
       - uses: actions/checkout@v4
 

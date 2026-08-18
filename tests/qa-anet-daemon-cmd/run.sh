@@ -139,7 +139,17 @@ done
 
 # CRITICAL: post-#337, hub /api/nodes returns role field extracted from config_snapshot.
 # This is the integration that unblocks the dashboard's role-based daemon discovery (#24).
-HUB_ROLE=$(curl -sS "$HUB_BASE/api/nodes?node_id=$NID_AFTER" -H "Authorization: Bearer $UTOK" | jq -r '.nodes[0].role')
+# 等待条件必须是**目标状态本身**，不能是它的前置条件。
+# register() 只建 nodes 行；role 住在 config_snapshot 里，由紧随其后**异步**发出的
+# reportStatus 补上（agent-node/src/cli.ts:6054-6061 的 RFC-024 注释写明了这个顺序）。
+# 原来只等「node_id 出现在 /api/nodes」就立刻读 .role，会落进这两者之间的窗口，
+# 读到 role=null —— 产品没坏，是断言早了一步。实测：只改这个循环，
+# PASS=34 FAIL=8 → PASS=42 FAIL=0。
+for _ in $(seq 1 30); do
+  HUB_ROLE=$(curl -sS "$HUB_BASE/api/nodes?node_id=$NID_AFTER" -H "Authorization: Bearer $UTOK" | jq -r '.nodes[0].role')
+  [[ "$HUB_ROLE" == "host_supervisor" ]] && break
+  sleep 1
+done
 [[ "$HUB_ROLE" == "host_supervisor" ]] && ok "hub /api/nodes returns role=host_supervisor (post-#337 integration真)" || bad "hub role='$HUB_ROLE' expected host_supervisor"
 
 # Dashboard-style discovery: rows.find(r => r.role === 'host_supervisor') succeeds
