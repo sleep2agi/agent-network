@@ -57,6 +57,7 @@ on:
       - 'tests/test225-grok-preview-package-live/**'
       - 'tests/test233-grok-main-integration/**'
       - 'tests/test234-grok-profile-disclosure/**'
+      - 'tests/test235-grok-mcp-outbound-only/**'
   push:
     branches: [main]
     paths:
@@ -104,6 +105,7 @@ on:
       - 'tests/test225-grok-preview-package-live/**'
       - 'tests/test233-grok-main-integration/**'
       - 'tests/test234-grok-profile-disclosure/**'
+      - 'tests/test235-grok-mcp-outbound-only/**'
 
 # Older runs on the same ref get cancelled — saves minutes when a PR is
 # updated rapidly. main pushes run independently.
@@ -461,3 +463,17 @@ jobs:
             -f tests/test234-grok-profile-disclosure/Dockerfile .
           docker run --rm --network none -e ARTIFACT_DIR=/tmp/art \
             anet-test234-grok-profile-disclosure
+
+      # 这个套件此前基线是**红**的，红在相对 import 够不着 agent-network
+      # （容器把它拷到 /test235，而 `../../` 从那里解析成 `/`）。
+      # 本 PR 把容器布局改成与仓库同构之后它是真绿的：
+      #   Summary: PASS (real MCP child; zero long-lived Hub sockets; 40/40 outer ownership; 12 outbound calls; mutation red)
+      # 自带一条见证红：PASS: witnessed-red outbound-only mutation rc=1
+      # `--network none` 同样是**实测过**的那条命令。
+      - name: Build + run test235-grok-mcp-outbound-only
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-test235-grok-mcp-outbound-only \
+            -f tests/test235-grok-mcp-outbound-only/Dockerfile .
+          docker run --rm --network none -e ARTIFACT_DIR=/tmp/art \
+            anet-test235-grok-mcp-outbound-only
