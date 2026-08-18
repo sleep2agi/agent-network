@@ -98,7 +98,7 @@ sessions from networks they may access (or an empty object when they belong to
 none).
 
 ::: tip The `license` field is a v0.6 legacy
-`license: "trial"` is a leftover from the v0.6 era 14-day trial mechanism. After the Apache 2.0 OSS transition it is **no longer a commercial feature gate** (self-hosted has no notion of "expired"). The `send_task` path still runs the trial check only for backward compatibility (verify [`server/src/tools.ts:521`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L521) where `license_expired` is still emitted); if you hit it, see [troubleshooting](/en/troubleshooting). **The v0.9.x and v0.10.x scopes did not touch this** (Recovery & Observability took priority); full removal is queued for v0.11+ / unscheduled.
+`license: "trial"` is a leftover from the v0.6 era 14-day trial mechanism. After the Apache 2.0 OSS transition it is **no longer a commercial feature gate** (self-hosted has no notion of "expired"). The `send_task` path still runs the trial check only for backward compatibility (verify [`server/src/tools.ts:521`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) where `license_expired` is still emitted); if you hit it, see [troubleshooting](/en/troubleshooting). **The v0.9.x and v0.10.x scopes did not touch this** (Recovery & Observability took priority); full removal is queued for v0.11+ / unscheduled.
 :::
 
 ---
@@ -442,7 +442,8 @@ curl -X POST http://localhost:9200/api/networks \
 | Status | `error` value | Trigger |
 |------|------------|---------|
 | 400 | `network name already exists` | Same owner already has a network with this name (`UNIQUE(owner_id, network_name)` constraint) |
-| 400 | `quota exceeded: max N networks for free plan` | Plan quota gate ([`auth.ts:184-189`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L184); admins are exempt; free plan default `max_networks_owned = 2`). Note this gate **is** enforced, unlike the `max_members` column, which is dormant |
+| 400 | `quota exceeded: max N networks for free plan` | **What actually rejects a network creation is the plan quota** — enforced in [`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) `createNetwork()` (the old `L184-189` pin has drifted onto token-issuing code, so this now pins the function name; admins are exempt; free plan default `max_networks_owned = 2`). Note this gate **is** enforced, unlike the `max_members` column, which is dormant.
+⚠️ Do not confuse it with the `limits` block from `/api/license` (trial defaults `max_agents=5` / `max_networks=3` / `max_tasks_day=500`): those are **soft limits** — the server only stores and returns them and enforces nothing (the CLI prints them as `Soft limits`). The two `networks` numbers even differ (3 vs 2); the plan quota is the one that applies |
 | 401 | `token required` / `invalid token` | Missing / invalid utok_ |
 
 ---
@@ -1532,10 +1533,10 @@ curl -N "http://localhost:9200/events/coder-1?token=ntok_xxx"
 | `new_message` | New chat message (`send_message`) | `{from, message_id}` |
 | `new_reply` | Reply to a task (`send_reply`) | `{from, message_id, in_reply_to, status}` |
 | `broadcast` | Broadcast received (`broadcast` tool) | `{inbox_count}` |
-| `chained_reply` | Sub-task completion routed back to the parent task's originator ([`tools.ts:286/646`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L286)) | `{parent_task_id, child_task_id, child_alias}` |
+| `chained_reply` | Sub-task completion routed back to the parent task's originator ([`tools.ts:286/646`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts)) | `{parent_task_id, child_task_id, child_alias}` |
 | `node.renamed` | Broadcast on RFC-010 node-rename COMMIT ([`rename.ts:100-123`](https://github.com/sleep2agi/agent-network/blob/main/server/src/rename.ts#L100)); pushed to the old + new alias streams **plus every network member's user channel** (the dashboard subscribes to `/events/<username>`, not per-alias streams — #84 SSE channel fix) | `{txn_id, alias(=new_alias), network_id, data:{old_alias, new_alias, surfaces_updated[], history_policy:"preserve"}}` |
 
-> Earlier docs claimed `new_message` carried a `message` field and `broadcast` carried `{content, from}` — neither is correct. Verify [`tools.ts:571 + 911`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L571) for the actual payloads. Note: `new_task` / `new_message` additionally carry a `renamed_from` field (the old alias) when the target alias was just renamed — the `canonical.renamed` branch in `tools.ts`.
+> Earlier docs claimed `new_message` carried a `message` field and `broadcast` carried `{content, from}` — neither is correct. Verify [`tools.ts:571 + 911`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) for the actual payloads. Note: `new_task` / `new_message` additionally carry a `renamed_from` field (the old alias) when the target alias was just renamed — the `canonical.renamed` branch in `tools.ts`.
 >
 > **Correction**: the table previously listed a `heartbeat` event with `{time}` payload. No such JSON event is emitted. [`push.ts:38-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L38) sends an SSE **comment line** `: keepalive\n\n` every 30s purely to defeat proxy/LB idle timeouts — comments are NOT delivered to `EventSource.onmessage` / `addEventListener` and carry no payload. The real once-per-connection initial event is `connected` (agent-node handles it explicitly at [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)).
 
@@ -2130,7 +2131,7 @@ curl http://localhost:9200/api/license
 {
   "ok": true,
   "license": { "type": "trial", "expires_at": "2026-04-25 12:00:00", "days_left": 12, "expired": false },
-  "limits": { "max_agents": 5, "max_networks": 1, "max_tasks_day": 100 }
+  "limits": { "max_agents": 5, "max_networks": 3, "max_tasks_day": 500 }
 }
 ```
 

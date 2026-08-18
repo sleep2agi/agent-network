@@ -9,17 +9,17 @@ python=Python 3.12.13
 [L0] denominator
   listing_mode=walk
   scanned_doc_files=106
-  pin_occurrences=35
+  pin_occurrences=28
   pins_on_immutable_ref=0
   pin_doc_pairs=35
-  unique_pins=15
+  unique_pins=11
   broken_pins=5
   baseline_entries=5
   
   OK: 失效 pin 5 个,基线 5 条 —— 没有新增,也没有该清的残留。
   注意:这只说明已知失效的那批没变多。它抓不到「锚点指着一行正常代码、
   只是不是声称的那一行」—— 实测召回率 5/10,详见本文件头部。
-  OK  walk 路径与 git 路径给出同一份清单(106 文件 / 15 唯一 pin / 35 处)
+  OK  walk 路径与 git 路径给出同一份清单(106 文件 / 11 唯一 pin / 28 处)
 [L1] clean tree passes
   OK rc=0  broken_pins=5(全部在基线里)
 [L2] witnessed-red: a NEW broken pin must turn it red

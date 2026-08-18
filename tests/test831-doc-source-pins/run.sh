@@ -72,10 +72,23 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 # 正好 3 条,18 - 3 = 15。`occ` 仍是 35(钉提交不减少"出现次数",只改变引用形式),
 # `files` 仍是 106 —— **只有一个数变了,而且变的原因能逐条指出来**。这正是这道
 # 断言想逼出来的动作:数字变了要有人说清是进展还是扫漏,而不是把它改宽。
+#
+# 2026-08-18(第二次):15 → 11,35 → 28。#810 把 docs-site 中英两版 api/rest.md 里
+# 4 个唯一 pin 的 `#L` 锚点去掉了(链接保留,只是不再钉行号),逐条数得出来:
+#
+#     server/src/tools.ts#L521   ×2(中/英)
+#     server/src/tools.ts#L571   ×2
+#     server/src/tools.ts#L286   ×2
+#     server/src/auth.ts#L184    ×1
+#     ─────────────────────────────
+#     唯一 4 个,出现 7 处
+#
+# 15 − 4 = 11,35 − 7 = 28,`files` 仍 106。**加回来的锚点数是 0**(diff 的 `+` 侧
+# 一个 `#L` 都没有),所以这是净减少,不是"挪了个位置"。
 [[ "$files" -eq 106 ]] || fail "预期扫 106 个文档文件(= git ls-files 的结果),实际 $files"
-[[ "$uniq"  -eq 15  ]] || fail "预期 15 个唯一 pin,实际 $uniq"
-[[ "$occ"   -eq 35 ]] || fail "预期 35 处原始出现,实际 $occ"
-echo "  OK  walk 路径与 git 路径给出同一份清单(106 文件 / 15 唯一 pin / 35 处)"
+[[ "$uniq"  -eq 11  ]] || fail "预期 11 个唯一 pin,实际 $uniq"
+[[ "$occ"   -eq 28 ]] || fail "预期 28 处原始出现,实际 $occ"
+echo "  OK  walk 路径与 git 路径给出同一份清单(106 文件 / 11 唯一 pin / 28 处)"
 
 # ---------------------------------------------------------------------------
 # L1 — 干净树上必须绿
@@ -304,7 +317,10 @@ cmp -s "$BASELINE" /tmp/bl7.bak || fail "② 它拒绝了,却还是把基线写�
 echo "  MUTATION_RED write-baseline-refuses-new-failure rc=$rc12"
 
 # ③ 引用消失时要删对,并保留表头注释
-BL_BEFORE=$(grep -cv '^\s*#\|^\s*$' "$BASELINE")
+# 🔴 `grep -c` 在计数为 0 时退出码是 1,而这一段 set -e 是开着的
+# ⇒ `VAR=$(grep -c …)` 会**静默**终止整个脚本(没有任何 FAIL 输出)。
+# 而计数为 0 恰恰是这道门**清干净了**才会出现的状态 —— 又一次「门赢了自己就坏」。
+BL_BEFORE=$(grep -cv '^\s*#\|^\s*$' "$BASELINE" || true)
 # 🔴 造场景用的 SHA 必须是**仓里不可能出现的**合成值,不能借用一个真实提交。
 #    原来这里用 22ed1886 —— 而 #834 之后 changelog 里**真的**有
 #    `blob/22ed1886/server/src/index.ts#L253`,于是下面的复原(全局把
@@ -333,7 +349,7 @@ print(f"    (造场景:把 {target} 的 {n} 处引用改钉合成 SHA,涉及 {le
 PYX
 out13=$(python3 "$CHECK" "$ROOT" --write-baseline) || fail "③ 有该删的条目时 --write-baseline 却非零"
 printf '%s' "$out13" | grep -qF "已改写基线" || fail "③ 没报告改写"
-BL_AFTER=$(grep -cv '^\s*#\|^\s*$' "$BASELINE")
+BL_AFTER=$(grep -cv '^\s*#\|^\s*$' "$BASELINE" || true)
 [[ "$BL_AFTER" -lt "$BL_BEFORE" ]] || fail "③ 基线没有变小($BL_BEFORE → $BL_AFTER)"
 head -1 "$BASELINE" | grep -q '^#' || fail "③ 改写把表头注释弄丢了"
 python3 "$CHECK" "$ROOT" >/dev/null || fail "③ 改写之后门没有转绿"
