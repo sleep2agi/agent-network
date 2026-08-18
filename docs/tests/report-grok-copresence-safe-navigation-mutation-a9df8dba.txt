@@ -1,0 +1,40 @@
+# Grok co-presence safe composer navigation — witnessed red
+
+source_commit=a9df8dba21683324ed9127a15331914aeb3eea36
+image_id=sha256:ccb2d39104cda9ba9c6ee38aa372e0a98e2bff86de90bbe6abd73de6bbbc84a0
+baseline_report=docs/tests/report-grok-copresence-safe-navigation-a9df8dba.txt
+baseline_report_sha256=f706715a7e9f3f7f39cf5fc166aab5fd8d67f2577691c3a17f50e1d61f188b1f
+
+Baseline, inside Docker:
+
+  Summary: PASS (304 tests, 0 failures; all validation ran inside Docker)
+
+Mutation, applied only inside an ephemeral container made from the exact image:
+
+  return this.humanComposerLeadingSlash || this.humanComposerAuditUnsafe;
+
+was changed back to the prior behavior:
+
+  return this.humanComposerLeadingSlash || this.humanComposerAuditTainted;
+
+The mutation recreates the product regression in which a safe Left-arrow edit
+taints the composer and Enter silently refuses the human turn. The complete
+runtime test file produced this attributable failure:
+
+  error: condition not met within 3000ms
+  at runtime.test.ts:1377
+  (fail) Grok copresence runtime integration > arbitrates a live PTY,
+    settles final JSONL, attaches once, and resumes
+
+Aggregate:
+
+  52 pass
+  1 fail
+  418 expect() calls
+  Ran 53 tests across 1 file.
+
+MUTATION_RED safe-navigation-submit-regressed
+
+The mutation changed product source, not test source. The failing assertion is
+the named behavior that types `AC`, sends Left, inserts `B`, submits, and waits
+for the runtime-owned PTY to record `ABC` as a human prompt.

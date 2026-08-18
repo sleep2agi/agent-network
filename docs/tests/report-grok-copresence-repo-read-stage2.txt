@@ -1,0 +1,124 @@
+# Grok TUI co-presence repo-read stage-2 evidence
+
+Date: 2026-08-13 (Asia/Shanghai)
+
+## Provenance
+
+source_commit=449683586a5a2ba44e99eb8c595be25d7467c967
+base_commit=8186b79de8e2f904c28bec268d93a523503a6845
+tree=21cd907323b374f2df6c722d314c05597ea0c093
+unit_image_id=sha256:d46c3dc573bba4e282750df6877fc893e490cc5d2fdfeab5c2de2e0c246dae53
+readiness_image_id=sha256:459b3239eae27afb6aa6a4cac7375f45c10c2df223083352187c92ca820cd60f
+unit_image_tag=anet-grok-repo-read:44968358
+readiness_image_tag=anet-test813-readiness:44968358
+
+Both images were built from `git archive` of the exact source commit with
+`SOURCE_COMMIT` set to the same value. Seventeen source/fixture files present
+in the two images were copied back out and compared with Git: `17/17 MATCH`.
+No live node, package, production database, or production configuration was
+changed.
+
+## Intended boundary
+
+The new profile is admitted only for the exact configured tool vector:
+
+    ["Read", "Grep", "Glob"]
+
+It maps once at process startup to the `repo-read` capability and a generated
+Grok custom strict sandbox. The model-visible tools are exactly:
+
+    todo_write search_tool use_tool read_file grep list_dir
+
+There is no shell, file-write, web, media, or subagent tool in this profile.
+Reordered, missing, additional, whitespace-mutated, or otherwise near-match
+configuration vectors fail closed. Resume cannot widen an existing process;
+enabling repo-read requires a fresh Grok session.
+
+The restack deliberately preserves the #813 command/readiness boundary. The
+CommHub MCP executable is resolved to one canonical executable before runtime
+home staging, staged unchanged into the strict profile's read-only set, and
+must pass the four-tool doctor before TUI readiness.
+
+## Exact-source Docker verification
+
+Complete agent-node unit domain, non-root, Bun 1.3.14:
+
+    1284 pass
+    0 fail
+    4406 expect() calls
+    Ran 1284 tests across 91 files. [117.66s]
+    MUTATION_RED readable-attachment-runtime-disconnected rc=1
+    RESULT: PASS
+
+Targeted repo-read verification in the same exact-source image:
+
+    agent-node targeted: 47 pass / 0 fail / 364 expect
+    agent-node build: PASS
+    agent-network disclosure: 5 pass / 0 fail / 30 expect
+    agent-network tsc --noEmit: PASS
+
+The exact-source #813 readiness/product path also passed after the restack:
+
+    MCP_READINESS_PASS tools=commhub_get_all_status,commhub_send_message,commhub_send_task,commhub_upload_file
+    MUTATION_RED upload-tool-removed
+    MUTATION_RED stale-three-tool-doctor
+    PRODUCT_PATH_NEGATIVE_PASS registration=absent session=unchanged
+    PRODUCT_PATH_RECOVERY_PASS session=preserved
+    MUTATION_RED doctor-three-tools-product-path-before-tui
+    MUTATION_RED bun-resolver-bypassed
+    PRODUCT_PATH_NEGATIVE_PASS registration=absent session=unchanged
+    PRODUCT_PATH_RECOVERY_PASS session=preserved
+    RESULT: PASS source_commit=449683586a5a2ba44e99eb8c595be25d7467c967
+
+## Named witnessed-red mutation
+
+The selector mutation changes only the production repo-read result from the
+strict profile to the workspace profile. Baseline runs first; the mutation
+target and replacement are exact. The same exact-source image then emits:
+
+    2 pass
+    1 fail
+    Expected: "anet-strict"
+    Received: "anet-workspace"
+    MUTATION_RED repo-read-selector-strict-to-workspace rc=1
+
+This proves the test carries the strict-selection behavior rather than merely
+observing a non-zero mutation exit.
+
+## Restack correction
+
+The superseded source `8929fc28` resolved a bare `bun` again inside MCP staging.
+That overlapped the later #813 fix, which resolves and validates the executable
+before staging and passes the absolute command through the runtime boundary.
+This source keeps the #813 design and removes the older internal resolver while
+retaining repo-read's strict sandbox and read-only dependency grants. The old
+report is not evidence for this source.
+
+## Run log digests
+
+    unit build       f21e495e0841c1c52e931bc645bdafe0d3c0d1e043dfcd1781293db83714a527
+    unit run         24621f6a97145424501a78cedadde4a9de6376d9e3527cd0cf68a092d3ee6d4c
+    targeted run     5c64460b8081fbb766e0eb2fd79d33891565e13e8e73dae81413e7ddb591ccf3
+    selector mutant  7348b1a1aaf6e2b85d580eeaa3a59375abe2c74efbe714a55fe65e47023abe9d
+    readiness build  5b4468efd82d54f6b209c7a9d6d369f41eef41353d1df41821cfe72cc48abb8f
+    readiness run    535aedcce1ed1b521e80e7fa36c735591545c99294f94b983e842022d4fa7d22
+
+The logs contain timing and Docker progress, so their digests are run records,
+not byte-reproducible anchors. Git coordinates, image IDs, and `17/17 MATCH`
+are the reproducible provenance.
+
+## Honest limits / rollout gate
+
+- NOT COVERED: the earlier real pinned-Grok sandbox observations belong to
+  source `8929fc28`; they are not claimed as evidence for this restacked source.
+- NOT COVERED: a live Dashboard-origin task proving repository read plus a
+  CommHub reply in the same TUI session.
+- NOT COVERED: independent adversarial review of this source/report pair.
+- NOT COVERED: non-Linux and multi-architecture execution; Linux is the current
+  deployment target.
+- The live `通信狗` remains on its validated `x-search` profile. It was not
+  restarted or upgraded by this work.
+- No rollout is authorized by this report. A pilot still requires backup and
+  rollback coordinates, a fresh Grok session, observed `ProfileApplied` with
+  `enforced=true`, exact tool inventory, inside/outside/credential behavioral
+  probes, and a real CommHub round trip before deeper participation.

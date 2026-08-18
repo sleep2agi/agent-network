@@ -27,9 +27,9 @@ import { GROK_COPRESENCE_EFFECTIVE_TOOLS } from "./policy";
 function validResolutionFor(tool: string) {
   return {
     requestTool: tool,
-    activeRequestId: `tool:${tool}`,
+    pendingRequestCount: 1,
     humanDecisionDispatched: false,
-    waitingHuman: true,
+    waitingHuman: false,
     turnOwner: "network" as const,
     terminalEventSeen: false,
     event: {

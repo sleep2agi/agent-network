@@ -1,12 +1,12 @@
 export type GrokCopresenceSessionDisclosure = "configured" | "new" | "resume";
 
 export type GrokCopresenceDisclosure = {
-  profile: "commhub-only" | "x-search" | "invalid";
+  profile: "commhub-only" | "x-search" | "repo-read" | "invalid";
   lines: readonly string[];
 };
 
 /**
- * Describe only the two exact tool profiles accepted by the pinned Grok TUI
+ * Describe only the exact tool profiles accepted by the pinned Grok TUI
  * runtime. This is deliberately exact: a near-miss must never be presented as
  * either reviewed capability set.
  */
@@ -16,6 +16,10 @@ export function grokCopresenceDisclosure(
 ): GrokCopresenceDisclosure {
   const configured = Array.isArray(tools) ? tools : [];
   const xSearch = configured.length === 1 && configured[0] === "WebSearch";
+  const repoRead = configured.length === 3
+    && configured[0] === "Read"
+    && configured[1] === "Grep"
+    && configured[2] === "Glob";
   const defaultProfile = configured.length === 0;
 
   const lines: string[] = [];
@@ -24,6 +28,10 @@ export function grokCopresenceDisclosure(
     profile = "x-search";
     lines.push("Configured profile: x-search; fixed tools: [todo_write,search_tool,use_tool,web_search].");
     lines.push("General web_search is enabled; WebFetch, filesystem, shell, media, project/host MCP, and subagents remain unavailable.");
+  } else if (repoRead) {
+    profile = "repo-read";
+    lines.push("Configured profile: repo-read; fixed tools: [todo_write,search_tool,use_tool,read_file,grep,list_dir].");
+    lines.push("Read-only filesystem access uses Grok's strict sandbox (project tree plus essential system paths); protected credential paths, shell, writes, web/media, and subagents remain unavailable.");
   } else if (defaultProfile) {
     profile = "commhub-only";
     lines.push("Configured profile: commhub-only; fixed tools: [todo_write,search_tool,use_tool].");
@@ -31,7 +39,7 @@ export function grokCopresenceDisclosure(
   } else {
     profile = "invalid";
     lines.push("Configured tools do not match a supported exact Grok co-presence profile; startup will fail closed.");
-    lines.push("Supported profiles are [] and [WebSearch]; custom or near-match tool names are not accepted.");
+    lines.push('Supported profiles are [], [WebSearch], and [Read,Grep,Glob]; custom, reordered, or near-match tool names are not accepted.');
   }
 
   if (session === "new") {

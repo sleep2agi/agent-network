@@ -71,6 +71,7 @@ import { resolveGrokAcpTimeout } from "./runtime/grok-build-acp/timeout-resolve"
 import {
   GROK_COPRESENCE_PROFILE_ENV,
   selectGrokCopresenceCapabilityProfile,
+  selectGrokCopresenceSandboxProfile,
 } from "./runtime/grok-copresence/profile-selection";
 import {
   describeGrokCopresenceLiveness,
@@ -575,7 +576,7 @@ if (GROK_COPRESENCE) {
   console.warn(
     `[agent-node] EXPERIMENTAL/DANGEROUS grok-build-cli co-presence is enabled `
     + `(process profile=${GROK_COPRESENCE_CAPABILITY_PROFILE}); the shared human TUI must receive `
-    + "tasks only from trusted senders. MCP is CommHub-only; WebSearch is available only in the explicit x-search profile.",
+    + "tasks only from trusted senders. MCP is CommHub-only; WebSearch and repo reads are available only in their explicit profiles.",
   );
 }
 // Default 50 turns. The old default of 5 was way too low — Claude Agent SDK
@@ -3550,6 +3551,27 @@ let grokCopresenceRuntimeSession: GrokCopresenceSession | null = null;
 let grokCopresenceRuntimeOpening: Promise<GrokCopresenceSession> | null = null;
 let grokCopresenceLocalTaskSequence = 0;
 
+async function retireCachedGrokCopresenceRuntime(): Promise<void> {
+  const stopped = grokCopresenceRuntimeSession;
+  // 🔴 动态 import，和本文件里另外两处 grok-copresence 的取法一致。
+  //    静态 import 会被 ESM 提升 —— 被导入模块的顶层会在 cli.ts 第一条语句之前执行，
+  //    于是 policy.ts 顶层那句 readPinnedGrokCopresenceCapabilityProfile() 读到的是
+  //    **ambient 环境变量**，而不是启动时从节点配置钉下来的档位。
+  //    check-copresence-profile-pin.py 就是守这一条的，它在本分支上报的正是这里。
+  const { retireStoppedGrokCopresenceRuntime } = await import(
+    "./runtime/grok-copresence/runtime-retirement"
+  );
+  await retireStoppedGrokCopresenceRuntime(stopped, {
+    warn: (message) => warn(message),
+    retire: (retired) => {
+      if (grokCopresenceRuntimeSession !== retired) return;
+      grokCopresenceRuntimeSession = null;
+      clearGrokSession("fatal co-presence boundary; next task requires a fresh session");
+      warn("[grok-copresence] retired stopped TUI; next task will open a fresh session");
+    },
+  });
+}
+
 function resolveReportedStatus(status: string): string {
   if (!GROK_COPRESENCE || !isGrokCopresenceHubStatus(status)) return status;
   return resolveGrokCopresenceHubStatus(
@@ -3599,6 +3621,7 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
   if (process.platform !== "linux") {
     throw new Error("grok co-presence preview currently requires Linux PTY, /proc, and Unix sockets");
   }
+  await retireCachedGrokCopresenceRuntime();
   if (grokCopresenceRuntimeSession) return grokCopresenceRuntimeSession;
   if (grokCopresenceRuntimeOpening) return grokCopresenceRuntimeOpening;
 
@@ -3613,7 +3636,7 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
       );
     }
     // The generic tools option is not forwarded. It was already reduced at
-    // process boot to one of two exact profiles; any other value failed before
+    // process boot to one exact runtime-owned profile; any other value failed before
     // the runtime module was loaded.
     if (
       MAX_TURNS_CLI !== undefined
@@ -3634,8 +3657,10 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
     const {
       prepareGrokCliHome,
       assertNoDiscoveredGrokHooks,
+      assertGrokCommhubMcpDoctor,
       grokCliStateKey,
       grokProjectPolicyPaths,
+      resolveGrokCommhubMcpCommand,
     } = await import("./runtime/grok-build-cli-home");
     const {
       assertGrokCopresenceFeatures,
@@ -3667,6 +3692,10 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
     if (leaderSocket === attachSocket) {
       throw new Error("grok leader and attach sockets must use different paths");
     }
+    const commhubMcpCommand = resolveGrokCommhubMcpCommand(
+      process.env.BUN_BIN || "bun",
+      process.env.PATH || "",
+    );
 
     const prepareRuntime = () => {
       const grokCliHome = prepareGrokCliHome({
@@ -3676,6 +3705,7 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
         projectCwd: grokCwd,
         useLeader: true,
         commhubMcp: {
+          command: commhubMcpCommand,
           serverPath: commhubMcpServer,
           envFile: commhubMcpEnv,
           alias: currentAlias(),
@@ -3767,7 +3797,27 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
         );
       }
       assertNoDiscoveredGrokHooks(inspection);
-      assertGrokCopresenceApprovalOwnership(inspection, auditRuntime.grokCliHome.home);
+      assertGrokCopresenceApprovalOwnership(
+        inspection,
+        auditRuntime.grokCliHome.home,
+        commhubMcpCommand,
+      );
+      let doctor: string;
+      try {
+        doctor = execFileSync(grokBinary, ["mcp", "doctor", "commhub", "--json"], {
+          encoding: "utf-8",
+          stdio: ["ignore", "pipe", "pipe"],
+          timeout: 10_000,
+          maxBuffer: 2 * 1024 * 1024,
+          cwd: grokCwd,
+          env: auditRuntime.env,
+        });
+      } catch (error: any) {
+        throw new Error(
+          `grok copresence CommHub MCP readiness preflight failed (${error?.code || error?.status || "doctor error"})`,
+        );
+      }
+      assertGrokCommhubMcpDoctor(doctor);
       // Clear runtime-owned executable state once more after the inspector.
       return prepareRuntime();
     };
@@ -3788,9 +3838,15 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
       alias: currentAlias(),
       model: MODEL || undefined,
       agentProfile: grokCliHome.copresenceAgentProfile,
-      // The runtime always approves its fixed three-tool profile. Filesystem,
-      // shell, web, host/project MCP and subagent capabilities remain absent.
-      sandboxProfile: grokCliHome.workspaceProfile,
+      // Repo-read is the only profile with filesystem tools. Pinned 0.2.93
+      // documents workspace as read-everywhere, so repo-read must use the
+      // kernel-enforced strict base (CWD + essential system paths). A resumed
+      // workspace session cannot change sandbox and therefore requires an
+      // explicit new session before repo-read can start.
+      sandboxProfile: selectGrokCopresenceSandboxProfile(
+        GROK_COPRESENCE_CAPABILITY_PROFILE,
+        grokCliHome,
+      ),
       protectedPaths: [
         grokCliHome.home,
         grokCliHome.commhubCredentialDir || "",
@@ -5900,7 +5956,7 @@ if (AUTH_TOKEN) {
 }
 
 // #101 fix: log resolved toolset shape. Co-presence reduces the generic config
-// to one of two runtime-owned process profiles verified for the pinned TUI.
+// to one runtime-owned process profile verified for the pinned TUI.
 const requestedToolsSummary =
   Array.isArray(TOOLS)
     ? (TOOLS.length ? `[${TOOLS.join(",")}]` : "(none)")
@@ -5908,7 +5964,9 @@ const requestedToolsSummary =
 log(`  tools:   ${GROK_COPRESENCE
   ? GROK_COPRESENCE_CAPABILITY_PROFILE === "x-search"
     ? "fixed x-search profile [todo_write,search_tool,use_tool,web_search] (general web; no web-fetch/filesystem/shell/media/subagents)"
-    : "fixed commhub-only profile [todo_write,search_tool,use_tool] (no filesystem/shell/web/media/subagents)"
+    : GROK_COPRESENCE_CAPABILITY_PROFILE === "repo-read"
+      ? "fixed repo-read profile [todo_write,search_tool,use_tool,read_file,grep,list_dir] (strict CWD reads; no shell/write/web/media/subagents)"
+      : "fixed commhub-only profile [todo_write,search_tool,use_tool] (no filesystem/shell/web/media/subagents)"
   : requestedToolsSummary}`);
 log(`  channels:${[
   TELEGRAM_CHANNELS.length ? `telegram(${TELEGRAM_CHANNELS.map(ch => ch.dir).join(",")})` : "",

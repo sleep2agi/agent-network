@@ -57,9 +57,9 @@ describe("Grok copresence launch and injection policy", () => {
   test("keeps the fixed-tool auto-resolution exception exact and limited to active turns", () => {
     const exact = {
       requestTool: "todo_write",
-      activeRequestId: "tool:todo_write",
+      pendingRequestCount: 1,
       humanDecisionDispatched: false,
-      waitingHuman: true,
+      waitingHuman: false,
       turnOwner: "network" as const,
       terminalEventSeen: false,
       event: {
@@ -77,9 +77,9 @@ describe("Grok copresence launch and injection policy", () => {
     })).toBe(true);
     for (const mutation of [
       { ...exact, requestTool: null },
-      { ...exact, activeRequestId: "tool:read_file" },
+      { ...exact, pendingRequestCount: 0 },
       { ...exact, humanDecisionDispatched: true },
-      { ...exact, waitingHuman: false },
+      { ...exact, waitingHuman: true },
       { ...exact, turnOwner: null },
       { ...exact, terminalEventSeen: true },
       { ...exact, event: { ...exact.event, decision: "allow_once" } },
@@ -98,9 +98,9 @@ describe("Grok copresence launch and injection policy", () => {
     for (const tool of ["todo_write", "search_tool", "use_tool"]) {
       const exact = {
         requestTool: tool,
-        activeRequestId: `tool:${tool}`,
+        pendingRequestCount: 1,
         humanDecisionDispatched: false,
-        waitingHuman: true,
+        waitingHuman: false,
         turnOwner: "human" as const,
         terminalEventSeen: false,
         event: {
@@ -121,9 +121,9 @@ describe("Grok copresence launch and injection policy", () => {
     for (const tool of ["read_file", "Bash", "commhub_send_task"]) {
       expect(isGrokPreviewAutomaticResolution({
         requestTool: tool,
-        activeRequestId: `tool:${tool}`,
+        pendingRequestCount: 1,
         humanDecisionDispatched: false,
-        waitingHuman: true,
+        waitingHuman: false,
         turnOwner: "human",
         terminalEventSeen: false,
         event: {
@@ -240,6 +240,18 @@ describe("Grok copresence launch and injection policy", () => {
     expect(args).toContain("--always-approve");
     expect(args).not.toContain("MCPTool");
     const denied = args.flatMap((value, index) => args[index - 1] === "--deny" ? [value] : []);
+    for (const tool of [
+      "run_terminal_command", "run_terminal_cmd", "search_replace", "write_file",
+      "edit_file", "apply_patch", "write", "kill_command_or_subagent",
+      "get_command_or_subagent_output", "wait_commands_or_subagents", "scheduler_create",
+      "scheduler_delete", "scheduler_list", "monitor", "update_goal", "enter_plan_mode",
+      "exit_plan_mode", "ask_user_question", "web_fetch", "http_request", "image_gen",
+      "image_edit", "generate_image", "video_gen", "generate_video", "browser", "computer",
+      "screenshot",
+    ]) expect(denied).toContain(tool);
+    for (const tool of ["read_file", "grep", "list_dir", "web_search"]) {
+      expect(denied).toContain(tool);
+    }
     expect(denied).toContain("Bash");
     expect(denied).toContain("Write");
     expect(denied).toContain("WebFetch");
@@ -328,6 +340,24 @@ describe("Grok copresence launch and injection policy", () => {
     expect(() => assertGrokCopresenceApprovalOwnership(JSON.stringify({
       ...cleanInspection,
     }), home)).not.toThrow();
+    // 🔴 #1016：产品生成的 config.toml 里 command 是 realpath 之后的绝对路径，
+    //    而钉死的 grok 0.2.93 把 target 逐字报成那个 command（2026-08-19 容器内实测）。
+    //    所以审计必须和「产品自己算出来的命令」比，不能和裸 "bun" 比。
+    //    下面第三条是 #1016 那个不一致本身：target 是裸 "bun" 而产品算出的是绝对路径。
+    const absoluteBun = "/opt/anet/bin/bun";
+    const absoluteInspection = {
+      ...cleanInspection,
+      mcpServers: [{ ...cleanInspection.mcpServers[0], target: absoluteBun }],
+    };
+    expect(() => assertGrokCopresenceApprovalOwnership(
+      JSON.stringify(absoluteInspection), home, absoluteBun,
+    )).not.toThrow();
+    expect(() => assertGrokCopresenceApprovalOwnership(
+      JSON.stringify(absoluteInspection), home, "/somewhere/else/bun",
+    )).toThrow("runtime-owned commhub");
+    expect(() => assertGrokCopresenceApprovalOwnership(
+      JSON.stringify(cleanInspection), home, absoluteBun,
+    )).toThrow("runtime-owned commhub");
     expect(() => assertGrokCopresenceApprovalOwnership(JSON.stringify({
       ...cleanInspection,
       permissions: {
@@ -1440,6 +1470,23 @@ describe("Grok copresence runtime integration", () => {
         handshakeTimeoutMs: 500,
       })).rejects.toThrow("already attached");
 
+      input.write("/model\r");
+      await waitFor(() => runtime!.state.phase === "idle");
+      const afterBlockedSlash = await runtime.submit({
+        taskId: "network-after-blocked-slash",
+        from: "dashboard",
+        text: "after blocked slash",
+        timeoutMs: 4_000,
+      });
+      expect(afterBlockedSlash.replyText).toBe("FINAL network-after-blocked-slash");
+      expect(fixture.humanPrompts).not.toContain("/model");
+
+      input.write("AC");
+      await waitFor(() => runtime!.state.phase === "human_editing");
+      input.write("\x1b[D");
+      input.write("B\r");
+      await waitFor(() => fixture.humanPrompts.includes("ABC"));
+
       input.write("\x0f");
       input.write("\x1b[Z");
       input.write("\x1b[111;5u");
@@ -1470,7 +1517,7 @@ describe("Grok copresence runtime integration", () => {
       await waitFor(() => fixture.humanPrompts.includes("queued"));
       input.write("lf-human\n");
       await waitFor(() => fixture.humanPrompts.includes("lf-human"));
-      expect(fixture.humanPrompts).toEqual(["first\rsecond", "queued", "lf-human"]);
+      expect(fixture.humanPrompts).toEqual(["ABC", "first\rsecond", "queued", "lf-human"]);
 
       const approvalPromise = runtime.submit({
         taskId: "approval-1",
@@ -1720,7 +1767,9 @@ describe("Grok copresence runtime integration", () => {
           from: "reviewer",
           text: `AUTO_RESOLVE_TODO_${mutation}`,
           timeoutMs: 3_000,
-        }), mutation).rejects.toThrow(/permission request|automatically resolved/);
+        }), mutation).rejects.toThrow(
+          /permission request|automatically resolved|unmatched automatic|human approval/,
+        );
         await waitFor(() => !runtime!.isRunning);
       } finally {
         await runtime?.close();
@@ -1815,6 +1864,27 @@ describe("Grok copresence runtime integration", () => {
       expect(result.replyText).toBe("TODO TWICE preview-todo-order-twice");
       expect(runtime.isRunning).toBe(true);
       expect(existsSync(fixture.attachSocket)).toBe(true);
+      expect(fixture.approvalDecisionCount()).toBe(0);
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 8_000);
+
+  test("allows a pinned tool batch whose automatic resolutions are not request ordered", async () => {
+    const fixture = new RuntimeFixture();
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await fixture.open();
+      const result = await runtime.submit({
+        taskId: "preview-batched-order",
+        from: "reviewer",
+        text: "AUTO_RESOLVE_BATCHED",
+        timeoutMs: 3_000,
+      });
+      expect(result.replyText).toBe("BATCHED preview-batched-order");
+      expect(runtime.isRunning).toBe(true);
+      expect(runtime.state.waitingHuman).toBe(false);
       expect(fixture.approvalDecisionCount()).toBe(0);
     } finally {
       await runtime?.close();
@@ -2425,6 +2495,7 @@ class FakePty implements GrokPtyLike {
   private dataListeners: Array<(data: string) => void> = [];
   private exitListeners: Array<(event: { exitCode: number; signal?: number }) => void> = [];
   private composer = "";
+  private composerCursor = 0;
   private paste = false;
   private awaitingApprovalTask = "";
   private lateCrashTask = "";
@@ -2723,6 +2794,36 @@ class FakePty implements GrokPtyLike {
       }, 150);
       return;
     }
+    if (message === "AUTO_RESOLVE_BATCHED") {
+      appendJson(join(this.sessionDir, "chat_history.jsonl"), {
+        type: "user",
+        content: `<user_query>[Agent Network/from=${from}/task=${taskId}] ${message}</user_query>`,
+      });
+      const eventsPath = join(this.sessionDir, "events.jsonl");
+      appendJson(eventsPath, { type: "turn_started", turn_number: 15 });
+      for (const tool_name of ["search_tool", "use_tool", "search_tool"]) {
+        appendJson(eventsPath, {
+          type: "permission_requested",
+          tool_name,
+          ts: `preview-${tool_name}-requested`,
+        });
+      }
+      for (const tool_name of ["search_tool", "search_tool", "use_tool"]) {
+        appendJson(eventsPath, {
+          type: "permission_resolved",
+          tool_name,
+          decision: "allow",
+          ts: `preview-${tool_name}-resolved`,
+          wait_ms: 0,
+        });
+      }
+      appendJson(join(this.sessionDir, "chat_history.jsonl"), {
+        type: "assistant",
+        content: `BATCHED ${taskId}`,
+      });
+      appendJson(eventsPath, { type: "turn_ended", outcome: "completed" });
+      return;
+    }
     if (
       message === "AUTO_RESOLVE_TODO_COALESCED"
       || message === "AUTO_RESOLVE_TODO_FRAGMENTED"
@@ -2837,6 +2938,23 @@ class FakePty implements GrokPtyLike {
                 ts: "preview-todo-requested-duplicate",
               }),
         });
+        if (message.endsWith("_DUPLICATE") && !message.endsWith("CHANGED_DUPLICATE")) {
+          appendJson(join(this.sessionDir, "events.jsonl"), {
+            type: "permission_resolved",
+            tool_name: "todo_write",
+            decision: "allow",
+            ts: "preview-todo-resolved-once",
+            wait_ms: 0,
+          });
+          appendJson(join(this.sessionDir, "chat_history.jsonl"), {
+            type: "assistant",
+            content: "must not complete with one unresolved automatic request",
+          });
+          appendJson(join(this.sessionDir, "events.jsonl"), {
+            type: "turn_ended",
+            outcome: "completed",
+          });
+        }
         return;
       }
       const resolved = message.endsWith("CAMEL_CASE")
@@ -2936,6 +3054,16 @@ class FakePty implements GrokPtyLike {
         index += 6;
         continue;
       }
+      if (!this.paste && data.startsWith("\x1b[D", index)) {
+        this.composerCursor = Math.max(0, this.composerCursor - 1);
+        index += 3;
+        continue;
+      }
+      if (!this.paste && data.startsWith("\x1b[C", index)) {
+        this.composerCursor = Math.min(this.composer.length, this.composerCursor + 1);
+        index += 3;
+        continue;
+      }
       const char = data[index++];
       if (this.awaitingApprovalTask && /^[1-9]$/.test(char)) {
         this.resolveApproval();
@@ -2943,14 +3071,19 @@ class FakePty implements GrokPtyLike {
       }
       if (char === "\x03" && !this.paste) {
         this.composer = "";
+        this.composerCursor = 0;
         continue;
       }
       if ((char !== "\r" && char !== "\n") || this.paste) {
-        this.composer += char;
+        this.composer = this.composer.slice(0, this.composerCursor)
+          + char
+          + this.composer.slice(this.composerCursor);
+        this.composerCursor += char.length;
         continue;
       }
       const submitted = this.composer;
       this.composer = "";
+      this.composerCursor = 0;
       if (this.awaitingApprovalTask) {
         this.resolveApproval();
       } else if (submitted) {

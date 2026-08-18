@@ -4,6 +4,12 @@ import {
   GROK_COPRESENCE_EFFECTIVE_TOOLS,
   renderGrokCopresenceAgentProfile,
 } from "./policy";
+import { selectGrokCopresenceSandboxProfile } from "./profile-selection";
+
+const sandboxProfile = selectGrokCopresenceSandboxProfile(
+  GROK_COPRESENCE_CAPABILITY_PROFILE,
+  { workspaceProfile: "anet-test232-workspace", strictProfile: "anet-test232-strict" },
+);
 
 const args = buildGrokCopresenceArgs({
   cwd: "/workspace/project",
@@ -11,14 +17,14 @@ const args = buildGrokCopresenceArgs({
   resume: false,
   leaderSocket: "/tmp/anet-test232/leader.sock",
   agentProfile: "/runtime/anet-copresence-preview.md",
-  sandboxProfile: "anet-test232-workspace",
+  sandboxProfile,
   protectedPaths: ["/runtime/private"],
 });
 const automaticTool = (tool: string, turnOwner: "human" | "network") => isGrokPreviewAutomaticResolution({
   requestTool: tool,
-  activeRequestId: `tool:${tool}`,
+  pendingRequestCount: 1,
   humanDecisionDispatched: false,
-  waitingHuman: true,
+  waitingHuman: false,
   turnOwner,
   terminalEventSeen: false,
   event: {
@@ -33,14 +39,16 @@ const automaticTool = (tool: string, turnOwner: "human" | "network") => isGrokPr
 process.stdout.write(JSON.stringify({
   profile: GROK_COPRESENCE_CAPABILITY_PROFILE,
   tools: GROK_COPRESENCE_EFFECTIVE_TOOLS,
+  sandboxProfile,
   args,
   renderedProfile: renderGrokCopresenceAgentProfile(),
-  automaticWebSearch: {
-    human: automaticTool("web_search", "human"),
-    network: automaticTool("web_search", "network"),
-  },
-  webSearchNearMisses: [
+  automaticTools: Object.fromEntries(GROK_COPRESENCE_EFFECTIVE_TOOLS.map((tool) => [tool, {
+    human: automaticTool(tool, "human"),
+    network: automaticTool(tool, "network"),
+  }])),
+  toolNearMisses: [
     "web_search2", "WebSearch", " web_search", "web_search ", "web-search",
     "web_search\n", "ｗｅｂ＿ｓｅａｒｃｈ", "not_web_search",
+    "read_file2", "Read", "read-file", " grep", "list_dir ", "list_directory",
   ].map((tool) => [tool, automaticTool(tool, "network")]),
 }) + "\n");
