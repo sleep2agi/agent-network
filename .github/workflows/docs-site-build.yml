@@ -1,0 +1,83 @@
+# docs-site 必须真的构建得出来。
+#
+# 2026-08-18 —— 仓里没有任何 CI 跑过 `vitepress build`。三条工作流的名字里带
+# docs-site,但它们做的是别的事:qa.yml 只是把 `docs-site/**` 列进 paths 触发器,
+# public-script-safety 看 public/ 下的脚本,published-artifact-drift 跑
+# check-docs-site-drift.py(比对已发布产物,不构建)。
+#
+# 也就是说,**唯一会构建这个站点的地方是 Vercel 的部署**。构建失败的第一个知情者
+# 是「线上没更新」,而不是 PR 上的一个红叉。
+#
+# 🔴 这道门抓的主要是死链,而死链检查不是我加的判据 —— 是 VitePress 自带的、
+#    默认开启的(config.ts 没有 ignoreDeadLinks)。实测过它确实会红:
+#
+#      把 docs-site/docs/api/mcp-tools.md 里 `](/troubleshooting)` 改成
+#      `](/definitely-not-a-page-xyz)`:
+#
+#        (!) Found dead link /definitely-not-a-page-xyz in file api/mcp-tools.md
+#        [vitepress] 1 dead link(s) found.
+#        ✗ Build failed in 24.43s        rc=1
+#
+#    改回去之后 rc=0、build complete in 37.45s。**见证红在见证绿之前。**
+#
+# 🔴 顺带一句方法论,因为我今天在这上面栽了一次:我先自己写了个"相对链接是否
+#    存在"的扫描器,它报了 **671 条断链**。真跑 `vitepress build` 是 **0 条**。
+#    我那个判据把 `/concepts/task-lifecycle` 这种**站点绝对路由**当成了文件系统
+#    相对路径 —— 数字不是算错的,是量错了对象。所以这里跑的是产品自己的构建,
+#    不是我重写一遍它的判据。
+#
+# 🔴 起点是绿的,不是积压金丝雀:main 上 build rc=0 / 0 dead links / 95 个页面。
+#    红了就意味着刚刚有东西被改坏。
+#
+# 关于 paths 过滤:刻意不加。`npm run build` 的全部输入都在 docs-site/ 下
+# (prebuild 的 build-public-skillhub.mjs 只读 docs-site/docs/public/skillhub/),
+# 所以按 `docs-site/**` 过滤在**触发**上是正确的 —— 但带 paths 的工作流在分支保护里
+# 做不成 required check(它不触发时会永远停在 "Expected — Waiting for status")。
+# 这道门将来要能被设成必需,所以宁可每个 PR 都跑这两分钟。
+
+name: docs-site build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    # 这个 name 是分支保护里 required check 唯一能写的标识符,必须全仓唯一。
+    name: docs-site-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install (locked)
+        run: npm ci
+        working-directory: docs-site
+
+      # 🔴 顺序不能反。`npm run build` 的 prebuild 会**重新生成** catalog.json,
+      #    生成之后再检查就永远一致 —— 那是一道恒真的门。所以先拿仓里提交的
+      #    那一份对源目录做校验,再让 build 去覆盖它。
+      - name: skillhub catalog is current (before build regenerates it)
+        run: npm run skillhub:check
+        working-directory: docs-site
+
+      - name: vitepress build (dead links are fatal by default)
+        run: npm run build
+        working-directory: docs-site
+
+      # 分母承重:上面那步在 docs/ 被清空时**也会 rc=0** —— 0 个页面、0 条死链,
+      # 打印出来和真绿几乎一样。把「磁盘上有几篇 md」和「渲染出几个 html」绑在一起。
+      - name: rendered-page denominator
+        run: |
+          set -euo pipefail
+          md=$(git ls-files docs-site/docs | grep -c '\.md$')
+          html=$(find docs-site/docs/.vitepress/dist -name '*.html' | wc -l | tr -d ' ')
+          echo "tracked_md=$md rendered_html=$html"
+          FLOOR=80
+          [ "$md" -ge "$FLOOR" ] || { echo "FAIL: only $md tracked .md under docs-site/docs, floor is $FLOOR" >&2; exit 1; }
+          [ "$html" -ge "$md" ] || { echo "FAIL: rendered $html page(s) but $md .md exist — 渲染范围塌了" >&2; exit 1; }
