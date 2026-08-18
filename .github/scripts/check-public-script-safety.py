@@ -40,7 +40,17 @@ PUBLIC_DIR = Path("docs-site/docs/public")
 OURS = ("~/.anet", "~/.commhub", "~/anodes/.anet",
         "~/.npm-global/lib/node_modules/@sleep2agi", "~/.anet-grok")
 
-RM_RF = re.compile(r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*f?\s+(?P<targets>[^\n;&|]+)")
+# 🔴 同一个 `rm -rf` 可以写成好几种样子，而原正则只认小写 r 的短选项。
+#    2026-08-19 实测（在 main 上）：
+#        rm -rf /tmp/x   rm -fr /tmp/x   rm -rvf /tmp/x   rm -r -f /tmp/x   → 命中
+#        rm -Rf /tmp/x                                                       → 🔴 放行
+#        rm --recursive --force /tmp/x                                       → 🔴 放行
+#    `-R` 是 `-r` 的大写形式（POSIX 就有，macOS 文档里用的正是它），不是什么冷僻写法；
+#    长选项同理。这和 TLS 那条的 `curl -fsSLk` 是同一个毛病：**判据认的是某一种拼法，
+#    不是那个命令**。
+RM_RF = re.compile(
+    r"\brm\s+(?:-[a-zA-Z]*[rR][a-zA-Z]*f?|--recursive)\b[^\n;&|]*?\s(?P<targets>[^\n;&|]+)"
+)
 KILL = re.compile(r"\b(pkill|killall)\b(?P<args>[^\n;&|]*)")
 USER_SCOPED = re.compile(r"-u\s+\S")
 # TLS verification is the only thing standing between the reader and a tampered
