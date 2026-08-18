@@ -55,6 +55,16 @@ jobs:
         with:
           node-version: '22'
 
+      # 结构自检,放在 npm ci 之前 —— 它不需要依赖,而且失败得比构建快得多。
+      # 判据只有两条:戳还在(整块被删掉时 exit 2,不许报绿),以及每条戳声明的
+      # 版本号在正文里真的出现过(抓「改了戳没改表格」)。
+      # 「戳等于正在发的那个版本」是 release gate 的 gate 4 在管,不在这里 ——
+      # 文档变假的时刻是发版,不是改文档。
+      - name: getting-started 版本断言戳（结构自检）
+        run: |
+          python3 scripts/check-doc-version-claims.py --selftest
+          python3 scripts/check-doc-version-claims.py
+
       - name: Install (locked)
         run: npm ci
         working-directory: docs-site

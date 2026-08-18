@@ -1,5 +1,13 @@
 # 上手指南（5 步跑通）
 
+<!-- 🔴 下面这两条戳被 scripts/check-doc-version-claims.py 读取,渲染出来看不见。
+     本页有多处**带版本号的行为断言**(某个版本上第一条命令会怎样),它们在发版那一刻
+     同时变假。release gate 会拿正在发的版本和这两条戳比对,不一致就拦下发布并列出
+     每一处需要改的行。改了正文也要改戳,反之亦然 —— 两边不一致时门同样会红。
+     只标"现状"断言;讲历史的版本引用(如 `≤ 2.3.0-preview.37`)故意不标。 -->
+<!-- version-claim: package=agent-network channel=latest version=2.2.21 -->
+<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.39 -->
+
 新用户首次跑通的最小路径——**5 步, 5 分钟**。每步一条命令 + 一句验证。
 
 ::: tip 最快路径（推荐）— 有 Claude 订阅就 0 配置

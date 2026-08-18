@@ -398,9 +398,32 @@ jobs:
 
           echo "✅ Gate 3 — release notes contain both Install + Upgrade for v$GATED_VER ($src)"
 
+  gate-4-doc-version-claims:
+    name: gate 4 — 上手指南里的版本断言
+    needs: build-tarball
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+
+      # getting-started.md 里有一整套**带版本号的行为断言**(某个版本上第一条命令
+      # 会怎样)。它们今天是真的(#952 逐条实跑过),但在发版那一刻同时变假,而且
+      # 是往最糟的方向:新用户会读到「stable 上第一条命令会裸崩」,而那时 stable
+      # 已经修好了。一句劝退用户的假话比一个过期的版本号严重得多。
+      #
+      # 🔴 门挂在这里而不是每个 PR 上,是因为**文档变假的时刻是「有人发了新版本」,
+      #    不是「有人改了文档」**。挂在 PR 上的话,在最需要它的那类动作上永远不响。
+      #    (结构自检 —— 戳存在、戳和正文一致 —— 另外挂在 docs-site-build 上。)
+      - run: python3 scripts/check-doc-version-claims.py --selftest
+      - name: Assert getting-started's version claims match what is being published
+        run: |
+          python3 scripts/check-doc-version-claims.py \
+            --package '${{ needs.build-tarball.outputs.package }}' \
+            --version '${{ needs.build-tarball.outputs.version }}'
+
   verdict:
     name: verdict (aggregate)
-    needs: [gate-1-install-smoke, gate-2-pinned-audit, gate-3-release-notes]
+    needs: [gate-1-install-smoke, gate-2-pinned-audit, gate-3-release-notes, gate-4-doc-version-claims]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -410,10 +433,12 @@ jobs:
           g1='${{ needs.gate-1-install-smoke.result }}'
           g2='${{ needs.gate-2-pinned-audit.result }}'
           g3='${{ needs.gate-3-release-notes.result }}'
+          g4='${{ needs.gate-4-doc-version-claims.result }}'
           echo "Gate 1 (install smoke):  $g1"
           echo "Gate 2 (PINNED audit):   $g2"
           echo "Gate 3 (release notes):  $g3"
-          if [ "$g1" = success ] && [ "$g2" = success ] && [ "$g3" = success ]; then
+          echo "Gate 4 (doc version claims): $g4"
+          if [ "$g1" = success ] && [ "$g2" = success ] && [ "$g3" = success ] && [ "$g4" = success ]; then
             echo "✅ RELEASE GATE CLEAN — safe to npm publish (or promote to @latest)"
           else
             echo "::warning::release gate has at least one failure — review before publishing"
