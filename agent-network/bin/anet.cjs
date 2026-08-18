@@ -28,25 +28,44 @@
 //     而调用只发生在版本检查通过之后。
 //   - 不进 bun build,不进 obfuscator。构建里只 cp 过去。
 
-var REQUIRED = '22.13.0';
+// 🔴 两个阈值，回答两个不同的问题。把它们合成一个，就是我 2026-08-18 犯的错:
+//
+//   PARSE_FLOOR = 16.0.0   「这个 Node 能不能**加载**入口?」
+//       低于它，dist/bin/cli.js 的第一行 `import{createRequire}from'node:module'`
+//       连解析都过不去(ESM 语句需要 Node>=12;`node:` 前缀需要 >=14.18/16)。
+//       这时**必须硬退**，因为再往下没有任何一行自己的代码能跑。
+//
+//   SUPPORTED = 22.13.0    「这个 Node 是不是受支持的版本?」
+//       这是 package.json engines 声明的下限，而产品对它的既有立场是
+//       **警告并继续** —— cli.ts 的 checkNodeVersion() 只在 `anet upgrade` 里
+//       打一行 "Continuing anyway"。
+//
+// 🔴 第一版我用 SUPPORTED 做硬退，直接把 e2e 打红了:CI 镜像跑的是 Node 20
+//    (tests/Dockerfile 里 setup_20.x)，5 个 suite 当场全灭。
+//    **垫片不该比产品自己的立场更严** —— 它的职责是把「解析不了」这件事讲清楚，
+//    不是顺手收紧支持策略。那是另一个决定，要单独做。
+var PARSE_FLOOR = '16.0.0';
+var SUPPORTED = '22.13.0';
 
 function parts(v) {
   var a = String(v).split('.');
   return [parseInt(a[0], 10) || 0, parseInt(a[1], 10) || 0, parseInt(a[2], 10) || 0];
 }
 
-var cur = parts(process.versions.node);
-var req = parts(REQUIRED);
-var ok = cur[0] > req[0]
-  || (cur[0] === req[0] && cur[1] > req[1])
-  || (cur[0] === req[0] && cur[1] === req[1] && cur[2] >= req[2]);
+function gte(a, b) {
+  return a[0] > b[0]
+    || (a[0] === b[0] && a[1] > b[1])
+    || (a[0] === b[0] && a[1] === b[1] && a[2] >= b[2]);
+}
 
-if (!ok) {
+var cur = parts(process.versions.node);
+
+if (!gte(cur, parts(PARSE_FLOOR))) {
   console.error('');
-  console.error('  ❌ anet 需要 Node >= ' + REQUIRED + '，当前是 Node ' + process.versions.node + '。');
+  console.error('  \u274c anet 无法在 Node ' + process.versions.node + ' 上启动。');
   console.error('');
-  console.error('     这不是 anet 的 bug —— 它的入口是 ESM，你这个版本的 Node 连解析都做不到，');
-  console.error('     所以你会看到一屏代码加一句 SyntaxError，而真因是版本。');
+  console.error('     它的入口是 ESM，而这个版本的 Node 连解析都做不到 —— 没有垫片的话，');
+  console.error('     你看到的会是一屏代码加一句 SyntaxError，而真因是版本。');
   console.error('');
   console.error('     升级 Node（任选其一）:');
   console.error('       nvm install 22 && nvm use 22');
@@ -55,6 +74,12 @@ if (!ok) {
   console.error('     然后: node -v && anet -v');
   console.error('');
   process.exit(1);
+}
+
+if (!gte(cur, parts(SUPPORTED))) {
+  // 警告不退出 —— 与 cli.ts 的既有立场一致。走 stderr，不污染任何解析 stdout 的调用方。
+  console.error('[anet] \u26a0 Node ' + process.versions.node + ' 低于受支持的 >=' + SUPPORTED
+    + '；能跑，但不保证。升级: nvm install ' + SUPPORTED.split('.')[0]);
 }
 
 var path = require('path');
