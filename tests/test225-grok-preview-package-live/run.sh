@@ -120,7 +120,18 @@ node /test225/artifact-report.mjs "$REPORT" \
   || { printf 'FAIL: could not atomically create a private report\n' >&2; exit 1; }
 
 log() { printf '%s\n' "$*" | tee -a "$REPORT"; }
-fail() { log "FAIL: $*"; exit 1; }
+# 🔴 #1026 —— fail() 退出整个套件,于是它下游的判据本次一条都不会跑。
+#    这件事以前在报告里**完全不可见**:报告只说「FAIL: xxx」,读起来像
+#    「其余都查过了」。实测这个套件长期红在第 1954 行 / 共 2482 行 ——
+#    下游 527 行、85 条断言(其中 30 条涉凭据)从未执行,而报告一个字都没提。
+#    ${BASH_LINENO[0]} 是**调用方**的行号(不是 fail 自己的),所以这个数就是
+#    早停的确切位置。这不修 fail-fast 本身,只是让它丢掉的量变成可见的。
+TOTAL_LINES=$(wc -l < "$0")
+fail() {
+  log "FAIL: $*"
+  log "diagnostic: 早停于 run.sh:${BASH_LINENO[0]} / 共 ${TOTAL_LINES} 行 —— 该行之后的判据本次**未执行**,不是通过"
+  exit 1
+}
 pass() { log "PASS: $*"; }
 
 PROJECT_SANDBOX_PLACEHOLDER_NAMES=(.grok .claude .cursor .mcp.json .envrc)
@@ -1935,7 +1946,15 @@ rm -f "$GLOBAL_INSTALL_LOG"
 # forked worker or Grok TUI starts, with a fixed explanation and no channel
 # credential in output.
 FEISHU_DIR=/tmp/test225-feishu-refused
-FEISHU_CONFIG=/tmp/test225-feishu-refused-config.json
+# 🔴 #1020 真因 —— 这份 config 原来直接放在 /tmp 下,于是节点**在走到飞书拒绝之前**
+#    就先拒绝了配置本身:
+#        [agent-node] Refusing unsafe config state: private config parent is not owner-controlled: /tmp
+#    产品那条检查在 agent-node/src/runtime/config-apply.ts:256,只看**直接父目录**
+#    (`const parent = dirname(path)`),判据是 `opened.uid !== uid` ——
+#    /tmp 属 root(0),容器里进程是 node(1000),所以必然不过。**产品是对的。**
+#    本套件其它 config 一直放在 $WORK 下(`CONFIG="$WORK/.anet/nodes/$ALIAS/config.json"`,
+#    $WORK 建出来就 chmod 700),只有这一份是例外。按本文件自己的约定改回去。
+FEISHU_CONFIG="$WORK/test225-feishu-refused-config.json"
 FEISHU_LOG=/tmp/test225-feishu-refused.raw.log
 mkdir -p "$FEISHU_DIR"
 chmod 700 "$FEISHU_DIR"
