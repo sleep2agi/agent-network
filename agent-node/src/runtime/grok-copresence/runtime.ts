@@ -47,6 +47,8 @@ import {
 import {
   assertGrokCopresenceAgentProfile,
   GROK_COPRESENCE_EFFECTIVE_TOOLS,
+  GROK_COPRESENCE_REPO_READ_ENABLED,
+  GROK_COPRESENCE_VENDOR_DENY_TOOLS,
   GROK_COPRESENCE_WEB_SEARCH_ENABLED,
 } from "./policy";
 import {
@@ -419,10 +421,19 @@ export function buildGrokCopresenceArgs(opts: BuildGrokCopresenceArgsOptions): s
   // filesystem/process/web-fetch escape routes remain denied. The explicit
   // x-search process profile may expose general web_search; it is not a
   // domain-restricted network sandbox.
+  for (const tool of GROK_COPRESENCE_VENDOR_DENY_TOOLS) {
+    args.push("--deny", tool);
+  }
+  if (!GROK_COPRESENCE_REPO_READ_ENABLED) {
+    for (const tool of ["read_file", "grep", "list_dir"]) args.push("--deny", tool);
+  }
+  if (!GROK_COPRESENCE_WEB_SEARCH_ENABLED) args.push("--deny", "web_search");
   args.push(
     // The shared process must read its owner-only GROK_AUTH_PATH after its
     // sandbox re-exec. Shell access would bypass path-specific Read/Grep/Edit
     // rules, so the experimental preview gives up terminal tools entirely.
+    // These are compatibility aliases, not translations for the exact
+    // vendor-native names appended above.
     "--deny", "Bash",
     "--deny", "Write",
     "--deny", "WebFetch",

@@ -1,0 +1,126 @@
+# Grok co-presence pinned native-tool boundary — exact-source evidence
+
+Date: 2026-08-13
+Base: 114967626f20c7ef036c3d0e0dab295e1f983a89 (#826 report head)
+Source commit: 433b4af44bdcc09145c75b697634f74aec42a7df
+Image: anet-test830:433b4af4
+Image ID / repo digest: sha256:df3b83526409d21ece60f0a5a12589e0fc0933616af617ea83abd6e1416deb1c
+
+## Live trigger
+
+A prompt-contained review explicitly prohibited tools and pinned Grok 0.2.93 rendered
+`Run No-op; review is prompt-only`. Its `events.jsonl` nevertheless emitted:
+
+```text
+permission_requested tool_name=run_terminal_command
+permission_resolved tool_name=run_terminal_command decision=allow wait_ms=0
+tool_completed tool_name=run_terminal_command outcome=success
+```
+
+The old argv denied only the cross-runtime name `Bash`. The supervisor later failed closed with
+`grok_failure:approval_boundary`, but only after the vendor reported successful terminal execution. The affected
+communication-dog node is intentionally offline until a reviewed build and authorized pilot exist.
+
+## Pinned denominator and policy
+
+The generated Grok agent profile is not the complete native permission boundary: pinned 0.2.93 ignored its
+interactive `tools` inventory. The captured `AvailableCommandsUpdate._meta.tools` denominator is exactly:
+
+```text
+run_terminal_command  read_file  search_replace  list_dir  grep  kill_command_or_subagent
+todo_write  get_command_or_subagent_output  wait_commands_or_subagents
+scheduler_create  scheduler_delete  scheduler_list  monitor  search_tool  use_tool
+update_goal  enter_plan_mode  exit_plan_mode  ask_user_question  web_search  web_fetch
+image_gen  image_edit  video_gen  write
+```
+
+Every captured name is now either explicitly allowed by the selected process profile or explicitly denied at the
+final argv boundary. The three profiles differ intentionally:
+
+```text
+commhub-only: allow todo_write/search_tool/use_tool; deny read_file/grep/list_dir/web_search
+x-search:     additionally allow web_search; deny read_file/grep/list_dir
+repo-read:    additionally allow read_file/grep/list_dir; deny web_search
+```
+
+All 18 captured effectful/control names outside the union of those allowed sets are common denies. Ten additional
+native aliases observed in the pinned binary/repository are preventive denies. `Bash`, `Write`, and `WebFetch`
+remain compatibility aliases and are not treated as translations for vendor lifecycle names.
+
+Only `run_terminal_command` has been observed in a live permission lifecycle. The other entries are preventive
+boundary rules, not claims that every name is reachable.
+
+Changed source files and SHA-256 values:
+
+```text
+e0d51898ffaabbb8bf3b5275a55f97e6a86df3008d36491f9a446966f383ae60  agent-node/src/runtime/grok-copresence/policy.ts
+699371996090a058d9a01c87581dc7dc4dd7bd03072cebb85bee936912028011  agent-node/src/runtime/grok-copresence/runtime.ts
+56a308e12d94bebdf27c19e1eccc08e55096f6e769df35610fd916bb4a7a0704  agent-node/src/runtime/grok-copresence/runtime.test.ts
+ff60c2cdd68cce0e09592dec0594f310200405f7f9c63d58787c10dd52e2483a  agent-node/src/runtime/grok-copresence/profile-process.test.ts
+```
+
+## Docker evidence
+
+The image was built from source commit `433b4af44bdcc09145c75b697634f74aec42a7df` with
+`tests/test725-agent-node-unit-ci/Dockerfile` and pinned Bun 1.3.14.
+
+Full non-root agent-node unit domain:
+
+```text
+1284 pass
+0 fail
+4609 expect() calls
+Ran 1284 tests across 91 files. [115.10s]
+MUTATION_RED readable-attachment-runtime-disconnected rc=1
+RESULT: PASS
+```
+
+Focused zero-mutation control:
+
+```text
+54 pass
+0 fail
+655 expect() calls
+Ran 54 tests across 2 files. [61.63s]
+```
+
+Seven independent mutations ran in fresh containers. Each required a unique production target, a changed file
+hash, a non-zero focused test result, and a failure naming the missing tool:
+
+```text
+MUTATION_RED common:run_terminal_command rc=1
+MUTATION_RED common:write rc=1
+MUTATION_RED common:scheduler_create rc=1
+MUTATION_RED common:web_fetch rc=1
+MUTATION_RED common:image_edit rc=1
+MUTATION_RED profile:read_file rc=1
+MUTATION_RED profile:web_search rc=1
+```
+
+The first five witness terminal, write, scheduler/control, fetch, and media classes in the common deny set. The
+last two witness the profile-specific read/search boundary. A representative profile mutation produced:
+
+```text
+Expected to contain: "read_file"
+0 pass
+52 filtered out
+2 fail
+98 expect() calls
+Ran 2 tests across 2 files. [264.00ms]
+RC=1
+```
+
+An unrelated red, a self-red baseline, or a byte-only no-op did not count.
+
+## Honest limits
+
+- NOT COVERED: a released build has not yet been exercised against the real pinned Grok 0.2.93 vendor after
+  this change. A fresh-session pilot must probe prompt-only review plus terminal, write, scheduler/control,
+  fetch, media, profile-specific read, and profile-specific web-search cases. Denied cases must emit no
+  request/resolution/completion and produce no filesystem/network/scheduler side effect.
+- The Docker evidence proves exact argv construction, captured-inventory coverage, profile separation, and
+  regression sensitivity. It does not prove the vendor honors every deny rule.
+- A future Grok version requires a new exact inventory and witnessed pilot. This list is not claimed complete for
+  any other binary.
+- This delta does not grant repo-read, merge, publish, deploy, DB, secret, or cloud authority. It does not change
+  any production package or node configuration.
