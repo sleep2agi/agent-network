@@ -25,7 +25,7 @@ Erratum 2's "two-tier" split came from R83's trace where the LLM made 17 `run_te
 **Corrective decisions**:
 - ✅ Delete `demos/grok-x-search/fetcher/` + `.env.x.example` — the entire twitterapi.io template
 - ✅ Scenario doc rewritten from "two-tier" to "single native tier + honest boundary + if-you-really-need-faves-integrate-yourself"
-- ✅ RFC-021 §14 banks the lesson: "schema-introspection is necessary but not sufficient"; agent-action E2E is the final gate for capability claims (third occurrence of the same pattern, [[feedback_schema_introspection_not_capability_proof]])
+- ✅ RFC-021 §14 banks the lesson: "schema-introspection is necessary but not sufficient"; agent-action E2E is the final gate for capability claims (third occurrence of the same pattern — schema introspection proves a tool is *declared*, never that invoking it does anything)
 - ❌ **Do not ship any specific third-party X commercial API adapter as the anet default** — users integrate per their needs
 
 ---
