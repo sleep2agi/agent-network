@@ -1950,12 +1950,28 @@ if env -i HOME="$HOME" PATH="$PATH" GROK_BINARY="$FAKE_GROK" \
   > "$FEISHU_LOG" 2>&1; then
   fail "installed candidate accepted an unsupported Feishu channel"
 fi
-grep -Fq 'grok-build-cli preview currently refuses Feishu channels' "$FEISHU_LOG" \
-  || fail "installed candidate Feishu refusal lacked the fixed explanation"
+# 🔴 #1020 —— 顺序:凭据扫描必须排在功能断言**之前**。
+#    原来那句 `grep -Fq ... || fail` 排在两条 scan_fixed_file 前面,而 `fail()` 是
+#    `log "FAIL: $*"; exit 1` —— 一旦那句 grep 不过(它已经红了至少两个 commit),
+#    这两条**安全检查根本不会执行**。也就是说:在唯一一种「拒绝路径没按预期走完」的
+#    现实里,我们恰好放弃了检查它有没有把凭据打进日志。
+#    把安全检查挡在功能检查后面,等于让功能回归顺手关掉安全回归。
 scan_fixed_file /tmp/test225-markers "$FEISHU_LOG" \
   || fail "Feishu refusal output exposed a synthetic credential marker"
 scan_fixed_file /tmp/test225-live-credentials "$FEISHU_LOG" \
   || fail "Feishu refusal output exposed a Hub credential"
+if ! grep -Fq 'grok-build-cli preview currently refuses Feishu channels' "$FEISHU_LOG"; then
+  # 到这里为止,上面两条扫描已经证明这份日志里没有凭据 —— 所以可以安全地把
+  # 产品自己打的那几行原样带出来。只带 `[agent-node] ` 前缀的行:
+  # 它们是产品的错误消息,而拒绝语句之前有 **17 处** process.exit(1),
+  # 「退出码非 0」这半边判据被其中任意一条满足,区分不出是哪一条。
+  # 不带这几行的话,这条 FAIL 只能说明「不是因为飞书被拒而退的」,不能说明因为什么。
+  log "diagnostic: feishu_refusal actual [agent-node] output follows (credential-scanned above)"
+  grep -F '[agent-node] ' "$FEISHU_LOG" | head -5 | while IFS= read -r line; do
+    log "  | $line"
+  done
+  fail "installed candidate Feishu refusal lacked the fixed explanation"
+fi
 [ "$(matching_process_count '/test225/fake-grok.mjs')" -eq 0 ] \
   || fail "Feishu refusal started Grok before closing the channel boundary"
 safe_rm_rf "$FEISHU_DIR" "$FEISHU_CONFIG" "$FEISHU_LOG"
