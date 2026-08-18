@@ -15,6 +15,16 @@ run_suite() {
   local CMD="$2"
   echo "━━━ $NAME ━━━"
   OUTPUT=$(eval "$CMD" 2>&1)
+  # 🔴 退出码必须在这里取:下一条命令就会覆盖 $?。
+  #    2026-08-18:5 个 suite 同时 0 ran，加了输出转储（上一条改动）之后仍然
+    # 看不出死因——它们各自只打印了自己的横幅就没了，没有任何错误行。
+  #    「正常退出但没打 Results」和「被信号打死」在输出上完全一样，
+  #    而这两者的下一步完全不同。退出码是唯一能分开它们的东西：
+  #      0     跑完了但没产出 Results 行（解析/格式问题）
+  #      1-125 脚本自己 exit 的
+  #      127   command not found
+  #      >128  被信号打死（128+N，如 137=SIGKILL、143=SIGTERM）
+  SUITE_RC=$?
   PASS=$(echo "$OUTPUT" | grep -oP '\d+(?= passed)' | tail -1)
   FAIL=$(echo "$OUTPUT" | grep -oP '\d+(?= failed)' | tail -1)
   PASS=${PASS:-0}; FAIL=${FAIL:-0}
@@ -41,7 +51,15 @@ run_suite() {
     printf '%s\n' "$OUTPUT" | head -10 | sed 's/^/  | /'
     echo "  ── suite 自己的输出（后 40 行）──"
     printf '%s\n' "$OUTPUT" | tail -40 | sed 's/^/  | /'
-    echo "  ── 输出共 $(printf '%s\n' "$OUTPUT" | wc -l) 行 ──"
+    echo "  ── 输出共 $(printf '%s\n' "$OUTPUT" | wc -l) 行，退出码 $SUITE_RC ──"
+    if [ "$SUITE_RC" -gt 128 ]; then
+      echo "  🔴 退出码 $SUITE_RC > 128 ⇒ 它是被信号打死的（SIG$((SUITE_RC - 128))），不是自己退的。"
+      echo "     查谁发的信号，而不是查它自己的逻辑。"
+    elif [ "$SUITE_RC" -eq 127 ]; then
+      echo "  🔴 退出码 127 ⇒ command not found。查 PATH / 那个命令装没装上。"
+    elif [ "$SUITE_RC" -eq 0 ]; then
+      echo "  🔴 退出码 0 但没有 Results 行 ⇒ 它跑完了，是产出格式的问题，不是崩溃。"
+    fi
     echo ""
     return
   fi
