@@ -62,6 +62,56 @@ DYNAMIC = re.compile(r'(?<!type )\bimport\(\s*["\'][^"\']*' + GUARDED + r'[^"\']
 TYPE_IMPORT = re.compile(r'\btype\s+\w+\s*=\s*import\(\s*["\'][^"\']*' + GUARDED)
 
 
+# 🔴 传递闭包用的「任意相对 import」——注意它**不带** GUARDED 过滤：
+#    上面那三条只认「cli.ts 直接 import 了 policy/runtime」，而 #1009 实测出的缺口是
+#    **经由第三个模块到达**：`agent-node/src/runtime/grok-build-cli-home.ts:32` 自己
+#    静态 import 了 `./grok-copresence/policy`，所以往 cli.ts 加一条
+#    `import … from "./runtime/grok-build-cli-home"` 会传递地在 hoist 阶段求值
+#    policy.ts 的顶层 —— 而那条 import 的路径里没有 `grok-copresence/`，
+#    于是上面三条一个都不命中，门 rc=0 放行（实测假绿，见 #1009）。
+ANY_STATIC_FROM = re.compile(
+    r'^\s*\}?\s*from\s+["\'](\.[^"\']+)["\']', re.M)
+ANY_STATIC_ONELINE = re.compile(
+    r'^\s*(?:import|export)\b[^;\n]*?\bfrom\s+["\'](\.[^"\']+)["\']', re.M)
+
+
+def resolve_relative(base: Path, spec: str) -> Path | None:
+    """把相对 import 指向的说明符解析成真实文件；解析不到返回 None（不猜）。"""
+    target = base.parent / spec
+    for cand in (target.with_suffix(".ts"), target / "index.ts", target.with_suffix(".tsx")):
+        if cand.is_file():
+            return cand.resolve()
+    return None
+
+
+def static_closure(entry: Path) -> tuple[set[Path], dict[Path, Path]]:
+    """从 entry 出发，只沿**静态** import 边走到底。
+
+    刻意不跟随 `await import(...)` —— 动态 import 正是这道门认可的安全形态，
+    跟随它会把所有合规写法也拖进闭包，判据就失去意义。
+    """
+    seen: set[Path] = set()
+    parent: dict[Path, Path] = {}
+    frontier = [entry.resolve()]
+    while frontier:
+        cur = frontier.pop()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        try:
+            body = cur.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for m in list(ANY_STATIC_FROM.finditer(body)) + list(ANY_STATIC_ONELINE.finditer(body)):
+            nxt = resolve_relative(cur, m.group(1))
+            if nxt is None:
+                continue
+            parent.setdefault(nxt, cur)
+            if nxt not in seen:
+                frontier.append(nxt)
+    return seen, parent
+
+
 def line_of(text: str, index: int) -> int:
     return text.count("\n", 0, index) + 1
 
@@ -103,8 +153,29 @@ def run() -> int:
                   f"happens before the profile pin at line {pin}.")
             problems += 1
 
+    # 🔴 传递闭包：直接 import 之外的第二条路（#1009）。
+    reachable, parent = static_closure(CLI)
+    guarded_re = re.compile(GUARDED + r"\.tsx?$")
+    hit = sorted(pth for pth in reachable if guarded_re.search(str(pth)))
+    for pth in hit:
+        # 把到达路径打出来 —— 只说「有一条路」没法改，得说清是哪一条。
+        chain, cur = [pth], pth
+        while cur in parent and len(chain) < 12:
+            cur = parent[cur]
+            chain.append(cur)
+        arrow = " → ".join(str(c).split("agent-node/src/")[-1] for c in reversed(chain))
+        print(f"::error file={CLI}::静态 import 闭包到达了 {pth.name} —— "
+              f"它的顶层会在 cli.ts 第一条语句之前求值，档位就会从 ambient 环境变量算出来。"
+              f"到达路径：{arrow}。改法：把这条链上第一段换成 `await import(...)`（钉档位之后）。")
+        problems += 1
+
     print(f"pin_line={pin} static_imports={len(static)} dynamic_imports={len(dynamic)} "
-          f"type_imports={len(type_lines)}")
+          f"type_imports={len(type_lines)} closure_files={len(reachable)} closure_hits={len(hit)}")
+    # 分母承重：闭包只有 1 个文件（= 只有 cli.ts 自己）说明相对 import 一条都没解析出来。
+    if len(reachable) < 2:
+        print("::error::静态 import 闭包只解析出 "
+              f"{len(reachable)} 个文件 —— 解析器坏了，不当作通过", file=sys.stderr)
+        return 2
     if not dynamic and not static:
         print("::error::no reference to grok-copresence/policy|runtime found in cli.ts at all — "
               "either the runtime was removed or this gate's pattern stopped matching. "
@@ -147,6 +218,43 @@ def selftest() -> int:
     check("profile-selection 是静态也没关系(它不读 env)",
           f'import {{ a }} from "./runtime/{G}profile-selection";\n{PINLINE}'
           f'await import("./runtime/{G}runtime");\n', True, 0, 0)
+
+    # --- 闭包那一层单独自检（真造目录树，不能只喂一段文本）---
+    # 上面 7 条只验 analyse()，它看的是 cli.ts 一个文件的内容；
+    # 闭包判据要跨文件，所以夹具必须是真文件 —— 用一段字符串喂不出「A import B、
+    # B import C」这个形状。这也是 #1009 那个缺口能存在的原因：单文件视角看不见它。
+    import tempfile
+
+    def check_closure(name, files, want_hit):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            for rel, body in files.items():
+                f = base / rel
+                f.parent.mkdir(parents=True, exist_ok=True)
+                f.write_text(body, encoding="utf-8")
+            reachable, _parent = static_closure(base / "cli.ts")
+            guarded_re = re.compile(GUARDED + r"\.tsx?$")
+            hit = [x for x in reachable if guarded_re.search(str(x))]
+            ok = (len(hit) > 0) == want_hit
+            cases.append((name, ok, f"closure={len(reachable)} hits={len(hit)}"))
+
+    G2 = "runtime/" + G
+    check_closure("🔴 传递静态 import 到达 policy（#1009 的那个形状）", {
+        "cli.ts": 'import { x } from "./runtime/grok-build-cli-home";\n',
+        "runtime/grok-build-cli-home.ts": 'import { P } from "./' + G + 'policy";\nexport const x = 1;\n',
+        G2 + "policy.ts": "export const P = 1;\n",
+    }, True)
+    check_closure("动态 import 不被跟随（这是合规形态）", {
+        "cli.ts": 'const m = await import("./runtime/grok-build-cli-home");\n',
+        "runtime/grok-build-cli-home.ts": 'import { P } from "./' + G + 'policy";\nexport const x = 1;\n',
+        G2 + "policy.ts": "export const P = 1;\n",
+    }, False)
+    check_closure("中间模块只 import 无关文件 → 不该命中", {
+        "cli.ts": 'import { x } from "./runtime/grok-build-cli-home";\n',
+        "runtime/grok-build-cli-home.ts": 'import { y } from "./other";\nexport const x = 1;\n',
+        "runtime/other.ts": "export const y = 1;\n",
+        G2 + "policy.ts": "export const P = 1;\n",
+    }, False)
 
     for name, ok, detail in cases:
         print(f"  {'ok  ' if ok else 'FAIL'} {name}   [{detail}]")
