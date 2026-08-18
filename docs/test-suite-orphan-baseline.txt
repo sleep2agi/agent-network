@@ -94,9 +94,6 @@ test596-goal-loop-docs
 test6-networks
 test608-claude-cli-dependency
 test616-feishu-docker-bootstrap
-test625-explicit-env-crlf
-test632-honest-sse-recovery
-test633-doctor-locale
 test638-server-aggregate-isolation
 test647-rest-explicit-columns
 test648-probe-ip-pin

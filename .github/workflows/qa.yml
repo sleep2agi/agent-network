@@ -100,6 +100,9 @@ on:
       - 'tests/test618-claude-vendor-env/**'
       - 'tests/test621-test384-layer-isolation/**'
       - 'tests/test624-task-cursor-pagination/**'
+      - 'tests/test625-explicit-env-crlf/**'
+      - 'tests/test632-honest-sse-recovery/**'
+      - 'tests/test633-doctor-locale/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
       - 'agent-node/src/cli.ts'
@@ -198,6 +201,9 @@ on:
       - 'tests/test618-claude-vendor-env/**'
       - 'tests/test621-test384-layer-isolation/**'
       - 'tests/test624-task-cursor-pagination/**'
+      - 'tests/test625-explicit-env-crlf/**'
+      - 'tests/test632-honest-sse-recovery/**'
+      - 'tests/test633-doctor-locale/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
       - 'agent-node/src/cli.ts'
@@ -743,6 +749,9 @@ jobs:
           - test618-claude-vendor-env
           - test621-test384-layer-isolation
           - test624-task-cursor-pagination
+          - test625-explicit-env-crlf
+          - test632-honest-sse-recovery
+          - test633-doctor-locale
     steps:
       - uses: actions/checkout@v4
 
