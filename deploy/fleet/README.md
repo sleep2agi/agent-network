@@ -165,3 +165,52 @@ production data restoration remain NOT COVERED.
 `anet-nodes-boot.service` **从未经历过一次真实开机**:机器 `2026-08-17 07:06:39` 起来,
 而已知的那次运行是 `2026-08-18 00:36`,差 17.5 小时。**开机链路(linger + WantedBy=default.target)
 本身是通的,但「开机时它会不会成功」没有观测。**
+
+## 分叉自检:`check-fleet-drift.sh`
+
+收进仓之后风险换了形状但没消失:**跑的是机器上那份,仓里那份是记录。** 有人在机器上改出
+新版本,仓里这份会静默变成过期的记录,而没有任何东西会喊。
+
+```bash
+bash deploy/fleet/check-fleet-drift.sh            # 在部署机上比
+bash deploy/fleet/check-fleet-drift.sh --selftest # 判据自检(4 条)
+```
+
+判据只比**实质**不比**字面**:两边先把 `/home/<user>/` 归一成 `$HOME/`、把写死用户名的
+basename 比较归一掉,再 diff。**一个文件都没比到时 exit 2**,不是 exit 0 —— 「没有分叉」
+和「根本没看」打印出来会长得很像。
+
+### 🔴 它第一次真跑就找到一个真的,而且我猜错了
+
+我预期「全 ok」(仓里那份是我刚从机器上机械移植的)。实际:
+
+```
+checked=4 drift=2 missing=0
+DRIFT anet-nodes-boot.sh   ← 只差我加的 2 行注释,不是逻辑分叉
+DRIFT pm2-fleet-boot.sh    ← 🔴 真的
+```
+
+`pm2-fleet-boot.sh` 的分叉方向是**仓里有保护、机器上没有**:
+
+```
+仓里(b7d1289b · 2026-08-13 · #741 "version PM2 fleet boot authority"):
+    jlist=$("$PM2" jlist 2>/dev/null); jlist_rc=$?
+    [ rc≠0 ]        → 🔴 拒绝 resurrect,exit 1
+    解析不出数字     → 🔴 拒绝 resurrect,exit 1
+
+机器上(mtime 2026-07-30 21:14,1432 bytes):
+    n=$(... 2>/dev/null || echo 0); n=${n:-0}
+    ⇒ jlist 失败时 n=0,而 n=0 会**继续往下走去 resurrect**
+```
+
+⇒ 2026-08-13 有人在仓里把这个脚本改硬了,**但没有拷到机器上**。开机时若 `pm2 jlist`
+抽风,在跑的那份会当成「一个进程都没有」,然后在已有进程之上重复拉起 hub / dashboard /
+weixin。**这正是那次加固要防的事,而加固没有部署。**
+
+**部署要单独一条**(动的是整支 fleet 的开机路径),本 README 只负责让它不再隐形。
+
+### 一个诚实的边界
+
+这次的变异测试没提供什么信息:基线**本来就是红的**,人为改坏之后还是 `rc=1`,
+两次输出区分不出来。**真正验到判据的是那条 fail-closed**:把 `HOME` 指向一个空目录,
+`checked=0 drift=0 missing=4 → exit 2`,而不是「干净」。
