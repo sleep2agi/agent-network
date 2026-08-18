@@ -52,6 +52,40 @@ import subprocess
 import sys
 from pathlib import Path
 
+# 🔴 为什么标记词只有 `搜`,没有 `grep`(2026-08-18 实测,不要"顺手"加)
+#
+# 英文页要写锚点就得塞一个中文的 `搜`,读起来别扭 —— 所以「把它扩成 (?:搜|grep)」
+# 是个非常自然的念头。我试了。结果不是"有存量要清",是**这个标记词本身不成立**:
+#
+#     只认 `搜`            77 条锚点,77 条全部命中
+#     加上 `grep`         145 条锚点,**32 条不过**（全部是 "no source link precedes"）
+#
+# 把那 32 条逐条看完,**没有一条是坏掉的锚点**。它们分两类:
+#
+#   ① `grep` 在这个仓里也是**普通动词**。文档里大量句子在讲「我去 grep 了什么」:
+#        docs/pre-pr-selfcheck.md:229   我在 hub 日志里 grep `delivered-stale`,数出 1018 条
+#        docs/stale-issue-review.md:189 `agent-node` 全域 grep `Retry-After` 命中 0
+#        docs/stale-issue-review.md:65  `db.ts` 里 grep `cost` 有 6 处命中,全是 scrypt 的 cost 参数
+#      这些**本来就不该**有前置源码链接 —— 它们不是「去这个文件里找这个符号」,
+#      是「我跑过这条命令,结果是这样」。要求它们配链接是**误报**。
+#
+#   ② 更硬的一条:`grep` 会**在斜杠/逗号列表里被当成标记词**,于是捕获到标点。
+#      这四条的锚串逐字是:
+#        docs-site/docs/guide/runtimes.md:32           « / »
+#        docs-site/docs/en/guide/runtimes.md:32        « / »
+#        docs/tests/release-gate-playbook.md:293       « because »
+#        docs/tests/release-gate-playbook.md:459       «, use »
+#      前两条来自一句列举被禁工具的话:`bash` / `read` / `glob` / `grep` / `edit` / …
+#      —— **`grep` 是那个列表的成员**,它后面那个反引号属于下一项。
+#
+# ⇒ `搜` 能用,恰恰因为它在这个仓里**只**当标记词用;`grep` 不能,因为它同时是
+#   一个会出现在正文和列表里的普通词。**这不是"清完存量就能扩"的那一类** ——
+#   清完也会随着新文档不断长回来。
+#
+# (同族但判据不同的另一道门 scripts/check-mcp-tool-anchor-sections.py 收 `搜|grep`,
+#  那里成立是因为它的范围只有 mcp-tools.md 一个文件,而那份文档里 `grep` 全是锚点。
+#  **同一个词在不同范围里是不是可靠标记,要分别看。**)
+#
 # 锚点本体:`搜 ` 之后的第一个反引号串。
 # 🔴 只取第一个 —— docs/architecture.md:450 那种一行里 `搜 X` 后面还跟着两个
 # 描述性代码串(`writeFileSync(..., {mode: 0o600})` 之类),它们不是锚点。
