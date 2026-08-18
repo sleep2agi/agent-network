@@ -148,6 +148,12 @@ agent-node/src/cli.ts:3450               … Cross-machine artifact distribution
      所以这三条改成**两列式**：靠子串唯一定位，不写行号（见 scripts/check-doc-claims.py
      头部）。`total_cost_usd` 在 cli.ts 里有 3 处，所以加长成 `totalCostUsd: m.total_cost_usd`
      —— 顺带说明行号式掩盖了什么：一个不唯一的子串，本来就没钉住任何地方。
+     🔴 2026-08-19（第三次）：`agent-network/bin/cli.ts :: 5151` 又漂了 —— 这次是 #853 那条
+     诊断改动往 cli.ts 加了 16 行。**它正是上一轮我留着没改成两列式的那一条**，理由当时
+     写的是「它的子串本来就唯一」。唯一不代表不漂：唯一性解决的是「指得准不准」，
+     行号解决的是「指得到指不到」，**两者是两个问题**。这一条也改成两列式了；
+     子串加长成整行 `claudeArgs.push("--dangerously-load-development-channels", ch)`，
+     因为裸的 `dangerously-load-development-channels` 在该文件里有 4 处。
      其余几条保持行号式：它们的子串本来就唯一，而且 test846 的 drifted 变异打的就是
      清单里 db.ts 的那一条（`ADD COLUMN team`）。
      🔴 这段注释第一版把那条清单行**逐字抄了一遍**，于是同一个串在文档里出现两次，
@@ -156,7 +162,7 @@ agent-node/src/cli.ts:3450               … Cross-machine artifact distribution
      **写注释引用一条被机器匹配的行时，不要逐字复制它。** -->
 ```doc-claims
 server/src/db.ts :: 393 :: ADD COLUMN team
-agent-network/bin/cli.ts :: 5151 :: dangerously-load-development-channels
+agent-network/bin/cli.ts :: claudeArgs.push("--dangerously-load-development-channels", ch)
 agent-node/src/cli.ts :: video_gen
 agent-node/src/cli.ts :: Expose CURRENT_TASK_ID
 agent-node/src/cli.ts :: totalCostUsd: m.total_cost_usd
