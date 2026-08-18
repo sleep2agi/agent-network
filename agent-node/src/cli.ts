@@ -3546,6 +3546,27 @@ let grokCopresenceRuntimeSession: GrokCopresenceSession | null = null;
 let grokCopresenceRuntimeOpening: Promise<GrokCopresenceSession> | null = null;
 let grokCopresenceLocalTaskSequence = 0;
 
+async function retireCachedGrokCopresenceRuntime(): Promise<void> {
+  const stopped = grokCopresenceRuntimeSession;
+  // 🔴 动态 import，和本文件里另外两处 grok-copresence 的取法一致。
+  //    静态 import 会被 ESM 提升 —— 被导入模块的顶层会在 cli.ts 第一条语句之前执行，
+  //    于是 policy.ts 顶层那句 readPinnedGrokCopresenceCapabilityProfile() 读到的是
+  //    **ambient 环境变量**，而不是启动时从节点配置钉下来的档位。
+  //    check-copresence-profile-pin.py 就是守这一条的，它在本分支上报的正是这里。
+  const { retireStoppedGrokCopresenceRuntime } = await import(
+    "./runtime/grok-copresence/runtime-retirement"
+  );
+  await retireStoppedGrokCopresenceRuntime(stopped, {
+    warn: (message) => warn(message),
+    retire: (retired) => {
+      if (grokCopresenceRuntimeSession !== retired) return;
+      grokCopresenceRuntimeSession = null;
+      clearGrokSession("fatal co-presence boundary; next task requires a fresh session");
+      warn("[grok-copresence] retired stopped TUI; next task will open a fresh session");
+    },
+  });
+}
+
 function grokCopresenceTimeoutMs(): number {
   const raw = process.env.GROK_CLI_TIMEOUT_MS
     || fileConfig.flags?.grokCliTimeoutMs
@@ -3587,6 +3608,7 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
   if (process.platform !== "linux") {
     throw new Error("grok co-presence preview currently requires Linux PTY, /proc, and Unix sockets");
   }
+  await retireCachedGrokCopresenceRuntime();
   if (grokCopresenceRuntimeSession) return grokCopresenceRuntimeSession;
   if (grokCopresenceRuntimeOpening) return grokCopresenceRuntimeOpening;
 

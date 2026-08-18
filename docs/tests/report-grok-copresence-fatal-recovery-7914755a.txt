@@ -1,0 +1,126 @@
+# Grok co-presence fatal-runtime recovery and repo-read pilot
+
+date=2026-08-14T16:10:39+08:00
+source_commit=b830403b82a97a98ec004e59c86eb294ddfd1771
+candidate_image=sha256:261ade0fd44147370df56a7377f409c840f3e65a07aa472174e7761184b45ecb
+candidate_agent_node_cli_sha256=5c0d5cbcfb0350af1eb27e78de1ccd5902c5ba22be732df415fe26851c269a45
+
+## Incident reproduced from production evidence
+
+The pinned Grok 0.2.93 TUI auto-resolved a `list_dir` permission request even
+though the x-search launch argv denied `list_dir`. The co-presence bridge
+correctly failed closed, but agent-node retained that terminal runtime in its
+process cache. Every later task therefore inherited `runtime_closed` instead
+of opening a fresh TUI.
+
+The subsequent repo-read pilot exposed a second, distinct ordering bug. The
+real Grok event stream emitted three automatic permission requests first
+(`search_tool`, `list_dir`, `search_tool`) and then resolved them in the order
+`search_tool`, `search_tool`, `list_dir`. The bridge kept only one scalar
+automatic request and incorrectly treated this valid batched lifecycle as an
+approval-boundary violation. Six queued tasks then failed within seconds; no
+model turn was allowed to proceed after the first fatal boundary.
+
+## Product changes
+
+- A stopped terminal co-presence runtime is closed, retired with a CAS against
+  the cached instance, and its persisted Grok session is cleared before the
+  next task opens a fresh TUI.
+- A normal PTY recovery (`phase=recovering`) is retained and is not mistaken
+  for a terminal runtime.
+- A blocked human slash command returns arbitration to idle; the integration
+  test immediately submits and completes a following network task.
+- Exact fixed-profile automatic permissions are now correlated as a bounded
+  multiset by tool name. Multiple same-tool requests and out-of-request-order
+  resolutions are accepted while manual approval overlap, unmatched
+  resolutions/rejections, overflow, malformed events, and terminal completion
+  with unresolved requests still fail closed.
+- The pre-spawn MCP audit binds the inspected CommHub target to the exact
+  already-resolved Bun executable. It still requires one stdio server named
+  `commhub`, sourced from the isolated `config.toml`, and rejects any other
+  command or MCP server.
+
+## Docker evidence
+
+test725 exact source image, full agent-node unit domain:
+
+    1287 pass
+    0 fail
+    4627 expect() calls
+    Ran 1287 tests across 92 files. [116.74s]
+    MUTATION_RED readable-attachment-runtime-disconnected rc=1
+    RESULT: PASS
+
+After the exact-command audit correction, the focused runtime layer was rerun
+from source commit 7914755a:
+
+    56 pass
+    0 fail
+    464 expect() calls
+    Ran 56 tests across 2 files. [64.01s]
+
+The batched-permission regression was first witnessed red against the prior
+runtime (`duplicate preview automatic permission request`). From exact source
+commit b830403b, the focused runtime/profile/near-miss layer then passed:
+
+    84 pass
+    0 fail
+    694 expect() calls
+    Ran 84 tests across 3 files.
+
+The exact archive image then passed the full test725 unit domain:
+
+    1288 pass
+    0 fail
+    4633 expect() calls
+    Ran 1288 tests across 92 files.
+    MUTATION_RED readable-attachment-runtime-disconnected rc=1
+    RESULT: PASS
+
+The archive-built test225 package gate passed its packed-source boundary and,
+before its unrelated existing L4 failure, passed the real package path:
+
+    PASS: create -> start -> register -> Hub task -> real tmux attach live render -> reply
+    PASS: Hub session registration reports agent-node:grok-build-cli
+    PASS: Grok child env is filtered; state is 0700/0600
+
+The same test225 L4 failure (`installed candidate Feishu refusal lacked the
+fixed explanation`) was reproduced unchanged on parent source a9df8dba. It is
+therefore a pre-existing gate failure and is not claimed as green here.
+
+## Single-node pilot
+
+- tmux session remains exactly `通信狗`, with windows `0:node` and `1:tui`.
+- runtime remains `grok-build-cli`; pinned Grok remains 0.2.93.
+- capability profile changed from x-search to the already reviewed repo-read
+  profile (`Read`, `Grep`, `Glob`) because this node receives repository review
+  tasks. The strict sandbox permits only `read_file`, `grep`, and `list_dir` in
+  addition to fixed runtime tools; shell, write, web, media, scheduler, and
+  subagent tools remain denied.
+- source b830403b was deployed only to this node. Startup reached TUI-ready,
+  input-ready, CommHub registration, and SSE connection with new Grok session
+  `4055ed56-09e1-47a2-9666-277763ef6e63`; Hub reported idle, node_id
+  `n_72be30e0`, and zero pending/in-flight tasks.
+- The first start failed closed because the previous generation's interrupted
+  cleanup had left five empty, owner-held mode-0444 sandbox placeholder files.
+  Their exact metadata was verified and they were moved intact into the
+  owner-only rollback directory before the successful retry. No user file or
+  policy content was removed.
+- No task was synthesized, retried, or sent during this pilot.
+
+Rollback coordinates:
+
+    previous runtime: ~/.commhub/runtime-commdog-grok-7914755a
+    rollback dir: ~/.commhub/rollback-commdog-b830403b-20260814T161000CST
+    candidate runtime: ~/.commhub/runtime-commdog-grok-b830403b
+
+## Honest limits
+
+- No owner-origin Dashboard task was sent after the pilot because task traffic
+  was explicitly paused while the approval-boundary incident was investigated.
+- `/model` remains intentionally blocked in this preview. It is a model-picker
+  control turn rather than an ordinary model response, and the current FIFO
+  ownership protocol cannot yet prove when that interactive control has
+  returned to the composer. The TUI now reports the block instead of silently
+  leaving the queue stuck; changing the persisted model still requires a
+  controlled config update and restart.
