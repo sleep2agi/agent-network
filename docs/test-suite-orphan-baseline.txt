@@ -35,7 +35,6 @@ test13-multi-channel
 test14-agent-node
 test15-telegram-mock
 test16-channel-plugin
-test166-task-diagnostics
 test17-user-journey
 test18-error-paths
 test185-external-schedules
@@ -72,7 +71,6 @@ test31-claude-code-cli-resume
 test313-test-all-v3-fixtures
 test32-agent-network-shell-spawn-audit
 test34-playwright-discovery
-test365-nonimage-read-attachments
 test383-thinking-only-fallback
 test384-opencode-local-package-e2e
 test386-opencode-agent-node-gate
@@ -86,7 +84,6 @@ test573-codex-turn-reconcile
 test575-opencode-reply-ownership
 test583-dashboard-chat-idempotency
 test584-dashboard-codex-delivery
-test585-codex-runtime-singleflight
 test586-codex-successor-reconcile
 test587-codex-start-relative-timeout
 test588-codex-turn-clientid-rebind
