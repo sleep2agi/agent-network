@@ -1,6 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 🔴 不要用 `... | sort | head -1`。本文件顶上是 `set -euo pipefail`，而 `head -1`
+#    读到第一行就退出、关掉管道，上游 `sort`/`grep` 拿到 SIGPIPE → 退出码 141
+#    （128+13），pipefail 把它传出来，`set -e` 直接把脚本打死。
+#    这不是假设:2026-08-19 CI 上真的这么红过一次 ——
+#      [L5] the four review findings each have an assertion
+#      ##[error]Process completed with exit code 141
+#    L1–L4 全绿，死在 L5 的第一行，而那一行只是在挑一个夹具文件。
+#    🔴 它是**时序相关**的，所以平时看起来一直是绿的；红的时候和真失败长得一样
+#    （同一个 job 名、同样没有断言输出），最容易被当成"哪里真的坏了"去查。
+first_md_under() {
+  local _list
+  _list=$(find "$1" -name '*.md' | sort)
+  [ -n "$_list" ] || { echo "FAIL: $1 下一个 .md 都没有 —— 夹具取集塌了" >&2; exit 1; }
+  printf '%s' "${_list%%$'\n'*}"
+}
+
 # test831 —— 文档站源码行号 pin 的下限门(见 #831)
 #
 # 🔴 这道门证明的是「已知失效的那批不会变多」,不是「文档站的行号引用是对的」。
@@ -101,7 +117,7 @@ echo "  OK rc=0  broken_pins=$broken(全部在基线里)"
 # L2 — witnessed-red ①:新增一个坏 pin,必须红,且红在「新的失效 pin」上
 # ---------------------------------------------------------------------------
 echo "[L2] witnessed-red: a NEW broken pin must turn it red"
-VICTIM=$(find "$ROOT/docs-site" -name '*.md' | sort | head -1)
+VICTIM=$(first_md_under "$ROOT/docs-site")
 [[ -n "$VICTIM" ]] || fail "找不到可用于变异的文档"
 cp "$VICTIM" /tmp/victim.bak
 before=$(sha256sum "$VICTIM" | cut -d' ' -f1)
@@ -169,7 +185,7 @@ echo "  OK  $blind_ok 条已知盲区仍未被判据覆盖(与文档里 5/10 的
 #      每条都用"注入 → 期望的红/绿 → 复原 → 回绿"的形状。
 # ---------------------------------------------------------------------------
 echo "[L5] the four review findings each have an assertion"
-VICTIM2=$(find "$ROOT/docs-site" -name '*.md' | sort | head -1)
+VICTIM2=$(first_md_under "$ROOT/docs-site")
 cp "$VICTIM2" /tmp/victim2.bak
 restore2() { cp /tmp/victim2.bak "$VICTIM2"; }
 
@@ -264,7 +280,8 @@ regs=$(printf '%s' "$out9" | sed -nE 's/^tool_registrations=([0-9]+)$/\1/p')
 
 # witnessed-red:把 #845 里真实发生过的那个错重新注入 —— broadcast 段的参数表
 # 锚到 "ack_inbox"。必须红,且红在 broadcast 那一行上。
-BC=$(grep -n '^#\{2,4\} \?`\?broadcast`\?$' "$ROOT/docs-site/docs/api/mcp-tools.md" | head -1 | cut -d: -f1)
+# grep -m1 自己就在第一处匹配后退出，不需要 head 去关管道（见顶部 SIGPIPE 说明）。
+BC=$(grep -n -m1 '^#\{2,4\} \?`\?broadcast`\?$' "$ROOT/docs-site/docs/api/mcp-tools.md" | cut -d: -f1)
 [[ -n "$BC" ]] || fail "找不到 broadcast 章节,无法造 L6 的变异"
 cp "$ROOT/docs-site/docs/api/mcp-tools.md" /tmp/mcp.bak
 python3 - "$ROOT/docs-site/docs/api/mcp-tools.md" "$BC" <<'PYX'
@@ -297,7 +314,7 @@ echo "  复原后回绿 ✓  (anchors_checked=$anch, tool_registrations=$regs)"
 # ---------------------------------------------------------------------------
 echo "[L7] --write-baseline shrinks only"
 cp "$BASELINE" /tmp/bl7.bak
-VICTIM3=$(find "$ROOT/docs-site" -name '*.md' | sort | head -1)
+VICTIM3=$(first_md_under "$ROOT/docs-site")
 cp "$VICTIM3" /tmp/v7.bak
 
 # ① 干净树上无事可做
