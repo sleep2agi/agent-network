@@ -1,0 +1,37 @@
+# 新增的测试套件必须能被 CI 跑到，或者写明为什么不进 CI。
+#
+# #861 的普查：2026-08-13 是「194 个套件只有 21 个被 CI 引用」，2026-08-18 用同一口径
+# 复量是「197 个里 33 个被引用，164 个孤儿」。5 天接进去 12 个，方向对，绝对数没变。
+#
+# 这道门不清理存量（那需要 #861 说的逐个分类：一次性验证／事故复现件／已被取代的，
+# 塞进 CI 只会让 CI 变慢并制造噪音）。它只**止住增量** —— 基线记着今天这 164 个，
+# 只对新增的孤儿变红。理由和 check-home-path-baseline.py 完全一样：一道只因积压而红
+# 的门，等积压清完就再也不会红，到时没人知道它还有没有效。
+
+name: lint (test suite registration)
+
+on:
+  # 与本仓其它守卫一致：刻意不加 paths。带 paths 的 workflow 在不匹配的 PR 上不产生
+  # check-run，永远做不了 required check。
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test-suite-registration:
+    # 全仓唯一的 job name —— required check 只能按这个名字写。
+    name: test-suite-registration
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # 判据自检先跑：扫真实仓那一步的绿，和「判据被改坏之后」的绿打印出来一样。
+      # main() 和 selftest() 调的是同一个 classify()，所以变异真代码时自检会红
+      # （实测：去掉 NOT-IN-CI.md 豁免 → selftest 4/5）。
+      - run: python3 .github/scripts/check-test-suite-registration.py --selftest
+      # 打印 suites / registered / exempt / orphans / baseline / new 六个数，
+      # 并在取集为空或基线缺失时退 2 —— 绿不能和「根本没跑」同形。
+      - run: python3 .github/scripts/check-test-suite-registration.py
