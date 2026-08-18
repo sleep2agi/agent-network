@@ -66,11 +66,30 @@
 ## 一键跑 + CI
 
 ```bash
-bash scripts/qa.sh           # 全跑 ~93s warm
-bash scripts/qa.sh --l0      # 只 L0 ~0.1s
-bash scripts/qa.sh --l1      # 只 L1 docker ~80s
+bash scripts/qa.sh           # 全跑
+bash scripts/qa.sh --l0      # 只 L0（单测，毫秒级）
+bash scripts/qa.sh --l1      # 只 L1（每个套件一次 docker build + run）
 bash scripts/qa.sh --list    # 列测试名
 ```
+
+> 🔴 **这几行原来带着 `~93s` / `~80s`,已经去掉 —— 不是排版,是它们会骗人。**
+>
+> 上面「一句话」那段的 `~93s` 明确标了是 **2026-05 首次测量的墙钟值**,那是**记录**,
+> 保留没问题。但这个速查块是**照抄用的**,它旁边的秒数读起来像「现在就是这么久」。
+> **同一句过期的话,写在说明里和写在用户会复制的那一行里,代价不一样** ——
+> 前者读者会连着上下文一起读到日期,后者他只会看见那个数。
+>
+> L1 的耗时随 `scripts/qa.sh` 里 `L1_TESTS` 的成员数走,而那个数一直在涨:
+> 写下最早那个「~16s」时是 **3** 个(见 #871),`ce0c99ab` 上是 **22** 个。
+> 每个成员各要一次 `docker build` + `docker run`。
+>
+> 要知道**你这台机、这个 Docker 缓存状态下**是多久:
+>
+> ```bash
+> time bash scripts/qa.sh
+> # L1 当前成员数（自己数，不要信这里写死的数字）：
+> bash -c 'source <(sed -n "/^L1_TESTS=(/,/^)/p" scripts/qa.sh); echo "${#L1_TESTS[@]}"'
+> ```
 
 [.github/workflows/qa.yml](../../.github/workflows/qa.yml) **report-only**，PR + push to main 触发，不阻塞合并。
 CI 真实抓 race ≥4 次（每次都是新 hub-bootstrap 后 auth race，固化 retry pattern）。
