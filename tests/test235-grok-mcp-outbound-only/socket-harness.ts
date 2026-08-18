@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { OUTBOUND_TOOL_NAMES } from "../../agent-network/src/outbound-tool-names";
 
 type RpcMessage = { id?: number; method?: string; result?: any; error?: any; params?: any };
 
@@ -207,7 +208,21 @@ try {
   await sendRpc({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} } as any);
   const listed = await waitForId(2);
   const toolNames = listed.result?.tools?.map((tool: any) => tool.name) || [];
-  assert(JSON.stringify(toolNames) === JSON.stringify(["commhub_send_task", "commhub_send_message", "commhub_get_all_status"]), "exact three outbound tools");
+  // 🔴 The expected set comes from the source of truth, not from a copy.
+  //
+  // This line used to hard-code three names. `OUTBOUND_TOOL_NAMES` in
+  // agent-network/src/node-server.ts has carried FOUR since commhub_upload_file
+  // shipped (#693), so the assertion has been wrong on main — and nothing
+  // reported it, because no workflow and neither qa.sh list runs test235. A
+  // gate that is wrong and unrun is indistinguishable from a gate that passes.
+  //
+  // Sorted on both sides: the assertion is about WHICH tools are exposed, not
+  // about the order the server happens to register them in.
+  const expectedOutbound = [...OUTBOUND_TOOL_NAMES].sort();
+  assert(
+    JSON.stringify([...toolNames].sort()) === JSON.stringify(expectedOutbound),
+    `outbound tool set must equal OUTBOUND_TOOL_NAMES (${expectedOutbound.join(", ")}); got ${[...toolNames].sort().join(", ") || "<none>"}`,
+  );
 
   await Bun.sleep(350);
   assert(state.sseOpened === 1, "only outer owner opens SSE");

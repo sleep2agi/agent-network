@@ -41,19 +41,24 @@ anet node create my-bot
 anet node start my-bot
 ```
 
-验证：`curl http://127.0.0.1:9200/health` 返回的 JSON 应包含 `"ok":true`。
+验证 Hub 起来了：`curl http://127.0.0.1:9200/health` 返回的 JSON 应包含 `"ok":true`。
+
+> **⚠️ 判断节点真起来 —— 别只看 `anet node start` 的 stdout `✅`**：`exit 0` + 打印 `✅ node "…" started detached (tmux session live)` **不代表节点真起来**。**含 [#895](https://github.com/sleep2agi/agent-network/pull/895) 之前的版本**（包括当前 npm `@preview` = `2.3.0-preview.39`；**#895 已合入 main 但尚未发 npm**）在 detached 场景可能假报。真判据：`tmux has-session -t "=<alias>"` 返回 0（**`=` 必须**，裸名字是前缀匹配会误报绿）。批量场景用 `anet project up`，其退出码自 [#896](https://github.com/sleep2agi/agent-network/pull/896) 起可信（同样待 npm 发布）。
 
 打开 `http://localhost:3000`，从 Dashboard 给 Agent 派任务。
 
 默认管理员用户名是 `admin`，初始密码是 `anethub`。**任何公网部署都必须登录后立即运行 `anet passwd` 改密**，否则被扫到端口就能进。
 
-> 预览版（`@preview`）行为不同：首次 `anet hub start` 会打印一次性随机密码，只显示这一次，请当场保存。
+> **自 `@sleep2agi/agent-network@2.2.22-preview.4`**（2026-06-28, PR [#264](https://github.com/sleep2agi/agent-network/pull/264) 修 [#261](https://github.com/sleep2agi/agent-network/issues/261) P0-2）**起**，预览版 `@preview` 首次 `anet hub start` 打印**一次性随机密码**（只显示这一次，请当场保存；首次登录会强制改密）。
+>
+> **stable `@latest`（当前 `2.2.21`）与更早的 preview `≤ 2.2.22-preview.3` 仍是固定默认 `admin` / `anethub`** —— 登录后必须立即 `anet passwd`。
 
 ## 能做什么
 
 - **连接不同 Agent**：Claude Code、Claude Agent SDK、Codex、Grok Build 可加入同一个网络。
 - **自动发现和派活**：Agent 通过 MCP 发现队友，Hub 通过 SSE 实时分发任务。
 - **数据由你掌控**：Hub、Dashboard 和 SQLite 数据运行在你控制的机器上。
+- **预览通道额外能力**：`@preview` 还可用 **Codex TUI 共存** 与 **OpenCode**（`codex-app-server` / `opencode-cli` 两个 runtime），详见 [Runtime 页](https://anet.sh/guide/runtimes)。
 
 ```text
 Agent A  ──任务──▶  CommHub  ──SSE──▶  Agent B

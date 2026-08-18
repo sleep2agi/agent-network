@@ -16,6 +16,7 @@ import {
 import type { Stats } from "fs";
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from "path";
 import { opencodeOwnedPathModeIsSafe } from "./opencode-owner-mode";
+import { describeUnsafePath } from "./unsafe-package-path-reason";
 
 export const OPENCODE_AGENT_NETWORK_VERSION = "2.3.0-preview.39";
 export const OPENCODE_AGENT_NODE_VERSION = "2.5.0-preview.31";
@@ -53,6 +54,16 @@ function assertSafePackagePath(path: string, kind: "file" | "directory"): Stats 
     // while ACL review is left to the OS/npm install boundary.
     || (process.platform !== "win32" && !opencodeOwnedPathModeIsSafe(stat))
   ) {
+    // Same reasoning as the grok resolver: on a stock Debian/Ubuntu box the
+    // condition that fires is the group-write bit npm inherits from umask
+    // 0002, and a message that leads with "ownership" sends the reader to the
+    // wrong place. Shape/symlink failures keep their own wording.
+    if (kind === "file" && stat.isFile() && !stat.isSymbolicLink() && process.platform !== "win32") {
+      throw new Error(
+        `resolved agent-node package has unsafe ownership or mode — ` +
+        describeUnsafePath(path, { uid: stat.uid, mode: stat.mode, processUid: process.getuid?.() ?? stat.uid }),
+      );
+    }
     throw new Error("resolved agent-node package has unsafe ownership or mode");
   }
   return stat;

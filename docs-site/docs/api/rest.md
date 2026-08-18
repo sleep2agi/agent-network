@@ -34,6 +34,7 @@ curl http://localhost:9200/health
   "transport": "streamable-http",
   "sessions_count": 0,
   "sse_connections": 0,
+  "sse_sessions": {},
   "auth": "user-token",
   "security": "secured",
   "tmux": "disabled",
@@ -44,7 +45,45 @@ curl http://localhost:9200/health
 }
 ```
 
-未认证请求只返回上述聚合数据，不包含 `sse_sessions`。携带有效 token 时：
+> 🔴 **这份样例是实测抓的,不是手写的** —— 2026-08-13 在干净容器里
+> `bunx --bun @sleep2agi/commhub-server@0.8.8`,未认证 `curl /health` 的原样响应。
+>
+> **两条线的键不一样,解析 `/health` 的脚本要按信道分别处理:**
+>
+> | 键 | latest `0.8.8` | preview `0.9.0-preview.29` |
+> |---|---|---|
+> | `sse_sessions` | **未认证也会返回,且未脱敏** | 未认证不返回 |
+> | `limits` | 没有 | 有 |
+>
+> **本次实测中**,其余 13 个键两条线都有 —— 每条线各一个样本,不是永久契约。
+
+::: danger latest `0.8.8` 的 `sse_sessions` 会向匿名调用方泄露全部在线 agent
+上面那个样本里 `sse_sessions` 是 `{}`,**只是因为那个干净容器一条 SSE 连接都没有**。
+**不要把它读成「latest 不泄露」。**
+
+`/health` 的脱敏是 [#473](https://github.com/sleep2agi/agent-network/issues/473) 修的,
+落于 **2026-07-29**(`7bacb729`),而 `commhub-server@0.8.8` 发布于 **2026-06-24** ——
+**早 35 天,所以 `0.8.8` 不含这个修复。**
+
+在有连接的 `0.8.8` hub 上,匿名 `GET /health` 返回的是**每个活跃连接的
+`{networkId}:{alias}` 明细**。当时的公开 hub 审计(2026-07-30)一次拿到了
+**网络 id + 全部 95 个 agent 别名**,证据见 `server/src/health-redaction.test.ts`。
+
+所以两条线的差别不是「有键 / 没键」,是:
+
+- **latest `0.8.8`** —— 未认证可读全部在线会话明细(空 hub 上恰好为空);
+- **preview `0.9.0-preview.22` 及以后** —— 匿名只给聚合计数,明细移到需鉴权的 `GET /api/stats/sse`;
+- ⚠️ **preview `0.9.0-preview.0` ~ `.21` 同样会泄露** —— 它们发布于 2026-06-28 ~ 07-04,**早于修复**。
+  别把「preview」整条线当成安全的。
+
+把 `0.8.8` 的 hub 暴露到公网前,先确认这一点。
+:::
+
+另外,如果你的解析代码用「键是否存在」来判断权限,两条线的行为也不同。
+
+未认证请求的行为**按线区分**(见上表与上面的告警):preview 上只返回聚合数据、
+不含 `sse_sessions`;latest `0.8.8` 上该键**未脱敏**返回 —— 空 hub 上恰好为空,
+一旦有连接就是完整的 `{networkId}:{alias}` 明细。携带有效 token 时：
 - system-admin、legacy master 或 DEV_OPEN 调用方可看到完整 `sse_sessions`；
 - 普通 `utok_` / `ntok_` 只看到其有权访问网络的 session；无网络成员关系时返回空对象。
 
@@ -102,7 +141,7 @@ curl -X POST http://localhost:9200/api/auth/register \
 }
 ```
 
-`user` 对象 5 字段对照 [`server/src/auth.ts:7-13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L7) `AuthUser` interface（`display_name` / `email` 可为 `null`）；`token` 是 `utok_` 给 CLI/Dashboard 用，`network_token` 是 `ntok_` 给注册时自动创建的那个网络里的 agent 用。
+`user` 对象 5 字段对照 [`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) 搜 `interface AuthUser` `AuthUser` interface（`display_name` / `email` 可为 `null`）；`token` 是 `utok_` 给 CLI/Dashboard 用，`network_token` 是 `ntok_` 给注册时自动创建的那个网络里的 agent 用。
 
 **常见 4xx**（verify [`auth.ts register()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts)）：
 
@@ -155,13 +194,13 @@ curl -X POST http://localhost:9200/api/auth/login \
 }
 ```
 
-`user` 对象 5 字段同 register 响应（注 `email` 可为 `null`）；`network_id` 是该用户作为 owner 的 default network（[`auth.ts:113-115`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L113) 取 `ORDER BY role = 'owner' DESC LIMIT 1`）。每次 login 都签发**新的** `utok_`（不撤销已有，多设备登录互不踢，[`auth.ts:102-110`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L102)）。
+`user` 对象 5 字段同 register 响应（注 `email` 可为 `null`）；`network_id` 是该用户作为 owner 的 default network（[`auth.ts:113-115`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L113) 取 `ORDER BY role = 'owner' DESC LIMIT 1`）。每次 login 都签发**新的** `utok_`（不撤销已有，多设备登录互不踢，[`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) 搜 `// User token (utok_) — not bound to network, for CLI/Dashboard login`）。
 
 **常见 4xx**（verify [`auth.ts login()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts)）：
 
 | 状态 | `error` 值 | 触发条件 |
 |------|------------|---------|
-| 401 | `invalid username or password` | 用户名不存在 **或** 密码哈希不匹配（[`auth.ts:99-100`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L99) 故意把两种错误合并成同一文案，避免 username enumeration）；server 同时写 `login_failed` audit |
+| 401 | `invalid username or password` | 用户名不存在 **或** 密码哈希不匹配（[`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) 搜 `invalid username or password`（全仓 2 处） 故意把两种错误合并成同一文案，避免 username enumeration）；server 同时写 `login_failed` audit |
 | 429 | `rate_limited` | 超过 10/分 IP rate limit（[`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)；触发时写 `login_rate_limited` audit + clientIP）|
 
 **速率限制**：10 次/分钟 per IP。
@@ -298,7 +337,7 @@ curl -X POST http://localhost:9200/api/auth/password \
 
 **关键副作用** (verify [`auth.ts:267-282 changePassword + revokeOtherUserTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L267) + [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
 1. **当前调用方的 `utok_`** (`resolved.tokenId`) 立即撤销（[`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) `revokeToken(...)` 显式删）
-2. **其他设备的所有 `utok_` / `atok_`** 同步撤销（[`auth.ts:269-270`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L269) `DELETE ... WHERE user_id=? AND network_id IS NULL AND token_id != ?currentTokenId` 一锅端）—— 计数返回到 `revoked` 字段
+2. **其他设备的所有 `utok_` / `atok_`** 同步撤销（[`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) 搜 `network_id IS NULL AND token_id != ` `DELETE ... WHERE user_id=? AND network_id IS NULL AND token_id != ?currentTokenId` 一锅端）—— 计数返回到 `revoked` 字段
 3. **`ntok_` 不受影响**（`revokeOtherUserTokens` 只删 `network_id IS NULL` 的 token，agent node 用 `ntok_` 跑着的不会被改密打断；跟 [account-system 改密码副作用](/guide/account-system#修改密码) ZH 描述一致）
 4. **新 `utok_`** (`issued.token`) 颁发给调用方作为响应返回 —— 调用方应立即用新 token 覆盖本地存储
 5. 写 audit log: `action='password_changed'`
@@ -357,7 +396,7 @@ curl http://localhost:9200/api/networks \
 }
 ```
 
-`networks` 数组每行 10 字段：9 个 `networks` 表字段 ([`server/src/db.ts:168-177`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L168) 含 v3 migration `visibility` + `max_members`) + 1 个 join 字段 `member_role`（[`auth.ts:382-388`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L382) JOIN `network_members`）。排序：owner 在前，其余按 `created_at`（`ORDER BY nm.role = 'owner' DESC, n.created_at`）。`settings` / `description` 可为 `null`。`ntok_` 调用只返回当前 binding 那一个 network（不是全部）；`utok_` 返回所有所属网络。
+`networks` 数组每行 10 字段：9 个 `networks` 表字段 ([`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) 搜 `CREATE TABLE IF NOT EXISTS networks` 含 v3 migration `visibility` + `max_members`) + 1 个 join 字段 `member_role`（[`auth.ts:382-388`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L382) JOIN `network_members`）。排序：owner 在前，其余按 `created_at`（`ORDER BY nm.role = 'owner' DESC, n.created_at`）。`settings` / `description` 可为 `null`。`ntok_` 调用只返回当前 binding 那一个 network（不是全部）；`utok_` 返回所有所属网络。
 
 ---
 
@@ -1520,7 +1559,7 @@ curl -X POST http://localhost:9200/mcp \
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
 
-SSE 实时推送端点，客户端通过长连接接收事件。路径段 `:name` 是一个**通用 channel 名**（源码里叫 `:session`）：Agent 用自己的 **node alias** 订阅、Dashboard 用 **username** 订阅 user channel。SSE 层本身是 per-channel-name 的 `Map`（[`push.ts:11` `clients`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L11)），不区分 alias / username —— `pushEvent(name, ...)` 推给谁取决于谁注册了那个 name（如 `node.renamed` 同时推 alias 流和成员 username channel，见下表）。
+SSE 实时推送端点，客户端通过长连接接收事件。路径段 `:name` 是一个**通用 channel 名**（源码里叫 `:session`）：Agent 用自己的 **node alias** 订阅、Dashboard 用 **username** 订阅 user channel。SSE 层本身是 per-channel-name 的 `Map`（[`push.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts) 搜 `const clients = new Map<string, SSEClient[]>()`），不区分 alias / username —— `pushEvent(name, ...)` 推给谁取决于谁注册了那个 name（如 `node.renamed` 同时推 alias 流和成员 username channel，见下表）。
 
 ```bash
 # 推荐：Authorization header（避免 token 写进代理 / 浏览器历史 / access log）
@@ -1534,7 +1573,7 @@ curl -N "http://localhost:9200/events/代码1号?token=ntok_xxx"
 
 | 事件 | 触发条件 | 数据 |
 |------|---------|------|
-| `connected` | 初始连接握手（[`push.ts:35`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L35)，每个 client 连上 SSE 时发一次） | `{session, network_id}` |
+| `connected` | 初始连接握手（[`push.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts) 搜 `{ type: "connected", session: sessionName`，每个 client 连上 SSE 时发一次） | `{session, network_id}` |
 | `new_task` | 收到新任务（`send_task` / `retry_task` / `reassign_task` / REST `POST /api/task`） | `{inbox_count, priority, from}` |
 | `new_message` | 收到新消息（`send_message`） | `{from, message_id}` |
 | `new_reply` | 收到 reply（`send_reply`） | `{from, message_id, in_reply_to, status}` |
@@ -1672,7 +1711,7 @@ curl -X POST http://localhost:9200/api/auth/tokens \
 :::
 
 ::: info 这个 endpoint 创建的是 legacy `atok_`
-本 endpoint 走 [`auth.ts:243` `generateToken()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L243) 颁发 `atok_` 前缀 + `scope='full'` token，是 V2 时代的兼容路径，不是 v0.8 主线的 `utok_` / `ntok_`。新代码请用：
+本 endpoint 走 [`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) 搜 `generateToken`（全仓 3 处） 颁发 `atok_` 前缀 + `scope='full'` token，是 V2 时代的兼容路径，不是 v0.8 主线的 `utok_` / `ntok_`。新代码请用：
 - **`utok_`（用户 Token）**：通过 [POST /api/auth/login](#post-api-auth-login) 或 [POST /api/auth/register](#post-api-auth-register) 自动颁发
 - **`ntok_`（节点 Token）**：通过 [POST /api/auth/node-token](#post-api-auth-node-token) 创建（绑定到指定 network + 节点 alias）
 
@@ -1958,7 +1997,7 @@ curl -X POST http://localhost:9200/api/networks/join \
 | 400 | `invite code expired` | `expires_at < now()`（不传 `expires_days` 创建则不会过期） |
 | 400 | `already a member of this network` | 调用者已是该网络成员 |
 
-`anet network join` CLI 拿到该响应后会自动切换到加入的 network（即 `~/.anet/config.json` 的 `network_id` 字段更新为 `res.network_id`），并打印 `Joined network as <role>`。同时 server 自动颁发一个 `network_id` 绑定的 token 给加入者（[`auth.ts:374-377`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L374) `name='auto-join' scope='full'`），写 audit `network_joined`。
+`anet network join` CLI 拿到该响应后会自动切换到加入的 network（即 `~/.anet/config.json` 的 `network_id` 字段更新为 `res.network_id`），并打印 `Joined network as <role>`。同时 server 自动颁发一个 `network_id` 绑定的 token 给加入者（[`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) 搜 `"auto-join", "full"` `name='auto-join' scope='full'`），写 audit `network_joined`。
 
 ---
 
