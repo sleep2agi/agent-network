@@ -106,6 +106,10 @@ on:
       - 'tests/test166-task-diagnostics/**'
       - 'tests/test365-nonimage-read-attachments/**'
       - 'tests/test585-codex-runtime-singleflight/**'
+      - 'tests/test586-codex-successor-reconcile/**'
+      - 'tests/test596-goal-loop-docs/**'
+      - 'tests/test638-server-aggregate-isolation/**'
+      - 'tests/test681-explicit-lifecycle/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
       - 'agent-node/src/cli.ts'
@@ -210,6 +214,10 @@ on:
       - 'tests/test166-task-diagnostics/**'
       - 'tests/test365-nonimage-read-attachments/**'
       - 'tests/test585-codex-runtime-singleflight/**'
+      - 'tests/test586-codex-successor-reconcile/**'
+      - 'tests/test596-goal-loop-docs/**'
+      - 'tests/test638-server-aggregate-isolation/**'
+      - 'tests/test681-explicit-lifecycle/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
       - 'agent-node/src/cli.ts'
@@ -761,6 +769,10 @@ jobs:
           - test166-task-diagnostics
           - test365-nonimage-read-attachments
           - test585-codex-runtime-singleflight
+          - test586-codex-successor-reconcile
+          - test596-goal-loop-docs
+          - test638-server-aggregate-isolation
+          - test681-explicit-lifecycle
     steps:
       - uses: actions/checkout@v4
 
