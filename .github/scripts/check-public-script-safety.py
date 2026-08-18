@@ -36,6 +36,34 @@ from pathlib import Path
 
 PUBLIC_DIR = Path("docs-site/docs/public")
 
+# 🔴 取集，不是判据。2026-08-18 实测（在 main 上，取集是 `PUBLIC_DIR.glob("*.sh")`）：
+#     把 `pkill -f agent-node` 写进 docs-site/docs/public/community/evil.sh
+#     —— 这个路径会被 anet.sh/community/evil.sh 服出去 ——
+#     门打印 `scanned 6 public script(s) … 0 findings`，rc=0。
+#     **和真绿逐字相同**，连分母 6 都没变（分母是从同一个 glob 算的，
+#     所以它永远自洽，也永远看不见 glob 外面）。
+#     `git add` 之后再跑还是同一句：取集靠文件系统，不靠 git。
+#
+# 两处放宽，都只动「怎么拿到要判的东西」：
+#   1) 递归 —— 子目录里的 .sh 一样会被服出去
+#   2) 认 shebang —— 服出去的路径不要求带 .sh 后缀，`curl anet.sh/foo | bash`
+#      照跑。今天这两个集合恰好相等（6 == 6），所以放宽后仍是绿起点。
+SHEBANG = re.compile(rb"^#!.*\b(?:ba|da|k|z)?sh\b")
+
+
+def collect(root: Path) -> list[Path]:
+    out = set(root.rglob("*.sh"))
+    for f in root.rglob("*"):
+        if not f.is_file() or f.suffix == ".sh":
+            continue
+        try:
+            head = f.open("rb").readline(256)
+        except OSError:
+            continue
+        if SHEBANG.match(head):
+            out.add(f)
+    return sorted(out)
+
 # Paths this product owns. Wiping these is the user's stated intent (WIPE=1).
 OURS = ("~/.anet", "~/.commhub", "~/anodes/.anet",
         "~/.npm-global/lib/node_modules/@sleep2agi", "~/.anet-grok")
@@ -148,6 +176,43 @@ SELFTEST = [
 ]
 
 
+# \u53d6\u96c6\u90a3\u4e00\u5c42\u7684\u6b63\u53cd\u4f8b\u3002\u4e0a\u9762\u90a3\u5f20\u8868\u53ea\u80fd\u9a8c\u5224\u636e\uff08\u7ed9\u5b83\u4e00\u884c\u3001\u770b\u5b83\u62a5\u4e0d\u62a5\uff09\uff0c
+# \u800c #996 \u4e4b\u524d\u90a3\u4e2a\u5b9e\u6d4b\u51fa\u6765\u7684\u7f3a\u53e3\u4e0d\u5728\u5224\u636e\u91cc\uff0c\u5728\u300c\u600e\u4e48\u62ff\u5230\u8981\u5224\u7684\u4e1c\u897f\u300d\u91cc\u3002
+# \u8fd9\u4e24\u5c42\u5f97\u5206\u5f00\u9489\uff1a\u5224\u636e\u5168\u5bf9\u3001\u53d6\u96c6\u6f0f\u4e00\u4e2a\u6587\u4ef6\uff0c\u8f93\u51fa\u4e5f\u662f\u4e00\u7247\u7eff\u3002
+COLLECT_SELFTEST = [
+    ("install.sh", "#!/bin/bash\n", True),
+    ("community/evil.sh", "#!/bin/bash\n", True),          # \u5b50\u76ee\u5f55\u4e00\u6837\u4f1a\u88ab\u670d\u51fa\u53bb
+    ("bootstrap", "#!/usr/bin/env bash\n", True),          # \u65e0\u540e\u7f00\uff0c\u4f46 curl \u2026 | bash \u7167\u8dd1
+    ("deep/a/b/x.sh", "#!/bin/sh\n", True),
+    ("notes.md", "# \u4e0d\u662f\u811a\u672c\n", False),
+    ("README.txt", "just a note\nrm -rf /etc\n", False),   # \u6ca1 shebang\uff0c\u4e0d\u6536
+    ("logo.svg", "<svg/>\n", False),
+]
+
+
+def collect_selftest() -> int:
+    import tempfile
+    bad = 0
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        want = set()
+        for rel, body, expected in COLLECT_SELFTEST:
+            f = root / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(body, encoding="utf-8")
+            if expected:
+                want.add(rel)
+        got = {str(f.relative_to(root)) for f in collect(root)}
+        for rel in sorted(want - got):
+            bad += 1
+            print(f"COLLECT \u6f0f\u6536: {rel}")
+        for rel in sorted(got - want):
+            bad += 1
+            print(f"COLLECT \u591a\u6536: {rel}")
+    print(f"collect-selftest {len(COLLECT_SELFTEST) - bad}/{len(COLLECT_SELFTEST)}")
+    return 1 if bad else 0
+
+
 def selftest() -> int:
     import tempfile
     bad = 0
@@ -168,12 +233,12 @@ def selftest() -> int:
 
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "--selftest":
-        return selftest()
+        return selftest() | collect_selftest()
     if not PUBLIC_DIR.is_dir():
         print(f"::error::{PUBLIC_DIR} does not exist — scope regression, refusing to pass")
         return 2
 
-    scripts = sorted(PUBLIC_DIR.glob("*.sh"))
+    scripts = collect(PUBLIC_DIR)
     # A scan that matched nothing and a scan that never ran print the same "0".
     # Report the denominator, and treat an empty scope as a failure.
     if not scripts:
@@ -185,7 +250,10 @@ def main():
         for line_no, rule, text in check(s):
             findings.append((s, line_no, rule, text))
 
-    print(f"scanned {len(scripts)} public script(s): {', '.join(s.name for s in scripts)}")
+    # 打相对 PUBLIC_DIR 的路径，不打 s.name —— 递归之后 community/install.sh
+    # 和顶层 install.sh 的 name 是同一个字符串，读的人分不出扫的是哪个。
+    print(f"scanned {len(scripts)} public script(s): "
+          f"{', '.join(str(s.relative_to(PUBLIC_DIR)) for s in scripts)}")
 
     if not findings:
         print(f"0 findings across {len(scripts)} script(s).")
