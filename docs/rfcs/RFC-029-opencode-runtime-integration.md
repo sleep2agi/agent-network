@@ -6,7 +6,7 @@
 | **状态** | v0.4 — **Vincent 2026-07-23 定调 opencode 提升为第 5 个原生 runtime, 人机共存 (co-existence) 一等**. v0.3 headless (B1' ACP) 保留为 mode; v0.4 新增 §11 co-existence formalization (serve + attach + PGID identity teardown). 通信龙 review addendum draft PASS + Vincent 拍 D_new_5 = B full copresence 全 track. 分 M0-M5 里程碑 (M0 探针 → M1 headless 骨架 WIP → M2 copresence 核心 → M3 wizard+doctor → M4 Docker E2E → M5 preview 发版), 6-8 工作日. (历史: v0.3 B1' 已 in-flight; v0.2 通信龙 v0.1 review PASS+merged PR #369) |
 | **调度** | 通信龙 dispatch task_id `418d0521-0148-452a-9f5a-70ed13f195e3` (HIGH, Vincent 要求) |
 | **创建** | 2026-07-01 (北京 UTC+8) |
-| **关联 RFC** | [RFC-021](RFC-021-acp-capability-profile-expansion.md) (ACP capability 扩展 — grok-build-acp precedent) · [RFC-006 (project memory)](../../.claude/memory/) codex-code-cli-mcp runtime 类似 track |
+| **关联 RFC** | [RFC-021](RFC-021-acp-capability-profile-expansion.md) (ACP capability 扩展 — grok-build-acp precedent) · ⚠️ 原文此处链到 `.claude/memory/`(**仓外的私有目录**),且本仓的 [RFC-006](RFC-006-codex-code-cli-mcp-server.md) 讲的是 codex-code-cli MCP server 而不是 project memory ——**标签和目标都对不上**,故只保留「codex-code-cli-mcp runtime 类似 track」这层意思,不再链 |
 | **红线** | 只做**公版 [sst/opencode](https://github.com/sst/opencode)**, 不引入任何非公开分支/fork 概念, 不在公开仓提任何私有对应物 |
 | **依据** | 公版 opencode 官方文档 (`opencode.ai/docs`), 现有 4 runtime adapter 代码链 (agent-node/src/cli.ts + agent-network/bin/cli.ts + server/src/index.ts) |
 

@@ -8,7 +8,7 @@
 | **状态** | Draft v1 完整就绪（待 review） |
 | **创建日期** | 2026-05-14 |
 | **关联 issue** | [#77](https://github.com/sleep2agi/agent-network/issues/77) |
-| **关联 demo** | [#72 opinion-spread](../issues/72) · [#74 信息瀑布](../issues/74) |
+| **关联 demo** | [#72 opinion-spread](https://github.com/sleep2agi/agent-network/issues/72) · [#74](https://github.com/sleep2agi/agent-network/issues/74) ⚠️ #74 当前标题是「节点删除后，dash 里面还展示」,与这里写的「信息瀑布」对不上 —— 原链接是坏的,修好之后才发现指向对不上,留给 RFC 作者判断该指哪一条 |
 | **依赖** | RFC-008 multi-agent-team-convention · `BatchOptions` (anet/cli/batch.ts) |
 | **审阅** | 通信牛 (技术) · 通信龙 (high-level) · Vincent (final) |
 

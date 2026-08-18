@@ -179,8 +179,8 @@ docker inspect anet-feishu-local --format 'RestartCount={{.RestartCount}} Status
 
 - ~~[#362](https://github.com/sleep2agi/agent-network/issues/362) inbound 文件下载~~ — ✅ 2026-07-01 preview.17 修复（PR #364）。
 - 用户文档（已上线 anet.sh）：
-  - [飞书 channel 接入指南](/guide/feishu)（Docker 一键 + 手动、模型后端、白名单、群@、故障排查）
-  - [经典案例：飞书静默拒收 + 同源图片案例](/troubleshooting/case-feishu-silent-deny)
+  - [飞书 channel 接入指南](../../docs-site/docs/guide/feishu.md)（Docker 一键 + 手动、模型后端、白名单、群@、故障排查）
+  - [经典案例：飞书静默拒收 + 同源图片案例](../../docs-site/docs/troubleshooting/case-feishu-silent-deny.md)
 - 设计：[RFC-020](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-020-im-platform-integration.md)（issue #179）。
 
 ---

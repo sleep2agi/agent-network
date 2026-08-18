@@ -288,7 +288,7 @@ ZH 翻译要点：
 - **[#<issue> P0]** <fix headline> (`<commit-sha>`)
   - 1-2 行 root cause 简述（详细 root cause 移到 commit message 或 issue 评论 link）
   - **Why prior preview didn't catch this**：1 行说明
-  - 链接到 detailed analysis: [→ #132 评论](...)
+  - 链接到 detailed analysis: `[→ #<issue> 评论](<url>)` ← 模板占位,写的时候换成真 URL
 
 ### Dashboard polish (#116 R<start>-R<end>)
 
