@@ -75,6 +75,22 @@ Three things worth knowing:
 **Until someone builds them on the matching platform, this page will not claim the macOS or
 Windows installers work.**
 
+::: tip That sentence is only about the Dashboard shell
+There is a **second, independent client line**:
+[`sleep2agi/agent-network-app`](https://github.com/sleep2agi/agent-network-app)
+(`desktop/` + `src-tauri/`, Tauri). It has its own packaging pipeline, and **its macOS job runs
+on a real `macos-14` runner**, producing a `.dmg` and an `.app` zip. It has succeeded
+(most recently 2026-06-17).
+
+So the answer to "is there a Mac installer" is **yes** — just not from the shell this page
+describes. Both lines currently coexist; this page does not judge which one is the main line.
+See [issue #233](https://github.com/sleep2agi/agent-network/issues/233).
+
+**Windows is the one genuinely empty cell across all three repositories**: no workflow anywhere
+builds for Windows. The Dashboard's `electron-builder.json` does *configure* a `win: nsis`
+target, but no CI runs it — **a configured target is not a produced artifact.**
+:::
+
 ## Which one should I use
 
 - Just want it on your phone → **PWA**, no build step at all;
