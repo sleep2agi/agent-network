@@ -72,6 +72,24 @@ L1_TESTS=(
   "qa-hub-07-sse-reconnect"
   "qa-hub-08-restart-persistence"
   "qa-hub-09-task-state-machine"
+  # 2026-08-18 补注册 —— 这四个是 #863 修好的那批(commit 61f7203a,「静默失效 6 周」
+  # 实跑 4/4 从红到绿),但修完之后**没有注册到任何地方**,于是回到了同一个位置:
+  # 没有任何东西会跑它们。#861 的实测把最后一个未知量补上了。
+  #
+  # 实测(通信IM马,隔离 tree,顺序 build+run):
+  #   warm cache   10:7+6  11:1+3  12:1+4  13:7+6   合计 35s
+  #   🔴 warm 是误导 —— 四个共享 node:20-slim + apt + bun.sh + `bun install server/`
+  #      的层。单独用 --no-cache 测 qa-hub-10 是 **22s**(比 warm 的 7s 多 15s)。
+  #      CI 冷跑的形状是「第一个 ~22s,后 3 个各 1-7s,4 个 run 合计 19s」⇒ 约 44-50s。
+  #   L0+L1 job 近 4 次 main 实测 137-165s / 预算 300s ⇒ 加完约 181-215s,余 85-119s。
+  #
+  # 依赖:这四个**不需要活 hub、不需要外网、不需要凭据**。每个 run.sh 自己在
+  # loopback 上起 hub(端口 9210/9211/9212/9213 写死互不撞),跑完 trap kill 掉自己的
+  # HUB_PID。run 阶段完全离网;build 阶段要外网(bun.sh + apt),与既有套件同形。
+  "qa-hub-10-network-scope-regressions"
+  "qa-hub-11-node-delete-sse"
+  "qa-hub-12-servers-endpoint"
+  "qa-hub-13-server-health-agents"
   "qa-node-02-success-reply"
   "qa-node-03b-task-events"
   "test686-rest-shape-golden"
