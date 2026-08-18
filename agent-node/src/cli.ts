@@ -461,6 +461,18 @@ const RUNTIME_MAP: Record<string, string> = {
 //    (The `--help` above lists it only in the Runtime section, marked as anet-provided, for exactly this reason.)
 if (!Object.prototype.hasOwnProperty.call(RUNTIME_MAP, rawRuntime)) {
   const supported = [...new Set(Object.keys(RUNTIME_MAP))].join(", ");
+  // 🔴 `claude-code-cli` needs its own sentence. "Unsupported" is true of THIS
+  //    binary and false of the product: it is implemented, tested and shipping —
+  //    in the launcher (`anet node start`), not here. #909 already fixed the
+  //    `--help` text and the comment above; this line was the same claim left in
+  //    the one place a user actually hits it. Telling them "unsupported" sends
+  //    them looking for a runtime that does not exist instead of one command over.
+  if (rawRuntime === "claude-code-cli") {
+    console.error(`[${ALIAS}] "claude-code-cli" does not run through agent-node — it is provided and launched by \`anet\` itself.`);
+    console.error(`[${ALIAS}] Use: anet node start <node>   (with runtime "claude-code-cli" in that node's config.json)`);
+    console.error(`[${ALIAS}] Runtimes agent-node can take directly: ${supported}`);
+    process.exit(1);
+  }
   console.error(`[${ALIAS}] Unsupported runtime "${rawRuntime}". Supported: ${supported}`);
   process.exit(1);
 }
