@@ -12,7 +12,7 @@ agent-network/src/batch-workdir.test.ts	3
 agent-network/src/grok-copresence-profile.test.ts	5
 agent-network/src/project-key.ts	1
 agent-network/src/tmux-pane-prompt.test.ts	1
-agent-network/tests/project-key.test.ts	7
+agent-network/tests/project-key.test.ts	6
 agent-node/src/runtime/fetch-attachment.ts	1
 agent-node/tests/feishu-tool-deny.test.ts	2
 agent-node/tests/rfc-030-copresence-observer.ts	2

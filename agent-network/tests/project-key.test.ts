@@ -3,7 +3,7 @@
 // User report (preview.18): `anet create` crashes on Windows because
 // `cwd.replace(/\//g, "-")` only substituted POSIX `/`. On Windows the
 // resulting key still contains `\` and drive `:`, and mkdirSync on
-// `~/.claude/channels/commhub/C:\Users\wenxing_hu3/.env` ENOENTs
+// `~/.claude/channels/commhub/C:\Users\your_user/.env` ENOENTs
 // (drive colon is illegal in a path segment).
 //
 // The fix adopts claude-code's own <sanitized-cwd> scheme (verified
@@ -25,7 +25,7 @@ import { encodeCwd } from "../src/project-key";
 describe("encodeCwd (Windows P0)", () => {
   test("Windows: drive letter + backslashes → alnum-dash-underscore segment", () => {
     // The reproducing case from the user report.
-    expect(encodeCwd("C:\\Users\\wenxing_hu3")).toBe("C--Users-wenxing_hu3");
+    expect(encodeCwd("C:\\Users\\your_user")).toBe("C--Users-your_user");
   });
 
   test("Windows: nested backslashes collapse individually (no consecutive-dash squashing)", () => {
@@ -65,8 +65,8 @@ describe("encodeCwd (Windows P0)", () => {
       .toBe("-home-vansin-ai-insight--claude-worktrees-feat-404-suggestions");
   });
 
-  test("preserves underscores (usernames like wenxing_hu3 stay readable)", () => {
-    expect(encodeCwd("/home/wenxing_hu3/proj")).toBe("-home-wenxing_hu3-proj");
+  test("preserves underscores (usernames like your_user stay readable)", () => {
+    expect(encodeCwd("/home/your_user/proj")).toBe("-home-your_user-proj");
   });
 
   test("preserves hyphens (agent-orchestra is not mangled)", () => {
