@@ -69,7 +69,31 @@ anet hub start
 anet hub dashboard
 ```
 
-浏览器访问 `http://localhost:3000`, 用 `admin / anethub` 登录。
+浏览器访问 `http://localhost:3000`, 用 `admin` 加**你自己那次 `anet hub start` 打印的密码**登录。
+
+::: warning 密码从 `anet hub start` 的输出里取,不要照抄这里
+`anet hub start` 第一次跑的时候会打印一次管理员凭据:
+
+```
+✅ Admin account created
+   username: admin
+   password: <这里打印的那个串>
+   Store this password now; it will not be shown again.
+```
+
+**那个串取决于你装的是哪个版本**(实测 2026-08-18):
+
+| 通道 | 打印出来的密码 |
+|---|---|
+| `latest` = `2.2.21` | 固定的 `anethub` |
+| `preview` = `2.3.0-preview.39` | **随机串**,形如 `anet-232412de5bb54c058cff32`,并提示首次登录后要改 |
+
+所以下面命令里的 `anethub` **只在 stable 上成立**。**照抄这一页而不看自己那次启动输出的人,在 preview 上一定登不进去。**
+凭据也落在 `~/.anet/server/admin-utok.json`。
+
+🔴 另外:**`anet login` 失败时目前仍然退出码 0**(`latest` 与 `preview` 都是,修复已在 main 上,见 #716 / #722)。
+⇒ **不要用 `anet login && 下一步` 来判断登录成功** —— 它会在失败时继续往下走。用 `anet whoami` 确认。
+:::
 
 第三个终端给 CLI 也登录一次（后续 `anet node ...` 命令带凭证）：
 

@@ -69,7 +69,31 @@ Open terminal #2, **keep it running**:
 anet hub dashboard
 ```
 
-Open `http://localhost:3000` in your browser and log in with `admin / anethub`.
+Open `http://localhost:3000` in your browser and log in as `admin` with **the password your own `anet hub start` printed**.
+
+::: warning Take the password from your own `anet hub start` output — do not copy it from this page
+The first `anet hub start` prints the admin credentials once:
+
+```
+✅ Admin account created
+   username: admin
+   password: <the string printed there>
+   Store this password now; it will not be shown again.
+```
+
+**That string depends on which version you installed** (measured 2026-08-18):
+
+| channel | printed password |
+|---|---|
+| `latest` = `2.2.21` | the fixed string `anethub` |
+| `preview` = `2.3.0-preview.39` | a **random** string like `anet-232412de5bb54c058cff32`, with a change-on-first-login notice |
+
+So the `anethub` below **only holds on stable**. **Anyone who copies this page instead of reading their own startup output will fail to log in on preview.**
+The credentials are also written to `~/.anet/server/admin-utok.json`.
+
+🔴 Also: **`anet login` currently exits 0 even when it fails** (both `latest` and `preview`; fixed on main — see #716 / #722).
+⇒ **Do not use `anet login && <next step>` to decide whether login worked** — it will carry on after a failure. Confirm with `anet whoami`.
+:::
 
 In terminal #3, log the CLI in too (so subsequent `anet node ...` commands carry the credentials):
 
