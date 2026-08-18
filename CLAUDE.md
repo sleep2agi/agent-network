@@ -81,6 +81,39 @@ cmd || exit 1                    # ✓
 的工具** —— 三个用例全打印 `rc=0`，真实退出码是 `1/1/0`。
 **一个会说谎的退出码，会先骗过写检查的人。**
 
+🔴 **同一天又撞到它的另外两副面孔，都在 `set -euo pipefail` 的脚本里：**
+
+**(a) `… | head -N` 会被 SIGPIPE 打死。** `head` 读够就退出、关掉管道，上游
+`sort`/`find` 拿到 SIGPIPE → **退出码 141**，pipefail 传出来，`set -e` 打死脚本。
+
+```bash
+VICTIM=$(find "$ROOT/docs-site" -name '*.md' | sort | head -1)   # ✗ 141
+_list=$(find "$ROOT/docs-site" -name '*.md' | sort); VICTIM=${_list%%$'\n'*}   # ✓
+grep -n -m1 PATTERN file                                          # ✓ 代替 grep|head -1
+```
+
+它**平时是绿的**（输出小的时候 `sort` 写完就退出了），红的时候**和真失败长得一样**：
+同一个 job 名、同样没有断言输出、同样一个非零退出码。见 #990。
+
+**(b) `if <预期会失败的命令> | grep -q X; then` 会把「命中」判成「没命中」。**
+pipefail 让整条管道继承那个非零退出码，于是 `grep` 明明找到了，`if` 仍然走 else。
+
+```bash
+if bash "$GATE" bad.log 0 2>&1 | grep -Fq 'never ran'; then   # ✗ 恒 false
+out=$(bash "$GATE" bad.log 0 2>&1 || true)                     # ✓ 先收进变量
+if printf '%s' "$out" | grep -Fq 'never ran'; then
+```
+
+**这一条是我在给「判据要说得清红的是哪一种」写测试时,自己写出来的** ——
+跑出 `PASS=25 FAIL=1`，而那条 FAIL 是假的。
+
+🔴 **为什么没有把它做成一道门（量过才决定的）：** 全仓 258 个 `.sh` 里 159 个设了
+pipefail，`if … | grep -q` 形态 **22 条**；逐条看完，**没有一条是缺陷** —— 8 条生产者是
+`echo/printf`（恒 0），其余 14 条里 `pgrep|grep -q .`、`find … | grep -q .` 这类
+「生产者失败」和「grep 没命中」含义相同，行为恰好一致。**唯一真正踩坑的那一条是我
+当晚新写的。** 一道 22 条全是误报的门，会在第一周就被人关掉。
+**所以这条留在这里靠读，而不是靠门。**
+
 **③ 跑那道门本身，别自造它的判据。**
 
 当天两次把数字数错：用自造的后缀白名单数测试文件（漏了 `.mts`，11 个数成 5 个）；
