@@ -7,7 +7,7 @@
 > **Changelog：**
 > - v1：初版 5 agent 草案
 > - v2：通信龙 review 通过 — 3 review 问题答（参数化 reporter / 砍 probe / b+a 输出）+ 关键设计 ack
-> - **v3：通信龙 pivot ack — 加 §UX 反馈 (在控感) + §测试规格（Vincent 2026-05-12 定调 "用户能掌控多 agent + 充分测试"，refs [[feedback-demo-quality-over-count]]）**
+> - **v3：通信龙 pivot ack — 加 §UX 反馈 (在控感) + §测试规格（Vincent 2026-05-12 定调 "用户能掌控多 agent + 充分测试"——即「宁可少做几个、每个都做扎实」,不以数量论）**
 >
 > Backlog：refs [#25](https://github.com/sleep2agi/agent-network/issues/25) demo backlog 第 2 项（通信龙 选择优先级 #2，PASS 「AI 新闻编辑室」因模式与 translation-pipeline 重合）
 
