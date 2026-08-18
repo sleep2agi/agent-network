@@ -19,7 +19,6 @@ agent-node/tests/rfc-030-copresence-observer.ts	2
 channel/commhub-channel.ts	1
 deploy/dashboard/dash-start.sh	1
 deploy/dashboard/ecosystem.config.cjs	1
-deploy/fleet/pm2-fleet-boot.sh	3
 deploy/tunnel/frpc.service	1
 docs/anet-codex-code-cli-design.md	1
 docs/anet-codex-mcp-server-plan.md	1
