@@ -1,0 +1,54 @@
+# Catch the two kinds of Markdown rot that no build step can see.
+#
+# On 2026-08-17, docs/qa/weekly/2026-W19.md had three multi-byte characters
+# truncated mid-sequence (the file would not decode as UTF-8 at all, and each
+# damaged sentence silently lost its last character) and all 24 of its relative
+# links resolved to paths that do not exist — the file sits three levels deep
+# and the links were written for two.
+#
+# Markdown has no compiler, so a dead link and a live one render the same until
+# a reader clicks. Both problems are mechanical to detect and were invisible to
+# every existing gate.
+#
+# Starts green: after the repair, all 359 tracked .md files decode cleanly and
+# all 80 relative links under docs/qa/ resolve. This is deliberately not a
+# backlog canary — it only reddens on new damage, so a red here always means
+# something just broke rather than something is still on the pile.
+#
+# Scope note (stated because a filter you cannot see is a filter you cannot
+# trust): UTF-8 validity is checked across EVERY tracked .md; link resolution is
+# checked for docs/qa/** only, where the defect was found. Widening the link
+# check repo-wide is a separate call — some pages link to generated or ignored
+# paths, and a guard that cries wolf gets turned off.
+
+name: lint (docs integrity)
+
+on:
+  pull_request:
+    paths:
+      - '**/*.md'
+      - '.github/scripts/check-docs-integrity.py'
+      - '.github/workflows/docs-integrity.yml'
+  push:
+    branches: [main]
+    paths:
+      - '**/*.md'
+      - '.github/scripts/check-docs-integrity.py'
+      - '.github/workflows/docs-integrity.yml'
+
+jobs:
+  scan:
+    # 这个 name 就是 GitHub 上那个 check 的名字，也是分支保护里 required check
+    # 唯一能写的标识符。它必须全仓唯一 —— 2026-08-18 之前，四个 workflow 的
+    # job 全叫 `scan`，于是四道门在 check 列表里挤成同一个名字：required 里
+    # 写 `scan` 指的是哪一道无法确定，而按名字统计覆盖率会把四道门算成一道。
+    name: docs-integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Collector first. If this gate stops seeing a whole spelling of relative
+      # link, the scan below still prints a count and still exits 0 — a false
+      # green byte-identical to a real one. That happened: bare `](file.md)`
+      # targets were invisible, and both broken links in scope were among them.
+      - run: python3 .github/scripts/check-docs-integrity.py --selftest
+      - run: python3 .github/scripts/check-docs-integrity.py

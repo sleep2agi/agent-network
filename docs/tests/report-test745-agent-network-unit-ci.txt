@@ -2,8 +2,50 @@
 
 Date: 2026-08-13 (Asia/Shanghai)
 Issue: https://github.com/sleep2agi/agent-network/issues/745
-Base: 1f4cbf49cf1b03ba3dd9d7ea81c2778b318d0cce
-Source commit: b4e13f45f032dbcf12ffc0b1d0c736571385702b
+Source commit: 507bae6f9045aca6dab07009140e060066cb6936
+
+本文件记录两次跑。上面这个是当前的那次(#842,hono 推过修复线之后);
+建门那次(source b4e13f45 / Base 1f4cbf49)完整保留在文末附录里。
+
+## hono 推过修复线之后的重跑(#842)
+
+审查指出:#842 改了 agent-network/package-lock.json,而 test745 用 npm ci 装
+依赖 —— 也就是说这次改动**改变了这道门实际跑的依赖图**,而这份报告当时仍记着
+b4e13f45 那版镜像。仓里因此没有「新锁的 hono 制品跑绿了」的留存证据。指控成立。
+
+- image: `anet-test745:507bae6f-exact`
+- image id: `sha256:ac8b956ab01a21e1fbc6fd801e99e2ff64e9655508497887f07314e9fa468ba8`
+- 镜像内读回 `TEST745_SOURCE_COMMIT=507bae6f9045aca6dab07009140e060066cb6936`
+- 🔴 **镜像内实际装到的 hono = 4.13.1**(不是从 lockfile 推的,是进容器读
+  `node_modules/hono/package.json`)。这一步是这次改动的**主张本身** ——
+  「lockfile 把 hono 推过了 4.12.34」只有在容器里看到 4.13.1 才算证到。
+  **套件全绿不证明它**:lockfile 改了而构建缓存没失效、或 Dockerfile 没 COPY
+  lockfile,都会给出一模一样的 438 绿。
+
+```text
+source_commit=507bae6f9045aca6dab07009140e060066cb6936
+ 438 pass
+ 0 fail
+ 1333 expect() calls
+Ran 438 tests across 46 files. [4.34s]
+executed_files=46 discovered_files=46
+MUTATION_RED stale-config-help rc=1
+RESULT: PASS
+退出码 0
+```
+
+本次运行日志摘要:`5db43c0ff9299d8cc1983ef700dfc2545b68d28881d6e6462e6f97aa02ffff1e`。它标识这一次运行,不作为来源凭据。
+
+分母承重仍成立:`executed_files=46 discovered_files=46` —— 跑过的文件数等于
+磁盘上的数,没有因为依赖变动而少跑。
+
+> ⚠️ 这份报告的 source commit 指向 `507bae6f`,而提交这份报告本身会产生一个
+> 更新的 commit。二者之间只差这一个文件。
+
+---
+
+## 附录:建门那次(source b4e13f45 / Base 1f4cbf49)
+
 Image: sha256:484e6b482816e36daf0a05385b7d09944786661eba17da973ff2c329fe7ce415
 Image env: TEST745_SOURCE_COMMIT=b4e13f45f032dbcf12ffc0b1d0c736571385702b
 

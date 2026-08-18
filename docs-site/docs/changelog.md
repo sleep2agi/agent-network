@@ -658,7 +658,7 @@ v0.10.4 Vincent 紧急 ship 跳过 测试团队 Docker smoke gate（不在生产
 - `HostTelemetry` interface 加 `disk_total_gb` / `disk_used_gb` / `disk_avail_gb`，`getHostTelemetry()` 通过 `toGb()` 同 mem/cpu 同 path 合成
 - **Backward compat**：老 server 端 schema silent-drop unknown keys；agent / server 可独立升
 
-接 [RFC-014](https://github.com/sleep2agi/agent-network/issues/99) — `/api/server/:host/health` 响应现在带 disk 三字段 + 24h 分桶 history 也含 `disk_avail_min` / `disk_used_max`；`alert_level` 加 `disk < 1GB critical / < 5GB warn` 触发（[`server/src/index.ts:253-258`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L253)）。
+接 [RFC-014](https://github.com/sleep2agi/agent-network/issues/99) — `/api/server/:host/health` 响应现在带 disk 三字段 + 24h 分桶 history 也含 `disk_avail_min` / `disk_used_max`；`alert_level` 加 `disk < 1GB critical / < 5GB warn` 触发（[`server/src/index.ts:253-258`](https://github.com/sleep2agi/agent-network/blob/22ed1886/server/src/index.ts#L253)，钉在当时的提交 `22ed1886`；该文件此后已被拆分，main 上只剩 16 行，所以这里不指向 main）。
 
 测试团队 Docker Linux smoke 3/3 PASS（disk 299.8 GB total / 216 used / 71.5 avail，alert green，backward compat verified）。
 
@@ -710,7 +710,7 @@ anet project restart                             # 重启项目（拉新 agent-n
 
 ### Fix
 
-[`agent-network/bin/cli.ts:61` `PINNED_SERVER_VERSION`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L61) 跨 v0.9.x + v0.10.0 promote 漏 bump，仍 hardcode `0.8.0` —— `anet hub start` 实际 `bunx --bun @sleep2agi/commhub-server@0.8.0` 启服务（[cli.ts:2589](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2589)），跑的是老 server 不是 v0.10.0 ship 的 `0.8.2`。直接影响：
+[`agent-network/bin/cli.ts` 的 `PINNED_SERVER_VERSION`](https://github.com/sleep2agi/agent-network/blob/3a387204/agent-network/bin/cli.ts#L61)（钉在当时的提交 `3a387204`，第 61 行） 跨 v0.9.x + v0.10.0 promote 漏 bump，仍 hardcode `0.8.0` —— `anet hub start` 实际 `bunx --bun @sleep2agi/commhub-server@0.8.0` 启服务（[`cli.ts` 里 `anet hub start` 的 `bunx --bun @sleep2agi/commhub-server@…` 那处](https://github.com/sleep2agi/agent-network/blob/3a387204/agent-network/bin/cli.ts#L2589)（同一提交，第 2589 行）），跑的是老 server 不是 v0.10.0 ship 的 `0.8.2`。直接影响：
 
 - [#99](https://github.com/sleep2agi/agent-network/issues/99) 守护节点 endpoint family `GET /api/server/:host/health` + `GET /api/server/:host/agents` 在 0.8.0 不存在 → **404**
 - [#142](https://github.com/sleep2agi/agent-network/issues/142) server schema align `process_telemetry` 字段在 0.8.0 没接 → 老 schema silent-drop 字段
