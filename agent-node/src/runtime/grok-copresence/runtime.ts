@@ -18,6 +18,7 @@ import { setTimeout as delay } from "timers/promises";
 import { StringDecoder } from "string_decoder";
 import { startGrokAttachServer, type GrokAttachServer } from "./attach";
 import { describeStuckPhase } from "./stuck-phase-alarm";
+import { describeBlockedKey } from "./blocked-key-name";
 import {
   newGrokJsonlState,
   flushPendingGrokNetworkReply,
@@ -1532,7 +1533,13 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           // Unknown CSI/SS3/Alt sequences include enhanced keyboard encodings
           // such as CSI-u, which can represent Ctrl+O or a slash without those
           // raw bytes. Never forward them to the policy-owning TUI.
-          this.warnBlockedPermissionModeChange("unknown terminal control sequence");
+          // issue #882: keep the decision identical and only make it legible.
+          // A CSI-u terminal encodes Ctrl+M distinctly, so this is the one
+          // route where the unreachable model picker can be named at all.
+          const namedSequence = describeBlockedKey(remainder);
+          this.warnBlockedPermissionModeChange(
+            namedSequence ?? "unknown terminal control sequence",
+          );
           return;
         }
       }
@@ -1542,8 +1549,12 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         && nextControl < 0x20
         && ![0x03, 0x08, 0x0a, 0x0d, 0x15].includes(nextControl);
       if (unmodelledEditorControl) {
+        // Name it before advancing past it. "unknown editor control key" is
+        // true but unusable: a human who pressed Ctrl+P to open Grok's command
+        // palette learns nothing about which key the proxy owns (issue #882).
+        const namedControl = describeBlockedKey(input.subarray(offset));
         offset += 1;
-        this.warnBlockedPermissionModeChange("unknown editor control key");
+        this.warnBlockedPermissionModeChange(namedControl ?? "unknown editor control key");
         continue;
       }
       if (this.arbitration.phase === "idle") this.transition({ type: "human_input_started" });
