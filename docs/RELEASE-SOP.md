@@ -28,7 +28,61 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 
 未来加新 doc 时**不要再写硬版本号**（reviewer 拦截，rationale：每 release drift 一次维护负担，让 doc 引导用户去 npm 包页查最新 latest 比 doc 自己钉死可靠）。
 
-~~例外（保留快照）：sdk-deep-dive.md L14 用 `agent-node@2.3.1-preview.0` 做 snapshot pin~~ —— **R367 (2026-05-14) 已取消该例外**：[`docs-site/docs/guide/sdk-deep-dive.md` L14](https://github.com/sleep2agi/agent-network/blob/main/docs-site/docs/guide/sdk-deep-dive.md#L14) 的 `cli.ts:NNN` 行号引用改成「对照 GitHub `main` 校准」（不再 pin 具体 preview 版本），跟其余 doc 一致。现在 **没有 docs 还 pin npm 版本号**了。
+~~例外（保留快照）：sdk-deep-dive.md L14 用 `agent-node@2.3.1-preview.0` 做 snapshot pin~~ —— **R367 (2026-05-14) 已取消该例外**：[`docs-site/docs/guide/sdk-deep-dive.md` L14](https://github.com/sleep2agi/agent-network/blob/main/docs-site/docs/guide/sdk-deep-dive.md#L14) 的 `cli.ts:NNN` 行号引用改成「对照 GitHub `main` 校准」（不再 pin 具体 preview 版本），跟其余 doc 一致。现在 **没有 docs 还在安装命令里 pin npm 版本号**了。
+
+> 🔴 **但「没有任何 doc 提版本号」是错的,别照这句话跳过检查。**
+> 有一类版本号是**故意**留着的:限定信道的**行为断言** ——「在 latest `2.2.21` 上
+> 你会看到裸崩,在 preview 上会被 preflight 拦下」。这类断言**去掉版本号就失去意义**,
+> 所以 R367 没有、也不该把它们清掉。代价是:**latest 或 preview 一发布,它们立刻变成假的**,
+> 而且是危险的那种假 —— 会告诉用户一道已经存在的安全 preflight 不存在。
+>
+> 逐次发版必须重新核对的位置(**12 个路径**,下表 12 行 = 12 个文件 ——
+> 不要把 zh/en 合成一行数,分母数错会漏核。
+> 这张表的分母被修正过两次:7 → 8 → 12。**加新的信道断言时,同时把它加进这张表**,
+> 否则下一个人照着一份"看起来完整"的清单去核,漏掉的那几页永远不会被发现):
+>
+> | 文件 | 行 | 断言 |
+> |---|---|---|
+> | `docs-site/docs/guide/getting-started.md` | 19–20 | latest `2.2.21` 裸崩 / preview `2.3.0-preview.x` 被拦 |
+> | `docs-site/docs/en/guide/getting-started.md` | 19–20 | 同上(英文) |
+> | `docs-site/docs/deploy/clean-server.md` | 21–22 | 同上 |
+> | `docs-site/docs/en/deploy/clean-server.md` | 21–22 | 同上(英文) |
+> | `docs-site/docs/troubleshooting.md` | 29、37 | preview 有 preflight / latest 没有 |
+> | `docs-site/docs/en/troubleshooting.md` | 29、37 | 同上(英文) |
+> | `docs-site/docs/guide/versioning.md` | 11 | `anet -v` 顶行示例 `anet v2.2.21` |
+> | `docs-site/docs/en/guide/versioning.md` | 11 | 同上(英文) |
+> | `docs-site/docs/guide/windows.md` | 102 | 跨盘 `anet --version` 崩溃是哪个通道的现状 |
+> | `docs-site/docs/en/guide/windows.md` | 102 | 同上(英文) |
+> | `docs-site/docs/guide/dashboard.md` | 313、328 | `anet -v` 应显示 `2.3.0-preview.N` / preview 不自动 promote |
+> | `docs-site/docs/en/guide/dashboard.md` | 314、329 | 同上(英文) |
+>
+> **核对方法不是 grep,是真机装。但不同断言要各跑各的 —— 一次探针不能替所有:**
+>
+> | 断言 | 核法 | 2026-08-13 状态 |
+> |---|---|---|
+> | latest 裸崩 / preview 被 preflight 拦 | 干净容器装对应通道、**不装 bun**,跑 `anet hub start` | **已实测**:latest `2.2.21` 仍裸崩(`syscall: 'spawn bunx'`, `code: 'ENOENT'`);preview 被拦 |
+> | `anet -v` 顶行示例 | 装 latest 后跑 **`anet -v`**,比对顶行 | **已实测**:干净容器装 latest 后 `anet -v` 顶行正是 `anet v2.2.21`,与 `versioning.md` 一致 |
+> | 安装命令里的版本 pin | 比对 npm dist-tag 与文中命令 | **不适用**:上表各页的安装命令全是裸 `npm i -g @sleep2agi/<pkg>`,一个都不钉版本。这一行保留为**负向不变量** —— 每次发版确认「没有新出现钉版本的安装命令」 |
+>
+> 🔴 **原来那次探针只证明了第一行**,把它当成「整张表都成立」是证据越权 ——
+> **一次运行只能证明它实际执行过的那条路径。**
+> 后来我把第二行也真跑了(另起一个干净容器跑 `anet -v`),第三行查完是不适用。
+> **记一笔:我一度把这两行标成「未实测」就交付了。标注不确定性是诚实的,
+> 但当那个不确定性两分钟就能消除时,标注会变成不去消除它的借口。**
+>
+> 当前坐标(便于下次比对)—— **注意是哪个包**:
+>
+> | 包 | latest | preview | 为什么是它 |
+> |---|---|---|---|
+> | `@sleep2agi/agent-network` | `2.2.21` | `2.3.0-preview.39` | **preflight 实现在 `agent-network/bin/cli.ts`,上表断言核的就是它** |
+> | `@sleep2agi/commhub-server` | `0.8.8` | `0.9.0-preview.29` | 只在 preflight 通过之后才相关,**不是上表断言的坐标** |
+>
+> 我第一版在这里记的是 commhub-server 的版本 —— **记错了包**。被核的是 CLI 的
+> preflight,却钉了 server 的 dist-tag,下次比对会比错对象。
+> preview 版本每次发版都变,重核时以 npm dist-tag 实际值为准,别照抄这里。
+>
+> 上表第一行的实测证据:`docs/tests/report-latest-channel-preflight.txt`
+> (含复现命令、两个通道的原始输出、以及它**不覆盖**哪两条断言)。
 :::
 
 ::: tip R? 校准（2026-08-17）：测试套件里的版本号已改为「从源码常量派生」，不再需要 release sync

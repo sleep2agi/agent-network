@@ -1,0 +1,48 @@
+# report — latest/preview 首启 preflight 信道核对
+
+Date:  2026-08-13 (Asia/Shanghai)
+Scope: 只覆盖「无 Bun 时 `anet hub start` 的表现」这一条断言。
+       不覆盖 `anet -v` 顶行示例,也不覆盖安装命令里的版本 pin。
+
+## 复现命令(干净容器,装完断网跑)
+
+    docker build -t probe - <<'EOF'
+    FROM node:22-bookworm-slim
+    RUN npm i -g @sleep2agi/agent-network@latest
+    EOF
+    docker run --rm --network none probe sh -c 'anet hub start; echo exit=$?'
+
+`--network none` 是刻意的:探针默认目标是生产 hub,不断网会短路成
+`already running`,被测分支根本不执行(本仓记录过这个坑)。
+
+## latest → 2.2.21
+
+      Starting CommHub Server on port 9200 (bind 127.0.0.1)...
+    node:events:497
+          throw er; // Unhandled 'error' event
+    Error: spawn bunx ENOENT
+        at ChildProcess._handle.onexit (node:internal/child_process:285:19)
+      errno: -2, code: 'ENOENT', syscall: 'spawn bunx', path: 'bunx'
+    exit=1
+
+## 同一容器 preview → 2.3.0-preview.39
+
+      ❌ anet hub start requires the Bun runtime (commhub-server is bun-only —
+         uses Bun.serve + bun:sqlite, no Node fallback).
+    exit=1
+
+## 两条通道退出码相同,都是 1
+
+差别不在退出码,纯在可读性。脚本包装(`|| exit`)两边行为一致。
+
+## 坐标
+
+    @sleep2agi/agent-network   latest 2.2.21   preview 2.3.0-preview.39
+    (preflight 实现在 agent-network/bin/cli.ts;commhub-server 的版本
+     只在 preflight 通过之后才相关,不是本条断言的坐标)
+
+## 边界
+
+- 容器刻意无 bun。装了 bun 的机器不会走到这个分支 —— 这不是
+  「所有 latest 用户都会崩」,是「没有 bun 的新机器上会」;
+- `--network none` 保证不接触外部服务,同时意味着未验证联网场景。
