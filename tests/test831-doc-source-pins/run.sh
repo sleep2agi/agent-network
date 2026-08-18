@@ -305,21 +305,31 @@ echo "  MUTATION_RED write-baseline-refuses-new-failure rc=$rc12"
 
 # ③ 引用消失时要删对,并保留表头注释
 BL_BEFORE=$(grep -cv '^\s*#\|^\s*$' "$BASELINE")
+# 🔴 造场景用的 SHA 必须是**仓里不可能出现的**合成值,不能借用一个真实提交。
+#    原来这里用 22ed1886 —— 而 #834 之后 changelog 里**真的**有
+#    `blob/22ed1886/server/src/index.ts#L253`,于是下面的复原(全局把
+#    22ed1886 换回 main)会把那条真实的、有意为之的提交钉**改回会漂的 main 引用**,
+#    留下一个不在基线里的失效 pin,L7 末尾因此永远回不了绿。
+#    「合成值恰好不与真实数据相撞」是一个会过期的巧合,不是一条性质。
+#    另外把改过的文件名记下来,复原时只碰这些文件。
 python3 - "$ROOT" <<'PYX'
 import sys, pathlib
 root = pathlib.Path(sys.argv[1])
-# 造一个「引用消失」:把基线里某条 pin 的所有引用改锚到不可变 SHA
+FAKE = "0123456789abcdef0123456789abcdef01234567"   # 合成 SHA,仓里不会有
 base = [l.strip() for l in (root/'docs/doc-source-pins-baseline.txt').read_text(encoding='utf-8').splitlines()
         if l.strip() and not l.lstrip().startswith('#')]
 target = base[0]
 old = f"blob/main/{target}"
-new = f"blob/22ed1886/{target}"
-n = 0
+new = f"blob/{FAKE}/{target}"
+touched, n = [], 0
 for f in (root/'docs-site').rglob('*.md'):
     t = f.read_text(encoding='utf-8')
     if old in t:
-        f.write_text(t.replace(old, new), encoding='utf-8'); n += t.count(old)
-print(f"    (造场景:把 {target} 的 {n} 处引用改钉 SHA)")
+        n += t.count(old)
+        f.write_text(t.replace(old, new), encoding='utf-8')
+        touched.append(str(f))
+(root/'.l7-touched').write_text("\n".join(touched), encoding='utf-8')
+print(f"    (造场景:把 {target} 的 {n} 处引用改钉合成 SHA,涉及 {len(touched)} 个文件)")
 PYX
 out13=$(python3 "$CHECK" "$ROOT" --write-baseline) || fail "③ 有该删的条目时 --write-baseline 却非零"
 printf '%s' "$out13" | grep -qF "已改写基线" || fail "③ 没报告改写"
@@ -334,10 +344,18 @@ cd "$ROOT" && git status >/dev/null 2>&1 || true
 python3 - "$ROOT" <<'PYX'
 import sys, pathlib
 root = pathlib.Path(sys.argv[1])
-for f in (root/'docs-site').rglob('*.md'):
+FAKE = "0123456789abcdef0123456789abcdef01234567"
+listing = root/'.l7-touched'
+files = [pathlib.Path(p) for p in listing.read_text(encoding='utf-8').split("\n") if p.strip()] if listing.exists() else []
+for f in files:
     t = f.read_text(encoding='utf-8')
-    if 'blob/22ed1886/' in t:
-        f.write_text(t.replace('blob/22ed1886/', 'blob/main/'), encoding='utf-8')
+    f.write_text(t.replace(f"blob/{FAKE}/", "blob/main/"), encoding='utf-8')
+if listing.exists():
+    listing.unlink()
+# 断言复原彻底:合成 SHA 在整个 docs-site 里必须一个都不剩。
+left = [str(f) for f in (root/'docs-site').rglob('*.md') if FAKE in f.read_text(encoding='utf-8')]
+if left:
+    raise SystemExit(f"L7 复原不彻底,合成 SHA 仍残留于: {left}")
 PYX
 cp /tmp/bl7.bak "$BASELINE"
 python3 "$CHECK" "$ROOT" >/dev/null || fail "L7 复原之后没有回绿"
