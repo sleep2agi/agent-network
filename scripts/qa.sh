@@ -78,6 +78,12 @@ L1_TESTS=(
   # 才够格进这里 —— **先让它真的能红，再让 CI 跑它**。
   # 按 qa.sh 的真实调法(docker run --rm，不挂 /artifacts)实测 rc=0。
   "test236-dashboard-codex-goal"
+  # 2026-08-19 补注册。孤儿，但它本来就够格:两条 sed 变异后面都紧跟
+  # `grep -F '<变异后形态>' … >/dev/null`(锚点过期会当场红,而不是让变异变成 no-op),
+  # 且 :23-25 拿 resolver 的输出和【真实已安装的 SDK 版本】比,不是自证。
+  # 按 qa.sh 的真实调法(docker run --rm,不挂 /artifacts)实测 rc=0 pass=5 fail=0,
+  # 两条见证红都成立。耗时 build 105s + run 2s。
+  "test657-claude-native-version-pin"
   # 2026-08-18 补注册 —— 这四个是 #863 修好的那批(commit 61f7203a,「静默失效 6 周」
   # 实跑 4/4 从红到绿),但修完之后**没有注册到任何地方**,于是回到了同一个位置:
   # 没有任何东西会跑它们。#861 的实测把最后一个未知量补上了。
