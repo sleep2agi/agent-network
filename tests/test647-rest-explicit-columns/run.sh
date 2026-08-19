@@ -35,6 +35,20 @@ cp server/src/server.ts /tmp/test647-server.ts
 cp server/src/auth.ts /tmp/test647-auth.ts
 cp server/src/scheduled-tasks.ts /tmp/test647-scheduled-tasks.ts
 
+# 🔴 2026-08-19（#1096）：原来这里是裸的 `test "$X_rc" -ne 0`。
+#    在 set -e 下，变异**存活**（rc=0）会让脚本当场终止，**一个字都不打** ——
+#    日志停在上一行 echo 的标题上，读的人看不出是哪条变异活下来了、也看不出是不是脚本崩了。
+#    实测：L3b 的变异存活，整个套件的输出就停在
+#    「L3b witnessed-red: network membership SELECT-star leaks future column」这一行。
+#    下面这个函数把「静默死亡」换成一句能定位的话。判据的宽严一点没变。
+mutation_must_be_red() { # $1=变异名 $2=rc $3=那次运行的日志
+  if [ "$2" -ne 0 ]; then return 0; fi
+  echo "FAIL: mutation '$1' SURVIVED (rc=0) —— 这条变异没有被任何测试抓到，是**覆盖洞**，不是脚本错误" >&2
+  echo "      变异后的运行日志尾部：" >&2
+  tail -6 "$3" >&2 || true
+  exit 1
+}
+
 echo "L3a witnessed-red: task list SELECT-star leaks future column"
 sed -i 's/SELECT ${TASK_REST_SELECT} FROM tasks WHERE 1=1/SELECT * FROM tasks WHERE 1=1/' server/src/server.ts
 grep -Fq 'SELECT * FROM tasks WHERE 1=1' server/src/server.ts
@@ -42,7 +56,7 @@ set +e
 run_shape_test /tmp/test647-mut-task.db >/tmp/test647-mut-task.log 2>&1
 task_rc=$?
 set -e
-test "$task_rc" -ne 0
+mutation_must_be_red task-rest-select-star "$task_rc" /tmp/test647-mut-task.log
 grep -Fq 'future_internal_only' /tmp/test647-mut-task.log
 echo "MUTATION_RED: task-rest-select-star rc=$task_rc"
 cp /tmp/test647-server.ts server/src/server.ts
@@ -54,7 +68,7 @@ set +e
 run_shape_test /tmp/test647-mut-network.db >/tmp/test647-mut-network.log 2>&1
 network_rc=$?
 set -e
-test "$network_rc" -ne 0
+mutation_must_be_red network-rest-select-star "$network_rc" /tmp/test647-mut-network.log
 grep -Fq 'future_internal_only' /tmp/test647-mut-network.log
 echo "MUTATION_RED: network-rest-select-star rc=$network_rc"
 cp /tmp/test647-auth.ts server/src/auth.ts
@@ -66,7 +80,7 @@ set +e
 run_shape_test /tmp/test647-mut-schedule.db >/tmp/test647-mut-schedule.log 2>&1
 schedule_rc=$?
 set -e
-test "$schedule_rc" -ne 0
+mutation_must_be_red schedule-rest-select-star "$schedule_rc" /tmp/test647-mut-schedule.log
 grep -Fq 'future_internal_only' /tmp/test647-mut-schedule.log
 echo "MUTATION_RED: schedule-rest-select-star rc=$schedule_rc"
 cp /tmp/test647-scheduled-tasks.ts server/src/scheduled-tasks.ts
