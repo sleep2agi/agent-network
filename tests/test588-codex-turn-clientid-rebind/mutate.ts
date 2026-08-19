@@ -1,3 +1,8 @@
+// 🔴 2026-08-19（#1095）：产品把 `startResponseTimer` 改名成 `armResponseIdleTimer`，
+//   而且 onStarted 之后的上下文也从 `// A shared app-server WebSocket` 变成了 `const onActivity`。
+//   本文件的变异锚点还停在旧名字上 ⇒ replaceExact 命中 0 次 ⇒ 套件红在
+//   `expected one anchor ... found 0`。**守卫是对的、红得也准确**，是锚点过期。
+//   实测：全仓只剩本文件和另一个套件的 mutate.ts 还在用旧名，产品里 startResponseTimer 出现 0 次。
 import { readFileSync, writeFileSync } from "node:fs";
 
 const mutation = process.argv[2];
@@ -56,14 +61,14 @@ switch (mutation) {
     );
     break;
   case "timer_at_submission":
-    replaceExact(runtimePath, `    bridge.on("task_started", onStarted);`, `    bridge.on("task_started", onStarted);\n    startResponseTimer();`);
+    replaceExact(runtimePath, `    bridge.on("task_started", onStarted);`, `    bridge.on("task_started", onStarted);\n    armResponseIdleTimer();`);
     break;
   case "ignore_started_event":
-    replaceExact(runtimePath, `      startResponseTimer();\n    };\n\n    // A shared app-server WebSocket`, `      void ev;\n    };\n\n    // A shared app-server WebSocket`);
+    replaceExact(runtimePath, `      armResponseIdleTimer();\n    };\n    const onActivity`, `      void ev;\n    };\n    const onActivity`);
     break;
   case "identity_defer_unbounded":
-    replaceExact(runtimePath, `      startResponseTimer();\n    };\n\n    // A shared app-server WebSocket`, `      void ev;\n    };\n\n    // A shared app-server WebSocket`);
-    replaceExact(runtimePath, `        if (r.started) startResponseTimer();`, `        if (false && r.started) startResponseTimer();`);
+    replaceExact(runtimePath, `      armResponseIdleTimer();\n    };\n    const onActivity`, `      void ev;\n    };\n    const onActivity`);
+    replaceExact(runtimePath, `        if (r.started) armResponseIdleTimer();`, `        if (false && r.started) armResponseIdleTimer();`);
     break;
   case "wrong_task_arms_timer":
     replaceExact(runtimePath, `    const onStarted = (ev: { taskId: string; turnId: string; steered?: boolean }) => {\n      if (ev.taskId !== opts.taskId) return;`, `    const onStarted = (ev: { taskId: string; turnId: string; steered?: boolean }) => {\n      if (false && ev.taskId !== opts.taskId) return;`);
@@ -84,7 +89,7 @@ switch (mutation) {
   case "omit_left_fifo_response_fallback":
     replaceExact(
       runtimePath,
-      `        log(\`[codex-app-server] queue deadline reached after task left FIFO; arming response timeout for \${opts.taskId}\`);\n        startResponseTimer();\n        return;`,
+      `        log(\`[codex-app-server] queue deadline reached after task left FIFO; arming response timeout for \${opts.taskId}\`);\n        armResponseIdleTimer();\n        return;`,
       `        log(\`[codex-app-server] queue deadline reached after task left FIFO; response timeout omitted by mutation\`);\n        return;`,
     );
     break;

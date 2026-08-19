@@ -1,3 +1,8 @@
+// 🔴 2026-08-19（#1095）：产品把 `startResponseTimer` 改名成 `armResponseIdleTimer`，
+//   而且 onStarted 之后的上下文也从 `// A shared app-server WebSocket` 变成了 `const onActivity`。
+//   本文件的变异锚点还停在旧名字上 ⇒ replaceExact 命中 0 次 ⇒ 套件红在
+//   `expected one anchor ... found 0`。**守卫是对的、红得也准确**，是锚点过期。
+//   实测：全仓只剩本文件和另一个套件的 mutate.ts 还在用旧名，产品里 startResponseTimer 出现 0 次。
 import { readFileSync, writeFileSync } from "node:fs";
 
 const mutation = process.argv[2];
@@ -23,8 +28,8 @@ switch (mutation) {
   case "ignore_started_event":
     replaceExact(
       runtimePath,
-      `      startResponseTimer();\n    };\n\n    // A shared app-server WebSocket`,
-      `      void ev;\n    };\n\n    // A shared app-server WebSocket`,
+      `      armResponseIdleTimer();\n    };\n    const onActivity`,
+      `      void ev;\n    };\n    const onActivity`,
     );
     break;
   case "wrong_task_arms_timer":
@@ -37,8 +42,11 @@ switch (mutation) {
   case "omit_bridge_started_event":
     replaceExact(
       bridgePath,
-      `    this.emit("task_started", { taskId: input.taskId, turnId, steered: false });`,
-      `    void turnId;`,
+      // 🔴 #1095：产品这段从单行 { taskId: input.taskId, turnId, ... } 改成了多行
+      //   { taskId: pending.taskId, ... }。正确的锚点**隔壁 test588 已经有了**
+      //   （tests/test588-codex-turn-clientid-rebind/mutate.ts 的同名 case），照抄它，不另发明。
+      `    this.emit("task_started", {\n      taskId: pending.taskId,\n      turnId: pending.turnId,\n      steered: false,\n    });`,
+      `    void pending;`,
     );
     break;
   case "omit_steer_started_event":
