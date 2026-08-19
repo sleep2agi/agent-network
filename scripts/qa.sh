@@ -91,6 +91,15 @@ L1_TESTS=(
   # 按 qa.sh 真实调法(docker run --rm，不挂 /artifacts)实测 rc=0 RESULT pass=14 fail=0，
   # 四条见证红全成立；耗时 build 104s + run 39s(L1 里较重的一个)。
   "test654-dashboard-managed-launch"
+  # 2026-08-19 补注册。它此前是孤儿**而且在 main 上就是红的** ——
+  # `[[ "$SDK_VERSION" == 0.3.226 ]]` 是逐字相等，而 package.json 是 `^0.3.226`、
+  # 本套件 Dockerfile 不拷 lockfile ⇒ 解析到当时最新的 0.3.x，上游发到 0.3.235 就红。
+  # #1082 改成地板之后才够格（先修红、再登记）。
+  # 实测（按 qa.sh 真实调法 docker run --rm，不挂 /artifacts）：rc=0 RESULT pass=8 fail=0。
+  # 🔴 耗时按**冷构建**记：build 107s + run 33s = 140s（warm 只有 37s，会误导）。
+  # 推算：L1 24 条=3.50min → 25 条=5.32min；再加这个同量级的 ≈7min，
+  # 在 qa.yml:414 那个 10 分钟守卫内（那个守卫上一轮刚从 5 调到 10，原因见该处注释）。
+  "test656-claude-sdk-tool-aliases"
   # 2026-08-18 补注册 —— 这四个是 #863 修好的那批(commit 61f7203a,「静默失效 6 周」
   # 实跑 4/4 从红到绿),但修完之后**没有注册到任何地方**,于是回到了同一个位置:
   # 没有任何东西会跑它们。#861 的实测把最后一个未知量补上了。

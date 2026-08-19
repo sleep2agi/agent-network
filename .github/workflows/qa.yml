@@ -30,6 +30,7 @@ on:
       # reached through scripts/qa.sh L1_TESTS and the e2e workflow; the other
       # ~160 dirs under tests/ are not run by any workflow, so listing them
       # would only look like coverage.
+      - 'tests/test656-claude-sdk-tool-aliases/**'
       - 'tests/test654-dashboard-managed-launch/**'
       - 'tests/test657-claude-native-version-pin/**'
       - 'tests/test236-dashboard-codex-goal/**'
@@ -147,6 +148,7 @@ on:
       # reached through scripts/qa.sh L1_TESTS and the e2e workflow; the other
       # ~160 dirs under tests/ are not run by any workflow, so listing them
       # would only look like coverage.
+      - 'tests/test656-claude-sdk-tool-aliases/**'
       - 'tests/test654-dashboard-managed-launch/**'
       - 'tests/test657-claude-native-version-pin/**'
       - 'tests/test236-dashboard-codex-goal/**'
