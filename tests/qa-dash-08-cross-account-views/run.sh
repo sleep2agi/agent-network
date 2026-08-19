@@ -8,6 +8,8 @@
 #   /api/nodes / /api/stats / /api/completions / /api/auth/tokens
 #   + 显式 ?to_name=<alice-agent> filter / ?from_name=alice 等过滤参数
 set -euo pipefail
+# 绑了还要看得见（#1092）：报告里没有这一行，就没法把这次运行钉到某个提交上。
+printf 'source_commit=%s\n' "${SOURCE_COMMIT:-unknown}"
 
 export HOME=/tmp/anethome
 

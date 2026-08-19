@@ -9,6 +9,8 @@
 #   2. actor 列正确归属（admin 发 → admin；agent 回 → agent alias）
 #   3. /api/task_events?task_id=<id> 返回该 task 全部事件，created_at DESC 排序
 set -euo pipefail
+# 绑了还要看得见（#1092）：报告里没有这一行，就没法把这次运行钉到某个提交上。
+printf 'source_commit=%s\n' "${SOURCE_COMMIT:-unknown}"
 
 export HOME=/tmp/anethome
 

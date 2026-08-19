@@ -4,6 +4,8 @@
 # 用户也可以单独撤销自己的 ntok。
 # L1 contract test，纯黑盒。
 set -euo pipefail
+# 绑了还要看得见（#1092）：报告里没有这一行，就没法把这次运行钉到某个提交上。
+printf 'source_commit=%s\n' "${SOURCE_COMMIT:-unknown}"
 
 export HOME=/tmp/anethome
 
