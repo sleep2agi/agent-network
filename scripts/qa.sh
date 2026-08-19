@@ -204,6 +204,13 @@ L1_TESTS=(
   "test-npm-security"
   "test648-probe-ip-pin"
   "qa-frontdoor-docs"
+  # 2026-08-20 补注册。此前是孤儿且在 main 上 5 passed / 12 failed ——
+  # 12 条全是**一个**根因的级联：node_name 铸成 `agent-a-node` 而别名是 `agent-a`，
+  # 差一个 -node 后缀 ⇒ 撞 #203 身份守卫，第一步 report_status 就死。
+  # **不是回归**（同 #1113 test198、#1121 test12，这是同一根因的第三次）。
+  # 修法照前两次：先把守卫钉成一条断言，再用一致身份走 happy path。
+  # 实测：修前 5/12 → 修后 **18 passed / 0 failed**。
+  "test13-multi-channel"
   # 2026-08-20 补注册这 4 个。它们是**本来就绿**的孤儿 ——
   # 干净 worktree（无 node_modules）+ --no-cache，宿主钉在 f13699ff == origin/main，
   # 四个全部 build=0 run=0。登记它们不是修 bug，是把「验过的绿」变成「有门守着的绿」：

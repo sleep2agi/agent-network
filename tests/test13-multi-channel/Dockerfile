@@ -6,4 +6,7 @@ RUN cd server && bun install
 COPY tests/test13-multi-channel/run.sh /app/run.sh
 RUN chmod +x /app/run.sh
 ENV COMMHUB_AUTH_TOKEN=test-auth-token
+ARG TEST13_SOURCE_COMMIT=dev
+ENV TEST13_SOURCE_COMMIT=$TEST13_SOURCE_COMMIT
+
 CMD ["bash", "/app/run.sh"]
