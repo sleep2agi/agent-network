@@ -83,7 +83,6 @@ test648-probe-ip-pin
 test650-anet-attach
 test673-claude-image-attachment-block
 test7-config
-test8-runtime
 test9-permissions
 qa-core-docs
 qa-frontdoor-docs

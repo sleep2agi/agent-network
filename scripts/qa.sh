@@ -140,6 +140,21 @@ L1_TESTS=(
   # 见证红：把漂移那次改用绑定别名 ⇒ 那条断言变红
   #   FAIL: drifted alias was NOT rejected by the #203 guard, got: {"ok":true,...}
   "test198-from-alias"
+  # 2026-08-20 补注册。它此前是孤儿**且在 main 上是 4 passed / 4 failed**，
+  # 红因共 6 层，**没有一条是回归** —— 全是产品前进、套件写在它之前：
+  #   ① 脚本全程用 master token（server/src/server.ts:169-170 已废弃它的写操作）
+  #   ② 我修 ① 时只改了两个 helper，**漏了内联的 SSE curl**（同一规则的第三个调用点）
+  #   ③ agent-node 自己读 /root/.anet/config.json，里面也是 master token
+  #   ④ utok_ 没有隐式 network，四类调用点都要显式带（含 SSE URL —— 我又漏过一次，
+  #      因为我数的是「认证头」，而 network 作用域落在**另一组端点**上）
+  #   ⑤ 节点注册要 **ntok_**（app-level rejection: network_token_required），
+  #      且按 #203 其 node_name 必须与别名一致
+  #   ⑥ --runtime http-api 已移出 agent-node 白名单（同 #1112③）
+  # 🔴 修法方向是**加断言不是减断言**：8 → 13 条，其中 3 条是新增的负向/边界断言
+  #   （master token 写操作必须 401 · utok_ 调 report_status 必须 network_token_required
+  #     · ntok_ 铸造别名一致）。
+  # 干净 worktree + --no-cache 实测：修前 4 passed/4 failed → 修后 **13 passed/0 failed**。
+  "test8-runtime"
   # 2026-08-19 批量补注册这 7 个。全部按 qa.sh 的真实调法（docker run --rm，不挂 /artifacts）
   # 实测 rc=0；本机耗时（build+run）：
   #   test652 3+4s · test653 8+4s · test-goal-cli 21+2s · test702 23+33s
