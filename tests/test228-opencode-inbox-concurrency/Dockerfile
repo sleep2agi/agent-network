@@ -11,4 +11,8 @@ RUN cd /agent-node-src && bun install --frozen-lockfile
 COPY tests/test228-opencode-inbox-concurrency/run.sh /test228/run.sh
 RUN chmod +x /test228/run.sh
 
+ARG TEST228_SOURCE_COMMIT=dev
+ENV TEST228_SOURCE_COMMIT=$TEST228_SOURCE_COMMIT
+LABEL org.opencontainers.image.revision=$TEST228_SOURCE_COMMIT
+
 CMD ["bash", "/test228/run.sh"]
