@@ -193,6 +193,17 @@ L1_TESTS=(
   #   见证红（把注册改回 master token）⇒ **5 passed / 8 failed** ——
   #   也就是说那条断言现在真的会咬人，而改之前它在同样情况下会打印 PASS。
   "test11-lifecycle"
+  # 2026-08-20 补注册这 3 个**本来就绿**的孤儿（干净 worktree + --no-cache，宿主 986f8aba，三个 rc=0）。
+  # 🔴 而登记前逐个核了三格，每一格今晚都有人（含我自己）栽过：
+  #   ① shebang —— qa-frontdoor-docs 的入口是 **run.mjs**（Node）不是 run.sh，
+  #      断言写成 bash 的 [[ ]] 在那里根本不会执行；已改用 JS 版。
+  #   ② ARG 名能不能被本文件下面那条 `^ARG (SOURCE_COMMIT|TEST[0-9]+_SOURCE_COMMIT)` 匹配到 ——
+  #      我第一版给 test-npm-security 起名 TESTNPMSEC_SOURCE_COMMIT，**当场校验发现不匹配**
+  #      （套件名里没有数字 ⇒ 只能用裸 SOURCE_COMMIT）。不匹配时 qa.sh **不传且不报错**。
+  #   ③ ARG 名与运行时 ENV 名是否一致（test573 那次就是两者不同，断言查了个不存在的变量）。
+  "test-npm-security"
+  "test648-probe-ip-pin"
+  "qa-frontdoor-docs"
   # 2026-08-20 补注册这 4 个。它们是**本来就绿**的孤儿 ——
   # 干净 worktree（无 node_modules）+ --no-cache，宿主钉在 f13699ff == origin/main，
   # 四个全部 build=0 run=0。登记它们不是修 bug，是把「验过的绿」变成「有门守着的绿」：

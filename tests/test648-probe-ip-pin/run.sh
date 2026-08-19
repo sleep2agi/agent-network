@@ -9,6 +9,13 @@ exec > >(tee -a "$REPORT") 2>&1
 cd /workspace
 
 echo "# test648 — pre-validated DNS IP pin"
+# 🔴 原来这里只 print 不校验 ⇒ 缺 build-arg 时它打印 source_commit=dev 而**照样 rc=0**。
+# 实测：不传 build-arg ⇒ rc=0（本该是 1）。四道门全 PASS 也没发现 ——
+# 因为门检查的是「ARG 在不在 + source_commit 可不可见」，而不是「绑定是否真的成立」。
+[[ "${TEST648_SOURCE_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]] || {
+  echo 'FAIL: TEST648_SOURCE_COMMIT must be one full lowercase Git SHA' >&2
+  exit 1
+}
 echo "source_commit=${TEST648_SOURCE_COMMIT:-unknown}"
 echo "node=$(node --version)"
 echo "bun=$(bun --version)"

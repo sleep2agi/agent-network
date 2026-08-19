@@ -19,7 +19,6 @@ qa-rfc024-config-apply
 qa-rfc026-create-node
 qa-rfc027-stop-delete
 qa-rfc028-provider-probe
-test-npm-security
 test-rfc029-pr1-registration
 test-rfc029-pr2-acp-shim
 test-rfc029-pr3-preset
@@ -71,11 +70,9 @@ test588-codex-turn-clientid-rebind
 test6-networks
 test608-claude-cli-dependency
 test616-feishu-docker-bootstrap
-test648-probe-ip-pin
 test650-anet-attach
 test673-claude-image-attachment-block
 test7-config
 test9-permissions
 qa-core-docs
-qa-frontdoor-docs
 test-rename-identity

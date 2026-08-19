@@ -1,6 +1,15 @@
 #!/bin/bash
 # NPM package security boundary test
 
+
+# SHA 绑定。🔴 变量名必须能被 scripts/qa.sh:359 的 `^ARG (SOURCE_COMMIT|TEST[0-9]+_SOURCE_COMMIT)`
+# 匹配到，否则 qa.sh **不传且不报错**。本套件名里没有数字 ⇒ 只能用裸 SOURCE_COMMIT。
+[[ "${SOURCE_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]] || {
+  echo 'FAIL: SOURCE_COMMIT must be one full lowercase Git SHA' >&2
+  exit 1
+}
+printf 'source_commit=%s\n' "$SOURCE_COMMIT"
+
 PASS=0
 FAIL=0
 AUTH_TOKEN="${COMMHUB_AUTH_TOKEN:-test-auth-token}"
