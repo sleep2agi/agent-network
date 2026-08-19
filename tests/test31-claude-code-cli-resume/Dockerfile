@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends bash nodejs npm
     rm -rf /var/lib/apt/lists/*
 
 COPY agent-network/ agent-network/
+COPY tests/lib/safe-rm.sh /lib/safe-rm.sh
 COPY tests/test31-claude-code-cli-resume/run.sh /app/run.sh
 RUN chmod +x /app/run.sh
 

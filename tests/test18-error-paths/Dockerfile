@@ -5,6 +5,7 @@ COPY server/ server/
 RUN cd server && bun install
 COPY agent-network/ agent-network/
 RUN cd agent-network && bun install
+COPY tests/lib/safe-rm.sh /lib/safe-rm.sh
 COPY tests/test18-error-paths/run.sh /app/run.sh
 RUN chmod +x /app/run.sh
 ENV COMMHUB_AUTH_TOKEN=test-auth-token
