@@ -24,4 +24,8 @@ RUN chmod +x /app/run.sh
 
 ENV COMMHUB_AUTH_TOKEN=test-auth-token
 
+ARG TEST8_SOURCE_COMMIT=dev
+ENV TEST8_SOURCE_COMMIT=$TEST8_SOURCE_COMMIT
+LABEL org.opencontainers.image.revision=$TEST8_SOURCE_COMMIT
+
 CMD ["bash", "/app/run.sh"]
