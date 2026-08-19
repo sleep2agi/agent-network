@@ -19,7 +19,6 @@ qa-rfc024-config-apply
 qa-rfc026-create-node
 qa-rfc027-stop-delete
 qa-rfc028-provider-probe
-test-goal-cli
 test-npm-api
 test-npm-install
 test-npm-security
@@ -75,13 +74,11 @@ test386-opencode-agent-node-gate
 test4-base
 test466-codex-copresence-p3
 test520-ack-inbox-docs
-test520-dashboard-attachment-read
 test520-task-runtime-evidence
 test535-codex-copresence-docs
 test573-codex-turn-reconcile
 test575-opencode-reply-ownership
 test583-dashboard-chat-idempotency
-test584-dashboard-codex-delivery
 test587-codex-start-relative-timeout
 test588-codex-turn-clientid-rebind
 test6-networks
@@ -89,12 +86,8 @@ test608-claude-cli-dependency
 test616-feishu-docker-bootstrap
 test648-probe-ip-pin
 test650-anet-attach
-test652-admin-network-list
-test653-batch-workdir
 test673-claude-image-attachment-block
-test696-human-low-value-reply
 test7-config
-test702-primary-network
 test8-runtime
 test9-permissions
 qa-core-docs

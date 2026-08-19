@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# 绑了还要看得见（#1092）：报告里没有这一行，就没法把这次运行钉到某个提交上。
+printf 'source_commit=%s\n' "${SOURCE_COMMIT:-unknown}"
 
 ROOT="/workspace"
 ARTIFACT_DIR="${ARTIFACT_DIR:-/artifacts}"
