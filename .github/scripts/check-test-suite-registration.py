@@ -92,11 +92,29 @@ def read(p: pathlib.Path) -> str:
         return ""
 
 
-def suites() -> list[str]:
-    if not TESTS.is_dir():
+def is_suite_dir(d: pathlib.Path) -> bool:
+    """一个目录算不算「测试套件」。
+
+    🔴 2026-08-19：这里原本只认 `run.sh`，于是 7 个真套件**从来没被这道门见过** ——
+    既不会被报成孤儿，也不在打印的 `suites=N` 分母里。它们的入口分别是
+    `Dockerfile`（qa-ut-0*/qa-*-docs）、`Dockerfile.*`+`docker-compose.yml`
+    （test380-gateway-topology-probe）、`run-all.sh`（test-rename-identity，另有 Dockerfile）。
+
+    **盲区在取集，不在判据** —— classify() 一直是对的，只是它拿不到这些名字。
+    `helpers` / `lib` / `scripts` 三个支持目录三种入口都没有，仍然被排除。
+    """
+    if (d / "run.sh").exists() or (d / "docker-compose.yml").exists():
+        return True
+    return any(f.is_file() and (f.name == "Dockerfile" or f.name.startswith("Dockerfile."))
+               for f in d.iterdir())
+
+
+def suites(tests_dir: pathlib.Path | None = None) -> list[str]:
+    # tests_dir 可注入：selftest 要能对**取集本身**做夹具，见 selftest()。
+    root = TESTS if tests_dir is None else tests_dir
+    if not root.is_dir():
         return []
-    return sorted(d.name for d in TESTS.iterdir()
-                  if d.is_dir() and (d / "run.sh").exists())
+    return sorted(d.name for d in root.iterdir() if d.is_dir() and is_suite_dir(d))
 
 
 def registration_blob() -> str:
@@ -217,7 +235,14 @@ def main() -> int:
 
 
 def selftest() -> int:
-    """判据自检。绿和「取集坏了」打印出来是两码事，这里把两者都钉住。"""
+    """判据自检 + **取集自检**。
+
+    🔴 2026-08-19：这句 docstring 原本就写着「两者都钉住」，但代码只钉了判据 ——
+    下面的 classify 用例把名字**直接喂进去**，从不经过 suites()；而且每个夹具都写了
+    run.sh，所以即便经过也测不出「只认 run.sh」这个盲区。
+    **一句没兑现的承诺，长在最能阻止别人复查的位置上。**
+    真实后果：7 个套件从来没被这道门见过（issue #1064）。
+    """
     import tempfile
     cases = [
         # (目录名, 是否出现在注册表, 是否有 NOT-IN-CI.md, 是否在基线, 期望判为新孤儿)
@@ -241,6 +266,28 @@ def selftest() -> int:
             if got != want:
                 bad += 1
                 print(f"SELFTEST 失配: {name} got={got} want={want}")
+    # ── 取集自检：夹具走 suites()，不直接喂名字 ──────────────────
+    # 每条只放一种入口文件，钉住「哪些形状算套件」。
+    collect_cases = [
+        ("c-run",       ["run.sh"],                              True),
+        ("c-docker",    ["Dockerfile"],                          True),   # qa-ut-0* / qa-*-docs
+        ("c-compose",   ["docker-compose.yml"],                  True),   # test383
+        ("c-dockerdot", ["Dockerfile.harness"],                  True),   # test380-gateway
+        ("c-support",   ["helper.sh", "README.md"],              False),  # lib / scripts / helpers
+    ]
+    with tempfile.TemporaryDirectory() as td2:
+        root = pathlib.Path(td2)
+        for name, files, _ in collect_cases:
+            (root / name).mkdir(parents=True, exist_ok=True)
+            for f in files:
+                (root / name / f).write_text("x\n", encoding="utf-8")
+        got_names = set(suites(root))
+        for name, _, want in collect_cases:
+            if (name in got_names) != want:
+                bad += 1
+                print(f"SELFTEST 取集失配: {name} collected={name in got_names} want={want}")
+    cases = cases + collect_cases
+
     print(f"selftest {len(cases) - bad}/{len(cases)}")
     return 1 if bad else 0
 
