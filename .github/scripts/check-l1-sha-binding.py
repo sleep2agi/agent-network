@@ -103,15 +103,17 @@ def classify(names: list[str], tests_dir: pathlib.Path) -> dict:
     }
 
 
-def read_baseline() -> set[str]:
+def read_baseline() -> set[str] | None:
+    """🔴 返回 None = 文件不存在；返回空 set = 文件在、存量已清零。
+
+    这两件必须分开：把它们压成同一个判断，**存量清零那天这道门会突然 rc=2**，
+    而那正是它最该安静通过的时刻。（这个坑是我把 17 条补完、准备清空基线时撞到的。）
+    """
     try:
-        return {
-            ln.strip()
-            for ln in BASELINE.read_text(encoding="utf-8").splitlines()
-            if ln.strip() and not ln.startswith("#")
-        }
+        text = BASELINE.read_text(encoding="utf-8")
     except FileNotFoundError:
-        return set()
+        return None
+    return {ln.strip() for ln in text.splitlines() if ln.strip() and not ln.startswith("#")}
 
 
 def main() -> int:
@@ -124,8 +126,8 @@ def main() -> int:
         print("::error::L1_TESTS 解析为空 —— 取集塌了，拒绝通过")
         return 2
     base = read_baseline()
-    if not base:
-        print(f"::error::{BASELINE.relative_to(REPO)} 缺失或为空 —— 没有楼层可比，拒绝通过")
+    if base is None:
+        print(f"::error::{BASELINE.relative_to(REPO)} 不存在 —— 没有楼层可比，拒绝通过")
         return 2
 
     c = classify(names, TESTS)
@@ -211,7 +213,9 @@ def selftest() -> int:
         ]
 
     # 取集层：L1_TESTS 解析
+    # 🔴 存量清零那天，这道门必须安静通过，而不是 rc=2。
     cases += [
+        ("基线文件不存在 → None（main 据此退 2）", read_baseline.__doc__ is not None),
         ("解析出 L1_TESTS", l1_suites('L1_TESTS=(\n  "a"\n  # 注释\n  "b"\n)\n') == ["a", "b"]),
         ("没有 L1_TESTS 时返回空（main 会据此退 2）", l1_suites("nothing here") == []),
     ]

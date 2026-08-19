@@ -8,6 +8,8 @@
 # 这是 NODE-04 (agent-node 自重连) 的 hub-side 半边。real anet node CLI 的
 # 自动重连逻辑是另一半，需要 NODE-04b 用真 anet node 进程测。
 set -euo pipefail
+# 绑了还要看得见（#1092）：报告里没有这一行，就没法把这次运行钉到某个提交上。
+printf 'source_commit=%s\n' "${SOURCE_COMMIT:-unknown}"
 
 export HOME=/tmp/anethome
 

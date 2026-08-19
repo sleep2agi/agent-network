@@ -10,6 +10,8 @@
 #
 # 是 [docker-e2e SC01] / [test30] 等之外，专 pin **CLI 输出 + 用户能否上手** 的 L2 smoke。
 set -euo pipefail
+# 绑了还要看得见（#1092）：报告里没有这一行，就没法把这次运行钉到某个提交上。
+printf 'source_commit=%s\n' "${SOURCE_COMMIT:-unknown}"
 
 export HOME=/tmp/anethome
 

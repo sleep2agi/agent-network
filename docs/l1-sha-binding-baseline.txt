@@ -12,20 +12,6 @@
 #   —— 不是打印，是**断言**，拿不到 SHA 就 fail closed。
 #
 # 生成于 origin/main e0f97d5c，2026-08-19：L1 共 30 条，其中 17 条无绑定。
-qa-cli-01-hub-start
-qa-cli-02-network-create
-qa-dash-07-auth-boundary
-qa-dash-08-cross-account-views
-qa-dash-10-incremental-poll
-qa-hub-05-roundtrip
-qa-hub-06-token-revoke
-qa-hub-06b-cross-user-isolation
-qa-hub-07-sse-reconnect
-qa-hub-08-restart-persistence
-qa-hub-09-task-state-machine
-qa-hub-10-network-scope-regressions
-qa-hub-11-node-delete-sse
-qa-hub-12-servers-endpoint
-qa-hub-13-server-health-agents
-qa-node-02-success-reply
-qa-node-03b-task-events
+# 🔴 2026-08-19：**存量已清零**（17 → 0）。这份文件现在是空的，而它必须存在 ——
+#    「文件不存在」和「存量清零」在这道门里是两件事：前者 rc=2（没有楼层可比），
+#    后者安静通过。删掉这个文件会让门以为楼层丢了。

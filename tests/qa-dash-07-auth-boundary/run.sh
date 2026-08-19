@@ -9,6 +9,8 @@
 # 直接 curl hub REST，不起 dashboard 前端。dashboard 视觉 + 路由
 # 由 dashboard repo Playwright 在 docker-e2e 里覆盖（保护资产）。
 set -euo pipefail
+# 绑了还要看得见（#1092）：报告里没有这一行，就没法把这次运行钉到某个提交上。
+printf 'source_commit=%s\n' "${SOURCE_COMMIT:-unknown}"
 
 export HOME=/tmp/anethome
 

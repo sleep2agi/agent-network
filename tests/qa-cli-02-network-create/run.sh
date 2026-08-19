@@ -6,6 +6,8 @@
 # 测的是 CLI binary 这一层 — 输出格式 + 本地 config 落地 + REST 调用。
 # REST 本身已被 qa-hub-05 覆盖，这条专测 CLI 包装层。
 set -euo pipefail
+# 绑了还要看得见（#1092）：报告里没有这一行，就没法把这次运行钉到某个提交上。
+printf 'source_commit=%s\n' "${SOURCE_COMMIT:-unknown}"
 
 export HOME=/tmp/anethome
 
