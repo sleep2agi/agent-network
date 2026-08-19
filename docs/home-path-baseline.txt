@@ -1,15 +1,27 @@
-# 每行:<文件>\t<该文件里 /home/<人名>/ 的出现次数>
+# 每行:<文件>\t<该文件里 /home/<人名> 的出现次数>
 # 这是一个**上限**,不是目标。它存在的意义是让「新增」变红,而不是让「存量」变红——
 # 一道只因积压而红的门,等积压清完就再也不会红,到时没人知道它还有没有效。
 # 清理某个文件之后,把它这一行的数字改小(或整行删掉),楼层就只会往下走、不会悄悄回填。
-# 生成于 origin/main,2026-08-18:203 次 / 71 文件 / 共扫 2000 个跟踪文件。
+#
+# 🔴 2026-08-19 重算,因为**判据的覆盖面变了**,不是因为存量变多了:
+#   ① 不再要求结尾斜杠 ⇒ 多看见 38 处 / 20 个文件(`ENV HOME=/home/<名>`、
+#      `chown -R <名>:<名> /home/<名>` 这类恰好是这个门最该看见的形状,原先隐形)
+#   ② 加了根边界     ⇒ 去掉 18 处误报(`/runtime/home/x/`、`$case_root/home/.anet`
+#      里的 `/home/` 不是系统家目录)
+#   净效果 198 → 218。**地板变高 = 看见的东西变多,不是更宽容。**
+#   下一次有人想再动这两个数,请先读 .github/scripts/check-home-path-baseline.py
+#   里 HOME_PATH 上方那段注释。
+# 生成于 origin/main 3fd3e4bb,2026-08-19:218 次 / 76 文件 / 共扫 2090 个跟踪文件。
+.github/scripts/check-no-memory-slugs.py	1
+AGENTS.md	1
+agent-network/bin/cli.ts	1
 agent-network/docs/lessons/2026-05-28-mcp-json-shared-identity-pollution.md	3
 agent-network/docs/tests/report-grok-build-capability.txt	4
 agent-network/scripts/README.md	3
 agent-network/scripts/opencode-node-start.sh	4
 agent-network/scripts/pm2-opencode.config.cjs	3
-agent-network/src/batch-workdir.test.ts	3
-agent-network/src/grok-copresence-profile.test.ts	5
+agent-network/src/batch-workdir.test.ts	8
+agent-network/src/grok-copresence-profile.test.ts	13
 agent-network/src/project-key.ts	1
 agent-network/src/tmux-pane-prompt.test.ts	1
 agent-network/tests/project-key.test.ts	6
@@ -26,8 +38,8 @@ docs/anet-codex-remote-control-plan.md	1
 docs/codex-cli-direct-comm-research.md	1
 docs/grok-build-runtime.md	2
 docs/research/codex-sdk-goal-feasibility.md	1
-docs/research/grok-video-gen-capability-probe.en.md	3
-docs/research/grok-video-gen-capability-probe.md	3
+docs/research/grok-video-gen-capability-probe.en.md	4
+docs/research/grok-video-gen-capability-probe.md	4
 docs/research/grok-x-search-capability-probe.en.md	1
 docs/research/grok-x-search-capability-probe.md	1
 docs/research/intern-tool-calling-investigation.md	1
@@ -35,6 +47,7 @@ docs/research/sdk-concurrency-investigation.md	1
 docs/rfcs/RFC-005-codex-code-cli-runtime.md	1
 docs/runbooks/opencode-tui-copresence.md	1
 docs/sdk-upgrade-2026-05-12-baseline.md	4
+docs/tests/p-214-wave2-harness/Dockerfile.7fix	1
 docs/tests/p-498-reply-warning/witnessed-red.txt	1
 docs/tests/p-517-mcp-write-scope/witnessed-red-p2-ghost.txt	3
 docs/tests/p-517-mcp-write-scope/witnessed-red-pins-sabotage.txt	21
@@ -48,27 +61,30 @@ docs/tests/report-test227-live-uat.txt	1
 docs/tests/report-test227.txt	2
 docs/tests/report-test229-opencode-final-review-packet.txt	1
 docs/tests/report-test231-grok-socket-sandbox-green.txt	2
-docs/tests/report-test231-grok-socket-sandbox-red.txt	2
+docs/tests/report-test231-grok-socket-sandbox-red.txt	4
 docs/tests/report-test231-grok-socket-sandbox-summary.txt	1
 docs/tests/report-test232-live-uat.txt	1
 docs/tests/report-test386.txt	2
 docs/tests/report-test573.txt	2
 docs/tests/report-test653-batch-workdir.txt	1
 docs/tests/report-test735-hub-daemon-rebuild.txt	1
+docs/troubleshooting/rm-rf-incident-2026-06-16.md	2
 server/src/uploads.test.ts	1
+tests/lib/safe-rm.sh	2
+tests/qa-222-cross-host-attachments/Dockerfile	1
 tests/test-rename-identity/lib/helpers.sh	1
 tests/test225-grok-preview-package-live/auth-evidence-diagnostic.test.mjs	1
-tests/test225-grok-preview-package-live/run.sh	3
-tests/test231-grok-socket-sandbox/run.sh	7
+tests/test231-grok-socket-sandbox/run.sh	10
+tests/test231-grok-socket-sandbox/socket-path.ts	1
+tests/test232-grok-xsearch-process-profile/run-tui.sh	1
 tests/test380-gateway-topology-probe/docker-compose.yml	1
 tests/test383-thinking-only-fallback/docker-compose.yml	1
-tests/test386-opencode-agent-node-gate/Dockerfile	9
-tests/test386-opencode-agent-node-gate/nonroot-real-package.ts	11
-tests/test653-batch-workdir/run.sh	9
+tests/test386-opencode-agent-node-gate/Dockerfile	11
+tests/test386-opencode-agent-node-gate/nonroot-real-package.ts	12
 tests/test698-atomic-peer-reply/cli-wiring-e2e.ts	2
 tests/test698-atomic-peer-reply/legacy-cli-failure-e2e.ts	1
 tests/test698-atomic-peer-reply/legacy-wire-e2e.ts	2
-tests/test735-hub-daemon-rebuild/run.sh	6
-tests/test736-pm2-fleet-rebuild/Dockerfile	2
-tests/test736-pm2-fleet-rebuild/run.sh	1
-tests/test765-batch-runtime-gate/run.sh	2
+tests/test735-hub-daemon-rebuild/Dockerfile	1
+tests/test735-hub-daemon-rebuild/run.sh	2
+tests/test736-pm2-fleet-rebuild/Dockerfile	4
+tests/test736-pm2-fleet-rebuild/run.sh	2
