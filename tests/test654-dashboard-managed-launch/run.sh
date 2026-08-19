@@ -27,6 +27,20 @@ expect_red(){
   if "$@" >"$ART/$name.log" 2>&1; then bad "mutation $name stayed green"; else ok "mutation $name witnessed red"; fi
 }
 
+# 🔴 变异必须真的改动文件，否则算【测试锚点过期】而不是产品缺陷。
+#    为什么这里**不能**用本仓另一种常见写法 `grep -F '<变异后的形态>' <文件>`：
+#      · 下面第一条变异把 `input.healthy && record.source === … && record.source_key === …`
+#        换成 `input.healthy` —— **变异后的形态是原文的子串**，grep 它变异前也命中，
+#        那会是一个恒真的守卫；
+#      · 后两条是**删行**（`sed -i '0,/…/{//d;}'`），压根没有「变异后的形态」可 grep。
+#    ⇒ 这四条只能比对「文件有没有变」。每条变异前本来就已经 cp 了一份 .orig，直接用它。
+assert_mutated(){ # $1=目标文件 $2=变异前的副本
+  cmp -s "$1" "$2" || return 0
+  bad "mutation did not change $1 —— 【测试锚点过期】，不是产品缺陷"
+  printf 'RESULT pass=%s fail=%s\n' "$PASS" "$FAIL"
+  exit 1
+}
+
 cleanup_pids=()
 cleanup(){
   for pid in "${cleanup_pids[@]:-}"; do
@@ -243,20 +257,24 @@ else bad "missing-inspector guard failed"; fi
 echo "== L6 witnessed-red mutations =="
 cp "$ROOT/agent-network/src/dashboard-managed-process.ts" "$WORK/dashboard-managed-process.ts.orig"
 sed -i 's/input\.healthy && record\.source === input\.desiredSource && record\.source_key === input\.desiredSourceKey/input.healthy/' "$ROOT/agent-network/src/dashboard-managed-process.ts"
+assert_mutated "$ROOT/agent-network/src/dashboard-managed-process.ts" "$WORK/dashboard-managed-process.ts.orig"
 expect_red version-gate bun test "$ROOT/agent-network/src/dashboard-managed-process.test.ts"
 cp "$WORK/dashboard-managed-process.ts.orig" "$ROOT/agent-network/src/dashboard-managed-process.ts"
 sed -i 's/if (!record) return { action: "refuse", reason: `port ${input.port} is occupied by an unmanaged process (pid ${pid})` };/if (!record) return { action: "terminate_owned_stale", pid, reason: "unhealthy" };/' "$ROOT/agent-network/src/dashboard-managed-process.ts"
+assert_mutated "$ROOT/agent-network/src/dashboard-managed-process.ts" "$WORK/dashboard-managed-process.ts.orig"
 expect_red unmanaged-gate bun test "$ROOT/agent-network/src/dashboard-managed-process.test.ts"
 cp "$WORK/dashboard-managed-process.ts.orig" "$ROOT/agent-network/src/dashboard-managed-process.ts"
 bun test "$ROOT/agent-network/src/dashboard-managed-process.test.ts"
 
 cp "$CLI" "$WORK/cli.ts.orig"
 sed -i '0,/if (!revalidateExactManagedDashboard(pid, port, expectedRecord)) return false;/{//d;}' "$CLI"
+assert_mutated "$CLI" "$WORK/cli.ts.orig"
 expect_red birth-recheck run_birth_race 33106 "$ART/birth-recheck-inner.log"
 cp "$WORK/cli.ts.orig" "$CLI"
 
 cp "$CLI" "$WORK/cli.ts.orig"
 sed -i '0,/if (!revalidateExactManagedDashboard(pid, port, expectedRecord)) return false;/{//d;}' "$CLI"
+assert_mutated "$CLI" "$WORK/cli.ts.orig"
 expect_red foreign-reuse-recheck run_foreign_reuse_race 33108 "$ART/foreign-reuse-recheck-inner.log"
 cp "$WORK/cli.ts.orig" "$CLI"
 
