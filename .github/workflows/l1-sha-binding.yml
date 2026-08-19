@@ -1,0 +1,37 @@
+# L1 套件必须能把自己的运行钉到一个提交上。
+#
+# #1092 的普查（2026-08-19，origin/main）：30 条 L1 里 **17 条**的 Dockerfile 没有
+# `ARG SOURCE_COMMIT`。scripts/qa.sh 靠 grep 这一行决定传不传 --build-arg，
+# 没有它就**不传，而且不报错** —— 那 17 条的输出无法被钉到任何一个提交上。
+#
+# 这道门不清理存量（docs/l1-sha-binding-baseline.txt 记着今天这 17 条），
+# 只**止住增量**。理由和 check-test-suite-registration.py 完全一样：
+# 一道只因积压而红的门，等积压清完就再也不会红，到时没人知道它还有没有效。
+
+name: lint (L1 SHA binding)
+
+on:
+  # 与本仓其它守卫一致：刻意不加 paths。带 paths 的 workflow 在不匹配的 PR 上
+  # 不产生 check-run，永远做不了 required check。
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  l1-sha-binding:
+    # 全仓唯一的 job name —— required check 只能按这个名字写。
+    name: l1-sha-binding
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # 判据自检先跑。它的两条夹具对应作者自己踩过的两个**取集**错
+      # （排除了 Dockerfile / 大小写不匹配），第三条对应自检自己抓到的恒真判据
+      # （ARG 声明行本身含 SOURCE_COMMIT ⇒ 任何有 ARG 的套件都会自动「可见」）。
+      - run: python3 .github/scripts/check-l1-sha-binding.py --selftest
+      # 打印 l1/bound/unbound/invisible/baseline/new 六个数；
+      # L1_TESTS 解析为空或基线缺失时退 2 —— 绿不能和「根本没跑」同形。
+      - run: python3 .github/scripts/check-l1-sha-binding.py

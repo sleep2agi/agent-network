@@ -1,0 +1,31 @@
+# L1 套件「无 SHA 绑定」的存量基线 —— 棘轮，不是豁免清单
+#
+# 判据：不在这份名单里的 L1 套件，Dockerfile 必须有 `ARG SOURCE_COMMIT`
+#       （或 `ARG TESTn_SOURCE_COMMIT`）。多出任何一条 → 红（新伤）。
+#       名单里的补上了 → 不红，但会打印「请把它删掉」，楼层只降不回填。
+#
+# 🔴 为什么不要求清零：一道只因积压而红的门，等积压清完就再也不会红，
+#    到时没人知道它还有没有效。同 docs/test-suite-orphan-baseline.txt。
+#
+# 补的时候照 tests/test746-setup-bun-pin/run.sh:8 那个最强写法：
+#   [[ "${TESTn_SOURCE_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]] || exit 1
+#   —— 不是打印，是**断言**，拿不到 SHA 就 fail closed。
+#
+# 生成于 origin/main e0f97d5c，2026-08-19：L1 共 30 条，其中 17 条无绑定。
+qa-cli-01-hub-start
+qa-cli-02-network-create
+qa-dash-07-auth-boundary
+qa-dash-08-cross-account-views
+qa-dash-10-incremental-poll
+qa-hub-05-roundtrip
+qa-hub-06-token-revoke
+qa-hub-06b-cross-user-isolation
+qa-hub-07-sse-reconnect
+qa-hub-08-restart-persistence
+qa-hub-09-task-state-machine
+qa-hub-10-network-scope-regressions
+qa-hub-11-node-delete-sse
+qa-hub-12-servers-endpoint
+qa-hub-13-server-health-agents
+qa-node-02-success-reply
+qa-node-03b-task-events
