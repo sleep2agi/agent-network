@@ -72,6 +72,12 @@ L1_TESTS=(
   "qa-hub-07-sse-reconnect"
   "qa-hub-08-restart-persistence"
   "qa-hub-09-task-state-machine"
+  # 2026-08-19 补注册。它一直是孤儿(docs/test-suite-orphan-baseline.txt),
+  # 而在此之前套件里有 3 处字面量随一次改名过期(#1072):1 条 production grep
+  # 0 命中、2 条变异锚点 0 命中 ⇒ 变异是 no-op。修好之后它有三条成立的见证红,
+  # 才够格进这里 —— **先让它真的能红，再让 CI 跑它**。
+  # 按 qa.sh 的真实调法(docker run --rm，不挂 /artifacts)实测 rc=0。
+  "test236-dashboard-codex-goal"
   # 2026-08-18 补注册 —— 这四个是 #863 修好的那批(commit 61f7203a,「静默失效 6 周」
   # 实跑 4/4 从红到绿),但修完之后**没有注册到任何地方**,于是回到了同一个位置:
   # 没有任何东西会跑它们。#861 的实测把最后一个未知量补上了。
