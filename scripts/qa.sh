@@ -178,6 +178,21 @@ L1_TESTS=(
   # 实测：修前 6/11 → 修后 **19 passed / 0 failed**；
   #   见证红（把漂移那次的 alias 改成与绑定一致）⇒ 18 passed / 1 failed，红的正是新增那条。
   "test12-claude-channel"
+  # 2026-08-20 补注册。此前是孤儿且在 main 上 3 passed / 6 failed。
+  # 🔴 而它最严重的问题不是那 6 条红，是它**用一条恒真断言把自己的真实故障盖住了**：
+  #     mcp_call "report_status" '...' >/dev/null   （三次，返回全丢掉）
+  #     pass "agents registered"                    （无条件）
+  #   而那三次调用一直在失败，逐字返回是：
+  #     {"ok":false,"error":"master-token auth is deprecated; use admin utok_"}
+  #   ⇒ 注册从没成功过，而成绩单上永远写着 PASS。
+  # 本 PR 两件：① 换 admin utok_ + 每别名自己的 ntok_（#203 要求 node_name 与别名一致）
+  #             ② 🔴 把无条件 pass 换成**逐个断言** —— 这条比 ① 重要：
+  #                ① 只修好这一次；② 让下一次注册失败**能被看见**。
+  #   并新增一条负向断言：master token 调 /mcp 必须被拒（把废弃边界真正测住）。
+  # 实测：修前 3/6 → 修后 **13 passed / 0 failed**；
+  #   见证红（把注册改回 master token）⇒ **5 passed / 8 failed** ——
+  #   也就是说那条断言现在真的会咬人，而改之前它在同样情况下会打印 PASS。
+  "test11-lifecycle"
   # 2026-08-20 补注册这 4 个。它们是**本来就绿**的孤儿 ——
   # 干净 worktree（无 node_modules）+ --no-cache，宿主钉在 f13699ff == origin/main，
   # 四个全部 build=0 run=0。登记它们不是修 bug，是把「验过的绿」变成「有门守着的绿」：
