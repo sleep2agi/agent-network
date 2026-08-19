@@ -907,6 +907,34 @@ wait_pid_gone() {
   return 1
 }
 
+# 🔴 #1027：`wait_pid_gone` 的预算到期只说明「N 秒内没死」，说明不了「不会死」。
+#    这一条红话在 CI 里间歇出现，而它同时对应两件处置完全相反的事：
+#      · 【停得慢】 —— 进程最终会退，只是超过了预算 ⇒ 该调预算 / 该查为什么慢
+#      · 【停不掉】 —— 进程根本不退 ⇒ 这才是 #1027 那个真缺陷
+#    2026-08-19 的 CI 红只留下了 `仍存活 100 × 0.1s`，**分不出是哪一种**。
+#    延长观察一段，把结论写进红话里。
+#    ⚠️ 两个分支都 `return 1` —— 门的宽严一点没变，只是红得能定位。
+#       `anet node stop` 报了成功而进程还活着 10 秒，本来就是错的，不该因为「它后来死了」放行。
+wait_pid_gone_diagnosed() { # $1=pid $2=首个预算(0.1s 为单位) $3=延长观察秒数
+  local pid=$1 tries=$2 extra=$3 i cmd waited budget total
+  # 🔴 用 awk 算，不用 $(( )) —— tries<10 时整除会把预算印成 0s。
+  #    真实调用是 tries=100(=10s)，正好不会暴露它；是拿 tries=5 校准时才看见的。
+  budget=$(awk "BEGIN{printf \"%.1f\", $tries/10}")
+  total=$(awk "BEGIN{printf \"%.1f\", $tries/10 + $extra}")
+  wait_pid_gone "$pid" "$tries" && return 0
+  for ((i = 0; i < extra * 10; i++)); do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      waited=$(awk "BEGIN{printf \"%.1f\", $i/10}")
+      log "diagnostic: pid $pid 在首个 ${budget}s 预算之后又过了约 ${waited}s 才退出 —— 属于【停得慢】，不是【停不掉】"
+      return 1
+    fi
+    sleep 0.1
+  done
+  cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || echo "(cmdline 读不到)")
+  log "diagnostic: pid $pid 在 stop 之后存活超过 ${total}s —— 属于【停不掉】(#1027 的真形态) —— cmdline: $cmd"
+  return 1
+}
+
 stop_node_checked() {
   local alias label output
   alias=$1
@@ -2051,8 +2079,8 @@ scan_fixed_file /tmp/test225-markers "$HEADLESS_LOG" \
 scan_fixed_file /tmp/test225-live-credentials "$HEADLESS_LOG" \
   || fail "headless start output exposed a Hub credential"
 stop_node_checked "$HEADLESS_ALIAS" headless
-wait_pid_gone "$HEADLESS_PID" 100 \
-  || fail "headless node survived a node stop that reported success (#1027)"
+wait_pid_gone_diagnosed "$HEADLESS_PID" 100 50 \
+  || fail "headless node survived a node stop that reported success (#1027) —— 上一行的 diagnostic 写明是【停得慢】还是【停不掉】"
 HEADLESS_PID=""
 rm -f "$HEADLESS_LOG"
 pass "persisted co-presence true/false and socket identities override stale ambient env"
