@@ -12,4 +12,7 @@ RUN chmod +x /app/run.sh
 
 ENV COMMHUB_AUTH_TOKEN=test-auth-token
 
+ARG SOURCE_COMMIT=dev
+ENV SOURCE_COMMIT=$SOURCE_COMMIT
+
 CMD ["bash", "/app/run.sh"]

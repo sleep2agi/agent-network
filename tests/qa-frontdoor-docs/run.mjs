@@ -1,3 +1,12 @@
+// SHA 绑定。🔴 本套件入口是 run.mjs（Node），不是 shell —— 断言要用 JS 写，
+// 照抄 bash 版的 [[ ]] 在这里根本不会执行。
+const __sc = process.env.SOURCE_COMMIT ?? "";
+if (!/^[0-9a-f]{40}$/.test(__sc)) {
+  console.error("FAIL: SOURCE_COMMIT must be one full lowercase Git SHA");
+  process.exit(1);
+}
+console.log(`source_commit=${__sc}`);
+
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 
