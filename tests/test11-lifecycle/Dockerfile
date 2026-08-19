@@ -13,4 +13,8 @@ RUN chmod +x /app/run.sh
 ENV COMMHUB_AUTH_TOKEN=test-auth-token
 ENV COMMHUB_DB=/tmp/commhub-test11.db
 
+ARG TEST11_SOURCE_COMMIT=dev
+ENV TEST11_SOURCE_COMMIT=$TEST11_SOURCE_COMMIT
+LABEL org.opencontainers.image.revision=$TEST11_SOURCE_COMMIT
+
 CMD ["bash", "/app/run.sh"]

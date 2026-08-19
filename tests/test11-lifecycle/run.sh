@@ -1,6 +1,14 @@
 #!/bin/bash
 # Lifecycle-focused E2E suite. Keep assertions explicit; do not stop on first failure.
 
+
+# SHA 绑定（形态同 tests/test746-setup-bun-pin/run.sh:8）。
+[[ "${TEST11_SOURCE_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]] || {
+  echo 'FAIL: TEST11_SOURCE_COMMIT must be one full lowercase Git SHA' >&2
+  exit 1
+}
+printf 'source_commit=%s\n' "$TEST11_SOURCE_COMMIT"
+
 PASS=0
 FAIL=0
 AUTH_TOKEN="${COMMHUB_AUTH_TOKEN:-test-auth-token}"
@@ -10,14 +18,15 @@ pass() { echo "  PASS  $1"; PASS=$((PASS+1)); }
 fail() { echo "  FAIL  $1"; FAIL=$((FAIL+1)); }
 
 api_curl() {
-  curl -s -H "Authorization: Bearer ${AUTH_TOKEN}" "$@"
+  curl -s -H "Authorization: Bearer ${UTOK:-$AUTH_TOKEN}" "$@"
 }
 
 mcp_call() {
   local tool="$1"
   local args="$2"
+  local tok="${3:-${UTOK:-$AUTH_TOKEN}}"   # 第三参数指定身份；默认 utok_
   curl -s -X POST http://127.0.0.1:9200/mcp \
-    -H "Authorization: Bearer ${AUTH_TOKEN}" \
+    -H "Authorization: Bearer ${tok}" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
     -d "{\"jsonrpc\":\"2.0\",\"id\":\"test11\",\"method\":\"tools/call\",\"params\":{\"name\":\"${tool}\",\"arguments\":${args}}}"
@@ -83,10 +92,40 @@ echo "$HEALTH" | grep -q '"ok":true' && pass "CommHub server started" || fail "C
 echo ""
 
 echo "2. Register lifecycle agents..."
-mcp_call "report_status" '{"resume_id":"ttl-agent-1","alias":"ttl-agent","status":"idle"}' >/dev/null
-mcp_call "report_status" '{"resume_id":"ack-agent-1","alias":"ack-agent","status":"idle"}' >/dev/null
-mcp_call "report_status" '{"resume_id":"run-agent-1","alias":"run-agent","status":"idle"}' >/dev/null
-pass "agents registered"
+# 🔴 这一段原来是：三次 mcp_call 全部 `>/dev/null`，然后**无条件** `pass "agents registered"`。
+# 那句 PASS 恒真 —— 注册失败时它也照样打印。而注册确实一直在失败，逐字返回是：
+#   {"ok":false,"error":"master-token auth is deprecated; use admin utok_"}
+# （守卫 server/src/server.ts:169-170；本套件的 mcp_call 原来用的是 master token。）
+# ⇒ 于是这个套件用一条恒真断言把自己的真实故障盖了 6 个月。
+#
+# 修两件：① 用 admin utok_ + 每个别名自己的 ntok_（#203 要求 node_name 与别名一致）
+#         ② 🔴 把无条件 pass 换成**逐个断言** —— 这一条比 ① 更重要：
+#            ① 只修好这一次；② 让下一次注册失败**能被看见**。
+REG=$(curl -s -X POST "${BASE:-http://127.0.0.1:9200}/api/auth/register" \
+  -H "Authorization: Bearer ${AUTH_TOKEN}" -H "Content-Type: application/json" \
+  -d '{"username":"t11admin","password":"pass123456"}')
+UTOK=$(echo "$REG" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))' 2>/dev/null)
+NET_ID=$(echo "$REG" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("network_id",""))' 2>/dev/null)
+[ -n "$UTOK" ] && [ -n "$NET_ID" ] && pass "admin utok_ + network_id obtained" || { echo "$REG"; fail "could not bootstrap admin identity"; }
+
+# 🔴 新增的负向断言：本套件原来依赖的那条路（master token）必须**被拒**。
+# 只把 token 换掉是"让它能过"；加上这条，才是把废弃边界真正测住。
+DEPR=$(mcp_call "report_status" '{"resume_id":"depr","alias":"ttl-agent","status":"idle"}' "$AUTH_TOKEN")
+echo "$DEPR" | grep -q 'master-token auth is deprecated' \
+  && pass "master token rejected on /mcp (deprecated)" \
+  || fail "master token NOT rejected: $(echo "$DEPR" | head -c 140)"
+
+for A in ttl-agent ack-agent run-agent; do
+  TOK=$(curl -s -X POST "${BASE:-http://127.0.0.1:9200}/api/auth/node-token" \
+    -H "Authorization: Bearer ${UTOK}" -H "Content-Type: application/json" \
+    -d "{\"network_id\":\"${NET_ID}\",\"node_name\":\"${A}\"}" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))' 2>/dev/null)
+  case "$TOK" in ntok_*) ;; *) fail "could not mint ntok_ for ${A}"; continue ;; esac
+  eval "TOK_${A//-/_}=\$TOK"
+  R=$(mcp_call "report_status" "{\"resume_id\":\"${A}-1\",\"alias\":\"${A}\",\"status\":\"idle\",\"network_id\":\"${NET_ID}\"}" "$TOK")
+  # 🔴 逐个断言，不再吞掉返回值
+  echo "$R" | grep -q 'ok\\":true' && pass "registered ${A}" || { echo "$R"; fail "register ${A} failed"; }
+done
 echo ""
 
 echo "3. TTL boundary: ttl_seconds=5, wait 6s..."
@@ -147,7 +186,9 @@ echo "6. report_status(working) transitions task -> running..."
 RUN_TASK_TEXT="run boundary case"
 RUN_SEND=$(mcp_call "send_task" "{\"alias\":\"run-agent\",\"task\":\"${RUN_TASK_TEXT}\",\"from_session\":\"test11\"}")
 RUN_TASK_ID=$(echo "$RUN_SEND" | extract_task_id)
-RUN_WORK=$(mcp_call "report_status" "{\"resume_id\":\"run-agent-1\",\"alias\":\"run-agent\",\"status\":\"working\",\"task\":\"${RUN_TASK_TEXT}\"}")
+# 🔴 report_status 需要 network token（utok 会被 network_token_required 拒），
+# 且按 #203 其 node_name 必须与别名一致 —— 用上面为 run-agent 铸的那个。
+RUN_WORK=$(mcp_call "report_status" "{\"resume_id\":\"run-agent-1\",\"alias\":\"run-agent\",\"status\":\"working\",\"task\":\"${RUN_TASK_TEXT}\",\"network_id\":\"${NET_ID}\"}" "$TOK_run_agent")
 [ "$(echo "$RUN_WORK" | mcp_ok)" = "true" ] && pass "report_status working accepted" || fail "report_status working rejected"
 sleep 1
 RUN_STATUS=$(task_field "$RUN_TASK_ID" "status")
