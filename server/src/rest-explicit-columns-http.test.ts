@@ -24,6 +24,15 @@ const GOLDEN_RESPONSE_KEYS = {
     "network_id", "network_name", "owner_id", "description", "settings",
     "created_at", "updated_at", "visibility", "max_members", "member_role", "name",
   ],
+  // 🔴 #1097：GET /api/auth/me 走的是 auth.ts 的 getUserAllNetworks()，
+  //    与 GET /api/networks 的 admin 分支**不是同一条查询**。
+  //    server.ts:985 直接返回原始行，没有 :1166 那个 withNetworkNameAlias，
+  //    所以比 networkList 少一个 "name"。这里逐字写死，不从 rest-projections.ts 推导
+  //    —— 理由见本文件顶部：从投影推导会让被删掉的列同时从响应和期望里消失，产生假绿。
+  authMeNetwork: [
+    "network_id", "network_name", "owner_id", "description", "settings",
+    "created_at", "updated_at", "visibility", "max_members", "member_role",
+  ],
   networkDetail: [
     "network_id", "network_name", "owner_id", "description", "settings",
     "created_at", "updated_at", "visibility", "max_members",
@@ -142,6 +151,21 @@ describe("#311 REST response projections are stable across future ALTER TABLE", 
     const detail = await api(`/api/networks/${networkId}`);
     expect(sortedKeys(detail.network)).toEqual(sorted(GOLDEN_RESPONSE_KEYS.networkDetail));
     expect(detail.network[INTERNAL_SENTINEL]).toBeUndefined();
+  });
+
+  // 🔴 #1097：这条补的是 test647 抓到的一个**真覆盖洞**。
+  //    tests/test647-rest-explicit-columns 的 L3b 变异把 auth.ts 的
+  //    `SELECT ${sqlColumns(NETWORK_REST_COLUMNS, "n")}, nm.role as member_role`
+  //    改成 `SELECT n.*, …`，而**整套测试仍然全绿** —— 因为 getUserAllNetworks()
+  //    只在两处可达：server.ts:985(GET /api/auth/me) 与 server.ts:1165
+  //    (GET /api/networks 的三元 **else** 分支)，而上面那条测试打的是 /api/networks
+  //    且它的用户走 **if** 分支（:1156-1162 的内联查询）⇒ 两条可达路径一条都没覆盖。
+  test("auth/me networks come from an explicit column list, not SELECT *", async () => {
+    const me = await api("/api/auth/me");
+    const row = me.networks.find((item: any) => item.network_id === networkId);
+    expect(row).toBeDefined();
+    expect(sortedKeys(row)).toEqual(sorted(GOLDEN_RESPONSE_KEYS.authMeNetwork));
+    expect(row[INTERNAL_SENTINEL]).toBeUndefined();
   });
 
   test("full status preserves telemetry compatibility without storage drift", async () => {
