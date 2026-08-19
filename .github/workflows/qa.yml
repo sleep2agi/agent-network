@@ -114,6 +114,8 @@ on:
       - 'tests/test690-scheduled-run-terminal/**'
       - 'tests/test693-agent-local-upload/**'
       - 'tests/test697-codex-default-model/**'
+      - 'tests/test698-atomic-peer-reply/**'
+      - 'tests/test736-pm2-fleet-rebuild/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
       - 'agent-node/src/cli.ts'
@@ -226,6 +228,8 @@ on:
       - 'tests/test690-scheduled-run-terminal/**'
       - 'tests/test693-agent-local-upload/**'
       - 'tests/test697-codex-default-model/**'
+      - 'tests/test698-atomic-peer-reply/**'
+      - 'tests/test736-pm2-fleet-rebuild/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
       - 'agent-node/src/cli.ts'
@@ -785,6 +789,8 @@ jobs:
           - test690-scheduled-run-terminal
           - test693-agent-local-upload
           - test697-codex-default-model
+          - test698-atomic-peer-reply
+          - test736-pm2-fleet-rebuild
     steps:
       - uses: actions/checkout@v4
 
