@@ -67,8 +67,18 @@ PINNED_HINTS = (
 
 
 def is_dockerfile(path: str) -> bool:
+    """哪些文件算 Dockerfile。
+
+    🔴 2026-08-19：这里原本只认前缀式（`Dockerfile` / `Dockerfile.mock`），
+    **后缀式 `<name>.Dockerfile` 一个都不收** —— 实测漏了 7 个，全在
+    `agent-network/tests/docker-e2e/`（`playwright.Dockerfile` 等）。
+    当时那 7 个都没用 `bun.sh/install`，所以没漏掉真问题，但只要有人往里面加一句
+    `curl bun.sh/install`，这道门看不见。**盲区在取集，不在判据。**
+    """
     name = Path(path).name
-    return name == "Dockerfile" or name.startswith("Dockerfile.")
+    return (name == "Dockerfile"
+            or name.startswith("Dockerfile.")
+            or name.endswith(".Dockerfile"))
 
 
 def is_pinned(text: str) -> bool:
@@ -97,6 +107,20 @@ def selftest() -> int:
     # 🔴 负向:压根不装 bun 的 Dockerfile 不该被这道门碰到
     ck("不引用安装器 → 不判", "FROM node:22\nRUN npm ci", False)
     ck("只提到 bun 这个词 → 不判", "# bun is faster\nFROM node:22", False)
+
+    # ── 取集自检：这道门的坏法是「圈错哪些文件算 Dockerfile」，
+    #    而判据 unpinned() 再准也救不回来。夹具直接喂 is_dockerfile()。
+    def ckname(path, want):
+        got = is_dockerfile(path)
+        cases.append((f"取集 {path}", got == want, f"got={got} want={want}"))
+
+    ckname("Dockerfile", True)
+    ckname("tests/x/Dockerfile", True)
+    ckname("tests/x/Dockerfile.mock", True)          # 前缀式
+    ckname("tests/x/playwright.Dockerfile", True)    # 🔴 后缀式,2026-08-19 之前漏
+    ckname("tests/x/Dockerfile.harness", True)
+    ckname("tests/x/dockerfile-notes.md", False)     # 名字里有 dockerfile 但不是
+    ckname("tests/x/README.md", False)
 
     for n, ok, d in cases:
         print(f"  {'ok  ' if ok else 'FAIL'} {n}   [{d}]")
