@@ -3045,6 +3045,28 @@ return Bun.serve({
       const targetSession = db.get<{ alias: string; status: string }>(targetSql, ...targetParams);
       const targetAlias = targetSession?.alias ?? canonicalTarget ?? String(task.to_name ?? "");
       const liveSseConnections = getSSEStats().sessions[`${taskNetworkId || "global"}:${targetAlias}`] ?? 0;
+      // 🔴 #1083：这个目标【历史上有没有报过任何一次】运行时证据。
+      //   只用 Hub 自己已有的数据算，不需要 agent 侧任何改动。
+      //   为空时 runtime_submitted_at/consumed_at 是「不会走到」而不是「还没走到」，
+      //   两者处置相反（别等去接线 vs 等）。参数编号沿用上面 targetSql 的写法。
+      const evidenceParams: unknown[] = [];
+      let evidenceSql = "SELECT 1 AS seen FROM tasks WHERE runtime_submitted_at IS NOT NULL AND ";
+      if (task.to_node_id) {
+        evidenceSql += "to_node_id = ?1";
+        evidenceParams.push(task.to_node_id);
+      } else {
+        evidenceSql += "to_node_id IS NULL AND to_name = ?1";
+        evidenceParams.push(canonicalTarget ?? String(task.to_name ?? ""));
+      }
+      if (taskNetworkId) {
+        evidenceSql += " AND network_id = ?2";
+        evidenceParams.push(taskNetworkId);
+      } else {
+        evidenceSql += " AND network_id IS NULL";
+      }
+      evidenceSql += " LIMIT 1";
+      const targetEverReportedRuntimeEvidence =
+        Boolean(db.get<{ seen: number }>(evidenceSql, ...evidenceParams));
       const diagnostic = diagnoseTask({
         status: String(task.status ?? "unknown"),
         runtimeSubmittedAt: typeof task.runtime_submitted_at === "string" ? task.runtime_submitted_at : null,
@@ -3052,6 +3074,7 @@ return Bun.serve({
         targetSessionStatus: targetSession?.status ?? null,
         targetSessionExists: Boolean(targetSession),
         liveSseConnections,
+        targetEverReportedRuntimeEvidence,
       });
       return withCors(req, Response.json({ ok: true, task, diagnostic }));
     }
