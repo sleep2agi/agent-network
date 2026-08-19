@@ -28,6 +28,7 @@ cp -a docs-site/docs/public/skillhub "$case_root/docs-site/docs/public/"
 
 cp -a "$case_root" /tmp/test600-license
 sed -i 's/"Apache-2.0"/"UNLICENSED"/' /tmp/test600-license/docs-site/docs/public/skillhub/skills/skill-writing-guide/1.0.0/metadata.json
+grep -F '"UNLICENSED"' /tmp/test600-license/docs-site/docs/public/skillhub/skills/skill-writing-guide/1.0.0/metadata.json >/dev/null
 expect_red "unsupported license is rejected" node /tmp/test600-license/scripts/build-public-skillhub.mjs
 
 cp -a "$case_root" /tmp/test600-secret
