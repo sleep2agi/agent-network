@@ -61,7 +61,6 @@ test29-network-alias
 test292-e2e-agent-registration
 test292-e2e-contract-drift
 test292-e2e-identity-fixtures
-test292-e2e-ok-assertions
 test292-e2e-rename-command
 test292-e2e-residual-fixtures
 test3-security

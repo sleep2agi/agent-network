@@ -109,6 +109,12 @@ L1_TESTS=(
   "qa-ut-01-auth-tokens"
   "qa-ut-02-password-dict"
   "qa-ut-03-auth-validate"
+  # 2026-08-19 补注册。它此前是孤儿**而且在 main 上就是红的**，
+  # 而红的表面原因（逐字计数 16 vs 17）底下藏着一道**恒真的门**：
+  # WEAK_COUNT 的正则对真实文件命中 0 行，那句
+  # "docker-e2e has no weak grep-ok assertions" 永远不可能红（#1088 修）。
+  # 修好之后 rc=0、weak_assertions=14（真实值），才够格接进来。
+  "test292-e2e-ok-assertions"
   # 2026-08-18 补注册 —— 这四个是 #863 修好的那批(commit 61f7203a,「静默失效 6 周」
   # 实跑 4/4 从红到绿),但修完之后**没有注册到任何地方**,于是回到了同一个位置:
   # 没有任何东西会跑它们。#861 的实测把最后一个未知量补上了。

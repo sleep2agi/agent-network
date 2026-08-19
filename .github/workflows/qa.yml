@@ -32,6 +32,7 @@ on:
       # would only look like coverage.
       - 'tests/qa-ut-01-auth-tokens/**'
       - 'tests/qa-ut-02-password-dict/**'
+      - 'tests/test292-e2e-ok-assertions/**'
       - 'tests/qa-ut-03-auth-validate/**'
       - 'tests/test656-claude-sdk-tool-aliases/**'
       - 'tests/test654-dashboard-managed-launch/**'
@@ -153,6 +154,7 @@ on:
       # would only look like coverage.
       - 'tests/qa-ut-01-auth-tokens/**'
       - 'tests/qa-ut-02-password-dict/**'
+      - 'tests/test292-e2e-ok-assertions/**'
       - 'tests/qa-ut-03-auth-validate/**'
       - 'tests/test656-claude-sdk-tool-aliases/**'
       - 'tests/test654-dashboard-managed-launch/**'
