@@ -93,7 +93,6 @@ test648-probe-ip-pin
 test650-anet-attach
 test652-admin-network-list
 test653-batch-workdir
-test654-dashboard-managed-launch
 test656-claude-sdk-tool-aliases
 test673-claude-image-attachment-block
 test696-human-low-value-reply
