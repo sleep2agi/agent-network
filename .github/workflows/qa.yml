@@ -30,6 +30,7 @@ on:
       # reached through scripts/qa.sh L1_TESTS and the e2e workflow; the other
       # ~160 dirs under tests/ are not run by any workflow, so listing them
       # would only look like coverage.
+      - 'tests/test654-dashboard-managed-launch/**'
       - 'tests/test657-claude-native-version-pin/**'
       - 'tests/test236-dashboard-codex-goal/**'
       - 'tests/test292-e2e-hard-gate/**'
@@ -146,6 +147,7 @@ on:
       # reached through scripts/qa.sh L1_TESTS and the e2e workflow; the other
       # ~160 dirs under tests/ are not run by any workflow, so listing them
       # would only look like coverage.
+      - 'tests/test654-dashboard-managed-launch/**'
       - 'tests/test657-claude-native-version-pin/**'
       - 'tests/test236-dashboard-codex-goal/**'
       - 'tests/test292-e2e-hard-gate/**'
@@ -411,7 +413,17 @@ jobs:
   qa:
     name: L0 + L1 (report-only)
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 🔴 2026-08-19：5 → 10。实测（同一个 job，两次 PR）：
+    #     L1 = 24 条（含 test657）  3.50 分钟  success
+    #     L1 = 25 条（加 test654）  5.32 分钟  **cancelled** ← 撞上原来的 5 分钟
+    #   test654 是 L1 里较重的一个（本机 build 104s + run 39s）。
+    #
+    #   为什么是调守卫而不是「撞了就把门挪开」：`timeout-minutes` 是 **runaway 守卫**，
+    #   不是性能预算。一个跑 25 个 docker 套件的 job，典型 3.5 分钟而守卫设在 5 分钟
+    #   （余量 43%），对 CI 抖动本来就偏紧；runaway 守卫该在典型值的 2–3 倍。
+    #   ⚠️ 这不会掩盖变慢 —— job 的实际时长在 Actions 界面上一直是可见的。
+    #   真要「不许变慢」那是另一套机制（记时长 + 比基线），不是靠把超时压到贴脸。
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 

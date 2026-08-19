@@ -84,6 +84,13 @@ L1_TESTS=(
   # 按 qa.sh 的真实调法(docker run --rm,不挂 /artifacts)实测 rc=0 pass=5 fail=0,
   # 两条见证红都成立。耗时 build 105s + run 2s。
   "test657-claude-native-version-pin"
+  # 2026-08-19 补注册。它之前是孤儿里 sed 最多(4 条)、也是唯一一处守卫都没有的，
+  # 所以 #1078 那轮我**没有**先接它 —— 先接只会把「有覆盖」的假象固定下来。
+  # #1079 补上 assert_mutated 之后才够格(那四条不能用 grep 写法:第 1 条变异后的形态
+  # 是原文的子串、后两条是删行，所以只能比对文件有没有变)。
+  # 按 qa.sh 真实调法(docker run --rm，不挂 /artifacts)实测 rc=0 RESULT pass=14 fail=0，
+  # 四条见证红全成立；耗时 build 104s + run 39s(L1 里较重的一个)。
+  "test654-dashboard-managed-launch"
   # 2026-08-18 补注册 —— 这四个是 #863 修好的那批(commit 61f7203a,「静默失效 6 周」
   # 实跑 4/4 从红到绿),但修完之后**没有注册到任何地方**,于是回到了同一个位置:
   # 没有任何东西会跑它们。#861 的实测把最后一个未知量补上了。
