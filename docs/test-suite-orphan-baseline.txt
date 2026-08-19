@@ -19,7 +19,6 @@ qa-rfc024-config-apply
 qa-rfc026-create-node
 qa-rfc027-stop-delete
 qa-rfc028-provider-probe
-test-npm-install
 test-npm-security
 test-rfc029-pr1-registration
 test-rfc029-pr2-acp-shim
