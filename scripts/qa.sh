@@ -114,6 +114,22 @@ L1_TESTS=(
   # 说出来才发现是真覆盖洞：getUserAllNetworks() 的两条可达路径一条都没被测到（#1097 补上）。
   # 三条见证红现在全部成立；按 qa.sh 真实调法实测 rc=0，build 3s + run 5s（很便宜）。
   "test647-rest-explicit-columns"
+  # 2026-08-19 批量补注册这 7 个。全部按 qa.sh 的真实调法（docker run --rm，不挂 /artifacts）
+  # 实测 rc=0；本机耗时（build+run）：
+  #   test652 3+4s · test653 8+4s · test-goal-cli 21+2s · test702 23+33s
+  #   test584 23+55s · test696 93+5s · test520-dashboard-attachment-read 134+21s
+  # 🔴 其中 test520-dashboard-attachment-read 与 test-goal-cli 原来**没有 ARG SOURCE_COMMIT**，
+  #    本 PR 一并补上（同 #1094 的形态：ARG/ENV 放 ENTRYPOINT 之前 + run.sh 里打印）。
+  # ⚠️ 一次加 7 个会让 L1 变慢。上一次我因为拿一个**被超时截断的观测**去外推而估错过
+  #    （#1092 那轮：25 条 5.32min 是斧头落下的位置，不是完成时间），所以这次不外推，
+  #    直接看本 PR 上 L0+L1 job 的实测时长再决定要不要拆批。守卫是 qa.yml:414 的 10 分钟。
+  "test520-dashboard-attachment-read"
+  "test584-dashboard-codex-delivery"
+  "test-goal-cli"
+  "test652-admin-network-list"
+  "test653-batch-workdir"
+  "test696-human-low-value-reply"
+  "test702-primary-network"
   # 2026-08-19 补注册。它此前是孤儿**而且在 main 上就是红的**，
   # 而红的表面原因（逐字计数 16 vs 17）底下藏着一道**恒真的门**：
   # WEAK_COUNT 的正则对真实文件命中 0 行，那句
