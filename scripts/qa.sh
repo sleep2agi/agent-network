@@ -211,6 +211,10 @@ L1_TESTS=(
   # 修法照前两次：先把守卫钉成一条断言，再用一致身份走 happy path。
   # 实测：修前 5/12 → 修后 **18 passed / 0 failed**。
   "test13-multi-channel"
+  # 2026-08-20 补注册。孤儿，在 origin/main 55b6a2dc 上实跑 build=0 run=0（真绿，非探针）。
+  "qa-517-mcp-write-scope"
+  # 2026-08-20 补注册。孤儿，在 origin/main 55b6a2dc 上实跑 build=0 run=0（真绿，非探针）。
+  "test203-alias-crossover-repro"
   # 2026-08-20 补注册这 4 个。它们是**本来就绿**的孤儿 ——
   # 干净 worktree（无 node_modules）+ --no-cache，宿主钉在 f13699ff == origin/main，
   # 四个全部 build=0 run=0。登记它们不是修 bug，是把「验过的绿」变成「有门守着的绿」：

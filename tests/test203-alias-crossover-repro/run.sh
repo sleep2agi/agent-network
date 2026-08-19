@@ -34,6 +34,11 @@
 # Numbers are dumped into report.txt for PR body citation. Every scenario
 # emits a `PASS` / `FAIL` verdict. Overall pass gate at end.
 
+
+# SHA 绑定。ARG 名须能被 scripts/qa.sh 的 `^ARG (SOURCE_COMMIT|TEST[0-9]+_SOURCE_COMMIT)` 匹配。
+[[ "${TEST203_SOURCE_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]] || { echo "FAIL: TEST203_SOURCE_COMMIT must be one full lowercase Git SHA" >&2; exit 1; }
+printf 'source_commit=%s\n' "$TEST203_SOURCE_COMMIT"
+
 set -euo pipefail
 
 export HOME=/tmp/anethome

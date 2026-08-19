@@ -24,4 +24,7 @@ RUN chmod +x /app/tests/qa-517-mcp-write-scope/run.sh
 
 RUN cd /app/server && bun install --silent
 
+ARG TEST517_SOURCE_COMMIT=dev
+ENV TEST517_SOURCE_COMMIT=$TEST517_SOURCE_COMMIT
+
 CMD ["/app/tests/qa-517-mcp-write-scope/run.sh"]

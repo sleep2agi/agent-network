@@ -5,6 +5,11 @@
 # deleted-network → roles. Exact-match assertions on error AND message
 # (accepted set == spec-allowed set).
 
+
+# SHA 绑定。ARG 名须能被 scripts/qa.sh 的 `^ARG (SOURCE_COMMIT|TEST[0-9]+_SOURCE_COMMIT)` 匹配。
+[[ "${TEST517_SOURCE_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]] || { echo "FAIL: TEST517_SOURCE_COMMIT must be one full lowercase Git SHA" >&2; exit 1; }
+printf 'source_commit=%s\n' "$TEST517_SOURCE_COMMIT"
+
 set -uo pipefail
 
 HUB_PORT=9251
