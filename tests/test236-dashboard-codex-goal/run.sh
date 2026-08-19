@@ -15,19 +15,22 @@ run() {
 }
 
 # 🔴 变异必须真的改动文件，否则算【锚点过期】而不是产品缺陷。
-#    为什么不预先 grep 锚点：锚点里含 `\\n` 这类转义，在 grep -F / sed / shell 引号
-#    三层里的含义不同，判据本身就会成为 bug 源。**直接量「文件改没改」不需要任何转义。**
+#    这个 helper 的名字和形状**沿用本仓已有的写法**（tests/test689-owner-schedule-agent/run.sh:41），
+#    而不是再发明一个 —— 本仓已有 27 个套件用 expect_red 断言「变异让测试变红」，
+#    但只有 1 个（test689）同时断言「变异真的改动了文件」。这里补上第 2 个。
+#
+#    为什么不预先 grep 锚点：锚点里含 `\n` 这类转义，在 grep -F / sed / shell 引号
+#    三层里的含义不同，判据本身就会成为 bug 源。**比对 sha256 不需要任何转义。**
 #    背景（2026-08-19 实测 origin/main）：3 条锚点里 2 条 0 命中 ——
 #    一次改名把 Codex/INTERVAL 换成了 Native/SCHEDULE，本文件的字面量没跟上。
-#    sed 打不中时是 **no-op** ⇒ 产品没被改坏 ⇒ 测试绿 ⇒ 下面那句
+#    sed 打不中时是 no-op ⇒ 产品没被改坏 ⇒ 测试绿 ⇒ 下面那句
 #    `FAIL: ... stayed green` 照样会打，套件确实红了 —— **但那句红话指错了层**：
-#    它把人指向产品，而该改的是这个文件。这个函数把它变成一句指对层的红话。
-mutate() { # $1=目标文件 $2=sed 表达式（原样透传，不经二次解析）
-  cp "$1" /tmp/pre-mutation.snapshot
-  sed -i "$2" "$1"
-  if cmp -s /tmp/pre-mutation.snapshot "$1"; then
-    printf 'FAIL: 变异未改动 %s —— 【测试锚点过期】，不是产品缺陷\n' "$1" | tee -a "$REPORT"
-    printf '  sed: %s\n' "$2" | tee -a "$REPORT"
+#    它把人指向产品，而该改的是这个文件。
+assert_changed() {  # $1=目标文件 $2=变异前的 sha256
+  local after
+  after="$(sha256sum "$1" | cut -d' ' -f1)"
+  if [[ "$after" == "$2" ]]; then
+    printf 'FAIL: 变异后文件逐字未变 %s —— 【测试锚点过期】，不是产品缺陷\n' "$1" | tee -a "$REPORT"
     exit 1
   fi
 }
@@ -65,7 +68,9 @@ run production-build bash -ceu '
 # leaving the test unchanged. The screenshot's interval-free `/goal` must be
 # intercepted again, so the focused routing test has to fail.
 cp /workspace/agent-node/src/goals/routing.ts /tmp/routing.original.ts
-mutate /workspace/agent-node/src/goals/routing.ts 's/return !interactiveDashboardTask;/return true;/'
+_pre="$(sha256sum /workspace/agent-node/src/goals/routing.ts | cut -d' ' -f1)"
+sed -i 's/return !interactiveDashboardTask;/return true;/' /workspace/agent-node/src/goals/routing.ts
+assert_changed /workspace/agent-node/src/goals/routing.ts "$_pre"
 set +e
 bun test /workspace/agent-node/src/goals/routing.test.ts > /tmp/mutation.out 2>&1
 mutation_rc=$?
@@ -83,7 +88,9 @@ run restored-green bun test /workspace/agent-node/src/goals/routing.test.ts
 # Witnessed-red: keep the routing exception but remove the deterministic
 # interval notice from the successful reply. The ambiguity regression must be
 # observable even though the goal itself still reaches Codex.
-mutate /workspace/agent-node/src/goals/routing.ts 's/return `${DASHBOARD_NATIVE_SCHEDULE_NOTICE}\\n\\n${replyText}`;/return replyText;/'
+_pre="$(sha256sum /workspace/agent-node/src/goals/routing.ts | cut -d' ' -f1)"
+sed -i 's/return `${DASHBOARD_NATIVE_SCHEDULE_NOTICE}\\n\\n${replyText}`;/return replyText;/' /workspace/agent-node/src/goals/routing.ts
+assert_changed /workspace/agent-node/src/goals/routing.ts "$_pre"
 set +e
 bun test /workspace/agent-node/src/goals/routing.test.ts > /tmp/notice-mutation.out 2>&1
 notice_mutation_rc=$?
@@ -101,7 +108,9 @@ run final-green bun test /workspace/agent-node/src/goals/routing.test.ts
 # Witnessed-red: evaluate low-value status against the raw model text instead
 # of the notice-prefixed text. A model reply of "收到" would then suppress the
 # required interval warning.
-mutate /workspace/agent-node/src/goals/routing.ts 's/!isLowValueReply(text)/!isLowValueReply(replyText)/'
+_pre="$(sha256sum /workspace/agent-node/src/goals/routing.ts | cut -d' ' -f1)"
+sed -i 's/!isLowValueReply(text)/!isLowValueReply(replyText)/' /workspace/agent-node/src/goals/routing.ts
+assert_changed /workspace/agent-node/src/goals/routing.ts "$_pre"
 set +e
 bun test /workspace/agent-node/src/goals/routing.test.ts > /tmp/order-mutation.out 2>&1
 order_mutation_rc=$?
