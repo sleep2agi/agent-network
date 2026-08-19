@@ -32,7 +32,24 @@ import sys
 
 BASELINE = "docs/home-path-baseline.txt"
 
-HOME_PATH = re.compile(r"/home/([A-Za-z0-9._-]+)/")
+# 🔴 两处修正（2026-08-19，实测 origin/main 3fd3e4bb）：
+#
+# ① **不再要求结尾斜杠。** 旧写法 `/home/([A-Za-z0-9._-]+)/` 漏掉 38 处 / 20 个文件，
+#    而漏掉的恰恰是这个门最该看见的形状：
+#        tests/test736-pm2-fleet-rebuild/Dockerfile:22  ENV HOME=/home/<名>
+#        tests/test736-pm2-fleet-rebuild/Dockerfile:19  chown -R <名>:<名> /home/<名>
+#        agent-network/src/grok-copresence-profile.test.ts  HOME: "/home/<名>"
+#    这些位置对棘轮是**隐形**的 —— 在那儿新增一条，门不会发现。
+#    旧 selftest 有一条 `regex needs the trailing slash` 把这个行为**钉成了正确的**；
+#    本次把那条钉改掉，并在下面用两条新夹具钉住新行为。
+#
+# ② **加根边界。** 旧写法会把 `/runtime/home/x/`、`$case_root/home/.anet` 里的
+#    `/home/` 也算进来 —— 那不是系统家目录。实测 198 处计入里有 **18 处是这类误报**。
+#
+# ⇒ 净效果：计入 198 → 218（+38 真命中，−18 误报）。**基线随之重算。**
+#    地板变高不是「更宽容」，是**看见的东西变多了**；这两个数写在这里，
+#    是为了让下一个人能判断它该不该再变。
+HOME_PATH = re.compile(r"(?<![A-Za-z0-9._-])/home/([A-Za-z0-9._-]+)")
 
 # Names that are documentation placeholders or machine accounts rather than a
 # person. Kept explicit (and covered by --selftest) because the count moves when
@@ -63,7 +80,7 @@ def scan() -> tuple[dict[str, int], int]:
     tracked = [f for f in listing if f]
 
     out = subprocess.run(
-        ["git", "grep", "-InE", r"/home/[A-Za-z0-9._-]+/"],
+        ["git", "grep", "-InE", r"(^|[^A-Za-z0-9._-])/home/[A-Za-z0-9._-]+"],
         capture_output=True, text=True, check=False,
     ).stdout
 
@@ -155,7 +172,13 @@ def selftest() -> int:
         ("two letters do not", not is_person("ab")),
         ("three letters do", is_person("abc")),
         ("regex finds the name between slashes", HOME_PATH.findall(f"cd {home}zqxjkv{slash}work") == ["zqxjkv"]),
-        ("regex needs the trailing slash", HOME_PATH.findall(f"{home}zqxjkv") == []),
+        # 🔴 这三条替换掉旧的 `regex needs the trailing slash` —— 那条钉住的是
+        # 一个会漏掉 `ENV HOME=/home/<名>` 的行为。
+        ("a path with no trailing slash still counts", HOME_PATH.findall(f"{home}zqxjkv") == ["zqxjkv"]),
+        ("a home dir nested under another path does not count",
+         HOME_PATH.findall(f"{slash}runtime{home}zqxjkv{slash}x") == []),
+        ("a var-rooted home dir does not count",
+         HOME_PATH.findall(f"$case_root{home}zqxjkv") == []),
         ("two paths on one line are both found", len(HOME_PATH.findall(f"{home}aaa{slash}x {home}bbb{slash}y")) == 2),
     ]
     bad = [n for n, ok in cases if not ok]
