@@ -36,7 +36,6 @@ test17-user-journey
 test18-error-paths
 test185-external-schedules
 test19-real-collab
-test198-from-alias
 test199-agent-node-from-session
 test2-collab
 test20-cli-ux

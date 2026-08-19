@@ -126,6 +126,20 @@ L1_TESTS=(
   # 便宜：build 含 bun install，run ~1s。
   "test230-opencode-sender-label"
   "test228-opencode-inbox-concurrency"
+  # 2026-08-19 补注册。它此前是孤儿**且在 main 上是红的**，而红因有三层，
+  # 全部是「产品前进、套件写在它之前」，一条回归都没有：
+  #   ① #203 身份守卫（server/src/tools.ts 的 alias_identity_mismatch）——
+  #      产品**有意移除**了「ntok 用旧别名铸造、report_status 报新别名会被调和」这个行为，
+  #      理由写在守卫注释里：漂移的 ALIAS 会改写 api_tokens.name，导致此后该 token
+  #      的每一次 send_task 都被归到漂移别名上（#203 现象：grokB 的发送显示成 from=grokA）。
+  #   ② alias_not_found（tools.ts:411）：套件往【从未注册过】的 总指挥 发消息。
+  #      这一层之前发现不了，因为它在 ① 就死了。
+  # 🔴 修法是**倒过来断言现在真实存在的边界**，不是把断言删掉：
+  #   漂移别名必须被 alias_identity_mismatch 拒绝（#203 那道守卫此前**无人覆盖**）
+  #   ＋ 正控（换成绑定别名必须成功）＋ 原有的 from_session 防冒充断言一条没少（只是两侧对调）。
+  # 见证红：把漂移那次改用绑定别名 ⇒ 那条断言变红
+  #   FAIL: drifted alias was NOT rejected by the #203 guard, got: {"ok":true,...}
+  "test198-from-alias"
   # 2026-08-19 批量补注册这 7 个。全部按 qa.sh 的真实调法（docker run --rm，不挂 /artifacts）
   # 实测 rc=0；本机耗时（build+run）：
   #   test652 3+4s · test653 8+4s · test-goal-cli 21+2s · test702 23+33s
