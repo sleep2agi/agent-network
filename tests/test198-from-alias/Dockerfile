@@ -10,4 +10,8 @@ WORKDIR /repo/server
 RUN bun install
 
 WORKDIR /repo
+ARG TEST198_SOURCE_COMMIT=dev
+ENV TEST198_SOURCE_COMMIT=$TEST198_SOURCE_COMMIT
+LABEL org.opencontainers.image.revision=$TEST198_SOURCE_COMMIT
+
 CMD ["bash", "tests/test198-from-alias/run.sh"]
