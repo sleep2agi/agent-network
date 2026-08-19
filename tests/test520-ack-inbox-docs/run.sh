@@ -1,4 +1,15 @@
 #!/bin/sh
+# 🔴 本文件是 #!/bin/sh —— 没有 [[ ]] / =~（bash 专有）。
+# 我第一版照抄了 tests/test746 的 bash 写法，结果 `[[: not found` 把套件直接打红。
+# 这里用 POSIX 写法表达同一条断言：40 位、且只含小写十六进制。
+_sc="${TEST520_SOURCE_COMMIT:-}"
+if [ ${#_sc} -ne 40 ]; then _bad=1; else case "$_sc" in *[!0-9a-f]*) _bad=1 ;; *) _bad=0 ;; esac; fi
+if [ "$_bad" -ne 0 ]; then
+  echo 'FAIL: TEST520_SOURCE_COMMIT must be one full lowercase Git SHA' >&2
+  exit 1
+fi
+printf 'source_commit=%s\n' "$_sc"
+
 set -eu
 
 ZH=docs-site/docs/api/mcp-tools.md
@@ -28,7 +39,8 @@ reject() {
   pass=$((pass + 1))
 }
 
-echo "source_commit=$TEST520_DOCS_SOURCE_COMMIT"
+# 🔴 原来只 echo 不校验：缺 build-arg 时会打印 source_commit=unknown 而**不报错**。
+echo "source_commit=$TEST520_SOURCE_COMMIT"
 
 # Production wire: get_inbox exposes logical identity, ack accepts both
 # transport-row and logical-task capabilities, then updates the resolved row.

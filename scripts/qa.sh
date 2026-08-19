@@ -166,6 +166,19 @@ L1_TESTS=(
   #   所以现在改断言前会先离线验一次「这个正则真的能命中实际输出」。
   # 实测：修前 10/3 → 修后 **13 passed / 0 failed**。
   "test17-user-journey"
+  # 2026-08-20 补注册这 4 个。它们是**本来就绿**的孤儿 ——
+  # 干净 worktree（无 node_modules）+ --no-cache，宿主钉在 f13699ff == origin/main，
+  # 四个全部 build=0 run=0。登记它们不是修 bug，是把「验过的绿」变成「有门守着的绿」：
+  # 在此之前它们绿不绿没有任何东西会告诉我们。
+  # 🔴 其中 test583 / test199 原来**没有 ARG SOURCE_COMMIT**，本次一并补上
+  #   （否则 qa.sh 会在【没有 SHA 绑定】的情况下跑它们，而输出看起来一切正常）。
+  # 本机实测耗时（build+run）：test583 4+2s · test573 10+3s · test520 58+40s · test199 120+1s
+  # ⚠️ 一次加 4 个会让 L1 变长。按仓里既有的教训，这里**不外推** ——
+  #   直接看本 PR 上 L0+L1 job 的实测时长，再决定要不要拆批。守卫是 qa.yml 的 10 分钟。
+  "test583-dashboard-chat-idempotency"
+  "test573-codex-turn-reconcile"
+  "test520-ack-inbox-docs"
+  "test199-agent-node-from-session"
   # 2026-08-19 批量补注册这 7 个。全部按 qa.sh 的真实调法（docker run --rm，不挂 /artifacts）
   # 实测 rc=0；本机耗时（build+run）：
   #   test652 3+4s · test653 8+4s · test-goal-cli 21+2s · test702 23+33s
