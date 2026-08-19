@@ -101,7 +101,4 @@ test8-runtime
 test9-permissions
 qa-core-docs
 qa-frontdoor-docs
-qa-ut-01-auth-tokens
-qa-ut-02-password-dict
-qa-ut-03-auth-validate
 test-rename-identity
