@@ -166,6 +166,18 @@ L1_TESTS=(
   #   所以现在改断言前会先离线验一次「这个正则真的能命中实际输出」。
   # 实测：修前 10/3 → 修后 **13 passed / 0 failed**。
   "test17-user-journey"
+  # 2026-08-20 补注册。此前是孤儿且在 main 上 6 passed / 11 failed —— 11 条全是**一个**根因的级联：
+  #   注册返回的 network_token 绑定的是【用户名】claudeuser，而套件全程用别名 claude-agent，
+  #   撞 #203 身份守卫：{"ok":false,"error":"alias_identity_mismatch",
+  #                      "token_alias":"claudeuser","reported_alias":"claude-agent"}
+  #   ⇒ 第 3 步 report_status 就死，后面 10 条全是它的级联。**不是回归**，套件写在守卫之前。
+  # 🔴 修法同 tests/test198-from-alias（#1113）：**先把守卫钉成一条断言，再用一致身份走 happy path**。
+  #   而这里需要**两个** ntok（claude-agent 与 orchestrator）——因为 ntok 的 from_session
+  #   会被服务端强制成绑定别名（server/src/tools.ts:29-33），用同一个 token 发
+  #   from_session=orchestrator 会撞 from_session_identity_mismatch。
+  # 实测：修前 6/11 → 修后 **19 passed / 0 failed**；
+  #   见证红（把漂移那次的 alias 改成与绑定一致）⇒ 18 passed / 1 failed，红的正是新增那条。
+  "test12-claude-channel"
   # 2026-08-20 补注册这 4 个。它们是**本来就绿**的孤儿 ——
   # 干净 worktree（无 node_modules）+ --no-cache，宿主钉在 f13699ff == origin/main，
   # 四个全部 build=0 run=0。登记它们不是修 bug，是把「验过的绿」变成「有门守着的绿」：
