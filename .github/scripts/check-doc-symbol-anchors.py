@@ -105,8 +105,18 @@ DOC_ROOTS = ("docs/", "docs-site/")
 
 
 def tracked_markdown(repo: Path) -> list[str]:
+    """全仓被跟踪的 .md。
+
+    🔴 2026-08-19：这里原本限定 `-- docs docs-site`，于是 **103 个 .md 从来没被扫过**
+    （`README.md` / `CLAUDE.md` / `AGENTS.md` / `SECURITY.md` / `.github/**` …）。
+    当时门外一个「搜 + 反引号符号」锚点都没有，所以没漏掉真问题 —— 但约定一旦被用到
+    这些文件里，这道门看不见。**盲区在取集，不在判据。**
+
+    隔壁 `check-docs-integrity.py:107` 就是现成写法：全仓 `git ls-files "*.md"`
+    加一条「取集为空就拒绝通过」。这里照抄。
+    """
     out = subprocess.run(
-        ["git", "ls-files", "-z", "--", "docs", "docs-site"],
+        ["git", "ls-files", "-z", "--", "*.md"],
         cwd=repo, capture_output=True, text=True, check=True,
     ).stdout
     return sorted(p for p in out.split("\0") if p.endswith(".md"))
@@ -205,7 +215,10 @@ def run(repo: Path) -> int:
 # selftest
 #
 # 🔴 夹具里的锚点用字符串拼接造,不写成字面量 —— 否则这个文件自己会被
-#    真实扫描当成 docs 命中(它不在 docs/ 下,但同类门吃过这个亏,留个明示)。
+#    真实扫描命中。
+# ⚠️ 2026-08-19 更正:原注释说「它不在 docs/ 下」,那个理由**在取集放宽到全仓之后不再成立**。
+#    现在真正的理由是:tracked_markdown() 只收 `.md`,而本文件是 `.py`。
+#    字符串拼接仍然该留 —— 但别再靠「不在 docs/ 下」这个已经过期的前提。
 # ---------------------------------------------------------------------------
 def selftest() -> int:
     SEARCH = "搜"
@@ -218,6 +231,26 @@ def selftest() -> int:
         return "[`x`](https://github.com/o/r/blob/main/" + target + ")"
 
     cases: list[tuple[str, bool, str]] = []
+
+    # ── 取集自检:这道门的坏法是「圈错扫哪些文件」,判据再准也救不回来。 ──
+    # 2026-08-19 之前它只扫 `-- docs docs-site`,103 个 .md(README/CLAUDE/AGENTS/
+    # SECURITY/.github/**)从来没被扫过。夹具建一个真 git 仓,走 tracked_markdown()。
+    import tempfile as _tf
+    with _tf.TemporaryDirectory() as _td:
+        _root = Path(_td)
+        for rel in ("README.md", "docs/a.md", "docs-site/b.md",
+                    "agent-node/notes.md", ".github/PULL_REQUEST_TEMPLATE.md",
+                    "docs/not-markdown.txt"):
+            f = _root / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text("x\n", encoding="utf-8")
+        for cmd in (["git", "init", "-q"], ["git", "add", "-A"]):
+            subprocess.run(cmd, cwd=_root, check=True, capture_output=True, text=True)
+        got = set(tracked_markdown(_root))
+        want = {"README.md", "docs/a.md", "docs-site/b.md",
+                "agent-node/notes.md", ".github/PULL_REQUEST_TEMPLATE.md"}
+        cases.append(("取集:全仓 .md 都收(含 docs/ 之外)", got == want, f"got={sorted(got)}"))
+        cases.append(("取集:非 .md 不收", "docs/not-markdown.txt" not in got, ""))
 
     def check(name: str, line: str, src_map: dict[str, str], want_problem: bool) -> None:
         probs, n = scan_text("docs/f.md", line)
