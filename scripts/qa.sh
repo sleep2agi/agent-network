@@ -114,6 +114,18 @@ L1_TESTS=(
   # 说出来才发现是真覆盖洞：getUserAllNetworks() 的两条可达路径一条都没被测到（#1097 补上）。
   # 三条见证红现在全部成立；按 qa.sh 真实调法实测 rc=0，build 3s + run 5s（很便宜）。
   "test647-rest-explicit-columns"
+  # 2026-08-19 补注册这两个。它们此前是孤儿，**而且在干净检出上是红的**：
+  #   error: Could not resolve: "zod" ... at /agent-node-src/src/commhub-mcp.ts:31:19
+  # 根因不在测试逻辑，在 Dockerfile —— COPY 了 agent-node 源码却没 bun install。
+  # 🔴 它们之所以以前看着能过：仓里没有 .dockerignore，构建上下文会把开发者本地的
+  #    agent-node/node_modules 一起 COPY 进去 ⇒ 绿是【借来的】，取决于跑的人
+  #    有没有在本地 bun install 过。在干净检出／CI runner 上必红。
+  # 本 PR 给两个 Dockerfile 补了 `bun install --frozen-lockfile`，
+  # 干净 worktree（确认无 agent-node/node_modules）+ --no-cache 实测：
+  #   修前 run rc=1（zod 无法解析）→ 修后 run rc=0（OVERALL: PASS，各 34 expect）
+  # 便宜：build 含 bun install，run ~1s。
+  "test230-opencode-sender-label"
+  "test228-opencode-inbox-concurrency"
   # 2026-08-19 批量补注册这 7 个。全部按 qa.sh 的真实调法（docker run --rm，不挂 /artifacts）
   # 实测 rc=0；本机耗时（build+run）：
   #   test652 3+4s · test653 8+4s · test-goal-cli 21+2s · test702 23+33s
