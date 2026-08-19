@@ -84,6 +84,7 @@ cp /tmp/test660-db-adapter.orig server/src/db-adapter.ts
 
 cp server/src/index.ts /tmp/test660-index.orig
 sed -i 's/process.env.COMMHUB_SERVER = "1";/\/\/ mutation: server capability removed/' server/src/index.ts
+grep -F '// mutation: server capability removed' server/src/index.ts >/dev/null
 expect_red remove-index-optin bash -c '
   mutation_home=$(mktemp -d /tmp/test660-index-mutation.XXXXXX)
   env -u COMMHUB_DB -u DATABASE_URL -u COMMHUB_SERVER HOME="$mutation_home" PORT=25662 HOST=127.0.0.1 COMMHUB_DEV_OPEN=1 \
@@ -104,6 +105,7 @@ cp /tmp/test660-index.orig server/src/index.ts
 
 cp server/bin/commhub.ts /tmp/test660-bin.orig
 sed -i 's/process.env.COMMHUB_SERVER = "1";/\/\/ mutation: server capability removed/' server/bin/commhub.ts
+grep -F '// mutation: server capability removed' server/bin/commhub.ts >/dev/null
 expect_red remove-bin-optin bash -c '
   mutation_home=$(mktemp -d /tmp/test660-bin-mutation.XXXXXX)
   env -u COMMHUB_DB -u DATABASE_URL -u COMMHUB_SERVER HOME="$mutation_home" \
