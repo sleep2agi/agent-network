@@ -1,4 +1,12 @@
 #!/bin/bash
+
+# SHA 绑定。名字须能被 scripts/qa.sh 的 `^ARG (SOURCE_COMMIT|TEST[0-9]+_SOURCE_COMMIT)` 匹配。
+[[ "${TEST13_SOURCE_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]] || {
+  echo 'FAIL: TEST13_SOURCE_COMMIT must be one full lowercase Git SHA' >&2
+  exit 1
+}
+printf 'source_commit=%s\n' "$TEST13_SOURCE_COMMIT"
+
 set -e
 PASS=0; FAIL=0
 pass() { echo "  ✅ $1"; PASS=$((PASS+1)); }
@@ -102,13 +110,26 @@ echo "$NET_RES" | grep -q '"ok":true' && [ -n "$NET_ID" ] && pass "network creat
 echo ""
 
 echo "2. Register 3 agents: agent-a / agent-b / agent-c"
-NTOK_A_RES=$(curl -s -X POST "$BASE/api/auth/node-token" -H "$OWNER_AUTH" -H "Content-Type: application/json" -d "{\"network_id\":\"$NET_ID\",\"node_name\":\"agent-a-node\"}")
-NTOK_B_RES=$(curl -s -X POST "$BASE/api/auth/node-token" -H "$OWNER_AUTH" -H "Content-Type: application/json" -d "{\"network_id\":\"$NET_ID\",\"node_name\":\"agent-b-node\"}")
-NTOK_C_RES=$(curl -s -X POST "$BASE/api/auth/node-token" -H "$OWNER_AUTH" -H "Content-Type: application/json" -d "{\"network_id\":\"$NET_ID\",\"node_name\":\"agent-c-node\"}")
+NTOK_A_RES=$(curl -s -X POST "$BASE/api/auth/node-token" -H "$OWNER_AUTH" -H "Content-Type: application/json" -d "{\"network_id\":\"$NET_ID\",\"node_name\":\"agent-a\"}")
+NTOK_B_RES=$(curl -s -X POST "$BASE/api/auth/node-token" -H "$OWNER_AUTH" -H "Content-Type: application/json" -d "{\"network_id\":\"$NET_ID\",\"node_name\":\"agent-b\"}")
+NTOK_C_RES=$(curl -s -X POST "$BASE/api/auth/node-token" -H "$OWNER_AUTH" -H "Content-Type: application/json" -d "{\"network_id\":\"$NET_ID\",\"node_name\":\"agent-c\"}")
 NTOK_A=$(echo "$NTOK_A_RES" | json_get "token")
 NTOK_B=$(echo "$NTOK_B_RES" | json_get "token")
 NTOK_C=$(echo "$NTOK_C_RES" | json_get "token")
 echo "$NTOK_A" | grep -q '^ntok_' && echo "$NTOK_B" | grep -q '^ntok_' && echo "$NTOK_C" | grep -q '^ntok_' && pass "three agent ntok created" || fail "agent ntok create"
+
+# 🔴 本套件原来把 node_name 铸成 agent-a-node 而用别名 agent-a 上报，差一个 -node 后缀，
+# 撞 #203 身份守卫（同 tests/test198-from-alias #1113、tests/test12-claude-channel #1121）：
+#   {"ok":false,"error":"alias_identity_mismatch",
+#    "message":"report_status alias does not match the token-bound node alias; ..."}
+# ⇒ 第一步 report_status 就死，后面 11 条全是级联。**不是回归**，套件写在守卫之前。
+# 修法同前两次：先把守卫钉成一条断言，再用一致身份走 happy path。
+DRIFT_TOK=$(curl -s -X POST "$BASE/api/auth/node-token" -H "$OWNER_AUTH" -H "Content-Type: application/json" \
+  -d "{\"network_id\":\"$NET_ID\",\"node_name\":\"agent-drift-node\"}" | json_get "token")
+DRIFT=$(report_status "$DRIFT_TOK" "agent-a" "resume-drift" "claude")
+echo "$DRIFT" | grep -q 'alias_identity_mismatch' \
+  && pass "#203 guard rejects alias drift (token bound to agent-drift-node)" \
+  || fail "alias drift NOT rejected: $(echo "$DRIFT" | head -c 160)"
 
 RA=$(report_status "$NTOK_A" "agent-a" "resume-a" "claude")
 RB=$(report_status "$NTOK_B" "agent-b" "resume-b" "codex")

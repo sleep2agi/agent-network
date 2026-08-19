@@ -25,7 +25,6 @@ test-rfc029-pr3-preset
 test-rfc029-pr4-kernel-live
 test1-newuser
 test10-token-ratelimit
-test13-multi-channel
 test14-agent-node
 test15-telegram-mock
 test16-channel-plugin
