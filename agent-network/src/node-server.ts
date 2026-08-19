@@ -14,6 +14,7 @@
 
 import { readFileSync, existsSync } from "fs";
 import { OUTBOUND_TOOL_NAMES } from "./outbound-tool-names";
+import { parseCommhubToolResult } from "./commhub-response";
 import { randomUUID } from "crypto";
 import { join } from "path";
 import { hostname } from "os";
@@ -304,7 +305,10 @@ async function callCommHub(toolName: string, args: Record<string, unknown>): Pro
   const dataLine = text.split("\n").find((l) => l.startsWith("data: "));
   if (dataLine) {
     const json = JSON.parse(dataLine.slice(6));
-    return json?.result?.content?.[0]?.text ? JSON.parse(json.result.content[0].text) : json;
+    // #1100 — never let an isError / non-JSON body throw here (see
+    // commhub-response.ts). Returns a structured {ok:false,error} instead
+    // of surfacing an opaque -32603 that hides the real cause.
+    return parseCommhubToolResult(json);
   }
   return { ok: false, error: "no response" };
 }
