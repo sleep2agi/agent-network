@@ -109,6 +109,11 @@ L1_TESTS=(
   "qa-ut-01-auth-tokens"
   "qa-ut-02-password-dict"
   "qa-ut-03-auth-validate"
+  # 2026-08-19 补注册。它此前是孤儿**而且在 main 上就是红的**，而且红得**完全没有输出**：
+  # 变异存活时那句裸的 `test "$X_rc" -ne 0` 在 set -e 下静默终止（#1096 让它说话），
+  # 说出来才发现是真覆盖洞：getUserAllNetworks() 的两条可达路径一条都没被测到（#1097 补上）。
+  # 三条见证红现在全部成立；按 qa.sh 真实调法实测 rc=0，build 3s + run 5s（很便宜）。
+  "test647-rest-explicit-columns"
   # 2026-08-19 补注册。它此前是孤儿**而且在 main 上就是红的**，
   # 而红的表面原因（逐字计数 16 vs 17）底下藏着一道**恒真的门**：
   # WEAK_COUNT 的正则对真实文件命中 0 行，那句

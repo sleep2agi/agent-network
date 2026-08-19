@@ -87,7 +87,6 @@ test588-codex-turn-clientid-rebind
 test6-networks
 test608-claude-cli-dependency
 test616-feishu-docker-bootstrap
-test647-rest-explicit-columns
 test648-probe-ip-pin
 test650-anet-attach
 test652-admin-network-list
