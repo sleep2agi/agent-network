@@ -14,6 +14,24 @@ run() {
   "$@" 2>&1 | tee -a "$REPORT"
 }
 
+# 🔴 变异必须真的改动文件，否则算【锚点过期】而不是产品缺陷。
+#    为什么不预先 grep 锚点：锚点里含 `\\n` 这类转义，在 grep -F / sed / shell 引号
+#    三层里的含义不同，判据本身就会成为 bug 源。**直接量「文件改没改」不需要任何转义。**
+#    背景（2026-08-19 实测 origin/main）：3 条锚点里 2 条 0 命中 ——
+#    一次改名把 Codex/INTERVAL 换成了 Native/SCHEDULE，本文件的字面量没跟上。
+#    sed 打不中时是 **no-op** ⇒ 产品没被改坏 ⇒ 测试绿 ⇒ 下面那句
+#    `FAIL: ... stayed green` 照样会打，套件确实红了 —— **但那句红话指错了层**：
+#    它把人指向产品，而该改的是这个文件。这个函数把它变成一句指对层的红话。
+mutate() { # $1=目标文件 $2=sed 表达式（原样透传，不经二次解析）
+  cp "$1" /tmp/pre-mutation.snapshot
+  sed -i "$2" "$1"
+  if cmp -s /tmp/pre-mutation.snapshot "$1"; then
+    printf 'FAIL: 变异未改动 %s —— 【测试锚点过期】，不是产品缺陷\n' "$1" | tee -a "$REPORT"
+    printf '  sed: %s\n' "$2" | tee -a "$REPORT"
+    exit 1
+  fi
+}
+
 printf '%s\n' \
   '# test236 — Dashboard /goal reaches shared Codex TUI' \
   "source_commit=$SOURCE_COMMIT" \
@@ -28,7 +46,7 @@ run production-wiring bash -ceu '
   cli=/workspace/agent-node/src/cli.ts
   grep -Fq "const interactiveDashboardTask = isInteractiveDashboardTask(msg);" "$cli"
   grep -Fq "shouldCreateScheduledGoal(persistenceSafeContent, RUNTIME, interactiveDashboardTask)" "$cli"
-  grep -Fq "const preparedReply = prepareDashboardCodexGoalReply(" "$cli"
+  grep -Fq "const preparedReply = prepareDashboardNativeSlashReply(" "$cli"
   grep -Fq "if (!preparedReply.shouldDeliver)" "$cli"
   grep -Fq "interactiveDashboardTask," "$cli"
 '
@@ -47,8 +65,7 @@ run production-build bash -ceu '
 # leaving the test unchanged. The screenshot's interval-free `/goal` must be
 # intercepted again, so the focused routing test has to fail.
 cp /workspace/agent-node/src/goals/routing.ts /tmp/routing.original.ts
-sed -i 's/return !(runtime === "codex-app-server" && interactiveDashboardTask);/return true;/' \
-  /workspace/agent-node/src/goals/routing.ts
+mutate /workspace/agent-node/src/goals/routing.ts 's/return !interactiveDashboardTask;/return true;/'
 set +e
 bun test /workspace/agent-node/src/goals/routing.test.ts > /tmp/mutation.out 2>&1
 mutation_rc=$?
@@ -66,8 +83,7 @@ run restored-green bun test /workspace/agent-node/src/goals/routing.test.ts
 # Witnessed-red: keep the routing exception but remove the deterministic
 # interval notice from the successful reply. The ambiguity regression must be
 # observable even though the goal itself still reaches Codex.
-sed -i 's/return `${DASHBOARD_CODEX_GOAL_INTERVAL_NOTICE}\\n\\n${replyText}`;/return replyText;/' \
-  /workspace/agent-node/src/goals/routing.ts
+mutate /workspace/agent-node/src/goals/routing.ts 's/return `${DASHBOARD_NATIVE_SCHEDULE_NOTICE}\\n\\n${replyText}`;/return replyText;/'
 set +e
 bun test /workspace/agent-node/src/goals/routing.test.ts > /tmp/notice-mutation.out 2>&1
 notice_mutation_rc=$?
@@ -85,8 +101,7 @@ run final-green bun test /workspace/agent-node/src/goals/routing.test.ts
 # Witnessed-red: evaluate low-value status against the raw model text instead
 # of the notice-prefixed text. A model reply of "收到" would then suppress the
 # required interval warning.
-sed -i 's/!isLowValueReply(text)/!isLowValueReply(replyText)/' \
-  /workspace/agent-node/src/goals/routing.ts
+mutate /workspace/agent-node/src/goals/routing.ts 's/!isLowValueReply(text)/!isLowValueReply(replyText)/'
 set +e
 bun test /workspace/agent-node/src/goals/routing.test.ts > /tmp/order-mutation.out 2>&1
 order_mutation_rc=$?
