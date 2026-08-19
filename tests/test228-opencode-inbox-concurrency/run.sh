@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# SHA 绑定（形态同 tests/test746-setup-bun-pin/run.sh:8）：没有它这次运行钉不到任何提交，
+# 而 scripts/qa.sh 在缺 ARG 时是**不传且不报错**的 —— 断言在这里才会让缺失显形。
+[[ "${TEST228_SOURCE_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]] || {
+  echo 'FAIL: TEST228_SOURCE_COMMIT must be one full lowercase Git SHA' >&2
+  exit 1
+}
+printf 'source_commit=%s\n' "$TEST228_SOURCE_COMMIT"
+
 REPORT="${REPORT:-/report/report-test228.txt}"
 mkdir -p "$(dirname "$REPORT")"
 

@@ -46,9 +46,7 @@ test21-quickstart-ux
 test22-agent-ux
 test226-opencode-preview-release
 test227-opencode-tui-copresence
-test228-opencode-inbox-concurrency
 test23-codex-telegram
-test230-opencode-sender-label
 test24-codex-commander
 test25-agent-telegram
 test26-network-scope
