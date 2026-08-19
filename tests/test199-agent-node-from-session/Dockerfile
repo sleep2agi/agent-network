@@ -8,4 +8,8 @@ COPY tests/test199-agent-node-from-session/run.sh tests/run-agent-node-from-sess
 WORKDIR /repo/agent-node
 RUN bun install
 
+ARG TEST199_SOURCE_COMMIT=dev
+ENV TEST199_SOURCE_COMMIT=$TEST199_SOURCE_COMMIT
+LABEL org.opencontainers.image.revision=$TEST199_SOURCE_COMMIT
+
 CMD ["bash", "/repo/tests/run-agent-node-from-session.sh"]

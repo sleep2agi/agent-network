@@ -11,7 +11,7 @@ COPY docs-site docs-site
 COPY tests/test520-ack-inbox-docs/run.sh tests/test520-ack-inbox-docs/run.sh
 RUN chmod +x tests/test520-ack-inbox-docs/run.sh
 
-ARG TEST520_DOCS_SOURCE_COMMIT=unknown
-ENV TEST520_DOCS_SOURCE_COMMIT=$TEST520_DOCS_SOURCE_COMMIT
+ARG TEST520_SOURCE_COMMIT=unknown
+ENV TEST520_SOURCE_COMMIT=$TEST520_SOURCE_COMMIT
 
 CMD ["tests/test520-ack-inbox-docs/run.sh"]

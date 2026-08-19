@@ -35,7 +35,6 @@ test16-channel-plugin
 test18-error-paths
 test185-external-schedules
 test19-real-collab
-test199-agent-node-from-session
 test2-collab
 test20-cli-ux
 test203-alias-crossover-repro
@@ -66,12 +65,9 @@ test384-opencode-local-package-e2e
 test386-opencode-agent-node-gate
 test4-base
 test466-codex-copresence-p3
-test520-ack-inbox-docs
 test520-task-runtime-evidence
 test535-codex-copresence-docs
-test573-codex-turn-reconcile
 test575-opencode-reply-ownership
-test583-dashboard-chat-idempotency
 test587-codex-start-relative-timeout
 test588-codex-turn-clientid-rebind
 test6-networks

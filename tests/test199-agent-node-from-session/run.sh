@@ -1,4 +1,13 @@
 #!/usr/bin/env bash
+
+# SHA 绑定（形态同 tests/test746-setup-bun-pin/run.sh:8）：scripts/qa.sh 缺 ARG 时
+# **不传且不报错**，断言写在这里才会让缺失显形。
+[[ "${TEST199_SOURCE_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]] || {
+  echo 'FAIL: TEST199_SOURCE_COMMIT must be one full lowercase Git SHA' >&2
+  exit 1
+}
+printf 'source_commit=%s\n' "$TEST199_SOURCE_COMMIT"
+
 set -euo pipefail
 
 cd /repo/agent-node
