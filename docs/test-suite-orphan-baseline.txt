@@ -48,7 +48,6 @@ test24-codex-commander
 test25-agent-telegram
 test26-network-scope
 test27-cases-docs
-test28-demo-debate-v2.1.2
 test28-pr-review-room
 test29-network-alias
 test292-e2e-agent-registration
