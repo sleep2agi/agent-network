@@ -161,7 +161,11 @@ const mcp = new Server(
           `Messages from CommHub arrive as <channel source="commhub" task_id="..." priority="..." from="...">`,
           `These are tasks dispatched by the hub or other sessions via the CommHub Server.`,
           `Reply routing (IMPORTANT — the tool you pick determines whether the receiver actually gets woken up):`,
-          `  • If the sender is another agent node (from CommHub, from your peer's session alias), reply with commhub_send_task(alias="<their alias>", task="<your reply>"). This creates a new routable task that wakes the peer via new_task SSE so they process it. commhub_reply does NOT wake agent peers — they'd only see it on the next inbox poll (Vincent 2026-07-28 全网规则).`,
+          `  • If the sender is another agent node, replying takes TWO actions — send_task wakes them but does NOT close the task you were sent:`,
+          `      1. commhub_send_task(alias="<their alias>", task="<your reply>") — wakes the peer via new_task SSE. commhub_reply does NOT wake agent peers (Vincent 2026-07-28 全网规则).`,
+          `      2. commhub_reply(task_id="<the task_id you were sent>", status="completed") — terminalizes the ORIGINAL task.`,
+          `    Skip step 2 and the peer wakes up, but their task stays "delivered" forever: they will keep re-reporting "still awaiting reply". The Hub does NOT redeliver — that repetition comes from the peer's own logic, so only closing the task stops it.`,
+          `    If your runtime has commhub_send_peer_reply, it does both in one call (RFC-030). Check your own tool list for it — do not infer it from a version number.`,
           `  • Only use commhub_reply when the sender is the Dashboard/UI (task_id came from a browser chat). Use status="completed" (terminal) so send_reply routes it, updates the task row (Dashboard displays it), and emits new_reply SSE for the live Dashboard viewer. Non-terminal status (in_progress/blocked/error) just updates your session status and does NOT reach the Dashboard.`,
           `You can also use commhub_report_status to update your session status.`,
           `Session alias: ${ALIAS}`,
@@ -175,7 +179,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: "commhub_reply",
-      description: "Reply to a Dashboard/UI-originated CommHub task. ⚠ For agent-to-agent replies use commhub_send_task instead — commhub_reply does NOT wake agent peers via SSE (Vincent 2026-07-28 全网规则). status=\"completed\" (terminal) routes to send_reply and emits new_reply SSE for the live Dashboard; non-terminal status (in_progress/blocked/error) only updates session status (report_status) and does NOT reach the Dashboard.",
+      description: "Reply to a Dashboard/UI-originated CommHub task, AND close an agent-to-agent task you were sent. ⚠ For agent peers this does not replace commhub_send_task — it does NOT wake them (Vincent 2026-07-28 全网规则) — but it IS what terminalizes the original task, so a peer reply needs both: send_task to wake, then commhub_reply(status=\"completed\") to close. status=\"completed\" (terminal) routes to send_reply and emits new_reply SSE for the live Dashboard; non-terminal status (in_progress/blocked/error) only updates session status (report_status) and does NOT reach the Dashboard.",
       inputSchema: {
         type: "object" as const,
         properties: {
