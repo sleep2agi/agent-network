@@ -155,6 +155,17 @@ L1_TESTS=(
   #     · ntok_ 铸造别名一致）。
   # 干净 worktree + --no-cache 实测：修前 4 passed/4 failed → 修后 **13 passed/0 failed**。
   "test8-runtime"
+  # 2026-08-20 补注册。此前是孤儿且在 main 上 10 passed / 3 failed，两个根因，都不是回归：
+  #   ① --runtime http-api 已移出白名单（同 #1112③、#1116⑥）—— 只解释 3 条里的 2 条
+  #   ② `anet demo` 从「起一个 dashboard/server」改成「列出可用演示」，
+  #      而断言还在等旧行为的 'Agent Network Dashboard|Server:'
+  # 🔴 ② 的断言换成【现在真实的契约】而不是放宽：匹配一条目录条目行
+  #   （演示名 + 描述里的 agent 字样），demo 目录被清空/改名时它仍会红。
+  # ⚠️ run_step 用 `grep -Eqi`（**逐行 + POSIX ERE**）——我第一版写了跨行且带 \s 的正则，
+  #   它从一开始就匹配不到任何东西，而失败长得跟原来那条一模一样。
+  #   所以现在改断言前会先离线验一次「这个正则真的能命中实际输出」。
+  # 实测：修前 10/3 → 修后 **13 passed / 0 failed**。
+  "test17-user-journey"
   # 2026-08-19 批量补注册这 7 个。全部按 qa.sh 的真实调法（docker run --rm，不挂 /artifacts）
   # 实测 rc=0；本机耗时（build+run）：
   #   test652 3+4s · test653 8+4s · test-goal-cli 21+2s · test702 23+33s

@@ -32,7 +32,6 @@ test13-multi-channel
 test14-agent-node
 test15-telegram-mock
 test16-channel-plugin
-test17-user-journey
 test18-error-paths
 test185-external-schedules
 test19-real-collab
