@@ -43,7 +43,6 @@ test23-codex-telegram
 test24-codex-commander
 test25-agent-telegram
 test26-network-scope
-test27-cases-docs
 test28-pr-review-room
 test29-network-alias
 test292-e2e-agent-registration
