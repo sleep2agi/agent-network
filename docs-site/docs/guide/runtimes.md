@@ -64,7 +64,7 @@
 - **想白嫖 Claude 订阅 / 新手最省事** → `claude-code-cli` (`claude auth login` 后 0 配置)
 - **写文案 / 翻译 / 分析 (编程式) / 接国产模型** → `claude-agent-sdk` + 在 wizard 里选对应 vendor
 - **写代码 / 跑命令** → `codex-sdk`
-- **人和 Agent 共用一个 Codex TUI/thread** → preview `codex-app-server` + `anet node start <alias> --copresence`（[完整指南](/guide/codex-copresence)）
+- **人和 Agent 共用一个 Codex TUI/thread** → preview `codex-app-server`；创建时加一次 `--copresence`，之后 `anet node start <alias>` 即可启动或恢复（[完整指南](/guide/codex-copresence)）
 - **用 xAI Grok Build** → `grok-build-acp` ([详细 runtime 指南 ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md))
 - **想用公版 sst/opencode CLI 当多 vendor 前端（统一 session/auth）** → `opencode-cli`（需本机装 `opencode` CLI + Anthropic/OpenAI env key，[RFC-029](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md)）
 - **接国产 / 非内置 vendor** (GLM / Kimi / OpenRouter / vLLM / SiliconFlow / 通义千问 等) → `claude-agent-sdk` + 在 vendor 子菜单选 `自定义 (custom)` + `ANTHROPIC_BASE_URL`
@@ -437,12 +437,12 @@ anet node start  →  spawn agent-node 子进程（runtime=codex-app-server）
 ```bash
 cd /path/to/project
 for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
-anet node create codexbridge --runtime codex-app-server
-anet node start codexbridge --copresence
+anet node create codexbridge --runtime codex-app-server --copresence
+anet node start codexbridge
 tmux attach -t =codexbridge
 ```
 
-它统一编排独立 app-server、bridge 与 TUI，默认只读。完整权限、恢复、停止与原生 Windows 手工 WS 步骤见 [Codex TUI 人机共存](/guide/codex-copresence)。
+创建时的 `--copresence` 会被记住；之后普通 `start`（含中断后的恢复）统一编排独立 app-server、bridge 与 TUI，默认只读。完整权限、恢复、停止与原生 Windows 手工 WS 步骤见 [Codex TUI 人机共存](/guide/codex-copresence)。
 
 **① 独占（默认）** —— 节点自己起 app-server + 新建 thread。多个 codex-app-server 节点互不干扰：
 

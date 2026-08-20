@@ -32,7 +32,7 @@ anet --help
 - The recommended one-command path also needs `bash` and **tmux 3.2+**. It currently targets POSIX environments such as Linux/WSL; for native Windows, use the [manual shared-WebSocket path](#native-windows-or-advanced-adoption-manual-shared-websocket).
 - The node must have a network-scoped `ntok_`. Run `anet doctor --fix` for an old node with no token, or recreate it.
 
-## Recommended: first-class `--copresence`
+## Recommended: choose co-presence at creation, then start or resume with one command
 
 ```bash
 # 0. From an external clean shell, enter the project the node should operate on
@@ -42,10 +42,10 @@ cd /path/to/project
 for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
 
 # 1. Create a preview-runtime node
-anet node create codex-human --runtime codex-app-server
+anet node create codex-human --runtime codex-app-server --copresence
 
 # 2. Start the app-server, bridge, and attachable Codex TUI
-anet node start codex-human --copresence
+anet node start codex-human
 
 # 3. Enter the shared human/agent TUI
 tmux attach -t =codex-human
@@ -53,7 +53,9 @@ tmux attach -t =codex-human
 
 A Codex thread inherits its working directory from the **app-server process cwd**, not the bridge cwd. `cd` into the target project **before** `--copresence`. On Linux, verify with `readlink /proc/<app-server-pid>/cwd`; checking only the bridge is insufficient.
 
-`--copresence` creates three tmux sessions carrying one shared identity marker:
+`create --copresence` records the choice in the node profile. After that, plain `node start` rebuilds the same co-presence topology after a stop or interruption; the flag does not need to be repeated. For an existing node, run `anet node start codex-human --copresence` once and later starts can use the plain command.
+
+Startup creates three tmux sessions carrying one shared identity marker:
 
 | Session | Role |
 |---|---|
@@ -92,7 +94,7 @@ If a bridge has been disconnected for a long time and prints “run `anet node s
 anet node stop codex-human
 cd /path/to/project
 for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
-anet node start codex-human --copresence
+anet node start codex-human
 ```
 
 This is not theoretical: the production node `TM副责人` ran a silent duplicate for about two days, and `A站副责人` did so for about nine days after operators followed the generic hint ([#535](https://github.com/sleep2agi/agent-network/issues/535)).

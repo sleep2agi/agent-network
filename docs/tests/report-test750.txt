@@ -1,0 +1,20 @@
+# test750 — Codex TUI one-command create/start/resume journey
+
+Date: 2026-08-21 (Asia/Shanghai)
+Source: 0efa63a6
+Environment: isolated Docker container; no host Codex or anet state mounted
+
+Command:
+
+    sg docker -c 'docker build -t anet-test750 -f tests/test750-codex-copresence-onecommand/Dockerfile . && docker run --rm anet-test750'
+
+Result: PASS — 6 groups, 0 failures.
+
+- L0 isolated environment: PASS
+- L1 profile and preflight decisions: PASS (38 assertions)
+- L2 create persists the co-presence choice: PASS
+- L3 plain `anet node start <name>` routes a recorded node to the TUI stack: PASS
+- L4 one-off `--copresence` remains compatible and is remembered: PASS
+- L5 read-only default and explicitly remembered full-access posture: PASS
+
+The resume behavior uses the same plain `node start` path after stop/interruption; the persisted `codexCopresence` profile field selects the co-presence stack without requiring the flag again.

@@ -32,7 +32,7 @@ anet --help
 - 推荐的一键共存路径还需要 `bash` 和 **tmux 3.2+**。当前以 Linux/WSL 等 POSIX 环境为目标；原生 Windows 请用下方的[手工共享 WS 路径](#原生-windows-或高级接管手工共享-ws)。
 - 节点必须持有 network-scoped `ntok_`。旧节点缺 token 时先运行 `anet doctor --fix`，或重新创建节点。
 
-## 推荐：一等 `--copresence` 路径
+## 推荐：创建时选定共存，之后一键启动/恢复
 
 ```bash
 # 0. 在外部干净 shell 中进入节点要操作的项目
@@ -42,10 +42,10 @@ cd /path/to/project
 for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
 
 # 1. 创建 preview runtime 节点
-anet node create codex-human --runtime codex-app-server
+anet node create codex-human --runtime codex-app-server --copresence
 
 # 2. 一键启动 app-server、bridge 和可 attach 的 Codex TUI
-anet node start codex-human --copresence
+anet node start codex-human
 
 # 3. 进入人机共用的 TUI
 tmux attach -t =codex-human
@@ -53,7 +53,9 @@ tmux attach -t =codex-human
 
 Codex thread 的工作目录继承自 **app-server 进程启动时的 cwd**，不是 bridge 的 cwd；因此要在运行 `--copresence` **之前**先 `cd` 到目标项目。Linux 上可用 `readlink /proc/<app-server-pid>/cwd` 复核，不能只检查 bridge。
 
-`--copresence` 会创建三个带同一身份标记的 tmux session：
+`create --copresence` 会把选择写入节点配置；此后普通 `node start`（包括停止或中断后的恢复）都会重建同一套共存拓扑，无需重复 flag。旧节点也可第一次运行 `anet node start codex-human --copresence`，CLI 会记住选择，后续同样只需 `anet node start codex-human`。
+
+启动会创建三个带同一身份标记的 tmux session：
 
 | Session | 作用 |
 |---|---|
@@ -91,7 +93,7 @@ anet node stop codex-human
 anet node stop codex-human
 cd /path/to/project
 for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
-anet node start codex-human --copresence
+anet node start codex-human
 ```
 
 这不是理论风险：生产节点 `TM副责人` 因此静默重复运行约 2 天，`A站副责人` 则持续约 9 天（[#535](https://github.com/sleep2agi/agent-network/issues/535)）。

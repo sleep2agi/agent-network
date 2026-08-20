@@ -64,7 +64,7 @@ Rows tagged `(preview)` below are **preview-only** and not selectable on stable.
 - **Reuse a Claude subscription / smoothest first-time path** → `claude-code-cli` (zero config after `claude auth login`)
 - **Writing copy / translation / analysis (programmatic) / using a domestic Chinese model** → `claude-agent-sdk` + pick the matching vendor in the wizard
 - **Writing code / running commands** → `codex-sdk`
-- **Human and Agent sharing one Codex TUI/thread** → preview `codex-app-server` + `anet node start <alias> --copresence` ([full guide](/en/guide/codex-copresence))
+- **Human and Agent sharing one Codex TUI/thread** → preview `codex-app-server`; pass `--copresence` once at creation, then `anet node start <alias>` starts or resumes it ([full guide](/en/guide/codex-copresence))
 - **Using xAI Grok Build** → `grok-build-acp` ([detailed runtime guide ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md))
 - **Use the public sst/opencode CLI as a multi-vendor front-end (unified session/auth)** → `opencode-cli` (needs the local `opencode` CLI + an Anthropic/OpenAI env key, [RFC-029](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md))
 - **Reach a vendor that's NOT in the built-in list** (GLM / Kimi / OpenRouter / vLLM / SiliconFlow / Qwen ...) → `claude-agent-sdk` + pick `custom` in the vendor submenu + `ANTHROPIC_BASE_URL`
@@ -417,12 +417,12 @@ The recommended co-presence entry point is the preview CLI command, not hand-edi
 ```bash
 cd /path/to/project
 for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
-anet node create codexbridge --runtime codex-app-server
-anet node start codexbridge --copresence
+anet node create codexbridge --runtime codex-app-server --copresence
+anet node start codexbridge
 tmux attach -t =codexbridge
 ```
 
-It orchestrates a dedicated app-server, bridge, and TUI together and defaults to read-only. See [Codex TUI Co-presence](/en/guide/codex-copresence) for permissions, recovery, stop behavior, and the native-Windows manual WebSocket path.
+The create-time choice is remembered. Plain `start` then orchestrates a dedicated app-server, bridge, and TUI together—including recovery after interruption—and defaults to read-only. See [Codex TUI Co-presence](/en/guide/codex-copresence) for permissions, recovery, stop behavior, and the native-Windows manual WebSocket path.
 
 **① Owned (default)** — the node spawns its own app-server and creates a fresh thread. Multiple codex-app-server nodes are fully independent:
 
