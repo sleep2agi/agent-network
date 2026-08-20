@@ -1,6 +1,7 @@
 import {
   closeSync,
   constants,
+  existsSync,
   fchmodSync,
   fstatSync,
   fsyncSync,
@@ -14,6 +15,27 @@ import {
   writeSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
+
+
+/**
+ * `/proc/self/fd/<fd>` 这套「把已打开的 fd 变回路径」的 TOCTOU 加固**只有 Linux 有**。
+ *
+ * 🔴 Windows 上 `realpathSync("/proc/self/fd/3")` 会被 resolve 成当前盘符下的
+ *    `D:\\proc\\...` 然后 ENOENT —— 实测报错就是
+ *    `Error: ENOENT: no such file or directory, lstat 'D:\\proc'`。
+ *    ⇒ 在没有 procfs 的平台上退回按【路径】操作，并且【明确记下】少了哪一条保证：
+ *      少的是「校验与使用之间目录被换掉」的防护，
+ *      fstat 的 isDirectory / uid、以及 O_NOFOLLOW 仍然生效。
+ *      这里不假装它等价 —— 假装等价才是真正危险的那一步。
+ */
+function procfsFdPathsAvailable(): boolean {
+  return process.platform === "linux" && existsSync("/proc/self/fd");
+}
+
+/** 已打开目录 fd 对应的可用路径：有 procfs 用 fd 引用，否则回退到原路径。 */
+function directoryHandlePath(directoryFd: number, fallbackAbsolute: string): string {
+  return procfsFdPathsAvailable() ? `/proc/self/fd/${directoryFd}` : fallbackAbsolute;
+}
 
 export interface PrivateLogRedactor {
   redactText(value: unknown): { text: string; redactions: number };
@@ -43,10 +65,11 @@ function openPrivateDirectory(path: string): number {
     if (!stat.isDirectory() || (uid !== undefined && stat.uid !== uid)) {
       throw new Error(`private log directory is not owner-controlled: ${absolute}`);
     }
-    if (realpathSync(`/proc/self/fd/${fd}`) !== absolute) {
+    if (procfsFdPathsAvailable() && realpathSync(`/proc/self/fd/${fd}`) !== absolute) {
       throw new Error(`private log directory changed during validation: ${absolute}`);
     }
-    fchmodSync(fd, 0o700);
+    // NTFS 走 ACL，没有 mode 位；fchmod 在 Windows 上直接 EPERM。
+    if (process.platform !== "win32") fchmodSync(fd, 0o700);
     return fd;
   } catch (error) {
     closeSync(fd);
@@ -108,7 +131,7 @@ export function preparePrivateLogDirectory(
   try {
     // Resolve children through the already-open directory descriptor. A
     // pathname replacement cannot redirect legacy scrubbing elsewhere.
-    const descriptorPath = `/proc/self/fd/${directoryFd}`;
+    const descriptorPath = directoryHandlePath(directoryFd, absolute);
     for (const name of readdirSync(descriptorPath)) {
       if (!name.endsWith(".log")) continue;
       scrubLegacyLog(join(descriptorPath, name), redactor);
@@ -130,7 +153,7 @@ export function appendPrivateLogLine(
     throw new Error("private log filename is not a canonical daily log name");
   }
   const directoryFd = openPrivateDirectory(directory);
-  const path = `/proc/self/fd/${directoryFd}/${filename}`;
+  const path = join(directoryHandlePath(directoryFd, resolve(directory)), filename);
   let fd: number | undefined;
   try {
     fd = openSync(

@@ -6,6 +6,13 @@ import {
   type Stats,
 } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
+import {
+  copresenceCapabilities,
+  copresenceEndpointIsFilesystemPath,
+  copresenceIpcEndpoint,
+  modeIsExactly,
+  modeIsOwnerOnly,
+} from "./platform";
 import { dirname, isAbsolute, resolve } from "node:path";
 
 export const GROK_COPRESENCE_ATTACH_PROTOCOL = "anet-grok-copresence-attach";
@@ -160,19 +167,28 @@ class AttachServer implements GrokCopresenceAttachServer {
       };
       this.server.once("error", onError);
       this.server.once("listening", onListening);
-      this.server.listen(this.socketPath);
+      // 路径仍按路径用（锁文件、哈希键），只有真正 bind 的这一刻换成平台端点：
+      // Linux 逐字沿用原 Unix socket 路径；Windows 换成按完整路径哈希出的命名管道。
+      this.server.listen(copresenceIpcEndpoint(this.socketPath, copresenceCapabilities()));
     });
 
     try {
-      chmodSync(this.socketPath, 0o600);
-      const stat = lstatSync(this.socketPath);
-      if (!stat.isSocket() || stat.isSymbolicLink()) {
-        throw new Error("Grok attach endpoint is not a real Unix socket");
+      // 🔴 命名管道不在文件系统里：这里的 chmod / lstat / isSocket / dev+ino
+      //    全部是针对【Unix socket 文件】的校验，对管道逐条都不成立
+      //    （实测第一条就 `ENOENT: chmod '...\\run\\attach.sock'`）。
+      //    互斥与生命周期由管道命名空间本身保证：同名只能被一个进程创建，
+      //    进程退出 OS 立即回收 —— 这一格不是"跳过检查"，是"检查对象不同"。
+      if (copresenceEndpointIsFilesystemPath(copresenceCapabilities())) {
+        chmodSync(this.socketPath, 0o600);
+        const stat = lstatSync(this.socketPath);
+        if (!stat.isSocket() || stat.isSymbolicLink()) {
+          throw new Error("Grok attach endpoint is not a real Unix socket");
+        }
+        if (!modeIsOwnerOnly(stat.mode)) {
+          throw new Error("Grok attach Unix socket must be owner-only (0600)");
+        }
+        this.identity = { dev: stat.dev, ino: stat.ino };
       }
-      if ((stat.mode & 0o077) !== 0) {
-        throw new Error("Grok attach Unix socket must be owner-only (0600)");
-      }
-      this.identity = { dev: stat.dev, ino: stat.ino };
       this.started = true;
     } catch (error) {
       await this.stopListeningAfterStartFailure();
@@ -525,6 +541,12 @@ function assertSafeSocketLocation(socketPath: string): void {
   if (!isAbsolute(socketPath) || resolve(socketPath) !== socketPath) {
     throw new Error("Grok attach socket path must be absolute and normalized");
   }
+  // 🔴 Windows：端点是【命名管道】而不是文件系统里的 socket 文件，
+  //    所以下面这组 lstat / uid / 0700 校验对它没有意义 —— 它们的保护对象
+  //    （别人能不能在同目录里塞一个同名 socket）在管道命名空间里不存在。
+  //    实测：AF_UNIX 在 Windows 上 EACCES，命名管道 ok。
+  //    父目录本身仍然由 ensurePrivateRuntimeDirectory 建成受控目录（锁文件放那儿）。
+  if (!copresenceEndpointIsFilesystemPath(copresenceCapabilities())) return;
   const parent = dirname(socketPath);
   const parentStat = lstatSync(parent);
   if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) {
@@ -536,7 +558,7 @@ function assertSafeSocketLocation(socketPath: string): void {
   if (typeof process.getuid !== "function" || parentStat.uid !== process.getuid()) {
     throw new Error("Grok attach socket parent must be owned by the current uid");
   }
-  if ((parentStat.mode & 0o077) !== 0) {
+  if (!modeIsOwnerOnly(parentStat.mode)) {
     throw new Error("Grok attach socket parent must be owner-only (0700)");
   }
 

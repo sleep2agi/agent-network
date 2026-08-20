@@ -64,8 +64,21 @@ loadEnvFile(join(COMMHUB_DIR, projectPath, ".env"));
 
 // ── Get tmux session name ─────────────────────────────
 function getTmuxSessionName(): string {
+  // 🔴 Windows 没有 tmux，而 execSync **默认把子进程 stderr 透传到父进程 stderr**：
+  //    于是每次启动都往 stderr 写一行 `'tmux' is not recognized ...`。
+  //    这个 server 是 MCP stdio 服务端，父进程（grok）不一定排空 stderr 管道；
+  //    Windows 管道缓冲只有几 KB，写满即**阻塞**，initialize 就永远回不出去 ——
+  //    实测：grok 的 `mcp doctor` 报 `server started 0.1s` 然后
+  //    `handshake failed: connection closed: initialize response`，
+  //    而同一台机上一个【完全不写 stderr】的最小 MCP server 握手正常（healthy=1）。
+  //    ⇒ 平台上没有 tmux 就不要去问；并且显式丢弃子进程 stderr，不让它进管道。
+  if (process.platform === "win32") return "";
   try {
-    return execSync("tmux display-message -p '#S'", { encoding: "utf-8", timeout: 2000 }).trim();
+    return execSync("tmux display-message -p '#S'", {
+      encoding: "utf-8",
+      timeout: 2000,
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
   } catch {
     return "";
   }

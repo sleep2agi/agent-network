@@ -30,6 +30,8 @@ import {
   GROK_COPRESENCE_AGENT_FILE,
   renderGrokCopresenceAgentProfile,
 } from "./grok-copresence/policy";
+import { chmodIfPosix, copresenceCapabilities, copresenceIpcEndpoint, modeIsExactly, modeIsOwnerOnly, posixFileModes } from "./grok-copresence/platform";
+import { createServer as createNetServer } from "node:net";
 
 export interface PrepareGrokCliHomeOptions {
   sourceHome: string;
@@ -61,9 +63,37 @@ export function resolveGrokCommhubMcpCommand(command: string, pathEnv: string): 
   if (!command || command.includes("\0") || command.includes("\r") || command.includes("\n")) {
     throw new Error("grok copresence CommHub MCP command is invalid");
   }
+  // 🔴 Windows 上必须带扩展名才能 spawn。实测：解析到 nvm 下那个**无扩展名**的
+  //    `bun`（它是 shell 脚本），grok 的 doctor 报
+  //      spawn failed %1 不是有效的 Win32 应用程序。(os error 193)
+  //    而同一目录下的 `bun.cmd` / `bun.exe` 才是可执行的那个。
+  //    ⇒ 非 POSIX 平台按 PATHEXT 依次尝试；顺序里把无扩展名放最后，
+  //      这样 Linux 行为逐字不变，Windows 也不会挑到脚本。
+  const extensions = posixFileModes()
+    ? [""]
+    : [
+        ...(process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD")
+          .split(";")
+          .map((ext) => ext.trim())
+          .filter(Boolean),
+        "",
+      ];
+  const withExtensions = (base: string) => extensions.map((ext) => `${base}${ext}`);
+  // 🔴 Linux 上 `<prefix>/bin/bun` 是指向 `lib/node_modules/bun/bin/bun.exe` 的符号链接，
+  //    realpathSync 会自动解到那个真二进制。Windows 上同名的是 `bun.CMD` 批处理包装，
+  //    它不是链接、解不过去 —— 而 MCP 走 stdio 握手，经批处理转发会失败：
+  //    实测 doctor 报 `server started 0.0s` 之后 `handshake failed: connection closed`。
+  //    ⇒ 额外探一次 npm 全局布局下的真二进制，与 Linux 解析到的是同一个文件。
+  const npmGlobalBinaries = (directory: string) => (posixFileModes() ? [] : [
+    resolve(directory, "node_modules", command, "bin", `${command}.exe`),
+  ]);
   const candidates = isAbsolute(command)
-    ? [command]
-    : pathEnv.split(delimiter).filter(Boolean).map((directory) => resolve(directory, command));
+    ? withExtensions(command)
+    : pathEnv.split(delimiter).filter(Boolean)
+        .flatMap((directory) => [
+          ...npmGlobalBinaries(directory),
+          ...withExtensions(resolve(directory, command)),
+        ]);
   for (const candidate of candidates) {
     try {
       const canonical = realpathSync(candidate);
@@ -187,6 +217,40 @@ function removeTransientPostStopDirectory(path: string): void {
   rmSync(quarantine, { recursive: true, force: false });
 }
 
+/** 项目级 turn 锁的落盘文件名（Windows 上它同时是命名管道名的哈希来源）。 */
+const GROK_PROJECT_TURN_LOCK_FILE = ".anet-grok-turn.lock";
+
+/**
+ * 命名管道独占。第二个 listen 同名会 EADDRINUSE —— 那就是"已被占用"。
+ * 与 grok-copresence/runtime.ts 里的生命周期锁用同一条 copresenceIpcEndpoint 规则，
+ * 保证两侧对同一路径算出同一个管道名。
+ */
+async function acquireNamedPipeExclusive(path: string): Promise<{ release(): Promise<void> }> {
+  const endpoint = copresenceIpcEndpoint(path, copresenceCapabilities());
+  const server = createNetServer();
+  server.on("connection", (socket) => { try { socket.destroy(); } catch {} });
+  await new Promise<void>((resolveListen, rejectListen) => {
+    const onError = (error: any) => {
+      server.removeListener("listening", onListening);
+      rejectListen(new Error(
+        `grok-build-cli project turn lock is already held (${endpoint}): ${error?.message || error}`,
+      ));
+    };
+    const onListening = () => { server.removeListener("error", onError); resolveListen(); };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(endpoint);
+  });
+  let released = false;
+  return {
+    async release() {
+      if (released) return;
+      released = true;
+      await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+    },
+  };
+}
+
 export interface GrokProjectTurnLock {
   /** Parent fd for the already-locked open-file-description. Pass to turn. */
   fd: number;
@@ -219,7 +283,7 @@ export function hardenExistingGrokSessionStore(stateHome: string): void {
       let fd: number | undefined;
       try {
         fd = openSync(path, constants.O_RDONLY | (constants.O_DIRECTORY || 0) | (constants.O_NOFOLLOW || 0));
-        fchmodSync(fd, 0o700);
+        chmodIfPosix(() => fchmodSync(fd, 0o700));
       } finally {
         if (fd !== undefined) closeSync(fd);
       }
@@ -235,7 +299,7 @@ export function hardenExistingGrokSessionStore(stateHome: string): void {
       if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== stat.dev || opened.ino !== stat.ino) {
         throw new Error(`grok-build-cli session state changed during mode repair: ${path}`);
       }
-      fchmodSync(fd, 0o600);
+      chmodIfPosix(() => fchmodSync(fd, 0o600));
     } finally {
       closeSync(fd);
     }
@@ -283,7 +347,7 @@ function ensurePrivateDirectory(path: string, label: string): void {
     }
     const uid = process.getuid?.();
     if (uid !== undefined) assertCurrentOwner(path, uid, stat.uid);
-    fchmodSync(fd, 0o700);
+    chmodIfPosix(() => fchmodSync(fd, 0o700));
   } catch (error: any) {
     if (error?.code === "ELOOP" || error?.code === "ENOTDIR") {
       throw new Error(`grok-build-cli refuses ${label} at ${path}: expected a real directory, not a symlink or file`);
@@ -331,7 +395,7 @@ function writeGeneratedFile(path: string, content: string): void {
   );
   try {
     writeFileSync(fd, content, "utf8");
-    fchmodSync(fd, 0o600);
+    chmodIfPosix(() => fchmodSync(fd, 0o600));
     closeSync(fd);
     renameSync(temp, path);
   } catch (error) {
@@ -373,7 +437,7 @@ function assertOwnedDirectoryForPostStop(path: string, label: string): void {
     }
     const uid = process.getuid?.();
     if (uid !== undefined) assertCurrentOwner(expected, uid, stat.uid);
-    fchmodSync(fd, 0o700);
+    chmodIfPosix(() => fchmodSync(fd, 0o700));
   } catch (error: any) {
     if (error?.code === "ELOOP" || error?.code === "ENOTDIR") {
       throw new Error(`grok-build-cli refuses ${label}: expected a real directory`);
@@ -477,7 +541,7 @@ function assertExactProjectSandboxPlaceholder(
     || !stat.isFile()
     || stat.nlink !== 1
     || stat.size !== 0
-    || (stat.mode & 0o7777) !== 0o444) {
+    || posixFileModes() && (stat.mode & 0o7777) !== 0o444) {
     throw new Error(
       `grok-build-cli refuses post-stop project placeholder at ${path}: `
       + "expected an empty owner-held single-link regular file with mode 0444",
@@ -580,7 +644,7 @@ function hardenExactPostStopFile(path: string): void {
   if (!lstatIfPresent(path)) return;
   const opened = openOwnedSingleLinkFileForPostStop(path);
   try {
-    fchmodSync(opened.fd, 0o600);
+    chmodIfPosix(() => fchmodSync(opened.fd, 0o600));
   } finally {
     closeSync(opened.fd);
   }
@@ -676,7 +740,7 @@ function reclaimSandboxBlockedPlaceholder(
   uid: number | undefined,
 ): void {
   if (before.isDirectory()) {
-    chmodSync(path, 0o700);
+    chmodIfPosix(() => chmodSync(path, 0o700));
     let empty = false;
     let fd: number | undefined;
     try {
@@ -699,7 +763,7 @@ function reclaimSandboxBlockedPlaceholder(
     if (!empty) {
       // Non-empty marker: restore the unreadable mode so the scanner still maps
       // it to the fatal structural role rather than a hardened owner-only tree.
-      chmodSync(path, 0o000);
+      chmodIfPosix(() => chmodSync(path, 0o000));
       return;
     }
     const after = lstatSync(path);
@@ -716,7 +780,7 @@ function reclaimSandboxBlockedPlaceholder(
     // wrote it so the scanner classifies it as a fatal structural anomaly.
     return;
   }
-  chmodSync(path, 0o700);
+  chmodIfPosix(() => chmodSync(path, 0o700));
   let fd: number | undefined;
   try {
     fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
@@ -857,9 +921,9 @@ function exactPrivateIdentityCopy(source: string, target: string): boolean {
     // the symlink path; require ownership and no world-write here, while the
     // runtime-owned copied target must remain exactly 0600.
     if (!boundedOwnedIdentity(sourceBefore)
-      || (sourceBefore.mode & 0o002) !== 0
+      || posixFileModes() && (sourceBefore.mode & 0o002) !== 0
       || !boundedOwnedIdentity(targetBefore)
-      || (targetBefore.mode & 0o777) !== 0o600
+      || !modeIsExactly(targetBefore.mode, 0o600)
       || sourceBefore.size !== targetBefore.size) return false;
     const sourceBytes = readFileSync(sourceFd);
     const targetBytes = readFileSync(targetFd);
@@ -907,16 +971,21 @@ function readPrivateSourceAuth(path: string): string | undefined {
   const before = lstatIfPresent(path);
   if (!before) return undefined;
   const uid = process.getuid?.();
-  if (uid === undefined) {
+  // 🔴 process.getuid 只在 POSIX 上存在。Windows 的属主是 ACL，Node 不直接暴露。
+  //    在那里把"取不到 uid"当作硬失败，等于把整个平台挡在门外；
+  //    而下面 symlink / nlink / 正规文件 / O_NOFOLLOW 的检查【全部照常执行】。
+  //    丢掉的这一条已经写进 platform.ts 的 reducedGuarantees，并在启动时打印。
+  if (uid === undefined && posixFileModes()) {
     throw new Error("grok-build-cli requires Unix uid checks for source auth.json");
   }
   if (before.isSymbolicLink() || !before.isFile() || before.nlink !== 1) {
     throw new Error("grok-build-cli source auth.json must be a single-link regular file");
   }
-  if (before.uid !== uid) {
+  // uid 在 Windows 上是 undefined（见上）；与本文件其余 15 处 uid 比较保持同一写法。
+  if (uid !== undefined && before.uid !== uid) {
     throw new Error("grok-build-cli source auth.json must be owned by the runtime uid");
   }
-  if ((before.mode & 0o777) !== 0o600) {
+  if (!modeIsExactly(before.mode, 0o600)) {
     throw new Error("grok-build-cli source auth.json must have mode 0600");
   }
 
@@ -928,7 +997,7 @@ function readPrivateSourceAuth(path: string): string | undefined {
       || opened.dev !== before.dev || opened.ino !== before.ino) {
       throw new Error("grok-build-cli source auth.json changed during validation");
     }
-    if (opened.uid !== uid || (opened.mode & 0o777) !== 0o600) {
+    if ((uid !== undefined && opened.uid !== uid) || !modeIsExactly(opened.mode, 0o600)) {
       throw new Error("grok-build-cli source auth.json changed security metadata during validation");
     }
     return readFileSync(fd, "utf8");
@@ -1081,7 +1150,7 @@ function validateCommhubMcpConfig(
       || before.nlink !== 1
       || realpathSync(path) !== path
       || (uid !== undefined && before.uid !== uid)
-      || (expectedMode !== undefined && (before.mode & 0o777) !== expectedMode)
+      || (expectedMode !== undefined && !modeIsExactly(before.mode, expectedMode))
     ) {
       throw new Error(`grok-build-cli commhub MCP ${label} is not an owner-held canonical file`);
     }
@@ -1115,7 +1184,7 @@ function stageCommhubMcpConfig(
       if (!opened.isFile() || opened.nlink !== 1
         || opened.dev !== before.dev || opened.ino !== before.ino
         || (uid !== undefined && opened.uid !== uid)
-        || (expectedMode !== undefined && (opened.mode & 0o777) !== expectedMode)) {
+        || (expectedMode !== undefined && !modeIsExactly(opened.mode, expectedMode))) {
         throw new Error(`grok-build-cli commhub MCP ${label} changed during staging`);
       }
       return readFileSync(fd, "utf8");
@@ -1202,6 +1271,30 @@ export async function acquireGrokProjectTurnLock(
 ): Promise<GrokProjectTurnLock> {
   const lexicalRoot = grokProjectWalk(cwd).root;
   const projectRoot = realpathSync(lexicalRoot);
+  // 🔴 Windows 没有 flock(1)（实测 `spawn flock ENOENT`）。用命名管道独占顶上：
+  //    互斥由内核给（同名管道只能建一次），且进程退出后 OS 立即回收，不留死锁。
+  //    fd 仍然给出一个真实的已打开描述符，调用方对它的用法（传进 turn）不变。
+  if (!posixFileModes()) {
+    const lockPath = join(projectRoot, GROK_PROJECT_TURN_LOCK_FILE);
+    const lockFd = openSync(lockPath, constants.O_RDWR | constants.O_CREAT, 0o600);
+    let pipeLock: { release(): Promise<void> };
+    try {
+      pipeLock = await acquireNamedPipeExclusive(lockPath);
+    } catch (error) {
+      closeSync(lockFd);
+      throw error;
+    }
+    let released = false;
+    return {
+      fd: lockFd,
+      async release() {
+        if (released) return;
+        released = true;
+        await pipeLock.release();
+        closeSync(lockFd);
+      },
+    };
+  }
   // issue #884: the walk goes *up*, so a caller under a directory that happens
   // to sit below someone else's `.anet` silently shares that project's lock.
   // Test fixtures under `tmpdir()` are the usual victim: every fixture lands on
@@ -1238,7 +1331,7 @@ export async function acquireGrokProjectTurnLock(
     }
     const uid = process.getuid?.();
     if (uid !== undefined) assertCurrentOwner(lockPath, uid, lockStat.uid);
-    fchmodSync(lockFd, 0o600);
+    chmodIfPosix(() => fchmodSync(lockFd, 0o600));
   } catch (error) {
     closeSync(lockFd);
     throw error;

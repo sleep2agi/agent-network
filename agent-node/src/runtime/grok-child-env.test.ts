@@ -273,3 +273,41 @@ describe("Grok child environment boundary", () => {
     ]);
   });
 });
+
+describe("Windows home isolation", () => {
+  const base = {
+    parentEnv: { PATH: "/bin", USERPROFILE: "C:\\Users\\real", HOMEDRIVE: "C:", HOMEPATH: "\\Users\\real" },
+    cwd: "D:\\work\\proj",
+    home: "D:\\iso\\grok-home",
+    authPath: "D:\\iso\\grok-home\\auth.json",
+  };
+
+  it("redirects every Windows home variable at the isolated home", () => {
+    // 🔴 Windows 不看 HOME。只设 HOME 时隔离形同虚设 —— 实测被
+    //    assertGrokCopresenceExternalSurfaces 抓到 grok 仍在读
+    //    C:\Users\<u>\.agents\skills\...\SKILL.md。
+    const env = buildGrokChildEnv({ ...base, platform: "win32" });
+    expect(env.HOME).toBe("D:\\iso\\grok-home");
+    expect(env.USERPROFILE).toBe("D:\\iso\\grok-home");
+    expect(env.HOMEDRIVE).toBe("D:");
+    expect(env.HOMEPATH).toBe("\\iso\\grok-home");
+    // 真实用户目录一个字都不能漏进去
+    for (const value of Object.values(env)) {
+      expect(String(value)).not.toContain("C:\\Users\\real");
+    }
+  });
+
+  it("leaves Linux untouched — no Windows-only keys leak into a POSIX child", () => {
+    const env = buildGrokChildEnv({
+      parentEnv: { PATH: "/bin" },
+      cwd: "/work/proj",
+      home: "/iso/home",
+      authPath: "/iso/home/auth.json",
+      platform: "linux",
+    });
+    expect(env.HOME).toBe("/iso/home");
+    expect(env.USERPROFILE).toBeUndefined();
+    expect(env.HOMEDRIVE).toBeUndefined();
+    expect(env.HOMEPATH).toBeUndefined();
+  });
+});

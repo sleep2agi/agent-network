@@ -248,8 +248,21 @@ function repairPrivateDirectory(path: string, tightenMode: boolean): void {
       || opened.dev !== before.dev || opened.ino !== before.ino) {
       throw new Error(`private config parent is not owner-controlled: ${path}`);
     }
-    if (tightenMode) fchmodSync(fd, 0o700);
+    if (tightenMode && posixFileModesSupported()) fchmodSync(fd, 0o700);
   } finally { closeSync(fd); }
+}
+
+/**
+ * POSIX 文件模式位（0600/0700）在这个平台上有没有意义。
+ *
+ * 🔴 Windows 的 NTFS 走 ACL，没有 mode 位；`fchmod` 直接 EPERM，
+ *    实测报错是 `Refusing unsafe global config: EPERM: operation not permitted, fchmod`。
+ *    ⇒ 在那里跳过的只有【收紧模式位】这一个动作；
+ *      symlink / nlink / 正规文件 / dev+ino 一致 / uid 这些校验**一条都不放过**。
+ *      把它们一起跳掉会把这个函数变成恒真的空壳。
+ */
+function posixFileModesSupported(platform: NodeJS.Platform = process.platform): boolean {
+  return platform !== "win32";
 }
 
 /** Tighten legacy umask-derived config state before reading any token. */
@@ -272,7 +285,7 @@ export function repairPrivateConfigPermissions(path: string): void {
         || opened.dev !== before.dev || opened.ino !== before.ino) {
         throw new Error(`private config is not owner-controlled: ${candidate}`);
       }
-      fchmodSync(fd, 0o600);
+      if (posixFileModesSupported()) fchmodSync(fd, 0o600);
     } finally { closeSync(fd); }
   }
 }
