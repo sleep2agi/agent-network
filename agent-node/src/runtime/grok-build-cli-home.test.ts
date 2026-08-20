@@ -27,6 +27,8 @@ import {
   GROK_POST_STOP_CLEANUP_POLICY,
   prepareGrokCliHome,
   resolveGrokCommhubMcpCommand,
+  canTrustGrokProjectCwd,
+  isOverBroadGrokTrustTarget,
 } from "./grok-build-cli-home";
 import { assertGrokCopresenceAgentProfile } from "./grok-copresence/policy";
 
@@ -1525,3 +1527,33 @@ function parseNulEnvironment(raw: Buffer): Record<string, string> {
   }
   return parsed;
 }
+
+describe("grok folder-trust breadth predicate", () => {
+  it("names $HOME and the filesystem root as over-broad, and nothing else", () => {
+    // 判据与闸共用同一份实现 —— 这条测试同时钉住「回退会不会触发」与「闸会不会拒」。
+    expect(isOverBroadGrokTrustTarget("/home/u", "/home/u")).toBe(true);
+    expect(isOverBroadGrokTrustTarget("/", "/home/u")).toBe(true);
+    expect(isOverBroadGrokTrustTarget("/home/u/project", "/home/u")).toBe(false);
+    // 家目录的【父目录】不是家目录，不该被当成过宽（否则 /home 下所有人都被拒）
+    expect(isOverBroadGrokTrustTarget("/home", "/home/u")).toBe(false);
+  });
+
+  it("refuses $HOME as a project cwd but accepts a real project directory", () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "grok-trust-home-")));
+    const project = join(home, "project");
+    mkdirSync(project, { recursive: true });
+    try {
+      // 🔴 这一格正是 `anet node create` 在 $HOME 里建节点后起不来的成因。
+      expect(canTrustGrokProjectCwd(home, home)).toBe(false);
+      expect(canTrustGrokProjectCwd(project, home)).toBe(true);
+      // 不存在的路径 ⇒ 不可授信（而不是抛异常）
+      expect(canTrustGrokProjectCwd(join(home, "nope"), home)).toBe(false);
+      // 文件不是目录 ⇒ 不可授信
+      const file = join(home, "a-file");
+      writeFileSync(file, "x");
+      expect(canTrustGrokProjectCwd(file, home)).toBe(false);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});

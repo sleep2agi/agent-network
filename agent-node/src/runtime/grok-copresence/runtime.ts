@@ -153,6 +153,8 @@ export type GrokPtySpawn = (
 ) => GrokPtyLike | Promise<GrokPtyLike>;
 
 export interface GrokCopresenceOpenOptions {
+  /** 观测到的 `grok --version` 原文，用于按 build 决定 argv 里的旧开关。 */
+  grokVersion?: string;
   binary?: string;
   cwd: string;
   grokHome: string;
@@ -386,6 +388,11 @@ export interface BuildGrokCopresenceArgsOptions {
   toolAllowlist?: readonly string[];
   sandboxProfile: string;
   protectedPaths?: readonly string[];
+  /**
+   * 观测到的 `grok --version` 原文。缺省时按 0.2.93 那套 flag 处理，
+   * 以免既有调用点（含 profile-process-probe 与单测）行为改变。
+   */
+  grokVersion?: string;
 }
 
 /** Interactive TUI argv. No prompt/output JSON flags; only audited CommHub MCP. */
@@ -466,24 +473,162 @@ export function buildGrokCopresenceArgs(opts: BuildGrokCopresenceArgsOptions): s
 }
 
 export function assertGrokCopresenceFeatures(help: string): void {
+  // 🔴 2026-08-20：grok 1.0.5 把 `--no-memory` 从 `--help` 里【隐藏】了，但**仍然接受它**。
+  //    实测（顶层解析路径，带正控）：
+  //      grok --definitely-bogus --help ⇒ rc=2 unexpected argument   ← 正控，说明未知 flag 真会红
+  //      grok --no-memory        --help ⇒ rc=0                       ← 隐藏但接受
+  //      grok --no-auto-update   --help ⇒ rc=0
+  //      grok --leader           --help ⇒ rc=0
+  //    ⚠️ 我第一次是拿 `grok inspect --no-memory` 探的，得到 rc=2 并据此判成「已移除」——
+  //       那是**量错了对象**：inspect 是子命令、有自己的 flag 集，连确实存在的
+  //       `--always-approve` 在它下面也 rc=2。
+  //    ⇒ 所以 argv 照旧下发这些 flag（见 buildGrokCopresenceArgs），
+  //      只是不能再用「出现在 help 里」当存在性判据。这一格改的是【判据】，不是【要求】。
+  //    记忆另有第二道：buildGrokChildEnv 无条件设 GROK_MEMORY=0，由 grok-child-env.test.ts 钉住。
   const required = [
     "--leader-socket", "--session-id", "--resume", "--cwd", "--sandbox",
     "--agent", "--deny", "--permission-mode",
-    "--disable-web-search", "--no-subagents", "--no-memory",
+    "--disable-web-search", "--no-subagents",
   ];
   const missing = required.filter((flag) => !help.includes(flag));
   if (missing.length) throw new Error(`Grok CLI is too old for copresence; missing: ${missing.join(", ")}`);
 }
 
-/** The PTY/menu/event security contract was black-box verified for this build. */
+/**
+ * grok 1.0.5 新增的发现面，0.2.93 时代的审计完全不认识它们。
+ *
+ * 🔴 实测（本机 grok 1.0.5 (5115b46bc9)，真实 HOME + 带 .claude/ 的仓库）：
+ *      skills=114 hooks=1 mcpServers=5 agents=5 plugins=2 permissions.loaded=4
+ *    其中 hooks / mcpServers / permissions.loaded 会被既有断言挡住，
+ *    而 **skills / agents / plugins / marketplaces / lspServers 一条断言都没有**。
+ *
+ * 🔴 而「关掉 compat」不会让条目从 inspect 里消失 —— 实测把 13 个
+ *    GROK_<VENDOR>_<SURFACE>_ENABLED 全设 false 之后，各面的**计数一个都没变**，
+ *    变的是每条的 `compatibilityStatus: "disabled"`。
+ *    ⇒ 所以判据不能写 `skills.length === 0`（那会永远为假），
+ *      要写「没有任何一条来自 runtime-owned home 之外且仍处于启用状态」。
+ */
+export function assertGrokCopresenceExternalSurfaces(
+  inspectionJson: string,
+  isolatedGrokHome: string,
+): void {
+  let inspection: Record<string, unknown>;
+  try {
+    inspection = JSON.parse(inspectionJson) as Record<string, unknown>;
+  } catch {
+    throw new Error("grok copresence inspect is not valid JSON");
+  }
+  const allowedRoot = resolve(isolatedGrokHome);
+  const insideHome = (p: string) => {
+    const c = resolve(p);
+    return c === allowedRoot || c.startsWith(`${allowedRoot}/`);
+  };
+
+  // ① 跨厂商兼容矩阵必须整张关闭。缺失该字段的 build（0.2.93）跳过这一格。
+  const compat = inspection.externalCompat as Record<string, unknown> | undefined;
+  if (compat && typeof compat === "object" && !Array.isArray(compat)) {
+    if (compat.remoteSettingsLoaded === true) {
+      throw new Error("grok copresence refuses a build with remote settings loaded");
+    }
+    const cells = compat.cells;
+    if (!Array.isArray(cells)) {
+      throw new Error("grok copresence inspect is missing externalCompat cells");
+    }
+    const enabled = cells
+      .filter((cell: any) => cell && cell.enabled !== false)
+      .map((cell: any) => `${cell?.vendor}.${cell?.surface}`);
+    if (enabled.length) {
+      throw new Error(
+        `grok copresence refuses enabled cross-vendor compatibility cells: ${enabled.join(", ")}`,
+      );
+    }
+  }
+
+  // ② 系统级 managed settings 在隔离 home 之外，隔离拦不住它。
+  const permissions = inspection.permissions as Record<string, unknown> | undefined;
+  if (permissions && typeof permissions === "object" && !Array.isArray(permissions)) {
+    if (permissions.managedSettingsActive === true || permissions.managedSettingsExists === true) {
+      throw new Error(
+        `grok copresence refuses active managed settings at ${String(permissions.managedSettingsPath || "(unknown path)")}`,
+      );
+    }
+  }
+
+  // ③ 每一个被发现的条目：要么没有磁盘来源（builtin），要么落在 runtime-owned home 内，
+  //    要么已被判定为 disabled。三者皆不满足即拒。
+  for (const field of ["skills", "agents", "plugins", "marketplaces", "lspServers"] as const) {
+    const entries = inspection[field];
+    if (entries === undefined) continue;
+    if (!Array.isArray(entries)) {
+      throw new Error(`grok copresence inspect reports malformed ${field}`);
+    }
+    for (const entry of entries as any[]) {
+      if (!entry || typeof entry !== "object") {
+        throw new Error(`grok copresence inspect reports malformed ${field} entry`);
+      }
+      if (entry.compatibilityStatus === "disabled") continue;
+      if (entry.compatibilityStatus === "unresolved") {
+        throw new Error(
+          `grok copresence refuses unresolved ${field} entry ${String(entry.name || "(unnamed)")}`,
+        );
+      }
+      const source = entry.source;
+      // 🔴 `source` 既可能是【路径】也可能是【类型标签】：实测 agents 的内置项
+      //    source === "builtin"，skills 则是 { type, path }。把标签当路径 resolve()
+      //    会相对 cwd 展开成一个假路径并误拒 —— 这条是被自己的测试红出来的。
+      //    判据：只有【绝对路径】才算磁盘来源。
+      const raw = typeof source === "string"
+        ? source
+        : (source && typeof source === "object" ? (source as any).path : undefined);
+      const path = typeof raw === "string" && isAbsolute(raw) ? raw : undefined;
+      if (path === undefined) continue; // builtin / 类型标签 / 无磁盘来源
+      if (!insideHome(path)) {
+        throw new Error(
+          `grok copresence refuses external ${field} source ${resolve(path)}; the fixed tool inventory must stay runtime-owned`,
+        );
+      }
+    }
+  }
+}
+
+/**
+ * 已黑盒验证过 PTY / 审批菜单 / 事件安全契约的 build 白名单。
+ *
+ * 🔴 这里刻意**不是**版本区间比较：新 build 会改这些契约（1.0.5 就把 folder trust
+ *    从「MCP + hooks」扩成「MCP + LSP + hooks 且级联子目录」，并新增了 13 格
+ *    externalCompat）。区间比较会让一个没验过的 build 自动通过。
+ *    加一个版本 = 先跑验证、再往这个集合里加一行，而不是放宽比较符。
+ */
+export const GROK_COPRESENCE_VERIFIED_BUILDS: ReadonlySet<string> = new Set([
+  "grok 0.2.93 (f00f96316d)",
+  "grok 0.2.93 (f00f96316d) [stable]",
+  // 🔴 2026-08-20 验证 grok 1.0.5 (5115b46bc9)：**不予收录**，理由是实测的，不是保守。
+  //    过了的格：
+  //      · `grok inspect --json` 仍提供 permissions.{sources,loaded,skipped,
+  //        mcpServerAllowlist,marketplaceAllowlist} 与 mcpServers/hooks，隔离 HOME 下全为空
+  //      · 11 条 flag 全部仍被接受（--no-memory / --no-auto-update / --leader 只是被隐藏出 help）
+  //      · 13 格 externalCompat 可由 GROK_<VENDOR>_<SURFACE>_ENABLED 全关（实测 13/13 → 0/13）
+  //      · TUI 能起来并就绪（实测日志 "TUI input ready generation=1"）
+  //    🔴 没过的那一格 —— 而它是共存的地基：
+  //      **1.0.5 的交互式 TUI 不再自动拉起 Leader。**
+  //      实测三组，都没有 socket 出现：
+  //        ① 共存流程等 10s  ⇒ "did not create leader socket within 10000ms"
+  //        ② 同上放宽到 60s ⇒ 同样没有（所以不是慢，是不建）
+  //        ③ 对照组：一个【普通已认证】的 `grok` TUI 跑 25s ⇒ ~/.grok 下无任何新 .sock，
+  //           `grok leader list` 仍只有一条 5 天前的 Unreachable 记录
+  //      ⇒ attach 机制（anet grok attach）建立在「TUI 自动起 Leader、我们再绑定」之上，
+  //        这个前提在 1.0.5 上不成立。收录它只会把失败从「版本门」推迟到「等 socket 超时」，
+  //        而后者的报错完全指不出真正原因。
+  //    ⇒ 收录 1.0.5 的前置条件：先让共存不依赖「TUI 自动起 Leader」，或找到 1.0.5 下
+  //      显式拉起 Leader 的方式（`grok leader` 子命令只有 list/info/kill，没有 start）。
+]);
+
 export function assertGrokCopresenceVersion(version: string): void {
   const observed = version.trim();
-  if (
-    observed !== "grok 0.2.93 (f00f96316d)"
-    && observed !== "grok 0.2.93 (f00f96316d) [stable]"
-  ) {
+  if (!GROK_COPRESENCE_VERIFIED_BUILDS.has(observed)) {
     throw new Error(
-      `grok copresence requires exactly grok 0.2.93 (f00f96316d); received ${observed || "empty version"}`,
+      `grok copresence requires a verified grok build; received ${observed || "empty version"}. `
+      + `Verified: ${[...GROK_COPRESENCE_VERIFIED_BUILDS].join(", ")}`,
     );
   }
 }
@@ -872,7 +1017,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         assertSafePersistedGrokSessionForResume(sessionDir);
       }
       await this.spawnTui(resume);
-      await waitForOwnedUnixSocket(this.leaderSocket, 10_000);
+      await waitForOwnedUnixSocket(this.leaderSocket, grokLeaderSocketTimeoutMs());
       await this.bindSpawnedLeader();
 
       // New sessions start at byte zero. Resume tails were already armed at
@@ -1095,6 +1240,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       toolAllowlist: this.opts.toolAllowlist,
       sandboxProfile: this.opts.sandboxProfile,
       protectedPaths: this.opts.protectedPaths,
+      grokVersion: this.opts.grokVersion,
     });
     const ptySpawn = this.opts.ptySpawn ?? defaultPtySpawn;
     const pty = await ptySpawn(binary, args, {
@@ -1208,7 +1354,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         // this recovery promise. Even an already-exited recovery TUI can have
         // left its auto-Leader alive, so liveness is checked only after that
         // Leader has been captured by its exact generation marker.
-        await waitForOwnedUnixSocket(this.leaderSocket, 10_000);
+        await waitForOwnedUnixSocket(this.leaderSocket, grokLeaderSocketTimeoutMs());
         this.assertOwnedTuiGeneration(attemptedTui, "leader socket");
         await this.bindSpawnedLeader();
         this.assertLiveTuiGeneration(attemptedTui, "leader bind");
@@ -3214,6 +3360,25 @@ function assertAbsentSocketPath(path: string, label: string): void {
   } catch (error) {
     if (!isErrno(error, "ENOENT")) throw error;
   }
+}
+
+/**
+ * Leader socket 就绪等待上限。
+ *
+ * 🔴 0.2.93 在终端协商完成前就建好 socket（见本文件 L78），10s 绰绰有余；
+ *    而新 build 的启动路径更长（1.0.5 要解析 13 格 compat、bundled skills、
+ *    plugins/marketplaces 等）。写死 10s 会把「慢」误判成「不建」，
+ *    而这两者的下一步动作完全不同（等一等 vs 去查 flag 语义）。
+ *    ⇒ 允许按环境放宽；默认保持 10s 不变。
+ */
+export function grokLeaderSocketTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.ANET_GROK_LEADER_SOCKET_TIMEOUT_MS;
+  if (raw === undefined || raw.trim() === "") return 10_000;
+  const parsed = Number(raw);
+  // 🔴 不用 `Number(raw) || 10_000`：那会把合法的 0 吞掉，
+  //    而 0 在这里是「不等待」这个有意义的取值。
+  if (!Number.isFinite(parsed) || parsed < 0) return 10_000;
+  return Math.min(parsed, 120_000);
 }
 
 async function waitForOwnedUnixSocket(path: string, timeoutMs: number): Promise<void> {

@@ -31,10 +31,30 @@ export const GROK_CHILD_CONTROLLED_ENV_KEYS = [
   "GROK_AUTH_PATH",
   "GROK_OIDC_ISSUER",
   "GROK_OIDC_CLIENT_ID",
+  // 🔴 2026-08-20：grok 1.0.5 把跨厂商发现扩成 13 个 compat cell，**默认全 true**
+  //    （cursor/claude 各 skills/rules/agents/mcps/hooks/sessions，codex 只有 sessions）。
+  //    0.2.93 时代只关了 MCPS/HOOKS 四个 —— 在 1.0.5 上那留下 9 个洞。
+  //    实测（本机 grok 1.0.5 (5115b46bc9)，隔离 HOME，`grok inspect --json` 读
+  //    externalCompat.cells）：
+  //      不设            ⇒ enabled=13/13
+  //      只设原来那 4 个  ⇒ enabled=9/13
+  //      设下面这 13 个   ⇒ enabled=0/13
+  //    命名规律是 GROK_<VENDOR>_<SURFACE>_ENABLED，**文档只列了 4 个但 13 个都生效**。
+  //    ⚠️ 试过 GROK_CONFIG 内联 JSON overlay 关整张矩阵 ⇒ **无效，仍是 13/13**，
+  //       所以这里必须逐个列，不能靠一个 overlay。
+  "GROK_CLAUDE_SKILLS_ENABLED",
+  "GROK_CURSOR_SKILLS_ENABLED",
+  "GROK_CLAUDE_RULES_ENABLED",
+  "GROK_CURSOR_RULES_ENABLED",
+  "GROK_CLAUDE_AGENTS_ENABLED",
+  "GROK_CURSOR_AGENTS_ENABLED",
   "GROK_CLAUDE_MCPS_ENABLED",
   "GROK_CURSOR_MCPS_ENABLED",
   "GROK_CLAUDE_HOOKS_ENABLED",
   "GROK_CURSOR_HOOKS_ENABLED",
+  "GROK_CLAUDE_SESSIONS_ENABLED",
+  "GROK_CURSOR_SESSIONS_ENABLED",
+  "GROK_CODEX_SESSIONS_ENABLED",
   "GROK_FOLDER_TRUST",
   "GROK_DEFAULT_SELECTED_PERMISSION",
   "GROK_DISABLE_AUTOUPDATER",
@@ -103,10 +123,14 @@ export function buildGrokChildEnv(opts: BuildGrokChildEnvOptions): NodeJS.Proces
   env.PWD = opts.cwd;
   env.GROK_HOME = opts.home;
   env.GROK_AUTH_PATH = opts.authPath;
-  env.GROK_CLAUDE_MCPS_ENABLED = "false";
-  env.GROK_CURSOR_MCPS_ENABLED = "false";
-  env.GROK_CLAUDE_HOOKS_ENABLED = "false";
-  env.GROK_CURSOR_HOOKS_ENABLED = "false";
+  // 关死整张 compat 矩阵（13 格）。解析顺序是 env > config.toml > 默认 on，
+  // 所以 env 是运行时唯一不依赖磁盘状态的杠杆。
+  for (const vendor of ["CLAUDE", "CURSOR"] as const) {
+    for (const surface of ["SKILLS", "RULES", "AGENTS", "MCPS", "HOOKS", "SESSIONS"] as const) {
+      env[`GROK_${vendor}_${surface}_ENABLED`] = "false";
+    }
+  }
+  env.GROK_CODEX_SESSIONS_ENABLED = "false";
   env.GROK_FOLDER_TRUST = "1";
   // The preview pins one audited binary and one fixed no-I/O agent profile.
   // Keep the same posture across every preflight, Leader and recovery spawn.

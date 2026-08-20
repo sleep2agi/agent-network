@@ -1141,6 +1141,32 @@ function stageCommhubMcpConfig(
   return { config: { ...config, serverPath, envFile }, credentialDir };
 }
 
+/**
+ * 「这个目录过宽，不能整体授信」——$HOME 本身或文件系统根。
+ *
+ * 🔴 抽出来是为了让**回退决策**与**闸本身**用同一份实现：
+ *    调用方需要在起 TUI 之前知道「这个 cwd 会不会被拒」，
+ *    如果它自己再写一遍判据，两份就会漂移（而漂移的方向通常是回退没触发、
+ *    用户仍然撞到硬失败）。
+ */
+export function isOverBroadGrokTrustTarget(canonicalDir: string, canonicalHome: string): boolean {
+  return dirname(canonicalDir) === canonicalDir || canonicalDir === canonicalHome;
+}
+
+/**
+ * cwd 能不能当 folder trust 目标。只回答「过宽」这一格 —— 与凭据路径重叠、
+ * 符号链接、非目录等仍由 trustedProjectDirectory 在真正准备时 fail-closed。
+ */
+export function canTrustGrokProjectCwd(projectCwd: string, home?: string): boolean {
+  try {
+    const canonical = realpathSync(resolve(projectCwd));
+    if (!statSync(canonical).isDirectory()) return false;
+    return !isOverBroadGrokTrustTarget(canonical, realpathSync(resolve(home ?? homedir())));
+  } catch {
+    return false;
+  }
+}
+
 function trustedProjectDirectory(projectCwd: string, protectedPaths: readonly string[]): string {
   const lexical = resolve(projectCwd);
   const canonical = realpathSync(lexical);
@@ -1152,7 +1178,7 @@ function trustedProjectDirectory(projectCwd: string, protectedPaths: readonly st
     throw new Error("grok-build-cli folder trust target must be a directory");
   }
   const canonicalHome = realpathSync(resolve(homedir()));
-  if (dirname(canonical) === canonical || canonical === canonicalHome) {
+  if (isOverBroadGrokTrustTarget(canonical, canonicalHome)) {
     throw new Error("grok-build-cli refuses over-broad folder trust for a home or filesystem root");
   }
   for (const protectedPath of [canonicalHome, ...protectedPaths.map((path) => resolve(path))]) {
