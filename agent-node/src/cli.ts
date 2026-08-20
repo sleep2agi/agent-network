@@ -11,7 +11,7 @@
  * 配置加载: --config > CLI args > env > .anet/nodes/<name>/config.json > ~/.anet/config.json > defaults
  */
 
-import { readFileSync, existsSync, writeFileSync, chmodSync, realpathSync } from "fs";
+import { readFileSync, existsSync, writeFileSync, chmodSync, realpathSync, renameSync } from "fs";
 import { dirname, join, isAbsolute, resolve } from "path";
 import { hostname as osHostname, homedir } from "os";
 import { createCommhubSdkMcpServer } from "./commhub-mcp";
@@ -3664,7 +3664,18 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
     }
 
     const grokBinary = process.env.GROK_BINARY || "grok";
-    const grokCwd = process.cwd();
+    // 🔴 2026-08-20：共存把 process.cwd() 整个交给 grok 的 folder trust，而那道闸
+    //    拒绝 $HOME 与文件系统根；而 `anet node create` 的注册表是 cwd 相对的
+    //    （agent-network/bin/cli.ts:145 nodesDir() = <cwd>/.anet/nodes）。
+    //    于是在 $HOME 建出来的节点会陷入死结：**唯一能看见它的 cwd，正是闸拒绝的那个**
+    //    （实测：$HOME 起 ⇒ "refuses over-broad folder trust"；子目录起 ⇒ "Node not found"）。
+    //    ⇒ cwd 不可授信时回退到节点自有的干净目录，让开箱即用不依赖用户先 cd。
+    //    ⚠️ 这里【不】复用 prepareGrokIsolatedCwd：它会把 userCwd 的顶层条目软链进去，
+    //       而 userCwd 恰是 $HOME 时，那等于把整个家目录又暴露回来。
+    let grokCwd = process.cwd();
+    // `anet` 把 CommHub MCP 载荷投在【它自己的 cwd】下的 .anet/。grokCwd 若被回退，
+    // 载荷不会跟着走 —— 源目录必须单独记住，否则回退会把它变成 ENOENT。
+    const stagedAnetDir = resolve(process.cwd(), ".anet");
     const sourceGrokHome = process.env.GROK_HOME || join(home, ".grok");
 
     const { execFileSync } = await import("child_process");
@@ -3676,11 +3687,42 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
       grokCliStateKey,
       grokProjectPolicyPaths,
       resolveGrokCommhubMcpCommand,
+      canTrustGrokProjectCwd,
     } = await import("./runtime/grok-build-cli-home");
+    if (!canTrustGrokProjectCwd(grokCwd, home)) {
+      // 🔴 必须落在 ~/.anet 【之外】：sandbox.toml 生成的每个 profile 都带
+      //    deny = ["<home>/.anet"]（那里放着节点 config 与令牌）。把受信项目目录
+      //    放进 deny 列表内，grok 会拒绝启动：
+      //      "this sandbox could not enforce its deny list ... Refusing to start"
+      //    ——实测就是这么红的，TUI exited code=1 且 stderr 被吞。
+      const ownedCwd = join(
+        home, ".anet-copresence-cwd",
+        (NODE_ID || ALIAS || "default").replace(/[^A-Za-z0-9._-]/g, "_"),
+      );
+      mkdirSync(ownedCwd, { recursive: true, mode: 0o700 });
+      // 🔴 grok-build-cli 要求 CommHub MCP 载荷落在【受信项目目录】内
+      //    （判据：serverPath === join(projectCwd, ".anet", "node-server.js")）。
+      //    换了 cwd 就必须把载荷一起搬过去，否则下一道门会报
+      //    "commhub MCP paths must be the canonical project .anet artifacts"。
+      const ownedAnet = join(ownedCwd, ".anet");
+      mkdirSync(ownedAnet, { recursive: true, mode: 0o700 });
+      for (const [name, mode] of [["node-server.js", 0o600], [".env", 0o600]] as const) {
+        const from = join(stagedAnetDir, name);
+        if (!existsSync(from)) continue;
+        const to = join(ownedAnet, name);
+        // 原子替换：先写临时名再 rename，避免半份文件被下一道门读到。
+        const tmp = `${to}.${process.pid}.tmp`;
+        writeFileSync(tmp, readFileSync(from), { mode });
+        renameSync(tmp, to);
+      }
+      log(`[grok-cli] ${grokCwd} 不能整体授信（$HOME 或文件系统根），改用节点自有目录 ${ownedCwd}`);
+      grokCwd = ownedCwd;
+    }
     const {
       assertGrokCopresenceFeatures,
       assertGrokCopresenceVersion,
       assertGrokCopresenceApprovalOwnership,
+      assertGrokCopresenceExternalSurfaces,
       openGrokCopresenceRuntime,
     } = await import("./runtime/grok-copresence/runtime");
 
@@ -3812,6 +3854,9 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
         );
       }
       assertNoDiscoveredGrokHooks(inspection);
+      // 1.0.5 新增面（skills/agents/plugins/marketplaces/lspServers/externalCompat/
+      // managedSettings）在这里 fail-closed；0.2.93 缺这些字段时自动跳过对应格。
+      assertGrokCopresenceExternalSurfaces(inspection, auditRuntime.grokCliHome.home);
       assertGrokCopresenceApprovalOwnership(
         inspection,
         auditRuntime.grokCliHome.home,
@@ -3845,6 +3890,12 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
       binary: grokBinary,
       cwd: grokCwd,
       grokHome: grokCliHome.home,
+      // 1.0.5 移除了 --no-memory / --no-auto-update 且硬拒未知 flag，
+      // argv 必须按观测到的 build 决定。
+      grokVersion: version,
+      // 1.0.5 移除了 --no-memory / --no-auto-update 且硬拒未知 flag，
+      // argv 必须按观测到的 build 决定。
+      grokVersion: version,
       env,
       sessionId: grokSessionId || undefined,
       newSession: NEW_SESSION,
