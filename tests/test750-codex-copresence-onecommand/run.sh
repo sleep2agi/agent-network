@@ -223,6 +223,28 @@ grep -qF -e 'did not bind' "$WORK/withflag.start" \
   || fail "start failed without naming what did not come up"
 pass "an incomplete start exits non-zero and names the step that failed"
 
+log "[L9] the first-run chain must not walk past its own failures"
+# 🔴 `anet register && anet login && anet node create` is the documented first
+#    run. Measured on a clean machine with no hub reachable: register and login
+#    printed an error and exited 0, while init and node create exited 1 — so a
+#    setup script (or a person checking $?) sails past the first failure and
+#    only learns something is wrong three commands later, at a command that is
+#    not the one that broke.
+#
+#    Uses a hub URL nothing is listening on, so the failure is the connection,
+#    not credentials.
+DEADHUB="http://127.0.0.1:9" 
+for cmd in "register --username x1 --password pass123456" "login --username x1 --password pass123456"; do
+  set +e
+  # shellcheck disable=SC2086
+  $CLI $cmd --hub "$DEADHUB" >"$WORK/firstrun.log" 2>&1
+  rc=$?
+  set -e
+  cat "$WORK/firstrun.log" >>"$REPORT"
+  [ "$rc" -ne 0 ] || fail "anet ${cmd%% *} exited 0 against an unreachable hub — the first-run chain would continue"
+done
+pass "register and login report failure through their exit code"
+
 PASSED=$(grep -c '^PASS: ' "$REPORT" || true)
 FAILED=$(grep -c '^FAIL: ' "$REPORT" || true)
 log "Summary: PASS ($PASSED groups, $FAILED failures; all validation ran inside Docker)"

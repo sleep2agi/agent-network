@@ -10481,14 +10481,20 @@ async function registerCommand() {
       if (h.ok) { hub = "http://127.0.0.1:9200"; gc.hub = hub; saveGlobal(gc); console.log(`[anet] 检测到本地 CommHub: ${hub}`); }
     } catch {}
   }
-  if (!hub) { console.error("未找到 CommHub Server。请先运行: anet hub start"); return; }
+  // 🔴 exit(1), not return. `anet register && anet login && anet node create` is
+  //    the documented first-run chain, and a command that prints an error while
+  //    exiting 0 lets the chain walk straight past the failure. Measured on a
+  //    clean machine with the hub down: register and login both returned 0,
+  //    while init and node create returned 1 — loginCommand even mixed both
+  //    conventions internally (its bad-password path already exits 1).
+  if (!hub) { console.error("未找到 CommHub Server。请先运行: anet hub start"); process.exit(1); }
 
   const username = opts.username || opts.user || await ask("Username");
   const password = opts.password || opts.pass || await ask("Password (min 6)");
   const email = opts.email || ((opts.username || opts.user) ? "" : await ask("Email (optional)"));
   closeRL();
 
-  if (!username || !password) { console.error("Username and password required."); return; }
+  if (!username || !password) { console.error("Username and password required."); process.exit(1); }
 
   // Auto-include server auth token for registration
   const serverToken = serverAuthTokenFromConfig(sc) || getToken();
@@ -10502,7 +10508,7 @@ async function registerCommand() {
       body: JSON.stringify({ username, password, email: email || undefined }),
     }).then(r => r.json() as any);
 
-    if (!res.ok) { console.error(`Registration failed: ${res.error}`); return; }
+    if (!res.ok) { console.error(`Registration failed: ${res.error}`); process.exit(1); }
 
     // Auto-login
     gc.token = res.token;
@@ -10516,7 +10522,7 @@ async function registerCommand() {
     console.log(`[anet] Registered and logged in as ${res.user.username}`);
     if (gc.network_name) console.log(`[anet] Default network: ${gc.network_name}`);
     console.log(`[anet] Token saved to ~/.anet/config.json`);
-  } catch (e: any) { console.error(friendlyError(e)); }
+  } catch (e: any) { console.error(friendlyError(e)); process.exit(1); }
 }
 
 // ── login/logout/whoami ──
@@ -10528,7 +10534,7 @@ async function loginCommand() {
   // don't have to run a separate `anet init` step. If supplied, persist it
   // to gc.hub so subsequent commands work.
   const hub = opts.hub || gc.hub;
-  if (!hub) { console.error("No hub configured. Pass --hub <url> or run 'anet init' first."); return; }
+  if (!hub) { console.error("No hub configured. Pass --hub <url> or run 'anet init' first."); process.exit(1); }
   if (opts.hub && opts.hub !== gc.hub) {
     gc.hub = opts.hub;
     saveGlobal(gc);
@@ -10538,14 +10544,14 @@ async function loginCommand() {
   if (opts.token) {
     try {
       const res = await fetch(`${hub}/api/auth/me`, { headers: { Authorization: `Bearer ${opts.token}` } }).then(r => r.json() as any);
-      if (!res.ok) { console.error(`Invalid token: ${res.error}`); return; }
+      if (!res.ok) { console.error(`Invalid token: ${res.error}`); process.exit(1); }
       gc.token = opts.token;
       gc.user = res.user;
       gc.network_id = res.current_network;
       saveGlobal(gc);
       console.log(`[anet] Logged in as ${res.user.username} (token)`);
       console.log(`[anet] Network: ${res.current_network || "none"}`);
-    } catch (e: any) { console.error(friendlyError(e)); }
+    } catch (e: any) { console.error(friendlyError(e)); process.exit(1); }
     return;
   }
 
@@ -10554,7 +10560,7 @@ async function loginCommand() {
   const password = opts.password || opts.pass || await ask("Password");
   closeRL();
 
-  if (!username || !password) { console.error("Username and password required."); return; }
+  if (!username || !password) { console.error("Username and password required."); process.exit(1); }
 
   let res: any;
   try {
@@ -10567,7 +10573,7 @@ async function loginCommand() {
     // Network / DNS / connection error — show the friendly hint, not the
     // first-time-login guidance (auth-fail guidance below is for 401 only).
     console.error(`❌ Cannot reach hub: ${friendlyError(e)}`);
-    return;
+    process.exit(1);
   }
 
   if (!res?.ok) {
@@ -10652,7 +10658,7 @@ async function loginCommand() {
     if (gc.network_name) console.log(`   network: ${gc.network_name}`);
     console.log(`   token saved to ~/.anet/config.json`);
     console.log(`✅ Login successful — next: anet status / anet node create my-agent`);
-  } catch (e: any) { console.error(friendlyError(e)); }
+  } catch (e: any) { console.error(friendlyError(e)); process.exit(1); }
 }
 
 function logoutCommand() {
