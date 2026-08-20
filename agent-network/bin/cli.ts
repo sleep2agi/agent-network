@@ -91,6 +91,12 @@ import {
   resolveGrokAttachTarget,
 } from "../src/grok-copresence-profile";
 import {
+  codexCopresencePosture,
+  codexCopresenceRequested,
+  shouldPersistCodexCopresence,
+  shouldPersistCodexFullAccess,
+} from "../src/codex-copresence-profile";
+import {
   grokCopresenceDisclosure,
   type GrokCopresenceSessionDisclosure,
 } from "../src/grok-copresence-disclosure";
@@ -586,8 +592,17 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
 
   const port = await findFreeLoopbackPort(opts.port);
   const wsUrl = `ws://127.0.0.1:${port}`;
-  const approvalPolicy = opts.dangerFullAccess ? "never" : "on-request";
-  const sandboxMode = opts.dangerFullAccess ? "danger-full-access" : "read-only";
+  // read-only is still the default; flags.sandboxMode never opens it on its
+  // own. What changed: an explicit grant is remembered, and a node that asked
+  // for full access and is not getting it now says so instead of running
+  // silently crippled.
+  const posture = codexCopresencePosture(opts.dangerFullAccess, profile, displayName);
+  if (posture.downgradeNotice) console.error(posture.downgradeNotice);
+  if (posture.grantedFromProfile) {
+    console.error(`[anet] ⚠ full filesystem/network access for ${displayName} (grant recorded on this node profile).`);
+  }
+  const approvalPolicy = posture.approvalPolicy;
+  const sandboxMode = posture.sandboxMode;
   const model = opts.model || DEFAULT_CODEX_MODEL;
 
   // ── piece ① codex app-server (loopback WS + commhub MCP) ──────────────
@@ -1168,6 +1183,12 @@ interface Profile {
   codexRuntime?: string;
   codexAppServerUrl?: string;  // RFC-030 — shared codex app-server URL (co-presence)
   codexThreadId?: string;      // RFC-030 — codex thread to adopt
+  // Remembered so `anet node start <name>` alone brings up the co-presence
+  // TUI, the way grokCopresence / opencodeMode already do for their runtimes.
+  codexCopresence?: boolean;
+  // A full-access grant that was made explicitly once. Never inferred from
+  // flags.sandboxMode — see src/codex-copresence-profile.ts.
+  codexCopresenceFullAccess?: boolean;
   opencodeMode?: "headless" | "copresence";
   model?: string;
   channels: string[];
@@ -1395,6 +1416,12 @@ function saveProfile(id: string, profile: Profile) {
     ...(normalized.grokCliSession ? { grokCliSession: normalized.grokCliSession } : {}),
     ...(typeof normalized.grokCopresence === "boolean"
       ? { grokCopresence: normalized.grokCopresence }
+      : {}),
+    ...(typeof (normalized.codexCopresence ?? profile.codexCopresence) === "boolean"
+      ? { codexCopresence: normalized.codexCopresence ?? profile.codexCopresence }
+      : {}),
+    ...(typeof (normalized.codexCopresenceFullAccess ?? profile.codexCopresenceFullAccess) === "boolean"
+      ? { codexCopresenceFullAccess: normalized.codexCopresenceFullAccess ?? profile.codexCopresenceFullAccess }
       : {}),
     ...(normalized.grokLeaderSocket ? { grokLeaderSocket: normalized.grokLeaderSocket } : {}),
     ...(normalized.grokAttachSocket ? { grokAttachSocket: normalized.grokAttachSocket } : {}),
@@ -2805,12 +2832,18 @@ Options:
   --tmux                       Start in a tmux session
   --new-session               Start with a fresh model session
   --copresence                Start a supported shared human + agent TUI
+                              (codex: recorded on the node, so the next start
+                              needs no flag — plain 'anet node start <name>')
   --accept-dev-channels       Headless / CI / no-TTY mode: start in detached
                               tmux and auto-confirm the dev-channel prompt
                               (requires tmux)
   --dangerously-allow-full-access
                               Request full filesystem/network access for
-                              supported co-presence runtimes
+                              supported co-presence runtimes. Recorded on the
+                              node once granted, so later starts need no flag.
+                              A node whose flags ask for full access but has no
+                              grant is told so at start, instead of quietly
+                              running read-only.
   --yes-danger-full-access    Required with the previous flag in non-TTY use
 `);
 }
@@ -5349,12 +5382,17 @@ async function startCommand() {
   // for the Risk C double-safeguard (default read-only; danger requires
   // explicit flag + typed confirm + stderr banner) and the per-node
   // CODEX_HOME isolation.
-  if (opts.copresence === "true") {
-    const resolvedForCopresence = resolveNodeRef(id);
-    if (!resolvedForCopresence) {
-      console.error(`Node "${id}" not found. Create it first: anet node create ${id}`);
-      process.exit(1);
-    }
+  // The flag is a one-off; `codexCopresence` on the profile is what makes the
+  // NEXT start a single `anet node start <name>` — the shape grok and opencode
+  // already use. Resolve first so the profile can answer the question too.
+  const copresenceFlagPassed = opts.copresence === "true";
+  const resolvedForCopresence = resolveNodeRef(id);
+  if (copresenceFlagPassed && !resolvedForCopresence) {
+    console.error(`Node "${id}" not found. Create it first: anet node create ${id}`);
+    process.exit(1);
+  }
+  if (resolvedForCopresence
+    && codexCopresenceRequested(copresenceFlagPassed, resolvedForCopresence.profile as any)) {
     const copresenceRuntime = runtimeForExecution(
       resolvedForCopresence.profile,
       `start copresence node ${JSON.stringify(id)}`,
@@ -5363,9 +5401,27 @@ async function startCommand() {
       await startOpencodeCopresenceOrchestration(id, opts.hub);
       return;
     }
+    const displayNameForCopresence = nodeDisplayName(resolvedForCopresence.id, resolvedForCopresence.profile);
     const codexHomeDefault = join(nodesDir(), resolvedForCopresence.id, "codex-home");
     const profileHub = opts.hub || (resolvedForCopresence.profile as any).hub || getHub();
     const profileTok = resolvedForCopresence.profile.token || "";
+    // Record what was granted so the operator does not retype it. Written
+    // BEFORE the orchestration so a node that comes up full-access is never
+    // left with a profile claiming it did not.
+    const danger = opts["dangerously-allow-full-access"] === "true";
+    const prof = resolvedForCopresence.profile as any;
+    const remember: Record<string, boolean> = {};
+    if (shouldPersistCodexCopresence(copresenceFlagPassed, prof)) remember.codexCopresence = true;
+    if (shouldPersistCodexFullAccess(danger, prof)) remember.codexCopresenceFullAccess = true;
+    if (Object.keys(remember).length > 0) {
+      saveProfile(resolvedForCopresence.id, { ...prof, ...remember });
+      if (remember.codexCopresence) {
+        console.log(`[anet] remembered co-presence for this node — next time \`anet node start ${shellQuote(displayNameForCopresence)}\` is enough.`);
+      }
+      if (remember.codexCopresenceFullAccess) {
+        console.error(`[anet] ⚠ full-access grant recorded on ${displayNameForCopresence}; future co-presence starts will not ask again.`);
+      }
+    }
     await startCopresenceOrchestration(id, {
       codexBin: opts["codex-bin"] || "codex",
       codexHome: opts["codex-home"] || codexHomeDefault,
