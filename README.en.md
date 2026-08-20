@@ -43,7 +43,7 @@ anet node start my-bot
 
 Verify the Hub is up: `curl http://127.0.0.1:9200/health` should return JSON containing `"ok":true`.
 
-> **⚠️ Check that the node really started — don't rely on `anet node start`'s stdout `✅`**: `exit 0` plus a printed `✅ node "…" started detached (tmux session live)` does **not** mean the node came up. On **versions predating [#895](https://github.com/sleep2agi/agent-network/pull/895)** (including today's npm `@preview` = `2.3.0-preview.39`; **#895 has landed on `main` but is not yet released to npm**) the detached path can lie. Real check: `tmux has-session -t "=<alias>"` returns 0 (**the `=` is required** — a bare alias is a prefix match and can go green on the wrong session). For bulk launches use `anet project up`; its exit code is trustworthy since [#896](https://github.com/sleep2agi/agent-network/pull/896) (also awaiting an npm release).
+> **⚠️ Check that the node really started — don't rely on `anet node start`'s stdout `✅`**: `exit 0` plus a printed `✅ node "…" started detached (tmux session live)` does **not** mean the node came up. On **versions predating [#895](https://github.com/sleep2agi/agent-network/pull/895)** (**fixed as of `2.3.0-preview.40`**; #895 landed 2026-08-17 and ships in preview.40) the detached path can lie. Real check: `tmux has-session -t "=<alias>"` returns 0 (**the `=` is required** — a bare alias is a prefix match and can go green on the wrong session). For bulk launches use `anet project up`; its exit code is trustworthy since [#896](https://github.com/sleep2agi/agent-network/pull/896) (also shipping in `2.3.0-preview.40`).
 
 Open `http://localhost:3000` and dispatch work from the Dashboard.
 

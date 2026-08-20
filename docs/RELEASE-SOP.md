@@ -74,7 +74,7 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 >
 > | 包 | latest | preview | 为什么是它 |
 > |---|---|---|---|
-> | `@sleep2agi/agent-network` | `2.2.21` | `2.3.0-preview.39` | **preflight 实现在 `agent-network/bin/cli.ts`,上表断言核的就是它** |
+> | `@sleep2agi/agent-network` | `2.2.21` | `2.3.0-preview.40` | **preflight 实现在 `agent-network/bin/cli.ts`,上表断言核的就是它** |
 > | `@sleep2agi/commhub-server` | `0.8.8` | `0.9.0-preview.29` | 只在 preflight 通过之后才相关,**不是上表断言的坐标** |
 >
 > 我第一版在这里记的是 commhub-server 的版本 —— **记错了包**。被核的是 CLI 的

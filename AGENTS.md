@@ -34,7 +34,7 @@
 - `agent-network/bin/cli.ts` — anet CLI (完整命令清单以 [`docs-site/docs/guide/cli.md`](./docs-site/docs/guide/cli.md) 为准；数字会漂，不硬编)
 - `agent-node/src/cli.ts` — Agent 运行时
   - **stable `@latest` runtime**（以 npm `--help` 为准，勿背版本号）：`claude-agent-sdk` / `codex-sdk` / `grok-build-acp`
-  - **`@preview` 额外**（2026-08-18 实测 `agent-node@2.5.0-preview.31`）：`claude-code-cli` / `codex-app-server` / `grok-build-cli` / `opencode-cli`
+  - **`@preview` 额外**（2026-08-20 实测 `agent-node@2.5.0-preview.32`）：`claude-code-cli` / `codex-app-server` / `grok-build-cli` / `opencode-cli`
   - `anet grok attach` 在 `@preview` CLI 有命令；`@latest` 返回 `Unknown: grok`。Hub 不得把死 TUI 报成 idle（见 #1005）
 - `tests/testN-xxx/` — 独立 Docker 测试套件 (每个有 Dockerfile + run.sh)
 - `docs/` — 设计文档 + 测试报告

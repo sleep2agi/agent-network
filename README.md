@@ -43,7 +43,7 @@ anet node start my-bot
 
 验证 Hub 起来了：`curl http://127.0.0.1:9200/health` 返回的 JSON 应包含 `"ok":true`。
 
-> **⚠️ 判断节点真起来 —— 别只看 `anet node start` 的 stdout `✅`**：`exit 0` + 打印 `✅ node "…" started detached (tmux session live)` **不代表节点真起来**。**含 [#895](https://github.com/sleep2agi/agent-network/pull/895) 之前的版本**（包括当前 npm `@preview` = `2.3.0-preview.39`；**#895 已合入 main 但尚未发 npm**）在 detached 场景可能假报。真判据：`tmux has-session -t "=<alias>"` 返回 0（**`=` 必须**，裸名字是前缀匹配会误报绿）。批量场景用 `anet project up`，其退出码自 [#896](https://github.com/sleep2agi/agent-network/pull/896) 起可信（同样待 npm 发布）。
+> **⚠️ 判断节点真起来 —— 别只看 `anet node start` 的 stdout `✅`**：`exit 0` + 打印 `✅ node "…" started detached (tmux session live)` **不代表节点真起来**。**含 [#895](https://github.com/sleep2agi/agent-network/pull/895) 之前的版本**（**`2.3.0-preview.40` 起已修**；#895 于 2026-08-17 合入，随 preview.40 发布）在 detached 场景可能假报。真判据：`tmux has-session -t "=<alias>"` 返回 0（**`=` 必须**，裸名字是前缀匹配会误报绿）。批量场景用 `anet project up`，其退出码自 [#896](https://github.com/sleep2agi/agent-network/pull/896) 起可信（同样随 `2.3.0-preview.40` 发布）。
 
 打开 `http://localhost:3000`，从 Dashboard 给 Agent 派任务。
 
