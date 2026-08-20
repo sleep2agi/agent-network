@@ -27,30 +27,46 @@ export interface CopresenceDep {
 
 export type CommandProbe = (cmd: string) => boolean;
 
-function installHint(name: string, platform: NodeJS.Platform): string | null {
+function installHint(name: string, platform: NodeJS.Platform, probe?: CommandProbe): string | null {
   if (name === "codex") return "npm install -g @openai/codex";
+  if (name === "bunx") {
+    // bun installed from the release zip does not ship bunx, and that is the
+    // most common way to have one without the other (#766). Symlinking is the
+    // one-line fix; telling that person to "install bun" is wrong twice.
+    return probe?.("bun")
+      ? `ln -s "$(command -v bun)" "$(dirname "$(command -v bun)")/bunx"   # bun is here, bunx is not`
+      : "npm i -g bun";
+  }
   if (name === "tmux") {
     if (platform === "darwin") return "brew install tmux";
     if (platform === "linux") return "sudo apt-get install -y tmux   # or: sudo dnf install -y tmux";
     return null;   // windows: no honest one-liner
   }
-  if (name === "bun") return "curl -fsSL https://bun.sh/install | bash";
   return null;
 }
 
 const DEPS: ReadonlyArray<{ name: string; probes: readonly string[]; why: string }> = [
   { name: "tmux", probes: ["tmux"], why: "isolates the app-server / bridge / TUI trio" },
   { name: "codex", probes: ["codex"], why: "the TUI and the app-server are both codex" },
-  // Either binary satisfies it — `anet hub start` accepts bunx or bun. Probing
-  // only `bun` would fail on a PATH that carries just `bunx`.
-  { name: "bun", probes: ["bunx", "bun"], why: "anet hub start runs the server through bunx" },
+  // 🔴 bunx SPECIFICALLY, not "bun or bunx".
+  //
+  // The one spawn point for commhub-server is `spawn("bunx", …)`, and the guard
+  // in `anet hub start` is `if (!commandExists("bunx"))` — it was tightened from
+  // OR to bunx-only in #766, precisely because the OR let a bun-only machine
+  // pass preflight and then fail at spawn.
+  //
+  // Three comments in cli.ts still describe the OLD guard ("守卫接受 bunx 或
+  // bun"), and this module was written from one of them. Verified the hard way:
+  // a container with bun and no bunx passed this preflight, auto-start fired,
+  // and `anet hub start` exited 1 with "找到了 bun,但没有 bunx".
+  { name: "bunx", probes: ["bunx"], why: "anet hub start spawns commhub-server through bunx" },
 ];
 
 export function copresenceDeps(probe: CommandProbe, platform: NodeJS.Platform = process.platform): CopresenceDep[] {
   return DEPS.map((d) => ({
     name: d.name,
     present: d.probes.some((p) => probe(p)),
-    install: installHint(d.name, platform),
+    install: installHint(d.name, platform, probe),
     why: d.why,
   }));
 }

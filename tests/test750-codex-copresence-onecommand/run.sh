@@ -207,6 +207,22 @@ if grep -qF -e 'starting it in tmux=anet-hub' "$WORK/remote.start"; then
 fi
 pass "refuses to substitute a local hub for a remote one, and says why"
 
+log "[L8] a start that did not bring the node up must not report success"
+# 🔴 The regression this exists for. `waitForTmuxPaneText` abandoned its poll
+#    loop when the pane was not listable yet — it neither resolved nor
+#    rescheduled, so the promise never settled, the event loop drained, and node
+#    exited 0. `anet node start --copresence` printed two lines and returned
+#    SUCCESS having started nothing. It reproduced every time on a machine whose
+#    tmux server was not already warm, i.e. the first node on a fresh box.
+#
+#    In this image the codex stub never binds, so every start here legitimately
+#    fails; what is asserted is that failure is REPORTED, not that it happens.
+[ "$RC_WITH" -ne 0 ] \
+  || fail "start exited 0 while the node did not come up (rc=$RC_WITH) — the silent-success regression"
+grep -qF -e 'did not bind' "$WORK/withflag.start" \
+  || fail "start failed without naming what did not come up"
+pass "an incomplete start exits non-zero and names the step that failed"
+
 PASSED=$(grep -c '^PASS: ' "$REPORT" || true)
 FAILED=$(grep -c '^FAIL: ' "$REPORT" || true)
 log "Summary: PASS ($PASSED groups, $FAILED failures; all validation ran inside Docker)"

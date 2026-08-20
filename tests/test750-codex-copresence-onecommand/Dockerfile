@@ -24,6 +24,12 @@ RUN curl --fail --silent --show-error --location \
   && chmod 0755 /usr/local/bin/bun \
   && test "$(bun --version)" = "$BUN_VERSION" \
   && rm -f /tmp/bun-linux-x64.zip
+# 🔴 The release zip ships bun WITHOUT bunx, and `anet hub start` spawns
+#    commhub-server through bunx specifically (#766). Without this symlink the
+#    dependency preflight correctly refuses to start — which is how this line
+#    came to be needed: the suite went red the moment that preflight learned the
+#    real requirement.
+RUN ln -s /usr/local/bin/bun /usr/local/bin/bunx
 
 WORKDIR /workspace
 COPY server/package.json server/package-lock.json ./server/

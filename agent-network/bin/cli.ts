@@ -13,7 +13,7 @@
 import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync, rmSync, cpSync, copyFileSync, unlinkSync, realpathSync } from "fs";
 import { dirname, isAbsolute, join, resolve } from "path";
 import { fileURLToPath } from "url";
-import { homedir } from "os";
+import { homedir, tmpdir } from "os";
 import { spawn, spawnSync, execSync, execFileSync } from "child_process";
 import { createHash, randomBytes, randomUUID } from "crypto";
 import {
@@ -176,6 +176,24 @@ function shellQuote(value: string): string { return `'${value.replace(/'/g, `'\\
  *    So the exact form for a pane is the coordinate, with the session matched by
  *    string equality in our own code rather than by tmux's prefix rules.
  */
+/**
+ * Will `anet hub start` be able to run?
+ *
+ * 🔴 The authority is the guard inside `hub start` itself:
+ *       if (!commandExists("bunx"))
+ *    Tightened from OR in #766 — the only spawn point is `spawn("bunx", …)`, so
+ *    bun alone was never enough. Anything that PREDICTS that guard must route
+ *    through here rather than restating the condition: three restatements had
+ *    already drifted to the old OR and told bun-only machines they were fine.
+ *
+ *    Deliberately not used by the guard itself. tests/test766-bunx-preflight
+ *    pins that literal and mutates it to prove the gate is live; a helper call
+ *    there would make the guard invisible to its own test.
+ */
+function bunxAvailable(): boolean {
+  return commandExists("bunx");
+}
+
 function tmuxPaneTarget(sessionName: string): string | null {
   try {
     const out = execFileSync("tmux", ["list-panes", "-a", "-F", PANE_LIST_FORMAT], {
@@ -257,7 +275,20 @@ function waitForTmuxPaneText(sessionName: string, needle: string, timeoutMs: num
     const poll = () => {
       try {
         const paneTarget = tmuxPaneTarget(sessionName);
-        if (!paneTarget) return false;
+        // 🔴 The pane is not listable the instant `tmux new-session -d` returns,
+        //    so a miss here is normal and means "not yet", never "give up".
+        //
+        //    The old `return false` left this promise UNSETTLED: it neither
+        //    resolved nor rescheduled, so the await never completed, the event
+        //    loop drained, and node exited 0 — `anet node start --copresence`
+        //    printed two lines and returned success having started nothing.
+        //    Reproduced every time in a clean container; instrumented to
+        //    confirm this exact branch.
+        if (!paneTarget) {
+          if (Date.now() >= deadline) { resolve(false); return; }
+          setTimeout(poll, 400);
+          return;
+        }
         // 🔴 `-S -200`:不带它,capture-pane 只返回**当前可见区**。
         // 一行「listening on: …」被后续日志顶出屏幕之后,这个轮询就再也看不到它了,
         // 于是等满 timeout 判失败 —— 而服务其实早就绑上了(#849 实测 1.1s 绑上、
@@ -514,12 +545,36 @@ async function ensureLocalHubRunning(hub: string): Promise<void> {
     console.error(`[anet]    Start it where it lives, or point this node at a hub that is up.`);
     process.exit(1);
   }
+  // 🔴 Tee the hub's own output to a file. `anet hub start` exits 1 on a failed
+  //    preflight (missing bunx is the common one), which takes the tmux session
+  //    with it — so "attach to tmux=anet-hub" is advice pointing at something
+  //    that no longer exists. Observed exactly that: the session was gone and
+  //    the only thing printed was our own 60s timeout. The reason lives here.
+  const hubLog = join(tmpdir(), `anet-hub-start-${process.pid}.log`);
   if (tmuxSessionRunning(ANET_HUB_TMUX_SESSION)) {
     console.log(`[anet] local hub is starting in tmux=${ANET_HUB_TMUX_SESSION} — waiting for it`);
   } else {
     console.log(`[anet] local hub ${hub} is not up — starting it in tmux=${ANET_HUB_TMUX_SESSION}`);
     try {
-      execFileSync("tmux", ["new-session", "-d", "-s", ANET_HUB_TMUX_SESSION, "anet hub start"], { stdio: "pipe" });
+      // 🔴 Re-invoke THIS entry point, not a bare `anet`.
+      //    Bare `anet` depends on the name being on PATH — it was not in a
+      //    container running the CLI directly, and the only thing printed was
+      //    "anet: command not found" 60s later. Worse in production: whoever
+      //    launched this may have been running npx, a local build, or another
+      //    channel, and a bare name would start a DIFFERENT version's hub than
+      //    the one the operator is holding.
+      // 🔴 Pass the port from the NODE's hub URL. `anet hub start` defaults to
+      //    9200 regardless of what the node was told to use, so on any other
+      //    port auto-start brings up a hub the node will never reach and the
+      //    wait below times out against a perfectly healthy server. Observed:
+      //    node on 9299, "Server: http://127.0.0.1:9200", 60s timeout.
+      const hubPort = (() => { try { return new URL(hub).port || "9200"; } catch { return "9200"; } })();
+      const selfCmd = `${shellQuote(process.execPath)} ${shellQuote(process.argv[1] ?? "")}`
+        + ` hub start --port ${shellQuote(hubPort)}`;
+      execFileSync("tmux", [
+        "new-session", "-d", "-s", ANET_HUB_TMUX_SESSION,
+        `${selfCmd} 2>&1 | tee ${shellQuote(hubLog)}`,
+      ], { stdio: "pipe" });
     } catch (e) {
       console.error(`[anet] ❌ could not start the local hub: ${(e as Error).message}`);
       console.error(`[anet]    Start it yourself in another terminal: anet hub start`);
@@ -535,7 +590,23 @@ async function ensureLocalHubRunning(hub: string): Promise<void> {
     await new Promise((r) => setTimeout(r, 500));
   }
   console.error(`[anet] ❌ the local hub did not answer ${hub}/health within 60s.`);
-  console.error(`[anet]    Look at it: tmux attach -t '=${ANET_HUB_TMUX_SESSION}'`);
+  // Say WHY, not where to look — the session is usually already gone.
+  let said = false;
+  try {
+    const out = readFileSync(hubLog, "utf8").trim();
+    if (out) {
+      console.error(`[anet]    anet hub start said:`);
+      for (const line of out.split("\n").filter((l) => l.trim()).slice(-12)) {
+        console.error(`[anet]      ${line}`);
+      }
+      said = true;
+    }
+  } catch { /* no log: fall through to the generic hint */ }
+  if (!said) {
+    console.error(tmuxSessionRunning(ANET_HUB_TMUX_SESSION)
+      ? `[anet]    It is still running — look at it: tmux attach -t '=${ANET_HUB_TMUX_SESSION}'`
+      : `[anet]    Its tmux session is already gone, and it left no output. Try: anet hub start`);
+  }
   process.exit(1);
 }
 
@@ -2000,18 +2071,21 @@ function detectInstalledPackages() {
     // Bun 不是「可选运行时」,它是本机跑 hub 的硬前置:`anet hub start` 在
     // 缺 bun/bunx 时直接 process.exit(1)(见 hub start 里的前置校验)。
     // 此前自报里完全不提它,用户只能撞上去才知道 —— 这正是本次要修的。
-    // 🔴 判据必须与 hub 守卫同源。守卫是
-    //     if (!commandExists("bunx") && !commandExists("bun"))
-    // —— **任一存在即放行**。所以只探 `bun` 会在「只有 bunx」的 PATH 上
-    // 假报 "hub start will fail",而实际 hub 能起来。假警报比不报更糟:
-    // 它会让人去装一个本来就不需要装的东西,并开始怀疑其它自报信息。
-    // (通信牛在 #744 源码审里指出,已复验:cli.ts 的守卫确实是 OR。)
+    // 🔴 判据必须与 hub 守卫同源,而守卫现在是
+    //     if (!commandExists("bunx"))            (cli.ts, hub start)
+    // —— **只认 bunx**。#766 把它从 OR 收紧成这样,理由写在那里:唯一的启动方式
+    // 是 `spawn("bunx", …)`,OR 会让 bun-only 的机器通过前置检查然后在 spawn 处
+    // 失败。这里的 OR 是那次收紧留下的旧副本(#744 复核当时为真,现在为假),它让
+    // 自报在 bun-only 机器上说「齐了」,而 `anet hub start` 随后 exit 1。
+    // 实测:容器里有 bun 无 bunx,自报通过、hub 起不来,报「找到了 bun,但没有 bunx」。
     bun: (() => {
+      // bunx is the requirement; bun is only how we get a version to show.
+      if (!bunxAvailable()) {
+        return { name: "bunx", displayName: "Bun (bunx)", version: null, state: "not-installed" as VersionState };
+      }
       const direct = detectCommandVersion("bun", "Bun");
       if (direct.state === "ok" || direct.state === "unknown") return direct;
-      // bun 不在 PATH 但 bunx 在 —— 守卫会放行,自报也必须放行。
-      const viaBunx = detectCommandVersion("bunx", "Bun (via bunx)");
-      return viaBunx.state === "ok" || viaBunx.state === "unknown" ? viaBunx : direct;
+      return detectCommandVersion("bunx", "Bun (via bunx)");
     })(),
   };
 
@@ -9104,13 +9178,16 @@ function selfUpgradeDetached(channel: ReleaseChannel): never {
   console.log(`[anet]   Log: ${errLog}`);
   console.log(`[anet]   When npm finishes, open a NEW terminal (or 'source ~/.bashrc') and run \`anet --version\` to verify ${channel}.`);
   console.log(`[anet]   The current shell's \`anet\` binary will keep pointing at the old version until you do.`);
-  // 同源判据:hub start 的守卫接受 bunx **或** bun,这里必须一致,
-  // 否则 bunx-only 的机器会收到一条「will fail」的假警报(同 #761)。
-  if (!commandExists("bun") && !commandExists("bunx")) {
+  // 同源判据:hub start 的守卫是 `if (!commandExists("bunx"))` —— 只认 bunx
+  // (#766 从 OR 收紧)。这里原本写的是 OR,是那次收紧漏掉的第三份副本:
+  // bun-only 的机器不会收到提示,然后在 hub start 处撞上去。
+  if (!bunxAvailable()) {
     // #214 P2.7 — anet hub start needs bun (commhub-server is bun-only).
     // Surface this now so users don't hit it on next `anet hub start`.
-    console.log(`[anet]   note: bun is not installed; \`anet hub start\` will fail without it.`);
-    console.log(`[anet]         Install: npm i -g bun  (或 https://bun.sh/docs/installation)`);
+    console.log(`[anet]   note: bunx is not on PATH; \`anet hub start\` will fail without it.`);
+    console.log(commandExists("bun")
+      ? `[anet]         bun is here but bunx is not: ln -s "$(command -v bun)" "$(dirname "$(command -v bun)")/bunx"`
+      : `[anet]         Install: npm i -g bun  (或 https://bun.sh/docs/installation)`);
   }
   console.log(`[anet]   (Use \`anet upgrade --no-auto-self\` next time if you prefer to manage the install yourself.)`);
   try {
