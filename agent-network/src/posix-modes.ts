@@ -19,7 +19,7 @@
 // agent-node made the same decision (posixFileModesSupported in
 // runtime/config-apply.ts); this is that decision for agent-network.
 
-import { chmodSync, fchmodSync } from "fs";
+import { chmodSync, fchmodSync, fsyncSync } from "fs";
 
 export function posixFileModes(platform: NodeJS.Platform = process.platform): boolean {
   return platform !== "win32";
@@ -44,4 +44,30 @@ export function fchmodIfPosix(fd: number, mode: number): void {
  */
 export function modeIsJudgeable(platform: NodeJS.Platform = process.platform): boolean {
   return posixFileModes(platform);
+}
+
+/**
+ * fsync a DIRECTORY handle, where the platform supports it.
+ *
+ * The durability barrier after an atomic rename: on POSIX, fsyncing the parent
+ * makes the rename itself survive a crash, not just the file's bytes. Windows
+ * has no equivalent — FlushFileBuffers works on files, and on a directory
+ * handle it fails:
+ *
+ *     [anet] FATAL: Error: EPERM: operation not permitted, fsync
+ *         at fsyncSync (node:fs:1285:11)
+ *
+ * which is `anet start <node>` dying on its first private-state write. Reported
+ * from the Windows box while it was running the previous fix, i.e. this is the
+ * next call in the same family, not a regression of that one.
+ *
+ * 🔴 Note what is NOT skipped: the fsync of the temp FILE before the rename.
+ *    That one works on Windows and carries the bytes. What is skipped is only
+ *    the parent-directory barrier, which the platform does not offer at all —
+ *    NTFS journals the rename's metadata itself. Skipping an operation the OS
+ *    cannot perform is not a weakened guarantee; crashing instead of writing
+ *    the file is a much larger one.
+ */
+export function fsyncDirectoryIfSupported(fd: number): void {
+  if (posixFileModes()) fsyncSync(fd);
 }

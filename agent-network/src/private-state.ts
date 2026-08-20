@@ -14,7 +14,7 @@ import {
 import { basename, dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { fchmodIfPosix } from "./posix-modes";
+import { fchmodIfPosix, fsyncDirectoryIfSupported } from "./posix-modes";
 
 function restrictWindowsAcl(path: string, directory: boolean): void {
   const sid = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
@@ -84,13 +84,8 @@ export function atomicWritePrivateFile(path: string, body: string): void {
     closeSync(fd);
     fd = undefined;
     renameSync(temp, path);
-    // node:fs cannot open/fsync directory handles on Windows (EPERM). The
-    // temporary file itself was already fsynced; retain the directory rename
-    // durability barrier on platforms which support it.
-    if (process.platform !== "win32") {
-      const parentFd = openOwned(parent, constants.O_RDONLY | (constants.O_DIRECTORY || 0), "directory");
-      try { fsyncSync(parentFd); } finally { closeSync(parentFd); }
-    }
+    const parentFd = openOwned(parent, constants.O_RDONLY | (constants.O_DIRECTORY || 0), "directory");
+    try { fsyncDirectoryIfSupported(parentFd); } finally { closeSync(parentFd); }
   } catch (error) {
     if (fd !== undefined) try { closeSync(fd); } catch {}
     rmSync(temp, { force: true });
