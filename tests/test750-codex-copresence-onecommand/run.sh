@@ -46,13 +46,14 @@ pass "environment (no host state; tmux + codex stub present so the launcher reac
 
 log "[L1] decision functions"
 cd "$ROOT/agent-network"
-bun test src/codex-copresence-profile.test.ts src/codex-copresence-preflight.test.ts >>"$REPORT" 2>&1 \
+bun test src/codex-copresence-profile.test.ts src/codex-copresence-preflight.test.ts \
+     src/copresence-deps.test.ts >>"$REPORT" 2>&1 \
   || fail "codex co-presence unit tests"
 # 🔴 A green `bun test` does not prove these files ran — a path typo produces
 #    "0 tests" and exit 0 all the same. Assert the denominator.
-UNIT_TOTAL=$(bun test src/codex-copresence-profile.test.ts src/codex-copresence-preflight.test.ts 2>&1 \
-  | grep -oE '^ *[0-9]+ pass' | grep -oE '[0-9]+' | head -1)
-[ "${UNIT_TOTAL:-0}" -ge 30 ] || fail "expected >=30 unit assertions, ran ${UNIT_TOTAL:-0} — did the files resolve?"
+UNIT_TOTAL=$(bun test src/codex-copresence-profile.test.ts src/codex-copresence-preflight.test.ts \
+     src/copresence-deps.test.ts 2>&1 | grep -oE '^ *[0-9]+ pass' | grep -oE '[0-9]+' | head -1)
+[ "${UNIT_TOTAL:-0}" -ge 44 ] || fail "expected >=44 unit assertions, ran ${UNIT_TOTAL:-0} — did the files resolve?"
 log "unit assertions: $UNIT_TOTAL"
 pass "profile + preflight decision functions ($UNIT_TOTAL tests)"
 
@@ -162,6 +163,49 @@ grep -qF -e 'sandbox=danger-full-access' "$WORK/grant.start" \
 [ "$(field .anet/nodes/noflag/config.json codexCopresenceFullAccess)" = "True" ] \
   || fail "explicit grant was not recorded"
 pass "read-only is what co-presence actually resolves to; the grant is explicit and remembered"
+
+log "[L6] every missing dependency in one pass, with a command for each"
+# Hide tmux and codex from PATH rather than uninstalling them: the other layers
+# need both, and a second image would drift from this one.
+MINPATH=$(mktemp -d)
+for b in bun node python3 sh bash env grep sed awk cat mktemp curl printf; do
+  src=$(command -v "$b" 2>/dev/null) && ln -sf "$src" "$MINPATH/$b"
+done
+set +e
+PATH="$MINPATH" $CLI node start withflag --accept-dev-channels >"$WORK/nodeps.start" 2>&1
+RC_NODEPS=$?
+set -e
+cat "$WORK/nodeps.start" >>"$REPORT"
+[ "$RC_NODEPS" -ne 0 ] || fail "start succeeded on a machine with no tmux and no codex"
+# 🔴 The point is BOTH in one run. The guards this replaced exited at the first
+#    gap, so the operator learned about tmux, installed it, reran, and only then
+#    learned about codex.
+grep -qF -e 'tmux' "$WORK/nodeps.start"  || fail "missing tmux was not reported"
+grep -qF -e 'codex' "$WORK/nodeps.start" || fail "missing codex was not reported"
+grep -qF -e 'npm install -g @openai/codex' "$WORK/nodeps.start" \
+  || fail "reported the gap but not the command that closes it"
+pass "all gaps reported together, each with a runnable command"
+
+log "[L7] a hub that is not ours is never started for us"
+# 🔴 A remote hub that refuses is somebody else's service. Starting a local one
+#    would point the node at a DIFFERENT hub than its profile names — it would
+#    come up looking healthy and be invisible to everyone waiting on the real
+#    one. Loopback auto-start itself needs the network to fetch the server
+#    package, so it is not exercised here; this is the half that can be.
+$CLI node create remotehub --runtime codex-tui --copresence --hub http://10.255.255.1:9200 >>"$REPORT" 2>&1 \
+  || fail "create with a remote hub"
+set +e
+$CLI node start remotehub --accept-dev-channels >"$WORK/remote.start" 2>&1
+RC_REMOTE=$?
+set -e
+cat "$WORK/remote.start" >>"$REPORT"
+[ "$RC_REMOTE" -ne 0 ] || fail "start succeeded against an unreachable remote hub"
+grep -qF -e 'not a loopback hub' "$WORK/remote.start" \
+  || fail "did not say why it refused to start the remote hub"
+if grep -qF -e 'starting it in tmux=anet-hub' "$WORK/remote.start"; then
+  fail "tried to start a local hub for a node pointed at a remote one"
+fi
+pass "refuses to substitute a local hub for a remote one, and says why"
 
 PASSED=$(grep -c '^PASS: ' "$REPORT" || true)
 FAILED=$(grep -c '^FAIL: ' "$REPORT" || true)

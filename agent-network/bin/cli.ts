@@ -105,6 +105,11 @@ import {
   describeCodexTuiNotPainted,
 } from "../src/codex-copresence-preflight";
 import {
+  describeMissingDeps,
+  isLoopbackHub,
+  missingCopresenceDeps,
+} from "../src/copresence-deps";
+import {
   grokCopresenceDisclosure,
   type GrokCopresenceSessionDisclosure,
 } from "../src/grok-copresence-disclosure";
@@ -477,6 +482,63 @@ interface CopresenceOptions {
   token: string;
 }
 
+/** True once `${hub}/health` answers. Unauthenticated on purpose: we only need
+ *  to know something is listening, not to read anything from it. */
+async function hubAnswersHealth(hub: string, timeoutMs = 2_000): Promise<boolean> {
+  try {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), timeoutMs);
+    const res = await fetch(`${hub}/health`, { signal: ctl.signal });
+    clearTimeout(t);
+    return res.ok || res.status === 401;   // 401 = up, just gated
+  } catch { return false; }
+}
+
+const ANET_HUB_TMUX_SESSION = "anet-hub";
+
+/**
+ * Start the local hub if the node's own hub is loopback and nothing answers.
+ *
+ * 🔴 Loopback only. A remote hub that refuses is somebody else's service, and
+ *    spawning a local one would point the node at a DIFFERENT hub than its
+ *    profile names — it would come up looking healthy and be invisible to
+ *    everyone waiting for it on the real one. See isLoopbackHub.
+ *
+ * Detached in tmux, because `anet hub start` runs the server in the foreground
+ * (stdio: "inherit") and this caller has a node to bring up afterwards.
+ */
+async function ensureLocalHubRunning(hub: string): Promise<void> {
+  if (await hubAnswersHealth(hub)) return;
+  if (!isLoopbackHub(hub)) {
+    console.error(`[anet] ❌ ${hub} is not answering, and it is not a loopback hub — anet will not start someone else's service.`);
+    console.error(`[anet]    Start it where it lives, or point this node at a hub that is up.`);
+    process.exit(1);
+  }
+  if (tmuxSessionRunning(ANET_HUB_TMUX_SESSION)) {
+    console.log(`[anet] local hub is starting in tmux=${ANET_HUB_TMUX_SESSION} — waiting for it`);
+  } else {
+    console.log(`[anet] local hub ${hub} is not up — starting it in tmux=${ANET_HUB_TMUX_SESSION}`);
+    try {
+      execFileSync("tmux", ["new-session", "-d", "-s", ANET_HUB_TMUX_SESSION, "anet hub start"], { stdio: "pipe" });
+    } catch (e) {
+      console.error(`[anet] ❌ could not start the local hub: ${(e as Error).message}`);
+      console.error(`[anet]    Start it yourself in another terminal: anet hub start`);
+      process.exit(1);
+    }
+  }
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    if (await hubAnswersHealth(hub)) {
+      console.log(`[anet] local hub is up`);
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  console.error(`[anet] ❌ the local hub did not answer ${hub}/health within 60s.`);
+  console.error(`[anet]    Look at it: tmux attach -t '=${ANET_HUB_TMUX_SESSION}'`);
+  process.exit(1);
+}
+
 async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOptions): Promise<void> {
   const resolved = resolveNodeRef(nodeId);
   if (!resolved) {
@@ -491,14 +553,14 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     console.error(`[anet]      anet node create ${shellQuote(displayName)} --runtime codex-app-server`);
     process.exit(1);
   }
-  if (!tmuxAvailable()) {
-    console.error(`[anet] ❌ --copresence requires tmux (used to isolate the 3-piece dance).`);
-    console.error(`[anet]    Install tmux (e.g. \`brew install tmux\` / \`apt-get install tmux\`) and retry.`);
-    process.exit(1);
-  }
-  if (!commandExists(opts.codexBin)) {
-    console.error(`[anet] ❌ codex binary "${opts.codexBin}" not found in PATH.`);
-    console.error(`[anet]    Install codex CLI (e.g. \`npm install -g @openai/codex\`) or pass --codex-bin <path>.`);
+  // One preflight for every external dependency, not one exit per gap. A box
+  // missing tmux AND codex used to need two runs to learn both — see
+  // src/copresence-deps.ts. `--codex-bin` is honoured by probing that name.
+  const missingDeps = missingCopresenceDeps(
+    (cmd) => (cmd === "codex" ? commandExists(opts.codexBin) : commandExists(cmd)),
+  );
+  if (missingDeps.length > 0) {
+    console.error(describeMissingDeps(missingDeps, displayName));
     process.exit(1);
   }
   if (!opts.token || !opts.token.startsWith("ntok_")) {
@@ -509,12 +571,19 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
 
   // #P2fix必修2 — hub URL sanity before any interpolation into bash -c.
   // Rejects bad schemes, empty, and shell-metacharacter contamination.
+  // 🔴 Must stay BEFORE ensureLocalHubRunning: that one puts the URL in a fetch
+  //    and in a tmux command line, so it may not run on an unvalidated string.
   try { assertSafeHubUrl(opts.hub); }
   catch (e: any) {
     console.error(`[anet] ❌ ${e?.message || String(e)}`);
     console.error(`[anet]    Fix: correct the hub URL in ${join(nodesDir(), resolved.id, "config.json")} (or global .anet/config.json).`);
     process.exit(1);
   }
+
+  // The node cannot register anywhere if nothing is listening. Starting a
+  // loopback hub needs no privileges and is our own service, so a launcher that
+  // refuses over it is just handing the operator a second terminal to open.
+  await ensureLocalHubRunning(opts.hub);
 
   // Risk C double safeguard — dangerous sandbox is never the default.
   // Requires: explicit CLI flag (opts.dangerFullAccess) + typed 'yes' at
