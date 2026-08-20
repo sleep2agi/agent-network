@@ -146,6 +146,7 @@ on:
       - 'tests/test693-agent-local-upload/**'
       - 'tests/test697-codex-default-model/**'
       - 'tests/test698-atomic-peer-reply/**'
+      - 'tests/test750-codex-copresence-onecommand/**'
       - 'tests/test736-pm2-fleet-rebuild/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
@@ -291,6 +292,7 @@ on:
       - 'tests/test693-agent-local-upload/**'
       - 'tests/test697-codex-default-model/**'
       - 'tests/test698-atomic-peer-reply/**'
+      - 'tests/test750-codex-copresence-onecommand/**'
       - 'tests/test736-pm2-fleet-rebuild/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
@@ -862,6 +864,7 @@ jobs:
           - test693-agent-local-upload
           - test697-codex-default-model
           - test698-atomic-peer-reply
+          - test750-codex-copresence-onecommand
           - test736-pm2-fleet-rebuild
     steps:
       - uses: actions/checkout@v4
