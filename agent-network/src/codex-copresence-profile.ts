@@ -109,3 +109,50 @@ export function shouldPersistCodexFullAccess(
 ): boolean {
   return dangerFlagPassed && profile.codexCopresenceFullAccess !== true;
 }
+
+/**
+ * What `anet node create --runtime codex-app-server` should record, so that a
+ * later `anet node start <name>` is a single command with no flag.
+ *
+ * Shape copied from opencode, which already does exactly this at create time:
+ *
+ *   ...(runtime === "opencode-cli"
+ *     ? { opencodeMode: opts.mode === "copresence" || opts.copresence === "true"
+ *         ? "copresence" : "headless" }
+ *     : {}),
+ *
+ * Deliberately NOT keyed on which alias the operator typed. `codex-tui`,
+ * `codex-appserver` and `codex-app-server` are documented as aliases of one
+ * runtime (agent-node/src/cli.ts); giving one of them a different default would
+ * quietly break that contract, and "I typed the short name" is not a reliable
+ * statement of intent. Opting in stays explicit, exactly as it is for opencode.
+ */
+export function codexCopresenceCreateFields(
+  normalizedRuntime: string | undefined,
+  copresenceOpt: string | boolean | undefined,
+): { codexCopresence?: true } {
+  if (normalizedRuntime !== CODEX_COPRESENCE_RUNTIME) return {};
+  const wanted = copresenceOpt === true || copresenceOpt === "true";
+  return wanted ? { codexCopresence: true } : {};
+}
+
+/**
+ * One line at create time for a node that will start headless.
+ *
+ * NOT keyed on which alias the operator typed: by the time create builds the
+ * profile, `opts.runtime` has already been normalized to `codex-app-server`, so
+ * `codex-tui` is simply not recoverable here — a hint that tried to read it
+ * would never fire. (It didn't; that is how this was found.) Keying on the
+ * runtime instead also keeps the aliases true synonyms.
+ */
+export function codexCopresenceCreateHint(
+  normalizedRuntime: string | undefined,
+  copresenceOpt: string | boolean | undefined,
+  displayName: string,
+): string | undefined {
+  if (normalizedRuntime !== CODEX_COPRESENCE_RUNTIME) return undefined;
+  if (copresenceOpt === true || copresenceOpt === "true") return undefined;
+  return `[anet] note: this node starts headless. For the shared human + agent TUI, run once:\n`
+    + `[anet]     anet node start ${displayName} --copresence\n`
+    + `[anet]   (it is recorded, so later starts need no flag)`;
+}

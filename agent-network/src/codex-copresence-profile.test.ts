@@ -5,6 +5,8 @@ import {
   codexCopresenceRequested,
   shouldPersistCodexCopresence,
   shouldPersistCodexFullAccess,
+  codexCopresenceCreateFields,
+  codexCopresenceCreateHint,
 } from "./codex-copresence-profile";
 
 const YOLO = { approvalPolicy: "never", sandboxMode: "danger-full-access", skipGitRepoCheck: true };
@@ -101,5 +103,44 @@ describe("sandbox posture", () => {
     expect(shouldPersistCodexFullAccess(true, {})).toBe(true);
     expect(shouldPersistCodexFullAccess(true, { codexCopresenceFullAccess: true })).toBe(false);
     expect(shouldPersistCodexFullAccess(false, {})).toBe(false);
+  });
+});
+
+describe("what create records", () => {
+  test("records co-presence when it was asked for", () => {
+    expect(codexCopresenceCreateFields("codex-app-server", "true")).toEqual({ codexCopresence: true });
+    expect(codexCopresenceCreateFields("codex-app-server", true)).toEqual({ codexCopresence: true });
+  });
+
+  test("records nothing otherwise — headless stays the default, as for opencode", () => {
+    expect(codexCopresenceCreateFields("codex-app-server", undefined)).toEqual({});
+    expect(codexCopresenceCreateFields("codex-app-server", "false")).toEqual({});
+  });
+
+  test("never writes the field onto another runtime", () => {
+    expect(codexCopresenceCreateFields("codex-sdk", "true")).toEqual({});
+    expect(codexCopresenceCreateFields("opencode-cli", "true")).toEqual({});
+    expect(codexCopresenceCreateFields(undefined, "true")).toEqual({});
+  });
+
+  test("a node that will start headless is told how to get a TUI", () => {
+    const hint = codexCopresenceCreateHint("codex-app-server", undefined, "通信牛");
+    expect(hint).toBeDefined();
+    expect(hint).toContain("--copresence");
+    expect(hint).toContain("通信牛");
+  });
+
+  test("no hint for another runtime, or when co-presence was already asked for", () => {
+    expect(codexCopresenceCreateHint("codex-sdk", undefined, "n")).toBeUndefined();
+    expect(codexCopresenceCreateHint("opencode-cli", undefined, "n")).toBeUndefined();
+    expect(codexCopresenceCreateHint("codex-app-server", "true", "n")).toBeUndefined();
+    expect(codexCopresenceCreateHint("codex-app-server", true, "n")).toBeUndefined();
+  });
+
+  test("the hint takes no typed-alias argument — create has already normalized it", () => {
+    // The first version of this keyed on `opts.runtime === "codex-tui"` and
+    // silently never fired, because create normalizes the alias before the
+    // profile is built. Keep the signature free of anything create cannot see.
+    expect(codexCopresenceCreateHint.length).toBe(3);
   });
 });

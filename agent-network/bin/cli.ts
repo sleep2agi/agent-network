@@ -10,7 +10,7 @@
  * anet run                     独立 SSE Agent
  */
 
-import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync, rmSync, cpSync, unlinkSync, realpathSync } from "fs";
+import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync, rmSync, cpSync, copyFileSync, unlinkSync, realpathSync } from "fs";
 import { dirname, isAbsolute, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
@@ -92,10 +92,18 @@ import {
 } from "../src/grok-copresence-profile";
 import {
   codexCopresencePosture,
+  codexCopresenceCreateFields,
+  codexCopresenceCreateHint,
   codexCopresenceRequested,
   shouldPersistCodexCopresence,
   shouldPersistCodexFullAccess,
 } from "../src/codex-copresence-profile";
+import {
+  codexHomeStagePlan,
+  codexTuiPaneState,
+  describeCodexTuiBlocker,
+  describeCodexTuiNotPainted,
+} from "../src/codex-copresence-preflight";
 import {
   grokCopresenceDisclosure,
   type GrokCopresenceSessionDisclosure,
@@ -265,6 +273,45 @@ function waitForTmuxPaneText(sessionName: string, needle: string, timeoutMs: num
   });
 }
 
+/**
+ * Read a pane, optionally including scrollback.
+ *
+ * Which one you want depends on the question — see codexTuiPaneState. "Is it
+ * blocked right now" must NOT read scrollback (an answered prompt lives there
+ * forever); "did the TUI ever paint" must, because the banner scrolls away.
+ */
+function capturePane(sessionName: string, scrollbackLines?: number): string | null {
+  try {
+    const paneTarget = tmuxPaneTarget(sessionName);
+    if (!paneTarget) return null;
+    const args = ["capture-pane", "-t", paneTarget, "-p"];
+    if (scrollbackLines) args.push("-S", `-${scrollbackLines}`);
+    return execFileSync("tmux", args, { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
+  } catch { return null; }
+}
+
+/**
+ * Poll until the TUI has painted, then classify what it shows.
+ *
+ * Keys on a codex marker, never on "the pane has text": the launcher's own
+ * output sits in that pane for several seconds before codex clears the screen,
+ * and an emptiness-based rule reports ready before the TUI even exists. See
+ * codexTuiPaneState for the measured timeline.
+ */
+async function codexTuiStateAfterRender(sessionName: string, timeoutMs: number) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const onScreen = capturePane(sessionName);
+    if (onScreen !== null) {
+      const everSeen = capturePane(sessionName, 400) ?? onScreen;
+      const state = codexTuiPaneState(onScreen, everSeen);
+      if (state !== "not-painted") return state;
+    }
+    if (Date.now() >= deadline) return "not-painted" as const;
+    await new Promise((r) => setTimeout(r, 400));
+  }
+}
+
 async function resolveCopresenceWebSocketCtor(): Promise<any> {
   const g = (globalThis as any).WebSocket;
   if (typeof g === "function") return g;
@@ -424,6 +471,8 @@ interface CopresenceOptions {
   port?: number;
   dangerFullAccess: boolean;
   yesDangerFullAccess: boolean;
+  /** Stage the host's auth.json / version.json into the node CODEX_HOME. */
+  inheritCodexHome: boolean;
   hub: string;
   token: string;
 }
@@ -520,15 +569,31 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   //    opencode 用 writeOpencodePresetIfRequested 写独立文件)，只有 codex 这条没有。
   //    "补哪一种"是个隔离取向的决定(共享刷新 vs 真隔离)，不在这里定；
   //    但**让失败说出原因**不需要等那个决定。
+  // The decision the comment above deferred, taken in
+  // src/codex-copresence-preflight.ts: SHARE the host's non-session state, and
+  // re-stage whenever the host copy is newer — auth.json rotates, so a one-time
+  // copy is a delayed failure rather than a fix.
   try {
-    const isolatedAuth = join(opts.codexHome, "auth.json");
-    const defaultAuth = join(homedir(), ".codex", "auth.json");
-    if (!existsSync(isolatedAuth) && existsSync(defaultAuth)) {
-      console.error(`[anet] ⚠ ${isolatedAuth} 不存在，而 ${defaultAuth} 存在。`);
-      console.error(`[anet]   codex TUI 会停在登录选择页，且不会说明原因（#853）。`);
-      console.error(`[anet]   要用现有登录态，把凭据放进这个隔离 HOME；或先在该 HOME 下登录一次。`);
+    const hostCodexHome = join(homedir(), ".codex");
+    if (opts.inheritCodexHome) {
+      mkdirSync(opts.codexHome, { recursive: true, mode: 0o700 });
+      const plan = codexHomeStagePlan(hostCodexHome, opts.codexHome, (pth) => {
+        try { return { mtimeMs: statSync(pth).mtimeMs }; } catch { return null; }
+      }, join);
+      for (const step of plan) {
+        copyFileSync(step.src, step.dst);
+        try { chmodSync(step.dst, step.mode); } catch { /* best effort */ }
+        console.log(`[anet] staged ${step.name} into the node CODEX_HOME (${step.reason}) — ${step.because}`);
+      }
+    } else if (!existsSync(join(opts.codexHome, "auth.json"))) {
+      console.error(`[anet] ⚠ --no-inherit-codex-home, and ${join(opts.codexHome, "auth.json")} does not exist.`);
+      console.error(`[anet]   codex TUI 会停在登录选择页，且不会说明原因（#853）。先在该 HOME 下登录一次。`);
     }
-  } catch { /* 这只是提示，取不到就算了，绝不因此拦住启动 */ }
+  } catch (e) {
+    // Never refuse to launch over this: a node that starts and then reports its
+    // blocker is strictly more useful than one that will not start.
+    console.error(`[anet] ⚠ could not stage CODEX_HOME state: ${(e as Error).message}`);
+  }
 
   const { appsrv: appsrvSession, bridge: bridgeSession, tui: tuiSession } =
     copresenceTmuxSessions(displayName);
@@ -782,6 +847,20 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   if (dead.length > 0) {
     console.error(`[anet] ❌ 共存节点 ${displayName} 没起来 — 这些 tmux 会话已经不在了: ${dead.join(", ")}`);
     console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
+    process.exit(1);
+  }
+
+  // 就绪 has to mean "can take a task", not "three sessions exist". Both times
+  // a node was unusable on 2026-08-20 the ✅ had already been printed over a
+  // TUI parked on an interactive prompt.
+  const TUI_PAINT_TIMEOUT_MS = 40_000;
+  const tuiState = await codexTuiStateAfterRender(tuiSession, TUI_PAINT_TIMEOUT_MS);
+  if (tuiState !== "usable") {
+    console.error("");
+    console.error(tuiState === "not-painted"
+      ? describeCodexTuiNotPainted(displayName, tuiSession, TUI_PAINT_TIMEOUT_MS)
+      : describeCodexTuiBlocker(tuiState, displayName, tuiSession));
+    console.error(`[anet]   The sessions are left running so you can look; or: anet node stop ${shellQuote(displayName)}`);
     process.exit(1);
   }
 
@@ -2845,6 +2924,11 @@ Options:
                               grant is told so at start, instead of quietly
                               running read-only.
   --yes-danger-full-access    Required with the previous flag in non-TTY use
+  --no-inherit-codex-home     Do not stage the host's codex auth.json /
+                              version.json into the node's isolated CODEX_HOME.
+                              Without them the TUI parks on the sign-in page or
+                              the update prompt; use this only if you intend to
+                              sign in inside that HOME yourself.
 `);
 }
 
@@ -3117,6 +3201,9 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
     ...(runtime === "opencode-cli"
       ? { opencodeMode: opts.mode === "copresence" || opts.copresence === "true" ? "copresence" : "headless" }
       : {}),
+    // Same shape one runtime over: opting in at create is what makes every
+    // later `anet node start <name>` a single command.
+    ...codexCopresenceCreateFields(runtime, opts.copresence),
     ...(runtime === "claude-code-cli"
       ? { session: opts.session || randomUUID() }
       : opts.session && runtime === "grok-build-cli"
@@ -4325,6 +4412,12 @@ async function createCommand(idOverride?: string) {
 
   const netLabel = gc.network_name || gc.network_id || "global";
   console.log(`\n[anet] Created node "${id}" (${normalizeRuntime(profile)}) in network "${netLabel}"`);
+  // A headless codex-app-server node gets one line telling it how to become a
+  // shared TUI. Hint only; nothing about the node changes.
+  const codexHint = codexCopresenceCreateHint(
+    normalizeRuntime(profile), opts.copresence, nodeDisplayName(id, profile),
+  );
+  if (codexHint) console.log(codexHint);
   if (profile.token?.startsWith("ntok_")) {
     console.log(`[anet] Network token assigned (node-level)`);
   }
@@ -5428,6 +5521,7 @@ async function startCommand() {
       model: opts.model,
       port: opts.port ? Number(opts.port) : undefined,
       dangerFullAccess: opts["dangerously-allow-full-access"] === "true",
+      inheritCodexHome: opts["no-inherit-codex-home"] !== "true",
       yesDangerFullAccess: opts["yes-danger-full-access"] === "true",
       hub: profileHub,
       token: profileTok,
