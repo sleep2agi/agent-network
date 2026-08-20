@@ -12,6 +12,11 @@
  */
 
 import { readFileSync, existsSync, writeFileSync, chmodSync, realpathSync, renameSync } from "fs";
+import {
+  copresenceCapabilities as grokCopresenceCapabilities,
+  assertCopresenceSupported as assertGrokCopresenceSupported,
+  copresenceDowngradeNotice as grokCopresenceDowngradeNotice,
+} from "./runtime/grok-copresence/platform";
 import { dirname, join, isAbsolute, resolve } from "path";
 import { hostname as osHostname, homedir } from "os";
 import { createCommhubSdkMcpServer } from "./commhub-mcp";
@@ -500,16 +505,40 @@ const GROK_EXECUTION_MODE: "acp" | "cli" =
 // the PTY child are created. Existing credential stores are separately
 // validated/repaired by their boundary-specific writers.
 if (GROK_EXECUTION_MODE === "cli") process.umask(0o077);
-if (GROK_EXECUTION_MODE === "cli" && (process.platform !== "linux" || !existsSync("/proc/self/fd"))) {
-  console.error("[agent-node] grok-build-cli preview requires Linux with procfs mounted at /proc");
-  process.exit(1);
-}
 const rawGrokCopresence = opts["grok-copresence"]
   ?? fileConfig.grokCopresence
   ?? fileConfig.flags?.grokCopresence
   ?? process.env.ANET_GROK_COPRESENCE;
 const GROK_COPRESENCE = GROK_EXECUTION_MODE === "cli"
   && (rawGrokCopresence === true || rawGrokCopresence === "true" || rawGrokCopresence === "1");
+// 🔴 平台闸按【能力】判，不按「是不是 Linux」判。
+//    原来这里是一句 `process.platform !== "linux"` 就整体退出，它把
+//    「不支持」和「少了哪几样、少了会失去什么」压成了一格。
+//    实测（Windows 11 build 26200 / node v24.18.0 / grok 1.0.5）：
+//      ConPTY 可用、命名管道可用、AF_UNIX EACCES、/proc absent、grok 无 Windows 沙箱后端。
+//    ⇒ 共存（PTY + IPC）在 Windows 上可跑；headless 每轮要 `unshare --user`，仍限 Linux。
+if (GROK_EXECUTION_MODE === "cli") {
+  const caps = grokCopresenceCapabilities(process.platform, {
+    hasProcSelfFd: existsSync("/proc/self/fd"),
+  });
+  if (GROK_COPRESENCE) {
+    if (!caps.supported) {
+      console.error(
+        `[agent-node] grok-build-cli co-presence 无法在 ${caps.platform} 上运行，`
+        + `缺少：${caps.missingHard.join("；")}`,
+      );
+      process.exit(1);
+    }
+  } else if (process.platform !== "linux" || !caps.procfs) {
+    // headless grok-build-cli 每个 turn 在 unshare --user 下跑，没有非 Linux 等价物。
+    console.error(
+      "[agent-node] grok-build-cli headless 需要 Linux 与挂载于 /proc 的 procfs；"
+      + "在其它平台请改用共存模式（grokCopresence:true）或 grok-build-acp",
+    );
+    process.exit(1);
+  }
+}
+
 const RUNTIME_AGENT_LABEL = RUNTIME === "grok" && GROK_EXECUTION_MODE === "cli"
   ? "agent-node:grok-build-cli"
   : `agent-node:${RUNTIME}`;
@@ -578,6 +607,10 @@ if (GROK_COPRESENCE) {
     + `(process profile=${GROK_COPRESENCE_CAPABILITY_PROFILE}); the shared human TUI must receive `
     + "tasks only from trusted senders. MCP is CommHub-only; WebSearch and repo reads are available only in their explicit profiles.",
   );
+  // 降级必须【逐条】打出来：只说一句「较弱」，用户没法判断自己的任务能不能接受。
+  for (const line of grokCopresenceDowngradeNotice(grokCopresenceCapabilities(process.platform))) {
+    console.warn(`[agent-node] ${line}`);
+  }
 }
 // Default 50 turns. The old default of 5 was way too low — Claude Agent SDK
 // uses one turn per tool roundtrip, so any task that uses commhub MCP or
@@ -3609,7 +3642,7 @@ function resolveGrokCopresenceSocket(configured: unknown, fallback: string): str
     ? configured.trim()
     : fallback;
   const expanded = expandHome(value);
-  return expanded.startsWith("/") ? expanded : join(process.cwd(), expanded);
+  return isAbsolute(expanded) ? expanded : join(process.cwd(), expanded);
 }
 
 async function handleGrokCopresenceHumanPrompt(prompt: string): Promise<void> {
@@ -3633,9 +3666,9 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
   if (!GROK_COPRESENCE) {
     throw new Error("grok copresence runtime requested without grokCopresence:true");
   }
-  if (process.platform !== "linux") {
-    throw new Error("grok co-presence preview currently requires Linux PTY, /proc, and Unix sockets");
-  }
+  assertGrokCopresenceSupported(grokCopresenceCapabilities(process.platform, {
+    hasProcSelfFd: existsSync("/proc/self/fd"),
+  }));
   await retireCachedGrokCopresenceRuntime();
   if (grokCopresenceRuntimeSession) return grokCopresenceRuntimeSession;
   if (grokCopresenceRuntimeOpening) return grokCopresenceRuntimeOpening;
@@ -3856,12 +3889,24 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
       assertNoDiscoveredGrokHooks(inspection);
       // 1.0.5 新增面（skills/agents/plugins/marketplaces/lspServers/externalCompat/
       // managedSettings）在这里 fail-closed；0.2.93 缺这些字段时自动跳过对应格。
-      assertGrokCopresenceExternalSurfaces(inspection, auditRuntime.grokCliHome.home);
-      assertGrokCopresenceApprovalOwnership(
+      // 返回的是【已证明隔离不了】的外部来源（当前只有 Windows 的厂商技能/子代理）。
+      // 逐条原样打印：这是操作者唯一能看到"我接受了什么"的地方。
+      const unisolatedSources: string[] = [...assertGrokCopresenceExternalSurfaces(
+        inspection,
+        auditRuntime.grokCliHome.home,
+      )];
+      unisolatedSources.push(...assertGrokCopresenceApprovalOwnership(
         inspection,
         auditRuntime.grokCliHome.home,
         commhubMcpCommand,
-      );
+      ));
+      // 逐条原样打印：这是操作者唯一能看到"我接受了什么"的地方。
+      if (unisolatedSources.length) {
+        console.warn(
+          `[agent-node] 🔴 ${unisolatedSources.length} 项无法被隔离 HOME 挡住（未生效的规则也列出）：`,
+        );
+        for (const source of unisolatedSources) console.warn(`[agent-node]    · ${source}`);
+      }
       let doctor: string;
       try {
         doctor = execFileSync(grokBinary, ["mcp", "doctor", "commhub", "--json"], {
@@ -3920,7 +3965,12 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
         join(grokCwd, ".anet"),
         join(home, ".anet"),
         ...grokProjectPolicyPaths(grokCwd),
-        "/proc",
+        // 🔴 "/proc" 只在有 procfs 的平台上才是一个真实路径。
+        //    Windows 上 resolve("/proc") 会变成当前盘符下的 "D:\\proc"，
+        //    随后 realpathSync 直接 ENOENT ——实测就是这么红的。
+        ...(grokCopresenceCapabilities(process.platform, {
+          hasProcSelfFd: existsSync("/proc/self/fd"),
+        }).procfs ? ["/proc"] : []),
       ],
       flockBinary: process.env.FLOCK_BINARY || "flock",
       turnTimeoutMs: grokCopresenceTimeoutMs(),
@@ -4121,7 +4171,10 @@ async function processWithGrokCli(
   const stateGrokRoot = join(home, ".anet-grok");
   const stateGrokHome = join(stateGrokRoot, grokHomeKey);
   if (process.platform !== "linux") {
-    throw new Error("grok-build-cli secure turn supervision currently requires Linux user/PID namespaces");
+    throw new Error(
+      "grok-build-cli headless 的每轮隔离依赖 Linux user/PID 命名空间（unshare --user）；"
+      + "在其它平台请改用共存模式（grokCopresence:true）或 grok-build-acp",
+    );
   }
   const unshareBinary = process.env.UNSHARE_BINARY || "unshare";
   // 上面的 platform 判断是**必要不充分**的:是 Linux 不等于非特权 userns 可用。

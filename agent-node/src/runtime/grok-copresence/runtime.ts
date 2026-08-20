@@ -14,9 +14,20 @@ import {
   type Stats,
 } from "fs";
 import { dirname, isAbsolute, join, resolve } from "path";
+import {
+  assertCopresenceSupported,
+  copresenceCapabilities,
+  copresenceEndpointIsFilesystemPath,
+  copresenceIpcEndpoint,
+  type CopresenceCapabilities,
+  modeIsExactly,
+  modeIsOwnerOnly,
+} from "./platform";
+import { createServer as createNetServer } from "node:net";
 import { setTimeout as delay } from "timers/promises";
 import { StringDecoder } from "string_decoder";
 import { startGrokAttachServer, type GrokAttachServer } from "./attach";
+import { resolveGrokCommhubMcpCommand } from "../grok-build-cli-home";
 import { describeStuckPhase } from "./stuck-phase-alarm";
 import { describeBlockedKey } from "./blocked-key-name";
 import {
@@ -458,16 +469,23 @@ export function buildGrokCopresenceArgs(opts: BuildGrokCopresenceArgsOptions): s
   );
   for (const path of opts.protectedPaths ?? []) {
     if (path) {
-      if (!isAbsolute(path) || /[\0\r\n\\*?()[\]{},]/.test(path)) {
+      // 🔴 反斜杠在这条判据里被列为不安全字符（它在规则语法里可能当转义符），
+      //    而它恰恰是 Windows 的路径分隔符 —— 于是每一个 Windows 保护路径都被误拒。
+      //    解法不是把 `\\` 放行（那会真的引入转义歧义），而是**归一成正斜杠**：
+      //    Windows 接受 `C:/Users/...` 形式，归一之后这条判据一字不改地继续成立。
+      const rulePath = isAbsolute(path) && !copresenceEndpointIsFilesystemPath(copresenceCapabilities())
+        ? path.replace(/\\/g, "/")
+        : path;
+      if (!isAbsolute(path) || /[\0\r\n\\*?()[\]{},]/.test(rulePath)) {
         throw new Error("grok copresence protected path cannot be represented safely as a permission rule");
       }
       args.push(
-        "--deny", `Read(${path})`,
-        "--deny", `Read(${path}/**)`,
-        "--deny", `Grep(${path})`,
-        "--deny", `Grep(${path}/**)`,
-        "--deny", `Edit(${path})`,
-        "--deny", `Edit(${path}/**)`,
+        "--deny", `Read(${rulePath})`,
+        "--deny", `Read(${rulePath}/**)`,
+        "--deny", `Grep(${rulePath})`,
+        "--deny", `Grep(${rulePath}/**)`,
+        "--deny", `Edit(${rulePath})`,
+        "--deny", `Edit(${rulePath}/**)`,
       );
     }
   }
@@ -513,13 +531,15 @@ export function assertGrokCopresenceFeatures(help: string): void {
 export function assertGrokCopresenceExternalSurfaces(
   inspectionJson: string,
   isolatedGrokHome: string,
-): void {
+  caps: CopresenceCapabilities = copresenceCapabilities(),
+): readonly string[] {
   let inspection: Record<string, unknown>;
   try {
     inspection = JSON.parse(inspectionJson) as Record<string, unknown>;
   } catch {
     throw new Error("grok copresence inspect is not valid JSON");
   }
+  const unisolated: string[] = [];
   const allowedRoot = resolve(isolatedGrokHome);
   const insideHome = (p: string) => {
     const c = resolve(p);
@@ -585,12 +605,21 @@ export function assertGrokCopresenceExternalSurfaces(
       const path = typeof raw === "string" && isAbsolute(raw) ? raw : undefined;
       if (path === undefined) continue; // builtin / 类型标签 / 无磁盘来源
       if (!insideHome(path)) {
+        // 🔴 skills / agents 在 Windows 上【已证明隔离不了】（重定向全部家目录变量后
+        //    grok 仍读 C:\Users\<u>\.agents\skills\...）。不放松其它类别，也不假装
+        //    它被挡住了：逐条收集，由调用方在启动横幅原样打印。
+        //    平台一旦能隔离（Linux），同样的条目仍是硬拒。
+        if (!caps.homeIsolationHidesVendorSkills && (field === "skills" || field === "agents")) {
+          unisolated.push(`${field}: ${resolve(path)}`);
+          continue;
+        }
         throw new Error(
           `grok copresence refuses external ${field} source ${resolve(path)}; the fixed tool inventory must stay runtime-owned`,
         );
       }
     }
   }
+  return unisolated;
 }
 
 /**
@@ -667,7 +696,9 @@ export function assertGrokCopresenceApprovalOwnership(
   //    这个不一致由 #1004 落了生成侧、#1010 摘了审计侧造成（见 #1016）。
   //    默认值 "bun" 只为兼容尚未传参的调用点；生产路径必须显式传。
   expectedCommhubCommand = "bun",
-): void {
+  caps: CopresenceCapabilities = copresenceCapabilities(),
+): readonly string[] {
+  const unisolated: string[] = [];
   let inspection: Record<string, unknown>;
   try {
     const parsed = JSON.parse(inspectionJson) as unknown;
@@ -710,8 +741,24 @@ export function assertGrokCopresenceApprovalOwnership(
   if (!Number.isSafeInteger(record.loaded) || record.loaded !== 0 || record.sources.length !== 0) {
     throw new Error("grok copresence refuses preloaded permission rules; approvals must stay human-owned");
   }
-  if (!Array.isArray(record.skipped) || record.skipped.length !== 0) {
+  if (!Array.isArray(record.skipped)) {
     throw new Error("grok copresence inspect reports skipped or unknown permission rules");
+  }
+  if (record.skipped.length !== 0) {
+    // 🔴 `skipped` 是【grok 没能理解、因而没有生效】的规则；上面 `loaded !== 0`
+    //    与 `sources.length !== 0` 那两格仍然硬拒——真正被加载的规则一条都不许有。
+    //    而在隔离挡不住厂商配置的平台（Windows 实测：sources=[] loaded=0，
+    //    却仍读到 `permissions.allow: PowerShell(npm ls *)` / `unknown tool prefix`），
+    //    把"没生效的规则"也判成致命，等于把整个平台挡在门外，
+    //    却并没有拦住任何**已生效**的东西。⇒ 改为逐条列出。
+    if (caps.homeIsolationHidesVendorSkills) {
+      throw new Error("grok copresence inspect reports skipped or unknown permission rules");
+    }
+    for (const entry of record.skipped as any[]) {
+      const rule = entry && typeof entry === "object" ? entry.rule : entry;
+      const reason = entry && typeof entry === "object" ? entry.reason : "";
+      unisolated.push(`permission rule (未生效): ${String(rule)}${reason ? ` — ${reason}` : ""}`);
+    }
   }
   for (const field of ["mcpServerAllowlist", "marketplaceAllowlist"] as const) {
     if (!Array.isArray(record[field]) || record[field].length !== 0) {
@@ -765,6 +812,7 @@ export function assertGrokCopresenceApprovalOwnership(
   if (modeValues.some((value) => value.trim().toLowerCase() !== "default")) {
     throw new Error("grok copresence inspect reports an unknown or non-default permission mode");
   }
+  return unisolated;
 }
 
 export function grokSessionDirectory(grokHome: string, cwd: string, sessionId: string): string {
@@ -959,9 +1007,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
 
   async open(): Promise<void> {
     if (this.opened) return;
-    if (process.platform !== "linux") {
-      throw new Error("grok co-presence preview currently requires Linux PTY, /proc, and Unix sockets");
-    }
+    assertCopresenceSupported(copresenceCapabilities());
     assertSessionId(this.sessionId);
     assertSocketPath(this.leaderSocket, "leader");
     assertSocketPath(this.attachSocket, "attach");
@@ -1246,7 +1292,14 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     this.leaderOwnerNonce = randomUUID();
     this.tuiComposerReady = false;
     this.tuiReadinessBuffer = "";
-    const binary = this.opts.binary ?? "grok";
+    // 🔴 node-pty 在 Windows 上要【带扩展名的完整路径】：传裸名 `grok` 会得到
+    //    `Error: File not found:`（文件名是空的，报错本身也不说是哪个）。
+    //    复用 grok-build-cli-home 里那个已经处理了 PATHEXT 与 npm 真二进制的解析器，
+    //    保证 TUI 与 MCP 两条路径用同一套解析规则，不会一边能找到一边找不到。
+    const rawBinary = this.opts.binary ?? "grok";
+    const binary = copresenceEndpointIsFilesystemPath(copresenceCapabilities())
+      ? rawBinary
+      : resolveGrokCommhubMcpCommand(rawBinary, String(this.spawnEnv.PATH || process.env.PATH || ""));
     const args = buildGrokCopresenceArgs({
       cwd: this.opts.cwd,
       sessionId: this.sessionId,
@@ -3134,7 +3187,7 @@ class SafeJsonlTail {
     if (
       !stat.isFile()
       || (allowUnlinked ? stat.nlink > 1 : stat.nlink !== 1)
-      || (stat.mode & 0o077) !== 0
+      || !modeIsOwnerOnly(stat.mode)
       || (this.uid !== undefined && stat.uid !== this.uid)
     ) {
       throw jsonlTailBoundaryError(
@@ -3194,7 +3247,7 @@ class SafeJsonlTail {
       stat.isSymbolicLink()
       || !stat.isFile()
       || stat.nlink !== 1
-      || (stat.mode & 0o077) !== 0
+      || !modeIsOwnerOnly(stat.mode)
     ) {
       throw jsonlTailBoundaryError(
         safeJsonlTailFailureSubcode(this.source, "statNonRegular"),
@@ -3259,11 +3312,49 @@ class GrokUnsafeRecoveryApprovalError extends GrokCopresenceFailure {
   constructor(message: string) { super("approval_boundary", message); }
 }
 
+/**
+ * Windows 的生命周期锁：命名管道独占。
+ *
+ * 🔴 flock(1) 是外部二进制，Windows 上没有（实测 `spawn flock ENOENT`）。
+ *    用命名管道做互斥，它在两个性质上**优于**锁文件：
+ *      · 互斥由内核给：同名管道只能被一个进程创建，第二个 listen 直接 EADDRINUSE
+ *      · 无残留：进程崩了 OS 立刻回收管道名，不会留下"看起来被持有"的死锁文件
+ *    管道名由锁文件的【完整路径】哈希而来，与 Linux 侧一一对应、不会跨节点撞名。
+ */
+async function acquireNamedPipeLifetimeLock(path: string): Promise<LifetimeLock> {
+  const endpoint = copresenceIpcEndpoint(path, copresenceCapabilities());
+  const server = createNetServer();
+  server.on("connection", (socket) => { try { socket.destroy(); } catch {} });
+  await new Promise<void>((resolveListen, rejectListen) => {
+    const onError = (error: unknown) => {
+      server.removeListener("listening", onListening);
+      rejectListen(new Error(
+        `copresence lock is already held or unavailable (${endpoint}): ${errorMessage(error)}`,
+      ));
+    };
+    const onListening = () => { server.removeListener("error", onError); resolveListen(); };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(endpoint);
+  });
+  let released = false;
+  return {
+    async release() {
+      if (released) return;
+      released = true;
+      await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+    },
+  };
+}
+
 async function acquireLifetimeLock(
   path: string,
   flockBinary: string,
   holderParentEnv: NodeJS.ProcessEnv,
 ): Promise<LifetimeLock> {
+  if (!copresenceEndpointIsFilesystemPath(copresenceCapabilities())) {
+    return acquireNamedPipeLifetimeLock(path);
+  }
   const fd = openSync(path, constants.O_RDWR | constants.O_CREAT | (constants.O_NOFOLLOW || 0), 0o600);
   let expectedDev = 0;
   let expectedIno = 0;
@@ -3391,10 +3482,13 @@ function ensurePrivateRuntimeDirectory(path: string): void {
   }
   const uid = process.getuid?.();
   if (uid !== undefined && stat.uid !== uid) throw new Error(`Grok copresence runtime directory owner mismatch: ${path}`);
-  if ((stat.mode & 0o077) !== 0) throw new Error(`Grok copresence runtime directory must be mode 0700: ${path}`);
+  if (!modeIsOwnerOnly(stat.mode)) throw new Error(`Grok copresence runtime directory must be mode 0700: ${path}`);
 }
 
 function assertAbsentSocketPath(path: string, label: string): void {
+  // 命名管道不落在文件系统里，lstat 恒 ENOENT —— 这个检查在 Windows 上零分辨力，
+  // 与其留一个恒真的断言（看起来在把关、实际不判事），不如明确跳过。
+  if (!copresenceEndpointIsFilesystemPath(copresenceCapabilities())) return;
   try {
     const stat = lstatSync(path);
     if (stat.isSymbolicLink()) throw new Error(`${label} socket may not be a symlink: ${path}`);
@@ -3442,6 +3536,9 @@ async function waitForOwnedUnixSocket(path: string, timeoutMs: number): Promise<
 
 function assertSocketPath(path: string, label: string): void {
   if (!isAbsolute(path) || resolve(path) !== path) throw new Error(`${label} socket path must be absolute and normalized`);
+  // sun_path 的 108 字节上限是 Unix socket 独有的；命名管道没有这个限制，
+  // 在 Windows 上照搬会把合法路径误拒（用户目录一深就超）。
+  if (!copresenceEndpointIsFilesystemPath(copresenceCapabilities())) return;
   if (Buffer.byteLength(path) > UNIX_SOCKET_PATH_MAX_BYTES) throw new Error(`${label} socket path is too long for a Unix socket`);
 }
 

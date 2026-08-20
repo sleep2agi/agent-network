@@ -1,3 +1,4 @@
+import { posix as posixPath, win32 as win32Path } from "path";
 /**
  * Environment boundary for every Grok CLI process.
  *
@@ -24,8 +25,39 @@ export const GROK_CHILD_INHERITED_ENV_KEYS = [
   "NO_COLOR",
 ] as const;
 
+/**
+ * Windows 上**运行任何子进程都必需**的系统变量。
+ *
+ * 🔴 这个边界刻意是精确白名单（见文件头）。但那份名单是照 POSIX 写的：
+ *    没有 SystemRoot 的 Windows 子进程会直接挂死 —— 实测 grok 的
+ *    `mcp doctor commhub` 从 `os error 193` 变成 **ETIMEDOUT**，
+ *    正是缺这几个变量导致 MCP server 起不来。
+ *    这些都是**系统路径与处理器信息，不含任何凭据**；仍逐个列出、不做通配。
+ */
+export const GROK_CHILD_WINDOWS_INHERITED_ENV_KEYS = [
+  "SystemRoot",
+  "SystemDrive",
+  "windir",
+  "ComSpec",
+  "PATHEXT",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "ProgramData",
+  "ProgramFiles",
+  "NUMBER_OF_PROCESSORS",
+  "PROCESSOR_ARCHITECTURE",
+] as const;
+
 export const GROK_CHILD_CONTROLLED_ENV_KEYS = [
   "HOME",
+  // 🔴 Windows 用 USERPROFILE / HOMEDRIVE+HOMEPATH 解析家目录，**不看 HOME**。
+  //    只设 HOME 的话隔离 home 在 Windows 上等于没设 —— 实测被
+  //    assertGrokCopresenceExternalSurfaces 当场抓到：
+  //      refuses external skills source C:\\Users\\<u>\\.agents\\skills\\...\\SKILL.md
+  //    也就是说 grok 仍在读真实用户目录下的 skills。
+  "USERPROFILE",
+  "HOMEDRIVE",
+  "HOMEPATH",
   "PWD",
   "GROK_HOME",
   "GROK_AUTH_PATH",
@@ -90,6 +122,7 @@ export const GROK_PTY_CONTROLLED_ENV_KEYS = [
 
 const GROK_CHILD_ENV_KEYS = new Set<string>([
   ...GROK_CHILD_INHERITED_ENV_KEYS,
+  ...GROK_CHILD_WINDOWS_INHERITED_ENV_KEYS,
   ...GROK_CHILD_CONTROLLED_ENV_KEYS,
 ]);
 
@@ -103,20 +136,45 @@ export interface BuildGrokChildEnvOptions {
   oidcClientId?: string;
   expectedParentPid?: number;
   defaultSelectedPermission?: "allow_once" | "always_allow_all_sessions";
+  /** 注入平台以便在 Linux CI 上覆盖 Windows 分支。缺省取 process.platform。 */
+  platform?: NodeJS.Platform;
 }
 
 /** Construct a Grok child environment from an empty object. */
 export function buildGrokChildEnv(opts: BuildGrokChildEnvOptions): NodeJS.ProcessEnv {
-  if (!opts.cwd || opts.cwd.includes("\0") || !opts.cwd.startsWith("/")) {
+  // 🔴 原来写的是 `startsWith("/")` —— POSIX-only 的绝对路径判据，
+  //    Windows 的 `D:\\x` 不满足它，一个完全合法的 cwd 会被判成"不是绝对路径"。
+  //    而 `path.isAbsolute` 也不够：它按【当前运行平台】判，
+  //    于是在 Linux CI 上给它一个 Windows 路径会答 false ——
+  //    这一条是被本文件的测试红出来的，不是想出来的。
+  //    ⇒ 显式按目标平台选约定，判据自己说清它在用哪一套。
+  const targetPlatform = opts.platform ?? process.platform;
+  const isAbsoluteForTarget = targetPlatform === "win32"
+    ? win32Path.isAbsolute
+    : posixPath.isAbsolute;
+  if (!opts.cwd || opts.cwd.includes("\0") || !isAbsoluteForTarget(opts.cwd)) {
     throw new Error("Grok child environment requires an absolute cwd");
   }
   const env: NodeJS.ProcessEnv = {};
-  for (const key of GROK_CHILD_INHERITED_ENV_KEYS) {
+  const inherited = targetPlatform === "win32"
+    ? [...GROK_CHILD_INHERITED_ENV_KEYS, ...GROK_CHILD_WINDOWS_INHERITED_ENV_KEYS]
+    : GROK_CHILD_INHERITED_ENV_KEYS;
+  for (const key of inherited) {
     const value = opts.parentEnv[key];
     if (value !== undefined && value !== "") env[key] = value;
   }
 
   env.HOME = opts.home;
+  if (targetPlatform === "win32") {
+    // 三个都要设：Node 的 os.homedir() 在 Windows 上依次看 USERPROFILE、
+    // 然后 HOMEDRIVE+HOMEPATH；漏掉任何一个都会让隔离在某条路径上失效。
+    env.USERPROFILE = opts.home;
+    const drive = opts.home.length >= 2 && opts.home[1] === ":" ? opts.home.slice(0, 2) : "";
+    if (drive) {
+      env.HOMEDRIVE = drive;
+      env.HOMEPATH = opts.home.slice(2) || "\\";
+    }
+  }
   // dash exports PWD when the headless launcher enters /bin/sh. Seed the
   // exact expected value so that wrapper behavior cannot silently widen the
   // final child environment.
@@ -160,8 +218,17 @@ export function buildGrokChildEnv(opts: BuildGrokChildEnvOptions): NodeJS.Proces
 }
 
 /** Construct a helper-process environment from an empty object. */
-export function buildGrokHelperEnv(parentEnv: NodeJS.ProcessEnv): Record<string, string> {
+export function buildGrokHelperEnv(
+  parentEnv: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
+): Record<string, string> {
   const env: Record<string, string> = {};
+  if (platform === "win32") {
+    for (const key of GROK_CHILD_WINDOWS_INHERITED_ENV_KEYS) {
+      const value = parentEnv[key];
+      if (value !== undefined && value !== "") env[key] = value;
+    }
+  }
   for (const key of GROK_HELPER_INHERITED_ENV_KEYS) {
     const value = parentEnv[key];
     if (value !== undefined && value !== "") env[key] = value;

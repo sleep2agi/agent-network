@@ -9,6 +9,7 @@ import {
 } from "fs";
 import { dirname, join, resolve } from "path";
 import { readPinnedGrokCopresenceCapabilityProfile } from "./profile-selection";
+import { modeIsExactly, modeIsOwnerOnly } from "./platform";
 
 /**
  * Pinned Grok 0.2.93 ignores `--tools` in its interactive TUI.  The preview
@@ -107,7 +108,7 @@ export function assertGrokCopresenceAgentProfile(profilePath: string, grokHome: 
     before.isSymbolicLink()
     || !before.isFile()
     || before.nlink !== 1
-    || (before.mode & 0o777) !== 0o600
+    || !modeIsExactly(before.mode, 0o600)
     || (uid !== undefined && before.uid !== uid)
   ) {
     throw new Error("grok copresence agent profile is not an owner-only regular file");
@@ -120,7 +121,7 @@ export function assertGrokCopresenceAgentProfile(profilePath: string, grokHome: 
       || opened.nlink !== 1
       || opened.dev !== before.dev
       || opened.ino !== before.ino
-      || (opened.mode & 0o777) !== 0o600
+      || !modeIsExactly(opened.mode, 0o600)
       || (uid !== undefined && opened.uid !== uid)
       || readFileSync(fd, "utf8") !== renderGrokCopresenceAgentProfile()
     ) {
