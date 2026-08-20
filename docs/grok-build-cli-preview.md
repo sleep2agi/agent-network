@@ -41,10 +41,13 @@ the explicit preview policy; it remains a blocker to claiming production or
 
 - Linux with procfs mounted at `/proc` (including `/proc/self/fd`).
 - `@sleep2agi/agent-network` from the `preview` channel once the candidate is published.
-- The exact Grok CLI build `grok 0.2.93 (f00f96316d)`. The co-presence runtime also accepts the
-  ` [stable]` suffix on that same build — see
-  [`runtime.ts`](../agent-node/src/runtime/grok-copresence/runtime.ts) —— 搜 `requires exactly grok`.
+- 一个**已黑盒验证过的** Grok CLI build。当前两个：`grok 0.2.93 (f00f96316d)` 与
+  `grok 1.0.5 (5115b46bc9)`（两者的 ` [stable]` 后缀形式同样接受）——
+  见 [`runtime.ts`](../agent-node/src/runtime/grok-copresence/runtime.ts) —— 搜 `requires a verified grok build`.
   (Symbol anchor, not a line number: #857 replaced 13 line pins here after finding **13 of 13 had drifted**.)
+  🔴 这里**不是版本区间比较**：新 build 会改 PTY / 审批菜单 / Leader 契约
+  （1.0.5 就把 folder trust 从「MCP + hooks」扩成「MCP + LSP + hooks 且级联子目录」，
+  并新增了 13 格跨厂商 `externalCompat`）。加一个版本 = 先跑验证再往白名单加一行。
 
   🔴 **The unversioned installer does not give you this build.** `https://x.ai/cli/stable` returned
   `1.0.4` when #876 was filed and `1.0.5` on 2026-08-18 — it keeps moving, and the pin does not.
@@ -264,14 +267,22 @@ fallback if the native TUI path fails.
 
 ## Common errors
 
-`grok copresence requires exactly grok 0.2.93 (f00f96316d)` means the installed Grok binary is not the
-captured build — most often because the unversioned installer was used and it now ships a much newer
-stable. Install the pinned build; do not bypass the check:
+`grok copresence requires a verified grok build` 表示装着的 Grok 二进制不在已验证白名单里。
+报错本身会列出当前已验证的 build。装其中一个；**不要绕过这个检查**：
 
 ```bash
 curl -fsSL https://x.ai/cli/install.sh | bash -s 0.2.93
 grok --version   # grok 0.2.93 (f00f96316d)
 ```
+
+### 1.0.5 与 0.2.93 的一处行为差异（会影响你读日志）
+
+1.0.5 **不会**自动拉起 Leader 进程：厂商文档 `18-sandbox.md` 写明，只要请求了
+非 `off` 的 sandbox profile，agent 就在**进程内**跑、并且**拒绝 leader**
+（"still refuses the leader so tools are not delegated elsewhere"）。而共存永远请求
+sandbox，所以在 1.0.5 上 `~/.grok/leader.sock` 与 `--leader-socket` 指向的路径都不会出现
+socket —— 这是**预期**，不是故障。运行时按 build 记录了这一能力，并对相反情况
+fail-closed：声明无 Leader 的 build 上真出现了 socket 会直接报错。
 
 `Node ... uses legacy headless grok-build-cli mode` means the profile was created with `--grok-headless`. Create a new co-presence profile explicitly rather than editing socket/session fields by hand.
 
