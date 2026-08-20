@@ -406,7 +406,9 @@ export function buildGrokCopresenceArgs(opts: BuildGrokCopresenceArgsOptions): s
     // Hidden in 0.2.93 help but required by the captured live TUI path:
     // --leader-socket alone merely names a socket and does not join/spawn the
     // shared backend. The exact binary pin below is the compatibility gate.
-    "--leader",
+    // 🔴 只在会自动起 Leader 的 build 上请求它：1.0.5 请求 sandbox 时硬拒 leader 模式，
+    //    再传 --leader 只会让它在启动时打一行「已拒绝」的提示，徒增噪音。
+    ...(grokBuildAutoLeader(opts.grokVersion) ? ["--leader"] : []),
     "--leader-socket", opts.leaderSocket,
     "--cwd", opts.cwd,
     opts.resume ? "--resume" : "--session-id", opts.sessionId,
@@ -599,36 +601,53 @@ export function assertGrokCopresenceExternalSurfaces(
  *    externalCompat）。区间比较会让一个没验过的 build 自动通过。
  *    加一个版本 = 先跑验证、再往这个集合里加一行，而不是放宽比较符。
  */
-export const GROK_COPRESENCE_VERIFIED_BUILDS: ReadonlySet<string> = new Set([
-  "grok 0.2.93 (f00f96316d)",
-  "grok 0.2.93 (f00f96316d) [stable]",
-  // 🔴 2026-08-20 验证 grok 1.0.5 (5115b46bc9)：**不予收录**，理由是实测的，不是保守。
-  //    过了的格：
-  //      · `grok inspect --json` 仍提供 permissions.{sources,loaded,skipped,
-  //        mcpServerAllowlist,marketplaceAllowlist} 与 mcpServers/hooks，隔离 HOME 下全为空
-  //      · 11 条 flag 全部仍被接受（--no-memory / --no-auto-update / --leader 只是被隐藏出 help）
-  //      · 13 格 externalCompat 可由 GROK_<VENDOR>_<SURFACE>_ENABLED 全关（实测 13/13 → 0/13）
-  //      · TUI 能起来并就绪（实测日志 "TUI input ready generation=1"）
-  //    🔴 没过的那一格 —— 而它是共存的地基：
-  //      **1.0.5 的交互式 TUI 不再自动拉起 Leader。**
-  //      实测三组，都没有 socket 出现：
-  //        ① 共存流程等 10s  ⇒ "did not create leader socket within 10000ms"
-  //        ② 同上放宽到 60s ⇒ 同样没有（所以不是慢，是不建）
-  //        ③ 对照组：一个【普通已认证】的 `grok` TUI 跑 25s ⇒ ~/.grok 下无任何新 .sock，
-  //           `grok leader list` 仍只有一条 5 天前的 Unreachable 记录
-  //      ⇒ attach 机制（anet grok attach）建立在「TUI 自动起 Leader、我们再绑定」之上，
-  //        这个前提在 1.0.5 上不成立。收录它只会把失败从「版本门」推迟到「等 socket 超时」，
-  //        而后者的报错完全指不出真正原因。
-  //    ⇒ 收录 1.0.5 的前置条件：先让共存不依赖「TUI 自动起 Leader」，或找到 1.0.5 下
-  //      显式拉起 Leader 的方式（`grok leader` 子命令只有 list/info/kill，没有 start）。
+export interface GrokVerifiedBuild {
+  /**
+   * 该 build 的交互式 TUI 是否会**自动拉起一个 Leader 进程**。
+   *
+   * 🔴 0.2.93：会，而且 PTY 断开后仍故意存活（见 leader-lifecycle 注释）
+   *    ⇒ 必须等它出现并按代绑定，否则恢复代会与陈旧 Leader 抢同一个 socket。
+   * 🔴 1.0.5：**不会** —— 厂商文档 18-sandbox.md 原文：
+   *      "When a non-`off` sandbox profile is requested … The agent runs
+   *       in-process, not through the shared leader … but still refuses the
+   *       leader so tools are not delegated elsewhere"
+   *    而共存永远请求 sandbox（deny 列表靠它）⇒ 这个 build 上永远没有 Leader。
+   *    实测三组佐证：等 10s / 等 60s / 一个普通已认证 TUI 跑 25s —— 都没有 socket。
+   *    ⇒ 既然工具不外派，"Leader 被劫持"这个危险不存在，等待与绑定都应跳过；
+   *      但要**反向 fail-closed**：不该出现却出现了，说明这个 build 的假设错了。
+   */
+  readonly autoLeader: boolean;
+}
+
+export const GROK_COPRESENCE_VERIFIED_BUILDS: ReadonlyMap<string, GrokVerifiedBuild> = new Map([
+  ["grok 0.2.93 (f00f96316d)", { autoLeader: true }],
+  ["grok 0.2.93 (f00f96316d) [stable]", { autoLeader: true }],
+  // 2026-08-20 验证 grok 1.0.5 (5115b46bc9)：
+  //   · `grok inspect --json` 仍提供审计要的全部字段，隔离 HOME 下全为空
+  //   · 11 条 flag 全部仍被接受（--no-memory / --no-auto-update / --leader 只是隐藏出 help）
+  //   · 13 格 externalCompat 可由 GROK_<VENDOR>_<SURFACE>_ENABLED 全关（13/13 → 0/13）
+  //   · TUI 能起来并就绪（实测日志 "TUI input ready generation=1"）
+  //   · Leader：sandbox 与 leader 模式在 1.0.5 上互斥 ⇒ autoLeader=false（见上）
+  ["grok 1.0.5 (5115b46bc9)", { autoLeader: false }],
+  ["grok 1.0.5 (5115b46bc9) [stable]", { autoLeader: false }],
 ]);
+
+/** 该 build 的已验证能力；未验证的 build 返回 undefined。 */
+export function grokVerifiedBuild(version?: string): GrokVerifiedBuild | undefined {
+  return GROK_COPRESENCE_VERIFIED_BUILDS.get((version ?? "").trim());
+}
+
+/** 缺省（未传版本）按 0.2.93 那套「有 Leader」处理，保持既有行为。 */
+export function grokBuildAutoLeader(version?: string): boolean {
+  return grokVerifiedBuild(version)?.autoLeader ?? true;
+}
 
 export function assertGrokCopresenceVersion(version: string): void {
   const observed = version.trim();
   if (!GROK_COPRESENCE_VERIFIED_BUILDS.has(observed)) {
     throw new Error(
       `grok copresence requires a verified grok build; received ${observed || "empty version"}. `
-      + `Verified: ${[...GROK_COPRESENCE_VERIFIED_BUILDS].join(", ")}`,
+      + `Verified: ${[...GROK_COPRESENCE_VERIFIED_BUILDS.keys()].join(", ")}`,
     );
   }
 }
@@ -1017,8 +1036,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         assertSafePersistedGrokSessionForResume(sessionDir);
       }
       await this.spawnTui(resume);
-      await waitForOwnedUnixSocket(this.leaderSocket, grokLeaderSocketTimeoutMs());
-      await this.bindSpawnedLeader();
+      await this.settleLeader();
 
       // New sessions start at byte zero. Resume tails were already armed at
       // the pre-spawn EOF above, so startup writes remain unread and visible.
@@ -1354,9 +1372,8 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         // this recovery promise. Even an already-exited recovery TUI can have
         // left its auto-Leader alive, so liveness is checked only after that
         // Leader has been captured by its exact generation marker.
-        await waitForOwnedUnixSocket(this.leaderSocket, grokLeaderSocketTimeoutMs());
         this.assertOwnedTuiGeneration(attemptedTui, "leader socket");
-        await this.bindSpawnedLeader();
+        await this.settleLeader();
         this.assertLiveTuiGeneration(attemptedTui, "leader bind");
         // close() owns all termination once closing is latched. It awaits this
         // outer recovery promise, then uses the still-bound generation handle;
@@ -1570,6 +1587,31 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       tuiProcessId,
     });
     this.pendingTuiProcessIds.delete(tuiProcessId);
+  }
+
+  /**
+   * Leader 就绪 / 归属。没有自动 Leader 的 build（1.0.5：sandbox 与 leader 互斥）
+   * 跳过等待与绑定 —— 但**反向 fail-closed**：那种 build 上若真出现了 socket，
+   * 说明「工具不外派」这个前提不成立，必须红，而不是顺手把它绑上。
+   */
+  private async settleLeader(): Promise<void> {
+    if (grokBuildAutoLeader(this.opts.grokVersion)) {
+      await waitForOwnedUnixSocket(this.leaderSocket, grokLeaderSocketTimeoutMs());
+      await this.bindSpawnedLeader();
+      return;
+    }
+    try {
+      lstatSync(this.leaderSocket);
+    } catch (error) {
+      if (isErrno(error, "ENOENT")) return; // 预期：这个 build 不会建
+      throw error;
+    }
+    this.retainLocksForUnconfirmedPty = true;
+    throw new GrokCopresenceFailure(
+      "leader_lifecycle",
+      `this grok build was verified as leaderless yet created ${this.leaderSocket}; `
+      + "tool calls may be delegated outside the sandboxed process",
+    );
   }
 
   private async bindSpawnedLeader(): Promise<void> {

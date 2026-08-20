@@ -28,6 +28,8 @@ import {
 import {
   assertGrokCopresenceApprovalOwnership,
   assertGrokCopresenceExternalSurfaces,
+  grokVerifiedBuild,
+  grokBuildAutoLeader,
   assertGrokCopresenceVersion,
   buildGrokCopresenceArgs,
   formatNetworkTuiInput,
@@ -211,10 +213,8 @@ describe("Grok copresence launch and injection policy", () => {
     // 白名单，不是区间比较：区间会让没验过的新 build 自动通过。
     expect(() => assertGrokCopresenceVersion("grok 0.2.93 (f00f96316d)")).not.toThrow();
     expect(() => assertGrokCopresenceVersion("grok 0.2.93 (f00f96316d) [stable]")).not.toThrow();
-    // 🔴 1.0.5 【故意】不在列：它的 TUI 不再自动拉起 Leader（三组实测见 runtime.ts 注释）。
-    //    这条断言的意义是「验证没过就不许进」，而不是「新版本要拦一下」。
-    expect(() => assertGrokCopresenceVersion("grok 1.0.5 (5115b46bc9)"))
-      .toThrow("requires a verified grok build");
+    expect(() => assertGrokCopresenceVersion("grok 1.0.5 (5115b46bc9)")).not.toThrow();
+    expect(() => assertGrokCopresenceVersion("grok 1.0.5 (5115b46bc9) [stable]")).not.toThrow();
     // 更高版本号【不】自动通过 —— 白名单不是区间比较。
     expect(() => assertGrokCopresenceVersion("grok 1.0.6 (unverified)"))
       .toThrow("requires a verified grok build");
@@ -226,6 +226,7 @@ describe("Grok copresence launch and injection policy", () => {
     expect(() => assertGrokCopresenceVersion("")).toThrow("empty version");
     // 报错必须说出已验证集合，否则用户不知道该装哪个。
     expect(() => assertGrokCopresenceVersion("grok 9.9.9 (x)")).toThrow("grok 0.2.93 (f00f96316d)");
+    expect(() => assertGrokCopresenceVersion("grok 9.9.9 (x)")).toThrow("grok 1.0.5 (5115b46bc9)");
   });
 
   test("fail-closes on the discovery surfaces grok 1.0.5 added", () => {
@@ -302,6 +303,30 @@ describe("Grok copresence launch and injection policy", () => {
         expect(args).toContain(flag);
       }
     }
+    // 🔴 1.0.5 请求 sandbox 时硬拒 leader 模式（厂商文档 18-sandbox.md），
+    //    再传 --leader 只会让它在启动时打一行「已拒绝」提示。其余固定清单一格不能少。
+    const leaderless = buildGrokCopresenceArgs({ ...base, grokVersion: "grok 1.0.5 (5115b46bc9)" });
+    expect(leaderless).not.toContain("--leader");
+    expect(leaderless).toContain("--leader-socket");
+    for (const flag of ["--no-memory", "--no-auto-update", "--no-subagents", "--sandbox", "--agent"]) {
+      expect(leaderless).toContain(flag);
+    }
+  });
+
+  test("records per-build Leader behaviour instead of assuming every build has one", () => {
+    // 0.2.93 的 TUI 会自动留下一个 Leader（断开后仍存活）⇒ 必须等待并按代绑定。
+    expect(grokBuildAutoLeader("grok 0.2.93 (f00f96316d)")).toBe(true);
+    expect(grokBuildAutoLeader("grok 0.2.93 (f00f96316d) [stable]")).toBe(true);
+    // 🔴 1.0.5 + sandbox ⇒ 永远没有 Leader。实测三组：等 10s / 等 60s /
+    //    一个普通已认证 TUI 跑 25s —— 都没有 socket。
+    expect(grokBuildAutoLeader("grok 1.0.5 (5115b46bc9)")).toBe(false);
+    expect(grokBuildAutoLeader("grok 1.0.5 (5115b46bc9) [stable]")).toBe(false);
+    // 未知 build 落到「按有 Leader 处理」这一侧：那是更严的一侧（会等、会绑），
+    // 而不是直接跳过检查。fail-closed 的方向由「这道门在防什么」决定。
+    expect(grokBuildAutoLeader("grok 9.9.9 (unknown)")).toBe(true);
+    expect(grokBuildAutoLeader(undefined)).toBe(true);
+    expect(grokVerifiedBuild("grok 9.9.9 (unknown)")).toBeUndefined();
+    expect(grokVerifiedBuild("grok 1.0.5 (5115b46bc9)")).toEqual({ autoLeader: false });
   });
 
   test("pins one TUI-effective commhub-only agent profile and hard-denies fallback routes", () => {
