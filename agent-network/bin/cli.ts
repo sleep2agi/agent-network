@@ -176,6 +176,24 @@ function shellQuote(value: string): string { return `'${value.replace(/'/g, `'\\
  *    So the exact form for a pane is the coordinate, with the session matched by
  *    string equality in our own code rather than by tmux's prefix rules.
  */
+/**
+ * Will `anet hub start` be able to run?
+ *
+ * 🔴 The authority is the guard inside `hub start` itself:
+ *       if (!commandExists("bunx"))
+ *    Tightened from OR in #766 — the only spawn point is `spawn("bunx", …)`, so
+ *    bun alone was never enough. Anything that PREDICTS that guard must route
+ *    through here rather than restating the condition: three restatements had
+ *    already drifted to the old OR and told bun-only machines they were fine.
+ *
+ *    Deliberately not used by the guard itself. tests/test766-bunx-preflight
+ *    pins that literal and mutates it to prove the gate is live; a helper call
+ *    there would make the guard invisible to its own test.
+ */
+function bunxAvailable(): boolean {
+  return commandExists("bunx");
+}
+
 function tmuxPaneTarget(sessionName: string): string | null {
   try {
     const out = execFileSync("tmux", ["list-panes", "-a", "-F", PANE_LIST_FORMAT], {
@@ -2062,7 +2080,7 @@ function detectInstalledPackages() {
     // 实测:容器里有 bun 无 bunx,自报通过、hub 起不来,报「找到了 bun,但没有 bunx」。
     bun: (() => {
       // bunx is the requirement; bun is only how we get a version to show.
-      if (!commandExists("bunx")) {
+      if (!bunxAvailable()) {
         return { name: "bunx", displayName: "Bun (bunx)", version: null, state: "not-installed" as VersionState };
       }
       const direct = detectCommandVersion("bun", "Bun");
@@ -9163,7 +9181,7 @@ function selfUpgradeDetached(channel: ReleaseChannel): never {
   // 同源判据:hub start 的守卫是 `if (!commandExists("bunx"))` —— 只认 bunx
   // (#766 从 OR 收紧)。这里原本写的是 OR,是那次收紧漏掉的第三份副本:
   // bun-only 的机器不会收到提示,然后在 hub start 处撞上去。
-  if (!commandExists("bunx")) {
+  if (!bunxAvailable()) {
     // #214 P2.7 — anet hub start needs bun (commhub-server is bun-only).
     // Surface this now so users don't hit it on next `anet hub start`.
     console.log(`[anet]   note: bunx is not on PATH; \`anet hub start\` will fail without it.`);
