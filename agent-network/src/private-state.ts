@@ -14,6 +14,7 @@ import {
 import { basename, dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { fchmodIfPosix } from "./posix-modes";
 
 function restrictWindowsAcl(path: string, directory: boolean): void {
   const sid = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
@@ -53,7 +54,7 @@ export function ensurePrivateDirectory(path: string): void {
     return;
   }
   const fd = openOwned(path, constants.O_RDONLY | (constants.O_DIRECTORY || 0), "directory");
-  try { fchmodSync(fd, 0o700); } finally { closeSync(fd); }
+  try { fchmodIfPosix(fd, 0o700); } finally { closeSync(fd); }
 }
 
 /**
@@ -73,7 +74,7 @@ export function atomicWritePrivateFile(path: string, body: string): void {
       0o600,
     );
     writeFileSync(fd, body, "utf8");
-    if (process.platform !== "win32") fchmodSync(fd, 0o600);
+    fchmodIfPosix(fd, 0o600);
     fsyncSync(fd);
     const stat = fstatSync(fd);
     const uid = process.getuid?.();
@@ -119,5 +120,5 @@ export function repairPrivateFilePermissions(path: string): void {
     return;
   }
   const fd = openOwned(path, constants.O_RDONLY, "file");
-  try { fchmodSync(fd, 0o600); } finally { closeSync(fd); }
+  try { fchmodIfPosix(fd, 0o600); } finally { closeSync(fd); }
 }
