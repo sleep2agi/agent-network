@@ -58,7 +58,7 @@ Codex thread 的工作目录继承自 **app-server 进程启动时的 cwd**，�
 交互菜单里的 `codex-cli` 就是共存模式：选中后直接写入 `codexCopresence: true`，不再要求第二次选择。`codex-sdk` 是后台无头 Codex 节点。脚本可使用等价命令 `anet node create codex-human --runtime codex-cli`；旧的 `--runtime codex-app-server --copresence` 继续兼容。
 
 ::: warning 发布渠道
-这个交互选项已在 `main` 通过真实 PTY 测试，将随 **preview.42 或更高版本**发布。当前 npm `2.3.0-preview.41` 尚未包含 `codex-cli` 别名；该版本请暂用 `anet node create codex-human --runtime codex-app-server --copresence`。
+这个交互选项已在 `main` 通过真实 PTY 测试，并已随 **preview.42** 发布。安装或升级 preview 后，即可在交互菜单中直接选择 `codex-cli`。
 :::
 
 启动会创建三个带同一身份标记的 tmux session：

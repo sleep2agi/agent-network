@@ -58,7 +58,7 @@ A Codex thread inherits its working directory from the **app-server process cwd*
 `codex-cli` in the interactive runtime menu means co-presence mode: selecting it writes `codexCopresence: true` immediately, with no second question. `codex-sdk` is the headless Codex worker. Scripts can use the equivalent `anet node create codex-human --runtime codex-cli`; the older `--runtime codex-app-server --copresence` form remains compatible.
 
 ::: warning Release channel
-This interactive choice has passed a real PTY test on `main` and will ship in **preview.42 or later**. The current npm `2.3.0-preview.41` does not yet include the `codex-cli` alias; on that version, use `anet node create codex-human --runtime codex-app-server --copresence` for now.
+This interactive choice has passed a real PTY test on `main` and ships in **preview.42**. After installing or upgrading to preview, you can select `codex-cli` directly from the interactive menu.
 :::
 
 Startup creates three tmux sessions carrying one shared identity marker:
