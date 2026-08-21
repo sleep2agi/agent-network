@@ -65,10 +65,8 @@ describe.skipIf(process.platform !== "win32")("Windows native process/ACL smoke"
     const dir = join(root, "credentials");
     mkdirSync(dir);
     ensureWindowsPrivateDirectory(dir);
-    const quoted = dir.replace(/'/g, "''");
-    const output = Bun.spawnSync(["powershell.exe", "-NoProfile", "-Command",
-      `(Get-Acl -LiteralPath '${quoted}').AreAccessRulesProtected`], { stdout: "pipe" });
+    const output = Bun.spawnSync(["icacls.exe", dir], { stdout: "pipe" });
     expect(output.exitCode).toBe(0);
-    expect(output.stdout.toString().trim()).toBe("True");
+    expect(output.stdout.toString()).not.toContain("(I)");
   });
 });

@@ -1,7 +1,7 @@
 import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { atomicWritePrivateJson } from "./private-state";
+import { atomicWritePrivateJson, ensurePrivateDirectory } from "./private-state";
 
 export type WindowsCopresenceRole = "appsrv" | "bridge";
 
@@ -33,21 +33,7 @@ export function openPrivateAppendLog(path: string): number {
 
 /** Protect credential-bearing state with native Windows ACLs. */
 export function ensureWindowsPrivateDirectory(path: string): void {
-  const escaped = path.replace(/'/g, "''");
-  const script = [
-    `$path='${escaped}'`, `$acl=Get-Acl -LiteralPath $path`,
-    `$acl.SetAccessRuleProtection($true,$false)`,
-    `$acl.Access | ForEach-Object { [void]$acl.RemoveAccessRuleSpecific($_) }`,
-    `$inherit=[Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit'`,
-    `$prop=[Security.AccessControl.PropagationFlags]::None`,
-    `$allow=[Security.AccessControl.AccessControlType]::Allow`,
-    `$ids=@([Security.Principal.WindowsIdentity]::GetCurrent().User,[Security.Principal.SecurityIdentifier]'S-1-5-18',[Security.Principal.SecurityIdentifier]'S-1-5-32-544')`,
-    `$ids | ForEach-Object { $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($_,'FullControl',$inherit,$prop,$allow)) }`,
-    `Set-Acl -LiteralPath $path -AclObject $acl`,
-  ].join(";");
-  execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
-    stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
-  });
+  ensurePrivateDirectory(path);
 }
 
 export function closeLog(fd: number): void {
@@ -60,7 +46,7 @@ export type CreationDateProbe = (pid: number) => string | null;
 export function probeWindowsCreationDate(pid: number): string | null {
   if (!Number.isInteger(pid) || pid <= 0) return null;
   try {
-    const script = `(Get-CimInstance Win32_Process -Filter \"ProcessId=${pid}\").CreationDate`;
+    const script = `[Diagnostics.Process]::GetProcessById(${pid}).StartTime.ToUniversalTime().Ticks`;
     const out = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
       encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true,
     }).trim();
