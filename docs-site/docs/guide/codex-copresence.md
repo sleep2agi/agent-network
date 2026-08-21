@@ -29,7 +29,7 @@ anet -v
 anet --help
 ```
 
-- 推荐的一键共存路径还需要 `bash` 和 **tmux 3.2+**。当前以 Linux/WSL 等 POSIX 环境为目标；原生 Windows 请用下方的[手工共享 WS 路径](#原生-windows-或高级接管手工共享-ws)。
+- Linux、macOS 与 WSL 的一键路径还需要 `bash` 和 **tmux 3.2+**。原生 Windows 使用受管后台进程与当前 PowerShell/Windows Terminal，不需要 tmux。
 - 节点必须持有 network-scoped `ntok_`。旧节点缺 token 时先运行 `anet doctor --fix`，或重新创建节点。
 
 ## 推荐：创建时选定共存，之后一键启动/恢复
@@ -47,9 +47,11 @@ anet node create
 # 2. 一键启动 app-server、bridge 和可 attach 的 Codex TUI
 anet node start codex-human
 
-# 3. 进入人机共用的 TUI
+# 3. Linux/macOS/WSL：进入人机共用的 TUI
 tmux attach -t =codex-human
 ```
+
+原生 Windows 的第 2 条命令会直接在当前 PowerShell/Windows Terminal 打开 Codex TUI；无需第 3 条命令。要停止整套进程，请保留 TUI 窗口并在另一个终端运行 `anet node stop codex-human`。
 
 Codex thread 的工作目录继承自 **app-server 进程启动时的 cwd**，不是 bridge 的 cwd；因此要在运行 `--copresence` **之前**先 `cd` 到目标项目。Linux 上可用 `readlink /proc/<app-server-pid>/cwd` 复核，不能只检查 bridge。
 
@@ -58,16 +60,18 @@ Codex thread 的工作目录继承自 **app-server 进程启动时的 cwd**，�
 交互菜单里的 `codex-cli` 就是共存模式：选中后直接写入 `codexCopresence: true`，不再要求第二次选择。`codex-sdk` 是后台无头 Codex 节点。脚本可使用等价命令 `anet node create codex-human --runtime codex-cli`；旧的 `--runtime codex-app-server --copresence` 继续兼容。
 
 ::: warning 发布渠道
-这个交互选项已在 `main` 通过真实 PTY 测试，并已随 **preview.42** 发布。安装或升级 preview 后，即可在交互菜单中直接选择 `codex-cli`。
+交互选项从 **preview.42** 起可用；原生 Windows 一键编排从 **preview.43** 起可用。Windows 路径已在 `windows-latest` 通过真实 ConPTY 测试：交互创建、首次启动、停止、重启和再次停止，并验证重启恢复同一个 thread。
 :::
 
-启动会创建三个带同一身份标记的 tmux session：
+Linux/macOS/WSL 启动会创建三个带同一身份标记的 tmux session；Windows 创建两个受管后台进程，并把 TUI 留在当前控制台：
 
 | Session | 作用 |
 |---|---|
 | `codex-human-appsrv` | 只监听 loopback 的 `codex app-server`，并注入 CommHub MCP |
 | `codex-human-桥` | `agent-node` bridge，接收网络派工并投进同一 thread |
 | `codex-human` | 人类可 attach 的原生 Codex TUI |
+
+Windows 会把 app-server 与 bridge 的 PID、进程创建时间和日志位置写入节点私有状态。`stop` 只有在 PID 与创建时间同时匹配时才会调用 `taskkill /T`，避免 PID 复用时误杀无关进程；凭据目录用 Windows ACL 限制为当前用户、SYSTEM 与 Administrators。
 
 ### tmux 目标必须精确匹配
 
@@ -92,8 +96,8 @@ anet node stop codex-human
 
 停止流程会用持久身份标记收拢这三个 session 及其子进程；从共存 session 内调用 `stop` 会 fail closed，避免把当前 shell 一起杀掉。
 
-::: danger 断线恢复仍必须回到共存命令
-如果 bridge 长时间断线后提示“运行 `anet node start codex-human` 手动恢复”，**不要照抄这条通用提示**。普通 `start` 会另起一个非共存节点，与仍存活的 bridge 争抢同一 alias。应在外部 shell 中停止旧共存树、重新清空 `COMMHUB_*`，再运行：
+::: danger 断线恢复要先停止旧进程树
+节点配置会记住共存模式，因此普通 `anet node start codex-human` 会重新进入共存编排，不会降级成无头节点。但在旧 bridge 仍存活时不要直接再启动；应在外部 shell 中先停止旧树、清空 `COMMHUB_*`，再运行：
 
 ```bash
 anet node stop codex-human
@@ -158,9 +162,9 @@ anet node start codex-worker
 
 节点会自己 spawn 私有 app-server 和新 thread，适合作为 codex 驱动的后台 Agent；由于没有人类可 attach 的 TUI，这条路径**不是人机共存**。
 
-## 原生 Windows 或高级接管：手工共享 WS
+## 高级接管：手工共享 WS
 
-原生 Windows 没有上述 tmux 编排，可手工让 TUI 与 bridge 连接同一个 loopback WebSocket。**每个节点使用独立 app-server/端口，不要让多个节点共用**：CommHub bearer token 是 app-server 的进程级环境，复用会造成 thread 身份混淆，也会制造单点故障。
+日常使用原生 Windows 请直接运行前面的一键命令。本节只用于接管已有 app-server 或调试。**每个节点使用独立 app-server/端口，不要让多个节点共用**：CommHub bearer token 是 app-server 的进程级环境，复用会造成 thread 身份混淆，也会制造单点故障。
 
 ```powershell
 # 起前先找空闲端口；示例端口仅占位

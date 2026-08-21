@@ -2,7 +2,7 @@
 
 在 Windows 上跑 Agent Node 有两条路：**原生 Windows（PowerShell）** 或 **WSL（Ubuntu）**。
 
-- **原生 PowerShell**：`anet` 是 Node CLI，`@openai/codex` 有原生 Windows 二进制，且 **codex-sdk 节点不需要 tmux、也不需要 bun**（commhub 走 agent-node 进程内父进程中介）——依赖链干净，适合跑 **codex-sdk** 节点。
+- **原生 PowerShell**：`codex-sdk` 可作为无头节点；preview.43+ 还原生支持 `codex-cli` 共存 TUI，一条 `anet node start` 自动管理 app-server 与 bridge，不需要 tmux。
 - **WSL（Ubuntu）**：就是标准 Linux 环境，跟文档其余部分完全一致，是**最稳**的路径，任何 runtime 都适用。
 
 ::: tip 建议
@@ -56,8 +56,19 @@ anet node create codex-node --runtime codex-sdk
 anet node start codex-node
 ```
 
-::: warning `anet node start` 是关键一步
-前面几步（装、`codex --version`、登录、建节点）在原生 Windows 上依赖很干净、大概率顺。`anet node start` 是 agent-node 运行时真正在 Windows 上跑起来的时刻——原生 Windows 上手是**较新、验证较少**的路径，若这里出现 Windows 特有报错（子进程 spawn / 可选依赖 node-pty 等），改走下面的 **WSL**。
+要让人和 Agent 共用同一个 Codex TUI/thread，请安装 preview.43+，然后交互创建：
+
+```powershell
+npm install -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview
+anet node create
+# 在 runtime 菜单选择：codex-cli — Codex 共存 TUI
+anet node start <你输入的节点名>
+```
+
+TUI 会直接占用当前控制台。停止时在另一个 PowerShell 运行 `anet node stop <节点名>`。再次执行 `anet node start <节点名>` 会恢复配置中保存的同一个 Codex thread，而不是新建会话。详见 [Codex TUI 人机共存](./codex-copresence.md)。
+
+::: tip Windows 原生验证范围
+preview.43 的共存路径在 `windows-latest` 的真实 ConPTY 中覆盖了交互选择、启动、TUI 接入、停止和重启恢复同一 thread。WSL 仍适合需要完整 POSIX 工具链的其他 runtime。
 :::
 
 ---

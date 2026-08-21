@@ -217,7 +217,7 @@ anet upgrade --dry-run
 | Vendor 401/403 | API key、envRef 指向的变量、`ANTHROPIC_BASE_URL` 是否匹配同一服务 |
 | Vendor 超时/限流 | 服务状态、账户配额、节点并发；不要靠无限重试消耗额度 |
 | Grok ACP 长任务超时 | 按 runtime 指南核 `flags.grokAcpTimeoutMs` / `GROK_ACP_TIMEOUT_MS` |
-| Codex 共存恢复后变成普通节点 | 必须继续用 `anet node start <alias> --copresence`，不要改用普通 start |
+| Codex 共存重启后历史消失 | 升级到 preview.43+；普通 `anet node start <alias>` 会读取已保存的 `codexThreadId` 并执行 `thread/resume`。若旧 bridge 尚存活，先从外部终端 `anet node stop <alias>` |
 
 OpenCode 当前是任务 runtime，不是共享 TUI；Grok 共享 TUI 尚未发布。以 [Runtime 对比](/guide/runtimes)为准，不要照旧版本或 changelog 历史命令操作。
 

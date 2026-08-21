@@ -1,0 +1,38 @@
+# test751 — native Windows Codex co-presence
+date: 2026-08-21T03:06:50Z
+source_commit: 7c8772b1 (feature branch; final documentation commit is a descendant)
+platform: GitHub Actions windows-latest, real ConPTY via node-pty
+job: https://github.com/sleep2agi/agent-network/actions/runs/32442187064/job/96654980156
+
+L0 Windows primitives
+- PASS: 16 tests, 0 failures, 37 assertions
+- PASS: Windows dependency plan does not require tmux
+- PASS: .NET Process.StartTime identity + taskkill process-tree teardown
+- PASS: protected Windows ACL has no inherited ACE
+- PASS: TypeScript typecheck
+
+L1 authentication and interactive creation
+- PASS: real CommHub register/login
+- PASS: real ConPTY opened `anet node create`
+- PASS: keyboard navigation selected `codex-cli — Codex 共存 TUI`
+- PASS: config persisted runtime=codex-app-server and codexCopresence=true
+
+L2 first native start/stop
+- PASS: managed app-server bound a loopback WebSocket
+- PASS: bridge launched through the internal bridge lane (no recursive co-presence orchestration)
+- PASS: foreground fake Codex TUI adopted thread_windows_e2e
+- PASS: `anet node stop` removed the managed record and process trees
+
+L3 restart continuity
+- PASS: second plain `anet node start windows-picker` entered co-presence again
+- PASS: thread/start occurred exactly once across both starts
+- PASS: thread/resume(thread_windows_e2e) occurred exactly once on restart
+- PASS: both TUI launches adopted thread_windows_e2e
+- PASS: second `anet node stop` completed
+
+Cross-platform compatibility evidence
+- PASS: test750 Docker on Linux, 10 groups / 0 failures, including real PTY picker
+- PASS: test30 Docker, legacy atok_ authentication remains accepted
+- PASS: portable test751 Docker logic, 14 pass / 0 fail; Windows-only cases skip by platform
+
+Result: PASS

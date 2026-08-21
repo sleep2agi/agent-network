@@ -2,7 +2,7 @@
 
 There are two ways to run an Agent Node on Windows: **native Windows (PowerShell)** or **WSL (Ubuntu)**.
 
-- **Native PowerShell**: `anet` is a Node CLI, `@openai/codex` ships a native Windows binary, and a **codex-sdk node needs neither tmux nor bun** (commhub is parent-mediated inside the agent-node process) — a clean dependency chain, well suited to **codex-sdk** nodes.
+- **Native PowerShell**: use `codex-sdk` for a headless node. Preview.43+ also supports native `codex-cli` co-presence: one `anet node start` manages the app-server and bridge without tmux.
 - **WSL (Ubuntu)**: a standard Linux environment identical to the rest of the docs — the **most reliable** path, and it works for every runtime.
 
 ::: tip Recommendation
@@ -56,8 +56,19 @@ anet node create codex-node --runtime codex-sdk
 anet node start codex-node
 ```
 
-::: warning `anet node start` is the key step
-The earlier steps (install, `codex --version`, login, create) have a clean dependency footprint on native Windows and should be smooth. `anet node start` is where the agent-node runtime actually launches on Windows — native Windows is a **newer, less battle-tested** path, so if you hit a Windows-specific error here (child-process spawn, the optional `node-pty` dependency, etc.), switch to **WSL** below.
+To share one Codex TUI/thread between a human and the Agent, install preview.43+ and create interactively:
+
+```powershell
+npm install -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview
+anet node create
+# Choose: codex-cli — Codex co-presence TUI
+anet node start <the-node-name-you-entered>
+```
+
+The TUI occupies the current console. Run `anet node stop <name>` from another PowerShell to stop it. The next `anet node start <name>` resumes the same saved Codex thread instead of creating a new conversation. See [Codex TUI Co-presence](./codex-copresence.md).
+
+::: tip Native Windows verification scope
+The preview.43 co-presence path is covered in a real `windows-latest` ConPTY: interactive selection, startup, TUI adoption, stop, and restart resuming the same thread. WSL remains useful for other runtimes that need a full POSIX toolchain.
 :::
 
 ---
