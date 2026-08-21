@@ -718,7 +718,10 @@ async function stopPriorWindowsCopresence(nodeId: string): Promise<void> {
   if (!prior) return;
   const decision = decideWindowsManagedStop(prior, probeWindowsCreationDate);
   for (const process of decision.safe) {
-    try { taskkillWindowsProcessTree(process.pid); } catch {}
+    try { taskkillWindowsProcessTree(process.pid); }
+    catch (e) {
+      throw new Error(`could not stop prior ${process.role} pid=${process.pid}: ${(e as Error).message}`);
+    }
   }
   rmSync(windowsCopresenceRecordPath(nodesDir(), nodeId), { force: true });
 }
