@@ -210,7 +210,7 @@ jobs:
               # `anet --version` intentionally prints a first-line version plus
               # component diagnostics. Parse only that contract line; flattening
               # the whole output also deleted every letter "v" from prereleases.
-              ver=$(anet --version | sed -n '1{s/^anet v//;p;q;}')
+              ver=$(anet --version | sed -n "1{s/^anet v//;p;q;}")
               echo "anet --version → $ver (expected $GATED_VER)"
               [ "$ver" = "$GATED_VER" ] \
                 || { echo "::error::version mismatch — anet says $ver, gating $GATED_VER"; exit 1; }
