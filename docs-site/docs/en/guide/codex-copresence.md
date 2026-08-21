@@ -41,8 +41,8 @@ cd /path/to/project
 # Remove every inherited COMMHUB_* identity; do not enumerate only known names
 for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
 
-# 1. Create a preview-runtime node
-anet node create codex-human --runtime codex-app-server --copresence
+# 1. Interactive creation: enter a node name, then choose “codex-cli — Codex co-presence TUI”
+anet node create
 
 # 2. Start the app-server, bridge, and attachable Codex TUI
 anet node start codex-human
@@ -54,6 +54,8 @@ tmux attach -t =codex-human
 A Codex thread inherits its working directory from the **app-server process cwd**, not the bridge cwd. `cd` into the target project **before** `--copresence`. On Linux, verify with `readlink /proc/<app-server-pid>/cwd`; checking only the bridge is insufficient.
 
 `create --copresence` records the choice in the node profile. After that, plain `node start` rebuilds the same co-presence topology after a stop or interruption; the flag does not need to be repeated. For an existing node, run `anet node start codex-human --copresence` once and later starts can use the plain command.
+
+`codex-cli` in the interactive runtime menu means co-presence mode: selecting it writes `codexCopresence: true` immediately, with no second question. `codex-sdk` is the headless Codex worker. Scripts can use the equivalent `anet node create codex-human --runtime codex-cli`; the older `--runtime codex-app-server --copresence` form remains compatible.
 
 Startup creates three tmux sessions carrying one shared identity marker:
 

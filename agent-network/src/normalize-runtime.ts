@@ -46,11 +46,12 @@ type ProfileLike = {
 
 function canonicalizeRuntime(runtime: string): RuntimeName | undefined {
   // RFC-030 — codex TUI bridge (standalone `codex app-server`). Aliases:
-  // `codex-tui` / `codex-app-server` / `codex-appserver`. Checked BEFORE
+  // `codex-cli` / `codex-tui` / `codex-app-server` / `codex-appserver`. Checked BEFORE
   // the `codex`/`codex-sdk` branch so the more specific names win.
   if (
     runtime === "codex-app-server" ||
     runtime === "codex-appserver" ||
+    runtime === "codex-cli" ||
     runtime === "codex-tui"
   ) return "codex-app-server";
   if (runtime === "codex" || runtime === "codex-sdk") return "codex-sdk";

@@ -41,8 +41,8 @@ cd /path/to/project
 # 清掉调用方继承的全部 COMMHUB_* 身份，不能只逐个删已知变量
 for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
 
-# 1. 创建 preview runtime 节点
-anet node create codex-human --runtime codex-app-server --copresence
+# 1. 交互创建：输入节点名，然后在 runtime 菜单选择“codex-cli — Codex 共存 TUI”
+anet node create
 
 # 2. 一键启动 app-server、bridge 和可 attach 的 Codex TUI
 anet node start codex-human
@@ -54,6 +54,8 @@ tmux attach -t =codex-human
 Codex thread 的工作目录继承自 **app-server 进程启动时的 cwd**，不是 bridge 的 cwd；因此要在运行 `--copresence` **之前**先 `cd` 到目标项目。Linux 上可用 `readlink /proc/<app-server-pid>/cwd` 复核，不能只检查 bridge。
 
 `create --copresence` 会把选择写入节点配置；此后普通 `node start`（包括停止或中断后的恢复）都会重建同一套共存拓扑，无需重复 flag。旧节点也可第一次运行 `anet node start codex-human --copresence`，CLI 会记住选择，后续同样只需 `anet node start codex-human`。
+
+交互菜单里的 `codex-cli` 就是共存模式：选中后直接写入 `codexCopresence: true`，不再要求第二次选择。`codex-sdk` 是后台无头 Codex 节点。脚本可使用等价命令 `anet node create codex-human --runtime codex-cli`；旧的 `--runtime codex-app-server --copresence` 继续兼容。
 
 启动会创建三个带同一身份标记的 tmux session：
 

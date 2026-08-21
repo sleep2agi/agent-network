@@ -12,7 +12,7 @@ ENV BUN_VERSION=1.3.14
 ENV BUN_LINUX_X64_SHA256=951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends bash ca-certificates curl git python3 tmux unzip \
+  && apt-get install -y --no-install-recommends bash ca-certificates curl git python3 python3-pexpect tmux unzip \
   && rm -rf /var/lib/apt/lists/*
 
 RUN curl --fail --silent --show-error --location \
