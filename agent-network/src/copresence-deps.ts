@@ -28,7 +28,7 @@ export interface CopresenceDep {
 export type CommandProbe = (cmd: string) => boolean;
 
 function installHint(name: string, platform: NodeJS.Platform, probe?: CommandProbe): string | null {
-  if (name === "codex") return "npm install -g @openai/codex";
+  for (const dep of Object.values(AGENT_DEP)) if (name === dep.name) return dep.install;
   if (name === "bunx") {
     // bun installed from the release zip does not ship bunx, and that is the
     // most common way to have one without the other (#766). Symlinking is the
@@ -45,9 +45,20 @@ function installHint(name: string, platform: NodeJS.Platform, probe?: CommandPro
   return null;
 }
 
+/** Which agent binary this co-presence lane is built on. */
+export type CopresenceAgent = "codex" | "grok";
+
+// The only dep that differs between lanes is the agent binary itself; tmux and
+// bunx are needed identically by both. Keeping ONE table means a gap added for
+// codex is not silently missing for grok — the drift that made `--copresence`
+// codex-only in the first place.
+const AGENT_DEP: Record<CopresenceAgent, { name: string; probes: readonly string[]; why: string; install: string }> = {
+  codex: { name: "codex", probes: ["codex"], why: "the TUI and the app-server are both codex", install: "npm install -g @openai/codex" },
+  grok: { name: "grok", probes: ["grok"], why: "the shared TUI and the leader are both grok", install: "npm install -g @sleep2agi/grok-build-cli" },
+};
+
 const DEPS: ReadonlyArray<{ name: string; probes: readonly string[]; why: string; platforms?: readonly NodeJS.Platform[] }> = [
-  { name: "tmux", probes: ["tmux"], why: "isolates the app-server / bridge / TUI trio", platforms: ["linux", "darwin"] },
-  { name: "codex", probes: ["codex"], why: "the TUI and the app-server are both codex" },
+  { name: "tmux", probes: ["tmux"], why: "isolates the leader / bridge / TUI trio", platforms: ["linux", "darwin"] },
   // 🔴 bunx SPECIFICALLY, not "bun or bunx".
   //
   // The one spawn point for commhub-server is `spawn("bunx", …)`, and the guard
@@ -62,8 +73,13 @@ const DEPS: ReadonlyArray<{ name: string; probes: readonly string[]; why: string
   { name: "bunx", probes: ["bunx"], why: "anet hub start spawns commhub-server through bunx" },
 ];
 
-export function copresenceDeps(probe: CommandProbe, platform: NodeJS.Platform = process.platform): CopresenceDep[] {
-  return DEPS.filter((d) => !d.platforms || d.platforms.includes(platform)).map((d) => ({
+export function copresenceDeps(
+  probe: CommandProbe,
+  platform: NodeJS.Platform = process.platform,
+  agent: CopresenceAgent = "codex",
+): CopresenceDep[] {
+  const all = [DEPS[0], AGENT_DEP[agent], ...DEPS.slice(1)];
+  return all.filter((d) => !("platforms" in d) || !d.platforms || d.platforms.includes(platform)).map((d) => ({
     name: d.name,
     present: d.probes.some((p) => probe(p)),
     install: installHint(d.name, platform, probe),
@@ -71,8 +87,12 @@ export function copresenceDeps(probe: CommandProbe, platform: NodeJS.Platform = 
   }));
 }
 
-export function missingCopresenceDeps(probe: CommandProbe, platform: NodeJS.Platform = process.platform): CopresenceDep[] {
-  return copresenceDeps(probe, platform).filter((d) => !d.present);
+export function missingCopresenceDeps(
+  probe: CommandProbe,
+  platform: NodeJS.Platform = process.platform,
+  agent: CopresenceAgent = "codex",
+): CopresenceDep[] {
+  return copresenceDeps(probe, platform, agent).filter((d) => !d.present);
 }
 
 /** One block naming every gap and how to close it — never one gap at a time. */
