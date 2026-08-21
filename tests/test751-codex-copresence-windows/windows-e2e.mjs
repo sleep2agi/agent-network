@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 import pty from "../../agent-network/node_modules/node-pty/lib/index.js";
 
 if (process.platform !== "win32") throw new Error("windows-e2e must run on Windows");
@@ -10,6 +11,8 @@ const project = join(root, "project");
 const bin = join(root, "bin");
 const userHome = join(root, "home");
 const rpcLog = join(root, "rpc.log");
+const bun = process.env.ANET_TEST751_BUN;
+if (!bun) throw new Error("ANET_TEST751_BUN is required");
 mkdirSync(project, { recursive: true });
 mkdirSync(bin, { recursive: true });
 mkdirSync(join(userHome, ".anet"), { recursive: true });
@@ -22,15 +25,15 @@ const env = {
 };
 
 function command(args, stdin = "") {
-  const result = Bun.spawnSync([process.execPath, cli, ...args], { cwd: project, env, stdin: Buffer.from(stdin), stdout: "pipe", stderr: "pipe" });
-  const output = result.stdout.toString() + result.stderr.toString();
-  if (result.exitCode !== 0) throw new Error(`command failed (${args.join(" ")}):\n${output}`);
+  const result = spawnSync(bun, [cli, ...args], { cwd: project, env, input: stdin, encoding: "utf8" });
+  const output = (result.stdout || "") + (result.stderr || "");
+  if (result.status !== 0) throw new Error(`command failed (${args.join(" ")}):\n${output}`);
   return output;
 }
 
 function terminal(args, onData, timeoutMs = 45_000) {
   return new Promise((resolvePromise, reject) => {
-    const child = pty.spawn(process.execPath, [cli, ...args], { cwd: project, env, cols: 120, rows: 40 });
+    const child = pty.spawn(bun, [cli, ...args], { cwd: project, env, cols: 120, rows: 40 });
     let output = "";
     const timer = setTimeout(() => { child.kill(); reject(new Error(`PTY timeout: ${args.join(" ")}\n${output}`)); }, timeoutMs);
     child.onData((data) => { output += data; onData?.(child, output); });
@@ -48,7 +51,7 @@ let selected = false;
 const pickerOutput = await terminal(["node", "create", "windows-picker", "--hub", "http://127.0.0.1:19351"], (child, output) => {
   if (!selected && output.includes("选择 runtime:")) {
     selected = true;
-    child.write("\x1b[B\x1b[B\x1b[B\r");
+    setTimeout(() => child.write("\x1b[B\x1b[B\x1b[B\r"), 150);
   }
 });
 if (!pickerOutput.includes("Codex 共存 TUI")) throw new Error("interactive picker did not display Codex co-presence");

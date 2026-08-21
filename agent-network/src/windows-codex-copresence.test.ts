@@ -43,8 +43,8 @@ describe.skipIf(process.platform !== "win32")("Windows native process/ACL smoke"
     rmSync(root, { recursive: true, force: true });
   });
 
-  test("CIM identity and taskkill manage a real Windows process tree", async () => {
-    const child = spawn("powershell.exe", ["-NoProfile", "-Command", "Start-Sleep -Seconds 120"], {
+  test(".NET process identity and taskkill manage a real Windows process tree", async () => {
+    const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 120000)"], {
       detached: true, windowsHide: true, stdio: "ignore",
     });
     expect(child.pid).toBeGreaterThan(0);

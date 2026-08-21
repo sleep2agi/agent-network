@@ -16,7 +16,8 @@ try {
   }
   if ($i -ge 60) { throw "CommHub did not become healthy" }
   Set-Location (Join-Path $PSScriptRoot "..\..")
-  bun ./tests/test751-codex-copresence-windows/windows-e2e.mjs 2>&1 | Tee-Object -FilePath $report -Append
+  $env:ANET_TEST751_BUN = (Get-Command bun).Source
+  node ./tests/test751-codex-copresence-windows/windows-e2e.mjs 2>&1 | Tee-Object -FilePath $report -Append
 } finally {
   Stop-Process -Id $hub.Id -Force -ErrorAction SilentlyContinue
 }
