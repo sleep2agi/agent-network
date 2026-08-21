@@ -193,7 +193,7 @@ jobs:
             node:24-slim bash -c '
               set -euo pipefail
               apt-get update -qq && apt-get install -y --no-install-recommends \
-                bash curl ca-certificates jq expect util-linux procps > /dev/null
+                bash curl ca-certificates jq expect util-linux procps unzip > /dev/null
               rm -rf /var/lib/apt/lists/*
 
               # bun is required by anet hub start (commhub-server is bun-only)
@@ -392,7 +392,11 @@ jobs:
           # Spot-check that Install section actually contains the gated version
           # — catches stale notes where someone copied an old file but forgot
           # to bump the version inside.
-          install_block=$(echo "$notes_body" | awk '/^## Install/,/^## /' | head -50)
+          install_block=$(echo "$notes_body" | awk '
+            found && /^## / { exit }
+            /^## Install$/ { found=1 }
+            found { print }
+          ' | head -50)
           echo "$install_block" | grep -qE "@$GATED_VER\b" \
             || { echo "::error::'## Install' section in $src does not mention @$GATED_VER"; exit 1; }
 

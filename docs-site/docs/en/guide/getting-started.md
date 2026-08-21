@@ -7,7 +7,7 @@
      Change the prose, change the stamp — the gate also fails when the two disagree.
      Only "current state" claims are stamped; historical references (e.g. `<= 2.3.0-preview.37`) are not. -->
 <!-- version-claim: package=agent-network channel=latest version=2.2.21 -->
-<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.40 -->
+<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.43 -->
 
 The minimum path for a brand-new user — **5 steps, 5 minutes**. One command + one verification per step.
 
@@ -95,7 +95,7 @@ The first `anet hub start` prints the admin credentials once:
 | channel | printed password |
 |---|---|
 | `latest` = `2.2.21` | the fixed string `anethub` |
-| `preview` = `2.3.0-preview.40` | a **random** string like `anet-232412de5bb54c058cff32`, with a change-on-first-login notice |
+| `preview` = `2.3.0-preview.43` | a **random** string like `anet-232412de5bb54c058cff32`, with a change-on-first-login notice |
 
 So the `anethub` below **only holds on stable**. **Anyone who copies this page instead of reading their own startup output will fail to log in on preview.**
 The credentials are also written to `~/.anet/server/admin-utok.json`.
@@ -131,7 +131,7 @@ On stable, `anet node create` lists **4 production runtimes** (`claude-agent-sdk
 Start the node:
 
 ::: warning Fresh install + claude-agent-sdk / codex-sdk? Install agent-node first
-These runtimes depend on the `agent-node` package. The first `node start` triggers an npx auto-fetch that takes ~1 minute, but on **stable `@latest` (currently `2.2.21`) and preview `≤ 2.3.0-preview.37`** the startup check **doesn't wait for it** and exits with `agent-node is not installed or cannot report a version` (reproduced on real hardware — [#450](https://github.com/sleep2agi/agent-network/issues/450) is the precise filing, #237 is the umbrella). **Root fix** is [PR #239](https://github.com/sleep2agi/agent-network/pull/239) (commit `1eff3a4d`, merged 2026-06-28); Vincent's 2026-08-09 audit verified the fix in an isolated Docker probe on `2.3.0-preview.38` reaching SSE connected. **The current `@preview` (`2.3.0-preview.40`) contains this fix; `@latest` does not** — [#450](https://github.com/sleep2agi/agent-network/issues/450) is still `open` pending 4 acceptance gates before latest promotion. **Workarounds** (in verified-strength order): upgrade to `@sleep2agi/agent-network@preview`; or stay on `@latest` but pre-install `agent-node` so the binary is already there:
+These runtimes depend on the `agent-node` package. The first `node start` triggers an npx auto-fetch that takes ~1 minute, but on **stable `@latest` (currently `2.2.21`) and preview `≤ 2.3.0-preview.37`** the startup check **doesn't wait for it** and exits with `agent-node is not installed or cannot report a version` (reproduced on real hardware — [#450](https://github.com/sleep2agi/agent-network/issues/450) is the precise filing, #237 is the umbrella). **Root fix** is [PR #239](https://github.com/sleep2agi/agent-network/pull/239) (commit `1eff3a4d`, merged 2026-06-28); Vincent's 2026-08-09 audit verified the fix in an isolated Docker probe on `2.3.0-preview.38` reaching SSE connected. **The current `@preview` (`2.3.0-preview.43`) contains this fix; `@latest` does not** — [#450](https://github.com/sleep2agi/agent-network/issues/450) is still `open` pending 4 acceptance gates before latest promotion. **Workarounds** (in verified-strength order): upgrade to `@sleep2agi/agent-network@preview`; or stay on `@latest` but pre-install `agent-node` so the binary is already there:
 
 ```bash
 npm install -g @sleep2agi/agent-node

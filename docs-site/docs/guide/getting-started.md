@@ -6,7 +6,7 @@
      每一处需要改的行。改了正文也要改戳,反之亦然 —— 两边不一致时门同样会红。
      只标"现状"断言;讲历史的版本引用(如 `≤ 2.3.0-preview.37`)故意不标。 -->
 <!-- version-claim: package=agent-network channel=latest version=2.2.21 -->
-<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.40 -->
+<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.43 -->
 
 新用户首次跑通的最小路径——**5 步, 5 分钟**。每步一条命令 + 一句验证。
 
@@ -94,7 +94,7 @@ anet hub dashboard
 | 通道 | 打印出来的密码 |
 |---|---|
 | `latest` = `2.2.21` | 固定的 `anethub` |
-| `preview` = `2.3.0-preview.40` | **随机串**,形如 `anet-232412de5bb54c058cff32`,并提示首次登录后要改 |
+| `preview` = `2.3.0-preview.43` | **随机串**,形如 `anet-232412de5bb54c058cff32`,并提示首次登录后要改 |
 
 所以下面命令里的 `anethub` **只在 stable 上成立**。**照抄这一页而不看自己那次启动输出的人,在 preview 上一定登不进去。**
 凭据也落在 `~/.anet/server/admin-utok.json`。
@@ -130,7 +130,7 @@ stable 版 `anet node create` 列出正式版的 runtime（`claude-agent-sdk` / 
 启动节点：
 
 ::: warning 全新安装选了 claude-agent-sdk / codex-sdk？先装 agent-node
-这两个 runtime 依赖 `agent-node` 包。首次 `node start` 的 npx 自动拉取需要约 1 分钟，而 **stable `@latest`（当前 `2.2.21`）与 preview `≤ 2.3.0-preview.37`** 的启动检查**不等它拉完**就报 `agent-node is not installed or cannot report a version` 退出（真机复现，[#450](https://github.com/sleep2agi/agent-network/issues/450) 精确立案，#237 为同族）。**根因修复**见 [PR #239](https://github.com/sleep2agi/agent-network/pull/239)（commit `1eff3a4d`, merged 2026-06-28），Vincent 2026-08-09 audit 在 `2.3.0-preview.38` 隔离 Docker 里 verified 抵达 SSE connected；**当前 `@preview` (`2.3.0-preview.40`) 已含此 fix，`@latest` 未含** —— [#450](https://github.com/sleep2agi/agent-network/issues/450) 仍 `open`，因 promote 到 latest 待 4 项 acceptance gate 真绿。**变通**（按 verified 强度）：升到 `@sleep2agi/agent-network@preview`；或用 `@latest` 但先跑一句让二进制预先就位：
+这两个 runtime 依赖 `agent-node` 包。首次 `node start` 的 npx 自动拉取需要约 1 分钟，而 **stable `@latest`（当前 `2.2.21`）与 preview `≤ 2.3.0-preview.37`** 的启动检查**不等它拉完**就报 `agent-node is not installed or cannot report a version` 退出（真机复现，[#450](https://github.com/sleep2agi/agent-network/issues/450) 精确立案，#237 为同族）。**根因修复**见 [PR #239](https://github.com/sleep2agi/agent-network/pull/239)（commit `1eff3a4d`, merged 2026-06-28），Vincent 2026-08-09 audit 在 `2.3.0-preview.38` 隔离 Docker 里 verified 抵达 SSE connected；**当前 `@preview` (`2.3.0-preview.43`) 已含此 fix，`@latest` 未含** —— [#450](https://github.com/sleep2agi/agent-network/issues/450) 仍 `open`，因 promote 到 latest 待 4 项 acceptance gate 真绿。**变通**（按 verified 强度）：升到 `@sleep2agi/agent-network@preview`；或用 `@latest` 但先跑一句让二进制预先就位：
 
 ```bash
 npm install -g @sleep2agi/agent-node
