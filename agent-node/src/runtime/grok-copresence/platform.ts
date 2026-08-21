@@ -71,6 +71,46 @@ export function copresenceCapabilities(
       reducedGuarantees: [],
     };
   }
+  if (platform === "darwin") {
+    // 实测于 2026-08-21,Apple M4 / macOS(Darwin 25.3.0) / grok 1.0.5:
+    //
+    //   /proc/self/fd            不存在
+    //   AF_UNIX bind+listen      可用,lstat 认得 S_ISSOCK
+    //   chmod 0600               生效(0o600)
+    //   PTY (openpty)            可用,从属端 isatty=true
+    //   隔离 HOME 挡厂商技能      挡不住:真实家目录 skills=122,隔离家目录 skills=89
+    //                            —— 与 Windows 同一结论(53→31),非零即挡不住
+    //
+    // 🔴 关键的那一格:grok 在 macOS 上是 **leaderless**。同一台机跑 `grok`,
+    //    TUI 正常起来(Grok 4.6 / Grok Build 1.0.5),而 ~/.grok/leader.sock 与
+    //    leader.lock **都没有被创建**(Linux 上两者都在)。因此 leader-lifecycle.ts
+    //    那条建立在 /proc/net/unix + /proc/<pid>/{exe,cmdline,environ} 上的
+    //    身份链在这里根本不会被进入 —— 和 win32 走的是同一条 leaderless 路径。
+    //
+    //    这一格必须实测,不能推断:macOS 上**读不到另一个进程的 environ**
+    //    (ps -E / ps eww 对自己刚启动的子进程也读不到),所以那条链如果真的
+    //    会被进入,它是**无法忠实移植的**,而不是"换个 API 就行"。
+    return {
+      platform,
+      supported: true,
+      ipc: "unix-socket",
+      kernelSandbox: false,
+      procfs: false,
+      posixFileModes: true,
+      homeIsolationHidesVendorSkills: false,
+      missingHard: [],
+      // 🔴 与 win32 那份一样,这些是**真的丢了**,不是措辞问题。
+      reducedGuarantees: [
+        "内核强制的 deny 路径 —— grok inspect 在 macOS 上不报告任何沙箱后端"
+        + "(系统有 /usr/bin/sandbox-exec,但没有证据表明 grok 使用它)",
+        "每轮 unshare --user 的用户命名空间隔离(Linux 专用)",
+        "基于 /proc 的父进程与 fd 校验 —— macOS 无 /proc,且**读不到别的进程的"
+        + " environ**,所以这一格不是降级而是不可得",
+        "隔离 HOME 对厂商技能无效:实测同机 grok 1.0.5,真实家目录 skills=122、"
+        + "隔离家目录 skills=89,它们的【指令文本】仍会进入上下文",
+      ],
+    };
+  }
   if (platform === "win32") {
     return {
       platform,

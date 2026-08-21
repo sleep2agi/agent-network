@@ -75,10 +75,35 @@ describe("grok copresence platform capabilities", () => {
       .toBe(copresenceIpcEndpoint("C:\\x\\leader.sock", caps));
   });
 
-  test("an unverified platform is refused rather than silently downgraded", () => {
+  test("darwin is supported over a Unix socket, and says exactly what it loses", () => {
+    // 实测(2026-08-21, Apple M4 / Darwin 25.3.0 / grok 1.0.5):
+    //   AF_UNIX + chmod 0600 + PTY 都可用；/proc 不存在；
+    //   隔离 HOME 挡不住厂商技能(真实 122 → 隔离 89)；
+    //   🔴 而决定性的一格是 grok 在 macOS 上 leaderless —— 跑一次 grok,
+    //      TUI 正常起来而 ~/.grok/leader.sock 与 leader.lock 都没被创建。
+    //      因此 leader-lifecycle.ts 那条 /proc 身份链不会被进入(与 win32 同路径)。
     const caps = copresenceCapabilities("darwin");
+    expect(caps.supported).toBe(true);
+    expect(caps.ipc).toBe("unix-socket");     // 比 win32 好：不是 named-pipe
+    expect(caps.posixFileModes).toBe(true);   // 比 win32 好：0600 真的生效
+    expect(caps.procfs).toBe(false);
+    expect(caps.kernelSandbox).toBe(false);
+    expect(caps.homeIsolationHidesVendorSkills).toBe(false);
+    expect(caps.missingHard).toEqual([]);
+    // 丢了什么必须逐条说得出来，不能只是"支持"。
+    expect(caps.reducedGuarantees.length).toBe(4);
+    expect(caps.reducedGuarantees.join("\n")).toContain("environ");
+    expect(caps.reducedGuarantees.join("\n")).toContain("122");
+  });
+
+  test("an unverified platform is still refused rather than silently downgraded", () => {
+    // 🔴 这条原来拿 darwin 当例子。darwin 被实测验证后,那个夹具就把
+    //    "未验证 ⇒ 拒绝" 这条规则**编码在了一个不再未验证的平台上** ——
+    //    它会随着 darwin 转正而静默失去意义(从红变绿,输出逐字相同)。
+    //    换成一个确实没有被评估过的平台，规则本身才继续被守着。
+    const caps = copresenceCapabilities("freebsd");
     expect(caps.supported).toBe(false);
-    expect(() => assertCopresenceSupported(caps)).toThrow("darwin");
+    expect(() => assertCopresenceSupported(caps)).toThrow("freebsd");
     // fail-closed 的方向：没验过的平台走"拒绝"，不是走"当成 Windows 那套降级跑"。
     expect(caps.reducedGuarantees).toEqual([]);
   });

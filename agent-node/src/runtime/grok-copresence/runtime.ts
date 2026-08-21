@@ -659,6 +659,20 @@ export const GROK_COPRESENCE_VERIFIED_BUILDS: ReadonlyMap<string, GrokVerifiedBu
   //   · Leader：sandbox 与 leader 模式在 1.0.5 上互斥 ⇒ autoLeader=false（见上）
   ["grok 1.0.5 (5115b46bc9)", { autoLeader: false }],
   ["grok 1.0.5 (5115b46bc9) [stable]", { autoLeader: false }],
+  // 2026-08-21 验证 grok 1.0.5 (5115b46bc909) —— macOS(Apple M4 / Darwin 25.3.0)。
+  // 与上面那条是同一源码提交(5115b46bc9 是 5115b46bc909 的前缀),但**这张表按
+  // 版本串精确匹配是有道理的**:同一份源码在不同平台上行为并不相同,下面第②条就是。
+  //   · `grok inspect --json` 仍提供审计要的全部字段(17 个顶层键)
+  //   · 🔴 隔离 HOME 下【并非全为空】:skills=89、agents=3(真实家目录为 skills=122)。
+  //        Linux 上这一格是"全为空",macOS 上不是 —— 与 Windows 同一结论。
+  //        因此 copresenceCapabilities("darwin").homeIsolationHidesVendorSkills=false,
+  //        并在 reducedGuarantees 里逐条列出;这不是"放松断言",是**如实登记已失去的保证**。
+  //   · `--leader` 在 help 里;`--no-memory` / `--no-auto-update` 与 Linux 一样是隐藏 flag
+  //   · TUI 能起来:同机 `grok` 起 TUI 正常(Grok 4.6 / Grok Build 1.0.5)
+  //   · 🔴 grok 在 macOS 上是 leaderless —— 跑一次 grok 之后 ~/.grok/leader.sock 与
+  //        leader.lock 都没有被创建(Linux 上两者都在)。autoLeader 沿用 false。
+  ["grok 1.0.5 (5115b46bc909)", { autoLeader: false }],
+  ["grok 1.0.5 (5115b46bc909) [stable]", { autoLeader: false }],
 ]);
 
 /** 该 build 的已验证能力；未验证的 build 返回 undefined。 */
@@ -1297,7 +1311,14 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     //    复用 grok-build-cli-home 里那个已经处理了 PATHEXT 与 npm 真二进制的解析器，
     //    保证 TUI 与 MCP 两条路径用同一套解析规则，不会一边能找到一边找不到。
     const rawBinary = this.opts.binary ?? "grok";
-    const binary = copresenceEndpointIsFilesystemPath(copresenceCapabilities())
+    // 🔴 这里原来按【端点是不是文件系统路径】决定要不要解析,也就是"只有 Windows
+    //    才解析"。那个条件和它要解决的问题无关:裸名能不能被 spawn,取决于**子进程
+    //    的 PATH**,不取决于 IPC 用的是 unix socket 还是 named pipe。
+    //    实测(macOS,Apple M4):grok 装在 ~/.grok/bin,而 PTY 的受控 env 里没有它,
+    //    于是裸名 `grok` 让 node-pty 抛 `posix_spawnp failed` —— 报错既不说是哪个
+    //    文件,也不说是 PATH 的问题。改成按"是不是绝对路径"判断:绝对路径直接用
+    //    (于是 GROK_BINARY 这个既有覆盖真的生效),裸名一律解析,三个平台同一套规则。
+    const binary = isAbsolute(rawBinary)
       ? rawBinary
       : resolveGrokCommhubMcpCommand(rawBinary, String(this.spawnEnv.PATH || process.env.PATH || ""));
     const args = buildGrokCopresenceArgs({
