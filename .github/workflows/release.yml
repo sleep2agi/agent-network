@@ -241,6 +241,15 @@ jobs:
               done
               curl -sf http://127.0.0.1:9200/health > /dev/null \
                 || { echo "::error::/health did not respond 2xx"; cat /tmp/hub.log; exit 1; }
+              # Health can become ready just before bootstrap credentials are
+              # atomically persisted. Wait for both readiness signals instead
+              # of racing the background `hub start` process.
+              for i in $(seq 1 10); do
+                [ -f "$HOME/.anet/server/admin-utok.json" ] && break
+                sleep 1
+              done
+              [ -f "$HOME/.anet/server/admin-utok.json" ] \
+                || { echo "::error::admin-utok.json was not persisted"; cat /tmp/hub.log; exit 1; }
               mode=$(stat -c %a "$HOME/.anet/server/admin-utok.json")
               [ "$mode" = "600" ] \
                 || { echo "::error::admin-utok.json mode $mode (expected 600)"; exit 1; }
