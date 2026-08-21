@@ -57,8 +57,8 @@ print(f"setup_bun_occurrences={len(found)} expected_version={expected}")
 for path, version in found:
     print(f"{path} bun-version={version}")
 
-if len(found) != 3:
-    print(f"FAIL: expected exactly 3 setup-bun occurrences, found {len(found)}", file=sys.stderr)
+if len(found) != 4:
+    print(f"FAIL: expected exactly 4 setup-bun occurrences, found {len(found)}", file=sys.stderr)
     sys.exit(1)
 if bad:
     for path, version in bad:
@@ -70,7 +70,7 @@ PY
 BASELINE_LOG=/tmp/test746-baseline.log
 assert_setup_bun_pins "$WORKFLOWS" "$BASELINE_LOG"
 cat "$BASELINE_LOG"
-grep -Fxq 'setup_bun_occurrences=3 expected_version=1.3.14' "$BASELINE_LOG"
+grep -Fxq 'setup_bun_occurrences=4 expected_version=1.3.14' "$BASELINE_LOG"
 echo 'L1 SETUP_BUN_PIN_PASS'
 
 MUTANT_ROOT=/tmp/test746-mutant
