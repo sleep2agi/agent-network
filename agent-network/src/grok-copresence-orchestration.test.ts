@@ -41,7 +41,7 @@ describe("grok co-presence: readiness", () => {
 
 describe("grok co-presence: diagnosis names every gap at once", () => {
   test("wrong runtime is named with the command that fixes it", () => {
-    const d = diagnoseGrokCopresence({ runtime: "claude-code-cli", displayName: "甲" });
+    const d = diagnoseGrokCopresence({ runtime: "claude-code-cli", displayName: "甲", platform: "linux" });
     expect(d.ok).toBe(false);
     expect(d.lines.join("\n")).toContain("--runtime grok-build-cli");
   });
@@ -50,14 +50,14 @@ describe("grok co-presence: diagnosis names every gap at once", () => {
     // "not supported" would send the operator looking for a missing feature;
     // the truth is they opted out at create time.
     const d = diagnoseGrokCopresence({
-      runtime: "grok-build-cli", displayName: "乙", grokCopresence: false, grokAttachSocket: "/run/a.sock",
+      runtime: "grok-build-cli", displayName: "乙", grokCopresence: false, grokAttachSocket: "/run/a.sock", platform: "linux",
     });
     expect(d.ok).toBe(false);
     expect(d.lines.join("\n")).toContain("--grok-headless");
   });
 
   test("a missing attach socket is reported, and refuses to guess", () => {
-    const d = diagnoseGrokCopresence({ runtime: "grok-build-cli", displayName: "丙", grokCopresence: true });
+    const d = diagnoseGrokCopresence({ runtime: "grok-build-cli", displayName: "丙", grokCopresence: true, platform: "linux" });
     expect(d.ok).toBe(false);
     expect(d.lines.join("\n")).toContain("grokAttachSocket");
   });
@@ -65,13 +65,31 @@ describe("grok co-presence: diagnosis names every gap at once", () => {
   test("two problems produce TWO reports in one run, not one exit", () => {
     // Whack-a-mole is the failure this shape exists to prevent: fix the runtime,
     // rerun, only then learn the socket is missing too.
-    const d = diagnoseGrokCopresence({ runtime: "grok-build-cli", displayName: "丁", grokCopresence: false });
+    const d = diagnoseGrokCopresence({ runtime: "grok-build-cli", displayName: "丁", grokCopresence: false, platform: "linux" });
+    expect(d.lines.filter((l) => l.includes("❌")).length).toBe(2);
+  });
+
+  test("🔴 an unsupported platform is named up front, not after a full install", () => {
+    // Measured on a real Mac mini: anet installed, agent-node installed, node
+    // created, started — and only then did agent-node refuse with
+    // "平台 darwin 尚未验证过共存所需的 PTY / IPC / 隔离原语". A one-command
+    // launcher that lets someone get that far has saved them nothing.
+    const d = diagnoseGrokCopresence({
+      runtime: "grok-build-cli", displayName: "mac", grokCopresence: true,
+      grokAttachSocket: "/run/a.sock", platform: "darwin",
+    });
+    expect(d.ok).toBe(false);
+    expect(d.lines.join("\n")).toContain("darwin");
+  });
+
+  test("the platform gate does not shadow the other gaps — both are reported", () => {
+    const d = diagnoseGrokCopresence({ runtime: "claude-code-cli", displayName: "mac", platform: "darwin" });
     expect(d.lines.filter((l) => l.includes("❌")).length).toBe(2);
   });
 
   test("a healthy node produces no lines at all", () => {
     const d = diagnoseGrokCopresence({
-      runtime: "grok-build-cli", displayName: "戊", grokCopresence: true, grokAttachSocket: "/run/a.sock",
+      runtime: "grok-build-cli", displayName: "戊", grokCopresence: true, grokAttachSocket: "/run/a.sock", platform: "linux",
     });
     expect(d).toEqual({ ok: true, lines: [] });
   });

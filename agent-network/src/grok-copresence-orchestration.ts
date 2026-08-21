@@ -44,13 +44,33 @@ export interface GrokCopresenceDiagnosis {
 /** One block naming every reason this node cannot run the shared TUI, not one
  *  exit per reason. A node that is both the wrong runtime AND missing its
  *  attach socket should learn both in one run. */
+/** Platforms whose PTY / IPC / isolation primitives the grok co-presence lane
+ *  has actually been validated on. agent-node refuses anywhere else, and it does
+ *  so only after the node has been created and started once:
+ *
+ *    [agent-node] grok-build-cli co-presence 无法在 darwin 上运行，缺少：
+ *                 平台 darwin 尚未验证过共存所需的 PTY / IPC / 隔离原语
+ *
+ *  Learned the expensive way on a Mac mini: install anet, install agent-node,
+ *  create the node, start it — and only then find out the platform is refused.
+ *  A one-command launcher that lets someone get that far has not saved them
+ *  anything, so say it in the same breath as every other gap. */
+export const GROK_COPRESENCE_PLATFORMS: readonly NodeJS.Platform[] = ["linux"];
+
 export function diagnoseGrokCopresence(input: {
   runtime: string;
   displayName: string;
   grokCopresence?: boolean;
   grokAttachSocket?: string;
+  platform?: NodeJS.Platform;
 }): GrokCopresenceDiagnosis {
   const lines: string[] = [];
+  const platform = input.platform ?? process.platform;
+  if (!GROK_COPRESENCE_PLATFORMS.includes(platform)) {
+    lines.push(`[anet] ❌ grok co-presence does not run on ${platform} — the PTY / IPC / isolation primitives it needs are unvalidated there.`);
+    lines.push(`[anet]    agent-node refuses this at startup; nothing on this machine can change that.`);
+    lines.push(`[anet]    Supported today: ${GROK_COPRESENCE_PLATFORMS.join(", ")}.`);
+  }
   if (input.runtime !== "grok-build-cli") {
     lines.push(`[anet] ❌ grok --copresence requires runtime=grok-build-cli (node "${input.displayName}" is runtime=${input.runtime}).`);
     lines.push(`[anet]    Create one with: anet node create ${input.displayName} --runtime grok-build-cli`);
