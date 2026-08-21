@@ -763,7 +763,11 @@ async function startWindowsCodexCopresence(
     delete rawCfg.session;
     atomicWritePrivateJson(rawCfgPath, rawCfg);
 
-    const bridgeEnv: NodeJS.ProcessEnv = { ...process.env, ANET_NODE_MARKER: marker };
+    const bridgeEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      ANET_NODE_MARKER: marker,
+      ANET_COPRESENCE_BRIDGE: "1",
+    };
     delete bridgeEnv.COMMHUB_TOKEN;
     delete bridgeEnv.ANET_CODEX_COMMHUB_TOKEN;
     managed.push(await windowsManagedProcess("bridge", process.execPath, [
@@ -1124,6 +1128,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     execFileSync("tmux", [
       "new-session", "-d", "-s", bridgeSession, "-c", process.cwd(),
       "-e", `ANET_NODE_MARKER=${identityMarker}`,
+      "-e", "ANET_COPRESENCE_BRIDGE=1",
       "bash", "-lc", bridgeCmd,
     ], { stdio: "pipe" });
   } catch (e: any) {
@@ -5839,7 +5844,7 @@ async function startCommand() {
     console.error(`Node "${id}" not found. Create it first: anet node create ${id}`);
     process.exit(1);
   }
-  if (resolvedForCopresence
+  if (process.env.ANET_COPRESENCE_BRIDGE !== "1" && resolvedForCopresence
     && codexCopresenceRequested(copresenceFlagPassed, resolvedForCopresence.profile as any)) {
     const copresenceRuntime = runtimeForExecution(
       resolvedForCopresence.profile,
