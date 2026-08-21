@@ -12,6 +12,7 @@
  *   COMMHUB_URL, COMMHUB_TOKEN
  */
 
+import { inboundChannelMeta } from "./channel-meta.js";
 import { readFileSync, existsSync } from "fs";
 import { OUTBOUND_TOOL_NAMES } from "./outbound-tool-names";
 import { parseCommhubToolResult } from "./commhub-response";
@@ -34,6 +35,8 @@ import {
 import { sendChannelTaskWithTrace } from "./channel-task-trace";
 
 // ── .env loader helper ────────────────────────────────
+
+
 function loadEnvFile(path: string): void {
   if (!existsSync(path)) return;
   for (const line of readFileSync(path, "utf-8").split("\n")) {
@@ -172,7 +175,8 @@ const mcp = new Server(
           `Use commhub_send_task for peer results; commhub_send_message is non-lifecycle chat.`,
         ].join("\n")
       : [
-          `Messages from CommHub arrive as <channel source="commhub" task_id="..." priority="..." from="...">`,
+          `Messages from CommHub arrive as <channel source="commhub" sender="..." task_id="..." priority="..." ts="...">`,
+          `  task_id is the inbox row id (changes when the Hub re-queues, identical when the node re-reads); ts is the Hub-side creation time.`,
           `These are tasks dispatched by the hub or other sessions via the CommHub Server.`,
           `Reply routing (IMPORTANT — the tool you pick determines whether the receiver actually gets woken up):`,
           `  • If the sender is another agent node, replying takes TWO actions — send_task wakes them but does NOT close the task you were sent:`,
@@ -596,13 +600,7 @@ async function handleSSEEvent(event: any) {
           // cache/fetch implementation hits an unexpected host error.
           log(`attachment resolver failed unexpectedly; preserving text-only task: ${error instanceof Error ? error.message : String(error)}`);
         }
-        const meta: Record<string, string> = {
-          sender: msg.from_session || "hub",
-          sender_id: "commhub",
-          user: msg.from_session || "hub", // Claude Code 用 meta.user 显示 "commhub · {user}"
-          task_id: msg.id,
-          priority: msg.priority || "normal",
-        };
+        const meta = inboundChannelMeta(msg);
         // V2: remember who sent this task so send_reply knows the target
         taskOriginators.set(msg.id, msg.from_session || "hub");
 
