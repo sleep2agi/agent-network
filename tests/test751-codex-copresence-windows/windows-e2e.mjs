@@ -39,7 +39,12 @@ function terminal(args, onData, timeoutMs = 45_000) {
     child.onData((data) => { output += data; onData?.(child, output); });
     child.onExit(({ exitCode }) => {
       clearTimeout(timer);
-      if (exitCode !== 0) reject(new Error(`PTY failed (${exitCode}): ${args.join(" ")}\n${output}`));
+      if (exitCode !== 0) {
+        const appLog = join(project, ".anet", "nodes", "windows-picker", "windows-appsrv.log");
+        const diagnostics = existsSync(appLog) ? `\n--- app-server log ---\n${readFileSync(appLog, "utf8")}` : "";
+        const rpcDiagnostics = existsSync(rpcLog) ? `\n--- fake rpc log ---\n${readFileSync(rpcLog, "utf8")}` : "";
+        reject(new Error(`PTY failed (${exitCode}): ${args.join(" ")}\n${output}${diagnostics}${rpcDiagnostics}`));
+      }
       else resolvePromise(output);
     });
   });

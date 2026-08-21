@@ -3,6 +3,7 @@ import { appendFileSync } from "node:fs";
 const args = process.argv.slice(2);
 const rpcLog = process.env.ANET_TEST751_RPC_LOG;
 const log = (line) => { if (rpcLog) appendFileSync(rpcLog, `${line}\n`); };
+log(`invoke:${JSON.stringify(args)}`);
 
 if (args[0] === "app-server") {
   const listen = args[args.indexOf("--listen") + 1];
