@@ -482,7 +482,11 @@ jobs:
     #   （余量 43%），对 CI 抖动本来就偏紧；runaway 守卫该在典型值的 2–3 倍。
     #   ⚠️ 这不会掩盖变慢 —— job 的实际时长在 Actions 界面上一直是可见的。
     #   真要「不许变慢」那是另一套机制（记时长 + 比基线），不是靠把超时压到贴脸。
-    timeout-minutes: 10
+    # 2026-08-21：10 → 15。PR #1143 首跑在 9m40s 时已输出的 suite
+    # 全部 PASS，但在汇总前被 guard 杀掉；failed-only 重跑也在 10m05s
+    # 被取消。15 分钟仍是有限 runaway guard，并给当前 Docker build
+    # 波动留下实际余量。
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
