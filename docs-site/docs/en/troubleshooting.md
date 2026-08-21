@@ -217,7 +217,7 @@ anet upgrade --dry-run
 | Vendor 401/403 | API key, envRef target, and `ANTHROPIC_BASE_URL` belong to the same service |
 | Vendor timeout/rate limit | Service status, account quota, and node concurrency; do not burn quota with unbounded retries |
 | Long Grok ACP task times out | Check `flags.grokAcpTimeoutMs` / `GROK_ACP_TIMEOUT_MS` in the runtime guide |
-| Codex co-presence recovers as a normal node | Continue using `anet node start <alias> --copresence`, not plain start |
+| Codex co-presence loses history after restart | Upgrade to preview.43+; plain `anet node start <alias>` reads the saved `codexThreadId` and performs `thread/resume`. If an old bridge survives, first run `anet node stop <alias>` from an external terminal |
 
 OpenCode is currently a task runtime, not a shared TUI. Shared Grok TUI support has not shipped. Follow [Runtimes](/en/guide/runtimes), not old versions or historical changelog commands.
 

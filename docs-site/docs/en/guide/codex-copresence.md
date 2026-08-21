@@ -29,7 +29,7 @@ anet -v
 anet --help
 ```
 
-- The recommended one-command path also needs `bash` and **tmux 3.2+**. It currently targets POSIX environments such as Linux/WSL; for native Windows, use the [manual shared-WebSocket path](#native-windows-or-advanced-adoption-manual-shared-websocket).
+- On Linux, macOS, and WSL, the one-command path also needs `bash` and **tmux 3.2+**. Native Windows uses managed background processes plus the current PowerShell/Windows Terminal and does not need tmux.
 - The node must have a network-scoped `ntok_`. Run `anet doctor --fix` for an old node with no token, or recreate it.
 
 ## Recommended: choose co-presence at creation, then start or resume with one command
@@ -47,9 +47,11 @@ anet node create
 # 2. Start the app-server, bridge, and attachable Codex TUI
 anet node start codex-human
 
-# 3. Enter the shared human/agent TUI
+# 3. Linux/macOS/WSL: enter the shared human/agent TUI
 tmux attach -t =codex-human
 ```
+
+On native Windows, step 2 opens the Codex TUI directly in the current PowerShell/Windows Terminal. There is no step 3. To stop the complete topology, keep the TUI open and run `anet node stop codex-human` from another terminal.
 
 A Codex thread inherits its working directory from the **app-server process cwd**, not the bridge cwd. `cd` into the target project **before** `--copresence`. On Linux, verify with `readlink /proc/<app-server-pid>/cwd`; checking only the bridge is insufficient.
 
@@ -58,16 +60,18 @@ A Codex thread inherits its working directory from the **app-server process cwd*
 `codex-cli` in the interactive runtime menu means co-presence mode: selecting it writes `codexCopresence: true` immediately, with no second question. `codex-sdk` is the headless Codex worker. Scripts can use the equivalent `anet node create codex-human --runtime codex-cli`; the older `--runtime codex-app-server --copresence` form remains compatible.
 
 ::: warning Release channel
-This interactive choice has passed a real PTY test on `main` and ships in **preview.42**. After installing or upgrading to preview, you can select `codex-cli` directly from the interactive menu.
+The interactive choice ships from **preview.42**; native Windows one-command orchestration ships from **preview.43**. The Windows path passed a real `windows-latest` ConPTY test covering interactive creation, first start, stop, restart, and a second stop, with the restart proven to resume the same thread.
 :::
 
-Startup creates three tmux sessions carrying one shared identity marker:
+Linux/macOS/WSL startup creates three tmux sessions carrying one shared identity marker. Windows creates two managed background processes and keeps the TUI in the current console:
 
 | Session | Role |
 |---|---|
 | `codex-human-appsrv` | loopback-only `codex app-server` with CommHub MCP injected |
 | `codex-human-桥` | the `agent-node` bridge that receives network tasks and submits them to the thread |
 | `codex-human` | the native Codex TUI that a human can attach to |
+
+On Windows, anet records each app-server/bridge PID, process creation time, and log path in private node state. `stop` calls `taskkill /T` only when both PID and creation time still match, preventing PID reuse from killing an unrelated process. Native Windows ACLs restrict credential state to the current user, SYSTEM, and Administrators.
 
 ### Use exact tmux targets
 
@@ -93,8 +97,8 @@ anet node stop codex-human
 
 The stop path uses a persistent identity marker to reap all three sessions and their children. Calling `stop` from inside the co-presence session fails closed so it cannot kill the caller's own shell.
 
-::: danger Recovery must return through the co-presence command
-If a bridge has been disconnected for a long time and prints “run `anet node start codex-human` to recover,” **do not copy that generic hint**. A plain `start` launches a separate non-co-presence node that competes with the surviving bridge for the same alias. From an external shell, stop the old tree, clear every `COMMHUB_*` variable again, and restart with:
+::: danger Stop the old process tree before recovery
+The node profile remembers co-presence, so plain `anet node start codex-human` re-enters co-presence orchestration rather than downgrading to a headless node. Do not start again while an old bridge survives. From an external shell, stop the old tree, clear every `COMMHUB_*` variable, and restart with:
 
 ```bash
 anet node stop codex-human
@@ -159,9 +163,9 @@ anet node start codex-worker
 
 The node spawns a private app-server and a fresh thread. This is useful as a codex-backed background Agent, but there is no human-attachable TUI, so this path **is not co-presence**.
 
-## Native Windows or advanced adoption: manual shared WebSocket
+## Advanced adoption: manual shared WebSocket
 
-Native Windows does not have the tmux orchestration above. You can manually connect both the TUI and bridge to one loopback WebSocket. Give **each node its own app-server and port; never share one across nodes**: the CommHub bearer token is app-server process state, so sharing mixes thread identities and creates a single point of failure.
+For everyday native Windows use, run the one-command flow above. This section is only for adopting an existing app-server or debugging. Give **each node its own app-server and port; never share one across nodes**: the CommHub bearer token is app-server process state, so sharing mixes thread identities and creates a single point of failure.
 
 ```powershell
 # Check that the chosen port is free; this is a placeholder

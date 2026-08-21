@@ -45,8 +45,8 @@ function installHint(name: string, platform: NodeJS.Platform, probe?: CommandPro
   return null;
 }
 
-const DEPS: ReadonlyArray<{ name: string; probes: readonly string[]; why: string }> = [
-  { name: "tmux", probes: ["tmux"], why: "isolates the app-server / bridge / TUI trio" },
+const DEPS: ReadonlyArray<{ name: string; probes: readonly string[]; why: string; platforms?: readonly NodeJS.Platform[] }> = [
+  { name: "tmux", probes: ["tmux"], why: "isolates the app-server / bridge / TUI trio", platforms: ["linux", "darwin"] },
   { name: "codex", probes: ["codex"], why: "the TUI and the app-server are both codex" },
   // 🔴 bunx SPECIFICALLY, not "bun or bunx".
   //
@@ -63,7 +63,7 @@ const DEPS: ReadonlyArray<{ name: string; probes: readonly string[]; why: string
 ];
 
 export function copresenceDeps(probe: CommandProbe, platform: NodeJS.Platform = process.platform): CopresenceDep[] {
-  return DEPS.map((d) => ({
+  return DEPS.filter((d) => !d.platforms || d.platforms.includes(platform)).map((d) => ({
     name: d.name,
     present: d.probes.some((p) => probe(p)),
     install: installHint(d.name, platform, probe),

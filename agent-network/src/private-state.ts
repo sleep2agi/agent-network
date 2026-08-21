@@ -13,6 +13,20 @@ import {
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
+import { execFileSync } from "node:child_process";
+
+function restrictWindowsAcl(path: string, directory: boolean): void {
+  const sid = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
+    "[Security.Principal.WindowsIdentity]::GetCurrent().User.Value"], {
+    encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
+  }).trim();
+  if (!/^S-1-[0-9-]+$/.test(sid)) throw new Error("could not resolve current Windows SID");
+  const suffix = directory ? "(OI)(CI)F" : "F";
+  execFileSync("icacls.exe", [path, "/inheritance:r", "/grant:r",
+    `*${sid}:${suffix}`, `*S-1-5-18:${suffix}`, `*S-1-5-32-544:${suffix}`], {
+    stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
+  });
+}
 
 function openOwned(path: string, flags: number, expected: "file" | "directory"): number {
   const before = lstatSync(path);
@@ -34,6 +48,10 @@ function openOwned(path: string, flags: number, expected: "file" | "directory"):
 
 export function ensurePrivateDirectory(path: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 });
+  if (process.platform === "win32") {
+    restrictWindowsAcl(path, true);
+    return;
+  }
   const fd = openOwned(path, constants.O_RDONLY | (constants.O_DIRECTORY || 0), "directory");
   try { fchmodSync(fd, 0o700); } finally { closeSync(fd); }
 }
@@ -55,7 +73,7 @@ export function atomicWritePrivateFile(path: string, body: string): void {
       0o600,
     );
     writeFileSync(fd, body, "utf8");
-    fchmodSync(fd, 0o600);
+    if (process.platform !== "win32") fchmodSync(fd, 0o600);
     fsyncSync(fd);
     const stat = fstatSync(fd);
     const uid = process.getuid?.();
@@ -65,8 +83,13 @@ export function atomicWritePrivateFile(path: string, body: string): void {
     closeSync(fd);
     fd = undefined;
     renameSync(temp, path);
-    const parentFd = openOwned(parent, constants.O_RDONLY | (constants.O_DIRECTORY || 0), "directory");
-    try { fsyncSync(parentFd); } finally { closeSync(parentFd); }
+    // node:fs cannot open/fsync directory handles on Windows (EPERM). The
+    // temporary file itself was already fsynced; retain the directory rename
+    // durability barrier on platforms which support it.
+    if (process.platform !== "win32") {
+      const parentFd = openOwned(parent, constants.O_RDONLY | (constants.O_DIRECTORY || 0), "directory");
+      try { fsyncSync(parentFd); } finally { closeSync(parentFd); }
+    }
   } catch (error) {
     if (fd !== undefined) try { closeSync(fd); } catch {}
     rmSync(temp, { force: true });
@@ -87,6 +110,14 @@ export function repairPrivateFilePermissions(path: string): void {
   }
   if (!present) return;
   ensurePrivateDirectory(dirname(path));
+  if (process.platform === "win32") {
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink() || !stat.isFile() || stat.nlink !== 1) {
+      throw new Error(`private state is not an owner-controlled file: ${path}`);
+    }
+    restrictWindowsAcl(path, false);
+    return;
+  }
   const fd = openOwned(path, constants.O_RDONLY, "file");
   try { fchmodSync(fd, 0o600); } finally { closeSync(fd); }
 }

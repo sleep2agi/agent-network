@@ -35,7 +35,7 @@ import {
   type SessionInfo,
 } from "../src/copresence-identity";
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
-import { createServer as netCreateServer } from "net";
+import { createConnection as netCreateConnection, createServer as netCreateServer } from "net";
 import { PassThrough } from "stream";
 import { checkbox, confirm, select } from "@inquirer/prompts";
 import { ensureGitignoreRule, ensureGitignoreRules } from "../src/gitignore-writeback";
@@ -130,7 +130,21 @@ import {
   collectClaudeVendorEnvForCreate,
   planPlainSecretEnvRewrites,
 } from "../src/claude-vendor-env";
+import {
+  closeLog,
+  ensureWindowsPrivateDirectory,
+  openPrivateAppendLog,
+  probeWindowsCreationDate,
+  readWindowsCopresenceRecord,
+  taskkillWindowsProcessTree,
+  windowsCopresenceLogPath,
+  windowsCopresenceRecordPath,
+  writeWindowsCopresenceRecord,
+  decideWindowsManagedStop,
+  type WindowsManagedProcess,
+} from "../src/windows-codex-copresence";
 import { normalizeBatchWorkdir } from "../src/batch-workdir";
+import { copresenceThreadPlan } from "../src/codex-copresence-thread";
 import { loadMockLlmRules, resolveMockLlmReply } from "../src/mock-llm";
 import {
   decideDashboardListener,
@@ -363,7 +377,11 @@ async function resolveCopresenceWebSocketCtor(): Promise<any> {
 // Minimal WebSocket JSON-RPC thread creator against a running `codex
 // app-server`. Mirrors agent-node/tests/rfc-030-create-thread.ts but inlined
 // so the shipped CLI can call it (tests/ is not published).
-async function createCodexCopresenceThread(ws: string, timeoutMs = 60_000): Promise<string> {
+async function createCodexCopresenceThread(
+  ws: string,
+  timeoutMs = 60_000,
+  resumeThreadId?: string,
+): Promise<string> {
   const WsCtor = await resolveCopresenceWebSocketCtor();
   const socket = new WsCtor(ws);
   const deadline = Date.now() + timeoutMs;
@@ -413,7 +431,13 @@ async function createCodexCopresenceThread(ws: string, timeoutMs = 60_000): Prom
       // server path; every other initialize failure is real.
       if (!isAlreadyInitializedError(e)) throw e;
     }
-    const started: any = await request("thread/start", {}, 15_000);
+    const plan = copresenceThreadPlan(resumeThreadId);
+    if (plan.method === "thread/resume") {
+      if (!SAFE_THREAD_ID.test(plan.params.threadId)) throw new Error("stored threadId has unexpected shape");
+      await request(plan.method, plan.params, 15_000);
+      return plan.params.threadId;
+    }
+    const started: any = await request(plan.method, plan.params, 15_000);
     const threadId: string | undefined = started?.threadId ?? started?.thread?.id;
     if (!threadId) throw new Error("thread/start returned no threadId");
     // Tiny turn persists the rollout so `codex resume --remote` can adopt.
@@ -551,6 +575,29 @@ async function ensureLocalHubRunning(hub: string): Promise<void> {
   //    that no longer exists. Observed exactly that: the session was gone and
   //    the only thing printed was our own 60s timeout. The reason lives here.
   const hubLog = join(tmpdir(), `anet-hub-start-${process.pid}.log`);
+  if (process.platform === "win32") {
+    console.log(`[anet] local hub ${hub} is not up — starting it as a managed Windows background process`);
+    const hubPort = (() => { try { return new URL(hub).port || "9200"; } catch { return "9200"; } })();
+    const fd = openPrivateAppendLog(hubLog);
+    try {
+      const child = spawn(process.execPath, [process.argv[1] ?? "", "hub", "start", "--port", hubPort], {
+        cwd: process.cwd(), detached: true, windowsHide: true,
+        stdio: ["ignore", fd, fd], env: { ...process.env },
+      });
+      child.unref();
+    } catch (e) {
+      console.error(`[anet] ❌ could not start the local hub on Windows: ${(e as Error).message}`);
+      process.exit(1);
+    } finally { closeLog(fd); }
+    const deadline = Date.now() + 60_000;
+    while (Date.now() < deadline) {
+      if (await hubAnswersHealth(hub)) { console.log(`[anet] local hub is up`); return; }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    console.error(`[anet] ❌ the local hub did not answer ${hub}/health within 60s.`);
+    try { console.error(readFileSync(hubLog, "utf8").trim().split("\n").slice(-12).join("\n")); } catch {}
+    process.exit(1);
+  }
   if (tmuxSessionRunning(ANET_HUB_TMUX_SESSION)) {
     console.log(`[anet] local hub is starting in tmux=${ANET_HUB_TMUX_SESSION} — waiting for it`);
   } else {
@@ -610,6 +657,174 @@ async function ensureLocalHubRunning(hub: string): Promise<void> {
   process.exit(1);
 }
 
+async function waitForFileText(path: string, needle: string, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try { if (readFileSync(path, "utf8").includes(needle)) return true; } catch {}
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  return false;
+}
+
+async function waitForLoopbackPort(port: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const connected = await new Promise<boolean>((resolve) => {
+      const socket = netCreateConnection({ host: "127.0.0.1", port });
+      const finish = (ok: boolean) => { socket.destroy(); resolve(ok); };
+      socket.setTimeout(500);
+      socket.once("connect", () => finish(true));
+      socket.once("error", () => finish(false));
+      socket.once("timeout", () => finish(false));
+    });
+    if (connected) return true;
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  return false;
+}
+
+async function windowsManagedProcess(
+  role: "appsrv" | "bridge",
+  command: string,
+  argv: string[],
+  env: NodeJS.ProcessEnv,
+  logPath: string,
+  shell = false,
+): Promise<WindowsManagedProcess> {
+  const fd = openPrivateAppendLog(logPath);
+  let child;
+  try {
+    child = spawn(command, argv, {
+      cwd: process.cwd(), env, detached: true, windowsHide: true,
+      stdio: ["ignore", fd, fd], shell,
+    });
+    child.unref();
+  } finally { closeLog(fd); }
+  if (!child?.pid) throw new Error(`${role} did not return a pid`);
+  let creationDate: string | null = null;
+  for (let i = 0; i < 30 && !creationDate; i++) {
+    creationDate = probeWindowsCreationDate(child.pid);
+    if (!creationDate) await new Promise((r) => setTimeout(r, 100));
+  }
+  if (!creationDate) {
+    try { taskkillWindowsProcessTree(child.pid); } catch {}
+    throw new Error(`${role} pid=${child.pid} has no queryable Windows CreationDate; refusing an unmanaged process`);
+  }
+  return { role, pid: child.pid, creationDate, logPath };
+}
+
+async function stopPriorWindowsCopresence(nodeId: string): Promise<void> {
+  const prior = readWindowsCopresenceRecord(nodesDir(), nodeId);
+  if (!prior) return;
+  const decision = decideWindowsManagedStop(prior, probeWindowsCreationDate);
+  for (const process of decision.safe) {
+    try { taskkillWindowsProcessTree(process.pid); }
+    catch (e) {
+      throw new Error(`could not stop prior ${process.role} pid=${process.pid}: ${(e as Error).message}`);
+    }
+  }
+  rmSync(windowsCopresenceRecordPath(nodesDir(), nodeId), { force: true });
+}
+
+async function startWindowsCodexCopresence(
+  resolved: NonNullable<ReturnType<typeof resolveNodeRef>>,
+  displayName: string,
+  opts: CopresenceOptions,
+  model: string,
+): Promise<void> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new Error("Windows Codex co-presence needs an interactive console (Windows Terminal, PowerShell, or cmd.exe)");
+  }
+  const unsafeCmd = /[\r\n&|<>^%!`()\"]/;
+  if (unsafeCmd.test(opts.codexBin) || unsafeCmd.test(opts.model || "")) {
+    throw new Error("Windows codex command/model contains cmd.exe metacharacters");
+  }
+  await stopPriorWindowsCopresence(resolved.id);
+  const port = await findFreeLoopbackPort(opts.port);
+  const wsUrl = `ws://127.0.0.1:${port}`;
+  const posture = codexCopresencePosture(opts.dangerFullAccess, resolved.profile, displayName);
+  if (posture.downgradeNotice) console.error(posture.downgradeNotice);
+  const marker = randomUUID();
+  const appLog = windowsCopresenceLogPath(nodesDir(), resolved.id, "appsrv");
+  const bridgeLog = windowsCopresenceLogPath(nodesDir(), resolved.id, "bridge");
+  rmSync(appLog, { force: true });
+  rmSync(bridgeLog, { force: true });
+  const hubMcpUrlToml = `mcp_servers.commhub.url=${opts.hub}/mcp`;
+  const bearerTomlLiteral = `mcp_servers.commhub.bearer_token_env_var=ANET_CODEX_COMMHUB_TOKEN`;
+  const appEnv = {
+    ...process.env,
+    CODEX_HOME: opts.codexHome,
+    ANET_NODE_MARKER: marker,
+    ANET_CODEX_COMMHUB_TOKEN: opts.token,
+  };
+  const managed: WindowsManagedProcess[] = [];
+  try {
+    managed.push(await windowsManagedProcess("appsrv", opts.codexBin, [
+      "app-server",
+      "-c", `approval_policy=${posture.approvalPolicy}`,
+      "-c", `sandbox_mode=${posture.sandboxMode}`,
+      "-c", `model=${model}`,
+      "-c", hubMcpUrlToml,
+      "-c", bearerTomlLiteral,
+      "--listen", wsUrl,
+    ], appEnv, appLog, true));
+    writeWindowsCopresenceRecord(nodesDir(), resolved.id, managed);
+    console.log(`[anet] ① app-server pid=${managed[0].pid} listening ${wsUrl} (sandbox=${posture.sandboxMode})…`);
+    // npm installs Codex as codex.cmd. Its cmd.exe grandchild does not
+    // reliably inherit a detached Node file descriptor on Windows, so log
+    // text is not a readiness signal. Probe the actual loopback listener.
+    if (!await waitForLoopbackPort(port, 25_000)) {
+      throw new Error(`app-server did not bind ${wsUrl} within 25s; log=${appLog}`);
+    }
+    const threadId = await createCodexCopresenceThread(wsUrl, 60_000, resolved.profile.codexThreadId);
+    if (!SAFE_THREAD_ID.test(threadId)) throw new Error("unexpected threadId shape");
+    const rawCfgPath = join(nodesDir(), resolved.id, "config.json");
+    const rawCfg = JSON.parse(readFileSync(rawCfgPath, "utf-8"));
+    rawCfg.codexAppServerPort = port;
+    rawCfg.codexAppServerUrl = wsUrl;
+    rawCfg.codexThreadId = threadId;
+    delete rawCfg.session;
+    atomicWritePrivateJson(rawCfgPath, rawCfg);
+
+    const bridgeEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      ANET_NODE_MARKER: marker,
+      ANET_COPRESENCE_BRIDGE: "1",
+    };
+    delete bridgeEnv.COMMHUB_TOKEN;
+    delete bridgeEnv.ANET_CODEX_COMMHUB_TOKEN;
+    managed.push(await windowsManagedProcess("bridge", process.execPath, [
+      process.argv[1] ?? "", "node", "start", displayName,
+    ], bridgeEnv, bridgeLog));
+    writeWindowsCopresenceRecord(nodesDir(), resolved.id, managed);
+    await new Promise((r) => setTimeout(r, 3000));
+    if (!probeWindowsCreationDate(managed[1].pid)) throw new Error(`bridge exited during startup; log=${bridgeLog}`);
+
+    console.log(`[anet] ② bridge pid=${managed[1].pid} running`);
+    console.log(`[anet] ③ opening Codex TUI in this Windows console (thread=${threadId})`);
+    console.log(`[anet]    stop from another terminal: anet node stop ${displayName}`);
+    const tuiArgs = ["resume", "--remote", wsUrl, threadId];
+    if (opts.dangerFullAccess) tuiArgs.push("--dangerously-bypass-approvals-and-sandbox");
+    const tui = spawn(opts.codexBin, tuiArgs, {
+      cwd: process.cwd(), env: { ...process.env, CODEX_HOME: opts.codexHome },
+      stdio: "inherit", windowsHide: false, shell: true,
+    });
+    const code = await new Promise<number>((resolve, reject) => {
+      tui.once("error", reject);
+      tui.once("exit", (c) => resolve(c ?? 1));
+    });
+    if (code !== 0) throw new Error(`Codex TUI exited with code ${code}`);
+  } catch (e) {
+    for (const process of [...managed].reverse()) {
+      if (probeWindowsCreationDate(process.pid) === process.creationDate) {
+        try { taskkillWindowsProcessTree(process.pid); } catch {}
+      }
+    }
+    rmSync(windowsCopresenceRecordPath(nodesDir(), resolved.id), { force: true });
+    throw e;
+  }
+}
+
 async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOptions): Promise<void> {
   const resolved = resolveNodeRef(nodeId);
   if (!resolved) {
@@ -618,6 +833,9 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   }
   const displayName = nodeDisplayName(resolved.id, resolved.profile);
   const profile = resolved.profile;
+  // Resolve once for both platform backends. Keeping a second default inside
+  // the Windows branch lets Windows and POSIX silently drift.
+  const model = opts.model || DEFAULT_CODEX_MODEL;
   if (profile.runtime !== "codex-app-server") {
     console.error(`[anet] ❌ --copresence requires runtime=codex-app-server (node "${displayName}" is runtime=${profile.runtime}).`);
     console.error(`[anet]    Create a copresence-capable node with:`);
@@ -695,11 +913,11 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // 0600 env file inside; if we can't enforce it, refuse to start rather than
   // silently degrade to whatever perms already exist.
   try {
-    chmodSync(opts.codexHome, 0o700);
+    if (process.platform === "win32") ensureWindowsPrivateDirectory(opts.codexHome);
+    else chmodSync(opts.codexHome, 0o700);
   } catch (e: any) {
-    console.error(`[anet] ❌ cannot set 0700 on CODEX_HOME (${opts.codexHome}): ${e?.message || e}`);
-    console.error(`[anet]    The token env file requires a 0700 parent directory.`);
-    console.error(`[anet]    Fix perms manually (chmod 700 ${shellQuote(opts.codexHome)}) or point --codex-home elsewhere.`);
+    console.error(`[anet] ❌ cannot restrict CODEX_HOME (${opts.codexHome}): ${e?.message || e}`);
+    console.error(`[anet]    Credentials require 0700 on POSIX or a protected ACL on Windows.`);
     process.exit(1);
   }
 
@@ -733,6 +951,17 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     // Never refuse to launch over this: a node that starts and then reports its
     // blocker is strictly more useful than one that will not start.
     console.error(`[anet] ⚠ could not stage CODEX_HOME state: ${(e as Error).message}`);
+  }
+
+  if (process.platform === "win32") {
+    try {
+      await startWindowsCodexCopresence(resolved, displayName, opts, model);
+      return;
+    } catch (e) {
+      console.error(`[anet] ❌ Windows Codex co-presence failed: ${(e as Error).message}`);
+      console.error(`[anet]    Cleanup: anet node stop ${displayName}`);
+      process.exit(1);
+    }
   }
 
   const { appsrv: appsrvSession, bridge: bridgeSession, tui: tuiSession } =
@@ -808,7 +1037,6 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   }
   const approvalPolicy = posture.approvalPolicy;
   const sandboxMode = posture.sandboxMode;
-  const model = opts.model || DEFAULT_CODEX_MODEL;
 
   // ── piece ① codex app-server (loopback WS + commhub MCP) ──────────────
   // #P2fix必修1 — token to 0600 file, sourced-then-removed inside the tmux
@@ -886,7 +1114,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // ── create fresh thread + persist config ──────────────────────────────
   let threadId: string;
   try {
-    threadId = await createCodexCopresenceThread(wsUrl);
+    threadId = await createCodexCopresenceThread(wsUrl, 60_000, profile.codexThreadId);
   } catch (e: any) {
     console.error(`[anet] ❌ thread/start failed: ${e?.message || e}`);
     console.error(`[anet]    Debug:   tmux attach -t ${shellQuote(`=${appsrvSession}`)}`);
@@ -925,6 +1153,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     execFileSync("tmux", [
       "new-session", "-d", "-s", bridgeSession, "-c", process.cwd(),
       "-e", `ANET_NODE_MARKER=${identityMarker}`,
+      "-e", "ANET_COPRESENCE_BRIDGE=1",
       "bash", "-lc", bridgeCmd,
     ], { stdio: "pipe" });
   } catch (e: any) {
@@ -5640,7 +5869,7 @@ async function startCommand() {
     console.error(`Node "${id}" not found. Create it first: anet node create ${id}`);
     process.exit(1);
   }
-  if (resolvedForCopresence
+  if (process.env.ANET_COPRESENCE_BRIDGE !== "1" && resolvedForCopresence
     && codexCopresenceRequested(copresenceFlagPassed, resolvedForCopresence.profile as any)) {
     const copresenceRuntime = runtimeForExecution(
       resolvedForCopresence.profile,
@@ -7968,6 +8197,34 @@ Stop a running agent node.
   }
 
   const displayName = nodeDisplayName(resolved.id, resolved.profile);
+  if (process.platform === "win32") {
+    let record;
+    try { record = readWindowsCopresenceRecord(nodesDir(), resolved.id); }
+    catch (e) {
+      console.error(`[anet] ❌ refusing Windows co-presence teardown: ${(e as Error).message}`);
+      process.exit(1);
+    }
+    if (record) {
+      const decision = decideWindowsManagedStop(record, probeWindowsCreationDate);
+      for (const refused of decision.refused) {
+        if (refused.reason === "pid-reused") {
+          console.warn(`[anet] ⚠ ${refused.process.role} pid=${refused.process.pid} was reused; leaving the unrelated process untouched`);
+        }
+      }
+      for (const managedProcess of [...decision.safe].reverse()) {
+        try { taskkillWindowsProcessTree(managedProcess.pid); }
+        catch (e) {
+          console.error(`[anet] ❌ taskkill failed for ${managedProcess.role} pid=${managedProcess.pid}: ${(e as Error).message}`);
+          process.exit(1);
+        }
+      }
+      rmSync(windowsCopresenceRecordPath(nodesDir(), resolved.id), { force: true });
+      await stopNode(resolved.id);
+      await notifyServerOffline(resolved.profile, resolved.id);
+      console.log(`[anet] Stopped "${displayName}" (Windows managed app-server + bridge, server notified)`);
+      return;
+    }
+  }
   let allowLegacyTmuxNameSweep = true;
   let identityTeardownKilled = false;
   // #122 — auto-tmux on start needs symmetric cleanup on stop. Kill the
