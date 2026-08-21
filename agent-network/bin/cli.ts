@@ -727,6 +727,7 @@ async function startWindowsCodexCopresence(
   resolved: NonNullable<ReturnType<typeof resolveNodeRef>>,
   displayName: string,
   opts: CopresenceOptions,
+  model: string,
 ): Promise<void> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     throw new Error("Windows Codex co-presence needs an interactive console (Windows Terminal, PowerShell, or cmd.exe)");
@@ -740,7 +741,6 @@ async function startWindowsCodexCopresence(
   const wsUrl = `ws://127.0.0.1:${port}`;
   const posture = codexCopresencePosture(opts.dangerFullAccess, resolved.profile, displayName);
   if (posture.downgradeNotice) console.error(posture.downgradeNotice);
-  const model = opts.model || DEFAULT_CODEX_MODEL;
   const marker = randomUUID();
   const appLog = windowsCopresenceLogPath(nodesDir(), resolved.id, "appsrv");
   const bridgeLog = windowsCopresenceLogPath(nodesDir(), resolved.id, "bridge");
@@ -830,6 +830,9 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   }
   const displayName = nodeDisplayName(resolved.id, resolved.profile);
   const profile = resolved.profile;
+  // Resolve once for both platform backends. Keeping a second default inside
+  // the Windows branch lets Windows and POSIX silently drift.
+  const model = opts.model || DEFAULT_CODEX_MODEL;
   if (profile.runtime !== "codex-app-server") {
     console.error(`[anet] ❌ --copresence requires runtime=codex-app-server (node "${displayName}" is runtime=${profile.runtime}).`);
     console.error(`[anet]    Create a copresence-capable node with:`);
@@ -949,7 +952,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
 
   if (process.platform === "win32") {
     try {
-      await startWindowsCodexCopresence(resolved, displayName, opts);
+      await startWindowsCodexCopresence(resolved, displayName, opts, model);
       return;
     } catch (e) {
       console.error(`[anet] ❌ Windows Codex co-presence failed: ${(e as Error).message}`);
@@ -1031,7 +1034,6 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   }
   const approvalPolicy = posture.approvalPolicy;
   const sandboxMode = posture.sandboxMode;
-  const model = opts.model || DEFAULT_CODEX_MODEL;
 
   // ── piece ① codex app-server (loopback WS + commhub MCP) ──────────────
   // #P2fix必修1 — token to 0600 file, sourced-then-removed inside the tmux
