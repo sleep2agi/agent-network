@@ -50,11 +50,10 @@ describe("the hint is a command, not advice", () => {
     expect(linux.find((d) => d.name === "codex")!.install).toBe("npm install -g @openai/codex");
   });
 
-  test("says so honestly when there is no one-liner", () => {
-    // Better than printing a linux command on windows and having it fail.
-    expect(copresenceDeps(has(), "win32").find((d) => d.name === "tmux")!.install).toBeNull();
-    expect(describeMissingDeps(copresenceDeps(has(), "win32").filter((d) => d.name === "tmux"), "n"))
-      .toContain("no install command for this platform");
+  test("Windows uses its native console backend and does not require tmux", () => {
+    const windows = copresenceDeps(has(), "win32");
+    expect(windows.map((d) => d.name)).toEqual(["codex", "bunx"]);
+    expect(windows.some((d) => d.name === "tmux")).toBe(false);
   });
 
   test("the block names every gap and what each is for", () => {

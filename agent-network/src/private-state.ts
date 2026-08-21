@@ -65,8 +65,13 @@ export function atomicWritePrivateFile(path: string, body: string): void {
     closeSync(fd);
     fd = undefined;
     renameSync(temp, path);
-    const parentFd = openOwned(parent, constants.O_RDONLY | (constants.O_DIRECTORY || 0), "directory");
-    try { fsyncSync(parentFd); } finally { closeSync(parentFd); }
+    // node:fs cannot open/fsync directory handles on Windows (EPERM). The
+    // temporary file itself was already fsynced; retain the directory rename
+    // durability barrier on platforms which support it.
+    if (process.platform !== "win32") {
+      const parentFd = openOwned(parent, constants.O_RDONLY | (constants.O_DIRECTORY || 0), "directory");
+      try { fsyncSync(parentFd); } finally { closeSync(parentFd); }
+    }
   } catch (error) {
     if (fd !== undefined) try { closeSync(fd); } catch {}
     rmSync(temp, { force: true });
