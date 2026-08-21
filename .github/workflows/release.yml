@@ -207,7 +207,10 @@ jobs:
                 || { echo "::error::npm install -g failed"; cat /tmp/install.log; exit 1; }
 
               # case 1 — version matches tag
-              ver=$(anet --version | tr -d "v\n ")
+              # `anet --version` intentionally prints a first-line version plus
+              # component diagnostics. Parse only that contract line; flattening
+              # the whole output also deleted every letter "v" from prereleases.
+              ver=$(anet --version | sed -n '1{s/^anet v//;p;q;}')
               echo "anet --version → $ver (expected $GATED_VER)"
               [ "$ver" = "$GATED_VER" ] \
                 || { echo "::error::version mismatch — anet says $ver, gating $GATED_VER"; exit 1; }
