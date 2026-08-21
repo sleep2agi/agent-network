@@ -131,6 +131,11 @@ describe("normalizeRuntime — explicit choices are preserved", () => {
     expect(normalizeRuntime("codex-tui")).toBe("codex-app-server");
   });
 
+  test("user-facing alias 'codex-cli' → codex-app-server", () => {
+    expect(normalizeRuntime("codex-cli")).toBe("codex-app-server");
+    expect(normalizeRuntimeStrict("codex-cli")).toBe("codex-app-server");
+  });
+
   test("alias 'codex-appserver' → codex-app-server", () => {
     expect(normalizeRuntime("codex-appserver")).toBe("codex-app-server");
   });

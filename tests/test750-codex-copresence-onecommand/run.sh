@@ -47,13 +47,13 @@ pass "environment (no host state; tmux + codex stub present so the launcher reac
 log "[L1] decision functions"
 cd "$ROOT/agent-network"
 bun test src/codex-copresence-profile.test.ts src/codex-copresence-preflight.test.ts \
-     src/copresence-deps.test.ts >>"$REPORT" 2>&1 \
+     src/copresence-deps.test.ts src/normalize-runtime.test.ts >>"$REPORT" 2>&1 \
   || fail "codex co-presence unit tests"
 # 🔴 A green `bun test` does not prove these files ran — a path typo produces
 #    "0 tests" and exit 0 all the same. Assert the denominator.
 UNIT_TOTAL=$(bun test src/codex-copresence-profile.test.ts src/codex-copresence-preflight.test.ts \
-     src/copresence-deps.test.ts 2>&1 | grep -oE '^ *[0-9]+ pass' | grep -oE '[0-9]+' | head -1)
-[ "${UNIT_TOTAL:-0}" -ge 44 ] || fail "expected >=44 unit assertions, ran ${UNIT_TOTAL:-0} — did the files resolve?"
+     src/copresence-deps.test.ts src/normalize-runtime.test.ts 2>&1 | grep -oE '^ *[0-9]+ pass' | grep -oE '[0-9]+' | head -1)
+[ "${UNIT_TOTAL:-0}" -ge 74 ] || fail "expected >=74 unit assertions, ran ${UNIT_TOTAL:-0} — did the files resolve?"
 log "unit assertions: $UNIT_TOTAL"
 pass "profile + preflight decision functions ($UNIT_TOTAL tests)"
 
@@ -86,6 +86,34 @@ $CLI node create withflag --runtime codex-tui --copresence --hub "$HUB" >>"$REPO
 [ "$(field .anet/nodes/withflag/config.json codexCopresence)" = "True" ] \
   || fail "create --copresence did not record codexCopresence"
 
+# The operator-facing codex-cli name itself means co-presence. This is the
+# non-interactive equivalent of choosing that row in the runtime picker.
+$CLI node create clialias --runtime codex-cli --hub "$HUB" >>"$REPORT" 2>&1 \
+  || fail "create --runtime codex-cli"
+[ "$(field .anet/nodes/clialias/config.json codexCopresence)" = "True" ] \
+  || fail "--runtime codex-cli did not record codexCopresence"
+
+# Real TTY picker coverage: move from the first runtime row to the fourth
+# (`codex-cli — Codex 共存 TUI`) and press Enter. A flag-only test cannot prove
+# that an operator can discover and choose this in `anet node create`.
+python3 - "$ROOT/agent-network/bin/cli.ts" "$WORK" "$HUB" <<'PY' || fail "interactive codex-cli picker"
+import os, pexpect, sys
+cli, cwd, hub = sys.argv[1:]
+child = pexpect.spawn("bun", [cli, "node", "create", "picker", "--hub", hub], cwd=cwd,
+                      env=os.environ.copy(), encoding="utf-8", timeout=30)
+child.logfile = open(os.path.join(cwd, "picker.out"), "w", encoding="utf-8")
+child.expect("选择 runtime:")
+child.send("\x1b[B\x1b[B\x1b[B\r")
+child.expect(pexpect.EOF)
+if child.exitstatus not in (0, None):
+    raise SystemExit(child.exitstatus)
+PY
+cat "$WORK/picker.out" >>"$REPORT"
+[ "$(field .anet/nodes/picker/config.json codexCopresence)" = "True" ] \
+  || fail "interactive codex-cli choice did not record codexCopresence"
+grep -q 'Codex 共存 TUI' "$WORK/picker.out" \
+  || fail "interactive picker did not expose the user-facing Codex co-presence choice"
+
 $CLI node create noflag --runtime codex-tui --hub "$HUB" >"$WORK/noflag.out" 2>&1 || fail "create without flag"
 cat "$WORK/noflag.out" >>"$REPORT"
 [ "$(field .anet/nodes/noflag/config.json codexCopresence)" = "None" ] \
@@ -98,7 +126,7 @@ grep -q 'this node starts headless' "$WORK/noflag.out" \
 $CLI node create sdknode --runtime codex-sdk --copresence --hub "$HUB" >>"$REPORT" 2>&1 || fail "create codex-sdk"
 [ "$(field .anet/nodes/sdknode/config.json codexCopresence)" = "None" ] \
   || fail "codexCopresence written onto a codex-sdk node"
-pass "create records the choice, only for the runtime that can use it, and says so when it does not"
+pass "flag, codex-cli alias, and real interactive picker all record co-presence only on the supported runtime"
 
 log "[L3] start routes on the recorded field, with no flag"
 set +e

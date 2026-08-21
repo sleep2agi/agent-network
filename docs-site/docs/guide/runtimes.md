@@ -23,7 +23,7 @@
 | `claude-agent-sdk` | `@anthropic-ai/claude-agent-sdk` (随 agent-node 装) | 编程式调用任意 Anthropic 兼容 API | Anthropic 直连 / MiniMax / 书生 Intern / 小米 MiMo / DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / 通义千问 ... ([完整表](/guide/multi-model)) | API Key | **唯一会弹 vendor 子菜单 → 选 vendor → 选 model → 填 API Key** |
 | `codex-sdk` | `@openai/codex-sdk` (随 agent-node 装) | 写代码 / 跑命令 | OpenAI Codex (gpt-5 等) | 已 `codex login` ([@openai/codex](https://www.npmjs.com/package/@openai/codex) CLI) | 选完 print `codex login` hint, **跳过 vendor** |
 | `grok-build-acp` | spawn 本机 `grok` ACP server | 用 xAI Grok Build 跑任务 / 协作 | xAI Grok (grok-build 系列) | 已 `grok login` + `GROK_CODE_XAI_API_KEY` env (该 runtime **另需**该 env, 非 wizard 输出) | 选完 print `grok login` hint, **跳过 vendor** |
-| `codex-app-server` (preview) | OWNED codex app-server 桥 ([RFC-030](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)) | 复用 codex TUI / 人机共存桥（人和 agent 共用一个 codex 会话） | OpenAI Codex（默认 gpt-5.6-sol） | 已 `codex login`（该 runtime 需 codex CLI） | 选完 print `codex login` hint, **跳过 vendor** |
+| `codex-cli`（内部存为 `codex-app-server`，preview） | OWNED codex app-server 桥 ([RFC-030](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)) | Codex TUI 人机共存（人和 agent 共用一个 thread） | OpenAI Codex（默认 gpt-5.6-sol） | 已 `codex login` | 向导选中即启用共存，无第二次模式选择 |
 | `opencode-cli` (preview) | spawn 本机 `opencode` 命令 (公版 sst/opencode CLI, 固定 `opencode-ai` 版本 pin) | 用公版 opencode 做多 vendor 前端 (统一 session / auth 抽象, [RFC-029](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md)) | 多 vendor: Anthropic 原生 / OpenAI preset | 装 `opencode` CLI (`npm i -g opencode-ai@<pin>`) + 选 vendor preset (Anthropic 读 `ANTHROPIC_API_KEY` / OpenAI 读 `OPENAI_API_KEY` env) | 选完提示装 opencode CLI → 选 vendor preset (anthropic / openai), API key 从 env 读、**不 prompt** |
 
 > ⚠️ **`opencode-cli` 仅 preview 渠道**（RFC-029 迭代中）：npm **latest 尚未包含**——装 latest 后 `anet node create` 选单只有正式版的那几个 runtime（`claude-code-cli` / `claude-agent-sdk` / `codex-sdk` / `grok-build-acp`）。稳定后再进 latest。
@@ -64,7 +64,7 @@
 - **想白嫖 Claude 订阅 / 新手最省事** → `claude-code-cli` (`claude auth login` 后 0 配置)
 - **写文案 / 翻译 / 分析 (编程式) / 接国产模型** → `claude-agent-sdk` + 在 wizard 里选对应 vendor
 - **写代码 / 跑命令** → `codex-sdk`
-- **人和 Agent 共用一个 Codex TUI/thread** → preview `codex-app-server`；创建时加一次 `--copresence`，之后 `anet node start <alias>` 即可启动或恢复（[完整指南](/guide/codex-copresence)）
+- **人和 Agent 共用一个 Codex TUI/thread** → 向导选择 preview `codex-cli`；之后 `anet node start <alias>` 即可启动或恢复（[完整指南](/guide/codex-copresence)）
 - **用 xAI Grok Build** → `grok-build-acp` ([详细 runtime 指南 ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md))
 - **想用公版 sst/opencode CLI 当多 vendor 前端（统一 session/auth）** → `opencode-cli`（需本机装 `opencode` CLI + Anthropic/OpenAI env key，[RFC-029](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md)）
 - **接国产 / 非内置 vendor** (GLM / Kimi / OpenRouter / vLLM / SiliconFlow / 通义千问 等) → `claude-agent-sdk` + 在 vendor 子菜单选 `自定义 (custom)` + `ANTHROPIC_BASE_URL`

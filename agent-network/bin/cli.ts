@@ -3280,6 +3280,11 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
   // Default to claude-agent-sdk — works with any Anthropic-compatible API
   // (MiniMax/DeepSeek/GLM/Kimi/Anthropic). claude-code-cli only works for Max/Pro
   // subscribers and was a poor default that left non-subscribers with broken nodes.
+  // User-facing `codex-cli` means the live shared TUI. Keep the canonical
+  // stored runtime while recording co-presence for later plain starts.
+  if (opts.runtime === "codex-cli" && opts.copresence === undefined) {
+    opts.copresence = "true";
+  }
   const runtime = runtimeForExecution(opts.runtime, "create node");
   const defaultModel = defaultCodexModelForRuntime(runtime);
   const nodeId = generateNodeId();
@@ -4099,7 +4104,7 @@ function createRuntimeChoices() {
     { value: "claude-agent-sdk", name: "claude-agent-sdk — 任意 OpenAI/Anthropic-compat vendor (intern / MiniMax / Claude / GLM / ...)" },
     { value: "claude-code-cli", name: "claude-code-cli — Anthropic Claude (Max/Pro plan), 复用 `claude` CLI 登录态" },
     { value: "codex-sdk", name: "codex-sdk — OpenAI Codex, 复用 `codex login` 登录态" },
-    { value: "codex-app-server", name: "codex-app-server — OpenAI Codex TUI 桥 (RFC-030)" },
+    { value: "codex-app-server", name: "codex-cli — Codex 共存 TUI（人和 Agent 共用一个 thread）" },
     { value: "grok-build-acp", name: "grok-build-acp — Grok Build ACP, 复用 `grok` CLI 登录态" },
     { value: "grok-build-cli", name: "grok-build-cli — Grok 共存 TUI（preview，仅可信任务）" },
     { value: "opencode-cli", name: "opencode-cli — 公版 OpenCode CLI, Anthropic/OpenAI preset (RFC-029)" },
@@ -4155,8 +4160,9 @@ This wizard creates one agent node for this project:
     console.log(`[anet] 请确保已执行: codex login`);
   } else if (pickedRuntime === "codex-app-server") {
     opts.runtime = "codex-app-server";
+    opts.copresence = "true";
     console.log(`[anet] 请确保已执行: codex login （codex-app-server 需要 codex CLI）`);
-    console.log(`[anet] 接管已有 codex 会话：在 config.json 里设 codexAppServerUrl + codexThreadId`);
+    console.log(`[anet] 已选择 Codex 共存 TUI；以后运行 anet node start ${id} 即可启动或恢复`);
   } else if (pickedRuntime === "grok-build-acp" || pickedRuntime === "grok-build-cli") {
     opts.runtime = pickedRuntime;
     console.log(`[anet] 请确保已安装并登录 Grok Build CLI: grok login`);
@@ -4314,6 +4320,12 @@ async function createCommand(idOverride?: string) {
   const opts = parseOpts();
   const gc = loadGlobal();
 
+  // Preserve the user-facing alias's product meaning before strict runtime
+  // normalization replaces it with the internal `codex-app-server` name.
+  if (opts.runtime === "codex-cli" && opts.copresence === undefined) {
+    opts.copresence = "true";
+  }
+
   // ── Check hub connection BEFORE asking for model/key ──
   if (!gc.hub) {
     try {
@@ -4386,6 +4398,7 @@ async function createCommand(idOverride?: string) {
   } else if (opts.runtime === "codex-sdk") {
     console.log("[anet] 请确保已执行: codex login");
   } else if (opts.runtime === "codex-app-server") {
+    if (!runtimeAlreadyExplicit) opts.copresence = "true";
     console.log("[anet] 请确保已执行: codex login（codex-app-server 需要 codex CLI）");
   } else if (opts.runtime === "grok-build-acp" || opts.runtime === "grok-build-cli") {
     console.log("[anet] 请确保已安装并登录 Grok Build CLI: grok login");
