@@ -25,13 +25,15 @@ const env = {
 };
 
 function command(args, stdin = "") {
-  const result = spawnSync(bun, [cli, ...args], { cwd: project, env, input: stdin, encoding: "utf8" });
+  console.log(`PHASE command: ${args.join(" ")}`);
+  const result = spawnSync(bun, [cli, ...args], { cwd: project, env, input: stdin, encoding: "utf8", timeout: 30_000 });
   const output = (result.stdout || "") + (result.stderr || "");
   if (result.status !== 0) throw new Error(`command failed (${args.join(" ")}):\n${output}`);
   return output;
 }
 
 function terminal(args, onData, timeoutMs = 45_000) {
+  console.log(`PHASE terminal: ${args.join(" ")}`);
   return new Promise((resolvePromise, reject) => {
     const child = pty.spawn(bun, [cli, ...args], { cwd: project, env, cols: 120, rows: 40 });
     let output = "";
@@ -70,6 +72,7 @@ mkdirSync(codexHome, { recursive: true });
 writeFileSync(join(codexHome, "auth.json"), "{}\n");
 
 async function startAndStop(label) {
+  console.log(`PHASE ${label}`);
   const out = await terminal(["node", "start", "windows-picker", "--no-inherit-codex-home"], undefined, 60_000);
   if (!out.includes("FAKE_CODEX_TUI_RESUMED thread_windows_e2e")) throw new Error(`${label}: TUI did not resume expected thread\n${out}`);
   const record = join(project, ".anet", "nodes", "windows-picker", "windows-copresence.json");
