@@ -35,7 +35,7 @@ import {
   type SessionInfo,
 } from "../src/copresence-identity";
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
-import { createServer as netCreateServer } from "net";
+import { createConnection as netCreateConnection, createServer as netCreateServer } from "net";
 import { PassThrough } from "stream";
 import { checkbox, confirm, select } from "@inquirer/prompts";
 import { ensureGitignoreRule, ensureGitignoreRules } from "../src/gitignore-writeback";
@@ -666,6 +666,23 @@ async function waitForFileText(path: string, needle: string, timeoutMs: number):
   return false;
 }
 
+async function waitForLoopbackPort(port: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const connected = await new Promise<boolean>((resolve) => {
+      const socket = netCreateConnection({ host: "127.0.0.1", port });
+      const finish = (ok: boolean) => { socket.destroy(); resolve(ok); };
+      socket.setTimeout(500);
+      socket.once("connect", () => finish(true));
+      socket.once("error", () => finish(false));
+      socket.once("timeout", () => finish(false));
+    });
+    if (connected) return true;
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  return false;
+}
+
 async function windowsManagedProcess(
   role: "appsrv" | "bridge",
   command: string,
@@ -750,7 +767,10 @@ async function startWindowsCodexCopresence(
     ], appEnv, appLog, true));
     writeWindowsCopresenceRecord(nodesDir(), resolved.id, managed);
     console.log(`[anet] ① app-server pid=${managed[0].pid} listening ${wsUrl} (sandbox=${posture.sandboxMode})…`);
-    if (!await waitForFileText(appLog, `listening on: ${wsUrl}`, 25_000)) {
+    // npm installs Codex as codex.cmd. Its cmd.exe grandchild does not
+    // reliably inherit a detached Node file descriptor on Windows, so log
+    // text is not a readiness signal. Probe the actual loopback listener.
+    if (!await waitForLoopbackPort(port, 25_000)) {
       throw new Error(`app-server did not bind ${wsUrl} within 25s; log=${appLog}`);
     }
     const threadId = await createCodexCopresenceThread(wsUrl, 60_000, resolved.profile.codexThreadId);
