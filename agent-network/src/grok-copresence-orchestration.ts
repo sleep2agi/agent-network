@@ -68,13 +68,31 @@ export function diagnoseGrokCopresence(input: {
 }
 
 /** True when a plain `anet node start <name>` (no flag) should bring the shared
- *  TUI up by itself. The flag is a one-off; the profile is what makes every
- *  later start a single command. */
+ *  TUI up by itself.
+ *
+ * 🔴 Deliberately NOT keyed on `grokCopresence`. That field is set to true at
+ *    CREATE time for every grok-build-cli node, so reading it here would silently
+ *    change what `anet node start` does for every grok node that already exists —
+ *    they would stop running in the foreground and fork into tmux, unasked. Caught
+ *    exactly that way: a start without the flag entered the orchestration.
+ *
+ *    The codex lane looks the same but is not: `codexCopresence` is written only
+ *    when the operator passes the flag. So grok needs its own record of the
+ *    operator's choice, and `grokCopresenceAuto` is it. */
 export function grokCopresenceRequested(
   flagPassed: boolean,
-  profile: { runtime?: unknown; grokCopresence?: unknown },
+  profile: { runtime?: unknown; grokCopresence?: unknown; grokCopresenceAuto?: unknown },
 ): boolean {
   if (profile.runtime !== "grok-build-cli") return false;
   if (profile.grokCopresence === false) return false;
-  return flagPassed || profile.grokCopresence === true;
+  return flagPassed || profile.grokCopresenceAuto === true;
+}
+
+/** Record the operator's opt-in so the NEXT start needs no flag — and only then.
+ *  Never infer it from `grokCopresence`, which create sets by default. */
+export function shouldPersistGrokCopresence(
+  flagPassed: boolean,
+  profile: { runtime?: unknown; grokCopresenceAuto?: unknown },
+): boolean {
+  return flagPassed && profile.runtime === "grok-build-cli" && profile.grokCopresenceAuto !== true;
 }

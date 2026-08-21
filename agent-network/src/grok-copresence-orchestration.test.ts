@@ -5,6 +5,7 @@ import {
   grokAttachSocketState,
   grokCopresenceRequested,
   grokCopresenceSessions,
+  shouldPersistGrokCopresence,
   GROK_COPRESENCE_CHILD_ENV,
 } from "./grok-copresence-orchestration.js";
 import { copresenceDeps, missingCopresenceDeps } from "./copresence-deps.js";
@@ -81,8 +82,15 @@ describe("grok co-presence: when a bare `anet node start` should do it", () => {
   test("the flag turns it on for this run", () => {
     expect(grokCopresenceRequested(true, grok)).toBe(true);
   });
-  test("a remembered profile makes every later start a single command", () => {
-    expect(grokCopresenceRequested(false, { ...grok, grokCopresence: true })).toBe(true);
+  test("a remembered opt-in makes every later start a single command", () => {
+    expect(grokCopresenceRequested(false, { ...grok, grokCopresenceAuto: true })).toBe(true);
+  });
+  test("🔴 grokCopresence alone must NOT trigger it — create sets that on every grok node", () => {
+    // Reading grokCopresence here would silently change what `anet node start`
+    // does for every grok node that already exists: foreground today, forked
+    // into tmux tomorrow, unasked. Found by running the real command without
+    // the flag and watching it enter the orchestration anyway.
+    expect(grokCopresenceRequested(false, { ...grok, grokCopresence: true })).toBe(false);
   });
   test("a plain grok node with nothing recorded does not silently open a TUI", () => {
     expect(grokCopresenceRequested(false, grok)).toBe(false);
@@ -153,4 +161,42 @@ describe("grok co-presence: the CLI actually routes to it", () => {
     const printed = cli.split("\n").filter((l) => /console\.(log|warn|error)/.test(l));
     expect(printed.filter((l) => /second terminal|Attach from another terminal/.test(l))).toEqual([]);
   });
+});
+
+describe("grok co-presence: remembering the choice", () => {
+  const grok = { runtime: "grok-build-cli" };
+  test("the flag is recorded so the next start needs none", () => {
+    expect(shouldPersistGrokCopresence(true, grok)).toBe(true);
+  });
+  test("nothing is written when the flag was not passed", () => {
+    expect(shouldPersistGrokCopresence(false, grok)).toBe(false);
+  });
+  test("no pointless rewrite when it is already recorded", () => {
+    expect(shouldPersistGrokCopresence(true, { ...grok, grokCopresenceAuto: true })).toBe(false);
+  });
+  test("never recorded on a non-grok node", () => {
+    expect(shouldPersistGrokCopresence(true, { runtime: "codex-app-server" })).toBe(false);
+  });
+});
+
+test("the CLI records the opt-in before orchestrating", () => {
+  const cli = readFileSync(new URL("../bin/cli.ts", import.meta.url), "utf8");
+  expect(cli).toContain("shouldPersistGrokCopresence(copresenceFlagPassed");
+  expect(cli).toContain("grokCopresenceAuto: true");
+});
+
+test("the node session tees its output, so a dead session still explains itself", () => {
+  // A leader that dies during startup takes its tmux session with it; naming
+  // that session is advice pointing at something that no longer exists.
+  const cli = readFileSync(new URL("../bin/cli.ts", import.meta.url), "utf8");
+  expect(cli).toContain("anet-grok-copresence-");
+  expect(cli).toContain("What it printed");
+});
+
+test("hub auto-start forwards COMMHUB_DB into the tmux child", () => {
+  // tmux hands the new session the tmux SERVER's environment, not this
+  // process's. Verified: a hub started this way with COMMHUB_DB set served the
+  // default database and never created the file COMMHUB_DB named.
+  const cli = readFileSync(new URL("../bin/cli.ts", import.meta.url), "utf8");
+  expect(cli).toContain("COMMHUB_DB=${process.env.COMMHUB_DB}");
 });
