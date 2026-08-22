@@ -1,0 +1,20 @@
+Agent Network desktop updater endpoint
+=====================================
+
+Endpoint: https://anet.sh/desktop/update/latest.json
+Origin: https://github.com/sleep2agi/agent-network-app/releases/latest/download/latest.json
+
+The endpoint is a Vercel rewrite. The stable URL belongs to anet.sh while the
+signed manifest and update binaries remain on GitHub Releases.
+
+Validation command:
+  sg docker -c 'tests/test-desktop-update-endpoint/run.sh'
+
+Expected checks:
+  - updater rewrite exists and targets the signed stable release manifest
+  - VitePress production build succeeds
+
+Result (2026-08-22): PASS
+  - desktop updater route: ok
+  - VitePress client/server build: ok
+  - VitePress page rendering: ok
