@@ -2,8 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   appendDashboardNativeScheduleNotice,
   appendLegacyScheduledGoalNotice,
-  DASHBOARD_NATIVE_SCHEDULE_NOTICE,
-  LEGACY_ANET_SCHEDULE_NOTICE,
   prepareDashboardNativeSlashReply,
   shouldCreateScheduledGoal,
 } from "./routing";
@@ -25,10 +23,10 @@ describe("shouldCreateScheduledGoal — Dashboard native slash pass-through", ()
     }
   });
 
-  test("non-Dashboard traffic retains /goal and /loop during the compatibility window", () => {
+  test("non-Dashboard /goal and /loop also pass through unchanged", () => {
     for (const runtime of RUNTIMES) {
-      expect(shouldCreateScheduledGoal("/goal 1h update docs", runtime, false)).toBe(true);
-      expect(shouldCreateScheduledGoal("/loop 1h update docs", runtime, false)).toBe(true);
+      expect(shouldCreateScheduledGoal("/goal 1h update docs", runtime, false)).toBe(false);
+      expect(shouldCreateScheduledGoal("/loop 1h update docs", runtime, false)).toBe(false);
       expect(shouldCreateScheduledGoal("/agoal 1h update docs", runtime, false)).toBe(true);
       expect(shouldCreateScheduledGoal("/aloop 1h update docs", runtime, false)).toBe(true);
     }
@@ -44,12 +42,10 @@ describe("shouldCreateScheduledGoal — Dashboard native slash pass-through", ()
   });
 });
 
-describe("appendLegacyScheduledGoalNotice", () => {
-  test("non-Dashboard /goal and /loop replies carry a deterministic migration notice", () => {
-    expect(appendLegacyScheduledGoalNotice("created", "/goal 5m work", false))
-      .toBe(`${LEGACY_ANET_SCHEDULE_NOTICE}\n\ncreated`);
-    expect(appendLegacyScheduledGoalNotice("failed", "/loop 5m work", false))
-      .toBe(`${LEGACY_ANET_SCHEDULE_NOTICE}\n\nfailed`);
+describe("native slash replies stay unchanged", () => {
+  test("non-Dashboard /goal and /loop replies are not rewritten", () => {
+    expect(appendLegacyScheduledGoalNotice("native", "/goal 5m work", false)).toBe("native");
+    expect(appendLegacyScheduledGoalNotice("native", "/loop 5m work", false)).toBe("native");
   });
 
   test("new namespaced commands, Dashboard pass-through, and near matches are not warned", () => {
@@ -60,17 +56,17 @@ describe("appendLegacyScheduledGoalNotice", () => {
     expect(appendLegacyScheduledGoalNotice("plain", "/looper 5m work", false)).toBe("plain");
   });
 
-  test("the migration notice is first so the outer reply cap cannot truncate it", () => {
+  test("long native replies are preserved exactly", () => {
     const reply = appendLegacyScheduledGoalNotice("x".repeat(2_500), "/goal 5m work", false);
-    expect(reply.slice(0, 2_000)).toContain(LEGACY_ANET_SCHEDULE_NOTICE);
+    expect(reply).toBe("x".repeat(2_500));
   });
 });
 
-describe("Dashboard native slash migration notice", () => {
-  test("interval-shaped /goal and /loop replies explain that ANet scheduling moved to /aloop", () => {
+describe("Dashboard native slash pass-through", () => {
+  test("interval-shaped /goal and /loop replies are unchanged", () => {
     for (const command of ["/goal 5m work", "/loop 每小时 work"]) {
       expect(appendDashboardNativeScheduleNotice("native reply", command, true))
-        .toBe(`${DASHBOARD_NATIVE_SCHEDULE_NOTICE}\n\nnative reply`);
+        .toBe("native reply");
     }
   });
 
@@ -81,7 +77,7 @@ describe("Dashboard native slash migration notice", () => {
     expect(appendDashboardNativeScheduleNotice("legacy", "/loop 5m work", false)).toBe("legacy");
   });
 
-  test("the notice survives low-value filtering and the outer reply cap", () => {
+  test("ordinary reply filtering remains unchanged", () => {
     const prepared = prepareDashboardNativeSlashReply(
       "收到",
       "/loop 5m work",
@@ -90,20 +86,12 @@ describe("Dashboard native slash migration notice", () => {
       (text) => text === "收到",
     );
     expect(prepared.shouldDeliver).toBe(true);
-    expect(prepared.text).toContain(DASHBOARD_NATIVE_SCHEDULE_NOTICE);
+    expect(prepared.text).toBe("收到");
     expect(appendDashboardNativeScheduleNotice("x".repeat(2_500), "/goal 5m work", true)
-      .slice(0, 2_000)).toContain(DASHBOARD_NATIVE_SCHEDULE_NOTICE);
+    ).toBe("x".repeat(2_500));
   });
 
-  // 🔴 上一条用 messageType:"task"，于是 `humanDashboardRequest` 为真，
-  //    `failed || humanDashboardRequest || !isLowValueReply(text)` 在第二项就短路 ——
-  //    `isLowValueReply` 根本没被求值。所以尽管那条测试名叫
-  //    "the notice survives low-value filtering"，它**测不到低价值过滤**。
-  //    要让第三项真的被求值，必须同时满足：有通知(interactiveDashboardTask=true)
-  //    且不是 human 直连(messageType 不是 task/broadcast)。
-  //    2026-08-19 实测：把 `isLowValueReply(text)` 改成 `isLowValueReply(replyText)`
-  //    后整个套件仍然全绿，就是缺了这一格。
-  test("low-value filtering judges the notice-prefixed text, not the raw model reply", () => {
+  test("non-task low-value replies remain filtered without rewriting", () => {
     const prepared = prepareDashboardNativeSlashReply(
       "收到",
       "/loop 5m work",
@@ -112,12 +100,11 @@ describe("Dashboard native slash migration notice", () => {
       (text) => text === "收到",
     );
 
-    expect(prepared.text).toBe(`${DASHBOARD_NATIVE_SCHEDULE_NOTICE}\n\n收到`);
-    // 判据在这一行：拿【原始回复】判低价值会把该发的迁移通知一起吞掉。
-    expect(prepared.shouldDeliver).toBe(true);
+    expect(prepared.text).toBe("收到");
+    expect(prepared.shouldDeliver).toBe(false);
   });
 
-  test("failed native replies still surface the migration notice and the failure", () => {
+  test("failed native replies surface without rewriting", () => {
     const prepared = prepareDashboardNativeSlashReply(
       "native failed",
       "/loop 5m work",
@@ -126,7 +113,7 @@ describe("Dashboard native slash migration notice", () => {
       () => false,
     );
     expect(prepared.shouldDeliver).toBe(true);
-    expect(prepared.text).toBe(`${DASHBOARD_NATIVE_SCHEDULE_NOTICE}\n\nnative failed`);
+    expect(prepared.text).toBe("native failed");
   });
 });
 

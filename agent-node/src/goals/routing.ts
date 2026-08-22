@@ -1,5 +1,3 @@
-import { parseGoalCommand } from "./parser";
-
 export type GoalRoutingRuntime = "claude" | "codex" | "grok" | "opencode" | "codex-app-server";
 
 export interface ReplyMessageProvenance {
@@ -8,7 +6,6 @@ export interface ReplyMessageProvenance {
 }
 
 const ANET_SCHEDULE_COMMAND_RE = /^\s*\/(?:agoal|aloop)\b/i;
-const LEGACY_SCHEDULE_COMMAND_RE = /^\s*\/(?:goal|loop)\b/i;
 
 export const LEGACY_ANET_SCHEDULE_NOTICE =
   "提示：/goal 和 /loop 仅在非 Dashboard 路径处于兼容期；Agent Network 定时请改用 /aloop <间隔> <任务>。";
@@ -23,28 +20,25 @@ export const DASHBOARD_NATIVE_SCHEDULE_NOTICE =
  * `/goal` and `/loop` pass through to the target runtime for every runtime
  * bucket. Agent Network commands use `/agoal` and `/aloop` instead.
  *
- * Non-Dashboard traffic retains `/goal` + `/loop` temporarily so existing
- * node-to-node automations do not silently change behavior. The caller adds a
- * deterministic migration notice through appendLegacyScheduledGoalNotice().
+ * `/goal` and `/loop` always belong to the target runtime, regardless of
+ * transport provenance. Only the namespaced `/agoal` and `/aloop` commands
+ * select Agent Network scheduling.
  */
 export function shouldCreateScheduledGoal(
   content: string,
   _runtime: GoalRoutingRuntime,
-  interactiveDashboardTask: boolean,
+  _interactiveDashboardTask: boolean,
 ): boolean {
-  if (ANET_SCHEDULE_COMMAND_RE.test(content || "")) return true;
-  if (!LEGACY_SCHEDULE_COMMAND_RE.test(content || "")) return false;
-  return !interactiveDashboardTask;
+  return ANET_SCHEDULE_COMMAND_RE.test(content || "");
 }
 
-/** Add a visible compatibility warning to old non-Dashboard scheduler names. */
+/** Kept as a compatibility export; native slash replies are never rewritten. */
 export function appendLegacyScheduledGoalNotice(
   replyText: string,
-  content: string,
-  interactiveDashboardTask: boolean,
+  _content: string,
+  _interactiveDashboardTask: boolean,
 ): string {
-  if (interactiveDashboardTask || !LEGACY_SCHEDULE_COMMAND_RE.test(content || "")) return replyText;
-  return `${LEGACY_ANET_SCHEDULE_NOTICE}\n\n${replyText}`;
+  return replyText;
 }
 
 /**
@@ -55,12 +49,10 @@ export function appendLegacyScheduledGoalNotice(
  */
 export function appendDashboardNativeScheduleNotice(
   replyText: string,
-  content: string,
-  interactiveDashboardTask: boolean,
+  _content: string,
+  _interactiveDashboardTask: boolean,
 ): string {
-  if (!interactiveDashboardTask || !LEGACY_SCHEDULE_COMMAND_RE.test(content || "")) return replyText;
-  if (!parseGoalCommand(content).ok) return replyText;
-  return `${DASHBOARD_NATIVE_SCHEDULE_NOTICE}\n\n${replyText}`;
+  return replyText;
 }
 
 /** Compose the Dashboard migration notice before ordinary reply filtering. */

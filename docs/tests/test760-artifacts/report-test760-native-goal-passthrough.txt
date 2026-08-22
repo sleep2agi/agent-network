@@ -1,0 +1,44 @@
+# test760 — native /goal and /loop pass-through
+bun test v1.3.14 (0d9b296a)
+
+agent-node/src/inbox-dispatch.test.ts:
+(pass) isInteractiveDashboardTask > accepts a Hub-authenticated dashboard chat task [0.53ms]
+(pass) isInteractiveDashboardTask > pre-stamp admin rows stay FIFO because aliases are not auth facts [3.47ms]
+(pass) isInteractiveDashboardTask > rejects node-authenticated spoofing, malformed ids, and plain messages [0.51ms]
+(pass) dispatchInboxBatch > awaited batches preserve legacy runtime serialization [2.25ms]
+(pass) dispatchInboxBatch > a later SSE snapshot enters while the first detached turn is still running [2.31ms]
+(pass) dispatchInboxBatch > the real serialized drain lane can fetch a later SSE snapshot before the active turn ends [1.39ms]
+(pass) dispatchInboxBatch > detached completion failures remain observable [1.47ms]
+(pass) dispatchInboxBatch > settling detached work emits a wake for the next Hub inbox window [1.52ms]
+(pass) dispatchInboxBatch > a throwing settle callback cannot strand queued N+1 work [1.54ms]
+(pass) dispatchInboxBatch > same-tick duplicate kicks claim one row exactly once [0.44ms]
+(pass) dispatchInboxBatch > bounded admission waits N+1 and starts it after a slot settles [2.28ms]
+(pass) dispatchInboxBatch > durable reply drain waits until detached Codex rows finish [0.09ms]
+(pass) dispatchInboxBatch > active Codex direct delivery and durable drain send one reply, not two [11.73ms]
+
+agent-node/src/goals/routing.test.ts:
+(pass) shouldCreateScheduledGoal — Dashboard native slash pass-through > authenticated Dashboard /goal and /loop pass through for every agent-node runtime [0.23ms]
+(pass) shouldCreateScheduledGoal — Dashboard native slash pass-through > authenticated Dashboard /agoal and /aloop always select the ANet scheduler [0.09ms]
+(pass) shouldCreateScheduledGoal — Dashboard native slash pass-through > non-Dashboard /goal and /loop also pass through unchanged [0.14ms]
+(pass) shouldCreateScheduledGoal — Dashboard native slash pass-through > near matches and slash text away from the start never select the scheduler [0.18ms]
+(pass) native slash replies stay unchanged > non-Dashboard /goal and /loop replies are not rewritten [0.09ms]
+(pass) native slash replies stay unchanged > new namespaced commands, Dashboard pass-through, and near matches are not warned [0.07ms]
+(pass) native slash replies stay unchanged > long native replies are preserved exactly [0.07ms]
+(pass) Dashboard native slash pass-through > interval-shaped /goal and /loop replies are unchanged [0.14ms]
+(pass) Dashboard native slash pass-through > ordinary native commands, namespaced commands, and non-Dashboard paths are untouched [0.07ms]
+(pass) Dashboard native slash pass-through > ordinary reply filtering remains unchanged [0.18ms]
+(pass) Dashboard native slash pass-through > non-task low-value replies remain filtered without rewriting [0.07ms]
+(pass) Dashboard native slash pass-through > failed native replies surface without rewriting [0.05ms]
+(pass) reply filtering uses authenticated message provenance > a short presence reply to an authenticated Dashboard human task is delivered [0.10ms]
+(pass) reply filtering uses authenticated message provenance > the same low-value class remains filtered for agent-to-agent tasks [0.07ms]
+(pass) reply filtering uses authenticated message provenance > a provenance flag cannot bypass filtering for a non-task message type [0.07ms]
+
+ 28 pass
+ 0 fail
+ 116 expect() calls
+Ran 28 tests across 2 files. [133.00ms]
+Bundled 279 modules in 159ms
+
+  agent-node-cli.js  2.0 MB  (entry point)
+
+RESULT: PASS
