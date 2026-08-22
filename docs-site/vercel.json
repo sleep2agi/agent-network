@@ -1,3 +1,20 @@
 {
-  "cleanUrls": true
+  "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/desktop/update/latest.json",
+      "destination": "https://github.com/sleep2agi/agent-network-app/releases/latest/download/latest.json"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/desktop/update/latest.json",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=60, s-maxage=300, stale-while-revalidate=300"
+        }
+      ]
+    }
+  ]
 }
