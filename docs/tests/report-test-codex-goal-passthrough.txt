@@ -1,0 +1,24 @@
+# Codex TUI /goal passthrough regression
+
+Date: 2026-08-22
+Base: origin/main 126e74ccb998cc6380bc02b609319cc587de8bfc
+Environment: Docker, test725-agent-node-unit-ci, Bun 1.3.14, Node v22.23.2
+
+Behavior under test:
+- codex-app-server `/goal ...` bypasses Agent Network scheduling even without Dashboard provenance.
+- `/agoal` and `/aloop` still select Agent Network scheduling.
+- legacy non-Dashboard `/loop` behavior is unchanged.
+- non-Codex runtime compatibility behavior is unchanged.
+
+Commands:
+- `sg docker -c 'docker build ... tests/test725-agent-node-unit-ci/Dockerfile .'`
+- `sg docker -c 'docker run --rm anet-test725-goal'`
+- `sg docker -c "docker run --rm --entrypoint bash anet-test725-goal -lc 'cd /workspace/agent-node && npm run build'"`
+
+Results:
+- agent-node/src: 1339 pass, 0 fail, 99/99 test files.
+- agent-node/tests: 6/6 files executed, 0 failed.
+- witnessed-red attachment mutation gate: PASS.
+- agent-node production build: PASS (cli.js and upload-file-mcp-stdio.js bundled).
+
+RESULT: PASS
