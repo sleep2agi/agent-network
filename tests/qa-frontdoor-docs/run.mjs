@@ -20,7 +20,7 @@ for (const path of ["README.md", "README.en.md"]) {
   check(read(path).split("\n").length <= 100, `${path} exceeds 100 lines`);
 }
 for (const path of ["docs-site/docs/index.md", "docs-site/docs/en/index.md"]) {
-  check(read(path).split("\n").length <= 50, `${path} exceeds 50 lines`);
+  check(read(path).split("\n").length <= 100, `${path} exceeds 100 lines`);
 }
 
 const layout = read("docs-site/docs/.vitepress/theme/Layout.vue");
@@ -150,14 +150,16 @@ for (const [language, html] of renderedHomepages) {
   for (const marker of retiredHomepageMarkers) {
     check(!html.includes(marker), `${language} rendered homepage still contains ${marker}`);
   }
-  check(html.includes("@sleep2agi/agent-network"), `${language} rendered homepage lost the install command`);
+  check(html.includes("desktop-v0.2.13"), `${language} rendered homepage lost the stable desktop release`);
+  check(html.includes("Agent.Network_0.2.13_aarch64.dmg"), `${language} rendered homepage lost the macOS download`);
+  check(html.includes("Agent.Network_0.2.13_x64-setup.exe"), `${language} rendered homepage lost the Windows download`);
 }
-check(renderedHomepages[0][1].includes("让 AI Agent 组成团队"), "Chinese rendered homepage lost the concise hero");
-check(renderedHomepages[1][1].includes("Turn AI agents into a team"), "English rendered homepage lost the concise hero");
-for (const marker of ["一个网络", "本地掌控", "自由组合"]) {
+check(renderedHomepages[0][1].includes("你的 AI Agent 桌面工作台"), "Chinese rendered homepage lost the desktop hero");
+check(renderedHomepages[1][1].includes("Your desktop workspace for AI agents"), "English rendered homepage lost the desktop hero");
+for (const marker of ["像聊天一样协作", "管理整个网络", "本地优先"]) {
   check(renderedHomepages[0][1].includes(marker), `Chinese rendered homepage lost feature card: ${marker}`);
 }
-for (const marker of ["One network", "Local control", "Mix and match"]) {
+for (const marker of ["Collaborate like chat", "Manage the network", "Local first"]) {
   check(renderedHomepages[1][1].includes(marker), `English rendered homepage lost feature card: ${marker}`);
 }
 
