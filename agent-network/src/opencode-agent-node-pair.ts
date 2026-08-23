@@ -19,7 +19,7 @@ import { opencodeOwnedPathModeIsSafe } from "./opencode-owner-mode";
 import { describeUnsafePath } from "./unsafe-package-path-reason";
 
 export const OPENCODE_AGENT_NETWORK_VERSION = "2.3.0-preview.43";
-export const OPENCODE_AGENT_NODE_VERSION = "2.5.0-preview.32";
+export const OPENCODE_AGENT_NODE_VERSION = "2.5.0-preview.33";
 export const OPENCODE_AGENT_NODE_SPEC =
   `@sleep2agi/agent-node@${OPENCODE_AGENT_NODE_VERSION}`;
 
