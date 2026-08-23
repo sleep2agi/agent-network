@@ -2263,6 +2263,7 @@ return Bun.serve({
       const identity = resolveRestFromSession({
         token: requestToken(req),
         tokenName: restAuth?.tokenName,
+        authenticatedUsername: restAuth?.username,
         requestedFrom: body.from,
       });
       if (!identity.ok) {
