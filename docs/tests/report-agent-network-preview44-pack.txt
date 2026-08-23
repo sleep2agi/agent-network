@@ -1,0 +1,396 @@
+[
+  {
+    "id": "@sleep2agi/agent-network@2.3.0-preview.44",
+    "name": "@sleep2agi/agent-network",
+    "version": "2.3.0-preview.44",
+    "size": 1679131,
+    "unpackedSize": 5077125,
+    "shasum": "cc6f48a4b670a15ceb9be3fc69893b35cb142c81",
+    "integrity": "sha512-qyZR9iHctWjmogA+xKdOfmquw6kAnhjX19r383UUQMdniLjXukww6THfHiPFY7RfSplkUHoMGs0kEavfbgNn6Q==",
+    "filename": "sleep2agi-agent-network-2.3.0-preview.44.tgz",
+    "files": [
+      {
+        "path": "LICENSE",
+        "size": 11358,
+        "mode": 420
+      },
+      {
+        "path": "README.md",
+        "size": 3833,
+        "mode": 420
+      },
+      {
+        "path": "dist/bin/anet.cjs",
+        "size": 5070,
+        "mode": 493
+      },
+      {
+        "path": "dist/bin/cli.d.ts",
+        "size": 530,
+        "mode": 420
+      },
+      {
+        "path": "dist/bin/cli.js",
+        "size": 2027302,
+        "mode": 493
+      },
+      {
+        "path": "dist/bin/goal-wake-log-render.d.ts",
+        "size": 1024,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/batch-workdir.d.ts",
+        "size": 479,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/bootstrap-password-db.d.ts",
+        "size": 698,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/channel-attachments.d.ts",
+        "size": 996,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/channel-meta.d.ts",
+        "size": 397,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/channel-task-trace.d.ts",
+        "size": 293,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/claude-vendor-env.d.ts",
+        "size": 1254,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/cli-args.d.ts",
+        "size": 310,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/client-task-trace.d.ts",
+        "size": 264,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/client.d.ts",
+        "size": 2517,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/client.js",
+        "size": 12909,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/codex-copresence-preflight.d.ts",
+        "size": 3267,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/codex-copresence-profile.d.ts",
+        "size": 3617,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/codex-copresence-thread.d.ts",
+        "size": 409,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/codex-model-default.d.ts",
+        "size": 267,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/commhub-response.d.ts",
+        "size": 64,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/controlled-upload.d.ts",
+        "size": 3612,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/copresence-deps.d.ts",
+        "size": 1033,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/copresence-identity.d.ts",
+        "size": 15776,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/dashboard-managed-process.d.ts",
+        "size": 1056,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/environ-alias.d.ts",
+        "size": 988,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/gitignore-writeback.d.ts",
+        "size": 1049,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/grok-attach-client.d.ts",
+        "size": 4280,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/grok-copresence-disclosure.d.ts",
+        "size": 551,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/grok-copresence-profile.d.ts",
+        "size": 3408,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/im/access-resolve.d.ts",
+        "size": 4283,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/im/feishu/adapter.d.ts",
+        "size": 8535,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/im/feishu/bridge.d.ts",
+        "size": 6816,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/im/feishu/config.d.ts",
+        "size": 2956,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/im/feishu/hub-upload.d.ts",
+        "size": 4258,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/im/feishu/index.d.ts",
+        "size": 707,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/im/feishu/markdown-image-renderer.d.ts",
+        "size": 3134,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/im/feishu/outbound-marker.d.ts",
+        "size": 6274,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/im/feishu/outbound-paths.d.ts",
+        "size": 2518,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/im/feishu/outbound-route.d.ts",
+        "size": 2653,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/im/feishu/worker-lifecycle.d.ts",
+        "size": 479,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/im/feishu/worker.d.ts",
+        "size": 31,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/im/feishu/worker.js",
+        "size": 2287755,
+        "mode": 493
+      },
+      {
+        "path": "dist/src/im/types.d.ts",
+        "size": 10077,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/locale-diagnostic.d.ts",
+        "size": 577,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/mock-llm.d.ts",
+        "size": 499,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/node-server.d.ts",
+        "size": 353,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/node-server.js",
+        "size": 590741,
+        "mode": 493
+      },
+      {
+        "path": "dist/src/normalize-runtime.d.ts",
+        "size": 1094,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/opencode-agent-node-pair.d.ts",
+        "size": 1123,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/opencode-auth-login.d.ts",
+        "size": 2320,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/opencode-launch-env.d.ts",
+        "size": 1101,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/opencode-owner-mode.d.ts",
+        "size": 280,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/opencode-package-binary.d.ts",
+        "size": 1331,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/opencode-pin.d.ts",
+        "size": 2239,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/opencode-preset.d.ts",
+        "size": 4058,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/opencode-runtime-binding.d.ts",
+        "size": 2077,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/opencode-safe-root.d.ts",
+        "size": 1230,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/opencode-smoke-env.d.ts",
+        "size": 129,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/outbound-tool-names.d.ts",
+        "size": 55,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/owner-env-file.d.ts",
+        "size": 180,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/package-mode-preflight.d.ts",
+        "size": 1330,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/primary-network.d.ts",
+        "size": 877,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/private-state.d.ts",
+        "size": 624,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/project-key.d.ts",
+        "size": 56,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/secret-shell-guidance.d.ts",
+        "size": 258,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/supervise-child.d.ts",
+        "size": 2977,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/task-trace.d.ts",
+        "size": 1326,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/tmux-attach.d.ts",
+        "size": 394,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/tmux-capability.d.ts",
+        "size": 2331,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/tmux-exact-target.d.ts",
+        "size": 1551,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/tmux-pane-prompt.d.ts",
+        "size": 1180,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/token-cli.d.ts",
+        "size": 401,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/unsafe-package-path-reason.d.ts",
+        "size": 761,
+        "mode": 420
+      },
+      {
+        "path": "dist/src/windows-codex-copresence.d.ts",
+        "size": 1744,
+        "mode": 420
+      },
+      {
+        "path": "package.json",
+        "size": 2841,
+        "mode": 420
+      }
+    ],
+    "entryCount": 76,
+    "bundled": []
+  }
+]
