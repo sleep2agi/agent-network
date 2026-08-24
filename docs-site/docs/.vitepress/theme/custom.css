@@ -929,14 +929,16 @@
   transform: translateY(-1px);
 }
 
-/* ---------- Desktop download / product paths ---------- */
+/* ---------- Desktop / mobile download, product paths ---------- */
 .desktop-download,
+.mobile-download,
 .product-path {
   max-width: 1152px;
   margin: 72px auto 0;
   padding: 0 24px;
 }
-.desktop-download {
+.desktop-download,
+.mobile-download {
   padding: 42px;
   border: 1px solid var(--vp-c-divider);
   border-radius: 24px;
@@ -951,6 +953,7 @@
   letter-spacing: 0.14em;
 }
 .desktop-download h2,
+.mobile-download h2,
 .product-path h2 {
   margin: 8px 0 10px;
   border: 0;
@@ -998,6 +1001,17 @@
 .download-card-primary {
   background: linear-gradient(145deg, rgba(0, 158, 126, 0.12), var(--vp-c-bg));
 }
+/* The iOS card is deliberately not a link: TestFlight has no public invite URL
+   yet, and a card that looks clickable but goes nowhere is worse than one that
+   plainly says it is not ready. */
+.download-card-pending {
+  border-style: dashed;
+  background: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-2) !important;
+  cursor: default;
+}
+.download-card-pending:hover { transform: none; border-color: var(--vp-c-divider); box-shadow: none; }
+.download-card-pending strong { color: var(--vp-c-text-2); }
 .download-platform { color: var(--vp-c-text-2); font-size: 0.78rem; }
 .download-card strong { margin-top: 7px; font-size: 1.18rem; }
 .download-card small { margin-top: auto; color: var(--vp-c-text-2); }
@@ -1018,7 +1032,8 @@
 .cli-command code { white-space: nowrap; font-size: 0.76rem; }
 .VPHome .VPFeatures { padding-top: 54px; }
 .VPNavBarMenuLink[href*="desktop-download-title"] { color: var(--vp-c-brand-1); font-weight: 700; }
-.dark .desktop-download { box-shadow: 0 28px 90px -55px rgba(0, 212, 170, 0.55); }
+.dark .desktop-download,
+.dark .mobile-download { box-shadow: 0 28px 90px -55px rgba(0, 212, 170, 0.55); }
 
 /* ---------- Sidebar / doc tweaks (kept) ---------- */
 .VPSidebarItem.is-active > .item > .link > .text {
@@ -1034,8 +1049,10 @@
 /* ---------- Mobile (≤ 720px) — landing-only tuning ---------- */
 @media (max-width: 720px) {
   .desktop-download,
+  .mobile-download,
   .product-path { margin-top: 48px; padding-left: 20px; padding-right: 20px; }
-  .desktop-download { margin-left: 16px; margin-right: 16px; padding: 28px 20px; }
+  .desktop-download,
+  .mobile-download { margin-left: 16px; margin-right: 16px; padding: 28px 20px; }
   .download-grid,
   .product-path-grid { grid-template-columns: 1fr; }
   .product-path-card p { min-height: auto; }
