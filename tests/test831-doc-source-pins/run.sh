@@ -119,10 +119,25 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 #
 # 抬的是**分母**(110 > 108),覆盖面变大不是变小。反过来那种「把数改小让门变绿」
 # 的动作要当红线看:分母变小意味着有文件被移出取集,而假绿和真绿的输出逐字相同。
-[[ "$files" -eq 110 ]] || fail "预期扫 110 个文档文件(= git ls-files 的结果),实际 $files"
+#
+# 2026-08-25:110 → 111。新增一个文档文件:
+#     docs-site/docs/public/desktop/update/latest.json
+# 同一批(4ef14e2f..HEAD)其实新增了两个文件,另一个是
+# docs-site/scripts/check-desktop-update-route.mjs —— 它**不计入**,因为 `.mjs`
+# 不在 SCANNED_SUFFIXES(.md/.ts/.tsx/.js/.json/.vue)里。110+1=111 对得上。
+# 又是**只有 `files` 变了**:实测 uniq 仍 11、occ 仍 28 —— 这正是预期,latest.json
+# 是发版生成的产物(version/notes/pub_date/platforms 签名与下载地址),里面一个
+# `#L` 锚点都没有。
+#
+# 为什么不是"把它排除掉":`docs/public/` **本来就在取集里**,当前已有 5 个
+# public 文件被扫(skillhub 的 catalog.json、两份 SKILL.md、两份 metadata.json),
+# 其中 SKILL.md 是真正的文档正文。排除 public/ 会一次性砍掉 6 个已覆盖文件,
+# 那是"改扫描范围让门变绿",与上面那条红线是同一个动作。
+# 该文件后续发版是**原地修改**同一路径,不会再次改变计数。
+[[ "$files" -eq 111 ]] || fail "预期扫 111 个文档文件(= git ls-files 的结果),实际 $files"
 [[ "$uniq"  -eq 11  ]] || fail "预期 11 个唯一 pin,实际 $uniq"
 [[ "$occ"   -eq 28 ]] || fail "预期 28 处原始出现,实际 $occ"
-echo "  OK  walk 路径与 git 路径给出同一份清单(110 文件 / 11 唯一 pin / 28 处)"
+echo "  OK  walk 路径与 git 路径给出同一份清单(111 文件 / 11 唯一 pin / 28 处)"
 
 # ---------------------------------------------------------------------------
 # L1 — 干净树上必须绿
