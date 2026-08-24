@@ -150,9 +150,22 @@ for (const [language, html] of renderedHomepages) {
   for (const marker of retiredHomepageMarkers) {
     check(!html.includes(marker), `${language} rendered homepage still contains ${marker}`);
   }
-  check(html.includes("desktop-v0.2.13"), `${language} rendered homepage lost the stable desktop release`);
-  check(html.includes("Agent.Network_0.2.13_aarch64.dmg"), `${language} rendered homepage lost the macOS download`);
-  check(html.includes("Agent.Network_0.2.13_x64-setup.exe"), `${language} rendered homepage lost the Windows download`);
+  // 🔴 这三条原本钉的是字面版本号 desktop-v0.2.13 —— 于是「首页必须提供桌面下载」
+  // 变成了「首页必须永远提供 0.2.13」。任何一次更新都会红,所以没人更新:实测到
+  // 2026-08-24 首页仍指向 19 个版本前的包,而 anet.sh 的自动更新清单已经在发 0.2.32。
+  // 一道让正确改动变红的门,最终保护的是过时,不是可用性。
+  // 现在钉形状:桌面下载必须在,版本号自由。
+  check(/releases\/tag\/desktop-v\d+\.\d+\.\d+/.test(html), `${language} rendered homepage lost the stable desktop release`);
+  check(/Agent\.Network_\d+\.\d+\.\d+_aarch64\.dmg/.test(html), `${language} rendered homepage lost the macOS download`);
+  check(/Agent\.Network_\d+\.\d+\.\d+_x64-setup\.exe/.test(html), `${language} rendered homepage lost the Windows download`);
+}
+
+// 真正值得钉的不变量:两种语言必须宣传同一个版本。字面钉版本号做不到这件事,
+// 而它恰好是最容易犯的错 —— 只改了一半的首页。
+const advertisedVersion = (html) => (html.match(/desktop-v(\d+\.\d+\.\d+)/) || [])[1];
+{
+  const [zh, en] = renderedHomepages.map(([, html]) => advertisedVersion(html));
+  check(Boolean(zh) && zh === en, `homepages advertise different desktop versions (zh=${zh}, en=${en})`);
 }
 check(renderedHomepages[0][1].includes("你的 AI Agent 桌面工作台"), "Chinese rendered homepage lost the desktop hero");
 check(renderedHomepages[1][1].includes("Your desktop workspace for AI agents"), "English rendered homepage lost the desktop hero");
