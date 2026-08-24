@@ -13,7 +13,9 @@ const route = config.rewrites?.find(
 );
 
 assert.equal(route, undefined, 'desktop updater manifest must be served directly, without a rewrite');
-assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
+// Windows MSI accepts a numeric-only prerelease identifier (for example
+// 0.2.33-1), but rejects identifiers such as 0.2.33-beta.1.
+assert.match(manifest.version, /^\d+\.\d+\.\d+(?:-\d+)?$/);
 assert.ok(manifest.platforms?.['darwin-aarch64']?.signature);
 assert.ok(manifest.platforms?.['windows-x86_64']?.signature);
 
