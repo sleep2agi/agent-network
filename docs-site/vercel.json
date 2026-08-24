@@ -1,11 +1,5 @@
 {
   "cleanUrls": true,
-  "rewrites": [
-    {
-      "source": "/desktop/update/latest.json",
-      "destination": "https://github.com/sleep2agi/agent-network-app/releases/latest/download/latest.json"
-    }
-  ],
   "headers": [
     {
       "source": "/desktop/update/latest.json",
