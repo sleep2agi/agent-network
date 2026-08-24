@@ -1,0 +1,27 @@
+{
+  "version": "0.2.30",
+  "notes": "Signed macOS and Windows desktop update. Publish this draft only after installation smoke tests pass.",
+  "pub_date": "2026-08-23T21:15:43.139Z",
+  "platforms": {
+    "darwin-aarch64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TlpFdytIZlRhNC9oVjJEaXJIUDlLQnYvQS82SVdBYU16SEtRNlBYUFJtT296Q3EzN3l6WFRZZFQyaksydWRoVng0N3Y5SFk5T0hHb0w1ZzQwV3lmSXdNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3NTE5NTM0CWZpbGU6QWdlbnQgTmV0d29yay5hcHAudGFyLmd6Cm1obnJCNDVVcDJISzFGNGRPYVRJVHdzSkxJd1JIWUxVOGhVS21jM01vWVNZQnorNHVQYWM1M3kvMHFnRW9mMlh4WC9mU0VrQmwwYStrZGpGZ1oxdkFRPT0K",
+      "url": "https://api.github.com/repos/sleep2agi/agent-network-app/releases/assets/526646988"
+    },
+    "darwin-aarch64-app": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TlpFdytIZlRhNC9oVjJEaXJIUDlLQnYvQS82SVdBYU16SEtRNlBYUFJtT296Q3EzN3l6WFRZZFQyaksydWRoVng0N3Y5SFk5T0hHb0w1ZzQwV3lmSXdNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3NTE5NTM0CWZpbGU6QWdlbnQgTmV0d29yay5hcHAudGFyLmd6Cm1obnJCNDVVcDJISzFGNGRPYVRJVHdzSkxJd1JIWUxVOGhVS21jM01vWVNZQnorNHVQYWM1M3kvMHFnRW9mMlh4WC9mU0VrQmwwYStrZGpGZ1oxdkFRPT0K",
+      "url": "https://api.github.com/repos/sleep2agi/agent-network-app/releases/assets/526646988"
+    },
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TlN0Y3FFdmdBR05IaFBINGJzR0p5OGxDaWJmSFVkbnNhUmQ2V2Q2b09yOUpkWUdBSEh4OW9vdFNhWGpmQjRXSEprN2U5bDRDTkhFTndibE1KR3NWdlFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3NTE5NzM3CWZpbGU6QWdlbnQgTmV0d29ya18wLjIuMzBfeDY0LXNldHVwLmV4ZQplWWhYaVJiSCtVN2ZZZ0NFVStDS3pmV2cxZUtmQkd4UE8vN2RUQlZqRU1rWTRvMVBRL3NsWnV4cnU1QXNuYkxZUDgzVzJHeEVmbkxSQ2lRdU5scVFEQT09Cg==",
+      "url": "https://api.github.com/repos/sleep2agi/agent-network-app/releases/assets/526649405"
+    },
+    "windows-x86_64-nsis": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TlN0Y3FFdmdBR05IaFBINGJzR0p5OGxDaWJmSFVkbnNhUmQ2V2Q2b09yOUpkWUdBSEh4OW9vdFNhWGpmQjRXSEprN2U5bDRDTkhFTndibE1KR3NWdlFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3NTE5NzM3CWZpbGU6QWdlbnQgTmV0d29ya18wLjIuMzBfeDY0LXNldHVwLmV4ZQplWWhYaVJiSCtVN2ZZZ0NFVStDS3pmV2cxZUtmQkd4UE8vN2RUQlZqRU1rWTRvMVBRL3NsWnV4cnU1QXNuYkxZUDgzVzJHeEVmbkxSQ2lRdU5scVFEQT09Cg==",
+      "url": "https://api.github.com/repos/sleep2agi/agent-network-app/releases/assets/526649405"
+    },
+    "windows-x86_64-msi": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TldCZmFIcWg1dFhKOGlrL1Z0RWhFYTRvb0t5UWp0Um9pNTZCbFh0THB2aUVMVVdDaVF5YmptalI0d2FaYjN5RThiaHZqTXdxT0djMEJLRER0eDh1ekFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3NTE5NzM3CWZpbGU6QWdlbnQgTmV0d29ya18wLjIuMzBfeDY0X2VuLVVTLm1zaQpLTFliTUd0STNManNncTBzSVpQQ3BML2NmTlZsczJDY08zeCtNalJjQSt0RURCVUVKWXBaRVAzS2hCc0FFRWlWZlhCM0g1S3I0VHMvSys0WWNQK09Bdz09Cg==",
+      "url": "https://api.github.com/repos/sleep2agi/agent-network-app/releases/assets/526649361"
+    }
+  }
+}
