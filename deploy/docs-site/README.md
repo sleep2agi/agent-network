@@ -52,20 +52,29 @@ cd /tmp/anet-site && git rev-parse --short HEAD      # 必须等于 origin/main
 ```bash
 cd /tmp/anet-site/docs-site
 
-# 项目关联与构建 env 都在 .vercel/ 里,从主 checkout 带过来
-cp -r <主checkout>/docs-site/.vercel .vercel
+# 只复制项目关联与构建 env。不要复制 `.vercel/output`:主 checkout 里可能
+# 留着别的 commit 的陈旧预构建产物,`--prebuilt` 会把它当成真的部署。
+mkdir -p .vercel
+cp <主checkout>/docs-site/.vercel/project.json .vercel/project.json
+cp <主checkout>/docs-site/.vercel/.env.production.local .vercel/.env.production.local
 
-# 复用已装好的依赖,省一次冷装
-ln -sfn <主checkout>/docs-site/node_modules node_modules
+# 依赖必须属于这个 worktree。不要软链别的检出的 node_modules:`npm ci`
+# 会删除并重建目标目录,软链会让本 worktree 破坏另一个检出。
+npm ci
 
 # 🔴 本地先构建 —— ignoreDeadLinks 未设,有死链即 fail。
 #    不要带着死链上线。
 npm run build
 
-# 部署(云端会重新跑 npm run build,含 prebuild 的 skillhub 生成)
-vercel --prod --yes
+# 🔴 成本红线:只上传本地预构建产物,绝不让 Vercel 远端重新构建。
+vercel build --prod
+vercel deploy --prebuilt --prod
 # 期望结尾: Aliased: https://www.anet.sh
 ```
+
+部署日志应只有读取/上传 `.vercel/output` 与 alias 的过程,不应再次出现
+`npm install`、`npm ci` 或 VitePress 的构建输出。若出现远端依赖安装或构建,
+立即停止并检查是否漏了 `--prebuilt`;不要改用 `vercel --prod --yes` 绕过。
 
 ## 验证:验内容,不验状态码
 

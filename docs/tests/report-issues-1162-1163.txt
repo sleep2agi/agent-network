@@ -1,0 +1,49 @@
+# report — issues #1162 / #1163
+
+Date: 2026-08-25
+Base: fcea821d414f440a204afceb63866be2800ff932
+
+## #1162 — doc source-pin denominator
+
+The 111th tracked document is:
+
+  docs-site/docs/public/desktop/update/latest.json
+
+It was added by #1160 and belongs in the scanner because JSON is an intentional
+scanned suffix. It contains no blob/<ref>/<path>#L<n> source pin, so only the
+file denominator changes: files 110 -> 111; unique pins remain 11 and raw
+occurrences remain 28.
+
+Docker image: anet-issues-1162-test831
+Network: none
+Result: PASS
+
+  scanned_doc_files=111
+  pin_occurrences=28
+  pins_on_immutable_ref=6
+  unique_pins=11
+  broken_pins=1
+  baseline_entries=1
+  RESULT: PASS
+
+The suite also replayed its witnessed-red cases for a new broken pin, a stale
+baseline entry, malformed line zero, a path escaping the repository, a wrong
+symbol section, and a baseline expansion attempt. Each mutation returned
+non-zero and the restored tree returned green.
+
+## #1163 — prebuilt Vercel deployment runbook
+
+An Alpine 3.20 container, with the repository mounted read-only and networking
+disabled, checked the runbook for:
+
+  - vercel build --prod
+  - vercel deploy --prebuilt --prod
+  - worktree-owned npm ci
+  - an explicit stale .vercel/output warning
+  - no executable guidance using vercel --prod --yes
+
+Result:
+
+  PASS: docs-site runbook uses local prebuilt deployment and rejects stale output reuse
+
+No deployment was performed by this test.
