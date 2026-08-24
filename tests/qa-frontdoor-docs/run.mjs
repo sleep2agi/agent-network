@@ -160,13 +160,29 @@ for (const [language, html] of renderedHomepages) {
   check(/Agent\.Network_\d+\.\d+\.\d+_x64-setup\.exe/.test(html), `${language} rendered homepage lost the Windows download`);
 }
 
+// 收全集再判,不取首个匹配:只看第一个 desktop-v 的话,页面上同时留着新旧两个版本
+// (改了上面忘了下面、或旧卡片没删干净)会被判成正常 —— 而那正是最像"已经更新完"
+// 的失败形态。`desktop-v` 前缀让 mobile-v 的版本号不参与,不会互相误伤。
+const desktopVersions = (html) => [
+  ...new Set([...html.matchAll(/desktop-v(\d+\.\d+\.\d+)/g)].map((m) => m[1])),
+];
+for (const [language, html] of renderedHomepages) {
+  const versions = desktopVersions(html);
+  check(
+    versions.length === 1,
+    `${language} rendered homepage must advertise exactly one desktop version (found ${versions.length ? versions.join(", ") : "none"})`,
+  );
+}
 // 真正值得钉的不变量:两种语言必须宣传同一个版本。字面钉版本号做不到这件事,
 // 而它恰好是最容易犯的错 —— 只改了一半的首页。
-const advertisedVersion = (html) => (html.match(/desktop-v(\d+\.\d+\.\d+)/) || [])[1];
 {
-  const [zh, en] = renderedHomepages.map(([, html]) => advertisedVersion(html));
-  check(Boolean(zh) && zh === en, `homepages advertise different desktop versions (zh=${zh}, en=${en})`);
+  const [zh, en] = renderedHomepages.map(([, html]) => desktopVersions(html));
+  check(
+    zh.length === 1 && en.length === 1 && zh[0] === en[0],
+    `homepages advertise different desktop versions (zh=${zh.join("|") || "none"}, en=${en.join("|") || "none"})`,
+  );
 }
+
 check(renderedHomepages[0][1].includes("你的 AI Agent 桌面工作台"), "Chinese rendered homepage lost the desktop hero");
 check(renderedHomepages[1][1].includes("Your desktop workspace for AI agents"), "English rendered homepage lost the desktop hero");
 for (const marker of ["像聊天一样协作", "管理整个网络", "本地优先"]) {

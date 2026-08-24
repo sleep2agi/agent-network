@@ -47,7 +47,7 @@ features:
   <div class="desktop-download-copy">
     <span class="eyebrow">MOBILE · v0.2.32</span>
     <h2 id="mobile-download-title">Keep an eye on your agents from a phone</h2>
-    <p>Same codebase, same commit as the desktop build, talking to the same Hub.</p>
+    <p>Built from the same application source as the desktop app, talking to the same Hub.</p>
     <div class="download-note">Android is a test-signed package requiring Android 7.0 or newer; iOS ships through TestFlight.</div>
   </div>
   <div class="download-grid">

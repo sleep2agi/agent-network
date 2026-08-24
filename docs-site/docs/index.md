@@ -51,7 +51,7 @@ features:
   <div class="desktop-download-copy">
     <span class="eyebrow">MOBILE · v0.2.32</span>
     <h2 id="mobile-download-title">手机上也能盯着你的 Agent</h2>
-    <p>与桌面版同一份代码、同一个提交构建，连的是同一个 Hub。</p>
+    <p>与桌面版同一份应用源码，连的是同一个 Hub。</p>
     <div class="download-note">Android 为测试签名安装包，需 Android 7.0 及以上；iOS 通过 TestFlight 分发。</div>
   </div>
   <div class="download-grid">
