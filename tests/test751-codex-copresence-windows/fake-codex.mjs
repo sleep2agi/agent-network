@@ -23,6 +23,12 @@ if (args[0] === "app-server") {
         if (msg.method === "thread/start") result = { thread: { id: "thread_windows_e2e" } };
         if (msg.method === "thread/resume") result = { thread: { id: msg.params.threadId } };
         if (msg.method === "turn/start") result = { turn: { id: "turn_bootstrap" } };
+        if (msg.method === "thread/read") result = {
+          thread: {
+            id: msg.params.threadId,
+            turns: [{ id: "turn_bootstrap", status: "completed" }],
+          },
+        };
         ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result }));
       },
     },
