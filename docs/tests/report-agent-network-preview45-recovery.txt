@@ -1,0 +1,56 @@
+# @sleep2agi/agent-network 2.3.0-preview.45 — recovery release gate
+
+Status: PASS on exact final post-hygiene main
+
+Environment
+
+- Base commit: `1e09f26de61d0d07f31732f04c07be3a4174cfd8`
+- Source commit under test: `b03e269a6faeb25e6cf974f7b2ec1849f478feb5`
+- Node: `v22.23.2`
+- Bun: `1.3.14`
+- Docker image: `sha256:ce79cfebccb3dd6a85091df890f9cb705ca3eadc0a25c0d8f0f8617c5f304554`
+
+Test 1178
+
+The Node 22 + Bun container ran
+`tests/test1178-codex-upgrade-recovery/run.sh` with the release bump present.
+
+Result:
+
+- 14 tests passed, 0 failed, 41 assertions
+- exact resume/read identity and persisted-history verification passed
+- failure to verify resume remained fail-closed and never called
+  `thread/start`
+- the authoritative snapshot happened only after the active writer quiesced
+- nested session state retained relative path, byte size, and sha256 evidence
+- symlink escape from CODEX_HOME was rejected
+- the redacted recovery metadata boundary excluded credentials
+- stale PATH globals were ignored
+- the immutable paired runtime remained agent-node preview.33
+- missing `codex-app-server` capability failed closed
+- TypeScript typecheck and production bundle passed
+
+Pair unit gate
+
+`src/opencode-agent-node-pair.test.ts` contributed 6 passing tests:
+
+- package and shared constant agree on network preview.45
+- agent-node remains preview.33
+- stale preview.32 PATH global cannot shadow the immutable pair
+- missing codex-app-server capability is rejected
+- only an exact package-owned entrypoint with safe modes is admitted
+- a project-local impersonator is skipped
+
+Packed recovery surface
+
+Tar inspection confirmed both
+`dist/src/codex-copresence-recovery.d.ts` and
+`dist/src/opencode-agent-node-pair.d.ts`. The declarations expose the shared
+quiesce-before-snapshot boundary, exact resume/read verification, redacted
+recovery snapshot, topology audit, and the exact preview.45/preview.33 pair.
+
+Release boundary
+
+This is not publication evidence. npm was not published, no dist-tag moved,
+and no global npm package was modified. These gates were rerun after rebasing
+onto the final merged main and are suitable for the Draft release PR.
