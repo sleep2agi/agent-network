@@ -1,10 +1,11 @@
 # @sleep2agi/agent-network 2.3.0-preview.45 — local pack evidence
 
-Status: PASS (local preparation only; not pushed, published, or installed globally)
+Status: PASS on the final post-hygiene main (not published or installed globally)
 
 Source boundary
 
-- Exact base: `d829ef570096ea60f31f60d8bcab7e9522ba1a7b`
+- Exact base: `1e09f26de61d0d07f31732f04c07be3a4174cfd8`
+- Source commit under test: `b03e269a6faeb25e6cf974f7b2ec1849f478feb5`
 - Release version: `2.3.0-preview.45`
 - Paired runtime: `@sleep2agi/agent-node@2.5.0-preview.33` (unchanged)
 - Changed release inputs: `agent-network/package.json`, the two root-version
@@ -20,19 +21,17 @@ Command:
 
 `./scripts/sync-pinned-versions.sh @sleep2agi/agent-network 2.3.0-preview.45`
 
-Result: exit 0, but the old script reported the shared-pair source as
-`unchanged`. Its registered name is the compatibility alias
-`OPENCODE_AGENT_NETWORK_VERSION`, while the literal now lives in
-`PAIRED_AGENT_NETWORK_VERSION`; therefore this dry-run is not evidence that
-the pair bump happened. The release diff and generated declarations were
-checked directly instead. No `--apply` was used.
+Result: exit 0. The corrected registry enumerated the writable
+`PAIRED_AGENT_NETWORK_VERSION` literal and reported it unchanged at
+preview.45. The stale `OPENCODE_*` compatibility alias is no longer treated as
+a writable release target. No `--apply` was used.
 
 Container
 
 - Base: `node:22-bookworm-slim`
 - Node: `v22.23.2`
 - Bun: `1.3.14` (pinned archive + checksum)
-- Image: `sha256:e00ed7a14319c37b2ecd2b95a84ec8be5749d16a7225b55f8fa17e5edfac76a7`
+- Recovery/build image: `sha256:ce79cfebccb3dd6a85091df890f9cb705ca3eadc0a25c0d8f0f8617c5f304554`
 
 Build and pack
 
@@ -47,12 +46,11 @@ Accepted pack result:
 
 - id: `@sleep2agi/agent-network@2.3.0-preview.45`
 - filename: `sleep2agi-agent-network-2.3.0-preview.45.tgz`
-- size: `1,706,566` bytes
-- unpacked size: `5,135,560` bytes
+- size: `1,704,820` bytes
+- unpacked size: `5,136,227` bytes
 - entries: `77`
-- sha1 (npm): `997ccbd845accc5a04530fe5126bd0405ef1cc76`
-- sha256: `8ed8e13a4dae60afc25e3f2bc6ff47acfb54a9aa4e1f8b9648dae875a42e9122`
-- integrity: `sha512-QsTMg8e/jLaLbmmVrDcw/lMNUUhbFuSwD3lzht2ie/pCJXoXT23G0SGMwQ0NwrcSJqZaraNSQnB+qWK7nMlFew==`
+- sha256: `559b21db4221da1d0b796a9888075adb27a26b613e209d52ddf0e8480fc4b0e3`
+- integrity: `sha512-13P1WSfliyg7wx1GkcTP2yJGMBBcWxNkFySablDghOASLBqbM3lca/2SCN1b65eF/TNWpgAsyiehNgSV6kUdwA==`
 
 Tar inspection confirmed these required entries:
 
@@ -84,7 +82,6 @@ Observed:
 
 Final boundary
 
-This evidence is for the exact local base plus the stated release diff. It
-must be regenerated after rebasing onto the eventual merged main. Nothing was
-pushed, no PR was opened, no npm package or dist-tag was changed, and the host
-global npm installation was untouched.
+This evidence is for the exact final main plus the stated release diff. No npm
+package or dist-tag was changed, and the host global npm installation was
+untouched.
