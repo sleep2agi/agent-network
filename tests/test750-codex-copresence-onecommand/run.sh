@@ -44,6 +44,25 @@ node --version >>"$REPORT"
 bun --version >>"$REPORT"
 pass "environment (no host state; tmux + codex stub present so the launcher reaches its decisions)"
 
+# Exact package-owned preview.33 fixture. A stale `agent-node` may exist on
+# PATH, but codex-app-server compatibility must be checked against this paired
+# identity and never against a floating dist-tag.
+PAIR_BASE="/run/user/$(id -u)/test750-paired-agent-node"
+PAIR_ROOT="$PAIR_BASE/node_modules/@sleep2agi/agent-node"
+mkdir -p "$PAIR_ROOT/dist"
+chmod 700 "/run/user/$(id -u)" "$PAIR_BASE"
+cat >"$PAIR_ROOT/package.json" <<'JSON'
+{"name":"@sleep2agi/agent-node","version":"2.5.0-preview.33","publishConfig":{"tag":"preview"},"bin":{"agent-node":"dist/cli.js"}}
+JSON
+cat >"$PAIR_ROOT/dist/cli.js" <<'JS'
+#!/usr/bin/env node
+if (process.argv.includes("--help")) { console.log("--runtime codex-app-server"); process.exit(0); }
+await new Promise(() => {});
+JS
+chmod 644 "$PAIR_ROOT/package.json"
+chmod 755 "$PAIR_ROOT" "$PAIR_ROOT/dist" "$PAIR_ROOT/dist/cli.js"
+export ANET_AGENT_NODE_BIN="$PAIR_ROOT/dist/cli.js"
+
 log "[L1] decision functions"
 cd "$ROOT/agent-network"
 bun test src/codex-copresence-profile.test.ts src/codex-copresence-preflight.test.ts \

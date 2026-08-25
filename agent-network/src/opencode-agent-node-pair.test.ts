@@ -13,8 +13,12 @@ import {
   OPENCODE_AGENT_NETWORK_VERSION,
   OPENCODE_AGENT_NODE_SPEC,
   OPENCODE_AGENT_NODE_VERSION,
+  PAIRED_AGENT_NODE_SPEC,
+  PAIRED_AGENT_NODE_VERSION,
+  agentNodeHelpSupportsCodexAppServer,
   agentNodeHelpSupportsOpencode,
   opencodeExactPairInstallCommand,
+  pairedAgentNodeResolution,
   resolveAgentNodePackageEntrypointFromPath,
   validateAgentNodePackageEntrypoint,
 } from "./opencode-agent-node-pair";
@@ -45,6 +49,24 @@ describe("OpenCode agent-node release pairing", () => {
 
     expect(agentNodeHelpSupportsOpencode(staleHelp)).toBe(false);
     expect(agentNodeHelpSupportsOpencode(currentHelp)).toBe(true);
+  });
+
+  test("codex bridge ignores stale PATH globals and resolves only the immutable pair", () => {
+    const staleGlobal = "@sleep2agi/agent-node@2.5.0-preview.32";
+    const resolution = pairedAgentNodeResolution();
+    expect(staleGlobal).not.toBe(PAIRED_AGENT_NODE_SPEC);
+    expect(PAIRED_AGENT_NODE_VERSION).toBe("2.5.0-preview.33");
+    expect(resolution).toEqual({
+      spec: PAIRED_AGENT_NODE_SPEC,
+      args: ["-y", PAIRED_AGENT_NODE_SPEC, "--print-entrypoint"],
+      allowPathGlobal: false,
+    });
+    expect(resolution.spec).not.toEndWith("@preview");
+  });
+
+  test("codex capability is explicit and fails closed when absent", () => {
+    expect(agentNodeHelpSupportsCodexAppServer("--runtime codex-sdk | opencode-cli")).toBe(false);
+    expect(agentNodeHelpSupportsCodexAppServer("--runtime codex-sdk | codex-app-server")).toBe(true);
   });
 
   test("admits only the exact preview package identity with safe file modes", () => {
