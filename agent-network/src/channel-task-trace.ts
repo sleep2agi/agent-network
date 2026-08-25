@@ -6,6 +6,10 @@ export async function sendChannelTaskWithTrace(input: {
   priority?: string;
   fromAlias: string;
   networkId?: string | null;
+  /** Structured task metadata forwarded verbatim, e.g. { attachments: [...] }.
+   *  Omitted from the outbound body when absent, so a call without it is
+   *  unchanged. */
+  meta?: Record<string, unknown>;
 }, deps: {
   send: (args: Record<string, unknown>) => Promise<any>;
   log: (line: string) => void;
@@ -32,6 +36,7 @@ export async function sendChannelTaskWithTrace(input: {
       task: input.task,
       priority: input.priority || "normal",
       from_session: input.fromAlias,
+      ...(input.meta ? { meta: input.meta } : {}),
     });
     const taskId = result?.task_id || result?.message_id || result?.id || null;
     if (result?.ok === false || result?.error) emit("failed", taskId, result?.error || "commhub rejected task");

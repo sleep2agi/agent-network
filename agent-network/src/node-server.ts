@@ -32,6 +32,12 @@ import {
   channelAttachmentCacheDir,
   downloadChannelAttachments,
 } from "./channel-attachments";
+import {
+  ATTACHMENTS_SCHEMA,
+  attachmentsField,
+  attachmentsMeta,
+  normalizeOutboundAttachments,
+} from "./outbound-attachments";
 import { sendChannelTaskWithTrace } from "./channel-task-trace";
 
 // ── .env loader helper ────────────────────────────────
@@ -208,6 +214,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
             enum: ["completed", "failed", "cancelled", "blocked", "error", "in_progress"],
             description: "Task outcome: completed/failed/cancelled for final results, blocked/error/in_progress for status updates",
           },
+          attachments: ATTACHMENTS_SCHEMA,
         },
         required: ["text"],
       },
@@ -237,6 +244,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           alias: { type: "string", description: "Target session alias" },
           task: { type: "string", description: "Task content" },
           priority: { type: "string", enum: ["high", "normal", "low"], description: "Priority (default: normal)" },
+          attachments: ATTACHMENTS_SCHEMA,
         },
         required: ["alias", "task"],
       },
@@ -351,7 +359,13 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req: any) => {
   }
 
   if (name === "commhub_reply") {
-    const { task_id, text, status } = args as any;
+    const { task_id, text, status, attachments } = args as any;
+    // Fail the call rather than dropping a malformed list: an attachment that
+    // silently vanishes is indistinguishable from one that was never sent.
+    const parsed = normalizeOutboundAttachments(attachments);
+    if (!parsed.ok) {
+      return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: parsed.error }) }] };
+    }
     // V2: terminal statuses use send_reply to close task lifecycle
     if (status === "completed" || status === "failed" || status === "cancelled") {
       const replyStatus = status === "completed" ? "replied" : status;
@@ -362,6 +376,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req: any) => {
         in_reply_to: task_id || undefined,
         status: replyStatus,
         from_session: ALIAS,
+        ...attachmentsField(parsed.attachments),
       });
       if (task_id) taskOriginators.delete(task_id);
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
@@ -390,11 +405,16 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req: any) => {
   }
 
   if (name === "commhub_send_task") {
-    const { alias, task, priority } = args as any;
+    const { alias, task, priority, attachments } = args as any;
+    const parsedTaskAttachments = normalizeOutboundAttachments(attachments);
+    if (!parsedTaskAttachments.ok) {
+      return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: parsedTaskAttachments.error }) }] };
+    }
     const result = await sendChannelTaskWithTrace({
       alias: String(alias || ""), task: String(task || ""), priority,
       fromAlias: ALIAS,
       networkId: process.env.ANET_NETWORK_ID || ANET_CONFIG.network_id || null,
+      ...attachmentsMeta(parsedTaskAttachments.attachments),
     }, {
       send: (sendArgs) => callCommHub("send_task", sendArgs),
       log: (line) => process.env.ANET_TASK_TRACE_FORMAT === "json"
