@@ -1,0 +1,13 @@
+Test 1176 — Codex TUI thread alignment and runtime truth
+
+Source commit under test: pending
+
+Scope
+- Hub preserves agent-node:codex-app-server and agent-node:grok-build-cli instead of collapsing them into family fallbacks.
+- When a manually assembled bridge creates a thread after a TUI was opened, agent-node writes codexThreadId and prints the exact CODEX_HOME / remote / thread / model needed to resume that TUI.
+- The managed `anet node start --copresence` path was audited: it already starts app-server, creates/resumes the thread, persists config, then starts bridge and TUI on that same thread.
+
+Container result: pending
+
+Boundary
+- This change does not restart an operator's interactive TUI behind their back. Managed topology is already synchronized; manual topology gets a fail-loud, exact repair command when the bridge changes thread.

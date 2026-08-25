@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { resolvePort } from "./resolve-port.js";
+import { normalizeSessionRuntime } from "./runtime-label.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
@@ -206,19 +207,7 @@ function isLocalhostIP(ip: string): boolean {
 // Normalize the raw `agent` field into a canonical runtime identifier for the
 // dashboard's Runtime badge. Returns null for unknown/absent agents so the
 // frontend can fall back to a placeholder.
-function normalizeRuntime(agent: unknown): string | null {
-  if (typeof agent !== "string" || agent.length === 0) return null;
-  if (agent === "claude-code") return "claude-code-cli";
-  if (agent.startsWith("agent-node:codex")) return "codex-sdk";
-  if (agent.startsWith("agent-node:claude")) return "claude-agent-sdk";
-  if (agent.startsWith("agent-node:grok")) return "grok-build-acp";
-  // RFC-029 — agent-node reports `agent-node:opencode` when RUNTIME
-  // bucket resolves to "opencode". Dashboard needs the canonical
-  // launcher name so its Runtime badge matches wizard choices.
-  if (agent.startsWith("agent-node:opencode")) return "opencode-cli";
-  if (agent === "http-api" || agent === "http" || agent === "api") return "http-api";
-  return null;
-}
+const normalizeRuntime = normalizeSessionRuntime;
 
 function isTmuxAllowedIP(ip: string): boolean {
   return isLocalhostIP(ip) || TMUX_ALLOWLIST.has(ip);
