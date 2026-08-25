@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
-import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
-import { basename, join } from "path";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "fs";
+import { join, sep } from "path";
 
 export interface CodexRecoveryVerification {
   method: "thread/start" | "thread/resume";
@@ -17,6 +17,13 @@ export interface CodexRecoveryBackup {
 }
 
 const SESSION_STATE_NAMES = new Set(["sessions", "history.jsonl", "state_5.sqlite", "state_5.sqlite-shm", "state_5.sqlite-wal"]);
+
+/** Transaction boundary shared by Windows and POSIX cutovers: the snapshot
+ * cannot begin until every authoritative state writer has quiesced. */
+export async function quiesceThenSnapshot<T>(quiesce: () => Promise<void>, snapshot: () => T): Promise<T> {
+  await quiesce();
+  return snapshot();
+}
 
 function hashJson(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -67,9 +74,10 @@ export async function resumeAndVerifyCodexThread(
   return verifyCodexThreadHistory("thread/resume", threadId, read);
 }
 
-/** Private, node-local recovery point. The exact config is retained for
- * rollback with mode 0600; reports/logs receive only filenames and hashes.
- * CODEX_HOME credentials are intentionally excluded. */
+/** Private, node-local recovery point. config-recovery.json is deliberately
+ * redacted non-credential audit/recovery metadata, not an identity backup.
+ * Identity recovery relies on leaving the original node config and CODEX_HOME
+ * in place. Credentials are never copied into this snapshot. */
 export function backupCodexRecoveryState(opts: {
   nodeDir: string;
   codexHome: string;
@@ -90,19 +98,38 @@ export function backupCodexRecoveryState(opts: {
   const stateDir = join(backupDir, "codex-state");
   mkdirSync(stateDir, { recursive: true, mode: 0o700 });
   const stateFiles: string[] = [];
+  const manifestFiles: Array<{ path: string; size: number; sha256: string }> = [];
+  const codexRoot = existsSync(opts.codexHome) ? realpathSync(opts.codexHome) : opts.codexHome;
+  const copyStateTree = (source: string, target: string, relativePath: string) => {
+    const info = lstatSync(source);
+    if (info.isSymbolicLink()) throw new Error(`recovery snapshot refuses symlink: ${relativePath}`);
+    const resolved = realpathSync(source);
+    if (resolved !== codexRoot && !resolved.startsWith(codexRoot + sep)) {
+      throw new Error(`recovery snapshot path escapes CODEX_HOME: ${relativePath}`);
+    }
+    if (info.isDirectory()) {
+      mkdirSync(target, { recursive: true, mode: 0o700 });
+      for (const child of readdirSync(source)) copyStateTree(join(source, child), join(target, child), join(relativePath, child));
+      return;
+    }
+    if (!info.isFile()) throw new Error(`recovery snapshot refuses non-file state: ${relativePath}`);
+    copyFileSync(source, target);
+    const copied = readFileSync(target);
+    manifestFiles.push({ path: relativePath, size: copied.length, sha256: createHash("sha256").update(copied).digest("hex") });
+  };
   if (existsSync(opts.codexHome)) {
     for (const name of readdirSync(opts.codexHome)) {
       if (!SESSION_STATE_NAMES.has(name)) continue;
       const source = join(opts.codexHome, name);
       const target = join(stateDir, name);
-      cpSync(source, target, { recursive: lstatSync(source).isDirectory(), preserveTimestamps: true });
+      copyStateTree(source, target, name);
       stateFiles.push(name);
     }
   }
   const manifest = {
     createdAt: now.toISOString(),
     configSha256: createHash("sha256").update(rawConfig).digest("hex"),
-    stateFiles: stateFiles.map((name) => ({ name: basename(name), size: statSync(join(stateDir, name)).size })),
+    stateFiles: manifestFiles.sort((a, b) => a.path.localeCompare(b.path)),
     credentialsIncluded: false,
   };
   writeFileSync(join(backupDir, "manifest.json"), JSON.stringify(manifest, null, 2), { mode: 0o600 });

@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 import pty from "../../agent-network/node_modules/node-pty/lib/index.js";
 
@@ -19,9 +20,23 @@ mkdirSync(join(userHome, ".anet"), { recursive: true });
 writeFileSync(join(userHome, ".anet", "config.json"), JSON.stringify({ hub: "http://127.0.0.1:19351" }));
 writeFileSync(join(bin, "codex.cmd"), `@echo off\r\nbun "${join(import.meta.dirname, "fake-codex.mjs")}" %*\r\n`);
 writeFileSync(join(bin, "agent-node.cmd"), `@echo off\r\nbun "${join(import.meta.dirname, "fake-agent-node.mjs")}" %*\r\n`);
+// Deliberately leave the PATH shim above as a stale-global witness. The Codex
+// bridge must use this exact package-owned preview.33 entrypoint instead.
+const exactNodeRoot = join(process.env.RUNNER_TEMP, "anet-test751-exact-pair", "node_modules", "@sleep2agi", "agent-node");
+const exactNodeDist = join(exactNodeRoot, "dist");
+const exactNodeEntrypoint = join(exactNodeDist, "cli.js");
+mkdirSync(exactNodeDist, { recursive: true });
+writeFileSync(join(exactNodeRoot, "package.json"), JSON.stringify({
+  name: "@sleep2agi/agent-node",
+  version: "2.5.0-preview.33",
+  publishConfig: { tag: "preview" },
+  bin: { "agent-node": "dist/cli.js" },
+}));
+writeFileSync(exactNodeEntrypoint, `import ${JSON.stringify(pathToFileURL(join(import.meta.dirname, "fake-agent-node.mjs")).href)};\n`);
 const env = {
   ...process.env, HOME: userHome, USERPROFILE: userHome,
   PATH: `${bin};${process.env.PATH}`, ANET_TEST751_RPC_LOG: rpcLog,
+  ANET_AGENT_NODE_BIN: exactNodeEntrypoint,
 };
 
 function command(args, stdin = "") {

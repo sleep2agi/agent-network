@@ -4,6 +4,7 @@ RUN apt-get update -qq && apt-get install -y --no-install-recommends python3 mak
 COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
 RUN cd agent-network && bun install --frozen-lockfile
 COPY agent-network ./agent-network
+COPY agent-node/package.json ./agent-node/package.json
 COPY tests/test1178-codex-upgrade-recovery/run.sh ./run.sh
 RUN chmod +x ./run.sh
 CMD ["./run.sh"]

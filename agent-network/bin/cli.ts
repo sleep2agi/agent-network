@@ -45,8 +45,12 @@ import { buildOpencodeSmokeEnv } from "../src/opencode-smoke-env";
 import {
   OPENCODE_AGENT_NODE_SPEC,
   OPENCODE_AGENT_NODE_VERSION,
+  PAIRED_AGENT_NODE_SPEC,
+  PAIRED_AGENT_NODE_VERSION,
+  agentNodeHelpSupportsCodexAppServer,
   agentNodeHelpSupportsOpencode,
   opencodeExactPairInstallCommand,
+  pairedAgentNodeResolution,
   resolveAgentNodePackageEntrypointFromPath,
   validateAgentNodePackageEntrypoint,
 } from "../src/opencode-agent-node-pair";
@@ -148,6 +152,7 @@ import { copresenceThreadPlan } from "../src/codex-copresence-thread";
 import {
   backupCodexRecoveryState,
   codexTopologyAudit,
+  quiesceThenSnapshot,
   resumeAndVerifyCodexThread,
   verifyCodexThreadHistory,
   type CodexRecoveryVerification,
@@ -739,6 +744,17 @@ async function stopPriorWindowsCopresence(nodeId: string): Promise<void> {
   rmSync(windowsCopresenceRecordPath(nodesDir(), nodeId), { force: true });
 }
 
+function persistCodexRecoveryPoint(resolved: NonNullable<ReturnType<typeof resolveNodeRef>>, codexHome: string): void {
+  const nodeDir = join(nodesDir(), resolved.id);
+  const backup = backupCodexRecoveryState({ nodeDir, codexHome });
+  const cfgPath = join(nodeDir, "config.json");
+  const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+  cfg.codexRecoveryBackup = { createdAt: backup.createdAt, stateFiles: backup.stateFiles, path: backup.backupDir };
+  atomicWritePrivateJson(cfgPath, cfg);
+  resolved.profile.codexRecoveryBackup = cfg.codexRecoveryBackup;
+  console.log(`[anet] recovery point created after prior runtime quiesced (${backup.stateFiles.length} session-state item(s); credentials excluded)`);
+}
+
 async function startWindowsCodexCopresence(
   resolved: NonNullable<ReturnType<typeof resolveNodeRef>>,
   displayName: string,
@@ -752,7 +768,12 @@ async function startWindowsCodexCopresence(
   if (unsafeCmd.test(opts.codexBin) || unsafeCmd.test(opts.model || "")) {
     throw new Error("Windows codex command/model contains cmd.exe metacharacters");
   }
-  await stopPriorWindowsCopresence(resolved.id);
+  // Authoritative snapshot only after all prior writers have been reaped.
+  // Failure aborts before any replacement app-server can start.
+  await quiesceThenSnapshot(
+    () => stopPriorWindowsCopresence(resolved.id),
+    () => persistCodexRecoveryPoint(resolved, opts.codexHome),
+  );
   const port = await findFreeLoopbackPort(opts.port);
   const wsUrl = `ws://127.0.0.1:${port}`;
   const posture = codexCopresencePosture(opts.dangerFullAccess, resolved.profile, displayName);
@@ -969,26 +990,6 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     console.error(`[anet] ⚠ could not stage CODEX_HOME state: ${(e as Error).message}`);
   }
 
-  // Recovery point is created after credential staging but excludes credential
-  // files. It precedes every app-server/process replacement on both platforms.
-  try {
-    const nodeDir = join(nodesDir(), resolved.id);
-    const backup = backupCodexRecoveryState({ nodeDir, codexHome: opts.codexHome });
-    const cfgPath = join(nodeDir, "config.json");
-    const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
-    cfg.codexRecoveryBackup = {
-      createdAt: backup.createdAt,
-      stateFiles: backup.stateFiles,
-      path: backup.backupDir,
-    };
-    atomicWritePrivateJson(cfgPath, cfg);
-    resolved.profile.codexRecoveryBackup = cfg.codexRecoveryBackup;
-    console.log(`[anet] recovery point created (${backup.stateFiles.length} session-state item(s); credentials excluded)`);
-  } catch (e) {
-    console.error(`[anet] ❌ cannot create Codex recovery point: ${(e as Error).message}`);
-    process.exit(1);
-  }
-
   if (process.platform === "win32") {
     try {
       await startWindowsCodexCopresence(resolved, displayName, opts, model);
@@ -1051,14 +1052,22 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   }
   console.log(`[anet] identity marker written (uuid=${identityMarker.slice(0, 8)}… — on disk before any session starts)`);
 
-  // Kill any prior instances so this is idempotent.
-  for (const s of [appsrvSession, bridgeSession, tuiSession]) {
-    if (tmuxSessionRunning(s)) {
-      console.log(`[anet] killing prior tmux session ${s}`);
-      killTmuxSession(s);
-    }
+  // Kill any prior instances and only then take the authoritative snapshot.
+  // Snapshot failure is fail-closed before the new app-server is launched.
+  try {
+    await quiesceThenSnapshot(async () => {
+      for (const s of [appsrvSession, bridgeSession, tuiSession]) {
+        if (tmuxSessionRunning(s)) {
+          console.log(`[anet] killing prior tmux session ${s}`);
+          killTmuxSession(s);
+        }
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }, () => persistCodexRecoveryPoint(resolved, opts.codexHome));
+  } catch (e) {
+    console.error(`[anet] ❌ cannot create quiesced Codex recovery point: ${(e as Error).message}`);
+    process.exit(1);
   }
-  await new Promise((r) => setTimeout(r, 500));
 
   const port = await findFreeLoopbackPort(opts.port);
   const wsUrl = `ws://127.0.0.1:${port}`;
@@ -2710,18 +2719,19 @@ function opencodeUsePinSource(): string {
 type AgentNodeLaunchPlan = {
   command: string;
   argsPrefix: string[];
-  source: "explicit" | "global" | "preview";
+  source: "explicit" | "global" | "preview" | "paired";
   probeEnv: NodeJS.ProcessEnv;
 };
 
 let opencodeAgentNodeLaunchPlan: AgentNodeLaunchPlan | null = null;
 let grokAgentNodeLaunchPlan: AgentNodeLaunchPlan | null = null;
+let codexAgentNodeLaunchPlan: AgentNodeLaunchPlan | null = null;
 
 function agentNodeHelp(plan: AgentNodeLaunchPlan): string {
   return execFileSync(plan.command, [...plan.argsPrefix, "--help"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
-    timeout: plan.source === "preview" ? 120_000 : 5_000,
+    timeout: plan.source === "preview" || plan.source === "paired" ? 120_000 : 5_000,
     env: plan.probeEnv,
   });
 }
@@ -2836,6 +2846,58 @@ function revalidateOpencodeAgentNodeLaunchPlan(plan: AgentNodeLaunchPlan): Agent
     throw opencodeAgentNodeError(`${OPENCODE_AGENT_NODE_SPEC} no longer advertises opencode-cli`);
   }
   return checked;
+}
+
+function pairedAgentNodeError(detail: string): Error {
+  return new Error(`${detail}\nRequired exact runtime: ${PAIRED_AGENT_NODE_SPEC}`);
+}
+
+/** Resolve only the exact release-paired package. PATH globals are
+ * deliberately ignored so preview.32 cannot shadow preview.33. */
+function resolveCodexAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
+  if (codexAgentNodeLaunchPlan) return codexAgentNodeLaunchPlan;
+  const probeEnv = { ...process.env };
+  const forbiddenRoots = discoverOpencodeForbiddenRoots();
+  const explicit = process.env.ANET_AGENT_NODE_BIN;
+  let rawEntrypoint: string;
+  let source: AgentNodeLaunchPlan["source"];
+  if (explicit) {
+    if (!isAbsolute(explicit) || !existsSync(explicit)) {
+      throw pairedAgentNodeError("ANET_AGENT_NODE_BIN must name an existing absolute agent-node CLI path");
+    }
+    rawEntrypoint = explicit;
+    source = "explicit";
+  } else {
+    let output: string;
+    try {
+      const resolution = pairedAgentNodeResolution();
+      output = execFileSync("npx", resolution.args, {
+        encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 120_000, env: probeEnv,
+      });
+    } catch (error: any) {
+      throw pairedAgentNodeError(`could not resolve exact paired package: ${error?.stderr || error?.message || error}`);
+    }
+    const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    if (lines.length !== 1 || !isAbsolute(lines[0])) {
+      throw pairedAgentNodeError(`${PAIRED_AGENT_NODE_SPEC} returned an invalid entrypoint`);
+    }
+    rawEntrypoint = lines[0];
+    source = "paired";
+  }
+  let entrypoint: string;
+  try {
+    entrypoint = validateAgentNodePackageEntrypoint(
+      rawEntrypoint, PAIRED_AGENT_NODE_SPEC, PAIRED_AGENT_NODE_VERSION, forbiddenRoots,
+    );
+  } catch (error: any) {
+    throw pairedAgentNodeError(`exact paired package identity validation failed: ${error?.message || error}`);
+  }
+  const plan: AgentNodeLaunchPlan = { command: process.execPath, argsPrefix: [entrypoint], source, probeEnv };
+  if (!agentNodeHelpSupportsCodexAppServer(agentNodeHelp(plan))) {
+    throw pairedAgentNodeError("exact paired package lacks codex-app-server capability");
+  }
+  codexAgentNodeLaunchPlan = plan;
+  return plan;
 }
 
 function resolvePreviewAgentNodeEntrypoint(resolverEnv: NodeJS.ProcessEnv): string {
@@ -2976,6 +3038,17 @@ function resolveGrokAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
 }
 
 function assertStartCompatibility(runtime: RuntimeName) {
+  if (runtime === "codex-app-server") {
+    try {
+      resolveCodexAgentNodeLaunchPlan();
+    } catch (error: any) {
+      console.error(`[anet] Incompatible agent-node for codex-app-server.`);
+      console.error(`[anet] ${error?.message || error}`);
+      console.error(`[anet] Refusing to start: stale globals and floating @preview are not recovery-safe.`);
+      process.exit(1);
+    }
+    return;
+  }
   // RFC-029 — opencode CLI's Zed ACP surface is the only integration
   // point, and its message-schema stability across upstream releases
   // is unproven. Reject any drift from the pinned version so a
@@ -5493,6 +5566,10 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
       commandArgs = [...plan.argsPrefix, ...agentArgs];
     } else if (runtime === "grok-build-cli") {
       const plan = resolveGrokAgentNodeLaunchPlan();
+      cmd = plan.command;
+      commandArgs = [...plan.argsPrefix, ...agentArgs];
+    } else if (runtime === "codex-app-server") {
+      const plan = resolveCodexAgentNodeLaunchPlan();
       cmd = plan.command;
       commandArgs = [...plan.argsPrefix, ...agentArgs];
     } else try { execSync(process.platform === "win32" ? "where agent-node" : "which agent-node", { stdio: "pipe" }); } catch {

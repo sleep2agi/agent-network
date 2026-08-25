@@ -18,10 +18,32 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } fro
 import { opencodeOwnedPathModeIsSafe } from "./opencode-owner-mode";
 import { describeUnsafePath } from "./unsafe-package-path-reason";
 
-export const OPENCODE_AGENT_NETWORK_VERSION = "2.3.0-preview.44";
-export const OPENCODE_AGENT_NODE_VERSION = "2.5.0-preview.33";
-export const OPENCODE_AGENT_NODE_SPEC =
-  `@sleep2agi/agent-node@${OPENCODE_AGENT_NODE_VERSION}`;
+export const PAIRED_AGENT_NETWORK_VERSION = "2.3.0-preview.44";
+export const PAIRED_AGENT_NODE_VERSION = "2.5.0-preview.33";
+export const PAIRED_AGENT_NODE_SPEC = `@sleep2agi/agent-node@${PAIRED_AGENT_NODE_VERSION}`;
+// Backward-compatible names for the first consumer of the shared pair.
+export const OPENCODE_AGENT_NETWORK_VERSION = PAIRED_AGENT_NETWORK_VERSION;
+export const OPENCODE_AGENT_NODE_VERSION = PAIRED_AGENT_NODE_VERSION;
+export const OPENCODE_AGENT_NODE_SPEC = PAIRED_AGENT_NODE_SPEC;
+
+export type PairedAgentNodeResolution = {
+  spec: string;
+  args: string[];
+  allowPathGlobal: false;
+};
+
+/** The codex bridge must resolve the immutable release pair, independent of PATH. */
+export function pairedAgentNodeResolution(): PairedAgentNodeResolution {
+  return {
+    spec: PAIRED_AGENT_NODE_SPEC,
+    args: ["-y", PAIRED_AGENT_NODE_SPEC, "--print-entrypoint"],
+    allowPathGlobal: false,
+  };
+}
+
+export function agentNodeHelpSupportsCodexAppServer(help: string): boolean {
+  return help.includes("codex-app-server");
+}
 
 export function opencodeExactPairInstallCommand(): string {
   return `npm install -g @sleep2agi/agent-network@${OPENCODE_AGENT_NETWORK_VERSION} ${OPENCODE_AGENT_NODE_SPEC}`;
