@@ -52,6 +52,7 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
   private readonly derivedThreads = new Map<string, string>();
   private readonly byClientId = new Map<string, Execution>();
   private readonly byTurn = new Map<string, Execution>();
+  private readonly pendingStartThreads = new Set<string>();
   private readonly earlyTerminals = new Map<string, unknown>();
   private closed = false;
   private readonly closedSignal: Promise<never>;
@@ -69,6 +70,7 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
   capability(): SideThreadCapability {
     if (this.opts.runtimeVersion !== "0.148.0") return unsupported("version", this.opts);
     if (this.opts.topology !== "owned-stdio") return unsupported("topology", this.opts);
+    if (!this.opts.forkLeaseStore.claimSupported()) return unsupported("topology", this.opts);
     if (this.opts.evidenceRevision !== "test1190-wire-v2") return unsupported("exact-boundary", this.opts);
     return {
       supported: true, runtime: "codex-app-server", runtimeVersion: this.opts.runtimeVersion,
@@ -88,6 +90,21 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
       );
     }
     const identity = input.operation ?? this.defaultOperation(input.sideThreadId, "fork", `fork-${input.sideThreadId}`);
+    let claim;
+    try { claim = await this.opts.forkLeaseStore.claim(identity.nodeId, input.sourceThreadId); }
+    catch (error) {
+      if (error instanceof Error && error.message === "runtime operation executor is already claimed") {
+        throw new SideThreadAmbiguousError("Codex fork is already executing; refusing duplicate thread/fork");
+      }
+      throw error;
+    }
+    try { return await this.forkClaimed(input, identity); }
+    finally { await claim.release(); }
+  }
+
+  private async forkClaimed(input: { sideThreadId: string; sourceThreadId: string; boundary: ExactBoundary; operation?: SideThreadRuntimeOperation },
+    identity: SideThreadRuntimeOperation): Promise<{ derivedThreadId: string }> {
+    this.assertOpen();
     const operation = this.operation(identity, input.sideThreadId, "fork", input.sourceThreadId,
       JSON.stringify([input.sourceThreadId, input.boundary.kind, input.boundary.turnId]));
     const existing = this.existing(operation);
@@ -101,11 +118,33 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
       state: "snapshot", updatedAt: this.now(),
     });
     if (lease.state !== "snapshot") return this.reconcileFork({ ...input, operation: identity }, this.mustOperation(operation));
-    if (lease.snapshotThreadIdHashes.length === 0) {
+    let current = this.mustOperation(operation);
+    let authoritativeSnapshot = current.result?.snapshotThreadIdHashes;
+    if (authoritativeSnapshot) {
+      if (lease.snapshotThreadIdHashes.length > 0
+        && JSON.stringify(lease.snapshotThreadIdHashes) !== JSON.stringify(authoritativeSnapshot)) {
+        throw new SideThreadConflictError("fork snapshot authority mismatch");
+      }
+      if (JSON.stringify(lease.snapshotThreadIdHashes) !== JSON.stringify(authoritativeSnapshot)) {
+        lease = { ...lease, snapshotThreadIdHashes: [...authoritativeSnapshot], updatedAt: this.now() };
+        this.opts.forkLeaseStore.put(lease);
+      }
+    } else if (lease.snapshotThreadIdHashes.length > 0) {
+      // Recovery for the old two-write ordering: the lease fsync completed but
+      // the operation snapshot did not. The already-durable lease is the only
+      // safe pre-send authority; never re-list and adopt an older fork.
+      authoritativeSnapshot = [...lease.snapshotThreadIdHashes];
+      current = { ...current, result: { ...current.result, snapshotThreadIdHashes: authoritativeSnapshot }, updatedAt: this.now() };
+      this.put(current);
+    } else {
       const snapshot = await this.listThreads();
-      lease = { ...lease, snapshotThreadIdHashes: snapshot.map((thread) => operationHash(thread.id)), updatedAt: this.now() };
+      authoritativeSnapshot = snapshot.map((thread) => operationHash(thread.id));
+      // Persist the operation authority first. A crash before the lease update
+      // is recovered from this record; a crash before this write is pre-send.
+      current = { ...current, result: { ...current.result, snapshotThreadIdHashes: authoritativeSnapshot }, updatedAt: this.now() };
+      this.put(current);
+      lease = { ...lease, snapshotThreadIdHashes: [...authoritativeSnapshot], updatedAt: this.now() };
       this.opts.forkLeaseStore.put(lease);
-      this.put({ ...operation, result: { snapshotThreadIdHashes: lease.snapshotThreadIdHashes }, updatedAt: this.now() });
     }
     const params: Record<string, unknown> = {
       threadId: input.sourceThreadId,
@@ -143,6 +182,29 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
     this.assertOwnedThread(input.derivedThreadId, input.sideThreadId);
     const clientUserMessageId = `anet-side:${input.sideThreadId}:${input.attemptId}`;
     const identity = input.operation ?? this.defaultOperation(input.sideThreadId, "start", `start-${input.attemptId}`);
+    this.pendingStartThreads.add(input.derivedThreadId);
+    let claim;
+    try { claim = await this.opts.forkLeaseStore.claimOperation(identity.nodeId, input.sideThreadId, identity.operationId); }
+    catch (error) {
+      this.pendingStartThreads.delete(input.derivedThreadId);
+      if (error instanceof Error && error.message === "runtime operation executor is already claimed") {
+        throw new SideThreadAmbiguousError("Codex start is already executing; refusing duplicate turn/start");
+      }
+      throw error;
+    }
+    try { return await this.startClaimed(input, identity, clientUserMessageId); }
+    catch (error) {
+      if (this.closed && error instanceof SideThreadConflictError) {
+        throw new SideThreadAmbiguousError("Codex start closed before its durable outcome was observed");
+      }
+      throw error;
+    }
+    finally { this.pendingStartThreads.delete(input.derivedThreadId); await claim.release(); }
+  }
+
+  private async startClaimed(input: { sideThreadId: string; attemptId: string; derivedThreadId: string; prompt: string; operation?: SideThreadRuntimeOperation },
+    identity: SideThreadRuntimeOperation, clientUserMessageId: string): Promise<{ turnId: string }> {
+    this.assertOpen();
     const operation = this.operation(identity, input.sideThreadId, "start", input.derivedThreadId,
       JSON.stringify([input.sideThreadId, input.attemptId, input.derivedThreadId, operationHash(input.prompt)]));
     const prior = this.existing(operation);
@@ -230,7 +292,8 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
   async delete(input: { sideThreadId?: string; derivedThreadId: string; operation?: SideThreadRuntimeOperation }): Promise<void> {
     this.assertOpen();
     this.assertOwnedThread(input.derivedThreadId);
-    if ([...this.byTurn.values(), ...this.byClientId.values()].some((x) => x.threadId === input.derivedThreadId)) {
+    if (this.pendingStartThreads.has(input.derivedThreadId)
+      || [...this.byTurn.values(), ...this.byClientId.values()].some((x) => x.threadId === input.derivedThreadId)) {
       throw new SideThreadConflictError("refusing to delete a thread with an active owned turn");
     }
     const sideThreadId = input.sideThreadId ?? this.derivedThreads.get(input.derivedThreadId)!;
@@ -238,10 +301,12 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
       JSON.stringify([input.derivedThreadId]), "thread/delete", { threadId: input.derivedThreadId });
     this.derivedThreads.delete(input.derivedThreadId);
   }
-  async discardFork(input: { sideThreadId: string; derivedThreadId: string }): Promise<void> {
+  async discardFork(input: { sideThreadId: string; derivedThreadId: string; operation?: SideThreadRuntimeOperation }): Promise<void> {
     if (this.derivedThreads.get(input.derivedThreadId) !== input.sideThreadId) return;
-    try { await this.rpc("thread/delete", { threadId: input.derivedThreadId }); }
-    finally { this.derivedThreads.delete(input.derivedThreadId); }
+    const identity = input.operation ?? this.defaultOperation(input.sideThreadId, "delete", `discard-${input.sideThreadId}`);
+    await this.durableMutation(input.sideThreadId, "delete", identity, input.derivedThreadId,
+      JSON.stringify([input.derivedThreadId, "discard"]), "thread/delete", { threadId: input.derivedThreadId });
+    this.derivedThreads.delete(input.derivedThreadId);
   }
 
   subscribe(listener: (event: SideThreadTerminalEvent) => void): () => void {
@@ -267,6 +332,7 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
     }
     this.byClientId.clear();
     this.byTurn.clear();
+    this.pendingStartThreads.clear();
     this.earlyTerminals.clear();
     this.listeners.clear();
     this.droppedListeners.clear();
@@ -312,7 +378,8 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
     if (!p?.threadId || !turnId) return;
     const execution = this.byTurn.get(turnKey(p.threadId, turnId));
     if (!execution) {
-      const starting = [...this.byClientId.values()].some((x) => x.threadId === p.threadId);
+      const starting = this.pendingStartThreads.has(p.threadId)
+        || [...this.byClientId.values()].some((x) => x.threadId === p.threadId);
       if (starting && this.earlyTerminals.size < 64) this.earlyTerminals.set(turnKey(p.threadId, turnId), params);
       else this.dropped(starting ? "terminal-buffer-full" : "unowned-terminal");
       return;
@@ -434,6 +501,7 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
     clientUserMessageId: string, prior: SideThreadOperation): Promise<{ turnId: string }> {
     const live = this.byClientId.get(clientUserMessageId);
     let turnId = live?.turnId;
+    let matchedTurn: RuntimeTurn | undefined;
     let current = prior;
     if (current.state === "sent") { current = { ...current, state: "ambiguous", updatedAt: this.now() }; this.put(current); }
     if (!turnId) {
@@ -442,8 +510,9 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
         const thread = await this.readThread(input.derivedThreadId);
         const matches = (thread.turns ?? []).filter((turn) => turnHasClientId(turn, clientUserMessageId));
         if (prior.result?.turnIdHash) {
-          turnId = matches.find((turn) => operationHash(turn.id) === prior.result!.turnIdHash)?.id;
-        } else if (matches.length === 1) turnId = matches[0].id;
+          matchedTurn = matches.find((turn) => operationHash(turn.id) === prior.result!.turnIdHash);
+          turnId = matchedTurn?.id;
+        } else if (matches.length === 1) { matchedTurn = matches[0]; turnId = matchedTurn.id; }
       } catch { /* the durable ambiguity below is authoritative */ }
     }
     if (!turnId) {
@@ -454,7 +523,31 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
     if (current.state === "accepted" || current.state === "reconciling") {
       this.put({ ...current, state: "reconciled", result: { ...current.result, turnIdHash: operationHash(turnId) }, updatedAt: this.now() });
     }
+    if (!live) this.restoreExecution(input, clientUserMessageId, turnId, matchedTurn);
     return { turnId };
+  }
+  private restoreExecution(input: { sideThreadId: string; attemptId: string; derivedThreadId: string },
+    clientUserMessageId: string, turnId: string, turn?: RuntimeTurn): void {
+    const key = turnKey(input.derivedThreadId, turnId);
+    const owned = this.byTurn.get(key);
+    if (owned && (owned.sideThreadId !== input.sideThreadId || owned.attemptId !== input.attemptId)) {
+      throw new SideThreadConflictError("reconciled Codex turn is already owned by another attempt");
+    }
+    let resolveIdentity!: (value: string) => void; let rejectIdentity!: (error: Error) => void;
+    const identity = new Promise<string>((resolve, reject) => { resolveIdentity = resolve; rejectIdentity = reject; });
+    void identity.catch(() => {}); resolveIdentity(turnId);
+    const identityTimer = setTimeout(() => {}, 0); clearTimeout(identityTimer);
+    const execution: Execution = {
+      sideThreadId: input.sideThreadId, attemptId: input.attemptId, threadId: input.derivedThreadId,
+      clientUserMessageId, responseTurnId: turnId, turnId, text: turnText(turn),
+      resolveIdentity, rejectIdentity, identityTimer, readyForTerminal: true, identityAmbiguous: false,
+    };
+    this.byClientId.set(clientUserMessageId, execution); this.byTurn.set(key, execution);
+    if (turn?.status && turn.status !== "inProgress") {
+      setTimeout(() => this.onCompleted({ threadId: input.derivedThreadId, turn: {
+        id: turnId, status: turn.status, error: turn.error,
+      } }), 0);
+    }
   }
   private async listThreads(): Promise<RuntimeThread[]> {
     const all: RuntimeThread[] = []; let cursor: string | undefined;
@@ -479,6 +572,19 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
     this.derivedThreads.set(threadId, sideThreadId);
   }
   private async durableMutation(sideThreadId: string, method: "interrupt" | "archive" | "delete", identity: SideThreadRuntimeOperation,
+    target: string, fingerprint: string, rpcMethod: string, params: unknown): Promise<void> {
+    let claim;
+    try { claim = await this.opts.forkLeaseStore.claimOperation(identity.nodeId, sideThreadId, identity.operationId); }
+    catch (error) {
+      if (error instanceof Error && error.message === "runtime operation executor is already claimed") {
+        throw new SideThreadAmbiguousError(`Codex ${method} is already executing; refusing duplicate RPC`);
+      }
+      throw error;
+    }
+    try { await this.durableMutationClaimed(sideThreadId, method, identity, target, fingerprint, rpcMethod, params); }
+    finally { await claim.release(); }
+  }
+  private async durableMutationClaimed(sideThreadId: string, method: "interrupt" | "archive" | "delete", identity: SideThreadRuntimeOperation,
     target: string, fingerprint: string, rpcMethod: string, params: unknown): Promise<void> {
     const operation = this.operation(identity, sideThreadId, method, target, fingerprint);
     const prior = this.existing(operation);
@@ -511,11 +617,17 @@ function unsupported(reason: "version" | "topology" | "exact-boundary", opts: Co
   };
 }
 function turnKey(threadId: string, turnId: string): string { return `${threadId}\0${turnId}`; }
-interface RuntimeTurn { id: string; items?: unknown[]; [key: string]: unknown }
+interface RuntimeTurn { id: string; items?: unknown[]; status?: string; error?: { message?: string } | string; [key: string]: unknown }
 interface RuntimeThread { id: string; forkedFromId?: string; turns?: RuntimeTurn[]; [key: string]: unknown }
 function turnHasClientId(turn: RuntimeTurn, clientId: string): boolean {
   return (turn.items ?? []).some((item) => {
     const value = item as { clientId?: string; client_id?: string };
     return value?.clientId === clientId || value?.client_id === clientId;
   });
+}
+function turnText(turn?: RuntimeTurn): string {
+  return (turn?.items ?? []).map((item) => {
+    const value = item as { type?: string; text?: string };
+    return value?.type === "agentMessage" && typeof value.text === "string" ? value.text : "";
+  }).join("");
 }

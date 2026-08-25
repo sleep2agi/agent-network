@@ -115,7 +115,7 @@ export interface SideThreadRuntimeAdapter {
   subscribe(listener: (event: SideThreadTerminalEvent) => void): () => void;
   subscribeDropped?(listener: (reason: string) => void): () => void;
   close?(): void;
-  discardFork?(input: { sideThreadId: string; derivedThreadId: string }): Promise<void>;
+  discardFork?(input: { sideThreadId: string; derivedThreadId: string; operation: SideThreadRuntimeOperation }): Promise<void>;
 }
 
 export type SideThreadAuditAction =
@@ -240,7 +240,10 @@ export class SideThreadService {
     this.assertOpen();
     try { this.assertCapability(capability, input.boundary.kind); }
     catch (error) {
-      await this.opts.adapter.discardFork?.({ sideThreadId, derivedThreadId: forked.derivedThreadId }).catch(() => {});
+      await this.opts.adapter.discardFork?.({
+        sideThreadId, derivedThreadId: forked.derivedThreadId,
+        operation: runtimeOperation(input.nodeId, sideThreadId, "delete", `discard-${input.requestKey}`),
+      }).catch(() => {});
       throw error;
     }
     if (forked.derivedThreadId === input.sourceThreadId) {
@@ -468,7 +471,7 @@ export class SideThreadService {
   private auditDropped(reason: string): void {
     this.emitAudit({ action: "event_dropped", sideThreadId: "unowned", runtime: this.opts.adapter.capability().runtime,
       runtimeVersion: this.opts.adapter.capability().runtimeVersion, topology: this.opts.adapter.capability().topology,
-      evidenceRevision: this.opts.adapter.capability().evidenceRevision, reason: safeText(reason), at: this.now() });
+      evidenceRevision: this.opts.adapter.capability().evidenceRevision, reason: safeDroppedReason(reason), at: this.now() });
   }
 
   private audit(record: SideThreadRecord, action: SideThreadAuditAction, extra: Partial<SideThreadAuditEntry>): void {
@@ -492,6 +495,12 @@ function safeText(value: unknown): string | undefined {
   return value.replace(/[\r\n\t]+/g, " ").slice(0, 300);
 }
 function safeError(error: unknown): string { return safeText(error instanceof Error ? error.message : String(error)) ?? "runtime error"; }
+function safeDroppedReason(reason: string): string {
+  return new Set([
+    "identity-ownership-mismatch", "identity-turn-mismatch", "unowned-agent-message",
+    "unowned-delta", "terminal-buffer-full", "unowned-terminal",
+  ]).has(reason) ? reason : "runtime-event-rejected";
+}
 function cloneAttempt(value: SideThreadAttempt): SideThreadAttempt { return { ...value }; }
 function cloneRecord(value: SideThreadRecord): SideThreadRecord {
   return { ...value, boundary: { ...value.boundary }, attempts: value.attempts.map(cloneAttempt) };

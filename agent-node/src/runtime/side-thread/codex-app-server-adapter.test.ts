@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CodexAppServerSideThreadAdapter } from "./codex-app-server-adapter";
 import { SideThreadConflictError } from "./domain";
-import { PrivateFileOperationLedger } from "./operation-ledger";
+import { operationHash, PrivateFileOperationLedger, stableOperationId, type SideThreadOperation } from "./operation-ledger";
 import { PrivateFileForkLeaseStore } from "./fork-lease";
 
 const roots: string[] = [];
@@ -73,8 +73,15 @@ const make = (overrides: Partial<ConstructorParameters<typeof CodexAppServerSide
     operationLedger: new PrivateFileOperationLedger(join(root, "operations")),
     forkLeaseStore: new PrivateFileForkLeaseStore(join(root, "fork-leases")), ...overrides,
   });
-  return { client, adapter };
+  return { client, adapter, root };
 };
+
+const makeAt = (client: Client, root: string) => new CodexAppServerSideThreadAdapter({
+  client, runtimeVersion: "0.148.0", topology: "owned-stdio",
+  evidenceRevision: "test1190-wire-v2", experimentalApi: true, nodeId: "node-1",
+  operationLedger: new PrivateFileOperationLedger(join(root, "operations")),
+  forkLeaseStore: new PrivateFileForkLeaseStore(join(root, "fork-leases")), identityTimeoutMs: 5,
+});
 
 describe("CodexAppServerSideThreadAdapter", () => {
   test("capability matrix fails closed", () => {
@@ -86,6 +93,9 @@ describe("CodexAppServerSideThreadAdapter", () => {
       supported: true, exactBoundary: { through: true, before: false },
     });
     expect(make({ experimentalApi: "false" as any }).adapter.capability()).toMatchObject({ exactBoundary: { before: false } });
+    const gatedRoot = mkdtempSync(join(tmpdir(), "side-adapter-platform-")); roots.push(gatedRoot);
+    expect(make({ forkLeaseStore: new PrivateFileForkLeaseStore(gatedRoot, { platform: "win32" }) }).adapter.capability())
+      .toMatchObject({ supported: false, reason: "topology" });
   });
 
   test("fork sends one exact boundary and no permission override", async () => {
@@ -243,5 +253,58 @@ describe("CodexAppServerSideThreadAdapter", () => {
     await expect(adapter.delete({ derivedThreadId: fork.derivedThreadId })).rejects.toMatchObject({ code: "SIDE_THREAD_AMBIGUOUS" });
     await expect(adapter.delete({ derivedThreadId: fork.derivedThreadId })).rejects.toMatchObject({ code: "SIDE_THREAD_AMBIGUOUS" });
     expect(client.calls.filter((x) => x.method === "thread/delete")).toHaveLength(1);
+  });
+
+  test("recovers a lease-first snapshot tear without adopting a pre-snapshot fork", async () => {
+    const root = mkdtempSync(join(tmpdir(), "side-adapter-torn-")); roots.push(root);
+    const client = new Client();
+    client.threads.set("old-fork", { id: "old-fork", forkedFromId: "main", turns: [] });
+    client.loseForkResponse = true; client.forkResponseCreates = 0;
+    const sideThreadId = "torn-side"; const idempotencyKey = `fork-${sideThreadId}`;
+    const operationId = stableOperationId(sideThreadId, "fork", idempotencyKey);
+    const operation: SideThreadOperation = {
+      version: 1, nodeId: "node-1", sideThreadId, opId: operationId, idempotencyKey, method: "fork",
+      targetHash: operationHash("main"), fingerprint: operationHash(JSON.stringify(["main", "through", "done"])),
+      state: "prepared", updatedAt: 1,
+    };
+    new PrivateFileOperationLedger(join(root, "operations")).put(operation);
+    new PrivateFileForkLeaseStore(join(root, "fork-leases")).acquire({
+      version: 1, nodeId: "node-1", sourceThreadHash: operationHash("main"), sideThreadId,
+      operationId, fingerprint: operation.fingerprint,
+      snapshotThreadIdHashes: [operationHash("main"), operationHash("old-fork")], state: "snapshot", updatedAt: 2,
+    });
+    await expect(makeAt(client, root).fork({ sideThreadId, sourceThreadId: "main", boundary: { kind: "through", turnId: "done" } }))
+      .rejects.toMatchObject({ code: "SIDE_THREAD_AMBIGUOUS" });
+    expect(client.calls.filter((call) => call.method === "thread/fork")).toHaveLength(1);
+    expect(new PrivateFileOperationLedger(join(root, "operations")).get("node-1", sideThreadId, operationId)?.result?.snapshotThreadIdHashes)
+      .toContain(operationHash("old-fork"));
+  });
+
+  test("restart reconciliation restores exact terminal and cancel ownership", async () => {
+    const root = mkdtempSync(join(tmpdir(), "side-adapter-restart-")); roots.push(root);
+    const client = new Client(); const first = makeAt(client, root);
+    const forkInput = { sideThreadId: "restart-side", sourceThreadId: "main", boundary: { kind: "through", turnId: "done" } as const };
+    const fork = await first.fork(forkInput);
+    const startInput = { sideThreadId: "restart-side", attemptId: "attempt-1", derivedThreadId: fork.derivedThreadId, prompt: "q" };
+    const started = await first.start(startInput); first.close();
+    const second = makeAt(client, root); await second.fork(forkInput); await second.start(startInput);
+    await second.cancel({ sideThreadId: "restart-side", derivedThreadId: fork.derivedThreadId, turnId: started.turnId });
+    expect(client.calls.filter((call) => call.method === "turn/interrupt")).toHaveLength(1);
+    const terminal: any[] = []; second.subscribe((event) => terminal.push(event));
+    client.emit("turn/completed", { threadId: fork.derivedThreadId, turn: { id: started.turnId, status: "completed" } });
+    expect(terminal).toEqual([expect.objectContaining({ sideThreadId: "restart-side", attemptId: "attempt-1", turnId: started.turnId })]);
+  });
+
+  test("discard compensation is durable and response-loss replay never deletes twice", async () => {
+    const { client, adapter, root } = make();
+    const fork = await adapter.fork({ sideThreadId: "discard-side", sourceThreadId: "main", boundary: { kind: "through", turnId: "done" } });
+    client.loseMethods.add("thread/delete");
+    const operation = { nodeId: "node-1", idempotencyKey: "discard-request-1",
+      operationId: stableOperationId("discard-side", "delete", "discard-request-1") };
+    const input = { sideThreadId: "discard-side", derivedThreadId: fork.derivedThreadId, operation };
+    await expect(adapter.discardFork(input)).rejects.toMatchObject({ code: "SIDE_THREAD_AMBIGUOUS" });
+    await expect(adapter.discardFork(input)).rejects.toMatchObject({ code: "SIDE_THREAD_AMBIGUOUS" });
+    expect(client.calls.filter((call) => call.method === "thread/delete")).toHaveLength(1);
+    expect(new PrivateFileOperationLedger(join(root, "operations")).get("node-1", "discard-side", operation.operationId)?.state).toBe("ambiguous");
   });
 });
