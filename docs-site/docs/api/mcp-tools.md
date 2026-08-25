@@ -1,20 +1,82 @@
 # MCP Tools 参考
 
-CommHub Server 共注册约 40 个 MCP Tools；本页文档化其中 agent 日常协作最常用的 17 个核心工具（其余为节点管理、供应商配置等运维类工具）。全部通过 `POST /mcp`（Streamable HTTP）端点调用。
+CommHub Server 注册 **44 个** MCP Tools，全部经 `POST /mcp`（Streamable HTTP）调用。下表是完整索引；其中 17 个 agent 日常协作工具在本页有参数与返回值的详细说明，点名字直达。
 
-## 工具分类
+## 完整工具索引
 
-| 分组 | 数量 | 用途 |
-|------|------|------|
-| Agent 端工具 | 4 | 状态上报、收取消息 |
-| 任务管理工具 | 7 | 发任务、回复、重试、取消、转移 |
-| 查询工具 | 5 | 查任务详情、查任务列表、查状态、查完成 |
-| 广播工具 | 1 | 群发消息 |
+**协作（本页有详细说明）** · 17 个
 
-> **运维类 MCP 工具（本页不展开）**：除上述 17 个协作工具外，Hub 还注册了约 22 个运维类工具，**由 `anet` CLI / Dashboard 调用，普通 agent 用不到**：
-> - 节点生命周期：`create_node` / `delete_node` / `restart_node` / `stop_node` / `update_node_config`
-> - 供应商与密钥（OWNER / admin）：`upsert_provider` / `update_provider` / `list_providers` / `probe_provider_model` / `upsert_network_secret` / `list_network_secrets`
-> - 主机 daemon 协议（内部）：`list_host_supervisors` / `list_my_children` / `get_*_request` / `ack_*_request` 等
+| 工具 | 说明 |
+|------|------|
+| [`report_status`](#report_status) | 上报状态，返回 inbox_count |
+| [`report_completion`](#report_completion) | 上报任务完成与产物 |
+| [`get_inbox`](#get_inbox) | 取本会话待处理命令 |
+| [`ack_inbox`](#ack_inbox) | 确认已收到命令 |
+| [`send_task`](#send_task) | 按 alias 投任务进对方 inbox |
+| [`send_message`](#send_message) | 发消息，不建任务生命周期 |
+| [`send_reply`](#send_reply) | 回复 Dashboard 发起的任务；也是 agent 间任务的终结腿 |
+| [`send_ack`](#send_ack) | 确认收到任务，不进 inbox |
+| [`retry_task`](#retry_task) | 重试失败/过期/取消的任务 |
+| [`cancel_task`](#cancel_task) | 取消 delivered/acked/running 的任务 |
+| [`reassign_task`](#reassign_task) | 把任务转给另一个 agent |
+| [`get_task`](#get_task) | 按 task_id 查详情、状态、结果 |
+| [`list_tasks`](#list_tasks) | 带过滤条件列任务 |
+| [`get_all_status`](#get_all_status) | 列全部会话状态（Hub 巡检用） |
+| [`get_session_status`](#get_session_status) | 按 alias 查单个会话详情 |
+| [`get_completions`](#get_completions) | 查近期任务完成记录 |
+| [`broadcast`](#broadcast) | 群发消息给多个会话 |
+
+**SkillHub** · 4 个
+
+| 工具 | 说明 |
+|------|------|
+| `submit_skill` | 向本网络 SkillHub 提交一版不可变 SKILL.md |
+| `list_skills` | 列本网络已发布技能（owner/admin 可含待审） |
+| `get_skill` | 读一份 SKILL.md（待审内容仅 owner/admin 可见） |
+| `review_skill` | 发布或驳回待审技能（owner/admin） |
+
+**节点生命周期（`anet` CLI / Dashboard 调用）** · 5 个
+
+| 工具 | 说明 |
+|------|------|
+| `create_node` | 在 host-daemon 上创建并启动节点 |
+| `delete_node` | 停子进程 + 吊销 ntok + 删 hub 行（默认备份配置） |
+| `stop_node` | 停 agent-node 子进程，保留配置目录 |
+| `restart_node` | 不改配置直接重启节点 |
+| `update_node_config` | 设置节点目标配置（model + flags）并推门铃 |
+
+**主机 daemon 协议（内部，节点与 daemon 自动调用）** · 8 个
+
+| 工具 | 说明 |
+|------|------|
+| `get_config_update` | 节点拉取待应用的配置更新 |
+| `ack_config_update` | 节点回报配置更新结果 |
+| `get_create_request` | daemon 拉取待处理的建节点请求 |
+| `ack_create_request` | daemon 回报 fork 后的启动结果 |
+| `get_stop_request` | daemon 拉取待处理的停/删请求 |
+| `ack_stop_request` | daemon 回报停/删完成或失败 |
+| `list_host_supervisors` | 列本网络的 host_supervisor daemon（含在线状态） |
+| `list_my_children` | daemon 拉取自己派生的子节点清单 |
+
+**Provider 与密钥金库（owner/admin）** · 7 个
+
+| 工具 | 说明 |
+|------|------|
+| `list_providers` | 列本网络 provider 与模型（从不返回密钥值） |
+| `upsert_provider` | 新建或更新 provider |
+| `list_network_secrets` | 列金库密钥**名**（从不返回值），RFC-028 |
+| `upsert_network_secret` | 写入或替换金库密钥值（AES-GCM 加密） |
+| `probe_provider_model` | 向 daemon 派连通性探测 |
+| `get_probe_request` | daemon 拉取待处理的探测请求 |
+| `get_probe_results` | 查探测历史（可按 provider/model/daemon 过滤） |
+
+**内部信号（agent-node 自动调用）** · 3 个
+
+| 工具 | 说明 |
+|------|------|
+| `send_peer_reply` | 原子地终结一个节点任务并投一条无需回执的结果 |
+| `mark_tasks_consumed` | agent-node 内部信号：标记本轮实际消费的任务 |
+| `mark_tasks_runtime_submitted` | agent-node 内部信号：标记已提交给运行时的任务 |
 
 ---
 

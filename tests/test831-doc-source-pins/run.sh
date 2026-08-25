@@ -416,4 +416,40 @@ cp /tmp/bl7.bak "$BASELINE"
 python3 "$CHECK" "$ROOT" >/dev/null || fail "L7 复原之后没有回绿"
 echo "  复原后回绿 ✓"
 
+# ---------------------------------------------------------------------------
+# L8 — mcp-tools.md 的索引必须列全 tools.ts 注册的每一个 tool
+#
+# 与 L6 判据不同,不要合并:L6 管「锚串落在对的 tool 段」,L8 管「一个都没漏」。
+# 一份索引可以每条锚点都正确、同时漏掉 27 个工具 —— 2026-08-26 实测就是这样
+# (注册 44 个、文档写 17 个、还点名了一个代码里不存在的 update_provider)。
+# 漏写不会让任何东西变红,读者只是不知道有这个能力;app#173 就是这么来的。
+# ---------------------------------------------------------------------------
+echo "[L8] the tool index lists every registered tool"
+COVCHECK="$ROOT/scripts/check-mcp-tool-index-coverage.py"
+[[ -f "$COVCHECK" ]] || fail "L8 的脚本不在镜像里:$COVCHECK"
+outc=$(python3 "$COVCHECK" "$ROOT") || fail "干净树上 L8 就红了:$(printf '%s' "$outc" | tail -4)"
+printf '%s\n' "$outc" | sed 's/^/  /'
+regs8=$(printf '%s' "$outc" | sed -nE 's/^tool_registrations=([0-9]+)$/\1/p')
+[[ "${regs8:-0}" -gt 0 ]] || fail "L8 没解析出任何 tool 注册点 —— 分母塌了"
+
+# witnessed-red:代码新增一个 tool 而文档没跟上,必须红。这是这道门唯一要防的事,
+# 所以在这里真造一次,而不是相信它"应该会红"。
+cp "$ROOT/server/src/tools.ts" /tmp/l8-tools.bak
+python3 - "$ROOT" <<'PYX'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1])/'server'/'src'/'tools.ts'
+t = p.read_text(encoding='utf-8')
+needle = 'server.tool('
+assert t.count(needle) > 0, "L8 变异找不到注册点"
+p.write_text(t.replace(needle, 'server.tool(\n    "l8_probe_tool",\n    "probe",\n    {},\n    async () => ({}),\n  );\n  server.tool(', 1), encoding='utf-8')
+PYX
+if python3 "$COVCHECK" "$ROOT" >/dev/null 2>&1; then
+  cp /tmp/l8-tools.bak "$ROOT/server/src/tools.ts"
+  fail "L8 变异存活:新注册的 tool 没写进索引,门却是绿的"
+fi
+echo "  MUTATION_RED new-tool-not-in-index rc=1"
+cp /tmp/l8-tools.bak "$ROOT/server/src/tools.ts"
+python3 "$COVCHECK" "$ROOT" >/dev/null || fail "L8 复原之后没有回绿"
+echo "  复原后回绿 ✓"
+
 echo "RESULT: PASS"

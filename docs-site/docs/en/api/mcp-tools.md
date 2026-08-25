@@ -1,20 +1,82 @@
 # MCP Tools Reference
 
-CommHub Server registers ~40 MCP Tools in total; this page documents the 17 core tools agents use most for day-to-day collaboration (the rest are node-management, provider-config, and other ops tools). All are called via the `POST /mcp` (Streamable HTTP) endpoint.
+CommHub Server registers **44** MCP Tools, all called through `POST /mcp` (Streamable HTTP). The index below is complete; the 17 tools agents use for day-to-day collaboration are documented in full further down — click the name to jump.
 
-## Tool Categories
+## Complete tool index
 
-| Group | Count | Purpose |
-|------|------|------|
-| Agent-side tools | 4 | Status reporting, message retrieval |
-| Task management tools | 7 | Send tasks, reply, retry, cancel, reassign |
-| Query tools | 5 | Query task detail, task list, status, completions |
-| Broadcast tools | 1 | Broadcast to all agents |
+**Collaboration — detailed below** · 17
 
-> **Ops-tier MCP tools (not detailed here)**: beyond the 17 collaboration tools above, the Hub registers ~22 ops tools **driven by the `anet` CLI / Dashboard — typical agents don't call these**:
-> - Node lifecycle: `create_node` / `delete_node` / `restart_node` / `stop_node` / `update_node_config`
-> - Providers & secrets (OWNER / admin): `upsert_provider` / `update_provider` / `list_providers` / `probe_provider_model` / `upsert_network_secret` / `list_network_secrets`
-> - Host-daemon protocol (internal): `list_host_supervisors` / `list_my_children` / `get_*_request` / `ack_*_request`, etc.
+| Tool | What it does |
+|------|------|
+| [`report_status`](#report_status) | Report agent status; returns inbox_count |
+| [`report_completion`](#report_completion) | Report task completion with results and artifacts |
+| [`get_inbox`](#get_inbox) | Fetch pending commands for this session |
+| [`ack_inbox`](#ack_inbox) | Acknowledge receipt of a command |
+| [`send_task`](#send_task) | Dispatch a task into a session's inbox by alias |
+| [`send_message`](#send_message) | Send a message with no task lifecycle |
+| [`send_reply`](#send_reply) | Reply to a Dashboard-originated task; also the terminal leg for agent-to-agent tasks |
+| [`send_ack`](#send_ack) | Acknowledge a task without entering the inbox |
+| [`retry_task`](#retry_task) | Retry a failed, expired, or cancelled task |
+| [`cancel_task`](#cancel_task) | Cancel a delivered/acked/running task |
+| [`reassign_task`](#reassign_task) | Reassign a task to a different agent |
+| [`get_task`](#get_task) | Get task detail, status, and result by task_id |
+| [`list_tasks`](#list_tasks) | List tasks with filters |
+| [`get_all_status`](#get_all_status) | List every session's status (Hub patrol loop) |
+| [`get_session_status`](#get_session_status) | Get one session's detail by alias |
+| [`get_completions`](#get_completions) | Query recent task completions |
+| [`broadcast`](#broadcast) | Send a message to multiple sessions |
+
+**SkillHub** · 4
+
+| Tool | What it does |
+|------|------|
+| `submit_skill` | Submit an immutable SKILL.md version to this network's SkillHub |
+| `list_skills` | List published skills (owners/admins may include pending) |
+| `get_skill` | Read one SKILL.md (pending content is owner/admin only) |
+| `review_skill` | Publish or reject a pending submission (owner/admin) |
+
+**Node lifecycle — driven by the `anet` CLI / Dashboard** · 5
+
+| Tool | What it does |
+|------|------|
+| `create_node` | Create and start a node on a host daemon |
+| `delete_node` | Stop child, revoke ntok, delete the hub row (config backed up by default) |
+| `stop_node` | Stop the agent-node child, keep the config dir |
+| `restart_node` | Restart a node without changing its config |
+| `update_node_config` | Set a node's desired config (model + flags) and ring its doorbell |
+
+**Host-daemon protocol — internal, called by nodes and daemons** · 8
+
+| Tool | What it does |
+|------|------|
+| `get_config_update` | Node pulls its pending config update |
+| `ack_config_update` | Node reports the config-update outcome |
+| `get_create_request` | Daemon pulls a pending create-node request |
+| `ack_create_request` | Daemon reports the post-fork start result |
+| `get_stop_request` | Daemon pulls a pending stop/delete request |
+| `ack_stop_request` | Daemon reports stop/delete completion or failure |
+| `list_host_supervisors` | List host_supervisor daemons in this network, with online status |
+| `list_my_children` | Daemon pulls the list of children it spawned |
+
+**Providers & secret vault — owner/admin** · 7
+
+| Tool | What it does |
+|------|------|
+| `list_providers` | List providers and models (never returns secret values) |
+| `upsert_provider` | Create or update a provider |
+| `list_network_secrets` | List vault key NAMES only, never values (RFC-028) |
+| `upsert_network_secret` | Write or replace a vault secret (AES-GCM encrypted) |
+| `probe_provider_model` | Dispatch a connectivity probe to a daemon |
+| `get_probe_request` | Daemon pulls a pending probe request |
+| `get_probe_results` | Query probe history, optionally filtered by provider/model/daemon |
+
+**Internal signals — called by agent-node** · 3
+
+| Tool | What it does |
+|------|------|
+| `send_peer_reply` | Atomically finalize one node-owned task and enqueue a no-response result |
+| `mark_tasks_consumed` | Internal agent-node signal: which tasks this turn actually consumed |
+| `mark_tasks_runtime_submitted` | Internal agent-node signal: which task bodies reached the runtime |
 
 ---
 
