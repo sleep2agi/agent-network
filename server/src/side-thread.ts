@@ -1030,80 +1030,77 @@ export class SideThreadCoordinator {
   async cancel(
     actor: SideThreadActor,
     sideChatId: string,
+    input: { requestKey: string },
   ): Promise<SideThreadRecord> {
     this.assertEnabled();
-    return this.singleFlight(`cancel:${sideChatId}`, async () => {
-      const record = this.mustOwned(sideChatId, actor);
-      const attempt = record.attempts.find(
-        (a) => a.attemptId === record.activeAttemptId,
-      );
-      if (
-        !attempt?.threadId ||
-        !attempt.turnId ||
-        !["running", "ambiguous", "reconciling"].includes(attempt.state)
-      )
-        throw conflict("side chat has no cancellable attempt");
-      await this.assertCapability(record.nodeId);
-      const operationRequestKey = `cancel:${attempt.attemptId}`;
-      const prepared = this.prepareStableOperation({
-        sideChatId,
-        attemptId: attempt.attemptId,
-        kind: "cancel",
-        requestKey: operationRequestKey,
-        fingerprint: hashJson([
+    requireKey(input.requestKey);
+    return this.singleFlight(
+      `cancel:${sideChatId}:${input.requestKey}`,
+      async () => {
+        const record = this.mustOwned(sideChatId, actor);
+        const replay = this.store.db.get<{
+          operation_id: string;
+          attempt_id: string | null;
+          state: SideThreadOperationRecord["state"];
+        }>(
+          "SELECT operation_id,attempt_id,state FROM side_chat_operations WHERE side_chat_id=?1 AND operation_kind='cancel' AND request_key=?2",
           sideChatId,
-          attempt.attemptId,
-          attempt.threadId,
-          attempt.turnId,
-        ]),
-        threadId: attempt.threadId,
-        turnId: attempt.turnId,
-      });
-      if (prepared.state === "completed") return record;
-      if (prepared.state === "ambiguous" || prepared.state === "reconciling")
-        throw ambiguousError(
-          prepared.operationId,
-          sideChatId,
-          attempt.attemptId,
+          input.requestKey,
         );
-      // A second coordinator observing the durable pending claim must never
-      // issue another RPC. Returning its current owner projection is an
-      // honest in-progress replay; ambiguous is handled above and is typed.
-      if (!prepared.callable) return this.mustOwned(sideChatId, actor);
-      const claimedAt = this.now();
-      const claim = this.store.db.run(
-        "UPDATE side_chat_attempts SET cancel_requested_at=?1,updated_at=?1 WHERE attempt_id=?2 AND state='running' AND thread_id=?3 AND turn_id=?4 AND cancel_requested_at IS NULL",
-        [claimedAt, attempt.attemptId, attempt.threadId, attempt.turnId],
-      );
-      if (claim.changes === 0) {
-        this.markAmbiguous(
-          sideChatId,
-          attempt.attemptId,
-          prepared.operationId,
-          { code: "SIDE_THREAD_RESPONSE_LOST" },
+        if (replay?.state === "completed" || replay?.state === "pending")
+          return record;
+        if (replay?.state === "ambiguous" || replay?.state === "reconciling")
+          throw ambiguousError(
+            replay.operation_id,
+            sideChatId,
+            replay.attempt_id ?? undefined,
+          );
+        const attempt = record.attempts.find(
+          (a) => a.attemptId === record.activeAttemptId,
         );
-        throw ambiguousError(
-          prepared.operationId,
-          sideChatId,
-          attempt.attemptId,
-        );
-      }
-      try {
-        await this.port.cancel({
-          operationId: prepared.operationId,
+        if (
+          !attempt?.threadId ||
+          !attempt.turnId ||
+          !["running", "ambiguous", "reconciling"].includes(attempt.state)
+        )
+          throw conflict("side chat has no cancellable attempt");
+        await this.assertCapability(record.nodeId);
+        const prepared = this.prepareStableOperation({
           sideChatId,
           attemptId: attempt.attemptId,
-          nodeId: record.nodeId,
+          kind: "cancel",
+          requestKey: input.requestKey,
+          fingerprint: hashJson([
+            sideChatId,
+            attempt.attemptId,
+            attempt.threadId,
+            attempt.turnId,
+          ]),
           threadId: attempt.threadId,
           turnId: attempt.turnId,
         });
-      } catch (error) {
-        if (isAmbiguousRuntimeError(error)) {
+        if (prepared.state === "completed") return record;
+        if (prepared.state === "ambiguous" || prepared.state === "reconciling")
+          throw ambiguousError(
+            prepared.operationId,
+            sideChatId,
+            attempt.attemptId,
+          );
+        // A second coordinator observing the durable pending claim must never
+        // issue another RPC. Returning its current owner projection is an
+        // honest in-progress replay; ambiguous is handled above and is typed.
+        if (!prepared.callable) return this.mustOwned(sideChatId, actor);
+        const claimedAt = this.now();
+        const claim = this.store.db.run(
+          "UPDATE side_chat_attempts SET cancel_requested_at=?1,updated_at=?1 WHERE attempt_id=?2 AND state='running' AND thread_id=?3 AND turn_id=?4 AND cancel_requested_at IS NULL",
+          [claimedAt, attempt.attemptId, attempt.threadId, attempt.turnId],
+        );
+        if (claim.changes === 0) {
           this.markAmbiguous(
             sideChatId,
             attempt.attemptId,
             prepared.operationId,
-            error,
+            { code: "SIDE_THREAD_RESPONSE_LOST" },
           );
           throw ambiguousError(
             prepared.operationId,
@@ -1111,44 +1108,68 @@ export class SideThreadCoordinator {
             attempt.attemptId,
           );
         }
-        this.settleOperation(prepared.operationId, "failed", {
-          errorCode: auditErrorReason(error),
-        });
-        this.store.db.run(
-          "UPDATE side_chat_attempts SET cancel_requested_at=NULL,updated_at=?1 WHERE attempt_id=?2 AND state='running' AND thread_id=?3 AND turn_id=?4",
-          [this.now(), attempt.attemptId, attempt.threadId, attempt.turnId],
-        );
-        throw normalizePortError(error);
-      }
-      this.store.db.transaction(() => {
-        const t = this.now();
-        const changed = this.store.db.run(
-          "UPDATE side_chat_attempts SET state='cancelled',updated_at=?1 WHERE attempt_id=?2 AND state='running' AND thread_id=?3 AND turn_id=?4",
-          [t, attempt.attemptId, attempt.threadId, attempt.turnId],
-        );
-        if (changed.changes > 0) {
-          this.store.db.run(
-            "UPDATE side_chats SET state='cancelled',active_attempt_id=NULL,updated_at=?1 WHERE side_chat_id=?2 AND active_attempt_id=?3",
-            [t, sideChatId, attempt.attemptId],
-          );
-          this.emitStored(
+        try {
+          await this.port.cancel({
+            operationId: prepared.operationId,
             sideChatId,
-            attempt.attemptId,
-            attempt.threadId,
-            attempt.turnId,
-            "attempt.cancelled",
-            "cancelled",
-            undefined,
-            t,
+            attemptId: attempt.attemptId,
+            nodeId: record.nodeId,
+            threadId: attempt.threadId,
+            turnId: attempt.turnId,
+          });
+        } catch (error) {
+          if (isAmbiguousRuntimeError(error)) {
+            this.markAmbiguous(
+              sideChatId,
+              attempt.attemptId,
+              prepared.operationId,
+              error,
+            );
+            throw ambiguousError(
+              prepared.operationId,
+              sideChatId,
+              attempt.attemptId,
+            );
+          }
+          this.settleOperation(prepared.operationId, "failed", {
+            errorCode: auditErrorReason(error),
+          });
+          this.store.db.run(
+            "UPDATE side_chat_attempts SET cancel_requested_at=NULL,updated_at=?1 WHERE attempt_id=?2 AND state='running' AND thread_id=?3 AND turn_id=?4",
+            [this.now(), attempt.attemptId, attempt.threadId, attempt.turnId],
           );
+          throw normalizePortError(error);
         }
-        this.settleOperation(prepared.operationId, "completed", {
-          threadId: attempt.threadId,
-          turnId: attempt.turnId,
+        this.store.db.transaction(() => {
+          const t = this.now();
+          const changed = this.store.db.run(
+            "UPDATE side_chat_attempts SET state='cancelled',updated_at=?1 WHERE attempt_id=?2 AND state='running' AND thread_id=?3 AND turn_id=?4",
+            [t, attempt.attemptId, attempt.threadId, attempt.turnId],
+          );
+          if (changed.changes > 0) {
+            this.store.db.run(
+              "UPDATE side_chats SET state='cancelled',active_attempt_id=NULL,updated_at=?1 WHERE side_chat_id=?2 AND active_attempt_id=?3",
+              [t, sideChatId, attempt.attemptId],
+            );
+            this.emitStored(
+              sideChatId,
+              attempt.attemptId,
+              attempt.threadId,
+              attempt.turnId,
+              "attempt.cancelled",
+              "cancelled",
+              undefined,
+              t,
+            );
+          }
+          this.settleOperation(prepared.operationId, "completed", {
+            threadId: attempt.threadId,
+            turnId: attempt.turnId,
+          });
         });
-      });
-      return this.mustOwned(sideChatId, actor);
-    });
+        return this.mustOwned(sideChatId, actor);
+      },
+    );
   }
 
   async retry(
@@ -1330,124 +1351,130 @@ export class SideThreadCoordinator {
   async archive(
     actor: SideThreadActor,
     sideChatId: string,
+    input: { requestKey: string },
   ): Promise<SideThreadRecord> {
-    return this.lifecycle(actor, sideChatId, "archive");
+    return this.lifecycle(actor, sideChatId, "archive", input);
   }
   async purge(
     actor: SideThreadActor,
     sideChatId: string,
+    input: { requestKey: string },
   ): Promise<SideThreadRecord> {
-    return this.lifecycle(actor, sideChatId, "purge");
+    return this.lifecycle(actor, sideChatId, "purge", input);
   }
   private async lifecycle(
     actor: SideThreadActor,
     sideChatId: string,
     action: "archive" | "purge",
+    input: { requestKey: string },
   ): Promise<SideThreadRecord> {
     this.assertEnabled();
-    return this.singleFlight(`${action}:${sideChatId}`, async () => {
-      const r = this.mustOwned(sideChatId, actor);
-      if (r.activeAttemptId)
-        throw conflict(`cannot ${action} a running side chat`);
-      if (!r.threadId) throw conflict("side chat has no derived thread");
-      if (r.state === "purged") return r;
-      if (action === "archive" && r.state === "archived") return r;
-      await this.assertCapability(r.nodeId);
-      const operationRequestKey = `${action}:${sideChatId}`;
-      const prepared = this.prepareStableOperation({
-        sideChatId,
-        kind: action,
-        requestKey: operationRequestKey,
-        fingerprint: hashJson([action, sideChatId, r.nodeId, r.threadId]),
-        threadId: r.threadId,
-      });
-      if (prepared.state === "completed") return r;
-      if (prepared.state === "ambiguous" || prepared.state === "reconciling")
-        throw ambiguousError(prepared.operationId, sideChatId);
-      if (!prepared.callable)
-        throw conflict("side chat lifecycle operation already in progress");
-      const claim = this.store.db.run(
-        "UPDATE side_chats SET lifecycle_operation=?1,updated_at=?2 WHERE side_chat_id=?3 AND active_attempt_id IS NULL AND lifecycle_operation IS NULL",
-        [action, this.now(), sideChatId],
-      );
-      if (claim.changes === 0) {
-        const current = this.mustOwned(sideChatId, actor);
-        if (current.state === "purged") return current;
-        if (action === "archive" && current.state === "archived")
-          return current;
-        this.markAmbiguous(sideChatId, undefined, prepared.operationId, {
-          code: "SIDE_THREAD_RESPONSE_LOST",
-        });
-        throw ambiguousError(prepared.operationId, sideChatId);
-      }
-      try {
-        if (action === "archive")
-          await this.port.archive({
-            operationId: prepared.operationId,
-            sideChatId,
-            nodeId: r.nodeId,
-            threadId: r.threadId,
-          });
-        else
-          await this.port.purge({
-            operationId: prepared.operationId,
-            sideChatId,
-            nodeId: r.nodeId,
-            threadId: r.threadId,
-          });
-      } catch (error) {
-        if (isAmbiguousRuntimeError(error)) {
-          this.markAmbiguous(
-            sideChatId,
-            undefined,
-            prepared.operationId,
-            error,
-          );
-          throw ambiguousError(prepared.operationId, sideChatId);
-        }
-        this.settleOperation(prepared.operationId, "failed", {
-          errorCode: auditErrorReason(error),
-        });
-        this.store.db.run(
-          "UPDATE side_chats SET lifecycle_operation=NULL,updated_at=?1 WHERE side_chat_id=?2 AND lifecycle_operation=?3",
-          [this.now(), sideChatId, action],
-        );
-        throw normalizePortError(error);
-      }
-      const state = action === "archive" ? "archived" : "purged",
-        t = this.now();
-      this.store.db.transaction(() => {
-        if (action === "purge") {
-          this.store.db.run(
-            "UPDATE side_chats SET state='purged',question_text='',attachments_json='[]',lifecycle_operation=NULL,updated_at=?1,purged_at=?1 WHERE side_chat_id=?2 AND active_attempt_id IS NULL AND lifecycle_operation='purge'",
-            [t, sideChatId],
-          );
-          this.store.db.run(
-            "UPDATE side_chat_attempts SET result_text=NULL,error_text=NULL,updated_at=?1 WHERE side_chat_id=?2",
-            [t, sideChatId],
-          );
-        } else {
-          this.store.db.run(
-            "UPDATE side_chats SET state='archived',lifecycle_operation=NULL,updated_at=?1,archived_at=?1 WHERE side_chat_id=?2 AND active_attempt_id IS NULL AND lifecycle_operation='archive'",
-            [t, sideChatId],
-          );
-        }
-        this.settleOperation(prepared.operationId, "completed", {
+    requireKey(input.requestKey);
+    return this.singleFlight(
+      `${action}:${sideChatId}:${input.requestKey}`,
+      async () => {
+        const r = this.mustOwned(sideChatId, actor);
+        if (r.activeAttemptId)
+          throw conflict(`cannot ${action} a running side chat`);
+        if (!r.threadId) throw conflict("side chat has no derived thread");
+        if (r.state === "purged") return r;
+        if (action === "archive" && r.state === "archived") return r;
+        await this.assertCapability(r.nodeId);
+        const prepared = this.prepareStableOperation({
+          sideChatId,
+          kind: action,
+          requestKey: input.requestKey,
+          fingerprint: hashJson([action, sideChatId, r.nodeId, r.threadId]),
           threadId: r.threadId,
         });
-        this.emitStored(
-          sideChatId,
-          undefined,
-          r.threadId,
-          undefined,
-          `side_chat.${state}`,
-          state,
-          undefined,
-          t,
+        if (prepared.state === "completed") return r;
+        if (prepared.state === "ambiguous" || prepared.state === "reconciling")
+          throw ambiguousError(prepared.operationId, sideChatId);
+        if (!prepared.callable)
+          throw conflict("side chat lifecycle operation already in progress");
+        const claim = this.store.db.run(
+          "UPDATE side_chats SET lifecycle_operation=?1,updated_at=?2 WHERE side_chat_id=?3 AND active_attempt_id IS NULL AND lifecycle_operation IS NULL",
+          [action, this.now(), sideChatId],
         );
-      });
-      return this.mustOwned(sideChatId, actor);
-    });
+        if (claim.changes === 0) {
+          const current = this.mustOwned(sideChatId, actor);
+          if (current.state === "purged") return current;
+          if (action === "archive" && current.state === "archived")
+            return current;
+          this.markAmbiguous(sideChatId, undefined, prepared.operationId, {
+            code: "SIDE_THREAD_RESPONSE_LOST",
+          });
+          throw ambiguousError(prepared.operationId, sideChatId);
+        }
+        try {
+          if (action === "archive")
+            await this.port.archive({
+              operationId: prepared.operationId,
+              sideChatId,
+              nodeId: r.nodeId,
+              threadId: r.threadId,
+            });
+          else
+            await this.port.purge({
+              operationId: prepared.operationId,
+              sideChatId,
+              nodeId: r.nodeId,
+              threadId: r.threadId,
+            });
+        } catch (error) {
+          if (isAmbiguousRuntimeError(error)) {
+            this.markAmbiguous(
+              sideChatId,
+              undefined,
+              prepared.operationId,
+              error,
+            );
+            throw ambiguousError(prepared.operationId, sideChatId);
+          }
+          this.settleOperation(prepared.operationId, "failed", {
+            errorCode: auditErrorReason(error),
+          });
+          this.store.db.run(
+            "UPDATE side_chats SET lifecycle_operation=NULL,updated_at=?1 WHERE side_chat_id=?2 AND lifecycle_operation=?3",
+            [this.now(), sideChatId, action],
+          );
+          throw normalizePortError(error);
+        }
+        const state = action === "archive" ? "archived" : "purged",
+          t = this.now();
+        this.store.db.transaction(() => {
+          if (action === "purge") {
+            this.store.db.run(
+              "UPDATE side_chats SET state='purged',question_text='',attachments_json='[]',lifecycle_operation=NULL,updated_at=?1,purged_at=?1 WHERE side_chat_id=?2 AND active_attempt_id IS NULL AND lifecycle_operation='purge'",
+              [t, sideChatId],
+            );
+            this.store.db.run(
+              "UPDATE side_chat_attempts SET result_text=NULL,error_text=NULL,updated_at=?1 WHERE side_chat_id=?2",
+              [t, sideChatId],
+            );
+          } else {
+            this.store.db.run(
+              "UPDATE side_chats SET state='archived',lifecycle_operation=NULL,updated_at=?1,archived_at=?1 WHERE side_chat_id=?2 AND active_attempt_id IS NULL AND lifecycle_operation='archive'",
+              [t, sideChatId],
+            );
+          }
+          this.settleOperation(prepared.operationId, "completed", {
+            threadId: r.threadId,
+          });
+          this.emitStored(
+            sideChatId,
+            undefined,
+            r.threadId,
+            undefined,
+            `side_chat.${state}`,
+            state,
+            undefined,
+            t,
+          );
+        });
+        return this.mustOwned(sideChatId, actor);
+      },
+    );
   }
 
   async bringBack(

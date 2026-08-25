@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd /app
 echo "source_commit=${SOURCE_COMMIT}"
-bun test server/src/side-thread.test.ts -t 'feature flag|create is payload|cross-window|authoritative vendorable|routes use|disabled surface|capability flips'
+bun test server/src/side-thread.test.ts -t 'feature flag|create is payload|cross-window|authoritative vendorable|routes use|every mutating|disabled surface|capability flips'
 
 # Witness red: removing the explicit native-exact-fork mode gate must make the
 # unverified/shared adapter case fail.
