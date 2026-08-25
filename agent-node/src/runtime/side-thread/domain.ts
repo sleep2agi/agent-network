@@ -81,6 +81,8 @@ export interface SideThreadTerminalEvent {
   status: "completed" | "failed" | "interrupted";
   text?: string;
   error?: string;
+  /** Adapter proved this turn by the echoed per-attempt client identity. */
+  identityBound?: boolean;
 }
 
 export interface SideThreadRuntimeAdapter {
@@ -364,10 +366,11 @@ export class SideThreadService {
   private onTerminal(event: SideThreadTerminalEvent): void {
     const record = this.records.get(event.sideThreadId);
     const attempt = record?.attempts.find((a) => a.id === event.attemptId);
+    const reconciling = attempt?.state === "ambiguous" && !attempt.turnId && event.identityBound === true;
     const owned = !!record && !!attempt && record.derivedThreadId === event.threadId
-      && attempt.turnId === event.turnId
+      && (attempt.turnId === event.turnId || reconciling)
       && record.activeAttemptId === attempt.id
-      && attempt.state === "running";
+      && (attempt.state === "running" || reconciling);
     if (!owned) {
       this.emitAudit(redactAudit({
         action: "event_dropped", sideThreadId: event.sideThreadId,
@@ -379,6 +382,7 @@ export class SideThreadService {
       }) as SideThreadAuditEntry);
       return;
     }
+    if (!attempt!.turnId) attempt!.turnId = event.turnId;
     if (!attempt!.turnId) attempt!.turnId = event.turnId;
     attempt!.state = event.status === "completed" ? "completed"
       : event.status === "interrupted" ? "cancelled" : "failed";
