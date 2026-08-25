@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source /tests/lib/safe-rm.sh
 
 REPORT_DIR="${REPORT_DIR:-/probe/out}"
 mkdir -p "$REPORT_DIR"
@@ -8,7 +9,7 @@ version=$(codex --version)
 test "$version" = "codex-cli 0.148.0"
 
 schema_dir=$(mktemp -d)
-trap 'rm -rf "$schema_dir"' EXIT
+trap 'safe_rm_rf "$schema_dir"' EXIT
 codex app-server generate-json-schema --experimental --out "$schema_dir"
 node /probe/schema-probe.mjs "$schema_dir/ClientRequest.json" \
   > "$REPORT_DIR/schema-result.json"
