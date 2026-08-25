@@ -145,6 +145,13 @@ import {
 } from "../src/windows-codex-copresence";
 import { normalizeBatchWorkdir } from "../src/batch-workdir";
 import { copresenceThreadPlan } from "../src/codex-copresence-thread";
+import {
+  backupCodexRecoveryState,
+  codexTopologyAudit,
+  resumeAndVerifyCodexThread,
+  verifyCodexThreadHistory,
+  type CodexRecoveryVerification,
+} from "../src/codex-copresence-recovery";
 import { loadMockLlmRules, resolveMockLlmReply } from "../src/mock-llm";
 import {
   decideDashboardListener,
@@ -381,7 +388,7 @@ async function createCodexCopresenceThread(
   ws: string,
   timeoutMs = 60_000,
   resumeThreadId?: string,
-): Promise<string> {
+): Promise<{ threadId: string; verification: CodexRecoveryVerification }> {
   const WsCtor = await resolveCopresenceWebSocketCtor();
   const socket = new WsCtor(ws);
   const deadline = Date.now() + timeoutMs;
@@ -434,8 +441,13 @@ async function createCodexCopresenceThread(
     const plan = copresenceThreadPlan(resumeThreadId);
     if (plan.method === "thread/resume") {
       if (!SAFE_THREAD_ID.test(plan.params.threadId)) throw new Error("stored threadId has unexpected shape");
-      await request(plan.method, plan.params, 15_000);
-      return plan.params.threadId;
+      return {
+        threadId: plan.params.threadId,
+        verification: await resumeAndVerifyCodexThread(
+          plan.params.threadId,
+          (method, params) => request(method, params, 15_000),
+        ),
+      };
     }
     const started: any = await request(plan.method, plan.params, 15_000);
     const threadId: string | undefined = started?.threadId ?? started?.thread?.id;
@@ -447,7 +459,8 @@ async function createCodexCopresenceThread(
       input: [{ type: "text", text: "只回复一个词：READY" }],
     }, 45_000);
     await new Promise((r) => setTimeout(r, 3000));
-    return threadId;
+    const read = await request("thread/read", { threadId, includeTurns: true }, 15_000);
+    return { threadId, verification: verifyCodexThreadHistory("thread/start", threadId, read) };
   } finally {
     try { socket.close(); } catch { /* ignore */ }
   }
@@ -776,13 +789,15 @@ async function startWindowsCodexCopresence(
     if (!await waitForLoopbackPort(port, 25_000)) {
       throw new Error(`app-server did not bind ${wsUrl} within 25s; log=${appLog}`);
     }
-    const threadId = await createCodexCopresenceThread(wsUrl, 60_000, resolved.profile.codexThreadId);
+    const thread = await createCodexCopresenceThread(wsUrl, 60_000, resolved.profile.codexThreadId);
+    const threadId = thread.threadId;
     if (!SAFE_THREAD_ID.test(threadId)) throw new Error("unexpected threadId shape");
     const rawCfgPath = join(nodesDir(), resolved.id, "config.json");
     const rawCfg = JSON.parse(readFileSync(rawCfgPath, "utf-8"));
     rawCfg.codexAppServerPort = port;
     rawCfg.codexAppServerUrl = wsUrl;
     rawCfg.codexThreadId = threadId;
+    rawCfg.codexRecoveryVerification = thread.verification;
     delete rawCfg.session;
     atomicWritePrivateJson(rawCfgPath, rawCfg);
 
@@ -803,7 +818,7 @@ async function startWindowsCodexCopresence(
     console.log(`[anet] ② bridge pid=${managed[1].pid} running`);
     console.log(`[anet] ③ opening Codex TUI in this Windows console (thread=${threadId})`);
     console.log(`[anet]    stop from another terminal: anet node stop ${displayName}`);
-    const tuiArgs = ["resume", "--remote", wsUrl, threadId];
+    const tuiArgs = ["resume", "--remote", wsUrl, threadId, "-m", model];
     if (opts.dangerFullAccess) tuiArgs.push("--dangerously-bypass-approvals-and-sandbox");
     const tui = spawn(opts.codexBin, tuiArgs, {
       cwd: process.cwd(), env: { ...process.env, CODEX_HOME: opts.codexHome },
@@ -823,6 +838,7 @@ async function startWindowsCodexCopresence(
     rmSync(windowsCopresenceRecordPath(nodesDir(), resolved.id), { force: true });
     throw e;
   }
+
 }
 
 async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOptions): Promise<void> {
@@ -951,6 +967,26 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     // Never refuse to launch over this: a node that starts and then reports its
     // blocker is strictly more useful than one that will not start.
     console.error(`[anet] ⚠ could not stage CODEX_HOME state: ${(e as Error).message}`);
+  }
+
+  // Recovery point is created after credential staging but excludes credential
+  // files. It precedes every app-server/process replacement on both platforms.
+  try {
+    const nodeDir = join(nodesDir(), resolved.id);
+    const backup = backupCodexRecoveryState({ nodeDir, codexHome: opts.codexHome });
+    const cfgPath = join(nodeDir, "config.json");
+    const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+    cfg.codexRecoveryBackup = {
+      createdAt: backup.createdAt,
+      stateFiles: backup.stateFiles,
+      path: backup.backupDir,
+    };
+    atomicWritePrivateJson(cfgPath, cfg);
+    resolved.profile.codexRecoveryBackup = cfg.codexRecoveryBackup;
+    console.log(`[anet] recovery point created (${backup.stateFiles.length} session-state item(s); credentials excluded)`);
+  } catch (e) {
+    console.error(`[anet] ❌ cannot create Codex recovery point: ${(e as Error).message}`);
+    process.exit(1);
   }
 
   if (process.platform === "win32") {
@@ -1114,11 +1150,15 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // ── create fresh thread + persist config ──────────────────────────────
   let threadId: string;
   try {
-    threadId = await createCodexCopresenceThread(wsUrl, 60_000, profile.codexThreadId);
+    const thread = await createCodexCopresenceThread(wsUrl, 60_000, profile.codexThreadId);
+    threadId = thread.threadId;
+    profile.codexRecoveryVerification = thread.verification;
   } catch (e: any) {
-    console.error(`[anet] ❌ thread/start failed: ${e?.message || e}`);
+    console.error(`[anet] ❌ Codex thread recovery verification failed: ${e?.message || e}`);
+    console.error(`[anet]    Fail-closed: no bridge/TUI was started and thread/start was not used as a fallback.`);
     console.error(`[anet]    Debug:   tmux attach -t ${shellQuote(`=${appsrvSession}`)}`);
-    console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
+    killTmuxSession(appsrvSession);
+    console.error(`[anet]    Rolled back the replacement app-server; existing CODEX_HOME and stored thread remain unchanged.`);
     // #P2fix复审顺手3 — defense-in-depth env-file cleanup (see :431).
     try { rmSync(envFilePath, { force: true }); } catch { /* best-effort */ }
     process.exit(1);
@@ -1140,6 +1180,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   rawCfg.codexAppServerPort = port;
   rawCfg.codexAppServerUrl = wsUrl;
   rawCfg.codexThreadId = threadId;
+  rawCfg.codexRecoveryVerification = profile.codexRecoveryVerification;
   delete rawCfg.session;
   atomicWritePrivateJson(rawCfgPath, rawCfg);
 
@@ -1169,7 +1210,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   if (opts.dangerFullAccess) tuiFlags.push("--dangerously-bypass-approvals-and-sandbox");
   const tuiCmd = [
     `export CODEX_HOME=${shellQuote(opts.codexHome)}`,
-    `exec ${shellQuote(opts.codexBin)} resume --remote ${wsUrl} ${threadId} ${tuiFlags.join(" ")}`.trim(),
+    `exec ${shellQuote(opts.codexBin)} resume --remote ${wsUrl} ${threadId} -m ${shellQuote(model)} ${tuiFlags.join(" ")}`.trim(),
   ].join(" ; ");
   try {
     execFileSync("tmux", [
@@ -1631,6 +1672,8 @@ interface Profile {
   codexRuntime?: string;
   codexAppServerUrl?: string;  // RFC-030 — shared codex app-server URL (co-presence)
   codexThreadId?: string;      // RFC-030 — codex thread to adopt
+  codexRecoveryVerification?: CodexRecoveryVerification;
+  codexRecoveryBackup?: { createdAt: string; stateFiles: string[]; path: string };
   // Remembered so `anet node start <name>` alone brings up the co-presence
   // TUI, the way grokCopresence / opencodeMode already do for their runtimes.
   codexCopresence?: boolean;
@@ -6305,6 +6348,13 @@ async function lsCommand() {
         const flags = (p as any).flags || {};
         const flagLabel = flags.dangerouslySkipPermissions === false ? "permGate=on" : "permGate=off";
         console.log(`  ${" ".repeat(20)} tools=${toolsLabel}  ${flagLabel}`);
+        if (runtime === "codex-app-server") {
+          const audit = codexTopologyAudit(p as any, join(nodesDir(), id), process.cwd());
+          const verified = audit.lastRecoveryVerification as any;
+          console.log(`  ${" ".repeat(20)} launch=${audit.launchMode} cwd=${audit.cwd}`);
+          console.log(`  ${" ".repeat(20)} CODEX_HOME=${audit.codexHome} remote=${audit.remote || "-"} thread=${audit.threadId || "-"} model=${audit.model || "-"}`);
+          console.log(`  ${" ".repeat(20)} recovery=${verified ? `${verified.method} verified ${verified.verifiedAt} turns=${verified.historyTurnCount}` : "not verified"}`);
+        }
       }
     }
     console.log();
@@ -13943,6 +13993,13 @@ async function doctorCommand() {
     const pid = join(nodesDir(), id, ".pid");
     const alive = existsSync(pid) ? (() => { try { process.kill(parseInt(readFileSync(pid, "utf-8")), 0); return true; } catch { return false; } })() : false;
     info(`  ${name}`, `${runtime} ${alive ? "● running" : "○ stopped"} node_id=${p?.node_id || "-"}`);
+    if (p && runtime === "codex-app-server") {
+      const audit = codexTopologyAudit(p as any, join(nodesDir(), id), process.cwd());
+      const verified = audit.lastRecoveryVerification as any;
+      info(`    ↳ ${name} topology`, `${audit.launchMode}; cwd=${audit.cwd}; CODEX_HOME=${audit.codexHome}; remote=${audit.remote || "-"}; thread=${audit.threadId || "-"}; model=${audit.model || "-"}; flags=${JSON.stringify(audit.flags)}`);
+      if (audit.threadId && !verified) warning(`    ↳ ${name} recovery`, "stored thread has no successful thread/read history verification");
+      else if (verified) info(`    ↳ ${name} recovery`, `${verified.method} verified ${verified.verifiedAt}; turns=${verified.historyTurnCount}; fingerprint=${String(verified.historyFingerprint).slice(0, 12)}`);
+    }
     const diag = diagnoseNode(id);
     if (diag && diag.issues.length) {
       needsMigration.push(id);

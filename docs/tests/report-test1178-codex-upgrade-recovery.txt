@@ -1,0 +1,53 @@
+Test 1178 — Codex upgrade recovery and topology audit
+
+Layer 1: pure recovery + existing thread lifecycle
+bun test v1.3.14 (0d9b296a)
+
+src/codex-copresence-thread.test.ts:
+(pass) co-presence thread lifecycle > restart resumes the persisted conversation [0.21ms]
+(pass) co-presence thread lifecycle > only a node with no persisted thread creates one [0.08ms]
+
+src/codex-copresence-recovery.test.ts:
+(pass) Codex co-presence recovery > resume requires exact thread identity and persisted history [0.86ms]
+(pass) Codex co-presence recovery > stub resume failure is fail-closed and never calls thread/start [0.59ms]
+(pass) Codex co-presence recovery > backup preserves config and session state but excludes credentials [6.93ms]
+(pass) Codex co-presence recovery > audit exposes topology without config secrets [0.18ms]
+
+ 6 pass
+ 0 fail
+ 16 expect() calls
+Ran 6 tests across 2 files. [61.00ms]
+
+Layer 2: production wiring invariants
+PASS: launcher uses exact resume/read verification, private backup, and audit projection
+
+Layer 3: typecheck + production bundle
+$ tsc --noEmit
+$ bun build src/client.ts --outdir dist/src --target node --minify && bun build bin/cli.ts --outdir dist/bin --target node --minify --external @sleep2agi/commhub-server --external bun:sqlite --external '../../server/*' && bun build src/node-server.ts --outdir dist/src --target node --minify && bun build src/im/feishu/worker.ts --outdir dist/src/im/feishu --target node --minify --external @larksuiteoapi/node-sdk && tsc --emitDeclarationOnly --declaration --outDir dist && bun x javascript-obfuscator dist/bin/cli.js --output dist/bin/cli.js --compact true --string-array true --string-array-encoding base64 && bun x javascript-obfuscator dist/src/client.js --output dist/src/client.js --compact true --string-array true && bun x javascript-obfuscator dist/src/node-server.js --output dist/src/node-server.js --compact true --string-array true && cp bin/anet.cjs dist/bin/anet.cjs
+Bundled 3 modules in 11ms
+
+  client.js  5.79 KB  (entry point)
+
+Bundled 219 modules in 77ms
+
+  cli.js  1.19 MB  (entry point)
+
+Bundled 229 modules in 49ms
+
+  node-server.js  0.29 MB  (entry point)
+
+Bundled 598 modules in 113ms
+
+  worker.js  2.29 MB  (entry point)
+
+
+[javascript-obfuscator-cli] Obfuscating file: dist/bin/cli.js... 
+
+[javascript-obfuscator-cli] Obfuscating file: dist/src/client.js... 
+
+[javascript-obfuscator-cli] Obfuscating file: dist/src/node-server.js... 
+PASS: typecheck and production bundle
+
+Witnessed-red contract
+Mutation proven by unit stub: thread/read returns exact id with empty history; test rejects and call trace is only thread/resume,thread/read (no thread/start).
+RESULT: PASS
