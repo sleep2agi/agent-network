@@ -2,6 +2,12 @@ $ErrorActionPreference = "Stop"
 $report = Join-Path $env:RUNNER_TEMP "report-test751-windows.txt"
 Set-Location (Join-Path $PSScriptRoot "..\..\agent-network")
 @("# test751 — native Windows Codex co-presence", "date: $([DateTime]::UtcNow.ToString('o'))") | Set-Content $report
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$fakeCodex = Join-Path $repoRoot "tests\test751-codex-copresence-windows\fake-codex.mjs"
+$sourceCommit = (git -C $repoRoot rev-parse HEAD).Trim()
+$fakeHash = (Get-FileHash -Algorithm SHA256 $fakeCodex).Hash.ToLowerInvariant()
+$threadReadWire = (Select-String -Path $fakeCodex -SimpleMatch 'msg.method === "thread/read"').Line.Trim()
+@("source_commit: $sourceCommit", "fake_codex_sha256: $fakeHash", "fake_thread_read_wire: $threadReadWire") | Tee-Object -FilePath $report -Append
 bun install --frozen-lockfile 2>&1 | Tee-Object -FilePath $report -Append
 bun test src/copresence-deps.test.ts src/windows-codex-copresence.test.ts src/codex-copresence-thread.test.ts 2>&1 | Tee-Object -FilePath $report -Append
 bun run typecheck 2>&1 | Tee-Object -FilePath $report -Append
