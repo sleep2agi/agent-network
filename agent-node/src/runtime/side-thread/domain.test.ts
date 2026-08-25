@@ -137,6 +137,15 @@ describe("SideThreadService", () => {
     expect(audit.every((x) => !Object.hasOwn(x, "prompt") && !Object.hasOwn(x, "result"))).toBe(true);
   });
 
+  test("hostile dropped-event details are reduced to a fixed audit reason", () => {
+    const adapter = new FakeAdapter(); const audit: any[] = []; let dropped!: (reason: string) => void;
+    (adapter as any).subscribeDropped = (listener: (reason: string) => void) => { dropped = listener; return () => {}; };
+    new SideThreadService({ adapter, audit: (entry) => audit.push(entry) });
+    dropped("Bearer TOPSECRET\nhttps://secret.example/x /home/private prompt-body");
+    expect(audit).toEqual([expect.objectContaining({ action: "event_dropped", reason: "runtime-event-rejected" })]);
+    expect(JSON.stringify(audit)).not.toMatch(/TOPSECRET|https?:|\/home\/|prompt-body/);
+  });
+
   test("close removes subscription and refuses new mutations", async () => {
     const adapter = new FakeAdapter();
     const service = new SideThreadService({ adapter, id: ids() });

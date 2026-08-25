@@ -1,4 +1,5 @@
-import { chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { constants, chmodSync, closeSync, existsSync, fchmodSync, fstatSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { operationHash } from "./operation-ledger";
@@ -16,11 +17,16 @@ export interface ForkLeaseRecord {
 }
 
 export interface ForkLeaseStore {
+  claimSupported(): boolean;
+  claim(nodeId: string, sourceThreadId: string): Promise<ForkExecutorClaim>;
+  claimOperation(nodeId: string, sideThreadId: string, operationId: string): Promise<ForkExecutorClaim>;
   acquire(record: ForkLeaseRecord): ForkLeaseRecord;
   put(record: ForkLeaseRecord): void;
   get(nodeId: string, sourceThreadId: string): ForkLeaseRecord | undefined;
   release(nodeId: string, sourceThreadId: string, operationId: string): void;
 }
+
+export interface ForkExecutorClaim { release(): Promise<void> }
 
 /**
  * Crash-persistent, per-source exclusion for an owned stdio app-server.
@@ -29,8 +35,79 @@ export interface ForkLeaseStore {
  * old owner is dead and emit a second thread/fork.
  */
 export class PrivateFileForkLeaseStore implements ForkLeaseStore {
-  constructor(private readonly root: string) {
+  private readonly platform: NodeJS.Platform;
+  private readonly flockBinary: string;
+  constructor(private readonly root: string, options: { platform?: NodeJS.Platform; flockBinary?: string } = {}) {
+    this.platform = options.platform ?? process.platform;
+    this.flockBinary = options.flockBinary ?? "/usr/bin/flock";
     mkdirSync(root, { recursive: true, mode: 0o700 }); chmodSync(root, 0o700);
+  }
+  claimSupported(): boolean {
+    return this.platform === "linux" && existsSync(this.flockBinary) && existsSync("/bin/sh") && existsSync("/bin/cat");
+  }
+  async claim(nodeId: string, sourceThreadId: string): Promise<ForkExecutorClaim> {
+    if (!this.claimSupported()) throw new Error("fork executor claim is unsupported on this platform");
+    const sourceThreadHash = operationHash(sourceThreadId);
+    const lockPath = this.path(nodeId, sourceThreadHash).replace(/\.json$/, ".executor.lock");
+    return this.claimPath(lockPath);
+  }
+  async claimOperation(nodeId: string, sideThreadId: string, operationId: string): Promise<ForkExecutorClaim> {
+    if (!this.claimSupported()) throw new Error("operation executor claim is unsupported on this platform");
+    for (const [value, label] of [[nodeId, "nodeId"], [sideThreadId, "sideThreadId"], [operationId, "operationId"]] as const) {
+      if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(value)) throw new Error(`invalid executor ${label}`);
+    }
+    const lockPath = join(this.root, `${nodeId}.${operationHash(`${sideThreadId}\0${operationId}`).slice(7)}.operation.lock`);
+    return this.claimPath(lockPath);
+  }
+  private async claimPath(lockPath: string): Promise<ForkExecutorClaim> {
+    const fd = openSync(lockPath, constants.O_RDWR | constants.O_CREAT | (constants.O_NOFOLLOW || 0), 0o600);
+    try {
+      const stat = fstatSync(fd);
+      if (!stat.isFile() || stat.nlink !== 1) throw new Error("runtime operation executor lock must be a single-link regular file");
+      fchmodSync(fd, 0o600);
+    } catch (error) {
+      closeSync(fd);
+      throw error;
+    }
+    const holder = spawn("/bin/sh", ["-c",
+      "if ! \"$1\" --exclusive --nonblock 3; then exit 73; fi; printf 'LOCKED\\n'; /bin/cat >/dev/null",
+      "side-thread-executor", this.flockBinary], {
+      env: {}, stdio: ["pipe", "pipe", "pipe", fd],
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        let settled = false; let stdout = ""; let stderr = "";
+        const timer = setTimeout(() => {
+          if (settled) return; settled = true; holder.kill("SIGKILL");
+          reject(new Error("runtime operation executor claim startup timed out"));
+        }, 3_000);
+        timer.unref?.();
+        const fail = (error: Error) => { if (settled) return; settled = true; clearTimeout(timer); reject(error); };
+        holder.stdout!.setEncoding("utf8");
+        holder.stdout!.on("data", (chunk: string) => {
+          stdout = (stdout + chunk).slice(-64);
+          if (!settled && stdout.includes("LOCKED\n")) { settled = true; clearTimeout(timer); resolve(); }
+        });
+        holder.stderr!.setEncoding("utf8");
+        holder.stderr!.on("data", (chunk: string) => { stderr = (stderr + chunk).slice(-300); });
+        holder.once("error", (error) => fail(new Error(`runtime operation executor claim unavailable: ${error.message}`)));
+        holder.once("exit", (code) => fail(new Error(code === 73
+          ? "runtime operation executor is already claimed"
+          : `runtime operation executor holder exited before claim${stderr ? `: ${stderr.trim()}` : ""}`)));
+      });
+    } catch (error) {
+      closeSync(fd);
+      throw error;
+    }
+    let released = false;
+    return { release: async () => {
+      if (released) return; released = true;
+      await new Promise<void>((resolve) => {
+        if (holder.exitCode !== null || holder.signalCode !== null) return resolve();
+        holder.once("exit", () => resolve()); holder.stdin!.end();
+      });
+      closeSync(fd);
+    } };
   }
   acquire(record: ForkLeaseRecord): ForkLeaseRecord {
     validate(record);
@@ -83,7 +160,15 @@ export class PrivateFileForkLeaseStore implements ForkLeaseStore {
     if (!/^sha256:[0-9a-f]{64}$/.test(sourceThreadHash)) throw new Error("fork lease source hash required");
     return join(this.root, `${nodeId}.${sourceThreadHash.slice(7)}.json`);
   }
-  private read(path: string): ForkLeaseRecord { const value = JSON.parse(readFileSync(path, "utf8")); validate(value); return value; }
+  private read(path: string): ForkLeaseRecord {
+    const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+    try {
+      const stat = fstatSync(fd);
+      if (!stat.isFile() || stat.nlink !== 1) throw new Error("fork lease must be a single-link regular file");
+      fchmodSync(fd, 0o600);
+      const value = JSON.parse(readFileSync(fd, "utf8")); validate(value); return value;
+    } finally { closeSync(fd); }
+  }
   private sync(path: string): void { const fd = openSync(path, "r"); try { fsyncSync(fd); } finally { closeSync(fd); } this.syncDir(); }
   private syncDir(): void { const fd = openSync(this.root, "r"); try { fsyncSync(fd); } finally { closeSync(fd); } }
 }
