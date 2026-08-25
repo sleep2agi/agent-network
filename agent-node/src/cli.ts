@@ -40,6 +40,7 @@ import { bumpFailure, resetFailure, applyAutoPause, resolveMaxConsecutiveFailure
 import { formatSelfLoopsBlock } from "./goals/format";
 import { startTelegramWatchdog } from "./telegram-watchdog";
 import { sseAbandonGuidance } from "./sse-recovery-guidance";
+import { resolveInboxReconcileMs } from "./inbox-reconcile";
 import {
   appendReadableAttachmentPaths,
   attachmentDescriptorsForRuntime,
@@ -6155,6 +6156,17 @@ try {
 }
 scheduleWorkInboxDrain();
 scheduleInformationalInboxDrain();
+// SSE is the low-latency doorbell, not the source of truth. Periodically pull
+// CommHub as a fallback so a dropped doorbell, a reconnect race, or an event
+// received during a long runtime turn cannot leave durable inbox rows unseen.
+// The existing drain lanes are single-flight, dirty-rerun, retry/backoff
+// arbiters, so timer and SSE triggers cannot duplicate task execution.
+const inboxReconcileMs = resolveInboxReconcileMs(process.env.COMMHUB_INBOX_RECONCILE_MS);
+log(`  inbox reconciliation: SSE + every ${inboxReconcileMs}ms`);
+setInterval(() => {
+  scheduleWorkInboxDrain();
+  scheduleInformationalInboxDrain();
+}, inboxReconcileMs);
 // RFC-024 — fire a reportStatus immediately on startup so the
 // config_snapshot reaches the hub right after register(), instead of
 // waiting up to 3 minutes for the periodic timer below to fire. Hub
