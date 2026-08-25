@@ -98,7 +98,10 @@ export default async function handler(_request, response) {
   try {
     const { manifest, source } = await resolveDesktopUpdate();
     response.setHeader('Content-Type', 'application/json; charset=utf-8');
-    response.setHeader('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=300');
+    // Manual update checks must never reuse a manifest fetched before a new
+    // release was published. A cached old manifest is indistinguishable from
+    // "already up to date" to the Tauri updater.
+    response.setHeader('Cache-Control', 'no-store, max-age=0');
     response.setHeader('X-Anet-Update-Source', source);
     response.status(200).json(manifest);
   } catch (error) {
