@@ -174,7 +174,23 @@ apply_or_preview() {
     CHANGED_FILES+=("$file")
   else
     echo "  WOULD-WRITE: $file"
-    diff -u <(printf '%s' "$before") <(printf '%s' "$after") | sed 's/^/    /' | head -40
+    # `diff` uses rc=1 for the expected "files differ" result. With
+    # `set -euo pipefail`, piping that result directly through sed/head made a
+    # healthy dry-run exit before the remaining registry entries and summary.
+    # Capture the status explicitly: rc=0/1 are valid, while rc>1 is a real
+    # read/exec error and must still fail the release check.
+    local diff_output diff_rc
+    set +e
+    diff_output="$(diff -u <(printf '%s' "$before") <(printf '%s' "$after"))"
+    diff_rc=$?
+    set -e
+    if [[ "$diff_rc" -gt 1 ]]; then
+      echo "  ERROR: diff failed for $file (rc=$diff_rc)" >&2
+      return "$diff_rc"
+    fi
+    # `head` can make the upstream sed exit on SIGPIPE under pipefail. A
+    # single sed invocation both indents and limits the preview safely.
+    printf '%s\n' "$diff_output" | sed -n '1,40{s/^/    /;p;}'
   fi
 }
 
