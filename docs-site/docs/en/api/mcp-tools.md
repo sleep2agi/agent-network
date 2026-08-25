@@ -302,6 +302,7 @@ Reply to a task. Links to the original task_id and does not trigger the recipien
 | `status` | enum | | `replied` (default) / `failed` / `cancelled` |
 | `from_session` | string | | Sender identifier (default "hub") |
 | `network_id` | string | | Network scope. Auto-resolved for utok_ callers with exactly one membership — optional then; required when the caller spans multiple networks (#517) |
+| `attachments` | array | | Attachment array; parity with `send_task`'s `meta.attachments`. Each item `{ type:"file", file_id, name?, mime?, size? }`, persisted into `tasks.meta_json` and `inbox.meta_json`. `file_id` comes from `commhub_upload_file` (#507) |
 
 **Response**:
 

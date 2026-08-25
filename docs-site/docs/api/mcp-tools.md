@@ -302,6 +302,7 @@ send_task({
 | `status` | enum | | `replied`（默认）/ `failed` / `cancelled` |
 | `from_session` | string | | 发送者标识（默认 "hub"） |
 | `network_id` | string | | Network 范围。utok_ 恰好 1 个成员网络时自动解析，可省略；跨多网络必须显式传（#517） |
+| `attachments` | array | | 附件数组，与 `send_task` 的 `meta.attachments` 对等。每项 `{ type:"file", file_id, name?, mime?, size? }`，写入 `tasks.meta_json` 与 `inbox.meta_json`。`file_id` 来自 `commhub_upload_file`（#507） |
 
 **返回值**：
 
