@@ -96,6 +96,8 @@ export interface SideThreadRuntimeAdapter {
   archive(input: { derivedThreadId: string }): Promise<void>;
   delete(input: { derivedThreadId: string }): Promise<void>;
   subscribe(listener: (event: SideThreadTerminalEvent) => void): () => void;
+  subscribeDropped?(listener: (reason: string) => void): () => void;
+  close?(): void;
 }
 
 export type SideThreadAuditAction =
@@ -124,7 +126,7 @@ export interface SideThreadAuditEntry {
 
 export interface SideThreadServiceOptions {
   adapter: SideThreadRuntimeAdapter;
-  audit?: (entry: SideThreadAuditEntry) => void;
+  audit?: (entry: SideThreadAuditEntry) => void | Promise<void>;
   now?: () => number;
   id?: () => string;
 }
@@ -138,6 +140,10 @@ export class SideThreadService {
   private readonly createByKey = new Map<string, { fingerprint: string; operation: Promise<SideThreadRecord> }>();
   private readonly attemptByKey = new Map<string, { fingerprint: string; operation: Promise<SideThreadAttempt> }>();
   private readonly unsubscribe: () => void;
+  private readonly unsubscribeDropped: () => void;
+  private readonly locks = new Map<string, Promise<void>>();
+  private readonly pending = new Set<Promise<unknown>>();
+  private readonly cancelRequested = new Set<string>();
   private closed = false;
   private readonly now: () => number;
   private readonly id: () => string;
@@ -146,12 +152,16 @@ export class SideThreadService {
     this.now = opts.now ?? Date.now;
     this.id = opts.id ?? randomUUID;
     this.unsubscribe = opts.adapter.subscribe((event) => this.onTerminal(event));
+    this.unsubscribeDropped = opts.adapter.subscribeDropped?.((reason) => this.auditDropped(reason)) ?? (() => {});
   }
 
-  close(): void {
+  async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
     this.unsubscribe();
+    this.unsubscribeDropped();
+    this.opts.adapter.close?.();
+    await Promise.allSettled([...this.pending]);
   }
 
   capability(): SideThreadCapability { return this.opts.adapter.capability(); }
@@ -200,8 +210,12 @@ export class SideThreadService {
       sideThreadId, sourceThreadId: input.sourceThreadId, boundary: input.boundary,
     });
     requireIdentity(forked.derivedThreadId, "derivedThreadId");
+    this.assertOpen();
     if (forked.derivedThreadId === input.sourceThreadId) {
       throw new SideThreadConflictError("runtime returned the source thread as the derived thread");
+    }
+    if ([...this.records.values()].some((record) => record.derivedThreadId === forked.derivedThreadId)) {
+      throw new SideThreadConflictError("runtime returned a derived thread already owned by another side thread");
     }
     const record: SideThreadRecord = {
       id: sideThreadId, requestKey: input.requestKey, nodeId: input.nodeId,
@@ -237,7 +251,9 @@ export class SideThreadService {
   }
 
   private async startOnce(input: { sideThreadId: string; requestKey: string; prompt: string }): Promise<SideThreadAttempt> {
+    return this.withLock(input.sideThreadId, async () => {
     const record = this.mustGet(input.sideThreadId);
+    this.assertAttestation(record);
     if (record.state === "archived" || record.state === "purged") {
       throw new SideThreadConflictError(`cannot start attempt from ${record.state}`);
     }
@@ -253,6 +269,8 @@ export class SideThreadService {
         sideThreadId: record.id, attemptId: attempt.id,
         derivedThreadId: record.derivedThreadId, prompt: input.prompt,
       });
+      this.assertOpen();
+      this.assertAttestation(record);
       requireIdentity(started.turnId, "turnId");
       if (attempt.turnId && attempt.turnId !== started.turnId) {
         throw new SideThreadConflictError("runtime attempt identity changed during start");
@@ -263,44 +281,63 @@ export class SideThreadService {
       this.audit(record, "attempt_started", { attemptId: attempt.id, derivedThreadId: record.derivedThreadId, turnId: attempt.turnId });
       return attempt;
     } catch (error) {
-      attempt.state = "failed";
-      attempt.error = safeError(error);
-      record.activeAttemptId = undefined;
-      record.state = "failed";
+      if (attempt.state === "starting" || attempt.state === "running") {
+        attempt.state = "failed";
+        attempt.error = safeError(error);
+        record.activeAttemptId = undefined;
+        record.state = "failed";
+      }
       throw error;
     }
+    });
   }
 
   async cancel(sideThreadId: string): Promise<void> {
     this.assertOpen();
+    return this.withLock(sideThreadId, async () => {
     const record = this.mustGet(sideThreadId);
+    this.assertAttestation(record);
     const attempt = record.attempts.find((a) => a.id === record.activeAttemptId);
     if (!attempt?.turnId || attempt.state !== "running") {
       throw new SideThreadConflictError("side thread has no cancellable turn");
     }
+    if (this.cancelRequested.has(attempt.id)) return;
+    this.cancelRequested.add(attempt.id);
     this.audit(record, "cancel_requested", { attemptId: attempt.id, derivedThreadId: record.derivedThreadId, turnId: attempt.turnId });
-    await this.opts.adapter.cancel({ derivedThreadId: record.derivedThreadId, turnId: attempt.turnId });
+    try { await this.opts.adapter.cancel({ derivedThreadId: record.derivedThreadId, turnId: attempt.turnId }); }
+    catch (error) { this.cancelRequested.delete(attempt.id); throw error; }
+    this.assertOpen();
+    });
   }
 
   async archive(sideThreadId: string): Promise<void> {
     this.assertOpen();
+    return this.withLock(sideThreadId, async () => {
     const record = this.mustGet(sideThreadId);
+    this.assertAttestation(record);
     if (record.activeAttemptId) throw new SideThreadConflictError("cannot archive a running side thread");
     if (record.state === "purged") throw new SideThreadConflictError("cannot archive a purged side thread");
     if (record.state === "archived") return;
     await this.opts.adapter.archive({ derivedThreadId: record.derivedThreadId });
+    this.assertOpen();
+    if (record.state === "purged") throw new SideThreadConflictError("purge won archive race");
     record.state = "archived";
     this.audit(record, "archived", { derivedThreadId: record.derivedThreadId });
+    });
   }
 
   async purge(sideThreadId: string): Promise<void> {
     this.assertOpen();
+    return this.withLock(sideThreadId, async () => {
     const record = this.mustGet(sideThreadId);
+    this.assertAttestation(record);
     if (record.activeAttemptId) throw new SideThreadConflictError("cannot purge a running side thread");
     if (record.state === "purged") return;
     await this.opts.adapter.delete({ derivedThreadId: record.derivedThreadId });
+    this.assertOpen();
     record.state = "purged";
     this.audit(record, "purged", { derivedThreadId: record.derivedThreadId });
+    });
   }
 
   get(sideThreadId: string): SideThreadRecord | undefined {
@@ -311,11 +348,10 @@ export class SideThreadService {
   private onTerminal(event: SideThreadTerminalEvent): void {
     const record = this.records.get(event.sideThreadId);
     const attempt = record?.attempts.find((a) => a.id === event.attemptId);
-    const startingIdentity = attempt?.state === "starting" && !attempt.turnId;
     const owned = !!record && !!attempt && record.derivedThreadId === event.threadId
-      && (attempt.turnId === event.turnId || startingIdentity)
+      && attempt.turnId === event.turnId
       && record.activeAttemptId === attempt.id
-      && (attempt.state === "running" || startingIdentity);
+      && attempt.state === "running";
     if (!owned) {
       this.opts.audit?.({
         action: "event_dropped", sideThreadId: event.sideThreadId,
@@ -333,6 +369,7 @@ export class SideThreadService {
     attempt!.result = event.status === "completed" ? event.text : undefined;
     attempt!.error = event.status === "failed" ? safeText(event.error) : undefined;
     record!.activeAttemptId = undefined;
+    this.cancelRequested.delete(attempt!.id);
     record!.state = attempt!.state === "cancelled" ? "cancelled" : attempt!.state;
     this.audit(record!, "attempt_terminal", {
       attemptId: attempt!.id, derivedThreadId: record!.derivedThreadId,
@@ -350,15 +387,46 @@ export class SideThreadService {
     if (this.closed) throw new SideThreadConflictError("side thread service is closed");
   }
 
+  private assertAttestation(record: SideThreadRecord): void {
+    const cap = this.opts.adapter.capability();
+    if (!cap.supported || cap.mode !== "native-exact-fork" || cap.runtime !== record.runtime
+      || cap.runtimeVersion !== record.runtimeVersion || cap.topology !== record.topology
+      || cap.evidenceRevision !== record.evidenceRevision || !cap.exactBoundary?.[record.boundary.kind]) {
+      throw new SideThreadUnsupportedError(cap.reason ?? "exact-boundary", "immutable capability attestation no longer matches");
+    }
+  }
+
+  private withLock<T>(sideThreadId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.locks.get(sideThreadId) ?? Promise.resolve();
+    let release!: () => void;
+    const next = new Promise<void>((resolve) => { release = resolve; });
+    const tail = previous.then(() => next);
+    this.locks.set(sideThreadId, tail);
+    const running = previous.then(() => { this.assertOpen(); return operation(); })
+      .finally(() => { release(); if (this.locks.get(sideThreadId) === tail) this.locks.delete(sideThreadId); });
+    this.pending.add(running);
+    void running.then(() => this.pending.delete(running), () => this.pending.delete(running));
+    return running;
+  }
+
+  private auditDropped(reason: string): void {
+    this.emitAudit({ action: "event_dropped", sideThreadId: "unowned", runtime: this.opts.adapter.capability().runtime,
+      runtimeVersion: this.opts.adapter.capability().runtimeVersion, topology: this.opts.adapter.capability().topology,
+      evidenceRevision: this.opts.adapter.capability().evidenceRevision, reason: safeText(reason), at: this.now() });
+  }
+
   private audit(record: SideThreadRecord, action: SideThreadAuditAction, extra: Partial<SideThreadAuditEntry>): void {
-    this.opts.audit?.({ action, sideThreadId: record.id, runtime: record.runtime,
+    this.emitAudit({ action, sideThreadId: record.id, runtime: record.runtime,
       runtimeVersion: record.runtimeVersion, topology: record.topology,
-      evidenceRevision: record.evidenceRevision, at: this.now(), ...extra });
+      evidenceRevision: record.evidenceRevision, at: this.now(), ...redactAudit(extra) });
+  }
+  private emitAudit(entry: SideThreadAuditEntry): void {
+    try { void Promise.resolve(this.opts.audit?.(entry)).catch(() => {}); } catch { /* audit is non-throwing */ }
   }
 }
 
 function requireIdentity(value: string, label: string): void {
-  if (!value || value.length > 512 || /[\r\n\0]/.test(value)) throw new SideThreadConflictError(`invalid ${label}`);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(value)) throw new SideThreadConflictError(`invalid ${label}`);
 }
 function requireIdempotencyKey(value: string): void {
   if (!/^[A-Za-z0-9._:-]{8,160}$/.test(value)) throw new SideThreadConflictError("invalid idempotency key");
@@ -372,4 +440,13 @@ function cloneAttempt(value: SideThreadAttempt): SideThreadAttempt { return { ..
 function cloneRecord(value: SideThreadRecord): SideThreadRecord {
   return { ...value, boundary: { ...value.boundary }, attempts: value.attempts.map(cloneAttempt) };
 }
+function auditHash(value: string): string { return `sha256:${createHash("sha256").update(value).digest("hex").slice(0, 24)}`; }
+function redactAudit(extra: Partial<SideThreadAuditEntry>): Partial<SideThreadAuditEntry> {
+  const copy = { ...extra };
+  for (const key of ["sourceThreadId", "derivedThreadId", "turnId"] as const) {
+    if (copy[key]) copy[key] = auditHash(copy[key]!);
+  }
+  return copy;
+}
 import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";

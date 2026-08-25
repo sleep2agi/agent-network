@@ -32,14 +32,18 @@ interface Execution {
   resolveIdentity: (turnId: string) => void;
   rejectIdentity: (error: Error) => void;
   identityTimer: ReturnType<typeof setTimeout>;
+  pendingTerminal?: unknown;
 }
 
 /** Native exact-boundary adapter proven only by PR0's 0.148.0 owned probe. */
 export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter {
   private readonly listeners = new Set<(event: SideThreadTerminalEvent) => void>();
-  private readonly derivedThreads = new Set<string>();
+  private readonly droppedListeners = new Set<(reason: string) => void>();
+  private readonly derivedThreads = new Map<string, string>();
   private readonly byClientId = new Map<string, Execution>();
   private readonly byTurn = new Map<string, Execution>();
+  private readonly earlyTerminals = new Map<string, unknown>();
+  private closed = false;
 
   constructor(private readonly opts: CodexSideThreadAdapterOptions) {
     opts.client.on("item/started", this.onItem);
@@ -61,6 +65,7 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
   }
 
   async fork(input: { sideThreadId: string; sourceThreadId: string; boundary: ExactBoundary }): Promise<{ derivedThreadId: string }> {
+    this.assertOpen();
     this.assertSupported();
     if (!this.capability().exactBoundary?.[input.boundary.kind]) {
       throw new SideThreadUnsupportedError(
@@ -77,22 +82,26 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
         ? { lastTurnId: input.boundary.turnId }
         : { beforeTurnId: input.boundary.turnId }),
     };
-    const response = await this.opts.client.request<{ thread?: { id?: string }; threadId?: string }>("thread/fork", params);
-    const derivedThreadId = response?.thread?.id ?? response?.threadId;
+    const response = await this.opts.client.request<{ thread?: { id?: string } }>("thread/fork", params);
+    this.assertOpen();
+    const derivedThreadId = response?.thread?.id;
     if (!derivedThreadId || derivedThreadId === input.sourceThreadId) {
       throw new SideThreadConflictError("Codex returned an invalid derived thread identity");
     }
-    this.derivedThreads.add(derivedThreadId);
+    if (this.derivedThreads.has(derivedThreadId)) throw new SideThreadConflictError("Codex reused a derived thread identity");
+    this.derivedThreads.set(derivedThreadId, input.sideThreadId);
     return { derivedThreadId };
   }
 
   async start(input: { sideThreadId: string; attemptId: string; derivedThreadId: string; prompt: string }): Promise<{ turnId: string }> {
-    this.assertOwnedThread(input.derivedThreadId);
+    this.assertOpen();
+    this.assertOwnedThread(input.derivedThreadId, input.sideThreadId);
     const clientUserMessageId = `anet-side:${input.sideThreadId}:${input.attemptId}`;
     if (this.byClientId.has(clientUserMessageId)) throw new SideThreadConflictError("duplicate Codex attempt identity");
     let resolveIdentity!: (turnId: string) => void;
     let rejectIdentity!: (error: Error) => void;
     const identity = new Promise<string>((resolve, reject) => { resolveIdentity = resolve; rejectIdentity = reject; });
+    void identity.catch(() => {});
     const execution: Execution = {
       sideThreadId: input.sideThreadId, attemptId: input.attemptId,
       threadId: input.derivedThreadId, clientUserMessageId,
@@ -106,20 +115,33 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
     try {
       let response: { turn?: { id?: string }; turnId?: string } | undefined;
       try {
-        response = await this.opts.client.request<{ turn?: { id?: string }; turnId?: string }>("turn/start", {
+        const request = this.opts.client.request<{ turn?: { id?: string }; turnId?: string }>("turn/start", {
         threadId: input.derivedThreadId,
         clientUserMessageId,
         input: [{ type: "text", text: input.prompt }],
         });
+        const abortOnIdentityFailure = identity.then(
+          () => new Promise<never>(() => {}),
+          (error) => Promise.reject(error),
+        );
+        response = await Promise.race([request, abortOnIdentityFailure]);
       } catch (error) {
         // The response can be lost after app-server accepted the turn. The
         // echoed client id is authoritative and makes retrying unsafe.
         if (!execution.turnId) throw error;
       }
-      execution.responseTurnId = response?.turn?.id ?? response?.turnId;
+      this.assertOpen();
+      execution.responseTurnId = response?.turn?.id;
+      if (!execution.responseTurnId && !execution.turnId) throw new SideThreadConflictError("Codex returned an invalid turn identity");
       // Response identity alone is not authoritative: Codex automatic goal
       // continuation can replace it. Wait for the echoed client id.
-      return { turnId: await identity };
+      const turnId = await identity;
+      if (execution.pendingTerminal) {
+        const pending = execution.pendingTerminal;
+        execution.pendingTerminal = undefined;
+        setTimeout(() => this.onCompleted(pending), 0);
+      }
+      return { turnId };
     } catch (error) {
       this.dropExecution(execution);
       throw error;
@@ -127,6 +149,7 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
   }
 
   async cancel(input: { derivedThreadId: string; turnId: string }): Promise<void> {
+    this.assertOpen();
     this.assertOwnedThread(input.derivedThreadId);
     const execution = this.byTurn.get(turnKey(input.derivedThreadId, input.turnId));
     if (!execution) throw new SideThreadConflictError("refusing to cancel an unowned Codex turn");
@@ -134,13 +157,15 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
   }
 
   async archive(input: { derivedThreadId: string }): Promise<void> {
+    this.assertOpen();
     this.assertOwnedThread(input.derivedThreadId);
     await this.opts.client.request("thread/archive", { threadId: input.derivedThreadId });
   }
 
   async delete(input: { derivedThreadId: string }): Promise<void> {
+    this.assertOpen();
     this.assertOwnedThread(input.derivedThreadId);
-    if ([...this.byTurn.values()].some((x) => x.threadId === input.derivedThreadId)) {
+    if ([...this.byTurn.values(), ...this.byClientId.values()].some((x) => x.threadId === input.derivedThreadId)) {
       throw new SideThreadConflictError("refusing to delete a thread with an active owned turn");
     }
     await this.opts.client.request("thread/delete", { threadId: input.derivedThreadId });
@@ -151,8 +176,14 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
+  subscribeDropped(listener: (reason: string) => void): () => void {
+    this.droppedListeners.add(listener);
+    return () => this.droppedListeners.delete(listener);
+  }
 
   close(): void {
+    if (this.closed) return;
+    this.closed = true;
     this.opts.client.off("item/started", this.onItem);
     this.opts.client.off("item/completed", this.onItem);
     this.opts.client.off("item/agentMessage/delta", this.onDelta);
@@ -163,7 +194,9 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
     }
     this.byClientId.clear();
     this.byTurn.clear();
+    this.earlyTerminals.clear();
     this.listeners.clear();
+    this.droppedListeners.clear();
   }
 
   private readonly onItem = (params: unknown): void => {
@@ -172,17 +205,19 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
     const clientId = p.item.clientId;
     if (p.item.type === "userMessage" && clientId) {
       const execution = this.byClientId.get(clientId);
-      if (!execution || execution.threadId !== p.threadId) return;
-      if (execution.turnId && execution.turnId !== p.turnId) return;
+      if (!execution || execution.threadId !== p.threadId) { this.dropped("identity-ownership-mismatch"); return; }
+      if (execution.turnId && execution.turnId !== p.turnId) { this.dropped("identity-turn-mismatch"); return; }
       execution.turnId = p.turnId;
       this.byTurn.set(turnKey(p.threadId, p.turnId), execution);
       clearTimeout(execution.identityTimer);
       execution.resolveIdentity(p.turnId);
+      const early = this.earlyTerminals.get(turnKey(p.threadId, p.turnId));
+      if (early) { this.earlyTerminals.delete(turnKey(p.threadId, p.turnId)); execution.pendingTerminal = early; }
       return;
     }
     if (p.item.type === "agentMessage" && typeof p.item.text === "string") {
       const execution = this.byTurn.get(turnKey(p.threadId, p.turnId));
-      if (execution) execution.text = p.item.text;
+      if (execution) execution.text = p.item.text; else this.dropped("unowned-agent-message");
     }
   };
 
@@ -190,7 +225,7 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
     const p = params as { threadId?: string; turnId?: string; delta?: string };
     if (!p?.threadId || !p.turnId || typeof p.delta !== "string") return;
     const execution = this.byTurn.get(turnKey(p.threadId, p.turnId));
-    if (execution) execution.text += p.delta;
+    if (execution) execution.text += p.delta; else this.dropped("unowned-delta");
   };
 
   private readonly onCompleted = (params: unknown): void => {
@@ -198,7 +233,12 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
     const turnId = p?.turn?.id;
     if (!p?.threadId || !turnId) return;
     const execution = this.byTurn.get(turnKey(p.threadId, turnId));
-    if (!execution) return;
+    if (!execution) {
+      const starting = [...this.byClientId.values()].some((x) => x.threadId === p.threadId);
+      if (starting && this.earlyTerminals.size < 64) this.earlyTerminals.set(turnKey(p.threadId, turnId), params);
+      else this.dropped(starting ? "terminal-buffer-full" : "unowned-terminal");
+      return;
+    }
     const status = p.turn?.status;
     const event: SideThreadTerminalEvent = {
       sideThreadId: execution.sideThreadId, attemptId: execution.attemptId,
@@ -228,10 +268,13 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
       );
     }
   }
-  private assertOwnedThread(threadId: string): void {
+  private assertOpen(): void { if (this.closed) throw new SideThreadConflictError("Codex side-thread adapter closed"); }
+  private assertOwnedThread(threadId: string, sideThreadId?: string): void {
     this.assertSupported();
-    if (!this.derivedThreads.has(threadId)) throw new SideThreadConflictError("refusing operation on an unowned Codex thread");
+    const owner = this.derivedThreads.get(threadId);
+    if (!owner || (sideThreadId && owner !== sideThreadId)) throw new SideThreadConflictError("refusing operation on an unowned Codex thread");
   }
+  private dropped(reason: string): void { for (const listener of this.droppedListeners) listener(reason); }
 }
 
 function unsupported(reason: "version" | "topology" | "exact-boundary", opts: CodexSideThreadAdapterOptions): SideThreadCapability {

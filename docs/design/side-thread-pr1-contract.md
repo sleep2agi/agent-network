@@ -3,9 +3,8 @@
 Status: Draft, disabled and not wired to Hub/App.
 
 This document describes the credential-free implementation layer stacked on
-RFC-036 PR0. It does not claim that PR0's semantic wire review is complete;
-the runtime allowlist remains unusable in production until PR0's raw trace,
-boundary-content and concurrency blockers are resolved.
+RFC-036 PR0. The allowlist consumes only reviewed `test1190-wire-v2`
+owned-stdio evidence and remains disabled from production entry points.
 
 ## Boundary-specific capability
 
@@ -25,8 +24,7 @@ exactBoundary: { through: true, before: experimentalApi }
 The domain asks for the selected boundary, and fails before `thread/fork` if
 that specific boundary is unavailable. Runtime version must be exactly
 `0.148.0`, topology must be `owned-stdio`, and evidence revision must be the
-reviewed `test1190-wire-v2`. PR0 currently has blockers and has not produced
-that revision, so present production inputs remain unsupported. Shared
+reviewed `test1190-wire-v2`. Shared
 app-server, owned WebSocket, every other version and stale evidence are typed
 unsupported.
 
@@ -53,14 +51,20 @@ The execution registry accepts a terminal event only if
 `sideThreadId + attemptId + derivedThreadId + turnId` matches the active
 attempt. Duplicates, stale attempts, source-thread events and sibling-thread
 events are dropped and audited. Closing the service unsubscribes its listener
-and prohibits further mutation.
+and adapter, drains tracked operations, and prohibits post-close mutation.
+Every mutation rechecks the record's immutable runtime/version/topology/evidence
+attestation. Per-side serialization prevents archive/purge regression and
+duplicate cancel/delete RPCs.
 
 ## Codex ownership rules
 
-- A successful native fork registers its derived thread as adapter-owned.
+- A successful native fork registers a unique derived-thread-to-side owner;
+  duplicate runtime identities fail closed.
 - Start uses `clientUserMessageId=anet-side:<side>:<attempt>`.
 - The echoed user item binds the authoritative turn; the `turn/start` response
   turn ID is recorded but not trusted.
+- A bounded pre-echo terminal buffer handles terminal-before-identity without
+  allowing the domain's `starting` state to accept an arbitrary turn ID.
 - A lost RPC response after the identity echo does not start a duplicate turn.
 - Interrupt requires an active registry entry for the exact derived thread and
   turn. Source, sibling and unknown identities are rejected locally.
@@ -71,12 +75,13 @@ and prohibits further mutation.
 
 ## Audit boundary
 
-Audit entries contain action, logical ownership IDs, runtime/version,
+Audit entries contain action, hashed ownership IDs, runtime/version,
 topology/evidence revision, terminal status/rejection reason and timestamp.
 They never contain prompt/result bodies,
 credentials, environment, paths, request payloads or model output. The current
-callback is an internal sink interface; durable storage and authorization are
-future Hub work.
+callback is a non-throwing internal sink boundary: synchronous throws and
+rejected promises cannot orphan or duplicate runtime work. Durable transactional
+storage and authorization are future Hub work.
 
 ## Deliberate omissions
 
