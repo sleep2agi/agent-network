@@ -15,7 +15,8 @@ export interface SideThreadCodexClient extends EventEmitter {
 export interface CodexSideThreadAdapterOptions {
   client: SideThreadCodexClient;
   runtimeVersion: string;
-  topology: "owned" | "shared";
+  topology: "owned-stdio" | "owned-websocket" | "shared-websocket";
+  evidenceRevision: string;
   experimentalApi: boolean;
   identityTimeoutMs?: number;
 }
@@ -48,10 +49,12 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
   }
 
   capability(): SideThreadCapability {
-    if (this.opts.runtimeVersion !== "0.148.0") return unsupported("version", this.opts.runtimeVersion);
-    if (this.opts.topology !== "owned") return unsupported("topology", this.opts.runtimeVersion);
+    if (this.opts.runtimeVersion !== "0.148.0") return unsupported("version", this.opts);
+    if (this.opts.topology !== "owned-stdio") return unsupported("topology", this.opts);
+    if (this.opts.evidenceRevision !== "test1190-wire-v2") return unsupported("exact-boundary", this.opts);
     return {
       supported: true, runtime: "codex-app-server", runtimeVersion: this.opts.runtimeVersion,
+      topology: this.opts.topology, evidenceRevision: this.opts.evidenceRevision,
       mode: "native-exact-fork",
       exactBoundary: { through: true, before: this.opts.experimentalApi },
     };
@@ -231,7 +234,10 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
   }
 }
 
-function unsupported(reason: "version" | "topology", runtimeVersion: string): SideThreadCapability {
-  return { supported: false, runtime: "codex-app-server", runtimeVersion, reason };
+function unsupported(reason: "version" | "topology" | "exact-boundary", opts: CodexSideThreadAdapterOptions): SideThreadCapability {
+  return {
+    supported: false, runtime: "codex-app-server", runtimeVersion: opts.runtimeVersion,
+    topology: opts.topology, evidenceRevision: opts.evidenceRevision, reason,
+  };
 }
 function turnKey(threadId: string, turnId: string): string { return `${threadId}\0${turnId}`; }

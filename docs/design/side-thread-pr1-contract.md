@@ -16,7 +16,7 @@ Codex 0.148.0 does not have one Boolean "exact fork" capability:
 - `beforeTurnId` (`kind: before`) is experimental and is rejected unless the
   client negotiated `initialize.capabilities.experimentalApi=true`.
 
-The adapter therefore reports:
+After all gates pass, the adapter reports:
 
 ```ts
 exactBoundary: { through: true, before: experimentalApi }
@@ -24,8 +24,11 @@ exactBoundary: { through: true, before: experimentalApi }
 
 The domain asks for the selected boundary, and fails before `thread/fork` if
 that specific boundary is unavailable. Runtime version must be exactly
-`0.148.0` and topology must be `owned`; shared app-server and every other
-version are typed unsupported.
+`0.148.0`, topology must be `owned-stdio`, and evidence revision must be the
+reviewed `test1190-wire-v2`. PR0 currently has blockers and has not produced
+that revision, so present production inputs remain unsupported. Shared
+app-server, owned WebSocket, every other version and stale evidence are typed
+unsupported.
 
 This is an adapter allowlist, not a repository-wide Codex dependency upgrade.
 `agent-node/package-lock.json` still resolves Codex SDK/CLI 0.133.0, while the
@@ -68,8 +71,9 @@ and prohibits further mutation.
 
 ## Audit boundary
 
-Audit entries contain action, logical ownership IDs, runtime/version, terminal
-status/rejection reason and timestamp. They never contain prompt/result bodies,
+Audit entries contain action, logical ownership IDs, runtime/version,
+topology/evidence revision, terminal status/rejection reason and timestamp.
+They never contain prompt/result bodies,
 credentials, environment, paths, request payloads or model output. The current
 callback is an internal sink interface; durable storage and authorization are
 future Hub work.
