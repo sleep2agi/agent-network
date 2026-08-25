@@ -1,0 +1,36 @@
+test1193 — SideThread PR1 rev4 runtime ledger
+Date: 2026-08-26
+Layer: Docker L1, credential-free
+Source commit: 635a657bdbae4c1770e28eeb4ba896b45e5ad707
+Image: oven/bun:1.3.14-debian
+
+Command:
+  sg docker -c 'docker build -f tests/test1193-side-thread-contract/Dockerfile \
+    --build-arg TEST1193_SOURCE_COMMIT=$(git rev-parse HEAD) \
+    -t anet-test1193-pr1-rev4-exact . && \
+    docker run --rm anet-test1193-pr1-rev4-exact'
+
+Result:
+  32 pass
+  0 fail
+  109 expect() calls
+  PASS test1193 side-thread domain/adapter contract + witnessed red
+
+Covered fault evidence:
+  - private 0700/0600 persistent operation ledger and fork lease
+  - immutable stable operation identity and monotonic state transitions
+  - fork thread/list snapshot precedes thread/fork
+  - lost fork response reconciles only one new forkedFromId candidate
+  - multiple candidates remain ambiguous and retry emits no second thread/fork
+  - lost start identity reconciles by persisted client identity without retry RPC
+  - accepted/ambiguous start, interrupt, archive and delete emit one RPC only
+  - ambiguous domain retries reuse the original side-thread and attempt IDs
+
+Supplemental Docker checks:
+  - check-test-suite-registration.py: new=0, PASS
+  - check-l1-paths-sync.py: 54 L1 suites / 136 patterns, PASS
+  - lint-no-bare-rm-rf.sh: 266 shell files, PASS
+  - Bun build of domain/adapter/lease/ledger entry points: PASS
+
+No production service, local global package, npm preview, merge, or release was
+modified by this verification.
