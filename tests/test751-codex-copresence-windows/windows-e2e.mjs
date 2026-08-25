@@ -185,7 +185,13 @@ if ((steerCalls.match(/^rpc:turn\/steer:thread_windows_e2e:turn_windows_human$/g
 }
 if (steerCalls.includes("rpc:turn/start:during-long-turn")) throw new Error("Dashboard work opened a second turn");
 const longConfig = JSON.parse(readFileSync(configPath, "utf8"));
-if (longConfig.codexThreadId !== "thread_windows_e2e" || longConfig.codexAppServerUrl !== "ws://127.0.0.1:24703") {
+const tuiRemotes = [...steerCalls.matchAll(/^tui-remote:(.+)$/gm)].map((match) => match[1].trim());
+const tuiHomes = [...steerCalls.matchAll(/^tui-home:(.+)$/gm)].map((match) => match[1].trim());
+if (
+  longConfig.codexThreadId !== "thread_windows_e2e"
+  || tuiRemotes.at(-1) !== longConfig.codexAppServerUrl
+  || tuiHomes.at(-1) !== codexHome
+) {
   throw new Error(`long-turn identity drift: ${JSON.stringify(longConfig)}`);
 }
 const managed = JSON.parse(readFileSync(join(project, ".anet", "nodes", "windows-picker", "windows-copresence.json"), "utf8"));
