@@ -1,23 +1,30 @@
 Test 1183 — release version-sync dry-run completion
 
 Source commit under test:
-d0d50962e629039f3af8a04f1e5c1fcb78d96907
+ee31dfdf2f371a3dc9ae60723084b99795a9ac0d
 
 Scope:
 - scripts/sync-pinned-versions.sh treats diff rc=1 as an expected preview.
 - Every registered target is processed and the dry-run summary is printed.
 - A genuine diff rc>1 remains fatal and reports the failing target/status.
 - The preview is limited without a sed/head SIGPIPE under pipefail.
+- The two release-pair package mappings point at writable quoted literals:
+  `PAIRED_AGENT_NETWORK_VERSION` and `PAIRED_AGENT_NODE_VERSION`.
+- Stale documentation registrations with no remaining literal pin are removed.
+- A compatibility alias such as `const OLD = NEW` is rejected as missing,
+  rather than being mistaken for a writable version target.
 
 Docker command:
-sg docker -c 'docker build --build-arg SOURCE_COMMIT=d0d50962e629039f3af8a04f1e5c1fcb78d96907 -t anet-test1183-sync:d0d50962 -f tests/test1183-sync-pinned-dryrun/Dockerfile . && docker run --rm --network none anet-test1183-sync:d0d50962'
+sg docker -c 'docker build --build-arg SOURCE_COMMIT=ee31dfdf2f371a3dc9ae60723084b99795a9ac0d -t anet-test1183-rev2-ee31dfdf -f tests/test1183-sync-pinned-dryrun/Dockerfile . && docker run --rm --network none anet-test1183-rev2-ee31dfdf'
 
 Result:
 PASS: normal version differences do not abort the dry-run
 PASS: every registered target is followed by the final summary
+PASS: both release-pair registries own writable quoted literals
+PASS: a constant name without a quoted literal is rejected as stale
 PASS: WITNESSED_RED: the old diff pipeline exits early and loses the summary
 PASS: real diff failures remain nonzero and visible
-SOURCE_COMMIT=d0d50962e629039f3af8a04f1e5c1fcb78d96907
+SOURCE_COMMIT=ee31dfdf2f371a3dc9ae60723084b99795a9ac0d
 RESULT: PASS
 
 Witnessed-red construction:
@@ -34,6 +41,15 @@ Real-error negative control:
 PATH is prefixed with a disposable diff executable that exits 2. The source
 script stays nonzero and prints `ERROR: diff failed ... (rc=2)`, proving that
 the fix does not turn all diff failures green.
+
+Registry-drift negative control:
+The baseline must contain `WOULD-WRITE` for the real paired network literal;
+merely enumerating a filename is insufficient. A disposable script then
+changes the registry back to the non-literal compatibility alias
+`OPENCODE_AGENT_NETWORK_VERSION`. The run exits nonzero and names that exact
+alias as `MISSING TARGET`, proving a constant name alone cannot satisfy the
+registry. The agent-node package is independently dry-run to preview.34 and
+must also produce `WOULD-WRITE` plus the final summary.
 
 Boundaries:
 - No package version was changed.
