@@ -48,6 +48,8 @@ import { diagnoseTask } from "./task-diagnostic.js";
 import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startScheduledTaskScheduler } from "./scheduled-tasks.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
 import { recordDeliveredStaleEvents } from "./task-lifecycle-watcher.js";
+import { SIDE_THREAD_FEATURE_FLAG, SideThreadCoordinator, SideThreadPortRegistry, SideThreadStore, type SideThreadActor, type SideThreadAttachmentRef, type SideThreadExecutionPort } from "./side-thread.js";
+import { handleSideThreadHttpRequest } from "./side-thread-http.js";
 
 const PORT = resolvePort(process.env.PORT);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -62,6 +64,18 @@ const TMUX_ALLOWLIST = new Set(
     .filter(Boolean)
 );
 let masterTokenDeprecationLogged = false;
+
+// #175 PR2 starts fail-closed. Only a verified native adapter can be installed;
+// the execution port deliberately has no ordinary task/FIFO delivery method.
+export const sideThreadPortRegistry = new SideThreadPortRegistry();
+export function installSideThreadExecutionPort(port: SideThreadExecutionPort): () => void {
+  return sideThreadPortRegistry.install(port);
+}
+const sideThreadCoordinator = new SideThreadCoordinator(new SideThreadStore(db), sideThreadPortRegistry, {
+  enabled: process.env[SIDE_THREAD_FEATURE_FLAG] === "1",
+  authorizeNode: (actor, networkId, nodeId) => authorizeSideThreadNode(actor, networkId, nodeId),
+  authorizeAttachment: (actor, networkId, ref) => authorizeSideThreadAttachment(actor, networkId, ref),
+});
 
 if (AUTH_TOKEN) {
   console.warn("[commhub] COMMHUB_AUTH_TOKEN is deprecated and will be removed in v1.0. See RFC-001.");
@@ -235,6 +249,25 @@ function resolveRequestAuth(req: Request, options: RequestTokenOptions = {}): { 
   return { userId: resolved.user.user_id, networkId: resolved.networkId, username: resolved.user.username, tokenName: resolved.tokenName, tokenId: resolved.tokenId };
 }
 
+function resolveSideThreadActor(req: Request, auth: ReturnType<typeof resolveRequestAuth>, isAdmin: boolean): SideThreadActor | null {
+  // Legacy master and DEV_OPEN cannot own durable records because neither
+  // supplies a stable per-user identity for later window hydration.
+  if (!auth?.userId || !auth.tokenId) return null;
+  const nodeCredential = requestToken(req).startsWith("ntok_");
+  const tokenRow = nodeCredential
+    ? db.get<{ bound_node_id: string | null }>("SELECT bound_node_id FROM api_tokens WHERE token_id = ?1", auth.tokenId)
+    : null;
+  return {
+    userId: auth.userId,
+    username: auth.username,
+    tokenId: auth.tokenId,
+    kind: nodeCredential ? "node" : "user",
+    ...(auth.networkId ? { boundNetworkId: auth.networkId } : {}),
+    ...(tokenRow?.bound_node_id ? { boundNodeId: tokenRow.bound_node_id } : {}),
+    isAdmin,
+  };
+}
+
 // #503 — the credential kinds that authorization decisions branch on.
 // Resolved once per request at the handler, so the authz helpers stay
 // pure functions of (principal, entry) and every credential kind is a
@@ -335,6 +368,46 @@ export function authorizeFileDownload(
   // tightening the local-dev carve-out.
   if (entry.ownerId === null && DEV_OPEN) return true;
   return false;
+}
+
+function authorizeSideThreadNode(actor: SideThreadActor, networkId: string, nodeId: string): boolean {
+  const node = db.get<{ network_id: string | null; owner_user_id: string | null }>(
+    "SELECT network_id, owner_user_id FROM nodes WHERE node_id = ?1", nodeId,
+  );
+  if (!node || node.network_id !== networkId) return false;
+  if (!getUserNetworkRole(actor.userId, networkId)) return false;
+  if (!node.owner_user_id || node.owner_user_id !== actor.userId) return false;
+  if (actor.boundNetworkId && actor.boundNetworkId !== networkId) return false;
+  if (actor.kind === "node" && actor.boundNodeId !== nodeId) return false;
+  return true;
+}
+
+function resolveSideThreadCapabilityTarget(input: { actor: SideThreadActor; alias?: string; nodeId?: string; networkId?: string }): { nodeId: string; networkId: string } | undefined {
+  if ((!input.alias && !input.nodeId) || (input.alias && input.nodeId)) return undefined;
+  const networkId = input.actor.boundNetworkId ?? input.networkId;
+  const params: unknown[] = [input.nodeId ?? input.alias];
+  let sql = input.nodeId
+    ? "SELECT node_id,network_id FROM nodes WHERE node_id=?1"
+    : "SELECT node_id,network_id FROM nodes WHERE alias=?1";
+  if (networkId) { params.push(networkId); sql += " AND network_id=?2"; }
+  const authorized = db.all<{ node_id: string; network_id: string | null }>(sql, ...params)
+    .filter(row => !!row.network_id && authorizeSideThreadNode(input.actor, row.network_id, row.node_id));
+  if (authorized.length !== 1) return undefined;
+  return { nodeId: authorized[0].node_id, networkId: authorized[0].network_id! };
+}
+
+function authorizeSideThreadAttachment(actor: SideThreadActor, networkId: string, ref: SideThreadAttachmentRef): boolean {
+  if (!FILE_ID_REGEX.test(ref.fileId)) return false;
+  const path = indexEntryPath(ref.fileId);
+  if (!path || !existsSync(path)) return false;
+  try {
+    const entry = JSON.parse(readFileSync(path, "utf8"));
+    if (!validateIndexEntry(entry) || entry.file_id !== ref.fileId) return false;
+    if (entry.network_id !== networkId || entry.owner_id !== actor.userId) return false;
+    if (!isValidCalendarBucket(entry.date_bucket)) return false;
+    const storage = pathForExistingBlob(entry.date_bucket, entry.file_id, entry.ext);
+    return isPathInsideUploadsRoot(storage.absolutePath) && existsSync(storage.absolutePath);
+  } catch { return false; }
 }
 
 type ByteRange =
@@ -1442,6 +1515,16 @@ return Bun.serve({
     if (restScope.denied) {
       return withCors(req, Response.json({ ok: false, error: restScope.denied }, { status: 403 }));
     }
+
+    const sideThreadResponse = await handleSideThreadHttpRequest({
+      req,
+      url,
+      // Durable prompts/results never accept query-string credentials.
+      actor: resolveSideThreadActor(req, resolveRequestAuth(req, { allowQueryToken: false }), isAdmin),
+      coordinator: sideThreadCoordinator,
+      resolveCapabilityTarget: resolveSideThreadCapabilityTarget,
+    });
+    if (sideThreadResponse) return withCors(req, sideThreadResponse);
 
     // RFC-036 owner-gated host schedule edits. This handler independently
     // verifies exact node ownership and node-token binding; network admin is

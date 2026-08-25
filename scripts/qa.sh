@@ -64,6 +64,11 @@ L1_TESTS=(
   # RFC-036 PR1: credential-free SideThread state machine + Codex adapter
   # contract. Exact-version fail-closed has a witnessed-red mutation.
   "test1193-side-thread-contract"
+  # #175 PR2: Hub contract, authenticated HTTP/SSE security, and lifecycle
+  # races are separate Docker layers. Each has its own witnessed-red mutation.
+  "test1195-side-thread-hub-contract"
+  "test1195-side-thread-hub-security"
+  "test1195-side-thread-hub-race"
   "qa-cli-01-hub-start"
   "qa-cli-02-network-create"
   "qa-dash-07-auth-boundary"

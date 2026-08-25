@@ -29,6 +29,9 @@ on:
       - 'tests/test751-codex-copresence-windows/**'
       - 'tests/test1183-sync-pinned-dryrun/**'
       - 'tests/test1193-side-thread-contract/**'
+      - 'tests/test1195-side-thread-hub-contract/**'
+      - 'tests/test1195-side-thread-hub-security/**'
+      - 'tests/test1195-side-thread-hub-race/**'
       # A test directory belongs here exactly when CI executes it — otherwise
       # editing the test cannot re-run the gate that runs it. The four below are
       # reached through scripts/qa.sh L1_TESTS and the e2e workflow; the other
