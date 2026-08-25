@@ -12,6 +12,7 @@ const project = join(root, "project");
 const bin = join(root, "bin");
 const userHome = join(root, "home");
 const rpcLog = join(root, "rpc.log");
+const completeLongTurn = join(root, "complete-long-turn");
 const bun = process.env.ANET_TEST751_BUN;
 if (!bun) throw new Error("ANET_TEST751_BUN is required");
 mkdirSync(project, { recursive: true });
@@ -21,7 +22,10 @@ writeFileSync(join(userHome, ".anet", "config.json"), JSON.stringify({ hub: "htt
 writeFileSync(join(bin, "codex.cmd"), `@echo off\r\nbun "${join(import.meta.dirname, "fake-codex.mjs")}" %*\r\n`);
 writeFileSync(join(bin, "agent-node.cmd"), `@echo off\r\nbun "${join(import.meta.dirname, "fake-agent-node.mjs")}" %*\r\n`);
 // Deliberately leave the PATH shim above as a stale-global witness. The Codex
-// bridge must use this exact package-owned preview.33 entrypoint instead.
+// bridge must use this exact package-owned preview.33 entrypoint instead. The
+// package-owned wrapper imports the repository's REAL built agent-node: the
+// old Windows gate imported fake-agent-node.mjs (an infinite sleep), so it
+// could never prove SSE admission or turn/steer while the TUI was busy.
 const exactNodeRoot = join(process.env.RUNNER_TEMP, "anet-test751-exact-pair", "node_modules", "@sleep2agi", "agent-node");
 const exactNodeDist = join(exactNodeRoot, "dist");
 const exactNodeEntrypoint = join(exactNodeDist, "cli.js");
@@ -32,10 +36,12 @@ writeFileSync(join(exactNodeRoot, "package.json"), JSON.stringify({
   publishConfig: { tag: "preview" },
   bin: { "agent-node": "dist/cli.js" },
 }));
-writeFileSync(exactNodeEntrypoint, `import ${JSON.stringify(pathToFileURL(join(import.meta.dirname, "fake-agent-node.mjs")).href)};\n`);
+writeFileSync(exactNodeEntrypoint, `import ${JSON.stringify(pathToFileURL(join(repo, "agent-node", "dist", "cli.js")).href)};\n`);
 const env = {
   ...process.env, HOME: userHome, USERPROFILE: userHome,
   PATH: `${bin};${process.env.PATH}`, ANET_TEST751_RPC_LOG: rpcLog,
+  ANET_TEST751_CODEX_HOME: "",
+  ANET_TEST751_COMPLETE_LONG_TURN: completeLongTurn,
   ANET_AGENT_NODE_BIN: exactNodeEntrypoint,
 };
 
@@ -83,6 +89,7 @@ if (firstConfig.runtime !== "codex-app-server" || firstConfig.codexCopresence !=
   throw new Error(`picker persisted wrong mode: ${JSON.stringify(firstConfig)}`);
 }
 const codexHome = join(project, ".anet", "nodes", "windows-picker", "codex-home");
+env.ANET_TEST751_CODEX_HOME = codexHome;
 mkdirSync(codexHome, { recursive: true });
 writeFileSync(join(codexHome, "auth.json"), "{}\n");
 
@@ -100,10 +107,91 @@ await startAndStop("first start");
 await startAndStop("restart");
 const calls = readFileSync(rpcLog, "utf8");
 if ((calls.match(/^rpc:thread\/start$/gm) || []).length !== 1) throw new Error(`expected exactly one new thread:\n${calls}`);
-if ((calls.match(/^rpc:thread\/resume:thread_windows_e2e$/gm) || []).length !== 1) throw new Error(`restart did not resume persisted thread:\n${calls}`);
-if ((calls.match(/^rpc:thread\/read:thread_windows_e2e$/gm) || []).length !== 2) throw new Error(`both start and resume must verify exact persisted history:\n${calls}`);
+if ((calls.match(/^rpc:thread\/resume:thread_windows_e2e$/gm) || []).length !== 3) throw new Error(`launcher and real bridge did not resume one persisted thread:\n${calls}`);
+if ((calls.match(/^rpc:thread\/read:thread_windows_e2e$/gm) || []).length !== 4) throw new Error(`launcher verification plus eager bridge recovery did not read exact history:\n${calls}`);
 if ((calls.match(/^tui:thread_windows_e2e$/gm) || []).length !== 2) throw new Error(`TUI did not adopt same thread twice:\n${calls}`);
 console.log("PASS interactive create -> native start -> stop -> restart resumes same Codex thread");
+
+const globalConfig = JSON.parse(readFileSync(join(userHome, ".anet", "config.json"), "utf8"));
+const userToken = globalConfig.token;
+const networkId = globalConfig.network_id;
+if (typeof userToken !== "string" || !userToken.startsWith("utok_")) throw new Error("test user token missing");
+if (typeof networkId !== "string" || !networkId) throw new Error("test network id missing");
+
+async function waitUntil(label, predicate, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error(`timeout waiting for ${label}`);
+}
+
+async function postDashboardTask(priority, suffix) {
+  const clientRequestId = `dreq_${suffix.repeat(32).slice(0, 32)}`;
+  const response = await fetch("http://127.0.0.1:19351/api/task", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${userToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      alias: "windows-picker",
+      from: "t751",
+      network_id: networkId,
+      priority,
+      task: `windows-${priority}-during-long-turn`,
+      meta: { source: "dashboard-chat", client_request_id: clientRequestId },
+    }),
+  });
+  const body = await response.json();
+  if (!response.ok || !body.task_id) throw new Error(`dashboard task failed ${response.status}: ${JSON.stringify(body)}`);
+  return body.task_id;
+}
+
+env.ANET_TEST751_LONG_TURN = "1";
+let driven = false;
+let drivePromise;
+const longTurnOutput = await terminal(["node", "start", "windows-picker", "--no-inherit-codex-home"], (_child, output) => {
+  if (driven || !output.includes("FAKE_CODEX_TUI_LONG_TURN_READY")) return;
+  driven = true;
+  drivePromise = (async () => {
+    const normalTask = await postDashboardTask("normal", "a");
+    const highTask = await postDashboardTask("high", "b");
+    await waitUntil("two live turn/steer RPCs", () => {
+      const wire = existsSync(rpcLog) ? readFileSync(rpcLog, "utf8") : "";
+      return (wire.match(/^rpc:turn\/steer:thread_windows_e2e:turn_windows_human$/gm) || []).length === 2;
+    });
+    writeFileSync(completeLongTurn, "complete\n");
+    await waitUntil("both Dashboard tasks terminal", async () => {
+      for (const taskId of [normalTask, highTask]) {
+        const res = await fetch(`http://127.0.0.1:19351/api/tasks?network_id=${encodeURIComponent(networkId)}&task_id=${encodeURIComponent(taskId)}&skip_stats=1`, {
+          headers: { Authorization: `Bearer ${userToken}` },
+        });
+        if (!res.ok) return false;
+        const payload = await res.json();
+        const rows = Array.isArray(payload) ? payload : payload.tasks;
+        if (!Array.isArray(rows) || !rows.some((row) => row.task_id === taskId && ["completed", "replied"].includes(row.status))) return false;
+      }
+      return true;
+    });
+  })().catch((error) => { writeFileSync(completeLongTurn, "abort\n"); throw error; });
+}, 90_000);
+delete env.ANET_TEST751_LONG_TURN;
+if (drivePromise) await drivePromise;
+if (!driven || !longTurnOutput.includes("FAKE_CODEX_TUI_LONG_TURN_COMPLETED")) {
+  throw new Error(`Windows long-turn steer probe did not complete:\n${longTurnOutput}`);
+}
+const steerCalls = readFileSync(rpcLog, "utf8");
+if ((steerCalls.match(/^rpc:turn\/steer:thread_windows_e2e:turn_windows_human$/gm) || []).length !== 2) {
+  throw new Error(`normal/high messages did not both steer the same active turn:\n${steerCalls}`);
+}
+if (steerCalls.includes("rpc:turn/start:during-long-turn")) throw new Error("Dashboard work opened a second turn");
+const longConfig = JSON.parse(readFileSync(configPath, "utf8"));
+if (longConfig.codexThreadId !== "thread_windows_e2e" || longConfig.codexAppServerUrl !== "ws://127.0.0.1:24703") {
+  throw new Error(`long-turn identity drift: ${JSON.stringify(longConfig)}`);
+}
+const managed = JSON.parse(readFileSync(join(project, ".anet", "nodes", "windows-picker", "windows-copresence.json"), "utf8"));
+if (managed.processes.filter((process) => process.role === "bridge").length !== 1) throw new Error("duplicate Windows bridge");
+command(["node", "stop", "windows-picker"]);
+console.log("PASS Windows real bridge receives normal/high SSE during one human turn and steers the same remote/thread/HOME without duplication");
 // node-pty's Windows ConPTY helper can retain an internal pipe handle after
 // every child has exited. All assertions and both managed teardowns are done.
 process.exit(0);

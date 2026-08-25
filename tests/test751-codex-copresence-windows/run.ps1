@@ -11,6 +11,9 @@ $threadReadWire = (Select-String -Path $fakeCodex -SimpleMatch 'msg.method === "
 bun install --frozen-lockfile 2>&1 | Tee-Object -FilePath $report -Append
 bun test src/copresence-deps.test.ts src/windows-codex-copresence.test.ts src/codex-copresence-thread.test.ts 2>&1 | Tee-Object -FilePath $report -Append
 bun run typecheck 2>&1 | Tee-Object -FilePath $report -Append
+Set-Location (Join-Path $PSScriptRoot "..\..\agent-node")
+bun install --frozen-lockfile 2>&1 | Tee-Object -FilePath $report -Append
+bun run build 2>&1 | Tee-Object -FilePath $report -Append
 Set-Location (Join-Path $PSScriptRoot "..\..\server")
 bun install --frozen-lockfile 2>&1 | Tee-Object -FilePath $report -Append
 $env:PORT = "19351"

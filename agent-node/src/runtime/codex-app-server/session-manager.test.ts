@@ -11,10 +11,24 @@ describe("createCodexSessionManager", () => {
       cli.indexOf("async function processWithCodexAppServer("),
       cli.indexOf("async function processWithGrok("),
     );
-    expect(body).toContain("codexAppServerSessionManager.getOrOpen(async () =>");
+    expect(body).toContain("ensureCodexAppServerSession()");
     expect(body).toContain("codexAppServerThink(session,");
     expect(body).toContain("return codexAppServerReplyOrThrow(outcome);");
     expect(body).not.toContain("return outcome.replyText;");
+  });
+
+  test("shared co-presence attaches eagerly before SSE and the human TUI", () => {
+    const cli = readFileSync(new URL("../../cli.ts", import.meta.url), "utf8");
+    const registerAt = cli.indexOf("await register();");
+    const eagerAt = cli.indexOf('if (RUNTIME === "codex-app-server" && codexAppServerUrl)', registerAt);
+    const inboxAt = cli.indexOf("scheduleWorkInboxDrain();", registerAt);
+    const sseAt = cli.lastIndexOf("connectSSE();");
+    expect(registerAt).toBeGreaterThan(0);
+    expect(eagerAt).toBeGreaterThan(registerAt);
+    expect(inboxAt).toBeGreaterThan(eagerAt);
+    expect(sseAt).toBeGreaterThan(eagerAt);
+    expect(cli.slice(eagerAt, inboxAt)).toContain("ensureCodexAppServerSession()");
+    expect(cli.slice(eagerAt, inboxAt)).toContain("shared bridge ready");
   });
 
   test("concurrent Dashboard handlers share one complete open attempt", async () => {

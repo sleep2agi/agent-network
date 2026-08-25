@@ -833,7 +833,9 @@ async function startWindowsCodexCopresence(
       process.argv[1] ?? "", "node", "start", displayName,
     ], bridgeEnv, bridgeLog));
     writeWindowsCopresenceRecord(nodesDir(), resolved.id, managed);
-    await new Promise((r) => setTimeout(r, 3000));
+    if (!await waitForFileText(bridgeLog, "[codex-app-server] shared bridge ready", 25_000)) {
+      throw new Error(`bridge did not attach to the shared app-server before TUI launch; log=${bridgeLog}`);
+    }
     if (!probeWindowsCreationDate(managed[1].pid)) throw new Error(`bridge exited during startup; log=${bridgeLog}`);
 
     console.log(`[anet] ② bridge pid=${managed[1].pid} running`);
