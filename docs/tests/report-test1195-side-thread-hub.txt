@@ -1,0 +1,42 @@
+SideThread Hub PR2 Docker evidence
+Date: 2026-08-26 Asia/Shanghai
+Tested source commit: 72fe67b983c390e77cb81a461739886b4e85cb61
+Stack base: c0981ecc26b8b570ff29a30da2d926fdc8ec4a09 (PR #1194 rev4)
+
+Layer 1 — contract
+  image: anet-test1195-contract-final
+  result: PASS
+  tests: 7 pass, 0 fail, 30 assertions
+  witnessed-red: native exact-fork mode gate mutation rejected
+  includes schema/golden projection drift check
+
+Layer 2 — auth/SSE security
+  image: anet-test1195-security-final
+  result: PASS
+  tests: 5 pass, 0 fail, 19 assertions
+  witnessed-red: query-string token acceptance mutation rejected
+  covers owner hydration, opaque cross-owner reads, node binding, metadata-only SSE,
+  and no-FIFO unsupported behavior
+
+Layer 3 — races/faults
+  image: anet-test1195-race-final
+  result: PASS
+  tests: 9 pass, 0 fail, 60 assertions
+  witnessed-red: weakened four-tuple runtime event ownership mutation rejected
+  covers terminal-before-ACK, cross-coordinator claims, retry lineage, bring-back
+  uniqueness, response-loss ambiguity/reconciliation, and no-repeat
+  cancel/archive/purge RPCs
+
+Total final Docker evidence: 21 pass, 0 fail, 109 assertions, 3 witnessed-red.
+
+Preflight:
+  check-test-suite-registration.py PASS (no new unregistered suite)
+  check-l1-paths-sync.py PASS
+  lint-no-bare-rm-rf.sh PASS
+  git diff --check PASS
+  server.ts minimal diff: 83 additions, 0 deletions ignoring EOL whitespace
+
+An earlier race image attempt failed before test collection because its
+Dockerfile omitted the vendored golden fixture. Commit 72fe67b9 added that
+explicit COPY; all three layers above were then rebuilt and rerun against the
+same exact source commit. No failed pre-fix run is counted as evidence.
