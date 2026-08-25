@@ -51,10 +51,10 @@ features:
     <div class="download-note">Android is a test-signed package requiring Android 7.0 or newer; iOS ships through TestFlight.</div>
   </div>
   <div class="download-grid">
-    <a class="download-card download-card-primary" href="https://github.com/sleep2agi/agent-network-app/releases/download/mobile-v0.2.32/AgentNetwork-0.2.32-android.apk"><span class="download-platform">Android</span><strong>Download .apk</strong><small>Android 7.0+ · 76.3 MB</small><span class="download-arrow">↓</span></a>
+    <a class="download-card download-card-primary" href="https://github.com/sleep2agi/agent-network-app/releases/download/mobile-v0.2.34/AgentNetwork-0.2.34-android.apk"><span class="download-platform">Android</span><strong>Download .apk</strong><small>Android 7.0+ · 76.4 MB</small><span class="download-arrow">↓</span></a>
     <div class="download-card download-card-pending" aria-disabled="true"><span class="download-platform">iOS</span><strong>TestFlight in review</strong><small>Public testing link coming soon</small></div>
   </div>
-  <p class="release-links"><a href="https://github.com/sleep2agi/agent-network-app/releases/tag/mobile-v0.2.32">Release notes and checksums</a> · <a href="https://github.com/sleep2agi/agent-network-app/releases/tag/mobile-v0.2.32">Advanced: audit .ipa and SHA256SUMS</a></p>
+  <p class="release-links"><a href="https://github.com/sleep2agi/agent-network-app/releases/tag/mobile-v0.2.34">Release notes and checksum</a> · <a href="https://github.com/sleep2agi/agent-network-app/releases/tag/mobile-v0.2.32">Advanced: 0.2.32 audit .ipa and SHA256SUMS</a></p>
   <p class="release-links">The iOS <code>.ipa</code> is App Store distribution-signed, published for auditing only — it <strong>cannot be sideloaded</strong>. Wait for TestFlight.</p>
 </section>
 
