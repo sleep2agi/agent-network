@@ -37,6 +37,16 @@ Complete server unit domain:
   witnessed-red: weakened registration password floor rejected
   confirms the schema/golden fixture is present in the CI image
 
+Aggregate isolation CI image:
+  image: anet-test638-pr1196-exact
+  tested fix commit: c207d3538d4f28d774f165c9eebac46ae732772c
+  result: PASS
+  aggregate: 74 files, 984 pass, 0 fail, 3235 assertions
+  covers normal/reverse concurrent aggregate order, syscall DB isolation,
+  nonzero/timeout/signal/missing-summary/spawn/slug witnessed-red, and the
+  per-file DB isolation mutation
+  root cause fixed: test638 now explicitly copies contracts/side-thread/v1
+
 Preflight:
   check-test-suite-registration.py PASS (no new unregistered suite)
   check-l1-paths-sync.py PASS
