@@ -3,7 +3,7 @@ import { chmodSync, mkdtempSync, statSync } from "node:fs";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { PrivateFileOperationLedger, type SideThreadOperation } from "./operation-ledger";
+import { operationHash, PrivateFileOperationLedger, stableOperationId, type SideThreadOperation } from "./operation-ledger";
 const roots: string[] = []; afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 const op = (state: SideThreadOperation["state"] = "sent"): SideThreadOperation => ({ version: 1, nodeId: "node-1", sideThreadId: "side-1", opId: "op-1", idempotencyKey: "request-0001", method: "fork", targetHash: `sha256:${"a".repeat(64)}`, fingerprint: `sha256:${"b".repeat(64)}`, state, updatedAt: 1 });
 describe("PrivateFileOperationLedger", () => {
@@ -20,5 +20,14 @@ describe("PrivateFileOperationLedger", () => {
     const root = mkdtempSync(join(tmpdir(), "side-ledger-")); roots.push(root); const ledger = new PrivateFileOperationLedger(root);
     for (const bad of ["../escape", "Bearer SECRET", "https://host/x", "/private/path"]) expect(() => ledger.put({ ...op(), nodeId: bad })).toThrow("invalid");
     expect(() => ledger.put({ ...op(), targetHash: "/private/path" })).toThrow("hashes required");
+  });
+  test("operation ids are stable and identity/state cannot be rewritten", () => {
+    expect(stableOperationId("side-1", "start", "request-0001")).toBe(stableOperationId("side-1", "start", "request-0001"));
+    expect(stableOperationId("side-1", "start", "request-0001")).not.toBe(stableOperationId("side-1", "start", "request-0002"));
+    expect(operationHash("secret")).toMatch(/^sha256:[0-9a-f]{64}$/);
+    const root = mkdtempSync(join(tmpdir(), "side-ledger-")); roots.push(root); const ledger = new PrivateFileOperationLedger(root);
+    ledger.put({ ...op(), state: "prepared" }); ledger.put({ ...op(), state: "sent", updatedAt: 2 });
+    expect(() => ledger.put({ ...op(), state: "prepared", updatedAt: 3 })).toThrow("transition");
+    expect(() => ledger.put({ ...op(), state: "ambiguous", fingerprint: operationHash("other"), updatedAt: 3 })).toThrow("immutable");
   });
 });

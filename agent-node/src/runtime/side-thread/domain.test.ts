@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import {
   SideThreadConflictError, SideThreadService, SideThreadUnsupportedError,
+  SideThreadAmbiguousError,
   type SideThreadCapability, type SideThreadRuntimeAdapter, type SideThreadTerminalEvent,
 } from "./domain";
 
@@ -13,10 +14,17 @@ class FakeAdapter extends EventEmitter implements SideThreadRuntimeAdapter {
   };
   forks = 0; starts = 0; cancels: unknown[] = []; archives = 0; deletes = 0;
   terminalDuringStart = false;
+  ambiguousForks = 0; ambiguousStarts = 0; forkSideIds: string[] = []; startAttemptIds: string[] = [];
   capability() { return this.cap; }
-  async fork(input: { sideThreadId: string }) { this.forks++; return { derivedThreadId: `derived-${input.sideThreadId}` }; }
+  async fork(input: { sideThreadId: string }) {
+    this.forks++; this.forkSideIds.push(input.sideThreadId);
+    if (this.ambiguousForks-- > 0) throw new SideThreadAmbiguousError("fork ambiguous");
+    return { derivedThreadId: `derived-${input.sideThreadId}` };
+  }
   async start(input: { sideThreadId: string; attemptId: string; derivedThreadId: string }) {
     this.starts++;
+    this.startAttemptIds.push(input.attemptId);
+    if (this.ambiguousStarts-- > 0) throw new SideThreadAmbiguousError("start ambiguous");
     const turnId = `turn-${input.attemptId}`;
     if (this.terminalDuringStart) this.terminal({
       sideThreadId: input.sideThreadId, attemptId: input.attemptId,
@@ -77,7 +85,7 @@ describe("SideThreadService", () => {
     const side = await service.create(createInput);
     const attempt = await service.startAttempt({ sideThreadId: side.id, requestKey: "attempt-key-0002", prompt: "question" });
     await Promise.all([service.cancel(side.id), service.cancel(side.id)]);
-    expect(adapter.cancels).toEqual([{ derivedThreadId: side.derivedThreadId, turnId: attempt.turnId }]);
+    expect(adapter.cancels).toEqual([expect.objectContaining({ derivedThreadId: side.derivedThreadId, turnId: attempt.turnId })]);
     expect(adapter.cancels).not.toContainEqual(expect.objectContaining({ derivedThreadId: side.sourceThreadId }));
   });
 
@@ -168,5 +176,19 @@ describe("SideThreadService", () => {
     await expect(service.create(createInput)).rejects.toBeInstanceOf(SideThreadUnsupportedError);
     expect(discarded).toBe(1);
     expect(service.get("id-1")).toBeUndefined();
+  });
+
+  test("ambiguous create and start retries reuse stable side/attempt operation identities", async () => {
+    const adapter = new FakeAdapter(); adapter.ambiguousForks = 1;
+    const service = new SideThreadService({ adapter, id: ids() });
+    await expect(service.create(createInput)).rejects.toBeInstanceOf(SideThreadAmbiguousError);
+    const side = await service.create(createInput);
+    expect(adapter.forkSideIds).toEqual([side.id, side.id]);
+    adapter.ambiguousStarts = 1;
+    await expect(service.startAttempt({ sideThreadId: side.id, requestKey: "attempt-key-stable", prompt: "q" }))
+      .rejects.toBeInstanceOf(SideThreadAmbiguousError);
+    const attempt = await service.startAttempt({ sideThreadId: side.id, requestKey: "attempt-key-stable", prompt: "q" });
+    expect(adapter.startAttemptIds).toEqual([attempt.id, attempt.id]);
+    expect(service.get(side.id)?.attempts).toHaveLength(1);
   });
 });

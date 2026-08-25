@@ -3,8 +3,7 @@ set -euo pipefail
 
 cd /app
 echo "source_commit=${TEST1193_SOURCE_COMMIT}"
-bun test agent-node/src/runtime/side-thread/domain.test.ts \
-  agent-node/src/runtime/side-thread/codex-app-server-adapter.test.ts
+bun test agent-node/src/runtime/side-thread/*.test.ts
 
 # Witness red: if the exact pinned-version gate is weakened, the capability
 # matrix test must fail. Work only on the container copy.

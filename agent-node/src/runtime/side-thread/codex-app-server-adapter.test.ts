@@ -1,21 +1,49 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { CodexAppServerSideThreadAdapter } from "./codex-app-server-adapter";
 import { SideThreadConflictError } from "./domain";
+import { PrivateFileOperationLedger } from "./operation-ledger";
+import { PrivateFileForkLeaseStore } from "./fork-lease";
+
+const roots: string[] = [];
+afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 class Client extends EventEmitter {
   calls: Array<{ method: string; params: any }> = [];
   forkN = 0; turnN = 0;
   loseTurnStartResponse = false;
+  loseForkResponse = false;
+  forkResponseCreates = 1;
   holdTurnStart = false;
+  loseMethods = new Set<string>();
+  threads = new Map<string, any>([["main", { id: "main", turns: [{ id: "done", items: [] }] }]]);
   async request<T>(method: string, params: any): Promise<T> {
     this.calls.push({ method, params });
-    if (method === "thread/fork") return { thread: { id: `fork-${++this.forkN}` } } as T;
+    if (method === "thread/list") return { data: [...this.threads.values()], nextCursor: null } as T;
+    if (method === "thread/read") {
+      const thread = this.threads.get(params.threadId);
+      if (!thread) throw Object.assign(new Error("not found"), { code: -32001 });
+      return { thread } as T;
+    }
+    if (method === "thread/fork") {
+      let last: any;
+      for (let n = 0; n < this.forkResponseCreates; n++) {
+        const id = `fork-${++this.forkN}`;
+        last = { id, forkedFromId: params.threadId, turns: [{ id: params.lastTurnId ?? "done", items: [] }] };
+        this.threads.set(id, last);
+      }
+      if (this.loseForkResponse) throw new Error("fork response lost");
+      return { thread: last } as T;
+    }
     if (method === "turn/start") {
       if (this.holdTurnStart) return await new Promise<T>(() => {});
       const turnId = `turn-${++this.turnN}`;
       if (this.loseTurnStartResponse) {
         return await new Promise<T>((_resolve, reject) => queueMicrotask(() => {
+          this.threads.get(params.threadId)?.turns.push({ id: turnId, items: [{ type: "userMessage", clientId: params.clientUserMessageId }] });
           this.emit("item/started", {
             threadId: params.threadId, turnId,
             item: { type: "userMessage", clientId: params.clientUserMessageId },
@@ -23,21 +51,27 @@ class Client extends EventEmitter {
           queueMicrotask(() => reject(new Error("response lost")));
         }));
       }
+      this.threads.get(params.threadId)?.turns.push({ id: turnId, items: [{ type: "userMessage", clientId: params.clientUserMessageId }] });
       queueMicrotask(() => this.emit("item/started", {
           threadId: params.threadId, turnId,
           item: { type: "userMessage", clientId: params.clientUserMessageId },
         }));
       return { turn: { id: `response-${turnId}` } } as T;
     }
+    if (method === "thread/delete") this.threads.delete(params.threadId);
+    if (this.loseMethods.has(method)) throw new Error(`${method} response lost`);
     return {} as T;
   }
 }
 
 const make = (overrides: Partial<ConstructorParameters<typeof CodexAppServerSideThreadAdapter>[0]> = {}) => {
   const client = new Client();
+  const root = mkdtempSync(join(tmpdir(), "side-adapter-")); roots.push(root);
   const adapter = new CodexAppServerSideThreadAdapter({
     client, runtimeVersion: "0.148.0", topology: "owned-stdio",
-    evidenceRevision: "test1190-wire-v2", experimentalApi: true, ...overrides,
+    evidenceRevision: "test1190-wire-v2", experimentalApi: true, nodeId: "node-1",
+    operationLedger: new PrivateFileOperationLedger(join(root, "operations")),
+    forkLeaseStore: new PrivateFileForkLeaseStore(join(root, "fork-leases")), ...overrides,
   });
   return { client, adapter };
 };
@@ -58,7 +92,7 @@ describe("CodexAppServerSideThreadAdapter", () => {
     const { client, adapter } = make();
     await adapter.fork({ sideThreadId: "s1", sourceThreadId: "main", boundary: { kind: "through", turnId: "done-1" } });
     await adapter.fork({ sideThreadId: "s2", sourceThreadId: "main", boundary: { kind: "before", turnId: "active-2" } });
-    const [a, b] = client.calls.map((x) => x.params);
+    const [a, b] = client.calls.filter((x) => x.method === "thread/fork").map((x) => x.params);
     expect(a).toEqual({ threadId: "main", ephemeral: false, lastTurnId: "done-1" });
     expect(b).toEqual({ threadId: "main", ephemeral: false, beforeTurnId: "active-2" });
     expect(JSON.stringify(client.calls)).not.toMatch(/approval|sandbox|cwd|instruction/i);
@@ -157,6 +191,57 @@ describe("CodexAppServerSideThreadAdapter", () => {
     await expect(adapter.delete({ derivedThreadId: fork.derivedThreadId })).rejects.toThrow("active owned turn");
     const pending = adapter.start({ sideThreadId: "a", attemptId: "closing", derivedThreadId: fork.derivedThreadId, prompt: "q" });
     adapter.close();
-    await expect(pending).rejects.toThrow("closed");
+    await expect(pending).rejects.toMatchObject({ code: "SIDE_THREAD_AMBIGUOUS" });
+  });
+
+  test("snapshots thread/list before fork and uniquely reconciles a lost response without another RPC", async () => {
+    const { client, adapter } = make(); client.loseForkResponse = true;
+    const fork = await adapter.fork({ sideThreadId: "lost", sourceThreadId: "main", boundary: { kind: "through", turnId: "done" } });
+    expect(fork.derivedThreadId).toBe("fork-1");
+    expect(client.calls.map((x) => x.method).slice(0, 3)).toEqual(["thread/list", "thread/fork", "thread/list"]);
+    expect(client.calls.filter((x) => x.method === "thread/fork")).toHaveLength(1);
+    const replay = await adapter.fork({ sideThreadId: "lost", sourceThreadId: "main", boundary: { kind: "through", turnId: "done" } });
+    expect(replay).toEqual(fork);
+    expect(client.calls.filter((x) => x.method === "thread/fork")).toHaveLength(1);
+  });
+
+  test("multiple post-snapshot fork candidates stay ambiguous and retries never fork again", async () => {
+    const { client, adapter } = make(); client.loseForkResponse = true; client.forkResponseCreates = 2;
+    const input = { sideThreadId: "multi", sourceThreadId: "main", boundary: { kind: "through", turnId: "done" } as const };
+    await expect(adapter.fork(input)).rejects.toMatchObject({ code: "SIDE_THREAD_AMBIGUOUS" });
+    await expect(adapter.fork(input)).rejects.toMatchObject({ code: "SIDE_THREAD_AMBIGUOUS" });
+    expect(client.calls.filter((x) => x.method === "thread/fork")).toHaveLength(1);
+  });
+
+  test("an ambiguous start reconciles the unique persisted client identity without another turn/start", async () => {
+    const { client, adapter } = make({ identityTimeoutMs: 5 });
+    const fork = await adapter.fork({ sideThreadId: "start-lost", sourceThreadId: "main", boundary: { kind: "through", turnId: "done" } });
+    client.holdTurnStart = true;
+    const input = { sideThreadId: "start-lost", attemptId: "attempt-lost", derivedThreadId: fork.derivedThreadId, prompt: "q" };
+    await expect(adapter.start(input)).rejects.toMatchObject({ code: "SIDE_THREAD_AMBIGUOUS" });
+    client.threads.get(fork.derivedThreadId).turns.push({ id: "turn-recovered", items: [{ type: "userMessage", clientId: "anet-side:start-lost:attempt-lost" }] });
+    await expect(adapter.start(input)).resolves.toEqual({ turnId: "turn-recovered" });
+    expect(client.calls.filter((x) => x.method === "turn/start")).toHaveLength(1);
+  });
+
+  test("accepted and ambiguous start/interrupt/archive/delete operations never repeat their RPC", async () => {
+    const { client, adapter } = make({ identityTimeoutMs: 5 });
+    const fork = await adapter.fork({ sideThreadId: "ops", sourceThreadId: "main", boundary: { kind: "through", turnId: "done" } });
+    const accepted = { sideThreadId: "ops", attemptId: "accepted", derivedThreadId: fork.derivedThreadId, prompt: "q" };
+    const first = await adapter.start(accepted); await adapter.start(accepted);
+    expect(client.calls.filter((x) => x.method === "turn/start")).toHaveLength(1);
+    client.loseMethods.add("turn/interrupt");
+    await expect(adapter.cancel({ derivedThreadId: fork.derivedThreadId, turnId: first.turnId })).rejects.toMatchObject({ code: "SIDE_THREAD_AMBIGUOUS" });
+    await expect(adapter.cancel({ derivedThreadId: fork.derivedThreadId, turnId: first.turnId })).rejects.toMatchObject({ code: "SIDE_THREAD_AMBIGUOUS" });
+    expect(client.calls.filter((x) => x.method === "turn/interrupt")).toHaveLength(1);
+    client.loseMethods.add("thread/archive");
+    await expect(adapter.archive({ derivedThreadId: fork.derivedThreadId })).rejects.toMatchObject({ code: "SIDE_THREAD_AMBIGUOUS" });
+    await expect(adapter.archive({ derivedThreadId: fork.derivedThreadId })).rejects.toMatchObject({ code: "SIDE_THREAD_AMBIGUOUS" });
+    expect(client.calls.filter((x) => x.method === "thread/archive")).toHaveLength(1);
+    client.emit("turn/completed", { threadId: fork.derivedThreadId, turn: { id: first.turnId, status: "completed" } });
+    client.loseMethods.add("thread/delete");
+    await expect(adapter.delete({ derivedThreadId: fork.derivedThreadId })).rejects.toMatchObject({ code: "SIDE_THREAD_AMBIGUOUS" });
+    await expect(adapter.delete({ derivedThreadId: fork.derivedThreadId })).rejects.toMatchObject({ code: "SIDE_THREAD_AMBIGUOUS" });
+    expect(client.calls.filter((x) => x.method === "thread/delete")).toHaveLength(1);
   });
 });

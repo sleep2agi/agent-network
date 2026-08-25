@@ -46,6 +46,14 @@ reachable from production startup.
 Create and attempt request keys are single-flight and payload-bound. Reusing a
 key with different input is a conflict, not a silent replay. A failed operation
 may be retried with the same key; a completed operation remains idempotent.
+Ambiguous create/start retries retain the original side-thread and attempt
+identities, so the stable operation ID addresses the same durable journal row.
+
+Every mutating Codex RPC is journaled to a private `0700` directory with `0600`
+atomic records. The stable operation ID is derived from side-thread, method and
+idempotency key; target and payload fingerprints are SHA-256 values. The
+adapter persists `sent` before writing an RPC. `accepted` and `ambiguous`
+operations are never emitted again on replay.
 
 The execution registry accepts a terminal event only if
 `sideThreadId + attemptId + derivedThreadId + turnId` matches the active
@@ -60,6 +68,12 @@ duplicate cancel/delete RPCs.
 
 - A successful native fork registers a unique derived-thread-to-side owner;
   duplicate runtime identities fail closed.
+- Fork holds a crash-persistent per-source lease. There is no timeout-based
+  lease stealing for an uncertain operation.
+- Before `thread/fork`, the adapter persists a complete paginated `thread/list`
+  snapshot. If the fork response is lost, only one new thread whose
+  `forkedFromId` is the exact source may be adopted. Zero or multiple candidates
+  stay ambiguous and retain the lease; retry never emits another fork RPC.
 - Start uses `clientUserMessageId=anet-side:<side>:<attempt>`.
 - The echoed user item binds the authoritative turn; the `turn/start` response
   turn ID is recorded but not trusted.
@@ -80,22 +94,24 @@ topology/evidence revision, terminal status/rejection reason and timestamp.
 They never contain prompt/result bodies,
 credentials, environment, paths, request payloads or model output. The current
 callback is a non-throwing internal sink boundary: synchronous throws and
-rejected promises cannot orphan or duplicate runtime work. Durable transactional
-storage and authorization are future Hub work.
+rejected promises cannot orphan or duplicate runtime work. Hub authorization
+and transactional resource persistence remain future work.
 
 ## Deliberate omissions
 
 - no App command/parser/UI;
 - no Hub REST/SSE route, database or authorization surface;
 - no node startup integration or production feature flag;
-- no durable restart/recovery ledger;
+- no durable SideThread resource/attempt registry (the runtime operation
+  journal and fork lease do not reconstruct the whole domain registry);
 - no shared WebSocket/TUI topology;
 - no snapshot fallback or non-Codex adapter;
 - no attachment cache or bring-back path.
 
-Durability is a blocker for exposing the API externally: an in-memory registry
-cannot safely recover ownership after process death. PR2 must persist the
-resource/attempt ledger before any Hub or App caller can create SideThreads.
+Resource durability is still a blocker for exposing the API externally: the
+operation journal prevents duplicate runtime RPCs, but the in-memory registry
+cannot reconstruct complete SideThread/attempt state after process death. PR2
+must persist that registry before any Hub or App caller can create SideThreads.
 
 ## Independent review checklist
 
