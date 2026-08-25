@@ -86,6 +86,7 @@ await startAndStop("restart");
 const calls = readFileSync(rpcLog, "utf8");
 if ((calls.match(/^rpc:thread\/start$/gm) || []).length !== 1) throw new Error(`expected exactly one new thread:\n${calls}`);
 if ((calls.match(/^rpc:thread\/resume:thread_windows_e2e$/gm) || []).length !== 1) throw new Error(`restart did not resume persisted thread:\n${calls}`);
+if ((calls.match(/^rpc:thread\/read:thread_windows_e2e$/gm) || []).length !== 2) throw new Error(`both start and resume must verify exact persisted history:\n${calls}`);
 if ((calls.match(/^tui:thread_windows_e2e$/gm) || []).length !== 2) throw new Error(`TUI did not adopt same thread twice:\n${calls}`);
 console.log("PASS interactive create -> native start -> stop -> restart resumes same Codex thread");
 // node-pty's Windows ConPTY helper can retain an internal pipe handle after
