@@ -34,6 +34,8 @@ interface Execution {
   rejectIdentity: (error: Error) => void;
   identityTimer: ReturnType<typeof setTimeout>;
   pendingTerminal?: unknown;
+  readyForTerminal: boolean;
+  identityAmbiguous: boolean;
 }
 
 /** Native exact-boundary adapter proven only by PR0's 0.148.0 owned probe. */
@@ -111,7 +113,10 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
       sideThreadId: input.sideThreadId, attemptId: input.attemptId,
       threadId: input.derivedThreadId, clientUserMessageId,
       text: "", resolveIdentity, rejectIdentity,
+      readyForTerminal: false,
+      identityAmbiguous: false,
       identityTimer: setTimeout(() => {
+        execution.identityAmbiguous = true;
         rejectIdentity(new SideThreadAmbiguousError("Codex accepted turn/start but did not echo identity; reconciliation required"));
       }, this.opts.identityTimeoutMs ?? 10_000),
     };
@@ -140,6 +145,7 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
       // Response identity alone is not authoritative: Codex automatic goal
       // continuation can replace it. Wait for the echoed client id.
       const turnId = await identity;
+      execution.readyForTerminal = true;
       if (execution.pendingTerminal) {
         const pending = execution.pendingTerminal;
         execution.pendingTerminal = undefined;
@@ -221,8 +227,13 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
       this.byTurn.set(turnKey(p.threadId, p.turnId), execution);
       clearTimeout(execution.identityTimer);
       execution.resolveIdentity(p.turnId);
+      if (execution.identityAmbiguous) execution.readyForTerminal = true;
       const early = this.earlyTerminals.get(turnKey(p.threadId, p.turnId));
-      if (early) { this.earlyTerminals.delete(turnKey(p.threadId, p.turnId)); execution.pendingTerminal = early; }
+      if (early) {
+        this.earlyTerminals.delete(turnKey(p.threadId, p.turnId));
+        execution.pendingTerminal = early;
+        if (execution.readyForTerminal) setTimeout(() => this.onCompleted(early), 0);
+      }
       return;
     }
     if (p.item.type === "agentMessage" && typeof p.item.text === "string") {
@@ -250,6 +261,7 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
       return;
     }
     const status = p.turn?.status;
+    if (!execution.readyForTerminal) { execution.pendingTerminal = params; return; }
     const event: SideThreadTerminalEvent = {
       sideThreadId: execution.sideThreadId, attemptId: execution.attemptId,
       threadId: execution.threadId, turnId,
@@ -258,6 +270,7 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
       error: status !== "completed" && status !== "interrupted"
         ? typeof p.turn?.error === "string" ? p.turn.error : p.turn?.error?.message
         : undefined,
+      identityBound: true,
     };
     this.dropExecution(execution);
     for (const listener of this.listeners) listener(event);
