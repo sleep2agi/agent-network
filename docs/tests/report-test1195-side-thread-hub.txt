@@ -1,17 +1,18 @@
 SideThread Hub PR2 Docker evidence
 Date: 2026-08-26 Asia/Shanghai
-Tested source commit: a07effabd9e5b752e9a094681d52af5c6f646284
+Tested source commit: 0744c312f9188278f243d4266ddd8acab8493c7b
 Stack base: c0981ecc26b8b570ff29a30da2d926fdc8ec4a09 (PR #1194 rev4)
 
 Layer 1 — contract
-  image: anet-test1195-contract-final
+  image: anet-test1195-contract-actions
   result: PASS
-  tests: 7 pass, 0 fail, 31 assertions
+  tests: 8 pass, 0 fail, 35 assertions
   witnessed-red: native exact-fork mode gate mutation rejected
-  includes schema/golden projection drift check
+  includes schema/golden projection drift check and caller requestKey coverage
+  for every mutating POST action
 
 Layer 2 — auth/SSE security
-  image: anet-test1195-security-final
+  image: anet-test1195-security-actions
   result: PASS
   tests: 5 pass, 0 fail, 19 assertions
   witnessed-red: query-string token acceptance mutation rejected
@@ -19,7 +20,7 @@ Layer 2 — auth/SSE security
   and no-FIFO unsupported behavior
 
 Layer 3 — races/faults
-  image: anet-test1195-race-final
+  image: anet-test1195-race-actions
   result: PASS
   tests: 9 pass, 0 fail, 60 assertions
   witnessed-red: weakened four-tuple runtime event ownership mutation rejected
@@ -27,7 +28,14 @@ Layer 3 — races/faults
   uniqueness, response-loss ambiguity/reconciliation, and no-repeat
   cancel/archive/purge RPCs
 
-Total final Docker evidence: 21 pass, 0 fail, 110 assertions, 3 witnessed-red.
+Total final Docker evidence: 22 pass, 0 fail, 114 assertions, 3 witnessed-red.
+
+Complete server unit domain:
+  image: anet-test798-pr1196-actions
+  result: PASS
+  discovered/executed files: 74/74, failed files: 0
+  witnessed-red: weakened registration password floor rejected
+  confirms the schema/golden fixture is present in the CI image
 
 Preflight:
   check-test-suite-registration.py PASS (no new unregistered suite)
