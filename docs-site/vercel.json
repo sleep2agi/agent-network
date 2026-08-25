@@ -1,5 +1,11 @@
 {
   "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/desktop/update/latest.json",
+      "destination": "/api/desktop-update-latest"
+    }
+  ],
   "headers": [
     {
       "source": "/desktop/update/latest.json",
