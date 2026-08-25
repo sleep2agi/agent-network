@@ -2,6 +2,9 @@
 
 Date: 2026-08-25
 
+Source commit under test:
+`c4797d427db0085ac513343a45ee7063d685f32f`
+
 ## Scope
 
 PR #1184 corrects the `agent-node/package-lock.json` root versions from
@@ -27,7 +30,7 @@ All open PRs were enumerated without a result limit. No other open PR changes
 Built and ran the existing complete agent-node unit image:
 
 ```text
-image: anet-test1184-rev2
+image: anet-test1184-rev2-c4797d42
 test_files=100
 package-version-consistency: 2/2 passed
 1341 pass
@@ -37,9 +40,11 @@ tests_dir_executed=6 tests_dir_discovered=6 tests_dir_failed=0
 RESULT: PASS
 ```
 
-The image was built from the exact PR tree after merging current `main` into
-the branch. The build used the repository's pinned Bun 1.3.14 and Node 22
-test725 Dockerfile, and ran as the non-root `node` user.
+The image embeds `TEST725_SOURCE_COMMIT=c4797d427db0085ac513343a45ee7063d685f32f`.
+The following report-only commit changes only this file, so the tested package
+metadata and test are byte-identical at the PR head. The build used the
+repository's pinned Bun 1.3.14 and Node 22 test725 Dockerfile, and ran as the
+non-root `node` user.
 
 ## Witnessed red
 
