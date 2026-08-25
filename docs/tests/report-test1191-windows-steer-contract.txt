@@ -1,0 +1,39 @@
+# test1191 — Windows Codex co-presence live steer contract
+
+Status: PASS (Docker contract); native Windows job is the Draft PR gate
+
+Source boundary:
+
+- Base: `aca3a9263ab29b9aa02760f8d0ac95fdbb298836`
+- Implementation commit under test: `16b2d3e2252074b65ba6f7f818d6389d55a70c93`
+- Image base: `oven/bun:1.3.14`
+- Command: `docker build --build-arg SOURCE_COMMIT=16b2d3e...` followed
+  by `docker run --rm --network none`.
+
+Scope:
+
+- shared Codex bridge attaches before the Windows launcher opens the TUI;
+- the existing authenticated Dashboard `turn/steer` and later-SSE admission
+  contracts remain green;
+- Windows launcher refuses to open a TUI before the exact paired bridge emits
+  its ready boundary;
+- witnessed-red mutations remove eager attach and readiness wait separately;
+- native Windows test751 runs the real built agent-node against the fake Codex
+  protocol endpoint and sends normal/high Dashboard tasks during one human
+  turn, with same remote/thread/CODEX_HOME and one bridge.
+
+No package was published or installed globally.
+
+Exact Docker result:
+
+- both CLI production bundles compiled;
+- Windows fake protocol and native harness compiled;
+- 61 passed, 3 Windows-only tests skipped in Linux Docker, 0 failed;
+- lazy-bridge mutation: red;
+- launcher-without-ready-wait mutation: red;
+- final `RESULT: PASS`.
+
+The Windows-only assertions are not claimed by Docker. The existing
+`Windows Codex co-presence native smoke` workflow runs them on
+`windows-latest`; it now builds and launches the real repository agent-node,
+not the old sleeping fake, and is required before this change can leave Draft.
