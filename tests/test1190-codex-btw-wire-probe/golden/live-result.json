@@ -1,25 +1,49 @@
 {
-  "version": "codex-cli 0.148.0",
-  "observations": {
-    "forkBoundary": {
-      "completedLastTurnWhileLaterActive": true,
-      "beforeActiveTurn": true,
-      "activeLastTurnRejected": true,
-      "activeLastTurnErrorCode": -32600
-    },
-    "concurrentAndCancel": {
-      "independentInterruptAccepted": true,
-      "cancelledForkStatus": "interrupted",
-      "siblingForkStatus": "completed",
-      "sourceStatus": "completed",
-      "allThreadIdsDistinct": true
-    },
-    "retention": {
-      "archiveAccepted": true,
-      "archivedStillReadable": true,
-      "deleteAccepted": true,
-      "deletedReadRejected": true,
-      "deletedReadErrorCode": -32600
-    }
+  "evidenceRevision": "test1190-wire-v2",
+  "artifact": {
+    "codexCli": "0.148.0",
+    "packageBoundary": "probe-only; agent-node lock remains 0.133.0",
+    "os": "linux",
+    "arch": "x64",
+    "binarySha256": "134063e133f0b4244fa3b251acf973d4fe4b4aeeacbdc135211bf480f59f1477"
+  },
+  "topology": "owned-stdio",
+  "forkBoundary": {
+    "sourceStatusAtFork": "active",
+    "sourceTurnsBefore": ["seed", "sourceActive"],
+    "throughTurns": ["seed"],
+    "beforeTurns": ["seed"],
+    "throughForkedFromMatches": true,
+    "beforeForkedFromMatches": true,
+    "seedIncluded": true,
+    "activeExcluded": true,
+    "activeInclusiveBoundaryRejected": true,
+    "activeInclusiveBoundaryErrorCode": -32600
+  },
+  "concurrencyCancel": {
+    "sourceStartedBeforeForks": true,
+    "allThreeActiveBeforeCancel": true,
+    "cancelRequestedBeforeTargetTerminal": true,
+    "cancelRequestedBeforeSiblingTerminal": true,
+    "cancelRequestedBeforeSourceTerminal": true,
+    "targetStatus": "interrupted",
+    "siblingStatus": "completed",
+    "sourceStatus": "completed",
+    "sourceReadableAfterCancel": true,
+    "siblingReadableAfterCancel": true
+  },
+  "reverseCompletion": {
+    "creationOrder": ["forkSlow", "forkFast"],
+    "completionOrder": ["forkFast", "forkSlow"],
+    "fastStatus": "completed",
+    "slowStatus": "completed"
+  },
+  "retention": {
+    "archivedReadable": true,
+    "unarchivedReadable": true,
+    "deleteReadRejected": true,
+    "deleteReadErrorCode": -32600,
+    "sourceIsolatedFromDelete": true,
+    "unarchivedSiblingIsolatedFromDelete": true
   }
 }

@@ -1,36 +1,40 @@
 import fs from "node:fs";
+import path from "node:path";
 
-const schema = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-const defs = schema.definitions ?? {};
-const methods = new Set();
-const visit = (value) => {
-  if (!value || typeof value !== "object") return;
-  if (value.const && typeof value.const === "string") methods.add(value.const);
-  if (Array.isArray(value.enum)) {
-    for (const member of value.enum) if (typeof member === "string") methods.add(member);
-  }
-  for (const child of Object.values(value)) visit(child);
-};
-visit(schema);
+const [normalDir, experimentalDir] = process.argv.slice(2);
+const read = (dir, file) => JSON.parse(fs.readFileSync(path.join(dir, file), "utf8"));
+const normalRequest = read(normalDir, "ClientRequest.json");
+const expRequest = read(experimentalDir, "ClientRequest.json");
+const expNotification = read(experimentalDir, "ServerNotification.json");
+const expForkResponse = read(experimentalDir, "v2/ThreadForkResponse.json");
+const expReadResponse = read(experimentalDir, "v2/ThreadReadResponse.json");
+const props = (schema, name) => Object.keys(schema.definitions?.[name]?.properties ?? {}).sort();
+const required = (schema, name) => [...(schema.definitions?.[name]?.required ?? [])].sort();
+const has = (schema, name, property) => props(schema, name).includes(property);
+const rootProps = (schema) => Object.keys(schema.properties ?? {}).sort();
+const rootRequired = (schema) => [...(schema.required ?? [])].sort();
 
-const props = (name) => Object.keys(defs[name]?.properties ?? {}).sort();
-const required = (name) => [...(defs[name]?.required ?? [])].sort();
 const output = {
-  protocolVersion: "codex-cli 0.148.0",
-  methods: {
-    threadFork: methods.has("thread/fork"),
-    threadArchive: methods.has("thread/archive"),
-    threadDelete: methods.has("thread/delete"),
-    turnInterrupt: methods.has("turn/interrupt"),
+  artifact: { codexCli: "0.148.0", schemaMode: "normal+experimental" },
+  forkBoundary: {
+    lastTurnId: { normalSchema: has(normalRequest, "ThreadForkParams", "lastTurnId"), experimentalSchema: has(expRequest, "ThreadForkParams", "lastTurnId"), requiresExperimental: false },
+    beforeTurnId: { normalSchema: has(normalRequest, "ThreadForkParams", "beforeTurnId"), experimentalSchema: has(expRequest, "ThreadForkParams", "beforeTurnId"), requiresExperimental: true },
+    requestRequired: required(expRequest, "ThreadForkParams"),
   },
-  threadFork: {
-    experimentalApiRequiredForExactBoundary: true,
-    properties: props("ThreadForkParams"),
-    required: required("ThreadForkParams"),
-    exactBoundaryFields: ["beforeTurnId", "lastTurnId"].filter((x) => props("ThreadForkParams").includes(x)),
+  initialize: {
+    capabilitiesProperties: props(expRequest, "InitializeCapabilities"),
+    experimentalApiDefault: expRequest.definitions.InitializeCapabilities.properties.experimentalApi.default,
   },
-  threadArchive: { required: required("ThreadArchiveParams") },
-  threadDelete: { required: required("ThreadDeleteParams") },
-  turnInterrupt: { required: required("TurnInterruptParams") },
+  responseShape: {
+    threadFork: { properties: rootProps(expForkResponse), required: rootRequired(expForkResponse) },
+    threadRead: { properties: rootProps(expReadResponse), required: rootRequired(expReadResponse) },
+  },
+  ownershipShape: {
+    thread: { properties: props(expNotification, "Thread"), required: required(expNotification, "Thread") },
+    turn: { properties: props(expNotification, "Turn"), required: required(expNotification, "Turn") },
+    turnStarted: { properties: props(expNotification, "TurnStartedNotification"), required: required(expNotification, "TurnStartedNotification") },
+    turnCompleted: { properties: props(expNotification, "TurnCompletedNotification"), required: required(expNotification, "TurnCompletedNotification") },
+  },
 };
+if (!output.forkBoundary.lastTurnId.normalSchema || output.forkBoundary.beforeTurnId.normalSchema) throw new Error("normal/experimental boundary classification drifted");
 process.stdout.write(JSON.stringify(output, null, 2) + "\n");

@@ -1,143 +1,153 @@
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
 import readline from "node:readline";
 
-const child = spawn("codex", [
-  "app-server", "--stdio",
-  "-c", "approval_policy=never",
-  "-c", "sandbox_mode=danger-full-access",
-], { stdio: ["pipe", "pipe", "pipe"], env: process.env });
+const child = spawn("codex", ["app-server", "--stdio", "-c", "approval_policy=never", "-c", "sandbox_mode=danger-full-access"], { stdio: ["pipe", "pipe", "pipe"], env: process.env });
+let stderrTail = "";
+child.stderr.on("data", (chunk) => { stderrTail = (stderrTail + String(chunk)).slice(-2000); });
 
-let seq = 0;
-const pending = new Map();
-const events = [];
+let rpcId = 0, semanticSeq = 0;
+const pending = new Map(), events = [], trace = [], aliases = new Map();
+const alias = (id) => aliases.get(id) ?? "unknown";
+const mark = (kind, fields = {}) => trace.push({ seq: ++semanticSeq, kind, ...fields });
 const rl = readline.createInterface({ input: child.stdout });
 rl.on("line", (line) => {
-  let msg;
-  try { msg = JSON.parse(line); } catch { return; }
+  let msg; try { msg = JSON.parse(line); } catch { return; }
   if (msg.id != null && !msg.method) {
-    const p = pending.get(msg.id);
-    if (!p) return;
+    const p = pending.get(msg.id); if (!p) return;
     pending.delete(msg.id);
+    mark("rpc_response", { method: p.method, class: msg.error ? "error" : "success", errorCode: msg.error?.code });
     msg.error ? p.reject(Object.assign(new Error(msg.error.message), { rpc: msg.error })) : p.resolve(msg.result);
     return;
   }
-  if (msg.method) events.push(msg);
+  if (msg.method === "turn/started" || msg.method === "turn/completed") {
+    const event = { seq: ++semanticSeq, method: msg.method, params: msg.params, used: false };
+    events.push(event);
+    trace.push({ seq: event.seq, kind: "notification", method: msg.method, threadId: msg.params?.threadId, turnId: msg.params?.turn?.id, status: msg.params?.turn?.status });
+  }
 });
-
-const rpc = (method, params, timeoutMs = 120_000) => new Promise((resolve, reject) => {
-  const id = ++seq;
-  const timer = setTimeout(() => {
-    pending.delete(id);
-    reject(new Error(`${method} timed out`));
-  }, timeoutMs);
-  pending.set(id, {
-    resolve: (v) => { clearTimeout(timer); resolve(v); },
-    reject: (e) => { clearTimeout(timer); reject(e); },
-  });
+const rpc = (method, params, timeoutMs = 180_000) => new Promise((resolve, reject) => {
+  const id = ++rpcId;
+  mark("rpc_request", { method, threadId: params?.threadId, turnId: params?.turnId,
+    boundaryTurnId: params?.lastTurnId ?? params?.beforeTurnId,
+    boundaryKind: params?.lastTurnId ? "through" : params?.beforeTurnId ? "before" : undefined });
+  const timer = setTimeout(() => { pending.delete(id); reject(new Error(`${method} timed out; stderr=${stderrTail}`)); }, timeoutMs);
+  pending.set(id, { method, resolve: (v) => { clearTimeout(timer); resolve(v); }, reject: (e) => { clearTimeout(timer); reject(e); } });
   child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
 });
 const notify = (method, params) => child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method, params }) + "\n");
-const idOfThread = (x) => x?.thread?.id ?? x?.threadId;
-const idOfTurn = (x) => x?.turn?.id ?? x?.turnId;
-const statusOf = (x) => x?.turn?.status ?? x?.status;
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const waitEvent = async (method, predicate, timeoutMs = 120_000) => {
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const waitEvent = async (method, threadId, turnId, timeoutMs = 180_000) => {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const at = events.findIndex((e) => e.method === method && predicate(e.params ?? {}));
-    if (at >= 0) return events.splice(at, 1)[0].params;
-    await sleep(25);
+    const event = events.find((x) => !x.used && x.method === method && x.params?.threadId === threadId && x.params?.turn?.id === turnId);
+    if (event) { event.used = true; return event; }
+    await sleep(20);
   }
-  throw new Error(`notification ${method} timed out`);
+  throw new Error(`${method} timed out for ${alias(threadId)}/${alias(turnId)}`);
 };
-const terminal = async (threadId, turnId) => waitEvent("turn/completed", (p) =>
-  (p.threadId ?? p.thread_id) === threadId && idOfTurn(p) === turnId, 180_000);
-const tryRpc = async (method, params) => {
-  try { return { ok: true, value: await rpc(method, params) }; }
-  catch (e) { return { ok: false, code: e.rpc?.code ?? null, message: String(e.message).slice(0, 240) }; }
+const strictThread = (response, method) => {
+  if (!response?.thread?.id || Object.hasOwn(response, "threadId")) throw new Error(`${method} response shape drift`);
+  return response.thread;
+};
+const strictTurn = (response) => {
+  if (!response?.turn?.id || Object.hasOwn(response, "turnId")) throw new Error("turn/start response shape drift");
+  return response.turn;
+};
+const read = async (threadId) => strictThread(await rpc("thread/read", { threadId, includeTurns: true }), "thread/read");
+const statusType = (thread) => thread?.status?.type;
+const turnIds = (thread) => (thread.turns ?? []).map((turn) => turn.id);
+const tryRpc = async (method, params) => { try { return { ok: true, value: await rpc(method, params) }; } catch (error) { return { ok: false, code: error.rpc?.code ?? null }; } };
+const started = (threadId, turnId) => waitEvent("turn/started", threadId, turnId);
+const terminal = (threadId, turnId) => waitEvent("turn/completed", threadId, turnId);
+const completedStatus = (event) => event.params.turn.status;
+const logicalTurns = (ids) => ids.map(alias);
+const sanitizeTrace = () => trace.map((entry) => {
+  const output = { ...entry };
+  if (entry.threadId) output.thread = alias(entry.threadId);
+  if (entry.turnId) output.turn = alias(entry.turnId);
+  if (entry.boundaryTurnId) output.boundaryTurn = alias(entry.boundaryTurnId);
+  delete output.threadId; delete output.turnId; delete output.boundaryTurnId;
+  return output;
+});
+
+const binary = execFileSync("sh", ["-c", "command -v codex"], { encoding: "utf8" }).trim();
+const binarySha256 = createHash("sha256").update(fs.readFileSync(fs.realpathSync(binary))).digest("hex");
+const result = {
+  evidenceRevision: "test1190-wire-v2",
+  artifact: { codexCli: "0.148.0", packageBoundary: "probe-only; agent-node lock remains 0.133.0", os: os.platform(), arch: os.arch(), binarySha256 },
+  topology: "owned-stdio", forkBoundary: {}, concurrencyCancel: {}, reverseCompletion: {}, retention: {},
 };
 
-const result = { version: "codex-cli 0.148.0", observations: {} };
 try {
-  await rpc("initialize", {
-    clientInfo: { name: "anet-btw-wire-probe", version: "0.1.0" },
-    capabilities: { experimentalApi: true },
-  });
+  await rpc("initialize", { clientInfo: { name: "anet-btw-wire-probe", version: "0.2.0" }, capabilities: { experimentalApi: true } });
   notify("initialized", {});
+  const source = strictThread(await rpc("thread/start", { ephemeral: false }), "thread/start").id; aliases.set(source, "source");
+  const seed = strictTurn(await rpc("turn/start", { threadId: source, input: [{ type: "text", text: "Reply exactly SEED_OK." }] })).id; aliases.set(seed, "seed");
+  await terminal(source, seed);
+  const active = strictTurn(await rpc("turn/start", { threadId: source, input: [{ type: "text", text: "Run `sleep 15`, then reply MAIN_OK." }] })).id; aliases.set(active, "sourceActive");
+  const sourceStarted = await started(source, active);
+  if (process.env.BTW_WITNESS_SOURCE_FIRST === "1") await terminal(source, active);
+  const sourceBefore = await read(source);
+  if (statusType(sourceBefore) !== "active") throw new Error("WITNESS_RED: source was not active at fork boundary");
 
-  const source = idOfThread(await rpc("thread/start", { ephemeral: false }));
-  if (!source) throw new Error("thread/start returned no id");
-
-  const seed = idOfTurn(await rpc("turn/start", {
-    threadId: source,
-    input: [{ type: "text", text: "Reply with exactly SEED_OK and nothing else." }],
-  }));
-  if (!seed) throw new Error("seed turn/start returned no id");
-  const seedDone = await terminal(source, seed);
-  if (statusOf(seedDone) !== "completed") throw new Error(`seed status=${statusOf(seedDone)}`);
-
-  const active = idOfTurn(await rpc("turn/start", {
-    threadId: source,
-    input: [{ type: "text", text: "Run the shell command `sleep 12`, then reply exactly MAIN_OK." }],
-  }));
-  if (!active) throw new Error("active turn/start returned no id");
-  await waitEvent("turn/started", (p) => (p.threadId ?? p.thread_id) === source && idOfTurn(p) === active);
-
-  // Exact completed boundary while the source has a later active turn.
-  const forkAResp = await rpc("thread/fork", { threadId: source, lastTurnId: seed, ephemeral: false });
-  const forkA = idOfThread(forkAResp);
-  const forkBResp = await rpc("thread/fork", { threadId: source, beforeTurnId: active, ephemeral: false });
-  const forkB = idOfThread(forkBResp);
-  if (!forkA || !forkB || forkA === forkB || forkA === source || forkB === source) {
-    throw new Error("fork ids are not independent");
-  }
-  const activeAsBoundary = await tryRpc("thread/fork", { threadId: source, lastTurnId: active, ephemeral: true });
-  result.observations.forkBoundary = {
-    completedLastTurnWhileLaterActive: true,
-    beforeActiveTurn: true,
-    activeLastTurnRejected: !activeAsBoundary.ok,
-    activeLastTurnErrorCode: activeAsBoundary.code,
+  const forkCancel = strictThread(await rpc("thread/fork", { threadId: source, lastTurnId: seed, ephemeral: false }), "thread/fork").id; aliases.set(forkCancel, "forkCancel");
+  const forkCancelRead = await read(forkCancel);
+  if (statusType(await read(source)) !== "active") throw new Error("source stopped before beforeTurnId fork");
+  const forkSibling = strictThread(await rpc("thread/fork", { threadId: source, beforeTurnId: active, ephemeral: false }), "thread/fork").id; aliases.set(forkSibling, "forkSibling");
+  const forkSiblingRead = await read(forkSibling);
+  const activeBoundary = await tryRpc("thread/fork", { threadId: source, lastTurnId: active, ephemeral: true });
+  result.forkBoundary = {
+    sourceStatusAtFork: statusType(sourceBefore), sourceTurnsBefore: logicalTurns(turnIds(sourceBefore)),
+    throughTurns: logicalTurns(turnIds(forkCancelRead)), beforeTurns: logicalTurns(turnIds(forkSiblingRead)),
+    throughForkedFromMatches: forkCancelRead.forkedFromId === source, beforeForkedFromMatches: forkSiblingRead.forkedFromId === source,
+    seedIncluded: turnIds(forkCancelRead).includes(seed) && turnIds(forkSiblingRead).includes(seed),
+    activeExcluded: !turnIds(forkCancelRead).includes(active) && !turnIds(forkSiblingRead).includes(active),
+    activeInclusiveBoundaryRejected: !activeBoundary.ok, activeInclusiveBoundaryErrorCode: activeBoundary.code,
   };
 
-  // Two derived threads execute concurrently. B is short; A is cancelled.
-  const turnA = idOfTurn(await rpc("turn/start", {
-    threadId: forkA,
-    input: [{ type: "text", text: "Run `sleep 9`, then reply exactly FORK_A_SHOULD_NOT_FINISH." }],
-  }));
-  const turnB = idOfTurn(await rpc("turn/start", {
-    threadId: forkB,
-    input: [{ type: "text", text: "Reply exactly FORK_B_OK and nothing else." }],
-  }));
-  await Promise.all([
-    waitEvent("turn/started", (p) => (p.threadId ?? p.thread_id) === forkA && idOfTurn(p) === turnA),
-    waitEvent("turn/started", (p) => (p.threadId ?? p.thread_id) === forkB && idOfTurn(p) === turnB),
-  ]);
-  const interrupted = await tryRpc("turn/interrupt", { threadId: forkA, turnId: turnA });
-  const [aDone, bDone, mainDone] = await Promise.all([
-    terminal(forkA, turnA), terminal(forkB, turnB), terminal(source, active),
-  ]);
-  result.observations.concurrentAndCancel = {
-    independentInterruptAccepted: interrupted.ok,
-    cancelledForkStatus: statusOf(aDone),
-    siblingForkStatus: statusOf(bDone),
-    sourceStatus: statusOf(mainDone),
-    allThreadIdsDistinct: new Set([source, forkA, forkB]).size === 3,
+  const cancelTurn = strictTurn(await rpc("turn/start", { threadId: forkCancel, input: [{ type: "text", text: "Run `sleep 12`, then reply CANCEL_BAD." }] })).id; aliases.set(cancelTurn, "cancelTurn");
+  const siblingTurn = strictTurn(await rpc("turn/start", { threadId: forkSibling, input: [{ type: "text", text: "Run `sleep 8`, then reply SIBLING_OK." }] })).id; aliases.set(siblingTurn, "siblingTurn");
+  const [cancelStarted, siblingStarted] = await Promise.all([started(forkCancel, cancelTurn), started(forkSibling, siblingTurn)]);
+  const activeReads = await Promise.all([read(source), read(forkCancel), read(forkSibling)]);
+  if (activeReads.some((thread) => statusType(thread) !== "active")) throw new Error("three-way active precondition failed");
+  mark("cancel_requested", { threadId: forkCancel, turnId: cancelTurn }); const cancelRequestedSeq = semanticSeq;
+  await rpc("turn/interrupt", { threadId: forkCancel, turnId: cancelTurn });
+  const [cancelDone, siblingDone, sourceDone] = await Promise.all([terminal(forkCancel, cancelTurn), terminal(forkSibling, siblingTurn), terminal(source, active)]);
+  const sourceAfterCancel = await read(source), siblingAfterCancel = await read(forkSibling);
+  result.concurrencyCancel = {
+    sourceStartedBeforeForks: sourceStarted.seq < cancelStarted.seq && sourceStarted.seq < siblingStarted.seq,
+    allThreeActiveBeforeCancel: true,
+    cancelRequestedBeforeTargetTerminal: cancelRequestedSeq < cancelDone.seq,
+    cancelRequestedBeforeSiblingTerminal: cancelRequestedSeq < siblingDone.seq,
+    cancelRequestedBeforeSourceTerminal: cancelRequestedSeq < sourceDone.seq,
+    targetStatus: completedStatus(cancelDone), siblingStatus: completedStatus(siblingDone), sourceStatus: completedStatus(sourceDone),
+    sourceReadableAfterCancel: sourceAfterCancel.id === source, siblingReadableAfterCancel: siblingAfterCancel.id === forkSibling,
   };
 
-  const archived = await tryRpc("thread/archive", { threadId: forkA });
-  const readArchived = await tryRpc("thread/read", { threadId: forkA, includeTurns: true });
-  const deleted = await tryRpc("thread/delete", { threadId: forkB });
-  const readDeleted = await tryRpc("thread/read", { threadId: forkB, includeTurns: true });
-  result.observations.retention = {
-    archiveAccepted: archived.ok,
-    archivedStillReadable: readArchived.ok,
-    deleteAccepted: deleted.ok,
-    deletedReadRejected: !readDeleted.ok,
-    deletedReadErrorCode: readDeleted.code,
+  const slowThread = strictThread(await rpc("thread/fork", { threadId: source, lastTurnId: seed, ephemeral: false }), "thread/fork").id;
+  const fastThread = strictThread(await rpc("thread/fork", { threadId: source, lastTurnId: seed, ephemeral: false }), "thread/fork").id;
+  aliases.set(slowThread, "forkSlow"); aliases.set(fastThread, "forkFast");
+  const slowTurn = strictTurn(await rpc("turn/start", { threadId: slowThread, input: [{ type: "text", text: "Run `sleep 6`, then reply SLOW_OK." }] })).id;
+  const fastTurn = strictTurn(await rpc("turn/start", { threadId: fastThread, input: [{ type: "text", text: "Reply FAST_OK." }] })).id;
+  aliases.set(slowTurn, "slowTurn"); aliases.set(fastTurn, "fastTurn");
+  const [fastDone, slowDone] = await Promise.all([terminal(fastThread, fastTurn), terminal(slowThread, slowTurn)]);
+  result.reverseCompletion = { creationOrder: ["forkSlow", "forkFast"], completionOrder: fastDone.seq < slowDone.seq ? ["forkFast", "forkSlow"] : ["forkSlow", "forkFast"], fastStatus: completedStatus(fastDone), slowStatus: completedStatus(slowDone) };
+
+  await rpc("thread/archive", { threadId: forkCancel }); const archivedRead = await read(forkCancel);
+  await rpc("thread/unarchive", { threadId: forkCancel }); const unarchivedRead = await read(forkCancel);
+  await rpc("thread/delete", { threadId: forkSibling }); const deletedRead = await tryRpc("thread/read", { threadId: forkSibling, includeTurns: true });
+  const sourceAfterDelete = await read(source), unarchivedAfterDelete = await read(forkCancel);
+  result.retention = {
+    archivedReadable: archivedRead.id === forkCancel, unarchivedReadable: unarchivedRead.id === forkCancel,
+    deleteReadRejected: !deletedRead.ok, deleteReadErrorCode: deletedRead.code,
+    sourceIsolatedFromDelete: sourceAfterDelete.id === source, unarchivedSiblingIsolatedFromDelete: unarchivedAfterDelete.id === forkCancel,
   };
+  fs.writeFileSync(process.env.BTW_TRACE_PATH, JSON.stringify({ evidenceRevision: result.evidenceRevision, topology: result.topology, trace: sanitizeTrace() }, null, 2) + "\n", { mode: 0o600 });
 } finally {
   try { await rpc("shutdown", {}, 5_000); } catch {}
   child.kill("SIGTERM");
 }
-
 process.stdout.write(JSON.stringify(result, null, 2) + "\n");

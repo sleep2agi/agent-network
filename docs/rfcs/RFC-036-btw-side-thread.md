@@ -4,7 +4,7 @@
 |---|---|
 | Status | **Draft — probe evidence only; no product/API implementation authorized** |
 | Tracking | `sleep2agi/agent-network-app#175` |
-| Protocol baseline | `codex-cli 0.148.0`, exact npm pin |
+| Protocol baseline | probe-only `codex-cli 0.148.0`, exact npm pin; repository `agent-node` remains on `@openai/codex-sdk 0.133.0` |
 | Evidence | `tests/test1190-codex-btw-wire-probe`, `docs/tests/report-test1190-codex-btw-wire-probe.md` |
 
 ## 1. Decision
@@ -27,21 +27,25 @@ The Docker live probe uses the real vendor binary and an isolated authenticated
 
 | Question | Observed result |
 |---|---|
-| Exact fork through a completed turn while a later source turn runs | `thread/fork {threadId,lastTurnId}` succeeds |
-| Fork immediately before the active turn | `thread/fork {threadId,beforeTurnId}` succeeds |
+| Exact fork through a completed turn while a later source turn runs | `thread/fork {threadId,lastTurnId}` yields exactly the source turns through that turn |
+| Fork immediately before the active turn | `thread/fork {threadId,beforeTurnId}` excludes that active turn and yields the same exact prefix |
 | Use the active turn as inclusive boundary | rejected with JSON-RPC `-32600` |
-| Source + two forked threads active together | supported by the app-server |
+| Source + two forked threads active together | all three are observed `active` before cancellation; monotonic events prove cancellation precedes all three terminals |
 | Interrupt one fork with exact `(threadId,turnId)` | target becomes `interrupted`; sibling and source complete |
-| Archive | succeeds; archived thread remains readable |
-| Delete | succeeds; subsequent `thread/read` is rejected (`-32600`) |
+| Two successful forks finish out of creation order | supported; the second-created fast fork completes before the first-created slow fork |
+| Archive/unarchive | both succeed and the restored thread remains readable |
+| Delete isolation | deleted sibling becomes unreadable while source and another derived thread remain readable |
 
-`beforeTurnId` and the tested exact-boundary surface require the client to
-declare `initialize.capabilities.experimentalApi=true`. Without that opt-in,
-the server rejects the request even though the generated experimental schema
-contains the field. Therefore a version comparison or schema grep alone is
-not a capability check.
+`lastTurnId` is present in both the normal and experimental generated schemas
+and does not require experimental API negotiation. `beforeTurnId` is present
+only in the experimental schema and requires
+`initialize.capabilities.experimentalApi=true`. The gate records these as
+separate capabilities; it must not hard-code one conclusion for both fork
+forms.
 
 These findings apply only to the exact Linux npm artifact pinned in the suite.
+That 0.148.0 allowlist is evidence for this probe, not an upgrade or unified
+pin for the repository's 0.133.0 Codex SDK dependency.
 They do not prove behavior for 0.147, future versions, shared app-server
 topology, Codex SDK, or another runtime.
 
@@ -56,6 +60,8 @@ type SideChat = {
   derivedThreadId: string;
   runtime: "codex-app-server";
   runtimeVersion: "0.148.0";
+  topology: "owned-stdio";
+  evidenceRevision: "test1190-wire-v2";
   capabilityMode: "native-fork";
   state: "creating" | "running" | "completed" | "failed" |
          "cancelled" | "archived" | "purged";
@@ -96,14 +102,15 @@ fails closed.
 The future adapter must run a startup capability gate containing all of:
 
 1. exact runtime name and version allowlist;
-2. successful initialization with `experimentalApi` explicitly negotiated;
+2. exact per-field negotiation (`lastTurnId` normal; `beforeTurnId`
+   experimental), with unsupported combinations rejected;
 3. method/field schema match against the reviewed golden;
 4. topology match (`owned` versus `shared` is a separate evidence cell);
 5. a runtime health probe that does not mutate the main thread.
 
 Any unknown value returns structured `unsupported`; it does not enqueue.
-Removing the experimental requirement or widening the version range needs a
-new live capture and independent review.
+Changing field negotiation or widening the version range needs a new live
+capture and independent review.
 
 ## 6. PR sequence after PR0
 
@@ -137,9 +144,15 @@ The reviewer must inspect raw/sanitized wire evidence and attempt fault
 injection, not only the happy-path assertions.
 
 - [ ] Verify npm version is exact and golden changes cannot pass under `latest`.
-- [ ] Verify `experimentalApi` is negotiated and missing capability fails closed.
+- [ ] Verify normal and experimental schemas independently: `lastTurnId` is
+      normal while `beforeTurnId` is experimental and fails closed without it.
 - [ ] Verify boundary IDs come from authoritative source thread state.
 - [ ] Race source completion against both fork variants; reject ambiguous point.
+- [ ] Inspect authoritative `thread/read` turn sets and `forkedFromId`; RPC
+      success alone is not boundary evidence.
+- [ ] Require a monotonic event trace proving all three threads active together,
+      cancellation before every terminal, and two successful forks finishing
+      in reverse creation order.
 - [ ] Race cancel against completion and retry; old terminal cannot settle new attempt.
 - [ ] Confirm all notifications are filtered by side/attempt/thread/turn tuple.
 - [ ] Kill transport during fork/start/interrupt and inspect recovery ownership.
