@@ -1,6 +1,6 @@
 Test 1176 — Codex TUI thread alignment and runtime truth
 
-Source commit under test: b8d5b2d8568165898ef6715c47f91bdbd0c8999c
+Source commit under test: 3b13e8ebc0b1694f91717a3b3f3edb2a9eff78b4
 
 Scope
 - Hub preserves agent-node:codex-app-server and agent-node:grok-build-cli instead of collapsing them into family fallbacks.
