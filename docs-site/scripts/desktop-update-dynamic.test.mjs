@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { compareDesktopVersions, resolveDesktopUpdate, selectDesktopRelease } from '../api/desktop-update-latest.mjs';
 
 const release = (tag, { draft = false, asset = true } = {}) => ({
@@ -68,4 +69,9 @@ const mismatchFetch = async (url) => {
 };
 assert.equal((await resolveDesktopUpdate(mismatchFetch)).source, 'fallback');
 
-console.log('desktop updater dynamic route: 10 checks passed');
+const handlerSource = fs.readFileSync(new URL('../api/desktop-update-latest.mjs', import.meta.url), 'utf8');
+const vercelConfig = JSON.parse(fs.readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
+assert.match(handlerSource, /setHeader\('Cache-Control', 'no-store, max-age=0'\)/);
+assert.equal(vercelConfig.headers[0].headers[0].value, 'no-store, max-age=0');
+
+console.log('desktop updater dynamic route: 12 checks passed');
