@@ -1,0 +1,32 @@
+Test 1179 — CommHub inbox reconciliation fallback
+
+Objective
+- Preserve SSE as the low-latency path while periodically pulling the durable
+  CommHub inbox when an SSE doorbell is lost or arrives during a long turn.
+- Reuse the existing single-flight dirty-rerun lanes; do not create a second
+  inbox consumer or duplicate task execution.
+
+Contract
+- Default reconciliation interval: 15 seconds.
+- COMMHUB_INBOX_RECONCILE_MS may raise/change it, but invalid, fractional, or
+  sub-second values fail back to the bounded default.
+- Each tick schedules both work tasks and the informational copresence lane.
+- Existing inbox row IDs, inflight claims, ACKs and detached Codex dispatcher
+  remain the deduplication and completion authority.
+
+Verification
+- Focused Bun suites: inbox reconciliation + real inbox drain/dispatcher.
+- Production bundle: clean.
+- Docker suite: tests/test1179-commhub-inbox-reconcile/Dockerfile.
+- Docker image: anet-test1179:dev; 16 pass, 0 fail, 39 expectations.
+
+Witnessed red
+- Removing the informational-lane schedule from the periodic tick fails
+  `the node periodically schedules both durable inbox lanes` (2 pass/1 fail).
+
+Boundary
+- Polling cannot preempt a model turn by itself. Authenticated Codex
+  app-server turn/steer remains the real-time insertion path; polling closes
+  missed-doorbell and reconnect gaps.
+- Outbound task status remains queryable through CommHub get_task/list_tasks;
+  this change concerns reliable inbound discovery only.
