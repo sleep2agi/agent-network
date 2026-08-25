@@ -20,12 +20,14 @@ on:
       - 'agent-node/**'
       - 'tests/qa-*/**'
       - 'scripts/qa.sh'
+      - 'scripts/sync-pinned-versions.sh'
       - 'docs/qa/**'
       - '.github/workflows/qa.yml'
       - 'tests/test725-agent-node-unit-ci/**'
       - 'tests/test745-agent-network-unit-ci/**'
       - 'tests/test746-setup-bun-pin/**'
       - 'tests/test751-codex-copresence-windows/**'
+      - 'tests/test1183-sync-pinned-dryrun/**'
       # A test directory belongs here exactly when CI executes it — otherwise
       # editing the test cannot re-run the gate that runs it. The four below are
       # reached through scripts/qa.sh L1_TESTS and the e2e workflow; the other
@@ -313,6 +315,19 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  release-sync-dry-run:
+    name: release version sync dry-run (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build + run test1183-sync-pinned-dryrun
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-test1183-sync-pinned-dryrun \
+            -f tests/test1183-sync-pinned-dryrun/Dockerfile .
+          docker run --rm --network none anet-test1183-sync-pinned-dryrun
+
   doc-claims:
     name: doc claim freshness (Docker)
     runs-on: ubuntu-latest
