@@ -199,6 +199,154 @@
         "updatedAt": { "type": "number" }
       }
     },
+    "createRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestKey",
+        "networkId",
+        "nodeId",
+        "sourceThreadId",
+        "boundary",
+        "question"
+      ],
+      "properties": {
+        "requestKey": { "type": "string" },
+        "networkId": { "type": "string" },
+        "nodeId": { "type": "string" },
+        "sourceThreadId": { "type": "string" },
+        "boundary": { "$ref": "#/$defs/boundary" },
+        "question": { "type": "string" },
+        "attachments": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/attachment" }
+        }
+      }
+    },
+    "retryRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requestKey", "question"],
+      "properties": {
+        "requestKey": { "type": "string" },
+        "question": { "type": "string" },
+        "attachments": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/attachment" }
+        }
+      }
+    },
+    "bringBackRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requestKey", "destinationThreadId"],
+      "properties": {
+        "requestKey": { "type": "string" },
+        "destinationThreadId": { "type": "string" },
+        "attemptId": { "type": "string" }
+      }
+    },
+    "capabilityResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "capability"],
+      "properties": {
+        "ok": { "const": true },
+        "capability": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "supported",
+            "mode",
+            "runtime",
+            "runtimeVersion",
+            "topology",
+            "evidenceRevision",
+            "exactBoundary",
+            "reason",
+            "context"
+          ],
+          "properties": {
+            "enabled": { "const": true },
+            "supported": { "type": "boolean" },
+            "mode": { "type": ["string", "null"] },
+            "runtime": { "type": ["string", "null"] },
+            "runtimeVersion": { "type": ["string", "null"] },
+            "topology": { "type": ["string", "null"] },
+            "evidenceRevision": { "type": ["string", "null"] },
+            "exactBoundary": { "type": ["object", "null"] },
+            "reason": { "type": ["string", "null"] },
+            "context": { "type": ["object", "null"] }
+          }
+        }
+      }
+    },
+    "sideThreadResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "sideThread"],
+      "properties": {
+        "ok": { "const": true },
+        "sideThread": { "$ref": "#/$defs/sideThread" }
+      }
+    },
+    "sideThreadsResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "sideThreads", "count"],
+      "properties": {
+        "ok": { "const": true },
+        "sideThreads": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/sideThread" }
+        },
+        "count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "bringBackResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "bringBack"],
+      "properties": {
+        "ok": { "const": true },
+        "bringBack": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["bringBackId", "destinationTurnId"],
+          "properties": {
+            "bringBackId": { "type": "string" },
+            "destinationTurnId": { "type": "string" }
+          }
+        }
+      }
+    },
+    "sseEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "eventId",
+        "sideThreadId",
+        "attemptId",
+        "threadId",
+        "turnId",
+        "type",
+        "state",
+        "reason",
+        "createdAt"
+      ],
+      "properties": {
+        "eventId": { "type": "integer" },
+        "sideThreadId": { "type": "string" },
+        "attemptId": { "type": ["string", "null"] },
+        "threadId": { "type": ["string", "null"] },
+        "turnId": { "type": ["string", "null"] },
+        "type": { "type": "string" },
+        "state": { "type": ["string", "null"] },
+        "reason": { "type": ["string", "null"] },
+        "createdAt": { "type": "number" }
+      }
+    },
     "error": {
       "type": "object",
       "additionalProperties": false,
