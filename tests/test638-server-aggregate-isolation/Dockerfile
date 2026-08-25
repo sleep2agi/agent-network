@@ -7,6 +7,7 @@ RUN apt-get update \
 WORKDIR /work
 
 COPY server/ server/
+COPY contracts/side-thread/v1/ contracts/side-thread/v1/
 COPY agent-node/src/ agent-node/src/
 COPY tests/test601-hub-scheduled-tasks/ tests/test601-hub-scheduled-tasks/
 RUN cd server && bun install

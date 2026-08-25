@@ -1,0 +1,151 @@
+{
+  "contractVersion": 1,
+  "nullablePolicy": "Optional projection fields are present with JSON null; optional error correlation fields are absent.",
+  "sideThreadActions": ["create", "get", "cancel", "retry", "archive", "purge"],
+  "requests": {
+    "capabilityQuery": {
+      "alias": "node-a",
+      "networkId": "net_a",
+      "sourceThreadId": "source_thread",
+      "boundaryKind": "through",
+      "boundaryTurnId": "source_turn"
+    },
+    "create": {
+      "requestKey": "create-request-0001",
+      "networkId": "net_a",
+      "nodeId": "node_a",
+      "sourceThreadId": "source_thread",
+      "boundary": { "kind": "through", "turnId": "source_turn" },
+      "question": "Original question",
+      "attachments": [{ "fileId": "file_ref_0001" }]
+    },
+    "retry": {
+      "requestKey": "retry-request-0001",
+      "question": "Try again",
+      "attachments": [{ "fileId": "file_ref_0001" }]
+    },
+    "cancel": { "requestKey": "cancel-request-0001" },
+    "archive": { "requestKey": "archive-request-0001" },
+    "purge": { "requestKey": "purge-request-0001" },
+    "bringBack": {
+      "requestKey": "bring-request-0001",
+      "attemptId": "sat_1",
+      "destinationThreadId": "source_thread"
+    }
+  },
+  "capabilityResponse": {
+    "ok": true,
+    "capability": {
+      "enabled": true,
+      "supported": true,
+      "mode": "native-exact-fork",
+      "runtime": "codex",
+      "runtimeVersion": "0.148.0",
+      "topology": "owned-stdio",
+      "evidenceRevision": "reviewed",
+      "exactBoundary": { "through": true, "before": true },
+      "reason": null,
+      "context": {
+        "networkId": "net_a",
+        "nodeId": "node_a",
+        "sourceThreadId": "source_thread",
+        "boundary": { "kind": "through", "turnId": "source_turn" }
+      }
+    }
+  },
+  "sideThreadEnvelope": {
+    "ok": true,
+    "sideThread": {
+      "sideThreadId": "sth_1",
+      "requestKey": "create-request-0001",
+      "networkId": "net_a",
+      "nodeId": "node_a",
+      "sourceThreadId": "source_thread",
+      "question": "Original question",
+      "title": "Original question",
+      "boundary": { "kind": "through", "turnId": "source_turn" },
+      "threadId": "derived_thread",
+      "state": "running",
+      "activeAttemptId": "sat_1",
+      "capability": {
+        "runtime": "codex",
+        "runtimeVersion": "0.148.0",
+        "topology": "owned-stdio",
+        "evidenceRevision": "reviewed"
+      },
+      "attachments": [{ "fileId": "file_ref_0001" }],
+      "attempts": [
+        {
+          "attemptId": "sat_1",
+          "requestKey": "create-request-0001",
+          "parentAttemptId": null,
+          "threadId": "derived_thread",
+          "turnId": "turn_1",
+          "state": "running",
+          "result": null,
+          "error": null,
+          "attachments": [{ "fileId": "file_ref_0001" }],
+          "broughtBack": false,
+          "createdAt": 1700000000000,
+          "updatedAt": 1700000000001
+        }
+      ],
+      "bringBacks": [],
+      "operations": [
+        {
+          "operationId": "sop_fork",
+          "attemptId": "sat_1",
+          "kind": "fork",
+          "requestKey": "create-request-0001",
+          "state": "completed",
+          "threadId": "derived_thread",
+          "turnId": null,
+          "errorCode": null,
+          "createdAt": 1700000000000,
+          "updatedAt": 1700000000001
+        },
+        {
+          "operationId": "sop_start",
+          "attemptId": "sat_1",
+          "kind": "start",
+          "requestKey": "create-request-0001",
+          "state": "completed",
+          "threadId": "derived_thread",
+          "turnId": "turn_1",
+          "errorCode": null,
+          "createdAt": 1700000000001,
+          "updatedAt": 1700000000002
+        }
+      ],
+      "createdAt": 1700000000000,
+      "updatedAt": 1700000000002
+    }
+  },
+  "listResponse": { "ok": true, "sideThreads": [], "count": 0 },
+  "bringBackResponse": {
+    "ok": true,
+    "bringBack": {
+      "bringBackId": "sbb_1",
+      "destinationTurnId": "destination_turn"
+    }
+  },
+  "ambiguousError": {
+    "ok": false,
+    "error": "SIDE_THREAD_AMBIGUOUS",
+    "message": "runtime acceptance is ambiguous; reconcile this stable operation before retrying",
+    "operationId": "sop_start",
+    "sideThreadId": "sth_1",
+    "attemptId": "sat_1"
+  },
+  "sseEvent": {
+    "eventId": 1,
+    "sideThreadId": "sth_1",
+    "attemptId": "sat_1",
+    "threadId": "derived_thread",
+    "turnId": "turn_1",
+    "type": "attempt.running",
+    "state": "running",
+    "reason": null,
+    "createdAt": 1700000000002
+  }
+}
