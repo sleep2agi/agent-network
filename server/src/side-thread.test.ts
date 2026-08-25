@@ -19,6 +19,12 @@ const contractGolden = JSON.parse(
     "utf8",
   ),
 );
+const contractSchema = JSON.parse(
+  readFileSync(
+    new URL("../../contracts/side-thread/v1/schema.json", import.meta.url),
+    "utf8",
+  ),
+);
 
 function jsonShape(value: unknown): unknown {
   if (value === null) return null;
@@ -710,6 +716,26 @@ describe("SideThread Hub contract", () => {
 
 describe("SideThread HTTP contract", () => {
   test("authoritative vendorable golden fixtures cannot drift from HTTP projection", async () => {
+    expect(Object.keys(contractSchema.$defs).sort()).toEqual(
+      [
+        "attachment",
+        "attempt",
+        "boundary",
+        "bringBack",
+        "bringBackRequest",
+        "bringBackResponse",
+        "capabilityResponse",
+        "createRequest",
+        "error",
+        "operation",
+        "recordCapability",
+        "retryRequest",
+        "sideThread",
+        "sideThreadResponse",
+        "sideThreadsResponse",
+        "sseEvent",
+      ].sort(),
+    );
     const f = fixture();
     const capabilityReq = new Request(
       "http://hub/api/side-threads/capability?alias=node-a&networkId=net_a&sourceThreadId=source_thread&boundaryKind=through&boundaryTurnId=source_turn",
