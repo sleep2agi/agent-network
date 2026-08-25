@@ -2,7 +2,20 @@
 set -euo pipefail
 
 SCRIPT="scripts/sync-pinned-versions.sh"
-TARGET="2.3.0-preview.45"
+# The suite must always exercise a real version difference, including when the
+# release under test happens to be the version that was current when this gate
+# was introduced. Derive a syntactically valid next patch from the checked-out
+# package instead of pinning a future release literal in the test itself.
+TARGET="$(node -e '
+  const fs = require("node:fs");
+  const source = fs.readFileSync("agent-network/src/opencode-agent-node-pair.ts", "utf8");
+  const literal = /PAIRED_AGENT_NETWORK_VERSION\s*=\s*"([^"]+)"/.exec(source);
+  if (!literal) throw new Error("missing PAIRED_AGENT_NETWORK_VERSION literal");
+  const current = literal[1];
+  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(current);
+  if (!match) throw new Error(`unexpected package version: ${current}`);
+  console.log(`${match[1]}.${match[2]}.${Number(match[3]) + 1}-preview.0`);
+')"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { echo "PASS: $*"; }

@@ -26,6 +26,14 @@ Result: exit 0. The corrected registry enumerated the writable
 preview.45. The stale `OPENCODE_*` compatibility alias is no longer treated as
 a writable release target. No `--apply` was used.
 
+The first CI run exposed a release-self collision in the new gate: its fixture
+version was pinned to preview.45, so this actual preview.45 bump could not
+produce the required `WOULD-WRITE`. The suite now derives a different next
+patch version from the checked-out `PAIRED_AGENT_NETWORK_VERSION` literal.
+The exact minimal Docker suite passed all six checks, including the stale-alias
+and old-pipeline witnessed-red cases. This makes the gate reusable for future
+versions instead of teaching it the next release number.
+
 Container
 
 - Base: `node:22-bookworm-slim`
