@@ -148,11 +148,13 @@ export async function handleSideThreadHttpRequest(
     }
 
     if (ctx.req.method !== "POST") return methodNotAllowed("POST");
+    const body = await requestJson(ctx.req);
+    const requestKey = field(body, "requestKey", "request_key");
     if (action === "cancel") {
       return json({
         ok: true,
         sideThread: serialize(
-          await ctx.coordinator.cancel(ctx.actor, sideChatId),
+          await ctx.coordinator.cancel(ctx.actor, sideChatId, { requestKey }),
         ),
       });
     }
@@ -160,7 +162,7 @@ export async function handleSideThreadHttpRequest(
       return json({
         ok: true,
         sideThread: serialize(
-          await ctx.coordinator.archive(ctx.actor, sideChatId),
+          await ctx.coordinator.archive(ctx.actor, sideChatId, { requestKey }),
         ),
       });
     }
@@ -168,17 +170,16 @@ export async function handleSideThreadHttpRequest(
       return json({
         ok: true,
         sideThread: serialize(
-          await ctx.coordinator.purge(ctx.actor, sideChatId),
+          await ctx.coordinator.purge(ctx.actor, sideChatId, { requestKey }),
         ),
       });
     }
-    const body = await requestJson(ctx.req);
     if (action === "retry") {
       return json({
         ok: true,
         sideThread: serialize(
           await ctx.coordinator.retry(ctx.actor, sideChatId, {
-            requestKey: field(body, "requestKey", "request_key"),
+            requestKey,
             prompt: field(body, "question", "prompt"),
             attachments:
               body.attachments === undefined
@@ -189,7 +190,7 @@ export async function handleSideThreadHttpRequest(
       });
     }
     const broughtBack = await ctx.coordinator.bringBack(ctx.actor, sideChatId, {
-      requestKey: field(body, "requestKey", "request_key"),
+      requestKey,
       destinationThreadId: field(
         body,
         "destinationThreadId",

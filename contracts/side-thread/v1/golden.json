@@ -24,6 +24,9 @@
       "question": "Try again",
       "attachments": [{ "fileId": "file_ref_0001" }]
     },
+    "cancel": { "requestKey": "cancel-request-0001" },
+    "archive": { "requestKey": "archive-request-0001" },
+    "purge": { "requestKey": "purge-request-0001" },
     "bringBack": {
       "requestKey": "bring-request-0001",
       "attemptId": "sat_1",

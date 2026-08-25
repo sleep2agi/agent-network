@@ -236,6 +236,12 @@
         }
       }
     },
+    "actionRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requestKey"],
+      "properties": { "requestKey": { "type": "string" } }
+    },
     "bringBackRequest": {
       "type": "object",
       "additionalProperties": false,

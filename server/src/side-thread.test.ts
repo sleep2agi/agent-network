@@ -356,7 +356,9 @@ describe("SideThread Hub contract", () => {
         text: "won race",
       });
     };
-    const after = await f.coordinator.cancel(owner, r.sideChatId);
+    const after = await f.coordinator.cancel(owner, r.sideChatId, {
+      requestKey: "cancel-key-race1",
+    });
     expect(after.state).toBe("completed");
     expect(after.attempts[0].result).toBe("won race");
     expect(
@@ -408,9 +410,13 @@ describe("SideThread Hub contract", () => {
       cancelEntered();
       await cancelGate;
     };
-    const firstCancel = f.coordinator.cancel(owner, created.sideChatId);
+    const firstCancel = f.coordinator.cancel(owner, created.sideChatId, {
+      requestKey: "cancel-key-cross1",
+    });
     await cancelStarted;
-    const concurrent = await second.cancel(owner, created.sideChatId);
+    const concurrent = await second.cancel(owner, created.sideChatId, {
+      requestKey: "cancel-key-cross1",
+    });
     expect(concurrent.state).toBe("running");
     expect(f.port.calls.cancel).toBe(1);
     releaseCancel();
@@ -429,10 +435,14 @@ describe("SideThread Hub contract", () => {
       archiveEntered();
       await archiveGate;
     };
-    const firstArchive = f.coordinator.archive(owner, created.sideChatId);
+    const firstArchive = f.coordinator.archive(owner, created.sideChatId, {
+      requestKey: "archive-key-cross1",
+    });
     await archiveStarted;
     await expect(
-      second.archive(owner, created.sideChatId),
+      second.archive(owner, created.sideChatId, {
+        requestKey: "archive-key-cross1",
+      }),
     ).rejects.toMatchObject({ code: "SIDE_THREAD_CONFLICT" });
     expect(f.port.calls.archive).toBe(1);
     releaseArchive();
@@ -480,7 +490,9 @@ describe("SideThread Hub contract", () => {
     const r = await f.coordinator.create(owner, createInput());
     const a = r.attempts[0];
     await expect(
-      f.coordinator.archive(owner, r.sideChatId),
+      f.coordinator.archive(owner, r.sideChatId, {
+        requestKey: "archive-key-running1",
+      }),
     ).rejects.toMatchObject({
       code: "SIDE_THREAD_CONFLICT",
     });
@@ -492,15 +504,27 @@ describe("SideThread Hub contract", () => {
       status: "completed",
       text: "done",
     });
-    expect((await f.coordinator.archive(owner, r.sideChatId)).state).toBe(
-      "archived",
-    );
-    expect((await f.coordinator.archive(owner, r.sideChatId)).state).toBe(
-      "archived",
-    );
-    expect((await f.coordinator.purge(owner, r.sideChatId)).state).toBe(
-      "purged",
-    );
+    expect(
+      (
+        await f.coordinator.archive(owner, r.sideChatId, {
+          requestKey: "archive-key-0001",
+        })
+      ).state,
+    ).toBe("archived");
+    expect(
+      (
+        await f.coordinator.archive(owner, r.sideChatId, {
+          requestKey: "archive-key-0001",
+        })
+      ).state,
+    ).toBe("archived");
+    expect(
+      (
+        await f.coordinator.purge(owner, r.sideChatId, {
+          requestKey: "purge-key-0001",
+        })
+      ).state,
+    ).toBe("purged");
     const purged = f.coordinator.get(owner, r.sideChatId);
     expect(purged.question).toBe("");
     expect(purged.attachments).toEqual([]);
@@ -663,13 +687,17 @@ describe("SideThread Hub contract", () => {
     );
     let cancelOperationId = "";
     try {
-      await cancelFixture.coordinator.cancel(owner, running.sideChatId);
+      await cancelFixture.coordinator.cancel(owner, running.sideChatId, {
+        requestKey: "cancel-key-lost1",
+      });
     } catch (error) {
       expect(error).toMatchObject({ code: "SIDE_THREAD_AMBIGUOUS" });
       cancelOperationId = (error as SideThreadError).operationId!;
     }
     await expect(
-      cancelFixture.coordinator.cancel(owner, running.sideChatId),
+      cancelFixture.coordinator.cancel(owner, running.sideChatId, {
+        requestKey: "cancel-key-lost1",
+      }),
     ).rejects.toMatchObject({
       code: "SIDE_THREAD_AMBIGUOUS",
       operationId: cancelOperationId,
@@ -698,13 +726,17 @@ describe("SideThread Hub contract", () => {
       });
       let operationId = "";
       try {
-        await current.coordinator[action](owner, record.sideChatId);
+        await current.coordinator[action](owner, record.sideChatId, {
+          requestKey: `${action}-key-lost1`,
+        });
       } catch (error) {
         operationId = (error as SideThreadError).operationId!;
         expect(error).toMatchObject({ code: "SIDE_THREAD_AMBIGUOUS" });
       }
       await expect(
-        current.coordinator[action](owner, record.sideChatId),
+        current.coordinator[action](owner, record.sideChatId, {
+          requestKey: `${action}-key-lost1`,
+        }),
       ).rejects.toMatchObject({
         code: "SIDE_THREAD_AMBIGUOUS",
         operationId,
@@ -718,6 +750,7 @@ describe("SideThread HTTP contract", () => {
   test("authoritative vendorable golden fixtures cannot drift from HTTP projection", async () => {
     expect(Object.keys(contractSchema.$defs).sort()).toEqual(
       [
+        "actionRequest",
         "attachment",
         "attempt",
         "boundary",
@@ -839,6 +872,40 @@ describe("SideThread HTTP contract", () => {
       coordinator: f.coordinator,
     });
     expect(denied?.status).toBe(404);
+  });
+
+  test("every mutating action binds the caller requestKey into its durable operation", async () => {
+    const f = fixture();
+    const record = await f.coordinator.create(owner, createInput());
+    for (const action of ["cancel", "archive", "purge"] as const) {
+      const request = new Request(
+        `http://hub/api/side-threads/${record.sideChatId}/${action}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(contractGolden.requests[action]),
+        },
+      );
+      const response = await handleSideThreadHttpRequest({
+        req: request,
+        url: new URL(request.url),
+        actor: owner,
+        coordinator: f.coordinator,
+      });
+      expect(response?.status).toBe(200);
+    }
+    const hydrated = f.coordinator.get(owner, record.sideChatId);
+    expect(
+      hydrated.operations
+        .filter((operation) =>
+          ["cancel", "archive", "purge"].includes(operation.kind),
+        )
+        .map((operation) => [operation.kind, operation.requestKey]),
+    ).toEqual([
+      ["cancel", contractGolden.requests.cancel.requestKey],
+      ["archive", contractGolden.requests.archive.requestKey],
+      ["purge", contractGolden.requests.purge.requestKey],
+    ]);
   });
 
   test("disabled surface is 404 before auth and unsupported adapter is typed 501", async () => {
