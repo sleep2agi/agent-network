@@ -15,6 +15,8 @@ export interface SideThreadCapability {
   supported: boolean;
   runtime: string;
   runtimeVersion: string;
+  topology: string;
+  evidenceRevision: string;
   mode?: "native-exact-fork";
   exactBoundary?: { through: boolean; before: boolean };
   reason?: SideThreadUnsupportedReason;
@@ -49,6 +51,8 @@ export interface SideThreadRecord {
   boundary: ExactBoundary;
   runtime: string;
   runtimeVersion: string;
+  topology: string;
+  evidenceRevision: string;
   state: SideThreadState;
   activeAttemptId?: string;
   attempts: SideThreadAttempt[];
@@ -109,6 +113,8 @@ export interface SideThreadAuditEntry {
   attemptId?: string;
   runtime: string;
   runtimeVersion: string;
+  topology: string;
+  evidenceRevision: string;
   sourceThreadId?: string;
   derivedThreadId?: string;
   turnId?: string;
@@ -201,7 +207,9 @@ export class SideThreadService {
       id: sideThreadId, requestKey: input.requestKey, nodeId: input.nodeId,
       sourceThreadId: input.sourceThreadId, derivedThreadId: forked.derivedThreadId,
       boundary: input.boundary, runtime: capability.runtime,
-      runtimeVersion: capability.runtimeVersion, state: "ready", attempts: [],
+      runtimeVersion: capability.runtimeVersion, topology: capability.topology,
+      evidenceRevision: capability.evidenceRevision,
+      state: "ready", attempts: [],
       createdAt: this.now(),
     };
     this.records.set(record.id, record);
@@ -313,6 +321,8 @@ export class SideThreadService {
         action: "event_dropped", sideThreadId: event.sideThreadId,
         attemptId: event.attemptId, runtime: this.opts.adapter.capability().runtime,
         runtimeVersion: this.opts.adapter.capability().runtimeVersion,
+        topology: this.opts.adapter.capability().topology,
+        evidenceRevision: this.opts.adapter.capability().evidenceRevision,
         reason: "ownership-mismatch", at: this.now(),
       });
       return;
@@ -342,7 +352,8 @@ export class SideThreadService {
 
   private audit(record: SideThreadRecord, action: SideThreadAuditAction, extra: Partial<SideThreadAuditEntry>): void {
     this.opts.audit?.({ action, sideThreadId: record.id, runtime: record.runtime,
-      runtimeVersion: record.runtimeVersion, at: this.now(), ...extra });
+      runtimeVersion: record.runtimeVersion, topology: record.topology,
+      evidenceRevision: record.evidenceRevision, at: this.now(), ...extra });
   }
 }
 

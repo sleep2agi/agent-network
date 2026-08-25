@@ -6,7 +6,11 @@ import {
 } from "./domain";
 
 class FakeAdapter extends EventEmitter implements SideThreadRuntimeAdapter {
-  cap: SideThreadCapability = { supported: true, runtime: "fake", runtimeVersion: "1", mode: "native-exact-fork", exactBoundary: { through: true, before: true } };
+  cap: SideThreadCapability = {
+    supported: true, runtime: "fake", runtimeVersion: "1", topology: "test",
+    evidenceRevision: "fixture", mode: "native-exact-fork",
+    exactBoundary: { through: true, before: true },
+  };
   forks = 0; starts = 0; cancels: unknown[] = []; archives = 0; deletes = 0;
   terminalDuringStart = false;
   capability() { return this.cap; }
@@ -33,7 +37,7 @@ const createInput = { requestKey: "create-key-0001", nodeId: "node-1", sourceThr
 describe("SideThreadService", () => {
   test("fails closed before fork for unsupported capability", async () => {
     const adapter = new FakeAdapter();
-    adapter.cap = { supported: false, runtime: "claude", runtimeVersion: "x", reason: "runtime" };
+    adapter.cap = { supported: false, runtime: "claude", runtimeVersion: "x", topology: "none", evidenceRevision: "none", reason: "runtime" };
     const service = new SideThreadService({ adapter, id: ids() });
     await expect(service.create(createInput)).rejects.toBeInstanceOf(SideThreadUnsupportedError);
     expect(adapter.forks).toBe(0);

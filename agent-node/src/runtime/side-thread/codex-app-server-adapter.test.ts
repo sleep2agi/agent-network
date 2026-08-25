@@ -34,7 +34,8 @@ class Client extends EventEmitter {
 const make = (overrides: Partial<ConstructorParameters<typeof CodexAppServerSideThreadAdapter>[0]> = {}) => {
   const client = new Client();
   const adapter = new CodexAppServerSideThreadAdapter({
-    client, runtimeVersion: "0.148.0", topology: "owned", experimentalApi: true, ...overrides,
+    client, runtimeVersion: "0.148.0", topology: "owned-stdio",
+    evidenceRevision: "test1190-wire-v2", experimentalApi: true, ...overrides,
   });
   return { client, adapter };
 };
@@ -43,7 +44,8 @@ describe("CodexAppServerSideThreadAdapter", () => {
   test("capability matrix fails closed", () => {
     expect(make().adapter.capability().supported).toBe(true);
     expect(make({ runtimeVersion: "0.149.0" }).adapter.capability()).toMatchObject({ supported: false, reason: "version" });
-    expect(make({ topology: "shared" }).adapter.capability()).toMatchObject({ supported: false, reason: "topology" });
+    expect(make({ topology: "shared-websocket" }).adapter.capability()).toMatchObject({ supported: false, reason: "topology" });
+    expect(make({ evidenceRevision: "blocked-v1" }).adapter.capability()).toMatchObject({ supported: false, reason: "exact-boundary" });
     expect(make({ experimentalApi: false }).adapter.capability()).toMatchObject({
       supported: true, exactBoundary: { through: true, before: false },
     });

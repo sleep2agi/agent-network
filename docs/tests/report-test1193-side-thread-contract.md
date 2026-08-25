@@ -8,7 +8,8 @@ The suite runs the runtime-neutral domain and Codex adapter tests inside an
 independent `oven/bun:1.3.14-debian` image. It covers:
 
 - typed unsupported results before any fork request;
-- exact 0.148.0 + owned topology + experimental API capability gate;
+- exact 0.148.0 + owned-stdio topology + reviewed evidence revision gate;
+- boundary-specific experimental API capability (`before`, not `through`);
 - concurrent create/attempt idempotency;
 - native `lastTurnId` and `beforeTurnId` request shapes;
 - absence of permission, sandbox, cwd and instruction overrides;
