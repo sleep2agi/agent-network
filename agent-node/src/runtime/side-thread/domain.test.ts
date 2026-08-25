@@ -159,4 +159,14 @@ describe("SideThreadService", () => {
     expect(retry.id).toBe(first.id);
     expect(adapter.forks).toBe(1);
   });
+
+  test("capability flip after fork fails create and compensates derived thread", async () => {
+    const adapter = new FakeAdapter(); let discarded = 0;
+    adapter.fork = async (input) => { adapter.cap.supported = false; adapter.cap.reason = "version"; return { derivedThreadId: `derived-${input.sideThreadId}` }; };
+    adapter.discardFork = async () => { discarded++; };
+    const service = new SideThreadService({ adapter, id: ids() });
+    await expect(service.create(createInput)).rejects.toBeInstanceOf(SideThreadUnsupportedError);
+    expect(discarded).toBe(1);
+    expect(service.get("id-1")).toBeUndefined();
+  });
 });

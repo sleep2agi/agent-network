@@ -51,6 +51,7 @@ describe("CodexAppServerSideThreadAdapter", () => {
     expect(make({ experimentalApi: false }).adapter.capability()).toMatchObject({
       supported: true, exactBoundary: { through: true, before: false },
     });
+    expect(make({ experimentalApi: "false" as any }).adapter.capability()).toMatchObject({ exactBoundary: { before: false } });
   });
 
   test("fork sends one exact boundary and no permission override", async () => {
@@ -145,5 +146,17 @@ describe("CodexAppServerSideThreadAdapter", () => {
     expect(terminal).toHaveLength(1);
     client.emit("turn/completed", { threadId: "source", turn: { id: "other", status: "completed" } });
     expect(dropped).toContain("unowned-terminal");
+  });
+
+  test("identity timeout is ambiguous and close settles a pending start", async () => {
+    const { client, adapter } = make({ identityTimeoutMs: 5 });
+    const fork = await adapter.fork({ sideThreadId: "a", sourceThreadId: "main", boundary: { kind: "through", turnId: "done" } });
+    client.holdTurnStart = true;
+    await expect(adapter.start({ sideThreadId: "a", attemptId: "amb", derivedThreadId: fork.derivedThreadId, prompt: "q" }))
+      .rejects.toMatchObject({ code: "SIDE_THREAD_AMBIGUOUS" });
+    await expect(adapter.delete({ derivedThreadId: fork.derivedThreadId })).rejects.toThrow("active owned turn");
+    const pending = adapter.start({ sideThreadId: "a", attemptId: "closing", derivedThreadId: fork.derivedThreadId, prompt: "q" });
+    adapter.close();
+    await expect(pending).rejects.toThrow("closed");
   });
 });

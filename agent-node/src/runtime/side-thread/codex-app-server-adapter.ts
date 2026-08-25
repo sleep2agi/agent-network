@@ -1,6 +1,7 @@
 import type { EventEmitter } from "node:events";
 import {
   SideThreadConflictError,
+  SideThreadAmbiguousError,
   SideThreadUnsupportedError,
   type ExactBoundary,
   type SideThreadCapability,
@@ -44,8 +45,12 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
   private readonly byTurn = new Map<string, Execution>();
   private readonly earlyTerminals = new Map<string, unknown>();
   private closed = false;
+  private readonly closedSignal: Promise<never>;
+  private rejectClosed!: (error: Error) => void;
 
   constructor(private readonly opts: CodexSideThreadAdapterOptions) {
+    this.closedSignal = new Promise<never>((_resolve, reject) => { this.rejectClosed = reject; });
+    void this.closedSignal.catch(() => {});
     opts.client.on("item/started", this.onItem);
     opts.client.on("item/completed", this.onItem);
     opts.client.on("item/agentMessage/delta", this.onDelta);
@@ -60,7 +65,7 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
       supported: true, runtime: "codex-app-server", runtimeVersion: this.opts.runtimeVersion,
       topology: this.opts.topology, evidenceRevision: this.opts.evidenceRevision,
       mode: "native-exact-fork",
-      exactBoundary: { through: true, before: this.opts.experimentalApi },
+      exactBoundary: { through: true, before: this.opts.experimentalApi === true },
     };
   }
 
@@ -82,7 +87,7 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
         ? { lastTurnId: input.boundary.turnId }
         : { beforeTurnId: input.boundary.turnId }),
     };
-    const response = await this.opts.client.request<{ thread?: { id?: string } }>("thread/fork", params);
+    const response = await this.rpc<{ thread?: { id?: string } }>("thread/fork", params);
     this.assertOpen();
     const derivedThreadId = response?.thread?.id;
     if (!derivedThreadId || derivedThreadId === input.sourceThreadId) {
@@ -107,15 +112,14 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
       threadId: input.derivedThreadId, clientUserMessageId,
       text: "", resolveIdentity, rejectIdentity,
       identityTimer: setTimeout(() => {
-        this.dropExecution(execution);
-        rejectIdentity(new SideThreadConflictError("Codex did not echo the attempt identity"));
+        rejectIdentity(new SideThreadAmbiguousError("Codex accepted turn/start but did not echo identity; reconciliation required"));
       }, this.opts.identityTimeoutMs ?? 10_000),
     };
     this.byClientId.set(clientUserMessageId, execution);
     try {
       let response: { turn?: { id?: string }; turnId?: string } | undefined;
       try {
-        const request = this.opts.client.request<{ turn?: { id?: string }; turnId?: string }>("turn/start", {
+        const request = this.rpc<{ turn?: { id?: string }; turnId?: string }>("turn/start", {
         threadId: input.derivedThreadId,
         clientUserMessageId,
         input: [{ type: "text", text: input.prompt }],
@@ -143,7 +147,7 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
       }
       return { turnId };
     } catch (error) {
-      this.dropExecution(execution);
+      if (!(error instanceof SideThreadAmbiguousError)) this.dropExecution(execution);
       throw error;
     }
   }
@@ -153,13 +157,13 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
     this.assertOwnedThread(input.derivedThreadId);
     const execution = this.byTurn.get(turnKey(input.derivedThreadId, input.turnId));
     if (!execution) throw new SideThreadConflictError("refusing to cancel an unowned Codex turn");
-    await this.opts.client.request("turn/interrupt", { threadId: input.derivedThreadId, turnId: input.turnId });
+    await this.rpc("turn/interrupt", { threadId: input.derivedThreadId, turnId: input.turnId });
   }
 
   async archive(input: { derivedThreadId: string }): Promise<void> {
     this.assertOpen();
     this.assertOwnedThread(input.derivedThreadId);
-    await this.opts.client.request("thread/archive", { threadId: input.derivedThreadId });
+    await this.rpc("thread/archive", { threadId: input.derivedThreadId });
   }
 
   async delete(input: { derivedThreadId: string }): Promise<void> {
@@ -168,8 +172,13 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
     if ([...this.byTurn.values(), ...this.byClientId.values()].some((x) => x.threadId === input.derivedThreadId)) {
       throw new SideThreadConflictError("refusing to delete a thread with an active owned turn");
     }
-    await this.opts.client.request("thread/delete", { threadId: input.derivedThreadId });
+    await this.rpc("thread/delete", { threadId: input.derivedThreadId });
     this.derivedThreads.delete(input.derivedThreadId);
+  }
+  async discardFork(input: { sideThreadId: string; derivedThreadId: string }): Promise<void> {
+    if (this.derivedThreads.get(input.derivedThreadId) !== input.sideThreadId) return;
+    try { await this.rpc("thread/delete", { threadId: input.derivedThreadId }); }
+    finally { this.derivedThreads.delete(input.derivedThreadId); }
   }
 
   subscribe(listener: (event: SideThreadTerminalEvent) => void): () => void {
@@ -184,6 +193,7 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.rejectClosed(new SideThreadConflictError("Codex side-thread adapter closed"));
     this.opts.client.off("item/started", this.onItem);
     this.opts.client.off("item/completed", this.onItem);
     this.opts.client.off("item/agentMessage/delta", this.onDelta);
@@ -269,6 +279,10 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
     }
   }
   private assertOpen(): void { if (this.closed) throw new SideThreadConflictError("Codex side-thread adapter closed"); }
+  private rpc<T = unknown>(method: string, params?: unknown): Promise<T> {
+    this.assertOpen();
+    return Promise.race([this.opts.client.request<T>(method, params), this.closedSignal]);
+  }
   private assertOwnedThread(threadId: string, sideThreadId?: string): void {
     this.assertSupported();
     const owner = this.derivedThreads.get(threadId);

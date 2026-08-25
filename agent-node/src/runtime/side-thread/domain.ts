@@ -41,6 +41,10 @@ export class SideThreadConflictError extends Error {
   readonly code = "SIDE_THREAD_CONFLICT";
   constructor(message: string) { super(message); this.name = "SideThreadConflictError"; }
 }
+export class SideThreadAmbiguousError extends Error {
+  readonly code = "SIDE_THREAD_AMBIGUOUS";
+  constructor(message: string) { super(message); this.name = "SideThreadAmbiguousError"; }
+}
 
 export interface SideThreadRecord {
   id: string;
@@ -63,7 +67,7 @@ export interface SideThreadAttempt {
   id: string;
   requestKey: string;
   turnId?: string;
-  state: "starting" | "running" | "completed" | "failed" | "cancelled";
+  state: "starting" | "running" | "ambiguous" | "completed" | "failed" | "cancelled";
   result?: string;
   error?: string;
   createdAt: number;
@@ -98,6 +102,7 @@ export interface SideThreadRuntimeAdapter {
   subscribe(listener: (event: SideThreadTerminalEvent) => void): () => void;
   subscribeDropped?(listener: (reason: string) => void): () => void;
   close?(): void;
+  discardFork?(input: { sideThreadId: string; derivedThreadId: string }): Promise<void>;
 }
 
 export type SideThreadAuditAction =
@@ -211,6 +216,11 @@ export class SideThreadService {
     });
     requireIdentity(forked.derivedThreadId, "derivedThreadId");
     this.assertOpen();
+    try { this.assertCapability(capability, input.boundary.kind); }
+    catch (error) {
+      await this.opts.adapter.discardFork?.({ sideThreadId, derivedThreadId: forked.derivedThreadId }).catch(() => {});
+      throw error;
+    }
     if (forked.derivedThreadId === input.sourceThreadId) {
       throw new SideThreadConflictError("runtime returned the source thread as the derived thread");
     }
@@ -247,7 +257,7 @@ export class SideThreadService {
     const operation = this.startOnce(input);
     this.attemptByKey.set(key, { fingerprint, operation });
     try { return cloneAttempt(await operation); }
-    catch (error) { this.attemptByKey.delete(key); throw error; }
+    catch (error) { if (!(error instanceof SideThreadAmbiguousError)) this.attemptByKey.delete(key); throw error; }
   }
 
   private async startOnce(input: { sideThreadId: string; requestKey: string; prompt: string }): Promise<SideThreadAttempt> {
@@ -281,6 +291,12 @@ export class SideThreadService {
       this.audit(record, "attempt_started", { attemptId: attempt.id, derivedThreadId: record.derivedThreadId, turnId: attempt.turnId });
       return attempt;
     } catch (error) {
+      if (error instanceof SideThreadAmbiguousError) {
+        attempt.state = "ambiguous";
+        attempt.error = safeError(error);
+        record.state = "running";
+        throw error;
+      }
       if (attempt.state === "starting" || attempt.state === "running") {
         attempt.state = "failed";
         attempt.error = safeError(error);
@@ -353,14 +369,14 @@ export class SideThreadService {
       && record.activeAttemptId === attempt.id
       && attempt.state === "running";
     if (!owned) {
-      this.opts.audit?.({
+      this.emitAudit(redactAudit({
         action: "event_dropped", sideThreadId: event.sideThreadId,
         attemptId: event.attemptId, runtime: this.opts.adapter.capability().runtime,
         runtimeVersion: this.opts.adapter.capability().runtimeVersion,
         topology: this.opts.adapter.capability().topology,
         evidenceRevision: this.opts.adapter.capability().evidenceRevision,
         reason: "ownership-mismatch", at: this.now(),
-      });
+      }) as SideThreadAuditEntry);
       return;
     }
     if (!attempt!.turnId) attempt!.turnId = event.turnId;
@@ -393,6 +409,14 @@ export class SideThreadService {
       || cap.runtimeVersion !== record.runtimeVersion || cap.topology !== record.topology
       || cap.evidenceRevision !== record.evidenceRevision || !cap.exactBoundary?.[record.boundary.kind]) {
       throw new SideThreadUnsupportedError(cap.reason ?? "exact-boundary", "immutable capability attestation no longer matches");
+    }
+  }
+  private assertCapability(expected: SideThreadCapability, boundary: ExactBoundary["kind"]): void {
+    const fresh = this.opts.adapter.capability();
+    if (!fresh.supported || fresh.mode !== "native-exact-fork" || !fresh.exactBoundary?.[boundary]
+      || fresh.runtime !== expected.runtime || fresh.runtimeVersion !== expected.runtimeVersion
+      || fresh.topology !== expected.topology || fresh.evidenceRevision !== expected.evidenceRevision) {
+      throw new SideThreadUnsupportedError(fresh.reason ?? "exact-boundary", "capability changed while creating side thread");
     }
   }
 
