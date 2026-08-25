@@ -10,7 +10,7 @@ export interface SideThreadOperation {
   result?: { derivedThreadIdHash?: string; turnIdHash?: string; classification?: "exists" | "not-found" | "terminal" | "active" };
   updatedAt: number;
 }
-export interface OperationLedger { put(op: SideThreadOperation): void; get(nodeId: string, sideThreadId: string, opId: string): SideThreadOperation | undefined; list(nodeId: string, sideThreadId: string): SideThreadOperation[]; }
+export interface OperationLedger { put(op: SideThreadOperation): void; get(nodeId: string, sideThreadId: string, opId: string): SideThreadOperation | undefined; list(nodeId: string, sideThreadId: string): SideThreadOperation[]; find(nodeId: string, sideThreadId: string, idempotencyKey: string, method: OperationMethod, fingerprint: string): SideThreadOperation | undefined; }
 
 export class PrivateFileOperationLedger implements OperationLedger {
   constructor(private readonly root: string) { mkdirSync(root, { recursive: true, mode: 0o700 }); chmodSync(root, 0o700); }
@@ -34,6 +34,11 @@ export class PrivateFileOperationLedger implements OperationLedger {
     return readdirSync(dir).filter((x) => x.endsWith(".json")).map((x) => {
       const value = JSON.parse(readFileSync(join(dir, x), "utf8")); validate(value); return value;
     }).sort((a, b) => a.updatedAt - b.updatedAt || a.opId.localeCompare(b.opId));
+  }
+  find(nodeId: string, sideThreadId: string, idempotencyKey: string, method: OperationMethod, fingerprint: string): SideThreadOperation | undefined {
+    requireSafe(idempotencyKey, "idempotencyKey");
+    if (!/^sha256:[0-9a-f]{64}$/.test(fingerprint)) throw new Error("operation fingerprint hash required");
+    return this.list(nodeId, sideThreadId).find((op) => op.idempotencyKey === idempotencyKey && op.method === method && op.fingerprint === fingerprint);
   }
   private path(nodeId: string, sideThreadId: string, opId: string): string {
     for (const [v, label] of [[nodeId, "nodeId"], [sideThreadId, "sideThreadId"], [opId, "opId"]] as const) requireSafe(v, label);

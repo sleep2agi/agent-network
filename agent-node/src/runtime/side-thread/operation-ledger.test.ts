@@ -14,6 +14,7 @@ describe("PrivateFileOperationLedger", () => {
     expect(statSync(path).mode & 0o777).toBe(0o600);
     expect(new PrivateFileOperationLedger(root).get("node-1", "side-1", "op-1")?.state).toBe("ambiguous");
     expect(new PrivateFileOperationLedger(root).list("node-1", "side-1")).toHaveLength(1);
+    expect(new PrivateFileOperationLedger(root).find("node-1", "side-1", "request-0001", "fork", op().fingerprint)?.state).toBe("ambiguous");
   });
   test("rejects traversal, bearer, URL and unhashed targets", () => {
     const root = mkdtempSync(join(tmpdir(), "side-ledger-")); roots.push(root); const ledger = new PrivateFileOperationLedger(root);
