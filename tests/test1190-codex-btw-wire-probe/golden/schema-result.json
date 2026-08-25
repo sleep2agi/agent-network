@@ -1,0 +1,57 @@
+{
+  "protocolVersion": "codex-cli 0.148.0",
+  "methods": {
+    "threadFork": true,
+    "threadArchive": true,
+    "threadDelete": true,
+    "turnInterrupt": true
+  },
+  "threadFork": {
+    "experimentalApiRequiredForExactBoundary": true,
+    "properties": [
+      "approvalPolicy",
+      "approvalsReviewer",
+      "baseInstructions",
+      "beforeTurnId",
+      "config",
+      "cwd",
+      "deferGoalContinuation",
+      "developerInstructions",
+      "ephemeral",
+      "excludeTurns",
+      "lastTurnId",
+      "model",
+      "modelProvider",
+      "path",
+      "permissions",
+      "runtimeWorkspaceRoots",
+      "sandbox",
+      "serviceTier",
+      "threadId",
+      "threadSource"
+    ],
+    "required": [
+      "threadId"
+    ],
+    "exactBoundaryFields": [
+      "beforeTurnId",
+      "lastTurnId"
+    ]
+  },
+  "threadArchive": {
+    "required": [
+      "threadId"
+    ]
+  },
+  "threadDelete": {
+    "required": [
+      "threadId"
+    ]
+  },
+  "turnInterrupt": {
+    "required": [
+      "threadId",
+      "turnId"
+    ]
+  }
+}

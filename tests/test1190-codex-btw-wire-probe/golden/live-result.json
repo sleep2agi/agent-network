@@ -1,0 +1,25 @@
+{
+  "version": "codex-cli 0.148.0",
+  "observations": {
+    "forkBoundary": {
+      "completedLastTurnWhileLaterActive": true,
+      "beforeActiveTurn": true,
+      "activeLastTurnRejected": true,
+      "activeLastTurnErrorCode": -32600
+    },
+    "concurrentAndCancel": {
+      "independentInterruptAccepted": true,
+      "cancelledForkStatus": "interrupted",
+      "siblingForkStatus": "completed",
+      "sourceStatus": "completed",
+      "allThreadIdsDistinct": true
+    },
+    "retention": {
+      "archiveAccepted": true,
+      "archivedStillReadable": true,
+      "deleteAccepted": true,
+      "deletedReadRejected": true,
+      "deletedReadErrorCode": -32600
+    }
+  }
+}
