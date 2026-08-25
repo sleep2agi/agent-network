@@ -1,0 +1,90 @@
+# @sleep2agi/agent-network 2.3.0-preview.45 — local pack evidence
+
+Status: PASS (local preparation only; not pushed, published, or installed globally)
+
+Source boundary
+
+- Exact base: `d829ef570096ea60f31f60d8bcab7e9522ba1a7b`
+- Release version: `2.3.0-preview.45`
+- Paired runtime: `@sleep2agi/agent-node@2.5.0-preview.33` (unchanged)
+- Changed release inputs: `agent-network/package.json`, the two root-version
+  fields in `agent-network/package-lock.json`, and
+  `PAIRED_AGENT_NETWORK_VERSION` in
+  `agent-network/src/opencode-agent-node-pair.ts`.
+- Compatibility export `OPENCODE_AGENT_NETWORK_VERSION` aliases the shared
+  constant, and the generated declaration exposes both as preview.45.
+
+SOP dry-run boundary
+
+Command:
+
+`./scripts/sync-pinned-versions.sh @sleep2agi/agent-network 2.3.0-preview.45`
+
+Result: exit 0, but the old script reported the shared-pair source as
+`unchanged`. Its registered name is the compatibility alias
+`OPENCODE_AGENT_NETWORK_VERSION`, while the literal now lives in
+`PAIRED_AGENT_NETWORK_VERSION`; therefore this dry-run is not evidence that
+the pair bump happened. The release diff and generated declarations were
+checked directly instead. No `--apply` was used.
+
+Container
+
+- Base: `node:22-bookworm-slim`
+- Node: `v22.23.2`
+- Bun: `1.3.14` (pinned archive + checksum)
+- Image: `sha256:e00ed7a14319c37b2ecd2b95a84ec8be5749d16a7225b55f8fa17e5edfac76a7`
+
+Build and pack
+
+The release package was explicitly built before packing. A diagnostic direct
+`npm pack` without a preceding build produced only LICENSE/README/package.json;
+`prepublishOnly` does not make that direct-pack shape safe. That artifact was
+discarded as evidence. The accepted command sequence was:
+
+`npm run build && npm pack --json --pack-destination /out`
+
+Accepted pack result:
+
+- id: `@sleep2agi/agent-network@2.3.0-preview.45`
+- filename: `sleep2agi-agent-network-2.3.0-preview.45.tgz`
+- size: `1,706,566` bytes
+- unpacked size: `5,135,560` bytes
+- entries: `77`
+- sha1 (npm): `997ccbd845accc5a04530fe5126bd0405ef1cc76`
+- sha256: `8ed8e13a4dae60afc25e3f2bc6ff47acfb54a9aa4e1f8b9648dae875a42e9122`
+- integrity: `sha512-QsTMg8e/jLaLbmmVrDcw/lMNUUhbFuSwD3lzht2ie/pCJXoXT23G0SGMwQ0NwrcSJqZaraNSQnB+qWK7nMlFew==`
+
+Tar inspection confirmed these required entries:
+
+- `package/dist/bin/anet.cjs`
+- `package/dist/bin/cli.js`
+- `package/dist/src/codex-copresence-recovery.d.ts`
+- `package/dist/src/opencode-agent-node-pair.d.ts`
+- `package/package.json`
+
+The packed declaration contains exact literals:
+
+- `PAIRED_AGENT_NETWORK_VERSION = "2.3.0-preview.45"`
+- `OPENCODE_AGENT_NETWORK_VERSION = "2.3.0-preview.45"`
+- `PAIRED_AGENT_NODE_VERSION = "2.5.0-preview.33"`
+- `PAIRED_AGENT_NODE_SPEC = "@sleep2agi/agent-node@2.5.0-preview.33"`
+
+Clean local install (not global)
+
+In a fresh temporary npm project inside the same Node 22 container:
+
+`npm install --ignore-scripts /out/sleep2agi-agent-network-2.3.0-preview.45.tgz @sleep2agi/agent-node@2.5.0-preview.33`
+
+Observed:
+
+- `anet v2.3.0-preview.45`
+- `agent-node v2.5.0-preview.33`
+- agent-node help advertises `codex-app-server`
+- neither package was installed under the container global npm prefix
+
+Final boundary
+
+This evidence is for the exact local base plus the stated release diff. It
+must be regenerated after rebasing onto the eventual merged main. Nothing was
+pushed, no PR was opened, no npm package or dist-tag was changed, and the host
+global npm installation was untouched.
