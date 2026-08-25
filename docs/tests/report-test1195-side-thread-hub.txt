@@ -1,12 +1,12 @@
 SideThread Hub PR2 Docker evidence
 Date: 2026-08-26 Asia/Shanghai
-Tested source commit: 72fe67b983c390e77cb81a461739886b4e85cb61
+Tested source commit: a07effabd9e5b752e9a094681d52af5c6f646284
 Stack base: c0981ecc26b8b570ff29a30da2d926fdc8ec4a09 (PR #1194 rev4)
 
 Layer 1 — contract
   image: anet-test1195-contract-final
   result: PASS
-  tests: 7 pass, 0 fail, 30 assertions
+  tests: 7 pass, 0 fail, 31 assertions
   witnessed-red: native exact-fork mode gate mutation rejected
   includes schema/golden projection drift check
 
@@ -27,7 +27,7 @@ Layer 3 — races/faults
   uniqueness, response-loss ambiguity/reconciliation, and no-repeat
   cancel/archive/purge RPCs
 
-Total final Docker evidence: 21 pass, 0 fail, 109 assertions, 3 witnessed-red.
+Total final Docker evidence: 21 pass, 0 fail, 110 assertions, 3 witnessed-red.
 
 Preflight:
   check-test-suite-registration.py PASS (no new unregistered suite)
