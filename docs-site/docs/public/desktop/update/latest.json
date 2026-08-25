@@ -1,27 +1,27 @@
 {
-  "version": "0.2.33-1",
-  "notes": "Signed and notarized desktop update for macOS (Apple Silicon) and Windows (x64). Existing installations can update in place; new installations use the assets below.",
-  "pub_date": "2026-08-24T14:48:52.569Z",
+  "version": "0.2.33-3",
+  "notes": "Signed and notarized Beta update for macOS (Apple Silicon) and Windows (x64).\n\nWhat's new in 0.2.33-3:\n- Press Enter to send a chat message, matching familiar desktop messaging apps.\n- Use Shift+Enter, Ctrl+Enter, or Command+Enter to insert a newline.\n- Confirming Chinese or another IME candidate with Enter no longer sends the unfinished composition. Both modern composition events and legacy WebView key code 229 are covered.\n\nThis Beta does not yet add true steering into an already-running Codex turn; the existing high-priority control only moves waiting Hub tasks ahead of normal work. Existing installations can update in place; new installations can use the assets below.",
+  "pub_date": "2026-08-25T01:29:42.058Z",
   "platforms": {
     "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TmVPaFZiU0JydHBvSU5ldjBCWHhLV3laUnBGOVA3TXh4aEZYekt0V0o1T1FQSXdDTUQ1ZE04TmpjUDBzRW9MeDN2UXg5dmk2eG5INW5LZXVKeDRGZ2drPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3NTgyNzE4CWZpbGU6QWdlbnQgTmV0d29yay5hcHAudGFyLmd6CmltLzVaRUhmeVhhZklhSktjQ1BwZ0UxSEZYeUpSY29QcmR0Sy9TU2M1cWNpbU1HOGZ6NDhQdVpjdzFYYmxvaWp1WW4xMG9jSGFBV2RjNU1WSTRNcEJnPT0K",
-      "url": "https://api.github.com/repos/sleep2agi/agent-network-app/releases/assets/527742829"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TlhXaU1Ja0NuaWhVcnRoQ1dydVRvNW12cy9vS1NFNkdES3NQaEd6QW90dHdscmlJMkFkeTF1T1U5aWpId3Z2R2tmQTR2WWNIcjBQeDFNTlJNTExubEEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3NjIxMTQ4CWZpbGU6QWdlbnQgTmV0d29yay5hcHAudGFyLmd6CmF4dll5blFqQUUvaCtmTGRVektsQVJlK092TkZHdC9OV1BxUmN4Y29GV1lMM1ZQS3NmNDhrZlh3WGQ4Ky9SWVRLVU9NWnNyQlhDWkpabkpqZmw0UURnPT0K",
+      "url": "https://api.github.com/repos/sleep2agi/agent-network-app/releases/assets/528440640"
     },
     "darwin-aarch64-app": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TmVPaFZiU0JydHBvSU5ldjBCWHhLV3laUnBGOVA3TXh4aEZYekt0V0o1T1FQSXdDTUQ1ZE04TmpjUDBzRW9MeDN2UXg5dmk2eG5INW5LZXVKeDRGZ2drPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3NTgyNzE4CWZpbGU6QWdlbnQgTmV0d29yay5hcHAudGFyLmd6CmltLzVaRUhmeVhhZklhSktjQ1BwZ0UxSEZYeUpSY29QcmR0Sy9TU2M1cWNpbU1HOGZ6NDhQdVpjdzFYYmxvaWp1WW4xMG9jSGFBV2RjNU1WSTRNcEJnPT0K",
-      "url": "https://api.github.com/repos/sleep2agi/agent-network-app/releases/assets/527742829"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TlhXaU1Ja0NuaWhVcnRoQ1dydVRvNW12cy9vS1NFNkdES3NQaEd6QW90dHdscmlJMkFkeTF1T1U5aWpId3Z2R2tmQTR2WWNIcjBQeDFNTlJNTExubEEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3NjIxMTQ4CWZpbGU6QWdlbnQgTmV0d29yay5hcHAudGFyLmd6CmF4dll5blFqQUUvaCtmTGRVektsQVJlK092TkZHdC9OV1BxUmN4Y29GV1lMM1ZQS3NmNDhrZlh3WGQ4Ky9SWVRLVU9NWnNyQlhDWkpabkpqZmw0UURnPT0K",
+      "url": "https://api.github.com/repos/sleep2agi/agent-network-app/releases/assets/528440640"
     },
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TmFXbzN2eG1rTk5LVVZJWDc4anc5M3QxVkdWbitVNkN3YjhLSUNQc2h1Smh2UFN3TzVKNkNlZDJLTFl2WFFLUUgvV1A2SytaenVVSTNZN09TZzBNc2djPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3NTgyOTI2CWZpbGU6QWdlbnQgTmV0d29ya18wLjIuMzMtMV94NjQtc2V0dXAuZXhlCm5OR0c1UjBpalQrZVlrUjBlN21nLzFoOUgydjNWQ2lmamlRaERlcU5lSjZVREJiK0FaOG1Vd1FIa0tsZnZLelQ3SVQ4aHhJb3FRZzR1MEFMZkJOR0RRPT0K",
-      "url": "https://api.github.com/repos/sleep2agi/agent-network-app/releases/assets/527746651"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TlRGUjBISFJxaXdoaVhiNFB0Z2JRNnkvN3M5TXo0SThaaFl2N2d2VHdCRUFMaU1HZXo5ZUc4Ly92NEZ4RVVMYWxNS1NhMzZJdVFlUVVoME9CYjk1R1FNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3NjIxMzc2CWZpbGU6QWdlbnQgTmV0d29ya18wLjIuMzMtM194NjQtc2V0dXAuZXhlClBNQ1A5c05JaktheDZUeFJHMDNxU1lRMG8wd2V2c2prZHVXeCtmaTJxdHExeCtqSmFHRE93Y0FUb1hjRkMybHpNdiswd25ia1VrSHBqdFQ2bVVuL0NRPT0K",
+      "url": "https://api.github.com/repos/sleep2agi/agent-network-app/releases/assets/528444641"
     },
     "windows-x86_64-nsis": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TmFXbzN2eG1rTk5LVVZJWDc4anc5M3QxVkdWbitVNkN3YjhLSUNQc2h1Smh2UFN3TzVKNkNlZDJLTFl2WFFLUUgvV1A2SytaenVVSTNZN09TZzBNc2djPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3NTgyOTI2CWZpbGU6QWdlbnQgTmV0d29ya18wLjIuMzMtMV94NjQtc2V0dXAuZXhlCm5OR0c1UjBpalQrZVlrUjBlN21nLzFoOUgydjNWQ2lmamlRaERlcU5lSjZVREJiK0FaOG1Vd1FIa0tsZnZLelQ3SVQ4aHhJb3FRZzR1MEFMZkJOR0RRPT0K",
-      "url": "https://api.github.com/repos/sleep2agi/agent-network-app/releases/assets/527746651"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TlRGUjBISFJxaXdoaVhiNFB0Z2JRNnkvN3M5TXo0SThaaFl2N2d2VHdCRUFMaU1HZXo5ZUc4Ly92NEZ4RVVMYWxNS1NhMzZJdVFlUVVoME9CYjk1R1FNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3NjIxMzc2CWZpbGU6QWdlbnQgTmV0d29ya18wLjIuMzMtM194NjQtc2V0dXAuZXhlClBNQ1A5c05JaktheDZUeFJHMDNxU1lRMG8wd2V2c2prZHVXeCtmaTJxdHExeCtqSmFHRE93Y0FUb1hjRkMybHpNdiswd25ia1VrSHBqdFQ2bVVuL0NRPT0K",
+      "url": "https://api.github.com/repos/sleep2agi/agent-network-app/releases/assets/528444641"
     },
     "windows-x86_64-msi": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TlVqbytZS3FCQXYrK3U2aXo4c2V5OU15N1lEZXBSK3VCSHBmVTRmeCtvTHVuYlZRNmN2SWEzaDhxVk9MWDMvWHByWkFaNGRhMTNTWkJ5YmZoNzRTQUFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3NTgyOTI2CWZpbGU6QWdlbnQgTmV0d29ya18wLjIuMzMtMV94NjRfZW4tVVMubXNpCnFoR2lDblc5MldDZCtZNGprL3RPWHNYdTJ5TXVxb3g5VVBwRitBSGZacTZWUFFZTXYxcG9YRzk5NGRueWUwZCtLbnFuazZnVnlhWXNlV1I5MmtVT0NnPT0K",
-      "url": "https://api.github.com/repos/sleep2agi/agent-network-app/releases/assets/527746577"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TllKSElnajZraHhxSnZxb3pIQkJQV1MxUk4wcCtHS1o2dGl6UWI0eGZDYlVreVlwSnFEUVhCZmxWSzB1NGIvcERaRGI1UndLbjZvVnROQVRtem1zclFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3NjIxMzc3CWZpbGU6QWdlbnQgTmV0d29ya18wLjIuMzMtM194NjRfZW4tVVMubXNpCkJqRmJqWkRlVmZOdmR1NVNjWWFlcnN6cElwQ2lZY3hOYis0aTlxK0JwcHNTdmVRZG0wYmR4d2tSdUkwcGE0TzdwWmdwc3YzdjY2aUxzbi9XNkxRWERRPT0K",
+      "url": "https://api.github.com/repos/sleep2agi/agent-network-app/releases/assets/528444616"
     }
   }
 }
