@@ -7,10 +7,12 @@ class Client extends EventEmitter {
   calls: Array<{ method: string; params: any }> = [];
   forkN = 0; turnN = 0;
   loseTurnStartResponse = false;
+  holdTurnStart = false;
   async request<T>(method: string, params: any): Promise<T> {
     this.calls.push({ method, params });
     if (method === "thread/fork") return { thread: { id: `fork-${++this.forkN}` } } as T;
     if (method === "turn/start") {
+      if (this.holdTurnStart) return await new Promise<T>(() => {});
       const turnId = `turn-${++this.turnN}`;
       if (this.loseTurnStartResponse) {
         return await new Promise<T>((_resolve, reject) => queueMicrotask(() => {
@@ -115,5 +117,33 @@ describe("CodexAppServerSideThreadAdapter", () => {
     client.emit("turn/completed", { threadId: a.derivedThreadId, turn: { id: ta.turnId, status: "interrupted" } });
     client.emit("turn/completed", { threadId: b.derivedThreadId, turn: { id: tb.turnId, status: "completed" } });
     expect(got).toEqual(["bb", "aa"]);
+  });
+
+  test("duplicate derived identity and delete during starting fail closed", async () => {
+    const { client, adapter } = make();
+    const first = await adapter.fork({ sideThreadId: "a", sourceThreadId: "main", boundary: { kind: "through", turnId: "done" } });
+    client.forkN--;
+    await expect(adapter.fork({ sideThreadId: "b", sourceThreadId: "main", boundary: { kind: "through", turnId: "done" } }))
+      .rejects.toThrow("reused a derived thread");
+    client.holdTurnStart = true;
+    void adapter.start({ sideThreadId: "a", attemptId: "pending", derivedThreadId: first.derivedThreadId, prompt: "q" }).catch(() => {});
+    await Promise.resolve();
+    await expect(adapter.delete({ derivedThreadId: first.derivedThreadId })).rejects.toThrow("active owned turn");
+    adapter.close();
+  });
+
+  test("terminal before identity echo is buffered and unowned events are reported", async () => {
+    const { client, adapter } = make();
+    const fork = await adapter.fork({ sideThreadId: "a", sourceThreadId: "main", boundary: { kind: "through", turnId: "done" } });
+    const dropped: string[] = []; const terminal: any[] = [];
+    adapter.subscribeDropped((reason) => dropped.push(reason)); adapter.subscribe((event) => terminal.push(event));
+    const start = adapter.start({ sideThreadId: "a", attemptId: "attempt", derivedThreadId: fork.derivedThreadId, prompt: "q" });
+    client.emit("turn/completed", { threadId: fork.derivedThreadId, turn: { id: "turn-1", status: "completed" } });
+    const started = await start;
+    await Bun.sleep(5);
+    expect(started.turnId).toBe("turn-1");
+    expect(terminal).toHaveLength(1);
+    client.emit("turn/completed", { threadId: "source", turn: { id: "other", status: "completed" } });
+    expect(dropped).toContain("unowned-terminal");
   });
 });

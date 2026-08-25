@@ -76,7 +76,7 @@ describe("SideThreadService", () => {
     const service = new SideThreadService({ adapter, id: ids() });
     const side = await service.create(createInput);
     const attempt = await service.startAttempt({ sideThreadId: side.id, requestKey: "attempt-key-0002", prompt: "question" });
-    await service.cancel(side.id);
+    await Promise.all([service.cancel(side.id), service.cancel(side.id)]);
     expect(adapter.cancels).toEqual([{ derivedThreadId: side.derivedThreadId, turnId: attempt.turnId }]);
     expect(adapter.cancels).not.toContainEqual(expect.objectContaining({ derivedThreadId: side.sourceThreadId }));
   });
@@ -97,13 +97,13 @@ describe("SideThreadService", () => {
     expect(service.get(side.id)?.state).toBe("completed");
   });
 
-  test("terminal racing start return settles the same attempt once", async () => {
+  test("domain rejects unbound terminal racing start return", async () => {
     const adapter = new FakeAdapter(); adapter.terminalDuringStart = true;
     const service = new SideThreadService({ adapter, id: ids() });
     const side = await service.create(createInput);
     const attempt = await service.startAttempt({ sideThreadId: side.id, requestKey: "attempt-key-fast", prompt: "fast" });
-    expect(attempt).toMatchObject({ state: "completed", result: "fast" });
-    expect(service.get(side.id)).toMatchObject({ state: "completed", activeAttemptId: undefined });
+    expect(attempt).toMatchObject({ state: "running" });
+    expect(service.get(side.id)).toMatchObject({ state: "running", activeAttemptId: attempt.id });
   });
 
   test("archive is idempotent, purge is owned and refuses running turns", async () => {
@@ -133,8 +133,30 @@ describe("SideThreadService", () => {
     const adapter = new FakeAdapter();
     const service = new SideThreadService({ adapter, id: ids() });
     expect(adapter.listenerCount("terminal")).toBe(1);
-    service.close(); service.close();
+    await service.close(); await service.close();
     expect(adapter.listenerCount("terminal")).toBe(0);
     await expect(service.create(createInput)).rejects.toThrow("service is closed");
+  });
+
+  test("rejects duplicate fork ownership, capability drift, and unsafe identities", async () => {
+    const adapter = new FakeAdapter();
+    adapter.fork = async () => ({ derivedThreadId: "same-derived" });
+    const service = new SideThreadService({ adapter, id: ids() });
+    await service.create(createInput);
+    await expect(service.create({ ...createInput, requestKey: "create-key-0002" })).rejects.toThrow("already owned");
+    adapter.cap.evidenceRevision = "drifted";
+    await expect(service.startAttempt({ sideThreadId: "id-1", requestKey: "attempt-key-drift", prompt: "q" }))
+      .rejects.toBeInstanceOf(SideThreadUnsupportedError);
+    await expect(new SideThreadService({ adapter, id: ids() }).create({ ...createInput, sourceThreadId: "Bearer FAKE" }))
+      .rejects.toThrow("invalid sourceThreadId");
+  });
+
+  test("audit sink failures cannot orphan or duplicate a fork", async () => {
+    const adapter = new FakeAdapter();
+    const service = new SideThreadService({ adapter, id: ids(), audit: () => { throw new Error("sink down"); } });
+    const first = await service.create(createInput);
+    const retry = await service.create(createInput);
+    expect(retry.id).toBe(first.id);
+    expect(adapter.forks).toBe(1);
   });
 });

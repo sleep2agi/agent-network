@@ -11,14 +11,20 @@ independent `oven/bun:1.3.14-debian` image. It covers:
 - exact 0.148.0 + owned-stdio topology + reviewed evidence revision gate;
 - boundary-specific experimental API capability (`before`, not `through`);
 - concurrent create/attempt idempotency;
+- per-side serialization and single-flight cancel/archive/purge;
 - native `lastTurnId` and `beforeTurnId` request shapes;
 - absence of permission, sandbox, cwd and instruction overrides;
 - binding by echoed `clientUserMessageId`, not the turn/start response ID;
 - exact derived-thread/turn cancellation and rejection of source/sibling IDs;
 - out-of-order terminal isolation and duplicate/late terminal drops;
+- bounded terminal-before-identity buffering and adapter-level dropped-event audit;
+- unique derived-thread ownership and starting-attempt delete refusal;
+- immutable capability attestation on every mutation;
 - archive/purge idempotency and active-turn deletion refusal;
-- field-minimized audit without prompt/result bodies;
-- listener teardown.
+- hashed, field-minimized, non-throwing audit without prompt/result bodies;
+- close during pending start without unhandled rejection or post-close state;
+- strict identity rejection for bearer/path/newline-shaped values;
+- listener/timer/execution teardown.
 
 The run script also weakens the exact version gate and requires the adapter
 test to turn red. A green suite therefore proves the tested fail-closed branch
