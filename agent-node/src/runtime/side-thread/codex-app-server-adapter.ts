@@ -6,8 +6,11 @@ import {
   type ExactBoundary,
   type SideThreadCapability,
   type SideThreadRuntimeAdapter,
+  type SideThreadRuntimeOperation,
   type SideThreadTerminalEvent,
 } from "./domain";
+import { operationHash, stableOperationId, type OperationLedger, type OperationMethod, type SideThreadOperation } from "./operation-ledger";
+import type { ForkLeaseStore } from "./fork-lease";
 
 export interface SideThreadCodexClient extends EventEmitter {
   request<T = unknown>(method: string, params?: unknown, timeoutMs?: number): Promise<T>;
@@ -19,7 +22,11 @@ export interface CodexSideThreadAdapterOptions {
   topology: "owned-stdio" | "owned-websocket" | "shared-websocket";
   evidenceRevision: string;
   experimentalApi: boolean;
+  nodeId: string;
+  operationLedger: OperationLedger;
+  forkLeaseStore: ForkLeaseStore;
   identityTimeoutMs?: number;
+  now?: () => number;
 }
 
 interface Execution {
@@ -71,7 +78,7 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
     };
   }
 
-  async fork(input: { sideThreadId: string; sourceThreadId: string; boundary: ExactBoundary }): Promise<{ derivedThreadId: string }> {
+  async fork(input: { sideThreadId: string; sourceThreadId: string; boundary: ExactBoundary; operation?: SideThreadRuntimeOperation }): Promise<{ derivedThreadId: string }> {
     this.assertOpen();
     this.assertSupported();
     if (!this.capability().exactBoundary?.[input.boundary.kind]) {
@@ -79,6 +86,26 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
         input.boundary.kind === "before" ? "experimental-api" : "exact-boundary",
         `Codex boundary '${input.boundary.kind}' is unsupported`,
       );
+    }
+    const identity = input.operation ?? this.defaultOperation(input.sideThreadId, "fork", `fork-${input.sideThreadId}`);
+    const operation = this.operation(identity, input.sideThreadId, "fork", input.sourceThreadId,
+      JSON.stringify([input.sourceThreadId, input.boundary.kind, input.boundary.turnId]));
+    const existing = this.existing(operation);
+    if (existing && existing.state !== "prepared") return this.reconcileFork({ ...input, operation: identity }, existing);
+    if (!existing) this.put(operation);
+    const sourceThreadHash = operationHash(input.sourceThreadId);
+    let lease = this.opts.forkLeaseStore.acquire({
+      version: 1, nodeId: identity.nodeId, sourceThreadHash,
+      sideThreadId: input.sideThreadId, operationId: identity.operationId,
+      fingerprint: operation.fingerprint, snapshotThreadIdHashes: operation.result?.snapshotThreadIdHashes ?? [],
+      state: "snapshot", updatedAt: this.now(),
+    });
+    if (lease.state !== "snapshot") return this.reconcileFork({ ...input, operation: identity }, this.mustOperation(operation));
+    if (lease.snapshotThreadIdHashes.length === 0) {
+      const snapshot = await this.listThreads();
+      lease = { ...lease, snapshotThreadIdHashes: snapshot.map((thread) => operationHash(thread.id)), updatedAt: this.now() };
+      this.opts.forkLeaseStore.put(lease);
+      this.put({ ...operation, result: { snapshotThreadIdHashes: lease.snapshotThreadIdHashes }, updatedAt: this.now() });
     }
     const params: Record<string, unknown> = {
       threadId: input.sourceThreadId,
@@ -89,7 +116,16 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
         ? { lastTurnId: input.boundary.turnId }
         : { beforeTurnId: input.boundary.turnId }),
     };
-    const response = await this.rpc<{ thread?: { id?: string } }>("thread/fork", params);
+    const sent = { ...this.mustOperation(operation), state: "sent" as const, updatedAt: this.now() };
+    this.put(sent);
+    lease = { ...lease, state: "sent", updatedAt: this.now() }; this.opts.forkLeaseStore.put(lease);
+    let response: { thread?: { id?: string } };
+    try { response = await this.rpc<{ thread?: { id?: string } }>("thread/fork", params); }
+    catch (error) {
+      const ambiguous = { ...sent, state: "ambiguous" as const, updatedAt: this.now() };
+      this.put(ambiguous); this.opts.forkLeaseStore.put({ ...lease, state: "ambiguous", updatedAt: this.now() });
+      return this.reconcileFork({ ...input, operation: identity }, ambiguous, error);
+    }
     this.assertOpen();
     const derivedThreadId = response?.thread?.id;
     if (!derivedThreadId || derivedThreadId === input.sourceThreadId) {
@@ -97,18 +133,26 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
     }
     if (this.derivedThreads.has(derivedThreadId)) throw new SideThreadConflictError("Codex reused a derived thread identity");
     this.derivedThreads.set(derivedThreadId, input.sideThreadId);
+    this.put({ ...sent, state: "accepted", result: { ...sent.result, derivedThreadIdHash: operationHash(derivedThreadId) }, updatedAt: this.now() });
+    this.opts.forkLeaseStore.release(identity.nodeId, input.sourceThreadId, identity.operationId);
     return { derivedThreadId };
   }
 
-  async start(input: { sideThreadId: string; attemptId: string; derivedThreadId: string; prompt: string }): Promise<{ turnId: string }> {
+  async start(input: { sideThreadId: string; attemptId: string; derivedThreadId: string; prompt: string; operation?: SideThreadRuntimeOperation }): Promise<{ turnId: string }> {
     this.assertOpen();
     this.assertOwnedThread(input.derivedThreadId, input.sideThreadId);
     const clientUserMessageId = `anet-side:${input.sideThreadId}:${input.attemptId}`;
-    if (this.byClientId.has(clientUserMessageId)) throw new SideThreadConflictError("duplicate Codex attempt identity");
+    const identity = input.operation ?? this.defaultOperation(input.sideThreadId, "start", `start-${input.attemptId}`);
+    const operation = this.operation(identity, input.sideThreadId, "start", input.derivedThreadId,
+      JSON.stringify([input.sideThreadId, input.attemptId, input.derivedThreadId, operationHash(input.prompt)]));
+    const prior = this.existing(operation);
+    if (prior && prior.state !== "prepared") return this.reconcileStart({ ...input, operation: identity }, clientUserMessageId, prior);
+    if (!prior) this.put(operation);
+    if (this.byClientId.has(clientUserMessageId)) return this.reconcileStart({ ...input, operation: identity }, clientUserMessageId, this.mustOperation(operation));
     let resolveIdentity!: (turnId: string) => void;
     let rejectIdentity!: (error: Error) => void;
-    const identity = new Promise<string>((resolve, reject) => { resolveIdentity = resolve; rejectIdentity = reject; });
-    void identity.catch(() => {});
+    const identityEcho = new Promise<string>((resolve, reject) => { resolveIdentity = resolve; rejectIdentity = reject; });
+    void identityEcho.catch(() => {});
     const execution: Execution = {
       sideThreadId: input.sideThreadId, attemptId: input.attemptId,
       threadId: input.derivedThreadId, clientUserMessageId,
@@ -121,6 +165,8 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
       }, this.opts.identityTimeoutMs ?? 10_000),
     };
     this.byClientId.set(clientUserMessageId, execution);
+    const sent = { ...this.mustOperation(operation), state: "sent" as const, updatedAt: this.now() };
+    this.put(sent);
     try {
       let response: { turn?: { id?: string }; turnId?: string } | undefined;
       try {
@@ -129,7 +175,7 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
         clientUserMessageId,
         input: [{ type: "text", text: input.prompt }],
         });
-        const abortOnIdentityFailure = identity.then(
+        const abortOnIdentityFailure = identityEcho.then(
           () => new Promise<never>(() => {}),
           (error) => Promise.reject(error),
         );
@@ -144,41 +190,52 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
       if (!execution.responseTurnId && !execution.turnId) throw new SideThreadConflictError("Codex returned an invalid turn identity");
       // Response identity alone is not authoritative: Codex automatic goal
       // continuation can replace it. Wait for the echoed client id.
-      const turnId = await identity;
+      const turnId = await identityEcho;
       execution.readyForTerminal = true;
       if (execution.pendingTerminal) {
         const pending = execution.pendingTerminal;
         execution.pendingTerminal = undefined;
         setTimeout(() => this.onCompleted(pending), 0);
       }
+      this.put({ ...sent, state: "accepted", result: { turnIdHash: operationHash(turnId) }, updatedAt: this.now() });
       return { turnId };
     } catch (error) {
-      if (!(error instanceof SideThreadAmbiguousError)) this.dropExecution(execution);
-      throw error;
+      const current = this.mustOperation(operation);
+      if (current.state === "sent") this.put({ ...current, state: "ambiguous", updatedAt: this.now() });
+      if (!(error instanceof SideThreadAmbiguousError) && !execution.turnId) execution.identityAmbiguous = true;
+      throw error instanceof SideThreadAmbiguousError ? error
+        : new SideThreadAmbiguousError("Codex start outcome is ambiguous; refusing a duplicate turn/start");
     }
   }
 
-  async cancel(input: { derivedThreadId: string; turnId: string }): Promise<void> {
+  async cancel(input: { sideThreadId?: string; derivedThreadId: string; turnId: string; operation?: SideThreadRuntimeOperation }): Promise<void> {
     this.assertOpen();
     this.assertOwnedThread(input.derivedThreadId);
     const execution = this.byTurn.get(turnKey(input.derivedThreadId, input.turnId));
     if (!execution) throw new SideThreadConflictError("refusing to cancel an unowned Codex turn");
-    await this.rpc("turn/interrupt", { threadId: input.derivedThreadId, turnId: input.turnId });
+    const sideThreadId = input.sideThreadId ?? execution.sideThreadId;
+    await this.durableMutation(sideThreadId, "interrupt", input.operation ?? this.defaultOperation(sideThreadId, "interrupt", `cancel-${execution.attemptId}`), input.derivedThreadId,
+      JSON.stringify([input.derivedThreadId, input.turnId]), "turn/interrupt",
+      { threadId: input.derivedThreadId, turnId: input.turnId });
   }
 
-  async archive(input: { derivedThreadId: string }): Promise<void> {
+  async archive(input: { sideThreadId?: string; derivedThreadId: string; operation?: SideThreadRuntimeOperation }): Promise<void> {
     this.assertOpen();
     this.assertOwnedThread(input.derivedThreadId);
-    await this.rpc("thread/archive", { threadId: input.derivedThreadId });
+    const sideThreadId = input.sideThreadId ?? this.derivedThreads.get(input.derivedThreadId)!;
+    await this.durableMutation(sideThreadId, "archive", input.operation ?? this.defaultOperation(sideThreadId, "archive", `archive-${sideThreadId}`), input.derivedThreadId,
+      JSON.stringify([input.derivedThreadId]), "thread/archive", { threadId: input.derivedThreadId });
   }
 
-  async delete(input: { derivedThreadId: string }): Promise<void> {
+  async delete(input: { sideThreadId?: string; derivedThreadId: string; operation?: SideThreadRuntimeOperation }): Promise<void> {
     this.assertOpen();
     this.assertOwnedThread(input.derivedThreadId);
     if ([...this.byTurn.values(), ...this.byClientId.values()].some((x) => x.threadId === input.derivedThreadId)) {
       throw new SideThreadConflictError("refusing to delete a thread with an active owned turn");
     }
-    await this.rpc("thread/delete", { threadId: input.derivedThreadId });
+    const sideThreadId = input.sideThreadId ?? this.derivedThreads.get(input.derivedThreadId)!;
+    await this.durableMutation(sideThreadId, "delete", input.operation ?? this.defaultOperation(sideThreadId, "delete", `purge-${sideThreadId}`), input.derivedThreadId,
+      JSON.stringify([input.derivedThreadId]), "thread/delete", { threadId: input.derivedThreadId });
     this.derivedThreads.delete(input.derivedThreadId);
   }
   async discardFork(input: { sideThreadId: string; derivedThreadId: string }): Promise<void> {
@@ -296,6 +353,149 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
     this.assertOpen();
     return Promise.race([this.opts.client.request<T>(method, params), this.closedSignal]);
   }
+  private now(): number { return this.opts.now?.() ?? Date.now(); }
+  private defaultOperation(sideThreadId: string, method: OperationMethod, idempotencyKey: string): SideThreadRuntimeOperation {
+    return { nodeId: this.opts.nodeId, operationId: stableOperationId(sideThreadId, method, idempotencyKey), idempotencyKey };
+  }
+  private operation(identity: SideThreadRuntimeOperation, sideThreadId: string, method: OperationMethod, target: string, fingerprint: string): SideThreadOperation {
+    if (identity.operationId.length === 0 || identity.idempotencyKey.length === 0 || identity.nodeId.length === 0) {
+      throw new SideThreadConflictError("missing persistent operation identity");
+    }
+    if (identity.nodeId !== this.opts.nodeId) throw new SideThreadConflictError("persistent operation node ownership mismatch");
+    return { version: 1, nodeId: identity.nodeId, sideThreadId, opId: identity.operationId,
+      idempotencyKey: identity.idempotencyKey, method, targetHash: operationHash(target),
+      fingerprint: operationHash(fingerprint), state: "prepared", updatedAt: this.now() };
+  }
+  private existing(expected: SideThreadOperation): SideThreadOperation | undefined {
+    const existing = this.opts.operationLedger.get(expected.nodeId, expected.sideThreadId, expected.opId);
+    if (!existing) return undefined;
+    for (const key of ["idempotencyKey", "method", "targetHash", "fingerprint"] as const) {
+      if (existing[key] !== expected[key]) throw new SideThreadConflictError(`persistent operation ${key} mismatch`);
+    }
+    return existing;
+  }
+  private mustOperation(expected: SideThreadOperation): SideThreadOperation {
+    const operation = this.existing(expected);
+    if (!operation) throw new SideThreadConflictError("persistent operation disappeared");
+    return operation;
+  }
+  private put(operation: SideThreadOperation): void { this.opts.operationLedger.put(operation); }
+  private async reconcileFork(input: { sideThreadId: string; sourceThreadId: string; boundary: ExactBoundary; operation: SideThreadRuntimeOperation },
+    prior: SideThreadOperation, cause?: unknown): Promise<{ derivedThreadId: string }> {
+    const expected = this.operation(input.operation, input.sideThreadId, "fork", input.sourceThreadId,
+      JSON.stringify([input.sourceThreadId, input.boundary.kind, input.boundary.turnId]));
+    if (prior.state === "sent") {
+      prior = { ...prior, state: "ambiguous", updatedAt: this.now() };
+      this.put(prior);
+    }
+    let candidate: RuntimeThread | undefined;
+    try {
+      const threads = await this.listThreads();
+      if (prior.result?.derivedThreadIdHash) {
+        candidate = threads.find((thread) => operationHash(thread.id) === prior.result!.derivedThreadIdHash);
+        if (candidate && candidate.forkedFromId !== input.sourceThreadId) {
+          candidate = await this.readThread(candidate.id);
+          if (candidate.forkedFromId !== input.sourceThreadId) candidate = undefined;
+        }
+      } else {
+        const reconciling = prior.state === "reconciling" ? prior
+          : { ...prior, state: "reconciling" as const, updatedAt: this.now() };
+        if (reconciling !== prior) this.put(reconciling);
+        const snapshot = new Set(prior.result?.snapshotThreadIdHashes ?? []);
+        const unseen = threads.filter((thread) => thread.id !== input.sourceThreadId && !snapshot.has(operationHash(thread.id)));
+        const inspected = await Promise.all(unseen.map((thread) => thread.forkedFromId ? thread : this.readThread(thread.id)));
+        const candidates = inspected.filter((thread) => thread.forkedFromId === input.sourceThreadId);
+        if (candidates.length !== 1) {
+          this.put({ ...reconciling, state: "ambiguous", result: { ...reconciling.result,
+            classification: candidates.length === 0 ? "no-candidate" : "multiple-candidates" }, updatedAt: this.now() });
+          throw new SideThreadAmbiguousError(`Codex fork outcome has ${candidates.length} candidates; refusing duplicate thread/fork`);
+        }
+        candidate = candidates[0];
+        prior = reconciling;
+      }
+      if (!candidate) throw new SideThreadAmbiguousError("accepted Codex fork is not visible; refusing duplicate thread/fork");
+      if (candidate.id === input.sourceThreadId) throw new SideThreadConflictError("reconciled fork reused source thread");
+      this.registerDerived(candidate.id, input.sideThreadId);
+      if (prior.state === "accepted" || prior.state === "ambiguous" || prior.state === "reconciling") {
+        if (prior.state === "ambiguous") { prior = { ...prior, state: "reconciling", updatedAt: this.now() }; this.put(prior); }
+        this.put({ ...prior, state: "reconciled", result: { ...prior.result,
+          derivedThreadIdHash: operationHash(candidate.id), classification: "unique-candidate" }, updatedAt: this.now() });
+      }
+      this.opts.forkLeaseStore.release(input.operation.nodeId, input.sourceThreadId, input.operation.operationId);
+      return { derivedThreadId: candidate.id };
+    } catch (error) {
+      if (error instanceof SideThreadAmbiguousError || error instanceof SideThreadConflictError) throw error;
+      const current = this.mustOperation(expected);
+      if (current.state === "reconciling") this.put({ ...current, state: "ambiguous", updatedAt: this.now() });
+      throw new SideThreadAmbiguousError(`Codex fork reconciliation failed; refusing duplicate thread/fork${cause ? " after response loss" : ""}`);
+    }
+  }
+  private async reconcileStart(input: { sideThreadId: string; attemptId: string; derivedThreadId: string; prompt: string; operation: SideThreadRuntimeOperation },
+    clientUserMessageId: string, prior: SideThreadOperation): Promise<{ turnId: string }> {
+    const live = this.byClientId.get(clientUserMessageId);
+    let turnId = live?.turnId;
+    let current = prior;
+    if (current.state === "sent") { current = { ...current, state: "ambiguous", updatedAt: this.now() }; this.put(current); }
+    if (!turnId) {
+      if (current.state === "ambiguous") { current = { ...current, state: "reconciling", updatedAt: this.now() }; this.put(current); }
+      try {
+        const thread = await this.readThread(input.derivedThreadId);
+        const matches = (thread.turns ?? []).filter((turn) => turnHasClientId(turn, clientUserMessageId));
+        if (prior.result?.turnIdHash) {
+          turnId = matches.find((turn) => operationHash(turn.id) === prior.result!.turnIdHash)?.id;
+        } else if (matches.length === 1) turnId = matches[0].id;
+      } catch { /* the durable ambiguity below is authoritative */ }
+    }
+    if (!turnId) {
+      if (current.state === "reconciling") this.put({ ...current, state: "ambiguous", updatedAt: this.now() });
+      throw new SideThreadAmbiguousError("Codex start outcome cannot be uniquely reconciled; refusing duplicate turn/start");
+    }
+    if (current.state === "ambiguous") { current = { ...current, state: "reconciling", updatedAt: this.now() }; this.put(current); }
+    if (current.state === "accepted" || current.state === "reconciling") {
+      this.put({ ...current, state: "reconciled", result: { ...current.result, turnIdHash: operationHash(turnId) }, updatedAt: this.now() });
+    }
+    return { turnId };
+  }
+  private async listThreads(): Promise<RuntimeThread[]> {
+    const all: RuntimeThread[] = []; let cursor: string | undefined;
+    do {
+      const response = await this.rpc<{ data?: RuntimeThread[]; threads?: RuntimeThread[]; nextCursor?: string | null }>("thread/list",
+        { limit: 100, ...(cursor ? { cursor } : {}) });
+      const page = response?.data ?? response?.threads;
+      if (!Array.isArray(page) || page.some((thread) => !thread?.id)) throw new SideThreadConflictError("Codex returned an invalid thread/list snapshot");
+      all.push(...page); cursor = response.nextCursor ?? undefined;
+      if (all.length > 10_000) throw new SideThreadConflictError("Codex thread/list snapshot exceeded bound");
+    } while (cursor);
+    return all;
+  }
+  private async readThread(threadId: string): Promise<RuntimeThread> {
+    const response = await this.rpc<{ thread?: RuntimeThread }>("thread/read", { threadId, includeTurns: true });
+    if (!response?.thread?.id || response.thread.id !== threadId) throw new SideThreadConflictError("Codex returned an invalid thread/read result");
+    return response.thread;
+  }
+  private registerDerived(threadId: string, sideThreadId: string): void {
+    const owner = this.derivedThreads.get(threadId);
+    if (owner && owner !== sideThreadId) throw new SideThreadConflictError("Codex reused a derived thread identity");
+    this.derivedThreads.set(threadId, sideThreadId);
+  }
+  private async durableMutation(sideThreadId: string, method: "interrupt" | "archive" | "delete", identity: SideThreadRuntimeOperation,
+    target: string, fingerprint: string, rpcMethod: string, params: unknown): Promise<void> {
+    const operation = this.operation(identity, sideThreadId, method, target, fingerprint);
+    const prior = this.existing(operation);
+    if (prior) {
+      if (prior.state === "accepted" || prior.state === "reconciled") return;
+      if (prior.state !== "prepared") throw new SideThreadAmbiguousError(`Codex ${method} outcome is ambiguous; refusing duplicate RPC`);
+    } else this.put(operation);
+    const sent = { ...this.mustOperation(operation), state: "sent" as const, updatedAt: this.now() };
+    this.put(sent);
+    try {
+      await this.rpc(rpcMethod, params);
+      this.put({ ...sent, state: "accepted", updatedAt: this.now() });
+    } catch {
+      this.put({ ...sent, state: "ambiguous", updatedAt: this.now() });
+      throw new SideThreadAmbiguousError(`Codex ${method} outcome is ambiguous; refusing duplicate RPC`);
+    }
+  }
   private assertOwnedThread(threadId: string, sideThreadId?: string): void {
     this.assertSupported();
     const owner = this.derivedThreads.get(threadId);
@@ -311,3 +511,11 @@ function unsupported(reason: "version" | "topology" | "exact-boundary", opts: Co
   };
 }
 function turnKey(threadId: string, turnId: string): string { return `${threadId}\0${turnId}`; }
+interface RuntimeTurn { id: string; items?: unknown[]; [key: string]: unknown }
+interface RuntimeThread { id: string; forkedFromId?: string; turns?: RuntimeTurn[]; [key: string]: unknown }
+function turnHasClientId(turn: RuntimeTurn, clientId: string): boolean {
+  return (turn.items ?? []).some((item) => {
+    const value = item as { clientId?: string; client_id?: string };
+    return value?.clientId === clientId || value?.client_id === clientId;
+  });
+}

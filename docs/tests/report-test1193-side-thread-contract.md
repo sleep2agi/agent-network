@@ -11,6 +11,15 @@ independent `oven/bun:1.3.14-debian` image. It covers:
 - exact 0.148.0 + owned-stdio topology + reviewed evidence revision gate;
 - boundary-specific experimental API capability (`before`, not `through`);
 - concurrent create/attempt idempotency;
+- stable side/attempt identities across ambiguous retries;
+- private atomic persistent operation journal with immutable identities and
+  monotonic state transitions;
+- crash-persistent per-source fork leases without timeout stealing;
+- paginated `thread/list` snapshot before every fork;
+- unique-candidate fork reconciliation after response loss, with zero/multiple
+  candidates remaining ambiguous and never causing a second fork RPC;
+- accepted/ambiguous start, interrupt, archive and delete replay with exactly
+  one runtime RPC;
 - per-side serialization and single-flight cancel/archive/purge;
 - native `lastTurnId` and `beforeTurnId` request shapes;
 - absence of permission, sandbox, cwd and instruction overrides;
@@ -29,6 +38,11 @@ independent `oven/bun:1.3.14-debian` image. It covers:
 The run script also weakens the exact version gate and requires the adapter
 test to turn red. A green suite therefore proves the tested fail-closed branch
 is reachable rather than merely present in source.
+
+Rev4 result: **32 tests passed, 0 failed, 109 assertions**, followed by the
+existing witnessed-red mutation pass. The suite now includes all four test
+files under `agent-node/src/runtime/side-thread`, so ledger/lease tests cannot
+silently fall outside the Docker gate.
 
 Command:
 
