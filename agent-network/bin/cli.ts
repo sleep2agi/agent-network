@@ -197,6 +197,7 @@ function serverConfigPath() { return join(home, ".anet", "server", "config.json"
 function adminUtokPath() { return join(home, ".anet", "server", "admin-utok.json"); }
 function dashboardLaunchRecordPath(port: string | number) { return join(home, ".anet", "server", `dashboard-${port}.json`); }
 function nodesDir() { return join(process.cwd(), ".anet", "nodes"); }
+function skillCachePath() { return join(home, ".anet", "skillhub", "catalog-cache.json"); }
 function shellQuote(value: string): string { return `'${value.replace(/'/g, `'\\''`)}'`; }
 /**
  * Pane target (`<session>:<window>.<pane>`) for a session, or null.
@@ -1570,6 +1571,13 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
 // `anet upgrade` (#88) surfaces this constant in its plan output so users
 // understand global-install version != version anet hub start actually runs.
 const PINNED_SERVER_VERSION = "0.9.0-preview.30";
+
+// Canonical SkillHub URL: https://anet.sh/skillhub/catalog.json currently
+// returns 307 to this www host. Pin the direct 200 URL so catalog fetch
+// failures are real network/content failures, not avoidable redirect/domain
+// ambiguity.
+const DEFAULT_SKILL_CATALOG_URL = "https://www.anet.sh/skillhub/catalog.json";
+
 function sessionFileExists(uuid: string, cwd: string = process.cwd()): boolean {
   if (!uuid) return false;
   return existsSync(join(homedir(), ".claude", "projects", encodeCwd(cwd), `${uuid}.jsonl`));
@@ -3417,6 +3425,134 @@ function friendlyError(e: any): string {
   return msg;
 }
 
+type SkillCatalogEntry = {
+  slug: string;
+  name?: string;
+  description?: string;
+  version?: string;
+  content_url?: string;
+  content_sha256?: string;
+};
+
+type SkillCatalog = {
+  skills?: SkillCatalogEntry[];
+};
+
+function skillCatalogUrl(): string {
+  return process.env.ANET_SKILL_CATALOG_URL || DEFAULT_SKILL_CATALOG_URL;
+}
+
+function sha256Text(text: string): string {
+  return createHash("sha256").update(text).digest("hex");
+}
+
+function writeSkillCatalogCache(catalog: SkillCatalog, sourceUrl: string) {
+  const p = skillCachePath();
+  mkdirSync(dirname(p), { recursive: true });
+  writeFileSync(p, JSON.stringify({
+    cached_at: new Date().toISOString(),
+    source_url: sourceUrl,
+    catalog,
+  }, null, 2) + "\n");
+}
+
+function readSkillCatalogCache(): { cached_at: string; source_url: string; catalog: SkillCatalog } | null {
+  const p = skillCachePath();
+  if (!existsSync(p)) return null;
+  try {
+    const data = JSON.parse(readFileSync(p, "utf-8"));
+    if (!data?.catalog || !Array.isArray(data.catalog.skills)) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchJson(url: string): Promise<any> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.json();
+}
+
+async function loadSkillCatalog(verbose = false): Promise<{ catalog: SkillCatalog; sourceUrl: string; fromCache: boolean; cachedAt?: string }> {
+  const url = skillCatalogUrl();
+  try {
+    const catalog = await fetchJson(url) as SkillCatalog;
+    if (!Array.isArray(catalog.skills)) throw new Error("catalog has no skills[]");
+    writeSkillCatalogCache(catalog, url);
+    if (verbose) console.error(`[anet] Skill cache: ${skillCachePath()}`);
+    return { catalog, sourceUrl: url, fromCache: false };
+  } catch (e: any) {
+    const cached = readSkillCatalogCache();
+    if (cached) {
+      console.error(`[anet] Using local SkillHub cache: ${skillCachePath()}`);
+      console.error(`[anet] Cache time: ${cached.cached_at}`);
+      console.error(`[anet] Cache source: ${cached.source_url}`);
+      if (verbose) console.error(`[anet] Online fetch failed: ${url} (${e?.message || e})`);
+      return { catalog: cached.catalog, sourceUrl: cached.source_url, fromCache: true, cachedAt: cached.cached_at };
+    }
+    throw new Error(`Cannot read ${url} and no local cache exists at ${skillCachePath()}`);
+  }
+}
+
+function resolveSkillContentUrl(catalogUrl: string, contentUrl: string): string {
+  return new URL(contentUrl, catalogUrl).toString();
+}
+
+async function fetchSkillContent(entry: SkillCatalogEntry, catalogUrl: string): Promise<string> {
+  if (!entry.content_url) throw new Error(`Skill ${entry.slug} has no content_url`);
+  if (!entry.content_sha256 || !/^[0-9a-f]{64}$/i.test(entry.content_sha256)) {
+    throw new Error(`Skill ${entry.slug} has no valid content_sha256`);
+  }
+  const contentUrl = resolveSkillContentUrl(catalogUrl, entry.content_url);
+  const res = await fetch(contentUrl);
+  if (!res.ok) throw new Error(`Cannot read ${contentUrl}: HTTP ${res.status}`);
+  const text = await res.text();
+  const actual = sha256Text(text);
+  if (actual.toLowerCase() !== entry.content_sha256.toLowerCase()) {
+    throw new Error(`sha256 mismatch for ${entry.slug}: expected ${entry.content_sha256}, got ${actual}`);
+  }
+  return text;
+}
+
+async function skillCommand() {
+  const sub = args[1];
+  const verbose = args.includes("--verbose") || args.includes("-v");
+  if (sub === "list" || sub === "ls") {
+    const { catalog } = await loadSkillCatalog(verbose);
+    const skills = [...(catalog.skills || [])].sort((a, b) => (a.slug || "").localeCompare(b.slug || ""));
+    if (skills.length === 0) {
+      console.log("No skills found.");
+      return;
+    }
+    for (const s of skills) {
+      console.log(`${s.slug}\t${s.name || ""}\t${s.description || ""}\t${s.version || ""}`);
+    }
+    if (verbose) console.error(`[anet] Cache path: ${skillCachePath()}`);
+    return;
+  }
+  if (sub === "show") {
+    const slug = args.slice(2).find(a => a !== "--verbose" && a !== "-v" && !a.startsWith("--"));
+    if (!slug) {
+      console.error("Usage: anet skill show <slug>");
+      process.exit(1);
+    }
+    const { catalog, sourceUrl } = await loadSkillCatalog(verbose);
+    const entry = (catalog.skills || []).find(s => s.slug === slug);
+    if (!entry) {
+      console.error(`Skill not found: ${slug}`);
+      process.exit(1);
+    }
+    const text = await fetchSkillContent(entry, sourceUrl);
+    process.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
+    if (verbose) console.error(`[anet] Verified sha256: ${entry.content_sha256}`);
+    return;
+  }
+  console.log(`Usage:
+  anet skill list [--verbose]
+  anet skill show <slug> [--verbose]`);
+}
+
 function printHelp() {
   console.log(`
 anet — AI Agent Network CLI (V2)
@@ -3524,6 +3660,8 @@ Other:
   anet network ls               List my networks
   anet network create <name>    Create a network
   anet network use <name>       Switch to a network
+  anet skill list               List public SkillHub skills
+  anet skill show <slug>        Print a skill's SKILL.md (sha256 verified)
   anet license                  Show license status + limits
   anet activate <key>           Activate license key
   anet logs <name>              Show recent agent logs
@@ -15053,6 +15191,7 @@ switch (command) {
   case "setup": await setupCommand(); break;
   case "upgrade": await upgradeCommand(); break;
   case "session": sessionCommand(); break;
+  case "skill": await skillCommand(); break;
   case "ls": case "list": await lsCommand(); break;
   case "status": await statusCommand(); break;
   case "tasks": await tasksCommand(); break;
@@ -15102,7 +15241,7 @@ switch (command) {
       const TOP_COMMANDS = [
         "init", "create", "attach", "server", "hub", "node", "project", "start", "resume",
         "rename", "stop", "delete", "import", "channel", "setup", "upgrade",
-        "session", "ls", "list", "status", "tasks", "goal", "doctor", "license",
+        "session", "skill", "ls", "list", "status", "tasks", "goal", "doctor", "license",
         "activate", "passwd", "token", "demo", "batch", "logs", "info", "config",
         "login", "register", "logout", "whoami", "network", "run", "version", "help",
       ];

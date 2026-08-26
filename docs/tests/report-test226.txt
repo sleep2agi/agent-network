@@ -1,82 +1,58 @@
-# Test 226 — opencode-cli release pin matrix
+# Test 226 SkillHub CLI
+- Runs in Docker from source.
+- Catalog URL: http://127.0.0.1:8126/skillhub/catalog.json
+- Cache path: /tmp/test226/home/.anet/skillhub/catalog-cache.json
 
-date: 2026-07-16T03:15:29+00:00
-candidate pin: 1.18.1
-opencode: 1.18.1
-bun: 1.3.1
-node: v18.20.4
 
-## Layer 1 — environment / ACP surface
+## 1. Online list writes cache and shows cache path under --verbose
+[anet] Skill cache: /tmp/test226/home/.anet/skillhub/catalog-cache.json
+demo-skill	Demo Skill	Fixture skill for anet skill commands.	1.0.0
+[anet] Cache path: /tmp/test226/home/.anet/skillhub/catalog-cache.json
+PASS: skill list shows slug
+PASS: skill list shows name
+PASS: verbose output shows cache path
+PASS: catalog cache written
 
-- exact binary version: PASS
-- opencode acp --help: PASS
+## 2. Online show verifies sha256 and prints SKILL.md
+[anet] Skill cache: /tmp/test226/home/.anet/skillhub/catalog-cache.json
+# Demo Skill
 
-## Layer 2 — real ACP single-turn
+Use this fixture.
+[anet] Verified sha256: 71cd04f83fc233872e22bd235d197260f97b9df0341c45e36eff27bcb22f695b
+PASS: skill show prints content
+PASS: skill show reports verification under verbose
 
-# RFC-029 PR④ — kernel-live ACP e2e report
+## 3. Offline list uses cache with time, source URL, and path
+[anet] Using local SkillHub cache: /tmp/test226/home/.anet/skillhub/catalog-cache.json
+[anet] Cache time: 2026-08-26T23:13:49.899Z
+[anet] Cache source: http://127.0.0.1:8126/skillhub/catalog.json
+demo-skill	Demo Skill	Fixture skill for anet skill commands.	1.0.0
+PASS: offline cache use is explicit
+PASS: offline cache time printed
+PASS: offline cache source printed
+PASS: offline cache path printed
 
-date: 2026-07-16T03:15:30+00:00
-bun: 1.3.1
-node: v18.20.4
-opencode: 1.18.1
-free model: opencode/deepseek-v4-flash-free
+## 4. Offline without cache names failed URL
+[anet] FATAL: Error: Cannot read http://127.0.0.1:8126/skillhub/catalog.json and no local cache exists at /tmp/test226/no-cache-home/.anet/skillhub/catalog-cache.json
+    at loadSkillCatalog (/app/agent-network/bin/cli.ts:3494:15)
+    at async skillCommand (/app/agent-network/bin/cli.ts:3522:31)
+    at async main (/app/agent-network/bin/cli.ts:15194:23)
+    at processTicksAndRejections (native:7:39)
+PASS: offline no-cache error names URL
+PASS: offline no-cache error is clear
 
-## Full harness output
+## 5. Witnessed-red: same bad fixture accepted without verification, rejected by anet
+# Demo Skill
 
-```
-[runtime.log] [opencode-acp] session/new — ses_09713c95...
-===S-happy-live-BEGIN===
-{
-  "freeModel": "opencode/deepseek-v4-flash-free",
-  "wallMs": 9227,
-  "replyText": "hello world",
-  "replyTextLength": 11,
-  "thoughtTextLength": 94,
-  "sessionId": "ses_09713c955ffeS3V1KKYzyigDOR",
-  "chunks": 2,
-  "thoughtChunks": 22,
-  "stopReason": "end_turn",
-  "rescued": false,
-  "usage": {
-    "inputTokens": 3657,
-    "outputTokens": 3,
-    "totalTokens": 3682,
-    "thoughtTokens": 22
-  },
-  "pidsBefore": [],
-  "pidsDuring": [
-    83
-  ],
-  "pidsAfter": [],
-  "logsFromRuntime": [
-    "[opencode-acp] session/new — ses_09713c95..."
-  ],
-  "warnsFromRuntime": []
-}
-===S-happy-live-END===
-```
+Use this fixture.
+PASS: witness baseline: bad content accepted when sha256 is not checked
+[anet] FATAL: Error: sha256 mismatch for demo-skill: expected 0000000000000000000000000000000000000000000000000000000000000000, got 71cd04f83fc233872e22bd235d197260f97b9df0341c45e36eff27bcb22f695b
+    at fetchSkillContent (/app/agent-network/bin/cli.ts:3513:15)
+    at async skillCommand (/app/agent-network/bin/cli.ts:3546:24)
+    at async main (/app/agent-network/bin/cli.ts:15194:23)
+    at processTicksAndRejections (native:7:39)
+PASS: witness red: anet rejects mismatched sha256
+PASS: mismatched content was not printed
 
-harness exit=0
-
-## Assertions
-
-  ✓ opencode child present during turn (pgrep) — ge '1' got '1'
-  ✓ session id issued by session/new — regex '^ses_' got 'ses_09713c955ffeS3V1KKYzyigDOR'
-  ✓ at least one agent_message_chunk — ge '1' got '2'
-  ✓ replyText non-empty (real upstream free model produced text) — gt '0' got '11'
-  ✓ replyText looks like a real turn (contains a letter) — regex '[A-Za-z]' got 'hello world'
-  ✓ stopReason recorded — regex '.+' got 'end_turn'
-  ✓ no orphan opencode after runtime.client.stop — eq '0' got '0'
-  ✓ wall time under 3-minute idle ceiling — regex '^[0-9]+$' got '9227'
-
-OVERALL: PASS
-trailer: RFC-029 PR④ kernel-live — PASS
-
-## Gate
-
-- real opencode child spawned: PASS
-- ACP session/new returned a session id: PASS
-- live free-model reply was non-empty: PASS
-- child cleanup left no orphan: PASS
-
-OVERALL: PASS
+## Summary
+- Results: 15 passed, 0 failed
