@@ -1,9 +1,9 @@
-# test846 —— docs/stale-issue-review.md 里那些「某文件某行写着某句」的断言,还成立吗
+# test846 —— docs/stale-issue-review.md 里的源码定位断言还成立吗
 #
 # 起因:#846 的审查指出本仓要求所有改动跑 Docker E2E,而那份文档是纯散文、
 # 没有可执行断言。这就是把它变成门的那一步。
 #
-# 🔴 边界:这道门只证明「引的行号没漂」。正文的结论对不对、引用之外的散文,
+# 🔴 边界:这道门只证明源码定位仍成立。正文的结论对不对、引用之外的散文,
 #    它都不碰。判据与理由写在 scripts/check-doc-claims.py 的文件头。
 
 FROM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc

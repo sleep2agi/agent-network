@@ -13,6 +13,7 @@ db.exec(`
     hostname      TEXT,
     agent         TEXT,
     project_dir   TEXT,
+    os_user       TEXT,
     version       TEXT,
     status        TEXT DEFAULT 'offline',
     task          TEXT,
@@ -76,6 +77,7 @@ for (const col of [
   { name: "channels", def: "TEXT" },
   { name: "last_seen_at", def: "TEXT" },
   { name: "model", def: "TEXT" },
+  { name: "os_user", def: "TEXT" },
   { name: "cpu_load_1min", def: "REAL" },
   { name: "cpu_cores", def: "INTEGER" },
   { name: "mem_total_gb", def: "REAL" },
@@ -1022,6 +1024,7 @@ function migrateSessionsNetworkAliasUnique() {
         hostname      TEXT,
         agent         TEXT,
         project_dir   TEXT,
+        os_user       TEXT,
         version       TEXT,
         status        TEXT DEFAULT 'offline',
         task          TEXT,
@@ -1055,7 +1058,7 @@ function migrateSessionsNetworkAliasUnique() {
     `);
     db.exec(`
       INSERT OR REPLACE INTO sessions_migrated (
-        resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version,
+        resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, os_user, version,
         status, task, output, progress, score, registered_at, updated_at, node_id,
         session_id, config_path, channels, last_seen_at, model, cpu_load_1min,
         cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb,
@@ -1063,7 +1066,7 @@ function migrateSessionsNetworkAliasUnique() {
         process_uptime_seconds, process_in_flight_count, network_id
       )
       SELECT
-        resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version,
+        resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, os_user, version,
         status, task, output, progress, score, registered_at, updated_at, node_id,
         session_id, config_path, channels, last_seen_at, model, cpu_load_1min,
         cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb,

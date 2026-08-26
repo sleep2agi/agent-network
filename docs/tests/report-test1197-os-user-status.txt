@@ -1,0 +1,62 @@
+# test1197 — authoritative OS user status projection
+
+Date: 2026-08-26
+Base: `aca3a926` (`origin/main`)
+Scope: issue #1197; no merge, package publish, deployment, or release.
+
+## Contract
+
+- `agent-node` and the production legacy `agent-network/src/node-server.ts`
+  reporter read only `os.userInfo().username`.
+- Collection failures, missing usernames, empty values, control characters, and
+  values longer than 256 characters become `null`; there is no environment or
+  `project_dir` fallback.
+- `report_status.os_user` is nullable and bounded. Explicit `null` clears a
+  previously reported identity; omission by an old reporter remains compatible.
+- The Hub stores `sessions.os_user`. Authenticated, network-scoped full
+  `/api/status` and scoped MCP status expose it. `/api/status?light=1` keeps its
+  narrow list projection and intentionally omits the identity field.
+
+## Docker evidence
+
+Image build:
+
+```
+sg docker -c 'docker build -f tests/test1197-os-user-status/Dockerfile \
+  -t anet-test1197-os-user .'
+```
+
+Layered gate:
+
+```
+sg docker -c 'docker run --rm anet-test1197-os-user'
+```
+
+Results:
+
+- L1 platform collection: 9 pass / 15 assertions (Linux, macOS, Windows local,
+  Windows domain, failure/null, hostile values).
+- L2 MCP `report_status`: 5 pass / 12 assertions (persistence, explicit null,
+  legacy omission, scoped MCP read, control/whitespace/length rejection).
+- L3 authenticated REST: 7 pass / 39 assertions (full projection, anonymous
+  401, foreign-network exclusion, explicit light omission, stable columns).
+- L4 production entry compilation: `agent-node/src/cli.ts` and
+  `agent-network/src/node-server.ts` bundled successfully.
+- L5 witnessed-red: deleting the collector's control-character rejection made
+  the collector test fail; source was restored and the same test returned green.
+
+Full isolated Server aggregate (the image includes test601's required race
+worker fixture):
+
+```
+sg docker -c 'docker run --rm anet-test1197-os-user bash -lc \
+  "cd server && bun run scripts/test-aggregate.ts"'
+```
+
+Result: 73 files / 967 pass / 0 fail / 0 skip / 3136 assertions.
+
+## Boundary
+
+This field is process identity only. No token, environment value, config
+contents, instruction file, credential path, or inferred home-directory segment
+is collected or serialized.
