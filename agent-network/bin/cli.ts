@@ -1492,16 +1492,19 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
     console.error(`[anet] ❌ OpenCode --copresence requires tmux.`);
     process.exit(1);
   }
+  assertStartCompatibility("opencode-cli");
 
   const profile: Profile = { ...resolved.profile, opencodeMode: "copresence" };
   saveProfile(resolved.id, profile);
   const bridgeSession = `${displayName}-桥`;
   const tuiSession = displayName;
   const attachScript = join(nodesDir(), resolved.id, "opencode-attach.sh");
+  const bridgeLog = join(nodesDir(), resolved.id, "opencode-copresence-bridge.log");
   for (const name of [bridgeSession, tuiSession]) {
     if (tmuxSessionRunning(name)) killTmuxSession(name);
   }
   rmSync(attachScript, { force: true });
+  rmSync(bridgeLog, { force: true });
 
   const cliEntry = resolve(process.argv[1]);
   const bridgeCommand = [
@@ -1516,9 +1519,10 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
     `exec ${shellQuote(process.execPath)} ${shellQuote(cliEntry)} node start ${shellQuote(resolved.id)}`
       + (hubOverride ? ` --hub ${shellQuote(hubOverride)}` : ""),
   ].join(" ; ");
+  const bridgeTmuxCommand = `{ ${bridgeCommand}; } >> ${shellQuote(bridgeLog)} 2>&1`;
   execFileSync("tmux", [
     "new-session", "-d", "-s", bridgeSession, "-c", process.cwd(),
-    "bash", "-lc", bridgeCommand,
+    "bash", "-lc", bridgeTmuxCommand,
   ], { stdio: "pipe" });
 
   const deadline = Date.now() + 30_000;
@@ -1526,6 +1530,7 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   if (!existsSync(attachScript)) {
+    const bridgeStillRunning = tmuxSessionRunning(bridgeSession);
     let tail = "";
     try {
       const bridgePane = tmuxPaneTarget(bridgeSession);
@@ -1534,9 +1539,21 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
         stdio: ["ignore", "pipe", "pipe"],
       }).slice(-3_000) : "";
     } catch {}
+    if (!tail && existsSync(bridgeLog)) {
+      try { tail = readFileSync(bridgeLog, "utf8").slice(-3_000); } catch {}
+    }
     killTmuxSession(bridgeSession);
     console.error(`[anet] ❌ OpenCode copresence server did not produce its attach launcher within 30s.`);
-    if (tail) console.error(tail);
+    console.error(`[anet]    expected launcher: ${attachScript}`);
+    console.error(`[anet]    bridge log: ${bridgeLog}`);
+    console.error(`[anet]    bridge tmux session: ${bridgeSession} (${bridgeStillRunning ? "still running at timeout" : "exited before timeout"})`);
+    console.error(`[anet]    Recheck foreground: anet node start ${shellQuote(displayName)}`);
+    if (tail) {
+      console.error(`[anet]    bridge pane tail:`);
+      console.error(tail);
+    } else {
+      console.error(`[anet]    bridge pane tail unavailable; the bridge may have exited before tmux capture succeeded.`);
+    }
     process.exit(1);
   }
 

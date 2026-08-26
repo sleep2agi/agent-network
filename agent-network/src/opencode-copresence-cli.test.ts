@@ -22,6 +22,15 @@ describe("OpenCode co-presence CLI wiring", () => {
     expect(bridge).toBeGreaterThan(save);
   });
 
+  test("checks exact OpenCode dependencies before mutating profile or starting tmux", () => {
+    const compatibility = body.indexOf('assertStartCompatibility("opencode-cli")');
+    const save = body.indexOf('opencodeMode: "copresence"');
+    const bridge = body.indexOf('"new-session"');
+    expect(compatibility).toBeGreaterThan(-1);
+    expect(save).toBeGreaterThan(compatibility);
+    expect(bridge).toBeGreaterThan(compatibility);
+  });
+
   test("starts only exact alias and alias-bridge tmux sessions", () => {
     expect(body).toContain("const bridgeSession = `${displayName}-桥`");
     expect(body).toContain("const tuiSession = displayName");
@@ -41,6 +50,28 @@ describe("OpenCode co-presence CLI wiring", () => {
     expect(wait).toBeGreaterThan(-1);
     expect(tuiSpawn).toBeGreaterThan(wait);
     expect(body).toContain("exec ${shellQuote(attachScript)}");
+  });
+
+  test("launcher timeout reports enough bridge context to debug one-command startup", () => {
+    const timeout = body.indexOf("OpenCode copresence server did not produce its attach launcher within 30s.");
+    expect(timeout).toBeGreaterThan(-1);
+    const timeoutBody = body.slice(timeout, timeout + 900);
+    expect(timeoutBody).toContain("expected launcher:");
+    expect(timeoutBody).toContain("bridge log:");
+    expect(timeoutBody).toContain("bridge tmux session:");
+    expect(timeoutBody).toContain("Recheck foreground: anet node start");
+    expect(timeoutBody).toContain("bridge pane tail:");
+    expect(timeoutBody).toContain("bridge pane tail unavailable");
+  });
+
+  test("persists bridge output so exited tmux panes still leave diagnostics", () => {
+    const logPath = body.indexOf('const bridgeLog = join(nodesDir(), resolved.id, "opencode-copresence-bridge.log")');
+    const spawn = body.indexOf('"new-session"', logPath);
+    const readFallback = body.indexOf("readFileSync(bridgeLog", spawn);
+    expect(logPath).toBeGreaterThan(-1);
+    expect(body.slice(logPath, spawn)).toContain("rmSync(bridgeLog, { force: true })");
+    expect(body.slice(spawn - 400, spawn + 300)).toContain(">> ${shellQuote(bridgeLog)} 2>&1");
+    expect(readFallback).toBeGreaterThan(spawn);
   });
 
   test("the generic --copresence dispatcher selects OpenCode by stored runtime", () => {
