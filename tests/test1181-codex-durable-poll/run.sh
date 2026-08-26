@@ -29,7 +29,7 @@ echo "L1 environment + pure durable compensator"
 bun test agent-node/src/runtime/commhub-poll-compensator.test.ts
 
 echo "L1 Hub immutable identity + cursor pagination"
-bun test server/src/task-consumption.test.ts
+COMMHUB_DB=/tmp/test1181-hub.db bun test server/src/task-consumption.test.ts
 
 echo "L2 fault/reconnect + existing single-flight/steer ownership"
 bun test \
