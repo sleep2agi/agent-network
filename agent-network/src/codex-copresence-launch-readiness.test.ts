@@ -77,8 +77,26 @@ describe("Codex co-presence launch readiness", () => {
     expect(body).not.toContain('request("thread/start"');
     const orchestration = cli.slice(cli.indexOf("async function startCopresenceOrchestration("), cli.indexOf("async function startOpencodeCopresenceOrchestration("));
     const waiting = orchestration.indexOf("waiting-for-tui-thread");
-    const remoteOnly = orchestration.indexOf("? `exec ${shellQuote(opts.codexBin)} --remote");
+    const remoteOnly = orchestration.indexOf("const tuiArgv = codexTuiLaunchArgs(");
     expect(waiting).toBeGreaterThan(0);
     expect(remoteOnly).toBeGreaterThan(waiting);
+  });
+
+  test("crash-window pending promotion is authoritative before either platform starts its TUI", () => {
+    for (const [startName, endName] of [
+      ["async function startWindowsCodexCopresence(", "async function startCopresenceOrchestration("],
+      ["async function startCopresenceOrchestration(", "async function startOpencodeCopresenceOrchestration("],
+    ]) {
+      const body = cli.slice(cli.indexOf(startName), cli.indexOf(endName, cli.indexOf(startName)));
+      const migration = body.indexOf("migrateCodexPendingThread(");
+      const exactReceipt = body.indexOf("bridgeClientHealthReceipt(wsUrl, pendingRecoveryId)", migration);
+      const promotion = body.indexOf("requirePromotedCodexPendingThread(", exactReceipt);
+      const tuiArgs = body.indexOf("codexTuiLaunchArgs(", promotion);
+      expect(migration).toBeGreaterThan(0);
+      expect(exactReceipt).toBeGreaterThan(migration);
+      expect(promotion).toBeGreaterThan(exactReceipt);
+      expect(tuiArgs).toBeGreaterThan(promotion);
+      expect(body.slice(migration, tuiArgs)).not.toContain('request("thread/start"');
+    }
   });
 });

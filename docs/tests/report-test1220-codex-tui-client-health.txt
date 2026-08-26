@@ -1,7 +1,7 @@
 # test1220 Codex TUI second-client health gate
 
-Base: 742a451b20137099a8c0964434d2ff2a61da3c23
-Evidence date: 2026-08-26
+Base: 4148323d62ccd4743b2e79200bd3a52bbcb890e4
+Evidence date: 2026-08-27
 
 ## Claim boundary
 
@@ -11,13 +11,18 @@ thread, or spends a model turn. Fresh startup is remote-only; the first real
 user message supplies the sole thread identity. A durable 0600 pending
 candidate binds version, server URL, and node generation marker before bounded
 exact-ID resume. There is no list guess, `thread/start`, or alternate fallback.
+Crash-window restart additionally binds the old candidate to the previous
+private marker and loopback URL, reaps/quiesces that generation, atomically
+migrates it to the new URL/marker, and waits for exact bridge promotion before
+launching either platform's TUI with `resume` for the same ID. Missing,
+mismatched, still-live, or incompletely promoted state fails before TUI launch.
 
 Linux real evidence proves app-server/TUI/bridge outcomes and RPC state, not
 raw-wire packet capture. macOS and Windows real execution is not inferred.
 
 ## Final Docker gates
 
-- test1220: PASS — 71 pass, 3 native skips, 0 fail; all 10 mutations red.
+- test1220: PASS — 75 pass, 3 native skips, 0 fail; all 14 mutations red.
 - test1178: PASS — 14 pass, 0 fail; typecheck and bundle PASS.
 - test1191: PASS — 72 pass, 3 native skips, 0 fail; Linux fake-TUI normal/high
   entered one human turn with zero extra turn/start; live mutations red.
@@ -43,6 +48,11 @@ The full 65-second A9 run plus A12 restart-only verification proved:
   session or listener.
 
 ## Attempt ledger
+
+- Static crash-window review: BLOCKED the prior head because a persisted
+  candidate could be promoted by the restarted bridge while the launcher
+  opened a remote-only TUI. The replacement gate now coordinates old-marker
+  migration, exact promotion, and resume-only TUI argv on POSIX and Windows.
 
 - A1: locked dependencies absent; no product roles. A stale cleanup port caused
   a harness false positive.
