@@ -1,8 +1,9 @@
 test1210 — canonical actual target dispatch acknowledgement
 ============================================================
 
-Base: origin/main 3f88c9699b620597a6357bfc6eed6a02264152c7
-Environment: isolated Docker; Bun 1.2.22; ephemeral SQLite and loopback Hub
+Base: origin/main f962d72fef7ee11078be7e94e423c42ac65fdc21
+Candidate before this report update: 7a213929d3f5b92425a10ee04a67a4feff55574f
+Environment: isolated Docker; ephemeral SQLite and loopback Hub
 
 WITNESSED RED (before implementation)
 -------------------------------------
@@ -39,3 +40,18 @@ Focused regression tests (inside the same Docker image):
   - task-network-resolution-http.test.ts
   - mcp-write-network-resolution.test.ts
   - task-idempotency.test.ts
+
+Full server aggregate (test798, isolated Docker): PASS
+  L0 executed_files=76 discovered_files=76 failed_files=0
+  L1 witnessed-red registration-password-floor-weakened rc=1
+
+Node stop convergence package gate (test225, immutable git archive): PASS
+  Summary: PASS
+  package_e2e=PASS
+  npx_preview_fallback=PASS
+  global_agent_node_resume=PASS
+  known-failure ratchet: 11 PASS lines, 0 FAIL lines, empty baseline
+
+The test225 result verifies that the stop-convergence fix already merged in
+the pinned base removes the previous residual-process/socket failure. No
+waiver or known-failure entry was added.
