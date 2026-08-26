@@ -1,0 +1,48 @@
+# test225 node-stop convergence — issue #1027
+
+base: origin/main 8840b44f (includes #1193)
+scope: local Docker only; no publish, production, or merge action
+
+Root cause
+----------
+`anet node start` is a foreground supervisor, while `.pid` is written only
+after its asynchronous child spawn. A concurrent `node stop` could observe no
+tmux and no pidfile, report offline, and return 0; the older start then spawned
+or continued indefinitely. Stop also treated a single child PID as the whole
+authority and did not require leader/attach sockets to disappear.
+
+Witnessed red
+-------------
+Historical CI evidence is issue #1027 run 32241457013: successful stop followed
+by the same foreground wrapper PID alive beyond 60.0s. The deterministic Docker
+case in this suite preserves that exact foreground-start/background-wait shape.
+The first local Docker attempt also exposed an environment-layer failure (apt
+replaced Node 24 with unsupported Node 18); the Dockerfile was corrected before
+product assertions were accepted.
+
+Green layers
+------------
+PASS: test225 foreground startup race converged
+PASS: stale pid did not kill concurrent node
+PASS: surviving leader socket yields typed failure without collateral kill
+PASS: kill escalation is bounded and alias-owned
+Summary: PASS
+
+Implementation contract
+-----------------------
+- per-node cross-process mkdir lock and generation owner receipt linearize
+  start/stop admission; a stop intent cancels an older start before spawn
+- stop converges wrapper, agent children, env-owned bridge children, three tmux
+  sessions, and configured leader/attach sockets before notifying Hub offline
+- TERM has a bounded grace and KILL escalation; residuals return non-zero with
+  typed `STOP_TIMEOUT` diagnostics
+- Linux PID birth ticks (POSIX `ps lstart` fallback) are revalidated before
+  every signal; stale/reused pidfiles never grant kill authority
+- Windows managed-process creation dates are revalidated after taskkill and
+  refusal/residue paths do not notify Hub offline
+
+Validation
+----------
+PASS: Docker typecheck (`oven/bun:1.2.22`, `tsc --noEmit`)
+PASS: Docker convergence suite (four layers above)
+PASS: `git diff --check`

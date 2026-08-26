@@ -10,7 +10,7 @@
  * anet run                     独立 SSE Agent
  */
 
-import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync, rmSync, cpSync, copyFileSync, unlinkSync, realpathSync } from "fs";
+import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, lstatSync, renameSync, rmSync, cpSync, copyFileSync, unlinkSync, realpathSync } from "fs";
 import { dirname, isAbsolute, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { homedir, tmpdir } from "os";
@@ -5963,9 +5963,54 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
   }
 }
 
+type LifecycleOwnerRecord = {
+  schema: 1; state: "starting" | "stopping" | "stopped";
+  generation?: string; wrapperPid?: number; wrapperBirth?: string | null;
+  startInvokedAt?: number; stopInvokedAt?: number;
+};
+
+function lifecycleOwnerPath(nodeId: string) { return join(nodesDir(), nodeId, ".lifecycle-owner.json"); }
+function lifecycleLockPath(nodeId: string) { return join(nodesDir(), nodeId, ".lifecycle-lock"); }
+
+async function withLifecycleLock<T>(nodeId: string, fn: () => T | Promise<T>): Promise<T> {
+  const lock = lifecycleLockPath(nodeId);
+  const deadline = Date.now() + 5_000;
+  while (true) {
+    try { mkdirSync(lock, { mode: 0o700 }); break; }
+    catch (e: any) {
+      if (e?.code !== "EEXIST" || Date.now() >= deadline) throw new Error(`NODE_LIFECYCLE_LOCK_TIMEOUT: ${lock}`);
+      await new Promise(r => setTimeout(r, 25));
+    }
+  }
+  try { return await fn(); } finally { rmSync(lock, { recursive: true, force: true }); }
+}
+
+function readLifecycleOwner(nodeId: string): LifecycleOwnerRecord | null {
+  try { return JSON.parse(readFileSync(lifecycleOwnerPath(nodeId), "utf-8")); } catch { return null; }
+}
+
+function writeLifecycleOwner(nodeId: string, record: LifecycleOwnerRecord) {
+  atomicWritePrivateJson(lifecycleOwnerPath(nodeId), record);
+}
+
+async function admitNodeStart(nodeId: string, invokedAt: number) {
+  await withLifecycleLock(nodeId, () => {
+    const prior = readLifecycleOwner(nodeId);
+    if (prior?.stopInvokedAt && prior.stopInvokedAt >= invokedAt) {
+      throw new Error("NODE_START_CANCELLED_BY_CONCURRENT_STOP");
+    }
+    writeLifecycleOwner(nodeId, {
+      schema: 1, state: "starting", generation: randomUUID(), wrapperPid: process.pid,
+      wrapperBirth: processBirth(process.pid), startInvokedAt: invokedAt,
+      ...(prior?.stopInvokedAt ? { stopInvokedAt: prior.stopInvokedAt } : {}),
+    });
+  });
+}
+
 // ── start (new session) ──
 
 async function startCommand() {
+  const startInvokedAt = Date.now();
   // #173 — `anet node start --all` starts every node under cwd's .anet/nodes/
   // (skip already-running, staggered, auto-resume). It delegates to the
   // `anet project up` implementation (projectUp) so the two stay in lockstep
@@ -6006,6 +6051,10 @@ async function startCommand() {
   if (copresenceFlagPassed && !resolvedForCopresence) {
     console.error(`Node "${id}" not found. Create it first: anet node create ${id}`);
     process.exit(1);
+  }
+  if (resolvedForCopresence) {
+    try { await admitNodeStart(resolvedForCopresence.id, startInvokedAt); }
+    catch (e: any) { console.error(`[anet] ${e?.message || e}`); process.exit(1); }
   }
   if (process.env.ANET_COPRESENCE_BRIDGE !== "1" && resolvedForCopresence
     && codexCopresenceRequested(copresenceFlagPassed, resolvedForCopresence.profile as any)) {
@@ -7715,7 +7764,9 @@ function findNodeProcessesByAlias(...aliases: string[]): number[] | null {
     // Without this gap-fill, rename --force on a codex-sdk or grok-build-acp
     // node that was launched via the standalone CLI (not the agent-node
     // bridge) would silently fail to find the old process.
-    const isAgentProc = tok.some(x => {
+    const isForegroundStart = tok.some((x, i) => x === "node" && tok[i + 2] === "node" && tok[i + 3] === "start")
+      || tok.some((x, i) => (x.endsWith("/anet") || x === "anet") && tok[i + 1] === "node" && tok[i + 2] === "start");
+    const isAgentProc = isForegroundStart || tok.some(x => {
       const base = x.split("/").pop() || x;
       return base === "claude" || base === "agent-node"
         || base === "codex" || base === "grok"
@@ -7725,9 +7776,85 @@ function findNodeProcessesByAlias(...aliases: string[]): number[] | null {
     if (!isAgentProc) continue;
     for (let i = 0; i < tok.length - 1; i++) {
       if ((tok[i] === "-n" || tok[i] === "--alias") && wanted.has(tok[i + 1])) { pids.add(pid); break; }
+      if (tok[i] === "start" && tok[i - 1] === "node" && wanted.has(tok[i + 1])) { pids.add(pid); break; }
     }
   }
   return [...pids];
+}
+
+type StopResidual = { kind: "process" | "socket"; detail: string };
+
+function processBirth(pid: number): string | null {
+  if (process.platform === "linux") {
+    try {
+      const fields = readFileSync(`/proc/${pid}/stat`, "utf-8").trim().split(/\s+/);
+      return fields[21] || null;
+    } catch { return null; }
+  }
+  try { return execFileSync("ps", ["-p", String(pid), "-o", "lstart="], { encoding: "utf-8" }).trim() || null; }
+  catch { return null; }
+}
+
+function nodeSocketResiduals(profile: Profile): StopResidual[] {
+  const out: StopResidual[] = [];
+  for (const [label, path] of [["leader", profile.grokLeaderSocket], ["bridge", profile.grokAttachSocket]] as const) {
+    if (!path) continue;
+    try {
+      const st = lstatSync(path);
+      if (st.isSocket()) out.push({ kind: "socket", detail: `${label} socket ${path}` });
+    } catch (e: any) {
+      if (e?.code !== "ENOENT") out.push({ kind: "socket", detail: `${label} socket ${path} (${e?.code || "unreadable"})` });
+    }
+  }
+  return out;
+}
+
+// #1027 — the foreground start wrapper and its child are separate authorities.
+// The child pidfile is written only after spawn, so converge on the alias-
+// bearing generation. Linux birth ticks are revalidated before every signal;
+// a recycled PID is never signalled.
+async function reapLegacyNodeGeneration(alias: string): Promise<StopResidual[]> {
+  if (process.platform === "win32") return [];
+  const scan = (): number[] | null => {
+    const agents = findNodeProcessesByAlias(alias);
+    const bridges = process.platform === "linux" ? findMcpBridgeOrphansByAlias(alias) : [];
+    if (agents === null || bridges === null) return null;
+    return [...new Set([...agents, ...bridges])];
+  };
+  const initial = scan();
+  if (initial === null) return [{ kind: "process", detail: "process table unavailable" }];
+  const owned = new Map(initial.map(pid => [pid, processBirth(pid)]));
+  const signalOwned = (signal: NodeJS.Signals) => {
+    const current = scan();
+    if (current === null) return false;
+    for (const pid of current) {
+      const birth = processBirth(pid);
+      if (!owned.has(pid)) owned.set(pid, birth);
+      if (owned.get(pid) !== birth) continue;
+      try { process.kill(pid, signal); } catch {}
+    }
+    return true;
+  };
+  signalOwned("SIGTERM");
+  const termDeadline = Date.now() + 5_000;
+  while (Date.now() < termDeadline) {
+    await new Promise(r => setTimeout(r, 100));
+    const live = scan();
+    if (live === null) return [{ kind: "process", detail: "process table unavailable during TERM audit" }];
+    if (live.length === 0) return [];
+    signalOwned("SIGTERM");
+  }
+  signalOwned("SIGKILL");
+  const killDeadline = Date.now() + 3_000;
+  while (Date.now() < killDeadline) {
+    await new Promise(r => setTimeout(r, 100));
+    const live = scan();
+    if (live === null) return [{ kind: "process", detail: "process table unavailable during KILL audit" }];
+    if (live.length === 0) return [];
+    signalOwned("SIGKILL");
+  }
+  const survivors = scan();
+  return [{ kind: "process", detail: `alias-bearing pids ${(survivors || []).join(",") || "unknown"}` }];
 }
 
 // #146 GOTCHA-2 — best-effort drain before a rename restart kills the agent.
@@ -8324,7 +8451,18 @@ function clearStoppedIdentityPidFile(nodeId: string): StopNodeResult {
   return { status: "survived", pid };
 }
 
+function clearAuditedLegacyPidFile(nodeId: string): StopNodeResult {
+  const pidFile = join(nodesDir(), nodeId, ".pid");
+  if (!existsSync(pidFile)) return { status: "not-running" };
+  const pid = parseInt(readFileSync(pidFile, "utf-8").trim());
+  rmSync(pidFile, { force: true });
+  // The alias/birth audit has just proved no owned generation remains. An
+  // alive numeric PID here is therefore stale/reused, never kill authority.
+  return { status: "stopped", ...(Number.isNaN(pid) ? {} : { pid }) };
+}
+
 async function stopCommand() {
+  const stopInvokedAt = Date.now();
   const ref = args[1];
   if (!ref) {
     console.log(`
@@ -8342,6 +8480,20 @@ Stop a running agent node.
   }
 
   const displayName = nodeDisplayName(resolved.id, resolved.profile);
+  try {
+    await withLifecycleLock(resolved.id, () => {
+      const prior = readLifecycleOwner(resolved.id);
+      writeLifecycleOwner(resolved.id, {
+        schema: 1, state: "stopping", stopInvokedAt,
+        ...(prior?.generation ? { generation: prior.generation } : {}),
+        ...(prior?.wrapperPid ? { wrapperPid: prior.wrapperPid, wrapperBirth: prior.wrapperBirth } : {}),
+        ...(prior?.startInvokedAt ? { startInvokedAt: prior.startInvokedAt } : {}),
+      });
+    });
+  } catch (e: any) {
+    console.error(`[anet] ${e?.message || e}`);
+    process.exit(1);
+  }
   if (process.platform === "win32") {
     let record;
     try { record = readWindowsCopresenceRecord(nodesDir(), resolved.id); }
@@ -8356,6 +8508,10 @@ Stop a running agent node.
           console.warn(`[anet] ⚠ ${refused.process.role} pid=${refused.process.pid} was reused; leaving the unrelated process untouched`);
         }
       }
+      if (decision.refused.length > 0) {
+        console.error(`[anet] STOP_TIMEOUT: Windows ownership could not be proven; hub was not notified offline.`);
+        process.exit(1);
+      }
       for (const managedProcess of [...decision.safe].reverse()) {
         try { taskkillWindowsProcessTree(managedProcess.pid); }
         catch (e) {
@@ -8363,8 +8519,20 @@ Stop a running agent node.
           process.exit(1);
         }
       }
+      const windowsResiduals = decision.safe.filter(p => probeWindowsCreationDate(p.pid) === p.creationDate);
+      if (windowsResiduals.length > 0) {
+        console.error(`[anet] STOP_TIMEOUT: Windows managed processes survived: ${windowsResiduals.map(p => `${p.role}:${p.pid}`).join(", ")}`);
+        process.exit(1);
+      }
       rmSync(windowsCopresenceRecordPath(nodesDir(), resolved.id), { force: true });
-      await stopNode(resolved.id);
+      const pidResult = await stopNode(resolved.id);
+      if (pidResult.status === "survived") {
+        console.error(`[anet] STOP_TIMEOUT: Windows node pid ${pidResult.pid} survived; hub was not notified offline.`);
+        process.exit(1);
+      }
+      await withLifecycleLock(resolved.id, () => writeLifecycleOwner(resolved.id, {
+        ...(readLifecycleOwner(resolved.id) || { schema: 1 }), schema: 1, state: "stopped", stopInvokedAt,
+      }));
       await notifyServerOffline(resolved.profile, resolved.id);
       console.log(`[anet] Stopped "${displayName}" (Windows managed app-server + bridge, server notified)`);
       return;
@@ -8484,13 +8652,36 @@ Stop a running agent node.
     process.exit(1);
   }
   const tmuxKilled = identityTeardownKilled || tmuxTuiKilled || tmuxAppsrvKilled || tmuxBridgeKilled;
+  const generationResiduals = allowLegacyTmuxNameSweep
+    ? await reapLegacyNodeGeneration(displayName)
+    : [];
+  if (generationResiduals.length > 0) {
+    console.error(`[anet] STOP_TIMEOUT: could not prove "${displayName}" stopped; hub was not notified offline.`);
+    for (const residual of generationResiduals) console.error(`[anet]    residual ${residual.kind}: ${residual.detail}`);
+    process.exit(1);
+  }
   const stopResult = allowLegacyTmuxNameSweep
-    ? await stopNode(resolved.id)
+    ? clearAuditedLegacyPidFile(resolved.id)
     : clearStoppedIdentityPidFile(resolved.id);
   if (stopResult.status === "survived") {
     console.error(`[anet] could not confirm that "${displayName}" exited (pid ${stopResult.pid}); pidfile retained and PID was not signalled.`);
     process.exit(1);
   }
+  const socketDeadline = Date.now() + 3_000;
+  let socketResiduals = nodeSocketResiduals(resolved.profile);
+  while (socketResiduals.length > 0 && Date.now() < socketDeadline) {
+    await new Promise(r => setTimeout(r, 100));
+    socketResiduals = nodeSocketResiduals(resolved.profile);
+  }
+  if (socketResiduals.length > 0) {
+    console.error(`[anet] STOP_TIMEOUT: authoritative local resources survived for "${displayName}"; hub was not notified offline.`);
+    for (const residual of socketResiduals) console.error(`[anet]    residual ${residual.kind}: ${residual.detail}`);
+    process.exit(1);
+  }
+  await withLifecycleLock(resolved.id, () => {
+    const owner = readLifecycleOwner(resolved.id);
+    writeLifecycleOwner(resolved.id, { ...(owner || { schema: 1 }), schema: 1, state: "stopped", stopInvokedAt });
+  });
   const killed = stopResult.status === "stopped";
   // Always notify server — even if PID file missing, server may have stale session
   await notifyServerOffline(resolved.profile, resolved.id);
