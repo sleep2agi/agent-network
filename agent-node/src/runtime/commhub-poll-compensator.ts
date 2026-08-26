@@ -30,24 +30,31 @@ export interface InboxObservation {
 
 export interface OutboundTaskObservation {
   task_id: string;
+  terminal_seq?: number;
   status: string;
   result?: unknown;
   completed_at?: string | null;
 }
 
+export interface OutboundPollPage {
+  tasks: OutboundTaskObservation[];
+  hasMore: boolean;
+}
+
 interface CursorState {
-  version: 2;
+  version: 3;
   consumed_task_ids: string[];
   consumed_client_request_ids: string[];
   surfaced_outbound_terminal_ids: string[];
   outbound_deliveries: Array<{ task_id: string; idempotency_key: string; state: "pending" | "delivering" | "delivered"; lease_until?: number }>;
+  outbound_terminal_watermark: number;
   inbound_lifecycle: Array<{ task_id: string; state: "delivered" | "submitted" | "consumed" | "completed" }>;
   last_success_at: string | null;
 }
 
 export interface CompensationPollAdapters {
   getInbox(): Promise<InboxObservation[]>;
-  listOutbound(): Promise<OutboundTaskObservation[]>;
+  listOutbound(afterTerminalSeq: number): Promise<OutboundPollPage>;
   scheduleInboxDrain(): void;
   onOutboundTerminal(task: OutboundTaskObservation, idempotencyKey: string): void | Promise<void>;
   log(message: string): void;
@@ -80,11 +87,12 @@ export function resolveCompensationPollMs(raw: unknown): number {
 
 function emptyState(): CursorState {
   return {
-    version: 2,
+    version: 3,
     consumed_task_ids: [],
     consumed_client_request_ids: [],
     surfaced_outbound_terminal_ids: [],
     outbound_deliveries: [],
+    outbound_terminal_watermark: 0,
     inbound_lifecycle: [],
     last_success_at: null,
   };
@@ -101,7 +109,7 @@ function sanitizeState(value: unknown): CursorState {
   if (!value || typeof value !== "object") return emptyState();
   const input = value as Partial<CursorState>;
   return {
-    version: 2,
+    version: 3,
     consumed_task_ids: boundedStrings(input.consumed_task_ids),
     consumed_client_request_ids: boundedStrings(input.consumed_client_request_ids),
     surfaced_outbound_terminal_ids: boundedStrings(input.surfaced_outbound_terminal_ids),
@@ -115,6 +123,8 @@ function sanitizeState(value: unknown): CursorState {
           idempotency_key: `commhub-terminal:${task_id}`,
           state: "delivered" as const,
         })),
+    outbound_terminal_watermark: Number.isSafeInteger(input.outbound_terminal_watermark)
+      && Number(input.outbound_terminal_watermark) >= 0 ? Number(input.outbound_terminal_watermark) : 0,
     inbound_lifecycle: Array.isArray(input.inbound_lifecycle)
       ? input.inbound_lifecycle.filter((item): item is CursorState["inbound_lifecycle"][number] =>
           !!item && typeof item.task_id === "string"
@@ -159,7 +169,11 @@ class CursorStore {
       next.consumed_task_ids = boundedStrings(next.consumed_task_ids);
       next.consumed_client_request_ids = boundedStrings(next.consumed_client_request_ids);
       next.surfaced_outbound_terminal_ids = boundedStrings(next.surfaced_outbound_terminal_ids);
-      next.outbound_deliveries = next.outbound_deliveries.slice(-MAX_CURSOR_KEYS);
+      // Only unresolved callback attempts are retained. Delivered rows are
+      // represented by the monotonic watermark and are safe to garbage collect.
+      next.outbound_deliveries = next.outbound_deliveries
+        .filter((item) => item.state !== "delivered")
+        .slice(-MAX_CURSOR_KEYS);
       next.inbound_lifecycle = next.inbound_lifecycle.slice(-MAX_CURSOR_KEYS);
       this.write(next);
       this.state = next;
@@ -286,10 +300,12 @@ export function createCommHubPollCompensator(options: {
     try {
       // list_tasks is the capability handshake as well as the durable outbox
       // read. A Hub without it cannot promise the full inbox+outbox contract.
-      const [inbox, outbound] = await Promise.all([
+      const startWatermark = store.snapshot().outbound_terminal_watermark;
+      const [inbox, outboundPage] = await Promise.all([
         adapters.getInbox(),
-        adapters.listOutbound(),
+        adapters.listOutbound(startWatermark),
       ]);
+      const outbound = outboundPage.tasks;
       if (currentMode === "probing") {
         currentMode = "active";
         adapters.log(`[commhub-compensation] active (${intervalMs}ms; SSE remains primary)`);
@@ -299,10 +315,25 @@ export function createCommHubPollCompensator(options: {
       }
       for (const task of outbound) {
         if (!task?.task_id || !TERMINAL.has(task.status)) continue;
+        if (!Number.isSafeInteger(task.terminal_seq) || Number(task.terminal_seq) <= 0) {
+          throw Object.assign(new Error("Hub terminal sequence missing"), { code: -32602 });
+        }
+        const terminalSeq = Number(task.terminal_seq);
+        const latest = store.snapshot();
+        if (terminalSeq <= latest.outbound_terminal_watermark) continue;
         const existing = store.snapshot().outbound_deliveries.find((item) => item.task_id === task.task_id);
-        if (existing?.state === "delivered") continue;
+        // v2 migration: a legacy delivered marker is authoritative for this
+        // task. Bind it to the Hub sequence without invoking the callback.
+        if (existing?.state === "delivered") {
+          store.update((state) => {
+            state.outbound_terminal_watermark = Math.max(state.outbound_terminal_watermark, terminalSeq);
+          });
+          continue;
+        }
         const idempotencyKey = existing?.idempotency_key ?? `commhub-terminal:${task.task_id}`;
-        if (!store.claimOutbound(task.task_id, idempotencyKey, now(), deliveryLeaseMs)) continue;
+        // Preserve a contiguous watermark across processes. If the head event
+        // is leased elsewhere, later events must wait rather than leapfrog it.
+        if (!store.claimOutbound(task.task_id, idempotencyKey, now(), deliveryLeaseMs)) break;
         try {
           await adapters.onOutboundTerminal(task, idempotencyKey);
         } catch (error) {
@@ -315,10 +346,11 @@ export function createCommHubPollCompensator(options: {
         store.update((state) => {
           const row = state.outbound_deliveries.find((item) => item.task_id === task.task_id);
           if (row) { row.state = "delivered"; row.lease_until = 0; }
-          state.surfaced_outbound_terminal_ids.push(task.task_id);
+          state.outbound_terminal_watermark = Math.max(state.outbound_terminal_watermark, terminalSeq);
         });
       }
       store.update((state) => { state.last_success_at = new Date(now()).toISOString(); });
+      if (outboundPage.hasMore) dirty = true;
       failureCount = 0;
       adapters.log(`[commhub-compensation] ${triggerReason} poll ok; inbox=${inbox.length} outbound=${outbound.length}`);
       arm(intervalMs);

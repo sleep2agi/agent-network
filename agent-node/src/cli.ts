@@ -1580,28 +1580,24 @@ const commhubCompensation: CompensationPoller | null = RUNTIME === "codex-app-se
       ),
       adapters: {
         getInbox,
-        listOutbound: async () => {
+        listOutbound: async (afterTerminalSeq) => {
           if (!NODE_ID) throw Object.assign(new Error("immutable node identity unavailable"), { code: -32602 });
-          const all: any[] = [];
-          let cursor: { before_created_at: string; before_task_id: string } | null = null;
-          for (let page = 0; page < 100; page++) {
-            const response: any = await callCommHub("list_tasks", {
-              from_node_id: NODE_ID,
-              durable_cursor: true,
-              limit: 100,
-              ...(cursor ?? {}),
-            }, 0);
-            if (response?.capability !== "list_tasks.immutable-node-cursor.v1") {
-              throw Object.assign(new Error("Hub lacks immutable node cursor pagination"), { code: -32602 });
-            }
-            const rows = Array.isArray(response.tasks)
-              ? response.tasks.filter((task: any) => task?.from_node_id === NODE_ID)
-              : [];
-            all.push(...rows);
-            cursor = response.next_cursor;
-            if (!cursor) return all;
+          const response: any = await callCommHub("list_tasks", {
+            from_node_id: NODE_ID,
+            durable_cursor: true,
+            durable_terminal_cursor: true,
+            after_terminal_seq: afterTerminalSeq,
+            limit: 100,
+          }, 0);
+          if (response?.capability !== "list_tasks.immutable-terminal-sequence.v2") {
+            throw Object.assign(new Error("Hub lacks immutable node terminal sequence"), { code: -32602 });
           }
-          throw new Error("outbound pagination exceeded bounded 100-page recovery window");
+          return {
+            tasks: Array.isArray(response.tasks)
+              ? response.tasks.filter((task: any) => task?.from_node_id === NODE_ID)
+              : [],
+            hasMore: response.has_more === true,
+          };
         },
         scheduleInboxDrain: scheduleWorkInboxDrain,
         onOutboundTerminal: (task) => {

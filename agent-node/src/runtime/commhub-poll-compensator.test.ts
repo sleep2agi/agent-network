@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -30,7 +30,12 @@ function harness(overrides: Partial<CompensationPollAdapters> = {}) {
   const timers: Array<{ callback: () => void; delay: number }> = [];
   const adapters: CompensationPollAdapters = {
     getInbox: async () => [...inbox],
-    listOutbound: async () => [...outbound],
+    listOutbound: async (afterTerminalSeq) => ({
+      tasks: outbound
+        .map((task, index) => ({ ...task, terminal_seq: task.terminal_seq ?? index + 1 }))
+        .filter((task) => Number(task.terminal_seq) > afterTerminalSeq),
+      hasMore: false,
+    }),
     scheduleInboxDrain: () => drains.push("drain"),
     onOutboundTerminal: (task) => terminals.push(task.task_id),
     log: (message) => logs.push(message),
@@ -151,6 +156,74 @@ describe("CommHub durable poll compensation", () => {
     expect(h.terminals).toEqual(["child-1"]);
   });
 
+  test("monotonic terminal watermark garbage-collects more than 2000 delivered rows without replay", async () => {
+    const h = harness();
+    for (let i = 0; i < 2_001; i++) {
+      h.outbound.push({ task_id: `terminal-${i}`, terminal_seq: i + 1, status: "replied" });
+    }
+    let pageCalls = 0;
+    h.adapters.listOutbound = async (afterTerminalSeq) => {
+      pageCalls++;
+      const tasks = h.outbound.filter((task) => Number(task.terminal_seq) > afterTerminalSeq).slice(0, 100);
+      return { tasks, hasMore: tasks.length === 100 };
+    };
+    let poller = createCommHubPollCompensator({ cursorPath: h.cursorPath, adapters: h.adapters });
+    poller.trigger("startup");
+    await poller.idle();
+    expect(h.terminals).toHaveLength(2_001);
+    const firstPageCalls = pageCalls;
+    poller.stop();
+    poller = createCommHubPollCompensator({ cursorPath: h.cursorPath, adapters: h.adapters });
+    poller.trigger("startup");
+    await poller.idle();
+    poller.trigger("idle");
+    await poller.idle();
+    expect(h.terminals).toHaveLength(2_001);
+    expect(pageCalls - firstPageCalls).toBe(2);
+    expect(JSON.parse(readFileSync(h.cursorPath, "utf8"))).toMatchObject({
+      outbound_terminal_watermark: 2_001,
+      outbound_deliveries: [],
+    });
+  }, 20_000);
+
+  test("terminal sequence handles out-of-order completion independent of task creation order", async () => {
+    const h = harness();
+    h.outbound.push(
+      { task_id: "created-last-completed-first", terminal_seq: 1, status: "replied" },
+      { task_id: "created-first-completed-last", terminal_seq: 2, status: "failed" },
+    );
+    const poller = createCommHubPollCompensator({ cursorPath: h.cursorPath, adapters: h.adapters });
+    poller.trigger("timer");
+    await poller.idle();
+    expect(h.terminals).toEqual(["created-last-completed-first", "created-first-completed-last"]);
+    expect(JSON.parse(readFileSync(h.cursorPath, "utf8")).outbound_terminal_watermark).toBe(2);
+  });
+
+  test("expired cross-process lease retries the same stable key after simulated crash", async () => {
+    let at = 1_000;
+    const keys: string[] = [];
+    const h = harness({ now: () => at, onOutboundTerminal: (_task, key) => { keys.push(key); } });
+    h.outbound.push({ task_id: "crashed-child", terminal_seq: 1, status: "cancelled" });
+    const crashState = {
+      version: 3,
+      consumed_task_ids: [], consumed_client_request_ids: [], surfaced_outbound_terminal_ids: [],
+      outbound_terminal_watermark: 0,
+      outbound_deliveries: [{ task_id: "crashed-child", idempotency_key: "commhub-terminal:crashed-child", state: "delivering", lease_until: 31_000 }],
+      inbound_lifecycle: [], last_success_at: null,
+    };
+    writeFileSync(h.cursorPath, `${JSON.stringify(crashState)}\n`);
+    let poller = createCommHubPollCompensator({ cursorPath: h.cursorPath, adapters: h.adapters });
+    poller.trigger("startup");
+    await poller.idle();
+    expect(keys).toEqual([]);
+    poller.stop();
+    at = 31_001;
+    poller = createCommHubPollCompensator({ cursorPath: h.cursorPath, adapters: h.adapters });
+    poller.trigger("startup");
+    await poller.idle();
+    expect(keys).toEqual(["commhub-terminal:crashed-child"]);
+  });
+
   test("callback failure returns durable delivery to pending and retries the same idempotency key", async () => {
     const keys: string[] = [];
     let fail = true;
@@ -171,8 +244,9 @@ describe("CommHub durable poll compensation", () => {
     poller.trigger("idle");
     await poller.idle();
     expect(keys).toEqual(["commhub-terminal:child-fault", "commhub-terminal:child-fault"]);
-    expect(JSON.parse(readFileSync(h.cursorPath, "utf8")).outbound_deliveries[0]).toMatchObject({
-      task_id: "child-fault", idempotency_key: "commhub-terminal:child-fault", state: "delivered",
+    expect(JSON.parse(readFileSync(h.cursorPath, "utf8"))).toMatchObject({
+      outbound_terminal_watermark: 1,
+      outbound_deliveries: [],
     });
   });
 
@@ -245,7 +319,9 @@ describe("CommHub durable poll compensation", () => {
     expect(controller).not.toContain("processWithCodexAppServer(");
     expect(controller).not.toContain('client.request("turn/start"');
     expect(controller).toContain("durable_cursor: true");
-    expect(controller).toContain('response?.capability !== "list_tasks.immutable-node-cursor.v1"');
+    expect(controller).toContain("durable_terminal_cursor: true");
+    expect(controller).toContain("after_terminal_seq: afterTerminalSeq");
+    expect(controller).toContain('response?.capability !== "list_tasks.immutable-terminal-sequence.v2"');
     expect(cli).toContain('commhubCompensation?.trigger("sse-reconnect")');
     expect(cli).toContain('commhubCompensation?.trigger("idle")');
     expect(cli).toContain('commhubCompensation?.trigger("startup")');
@@ -254,6 +330,7 @@ describe("CommHub durable poll compensation", () => {
   test("production dedup imports the authenticated Dashboard provenance gate", () => {
     const source = readFileSync(new URL("./commhub-poll-compensator.ts", import.meta.url), "utf8");
     expect(source).toContain("return authenticatedDashboardRequestId(message)");
+    expect(source).toContain("state.outbound_terminal_watermark = Math.max(state.outbound_terminal_watermark, terminalSeq)");
   });
 
   test("production records the durable cursor only after Hub ACK succeeds", () => {

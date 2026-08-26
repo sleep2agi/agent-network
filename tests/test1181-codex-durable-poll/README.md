@@ -3,6 +3,7 @@
 Docker-only layered gate for issue #1181.
 
 - L1: bounded scheduler, persisted cursor, task/client-request dedup, restart,
+  monotonic terminal watermark, >2,000-row pagination, late completion,
   outbound terminal observation, old-Hub downgrade.
 - L2: retry/coalescing faults plus the existing Codex app-server ownership,
   FIFO and authenticated `turn/steer` suites.

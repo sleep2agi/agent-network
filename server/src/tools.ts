@@ -1943,9 +1943,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       before_created_at: z.string().max(64).optional().describe("Pagination cursor timestamp"),
       before_task_id: z.string().max(200).optional().describe("Pagination cursor task id"),
       durable_cursor: z.boolean().optional().describe("Require immutable node-scoped cursor protocol"),
+      durable_terminal_cursor: z.boolean().optional().describe("Read terminal outbound journal in monotonic order"),
+      after_terminal_seq: z.number().int().min(0).optional().describe("Exclusive terminal journal watermark"),
       limit: z.number().min(1).max(100).optional().default(20),
     },
-    async ({ alias, status, from_name, from_node_id, network_id: netId, before_created_at, before_task_id, durable_cursor, limit }) => {
+    async ({ alias, status, from_name, from_node_id, network_id: netId, before_created_at, before_task_id, durable_cursor, durable_terminal_cursor, after_terminal_seq, limit }) => {
       const readScope = resolveReadScope(netId);
       if (readScope.denied) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: readScope.denied }) }] };
       if (durable_cursor) {
@@ -1960,6 +1962,29 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         if (!boundNodeId || from_node_id !== boundNodeId) {
           return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "from_node_id_identity_mismatch" }) }] };
         }
+      }
+      if (durable_terminal_cursor) {
+        if (!durable_cursor) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "durable_cursor_required" }) }] };
+        const params: any[] = [enforceNetworkId, from_node_id, after_terminal_seq ?? 0, limit];
+        const tasks = db.all(
+          `SELECT t.task_id, t.from_node_id, t.from_name, t.to_node_id, t.to_name, t.priority,
+                  t.status, t.content, t.result, t.created_at, t.runtime_submitted_at,
+                  t.consumed_at, t.completed_at, e.terminal_seq
+             FROM task_terminal_events e
+             JOIN tasks t ON t.task_id = e.task_id
+            WHERE COALESCE(e.network_id, 'default') = COALESCE(?1, 'default')
+              AND e.from_node_id = ?2 AND e.terminal_seq > ?3
+            ORDER BY e.terminal_seq ASC LIMIT ?4`,
+          ...params,
+        );
+        return { content: [{ type: "text" as const, text: JSON.stringify({
+          ok: true,
+          capability: "list_tasks.immutable-terminal-sequence.v2",
+          tasks,
+          count: tasks.length,
+          next_terminal_seq: tasks.length ? tasks[tasks.length - 1]?.terminal_seq : (after_terminal_seq ?? 0),
+          has_more: tasks.length === limit,
+        }) }] };
       }
       let sql = "SELECT task_id, from_node_id, from_name, to_node_id, to_name, priority, status, content, result, created_at, runtime_submitted_at, consumed_at, completed_at FROM tasks WHERE 1=1";
       const params: any[] = [];

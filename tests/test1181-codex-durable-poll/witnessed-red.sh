@@ -35,8 +35,8 @@ sed -i 's/currentMode = "realtime-only";/currentMode = "active";/' "$module"
 expect_red "old Hub falsely claims compensation" "old Hub visibly degrades"
 cp "$tmp_module" "$module"
 
-# Mutation 4: callback failure is incorrectly made terminal instead of retryable.
-sed -i 's/row.state = "pending"/row.state = "delivered"/' "$module"
+# Mutation 4: callback failure incorrectly advances the terminal watermark.
+sed -i 's/if (row) { row.state = "pending"; row.lease_until = 0; }/if (row) { row.state = "delivered"; row.lease_until = 0; } state.outbound_terminal_watermark = terminalSeq;/' "$module"
 expect_red "callback failure loses durable retry" "callback failure returns durable delivery"
 cp "$tmp_module" "$module"
 
@@ -49,5 +49,10 @@ cp "$tmp_module" "$module"
 sed -i 's/durable_cursor: true,/durable_cursor: false,/' "$src"
 expect_red "outbound query drops immutable cursor protocol" "production wiring keeps SSE primary"
 cp "$tmp_cli" "$src"
+
+# Mutation 7: delivered callbacks stop advancing the monotonic terminal watermark.
+sed -i 's/state.outbound_terminal_watermark = Math.max(state.outbound_terminal_watermark, terminalSeq);/state.outbound_terminal_watermark = state.outbound_terminal_watermark;/' "$module"
+expect_red "delivered terminal watermark no longer advances" "production dedup imports"
+cp "$tmp_module" "$module"
 
 rm -f "$tmp_cli" "$tmp_module" /tmp/witnessed-red.log
