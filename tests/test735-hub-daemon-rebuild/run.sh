@@ -141,7 +141,21 @@ if (!app || app.name !== "commhub-hub") process.exit(1);
 if (app.script !== "/home/tester/.local/bin/hub-daemon.sh") process.exit(1);
 if (app.cwd !== "/home/tester/.commhub") process.exit(1);
 if (app.interpreter !== "bash" || app.exec_mode !== "fork") process.exit(1);
-if (app.autorestart !== true || app.min_uptime !== 20_000 || app.max_restarts !== 20) process.exit(1);
+if (app.autorestart !== true || app.max_restarts !== 20) process.exit(1);
+
+// 🔴 不要断言 min_uptime 的具体数值。
+// 这个字段唯一的正确性条件是**它必须大于「一次失败启动退出所需的时间」** ——
+// 低于它,PM2 把每次崩溃都算成启动成功,unstable restarts 恒为 0,
+// max_restarts/退避永远不触发,崩溃循环看起来像正常重启。
+//
+// 那个时间不是常数,它写在 hub-daemon.sh 的 fail_slow() 里(`sleep N` 后 exit 1)。
+// 所以从脚本自己读出来比,而不是把某个当时正确的数字抄进这里 ——
+// 抄数字的门在下次调参时会误红,而误红教会人绕过它。
+const daemon = require("fs").readFileSync("/app/deploy/hub/hub-daemon.sh", "utf8");
+const m = /fail_slow\(\)\s*\{[\s\S]*?\bsleep\s+(\d+)/.exec(daemon);
+if (!m) process.exit(1);                       // 读不到就不放行,不猜
+const failExitMs = Number(m[1]) * 1000;
+if (!Number.isFinite(app.min_uptime) || app.min_uptime <= failExitMs) process.exit(1);
 if (app.exp_backoff_restart_delay !== 200) process.exit(1);
 EOF
 }
