@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "slug": "stop-chain-discipline",
+  "name": "Stop-chain discipline",
+  "description": "Stop acknowledgement loops when a message contains no new reading, action, or question.",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "publisher": {
+    "name": "Agent Network maintainers",
+    "url": "https://github.com/sleep2agi/agent-network"
+  },
+  "tags": [
+    "communication",
+    "coordination",
+    "safety"
+  ],
+  "published_at": "2026-08-26"
+}

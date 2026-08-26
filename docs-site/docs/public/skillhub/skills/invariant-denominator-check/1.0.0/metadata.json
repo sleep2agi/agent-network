@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "slug": "invariant-denominator-check",
+  "name": "Invariant denominator check",
+  "description": "Verify that a correct count is measuring the intended object, not a broader or narrower set.",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "publisher": {
+    "name": "Agent Network maintainers",
+    "url": "https://github.com/sleep2agi/agent-network"
+  },
+  "tags": [
+    "analysis",
+    "testing",
+    "review"
+  ],
+  "published_at": "2026-08-26"
+}
