@@ -1,0 +1,34 @@
+PR #1214 release version sync dry-run regression fix
+Date: 2026-08-26 (Asia/Shanghai)
+Source commit: 3b93a070d607ad9c2dd649b732be14b03041a341
+
+CI first failure (preserved at /tmp/pr1214-version-sync.log):
+FAIL: the agent-node baseline really exercises a version difference
+
+Root cause:
+The test hard-coded @sleep2agi/agent-node 2.5.0-preview.34. The release bump
+made that equal to PAIRED_AGENT_NODE_VERSION, so the dry-run correctly emitted
+no WOULD-WRITE line and the test's difference baseline ceased to be a diff.
+
+Fix coverage:
+- Derive the next preview independently from each checked-out pair literal.
+- Exercise agent-node with its derived differing preview.
+- Exercise the checked-out agent-node version as a no-op negative control.
+- Retain the stale-alias mutant, witnessed-red old pipefail mutant, and real
+  diff-error negative control.
+
+Exact Docker command:
+sg docker -c 'docker build --build-arg SOURCE_COMMIT=3b93a070d607ad9c2dd649b732be14b03041a341 -t anet-test1183-pr1214-fix -f tests/test1183-sync-pinned-dryrun/Dockerfile . && docker run --rm --network none anet-test1183-pr1214-fix'
+
+Result:
+PASS: normal version differences do not abort the dry-run
+PASS: every registered target is followed by the final summary
+PASS: same-version negative control proves the version-difference assertion is discriminating
+PASS: both release-pair registries own writable quoted literals
+PASS: a constant name without a quoted literal is rejected as stale
+PASS: WITNESSED_RED: the old diff pipeline exits early and loses the summary
+PASS: real diff failures remain nonzero and visible
+SOURCE_COMMIT=3b93a070d607ad9c2dd649b732be14b03041a341
+RESULT: PASS
+
+Full local output: /tmp/pr1214-test1183-fix.log
