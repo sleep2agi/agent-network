@@ -4,6 +4,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && npm install -g --no-audit --no-fund @openai/codex@0.148.0 \
     && rm -rf /var/lib/apt/lists/*
 
+ARG TEST1203_SOURCE_COMMIT=dev
+ENV TEST1203_SOURCE_COMMIT=$TEST1203_SOURCE_COMMIT
+LABEL org.opencontainers.image.revision=$TEST1203_SOURCE_COMMIT
+
 WORKDIR /repo
 COPY agent-node/package.json agent-node/package.json
 COPY agent-node/src agent-node/src

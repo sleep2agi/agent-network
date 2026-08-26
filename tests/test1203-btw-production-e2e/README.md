@@ -13,9 +13,14 @@ journey to test1190; it proves an active main turn, two native exact forks,
 reverse completion and cancellation isolation against the exact 0.148.0 binary.
 
 ```sh
-sg docker -c 'docker build -f tests/test1203-btw-production-e2e/Dockerfile -t anet-test1203 .'
+sg docker -c 'docker build --build-arg TEST1203_SOURCE_COMMIT=$(git rev-parse HEAD) -f tests/test1203-btw-production-e2e/Dockerfile -t anet-test1203 .'
 sg docker -c 'docker run --rm anet-test1203'
 ```
+
+The registered L1 runner supplies `TEST1203_SOURCE_COMMIT` from the exact
+checked-out Git SHA. Direct builds must supply the same 40-character lowercase
+SHA with `--build-arg TEST1203_SOURCE_COMMIT=$(git rev-parse HEAD)`; the suite
+fails closed when the binding is missing or malformed.
 
 For the live layer, first copy only the required Codex authentication into a
 new one-use directory and add `.anet-btw-probe-sentinel` with the exact content

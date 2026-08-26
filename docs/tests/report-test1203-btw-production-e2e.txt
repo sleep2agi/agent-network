@@ -18,6 +18,8 @@ that wiring already exists.
 
 Executed evidence:
 - Docker image `anet-test1203`, pinned `codex-cli 0.148.0`
+- registered L1 image is bound to the exact 40-character lowercase source SHA;
+  missing and malformed bindings are both witnessed-red
 - offline recovery layer: 5 passed, 0 failed, 20 assertions
 - live owned-stdio layer: PASS, reviewed evidence `test1190-wire-v2`
 - source active at fork; three threads concurrently active
