@@ -46,3 +46,9 @@ Validation
 PASS: Docker typecheck (`oven/bun:1.2.22`, `tsc --noEmit`)
 PASS: Docker convergence suite (four layers above)
 PASS: `git diff --check`
+
+CI registration
+---------------
+The suite is registered in `scripts/qa.sh` L1 and both pull-request/push path
+lists in `.github/workflows/qa.yml`. Its Docker image requires a full 40-byte
+`SOURCE_COMMIT`; registration, path-sync and SHA-binding guards pass locally.

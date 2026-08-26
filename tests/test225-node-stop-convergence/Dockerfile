@@ -1,4 +1,7 @@
 FROM oven/bun:1.2.22
+ARG SOURCE_COMMIT
+ENV TEST225_STOP_SOURCE_COMMIT=$SOURCE_COMMIT
+LABEL org.opencontainers.image.revision=$SOURCE_COMMIT
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ procps && rm -rf /var/lib/apt/lists/*
 COPY agent-network/ agent-network/

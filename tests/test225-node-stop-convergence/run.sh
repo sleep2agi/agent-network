@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 set -uo pipefail
+[[ "${TEST225_STOP_SOURCE_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]] || {
+  echo "FAIL: TEST225_STOP_SOURCE_COMMIT must be one full lowercase Git SHA" >&2
+  exit 1
+}
 ROOT=/tmp/test225-stop
 PROJECT="$ROOT/project"
 mkdir -p "$PROJECT/.anet/nodes/a" "$PROJECT/.anet/nodes/b"
