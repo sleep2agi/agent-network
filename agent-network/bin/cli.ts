@@ -86,6 +86,7 @@ import {
   writeOpencodeRuntimeBinding,
 } from "../src/opencode-runtime-binding";
 import { connectGrokAttach } from "../src/grok-attach-client";
+import { ambientTypeScriptTranspiler, nodeServerPayloadFor } from "../src/node-server-payload";
 import {
   agentNodeHelpSupportsGrokCopresence,
   buildGrokAgentNodeEnv,
@@ -1817,10 +1818,17 @@ function refreshNodeServerJsAt(targetPath: string, opts: { overwrite: boolean })
   if (exists && !opts.overwrite) return "exists";
   const src = findBundledNodeServerJs();
   if (!src) return "no-source";
-  // Read+write rather than copyFile so .ts sources get content-substituted
-  // verbatim (we're writing to a .js path either way; bun runs .ts content
-  // under a .js extension fine, per the legacy candidates).
-  writeFileSync(targetPath, readFileSync(src, "utf-8"));
+  // The target is always `.js` — agent-node's spawn gate pins the CommHub MCP
+  // payload to exactly `<project>/.anet/node-server.js` — so a `.ts` source
+  // must be transpiled on the way, not copied verbatim. See issue #1216: the
+  // verbatim copy produced a file that could not be parsed, and the failure
+  // surfaced three layers away as "CommHub MCP readiness preflight failed (1)".
+  const payload = nodeServerPayloadFor(
+    readFileSync(src, "utf-8"),
+    src,
+    ambientTypeScriptTranspiler(),
+  );
+  writeFileSync(targetPath, payload);
   return "wrote";
 }
 
