@@ -229,49 +229,37 @@ apply_json_target() {
   fi
   local out rc
   set +e
-  out="$(JSON_FILE="$file" JSON_PATH="$jpath" JSON_NEW="$NEW_VERSION" JSON_MODE="$MODE" python3 - <<'PYEOF'
-import json, os, sys, collections, difflib
-
-path_s = os.environ["JSON_PATH"]
-f = os.environ["JSON_FILE"]
-new = os.environ["JSON_NEW"]
-mode = os.environ["JSON_MODE"]
-
-raw = open(f, encoding="utf-8").read()
-doc = json.loads(raw, object_pairs_hook=collections.OrderedDict)
-
-segs = [("" if seg == '""' else seg) for seg in path_s.split("/")]
-node = doc
-for seg in segs[:-1]:
-    if not isinstance(node, dict) or seg not in node:
-        print("MISSING", flush=True); sys.exit(3)
-    node = node[seg]
-leaf = segs[-1]
-if not isinstance(node, dict) or leaf not in node:
-    print("MISSING", flush=True); sys.exit(3)
-
-old = node[leaf]
-if old == new:
-    print("UNCHANGED", flush=True); sys.exit(0)
-
-node[leaf] = new
-after = json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
-
-diff = list(difflib.unified_diff(raw.splitlines(), after.splitlines(), lineterm="", n=0))
-changed = [l for l in diff if (l.startswith("+") or l.startswith("-")) and not l.startswith(("+++", "---"))]
-if len(changed) != 2:
-    print("REFORMAT %d" % len(changed), flush=True)
-    for l in changed[:8]:
-        print("   %s" % l[:120], flush=True)
-    sys.exit(4)
-
-if mode == "apply":
-    open(f, "w", encoding="utf-8").write(after)
-    print("WROTE %s -> %s" % (old, new), flush=True)
-else:
-    print("WOULD-WRITE %s -> %s" % (old, new), flush=True)
-PYEOF
-)"
+  out="$(JSON_FILE="$file" JSON_PATH="$jpath" JSON_NEW="$NEW_VERSION" JSON_MODE="$MODE" node -e '
+// 用 node 不用 python3:这个脚本改的是 package.json,跑它的地方一定有 node
+// (test1183 的镜像是 node:22-bookworm-slim,里面没有 python3 —— 2026-08-27
+// 第一版用 python3 写,在容器里 command not found,红的理由和被测行为无关)。
+const fs = require("fs");
+const f = process.env.JSON_FILE, pathS = process.env.JSON_PATH;
+const nv = process.env.JSON_NEW, mode = process.env.JSON_MODE;
+const raw = fs.readFileSync(f, "utf8");
+const doc = JSON.parse(raw);
+const segs = pathS.split("/").map((x) => (x === "\"\"" ? "" : x));
+let node = doc;
+for (const seg of segs.slice(0, -1)) {
+  if (node === null || typeof node !== "object" || !(seg in node)) { console.log("MISSING"); process.exit(3); }
+  node = node[seg];
+}
+const leaf = segs[segs.length - 1];
+if (node === null || typeof node !== "object" || !(leaf in node)) { console.log("MISSING"); process.exit(3); }
+const old = node[leaf];
+if (old === nv) { console.log("UNCHANGED"); process.exit(0); }
+node[leaf] = nv;
+const after = JSON.stringify(doc, null, 2) + "\n";
+// 只允许恰好一行变化;多于一行说明 JSON.stringify 的格式和原文件不一致,
+// 整个文件会被重排 —— 那种"成功"必须当失败。
+const a = raw.split("\n"), b = after.split("\n");
+let changed = 0;
+if (a.length !== b.length) { changed = Math.abs(a.length - b.length) + a.length; }
+else { for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) changed++; }
+if (changed !== 1) { console.log("REFORMAT " + changed); process.exit(4); }
+if (mode === "apply") { fs.writeFileSync(f, after); console.log("WROTE " + old + " -> " + nv); }
+else { console.log("WOULD-WRITE " + old + " -> " + nv); }
+')"
   rc=$?
   set -e
   case "$rc" in
