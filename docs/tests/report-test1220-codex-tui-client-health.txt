@@ -23,6 +23,9 @@ raw-wire packet capture. macOS and Windows real execution is not inferred.
 ## Final Docker gates
 
 - test1220: PASS — 77 pass, 3 native skips, 0 fail; all 15 mutations red.
+- test631: PASS — 93 pass, 0 fail; private-mode and startup-repair
+  mutations red. The deferred pending writer is pinned to the private atomic
+  config choke point.
 - test1178: PASS — 14 pass, 0 fail; typecheck and bundle PASS.
 - test1191: PASS — 75 pass, 3 native skips, 0 fail; Linux fake-TUI normal/high
   entered one human turn with zero extra turn/start; live mutations red.
