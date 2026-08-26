@@ -5383,7 +5383,10 @@ function maybeWarnChannelResumeBlocker(
   }
 }
 
-async function launchAgent(id: string, forceNewSession = false, hubOverride?: string) {
+async function launchAgent(id: string, forceNewSession = false, hubOverride?: string, admittedGeneration?: string) {
+  const launchResolved = resolveNodeRef(id);
+  if (!launchResolved) throw new Error(`Node ${JSON.stringify(id)} not found`);
+  const launchGeneration = admittedGeneration || await admitNodeStart(launchResolved.id, Date.now());
   const resolved = resolveNodeRef(id);
   if (!resolved) {
     console.error(`Node "${id}" not found. Create it first: anet node create ${id}`);
@@ -5678,11 +5681,11 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
         // Stable timer — child survives 30s → reset backoff to base.
         // Mirrors the connectFeishu supervisor pattern from PR #263.
         const stableTimer = setTimeout(() => ctrl.markStable(), 30_000);
-        const child = spawn(runCommand, runCommandArgs, {
+        const child = await spawnOwnedNodeChild(nodeId, launchGeneration, () => spawn(runCommand, runCommandArgs, {
           env: childEnv,
           stdio: "inherit",
           shell: runtime === "opencode-cli" ? false : process.platform === "win32",
-        });
+        }));
         if (runtime === "opencode-cli") activeAgentChild = child;
         if (child.pid) writeFileSync(pidFile, String(child.pid));
 
@@ -5925,8 +5928,14 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     // forgiving and the bug usually only manifests as a missing session
     // banner. Fix: await child exit so parent stays alive while child holds
     // the TTY; main() unwinds naturally only after claude actually exits.
-    await new Promise<void>((resolve) => {
-      const child = spawn("claude", claudeArgs, { env, stdio: "inherit" });
+    await new Promise<void>(async (resolve) => {
+      let child: ReturnType<typeof spawn>;
+      try {
+        child = await spawnOwnedNodeChild(nodeId, launchGeneration, () => spawn("claude", claudeArgs, { env, stdio: "inherit" }));
+      } catch (error: any) {
+        console.error(`[anet] ❌ ${error?.message || error}`);
+        process.exit(1);
+      }
       const pidFile = join(nodesDir(), nodeId, ".pid");
       if (child.pid) writeFileSync(pidFile, String(child.pid));
       child.on("exit", (code) => {
@@ -5963,22 +5972,69 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
   }
 }
 
+type LifecycleProcessIdentity = { pid: number; birth: string; role: "wrapper" | "agent" | "bridge" };
 type LifecycleOwnerRecord = {
   schema: 1; state: "starting" | "stopping" | "stopped";
-  generation?: string; wrapperPid?: number; wrapperBirth?: string | null;
+  generation?: string; wrapperPid?: number; wrapperBirth?: string;
+  processes?: LifecycleProcessIdentity[];
   startInvokedAt?: number; stopInvokedAt?: number;
 };
+type LifecycleLockOwner = { schema: 1; pid: number; birth: string; operation: string; generation?: string };
 
 function lifecycleOwnerPath(nodeId: string) { return join(nodesDir(), nodeId, ".lifecycle-owner.json"); }
 function lifecycleLockPath(nodeId: string) { return join(nodesDir(), nodeId, ".lifecycle-lock"); }
+function lifecycleLockOwnerPath(nodeId: string) { return join(lifecycleLockPath(nodeId), "owner.json"); }
 
-async function withLifecycleLock<T>(nodeId: string, fn: () => T | Promise<T>): Promise<T> {
+async function withLifecycleLock<T>(nodeId: string, fn: () => T | Promise<T>, operation = "lifecycle", generation?: string): Promise<T> {
   const lock = lifecycleLockPath(nodeId);
   const deadline = Date.now() + 5_000;
+  let missingReceiptSince = 0;
   while (true) {
-    try { mkdirSync(lock, { mode: 0o700 }); break; }
+    try {
+      mkdirSync(lock, { mode: 0o700 });
+      const birth = processBirth(process.pid);
+      if (!birth) { rmSync(lock, { recursive: true, force: true }); throw new Error("NODE_LIFECYCLE_BIRTH_UNAVAILABLE"); }
+      atomicWritePrivateJson(lifecycleLockOwnerPath(nodeId), { schema: 1, pid: process.pid, birth, operation, ...(generation ? { generation } : {}) });
+      break;
+    }
     catch (e: any) {
-      if (e?.code !== "EEXIST" || Date.now() >= deadline) throw new Error(`NODE_LIFECYCLE_LOCK_TIMEOUT: ${lock}`);
+      if (e?.code !== "EEXIST") throw e;
+      let owner: LifecycleLockOwner;
+      try { owner = JSON.parse(readFileSync(lifecycleLockOwnerPath(nodeId), "utf-8")); }
+      catch (readError: any) {
+        if (readError?.code === "ENOENT") {
+          if (!missingReceiptSince) missingReceiptSince = Date.now();
+          if (Date.now() - missingReceiptSince < 250) { await new Promise(r => setTimeout(r, 10)); continue; }
+        }
+        throw new Error(`NODE_LIFECYCLE_LOCK_CORRUPT: ${lock}`);
+      }
+      if (owner.schema !== 1 || !Number.isSafeInteger(owner.pid) || !owner.birth) throw new Error(`NODE_LIFECYCLE_LOCK_CORRUPT: ${lock}`);
+      const current = processIdentitySnapshot(owner.pid);
+      if (current.kind === "gone" || (current.kind === "live" && current.birth !== owner.birth)) {
+        const claim = `${lock}.reclaim-${process.pid}-${randomUUID()}`;
+        try { renameSync(lock, claim); }
+        catch (claimError: any) {
+          if (claimError?.code === "ENOENT" || claimError?.code === "EEXIST") continue;
+          throw claimError;
+        }
+        // Only the rename winner may inspect/delete this private claim. A
+        // loser loops against the replacement public lock and can never
+        // recursively delete it (compare-delete TOCTOU).
+        let claimedOwner: LifecycleLockOwner;
+        try { claimedOwner = JSON.parse(readFileSync(join(claim, "owner.json"), "utf-8")); }
+        catch { throw new Error(`NODE_LIFECYCLE_LOCK_CLAIM_CORRUPT: ${claim}`); }
+        if (claimedOwner.pid !== owner.pid || claimedOwner.birth !== owner.birth || claimedOwner.operation !== owner.operation) {
+          throw new Error(`NODE_LIFECYCLE_LOCK_CLAIM_CHANGED: ${claim}`);
+        }
+        const claimedIdentity = processIdentitySnapshot(claimedOwner.pid);
+        if (claimedIdentity.kind === "unverifiable" || (claimedIdentity.kind === "live" && claimedIdentity.birth === claimedOwner.birth)) {
+          throw new Error(`NODE_LIFECYCLE_LOCK_CLAIM_OWNER_LIVE: pid=${claimedOwner.pid}`);
+        }
+        rmSync(claim, { recursive: true, force: true });
+        continue;
+      }
+      if (current.kind === "unverifiable") throw new Error(`NODE_LIFECYCLE_LOCK_OWNER_UNVERIFIABLE: pid=${owner.pid}`);
+      if (Date.now() >= deadline) throw new Error(`NODE_LIFECYCLE_LOCK_TIMEOUT: pid=${owner.pid} op=${owner.operation}`);
       await new Promise(r => setTimeout(r, 25));
     }
   }
@@ -5993,18 +6049,76 @@ function writeLifecycleOwner(nodeId: string, record: LifecycleOwnerRecord) {
   atomicWritePrivateJson(lifecycleOwnerPath(nodeId), record);
 }
 
-async function admitNodeStart(nodeId: string, invokedAt: number) {
-  await withLifecycleLock(nodeId, () => {
+function snapshotOwnedProcessTree(roots: readonly LifecycleProcessIdentity[]): LifecycleProcessIdentity[] {
+  const owned = new Map(roots.map(p => [p.pid, p]));
+  if (process.platform !== "linux") return [...owned.values()];
+  const verifiedAnchors = new Set<number>();
+  for (const root of roots) {
+    const current = processIdentitySnapshot(root.pid);
+    if (current.kind === "gone") continue;
+    if (current.kind === "unverifiable") throw new Error(`NODE_OWNER_BIRTH_UNAVAILABLE: pid=${root.pid}`);
+    if (current.birth === root.birth) verifiedAnchors.add(root.pid);
+  }
+  let rows: Array<{ pid: number; ppid: number }>;
+  try {
+    rows = execFileSync("ps", ["-e", "-o", "pid=", "-o", "ppid="], { encoding: "utf-8" })
+      .split("\n").map(line => line.trim().split(/\s+/).map(Number))
+      .filter(parts => parts.length === 2 && parts.every(Number.isSafeInteger))
+      .map(([pid, ppid]) => ({ pid, ppid }));
+  } catch { throw new Error("NODE_PROCESS_TREE_UNAVAILABLE"); }
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const row of rows) {
+      if (owned.has(row.pid) || !verifiedAnchors.has(row.ppid)) continue;
+      const candidate = processIdentitySnapshot(row.pid);
+      if (candidate.kind === "gone") continue;
+      if (candidate.kind === "unverifiable" || candidate.ppid === undefined) throw new Error(`NODE_DESCENDANT_BIRTH_UNAVAILABLE: pid=${row.pid}`);
+      const identity = { birth: candidate.birth, ppid: candidate.ppid };
+      // The process table row is only a candidate. Revalidate PPID and birth
+      // from one /proc read so an exited/reused PID cannot be adopted.
+      if (identity.ppid !== row.ppid || !verifiedAnchors.has(identity.ppid)) continue;
+      owned.set(row.pid, { pid: row.pid, birth: identity.birth, role: "bridge" });
+      verifiedAnchors.add(row.pid);
+      changed = true;
+    }
+  }
+  return [...owned.values()];
+}
+
+async function admitNodeStart(nodeId: string, invokedAt: number): Promise<string> {
+  return await withLifecycleLock(nodeId, () => {
     const prior = readLifecycleOwner(nodeId);
-    if (prior?.stopInvokedAt && prior.stopInvokedAt >= invokedAt) {
+    if (prior?.state === "stopping" || (prior?.stopInvokedAt && prior.stopInvokedAt >= invokedAt)) {
       throw new Error("NODE_START_CANCELLED_BY_CONCURRENT_STOP");
     }
+    const birth = processBirth(process.pid);
+    if (!birth) throw new Error("NODE_LIFECYCLE_BIRTH_UNAVAILABLE");
+    const generation = randomUUID();
     writeLifecycleOwner(nodeId, {
-      schema: 1, state: "starting", generation: randomUUID(), wrapperPid: process.pid,
-      wrapperBirth: processBirth(process.pid), startInvokedAt: invokedAt,
+      schema: 1, state: "starting", generation, wrapperPid: process.pid,
+      wrapperBirth: birth, processes: [{ pid: process.pid, birth, role: "wrapper" }], startInvokedAt: invokedAt,
       ...(prior?.stopInvokedAt ? { stopInvokedAt: prior.stopInvokedAt } : {}),
     });
-  });
+    return generation;
+  }, "start-admit");
+}
+
+async function spawnOwnedNodeChild<T extends ReturnType<typeof spawn>>(nodeId: string, generation: string, spawnChild: () => T): Promise<T> {
+  return await withLifecycleLock(nodeId, async () => {
+    const owner = readLifecycleOwner(nodeId);
+    if (!owner || owner.state !== "starting" || owner.generation !== generation) throw new Error("NODE_START_CANCELLED_BY_CONCURRENT_STOP");
+    const child = spawnChild();
+    if (!child.pid) throw new Error("NODE_CHILD_PID_MISSING");
+    let birth = processBirth(child.pid);
+    for (let i = 0; !birth && i < 10; i++) { await new Promise(r => setTimeout(r, 10)); birth = processBirth(child.pid); }
+    if (!birth) {
+      try { child.kill("SIGKILL"); } catch {}
+      throw new Error(`NODE_CHILD_BIRTH_UNAVAILABLE: pid=${child.pid}`);
+    }
+    writeLifecycleOwner(nodeId, { ...owner, processes: [...(owner.processes || []), { pid: child.pid, birth, role: "agent" }] });
+    return child;
+  }, "spawn", generation);
 }
 
 // ── start (new session) ──
@@ -6048,12 +6162,13 @@ async function startCommand() {
   // already use. Resolve first so the profile can answer the question too.
   const copresenceFlagPassed = opts.copresence === "true";
   const resolvedForCopresence = resolveNodeRef(id);
+  let startGeneration: string | undefined;
   if (copresenceFlagPassed && !resolvedForCopresence) {
     console.error(`Node "${id}" not found. Create it first: anet node create ${id}`);
     process.exit(1);
   }
   if (resolvedForCopresence) {
-    try { await admitNodeStart(resolvedForCopresence.id, startInvokedAt); }
+    try { startGeneration = await admitNodeStart(resolvedForCopresence.id, startInvokedAt); }
     catch (e: any) { console.error(`[anet] ${e?.message || e}`); process.exit(1); }
   }
   if (process.env.ANET_COPRESENCE_BRIDGE !== "1" && resolvedForCopresence
@@ -6136,7 +6251,7 @@ async function startCommand() {
 
   if (!wantTmux && !wantAcceptDevChannels) {
     // Default: spawn the agent runtime in this terminal.
-    await launchAgent(id, forceNewSession, opts.hub);
+    await launchAgent(id, forceNewSession, opts.hub, startGeneration);
     return;
   }
 
@@ -7783,12 +7898,38 @@ function findNodeProcessesByAlias(...aliases: string[]): number[] | null {
 }
 
 type StopResidual = { kind: "process" | "socket"; detail: string };
+type ProcessIdentitySnapshot =
+  | { kind: "gone" }
+  | { kind: "unverifiable"; detail: string }
+  | { kind: "live"; birth: string; ppid?: number };
 
-function processBirth(pid: number): string | null {
+function processIdentitySnapshot(pid: number): ProcessIdentitySnapshot {
   if (process.platform === "linux") {
     try {
-      const fields = readFileSync(`/proc/${pid}/stat`, "utf-8").trim().split(/\s+/);
-      return fields[21] || null;
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf-8").trim();
+      const fields = stat.slice(stat.lastIndexOf(")") + 2).split(/\s+/);
+      if (fields[0] === "Z") return { kind: "gone" };
+      const ppid = Number(fields[1]);
+      const birth = fields[19];
+      if (!Number.isSafeInteger(ppid) || !birth) return { kind: "unverifiable", detail: "malformed /proc stat" };
+      return { kind: "live", birth, ppid };
+    } catch (e: any) {
+      if (e?.code === "ENOENT" || e?.code === "ESRCH") return { kind: "gone" };
+      return { kind: "unverifiable", detail: e?.code || "proc read failed" };
+    }
+  }
+  const birth = processBirth(pid);
+  if (birth) return { kind: "live", birth };
+  return pidAlive(pid) ? { kind: "unverifiable", detail: "birth probe failed" } : { kind: "gone" };
+}
+
+function processBirth(pid: number): string | null {
+  if (process.platform === "win32") return probeWindowsCreationDate(pid);
+  if (process.platform === "linux") {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf-8").trim();
+      const fields = stat.slice(stat.lastIndexOf(")") + 2).split(/\s+/);
+      return fields[19] || null;
     } catch { return null; }
   }
   try { return execFileSync("ps", ["-p", String(pid), "-o", "lstart="], { encoding: "utf-8" }).trim() || null; }
@@ -7813,48 +7954,39 @@ function nodeSocketResiduals(profile: Profile): StopResidual[] {
 // The child pidfile is written only after spawn, so converge on the alias-
 // bearing generation. Linux birth ticks are revalidated before every signal;
 // a recycled PID is never signalled.
-async function reapLegacyNodeGeneration(alias: string): Promise<StopResidual[]> {
-  if (process.platform === "win32") return [];
-  const scan = (): number[] | null => {
-    const agents = findNodeProcessesByAlias(alias);
-    const bridges = process.platform === "linux" ? findMcpBridgeOrphansByAlias(alias) : [];
-    if (agents === null || bridges === null) return null;
-    return [...new Set([...agents, ...bridges])];
-  };
-  const initial = scan();
-  if (initial === null) return [{ kind: "process", detail: "process table unavailable" }];
-  const owned = new Map(initial.map(pid => [pid, processBirth(pid)]));
+async function reapOwnedGeneration(owned: readonly LifecycleProcessIdentity[]): Promise<StopResidual[]> {
+  const audit = () => owned.map(identity => ({ identity, snapshot: processIdentitySnapshot(identity.pid) }));
+  const survivors = () => audit().filter(({ identity, snapshot }) =>
+    snapshot.kind === "live" && snapshot.birth === identity.birth).map(x => x.identity);
+  const unverifiable = () => audit().filter(({ snapshot }) => snapshot.kind === "unverifiable").map(x => x.identity);
   const signalOwned = (signal: NodeJS.Signals) => {
-    const current = scan();
-    if (current === null) return false;
-    for (const pid of current) {
-      const birth = processBirth(pid);
-      if (!owned.has(pid)) owned.set(pid, birth);
-      if (owned.get(pid) !== birth) continue;
-      try { process.kill(pid, signal); } catch {}
+    for (const identity of owned) {
+      // One authoritative snapshot distinguishes gone/live/unverifiable. A
+      // different birth is reuse; null is never compared to null.
+      const snapshot = processIdentitySnapshot(identity.pid);
+      if (snapshot.kind !== "live" || snapshot.birth !== identity.birth) continue;
+      try { process.kill(identity.pid, signal); } catch {}
     }
-    return true;
   };
+  const unknown = unverifiable();
+  if (unknown.length) return [{ kind: "process", detail: `birth unavailable for owned pids ${unknown.map(p => p.pid).join(",")}` }];
   signalOwned("SIGTERM");
   const termDeadline = Date.now() + 5_000;
   while (Date.now() < termDeadline) {
     await new Promise(r => setTimeout(r, 100));
-    const live = scan();
-    if (live === null) return [{ kind: "process", detail: "process table unavailable during TERM audit" }];
-    if (live.length === 0) return [];
-    signalOwned("SIGTERM");
+    const unknownNow = unverifiable();
+    if (unknownNow.length) return [{ kind: "process", detail: `birth unavailable during TERM audit for pids ${unknownNow.map(p => p.pid).join(",")}` }];
+    if (survivors().length === 0) return [];
   }
   signalOwned("SIGKILL");
   const killDeadline = Date.now() + 3_000;
   while (Date.now() < killDeadline) {
     await new Promise(r => setTimeout(r, 100));
-    const live = scan();
-    if (live === null) return [{ kind: "process", detail: "process table unavailable during KILL audit" }];
-    if (live.length === 0) return [];
-    signalOwned("SIGKILL");
+    const unknownNow = unverifiable();
+    if (unknownNow.length) return [{ kind: "process", detail: `birth unavailable during KILL audit for pids ${unknownNow.map(p => p.pid).join(",")}` }];
+    if (survivors().length === 0) return [];
   }
-  const survivors = scan();
-  return [{ kind: "process", detail: `alias-bearing pids ${(survivors || []).join(",") || "unknown"}` }];
+  return [{ kind: "process", detail: `owned generation pids ${survivors().map(p => p.pid).join(",") || "unknown"}` }];
 }
 
 // #146 GOTCHA-2 — best-effort drain before a rename restart kills the agent.
@@ -8480,16 +8612,34 @@ Stop a running agent node.
   }
 
   const displayName = nodeDisplayName(resolved.id, resolved.profile);
+  let stopGeneration = "";
+  let stopProcesses: LifecycleProcessIdentity[] = [];
   try {
     await withLifecycleLock(resolved.id, () => {
       const prior = readLifecycleOwner(resolved.id);
+      stopGeneration = prior?.generation || randomUUID();
+      let roots = prior?.processes || [];
+      if (roots.some(p => !p.birth)) throw new Error("NODE_OWNER_BIRTH_UNAVAILABLE");
+      // One-time migration for pre-receipt generations: discover by alias only
+      // while holding stop-intent, then freeze exact identities. Reaping never
+      // rescans by alias, so a later same-name generation cannot be adopted.
+      if (roots.length === 0) {
+        const legacy = findNodeProcessesByAlias(displayName);
+        if (legacy === null) throw new Error("NODE_PROCESS_TABLE_UNAVAILABLE");
+        roots = legacy.map(pid => {
+          const birth = processBirth(pid);
+          if (!birth) throw new Error(`NODE_OWNER_BIRTH_UNAVAILABLE: pid=${pid}`);
+          return { pid, birth, role: "agent" as const };
+        });
+      }
+      stopProcesses = snapshotOwnedProcessTree(roots);
       writeLifecycleOwner(resolved.id, {
-        schema: 1, state: "stopping", stopInvokedAt,
-        ...(prior?.generation ? { generation: prior.generation } : {}),
+        schema: 1, state: "stopping", stopInvokedAt, generation: stopGeneration,
         ...(prior?.wrapperPid ? { wrapperPid: prior.wrapperPid, wrapperBirth: prior.wrapperBirth } : {}),
+        processes: stopProcesses,
         ...(prior?.startInvokedAt ? { startInvokedAt: prior.startInvokedAt } : {}),
       });
-    });
+    }, "stop-intent");
   } catch (e: any) {
     console.error(`[anet] ${e?.message || e}`);
     process.exit(1);
@@ -8653,7 +8803,7 @@ Stop a running agent node.
   }
   const tmuxKilled = identityTeardownKilled || tmuxTuiKilled || tmuxAppsrvKilled || tmuxBridgeKilled;
   const generationResiduals = allowLegacyTmuxNameSweep
-    ? await reapLegacyNodeGeneration(displayName)
+    ? await reapOwnedGeneration(stopProcesses)
     : [];
   if (generationResiduals.length > 0) {
     console.error(`[anet] STOP_TIMEOUT: could not prove "${displayName}" stopped; hub was not notified offline.`);
@@ -8680,8 +8830,12 @@ Stop a running agent node.
   }
   await withLifecycleLock(resolved.id, () => {
     const owner = readLifecycleOwner(resolved.id);
+    if (!owner || owner.generation !== stopGeneration || (owner.state !== "stopping" && owner.state !== "stopped")) {
+      throw new Error("NODE_STOP_GENERATION_CHANGED");
+    }
+    if (owner.state === "stopped") return;
     writeLifecycleOwner(resolved.id, { ...(owner || { schema: 1 }), schema: 1, state: "stopped", stopInvokedAt });
-  });
+  }, "stop-complete", stopGeneration);
   const killed = stopResult.status === "stopped";
   // Always notify server — even if PID file missing, server may have stale session
   await notifyServerOffline(resolved.profile, resolved.id);

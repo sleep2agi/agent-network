@@ -1,6 +1,6 @@
 # test225 node-stop convergence — issue #1027
 
-base: origin/main 8840b44f (includes #1193)
+base: origin/main a2e76b1c (includes #1193)
 scope: local Docker only; no publish, production, or merge action
 
 Root cause
@@ -19,25 +19,45 @@ case in this suite preserves that exact foreground-start/background-wait shape.
 The first local Docker attempt also exposed an environment-layer failure (apt
 replaced Node 24 with unsupported Node 18); the Dockerfile was corrected before
 product assertions were accepted.
+Aggregate CI on a58590fd exposed a load-sensitive fixture race: the test edited
+the new generation receipt after a fixed 300ms sleep, while the delayed child
+spawn could subsequently publish its valid receipt over the injected
+missing-birth record. The fixture now waits for the exact wrapper generation's
+agent+birth receipt before fault injection; a different/stale receipt cannot
+satisfy readiness.
 
 Green layers
 ------------
 PASS: test225 foreground startup race converged
 PASS: stale pid did not kill concurrent node
 PASS: surviving leader socket yields typed failure without collateral kill
+PASS: leader and attach sockets are independently authoritative
+PASS: lifecycle lock recovers dead identity and refuses corrupt receipt
+PASS: dual stale-lock reclaimers serialize through one atomic claim winner
+PASS: single /proc snapshot treats exited process as gone without unverifiable race
 PASS: kill escalation is bounded and alias-owned
+PASS: stop intent rejects late start and releases alias only after completion
+PASS: birth unavailable fails closed and PID reuse is never signalled
+PASS: all three tmux resources are audited
+PASS: Windows uses creation identity and PM2 remains outside alias kill authority
+PASS: #1193 restart shares generation ownership and converges
 Summary: PASS
 
 Implementation contract
 -----------------------
-- per-node cross-process mkdir lock and generation owner receipt linearize
-  start/stop admission; a stop intent cancels an older start before spawn
+- per-node cross-process mkdir lock records holder pid, birth, operation, and
+  generation; stale recovery atomically renames to a unique claim so only one
+  reclaimer can delete it and no loser can delete a replacement lock
+- generation owner receipts are consumed by stop: stop intent freezes exact
+  pid+birth identities and descendants; reaping never dynamically adopts a
+  later same-alias process
 - stop converges wrapper, agent children, env-owned bridge children, three tmux
   sessions, and configured leader/attach sockets before notifying Hub offline
 - TERM has a bounded grace and KILL escalation; residuals return non-zero with
   typed `STOP_TIMEOUT` diagnostics
-- Linux PID birth ticks (POSIX `ps lstart` fallback) are revalidated before
-  every signal; stale/reused pidfiles never grant kill authority
+- Linux `/proc/stat` is read once per identity snapshot, atomically classifying
+  gone/zombie, live birth+ppid, or unverifiable; unavailable identity fails
+  closed and stale/reused PIDs never grant kill authority
 - Windows managed-process creation dates are revalidated after taskkill and
   refusal/residue paths do not notify Hub offline
 
