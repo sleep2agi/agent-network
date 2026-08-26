@@ -159,7 +159,13 @@ import {
 } from "../src/windows-codex-copresence";
 import { normalizeBatchWorkdir } from "../src/batch-workdir";
 import { copresenceThreadPlan } from "../src/codex-copresence-thread";
-import { bridgeClientHealthReceipt } from "../src/codex-tui-client-health";
+import {
+  bridgeClientHealthReceipt,
+  assertPendingServerQuiesced,
+  codexTuiLaunchArgs,
+  migrateCodexPendingThread,
+  requirePromotedCodexPendingThread,
+} from "../src/codex-tui-client-health";
 import { probePosixOwnedLoopbackConnection } from "../src/posix-codex-copresence";
 import {
   backupCodexRecoveryState,
@@ -782,12 +788,25 @@ async function startWindowsCodexCopresence(
   if (unsafeCmd.test(opts.codexBin) || unsafeCmd.test(opts.model || "")) {
     throw new Error("Windows codex command/model contains cmd.exe metacharacters");
   }
+  const recoveryCfg = JSON.parse(readFileSync(join(nodesDir(), resolved.id, "config.json"), "utf-8"));
+  const priorWindowsRecord = readWindowsCopresenceRecord(nodesDir(), resolved.id);
+  let authoritativeOldPendingMarker: string | undefined;
+  if (recoveryCfg.codexPendingThread !== undefined) {
+    if (priorWindowsRecord?.version !== 2 || !priorWindowsRecord.marker
+      || recoveryCfg.codexPendingThread?.marker !== priorWindowsRecord.marker) {
+      throw new Error("pending Codex thread is not bound to the exact private previous-generation Windows record");
+    }
+    authoritativeOldPendingMarker = priorWindowsRecord.marker;
+  }
   // Authoritative snapshot only after all prior writers have been reaped.
   // Failure aborts before any replacement app-server can start.
   await quiesceThenSnapshot(
     () => stopPriorWindowsCopresence(resolved.id),
     () => persistCodexRecoveryPoint(resolved, opts.codexHome),
   );
+  if (authoritativeOldPendingMarker) {
+    await assertPendingServerQuiesced(recoveryCfg.codexAppServerUrl, (oldPort) => waitForLoopbackPort(oldPort, 750));
+  }
   const port = await findFreeLoopbackPort(opts.port);
   const wsUrl = `ws://127.0.0.1:${port}`;
   const posture = codexCopresencePosture(opts.dangerFullAccess, resolved.profile, displayName);
@@ -816,7 +835,7 @@ async function startWindowsCodexCopresence(
       "-c", bearerTomlLiteral,
       "--listen", wsUrl,
     ], appEnv, appLog, true));
-    writeWindowsCopresenceRecord(nodesDir(), resolved.id, managed);
+    writeWindowsCopresenceRecord(nodesDir(), resolved.id, managed, marker);
     console.log(`[anet] ① app-server pid=${managed[0].pid} listening ${wsUrl} (sandbox=${posture.sandboxMode})…`);
     // npm installs Codex as codex.cmd. Its cmd.exe grandchild does not
     // reliably inherit a detached Node file descriptor on Windows, so log
@@ -825,13 +844,26 @@ async function startWindowsCodexCopresence(
       throw new Error(`app-server did not bind ${wsUrl} within 25s; log=${appLog}`);
     }
     const thread = await createCodexCopresenceThread(wsUrl, 60_000, resolved.profile.codexThreadId);
-    const threadId = thread.threadId;
-    if (!thread.freshDeferred && !SAFE_THREAD_ID.test(threadId)) throw new Error("unexpected threadId shape");
+    let threadId = thread.threadId;
+    let freshDeferred = thread.freshDeferred;
+    if (!freshDeferred && !SAFE_THREAD_ID.test(threadId)) throw new Error("unexpected threadId shape");
     const rawCfgPath = join(nodesDir(), resolved.id, "config.json");
     const rawCfg = JSON.parse(readFileSync(rawCfgPath, "utf-8"));
+    let pendingRecoveryId: string | undefined;
+    if (freshDeferred && rawCfg.codexPendingThread !== undefined) {
+      const migrated = migrateCodexPendingThread(
+        rawCfg.codexPendingThread,
+        rawCfg.codexAppServerUrl,
+        authoritativeOldPendingMarker,
+        wsUrl,
+        marker,
+      );
+      rawCfg.codexPendingThread = migrated;
+      pendingRecoveryId = migrated.threadId;
+    }
     rawCfg.codexAppServerPort = port;
     rawCfg.codexAppServerUrl = wsUrl;
-    if (thread.freshDeferred) { delete rawCfg.codexThreadId; delete rawCfg.codexRecoveryVerification; }
+    if (freshDeferred) { delete rawCfg.codexThreadId; delete rawCfg.codexRecoveryVerification; }
     else { rawCfg.codexThreadId = threadId; rawCfg.codexRecoveryVerification = thread.verification; }
     delete rawCfg.session;
     atomicWritePrivateJson(rawCfgPath, rawCfg);
@@ -847,22 +879,26 @@ async function startWindowsCodexCopresence(
     managed.push(await windowsManagedProcess("bridge", process.execPath, [
       process.argv[1] ?? "", "node", "start", displayName,
     ], bridgeEnv, bridgeLog));
-    writeWindowsCopresenceRecord(nodesDir(), resolved.id, managed);
-    const bridgeReceipt = thread.freshDeferred
-      ? "[codex-app-server] client-health role=bridge state=waiting-for-tui-thread"
-      : bridgeClientHealthReceipt(wsUrl, threadId);
+    writeWindowsCopresenceRecord(nodesDir(), resolved.id, managed, marker);
+    const bridgeReceipt = pendingRecoveryId
+      ? bridgeClientHealthReceipt(wsUrl, pendingRecoveryId)
+      : freshDeferred
+        ? "[codex-app-server] client-health role=bridge state=waiting-for-tui-thread"
+        : bridgeClientHealthReceipt(wsUrl, threadId);
     if (!await waitForFileText(bridgeLog, bridgeReceipt, 25_000)) {
       throw new Error(`bridge did not attach to the shared app-server before TUI launch; log=${bridgeLog}`);
     }
     if (!probeWindowsCreationDate(managed[1].pid)) throw new Error(`bridge exited during startup; log=${bridgeLog}`);
+    if (pendingRecoveryId) {
+      const promoted = JSON.parse(readFileSync(rawCfgPath, "utf-8"));
+      threadId = requirePromotedCodexPendingThread(promoted, pendingRecoveryId);
+      freshDeferred = false;
+    }
 
     console.log(`[anet] ② bridge pid=${managed[1].pid} running`);
     console.log(`[anet] ③ opening Codex TUI in this Windows console (thread=${threadId || "pending-user-thread"})`);
     console.log(`[anet]    stop from another terminal: anet node stop ${displayName}`);
-    const tuiArgs = thread.freshDeferred
-      ? ["--remote", wsUrl, "-m", model]
-      : ["resume", "--remote", wsUrl, threadId, "-m", model];
-    if (opts.dangerFullAccess) tuiArgs.push("--dangerously-bypass-approvals-and-sandbox");
+    const tuiArgs = codexTuiLaunchArgs(wsUrl, model, freshDeferred ? undefined : threadId, opts.dangerFullAccess);
     const tui = spawn(opts.codexBin, tuiArgs, {
       cwd: process.cwd(), env: { ...process.env, CODEX_HOME: opts.codexHome },
       stdio: "inherit", windowsHide: false, shell: true,
@@ -883,10 +919,10 @@ async function startWindowsCodexCopresence(
     if (!tuiConnected) {
       throw new Error("TUI second-client health failed: launched TUI tree has no attributable connection to the exact app-server");
     }
-    console.log(thread.freshDeferred
+    console.log(freshDeferred
       ? `[anet] client-health role=bridge state=waiting-for-tui-thread`
       : `[anet] client-health role=bridge remote=exact thread=exact`);
-    console.log(`[anet] client-health role=tui codex_home=exact remote=exact thread=${thread.freshDeferred ? "pending-user-thread" : "exact"} connection=pid-attributed`);
+    console.log(`[anet] client-health role=tui codex_home=exact remote=exact thread=${freshDeferred ? "pending-user-thread" : "exact"} connection=pid-attributed`);
     const code = await new Promise<number>((resolve, reject) => {
       tui.once("exit", (c) => resolve(c ?? 1));
     });
@@ -1198,6 +1234,17 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // never matched what was on disk, and nothing was ever killed while the
   // code reported success). See docs of writeMarker() in copresence-identity.ts.
   const identityMarker = randomUUID();
+  const prelaunchCfg = JSON.parse(readFileSync(join(nodesDir(), resolved.id, "config.json"), "utf-8"));
+  let authoritativeOldPendingMarker: string | undefined;
+  if (prelaunchCfg.codexPendingThread !== undefined) {
+    const oldIdentity = readCopresenceMarker(nodesDir(), resolved.id);
+    if (oldIdentity.kind !== "ok" || prelaunchCfg.codexPendingThread?.marker !== oldIdentity.marker.marker) {
+      console.error(`[anet] ❌ pending Codex thread is not bound to the exact private previous-generation marker.`);
+      console.error(`[anet]    Fail-closed before reap/start: inspect the private marker and node config; no TUI was started.`);
+      process.exit(1);
+    }
+    authoritativeOldPendingMarker = oldIdentity.marker.marker;
+  }
 
   // #P3fix必修12 — tmux capability preflight. `new-session -e KEY=VALUE`
   // (how the marker gets injected) needs tmux 3.2+; Ubuntu 20.04 ships
@@ -1254,6 +1301,16 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   } catch (e) {
     console.error(`[anet] ❌ cannot create quiesced Codex recovery point: ${(e as Error).message}`);
     process.exit(1);
+  }
+
+  if (authoritativeOldPendingMarker) {
+    try {
+      await assertPendingServerQuiesced(prelaunchCfg.codexAppServerUrl, (oldPort) => waitForLoopbackPort(oldPort, 750));
+    } catch {
+      console.error(`[anet] ❌ previous pending app-server identity did not quiesce; refusing recovery migration.`);
+      console.error(`[anet]    Fail-closed: no replacement app-server, bridge, or TUI was started.`);
+      process.exit(1);
+    }
   }
 
   const port = await findFreeLoopbackPort(opts.port);
@@ -1375,6 +1432,26 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
 
   const rawCfgPath = join(nodesDir(), resolved.id, "config.json");
   const rawCfg = JSON.parse(readFileSync(rawCfgPath, "utf-8"));
+  let pendingRecoveryId: string | undefined;
+  if (freshDeferred && rawCfg.codexPendingThread !== undefined) {
+    try {
+      const migrated = migrateCodexPendingThread(
+        rawCfg.codexPendingThread,
+        rawCfg.codexAppServerUrl,
+        authoritativeOldPendingMarker,
+        wsUrl,
+        identityMarker,
+      );
+      rawCfg.codexPendingThread = migrated;
+      pendingRecoveryId = migrated.threadId;
+    } catch (e: any) {
+      console.error(`[anet] ❌ pending Codex thread recovery refused: ${e?.message || e}`);
+      console.error(`[anet]    Fail-closed: no bridge/TUI was started and no thread was guessed or created.`);
+      killTmuxSession(appsrvSession);
+      try { rmSync(envFilePath, { force: true }); } catch {}
+      process.exit(1);
+    }
+  }
   rawCfg.codexAppServerPort = port;
   rawCfg.codexAppServerUrl = wsUrl;
   if (freshDeferred) { delete rawCfg.codexThreadId; delete rawCfg.codexRecoveryVerification; }
@@ -1405,9 +1482,11 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     process.exit(1);
   }
   console.log(`[anet] ② bridge tmux=${bridgeSession} starting…`);
-  const bridgeReceipt = freshDeferred
-    ? "[codex-app-server] client-health role=bridge state=waiting-for-tui-thread"
-    : bridgeClientHealthReceipt(wsUrl, threadId);
+  const bridgeReceipt = pendingRecoveryId
+    ? bridgeClientHealthReceipt(wsUrl, pendingRecoveryId)
+    : freshDeferred
+      ? "[codex-app-server] client-health role=bridge state=waiting-for-tui-thread"
+      : bridgeClientHealthReceipt(wsUrl, threadId);
   const bridgeReady = await waitForTmuxPaneText(
     bridgeSession,
     bridgeReceipt,
@@ -1419,16 +1498,24 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
     process.exit(1);
   }
+  if (pendingRecoveryId) {
+    const promoted = JSON.parse(readFileSync(rawCfgPath, "utf-8"));
+    try {
+      threadId = requirePromotedCodexPendingThread(promoted, pendingRecoveryId);
+    } catch {
+      console.error(`[anet] ❌ bridge reported ready without atomically promoting the exact pending Codex thread.`);
+      console.error(`[anet]    Fail-closed: TUI was not started; no thread was guessed or created.`);
+      process.exit(1);
+    }
+    freshDeferred = false;
+  }
   console.log(freshDeferred
     ? `[anet] ② bridge connected; waiting for the TUI-owned thread`
     : `[anet] ② bridge READY on ${wsUrl}`);
 
   // ── piece ③ codex TUI (attachable, resumes same thread) ───────────────
-  const tuiFlags: string[] = [];
-  if (opts.dangerFullAccess) tuiFlags.push("--dangerously-bypass-approvals-and-sandbox");
-  const tuiInvocation = freshDeferred
-    ? `exec ${shellQuote(opts.codexBin)} --remote ${wsUrl} -m ${shellQuote(model)} ${tuiFlags.join(" ")}`.trim()
-    : `exec ${shellQuote(opts.codexBin)} resume --remote ${wsUrl} ${threadId} -m ${shellQuote(model)} ${tuiFlags.join(" ")}`.trim();
+  const tuiArgv = codexTuiLaunchArgs(wsUrl, model, freshDeferred ? undefined : threadId, opts.dangerFullAccess);
+  const tuiInvocation = `exec ${shellQuote(opts.codexBin)} ${tuiArgv.map(shellQuote).join(" ")}`;
   const tuiCmd = [
     `export CODEX_HOME=${shellQuote(opts.codexHome)}`,
     tuiInvocation,

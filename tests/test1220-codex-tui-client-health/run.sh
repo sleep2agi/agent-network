@@ -85,6 +85,27 @@ cp /tmp/test1220-posix.ts agent-network/src/posix-codex-copresence.ts
 
 echo "L2c witnessed-red: bridge receipt cannot lose exact remote/thread"
 cp agent-network/src/codex-tui-client-health.ts /tmp/test1220-health.ts
+echo "L2i witnessed-red: crash-window marker, promotion, and resume argv are mandatory"
+bun /mutate.ts agent-network/src/codex-tui-client-health.ts \
+  '|| typeof p.marker !== "string" || p.marker !== expectedOldMarker' \
+  '|| typeof p.marker !== "string"'
+expect_red pending-old-marker bun test agent-network/src/codex-tui-client-health.test.ts
+cp /tmp/test1220-health.ts agent-network/src/codex-tui-client-health.ts
+bun /mutate.ts agent-network/src/codex-tui-client-health.ts \
+  '|| cfg.codexPendingThread !== undefined)' \
+  ')'
+expect_red pending-promote-atomic bun test agent-network/src/codex-tui-client-health.test.ts
+cp /tmp/test1220-health.ts agent-network/src/codex-tui-client-health.ts
+bun /mutate.ts agent-network/src/codex-tui-client-health.ts \
+  '? (THREAD_ID.test(threadId) ? ["resume", "--remote", remote, threadId, "-m", model] : [])' \
+  '? (THREAD_ID.test(threadId) ? ["--remote", remote, "-m", model] : [])'
+expect_red pending-resume-argv bun test agent-network/src/codex-tui-client-health.test.ts
+cp /tmp/test1220-health.ts agent-network/src/codex-tui-client-health.ts
+bun /mutate.ts agent-network/src/codex-tui-client-health.ts \
+  '|| await isListening(port))' \
+  ')'
+expect_red pending-old-server-live bun test agent-network/src/codex-tui-client-health.test.ts
+cp /tmp/test1220-health.ts agent-network/src/codex-tui-client-health.ts
 bun /mutate.ts agent-network/src/codex-tui-client-health.ts \
   'return `[codex-app-server] client-health role=bridge remote=${remote} thread=${threadId}`;' \
   'return `[codex-app-server] client-health role=bridge`;'

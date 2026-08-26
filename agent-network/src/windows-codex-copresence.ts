@@ -13,9 +13,10 @@ export interface WindowsManagedProcess {
 }
 
 export interface WindowsCopresenceRecord {
-  version: 1;
+  version: 1 | 2;
   nodeId: string;
   createdAt: string;
+  marker?: string;
   processes: WindowsManagedProcess[];
 }
 
@@ -78,11 +79,13 @@ export function writeWindowsCopresenceRecord(
   nodesDir: string,
   nodeId: string,
   processes: WindowsManagedProcess[],
+  marker?: string,
 ): void {
   atomicWritePrivateJson(windowsCopresenceRecordPath(nodesDir, nodeId), {
-    version: 1,
+    version: marker ? 2 : 1,
     nodeId,
     createdAt: new Date().toISOString(),
+    ...(marker ? { marker } : {}),
     processes,
   } satisfies WindowsCopresenceRecord);
 }
@@ -91,7 +94,8 @@ export function readWindowsCopresenceRecord(nodesDir: string, nodeId: string): W
   const path = windowsCopresenceRecordPath(nodesDir, nodeId);
   if (!existsSync(path)) return null;
   const value = JSON.parse(readFileSync(path, "utf8")) as Partial<WindowsCopresenceRecord>;
-  if (value.version !== 1 || value.nodeId !== nodeId || !Array.isArray(value.processes)) {
+  if (![1, 2].includes(value.version as number) || value.nodeId !== nodeId || !Array.isArray(value.processes)
+    || (value.version === 2 && (typeof value.marker !== "string" || !value.marker))) {
     throw new Error(`invalid Windows co-presence record: ${path}`);
   }
   for (const p of value.processes) {
