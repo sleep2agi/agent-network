@@ -1,5 +1,8 @@
 # 生产 Hub 换版本
 
+> 面向用户的守护说明（PM2 入口、`min_uptime` 怎么定、自动恢复四项验证）在文档站
+> [部署 / 让 Hub 常驻](https://anet.sh/deploy/daemon)。本目录是那一页所引用的 **Git 权威**。
+
 对应 `AGENTS.md` §19。与 `deploy/dashboard/` 同一套「固化安装 + 指针切换」模式,
 但 Hub 是**全网唯一**的,所以每一步的代价更高。
 

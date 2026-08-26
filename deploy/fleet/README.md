@@ -214,3 +214,8 @@ weixin。**这正是那次加固要防的事,而加固没有部署。**
 这次的变异测试没提供什么信息:基线**本来就是红的**,人为改坏之后还是 `rc=1`,
 两次输出区分不出来。**真正验到判据的是那条 fail-closed**:把 `HOME` 指向一个空目录,
 `checked=0 drift=0 missing=4 → exit 2`,而不是「干净」。
+
+## 相关
+
+面向用户的进程守护说明见文档站 [部署 / 让 Hub 常驻](https://anet.sh/deploy/daemon)；
+本目录是它引用的 **Git 权威**（systemd user unit + 军团启动链）。

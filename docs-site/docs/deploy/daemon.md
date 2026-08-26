@@ -85,8 +85,10 @@ module.exports = {
 };
 ```
 
-文件名必须是 `*.config.js`、`*.json` 或 `*.yaml`。PM2 会把普通 `.cjs`
-文件当脚本执行，界面可能显示 `online`，但 Hub 根本没有监听。
+文件名要让 PM2 认出这是**配置**而不是**脚本**：`*.config.js`、`*.config.cjs`、
+`*.json`、`*.yaml` 都可以（本仓 `deploy/` 下用的就是 `ecosystem.config.cjs`）。
+若文件名不匹配这些形态，PM2 会把它当普通脚本执行，界面可能显示 `online`，
+但 Hub 根本没有监听。
 
 启动并核验：
 
@@ -97,6 +99,41 @@ curl -fsS http://127.0.0.1:9200/health
 ```
 
 不要只看 PM2 的绿色状态；`/health` 才证明服务真的响应。
+
+## 本仓的权威配置在 `deploy/`
+
+上面的示例是通用起点。本仓生产环境实际在用的那一份已经在仓里，不需要照着手抄：
+
+- [`deploy/hub/ecosystem.config.cjs`](https://github.com/sleep2agi/agent-network/blob/main/deploy/hub/ecosystem.config.cjs) — Hub 的 PM2 进程定义（不含密钥）
+- [`deploy/hub/hub-daemon.sh`](https://github.com/sleep2agi/agent-network/blob/main/deploy/hub/hub-daemon.sh) — 被守护的启动脚本，四道 fail-closed 预检（bun / 固化安装 / vault 密钥 / 端口占用）
+- [`deploy/fleet/`](https://github.com/sleep2agi/agent-network/blob/main/deploy/fleet) — 开机自启的 systemd **user** unit 与军团启动链
+- [`deploy/hub/README.md`](https://github.com/sleep2agi/agent-network/blob/main/deploy/hub/README.md) — Hub 换版本流程（已演练）
+
+生产机 `~/.local/bin/` 下的是**部署副本**，Git 权威在 `deploy/`。两边要一起改，
+漂移用 [`deploy/check-deployed-copies.sh`](https://github.com/sleep2agi/agent-network/blob/main/deploy/check-deployed-copies.sh) 检。
+
+## `min_uptime` 按「失败退出耗时」定，不是按感觉定
+
+规则：`min_uptime` 必须**大于**一次失败启动走到退出所需的时间。小于它，PM2 会把这次
+失败当成「启动成功」——`max_restarts` 不累加、`exp_backoff_restart_delay` 不触发，
+于是崩溃循环看起来就是正常重启。
+
+**怎么算这个时间**：看被守护脚本失败路径上的固定延时。`hub-daemon.sh` 的预检失败走
+`fail_slow()`，它 `sleep 30` 之后 `exit 1`，所以失败退出耗时约 30 秒 ⇒ 守它的
+`min_uptime` 必须大于 `30000`。守裸 `anet hub start` 时失败退出通常快得多，
+所以本页示例用的 `45000` 对两种入口都够。
+
+实测（`node:22-bookworm-slim` 容器里的 PM2，同一个「30 秒后失败退出」的脚本，
+观察 100 秒约 3 个周期）：
+
+| `min_uptime` | `restarts` | `unstable restarts` |
+|---|---|---|
+| `20000` | 3 | **0** ← 退避从不触发 |
+| `45000` | 3 | 3 |
+
+`unstable restarts` 停在 0，就是这道保护已经失效的读数：PM2 认为每次都启动成功了。
+所以核对守护配置时要看这个字段，不要只看 `restarts`。（本仓当前取值的复核见
+[#1223](https://github.com/sleep2agi/agent-network/issues/1223)。）
 
 ## 安全边界
 
@@ -155,3 +192,4 @@ curl -fsS http://127.0.0.1:9200/health
 - [生产部署 / 公网部署安全](/deploy/production)
 - [升级指南](/guide/upgrade)
 - [故障排查](/troubleshooting)
+- [`deploy/` — 本仓部署资产的 Git 权威](https://github.com/sleep2agi/agent-network/blob/main/deploy)

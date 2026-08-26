@@ -93,8 +93,11 @@ module.exports = {
 };
 ```
 
-The filename must end in `*.config.js`, `*.json`, or `*.yaml`. PM2 may execute a
-plain `.cjs` file as a script, show it as `online`, and never start the Hub.
+The filename has to let PM2 recognise the file as a **config** rather than a
+**script**: `*.config.js`, `*.config.cjs`, `*.json`, and `*.yaml` all work (the
+files under `deploy/` in this repo are named `ecosystem.config.cjs`). A name that
+matches none of those shapes is executed as a plain script — PM2 may show it as
+`online` and never start the Hub.
 
 Start and verify it:
 
@@ -105,6 +108,47 @@ curl -fsS http://127.0.0.1:9200/health
 ```
 
 Do not treat PM2's green status as proof; `/health` proves that the service responds.
+
+## This repo's authoritative config lives in `deploy/`
+
+The example above is a generic starting point. The configuration this project
+actually runs in production is already committed — there is no need to retype it:
+
+- [`deploy/hub/ecosystem.config.cjs`](https://github.com/sleep2agi/agent-network/blob/main/deploy/hub/ecosystem.config.cjs) — the Hub's PM2 process definition (no secrets)
+- [`deploy/hub/hub-daemon.sh`](https://github.com/sleep2agi/agent-network/blob/main/deploy/hub/hub-daemon.sh) — the guarded launcher, with four fail-closed prechecks (bun / pinned install / vault key / port already listening)
+- [`deploy/fleet/`](https://github.com/sleep2agi/agent-network/blob/main/deploy/fleet) — the systemd **user** units and the fleet boot chain
+- [`deploy/hub/README.md`](https://github.com/sleep2agi/agent-network/blob/main/deploy/hub/README.md) — the Hub version-switch procedure (rehearsed)
+
+What sits in `~/.local/bin/` on the production host is a **deployed copy**; the Git
+authority is `deploy/`. Change both together, and check for drift with
+[`deploy/check-deployed-copies.sh`](https://github.com/sleep2agi/agent-network/blob/main/deploy/check-deployed-copies.sh).
+
+## Derive `min_uptime` from how long a failing start takes to exit
+
+The rule: `min_uptime` must be **greater** than the time a failing start needs to
+reach its exit. Set it lower and PM2 records the failure as a successful start —
+`max_restarts` never accumulates, `exp_backoff_restart_delay` never engages, and a
+crash loop looks like ordinary restarts.
+
+**How to obtain that number**: read the fixed delays on the guarded script's failure
+path. `hub-daemon.sh` routes every failed precheck through `fail_slow()`, which
+sleeps 30 seconds and then exits 1 — so a failing start takes about 30 seconds, and
+anything guarding it needs `min_uptime` above `30000`. A bare `anet hub start`
+usually fails much faster, so the `45000` used in the example above clears both
+entry points.
+
+Measured (PM2 inside a `node:22-bookworm-slim` container, the same "exit 1 after 30
+seconds" script, observed for 100 seconds — roughly three cycles):
+
+| `min_uptime` | `restarts` | `unstable restarts` |
+|---|---|---|
+| `20000` | 3 | **0** — backoff never engages |
+| `45000` | 3 | 3 |
+
+An `unstable restarts` stuck at 0 is the reading that says this protection is
+already inert: PM2 believes every start succeeded. Check that field when reviewing a
+supervisor config — `restarts` alone will not tell you. (The review of this repo's
+current value is tracked in [#1223](https://github.com/sleep2agi/agent-network/issues/1223).)
 
 ## Security boundaries
 
@@ -165,3 +209,4 @@ unclear, stop and identify which supervisor controls the Hub first.
 - [Production and public-internet security](/en/deploy/production)
 - [Upgrade guide](/en/guide/upgrade)
 - [Troubleshooting](/en/troubleshooting)
+- [`deploy/` — the Git authority for this repo's deployment assets](https://github.com/sleep2agi/agent-network/blob/main/deploy)
