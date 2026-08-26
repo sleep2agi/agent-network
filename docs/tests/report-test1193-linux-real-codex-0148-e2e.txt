@@ -49,15 +49,15 @@ space. No Docker prune was run.
 2. One built agent-node bridge attached and logged `shared bridge ready` before
    the real TUI was opened.
 3. App-server, bridge and TUI used the same node CODEX_HOME, remote and thread
-   `01a03ce4-fb32-7502-a1c8-9682c74defa6`. Exactly three dedicated tmux
-   sessions existed: app-server, bridge and TUI (one bridge).
+   (identified in this report only as `persisted_thread_A`). Exactly three
+   dedicated tmux sessions existed: app-server, bridge and TUI (one bridge).
 4. The human TUI submitted a real shell `sleep 70` turn. While the TUI still
    displayed `Working (26s)` with the terminal active, one high and one normal
    Dashboard task were posted at 15:16:30.
 5. The production bridge logged both tasks as `(steered)` into the same active
-   human turn `01a03ced-2ea4-7893-a0ab-d78c5be2d63e`. Both still emitted active
-   heartbeats at 15:17:23 and both completed/replied at 15:17:28. Thus the
-   overlap is witnessed during an actual >=70 second human turn.
+   human turn (identified only as `active_human_turn_A`). Both still emitted
+   active heartbeats at 15:17:23 and both completed/replied at 15:17:28. Thus
+   the overlap is witnessed during an actual >=70 second human turn.
 6. Each task persisted exactly one `task.started` and one `task.replied` event;
    no duplicate task completion was stored.
 7. Stop completed through identity-gated teardown. Restart retained the exact
