@@ -71,6 +71,25 @@ register "@sleep2agi/agent-network" "agent-network/src/opencode-agent-node-pair.
 # @sleep2agi/agent-node — paired runtime release
 register "@sleep2agi/agent-node" "agent-network/src/opencode-agent-node-pair.ts:PAIRED_AGENT_NODE_VERSION"
 
+# ---- 各包自身的 package.json / package-lock.json ----
+#
+# 为什么必须登记:2026-08-27 的 agent-node 2.5.0-preview.35 发版 PR 只改了
+# package.json 和 PAIRED_AGENT_NODE_VERSION,package-lock.json 里那两处留在
+# .34,于是 agent-node unit 门红在 package-version-consistency.test.ts。
+# 同一天普查发现 agent-network 的 lock 停在 preview.46 而 package.json 已是
+# preview.47 —— 那个包没有对应断言,所以漂移一直没被看见。
+#
+# lock 里的版本有两处:顶层 version 和 packages[""].version,npm 两处都写。
+register "@sleep2agi/agent-node" "json:agent-node/package.json:version"
+register "@sleep2agi/agent-node" "json:agent-node/package-lock.json:version"
+register "@sleep2agi/agent-node" "json:agent-node/package-lock.json:packages/\"\"/version"
+register "@sleep2agi/agent-network" "json:agent-network/package.json:version"
+register "@sleep2agi/agent-network" "json:agent-network/package-lock.json:version"
+register "@sleep2agi/agent-network" "json:agent-network/package-lock.json:packages/\"\"/version"
+register "@sleep2agi/commhub-server" "json:server/package.json:version"
+register "@sleep2agi/commhub-server" "json:server/package-lock.json:version"
+register "@sleep2agi/commhub-server" "json:server/package-lock.json:packages/\"\"/version"
+
 # @sleep2agi/commhub-server — agent-network CLI 内 PINNED_SERVER_VERSION 常量
 register "@sleep2agi/commhub-server" "agent-network/bin/cli.ts:PINNED_SERVER_VERSION"
 
@@ -189,6 +208,97 @@ apply_or_preview() {
   fi
 }
 
+# ---------- JSON 目标 ----------
+#
+# 形式: json:<file>:<path>,path 用 / 分段,空字符串键写作 ""
+#   json:agent-node/package-lock.json:packages/""/version
+#
+# 为什么不用 sed:JSON 里同一个版本串会在多处出现(依赖、resolved URL),
+# 按文本替换会打到不该动的地方。按路径定位只改那一个键。
+#
+# 写回后校验"改动行数恰好是 1" —— 若 json.dumps 的格式化和原文件不一致,
+# 整个文件会被重排,那种改动必须当成失败而不是成功。
+apply_json_target() {
+  local file="$1" jpath="$2"
+  echo ""
+  echo "[$PKG → $file ($jpath)]"
+  if [[ ! -f "$file" ]]; then
+    echo "  🔴 MISSING TARGET: $file 不存在 —— 注册表已过期"
+    MISSING_TARGETS=$((MISSING_TARGETS + 1))
+    return
+  fi
+  local out rc
+  set +e
+  out="$(JSON_FILE="$file" JSON_PATH="$jpath" JSON_NEW="$NEW_VERSION" JSON_MODE="$MODE" python3 - <<'PYEOF'
+import json, os, sys, collections, difflib
+
+path_s = os.environ["JSON_PATH"]
+f = os.environ["JSON_FILE"]
+new = os.environ["JSON_NEW"]
+mode = os.environ["JSON_MODE"]
+
+raw = open(f, encoding="utf-8").read()
+doc = json.loads(raw, object_pairs_hook=collections.OrderedDict)
+
+segs = [("" if seg == '""' else seg) for seg in path_s.split("/")]
+node = doc
+for seg in segs[:-1]:
+    if not isinstance(node, dict) or seg not in node:
+        print("MISSING", flush=True); sys.exit(3)
+    node = node[seg]
+leaf = segs[-1]
+if not isinstance(node, dict) or leaf not in node:
+    print("MISSING", flush=True); sys.exit(3)
+
+old = node[leaf]
+if old == new:
+    print("UNCHANGED", flush=True); sys.exit(0)
+
+node[leaf] = new
+after = json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
+
+diff = list(difflib.unified_diff(raw.splitlines(), after.splitlines(), lineterm="", n=0))
+changed = [l for l in diff if (l.startswith("+") or l.startswith("-")) and not l.startswith(("+++", "---"))]
+if len(changed) != 2:
+    print("REFORMAT %d" % len(changed), flush=True)
+    for l in changed[:8]:
+        print("   %s" % l[:120], flush=True)
+    sys.exit(4)
+
+if mode == "apply":
+    open(f, "w", encoding="utf-8").write(after)
+    print("WROTE %s -> %s" % (old, new), flush=True)
+else:
+    print("WOULD-WRITE %s -> %s" % (old, new), flush=True)
+PYEOF
+)"
+  rc=$?
+  set -e
+  case "$rc" in
+    0)
+      case "$out" in
+        UNCHANGED) echo "  unchanged: $file" ;;
+        WROTE*)    echo "  WROTE: $file (${out#WROTE })"; CHANGED_FILES+=("$file") ;;
+        *)         echo "  ${out}" ;;
+      esac
+      ;;
+    3)
+      echo "  🔴 MISSING TARGET: $file 里找不到路径 \`$jpath\` —— 注册表已过期"
+      MISSING_TARGETS=$((MISSING_TARGETS + 1))
+      ;;
+    4)
+      echo "  🔴 REFORMAT REFUSED: 写回会重排 $file,拒绝改动"
+      printf '%s\n' "$out" | sed 's/^/    /'
+      MISSING_TARGETS=$((MISSING_TARGETS + 1))
+      ;;
+    *)
+      echo "  ERROR: JSON 处理失败 ($file, rc=$rc)" >&2
+      printf '%s\n' "$out" | sed 's/^/    /' >&2
+      return "$rc"
+      ;;
+  esac
+}
+
 # ---------- 执行 ----------
 
 echo "============================================================"
@@ -200,7 +310,11 @@ echo "  repo    : $REPO_ROOT"
 echo "============================================================"
 
 for target in "${TARGETS[@]}"; do
-  if [[ "$target" == *":"* ]]; then
+  if [[ "$target" == json:* ]]; then
+    # json:<file>:<path> 形式
+    rest="${target#json:}"
+    apply_json_target "${rest%%:*}" "${rest#*:}"
+  elif [[ "$target" == *":"* ]]; then
     # cli.ts:CONST_NAME 形式
     file="${target%%:*}"
     const_name="${target#*:}"
