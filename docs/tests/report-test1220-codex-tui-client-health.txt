@@ -75,6 +75,12 @@ The full 65-second A9 run plus A12 restart-only verification proved:
   launcher/vendor before execution. A tenth static mutation removes the new
   form and must fail; real Windows rerun is required after this fix reaches
   trusted main.
+- PR native Windows run `33018856354` then proved the product health gate was
+  fail-closed: the short fake TUI printed a pane and exited without owning an
+  app-server socket long enough to attest CreationDate. The fixture now opens
+  the exact WebSocket on every TUI path, lets a fresh TUI publish its user-owned
+  thread, and holds the short probes for five seconds; no product health check
+  was weakened. Native Windows rerun remains the authority for this correction.
 
 - A1: locked dependencies absent; no product roles. A stale cleanup port caused
   a harness false positive.

@@ -88,28 +88,31 @@ if (args[0] === "app-server") {
     setInterval(() => {}, 1_000);
     await new Promise(() => {});
   }
+  // Every TUI fixture must model the production second client, including the
+  // short create/start/restart probes. Printing a pane and exiting can never
+  // satisfy PID+birth+socket health, and would only test a weaker old launcher.
+  const remote = args[args.indexOf("--remote") + 1];
+  const ws = new WebSocket(remote);
+  await new Promise((resolve, reject) => {
+    ws.addEventListener("open", resolve, { once: true });
+    ws.addEventListener("error", reject, { once: true });
+  });
+  let nextId = 1;
+  const request = (method) => new Promise((resolve, reject) => {
+    const id = nextId++;
+    const timer = setTimeout(() => reject(new Error(`${method} timeout`)), 10_000);
+    const listener = (event) => {
+      const response = JSON.parse(String(event.data));
+      if (response.id !== id) return;
+      ws.removeEventListener("message", listener);
+      clearTimeout(timer);
+      response.error ? reject(new Error(response.error.message)) : resolve(response.result);
+    };
+    ws.addEventListener("message", listener);
+    ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params: { threadId } }));
+  });
+  if (freshDeferred) await request("test/tui-thread/create");
   if (process.env.ANET_TEST751_LONG_TURN === "1") {
-    const remote = args[args.indexOf("--remote") + 1];
-    const ws = new WebSocket(remote);
-    await new Promise((resolve, reject) => {
-      ws.addEventListener("open", resolve, { once: true });
-      ws.addEventListener("error", reject, { once: true });
-    });
-    let nextId = 1;
-    const request = (method) => new Promise((resolve, reject) => {
-      const id = nextId++;
-      const timer = setTimeout(() => reject(new Error(`${method} timeout`)), 10_000);
-      const listener = (event) => {
-        const response = JSON.parse(String(event.data));
-        if (response.id !== id) return;
-        ws.removeEventListener("message", listener);
-        clearTimeout(timer);
-        response.error ? reject(new Error(response.error.message)) : resolve(response.result);
-      };
-      ws.addEventListener("message", listener);
-      ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params: { threadId } }));
-    });
-    if (freshDeferred) await request("test/tui-thread/create");
     await request("test/human-turn/start");
     console.log("FAKE_CODEX_TUI_LONG_TURN_READY");
     const sentinel = process.env.ANET_TEST751_COMPLETE_LONG_TURN;
@@ -117,8 +120,12 @@ if (args[0] === "app-server") {
     if (!sentinel || !existsSync(sentinel)) throw new Error("long turn completion sentinel missing");
     await request("test/human-turn/complete");
     console.log("FAKE_CODEX_TUI_LONG_TURN_COMPLETED");
-    ws.close();
+  } else {
+    // Keep the root process and exact socket observable across the launcher's
+    // WMI CreationDate and Get-NetTCPConnection snapshots.
+    await Bun.sleep(5_000);
   }
+  ws.close();
 } else if (args[0] === "--version") {
   console.log("codex-cli 1.0.0");
 } else {
