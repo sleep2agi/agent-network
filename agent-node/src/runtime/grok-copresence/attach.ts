@@ -529,6 +529,14 @@ class AttachServer implements GrokCopresenceAttachServer {
   private notifyDetach(client: ClientState, reason: GrokCopresenceAttachDetachReason): void {
     if (client.detachNotified) return;
     client.detachNotified = true;
+    // 🔴 Only the terminal seat detaching is a human detaching. The runtime
+    // reacts to `onDetach` by cancelling whatever is in the composer — it
+    // writes Ctrl-C into the PTY and drops the deferred bytes — so letting a
+    // control connection reach this would wipe a half-typed line every time
+    // somebody ran a model switch. Caught by CI: the integration test that
+    // opens a control connection and closes it hung for 20s because the
+    // arbitration it then waited on had been reset underneath it.
+    if (client.role !== "terminal") return;
     if (!this.options.onDetach) return;
     this.arbiterCallbacks = this.arbiterCallbacks
       .then(() => this.options.onDetach?.(reason))

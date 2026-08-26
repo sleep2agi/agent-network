@@ -264,6 +264,36 @@ describe("Grok co-presence local attach server", () => {
     expect(server.clientAttached).toBe(true);
   });
 
+  it("🔴 a control connection closing is not a human detaching", async () => {
+    // The runtime reacts to onDetach by writing Ctrl-C into the PTY and
+    // dropping deferred bytes. If a control connection reached that callback,
+    // every model switch would wipe whatever the human had half-typed.
+    const { socketPath } = temporarySocket();
+    const detachReasons: string[] = [];
+    const server = await startServer(socketPath, {
+      onSetModel: () => {},
+      onDetach: (reason) => { detachReasons.push(reason); },
+    });
+
+    const human = await connect(socketPath);
+    await human.frames.next();
+    const control = await connect(socketPath);
+    await control.frames.next();
+
+    writeFrame(control.socket, { type: "detach" });
+    await waitForSocketClose(control.socket);
+    await Bun.sleep(50);
+    expect(detachReasons).toEqual([]);
+    expect(server.clientAttached).toBe(true);
+
+    // The terminal seat still reports its own detach.
+    const humanClosed = waitForSocketClose(human.socket);
+    writeFrame(human.socket, { type: "detach" });
+    await humanClosed;
+    await Bun.sleep(50);
+    expect(detachReasons).toEqual(["client"]);
+  });
+
   it("🔴 bounds how many control connections may be open at once", async () => {
     // Without a cap, a caller that reconnects in a loop accumulates sockets
     // against the node — and every one of them is a socket `server.close()`
