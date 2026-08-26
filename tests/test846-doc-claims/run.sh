@@ -3,7 +3,7 @@ set -euo pipefail
 
 # test846 —— 文档行号断言门(见 #846)
 #
-# 🔴 绿只说明 docs/stale-issue-review.md 引的行号还没漂。
+# 🔴 绿只说明 docs/stale-issue-review.md 引的源码断言仍可唯一定位。
 #    正文的结论对不对,这道门不检查 —— 别拿它的绿去论证那份文档的判定是对的。
 
 ROOT=/repo
@@ -39,23 +39,23 @@ n=$(printf '%s' "$out" | sed -nE 's/^claims_checked=([0-9]+)$/\1/p')
 echo "  OK claims_checked=$n"
 
 # ---------------------------------------------------------------------------
-# L1 — witnessed-red ①:把清单里某条的行号改掉,必须红在 drifted 上
+# L1 — witnessed-red ①:破坏清单里的唯一源码子串,必须红在 not-found 上
 # ---------------------------------------------------------------------------
-echo "[L1] witnessed-red: a drifted line number must turn it red"
+echo "[L1] witnessed-red: a missing source substring must turn it red"
 cp "$DOC" /tmp/doc.bak
 python3 - "$DOC" <<'PYX'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1])
 t = p.read_text(encoding="utf-8")
-old = "server/src/db.ts :: 393 :: ADD COLUMN team"
+old = "server/src/db.ts :: `ALTER TABLE nodes ADD COLUMN team TEXT`,"
 assert t.count(old) == 1, "清单里的锚点不唯一,变异会不准"
-p.write_text(t.replace(old, "server/src/db.ts :: 394 :: ADD COLUMN team"), encoding="utf-8")
+p.write_text(t.replace(old, "server/src/db.ts :: `ALTER TABLE nodes ADD COLUMN missing_team TEXT`,"), encoding="utf-8")
 PYX
 set +e; mut=$(python3 "$CHECK" "$ROOT" 2>&1); rc=$?; set -e
 cp /tmp/doc.bak "$DOC"
-[[ "$rc" -ne 0 ]] || fail "行号改错之后这道门仍然绿"
-printf '%s' "$mut" | grep -q 'drifted' || fail "红了但类别不是 drifted:$(printf '%s' "$mut" | head -3)"
-echo "  MUTATION_RED drifted-line-number rc=$rc"
+[[ "$rc" -ne 0 ]] || fail "源码子串改错之后这道门仍然绿"
+printf '%s' "$mut" | grep -q '\[not-found\]' || fail "红了但类别不是 not-found:$(printf '%s' "$mut" | head -3)"
+echo "  MUTATION_RED not-found rc=$rc"
 python3 "$CHECK" "$ROOT" >/dev/null || fail "复原之后没有回绿"
 echo "  复原后回绿 ✓"
 
@@ -88,7 +88,7 @@ python3 - "$DOC" <<'PYX'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1])
 t = p.read_text(encoding="utf-8")
-old = "server/src/db.ts :: 393 :: ADD COLUMN team"
+old = "server/src/db.ts :: `ALTER TABLE nodes ADD COLUMN team TEXT`,"
 p.write_text(t.replace(old, old + "\n../../etc/passwd :: 1 :: root"), encoding="utf-8")
 PYX
 set +e; mut3=$(python3 "$CHECK" "$ROOT" 2>&1); rc3=$?; set -e

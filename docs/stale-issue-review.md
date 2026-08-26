@@ -161,17 +161,14 @@ agent-node/src/cli.ts:3450               … Cross-machine artifact distribution
      加长的两条：`list_providers` 在 tools.ts 里 2 处、`addNetworkScope` 在
      server.ts 里 **24 处** —— 后者尤其说明行号式掩盖了什么：一个出现 24 次的词
      本来就没钉住任何地方，行号只是让人看不出来。
-     **只留 db.ts 那一条仍是行号式**，因为 tests/test846-doc-claims/run.sh 的
-     drifted 变异打的就是它；改它等于顺手改动那道门的判据，属于另一条。
-     ⇒ 清单里恰好保留一条行号式，它同时是那道门的 witnessed-red 夹具。
-     其余几条保持行号式：它们的子串本来就唯一，而且 test846 的 drifted 变异打的就是
-     清单里 db.ts 的那一条（`ADD COLUMN team`）。
+     最后一条 db.ts 引用也改成两列式；test846 的 witnessed-red 对应改为破坏
+     唯一子串，避免测试夹具反过来要求文档保留一个会随插行漂移的行号。
      🔴 这段注释第一版把那条清单行**逐字抄了一遍**，于是同一个串在文档里出现两次，
      而 test846 的变异是 `t.count(old) == 1` + `replace(..., 1)` —— 它会打中我这段
      注释而不是清单，变异静默失效、门照绿。是我自己跑变异③时它没红才发现的。
      **写注释引用一条被机器匹配的行时，不要逐字复制它。** -->
 ```doc-claims
-server/src/db.ts :: 393 :: ADD COLUMN team
+server/src/db.ts :: `ALTER TABLE nodes ADD COLUMN team TEXT`,
 agent-network/bin/cli.ts :: claudeArgs.push("--dangerously-load-development-channels", ch)
 agent-node/src/cli.ts :: video_gen
 agent-node/src/cli.ts :: Expose CURRENT_TASK_ID
@@ -183,7 +180,7 @@ server/src/server.ts :: import { addNetworkScope, canRestWriteNetwork
 
 ### 为什么是显式清单,不是从正文正则抽
 
-正文里的引用是**裸文件名**:`cli.ts:3450`、`db.ts:393`。而 `cli.ts` 在
+正文里的引用是**裸文件名**:`cli.ts:3450`、`db.ts:395`。而 `cli.ts` 在
 `agent-network/bin/` 和 `agent-node/src/` 各有一个 —— 正则抽出来根本不知道该开哪个文件。
 第一版我想直接从正文抽,试到这里才发现。
 
@@ -191,7 +188,7 @@ server/src/server.ts :: import { addNetworkScope, canRestWriteNetwork
 
 ### 🔴 这道门不检查什么
 
-- **不检查正文的结论对不对。** 「`db.ts:393` 有 `ADD COLUMN team`」成立,不代表「#175 已交付」成立 —— 后者要人读 issue 正文。
+- **不检查正文的结论对不对。** 「`db.ts:395` 有 `ADD COLUMN team`」成立,不代表「#175 已交付」成立 —— 后者要人读 issue 正文。
 - **不检查引用之外的散文。**
 
 和 `scripts/check-doc-source-pins.py` 的边界同类:**门缩小了错误的种类,没有消灭错误。**
@@ -206,7 +203,7 @@ server/src/server.ts :: import { addNetworkScope, canRestWriteNetwork
 
 | issue | 结论 | 决定性证据 |
 |---|---|---|
-| #175 node.team | **部分核验** | `db.ts:393` 有 `ALTER TABLE nodes ADD COLUMN team TEXT`;`api-nodes-shape.test.ts` 把 `team` 写进 `/api/nodes` 投影断言。**只覆盖标题那一句;正文的「详细方案」未逐条比对,因此不建议据此关闭** |
+| #175 node.team | **部分核验** | `db.ts:395` 有 `ALTER TABLE nodes ADD COLUMN team TEXT`;`api-nodes-shape.test.ts` 把 `team` 写进 `/api/nodes` 投影断言。**只覆盖标题那一句;正文的「详细方案」未逐条比对,因此不建议据此关闭** |
 | #166 REST fallback 等 | **四项中三项已交付** | 三个点名端点各注册 1 处;`cli.ts:4273-4310` 注入并恢复 `CURRENT_TASK_ID`;`tests/test166-task-diagnostics` 在 main。**第四项「MCP 可用性本身」没有交付证据** —— 仓库改不了外部会话的工具面板,现状是把这条边界写进文档并用测试钉住(见文末) |
 | #114 token 用量 | 未交付,缺口明确 | 采集已完成(`cli.ts:2363/2373/2742`);**RFC-015 指定的 `agent_token_usage` 表 / `usage_event_id` / `token_usage_delta` 三个符号在全仓各只命中 1 个文件 —— 就是 RFC 自己**,即设计一行未落 |
 | #177 channel plugin | 未交付,前提存疑 | `cli.ts:5038` 仍在 push dev-channel flag;全仓无 `plugin:commhub` 实现;正文的 managed-settings 可行性至今未确认 |
