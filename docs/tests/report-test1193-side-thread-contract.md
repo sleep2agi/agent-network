@@ -1,7 +1,7 @@
 # test1193 — SideThread domain and Codex adapter contract
 
-Date: 2026-08-26  
-Layer: Docker, credential-free  
+Date: 2026-08-26
+Layer: Docker, credential-free
 Dependency: PR0 / test1190 wire evidence for `codex-cli 0.148.0`
 
 The suite runs the runtime-neutral domain and Codex adapter tests inside an
@@ -39,10 +39,11 @@ The run script also weakens the exact version gate and requires the adapter
 test to turn red. A green suite therefore proves the tested fail-closed branch
 is reachable rather than merely present in source.
 
-Rev4 result: **32 tests passed, 0 failed, 109 assertions**, followed by the
+Rev5 result: **40 tests passed, 0 failed, 135 assertions**, followed by the
 existing witnessed-red mutation pass. The suite now includes all four test
-files under `agent-node/src/runtime/side-thread`, so ledger/lease tests cannot
-silently fall outside the Docker gate.
+groups under `agent-node/src/runtime/side-thread`, including the cross-process
+fork executor test, so ledger/lease/claim tests cannot silently fall outside
+the Docker gate.
 
 Command:
 
