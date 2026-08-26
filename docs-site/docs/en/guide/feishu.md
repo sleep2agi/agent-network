@@ -108,11 +108,14 @@ Both matter: the `session` field in `config.json` is only the **resume id** (und
 
 ### Pinned versions + upgrades
 
-The image pins exact preview versions via Docker `ARG` (currently `agent-network 2.2.22-preview.2` + `agent-node 2.4.15-preview.2`) — no floating `@preview` tag, so builds are reproducible. To rebuild against a newer preview:
+The image pins exact preview versions via Docker `ARG` rather than floating `@preview`, so builds are reproducible; the default pins live in `docker/feishu/Dockerfile` / `docker-compose.yml`. To rebuild against a newer preview, check the npm dist-tags first:
 
 ```bash
-ANET_VERSION=2.2.23-preview.0 \
-ANET_NODE_VERSION=2.4.16-preview.0 \
+npm view @sleep2agi/agent-network dist-tags
+npm view @sleep2agi/agent-node dist-tags
+
+ANET_VERSION=<agent-network preview version> \
+ANET_NODE_VERSION=<agent-node preview version> \
   docker compose build
 docker compose up -d
 ```
@@ -235,11 +238,12 @@ If you'd rather not use Docker, or want to install directly on the host:
 ### 8.1 Install preview
 
 ```bash
+npm view @sleep2agi/agent-network dist-tags
+npm view @sleep2agi/agent-node dist-tags
+
 npm install -g \
-  @sleep2agi/agent-network@2.2.22-preview.2 \
-  @sleep2agi/agent-node@2.4.15-preview.2
-# Or pull the current preview tag:
-# npm install -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview
+  @sleep2agi/agent-network@preview \
+  @sleep2agi/agent-node@preview
 ```
 
 > The Feishu channel is still on the preview track; this page will be updated in lockstep once it promotes to `latest`.

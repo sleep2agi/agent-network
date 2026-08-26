@@ -108,11 +108,14 @@ docker compose logs -f feishu-agent         # 跟启动 + 运行日志
 
 ### 版本钉死 + 升级
 
-镜像通过 Docker `ARG` 钉死 preview 版本号（当前 `agent-network 2.2.22-preview.2` + `agent-node 2.4.15-preview.2`），不浮动 `@preview` tag，保证可复现。要换更新的 preview：
+镜像通过 Docker `ARG` 钉死 preview 版本号，不浮动 `@preview` tag，保证可复现；默认钉子以 `docker/feishu/Dockerfile` / `docker-compose.yml` 为准。要换更新的 preview，先查 npm dist-tags：
 
 ```bash
-ANET_VERSION=2.2.23-preview.0 \
-ANET_NODE_VERSION=2.4.16-preview.0 \
+npm view @sleep2agi/agent-network dist-tags
+npm view @sleep2agi/agent-node dist-tags
+
+ANET_VERSION=<agent-network preview 版本> \
+ANET_NODE_VERSION=<agent-node preview 版本> \
   docker compose build
 docker compose up -d
 ```
@@ -235,11 +238,12 @@ bot 的 reply 会跟着原消息的 `root_id` 进**同一条线程**，不会污
 ### 8.1 安装 preview
 
 ```bash
+npm view @sleep2agi/agent-network dist-tags
+npm view @sleep2agi/agent-node dist-tags
+
 npm install -g \
-  @sleep2agi/agent-network@2.2.22-preview.2 \
-  @sleep2agi/agent-node@2.4.15-preview.2
-# 或装当前 preview tag：
-# npm install -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview
+  @sleep2agi/agent-network@preview \
+  @sleep2agi/agent-node@preview
 ```
 
 > 飞书 channel 仍在 preview 通道；待 `latest` 升级后会同步更新本页。
