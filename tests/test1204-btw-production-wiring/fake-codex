@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "--version" ]]; then
+  echo "codex-cli 0.148.0"
+  exit 0
+fi
+[[ "${1:-}" == "app-server" ]] || exit 64
+shift
+listen=""
+while (($#)); do
+  if [[ "$1" == "--listen" ]]; then listen="$2"; shift 2; else shift; fi
+done
+[[ "$listen" == ws://127.0.0.1:* ]]
+exec bun /repo/tests/test1204-btw-production-wiring/fake-codex-app-server.mjs "$listen"

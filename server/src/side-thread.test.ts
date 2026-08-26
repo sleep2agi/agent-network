@@ -9,6 +9,7 @@ import {
   UnsupportedSideThreadPort,
   type SideThreadActor,
   type SideThreadExecutionPort,
+  type SideThreadEventRecord,
   type SideThreadRuntimeEvent,
 } from "./side-thread.js";
 import { handleSideThreadHttpRequest } from "./side-thread-http.js";
@@ -312,6 +313,28 @@ describe("SideThread Hub contract", () => {
     ).toHaveLength(3);
   });
 
+  test("throwing observers cannot alter durable truth or starve cursor replay", async () => {
+    const f = fixture();
+    const record = await f.coordinator.create(owner, createInput());
+    const attempt = record.attempts[0];
+    const cursor = f.coordinator.listEvents(owner, record.sideChatId).at(-1)!.eventId;
+    const delivered: SideThreadEventRecord[] = [];
+    const offThrow = f.coordinator.subscribe(record.sideChatId, () => { throw new Error("observer exploded"); });
+    const offGood = f.coordinator.subscribe(record.sideChatId, (event) => delivered.push(event));
+    f.port.emit({ sideChatId: record.sideChatId, attemptId: attempt.attemptId, threadId: record.threadId!, turnId: attempt.turnId!, status: "completed", text: "durable answer" });
+    await Bun.sleep(0);
+    expect(f.coordinator.get(owner, record.sideChatId)).toMatchObject({ state: "completed", attempts: [{ result: "durable answer" }] });
+    expect(delivered.filter((event) => event.type === "attempt.terminal")).toHaveLength(1);
+    const replay = f.coordinator.listEvents(owner, record.sideChatId, cursor);
+    expect(replay.filter((event) => event.type === "attempt.terminal")).toHaveLength(1);
+    expect(f.coordinator.listEvents(owner, record.sideChatId, replay.at(-1)!.eventId)).toHaveLength(0);
+    offThrow(); offGood();
+    f.coordinator.close();
+    const reopened = new SideThreadCoordinator(f.store, f.port, { enabled: true, authorizeNode: () => true, authorizeAttachment: () => true });
+    closers.push(() => reopened.close());
+    expect(reopened.listEvents(owner, record.sideChatId, cursor).filter((event) => event.type === "attempt.terminal")).toHaveLength(1);
+  });
+
   test("a terminal event arriving before start returns settles once", async () => {
     const f = fixture();
     f.port.onStart = (input, turnId) =>
@@ -391,10 +414,10 @@ describe("SideThread Hub contract", () => {
     closers.push(() => second.close());
     const firstCreate = f.coordinator.create(owner, createInput());
     await entered;
-    const replay = await second.create(owner, createInput());
-    expect(replay.state).toBe("creating");
     releaseFork();
     const created = await firstCreate;
+    const replay = await second.create(owner, createInput());
+    expect(replay.state).toBe("running");
     expect(f.port.calls.fork).toBe(1);
 
     let cancelEntered!: () => void;
@@ -420,7 +443,9 @@ describe("SideThread Hub contract", () => {
     expect(concurrent.state).toBe("running");
     expect(f.port.calls.cancel).toBe(1);
     releaseCancel();
-    expect((await firstCancel).state).toBe("cancelled");
+    expect((await firstCancel).state).toBe("running");
+    const cancelledAttempt = created.attempts[0];
+    f.port.emit({ sideChatId: created.sideChatId, attemptId: cancelledAttempt.attemptId, threadId: created.threadId!, turnId: cancelledAttempt.turnId!, status: "interrupted" });
 
     let archiveEntered!: () => void;
     const archiveStarted = new Promise<void>(
@@ -627,7 +652,7 @@ describe("SideThread Hub contract", () => {
     expect(reopened.list(stranger)).toHaveLength(0);
   });
 
-  test("response loss is durable ambiguous and reconciles without a second start RPC", async () => {
+  test("response loss remains ambiguous under the same stable start operation", async () => {
     const port = new FakePort();
     let accepted: Parameters<SideThreadExecutionPort["start"]>[0] | undefined;
     port.start = async (input) => {
@@ -658,11 +683,11 @@ describe("SideThread Hub contract", () => {
       state: "ambiguous",
       errorCode: "SIDE_THREAD_RESPONSE_LOST",
     });
-    expect(await f.coordinator.create(owner, createInput())).toMatchObject({
+    await expect(f.coordinator.create(owner, createInput())).rejects.toMatchObject({
+      code: "SIDE_THREAD_AMBIGUOUS",
       sideChatId: ambiguous.sideChatId,
-      state: "ambiguous",
     });
-    expect(port.calls).toMatchObject({ fork: 1, start: 1 });
+    expect(port.calls).toMatchObject({ fork: 1, start: 2 });
 
     f.coordinator.close();
     const reopened = new SideThreadCoordinator(f.store, port, {
@@ -689,13 +714,13 @@ describe("SideThread Hub contract", () => {
     expect(
       reconciled.operations.find((operation) => operation.kind === "start"),
     ).toMatchObject({ state: "completed", turnId: "turn_authoritative" });
-    expect(port.calls.start).toBe(1);
+    expect(port.calls.start).toBe(2);
     expect(
       JSON.stringify(reopened.listEvents(owner, ambiguous.sideChatId)),
     ).not.toContain("secret transport detail");
   });
 
-  test("ambiguous cancel/archive/purge keep stable claims and never issue a second RPC", async () => {
+  test("ambiguous cancel/archive/purge replay the same stable operation identity", async () => {
     const lose = () =>
       Object.assign(new Error("accepted but ACK lost"), {
         code: "SIDE_THREAD_RESPONSE_LOST",
@@ -728,7 +753,7 @@ describe("SideThread Hub contract", () => {
       code: "SIDE_THREAD_AMBIGUOUS",
       operationId: cancelOperationId,
     });
-    expect(cancelPort.calls.cancel).toBe(1);
+    expect(cancelPort.calls.cancel).toBe(2);
 
     for (const action of ["archive", "purge"] as const) {
       const port = new FakePort();
@@ -767,7 +792,7 @@ describe("SideThread Hub contract", () => {
         code: "SIDE_THREAD_AMBIGUOUS",
         operationId,
       });
-      expect(port.calls[action]).toBe(1);
+      expect(port.calls[action]).toBe(2);
     }
   });
 });
@@ -919,6 +944,10 @@ describe("SideThread HTTP contract", () => {
         coordinator: f.coordinator,
       });
       expect(response?.status).toBe(200);
+      if (action === "cancel") {
+        const attempt = record.attempts[0];
+        f.port.emit({ sideChatId: record.sideChatId, attemptId: attempt.attemptId, threadId: record.threadId!, turnId: attempt.turnId!, status: "interrupted" });
+      }
     }
     const hydrated = f.coordinator.get(owner, record.sideChatId);
     expect(

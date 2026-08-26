@@ -51,6 +51,7 @@ import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js"
 import { recordDeliveredStaleEvents } from "./task-lifecycle-watcher.js";
 import { SIDE_THREAD_FEATURE_FLAG, SideThreadCoordinator, SideThreadPortRegistry, SideThreadStore, type SideThreadActor, type SideThreadAttachmentRef, type SideThreadExecutionPort } from "./side-thread.js";
 import { handleSideThreadHttpRequest } from "./side-thread-http.js";
+import { createProductionSideThreadTransport } from "./side-thread-production.js";
 
 const PORT = resolvePort(process.env.PORT);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -77,6 +78,10 @@ const sideThreadCoordinator = new SideThreadCoordinator(new SideThreadStore(db),
   authorizeNode: (actor, networkId, nodeId) => authorizeSideThreadNode(actor, networkId, nodeId),
   authorizeAttachment: (actor, networkId, ref) => authorizeSideThreadAttachment(actor, networkId, ref),
 });
+const productionSideThreadTransport = process.env[SIDE_THREAD_FEATURE_FLAG] === "1"
+  ? createProductionSideThreadTransport(db)
+  : null;
+if (productionSideThreadTransport) installSideThreadExecutionPort(productionSideThreadTransport.port);
 
 if (AUTH_TOKEN) {
   console.warn("[commhub] COMMHUB_AUTH_TOKEN is deprecated and will be removed in v1.0. See RFC-001.");
@@ -1519,11 +1524,22 @@ return Bun.serve({
       return withCors(req, Response.json({ ok: false, error: restScope.denied }, { status: 403 }));
     }
 
+    const sideActor = resolveSideThreadActor(req, resolveRequestAuth(req, { allowQueryToken: false }), isAdmin);
+    const nodeCommandActor = sideActor?.kind === "node" && sideActor.boundNodeId && sideActor.boundNetworkId
+      ? { tokenId: sideActor.tokenId, networkId: sideActor.boundNetworkId, nodeId: sideActor.boundNodeId }
+      : null;
+    if (productionSideThreadTransport) {
+      const attachmentResponse = await productionSideThreadTransport.attachment(req, url, nodeCommandActor);
+      if (attachmentResponse) return withCors(req, attachmentResponse);
+      const commandResponse = await productionSideThreadTransport.handle({ req, url, actor: nodeCommandActor });
+      if (commandResponse) return withCors(req, commandResponse);
+    }
+
     const sideThreadResponse = await handleSideThreadHttpRequest({
       req,
       url,
       // Durable prompts/results never accept query-string credentials.
-      actor: resolveSideThreadActor(req, resolveRequestAuth(req, { allowQueryToken: false }), isAdmin),
+      actor: sideActor,
       coordinator: sideThreadCoordinator,
       resolveCapabilityTarget: resolveSideThreadCapabilityTarget,
     });

@@ -104,7 +104,13 @@ export class PrivateFileForkLeaseStore implements ForkLeaseStore {
       if (released) return; released = true;
       await new Promise<void>((resolve) => {
         if (holder.exitCode !== null || holder.signalCode !== null) return resolve();
-        holder.once("exit", () => resolve()); holder.stdin!.end();
+        let settled = false;
+        const done = () => { if (settled) return; settled = true; clearTimeout(force); resolve(); };
+        // A killed/reparented launcher can leave the stdin-driven flock
+        // helper alive even after end(). Never let command ACK hang forever.
+        const force = setTimeout(() => holder.kill("SIGKILL"), 1_000);
+        force.unref?.();
+        holder.once("exit", done); holder.stdin!.end();
       });
       closeSync(fd);
     } };

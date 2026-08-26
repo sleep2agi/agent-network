@@ -42,6 +42,7 @@ on:
       - 'tests/test1200-side-thread-command-transport/**'
       - 'tests/test1203-btw-production-e2e/**'
       - 'tests/test1181-codex-durable-poll/**'
+      - 'tests/test1204-btw-production-wiring/**'
       # A test directory belongs here exactly when CI executes it — otherwise
       # editing the test cannot re-run the gate that runs it. The four below are
       # reached through scripts/qa.sh L1_TESTS and the e2e workflow; the other
