@@ -40,6 +40,13 @@ export interface CodexAppServerBridgeOptions {
   bridgeLabel?: string;
   /** Slow full-history fallback; production default avoids 5s multi-MB reads. */
   fullHistoryReconciliationIntervalMs?: number;
+  /** Shared co-presence fresh start: wait for the human TUI to own a thread. */
+  deferThreadUntilTui?: boolean;
+  deferredThreadTimeoutMs?: number;
+  deferredResumeAttempts?: number;
+  deferredResumeGapMs?: number;
+  initialDeferredThreadId?: string;
+  onDeferredCandidate?: (threadId: string) => void | Promise<void>;
 }
 
 export type BridgeStatus =
@@ -98,6 +105,12 @@ export interface CodexAppServerTaskActivity {
   kind: "item_started" | "agent_delta" | "item_completed";
 }
 
+export class CodexBridgeNotReadyError extends Error {
+  readonly code = "CODEX_BRIDGE_WAITING_FOR_TUI_THREAD";
+  readonly retryable = true;
+  constructor() { super("Codex bridge is waiting for the first TUI-owned thread; retry this task after binding"); }
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Bridge
 // ────────────────────────────────────────────────────────────────────────────
@@ -121,6 +134,16 @@ export class CodexAppServerBridge extends EventEmitter {
   private readonly label: string;
   private status: BridgeStatus = "connecting";
   private activeTurnId: string | null = null;
+  private readonly deferThreadUntilTui: boolean;
+  private deferredThreadIds = new Set<string>();
+  private deferredResolve: ((threadId: string) => void) | null = null;
+  private deferredReject: ((error: Error) => void) | null = null;
+  private deferredBindingId: string | null = null;
+  private readonly deferredThreadTimeoutMs: number;
+  private readonly deferredResumeAttempts: number;
+  private readonly deferredResumeGapMs: number;
+  private readonly initialDeferredThreadId: string;
+  private readonly onDeferredCandidate?: (threadId: string) => void | Promise<void>;
   /**
    * A turn started by the human TUI. Dashboard chat is allowed to steer this
    * turn so a message sent while the human is actively using the TUI does not
@@ -164,6 +187,12 @@ export class CodexAppServerBridge extends EventEmitter {
     this.label = opts.bridgeLabel ?? `bridge:${(this.threadId || "new").slice(0, 8)}`;
     this.fullHistoryReconciliationIntervalMs =
       opts.fullHistoryReconciliationIntervalMs ?? 60_000;
+    this.deferThreadUntilTui = opts.deferThreadUntilTui === true;
+    this.deferredThreadTimeoutMs = opts.deferredThreadTimeoutMs ?? 120_000;
+    this.deferredResumeAttempts = opts.deferredResumeAttempts ?? 100;
+    this.deferredResumeGapMs = opts.deferredResumeGapMs ?? 200;
+    this.initialDeferredThreadId = opts.initialDeferredThreadId ?? "";
+    this.onDeferredCandidate = opts.onDeferredCandidate;
     this.attachClientListeners();
   }
 
@@ -220,6 +249,16 @@ export class CodexAppServerBridge extends EventEmitter {
         this.threadId = await this.startNewThread();
         created = true;
       }
+    } else if (this.deferThreadUntilTui) {
+      this.emit("thread_waiting", { reason: "waiting-for-tui-thread" });
+      this.threadId = await new Promise<string>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("waiting-for-tui-thread timed out")), this.deferredThreadTimeoutMs);
+        const done = (value: string) => { clearTimeout(timer); resolve(value); };
+        const fail = (error: Error) => { clearTimeout(timer); reject(error); };
+        this.deferredResolve = done;
+        this.deferredReject = fail;
+        if (this.initialDeferredThreadId) void this.bindDeferredThread(this.initialDeferredThreadId);
+      });
     } else {
       this.threadId = await this.startNewThread();
       created = true;
@@ -252,6 +291,7 @@ export class CodexAppServerBridge extends EventEmitter {
     text: string;
     from?: string;
   }): Promise<string> {
+    if (!this.threadId) throw new CodexBridgeNotReadyError();
     // Bridge discipline: one active turn at a time. The claim is taken
     // SYNCHRONOUSLY (before any await) so concurrent callers race cleanly:
     // exactly one proceeds, the rest throw. Queueing callers should use
@@ -389,6 +429,7 @@ export class CodexAppServerBridge extends EventEmitter {
   }): Promise<
     { started: true; turnId: string; steered?: boolean } | { started: false; queuedAt: number }
   > {
+    if (!this.threadId) { throw new CodexBridgeNotReadyError(); }
     if (this.turnClaimed || this.activeTurnId) {
       this.taskQueue.push(input);
       this.emit("task_queued", { taskId: input.taskId, depth: this.taskQueue.length });
@@ -579,6 +620,7 @@ export class CodexAppServerBridge extends EventEmitter {
     // parsing a single "notification" stream because the client dispatches
     // notifications on their method name.
     this.client.on("thread/status/changed", (params) => this.onStatusChanged(params));
+    this.client.on("thread/started", (params) => void this.onDeferredThreadStarted(params));
     this.client.on("turn/started", (params) => this.onTurnStarted(params));
     this.client.on("item/started", (params) => this.onItemStarted(params));
     this.client.on("item/agentMessage/delta", (params) => this.onAgentDelta(params));
@@ -599,6 +641,55 @@ export class CodexAppServerBridge extends EventEmitter {
       this.turnClaimed = false;
       this.setStatus("offline");
     });
+  }
+
+  private async onDeferredThreadStarted(params: unknown): Promise<void> {
+    if (!this.deferThreadUntilTui || this.threadId || !this.deferredResolve) return;
+    const thread = (params as any)?.thread;
+    const id = typeof thread?.id === "string" ? thread.id : "";
+    if (!id || thread?.threadSource !== "user") return;
+    this.deferredThreadIds.add(id);
+    if (this.deferredThreadIds.size !== 1) {
+      this.deferredReject?.(new Error("ambiguous TUI thread identity while waiting-for-tui-thread"));
+      this.deferredResolve = null;
+      return;
+    }
+    await this.bindDeferredThread(id);
+  }
+
+  private async bindDeferredThread(id: string): Promise<void> {
+    this.deferredThreadIds.add(id);
+    if (this.deferredThreadIds.size !== 1) {
+      this.deferredReject?.(new Error("ambiguous TUI thread identity while waiting-for-tui-thread"));
+      this.deferredResolve = null;
+      return;
+    }
+    if (this.deferredBindingId === id) return;
+    this.deferredBindingId = id;
+    try { await this.onDeferredCandidate?.(id); }
+    catch (error) {
+      this.deferredResolve = null;
+      this.deferredReject?.(error instanceof Error ? error : new Error(String(error)));
+      return;
+    }
+    for (let attempt = 0; attempt < this.deferredResumeAttempts; attempt++) {
+      try {
+        await this.client.request("thread/resume", { threadId: id });
+        const resolve = this.deferredResolve;
+        this.deferredResolve = null;
+        resolve?.(id);
+        return;
+      } catch (error) {
+        if (!isNoRollout(error)) {
+          this.deferredResolve = null;
+          this.deferredReject?.(error instanceof Error ? error : new Error(String(error)));
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, this.deferredResumeGapMs));
+      }
+    }
+    this.deferredResolve = null;
+    this.deferredReject?.(new Error(`TUI thread ${id} did not materialize within the bounded retry window`));
   }
 
   private onReverseRequest(rr: { id: number; method: string; params: unknown }): void {
@@ -1104,7 +1195,7 @@ function isAlreadyInitialized(e: unknown): boolean {
 /** thread/resume against an id the app-server has no persisted rollout for. */
 function isNoRollout(e: unknown): boolean {
   const msg = (e as { message?: unknown })?.message;
-  return typeof msg === "string" && /no rollout found|thread not found|unknown thread/i.test(msg);
+  return typeof msg === "string" && /no rollout found|not materialized yet/i.test(msg);
 }
 
 /**

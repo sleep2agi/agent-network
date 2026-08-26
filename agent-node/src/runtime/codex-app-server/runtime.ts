@@ -122,6 +122,9 @@ export async function openCodexAppServerRuntime(opts: {
   serverUrl?: string;
   /** Persisted thread id from node config; empty → create a fresh thread. */
   threadId?: string;
+  deferThreadUntilTui?: boolean;
+  initialDeferredThreadId?: string;
+  onDeferredCandidate?: (threadId: string) => void | Promise<void>;
   /** codex binary (default "codex"); honored only when we spawn. */
   binary?: string;
   /**
@@ -195,7 +198,12 @@ export async function openCodexAppServerRuntime(opts: {
   client.on("error", (e) => warn(`[codex-app-server] client error: ${String(e).slice(0, 200)}`));
   await client.connect();
 
-  const bridge = new CodexAppServerBridge({ client, threadId: opts.threadId });
+  const bridge = new CodexAppServerBridge({
+    client, threadId: opts.threadId, deferThreadUntilTui: opts.deferThreadUntilTui,
+    initialDeferredThreadId: opts.initialDeferredThreadId,
+    onDeferredCandidate: opts.onDeferredCandidate,
+  });
+  bridge.on("thread_waiting", () => log("[codex-app-server] client-health role=bridge state=waiting-for-tui-thread"));
   bridge.on("thread_ready", (e: { threadId: string; created: boolean }) => {
     if (e.created) {
       log(`[codex-app-server] created thread ${e.threadId.slice(0, 12)}…`);

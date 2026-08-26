@@ -20,6 +20,7 @@ import {
 import { dirname, join, isAbsolute, resolve } from "path";
 import { hostname as osHostname, homedir } from "os";
 import { codexTuiAlignmentNotice } from "./codex-tui-alignment";
+import { validateCodexPendingThread } from "./runtime/codex-app-server/pending-thread";
 import { createCommhubSdkMcpServer } from "./commhub-mcp";
 import { claudeCommhubToolAliases } from "./claude-tool-aliases";
 import { getHostTelemetry } from "./host-telemetry";
@@ -881,8 +882,9 @@ function writebackCodexThread(threadId: string) {
   if (!configFilePath || !threadId) return;
   try {
     const cfg = JSON.parse(readFileSync(configFilePath, "utf-8"));
-    if (cfg.codexThreadId === threadId) return;
+    if (cfg.codexThreadId === threadId && !cfg.codexPendingThread) return;
     cfg.codexThreadId = threadId;
+    delete cfg.codexPendingThread;
     atomicWriteJson(configFilePath, cfg);
     debug(`codexThreadId 写回: ${configFilePath} → ${threadId.slice(0, 8)}...`);
     const alignment = codexTuiAlignmentNotice(configFilePath, cfg, threadId);
@@ -896,6 +898,15 @@ function writebackCodexThread(threadId: string) {
   } catch (e: any) {
     warn(`writebackCodexThread failed: ${e.message}`);
   }
+}
+
+function writebackCodexPendingThread(threadId: string, serverUrl: string) {
+  if (!configFilePath || !threadId || !serverUrl) throw new Error("cannot persist an incomplete deferred Codex candidate");
+  const marker = process.env.ANET_NODE_MARKER;
+  if (!marker) throw new Error("deferred Codex candidate requires ANET_NODE_MARKER");
+  const cfg = JSON.parse(readFileSync(configFilePath, "utf-8"));
+  cfg.codexPendingThread = { version: 1, threadId, serverUrl, marker };
+  atomicWriteJson(configFilePath, cfg);
 }
 
 function clearGrokSession(reason: string) {
@@ -1938,6 +1949,11 @@ const codexAppServerUrl: string | undefined =
   (fileConfig as { codexAppServerUrl?: string }).codexAppServerUrl ||
   process.env.ANET_CODEX_APP_SERVER_URL ||
   undefined;
+const rawCodexPending = (fileConfig as any).codexPendingThread;
+let codexPendingThreadId: string | undefined;
+if (rawCodexPending !== undefined) {
+  codexPendingThreadId = validateCodexPendingThread(rawCodexPending, codexAppServerUrl, process.env.ANET_NODE_MARKER).threadId;
+}
 const codexAppServerSessionManager = createCodexSessionManager<
   import("./runtime/codex-app-server/runtime").CodexAppServerRuntimeSession
 >();
@@ -1955,6 +1971,9 @@ async function ensureCodexAppServerSession(): Promise<
     const opened = await openCodexAppServerRuntime({
       serverUrl: codexAppServerUrl,
       threadId: codexAppServerThreadId,
+      deferThreadUntilTui: process.env.ANET_COPRESENCE_BRIDGE === "1" && !codexAppServerThreadId,
+      initialDeferredThreadId: codexPendingThreadId,
+      onDeferredCandidate: (threadId) => writebackCodexPendingThread(threadId, codexAppServerUrl ?? ""),
       approvalPolicy: (fileConfig.flags as { approvalPolicy?: string } | undefined)?.approvalPolicy,
       sandboxMode: (fileConfig.flags as { sandboxMode?: string } | undefined)?.sandboxMode,
       commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`,
@@ -6225,7 +6244,7 @@ log("已注册到 CommHub");
 if (RUNTIME === "codex-app-server" && codexAppServerUrl) {
   try {
     const session = await ensureCodexAppServerSession();
-    log(`[codex-app-server] shared bridge ready thread=${session.threadId.slice(0, 12)}…`);
+    log(`[codex-app-server] client-health role=bridge remote=${codexAppServerUrl} thread=${session.threadId}`);
   } catch (startupError: any) {
     error(`[codex-app-server] shared bridge startup failed: ${startupError?.message || startupError}`);
     process.exit(1);

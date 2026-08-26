@@ -34,20 +34,26 @@ if (args[0] === "app-server") {
         let result = {};
         if (msg.method === "thread/start") result = { thread: { id: "thread_windows_e2e" } };
         if (msg.method === "thread/resume") result = { thread: { id: msg.params.threadId } };
-        if (msg.method === "turn/start") result = { turn: { id: "turn_bootstrap" } };
+        if (msg.method === "turn/start") {
+          result = { turn: { id: "turn_bootstrap" } };
+        }
         if (msg.method === "thread/read") result = {
           thread: {
             id: msg.params.threadId,
             status: humanTurnActive ? { type: "active", activeFlags: [] } : { type: "idle" },
             turns: humanTurnActive
               ? [{ id: "turn_windows_human", status: "inProgress", items: [{ type: "userMessage", content: [{ type: "text", text: "human long turn" }] }] }]
-              : [{ id: "turn_bootstrap", status: "completed" }],
+              : [{ id: "turn_bootstrap", status: "completed", items: [] }],
           },
         };
         if (msg.method === "test/human-turn/start") {
           humanTurnActive = true;
           result = { turnId: "turn_windows_human" };
           queueMicrotask(() => broadcast({ jsonrpc: "2.0", method: "turn/started", params: { threadId: "thread_windows_e2e", turn: { id: "turn_windows_human", status: "inProgress" } } }));
+        }
+        if (msg.method === "test/tui-thread/create") {
+          result = { threadId: "thread_windows_e2e" };
+          queueMicrotask(() => broadcast({ jsonrpc: "2.0", method: "thread/started", params: { thread: { id: "thread_windows_e2e", threadSource: "user" } } }));
         }
         if (msg.method === "turn/steer") result = { turnId: msg.params.expectedTurnId };
         if (msg.method === "test/human-turn/complete") {
@@ -68,13 +74,20 @@ if (args[0] === "app-server") {
   // lifetime explicitly instead of relying on an unresolved Promise alone.
   setInterval(() => {}, 1_000);
   await new Promise(() => {});
-} else if (args[0] === "resume") {
-  const threadId = args.find((arg) => arg.startsWith("thread_"));
+} else if (args[0] === "resume" || args.includes("--remote")) {
+  const freshDeferred = args[0] !== "resume";
+  const threadId = args.find((arg) => arg.startsWith("thread_")) ?? "thread_windows_e2e";
   log(`tui:${threadId}`);
   log(`tui-remote:${args[args.indexOf("--remote") + 1]}`);
   log(`tui-home:${process.env.CODEX_HOME}`);
   console.log(">_ OpenAI Codex (test co-presence)");
   console.log(`FAKE_CODEX_TUI_RESUMED ${threadId}`);
+  if (process.env.ANET_TEST751_EXPECT_CODEX_HOME
+    && process.env.CODEX_HOME !== process.env.ANET_TEST751_EXPECT_CODEX_HOME) {
+    console.log("FAKE_CODEX_TUI_CLOUD_FALLBACK");
+    setInterval(() => {}, 1_000);
+    await new Promise(() => {});
+  }
   if (process.env.ANET_TEST751_LONG_TURN === "1") {
     const remote = args[args.indexOf("--remote") + 1];
     const ws = new WebSocket(remote);
@@ -96,6 +109,7 @@ if (args[0] === "app-server") {
       ws.addEventListener("message", listener);
       ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params: { threadId } }));
     });
+    if (freshDeferred) await request("test/tui-thread/create");
     await request("test/human-turn/start");
     console.log("FAKE_CODEX_TUI_LONG_TURN_READY");
     const sentinel = process.env.ANET_TEST751_COMPLETE_LONG_TURN;

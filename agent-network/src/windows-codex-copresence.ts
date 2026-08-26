@@ -54,6 +54,26 @@ export function probeWindowsCreationDate(pid: number): string | null {
   } catch { return null; }
 }
 
+/**
+ * Attribute an ESTABLISHED loopback connection to the launched TUI process
+ * tree. This is deliberately stronger than counting listeners/connections:
+ * an unrelated local client cannot satisfy it.
+ */
+export function probeWindowsOwnedLoopbackConnection(rootPid: number, port: number): boolean {
+  if (!Number.isInteger(rootPid) || rootPid <= 0 || !Number.isInteger(port) || port < 1 || port > 65535) return false;
+  try {
+    const script = [
+      `$ids=[Collections.Generic.HashSet[int]]::new();[void]$ids.Add(${rootPid})`,
+      "do{$n=0;Get-CimInstance Win32_Process|%{if($ids.Contains([int]$_.ParentProcessId)-and $ids.Add([int]$_.ProcessId)){$n++}}}while($n-gt 0)",
+      `$hit=Get-NetTCPConnection -State Established -RemoteAddress 127.0.0.1 -RemotePort ${port} -ErrorAction SilentlyContinue|?{$ids.Contains([int]$_.OwningProcess)}`,
+      "if($hit){'true'}else{'false'}",
+    ].join(";");
+    return execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true,
+    }).trim() === "true";
+  } catch { return false; }
+}
+
 export function writeWindowsCopresenceRecord(
   nodesDir: string,
   nodeId: string,

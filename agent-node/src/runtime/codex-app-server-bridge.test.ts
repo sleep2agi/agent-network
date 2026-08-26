@@ -15,7 +15,7 @@
 
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { CodexAppServerClient } from "./codex-app-server-client";
-import { CodexAppServerBridge } from "./codex-app-server-bridge";
+import { CodexAppServerBridge, CodexBridgeNotReadyError } from "./codex-app-server-bridge";
 import {
   codexAppServerThink,
   type CodexAppServerRuntimeSession,
@@ -159,6 +159,82 @@ describe("CodexAppServerBridge — bootstrap + task mapping", () => {
     expect(bridge2.currentStatus()).toBe("idle");
     await client2.close().catch(() => undefined);
     await app2.stop();
+  });
+
+  test("deferred co-presence binds the unique TUI-owned thread without thread/start", async () => {
+    const app2 = await startFakeApp();
+    const client2 = new CodexAppServerClient({ url: app2.url });
+    await client2.connect();
+    const bridge2 = new CodexAppServerBridge({ client: client2, deferThreadUntilTui: true });
+    const waiting: unknown[] = [];
+    bridge2.on("thread_waiting", (e) => waiting.push(e));
+    const boot = bridge2.bootstrap();
+    while (!waiting.length) await Bun.sleep(1);
+    const notReady = await bridge2.submitTask({ taskId: "before-bind", text: "must retry", steerIfExternalTurn: true }).catch((e) => e);
+    expect(notReady).toBeInstanceOf(CodexBridgeNotReadyError);
+    expect(notReady.retryable).toBe(true);
+    expect(app2.received.filter((m) => (m as any).method === "turn/start")).toHaveLength(0);
+    app2.broadcast({ jsonrpc: "2.0", method: "thread/started", params: { thread: { id: "thread_tui_owned", threadSource: "user" } } });
+    await boot;
+    const methods = app2.received.map((m) => (m as { method?: string }).method).filter(Boolean);
+    expect(methods).toEqual(["initialize", "initialized", "thread/resume"]);
+    expect(bridge2.getThreadId()).toBe("thread_tui_owned");
+    expect(waiting).toEqual([{ reason: "waiting-for-tui-thread" }]);
+    await client2.close().catch(() => undefined);
+    await app2.stop();
+  });
+
+  test("deferred binding ignores non-user events and deduplicates the same TUI id", async () => {
+    const app2 = await startFakeApp(); const client2 = new CodexAppServerClient({ url: app2.url }); await client2.connect();
+    const bridge2 = new CodexAppServerBridge({ client: client2, deferThreadUntilTui: true });
+    const boot = bridge2.bootstrap(); await Bun.sleep(2);
+    app2.broadcast({ jsonrpc: "2.0", method: "thread/started", params: { thread: { id: "agent_owned", threadSource: "agent" } } });
+    app2.broadcast({ jsonrpc: "2.0", method: "thread/started", params: { thread: { id: "tui_one", threadSource: "user" } } });
+    app2.broadcast({ jsonrpc: "2.0", method: "thread/started", params: { thread: { id: "tui_one", threadSource: "user" } } });
+    await boot;
+    expect(app2.received.filter((m) => (m as any).method === "thread/resume")).toHaveLength(1);
+    expect(bridge2.getThreadId()).toBe("tui_one");
+    await client2.close(); await app2.stop();
+  });
+
+  test("deferred binding times out fail-closed without creating a thread", async () => {
+    const app2 = await startFakeApp(); const client2 = new CodexAppServerClient({ url: app2.url }); await client2.connect();
+    const bridge2 = new CodexAppServerBridge({ client: client2, deferThreadUntilTui: true, deferredThreadTimeoutMs: 10 });
+    await expect(bridge2.bootstrap()).rejects.toThrow("waiting-for-tui-thread timed out");
+    expect(app2.received.some((m) => (m as any).method === "thread/start")).toBe(false);
+    await client2.close(); await app2.stop();
+  });
+
+  test("deferred binding rejects two distinct user-owned thread identities", async () => {
+    const app2 = await startFakeApp({ onRequest: (msg, respond) => {
+      if (msg.method === "initialize") respond({ result: {} });
+      // Keep the first exact resume pending so a competing identity races it.
+    } });
+    const client2 = new CodexAppServerClient({ url: app2.url }); await client2.connect();
+    const bridge2 = new CodexAppServerBridge({ client: client2, deferThreadUntilTui: true, deferredThreadTimeoutMs: 100 });
+    const boot = bridge2.bootstrap(); await Bun.sleep(2);
+    app2.broadcast({ jsonrpc: "2.0", method: "thread/started", params: { thread: { id: "tui_a", threadSource: "user" } } });
+    app2.broadcast({ jsonrpc: "2.0", method: "thread/started", params: { thread: { id: "tui_b", threadSource: "user" } } });
+    await expect(boot).rejects.toThrow("ambiguous TUI thread identity");
+    expect(app2.received.some((m) => (m as any).method === "thread/start")).toBe(false);
+    await client2.close(); await app2.stop();
+  });
+
+  test("deferred candidate persists before resume and restart retries only that exact id", async () => {
+    const app2 = await startFakeApp(); let pending = "";
+    const clientA = new CodexAppServerClient({ url: app2.url }); await clientA.connect();
+    const bridgeA = new CodexAppServerBridge({ client: clientA, deferThreadUntilTui: true, onDeferredCandidate: (id) => { pending = id; throw new Error("simulated crash after persist"); } });
+    const first = bridgeA.bootstrap(); await Bun.sleep(2);
+    app2.broadcast({ jsonrpc: "2.0", method: "thread/started", params: { thread: { id: "tui_persisted", threadSource: "user" } } });
+    await expect(first).rejects.toThrow("simulated crash after persist");
+    expect(pending).toBe("tui_persisted");
+    await clientA.close();
+    const clientB = new CodexAppServerClient({ url: app2.url }); await clientB.connect();
+    const bridgeB = new CodexAppServerBridge({ client: clientB, deferThreadUntilTui: true, initialDeferredThreadId: pending, onDeferredCandidate: (id) => expect(id).toBe(pending) });
+    await bridgeB.bootstrap();
+    expect(bridgeB.getThreadId()).toBe("tui_persisted");
+    expect(app2.received.some((m) => (m as any).method === "thread/start")).toBe(false);
+    await clientB.close(); await app2.stop();
   });
 
   test("stale threadId with no rollout → resume fails, bootstrap falls back to thread/start", async () => {
