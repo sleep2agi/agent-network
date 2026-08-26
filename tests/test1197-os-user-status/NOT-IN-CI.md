@@ -1,5 +1,10 @@
 # Why this wrapper is not a separate CI job
 
+Verified: 2026-08-26
+Revisit-when: Any of the three source tests stops being discovered by its
+              package unit gate, or this wrapper gains an integration assertion
+              that those package gates cannot execute.
+
 This is the one-time, layered Docker acceptance wrapper for issue #1197. Its
 individual test files are continuously executed by the existing package gates:
 
