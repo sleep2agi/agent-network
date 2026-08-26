@@ -182,11 +182,14 @@ Get-ChildItem Env:COMMHUB_* | ForEach-Object { Remove-Item "Env:$($_.Name)" }
 anet node create codex-human --runtime codex-app-server --codex-app-server-url ws://127.0.0.1:<free-port>
 anet node start codex-human
 
-# Read codexThreadId from config.json, then attach Terminal 3 to that exact thread
-codex resume --remote ws://127.0.0.1:<free-port> <codexThreadId>
+# Read codexThreadId/model from config.json and use this node's CODEX_HOME
+$env:CODEX_HOME = "<node-directory>\codex-home"
+codex resume --remote ws://127.0.0.1:<free-port> <codexThreadId> -m <model>
 ```
 
-`codex resume --remote` must include the session/thread id. Omitting it opens a historical-session picker and makes attaching to the wrong thread easy. You may also pass `--codex-thread-id <id>` when creating the node to adopt a specific thread; otherwise the runtime captures one and writes `codexThreadId` back to config.
+`codex resume --remote` must align all four values: the node-isolated `CODEX_HOME`, `codexAppServerUrl`, `codexThreadId`, and `model`. Omitting the thread id opens a historical-session picker. Omitting `CODEX_HOME` is more deceptive: Codex can use the default `~/.codex` and silently connect to external port 443, leaving an empty pane that looks successfully attached while it is actually an independent cloud session. When the bridge first writes `codexThreadId`, it prints copyable POSIX and PowerShell resume commands. You may also pass `--codex-thread-id <id>` when creating the node to adopt a specific thread; otherwise the runtime captures one and writes it back.
+
+Do not treat an empty pane as proof. After manual startup, inspect the TUI process socket and verify it connects to the configured loopback `codexAppServerUrl` rather than external `:443`, then verify the same thread id from both the TUI and bridge sides. Linux/macOS also must run `export CODEX_HOME='<node-directory>/codex-home'` before `codex resume` with `--remote`, the thread id, and `-m`.
 
 Advanced Linux/macOS users can also use this topology with an existing app-server, but prefer `--copresence` for everyday use because it manages loopback binding, isolated `CODEX_HOME`, MCP injection, tmux lifecycle, and stop identity together. If common ports such as 24700–24720 are occupied by other co-presence nodes, choose another free loopback port and check it before starting.
 

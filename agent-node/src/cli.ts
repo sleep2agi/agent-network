@@ -19,6 +19,7 @@ import {
 } from "./runtime/grok-copresence/platform";
 import { dirname, join, isAbsolute, resolve } from "path";
 import { hostname as osHostname, homedir } from "os";
+import { codexTuiAlignmentNotice } from "./codex-tui-alignment";
 import { createCommhubSdkMcpServer } from "./commhub-mcp";
 import { claudeCommhubToolAliases } from "./claude-tool-aliases";
 import { getHostTelemetry } from "./host-telemetry";
@@ -879,6 +880,14 @@ function writebackCodexThread(threadId: string) {
     cfg.codexThreadId = threadId;
     atomicWriteJson(configFilePath, cfg);
     debug(`codexThreadId 写回: ${configFilePath} → ${threadId.slice(0, 8)}...`);
+    const alignment = codexTuiAlignmentNotice(configFilePath, cfg, threadId);
+    if (alignment) {
+      warn(`[codex-app-server] shared thread changed to ${alignment.threadId}. A TUI opened before the bridge will still show its old/blank thread.`);
+      warn(`[codex-app-server] align a POSIX TUI with: ${alignment.posixCommand}`);
+      warn(`[codex-app-server] align a PowerShell TUI with: ${alignment.powershellCommand}`);
+    } else {
+      warn("[codex-app-server] manual TUI alignment command withheld: codexAppServerUrl must be a credential-free loopback ws/wss URL without query or fragment");
+    }
   } catch (e: any) {
     warn(`writebackCodexThread failed: ${e.message}`);
   }
