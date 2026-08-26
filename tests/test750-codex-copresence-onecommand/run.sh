@@ -44,15 +44,19 @@ node --version >>"$REPORT"
 bun --version >>"$REPORT"
 pass "environment (no host state; tmux + codex stub present so the launcher reaches its decisions)"
 
-# Exact package-owned preview.34 fixture. A stale `agent-node` may exist on
+# Exact package-owned paired fixture. A stale `agent-node` may exist on
 # PATH, but codex-app-server compatibility must be checked against this paired
 # identity and never against a floating dist-tag.
+# 版本从 agent-node/package.json 派生,不写死:发版 PR 只改那个文件和
+# PAIRED_AGENT_NODE_VERSION,写死的第三份会让每次发版都红。
+PAIRED_VERSION="$(node -p "require('$ROOT/agent-node/package.json').version")"
+[ -n "$PAIRED_VERSION" ] || fail "无法从 agent-node/package.json 读出配对版本"
 PAIR_BASE="/run/user/$(id -u)/test750-paired-agent-node"
 PAIR_ROOT="$PAIR_BASE/node_modules/@sleep2agi/agent-node"
 mkdir -p "$PAIR_ROOT/dist"
 chmod 700 "/run/user/$(id -u)" "$PAIR_BASE"
-cat >"$PAIR_ROOT/package.json" <<'JSON'
-{"name":"@sleep2agi/agent-node","version":"2.5.0-preview.34","publishConfig":{"tag":"preview"},"bin":{"agent-node":"dist/cli.js"}}
+cat >"$PAIR_ROOT/package.json" <<JSON
+{"name":"@sleep2agi/agent-node","version":"$PAIRED_VERSION","publishConfig":{"tag":"preview"},"bin":{"agent-node":"dist/cli.js"}}
 JSON
 cat >"$PAIR_ROOT/dist/cli.js" <<'JS'
 #!/usr/bin/env node

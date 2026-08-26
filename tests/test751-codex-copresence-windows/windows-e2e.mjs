@@ -6,6 +6,11 @@ import pty from "../../agent-network/node_modules/node-pty/lib/index.js";
 
 if (process.platform !== "win32") throw new Error("windows-e2e must run on Windows");
 const repo = resolve(import.meta.dirname, "../..");
+// 配对版本从 agent-node/package.json 派生。写死在这里的话,每条发版 PR
+// (它只改 package.json 的版本和 PAIRED_AGENT_NODE_VERSION) 都会让本门变红:
+// cli.ts 拿新版本去校验,而 fixture 还声明着上一个版本。这不是配对失效,
+// 是同一个事实被抄了第三份。真实安装出来的包版本就等于 package.json 里那个。
+const pairedVersion = JSON.parse(readFileSync(join(repo, "agent-node", "package.json"), "utf8")).version;
 const cli = join(repo, "agent-network", "bin", "cli.ts");
 const root = join(process.env.RUNNER_TEMP, "anet-test751-e2e");
 const project = join(root, "project");
@@ -22,7 +27,7 @@ writeFileSync(join(userHome, ".anet", "config.json"), JSON.stringify({ hub: "htt
 writeFileSync(join(bin, "codex.cmd"), `@echo off\r\nbun "${join(import.meta.dirname, "fake-codex.mjs")}" %*\r\n`);
 writeFileSync(join(bin, "agent-node.cmd"), `@echo off\r\nbun "${join(import.meta.dirname, "fake-agent-node.mjs")}" %*\r\n`);
 // Deliberately leave the PATH shim above as a stale-global witness. The Codex
-// bridge must use this exact package-owned preview.34 entrypoint instead. The
+// bridge must use this exact package-owned paired entrypoint instead. The
 // package-owned wrapper imports the repository's REAL built agent-node: the
 // old Windows gate imported fake-agent-node.mjs (an infinite sleep), so it
 // could never prove SSE admission or turn/steer while the TUI was busy.
@@ -32,7 +37,7 @@ const exactNodeEntrypoint = join(exactNodeDist, "cli.js");
 mkdirSync(exactNodeDist, { recursive: true });
 writeFileSync(join(exactNodeRoot, "package.json"), JSON.stringify({
   name: "@sleep2agi/agent-node",
-  version: "2.5.0-preview.34",
+  version: pairedVersion,
   publishConfig: { tag: "preview" },
   bin: { "agent-node": "dist/cli.js" },
 }));

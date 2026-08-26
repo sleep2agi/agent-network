@@ -112,6 +112,25 @@ describe("OpenCode agent-node release pairing", () => {
         OPENCODE_AGENT_NODE_VERSION,
       )).toBe(entrypoint);
 
+      // 🔴 版本这条分支此前从未被任何用例执行过。上面两个 throw 用例改的是 name
+      // 和 publishConfig.tag —— 而产品代码里五个身份条件**共用同一句错误文案**
+      // (`resolved agent-node package is not exact version X`),所以断言那句话
+      // 对 name/tag/bin 任何一项失败都成立,唯独不证明版本被比较过。
+      // 下面这个用例只改 version,其余字段全部合法,是唯一能让版本比较独自变红的形状。
+      writePackage({ version: `${OPENCODE_AGENT_NODE_VERSION}-not-the-paired-one` });
+      expect(() => validateAgentNodePackageEntrypoint(
+        entrypoint,
+        OPENCODE_AGENT_NODE_SPEC,
+        OPENCODE_AGENT_NODE_VERSION,
+      )).toThrow(`not exact version ${OPENCODE_AGENT_NODE_VERSION}`);
+
+      // 不传 expectedVersion 时判据换成「是不是 preview 通道」,这条同样没被覆盖过。
+      writePackage({ version: "2.5.0" });
+      expect(() => validateAgentNodePackageEntrypoint(
+        entrypoint,
+        OPENCODE_AGENT_NODE_SPEC,
+      )).toThrow("not a preview-channel candidate");
+
       writePackage({ name: "attacker/agent-node" });
       expect(() => validateAgentNodePackageEntrypoint(
         entrypoint,
