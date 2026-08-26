@@ -18,6 +18,9 @@ on:
       - 'tests/test846-doc-claims/**'
       - 'agent-network/**'
       - 'agent-node/**'
+      # deploy/ 曾不在此列 —— 只改部署配置的 PR 因此绕过整个 QA 套件,
+      # 而且显示为全绿(检查数从 ~92 掉到 16,比例反而更好看)。
+      - 'deploy/**'
       - 'tests/qa-*/**'
       - 'scripts/qa.sh'
       - 'scripts/sync-pinned-versions.sh'
@@ -183,6 +186,7 @@ on:
       - 'tests/test846-doc-claims/**'
       - 'agent-network/**'
       - 'agent-node/**'
+      - 'deploy/**'
       - 'tests/qa-*/**'
       - 'scripts/qa.sh'
       - '.github/workflows/qa.yml'
