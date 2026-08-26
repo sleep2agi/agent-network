@@ -14,6 +14,7 @@ grep -Fq 'codexTuiAlignmentNotice(configFilePath, cfg, threadId)' /repo/agent-no
 grep -Fq 'const normalizeRuntime = normalizeSessionRuntime' /repo/server/src/server.ts
 grep -Fq 'align a POSIX TUI with:' /repo/agent-node/src/cli.ts
 grep -Fq 'align a PowerShell TUI with:' /repo/agent-node/src/cli.ts
+grep -Fq 'manual TUI alignment command withheld:' /repo/agent-node/src/cli.ts
 echo "PASS: writeback and all dashboard projections use the tested helpers"
 
 echo "Layer 3: manual-topology incident documentation"

@@ -885,6 +885,8 @@ function writebackCodexThread(threadId: string) {
       warn(`[codex-app-server] shared thread changed to ${alignment.threadId}. A TUI opened before the bridge will still show its old/blank thread.`);
       warn(`[codex-app-server] align a POSIX TUI with: ${alignment.posixCommand}`);
       warn(`[codex-app-server] align a PowerShell TUI with: ${alignment.powershellCommand}`);
+    } else {
+      warn("[codex-app-server] manual TUI alignment command withheld: codexAppServerUrl must be a credential-free loopback ws/wss URL without query or fragment");
     }
   } catch (e: any) {
     warn(`writebackCodexThread failed: ${e.message}`);

@@ -21,6 +21,25 @@ function ps(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
+function safeLoopbackRemote(value: unknown): string | null {
+  if (!usable(value, 2048)) return null;
+  try {
+    const parsed = new URL(value);
+    const loopback = parsed.hostname === "127.0.0.1"
+      || parsed.hostname === "localhost"
+      || parsed.hostname === "[::1]";
+    if ((parsed.protocol !== "ws:" && parsed.protocol !== "wss:")
+      || !loopback
+      || parsed.username
+      || parsed.password
+      || parsed.search
+      || parsed.hash) return null;
+    return parsed.pathname === "/" ? parsed.origin : `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return null;
+  }
+}
+
 /** Data-only repair guidance for manually assembled app-server/bridge/TUI
  * topologies. The managed `anet node start --copresence` path creates the
  * thread before both clients start and therefore does not need this repair. */
@@ -29,10 +48,10 @@ export function codexTuiAlignmentNotice(
   config: Record<string, unknown>,
   threadId: string,
 ): CodexTuiAlignmentNotice | null {
-  const remote = typeof config.codexAppServerUrl === "string" ? config.codexAppServerUrl : "";
+  const remote = safeLoopbackRemote(config.codexAppServerUrl);
   const codexHome = join(dirname(configPath), "codex-home");
   const model = usable(config.model, 256) ? config.model : undefined;
-  if (!usable(remote, 2048) || !usable(threadId, 1024) || !usable(codexHome, 4096)) return null;
+  if (!remote || !usable(threadId, 1024) || !usable(codexHome, 4096)) return null;
   const modelPosix = model ? ` -m ${sh(model)}` : "";
   const modelPowerShell = model ? ` -m ${ps(model)}` : "";
   return {
