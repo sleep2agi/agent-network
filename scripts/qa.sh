@@ -61,6 +61,9 @@ L1_TESTS=(
   # 这道闸门自己的回归。放在最前:它跑的是本脚本,若闸门坏了应当最先暴露。
   # (注册这一步不是可选的 —— 一个没被任何东西调用的套件等于不存在。)
   "test823-l1-concurrency-cap"
+  # RFC-036 PR1: credential-free SideThread state machine + Codex adapter
+  # contract. Exact-version fail-closed has a witnessed-red mutation.
+  "test1193-side-thread-contract"
   "qa-cli-01-hub-start"
   "qa-cli-02-network-create"
   "qa-dash-07-auth-boundary"
