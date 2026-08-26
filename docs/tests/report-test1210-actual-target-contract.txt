@@ -21,6 +21,8 @@ GREEN acceptance coverage
 - REST online success returns actual_to {alias,to_node_id,network_id}.
 - MCP online success returns the identical object shape.
 - MCP idempotent replay returns the same authoritative target and task ID.
+  The pre-existing exact-equality replay test is pinned to the additive
+  `actual_to` object, so future response drift is visible rather than ignored.
 - The same alias in two networks resolves to different scoped node IDs.
 - An old alias after rename reports the canonical alias while preserving
   renamed_from / renamed_to compatibility fields.
@@ -32,7 +34,8 @@ Docker result: PASS
   PASS test1210 actual target contract
 
 Focused regression tests (inside the same Docker image):
-  37 pass, 0 fail, 80 expect() calls
+  41 pass, 0 fail, 92 expect() calls
+  - task-idempotency-mcp.test.ts
   - task-network-resolution-http.test.ts
   - mcp-write-network-resolution.test.ts
   - task-idempotency.test.ts

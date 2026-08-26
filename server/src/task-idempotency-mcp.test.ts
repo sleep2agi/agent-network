@@ -114,6 +114,11 @@ describe("send_task durable idempotency", () => {
       task_id: first.message_id,
       task_status: "delivered",
       idempotent_replay: true,
+      actual_to: {
+        alias: TARGET,
+        to_node_id: "id_node_chat_idem",
+        network_id: NET,
+      },
     });
     expect(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM tasks WHERE network_id = ?1", [NET])?.count).toBe(1);
     expect(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM inbox WHERE network_id = ?1", [NET])?.count).toBe(1);
