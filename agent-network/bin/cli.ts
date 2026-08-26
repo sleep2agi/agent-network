@@ -824,6 +824,7 @@ async function startWindowsCodexCopresence(
 
     const bridgeEnv: NodeJS.ProcessEnv = {
       ...process.env,
+      CODEX_HOME: opts.codexHome,
       ANET_NODE_MARKER: marker,
       ANET_COPRESENCE_BRIDGE: "1",
     };
@@ -1200,7 +1201,11 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // path reads codexAppServerUrl / codexThreadId from the config we just
   // wrote and spawns agent-node in adopt mode. Same launchAgent()
   // codepath as the non-copresence case — no fork of the bridge dispatch.
-  const bridgeCmd = `unset COMMHUB_TOKEN ANET_CODEX_COMMHUB_TOKEN && exec anet node start ${shellQuote(displayName)}`;
+  const bridgeCmd = [
+    `export CODEX_HOME=${shellQuote(opts.codexHome)}`,
+    `unset COMMHUB_TOKEN ANET_CODEX_COMMHUB_TOKEN`,
+    `exec anet node start ${shellQuote(displayName)}`,
+  ].join(" && ");
   try {
     execFileSync("tmux", [
       "new-session", "-d", "-s", bridgeSession, "-c", process.cwd(),
@@ -1214,7 +1219,18 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     process.exit(1);
   }
   console.log(`[anet] ② bridge tmux=${bridgeSession} starting…`);
-  await new Promise((r) => setTimeout(r, 3000));
+  const bridgeReady = await waitForTmuxPaneText(
+    bridgeSession,
+    "[codex-app-server] shared bridge ready",
+    25_000,
+  );
+  if (!bridgeReady) {
+    console.error(`[anet] ❌ bridge did not attach to the shared app-server before TUI launch.`);
+    console.error(`[anet]    Debug:   tmux attach -t ${shellQuote(`=${bridgeSession}`)}`);
+    console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
+    process.exit(1);
+  }
+  console.log(`[anet] ② bridge READY on ${wsUrl}`);
 
   // ── piece ③ codex TUI (attachable, resumes same thread) ───────────────
   const tuiFlags: string[] = [];

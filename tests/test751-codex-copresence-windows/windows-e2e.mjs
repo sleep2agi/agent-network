@@ -36,7 +36,7 @@ writeFileSync(join(exactNodeRoot, "package.json"), JSON.stringify({
   publishConfig: { tag: "preview" },
   bin: { "agent-node": "dist/cli.js" },
 }));
-writeFileSync(exactNodeEntrypoint, `import ${JSON.stringify(pathToFileURL(join(repo, "agent-node", "dist", "cli.js")).href)};\n`);
+writeFileSync(exactNodeEntrypoint, `import { appendFileSync } from "node:fs";\nappendFileSync(process.env.ANET_TEST751_RPC_LOG, \`bridge-home:\${process.env.CODEX_HOME}\\n\`);\nawait import(${JSON.stringify(pathToFileURL(join(repo, "agent-node", "dist", "cli.js")).href)});\n`);
 const env = {
   ...process.env, HOME: userHome, USERPROFILE: userHome,
   PATH: `${bin};${process.env.PATH}`, ANET_TEST751_RPC_LOG: rpcLog,
@@ -149,10 +149,13 @@ async function postDashboardTask(priority, suffix) {
 env.ANET_TEST751_LONG_TURN = "1";
 let driven = false;
 let drivePromise;
+let turnStartCountBeforeDashboard = -1;
 const longTurnOutput = await terminal(["node", "start", "windows-picker", "--no-inherit-codex-home"], (_child, output) => {
   if (driven || !output.includes("FAKE_CODEX_TUI_LONG_TURN_READY")) return;
   driven = true;
   drivePromise = (async () => {
+    const beforeWire = readFileSync(rpcLog, "utf8");
+    turnStartCountBeforeDashboard = (beforeWire.match(/^rpc:turn\/start(?::|$)/gm) || []).length;
     const normalTask = await postDashboardTask("normal", "a");
     const highTask = await postDashboardTask("high", "b");
     await waitUntil("two live turn/steer RPCs", () => {
@@ -183,14 +186,21 @@ const steerCalls = readFileSync(rpcLog, "utf8");
 if ((steerCalls.match(/^rpc:turn\/steer:thread_windows_e2e:turn_windows_human$/gm) || []).length !== 2) {
   throw new Error(`normal/high messages did not both steer the same active turn:\n${steerCalls}`);
 }
-if (steerCalls.includes("rpc:turn/start:during-long-turn")) throw new Error("Dashboard work opened a second turn");
+const turnStartCountAfterDashboard = (steerCalls.match(/^rpc:turn\/start(?::|$)/gm) || []).length;
+if (turnStartCountBeforeDashboard < 0 || turnStartCountAfterDashboard !== turnStartCountBeforeDashboard) {
+  throw new Error(`Dashboard work opened a second turn: before=${turnStartCountBeforeDashboard} after=${turnStartCountAfterDashboard}\n${steerCalls}`);
+}
 const longConfig = JSON.parse(readFileSync(configPath, "utf8"));
 const tuiRemotes = [...steerCalls.matchAll(/^tui-remote:(.+)$/gm)].map((match) => match[1].trim());
 const tuiHomes = [...steerCalls.matchAll(/^tui-home:(.+)$/gm)].map((match) => match[1].trim());
+const appServerHomes = [...steerCalls.matchAll(/^appsrv-home:(.+)$/gm)].map((match) => match[1].trim());
+const bridgeHomes = [...steerCalls.matchAll(/^bridge-home:(.+)$/gm)].map((match) => match[1].trim());
 if (
   longConfig.codexThreadId !== "thread_windows_e2e"
   || tuiRemotes.at(-1) !== longConfig.codexAppServerUrl
   || tuiHomes.at(-1) !== codexHome
+  || appServerHomes.at(-1) !== codexHome
+  || bridgeHomes.at(-1) !== codexHome
 ) {
   throw new Error(`long-turn identity drift: ${JSON.stringify(longConfig)}`);
 }

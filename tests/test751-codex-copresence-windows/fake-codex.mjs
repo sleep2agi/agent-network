@@ -3,9 +3,12 @@ import { appendFileSync, existsSync } from "node:fs";
 const args = process.argv.slice(2);
 const rpcLog = process.env.ANET_TEST751_RPC_LOG;
 const log = (line) => { if (rpcLog) appendFileSync(rpcLog, `${line}\n`); };
+process.on("uncaughtException", (error) => { log(`fatal:${error?.stack || error}`); process.exit(1); });
+process.on("unhandledRejection", (error) => { log(`fatal:${error?.stack || error}`); process.exit(1); });
 log(`invoke:${JSON.stringify(args)}`);
 
 if (args[0] === "app-server") {
+  log(`appsrv-home:${process.env.CODEX_HOME}`);
   const listen = args[args.indexOf("--listen") + 1];
   const url = new URL(listen);
   const sockets = new Set();
@@ -60,12 +63,17 @@ if (args[0] === "app-server") {
     },
   });
   console.log(`listening on: ws://${server.hostname}:${server.port}`);
+  // Keep the fake alive even when a detached tmux/ConPTY has no readable
+  // stdin. The real app-server owns native handles; the fake must model that
+  // lifetime explicitly instead of relying on an unresolved Promise alone.
+  setInterval(() => {}, 1_000);
   await new Promise(() => {});
 } else if (args[0] === "resume") {
   const threadId = args.find((arg) => arg.startsWith("thread_"));
   log(`tui:${threadId}`);
   log(`tui-remote:${args[args.indexOf("--remote") + 1]}`);
   log(`tui-home:${process.env.CODEX_HOME}`);
+  console.log(">_ OpenAI Codex (test co-presence)");
   console.log(`FAKE_CODEX_TUI_RESUMED ${threadId}`);
   if (process.env.ANET_TEST751_LONG_TURN === "1") {
     const remote = args[args.indexOf("--remote") + 1];
