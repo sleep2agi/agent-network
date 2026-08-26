@@ -108,6 +108,7 @@ on:
       - 'tests/test661-explicit-bootstrap-db/**'
       - 'tests/test683-hub-lifecycle-watcher/**'
       - 'tests/qa-hub-17-rename-canonicalization/**'
+      - 'tests/test1210-actual-target-contract/**'
       - 'tests/qa-hub-19-login-guard/**'
       - 'tests/test635-daemon-private-state/**'
       - 'tests/test643-transient-hub-legacy-repair/**'
@@ -848,6 +849,7 @@ jobs:
       matrix:
         suite:
           - qa-hub-17-rename-canonicalization
+          - test1210-actual-target-contract
           - qa-hub-19-login-guard
           - test635-daemon-private-state
           - test643-transient-hub-legacy-repair

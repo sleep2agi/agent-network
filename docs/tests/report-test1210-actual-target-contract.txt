@@ -1,0 +1,38 @@
+test1210 — canonical actual target dispatch acknowledgement
+============================================================
+
+Base: origin/main 3f88c9699b620597a6357bfc6eed6a02264152c7
+Environment: isolated Docker; Bun 1.2.22; ephemeral SQLite and loopback Hub
+
+WITNESSED RED (before implementation)
+-------------------------------------
+Command:
+  sg docker -c 'docker build -t anet-test1210-red -f tests/test1210-actual-target-contract/Dockerfile . && docker run --rm anet-test1210-red'
+
+The baseline reached:
+  [0] environment -> authenticated Hub
+  [1] REST success returns the scoped canonical actual target
+
+It then exited non-zero because the baseline success response had no
+`actual_to`. This proves the suite discriminates the intended wire change.
+
+GREEN acceptance coverage
+-------------------------
+- REST online success returns actual_to {alias,to_node_id,network_id}.
+- MCP online success returns the identical object shape.
+- MCP idempotent replay returns the same authoritative target and task ID.
+- The same alias in two networks resolves to different scoped node IDs.
+- An old alias after rename reports the canonical alias while preserving
+  renamed_from / renamed_to compatibility fields.
+- REST and MCP offline/queued responses still identify the durable target.
+- Not-found responses omit actual_to.
+- A user without membership gets HTTP 403 and no alias/node/network leakage.
+
+Docker result: PASS
+  PASS test1210 actual target contract
+
+Focused regression tests (inside the same Docker image):
+  37 pass, 0 fail, 80 expect() calls
+  - task-network-resolution-http.test.ts
+  - mcp-write-network-resolution.test.ts
+  - task-idempotency.test.ts

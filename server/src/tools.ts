@@ -364,6 +364,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     | { state: "offline"; alias: string; session: any; message: string }
     | { state: "not_found"; alias: string; message: string };
 
+  // Only call after the authenticated, network-scoped lookup resolved a
+  // concrete target. Error paths intentionally omit this identity object.
+  const actualTo = (target: Exclude<DeliveryTarget, { state: "not_found" }>, networkId?: string | null) => ({
+    alias: target.alias,
+    to_node_id: target.session?.node_id ?? null,
+    network_id: networkId ?? null,
+  });
+
   const scopedSessionStatus = (alias: string, networkId?: string | null) => {
     const params: any[] = [alias];
     let sql = "SELECT status, updated_at, last_seen_at, node_id FROM sessions WHERE alias = ?1";
@@ -1315,8 +1323,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         ? idempotentTaskId(effectiveNetId ?? null, from_session, clientRequestId)
         : uuidv4();
       if (clientRequestId) {
-        const existing = db.get<StoredIdempotentTask>(
-          "SELECT task_id, from_name, to_name, priority, content, network_id, meta_json, status FROM tasks WHERE task_id = ?1",
+        const existing = db.get<StoredIdempotentTask & { to_node_id: string | null }>(
+          "SELECT task_id, from_name, to_node_id, to_name, priority, content, network_id, meta_json, status FROM tasks WHERE task_id = ?1",
           [id],
         );
         if (existing) {
@@ -1332,6 +1340,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           return { content: [{ type: "text" as const, text: JSON.stringify({
             ok: true, message_id: existing.task_id, task_id: existing.task_id,
             task_status: existing.status, idempotent_replay: true,
+            // A replay acknowledges the already-persisted dispatch. Use that
+            // row rather than today's session record so alias reuse or a
+            // restarted process cannot rewrite historical recipient identity.
+            actual_to: {
+              alias: existing.to_name,
+              to_node_id: existing.to_node_id ?? null,
+              network_id: existing.network_id ?? null,
+            },
           }) }] };
         }
       }
@@ -1365,6 +1381,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       console.log(`[${ts()}] ${from_session} → send_task → ${targetAlias}: ${task.slice(0, 60)}${priority === "high" ? " [HIGH]" : ""}${canonical.renamed ? ` [renamed from ${alias}]` : ""}`);
       const fromNodeId = resolveNodeIdForAlias(from_session, effectiveNetId);
       const targetNodeId = target.session?.node_id ?? null;
+      const resolvedActualTo = actualTo(target, effectiveNetId);
       // 事务：inbox + tasks 双写 + 触碰目标 session 的 task/updated_at（让
       // dashboard 在派任务一刻就反映出"任务已下发"，不再等 agent 的
       // report_status 心跳；status 字段交给 agent，避免与 working/idle
@@ -1422,6 +1439,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
               task_id: id,
               message_id: id,
               session_status: target.session.status ?? "offline",
+              actual_to: resolvedActualTo,
               ...(canonical.renamed ? { renamed_from: alias, renamed_to: targetAlias } : {}),
             }),
           }],
@@ -1435,6 +1453,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             text: JSON.stringify({
               ok: true,
               message_id: id,
+              actual_to: resolvedActualTo,
               ...(canonical.renamed ? { renamed_from: alias, renamed_to: targetAlias } : {}),
               session_status: target.session?.status ?? "unknown",
             }),
