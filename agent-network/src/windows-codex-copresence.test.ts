@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import {
   decideWindowsManagedStop, ensureWindowsPrivateDirectory,
-  probeWindowsCreationDate, taskkillWindowsProcessTree,
+  probeWindowsCreationDate, probeWindowsOwnedLoopbackConnection, taskkillWindowsProcessTree,
   type WindowsCopresenceRecord,
 } from "./windows-codex-copresence";
 
@@ -32,11 +32,26 @@ describe("Windows native Codex co-presence ownership", () => {
     expect(receiptAt).toBeGreaterThan(0);
     expect(readyAt).toBeGreaterThan(receiptAt);
     expect(tuiAt).toBeGreaterThan(readyAt);
-    const pidConnectionAt = windowsStart.indexOf("if (tui.pid && probeWindowsOwnedLoopbackConnection(tui.pid, port))", tuiAt);
+    const birthAt = windowsStart.indexOf("const tuiCreationDate = tui.pid ? probeWindowsCreationDate(tui.pid) : null", tuiAt);
+    const pidConnectionAt = windowsStart.indexOf("probeWindowsOwnedLoopbackConnection(tui.pid, tuiCreationDate, port)", tuiAt);
     const healthAt = windowsStart.indexOf("connection=pid-attributed", tuiAt);
-    expect(pidConnectionAt).toBeGreaterThan(tuiAt);
+    expect(birthAt).toBeGreaterThan(tuiAt);
+    expect(pidConnectionAt).toBeGreaterThan(birthAt);
     expect(healthAt).toBeGreaterThan(pidConnectionAt);
     expect(windowsStart.slice(pidConnectionAt, healthAt)).toContain("if (!tuiConnected)");
+  });
+
+  test("PID-attributed socket snapshot binds the exact TUI birth before and after enumeration", () => {
+    let script = "";
+    expect(probeWindowsOwnedLoopbackConnection(303, "638000000000000000", 24700, (s) => {
+      script = s;
+      return "true\n";
+    })).toBe(true);
+    expect(script).toContain("$before-ne$birth");
+    expect(script).toContain("$after-eq$birth");
+    expect(script).toContain("Get-NetTCPConnection");
+    expect(probeWindowsOwnedLoopbackConnection(303, "", 24700, () => "true")).toBe(false);
+    expect(probeWindowsOwnedLoopbackConnection(303, "638000000000000000", 24700, () => "false")).toBe(false);
   });
 
   test("matching PID plus CreationDate is safe to stop", () => {

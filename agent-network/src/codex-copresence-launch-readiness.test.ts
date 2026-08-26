@@ -55,6 +55,18 @@ describe("Codex co-presence launch readiness", () => {
     expect(windows).toContain("env: { ...process.env, CODEX_HOME: opts.codexHome }");
   });
 
+  test("each POSIX role receives the node marker exactly once", () => {
+    const start = cli.indexOf("async function startCopresenceOrchestration(");
+    const end = cli.indexOf("async function startOpencodeCopresenceOrchestration(", start);
+    const body = cli.slice(start, end);
+    expect(body.match(/`ANET_NODE_MARKER=\$\{identityMarker\}`/g)).toHaveLength(3);
+    for (const session of ["appsrvSession", "bridgeSession", "tuiSession"]) {
+      const roleStart = body.indexOf(`"-s", ${session}`);
+      const roleEnd = body.indexOf('"bash", "-lc"', roleStart);
+      expect(body.slice(roleStart, roleEnd).match(/`ANET_NODE_MARKER=\$\{identityMarker\}`/g)).toHaveLength(1);
+    }
+  });
+
   test("POSIX success requires exact bridge receipt and PID-attributed loopback connection", () => {
     const start = cli.indexOf("async function startCopresenceOrchestration(");
     const end = cli.indexOf("async function startOpencodeCopresenceOrchestration(", start);

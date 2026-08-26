@@ -908,10 +908,14 @@ async function startWindowsCodexCopresence(
       tui.once("error", reject);
       tui.once("spawn", resolve);
     });
+    const tuiCreationDate = tui.pid ? probeWindowsCreationDate(tui.pid) : null;
+    if (!tui.pid || !tuiCreationDate) {
+      throw new Error("TUI second-client health failed: could not attest the launched TUI process birth");
+    }
     const tuiHealthDeadline = Date.now() + 25_000;
     let tuiConnected = false;
     while (Date.now() < tuiHealthDeadline && tui.exitCode === null) {
-      if (tui.pid && probeWindowsOwnedLoopbackConnection(tui.pid, port)) {
+      if (probeWindowsOwnedLoopbackConnection(tui.pid, tuiCreationDate, port)) {
         tuiConnected = true;
         break;
       }
