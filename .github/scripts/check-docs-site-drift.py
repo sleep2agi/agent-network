@@ -42,6 +42,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -56,10 +57,70 @@ TIMEOUT = 25
 
 
 def md_to_url(rel: str) -> str:
-    u = "/" + rel[: -len(".md")]
-    if u.endswith("/index"):
-        u = u[: -len("index")]
-    return u or "/"
+    """`docs-site/docs` 下的相对路径 → 站点上的地址。
+
+    🔴 `docs/public/` 是 VitePress 的**静态资源根**:发布时剥掉 `public/`
+    这一段,**并且保留原扩展名**(`…/SKILL.md` 就是 `…/SKILL.md`,不是 `…/SKILL`)。
+    原来这里对所有路径一律走「去掉末尾 3 个字符」,于是:
+
+        public/skillhub/skills/x/1.0.0/SKILL.md → /public/skillhub/…/SKILL   ← 多了 /public、丢了 .md
+        public/skillhub/catalog.json            → /public/skillhub/catalog.j ← 把 "son" 也切掉了
+
+    第二种是无条件的垃圾地址 —— 因为切长度写死成 `len(".md")`,
+    对任何非 `.md` 的产物文件都会砍掉三个字符。
+    """
+    if rel.startswith("public/"):
+        return "/" + rel[len("public/"):]
+    if rel.endswith(".md"):
+        u = "/" + rel[: -len(".md")]
+        if u.endswith("/index"):
+            u = u[: -len("index")]
+        return u or "/"
+    return "/" + rel
+
+
+# 产物类文件:不是 markdown,判据也不是「指纹出现在渲染后的页面里」。
+# 🔴 覆盖面缺口:`recent_docs()` 原来只收 `.md`,而 `catalog.json` 不是 `.md`
+# ⇒ skillhub 目录漂移(线上 2 条 / main 6 条)**从来不在这道门的判据里**。
+ARTIFACT_NAMES = ("catalog.json",)
+ARTIFACT_LIMIT = 4
+
+
+def recent_artifacts(limit: int = ARTIFACT_LIMIT) -> list[str]:
+    """最近改动过的**产物类**文件(相对 docs-site/docs)。
+
+    单独给预算,不跟 markdown 抢 `SAMPLE_LIMIT` —— 扩覆盖面不能以缩小另一半为代价。
+    """
+    out = subprocess.run(
+        ["git", "log", "-n", "80", "--name-only", "--pretty=format:", "--", "docs-site/docs"],
+        capture_output=True, text=True,
+    ).stdout
+    seen: list[str] = []
+    for line in out.split("\n"):
+        line = line.strip()
+        if not line.startswith("docs-site/docs/"):
+            continue
+        rel = line[len("docs-site/docs/"):]
+        if Path(rel).name not in ARTIFACT_NAMES or rel in seen:
+            continue
+        if not (DOCS / rel).exists():
+            continue
+        seen.append(rel)
+        if len(seen) >= limit:
+            break
+    return seen
+
+
+def catalog_entries(payload) -> list[str]:
+    """catalog.json → 条目名列表(两种可能的外形都收)。"""
+    items = payload if isinstance(payload, list) else payload.get("skills", [])
+    names = []
+    for it in items:
+        if isinstance(it, dict):
+            names.append(str(it.get("name") or it.get("id") or it))
+        else:
+            names.append(str(it))
+    return sorted(names)
 
 
 def recent_docs(limit: int) -> list[str]:
@@ -128,10 +189,24 @@ def fingerprint(text: str) -> str | None:
     return None
 
 
+class SiteMissing(Exception):
+    """站点对这个地址回了 404 —— 服务器答了话,只是没有这一页。"""
+
+
 def fetch(url: str) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": "anet-docs-drift-check"})
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
-        return r.read().decode("utf-8", errors="replace")
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+            return r.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        # 🔴 404 与「连不上」不是同一件事,不该给同一个退出码。
+        # main 上存在、线上 404 ⇒ 这**正是**这道门要抓的漂移(exit 1),
+        # 而不是「说不清楚」(exit 2)。原来两者都走 exit 2,于是真漂移被
+        # 报成 `cannot fetch … refusing to pass` —— 读起来像网络抽风,
+        # 这正是它连红 8 天没人处理的原因之一:**错的不是判定,是判定被归到了错的层**。
+        if exc.code == 404:
+            raise SiteMissing(url) from exc
+        raise
 
 
 def run() -> int:
@@ -161,6 +236,11 @@ def run() -> int:
         url = SITE + md_to_url(rel)
         try:
             html = fetch(url)
+        except SiteMissing:
+            checked += 1
+            print(f"  MISS {rel}  →  {md_to_url(rel)}   [404 — 线上没有这一页]")
+            missing.append((rel, md_to_url(rel), "整页在线上不存在(404)"))
+            continue
         except (urllib.error.URLError, OSError, TimeoutError) as exc:
             print(f"::error::cannot fetch {url}: {exc} — refusing to pass", file=sys.stderr)
             return 2
@@ -174,6 +254,37 @@ def run() -> int:
             print(f"  MISS {rel}  →  {md_to_url(rel)}   [{source}]")
             missing.append((rel, md_to_url(rel), fp))
 
+    # --- 产物类文件:判据是「条目集合」,不是「指纹出现在渲染页里」 ---
+    for rel in recent_artifacts():
+        url = SITE + md_to_url(rel)
+        try:
+            raw = fetch(url)
+        except SiteMissing:
+            checked += 1
+            print(f"  MISS {rel}  →  {md_to_url(rel)}   [404 — 产物在线上不存在]")
+            missing.append((rel, md_to_url(rel), "产物在线上不存在(404)"))
+            continue
+        except (urllib.error.URLError, OSError, TimeoutError) as exc:
+            print(f"::error::cannot fetch {url}: {exc} — refusing to pass", file=sys.stderr)
+            return 2
+        checked += 1
+        try:
+            live = catalog_entries(json.loads(raw))
+            mine = catalog_entries(json.loads((DOCS / rel).read_text(encoding="utf-8")))
+        except (ValueError, AttributeError) as exc:
+            print(f"::error::cannot parse {rel} on either side: {exc} — refusing to pass",
+                  file=sys.stderr)
+            return 2
+        only_main = [n for n in mine if n not in live]
+        if only_main:
+            print(f"  MISS {rel}  →  {md_to_url(rel)}   "
+                  f"[main {len(mine)} 条 / 线上 {len(live)} 条]")
+            missing.append((rel, md_to_url(rel),
+                            f"main 有而线上没有:{', '.join(only_main)}"))
+        else:
+            print(f"  ok   {rel}  →  {md_to_url(rel)}   "
+                  f"[main {len(mine)} 条 / 线上 {len(live)} 条]")
+
     if checked == 0:
         print("::error::no page could be sampled (every candidate lacked a usable "
               "fingerprint) — refusing to pass", file=sys.stderr)
@@ -182,10 +293,12 @@ def run() -> int:
     print(f"\nsampled {checked} recently-changed page(s) against {SITE}")
     if missing:
         for rel, url, fp in missing:
-            print(f"::error file=docs-site/docs/{rel}::this sentence is on main but NOT on "
-                  f"{SITE}{url} — the site was not redeployed after the merge. "
-                  f"Run `vercel --prod` from a worktree at origin/main "
-                  f"(see deploy/docs-site/README.md). Missing: {fp[:80]!r}")
+            # 三种缺法的文案不一样:整页 404 / 产物条目少 / 指纹句缺失。
+            # 原来一律写死成 "this sentence is on main…",对前两种是错的描述。
+            print(f"::error file=docs-site/docs/{rel}::main 上的这一份没有出现在 "
+                  f"{SITE}{url} —— 合并后站点没有重新部署。"
+                  f"在 origin/main 的工作树里跑 `vercel --prod`"
+                  f"(见 deploy/docs-site/README.md)。差异:{fp[:100]!r}")
         print(f"\n{len(missing)} page(s) behind main.")
         return 1
     print("every sampled page on the live site matches main.")
@@ -202,6 +315,28 @@ def selftest() -> int:
     check("md → url: 英文页", md_to_url("en/deploy/npm.md") == "/en/deploy/npm")
     check("md → url: 目录首页", md_to_url("guide/index.md") == "/guide/")
     check("md → url: 站点首页", md_to_url("index.md") == "/")
+
+    # 🔴 `docs/public/` = VitePress 静态资源根:剥 `public/`、**保留扩展名**。
+    # 这三条是本次修的那个 bug 的红夹具 —— 修之前它们全部 FAIL。
+    check("public/ 下的 .md:剥 public/、保留 .md",
+          md_to_url("public/skillhub/skills/x/1.0.0/SKILL.md")
+          == "/skillhub/skills/x/1.0.0/SKILL.md",
+          f"got={md_to_url('public/skillhub/skills/x/1.0.0/SKILL.md')!r}")
+    check("public/ 下的 .json:扩展名不许被切",
+          md_to_url("public/skillhub/catalog.json") == "/skillhub/catalog.json",
+          f"got={md_to_url('public/skillhub/catalog.json')!r}")
+    check("非 .md 且不在 public/:原样保留扩展名",
+          md_to_url("assets/data.json") == "/assets/data.json",
+          f"got={md_to_url('assets/data.json')!r}")
+
+    # 产物判据:两种外形都要能读出条目名,且能看出 main 比线上多
+    check("catalog: list 形状", catalog_entries([{"name": "b"}, {"name": "a"}]) == ["a", "b"])
+    check("catalog: {'skills': …} 形状",
+          catalog_entries({"skills": [{"name": "b"}, {"name": "a"}]}) == ["a", "b"])
+    live_ = catalog_entries({"skills": [{"name": "a"}]})
+    main_ = catalog_entries({"skills": [{"name": "a"}, {"name": "b"}]})
+    check("catalog: 认得出 main 多出来的条目",
+          [n for n in main_ if n not in live_] == ["b"])
 
     # 指纹:必须跳过标题/列表/引用/链接/强调,选一句纯正文
     text = ("# 标题\n"
