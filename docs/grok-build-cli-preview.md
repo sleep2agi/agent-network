@@ -87,20 +87,38 @@ Install the preview CLI when a reviewed preview package containing this runtime 
 npm install -g @sleep2agi/agent-network@preview
 ```
 
-Create and start the node in terminal 1:
+Create the node, then bring up the node and its shared TUI in one command:
 
 ```bash
 anet node create grok-shared --runtime grok-build-cli
-anet node start grok-shared
+anet node start grok-shared --copresence
 ```
 
-Attach terminal 2:
+That starts a local hub if the node points at a loopback one, launches the node
+(which owns the Grok PTY and the attach socket), waits until that socket is
+actually a live socket, and opens the attachable TUI. Then:
 
 ```bash
-anet grok attach grok-shared
+tmux attach -t '=grok-shared'
 ```
 
-Press `Ctrl-]` to detach without stopping the node.
+Press `Ctrl-]` to detach the Grok TUI without stopping the node, and the usual
+tmux detach (`Ctrl-b d`) to leave the session.
+
+The `--copresence` flag is a one-off: it is recorded on the node profile, so
+every later start is just `anet node start grok-shared`.
+
+<details>
+<summary>Two-terminal flow (still supported)</summary>
+
+```bash
+anet node start grok-shared      # terminal 1
+anet grok attach grok-shared     # terminal 2
+```
+
+Use this when you want the node's own output in front of you, or when tmux is
+not available — `--copresence` requires it.
+</details>
 
 The default `grok-build-cli` profile created by `anet` enables co-presence. `anet node start` owns one Grok PTY and exposes a local, same-user attach socket. The attached terminal renders that TUI. A network task sent to `grok-shared` is submitted into the same session, appears in the TUI, and its completed answer is routed to the original CommHub task.
 
