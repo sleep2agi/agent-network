@@ -114,10 +114,16 @@ cp /tmp/test1220-health.ts agent-network/src/codex-tui-client-health.ts
 
 echo "L2d witnessed-red: Windows PID attribution cannot be skipped"
 bun /mutate.ts agent-network/bin/cli.ts \
-  'if (tui.pid && probeWindowsOwnedLoopbackConnection(tui.pid, port)) {' \
+  'if (probeWindowsOwnedLoopbackConnection(tui.pid, tuiCreationDate, port)) {' \
   'if (tui.pid) {'
 expect_red windows-pid-attribution bun test agent-network/src/windows-codex-copresence.test.ts
 cp /tmp/test1220-cli.ts agent-network/bin/cli.ts
+cp agent-network/src/windows-codex-copresence.ts /tmp/test1220-windows.ts
+bun /mutate.ts agent-network/src/windows-codex-copresence.ts \
+  'if($hit-and$after-eq$birth)' \
+  'if($hit)'
+expect_red windows-birth-recheck bun test agent-network/src/windows-codex-copresence.test.ts
+cp /tmp/test1220-windows.ts agent-network/src/windows-codex-copresence.ts
 
 echo "L2e witnessed-red: wrong TUI CODEX_HOME cannot pass source health contract"
 bun /mutate.ts agent-network/bin/cli.ts \
