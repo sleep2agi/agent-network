@@ -8,6 +8,11 @@ import { assistantItems, assistantSnapshot, pollCompletedAssistant } from "./thr
 
 if (process.platform !== "win32") throw new Error("real gate requires native Windows ConPTY");
 const repo = resolve(import.meta.dirname, "../..");
+// 配对版本从 agent-node/package.json 派生。写死在这里的话,每条发版 PR
+// (它只改 package.json 的版本和 PAIRED_AGENT_NODE_VERSION) 都会让本门变红:
+// cli.ts 拿新版本去校验,而 fixture 还声明着上一个版本。这不是配对失效,
+// 是同一个事实被抄了第三份。真实安装出来的包版本就等于 package.json 里那个。
+const pairedVersion = JSON.parse(readFileSync(join(repo, "agent-node", "package.json"), "utf8")).version;
 const privateRoot = process.env.ANET_TEST1212_PRIVATE;
 const artifacts = process.env.ANET_TEST1212_ARTIFACTS;
 const expectedSha = process.env.ANET_EXPECTED_SOURCE_SHA;
@@ -48,7 +53,7 @@ try {
   writeFileSync(join(nodeHome, "auth.json"), readFileSync(join(codexHome, "auth.json")), { mode: 0o600 });
   const exactRoot = join(privateRoot, "exact", "node_modules", "@sleep2agi", "agent-node"), exactDist = join(exactRoot, "dist");
   mkdirSync(exactDist, { recursive: true });
-  writeFileSync(join(exactRoot, "package.json"), JSON.stringify({ name: "@sleep2agi/agent-node", version: "2.5.0-preview.34", publishConfig: { tag: "preview" }, bin: { "agent-node": "dist/cli.js" } }));
+  writeFileSync(join(exactRoot, "package.json"), JSON.stringify({ name: "@sleep2agi/agent-node", version: pairedVersion, publishConfig: { tag: "preview" }, bin: { "agent-node": "dist/cli.js" } }));
   writeFileSync(join(exactDist, "cli.js"), `await import(${JSON.stringify(pathToFileURL(join(repo, "agent-node", "dist", "cli.js")).href)});\n`);
   env.ANET_AGENT_NODE_BIN = join(exactDist, "cli.js");
   // Pin the executable without installing it globally. The cmd shim is private.
