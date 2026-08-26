@@ -67,6 +67,14 @@ The full 65-second A9 run plus A12 restart-only verification proved:
   call while test631 still required exactly four. The inventory now requires
   five and separately pins the pending writer to that private atomic helper;
   exact Docker test631 passes 93/0 with both permission mutations red.
+- Protected Windows run `33018461634` reached the credentialed Windows runner
+  and failed closed before executing Codex: npm's current `cmd-shim` emits the
+  canonical launcher through `%dp0%`, while the allowlist parser accepted only
+  the historical `%~dp0` spelling. The parser now accepts only those two exact
+  forms, normalizes both to one identity, and still hashes the canonical
+  launcher/vendor before execution. A tenth static mutation removes the new
+  form and must fail; real Windows rerun is required after this fix reaches
+  trusted main.
 
 - A1: locked dependencies absent; no product roles. A stale cleanup port caused
   a harness false positive.
