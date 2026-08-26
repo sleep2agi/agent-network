@@ -114,6 +114,14 @@ import {
   missingCopresenceDeps,
 } from "../src/copresence-deps";
 import {
+  diagnoseGrokCopresence,
+  grokAttachSocketState,
+  grokCopresenceRequested,
+  grokCopresenceSessions,
+  shouldPersistGrokCopresence,
+  GROK_COPRESENCE_CHILD_ENV,
+} from "../src/grok-copresence-orchestration";
+import {
   grokCopresenceDisclosure,
   type GrokCopresenceSessionDisclosure,
 } from "../src/grok-copresence-disclosure";
@@ -636,8 +644,20 @@ async function ensureLocalHubRunning(hub: string): Promise<void> {
       const hubPort = (() => { try { return new URL(hub).port || "9200"; } catch { return "9200"; } })();
       const selfCmd = `${shellQuote(process.execPath)} ${shellQuote(process.argv[1] ?? "")}`
         + ` hub start --port ${shellQuote(hubPort)}`;
+      // 🔴 tmux does NOT hand a new session this process's environment — the
+      //    child inherits the tmux SERVER's, which was frozen whenever that
+      //    server started. Without forwarding it, an operator who set
+      //    COMMHUB_DB to isolate a test hub gets one on the DEFAULT database:
+      //    verified here by starting a hub on a spare port with COMMHUB_DB set
+      //    and finding it serving the production data, while the file named by
+      //    COMMHUB_DB was never created. That is precisely the second-hub-on-one-DB
+      //    case hub-daemon.sh guards against, entered through our own auto-start.
+      const forwardedEnv = process.env.COMMHUB_DB
+        ? ["-e", `COMMHUB_DB=${process.env.COMMHUB_DB}`]
+        : [];
       execFileSync("tmux", [
         "new-session", "-d", "-s", ANET_HUB_TMUX_SESSION,
+        ...forwardedEnv,
         `${selfCmd} 2>&1 | tee ${shellQuote(hubLog)}`,
       ], { stdio: "pipe" });
     } catch (e) {
@@ -863,6 +883,152 @@ async function startWindowsCodexCopresence(
     throw e;
   }
 
+}
+
+/**
+ * `anet node start <name> --copresence` for the grok lane.
+ *
+ * The mechanism already shipped — leader socket, attach protocol, profile
+ * fields. What had not shipped is the last step being automatic: cli.ts used to
+ * print "Start the node first, then attach from a second terminal." Codex got
+ * one command; grok got two, for no reason living in the mechanism.
+ *
+ * Two tmux sessions, named the same way the codex lane names its three, so
+ * `tmux attach -t '=<alias>'` lands a human on the TUI regardless of runtime.
+ */
+async function startGrokCopresenceOrchestration(
+  nodeId: string,
+  opts: { hub?: string },
+): Promise<void> {
+  const resolved = resolveNodeRef(nodeId);
+  if (!resolved) {
+    console.error(`Node "${nodeId}" not found. Create it first: anet node create ${nodeId}`);
+    process.exit(1);
+  }
+  const profile = resolved.profile as any;
+  const displayName = nodeDisplayName(resolved.id, profile);
+  const runtime = runtimeForExecution(profile, `start grok copresence node ${JSON.stringify(nodeId)}`);
+
+  const diag = diagnoseGrokCopresence({
+    runtime,
+    displayName,
+    grokCopresence: profile.grokCopresence,
+    grokAttachSocket: profile.grokAttachSocket,
+  });
+  if (!diag.ok) {
+    for (const line of diag.lines) console.error(line);
+    process.exit(1);
+  }
+  const attachSocket: string = profile.grokAttachSocket;
+
+  // One preflight naming every gap, not one exit per gap — same contract the
+  // codex lane uses, same table, so a dep added there is never missing here.
+  // No --grok-bin knob: `grok` on PATH is what every other grok codepath in
+  // this file assumes, and a flag nobody can discover is not an escape hatch.
+  const missing = missingCopresenceDeps(commandExists, process.platform, "grok");
+  if (missing.length > 0) {
+    console.error(describeMissingDeps(missing, displayName));
+    process.exit(1);
+  }
+
+  const hub = opts.hub || profile.hub || getHub();
+  await ensureLocalHubRunning(hub);
+
+  const { node: nodeSession, tui: tuiSession } = grokCopresenceSessions(displayName);
+  for (const stale of [nodeSession, tuiSession]) {
+    if (tmuxSessionRunning(stale)) {
+      console.error(`[anet] ❌ tmux session ${stale} already exists — stop the node first: anet node stop ${shellQuote(displayName)}`);
+      process.exit(1);
+    }
+  }
+  const selfCmd = `${shellQuote(process.execPath)} ${shellQuote(process.argv[1] ?? "")}`;
+
+  // ── piece ① the node (owns the grok leader and the attach socket) ────────
+  // GROK_COPRESENCE_CHILD_ENV keeps this inner start from re-entering the
+  // orchestration; without it the node forks another pair of sessions forever.
+  // 🔴 Tee the node's own output to a file. A leader that dies during startup
+  //    takes its tmux session with it, so "attach to tmux=<session>" is advice
+  //    pointing at something that no longer exists — observed exactly that:
+  //    session gone, log empty, and the only thing printed was our own timeout.
+  //    ensureLocalHubRunning above already learned this; the same reason applies.
+  const nodeLog = join(tmpdir(), `anet-grok-copresence-${resolved.id}.log`);
+  try {
+    execFileSync("tmux", [
+      "new-session", "-d", "-s", nodeSession, "-c", process.cwd(),
+      "-e", `${GROK_COPRESENCE_CHILD_ENV}=1`,
+      "bash", "-lc", `exec ${selfCmd} node start ${shellQuote(displayName)} 2>&1 | tee ${shellQuote(nodeLog)}`,
+    ], { stdio: "pipe" });
+  } catch (e: any) {
+    console.error(`[anet] ❌ tmux new-session ${nodeSession} failed: ${e?.message || e}`);
+    process.exit(1);
+  }
+  console.log(`[anet] ① node tmux=${nodeSession} starting (leader + bridge)…`);
+
+  // 🔴 Readiness is the attach socket being a SOCKET, never "tmux did not
+  //    throw". A leader that dies during startup leaves either nothing or a
+  //    stale regular file from an aborted run, and both read as ready to
+  //    anything that only checks existence.
+  const deadline = Date.now() + 45_000;
+  let state = grokAttachSocketState(null);
+  while (Date.now() < deadline) {
+    let entry: { isSocket(): boolean } | null = null;
+    try { entry = lstatSync(attachSocket); } catch { entry = null; }
+    state = grokAttachSocketState(entry);
+    if (state === "ready") break;
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  if (state !== "ready") {
+    console.error(`[anet] ❌ the grok leader did not open ${attachSocket} within 45s (state=${state}).`);
+    // Give the child a moment to flush. Reading the log at the instant of the
+    // timeout caught the banner but not the error text: node had printed the
+    // file/line echo and died before the message reached the file, so the tail
+    // ended mid-stack trace and the reason was still invisible.
+    for (let i = 0; i < 10 && tmuxSessionRunning(nodeSession); i++) {
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    await new Promise((r) => setTimeout(r, 500));
+    // Print the tail here rather than naming a session that may already be gone.
+    try {
+      const tail = readFileSync(nodeLog, "utf8").trim().split("\n").slice(-25);
+      if (tail.length) {
+        console.error(`[anet]    What it printed (${nodeLog}):`);
+        for (const line of tail) console.error(`[anet]      ${line}`);
+      }
+    } catch { console.error(`[anet]    No output was captured at ${nodeLog}.`); }
+    if (tmuxSessionRunning(nodeSession)) {
+      console.error(`[anet]    Still running — look live: tmux attach -t ${shellQuote(`=${nodeSession}`)}`);
+    }
+    console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
+    process.exit(1);
+  }
+  console.log(`[anet] ① node READY — attach socket live at ${attachSocket}`);
+
+  // ── piece ② the attachable TUI ───────────────────────────────────────────
+  try {
+    execFileSync("tmux", [
+      "new-session", "-d", "-s", tuiSession, "-c", process.cwd(),
+      "bash", "-lc", `exec ${selfCmd} grok attach ${shellQuote(displayName)}`,
+    ], { stdio: "pipe" });
+  } catch (e: any) {
+    console.error(`[anet] ❌ tmux new-session ${tuiSession} failed: ${e?.message || e}`);
+    console.error(`[anet]    The node itself is up; attach by hand: anet grok attach ${shellQuote(displayName)}`);
+    process.exit(1);
+  }
+  // 🔴 Do not print "ready" on the strength of new-session not throwing — the
+  //    codex lane shipped exactly that bug and said ready for a TUI that had
+  //    already exited. Ask tmux whether the pane is still there.
+  await new Promise((r) => setTimeout(r, 800));
+  if (!tmuxSessionRunning(tuiSession)) {
+    console.error(`[anet] ❌ the TUI session exited immediately — attach failed.`);
+    console.error(`[anet]    Reproduce it in the foreground: anet grok attach ${shellQuote(displayName)}`);
+    process.exit(1);
+  }
+  console.log(`[anet] ② TUI tmux=${tuiSession} ready to attach`);
+  console.log(``);
+  console.log(`[anet] ✅ 共存节点 ${displayName} 就绪`);
+  console.log(`[anet]    attach:  tmux attach -t ${shellQuote(`=${tuiSession}`)}    (Ctrl-] detaches the grok TUI)`);
+  console.log(`[anet]    stop:    anet node stop ${shellQuote(displayName)}`);
+  console.log(`[anet]    runtime: grok-build-cli @ ${attachSocket}`);
 }
 
 async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOptions): Promise<void> {
@@ -3159,7 +3325,14 @@ function printGrokCopresenceWarning(
   for (const line of disclosure.lines) console.warn(`[anet]   ${line}`);
   console.warn(`[anet]   MCP is the single runtime-owned CommHub server.`);
   console.warn(`[anet]   Use only with trusted tasks and a trusted network. Do not use in production.`);
-  if (nodeRef) console.warn(`[anet]   Attach from another terminal: anet grok attach ${nodeRef}`);
+  if (nodeRef) {
+    // 🔴 This line is the one an operator actually reads. When `--copresence`
+    //    learned to open the TUI itself, leaving this saying "another terminal"
+    //    would have kept the two-step flow alive in the only place it is
+    //    documented — the code would be one command and the product two.
+    console.warn(`[anet]   Shared TUI in one command:  anet node start ${nodeRef} --copresence`);
+    console.warn(`[anet]   Or attach an existing node: anet grok attach ${nodeRef}`);
+  }
 }
 
 function checkRuntimeDependency(runtime: RuntimeName, phase: "create" | "start") {
@@ -3416,7 +3589,7 @@ Usage: anet node start <name> [options]
 Options:
   --tmux                       Start in a tmux session
   --new-session               Start with a fresh model session
-  --copresence                Start a supported shared human + agent TUI
+  --copresence                Start a shared human + agent TUI\n                              (codex-app-server | opencode-cli | grok-build-cli)
                               (codex: recorded on the node, so the next start
                               needs no flag — plain 'anet node start <name>')
   --accept-dev-channels       Headless / CI / no-TTY mode: start in detached
@@ -4947,8 +5120,8 @@ async function createCommand(idOverride?: string) {
     printOpencodeCreationSecurityDisclosure(profile);
   } else if (profile.grokCopresence === true) {
     printGrokCopresenceWarning(id, profile.tools, "configured");
-    console.log(`[anet]   Start the node first, then attach from a second terminal.`);
-    console.log(`\nStart: anet node start ${id}`);
+    console.log(`[anet]   One command brings up the node and its shared TUI together.`);
+    console.log(`\nStart: anet node start ${id} --copresence`);
     closeRL();
     if (process.env.ANET_INTERNAL_KEEP_PROCESS !== "1") process.exit(0);
     return;
@@ -6171,14 +6344,32 @@ async function startCommand() {
     try { startGeneration = await admitNodeStart(resolvedForCopresence.id, startInvokedAt); }
     catch (e: any) { console.error(`[anet] ${e?.message || e}`); process.exit(1); }
   }
+  // 🔴 The entry gate used to ask ONLY codexCopresenceRequested, which answers
+  //    false for every grok node — so `anet node start <grok> --copresence`
+  //    fell through to the codex orchestration and died on "requires
+  //    runtime=codex-app-server". Each lane answers for itself.
   if (process.env.ANET_COPRESENCE_BRIDGE !== "1" && resolvedForCopresence
-    && codexCopresenceRequested(copresenceFlagPassed, resolvedForCopresence.profile as any)) {
+    && (codexCopresenceRequested(copresenceFlagPassed, resolvedForCopresence.profile as any)
+      || grokCopresenceRequested(copresenceFlagPassed, resolvedForCopresence.profile as any))) {
     const copresenceRuntime = runtimeForExecution(
       resolvedForCopresence.profile,
       `start copresence node ${JSON.stringify(id)}`,
     );
     if (copresenceRuntime === "opencode-cli") {
       await startOpencodeCopresenceOrchestration(id, opts.hub);
+      return;
+    }
+    if (copresenceRuntime === "grok-build-cli") {
+      // Record the opt-in BEFORE orchestrating, so a node that comes up shared
+      // is never left with a profile claiming the operator never asked.
+      if (shouldPersistGrokCopresence(copresenceFlagPassed, resolvedForCopresence.profile as any)) {
+        saveProfile(resolvedForCopresence.id, {
+          ...(resolvedForCopresence.profile as any),
+          grokCopresenceAuto: true,
+        });
+        console.log(`[anet] remembered co-presence for this node — next time \`anet node start ${shellQuote(nodeDisplayName(resolvedForCopresence.id, resolvedForCopresence.profile))}\` is enough.`);
+      }
+      await startGrokCopresenceOrchestration(id, { hub: opts.hub });
       return;
     }
     const displayNameForCopresence = nodeDisplayName(resolvedForCopresence.id, resolvedForCopresence.profile);
