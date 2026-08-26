@@ -29,7 +29,12 @@ grep -q 'atomicWritePrivateFile(dotenvPath, body)' agent-network/bin/cli.ts
 grep -q 'atomicWritePrivateFile(anetEnvPath, envContent)' agent-network/bin/cli.ts
 grep -q 'repairPrivateFilePermissions(p);' agent-network/bin/cli.ts
 grep -q 'repairPrivateFilePermissions(path);' agent-network/bin/cli.ts
-test "$(grep -c 'atomicWriteJson(configFilePath, cfg)' agent-node/src/cli.ts)" -eq 4
+test "$(grep -c 'atomicWriteJson(configFilePath, cfg)' agent-node/src/cli.ts)" -eq 5
+# Deferred Codex co-presence adds one token-preserving config write before the
+# exact thread is resumable. It must use the same private atomic choke point;
+# counting five alone would not prove that the new write is the pending record.
+grep -A8 'function writebackCodexPendingThread' agent-node/src/cli.ts \
+  | grep -q 'atomicWriteJson(configFilePath, cfg)'
 test "$(grep -c 'repairPrivateConfigPermissions' agent-node/src/cli.ts)" -eq 5
 grep -A2 'function loadEnvFile(path: string)' agent-node/src/cli.ts | grep -q 'repairPrivateConfigPermissions(path)'
 

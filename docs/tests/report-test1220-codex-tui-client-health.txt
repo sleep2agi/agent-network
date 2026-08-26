@@ -1,6 +1,6 @@
 # test1220 Codex TUI second-client health gate
 
-Base: 4148323d62ccd4743b2e79200bd3a52bbcb890e4
+Base: c335e9ddc835e66265a901c3b448ba99f91884b0
 Evidence date: 2026-08-27
 
 ## Claim boundary
@@ -59,6 +59,11 @@ The full 65-second A9 run plus A12 restart-only verification proved:
 - The old `8bfdfc32` QA Windows fake-contract run was RED before these final
   socket fixes. The corrected fake-Codex/source contract passes with exact
   PID+birth attribution; native Windows execution remains explicitly NOT-RUN.
+- The same old QA run exposed a stale private-write inventory: deferred Codex
+  pending state added a fifth `atomicWriteJson(configFilePath, cfg)` choke-point
+  call while test631 still required exactly four. The inventory now requires
+  five and separately pins the pending writer to that private atomic helper;
+  exact Docker test631 passes 93/0 with both permission mutations red.
 
 - A1: locked dependencies absent; no product roles. A stale cleanup port caused
   a harness false positive.
