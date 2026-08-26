@@ -1,0 +1,84 @@
+name: Windows real Codex protected gate
+
+# NOT-IN-CI: this is a credentialed, human-approved qualification run. A Draft
+# PR label can schedule it, but the protected environment approval and private
+# Windows runner are mandatory; it must never become an ordinary automatic CI
+# check.
+on:
+  pull_request:
+    types: [labeled, synchronize]
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full commit SHA to qualify (must equal the checkout HEAD)
+        required: true
+      draft_pr_number:
+        description: Draft PR whose head SHA is being qualified
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  protected-environment-preflight:
+    name: windows-real-codex-environment-preflight
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.draft == true &&
+       contains(github.event.pull_request.labels.*.name, 'windows-real-codex-gate'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a pre-existing protected environment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          response="$(gh api "repos/${GITHUB_REPOSITORY}/environments/windows-codex-real-gate")"
+          rules="$(jq '.protection_rules | length' <<<"$response")"
+          test "$rules" -gt 0 || {
+            echo '::error::windows-codex-real-gate is absent or has no protection rule; credentialed Windows execution is blocked.'
+            exit 1
+          }
+  windows-real-codex-0148:
+    name: windows-real-codex-0148-NOT-IN-CI
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.draft == true &&
+       contains(github.event.pull_request.labels.*.name, 'windows-real-codex-gate'))
+    needs: protected-environment-preflight
+    runs-on: windows-latest
+    environment: windows-codex-real-gate
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || inputs.source_sha }}
+          persist-credentials: false
+      - name: Fail closed unless this is the requested draft PR head
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || inputs.source_sha }}
+          DRAFT_PR: ${{ github.event.pull_request.number || inputs.draft_pr_number }}
+        run: ./tests/test1212-windows-real-codex-gate/verify-draft-pr.ps1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.2.22
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+      - name: Run isolated real Codex / ConPTY journey
+        shell: pwsh
+        env:
+          ANET_CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+          ANET_EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || inputs.source_sha }}
+        run: ./tests/test1212-windows-real-codex-gate/run.ps1
+      - name: Upload scrubbed evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-real-codex-0148-${{ github.event.pull_request.head.sha || inputs.source_sha }}
+          path: ${{ runner.temp }}/test1212-artifacts/
+          if-no-files-found: error
+          retention-days: 14
