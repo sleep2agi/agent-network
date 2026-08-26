@@ -3277,6 +3277,7 @@ Grok co-presence (preview only):
   anet node create <name> --runtime grok-build-cli --tools WebSearch
                                 Opt into general web search (supports basic X URL search)
   anet grok attach <name>       Attach this terminal (Ctrl-] detaches)
+  anet grok model <name> <id>   Switch the model; works while attached
   --grok-headless               Use legacy per-turn grok-build-cli instead
   --owner-schedule-control      Opt this node into owner-gated managed-cron edits
   WARNING: network tasks drive the same TUI; use trusted tasks/networks only
@@ -5188,9 +5189,97 @@ function ensureMcpJson(profile: Profile) {
 
 // ── launch helper (shared by start + resume) ──
 
+/**
+ * `anet grok model <node> <model>` — switch a co-presence node's model
+ * without a keystroke crossing the composer gate (issue #879).
+ *
+ * The human in the TUI cannot do this: `/model` is refused by the gate, and
+ * Grok's `Ctrl+M` picker shares a byte with Enter. This opens a *control*
+ * connection to the node's attach socket instead — one that may ask for a
+ * model switch and may not type — so it works while somebody is attached.
+ */
+async function grokModelCommand(ref: string | undefined, model: string | undefined) {
+  if (!ref || ref.startsWith("--") || !model || model.startsWith("--")) {
+    console.error("Usage: anet grok model <node> <model>");
+    process.exit(1);
+  }
+  const resolved = resolveNodeRef(ref);
+  if (!resolved) {
+    console.error(`Node "${ref}" not found.`);
+    process.exit(1);
+  }
+  const { id: nodeId, profile } = resolved;
+  const target = resolveGrokAttachTarget({
+    runtime: normalizeRuntime(profile),
+    grokCopresence: profile.grokCopresence,
+    grokAttachSocket: profile.grokAttachSocket,
+  });
+  if (!target.ok) {
+    console.error(`[anet] Node "${nodeDisplayName(nodeId, profile)}" has no co-presence attach socket.`);
+    process.exit(1);
+  }
+
+  // No TTY is needed or wanted: this connection never carries terminal bytes.
+  const input = new PassThrough();
+  const output = new PassThrough();
+  output.resume();
+  type Verdict = { ok: boolean; text: string };
+  let settle: (verdict: Verdict) => void;
+  const outcome = new Promise<Verdict>((resolveOutcome) => { settle = resolveOutcome; });
+  let settled = false;
+  // First verdict wins: an error frame and a refusal status can both arrive,
+  // and reporting the second one would describe a failure that already had an
+  // answer.
+  const finish = (ok: boolean, text: string) => {
+    if (settled) return;
+    settled = true;
+    settle({ ok, text });
+  };
+
+  let session: Awaited<ReturnType<typeof connectGrokAttach>> | undefined;
+  try {
+    session = await connectGrokAttach({
+      socketPath: target.socketPath,
+      input,
+      output,
+      handshakeTimeoutMs: 5_000,
+      onStatus: (frame) => {
+        const status = frame.status as { modelSwitch?: { ok?: boolean; model?: string; code?: string; message?: string } } | null;
+        const result = status?.modelSwitch;
+        // Status frames arrive for every state change; only the ones carrying
+        // a modelSwitch verdict answer this command.
+        if (!result) return;
+        if (result.ok) finish(true, `[anet] ${nodeDisplayName(nodeId, profile)} is switching to ${result.model}; the TUI restarts on the same session.`);
+        else finish(false, `[anet] refused (${result.code}): ${result.message}`);
+      },
+      onError: (error) => finish(false, `[anet] ${error.message}`),
+    });
+    session.setModel(model);
+    const verdict = await Promise.race([
+      outcome,
+      new Promise<{ ok: boolean; text: string }>((resolveTimeout) => setTimeout(
+        () => resolveTimeout({ ok: false, text: "[anet] the node did not report a result within 20s" }),
+        20_000,
+      )),
+    ]);
+    console[verdict.ok ? "log" : "error"](verdict.text);
+    session.detach();
+    await session.closed.catch(() => {});
+    process.exit(verdict.ok ? 0 : 1);
+  } catch (error) {
+    console.error(`[anet] grok model: ${error instanceof Error ? error.message : String(error)}`);
+    try { session?.detach(); } catch {}
+    process.exit(1);
+  }
+}
+
 async function grokCommand() {
+  if (args[1] === "model") {
+    await grokModelCommand(args[2], args[3]);
+    return;
+  }
   if (args[1] !== "attach") {
-    console.error("Usage: anet grok attach <node>");
+    console.error("Usage: anet grok attach <node> | anet grok model <node> <model>");
     process.exit(1);
   }
 

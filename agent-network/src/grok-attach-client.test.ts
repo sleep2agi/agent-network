@@ -162,6 +162,41 @@ test("validateGrokAttachSocket rejects symlinks, non-sockets, and foreign owners
   })).resolves.toBeUndefined();
 });
 
+test("setModel sends exactly one set-model frame and carries the id verbatim (#879)", async () => {
+  const h = harness();
+  const session = await connectGrokAttach(h.options);
+
+  session.setModel("grok-4.6");
+  const sent = h.socket.clientFrames().filter((frame) => frame.type === "set-model");
+  expect(sent).toEqual([{ type: "set-model", model: "grok-4.6" }]);
+});
+
+test("🔴 setModel is a no-op before hello and after close — never a silent half-send", async () => {
+  // Before the handshake the server has not said whether this connection got
+  // the keyboard or a control seat, and after close there is nothing to send
+  // on. Both must be quiet rather than writing a frame nobody will answer.
+  const h = harness();
+  const session = await connectGrokAttach(h.options);
+
+  session.detach();
+  session.setModel("grok-4.6");
+  expect(h.socket.clientFrames().filter((frame) => frame.type === "set-model")).toEqual([]);
+});
+
+test("a control connection learns the outcome through status, not from setModel", async () => {
+  // setModel returns void on purpose: the node may accept, refuse, or fail
+  // while re-spawning, and only a status frame carries that verdict.
+  const h = harness();
+  const session = await connectGrokAttach(h.options);
+  session.setModel("grok-4.6");
+
+  h.socket.sendFrame({ type: "status", status: { modelSwitch: { ok: false, code: "busy", message: "phase network_turn" } } });
+  expect(h.statuses.at(-1)).toEqual({
+    type: "status",
+    status: { modelSwitch: { ok: false, code: "busy", message: "phase network_turn" } },
+  });
+});
+
 test("connectGrokAttach bridges base64 terminal I/O, status, resize, and detach", async () => {
   const h = harness();
   const session = await connectGrokAttach(h.options);

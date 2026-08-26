@@ -69,7 +69,17 @@ export interface GrokAttachResizeFrame {
   rows: number;
 }
 
-export type GrokAttachClientFrame = GrokAttachInputFrame | GrokAttachResizeFrame | GrokAttachDetachFrame;
+/** Asks the node to switch models (issue #879); allowed on control connections. */
+export interface GrokAttachSetModelFrame {
+  type: "set-model";
+  model: string;
+}
+
+export type GrokAttachClientFrame =
+  | GrokAttachInputFrame
+  | GrokAttachResizeFrame
+  | GrokAttachSetModelFrame
+  | GrokAttachDetachFrame;
 
 export interface GrokAttachInputSource {
   on(event: "data", listener: (chunk: unknown) => void): unknown;
@@ -141,6 +151,15 @@ export interface GrokAttachSession {
   readonly closed: Promise<GrokAttachCloseInfo>;
   detach(): void;
   resize(cols?: number, rows?: number): void;
+  /**
+   * Ask the node to switch models (issue #879).
+   *
+   * The outcome does not come back from this call — it arrives as a `status`
+   * frame carrying `modelSwitch`, because the node may accept, refuse
+   * (busy / unchanged / invalid), or fail while re-spawning. Callers read it
+   * through `onStatus`.
+   */
+  setModel(model: string): void;
 }
 
 export class GrokAttachRemoteError extends Error {
@@ -320,6 +339,11 @@ class GrokAttachClient implements GrokAttachSession {
 
   detach(): void {
     this.detachWithReason("local-detach");
+  }
+
+  setModel(model: string): void {
+    if (this.finished || !this.sawHello) return;
+    this.sendFrame({ type: "set-model", model });
   }
 
   resize(cols?: number, rows?: number): void {
