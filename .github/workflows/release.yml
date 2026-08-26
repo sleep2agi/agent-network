@@ -93,6 +93,11 @@ on:
         description: 'Version to gate (e.g. 2.2.22-preview.4 or 2.2.21)'
         required: true
         type: string
+      publish:
+        description: '门全绿后,把 CI 构建的 tarball 发到 npm 的 preview 通道(永不发 latest)'
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: release-gate-${{ github.ref }}
@@ -461,3 +466,93 @@ jobs:
             # Non-blocking: report-only by design (see header). Maintainer decides.
             exit 0
           fi
+
+  # ── publish ────────────────────────────────────────────────────────────────
+  #
+  # 🔴 为什么 needs 里没有 verdict:
+  #   verdict 是 `if: always()` 且失败时也 `exit 0`(report-only by design,见文件头)。
+  #   把 publish 挂在它后面,门红了照样发 —— 那是"打印检查结果"被当成了"拿它当判据"。
+  #   所以这里直接依赖四道门本身,并在 if: 里逐个断言 success。
+  #
+  # 🔴 为什么发的是 CI 打的 tarball,不是在 runner 上重新 build:
+  #   gate-1 装的就是这个 artifact。如果 publish 时重新构建,发出去的字节
+  #   就不是被门验过的那份 —— 门验 A、用户装 B,验证等于没做。
+  #
+  # 🔴 为什么永远不发 latest:
+  #   docs/RELEASE-SOP.md §Step 7 的两阶段规则:preview 发布后至少 30 分钟真实环境
+  #   烟测 + owner 显式 ACK,才能升 latest。那道人工闸是故意的,不能被 CI 取消。
+  #   升 latest 走单独的 workflow_dispatch,见 promote-latest.yml。
+  publish:
+    name: publish (preview only)
+    needs: [build-tarball, gate-1-install-smoke, gate-2-pinned-audit, gate-3-release-notes, gate-4-doc-version-claims]
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.publish &&
+      needs.gate-1-install-smoke.result == 'success' &&
+      needs.gate-2-pinned-audit.result == 'success' &&
+      needs.gate-3-release-notes.result == 'success' &&
+      needs.gate-4-doc-version-claims.result == 'success'
+    permissions:
+      contents: read
+      id-token: write          # npm trusted publishing(OIDC)—— 无长期 token
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: gated-tarball
+          path: ./tarball
+
+      - name: 认清要发的到底是哪个字节
+        run: |
+          set -euo pipefail
+          f=$(ls ./tarball/*.tgz)
+          echo "tarball: $f"
+          echo "sha256:  $(sha256sum "$f" | cut -d" " -f1)"
+          # 从 tarball 自己读版本,不信 inputs —— inputs 是人打的,tarball 是门验过的
+          v=$(tar -xzOf "$f" package/package.json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).version))')
+          n=$(tar -xzOf "$f" package/package.json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).name))')
+          echo "package: $n@$v"
+          if [ "$v" != "${{ inputs.version }}" ]; then
+            echo "::error::tarball 里是 $v,而 dispatch 输入的是 ${{ inputs.version }} —— 拒绝发布"
+            exit 1
+          fi
+          echo "TARBALL=$f" >> "$GITHUB_ENV"
+
+      - name: 这个版本是不是已经发过了(重复发布会失败,先说清楚)
+        run: |
+          set -euo pipefail
+          n=$(tar -xzOf "$TARBALL" package/package.json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).name))')
+          if npm view "$n@${{ inputs.version }}" version >/dev/null 2>&1; then
+            echo "::error::$n@${{ inputs.version }} 已存在于 npm —— 先 bump 版本号"
+            exit 1
+          fi
+          echo "npm 上尚无此版本,可发"
+
+      - name: npm publish --tag preview
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::error::缺少 secrets.NPM_TOKEN。"
+            echo "更好的做法是 npm trusted publishing(OIDC):在 npmjs.com 上把这个仓库+workflow"
+            echo "配成该包的 trusted publisher,然后删掉 NPM_TOKEN —— 短时凭据,作用域只在这次运行。"
+            exit 1
+          fi
+          npm publish "$TARBALL" --tag preview --provenance --access public
+
+      - name: 发后核实(看 registry 不看退出码)
+        run: |
+          set -euo pipefail
+          n=$(tar -xzOf "$TARBALL" package/package.json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).name))')
+          sleep 10
+          got=$(npm view "$n" dist-tags.preview)
+          echo "npm preview 现在是: $got"
+          [ "$got" = "${{ inputs.version }}" ] || { echo "::error::preview 仍是 $got,发布没生效"; exit 1; }
+          echo "✅ $n@${{ inputs.version }} 已发布到 preview 通道"
+          echo "下一步(人工):至少 30 分钟真实环境烟测 + owner ACK 后,用 promote-latest 升 latest"

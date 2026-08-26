@@ -1,0 +1,136 @@
+# 把某个已发布的 preview 版本升到 npm 的 latest dist-tag。
+#
+# 为什么单独一个 workflow,而不是 release.yml 里的一步:
+#   docs/RELEASE-SOP.md §Step 7 的两阶段规则 ——
+#     第一阶段:publish --tag preview 后,**至少 30 分钟**真实环境烟测
+#     第二阶段:owner 或 lead **显式 ACK** 后才能升 latest
+#   那道人工闸是故意的。把它并进 release.yml 会让"发出去"和"推给所有人"
+#   变成一个动作,而这两件事的影响面差一个数量级:
+#   preview 是滚动通道(发错了下一个覆盖),latest 是所有 `npm i` / 不带版本
+#   `bunx` 的用户立刻拿到。
+#
+# 🔴 这个 workflow 会拒绝三种情况,每一种都真实发生过:
+#   1. 目标版本在 npm 上不存在 —— 打错版本号
+#   2. 距 preview 发布不足 30 分钟 —— 违反 §Step 7 第一阶段
+#   3. 目标版本比当前 latest 旧 —— 回退式 promote
+#
+#   第 3 条来自 2026-08-27 的一次真实失误:当时窗口已过、owner ACK 也有,
+#   于是把 @sleep2agi/agent-node 的 latest 推到了 2.5.0-preview.34 ——
+#   但那个版本**不含当晚的成果**(它发布于 11 小时前,当晚的 PR 全在其后)。
+#   窗口是"能不能推"的判据,不是"该不该推"的判据。两者被混为一谈。
+#   所以这里额外要求填 must-contain,并在 tarball 里断言它真的存在。
+
+name: promote to latest
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: '包名(不含 @sleep2agi/)'
+        required: true
+        type: choice
+        options:
+          - agent-network
+          - agent-node
+          - commhub-server
+      version:
+        description: '要升为 latest 的版本(必须已发布在 npm 上)'
+        required: true
+        type: string
+      must_contain:
+        description: '该版本必须包含的符号/字符串 —— 防止把 latest 推到一个不含目标改动的旧版本'
+        required: true
+        type: string
+      ack:
+        description: '确认已完成 ≥30 分钟真实环境烟测,且这是 owner/lead 的显式 ACK'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  promote:
+    name: promote ${{ inputs.package }}@${{ inputs.version }} → latest
+    runs-on: ubuntu-latest
+    if: inputs.ack
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: 闸 1 —— 目标版本在 npm 上存在吗
+        run: |
+          set -euo pipefail
+          P="@sleep2agi/${{ inputs.package }}"
+          npm view "$P@${{ inputs.version }}" version >/dev/null 2>&1 \
+            || { echo "::error::$P@${{ inputs.version }} 在 npm 上不存在"; exit 1; }
+          echo "存在 ✅"
+
+      - name: 闸 2 —— 距 preview 发布是否已满 30 分钟(SOP §Step 7 第一阶段)
+        run: |
+          set -euo pipefail
+          P="@sleep2agi/${{ inputs.package }}"
+          pub=$(npm view "$P" time --json | node -e '
+            let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+              const t=JSON.parse(s)["${{ inputs.version }}"];
+              if(!t){console.error("拿不到发布时间");process.exit(1)}
+              console.log(t)})')
+          echo "发布于 $pub"
+          mins=$(node -e "console.log(Math.floor((Date.now()-Date.parse('$pub'))/60000))")
+          echo "距今 $mins 分钟"
+          [ "$mins" -ge 30 ] || { echo "::error::不足 30 分钟(还差 $((30-mins)) 分钟)。SOP §Step 7 要求先做真实环境烟测。"; exit 1; }
+
+      - name: 闸 3 —— 不许回退式 promote
+        run: |
+          set -euo pipefail
+          P="@sleep2agi/${{ inputs.package }}"
+          cur=$(npm view "$P" dist-tags.latest)
+          echo "当前 latest: $cur   目标: ${{ inputs.version }}"
+          node -e '
+            const semverish=v=>v.split(/[.-]/).map(x=>/^\d+$/.test(x)?+x:x);
+            const a=semverish("'"$cur"'"), b=semverish("${{ inputs.version }}");
+            for(let i=0;i<Math.max(a.length,b.length);i++){
+              const x=a[i]??0,y=b[i]??0;
+              if(x===y)continue;
+              if(typeof x==="number"&&typeof y==="number"){process.exit(y>x?0:1)}
+              process.exit(String(y)>String(x)?0:1);
+            }
+            process.exit(1);   // 完全相等 = 无意义的 promote
+          ' || { echo "::error::目标版本不比当前 latest 新 —— 拒绝回退式 promote"; exit 1; }
+
+      - name: 🔴 闸 4 —— 目标版本真的含要发的改动吗
+        run: |
+          set -euo pipefail
+          P="@sleep2agi/${{ inputs.package }}"
+          mkdir -p /tmp/verify && cd /tmp/verify
+          npm pack "$P@${{ inputs.version }}" >/dev/null
+          tar -xzf ./*.tgz
+          if grep -rq -- '${{ inputs.must_contain }}' package/; then
+            echo "✅ 在该版本的字节里找到了 '${{ inputs.must_contain }}'"
+          else
+            echo "::error::'${{ inputs.must_contain }}' 不在 $P@${{ inputs.version }} 的字节里。"
+            echo "这正是 2026-08-27 那次失误的形状:窗口过了、ACK 有了,但版本里没有要发的东西。"
+            exit 1
+          fi
+
+      - name: dist-tag add … latest
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          [ -n "${NODE_AUTH_TOKEN:-}" ] || { echo "::error::缺少 secrets.NPM_TOKEN(建议改用 npm trusted publishing/OIDC)"; exit 1; }
+          npm dist-tag add "@sleep2agi/${{ inputs.package }}@${{ inputs.version }}" latest
+
+      - name: 核实(看 registry,不看退出码)
+        run: |
+          set -euo pipefail
+          sleep 12
+          got=$(npm view "@sleep2agi/${{ inputs.package }}" dist-tags.latest)
+          echo "latest 现在是: $got"
+          [ "$got" = "${{ inputs.version }}" ] || { echo "::error::latest 仍是 $got —— 没生效"; exit 1; }
+          echo "✅ 已升为 latest"
+          echo "::warning::发版后必做:按 docs/RELEASE-SOP.md 那张 31 项表核信道断言 —— latest 一动,那些'latest X 会怎样'的句子当场变假"
