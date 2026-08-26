@@ -4,10 +4,10 @@ Status: PASS (Docker contract); native Windows job is the Draft PR gate
 
 Source boundary:
 
-- Base: `aca3a9263ab29b9aa02760f8d0ac95fdbb298836`
-- Implementation commit under test: `16b2d3e2252074b65ba6f7f818d6389d55a70c93`
+- Base: `86f981661e3287dea0bbce51f40e824945882d81`
+- Rebased implementation commit under test: `4e7292f020fb7cc00a47c51090465bc57d2cfb4f`
 - Image base: `oven/bun:1.3.14`
-- Command: `docker build --build-arg SOURCE_COMMIT=16b2d3e...` followed
+- Command: `docker build --build-arg SOURCE_COMMIT=4e7292f0...` followed
   by `docker run --rm --network none`.
 
 Scope:
@@ -32,6 +32,14 @@ Exact Docker result:
 - lazy-bridge mutation: red;
 - launcher-without-ready-wait mutation: red;
 - final `RESULT: PASS`.
+
+Rebase compatibility gates:
+
+- `test584-dashboard-codex-delivery`: PASS (92 behavior tests, 15 witnessed-red mutations);
+- `test585-codex-runtime-singleflight`: PASS (42 behavior tests, all 5 mutations red, build PASS);
+- the stale `bypass_cli_wiring` mutation was moved from the pre-refactor inline
+  `getOrOpen` call to the production `ensureCodexAppServerSession()` call site,
+  so it again weakens the current code instead of producing a false green.
 
 The Windows-only assertions are not claimed by Docker. The existing
 `Windows Codex co-presence native smoke` workflow runs them on
