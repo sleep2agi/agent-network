@@ -12,6 +12,7 @@ COPY server ./server
 COPY agent-node ./agent-node
 COPY agent-network ./agent-network
 COPY tests/test1197-os-user-status/run.sh ./tests/test1197-os-user-status/run.sh
+COPY tests/lib/safe-rm.sh ./tests/lib/safe-rm.sh
 COPY tests/test601-hub-scheduled-tasks ./tests/test601-hub-scheduled-tasks
 
 CMD ["bash", "tests/test1197-os-user-status/run.sh"]
