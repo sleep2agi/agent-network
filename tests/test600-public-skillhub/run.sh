@@ -20,6 +20,37 @@ expect_red() {
 node scripts/build-public-skillhub.mjs --check
 pass "canonical catalog is deterministic and current"
 
+node <<'NODE'
+const fs = require('fs');
+const crypto = require('crypto');
+const path = require('path');
+
+const catalogPath = 'docs-site/docs/public/skillhub/catalog.json';
+const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
+if (catalog.schema_version !== 1) throw new Error('catalog schema_version must be 1');
+if (!Array.isArray(catalog.skills) || catalog.skills.length < 6) throw new Error('catalog must expose at least 6 skills');
+
+const skill = catalog.skills.find((entry) => entry.slug === 'content-search-before-pr') || catalog.skills[0];
+const required = ['schema_version', 'slug', 'name', 'description', 'version', 'license', 'publisher', 'tags', 'published_at', 'content_sha256', 'content_url'];
+for (const field of required) {
+  if (!(field in skill)) throw new Error(`catalog entry missing ${field}`);
+}
+if (skill.schema_version !== 1) throw new Error('skill schema_version must be 1');
+if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(skill.slug)) throw new Error('skill slug is not a lowercase slug');
+if (!/^[0-9A-Za-z]+(?:[._-][0-9A-Za-z]+)*$/.test(skill.version)) throw new Error('skill version shape is invalid');
+if (!/^[0-9a-f]{64}$/.test(skill.content_sha256)) throw new Error('content_sha256 must be a lowercase SHA-256 hex digest');
+if (skill.content_url !== `/skillhub/skills/${skill.slug}/${skill.version}/SKILL.md`) throw new Error('content_url does not match slug/version');
+if (!Array.isArray(skill.tags)) throw new Error('tags must be an array');
+if (!skill.publisher || typeof skill.publisher.name !== 'string') throw new Error('publisher.name is required');
+
+const contentPath = path.join('docs-site/docs/public', skill.content_url);
+const content = fs.readFileSync(contentPath);
+const actual = crypto.createHash('sha256').update(content).digest('hex');
+if (actual !== skill.content_sha256) throw new Error('downloaded skill content hash does not match catalog');
+if (!content.toString('utf8').startsWith('# ')) throw new Error('skill content should be a SKILL.md document');
+NODE
+pass "minimal consumer can read catalog, resolve a skill, and verify its content hash"
+
 case_root=/tmp/test600-case
 mkdir -p "$case_root/scripts" "$case_root/docs-site/scripts" "$case_root/docs-site/docs/public"
 cp scripts/build-public-skillhub.mjs "$case_root/scripts/"
