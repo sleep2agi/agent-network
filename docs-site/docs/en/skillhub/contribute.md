@@ -28,7 +28,20 @@ Private publication does not mean public publication.
    └── SKILL.md
    ```
 
-5. Run `node scripts/build-public-skillhub.mjs`, commit the source files and updated `catalog.json`, and open a pull request.
+5. From `docs-site/`, validate and regenerate the catalog:
+
+   ```bash
+   npm run skillhub:build
+   npm run skillhub:check
+   ```
+
+   Commit the source files and updated `docs/public/skillhub/catalog.json`, then
+   open a pull request.
+
+The PR should name the added or updated `slug@version`, license, public source,
+and local `skillhub:check` result. Public maintainers review reusability,
+license, privacy, and safety with `public-skill-review-checklist` from the
+public catalog.
 
 Updates use a new version instead of replacing already published content.
 

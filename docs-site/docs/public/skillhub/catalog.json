@@ -4,6 +4,46 @@
   "skills": [
     {
       "schema_version": 1,
+      "slug": "content-search-before-pr",
+      "name": "Content search before PR",
+      "description": "Check for overlapping work by changed identifiers instead of shared author identity.",
+      "version": "1.0.0",
+      "license": "Apache-2.0",
+      "publisher": {
+        "name": "Agent Network maintainers",
+        "url": "https://github.com/sleep2agi/agent-network"
+      },
+      "tags": [
+        "github",
+        "review",
+        "coordination"
+      ],
+      "published_at": "2026-08-26",
+      "content_sha256": "240f8f75d56f88b2595abd6351f5f774f6886993cc98c4139be2946ccd617593",
+      "content_url": "/skillhub/skills/content-search-before-pr/1.0.0/SKILL.md"
+    },
+    {
+      "schema_version": 1,
+      "slug": "invariant-denominator-check",
+      "name": "Invariant denominator check",
+      "description": "Verify that a correct count is measuring the intended object, not a broader or narrower set.",
+      "version": "1.0.0",
+      "license": "Apache-2.0",
+      "publisher": {
+        "name": "Agent Network maintainers",
+        "url": "https://github.com/sleep2agi/agent-network"
+      },
+      "tags": [
+        "analysis",
+        "testing",
+        "review"
+      ],
+      "published_at": "2026-08-26",
+      "content_sha256": "bcab7db153908a0372af0ca4f2942893b6f76d57edc1bb5ed791e0d8ab74d9a5",
+      "content_url": "/skillhub/skills/invariant-denominator-check/1.0.0/SKILL.md"
+    },
+    {
+      "schema_version": 1,
       "slug": "public-skill-review-checklist",
       "name": "Public skill review checklist",
       "description": "Safe promotion checklist from private SkillHub to the public catalog.",
@@ -41,6 +81,46 @@
       "published_at": "2026-08-08",
       "content_sha256": "d452b0bd216f97f3b1c36c1c1c71f0c03d7b4516dcba591663143b3ab023e639",
       "content_url": "/skillhub/skills/skill-writing-guide/1.0.0/SKILL.md"
+    },
+    {
+      "schema_version": 1,
+      "slug": "stop-chain-discipline",
+      "name": "Stop-chain discipline",
+      "description": "Stop acknowledgement loops when a message contains no new reading, action, or question.",
+      "version": "1.0.0",
+      "license": "Apache-2.0",
+      "publisher": {
+        "name": "Agent Network maintainers",
+        "url": "https://github.com/sleep2agi/agent-network"
+      },
+      "tags": [
+        "communication",
+        "coordination",
+        "safety"
+      ],
+      "published_at": "2026-08-26",
+      "content_sha256": "3068ad5ba9d00246e2283b08221f6eec98a24f98132a275012f787706b365562",
+      "content_url": "/skillhub/skills/stop-chain-discipline/1.0.0/SKILL.md"
+    },
+    {
+      "schema_version": 1,
+      "slug": "witnessed-red-regression-gate",
+      "name": "Witnessed red regression gate",
+      "description": "Prove a test or guard fails for the intended reason before accepting the green result.",
+      "version": "1.0.0",
+      "license": "Apache-2.0",
+      "publisher": {
+        "name": "Agent Network maintainers",
+        "url": "https://github.com/sleep2agi/agent-network"
+      },
+      "tags": [
+        "testing",
+        "regression",
+        "review"
+      ],
+      "published_at": "2026-08-26",
+      "content_sha256": "25af0f736a9a6caebb00e84ead97b0f32d2317cc8cd48949aef5564f78e206f4",
+      "content_url": "/skillhub/skills/witnessed-red-regression-gate/1.0.0/SKILL.md"
     }
   ]
 }

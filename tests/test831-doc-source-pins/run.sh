@@ -12,7 +12,11 @@ set -euo pipefail
 #    （同一个 job 名、同样没有断言输出），最容易被当成"哪里真的坏了"去查。
 first_md_under() {
   local _list
-  _list=$(find "$1" -name '*.md' | sort)
+  _list=$(find "$1" \
+    -path '*/node_modules/*' -prune -o \
+    -path '*/.vitepress/cache/*' -prune -o \
+    -path '*/.vitepress/dist/*' -prune -o \
+    -name '*.md' -print | sort)
   [ -n "$_list" ] || { echo "FAIL: $1 下一个 .md 都没有 —— 夹具取集塌了" >&2; exit 1; }
   printf '%s' "${_list%%$'\n'*}"
 }
@@ -121,12 +125,24 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 #     docs/tests/report-test1178-codex-upgrade-recovery.txt
 # 它没有新增源码行号 pin，所以仍然只有 files 增加，uniq=11、occ=28 不变。
 #
-# 抬的是**分母**(111 > 110),覆盖面变大不是变小。反过来那种「把数改小让门变绿」
+# 2026-08-26:111 → 119。公共 SkillHub 新增 4 个 reviewed seed skills,
+# 每个版本包含一个 SKILL.md 与一个 metadata.json:
+#     docs-site/docs/public/skillhub/skills/content-search-before-pr/1.0.0/SKILL.md
+#     docs-site/docs/public/skillhub/skills/content-search-before-pr/1.0.0/metadata.json
+#     docs-site/docs/public/skillhub/skills/invariant-denominator-check/1.0.0/SKILL.md
+#     docs-site/docs/public/skillhub/skills/invariant-denominator-check/1.0.0/metadata.json
+#     docs-site/docs/public/skillhub/skills/stop-chain-discipline/1.0.0/SKILL.md
+#     docs-site/docs/public/skillhub/skills/stop-chain-discipline/1.0.0/metadata.json
+#     docs-site/docs/public/skillhub/skills/witnessed-red-regression-gate/1.0.0/SKILL.md
+#     docs-site/docs/public/skillhub/skills/witnessed-red-regression-gate/1.0.0/metadata.json
+# 这些是 public catalog 的源文件,不是 .vitepress/dist 构建产物;所以分母应抬升。
+#
+# 抬的是**分母**(119 > 111),覆盖面变大不是变小。反过来那种「把数改小让门变绿」
 # 的动作要当红线看:分母变小意味着有文件被移出取集,而假绿和真绿的输出逐字相同。
-[[ "$files" -eq 111 ]] || fail "预期扫 111 个文档文件(= git ls-files 的结果),实际 $files"
+[[ "$files" -eq 119 ]] || fail "预期扫 119 个文档文件(= git ls-files 的结果),实际 $files"
 [[ "$uniq"  -eq 11  ]] || fail "预期 11 个唯一 pin,实际 $uniq"
 [[ "$occ"   -eq 28 ]] || fail "预期 28 处原始出现,实际 $occ"
-echo "  OK  walk 路径与 git 路径给出同一份清单(111 文件 / 11 唯一 pin / 28 处)"
+echo "  OK  walk 路径与 git 路径给出同一份清单(119 文件 / 11 唯一 pin / 28 处)"
 
 # ---------------------------------------------------------------------------
 # L1 — 干净树上必须绿

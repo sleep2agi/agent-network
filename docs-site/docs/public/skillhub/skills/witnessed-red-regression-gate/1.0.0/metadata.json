@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "slug": "witnessed-red-regression-gate",
+  "name": "Witnessed red regression gate",
+  "description": "Prove a test or guard fails for the intended reason before accepting the green result.",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "publisher": {
+    "name": "Agent Network maintainers",
+    "url": "https://github.com/sleep2agi/agent-network"
+  },
+  "tags": [
+    "testing",
+    "regression",
+    "review"
+  ],
+  "published_at": "2026-08-26"
+}

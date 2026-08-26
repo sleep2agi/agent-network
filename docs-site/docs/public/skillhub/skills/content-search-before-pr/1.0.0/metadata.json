@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "slug": "content-search-before-pr",
+  "name": "Content search before PR",
+  "description": "Check for overlapping work by changed identifiers instead of shared author identity.",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "publisher": {
+    "name": "Agent Network maintainers",
+    "url": "https://github.com/sleep2agi/agent-network"
+  },
+  "tags": [
+    "github",
+    "review",
+    "coordination"
+  ],
+  "published_at": "2026-08-26"
+}

@@ -27,9 +27,20 @@ description: 从私有 SkillHub 导出并向 anet.sh 公共目录投稿。
    └── SKILL.md
    ```
 
-5. 运行 `node scripts/build-public-skillhub.mjs`，提交源文件与更新后的 `catalog.json`，然后发起 Pull Request。
+5. 在 `docs-site/` 目录运行校验并重新生成 catalog：
 
-公共维护者会检查可复用性、许可证、隐私和安全边界。修改已公开内容时必须发布新版本，不得覆盖原版本。
+   ```bash
+   npm run skillhub:build
+   npm run skillhub:check
+   ```
+
+   提交源文件与更新后的 `docs/public/skillhub/catalog.json`，然后发起 Pull Request。
+
+PR 里应写明新增或更新的 `slug@version`、许可证、公开来源，以及本地
+`skillhub:check` 的结果。公共维护者会用公开 catalog 中的
+`public-skill-review-checklist` 复核可复用性、许可证、隐私和安全边界。
+
+修改已公开内容时必须发布新版本，不得覆盖原版本。
 
 ## 不会上传的内容
 
