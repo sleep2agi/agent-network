@@ -51,7 +51,11 @@ curl http://localhost:9200/health
 >
 > **The two channels return different keys** — parse `/health` per channel:
 >
-> | Key | latest `0.8.8` | preview `0.9.0-preview.29` |
+> 🔴 **`latest` moved from `0.8.8` to `0.9.0-preview.30` on 2026-08-27 (contains the redaction fix `7bacb729`).**
+> The text below describes **versions**, not channels — channels move, versions do not.
+> Check the current pointer with `npm view @sleep2agi/commhub-server dist-tags`.
+>
+> | Key | `0.8.8` | `0.9.0-preview.29` |
 > |---|---|---|
 > | `sse_sessions` | **returned even unauthenticated, and unredacted** | not returned unauthenticated |
 > | `limits` | absent | present |
@@ -59,7 +63,7 @@ curl http://localhost:9200/health
 > The other 13 keys were present on both **in this capture** — one sample per
 > channel, not a permanent contract.
 
-::: danger On latest `0.8.8`, `sse_sessions` exposes every connected agent to anonymous callers
+::: danger On `0.8.8`, `sse_sessions` exposes every connected agent to anonymous callers
 The sample above shows `{}` **only because that clean container had zero SSE
 connections**. **Do not read it as "latest leaks nothing."**
 
@@ -74,7 +78,7 @@ request; see `server/src/health-redaction.test.ts`.
 
 So the difference between channels is not "key present / key absent":
 
-- **latest `0.8.8`** — anonymous callers can read the full live-session breakdown
+- **`0.8.8`** — anonymous callers can read the full live-session breakdown
   (which is empty only on an idle hub);
 - **preview `0.9.0-preview.22` and later** — anonymous callers get aggregate counts
   only; the breakdown moved behind auth at `GET /api/stats/sse`;
@@ -89,7 +93,7 @@ differently across the two channels.
 
 Read the anonymous response **per channel**, per the table and the warning above:
 on preview the key is absent entirely and anonymous callers get aggregate counts
-only; on latest `0.8.8` the key is emitted **unredacted** — empty on an idle hub,
+only; on `0.8.8` the key is emitted **unredacted** — empty on an idle hub,
 and a full `{networkId}:{alias}` breakdown as soon as anything connects.
 
 With a valid token, a system admin, legacy master, or DEV_OPEN
