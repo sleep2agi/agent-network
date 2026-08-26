@@ -28,7 +28,7 @@ describe("createCodexSessionManager", () => {
     expect(inboxAt).toBeGreaterThan(eagerAt);
     expect(sseAt).toBeGreaterThan(eagerAt);
     expect(cli.slice(eagerAt, inboxAt)).toContain("ensureCodexAppServerSession()");
-    expect(cli.slice(eagerAt, inboxAt)).toContain("shared bridge ready");
+    expect(cli.slice(eagerAt, inboxAt)).toContain("client-health role=bridge");
   });
 
   test("concurrent Dashboard handlers share one complete open attempt", async () => {

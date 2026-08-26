@@ -26,10 +26,17 @@ describe("Windows native Codex co-presence ownership", () => {
       cli.indexOf("async function startWindowsCodexCopresence("),
       cli.indexOf("async function startCopresenceOrchestration("),
     );
-    const readyAt = windowsStart.indexOf('waitForFileText(bridgeLog, "[codex-app-server] shared bridge ready"');
+    const receiptAt = windowsStart.indexOf("bridgeClientHealthReceipt(wsUrl, threadId)");
+    const readyAt = windowsStart.indexOf("waitForFileText(bridgeLog, bridgeReceipt", receiptAt);
     const tuiAt = windowsStart.indexOf('console.log(`[anet] ③ opening Codex TUI');
-    expect(readyAt).toBeGreaterThan(0);
+    expect(receiptAt).toBeGreaterThan(0);
+    expect(readyAt).toBeGreaterThan(receiptAt);
     expect(tuiAt).toBeGreaterThan(readyAt);
+    const pidConnectionAt = windowsStart.indexOf("if (tui.pid && probeWindowsOwnedLoopbackConnection(tui.pid, port))", tuiAt);
+    const healthAt = windowsStart.indexOf("connection=pid-attributed", tuiAt);
+    expect(pidConnectionAt).toBeGreaterThan(tuiAt);
+    expect(healthAt).toBeGreaterThan(pidConnectionAt);
+    expect(windowsStart.slice(pidConnectionAt, healthAt)).toContain("if (!tuiConnected)");
   });
 
   test("matching PID plus CreationDate is safe to stop", () => {

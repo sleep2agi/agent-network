@@ -38,7 +38,8 @@ chmodSync(anetWrapper, 0o755);
 // The production resolver rejects every world-writable ancestor; /tmp is
 // intentionally 01777, so a faithful exact-package fixture must live below a
 // root-owned immutable prefix just like a real global npm payload.
-const exactNodeRoot = join(`/opt/test1191-${runId}`, "node_modules", "@sleep2agi", "agent-node");
+const exactPrefix = process.env.ANET_TEST1191_EXACT_ROOT_PREFIX || "/opt";
+const exactNodeRoot = join(exactPrefix, `test1191-${runId}`, "node_modules", "@sleep2agi", "agent-node");
 const exactNodeDist = join(exactNodeRoot, "dist");
 const exactNodeEntrypoint = join(exactNodeDist, "cli.js");
 mkdirSync(exactNodeDist, { recursive: true });
@@ -61,6 +62,7 @@ const env = {
   ANET_TEST751_RPC_LOG: rpcLog,
   ANET_TEST751_COMPLETE_LONG_TURN: completeLongTurn,
   ANET_TEST751_LONG_TURN: "1",
+  ANET_TEST751_EXPECT_CODEX_HOME: join(project, ".anet", "nodes", alias, "codex-home"),
   ANET_TEST1191_BRIDGE_DELAY_MS: "1500",
   ANET_AGENT_NODE_BIN: exactNodeEntrypoint,
 };
@@ -109,9 +111,14 @@ try {
     } catch {}
     throw error;
   }
-  if (!startOutput.includes("bridge READY") || !startOutput.includes(`共存节点 ${alias} 就绪`)) {
+  if (!startOutput.includes("state=waiting-for-tui-thread") || !startOutput.includes(`共存节点 ${alias} 就绪`)) {
     throw new Error(`launcher claimed no protocol readiness:\n${startOutput}`);
   }
+  const nodeConfigPath = join(project, ".anet", "nodes", alias, "config.json");
+  await waitUntil("deferred exact thread promotion", () => {
+    const cfg = JSON.parse(readFileSync(nodeConfigPath, "utf8"));
+    return cfg.codexThreadId === "thread_windows_e2e" && cfg.codexPendingThread === undefined;
+  });
   await waitUntil("human turn", () => wire().includes("rpc:test/human-turn/start:thread_windows_e2e"));
 
   const globalConfig = JSON.parse(readFileSync(join(userHome, ".anet", "config.json"), "utf8"));

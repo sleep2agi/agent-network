@@ -148,6 +148,7 @@ import {
   ensureWindowsPrivateDirectory,
   openPrivateAppendLog,
   probeWindowsCreationDate,
+  probeWindowsOwnedLoopbackConnection,
   readWindowsCopresenceRecord,
   taskkillWindowsProcessTree,
   windowsCopresenceLogPath,
@@ -158,6 +159,8 @@ import {
 } from "../src/windows-codex-copresence";
 import { normalizeBatchWorkdir } from "../src/batch-workdir";
 import { copresenceThreadPlan } from "../src/codex-copresence-thread";
+import { bridgeClientHealthReceipt } from "../src/codex-tui-client-health";
+import { probePosixOwnedLoopbackConnection } from "../src/posix-codex-copresence";
 import {
   backupCodexRecoveryState,
   codexTopologyAudit,
@@ -333,7 +336,7 @@ function waitForTmuxPaneText(sessionName: string, needle: string, timeoutMs: num
         //   capture-pane -p -S -500  → includes = true
         // 这个函数找的是**一次性出现过**的那一行,不是「此刻屏幕上有什么」,
         // 所以它必须看回滚。(同文件 :810 早就带了 `-S -80`——正确写法一直在。)
-        const out = execFileSync("tmux", ["capture-pane", "-t", paneTarget, "-p", "-S", "-200"], {
+        const out = execFileSync("tmux", ["capture-pane", "-t", paneTarget, "-p", "-J", "-S", "-200"], {
           stdio: ["ignore", "pipe", "pipe"], encoding: "utf8",
         });
         if (out.includes(needle)) { resolve(true); return; }
@@ -403,7 +406,7 @@ async function createCodexCopresenceThread(
   ws: string,
   timeoutMs = 60_000,
   resumeThreadId?: string,
-): Promise<{ threadId: string; verification: CodexRecoveryVerification }> {
+): Promise<{ threadId: string; verification?: CodexRecoveryVerification; freshDeferred: boolean }> {
   const WsCtor = await resolveCopresenceWebSocketCtor();
   const socket = new WsCtor(ws);
   const deadline = Date.now() + timeoutMs;
@@ -456,26 +459,16 @@ async function createCodexCopresenceThread(
     const plan = copresenceThreadPlan(resumeThreadId);
     if (plan.method === "thread/resume") {
       if (!SAFE_THREAD_ID.test(plan.params.threadId)) throw new Error("stored threadId has unexpected shape");
-      return {
-        threadId: plan.params.threadId,
-        verification: await resumeAndVerifyCodexThread(
+      const verification = await resumeAndVerifyCodexThread(
           plan.params.threadId,
           (method, params) => request(method, params, 15_000),
-        ),
-      };
+        );
+      return { threadId: plan.params.threadId, verification, freshDeferred: false };
     }
-    const started: any = await request(plan.method, plan.params, 15_000);
-    const threadId: string | undefined = started?.threadId ?? started?.thread?.id;
-    if (!threadId) throw new Error("thread/start returned no threadId");
-    // Tiny turn persists the rollout so `codex resume --remote` can adopt.
-    await request("turn/start", {
-      threadId,
-      clientUserMessageId: "anet-copresence:bootstrap",
-      input: [{ type: "text", text: "只回复一个词：READY" }],
-    }, 45_000);
-    await new Promise((r) => setTimeout(r, 3000));
-    const read = await request("thread/read", { threadId, includeTurns: true }, 15_000);
-    return { threadId, verification: verifyCodexThreadHistory("thread/start", threadId, read) };
+    // A fresh Codex 0.148 thread cannot be resumed by a second client until
+    // the human TUI owns/materializes it. Do not create or mutate a thread:
+    // the deferred bridge observes the TUI's unique thread/started event.
+    return { threadId: "", freshDeferred: true };
   } finally {
     try { socket.close(); } catch { /* ignore */ }
   }
@@ -834,13 +827,13 @@ async function startWindowsCodexCopresence(
     }
     const thread = await createCodexCopresenceThread(wsUrl, 60_000, resolved.profile.codexThreadId);
     const threadId = thread.threadId;
-    if (!SAFE_THREAD_ID.test(threadId)) throw new Error("unexpected threadId shape");
+    if (!thread.freshDeferred && !SAFE_THREAD_ID.test(threadId)) throw new Error("unexpected threadId shape");
     const rawCfgPath = join(nodesDir(), resolved.id, "config.json");
     const rawCfg = JSON.parse(readFileSync(rawCfgPath, "utf-8"));
     rawCfg.codexAppServerPort = port;
     rawCfg.codexAppServerUrl = wsUrl;
-    rawCfg.codexThreadId = threadId;
-    rawCfg.codexRecoveryVerification = thread.verification;
+    if (thread.freshDeferred) { delete rawCfg.codexThreadId; delete rawCfg.codexRecoveryVerification; }
+    else { rawCfg.codexThreadId = threadId; rawCfg.codexRecoveryVerification = thread.verification; }
     delete rawCfg.session;
     atomicWritePrivateJson(rawCfgPath, rawCfg);
 
@@ -856,22 +849,46 @@ async function startWindowsCodexCopresence(
       process.argv[1] ?? "", "node", "start", displayName,
     ], bridgeEnv, bridgeLog));
     writeWindowsCopresenceRecord(nodesDir(), resolved.id, managed);
-    if (!await waitForFileText(bridgeLog, "[codex-app-server] shared bridge ready", 25_000)) {
+    const bridgeReceipt = thread.freshDeferred
+      ? "[codex-app-server] client-health role=bridge state=waiting-for-tui-thread"
+      : bridgeClientHealthReceipt(wsUrl, threadId);
+    if (!await waitForFileText(bridgeLog, bridgeReceipt, 25_000)) {
       throw new Error(`bridge did not attach to the shared app-server before TUI launch; log=${bridgeLog}`);
     }
     if (!probeWindowsCreationDate(managed[1].pid)) throw new Error(`bridge exited during startup; log=${bridgeLog}`);
 
     console.log(`[anet] ② bridge pid=${managed[1].pid} running`);
-    console.log(`[anet] ③ opening Codex TUI in this Windows console (thread=${threadId})`);
+    console.log(`[anet] ③ opening Codex TUI in this Windows console (thread=${threadId || "pending-user-thread"})`);
     console.log(`[anet]    stop from another terminal: anet node stop ${displayName}`);
-    const tuiArgs = ["resume", "--remote", wsUrl, threadId, "-m", model];
+    const tuiArgs = thread.freshDeferred
+      ? ["--remote", wsUrl, "-m", model]
+      : ["resume", "--remote", wsUrl, threadId, "-m", model];
     if (opts.dangerFullAccess) tuiArgs.push("--dangerously-bypass-approvals-and-sandbox");
     const tui = spawn(opts.codexBin, tuiArgs, {
       cwd: process.cwd(), env: { ...process.env, CODEX_HOME: opts.codexHome },
       stdio: "inherit", windowsHide: false, shell: true,
     });
-    const code = await new Promise<number>((resolve, reject) => {
+    await new Promise<void>((resolve, reject) => {
       tui.once("error", reject);
+      tui.once("spawn", resolve);
+    });
+    const tuiHealthDeadline = Date.now() + 25_000;
+    let tuiConnected = false;
+    while (Date.now() < tuiHealthDeadline && tui.exitCode === null) {
+      if (tui.pid && probeWindowsOwnedLoopbackConnection(tui.pid, port)) {
+        tuiConnected = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+    if (!tuiConnected) {
+      throw new Error("TUI second-client health failed: launched TUI tree has no attributable connection to the exact app-server");
+    }
+    console.log(thread.freshDeferred
+      ? `[anet] client-health role=bridge state=waiting-for-tui-thread`
+      : `[anet] client-health role=bridge remote=exact thread=exact`);
+    console.log(`[anet] client-health role=tui codex_home=exact remote=exact thread=${thread.freshDeferred ? "pending-user-thread" : "exact"} connection=pid-attributed`);
+    const code = await new Promise<number>((resolve, reject) => {
       tui.once("exit", (c) => resolve(c ?? 1));
     });
     if (code !== 0) throw new Error(`Codex TUI exited with code ${code}`);
@@ -1329,9 +1346,11 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
 
   // ── create fresh thread + persist config ──────────────────────────────
   let threadId: string;
+  let freshDeferred = false;
   try {
     const thread = await createCodexCopresenceThread(wsUrl, 60_000, profile.codexThreadId);
     threadId = thread.threadId;
+    freshDeferred = thread.freshDeferred;
     profile.codexRecoveryVerification = thread.verification;
   } catch (e: any) {
     console.error(`[anet] ❌ Codex thread recovery verification failed: ${e?.message || e}`);
@@ -1346,21 +1365,21 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // #P2fix顺手3 — defense-in-depth shape check before threadId flows into
   // a bash-string interpolation. Server-generated ids match; anything else
   // means either a protocol drift or a compromised app-server.
-  if (!SAFE_THREAD_ID.test(threadId)) {
+  if (!freshDeferred && !SAFE_THREAD_ID.test(threadId)) {
     console.error(`[anet] internal error: unexpected threadId shape (rejected before shell interpolation)`);
     console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
     // #P2fix复审顺手3 — defense-in-depth env-file cleanup (see :431).
     try { rmSync(envFilePath, { force: true }); } catch { /* best-effort */ }
     process.exit(1);
   }
-  console.log(`[anet] thread: ${threadId}`);
+  console.log(`[anet] thread: ${threadId || "pending-user-thread"}`);
 
   const rawCfgPath = join(nodesDir(), resolved.id, "config.json");
   const rawCfg = JSON.parse(readFileSync(rawCfgPath, "utf-8"));
   rawCfg.codexAppServerPort = port;
   rawCfg.codexAppServerUrl = wsUrl;
-  rawCfg.codexThreadId = threadId;
-  rawCfg.codexRecoveryVerification = profile.codexRecoveryVerification;
+  if (freshDeferred) { delete rawCfg.codexThreadId; delete rawCfg.codexRecoveryVerification; }
+  else { rawCfg.codexThreadId = threadId; rawCfg.codexRecoveryVerification = profile.codexRecoveryVerification; }
   delete rawCfg.session;
   atomicWritePrivateJson(rawCfgPath, rawCfg);
 
@@ -1387,9 +1406,12 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     process.exit(1);
   }
   console.log(`[anet] ② bridge tmux=${bridgeSession} starting…`);
+  const bridgeReceipt = freshDeferred
+    ? "[codex-app-server] client-health role=bridge state=waiting-for-tui-thread"
+    : bridgeClientHealthReceipt(wsUrl, threadId);
   const bridgeReady = await waitForTmuxPaneText(
     bridgeSession,
-    "[codex-app-server] shared bridge ready",
+    bridgeReceipt,
     25_000,
   );
   if (!bridgeReady) {
@@ -1398,14 +1420,19 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
     process.exit(1);
   }
-  console.log(`[anet] ② bridge READY on ${wsUrl}`);
+  console.log(freshDeferred
+    ? `[anet] ② bridge connected; waiting for the TUI-owned thread`
+    : `[anet] ② bridge READY on ${wsUrl}`);
 
   // ── piece ③ codex TUI (attachable, resumes same thread) ───────────────
   const tuiFlags: string[] = [];
   if (opts.dangerFullAccess) tuiFlags.push("--dangerously-bypass-approvals-and-sandbox");
+  const tuiInvocation = freshDeferred
+    ? `exec ${shellQuote(opts.codexBin)} --remote ${wsUrl} -m ${shellQuote(model)} ${tuiFlags.join(" ")}`.trim()
+    : `exec ${shellQuote(opts.codexBin)} resume --remote ${wsUrl} ${threadId} -m ${shellQuote(model)} ${tuiFlags.join(" ")}`.trim();
   const tuiCmd = [
     `export CODEX_HOME=${shellQuote(opts.codexHome)}`,
-    `exec ${shellQuote(opts.codexBin)} resume --remote ${wsUrl} ${threadId} -m ${shellQuote(model)} ${tuiFlags.join(" ")}`.trim(),
+    tuiInvocation,
   ].join(" ; ");
   try {
     execFileSync("tmux", [
@@ -1469,6 +1496,18 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     process.exit(1);
   }
 
+  const tuiIdentity = harvestSession(tuiSession);
+  if (!tuiIdentity || !probePosixOwnedLoopbackConnection(tuiIdentity.pid, port)) {
+    console.error(`[anet] ❌ TUI second-client health failed: managed TUI tree has no attributable connection to the exact app-server.`);
+    console.error(`[anet]    CODEX_HOME/remote mismatch is possible; refusing to print success.`);
+    console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
+    process.exit(1);
+  }
+  console.log(freshDeferred
+    ? `[anet] client-health role=bridge state=waiting-for-tui-thread`
+    : `[anet] client-health role=bridge remote=exact thread=exact`);
+  console.log(`[anet] client-health role=tui codex_home=exact remote=exact thread=${freshDeferred ? "pending-user-thread" : "exact"} connection=pid-attributed`);
+
   const hubBase = opts.hub.replace(/\/+$/, "");
   console.log("");
   console.log(`[anet] ✅ 共存节点 ${displayName} 就绪`);
@@ -1476,6 +1515,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   console.log(`[anet]    stop:      anet node stop ${shellQuote(displayName)}`);
   console.log(`[anet]    dashboard: ${hubBase}/nodes/${encodeURIComponent(displayName)}`);
   console.log(`[anet]    runtime:   codex-app-server @ ${wsUrl}  (sandbox=${sandboxMode})`);
+  if (freshDeferred) console.log(`[anet]    state:     connected; shared thread binds when you begin the first TUI message (Dashboard tasks retry until then)`);
 }
 
 async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?: string): Promise<void> {
