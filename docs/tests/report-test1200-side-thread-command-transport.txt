@@ -1,0 +1,45 @@
+test1200 — SideThread dedicated command transport
+Date: 2026-08-26 Asia/Shanghai
+Product/test source commit: 41c9c13f8261e6644af7f204b487e91097970e39
+Stack base: PR1 merged head d033e606154800a38b4969a49c3a608e9b142960
+Rebuilt PR2 tip: 9a074ccb62d7829e5602ea6b14232b7e467e0cb4
+
+Layer order and results (Docker only, stopped-on-first-failure):
+1. test1193 runtime/domain: 48 pass, 0 fail, 163 assertions; witnessed red PASS.
+2. test1195 Hub contract: 8 pass, 0 fail, 35 assertions; witnessed red PASS.
+3. test1195 Hub auth/SSE security: 5 pass, 0 fail, 19 assertions; witnessed red PASS.
+4. test1195 Hub race: 9 pass, 0 fail, 60 assertions; witnessed red PASS.
+5. test1200 command transport: 13 pass, 0 fail, 45 assertions; build PASS;
+   three witnessed-red mutations PASS.
+
+test1200 behavior evidence:
+- commands use a dedicated durable outbox; the test creates an inbox table and
+  proves it remains empty;
+- exact bound node-token claim/ACK/terminal ownership;
+- node receipt survives executor restart and prevents native replay after ACK
+  response loss;
+- Hub ACK and terminal receipts are immutable and idempotent;
+- terminal acceptance binds sideThreadId+attemptId+threadId+turnId;
+- attachments require bound ntok download, exact byte length and SHA-256 before
+  native start; no partial/text-only downgrade;
+- bring-back is unavailable without a native injected implementation, and its
+  write-ahead journal refuses duplicate send after an ambiguous response.
+
+Witnessed red:
+1. bypass node command receipt lookup -> ACK-loss replay test red;
+2. remove terminal turnId ownership check -> four-tuple test red;
+3. allow sent/ambiguous bring-back replay -> fail-closed restart test red.
+
+First failed checks during development:
+- `bunx tsc --noEmit -p agent-node/tsconfig.json` failed because this package
+  has no tsconfig.json; replaced by the repository's Bun build boundary.
+- package-wide local `npm run build` then failed before compilation because
+  the worktree intentionally had no installed zod/undici. The Docker suite is
+  the authoritative clean dependency environment and its focused Bun build
+  passed. No global package or local production installation was modified.
+
+Scope note:
+This Draft adds the vendorable transport/store/consumer and recovery contract.
+Production feature enablement remains fail-closed until a later wiring change
+installs the port, resolves real node-token actors, serves short-lived grants,
+and boots the consumer for a verified native runtime.
