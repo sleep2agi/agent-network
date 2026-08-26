@@ -9,6 +9,7 @@ export interface ReplyMessageProvenance {
 
 const ANET_SCHEDULE_COMMAND_RE = /^\s*\/(?:agoal|aloop)\b/i;
 const LEGACY_SCHEDULE_COMMAND_RE = /^\s*\/(?:goal|loop)\b/i;
+const NATIVE_CODEX_GOAL_COMMAND_RE = /^\s*\/goal\b/i;
 
 export const LEGACY_ANET_SCHEDULE_NOTICE =
   "提示：/goal 和 /loop 仅在非 Dashboard 路径处于兼容期；Agent Network 定时请改用 /aloop <间隔> <任务>。";
@@ -19,9 +20,14 @@ export const DASHBOARD_NATIVE_SCHEDULE_NOTICE =
 /**
  * Select the Agent Network scheduled-goal path.
  *
- * Authenticated Dashboard chat owns the unprefixed vendor command namespace:
- * `/goal` and `/loop` pass through to the target runtime for every runtime
- * bucket. Agent Network commands use `/agoal` and `/aloop` instead.
+ * Codex TUI owns `/goal` regardless of message provenance. CommHub relays do
+ * not always carry Dashboard metadata (for example older desktop clients and
+ * node-to-node forwarding), so provenance is not a safe routing boundary for
+ * a native Codex command. Agent Network scheduling remains explicitly under
+ * `/agoal` and `/aloop`.
+ *
+ * Authenticated Dashboard chat additionally owns the unprefixed vendor
+ * command namespace for every runtime: `/goal` and `/loop` pass through.
  *
  * Non-Dashboard traffic retains `/goal` + `/loop` temporarily so existing
  * node-to-node automations do not silently change behavior. The caller adds a
@@ -29,11 +35,12 @@ export const DASHBOARD_NATIVE_SCHEDULE_NOTICE =
  */
 export function shouldCreateScheduledGoal(
   content: string,
-  _runtime: GoalRoutingRuntime,
+  runtime: GoalRoutingRuntime,
   interactiveDashboardTask: boolean,
 ): boolean {
   if (ANET_SCHEDULE_COMMAND_RE.test(content || "")) return true;
   if (!LEGACY_SCHEDULE_COMMAND_RE.test(content || "")) return false;
+  if (runtime === "codex-app-server" && NATIVE_CODEX_GOAL_COMMAND_RE.test(content || "")) return false;
   return !interactiveDashboardTask;
 }
 

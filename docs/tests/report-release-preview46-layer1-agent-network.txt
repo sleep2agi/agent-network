@@ -1,0 +1,815 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.88kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/node:22-bookworm-slim
+#2 DONE 0.0s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [internal] load build context
+#4 DONE 0.0s
+
+#5 [ 1/11] FROM docker.io/library/node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436
+#5 resolve docker.io/library/node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 0.0s done
+#5 DONE 0.0s
+
+#6 [ 2/11] RUN apt-get update   && apt-get install -y --no-install-recommends bash build-essential ca-certificates curl git python3 unzip util-linux   && rm -rf /var/lib/apt/lists/*
+#6 CACHED
+
+#7 [ 3/11] RUN curl --fail --silent --show-error --location       --retry 3 --retry-delay 2 --retry-all-errors       "https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-linux-x64.zip"       --output /tmp/bun-linux-x64.zip   && echo "951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f  /tmp/bun-linux-x64.zip" | sha256sum --check --strict   && unzip -j /tmp/bun-linux-x64.zip 'bun-linux-x64/bun' -d /usr/local/bin   && chmod 0755 /usr/local/bin/bun   && test "$(bun --version)" = "1.3.14"   && rm -f /tmp/bun-linux-x64.zip
+#7 CACHED
+
+#8 [ 4/11] WORKDIR /workspace
+#8 CACHED
+
+#4 [internal] load build context
+#4 transferring context: 5.14MB 0.1s done
+#4 DONE 0.1s
+
+#9 [ 5/11] COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
+#9 DONE 0.1s
+
+#10 [ 6/11] RUN cd agent-network && npm ci
+#10 17.17
+#10 17.17 added 307 packages, and audited 308 packages in 17s
+#10 17.17
+#10 17.17 62 packages are looking for funding
+#10 17.17   run `npm fund` for details
+#10 17.19
+#10 17.19 13 vulnerabilities (1 low, 2 moderate, 10 high)
+#10 17.19
+#10 17.19 To address issues that do not require attention, run:
+#10 17.19   npm audit fix
+#10 17.19
+#10 17.19 To address all issues (including breaking changes), run:
+#10 17.19   npm audit fix --force
+#10 17.19
+#10 17.19 Run `npm audit` for details.
+#10 17.19 npm notice
+#10 17.19 npm notice New major version of npm available! 10.9.8 -> 12.0.2
+#10 17.19 npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.0.2
+#10 17.19 npm notice To update run: npm install -g npm@12.0.2
+#10 17.19 npm notice
+#10 DONE 17.8s
+
+#11 [ 7/11] COPY agent-node/package.json ./agent-node/package.json
+#11 DONE 0.2s
+
+#12 [ 8/11] COPY agent-node/src ./agent-node/src
+#12 DONE 0.1s
+
+#13 [ 9/11] COPY agent-network ./agent-network
+#13 DONE 0.1s
+
+#14 [10/11] COPY tests/test745-agent-network-unit-ci/run.sh ./tests/test745-agent-network-unit-ci/run.sh
+#14 DONE 0.0s
+
+#15 [11/11] RUN install -d -o node -g node -m 0755 /work  && chmod 0755 ./tests/test745-agent-network-unit-ci/run.sh   && install -d -o node -g node -m 0700 "/run/user/$(id -u node)"   && chown -R node:node /workspace
+#15 DONE 29.9s
+
+#16 exporting to image
+#16 exporting layers
+#16 exporting layers 15.6s done
+#16 exporting manifest sha256:6009d687bafd0efa90c62112914d68100e0840dd22063a5a9bafe776e727c370 0.0s done
+#16 exporting config sha256:b15492693bd834f790a34f3c51c8b0a97360b94cdac70940a0cf008f7f093e8d 0.0s done
+#16 exporting attestation manifest sha256:ac5fa3d57b7b66acb4e30f80c715efc7bde864633c1e082e041668e9b6fa7346 0.0s done
+#16 exporting manifest list sha256:2153e04b13eab59799265692b0a91223a2d78eb6468439caa64d00cab17b7c11 0.0s done
+#16 naming to docker.io/library/anet-release46-test745:latest done
+#16 unpacking to docker.io/library/anet-release46-test745:latest
+#16 unpacking to docker.io/library/anet-release46-test745:latest 8.9s done
+#16 DONE 24.6s
+# test745 — complete agent-network unit domain
+source_commit=aa7402d8148e62c00a087a4f107bd7d8bf9cd748
+bun=1.3.14 node=v22.23.2 git=git version 2.39.5 uid=1000
+test_files=64
+[L0] full agent-network/src unit suite as non-root
+bun test v1.3.14 (0d9b296a)
+
+src/cli-args.test.ts:
+(pass) CLI argument parsing > pins the complete presence-only flag set [0.19ms]
+(pass) CLI argument parsing > --accept-dev-channels does not swallow a following positional operand [0.57ms]
+(pass) CLI argument parsing > --accept-dev-channels works after a positional operand [0.10ms]
+(pass) CLI argument parsing > --dev-open does not swallow a following positional operand [0.02ms]
+(pass) CLI argument parsing > --dev-open works after a positional operand [0.02ms]
+(pass) CLI argument parsing > --dry-run does not swallow a following positional operand [0.01ms]
+(pass) CLI argument parsing > --dry-run works after a positional operand
+(pass) CLI argument parsing > --follow does not swallow a following positional operand
+(pass) CLI argument parsing > --follow works after a positional operand
+(pass) CLI argument parsing > --no-auto-self does not swallow a following positional operand
+(pass) CLI argument parsing > --no-auto-self works after a positional operand [0.03ms]
+(pass) CLI argument parsing > --no-yolo does not swallow a following positional operand
+(pass) CLI argument parsing > --no-yolo works after a positional operand
+(pass) CLI argument parsing > --resume-latest does not swallow a following positional operand
+(pass) CLI argument parsing > --resume-latest works after a positional operand
+(pass) CLI argument parsing > --self does not swallow a following positional operand
+(pass) CLI argument parsing > --self works after a positional operand
+(pass) CLI argument parsing > --f does not swallow a following positional operand
+(pass) CLI argument parsing > --f works after a positional operand
+(pass) CLI argument parsing > presence-only flags do not accept an explicit true or false value [0.08ms]
+(pass) CLI argument parsing > value flags, repeatable flags, and multiple positionals retain their behavior [0.14ms]
+(pass) CLI argument parsing > key=value remains unsupported and is treated as the complete key [0.10ms]
+
+src/codex-copresence-profile.test.ts:
+(pass) one command instead of a flag every time > a profile that remembers co-presence needs no flag [0.12ms]
+(pass) one command instead of a flag every time > the flag still works for a profile that has not recorded it [0.04ms]
+(pass) one command instead of a flag every time > without either, start stays on the normal lane [0.04ms]
+(pass) one command instead of a flag every time > the profile field cannot drag a non-codex runtime into the codex dance [0.05ms]
+(pass) one command instead of a flag every time > remembers only when the flag taught it something new [0.11ms]
+(pass) sandbox posture > read-only remains the default — the flag is still what opens it [0.19ms]
+(pass) sandbox posture > flags.sandboxMode alone does NOT open the sandbox [0.09ms]
+(pass) sandbox posture > but the mismatch is announced, naming both values and the fix [0.14ms]
+(pass) sandbox posture > no notice when the node never asked for full access [0.06ms]
+(pass) sandbox posture > the explicit flag opens it, and says the grant came from this invocation [0.06ms]
+(pass) sandbox posture > a remembered grant opens it without retyping, and is labelled as remembered [0.07ms]
+(pass) sandbox posture > approvalPolicy and sandboxMode never disagree [0.17ms]
+(pass) sandbox posture > remembers an explicit grant only once [0.22ms]
+(pass) what create records > records co-presence when it was asked for [0.10ms]
+(pass) what create records > records nothing otherwise — headless stays the default, as for opencode [0.08ms]
+(pass) what create records > never writes the field onto another runtime [0.06ms]
+(pass) what create records > a node that will start headless is told how to get a TUI [0.11ms]
+(pass) what create records > no hint for another runtime, or when co-presence was already asked for [0.06ms]
+(pass) what create records > the hint takes no typed-alias argument — create has already normalized it [0.04ms]
+
+src/normalize-runtime.test.ts:
+(pass) normalizeRuntime — fallback default is claude-agent-sdk (Vincent no-Max) > legacy normalization: unknown string → claude-agent-sdk [0.18ms]
+(pass) normalizeRuntime — fallback default is claude-agent-sdk (Vincent no-Max) > empty string → claude-agent-sdk [0.03ms]
+(pass) normalizeRuntime — fallback default is claude-agent-sdk (Vincent no-Max) > undefined (no arg) → claude-agent-sdk [0.02ms]
+(pass) normalizeRuntime — fallback default is claude-agent-sdk (Vincent no-Max) > undefined profile arg → claude-agent-sdk [0.03ms]
+(pass) normalizeRuntime — fallback default is claude-agent-sdk (Vincent no-Max) > profile with missing runtime field → claude-agent-sdk [0.09ms]
+(pass) normalizeRuntime — fallback default is claude-agent-sdk (Vincent no-Max) > profile with empty-string runtime field → claude-agent-sdk [0.03ms]
+(pass) normalizeRuntimeStrict — execution boundaries fail closed > missing and empty runtime still select the documented default [0.14ms]
+(pass) normalizeRuntimeStrict — execution boundaries fail closed > canonical names and supported aliases are accepted [0.07ms]
+(pass) normalizeRuntimeStrict — execution boundaries fail closed > a non-empty unknown runtime is rejected [0.21ms]
+(pass) normalizeRuntime — explicit choices are preserved > explicit 'claude-code-cli' → claude-code-cli (operator opt-in still works) [0.06ms]
+(pass) normalizeRuntime — explicit choices are preserved > explicit 'claude-agent-sdk' → claude-agent-sdk [0.06ms]
+(pass) normalizeRuntime — explicit choices are preserved > alias 'claude' → claude-agent-sdk (existing canonicalization) [0.07ms]
+(pass) normalizeRuntime — explicit choices are preserved > alias 'claude-sdk' → claude-agent-sdk [0.03ms]
+(pass) normalizeRuntime — explicit choices are preserved > alias 'agent-sdk' (string form) → claude-agent-sdk [0.04ms]
+(pass) normalizeRuntime — explicit choices are preserved > 'codex' / 'codex-sdk' → codex-sdk [0.12ms]
+(pass) normalizeRuntime — explicit choices are preserved > 'grok' / 'grok-build' / 'grok-build-acp' → grok-build-acp [0.07ms]
+(pass) normalizeRuntime — explicit choices are preserved > explicit Grok co-presence names → grok-build-cli [0.06ms]
+(pass) normalizeRuntime — explicit choices are preserved > explicit 'opencode-cli' → opencode-cli (canonical launcher name) [0.03ms]
+(pass) normalizeRuntime — explicit choices are preserved > alias 'opencode' → opencode-cli (short form) [0.04ms]
+(pass) normalizeRuntime — explicit choices are preserved > profile with runtime='opencode-cli' → opencode-cli [0.04ms]
+(pass) normalizeRuntime — explicit choices are preserved > profile with runtime='opencode' → opencode-cli [0.03ms]
+(pass) normalizeRuntime — explicit choices are preserved > explicit 'codex-app-server' → codex-app-server [0.03ms]
+(pass) normalizeRuntime — explicit choices are preserved > alias 'codex-tui' → codex-app-server [0.27ms]
+(pass) normalizeRuntime — explicit choices are preserved > user-facing alias 'codex-cli' → codex-app-server [0.06ms]
+(pass) normalizeRuntime — explicit choices are preserved > alias 'codex-appserver' → codex-app-server [0.04ms]
+(pass) normalizeRuntime — explicit choices are preserved > 'codex-sdk' still → codex-sdk (not shadowed by the app-server branch) [0.02ms]
+(pass) normalizeRuntime — explicit choices are preserved > 'codex' still → codex-sdk (legacy short alias unchanged) [0.02ms]
+(pass) normalizeRuntime — explicit choices are preserved > profile with runtime='codex-app-server' → codex-app-server [0.03ms]
+(pass) normalizeRuntime — profile object paths > profile with runtime='claude-code-cli' → claude-code-cli (explicit, preserved) [0.04ms]
+(pass) normalizeRuntime — profile object paths > profile with runtime='agent-sdk' + codexRuntime='codex' → codex-sdk (legacy hybrid) [0.26ms]
+(pass) normalizeRuntime — profile object paths > profile with runtime='agent-sdk' + no codexRuntime → claude-agent-sdk [0.09ms]
+(pass) normalizeRuntime — profile object paths > legacy profile normalization keeps unknown → default for display/migration [0.13ms]
+
+src/batch-workdir-wiring.test.ts:
+(pass) batch workdir wiring > normalizes create workdir before mkdir or chdir [0.73ms]
+(pass) batch workdir wiring > normalizes cleanup workdir before filesystem mutation [0.33ms]
+
+src/top-level-help-contract.test.ts:
+(pass) top-level help matches the implemented command parsers > advertises only the implemented config and batch shapes [211.46ms]
+(pass) top-level help matches the implemented command parsers > includes the provider required by opencode auth-login [213.71ms]
+
+src/opencode-pin.test.ts:
+(pass) opencode-pin — built-in fallback > release builtin pin is the revalidated opencode-ai@1.18.1 [0.33ms]
+(pass) opencode-pin — built-in fallback > returns the built-in constant when no override file exists [0.51ms]
+(pass) opencode-pin — built-in fallback > missing/untrusted package hint preserves detail and exact install command [0.26ms]
+(pass) opencode-pin — override file write + read round-trip > a smoke marker for the exact release pin is recognized [1.35ms]
+(pass) opencode-pin — override file write + read round-trip > a locally-smoked different version cannot override the release pin [0.41ms]
+(pass) opencode-pin — validation refuses malformed / unvalidated overrides > hand-edited file with version but NO smokePassedAt → falls back to built-in [0.36ms]
+(pass) opencode-pin — validation refuses malformed / unvalidated overrides > version string doesn't match semver → falls back to built-in [0.36ms]
+(pass) opencode-pin — validation refuses malformed / unvalidated overrides > smokePassedAt not an ISO timestamp → falls back to built-in [0.32ms]
+(pass) opencode-pin — validation refuses malformed / unvalidated overrides > malformed JSON → falls back to built-in without throwing [0.34ms]
+
+src/unsafe-package-path-reason.test.ts:
+(pass) the condition that actually fires on a umask-0002 box is group-write, not ownership [0.13ms]
+(pass) a correctly-extracted package passes [0.06ms]
+(pass) someone else's payload is reported as ownership, and outranks the mode bits [0.04ms]
+(pass) world-writable is called out separately from group-writable [0.05ms]
+(pass) the message names the path, the mode, and umask — the thing the old text hid [0.21ms]
+(pass) an ownership failure does not send the reader chasing umask [0.08ms]
+(pass) the mode is printed octal and zero-padded, so 0644 never reads as 420 [0.05ms]
+
+src/outbound-tool-names.test.ts:
+(pass) the outbound set contains every tool a node-server exposes in outbound-only mode [0.09ms]
+(pass) importing the constant does not boot a server [0.38ms]
+(pass) node-server.ts consumes the shared constant rather than redeclaring it [0.34ms]
+
+src/copresence-deps.test.ts:
+(pass) all gaps at once, not one per run > a bare machine reports every missing dependency in one pass [1.65ms]
+(pass) all gaps at once, not one per run > a complete machine reports nothing [0.12ms]
+(pass) all gaps at once, not one per run > 🔴 bun without bunx is a gap, not a pass [0.10ms]
+(pass) all gaps at once, not one per run > and the fix it names is the symlink, not 'install bun' [0.38ms]
+(pass) the hint is a command, not advice > names a runnable line per platform [0.19ms]
+(pass) the hint is a command, not advice > Windows uses its native console backend and does not require tmux [0.26ms]
+(pass) the hint is a command, not advice > the block names every gap and what each is for [0.32ms]
+(pass) which hub we may start ourselves > loopback is ours to start [0.24ms]
+(pass) which hub we may start ourselves > 🔴 a remote hub is never ours to start [0.12ms]
+(pass) which hub we may start ourselves > an unparseable url is not loopback [0.16ms]
+
+src/tmux-attach.test.ts:
+(pass) tmux attach resolution > parses opaque IDs and Unicode names [0.76ms]
+(pass) tmux attach resolution > selects the exact TUI instead of prefix siblings [0.17ms]
+(pass) tmux attach resolution > does not fall back to a bridge or node session [0.08ms]
+
+src/owner-env-file.test.ts:
+(pass) loadOwnerOnlyEnvFile > loads the isolated commhub credential without overriding explicit identity [1.25ms]
+(pass) loadOwnerOnlyEnvFile > rejects relative, broad-mode, and symlinked credential files [0.68ms]
+
+src/opencode-owner-mode.test.ts:
+(pass) OpenCode owner/mode policy > accepts umask-0002 modes only for a non-root uid=gid layout [0.19ms]
+(pass) OpenCode owner/mode policy > always rejects world write and keeps root/foreign ownership strict [0.11ms]
+
+src/tmux-pane-target.test.ts:
+(pass) a pane target is the coordinate, never the = form [0.33ms]
+(pass) session matching is exact — a prefix sibling never wins [0.10ms]
+(pass) a session with no pane resolves to null rather than to something nearby [0.09ms]
+(pass) non-zero window/pane indexes are carried through [0.06ms]
+(pass) rows split on the last tab, so the coordinate is never mistaken for the name [0.09ms]
+(pass) the portable visible pane marker survives tmux builds that sanitize control characters [0.08ms]
+(pass) malformed rows are dropped, not turned into a target [0.05ms]
+(skip) real tmux: '=name' fails for capture-pane on a non-ASCII session, the coordinate works
+(pass) cli.ts sends pane commands to coordinates and session commands to the = form [16.92ms]
+(pass) auto-confirm selects nodes by their server: channel, not by runtime [2.58ms]
+(pass) the #494 warning and the auto-confirm agree on the predicate [2.17ms]
+
+src/codex-copresence-launch-readiness.test.ts:
+(pass) Codex co-presence launch readiness > POSIX waits for the shared bridge protocol boundary before creating the TUI [0.19ms]
+(pass) Codex co-presence launch readiness > app-server, bridge and TUI receive one node-specific CODEX_HOME on both launchers [0.28ms]
+
+src/start-paths-verify-before-claiming.test.ts:
+(pass) --tmux refuses an unstartable profile instead of spawning and polling [0.46ms]
+(pass) codex co-presence checks its TUI session before calling it ready to attach [0.11ms]
+(pass) codex co-presence proves all three sessions are alive at the moment it prints 就绪 [0.12ms]
+(pass) the OpenCode twin still guards its own TUI (the pattern being matched) [0.52ms]
+
+src/channel-attachments.test.ts:
+(pass) Claude channel attachments > pins the readable extension allowlist as an exact value set [0.51ms]
+(pass) Claude channel attachments > cache roots are alias-isolated even for path-shaped aliases [0.41ms]
+(pass) Claude channel attachments > downloads an authenticated Dashboard PNG and surfaces an owner-local Read path [4.08ms]
+(pass) Claude channel attachments > downloads an authenticated non-image file for the Read-capable channel [1.50ms]
+(pass) Claude channel attachments > does not fetch or inject a non-allowlisted file type [0.25ms]
+(pass) Claude channel attachments > download failure preserves the original text and exposes no token [0.72ms]
+(pass) Claude channel attachments > rejects traversal-shaped file ids before any fetch [0.21ms]
+(pass) Claude channel attachments > does not trust a sender-provided local path [0.53ms]
+
+src/codex-model-default.test.ts:
+(pass) Codex model defaults > all Codex creation runtime spellings use the supported default [0.20ms]
+(pass) Codex model defaults > shared Codex choice catalog has one supported default [0.11ms]
+
+src/copresence-identity.test.ts:
+(pass) Test 1: UUID round-trip > writeMarker persists exactly the provided uuid (single source of truth) [5.05ms]
+(pass) Test 1: UUID round-trip > writeMarker refuses empty uuid (guard against silent regeneration) [0.43ms]
+(pass) Test 1: UUID round-trip > writeMarker refuses non-string uuid [0.40ms]
+(pass) Test 2: enumeration failure is loud (fail-closed) > verifyGroupHomogeneity fails-closed when listAllPids throws [1.20ms]
+(pass) Test 2: enumeration failure is loud (fail-closed) > verifyGroupHomogeneity fails-closed when a member's environ read throws [0.82ms]
+(pass) Test 2: enumeration failure is loud (fail-closed) > verifyGroupHomogeneity fails-closed when a stat read throws [0.38ms]
+(pass) Test 3: foreign member in PGID → SKIP > group with unmarked co-resident refuses homogeneity [0.34ms]
+(pass) Test 3: foreign member in PGID → SKIP > group where every member carries the marker is ok [0.31ms]
+(pass) Test 4: main-dead-child-alive (environ scan is authority) > scan finds workers even when marker's stored pids are gone [0.78ms]
+(pass) Test 5: child setsid → new PGID > detached child grouped under its current pgid, not marker's stored pgid [0.25ms]
+(pass) Test 6: PID-reuse defense is the boot_id + environ-scan invariant > environ scan only returns pids whose current environ carries the uuid [0.20ms]
+(pass) Test 7: partial-start rollback (marker gate) > MISSING marker after partial start prevents any process action [0.42ms]
+(pass) Test 8: malformed marker → structured refuse (never throws) > null body → SCHEMA_INVALID (no TypeError from `in` operator) [0.63ms]
+(pass) Test 8: malformed marker → structured refuse (never throws) > bare number → SCHEMA_INVALID [0.43ms]
+(pass) Test 8: malformed marker → structured refuse (never throws) > empty array → SCHEMA_INVALID [0.56ms]
+(pass) Test 8: malformed marker → structured refuse (never throws) > empty object → SCHEMA_INVALID (missing required fields) [0.45ms]
+(pass) Test 8: malformed marker → structured refuse (never throws) > wrong types in schema → SCHEMA_INVALID [0.49ms]
+(pass) Test 8: malformed marker → structured refuse (never throws) > syntactically invalid JSON → PARSE_ERROR [0.55ms]
+(pass) Test 8: malformed marker → structured refuse (never throws) > wrong mode → WRONG_MODE (even with valid JSON) [0.64ms]
+(pass) Test 8: malformed marker → structured refuse (never throws) > symlink → SYMLINK (refuses to follow) [0.55ms]
+(pass) Test 8b: filesystem/environment refuse guards (mutation-sensitive) > NOT_REGULAR: directory at marker path with mode 0600 (skips SYMLINK+WRONG_MODE) [0.45ms]
+(pass) Test 8b: filesystem/environment refuse guards (mutation-sensitive) > OWNER_MISMATCH: valid marker file whose lstat.uid differs from process.getuid() (SECURITY CRITICAL) [4.19ms]
+(pass) Test 8b: filesystem/environment refuse guards (mutation-sensitive) > STALE_BOOT_ID: valid schema but boot_id differs from current /proc boot_id [0.82ms]
+(pass) Test 9: self-context refuses stop from within the tree > caller's own environ carrying the marker is detected [0.37ms]
+(pass) Test 9: self-context refuses stop from within the tree > ancestor carrying the marker is detected via PPID walk [0.30ms]
+(pass) Test 9: self-context refuses stop from within the tree > clean caller (no marker in ancestry) returns self=false [0.28ms]
+(pass) Test 10: non-copresence codex-app-server → legacy path (zero diff) > readMarker returns MISSING for an ordinary codex-app-server node dir [0.40ms]
+(pass) Test 11: 二次 stop is idempotent (MISSING = already stopped) > 2nd read after successful removeMarker returns MISSING (no side effects) [2.72ms]
+(pass) Test 11: 二次 stop is idempotent (MISSING = already stopped) > removeMarker on already-missing marker does not throw [0.30ms]
+(pass) reapMarkerGroups: end-to-end (mocked /proc + kill) > verified groups get SIGTERM, still-alive groups then get SIGKILL [7.35ms]
+(pass) reapMarkerGroups: end-to-end (mocked /proc + kill) > groups with foreign members are SKIPPED, never signaled [2.25ms]
+(pass) reapMarkerGroups: end-to-end (mocked /proc + kill) > no marker-carrying pids anywhere → immediate success (idempotent) [0.44ms]
+(pass) Blocker 1: scanEnvironForMarker EACCES discrimination > other-user EACCES on environ → skip that pid (expected, not fail) [1.38ms]
+(pass) Blocker 1: scanEnvironForMarker EACCES discrimination > Defect A defense: own-uid EACCES pid IN SCOPE (anchored) → reap refuses to delete marker [0.92ms]
+(pass) Blocker 1: scanEnvironForMarker EACCES discrimination > Blocker 1: own-uid EACCES pid OUT OF SCOPE → informational only, teardown still succeeds [0.53ms]
+(pass) Blocker 1: scanEnvironForMarker EACCES discrimination > Blocker 1: unreadable pid sharing a marker carrier's PGROUP is in scope (no anchors needed) [0.44ms]
+(pass) Blocker 1: scanEnvironForMarker EACCES discrimination > Blocker 8/invariant 5: an anchor whose starttime no longer matches is REJECTED (pid reuse) [0.37ms]
+(pass) Blocker 1: scanEnvironForMarker EACCES discrimination > Blocker 7: post-kill RESCAN unreadable half also preserves the marker [0.75ms]
+(pass) Blocker 1: scanEnvironForMarker EACCES discrimination > zombie process environ EACCES → skip (mm freed, expected) [0.34ms]
+(pass) Blocker 1: scanEnvironForMarker EACCES discrimination > EACCES-carrying process that vanishes during discrimination → skip [0.39ms]
+(pass) Blocker 2: verifyGroupHomogeneity zombie discrimination + EMPTY_GROUP > group containing a zombie same-uid member still verifies OK for the live marker members [0.51ms]
+(pass) Blocker 2: verifyGroupHomogeneity zombie discrimination + EMPTY_GROUP > group containing an other-user EACCES member still verifies OK for our members [0.37ms]
+(pass) Blocker 2: verifyGroupHomogeneity zombie discrimination + EMPTY_GROUP > empty group (no live marker members) → EMPTY_GROUP refuse (never ok:true) [0.35ms]
+(pass) Blocker 2: verifyGroupHomogeneity zombie discrimination + EMPTY_GROUP > own-uid non-zombie unreadable → ENUM_ERROR (fail-closed) [0.36ms]
+(pass) Finding #2: killPgroup pgid<=0 guard > realKiller().killPgroup(0, TERM) throws — kill(-0) would target caller's own pgroup [0.51ms]
+(pass) Finding #2: killPgroup pgid<=0 guard > realKiller().pgroupAlive(0) throws [0.35ms]
+(pass) Finding #3: reapMarkerGroups uses async sleep (not busy-wait) > grace period is truly asynchronous — event loop ticks during it [102.03ms]
+(pass) Finding #3: reapMarkerGroups uses async sleep (not busy-wait) > injected sleep function is used (tests can override with fast/deterministic version) [1.11ms]
+(pass) Finding #7: readMarker PLATFORM_UNSUPPORTED on non-Linux > on non-Linux, readMarker refuses cleanly regardless of on-disk state [3.45ms]
+(pass) Finding #4: writeMarker accepts partial sessions object > writeMarker with only appsrv session succeeds and readMarker returns ok [3.61ms]
+(pass) Finding #4: writeMarker accepts partial sessions object > writeMarker with empty sessions object still succeeds (uuid is what matters) [5.89ms]
+(pass) Blocker 3: verifyGroupHomogeneity stat-unreadable pids are bounded by ownership > an unrelated OTHER-uid pid whose stat is unreadable does NOT poison the group [0.48ms]
+(pass) Blocker 3: verifyGroupHomogeneity stat-unreadable pids are bounded by ownership > a pid hidden so thoroughly that even its uid is unknown does NOT poison the group [0.48ms]
+(pass) Blocker 3: verifyGroupHomogeneity stat-unreadable pids are bounded by ownership > an OWN-uid pid whose stat is unreadable still fails closed (we cannot rule out membership) [0.34ms]
+(pass) Blocker 4: readMarker checks MISSING before PLATFORM_UNSUPPORTED > non-Linux + NO marker file → MISSING (silent legacy fall-through, no scary warning) [0.50ms]
+(pass) Blocker 4: readMarker checks MISSING before PLATFORM_UNSUPPORTED > non-Linux + marker file present → PLATFORM_UNSUPPORTED (we genuinely cannot act on it) [3.40ms]
+(pass) Blockers 5+6: prepareIdentityForStart > no marker on disk → writes the new marker, reaps nothing [1.18ms]
+(pass) Blockers 5+6: prepareIdentityForStart > Blocker 6: a PRESERVED marker is reaped by its OWN uuid before the new one is written [1.84ms]
+(pass) Blockers 5+6: prepareIdentityForStart > Blocker 6: if the old generation cannot be reaped, start is BLOCKED and nothing is overwritten [0.65ms]
+(pass) Blockers 5+6: prepareIdentityForStart > a marker from a previous BOOT is discarded without a reap (its pids cannot exist) [0.49ms]
+(pass) Blockers 5+6: prepareIdentityForStart > an unreadable/suspicious marker BLOCKS start rather than overwriting it [0.64ms]
+(pass) Blockers 5+6: prepareIdentityForStart > Blocker 5: the marker is written with an EMPTY sessions object (before any session exists) [0.37ms]
+(pass) Blockers 5+6: prepareIdentityForStart > refuses an empty uuid (guards against a silently regenerated identity) [0.35ms]
+
+src/claude-vendor-env-wiring.test.ts:
+(pass) node create captures vendor shell env before profile construction [0.27ms]
+(pass) every dotenv-writing create preflights before any node-state side effect [0.24ms]
+(pass) the dotenv writer itself reuses the side-effect-free planner [0.17ms]
+
+src/copresence-cli-wiring.test.ts:
+(pass) cli.ts copresence start ordering (structural gate) > the copresence start path really does create tmux sessions with -e (anchor for the tests below) [0.07ms]
+(pass) cli.ts copresence start ordering (structural gate) > Blocker 5: prepareIdentityForStart runs BEFORE the first tmux new-session [0.06ms]
+(pass) cli.ts copresence start ordering (structural gate) > Blocker 5: no marker write happens before the identity preparation call [0.05ms]
+(pass) cli.ts copresence start ordering (structural gate) > Blocker 6: a blocked preparation aborts the start (never falls through to session creation) [0.09ms]
+(pass) cli.ts copresence start ordering (structural gate) > Blocker 12: the tmux capability preflight runs BEFORE the first tmux new-session [0.04ms]
+(pass) cli.ts copresence stop wiring (structural gate) > Blockers 1+2: the stop-time reap is given the marker's recorded pids as scope anchors [0.24ms]
+(pass) cli.ts copresence stop wiring (structural gate) > marker removal happens only on a successful reap [0.27ms]
+
+src/grok-copresence-disclosure.test.ts:
+(pass) grok co-presence disclosure > default profile reports the exact three tools and no web [0.31ms]
+(pass) grok co-presence disclosure > WebSearch profile reports general web_search without widening other tools [0.11ms]
+(pass) grok co-presence disclosure > repo-read profile reports only sandboxed project reads [0.15ms]
+(pass) grok co-presence disclosure > near-match tools are disclosed as invalid rather than a reviewed profile [0.20ms]
+(pass) grok co-presence disclosure > resume warns that a changed config cannot mutate the existing session [0.14ms]
+
+src/package-mode-preflight.test.ts:
+(pass) 0002 — the Debian/Ubuntu default this machine runs — leaks group-write [0.21ms]
+(pass) 0022 withholds both write bits, so a fresh fetch passes the check [0.63ms]
+(pass) 0000 leaks both, and says so [0.08ms]
+(pass) 0077 is stricter than needed and still passes [0.05ms]
+(pass) the advice names both runtimes and the misleading symptom [0.08ms]
+(pass) an already-extracted 0775/0664 payload is reported as rejected [0.15ms]
+(pass) a correctly-extracted payload is not reported [0.08ms]
+(pass) someone else's payload is rejected even at a safe mode [0.05ms]
+(pass) nothing extracted yet reports nothing — absence is not a pass [0.07ms]
+
+src/codex-copresence-preflight.test.ts:
+(pass) what the node HOME inherits > covers both prompts that actually blocked a node [0.09ms]
+(pass) what the node HOME inherits > the credential is staged 0600 [0.08ms]
+(pass) what the node HOME inherits > stages what the node is missing [0.37ms]
+(pass) what the node HOME inherits > re-stages after the host credential rotates [0.13ms]
+(pass) what the node HOME inherits > never clobbers a node copy that is fresher than the host's [0.06ms]
+(pass) what the node HOME inherits > equal mtimes are left alone — no rewrite on every start [0.05ms]
+(pass) what the node HOME inherits > a host with nothing to give produces no plan [0.09ms]
+(pass) what the node HOME inherits > every step says why, so the copy is legible when printed [0.09ms]
+(pass) is the TUI actually usable > recognises the two panes that were observed blocking real nodes [0.23ms]
+(pass) is the TUI actually usable > a painted, unblocked pane is usable [0.07ms]
+(pass) is the TUI actually usable > 🔴 launcher output before the TUI paints is NOT usable [0.15ms]
+(pass) is the TUI actually usable > an empty pane is not usable either [0.06ms]
+(pass) is the TUI actually usable > the update message names the shared-binary risk, not just the prompt [0.15ms]
+(pass) is the TUI actually usable > every message says where to look [0.18ms]
+(pass) is the TUI actually usable > the sign-in message points at the flag that causes it [0.05ms]
+(pass) is the TUI actually usable > not-painted is reported as its own thing, not as a blocker [0.05ms]
+(pass) the two reads answer different questions > a painted TUI whose banner scrolled off is still usable [0.10ms]
+(pass) the two reads answer different questions > a prompt sitting in scrollback does NOT make a working node blocked [0.08ms]
+(pass) the two reads answer different questions > a prompt on screen still wins over a painted history [0.06ms]
+
+src/opencode-agent-node-pair.test.ts:
+(pass) OpenCode agent-node release pairing > pins the exact versions being released together [0.12ms]
+(pass) OpenCode agent-node release pairing > rejects latest 2.4.x-style help and accepts the RFC-029 capability [0.11ms]
+(pass) OpenCode agent-node release pairing > codex bridge ignores stale PATH globals and resolves only the immutable pair [0.14ms]
+(pass) OpenCode agent-node release pairing > codex capability is explicit and fails closed when absent [0.08ms]
+(pass) OpenCode agent-node release pairing > admits only the exact preview package identity with safe file modes [8.73ms]
+(pass) OpenCode agent-node release pairing > skips an exact project-local impersonator and selects the later global package [6.79ms]
+
+src/batch-workdir.test.ts:
+(pass) normalizeBatchWorkdir > expands current-user tilde before a batch changes cwd [0.21ms]
+(pass) normalizeBatchWorkdir > anchors a relative workdir once to the caller cwd [0.08ms]
+(pass) normalizeBatchWorkdir > keeps an absolute workdir absolute [0.03ms]
+(pass) normalizeBatchWorkdir > rejects empty and unsupported named-user shorthands [0.13ms]
+
+src/copresence-identity.real.test.ts:
+(pass) REAL /proc integration (Linux only) > A: scan on real /proc with a nonce uuid does not throw and finds nothing [1.15ms]
+(pass) REAL /proc integration (Linux only) > B: live marker member + REAL zombie sibling in the same pgroup → homogeneity ok:true (escalation stays possible) [79.70ms]
+(pass) REAL /proc integration (Linux only) > C: readEnviron(1) EACCESes and readOwnerUid(1) is root (non-root only) [0.31ms]
+(pass) REAL /proc integration (Linux only) > D: POSITIVE — spawned marker carrier is found by the scan [28.78ms]
+(pass) REAL /proc integration (Linux only) > E: END-TO-END — scan → group → homogeneity all succeed on real /proc [25.43ms]
+(pass) REAL /proc integration (Linux only) > F: REAL REAP — reapMarkerGroups(realEnumerator, realKiller) kills a real carrier and returns success [376.20ms]
+(pass) REAL /proc integration (Linux only) > G: CLEAN-HOST REAP — nothing carries the uuid → success on THIS host (blocker 1 regression) [0.91ms]
+(pass) REAL /proc integration (Linux only) > H: NON-DUMPABLE — marker-carrying non-dumpable child of a carrier is accounted for, not dropped (blocker 2) [100.67ms]
+(pass) REAL /proc integration (Linux only) > I: readOwnerUid reports the REAL uid of a non-dumpable process (environ inode owner lies) [73.54ms]
+(pass) REAL /proc integration (Linux only) > J: REAL START SEAM — prepareIdentityForStart reclaims a live previous generation and installs the new marker [335.95ms]
+(pass) REAL /proc integration (Linux only) > K: REAL START SEAM — a previous generation that cannot be reaped BLOCKS the start and its marker survives [84.18ms]
+(pass) REAL /proc integration (Linux only) > L: anchorsFromMarker feeds real recorded pane pids into the scope test [29.41ms]
+
+src/claude-code-cli-tty-preflight.test.ts:
+(pass) claude-code-cli spawn preflight (#486 P0 regression gate) > body contains the claude-code-cli spawn (anchor for the assertions below) [0.11ms]
+(pass) claude-code-cli spawn preflight (#486 P0 regression gate) > Refuse: non-TTY stdin preflight fires BEFORE the claude spawn [0.12ms]
+(pass) claude-code-cli spawn preflight (#486 P0 regression gate) > Refuse: non-TTY branch exits non-zero [0.23ms]
+(pass) claude-code-cli spawn preflight (#486 P0 regression gate) > Refuse: message names claude-code-cli and recommends --accept-dev-channels first (--tmux listed with its precondition) [0.26ms]
+(pass) claude-code-cli spawn preflight (#486 P0 regression gate) > Success gate: 'session pinned' / 'session saved' only fires on exit code 0 [0.26ms]
+(pass) claude-code-cli spawn preflight (#486 P0 regression gate) > Exit-code propagation: non-zero child exit calls process.exit(code) [0.13ms]
+(pass) claude-code-cli spawn preflight (#486 P0 regression gate) > Spawn-error path: child.on('error') exits non-zero (was silent → false success) [0.10ms]
+(pass) --tmux escape-hatch headless (#486 CR regression gate) > body contains the --tmux branch (anchor) [0.12ms]
+(pass) --tmux escape-hatch headless (#486 CR regression gate) > --tmux branch has a headless (no-TTY) codepath (`new-session -d`) [0.15ms]
+(pass) --tmux escape-hatch headless (#486 CR regression gate) > --tmux headless: does NOT inherit stdin on detached spawn (was `stdio:"inherit"`) [0.20ms]
+(pass) --tmux escape-hatch headless (#486 CR regression gate) > --tmux headless: verifies session liveness after detached spawn [0.13ms]
+(pass) --tmux escape-hatch headless (#486 CR regression gate) > --tmux headless: propagates non-zero exit on failure paths [0.10ms]
+(pass) --tmux escape-hatch headless (#486 CR regression gate) > --tmux headless: prints attach hint after successful startup [0.11ms]
+
+src/dashboard-managed-process.test.ts:
+(pass) managed Dashboard listener decisions > empty port starts; same healthy managed release remains untouched [0.54ms]
+(pass) managed Dashboard listener decisions > only an exact managed stale npx listener may be terminated [0.12ms]
+(pass) managed Dashboard listener decisions > unmanaged, ambiguous, reused, foreign, and global listeners fail closed [0.32ms]
+(pass) record parser and command identity reject malformed state [0.22ms]
+
+src/token-cli.test.ts:
+(pass) parseTokenCreateName > keeps the legacy positional form [0.19ms]
+(pass) parseTokenCreateName > accepts separated and equals --name forms [0.09ms]
+(pass) parseTokenCreateName > fails closed for missing, empty, unknown, mixed, or extra operands [0.22ms]
+
+src/cli-args-wiring.test.ts:
+(pass) CLI option and positional parsing share cli-args.ts [3.72ms]
+
+src/private-state.test.ts:
+(pass) #472 private state writer > publishes 0600 files and 0700 parent under umask 0 [5.00ms]
+(pass) #472 private state writer > publishes 0600 files and 0700 parent under umask 2 [4.26ms]
+(pass) #472 private state writer > publishes 0600 files and 0700 parent under umask 22 [4.12ms]
+(pass) #472 private state writer > publishes 0600 files and 0700 parent under umask 77 [3.38ms]
+(pass) #472 private state writer > atomically replaces a legacy 0664 target with a 0600 inode [5.43ms]
+(pass) #472 private state writer > replaces a leaf symlink instead of writing through it [4.99ms]
+(pass) #472 private state writer > repairs a legacy file and parent before reading [1.29ms]
+(pass) #472 private state writer > read repair refuses a symlink instead of chmod-following it [0.75ms]
+
+src/tmux-capability.test.ts:
+(pass) parseTmuxVersion > parses the shapes real tmux builds print [0.47ms]
+(pass) parseTmuxVersion > returns null when there is no version to find [0.07ms]
+(pass) tmuxSupportsSessionEnv > 3.2 is the floor; the letter suffix is a patch marker and never lifts a version over it [0.15ms]
+(pass) tmuxSupportsSessionEnv > major version dominates the minor comparison [0.08ms]
+(pass) checkTmuxCapability > too old → actionable verdict naming the required version [0.29ms]
+(pass) checkTmuxCapability > tmux absent → missing verdict, not a crash [0.20ms]
+(pass) checkTmuxCapability > unparseable version → unknown (permissive: never refuse a tmux that may be fine) [0.08ms]
+(pass) checkTmuxCapability > modern tmux → ok [0.06ms]
+(pass) assertTmuxSupportsSessionEnv (cli wrapper) > old tmux aborts the start with an explanation [0.39ms]
+(pass) assertTmuxSupportsSessionEnv (cli wrapper) > missing tmux aborts the start [0.10ms]
+(pass) assertTmuxSupportsSessionEnv (cli wrapper) > modern tmux is silent and does not abort [0.06ms]
+(pass) assertTmuxSupportsSessionEnv (cli wrapper) > unknown version warns but does NOT abort [0.11ms]
+
+src/opencode-launch-env.test.ts:
+(pass) hardenOpencodeAgentNodeEnv > restores launcher PATH and strips every pre-entrypoint loader hook [0.45ms]
+(pass) hardenOpencodeAgentNodeEnv > does not mutate the caller's env object [0.15ms]
+(pass) hardenOpencodeAgentNodeEnv > strips case-variant loader and PATH keys for Windows semantics [0.13ms]
+
+src/secret-shell-guidance.test.ts:
+(pass) #379 secret shell guidance > keeps the existing POSIX export form [0.24ms]
+(pass) #379 secret shell guidance > uses PowerShell syntax and quote escaping on Windows [0.07ms]
+
+src/opencode-auth-login.test.ts:
+(pass) OpenCode manual auth-login sandbox > builds deterministic provider-specific API-key login argv [0.58ms]
+(pass) OpenCode manual auth-login sandbox > uses a fresh all-XDG tree and strips ambient credentials/config hooks [31.51ms]
+(pass) OpenCode manual auth-login sandbox > strictly consumes only the selected provider API record through a private leaf [20.97ms]
+(pass) OpenCode manual auth-login sandbox > refuses OAuth, mixed-provider and symlink auth shapes without disclosing secrets [22.54ms]
+(pass) OpenCode manual auth-login sandbox > persistent planted DB/log links are never exposed and cleanup never follows descendant links [21.64ms]
+(pass) OpenCode manual auth-login sandbox > cleanup unlinks a swapped root symlink but never removes its outside target [18.24ms]
+(pass) OpenCode manual auth-login sandbox > cleanup quarantines the tracked inode but leaves a regular root-name replacement untouched [19.37ms]
+(pass) OpenCode manual auth-login sandbox > a live tracked root whose literal name ends in deleted is still removed [19.15ms]
+(pass) OpenCode manual auth-login sandbox > Linux reports nlink zero for a removed directory retained by fd [9.90ms]
+(pass) OpenCode manual auth-login sandbox > cleanup retains inode ownership after bounded failure and succeeds on retry [20.15ms]
+(pass) OpenCode manual auth-login sandbox > refuses a concurrent live owner marker [22.61ms]
+(pass) OpenCode manual auth-login sandbox > refuses a provider that does not match the node's unique configured preset [12.44ms]
+(pass) OpenCode manual auth-login sandbox > prunes a dead owner's stale root without following its planted links [35.58ms]
+(pass) OpenCode manual auth-login sandbox > PID reuse does not retain a stale credential root [46.04ms]
+(pass) OpenCode manual auth-login sandbox > stale sweep resumes a crash-left quarantine while its owner marker remains [39.56ms]
+(pass) OpenCode manual auth-login sandbox > stale sweep removes an empty quarantine left after marker-last deletion [20.99ms]
+(pass) OpenCode manual auth-login sandbox > spawn-time revalidation rejects a hostile ancestor discovery candidate [21.79ms]
+(pass) OpenCode manual auth-login sandbox > with helper always cleans the fresh root when the action throws [21.19ms]
+
+src/node-start-help.test.ts:
+(pass) #518 node start help exposes the recommended headless flag > real `anet node start --help` names --accept-dev-channels and its operating boundary [217.77ms]
+(pass) #518 node start help exposes the recommended headless flag > asking for help performs no node-start work [239.14ms]
+
+src/claude-code-cli-dependency-preflight.test.ts:
+(pass) #485 claude-code-cli dependency preflight > create remains a warning while start fails closed [0.25ms]
+(pass) #485 claude-code-cli dependency preflight > dependency refusal runs before launch side effects [0.13ms]
+
+src/bootstrap-password-db.test.ts:
+(pass) bootstrap password database binding > turns the local default into an explicit absolute path [0.63ms]
+(pass) bootstrap password database binding > anchors a relative COMMHUB_DB to the hub launch cwd [0.23ms]
+(pass) bootstrap password database binding > rejects an unusable default before opening a database [0.29ms]
+(pass) bootstrap password database binding > does not invent a SQLite target for a PostgreSQL Hub [0.33ms]
+(pass) bootstrap password database binding > updates only the explicitly resolved database, never ambient HOME [79.49ms]
+(pass) bootstrap password database binding > child refuses a missing explicit path without falling back to HOME [46.94ms]
+
+src/gitignore-writeback.test.ts:
+(pass) ensureGitignoreRule — file does not exist > creates file with the rule + trailing newline [2.84ms]
+(pass) ensureGitignoreRule — file does not exist > trims surrounding whitespace from the rule before writing [0.43ms]
+(pass) ensureGitignoreRule — file exists, rule absent > appends rule and reports 'appended' [0.72ms]
+(pass) ensureGitignoreRule — file exists, rule absent > adds missing trailing newline before appending [0.78ms]
+(pass) ensureGitignoreRule — file exists, rule absent > empty file → appended, not created [0.52ms]
+(pass) ensureGitignoreRule — rule already present (idempotent) > exact match returns already-present + does not modify file [0.40ms]
+(pass) ensureGitignoreRule — rule already present (idempotent) > trimmed match (rule with surrounding whitespace) treats as present [0.36ms]
+(pass) ensureGitignoreRule — rule already present (idempotent) > commented-out rule does NOT count as present [0.42ms]
+(pass) ensureGitignoreRule — rule already present (idempotent) > multiple invocations are idempotent (call 3 times) [0.52ms]
+(pass) ensureGitignoreRule — multiple distinct rules don't collide > two different rules go to two different lines [0.44ms]
+(pass) ensureGitignoreRule — multiple distinct rules don't collide > similar-but-different rules don't false-match (`.anet/` vs `.anet/foo`) [0.43ms]
+(pass) ensureGitignoreRules — batch > empty rules list is a no-op [0.31ms]
+(pass) ensureGitignoreRules — batch > creates file with all rules on first call [0.74ms]
+(pass) ensureGitignoreRules — batch > second batch call is fully idempotent [1.36ms]
+(pass) ensureGitignoreRules — batch > partial overlap — only new rules appended [0.53ms]
+(pass) ensureGitignoreRule — defensive > empty rule throws [0.44ms]
+(pass) ensureGitignoreRule — defensive > whitespace-only rule throws [0.27ms]
+
+src/secret-shell-guidance-wiring.test.ts:
+(pass) #379 create and migrate both use platform-aware secret guidance [5.92ms]
+
+src/opencode-runtime-binding.test.ts:
+(pass) external OpenCode runtime binding > survives regular config runtime downgrade and proves the original exact runtime [11.88ms]
+(pass) external OpenCode runtime binding > read returns undefined only for absent state and deterministic keys separate nodes [12.10ms]
+(pass) external OpenCode runtime binding > an absent exact leaf does not impose POSIX modes on ordinary runtime state [2.68ms]
+(pass) external OpenCode runtime binding > unbound legacy symlink or junction-style node paths remain invisible [6.77ms]
+(pass) external OpenCode runtime binding > Windows synthetic permission bits do not disable structural security checks [0.83ms]
+(pass) external OpenCode runtime binding > secure removal is idempotent and removes the exact binding [11.13ms]
+(pass) external OpenCode runtime binding > secure removal refuses tampered content without unlinking it [7.30ms]
+(pass) external OpenCode runtime binding > rejects binding-directory and leaf symlinks [7.23ms]
+(pass) external OpenCode runtime binding > rejects dangling binding-root and exact-leaf symlinks [4.23ms]
+(pass) external OpenCode runtime binding > rejects permissive modes, hard links, and foreign ownership [7.93ms]
+(pass) external OpenCode runtime binding > rejects private but tampered runtime, identity, and extra fields [8.61ms]
+(pass) external OpenCode runtime binding > rejects binding roots that overlap the canonical project in either direction [5.01ms]
+(pass) external OpenCode runtime binding > a symlinked node workDir cannot remove another project's binding [8.51ms]
+(pass) assertOpencodeNodeStateUntracked > allows ordinary non-Git projects [2.03ms]
+(pass) assertOpencodeNodeStateUntracked > allows ordinary untracked projects inside a Git worktree checkout [41.68ms]
+(pass) assertOpencodeNodeStateUntracked > rejects forged Git worktree file markers [1.60ms]
+(pass) assertOpencodeNodeStateUntracked > allows ignored/untracked state but rejects git add -f tracked state [24.18ms]
+(pass) assertOpencodeNodeStateUntracked > rejects a force-added dotenv or any tracked file below the node directory [27.26ms]
+
+src/node-server-channel-meta.test.ts:
+(pass) inbound channel meta > carries the Hub-side creation time [1.03ms]
+(pass) inbound channel meta > task_id carries the inbox ROW id, which is what discriminates re-queue from re-read [0.14ms]
+(pass) inbound channel meta > a row with no created_at degrades to empty, never to the string 'undefined' [0.05ms]
+(pass) inbound channel meta > keeps the attributes send_reply routing already depends on [0.07ms]
+
+src/client.test.ts:
+(pass) CommHub.reply calls send_reply MCP tool [3.92ms]
+
+src/supervise-child.test.ts:
+(pass) superviseChild — shutdown gate stops the loop > shutdownGate=true from the start → runOnce never called [0.83ms]
+(pass) superviseChild — shutdown gate stops the loop > shutdownGate flips true after first iteration → exactly one runOnce [0.40ms]
+(pass) superviseChild — backoff growth + cap > waits double the delay each iteration, capping at maxDelayMs [12.75ms]
+(pass) superviseChild — runOnce that returns WITHOUT markStable is treated as failed (regression pin) > runOnce that returns cleanly without markStable → backoff doubles [16.14ms]
+(pass) superviseChild — markStable resets backoff > after iteration that calls markStable, next wait is baseDelayMs again [15.91ms]
+(pass) superviseChild — markStable resets backoff > markStable called multiple times in one iteration is idempotent [15.93ms]
+(pass) superviseChild — abandonAfterMs > calls onAbandon and returns after cumulative downtime exceeds threshold [16.82ms]
+(pass) superviseChild — abandonAfterMs > markStable in any iteration resets downtime — abandon never fires [16.02ms]
+(pass) superviseChild — runOnce error handling > runOnce throws → onError fires, loop continues [16.24ms]
+(pass) superviseChild — runOnce error handling > runOnce throws AND shutdownGate goes true → loop exits, no further iteration [2.26ms]
+(pass) superviseChild — jitter range > jitterRatio=0.25 + random=0 → -25% of delay (lower bound) [13.82ms]
+(pass) superviseChild — jitter range > jitterRatio=0.25 + random=1 → +25% of delay (upper bound) [16.02ms]
+(pass) superviseChild — jitter range > jitterRatio=0 → deterministic waits at exact delay [16.01ms]
+(pass) superviseChild — jitter range > waitMs floor 100 enforces minimum wait even with tiny base + negative jitter [16.01ms]
+(pass) superviseChild — defensive contract > returns (does not throw) when runOnce never resolves and shutdown flips [4.55ms]
+
+src/node-start-accept-dev-channels-wiring.test.ts:
+(pass) the detached start refuses before spawning when the profile is unstartable [0.49ms]
+(pass) success is claimed only after verifyNodeUp, and failure exits non-zero [0.35ms]
+(pass) the success line no longer asserts a live tmux session it never checked [0.23ms]
+(pass) a failed start never kills the session, but says the session outlives it [0.50ms]
+(pass) pane classification and failure-reason extraction come from the tested module [1.15ms]
+(pass) the prompt watcher answers folder-trust and then waits afresh for dev-channels [0.46ms]
+
+src/claude-vendor-env.test.ts:
+(pass) collectClaudeVendorEnvForCreate > captures known vendor endpoint and credential for claude-agent-sdk [1.53ms]
+(pass) collectClaudeVendorEnvForCreate > explicit --env value wins without duplicate capture [0.28ms]
+(pass) collectClaudeVendorEnvForCreate > does not capture vendor variables for another runtime [0.08ms]
+(pass) collectClaudeVendorEnvForCreate > rejects line-oriented dotenv injection [0.27ms]
+(pass) collectClaudeVendorEnvForCreate > rejects line breaks in explicit --env for every runtime [0.21ms]
+(pass) planPlainSecretEnvRewrites > plans the exact dotenv assignment without mutating the profile [0.46ms]
+(pass) planPlainSecretEnvRewrites > rejects a secret dotenv value with CRLF before any caller mutation [0.24ms]
+
+src/locale-diagnostic-wiring.test.ts:
+(pass) #68 doctor reports the pure locale diagnostic as a warning [5.00ms]
+
+src/primary-network.test.ts:
+(pass) resolvePrimaryNetwork > uses current_network even when the network list is reversed and renamed [0.88ms]
+(pass) resolvePrimaryNetwork > fails explicitly when current_network is missing instead of guessing networks[0] [0.36ms]
+(pass) resolvePrimaryNetwork > turns transport and HTTP failures into explicit resolution errors [0.39ms]
+(pass) debate, demo-social, and pr-review all use the shared resolver [4.09ms]
+
+src/codex-copresence-thread.test.ts:
+(pass) co-presence thread lifecycle > restart resumes the persisted conversation [2.45ms]
+(pass) co-presence thread lifecycle > only a node with no persisted thread creates one [0.28ms]
+
+src/opencode-preset.test.ts:
+(pass) OPENCODE_PRESETS registry > exports the two blessed presets (anthropic + openai) [0.12ms]
+(pass) OPENCODE_PRESETS registry > findOpencodePreset('anthropic') returns the record; unknown returns null [0.09ms]
+(pass) readPresetKeyFromEnv — env-only, no interactive prompt > returns the trimmed key when the env var is set [0.14ms]
+(pass) readPresetKeyFromEnv — env-only, no interactive prompt > returns null when the env var is missing / empty [0.10ms]
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > body shape matches opencode auth.json convention [0.60ms]
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > writes to <workdir>/.local/share/opencode/auth.json with mode 0o600 [6.96ms]
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > writeOpencodeConfigJson lands under .config/opencode with 0o600 [6.86ms]
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > keyless create atomically clears a private pre-planted auth file [6.88ms]
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > default tool policy disables filesystem, shell, task, and skill tools [0.26ms]
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > writes only blessed provider identity and strips all pre-planted routing/executable config [7.58ms]
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > atomically replaces a private but invalid pre-planted config without parsing it [6.28ms]
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > rejects symlink escapes in workDir, config/data ancestors, and final targets [8.52ms]
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > validates the full tree before mutation so a bad auth side cannot partially rewrite config [1.29ms]
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > rejects permissive modes and foreign owners without chmod-follow repair [3.65ms]
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > prepares .anet/nodes/node before profile secrets and provides atomic private leaf I/O [26.68ms]
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > accepts an ordinary 0775 project root for a non-root uid=gid private group [3.73ms]
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > profile preflight rejects .anet/nodes/node and config/.env symlink chains before secret writes [6.84ms]
+(pass) buildAuthJsonBody + writeOpencodeAuthJson > profile preflight rejects writable ancestors and non-private node roots [1.53ms]
+
+src/commhub-response.test.ts:
+(pass) #1100 parseCommhubToolResult > isError result → structured {ok:false,error} carrying the readable message, does NOT throw [1.77ms]
+(pass) #1100 parseCommhubToolResult > success JSON payload still parses to an object [0.13ms]
+(pass) #1100 parseCommhubToolResult > success text that isn't JSON degrades to a structured error, does NOT throw [0.26ms]
+(pass) #1100 parseCommhubToolResult > JSON-RPC error envelope (no result.content) → readable structured error [0.12ms]
+(pass) #1100 parseCommhubToolResult > plain result with no content passes through [0.06ms]
+
+src/codex-copresence-recovery.test.ts:
+(pass) Codex co-presence recovery > resume requires exact thread identity and persisted history [0.69ms]
+(pass) Codex co-presence recovery > stub resume failure is fail-closed and never calls thread/start [0.43ms]
+(pass) Codex co-presence recovery > backup preserves config and session state but excludes credentials [3.76ms]
+(pass) Codex co-presence recovery > active state writer is quiesced before the authoritative snapshot [0.38ms]
+(pass) Codex co-presence recovery > recursive snapshot rejects symlinks instead of following state outside CODEX_HOME [1.20ms]
+(pass) Codex co-presence recovery > audit exposes topology without config secrets [0.20ms]
+
+src/opencode-smoke-env.test.ts:
+(pass) buildOpencodeSmokeEnv > locks the exact hardened ancestor candidate set [1.75ms]
+(pass) buildOpencodeSmokeEnv > rejects sticky world-writable /tmp instead of silently degrading [0.42ms]
+(pass) buildOpencodeSmokeEnv > inherits only transport/locale trust settings and controls all OpenCode roots [0.60ms]
+(pass) buildOpencodeSmokeEnv > every writable root can be precreated private, including XDG_RUNTIME_DIR [1.11ms]
+
+src/grok-attach-client.test.ts:
+(pass) validateGrokAttachSocket rejects symlinks, non-sockets, and foreign owners [2.66ms]
+(pass) connectGrokAttach bridges base64 terminal I/O, status, resize, and detach [9.93ms]
+(pass) connectGrokAttach splits large input so every NDJSON frame stays bounded [2.32ms]
+(pass) connectGrokAttach fails closed on an invalid handshake and oversized frame [1.40ms]
+(pass) a single-client rejection before hello preserves the server error [0.83ms]
+(pass) hello followed by a fatal frame in the same chunk cannot return a dead session [0.71ms]
+(pass) detach force-closes a peer that never completes its half-close [13.93ms]
+(pass) callback failure and invalid limits fail before returning an attached client [1.36ms]
+(pass) remote detach is surfaced and closes without echoing a detach frame [1.72ms]
+
+src/tmux-pane-prompt.test.ts:
+(pass) folder-trust prompt is recognised as its own prompt, not as dev-channels [2.19ms]
+(pass) dev-channels prompt is still recognised [0.09ms]
+(pass) a normal Claude Code pane matches no prompt, so no Enter is ever sent [0.05ms]
+(pass) an empty / still-booting pane matches no prompt [0.05ms]
+(pass) when both prompts are in one capture the later one wins, not the leftover [0.06ms]
+(pass) the refusal line is pulled out of a dead pane, with the [anet] prefix stripped [0.34ms]
+(pass) the refusal is picked over unrelated scrollback both above and below it [0.11ms]
+(pass) an ❌ line is reported without its prefix decorations [0.08ms]
+(pass) a crash with no anet refusal falls back to the last non-empty line [0.20ms]
+(pass) an empty pane yields no reason, so the caller cannot print an invented one [0.16ms]
+
+src/project-outcome-exit-code.test.ts:
+(pass) project up exits non-zero when nodes failed to come up [0.43ms]
+(pass) project restart carries the same gate [0.28ms]
+(pass) the gate counts unstartable configs too, not only crashes [0.26ms]
+(pass) a fully successful run still returns normally [0.29ms]
+(pass) the failure line points at the list the operator just saw [0.28ms]
+
+src/windows-codex-copresence.test.ts:
+(pass) Windows native Codex co-presence ownership > launcher waits for the real shared bridge before opening the TUI [2.27ms]
+(pass) Windows native Codex co-presence ownership > matching PID plus CreationDate is safe to stop [0.42ms]
+(pass) Windows native Codex co-presence ownership > PID reuse is refused rather than killing an unrelated process [0.15ms]
+(skip) Windows native process/ACL smoke > .NET process identity and taskkill manage a real Windows process tree
+(skip) Windows native process/ACL smoke > credential directory gets protected native ACLs
+(skip) Windows native process/ACL smoke > (unnamed)
+
+src/grok-copresence-profile.test.ts:
+(pass) Grok copresence profile defaults > builds the Grok agent-node parent environment from an exact empty allowlist [2.05ms]
+(pass) Grok copresence profile defaults > does not mistake an old headless-only agent-node for co-presence support [0.15ms]
+(pass) Grok copresence profile defaults > builds the npm resolver environment from an exact empty allowlist [0.73ms]
+(pass) Grok copresence profile defaults > prepares two distinct empty owner-only npm config files without following symlinks [1.83ms]
+(pass) Grok copresence profile defaults > enables copresence only for non-headless grok-build-cli [0.49ms]
+(pass) Grok copresence profile defaults > uses the owner-bound state home even when XDG is owner-only [0.47ms]
+(pass) Grok copresence profile defaults > falls back to a bounded owner tmp path when the state home is too long [0.16ms]
+(pass) Grok copresence profile defaults > anet grok attach is the only join path and requires copresence + an absolute socket [0.44ms]
+
+src/tmux-exact-target.test.ts:
+(pass) a session name becomes an exact target [0.08ms]
+(pass) an already-exact target is not double-prefixed [0.12ms]
+(pass) no shell quoting is added — these go to tmux as argv, not through a shell [0.05ms]
+(skip) bare -t prefix-matches a sibling; =name does not
+
+src/opencode-copresence-cli.test.ts:
+(pass) OpenCode co-presence CLI wiring > persists copresence mode before launching the bridge [0.07ms]
+(pass) OpenCode co-presence CLI wiring > starts only exact alias and alias-bridge tmux sessions [0.07ms]
+(pass) OpenCode co-presence CLI wiring > does not depend on a long-lived tmux server's stale launcher environment [0.05ms]
+(pass) OpenCode co-presence CLI wiring > waits for the owner-only runtime launcher before starting the official TUI [0.05ms]
+(pass) OpenCode co-presence CLI wiring > the generic --copresence dispatcher selects OpenCode by stored runtime [0.15ms]
+(pass) OpenCode co-presence CLI wiring > operator help names the create, attach, and stop commands [1.10ms]
+(pass) OpenCode co-presence CLI wiring > prints an exact tmux target so an exited TUI cannot prefix-match the bridge [0.09ms]
+
+src/locale-diagnostic.test.ts:
+(pass) #68 locale diagnostic > LC_ALL overrides an otherwise UTF-8 LANG [2.11ms]
+(pass) #68 locale diagnostic > LC_CTYPE overrides LANG when LC_ALL is empty [0.10ms]
+(pass) #68 locale diagnostic > accepts common UTF-8 spellings [0.09ms]
+(pass) #68 locale diagnostic > warns for POSIX, C, non-UTF-8, and unset locale [0.16ms]
+(pass) #68 locale diagnostic > does not prescribe POSIX locale variables on Windows [0.08ms]
+(pass) #68 locale diagnostic > renders locale values without terminal control or unbounded output [0.20ms]
+
+src/opencode-package-binary.test.ts:
+(pass) validateOpencodePackageBinary > accepts only the canonical exact npm package entrypoint [2.43ms]
+(pass) validateOpencodePackageBinary > rejects a same-version package impersonator inside the project [1.46ms]
+(pass) validateOpencodePackageBinary > skips a same-version project shim and selects a later trusted package [2.79ms]
+(pass) validateOpencodePackageBinary > rejects a monorepo-root package when invoked from a nested app [3.17ms]
+(pass) validateOpencodePackageBinary > ordinary 0664 checkout package.json does not abort boundary discovery [1.11ms]
+(pass) validateOpencodePackageBinary > accepts both exact registry spellings of bin.opencode [1.80ms]
+(pass) validateOpencodePackageBinary > rejects forged name, version, and bin metadata [2.73ms]
+(pass) validateOpencodePackageBinary > rejects world-writable files and package ancestors [2.54ms]
+(pass) validateOpencodePackageBinary > rejects a symlinked package.json even when its contents are exact [1.05ms]
+(pass) #739 cwd 参与信任判定 > 缺陷现状:cwd 为文件系统根时,禁止根含 / —— 与任何包路径都重叠 [0.23ms]
+(pass) #739 cwd 参与信任判定 > 缺陷现状:cwd=/ 时,一个各方面都合法的包也会被拒 [1.38ms]
+(pass) #739 cwd 参与信任判定 > 缺陷现状:cwd 是全局安装前缀的祖先时,全局安装的包被判成项目本地 [1.53ms]
+(pass) #739 cwd 参与信任判定 > 这条守卫要防的东西必须继续被防住(修 #739 时不许放宽它) [1.01ms]
+
+src/im/access-resolve.test.ts:
+(pass) normalizeAllowFrom — input shapes > real string[] passes through deduped (filter empty strings) [1.87ms]
+(pass) normalizeAllowFrom — input shapes > undefined → empty + not malformed [0.05ms]
+(pass) normalizeAllowFrom — input shapes > null → empty + not malformed [0.02ms]
+(pass) normalizeAllowFrom — input shapes > non-array object → empty + malformed (corrupted access.json shape) [0.05ms]
+(pass) normalizeAllowFrom — input shapes > string instead of array → malformed [0.04ms]
+(pass) normalizeAllowFrom — input shapes > array with non-string elements drops them [0.07ms]
+(pass) resolveTelegramAccess — fail-closed empty allowFrom (v0.11 security change) > empty array → deny with empty-fail-closed kind [0.26ms]
+(pass) resolveTelegramAccess — fail-closed empty allowFrom (v0.11 security change) > undefined → deny [0.09ms]
+(pass) resolveTelegramAccess — fail-closed empty allowFrom (v0.11 security change) > malformed → deny + reason mentions malformed [0.12ms]
+(pass) resolveTelegramAccess — wildcard '*' opens the channel > ['*'] alone allows any sender [0.08ms]
+(pass) resolveTelegramAccess — wildcard '*' opens the channel > ['*', 'specific_id'] still wildcard-allows (wins precedence) [0.06ms]
+(pass) resolveTelegramAccess — explicit id / username matching > senderId in list → allow [0.11ms]
+(pass) resolveTelegramAccess — explicit id / username matching > senderUsername match (no id match) → allow [0.07ms]
+(pass) resolveTelegramAccess — explicit id / username matching > neither id nor username in list → deny [0.07ms]
+(pass) resolveTelegramAccess — explicit id / username matching > empty senderUsername doesn't accidentally match empty list entry [0.05ms]
+(pass) resolveTelegramAccess — explicit id / username matching > blank-string id with username match still allows [0.05ms]
+(pass) resolveTelegramAccess — explicit id / username matching > production-shape: bare username (no @) in allowFrom matches bare msg.from.username [0.07ms]
+(pass) resolveTelegramAccess — explicit id / username matching > production-shape mismatch: @vansin in allowFrom does NOT match bare vansin payload [0.05ms]
+(pass) resolveFeishuAccess — DM path mirrors telegram fail-closed > empty allowFrom → deny [0.26ms]
+(pass) resolveFeishuAccess — DM path mirrors telegram fail-closed > wildcard allows [0.08ms]
+(pass) resolveFeishuAccess — DM path mirrors telegram fail-closed > specific id allows [0.07ms]
+(pass) resolveFeishuAccess — DM path mirrors telegram fail-closed > sender not in list → deny [0.08ms]
+(pass) resolveFeishuAccess — group path (allowChats + groupPolicy) > empty allowChats → fail-closed [0.11ms]
+(pass) resolveFeishuAccess — group path (allowChats + groupPolicy) > chat in allowChats + groupPolicy=all → allow [0.10ms]
+(pass) resolveFeishuAccess — group path (allowChats + groupPolicy) > chat in allowChats + groupPolicy=observe → deny [0.07ms]
+(pass) resolveFeishuAccess — group path (allowChats + groupPolicy) > chat NOT in allowChats → deny (even with policy=all) [0.19ms]
+(pass) resolveFeishuAccess — group path (allowChats + groupPolicy) > wildcard chats opens any chat (with groupPolicy=all) [0.05ms]
+(pass) resolveFeishuAccess — group path (allowChats + groupPolicy) > groupPolicy=mention allows (caller decides at message inspect time) [0.07ms]
+(pass) buildEmptyAllowlistWarn — boot-time visibility > returns warn string for empty allowFrom [0.17ms]
+(pass) buildEmptyAllowlistWarn — boot-time visibility > returns warn string for malformed allowFrom + mentions malformed [0.05ms]
+(pass) buildEmptyAllowlistWarn — boot-time visibility > returns null when allowFrom has at least one entry [0.07ms]
+(pass) buildEmptyAllowlistWarn — boot-time visibility > returns null for wildcard-allow (channel intentionally open) [0.04ms]
+(pass) loadTelegramAccess + resolver — wiring regression (CHANGE_REQ on #276) > loader stores raw allowFrom verbatim — no normalization at load time [0.16ms]
+(pass) loadTelegramAccess + resolver — wiring regression (CHANGE_REQ on #276) > loader emits boot-warn when allowFrom is missing [0.11ms]
+(pass) loadTelegramAccess + resolver — wiring regression (CHANGE_REQ on #276) > loader emits boot-warn when allowFrom is malformed (non-array) [0.08ms]
+(pass) loadTelegramAccess + resolver — wiring regression (CHANGE_REQ on #276) > loader is silent when allowFrom has at least one entry (even if numeric) [0.06ms]
+(pass) loadTelegramAccess + resolver — wiring regression (CHANGE_REQ on #276) > [123] alone (numeric sender id from a misformatted access.json) → loader+resolver fail-closed [0.09ms]
+(pass) loadTelegramAccess + resolver — wiring regression (CHANGE_REQ on #276) > [null] (corrupted access.json) → loader+resolver fail-closed [0.05ms]
+(pass) loadTelegramAccess + resolver — wiring regression (CHANGE_REQ on #276) > [{}] (object instead of id string) → loader+resolver fail-closed [0.06ms]
+(pass) loadTelegramAccess + resolver — wiring regression (CHANGE_REQ on #276) > [123, '@vansin'] (mixed) → '@vansin' still allowed, numeric '123' rejected [0.10ms]
+(pass) loadTelegramAccess + resolver — wiring regression (CHANGE_REQ on #276) > [null, '*'] (mixed wildcard) → wildcard wins despite garbage entries [0.06ms]
+(pass) loadTelegramAccess + resolver — wiring regression (CHANGE_REQ on #276) > missing access.json entirely (loader gets null) → fail-closed [0.08ms]
+(pass) regression — pre-v0.11 fail-open MUST NOT come back > empty array NEVER allows [0.05ms]
+(pass) regression — pre-v0.11 fail-open MUST NOT come back > undefined NEVER allows [0.05ms]
+(pass) regression — pre-v0.11 fail-open MUST NOT come back > null NEVER allows [0.04ms]
+(pass) regression — pre-v0.11 fail-open MUST NOT come back > object-shape (corrupted) NEVER allows [0.03ms]
+
+src/im/feishu/adapter-lifecycle.test.ts:
+(pass) FeishuAdapter WS lifecycle > SDK start resolution is not readiness; missing onReady times out fail-closed [21.70ms]
+(pass) FeishuAdapter WS lifecycle > onReady is the only initial online authority [1.55ms]
+(pass) FeishuAdapter WS lifecycle > initial onError rejects and scrubs credentials [1.38ms]
+(pass) FeishuAdapter WS lifecycle > initial onError scrubs arbitrary Lark access-token shapes [1.45ms]
+(pass) FeishuAdapter WS lifecycle > spurious reconnect before first ready cannot mark health connected [17.55ms]
+[2026-08-26T09:53:26.875Z] [feishu:audit] error from=? conv=? — inbound [redacted] Bearer [redacted]
+(pass) FeishuAdapter WS lifecycle > inbound handler errors use the same token scrub before health [4.47ms]
+(pass) FeishuAdapter WS lifecycle > reconnecting lowers health and reconnected restores it [3.58ms]
+(pass) FeishuAdapter WS lifecycle > terminal error after ready lowers health and notifies worker owner once [1.59ms]
+(pass) FeishuAdapter WS lifecycle > stop closes the public SDK client and invalidates late callbacks [1.62ms]
+(pass) worker terminal owner logs safely and exits non-zero [0.16ms]
+
+5 tests skipped:
+(skip) real tmux: '=name' fails for capture-pane on a non-ASCII session, the coordinate works
+(skip) Windows native process/ACL smoke > .NET process identity and taskkill manage a real Windows process tree
+(skip) Windows native process/ACL smoke > credential directory gets protected native ACLs
+(skip) Windows native process/ACL smoke > (unnamed)
+(skip) bare -t prefix-matches a sibling; =name does not
+
+ 570 pass
+ 5 skip
+ 0 fail
+ 1662 expect() calls
+Ran 575 tests across 64 files. [4.50s]
+executed_files=64 discovered_files=64
+[L0b] every agent-network/tests file, dispatched by kind
+tests_dir_executed=19 tests_dir_discovered=19 tests_dir_failed=0
+[L1] witnessed-red: top-level config help must match the implemented parser
+Expected to contain: "anet config [path|json]"
+MUTATION_RED stale-config-help rc=1
+RESULT: PASS

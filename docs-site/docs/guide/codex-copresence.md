@@ -173,18 +173,26 @@ Get-NetTCPConnection -LocalPort <free-port> -ErrorAction SilentlyContinue
 
 # Terminal 1：先 cd 到目标项目，再起独立 app-server
 cd C:\path\to\project
+$env:CODEX_HOME = "C:\path\to\project\.anet\nodes\codex-human\codex-home"
 codex app-server --listen ws://127.0.0.1:<free-port>
 
 # Terminal 2：先启动 bridge，让 runtime 创建/捕获 thread 并写回 codexThreadId
 Get-ChildItem Env:COMMHUB_* | ForEach-Object { Remove-Item "Env:$($_.Name)" }
+$env:CODEX_HOME = "C:\path\to\project\.anet\nodes\codex-human\codex-home"
 anet node create codex-human --runtime codex-app-server --codex-app-server-url ws://127.0.0.1:<free-port>
 anet node start codex-human
 
-# 从节点 config.json 读取 codexThreadId 后，Terminal 3 接入同一条 thread
-codex resume --remote ws://127.0.0.1:<free-port> <codexThreadId>
+# 从节点 config.json 读取 codexThreadId/model 后，让 Terminal 3 接入同一条
+# thread；必须使用该节点自己的 CODEX_HOME
+$env:CODEX_HOME = "C:\path\to\project\.anet\nodes\codex-human\codex-home"
+codex resume --remote ws://127.0.0.1:<free-port> <codexThreadId> -m <model>
 ```
 
-`codex resume --remote` 必须带 session/thread id；省略会进入历史会话 picker，容易接错线程。创建节点时也可加 `--codex-thread-id <id>` 接管指定 thread；不传时 runtime 自动捕获并把 `codexThreadId` 写回节点配置。
+`codex resume --remote` 必须同时对齐节点的独立 `CODEX_HOME`、`codexAppServerUrl`、`codexThreadId` 与 `model`。省略 thread id 会进入历史会话 picker，容易接错线程；省略 `CODEX_HOME` 更危险：Codex 可能使用默认 `~/.codex` 并静默连接外网 443，留下一个空白 pane，看起来像已成功接入，实际却是独立云端会话。bridge 首次写回 `codexThreadId` 时会打印可直接复制的 POSIX 与 PowerShell resume 命令。创建节点时也可加 `--codex-thread-id <id>` 接管指定 thread；不传时 runtime 自动捕获并写回配置。
+
+手工启动后不要只看空 pane 判断成功：检查 TUI 进程的 socket，确认它连接的是配置中的 loopback `codexAppServerUrl`（而不是外网 `:443`），再在 TUI 与 bridge 两侧核对同一个 thread id。Linux/macOS 同样必须先 `export CODEX_HOME='<节点目录>/codex-home'`，再执行带 `--remote`、thread id 与 `-m` 的 `codex resume`。
+
+手工拓扑的三个终端还必须显式使用**同一个节点专属 `CODEX_HOME`**。漏掉任意一处时，Codex 可能静默使用用户默认 `~/.codex`，TUI 看起来已经启动，实际却连到另一套云端会话而不是这个 loopback app-server。不要让持久化节点与主 Codex 会话共享 `CODEX_HOME`。
 
 Linux/macOS 的高级用户也可用这一拓扑连接已存在的 app-server，但日常使用优先 `--copresence`，它会统一处理 loopback、独立 `CODEX_HOME`、MCP 注入、tmux 生命周期与停止身份。若本机 24700–24720 等常用范围已被其他共存节点占用，继续选新的空闲 loopback 端口，启动前先查占用。
 

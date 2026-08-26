@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { resolvePort } from "./resolve-port.js";
+import { normalizeSessionRuntime } from "./runtime-label.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
@@ -48,6 +49,8 @@ import { diagnoseTask } from "./task-diagnostic.js";
 import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startScheduledTaskScheduler } from "./scheduled-tasks.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
 import { recordDeliveredStaleEvents } from "./task-lifecycle-watcher.js";
+import { SIDE_THREAD_FEATURE_FLAG, SideThreadCoordinator, SideThreadPortRegistry, SideThreadStore, type SideThreadActor, type SideThreadAttachmentRef, type SideThreadExecutionPort } from "./side-thread.js";
+import { handleSideThreadHttpRequest } from "./side-thread-http.js";
 
 const PORT = resolvePort(process.env.PORT);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -62,6 +65,18 @@ const TMUX_ALLOWLIST = new Set(
     .filter(Boolean)
 );
 let masterTokenDeprecationLogged = false;
+
+// #175 PR2 starts fail-closed. Only a verified native adapter can be installed;
+// the execution port deliberately has no ordinary task/FIFO delivery method.
+export const sideThreadPortRegistry = new SideThreadPortRegistry();
+export function installSideThreadExecutionPort(port: SideThreadExecutionPort): () => void {
+  return sideThreadPortRegistry.install(port);
+}
+const sideThreadCoordinator = new SideThreadCoordinator(new SideThreadStore(db), sideThreadPortRegistry, {
+  enabled: process.env[SIDE_THREAD_FEATURE_FLAG] === "1",
+  authorizeNode: (actor, networkId, nodeId) => authorizeSideThreadNode(actor, networkId, nodeId),
+  authorizeAttachment: (actor, networkId, ref) => authorizeSideThreadAttachment(actor, networkId, ref),
+});
 
 if (AUTH_TOKEN) {
   console.warn("[commhub] COMMHUB_AUTH_TOKEN is deprecated and will be removed in v1.0. See RFC-001.");
@@ -192,19 +207,7 @@ function isLocalhostIP(ip: string): boolean {
 // Normalize the raw `agent` field into a canonical runtime identifier for the
 // dashboard's Runtime badge. Returns null for unknown/absent agents so the
 // frontend can fall back to a placeholder.
-function normalizeRuntime(agent: unknown): string | null {
-  if (typeof agent !== "string" || agent.length === 0) return null;
-  if (agent === "claude-code") return "claude-code-cli";
-  if (agent.startsWith("agent-node:codex")) return "codex-sdk";
-  if (agent.startsWith("agent-node:claude")) return "claude-agent-sdk";
-  if (agent.startsWith("agent-node:grok")) return "grok-build-acp";
-  // RFC-029 — agent-node reports `agent-node:opencode` when RUNTIME
-  // bucket resolves to "opencode". Dashboard needs the canonical
-  // launcher name so its Runtime badge matches wizard choices.
-  if (agent.startsWith("agent-node:opencode")) return "opencode-cli";
-  if (agent === "http-api" || agent === "http" || agent === "api") return "http-api";
-  return null;
-}
+const normalizeRuntime = normalizeSessionRuntime;
 
 function isTmuxAllowedIP(ip: string): boolean {
   return isLocalhostIP(ip) || TMUX_ALLOWLIST.has(ip);
@@ -233,6 +236,25 @@ function resolveRequestAuth(req: Request, options: RequestTokenOptions = {}): { 
   const resolved = resolveToken(token);
   if (!resolved) return null;
   return { userId: resolved.user.user_id, networkId: resolved.networkId, username: resolved.user.username, tokenName: resolved.tokenName, tokenId: resolved.tokenId };
+}
+
+function resolveSideThreadActor(req: Request, auth: ReturnType<typeof resolveRequestAuth>, isAdmin: boolean): SideThreadActor | null {
+  // Legacy master and DEV_OPEN cannot own durable records because neither
+  // supplies a stable per-user identity for later window hydration.
+  if (!auth?.userId || !auth.tokenId) return null;
+  const nodeCredential = requestToken(req).startsWith("ntok_");
+  const tokenRow = nodeCredential
+    ? db.get<{ bound_node_id: string | null }>("SELECT bound_node_id FROM api_tokens WHERE token_id = ?1", auth.tokenId)
+    : null;
+  return {
+    userId: auth.userId,
+    username: auth.username,
+    tokenId: auth.tokenId,
+    kind: nodeCredential ? "node" : "user",
+    ...(auth.networkId ? { boundNetworkId: auth.networkId } : {}),
+    ...(tokenRow?.bound_node_id ? { boundNodeId: tokenRow.bound_node_id } : {}),
+    isAdmin,
+  };
 }
 
 // #503 — the credential kinds that authorization decisions branch on.
@@ -335,6 +357,46 @@ export function authorizeFileDownload(
   // tightening the local-dev carve-out.
   if (entry.ownerId === null && DEV_OPEN) return true;
   return false;
+}
+
+function authorizeSideThreadNode(actor: SideThreadActor, networkId: string, nodeId: string): boolean {
+  const node = db.get<{ network_id: string | null; owner_user_id: string | null }>(
+    "SELECT network_id, owner_user_id FROM nodes WHERE node_id = ?1", nodeId,
+  );
+  if (!node || node.network_id !== networkId) return false;
+  if (!getUserNetworkRole(actor.userId, networkId)) return false;
+  if (!node.owner_user_id || node.owner_user_id !== actor.userId) return false;
+  if (actor.boundNetworkId && actor.boundNetworkId !== networkId) return false;
+  if (actor.kind === "node" && actor.boundNodeId !== nodeId) return false;
+  return true;
+}
+
+function resolveSideThreadCapabilityTarget(input: { actor: SideThreadActor; alias?: string; nodeId?: string; networkId?: string }): { nodeId: string; networkId: string } | undefined {
+  if ((!input.alias && !input.nodeId) || (input.alias && input.nodeId)) return undefined;
+  const networkId = input.actor.boundNetworkId ?? input.networkId;
+  const params: unknown[] = [input.nodeId ?? input.alias];
+  let sql = input.nodeId
+    ? "SELECT node_id,network_id FROM nodes WHERE node_id=?1"
+    : "SELECT node_id,network_id FROM nodes WHERE alias=?1";
+  if (networkId) { params.push(networkId); sql += " AND network_id=?2"; }
+  const authorized = db.all<{ node_id: string; network_id: string | null }>(sql, ...params)
+    .filter(row => !!row.network_id && authorizeSideThreadNode(input.actor, row.network_id, row.node_id));
+  if (authorized.length !== 1) return undefined;
+  return { nodeId: authorized[0].node_id, networkId: authorized[0].network_id! };
+}
+
+function authorizeSideThreadAttachment(actor: SideThreadActor, networkId: string, ref: SideThreadAttachmentRef): boolean {
+  if (!FILE_ID_REGEX.test(ref.fileId)) return false;
+  const path = indexEntryPath(ref.fileId);
+  if (!path || !existsSync(path)) return false;
+  try {
+    const entry = JSON.parse(readFileSync(path, "utf8"));
+    if (!validateIndexEntry(entry) || entry.file_id !== ref.fileId) return false;
+    if (entry.network_id !== networkId || entry.owner_id !== actor.userId) return false;
+    if (!isValidCalendarBucket(entry.date_bucket)) return false;
+    const storage = pathForExistingBlob(entry.date_bucket, entry.file_id, entry.ext);
+    return isPathInsideUploadsRoot(storage.absolutePath) && existsSync(storage.absolutePath);
+  } catch { return false; }
 }
 
 type ByteRange =
@@ -497,6 +559,17 @@ type RestDeliveryTarget =
   | { state: "offline"; alias: string; session: any; message: string }
   | { state: "not_found"; alias: string; message: string };
 
+// Build this only after authorization and a network-scoped lookup succeeded.
+// In particular, not-found and permission-denied responses must not become a
+// cross-network alias/node enumeration oracle.
+function restActualTo(target: Exclude<RestDeliveryTarget, { state: "not_found" }>, networkId: string | null) {
+  return {
+    alias: target.alias,
+    to_node_id: target.session?.node_id ?? null,
+    network_id: networkId,
+  };
+}
+
 function resolveRestDeliveryTarget(alias: string, networkId: string | null): RestDeliveryTarget {
   const params: any[] = [alias];
   let sql = "SELECT status, updated_at, last_seen_at, node_id FROM sessions WHERE alias = ?1";
@@ -649,7 +722,10 @@ export function patrolExpiredTasks(): void {
             WHERE task_id = ?1 AND status IN ('created', 'delivered')`,
           [task.task_id],
         );
-        if (result.changes !== 1) continue;
+        // SQLite may include the AFTER UPDATE terminal-journal trigger write
+        // in this count. The WHERE clause still targets one exact guarded
+        // task, so any positive count proves the task transition happened.
+        if (result.changes < 1) continue;
         syncScheduledRunForTask(task.task_id, task.network_id);
         changed.push(task);
       }
@@ -1442,6 +1518,16 @@ return Bun.serve({
     if (restScope.denied) {
       return withCors(req, Response.json({ ok: false, error: restScope.denied }, { status: 403 }));
     }
+
+    const sideThreadResponse = await handleSideThreadHttpRequest({
+      req,
+      url,
+      // Durable prompts/results never accept query-string credentials.
+      actor: resolveSideThreadActor(req, resolveRequestAuth(req, { allowQueryToken: false }), isAdmin),
+      coordinator: sideThreadCoordinator,
+      resolveCapabilityTarget: resolveSideThreadCapabilityTarget,
+    });
+    if (sideThreadResponse) return withCors(req, sideThreadResponse);
 
     // RFC-036 owner-gated host schedule edits. This handler independently
     // verifies exact node ownership and node-token binding; network admin is
@@ -2263,6 +2349,7 @@ return Bun.serve({
       const identity = resolveRestFromSession({
         token: requestToken(req),
         tokenName: restAuth?.tokenName,
+        authenticatedUsername: restAuth?.username,
         requestedFrom: body.from,
       });
       if (!identity.ok) {
@@ -2278,6 +2365,7 @@ return Bun.serve({
       const ttlSeconds = (body as any).ttl_seconds || 3600;
       const fromNodeId = resolveRestNodeIdForAlias(fromSession, taskNetId);
       const targetNodeId = target.session?.node_id ?? null;
+      const actualTo = restActualTo(target, taskNetId);
       // #221 — fold top-level `attachments` into `meta.attachments` so
       // the REST and MCP send_task transports produce identical
       // tasks.meta_json shape downstream. Top-level wins over any
@@ -2378,10 +2466,17 @@ return Bun.serve({
           task_id: id,
           message_id: id,
           session_status: target.session.status ?? "offline",
+          actual_to: actualTo,
           ...(canonical.renamed ? { renamed_from: body.alias, renamed_to: targetAlias } : {}),
         }, { status: 202 }));
       }
-      return withCors(req, Response.json({ ok: true, task_id: id, message_id: id, ...(canonical.renamed ? { renamed_from: body.alias, renamed_to: targetAlias } : {}) }));
+      return withCors(req, Response.json({
+        ok: true,
+        task_id: id,
+        message_id: id,
+        actual_to: actualTo,
+        ...(canonical.renamed ? { renamed_from: body.alias, renamed_to: targetAlias } : {}),
+      }));
     }
 
     // ── REST: broadcast ──

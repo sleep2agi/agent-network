@@ -21,6 +21,8 @@ export interface RestIdentityInput {
   token: string;
   /** `api_tokens.name`; for node tokens it is `node:<alias>`. */
   tokenName: string | null | undefined;
+  /** Username resolved from the authenticated token. */
+  authenticatedUsername?: string | null;
   /** Caller-supplied `body.from`. */
   requestedFrom: unknown;
 }
@@ -69,11 +71,16 @@ export function resolveRestFromSession(input: RestIdentityInput): RestIdentityRe
     return { ok: true, fromSession: "api" };
   }
 
-  // Not a node token: unchanged behaviour. The Dashboard legitimately posts as
-  // its logged-in user; tightening that is a separate change with its own
-  // compatibility surface.
+  // A user-token client normally does not need to repeat its identity in every
+  // request. Prefer an explicit, backwards-compatible claim when present;
+  // otherwise attribute the task to the authenticated username. Falling back
+  // to the transport label `api` is reserved for legacy auth contexts where
+  // the server genuinely has no user identity.
   if (!alias) {
-    return { ok: true, fromSession: requested || "api" };
+    const authenticatedUsername = typeof input.authenticatedUsername === "string"
+      ? input.authenticatedUsername.trim()
+      : "";
+    return { ok: true, fromSession: requested || authenticatedUsername || "api" };
   }
 
   // Node token claiming somebody else — refuse rather than silently rewrite,

@@ -39,6 +39,11 @@ test("rows split on the last tab, so the coordinate is never mistaken for the na
   expect(rows).toEqual([{ session: "odd\tname", coord: "1.2" }]);
 });
 
+test("the portable visible pane marker survives tmux builds that sanitize control characters", () => {
+  expect(PANE_LIST_FORMAT).toContain("::ANET_PANE::");
+  expect(paneTargetFor("linux-node::ANET_PANE::2.3\n", "linux-node")).toBe("linux-node:2.3");
+});
+
 test("malformed rows are dropped, not turned into a target", () => {
   expect(parsePaneRows("no-tab-here\n\t0.0\n")).toEqual([]);
 });

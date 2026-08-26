@@ -10,7 +10,7 @@
  * anet run                     独立 SSE Agent
  */
 
-import { lstatSync, chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync, rmSync, cpSync, copyFileSync, unlinkSync, realpathSync } from "fs";
+import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, lstatSync, renameSync, rmSync, cpSync, copyFileSync, unlinkSync, realpathSync } from "fs";
 import { dirname, isAbsolute, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { homedir, tmpdir } from "os";
@@ -45,8 +45,12 @@ import { buildOpencodeSmokeEnv } from "../src/opencode-smoke-env";
 import {
   OPENCODE_AGENT_NODE_SPEC,
   OPENCODE_AGENT_NODE_VERSION,
+  PAIRED_AGENT_NODE_SPEC,
+  PAIRED_AGENT_NODE_VERSION,
+  agentNodeHelpSupportsCodexAppServer,
   agentNodeHelpSupportsOpencode,
   opencodeExactPairInstallCommand,
+  pairedAgentNodeResolution,
   resolveAgentNodePackageEntrypointFromPath,
   validateAgentNodePackageEntrypoint,
 } from "../src/opencode-agent-node-pair";
@@ -153,6 +157,14 @@ import {
 } from "../src/windows-codex-copresence";
 import { normalizeBatchWorkdir } from "../src/batch-workdir";
 import { copresenceThreadPlan } from "../src/codex-copresence-thread";
+import {
+  backupCodexRecoveryState,
+  codexTopologyAudit,
+  quiesceThenSnapshot,
+  resumeAndVerifyCodexThread,
+  verifyCodexThreadHistory,
+  type CodexRecoveryVerification,
+} from "../src/codex-copresence-recovery";
 import { loadMockLlmRules, resolveMockLlmReply } from "../src/mock-llm";
 import {
   decideDashboardListener,
@@ -389,7 +401,7 @@ async function createCodexCopresenceThread(
   ws: string,
   timeoutMs = 60_000,
   resumeThreadId?: string,
-): Promise<string> {
+): Promise<{ threadId: string; verification: CodexRecoveryVerification }> {
   const WsCtor = await resolveCopresenceWebSocketCtor();
   const socket = new WsCtor(ws);
   const deadline = Date.now() + timeoutMs;
@@ -442,8 +454,13 @@ async function createCodexCopresenceThread(
     const plan = copresenceThreadPlan(resumeThreadId);
     if (plan.method === "thread/resume") {
       if (!SAFE_THREAD_ID.test(plan.params.threadId)) throw new Error("stored threadId has unexpected shape");
-      await request(plan.method, plan.params, 15_000);
-      return plan.params.threadId;
+      return {
+        threadId: plan.params.threadId,
+        verification: await resumeAndVerifyCodexThread(
+          plan.params.threadId,
+          (method, params) => request(method, params, 15_000),
+        ),
+      };
     }
     const started: any = await request(plan.method, plan.params, 15_000);
     const threadId: string | undefined = started?.threadId ?? started?.thread?.id;
@@ -455,7 +472,8 @@ async function createCodexCopresenceThread(
       input: [{ type: "text", text: "只回复一个词：READY" }],
     }, 45_000);
     await new Promise((r) => setTimeout(r, 3000));
-    return threadId;
+    const read = await request("thread/read", { threadId, includeTurns: true }, 15_000);
+    return { threadId, verification: verifyCodexThreadHistory("thread/start", threadId, read) };
   } finally {
     try { socket.close(); } catch { /* ignore */ }
   }
@@ -746,6 +764,17 @@ async function stopPriorWindowsCopresence(nodeId: string): Promise<void> {
   rmSync(windowsCopresenceRecordPath(nodesDir(), nodeId), { force: true });
 }
 
+function persistCodexRecoveryPoint(resolved: NonNullable<ReturnType<typeof resolveNodeRef>>, codexHome: string): void {
+  const nodeDir = join(nodesDir(), resolved.id);
+  const backup = backupCodexRecoveryState({ nodeDir, codexHome });
+  const cfgPath = join(nodeDir, "config.json");
+  const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+  cfg.codexRecoveryBackup = { createdAt: backup.createdAt, stateFiles: backup.stateFiles, path: backup.backupDir };
+  atomicWritePrivateJson(cfgPath, cfg);
+  resolved.profile.codexRecoveryBackup = cfg.codexRecoveryBackup;
+  console.log(`[anet] recovery point created after prior runtime quiesced (${backup.stateFiles.length} session-state item(s); credentials excluded)`);
+}
+
 async function startWindowsCodexCopresence(
   resolved: NonNullable<ReturnType<typeof resolveNodeRef>>,
   displayName: string,
@@ -759,7 +788,12 @@ async function startWindowsCodexCopresence(
   if (unsafeCmd.test(opts.codexBin) || unsafeCmd.test(opts.model || "")) {
     throw new Error("Windows codex command/model contains cmd.exe metacharacters");
   }
-  await stopPriorWindowsCopresence(resolved.id);
+  // Authoritative snapshot only after all prior writers have been reaped.
+  // Failure aborts before any replacement app-server can start.
+  await quiesceThenSnapshot(
+    () => stopPriorWindowsCopresence(resolved.id),
+    () => persistCodexRecoveryPoint(resolved, opts.codexHome),
+  );
   const port = await findFreeLoopbackPort(opts.port);
   const wsUrl = `ws://127.0.0.1:${port}`;
   const posture = codexCopresencePosture(opts.dangerFullAccess, resolved.profile, displayName);
@@ -796,18 +830,21 @@ async function startWindowsCodexCopresence(
     if (!await waitForLoopbackPort(port, 25_000)) {
       throw new Error(`app-server did not bind ${wsUrl} within 25s; log=${appLog}`);
     }
-    const threadId = await createCodexCopresenceThread(wsUrl, 60_000, resolved.profile.codexThreadId);
+    const thread = await createCodexCopresenceThread(wsUrl, 60_000, resolved.profile.codexThreadId);
+    const threadId = thread.threadId;
     if (!SAFE_THREAD_ID.test(threadId)) throw new Error("unexpected threadId shape");
     const rawCfgPath = join(nodesDir(), resolved.id, "config.json");
     const rawCfg = JSON.parse(readFileSync(rawCfgPath, "utf-8"));
     rawCfg.codexAppServerPort = port;
     rawCfg.codexAppServerUrl = wsUrl;
     rawCfg.codexThreadId = threadId;
+    rawCfg.codexRecoveryVerification = thread.verification;
     delete rawCfg.session;
     atomicWritePrivateJson(rawCfgPath, rawCfg);
 
     const bridgeEnv: NodeJS.ProcessEnv = {
       ...process.env,
+      CODEX_HOME: opts.codexHome,
       ANET_NODE_MARKER: marker,
       ANET_COPRESENCE_BRIDGE: "1",
     };
@@ -817,13 +854,15 @@ async function startWindowsCodexCopresence(
       process.argv[1] ?? "", "node", "start", displayName,
     ], bridgeEnv, bridgeLog));
     writeWindowsCopresenceRecord(nodesDir(), resolved.id, managed);
-    await new Promise((r) => setTimeout(r, 3000));
+    if (!await waitForFileText(bridgeLog, "[codex-app-server] shared bridge ready", 25_000)) {
+      throw new Error(`bridge did not attach to the shared app-server before TUI launch; log=${bridgeLog}`);
+    }
     if (!probeWindowsCreationDate(managed[1].pid)) throw new Error(`bridge exited during startup; log=${bridgeLog}`);
 
     console.log(`[anet] ② bridge pid=${managed[1].pid} running`);
     console.log(`[anet] ③ opening Codex TUI in this Windows console (thread=${threadId})`);
     console.log(`[anet]    stop from another terminal: anet node stop ${displayName}`);
-    const tuiArgs = ["resume", "--remote", wsUrl, threadId];
+    const tuiArgs = ["resume", "--remote", wsUrl, threadId, "-m", model];
     if (opts.dangerFullAccess) tuiArgs.push("--dangerously-bypass-approvals-and-sandbox");
     const tui = spawn(opts.codexBin, tuiArgs, {
       cwd: process.cwd(), env: { ...process.env, CODEX_HOME: opts.codexHome },
@@ -843,6 +882,7 @@ async function startWindowsCodexCopresence(
     rmSync(windowsCopresenceRecordPath(nodesDir(), resolved.id), { force: true });
     throw e;
   }
+
 }
 
 /**
@@ -1181,14 +1221,22 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   }
   console.log(`[anet] identity marker written (uuid=${identityMarker.slice(0, 8)}… — on disk before any session starts)`);
 
-  // Kill any prior instances so this is idempotent.
-  for (const s of [appsrvSession, bridgeSession, tuiSession]) {
-    if (tmuxSessionRunning(s)) {
-      console.log(`[anet] killing prior tmux session ${s}`);
-      killTmuxSession(s);
-    }
+  // Kill any prior instances and only then take the authoritative snapshot.
+  // Snapshot failure is fail-closed before the new app-server is launched.
+  try {
+    await quiesceThenSnapshot(async () => {
+      for (const s of [appsrvSession, bridgeSession, tuiSession]) {
+        if (tmuxSessionRunning(s)) {
+          console.log(`[anet] killing prior tmux session ${s}`);
+          killTmuxSession(s);
+        }
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }, () => persistCodexRecoveryPoint(resolved, opts.codexHome));
+  } catch (e) {
+    console.error(`[anet] ❌ cannot create quiesced Codex recovery point: ${(e as Error).message}`);
+    process.exit(1);
   }
-  await new Promise((r) => setTimeout(r, 500));
 
   const port = await findFreeLoopbackPort(opts.port);
   const wsUrl = `ws://127.0.0.1:${port}`;
@@ -1280,11 +1328,15 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // ── create fresh thread + persist config ──────────────────────────────
   let threadId: string;
   try {
-    threadId = await createCodexCopresenceThread(wsUrl, 60_000, profile.codexThreadId);
+    const thread = await createCodexCopresenceThread(wsUrl, 60_000, profile.codexThreadId);
+    threadId = thread.threadId;
+    profile.codexRecoveryVerification = thread.verification;
   } catch (e: any) {
-    console.error(`[anet] ❌ thread/start failed: ${e?.message || e}`);
+    console.error(`[anet] ❌ Codex thread recovery verification failed: ${e?.message || e}`);
+    console.error(`[anet]    Fail-closed: no bridge/TUI was started and thread/start was not used as a fallback.`);
     console.error(`[anet]    Debug:   tmux attach -t ${shellQuote(`=${appsrvSession}`)}`);
-    console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
+    killTmuxSession(appsrvSession);
+    console.error(`[anet]    Rolled back the replacement app-server; existing CODEX_HOME and stored thread remain unchanged.`);
     // #P2fix复审顺手3 — defense-in-depth env-file cleanup (see :431).
     try { rmSync(envFilePath, { force: true }); } catch { /* best-effort */ }
     process.exit(1);
@@ -1306,6 +1358,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   rawCfg.codexAppServerPort = port;
   rawCfg.codexAppServerUrl = wsUrl;
   rawCfg.codexThreadId = threadId;
+  rawCfg.codexRecoveryVerification = profile.codexRecoveryVerification;
   delete rawCfg.session;
   atomicWritePrivateJson(rawCfgPath, rawCfg);
 
@@ -1314,7 +1367,11 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // path reads codexAppServerUrl / codexThreadId from the config we just
   // wrote and spawns agent-node in adopt mode. Same launchAgent()
   // codepath as the non-copresence case — no fork of the bridge dispatch.
-  const bridgeCmd = `unset COMMHUB_TOKEN ANET_CODEX_COMMHUB_TOKEN && exec anet node start ${shellQuote(displayName)}`;
+  const bridgeCmd = [
+    `export CODEX_HOME=${shellQuote(opts.codexHome)}`,
+    `unset COMMHUB_TOKEN ANET_CODEX_COMMHUB_TOKEN`,
+    `exec anet node start ${shellQuote(displayName)}`,
+  ].join(" && ");
   try {
     execFileSync("tmux", [
       "new-session", "-d", "-s", bridgeSession, "-c", process.cwd(),
@@ -1328,14 +1385,25 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     process.exit(1);
   }
   console.log(`[anet] ② bridge tmux=${bridgeSession} starting…`);
-  await new Promise((r) => setTimeout(r, 3000));
+  const bridgeReady = await waitForTmuxPaneText(
+    bridgeSession,
+    "[codex-app-server] shared bridge ready",
+    25_000,
+  );
+  if (!bridgeReady) {
+    console.error(`[anet] ❌ bridge did not attach to the shared app-server before TUI launch.`);
+    console.error(`[anet]    Debug:   tmux attach -t ${shellQuote(`=${bridgeSession}`)}`);
+    console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
+    process.exit(1);
+  }
+  console.log(`[anet] ② bridge READY on ${wsUrl}`);
 
   // ── piece ③ codex TUI (attachable, resumes same thread) ───────────────
   const tuiFlags: string[] = [];
   if (opts.dangerFullAccess) tuiFlags.push("--dangerously-bypass-approvals-and-sandbox");
   const tuiCmd = [
     `export CODEX_HOME=${shellQuote(opts.codexHome)}`,
-    `exec ${shellQuote(opts.codexBin)} resume --remote ${wsUrl} ${threadId} ${tuiFlags.join(" ")}`.trim(),
+    `exec ${shellQuote(opts.codexBin)} resume --remote ${wsUrl} ${threadId} -m ${shellQuote(model)} ${tuiFlags.join(" ")}`.trim(),
   ].join(" ; ");
   try {
     execFileSync("tmux", [
@@ -1500,7 +1568,7 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
 // refetch). A `latest` agent-network release must pin a *stable* server.
 // `anet upgrade` (#88) surfaces this constant in its plan output so users
 // understand global-install version != version anet hub start actually runs.
-const PINNED_SERVER_VERSION = "0.9.0-preview.29";
+const PINNED_SERVER_VERSION = "0.9.0-preview.30";
 function sessionFileExists(uuid: string, cwd: string = process.cwd()): boolean {
   if (!uuid) return false;
   return existsSync(join(homedir(), ".claude", "projects", encodeCwd(cwd), `${uuid}.jsonl`));
@@ -1797,6 +1865,8 @@ interface Profile {
   codexRuntime?: string;
   codexAppServerUrl?: string;  // RFC-030 — shared codex app-server URL (co-presence)
   codexThreadId?: string;      // RFC-030 — codex thread to adopt
+  codexRecoveryVerification?: CodexRecoveryVerification;
+  codexRecoveryBackup?: { createdAt: string; stateFiles: string[]; path: string };
   // Remembered so `anet node start <name>` alone brings up the co-presence
   // TUI, the way grokCopresence / opencodeMode already do for their runtimes.
   codexCopresence?: boolean;
@@ -2833,18 +2903,19 @@ function opencodeUsePinSource(): string {
 type AgentNodeLaunchPlan = {
   command: string;
   argsPrefix: string[];
-  source: "explicit" | "global" | "preview";
+  source: "explicit" | "global" | "preview" | "paired";
   probeEnv: NodeJS.ProcessEnv;
 };
 
 let opencodeAgentNodeLaunchPlan: AgentNodeLaunchPlan | null = null;
 let grokAgentNodeLaunchPlan: AgentNodeLaunchPlan | null = null;
+let codexAgentNodeLaunchPlan: AgentNodeLaunchPlan | null = null;
 
 function agentNodeHelp(plan: AgentNodeLaunchPlan): string {
   return execFileSync(plan.command, [...plan.argsPrefix, "--help"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
-    timeout: plan.source === "preview" ? 120_000 : 5_000,
+    timeout: plan.source === "preview" || plan.source === "paired" ? 120_000 : 5_000,
     env: plan.probeEnv,
   });
 }
@@ -2959,6 +3030,58 @@ function revalidateOpencodeAgentNodeLaunchPlan(plan: AgentNodeLaunchPlan): Agent
     throw opencodeAgentNodeError(`${OPENCODE_AGENT_NODE_SPEC} no longer advertises opencode-cli`);
   }
   return checked;
+}
+
+function pairedAgentNodeError(detail: string): Error {
+  return new Error(`${detail}\nRequired exact runtime: ${PAIRED_AGENT_NODE_SPEC}`);
+}
+
+/** Resolve only the exact release-paired package. PATH globals are
+ * deliberately ignored so preview.32 cannot shadow preview.33. */
+function resolveCodexAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
+  if (codexAgentNodeLaunchPlan) return codexAgentNodeLaunchPlan;
+  const probeEnv = { ...process.env };
+  const forbiddenRoots = discoverOpencodeForbiddenRoots();
+  const explicit = process.env.ANET_AGENT_NODE_BIN;
+  let rawEntrypoint: string;
+  let source: AgentNodeLaunchPlan["source"];
+  if (explicit) {
+    if (!isAbsolute(explicit) || !existsSync(explicit)) {
+      throw pairedAgentNodeError("ANET_AGENT_NODE_BIN must name an existing absolute agent-node CLI path");
+    }
+    rawEntrypoint = explicit;
+    source = "explicit";
+  } else {
+    let output: string;
+    try {
+      const resolution = pairedAgentNodeResolution();
+      output = execFileSync("npx", resolution.args, {
+        encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 120_000, env: probeEnv,
+      });
+    } catch (error: any) {
+      throw pairedAgentNodeError(`could not resolve exact paired package: ${error?.stderr || error?.message || error}`);
+    }
+    const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    if (lines.length !== 1 || !isAbsolute(lines[0])) {
+      throw pairedAgentNodeError(`${PAIRED_AGENT_NODE_SPEC} returned an invalid entrypoint`);
+    }
+    rawEntrypoint = lines[0];
+    source = "paired";
+  }
+  let entrypoint: string;
+  try {
+    entrypoint = validateAgentNodePackageEntrypoint(
+      rawEntrypoint, PAIRED_AGENT_NODE_SPEC, PAIRED_AGENT_NODE_VERSION, forbiddenRoots,
+    );
+  } catch (error: any) {
+    throw pairedAgentNodeError(`exact paired package identity validation failed: ${error?.message || error}`);
+  }
+  const plan: AgentNodeLaunchPlan = { command: process.execPath, argsPrefix: [entrypoint], source, probeEnv };
+  if (!agentNodeHelpSupportsCodexAppServer(agentNodeHelp(plan))) {
+    throw pairedAgentNodeError("exact paired package lacks codex-app-server capability");
+  }
+  codexAgentNodeLaunchPlan = plan;
+  return plan;
 }
 
 function resolvePreviewAgentNodeEntrypoint(resolverEnv: NodeJS.ProcessEnv): string {
@@ -3099,6 +3222,17 @@ function resolveGrokAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
 }
 
 function assertStartCompatibility(runtime: RuntimeName) {
+  if (runtime === "codex-app-server") {
+    try {
+      resolveCodexAgentNodeLaunchPlan();
+    } catch (error: any) {
+      console.error(`[anet] Incompatible agent-node for codex-app-server.`);
+      console.error(`[anet] ${error?.message || error}`);
+      console.error(`[anet] Refusing to start: stale globals and floating @preview are not recovery-safe.`);
+      process.exit(1);
+    }
+    return;
+  }
   // RFC-029 — opencode CLI's Zed ACP surface is the only integration
   // point, and its message-schema stability across upstream releases
   // is unproven. Reject any drift from the pinned version so a
@@ -5422,7 +5556,10 @@ function maybeWarnChannelResumeBlocker(
   }
 }
 
-async function launchAgent(id: string, forceNewSession = false, hubOverride?: string) {
+async function launchAgent(id: string, forceNewSession = false, hubOverride?: string, admittedGeneration?: string) {
+  const launchResolved = resolveNodeRef(id);
+  if (!launchResolved) throw new Error(`Node ${JSON.stringify(id)} not found`);
+  const launchGeneration = admittedGeneration || await admitNodeStart(launchResolved.id, Date.now());
   const resolved = resolveNodeRef(id);
   if (!resolved) {
     console.error(`Node "${id}" not found. Create it first: anet node create ${id}`);
@@ -5625,6 +5762,10 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
       const plan = resolveGrokAgentNodeLaunchPlan();
       cmd = plan.command;
       commandArgs = [...plan.argsPrefix, ...agentArgs];
+    } else if (runtime === "codex-app-server") {
+      const plan = resolveCodexAgentNodeLaunchPlan();
+      cmd = plan.command;
+      commandArgs = [...plan.argsPrefix, ...agentArgs];
     } else try { execSync(process.platform === "win32" ? "where agent-node" : "which agent-node", { stdio: "pipe" }); } catch {
       cmd = "npx";
       commandArgs = ["-y", "@sleep2agi/agent-node@preview", ...agentArgs];
@@ -5713,11 +5854,11 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
         // Stable timer — child survives 30s → reset backoff to base.
         // Mirrors the connectFeishu supervisor pattern from PR #263.
         const stableTimer = setTimeout(() => ctrl.markStable(), 30_000);
-        const child = spawn(runCommand, runCommandArgs, {
+        const child = await spawnOwnedNodeChild(nodeId, launchGeneration, () => spawn(runCommand, runCommandArgs, {
           env: childEnv,
           stdio: "inherit",
           shell: runtime === "opencode-cli" ? false : process.platform === "win32",
-        });
+        }));
         if (runtime === "opencode-cli") activeAgentChild = child;
         if (child.pid) writeFileSync(pidFile, String(child.pid));
 
@@ -5960,8 +6101,14 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     // forgiving and the bug usually only manifests as a missing session
     // banner. Fix: await child exit so parent stays alive while child holds
     // the TTY; main() unwinds naturally only after claude actually exits.
-    await new Promise<void>((resolve) => {
-      const child = spawn("claude", claudeArgs, { env, stdio: "inherit" });
+    await new Promise<void>(async (resolve) => {
+      let child: ReturnType<typeof spawn>;
+      try {
+        child = await spawnOwnedNodeChild(nodeId, launchGeneration, () => spawn("claude", claudeArgs, { env, stdio: "inherit" }));
+      } catch (error: any) {
+        console.error(`[anet] ❌ ${error?.message || error}`);
+        process.exit(1);
+      }
       const pidFile = join(nodesDir(), nodeId, ".pid");
       if (child.pid) writeFileSync(pidFile, String(child.pid));
       child.on("exit", (code) => {
@@ -5998,9 +6145,159 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
   }
 }
 
+type LifecycleProcessIdentity = { pid: number; birth: string; role: "wrapper" | "agent" | "bridge" };
+type LifecycleOwnerRecord = {
+  schema: 1; state: "starting" | "stopping" | "stopped";
+  generation?: string; wrapperPid?: number; wrapperBirth?: string;
+  processes?: LifecycleProcessIdentity[];
+  startInvokedAt?: number; stopInvokedAt?: number;
+};
+type LifecycleLockOwner = { schema: 1; pid: number; birth: string; operation: string; generation?: string };
+
+function lifecycleOwnerPath(nodeId: string) { return join(nodesDir(), nodeId, ".lifecycle-owner.json"); }
+function lifecycleLockPath(nodeId: string) { return join(nodesDir(), nodeId, ".lifecycle-lock"); }
+function lifecycleLockOwnerPath(nodeId: string) { return join(lifecycleLockPath(nodeId), "owner.json"); }
+
+async function withLifecycleLock<T>(nodeId: string, fn: () => T | Promise<T>, operation = "lifecycle", generation?: string): Promise<T> {
+  const lock = lifecycleLockPath(nodeId);
+  const deadline = Date.now() + 5_000;
+  let missingReceiptSince = 0;
+  while (true) {
+    try {
+      mkdirSync(lock, { mode: 0o700 });
+      const birth = processBirth(process.pid);
+      if (!birth) { rmSync(lock, { recursive: true, force: true }); throw new Error("NODE_LIFECYCLE_BIRTH_UNAVAILABLE"); }
+      atomicWritePrivateJson(lifecycleLockOwnerPath(nodeId), { schema: 1, pid: process.pid, birth, operation, ...(generation ? { generation } : {}) });
+      break;
+    }
+    catch (e: any) {
+      if (e?.code !== "EEXIST") throw e;
+      let owner: LifecycleLockOwner;
+      try { owner = JSON.parse(readFileSync(lifecycleLockOwnerPath(nodeId), "utf-8")); }
+      catch (readError: any) {
+        if (readError?.code === "ENOENT") {
+          if (!missingReceiptSince) missingReceiptSince = Date.now();
+          if (Date.now() - missingReceiptSince < 250) { await new Promise(r => setTimeout(r, 10)); continue; }
+        }
+        throw new Error(`NODE_LIFECYCLE_LOCK_CORRUPT: ${lock}`);
+      }
+      if (owner.schema !== 1 || !Number.isSafeInteger(owner.pid) || !owner.birth) throw new Error(`NODE_LIFECYCLE_LOCK_CORRUPT: ${lock}`);
+      const current = processIdentitySnapshot(owner.pid);
+      if (current.kind === "gone" || (current.kind === "live" && current.birth !== owner.birth)) {
+        const claim = `${lock}.reclaim-${process.pid}-${randomUUID()}`;
+        try { renameSync(lock, claim); }
+        catch (claimError: any) {
+          if (claimError?.code === "ENOENT" || claimError?.code === "EEXIST") continue;
+          throw claimError;
+        }
+        // Only the rename winner may inspect/delete this private claim. A
+        // loser loops against the replacement public lock and can never
+        // recursively delete it (compare-delete TOCTOU).
+        let claimedOwner: LifecycleLockOwner;
+        try { claimedOwner = JSON.parse(readFileSync(join(claim, "owner.json"), "utf-8")); }
+        catch { throw new Error(`NODE_LIFECYCLE_LOCK_CLAIM_CORRUPT: ${claim}`); }
+        if (claimedOwner.pid !== owner.pid || claimedOwner.birth !== owner.birth || claimedOwner.operation !== owner.operation) {
+          throw new Error(`NODE_LIFECYCLE_LOCK_CLAIM_CHANGED: ${claim}`);
+        }
+        const claimedIdentity = processIdentitySnapshot(claimedOwner.pid);
+        if (claimedIdentity.kind === "unverifiable" || (claimedIdentity.kind === "live" && claimedIdentity.birth === claimedOwner.birth)) {
+          throw new Error(`NODE_LIFECYCLE_LOCK_CLAIM_OWNER_LIVE: pid=${claimedOwner.pid}`);
+        }
+        rmSync(claim, { recursive: true, force: true });
+        continue;
+      }
+      if (current.kind === "unverifiable") throw new Error(`NODE_LIFECYCLE_LOCK_OWNER_UNVERIFIABLE: pid=${owner.pid}`);
+      if (Date.now() >= deadline) throw new Error(`NODE_LIFECYCLE_LOCK_TIMEOUT: pid=${owner.pid} op=${owner.operation}`);
+      await new Promise(r => setTimeout(r, 25));
+    }
+  }
+  try { return await fn(); } finally { rmSync(lock, { recursive: true, force: true }); }
+}
+
+function readLifecycleOwner(nodeId: string): LifecycleOwnerRecord | null {
+  try { return JSON.parse(readFileSync(lifecycleOwnerPath(nodeId), "utf-8")); } catch { return null; }
+}
+
+function writeLifecycleOwner(nodeId: string, record: LifecycleOwnerRecord) {
+  atomicWritePrivateJson(lifecycleOwnerPath(nodeId), record);
+}
+
+function snapshotOwnedProcessTree(roots: readonly LifecycleProcessIdentity[]): LifecycleProcessIdentity[] {
+  const owned = new Map(roots.map(p => [p.pid, p]));
+  if (process.platform !== "linux") return [...owned.values()];
+  const verifiedAnchors = new Set<number>();
+  for (const root of roots) {
+    const current = processIdentitySnapshot(root.pid);
+    if (current.kind === "gone") continue;
+    if (current.kind === "unverifiable") throw new Error(`NODE_OWNER_BIRTH_UNAVAILABLE: pid=${root.pid}`);
+    if (current.birth === root.birth) verifiedAnchors.add(root.pid);
+  }
+  let rows: Array<{ pid: number; ppid: number }>;
+  try {
+    rows = execFileSync("ps", ["-e", "-o", "pid=", "-o", "ppid="], { encoding: "utf-8" })
+      .split("\n").map(line => line.trim().split(/\s+/).map(Number))
+      .filter(parts => parts.length === 2 && parts.every(Number.isSafeInteger))
+      .map(([pid, ppid]) => ({ pid, ppid }));
+  } catch { throw new Error("NODE_PROCESS_TREE_UNAVAILABLE"); }
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const row of rows) {
+      if (owned.has(row.pid) || !verifiedAnchors.has(row.ppid)) continue;
+      const candidate = processIdentitySnapshot(row.pid);
+      if (candidate.kind === "gone") continue;
+      if (candidate.kind === "unverifiable" || candidate.ppid === undefined) throw new Error(`NODE_DESCENDANT_BIRTH_UNAVAILABLE: pid=${row.pid}`);
+      const identity = { birth: candidate.birth, ppid: candidate.ppid };
+      // The process table row is only a candidate. Revalidate PPID and birth
+      // from one /proc read so an exited/reused PID cannot be adopted.
+      if (identity.ppid !== row.ppid || !verifiedAnchors.has(identity.ppid)) continue;
+      owned.set(row.pid, { pid: row.pid, birth: identity.birth, role: "bridge" });
+      verifiedAnchors.add(row.pid);
+      changed = true;
+    }
+  }
+  return [...owned.values()];
+}
+
+async function admitNodeStart(nodeId: string, invokedAt: number): Promise<string> {
+  return await withLifecycleLock(nodeId, () => {
+    const prior = readLifecycleOwner(nodeId);
+    if (prior?.state === "stopping" || (prior?.stopInvokedAt && prior.stopInvokedAt >= invokedAt)) {
+      throw new Error("NODE_START_CANCELLED_BY_CONCURRENT_STOP");
+    }
+    const birth = processBirth(process.pid);
+    if (!birth) throw new Error("NODE_LIFECYCLE_BIRTH_UNAVAILABLE");
+    const generation = randomUUID();
+    writeLifecycleOwner(nodeId, {
+      schema: 1, state: "starting", generation, wrapperPid: process.pid,
+      wrapperBirth: birth, processes: [{ pid: process.pid, birth, role: "wrapper" }], startInvokedAt: invokedAt,
+      ...(prior?.stopInvokedAt ? { stopInvokedAt: prior.stopInvokedAt } : {}),
+    });
+    return generation;
+  }, "start-admit");
+}
+
+async function spawnOwnedNodeChild<T extends ReturnType<typeof spawn>>(nodeId: string, generation: string, spawnChild: () => T): Promise<T> {
+  return await withLifecycleLock(nodeId, async () => {
+    const owner = readLifecycleOwner(nodeId);
+    if (!owner || owner.state !== "starting" || owner.generation !== generation) throw new Error("NODE_START_CANCELLED_BY_CONCURRENT_STOP");
+    const child = spawnChild();
+    if (!child.pid) throw new Error("NODE_CHILD_PID_MISSING");
+    let birth = processBirth(child.pid);
+    for (let i = 0; !birth && i < 10; i++) { await new Promise(r => setTimeout(r, 10)); birth = processBirth(child.pid); }
+    if (!birth) {
+      try { child.kill("SIGKILL"); } catch {}
+      throw new Error(`NODE_CHILD_BIRTH_UNAVAILABLE: pid=${child.pid}`);
+    }
+    writeLifecycleOwner(nodeId, { ...owner, processes: [...(owner.processes || []), { pid: child.pid, birth, role: "agent" }] });
+    return child;
+  }, "spawn", generation);
+}
+
 // ── start (new session) ──
 
 async function startCommand() {
+  const startInvokedAt = Date.now();
   // #173 — `anet node start --all` starts every node under cwd's .anet/nodes/
   // (skip already-running, staggered, auto-resume). It delegates to the
   // `anet project up` implementation (projectUp) so the two stay in lockstep
@@ -6038,9 +6335,14 @@ async function startCommand() {
   // already use. Resolve first so the profile can answer the question too.
   const copresenceFlagPassed = opts.copresence === "true";
   const resolvedForCopresence = resolveNodeRef(id);
+  let startGeneration: string | undefined;
   if (copresenceFlagPassed && !resolvedForCopresence) {
     console.error(`Node "${id}" not found. Create it first: anet node create ${id}`);
     process.exit(1);
+  }
+  if (resolvedForCopresence) {
+    try { startGeneration = await admitNodeStart(resolvedForCopresence.id, startInvokedAt); }
+    catch (e: any) { console.error(`[anet] ${e?.message || e}`); process.exit(1); }
   }
   // 🔴 The entry gate used to ask ONLY codexCopresenceRequested, which answers
   //    false for every grok node — so `anet node start <grok> --copresence`
@@ -6140,7 +6442,7 @@ async function startCommand() {
 
   if (!wantTmux && !wantAcceptDevChannels) {
     // Default: spawn the agent runtime in this terminal.
-    await launchAgent(id, forceNewSession, opts.hub);
+    await launchAgent(id, forceNewSession, opts.hub, startGeneration);
     return;
   }
 
@@ -6496,6 +6798,13 @@ async function lsCommand() {
         const flags = (p as any).flags || {};
         const flagLabel = flags.dangerouslySkipPermissions === false ? "permGate=on" : "permGate=off";
         console.log(`  ${" ".repeat(20)} tools=${toolsLabel}  ${flagLabel}`);
+        if (runtime === "codex-app-server") {
+          const audit = codexTopologyAudit(p as any, join(nodesDir(), id), process.cwd());
+          const verified = audit.lastRecoveryVerification as any;
+          console.log(`  ${" ".repeat(20)} launch=${audit.launchMode} cwd=${audit.cwd}`);
+          console.log(`  ${" ".repeat(20)} CODEX_HOME=${audit.codexHome} remote=${audit.remote || "-"} thread=${audit.threadId || "-"} model=${audit.model || "-"}`);
+          console.log(`  ${" ".repeat(20)} recovery=${verified ? `${verified.method} verified ${verified.verifiedAt} turns=${verified.historyTurnCount}` : "not verified"}`);
+        }
       }
     }
     console.log();
@@ -7761,7 +8070,9 @@ function findNodeProcessesByAlias(...aliases: string[]): number[] | null {
     // Without this gap-fill, rename --force on a codex-sdk or grok-build-acp
     // node that was launched via the standalone CLI (not the agent-node
     // bridge) would silently fail to find the old process.
-    const isAgentProc = tok.some(x => {
+    const isForegroundStart = tok.some((x, i) => x === "node" && tok[i + 2] === "node" && tok[i + 3] === "start")
+      || tok.some((x, i) => (x.endsWith("/anet") || x === "anet") && tok[i + 1] === "node" && tok[i + 2] === "start");
+    const isAgentProc = isForegroundStart || tok.some(x => {
       const base = x.split("/").pop() || x;
       return base === "claude" || base === "agent-node"
         || base === "codex" || base === "grok"
@@ -7771,9 +8082,102 @@ function findNodeProcessesByAlias(...aliases: string[]): number[] | null {
     if (!isAgentProc) continue;
     for (let i = 0; i < tok.length - 1; i++) {
       if ((tok[i] === "-n" || tok[i] === "--alias") && wanted.has(tok[i + 1])) { pids.add(pid); break; }
+      if (tok[i] === "start" && tok[i - 1] === "node" && wanted.has(tok[i + 1])) { pids.add(pid); break; }
     }
   }
   return [...pids];
+}
+
+type StopResidual = { kind: "process" | "socket"; detail: string };
+type ProcessIdentitySnapshot =
+  | { kind: "gone" }
+  | { kind: "unverifiable"; detail: string }
+  | { kind: "live"; birth: string; ppid?: number };
+
+function processIdentitySnapshot(pid: number): ProcessIdentitySnapshot {
+  if (process.platform === "linux") {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf-8").trim();
+      const fields = stat.slice(stat.lastIndexOf(")") + 2).split(/\s+/);
+      if (fields[0] === "Z") return { kind: "gone" };
+      const ppid = Number(fields[1]);
+      const birth = fields[19];
+      if (!Number.isSafeInteger(ppid) || !birth) return { kind: "unverifiable", detail: "malformed /proc stat" };
+      return { kind: "live", birth, ppid };
+    } catch (e: any) {
+      if (e?.code === "ENOENT" || e?.code === "ESRCH") return { kind: "gone" };
+      return { kind: "unverifiable", detail: e?.code || "proc read failed" };
+    }
+  }
+  const birth = processBirth(pid);
+  if (birth) return { kind: "live", birth };
+  return pidAlive(pid) ? { kind: "unverifiable", detail: "birth probe failed" } : { kind: "gone" };
+}
+
+function processBirth(pid: number): string | null {
+  if (process.platform === "win32") return probeWindowsCreationDate(pid);
+  if (process.platform === "linux") {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf-8").trim();
+      const fields = stat.slice(stat.lastIndexOf(")") + 2).split(/\s+/);
+      return fields[19] || null;
+    } catch { return null; }
+  }
+  try { return execFileSync("ps", ["-p", String(pid), "-o", "lstart="], { encoding: "utf-8" }).trim() || null; }
+  catch { return null; }
+}
+
+function nodeSocketResiduals(profile: Profile): StopResidual[] {
+  const out: StopResidual[] = [];
+  for (const [label, path] of [["leader", profile.grokLeaderSocket], ["bridge", profile.grokAttachSocket]] as const) {
+    if (!path) continue;
+    try {
+      const st = lstatSync(path);
+      if (st.isSocket()) out.push({ kind: "socket", detail: `${label} socket ${path}` });
+    } catch (e: any) {
+      if (e?.code !== "ENOENT") out.push({ kind: "socket", detail: `${label} socket ${path} (${e?.code || "unreadable"})` });
+    }
+  }
+  return out;
+}
+
+// #1027 — the foreground start wrapper and its child are separate authorities.
+// The child pidfile is written only after spawn, so converge on the alias-
+// bearing generation. Linux birth ticks are revalidated before every signal;
+// a recycled PID is never signalled.
+async function reapOwnedGeneration(owned: readonly LifecycleProcessIdentity[]): Promise<StopResidual[]> {
+  const audit = () => owned.map(identity => ({ identity, snapshot: processIdentitySnapshot(identity.pid) }));
+  const survivors = () => audit().filter(({ identity, snapshot }) =>
+    snapshot.kind === "live" && snapshot.birth === identity.birth).map(x => x.identity);
+  const unverifiable = () => audit().filter(({ snapshot }) => snapshot.kind === "unverifiable").map(x => x.identity);
+  const signalOwned = (signal: NodeJS.Signals) => {
+    for (const identity of owned) {
+      // One authoritative snapshot distinguishes gone/live/unverifiable. A
+      // different birth is reuse; null is never compared to null.
+      const snapshot = processIdentitySnapshot(identity.pid);
+      if (snapshot.kind !== "live" || snapshot.birth !== identity.birth) continue;
+      try { process.kill(identity.pid, signal); } catch {}
+    }
+  };
+  const unknown = unverifiable();
+  if (unknown.length) return [{ kind: "process", detail: `birth unavailable for owned pids ${unknown.map(p => p.pid).join(",")}` }];
+  signalOwned("SIGTERM");
+  const termDeadline = Date.now() + 5_000;
+  while (Date.now() < termDeadline) {
+    await new Promise(r => setTimeout(r, 100));
+    const unknownNow = unverifiable();
+    if (unknownNow.length) return [{ kind: "process", detail: `birth unavailable during TERM audit for pids ${unknownNow.map(p => p.pid).join(",")}` }];
+    if (survivors().length === 0) return [];
+  }
+  signalOwned("SIGKILL");
+  const killDeadline = Date.now() + 3_000;
+  while (Date.now() < killDeadline) {
+    await new Promise(r => setTimeout(r, 100));
+    const unknownNow = unverifiable();
+    if (unknownNow.length) return [{ kind: "process", detail: `birth unavailable during KILL audit for pids ${unknownNow.map(p => p.pid).join(",")}` }];
+    if (survivors().length === 0) return [];
+  }
+  return [{ kind: "process", detail: `owned generation pids ${survivors().map(p => p.pid).join(",") || "unknown"}` }];
 }
 
 // #146 GOTCHA-2 — best-effort drain before a rename restart kills the agent.
@@ -8370,7 +8774,18 @@ function clearStoppedIdentityPidFile(nodeId: string): StopNodeResult {
   return { status: "survived", pid };
 }
 
+function clearAuditedLegacyPidFile(nodeId: string): StopNodeResult {
+  const pidFile = join(nodesDir(), nodeId, ".pid");
+  if (!existsSync(pidFile)) return { status: "not-running" };
+  const pid = parseInt(readFileSync(pidFile, "utf-8").trim());
+  rmSync(pidFile, { force: true });
+  // The alias/birth audit has just proved no owned generation remains. An
+  // alive numeric PID here is therefore stale/reused, never kill authority.
+  return { status: "stopped", ...(Number.isNaN(pid) ? {} : { pid }) };
+}
+
 async function stopCommand() {
+  const stopInvokedAt = Date.now();
   const ref = args[1];
   if (!ref) {
     console.log(`
@@ -8388,6 +8803,38 @@ Stop a running agent node.
   }
 
   const displayName = nodeDisplayName(resolved.id, resolved.profile);
+  let stopGeneration = "";
+  let stopProcesses: LifecycleProcessIdentity[] = [];
+  try {
+    await withLifecycleLock(resolved.id, () => {
+      const prior = readLifecycleOwner(resolved.id);
+      stopGeneration = prior?.generation || randomUUID();
+      let roots = prior?.processes || [];
+      if (roots.some(p => !p.birth)) throw new Error("NODE_OWNER_BIRTH_UNAVAILABLE");
+      // One-time migration for pre-receipt generations: discover by alias only
+      // while holding stop-intent, then freeze exact identities. Reaping never
+      // rescans by alias, so a later same-name generation cannot be adopted.
+      if (roots.length === 0) {
+        const legacy = findNodeProcessesByAlias(displayName);
+        if (legacy === null) throw new Error("NODE_PROCESS_TABLE_UNAVAILABLE");
+        roots = legacy.map(pid => {
+          const birth = processBirth(pid);
+          if (!birth) throw new Error(`NODE_OWNER_BIRTH_UNAVAILABLE: pid=${pid}`);
+          return { pid, birth, role: "agent" as const };
+        });
+      }
+      stopProcesses = snapshotOwnedProcessTree(roots);
+      writeLifecycleOwner(resolved.id, {
+        schema: 1, state: "stopping", stopInvokedAt, generation: stopGeneration,
+        ...(prior?.wrapperPid ? { wrapperPid: prior.wrapperPid, wrapperBirth: prior.wrapperBirth } : {}),
+        processes: stopProcesses,
+        ...(prior?.startInvokedAt ? { startInvokedAt: prior.startInvokedAt } : {}),
+      });
+    }, "stop-intent");
+  } catch (e: any) {
+    console.error(`[anet] ${e?.message || e}`);
+    process.exit(1);
+  }
   if (process.platform === "win32") {
     let record;
     try { record = readWindowsCopresenceRecord(nodesDir(), resolved.id); }
@@ -8402,6 +8849,10 @@ Stop a running agent node.
           console.warn(`[anet] ⚠ ${refused.process.role} pid=${refused.process.pid} was reused; leaving the unrelated process untouched`);
         }
       }
+      if (decision.refused.length > 0) {
+        console.error(`[anet] STOP_TIMEOUT: Windows ownership could not be proven; hub was not notified offline.`);
+        process.exit(1);
+      }
       for (const managedProcess of [...decision.safe].reverse()) {
         try { taskkillWindowsProcessTree(managedProcess.pid); }
         catch (e) {
@@ -8409,8 +8860,20 @@ Stop a running agent node.
           process.exit(1);
         }
       }
+      const windowsResiduals = decision.safe.filter(p => probeWindowsCreationDate(p.pid) === p.creationDate);
+      if (windowsResiduals.length > 0) {
+        console.error(`[anet] STOP_TIMEOUT: Windows managed processes survived: ${windowsResiduals.map(p => `${p.role}:${p.pid}`).join(", ")}`);
+        process.exit(1);
+      }
       rmSync(windowsCopresenceRecordPath(nodesDir(), resolved.id), { force: true });
-      await stopNode(resolved.id);
+      const pidResult = await stopNode(resolved.id);
+      if (pidResult.status === "survived") {
+        console.error(`[anet] STOP_TIMEOUT: Windows node pid ${pidResult.pid} survived; hub was not notified offline.`);
+        process.exit(1);
+      }
+      await withLifecycleLock(resolved.id, () => writeLifecycleOwner(resolved.id, {
+        ...(readLifecycleOwner(resolved.id) || { schema: 1 }), schema: 1, state: "stopped", stopInvokedAt,
+      }));
       await notifyServerOffline(resolved.profile, resolved.id);
       console.log(`[anet] Stopped "${displayName}" (Windows managed app-server + bridge, server notified)`);
       return;
@@ -8530,13 +8993,40 @@ Stop a running agent node.
     process.exit(1);
   }
   const tmuxKilled = identityTeardownKilled || tmuxTuiKilled || tmuxAppsrvKilled || tmuxBridgeKilled;
+  const generationResiduals = allowLegacyTmuxNameSweep
+    ? await reapOwnedGeneration(stopProcesses)
+    : [];
+  if (generationResiduals.length > 0) {
+    console.error(`[anet] STOP_TIMEOUT: could not prove "${displayName}" stopped; hub was not notified offline.`);
+    for (const residual of generationResiduals) console.error(`[anet]    residual ${residual.kind}: ${residual.detail}`);
+    process.exit(1);
+  }
   const stopResult = allowLegacyTmuxNameSweep
-    ? await stopNode(resolved.id)
+    ? clearAuditedLegacyPidFile(resolved.id)
     : clearStoppedIdentityPidFile(resolved.id);
   if (stopResult.status === "survived") {
     console.error(`[anet] could not confirm that "${displayName}" exited (pid ${stopResult.pid}); pidfile retained and PID was not signalled.`);
     process.exit(1);
   }
+  const socketDeadline = Date.now() + 3_000;
+  let socketResiduals = nodeSocketResiduals(resolved.profile);
+  while (socketResiduals.length > 0 && Date.now() < socketDeadline) {
+    await new Promise(r => setTimeout(r, 100));
+    socketResiduals = nodeSocketResiduals(resolved.profile);
+  }
+  if (socketResiduals.length > 0) {
+    console.error(`[anet] STOP_TIMEOUT: authoritative local resources survived for "${displayName}"; hub was not notified offline.`);
+    for (const residual of socketResiduals) console.error(`[anet]    residual ${residual.kind}: ${residual.detail}`);
+    process.exit(1);
+  }
+  await withLifecycleLock(resolved.id, () => {
+    const owner = readLifecycleOwner(resolved.id);
+    if (!owner || owner.generation !== stopGeneration || (owner.state !== "stopping" && owner.state !== "stopped")) {
+      throw new Error("NODE_STOP_GENERATION_CHANGED");
+    }
+    if (owner.state === "stopped") return;
+    writeLifecycleOwner(resolved.id, { ...(owner || { schema: 1 }), schema: 1, state: "stopped", stopInvokedAt });
+  }, "stop-complete", stopGeneration);
   const killed = stopResult.status === "stopped";
   // Always notify server — even if PID file missing, server may have stale session
   await notifyServerOffline(resolved.profile, resolved.id);
@@ -14134,6 +14624,13 @@ async function doctorCommand() {
     const pid = join(nodesDir(), id, ".pid");
     const alive = existsSync(pid) ? (() => { try { process.kill(parseInt(readFileSync(pid, "utf-8")), 0); return true; } catch { return false; } })() : false;
     info(`  ${name}`, `${runtime} ${alive ? "● running" : "○ stopped"} node_id=${p?.node_id || "-"}`);
+    if (p && runtime === "codex-app-server") {
+      const audit = codexTopologyAudit(p as any, join(nodesDir(), id), process.cwd());
+      const verified = audit.lastRecoveryVerification as any;
+      info(`    ↳ ${name} topology`, `${audit.launchMode}; cwd=${audit.cwd}; CODEX_HOME=${audit.codexHome}; remote=${audit.remote || "-"}; thread=${audit.threadId || "-"}; model=${audit.model || "-"}; flags=${JSON.stringify(audit.flags)}`);
+      if (audit.threadId && !verified) warning(`    ↳ ${name} recovery`, "stored thread has no successful thread/read history verification");
+      else if (verified) info(`    ↳ ${name} recovery`, `${verified.method} verified ${verified.verifiedAt}; turns=${verified.historyTurnCount}; fingerprint=${String(verified.historyFingerprint).slice(0, 12)}`);
+    }
     const diag = diagnoseNode(id);
     if (diag && diag.issues.length) {
       needsMigration.push(id);

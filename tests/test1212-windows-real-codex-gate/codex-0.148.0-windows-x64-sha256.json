@@ -1,0 +1,7 @@
+{
+  "schema": "anet/codex-binary-allowlist/v1",
+  "package": "@openai/codex@0.148.0",
+  "platform": "win32-x64",
+  "launcherSha256": "134063e133f0b4244fa3b251acf973d4fe4b4aeeacbdc135211bf480f59f1477",
+  "vendorSha256": "2ad2cf8a732da68b8f141634f92db1a03016c5faf533a7225fbc0fb740130410"
+}

@@ -60,7 +60,16 @@ describe("REST from_session identity binding", () => {
     })).toEqual({ ok: true, fromSession: "admin" });
   });
 
-  test("user token with no from still defaults to 'api'", () => {
+  test("user token with no from defaults to the authenticated username", () => {
+    expect(resolveRestFromSession({
+      token: UTOK,
+      tokenName: null,
+      authenticatedUsername: "admin",
+      requestedFrom: undefined,
+    })).toEqual({ ok: true, fromSession: "admin" });
+  });
+
+  test("legacy user auth without a username still falls back to 'api'", () => {
     expect(resolveRestFromSession({
       token: UTOK,
       tokenName: null,

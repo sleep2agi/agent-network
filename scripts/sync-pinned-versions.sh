@@ -66,18 +66,10 @@ register() {
 }
 
 # @sleep2agi/agent-network — 用户安装入口
-register "@sleep2agi/agent-network" "docs-site/docs/guide/runtimes.md"
-register "@sleep2agi/agent-network" "docs-site/docs/en/guide/runtimes.md"
-register "@sleep2agi/agent-network" "agent-network/src/opencode-agent-node-pair.ts:OPENCODE_AGENT_NETWORK_VERSION"
+register "@sleep2agi/agent-network" "agent-network/src/opencode-agent-node-pair.ts:PAIRED_AGENT_NETWORK_VERSION"
 
-# @sleep2agi/agent-node — runtime + SDK 行号锚点
-register "@sleep2agi/agent-node" "docs-site/docs/guide/runtimes.md"
-register "@sleep2agi/agent-node" "docs-site/docs/en/guide/runtimes.md"
-register "@sleep2agi/agent-node" "docs-site/docs/guide/agent-node.md"
-register "@sleep2agi/agent-node" "docs-site/docs/en/guide/agent-node.md"
-register "@sleep2agi/agent-node" "docs-site/docs/guide/sdk-deep-dive.md"
-register "@sleep2agi/agent-node" "docs-site/docs/en/guide/sdk-deep-dive.md"
-register "@sleep2agi/agent-node" "agent-network/src/opencode-agent-node-pair.ts:OPENCODE_AGENT_NODE_VERSION"
+# @sleep2agi/agent-node — paired runtime release
+register "@sleep2agi/agent-node" "agent-network/src/opencode-agent-node-pair.ts:PAIRED_AGENT_NODE_VERSION"
 
 # @sleep2agi/commhub-server — agent-network CLI 内 PINNED_SERVER_VERSION 常量
 register "@sleep2agi/commhub-server" "agent-network/bin/cli.ts:PINNED_SERVER_VERSION"
@@ -160,7 +152,10 @@ apply_or_preview() {
     # 恰恰让人把它当作"硬编码版本位"的权威枚举。实例:
     # `agent-network/bin/cli.ts:PINNED_DASHBOARD_VERSION` 已从 cli.ts 消失,
     # 但注册表里还留着,同步时只会打印一行 unchanged。
-    if [[ -n "${3:-}" ]] && ! grep -q "const ${3} = " "$file"; then
+    # A name-only check is insufficient: a compatibility alias such as
+    # `const OLD_NAME = NEW_NAME` cannot be rewritten by ts_pinned_pattern.
+    # Require the exact quoted literal shape that the registered sed rule owns.
+    if [[ -n "${3:-}" ]] && ! grep -Eq "^(export )?const ${3} = \"[^\"]+\";" "$file"; then
       echo "  🔴 MISSING TARGET: $file 里找不到 \`const ${3} = ...\` —— 注册表已过期"
       MISSING_TARGETS=$((MISSING_TARGETS + 1))
       return
@@ -174,7 +169,23 @@ apply_or_preview() {
     CHANGED_FILES+=("$file")
   else
     echo "  WOULD-WRITE: $file"
-    diff -u <(printf '%s' "$before") <(printf '%s' "$after") | sed 's/^/    /' | head -40
+    # `diff` uses rc=1 for the expected "files differ" result. With
+    # `set -euo pipefail`, piping that result directly through sed/head made a
+    # healthy dry-run exit before the remaining registry entries and summary.
+    # Capture the status explicitly: rc=0/1 are valid, while rc>1 is a real
+    # read/exec error and must still fail the release check.
+    local diff_output diff_rc
+    set +e
+    diff_output="$(diff -u <(printf '%s' "$before") <(printf '%s' "$after"))"
+    diff_rc=$?
+    set -e
+    if [[ "$diff_rc" -gt 1 ]]; then
+      echo "  ERROR: diff failed for $file (rc=$diff_rc)" >&2
+      return "$diff_rc"
+    fi
+    # `head` can make the upstream sed exit on SIGPIPE under pipefail. A
+    # single sed invocation both indents and limits the preview safely.
+    printf '%s\n' "$diff_output" | sed -n '1,40{s/^/    /;p;}'
   fi
 }
 

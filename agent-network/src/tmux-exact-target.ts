@@ -76,15 +76,23 @@ export interface PaneRow {
   coord: string;
 }
 
+// tmux 3.3a (including Debian's build used by our Linux images) sanitizes a
+// literal TAB in a format string to `_`.  A visible marker survives tmux's
+// formatter unchanged; keep TAB parsing as backwards-compatible input for
+// callers/tests that captured the older wire shape.
+const PANE_FIELD_MARKER = "::ANET_PANE::";
+
 export function parsePaneRows(listOutput: string): PaneRow[] {
   const rows: PaneRow[] = [];
   for (const line of listOutput.split("\n")) {
     if (!line) continue;
-    // Split on the LAST tab: a session name may itself contain a tab only if
-    // someone worked hard at it, and the coordinate never does.
-    const i = line.lastIndexOf("\t");
+    // Split on the LAST marker (or legacy TAB): a session name may contain the
+    // delimiter only if someone worked hard at it, and the coordinate cannot.
+    const markerIndex = line.lastIndexOf(PANE_FIELD_MARKER);
+    const i = markerIndex >= 0 ? markerIndex : line.lastIndexOf("\t");
     if (i <= 0) continue;
-    rows.push({ session: line.slice(0, i), coord: line.slice(i + 1).trim() });
+    const width = markerIndex >= 0 ? PANE_FIELD_MARKER.length : 1;
+    rows.push({ session: line.slice(0, i), coord: line.slice(i + width).trim() });
   }
   return rows;
 }
@@ -102,4 +110,4 @@ export function paneTargetFor(listOutput: string, sessionName: string): string |
 }
 
 /** The format string the two functions above expect. */
-export const PANE_LIST_FORMAT = "#{session_name}\t#{window_index}.#{pane_index}";
+export const PANE_LIST_FORMAT = `#{session_name}${PANE_FIELD_MARKER}#{window_index}.#{pane_index}`;

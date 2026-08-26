@@ -1,0 +1,102 @@
+# test1193 — Linux real Codex 0.148 co-presence protected E2E
+
+Date: 2026-08-26 (Asia/Shanghai)
+Source/main SHA: 8840b44feb3652f3a8a6c055fe65bb982ea96381
+(`origin/main`, #1193 at the time of the protected run)
+Result: PASS, with evidence boundary stated below
+
+## Isolation / production guard
+
+- Detached clean source worktree under an owner-only sentinel directory.
+- Dedicated HOME, CODEX_HOME, XDG_RUNTIME_DIR, tmux socket, alias
+  `codex-gate-19372`, Hub port 19372, Hub DB, app-server port 24705 and PIDs.
+- Only `auth.json` was copied into the test CODEX_HOME, mode 0600. Its contents
+  were never printed. Production config.toml, history, sessions and databases
+  were not copied.
+- Installed CLI was authoritatively observed as `codex-cli 0.148.0` with the
+  isolated HOME/CODEX_HOME.
+- Installed npm launcher (`@openai/codex/bin/codex.js`) SHA-256:
+  `134063e133f0b4244fa3b251acf973d4fe4b4aeeacbdc135211bf480f59f1477`.
+- Executed Linux x64 vendor binary SHA-256:
+  `ac2cfed85fb647d61e0150b8548102b330e4799d9d81ad5d354de701edf6b074`.
+- The exact paired package identity was 2.5.0-preview.33; its private package
+  entrypoint imported the agent-node bundle built from the source commit above.
+- Production guard before/after: communication-node PID 1214804 and birth time
+  were unchanged. Its config SHA-256 was
+  `b435202f816578009a3db9ad75940c7eb6c596899882a8a28e421fefecf4a41b`
+  before and the same
+  `b435202f816578009a3db9ad75940c7eb6c596899882a8a28e421fefecf4a41b`
+  after;
+  production listeners stayed at 9200 (PID 4190120) and 24703 (PID 307626).
+
+## Docker prerequisites
+
+- test750: PASS, 10 groups / 0 failures.
+- test1178: PASS, 14 tests / 0 failures; recovery invariants, typecheck and
+  production bundle passed.
+- test1191: PASS, 63 passed / 3 Windows-only skipped / 0 failed. Linux
+  fake-Codex live baseline counted normal+high as exactly two `turn/steer`
+  requests and zero additional `turn/start`; all three weakening mutations
+  were red.
+
+The three task-specific Docker images were removed after the gates to recover
+space. No Docker prune was run.
+
+## Real Codex host journey
+
+1. Real Codex 0.148 app-server became protocol-ready on
+   `ws://127.0.0.1:24705`.
+2. One built agent-node bridge attached and logged `shared bridge ready` before
+   the real TUI was opened.
+3. App-server, bridge and TUI used the same node CODEX_HOME, remote and thread
+   (identified in this report only as `persisted_thread_A`). Exactly three
+   dedicated tmux sessions existed: app-server, bridge and TUI (one bridge).
+4. The human TUI submitted a real shell `sleep 70` turn. While the TUI still
+   displayed `Working (26s)` with the terminal active, one high and one normal
+   Dashboard task were posted at 15:16:30.
+5. The production bridge logged both tasks as `(steered)` into the same active
+   human turn (identified only as `active_human_turn_A`). Both still emitted
+   active heartbeats at 15:17:23 and both completed/replied at 15:17:28. Thus
+   the overlap is witnessed during an actual >=70 second human turn.
+6. Each task persisted exactly one `task.started` and one `task.replied` event;
+   no duplicate task completion was stored.
+7. Stop completed through identity-gated teardown. Restart retained the exact
+   thread ID. Codex presented an update prompt; the protected launcher did not
+   claim TUI readiness. The test selected `Skip`, never `Update now`. The
+   resumed TUI visibly contained the earlier `sleep 70` prompt, both injected
+   Agent Network messages and `HUMAN_DONE`, proving non-empty history recovery.
+8. Final stop removed all three dedicated sessions; the temporary Hub exited.
+
+## Evidence boundary
+
+The real 0.148 run did not interpose a WebSocket proxy, so it does not claim a
+raw-wire RPC transcript. Its evidence is the production built bridge result:
+two tasks logged `(steered)`, both bound to one pre-existing human turn, with no
+FIFO/new-turn log and one bridge. Exact method counts (`turn/steer=2`, added
+`turn/start=0`) come from the preceding test1191 fake-wire contract. Combining
+those layers proves the production mapping and the real-server outcome without
+misrepresenting the real run as a packet capture.
+
+## Harness failures observed (all fail-closed)
+
+- Initial inherited tmux connection, invalid wrapper bun path, and direct
+  source-dist paired-identity rejection were corrected by isolated socket and
+  exact private package wiring.
+- A host install attempted to rebuild node-pty under Node 20 and failed; the
+  locked dependencies were installed with Node 22 and scripts disabled, while
+  the Linux tmux journey and actual runtime launch verified the required path.
+- Docker layers temporarily exhausted disk space; identity-marker creation
+  failed with ENOSPC before any third-attempt process started. Only the three
+  task-owned images were removed before continuing.
+
+No package was published, no global npm package was modified, and no production
+process was stopped or restarted.
+
+## CI status
+
+NOT-IN-CI: the real-Codex host layer is a protected manual gate. It requires an
+already authenticated Codex installation and a PTY/tmux host, copies only the
+minimum credential file into an owner-only disposable CODEX_HOME, and must not
+upload that home or its raw traces. The deterministic Docker prerequisites are
+the reproducible CI-safe portion; this report preserves the separately observed
+real-host evidence and its limitations.

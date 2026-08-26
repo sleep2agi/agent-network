@@ -1,0 +1,126 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 720B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4
+#2 DONE 0.0s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [1/6] FROM docker.io/oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4
+#4 resolve docker.io/oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 0.0s done
+#4 CACHED
+
+#5 [internal] load build context
+#5 transferring context: 40.26kB 0.0s done
+#5 DONE 0.1s
+
+#6 [2/8] WORKDIR /repo
+#6 DONE 0.2s
+
+#7 [3/8] COPY agent-network/package.json /repo/agent-network/package.json
+#7 DONE 0.1s
+
+#8 [4/8] RUN cd /repo/agent-network && bun install --ignore-scripts
+#8 0.237 bun install v1.3.14 (0d9b296a)
+#8 0.242 Resolving dependencies
+#8 5.891 Resolved, downloaded and extracted [1293]
+#8 6.344 Saved lockfile
+#8 6.344
+#8 6.344 + @modelcontextprotocol/sdk@1.30.0
+#8 6.344 + @types/markdown-it@14.2.0
+#8 6.344 + @types/node@25.9.5 (v26.3.0 available)
+#8 6.344 + javascript-obfuscator@5.6.0
+#8 6.344 + node-pty@1.1.0
+#8 6.344 + typescript@5.9.3 (v7.0.2 available)
+#8 6.344 + @inquirer/prompts@8.6.0
+#8 6.344 + @larksuiteoapi/node-sdk@1.73.0
+#8 6.344 + markdown-it@14.3.0 (v15.0.0 available)
+#8 6.344 + puppeteer-core@24.43.1 (v25.9.0 available)
+#8 6.344
+#8 6.344 330 packages installed [6.11s]
+#8 6.344
+#8 6.344 Blocked 1 postinstall. Run `bun pm untrusted` for details.
+#8 DONE 9.1s
+
+#9 [5/8] COPY agent-network /repo/agent-network
+#9 DONE 0.4s
+
+#10 [6/8] COPY tests/lib /repo/tests/lib
+#10 DONE 0.0s
+
+#11 [7/8] COPY tests/test766-bunx-preflight /repo/tests/test766-bunx-preflight
+#11 DONE 0.1s
+
+#12 [8/8] RUN chmod +x /repo/tests/test766-bunx-preflight/run.sh   /repo/tests/test766-bunx-preflight/fake-bun-only/bun   /repo/tests/test766-bunx-preflight/fake-bunx/bunx
+#12 DONE 0.3s
+
+#13 exporting to image
+#13 exporting layers
+#13 exporting layers 12.7s done
+#13 exporting manifest sha256:7c7bd0ed1d374afd17be51e733fa9ce8fcdf76799d4ba58456a907bd272e63cd 0.0s done
+#13 exporting config sha256:a5005ac70c398a6eb239ffdb86c01614463de8d19f6c72ada094e378491eb2a4 0.0s done
+#13 exporting attestation manifest sha256:72391b4c1ba2002bf90b0e2cd4e0b48ca14655384c81f4669fb6808422624ff4 0.0s done
+#13 exporting manifest list sha256:7da5450b7e467ddc221fdf6f75aa9e7580b5624a1c173baea8f8993851ac5682 0.0s done
+#13 naming to docker.io/library/anet-release46-test766:latest done
+#13 unpacking to docker.io/library/anet-release46-test766:latest
+#13 unpacking to docker.io/library/anet-release46-test766:latest 6.9s done
+#13 DONE 19.7s
+source_commit=unknown
+PASS bun-only, neither, and bunx behavior matrix
+$ bun build src/client.ts --outdir dist/src --target node --minify && bun build bin/cli.ts --outdir dist/bin --target node --minify --external @sleep2agi/commhub-server --external bun:sqlite --external '../../server/*' && bun build src/node-server.ts --outdir dist/src --target node --minify && bun build src/im/feishu/worker.ts --outdir dist/src/im/feishu --target node --minify --external @larksuiteoapi/node-sdk && tsc --emitDeclarationOnly --declaration --outDir dist && bun x javascript-obfuscator dist/bin/cli.js --output dist/bin/cli.js --compact true --string-array true --string-array-encoding base64 && bun x javascript-obfuscator dist/src/client.js --output dist/src/client.js --compact true --string-array true && bun x javascript-obfuscator dist/src/node-server.js --output dist/src/node-server.js --compact true --string-array true && cp bin/anet.cjs dist/bin/anet.cjs
+Bundled 3 modules in 14ms
+
+  client.js  5.79 KB  (entry point)
+
+Bundled 220 modules in 110ms
+
+  cli.js  1.21 MB  (entry point)
+
+Bundled 229 modules in 62ms
+
+  node-server.js  0.30 MB  (entry point)
+
+Bundled 606 modules in 224ms
+
+  worker.js  2.31 MB  (entry point)
+
+
+[javascript-obfuscator-cli] Obfuscating file: dist/bin/cli.js...
+
+[javascript-obfuscator-cli] Obfuscating file: dist/src/client.js...
+
+[javascript-obfuscator-cli] Obfuscating file: dist/src/node-server.js...
+PASS agent-network production build
+
+  anet hub start
+
+  Starting CommHub Server on port 27668 (bind 127.0.0.1)...
+
+  ❌ Failed to spawn bunx.
+     This usually means Bun was uninstalled or PATH changed mid-process.
+     Try: which bunx && bunx --version
+PASS mutation old-or-allows-bun-only witnessed red at its named behavior
+grep: /tmp/test766-bunx.ggcHtB/runner.argv: No such file or directory
+
+  anet hub start
+
+
+  ❌ anet hub start requires the Bun runtime (commhub-server is bun-only — uses Bun.serve + bun:sqlite, no Node fallback).
+
+     Install Bun first:
+       npm i -g bun
+       # 或按 https://bun.sh/docs/installation 安装
+       # restart your shell so PATH picks up ~/.bun/bin
+
+     Then re-run: anet hub start
+
+     More info: https://bun.sh/install
+
+sed: can't read /tmp/test766-bunx.ggcHtB/runner.argv: No such file or directory
+PASS mutation valid-bunx-blocked witnessed red at its named behavior
+RESULT pass=4 fail=0

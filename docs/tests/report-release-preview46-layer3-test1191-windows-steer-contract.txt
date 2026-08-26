@@ -1,0 +1,456 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.00kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/oven/bun:1.3.14
+#2 DONE 0.0s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [1/6] FROM docker.io/oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4
+#4 resolve docker.io/oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 0.0s done
+#4 CACHED
+
+#5 [internal] load build context
+#5 transferring context: 47.96kB 0.1s done
+#5 DONE 0.1s
+
+#6 [ 2/17] RUN apt-get update && apt-get install -y --no-install-recommends tmux curl procps     && rm -rf /var/lib/apt/lists/*
+#6 0.347 Get:1 http://deb.debian.org/debian trixie InRelease [140 kB]
+#6 0.368 Get:2 http://deb.debian.org/debian trixie-updates InRelease [47.3 kB]
+#6 0.368 Get:3 http://deb.debian.org/debian-security trixie-security InRelease [43.4 kB]
+#6 0.402 Get:4 http://deb.debian.org/debian trixie/main amd64 Packages [9673 kB]
+#6 0.501 Get:5 http://deb.debian.org/debian trixie-updates/main amd64 Packages [4412 B]
+#6 0.502 Get:6 http://deb.debian.org/debian-security trixie-security/main amd64 Packages [246 kB]
+#6 1.785 Fetched 10.2 MB in 1s (7028 kB/s)
+#6 1.785 Reading package lists...
+#6 2.918 Reading package lists...
+#6 4.069 Building dependency tree...
+#6 4.403 Reading state information...
+#6 4.924 The following additional packages will be installed:
+#6 4.925   libbrotli1 libcom-err2 libcurl4t64 libevent-core-2.1-7t64 libffi8
+#6 4.925   libgnutls30t64 libgssapi-krb5-2 libidn2-0 libjemalloc2 libk5crypto3
+#6 4.925   libkeyutils1 libkrb5-3 libkrb5support0 libldap2 libncursesw6 libnghttp2-14
+#6 4.926   libnghttp3-9 libp11-kit0 libproc2-0 libpsl5t64 librtmp1 libsasl2-2
+#6 4.928   libsasl2-modules-db libssh2-1t64 libtasn1-6 libunistring5
+#6 4.931 Suggested packages:
+#6 4.931   gnutls-bin krb5-doc krb5-user
+#6 4.931 Recommended packages:
+#6 4.931   bash-completion ca-certificates krb5-locales libldap-common libgpm2
+#6 4.931   publicsuffix libsasl2-modules psmisc linux-sysctl-defaults
+#6 5.263 The following NEW packages will be installed:
+#6 5.264   curl libbrotli1 libcom-err2 libcurl4t64 libevent-core-2.1-7t64 libffi8
+#6 5.264   libgnutls30t64 libgssapi-krb5-2 libidn2-0 libjemalloc2 libk5crypto3
+#6 5.264   libkeyutils1 libkrb5-3 libkrb5support0 libldap2 libncursesw6 libnghttp2-14
+#6 5.265   libnghttp3-9 libp11-kit0 libproc2-0 libpsl5t64 librtmp1 libsasl2-2
+#6 5.267   libsasl2-modules-db libssh2-1t64 libtasn1-6 libunistring5 procps tmux
+#6 5.317 0 upgraded, 29 newly installed, 0 to remove and 21 not upgraded.
+#6 5.317 Need to get 6891 kB of archives.
+#6 5.317 After this operation, 20.3 MB of additional disk space will be used.
+#6 5.317 Get:1 http://deb.debian.org/debian trixie/main amd64 libncursesw6 amd64 6.5+20250216-2 [135 kB]
+#6 5.320 Get:2 http://deb.debian.org/debian trixie/main amd64 libproc2-0 amd64 2:4.0.4-9 [65.6 kB]
+#6 5.321 Get:3 http://deb.debian.org/debian trixie/main amd64 procps amd64 2:4.0.4-9 [882 kB]
+#6 5.328 Get:4 http://deb.debian.org/debian trixie/main amd64 libbrotli1 amd64 1.1.0-2+b7 [307 kB]
+#6 5.331 Get:5 http://deb.debian.org/debian trixie/main amd64 libkrb5support0 amd64 1.21.3-5+deb13u1 [33.1 kB]
+#6 5.332 Get:6 http://deb.debian.org/debian trixie/main amd64 libcom-err2 amd64 1.47.2-3+b11 [25.0 kB]
+#6 5.332 Get:7 http://deb.debian.org/debian trixie/main amd64 libk5crypto3 amd64 1.21.3-5+deb13u1 [81.2 kB]
+#6 5.333 Get:8 http://deb.debian.org/debian trixie/main amd64 libkeyutils1 amd64 1.6.3-6 [9456 B]
+#6 5.333 Get:9 http://deb.debian.org/debian trixie/main amd64 libkrb5-3 amd64 1.21.3-5+deb13u1 [326 kB]
+#6 5.336 Get:10 http://deb.debian.org/debian trixie/main amd64 libgssapi-krb5-2 amd64 1.21.3-5+deb13u1 [138 kB]
+#6 5.338 Get:11 http://deb.debian.org/debian trixie/main amd64 libunistring5 amd64 1.3-2 [477 kB]
+#6 5.342 Get:12 http://deb.debian.org/debian trixie/main amd64 libidn2-0 amd64 2.3.8-2 [109 kB]
+#6 5.343 Get:13 http://deb.debian.org/debian trixie/main amd64 libsasl2-modules-db amd64 2.1.28+dfsg1-9 [19.8 kB]
+#6 5.344 Get:14 http://deb.debian.org/debian trixie/main amd64 libsasl2-2 amd64 2.1.28+dfsg1-9 [57.5 kB]
+#6 5.344 Get:15 http://deb.debian.org/debian trixie/main amd64 libldap2 amd64 2.6.10+dfsg-1 [194 kB]
+#6 5.346 Get:16 http://deb.debian.org/debian trixie/main amd64 libnghttp2-14 amd64 1.64.0-1.1+deb13u1 [76.2 kB]
+#6 5.347 Get:17 http://deb.debian.org/debian trixie/main amd64 libnghttp3-9 amd64 1.8.0-1 [67.7 kB]
+#6 5.348 Get:18 http://deb.debian.org/debian trixie/main amd64 libpsl5t64 amd64 0.21.2-1.1+b1 [57.2 kB]
+#6 5.348 Get:19 http://deb.debian.org/debian trixie/main amd64 libffi8 amd64 3.4.8-2 [24.1 kB]
+#6 5.349 Get:20 http://deb.debian.org/debian trixie/main amd64 libp11-kit0 amd64 0.25.5-3 [425 kB]
+#6 5.353 Get:21 http://deb.debian.org/debian trixie/main amd64 libtasn1-6 amd64 4.20.0-2+deb13u1 [50.1 kB]
+#6 5.354 Get:22 http://deb.debian.org/debian trixie/main amd64 libgnutls30t64 amd64 3.8.9-3+deb13u4 [1469 kB]
+#6 5.366 Get:23 http://deb.debian.org/debian trixie/main amd64 librtmp1 amd64 2.4+20151223.gitfa8646d.1-2+b5 [58.8 kB]
+#6 5.367 Get:24 http://deb.debian.org/debian trixie/main amd64 libssh2-1t64 amd64 1.11.1-1+deb13u1 [245 kB]
+#6 5.369 Get:25 http://deb.debian.org/debian trixie/main amd64 libcurl4t64 amd64 8.14.1-2+deb13u4 [392 kB]
+#6 5.373 Get:26 http://deb.debian.org/debian trixie/main amd64 curl amd64 8.14.1-2+deb13u4 [270 kB]
+#6 5.375 Get:27 http://deb.debian.org/debian trixie/main amd64 libevent-core-2.1-7t64 amd64 2.1.12-stable-10+b1 [132 kB]
+#6 5.376 Get:28 http://deb.debian.org/debian trixie/main amd64 libjemalloc2 amd64 5.3.0-3 [274 kB]
+#6 5.379 Get:29 http://deb.debian.org/debian trixie/main amd64 tmux amd64 3.5a-3 [490 kB]
+#6 5.710 debconf: unable to initialize frontend: Dialog
+#6 5.710 debconf: (TERM is not set, so the dialog frontend is not usable.)
+#6 5.710 debconf: falling back to frontend: Readline
+#6 5.711 debconf: unable to initialize frontend: Readline
+#6 5.711 debconf: (Can't locate Term/ReadLine.pm in @INC (you may need to install the Term::ReadLine module) (@INC entries checked: /etc/perl /usr/local/lib/x86_64-linux-gnu/perl/5.40.1 /usr/local/share/perl/5.40.1 /usr/lib/x86_64-linux-gnu/perl5/5.40 /usr/share/perl5 /usr/lib/x86_64-linux-gnu/perl-base /usr/lib/x86_64-linux-gnu/perl/5.40 /usr/share/perl/5.40 /usr/local/lib/site_perl) at /usr/share/perl5/Debconf/FrontEnd/Readline.pm line 8, <STDIN> line 29.)
+#6 5.711 debconf: falling back to frontend: Teletype
+#6 5.719 debconf: unable to initialize frontend: Teletype
+#6 5.719 debconf: (This frontend requires a controlling tty.)
+#6 5.719 debconf: falling back to frontend: Noninteractive
+#6 6.797 Fetched 6891 kB in 0s (81.0 MB/s)
+#6 6.832 Selecting previously unselected package libncursesw6:amd64.
+#6 6.832 (Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 4936 files and directories currently installed.)
+#6 6.886 Preparing to unpack .../00-libncursesw6_6.5+20250216-2_amd64.deb ...
+#6 6.893 Unpacking libncursesw6:amd64 (6.5+20250216-2) ...
+#6 6.948 Selecting previously unselected package libproc2-0:amd64.
+#6 6.950 Preparing to unpack .../01-libproc2-0_2%3a4.0.4-9_amd64.deb ...
+#6 6.953 Unpacking libproc2-0:amd64 (2:4.0.4-9) ...
+#6 7.004 Selecting previously unselected package procps.
+#6 7.006 Preparing to unpack .../02-procps_2%3a4.0.4-9_amd64.deb ...
+#6 7.020 Unpacking procps (2:4.0.4-9) ...
+#6 7.178 Selecting previously unselected package libbrotli1:amd64.
+#6 7.180 Preparing to unpack .../03-libbrotli1_1.1.0-2+b7_amd64.deb ...
+#6 7.183 Unpacking libbrotli1:amd64 (1.1.0-2+b7) ...
+#6 7.243 Selecting previously unselected package libkrb5support0:amd64.
+#6 7.245 Preparing to unpack .../04-libkrb5support0_1.21.3-5+deb13u1_amd64.deb ...
+#6 7.248 Unpacking libkrb5support0:amd64 (1.21.3-5+deb13u1) ...
+#6 7.291 Selecting previously unselected package libcom-err2:amd64.
+#6 7.292 Preparing to unpack .../05-libcom-err2_1.47.2-3+b11_amd64.deb ...
+#6 7.297 Unpacking libcom-err2:amd64 (1.47.2-3+b11) ...
+#6 7.335 Selecting previously unselected package libk5crypto3:amd64.
+#6 7.337 Preparing to unpack .../06-libk5crypto3_1.21.3-5+deb13u1_amd64.deb ...
+#6 7.343 Unpacking libk5crypto3:amd64 (1.21.3-5+deb13u1) ...
+#6 7.383 Selecting previously unselected package libkeyutils1:amd64.
+#6 7.385 Preparing to unpack .../07-libkeyutils1_1.6.3-6_amd64.deb ...
+#6 7.388 Unpacking libkeyutils1:amd64 (1.6.3-6) ...
+#6 7.425 Selecting previously unselected package libkrb5-3:amd64.
+#6 7.427 Preparing to unpack .../08-libkrb5-3_1.21.3-5+deb13u1_amd64.deb ...
+#6 7.431 Unpacking libkrb5-3:amd64 (1.21.3-5+deb13u1) ...
+#6 7.492 Selecting previously unselected package libgssapi-krb5-2:amd64.
+#6 7.493 Preparing to unpack .../09-libgssapi-krb5-2_1.21.3-5+deb13u1_amd64.deb ...
+#6 7.498 Unpacking libgssapi-krb5-2:amd64 (1.21.3-5+deb13u1) ...
+#6 7.544 Selecting previously unselected package libunistring5:amd64.
+#6 7.546 Preparing to unpack .../10-libunistring5_1.3-2_amd64.deb ...
+#6 7.553 Unpacking libunistring5:amd64 (1.3-2) ...
+#6 7.627 Selecting previously unselected package libidn2-0:amd64.
+#6 7.628 Preparing to unpack .../11-libidn2-0_2.3.8-2_amd64.deb ...
+#6 7.631 Unpacking libidn2-0:amd64 (2.3.8-2) ...
+#6 7.731 Selecting previously unselected package libsasl2-modules-db:amd64.
+#6 7.733 Preparing to unpack .../12-libsasl2-modules-db_2.1.28+dfsg1-9_amd64.deb ...
+#6 7.736 Unpacking libsasl2-modules-db:amd64 (2.1.28+dfsg1-9) ...
+#6 7.768 Selecting previously unselected package libsasl2-2:amd64.
+#6 7.769 Preparing to unpack .../13-libsasl2-2_2.1.28+dfsg1-9_amd64.deb ...
+#6 7.773 Unpacking libsasl2-2:amd64 (2.1.28+dfsg1-9) ...
+#6 7.813 Selecting previously unselected package libldap2:amd64.
+#6 7.814 Preparing to unpack .../14-libldap2_2.6.10+dfsg-1_amd64.deb ...
+#6 7.817 Unpacking libldap2:amd64 (2.6.10+dfsg-1) ...
+#6 7.877 Selecting previously unselected package libnghttp2-14:amd64.
+#6 7.878 Preparing to unpack .../15-libnghttp2-14_1.64.0-1.1+deb13u1_amd64.deb ...
+#6 7.881 Unpacking libnghttp2-14:amd64 (1.64.0-1.1+deb13u1) ...
+#6 7.919 Selecting previously unselected package libnghttp3-9:amd64.
+#6 7.920 Preparing to unpack .../16-libnghttp3-9_1.8.0-1_amd64.deb ...
+#6 7.924 Unpacking libnghttp3-9:amd64 (1.8.0-1) ...
+#6 7.961 Selecting previously unselected package libpsl5t64:amd64.
+#6 7.962 Preparing to unpack .../17-libpsl5t64_0.21.2-1.1+b1_amd64.deb ...
+#6 7.970 Unpacking libpsl5t64:amd64 (0.21.2-1.1+b1) ...
+#6 8.012 Selecting previously unselected package libffi8:amd64.
+#6 8.014 Preparing to unpack .../18-libffi8_3.4.8-2_amd64.deb ...
+#6 8.017 Unpacking libffi8:amd64 (3.4.8-2) ...
+#6 8.053 Selecting previously unselected package libp11-kit0:amd64.
+#6 8.055 Preparing to unpack .../19-libp11-kit0_0.25.5-3_amd64.deb ...
+#6 8.058 Unpacking libp11-kit0:amd64 (0.25.5-3) ...
+#6 8.131 Selecting previously unselected package libtasn1-6:amd64.
+#6 8.133 Preparing to unpack .../20-libtasn1-6_4.20.0-2+deb13u1_amd64.deb ...
+#6 8.136 Unpacking libtasn1-6:amd64 (4.20.0-2+deb13u1) ...
+#6 8.180 Selecting previously unselected package libgnutls30t64:amd64.
+#6 8.182 Preparing to unpack .../21-libgnutls30t64_3.8.9-3+deb13u4_amd64.deb ...
+#6 8.185 Unpacking libgnutls30t64:amd64 (3.8.9-3+deb13u4) ...
+#6 8.294 Selecting previously unselected package librtmp1:amd64.
+#6 8.296 Preparing to unpack .../22-librtmp1_2.4+20151223.gitfa8646d.1-2+b5_amd64.deb ...
+#6 8.303 Unpacking librtmp1:amd64 (2.4+20151223.gitfa8646d.1-2+b5) ...
+#6 8.345 Selecting previously unselected package libssh2-1t64:amd64.
+#6 8.347 Preparing to unpack .../23-libssh2-1t64_1.11.1-1+deb13u1_amd64.deb ...
+#6 8.350 Unpacking libssh2-1t64:amd64 (1.11.1-1+deb13u1) ...
+#6 8.392 Selecting previously unselected package libcurl4t64:amd64.
+#6 8.394 Preparing to unpack .../24-libcurl4t64_8.14.1-2+deb13u4_amd64.deb ...
+#6 8.397 Unpacking libcurl4t64:amd64 (8.14.1-2+deb13u4) ...
+#6 8.454 Selecting previously unselected package curl.
+#6 8.455 Preparing to unpack .../25-curl_8.14.1-2+deb13u4_amd64.deb ...
+#6 8.458 Unpacking curl (8.14.1-2+deb13u4) ...
+#6 8.514 Selecting previously unselected package libevent-core-2.1-7t64:amd64.
+#6 8.516 Preparing to unpack .../26-libevent-core-2.1-7t64_2.1.12-stable-10+b1_amd64.deb ...
+#6 8.519 Unpacking libevent-core-2.1-7t64:amd64 (2.1.12-stable-10+b1) ...
+#6 8.565 Selecting previously unselected package libjemalloc2:amd64.
+#6 8.567 Preparing to unpack .../27-libjemalloc2_5.3.0-3_amd64.deb ...
+#6 8.572 Unpacking libjemalloc2:amd64 (5.3.0-3) ...
+#6 8.630 Selecting previously unselected package tmux.
+#6 8.632 Preparing to unpack .../28-tmux_3.5a-3_amd64.deb ...
+#6 8.636 Unpacking tmux (3.5a-3) ...
+#6 8.718 Setting up libkeyutils1:amd64 (1.6.3-6) ...
+#6 8.728 Setting up libbrotli1:amd64 (1.1.0-2+b7) ...
+#6 8.740 Setting up libnghttp2-14:amd64 (1.64.0-1.1+deb13u1) ...
+#6 8.749 Setting up libcom-err2:amd64 (1.47.2-3+b11) ...
+#6 8.757 Setting up libjemalloc2:amd64 (5.3.0-3) ...
+#6 8.766 Setting up libkrb5support0:amd64 (1.21.3-5+deb13u1) ...
+#6 8.777 Setting up libsasl2-modules-db:amd64 (2.1.28+dfsg1-9) ...
+#6 8.786 Setting up libproc2-0:amd64 (2:4.0.4-9) ...
+#6 8.795 Setting up libunistring5:amd64 (1.3-2) ...
+#6 8.804 Setting up libncursesw6:amd64 (6.5+20250216-2) ...
+#6 8.813 Setting up libk5crypto3:amd64 (1.21.3-5+deb13u1) ...
+#6 8.822 Setting up libsasl2-2:amd64 (2.1.28+dfsg1-9) ...
+#6 8.831 Setting up libnghttp3-9:amd64 (1.8.0-1) ...
+#6 8.846 Setting up libffi8:amd64 (3.4.8-2) ...
+#6 8.858 Setting up procps (2:4.0.4-9) ...
+#6 8.903 Setting up libtasn1-6:amd64 (4.20.0-2+deb13u1) ...
+#6 8.920 Setting up libkrb5-3:amd64 (1.21.3-5+deb13u1) ...
+#6 8.935 Setting up libevent-core-2.1-7t64:amd64 (2.1.12-stable-10+b1) ...
+#6 8.947 Setting up libssh2-1t64:amd64 (1.11.1-1+deb13u1) ...
+#6 8.959 Setting up tmux (3.5a-3) ...
+#6 8.971 Setting up libldap2:amd64 (2.6.10+dfsg-1) ...
+#6 8.980 Setting up libidn2-0:amd64 (2.3.8-2) ...
+#6 8.989 Setting up libp11-kit0:amd64 (0.25.5-3) ...
+#6 9.004 Setting up libgssapi-krb5-2:amd64 (1.21.3-5+deb13u1) ...
+#6 9.015 Setting up libgnutls30t64:amd64 (3.8.9-3+deb13u4) ...
+#6 9.027 Setting up libpsl5t64:amd64 (0.21.2-1.1+b1) ...
+#6 9.038 Setting up librtmp1:amd64 (2.4+20151223.gitfa8646d.1-2+b5) ...
+#6 9.047 Setting up libcurl4t64:amd64 (8.14.1-2+deb13u4) ...
+#6 9.055 Setting up curl (8.14.1-2+deb13u4) ...
+#6 9.065 Processing triggers for debianutils (5.23.2) ...
+#6 9.143 Processing triggers for libc-bin (2.41-12+deb13u2) ...
+#6 DONE 11.0s
+
+#7 [ 3/17] WORKDIR /workspace
+#7 DONE 0.1s
+
+#8 [ 4/17] COPY agent-node/package.json ./agent-node/package.json
+#8 DONE 0.0s
+
+#9 [ 5/17] RUN cd agent-node && bun install --ignore-scripts
+#9 0.244 bun install v1.3.14 (0d9b296a)
+#9 0.251 Resolving dependencies
+#9 24.67 Resolved, downloaded and extracted [436]
+#9 24.88
+#9 24.88 + @openai/codex@0.133.0 (v0.149.1 available)
+#9 24.88 + @openai/codex-sdk@0.133.0 (v0.149.1 available)
+#9 24.88 + node-pty@1.1.0
+#9 24.88 + @anthropic-ai/claude-agent-sdk@0.3.246
+#9 24.88 + undici@6.28.0 (v8.10.0 available)
+#9 24.88 + zod@4.4.3
+#9 24.88
+#9 24.88 108 packages installed [24.63s]
+#9 24.88 Saved lockfile
+#9 DONE 27.6s
+
+#10 [ 6/17] COPY agent-network/package.json ./agent-network/package.json
+#10 DONE 0.2s
+
+#11 [ 7/17] RUN cd agent-network && bun install --ignore-scripts
+#11 0.283 bun install v1.3.14 (0d9b296a)
+#11 0.308 Resolving dependencies
+#11 1.887 Resolved, downloaded and extracted [916]
+#11 13.56 Saved lockfile
+#11 13.56
+#11 13.56 + @modelcontextprotocol/sdk@1.30.0
+#11 13.56 + @types/markdown-it@14.2.0
+#11 13.56 + @types/node@25.9.5 (v26.3.0 available)
+#11 13.56 + javascript-obfuscator@5.6.0
+#11 13.56 + node-pty@1.1.0
+#11 13.56 + typescript@5.9.3 (v7.0.2 available)
+#11 13.56 + @inquirer/prompts@8.6.0
+#11 13.56 + @larksuiteoapi/node-sdk@1.73.0
+#11 13.56 + markdown-it@14.3.0 (v15.0.0 available)
+#11 13.56 + puppeteer-core@24.43.1 (v25.9.0 available)
+#11 13.56
+#11 13.56 330 packages installed [13.28s]
+#11 13.56
+#11 13.56 Blocked 1 postinstall. Run `bun pm untrusted` for details.
+#11 DONE 14.1s
+
+#12 [ 8/17] COPY server/package.json ./server/package.json
+#12 DONE 0.4s
+
+#13 [ 9/17] RUN cd server && bun install --ignore-scripts
+#13 0.285 bun install v1.3.14 (0d9b296a)
+#13 0.307 Resolving dependencies
+#13 0.454 Resolved, downloaded and extracted [8]
+#13 8.283 Saved lockfile
+#13 8.283
+#13 8.283 + @modelcontextprotocol/sdk@1.30.0
+#13 8.283 + bun-types@1.4.0
+#13 8.283 + hono@4.13.5
+#13 8.283 + zod@4.4.3
+#13 8.283
+#13 8.283 95 packages installed [8.00s]
+#13 DONE 8.3s
+
+#14 [10/17] COPY agent-node ./agent-node
+#14 DONE 0.2s
+
+#15 [11/17] COPY agent-network ./agent-network
+#15 DONE 0.1s
+
+#16 [12/17] COPY server ./server
+#16 DONE 0.1s
+
+#17 [13/17] COPY tests/test751-codex-copresence-windows ./tests/test751-codex-copresence-windows
+#17 DONE 0.0s
+
+#18 [14/17] COPY tests/test1191-windows-steer-contract/linux-e2e.mjs /linux-e2e.mjs
+#18 DONE 0.0s
+
+#19 [15/17] COPY tests/test1191-windows-steer-contract/run.sh /run.sh
+#19 DONE 0.0s
+
+#20 [16/17] COPY tests/test584-dashboard-codex-delivery/mutate.ts /mutate.ts
+#20 DONE 0.0s
+
+#21 [17/17] RUN chmod 0755 /run.sh
+#21 DONE 0.2s
+
+#22 exporting to image
+#22 exporting layers
+#22 exporting layers 49.0s done
+#22 exporting manifest sha256:9cb343c80a89baf07699f95c5433547fe942e20986733f4bac52384311fb72de 0.0s done
+#22 exporting config sha256:b1aaa1ffd6c35d389642cecd286d240009ef24e008c64914d5c5f27b16dfeed4 0.0s done
+#22 exporting attestation manifest sha256:d0b7a181e421e0ec59780a0ae537c7161a342ba84138d4f37536bb4286737313 0.0s done
+#22 exporting manifest list sha256:1aafaa58124b7ad3d17c84d0958ef6b10c58654a3f314c94f22831db00b956a1 0.0s done
+#22 naming to docker.io/library/anet-release46-test1191:latest done
+#22 unpacking to docker.io/library/anet-release46-test1191:latest
+#22 unpacking to docker.io/library/anet-release46-test1191:latest 15.2s done
+#22 DONE 64.3s
+TEST1191 source=aa7402d8148e62c00a087a4f107bd7d8bf9cd748
+L1 compile
+Bundled 1 module in 6ms
+
+  fake-codex.mjs  5.58 KB  (entry point)
+
+Bundled 10 modules in 10ms
+
+  windows-e2e.mjs  54.67 KB  (entry point)
+
+Bundled 281 modules in 80ms
+
+  cli.js  2.0 MB  (entry point)
+
+Bundled 220 modules in 87ms
+
+  cli.js  1.93 MB  (entry point)
+
+L2 shared bridge + Windows launcher contracts
+bun test v1.3.14 (0d9b296a)
+
+agent-node/src/inbox-dispatch.test.ts:
+(pass) isInteractiveDashboardTask > accepts a Hub-authenticated dashboard chat task [0.56ms]
+(pass) isInteractiveDashboardTask > pre-stamp admin rows stay FIFO because aliases are not auth facts [0.11ms]
+(pass) isInteractiveDashboardTask > rejects node-authenticated spoofing, malformed ids, and plain messages [0.13ms]
+(pass) dispatchInboxBatch > awaited batches preserve legacy runtime serialization [2.29ms]
+(pass) dispatchInboxBatch > a later SSE snapshot enters while the first detached turn is still running [2.05ms]
+(pass) dispatchInboxBatch > the real serialized drain lane can fetch a later SSE snapshot before the active turn ends [1.04ms]
+(pass) dispatchInboxBatch > detached completion failures remain observable [1.55ms]
+(pass) dispatchInboxBatch > settling detached work emits a wake for the next Hub inbox window [1.50ms]
+(pass) dispatchInboxBatch > a throwing settle callback cannot strand queued N+1 work [1.65ms]
+(pass) dispatchInboxBatch > same-tick duplicate kicks claim one row exactly once [0.42ms]
+(pass) dispatchInboxBatch > bounded admission waits N+1 and starts it after a slot settles [2.89ms]
+(pass) dispatchInboxBatch > durable reply drain waits until detached Codex rows finish [0.14ms]
+(pass) dispatchInboxBatch > active Codex direct delivery and durable drain send one reply, not two [9.89ms]
+
+agent-network/src/codex-copresence-launch-readiness.test.ts:
+(pass) Codex co-presence launch readiness > POSIX waits for the shared bridge protocol boundary before creating the TUI [0.23ms]
+(pass) Codex co-presence launch readiness > app-server, bridge and TUI receive one node-specific CODEX_HOME on both launchers [0.56ms]
+
+agent-network/src/windows-codex-copresence.test.ts:
+(pass) Windows native Codex co-presence ownership > launcher waits for the real shared bridge before opening the TUI [3.53ms]
+(pass) Windows native Codex co-presence ownership > matching PID plus CreationDate is safe to stop [0.63ms]
+(pass) Windows native Codex co-presence ownership > PID reuse is refused rather than killing an unrelated process [0.16ms]
+(skip) Windows native process/ACL smoke > .NET process identity and taskkill manage a real Windows process tree
+(skip) Windows native process/ACL smoke > credential directory gets protected native ACLs
+(skip) Windows native process/ACL smoke > (unnamed)
+
+agent-node/src/runtime/codex-app-server-bridge.test.ts:
+(pass) CodexAppServerBridge — bootstrap + task mapping > bootstrap sends initialize + initialized + thread/resume in order [16.48ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > empty threadId → bootstrap creates a thread (thread/start) and adopts its id [12.63ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > stale threadId with no rollout → resume fails, bootstrap falls back to thread/start [11.34ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > startTaskTurn returns the server-assigned turnId and marks bridge working [7.61ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > turn/completed for OUR turn fires task_reply mapped back to the task_id [18.10ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > only exact owned-turn item events emit task_activity [18.03ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > authenticated Dashboard native /goal text reaches the shared thread unchanged and replies [18.68ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > clientUserMessageId rebinds a task when a goal successor replaces the turn/start response id [66.41ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > client-id ownership observed before the RPC response wins without reversing task event order [30.52ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > real bridge + runtime bounds a deferred terminal when exact client identity never arrives [38.19ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > real bridge + runtime bounds an unresolved turn/start through the left-FIFO fallback [68.29ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > agentMessage/delta accumulates when server omits finalText [25.28ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > turn/completed for a HUMAN-TUI-initiated turn is dropped (§7.5) [17.53ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > events for a DIFFERENT thread are dropped (defense in depth) [15.98ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > startTaskTurn refuses a second task while one is active [6.44ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > turn/completed with an error field fires task_error, NOT task_reply [17.26ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > turn/completed with interrupted status cannot become a successful reply [17.58ms]
+(pass) CodexAppServerBridge — approvals (waiting_human) §7.6 > reverse-request approval records waiting_human and sends NO response [19.69ms]
+(pass) CodexAppServerBridge — approvals (waiting_human) §7.6 > serverRequest/resolved clears waiting_human and status recovers [29.11ms]
+(pass) CodexAppServerBridge — approvals (waiting_human) §7.6 > multiple concurrent approvals: bridge stays waiting_human until all resolve [39.65ms]
+(pass) CodexAppServerBridge — two-client race for idle > only one bridge wins turn/start; the other observes and does not reply [27.33ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > reconnect recovers an active human turn and keeps it steerable [9.93ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > reconnect provenance keeps an orphaned network turn FIFO-only [29.69ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > reconnect provenance ignores leading whitespace before the network prefix [5.56ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > reconnect stays FIFO-only when real-wire active history omits userMessage [6.30ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > uses exact turn/steer contract and maps the human turn final answer [27.95ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > multiple Dashboard rows steer one human turn while ordinary agent work stays queued [40.42ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > steer mismatch fails closed and preserves the task in the normal FIFO [40.97ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > turn completion cannot attribute a task before turn/steer acceptance [50.42ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > reconciliation recovers a missed human turn completion and exact steered reply [15.92ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > concurrent startTaskTurn: exactly ONE turn/start reaches the server even with a slow response [57.74ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > submitTask queues the second task and drains it after turn/completed (order preserved) [117.46ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > cancelQueuedTask removes only the named FIFO row before it can execute [57.97ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > thread/read recovers a completed owned turn while a successor keeps the thread active [112.68ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > thread/read uses clientUserMessageId to recover a replacement turn when all live item events were lost [7.49ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > slow full-history fallback recovers when both terminal and successor notifications are lost [7.01ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > full history never attributes a different completed turn to the owned task [11.60ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > thread/read never recovers an interrupted turn as success [6.00ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > drain losing the idle race requeues at the FRONT and retries on next idle [170.32ms]
+
+agent-node/src/runtime/codex-app-server/session-manager.test.ts:
+(pass) createCodexSessionManager > the production Codex inbox path is wired through the shared holder [1.42ms]
+(pass) createCodexSessionManager > shared co-presence attaches eagerly before SSE and the human TUI [1.46ms]
+(pass) createCodexSessionManager > concurrent Dashboard handlers share one complete open attempt [1.14ms]
+(pass) createCodexSessionManager > a rejected open is cleared and the next row can retry [0.45ms]
+(pass) createCodexSessionManager > stopped and explicitly invalidated sessions are never reused [0.35ms]
+(pass) createCodexSessionManager > a session that dies during bootstrap is not published [0.24ms]
+
+3 tests skipped:
+(skip) Windows native process/ACL smoke > .NET process identity and taskkill manage a real Windows process tree
+(skip) Windows native process/ACL smoke > credential directory gets protected native ACLs
+(skip) Windows native process/ACL smoke > (unnamed)
+
+ 63 pass
+ 3 skip
+ 0 fail
+ 225 expect() calls
+Ran 66 tests across 5 files. [1435.00ms]
+L3 witnessed red
+MUTATION_RED: lazy-bridge-cannot-pass rc=1
+MUTATION_RED: tui-cannot-open-before-bridge-ready rc=1
+L4 real Linux Hub + built agent-node + fake Codex
+$ bun build src/cli.ts --outdir dist --entry-naming cli.js --target node --minify --external @anthropic-ai/claude-agent-sdk --external '@anthropic-ai/claude-agent-sdk-*' --external @openai/codex-sdk --external node-pty && bun build src/upload-file-mcp-stdio.ts --outdir dist --entry-naming upload-file-mcp-stdio.js --target node --minify
+Bundled 281 modules in 96ms
+
+  cli.js  1.18 MB  (entry point)
+
+Bundled 221 modules in 50ms
+
+  upload-file-mcp-stdio.js  0.28 MB  (entry point)
+
+PASS Linux real Hub + built agent-node steers normal/high into one human turn with zero extra turn/start and one HOME/remote/thread
+L5 live witnessed red: POSIX launcher readiness wait removed
+MUTATION_RED: linux-tui-cannot-open-before-bridge-ready rc=1
+L6 live witnessed red: turn/steer degraded to turn/start
+$ bun build src/cli.ts --outdir dist --entry-naming cli.js --target node --minify --external @anthropic-ai/claude-agent-sdk --external '@anthropic-ai/claude-agent-sdk-*' --external @openai/codex-sdk --external node-pty && bun build src/upload-file-mcp-stdio.ts --outdir dist --entry-naming upload-file-mcp-stdio.js --target node --minify
+Bundled 281 modules in 202ms
+
+  cli.js  1.18 MB  (entry point)
+
+Bundled 221 modules in 78ms
+
+  upload-file-mcp-stdio.js  0.28 MB  (entry point)
+
+MUTATION_RED: steer-cannot-degrade-to-second-turn rc=1
+$ bun build src/cli.ts --outdir dist --entry-naming cli.js --target node --minify --external @anthropic-ai/claude-agent-sdk --external '@anthropic-ai/claude-agent-sdk-*' --external @openai/codex-sdk --external node-pty && bun build src/upload-file-mcp-stdio.ts --outdir dist --entry-naming upload-file-mcp-stdio.js --target node --minify
+Bundled 281 modules in 92ms
+
+  cli.js  1.18 MB  (entry point)
+
+Bundled 221 modules in 56ms
+
+  upload-file-mcp-stdio.js  0.28 MB  (entry point)
+
+RESULT: PASS

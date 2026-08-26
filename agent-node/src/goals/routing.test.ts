@@ -26,12 +26,23 @@ describe("shouldCreateScheduledGoal — Dashboard native slash pass-through", ()
   });
 
   test("non-Dashboard traffic retains /goal and /loop during the compatibility window", () => {
-    for (const runtime of RUNTIMES) {
+    for (const runtime of RUNTIMES.filter((value) => value !== "codex-app-server")) {
       expect(shouldCreateScheduledGoal("/goal 1h update docs", runtime, false)).toBe(true);
       expect(shouldCreateScheduledGoal("/loop 1h update docs", runtime, false)).toBe(true);
       expect(shouldCreateScheduledGoal("/agoal 1h update docs", runtime, false)).toBe(true);
       expect(shouldCreateScheduledGoal("/aloop 1h update docs", runtime, false)).toBe(true);
     }
+  });
+
+  test("Codex TUI /goal passes through even when Dashboard provenance is absent", () => {
+    expect(shouldCreateScheduledGoal("/goal 好好设计本地数据存储规范", "codex-app-server", false)).toBe(false);
+    expect(shouldCreateScheduledGoal("  /GOAL resume the previous session", "codex-app-server", false)).toBe(false);
+  });
+
+  test("Codex TUI keeps explicit ANet scheduling and legacy /loop compatibility", () => {
+    expect(shouldCreateScheduledGoal("/agoal 5m update docs", "codex-app-server", false)).toBe(true);
+    expect(shouldCreateScheduledGoal("/aloop 5m update docs", "codex-app-server", false)).toBe(true);
+    expect(shouldCreateScheduledGoal("/loop 5m update docs", "codex-app-server", false)).toBe(true);
   });
 
   test("near matches and slash text away from the start never select the scheduler", () => {

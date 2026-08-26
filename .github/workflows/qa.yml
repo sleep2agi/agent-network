@@ -20,12 +20,24 @@ on:
       - 'agent-node/**'
       - 'tests/qa-*/**'
       - 'scripts/qa.sh'
+      - 'scripts/sync-pinned-versions.sh'
       - 'docs/qa/**'
       - '.github/workflows/qa.yml'
       - 'tests/test725-agent-node-unit-ci/**'
       - 'tests/test745-agent-network-unit-ci/**'
       - 'tests/test746-setup-bun-pin/**'
       - 'tests/test751-codex-copresence-windows/**'
+      - 'tests/test1212-windows-real-codex-gate/**'
+      - '.github/workflows/windows-real-codex-gate.yml'
+      - 'tests/test1191-windows-steer-contract/**'
+      - 'tests/test1183-sync-pinned-dryrun/**'
+      - 'tests/test1193-side-thread-contract/**'
+      - 'tests/test1195-side-thread-hub-contract/**'
+      - 'tests/test1195-side-thread-hub-security/**'
+      - 'tests/test1195-side-thread-hub-race/**'
+      - 'tests/test1200-side-thread-command-transport/**'
+      - 'tests/test1203-btw-production-e2e/**'
+      - 'tests/test1181-codex-durable-poll/**'
       # A test directory belongs here exactly when CI executes it — otherwise
       # editing the test cannot re-run the gate that runs it. The four below are
       # reached through scripts/qa.sh L1_TESTS and the e2e workflow; the other
@@ -87,6 +99,7 @@ on:
       #    而 CI 从头到尾没有执行过这个套件。job 存在、挂上、会被触发是三件事,
       #    漏的就是第三件。
       - 'tests/test225-grok-preview-package-live/**'
+      - 'tests/test225-node-stop-convergence/**'
       - 'tests/test233-grok-main-integration/**'
       - 'tests/test234-grok-profile-disclosure/**'
       - 'tests/test235-grok-mcp-outbound-only/**'
@@ -97,6 +110,7 @@ on:
       - 'tests/test661-explicit-bootstrap-db/**'
       - 'tests/test683-hub-lifecycle-watcher/**'
       - 'tests/qa-hub-17-rename-canonicalization/**'
+      - 'tests/test1210-actual-target-contract/**'
       - 'tests/qa-hub-19-login-guard/**'
       - 'tests/test635-daemon-private-state/**'
       - 'tests/test643-transient-hub-legacy-repair/**'
@@ -148,6 +162,7 @@ on:
       - 'tests/test697-codex-default-model/**'
       - 'tests/test698-atomic-peer-reply/**'
       - 'tests/test750-codex-copresence-onecommand/**'
+      - 'tests/test1178-codex-upgrade-recovery/**'
       - 'tests/test736-pm2-fleet-rebuild/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
@@ -172,6 +187,10 @@ on:
       - 'tests/test725-agent-node-unit-ci/**'
       - 'tests/test745-agent-network-unit-ci/**'
       - 'tests/test746-setup-bun-pin/**'
+      - 'tests/test751-codex-copresence-windows/**'
+      - 'tests/test1212-windows-real-codex-gate/**'
+      - '.github/workflows/windows-real-codex-gate.yml'
+      - 'tests/test1191-windows-steer-contract/**'
       # A test directory belongs here exactly when CI executes it — otherwise
       # editing the test cannot re-run the gate that runs it. The four below are
       # reached through scripts/qa.sh L1_TESTS and the e2e workflow; the other
@@ -233,6 +252,7 @@ on:
       #    而 CI 从头到尾没有执行过这个套件。job 存在、挂上、会被触发是三件事,
       #    漏的就是第三件。
       - 'tests/test225-grok-preview-package-live/**'
+      - 'tests/test225-node-stop-convergence/**'
       - 'tests/test233-grok-main-integration/**'
       - 'tests/test234-grok-profile-disclosure/**'
       - 'tests/test235-grok-mcp-outbound-only/**'
@@ -294,6 +314,7 @@ on:
       - 'tests/test697-codex-default-model/**'
       - 'tests/test698-atomic-peer-reply/**'
       - 'tests/test750-codex-copresence-onecommand/**'
+      - 'tests/test1178-codex-upgrade-recovery/**'
       - 'tests/test736-pm2-fleet-rebuild/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
@@ -311,6 +332,19 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  release-sync-dry-run:
+    name: release version sync dry-run (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build + run test1183-sync-pinned-dryrun
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-test1183-sync-pinned-dryrun \
+            -f tests/test1183-sync-pinned-dryrun/Dockerfile .
+          docker run --rm --network none anet-test1183-sync-pinned-dryrun
+
   doc-claims:
     name: doc claim freshness (Docker)
     runs-on: ubuntu-latest
@@ -819,6 +853,7 @@ jobs:
       matrix:
         suite:
           - qa-hub-17-rename-canonicalization
+          - test1210-actual-target-contract
           - qa-hub-19-login-guard
           - test635-daemon-private-state
           - test643-transient-hub-legacy-repair
@@ -870,6 +905,8 @@ jobs:
           - test697-codex-default-model
           - test698-atomic-peer-reply
           - test750-codex-copresence-onecommand
+          - test1191-windows-steer-contract
+          - test1178-codex-upgrade-recovery
           - test736-pm2-fleet-rebuild
     steps:
       - uses: actions/checkout@v4
@@ -905,6 +942,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - name: Verify protected real-Codex gate trust boundary
+        run: node tests/test1212-windows-real-codex-gate/static-contract.mjs
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:

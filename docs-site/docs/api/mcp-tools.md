@@ -236,9 +236,19 @@ Hub 先用 `id = message_id`，或对任务消息用 `task_id = message_id`，�
 {
   "ok": true,
   "message_id": "uuid-xxx",
+  "actual_to": {
+    "alias": "代码1号",
+    "to_node_id": "node_xxx",
+    "network_id": "net_xxx"
+  },
   "session_status": "idle"
 }
 ```
+
+`actual_to` 表示 Hub 在调用方有权访问的 network 内实际解析到的 canonical
+目标；在线成功、离线排队和幂等重放均使用同一 shape。改名兼容字段
+`renamed_from` / `renamed_to` 继续保留。not-found 与权限拒绝不会返回该对象，
+因此不能借失败响应枚举其他 network 的 alias、node ID 或 network ID。
 
 **示例**：
 

@@ -1,0 +1,37 @@
+Test 1176 — manual Codex TUI alignment and runtime truth
+
+Source commit under test: e9b4a5c10383298aec50ea481062a5c5bb3b66f5
+Base: origin/main at 86f981661e3287dea0bbce51f40e824945882d81
+
+Scope
+- Hub preserves exact agent-node:codex-app-server and agent-node:grok-build-cli labels instead of collapsing them into SDK/ACP families. Legacy exact labels remain compatible; prefix lookalikes are rejected.
+- When a manually assembled bridge first creates/captures a thread, agent-node atomically writes codexThreadId and prints copyable POSIX and PowerShell resume commands containing the node-local CODEX_HOME, codexAppServerUrl, bridge-written thread id, and configured model.
+- Shell values are quoted and terminal control characters are not emitted.
+- Resume commands are emitted only for credential-free loopback ws/wss URLs. Userinfo, query, fragment, non-loopback hosts, and non-ws schemes fail closed; the fallback warning never includes the rejected value.
+- The manual topology guide records the observed failure: omitting the node CODEX_HOME can silently use ~/.codex, connect to external :443, and show an empty pane. Operators must verify socket/remote/thread; an empty pane is not evidence of success.
+- Managed creation/recovery remains owned by merged PR #1178 and was not duplicated here.
+
+Path-conflict audit
+- server/src/server.ts overlaps open BTW PRs #1196/#1200/#1204; this PR changes only the local normalization helper import/call already present in its original scope.
+- agent-node/src/cli.ts overlaps #1180/#1193/#1198/#1204; this PR changes only the post-writeback manual alignment warning.
+- Documentation and new helper/test/Docker paths have no open-PR overlap.
+
+Docker result
+- Image: anet-test1176:e9b4a5c10383298aec50ea481062a5c5bb3b66f5
+- Command: sg docker -c 'docker build --build-arg SOURCE_COMMIT=e9b4a5c10383298aec50ea481062a5c5bb3b66f5 -t anet-test1176:e9b4a5c10383298aec50ea481062a5c5bb3b66f5 -f tests/test1176-codex-thread-runtime/Dockerfile . && docker run --rm anet-test1176:e9b4a5c10383298aec50ea481062a5c5bb3b66f5'
+- Pure behavior: 13 pass / 0 fail / 24 expectations.
+- Production integration source gates: PASS.
+- Chinese + English incident documentation gates: PASS.
+- agent-node production bundle: PASS.
+- CommHub server production bundle: PASS.
+- RESULT: PASS.
+- The composed Docker artifact is not separately registered in CI; its behavior tests and bundles are already covered by package aggregate gates. See tests/test1176-codex-thread-runtime/NOT-IN-CI.md.
+
+Witnessed red
+1. Mutated exact mapping agent-node:codex-app-server back to codex-sdk: runtime-label.test.ts failed with expected codex-app-server / received codex-sdk (rc=1).
+2. Mutated the emitted POSIX command to use CODEX_HOME='wrong': codex-tui-alignment.test.ts failed on the exact resume command (rc=1).
+3. Removed the query-string rejection and retried ws://127.0.0.1:24712/rpc?token=review-query-secret: the fail-closed test received a command object and failed (rc=1), proving the secret regression is visible.
+
+Boundary
+- The bridge does not kill/restart an operator's interactive TUI behind their back. It emits exact repair instructions only when it actually changes codexThreadId.
+- This Draft does not merge, publish, alter managed recovery, or probe a real operator CODEX_HOME.

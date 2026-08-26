@@ -1,0 +1,74 @@
+# Test 1184 — agent-node package version lockstep
+
+Date: 2026-08-25
+
+Source commit under test:
+`c4797d427db0085ac513343a45ee7063d685f32f`
+
+## Scope
+
+PR #1184 corrects the `agent-node/package-lock.json` root versions from
+`2.5.0-preview.32` to `2.5.0-preview.33`. This revision adds the missing
+regression gate to the existing complete agent-node unit domain:
+
+- `package.json.version == package-lock.json.version`
+- `package.json.version == package-lock.json.packages[""].version`
+
+The new `agent-node/src/package-version-consistency.test.ts` file is discovered
+automatically by `tests/test725-agent-node-unit-ci/run.sh`, which enumerates and
+runs every `agent-node/src/**/*.test.ts` file and checks the executed-file
+denominator. No workflow or test registration change is required.
+
+## Open-PR path overlap
+
+All open PRs were enumerated without a result limit. No other open PR changes
+`agent-node/package-lock.json` or the new test path. PR #460 changes
+`agent-node/package.json`, but this PR does not edit that file.
+
+## Docker evidence
+
+Built and ran the existing complete agent-node unit image:
+
+```text
+image: anet-test1184-rev2-c4797d42
+test_files=100
+package-version-consistency: 2/2 passed
+1341 pass
+0 fail
+Ran 1341 tests across 100 files
+tests_dir_executed=6 tests_dir_discovered=6 tests_dir_failed=0
+RESULT: PASS
+```
+
+The image embeds `TEST725_SOURCE_COMMIT=c4797d427db0085ac513343a45ee7063d685f32f`.
+The following report-only commit changes only this file, so the tested package
+metadata and test are byte-identical at the PR head. The build used the
+repository's pinned Bun 1.3.14 and Node 22 test725 Dockerfile, and ran as the
+non-root `node` user.
+
+## Witnessed red
+
+Each equality was broken independently inside a disposable container; the
+repository worktree was not mutated.
+
+1. Set only `package-lock.json.version` to `0.0.0-mutant`:
+
+```text
+(fail) package-lock top-level version matches package.json
+1 pass
+1 fail
+WITNESSED_RED top-level-lock-version rc=1
+```
+
+2. Set only `package-lock.json.packages[""].version` to `0.0.0-mutant`:
+
+```text
+(fail) package-lock root package version matches package.json
+1 pass
+1 fail
+WITNESSED_RED root-package-lock-version rc=1
+```
+
+The two mutations demonstrate that removing either lockstep relationship is
+observable as a named failing assertion. CRLF coverage is intentionally not
+included because all three inputs are parsed JSON values, not raw text hashes.

@@ -165,6 +165,10 @@ describe("#167 Hub delivered-stale lifecycle watcher", () => {
     const taskId = "stale-live-wiring";
     const childDb = new Database(childDbPath);
     try {
+      // startHub may still be finishing its startup migration transaction even
+      // though the process has stayed alive. Wait for that short-lived writer
+      // instead of turning scheduler timing into an immediate SQLITE_BUSY.
+      childDb.exec("PRAGMA busy_timeout = 5000");
       childDb.run(
         `INSERT INTO tasks
            (task_id, from_name, to_name, status, content, delivered_at, network_id)

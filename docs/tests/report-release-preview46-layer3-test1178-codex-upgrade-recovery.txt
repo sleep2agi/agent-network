@@ -1,0 +1,159 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 525B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/oven/bun:1.3.14
+#2 DONE 0.0s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [1/9] FROM docker.io/oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4
+#4 resolve docker.io/oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 0.0s done
+#4 DONE 0.0s
+
+#5 [2/9] WORKDIR /repo
+#5 CACHED
+
+#6 [3/9] RUN apt-get update -qq && apt-get install -y --no-install-recommends python3 make g++ >/dev/null && rm -rf /var/lib/apt/lists/*
+#6 ...
+
+#7 [internal] load build context
+#7 transferring context: 20.73kB 0.0s done
+#7 DONE 0.1s
+
+#6 [3/9] RUN apt-get update -qq && apt-get install -y --no-install-recommends python3 make g++ >/dev/null && rm -rf /var/lib/apt/lists/*
+#6 10.48 debconf: unable to initialize frontend: Dialog
+#6 10.48 debconf: (TERM is not set, so the dialog frontend is not usable.)
+#6 10.48 debconf: falling back to frontend: Readline
+#6 10.48 debconf: unable to initialize frontend: Readline
+#6 10.48 debconf: (Can't locate Term/ReadLine.pm in @INC (you may need to install the Term::ReadLine module) (@INC entries checked: /etc/perl /usr/local/lib/x86_64-linux-gnu/perl/5.40.1 /usr/local/share/perl/5.40.1 /usr/lib/x86_64-linux-gnu/perl5/5.40 /usr/share/perl5 /usr/lib/x86_64-linux-gnu/perl-base /usr/lib/x86_64-linux-gnu/perl/5.40 /usr/share/perl/5.40 /usr/local/lib/site_perl) at /usr/share/perl5/Debconf/FrontEnd/Readline.pm line 8, <STDIN> line 58.)
+#6 10.48 debconf: falling back to frontend: Teletype
+#6 10.49 debconf: unable to initialize frontend: Teletype
+#6 10.49 debconf: (This frontend requires a controlling tty.)
+#6 10.49 debconf: falling back to frontend: Noninteractive
+#6 DONE 24.8s
+
+#8 [4/9] COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
+#8 DONE 0.1s
+
+#9 [5/9] RUN cd agent-network && bun install --frozen-lockfile
+#9 0.214 bun install v1.3.14 (0d9b296a)
+#9 0.219 [5.01ms] migrated lockfile from package-lock.json
+#9 0.228 Resolving dependencies
+#9 0.282 Resolved, downloaded and extracted [4]
+#9 10.67 Saved lockfile
+#9 10.67
+#9 10.67 + @modelcontextprotocol/sdk@1.29.0
+#9 10.67 + @types/markdown-it@14.1.2
+#9 10.67 + @types/node@25.5.2
+#9 10.67 + javascript-obfuscator@5.4.1
+#9 10.67 + node-pty@1.1.0
+#9 10.67 + typescript@5.9.3
+#9 10.67 + @inquirer/prompts@8.4.3
+#9 10.67 + @larksuiteoapi/node-sdk@1.67.0
+#9 10.67 + markdown-it@14.2.0
+#9 10.67 + puppeteer-core@24.43.1
+#9 10.67
+#9 10.67 307 packages installed [10.46s]
+#9 10.67
+#9 10.67 Blocked 1 postinstall. Run `bun pm untrusted` for details.
+#9 DONE 11.0s
+
+#10 [6/9] COPY agent-network ./agent-network
+#10 DONE 0.4s
+
+#11 [7/9] COPY agent-node/package.json ./agent-node/package.json
+#11 DONE 0.1s
+
+#12 [8/9] COPY tests/test1178-codex-upgrade-recovery/run.sh ./run.sh
+#12 DONE 0.0s
+
+#13 [9/9] RUN chmod +x ./run.sh
+#13 DONE 0.3s
+
+#14 exporting to image
+#14 exporting layers
+#14 exporting layers 21.7s done
+#14 exporting manifest sha256:faab9504c450aa034d25750c57049d3d3353ac6622712de0dffa014987e893ad 0.0s done
+#14 exporting config sha256:b6252b89da29459ebd92991a74e4a524fd1ba6193d2f506a9c1524f556db9f3a 0.0s done
+#14 exporting attestation manifest sha256:519c0554f03bcf590792f48c86b5919958af2246e16f7c79d8566cd8e35b9db1 0.0s done
+#14 exporting manifest list sha256:d99fa775ef367012422a89742f2537b071e004e0ace655136413d41cafeec90b 0.0s done
+#14 naming to docker.io/library/anet-release46-test1178:latest done
+#14 unpacking to docker.io/library/anet-release46-test1178:latest
+#14 unpacking to docker.io/library/anet-release46-test1178:latest 10.3s done
+#14 DONE 32.1s
+Test 1178 — Codex upgrade recovery and topology audit
+
+Layer 1: pure recovery + existing thread lifecycle
+bun test v1.3.14 (0d9b296a)
+
+src/opencode-agent-node-pair.test.ts:
+(pass) OpenCode agent-node release pairing > pins the exact versions being released together [0.13ms]
+(pass) OpenCode agent-node release pairing > rejects latest 2.4.x-style help and accepts the RFC-029 capability [0.09ms]
+(pass) OpenCode agent-node release pairing > codex bridge ignores stale PATH globals and resolves only the immutable pair [0.12ms]
+(pass) OpenCode agent-node release pairing > codex capability is explicit and fails closed when absent [0.04ms]
+(pass) OpenCode agent-node release pairing > admits only the exact preview package identity with safe file modes [4.61ms]
+(pass) OpenCode agent-node release pairing > skips an exact project-local impersonator and selects the later global package [4.99ms]
+
+src/codex-copresence-thread.test.ts:
+(pass) co-presence thread lifecycle > restart resumes the persisted conversation [0.08ms]
+(pass) co-presence thread lifecycle > only a node with no persisted thread creates one [0.02ms]
+
+src/codex-copresence-recovery.test.ts:
+(pass) Codex co-presence recovery > resume requires exact thread identity and persisted history [0.54ms]
+(pass) Codex co-presence recovery > stub resume failure is fail-closed and never calls thread/start [0.29ms]
+(pass) Codex co-presence recovery > backup preserves config and session state but excludes credentials [4.76ms]
+(pass) Codex co-presence recovery > active state writer is quiesced before the authoritative snapshot [0.32ms]
+(pass) Codex co-presence recovery > recursive snapshot rejects symlinks instead of following state outside CODEX_HOME [1.06ms]
+(pass) Codex co-presence recovery > audit exposes topology without config secrets [0.14ms]
+
+ 14 pass
+ 0 fail
+ 41 expect() calls
+Ran 14 tests across 3 files. [64.00ms]
+
+Layer 2: production wiring invariants
+PASS: launcher uses exact resume/read verification, quiesced private snapshot, and audit projection
+PASS: stale PATH globals are ignored; codex bridge selects exact paired preview.34 and fails closed on identity/capability drift
+
+Layer 3: typecheck + production bundle
+$ tsc --noEmit
+$ bun build src/client.ts --outdir dist/src --target node --minify && bun build bin/cli.ts --outdir dist/bin --target node --minify --external @sleep2agi/commhub-server --external bun:sqlite --external '../../server/*' && bun build src/node-server.ts --outdir dist/src --target node --minify && bun build src/im/feishu/worker.ts --outdir dist/src/im/feishu --target node --minify --external @larksuiteoapi/node-sdk && tsc --emitDeclarationOnly --declaration --outDir dist && bun x javascript-obfuscator dist/bin/cli.js --output dist/bin/cli.js --compact true --string-array true --string-array-encoding base64 && bun x javascript-obfuscator dist/src/client.js --output dist/src/client.js --compact true --string-array true && bun x javascript-obfuscator dist/src/node-server.js --output dist/src/node-server.js --compact true --string-array true && cp bin/anet.cjs dist/bin/anet.cjs
+Bundled 3 modules in 8ms
+
+  client.js  5.79 KB  (entry point)
+
+Bundled 219 modules in 69ms
+
+  cli.js  1.20 MB  (entry point)
+
+Bundled 229 modules in 46ms
+
+  node-server.js  0.29 MB  (entry point)
+
+Bundled 598 modules in 105ms
+
+  worker.js  2.29 MB  (entry point)
+
+
+[javascript-obfuscator-cli] Obfuscating file: dist/bin/cli.js...
+
+[javascript-obfuscator-cli] Obfuscating file: dist/src/client.js...
+
+[javascript-obfuscator-cli] Obfuscating file: dist/src/node-server.js...
+PASS: typecheck and production bundle
+
+Witnessed-red contract
+Mutation proven by unit stub: thread/read returns exact id with empty history; test rejects and call trace is only thread/resume,thread/read (no thread/start).
+Mutation proven by paired-runtime stub: preview.33 differs from the required preview.34; the resolution plan has allowPathGlobal=false and an exact non-floating spec. Missing codex-app-server help is rejected.
+Mutation proven by active-writer stub: snapshot throws if reached while writer=true; production Windows and POSIX call the shared quiesceThenSnapshot boundary exactly once each.
+Mutation proven by recursive state fixture: nested session files have relative path + byte size + sha256; a symlink to outside CODEX_HOME is rejected instead of copied.
+Identity boundary: config-recovery.json is redacted non-credential metadata only. The original config.json and CODEX_HOME remain in place and are never replaced or cleared.
+
+Release gate (report-only; this Draft does not publish or bump versions)
+preview.45 is immutable/already published. This release candidate bumps agent-network to preview.46, agent-node to preview.34, and commhub-server to preview.30; run all release gates before publishing. Do not overwrite an existing version or move latest.
+RESULT: PASS

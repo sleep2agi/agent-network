@@ -1,0 +1,23 @@
+Bundled 279 modules in 71ms
+
+  cli.js  1.17 MB  (entry point)
+
+Bundled 221 modules in 39ms
+
+  upload-file-mcp-stdio.js  0.28 MB  (entry point)
+
+bun pack v1.3.14 (0d9b296a)
+
+packed 1.70KB package.json
+packed 11.36KB LICENSE
+packed 4.1KB README.md
+packed 1.17MB dist/cli.js
+packed 0.28MB dist/upload-file-mcp-stdio.js
+
+/tmp/sleep2agi-agent-node-2.5.0-preview.33.tgz
+
+Total files: 5
+Shasum: 5b52d7ef9bab955c076023b0873de899ed3c0acd
+Integrity: sha512-ZSwYNigtNTYb3[...]22uaPhVh5EYiA==
+Unpacked size: 1.46MB
+Packed size: 0.44MB

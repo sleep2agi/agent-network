@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT="scripts/sync-pinned-versions.sh"
+# The suite must always exercise a real version difference, including when the
+# release under test happens to be the version that was current when this gate
+# was introduced. Derive a syntactically valid next preview from each checked-
+# out pair literal instead of pinning a future release literal in the test.
+pair_versions() {
+  node - "$1" <<'NODE'
+  const fs = require("node:fs");
+  const source = fs.readFileSync("agent-network/src/opencode-agent-node-pair.ts", "utf8");
+  const name = process.argv[2];
+  const literal = new RegExp(`${name}\\s*=\\s*"([^"]+)"`).exec(source);
+  if (!literal) throw new Error(`missing ${name} literal`);
+  const current = literal[1];
+  const match = /^(\d+)\.(\d+)\.(\d+)-preview\.(\d+)$/.exec(current);
+  if (!match) throw new Error(`unexpected package version: ${current}`);
+  console.log(current);
+  console.log(`${match[1]}.${match[2]}.${match[3]}-preview.${Number(match[4]) + 1}`);
+NODE
+}
+mapfile -t network_versions < <(pair_versions PAIRED_AGENT_NETWORK_VERSION)
+NETWORK_CURRENT="${network_versions[0]}"
+TARGET="${network_versions[1]}"
+mapfile -t node_versions < <(pair_versions PAIRED_AGENT_NODE_VERSION)
+NODE_CURRENT="${node_versions[0]}"
+NODE_TARGET="${node_versions[1]}"
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+pass() { echo "PASS: $*"; }
+
+baseline_out="$(mktemp)"
+if ! bash "$SCRIPT" @sleep2agi/agent-network "$TARGET" >"$baseline_out" 2>&1; then
+  cat "$baseline_out" >&2
+  fail "a normal dry-run with a version diff exits zero"
+fi
+grep -q 'agent-network/src/opencode-agent-node-pair.ts (PAIRED_AGENT_NETWORK_VERSION)' "$baseline_out" \
+  || fail "the changed live-version target is enumerated"
+grep -q 'WOULD-WRITE: agent-network/src/opencode-agent-node-pair.ts' "$baseline_out" \
+  || fail "the baseline really exercises a version difference"
+grep -q 'dry-run 完成' "$baseline_out" \
+  || fail "the dry-run reaches its final summary"
+grep -q '加 --apply 实跑' "$baseline_out" \
+  || fail "the summary retains the actionable apply command"
+pass "normal version differences do not abort the dry-run"
+pass "every registered target is followed by the final summary"
+
+# The agent-node side of the release pair moved in the same refactor. Its
+# compatibility alias is also non-literal and therefore not a writable target.
+node_out="$(mktemp)"
+if ! bash "$SCRIPT" @sleep2agi/agent-node "$NODE_TARGET" >"$node_out" 2>&1; then
+  cat "$node_out" >&2
+  fail "the agent-node registry points at its writable paired-version literal"
+fi
+grep -q 'agent-network/src/opencode-agent-node-pair.ts (PAIRED_AGENT_NODE_VERSION)' "$node_out" \
+  || fail "the agent-node paired-version target is enumerated"
+grep -q 'WOULD-WRITE: agent-network/src/opencode-agent-node-pair.ts' "$node_out" \
+  || fail "the agent-node baseline really exercises a version difference"
+grep -q 'dry-run 完成' "$node_out" \
+  || fail "the agent-node dry-run reaches its final summary"
+
+# Negative control: the checked-out value must remain a no-op. This proves the
+# preceding WOULD-WRITE assertion distinguishes a real mutation from a target
+# that merely happens to be present in the registry.
+node_same_out="$(mktemp)"
+if ! bash "$SCRIPT" @sleep2agi/agent-node "$NODE_CURRENT" >"$node_same_out" 2>&1; then
+  cat "$node_same_out" >&2
+  fail "the agent-node same-version negative control exits zero"
+fi
+if grep -q 'WOULD-WRITE:' "$node_same_out"; then
+  fail "the agent-node same-version negative control unexpectedly writes"
+fi
+grep -q 'dry-run 完成' "$node_same_out" \
+  || fail "the agent-node same-version negative control reaches its summary"
+[[ "$NODE_TARGET" != "$NODE_CURRENT" ]] \
+  || fail "the derived agent-node preview must differ from the checked-out version"
+[[ "$TARGET" != "$NETWORK_CURRENT" ]] \
+  || fail "the derived agent-network preview must differ from the checked-out version"
+pass "same-version negative control proves the version-difference assertion is discriminating"
+pass "both release-pair registries own writable quoted literals"
+
+# A compatibility alias with the right name but no quoted value must not be
+# accepted as a live target. Recreate the stale registration in a disposable
+# script and require the exact missing-target failure.
+alias_mutant="$(mktemp)"
+cp "$SCRIPT" "$alias_mutant"
+[[ "$(grep -c ':PAIRED_AGENT_NETWORK_VERSION"' "$alias_mutant")" -eq 1 ]] \
+  || fail "compatibility-alias mutation target count changed"
+sed -i 's/:PAIRED_AGENT_NETWORK_VERSION"/:OPENCODE_AGENT_NETWORK_VERSION"/' "$alias_mutant"
+[[ "$(grep -c ':OPENCODE_AGENT_NETWORK_VERSION"' "$alias_mutant")" -eq 1 ]] \
+  || fail "compatibility-alias mutation was a no-op"
+alias_out="$(mktemp)"
+if bash "$alias_mutant" @sleep2agi/agent-network "$TARGET" >"$alias_out" 2>&1; then
+  fail "a non-literal compatibility alias was accepted as writable"
+fi
+grep -q 'MISSING TARGET:.*OPENCODE_AGENT_NETWORK_VERSION' "$alias_out" \
+  || fail "the non-literal alias failure names the stale registry target"
+pass "a constant name without a quoted literal is rejected as stale"
+
+# Witnessed red: reconstruct the old pipeline in a disposable copy. It sees
+# the same real version difference, returns diff's expected rc=1 through
+# pipefail, and exits before the summary.
+mutant="$(mktemp)"
+cp "$SCRIPT" "$mutant"
+node - "$mutant" <<'NODE'
+const fs = require('fs');
+const path = process.argv[2];
+let source = fs.readFileSync(path, 'utf8');
+const start = source.indexOf('    # `diff` uses rc=1');
+const endMarker = '    printf \'%s\\n\' "$diff_output" | sed -n \'1,40{s/^/    /;p;}\'';
+const end = source.indexOf(endMarker, start);
+if (start < 0 || end < 0) throw new Error('mutation target not found');
+const after = end + endMarker.length;
+source = source.slice(0, start)
+  + '    diff -u <(printf \'%s\' "$before") <(printf \'%s\' "$after") | sed \'s/^/    /\' | head -40'
+  + source.slice(after);
+fs.writeFileSync(path, source);
+NODE
+chmod +x "$mutant"
+mutant_out="$(mktemp)"
+if bash "$mutant" @sleep2agi/agent-network "$TARGET" >"$mutant_out" 2>&1; then
+  fail "witnessed-red old pipefail pipeline unexpectedly stayed green"
+fi
+if grep -q 'dry-run 完成' "$mutant_out"; then
+  fail "witnessed-red old pipeline unexpectedly reached the summary"
+fi
+pass "WITNESSED_RED: the old diff pipeline exits early and loses the summary"
+
+# A genuine diff execution error remains fatal. This distinguishes the
+# expected rc=1 from rc>1 instead of papering over every diff failure.
+fakebin="$(mktemp -d)"
+cat >"$fakebin/diff" <<'SH'
+#!/usr/bin/env sh
+exit 2
+SH
+chmod +x "$fakebin/diff"
+error_out="$(mktemp)"
+if PATH="$fakebin:$PATH" bash "$SCRIPT" @sleep2agi/agent-network "$TARGET" >"$error_out" 2>&1; then
+  fail "a real diff error was incorrectly accepted"
+fi
+grep -q 'ERROR: diff failed.*rc=2' "$error_out" \
+  || fail "the real diff error is reported with its exit status"
+pass "real diff failures remain nonzero and visible"
+
+echo "SOURCE_COMMIT=${SOURCE_COMMIT}"
+echo "RESULT: PASS"

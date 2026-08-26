@@ -1434,11 +1434,26 @@ curl -X POST http://localhost:9200/api/task \
 **响应**（成功）：
 
 ```json
-{ "ok": true, "task_id": "uuid-xxx", "message_id": "uuid-xxx" }
+{
+  "ok": true,
+  "task_id": "uuid-xxx",
+  "message_id": "uuid-xxx",
+  "actual_to": {
+    "alias": "代码1号",
+    "to_node_id": "node_xxx",
+    "network_id": "net_xxx"
+  }
+}
 ```
 
 `task_id` 是 canonical task identifier；`message_id` 为兼容旧调用方保留，
 当前与 `task_id` 相同。
+
+`actual_to` 是 Hub 完成权限检查和 network-scoped alias 解析后的权威投递目标。
+它在在线成功和离线排队（HTTP 202、`alias_offline`）响应中使用同一 shape；
+alias 被改名时这里给 canonical alias，旧 `renamed_from` / `renamed_to` 字段仍保留。
+`to_node_id` 对尚未上报稳定 node identity 的旧节点可为 `null`。`alias_not_found`
+和权限拒绝响应不返回 `actual_to`，避免把错误接口变成跨 network 枚举入口。
 
 ### MCP 优先与 REST fallback
 

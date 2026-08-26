@@ -39,6 +39,7 @@ export default withMermaid(defineConfig({
       lang: 'zh-CN',
       themeConfig: {
         nav: [
+          { text: '下载桌面版', link: '/#desktop-download-title' },
           { text: '指南', link: '/guide/getting-started' },
           { text: 'SkillHub', link: '/skillhub/' },
           { text: 'API', link: '/api/mcp-tools' },
@@ -140,6 +141,7 @@ export default withMermaid(defineConfig({
       description: 'Local-first Multi-Agent Collaboration — Apache 2.0 open source, self-hosted',
       themeConfig: {
         nav: [
+          { text: 'Download', link: '/en/#desktop-download-title' },
           { text: 'Guide', link: '/en/guide/getting-started' },
           { text: 'SkillHub', link: '/en/skillhub/' },
           { text: 'API', link: '/en/api/mcp-tools' },

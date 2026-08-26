@@ -18,6 +18,7 @@ function cleanup() {
   try { db.run("DELETE FROM network_members WHERE network_id = ?1", [NET]); } catch {}
   try { db.run("DELETE FROM networks WHERE network_id = ?1", [NET]); } catch {}
   try { db.run("DELETE FROM users WHERE user_id = ?1", [USER]); } catch {}
+  try { db.run("DELETE FROM api_tokens WHERE network_id = ?1", [NET]); } catch {}
 }
 
 function seed() {
@@ -28,6 +29,10 @@ function seed() {
     db.run(
       "INSERT INTO nodes (node_id, node_name, alias, network_id, hostname, created_at, updated_at, lifecycle_state) VALUES (?1, ?2, ?2, ?3, 'host', datetime('now'), datetime('now'), 'active')",
       [`id_${alias}`, alias, NET],
+    );
+    db.run(
+      "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, bound_node_id) VALUES (?1, ?1, ?2, ?3, ?4, ?5)",
+      [`token_${alias}`, USER, NET, alias, `id_${alias}`],
     );
     db.run(
       "INSERT INTO sessions (resume_id, alias, status, node_id, network_id, updated_at, last_seen_at) VALUES (?1, ?2, 'idle', ?3, ?4, datetime('now'), datetime('now'))",
@@ -91,6 +96,70 @@ beforeEach(() => { cleanup(); seed(); });
 afterAll(cleanup);
 
 describe("task consumed_at identity and lifecycle", () => {
+  test("immutable node cursor paginates beyond 100 without alias or cross-node leakage", async () => {
+    for (let i = 0; i < 125; i++) {
+      db.run(
+        `INSERT INTO tasks (task_id, from_node_id, from_name, to_name, status, content, network_id, created_at)
+         VALUES (?1, ?2, ?3, ?4, 'replied', 'x', ?5, ?6)`,
+        [`page-${String(i).padStart(3, "0")}`, `id_${NODE_A}`, i < 60 ? "old-alias" : NODE_A, NODE_B, NET, `2026-01-01 00:${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}`],
+      );
+    }
+    db.run(
+      `INSERT INTO tasks (task_id, from_node_id, from_name, to_name, status, content, network_id)
+       VALUES ('foreign-node-row', ?1, ?2, ?3, 'replied', 'x', ?4)`,
+      [`id_${NODE_B}`, NODE_A, NODE_A, NET],
+    );
+    const handler = toolsFor({ alias: NODE_A, nodeToken: true }).list_tasks;
+    const first = await call(handler, { from_node_id: `id_${NODE_A}`, durable_cursor: true, limit: 100 });
+    expect(first.capability).toBe("list_tasks.immutable-node-cursor.v1");
+    expect(first.tasks).toHaveLength(100);
+    const second = await call(handler, { from_node_id: `id_${NODE_A}`, durable_cursor: true, limit: 100, ...first.next_cursor });
+    expect(second.tasks).toHaveLength(25);
+    expect(new Set([...first.tasks, ...second.tasks].map((task: any) => task.task_id)).size).toBe(125);
+    expect([...first.tasks, ...second.tasks].some((task: any) => task.task_id === "foreign-node-row")).toBe(false);
+    expect((await call(handler, { from_node_id: `id_${NODE_B}`, durable_cursor: true, limit: 100 })).error).toBe("from_node_id_identity_mismatch");
+  });
+  test("terminal sequence paginates beyond 2000 and admits late completion of an old task", async () => {
+    db.run(
+      `INSERT INTO tasks (task_id, from_node_id, from_name, to_name, status, content, network_id, created_at)
+       VALUES ('old-open-task', ?1, 'renamed-sender', ?2, 'running', 'late', ?3, '2020-01-01 00:00:00')`,
+      [`id_${NODE_A}`, NODE_B, NET],
+    );
+    for (let i = 0; i < 2_001; i++) {
+      db.run(
+        `INSERT INTO tasks (task_id, from_node_id, from_name, to_name, status, content, network_id, created_at, completed_at)
+         VALUES (?1, ?2, ?3, ?4, 'replied', 'x', ?5, ?6, datetime('now'))`,
+        [`terminal-page-${String(i).padStart(4, "0")}`, `id_${NODE_A}`, i < 1_000 ? "old-alias" : NODE_A, NODE_B, NET, `2026-01-01 00:00:${String(i % 60).padStart(2, "0")}`],
+      );
+    }
+    db.run(
+      `INSERT INTO tasks (task_id, from_node_id, from_name, to_name, status, content, network_id)
+       VALUES ('terminal-cross-network', ?1, ?2, ?3, 'replied', 'x', 'other-network')`,
+      [`id_${NODE_A}`, NODE_A, NODE_B],
+    );
+    const handler = toolsFor({ alias: NODE_A, nodeToken: true }).list_tasks;
+    let after = 0;
+    const ids: string[] = [];
+    for (let page = 0; page < 30; page++) {
+      const response = await call(handler, {
+        from_node_id: `id_${NODE_A}`, durable_cursor: true, durable_terminal_cursor: true,
+        after_terminal_seq: after, limit: 100,
+      });
+      expect(response.capability).toBe("list_tasks.immutable-terminal-sequence.v2");
+      ids.push(...response.tasks.map((task: any) => task.task_id));
+      after = response.next_terminal_seq;
+      if (!response.has_more) break;
+    }
+    expect(ids).toHaveLength(2_001);
+    expect(new Set(ids).size).toBe(2_001);
+    expect(ids).not.toContain("terminal-cross-network");
+    db.run("UPDATE tasks SET status = 'failed', completed_at = datetime('now') WHERE task_id = 'old-open-task'");
+    const late = await call(handler, {
+      from_node_id: `id_${NODE_A}`, durable_cursor: true, durable_terminal_cursor: true,
+      after_terminal_seq: after, limit: 100,
+    });
+    expect(late.tasks.map((task: any) => task.task_id)).toEqual(["old-open-task"]);
+  }, 20_000);
   test("enqueue and process-level ack keep consumed_at null", async () => {
     const content = "connected process has not started a model turn";
     const before = db.get<{ last_seen_at: string; task: string | null }>(

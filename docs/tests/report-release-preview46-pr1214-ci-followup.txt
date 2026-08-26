@@ -1,0 +1,40 @@
+PR #1214 CI follow-up: server startup lock and preview fixture comments
+Date: 2026-08-26 (Asia/Shanghai)
+Fixed source commit: e1b1a6903b38f19caf996e056448481b93e4b2ba
+
+Witnessed red (GitHub job 98147650320, synthetic merge 970f1932):
+- test798 discovered and executed all 76 server test files.
+- Only server/src/task-lifecycle-watcher.test.ts failed (4 pass, 1 fail).
+- The live-watcher test's immediate fixture INSERT failed at line 168 with
+  SQLITE_BUSY / "database is locked" while a real Hub child was starting.
+- Full downloaded job log: /tmp/pr1214-server-unit.log
+
+Isolation evidence:
+- PR #1214 had not changed the watcher/product path.
+- An exact old-head 6916943720527ba25fc259cf8d3ec3d2e52acb58 test798
+  Docker rerun passed all 76 files and its password-floor witnessed-red.
+- Therefore the old no-timeout test demonstrably admits both outcomes under
+  startup scheduling; the CI failure is the witnessed SQLITE_BUSY outcome.
+
+Deterministic fix:
+- The test-owned child Database now sets PRAGMA busy_timeout = 5000 before its
+  fixture INSERT, so it waits for startHub's short startup migration writer.
+- No server production behavior changed.
+- Corrected the package-owned fixture comments in test750 and test751 from
+  preview.33 to their executable preview.34 value.
+
+Focused Docker gates, run sequentially after the prior gate passed:
+
+1. test798 exact server unit domain, source e1b1a690:
+   executed_files=76 discovered_files=76 failed_files=0
+   MUTATION_RED registration-password-floor-weakened rc=1
+   RESULT: PASS
+   Full output: /tmp/pr1214-test798-lockfix.log
+
+2. test750 Linux Codex co-presence, source e1b1a690:
+   Summary: PASS (10 groups, 0 failures; all validation ran inside Docker)
+   Full output: /tmp/pr1214-test750-comments.log
+
+3. test751 Windows portable logic:
+   15 pass, 3 platform skips, 0 fail; tsc --noEmit exited zero
+   Full output: /tmp/pr1214-test751-comments.log

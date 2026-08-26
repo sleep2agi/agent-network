@@ -1,0 +1,26 @@
+# test750 — codex co-presence: one command, and the posture it keeps
+date: 2026-08-23T11:32:57+00:00
+source_commit: unset
+[L0] isolated environment
+PASS: environment (no host state; tmux + codex stub present so the launcher reaches its decisions)
+[L1] decision functions
+unit assertions: 80
+PASS: profile + preflight decision functions (80 tests)
+[L2] create writes what start will read
+hub up on http://127.0.0.1:9231
+PASS: flag, codex-cli alias, and real interactive picker all record co-presence only on the supported runtime
+[L3] start routes on the recorded field, with no flag
+PASS: recorded node → co-presence path; unrecorded node → normal lane
+[L4] --copresence still works as a one-off, and is then remembered
+PASS: one-off flag is honoured and remembered
+[L5] the sandbox the launcher actually resolved
+PASS: read-only is what co-presence actually resolves to; the grant is explicit and remembered
+[L6] every missing dependency in one pass, with a command for each
+PASS: all gaps reported together, each with a runnable command
+[L7] a hub that is not ours is never started for us
+PASS: refuses to substitute a local hub for a remote one, and says why
+[L8] a start that did not bring the node up must not report success
+PASS: an incomplete start exits non-zero and names the step that failed
+[L9] the first-run chain must not walk past its own failures
+PASS: register and login report failure through their exit code
+Summary: PASS (10 groups, 0 failures; all validation ran inside Docker)

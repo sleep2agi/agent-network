@@ -84,7 +84,7 @@ probe_bunx(){
   rc=0
   [[ -s "$capture" ]] || rc=1
   [[ "$(sed -n '1p' "$capture" 2>/dev/null || true)" == "--bun" ]] || rc=1
-  grep -Fxq '@sleep2agi/commhub-server@0.9.0-preview.29' "$capture" || rc=1
+  grep -Fxq '@sleep2agi/commhub-server@0.9.0-preview.30' "$capture" || rc=1
   grep -Fq 'Server running on http://127.0.0.1:27668' "$log" || rc=1
 
   kill "$cli_pid" 2>/dev/null || true

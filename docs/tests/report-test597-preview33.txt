@@ -1,0 +1,199 @@
+# test597 — Dashboard native slash / Agent Network scheduler namespace
+source_commit=unknown
+date=2026-08-23T11:27:46+00:00
+L0 source and build
+Bundled 279 modules in 88ms
+
+  test597-agent-node.js  2.0 MB  (entry point)
+
+$ tsc --noEmit
+L1 parser, routing, dispatch, and self-management
+bun test v1.3.14 (0d9b296a)
+
+agent-node/src/inbox-dispatch.test.ts:
+(pass) isInteractiveDashboardTask > accepts a Hub-authenticated dashboard chat task [0.42ms]
+(pass) isInteractiveDashboardTask > pre-stamp admin rows stay FIFO because aliases are not auth facts [0.07ms]
+(pass) isInteractiveDashboardTask > rejects node-authenticated spoofing, malformed ids, and plain messages [0.05ms]
+(pass) dispatchInboxBatch > awaited batches preserve legacy runtime serialization [1.79ms]
+(pass) dispatchInboxBatch > a later SSE snapshot enters while the first detached turn is still running [1.74ms]
+(pass) dispatchInboxBatch > the real serialized drain lane can fetch a later SSE snapshot before the active turn ends [1.13ms]
+(pass) dispatchInboxBatch > detached completion failures remain observable [1.41ms]
+(pass) dispatchInboxBatch > settling detached work emits a wake for the next Hub inbox window [1.34ms]
+(pass) dispatchInboxBatch > a throwing settle callback cannot strand queued N+1 work [1.52ms]
+(pass) dispatchInboxBatch > same-tick duplicate kicks claim one row exactly once [0.33ms]
+(pass) dispatchInboxBatch > bounded admission waits N+1 and starts it after a slot settles [1.86ms]
+(pass) dispatchInboxBatch > durable reply drain waits until detached Codex rows finish [0.06ms]
+(pass) dispatchInboxBatch > active Codex direct delivery and durable drain send one reply, not two [7.58ms]
+
+agent-node/src/goals/routing.test.ts:
+(pass) shouldCreateScheduledGoal — Dashboard native slash pass-through > authenticated Dashboard /goal and /loop pass through for every agent-node runtime [0.17ms]
+(pass) shouldCreateScheduledGoal — Dashboard native slash pass-through > authenticated Dashboard /agoal and /aloop always select the ANet scheduler [0.05ms]
+(pass) shouldCreateScheduledGoal — Dashboard native slash pass-through > non-Dashboard traffic retains /goal and /loop during the compatibility window [0.18ms]
+(pass) shouldCreateScheduledGoal — Dashboard native slash pass-through > Codex TUI /goal passes through even when Dashboard provenance is absent [0.12ms]
+(pass) shouldCreateScheduledGoal — Dashboard native slash pass-through > Codex TUI keeps explicit ANet scheduling and legacy /loop compatibility [0.08ms]
+(pass) shouldCreateScheduledGoal — Dashboard native slash pass-through > near matches and slash text away from the start never select the scheduler [0.12ms]
+(pass) appendLegacyScheduledGoalNotice > non-Dashboard /goal and /loop replies carry a deterministic migration notice [0.12ms]
+(pass) appendLegacyScheduledGoalNotice > new namespaced commands, Dashboard pass-through, and near matches are not warned [0.07ms]
+(pass) appendLegacyScheduledGoalNotice > the migration notice is first so the outer reply cap cannot truncate it [0.12ms]
+(pass) Dashboard native slash migration notice > interval-shaped /goal and /loop replies explain that ANet scheduling moved to /aloop [0.95ms]
+(pass) Dashboard native slash migration notice > ordinary native commands, namespaced commands, and non-Dashboard paths are untouched [0.14ms]
+(pass) Dashboard native slash migration notice > the notice survives low-value filtering and the outer reply cap [0.28ms]
+(pass) Dashboard native slash migration notice > low-value filtering judges the notice-prefixed text, not the raw model reply [0.12ms]
+(pass) Dashboard native slash migration notice > failed native replies still surface the migration notice and the failure [0.09ms]
+(pass) reply filtering uses authenticated message provenance > a short presence reply to an authenticated Dashboard human task is delivered [0.10ms]
+(pass) reply filtering uses authenticated message provenance > the same low-value class remains filtered for agent-to-agent tasks [0.07ms]
+(pass) reply filtering uses authenticated message provenance > a provenance flag cannot bypass filtering for a non-task message type [0.06ms]
+
+agent-node/src/goals/parser.test.ts:
+(pass) parseGoalCommand — English intervals > `5 min` form [0.11ms]
+(pass) parseGoalCommand — English intervals > `5min` joined form [0.09ms]
+(pass) parseGoalCommand — English intervals > `5 minutes` long form (plural wins over `min`) [0.05ms]
+(pass) parseGoalCommand — English intervals > `1 hour` [0.06ms]
+(pass) parseGoalCommand — English intervals > `hourly` keyword [0.08ms]
+(pass) parseGoalCommand — English intervals > `daily` [0.07ms]
+(pass) parseGoalCommand — English intervals > `1 day` [0.08ms]
+(pass) parseGoalCommand — English intervals > `/goal` prefix is optional [0.04ms]
+(pass) parseGoalCommand — English intervals > `/loop` alias [0.05ms]
+(pass) parseGoalCommand — English intervals > `/aloop` strips the namespaced canonical prefix [0.14ms]
+(pass) parseGoalCommand — English intervals > `/agoal` strips the namespaced compatibility prefix [0.07ms]
+(pass) parseGoalCommand — Chinese intervals > `每5分钟` [0.18ms]
+(pass) parseGoalCommand — Chinese intervals > `每 5 分钟` with spaces [0.15ms]
+(pass) parseGoalCommand — Chinese intervals > `5分钟` bare (no 每) [0.20ms]
+(pass) parseGoalCommand — Chinese intervals > `每小时` [0.06ms]
+(pass) parseGoalCommand — Chinese intervals > `每天` [0.07ms]
+(pass) parseGoalCommand — Chinese intervals > `每2小时` [0.08ms]
+(pass) parseGoalCommand — rejection paths > no interval — reject [0.10ms]
+(pass) parseGoalCommand — rejection paths > empty input — reject [0.04ms]
+(pass) parseGoalCommand — rejection paths > seconds rejected with informative error [0.08ms]
+(pass) parseGoalCommand — rejection paths > Chinese 秒 rejected [0.06ms]
+(pass) parseGoalCommand — rejection paths > text becomes empty after stripping interval — reject [0.08ms]
+(pass) parseGoalCommand — rejection paths > `/goal hourly` alone — reject (no text) [0.06ms]
+(pass) parseGoalCommand — rejection paths > MIN_INTERVAL_MS is 60s [0.05ms]
+(pass) parseGoalCommand — defence-in-depth > `1 min` exact minimum is accepted [0.06ms]
+(pass) parseGoalCommand — #144 round-6 single-letter units (CLI parity) > `5m` parses to 5 × 60_000 ms (the canonical CLI emission) [0.07ms]
+(pass) parseGoalCommand — #144 round-6 single-letter units (CLI parity) > `30m` / `90m` arbitrary minutes parse correctly [0.09ms]
+(pass) parseGoalCommand — #144 round-6 single-letter units (CLI parity) > `2h` parses to 2 hours [0.08ms]
+(pass) parseGoalCommand — #144 round-6 single-letter units (CLI parity) > `1d` parses to 24 hours [0.08ms]
+(pass) parseGoalCommand — #144 round-6 single-letter units (CLI parity) > single-letter and word-form yield the same interval (no semantic drift) [0.06ms]
+(pass) parseGoalCommand — #144 round-6 single-letter units (CLI parity) > `5min` still wins over `5m` (longest-prefix declaration order) [0.03ms]
+(pass) parseGoalCommand — #144 round-6 single-letter units (CLI parity) > single-letter inside a larger word is NOT swallowed (lookahead guard) [0.04ms]
+(pass) parseGoalCommand — #144 round-6 single-letter units (CLI parity) > `30s` is rejected with sub-minute error (parser + CLI aligned) [0.06ms]
+
+agent-node/src/goals/self-loop-tools.test.ts:
+(pass) list_my_loops > empty store → {goals: [], total: 0} [1.72ms]
+(pass) list_my_loops > includes goal_id_short + cadence schedule shape [1.67ms]
+(pass) create_my_loop > interval string '5m' creates goal [1.23ms]
+(pass) create_my_loop > cron-lite time_of_day creates goal with schedule field [7.68ms]
+(pass) create_my_loop > missing task → invalid_args [0.40ms]
+(pass) create_my_loop > missing both schedule and interval → invalid_schedule [0.51ms]
+(pass) create_my_loop > sub-minute interval rejected (parser 60s floor) [0.37ms]
+(pass) create_my_loop > max active goals cap (3 cap → 4th rejected) [1.65ms]
+(pass) edit_my_loop > change interval + report new value [2.06ms]
+(pass) edit_my_loop > paused=true → status=paused [1.23ms]
+(pass) edit_my_loop > cooldown — edit within 30s of last update rejected [0.69ms]
+(pass) edit_my_loop > unknown goal_id → goal_not_found [0.34ms]
+(pass) edit_my_loop > P0.3 unpause resets consecutive_failures (fresh 5-strike window) [1.31ms]
+(pass) edit_my_loop > P0.3 paused=false when already active does NOT wipe mid-failure counter [1.32ms]
+(pass) edit_my_loop > P0.3 paused=true does NOT reset consecutive_failures [1.31ms]
+(pass) reschedule_my_loop (★ ScheduleWakeup 范式) > pushes next_wake_at forward, interval_ms unchanged [1.85ms]
+(pass) reschedule_my_loop (★ ScheduleWakeup 范式) > invalid next_wake_in → invalid_interval [0.87ms]
+(pass) reschedule_my_loop (★ ScheduleWakeup 范式) > cooldown applies [0.65ms]
+(pass) complete_my_loop (★ 达标归档) > status → 'complete' [1.60ms]
+(pass) complete_my_loop (★ 达标归档) > unknown goal_id → goal_not_found [0.28ms]
+(pass) cancel_my_loop > status → 'cancelled' [1.54ms]
+(pass) cancel_my_loop > batch cancel (3 in 30s) triggers confirm-back on 4th [3.50ms]
+(pass) #302 round-2 — preflight computeNextWakeAt (self-lock prevention) > create_my_loop: bad timezone in schedule → invalid_schedule, NOT written [1.67ms]
+(pass) #302 round-2 — preflight computeNextWakeAt (self-lock prevention) > create_my_loop: bad weekday → invalid_schedule, NOT written [0.56ms]
+(pass) #302 round-2 — preflight computeNextWakeAt (self-lock prevention) > create_my_loop: bad time format → invalid_schedule, NOT written [0.52ms]
+(pass) #302 round-2 — preflight computeNextWakeAt (self-lock prevention) > edit_my_loop: bad timezone on edit → invalid_schedule, EXISTING goal untouched [1.07ms]
+(pass) #302 round-2 — preflight computeNextWakeAt (self-lock prevention) > create_my_loop: VALID structured schedule still works (regression) [2.19ms]
+(pass) SELF_LOOP_TOOL_SPECS — registration table > exports 6 tools with stable names [0.28ms]
+(pass) SELF_LOOP_TOOL_SPECS — registration table > every spec has non-empty description (LLM-discoverable) [0.28ms]
+(pass) SELF_LOOP_TOOL_SPECS — registration table > description guides per RFC-025 §3.2 (intent-parse + report-back + safety) [0.49ms]
+
+ 93 pass
+ 0 fail
+ 287 expect() calls
+Ran 93 tests across 4 files. [127.00ms]
+L2 real Hub binary + real SQLite authentication boundary
+bun test v1.3.14 (0d9b296a)
+
+server/src/dashboard-slash-routing-http.test.ts:
+[commhub] database: /tmp/test597-hub.db
+[commhub] 🎉 14-day free trial started!
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+(pass) real Hub → authenticated Dashboard slash routing > Dashboard /goal and /loop remain exact native payloads for every runtime [46.64ms]
+(pass) real Hub → authenticated Dashboard slash routing > Dashboard /agoal and /aloop use the Agent Network scheduler [6.92ms]
+(pass) real Hub → authenticated Dashboard slash routing > node token cannot forge Dashboard pass-through and keeps legacy compatibility [6.79ms]
+
+ 3 pass
+ 0 fail
+ 31 expect() calls
+Ran 3 tests across 1 file. [622.00ms]
+L3 real bridge websocket + shared-thread reply
+bun test v1.3.14 (0d9b296a)
+
+agent-node/src/runtime/codex-app-server-bridge.test.ts:
+(pass) CodexAppServerBridge — bootstrap + task mapping > authenticated Dashboard native /goal text reaches the shared thread unchanged and replies [23.68ms]
+
+ 1 pass
+ 38 filtered out
+ 0 fail
+ 3 expect() calls
+Ran 1 test across 1 file. [67.00ms]
+L4 real CLI wire
+bun test v1.3.14 (0d9b296a)
+
+tests/test597-dashboard-slash-namespace/cli-wire.test.ts:
+(pass) installed CLI-compatible node loop wire > anet node loop emits the namespaced /aloop payload [1184.69ms]
+
+ 1 pass
+ 0 fail
+ 3 expect() calls
+Ran 1 test across 1 file. [1223.00ms]
+L5 production wiring
+L6 witnessed-red mutations
+MUTATION_RED: dashboard-native-slash-must-not-enter-scheduler rc=1
+MUTATION_RED: namespaced-command-must-enter-scheduler rc=1
+MUTATION_RED: dashboard-interval-migration-notice-is-visible rc=1
+MUTATION_RED: near-match-must-not-route rc=1
+MUTATION_RED: cli-must-emit-namespaced-command rc=1
+MUTATION_RED: node-token-cannot-forge-dashboard-pass-through rc=1
+L7 restored green
+bun test v1.3.14 (0d9b296a)
+
+tests/test597-dashboard-slash-namespace/cli-wire.test.ts:
+(pass) installed CLI-compatible node loop wire > anet node loop emits the namespaced /aloop payload [1190.65ms]
+
+server/src/dashboard-slash-routing-http.test.ts:
+[commhub] database: /tmp/test597-restored.db
+[commhub] 🎉 14-day free trial started!
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+(pass) real Hub → authenticated Dashboard slash routing > Dashboard /goal and /loop remain exact native payloads for every runtime [39.55ms]
+(pass) real Hub → authenticated Dashboard slash routing > Dashboard /agoal and /aloop use the Agent Network scheduler [6.51ms]
+(pass) real Hub → authenticated Dashboard slash routing > node token cannot forge Dashboard pass-through and keeps legacy compatibility [6.80ms]
+
+agent-node/src/goals/routing.test.ts:
+(pass) shouldCreateScheduledGoal — Dashboard native slash pass-through > authenticated Dashboard /goal and /loop pass through for every agent-node runtime [0.11ms]
+(pass) shouldCreateScheduledGoal — Dashboard native slash pass-through > authenticated Dashboard /agoal and /aloop always select the ANet scheduler [0.10ms]
+(pass) shouldCreateScheduledGoal — Dashboard native slash pass-through > non-Dashboard traffic retains /goal and /loop during the compatibility window [0.18ms]
+(pass) shouldCreateScheduledGoal — Dashboard native slash pass-through > Codex TUI /goal passes through even when Dashboard provenance is absent [0.09ms]
+(pass) shouldCreateScheduledGoal — Dashboard native slash pass-through > Codex TUI keeps explicit ANet scheduling and legacy /loop compatibility [0.07ms]
+(pass) shouldCreateScheduledGoal — Dashboard native slash pass-through > near matches and slash text away from the start never select the scheduler [0.11ms]
+(pass) appendLegacyScheduledGoalNotice > non-Dashboard /goal and /loop replies carry a deterministic migration notice [0.24ms]
+(pass) appendLegacyScheduledGoalNotice > new namespaced commands, Dashboard pass-through, and near matches are not warned [0.10ms]
+(pass) appendLegacyScheduledGoalNotice > the migration notice is first so the outer reply cap cannot truncate it [0.30ms]
+(pass) Dashboard native slash migration notice > interval-shaped /goal and /loop replies explain that ANet scheduling moved to /aloop [0.87ms]
+(pass) Dashboard native slash migration notice > ordinary native commands, namespaced commands, and non-Dashboard paths are untouched [0.12ms]
+(pass) Dashboard native slash migration notice > the notice survives low-value filtering and the outer reply cap [0.24ms]
+(pass) Dashboard native slash migration notice > low-value filtering judges the notice-prefixed text, not the raw model reply [0.12ms]
+(pass) Dashboard native slash migration notice > failed native replies still surface the migration notice and the failure [0.11ms]
+(pass) reply filtering uses authenticated message provenance > a short presence reply to an authenticated Dashboard human task is delivered [0.13ms]
+(pass) reply filtering uses authenticated message provenance > the same low-value class remains filtered for agent-to-agent tasks [0.10ms]
+(pass) reply filtering uses authenticated message provenance > a provenance flag cannot bypass filtering for a non-task message type [0.10ms]
+
+ 21 pass
+ 0 fail
+ 120 expect() calls
+Ran 21 tests across 3 files. [1.81s]
+RESULT: PASS

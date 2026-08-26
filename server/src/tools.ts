@@ -364,6 +364,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     | { state: "offline"; alias: string; session: any; message: string }
     | { state: "not_found"; alias: string; message: string };
 
+  // Only call after the authenticated, network-scoped lookup resolved a
+  // concrete target. Error paths intentionally omit this identity object.
+  const actualTo = (target: Exclude<DeliveryTarget, { state: "not_found" }>, networkId?: string | null) => ({
+    alias: target.alias,
+    to_node_id: target.session?.node_id ?? null,
+    network_id: networkId ?? null,
+  });
+
   const scopedSessionStatus = (alias: string, networkId?: string | null) => {
     const params: any[] = [alias];
     let sql = "SELECT status, updated_at, last_seen_at, node_id FROM sessions WHERE alias = ?1";
@@ -1315,8 +1323,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         ? idempotentTaskId(effectiveNetId ?? null, from_session, clientRequestId)
         : uuidv4();
       if (clientRequestId) {
-        const existing = db.get<StoredIdempotentTask>(
-          "SELECT task_id, from_name, to_name, priority, content, network_id, meta_json, status FROM tasks WHERE task_id = ?1",
+        const existing = db.get<StoredIdempotentTask & { to_node_id: string | null }>(
+          "SELECT task_id, from_name, to_node_id, to_name, priority, content, network_id, meta_json, status FROM tasks WHERE task_id = ?1",
           [id],
         );
         if (existing) {
@@ -1332,6 +1340,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           return { content: [{ type: "text" as const, text: JSON.stringify({
             ok: true, message_id: existing.task_id, task_id: existing.task_id,
             task_status: existing.status, idempotent_replay: true,
+            // A replay acknowledges the already-persisted dispatch. Use that
+            // row rather than today's session record so alias reuse or a
+            // restarted process cannot rewrite historical recipient identity.
+            actual_to: {
+              alias: existing.to_name,
+              to_node_id: existing.to_node_id ?? null,
+              network_id: existing.network_id ?? null,
+            },
           }) }] };
         }
       }
@@ -1365,6 +1381,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       console.log(`[${ts()}] ${from_session} → send_task → ${targetAlias}: ${task.slice(0, 60)}${priority === "high" ? " [HIGH]" : ""}${canonical.renamed ? ` [renamed from ${alias}]` : ""}`);
       const fromNodeId = resolveNodeIdForAlias(from_session, effectiveNetId);
       const targetNodeId = target.session?.node_id ?? null;
+      const resolvedActualTo = actualTo(target, effectiveNetId);
       // 事务：inbox + tasks 双写 + 触碰目标 session 的 task/updated_at（让
       // dashboard 在派任务一刻就反映出"任务已下发"，不再等 agent 的
       // report_status 心跳；status 字段交给 agent，避免与 working/idle
@@ -1422,6 +1439,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
               task_id: id,
               message_id: id,
               session_status: target.session.status ?? "offline",
+              actual_to: resolvedActualTo,
               ...(canonical.renamed ? { renamed_from: alias, renamed_to: targetAlias } : {}),
             }),
           }],
@@ -1435,6 +1453,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             text: JSON.stringify({
               ok: true,
               message_id: id,
+              actual_to: resolvedActualTo,
               ...(canonical.renamed ? { renamed_from: alias, renamed_to: targetAlias } : {}),
               session_status: target.session?.status ?? "unknown",
             }),
@@ -1940,11 +1959,52 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       from_name: z.string().max(200).optional().describe("Filter by sender"),
       from_node_id: z.string().max(200).optional().describe("Filter by immutable sender node_id"),
       network_id: z.string().max(200).optional().describe("Filter by network"),
+      before_created_at: z.string().max(64).optional().describe("Pagination cursor timestamp"),
+      before_task_id: z.string().max(200).optional().describe("Pagination cursor task id"),
+      durable_cursor: z.boolean().optional().describe("Require immutable node-scoped cursor protocol"),
+      durable_terminal_cursor: z.boolean().optional().describe("Read terminal outbound journal in monotonic order"),
+      after_terminal_seq: z.number().int().min(0).optional().describe("Exclusive terminal journal watermark"),
       limit: z.number().min(1).max(100).optional().default(20),
     },
-    async ({ alias, status, from_name, from_node_id, network_id: netId, limit }) => {
+    async ({ alias, status, from_name, from_node_id, network_id: netId, before_created_at, before_task_id, durable_cursor, durable_terminal_cursor, after_terminal_seq, limit }) => {
       const readScope = resolveReadScope(netId);
       if (readScope.denied) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: readScope.denied }) }] };
+      if (durable_cursor) {
+        if (!callerTokenIsNetwork) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "node_token_required" }) }] };
+        const boundNodeId = callerTokenId && enforceNetworkId
+          ? db.get<{ bound_node_id: string | null }>(
+              "SELECT bound_node_id FROM api_tokens WHERE token_id = ?1 AND network_id = ?2",
+              callerTokenId,
+              enforceNetworkId,
+            )?.bound_node_id ?? null
+          : null;
+        if (!boundNodeId || from_node_id !== boundNodeId) {
+          return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "from_node_id_identity_mismatch" }) }] };
+        }
+      }
+      if (durable_terminal_cursor) {
+        if (!durable_cursor) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "durable_cursor_required" }) }] };
+        const params: any[] = [enforceNetworkId, from_node_id, after_terminal_seq ?? 0, limit];
+        const tasks = db.all(
+          `SELECT t.task_id, t.from_node_id, t.from_name, t.to_node_id, t.to_name, t.priority,
+                  t.status, t.content, t.result, t.created_at, t.runtime_submitted_at,
+                  t.consumed_at, t.completed_at, e.terminal_seq
+             FROM task_terminal_events e
+             JOIN tasks t ON t.task_id = e.task_id
+            WHERE COALESCE(e.network_id, 'default') = COALESCE(?1, 'default')
+              AND e.from_node_id = ?2 AND e.terminal_seq > ?3
+            ORDER BY e.terminal_seq ASC LIMIT ?4`,
+          ...params,
+        );
+        return { content: [{ type: "text" as const, text: JSON.stringify({
+          ok: true,
+          capability: "list_tasks.immutable-terminal-sequence.v2",
+          tasks,
+          count: tasks.length,
+          next_terminal_seq: tasks.length ? tasks[tasks.length - 1]?.terminal_seq : (after_terminal_seq ?? 0),
+          has_more: tasks.length === limit,
+        }) }] };
+      }
       let sql = "SELECT task_id, from_node_id, from_name, to_node_id, to_name, priority, status, content, result, created_at, runtime_submitted_at, consumed_at, completed_at FROM tasks WHERE 1=1";
       const params: any[] = [];
       sql = addReadScope(sql, params, readScope);
@@ -1952,7 +2012,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (status) { sql += ` AND status = ?${params.length + 1}`; params.push(status); }
       if (from_name) { sql += ` AND from_name = ?${params.length + 1}`; params.push(from_name); }
       if (from_node_id) { sql += ` AND from_node_id = ?${params.length + 1}`; params.push(from_node_id); }
-      sql += ` ORDER BY created_at DESC LIMIT ?${params.length + 1}`;
+      if (before_created_at && before_task_id) {
+        sql += ` AND (created_at < ?${params.length + 1} OR (created_at = ?${params.length + 1} AND task_id < ?${params.length + 2}))`;
+        params.push(before_created_at, before_task_id);
+      }
+      sql += ` ORDER BY created_at DESC, task_id DESC LIMIT ?${params.length + 1}`;
       params.push(limit);
       const tasks = db.all(sql, ...params);
 
@@ -1966,7 +2030,17 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       return {
         content: [{
           type: "text" as const,
-          text: JSON.stringify({ ok: true, tasks, count: tasks.length, stats }),
+          text: JSON.stringify({
+            ok: true,
+            ...(durable_cursor ? { capability: "list_tasks.immutable-node-cursor.v1" } : {}),
+            tasks,
+            count: tasks.length,
+            next_cursor: tasks.length === limit ? {
+              before_created_at: tasks[tasks.length - 1]?.created_at,
+              before_task_id: tasks[tasks.length - 1]?.task_id,
+            } : null,
+            stats,
+          }),
         }],
       };
     }
