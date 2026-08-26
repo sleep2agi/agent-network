@@ -58,3 +58,16 @@ An earlier race image attempt failed before test collection because its
 Dockerfile omitted the vendored golden fixture. Commit 72fe67b9 added that
 explicit COPY; all three layers above were then rebuilt and rerun against the
 same exact source commit. No failed pre-fix run is counted as evidence.
+
+Rebase + purge regression follow-up (2026-08-26 Asia/Shanghai):
+  code/test commit: 6c3c50a01276a70beb26a673a7ac8a2944c9c137
+  rebase base: 57bd606d52129d2a78360dda2dd68e8c968541bd (merged PR #1194)
+  provenance: old PR2 9a074ccb..new PR2 96c131ff is 9/9 patch-equivalent;
+              the two final trees are byte-identical
+  contract Docker: 8 pass, 0 fail, 35 assertions
+  security Docker: 5 pass, 0 fail, 19 assertions
+  race Docker: 9 pass, 0 fail, 62 assertions
+  witnessed-red: 4 total, including removal of per-attempt attachment purge
+  aggregate Docker: 74 files, 984 pass, 0 fail, 3237 assertions
+  purge boundary: readable question/result/error and root/per-attempt file
+                  references are erased; durable identity/audit receipts remain
