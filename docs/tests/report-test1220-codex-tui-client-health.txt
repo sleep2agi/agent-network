@@ -56,6 +56,9 @@ The full 65-second A9 run plus A12 restart-only verification proved:
 - Final static review: verified each POSIX role has exactly one marker env;
   Windows TUI socket ownership now binds a non-null CreationDate and rechecks
   the same birth before and after the native descendant/socket snapshot.
+- The old `8bfdfc32` QA Windows fake-contract run was RED before these final
+  socket fixes. The corrected fake-Codex/source contract passes with exact
+  PID+birth attribution; native Windows execution remains explicitly NOT-RUN.
 
 - A1: locked dependencies absent; no product roles. A stale cleanup port caused
   a harness false positive.
