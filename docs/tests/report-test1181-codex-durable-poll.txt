@@ -1,0 +1,36 @@
+Test 1181 — Codex TUI durable CommHub polling compensation
+
+Scope
+- SSE remains primary; polling only schedules the existing inbox drain.
+- Startup, reconnect, idle-boundary and bounded timer triggers.
+- Durable task_id + client_request_id cursor, written only after Hub ACK.
+- One-time outbound terminal reconciliation.
+- Explicit old-Hub realtime-only downgrade.
+
+Baseline (Docker, oven/bun:1.3.14)
+- L1 compensator: 10 pass, 0 fail, 27 expectations.
+- L2 inbox lane + Codex app-server bridge/runtime: 69 pass, 0 fail,
+  231 expectations.
+- L3 production agent-node bundle: pass.
+
+Fault coverage
+- lost SSE: idle poll wakes the existing drain;
+- duplicate SSE+poll and repeated client_request_id: suppressed;
+- restart: private persisted cursor prevents replay;
+- overlapping triggers: coalesced; transient errors back off with a 5m cap;
+- lost outbound notification: terminal task surfaces once across restart;
+- old Hub unknown tool: one warning, realtime-only, never active claim;
+- active human turn: existing tested bridge ownership uses exact turn/steer;
+  polling has no runtime/turn adapter and cannot open a parallel turn.
+
+Witnessed red
+- production scheduleInboxDrain replaced with no-op -> production-wiring test red;
+- cursor record moved before ack_inbox -> ACK-order test red;
+- unsupported Hub mode changed realtime-only -> active -> downgrade test red.
+
+Boundary
+- This is compensation, not an interrupt mechanism and not a replacement for
+  app-server turn/steer.
+- The local cursor does not broaden the Hub/runtime crash-exactly-once claim;
+  Hub inbox ACK, task runtime evidence, bridge recovery, and pending reply
+  queue remain authoritative.

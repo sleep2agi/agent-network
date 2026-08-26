@@ -71,6 +71,7 @@ L1_TESTS=(
   "test1195-side-thread-hub-race"
   "test1200-side-thread-command-transport"
   "test1203-btw-production-e2e"
+  "test1181-codex-durable-poll"
   "qa-cli-01-hub-start"
   "qa-cli-02-network-create"
   "qa-dash-07-auth-boundary"

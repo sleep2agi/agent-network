@@ -1,0 +1,38 @@
+#!/bin/sh
+set -eu
+
+src=agent-node/src/cli.ts
+module=agent-node/src/runtime/commhub-poll-compensator.ts
+test_file=agent-node/src/runtime/commhub-poll-compensator.test.ts
+tmp_cli=/tmp/cli.ts.baseline
+tmp_module=/tmp/compensator.ts.baseline
+cp "$src" "$tmp_cli"
+cp "$module" "$tmp_module"
+
+expect_red() {
+  name=$1
+  filter=$2
+  if bun test "$test_file" -t "$filter" >/tmp/witnessed-red.log 2>&1; then
+    echo "FAIL: mutation stayed green: $name"
+    cat /tmp/witnessed-red.log
+    exit 1
+  fi
+  echo "WITNESSED RED: $name"
+}
+
+# Mutation 1: polling bypasses/no longer wakes the production drain.
+sed -i 's/scheduleInboxDrain: scheduleWorkInboxDrain,/scheduleInboxDrain: () => {},/' "$src"
+expect_red "poll wake disconnected from existing inbox lane" "production wiring keeps SSE primary"
+cp "$tmp_cli" "$src"
+
+# Mutation 2: cursor is persisted before the authoritative Hub ACK.
+sed -i '/await ackMessage(msg.id);/{N;s/    await ackMessage(msg.id);\n    commhubCompensation?.recordConsumed(msg);/    commhubCompensation?.recordConsumed(msg);\n    await ackMessage(msg.id);/;}' "$src"
+expect_red "cursor advances before Hub ACK" "production records the durable cursor"
+cp "$tmp_cli" "$src"
+
+# Mutation 3: unsupported Hub falsely advertises active compensation.
+sed -i 's/currentMode = "realtime-only";/currentMode = "active";/' "$module"
+expect_red "old Hub falsely claims compensation" "old Hub visibly degrades"
+cp "$tmp_module" "$module"
+
+rm -f "$tmp_cli" "$tmp_module" /tmp/witnessed-red.log
