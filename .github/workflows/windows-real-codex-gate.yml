@@ -1,0 +1,69 @@
+name: Windows real Codex protected gate
+
+# NOT-IN-CI: credentialed, human-approved, default-branch-only qualification.
+# PR code is never checked out or executed in the credential context.
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full main SHA to qualify (must equal default-branch checkout)
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  protected-environment-preflight:
+    name: windows-real-codex-environment-preflight
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a pre-existing protected environment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          response="$(gh api "repos/${GITHUB_REPOSITORY}/environments/windows-codex-real-gate")"
+          reviewers="$(jq '[.protection_rules[]? | select(.type == "required_reviewers")] | length' <<<"$response")"
+          test "$reviewers" -gt 0 || {
+            echo '::error::windows-codex-real-gate must exist with a required-reviewers rule; credentialed execution is blocked.'
+            exit 1
+          }
+  windows-real-codex-0148:
+    name: windows-real-codex-0148-NOT-IN-CI
+    needs: protected-environment-preflight
+    runs-on: windows-latest
+    environment: windows-codex-real-gate
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Bind dispatch to trusted default-branch checkout
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ inputs.source_sha }}
+        run: |
+          if ($env:GITHUB_REF -ne 'refs/heads/main') { throw 'workflow must run from main' }
+          if ($env:EXPECTED_SHA -notmatch '^[0-9a-f]{40}$') { throw 'full lowercase source SHA required' }
+          if ((git rev-parse HEAD).Trim() -ne $env:EXPECTED_SHA) { throw 'dispatch SHA is not checked-out main HEAD' }
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.14.0
+      - name: Run isolated real Codex / ConPTY journey
+        shell: pwsh
+        env:
+          ANET_CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+          ANET_EXPECTED_SOURCE_SHA: ${{ inputs.source_sha }}
+        run: ./tests/test1212-windows-real-codex-gate/run.ps1
+      - name: Upload scrubbed evidence only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-real-codex-0148-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/test1212-artifacts/
+          if-no-files-found: error
+          retention-days: 14

@@ -27,6 +27,8 @@ on:
       - 'tests/test745-agent-network-unit-ci/**'
       - 'tests/test746-setup-bun-pin/**'
       - 'tests/test751-codex-copresence-windows/**'
+      - 'tests/test1212-windows-real-codex-gate/**'
+      - '.github/workflows/windows-real-codex-gate.yml'
       - 'tests/test1191-windows-steer-contract/**'
       - 'tests/test1183-sync-pinned-dryrun/**'
       - 'tests/test1193-side-thread-contract/**'
@@ -186,6 +188,8 @@ on:
       - 'tests/test745-agent-network-unit-ci/**'
       - 'tests/test746-setup-bun-pin/**'
       - 'tests/test751-codex-copresence-windows/**'
+      - 'tests/test1212-windows-real-codex-gate/**'
+      - '.github/workflows/windows-real-codex-gate.yml'
       - 'tests/test1191-windows-steer-contract/**'
       # A test directory belongs here exactly when CI executes it — otherwise
       # editing the test cannot re-run the gate that runs it. The four below are
@@ -938,6 +942,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - name: Verify protected real-Codex gate trust boundary
+        run: node tests/test1212-windows-real-codex-gate/static-contract.mjs
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
