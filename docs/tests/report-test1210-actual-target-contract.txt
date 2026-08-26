@@ -1,0 +1,57 @@
+test1210 — canonical actual target dispatch acknowledgement
+============================================================
+
+Base: origin/main f962d72fef7ee11078be7e94e423c42ac65fdc21
+Candidate before this report update: 7a213929d3f5b92425a10ee04a67a4feff55574f
+Environment: isolated Docker; ephemeral SQLite and loopback Hub
+
+WITNESSED RED (before implementation)
+-------------------------------------
+Command:
+  sg docker -c 'docker build -t anet-test1210-red -f tests/test1210-actual-target-contract/Dockerfile . && docker run --rm anet-test1210-red'
+
+The baseline reached:
+  [0] environment -> authenticated Hub
+  [1] REST success returns the scoped canonical actual target
+
+It then exited non-zero because the baseline success response had no
+`actual_to`. This proves the suite discriminates the intended wire change.
+
+GREEN acceptance coverage
+-------------------------
+- REST online success returns actual_to {alias,to_node_id,network_id}.
+- MCP online success returns the identical object shape.
+- MCP idempotent replay returns the same authoritative target and task ID.
+  The pre-existing exact-equality replay test is pinned to the additive
+  `actual_to` object, so future response drift is visible rather than ignored.
+- The same alias in two networks resolves to different scoped node IDs.
+- An old alias after rename reports the canonical alias while preserving
+  renamed_from / renamed_to compatibility fields.
+- REST and MCP offline/queued responses still identify the durable target.
+- Not-found responses omit actual_to.
+- A user without membership gets HTTP 403 and no alias/node/network leakage.
+
+Docker result: PASS
+  PASS test1210 actual target contract
+
+Focused regression tests (inside the same Docker image):
+  41 pass, 0 fail, 92 expect() calls
+  - task-idempotency-mcp.test.ts
+  - task-network-resolution-http.test.ts
+  - mcp-write-network-resolution.test.ts
+  - task-idempotency.test.ts
+
+Full server aggregate (test798, isolated Docker): PASS
+  L0 executed_files=76 discovered_files=76 failed_files=0
+  L1 witnessed-red registration-password-floor-weakened rc=1
+
+Node stop convergence package gate (test225, immutable git archive): PASS
+  Summary: PASS
+  package_e2e=PASS
+  npx_preview_fallback=PASS
+  global_agent_node_resume=PASS
+  known-failure ratchet: 11 PASS lines, 0 FAIL lines, empty baseline
+
+The test225 result verifies that the stop-convergence fix already merged in
+the pinned base removes the previous residual-process/socket failure. No
+waiver or known-failure entry was added.

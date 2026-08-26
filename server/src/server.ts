@@ -559,6 +559,17 @@ type RestDeliveryTarget =
   | { state: "offline"; alias: string; session: any; message: string }
   | { state: "not_found"; alias: string; message: string };
 
+// Build this only after authorization and a network-scoped lookup succeeded.
+// In particular, not-found and permission-denied responses must not become a
+// cross-network alias/node enumeration oracle.
+function restActualTo(target: Exclude<RestDeliveryTarget, { state: "not_found" }>, networkId: string | null) {
+  return {
+    alias: target.alias,
+    to_node_id: target.session?.node_id ?? null,
+    network_id: networkId,
+  };
+}
+
 function resolveRestDeliveryTarget(alias: string, networkId: string | null): RestDeliveryTarget {
   const params: any[] = [alias];
   let sql = "SELECT status, updated_at, last_seen_at, node_id FROM sessions WHERE alias = ?1";
@@ -2354,6 +2365,7 @@ return Bun.serve({
       const ttlSeconds = (body as any).ttl_seconds || 3600;
       const fromNodeId = resolveRestNodeIdForAlias(fromSession, taskNetId);
       const targetNodeId = target.session?.node_id ?? null;
+      const actualTo = restActualTo(target, taskNetId);
       // #221 — fold top-level `attachments` into `meta.attachments` so
       // the REST and MCP send_task transports produce identical
       // tasks.meta_json shape downstream. Top-level wins over any
@@ -2454,10 +2466,17 @@ return Bun.serve({
           task_id: id,
           message_id: id,
           session_status: target.session.status ?? "offline",
+          actual_to: actualTo,
           ...(canonical.renamed ? { renamed_from: body.alias, renamed_to: targetAlias } : {}),
         }, { status: 202 }));
       }
-      return withCors(req, Response.json({ ok: true, task_id: id, message_id: id, ...(canonical.renamed ? { renamed_from: body.alias, renamed_to: targetAlias } : {}) }));
+      return withCors(req, Response.json({
+        ok: true,
+        task_id: id,
+        message_id: id,
+        actual_to: actualTo,
+        ...(canonical.renamed ? { renamed_from: body.alias, renamed_to: targetAlias } : {}),
+      }));
     }
 
     // ── REST: broadcast ──
