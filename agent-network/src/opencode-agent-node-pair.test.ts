@@ -55,7 +55,17 @@ describe("OpenCode agent-node release pairing", () => {
     const staleGlobal = "@sleep2agi/agent-node@2.5.0-preview.32";
     const resolution = pairedAgentNodeResolution();
     expect(staleGlobal).not.toBe(PAIRED_AGENT_NODE_SPEC);
-    expect(PAIRED_AGENT_NODE_VERSION).toBe("2.5.0-preview.34");
+    // 🔴 不要把版本号抄进断言。
+    // 这个常量每次发 agent-node 都会被 sync-pinned-versions.sh 改，
+    // 而抄数值的断言会让**改它的那个 PR 自己红** ——
+    // sync 脚本只改源码不改测试，于是每次发版都要人记得手补一处。
+    // 今晚 test735 就是同一个形状：min_uptime 20_000 抄进断言，
+    // #1231 改它之后 main 红了近 6 小时。
+    //
+    // 真正要守的不变式是**形状**：它必须是一个 preview 版本号，
+    // 且与 PAIRED_AGENT_NODE_SPEC 拼出来的一致 —— 两条都不随版本变。
+    expect(PAIRED_AGENT_NODE_VERSION).toMatch(/^\d+\.\d+\.\d+-preview\.\d+$/);
+    expect(PAIRED_AGENT_NODE_SPEC).toBe(`@sleep2agi/agent-node@${PAIRED_AGENT_NODE_VERSION}`);
     expect(resolution).toEqual({
       spec: PAIRED_AGENT_NODE_SPEC,
       args: ["-y", PAIRED_AGENT_NODE_SPEC, "--print-entrypoint"],
