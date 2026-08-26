@@ -45,8 +45,11 @@ try {
   writeFileSync(join(bin, "codex.cmd"), `@echo off\r\ncall "${process.env.ANET_TEST1212_CODEX}" %*\r\n`);
   env.PATH = `${bin};${env.PATH}`;
   const cfgPath = join(project, ".anet", "nodes", "windows-real", "config.json");
-  let injected = false, injectionAt = 0, taskIds = [], drivePromise, driveError;
+  let injected = false, injectionAt = 0, humanDoneAt = 0, taskIds = [], drivePromise, driveError;
   await terminal(["node", "start", "windows-real", "--no-inherit-codex-home"], (child, output) => {
+    // The typed prompt echoes the nonce once. A second occurrence is the
+    // model's HUMAN_DONE answer after the real 70-second tool call.
+    if (!humanDoneAt && (output.match(new RegExp(marker, "g")) || []).length >= 2) humanDoneAt = Date.now();
     if (!injected && output.includes("opening Codex TUI")) {
       injected = true;
       setTimeout(() => child.write(`Use PowerShell to run Start-Sleep -Seconds ${sleepSeconds}; then reply exactly ${marker} HUMAN_DONE\r`), 2500);
@@ -57,7 +60,8 @@ try {
           const global = JSON.parse(readFileSync(join(home, ".anet", "config.json"), "utf8"));
           taskIds = await Promise.all([task(global.token, global.network_id, "normal"), task(global.token, global.network_id, "high")]);
           await wait("both task replies", async () => { const r = await fetch(`http://127.0.0.1:${port}/api/tasks?network_id=${global.network_id}&skip_stats=1`, { headers: { Authorization: `Bearer ${global.token}` } }); const b = await r.json(); const rows = Array.isArray(b) ? b : b.tasks; return taskIds.every(id => rows.some(x => x.task_id === id && ["completed", "replied"].includes(x.status))); }, 130000);
-          if (Date.now() - injectionAt < 60000) throw new Error("normal/high completed before 60s active-turn witness");
+          await wait("HUMAN_DONE after active turn", () => humanDoneAt > 0, 30000);
+          if (humanDoneAt - injectionAt < 60000) throw new Error("HUMAN_DONE occurred before 60s active-turn witness");
           evidence.thread = `sha256:${createHash("sha256").update(cfg.codexThreadId).digest("hex")}`;
         })().catch(error => { driveError = error; }).finally(() => child.write("/exit\r"));
       }, 7000);
@@ -65,7 +69,7 @@ try {
   });
   if (drivePromise) await drivePromise;
   if (driveError) throw driveError;
-  if (!injected || !injectionAt || !taskIds.length) throw new Error("active human turn was not driven");
+  if (!injected || !injectionAt || !humanDoneAt || !taskIds.length) throw new Error("active human turn was not driven");
   const cfg1 = JSON.parse(readFileSync(cfgPath, "utf8"));
   const bridgeLog = readFileSync(join(project, ".anet", "nodes", "windows-real", "windows-bridge.log"), "utf8");
   const steered = (bridgeLog.match(/\(steered\)/g) || []).length;
@@ -79,7 +83,7 @@ try {
   const cfg2 = JSON.parse(readFileSync(cfgPath, "utf8"));
   if (!exited || cfg2.codexThreadId !== cfg1.codexThreadId) throw new Error("restart did not preserve thread/history");
   run(["node", "stop", "windows-real"]);
-  Object.assign(evidence, { result: "PASS", sourceBound: true, codexLauncherSha256: process.env.ANET_TEST1212_LAUNCHER_SHA256, codexVendorSha256: process.env.ANET_TEST1212_VENDOR_SHA256, realBuiltAgentNode: true, sameHomeRemoteThread: true, activeHumanTurnSecondsMinimum: 60, priorities: ["normal", "high"], taskCount: 2, steeredCount: 2, turnStartOutcomeDelta: 0, turnStartEvidenceBoundary: "derived from two production bridge '(steered)' outcomes and absence of queued/new-turn outcome; not a raw RPC wire count", bridgeCount: 1, stopRestartHistory: true, rawLogsUploaded: false });
+  Object.assign(evidence, { result: "PASS", sourceBound: true, codexLauncherSha256: process.env.ANET_TEST1212_LAUNCHER_SHA256, codexVendorSha256: process.env.ANET_TEST1212_VENDOR_SHA256, realBuiltAgentNode: true, sameHomeRemoteThread: true, activeHumanTurnSecondsMinimum: 60, humanDoneAfterInjectionMs: humanDoneAt - injectionAt, priorities: ["normal", "high"], taskCount: 2, steeredCount: 2, turnStartOutcomeDelta: 0, turnStartEvidenceBoundary: "derived from two production bridge '(steered)' outcomes and absence of queued/new-turn outcome; not a raw RPC wire count", bridgeCount: 1, stopRestartHistory: true, rawLogsUploaded: false });
   writeFileSync(join(artifacts, "result.json"), JSON.stringify(evidence, null, 2));
   writeFileSync(join(artifacts, "report.txt"), `test1212 Windows real Codex protected manual gate\nresult: PASS\nsource: ${expectedSha}\nNOT-IN-CI: credentialed self-hosted Windows/ConPTY gate\nCodex: 0.148.0; real built agent-node: yes\nnormal+high: steered into one >=60s human turn\nturn/start outcome delta: 0 (derived bridge outcome, NOT raw-wire evidence)\nsame HOME/remote/thread; one bridge; stop/restart history: PASS\ncredentials, raw logs, paths and thread IDs: not uploaded\n`);
 } finally { try { run(["node", "stop", "windows-real"]); } catch {} hub.kill(); }
