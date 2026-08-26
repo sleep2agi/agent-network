@@ -1942,12 +1942,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       network_id: z.string().max(200).optional().describe("Filter by network"),
       before_created_at: z.string().max(64).optional().describe("Pagination cursor timestamp"),
       before_task_id: z.string().max(200).optional().describe("Pagination cursor task id"),
+      durable_cursor: z.boolean().optional().describe("Require immutable node-scoped cursor protocol"),
       limit: z.number().min(1).max(100).optional().default(20),
     },
-    async ({ alias, status, from_name, from_node_id, network_id: netId, before_created_at, before_task_id, limit }) => {
+    async ({ alias, status, from_name, from_node_id, network_id: netId, before_created_at, before_task_id, durable_cursor, limit }) => {
       const readScope = resolveReadScope(netId);
       if (readScope.denied) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: readScope.denied }) }] };
-      if (callerTokenIsNetwork) {
+      if (durable_cursor) {
+        if (!callerTokenIsNetwork) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "node_token_required" }) }] };
         const boundNodeId = callerTokenId && enforceNetworkId
           ? db.get<{ bound_node_id: string | null }>(
               "SELECT bound_node_id FROM api_tokens WHERE token_id = ?1 AND network_id = ?2",
@@ -1986,7 +1988,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           type: "text" as const,
           text: JSON.stringify({
             ok: true,
-            capability: "list_tasks.immutable-node-cursor.v1",
+            ...(durable_cursor ? { capability: "list_tasks.immutable-node-cursor.v1" } : {}),
             tasks,
             count: tasks.length,
             next_cursor: tasks.length === limit ? {

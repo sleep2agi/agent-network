@@ -110,14 +110,14 @@ describe("task consumed_at identity and lifecycle", () => {
       [`id_${NODE_B}`, NODE_A, NODE_A, NET],
     );
     const handler = toolsFor({ alias: NODE_A, nodeToken: true }).list_tasks;
-    const first = await call(handler, { from_node_id: `id_${NODE_A}`, limit: 100 });
+    const first = await call(handler, { from_node_id: `id_${NODE_A}`, durable_cursor: true, limit: 100 });
     expect(first.capability).toBe("list_tasks.immutable-node-cursor.v1");
     expect(first.tasks).toHaveLength(100);
-    const second = await call(handler, { from_node_id: `id_${NODE_A}`, limit: 100, ...first.next_cursor });
+    const second = await call(handler, { from_node_id: `id_${NODE_A}`, durable_cursor: true, limit: 100, ...first.next_cursor });
     expect(second.tasks).toHaveLength(25);
     expect(new Set([...first.tasks, ...second.tasks].map((task: any) => task.task_id)).size).toBe(125);
     expect([...first.tasks, ...second.tasks].some((task: any) => task.task_id === "foreign-node-row")).toBe(false);
-    expect((await call(handler, { from_node_id: `id_${NODE_B}`, limit: 100 })).error).toBe("from_node_id_identity_mismatch");
+    expect((await call(handler, { from_node_id: `id_${NODE_B}`, durable_cursor: true, limit: 100 })).error).toBe("from_node_id_identity_mismatch");
   });
   test("enqueue and process-level ack keep consumed_at null", async () => {
     const content = "connected process has not started a model turn";

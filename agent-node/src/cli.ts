@@ -1587,6 +1587,7 @@ const commhubCompensation: CompensationPoller | null = RUNTIME === "codex-app-se
           for (let page = 0; page < 100; page++) {
             const response: any = await callCommHub("list_tasks", {
               from_node_id: NODE_ID,
+              durable_cursor: true,
               limit: 100,
               ...(cursor ?? {}),
             }, 0);
