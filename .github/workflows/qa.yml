@@ -97,6 +97,7 @@ on:
       #    而 CI 从头到尾没有执行过这个套件。job 存在、挂上、会被触发是三件事,
       #    漏的就是第三件。
       - 'tests/test225-grok-preview-package-live/**'
+      - 'tests/test225-node-stop-convergence/**'
       - 'tests/test233-grok-main-integration/**'
       - 'tests/test234-grok-profile-disclosure/**'
       - 'tests/test235-grok-mcp-outbound-only/**'
@@ -246,6 +247,7 @@ on:
       #    而 CI 从头到尾没有执行过这个套件。job 存在、挂上、会被触发是三件事,
       #    漏的就是第三件。
       - 'tests/test225-grok-preview-package-live/**'
+      - 'tests/test225-node-stop-convergence/**'
       - 'tests/test233-grok-main-integration/**'
       - 'tests/test234-grok-profile-disclosure/**'
       - 'tests/test235-grok-mcp-outbound-only/**'
