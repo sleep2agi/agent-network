@@ -1,0 +1,58 @@
+Grok copresence model hot-switch fallback witnessed-red
+Date: 2026-08-27
+Base: origin/main c335e9dd
+
+Scope:
+- Docker suites were not run because disk usage is constrained.
+- Pure Bun tests only.
+- Witnessed-red used the same checkout and same test command; the only temporary source change was one execution-layer line that rethrew the ACP incompatible error before restart fallback.
+
+Green, targeted full:
+Command:
+  bun test agent-node/src/runtime/grok-copresence/model-switch.test.ts agent-node/src/runtime/grok-copresence/runtime.test.ts
+
+Output:
+  bun test v1.3.14 (0d9b296a)
+  86 pass
+  0 fail
+  578 expect() calls
+  Ran 86 tests across 2 files. [107.00s]
+
+Witnessed red, fallback disabled:
+Temporary change:
+  in switchModel(), after detecting isGrokModelSwitchFallbackError(error), throw error before calling fallbackGrokModelSwitchRestart().
+
+Command:
+  bun test agent-node/src/runtime/grok-copresence/runtime.test.ts -t "out-of-band model switch"
+
+Output:
+  bun test v1.3.14 (0d9b296a)
+  (fail) out-of-band model switch (#879) > falls back to restart+resume when ACP reports incompatible-agent [960.63ms]
+  error: incompatible-agent: model requires new session
+  (fail) out-of-band model switch (#879) > set-model status frames report the actual hot and restart routes [6010.78ms]
+  error: condition not met within 5000ms
+  (fail) out-of-band model switch (#879) > 🔴 the re-spawn keeps the approval boundary exactly where it was [973.32ms]
+  error: incompatible-agent: model requires new session
+  4 pass
+  59 filtered out
+  3 fail
+  20 expect() calls
+  Ran 7 tests across 1 file. [12.78s]
+
+Restored green:
+Command:
+  bun test agent-node/src/runtime/grok-copresence/runtime.test.ts -t "out-of-band model switch"
+
+Output:
+  bun test v1.3.14 (0d9b296a)
+  7 pass
+  59 filtered out
+  0 fail
+  32 expect() calls
+  Ran 7 tests across 1 file. [10.09s]
+
+Coverage claim:
+- decideGrokModelSwitch() is pure and always returns the ACP hot method session/set_model.
+- The execution layer calls ACP first and only uses restart+resume after a real incompatible/requires-restart error.
+- set-model status frames expose the actual route: modelSwitch.route = hot or restart.
+- The incompatible ACP stub fails without fallback logic and passes with fallback restored.

@@ -74,10 +74,13 @@ import {
 import {
   assertModelOnlyArgvDelta,
   decideGrokModelSwitch,
+  fallbackGrokModelSwitchRestart,
   GrokModelSwitchArgvError,
+  normalizeGrokModelSwitchRequest,
   withoutSessionFlag,
-  type GrokModelSwitchDecision,
+  type GrokModelSwitchResult,
 } from "./model-switch";
+import { GrokAcpClient } from "../grok-build-acp/client";
 
 // Keep enough headroom for Grok's XML wrapper plus JSON string escaping; the
 // reducer's hard JSONL line cap is 1 MiB.
@@ -193,6 +196,10 @@ export interface GrokCopresenceOpenOptions {
   pollIntervalMs?: number;
   reconnectAttempts?: number;
   ptySpawn?: GrokPtySpawn;
+  acpModelSwitch?: (request: {
+    method: string;
+    params: { sessionId: string; modelId: string };
+  }) => Promise<unknown>;
   /** Rebuild and audit the isolated Grok environment before every TUI spawn. */
   beforeSpawn?: (context: { resume: boolean }) =>
     NodeJS.ProcessEnv | void | Promise<NodeJS.ProcessEnv | void>;
@@ -395,7 +402,7 @@ export interface GrokCopresenceRuntimeSession {
   liveness(): GrokCopresenceLiveness;
   submit(opts: GrokCopresenceThinkOptions): Promise<GrokCopresenceThinkResult>;
   /** Out-of-band model switch that resumes the same session (issue #879). */
-  switchModel(requested: unknown): Promise<GrokModelSwitchDecision>;
+  switchModel(requested: unknown): Promise<GrokModelSwitchResult>;
   close(): Promise<void>;
 }
 
@@ -1062,7 +1069,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
    * remove.
    */
   private async onAttachSetModel(model: string): Promise<void> {
-    let decision: GrokModelSwitchDecision;
+    let decision: GrokModelSwitchResult;
     try {
       decision = await this.switchModel(model);
     } catch (error) {
@@ -1098,19 +1105,45 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
    * cleanup, and rebinds a fresh generation; a second, parallel re-spawn
    * sequence written here would be the one without those guarantees.
    */
-  async switchModel(requested: unknown): Promise<GrokModelSwitchDecision> {
-    const decision = decideGrokModelSwitch({
-      requested,
-      current: this.currentModel,
-      phase: this.arbitration.phase,
-    });
-    if (!decision.ok) return decision;
-    if (!this.isRunning) {
-      // Nothing is running to re-spawn, so record the choice and let the next
-      // spawn use it rather than terminating a PTY that is not there.
-      this.currentModel = decision.model;
-      return decision;
+  async switchModel(requested: unknown): Promise<GrokModelSwitchResult> {
+    const normalized = normalizeGrokModelSwitchRequest(requested);
+    if (!normalized.ok) return normalized;
+    if (this.currentModel !== undefined && this.currentModel === normalized.model) {
+      return {
+        ok: false,
+        code: "unchanged",
+        message: `the co-presence TUI is already running ${normalized.model}`,
+      };
     }
+    if (this.arbitration.phase !== "idle") {
+      return {
+        ok: false,
+        code: "busy",
+        message: `switching models is only safe while idle (current phase: ${this.arbitration.phase})`,
+      };
+    }
+    if (!this.isRunning) {
+      this.currentModel = normalized.model;
+      return { ok: true, model: normalized.model, route: "restart", resume: true };
+    }
+
+    const hot = decideGrokModelSwitch({ sessionId: this.sessionId, modelId: normalized.model });
+    try {
+      if (hot.kind !== "hot") throw new Error("unexpected non-hot Grok model switch decision");
+      const sender = this.opts.acpModelSwitch ?? ((request) => this.defaultAcpModelSwitch(request));
+      await sender({ method: hot.method, params: hot.params });
+      this.currentModel = normalized.model;
+      return { ok: true, model: normalized.model, route: "hot", resume: true };
+    } catch (error) {
+      if (!isGrokModelSwitchFallbackError(error)) throw error;
+      const fallback = fallbackGrokModelSwitchRestart();
+      if (fallback.kind !== "restart") throw new Error("unexpected non-restart Grok model switch fallback");
+      await this.restartTuiForModelSwitch(normalized.model);
+      return { ok: true, model: normalized.model, route: "restart", resume: true };
+    }
+  }
+
+  private async restartTuiForModelSwitch(model: string): Promise<void> {
     // 🔴 Prove the switch moves the model and nothing else *before* committing
     // to it. Re-spawning rebuilds argv from scratch, so this is where a bug
     // could quietly relocate `--permission-mode`, `--always-approve`,
@@ -1131,7 +1164,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         sessionId: this.sessionId,
         resume: true,
         leaderSocket: this.leaderSocket,
-        model: decision.model,
+        model,
         agentProfile: this.opts.agentProfile,
         maxTurns: this.opts.maxTurns,
         toolAllowlist: this.opts.toolAllowlist,
@@ -1148,11 +1181,11 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       assertModelOnlyArgvDelta(
         withoutSessionFlag(this.lastSpawnArgs),
         withoutSessionFlag(nextArgs),
-        decision.model,
+        model,
       );
     }
-    this.currentModel = decision.model;
-    this.modelSwitchInFlight = decision.model;
+    this.currentModel = model;
+    this.modelSwitchInFlight = model;
     const tui = this.activeTui;
     try {
       await terminateOwnedPty(tui?.pty ?? null, tui?.exit ?? null);
@@ -1163,7 +1196,37 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       this.retainLocksForUnconfirmedPty = true;
       throw error;
     }
-    return decision;
+  }
+
+  private async defaultAcpModelSwitch(request: {
+    method: string;
+    params: { sessionId: string; modelId: string };
+  }): Promise<unknown> {
+    const client = new GrokAcpClient();
+    client.start({
+      binary: this.opts.binary,
+      cwd: this.opts.cwd,
+      env: this.spawnEnv,
+      args: ["agent", "--leader", "--leader-socket", this.leaderSocket, "stdio"],
+    });
+    try {
+      const init = await client.request<{ authMethods?: Array<{ id?: string }> }>("initialize", {
+        protocolVersion: "1",
+        clientCapabilities: { terminal: false, fs: { readTextFile: false, writeTextFile: false } },
+      }, 5_000);
+      const methods = new Set((init.authMethods ?? []).map((method) => method.id).filter(Boolean));
+      if (methods.has("cached_token")) {
+        await client.request("authenticate", { methodId: "cached_token", meta: { headless: true } }, 5_000);
+      }
+      await client.request("session/load", {
+        sessionId: request.params.sessionId,
+        cwd: this.opts.cwd,
+        mcpServers: [],
+      }, 5_000);
+      return await client.request(request.method, request.params, 10_000);
+    } finally {
+      await client.close().catch(() => {});
+    }
   }
 
   async open(): Promise<void> {
@@ -3879,6 +3942,15 @@ function asError(error: unknown): Error {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isGrokModelSwitchFallbackError(error: unknown): boolean {
+  const message = errorMessage(error);
+  const data = error && typeof error === "object" && "data" in error
+    ? JSON.stringify((error as { data?: unknown }).data ?? "")
+    : "";
+  return /incompatible[-_ ]agent|new session|required.*session|requires.*restart|cannot.*set.*model/i
+    .test(`${message} ${data}`);
 }
 
 function isErrno(error: unknown, code: string): boolean {

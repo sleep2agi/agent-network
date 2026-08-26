@@ -16,6 +16,7 @@ import {
   writeFileSync,
 } from "fs";
 import { PassThrough } from "stream";
+import { createConnection, type Socket } from "net";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { basename, join, resolve } from "path";
@@ -2342,7 +2343,7 @@ function seedPostStopFootprint(fixture: RuntimeFixture): {
 }
 
 describe("out-of-band model switch (#879)", () => {
-  test("re-spawns onto the same session with the new model", async () => {
+  test("tries ACP hot switch first and reports the hot route", async () => {
     const fixture = new RuntimeFixture();
     let runtime: GrokCopresenceRuntimeSession | undefined;
     try {
@@ -2352,8 +2353,41 @@ describe("out-of-band model switch (#879)", () => {
       expect(runtime.model).toBe("grok-4.5");
 
       const decision = await runtime.switchModel("grok-4.6");
-      expect(decision).toMatchObject({ ok: true, model: "grok-4.6", resume: true });
+      expect(decision).toMatchObject({ ok: true, model: "grok-4.6", route: "hot", resume: true });
+      expect(fixture.acpModelSwitchCalls).toEqual([{
+        method: "session/set_model",
+        params: { sessionId: SESSION, modelId: "grok-4.6" },
+      }]);
+      await Bun.sleep(120);
+      expect(fixture.spawnedArgs).toHaveLength(1);
+      expect(runtime.model).toBe("grok-4.6");
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 20_000);
+
+  test("falls back to restart+resume when ACP reports incompatible-agent", async () => {
+    const fixture = new RuntimeFixture();
+    fixture.acpModelSwitch = async () => {
+      const error = new Error("incompatible-agent: model requires new session");
+      (error as Error & { code?: number }).code = -32000;
+      throw error;
+    };
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await openGrokCopresenceRuntime({ ...fixture.options(), model: "grok-4.5" });
+      expect(fixture.spawnedArgs).toHaveLength(1);
+      expect(fixture.spawnedArgs[0][fixture.spawnedArgs[0].indexOf("--model") + 1]).toBe("grok-4.5");
+      expect(runtime.model).toBe("grok-4.5");
+
+      const decision = await runtime.switchModel("grok-4.6");
+      expect(decision).toMatchObject({ ok: true, model: "grok-4.6", route: "restart", resume: true });
       await waitFor(() => fixture.spawnedArgs.length === 2, 5_000);
+      expect(fixture.acpModelSwitchCalls).toEqual([{
+        method: "session/set_model",
+        params: { sessionId: SESSION, modelId: "grok-4.6" },
+      }]);
 
       const respawn = fixture.spawnedArgs[1];
       expect(respawn[respawn.indexOf("--model") + 1]).toBe("grok-4.6");
@@ -2369,11 +2403,70 @@ describe("out-of-band model switch (#879)", () => {
     }
   }, 20_000);
 
+  test("set-model status frames report the actual hot and restart routes", async () => {
+    const fixture = new RuntimeFixture();
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    let terminal: Awaited<ReturnType<typeof connectGrokAttach>> | undefined;
+    let controller: Socket | undefined;
+    try {
+      runtime = await openGrokCopresenceRuntime({ ...fixture.options(), model: "grok-4.5" });
+      terminal = await connectGrokAttach({
+        socketPath: fixture.attachSocket,
+        input: new PassThrough(),
+        output: new PassThrough(),
+        signalSource: fixture.signals,
+        terminalSize: () => ({ cols: 100, rows: 30 }),
+      });
+      const statuses: unknown[] = [];
+      const controlFrames: Array<{ type?: string; status?: unknown; role?: string }> = [];
+      controller = createConnection(fixture.attachSocket);
+      let controlBuffer = "";
+      controller.on("data", (chunk) => {
+        controlBuffer += chunk.toString("utf8");
+        for (;;) {
+          const newline = controlBuffer.indexOf("\n");
+          if (newline < 0) break;
+          const line = controlBuffer.slice(0, newline);
+          controlBuffer = controlBuffer.slice(newline + 1);
+          if (!line.trim()) continue;
+          const frame = JSON.parse(line) as { type?: string; status?: unknown; role?: string };
+          controlFrames.push(frame);
+          if (frame.type === "status") statuses.push(frame.status);
+        }
+      });
+      await waitFor(() => controlFrames.some((frame) => frame.type === "hello" && frame.role === "control"));
+
+      controller.write(`${JSON.stringify({ type: "set-model", model: "grok-4.6" })}\n`);
+      await waitFor(() => statuses.some((status) =>
+        (status as { modelSwitch?: { route?: string; model?: string } })?.modelSwitch?.route === "hot"
+        && (status as { modelSwitch?: { route?: string; model?: string } })?.modelSwitch?.model === "grok-4.6"));
+      expect(fixture.spawnedArgs).toHaveLength(1);
+
+      fixture.acpModelSwitch = async () => {
+        throw new Error("incompatible-agent: model requires new session");
+      };
+      controller.write(`${JSON.stringify({ type: "set-model", model: "grok-4.7" })}\n`);
+      await waitFor(() => statuses.some((status) =>
+        (status as { modelSwitch?: { route?: string; model?: string } })?.modelSwitch?.route === "restart"
+        && (status as { modelSwitch?: { route?: string; model?: string } })?.modelSwitch?.model === "grok-4.7"), 5_000);
+      await waitFor(() => fixture.spawnedArgs.length === 2, 5_000);
+    } finally {
+      controller?.destroy();
+      terminal?.detach();
+      if (terminal) await terminal.closed;
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 20_000);
+
   test("🔴 the re-spawn keeps the approval boundary exactly where it was", async () => {
     // Asserted on the argv the runtime actually spawned, not on argv this test
     // rebuilt: a guard that recomputes its own expectation cannot notice the
     // runtime handing different flags to the process.
     const fixture = new RuntimeFixture();
+    fixture.acpModelSwitch = async () => {
+      throw new Error("incompatible-agent: model requires new session");
+    };
     let runtime: GrokCopresenceRuntimeSession | undefined;
     try {
       runtime = await openGrokCopresenceRuntime({ ...fixture.options(), model: "grok-4.5" });
@@ -2501,6 +2594,14 @@ class RuntimeFixture {
   blockRecoverySpawn = false;
   recoverySpawnBlocked = false;
   blockedTuiSpawnNumber = 0;
+  acpModelSwitch: ((request: {
+    method: string;
+    params: { sessionId: string; modelId: string };
+  }) => Promise<unknown>) | undefined;
+  readonly acpModelSwitchCalls: Array<{
+    method: string;
+    params: { sessionId: string; modelId: string };
+  }> = [];
   private recoverySpawnRelease: (() => void) | null = null;
   private ptys: FakePty[] = [];
 
@@ -2613,6 +2714,14 @@ class RuntimeFixture {
         };
       },
       ptySpawn: this.spawn,
+      acpModelSwitch: async (request: {
+        method: string;
+        params: { sessionId: string; modelId: string };
+      }) => {
+        this.acpModelSwitchCalls.push(request);
+        if (this.acpModelSwitch) return this.acpModelSwitch(request);
+        return {};
+      },
       onHumanPrompt: (prompt: string) => { this.humanPrompts.push(prompt); },
     };
   }
