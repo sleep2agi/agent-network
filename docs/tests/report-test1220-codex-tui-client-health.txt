@@ -24,9 +24,9 @@ raw-wire packet capture. macOS and Windows real execution is not inferred.
 
 - test1220: PASS — 75 pass, 3 native skips, 0 fail; all 14 mutations red.
 - test1178: PASS — 14 pass, 0 fail; typecheck and bundle PASS.
-- test1191: PASS — 72 pass, 3 native skips, 0 fail; Linux fake-TUI normal/high
+- test1191: PASS — 73 pass, 3 native skips, 0 fail; Linux fake-TUI normal/high
   entered one human turn with zero extra turn/start; live mutations red.
-- test745: PASS — 621 pass, 6 skip, 0 fail; 68/68 source and 19/19 tests files.
+- test745: PASS — 625 pass, 6 skip, 0 fail; 68/68 source and 19/19 tests files.
   One earlier invocation omitted required source SHA and failed before tests.
 - test725: PASS — 1462 pass, 0 fail; 110/110 source and 6/6 tests files.
 
