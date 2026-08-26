@@ -69,6 +69,8 @@ L1_TESTS=(
   "test1195-side-thread-hub-contract"
   "test1195-side-thread-hub-security"
   "test1195-side-thread-hub-race"
+  # #175 cross-layer App fixture -> Hub -> dedicated node port -> hydrate.
+  "test1199-btw-cross-layer-contract"
   "qa-cli-01-hub-start"
   "qa-cli-02-network-create"
   "qa-dash-07-auth-boundary"
