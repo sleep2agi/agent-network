@@ -44,7 +44,7 @@ node --version >>"$REPORT"
 bun --version >>"$REPORT"
 pass "environment (no host state; tmux + codex stub present so the launcher reaches its decisions)"
 
-# Exact package-owned preview.33 fixture. A stale `agent-node` may exist on
+# Exact package-owned preview.34 fixture. A stale `agent-node` may exist on
 # PATH, but codex-app-server compatibility must be checked against this paired
 # identity and never against a floating dist-tag.
 PAIR_BASE="/run/user/$(id -u)/test750-paired-agent-node"
