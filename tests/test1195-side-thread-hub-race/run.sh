@@ -16,4 +16,16 @@ if bun test server/src/side-thread.test.ts -t 'terminal events require' >/tmp/ra
 fi
 mv /tmp/side-thread.ts server/src/side-thread.ts
 
+# Witness red: purge must scrub attachment references from every attempt, not
+# merely from the root side-chat record.
+cp server/src/side-thread.ts /tmp/side-thread.ts
+sed -i "s/SET result_text=NULL,error_text=NULL,attachments_json='\[\]'/SET result_text=NULL,error_text=NULL/" server/src/side-thread.ts
+! grep -F "result_text=NULL,error_text=NULL,attachments_json='[]'" server/src/side-thread.ts >/dev/null
+if bun test server/src/side-thread.test.ts -t 'archive/purge are terminal-safe' >/tmp/purge-mutation.log 2>&1; then
+  echo "FAIL: attempt attachment purge mutation survived"
+  cat /tmp/purge-mutation.log
+  exit 1
+fi
+mv /tmp/side-thread.ts server/src/side-thread.ts
+
 echo "PASS test1195 SideThread Hub races + witnessed red"

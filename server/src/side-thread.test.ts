@@ -518,6 +518,13 @@ describe("SideThread Hub contract", () => {
         })
       ).state,
     ).toBe("archived");
+    // A failed receipt may contain a scrubbed runtime reason from an earlier
+    // process/version. Purge must remove it even though it is not projected by
+    // the public record.
+    f.db.run(
+      "INSERT INTO side_chat_bring_backs (bring_back_id,side_chat_id,attempt_id,owner_user_id,request_key,request_fingerprint,destination_thread_id,state,error_text,created_at,updated_at) VALUES ('sbb_failed',?1,?2,?3,'bring-failed-0001','fingerprint','source_thread','failed','private runtime detail',1,1)",
+      [r.sideChatId, a.attemptId, owner.userId],
+    );
     expect(
       (
         await f.coordinator.purge(owner, r.sideChatId, {
@@ -528,7 +535,26 @@ describe("SideThread Hub contract", () => {
     const purged = f.coordinator.get(owner, r.sideChatId);
     expect(purged.question).toBe("");
     expect(purged.attachments).toEqual([]);
-    expect(purged.attempts[0].result).toBeUndefined();
+    expect(purged.attempts[0]).toMatchObject({
+      result: undefined,
+      error: undefined,
+      attachments: [],
+    });
+    expect(
+      f.db.get<{
+        result_text: string | null;
+        error_text: string | null;
+        attachments_json: string;
+      }>(
+        "SELECT result_text,error_text,attachments_json FROM side_chat_attempts WHERE attempt_id=?1",
+        a.attemptId,
+      ),
+    ).toEqual({ result_text: null, error_text: null, attachments_json: "[]" });
+    expect(
+      f.db.get<{ error_text: string | null }>(
+        "SELECT error_text FROM side_chat_bring_backs WHERE bring_back_id='sbb_failed'",
+      ),
+    ).toEqual({ error_text: null });
     expect(f.port.calls).toMatchObject({ archive: 1, purge: 1 });
   });
 

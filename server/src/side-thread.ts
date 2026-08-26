@@ -1449,7 +1449,14 @@ export class SideThreadCoordinator {
               [t, sideChatId],
             );
             this.store.db.run(
-              "UPDATE side_chat_attempts SET result_text=NULL,error_text=NULL,updated_at=?1 WHERE side_chat_id=?2",
+              "UPDATE side_chat_attempts SET result_text=NULL,error_text=NULL,attachments_json='[]',updated_at=?1 WHERE side_chat_id=?2",
+              [t, sideChatId],
+            );
+            // Purge removes every persisted free-form content field. Keep only
+            // receipt/operation identities and allow-listed audit codes so a
+            // replay can remain idempotent without retaining user content.
+            this.store.db.run(
+              "UPDATE side_chat_bring_backs SET error_text=NULL,updated_at=?1 WHERE side_chat_id=?2",
               [t, sideChatId],
             );
           } else {

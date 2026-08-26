@@ -28,6 +28,13 @@ Only completed bring-back receipts set `broughtBack=true`, and a unique DB
 constraint prevents a second write to the same attempt/destination even when
 the caller supplies a new request key.
 
+Purge erases all persisted free-form content: the root question, root and
+per-attempt attachment references, attempt result/error text, and any
+bring-back error text. It intentionally retains identifiers, timestamps,
+state, hashes, completed bring-back receipts, and allow-listed operation/event
+codes so lifecycle replay and audit remain durable without retaining readable
+user content.
+
 The capability endpoint requires the requested source thread and exact
 boundary in addition to the authorized node. A supported response echoes that
 context. This prevents a generic runtime capability from being mistaken for
