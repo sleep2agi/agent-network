@@ -91,9 +91,17 @@ export class SideThreadCommandStore {
 
   ack(actor: NodeCommandActor, raw: unknown): { idempotent: boolean; ack: Record<string, unknown> } {
     const ack = object(raw);
+    exactKeys(ack, ["protocol", "commandId", "operationId", "state", "errorCode", "result"]);
     if (ack.protocol !== SIDE_THREAD_ACK_PROTOCOL) throw new Error("invalid ack protocol");
     const commandId = id(ack.commandId, "commandId"), operationId = id(ack.operationId, "operationId");
     if (!["accepted", "ambiguous", "failed", "unsupported"].includes(String(ack.state))) throw new Error("invalid ack state");
+    const expectedError = ack.state === "accepted" ? null : ack.state === "ambiguous" ? "SIDE_THREAD_AMBIGUOUS"
+      : ack.state === "unsupported" ? "SIDE_THREAD_UNSUPPORTED" : "SIDE_THREAD_CONFLICT";
+    if (ack.errorCode !== expectedError) throw new Error("invalid ack error code");
+    const result = object(ack.result);
+    exactKeys(result, ["threadId", "turnId", "destinationTurnId"]);
+    for (const key of ["threadId", "turnId", "destinationTurnId"])
+      if (result[key] !== null && !isId(result[key])) throw new Error("invalid ack result identity");
     const canonical = JSON.stringify(ack);
     return this.db.transaction(() => {
       const row = this.db.get<CommandRow>("SELECT * FROM side_thread_commands WHERE command_id=?1", commandId);
@@ -116,6 +124,7 @@ export class SideThreadCommandStore {
 
   terminal(actor: NodeCommandActor, raw: unknown): { idempotent: boolean; event: SideThreadRuntimeEvent } {
     const env = object(raw);
+    exactKeys(env, ["protocol", "sideThreadId", "attemptId", "threadId", "turnId", "status", "text", "errorCode"]);
     if (env.protocol !== SIDE_THREAD_TERMINAL_PROTOCOL) throw new Error("invalid terminal protocol");
     const sideChatId = id(env.sideThreadId, "sideThreadId"), attemptId = id(env.attemptId, "attemptId");
     const threadId = id(env.threadId, "threadId"), turnId = id(env.turnId, "turnId");
@@ -128,6 +137,12 @@ export class SideThreadCommandStore {
     const cmd = object(JSON.parse(command.command_json));
     if (object(ack.result).turnId !== turnId || object(cmd.payload).threadId !== threadId) throw new Error("terminal four-tuple mismatch");
     if (!["completed", "failed", "interrupted"].includes(String(env.status))) throw new Error("invalid terminal status");
+    if (env.status === "completed") {
+      if (typeof env.text !== "string" || env.text.includes("\0") || env.text.length > 1_000_000 || env.errorCode !== null)
+        throw new Error("invalid completed terminal payload");
+    } else if (env.text !== null || (env.status === "failed" ? env.errorCode !== "SIDE_THREAD_RUNTIME_FAILED" : env.errorCode !== null)) {
+      throw new Error("invalid non-completed terminal payload");
+    }
     const event: SideThreadRuntimeEvent = {
       sideChatId, attemptId, threadId, turnId, status: env.status as any,
       ...(env.status === "completed" ? { text: typeof env.text === "string" ? env.text : "" } : {}),
@@ -163,6 +178,9 @@ export class SideThreadCommandStore {
     if (row.kind === "start" && (!row.attempt_id || !isId(result.turnId) || !isId(object(command.payload).threadId)))
       throw new Error("start ack missing ownership tuple");
     if (row.kind === "bring-back" && !isId(result.destinationTurnId)) throw new Error("bring-back ack missing destination identity");
+    if (row.kind !== "fork" && result.threadId !== null) throw new Error("unexpected thread identity");
+    if (row.kind !== "start" && result.turnId !== null) throw new Error("unexpected turn identity");
+    if (row.kind !== "bring-back" && result.destinationTurnId !== null) throw new Error("unexpected destination identity");
   }
 }
 
@@ -229,6 +247,10 @@ export async function handleSideThreadCommandRequest(input: {
 }
 
 function object(value: unknown): Record<string, any> { if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("object required"); return value as any; }
+function exactKeys(value: Record<string, unknown>, allowed: readonly string[]): void {
+  const keys = Object.keys(value), expected = new Set(allowed);
+  if (keys.length !== allowed.length || keys.some((key) => !expected.has(key))) throw new Error("unexpected protocol fields");
+}
 function isId(value: unknown): value is string { return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(value); }
 function id(value: unknown, label: string): string { if (!isId(value)) throw new Error(`invalid ${label}`); return value; }
 function sha(value: string): string { return `sha256:${createHash("sha256").update(value).digest("hex")}`; }

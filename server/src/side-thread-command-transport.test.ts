@@ -68,4 +68,17 @@ describe("Hub durable SideThread command outbox", () => {
     const rejected = await handleSideThreadCommandRequest({ req: new Request(`http://hub/api/nodes/node-1/side-thread-commands/${command.commandId}/ack`, { method: "POST", body: JSON.stringify(badBody) }), url: new URL(`http://hub/api/nodes/node-1/side-thread-commands/${command.commandId}/ack`), actor: actor(), store: f.store, port: f.port });
     expect(rejected?.status).toBe(409);
   });
+
+  test("hostile node cannot smuggle extra receipt fields or unbounded terminal text", async () => {
+    const f = fixture();
+    await f.port.start({ operationId: "op-hostile", requestKey: "rk-hostile", sideChatId: "side-hostile", attemptId: "attempt-hostile", nodeId: "node-1", threadId: "derived-hostile", prompt: "q", attachments: [] }).catch(() => {});
+    const command = f.store.claim(actor())!;
+    const clean = { protocol: "side_thread.ack.v1", commandId: command.commandId, operationId: "op-hostile", state: "accepted", errorCode: null, result: { threadId: null, turnId: "turn-hostile", destinationTurnId: null } };
+    expect(() => f.store.ack(actor(), { ...clean, exception: "Bearer ntok_secret" })).toThrow(/unexpected protocol fields/);
+    f.store.ack(actor(), clean);
+    const terminal = { protocol: "side_thread.terminal.v1", sideThreadId: "side-hostile", attemptId: "attempt-hostile", threadId: "derived-hostile", turnId: "turn-hostile", status: "completed", text: "ok", errorCode: null };
+    expect(() => f.port.acceptTerminal(actor(), { ...terminal, stack: "secret" })).toThrow(/unexpected protocol fields/);
+    expect(() => f.port.acceptTerminal(actor(), { ...terminal, text: "x".repeat(1_000_001) })).toThrow(/completed terminal payload/);
+    expect(f.port.acceptTerminal(actor(), terminal).idempotent).toBe(false);
+  });
 });
