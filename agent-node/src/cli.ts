@@ -19,6 +19,7 @@ import {
 } from "./runtime/grok-copresence/platform";
 import { dirname, join, isAbsolute, resolve } from "path";
 import { hostname as osHostname, homedir } from "os";
+import { codexTuiAlignmentNotice } from "./codex-tui-alignment";
 import { createCommhubSdkMcpServer } from "./commhub-mcp";
 import { claudeCommhubToolAliases } from "./claude-tool-aliases";
 import { getHostTelemetry } from "./host-telemetry";
@@ -158,6 +159,11 @@ import { emitExplicitTaskTrace, sendExplicitTaskWithTrace, waitForExplicitTaskLi
 import { inboxDeliveryPolicy } from "./inbox-message-policy";
 import { routePeerReplySse, runInboxTurnByReplyPolicy } from "./peer-reply-inbox";
 import { createPeerReplyCapabilityCache, sendPeerReplyCompatible } from "./peer-reply-send";
+import {
+  createCommHubPollCompensator,
+  resolveCompensationPollMs,
+  type CompensationPoller,
+} from "./runtime/commhub-poll-compensator";
 
 const home = homedir();
 const peerReplyCapabilityCache = createPeerReplyCapabilityCache();
@@ -879,6 +885,14 @@ function writebackCodexThread(threadId: string) {
     cfg.codexThreadId = threadId;
     atomicWriteJson(configFilePath, cfg);
     debug(`codexThreadId 写回: ${configFilePath} → ${threadId.slice(0, 8)}...`);
+    const alignment = codexTuiAlignmentNotice(configFilePath, cfg, threadId);
+    if (alignment) {
+      warn(`[codex-app-server] shared thread changed to ${alignment.threadId}. A TUI opened before the bridge will still show its old/blank thread.`);
+      warn(`[codex-app-server] align a POSIX TUI with: ${alignment.posixCommand}`);
+      warn(`[codex-app-server] align a PowerShell TUI with: ${alignment.powershellCommand}`);
+    } else {
+      warn("[codex-app-server] manual TUI alignment command withheld: codexAppServerUrl must be a credential-free loopback ws/wss URL without query or fragment");
+    }
   } catch (e: any) {
     warn(`writebackCodexThread failed: ${e.message}`);
   }
@@ -1553,6 +1567,49 @@ const codexInboxDispatcher = createDetachedInboxDispatcher<any>({
   onSettled: scheduleWorkInboxDrain,
 });
 
+// #1181 — SSE remains the latency path. This controller only wakes the
+// existing inbox arbiters and observes durable outbound status after a lost
+// doorbell/reply notification. It never calls think(), turn/start or
+// turn/steer itself, so active-turn ownership remains in the app-server bridge.
+const commhubCompensation: CompensationPoller | null = RUNTIME === "codex-app-server"
+  ? createCommHubPollCompensator({
+      cursorPath: join(NODE_DIR, "commhub-compensation-cursor.json"),
+      intervalMs: resolveCompensationPollMs(
+        fileConfig.flags?.commhubCompensationPollMs
+          ?? process.env.COMMHUB_COMPENSATION_POLL_MS,
+      ),
+      adapters: {
+        getInbox,
+        listOutbound: async (afterTerminalSeq) => {
+          if (!NODE_ID) throw Object.assign(new Error("immutable node identity unavailable"), { code: -32602 });
+          const response: any = await callCommHub("list_tasks", {
+            from_node_id: NODE_ID,
+            durable_cursor: true,
+            durable_terminal_cursor: true,
+            after_terminal_seq: afterTerminalSeq,
+            limit: 100,
+          }, 0);
+          if (response?.capability !== "list_tasks.immutable-terminal-sequence.v2") {
+            throw Object.assign(new Error("Hub lacks immutable node terminal sequence"), { code: -32602 });
+          }
+          return {
+            tasks: Array.isArray(response.tasks)
+              ? response.tasks.filter((task: any) => task?.from_node_id === NODE_ID)
+              : [],
+            hasMore: response.has_more === true,
+          };
+        },
+        scheduleInboxDrain: scheduleWorkInboxDrain,
+        onOutboundTerminal: (task) => {
+          log(`[commhub-compensation] outbound ${task.task_id.slice(0, 8)} reached ${task.status}; scheduling durable reply inbox reconciliation`);
+          scheduleWorkInboxDrain();
+        },
+        log: (message) => debug(message),
+        warn,
+      },
+    })
+  : null;
+
 function formatInterval(ms: number): string {
   const min = Math.round(ms / 60_000);
   if (min % (24 * 60) === 0) return `${min / (24 * 60)}d`;
@@ -1884,6 +1941,38 @@ const codexAppServerUrl: string | undefined =
 const codexAppServerSessionManager = createCodexSessionManager<
   import("./runtime/codex-app-server/runtime").CodexAppServerRuntimeSession
 >();
+
+async function ensureCodexAppServerSession(): Promise<
+  import("./runtime/codex-app-server/runtime").CodexAppServerRuntimeSession
+> {
+  const { openCodexAppServerRuntime } = await import("./runtime/codex-app-server/runtime");
+  const existingSession = codexAppServerSessionManager.current();
+  if (existingSession && !existingSession.isRunning) {
+    log(`[codex-app-server] previous session not running — reopening`);
+  }
+  const session = await codexAppServerSessionManager.getOrOpen(async () => {
+    let openedRef: import("./runtime/codex-app-server/runtime").CodexAppServerRuntimeSession | null = null;
+    const opened = await openCodexAppServerRuntime({
+      serverUrl: codexAppServerUrl,
+      threadId: codexAppServerThreadId,
+      approvalPolicy: (fileConfig.flags as { approvalPolicy?: string } | undefined)?.approvalPolicy,
+      sandboxMode: (fileConfig.flags as { sandboxMode?: string } | undefined)?.sandboxMode,
+      commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`,
+      commhubToken: AUTH_TOKEN || undefined,
+      onThread: (threadId) => writebackCodexThread(threadId),
+      onExit: (info) => {
+        warn(`[codex-app-server] app-server exited code=${info.code} signal=${info.signal}; next turn will reopen`);
+        if (openedRef) codexAppServerSessionManager.invalidate(openedRef);
+      },
+      log,
+      warn,
+    });
+    openedRef = opened;
+    return opened;
+  });
+  writebackCodexThread(session.threadId);
+  return session;
+}
 if (NEW_SESSION && RUNTIME === "grok" && GROK_EXECUTION_MODE === "cli") {
   clearGrokSession("--new-session requested");
 }
@@ -3243,51 +3332,9 @@ async function processWithCodexAppServer(
   steerIfExternalTurn = false,
   evidence?: TaskRuntimeEvidenceReporter,
 ): Promise<string> {
-  const { openCodexAppServerRuntime, codexAppServerThink, codexAppServerReplyOrThrow } =
+  const { codexAppServerThink, codexAppServerReplyOrThrow } =
     await import("./runtime/codex-app-server/runtime");
-
-  const existingSession = codexAppServerSessionManager.current();
-  if (existingSession && !existingSession.isRunning) {
-    log(`[codex-app-server] previous session not running — reopening on this turn`);
-  }
-
-  const session = await codexAppServerSessionManager.getOrOpen(async () => {
-    let openedRef: import("./runtime/codex-app-server/runtime").CodexAppServerRuntimeSession | null = null;
-    const opened = await openCodexAppServerRuntime({
-      serverUrl: codexAppServerUrl,
-      threadId: codexAppServerThreadId,
-      // Auto-approve posture (RFC-030): the bridge never answers approvals,
-      // so an unattended node that must run write/command tasks needs
-      // approval_policy=never on its OWNED app-server. Driven by node config
-      // flags (approvalPolicy / sandboxMode); default codex behavior when
-      // unset. Ignored for the shared-server (adopt) topology.
-      approvalPolicy: (fileConfig.flags as { approvalPolicy?: string } | undefined)?.approvalPolicy,
-      sandboxMode: (fileConfig.flags as { sandboxMode?: string } | undefined)?.sandboxMode,
-      // Wire CommHub as a native MCP server so codex can call commhub_* tools
-      // (send_task / send_message / get_all_status …) instead of shelling out.
-      // The MCP endpoint is <hub>/mcp (COMMHUB_URL is the base). Owned-server
-      // topology only; shared/adopt servers carry their own MCP config. Token
-      // via env inside the runtime (never argv/config).
-      commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`,
-      commhubToken: AUTH_TOKEN || undefined,
-      onThread: (threadId) => writebackCodexThread(threadId),
-      onExit: (info) => {
-        warn(`[codex-app-server] app-server exited code=${info.code} signal=${info.signal}; next turn will reopen`);
-        // If the child dies before open() resolves there is nothing published
-        // yet; the post-open isRunning gate below rejects it.  Once published,
-        // invalidate only that exact session so a late old exit cannot clear a
-        // newer replacement.
-        if (openedRef) codexAppServerSessionManager.invalidate(openedRef);
-      },
-      log,
-      warn,
-    });
-    openedRef = opened;
-    return opened;
-  });
-  // A freshly-created thread is written back via onThread; make sure the
-  // in-memory var tracks it even when resuming (idempotent).
-  writebackCodexThread(session.threadId);
+  const session = await ensureCodexAppServerSession();
 
   let lastActivityHeartbeatAt = Date.now();
   const outcome = await codexAppServerThink(session, {
@@ -4657,10 +4704,13 @@ async function processTask(
   let grokFailureSubcode: string | null = null;
   const runtimeEvidence = createTaskRuntimeEvidenceReporter({
     taskId,
-    report: (level, exactTaskId) => callCommHub(
-      level === "submitted" ? "mark_tasks_runtime_submitted" : "mark_tasks_consumed",
-      { task_ids: [exactTaskId] },
-    ),
+    report: (level, exactTaskId) => {
+      commhubCompensation?.recordLifecycle(exactTaskId, level);
+      return callCommHub(
+        level === "submitted" ? "mark_tasks_runtime_submitted" : "mark_tasks_consumed",
+        { task_ids: [exactTaskId] },
+      );
+    },
     debug,
   });
   try {
@@ -4865,6 +4915,15 @@ function shouldSkipMessage(from: string, content: string, msgType?: string): str
 //         failure, leave queued for the next drain. On app-level
 //         rejection (e.g. target offline, task closed), drop with a
 //         loud warn — retrying would not help.
+async function ackAndRecordConsumed(msg: any, label: string): Promise<void> {
+  try {
+    await ackMessage(msg.id);
+    commhubCompensation?.recordConsumed(msg);
+  } catch (e: any) {
+    warn(`ack failed for ${label} ${String(msg.id).slice(0, 8)}: ${e.message}`);
+  }
+}
+
 async function processInbox() {
   // (1) Drain leftovers from previous runs.
   if (shouldDrainPendingReplies(RUNTIME, inflightMessageIds.size)) {
@@ -4887,6 +4946,11 @@ async function processInbox() {
     }
     inflightMessageIds.add(msg.id);
     try {
+      if (commhubCompensation?.wasConsumed(msg)) {
+        log(`[commhub-compensation] suppress replay task=${logicalTaskIdFromInbox(msg).slice(0, 8)}`);
+        await ackAndRecordConsumed(msg, "deduplicated");
+        return;
+      }
       const from = msg.from_session || "hub";
       const content = msg.content as string;
       const msgType = msg.type || "task";
@@ -4895,6 +4959,7 @@ async function processInbox() {
       // logical task across retry/reassign. Keep ACK on the transport row,
       // but bind runtime evidence and replies to the logical task.
       const logicalTaskId = logicalTaskIdFromInbox(msg);
+      commhubCompensation?.recordLifecycle(logicalTaskId, "delivered");
       const images = await extractRuntimeAttachmentPaths(msg);
       const inboundLogSuffix = GROK_EXECUTION_MODE === "cli"
         ? ` (${content.length} chars; content withheld)`
@@ -4910,7 +4975,7 @@ async function processInbox() {
         // least diagnosable. Whether plain messages should reach the model or a
         // human TUI is a product decision, deliberately not made here.
         log(`← [${from}] (message, not delivered to model) ${content.slice(0, 120)}`);
-        await ackMessage(msg.id).catch((e: any) => warn(`ack failed for non-task ${msg.id.slice(0, 8)}: ${e.message}`));
+        await ackAndRecordConsumed(msg, "non-task");
         return;
       }
 
@@ -4922,7 +4987,7 @@ async function processInbox() {
           taskId: logicalTaskId,
           messageType: msgType,
         }));
-        await ackMessage(msg.id).catch((e: any) => warn(`ack failed for skipped ${msg.id.slice(0, 8)}: ${e.message}`));
+        await ackAndRecordConsumed(msg, "skipped");
         return;
       }
 
@@ -4952,7 +5017,7 @@ async function processInbox() {
           interactiveDashboardTask,
         );
         await deliverReplyReliably(from, replyText, logicalTaskId, goalFailed);
-        await ackMessage(msg.id).catch((e: any) => warn(`ack failed for goal ${msg.id.slice(0, 8)}: ${e.message}`));
+        await ackAndRecordConsumed(msg, "goal");
         return;
       }
 
@@ -4971,7 +5036,10 @@ async function processInbox() {
             images,
             interactiveDashboardTask,
           ),
-          acknowledge: (id) => ackMessage(id),
+          acknowledge: async (id) => {
+            await ackMessage(id);
+            commhubCompensation?.recordConsumed(msg);
+          },
         },
       );
       if (inboxTurn.kind === "terminal_peer_reply") return;
@@ -4999,16 +5067,28 @@ async function processInbox() {
         log(GROK_EXECUTION_MODE === "cli"
           ? `skip reply: low-value (${result.length} chars; content withheld)`
           : `skip reply: low-value (${result.slice(0, 30)})`);
-        await ackMessage(msg.id).catch((e: any) => warn(`ack failed for low-value ${msg.id.slice(0, 8)}: ${e.message}`));
+        await ackAndRecordConsumed(msg, "low-value");
         return;
       }
 
       // (3c-e) Persist + ack + try send.
       const replyBody = `[${ALIAS}] ${result.slice(0, 2000)}`;
       await deliverReplyReliably(from, replyBody, logicalTaskId, failed);
-      await ackMessage(msg.id).catch((e: any) => warn(`ack failed for ${msg.id.slice(0, 8)}: ${e.message}`));
+      try {
+        // Keep the transport ACK visibly bound to inbox.id here. Stable
+        // task evidence/replies above use logicalTaskId; the compensation
+        // cursor advances only after this transport acknowledgement succeeds.
+        await ackMessage(msg.id);
+        commhubCompensation?.recordConsumed(msg);
+      } catch (e: any) {
+        warn(`ack failed for message ${String(msg.id).slice(0, 8)}: ${e.message}`);
+      }
     } finally {
       inflightMessageIds.delete(msg.id);
+      // One runtime admission settled: this is a controllable idle boundary
+      // for the compensation layer. It still only wakes the existing bridge
+      // lane; an active human turn will be steered by that bridge, never forked.
+      commhubCompensation?.trigger("idle");
     }
   };
 
@@ -5890,6 +5970,7 @@ async function connectSSE() {
               // informational messages have a separate lane from model work.
               scheduleWorkInboxDrain();
               scheduleInformationalInboxDrain();
+              commhubCompensation?.trigger("sse-reconnect");
               continue;
             }
             // Two defects were found independently on both sides on 2026-08-02,
@@ -6138,6 +6219,18 @@ if (GROK_COPRESENCE) {
 }
 await register();
 log("已注册到 CommHub");
+// Subscribe before the human TUI starts. Lazy-on-first-task attachment can
+// miss the TUI's turn/started notification; relying on thread/read to recover
+// that in-progress turn is not portable across Windows Codex builds.
+if (RUNTIME === "codex-app-server" && codexAppServerUrl) {
+  try {
+    const session = await ensureCodexAppServerSession();
+    log(`[codex-app-server] shared bridge ready thread=${session.threadId.slice(0, 12)}…`);
+  } catch (startupError: any) {
+    error(`[codex-app-server] shared bridge startup failed: ${startupError?.message || startupError}`);
+    process.exit(1);
+  }
+}
 let ownerScheduleConsumer: OwnerScheduleConsumer | null = null;
 try {
   ownerScheduleConsumer = createOwnerScheduleConsumer({
@@ -6155,6 +6248,7 @@ try {
 }
 scheduleWorkInboxDrain();
 scheduleInformationalInboxDrain();
+commhubCompensation?.trigger("startup");
 // RFC-024 — fire a reportStatus immediately on startup so the
 // config_snapshot reaches the hub right after register(), instead of
 // waiting up to 3 minutes for the periodic timer below to fire. Hub
@@ -6297,6 +6391,7 @@ const shutdown = async () => {
   // M2 — close loops HTTP MCP server (release port + token state).
   // Synchronous; fast.
   try { await loopsHttpServerHandle?.close(); } catch { /* already closed */ }
+  commhubCompensation?.stop();
   await reportStatus("offline").catch(() => {});
   process.exit(0);
 };

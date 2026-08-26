@@ -1,0 +1,28 @@
+{
+  "artifact": { "codexCli": "0.148.0", "schemaMode": "normal+experimental" },
+  "forkBoundary": {
+    "lastTurnId": { "normalSchema": true, "experimentalSchema": true, "requiresExperimental": false },
+    "beforeTurnId": { "normalSchema": false, "experimentalSchema": true, "requiresExperimental": true },
+    "requestRequired": ["threadId"]
+  },
+  "initialize": {
+    "capabilitiesProperties": ["experimentalApi", "extensions", "mcpServerOpenaiFormElicitation", "optOutNotificationMethods", "requestAttestation"],
+    "experimentalApiDefault": false
+  },
+  "responseShape": {
+    "threadFork": {
+      "properties": ["activePermissionProfile", "approvalPolicy", "approvalsReviewer", "cwd", "instructionSources", "model", "modelProvider", "multiAgentMode", "reasoningEffort", "runtimeWorkspaceRoots", "sandbox", "serviceTier", "thread"],
+      "required": ["approvalPolicy", "approvalsReviewer", "cwd", "model", "modelProvider", "sandbox", "thread"]
+    },
+    "threadRead": { "properties": ["thread"], "required": ["thread"] }
+  },
+  "ownershipShape": {
+    "thread": {
+      "properties": ["agentNickname", "agentRole", "canAcceptDirectInput", "cliVersion", "createdAt", "cwd", "ephemeral", "extra", "forkedFromId", "gitInfo", "historyMode", "id", "modelProvider", "name", "parentThreadId", "path", "preview", "recencyAt", "section", "sectionEnteredAt", "sessionId", "source", "status", "threadSource", "turns", "updatedAt"],
+      "required": ["cliVersion", "createdAt", "cwd", "ephemeral", "id", "modelProvider", "preview", "sessionId", "source", "status", "turns", "updatedAt"]
+    },
+    "turn": { "properties": ["completedAt", "durationMs", "error", "id", "items", "itemsView", "startedAt", "status"], "required": ["id", "items", "status"] },
+    "turnStarted": { "properties": ["threadId", "turn"], "required": ["threadId", "turn"] },
+    "turnCompleted": { "properties": ["threadId", "turn"], "required": ["threadId", "turn"] }
+  }
+}

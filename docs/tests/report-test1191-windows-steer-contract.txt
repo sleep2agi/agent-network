@@ -1,0 +1,58 @@
+# test1191 — Windows Codex co-presence live steer contract
+
+Status: PASS (Docker contract); native Windows job is the Draft PR gate
+
+Source boundary:
+
+- Base: `3f88c9699b620597a6357bfc6eed6a02264152c7`
+- Rebased implementation commit under test: `093e2fb06fb40620a7e982fe97d100da27f1935d`
+- Image base: `oven/bun:1.3.14`
+- Command: `docker build --build-arg SOURCE_COMMIT=093e2fb0...` followed
+  by `docker run --rm`.
+
+Scope:
+
+- shared Codex bridge attaches before the Windows launcher opens the TUI;
+- the existing authenticated Dashboard `turn/steer` and later-SSE admission
+  contracts remain green;
+- Windows launcher refuses to open a TUI before the exact paired bridge emits
+  its ready boundary;
+- witnessed-red mutations remove eager attach and readiness wait separately;
+- POSIX no longer sleeps for a guessed three seconds: it waits for the real
+  `[codex-app-server] shared bridge ready` boundary and fails closed before TUI;
+- a real Linux Hub + built agent-node + fake Codex E2E sends normal/high rows
+  during one human turn and asserts the total `turn/start` count cannot grow;
+- app-server, bridge, and TUI record the same node-specific `CODEX_HOME`;
+- tmux pane discovery uses a visible field marker because Debian tmux 3.3a
+  sanitizes a literal TAB in `-F` output to `_`; legacy TAB rows remain parsed;
+- native Windows test751 runs the real built agent-node against the fake Codex
+  protocol endpoint and sends normal/high Dashboard tasks during one human
+  turn, with same remote/thread/CODEX_HOME and one bridge.
+
+No package was published or installed globally.
+
+Exact Docker result:
+
+- both CLI production bundles compiled;
+- Windows fake protocol and native harness compiled;
+- 63 passed, 3 Windows-only tests skipped in Linux Docker, 0 failed;
+- lazy-bridge mutation: red;
+- launcher-without-ready-wait mutation: red;
+- live Linux launcher-without-protocol-ready mutation: red;
+- live `turn/steer` to `turn/start` degradation mutation: red;
+- Linux real Hub/built-agent-node baseline: PASS, with zero additional
+  `turn/start` RPCs and identical app-server/bridge/TUI `CODEX_HOME`;
+- final `RESULT: PASS`.
+
+Rebase compatibility gates:
+
+- `test584-dashboard-codex-delivery`: PASS (92 behavior tests, 15 witnessed-red mutations);
+- `test585-codex-runtime-singleflight`: PASS (42 behavior tests, all 5 mutations red, build PASS);
+- the stale `bypass_cli_wiring` mutation was moved from the pre-refactor inline
+  `getOrOpen` call to the production `ensureCodexAppServerSession()` call site,
+  so it again weakens the current code instead of producing a false green.
+
+The Windows-only assertions are not claimed by Docker. The existing
+`Windows Codex co-presence native smoke` workflow runs them on
+`windows-latest`; it now builds and launches the real repository agent-node,
+not the old sleeping fake, and is required before this change can leave Draft.

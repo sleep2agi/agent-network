@@ -25,6 +25,7 @@ COPY server/package.json server/package-lock.json ./server/
 RUN cd server && npm ci
 
 COPY server ./server
+COPY contracts/side-thread/v1 ./contracts/side-thread/v1
 # RFC-026 G9 / RFC-028 P1 的漂移门比对 hub 与 daemon 的同名共享源码,
 # 要读同级 agent-node/src/shared。只带这个目录,不带整个包。
 # 若干 server 测试跨包 import agent-node 的源码(hub↔daemon 漂移门比对

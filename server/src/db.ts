@@ -1101,6 +1101,71 @@ try { db.exec("ALTER TABLE tasks ADD COLUMN meta_json TEXT"); } catch {}
 try { db.exec("ALTER TABLE tasks ADD COLUMN runtime_submitted_at TEXT"); } catch {}
 try { db.exec("ALTER TABLE tasks ADD COLUMN consumed_at TEXT"); } catch {}
 
+// #1181 durable outbound terminal cursor.  A task's created_at cannot be used
+// as a recovery watermark because an old task may become terminal after newer
+// tasks.  Record terminal transitions in their own monotonically increasing
+// journal instead.  The journal is append-only for a logical task; retry keeps
+// the existing task identity and therefore the same idempotency domain.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS task_terminal_events (
+    terminal_seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT NOT NULL UNIQUE,
+    network_id TEXT,
+    from_node_id TEXT,
+    completed_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_task_terminal_events_sender_seq
+    ON task_terminal_events(network_id, from_node_id, terminal_seq);
+`);
+if (db.dialect === "sqlite") {
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS tasks_terminal_event_insert
+    AFTER INSERT ON tasks
+    WHEN NEW.status IN ('replied', 'failed', 'cancelled', 'expired')
+    BEGIN
+      INSERT OR IGNORE INTO task_terminal_events (task_id, network_id, from_node_id, completed_at)
+      VALUES (NEW.task_id, NEW.network_id, NEW.from_node_id, COALESCE(NEW.completed_at, datetime('now')));
+    END;
+    CREATE TRIGGER IF NOT EXISTS tasks_terminal_event_update
+    AFTER UPDATE OF status ON tasks
+    WHEN NEW.status IN ('replied', 'failed', 'cancelled', 'expired')
+      AND OLD.status NOT IN ('replied', 'failed', 'cancelled', 'expired')
+    BEGIN
+      INSERT OR IGNORE INTO task_terminal_events (task_id, network_id, from_node_id, completed_at)
+      VALUES (NEW.task_id, NEW.network_id, NEW.from_node_id, COALESCE(NEW.completed_at, datetime('now')));
+    END;
+  `);
+  db.run(`INSERT OR IGNORE INTO task_terminal_events (task_id, network_id, from_node_id, completed_at)
+          SELECT task_id, network_id, from_node_id, COALESCE(completed_at, created_at)
+            FROM tasks
+           WHERE status IN ('replied', 'failed', 'cancelled', 'expired')
+           ORDER BY COALESCE(completed_at, created_at), task_id`);
+} else {
+  db.exec(`
+    CREATE OR REPLACE FUNCTION record_task_terminal_event() RETURNS trigger AS $$
+    BEGIN
+      IF NEW.status IN ('replied', 'failed', 'cancelled', 'expired')
+         AND (TG_OP = 'INSERT' OR OLD.status NOT IN ('replied', 'failed', 'cancelled', 'expired')) THEN
+        INSERT INTO task_terminal_events (task_id, network_id, from_node_id, completed_at)
+        VALUES (NEW.task_id, NEW.network_id, NEW.from_node_id, COALESCE(NEW.completed_at, NOW()))
+        ON CONFLICT (task_id) DO NOTHING;
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+    DROP TRIGGER IF EXISTS tasks_terminal_event_insert ON tasks;
+    DROP TRIGGER IF EXISTS tasks_terminal_event_update ON tasks;
+    CREATE TRIGGER tasks_terminal_event_insert AFTER INSERT ON tasks
+      FOR EACH ROW EXECUTE FUNCTION record_task_terminal_event();
+    CREATE TRIGGER tasks_terminal_event_update AFTER UPDATE OF status ON tasks
+      FOR EACH ROW EXECUTE FUNCTION record_task_terminal_event();
+    INSERT INTO task_terminal_events (task_id, network_id, from_node_id, completed_at)
+    SELECT task_id, network_id, from_node_id, COALESCE(completed_at, created_at)
+      FROM tasks WHERE status IN ('replied', 'failed', 'cancelled', 'expired')
+    ON CONFLICT (task_id) DO NOTHING;
+  `);
+}
+
 // ── Hub scheduled tasks ──────────────────────────────────────────────
 // Scheduling is a Hub concern: clients manage these rows, while agents only
 // receive the ordinary inbox/tasks rows produced for each occurrence.  Keep

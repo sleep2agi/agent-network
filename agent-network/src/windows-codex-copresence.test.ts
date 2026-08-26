@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -20,6 +20,18 @@ const record: WindowsCopresenceRecord = {
 };
 
 describe("Windows native Codex co-presence ownership", () => {
+  test("launcher waits for the real shared bridge before opening the TUI", () => {
+    const cli = readFileSync(new URL("../bin/cli.ts", import.meta.url), "utf8");
+    const windowsStart = cli.slice(
+      cli.indexOf("async function startWindowsCodexCopresence("),
+      cli.indexOf("async function startCopresenceOrchestration("),
+    );
+    const readyAt = windowsStart.indexOf('waitForFileText(bridgeLog, "[codex-app-server] shared bridge ready"');
+    const tuiAt = windowsStart.indexOf('console.log(`[anet] ③ opening Codex TUI');
+    expect(readyAt).toBeGreaterThan(0);
+    expect(tuiAt).toBeGreaterThan(readyAt);
+  });
+
   test("matching PID plus CreationDate is safe to stop", () => {
     const d = decideWindowsManagedStop(record, (pid) => record.processes.find((p) => p.pid === pid)!.creationDate);
     expect(d.safe.map((p) => p.role)).toEqual(["appsrv", "bridge"]);

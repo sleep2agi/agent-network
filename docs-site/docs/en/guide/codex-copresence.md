@@ -174,46 +174,39 @@ Get-NetTCPConnection -LocalPort <free-port> -ErrorAction SilentlyContinue
 
 # Terminal 1: enter the target project before starting the dedicated app-server
 cd C:\path\to\project
+$env:CODEX_HOME = "C:\path\to\project\.anet\nodes\codex-human\codex-home"
 codex app-server --listen ws://127.0.0.1:<free-port>
 
 # Terminal 2: start the bridge first so it creates/captures a thread
 # and writes codexThreadId to the node config
 Get-ChildItem Env:COMMHUB_* | ForEach-Object { Remove-Item "Env:$($_.Name)" }
+$env:CODEX_HOME = "C:\path\to\project\.anet\nodes\codex-human\codex-home"
 anet node create codex-human --runtime codex-app-server --codex-app-server-url ws://127.0.0.1:<free-port>
 anet node start codex-human
 
-# Read codexThreadId from config.json, then attach Terminal 3 to that exact thread
-# 🔴 CODEX_HOME must be set explicitly to *this node's* codex-home — see the danger box below
-$env:CODEX_HOME = "<project>\.anet\nodes\<alias>\codex-home"
-codex resume --remote ws://127.0.0.1:<free-port> <codexThreadId>
+# Read codexThreadId/model from config.json, then attach Terminal 3 to that
+# exact thread while using this node's CODEX_HOME
+$env:CODEX_HOME = "C:\path\to\project\.anet\nodes\codex-human\codex-home"
+codex resume --remote ws://127.0.0.1:<free-port> <codexThreadId> -m <model>
 ```
 
-`codex resume --remote` must include the session/thread id. Omitting it opens a historical-session picker and makes attaching to the wrong thread easy. You may also pass `--codex-thread-id <id>` when creating the node to adopt a specific thread; otherwise the runtime captures one and writes `codexThreadId` back to config.
+`codex resume --remote` must align all four values: the node-isolated `CODEX_HOME`, `codexAppServerUrl`, `codexThreadId`, and `model`. Omitting the thread id opens a historical-session picker. Omitting `CODEX_HOME` is more deceptive: Codex can use the default `~/.codex` and silently connect to external port 443, leaving an empty pane that looks successfully attached while it is actually an independent cloud session. When the bridge first writes `codexThreadId`, it prints copyable POSIX and PowerShell resume commands. You may also pass `--codex-thread-id <id>` when creating the node to adopt a specific thread; otherwise the runtime captures one and writes it back.
 
-::: danger 🔴 A hand-started TUI must carry `CODEX_HOME`, or it silently goes to the cloud
-`--copresence` sets the node's own `CODEX_HOME` for you; **the manual topology does not**. Without it the TUI uses the default `~/.codex`, which does not hold this thread, so `codex resume --remote` **raises no error, writes no log, and leaves the pane empty** while falling back to a separate cloud session — one still carrying the `--dangerously-bypass-approvals-and-sandbox` you passed. From the outside it looks **exactly like success**.
+Do not treat an empty pane as proof. After manual startup, inspect the TUI process socket and verify it connects to the configured loopback `codexAppServerUrl` rather than external `:443`, then verify the same thread id from both the TUI and bridge sides. Linux/macOS also must run `export CODEX_HOME='<node-directory>/codex-home'` before `codex resume` with `--remote`, the thread id, and `-m`.
 
-Measured 2026-08-26 on Linux: a TUI started without `CODEX_HOME` had exactly one TCP connection from its codex child process, and it went to public `:443` rather than to the app-server's loopback port.
-
-```bash
-# Linux / macOS: line CODEX_HOME up with the app-server
-CODEX_HOME=<project>/.anet/nodes/<alias>/codex-home \
-  codex resume --remote ws://127.0.0.1:<free-port> <codexThreadId>
-```
-
-**Verify that it actually attached** — do not settle for "the process started":
-
-```bash
-# The TUI's codex child process should hold an ESTAB to the app-server port
-ss -tnp | grep '127.0.0.1:<free-port>'
-```
-
-The app-server port should show **two** connection pairs: one for the bridge, one for the TUI. Only one pair means the TUI did not attach.
-
-The app-server **accepts multiple clients**, so the TUI can join the same thread while the bridge is connected. **There is no need to stop the bridge first.**
-:::
+All three terminals in a manual topology must also set the **same node-specific `CODEX_HOME`** explicitly. If any terminal omits it, Codex can silently fall back to the user's default `~/.codex`: the TUI appears to start but belongs to a different cloud session instead of this loopback app-server. Do not share a persistent node's `CODEX_HOME` with the primary Codex session.
 
 Advanced Linux/macOS users can also use this topology with an existing app-server, but prefer `--copresence` for everyday use because it manages loopback binding, isolated `CODEX_HOME`, MCP injection, tmux lifecycle, and stop identity together. If common ports such as 24700–24720 are occupied by other co-presence nodes, choose another free loopback port and check it before starting.
+
+Concretely, "inspect the TUI process socket" means this, and the criterion is the **number of connection pairs**:
+
+```bash
+ss -tnp | grep '127.0.0.1:<app-server-port>'
+```
+
+A healthy attach shows **two** ESTAB pairs — one for the bridge, one for the TUI. **Only one pair means the TUI did not attach**, and the pane looks identical either way. Measured 2026-08-26 on Linux: a TUI started without `CODEX_HOME` had exactly one TCP connection from its codex child, and it went to public `:443`.
+
+The app-server **accepts multiple clients**, so the TUI can join the same thread while the bridge is connected. **There is no need to stop the bridge first** (measured on the same host: the bridge kept its 6-second round trip after a new TUI attached).
 
 A manually started app-server does not automatically get the CommHub MCP injection supplied by `--copresence`. If the human TUI needs direct `commhub_*` tools, configure the RFC-030 MCP URL and bearer-token environment variable **before the app-server creates the thread**. Existing threads snapshot their tool set, so adding MCP later does not work. Never put the token in argv or chat.
 

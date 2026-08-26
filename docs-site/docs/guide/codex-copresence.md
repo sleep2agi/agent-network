@@ -173,45 +173,38 @@ Get-NetTCPConnection -LocalPort <free-port> -ErrorAction SilentlyContinue
 
 # Terminal 1：先 cd 到目标项目，再起独立 app-server
 cd C:\path\to\project
+$env:CODEX_HOME = "C:\path\to\project\.anet\nodes\codex-human\codex-home"
 codex app-server --listen ws://127.0.0.1:<free-port>
 
 # Terminal 2：先启动 bridge，让 runtime 创建/捕获 thread 并写回 codexThreadId
 Get-ChildItem Env:COMMHUB_* | ForEach-Object { Remove-Item "Env:$($_.Name)" }
+$env:CODEX_HOME = "C:\path\to\project\.anet\nodes\codex-human\codex-home"
 anet node create codex-human --runtime codex-app-server --codex-app-server-url ws://127.0.0.1:<free-port>
 anet node start codex-human
 
-# 从节点 config.json 读取 codexThreadId 后，Terminal 3 接入同一条 thread
-# 🔴 CODEX_HOME 必须显式设成【该节点自己的】codex-home，见下方 danger 框
-$env:CODEX_HOME = "<项目>\.anet\nodes\<alias>\codex-home"
-codex resume --remote ws://127.0.0.1:<free-port> <codexThreadId>
+# 从节点 config.json 读取 codexThreadId/model 后，让 Terminal 3 接入同一条
+# thread；必须使用该节点自己的 CODEX_HOME
+$env:CODEX_HOME = "C:\path\to\project\.anet\nodes\codex-human\codex-home"
+codex resume --remote ws://127.0.0.1:<free-port> <codexThreadId> -m <model>
 ```
 
-`codex resume --remote` 必须带 session/thread id；省略会进入历史会话 picker，容易接错线程。创建节点时也可加 `--codex-thread-id <id>` 接管指定 thread；不传时 runtime 自动捕获并把 `codexThreadId` 写回节点配置。
+`codex resume --remote` 必须同时对齐节点的独立 `CODEX_HOME`、`codexAppServerUrl`、`codexThreadId` 与 `model`。省略 thread id 会进入历史会话 picker，容易接错线程；省略 `CODEX_HOME` 更危险：Codex 可能使用默认 `~/.codex` 并静默连接外网 443，留下一个空白 pane，看起来像已成功接入，实际却是独立云端会话。bridge 首次写回 `codexThreadId` 时会打印可直接复制的 POSIX 与 PowerShell resume 命令。创建节点时也可加 `--codex-thread-id <id>` 接管指定 thread；不传时 runtime 自动捕获并写回配置。
 
-::: danger 🔴 手工起 TUI 必须自带 `CODEX_HOME`，否则会静默连去云端
-`--copresence` 会替你设好节点专属的 `CODEX_HOME`；**手工拓扑不会**。缺了它，TUI 用默认 `~/.codex`，那里没有这条 thread，于是 `codex resume --remote` **不报错、不写日志、pane 全空**，直接回落成一个独立的云端会话——而它同样带着你传的 `--dangerously-bypass-approvals-and-sandbox`。从外面看和成功**一模一样**。
+手工启动后不要只看空 pane 判断成功：检查 TUI 进程的 socket，确认它连接的是配置中的 loopback `codexAppServerUrl`（而不是外网 `:443`），再在 TUI 与 bridge 两侧核对同一个 thread id。Linux/macOS 同样必须先 `export CODEX_HOME='<节点目录>/codex-home'`，再执行带 `--remote`、thread id 与 `-m` 的 `codex resume`。
 
-实测（2026-08-26，Linux）：不带 `CODEX_HOME` 起的 TUI，其 codex 子进程的唯一 TCP 连接是到公网 `:443`，而不是 app-server 的回环端口。
-
-```bash
-# Linux / macOS：把 CODEX_HOME 和 app-server 对齐
-CODEX_HOME=<项目>/.anet/nodes/<alias>/codex-home \
-  codex resume --remote ws://127.0.0.1:<free-port> <codexThreadId>
-```
-
-**验证它真的接上了**（不要只看进程起来了）：
-
-```bash
-# TUI 的 codex 子进程应当有一条到 app-server 端口的 ESTAB
-ss -tnp | grep '127.0.0.1:<free-port>'
-```
-
-app-server 端口上应当出现**两对**连接：bridge 一对、TUI 一对。只有一对就是 TUI 没接上。
-
-app-server **支持多客户端**，所以 bridge 连着的时候 TUI 照样能 join 同一条 thread，**不需要先停 bridge**。
-:::
+手工拓扑的三个终端还必须显式使用**同一个节点专属 `CODEX_HOME`**。漏掉任意一处时，Codex 可能静默使用用户默认 `~/.codex`，TUI 看起来已经启动，实际却连到另一套云端会话而不是这个 loopback app-server。不要让持久化节点与主 Codex 会话共享 `CODEX_HOME`。
 
 Linux/macOS 的高级用户也可用这一拓扑连接已存在的 app-server，但日常使用优先 `--copresence`，它会统一处理 loopback、独立 `CODEX_HOME`、MCP 注入、tmux 生命周期与停止身份。若本机 24700–24720 等常用范围已被其他共存节点占用，继续选新的空闲 loopback 端口，启动前先查占用。
+
+上一段说的「检查 socket」，具体是这条，判据是**连接对数**：
+
+```bash
+ss -tnp | grep '127.0.0.1:<app-server 端口>'
+```
+
+正常应当看到**两对** ESTAB —— bridge 一对、TUI 一对。**只有一对就是 TUI 没接上**（此时 pane 同样是空的，看不出区别）。实测（2026-08-26，Linux）：缺 `CODEX_HOME` 起的 TUI，其 codex 子进程唯一的 TCP 连接是到公网 `:443`。
+
+app-server **支持多客户端**，所以 bridge 连着的时候 TUI 照样能 join 同一条 thread，**不需要先停 bridge**（本机实测：接上新 TUI 后 bridge 6 秒往返照常）。
 
 手工启动的 app-server 不会自动获得 `--copresence` 注入的 CommHub MCP；若希望人类 TUI 直接调用 `commhub_*`，必须在 **app-server 创建 thread 之前**按 RFC-030 配好 MCP URL 与 bearer-token 环境变量。既有 thread 会快照工具集，事后补 MCP 不会生效。不要把 token 放进命令行或聊天。
 

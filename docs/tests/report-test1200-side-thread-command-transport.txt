@@ -1,0 +1,75 @@
+test1200 — SideThread dedicated command transport
+Date: 2026-08-26 Asia/Shanghai
+Product/test source commit: 336a7adf5c58db9079a58185154e67f585894d38
+Stack base: PR1 merged head d033e606154800a38b4969a49c3a608e9b142960
+Rebuilt PR2 tip: 9a074ccb62d7829e5602ea6b14232b7e467e0cb4
+
+Layer order and results (Docker only, stopped-on-first-failure):
+1. test1193 runtime/domain: 50 pass, 0 fail, 171 assertions; witnessed red PASS.
+2. test1195 Hub contract: 8 pass, 0 fail, 35 assertions; witnessed red PASS.
+3. test1195 Hub auth/SSE security: 5 pass, 0 fail, 19 assertions; witnessed red PASS.
+4. test1195 Hub race: 9 pass, 0 fail, 60 assertions; witnessed red PASS.
+5. test1200 command transport: 21 pass, 0 fail, 68 assertions; build PASS;
+   eight witnessed-red mutations PASS.
+
+test1200 behavior evidence:
+- commands use a dedicated durable outbox; the test creates an inbox table and
+  proves it remains empty;
+- exact bound node-token claim/ACK/terminal ownership;
+- node receipt survives executor restart and prevents native replay after ACK
+  response loss;
+- a Linux kernel executor claim spans receipt-read/native/receipt-write and a
+  second process cannot execute the same command concurrently;
+- Hub ACK and terminal receipts are immutable and idempotent;
+- node terminal outbox survives POST loss/restart, while Hub received/applying/
+  applied state redelivers after a receipt-commit/listener-failure window;
+- a concurrent terminal POST receives retryable non-confirmation while the first
+  applier owns the receipt, so it cannot delete the node WAL prematurely;
+- the coordinator propagates database/internal apply failures and the durable
+  port permits exactly one terminal applier, avoiding false applied receipts and
+  multi-listener partial replay;
+- terminal acceptance binds sideThreadId+attemptId+threadId+turnId;
+- attachments require bound ntok download, exact byte length and SHA-256 before
+  native start; no partial/text-only downgrade;
+- bring-back is unavailable without a native injected implementation, and its
+  write-ahead journal refuses duplicate send after an ambiguous response.
+
+Witnessed red:
+1. bypass node command receipt lookup -> ACK-loss replay test red;
+2. remove terminal turnId ownership check -> four-tuple test red;
+3. allow sent/ambiguous bring-back replay -> fail-closed restart test red;
+4. remove node terminal outbox enqueue -> POST-loss restart test red;
+5. bypass the cross-process command executor claim -> concurrent native test red;
+6. equate an existing terminal receipt with applied -> listener-crash test red.
+7. acknowledge a terminal while another request is applying it -> concurrent
+   POST/WAL-loss test red;
+8. replace coordinator terminal application with a no-op -> real coordinator
+   database-failure propagation test red.
+
+Independent review history:
+- exact `9e1d9b9c` was BLOCKED after reproducing two native calls from concurrent
+  consumers and permanent terminal loss between Hub receipt commit and the
+  coordinator listener;
+- exact `4728108e` closed both windows with a kernel operation claim, node
+  terminal WAL, and Hub received/applying/applied drain. PostgreSQL is now
+  explicitly rejected because the repository's PgAdapter transaction is not
+  atomic; this evidence makes no PostgreSQL durability claim.
+- exact `c2c520b7` was still BLOCKED after reproducing a concurrent terminal
+  POST prematurely confirming/deleting WAL and proving coordinator database
+  failures were swallowed;
+- exact `336a7adf` returns retryable non-confirmation while applying, propagates
+  coordinator database/internal failures, and enforces one durable applier.
+
+First failed checks during development:
+- `bunx tsc --noEmit -p agent-node/tsconfig.json` failed because this package
+  has no tsconfig.json; replaced by the repository's Bun build boundary.
+- package-wide local `npm run build` then failed before compilation because
+  the worktree intentionally had no installed zod/undici. The Docker suite is
+  the authoritative clean dependency environment and its focused Bun build
+  passed. No global package or local production installation was modified.
+
+Scope note:
+This Draft adds the vendorable transport/store/consumer and recovery contract.
+Production feature enablement remains fail-closed until a later wiring change
+installs the port, resolves real node-token actors, serves short-lived grants,
+and boots the consumer for a verified native runtime.

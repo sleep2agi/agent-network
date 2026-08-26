@@ -1,0 +1,52 @@
+Test 1181 — Codex TUI durable CommHub polling compensation
+
+Scope
+- SSE remains primary; polling only schedules the existing inbox drain.
+- Startup, reconnect, idle-boundary and bounded timer triggers.
+- Monotonic task lifecycle and authenticated Dashboard request IDs only.
+- Immutable node-id terminal sequence pagination beyond 2,000 rows.
+- Durable terminal outbox with stable idempotency key and callback retry.
+- Explicit old-Hub realtime-only downgrade.
+
+Baseline (Docker, oven/bun:1.3.14)
+- L1 compensator: 18 pass, 0 fail, 48 expectations.
+- L1 Hub protocol: 2,001-row terminal pagination, late out-of-order terminal,
+  rename, cross-network, foreign-node, and token-bound identity coverage.
+- L2 inbox lane + Codex app-server bridge/runtime: 69 pass, 0 fail,
+  231 expectations.
+- L3 production agent-node bundle: pass.
+
+Fault coverage
+- lost SSE: idle poll wakes the existing drain;
+- duplicate SSE+poll and repeated client_request_id: suppressed;
+- restart: private persisted cursor prevents replay;
+- overlapping triggers: coalesced; transient errors back off with a 5m cap;
+- lost outbound notification: terminal task surfaces once across restart;
+- callback throw retries pending with the same idempotency key;
+- concurrent pollers admit one callback through the delivery lease;
+- simulated process crash expires its lease and retries the same stable key;
+- 2,001 delivered terminal rows survive pagination and restart with
+  second_added=0; watermark GC leaves no delivered-row set to overflow;
+- an old task becoming terminal after newer tasks is observed by terminal_seq;
+- node metadata cannot poison Dashboard request dedup;
+- completed lifecycle is monotonic and never reinjected;
+- old Hub unknown tool: one warning, realtime-only, never active claim;
+- active human turn: existing tested bridge ownership uses exact turn/steer;
+  polling has no runtime/turn adapter and cannot open a parallel turn.
+
+Witnessed red
+- missing/invalid full source SHA -> Docker gate fails closed (2 cases);
+- production scheduleInboxDrain replaced with no-op -> production-wiring test red;
+- cursor record moved before ack_inbox -> ACK-order test red;
+- unsupported Hub mode changed realtime-only -> active -> downgrade test red.
+- callback failure advances watermark -> durable retry test red;
+- raw node metadata accepted as Dashboard request ID -> provenance test red;
+- durable_cursor disabled -> immutable protocol wiring test red.
+- delivered callback stops advancing terminal watermark -> >2,000 test red.
+
+Boundary
+- This is compensation, not an interrupt mechanism and not a replacement for
+  app-server turn/steer.
+- The local cursor does not broaden the Hub/runtime crash-exactly-once claim;
+  Hub inbox ACK, task runtime evidence, bridge recovery, and pending reply
+  queue remain authoritative.
