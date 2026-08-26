@@ -159,6 +159,11 @@ import { emitExplicitTaskTrace, sendExplicitTaskWithTrace, waitForExplicitTaskLi
 import { inboxDeliveryPolicy } from "./inbox-message-policy";
 import { routePeerReplySse, runInboxTurnByReplyPolicy } from "./peer-reply-inbox";
 import { createPeerReplyCapabilityCache, sendPeerReplyCompatible } from "./peer-reply-send";
+import {
+  createCommHubPollCompensator,
+  resolveCompensationPollMs,
+  type CompensationPoller,
+} from "./runtime/commhub-poll-compensator";
 
 const home = homedir();
 const peerReplyCapabilityCache = createPeerReplyCapabilityCache();
@@ -1561,6 +1566,49 @@ const codexInboxDispatcher = createDetachedInboxDispatcher<any>({
   // The work lane coalesces simultaneous completions into a bounded dirty run.
   onSettled: scheduleWorkInboxDrain,
 });
+
+// #1181 — SSE remains the latency path. This controller only wakes the
+// existing inbox arbiters and observes durable outbound status after a lost
+// doorbell/reply notification. It never calls think(), turn/start or
+// turn/steer itself, so active-turn ownership remains in the app-server bridge.
+const commhubCompensation: CompensationPoller | null = RUNTIME === "codex-app-server"
+  ? createCommHubPollCompensator({
+      cursorPath: join(NODE_DIR, "commhub-compensation-cursor.json"),
+      intervalMs: resolveCompensationPollMs(
+        fileConfig.flags?.commhubCompensationPollMs
+          ?? process.env.COMMHUB_COMPENSATION_POLL_MS,
+      ),
+      adapters: {
+        getInbox,
+        listOutbound: async (afterTerminalSeq) => {
+          if (!NODE_ID) throw Object.assign(new Error("immutable node identity unavailable"), { code: -32602 });
+          const response: any = await callCommHub("list_tasks", {
+            from_node_id: NODE_ID,
+            durable_cursor: true,
+            durable_terminal_cursor: true,
+            after_terminal_seq: afterTerminalSeq,
+            limit: 100,
+          }, 0);
+          if (response?.capability !== "list_tasks.immutable-terminal-sequence.v2") {
+            throw Object.assign(new Error("Hub lacks immutable node terminal sequence"), { code: -32602 });
+          }
+          return {
+            tasks: Array.isArray(response.tasks)
+              ? response.tasks.filter((task: any) => task?.from_node_id === NODE_ID)
+              : [],
+            hasMore: response.has_more === true,
+          };
+        },
+        scheduleInboxDrain: scheduleWorkInboxDrain,
+        onOutboundTerminal: (task) => {
+          log(`[commhub-compensation] outbound ${task.task_id.slice(0, 8)} reached ${task.status}; scheduling durable reply inbox reconciliation`);
+          scheduleWorkInboxDrain();
+        },
+        log: (message) => debug(message),
+        warn,
+      },
+    })
+  : null;
 
 function formatInterval(ms: number): string {
   const min = Math.round(ms / 60_000);
@@ -4656,10 +4704,13 @@ async function processTask(
   let grokFailureSubcode: string | null = null;
   const runtimeEvidence = createTaskRuntimeEvidenceReporter({
     taskId,
-    report: (level, exactTaskId) => callCommHub(
-      level === "submitted" ? "mark_tasks_runtime_submitted" : "mark_tasks_consumed",
-      { task_ids: [exactTaskId] },
-    ),
+    report: (level, exactTaskId) => {
+      commhubCompensation?.recordLifecycle(exactTaskId, level);
+      return callCommHub(
+        level === "submitted" ? "mark_tasks_runtime_submitted" : "mark_tasks_consumed",
+        { task_ids: [exactTaskId] },
+      );
+    },
     debug,
   });
   try {
@@ -4864,6 +4915,15 @@ function shouldSkipMessage(from: string, content: string, msgType?: string): str
 //         failure, leave queued for the next drain. On app-level
 //         rejection (e.g. target offline, task closed), drop with a
 //         loud warn — retrying would not help.
+async function ackAndRecordConsumed(msg: any, label: string): Promise<void> {
+  try {
+    await ackMessage(msg.id);
+    commhubCompensation?.recordConsumed(msg);
+  } catch (e: any) {
+    warn(`ack failed for ${label} ${String(msg.id).slice(0, 8)}: ${e.message}`);
+  }
+}
+
 async function processInbox() {
   // (1) Drain leftovers from previous runs.
   if (shouldDrainPendingReplies(RUNTIME, inflightMessageIds.size)) {
@@ -4886,6 +4946,11 @@ async function processInbox() {
     }
     inflightMessageIds.add(msg.id);
     try {
+      if (commhubCompensation?.wasConsumed(msg)) {
+        log(`[commhub-compensation] suppress replay task=${logicalTaskIdFromInbox(msg).slice(0, 8)}`);
+        await ackAndRecordConsumed(msg, "deduplicated");
+        return;
+      }
       const from = msg.from_session || "hub";
       const content = msg.content as string;
       const msgType = msg.type || "task";
@@ -4894,6 +4959,7 @@ async function processInbox() {
       // logical task across retry/reassign. Keep ACK on the transport row,
       // but bind runtime evidence and replies to the logical task.
       const logicalTaskId = logicalTaskIdFromInbox(msg);
+      commhubCompensation?.recordLifecycle(logicalTaskId, "delivered");
       const images = await extractRuntimeAttachmentPaths(msg);
       const inboundLogSuffix = GROK_EXECUTION_MODE === "cli"
         ? ` (${content.length} chars; content withheld)`
@@ -4909,7 +4975,7 @@ async function processInbox() {
         // least diagnosable. Whether plain messages should reach the model or a
         // human TUI is a product decision, deliberately not made here.
         log(`← [${from}] (message, not delivered to model) ${content.slice(0, 120)}`);
-        await ackMessage(msg.id).catch((e: any) => warn(`ack failed for non-task ${msg.id.slice(0, 8)}: ${e.message}`));
+        await ackAndRecordConsumed(msg, "non-task");
         return;
       }
 
@@ -4921,7 +4987,7 @@ async function processInbox() {
           taskId: logicalTaskId,
           messageType: msgType,
         }));
-        await ackMessage(msg.id).catch((e: any) => warn(`ack failed for skipped ${msg.id.slice(0, 8)}: ${e.message}`));
+        await ackAndRecordConsumed(msg, "skipped");
         return;
       }
 
@@ -4951,7 +5017,7 @@ async function processInbox() {
           interactiveDashboardTask,
         );
         await deliverReplyReliably(from, replyText, logicalTaskId, goalFailed);
-        await ackMessage(msg.id).catch((e: any) => warn(`ack failed for goal ${msg.id.slice(0, 8)}: ${e.message}`));
+        await ackAndRecordConsumed(msg, "goal");
         return;
       }
 
@@ -4970,7 +5036,10 @@ async function processInbox() {
             images,
             interactiveDashboardTask,
           ),
-          acknowledge: (id) => ackMessage(id),
+          acknowledge: async (id) => {
+            await ackMessage(id);
+            commhubCompensation?.recordConsumed(msg);
+          },
         },
       );
       if (inboxTurn.kind === "terminal_peer_reply") return;
@@ -4998,16 +5067,28 @@ async function processInbox() {
         log(GROK_EXECUTION_MODE === "cli"
           ? `skip reply: low-value (${result.length} chars; content withheld)`
           : `skip reply: low-value (${result.slice(0, 30)})`);
-        await ackMessage(msg.id).catch((e: any) => warn(`ack failed for low-value ${msg.id.slice(0, 8)}: ${e.message}`));
+        await ackAndRecordConsumed(msg, "low-value");
         return;
       }
 
       // (3c-e) Persist + ack + try send.
       const replyBody = `[${ALIAS}] ${result.slice(0, 2000)}`;
       await deliverReplyReliably(from, replyBody, logicalTaskId, failed);
-      await ackMessage(msg.id).catch((e: any) => warn(`ack failed for ${msg.id.slice(0, 8)}: ${e.message}`));
+      try {
+        // Keep the transport ACK visibly bound to inbox.id here. Stable
+        // task evidence/replies above use logicalTaskId; the compensation
+        // cursor advances only after this transport acknowledgement succeeds.
+        await ackMessage(msg.id);
+        commhubCompensation?.recordConsumed(msg);
+      } catch (e: any) {
+        warn(`ack failed for message ${String(msg.id).slice(0, 8)}: ${e.message}`);
+      }
     } finally {
       inflightMessageIds.delete(msg.id);
+      // One runtime admission settled: this is a controllable idle boundary
+      // for the compensation layer. It still only wakes the existing bridge
+      // lane; an active human turn will be steered by that bridge, never forked.
+      commhubCompensation?.trigger("idle");
     }
   };
 
@@ -5889,6 +5970,7 @@ async function connectSSE() {
               // informational messages have a separate lane from model work.
               scheduleWorkInboxDrain();
               scheduleInformationalInboxDrain();
+              commhubCompensation?.trigger("sse-reconnect");
               continue;
             }
             // Two defects were found independently on both sides on 2026-08-02,
@@ -6166,6 +6248,7 @@ try {
 }
 scheduleWorkInboxDrain();
 scheduleInformationalInboxDrain();
+commhubCompensation?.trigger("startup");
 // RFC-024 — fire a reportStatus immediately on startup so the
 // config_snapshot reaches the hub right after register(), instead of
 // waiting up to 3 minutes for the periodic timer below to fire. Hub
@@ -6308,6 +6391,7 @@ const shutdown = async () => {
   // M2 — close loops HTTP MCP server (release port + token state).
   // Synchronous; fast.
   try { await loopsHttpServerHandle?.close(); } catch { /* already closed */ }
+  commhubCompensation?.stop();
   await reportStatus("offline").catch(() => {});
   process.exit(0);
 };

@@ -711,7 +711,10 @@ export function patrolExpiredTasks(): void {
             WHERE task_id = ?1 AND status IN ('created', 'delivered')`,
           [task.task_id],
         );
-        if (result.changes !== 1) continue;
+        // SQLite may include the AFTER UPDATE terminal-journal trigger write
+        // in this count. The WHERE clause still targets one exact guarded
+        // task, so any positive count proves the task transition happened.
+        if (result.changes < 1) continue;
         syncScheduledRunForTask(task.task_id, task.network_id);
         changed.push(task);
       }

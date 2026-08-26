@@ -37,6 +37,12 @@ export function isInteractiveDashboardTask(message: InboxDispatchMessage): boole
   return meta.auth_origin === "user";
 }
 
+export function authenticatedDashboardRequestId(message: InboxDispatchMessage): string | null {
+  if (!isInteractiveDashboardTask(message)) return null;
+  const value = parseInboxDispatchMeta(message)?.client_request_id;
+  return typeof value === "string" ? value : null;
+}
+
 export async function dispatchInboxBatch<T>(
   messages: readonly T[],
   handler: (message: T) => Promise<void>,
