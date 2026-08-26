@@ -71,6 +71,13 @@ import {
   describeGrokCopresenceLiveness,
   type GrokCopresenceLiveness,
 } from "./liveness";
+import {
+  assertModelOnlyArgvDelta,
+  decideGrokModelSwitch,
+  GrokModelSwitchArgvError,
+  withoutSessionFlag,
+  type GrokModelSwitchDecision,
+} from "./model-switch";
 
 // Keep enough headroom for Grok's XML wrapper plus JSON string escaping; the
 // reducer's hard JSONL line cap is 1 MiB.
@@ -383,8 +390,12 @@ export interface GrokCopresenceRuntimeSession {
   readonly isRunning: boolean;
   readonly tuiReady: boolean;
   readonly state: GrokCopresenceState;
+  /** The model the next spawn will request; moves only via `switchModel`. */
+  readonly model: string | undefined;
   liveness(): GrokCopresenceLiveness;
   submit(opts: GrokCopresenceThinkOptions): Promise<GrokCopresenceThinkResult>;
+  /** Out-of-band model switch that resumes the same session (issue #879). */
+  switchModel(requested: unknown): Promise<GrokModelSwitchDecision>;
   close(): Promise<void>;
 }
 
@@ -945,6 +956,23 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   private logState: GrokJsonlState = newGrokJsonlState();
   private pty: GrokPtyLike | null = null;
   private activeTui: GrokTuiGeneration | null = null;
+  /**
+   * The model the next spawn will request (issue #879).
+   *
+   * Seeded from `opts.model` and only ever moved by `switchModel()`, which
+   * re-spawns onto the same on-disk session. `opts` stays readonly so the
+   * declared configuration keeps saying what the node was started with.
+   */
+  private currentModel?: string;
+  /** Set only while a `switchModel()` re-spawn is the reason the TUI exited. */
+  private modelSwitchInFlight: string | null = null;
+  /**
+   * argv of the most recent spawn, kept so a model switch can be checked
+   * against what actually reached the process rather than against a second
+   * copy of the same inputs — comparing two freshly built arrays would be
+   * tautological and could never fail.
+   */
+  private lastSpawnArgs: readonly string[] | null = null;
   private attach: GrokAttachServer | null = null;
   private locks: LifetimeLock[] = [];
   private chatTail: SafeJsonlTail | null = null;
@@ -1001,6 +1029,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     this.warn = opts.warn ?? (() => {});
     this.controlledSpawnEnv = projectGrokChildEnv(opts.env);
     this.spawnEnv = projectGrokChildEnv(opts.env, this.controlledSpawnEnv);
+    this.currentModel = opts.model;
   }
 
   get isRunning(): boolean {
@@ -1017,6 +1046,124 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
 
   get state(): GrokCopresenceState {
     return snapshotGrokCopresenceState(this.arbitration);
+  }
+
+  get model(): string | undefined {
+    return this.currentModel;
+  }
+
+  /**
+   * Attach-transport entry point for a model switch (issue #879).
+   *
+   * 🔴 The outcome is broadcast rather than thrown. The caller is an attach
+   * client on the other end of a socket, so an exception here would land in
+   * the runtime's own logs and leave the person who asked staring at an
+   * unchanged screen — the same silent shape this whole feature exists to
+   * remove.
+   */
+  private async onAttachSetModel(model: string): Promise<void> {
+    let decision: GrokModelSwitchDecision;
+    try {
+      decision = await this.switchModel(model);
+    } catch (error) {
+      const message = errorMessage(error);
+      this.warn(`[grok-copresence] model switch to ${model} failed: ${message}`);
+      this.attach?.broadcastStatus({ ...this.attachStatus(), modelSwitch: { ok: false, code: "failed", message } });
+      return;
+    }
+    if (decision.ok) {
+      this.log(`[grok-copresence] model switch accepted: ${decision.model}`);
+    } else {
+      this.warn(`[grok-copresence] model switch refused (${decision.code}): ${decision.message}`);
+    }
+    this.attach?.broadcastStatus({ ...this.attachStatus(), modelSwitch: decision });
+  }
+
+  /**
+   * Switch the model without a keystroke crossing the composer gate (#879).
+   *
+   * The human cannot do this from the TUI: `/model` is refused by the gate, and
+   * Grok's `Ctrl+M` picker shares a byte with Enter so the proxy consumes it as
+   * a submit. Both are keyboard routes and a keyboard fix would need something
+   * this proxy does not have — a view of which pane the TUI has focused.
+   *
+   * So this takes the flag route instead. Grok resolves CLI flags above every
+   * other configuration source, and a session's recorded `current_model_id` is
+   * metadata rather than configuration, so re-spawning as
+   * `--resume <sessionId> --model <new>` keeps the conversation and changes the
+   * model.
+   *
+   * 🔴 It re-uses the existing exit-recovery path rather than driving its own
+   * re-spawn. That path already confirms Leader death, runs containment
+   * cleanup, and rebinds a fresh generation; a second, parallel re-spawn
+   * sequence written here would be the one without those guarantees.
+   */
+  async switchModel(requested: unknown): Promise<GrokModelSwitchDecision> {
+    const decision = decideGrokModelSwitch({
+      requested,
+      current: this.currentModel,
+      phase: this.arbitration.phase,
+    });
+    if (!decision.ok) return decision;
+    if (!this.isRunning) {
+      // Nothing is running to re-spawn, so record the choice and let the next
+      // spawn use it rather than terminating a PTY that is not there.
+      this.currentModel = decision.model;
+      return decision;
+    }
+    // 🔴 Prove the switch moves the model and nothing else *before* committing
+    // to it. Re-spawning rebuilds argv from scratch, so this is where a bug
+    // could quietly relocate `--permission-mode`, `--always-approve`,
+    // `--sandbox`, or `--agent`.
+    //
+    // The comparison is against `lastSpawnArgs` — what actually reached the
+    // process — rather than against a second array built from the same inputs.
+    // Two arrays built here would differ only where this code made them differ,
+    // so the check would be tautological: it could not fail, and deleting it
+    // would change nothing observable.
+    //
+    // The session flag is excluded because it legitimately moves: the first
+    // spawn of a node uses `--session-id` and every re-spawn uses `--resume`.
+    // That the re-spawn resumes *this* session is asserted separately below.
+    if (this.lastSpawnArgs) {
+      const nextArgs = buildGrokCopresenceArgs({
+        cwd: this.opts.cwd,
+        sessionId: this.sessionId,
+        resume: true,
+        leaderSocket: this.leaderSocket,
+        model: decision.model,
+        agentProfile: this.opts.agentProfile,
+        maxTurns: this.opts.maxTurns,
+        toolAllowlist: this.opts.toolAllowlist,
+        sandboxProfile: this.opts.sandboxProfile,
+        protectedPaths: this.opts.protectedPaths,
+        grokVersion: this.opts.grokVersion,
+      });
+      const resumeIndex = nextArgs.indexOf("--resume");
+      if (resumeIndex < 0 || nextArgs[resumeIndex + 1] !== this.sessionId) {
+        throw new GrokModelSwitchArgvError(
+          `a model switch must resume session ${this.sessionId}; the rebuilt argv does not`,
+        );
+      }
+      assertModelOnlyArgvDelta(
+        withoutSessionFlag(this.lastSpawnArgs),
+        withoutSessionFlag(nextArgs),
+        decision.model,
+      );
+    }
+    this.currentModel = decision.model;
+    this.modelSwitchInFlight = decision.model;
+    const tui = this.activeTui;
+    try {
+      await terminateOwnedPty(tui?.pty ?? null, tui?.exit ?? null);
+    } catch (error) {
+      // The PTY did not confirm its exit. Recovery must not be entered on a
+      // guess about which process is still holding the Leader.
+      this.modelSwitchInFlight = null;
+      this.retainLocksForUnconfirmedPty = true;
+      throw error;
+    }
+    return decision;
   }
 
   async open(): Promise<void> {
@@ -1133,6 +1280,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         onInput: (data) => this.onHumanInput(data),
         onResize: (cols, rows) => this.onResize(cols, rows),
         onDetach: () => this.onHumanDetach(),
+        onSetModel: (model) => this.onAttachSetModel(model),
       });
       this.startPolling();
       this.opened = true;
@@ -1326,7 +1474,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       sessionId: this.sessionId,
       resume,
       leaderSocket: this.leaderSocket,
-      model: this.opts.model,
+      model: this.currentModel,
       agentProfile: this.opts.agentProfile,
       maxTurns: this.opts.maxTurns,
       toolAllowlist: this.opts.toolAllowlist,
@@ -1334,6 +1482,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       protectedPaths: this.opts.protectedPaths,
       grokVersion: this.opts.grokVersion,
     });
+    this.lastSpawnArgs = [...args];
     const ptySpawn = this.opts.ptySpawn ?? defaultPtySpawn;
     const pty = await ptySpawn(binary, args, {
       name: "xterm-256color",
@@ -1400,7 +1549,14 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     if (this.pollTimer) clearInterval(this.pollTimer);
     this.pollTimer = null;
     this.transition({ type: "disconnected" });
-    this.warn(`[grok-copresence] TUI exited code=${event.exitCode} signal=${event.signal ?? "-"}; resuming same session`);
+    // 🔴 Say which of the two reasons this is. A deliberate model switch and a
+    // crash reach this path identically, and reporting a switch as an
+    // unexplained exit is exactly the log line someone would go debugging.
+    const switchedTo = this.modelSwitchInFlight;
+    this.modelSwitchInFlight = null;
+    this.warn(switchedTo
+      ? `[grok-copresence] TUI stopped to switch model to ${switchedTo}; resuming same session`
+      : `[grok-copresence] TUI exited code=${event.exitCode} signal=${event.signal ?? "-"}; resuming same session`);
     if (this.arbitration.waitingHuman) {
       await this.failFatal(new GrokCopresenceFailure(
         "approval_boundary",

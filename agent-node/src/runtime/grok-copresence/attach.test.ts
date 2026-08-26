@@ -45,6 +45,9 @@ describe("Grok co-presence local attach server", () => {
       version: 1,
       alias: "test-grok",
       sessionId: "session-test",
+      // The first connection gets the keyboard; the handshake says so rather
+      // than leaving the client to infer it from a later refusal.
+      role: "terminal",
     });
     expect(server.clientAttached).toBe(true);
 
@@ -71,7 +74,12 @@ describe("Grok co-presence local attach server", () => {
     expect(existsSync(root)).toBe(true);
   });
 
-  it("rejects a second client without disturbing the attached human", async () => {
+  it("🔴 a second client becomes a control connection and cannot take the keyboard", async () => {
+    // The single-owner rule is about keyboard ownership, so it binds the
+    // terminal seat only. A second connection still may not type — that is the
+    // part being enforced here — but it is no longer turned away, because
+    // refusing it made a model switch impossible in the one situation it is
+    // for: somebody sitting in the TUI.
     const { socketPath } = temporarySocket();
     const received = deferred<Buffer>();
     const server = await startServer(socketPath, {
@@ -79,17 +87,24 @@ describe("Grok co-presence local attach server", () => {
     });
 
     const first = await connect(socketPath);
-    expect((await first.frames.next()).type).toBe("hello");
+    expect(await first.frames.next()).toMatchObject({ type: "hello", role: "terminal" });
 
     const second = await connect(socketPath);
-    const rejection = await second.frames.next();
-    expect(rejection).toMatchObject({
+    expect(await second.frames.next()).toMatchObject({ type: "hello", role: "control" });
+
+    second.socket.on("error", () => {});
+    writeFrame(second.socket, {
+      type: "input",
+      data: Buffer.from("not-the-owner").toString("base64"),
+      encoding: "base64",
+    });
+    expect(await second.frames.next()).toMatchObject({
       type: "error",
-      code: "client_already_attached",
+      code: "control_client_cannot_type",
       fatal: true,
     });
-    await waitForSocketClose(second.socket);
 
+    // The human keeps the seat, and their keystrokes still arrive.
     expect(server.clientAttached).toBe(true);
     writeFrame(first.socket, {
       type: "input",
@@ -157,6 +172,192 @@ describe("Grok co-presence local attach server", () => {
     });
     await closed;
     expect(server.clientAttached).toBe(false);
+  });
+
+  it("routes a set-model frame through the same serialized arbiter queue as input", async () => {
+    // Ordering matters, not just delivery: a switch that overtook queued
+    // keystrokes would tear the TUI down with the person's line still unsent.
+    const { socketPath } = temporarySocket();
+    const complete = deferred<void>();
+    const events: string[] = [];
+    const server = await startServer(socketPath, {
+      onInput: async (data) => {
+        events.push(`input:${data.toString("ascii")}`);
+        await Promise.resolve();
+      },
+      onSetModel: (model) => {
+        events.push(`set-model:${model}`);
+        complete.resolve();
+      },
+    });
+    const client = await connect(socketPath);
+    await client.frames.next();
+
+    client.socket.write([
+      JSON.stringify({ type: "input", data: Buffer.from("hi").toString("base64"), encoding: "base64" }),
+      JSON.stringify({ type: "set-model", model: "grok-4.6" }),
+      "",
+    ].join("\n"));
+
+    await complete.promise;
+    expect(events).toEqual(["input:hi", "set-model:grok-4.6"]);
+    expect(server.clientAttached).toBe(true);
+  });
+
+  it("🔴 refuses set-model when the runtime cannot switch, rather than accepting it silently", async () => {
+    // Accepting it would tell the caller the model moved on a node that has
+    // no way to move it.
+    const { socketPath } = temporarySocket();
+    await startServer(socketPath);
+    const client = await connect(socketPath);
+    await client.frames.next();
+
+    client.socket.write(`${JSON.stringify({ type: "set-model", model: "grok-4.6" })}\n`);
+    expect(await client.frames.next()).toMatchObject({
+      type: "error",
+      code: "unsupported_frame",
+    });
+  });
+
+  it("🔴 refuses a set-model frame that is not exactly {type, model:string}", async () => {
+    // The operand ends up in argv. Anything the transport is not certain about
+    // must not reach the runtime at all.
+    for (const frame of [
+      { type: "set-model" },
+      { type: "set-model", model: 42 },
+      { type: "set-model", model: "grok-4.6", extra: "smuggled" },
+    ]) {
+      const { socketPath } = temporarySocket();
+      let called = false;
+      await startServer(socketPath, { onSetModel: () => { called = true; } });
+      const client = await connect(socketPath);
+      await client.frames.next();
+
+      client.socket.write(`${JSON.stringify(frame)}\n`);
+      expect(await client.frames.next(), JSON.stringify(frame)).toMatchObject({
+        type: "error",
+        code: "invalid_set_model",
+      });
+      expect(called, JSON.stringify(frame)).toBe(false);
+    }
+  });
+
+  it("🔴 set-model works while a human is attached — that is the whole point", async () => {
+    // Before the control role, this frame could not arrive at all: the
+    // transport refused the second connection before parsing anything, so a
+    // model switch was impossible in exactly the situation it exists for.
+    const { socketPath } = temporarySocket();
+    const switched = deferred<string>();
+    const server = await startServer(socketPath, {
+      onSetModel: (model) => switched.resolve(model),
+    });
+
+    const human = await connect(socketPath);
+    expect(await human.frames.next()).toMatchObject({ type: "hello", role: "terminal" });
+
+    const controller = await connect(socketPath);
+    expect(await controller.frames.next()).toMatchObject({ type: "hello", role: "control" });
+    writeFrame(controller.socket, { type: "set-model", model: "grok-4.6" });
+    expect(await switched.promise).toBe("grok-4.6");
+
+    // The human never lost the seat.
+    expect(server.clientAttached).toBe(true);
+  });
+
+  it("🔴 a control connection closing is not a human detaching", async () => {
+    // The runtime reacts to onDetach by writing Ctrl-C into the PTY and
+    // dropping deferred bytes. If a control connection reached that callback,
+    // every model switch would wipe whatever the human had half-typed.
+    const { socketPath } = temporarySocket();
+    const detachReasons: string[] = [];
+    const server = await startServer(socketPath, {
+      onSetModel: () => {},
+      onDetach: (reason) => { detachReasons.push(reason); },
+    });
+
+    const human = await connect(socketPath);
+    await human.frames.next();
+    const control = await connect(socketPath);
+    await control.frames.next();
+
+    writeFrame(control.socket, { type: "detach" });
+    await waitForSocketClose(control.socket);
+    await Bun.sleep(50);
+    expect(detachReasons).toEqual([]);
+    expect(server.clientAttached).toBe(true);
+
+    // The terminal seat still reports its own detach.
+    const humanClosed = waitForSocketClose(human.socket);
+    writeFrame(human.socket, { type: "detach" });
+    await humanClosed;
+    await Bun.sleep(50);
+    expect(detachReasons).toEqual(["client"]);
+  });
+
+  it("🔴 bounds how many control connections may be open at once", async () => {
+    // Without a cap, a caller that reconnects in a loop accumulates sockets
+    // against the node — and every one of them is a socket `server.close()`
+    // has to wait for.
+    const { socketPath } = temporarySocket();
+    await startServer(socketPath, { onSetModel: () => {} });
+
+    const human = await connect(socketPath);
+    expect(await human.frames.next()).toMatchObject({ type: "hello", role: "terminal" });
+
+    // MAX_CONTROL_CLIENTS is 4; the fifth control connection is refused.
+    for (let index = 0; index < 4; index++) {
+      const control = await connect(socketPath);
+      expect(await control.frames.next(), `control ${index}`).toMatchObject({
+        type: "hello",
+        role: "control",
+      });
+    }
+    const overflow = await connect(socketPath);
+    overflow.socket.on("error", () => {});
+    expect(await overflow.frames.next()).toMatchObject({
+      type: "error",
+      code: "control_clients_exhausted",
+      fatal: true,
+    });
+  });
+
+  it("delivers status to a control connection so the caller learns the outcome", async () => {
+    // A switch that is refused (busy, unchanged, invalid) has to reach whoever
+    // asked. Without this the caller sees a socket that accepted the frame and
+    // nothing else — the same silent shape the feature removes.
+    const { socketPath } = temporarySocket();
+    const server = await startServer(socketPath, { onSetModel: () => {} });
+    const human = await connect(socketPath);
+    await human.frames.next();
+    const controller = await connect(socketPath);
+    await controller.frames.next();
+
+    expect(server.broadcastStatus({ modelSwitch: { ok: false, code: "busy" } })).toBe(true);
+    expect(await controller.frames.next()).toEqual({
+      type: "status",
+      status: { modelSwitch: { ok: false, code: "busy" } },
+    });
+  });
+
+  it("🔴 never sends terminal output to a control connection", async () => {
+    // A control connection is not a terminal and has no business reading what
+    // the human sees.
+    const { socketPath } = temporarySocket();
+    const server = await startServer(socketPath, { onSetModel: () => {} });
+    const human = await connect(socketPath);
+    await human.frames.next();
+    const controller = await connect(socketPath);
+    await controller.frames.next();
+
+    expect(server.broadcastOutput(Buffer.from("secret-pane-bytes"))).toBe(true);
+    expect(await human.frames.next()).toMatchObject({ type: "output" });
+
+    // The control connection receives the next status, not the output before it.
+    server.broadcastStatus({ marker: "after-output" });
+    expect(await controller.frames.next()).toEqual({
+      type: "status",
+      status: { marker: "after-output" },
+    });
   });
 
   it("refuses symlinks and regular files at the socket path", async () => {

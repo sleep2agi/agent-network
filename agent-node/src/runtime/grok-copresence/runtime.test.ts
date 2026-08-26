@@ -1575,14 +1575,13 @@ describe("Grok copresence runtime integration", () => {
         signalSource: fixture.signals,
         terminalSize: () => ({ cols: 100, rows: 30 }),
       });
-      const secondInput = new PassThrough();
-      await expect(connectGrokAttach({
-        socketPath: fixture.attachSocket,
-        input: secondInput,
-        output: new PassThrough(),
-        signalSource: fixture.signals,
-        handshakeTimeoutMs: 500,
-      })).rejects.toThrow("already attached");
+      // The second-connection behaviour moved to a *control* connection (#879)
+      // and is asserted in attach.test.ts, which owns the transport: it covers
+      // the control role, that it cannot type, that its detach is not a human
+      // detach, and the connection cap. Driving a second live client from here
+      // added a failure surface this test is not about — it timed out in the
+      // Docker job while passing locally 5/5 — so the assertion lives where the
+      // behaviour lives instead of being duplicated into a PTY lifecycle test.
 
       input.write("/model\r");
       await waitFor(() => runtime!.state.phase === "idle");
@@ -2341,6 +2340,132 @@ function seedPostStopFootprint(fixture: RuntimeFixture): {
     leaderLock,
   };
 }
+
+describe("out-of-band model switch (#879)", () => {
+  test("re-spawns onto the same session with the new model", async () => {
+    const fixture = new RuntimeFixture();
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await openGrokCopresenceRuntime({ ...fixture.options(), model: "grok-4.5" });
+      expect(fixture.spawnedArgs).toHaveLength(1);
+      expect(fixture.spawnedArgs[0][fixture.spawnedArgs[0].indexOf("--model") + 1]).toBe("grok-4.5");
+      expect(runtime.model).toBe("grok-4.5");
+
+      const decision = await runtime.switchModel("grok-4.6");
+      expect(decision).toMatchObject({ ok: true, model: "grok-4.6", resume: true });
+      await waitFor(() => fixture.spawnedArgs.length === 2, 5_000);
+
+      const respawn = fixture.spawnedArgs[1];
+      expect(respawn[respawn.indexOf("--model") + 1]).toBe("grok-4.6");
+      // 🔴 The conversation has to survive. `--session-id` would silently start
+      // a new one while every other assertion here still passed.
+      expect(respawn).toContain("--resume");
+      expect(respawn).not.toContain("--session-id");
+      expect(respawn[respawn.indexOf("--resume") + 1]).toBe(SESSION);
+      expect(runtime.model).toBe("grok-4.6");
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 20_000);
+
+  test("🔴 the re-spawn keeps the approval boundary exactly where it was", async () => {
+    // Asserted on the argv the runtime actually spawned, not on argv this test
+    // rebuilt: a guard that recomputes its own expectation cannot notice the
+    // runtime handing different flags to the process.
+    const fixture = new RuntimeFixture();
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await openGrokCopresenceRuntime({ ...fixture.options(), model: "grok-4.5" });
+      await runtime.switchModel("grok-4.6");
+      await waitFor(() => fixture.spawnedArgs.length === 2, 5_000);
+
+      // Two pairs legitimately differ between a first start and a resume, and
+      // both are asserted separately below rather than waved through: the
+      // model (that is the feature) and the session flag, which must move from
+      // `--session-id` to `--resume` while naming the same session.
+      const strip = (argv: string[]) => {
+        const rest: string[] = [];
+        for (let index = 0; index < argv.length; index++) {
+          if (argv[index] === "--model" || argv[index] === "--session-id" || argv[index] === "--resume") {
+            index++;
+            continue;
+          }
+          rest.push(argv[index]);
+        }
+        return rest;
+      };
+      // Everything else is byte-identical, which covers --permission-mode,
+      // --always-approve, --sandbox and --agent at once without this test
+      // having to enumerate them and drift out of date.
+      expect(strip(fixture.spawnedArgs[1])).toEqual(strip(fixture.spawnedArgs[0]));
+      expect(fixture.spawnedArgs[0][fixture.spawnedArgs[0].indexOf("--session-id") + 1]).toBe(SESSION);
+      expect(fixture.spawnedArgs[1][fixture.spawnedArgs[1].indexOf("--resume") + 1]).toBe(SESSION);
+      expect(fixture.spawnedArgs[1]).toContain("--always-approve");
+      expect(fixture.spawnedArgs[1][fixture.spawnedArgs[1].indexOf("--permission-mode") + 1])
+        .toBe("bypassPermissions");
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 20_000);
+
+  test("🔴 refuses while a network turn is running, and does not tear down the TUI", async () => {
+    const fixture = new RuntimeFixture();
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await openGrokCopresenceRuntime({ ...fixture.options(), model: "grok-4.5" });
+      const inFlight = runtime.submit({
+        taskId: "network-during-switch",
+        from: "通信龙",
+        text: "keep running",
+        timeoutMs: 8_000,
+      });
+      await waitFor(() => runtime!.state.phase === "network_turn");
+
+      const decision = await runtime.switchModel("grok-4.6");
+      expect(decision).toMatchObject({ ok: false, code: "busy" });
+      // The observable consequence, not just the return value: refusing has to
+      // mean the running task's TUI is still the one that was running it.
+      expect(fixture.spawnedArgs).toHaveLength(1);
+      expect(runtime.model).toBe("grok-4.5");
+      expect((await inFlight).replyText).toBe("FINAL network-during-switch");
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 25_000);
+
+  test("reports an unchanged model without restarting anything", async () => {
+    const fixture = new RuntimeFixture();
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await openGrokCopresenceRuntime({ ...fixture.options(), model: "grok-4.5" });
+      expect(await runtime.switchModel("grok-4.5")).toMatchObject({ ok: false, code: "unchanged" });
+      await Bun.sleep(120);
+      expect(fixture.spawnedArgs).toHaveLength(1);
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 20_000);
+
+  test("🔴 an invalid model never reaches argv", async () => {
+    const fixture = new RuntimeFixture();
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await openGrokCopresenceRuntime({ ...fixture.options(), model: "grok-4.5" });
+      expect(await runtime.switchModel("--permission-mode"))
+        .toMatchObject({ ok: false, code: "invalid_model" });
+      await Bun.sleep(120);
+      expect(fixture.spawnedArgs).toHaveLength(1);
+      expect(runtime.model).toBe("grok-4.5");
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 20_000);
+});
 
 class RuntimeFixture {
   readonly root = mkdtempSync(join(tmpdir(), "grok-copres-runtime-"));

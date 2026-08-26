@@ -23,6 +23,8 @@ export const DEFAULT_ATTACH_MAX_BUFFERED_BYTES = 128 * 1024;
 const MIN_FRAME_BYTES = 256;
 const MAX_TERMINAL_DIMENSION = 16_384;
 const MAX_PENDING_ARBITER_CALLBACKS = 128;
+/** Control connections are one-shot in practice; the cap only bounds abuse. */
+const MAX_CONTROL_CLIENTS = 4;
 
 export type GrokCopresenceAttachJson =
   | null
@@ -52,6 +54,19 @@ export interface GrokCopresenceAttachServerOptions {
   /** Receives validated dimensions. The arbiter remains the sole PTY owner. */
   onResize: (cols: number, rows: number) => void | Promise<void>;
   onDetach?: (reason: GrokCopresenceAttachDetachReason) => void | Promise<void>;
+  /**
+   * Receives a requested model id (issue #879).
+   *
+   * 🔴 This transport does not validate the value beyond "it is a string".
+   * The runtime owns that decision — it is the side that knows the current
+   * model, the current phase, and what argv the switch would produce. A
+   * transport that pre-screened model ids would be a second, weaker copy of
+   * that policy, and the two would drift.
+   *
+   * Optional: a node whose runtime cannot switch models leaves it unset, and
+   * the frame is then refused rather than silently accepted.
+   */
+  onSetModel?: (model: string) => void | Promise<void>;
   maxFrameBytes?: number;
   maxBufferedBytes?: number;
 }
@@ -76,13 +91,32 @@ type ServerFrame =
     version: typeof GROK_COPRESENCE_ATTACH_VERSION;
     alias: string;
     sessionId: string;
+    role?: ClientRole;
   }
   | { type: "output"; data: string; encoding: "base64" }
   | { type: "status"; status: unknown }
   | { type: "error"; code: string; message: string; fatal: boolean };
 
+/**
+ * A connection is one of two kinds (issue #879).
+ *
+ * `terminal` is the human at the keyboard: exactly one at a time, and it is
+ * the only kind that may send `input` / `resize` or receive `output`. That
+ * single-owner rule is about **keyboard ownership** — two terminals would
+ * interleave keystrokes into one composer.
+ *
+ * `control` may send `set-model` and nothing else. It takes no keyboard, so
+ * the rule above does not apply to it, and refusing it would make a model
+ * switch impossible in exactly the situation it exists for: somebody sitting
+ * in the TUI. It receives `status` so the caller learns the outcome, and never
+ * receives `output` — it is not a terminal and has no business reading what
+ * the human sees.
+ */
+type ClientRole = "terminal" | "control";
+
 interface ClientState {
   socket: Socket;
+  role: ClientRole;
   buffer: Buffer;
   pendingCallbacks: number;
   pendingInputBytes: number;
@@ -127,6 +161,12 @@ class AttachServer implements GrokCopresenceAttachServer {
   private readonly maxFrameBytes: number;
   private readonly maxBufferedBytes: number;
   private activeClient: ClientState | null = null;
+  /**
+   * Bounded so a caller that reconnects in a loop cannot accumulate sockets
+   * against the node. The cap is small on purpose: control connections are
+   * one-shot in practice.
+   */
+  private readonly controlClients = new Set<ClientState>();
   private identity: SocketIdentity | null = null;
   private started = false;
   private closing = false;
@@ -221,17 +261,31 @@ class AttachServer implements GrokCopresenceAttachServer {
   }
 
   broadcastStatus(status: unknown): boolean {
-    const client = this.activeClient;
-    if (!client || client.closed) return false;
+    // 🔴 Control connections get status too: it is the only way a caller that
+    // asked for a model switch learns whether it was accepted, refused, or
+    // why. `output` stays terminal-only — a control connection is not a
+    // terminal and has no business reading what the human sees.
+    const terminal = this.activeClient && !this.activeClient.closed ? this.activeClient : null;
+    const controls = [...this.controlClients].filter((candidate) => !candidate.closed);
+    if (!terminal && controls.length === 0) return false;
     try {
       if (JSON.stringify(status) === undefined) {
         throw new Error("status is not JSON serializable");
       }
     } catch (error) {
-      this.rejectActive(client, "invalid_status", errorMessage(error));
+      // Refuse every recipient: an unserializable status is the server's bug,
+      // and delivering it to some connections and not others would leave the
+      // set of clients disagreeing about the node.
+      for (const recipient of [terminal, ...controls]) {
+        if (recipient) this.rejectActive(recipient, "invalid_status", errorMessage(error));
+      }
       return false;
     }
-    return this.sendActive(client, { type: "status", status });
+    let delivered = false;
+    for (const recipient of [terminal, ...controls]) {
+      if (recipient && this.sendActive(recipient, { type: "status", status })) delivered = true;
+    }
+    return delivered;
   }
 
   close(): Promise<void> {
@@ -249,6 +303,13 @@ class AttachServer implements GrokCopresenceAttachServer {
       this.notifyDetach(client, "server_close");
       client.socket.destroy();
     }
+    // Control connections must be torn down too, or `server.close()` waits on
+    // them exactly the way it waited on a rejected socket before the drain fix.
+    for (const control of [...this.controlClients]) {
+      this.controlClients.delete(control);
+      control.closed = true;
+      control.socket.destroy();
+    }
 
     if (this.started || this.server.listening) {
       await new Promise<void>((resolveClose) => {
@@ -264,26 +325,34 @@ class AttachServer implements GrokCopresenceAttachServer {
       // close is the single teardown path; errors are intentionally fail-closed.
     });
 
-    if (this.closing || this.activeClient !== null) {
+    if (this.closing) {
+      this.rejectUnattached(socket, "server_closing", "Grok attach server is closing");
+      return;
+    }
+
+    // The terminal seat is single-owner; further connections become control
+    // connections, which may only ask for a model switch.
+    const role: ClientRole = this.activeClient === null ? "terminal" : "control";
+    if (role === "control" && this.controlClients.size >= MAX_CONTROL_CLIENTS) {
       this.rejectUnattached(
         socket,
-        this.closing ? "server_closing" : "client_already_attached",
-        this.closing
-          ? "Grok attach server is closing"
-          : "a human Grok TUI client is already attached",
+        "control_clients_exhausted",
+        `at most ${MAX_CONTROL_CLIENTS} control connections may be open`,
       );
       return;
     }
 
     const client: ClientState = {
       socket,
+      role,
       buffer: Buffer.alloc(0),
       pendingCallbacks: 0,
       pendingInputBytes: 0,
       detachNotified: false,
       closed: false,
     };
-    this.activeClient = client;
+    if (role === "terminal") this.activeClient = client;
+    else this.controlClients.add(client);
 
     socket.on("data", (chunk: Buffer) => this.receive(client, chunk));
     socket.on("end", () => this.releaseDisconnected(client));
@@ -295,13 +364,16 @@ class AttachServer implements GrokCopresenceAttachServer {
       version: GROK_COPRESENCE_ATTACH_VERSION,
       alias: this.options.alias,
       sessionId: this.options.sessionId,
+      // 🔴 Named in the handshake so a caller learns it did not get the
+      // keyboard, instead of discovering it when its first `input` is refused.
+      role: client.role,
     })) {
       this.releaseDisconnected(client);
     }
   }
 
   private receive(client: ClientState, chunk: Buffer): void {
-    if (client.closed || this.activeClient !== client) return;
+    if (!this.isLive(client)) return;
     if (!Buffer.isBuffer(chunk)) chunk = Buffer.from(chunk);
 
     if (client.buffer.length + chunk.length > this.maxBufferedBytes) {
@@ -349,6 +421,13 @@ class AttachServer implements GrokCopresenceAttachServer {
 
     switch (frame.type) {
       case "input": {
+        // 🔴 A control connection never gets the keyboard. This is the rule the
+        // single-terminal seat exists to enforce; giving control connections a
+        // way in here would hand a second writer to one composer.
+        if (client.role !== "terminal") {
+          this.rejectActive(client, "control_client_cannot_type", "a control connection may only send set-model");
+          return;
+        }
         if (!hasOnlyKeys(frame, ["type", "data", "encoding"])
           || frame.encoding !== "base64"
           || typeof frame.data !== "string"
@@ -362,6 +441,10 @@ class AttachServer implements GrokCopresenceAttachServer {
       }
 
       case "resize": {
+        if (client.role !== "terminal") {
+          this.rejectActive(client, "control_client_cannot_type", "a control connection may only send set-model");
+          return;
+        }
         if (!hasOnlyKeys(frame, ["type", "cols", "rows"])
           || !isTerminalDimension(frame.cols)
           || !isTerminalDimension(frame.rows)) {
@@ -375,12 +458,28 @@ class AttachServer implements GrokCopresenceAttachServer {
         return;
       }
 
+      case "set-model": {
+        // 🔴 Refused rather than ignored when the runtime cannot switch. A
+        // silently accepted frame would let a caller believe the model moved.
+        if (!this.options.onSetModel) {
+          this.rejectActive(client, "unsupported_frame", "this node does not support set-model");
+          return;
+        }
+        if (!hasOnlyKeys(frame, ["type", "model"]) || typeof frame.model !== "string") {
+          this.rejectActive(client, "invalid_set_model", "set-model requires a string model field");
+          return;
+        }
+        const model = frame.model;
+        this.enqueueCallback(client, () => this.options.onSetModel!(model), 0);
+        return;
+      }
+
       case "detach":
         if (Object.keys(frame).some((key) => key !== "type")) {
           this.rejectActive(client, "invalid_detach", "detach frame has unexpected fields");
           return;
         }
-        this.activeClient = null;
+        this.forget(client);
         client.closed = true;
         this.notifyDetach(client, "client");
         client.socket.end();
@@ -408,7 +507,13 @@ class AttachServer implements GrokCopresenceAttachServer {
         try {
           // A detached generation has lost ownership. Its queued bytes must
           // not race a newly attached terminal into the arbiter.
-          if (!client.closed && this.activeClient === client) await callback();
+          //
+          // 🔴 `isLive` rather than `this.activeClient === client`: for a
+          // terminal the two are identical, so that guarantee is unchanged.
+          // A control connection is never the active client, so the old form
+          // silently dropped every one of its callbacks — the frame was
+          // accepted, queued, and then discarded with nothing logged.
+          if (this.isLive(client)) await callback();
         } finally {
           client.pendingCallbacks -= 1;
           client.pendingInputBytes -= retainedInputBytes;
@@ -424,6 +529,14 @@ class AttachServer implements GrokCopresenceAttachServer {
   private notifyDetach(client: ClientState, reason: GrokCopresenceAttachDetachReason): void {
     if (client.detachNotified) return;
     client.detachNotified = true;
+    // 🔴 Only the terminal seat detaching is a human detaching. The runtime
+    // reacts to `onDetach` by cancelling whatever is in the composer — it
+    // writes Ctrl-C into the PTY and drops the deferred bytes — so letting a
+    // control connection reach this would wipe a half-typed line every time
+    // somebody ran a model switch. Caught by CI: the integration test that
+    // opens a control connection and closes it hung for 20s because the
+    // arbitration it then waited on had been reset underneath it.
+    if (client.role !== "terminal") return;
     if (!this.options.onDetach) return;
     this.arbiterCallbacks = this.arbiterCallbacks
       .then(() => this.options.onDetach?.(reason))
@@ -434,13 +547,13 @@ class AttachServer implements GrokCopresenceAttachServer {
   }
 
   private releaseDisconnected(client: ClientState): void {
-    if (this.activeClient === client) this.activeClient = null;
+    this.forget(client);
     if (!client.closed) client.closed = true;
     this.notifyDetach(client, "disconnect");
   }
 
   private sendActive(client: ClientState, frame: ServerFrame): boolean {
-    if (client.closed || this.activeClient !== client || !client.socket.writable) return false;
+    if (!this.isLive(client) || !client.socket.writable) return false;
     let encoded: Buffer;
     try {
       encoded = encodeFrame(frame, this.maxFrameBytes);
@@ -456,8 +569,22 @@ class AttachServer implements GrokCopresenceAttachServer {
     return true;
   }
 
-  private rejectActive(client: ClientState, code: string, message: string): void {
+  /** A connection is live while it is still the seat or set member it joined as. */
+  private isLive(client: ClientState): boolean {
+    if (client.closed) return false;
+    return client.role === "terminal"
+      ? this.activeClient === client
+      : this.controlClients.has(client);
+  }
+
+  /** Drop a connection from whichever collection holds it. */
+  private forget(client: ClientState): void {
     if (this.activeClient === client) this.activeClient = null;
+    this.controlClients.delete(client);
+  }
+
+  private rejectActive(client: ClientState, code: string, message: string): void {
+    this.forget(client);
     if (client.closed) return;
     client.closed = true;
     this.notifyDetach(client, "protocol_error");
@@ -478,6 +605,19 @@ class AttachServer implements GrokCopresenceAttachServer {
       }, this.maxFrameBytes);
       if (socket.writable && socket.writableLength + encoded.length <= this.maxBufferedBytes) {
         socket.end(encoded);
+        // 🔴 `end()` is a half-close: it sends FIN but the read side stays
+        // open. A socket rejected before it was ever attached has no `data`
+        // listener, so anything the peer sends piles up unread and the
+        // connection never ends — `server.close()` then waits for it forever
+        // and a refused client can keep the whole attach server from shutting
+        // down. (Reproduced on origin/main by writing one frame from the
+        // second client in the pre-existing "rejects a second client" test.)
+        //
+        // Draining is the fix, not `destroy()`: destroying a socket that
+        // still holds unread inbound data resets the connection, and the
+        // reset discards the error frame written just above — the peer would
+        // stop hanging but never learn why it was refused.
+        socket.resume();
       } else {
         socket.destroy();
       }
