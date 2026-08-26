@@ -115,7 +115,7 @@ anet node start my-agent
 CommHub Server 通过独立包运行：
 
 ::: danger 不要不带版本地跑 `bunx @sleep2agi/commhub-server`
-不带版本会解析到 npm 的 `latest` dist-tag,而 **`latest` 目前是 `0.8.8`(发布于 2026-06-24)**。
+不带版本会解析到 npm 的 `latest` dist-tag。**受影响版本:`0.8.8`(发布于 2026-06-24)**;`latest` 现在指向哪个版本用 `npm view @sleep2agi/commhub-server dist-tags` 查——若仍是 `0.8.8`,下面这条对你就是现在时。
 
 `0.8.8` 的匿名 `GET /health` 会**返回每个活跃 SSE 连接的 `{networkId}:{alias}` 明细** ——
 不需要任何 token。脱敏修复是
@@ -347,5 +347,5 @@ npm install -g @sleep2agi/agent-network@preview
 
 **深入**：
 - [架构概览](/guide/architecture) — 各组件部署在哪
-- [CLI 命令](/guide/cli) — anet 39 个命令完整清单
+- [CLI 命令](/guide/cli) — anet 命令完整清单
 - [Dashboard](/guide/dashboard) — Web UI 监控

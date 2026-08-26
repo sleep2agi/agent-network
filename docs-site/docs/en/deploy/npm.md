@@ -115,7 +115,7 @@ anet node start my-agent
 CommHub Server runs from its standalone package:
 
 ::: danger Do not run `bunx @sleep2agi/commhub-server` without a version
-Without a version this resolves to the npm `latest` dist-tag, and **`latest` is currently `0.8.8` (published 2026-06-24)**.
+Without a version this resolves to the npm `latest` dist-tag. **Affected version: `0.8.8` (published 2026-06-24)**; check where `latest` points today with `npm view @sleep2agi/commhub-server dist-tags` — if it is still `0.8.8`, the warning below is present tense for you.
 
 On `0.8.8` an anonymous `GET /health` **returns the `{networkId}:{alias}` of every live SSE connection** — no token required.
 The redaction fix is [`7bacb729`](https://github.com/sleep2agi/agent-network/commit/7bacb729) (`security(#473)`, **2026-07-29**),
