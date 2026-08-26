@@ -86,6 +86,7 @@ export default withMermaid(defineConfig({
           {
             text: '核心概念',
             items: [
+              { text: '基本概念', link: '/guide/basics' },
               { text: '架构概览', link: '/guide/architecture' },
               { text: 'Token 体系', link: '/concepts/tokens' },
               { text: '角色与权限', link: '/concepts/roles' },
@@ -188,6 +189,7 @@ export default withMermaid(defineConfig({
           {
             text: 'Core Concepts',
             items: [
+              { text: 'Basic Concepts', link: '/en/guide/basics' },
               { text: 'Architecture', link: '/en/guide/architecture' },
               { text: 'Token System', link: '/en/concepts/tokens' },
               { text: 'Roles & Permissions', link: '/en/concepts/roles' },
