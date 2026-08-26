@@ -22,11 +22,11 @@ raw-wire packet capture. macOS and Windows real execution is not inferred.
 
 ## Final Docker gates
 
-- test1220: PASS — 75 pass, 3 native skips, 0 fail; all 14 mutations red.
+- test1220: PASS — 77 pass, 3 native skips, 0 fail; all 15 mutations red.
 - test1178: PASS — 14 pass, 0 fail; typecheck and bundle PASS.
-- test1191: PASS — 73 pass, 3 native skips, 0 fail; Linux fake-TUI normal/high
+- test1191: PASS — 75 pass, 3 native skips, 0 fail; Linux fake-TUI normal/high
   entered one human turn with zero extra turn/start; live mutations red.
-- test745: PASS — 625 pass, 6 skip, 0 fail; 68/68 source and 19/19 tests files.
+- test745: PASS — 627 pass, 6 skip, 0 fail; 68/68 source and 19/19 tests files.
   One earlier invocation omitted required source SHA and failed before tests.
 - test725: PASS — 1462 pass, 0 fail; 110/110 source and 6/6 tests files.
 
@@ -53,6 +53,9 @@ The full 65-second A9 run plus A12 restart-only verification proved:
   candidate could be promoted by the restarted bridge while the launcher
   opened a remote-only TUI. The replacement gate now coordinates old-marker
   migration, exact promotion, and resume-only TUI argv on POSIX and Windows.
+- Final static review: verified each POSIX role has exactly one marker env;
+  Windows TUI socket ownership now binds a non-null CreationDate and rechecks
+  the same birth before and after the native descendant/socket snapshot.
 
 - A1: locked dependencies absent; no product roles. A stale cleanup port caused
   a harness false positive.
