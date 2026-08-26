@@ -1,0 +1,18 @@
+Test: test1239-feishu-correlation-store
+Date: 2026-08-27
+Scope: Feishu IM correlation store, pure logic only.
+
+Commands:
+- cd agent-network && bun test src/im/correlation-store.test.ts
+- cd agent-network && npm run typecheck
+
+Result:
+- PASS: 6 tests, 17 assertions.
+- PASS: TypeScript typecheck.
+
+Notes:
+- Docker was intentionally not run for this step: the change is a standalone
+  data-structure/store PR and current ops guidance pauses Docker builds.
+- No real Feishu/Lark app was contacted.
+- No production IM probe messages were sent.
+- No FEISHU_APP_SECRET values were used or logged.
