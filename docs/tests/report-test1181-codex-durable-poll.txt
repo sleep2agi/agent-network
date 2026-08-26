@@ -24,6 +24,7 @@ Fault coverage
   polling has no runtime/turn adapter and cannot open a parallel turn.
 
 Witnessed red
+- missing/invalid full source SHA -> Docker gate fails closed (2 cases);
 - production scheduleInboxDrain replaced with no-op -> production-wiring test red;
 - cursor record moved before ack_inbox -> ACK-order test red;
 - unsupported Hub mode changed realtime-only -> active -> downgrade test red.
