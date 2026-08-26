@@ -1940,11 +1940,25 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       from_name: z.string().max(200).optional().describe("Filter by sender"),
       from_node_id: z.string().max(200).optional().describe("Filter by immutable sender node_id"),
       network_id: z.string().max(200).optional().describe("Filter by network"),
+      before_created_at: z.string().max(64).optional().describe("Pagination cursor timestamp"),
+      before_task_id: z.string().max(200).optional().describe("Pagination cursor task id"),
       limit: z.number().min(1).max(100).optional().default(20),
     },
-    async ({ alias, status, from_name, from_node_id, network_id: netId, limit }) => {
+    async ({ alias, status, from_name, from_node_id, network_id: netId, before_created_at, before_task_id, limit }) => {
       const readScope = resolveReadScope(netId);
       if (readScope.denied) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: readScope.denied }) }] };
+      if (callerTokenIsNetwork) {
+        const boundNodeId = callerTokenId && enforceNetworkId
+          ? db.get<{ bound_node_id: string | null }>(
+              "SELECT bound_node_id FROM api_tokens WHERE token_id = ?1 AND network_id = ?2",
+              callerTokenId,
+              enforceNetworkId,
+            )?.bound_node_id ?? null
+          : null;
+        if (!boundNodeId || from_node_id !== boundNodeId) {
+          return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "from_node_id_identity_mismatch" }) }] };
+        }
+      }
       let sql = "SELECT task_id, from_node_id, from_name, to_node_id, to_name, priority, status, content, result, created_at, runtime_submitted_at, consumed_at, completed_at FROM tasks WHERE 1=1";
       const params: any[] = [];
       sql = addReadScope(sql, params, readScope);
@@ -1952,7 +1966,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (status) { sql += ` AND status = ?${params.length + 1}`; params.push(status); }
       if (from_name) { sql += ` AND from_name = ?${params.length + 1}`; params.push(from_name); }
       if (from_node_id) { sql += ` AND from_node_id = ?${params.length + 1}`; params.push(from_node_id); }
-      sql += ` ORDER BY created_at DESC LIMIT ?${params.length + 1}`;
+      if (before_created_at && before_task_id) {
+        sql += ` AND (created_at < ?${params.length + 1} OR (created_at = ?${params.length + 1} AND task_id < ?${params.length + 2}))`;
+        params.push(before_created_at, before_task_id);
+      }
+      sql += ` ORDER BY created_at DESC, task_id DESC LIMIT ?${params.length + 1}`;
       params.push(limit);
       const tasks = db.all(sql, ...params);
 
@@ -1966,7 +1984,17 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       return {
         content: [{
           type: "text" as const,
-          text: JSON.stringify({ ok: true, tasks, count: tasks.length, stats }),
+          text: JSON.stringify({
+            ok: true,
+            capability: "list_tasks.immutable-node-cursor.v1",
+            tasks,
+            count: tasks.length,
+            next_cursor: tasks.length === limit ? {
+              before_created_at: tasks[tasks.length - 1]?.created_at,
+              before_task_id: tasks[tasks.length - 1]?.task_id,
+            } : null,
+            stats,
+          }),
         }],
       };
     }

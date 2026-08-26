@@ -68,14 +68,25 @@ describe("CommHub durable poll compensation", () => {
 
   test("normal SSE delivery and a later poll share task/client-request dedup", async () => {
     const h = harness();
-    const msg = { id: "row-1", task_id: "task-1", meta: { client_request_id: "request-1" } };
+    const requestId = `dreq_${"1".repeat(32)}`;
+    const msg = { id: "row-1", task_id: "task-1", type: "task", meta: { source: "dashboard-chat", auth_origin: "user", client_request_id: requestId } };
     const poller = createCommHubPollCompensator({ cursorPath: h.cursorPath, adapters: h.adapters });
     poller.recordConsumed(msg);
     h.inbox.push(msg);
     poller.trigger("timer");
     await poller.idle();
     expect(h.drains).toEqual([]);
-    expect(poller.wasConsumed({ id: "another-row", task_id: "another-task", meta: { client_request_id: "request-1" } })).toBe(true);
+    expect(poller.wasConsumed({ id: "another-row", task_id: "another-task", type: "task", meta: { source: "dashboard-chat", auth_origin: "user", client_request_id: requestId } })).toBe(true);
+  });
+
+  test("node-supplied or malformed client_request_id cannot poison Dashboard dedup", () => {
+    const h = harness();
+    const poller = createCommHubPollCompensator({ cursorPath: h.cursorPath, adapters: h.adapters });
+    const requestId = `dreq_${"2".repeat(32)}`;
+    poller.recordConsumed({ id: "node-row", task_id: "node-task", meta: { source: "dashboard-chat", auth_origin: "node", client_request_id: requestId } });
+    expect(poller.wasConsumed({ id: "dashboard-row", task_id: "dashboard-task", meta: { source: "dashboard-chat", auth_origin: "user", client_request_id: requestId } })).toBe(false);
+    poller.recordConsumed({ id: "bad-row", task_id: "bad-task", meta: { source: "dashboard-chat", auth_origin: "user", client_request_id: "request-2" } });
+    expect(poller.wasConsumed({ id: "other-row", task_id: "other-task", meta: { source: "dashboard-chat", auth_origin: "user", client_request_id: "request-2" } })).toBe(false);
   });
 
   test("lost SSE is admitted by an idle poll exactly through the existing drain", async () => {
@@ -90,20 +101,39 @@ describe("CommHub durable poll compensation", () => {
 
   test("cursor is private, durable across restart, and prevents replay", async () => {
     const h = harness();
-    const msg = { id: "delivery-a", task_id: "task-a", meta_json: JSON.stringify({ client_request_id: "request-a" }) };
+    const requestId = `dreq_${"a".repeat(32)}`;
+    const msg = { id: "delivery-a", task_id: "task-a", type: "task", meta_json: JSON.stringify({ source: "dashboard-chat", auth_origin: "user", client_request_id: requestId }) };
     let poller = createCommHubPollCompensator({ cursorPath: h.cursorPath, adapters: h.adapters });
     poller.recordConsumed(msg);
     poller.stop();
     expect(statSync(h.cursorPath).mode & 0o777).toBe(0o600);
     expect(JSON.parse(readFileSync(h.cursorPath, "utf8"))).toMatchObject({
       consumed_task_ids: ["task-a"],
-      consumed_client_request_ids: ["request-a"],
+      consumed_client_request_ids: [requestId],
     });
     h.inbox.push(msg);
     poller = createCommHubPollCompensator({ cursorPath: h.cursorPath, adapters: h.adapters });
     poller.trigger("startup");
     await poller.idle();
     expect(h.drains).toEqual([]);
+  });
+
+  test("inbound lifecycle is monotonic and a completed task never reinjects", async () => {
+    const h = harness();
+    const msg = { id: "delivery-life", task_id: "task-life" };
+    let poller = createCommHubPollCompensator({ cursorPath: h.cursorPath, adapters: h.adapters });
+    poller.recordLifecycle("task-life", "delivered");
+    poller.recordLifecycle("task-life", "submitted");
+    poller.recordLifecycle("task-life", "consumed");
+    poller.recordConsumed(msg);
+    poller.recordLifecycle("task-life", "delivered");
+    poller.stop();
+    h.inbox.push(msg);
+    poller = createCommHubPollCompensator({ cursorPath: h.cursorPath, adapters: h.adapters });
+    poller.trigger("startup");
+    await poller.idle();
+    expect(h.drains).toEqual([]);
+    expect(JSON.parse(readFileSync(h.cursorPath, "utf8")).inbound_lifecycle).toContainEqual({ task_id: "task-life", state: "completed" });
   });
 
   test("terminal outbound status missed by SSE is surfaced once across restart", async () => {
@@ -119,6 +149,33 @@ describe("CommHub durable poll compensation", () => {
     poller.trigger("startup");
     await poller.idle();
     expect(h.terminals).toEqual(["child-1"]);
+  });
+
+  test("callback failure returns durable delivery to pending and retries the same idempotency key", async () => {
+    const keys: string[] = [];
+    let fail = true;
+    const h = harness({
+      onOutboundTerminal: async (_task, key) => {
+        keys.push(key);
+        if (fail) { fail = false; throw new Error("callback fault"); }
+      },
+    });
+    h.outbound.push({ task_id: "child-fault", status: "failed" });
+    let poller = createCommHubPollCompensator({ cursorPath: h.cursorPath, adapters: h.adapters });
+    poller.trigger("timer");
+    await poller.idle();
+    poller.stop();
+    poller = createCommHubPollCompensator({ cursorPath: h.cursorPath, adapters: h.adapters });
+    poller.trigger("startup");
+    await poller.idle();
+    poller.trigger("idle");
+    await poller.idle();
+    expect(keys).toEqual(["commhub-terminal:child-fault", "commhub-terminal:child-fault"]);
+    expect(JSON.parse(readFileSync(h.cursorPath, "utf8")).outbound_deliveries).toContainEqual({
+      task_id: "child-fault",
+      idempotency_key: "commhub-terminal:child-fault",
+      state: "delivered",
+    });
   });
 
   test("concurrent triggers coalesce and backoff remains bounded", async () => {

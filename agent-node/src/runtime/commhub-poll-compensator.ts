@@ -11,6 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { randomBytes } from "node:crypto";
+import { authenticatedDashboardRequestId } from "../inbox-dispatch.js";
 
 export const DEFAULT_COMPENSATION_POLL_MS = 15_000;
 export const MIN_COMPENSATION_POLL_MS = 2_500;
@@ -21,8 +22,9 @@ export type PollTrigger = "startup" | "sse-reconnect" | "idle" | "timer";
 
 export interface InboxObservation {
   id: string;
+  type?: string;
   task_id?: string | null;
-  meta?: { client_request_id?: string } | null;
+  meta?: Record<string, unknown> | null;
   meta_json?: string | null;
 }
 
@@ -34,10 +36,12 @@ export interface OutboundTaskObservation {
 }
 
 interface CursorState {
-  version: 1;
+  version: 2;
   consumed_task_ids: string[];
   consumed_client_request_ids: string[];
   surfaced_outbound_terminal_ids: string[];
+  outbound_deliveries: Array<{ task_id: string; idempotency_key: string; state: "pending" | "delivering" | "delivered" }>;
+  inbound_lifecycle: Array<{ task_id: string; state: "delivered" | "submitted" | "consumed" | "completed" }>;
   last_success_at: string | null;
 }
 
@@ -45,7 +49,7 @@ export interface CompensationPollAdapters {
   getInbox(): Promise<InboxObservation[]>;
   listOutbound(): Promise<OutboundTaskObservation[]>;
   scheduleInboxDrain(): void;
-  onOutboundTerminal(task: OutboundTaskObservation): void | Promise<void>;
+  onOutboundTerminal(task: OutboundTaskObservation, idempotencyKey: string): void | Promise<void>;
   log(message: string): void;
   warn(message: string): void;
   now?(): number;
@@ -57,6 +61,7 @@ export interface CompensationPoller {
   readonly mode: "probing" | "active" | "realtime-only";
   trigger(trigger: PollTrigger): void;
   recordConsumed(message: InboxObservation): void;
+  recordLifecycle(taskId: string, state: "delivered" | "submitted" | "consumed" | "completed"): void;
   wasConsumed(message: InboxObservation): boolean;
   idle(): Promise<void>;
   stop(): void;
@@ -75,10 +80,12 @@ export function resolveCompensationPollMs(raw: unknown): number {
 
 function emptyState(): CursorState {
   return {
-    version: 1,
+    version: 2,
     consumed_task_ids: [],
     consumed_client_request_ids: [],
     surfaced_outbound_terminal_ids: [],
+    outbound_deliveries: [],
+    inbound_lifecycle: [],
     last_success_at: null,
   };
 }
@@ -94,23 +101,32 @@ function sanitizeState(value: unknown): CursorState {
   if (!value || typeof value !== "object") return emptyState();
   const input = value as Partial<CursorState>;
   return {
-    version: 1,
+    version: 2,
     consumed_task_ids: boundedStrings(input.consumed_task_ids),
     consumed_client_request_ids: boundedStrings(input.consumed_client_request_ids),
     surfaced_outbound_terminal_ids: boundedStrings(input.surfaced_outbound_terminal_ids),
+    outbound_deliveries: Array.isArray(input.outbound_deliveries)
+      ? input.outbound_deliveries.filter((item): item is CursorState["outbound_deliveries"][number] =>
+          !!item && typeof item.task_id === "string" && typeof item.idempotency_key === "string"
+          && ["pending", "delivering", "delivered"].includes(item.state),
+        ).slice(-MAX_CURSOR_KEYS)
+      : boundedStrings(input.surfaced_outbound_terminal_ids).map((task_id) => ({
+          task_id,
+          idempotency_key: `commhub-terminal:${task_id}`,
+          state: "delivered" as const,
+        })),
+    inbound_lifecycle: Array.isArray(input.inbound_lifecycle)
+      ? input.inbound_lifecycle.filter((item): item is CursorState["inbound_lifecycle"][number] =>
+          !!item && typeof item.task_id === "string"
+          && ["delivered", "submitted", "consumed", "completed"].includes(item.state),
+        ).slice(-MAX_CURSOR_KEYS)
+      : boundedStrings(input.consumed_task_ids).map((task_id) => ({ task_id, state: "consumed" as const })),
     last_success_at: typeof input.last_success_at === "string" ? input.last_success_at : null,
   };
 }
 
 function clientRequestId(message: InboxObservation): string | null {
-  if (typeof message.meta?.client_request_id === "string") return message.meta.client_request_id;
-  if (typeof message.meta_json !== "string") return null;
-  try {
-    const parsed = JSON.parse(message.meta_json);
-    return typeof parsed?.client_request_id === "string" ? parsed.client_request_id : null;
-  } catch {
-    return null;
-  }
+  return authenticatedDashboardRequestId(message);
 }
 
 function logicalTaskId(message: InboxObservation): string {
@@ -132,15 +148,20 @@ class CursorStore {
   }
 
   snapshot(): CursorState {
+    this.state = this.read();
     return this.state;
   }
 
   update(mutator: (state: CursorState) => void): void {
-    const next = sanitizeState(this.state);
+    // Re-read for every transition so independently constructed pollers do
+    // not overwrite a newer durable state with their startup snapshot.
+    const next = this.read();
     mutator(next);
     next.consumed_task_ids = boundedStrings(next.consumed_task_ids);
     next.consumed_client_request_ids = boundedStrings(next.consumed_client_request_ids);
     next.surfaced_outbound_terminal_ids = boundedStrings(next.surfaced_outbound_terminal_ids);
+    next.outbound_deliveries = next.outbound_deliveries.slice(-MAX_CURSOR_KEYS);
+    next.inbound_lifecycle = next.inbound_lifecycle.slice(-MAX_CURSOR_KEYS);
     this.write(next);
     this.state = next;
   }
@@ -212,6 +233,20 @@ export function createCommHubPollCompensator(options: {
     store.update((state) => {
       state.consumed_task_ids.push(taskId);
       if (requestId) state.consumed_client_request_ids.push(requestId);
+      const row = state.inbound_lifecycle.find((item) => item.task_id === taskId);
+      if (row) row.state = "completed";
+      else state.inbound_lifecycle.push({ task_id: taskId, state: "completed" });
+    });
+  };
+
+  const lifecycleRank = { delivered: 0, submitted: 1, consumed: 2, completed: 3 } as const;
+  const recordLifecycle = (taskId: string, lifecycle: keyof typeof lifecycleRank): void => {
+    if (!taskId) return;
+    store.update((state) => {
+      const row = state.inbound_lifecycle.find((item) => item.task_id === taskId);
+      if (!row) state.inbound_lifecycle.push({ task_id: taskId, state: lifecycle });
+      else if (lifecycleRank[lifecycle] > lifecycleRank[row.state]) row.state = lifecycle;
+      if (lifecycleRank[lifecycle] >= lifecycleRank.consumed) state.consumed_task_ids.push(taskId);
     });
   };
 
@@ -239,14 +274,30 @@ export function createCommHubPollCompensator(options: {
       if (inbox.some((message) => !stateHas(message))) {
         adapters.scheduleInboxDrain();
       }
-      const surfaced = new Set(store.snapshot().surfaced_outbound_terminal_ids);
       for (const task of outbound) {
-        if (!task?.task_id || !TERMINAL.has(task.status) || surfaced.has(task.task_id)) continue;
-        // Persist before the observable notification. If the process dies
-        // after this point, restart will not repeatedly surface the terminal.
-        store.update((state) => state.surfaced_outbound_terminal_ids.push(task.task_id));
-        surfaced.add(task.task_id);
-        await adapters.onOutboundTerminal(task);
+        if (!task?.task_id || !TERMINAL.has(task.status)) continue;
+        const existing = store.snapshot().outbound_deliveries.find((item) => item.task_id === task.task_id);
+        if (existing?.state === "delivered") continue;
+        const idempotencyKey = existing?.idempotency_key ?? `commhub-terminal:${task.task_id}`;
+        store.update((state) => {
+          const row = state.outbound_deliveries.find((item) => item.task_id === task.task_id);
+          if (row) row.state = "delivering";
+          else state.outbound_deliveries.push({ task_id: task.task_id, idempotency_key: idempotencyKey, state: "delivering" });
+        });
+        try {
+          await adapters.onOutboundTerminal(task, idempotencyKey);
+        } catch (error) {
+          store.update((state) => {
+            const row = state.outbound_deliveries.find((item) => item.task_id === task.task_id);
+            if (row) row.state = "pending";
+          });
+          throw error;
+        }
+        store.update((state) => {
+          const row = state.outbound_deliveries.find((item) => item.task_id === task.task_id);
+          if (row) row.state = "delivered";
+          state.surfaced_outbound_terminal_ids.push(task.task_id);
+        });
       }
       store.update((state) => { state.last_success_at = new Date(now()).toISOString(); });
       failureCount = 0;
@@ -288,6 +339,7 @@ export function createCommHubPollCompensator(options: {
     get mode() { return currentMode; },
     trigger,
     recordConsumed,
+    recordLifecycle,
     wasConsumed: stateHas,
     async idle() { await running; },
     stop() {

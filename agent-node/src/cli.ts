@@ -1581,13 +1581,26 @@ const commhubCompensation: CompensationPoller | null = RUNTIME === "codex-app-se
       adapters: {
         getInbox,
         listOutbound: async () => {
-          const fromName = await liveAlias();
-          const response = await callCommHub("list_tasks", { from_name: fromName, limit: 100 }, 0);
-          // Old Hubs can silently ignore an unknown filter. Never accept rows
-          // owned by another sender even after a nominally successful probe.
-          return Array.isArray(response?.tasks)
-            ? response.tasks.filter((task: any) => task?.from_name === fromName)
-            : [];
+          if (!NODE_ID) throw Object.assign(new Error("immutable node identity unavailable"), { code: -32602 });
+          const all: any[] = [];
+          let cursor: { before_created_at: string; before_task_id: string } | null = null;
+          for (let page = 0; page < 100; page++) {
+            const response: any = await callCommHub("list_tasks", {
+              from_node_id: NODE_ID,
+              limit: 100,
+              ...(cursor ?? {}),
+            }, 0);
+            if (response?.capability !== "list_tasks.immutable-node-cursor.v1") {
+              throw Object.assign(new Error("Hub lacks immutable node cursor pagination"), { code: -32602 });
+            }
+            const rows = Array.isArray(response.tasks)
+              ? response.tasks.filter((task: any) => task?.from_node_id === NODE_ID)
+              : [];
+            all.push(...rows);
+            cursor = response.next_cursor;
+            if (!cursor) return all;
+          }
+          throw new Error("outbound pagination exceeded bounded 100-page recovery window");
         },
         scheduleInboxDrain: scheduleWorkInboxDrain,
         onOutboundTerminal: (task) => {
@@ -4694,10 +4707,13 @@ async function processTask(
   let grokFailureSubcode: string | null = null;
   const runtimeEvidence = createTaskRuntimeEvidenceReporter({
     taskId,
-    report: (level, exactTaskId) => callCommHub(
-      level === "submitted" ? "mark_tasks_runtime_submitted" : "mark_tasks_consumed",
-      { task_ids: [exactTaskId] },
-    ),
+    report: (level, exactTaskId) => {
+      commhubCompensation?.recordLifecycle(exactTaskId, level);
+      return callCommHub(
+        level === "submitted" ? "mark_tasks_runtime_submitted" : "mark_tasks_consumed",
+        { task_ids: [exactTaskId] },
+      );
+    },
     debug,
   });
   try {
@@ -4946,6 +4962,7 @@ async function processInbox() {
       // logical task across retry/reassign. Keep ACK on the transport row,
       // but bind runtime evidence and replies to the logical task.
       const logicalTaskId = logicalTaskIdFromInbox(msg);
+      commhubCompensation?.recordLifecycle(logicalTaskId, "delivered");
       const images = await extractRuntimeAttachmentPaths(msg);
       const inboundLogSuffix = GROK_EXECUTION_MODE === "cli"
         ? ` (${content.length} chars; content withheld)`
