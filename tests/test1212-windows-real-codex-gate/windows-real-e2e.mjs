@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import pty from "../../agent-network/node_modules/node-pty/lib/index.js";
+import { assistantItems, assistantSnapshot, pollCompletedAssistant } from "./thread-evidence.mjs";
 
 if (process.platform !== "win32") throw new Error("real gate requires native Windows ConPTY");
 const repo = resolve(import.meta.dirname, "../..");
@@ -55,7 +56,7 @@ try {
   writeFileSync(join(bin, "codex.cmd"), `@echo off\r\ncall "${process.env.ANET_TEST1212_CODEX}" %*\r\n`);
   env.PATH = `${bin};${env.PATH}`;
   const cfgPath = join(project, ".anet", "nodes", "windows-real", "config.json");
-  let injected = false, injectionAt = 0, activeTurnId, taskIds = [], drivePromise, driveError;
+  let injected = false, injectionAt = 0, activeTurnId, preAssistantSnapshot, taskIds = [], drivePromise, driveError;
   await terminal(["node", "start", "windows-real", "--no-inherit-codex-home"], (child, output) => {
     if (!injected && output.includes("opening Codex TUI")) {
       injected = true;
@@ -68,13 +69,16 @@ try {
           const activeTurn = activeThread.turns?.at(-1);
           if (!activeTurn?.id || activeTurn.status !== "inProgress" || !JSON.stringify(activeTurn.items || []).includes(marker)) throw new Error("authoritative thread/read did not show the human tool turn active before task injection");
           activeTurnId = activeTurn.id;
+          preAssistantSnapshot = assistantSnapshot(activeTurn);
+          if (assistantItems(activeTurn).some(item => item.text.includes(marker) && item.text.includes("HUMAN_DONE"))) throw new Error("HUMAN_DONE assistant item existed before task injection");
           const global = JSON.parse(readFileSync(join(home, ".anet", "config.json"), "utf8"));
           taskIds = await Promise.all([task(global.token, global.network_id, "normal"), task(global.token, global.network_id, "high")]);
           await wait("both task replies", async () => { const r = await fetch(`http://127.0.0.1:${port}/api/tasks?network_id=${global.network_id}&skip_stats=1`, { headers: { Authorization: `Bearer ${global.token}` } }); const b = await r.json(); const rows = Array.isArray(b) ? b : b.tasks; return taskIds.every(id => rows.some(x => x.task_id === id && ["completed", "replied"].includes(x.status))); }, 130000);
-          const terminalThread = await readThread(cfg.codexAppServerUrl, cfg.codexThreadId);
-          const terminalTurn = terminalThread.turns?.find(turn => turn.id === activeTurnId);
-          const terminalItems = JSON.stringify(terminalTurn?.items || []);
-          if (terminalTurn?.status !== "completed" || !terminalItems.includes(marker) || !terminalItems.includes("HUMAN_DONE")) throw new Error("authoritative thread/read lacks completed same-turn HUMAN_DONE assistant item");
+          await pollCompletedAssistant(
+            () => readThread(cfg.codexAppServerUrl, cfg.codexThreadId),
+            activeTurnId, preAssistantSnapshot, marker,
+            { timeoutMs: 30000, intervalMs: 300 },
+          );
           if (Date.now() - injectionAt < 60000) throw new Error("same human turn completed before 60s active-turn witness");
           evidence.thread = `sha256:${createHash("sha256").update(cfg.codexThreadId).digest("hex")}`;
         })().catch(error => { driveError = error; }).finally(() => child.write("/exit\r"));
@@ -83,7 +87,7 @@ try {
   });
   if (drivePromise) await drivePromise;
   if (driveError) throw driveError;
-  if (!injected || !injectionAt || !activeTurnId || !taskIds.length) throw new Error("active human turn was not driven");
+  if (!injected || !injectionAt || !activeTurnId || !preAssistantSnapshot || !taskIds.length) throw new Error("active human turn was not driven");
   const cfg1 = JSON.parse(readFileSync(cfgPath, "utf8"));
   const bridgeLog = readFileSync(join(project, ".anet", "nodes", "windows-real", "windows-bridge.log"), "utf8");
   const steered = (bridgeLog.match(/\(steered\)/g) || []).length;
