@@ -5060,7 +5060,15 @@ async function processInbox() {
       // (3c-e) Persist + ack + try send.
       const replyBody = `[${ALIAS}] ${result.slice(0, 2000)}`;
       await deliverReplyReliably(from, replyBody, logicalTaskId, failed);
-      await ackAndRecordConsumed(msg, "message");
+      try {
+        // Keep the transport ACK visibly bound to inbox.id here. Stable
+        // task evidence/replies above use logicalTaskId; the compensation
+        // cursor advances only after this transport acknowledgement succeeds.
+        await ackMessage(msg.id);
+        commhubCompensation?.recordConsumed(msg);
+      } catch (e: any) {
+        warn(`ack failed for message ${String(msg.id).slice(0, 8)}: ${e.message}`);
+      }
     } finally {
       inflightMessageIds.delete(msg.id);
       // One runtime admission settled: this is a controllable idle boundary
