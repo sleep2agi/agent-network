@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { SQLiteAdapter } from "./db-adapter";
 import { DurableSideThreadCommandPort, SideThreadCommandStore, handleSideThreadCommandRequest } from "./side-thread-command-transport";
+import { SideThreadCoordinator, SideThreadStore } from "./side-thread";
 
 function actor(tokenId = "tok-node") { return { tokenId, networkId: "net-1", nodeId: "node-1" }; }
 function fixture() {
@@ -17,6 +18,11 @@ function fixture() {
 describe("Hub durable SideThread command outbox", () => {
   test("fails closed on the currently non-atomic PostgreSQL adapter", () => {
     expect(() => new SideThreadCommandStore({ dialect: "postgres" } as any)).toThrow(/atomic SQLite/);
+  });
+  test("allows exactly one durable terminal applier", () => {
+    const f = fixture(); const close = f.port.subscribe(async () => {});
+    expect(() => f.port.subscribe(async () => {})).toThrow(/exactly one/);
+    close();
   });
   test("queues outside inbox/FIFO and only exact node token can retain the delivery", async () => {
     const f = fixture();
@@ -95,5 +101,40 @@ describe("Hub durable SideThread command outbox", () => {
     await expect(f.port.acceptTerminal(actor(), terminal)).rejects.toThrow(/coordinator crashed/);
     expect((await f.port.acceptTerminal(actor(), terminal)).pending).toBe(false);
     expect(calls).toBe(2);
+  });
+
+  test("concurrent terminal POST cannot acknowledge WAL deletion while apply is pending", async () => {
+    const f = fixture(); let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    f.port.subscribe(async () => { await gate; throw new Error("late apply failure"); });
+    await f.port.start({ operationId: "op-concurrent-terminal", requestKey: "rk-concurrent-terminal", sideChatId: "side-concurrent", attemptId: "attempt-concurrent", nodeId: "node-1", threadId: "derived-concurrent", prompt: "q", attachments: [] }).catch(() => {});
+    const command = f.store.claim(actor())!;
+    f.store.ack(actor(), { protocol: "side_thread.ack.v1", commandId: command.commandId, operationId: "op-concurrent-terminal", state: "accepted", errorCode: null, result: { threadId: null, turnId: "turn-concurrent", destinationTurnId: null } });
+    const terminal = { protocol: "side_thread.terminal.v1", sideThreadId: "side-concurrent", attemptId: "attempt-concurrent", threadId: "derived-concurrent", turnId: "turn-concurrent", status: "completed", text: "answer", errorCode: null };
+    const url = new URL("http://hub/api/nodes/node-1/side-thread-commands/terminals");
+    const call = () => handleSideThreadCommandRequest({ req: new Request(url, { method: "POST", body: JSON.stringify(terminal) }), url, actor: actor(), store: f.store, port: f.port });
+    const first = call(); await Bun.sleep(10);
+    const second = await call();
+    expect(second?.status).toBe(503);
+    expect(await second?.json()).toMatchObject({ ok: false, retryable: true });
+    release();
+    expect((await first)?.status).toBe(409);
+    expect(f.store.terminalApplyState(["side-concurrent", "attempt-concurrent", "derived-concurrent", "turn-concurrent"])).toBe("received");
+  });
+
+  test("real coordinator database failure rejects apply and leaves receipt retryable", async () => {
+    const f = fixture();
+    const sideStore = new SideThreadStore(f.db);
+    const coordinator = new SideThreadCoordinator(sideStore, f.port, { enabled: true, authorizeNode: () => true });
+    await f.port.start({ operationId: "op-db-fail", requestKey: "rk-db-fail", sideChatId: "side-db", attemptId: "attempt-db", nodeId: "node-1", threadId: "derived-db", prompt: "q", attachments: [] }).catch(() => {});
+    const command = f.store.claim(actor())!;
+    f.store.ack(actor(), { protocol: "side_thread.ack.v1", commandId: command.commandId, operationId: "op-db-fail", state: "accepted", errorCode: null, result: { threadId: null, turnId: "turn-db", destinationTurnId: null } });
+    const original = f.db.transaction.bind(f.db);
+    (f.db as any).transaction = () => { throw new Error("disk I/O failure"); };
+    const terminal = { protocol: "side_thread.terminal.v1", sideThreadId: "side-db", attemptId: "attempt-db", threadId: "derived-db", turnId: "turn-db", status: "completed", text: "answer", errorCode: null };
+    await expect(f.port.acceptTerminal(actor(), terminal)).rejects.toThrow(/disk I\/O/);
+    expect(f.store.terminalApplyState(["side-db", "attempt-db", "derived-db", "turn-db"])).toBe("received");
+    (f.db as any).transaction = original;
+    coordinator.close();
   });
 });

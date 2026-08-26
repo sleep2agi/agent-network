@@ -226,6 +226,8 @@ export class SideThreadPortRegistry implements SideThreadExecutionPort {
     return this.delegate.bringBack(input);
   }
   subscribe(listener: (event: SideThreadRuntimeEvent) => void | Promise<void>): () => void {
+    if (this.listeners.size > 0)
+      throw new Error("SideThread runtime port supports exactly one durable terminal applier");
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
@@ -1890,7 +1892,14 @@ export class SideThreadCoordinator {
       requireIdentity(event.attemptId, "event.attemptId");
       requireIdentity(event.threadId, "event.threadId");
       requireIdentity(event.turnId, "event.turnId");
-      this.store.db.transaction(() => {
+    } catch {
+      // Protocol-invalid runtime events are untrusted input and are ignored.
+      return;
+    }
+    // Database/internal failures must reject the transport apply. Swallowing
+    // them would let the durable terminal receipt advance to applied while the
+    // SideThread record remained running forever.
+    this.store.db.transaction(() => {
         const owned = this.store.db.get<any>(
           `SELECT c.active_attempt_id,c.derived_thread_id,a.state,a.turn_id FROM side_chats c JOIN side_chat_attempts a ON a.side_chat_id=c.side_chat_id AND a.attempt_id=?2 WHERE c.side_chat_id=?1`,
           event.sideChatId,
@@ -1967,10 +1976,7 @@ export class SideThreadCoordinator {
           event.status,
           t,
         );
-      });
-    } catch {
-      /* malformed runtime events are untrusted and ignored */
-    }
+    });
   }
 
   private failStarting(

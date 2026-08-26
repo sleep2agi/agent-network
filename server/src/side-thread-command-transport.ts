@@ -189,6 +189,14 @@ export class SideThreadCommandStore {
       applied ? [this.now(), ...key] : key,
     );
   }
+  terminalApplyState(key: [string,string,string,string]): "received" | "applying" | "applied" {
+    const row = this.db.get<{ applying_at: number | null; applied_at: number | null }>(
+      "SELECT applying_at,applied_at FROM side_thread_terminal_receipts WHERE side_chat_id=?1 AND attempt_id=?2 AND thread_id=?3 AND turn_id=?4",
+      ...key,
+    );
+    if (!row) throw new Error("terminal receipt disappeared");
+    return row.applied_at !== null ? "applied" : row.applying_at !== null ? "applying" : "received";
+  }
 
   receipt(operationId: string): Record<string, unknown> | null {
     const row = this.db.get<CommandRow>("SELECT * FROM side_thread_commands WHERE operation_id=?1", operationId);
@@ -225,15 +233,21 @@ export class DurableSideThreadCommandPort implements SideThreadExecutionPort {
   async archive(input: Parameters<SideThreadExecutionPort["archive"]>[0]) { await this.issue(input, "archive", { threadId: input.threadId }); }
   async purge(input: Parameters<SideThreadExecutionPort["purge"]>[0]) { await this.issue(input, "purge", { threadId: input.threadId }); }
   bringBack(input: Parameters<SideThreadExecutionPort["bringBack"]>[0]) { return this.issue(input, "bring-back", { sourceThreadId: input.sourceThreadId, sourceTurnId: input.sourceTurnId, destinationThreadId: input.destinationThreadId, text: input.text }, "destinationTurnId") as Promise<{destinationTurnId:string}>; }
-  subscribe(listener: (event: SideThreadRuntimeEvent) => void | Promise<void>) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
+  subscribe(listener: (event: SideThreadRuntimeEvent) => void | Promise<void>) {
+    if (this.listeners.size > 0) throw new Error("SideThread command port supports exactly one terminal applier");
+    this.listeners.add(listener); return () => this.listeners.delete(listener);
+  }
   async acceptTerminal(actor: NodeCommandActor, raw: unknown) {
     const x = this.opts.store.terminal(actor, raw);
-    if (!this.opts.store.claimTerminal(x.key)) return { ...x, pending: true };
+    if (!this.opts.store.claimTerminal(x.key)) {
+      const applyState = this.opts.store.terminalApplyState(x.key);
+      return { ...x, pending: applyState !== "applied", confirmed: applyState === "applied", applyState };
+    }
     try {
       if (this.listeners.size === 0) throw new Error("SideThread terminal applier unavailable");
       for (const listener of this.listeners) await listener(x.event);
       this.opts.store.settleTerminal(x.key, true);
-      return { ...x, pending: false };
+      return { ...x, pending: false, confirmed: true, applyState: "applied" as const };
     } catch (error) {
       this.opts.store.settleTerminal(x.key, false);
       throw error;
@@ -269,7 +283,9 @@ export async function handleSideThreadCommandRequest(input: {
       return Response.json({ ok: true, command: input.store.claim(input.actor) });
     if (match[2] === "terminals" && input.req.method === "POST") {
       const result = await input.port.acceptTerminal(input.actor, await input.req.json());
-      return Response.json({ ok: true, idempotent: result.idempotent });
+      if (!result.confirmed)
+        return Response.json({ ok: false, error: "terminal_applying", retryable: true }, { status: 503 });
+      return Response.json({ ok: true, idempotent: result.idempotent, applied: true });
     }
     if (match[3] && input.req.method === "POST") {
       const body = object(await input.req.json());

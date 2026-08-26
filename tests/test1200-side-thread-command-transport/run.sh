@@ -77,4 +77,24 @@ if bun test server/src/side-thread-command-transport.test.ts >/tmp/terminal-appl
 fi
 mv /tmp/terminal-apply.ts server/src/side-thread-command-transport.ts
 
-echo "PASS test1200 SideThread dedicated command transport + 6 witnessed red"
+# Witness red 7: acknowledging an in-progress apply lets a concurrent consumer
+# delete the only node WAL before the first listener fails.
+cp server/src/side-thread-command-transport.ts /tmp/terminal-confirm.ts
+sed -i 's/if (!result\.confirmed)/if (false \&\& !result.confirmed)/' server/src/side-thread-command-transport.ts
+if bun test server/src/side-thread-command-transport.test.ts >/tmp/terminal-confirm-red.log 2>&1; then
+  echo "FAIL terminal applying acknowledgement mutation survived"
+  exit 1
+fi
+mv /tmp/terminal-confirm.ts server/src/side-thread-command-transport.ts
+
+# Witness red 8: a coordinator that resolves without applying makes Hub mark a
+# receipt applied despite a simulated database failure.
+cp server/src/side-thread.ts /tmp/coordinator-apply.ts
+sed -i '/private async acceptRuntimeEvent/,/try {/s/    try {/    return; try {/' server/src/side-thread.ts
+if bun test server/src/side-thread-command-transport.test.ts >/tmp/coordinator-apply-red.log 2>&1; then
+  echo "FAIL coordinator apply propagation mutation survived"
+  exit 1
+fi
+mv /tmp/coordinator-apply.ts server/src/side-thread.ts
+
+echo "PASS test1200 SideThread dedicated command transport + 8 witnessed red"
