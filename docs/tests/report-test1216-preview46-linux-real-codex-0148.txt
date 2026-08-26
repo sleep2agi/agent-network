@@ -1,0 +1,95 @@
+# Preview .46 Linux real Codex 0.148 protected smoke
+
+Date: 2026-08-26
+
+Result: **PASS**, after fail-closed harness corrections described below.
+
+## Immutable inputs
+
+- Source commit: `81e9f446f53af097f29ffeb617cc6f3ca32f02f0`
+- `@sleep2agi/commhub-server@0.9.0-preview.30`
+  - registry integrity: `sha512-r+OErIy3702VqrMHWeH4buJG1iwFCSXU53Go7CZWS3KSANoF2yiF0sfsJKca7tdjtvutrrgvPMwdJrIKIZFPsQ==`
+- `@sleep2agi/agent-node@2.5.0-preview.34`
+  - registry integrity: `sha512-a/uZEqiH07L/L7YfQBkmbIP2hIIIPrKaP+PeSMh8cHWd2EnrgLCuysjuzGiSqXLy1LawOr4iEbBkXcArzQuJMA==`
+- `@sleep2agi/agent-network@2.3.0-preview.46`
+  - registry integrity: `sha512-ls4fkPgqfUjgYre/w7trjRWTW//7Vag9GrlZNfAuu7SOYc24/ntUdbosO3hFmvqe4Ztoc8KyDIrVErePvvoJmA==`
+- `@openai/codex@0.148.0`
+
+The smoke installed these exact public-registry versions into an owner-only
+temporary tree. No global npm package or `latest` dist-tag was changed.
+
+## Protection boundary
+
+The temporary Hub DB, npm cache, HOME, CODEX_HOME, project, tmux socket, node
+alias, and ports were isolated. The production node was guarded before every
+layer and during cleanup. Its process remained alive, its two listener process
+identities remained unchanged, and its config SHA-256 remained
+`b435202f816578009a3db9ad75940c7eb6c596899882a8a28e421fefecf4a41b`.
+
+No production process was stopped or restarted. The evidence contains no
+credential, thread UUID, task UUID, or host-private absolute path.
+
+## Passing chain
+
+1. Registry manifests reported server `.30`, node `.34`, network `.46`, and
+   Codex `0.148.0` from the isolated runtime.
+2. The launcher created exactly three isolated tmux roles: app-server, bridge,
+   and TUI. There was exactly one bridge. All three roles shared the intended
+   isolated HOME, remote app-server URL, and thread.
+3. The human prompt was visibly present in the composer before an independent
+   submit key. Authoritative `thread/read` then observed that marked turn as
+   `inProgress`.
+4. A normal and a high task were posted during the same human turn. The
+   package-owned node log recorded exactly one `task_started ... (steered)` and
+   one `steered into human turn` entry for each task, both bound to the same
+   human turn. No related `queued`, FIFO, or new-turn entry appeared.
+5. The turn remained active long enough to witness task heartbeats after the
+   required 60-second overlap. Both tasks reached terminal replied state.
+6. Hub persistence contained exactly one `task.started`, one `task.replied`,
+   and one terminal event for each of the two task IDs.
+7. Stop used identity-gated teardown. Restart resumed the exact same thread and
+   `thread/read` returned non-empty history. The resumed visible TUI contained
+   the prior human prompt, both Agent Network messages, their acknowledgement,
+   and the final human-turn response.
+8. Restart exposed the Codex update prompt. The protected launcher failed
+   closed. Only after the pane visibly showed both choices was the selection
+   moved from `Update now` to `Skip`; a second capture confirmed `Skip` selected
+   before Enter. No update or global install ran.
+9. Final stop removed all three owned sessions. The temporary Hub exited and
+   both temporary ports had no listener. Production guards still matched.
+
+## Evidence boundary
+
+The `(steered)` result above is a bridge outcome witnessed in the package-owned
+node log and Hub persistence. The test did not interpose on or capture raw
+app-server wire frames, so it makes no raw-wire claim. It also does not claim an
+additional `turn/start`; the success criterion is steering into the already
+authoritative active human turn.
+
+## Fail-closed attempt ledger
+
+- A1: inherited tmux context and an unsupported exact-target spelling made the
+  harness miss its pane. Fixed by unsetting inherited tmux state and using the
+  isolated socket/session target.
+- A2: the isolated login shell lacked the exact runtime PATH, so bridge
+  readiness timed out. Fixed by installing a private login profile.
+- A3: first-use package resolution/native build exceeded the readiness window.
+  The same exact cached node subsequently resolved in 1.38 seconds. Fixed by an
+  explicit exact-version prewarm.
+- A4: the prompt submit was not authoritative; the harness had no retained pane
+  evidence. It stopped before task injection. Fixed by retaining private pane
+  and redacted thread summaries on failure.
+- A5: the retained pane proved the complete prompt remained in the composer;
+  zero-delay literal input plus Enter had not submitted it. Fixed by requiring
+  visible composer text, then sending an independent submit key.
+- A6: steering succeeded, but the harness searched a transient bridge pane
+  while the package wrote the evidence to its persistent node log. Fixed by
+  binding checks to the two private task IDs in the package-owned log.
+- A7: steering, terminal state, and DB exactly-once checks passed. Restart then
+  stopped on the expected Codex update prompt. Fixed by the visible,
+  confirm-before-enter `Skip` procedure used in A8.
+- A8: same-thread restart, non-empty history, three-role/single-bridge topology,
+  safe Skip handling, final stop, cleanup, and production guards all passed.
+
+Every failed attempt stopped at its first failing layer and cleaned only its
+owned resources before the next attempt.
