@@ -4,11 +4,11 @@ Status: PASS (Docker contract); native Windows job is the Draft PR gate
 
 Source boundary:
 
-- Base: `86f981661e3287dea0bbce51f40e824945882d81`
-- Rebased implementation commit under test: `4e7292f020fb7cc00a47c51090465bc57d2cfb4f`
+- Base: `3f88c9699b620597a6357bfc6eed6a02264152c7`
+- Rebased implementation commit under test: `093e2fb06fb40620a7e982fe97d100da27f1935d`
 - Image base: `oven/bun:1.3.14`
-- Command: `docker build --build-arg SOURCE_COMMIT=4e7292f0...` followed
-  by `docker run --rm --network none`.
+- Command: `docker build --build-arg SOURCE_COMMIT=093e2fb0...` followed
+  by `docker run --rm`.
 
 Scope:
 
@@ -18,6 +18,13 @@ Scope:
 - Windows launcher refuses to open a TUI before the exact paired bridge emits
   its ready boundary;
 - witnessed-red mutations remove eager attach and readiness wait separately;
+- POSIX no longer sleeps for a guessed three seconds: it waits for the real
+  `[codex-app-server] shared bridge ready` boundary and fails closed before TUI;
+- a real Linux Hub + built agent-node + fake Codex E2E sends normal/high rows
+  during one human turn and asserts the total `turn/start` count cannot grow;
+- app-server, bridge, and TUI record the same node-specific `CODEX_HOME`;
+- tmux pane discovery uses a visible field marker because Debian tmux 3.3a
+  sanitizes a literal TAB in `-F` output to `_`; legacy TAB rows remain parsed;
 - native Windows test751 runs the real built agent-node against the fake Codex
   protocol endpoint and sends normal/high Dashboard tasks during one human
   turn, with same remote/thread/CODEX_HOME and one bridge.
@@ -28,9 +35,13 @@ Exact Docker result:
 
 - both CLI production bundles compiled;
 - Windows fake protocol and native harness compiled;
-- 61 passed, 3 Windows-only tests skipped in Linux Docker, 0 failed;
+- 63 passed, 3 Windows-only tests skipped in Linux Docker, 0 failed;
 - lazy-bridge mutation: red;
 - launcher-without-ready-wait mutation: red;
+- live Linux launcher-without-protocol-ready mutation: red;
+- live `turn/steer` to `turn/start` degradation mutation: red;
+- Linux real Hub/built-agent-node baseline: PASS, with zero additional
+  `turn/start` RPCs and identical app-server/bridge/TUI `CODEX_HOME`;
 - final `RESULT: PASS`.
 
 Rebase compatibility gates:
