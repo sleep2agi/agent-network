@@ -55,7 +55,7 @@ describe("OpenCode agent-node release pairing", () => {
     const staleGlobal = "@sleep2agi/agent-node@2.5.0-preview.32";
     const resolution = pairedAgentNodeResolution();
     expect(staleGlobal).not.toBe(PAIRED_AGENT_NODE_SPEC);
-    expect(PAIRED_AGENT_NODE_VERSION).toBe("2.5.0-preview.33");
+    expect(PAIRED_AGENT_NODE_VERSION).toBe("2.5.0-preview.34");
     expect(resolution).toEqual({
       spec: PAIRED_AGENT_NODE_SPEC,
       args: ["-y", PAIRED_AGENT_NODE_SPEC, "--print-entrypoint"],

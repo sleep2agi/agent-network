@@ -32,7 +32,7 @@ const exactNodeEntrypoint = join(exactNodeDist, "cli.js");
 mkdirSync(exactNodeDist, { recursive: true });
 writeFileSync(join(exactNodeRoot, "package.json"), JSON.stringify({
   name: "@sleep2agi/agent-node",
-  version: "2.5.0-preview.33",
+  version: "2.5.0-preview.34",
   publishConfig: { tag: "preview" },
   bin: { "agent-node": "dist/cli.js" },
 }));

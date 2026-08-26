@@ -1,5 +1,11 @@
 # Changelog
 
+## Durable Codex co-presence and safe teardown — preview (2026-08-26)
+
+This paired preview release is `agent-network@2.3.0-preview.46` / `agent-node@2.5.0-preview.34` / `commhub-server@0.9.0-preview.30`. The Hub adds immutable node cursors and a monotonic terminal journal for durable recovery after a missed SSE notification, while task delivery returns the network-authorized `actual_to`. Codex co-presence keeps one bridge and a shared `CODEX_HOME` plus thread/history; `node stop` now converges the managed app-server, bridge, and TUI resources. Linux and protected Windows Codex 0.148 gates cover upgrade recovery, active-turn steering, and history preservation.
+
+---
+
 ::: info Versioning note
 This log runs reverse-chronologically. **The version scheme was reshuffled once**:
 - **From 2026-05 onward**: gradual v0.6 → v0.7 → v0.8 → v0.9 → v0.10 → v0.11 releases; the `v0.X.Y` format mirrors `commhub-server`'s `0.X.Y` semver style.

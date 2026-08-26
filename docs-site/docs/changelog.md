@@ -1,5 +1,11 @@
 # 更新日志
 
+## Codex 共存 TUI 耐久化与安全停机——preview（2026-08-26）
+
+本轮 preview 三包配对发布：`agent-network@2.3.0-preview.46` / `agent-node@2.5.0-preview.34` / `commhub-server@0.9.0-preview.30`。Hub 增加不可变节点游标和终态序列，丢失 SSE 门铃后可耐久补偿；任务投递返回经 network 权限校验的 `actual_to`。Codex 共存路径保留单 bridge、共享 `CODEX_HOME` 与 thread/history，`node stop` 会收敛受管的 app-server / bridge / TUI 资源。Linux 与受保护 Windows Codex 0.148 门禁覆盖升级恢复、活跃 turn steer 和历史保留。
+
+---
+
 ## grok-tui liveness — Hub 不再把死 TUI 报成 idle（#1005）
 
 `runtime=grok-build-cli` + `grokCopresence`：心跳 / 任务收尾的 `report_status("idle")` 现在走 liveness 快照。TUI 子进程不在、composer 未就绪、或缺少按名存在的 `attach.sock` / `leader.sock` 时，Hub 状态是 `blocked` 而不是 `idle`。composer 就绪后再报一次 `idle`。`anet grok attach` 的资格判断抽成 `resolveGrokAttachTarget`。
