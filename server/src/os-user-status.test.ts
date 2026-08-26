@@ -47,7 +47,7 @@ describe("#1197 report_status OS user contract", () => {
   test("stores an explicit bounded OS user without deriving it from project_dir", async () => {
     const { client, server } = await connectClient();
     try {
-      const result = await report(client, { os_user: "DOMAIN\\runner", project_dir: "/home/not-the-user/project" });
+      const result = await report(client, { os_user: "DOMAIN\\runner", project_dir: "/srv/not-the-user/project" });
       expect(result.isError).not.toBe(true);
       expect(db.get<{ os_user: string }>("SELECT os_user FROM sessions WHERE network_id = ?1 AND alias = ?2", NET, ALIAS)?.os_user)
         .toBe("DOMAIN\\runner");

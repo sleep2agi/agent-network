@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/safe-rm.sh"
+
 test_root=$(mktemp -d)
-trap 'rm -rf "$test_root"' EXIT
+trap 'safe_rm_rf "$test_root"' EXIT
 
 export COMMHUB_DB="$test_root/commhub.db"
 export COMMHUB_DEV_OPEN=0
