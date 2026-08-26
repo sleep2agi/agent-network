@@ -1,5 +1,8 @@
 FROM oven/bun:latest
 
+ARG SOURCE_COMMIT=unknown
+ENV SOURCE_COMMIT=$SOURCE_COMMIT
+
 WORKDIR /src
 COPY . .
 

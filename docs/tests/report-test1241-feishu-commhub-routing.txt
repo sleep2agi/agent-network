@@ -1,7 +1,7 @@
 # test1241 Feishu CommHub routing
 
-Date: 2026-08-26T23:14:09Z
-HEAD: unknown
+Date: 2026-08-26T23:25:45Z
+HEAD: cfe1bf45
 
 [1] witnessed-red fixture: legacy IPC + CommHub reply paths send twice when both are active
 [feishu:bridge] reply text sent (messageId=om_1) for feishu:node-a#feishu:om_source
@@ -12,18 +12,18 @@ bun test v1.3.14 (0d9b296a)
 
 src/im/feishu/bridge-commhub-routing.test.ts:
 [feishu:bridge] reply text sent (messageId=om_1) for task_commhub_1
-(pass) Feishu bridge CommHub route > dispatches inbound IM as a CommHub task and routes one final text reply [58.31ms]
+(pass) Feishu bridge CommHub route > dispatches inbound IM as a CommHub task and routes one final text reply [45.54ms]
 [feishu:bridge] outbound-marker rejected /tmp/not-under-feishu-outbound/report.pdf for task_commhub_1: [文件附件未发送] 路径不在允许的会话目录内 (必须在 /work/feishu-attachments/node-a/oc_test/ 下)
 [feishu:bridge] reply text sent (messageId=om_1) for task_commhub_1
 [feishu:bridge] duplicate final reply ignored for task_commhub_1
-(pass) Feishu bridge CommHub route > deduplicates repeated CommHub replies for the same task across marker-fallback dispatch [62.19ms]
+(pass) Feishu bridge CommHub route > deduplicates repeated CommHub replies for the same task across marker-fallback dispatch [66.29ms]
 [feishu:bridge] orphan commhub reply for missing-task: late answer
-(pass) Feishu bridge CommHub route > acks orphan replies after correlation gc instead of silently leaving them unread [31.51ms]
+(pass) Feishu bridge CommHub route > acks orphan replies after correlation gc instead of silently leaving them unread [36.67ms]
 
  3 pass
  0 fail
  11 expect() calls
-Ran 3 tests across 1 file. [909.00ms]
+Ran 3 tests across 1 file. [821.00ms]
 [3] docker-only file dispatch: valid /work marker sends exactly one file despite duplicate replies
 [feishu:bridge] reply text sent (messageId=om_1) for task_file
 [feishu:bridge] outbound file sent (messageId=om_2, path=/work/feishu-attachments/node-a/oc_test/report.pdf) for task_file

@@ -9,7 +9,7 @@ mkdir -p "$ART"
   echo "# test1241 Feishu CommHub routing"
   echo
   echo "Date: $(date -u +%FT%TZ)"
-  echo "HEAD: $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  echo "HEAD: ${SOURCE_COMMIT:-unknown}"
   echo
 } > "$REPORT"
 
