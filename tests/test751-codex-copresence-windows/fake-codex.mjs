@@ -120,11 +120,12 @@ if (args[0] === "app-server") {
     if (!sentinel || !existsSync(sentinel)) throw new Error("long turn completion sentinel missing");
     await request("test/human-turn/complete");
     console.log("FAKE_CODEX_TUI_LONG_TURN_COMPLETED");
-  } else {
-    // Keep the root process and exact socket observable across the launcher's
-    // WMI CreationDate and Get-NetTCPConnection snapshots.
-    await Bun.sleep(5_000);
   }
+  // Keep the root process and exact socket observable across the launcher's
+  // WMI CreationDate and Get-NetTCPConnection snapshots. This applies after
+  // both the short probe and the long-turn fixture: completing the synthetic
+  // human turn must not make the second client disappear before attestation.
+  await Bun.sleep(5_000);
   ws.close();
 } else if (args[0] === "--version") {
   console.log("codex-cli 1.0.0");

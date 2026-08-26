@@ -87,6 +87,12 @@ The full 65-second A9 run plus A12 restart-only verification proved:
   requires `thread/start=0`, exactly one user-owned TUI identity notification,
   and the measured three exact resume/read calls. This tightens the no-health-
   turn invariant; a new native run remains required.
+- PR native Windows run `33019632278` passed the updated zero-start wire
+  contract and the first start/restart health checks. Its long-turn fake then
+  closed the exact WebSocket immediately after synthetic completion, before
+  the launcher's CreationDate/socket snapshot. The fixture now preserves the
+  same five-second observable PID/socket window after both short and long-turn
+  paths. The product gate remains unchanged; a new native run is required.
 
 - A1: locked dependencies absent; no product roles. A stale cleanup port caused
   a harness false positive.
