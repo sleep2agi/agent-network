@@ -48,7 +48,7 @@ try {
   writeFileSync(join(nodeHome, "auth.json"), readFileSync(join(codexHome, "auth.json")), { mode: 0o600 });
   const exactRoot = join(privateRoot, "exact", "node_modules", "@sleep2agi", "agent-node"), exactDist = join(exactRoot, "dist");
   mkdirSync(exactDist, { recursive: true });
-  writeFileSync(join(exactRoot, "package.json"), JSON.stringify({ name: "@sleep2agi/agent-node", version: "2.5.0-preview.33", publishConfig: { tag: "preview" }, bin: { "agent-node": "dist/cli.js" } }));
+  writeFileSync(join(exactRoot, "package.json"), JSON.stringify({ name: "@sleep2agi/agent-node", version: "2.5.0-preview.34", publishConfig: { tag: "preview" }, bin: { "agent-node": "dist/cli.js" } }));
   writeFileSync(join(exactDist, "cli.js"), `await import(${JSON.stringify(pathToFileURL(join(repo, "agent-node", "dist", "cli.js")).href)});\n`);
   env.ANET_AGENT_NODE_BIN = join(exactDist, "cli.js");
   // Pin the executable without installing it globally. The cmd shim is private.

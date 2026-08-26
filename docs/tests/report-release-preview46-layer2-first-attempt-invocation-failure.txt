@@ -1,0 +1,88 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 695B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/oven/bun:1.3.14
+#2 DONE 0.0s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [internal] load build context
+#4 DONE 0.0s
+
+#5 [ 1/11] FROM docker.io/oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4
+#5 resolve docker.io/oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 0.0s done
+#5 DONE 0.0s
+
+#6 [ 2/11] WORKDIR /workspace
+#6 CACHED
+
+#4 [internal] load build context
+#4 transferring context: 1.80MB 0.1s done
+#4 DONE 0.1s
+
+#7 [ 3/11] COPY agent-node/package.json agent-node/package-lock.json ./agent-node/
+#7 DONE 0.1s
+
+#8 [ 4/11] COPY server/package.json server/package-lock.json ./server/
+#8 DONE 0.0s
+
+#9 [ 5/11] RUN cd agent-node && bun install --frozen-lockfile
+#9 0.230 bun install v1.3.14 (0d9b296a)
+#9 0.233 [2.71ms] migrated lockfile from package-lock.json
+#9 23.49 Saved lockfile
+#9 23.49
+#9 23.49 + @anthropic-ai/claude-agent-sdk@0.3.231
+#9 23.49 + undici@6.28.0
+#9 23.49 + zod@4.4.3
+#9 23.49 + @openai/codex@0.133.0
+#9 23.49 + @openai/codex-sdk@0.133.0
+#9 23.49 + node-pty@1.1.0
+#9 23.49
+#9 23.49 109 packages installed [23.27s]
+#9 DONE 25.8s
+
+#10 [ 6/11] RUN cd server && bun install --frozen-lockfile
+#10 0.326 bun install v1.3.14 (0d9b296a)
+#10 0.332 [3.14ms] migrated lockfile from package-lock.json
+#10 9.009 Saved lockfile
+#10 9.009
+#10 9.009 + @modelcontextprotocol/sdk@1.30.0
+#10 9.009 + bun-types@1.3.14
+#10 9.009 + hono@4.13.1
+#10 9.009 + zod@4.4.3
+#10 9.009
+#10 9.009 96 packages installed [8.68s]
+#10 DONE 9.1s
+
+#11 [ 7/11] COPY agent-node ./agent-node
+#11 DONE 0.2s
+
+#12 [ 8/11] COPY server ./server
+#12 DONE 0.1s
+
+#13 [ 9/11] COPY tests/test1181-codex-durable-poll/run.sh ./run.sh
+#13 DONE 0.0s
+
+#14 [10/11] COPY tests/test1181-codex-durable-poll/witnessed-red.sh ./witnessed-red.sh
+#14 DONE 0.0s
+
+#15 [11/11] RUN chmod +x ./run.sh ./witnessed-red.sh
+#15 DONE 0.2s
+
+#16 exporting to image
+#16 exporting layers
+#16 exporting layers 51.3s done
+#16 exporting manifest sha256:d9d8f1a8c2d796d2921ec31a0374c922590e3559983075c703f8980412349aed 0.0s done
+#16 exporting config sha256:40e54fa8dcc985315061aed3d12325a42d048c8da4dab6c0d39a716e7de5f7a6 0.0s done
+#16 exporting attestation manifest sha256:49219673857355195491730da074d8e9b723803bcbffdf9c468caf6d96ba0d95 0.0s done
+#16 exporting manifest list sha256:34d365b06e3b83b22577c1b8c1bbc3d9f9e25a5d0aa4a354d6e6d6c415dcc41f 0.0s done
+#16 naming to docker.io/library/anet-release46-test1181-codex-durable-poll:latest done
+#16 unpacking to docker.io/library/anet-release46-test1181-codex-durable-poll:latest
+#16 unpacking to docker.io/library/anet-release46-test1181-codex-durable-poll:latest 9.3s done
+#16 DONE 60.7s
+FAIL: TEST1181_SOURCE_COMMIT must be one full lowercase Git SHA

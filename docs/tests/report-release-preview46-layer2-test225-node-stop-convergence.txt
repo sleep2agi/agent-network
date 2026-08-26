@@ -1,0 +1,133 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 764B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/oven/bun:1.2.22
+#2 DONE 0.0s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [1/9] FROM docker.io/oven/bun:1.2.22@sha256:66ba69deede44e3af5dc542def218fdb3bcad2205900ea761dc5623bf973d2df
+#4 resolve docker.io/oven/bun:1.2.22@sha256:66ba69deede44e3af5dc542def218fdb3bcad2205900ea761dc5623bf973d2df 0.0s done
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 5.37MB 0.1s done
+#5 DONE 0.1s
+
+#6 [2/9] WORKDIR /app
+#6 CACHED
+
+#7 [3/9] RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ procps tmux && rm -rf /var/lib/apt/lists/*
+#7 CACHED
+
+#8 [4/9] COPY agent-network/ agent-network/
+#8 CACHED
+
+#9 [5/9] COPY agent-node/ agent-node/
+#9 CACHED
+
+#10 [6/9] RUN cd agent-node && bun install --ignore-scripts && bun run build && ln -s /app/agent-node/dist/cli.js /usr/local/bin/agent-node
+#10 0.198 bun install v1.2.22 (6bafe260)
+#10 0.201 [2.17ms] migrated lockfile from package-lock.json
+#10 25.33
+#10 25.33 + @anthropic-ai/claude-agent-sdk@0.3.231
+#10 25.33 + undici@6.28.0
+#10 25.33 + zod@4.4.3
+#10 25.33 + @openai/codex@0.133.0
+#10 25.33 + @openai/codex-sdk@0.133.0
+#10 25.33 + node-pty@1.1.0
+#10 25.33
+#10 25.33 109 packages installed [25.13s]
+#10 25.33 Saved lockfile
+#10 25.46 $ bun build src/cli.ts --outdir dist --entry-naming cli.js --target node --minify --external @anthropic-ai/claude-agent-sdk --external '@anthropic-ai/claude-agent-sdk-*' --external @openai/codex-sdk --external node-pty && bun build src/upload-file-mcp-stdio.ts --outdir dist --entry-naming upload-file-mcp-stdio.js --target node --minify
+#10 25.55 Bundled 281 modules in 84ms
+#10 25.55
+#10 25.55   cli.js  1.18 MB  (entry point)
+#10 25.55
+#10 25.61 Bundled 221 modules in 52ms
+#10 25.61
+#10 25.61   upload-file-mcp-stdio.js  0.27 MB  (entry point)
+#10 25.61
+#10 DONE 29.6s
+
+#11 [7/9] RUN cd agent-network && bun install --ignore-scripts && bun run build && ln -s /app/agent-network/bin/anet.cjs /usr/local/bin/anet
+#11 0.331 bun install v1.2.22 (6bafe260)
+#11 0.335 [3.55ms] migrated lockfile from package-lock.json
+#11 0.342 Resolving dependencies
+#11 0.392 Resolved, downloaded and extracted [4]
+#11 7.960
+#11 7.960 + @modelcontextprotocol/sdk@1.29.0
+#11 7.960 + @types/markdown-it@14.1.2
+#11 7.960 + @types/node@25.5.2
+#11 7.960 + javascript-obfuscator@5.4.1
+#11 7.960 + node-pty@1.1.0
+#11 7.960 + typescript@5.9.3
+#11 7.960 + @inquirer/prompts@8.4.3
+#11 7.960 + @larksuiteoapi/node-sdk@1.67.0
+#11 7.960 + markdown-it@14.2.0
+#11 7.960 + puppeteer-core@24.43.1
+#11 7.960
+#11 7.960 307 packages installed [7.63s]
+#11 7.960
+#11 7.960 Blocked 1 postinstall. Run `bun pm untrusted` for details.
+#11 7.960 Saved lockfile
+#11 7.977 $ bun build src/client.ts --outdir dist/src --target node --minify && bun build bin/cli.ts --outdir dist/bin --target node --minify --external @sleep2agi/commhub-server --external bun:sqlite --external '../../server/*' && bun build src/node-server.ts --outdir dist/src --target node --minify && bun build src/im/feishu/worker.ts --outdir dist/src/im/feishu --target node --minify --external @larksuiteoapi/node-sdk && tsc --emitDeclarationOnly --declaration --outDir dist && bun x javascript-obfuscator dist/bin/cli.js --output dist/bin/cli.js --compact true --string-array true --string-array-encoding base64 && bun x javascript-obfuscator dist/src/client.js --output dist/src/client.js --compact true --string-array true && bun x javascript-obfuscator dist/src/node-server.js --output dist/src/node-server.js --compact true --string-array true && cp bin/anet.cjs dist/bin/anet.cjs
+#11 7.987 Bundled 3 modules in 5ms
+#11 7.987
+#11 7.987   client.js  5.79 KB  (entry point)
+#11 7.987
+#11 8.061 Bundled 219 modules in 70ms
+#11 8.061
+#11 8.061   cli.js  1.20 MB  (entry point)
+#11 8.061
+#11 8.110 Bundled 229 modules in 40ms
+#11 8.110
+#11 8.110   node-server.js  0.29 MB  (entry point)
+#11 8.110
+#11 8.241 Bundled 598 modules in 123ms
+#11 8.241
+#11 8.241   worker.js  2.29 MB  (entry point)
+#11 8.241
+#11 16.52
+#11 16.52 [javascript-obfuscator-cli] Obfuscating file: dist/bin/cli.js...
+#11 25.90
+#11 25.90 [javascript-obfuscator-cli] Obfuscating file: dist/src/client.js...
+#11 26.73
+#11 26.73 [javascript-obfuscator-cli] Obfuscating file: dist/src/node-server.js...
+#11 DONE 31.7s
+
+#12 [8/9] COPY tests/test225-node-stop-convergence/run.sh /app/run.sh
+#12 DONE 0.3s
+
+#13 [9/9] RUN chmod 0755 /app/run.sh
+#13 DONE 0.2s
+
+#14 exporting to image
+#14 exporting layers
+#14 exporting layers 53.6s done
+#14 exporting manifest sha256:3a66ec715aef43310eee8ab4686053b88bb415607d08917ffa541bcdb96c0021 0.0s done
+#14 exporting config sha256:b7725bbc08dab32fddafd6436dab9f36dee5c68c2a5b2fcd3dd18a7f08bc67a5 0.0s done
+#14 exporting attestation manifest sha256:232c5c7b901de2499f288070c9323126f841e6643c56097a357598bd6bc58169 0.0s done
+#14 exporting manifest list sha256:3a3bfa465b49846d6e3fcaa1ed6f43f03741063a44d72ea6d602a2ccd6f8f09f 0.0s done
+#14 naming to docker.io/library/anet-release46-test225-stop:latest done
+#14 unpacking to docker.io/library/anet-release46-test225-stop:latest
+#14 unpacking to docker.io/library/anet-release46-test225-stop:latest 16.4s done
+#14 DONE 70.2s
+PASS: test225 foreground startup race converged
+PASS: stale pid did not kill concurrent node
+PASS: surviving leader socket yields typed failure without collateral kill
+PASS: leader and attach sockets are independently authoritative
+PASS: lifecycle lock recovers dead identity and refuses corrupt receipt
+PASS: single /proc snapshot treats exited process as gone without unverifiable race
+PASS: kill escalation is bounded and alias-owned
+PASS: stop intent rejects late start and releases alias only after completion
+PASS: birth unavailable fails closed and PID reuse is never signalled
+PASS: all three tmux resources are audited
+PASS: Windows uses creation identity and PM2 remains outside alias kill authority
+PASS: #1193 restart shares generation ownership and converges
+Summary: PASS

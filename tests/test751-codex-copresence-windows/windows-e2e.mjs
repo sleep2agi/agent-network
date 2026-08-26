@@ -22,7 +22,7 @@ writeFileSync(join(userHome, ".anet", "config.json"), JSON.stringify({ hub: "htt
 writeFileSync(join(bin, "codex.cmd"), `@echo off\r\nbun "${join(import.meta.dirname, "fake-codex.mjs")}" %*\r\n`);
 writeFileSync(join(bin, "agent-node.cmd"), `@echo off\r\nbun "${join(import.meta.dirname, "fake-agent-node.mjs")}" %*\r\n`);
 // Deliberately leave the PATH shim above as a stale-global witness. The Codex
-// bridge must use this exact package-owned preview.33 entrypoint instead. The
+// bridge must use this exact package-owned preview.34 entrypoint instead. The
 // package-owned wrapper imports the repository's REAL built agent-node: the
 // old Windows gate imported fake-agent-node.mjs (an infinite sleep), so it
 // could never prove SSE admission or turn/steer while the TUI was busy.
@@ -32,7 +32,7 @@ const exactNodeEntrypoint = join(exactNodeDist, "cli.js");
 mkdirSync(exactNodeDist, { recursive: true });
 writeFileSync(join(exactNodeRoot, "package.json"), JSON.stringify({
   name: "@sleep2agi/agent-node",
-  version: "2.5.0-preview.33",
+  version: "2.5.0-preview.34",
   publishConfig: { tag: "preview" },
   bin: { "agent-node": "dist/cli.js" },
 }));
