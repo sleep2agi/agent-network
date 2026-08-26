@@ -1575,14 +1575,20 @@ describe("Grok copresence runtime integration", () => {
         signalSource: fixture.signals,
         terminalSize: () => ({ cols: 100, rows: 30 }),
       });
+      // A second connection is admitted as a *control* connection (#879): the
+      // single-owner rule binds the keyboard, and a control connection takes
+      // none. It still may not type — asserted in attach.test.ts — and the
+      // human below keeps the seat for the rest of this test.
       const secondInput = new PassThrough();
-      await expect(connectGrokAttach({
+      const control = await connectGrokAttach({
         socketPath: fixture.attachSocket,
         input: secondInput,
         output: new PassThrough(),
         signalSource: fixture.signals,
         handshakeTimeoutMs: 500,
-      })).rejects.toThrow("already attached");
+      });
+      control.detach();
+      await control.closed;
 
       input.write("/model\r");
       await waitFor(() => runtime!.state.phase === "idle");
