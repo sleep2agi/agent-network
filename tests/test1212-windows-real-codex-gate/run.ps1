@@ -26,21 +26,31 @@ try {
   npm install --prefix $codexInstall --ignore-scripts --no-audit --no-fund --save-exact "@openai/codex@0.148.0"
   if ($LASTEXITCODE -ne 0) { throw "could not install exact Codex package" }
   $codexCmd = Join-Path $codexInstall "node_modules\.bin\codex.cmd"
-  $codexVersion = (& $codexCmd --version 2>&1 | Out-String).Trim()
-  if ($LASTEXITCODE -ne 0 -or $codexVersion -ne "codex-cli 0.148.0") { throw "required codex-cli 0.148.0 unavailable" }
-  $launcher = Join-Path $codexInstall "node_modules\@openai\codex\bin\codex.js"
-  $vendor = Get-ChildItem (Join-Path $codexInstall "node_modules\@openai") -Recurse -File |
-    Where-Object { $_.Name -eq "codex.exe" } | Select-Object -First 1
-  if (-not (Test-Path $launcher) -or -not $vendor) { throw "Codex launcher/vendor binary missing" }
+  # Static resolution only: no package-controlled script may execute before
+  # both the launcher and its one canonical vendor binary are allowlisted.
+  $cmdText = Get-Content -LiteralPath $codexCmd -Raw
+  $cmdMatches = [regex]::Matches($cmdText, '(?i)%~?dp0\\\.\.\\@openai\\codex\\bin\\codex\.js')
+  $cmdTargets = @($cmdMatches | ForEach-Object { $_.Value.ToLowerInvariant().Replace('%~dp0', '%dp0') } | Sort-Object -Unique)
+  if ($cmdTargets.Count -ne 1) { throw "codex.cmd does not name one canonical launcher" }
+  $launcher = [IO.Path]::GetFullPath((Join-Path (Split-Path $codexCmd) "..\@openai\codex\bin\codex.js"))
+  $expectedLauncher = [IO.Path]::GetFullPath((Join-Path $codexInstall "node_modules\@openai\codex\bin\codex.js"))
+  if ($launcher -ne $expectedLauncher) { throw "codex.cmd launcher path escaped canonical package root" }
+  $vendorPath = [IO.Path]::GetFullPath((Join-Path $codexInstall "node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe"))
+  $vendorRoot = [IO.Path]::GetFullPath((Join-Path $codexInstall "node_modules\@openai\codex-win32-x64")) + [IO.Path]::DirectorySeparatorChar
+  if (-not $vendorPath.StartsWith($vendorRoot, [StringComparison]::OrdinalIgnoreCase)) { throw "vendor path escaped canonical package root" }
+  if (-not (Test-Path -LiteralPath $launcher -PathType Leaf) -or -not (Test-Path -LiteralPath $vendorPath -PathType Leaf)) { throw "canonical Codex launcher/vendor binary missing" }
+  if ((Get-Item -LiteralPath $launcher).LinkType -or (Get-Item -LiteralPath $vendorPath).LinkType) { throw "Codex executable path must not be a link" }
   if ($env:PROCESSOR_ARCHITECTURE -ne "AMD64") { throw "allowlist covers only Windows x64" }
   $allowlist = Get-Content (Join-Path $PSScriptRoot "codex-0.148.0-windows-x64-sha256.json") -Raw | ConvertFrom-Json
   $launcherSha = (Get-FileHash -Algorithm SHA256 $launcher).Hash.ToLowerInvariant()
-  $vendorSha = (Get-FileHash -Algorithm SHA256 $vendor.FullName).Hash.ToLowerInvariant()
+  $vendorSha = (Get-FileHash -Algorithm SHA256 $vendorPath).Hash.ToLowerInvariant()
   if ($allowlist.schema -ne "anet/codex-binary-allowlist/v1" -or
       $allowlist.package -ne "@openai/codex@0.148.0" -or
       $allowlist.platform -ne "win32-x64" -or
       $launcherSha -ne $allowlist.launcherSha256 -or
       $vendorSha -ne $allowlist.vendorSha256) { throw "Codex executable hash is outside trusted allowlist" }
+  $codexVersion = (& $codexCmd --version 2>&1 | Out-String).Trim()
+  if ($LASTEXITCODE -ne 0 -or $codexVersion -ne "codex-cli 0.148.0") { throw "required codex-cli 0.148.0 unavailable" }
   # Only materialize auth after every downloaded executable passed the trusted
   # allowlist. npm and its package subprocesses never inherit the credential.
   [IO.File]::WriteAllText((Join-Path $env:CODEX_HOME "auth.json"), $credentialJson, (New-Object Text.UTF8Encoding($false)))

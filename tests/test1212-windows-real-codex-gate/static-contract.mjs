@@ -18,7 +18,11 @@ function audit(w, r, j) {
   const writeAuth = r.indexOf("[IO.File]::WriteAllText");
   requireContract(removeSecret >= 0 && removeSecret < npmInstall && npmInstall < writeAuth, "credential crosses package-install boundary");
   requireContract(/Codex executable hash is outside trusted allowlist/.test(r), "binary allowlist is not fail-closed");
-  requireContract(/length >= 2/.test(j) && /humanDoneAt - injectionAt < 60000/.test(j), "HUMAN_DONE active-turn timing proof missing");
+  const allowlistGate = r.indexOf("Codex executable hash is outside trusted allowlist");
+  requireContract(r.indexOf("& $codexCmd") > allowlistGate, "Codex executed before allowlist gate");
+  requireContract(!/Get-ChildItem[^\n]+-Recurse|Select-Object -First/i.test(r), "vendor resolution accepts a recursive decoy");
+  requireContract(/thread\/read/.test(j) && /status !== "inProgress"/.test(j) && /status !== "completed"/.test(j), "authoritative active/completed turn boundary missing");
+  requireContract(!/output\.match\(new RegExp\(marker/.test(j), "ConPTY redraw is treated as HUMAN_DONE evidence");
   requireContract(/steered !== 2/.test(j) && /role === "bridge"/.test(j), "same-turn/single-bridge assertions missing");
 }
 audit(workflow, runner, journey);
@@ -27,7 +31,10 @@ const mutations = [
   ["candidate checkout", workflow.replace("persist-credentials: false", "ref: ${{ inputs.source_sha }}\n          persist-credentials: false"), runner, journey],
   ["weak environment", workflow.replace('select(.type == "required_reviewers")', 'select(.type == "wait_timer")'), runner, journey],
   ["secret during npm", workflow, runner.replace("Remove-Item Env:ANET_CODEX_AUTH_JSON", "# removed"), journey],
-  ["short human turn", workflow, runner, journey.replace("humanDoneAt - injectionAt < 60000", "humanDoneAt - injectionAt < 1")],
+  ["prehash execution", workflow, runner.replace("$codexInstall =", "& $codexCmd --version\n  $codexInstall ="), journey],
+  ["vendor decoy", workflow, runner.replace("$vendorPath =", "Get-ChildItem $codexInstall -Recurse | Select-Object -First 1\n  $vendorPath ="), journey],
+  ["ConPTY redraw nonce", workflow, runner, journey.replace("if (!injected", "if ((output.match(new RegExp(marker, 'g')) || []).length >= 2) activeTurnId = 'redraw';\n    if (!injected")],
+  ["no authoritative read", workflow, runner, journey.replaceAll('thread/read', 'screen/read')],
 ];
 for (const [name, w, r, j] of mutations) {
   let red = false;

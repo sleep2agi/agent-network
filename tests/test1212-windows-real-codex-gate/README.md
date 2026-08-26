@@ -24,9 +24,11 @@ downloaded executable hashes match.
 
 The journey uses real Codex `app-server`, the real Codex TUI through ConPTY,
 the repository-built agent-node, and a disposable Hub/database. It requires
-normal and high tasks to remain in one active human turn for at least 60s. The
-nonce appears once in the echoed prompt and must appear a second time with the
-post-tool `HUMAN_DONE` response at least 60s after task injection. It also checks
+normal and high tasks to remain in one active human turn for at least 60s. An
+authoritative `thread/read` must show that turn `inProgress` with the nonce
+before tasks are posted, then the same turn `completed` with the assistant's
+`HUMAN_DONE` item after both tasks terminate. ConPTY redraws are not evidence.
+It also checks
 same thread/remote/HOME, exactly one bridge, clean stop, and history-preserving
 restart. `turnStartOutcomeDelta: 0` is explicitly a production bridge outcome
 (two `(steered)` messages and no queued/new-turn outcome), not a raw WebSocket
