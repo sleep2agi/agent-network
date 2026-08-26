@@ -1,0 +1,242 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 695B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/oven/bun:1.3.14
+#2 DONE 0.0s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [ 1/11] FROM docker.io/oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4
+#4 resolve docker.io/oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 0.0s done
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 1.80MB 0.1s done
+#5 DONE 0.1s
+
+#6 [ 6/11] RUN cd server && bun install --frozen-lockfile
+#6 CACHED
+
+#7 [ 8/11] COPY server ./server
+#7 CACHED
+
+#8 [ 4/11] COPY server/package.json server/package-lock.json ./server/
+#8 CACHED
+
+#9 [ 5/11] RUN cd agent-node && bun install --frozen-lockfile
+#9 CACHED
+
+#10 [ 7/11] COPY agent-node ./agent-node
+#10 CACHED
+
+#11 [ 3/11] COPY agent-node/package.json agent-node/package-lock.json ./agent-node/
+#11 CACHED
+
+#12 [ 9/11] COPY tests/test1181-codex-durable-poll/run.sh ./run.sh
+#12 CACHED
+
+#13 [ 2/11] WORKDIR /workspace
+#13 CACHED
+
+#14 [10/11] COPY tests/test1181-codex-durable-poll/witnessed-red.sh ./witnessed-red.sh
+#14 CACHED
+
+#15 [11/11] RUN chmod +x ./run.sh ./witnessed-red.sh
+#15 DONE 0.2s
+
+#16 exporting to image
+#16 exporting layers 0.1s done
+#16 exporting manifest sha256:1442d37970c619b6abee8587041b86dd755f992d1293f05193446c468f823ac4 0.0s done
+#16 exporting config sha256:3d27d77c05fa13c13e64045ebf03136a105740974b4c93d6f5cd0991874a0c30 0.0s done
+#16 exporting attestation manifest sha256:88da7bd301f5b528f1ef09af65d19ce55c42ed67377cd1dd229df5b25dc64a5d
+#16 exporting attestation manifest sha256:88da7bd301f5b528f1ef09af65d19ce55c42ed67377cd1dd229df5b25dc64a5d 0.0s done
+#16 exporting manifest list sha256:5e7b7f6713d2cc450fb3b86370dfa2e6d00e47ecea561db93b9c51a0cb085a89 0.0s done
+#16 naming to docker.io/library/anet-release46-test1181:latest done
+#16 unpacking to docker.io/library/anet-release46-test1181:latest 0.0s done
+#16 DONE 0.2s
+source_commit=aa7402d8148e62c00a087a4f107bd7d8bf9cd748
+PASS source SHA binding + 2 witnessed-red cases
+L1 environment + pure durable compensator
+bun test v1.3.14 (0d9b296a)
+
+agent-node/src/runtime/commhub-poll-compensator.test.ts:
+(pass) CommHub durable poll compensation > bounds configured intervals [0.34ms]
+(pass) CommHub durable poll compensation > normal SSE delivery and a later poll share task/client-request dedup [9.48ms]
+(pass) CommHub durable poll compensation > node-supplied or malformed client_request_id cannot poison Dashboard dedup [4.78ms]
+(pass) CommHub durable poll compensation > lost SSE is admitted by an idle poll exactly through the existing drain [2.77ms]
+(pass) CommHub durable poll compensation > cursor is private, durable across restart, and prevents replay [6.66ms]
+(pass) CommHub durable poll compensation > inbound lifecycle is monotonic and a completed task never reinjects [17.00ms]
+(pass) CommHub durable poll compensation > terminal outbound status missed by SSE is surfaced once across restart [15.36ms]
+(pass) CommHub durable poll compensation > monotonic terminal watermark garbage-collects more than 2000 delivered rows without replay [8481.62ms]
+(pass) CommHub durable poll compensation > terminal sequence handles out-of-order completion independent of task creation order [10.87ms]
+(pass) CommHub durable poll compensation > expired cross-process lease retries the same stable key after simulated crash [9.62ms]
+(pass) CommHub durable poll compensation > callback failure returns durable delivery to pending and retries the same idempotency key [13.61ms]
+(pass) CommHub durable poll compensation > two poller processes share a delivery lease and invoke one callback [19.28ms]
+(pass) CommHub durable poll compensation > concurrent triggers coalesce and backoff remains bounded [1.09ms]
+(pass) CommHub durable poll compensation > old Hub visibly degrades to realtime-only instead of claiming polling [0.54ms]
+(pass) CommHub durable poll compensation > non-terminal outbound states are not surfaced [2.32ms]
+(pass) CommHub durable poll compensation > production wiring keeps SSE primary and routes poll wakes through the existing drain [2.11ms]
+(pass) CommHub durable poll compensation > production dedup imports the authenticated Dashboard provenance gate [0.18ms]
+(pass) CommHub durable poll compensation > production records the durable cursor only after Hub ACK succeeds [1.08ms]
+
+ 18 pass
+ 0 fail
+ 48 expect() calls
+Ran 18 tests across 1 file. [8.65s]
+L1 Hub immutable identity + cursor pagination
+bun test v1.3.14 (0d9b296a)
+
+server/src/task-consumption.test.ts:
+[commhub] database: /tmp/test1181-hub.db
+[commhub] 🎉 14-day free trial started!
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+(pass) task consumed_at identity and lifecycle > immutable node cursor paginates beyond 100 without alias or cross-node leakage [306.82ms]
+(pass) task consumed_at identity and lifecycle > terminal sequence paginates beyond 2000 and admits late completion of an old task [4196.83ms]
+[10:04:53] user_task_consumption → send_task → node_consumption_a: connected process has not started a model turn
+[10:04:53] node_consumption_a → get_inbox: 1 pending messages
+[10:04:53] node_consumption_a → ack_inbox: 0bd9ef30
+(pass) task consumed_at identity and lifecycle > enqueue and process-level ack keep consumed_at null [94.06ms]
+[10:04:53] user_task_consumption → send_task → node_consumption_a: vendor request accepted but no turn event yet
+(pass) task consumed_at identity and lifecycle > runtime submission is visible without claiming authoritative consumption [77.76ms]
+[10:04:53] user_task_consumption → send_task → node_consumption_a: runtime emitted an attributable event
+(pass) task consumed_at identity and lifecycle > token-bound target marks exact task idempotently [73.62ms]
+[10:04:53] user_task_consumption → send_task → node_consumption_a: batched wake first
+[10:04:53] user_task_consumption → send_task → node_consumption_a: batched wake second
+(pass) task consumed_at identity and lifecycle > one runtime wake can mark an exact batch of owned tasks [87.56ms]
+[10:04:53] user_task_consumption → send_task → node_consumption_a: owned
+[10:04:53] user_task_consumption → send_task → node_consumption_b: foreign
+(pass) task consumed_at identity and lifecycle > foreign or missing row rejects the whole batch with zero partial writes [79.71ms]
+[10:04:54] user_task_consumption → send_task → node_consumption_a: user token must not stamp node evidence
+(pass) task consumed_at identity and lifecycle > user token cannot forge runtime consumption [70.17ms]
+[10:04:54] user_task_consumption → send_task → node_consumption_a: legacy direct session has no immutable node id
+[10:04:54] user_task_consumption → send_task → node_consumption_a: alias fallback must not cross target aliases
+(pass) task consumed_at identity and lifecycle > token-bound canonical alias is the fail-closed fallback only for tasks without node_id [88.22ms]
+[10:04:54] user_task_consumption → send_task → node_consumption_a: task-lifetime evidence
+[10:04:54] node_consumption_a → ack_inbox: 527fddc3
+[10:04:54] user_task_consumption → retry_task → 527fddc3
+[10:04:54] node_consumption_a → get_inbox: 1 pending messages
+[10:04:54] node_consumption_a → ack_inbox: 527fddc3
+(pass) task consumed_at identity and lifecycle > retry keeps task-lifetime evidence and exposes the logical task id on the new inbox row [97.06ms]
+[10:04:54] user_task_consumption → send_task → node_consumption_a: retry must not lose logical task identity
+[10:04:54] node_consumption_a → ack_inbox: cbbb3b60
+[10:04:54] user_task_consumption → retry_task → cbbb3b60
+[10:04:54] node_consumption_a → get_inbox: 1 pending messages
+[10:04:54] node_consumption_a → ack_inbox: 772d49cb
+(pass) task consumed_at identity and lifecycle > an unconsumed first attempt can report against the linked task after retry [82.70ms]
+[10:04:54] user_task_consumption → send_task → node_consumption_a: reassign keeps logical task evidence
+[10:04:54] node_consumption_a → ack_inbox: 80bc84b8
+[10:04:54] user_task_consumption → reassign_task → 80bc84b8 → node_consumption_b
+[10:04:54] node_consumption_b → get_inbox: 1 pending messages
+[10:04:54] node_consumption_b → ack_inbox: 80bc84b8
+(pass) task consumed_at identity and lifecycle > reassign preserves task-lifetime evidence and binds the new inbox row to the same task [105.65ms]
+[10:04:54] node_consumption_a → get_inbox: 1 pending messages
+(pass) task consumed_at identity and lifecycle > scheduler delivery writes and exposes the same logical task id [47.98ms]
+
+ 13 pass
+ 0 fail
+ 111 expect() calls
+Ran 13 tests across 1 file. [5.90s]
+L2 fault/reconnect + existing single-flight/steer ownership
+bun test v1.3.14 (0d9b296a)
+
+agent-node/src/runtime/inbox-drain-lane.test.ts:
+(pass) inbox drain lanes > an informational lane drains while the work lane is busy [1.41ms]
+(pass) inbox drain lanes > each lane remains serial [0.39ms]
+(pass) inbox drain lanes > repeated wakeups for the same drain coalesce into one dirty rerun [0.60ms]
+(pass) inbox drain lanes > a failed drain is reported and does not poison later retries [0.52ms]
+(pass) inbox drain lanes > retry mode backs off and eventually completes the same drain [3.53ms]
+(pass) inbox drain lanes > one failed inbox item does not starve later items in the same snapshot [0.57ms]
+(pass) inbox drain lanes > ack-only retry does not duplicate the first notification or delay the second [1.63ms]
+
+agent-node/src/runtime/codex-app-server-bridge.test.ts:
+(pass) CodexAppServerBridge — bootstrap + task mapping > bootstrap sends initialize + initialized + thread/resume in order [10.95ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > empty threadId → bootstrap creates a thread (thread/start) and adopts its id [7.21ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > stale threadId with no rollout → resume fails, bootstrap falls back to thread/start [9.96ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > startTaskTurn returns the server-assigned turnId and marks bridge working [3.81ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > turn/completed for OUR turn fires task_reply mapped back to the task_id [15.74ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > only exact owned-turn item events emit task_activity [16.06ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > authenticated Dashboard native /goal text reaches the shared thread unchanged and replies [16.02ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > clientUserMessageId rebinds a task when a goal successor replaces the turn/start response id [51.75ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > client-id ownership observed before the RPC response wins without reversing task event order [24.89ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > real bridge + runtime bounds a deferred terminal when exact client identity never arrives [33.62ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > real bridge + runtime bounds an unresolved turn/start through the left-FIFO fallback [60.94ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > agentMessage/delta accumulates when server omits finalText [15.77ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > turn/completed for a HUMAN-TUI-initiated turn is dropped (§7.5) [15.86ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > events for a DIFFERENT thread are dropped (defense in depth) [15.29ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > startTaskTurn refuses a second task while one is active [3.78ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > turn/completed with an error field fires task_error, NOT task_reply [14.22ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > turn/completed with interrupted status cannot become a successful reply [15.51ms]
+(pass) CodexAppServerBridge — approvals (waiting_human) §7.6 > reverse-request approval records waiting_human and sends NO response [16.28ms]
+(pass) CodexAppServerBridge — approvals (waiting_human) §7.6 > serverRequest/resolved clears waiting_human and status recovers [26.97ms]
+(pass) CodexAppServerBridge — approvals (waiting_human) §7.6 > multiple concurrent approvals: bridge stays waiting_human until all resolve [37.39ms]
+(pass) CodexAppServerBridge — two-client race for idle > only one bridge wins turn/start; the other observes and does not reply [23.47ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > reconnect recovers an active human turn and keeps it steerable [5.43ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > reconnect provenance keeps an orphaned network turn FIFO-only [23.86ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > reconnect provenance ignores leading whitespace before the network prefix [5.45ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > reconnect stays FIFO-only when real-wire active history omits userMessage [3.12ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > uses exact turn/steer contract and maps the human turn final answer [27.27ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > multiple Dashboard rows steer one human turn while ordinary agent work stays queued [38.79ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > steer mismatch fails closed and preserves the task in the normal FIFO [37.85ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > turn completion cannot attribute a task before turn/steer acceptance [39.25ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > reconciliation recovers a missed human turn completion and exact steered reply [14.61ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > concurrent startTaskTurn: exactly ONE turn/start reaches the server even with a slow response [55.03ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > submitTask queues the second task and drains it after turn/completed (order preserved) [119.03ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > cancelQueuedTask removes only the named FIFO row before it can execute [57.22ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > thread/read recovers a completed owned turn while a successor keeps the thread active [109.50ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > thread/read uses clientUserMessageId to recover a replacement turn when all live item events were lost [4.32ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > slow full-history fallback recovers when both terminal and successor notifications are lost [3.45ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > full history never attributes a different completed turn to the owned task [3.76ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > thread/read never recovers an interrupted turn as success [3.13ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > drain losing the idle race requeues at the FRONT and retries on next idle [168.27ms]
+
+agent-node/src/runtime/codex-app-server/runtime.test.ts:
+(pass) buildOwnedAppServerArgs > no opts → bare app-server (codex defaults apply) [0.12ms]
+(pass) buildOwnedAppServerArgs > approval_policy only → single -c override before --listen [0.06ms]
+(pass) buildOwnedAppServerArgs > sandbox_mode only → single -c override [0.05ms]
+(pass) buildOwnedAppServerArgs > auto-approve posture (never + danger-full-access) → both overrides, policy first [0.05ms]
+(pass) buildOwnedAppServerArgs > commhubMcpUrl → adds url + bearer-token-env-var -c overrides [0.08ms]
+(pass) buildOwnedAppServerArgs > the CommHub bearer TOKEN never appears in argv (only the env-var NAME) [0.18ms]
+(pass) buildOwnedAppServerArgs > full production posture (yolo + commhub MCP) → stable order, --listen last [0.14ms]
+(pass) recoverSharedTurnOnAttach > invokes persisted active-turn recovery before shared runtime is returned [0.54ms]
+(pass) recoverSharedTurnOnAttach > history read failure is visible and never reported as steerable [0.36ms]
+(pass) codexAppServerThink — terminal-event reconciliation watchdog > FIFO admission reports neither submission nor consumption [21.93ms]
+(pass) codexAppServerThink — terminal-event reconciliation watchdog > exact runtime submission and task_started report each level once [0.73ms]
+(pass) codexAppServerThink — terminal-event reconciliation watchdog > exact task activity resets the response idle deadline for a long-running turn [70.74ms]
+(pass) codexAppServerThink — terminal-event reconciliation watchdog > activity from another task cannot keep a silent owned task alive [55.04ms]
+(pass) codexAppServerThink — terminal-event reconciliation watchdog > a started task whose client identity never confirms has a bounded, distinct response timeout [26.06ms]
+(pass) codexAppServerThink — terminal-event reconciliation watchdog > a never-started FIFO task has its own finite, distinct queue deadline [80.70ms]
+(pass) codexAppServerThink — terminal-event reconciliation watchdog > lost task_started after FIFO removal remains finite [80.93ms]
+(pass) codexAppServerThink — terminal-event reconciliation watchdog > a failed start or steer requeued after the queue deadline cannot leave a ghost row [113.95ms]
+(pass) codexAppServerThink — terminal-event reconciliation watchdog > queued wait does not consume the model-response timeout budget [86.28ms]
+(pass) codexAppServerThink — terminal-event reconciliation watchdog > another task starting cannot arm this task's timeout [111.05ms]
+(pass) codexAppServerThink — terminal-event reconciliation watchdog > resolves from authoritative reconciliation when turn/completed is missed [7.42ms]
+(pass) codexAppServerThink — terminal-event reconciliation watchdog > forwards the authenticated Dashboard steering decision to the bridge [5.43ms]
+(pass) codexAppServerReplyOrThrow > failed bridge outcomes enter processTask's thrown failure path [0.36ms]
+(pass) codexAppServerReplyOrThrow > successful empty replies preserve the existing fallback [0.07ms]
+
+ 69 pass
+ 0 fail
+ 231 expect() calls
+Ran 69 tests across 3 files. [1.87s]
+L2 witnessed-red mutations
+WITNESSED RED: poll wake disconnected from existing inbox lane
+WITNESSED RED: cursor advances before Hub ACK
+WITNESSED RED: old Hub falsely claims compensation
+WITNESSED RED: callback failure loses durable retry
+WITNESSED RED: node metadata poisons Dashboard request dedup
+WITNESSED RED: outbound query drops immutable cursor protocol
+WITNESSED RED: delivered terminal watermark no longer advances
+L3 production bundle
+$ bun build src/cli.ts --outdir dist --entry-naming cli.js --target node --minify --external @anthropic-ai/claude-agent-sdk --external '@anthropic-ai/claude-agent-sdk-*' --external @openai/codex-sdk --external node-pty && bun build src/upload-file-mcp-stdio.ts --outdir dist --entry-naming upload-file-mcp-stdio.js --target node --minify
+Bundled 281 modules in 76ms
+
+  cli.js  1.18 MB  (entry point)
+
+Bundled 221 modules in 38ms
+
+  upload-file-mcp-stdio.js  0.27 MB  (entry point)
