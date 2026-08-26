@@ -26,8 +26,8 @@ switch (mutation) {
   case "bypass_cli_wiring":
     replaceExact(
       cliPath,
-      "codexAppServerSessionManager.getOrOpen(async () =>",
-      "codexAppServerSessionManager_BYPASSED(async () =>",
+      "  const session = await ensureCodexAppServerSession();\n\n  let lastActivityHeartbeatAt",
+      "  const session = codexAppServerSessionManager.current()!;\n\n  let lastActivityHeartbeatAt",
     );
     break;
   case "publish_dead_session":

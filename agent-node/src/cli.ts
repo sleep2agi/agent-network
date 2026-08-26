@@ -1893,6 +1893,38 @@ const codexAppServerUrl: string | undefined =
 const codexAppServerSessionManager = createCodexSessionManager<
   import("./runtime/codex-app-server/runtime").CodexAppServerRuntimeSession
 >();
+
+async function ensureCodexAppServerSession(): Promise<
+  import("./runtime/codex-app-server/runtime").CodexAppServerRuntimeSession
+> {
+  const { openCodexAppServerRuntime } = await import("./runtime/codex-app-server/runtime");
+  const existingSession = codexAppServerSessionManager.current();
+  if (existingSession && !existingSession.isRunning) {
+    log(`[codex-app-server] previous session not running — reopening`);
+  }
+  const session = await codexAppServerSessionManager.getOrOpen(async () => {
+    let openedRef: import("./runtime/codex-app-server/runtime").CodexAppServerRuntimeSession | null = null;
+    const opened = await openCodexAppServerRuntime({
+      serverUrl: codexAppServerUrl,
+      threadId: codexAppServerThreadId,
+      approvalPolicy: (fileConfig.flags as { approvalPolicy?: string } | undefined)?.approvalPolicy,
+      sandboxMode: (fileConfig.flags as { sandboxMode?: string } | undefined)?.sandboxMode,
+      commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`,
+      commhubToken: AUTH_TOKEN || undefined,
+      onThread: (threadId) => writebackCodexThread(threadId),
+      onExit: (info) => {
+        warn(`[codex-app-server] app-server exited code=${info.code} signal=${info.signal}; next turn will reopen`);
+        if (openedRef) codexAppServerSessionManager.invalidate(openedRef);
+      },
+      log,
+      warn,
+    });
+    openedRef = opened;
+    return opened;
+  });
+  writebackCodexThread(session.threadId);
+  return session;
+}
 if (NEW_SESSION && RUNTIME === "grok" && GROK_EXECUTION_MODE === "cli") {
   clearGrokSession("--new-session requested");
 }
@@ -3252,51 +3284,9 @@ async function processWithCodexAppServer(
   steerIfExternalTurn = false,
   evidence?: TaskRuntimeEvidenceReporter,
 ): Promise<string> {
-  const { openCodexAppServerRuntime, codexAppServerThink, codexAppServerReplyOrThrow } =
+  const { codexAppServerThink, codexAppServerReplyOrThrow } =
     await import("./runtime/codex-app-server/runtime");
-
-  const existingSession = codexAppServerSessionManager.current();
-  if (existingSession && !existingSession.isRunning) {
-    log(`[codex-app-server] previous session not running — reopening on this turn`);
-  }
-
-  const session = await codexAppServerSessionManager.getOrOpen(async () => {
-    let openedRef: import("./runtime/codex-app-server/runtime").CodexAppServerRuntimeSession | null = null;
-    const opened = await openCodexAppServerRuntime({
-      serverUrl: codexAppServerUrl,
-      threadId: codexAppServerThreadId,
-      // Auto-approve posture (RFC-030): the bridge never answers approvals,
-      // so an unattended node that must run write/command tasks needs
-      // approval_policy=never on its OWNED app-server. Driven by node config
-      // flags (approvalPolicy / sandboxMode); default codex behavior when
-      // unset. Ignored for the shared-server (adopt) topology.
-      approvalPolicy: (fileConfig.flags as { approvalPolicy?: string } | undefined)?.approvalPolicy,
-      sandboxMode: (fileConfig.flags as { sandboxMode?: string } | undefined)?.sandboxMode,
-      // Wire CommHub as a native MCP server so codex can call commhub_* tools
-      // (send_task / send_message / get_all_status …) instead of shelling out.
-      // The MCP endpoint is <hub>/mcp (COMMHUB_URL is the base). Owned-server
-      // topology only; shared/adopt servers carry their own MCP config. Token
-      // via env inside the runtime (never argv/config).
-      commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`,
-      commhubToken: AUTH_TOKEN || undefined,
-      onThread: (threadId) => writebackCodexThread(threadId),
-      onExit: (info) => {
-        warn(`[codex-app-server] app-server exited code=${info.code} signal=${info.signal}; next turn will reopen`);
-        // If the child dies before open() resolves there is nothing published
-        // yet; the post-open isRunning gate below rejects it.  Once published,
-        // invalidate only that exact session so a late old exit cannot clear a
-        // newer replacement.
-        if (openedRef) codexAppServerSessionManager.invalidate(openedRef);
-      },
-      log,
-      warn,
-    });
-    openedRef = opened;
-    return opened;
-  });
-  // A freshly-created thread is written back via onThread; make sure the
-  // in-memory var tracks it even when resuming (idempotent).
-  writebackCodexThread(session.threadId);
+  const session = await ensureCodexAppServerSession();
 
   let lastActivityHeartbeatAt = Date.now();
   const outcome = await codexAppServerThink(session, {
@@ -6147,6 +6137,18 @@ if (GROK_COPRESENCE) {
 }
 await register();
 log("已注册到 CommHub");
+// Subscribe before the human TUI starts. Lazy-on-first-task attachment can
+// miss the TUI's turn/started notification; relying on thread/read to recover
+// that in-progress turn is not portable across Windows Codex builds.
+if (RUNTIME === "codex-app-server" && codexAppServerUrl) {
+  try {
+    const session = await ensureCodexAppServerSession();
+    log(`[codex-app-server] shared bridge ready thread=${session.threadId.slice(0, 12)}…`);
+  } catch (startupError: any) {
+    error(`[codex-app-server] shared bridge startup failed: ${startupError?.message || startupError}`);
+    process.exit(1);
+  }
+}
 let ownerScheduleConsumer: OwnerScheduleConsumer | null = null;
 try {
   ownerScheduleConsumer = createOwnerScheduleConsumer({
