@@ -26,24 +26,21 @@
  * every rule below is assertable without a PTY, a binary, or a clock.
  */
 
-import type { GrokCopresencePhase } from "./state.js";
-
 export type GrokModelSwitchRefusalCode =
   | "invalid_model"
   | "unchanged"
   | "busy";
 
-export interface GrokModelSwitchPlan {
+export type GrokModelSwitchRoute = "hot" | "restart";
+
+export type GrokModelSwitchDecision =
+  | { kind: "hot"; method: "session/set_model"; params: { sessionId: string; modelId: string } }
+  | { kind: "restart"; resume: true };
+
+export interface GrokModelSwitchSuccess {
   ok: true;
   model: string;
-  /**
-   * 🔴 Always `true`, and deliberately not derived from any input.
-   *
-   * A model switch that started a fresh session would silently drop the
-   * conversation the human is sitting in — the exact loss this feature exists
-   * to avoid. Making it a constant means no caller and no future refactor can
-   * turn a model switch into a new session by passing a flag.
-   */
+  route: GrokModelSwitchRoute;
   resume: true;
 }
 
@@ -53,19 +50,9 @@ export interface GrokModelSwitchRefusal {
   message: string;
 }
 
-export type GrokModelSwitchDecision = GrokModelSwitchPlan | GrokModelSwitchRefusal;
+export type GrokModelSwitchResult = GrokModelSwitchSuccess | GrokModelSwitchRefusal;
 
 /**
- * Phases in which a switch is allowed.
- *
- * Re-spawning the leader tears down the TUI process, so it must not happen
- * while a turn is in flight: `network_turn` would lose a task that CommHub
- * believes is running, `human_turn` / `human_editing` would throw away what the
- * person is in the middle of, and `recovering` means the runtime does not yet
- * know what state it is in.
- */
-const SWITCHABLE_PHASES: ReadonlySet<GrokCopresencePhase> = new Set(["idle"]);
-
 /** Grok model ids are short slugs; the cap only keeps argv and logs sane. */
 const MAX_MODEL_ID_LENGTH = 128;
 
@@ -81,12 +68,8 @@ const MAX_MODEL_ID_LENGTH = 128;
  */
 const VALID_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]*$/;
 
-export function decideGrokModelSwitch(input: {
-  requested: unknown;
-  current?: string;
-  phase: GrokCopresencePhase;
-}): GrokModelSwitchDecision {
-  const raw = typeof input.requested === "string" ? input.requested.trim() : "";
+export function normalizeGrokModelSwitchRequest(requested: unknown): GrokModelSwitchResult {
+  const raw = typeof requested === "string" ? requested.trim() : "";
   if (!raw) {
     return refuse("invalid_model", "a model id is required");
   }
@@ -99,19 +82,22 @@ export function decideGrokModelSwitch(input: {
       `model id ${JSON.stringify(raw)} is not a plain slug; it must start with a letter or digit and contain no whitespace, control characters, or leading dash`,
     );
   }
-  // Checked before `busy` on purpose: an unchanged model needs no restart, so
-  // there is nothing for a running turn to conflict with, and answering "busy"
-  // would send the caller off to retry something that was already a no-op.
-  if (input.current !== undefined && input.current === raw) {
-    return refuse("unchanged", `the co-presence TUI is already running ${raw}`);
-  }
-  if (!SWITCHABLE_PHASES.has(input.phase)) {
-    return refuse(
-      "busy",
-      `switching models restarts the shared TUI, which is only safe while idle (current phase: ${input.phase})`,
-    );
-  }
-  return { ok: true, model: raw, resume: true };
+  return { ok: true, model: raw, route: "hot", resume: true };
+}
+
+export function decideGrokModelSwitch(opts: {
+  sessionId: string;
+  modelId: string;
+}): GrokModelSwitchDecision {
+  return {
+    kind: "hot",
+    method: "session/set_model",
+    params: { sessionId: opts.sessionId, modelId: opts.modelId },
+  };
+}
+
+export function fallbackGrokModelSwitchRestart(): GrokModelSwitchDecision {
+  return { kind: "restart", resume: true };
 }
 
 function refuse(code: GrokModelSwitchRefusalCode, message: string): GrokModelSwitchRefusal {
