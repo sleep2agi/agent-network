@@ -128,7 +128,7 @@ export interface SideThreadExecutionPort {
     requestKey: string;
     text: string;
   }): Promise<{ destinationTurnId: string }>;
-  subscribe(listener: (event: SideThreadRuntimeEvent) => void): () => void;
+  subscribe(listener: (event: SideThreadRuntimeEvent) => void | Promise<void>): () => void;
 }
 
 export class SideThreadError extends Error {
@@ -188,14 +188,14 @@ export class UnsupportedSideThreadPort implements SideThreadExecutionPort {
 export class SideThreadPortRegistry implements SideThreadExecutionPort {
   private delegate: SideThreadExecutionPort = new UnsupportedSideThreadPort();
   private readonly listeners = new Set<
-    (event: SideThreadRuntimeEvent) => void
+    (event: SideThreadRuntimeEvent) => void | Promise<void>
   >();
   private detach: () => void = () => {};
   install(port: SideThreadExecutionPort): () => void {
     this.detach();
     this.delegate = port;
-    this.detach = port.subscribe((event) => {
-      for (const listener of this.listeners) listener(event);
+    this.detach = port.subscribe(async (event) => {
+      for (const listener of this.listeners) await listener(event);
     });
     return () => {
       if (this.delegate !== port) return;
@@ -225,7 +225,9 @@ export class SideThreadPortRegistry implements SideThreadExecutionPort {
   bringBack(input: Parameters<SideThreadExecutionPort["bringBack"]>[0]) {
     return this.delegate.bringBack(input);
   }
-  subscribe(listener: (event: SideThreadRuntimeEvent) => void): () => void {
+  subscribe(listener: (event: SideThreadRuntimeEvent) => void | Promise<void>): () => void {
+    if (this.listeners.size > 0)
+      throw new Error("SideThread runtime port supports exactly one durable terminal applier");
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
@@ -683,9 +685,7 @@ export class SideThreadCoordinator {
       id?: () => string;
     },
   ) {
-    this.unsubscribe = port.subscribe((event) => {
-      void this.acceptRuntimeEvent(event);
-    });
+    this.unsubscribe = port.subscribe((event) => this.acceptRuntimeEvent(event));
   }
 
   close(): void {
@@ -1892,7 +1892,14 @@ export class SideThreadCoordinator {
       requireIdentity(event.attemptId, "event.attemptId");
       requireIdentity(event.threadId, "event.threadId");
       requireIdentity(event.turnId, "event.turnId");
-      this.store.db.transaction(() => {
+    } catch {
+      // Protocol-invalid runtime events are untrusted input and are ignored.
+      return;
+    }
+    // Database/internal failures must reject the transport apply. Swallowing
+    // them would let the durable terminal receipt advance to applied while the
+    // SideThread record remained running forever.
+    this.store.db.transaction(() => {
         const owned = this.store.db.get<any>(
           `SELECT c.active_attempt_id,c.derived_thread_id,a.state,a.turn_id FROM side_chats c JOIN side_chat_attempts a ON a.side_chat_id=c.side_chat_id AND a.attempt_id=?2 WHERE c.side_chat_id=?1`,
           event.sideChatId,
@@ -1969,10 +1976,7 @@ export class SideThreadCoordinator {
           event.status,
           t,
         );
-      });
-    } catch {
-      /* malformed runtime events are untrusted and ignored */
-    }
+    });
   }
 
   private failStarting(
