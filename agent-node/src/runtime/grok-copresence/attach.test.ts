@@ -159,6 +159,116 @@ describe("Grok co-presence local attach server", () => {
     expect(server.clientAttached).toBe(false);
   });
 
+  it("routes a set-model frame through the same serialized arbiter queue as input", async () => {
+    // Ordering matters, not just delivery: a switch that overtook queued
+    // keystrokes would tear the TUI down with the person's line still unsent.
+    const { socketPath } = temporarySocket();
+    const complete = deferred<void>();
+    const events: string[] = [];
+    const server = await startServer(socketPath, {
+      onInput: async (data) => {
+        events.push(`input:${data.toString("ascii")}`);
+        await Promise.resolve();
+      },
+      onSetModel: (model) => {
+        events.push(`set-model:${model}`);
+        complete.resolve();
+      },
+    });
+    const client = await connect(socketPath);
+    await client.frames.next();
+
+    client.socket.write([
+      JSON.stringify({ type: "input", data: Buffer.from("hi").toString("base64"), encoding: "base64" }),
+      JSON.stringify({ type: "set-model", model: "grok-4.6" }),
+      "",
+    ].join("\n"));
+
+    await complete.promise;
+    expect(events).toEqual(["input:hi", "set-model:grok-4.6"]);
+    expect(server.clientAttached).toBe(true);
+  });
+
+  it("🔴 refuses set-model when the runtime cannot switch, rather than accepting it silently", async () => {
+    // Accepting it would tell the caller the model moved on a node that has
+    // no way to move it.
+    const { socketPath } = temporarySocket();
+    await startServer(socketPath);
+    const client = await connect(socketPath);
+    await client.frames.next();
+
+    client.socket.write(`${JSON.stringify({ type: "set-model", model: "grok-4.6" })}\n`);
+    expect(await client.frames.next()).toMatchObject({
+      type: "error",
+      code: "unsupported_frame",
+    });
+  });
+
+  it("🔴 refuses a set-model frame that is not exactly {type, model:string}", async () => {
+    // The operand ends up in argv. Anything the transport is not certain about
+    // must not reach the runtime at all.
+    for (const frame of [
+      { type: "set-model" },
+      { type: "set-model", model: 42 },
+      { type: "set-model", model: "grok-4.6", extra: "smuggled" },
+    ]) {
+      const { socketPath } = temporarySocket();
+      let called = false;
+      await startServer(socketPath, { onSetModel: () => { called = true; } });
+      const client = await connect(socketPath);
+      await client.frames.next();
+
+      client.socket.write(`${JSON.stringify(frame)}\n`);
+      expect(await client.frames.next(), JSON.stringify(frame)).toMatchObject({
+        type: "error",
+        code: "invalid_set_model",
+      });
+      expect(called, JSON.stringify(frame)).toBe(false);
+    }
+  });
+
+  it("🔴 known limitation: set-model is unreachable while a human is attached", async () => {
+    // Pinned deliberately, not asserted as desirable. The transport admits one
+    // client, and it refuses the second connection before parsing any frame —
+    // so a `set-model` sender is turned away for the same reason a second
+    // keyboard would be, even though it takes no keyboard.
+    //
+    // That makes the switch unusable exactly when someone would reach for it:
+    // while sitting in the TUI. Lifting it means giving the transport a
+    // control role that may send `set-model` and nothing else, which changes a
+    // rule that guards keyboard ownership and belongs in its own review.
+    //
+    // This test exists so the limitation cannot be mistaken for an oversight,
+    // and so the change that lifts it has to come here and say so.
+    const { socketPath } = temporarySocket();
+    let called = false;
+    const server = await startServer(socketPath, { onSetModel: () => { called = true; } });
+
+    const human = await connect(socketPath);
+    await human.frames.next();
+
+    const controller = await connect(socketPath);
+    // The server destroys this socket as it rejects it, so a write racing that
+    // teardown can emit 'error' with nobody listening. `connect()` only
+    // attaches a handler for the handshake.
+    controller.socket.on("error", () => {});
+    // Written before the rejection is read, so the frame is genuinely in
+    // flight rather than sent into an already-closed socket. It still never
+    // reaches the runtime: the connection is refused before any parsing.
+    controller.socket.write(`${JSON.stringify({ type: "set-model", model: "grok-4.6" })}\n`);
+    expect(await controller.frames.next()).toMatchObject({
+      type: "error",
+      code: "client_already_attached",
+      fatal: true,
+    });
+    await Bun.sleep(50);
+    expect(called).toBe(false);
+    // The human keeps the keyboard throughout.
+    expect(server.clientAttached).toBe(true);
+    controller.socket.destroy();
+    human.socket.destroy();
+  });
+
   it("refuses symlinks and regular files at the socket path", async () => {
     const symlinkCase = temporarySocket();
     symlinkSync(join(symlinkCase.root, "missing-target"), symlinkCase.socketPath);

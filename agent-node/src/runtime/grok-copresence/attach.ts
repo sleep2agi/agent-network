@@ -52,6 +52,19 @@ export interface GrokCopresenceAttachServerOptions {
   /** Receives validated dimensions. The arbiter remains the sole PTY owner. */
   onResize: (cols: number, rows: number) => void | Promise<void>;
   onDetach?: (reason: GrokCopresenceAttachDetachReason) => void | Promise<void>;
+  /**
+   * Receives a requested model id (issue #879).
+   *
+   * 🔴 This transport does not validate the value beyond "it is a string".
+   * The runtime owns that decision — it is the side that knows the current
+   * model, the current phase, and what argv the switch would produce. A
+   * transport that pre-screened model ids would be a second, weaker copy of
+   * that policy, and the two would drift.
+   *
+   * Optional: a node whose runtime cannot switch models leaves it unset, and
+   * the frame is then refused rather than silently accepted.
+   */
+  onSetModel?: (model: string) => void | Promise<void>;
   maxFrameBytes?: number;
   maxBufferedBytes?: number;
 }
@@ -375,6 +388,22 @@ class AttachServer implements GrokCopresenceAttachServer {
         return;
       }
 
+      case "set-model": {
+        // 🔴 Refused rather than ignored when the runtime cannot switch. A
+        // silently accepted frame would let a caller believe the model moved.
+        if (!this.options.onSetModel) {
+          this.rejectActive(client, "unsupported_frame", "this node does not support set-model");
+          return;
+        }
+        if (!hasOnlyKeys(frame, ["type", "model"]) || typeof frame.model !== "string") {
+          this.rejectActive(client, "invalid_set_model", "set-model requires a string model field");
+          return;
+        }
+        const model = frame.model;
+        this.enqueueCallback(client, () => this.options.onSetModel!(model), 0);
+        return;
+      }
+
       case "detach":
         if (Object.keys(frame).some((key) => key !== "type")) {
           this.rejectActive(client, "invalid_detach", "detach frame has unexpected fields");
@@ -478,6 +507,19 @@ class AttachServer implements GrokCopresenceAttachServer {
       }, this.maxFrameBytes);
       if (socket.writable && socket.writableLength + encoded.length <= this.maxBufferedBytes) {
         socket.end(encoded);
+        // 🔴 `end()` is a half-close: it sends FIN but the read side stays
+        // open. A socket rejected before it was ever attached has no `data`
+        // listener, so anything the peer sends piles up unread and the
+        // connection never ends — `server.close()` then waits for it forever
+        // and a refused client can keep the whole attach server from shutting
+        // down. (Reproduced on origin/main by writing one frame from the
+        // second client in the pre-existing "rejects a second client" test.)
+        //
+        // Draining is the fix, not `destroy()`: destroying a socket that
+        // still holds unread inbound data resets the connection, and the
+        // reset discards the error frame written just above — the peer would
+        // stop hanging but never learn why it was refused.
+        socket.resume();
       } else {
         socket.destroy();
       }

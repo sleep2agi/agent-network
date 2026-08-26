@@ -1053,6 +1053,33 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   }
 
   /**
+   * Attach-transport entry point for a model switch (issue #879).
+   *
+   * 🔴 The outcome is broadcast rather than thrown. The caller is an attach
+   * client on the other end of a socket, so an exception here would land in
+   * the runtime's own logs and leave the person who asked staring at an
+   * unchanged screen — the same silent shape this whole feature exists to
+   * remove.
+   */
+  private async onAttachSetModel(model: string): Promise<void> {
+    let decision: GrokModelSwitchDecision;
+    try {
+      decision = await this.switchModel(model);
+    } catch (error) {
+      const message = errorMessage(error);
+      this.warn(`[grok-copresence] model switch to ${model} failed: ${message}`);
+      this.attach?.broadcastStatus({ ...this.attachStatus(), modelSwitch: { ok: false, code: "failed", message } });
+      return;
+    }
+    if (decision.ok) {
+      this.log(`[grok-copresence] model switch accepted: ${decision.model}`);
+    } else {
+      this.warn(`[grok-copresence] model switch refused (${decision.code}): ${decision.message}`);
+    }
+    this.attach?.broadcastStatus({ ...this.attachStatus(), modelSwitch: decision });
+  }
+
+  /**
    * Switch the model without a keystroke crossing the composer gate (#879).
    *
    * The human cannot do this from the TUI: `/model` is refused by the gate, and
@@ -1253,6 +1280,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         onInput: (data) => this.onHumanInput(data),
         onResize: (cols, rows) => this.onResize(cols, rows),
         onDetach: () => this.onHumanDetach(),
+        onSetModel: (model) => this.onAttachSetModel(model),
       });
       this.startPolling();
       this.opened = true;
