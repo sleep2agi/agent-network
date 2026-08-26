@@ -12,4 +12,7 @@ WORKDIR /repo/agent-node
 RUN bun install
 
 WORKDIR /repo
+ARG TEST203_SOURCE_COMMIT=dev
+ENV TEST203_SOURCE_COMMIT=$TEST203_SOURCE_COMMIT
+
 CMD ["bash", "tests/test203-alias-crossover-repro/run.sh"]

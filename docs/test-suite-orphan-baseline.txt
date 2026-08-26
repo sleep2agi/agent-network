@@ -13,7 +13,6 @@
 # 口径与 #861 一致，便于两边数字直接对比。
 
 qa-222-cross-host-attachments
-qa-517-mcp-write-scope
 qa-hub-18-delivery-semantics
 qa-rfc024-config-apply
 qa-rfc026-create-node
@@ -33,7 +32,6 @@ test185-external-schedules
 test19-real-collab
 test2-collab
 test20-cli-ux
-test203-alias-crossover-repro
 test21-quickstart-ux
 test22-agent-ux
 test226-opencode-preview-release
