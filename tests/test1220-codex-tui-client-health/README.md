@@ -18,3 +18,8 @@ fall back to `thread/start`.
 Docker covers focused contracts and witnessed-red mutations. Authenticated
 Codex 0.148 is a separate protected Linux layer; macOS and Windows real runs
 remain explicitly NOT-RUN.
+
+Because the production launcher lives in the large generated CLI entry point,
+the repository `doc-symbol-pins` check is part of this gate as well: added CLI
+lines must update any exact documentation anchors instead of leaving stale
+source links behind.
