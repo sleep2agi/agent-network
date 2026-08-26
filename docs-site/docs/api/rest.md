@@ -50,14 +50,18 @@ curl http://localhost:9200/health
 >
 > **两条线的键不一样,解析 `/health` 的脚本要按信道分别处理:**
 >
-> | 键 | latest `0.8.8` | preview `0.9.0-preview.29` |
+> 🔴 **`latest` 已于 2026-08-27 从 `0.8.8` 移到 `0.9.0-preview.30`(含脱敏修复 `7bacb729`)。**
+> 下面按**版本**描述,不按信道 —— 信道会移动,版本不会。
+> 现在指向哪个版本:`npm view @sleep2agi/commhub-server dist-tags`。
+>
+> | 键 | `0.8.8` | `0.9.0-preview.29` |
 > |---|---|---|
 > | `sse_sessions` | **未认证也会返回,且未脱敏** | 未认证不返回 |
 > | `limits` | 没有 | 有 |
 >
 > **本次实测中**,其余 13 个键两条线都有 —— 每条线各一个样本,不是永久契约。
 
-::: danger latest `0.8.8` 的 `sse_sessions` 会向匿名调用方泄露全部在线 agent
+::: danger `0.8.8` 的 `sse_sessions` 会向匿名调用方泄露全部在线 agent
 上面那个样本里 `sse_sessions` 是 `{}`,**只是因为那个干净容器一条 SSE 连接都没有**。
 **不要把它读成「latest 不泄露」。**
 
@@ -71,7 +75,7 @@ curl http://localhost:9200/health
 
 所以两条线的差别不是「有键 / 没键」,是:
 
-- **latest `0.8.8`** —— 未认证可读全部在线会话明细(空 hub 上恰好为空);
+- **`0.8.8`** —— 未认证可读全部在线会话明细(空 hub 上恰好为空);
 - **preview `0.9.0-preview.22` 及以后** —— 匿名只给聚合计数,明细移到需鉴权的 `GET /api/stats/sse`;
 - ⚠️ **preview `0.9.0-preview.0` ~ `.21` 同样会泄露** —— 它们发布于 2026-06-28 ~ 07-04,**早于修复**。
   别把「preview」整条线当成安全的。
@@ -82,7 +86,7 @@ curl http://localhost:9200/health
 另外,如果你的解析代码用「键是否存在」来判断权限,两条线的行为也不同。
 
 未认证请求的行为**按线区分**(见上表与上面的告警):preview 上只返回聚合数据、
-不含 `sse_sessions`;latest `0.8.8` 上该键**未脱敏**返回 —— 空 hub 上恰好为空,
+不含 `sse_sessions`;`0.8.8` 上该键**未脱敏**返回 —— 空 hub 上恰好为空,
 一旦有连接就是完整的 `{networkId}:{alias}` 明细。携带有效 token 时：
 - system-admin、legacy master 或 DEV_OPEN 调用方可看到完整 `sse_sessions`；
 - 普通 `utok_` / `ntok_` 只看到其有权访问网络的 session；无网络成员关系时返回空对象。
