@@ -5306,7 +5306,16 @@ function ensureMcpJson(profile: Profile) {
   for (const p of candidates) {
     if (existsSync(p)) {
       mkdirSync(anetDir, { recursive: true });
-      const src = readFileSync(p, "utf-8");
+      // 🔴 issue #1216, second writer. The candidate list below falls back to
+      // `.ts` sources (a source checkout has no dist/), and the target is
+      // always `.js` — bun picks its parser from the extension, so copying
+      // verbatim produced a file that could not be parsed. #1227 fixed the
+      // *other* resolver in this same file (`refreshNodeServerJsAt`); that one
+      // only runs for `grok-build-acp`, so this path — which serves
+      // claude-code-cli, codex-sdk and grok-build-cli — kept writing
+      // TypeScript and kept failing three layers later as
+      // "CommHub MCP readiness preflight failed (1)".
+      const src = nodeServerPayloadFor(readFileSync(p, "utf-8"), p, ambientTypeScriptTranspiler());
       const dst = existsSync(serverTs) ? readFileSync(serverTs, "utf-8") : "";
       if (src !== dst) {
         writeFileSync(serverTs, src);

@@ -16,14 +16,28 @@ describe("nodeServerPayloadFor", () => {
     expect(nodeServerPayloadFor(compiled, "/pkg/dist/src/node-server.js", null)).toBe(compiled);
   });
 
-  test("🔴 transpiles a .ts source, because the target extension makes types a parse error", () => {
-    const out = nodeServerPayloadFor(TS_SOURCE, "/repo/src/node-server.ts", ambientTypeScriptTranspiler());
-    expect(out).not.toContain(": string");
-    expect(out).not.toContain(": void");
-    expect(out).toContain("loadEnvFile");
-  });
+  test("🔴 bundles a .ts source — types stripped AND relative imports inlined", async () => {
+    // Both halves matter. Stripping types alone left `import "./channel-meta.js"`
+    // pointing at a sibling that does not exist beside the destination, and the
+    // node still died on "CommHub MCP readiness preflight failed (1)".
+    const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const root = mkdtempSync(join(tmpdir(), "nsp-bundle-"));
+    try {
+      writeFileSync(join(root, "sibling.ts"), 'export const MARK: string = "from-sibling";\n');
+      const entry = join(root, "entry.ts");
+      writeFileSync(entry, 'import { MARK } from "./sibling";\nfunction f(x: string): void { console.log(MARK, x); }\nf("hi");\n');
+      const out = nodeServerPayloadFor("unused", entry, ambientTypeScriptTranspiler());
+      expect(out).not.toContain(": string");
+      expect(out).toContain("from-sibling");        // 兄弟模块被内联了
+      expect(out).not.toContain('from "./sibling"'); // 相对 import 没有留下
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 30_000);
 
-  test("🔴 refuses a .ts source when no transpiler exists, instead of writing a doomed file", () => {
+  test("🔴 refuses a .ts source when it cannot bundle, instead of writing a doomed file", () => {
     // Writing it anyway is what issue #1216 was: the file landed, the node
     // started, and died three layers later on "CommHub MCP readiness preflight
     // failed (1)" — a message naming neither the file nor the reason.
@@ -43,7 +57,7 @@ describe("nodeServerPayloadFor", () => {
     expect(message).toContain("dist/src/node-server.js");
   });
 
-  test("only the .ts extension triggers transpilation, not the word appearing in the path", () => {
+  test("only the .ts extension triggers bundling, not the word appearing in the path", () => {
     // A directory called `.../typescript/` or a file `node-server.tsx.js`
     // must not be mistaken for a TypeScript source.
     const js = "const x=1;\n";
@@ -96,7 +110,9 @@ describe("the bug this module exists to prevent", () => {
     const root = mkdtempSync(join(tmpdir(), "node-server-payload-fixed-"));
     try {
       const target = join(root, "payload.js");
-      writeFileSync(target, nodeServerPayloadFor(TS_SOURCE, "/repo/src/node-server.ts", ambientTypeScriptTranspiler()));
+      const entry = join(root, "entry.ts");
+      writeFileSync(entry, TS_SOURCE);
+      writeFileSync(target, nodeServerPayloadFor("unused", entry, ambientTypeScriptTranspiler()));
       const proc = Bun.spawn(["bun", target], { stdout: "pipe", stderr: "pipe" });
       const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
       expect(code, stderr).toBe(0);
