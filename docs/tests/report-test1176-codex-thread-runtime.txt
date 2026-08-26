@@ -24,6 +24,7 @@ Docker result
 - agent-node production bundle: PASS.
 - CommHub server production bundle: PASS.
 - RESULT: PASS.
+- The composed Docker artifact is not separately registered in CI; its behavior tests and bundles are already covered by package aggregate gates. See tests/test1176-codex-thread-runtime/NOT-IN-CI.md.
 
 Witnessed red
 1. Mutated exact mapping agent-node:codex-app-server back to codex-sdk: runtime-label.test.ts failed with expected codex-app-server / received codex-sdk (rc=1).
