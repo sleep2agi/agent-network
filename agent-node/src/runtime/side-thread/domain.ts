@@ -107,6 +107,8 @@ export interface SideThreadRuntimeAdapter {
     attemptId: string;
     derivedThreadId: string;
     prompt: string;
+    /** Node-local files materialized from Hub grants. Never Hub host paths. */
+    attachments?: Array<{ path: string; mediaType: string; sha256: string; size: number }>;
     operation: SideThreadRuntimeOperation;
   }): Promise<{ turnId: string }>;
   cancel(input: { sideThreadId: string; derivedThreadId: string; turnId: string; operation: SideThreadRuntimeOperation }): Promise<void>;
