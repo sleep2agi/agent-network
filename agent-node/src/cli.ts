@@ -883,7 +883,8 @@ function writebackCodexThread(threadId: string) {
     const alignment = codexTuiAlignmentNotice(configFilePath, cfg, threadId);
     if (alignment) {
       warn(`[codex-app-server] shared thread changed to ${alignment.threadId}. A TUI opened before the bridge will still show its old/blank thread.`);
-      warn(`[codex-app-server] align it with: CODEX_HOME=${JSON.stringify(alignment.codexHome)} codex resume ${JSON.stringify(alignment.threadId)} --remote ${JSON.stringify(alignment.remote)}${alignment.model ? ` -m ${JSON.stringify(alignment.model)}` : ""}`);
+      warn(`[codex-app-server] align a POSIX TUI with: ${alignment.posixCommand}`);
+      warn(`[codex-app-server] align a PowerShell TUI with: ${alignment.powershellCommand}`);
     }
   } catch (e: any) {
     warn(`writebackCodexThread failed: ${e.message}`);

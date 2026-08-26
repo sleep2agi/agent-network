@@ -15,6 +15,8 @@ describe("session runtime projection", () => {
   });
   test("does not invent unknown runtimes", () => {
     expect(normalizeSessionRuntime("agent-node:future-runtime")).toBeNull();
+    expect(normalizeSessionRuntime("agent-node:codex-app-server-evil")).toBeNull();
+    expect(normalizeSessionRuntime("agent-node:grok-build-cli-preview")).toBeNull();
     expect(normalizeSessionRuntime(null)).toBeNull();
   });
 });
