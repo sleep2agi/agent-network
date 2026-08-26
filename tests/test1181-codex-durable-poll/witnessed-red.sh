@@ -35,4 +35,19 @@ sed -i 's/currentMode = "realtime-only";/currentMode = "active";/' "$module"
 expect_red "old Hub falsely claims compensation" "old Hub visibly degrades"
 cp "$tmp_module" "$module"
 
+# Mutation 4: callback failure is incorrectly made terminal instead of retryable.
+sed -i 's/row.state = "pending"/row.state = "delivered"/' "$module"
+expect_red "callback failure loses durable retry" "callback failure returns durable delivery"
+cp "$tmp_module" "$module"
+
+# Mutation 5: metadata bypasses authenticated Dashboard provenance.
+sed -i 's/return authenticatedDashboardRequestId(message);/return String(message.meta?.client_request_id ?? "") || null;/' "$module"
+expect_red "node metadata poisons Dashboard request dedup" "node-supplied or malformed"
+cp "$tmp_module" "$module"
+
+# Mutation 6: client drops the explicit durable cursor protocol request.
+sed -i 's/durable_cursor: true,/durable_cursor: false,/' "$src"
+expect_red "outbound query drops immutable cursor protocol" "production wiring keeps SSE primary"
+cp "$tmp_cli" "$src"
+
 rm -f "$tmp_cli" "$tmp_module" /tmp/witnessed-red.log

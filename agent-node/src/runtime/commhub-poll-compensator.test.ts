@@ -244,9 +244,16 @@ describe("CommHub durable poll compensation", () => {
     expect(controller).toContain("scheduleInboxDrain: scheduleWorkInboxDrain");
     expect(controller).not.toContain("processWithCodexAppServer(");
     expect(controller).not.toContain('client.request("turn/start"');
+    expect(controller).toContain("durable_cursor: true");
+    expect(controller).toContain('response?.capability !== "list_tasks.immutable-node-cursor.v1"');
     expect(cli).toContain('commhubCompensation?.trigger("sse-reconnect")');
     expect(cli).toContain('commhubCompensation?.trigger("idle")');
     expect(cli).toContain('commhubCompensation?.trigger("startup")');
+  });
+
+  test("production dedup imports the authenticated Dashboard provenance gate", () => {
+    const source = readFileSync(new URL("./commhub-poll-compensator.ts", import.meta.url), "utf8");
+    expect(source).toContain("return authenticatedDashboardRequestId(message)");
   });
 
   test("production records the durable cursor only after Hub ACK succeeds", () => {

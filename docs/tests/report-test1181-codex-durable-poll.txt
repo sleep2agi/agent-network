@@ -9,7 +9,7 @@ Scope
 - Explicit old-Hub realtime-only downgrade.
 
 Baseline (Docker, oven/bun:1.3.14)
-- L1 compensator: 14 pass, 0 fail, 34 expectations.
+- L1 compensator: 15 pass, 0 fail, 37 expectations.
 - L1 Hub protocol: 125-row pagination, rename, foreign-node, and token-bound
   identity mismatch coverage.
 - L2 inbox lane + Codex app-server bridge/runtime: 69 pass, 0 fail,
@@ -35,6 +35,9 @@ Witnessed red
 - production scheduleInboxDrain replaced with no-op -> production-wiring test red;
 - cursor record moved before ack_inbox -> ACK-order test red;
 - unsupported Hub mode changed realtime-only -> active -> downgrade test red.
+- callback failure marked delivered -> durable retry test red;
+- raw node metadata accepted as Dashboard request ID -> provenance test red;
+- durable_cursor disabled -> immutable protocol wiring test red.
 
 Boundary
 - This is compensation, not an interrupt mechanism and not a replacement for
