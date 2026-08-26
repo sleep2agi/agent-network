@@ -40,7 +40,7 @@ interface CursorState {
   consumed_task_ids: string[];
   consumed_client_request_ids: string[];
   surfaced_outbound_terminal_ids: string[];
-  outbound_deliveries: Array<{ task_id: string; idempotency_key: string; state: "pending" | "delivering" | "delivered" }>;
+  outbound_deliveries: Array<{ task_id: string; idempotency_key: string; state: "pending" | "delivering" | "delivered"; lease_until?: number }>;
   inbound_lifecycle: Array<{ task_id: string; state: "delivered" | "submitted" | "consumed" | "completed" }>;
   last_success_at: string | null;
 }
@@ -153,17 +153,39 @@ class CursorStore {
   }
 
   update(mutator: (state: CursorState) => void): void {
-    // Re-read for every transition so independently constructed pollers do
-    // not overwrite a newer durable state with their startup snapshot.
-    const next = this.read();
-    mutator(next);
-    next.consumed_task_ids = boundedStrings(next.consumed_task_ids);
-    next.consumed_client_request_ids = boundedStrings(next.consumed_client_request_ids);
-    next.surfaced_outbound_terminal_ids = boundedStrings(next.surfaced_outbound_terminal_ids);
-    next.outbound_deliveries = next.outbound_deliveries.slice(-MAX_CURSOR_KEYS);
-    next.inbound_lifecycle = next.inbound_lifecycle.slice(-MAX_CURSOR_KEYS);
-    this.write(next);
-    this.state = next;
+    this.withLock(() => {
+      const next = this.read();
+      mutator(next);
+      next.consumed_task_ids = boundedStrings(next.consumed_task_ids);
+      next.consumed_client_request_ids = boundedStrings(next.consumed_client_request_ids);
+      next.surfaced_outbound_terminal_ids = boundedStrings(next.surfaced_outbound_terminal_ids);
+      next.outbound_deliveries = next.outbound_deliveries.slice(-MAX_CURSOR_KEYS);
+      next.inbound_lifecycle = next.inbound_lifecycle.slice(-MAX_CURSOR_KEYS);
+      this.write(next);
+      this.state = next;
+    });
+  }
+
+  claimOutbound(taskId: string, idempotencyKey: string, at: number, leaseMs: number): boolean {
+    return this.withLock(() => {
+      const next = this.read();
+      const row = next.outbound_deliveries.find((item) => item.task_id === taskId);
+      if (row?.state === "delivered" || (row?.state === "delivering" && (row.lease_until ?? 0) > at)) return false;
+      if (row) { row.state = "delivering"; row.lease_until = at + leaseMs; }
+      else next.outbound_deliveries.push({ task_id: taskId, idempotency_key: idempotencyKey, state: "delivering", lease_until: at + leaseMs });
+      this.write(next);
+      this.state = next;
+      return true;
+    }, false);
+  }
+
+  private withLock<T>(operation: () => T, busyValue?: T): T {
+    const lockPath = `${this.path}.lock`;
+    let fd: number;
+    try { fd = openSync(lockPath, "wx", 0o600); }
+    catch { if (arguments.length > 1) return busyValue as T; throw new Error("compensation cursor is locked"); }
+    try { return operation(); }
+    finally { closeSync(fd); try { unlinkSync(lockPath); } catch {} }
   }
 
   private read(): CursorState {
@@ -212,6 +234,7 @@ export function createCommHubPollCompensator(options: {
   let failureCount = 0;
   let warnedRealtimeOnly = false;
   const now = adapters.now ?? Date.now;
+  const deliveryLeaseMs = Math.max(30_000, intervalMs * 2);
   const setTimer = adapters.setTimer ?? ((callback, delay) => {
     const handle = setTimeout(callback, delay);
     handle.unref?.();
@@ -279,23 +302,19 @@ export function createCommHubPollCompensator(options: {
         const existing = store.snapshot().outbound_deliveries.find((item) => item.task_id === task.task_id);
         if (existing?.state === "delivered") continue;
         const idempotencyKey = existing?.idempotency_key ?? `commhub-terminal:${task.task_id}`;
-        store.update((state) => {
-          const row = state.outbound_deliveries.find((item) => item.task_id === task.task_id);
-          if (row) row.state = "delivering";
-          else state.outbound_deliveries.push({ task_id: task.task_id, idempotency_key: idempotencyKey, state: "delivering" });
-        });
+        if (!store.claimOutbound(task.task_id, idempotencyKey, now(), deliveryLeaseMs)) continue;
         try {
           await adapters.onOutboundTerminal(task, idempotencyKey);
         } catch (error) {
           store.update((state) => {
             const row = state.outbound_deliveries.find((item) => item.task_id === task.task_id);
-            if (row) row.state = "pending";
+            if (row) { row.state = "pending"; row.lease_until = 0; }
           });
           throw error;
         }
         store.update((state) => {
           const row = state.outbound_deliveries.find((item) => item.task_id === task.task_id);
-          if (row) row.state = "delivered";
+          if (row) { row.state = "delivered"; row.lease_until = 0; }
           state.surfaced_outbound_terminal_ids.push(task.task_id);
         });
       }

@@ -19,11 +19,14 @@ second turn is opened by polling.
 ## Durable cursor and deduplication
 
 `commhub-compensation-cursor.json` lives beside the node `config.json`, is
-atomically replaced, and is mode `0600`. It retains bounded high-water sets:
+atomically replaced, and is mode `0600`. Cross-process state transitions are
+locked. It retains bounded records:
 
 - logical `task_id` values whose inbox rows were acknowledged;
 - authenticated Dashboard `client_request_id` values for cross-row dedup;
-- outbound terminal task IDs already surfaced by status reconciliation.
+- monotonic inbox lifecycle (`delivered → submitted → consumed → completed`);
+- terminal delivery state (`pending → delivering → delivered`) with a stable
+  idempotency key and expiring cross-process lease.
 
 The cursor advances only after `ack_inbox` succeeds. A restart therefore does
 not replay acknowledged work. A stale duplicate row is acknowledged again but
@@ -36,13 +39,16 @@ does not claim exactly-once execution across an arbitrary crash before Hub ACK.
 
 ## Outbound status
 
-Each poll also queries this node's outbound tasks with `list_tasks`. Terminal
-`replied`, `failed`, `cancelled`, and `expired` rows are surfaced once and wake
-the durable reply inbox drain. Client-side sender filtering prevents an old
-Hub that silently ignores `from_name` from leaking another node's rows.
+Each poll also queries this node's outbound tasks with `list_tasks`. The Hub
+binds `from_node_id` to the authenticated node token and returns stable
+`(created_at, task_id)` cursor pages, so renames, alias reuse, cross-network
+rows, and result sets larger than 100 cannot leak or disappear. Terminal
+`replied`, `failed`, `cancelled`, and `expired` rows use the durable delivery
+state before waking the reply inbox drain. Callback faults retry with the same
+idempotency key; delivered rows are never called again.
 
-`list_tasks` is also the capability handshake. An old Hub returning
-unknown-tool/method errors switches the node to an observable
+The exact `list_tasks.immutable-node-cursor.v1` marker is the capability
+handshake. An old Hub missing the arguments or marker switches the node to an observable
 `realtime-only` mode. It does not claim that compensation is active.
 
 ## Boundary

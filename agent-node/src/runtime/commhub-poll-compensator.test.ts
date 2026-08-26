@@ -171,11 +171,26 @@ describe("CommHub durable poll compensation", () => {
     poller.trigger("idle");
     await poller.idle();
     expect(keys).toEqual(["commhub-terminal:child-fault", "commhub-terminal:child-fault"]);
-    expect(JSON.parse(readFileSync(h.cursorPath, "utf8")).outbound_deliveries).toContainEqual({
-      task_id: "child-fault",
-      idempotency_key: "commhub-terminal:child-fault",
-      state: "delivered",
+    expect(JSON.parse(readFileSync(h.cursorPath, "utf8")).outbound_deliveries[0]).toMatchObject({
+      task_id: "child-fault", idempotency_key: "commhub-terminal:child-fault", state: "delivered",
     });
+  });
+
+  test("two poller processes share a delivery lease and invoke one callback", async () => {
+    let callbacks = 0;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const h = harness({ onOutboundTerminal: async () => { callbacks++; await held; } });
+    h.outbound.push({ task_id: "child-race", status: "replied" });
+    const first = createCommHubPollCompensator({ cursorPath: h.cursorPath, adapters: h.adapters });
+    const second = createCommHubPollCompensator({ cursorPath: h.cursorPath, adapters: h.adapters });
+    first.trigger("timer");
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    second.trigger("timer");
+    await second.idle();
+    expect(callbacks).toBe(1);
+    release();
+    await first.idle();
   });
 
   test("concurrent triggers coalesce and backoff remains bounded", async () => {

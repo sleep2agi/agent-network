@@ -6,8 +6,11 @@ LABEL org.opencontainers.image.revision=$TEST1181_SOURCE_COMMIT
 
 WORKDIR /workspace
 COPY agent-node/package.json agent-node/package-lock.json ./agent-node/
+COPY server/package.json server/package-lock.json ./server/
 RUN cd agent-node && bun install --frozen-lockfile
+RUN cd server && bun install --frozen-lockfile
 COPY agent-node ./agent-node
+COPY server ./server
 COPY tests/test1181-codex-durable-poll/run.sh ./run.sh
 COPY tests/test1181-codex-durable-poll/witnessed-red.sh ./witnessed-red.sh
 RUN chmod +x ./run.sh ./witnessed-red.sh
