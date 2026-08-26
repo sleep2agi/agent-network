@@ -35,13 +35,22 @@ export function installSideThreadCommandSchema(db: DbAdapter): void {
       side_chat_id TEXT NOT NULL, attempt_id TEXT NOT NULL, thread_id TEXT NOT NULL,
       turn_id TEXT NOT NULL, status TEXT NOT NULL, envelope_json TEXT NOT NULL,
       consumed_by_token TEXT NOT NULL, created_at INTEGER NOT NULL,
+      applying_at INTEGER, applied_at INTEGER,
       PRIMARY KEY(side_chat_id,attempt_id,thread_id,turn_id)
     );
   `);
+  for (const sql of [
+    "ALTER TABLE side_thread_terminal_receipts ADD COLUMN applying_at INTEGER",
+    "ALTER TABLE side_thread_terminal_receipts ADD COLUMN applied_at INTEGER",
+  ]) try { db.exec(sql); } catch { /* additive migration already applied */ }
 }
 
 export class SideThreadCommandStore {
   constructor(readonly db: DbAdapter, private readonly now = Date.now) {
+    // PgAdapter transactions are currently documented non-atomic. Advertising
+    // a durable command outbox on it would be false, so fail closed until a
+    // real PostgreSQL race gate and single-connection transaction land.
+    if (db.dialect !== "sqlite") throw new Error("SideThread command transport requires atomic SQLite transactions");
     installSideThreadCommandSchema(db);
   }
 
@@ -122,7 +131,7 @@ export class SideThreadCommandStore {
     });
   }
 
-  terminal(actor: NodeCommandActor, raw: unknown): { idempotent: boolean; event: SideThreadRuntimeEvent } {
+  terminal(actor: NodeCommandActor, raw: unknown): { idempotent: boolean; event: SideThreadRuntimeEvent; key: [string,string,string,string] } {
     const env = object(raw);
     exactKeys(env, ["protocol", "sideThreadId", "attemptId", "threadId", "turnId", "status", "text", "errorCode"]);
     if (env.protocol !== SIDE_THREAD_TERMINAL_PROTOCOL) throw new Error("invalid terminal protocol");
@@ -154,15 +163,31 @@ export class SideThreadCommandStore {
         "INSERT INTO side_thread_terminal_receipts (side_chat_id,attempt_id,thread_id,turn_id,status,envelope_json,consumed_by_token,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
         [sideChatId, attemptId, threadId, turnId, env.status, canonical, actor.tokenId, this.now()],
       );
-      return { idempotent: false, event };
+      return { idempotent: false, event, key: [sideChatId, attemptId, threadId, turnId] };
     } catch {
       const prior = this.db.get<{ envelope_json: string; consumed_by_token: string }>(
         "SELECT envelope_json,consumed_by_token FROM side_thread_terminal_receipts WHERE side_chat_id=?1 AND attempt_id=?2 AND thread_id=?3 AND turn_id=?4",
         sideChatId, attemptId, threadId, turnId,
       );
       if (!prior || prior.envelope_json !== canonical || prior.consumed_by_token !== actor.tokenId) throw new Error("terminal receipt is immutable");
-      return { idempotent: true, event };
+      return { idempotent: true, event, key: [sideChatId, attemptId, threadId, turnId] };
     }
+  }
+
+  claimTerminal(key: [string,string,string,string]): boolean {
+    const stale = this.now() - 30_000;
+    return this.db.run(
+      "UPDATE side_thread_terminal_receipts SET applying_at=?1 WHERE side_chat_id=?2 AND attempt_id=?3 AND thread_id=?4 AND turn_id=?5 AND applied_at IS NULL AND (applying_at IS NULL OR applying_at<?6)",
+      [this.now(), ...key, stale],
+    ).changes === 1;
+  }
+  settleTerminal(key: [string,string,string,string], applied: boolean): void {
+    this.db.run(
+      applied
+        ? "UPDATE side_thread_terminal_receipts SET applied_at=?1,applying_at=NULL WHERE side_chat_id=?2 AND attempt_id=?3 AND thread_id=?4 AND turn_id=?5 AND applied_at IS NULL"
+        : "UPDATE side_thread_terminal_receipts SET applying_at=NULL WHERE side_chat_id=?1 AND attempt_id=?2 AND thread_id=?3 AND turn_id=?4 AND applied_at IS NULL",
+      applied ? [this.now(), ...key] : key,
+    );
   }
 
   receipt(operationId: string): Record<string, unknown> | null {
@@ -186,7 +211,7 @@ export class SideThreadCommandStore {
 
 /** Durable command outbox port. It has no task/inbox/FIFO dependency. */
 export class DurableSideThreadCommandPort implements SideThreadExecutionPort {
-  private listeners = new Set<(event: SideThreadRuntimeEvent) => void>();
+  private listeners = new Set<(event: SideThreadRuntimeEvent) => void | Promise<void>>();
   constructor(private readonly opts: {
     store: SideThreadCommandStore;
     networkForNode: (nodeId: string) => string | null;
@@ -200,8 +225,20 @@ export class DurableSideThreadCommandPort implements SideThreadExecutionPort {
   async archive(input: Parameters<SideThreadExecutionPort["archive"]>[0]) { await this.issue(input, "archive", { threadId: input.threadId }); }
   async purge(input: Parameters<SideThreadExecutionPort["purge"]>[0]) { await this.issue(input, "purge", { threadId: input.threadId }); }
   bringBack(input: Parameters<SideThreadExecutionPort["bringBack"]>[0]) { return this.issue(input, "bring-back", { sourceThreadId: input.sourceThreadId, sourceTurnId: input.sourceTurnId, destinationThreadId: input.destinationThreadId, text: input.text }, "destinationTurnId") as Promise<{destinationTurnId:string}>; }
-  subscribe(listener: (event: SideThreadRuntimeEvent) => void) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
-  acceptTerminal(actor: NodeCommandActor, raw: unknown) { const x = this.opts.store.terminal(actor, raw); if (!x.idempotent) for (const listener of this.listeners) listener(x.event); return x; }
+  subscribe(listener: (event: SideThreadRuntimeEvent) => void | Promise<void>) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
+  async acceptTerminal(actor: NodeCommandActor, raw: unknown) {
+    const x = this.opts.store.terminal(actor, raw);
+    if (!this.opts.store.claimTerminal(x.key)) return { ...x, pending: true };
+    try {
+      if (this.listeners.size === 0) throw new Error("SideThread terminal applier unavailable");
+      for (const listener of this.listeners) await listener(x.event);
+      this.opts.store.settleTerminal(x.key, true);
+      return { ...x, pending: false };
+    } catch (error) {
+      this.opts.store.settleTerminal(x.key, false);
+      throw error;
+    }
+  }
   private async issue(input: any, kind: string, payload: Record<string, unknown>, resultKey?: string): Promise<any> {
     const networkId = this.opts.networkForNode(input.nodeId);
     if (!networkId) throw new SideThreadError("SIDE_THREAD_NOT_FOUND", "node not found", 404);
@@ -231,7 +268,7 @@ export async function handleSideThreadCommandRequest(input: {
     if (match[2] === "pending" && input.req.method === "GET")
       return Response.json({ ok: true, command: input.store.claim(input.actor) });
     if (match[2] === "terminals" && input.req.method === "POST") {
-      const result = input.port.acceptTerminal(input.actor, await input.req.json());
+      const result = await input.port.acceptTerminal(input.actor, await input.req.json());
       return Response.json({ ok: true, idempotent: result.idempotent });
     }
     if (match[3] && input.req.method === "POST") {

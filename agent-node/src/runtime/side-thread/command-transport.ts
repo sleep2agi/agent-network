@@ -5,6 +5,7 @@ import {
   type SideThreadRuntimeAdapter,
   type SideThreadTerminalEvent,
 } from "./domain";
+import type { PrivateFileTerminalOutbox } from "./terminal-outbox";
 
 export const SIDE_THREAD_COMMAND_PROTOCOL = "side_thread.command.v1" as const;
 export const SIDE_THREAD_ACK_PROTOCOL = "side_thread.ack.v1" as const;
@@ -71,8 +72,10 @@ export interface SideThreadTerminalEnvelope {
 export interface SideThreadCommandExecutorOptions {
   nodeId: string;
   adapter: SideThreadRuntimeAdapter;
-  emitTerminal: (event: SideThreadTerminalEnvelope) => void | Promise<void>;
+  terminalOutbox: Pick<PrivateFileTerminalOutbox, "enqueue">;
   receipts: SideThreadCommandReceiptStore;
+  /** Cross-process claim held across receipt-read, native mutation and receipt-write. */
+  claimExecution: (identity: { nodeId: string; sideThreadId: string; operationId: string }) => Promise<{ release(): Promise<void> }>;
   materializeAttachment?: (grant: SideThreadAttachmentGrant) => Promise<{
     path: string; mediaType: string; sha256: string; size: number;
   }>;
@@ -123,13 +126,20 @@ export class SideThreadCommandExecutor {
   async execute(raw: unknown): Promise<SideThreadCommandAck> {
     const command = parseSideThreadCommand(raw);
     const fingerprint = commandFingerprint(command);
+    if (command.nodeId !== this.options.nodeId) return ack(command, "failed", "SIDE_THREAD_CONFLICT");
+    const claim = await this.options.claimExecution({ nodeId: command.nodeId, sideThreadId: command.sideThreadId, operationId: command.operationId });
+    try {
+      return await this.executeClaimed(command, fingerprint);
+    } finally {
+      await claim.release();
+    }
+  }
+
+  private async executeClaimed(command: SideThreadCommand, fingerprint: string): Promise<SideThreadCommandAck> {
     const prior = this.options.receipts.get(command.commandId);
     if (prior) {
       if (prior.fingerprint !== fingerprint) return ack(command, "failed", "SIDE_THREAD_CONFLICT");
       return structuredClone(prior.ack);
-    }
-    if (command.nodeId !== this.options.nodeId) {
-      return this.remember(command, fingerprint, ack(command, "failed", "SIDE_THREAD_CONFLICT"));
     }
     const operation = {
       nodeId: command.nodeId,
@@ -232,7 +242,7 @@ export class SideThreadCommandExecutor {
       this.options.onDroppedTerminal?.("invalid-terminal");
       return;
     }
-    await this.options.emitTerminal({
+    this.options.terminalOutbox.enqueue({
       protocol: SIDE_THREAD_TERMINAL_PROTOCOL,
       sideThreadId: event.sideThreadId,
       attemptId: event.attemptId,

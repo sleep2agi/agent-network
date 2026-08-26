@@ -1,5 +1,6 @@
 import type { SideThreadCommandAck, SideThreadTerminalEnvelope } from "./command-transport";
 import { SideThreadCommandExecutor } from "./command-transport";
+import type { PrivateFileTerminalOutbox } from "./terminal-outbox";
 
 /** Polls only the dedicated SideThread outbox. It has no task handler seam. */
 export class SideThreadCommandConsumer {
@@ -8,7 +9,7 @@ export class SideThreadCommandConsumer {
   private readonly endpoint: string;
   constructor(private readonly opts: {
     hubUrl: string; nodeId: string; token: string | (() => string);
-    executor: SideThreadCommandExecutor; fetchImpl?: typeof fetch;
+    executor: SideThreadCommandExecutor; terminalOutbox: PrivateFileTerminalOutbox; fetchImpl?: typeof fetch;
   }) {
     if (!safe(opts.nodeId) || !opts.hubUrl) throw new Error("invalid SideThread consumer identity");
     this.endpoint = `${opts.hubUrl.replace(/\/+$/, "")}/api/nodes/${encodeURIComponent(opts.nodeId)}/side-thread-commands`;
@@ -20,10 +21,11 @@ export class SideThreadCommandConsumer {
   }
   stop(): void { this.stopped = true; }
   async sendTerminal(envelope: SideThreadTerminalEnvelope): Promise<void> {
-    const response = await this.fetch(`${this.endpoint}/terminals`, { method: "POST", headers: this.headers(), body: JSON.stringify(envelope) });
-    if (!response.ok || !(await response.json() as any)?.ok) throw new Error(`SideThread terminal POST failed: ${response.status}`);
+    this.opts.terminalOutbox.enqueue(envelope);
+    await this.drainTerminals();
   }
   private async consumeOnce(): Promise<void> {
+    await this.drainTerminals();
     const response = await this.fetch(`${this.endpoint}/pending`, { headers: this.headers() });
     if (!response.ok) throw new Error(`SideThread command pull failed: ${response.status}`);
     const payload = await response.json() as any;
@@ -34,6 +36,13 @@ export class SideThreadCommandConsumer {
       method: "POST", headers: this.headers(), body: JSON.stringify(ack),
     });
     if (!ackResponse.ok || !(await ackResponse.json() as any)?.ok) throw new Error(`SideThread command ACK failed: ${ackResponse.status}`);
+  }
+  private async drainTerminals(): Promise<void> {
+    for (const envelope of this.opts.terminalOutbox.list()) {
+      const response = await this.fetch(`${this.endpoint}/terminals`, { method: "POST", headers: this.headers(), body: JSON.stringify(envelope) });
+      if (!response.ok || !(await response.json() as any)?.ok) throw new Error(`SideThread terminal POST failed: ${response.status}`);
+      this.opts.terminalOutbox.remove(envelope);
+    }
   }
   private headers(): Record<string, string> {
     const token = typeof this.opts.token === "function" ? this.opts.token() : this.opts.token;

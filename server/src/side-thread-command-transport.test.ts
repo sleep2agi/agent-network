@@ -15,6 +15,9 @@ function fixture() {
 }
 
 describe("Hub durable SideThread command outbox", () => {
+  test("fails closed on the currently non-atomic PostgreSQL adapter", () => {
+    expect(() => new SideThreadCommandStore({ dialect: "postgres" } as any)).toThrow(/atomic SQLite/);
+  });
   test("queues outside inbox/FIFO and only exact node token can retain the delivery", async () => {
     const f = fixture();
     await expect(f.port.fork({ operationId: "op-1", requestKey: "rk-1", sideChatId: "side-1", nodeId: "node-1", sourceThreadId: "source-1", boundary: { kind: "through", turnId: "source-turn" } })).rejects.toMatchObject({ code: "SIDE_THREAD_AMBIGUOUS" });
@@ -42,9 +45,9 @@ describe("Hub durable SideThread command outbox", () => {
     const command = f.store.claim(actor())!;
     f.store.ack(actor(), { protocol: "side_thread.ack.v1", commandId: command.commandId, operationId: "op-start", state: "accepted", errorCode: null, result: { threadId: null, turnId: "turn-1", destinationTurnId: null } });
     const terminal = { protocol: "side_thread.terminal.v1", sideThreadId: "side-1", attemptId: "attempt-1", threadId: "derived-1", turnId: "turn-1", status: "completed", text: "answer", errorCode: null };
-    expect(() => f.port.acceptTerminal(actor(), { ...terminal, turnId: "turn-foreign" })).toThrow(/four-tuple/);
-    expect(f.port.acceptTerminal(actor(), terminal).idempotent).toBe(false);
-    expect(f.port.acceptTerminal(actor(), terminal).idempotent).toBe(true);
+    await expect(f.port.acceptTerminal(actor(), { ...terminal, turnId: "turn-foreign" })).rejects.toThrow(/four-tuple/);
+    expect((await f.port.acceptTerminal(actor(), terminal)).idempotent).toBe(false);
+    expect((await f.port.acceptTerminal(actor(), terminal)).idempotent).toBe(true);
     expect(events).toHaveLength(1);
   });
 
@@ -70,15 +73,27 @@ describe("Hub durable SideThread command outbox", () => {
   });
 
   test("hostile node cannot smuggle extra receipt fields or unbounded terminal text", async () => {
-    const f = fixture();
+    const f = fixture(); f.port.subscribe(async () => {});
     await f.port.start({ operationId: "op-hostile", requestKey: "rk-hostile", sideChatId: "side-hostile", attemptId: "attempt-hostile", nodeId: "node-1", threadId: "derived-hostile", prompt: "q", attachments: [] }).catch(() => {});
     const command = f.store.claim(actor())!;
     const clean = { protocol: "side_thread.ack.v1", commandId: command.commandId, operationId: "op-hostile", state: "accepted", errorCode: null, result: { threadId: null, turnId: "turn-hostile", destinationTurnId: null } };
     expect(() => f.store.ack(actor(), { ...clean, exception: "Bearer ntok_secret" })).toThrow(/unexpected protocol fields/);
     f.store.ack(actor(), clean);
     const terminal = { protocol: "side_thread.terminal.v1", sideThreadId: "side-hostile", attemptId: "attempt-hostile", threadId: "derived-hostile", turnId: "turn-hostile", status: "completed", text: "ok", errorCode: null };
-    expect(() => f.port.acceptTerminal(actor(), { ...terminal, stack: "secret" })).toThrow(/unexpected protocol fields/);
-    expect(() => f.port.acceptTerminal(actor(), { ...terminal, text: "x".repeat(1_000_001) })).toThrow(/completed terminal payload/);
-    expect(f.port.acceptTerminal(actor(), terminal).idempotent).toBe(false);
+    await expect(f.port.acceptTerminal(actor(), { ...terminal, stack: "secret" })).rejects.toThrow(/unexpected protocol fields/);
+    await expect(f.port.acceptTerminal(actor(), { ...terminal, text: "x".repeat(1_000_001) })).rejects.toThrow(/completed terminal payload/);
+    expect((await f.port.acceptTerminal(actor(), terminal)).idempotent).toBe(false);
+  });
+
+  test("receipt commit followed by listener failure remains durably redeliverable", async () => {
+    const f = fixture(); let calls = 0;
+    f.port.subscribe(async () => { calls++; if (calls === 1) throw new Error("coordinator crashed"); });
+    await f.port.start({ operationId: "op-terminal-crash", requestKey: "rk-terminal-crash", sideChatId: "side-crash", attemptId: "attempt-crash", nodeId: "node-1", threadId: "derived-crash", prompt: "q", attachments: [] }).catch(() => {});
+    const command = f.store.claim(actor())!;
+    f.store.ack(actor(), { protocol: "side_thread.ack.v1", commandId: command.commandId, operationId: "op-terminal-crash", state: "accepted", errorCode: null, result: { threadId: null, turnId: "turn-crash", destinationTurnId: null } });
+    const terminal = { protocol: "side_thread.terminal.v1", sideThreadId: "side-crash", attemptId: "attempt-crash", threadId: "derived-crash", turnId: "turn-crash", status: "completed", text: "answer", errorCode: null };
+    await expect(f.port.acceptTerminal(actor(), terminal)).rejects.toThrow(/coordinator crashed/);
+    expect((await f.port.acceptTerminal(actor(), terminal)).pending).toBe(false);
+    expect(calls).toBe(2);
   });
 });

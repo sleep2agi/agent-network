@@ -12,6 +12,7 @@ bun build --target=bun \
   agent-node/src/runtime/side-thread/bring-back-journal.ts \
   agent-node/src/runtime/side-thread/materialize-command-attachment.ts \
   agent-node/src/runtime/side-thread/command-consumer.ts \
+  agent-node/src/runtime/side-thread/terminal-outbox.ts \
   server/src/side-thread-command-transport.ts \
   --outdir /tmp/test1200-build >/tmp/test1200-build.log
 
@@ -46,4 +47,34 @@ if bun test agent-node/src/runtime/side-thread/command-transport.test.ts >/tmp/b
 fi
 mv /tmp/bring-back.ts agent-node/src/runtime/side-thread/bring-back-journal.ts
 
-echo "PASS test1200 SideThread dedicated command transport + 3 witnessed red"
+# Witness red 4: deleting durable terminal enqueue makes a POST loss
+# unrecoverable across restart.
+cp agent-node/src/runtime/side-thread/command-transport.ts /tmp/terminal-outbox.ts
+sed -i 's/this\.options\.terminalOutbox\.enqueue({/return; this.options.terminalOutbox.enqueue({/' agent-node/src/runtime/side-thread/command-transport.ts
+if bun test agent-node/src/runtime/side-thread/command-transport.test.ts >/tmp/terminal-outbox-red.log 2>&1; then
+  echo "FAIL terminal outbox mutation survived"
+  exit 1
+fi
+mv /tmp/terminal-outbox.ts agent-node/src/runtime/side-thread/command-transport.ts
+
+# Witness red 5: bypassing the cross-process executor claim permits two native
+# mutations before either receipt is durable.
+cp agent-node/src/runtime/side-thread/command-transport.ts /tmp/executor-claim.ts
+sed -i 's/const claim = await this\.options\.claimExecution({ nodeId: command\.nodeId, sideThreadId: command\.sideThreadId, operationId: command\.operationId });/const claim = { release: async () => {} };/' agent-node/src/runtime/side-thread/command-transport.ts
+if bun test agent-node/src/runtime/side-thread/command-transport.test.ts >/tmp/executor-claim-red.log 2>&1; then
+  echo "FAIL cross-process command claim mutation survived"
+  exit 1
+fi
+mv /tmp/executor-claim.ts agent-node/src/runtime/side-thread/command-transport.ts
+
+# Witness red 6: treating an existing terminal receipt as already applied
+# reproduces receipt-commit/listener-crash permanent loss.
+cp server/src/side-thread-command-transport.ts /tmp/terminal-apply.ts
+sed -i 's/const x = this\.opts\.store\.terminal(actor, raw);/const x = this.opts.store.terminal(actor, raw); if (x.idempotent) return { ...x, pending: true };/' server/src/side-thread-command-transport.ts
+if bun test server/src/side-thread-command-transport.test.ts >/tmp/terminal-apply-red.log 2>&1; then
+  echo "FAIL terminal apply-state mutation survived"
+  exit 1
+fi
+mv /tmp/terminal-apply.ts server/src/side-thread-command-transport.ts
+
+echo "PASS test1200 SideThread dedicated command transport + 6 witnessed red"

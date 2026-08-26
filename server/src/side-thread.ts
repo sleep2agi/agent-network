@@ -128,7 +128,7 @@ export interface SideThreadExecutionPort {
     requestKey: string;
     text: string;
   }): Promise<{ destinationTurnId: string }>;
-  subscribe(listener: (event: SideThreadRuntimeEvent) => void): () => void;
+  subscribe(listener: (event: SideThreadRuntimeEvent) => void | Promise<void>): () => void;
 }
 
 export class SideThreadError extends Error {
@@ -188,14 +188,14 @@ export class UnsupportedSideThreadPort implements SideThreadExecutionPort {
 export class SideThreadPortRegistry implements SideThreadExecutionPort {
   private delegate: SideThreadExecutionPort = new UnsupportedSideThreadPort();
   private readonly listeners = new Set<
-    (event: SideThreadRuntimeEvent) => void
+    (event: SideThreadRuntimeEvent) => void | Promise<void>
   >();
   private detach: () => void = () => {};
   install(port: SideThreadExecutionPort): () => void {
     this.detach();
     this.delegate = port;
-    this.detach = port.subscribe((event) => {
-      for (const listener of this.listeners) listener(event);
+    this.detach = port.subscribe(async (event) => {
+      for (const listener of this.listeners) await listener(event);
     });
     return () => {
       if (this.delegate !== port) return;
@@ -225,7 +225,7 @@ export class SideThreadPortRegistry implements SideThreadExecutionPort {
   bringBack(input: Parameters<SideThreadExecutionPort["bringBack"]>[0]) {
     return this.delegate.bringBack(input);
   }
-  subscribe(listener: (event: SideThreadRuntimeEvent) => void): () => void {
+  subscribe(listener: (event: SideThreadRuntimeEvent) => void | Promise<void>): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
@@ -683,9 +683,7 @@ export class SideThreadCoordinator {
       id?: () => string;
     },
   ) {
-    this.unsubscribe = port.subscribe((event) => {
-      void this.acceptRuntimeEvent(event);
-    });
+    this.unsubscribe = port.subscribe((event) => this.acceptRuntimeEvent(event));
   }
 
   close(): void {

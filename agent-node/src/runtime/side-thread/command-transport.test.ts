@@ -6,6 +6,8 @@ import { PrivateFileCommandReceiptStore } from "./command-receipts";
 import { JournaledBringBackExecutor } from "./bring-back-journal";
 import { materializeCommandAttachment } from "./materialize-command-attachment";
 import { SideThreadCommandConsumer } from "./command-consumer";
+import { PrivateFileForkLeaseStore } from "./fork-lease";
+import { PrivateFileTerminalOutbox } from "./terminal-outbox";
 import {
   SIDE_THREAD_COMMAND_PROTOCOL, SideThreadCommandExecutor,
   type SideThreadCommand, type SideThreadTerminalEnvelope,
@@ -28,10 +30,12 @@ function fixture() {
     subscribe(fn) { listener = fn; return () => { listener = () => {}; }; },
   };
   const root = mkdtempSync(join(tmpdir(), "side-command-"));
-  const terminals: SideThreadTerminalEnvelope[] = [];
+  const claims = new PrivateFileForkLeaseStore(join(root, "claims"));
+  const terminalOutbox = new PrivateFileTerminalOutbox(join(root, "terminals"));
   const options = { nodeId: "node-1", adapter, receipts: new PrivateFileCommandReceiptStore(root),
-    emitTerminal: (event: SideThreadTerminalEnvelope) => { terminals.push(event); } };
-  return { adapter, options, root, terminals, emit: (x: any) => listener(x), calls: () => ({ forkCalls, startCalls }) };
+    claimExecution: ({ nodeId, sideThreadId, operationId }: any) => claims.claimOperation(nodeId, sideThreadId, operationId),
+    terminalOutbox };
+  return { adapter, options, root, terminalOutbox, terminals: () => terminalOutbox.list(), emit: (x: any) => listener(x), calls: () => ({ forkCalls, startCalls }) };
 }
 
 describe("SideThread dedicated node command boundary", () => {
@@ -90,8 +94,8 @@ describe("SideThread dedicated node command boundary", () => {
     f.emit({ sideThreadId: "side-1", attemptId: "attempt-1", threadId: "derived-1", turnId: "turn-1", status: "completed", text: "ok", identityBound: false });
     f.emit({ sideThreadId: "side-1", attemptId: "attempt-1", threadId: "derived-1", turnId: "turn-1", status: "completed", text: "ok", identityBound: true });
     await Bun.sleep(0);
-    expect(f.terminals).toHaveLength(1);
-    expect(f.terminals[0]).toMatchObject({ sideThreadId: "side-1", attemptId: "attempt-1", threadId: "derived-1", turnId: "turn-1" });
+    expect(f.terminals()).toHaveLength(1);
+    expect(f.terminals()[0]).toMatchObject({ sideThreadId: "side-1", attemptId: "attempt-1", threadId: "derived-1", turnId: "turn-1" });
   });
 
   test("bring-back write-ahead journal fails closed after response loss", async () => {
@@ -130,11 +134,51 @@ describe("SideThread dedicated node command boundary", () => {
       if (url.endsWith("/ack")) { ackPosts++; if (ackPosts === 1) return new Response("lost", { status: 503 }); return Response.json({ ok: true }); }
       throw new Error("unexpected transport");
     }) as typeof fetch;
-    const one = new SideThreadCommandConsumer({ hubUrl: "https://hub.invalid", nodeId: "node-1", token: "ntok_bound", executor: new SideThreadCommandExecutor(f.options), fetchImpl });
+    const one = new SideThreadCommandConsumer({ hubUrl: "https://hub.invalid", nodeId: "node-1", token: "ntok_bound", executor: new SideThreadCommandExecutor(f.options), terminalOutbox: f.terminalOutbox, fetchImpl });
     await expect(one.trigger()).rejects.toThrow(/ACK failed/);
-    const restarted = new SideThreadCommandConsumer({ hubUrl: "https://hub.invalid", nodeId: "node-1", token: "ntok_bound", executor: new SideThreadCommandExecutor({ ...f.options, receipts: new PrivateFileCommandReceiptStore(f.root) }), fetchImpl });
+    const restarted = new SideThreadCommandConsumer({ hubUrl: "https://hub.invalid", nodeId: "node-1", token: "ntok_bound", executor: new SideThreadCommandExecutor({ ...f.options, receipts: new PrivateFileCommandReceiptStore(f.root) }), terminalOutbox: f.terminalOutbox, fetchImpl });
     await restarted.trigger();
     expect(f.calls().forkCalls).toBe(1);
     expect(ackPosts).toBe(2);
+  });
+
+  test("two executors cannot concurrently cross receipt/native/receipt boundary", async () => {
+    const f = fixture(); let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let calls = 0;
+    f.adapter.fork = async () => { calls++; await gate; return { derivedThreadId: "derived-1" }; };
+    const raw = command("fork", { sourceThreadId: "source-1", boundary: { kind: "through", turnId: "t-1" } });
+    const one = new SideThreadCommandExecutor(f.options);
+    const two = new SideThreadCommandExecutor({ ...f.options, receipts: new PrivateFileCommandReceiptStore(f.root) });
+    const first = one.execute(raw);
+    await Bun.sleep(25);
+    const second = two.execute(raw).then(() => "resolved", (error) => /already claimed/.test(String(error)) ? "claimed" : "other-error");
+    await Bun.sleep(25);
+    const callsBeforeRelease = calls;
+    release();
+    expect((await first).state).toBe("accepted");
+    expect(await second).toBe("claimed");
+    expect(callsBeforeRelease).toBe(1);
+  });
+
+  test("terminal POST response loss survives consumer restart and drains before commands", async () => {
+    const f = fixture();
+    new SideThreadCommandExecutor(f.options);
+    f.emit({ sideThreadId: "side-terminal", attemptId: "attempt-terminal", threadId: "derived-terminal", turnId: "turn-terminal", status: "completed", text: "answer", identityBound: true });
+    await Bun.sleep(0);
+    expect(f.terminalOutbox.list()).toHaveLength(1);
+    let posts = 0;
+    const fetchImpl = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/terminals")) { posts++; return posts === 1 ? new Response("lost", { status: 503 }) : Response.json({ ok: true, idempotent: true }); }
+      if (url.endsWith("/pending")) return Response.json({ ok: true, command: null });
+      throw new Error("unexpected request");
+    }) as typeof fetch;
+    const consumer = () => new SideThreadCommandConsumer({ hubUrl: "https://hub.invalid", nodeId: "node-1", token: "ntok_bound", executor: new SideThreadCommandExecutor(f.options), terminalOutbox: new PrivateFileTerminalOutbox(join(f.root, "terminals")), fetchImpl });
+    await expect(consumer().trigger()).rejects.toThrow(/terminal POST failed/);
+    expect(f.terminalOutbox.list()).toHaveLength(1);
+    await consumer().trigger();
+    expect(f.terminalOutbox.list()).toHaveLength(0);
+    expect(posts).toBe(2);
   });
 });

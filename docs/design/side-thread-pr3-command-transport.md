@@ -54,3 +54,8 @@ replay. No secrets, host paths, or deployment-only launchers are added here.
 Rollback is source-only: disable the SideThread feature flag/uninstall the
 command port and return to the unsupported registry. Retain command and node
 journal state for reconciliation; do not delete it during rollback.
+
+The current transport is explicitly SQLite-only. `PgAdapter.transaction()` is
+not atomic today, so constructor startup fails closed for that dialect. A real
+single-connection PostgreSQL transaction implementation plus race suite is a
+prerequisite for enabling this outbox on PostgreSQL.
