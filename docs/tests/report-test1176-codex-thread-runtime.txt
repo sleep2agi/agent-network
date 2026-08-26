@@ -1,21 +1,34 @@
-Test 1176 — Codex TUI thread alignment and runtime truth
+Test 1176 — manual Codex TUI alignment and runtime truth
 
-Source commit under test: 3b13e8ebc0b1694f91717a3b3f3edb2a9eff78b4
+Source commit under test: 74a339d14973ca3efb6ca0daef2f62d3776ea2ef
+Base: origin/main at 86f981661e3287dea0bbce51f40e824945882d81
 
 Scope
-- Hub preserves agent-node:codex-app-server and agent-node:grok-build-cli instead of collapsing them into family fallbacks.
-- When a manually assembled bridge creates a thread after a TUI was opened, agent-node writes codexThreadId and prints the exact CODEX_HOME / remote / thread / model needed to resume that TUI.
-- The managed `anet node start --copresence` path was audited: it already starts app-server, creates/resumes the thread, persists config, then starts bridge and TUI on that same thread.
+- Hub preserves exact agent-node:codex-app-server and agent-node:grok-build-cli labels instead of collapsing them into SDK/ACP families. Legacy exact labels remain compatible; prefix lookalikes are rejected.
+- When a manually assembled bridge first creates/captures a thread, agent-node atomically writes codexThreadId and prints copyable POSIX and PowerShell resume commands containing the node-local CODEX_HOME, codexAppServerUrl, bridge-written thread id, and configured model.
+- Shell values are quoted and terminal control characters are not emitted.
+- The manual topology guide records the observed failure: omitting the node CODEX_HOME can silently use ~/.codex, connect to external :443, and show an empty pane. Operators must verify socket/remote/thread; an empty pane is not evidence of success.
+- Managed creation/recovery remains owned by merged PR #1178 and was not duplicated here.
 
-Container result (image anet-test1176:dev):
-- runtime-label.test.ts: 3 pass / 0 fail / 9 expectations
-- codex-tui-alignment.test.ts: 2 pass / 0 fail / 2 expectations
-- agent-node production bundle: success
-- RESULT: PASS
+Path-conflict audit
+- server/src/server.ts overlaps open BTW PRs #1196/#1200/#1204; this PR changes only the local normalization helper import/call already present in its original scope.
+- agent-node/src/cli.ts overlaps #1180/#1193/#1198/#1204; this PR changes only the post-writeback manual alignment warning.
+- Documentation and new helper/test/Docker paths have no open-PR overlap.
 
-Witnessed red:
-- Remove the exact codex-app-server projection: the runtime suite fails with received null instead of codex-app-server.
-- Replace the bridge-written thread in the alignment notice with a different thread: the alignment suite fails with wrong-thread instead of thread_123.
+Docker result
+- Image: anet-test1176:74a339d14973ca3efb6ca0daef2f62d3776ea2ef
+- Command: sg docker -c 'docker build --build-arg SOURCE_COMMIT=74a339d14973ca3efb6ca0daef2f62d3776ea2ef -t anet-test1176:74a339d14973ca3efb6ca0daef2f62d3776ea2ef -f tests/test1176-codex-thread-runtime/Dockerfile . && docker run --rm anet-test1176:74a339d14973ca3efb6ca0daef2f62d3776ea2ef'
+- Pure behavior: 7 pass / 0 fail / 18 expectations.
+- Production integration source gates: PASS.
+- Chinese + English incident documentation gates: PASS.
+- agent-node production bundle: PASS.
+- CommHub server production bundle: PASS.
+- RESULT: PASS.
+
+Witnessed red
+1. Mutated exact mapping agent-node:codex-app-server back to codex-sdk: runtime-label.test.ts failed with expected codex-app-server / received codex-sdk (rc=1).
+2. Mutated the emitted POSIX command to use CODEX_HOME='wrong': codex-tui-alignment.test.ts failed on the exact resume command (rc=1).
 
 Boundary
-- This change does not restart an operator's interactive TUI behind their back. Managed topology is already synchronized; manual topology gets a fail-loud, exact repair command when the bridge changes thread.
+- The bridge does not kill/restart an operator's interactive TUI behind their back. It emits exact repair instructions only when it actually changes codexThreadId.
+- This Draft does not merge, publish, alter managed recovery, or probe a real operator CODEX_HOME.
