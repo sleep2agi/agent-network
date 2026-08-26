@@ -183,10 +183,35 @@ anet node create codex-human --runtime codex-app-server --codex-app-server-url w
 anet node start codex-human
 
 # Read codexThreadId from config.json, then attach Terminal 3 to that exact thread
+# 🔴 CODEX_HOME must be set explicitly to *this node's* codex-home — see the danger box below
+$env:CODEX_HOME = "<project>\.anet\nodes\<alias>\codex-home"
 codex resume --remote ws://127.0.0.1:<free-port> <codexThreadId>
 ```
 
 `codex resume --remote` must include the session/thread id. Omitting it opens a historical-session picker and makes attaching to the wrong thread easy. You may also pass `--codex-thread-id <id>` when creating the node to adopt a specific thread; otherwise the runtime captures one and writes `codexThreadId` back to config.
+
+::: danger 🔴 A hand-started TUI must carry `CODEX_HOME`, or it silently goes to the cloud
+`--copresence` sets the node's own `CODEX_HOME` for you; **the manual topology does not**. Without it the TUI uses the default `~/.codex`, which does not hold this thread, so `codex resume --remote` **raises no error, writes no log, and leaves the pane empty** while falling back to a separate cloud session — one still carrying the `--dangerously-bypass-approvals-and-sandbox` you passed. From the outside it looks **exactly like success**.
+
+Measured 2026-08-26 on Linux: a TUI started without `CODEX_HOME` had exactly one TCP connection from its codex child process, and it went to public `:443` rather than to the app-server's loopback port.
+
+```bash
+# Linux / macOS: line CODEX_HOME up with the app-server
+CODEX_HOME=<project>/.anet/nodes/<alias>/codex-home \
+  codex resume --remote ws://127.0.0.1:<free-port> <codexThreadId>
+```
+
+**Verify that it actually attached** — do not settle for "the process started":
+
+```bash
+# The TUI's codex child process should hold an ESTAB to the app-server port
+ss -tnp | grep '127.0.0.1:<free-port>'
+```
+
+The app-server port should show **two** connection pairs: one for the bridge, one for the TUI. Only one pair means the TUI did not attach.
+
+The app-server **accepts multiple clients**, so the TUI can join the same thread while the bridge is connected. **There is no need to stop the bridge first.**
+:::
 
 Advanced Linux/macOS users can also use this topology with an existing app-server, but prefer `--copresence` for everyday use because it manages loopback binding, isolated `CODEX_HOME`, MCP injection, tmux lifecycle, and stop identity together. If common ports such as 24700–24720 are occupied by other co-presence nodes, choose another free loopback port and check it before starting.
 
