@@ -111,9 +111,10 @@ async function startAndStop(label) {
 await startAndStop("first start");
 await startAndStop("restart");
 const calls = readFileSync(rpcLog, "utf8");
-if ((calls.match(/^rpc:thread\/start$/gm) || []).length !== 1) throw new Error(`expected exactly one new thread:\n${calls}`);
+if ((calls.match(/^rpc:thread\/start$/gm) || []).length !== 0) throw new Error(`deferred TUI startup created a synthetic thread:\n${calls}`);
+if ((calls.match(/^rpc:test\/tui-thread\/create:thread_windows_e2e$/gm) || []).length !== 1) throw new Error(`expected one user-owned TUI thread identity:\n${calls}`);
 if ((calls.match(/^rpc:thread\/resume:thread_windows_e2e$/gm) || []).length !== 3) throw new Error(`launcher and real bridge did not resume one persisted thread:\n${calls}`);
-if ((calls.match(/^rpc:thread\/read:thread_windows_e2e$/gm) || []).length !== 4) throw new Error(`launcher verification plus eager bridge recovery did not read exact history:\n${calls}`);
+if ((calls.match(/^rpc:thread\/read:thread_windows_e2e$/gm) || []).length !== 3) throw new Error(`deferred promotion plus restart did not read exact history:\n${calls}`);
 if ((calls.match(/^tui:thread_windows_e2e$/gm) || []).length !== 2) throw new Error(`TUI did not adopt same thread twice:\n${calls}`);
 console.log("PASS interactive create -> native start -> stop -> restart resumes same Codex thread");
 

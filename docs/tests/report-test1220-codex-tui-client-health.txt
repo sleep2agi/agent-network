@@ -81,6 +81,12 @@ The full 65-second A9 run plus A12 restart-only verification proved:
   the exact WebSocket on every TUI path, lets a fresh TUI publish its user-owned
   thread, and holds the short probes for five seconds; no product health check
   was weakened. Native Windows rerun remains the authority for this correction.
+- PR native Windows run `33019271464` passed PID/birth/socket health on first
+  start and restart, then failed an obsolete wire-count assertion that still
+  expected the launcher to create a synthetic thread. Deferred startup now
+  requires `thread/start=0`, exactly one user-owned TUI identity notification,
+  and the measured three exact resume/read calls. This tightens the no-health-
+  turn invariant; a new native run remains required.
 
 - A1: locked dependencies absent; no product roles. A stale cleanup port caused
   a harness false positive.
