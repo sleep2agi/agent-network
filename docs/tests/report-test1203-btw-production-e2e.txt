@@ -1,0 +1,29 @@
+test1203 /btw production E2E gate
+Date: 2026-08-26
+Base: PR #1202 head 8ad03b1ea3c9fcfae085d85070213c9d2dffb5ac
+
+Scope:
+- real Codex 0.148 owned-stdio active-main / double-fork / reverse-completion / cancel isolation: delegated to reviewed test1190 live gate
+- durable command ACK loss and restart: executable offline gate
+- terminal WAL response loss and restart-before-pull ordering: executable offline gate
+- bring-back accepted replay exactly once and ambiguous response fail-closed: executable offline gate
+- attachment node-token / byte-count / SHA-256 / 0600 materialization: executable offline gate
+- persisted receipt redaction: executable offline gate
+
+Honest gap:
+The production Codex adapter does not yet serialize materialized attachments
+into turn/start. Therefore this gate does not claim model-side attachment
+consumption. It is a merge gate for the follow-up production wiring, not proof
+that wiring already exists.
+
+Executed evidence:
+- Docker image `anet-test1203`, pinned `codex-cli 0.148.0`
+- offline recovery layer: 5 passed, 0 failed, 20 assertions
+- live owned-stdio layer: PASS, reviewed evidence `test1190-wire-v2`
+- source active at fork; three threads concurrently active
+- cancelled target `interrupted`; source and sibling `completed`
+- created slow then fast; completed fast then slow
+- witnessed-red source-first mutation rejected
+- disposable CODEX_HOME files after exit: 0
+- sanitized wire trace scan: no prompt markers, local home paths, tokens,
+  bearer values, or raw UUIDs
