@@ -19,6 +19,7 @@ import {
 } from "./runtime/grok-copresence/platform";
 import { dirname, join, isAbsolute, resolve } from "path";
 import { hostname as osHostname, homedir } from "os";
+import { collectOsUser } from "./os-user";
 import { createCommhubSdkMcpServer } from "./commhub-mcp";
 import { claudeCommhubToolAliases } from "./claude-tool-aliases";
 import { getHostTelemetry } from "./host-telemetry";
@@ -1327,6 +1328,7 @@ const register = async () => {
     resume_id: RESUME_ID, alias, status: "idle",
     server: osHostname(), hostname: osHostname(),
     agent: RUNTIME_AGENT_LABEL, project_dir: process.cwd(),
+    os_user: collectOsUser(),
     version: AGENT_NODE_VERSION,
     node_id: NODE_ID || undefined,
     node_name: NODE_NAME || undefined,
@@ -1364,6 +1366,7 @@ const reportStatus = async (status: string, task?: string) => {
       : SESSION_ID || undefined;
   return callCommHub("report_status", {
     resume_id: RESUME_ID, alias, status: resolveReportedStatus(status), task,
+    os_user: collectOsUser(),
     node_id: NODE_ID || undefined,
     session_id: activeSessionId,
     config_path: configFilePath || undefined,

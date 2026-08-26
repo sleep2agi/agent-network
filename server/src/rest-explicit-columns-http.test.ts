@@ -11,6 +11,7 @@ let server: ReturnType<typeof Bun.serve>;
 let base = "";
 let token = "";
 let networkId = "";
+let foreignNetworkId = "";
 
 const INTERNAL_SENTINEL = "future_internal_only";
 const sortedKeys = (value: Record<string, unknown>): string[] => Object.keys(value).sort();
@@ -39,7 +40,7 @@ const GOLDEN_RESPONSE_KEYS = {
   ],
   statusSession: [
     "resume_id", "alias", "tmux_name", "server", "ip", "hostname", "agent",
-    "project_dir", "version", "status", "task", "output", "progress", "score",
+    "project_dir", "os_user", "version", "status", "task", "output", "progress", "score",
     "cpu_load_1min", "cpu_cores", "mem_total_gb", "mem_used_gb", "mem_avail_gb",
     "disk_total_gb", "disk_used_gb", "disk_avail_gb", "process_rss_bytes",
     "process_rss_mb", "process_cpu_pct", "process_uptime_seconds",
@@ -88,6 +89,9 @@ beforeAll(async () => {
   expect(auth.ok).toBe(true);
   token = auth.token!;
   networkId = auth.network_id!;
+  const foreign = register(`rest_shape_foreign_${Date.now()}`, "RestShape-Foreign-Strong-1!", undefined, "rest-shape-foreign");
+  expect(foreign.ok).toBe(true);
+  foreignNetworkId = foreign.network_id!;
 
   // Simulate future migrations. Any REST SELECT * silently broadcasts these
   // columns; every endpoint below must keep them private without needing a
@@ -97,9 +101,14 @@ beforeAll(async () => {
   }
 
   db.run(
-    `INSERT INTO sessions (resume_id, alias, status, agent, model, network_id, external_schedules)
-     VALUES ('resume-rest-shape', 'rest-shape-node', 'idle', 'agent-node:codex', 'gpt-shape', ?1, ?2)`,
+    `INSERT INTO sessions (resume_id, alias, status, agent, model, os_user, network_id, external_schedules)
+     VALUES ('resume-rest-shape', 'rest-shape-node', 'idle', 'agent-node:codex', 'gpt-shape', 'shape-runner', ?1, ?2)`,
     [networkId, JSON.stringify({ observed_at: "2026-08-10T02:00:00.000Z", schedules: [] })],
+  );
+  db.run(
+    `INSERT INTO sessions (resume_id, alias, status, os_user, network_id)
+     VALUES ('resume-rest-shape-foreign', 'rest-shape-foreign-node', 'idle', 'foreign-secret-user', ?1)`,
+    [foreignNetworkId],
   );
   db.run(
     `INSERT INTO tasks (task_id, from_name, to_name, status, content, priority, network_id, parent_task_id, meta_json)
@@ -174,6 +183,17 @@ describe("#311 REST response projections are stable across future ALTER TABLE", 
     expect(sortedKeys(row)).toEqual(sorted(GOLDEN_RESPONSE_KEYS.statusSession));
     expect(row[INTERNAL_SENTINEL]).toBeUndefined();
     expect(row.external_schedules).toEqual({ observed_at: "2026-08-10T02:00:00.000Z", schedules: [] });
+    expect(row.os_user).toBe("shape-runner");
+    expect(body.sessions.some((item: any) => item.os_user === "foreign-secret-user")).toBe(false);
+
+    const light = await api(`/api/status?network_id=${networkId}&light=1`);
+    const lightRow = light.sessions.find((item: any) => item.alias === "rest-shape-node");
+    expect(lightRow.os_user).toBeUndefined();
+  });
+
+  test("status remains authenticated", async () => {
+    const response = await fetch(`${base}/api/status`);
+    expect(response.status).toBe(401);
   });
 
   test("task list and task detail expose the same explicit contract", async () => {

@@ -454,6 +454,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       hostname: z.string().max(200).optional().describe("Agent hostname"),
       agent: z.string().max(100).optional().describe("Agent type (claude-code / codex / opencode)"),
       project_dir: z.string().max(1000).optional().describe("Agent working directory"),
+      os_user: z.string().min(1).max(256)
+        .refine((value) => value === value.trim(), "OS user must not have surrounding whitespace")
+        .refine((value) => !/[\u0000-\u001f\u007f-\u009f]/u.test(value), "OS user must not contain control characters")
+        .optional().nullable()
+        .describe("Operating-system user of the reporting process; null when unavailable"),
       version: z.string().max(100).optional().describe("Agent version"),
       tmux_name: z.string().max(200).optional().describe("tmux session name"),
       // V2 fields
@@ -535,7 +540,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         }).optional(),
       }).optional().describe("RFC-024 — masked node config snapshot"),
     },
-    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap }) => {
+    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, os_user: osUser, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap }) => {
       const effectiveNetId = getNetworkId(netId);
       const sessionNetId = effectiveNetId ?? "default";
       if (!callerTokenIsNetwork || !enforceNetworkId) {
@@ -653,36 +658,38 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // Only delete same-alias sessions within the same network
         db.run("DELETE FROM sessions WHERE alias = ?1 AND resume_id != ?2 AND network_id = ?3", [effectiveAlias, resume_id, sessionNetId]);
         db.run(
-          `INSERT INTO sessions (resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version, status, task, output, progress, score, node_id, session_id, config_path, channels, network_id, model, cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb, disk_used_gb, disk_avail_gb, process_rss_bytes, process_rss_mb, process_cpu_pct, process_uptime_seconds, process_in_flight_count, external_schedules, peer_reply_inbox_capable, last_seen_at, updated_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, datetime('now'), datetime('now'))
+          `INSERT INTO sessions (resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, os_user, version, status, task, output, progress, score, node_id, session_id, config_path, channels, network_id, model, cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb, disk_used_gb, disk_avail_gb, process_rss_bytes, process_rss_mb, process_cpu_pct, process_uptime_seconds, process_in_flight_count, external_schedules, peer_reply_inbox_capable, last_seen_at, updated_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, datetime('now'), datetime('now'))
            ON CONFLICT(resume_id) DO UPDATE SET
              alias = COALESCE(?2, sessions.alias), tmux_name = COALESCE(?3, sessions.tmux_name),
              server = COALESCE(?4, sessions.server), ip = COALESCE(?5, sessions.ip),
              hostname = COALESCE(?6, sessions.hostname), agent = COALESCE(?7, sessions.agent),
-             project_dir = COALESCE(?8, sessions.project_dir), version = COALESCE(?9, sessions.version),
-             status = ?10, task = COALESCE(?11, sessions.task),
-             output = COALESCE(?12, sessions.output), progress = COALESCE(?13, sessions.progress),
-             score = COALESCE(?14, sessions.score), node_id = COALESCE(?15, sessions.node_id),
-             session_id = COALESCE(?16, sessions.session_id), config_path = COALESCE(?17, sessions.config_path),
-             channels = COALESCE(?18, sessions.channels), network_id = COALESCE(?19, sessions.network_id),
-             model = COALESCE(?20, sessions.model),
-             cpu_load_1min = COALESCE(?21, sessions.cpu_load_1min),
-             cpu_cores = COALESCE(?22, sessions.cpu_cores),
-             mem_total_gb = COALESCE(?23, sessions.mem_total_gb),
-             mem_used_gb = COALESCE(?24, sessions.mem_used_gb),
-             mem_avail_gb = COALESCE(?25, sessions.mem_avail_gb),
-             disk_total_gb = COALESCE(?26, sessions.disk_total_gb),
-             disk_used_gb = COALESCE(?27, sessions.disk_used_gb),
-             disk_avail_gb = COALESCE(?28, sessions.disk_avail_gb),
-             process_rss_bytes = COALESCE(?29, sessions.process_rss_bytes),
-             process_rss_mb = COALESCE(?30, sessions.process_rss_mb),
-             process_cpu_pct = COALESCE(?31, sessions.process_cpu_pct),
-             process_uptime_seconds = COALESCE(?32, sessions.process_uptime_seconds),
-             process_in_flight_count = COALESCE(?33, sessions.process_in_flight_count),
-             external_schedules = COALESCE(?34, sessions.external_schedules),
-             peer_reply_inbox_capable = ?35,
+             project_dir = COALESCE(?8, sessions.project_dir),
+             os_user = CASE WHEN ?37 = 1 THEN ?9 ELSE sessions.os_user END,
+             version = COALESCE(?10, sessions.version),
+             status = ?11, task = COALESCE(?12, sessions.task),
+             output = COALESCE(?13, sessions.output), progress = COALESCE(?14, sessions.progress),
+             score = COALESCE(?15, sessions.score), node_id = COALESCE(?16, sessions.node_id),
+             session_id = COALESCE(?17, sessions.session_id), config_path = COALESCE(?18, sessions.config_path),
+             channels = COALESCE(?19, sessions.channels), network_id = COALESCE(?20, sessions.network_id),
+             model = COALESCE(?21, sessions.model),
+             cpu_load_1min = COALESCE(?22, sessions.cpu_load_1min),
+             cpu_cores = COALESCE(?23, sessions.cpu_cores),
+             mem_total_gb = COALESCE(?24, sessions.mem_total_gb),
+             mem_used_gb = COALESCE(?25, sessions.mem_used_gb),
+             mem_avail_gb = COALESCE(?26, sessions.mem_avail_gb),
+             disk_total_gb = COALESCE(?27, sessions.disk_total_gb),
+             disk_used_gb = COALESCE(?28, sessions.disk_used_gb),
+             disk_avail_gb = COALESCE(?29, sessions.disk_avail_gb),
+             process_rss_bytes = COALESCE(?30, sessions.process_rss_bytes),
+             process_rss_mb = COALESCE(?31, sessions.process_rss_mb),
+             process_cpu_pct = COALESCE(?32, sessions.process_cpu_pct),
+             process_uptime_seconds = COALESCE(?33, sessions.process_uptime_seconds),
+             process_in_flight_count = COALESCE(?34, sessions.process_in_flight_count),
+             external_schedules = COALESCE(?35, sessions.external_schedules),
+             peer_reply_inbox_capable = ?36,
              last_seen_at = datetime('now'), updated_at = datetime('now')`,
-          [resume_id, effectiveAlias, tmux ?? null, srv ?? null, hostIp, hostHostname, ag ?? null, pd ?? null, ver ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null, sessionNetId, mdl ?? null, cpuLoad1m, cpuCores, memTotalGb, memUsedGb, memAvailGb, diskTotalGb, diskUsedGb, diskAvailGb, processRssBytes, processRssMb, processCpuPct, processUptimeSeconds, processInFlightCount, externalSchedulesJson, peerReplyInboxCapable ? 1 : 0]
+          [resume_id, effectiveAlias, tmux ?? null, srv ?? null, hostIp, hostHostname, ag ?? null, pd ?? null, osUser ?? null, ver ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null, sessionNetId, mdl ?? null, cpuLoad1m, cpuCores, memTotalGb, memUsedGb, memAvailGb, diskTotalGb, diskUsedGb, diskAvailGb, processRssBytes, processRssMb, processCpuPct, processUptimeSeconds, processInFlightCount, externalSchedulesJson, peerReplyInboxCapable ? 1 : 0, osUser !== undefined ? 1 : 0]
         );
         if (host || proc) {
           db.run(

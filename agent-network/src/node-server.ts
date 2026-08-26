@@ -19,6 +19,7 @@ import { parseCommhubToolResult } from "./commhub-response";
 import { randomUUID } from "crypto";
 import { join } from "path";
 import { hostname } from "os";
+import { collectOsUser } from "./os-user";
 import { execSync } from "child_process";
 import { encodeCwd } from "./project-key";
 import { loadOwnerOnlyEnvFile } from "./owner-env-file";
@@ -464,6 +465,7 @@ async function reregister(): Promise<void> {
       hostname: hostname(),
       agent: "claude-code",
       project_dir: process.cwd(),
+      os_user: collectOsUser(),
       tmux_name: TMUX_NAME || undefined,
     });
     log(`re-registered as "${ALIAS}" after SSE reconnect`);
@@ -645,6 +647,7 @@ async function main() {
     hostname: hostname(),
     agent: "claude-code",
     project_dir: process.cwd(),
+    os_user: collectOsUser(),
     tmux_name: TMUX_NAME || undefined,
   })
     .then(() => log(`registered as "${ALIAS}" (${RESUME_ID.slice(0, 8)})`))
@@ -660,6 +663,7 @@ async function main() {
       hostname: hostname(),
       agent: "claude-code",
       project_dir: process.cwd(),
+      os_user: collectOsUser(),
       tmux_name: TMUX_NAME || undefined,
     }).catch((e) => log(`heartbeat failed: ${e}`));
   }, 3 * 60 * 1000);
