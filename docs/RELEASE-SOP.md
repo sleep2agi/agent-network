@@ -55,6 +55,31 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > | `docs-site/docs/en/guide/windows.md` | 102 | 同上(英文) |
 > | `docs-site/docs/guide/dashboard.md` | 313、328 | `anet -v` 应显示 `2.3.0-preview.N` / preview 不自动 promote |
 > | `docs-site/docs/en/guide/dashboard.md` | 314、329 | 同上(英文) |
+> | `docs-site/docs/api/rest.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
+> | `docs-site/docs/concepts/security.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
+> | `docs-site/docs/deploy/daemon.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
+> | `docs-site/docs/deploy/npm.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
+> | `docs-site/docs/en/api/rest.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
+> | `docs-site/docs/en/concepts/security.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
+> | `docs-site/docs/en/deploy/daemon.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
+> | `docs-site/docs/en/deploy/npm.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
+> | `docs-site/docs/en/guide/architecture.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
+> | `docs-site/docs/en/guide/feishu.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
+> | `docs-site/docs/en/guide/grok-copresence.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
+> | `docs-site/docs/en/preview/index.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
+> | `docs-site/docs/en/troubleshooting/case-feishu-silent-deny.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
+> | `docs-site/docs/guide/architecture.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
+> | `docs-site/docs/guide/feishu.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
+> | `docs-site/docs/guide/grok-copresence.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
+> | `docs-site/docs/preview/index.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
+> | `docs-site/docs/troubleshooting/case-feishu-silent-deny.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
+>
+> 🔴 **这张表第四次被修正:7 → 8 → 12 → 31。**
+> 前三次都是有人踩到之后手工补的,而 SOP 里那句「加新断言时同时加进这张表」靠人记 —— 记不住。
+> 现在由 `.github/scripts/check-release-channel-assertions.py` 扫出来:
+> 判据是「同一行里同时出现 `latest`/`preview` 与一个具体版本号」——那是断言的形状,
+> 不是某几个具体数字(上一次手工数就是只 grep 了三个版本号,因此又漏了一批)。
+> **新增断言不登记 = 门红。分母不会再靠自觉。**
 >
 > **核对方法不是 grep,是真机装。但不同断言要各跑各的 —— 一次探针不能替所有:**
 >

@@ -28,12 +28,16 @@ on:
     paths:
       - '**/*.md'
       - '.github/scripts/check-docs-integrity.py'
+      - '.github/scripts/check-release-channel-assertions.py'
+      - 'docs/RELEASE-SOP.md'
       - '.github/workflows/docs-integrity.yml'
   push:
     branches: [main]
     paths:
       - '**/*.md'
       - '.github/scripts/check-docs-integrity.py'
+      - '.github/scripts/check-release-channel-assertions.py'
+      - 'docs/RELEASE-SOP.md'
       - '.github/workflows/docs-integrity.yml'
 
 jobs:
@@ -52,3 +56,5 @@ jobs:
       # targets were invisible, and both broken links in scope were among them.
       - run: python3 .github/scripts/check-docs-integrity.py --selftest
       - run: python3 .github/scripts/check-docs-integrity.py
+      - name: 信道断言清单未登记即红
+        run: python3 .github/scripts/check-release-channel-assertions.py
