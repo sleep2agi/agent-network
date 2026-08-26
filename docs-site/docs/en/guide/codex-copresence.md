@@ -198,6 +198,16 @@ All three terminals in a manual topology must also set the **same node-specific 
 
 Advanced Linux/macOS users can also use this topology with an existing app-server, but prefer `--copresence` for everyday use because it manages loopback binding, isolated `CODEX_HOME`, MCP injection, tmux lifecycle, and stop identity together. If common ports such as 24700–24720 are occupied by other co-presence nodes, choose another free loopback port and check it before starting.
 
+Concretely, "inspect the TUI process socket" means this, and the criterion is the **number of connection pairs**:
+
+```bash
+ss -tnp | grep '127.0.0.1:<app-server-port>'
+```
+
+A healthy attach shows **two** ESTAB pairs — one for the bridge, one for the TUI. **Only one pair means the TUI did not attach**, and the pane looks identical either way. Measured 2026-08-26 on Linux: a TUI started without `CODEX_HOME` had exactly one TCP connection from its codex child, and it went to public `:443`.
+
+The app-server **accepts multiple clients**, so the TUI can join the same thread while the bridge is connected. **There is no need to stop the bridge first** (measured on the same host: the bridge kept its 6-second round trip after a new TUI attached).
+
 A manually started app-server does not automatically get the CommHub MCP injection supplied by `--copresence`. If the human TUI needs direct `commhub_*` tools, configure the RFC-030 MCP URL and bearer-token environment variable **before the app-server creates the thread**. Existing threads snapshot their tool set, so adding MCP later does not work. Never put the token in argv or chat.
 
 ::: warning Codex CLI update prompt

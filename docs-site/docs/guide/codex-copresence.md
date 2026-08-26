@@ -196,6 +196,16 @@ codex resume --remote ws://127.0.0.1:<free-port> <codexThreadId> -m <model>
 
 Linux/macOS 的高级用户也可用这一拓扑连接已存在的 app-server，但日常使用优先 `--copresence`，它会统一处理 loopback、独立 `CODEX_HOME`、MCP 注入、tmux 生命周期与停止身份。若本机 24700–24720 等常用范围已被其他共存节点占用，继续选新的空闲 loopback 端口，启动前先查占用。
 
+上一段说的「检查 socket」，具体是这条，判据是**连接对数**：
+
+```bash
+ss -tnp | grep '127.0.0.1:<app-server 端口>'
+```
+
+正常应当看到**两对** ESTAB —— bridge 一对、TUI 一对。**只有一对就是 TUI 没接上**（此时 pane 同样是空的，看不出区别）。实测（2026-08-26，Linux）：缺 `CODEX_HOME` 起的 TUI，其 codex 子进程唯一的 TCP 连接是到公网 `:443`。
+
+app-server **支持多客户端**，所以 bridge 连着的时候 TUI 照样能 join 同一条 thread，**不需要先停 bridge**（本机实测：接上新 TUI 后 bridge 6 秒往返照常）。
+
 手工启动的 app-server 不会自动获得 `--copresence` 注入的 CommHub MCP；若希望人类 TUI 直接调用 `commhub_*`，必须在 **app-server 创建 thread 之前**按 RFC-030 配好 MCP URL 与 bearer-token 环境变量。既有 thread 会快照工具集，事后补 MCP 不会生效。不要把 token 放进命令行或聊天。
 
 ::: warning Codex CLI 升级提示

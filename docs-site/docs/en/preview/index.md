@@ -5,17 +5,15 @@ The current preview channel = **v0.11-preview2** (npm `@preview` tag). This rele
 
 **Features available in preview that aren't in latest yet:**
 - `anet node loop` CLI + `/aloop` works across all runtimes (Dashboard `/goal` and `/loop` stay native to the target runtime)
-- Security batch: cross-tenant write防护带 + retention sweep + password KDF strengthening
+- Security batch: cross-tenant write guards + retention sweep + password KDF strengthening
 - RFC-024 hub config-apply foundation (4 new MCP tools)
 :::
 
-::: tip Install the current preview via the `@preview` tag — don't copy version numbers
-The specific `preview.N` numbers below are a **2026-06-28 snapshot**; the preview channel keeps iterating (it's now well past preview.1). **Always install / upgrade the current preview via the `@preview` tag** (the install commands below already do), rather than copying a specific version number.
+::: tip Install preview via the `@preview` tag
+The preview channel keeps iterating and the specific `preview.N` numbers change constantly — don't copy them. Always install and upgrade via `@preview` (the commands below already do); to see what it points at right now, run `npm view @sleep2agi/agent-network dist-tags`.
 :::
 
-## Current preview channel canonical build (snapshot 2026-08-17)
-
-> **Snapshot 2026-08-17**: `@preview` currently resolves to `@sleep2agi/agent-network@2.3.0-preview.39` / `@sleep2agi/agent-node@2.5.0-preview.31` / `@sleep2agi/commhub-server@0.9.0-preview.29` (what main source requires). The published `preview.39` binary's embedded `.d.ts` pair still names `agent-node@2.5.0-preview.28` (published-binary requirement ≠ main-source requirement; in auto-sync mode the main-source constant advances ahead of the npm-published artifact). **Always install / upgrade the current preview via the `@preview` tag** (the install commands below already do); do NOT hand-copy version numbers from here — both tags keep drifting; re-check with `npm view <pkg> dist-tags` before editing.
+## Current preview channel canonical build
 
 @preview now points at the **canonical build** (published from the exact tgz after real-Windows verification; independent Linux gate re-run in progress — latest promotion gated on true green):
 
@@ -125,7 +123,7 @@ anet node loop daily-bot "post the morning summary" --every 2h
 
 Four cross-tenant / data-integrity gaps closed for public-hub multi-user / multi-network deployments:
 
-- **Cross-tenant write防护带** ([#287](https://github.com/sleep2agi/agent-network/issues/287), RFC-024 PR A)
+- **Cross-tenant write guards** ([#287](https://github.com/sleep2agi/agent-network/issues/287), RFC-024 PR A)
 - **retention sweep + incremental VACUUM** ([#282](https://github.com/sleep2agi/agent-network/issues/282))
 - **read-path stale-marker fix** ([#283](https://github.com/sleep2agi/agent-network/issues/283))
 - **Password KDF strengthening** ([#285](https://github.com/sleep2agi/agent-network/issues/285))
@@ -148,7 +146,7 @@ Four cross-tenant / data-integrity gaps closed for public-hub multi-user / multi
 |---|---|---|
 | ANet `/aloop` scheduler | `claude-code-cli` only | **All production runtimes** |
 | `anet node loop` CLI | ❌ | ✅ |
-| Cross-tenant write防护带 | Partial (`#275`) | ✅ 4 tools + SQL guard |
+| Cross-tenant write guards | Partial (`#275`) | ✅ 4 tools + SQL guard |
 | retention sweep / VACUUM | ❌ | ✅ |
 | Password KDF | Basic scrypt | ✅ verified-modern parameters |
 | RFC-024 hub config-apply | ❌ | ✅ foundation (PR A) |
