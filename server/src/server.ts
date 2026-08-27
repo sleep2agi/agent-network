@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { parseDbTimestampMs } from "./db-timestamp.js";
 import { resolvePort } from "./resolve-port.js";
 import { normalizeSessionRuntime } from "./runtime-label.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
@@ -3008,7 +3009,10 @@ return Bun.serve({
       `, effectiveNetId);
 
       const nowMs = Date.now();
-      const ONLINE_MS = 60_000;
+      // 心跳周期是 3 分钟（agent-node/src/cli.ts 的 report_status 定时器），
+      // 窗口必须大于它，否则每次心跳后的 60s~180s 之间必然抖成 offline
+      // （通信评审牛 #1279 独审④）。取 5min，与仓内既有 stale 口径一致。
+      const ONLINE_MS = 5 * 60_000;
       const daemons = sqlRows
         .map(r => {
           let snapRole: string | null = null;
@@ -3026,7 +3030,7 @@ return Bun.serve({
           let lastSeenAt: string | null = null;
           if (r.session_last_seen) {
             lastSeenAt = r.session_last_seen;
-            const t = Date.parse(r.session_last_seen);
+            const t = parseDbTimestampMs(r.session_last_seen);
             if (!isNaN(t)) online = (nowMs - t) <= ONLINE_MS;
           }
           let runtimes: string[] = [];

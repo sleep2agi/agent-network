@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { parseDbTimestampMs } from "./db-timestamp.js";
 import { z } from "zod/v4";
 import { parseAliasFilter } from "./alias-filter.js";
 import { createHash } from "node:crypto";
@@ -2809,7 +2810,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // schema-promoted columns runtimes_supported/allowed_secret_keys
       // are pre-extracted but role isn't a first-class column).
       const nowMs = Date.now();
-      const ONLINE_MS = 60_000;
+      // 心跳周期是 3 分钟（agent-node/src/cli.ts 的 report_status 定时器），
+      // 窗口必须大于它，否则每次心跳后的 60s~180s 之间必然抖成 offline
+      // （通信评审牛 #1279 独审④）。取 5min，与仓内既有 stale 口径一致。
+      const ONLINE_MS = 5 * 60_000;
       const daemons = rows
         .map(r => {
           let snapRole: string | null = null;
@@ -2828,7 +2832,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           let lastSeenAt: string | null = null;
           if (r.session_last_seen) {
             lastSeenAt = r.session_last_seen;
-            const t = Date.parse(r.session_last_seen);
+            const t = parseDbTimestampMs(r.session_last_seen);
             if (!isNaN(t)) online = (nowMs - t) <= ONLINE_MS;
           }
           // Parse self-declare arrays (default to [] for pre-PR2 daemons)
