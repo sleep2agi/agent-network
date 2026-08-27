@@ -66,7 +66,15 @@ bad()  { echo "  ✗ $1" >&2; FAIL=$((FAIL+1)); }
 skip() { echo "  ⊘ $1 (skipped — $2)"; SKIP=$((SKIP+1)); }
 
 cleanup() {
-  kill "${HUB_PID:-0}" "${NODE_PID:-0}" 2>/dev/null || true
+  # 🔴 不能写 kill "${X:-0}" —— POSIX 里 `kill 0` 是「向当前进程组的每个成员
+  # 发信号」,脚本自己就在那个组里。本套件的 NODE_PID **从不被赋值**(全文 0 处
+  # 赋值),所以每次退出都会走到 `kill 0`,把自己 SIGTERM 掉。
+  # 后果:退出码恒为 143,**与 FAIL 无关** —— PASS=23 FAIL=0 也照样 143。
+  # `2>/dev/null || true` 只吞掉 kill 的报错,信号早已送出,救不了。
+  # 实测 A/B:kill "${A:-0}" → rc=143;换成不存在的高 PID → rc=0。
+  for _pid in "${HUB_PID:-}" "${NODE_PID:-}"; do
+    [[ -n "$_pid" ]] && kill "$_pid" 2>/dev/null
+  done
   echo
   echo "── Result ──"
   echo "  PASS=$PASS  FAIL=$FAIL  SKIP=$SKIP"
