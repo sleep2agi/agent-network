@@ -6,8 +6,8 @@
      version being published against these stamps and blocks the release, listing every line to update.
      Change the prose, change the stamp — the gate also fails when the two disagree.
      Only "current state" claims are stamped; historical references (e.g. `<= 2.3.0-preview.37`) are not. -->
-<!-- version-claim: package=agent-network channel=latest version=2.2.21 -->
-<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.43 -->
+<!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.47 -->
+<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.48 -->
 
 The minimum path for a brand-new user — **5 steps, 5 minutes**. One command + one verification per step.
 
@@ -90,15 +90,27 @@ The first `anet hub start` prints the admin credentials once:
    Store this password now; it will not be shown again.
 ```
 
-**That string depends on which version you installed** (measured 2026-08-18):
+🔴 **Do not copy the `anethub` in the command below.** Both `latest` and `preview`
+currently install versions that print a **random** password, so copying it will fail —
+the only reliable move is to read your own startup output.
 
-| channel | printed password |
+Measured 2026-08-27 (one `anet hub start` per version in a clean container, no `--password`):
+
+| installed version | printed password |
 |---|---|
-| `latest` = `2.2.21` | the fixed string `anethub` |
-| `preview` = `2.3.0-preview.43` | a **random** string like `anet-232412de5bb54c058cff32`, with a change-on-first-login notice |
+| `2.3.0-preview.47` (`latest` at the time) | `anet-3ce2750defe04d9ab3baf0` — **random**, with a change-on-first-login notice |
+| `2.3.0-preview.48` (`preview` at the time) | `anet-25c07c8cba0740f4a005bf` — **random**, same notice |
 
-So the `anethub` below **only holds on stable**. **Anyone who copies this page instead of reading their own startup output will fail to log in on preview.**
-The credentials are also written to `~/.anet/server/admin-utok.json`.
+Neither run printed the literal `anethub` anywhere.
+
+The fixed `anethub` only exists on `2.2.x` and earlier. **This table names versions rather
+than channels on purpose**: `latest` moves — before 2026-08 it pointed at `2.2.21` (which
+really did use a fixed password), and it now points at a preview build. **"latest uses a
+fixed password" is not merely stale; it becomes wrong when the channel moves.**
+
+The credentials are also written to `~/.anet/server/admin-utok.json`, which holds only
+`username` / `user_id` / `token` / `created_at` — **the password is not in there**, so if you
+miss that one line of output you have to bootstrap again.
 
 🔴 Also: **`anet login` currently exits 0 even when it fails** (both `latest` and `preview`; fixed on main — see #716 / #722).
 ⇒ **Do not use `anet login && <next step>` to decide whether login worked** — it will carry on after a failure. Confirm with `anet whoami`.
