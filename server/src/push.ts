@@ -109,6 +109,7 @@ function clientKey(sessionName: string, networkId?: string | null): string {
 // master-token caller could even inject a NUL into network_id via the
 // legacy ?network_id= path, and master token is root already.
 const OBSERVER_KEY_PREFIX = "\u0000netobs:";
+const USER_KEY_PREFIX = "\u0000user:";
 
 /** Printable form of `OBSERVER_KEY_PREFIX` — the shape emitted by
  *  `printableKey()` (below) and therefore the shape callers see via
@@ -121,6 +122,10 @@ export const PRINTABLE_OBSERVER_KEY_PREFIX = "\\0netobs:";
 
 function observerKey(networkId: string): string {
   return `${OBSERVER_KEY_PREFIX}${networkId}`;
+}
+
+function userKey(networkId: string, userId: string): string {
+  return `${USER_KEY_PREFIX}${networkId}:${userId}`;
 }
 
 /** Render a client key for logs / stats. Observer keys embed a raw NUL
@@ -262,6 +267,15 @@ export function createNetworkObserverStream(networkId: string): Response {
   return createStreamForKey(
     observerKey(networkId),
     { type: "connected", observer: true, network_id: networkId },
+  );
+}
+
+/** Desktop/user client SSE stream. Keyed by authenticated user_id, not
+ *  alias/session, so Desktop does not need to mint a pseudo node token. */
+export function createUserEventStream(networkId: string, userId: string): Response {
+  return createStreamForKey(
+    userKey(networkId, userId),
+    { type: "connected", user: true, network_id: networkId, user_id: userId },
   );
 }
 
@@ -433,6 +447,34 @@ export function pushNetworkObserverEvent(
   if (!arr || arr.length === 0) return;
 
   const data = `data: ${JSON.stringify({ ...event, network_id: networkId, scope: "network" })}\n\n`;
+  let needPrune = false;
+
+  for (const c of arr) {
+    if (c.closed) {
+      needPrune = true;
+      continue;
+    }
+    const result = tryEnqueueBytes(c, c.encoder.encode(data));
+    if (result === "dead") needPrune = true;
+  }
+
+  if (needPrune) pruneClosed(key);
+}
+
+/** Push an event to every active Desktop/web client for one user in one
+ *  network. No-op for falsy network/user ids; auth must be enforced by
+ *  the caller before invoking this helper. */
+export function pushUserEvent(
+  networkId: string | null | undefined,
+  userId: string | null | undefined,
+  event: Record<string, unknown>,
+): void {
+  if (!networkId || !userId) return;
+  const key = userKey(networkId, userId);
+  const arr = clients.get(key);
+  if (!arr || arr.length === 0) return;
+
+  const data = `data: ${JSON.stringify({ ...event, network_id: networkId, user_id: userId, scope: "user" })}\n\n`;
   let needPrune = false;
 
   for (const c of arr) {

@@ -11,8 +11,10 @@ import {
   __resetSSEClientsForTest,
   createNetworkObserverStream,
   createSSEStream,
+  createUserEventStream,
   pushEvent,
   pushNetworkObserverEvent,
+  pushUserEvent,
 } from "./push";
 
 afterEach(() => {
@@ -171,6 +173,80 @@ describe("#461 network observer stream", () => {
     expect((await readFrame(reader1)).task_id).toBe("fanout");
     expect((await readFrame(reader2)).task_id).toBe("fanout");
     await reader1.cancel();
+    await reader2.cancel();
+  });
+});
+
+describe("Desktop user SSE stream", () => {
+  test("user stream receives connected frame, then desktop_message", async () => {
+    const res = createUserEventStream("net_user_a", "u_user_a");
+    const reader = res.body!.getReader();
+
+    const connected = await readFrame(reader);
+    expect(connected.type).toBe("connected");
+    expect(connected.user).toBe(true);
+    expect(connected.network_id).toBe("net_user_a");
+    expect(connected.user_id).toBe("u_user_a");
+
+    pushUserEvent("net_user_a", "u_user_a", {
+      type: "desktop_message",
+      message_id: "dm_one",
+      from: "agent-a",
+      message: "hello",
+    });
+
+    const evt = await readFrame(reader);
+    expect(evt.type).toBe("desktop_message");
+    expect(evt.message_id).toBe("dm_one");
+    expect(evt.from).toBe("agent-a");
+    expect(evt.message).toBe("hello");
+    expect(evt.network_id).toBe("net_user_a");
+    expect(evt.user_id).toBe("u_user_a");
+    expect(evt.scope).toBe("user");
+    await reader.cancel();
+  });
+
+  test("user stream is isolated from alias and observer key spaces", async () => {
+    const userRes = createUserEventStream("net_user_iso", "u_iso");
+    const userReader = userRes.body!.getReader();
+    await readFrame(userReader);
+
+    const sessionRes = createSSEStream("u_iso", "net_user_iso");
+    const sessionReader = sessionRes.body!.getReader();
+    await readFrame(sessionReader);
+
+    const observerRes = createNetworkObserverStream("net_user_iso");
+    const observerReader = observerRes.body!.getReader();
+    await readFrame(observerReader);
+
+    pushEvent("u_iso", { type: "alias_marker", marker: "alias" }, "net_user_iso");
+    pushNetworkObserverEvent("net_user_iso", { type: "observer_marker", marker: "observer" });
+    pushUserEvent("net_user_iso", "u_iso", { type: "desktop_message", marker: "user" });
+
+    expect((await readFrame(sessionReader)).marker).toBe("alias");
+    expect((await readFrame(observerReader)).marker).toBe("observer");
+    expect((await readFrame(userReader)).marker).toBe("user");
+
+    await userReader.cancel();
+    await sessionReader.cancel();
+    await observerReader.cancel();
+  });
+
+  test("same user and network fan out to multiple live clients; cancelling one leaves the other live", async () => {
+    const r1 = createUserEventStream("net_user_multi", "u_multi");
+    const r2 = createUserEventStream("net_user_multi", "u_multi");
+    const reader1 = r1.body!.getReader();
+    const reader2 = r2.body!.getReader();
+    await readFrame(reader1);
+    await readFrame(reader2);
+
+    pushUserEvent("net_user_multi", "u_multi", { type: "desktop_message", message_id: "dm_fanout_1" });
+    expect((await readFrame(reader1)).message_id).toBe("dm_fanout_1");
+    expect((await readFrame(reader2)).message_id).toBe("dm_fanout_1");
+
+    await reader1.cancel();
+    pushUserEvent("net_user_multi", "u_multi", { type: "desktop_message", message_id: "dm_fanout_2" });
+    expect((await readFrame(reader2)).message_id).toBe("dm_fanout_2");
     await reader2.cancel();
   });
 });

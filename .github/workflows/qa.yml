@@ -128,6 +128,7 @@ on:
       - 'tests/test671-task-runtime-evidence-hub/**'
       - 'tests/test688-owner-gated-schedule-hub/**'
       - 'tests/test629-mcp-schema-policy/**'
+      - 'tests/test1280-desktop-user-push/**'
       - 'tests/qa-anet-daemon-cmd/**'
       - 'tests/qa-hub-16-rest-task-api/**'
       - 'tests/qa-node-04-codex-app-server-reply-routing/**'
@@ -289,6 +290,7 @@ on:
       - 'tests/test671-task-runtime-evidence-hub/**'
       - 'tests/test688-owner-gated-schedule-hub/**'
       - 'tests/test629-mcp-schema-policy/**'
+      - 'tests/test1280-desktop-user-push/**'
       - 'tests/qa-anet-daemon-cmd/**'
       - 'tests/qa-hub-16-rest-task-api/**'
       - 'tests/qa-node-04-codex-app-server-reply-routing/**'
@@ -959,6 +961,7 @@ jobs:
           - test671-task-runtime-evidence-hub
           - test688-owner-gated-schedule-hub
           - test629-mcp-schema-policy
+          - test1280-desktop-user-push
           - qa-anet-daemon-cmd
           - qa-hub-16-rest-task-api
           - qa-node-04-codex-app-server-reply-routing

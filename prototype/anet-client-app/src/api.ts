@@ -265,16 +265,20 @@ export function sendTask(
 export type MessageRow = {
   id: string;
   session_name: string;
+  to_alias?: string;
+  from_alias?: string;
   type: string;
   priority?: string;
   content: string;
   from_session?: string;
+  acked?: number;
   created_at?: string;
 };
 
 export type MessagesResp = {
   ok: boolean;
   messages: MessageRow[];
+  pending_count?: number;
 };
 
 export function getMessages(
@@ -296,15 +300,9 @@ export type SseEvent = {
   [k: string]: unknown;
 };
 
-export async function* streamEvents(
-  alias: string,
-  ntok: string,
-  networkId: string,
-  signal?: AbortSignal
-): AsyncGenerator<SseEvent, void, void> {
-  const url = `${COMMHUB_URL}/events/${encodeURIComponent(alias)}?network_id=${encodeURIComponent(networkId)}`;
+async function* readSse(url: string, token: string, signal?: AbortSignal): AsyncGenerator<SseEvent, void, void> {
   const res = await fetch(url, {
-    headers: { authorization: `Bearer ${ntok}` },
+    headers: { authorization: `Bearer ${token}` },
     signal
   });
   if (!res.ok || !res.body) {
@@ -333,6 +331,25 @@ export async function* streamEvents(
       }
     }
   }
+}
+
+export async function* streamEvents(
+  alias: string,
+  ntok: string,
+  networkId: string,
+  signal?: AbortSignal
+): AsyncGenerator<SseEvent, void, void> {
+  const url = `${COMMHUB_URL}/events/${encodeURIComponent(alias)}?network_id=${encodeURIComponent(networkId)}`;
+  yield* readSse(url, ntok, signal);
+}
+
+export async function* streamUserEvents(
+  utok: string,
+  networkId: string,
+  signal?: AbortSignal
+): AsyncGenerator<SseEvent, void, void> {
+  const url = `${COMMHUB_URL}/events/users/me?network_id=${encodeURIComponent(networkId)}`;
+  yield* readSse(url, utok, signal);
 }
 
 // ── Live log — tmux capture-pane ──
