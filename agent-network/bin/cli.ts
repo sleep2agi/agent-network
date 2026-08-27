@@ -8015,6 +8015,133 @@ Example:
 
 const DAEMON_DEFAULT_NAME = "daemon";
 
+function daemonAnetBinRepairCommand(reason: string, target?: string): string {
+  if (reason === "missing") {
+    return "npm i -g @sleep2agi/agent-network@latest && anet daemon up";
+  }
+  if (reason === "relative") {
+    return "ANET_BIN_ABS=$(node -e \"console.log(require('fs').realpathSync(process.argv[1]))\" $(command -v anet)) anet daemon up";
+  }
+  if (reason === "symlink" && target) {
+    return `ANET_BIN_ABS=${shellQuote(target)} anet daemon up`;
+  }
+  if (reason === "writable" && target) {
+    return `chmod go-w ${shellQuote(target)} && anet daemon up`;
+  }
+  if (reason === "not-executable" && target) {
+    return `chmod +x ${shellQuote(target)} && anet daemon up`;
+  }
+  return "anet daemon up";
+}
+
+function findPackageJsonDirForDaemonBin(start: string): string | null {
+  let dir = dirname(start);
+  for (;;) {
+    if (existsSync(join(dir, "package.json"))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+function verifyDaemonAnetBinIdentity(abs: string): void {
+  const pkgDir = findPackageJsonDirForDaemonBin(abs);
+  if (!pkgDir) {
+    throw new Error(`ANET_BIN_ABS is not an anet package bin: no package.json above ${abs}. Run: unset ANET_BIN_ABS && anet daemon up`);
+  }
+  let pkg: any;
+  try {
+    pkg = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf-8"));
+  } catch (e: any) {
+    throw new Error(`ANET_BIN_ABS is not an anet package bin: cannot read package.json (${e?.message || e}). Run: npm i -g @sleep2agi/agent-network@latest`);
+  }
+  if (pkg?.name !== "@sleep2agi/agent-network") {
+    throw new Error(`ANET_BIN_ABS is not an anet package bin: package name is ${JSON.stringify(pkg?.name)}. Run: unset ANET_BIN_ABS && anet daemon up`);
+  }
+
+  const binRel = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.anet;
+  if (binRel) {
+    try {
+      if (realpathSync(resolve(pkgDir, binRel)) === abs) return;
+    } catch { /* fall through to shim marker check */ }
+  }
+
+  // Source-tree/dev fallback: bin/anet.cjs is copied verbatim to dist/bin/anet.cjs
+  // at build time, but package.json points at the dist path.
+  const body = readFileSync(abs, "utf-8");
+  if (abs.endsWith("/anet.cjs") && body.includes("anet 的 bin 入口垫片") && body.includes("PARSE_FLOOR")) return;
+
+  throw new Error(`ANET_BIN_ABS is not an anet package bin: package.json bin.anet does not point at ${abs}. Run: unset ANET_BIN_ABS && anet daemon up`);
+}
+
+function resolveCurrentAnetBinForDaemon(): string {
+  const fromEnv = process.env.ANET_BIN_ABS;
+  const argvEntry = process.argv[1];
+  const packageBin = argvEntry ? join(dirname(argvEntry), "anet.cjs") : "";
+  // bin/anet.cjs intentionally rewrites argv[1] to dist/bin/cli.js before
+  // importing this file. The daemon must pin the package bin shim itself
+  // (the executable named by package.json), not the ESM implementation file.
+  const candidate = fromEnv || (packageBin && existsSync(packageBin) ? packageBin : "");
+  if (!candidate) {
+    throw new Error(`no self-resolved anet package bin found next to ${argvEntry || "(missing argv[1])"}. Run: ${daemonAnetBinRepairCommand("missing")}`);
+  }
+  if (!isAbsolute(candidate)) {
+    throw new Error(`${fromEnv ? "ANET_BIN_ABS" : "self-resolved anet binary"} is not absolute: ${candidate}. Run: ${fromEnv ? "unset ANET_BIN_ABS && anet daemon up" : daemonAnetBinRepairCommand("relative")}`);
+  }
+  let real: string;
+  try {
+    real = realpathSync(candidate);
+  } catch (e: any) {
+    throw new Error(`cannot resolve anet binary ${candidate}: ${e?.message || e}. Run: ${daemonAnetBinRepairCommand("missing")}`);
+  }
+  if (fromEnv && real !== fromEnv) {
+    throw new Error(`ANET_BIN_ABS points at a symlink: ${fromEnv} -> ${real}. Run: ${daemonAnetBinRepairCommand("symlink", real)}`);
+  }
+  verifyDaemonAnetBinIdentity(real);
+  return real;
+}
+
+function prepareDaemonAnetBin(): void {
+  if (process.platform === "win32") {
+    console.error("[anet daemon] Windows is not supported for host_supervisor daemon mode yet.");
+    console.error("[anet daemon] The daemon binary safety checks and child process model are POSIX-only; run this on Linux/macOS or WSL.");
+    process.exit(1);
+  }
+
+  let anetBin: string;
+  try {
+    anetBin = resolveCurrentAnetBinForDaemon();
+  } catch (e: any) {
+    console.error(`[anet daemon] ${e?.message || e}`);
+    process.exit(1);
+  }
+
+  const st = statSync(anetBin);
+  if ((st.mode & 0o022) !== 0) {
+    const before = (st.mode & 0o777).toString(8);
+    console.error(`[anet daemon] refusing to start: anet binary is group/other writable (mode=${before}); daemon requires a non-writable binary.`);
+    console.error(`[anet daemon] Run this once, then retry:`);
+    console.error(`[anet daemon]   ${daemonAnetBinRepairCommand("writable", anetBin)}`);
+    process.exit(1);
+  }
+  if ((st.mode & 0o111) === 0) {
+    console.error(`[anet daemon] anet binary is not executable: ${anetBin}`);
+    console.error(`[anet daemon] Run: ${daemonAnetBinRepairCommand("not-executable", anetBin)}`);
+    process.exit(1);
+  }
+  if (st.uid !== 0) {
+    console.log(`[anet daemon] anet binary is owned by uid=${st.uid}; accepting it as a user-managed nvm/homebrew/npm install.`);
+  }
+
+  process.env.ANET_BIN_ABS = anetBin;
+  // #1299 — runtime 只在显式 opt-in 时才认 env 来源的 pin。CLI 正是用 env 把 pin
+  // 交给同进程的 daemon(`daemon start/up` 是 `prepareDaemonAnetBin(); await startCommand()`),
+  // 所以不声明的话,没有 /etc/anet-daemon/path.conf 的机器上 `anet daemon up` 会被自己拦下。
+  process.env.ANET_DAEMON_ALLOW_ENV_BIN = "1";
+  process.env.ANET_DAEMON_ALLOW_NON_ROOT_BIN = "1";
+  console.log(`[anet daemon] using anet binary: ${anetBin}`);
+}
+
 async function daemonCommand() {
   const sub = args[1];
   if (!sub || sub === "help" || sub === "-h" || sub === "--help") {
@@ -8036,9 +8163,9 @@ Run \`anet hub start\` first if you don't yet have a CommHub.`);
     return;
   }
   switch (sub) {
-    case "init":  args.splice(0, 1); await daemonInitCommand(); break;
-    case "start": args.splice(0, 1); await daemonStartCommand(); break;
-    case "up":    args.splice(0, 1); await daemonUpCommand(); break;
+    case "init":  args.splice(0, 1); prepareDaemonAnetBin(); await daemonInitCommand(); break;
+    case "start": args.splice(0, 1); prepareDaemonAnetBin(); await daemonStartCommand(); break;
+    case "up":    args.splice(0, 1); prepareDaemonAnetBin(); await daemonUpCommand(); break;
     case "list": case "ls": await daemonListCommand(); break;
     default: {
       const suggestion = suggestSimilar(sub, ["init", "start", "up", "list"]);

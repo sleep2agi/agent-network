@@ -11,7 +11,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { statSync, realpathSync, readFileSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { isReservedEnvKey } from "../shared/reserved-env.js";
 import {
   atomicWriteJson,
@@ -24,8 +24,8 @@ import {
 // Resolution order (first-match wins):
 //   1. `/etc/anet-daemon/path.conf` (KEY=VALUE format; install scripts
 //      write this on systemd-managed hosts)
-//   2. `ANET_BIN_ABS` env var (container / dev convenience —
-//      Dockerfile sets this at build time)
+//   2. `ANET_BIN_ABS` env var only when `ANET_DAEMON_ALLOW_ENV_BIN=1`
+//      (Docker/dev/manual-ops convenience, not a production trust root)
 //
 // Runtime fork ALWAYS uses the resolved path. Daemon NEVER calls
 // `which anet` or any other PATH lookup. CI lint guard greps
@@ -34,6 +34,58 @@ import {
 interface PathPin {
   abs: string;
   sha256?: string;
+}
+
+function quoteSh(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+function unsafePathHelp(reason: string, fix: string): Error {
+  return new Error(`anet_bin_unsafe_path: ${reason}. Fix: ${fix}`);
+}
+
+function findPackageJsonDir(start: string): string | null {
+  let dir = dirname(start);
+  for (;;) {
+    try {
+      const pkg = join(dir, "package.json");
+      statSync(pkg);
+      return dir;
+    } catch { /* keep walking */ }
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+function verifyAnetBinIdentity(abs: string): void {
+  const pkgDir = findPackageJsonDir(abs);
+  if (!pkgDir) {
+    throw unsafePathHelp(`not an anet package bin: no package.json above ${abs}`, "re-run via the installed anet command: anet daemon up");
+  }
+  let pkg: any;
+  try {
+    pkg = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf-8"));
+  } catch (e: any) {
+    throw unsafePathHelp(`not an anet package bin: cannot read package.json (${e?.message || e})`, "reinstall anet: npm i -g @sleep2agi/agent-network@latest");
+  }
+  if (pkg?.name !== "@sleep2agi/agent-network") {
+    throw unsafePathHelp(`not an anet package bin: package name is ${JSON.stringify(pkg?.name)}`, "unset ANET_BIN_ABS and re-run: anet daemon up");
+  }
+
+  const binRel = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.anet;
+  if (binRel) {
+    try {
+      if (realpathSync(resolve(pkgDir, binRel)) === abs) return;
+    } catch { /* fall through to shim marker check */ }
+  }
+
+  // Source-tree/dev fallback: bin/anet.cjs is copied verbatim to dist/bin/anet.cjs
+  // at build time, but package.json points at the dist path.
+  const body = readFileSync(abs, "utf-8");
+  if (abs.endsWith("/anet.cjs") && body.includes("anet 的 bin 入口垫片") && body.includes("PARSE_FLOOR")) return;
+
+  throw unsafePathHelp(`not an anet package bin: package.json bin.anet does not point at ${abs}`, "unset ANET_BIN_ABS and re-run: anet daemon up");
 }
 
 function readPathConf(path: string): PathPin | null {
@@ -52,42 +104,63 @@ function readPathConf(path: string): PathPin | null {
 /** §4.2.6 B2 hardened — install-time pin + 5-check (PR #299 BLOCKER #3).
  *  All five gates throw `anet_bin_unsafe_path:<reason>` and fail-fast
  *  the daemon on boot (RFC: better to lose 1 host than fork a poisoned
- *  binary). owner=root is enforced unless an explicit opt-out env var
- *  ANET_DAEMON_ALLOW_NON_ROOT_BIN=1 is set (containers/CI escape hatch
- *  for environments where the binary lives under /usr/local owned by
- *  a non-root user — must be deliberate, not silent). */
+ *  binary). Non-root owners are allowed by default because nvm/homebrew
+ *  installs intentionally place the user's own anet binary outside root
+ *  ownership. */
 export function loadAndVerifyAnetBin(env: NodeJS.ProcessEnv = process.env): string {
   let pin: PathPin | null = null;
   const confPath = env.ANET_DAEMON_PATH_CONF || "/etc/anet-daemon/path.conf";
   pin = readPathConf(confPath);
-  if (!pin && env.ANET_BIN_ABS) {
+  if (!pin && env.ANET_BIN_ABS && env.ANET_DAEMON_ALLOW_ENV_BIN === "1") {
     pin = { abs: env.ANET_BIN_ABS, sha256: env.ANET_BIN_SHA256 };
   }
+  if (!pin && env.ANET_BIN_ABS) {
+    throw unsafePathHelp(
+      "ANET_BIN_ABS env fallback disabled (set ANET_DAEMON_ALLOW_ENV_BIN=1 only for Docker/dev/manual ops; production trust root is /etc/anet-daemon/path.conf)",
+      "install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$(node -e \\\"console.log(require('fs').realpathSync(process.argv[1]))\\\" $(command -v anet))\" | sudo tee /etc/anet-daemon/path.conf >/dev/null",
+    );
+  }
   if (!pin) {
-    throw new Error("anet_bin_unsafe_path: no ANET_BIN_ABS resolved (neither /etc/anet-daemon/path.conf nor env)");
+    throw unsafePathHelp(
+      "no ANET_BIN_ABS resolved from /etc/anet-daemon/path.conf; env fallback is Docker/dev/manual-ops convenience and requires ANET_DAEMON_ALLOW_ENV_BIN=1",
+      "install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$(node -e \\\"console.log(require('fs').realpathSync(process.argv[1]))\\\" $(command -v anet))\" | sudo tee /etc/anet-daemon/path.conf >/dev/null",
+    );
   }
   // ① absolute
   if (!pin.abs.startsWith("/")) {
-    throw new Error(`anet_bin_unsafe_path: not absolute: ${pin.abs}`);
+    throw unsafePathHelp(
+      `not absolute: ${pin.abs}`,
+      `export ANET_BIN_ABS=$(node -e "console.log(require('fs').realpathSync(process.argv[1]))" ${quoteSh(pin.abs)})`,
+    );
   }
   // ② no symlink path component (realpath equals self)
   const real = realpathSync(pin.abs);
   if (real !== pin.abs) {
-    throw new Error(`anet_bin_unsafe_path: contains symlink: ${pin.abs} → ${real}`);
+    throw unsafePathHelp(
+      `contains symlink: ${pin.abs} -> ${real}`,
+      `export ANET_BIN_ABS=${quoteSh(real)}`,
+    );
   }
-  // ③ stat: owner=root (enforced unless explicit opt-out)
+  verifyAnetBinIdentity(pin.abs);
+  // ③ stat: non-root owner is acceptable for nvm/homebrew/user installs.
   const st = statSync(pin.abs);
-  const allowNonRoot = env.ANET_DAEMON_ALLOW_NON_ROOT_BIN === "1";
-  if (st.uid !== 0 && !allowNonRoot) {
-    throw new Error(`anet_bin_unsafe_path: owner not root (uid=${st.uid}; set ANET_DAEMON_ALLOW_NON_ROOT_BIN=1 to bypass for non-root install)`);
+  if (st.uid !== 0 && env.ANET_DAEMON_STRICT_ROOT_BIN === "1") {
+    throw unsafePathHelp(
+      `owner not root (uid=${st.uid})`,
+      `sudo chown root:root ${quoteSh(pin.abs)} || unset ANET_DAEMON_STRICT_ROOT_BIN`,
+    );
   }
   // ④ not group/other writable
   if ((st.mode & 0o022) !== 0) {
-    throw new Error(`anet_bin_unsafe_path: writable by group/other (mode=${(st.mode & 0o777).toString(8)})`);
+    const before = (st.mode & 0o777).toString(8);
+    throw unsafePathHelp(
+      `writable by group/other (mode=${before})`,
+      `chmod go-w ${quoteSh(pin.abs)}`,
+    );
   }
   // ⑤ executable
   if ((st.mode & 0o111) === 0) {
-    throw new Error(`anet_bin_unsafe_path: not executable`);
+    throw unsafePathHelp("not executable", `chmod +x ${quoteSh(pin.abs)}`);
   }
   // hash match install-time witness (when provided, REQUIRED to match)
   if (pin.sha256) {
@@ -111,7 +184,6 @@ export function getAnetBinAbs(): string {
 export function _resetAnetBinAbsForTest(): void { _anetBinAbs = null; }
 
 // ── §4.2.6 B1 — minimalEnv (filter + fixed-keys-last + throw-on-collision) ──
-import { dirname } from "node:path";
 
 const SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 const FIXED_ENV_KEYS = new Set(["PATH", "HOME", "LANG"]);

@@ -149,59 +149,44 @@ anet daemon start <name> >> C:\Users\<you>\daemon-<name>.log 2>&1
 2. **别拿启动输出当就绪判据**。判据是 hub 侧：`anet daemon list` 只读本机配置、
    列出来不等于 hub 认得它；要看 hub 的节点状态里 `last_seen_at` 在持续刷新。
 
-### 3.6 让 daemon 能真的创建节点：`ANET_BIN` 钉死 {#anet-bin-pin}
+### 3.6 让 daemon 能真的创建节点：`ANET_BIN` 自动钉死 {#anet-bin-pin}
 
-🔴 **daemon 起来 ≠ 能干活。** 第一次通过 hub 让它创建节点时，很可能看到：
+daemon 收到 `create_node` 后必须 fork 当前安装的 `anet`。为了防止 `PATH` 劫持,
+runtime 仍然只接受一个通过校验的绝对路径；但现在 `anet daemon init` / `start` / `up`
+会自动做这件事,不再要求用户手工 `readlink -f`、`chmod`、设环境变量。
 
-```
-[create-node] anet_bin_unsafe_path: no ANET_BIN_ABS resolved
-              (neither /etc/anet-daemon/path.conf nor env)
-```
+启动 daemon 时会自动:
 
-这是**供应链保护**，不是 bug：daemon 会 fork 出真实进程，所以它拒绝走 `PATH` 去找
-`anet`（`PATH` 可被劫持），只接受一个**钉死并校验过**的绝对路径。校验五条，缺一不可：
+1. 把当前 `anet` 启动器 `realpath` 成实体文件,并注入 `ANET_BIN_ABS`。
+2. 分开诊断未解析、非绝对路径、symlink 路径、组/其他用户可写、不可执行等问题。
+3. 对 `umask 0002` 下 npm 常见的 `775` / group-writable 安装拒绝启动,并打印可直接执行的 `chmod go-w` 命令。
+4. 默认接受 nvm/homebrew/npm 的非 root 用户安装,因为那就是用户自己的二进制。
+5. 在 Windows 上直接拒绝 daemon 模式,避免 POSIX-only 路径和权限检查等到创建节点时才失败。
 
-| # | 要求 | npm 标准安装下的实际情况 |
-|---|---|---|
-| ① | 绝对路径 | ✅ |
-| ② | 路径中**无 symlink**（`realpath` 等于自身） | ❌ `npm i -g` 装出来的 `bin/anet` 就是 symlink |
-| ③ | 属主 root | ❌ 装在用户目录（nvm / `--prefix ~`）时属主是你 |
-| ④ | **不可被 group/other 写**（`mode & 0o022 == 0`） | ❌ **umask 0002 的机器上 npm 产物是 `775`** |
-| ⑤ | 可执行 | ✅ |
-
-②③④ 三条在「用 nvm 装、机器 umask 0002」这种**很常见**的组合下会同时不满足。
-
-**配法**（先取真实路径，再收紧权限，最后钉死）：
+预期路径就是:
 
 ```bash
-BIN=$(readlink -f "$(command -v anet)")   # ② 解掉 symlink，拿到 dist/bin/anet.cjs
-chmod go-w "$BIN"                          # ④ 775 → 755
-stat -c '%a %U %n' "$BIN"                  # 复核：755，属主是你
-
-# 启动 daemon 时钉死它
-ANET_BIN_ABS="$BIN" ANET_DAEMON_ALLOW_NON_ROOT_BIN=1   nohup anet daemon start <name> >> ~/daemon-<name>.log 2>&1 &
+npm i -g @sleep2agi/agent-network @sleep2agi/agent-node
+anet login
+anet daemon up
 ```
 
-- `ANET_DAEMON_ALLOW_NON_ROOT_BIN=1` 是③的显式豁免——**只在你确信该文件只有你能改时用**。
-  root 安装（`sudo npm i -g`）不需要它。
-- 也可以写进 `/etc/anet-daemon/path.conf`（daemon 优先读它），格式见
-  `loadAndVerifyAnetBin` 的 `readPathConf`。想再紧一档可以带 `sha256`：
-  安装时的哈希与运行时不一致会直接拒启动。
+`anet` 路径有两个来源,信任级别不同:
 
-🔴 **Windows 目前配不通，这不是你的配置问题**（2026-08-27 实测，见 [#1290](https://github.com/sleep2agi/agent-network/issues/1290)）：
-上面①那条判断在代码里是 `pin.abs.startsWith("/")` —— **POSIX-only**，而 Windows 的绝对路径
-是 `C:\...`，永远不以 `/` 开头，所以无论把 `ANET_BIN_ABS` 设成什么都会得到
-`anet_bin_unsafe_path: not absolute:`。而且即使放宽它，③④在 Windows 上也不成立
-（Node 在 Windows 的 `uid` 恒为 0 ⇒ 属主检查恒过；POSIX mode 位不反映 ACL ⇒ 权限检查
-不表达任何真实权限）。
+| 来源 | 用途 |
+|---|---|
+| `/etc/anet-daemon/path.conf` | 生产信任根；存在时优先于环境变量 |
+| `ANET_BIN_ABS` 环境变量 | Docker、开发机或手工运维的便利通道 |
 
-⚠️ **症状具有欺骗性**：这台 daemon 会**正常注册、正常心跳、正常收到 doorbell**，
-hub 侧一切看着都对，Dashboard 的「选服务器」也会把它列为可选；
-`create_node` 甚至返回 `ok:true` + request_id —— 失败只写在 daemon 本机日志里。
-**所以在 #1290 修复前：Windows 机器可以跑 daemon 做心跳/遥测，但不要指望它 fork 出子节点。**
+`ANET_BIN_ABS` 只有在 `ANET_DAEMON_ALLOW_ENV_BIN=1` 时才会被 runtime 接受。
+`anet daemon init` / `start` / `up` 会自己设置这个声明,所以上面的 quickstart
+不需要你手工加环境变量；只有绕过 `anet daemon`、直接拼 daemon 启动命令时才需要自己声明。
 
-**判据**：配好之后，从 hub 发一次 `create_node`，daemon 日志应出现
-`[create-node] spawned child '<name>' pid=…` 和 `+5000ms capability check OK`，
+如果安全检查失败,CLI 会打印一行可直接照敲的修复命令;不要手工编辑未入库的服务器
+启动文件来绕过它。
+
+**判据**：从 hub 发一次 `create_node`,daemon 日志应出现
+`[create-node] spawned child '<name>' pid=…` 和 `+5000ms capability check OK`,
 且新节点自己注册回 hub。**看不到这两行就是没配对**——它不会重试。
 
 ### 4. 确认它**进程**起来了

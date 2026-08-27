@@ -80,6 +80,7 @@ ok "node MOVED to /opt/anet-nvm-sim/bin/node (faithful nvm-style — SAFE_PATH l
 
 note "Stage 3 — start daemon under nvm-sim node"
 ANET_BIN_ABS="$ANET_BIN" \
+ANET_DAEMON_ALLOW_ENV_BIN=1 \
   nohup /opt/anet-nvm-sim/bin/node "$AGENT_NODE_BIN" \
     --config "$WORK/.anet/nodes/$DAEMON_NAME/config.json" \
     --alias "$DAEMON_NAME" --runtime claude-agent-sdk \

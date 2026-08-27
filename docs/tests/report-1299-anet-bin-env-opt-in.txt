@@ -1,0 +1,13 @@
+Test: #1299 daemon ANET_BIN_ABS env fallback explicit opt-in
+Date: 2026-08-28
+Worktree: /tmp/wt-anetbin-clean
+Branch: feat/daemon-anet-bin-auto-clean
+
+Commands:
+- bun test agent-node/src/runtime/create-node-daemon.test.ts
+- sg docker -c 'docker build -t anet-qa-daemon-cmd -f tests/qa-anet-daemon-cmd/Dockerfile . && docker run --rm anet-qa-daemon-cmd'
+
+Results:
+- Bun unit test: 38 pass, 0 fail, 82 expect calls.
+- Docker E2E: anet daemon CLI + list_host_supervisors + ack capability-fail e2e PASS=42 FAIL=0.
+
