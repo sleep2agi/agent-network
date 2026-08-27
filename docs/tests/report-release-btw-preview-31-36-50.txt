@@ -1,0 +1,25 @@
+BTW preview package release candidate
+Date: 2026-08-27
+
+Source
+- Base: eb28d04a2184c7ce3a11e35694768d41eedde068
+- Candidate: 3280001524952fe740f7a8703397fd7830e1876d
+
+Versions
+- @sleep2agi/commhub-server 0.9.0-preview.31
+- @sleep2agi/agent-node 2.5.0-preview.36
+- @sleep2agi/agent-network 2.3.0-preview.50
+- CLI server pin: 0.9.0-preview.31
+- Paired network/node: 2.3.0-preview.50 / 2.5.0-preview.36
+- Registry preflight: all three exact versions were absent.
+
+Docker gates
+- test1183 release version sync: PASS, including witnessed-red controls.
+- test766 pinned Hub preflight and production bundle: PASS (4/0).
+- test1204 BTW production wiring: PASS; 58 baseline tests, real Hub +
+  agent-node two-process E2E, 12 witnessed-red mutations, and two bundles.
+
+Safety
+- This candidate changes versions and exact package pins only.
+- No npm package or dist-tag was changed by the preparation gates.
+- Publish order must be server, agent-node, then agent-network.
