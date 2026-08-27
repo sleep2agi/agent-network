@@ -188,6 +188,18 @@ ANET_BIN_ABS="$BIN" ANET_DAEMON_ALLOW_NON_ROOT_BIN=1   nohup anet daemon start <
   `loadAndVerifyAnetBin` 的 `readPathConf`。想再紧一档可以带 `sha256`：
   安装时的哈希与运行时不一致会直接拒启动。
 
+🔴 **Windows 目前配不通，这不是你的配置问题**（2026-08-27 实测，见 [#1290](https://github.com/sleep2agi/agent-network/issues/1290)）：
+上面①那条判断在代码里是 `pin.abs.startsWith("/")` —— **POSIX-only**，而 Windows 的绝对路径
+是 `C:\...`，永远不以 `/` 开头，所以无论把 `ANET_BIN_ABS` 设成什么都会得到
+`anet_bin_unsafe_path: not absolute:`。而且即使放宽它，③④在 Windows 上也不成立
+（Node 在 Windows 的 `uid` 恒为 0 ⇒ 属主检查恒过；POSIX mode 位不反映 ACL ⇒ 权限检查
+不表达任何真实权限）。
+
+⚠️ **症状具有欺骗性**：这台 daemon 会**正常注册、正常心跳、正常收到 doorbell**，
+hub 侧一切看着都对，Dashboard 的「选服务器」也会把它列为可选；
+`create_node` 甚至返回 `ok:true` + request_id —— 失败只写在 daemon 本机日志里。
+**所以在 #1290 修复前：Windows 机器可以跑 daemon 做心跳/遥测，但不要指望它 fork 出子节点。**
+
 **判据**：配好之后，从 hub 发一次 `create_node`，daemon 日志应出现
 `[create-node] spawned child '<name>' pid=…` 和 `+5000ms capability check OK`，
 且新节点自己注册回 hub。**看不到这两行就是没配对**——它不会重试。
