@@ -1,0 +1,124 @@
+report: qa-daemon-lifecycle-e2e — daemon 全链路生命周期 e2e
+date:   2026-08-27
+by:     通信测试马 (独立执行)
+source_commit: 8c23e4bc02c675fab2a299990b516864af5531eb
+host:   iZrj93pr2rcf5r2y9uo1oyZ  disk: 71G avail, 85% used
+
+链条: anet daemon up → create_node → 子节点注册 → update_node_config → restart_node → stop_node
+      (start_node 留 TODO —— 工具尚未进 main,#1273 独审中)
+
+════ 1. 缺口依据(为什么不是重复覆盖)════
+现有套件对 origin/main 56b2a782 的覆盖:
+  qa-rfc026-create-node    create_node + 子节点注册           已覆盖
+  qa-rfc027-stop-delete    stop_node / restart_node / delete   已覆盖
+  qa-rfc024-config-apply   update_node_config —— 仅契约面
+
+qa-rfc024-config-apply/run.sh 源码注释原文:
+  "A real 'next think uses new value' check needs a vendor key + a live
+   agent-node consuming the SSE doorbell. That belongs in the longer-form QA."
+它只 mint 了 ntok、未起真节点 ⇒ hub 返回 node_not_found ⇒ 走 skip 分支。
+(该套件是诚实的:SKIP 单独计数,结尾明列哪些是 stub。缺口是有意留的,不是被藏的。)
+
+⇒ 未覆盖的不是任何单个工具,是它们之间在同一子节点上的状态交接。
+
+════ 2. CI 逐字命令 + 输出(正控)════
+$ docker build --build-arg SOURCE_COMMIT=$GITHUB_SHA \
+    --build-arg RUNSH_BLOB=$(git rev-parse HEAD:tests/qa-daemon-lifecycle-e2e/run.sh) \
+    -t anet-qa-daemon-lifecycle-e2e -f tests/qa-daemon-lifecycle-e2e/Dockerfile .
+$ docker run --rm anet-qa-daemon-lifecycle-e2e
+
+provenance: source_commit=8c23e4bc02c675fab2a299990b516864af5531eb run.sh blob=e45f1432dfc59fa3ce5a7a1c7e1a24fc5fbde2d0 (verified)
+
+=== 0. boot isolated hub :9251 (local server source, test DB) ===
+  ✓ hub /health 200
+  ✓ admin utok minted
+  ✓ network = net_b5c7d8efcd0f
+
+=== 0.A anet daemon up — one-shot init+start (NOT hand-written config) ===
+  ✓ daemon registered via `anet daemon up` (node_id=node_daemon_0d2177034b5a)
+  ✓ hub-side config_snapshot.role=host_supervisor (converged)
+
+=== A. create_node → child config on disk + child registers ===
+  ✓ RED-GATE child config.json absent before create_node — correctly red before the action
+  ✓ create_node dispatched (request_id=cr_793211a0-d863-4f14-82b7-682722ab4772)
+  ✓ child config.json written: .anet/nodes/dlife-child-a/config.json
+  ✓ child on-disk flags.maxTurns=7 (as created)
+  ✓ child registered with hub (node_id=node_793211a0-d863-4f14-82b7-682722ab4772)
+
+=== B. update_node_config → does the CHILD's real on-disk config change? ===
+  ✓ RED-GATE child flags.maxTurns=99 before update_node_config — correctly red before the action
+  ✓ hub accepted patch (apply_mode=hot update_id=cu_532ab7e6-8eaf-4c7e-b03b-29fde4a01b43)
+  ✓ CHILD on-disk flags.maxTurns 7 → 99 (config actually applied)
+  · note: config_revision=unset (informational — not all apply modes stamp it)
+
+=== C. restart_node → process really restarts AND config survives ===
+  · agent-node --alias dlife-child-a process count = 1
+  ✓ child process alive before restart (pid=176)
+  ✓ restart_node dispatched
+  ✓ process really restarted (pid 176 → 239)
+  ✓ config SURVIVED restart (maxTurns still 99)
+
+=== D. stop_node → hub terminal state + process really reaped ===
+  · pre-stop hub lifecycle_state = active (the value red-gate 3 judges)
+  ✓ RED-GATE hub lifecycle_state=stopped before stop_node — correctly red before the action
+  ✓ stop_node dispatched
+  ✓ hub-side TERMINAL state lifecycle_state=stopped
+  ✓ child process really reaped (pgrep finds nothing)
+  ✓ daemon survived the child stop
+
+=== E. start_node ===
+  ⊘ start_node re-start after stop — TODO: tool not in main yet (#1273 under independent review); add a stage here once merged
+
+=== Result ===
+  PASS=22  FAIL=0  TODO=1   (red gates witnessed: 3)
+RESULT: PASS
+
+════ 3. 反控(证明判据有分辨力,不是恒真)════
+── A. RUNSH_BLOB 传一个格式合法但错误的值 → 必须红
+$ docker build --build-arg RUNSH_BLOB=0000...0000 ... && docker run --rm
+FAIL: run.sh in the image is not the one SOURCE_COMMIT=8c23e4bc02c675fab2a299990b516864af5531eb claims
+      expected blob 0000000000000000000000000000000000000000, actual e45f1432dfc59fa3ce5a7a1c7e1a24fc5fbde2d0
+   rc=1 ✓
+
+── B. 在宿主机(非容器)直接跑 run.sh → 必须拒跑
+$ bash tests/qa-daemon-lifecycle-e2e/run.sh
+REFUSING: /.dockerenv absent — this suite boots a hub and kills pids; run it in its container.
+   rc=2 ✓
+
+── C. 套件内建 3 道红门(在断言必须失败的时刻运行)
+  ✓ RED-GATE child config.json absent before create_node — correctly red before the action
+  ✓ RED-GATE child flags.maxTurns=99 before update_node_config — correctly red before the action
+  ✓ RED-GATE hub lifecycle_state=stopped before stop_node — correctly red before the action
+   结尾强制 RED>=3:删掉任一红门 → 套件自身变红,而非静默缩小它证明的范围
+
+════ 4. 稳定性与耗时(决定 CI 归属)════
+连续两次独立运行,逐字一致:
+  run3: PASS=22  FAIL=0  TODO=1   (red gates witnessed: 3)
+  run4: PASS=22  FAIL=0  TODO=1   (red gates witnessed: 3)
+run 耗时       11 s
+冷构建耗时    244 s  (三次 bun install + 混淆构建 + 两次 npm pack)
+
+归属决策:放 qa.yml 的 recovered-suites job(12 分钟预算),不放 qa.sh 的 L1_TESTS。
+理由是量出来的,不是估的:qa.sh 的 L1 build 是**串行**的,job 预算 5 分钟且
+现有已用掉 141-148s。只看 11s 的 run 时间会把它错放进快层 —— 那是量了错的那一半。
+
+════ 5. 注册门(前后计数,证明不是靠缩小范围变绿)════
+check-test-suite-registration.py
+  加之前: suites=227 registered=153 exempt=13 orphans=61 baseline=60 new=1   rc=1
+  加之后: suites=227 registered=154 exempt=13 orphans=60 baseline=60 new=0   rc=0
+  增减恰为本套件一项(registered +1 / orphans -1),分母 227 不变。
+check-l1-paths-sync.py
+  rc=0  checked 66 L1 suite(s) against 155 path pattern(s); every L1 suite has a matching trigger.
+check-public-script-safety.py(本套件注释里含 pattern-kill 字面量,故实测其取集)
+  rc=0  scanned 6 public script(s) —— 取集为 public/ 下 6 个脚本,本套件不在其中。
+  (跑门之前先 git add:git ls-files 看不见未跟踪文件,不 add 会绿得毫无意义。)
+
+════ 6. 过程中被修正的两个错误(留档,因为都会产生看起来正常的假结果)════
+① 进程判据一开始断的是 `anet node start <name>`(启动器),而真正长驻的是孙进程
+   `agent-node --alias <name>`(create-node-daemon.ts:420 spawn 启动器,启动器再拉起节点)。
+   启动器可以已经退出而节点仍在跑 ⇒ restart 的 pid 比对和 stop 的 reap 判据会全部
+   断在错的对象上。改为与 qa-rfc027 已验证的写法一致后才可信。
+② daemon 的 role 不在 `nodes[0].role`,而在 `nodes[0].config_snapshot.role`,且它是
+   daemon 注册**之后**才上报的,存在真实 race(qa-rfc026 注释记录了同一 race)。
+   先前写法读到空字符串,表现为「产品没设置 role」,实为判据取错字段 + 未等收敛。
+两条的共同点:红/绿都看起来完全正常,只有对照已跑通的同类套件才暴露。
