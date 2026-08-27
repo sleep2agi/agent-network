@@ -180,6 +180,18 @@ anet login
 anet daemon up
 ```
 
+The `anet` path has two sources with different trust levels:
+
+| Source | Used for |
+|---|---|
+| `/etc/anet-daemon/path.conf` | Production trust root; when present, it wins over the environment |
+| `ANET_BIN_ABS` environment variable | Docker, development machines, or manual operations convenience |
+
+The runtime accepts `ANET_BIN_ABS` only when `ANET_DAEMON_ALLOW_ENV_BIN=1` is also set.
+`anet daemon init` / `start` / `up` sets that declaration itself, so the quickstart above
+does not need a manual environment variable. You only need to set it yourself when bypassing
+`anet daemon` and assembling the daemon startup command directly.
+
 If a safety check fails, the CLI prints a one-line repair command that can be copied and run
 directly; do not work around it by editing untracked server startup files.
 

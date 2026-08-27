@@ -1,21 +1,21 @@
 # test632 — honest SSE abandon recovery guidance
 source_commit=unknown
-date=2026-08-27T17:53:26+00:00
+date=2026-08-27T18:00:27+00:00
 L0 helper behaviour + production wiring
 bun test v1.3.14 (0d9b296a)
 
 agent-node/src/sse-recovery-guidance.test.ts:
-(pass) sseAbandonGuidance > states that abandon leaves the current process alive [1.97ms]
-(pass) sseAbandonGuidance > requires stop-and-replace instead of starting a duplicate [0.19ms]
+(pass) sseAbandonGuidance > states that abandon leaves the current process alive [1.94ms]
+(pass) sseAbandonGuidance > requires stop-and-replace instead of starting a duplicate [0.16ms]
 (pass) sseAbandonGuidance > preserves the co-presence launch shape in recovery guidance [0.07ms]
-(pass) sseAbandonGuidance > the production SSE abandon hook uses the honest guidance [1.90ms]
+(pass) sseAbandonGuidance > the production SSE abandon hook uses the honest guidance [2.41ms]
 
  4 pass
  0 fail
  13 expect() calls
-Ran 4 tests across 1 file. [43.00ms]
+Ran 4 tests across 1 file. [41.00ms]
 L1 real agent-node bundle
-Bundled 294 modules in 80ms
+Bundled 294 modules in 92ms
 
   cli.js  2.17 MB  (entry point)
 
@@ -28,13 +28,13 @@ L5 restored green
 bun test v1.3.14 (0d9b296a)
 
 agent-node/src/sse-recovery-guidance.test.ts:
-(pass) sseAbandonGuidance > states that abandon leaves the current process alive [1.49ms]
-(pass) sseAbandonGuidance > requires stop-and-replace instead of starting a duplicate [0.11ms]
-(pass) sseAbandonGuidance > preserves the co-presence launch shape in recovery guidance [0.07ms]
-(pass) sseAbandonGuidance > the production SSE abandon hook uses the honest guidance [3.98ms]
+(pass) sseAbandonGuidance > states that abandon leaves the current process alive [4.56ms]
+(pass) sseAbandonGuidance > requires stop-and-replace instead of starting a duplicate [0.35ms]
+(pass) sseAbandonGuidance > preserves the co-presence launch shape in recovery guidance [0.08ms]
+(pass) sseAbandonGuidance > the production SSE abandon hook uses the honest guidance [2.07ms]
 
  4 pass
  0 fail
  13 expect() calls
-Ran 4 tests across 1 file. [59.00ms]
+Ran 4 tests across 1 file. [52.00ms]
 RESULT: PASS

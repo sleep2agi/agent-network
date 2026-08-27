@@ -171,6 +171,17 @@ anet login
 anet daemon up
 ```
 
+`anet` 路径有两个来源,信任级别不同:
+
+| 来源 | 用途 |
+|---|---|
+| `/etc/anet-daemon/path.conf` | 生产信任根；存在时优先于环境变量 |
+| `ANET_BIN_ABS` 环境变量 | Docker、开发机或手工运维的便利通道 |
+
+`ANET_BIN_ABS` 只有在 `ANET_DAEMON_ALLOW_ENV_BIN=1` 时才会被 runtime 接受。
+`anet daemon init` / `start` / `up` 会自己设置这个声明,所以上面的 quickstart
+不需要你手工加环境变量；只有绕过 `anet daemon`、直接拼 daemon 启动命令时才需要自己声明。
+
 如果安全检查失败,CLI 会打印一行可直接照敲的修复命令;不要手工编辑未入库的服务器
 启动文件来绕过它。
 
