@@ -175,7 +175,7 @@ register() → callCommHub("report_status", {
 
 - **PHASE 1 — PREPARE（全程可回滚，old node 原封不动）**：写 `rename.lock` → `cpSync(oldDir → newDir)`（**copy 不是 move**）→ 更新 `newProfile.node_name` / `alias` + `saveProfile` → POST `/api/node-rename/prepare` 拿 `txn_id`。任一步失败 → 回滚（删 newDir + POST `/api/node-rename/abort` + 删 lock），`old` 完全不变。
 - **PHASE 2 — COMMIT（顺序敏感）**：
-  1. **C1** POST `/api/node-rename/commit` —— C1 之前仍可干净回滚，C1 之后转 forward-fix。**C4（server 侧）**：`commitRename` 成功后 server `pushEvent` 一个 `node.renamed` SSE 事件给 old + new 两个 alias 流，**外加每个网络成员的 user channel**（dashboard 订阅 `/events/<username>` user channel 而非 per-alias 流，#84 SSE channel fix；[`rename.ts:100-123`](https://github.com/sleep2agi/agent-network/blob/main/server/src/rename.ts#L100)，envelope 见 [rest.md SSE 端点](https://anet.sh/api/rest)）
+  1. **C1** POST `/api/node-rename/commit` —— C1 之前仍可干净回滚，C1 之后转 forward-fix。**C4（server 侧）**：`commitRename` 成功后 server `pushEvent` 一个 `node.renamed` SSE 事件给 old + new 两个 alias 流，**外加每个网络成员的 user channel**（dashboard 订阅 `/events/<username>` user channel 而非 per-alias 流，#84 SSE channel fix；[`rename.ts:147`](https://github.com/sleep2agi/agent-network/blob/main/server/src/rename.ts#L147)，envelope 见 [rest.md SSE 端点](https://anet.sh/api/rest)）
   2. **C2** 运行中 node 跑 `tmux rename-session`（不杀进程；失败转 forward-fix 不回滚）
   3. **C3** `rmSync(oldDir)` 原子切换本地 + `writeLegacyProjectAlias(newName)`
 
@@ -193,7 +193,7 @@ register() → callCommHub("report_status", {
 - config.json: 不变（session 已写回）
 - 进程退出
 
-**CommHub 超时检测**: 心跳 3 分钟间隔（[`agent-node/src/cli.ts:1159`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1159) `setInterval(() => reportStatus("idle"), 3 * 60 * 1000)`），超过 **10 分钟**无心跳 → 自动标记 offline（[`server/src/server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) `Date.now() - 10 * 60 * 1000` cutoff，惰性触发于 `/api/status` 调用时）。R219 校准：原 doc 5 分钟错。
+**CommHub 超时检测**: 心跳 3 分钟间隔（[`agent-node/src/cli.ts:6341`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L6341) `setInterval(() => reportStatus("idle"), 3 * 60 * 1000)`），超过 **10 分钟**无心跳 → 自动标记 offline（[`server/src/server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) `Date.now() - 10 * 60 * 1000` cutoff，惰性触发于 `/api/status` 调用时）。R219 校准：原 doc 5 分钟错。
 
 ### 9. 删除 (deleted) — R219 校准
 
