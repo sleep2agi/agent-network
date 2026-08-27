@@ -21,7 +21,8 @@
 两件事本页不替你打包票：
 
 - **成熟度**：`grok-build-cli` 在选单里仍自称「实验性 preview，仅可接收可信任务」。列出 ≠ 稳定。
-- **daemon 路径**：经 `anet daemon` 的 `create_node` 代创节点时，`grok-build-cli` / `codex-app-server` / `opencode-cli` 会被 daemon 侧的 runtime 闸拒掉（[#1298](https://github.com/sleep2agi/agent-network/issues/1298)）。**本机 `anet node create` 可用，daemon 代创不可用** —— 修复未进入你手上那个版本之前，这两条路径的结论不同。
+- **daemon 路径**：[#1301](https://github.com/sleep2agi/agent-network/pull/1301) 起，三个共存 runtime 已经进入 daemon 侧的 runtime 集合，`create_node` 不再拒它们。此前它们会被拒（[#1298](https://github.com/sleep2agi/agent-network/issues/1298)），**所以结论取决于你手上那个版本**：修复尚未进入你安装的版本时，本机 `anet node create` 可用而 daemon 代创不可用。
+- **仍然要自己给 `model`**：`create_node` 的 `node_spec.model` 是必填，而 `claude-code-cli` 这类复用订阅登录态的 runtime 并没有模型选择器（用订阅自带的模型）。key 和 url 不必给（走可选的 `env_refs`），**model 目前还得给一个**。
 
 Grok TUI 共存的当前状态见 [Grok TUI 状态页](/guide/grok-copresence)；`grok-build-acp` 不支持 attach。
 :::
