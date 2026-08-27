@@ -16,14 +16,15 @@ const pairedVersion = JSON.parse(readFileSync(join(repo, "agent-node", "package.
 const privateRoot = process.env.ANET_TEST1212_PRIVATE;
 const artifacts = process.env.ANET_TEST1212_ARTIFACTS;
 const expectedSha = process.env.ANET_EXPECTED_SOURCE_SHA;
-if (!privateRoot || !artifacts || !expectedSha) throw new Error("protected harness environment incomplete");
+const bun = process.env.ANET_TEST1212_BUN;
+if (!privateRoot || !artifacts || !expectedSha || !bun || !existsSync(bun)) throw new Error("protected harness environment incomplete");
 const work = join(privateRoot, "work"), home = process.env.HOME, codexHome = process.env.CODEX_HOME;
 const project = join(work, "project"), nodeHome = join(project, ".anet", "nodes", "windows-real", "codex-home");
 mkdirSync(project, { recursive: true });
 const port = 19000 + Math.floor(Math.random() * 1000);
 const token = `test1212-${randomUUID()}`;
 const hubEnv = { ...process.env, PORT: String(port), COMMHUB_AUTH_TOKEN: token, DATABASE_URL: join(privateRoot, "hub.db") };
-const hub = spawn("bun", ["run", "src/index.ts"], { cwd: join(repo, "server"), env: hubEnv, stdio: "ignore", windowsHide: true });
+const hub = spawn(bun, ["run", "src/index.ts"], { cwd: join(repo, "server"), env: hubEnv, stdio: "ignore", windowsHide: true });
 const cli = join(repo, "agent-network", "bin", "cli.ts");
 const env = { ...process.env, HOME: home, USERPROFILE: home };
 const marker = `WINDOWS_REAL_${randomUUID().replaceAll("-", "")}`;
@@ -31,8 +32,8 @@ const sleepSeconds = 70;
 const evidence = { schema: "anet/windows-real-codex-gate/v1", result: "FAIL", notInCi: true, sourceSha: expectedSha, codexVersion: "0.148.0", platform: process.platform, conpty: true };
 const delay = ms => new Promise(r => setTimeout(r, ms));
 async function wait(label, fn, ms = 30000) { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return; await delay(200); } throw new Error(`timeout: ${label}`); }
-function run(args, input = "") { const r = spawnSync("bun", [cli, ...args], { cwd: project, env, input, encoding: "utf8", timeout: 60000 }); if (r.status) throw new Error(`anet ${args.join(" ")} failed`); return `${r.stdout}${r.stderr}`; }
-function terminal(args, drive, ms = 180000) { return new Promise((ok, bad) => { const child = pty.spawn("bun", [cli, ...args], { cwd: project, env, cols: 140, rows: 45 }); let out = ""; const timer = setTimeout(() => { child.kill(); bad(new Error("ConPTY timeout")); }, ms); child.onData(d => { out += d; drive?.(child, out); }); child.onExit(({ exitCode }) => { clearTimeout(timer); exitCode === 0 ? ok(out) : bad(new Error(`ConPTY exit ${exitCode}`)); }); }); }
+function run(args, input = "") { const r = spawnSync(bun, [cli, ...args], { cwd: project, env, input, encoding: "utf8", timeout: 60000 }); if (r.status) throw new Error(`anet ${args.join(" ")} failed`); return `${r.stdout}${r.stderr}`; }
+function terminal(args, drive, ms = 180000) { return new Promise((ok, bad) => { const child = pty.spawn(bun, [cli, ...args], { cwd: project, env, cols: 140, rows: 45 }); let out = ""; const timer = setTimeout(() => { child.kill(); bad(new Error("ConPTY timeout")); }, ms); child.onData(d => { out += d; drive?.(child, out); }); child.onExit(({ exitCode }) => { clearTimeout(timer); exitCode === 0 ? ok(out) : bad(new Error(`ConPTY exit ${exitCode}`)); }); }); }
 async function task(auth, network, priority) { const r = await fetch(`http://127.0.0.1:${port}/api/task`, { method: "POST", headers: { Authorization: `Bearer ${auth}`, "Content-Type": "application/json" }, body: JSON.stringify({ alias: "windows-real", from: "test1212", network_id: network, priority, task: `${priority} gate message; reply with ${priority.toUpperCase()}_OK`, meta: { source: "dashboard-chat", client_request_id: randomUUID() } }) }); const b = await r.json(); if (!r.ok || !b.task_id) throw new Error("task post failed"); return b.task_id; }
 async function readThread(remote, threadId) {
   const ws = new WebSocket(remote);
