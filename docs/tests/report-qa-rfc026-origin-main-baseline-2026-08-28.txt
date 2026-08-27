@@ -1,0 +1,156 @@
+
+============================================================
+ qa-rfc026 master wrapper
+============================================================
+
+
+=== Suite 1/2 — run.sh (RFC-026 P1 main e2e) ===
+
+=== 0. boot hub + admin user + utok ===
+  ✓ hub /health 200 :9235
+  ✓ admin utok minted
+  ✓ default network = net_226f466fdce6
+  ✓ member user joined network (role=member)
+  ✓ daemon ntok minted
+  ✓ daemon registered (daemon-rfc026 / node_daemon_rfc026_6493910eec21)
+
+=== A. admin create succeeds end-to-end (real fork + real register) ===
+  ✓ create_node dispatched (request_id=cr_559f0d8a-baa4-4e42-8c34-21ad5a9cfa45)
+  ✓ child registered: demo-child / node_559f0d8a-baa4-4e42-8c34-21ad5a9cfa45 (iter 2)
+  ✓ request status = succeeded
+  ✓ daemon log records child pid=139
+  ✓ child starter pid=139 still alive after 12s (register≠alive guard pass)
+  ✓ child agent-node grandchild pid=183 alive (full process tree intact)
+
+=== B. member/viewer role gate (hub-side) ===
+  ✓ member blocked: insufficient_role_for_create_node
+  ✓ no orphan row created by rejected request
+
+=== C. cross-tenant — stranger network cannot target our daemon ===
+  ✗ cross-net NOT rejected: {"ok":false,"error":"access_denied","message":"access denied to requested network (not a member)"}
+
+=== D. F1 — env_blob never in DB; Map evicted after daemon get ===
+  ✓ node_create_requests has NO env_blob column
+  ✓ scenario A env_keys = [] (audit-only column shape correct)
+
+=== E. F2 — name/runtime/flag injection rejected (hub-side, daemon-side mirrored) ===
+  ✓ E1 bad name rejected: node_name_invalid
+  ✓ E2 bad runtime rejected: runtime_invalid
+  ✓ E3 bad flag rejected: flag_value_invalid
+
+=== F. daemon_max_children backpressure ===
+  ✓ max_children backpressure hit: daemon_max_children
+
+=== G. env_refs reserved denylist (C1+B1) ===
+  ✓ G7 PATH rejected (exact denylist): env_key_reserved
+  ✓ G8 LD_PRELOAD rejected (prefix denylist): env_key_reserved
+  ✓ G8b NPM_CONFIG_REGISTRY rejected: env_key_reserved
+  ✓ G9 drift guard: hub vs daemon reserved-env.ts identical
+
+=== H. daemon node_id 强绑 (C2) — P2 multi-daemon live ===
+  ✓ H daemonA bounced (same identity re-registered; snapshot re-published)
+  ✓ H daemonB ntok minted (isolated identity)
+  ✓ H daemonB registered (daemon-rfc026-b / node_daemon_rfc026b_eacbd8c21a1b)
+  ✓ H1 list_host_supervisors returns BOTH daemons (picker aggregation real; converged in 0s)
+  ✓ H1b REST /api/host-supervisors mirrors MCP tool with both daemons
+  ✓ H2 create_node(daemonA) dispatched (cr_650c8a95-f486-4a8f-b531-bc530f5a977e)
+  ✓ H2 create_node(daemonB) dispatched (cr_0bc58d8e-c162-4538-a108-962a8415b156)
+  ✓ H3 child on daemonA registered in 2s (h-child-on-a)
+  ✓ H3 child on daemonB registered in 2s (h-child-on-b)
+  ✓ H4 hub records child_a parent=daemonA
+  ✓ H4 hub records child_b parent=daemonB
+  ✓ H5 daemonA log records spawn of child_a
+  ✓ H5 daemonB log records spawn of child_b
+  ✓ H5 daemonB never touched h-child-on-a (C2 routing effective)
+  ✓ H5 daemonA never touched h-child-on-b (C2 routing effective)
+  ✓ H6 daemonB get_create_request(reqA) → not_your_request (C2 rejects)
+  ✓ H6 daemonA get_create_request(reqB) → not_your_request (C2 rejects)
+  ✓ H7 daemonB ack_create_request(reqA) → not_your_request
+  ✓ H7 reqA status unchanged post-hostile-ack (status=succeeded)
+  ✓ H8 daemonA (pid=340) still alive after H6/H7
+  ✓ H8 daemonB (pid=391) still alive after H6/H7
+
+=== I. ANET_BIN install-time pin + PATH 投毒 (C3, observable) ===
+  ✓ I1 daemon resolved ANET_BIN_ABS=/usr/local/lib/node_modules/@sleep2agi/agent-network/dist/bin/anet.cjs at boot (5-check passed)
+  ✓ I2.a evil-bin DOES shadow PATH-based which (attack surface confirmed)
+  ✓ I2.b loadAndVerifyAnetBin under poisoned PATH returns pinned path (NOT evil-bin)
+  ✓ I2.c evil-bin staged 0s ago — sub-case 2 didn't exec it (would have left process trace)
+
+=== J. mint-evict 失败 → orphan revoke (C4) ===
+  ⊘ J — stub: live test deferred to Phase 3 (needs hub-crash sim F-1 + daemon-kill-9 sim F-2, timing-coordinated with reaper TTL). C4 enforcement coverage = pure unit tests for runOrphanSweepOnce — asserts api_tokens.revoked_at populated + node_create_requests.status terminal-transition (see server/src/create-node.test.ts in this same PR).
+
+=== K. channels fail-closed (C5) ===
+  ✓ K channels rejected: channels_not_supported_in_p1
+
+=== A.nvm — issue #301 PATH fix真验 (isolated daemon identity, no race; complete-loop register+survive) ===
+  ✓ nvm-sim: MOVED node /usr/local/bin/node → /opt/anet-nvm-sim/bin/node (SAFE_PATH lookup of node now fails — faithful nvm)
+  ✓ nvm daemon ntok minted (isolated identity)
+  ✓ nvm-sim daemon execPath=/opt/anet-nvm-sim/bin/node (真 outside SAFE_PATH — fix is exercising)
+  ✓ nvm-sim daemon registered (daemon-rfc026-nvm / node_daemon_nvm_a8c69948229e)
+    nvm-sim daemon PID:        708
+    pgrep nvm-daemon matches:  1
+    all agent-node PIDs:       [183,402,446,585,595,]
+  ✓ single-daemon topology — only nvm-sim daemon owns alias=daemon-rfc026-nvm (HSP_COUNT=1 ASSERT PASS — race-free hard guard)
+  ✓ nvm-sim: create_node dispatched to ISOLATED daemon (request_id=cr_1002ef10-f1db-4c01-b4f5-8e987a24512b, 0 race possible)
+  ✓ nvm-sim: child registered in 2s (env node resolved via daemon PATH prepend — #301 修后 register OK)
+  ✓ nvm-sim: child pid=745 alive after 12s — FULL LOOP (register + survive; #301 真 fix landed, isolated daemon, no race)
+
+────────────────────────────────────────────
+RFC-026 P1/P2 e2e — PASS=58 FAIL=1 SKIP=1
+M3 milestone: A/B/C/D/E/F/G/H/K live + J stubbed (Phase 3)
+issue #338 §① / RFC-026 §5 P2 multi-daemon scenario H — live
+────────────────────────────────────────────
+
+
+=== Suite 2/2 — nvm-sendtask-smoke.sh (PR #309 send-task三连) ===
+
+=== Stage 0 — setup isolated hub + register admin user ===
+  ✓ isolated hub :9236 up
+  ✓ admin registered (net=net_3899eba4)
+
+=== Stage 1 — daemon node config (host_supervisor role) ===
+  ✓ daemon config written
+
+=== Stage 2 — nvm-sim: MOVE node out of SAFE_PATH ===
+  ✓ node MOVED to /opt/anet-nvm-sim/bin/node (faithful nvm-style — SAFE_PATH lookup fails)
+
+=== Stage 3 — start daemon under nvm-sim node ===
+  ✗ nvm-sim daemon failed to start
+[17:58:23] [INFO ] [daemon-309]   user:    t309admin (admin)
+[17:58:23] [INFO ] [daemon-309]   network: t309admin
+[17:58:23] [INFO ] [daemon-309]   tools:   all (Claude Code preset — built-in: WebFetch/WebSearch/Bash/Read/Write/Edit/Glob/Grep/Task/...)
+[17:58:23] [INFO ] [daemon-309]   channels: (none)
+[17:58:23] [INFO ] [daemon-309]   session: (new)
+[17:58:23] [INFO ] [daemon-309]   log-dir: /app/.anet/nodes/daemon-309/logs
+[17:58:23] [INFO ] [daemon-309]   goals:   /tmp/309-sendtask-work/.anet/nodes/daemon-309/goals.json
+[17:58:23] [INFO ] [daemon-309]   goals scheduler: enabled (runtime=claude)
+file:///usr/local/lib/node_modules/@sleep2agi/agent-node/dist/cli.js:192
+`)}function Ak(e){if((e.type??"task")==="task"&&typeof e.task_id==="string"&&e.task_id.length>0)return e.task_id;return String(e.id)}function bD(e){let t=new Set,r=(i)=>{if(!e.taskId||t.has(i))return;t.add(i),e.report(i,e.taskId).catch((n)=>{e.debug?.(`[runtime-evidence] ${i} report failed task=${e.taskId.slice(0,8)}: ${n instanceof Error?n.message:String(n)}`)})};return{submitted:()=>r("submitted"),consumed:()=>r("consumed")}}var NZ=new Set(["你","我","他","她","它","对方","大家","我们","你们","他们"]);function $Z(e){return e.trim().replace(/^[@＠]+/,"").replace(/^[「『“"'【\[]+|[」』”"'】\]]+$/g,"").replace(/[：:，,。.!?！？]+$/g,"").trim()}function vD(e){let t=e.trim();if(!t)return null;if(!/\b(?:mcp_commhub__send_task|commhub_send_task|send_task)\b|发任务|派任务|派给|转给|交给|发给|沟通一下|让|请|麻烦|和|你去给|给\s+\S+\s+(?:发|说|沟通|打)/.test(t))return null;let r=[/\b(?:mcp_commhub__send_task|commhub_send_task|send_task)\s*\(\s*alias\s*=\s*["']([^"']+)["']\s*,\s*task\s*=\s*["']([\s\S]+?)["']\s*\)/i,/\b(?:mcp_commhub__send_task|commhub_send_task|send_task)\s*\(\s*["']([^"']+)["']\s*,\s*["']([\s\S]+?)["']\s*\)/i,/^send_task\s+(\S+)\s+([\s\S]+)$/i,/给\s+(.+?)\s*(?:发任务|派任务|send_task)(?:\s*[：:]\s*([\s\S]+))?$/i,/给\s+[「『"'’“@＠]?(\S+?)[」』"'’“]?\s+(?:发(?:个?消息|个)?|说(?:一下)?|沟通(?:一下)?|打(?:个?招呼)?)\s+([\s\S]+)$/i,/(?:派给|转给|交给|发给)\s+(.+?)\s*[：:，,]\s*([\s\S]+)$/i,/你去给\s+[「『"'’“@＠]?(\S+?)[」』"'’“]?\s+([\s\S]+)$/i,/(?:你\s*)?和\s*(@?[^\s，,：:。.!?！？]+)\s*(?:沟通一下|send_task(?:\s*一下)?)(?:\s*(?:[，,：:]\s*)?([\s\S]+))?$/i,/(?:你\s*)?和\s*(@?[\s\S]+?)\s*沟通一下\s*[，,]\s*([\s\S]+)$/i,/(?:让|请|麻烦)\s+(@?[^\s，,：:。.!?！？]+)\s+([\s\S]+)$/i],i="",n="";for(let o of r){let s=t.match(o);if(!s?.[1])continue;i=$Z(s[1]),n=s[2]?.trim()||"";break}if(!i||NZ.has(i))return null;if(!n){let o=t.match(/(?:发任务|派任务|send_task)\s*[：:]\s*([\s\S]+)$/i);if(o?.[1])n=o[1].trim();else n=t.match(/(?:让|请)\s*(?:他|她|它|对方|该节点)?\s*([\s\S]+?)(?:。|$)/)?.[1]?.trim()||t}if(n=n.replace(/必须.*?(?:总结回|回复)\s*(?:admin|我).*$/i,"").replace(/并?用\s*commhub_get_task[\s\S]*$/i,"").replace(/^[：:，,\s]+/,"").trim(),!n)n=t;return{alias:i,childTask:n}}var FZ=new Set(["FEISHU_APP_SECRET","FEISHU_APP_ID","FEISHU_VERIFICATION_TOKEN","FEISHU_ENCRYPT_KEY","GH_TOKEN","GITHUB_TOKEN","HUB_PASSWORD","COMMHUB_TOKEN","ANET_HUB_TOKEN","AUTH_TOKEN","SLACK_TOKEN","TELEGRAM_TOKEN","TELEGRAM_BOT_TOKEN"]),LZ=[/^ntok_[a-zA-Z0-9_-]{8,}/,/^utok_[a-zA-Z0-9_-]{8,}/,/^atok_[a-zA-Z0-9_-]{8,}/,/^github_pat_[a-zA-Z0-9_]{20,}/,/^ghp_[a-zA-Z0-9]{36}/,/^xoxb-[a-zA-Z0-9-]{20,}/];function SD(e){let t={};for(let[r,i]of Object.entries(e)){if(i===void 0||i===null){t[r]=i;continue}if(FZ.has(r)){t[r]="<masked>";continue}if(typeof i==="string"&&i.length>0){let n=!1;for(let o of LZ)if(o.test(i)){n=!0;break}if(n){t[r]="<masked>";continue}}t[r]=i}return t}var OZ=[{kind:"ghp",regex:/\bghp_[A-Za-z0-9]{36}\b/g},{kind:"github_pat",regex:/\bgithub_pat_[A-Za-z0-9_]{20,}\b/g},{kind:"ntok",regex:/\bntok_[A-Za-z0-9_-]{20,}\b/g},{kind:"utok",regex:/\butok_[A-Za-z0-9_-]{20,}\b/g},{kind:"atok",regex:/\batok_[A-Za-z0-9_-]{20,}\b/g},{kind:"slack_token",regex:/\bxox[abprs]-[A-Za-z0-9-]{20,}\b/g},{kind:"sk_key",regex:/\bsk-(?:ant-)?[A-Za-z0-9_-]{32,}\b/g}];function MZ(e){return`[REDACTED_${e.toUpperCase()}]`}function _D(e){if(typeof e!=="string"||e.length===0)return{masked:typeof e==="string"?e:"",hits:[]};let t=[],r=e;for(let{kind:i,regex:n}of OZ)n.lastIndex=0,r=r.replace(n,(o)=>(t.push({kind:i,length:o.length}),MZ(i)));return{masked:r,hits:t}}function xD(e){if(e.length===0)return"none";let t=new Map;for(let n of e){let o=t.get(n.kind)||{count:0,chars:0};o.count++,o.chars+=n.length,t.set(n.kind,o)}let r=e.reduce((n,o)=>n+o.length,0);return`${Array.from(t.entries()).map(([n,o])=>`${n}=${o.count}`).join(", ")} (${r} chars)`}var dg=[/^\/work\/\.anet(\/|$)/,/^\/root\/\.claude(\/|$)/,/^\/home\/[^/]+\/\.claude(\/|$)/,/\.env(\.|$|\/)/,/^\/home\/[^/]+\/\.ssh(\/|$)/,/^\/root\/\.ssh(\/|$)/,/^\/etc\/shadow$/,/^\/etc\/passwd$/,/^\/proc\/[^/]+\/environ$/,/\/\.local\/share\/opencode\/auth\.json$/],TD=[...dg,/^\/work\/\.anet\/nodes\/[^/]+\/channels\/[^/]+\/access\.json$/,/^\/work\/\.anet\/nodes\/[^/]+\/config\.json$/,/^\/work\/\.anet\/nodes\/[^/]+\/goals\.json$/],UZ=[/(^|[;|&\s(/])env(\s|$|[|&;>])/,/\bprintenv\b/,/\/proc\/[^/\s]+\/environ\b/,/\bgrep\b[^|;]*\b(TOKEN|SECRET|KEY|PASSWORD|API_KEY|AUTH)\b/i,/\$\{?[A-Z_]*(TOKEN|SECRET|KEY|PASSWORD|AUTH)/i,/\b(ghp_|github_pat_|ntok_|utok_|atok_)[A-Za-z0-9_-]{20,}/,/\bxox[bpoars]-[0-9]+-[0-9A-Za-z-]{10,}/];function lg(e){if(e.length>=2){if(e[0]==='"'&&e[e.length-1]==='"'||e[0]==="'"&&e[e.length-1]==="'")return e.slice(1,-1)}return e}function PZ(e){let t=e.startsWith("/"),r=e.split("/").filter((n)=>n.length>0),i=[];for(let n of r)if(n===".."){if(i.length>0&&i[i.length-1]!=="..")i.pop();else if(!t)i.push("..")}else if(n!==".")i.push(n);return(t?"/":"")+i.join("/")}function GZ(e){try{return B("node:fs").realpathSync(e)}catch{return null}}function JZ(e,t){let r=lg(e),i=typeof process<"u"&&process.env&&process.env.HOME||"/root";if(r==="~")r=i;else if(r.startsWith("~/"))r=i+"/"+r.slice(2);if(r=r.replace(/\$\{?HOME\}?/g,i),r.startsWith("./")&&t)r=t.replace(/\/+$/,"")+"/"+r.slice(2);return r=r.replace(/\/{2,}/g,"/"),r=PZ(r),r}function dd(e,t){let r=JZ(e,t),i=GZ(r);if(i&&i!==r)return[r,i];return[r]}function HZ(e){let t=[],r=/(?<![>])>{1,2}\s*("[^"]+"|'[^']+'|[^\s|;&<>()]+)/g,i;while((i=r.exec(e))!==null)t.push(lg(i[1]));let n=/(?<![a-zA-Z0-9_])tee\b(?:\s+-[a-z]+)*\s+("[^"]+"|'[^']+'|[^\s|;&"'`]+)/g;while((i=n.exec(e))!==null)t.push(lg(i[1]));let o=e.match(/(?<![a-zA-Z0-9_])(cp|mv)\b(.*)/);if(o){let a=o[2].trim().split(/\s+/).filter((c)=>c&&!c.startsWith("-"));if(a.length>=2)t.push(lg(a[a.length-1]))}return t}function zZ(e){let t=[],r=/("([\/~][^"]*|\$\{?HOME\}?[^"]*)"|'([\/~][^']*|\$\{?HOME\}?[^']*)')/g,i;while((i=r.exec(e))!==null)t.push(i[2]??i[3]??"");let n=/(?<![a-zA-Z0-9_./~-])((?:\/|\.\/|~\/?|\$\{?HOME\}?)[^\s|;&"'`<>()]*)/g;while((i=n.exec(e))!==null)t.push(i[1]);return t.filter((o)=>o.length>0)}function YZ(e){return typeof e==="string"&&e.startsWith("mcp__commhub__")}function DD(e,t){if(YZ(e))return{deny:!0,reason:`工具 ${e} 在飞书 channel 不可用 (飞书消息走 bridge 直接回, 不经 commhub; 内部协作机制不暴露给用户)`};if(!t||typeof t!=="object")return{deny:!1};if(e==="Read"||e==="Glob"){let r=t.file_path||t.pattern||"",i=t.path||"",n=dd(r,"/work");for(let o of n)for(let s of dg)if(s.test(o))return{deny:!0,reason:`路径 ${o} 在飞书 channel 受限 (含 secret/config, 不可读)`};if(e==="Glob"){if(i){let s=dd(i,"/work");for(let a of s)for(let c of dg)if(c.test(a))return{deny:!0,reason:`Glob 搜索根 ${a} 在飞书 channel 受限 (枚举 secret 树)`}}let o=t.pattern||"";for(let s of VZ)if(o.includes(s))return{deny:!0,reason:`Glob 模式包含敏感前缀 (${s}) — 在飞书 channel 受限`}}}if(e==="Write"||e==="Edit"||e==="MultiEdit"||e==="NotebookEdit"){let r=t.file_path||"",i=dd(r,"/work");for(let n of i)for(let o of TD)if(o.test(n))return{deny:!0,reason:`路径 ${n} 在飞书 channel 受限 (config 写保护; 改 access/config 走 anet CLI 或 dashboard)`}}if(e==="Bash"){let r=t.command||"";for(let i of UZ)if(i.test(r))return{deny:!0,reason:"Bash 命令在飞书 channel 受限 (env/secret 提取模式或 secret literal 字面值)"};for(let i of zZ(r))for(let n of dd(i,"/work"))for(let o of dg)if(o.test(n))return{deny:!0,reason:`Bash 读到敏感路径 ${n} 在飞书 channel 受限 (cat/head/grep/python/dd/tar/zip 等任意命令)`};for(let i of HZ(r))for(let n of dd(i,"/work"))for(let o of TD)if(o.test(n))return{deny:!0,reason:`Bash 写目标 ${n} 在飞书 channel 受限 (config/secret 写保护)`}}return{deny:!1}}var VZ=["/.anet/","/.anet","/.claude/","/.ssh/","/.env","/proc/self/environ"];function gk(e){if(!e)return!1;return e.startsWith("feishu:")}function RD(e){if(!e||typeof e!=="object")return[];let t=Array.isArray(e.attachments)?e.attachments.filter((i)=>i!==null&&typeof i==="object"&&typeof i.path==="string"&&i.path.length>0).map((i)=>({path:i.path,file_id:typeof i.file_id==="string"?i.file_id:void 0,mime:typeof i.mime==="string"?i.mime:void 0,name:typeof i.name==="string"?i.name:void 0,size:typeof i.size==="number"?i.size:void 0})):[];if(t.length>0)return t;return(Array.isArray(e.images)?e.images:[]).filter((i)=>typeof i==="string"&&i.length>0).map((i)=>({path:i}))}function ND(e,t,r){if(typeof e==="string"&&e.length>0)return e;let i=t||"feishu",n=(r!=="?"?r:"default").replace(/[^a-zA-Z0-9_-]/g,"_");return`/work/feishu-attachments/${i}/${n}/`}function $D(e,t){return[e,"--channel-dir",t.dir,"--node-alias",t.connectionName]}var qZ=[/ZodError/,/invalid_union/i,/"validation":\s*\{/,/"?base_resp"?[\s:]*\{[^}]*"?status_code"?[\s:]*[1-9]/i,/\bunknown error,?\s*\d+/i,/"error"\s*:\s*\{\s*"(message|type|code)"\s*:/i,/"choices"\s*:\s*null/i],FD="[模型暂时异常] vendor 返回非预期格式，请稍后重发或重试。";function fk(e,t){if(!e||typeof e!=="string")return!1;if(!t)return!1;return qZ.filter((i)=>i.test(e)).length>=2}function LD(e,t){if(!fk(e,t))return!1;if(/\b401\b|\b403\b|unauthorized|forbidden/i.test(e))return!1;if(/quota|insufficient[_\s]?(credit|balance|funds|tokens?)/i.test(e))return!1;if(/\b429\b|too[_\s]?many[_\s]?requests|rate[_\s]?limit/i.test(e))return!1;return!0}var Js={maxRetries:2,backoffMs:[1500,3000]};import{chmodSync as UD,closeSync as PD,existsSync as XZ,fchmodSync as e6,fsyncSync as t6,openSync as r6,readFileSync as n6,renameSync as i6,statSync as o6,unlinkSync as s6,writeFileSync as a6}from"fs";import{randomBytes as c6}from"crypto";var OD=[/\b(?:ntok|utok|atok)_[A-Za-z0-9_-]{8,}\b/g,/\bghp_[A-Za-z0-9]{36}\b/g,/\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,/\bxox[abprs]-[A-Za-z0-9-]{20,}\b/g,/\bsk-(?:ant-)?[A-Za-z0-9_-]{32,}\b/g,/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g,/\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|rediss|amqp|amqps):\/\/[^\s:@/]+:[^@\s/]+@[^\s"'<>]+/gi],jZ=new Set(["DATABASE_URL","PASSWORD","NTOK","UTOK","ATOK","GH_TOKEN","GITHUB_TOKEN","GITHUB_PAT","AWS_ACCESS_KEY_ID","AWS_SECRET_ACCESS_KEY","AWS_SESSION_TOKEN","AWS_SECURITY_TOKEN"]);function ug(e){let t=e.trim().toUpperCase();return jZ.has(t)||/_(?:TOKEN|SECRET|KEY|PASSWORD)$/.test(t)}function MD(e,t=[]){let r=new Set;for(let i of t)if(typeof i==="string"&&i.length>0)r.add(i);for(let[i,n]of Object.entries(e)){if(!n)continue;if(ug(i)||WZ(n))r.add(n)}return[...r].sort((i,n)=>n.length-i.length||i.localeCompare(n))}function WZ(e){return OD.some((t)=>(t.lastIndex=0,t.test(e)))}function ZZ(e,t,r){let i=0;return t.lastIndex=0,{text:e.replace(t,()=>(i++,r)),count:i}}function KZ(e,t){let r=e,i=0,n=/(["']?)([A-Za-z_][A-Za-z0-9_]*)(\1\s*[:=]\s*)(["'])((?:\\.|(?!\4)[^\\\r\n])*)\4/g;r=r.replace(n,(s,a,c,d,l)=>{if(!ug(c))return s;return i++,`${a}${c}${d}${l}${t}${l}`});let o=/\b([A-Za-z_][A-Za-z0-9_]*)\s*([=:])\s*([^\s,;{}]+)/g;return r=r.replace(o,(s,a,c,d)=>{if(!ug(a)||d.includes(t))return s;return i++,`${a}${c}${t}`}),{text:r,redactions:i}}function ld(e={}){let t=e.placeholder||"[REDACTED_CREDENTIAL]",r=[...new Set([...e.knownValues??[]].filter((o)=>typeof o==="string"&&o.length>0))].filter((o)=>o!==t).sort((o,s)=>s.length-o.length||o.localeCompare(s)),i=(o)=>{if(typeof o!=="string"||o.length===0)return{text:typeof o==="string"?o:"",redactions:0};let s=o,a=0;for(let d of r){let l=s.split(d);if(l.length===1)continue;a+=l.length-1,s=l.join(t)}for(let d of OD){let l=ZZ(s,d,t);s=l.text,a+=l.count}let c=KZ(s,t);return{text:c.text,redactions:a+c.redactions}};return{redactText:i,redactValue:(o)=>{let s=new WeakMap,a=(c,d)=>{if(typeof c==="string"){if(d&&ug(d)&&c!==t)return t;return i(c).text}if(c==null||typeof c!=="object")return c;if(s.has(c))return s.get(c);if(Array.isArray(c)){let A=[];s.set(c,A);for(let u of c)A.push(a(u));return A}let l={};s.set(c,l);for(let[A,u]of Object.entries(c))l[A]=a(u,A);return l};return a(o)}}}class Lr extends Error{code;payload;appLevel;constructor(e,t={}){super(e);this.name="CommHubError",this.code=t.code,this.payload=t.payload,this.appLevel=t.appLevel??!1}}function JD(e){if(e?.error){let i=`${e.error.code??"?"}: ${e.error.message??"no message"}`;return{kind:"retryable",error:new Lr(`JSON-RPC error: ${i}`,{code:e.error.code,payload:e.error})}}if(e?.result?.isError===!0){let i=e?.result?.content?.[0]?.text||"tool returned isError",n=typeof i==="string"?i.match(/\bMCP error\s+(-?\d+)\s*:/i)?.[1]:void 0;return{kind:"retryable",error:new Lr(`tool isError: ${i.slice(0,200)}`,{...n!==void 0?{code:Number(n)}:{},payload:e.result})}}let t=e?.result?.content?.[0]?.text,r;if(typeof t==="string")try{r=JSON.parse(t)}catch{return{kind:"ok",payload:t}}else r=e;if(r&&typeof r==="object"&&r.ok===!1){let i=r.error||r.message||"no detail";return{kind:"appLevel",error:new Lr(`app-level rejection: ${i}`,{code:r.error,payload:r,appLevel:!0})}}return{kind:"ok",payload:r}}function HD(e){let t=1083885398,r=-537806866;for(let i=0;i<e.length;i++){let n=e.charCodeAt(i);t=Math.imul(t^n,2654435761),r=Math.imul(r^n,1597334677)}return t=Math.imul(t^t>>>16,2246822507)^Math.imul(r^r>>>13,3266489909),r=Math.imul(r^r>>>16,2246822507)^Math.imul(t^t>>>13,3266489909),(4294967296*(2097151&r)+(t>>>0)).toString(16).padStart(16,"0").repeat(2).slice(0,32)}class hk{filePath;redactor;constructor(e,t={}){this.filePath=e;this.redactor=t.redactor??ld(t)}load(){if(!XZ(this.filePath))return[];let e;try{e=n6(this.filePath,"utf8")}catch{return[]}let t;try{t=JSON.parse(e)}catch{return this.writeAtomic([]),[]}if(!Array.isArray(t))return this.writeAtomic([]),[];let r=this.sanitize(t),i=JSON.stringify(t)!==JSON.stringify(r),n=o6(this.filePath).mode&511;if(i)this.writeAtomic(r);else if(n!==384)UD(this.filePath,384);return r}save(e){this.writeAtomic(this.sanitize(e))}sanitize(e){return this.redactor.redactValue(e)}writeAtomic(e){let t=`${this.filePath}.${process.pid}.${c6(8).toString("hex")}.tmp`,r;try{r=r6(t,"wx",384),e6(r,384),a6(r,JSON.stringify(e,null,2),"utf8"),t6(r),PD(r),r=void 0,i6(t,this.filePath),UD(this.filePath,384)}catch(i){if(r!==void 0)try{PD(r)}catch{}try{s6(t)}catch{}throw i}}persist(e){let t=this.sanitize(e),r=this.load(),i=this.findIndex(r,t.to,t.taskId,t.text);if(i>=0)r[i]={...r[i],...t,attempts:r[i].attempts};else r.push({...t,attempts:0});this.save(r)}clear(e,t){if(!t)return;let r=this.load(),i=`${e}|task:${t}`,n=r.filter((o)=>GD(o)!==i);if(n.length!==r.length)this.save(n)}async drain(e){let t=this.load(),r=0,i=0,n=[];for(let o of t)try{await e(o),r++}catch(s){if(s instanceof Lr&&s.appLevel){i++;continue}n.push({...o,attempts:o.attempts+1,lastTryAt:Date.now(),lastError:s?.message??String(s)})}if(t.length>0)this.save(n);return{delivered:r,dropped:i,requeued:n.length}}findIndex(e,t,r,i){let n=r?`${t}|task:${r}`:`${t}|sha:${HD(i??"")}`;return e.findIndex((o)=>GD(o)===n)}}function GD(e){return e.taskId?`${e.to}|task:${e.taskId}`:`${e.to}|sha:${HD(e.text)}`}function Ag(e){let t=zD(e.envValue);if(t!==null)return{valueMs:t,source:"env",rawValue:String(e.envValue)};let r=zD(e.flagValue);if(r!==null)return{valueMs:r,source:"flags",rawValue:String(e.flagValue)};return{valueMs:e.defaultMs,source:"default"}}function zD(e){if(e===void 0||e===null)return null;if(typeof e==="number")return Number.isFinite(e)&&e>0?e:null;if(typeof e==="string"){if(e.trim()==="")return null;let t=Number(e);return Number.isFinite(t)&&t>0?t:null}return null}pk();import{dirname as g6}from"path";var Hs="@openai/codex-sdk",eR="@openai/codex",hg="^0.133.0";async function Ik(e,t){try{return{module:await e.importCodexSdk(),source:"already-installed"}}catch(r){e.log?.(`[codex] ${Hs} not resolved — auto-installing to ${t} ...`);try{await e.npmInstall(t,[`${Hs}@${hg}`,`${eR}@${hg}`])}catch(i){throw XD({agentNodeDir:t,initialReason:fg(r),installReason:fg(i)})}try{let i=await e.importCodexSdk();return e.log?.(`[codex] ${Hs} installed and loaded`),{module:i,source:"auto-installed"}}catch(i){throw XD({agentNodeDir:t,initialReason:fg(r),installReason:`install succeeded but ${Hs} still does not resolve: ${fg(i)}`})}}}function Ek(e){return g6(e)}function XD(e){let t=[`${Hs} not available and the auto-install attempt failed.`,"","Recovery — install both packages into agent-node's own node_modules:","",`  npm install --prefix ${mk(e.agentNodeDir)} \\`,`    ${Hs}@${hg} \\`,`    ${eR}@${hg}`,"","Then restart this node.","","Underlying reasons:",`  - initial import: ${e.initialReason}`,`  - auto-install:   ${e.installReason}`],r=Error(t.join(`
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            
+
+Lr [CommHubError]: app-level rejection: alias_identity_mismatch
+    at JD (file:///usr/local/lib/node_modules/@sleep2agi/agent-node/dist/cli.js:192:12377)
+    at tt (file:///usr/local/lib/node_modules/@sleep2agi/agent-node/dist/cli.js:237:685)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async TV (file:///usr/local/lib/node_modules/@sleep2agi/agent-node/dist/cli.js:237:3225)
+    at async file:///usr/local/lib/node_modules/@sleep2agi/agent-node/dist/cli.js:286:5173 {
+  code: 'alias_identity_mismatch',
+  payload: {
+    ok: false,
+    error: 'alias_identity_mismatch',
+    message: 'report_status alias does not match the token-bound node alias; use anet node rename to change identity',
+    token_alias: 't309admin',
+    reported_alias: 'daemon-309'
+  },
+  appLevel: true
+}
+
+Node.js v22.23.2
+
+============================================================
+ qa-rfc026 wrapper final
+============================================================
+  ❌ RFC-026 P1 e2e (run.sh, includes A.nvm distinct-daemon): FAIL (exit=1)
+  ❌ PR #309 nvm send-task smoke (race-free single-daemon): FAIL (exit=1)
+  TOTAL FAILED SUITES: 2
+============================================================
