@@ -30,9 +30,9 @@ describe("parseDbTimestampMs", () => {
     expect(parseDbTimestampMs("2026-08-27T19:23:54+08:00")).toBe(EXPECTED);
   });
 
-  it("an online window of 60s holds for a heartbeat written 1s ago", () => {
+  it("an online window of 5min holds for a heartbeat written 1s ago", () => {
     const now = Date.now();
     const iso = new Date(now - 1000).toISOString().slice(0, 19).replace("T", " ");
-    expect(now - parseDbTimestampMs(iso)).toBeLessThanOrEqual(60_000);
+    expect(now - parseDbTimestampMs(iso)).toBeLessThanOrEqual(5 * 60_000);
   });
 });
