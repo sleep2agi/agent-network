@@ -3,7 +3,7 @@ import { z } from "zod/v4";
 import { parseAliasFilter } from "./alias-filter.js";
 import { createHash } from "node:crypto";
 import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, generateNetworkToken, syncScheduledRunForTask } from "./db.js";
-import { getSSEStats, pushEvent, pushNetworkObserverEvent } from "./push.js";
+import { getSSEStats, hasSubscribers, pushEvent, pushNetworkObserverEvent } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { getUserNetworkRole, createNetworkTokenForNode } from "./auth.js";
 import { canRestWriteNetwork, getUserNetworkIds, singleNetworkId } from "./network-scope.js";
@@ -1429,12 +1429,17 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       let pendingSql = "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0";
       pendingSql = addScope(pendingSql, pendingParams, effectiveNetId);
       const pending = db.get<{ cnt: number }>(pendingSql, ...pendingParams);
-      if (target.state === "online") {
-        pushEvent(targetAlias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority, from: from_session, ...(canonical.renamed ? { renamed_from: alias } : {}) }, effectiveNetId);
-      }
+      // 🔴 不要用 last_seen_at 的时间戳去猜「有没有人在听」——SSE 订阅者注册表
+      // 就是那件事本身。pushEvent 在没有订阅者时已经是 no-op，所以这道闸不提供
+      // 任何保护，只会把**连着但最近没心跳**的会话排除掉；而全网「停发心跳/状态类
+      // 消息」的省额度规则让安静恰恰是常态。上面那段注释早就写着 "Push
+      // unconditionally"，同一类缺陷上次也是打在 Dashboard 任务上（f015d9d6：
+      // 任务标了 delivered，会话却从未收到推送）。
+      pushEvent(targetAlias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority, from: from_session, ...(canonical.renamed ? { renamed_from: alias } : {}) }, effectiveNetId);
+      const actuallyDelivered = hasSubscribers(targetAlias, effectiveNetId);
       // #461 network observer summary — unconditional (task row exists
       // even when the target is offline/queued), metadata only.
-      pushNetworkObserverEvent(effectiveNetId, { type: "new_task", task_id: id, from: from_session, to: targetAlias, status: target.state === "online" ? "delivered" : "queued", priority });
+      pushNetworkObserverEvent(effectiveNetId, { type: "new_task", task_id: id, from: from_session, to: targetAlias, status: actuallyDelivered ? "delivered" : "queued", priority });
 
       if (target.state === "offline") {
         return {
@@ -1502,9 +1507,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         [id, targetAlias, target.session?.node_id ?? null, message, from_session, effectiveNetId ?? null]
       );
 
-      if (target.state === "online") {
-        pushEvent(targetAlias, { type: "new_message", from: from_session, message_id: id, ...(canonical.renamed ? { renamed_from: alias } : {}) }, effectiveNetId);
-      }
+      // 同 send_task：可达性用订阅者注册表判，不用心跳时间戳猜。
+      pushEvent(targetAlias, { type: "new_message", from: from_session, message_id: id, ...(canonical.renamed ? { renamed_from: alias } : {}) }, effectiveNetId);
 
       const offlineReply = deliveryTargetReply(target, { message_id: id });
       if (offlineReply) {
