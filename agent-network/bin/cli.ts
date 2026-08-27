@@ -2054,6 +2054,7 @@ interface Profile {
 import {
   normalizeRuntime,
   normalizeRuntimeStrict,
+  SUPPORTED_RUNTIME_NAMES,
   type RuntimeName,
 } from "../src/normalize-runtime";
 import { findEnvironAliasMatches } from "../src/environ-alias";
@@ -8130,7 +8131,10 @@ async function daemonInitCommand() {
     hub: gc.hub,
     token: mintedToken,
     network_id: gc.network_id,
-    runtimes_supported: ["claude-agent-sdk", "codex-sdk", "grok-build-acp"],
+    // #1298 — 引用 canonical 集合，不再手写。这里曾经是硬编码的三元组，
+    // 于是 grok-build-cli / codex-app-server / opencode-cli 三个共存 runtime
+    // 永远不会出现在 daemon 的能力声明里，hub 据此把 create_node 拒掉。
+    runtimes_supported: [...SUPPORTED_RUNTIME_NAMES],
     allowed_secret_keys: allowedSecretKeys,
     max_concurrent_children: 20,
     channels: [],

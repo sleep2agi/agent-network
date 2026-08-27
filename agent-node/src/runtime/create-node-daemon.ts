@@ -163,7 +163,28 @@ export function minimalEnv(extra: Record<string, string> = {}): NodeJS.ProcessEn
 
 const NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/;
 const MODEL_RE = /^[a-zA-Z0-9._:\-]+$/;
-const VALID_RUNTIMES = new Set(["claude-agent-sdk", "codex-sdk", "grok-build-acp"]);
+// #1298 — 必须与 agent-network/src/normalize-runtime.ts 的 SUPPORTED_RUNTIME_NAMES
+// 逐字一致。两个包之间没有依赖关系（agent-node 不 import agent-network），所以这里
+// 只能是一份副本；而副本靠纪律会漂 —— 本仓 im/access-resolve.ts 那对镜像就没有门。
+// 因此 runtime-set-parity.test.ts 会跨包 import 两边并断言相等：改了 canonical 而
+// 忘了这里，那条测试立刻红并告诉你差哪几个。
+//
+// 🔴 这个集合不能删。agent-network 的 createCommand 对未知 runtime 走的是
+// else 分支（当作 claude-agent-sdk 继续），也就是**静默降级不报错**，所以
+// launcher 目前不是权威。让 launcher 走 normalizeRuntimeStrict 是独立的一条。
+const VALID_RUNTIMES = new Set([
+  "claude-agent-sdk",
+  "claude-code-cli",
+  "codex-sdk",
+  "codex-app-server",
+  "grok-build-acp",
+  "grok-build-cli",
+  "opencode-cli",
+]);
+/** 测试钩子 —— 让 runtime-set-parity.test.ts 能拿到这份副本做跨包等价断言。
+ *  只读用途，不要在产品代码里用它绕过 VALID_RUNTIMES 本身的检查。 */
+export const _internals = { VALID_RUNTIMES };
+
 const PERMISSION_MODES = new Set(["default", "acceptEdits", "plan", "bypassPermissions"]);
 
 // §4.2.2 daemon-side flag VALUE validator — defense in depth, mirrors
