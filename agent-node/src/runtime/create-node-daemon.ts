@@ -226,7 +226,7 @@ export function validateFlagValueDaemon(k: string, v: unknown): void {
 export interface DaemonNodeSpec {
   name: string;
   runtime: string;
-  model: string;
+  model?: string | null;
   flags?: Record<string, unknown>;
   channels?: unknown;
 }
@@ -236,9 +236,11 @@ function kebab(k: string): string { return k.replace(/([A-Z])/g, "-$1").toLowerC
 export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
   if (!spec.name || !NAME_RE.test(spec.name)) throw new Error("node_name_invalid");
   if (!VALID_RUNTIMES.has(spec.runtime)) throw new Error("runtime_invalid");
-  if (!spec.model || spec.model.length > 100 || !MODEL_RE.test(spec.model)) throw new Error("model_invalid");
+  if (spec.model !== undefined && spec.model !== null &&
+      (spec.model.length === 0 || spec.model.length > 100 || !MODEL_RE.test(spec.model))) throw new Error("model_invalid");
   if (Array.isArray(spec.channels) && spec.channels.length > 0) throw new Error("channels_not_supported_in_p1");
-  const args: string[] = ["node", "create", spec.name, "--runtime", spec.runtime, "--model", spec.model];
+  const args: string[] = ["node", "create", spec.name, "--runtime", spec.runtime];
+  if (spec.model) args.push("--model", spec.model);
   for (const [k, v] of Object.entries(spec.flags || {})) {
     if (!["permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout"].includes(k)) {
       throw new Error(`flag_key_unknown:${k}`);
@@ -391,7 +393,7 @@ export async function handleCreateNodeDoorbell(
       node_name: req.node_spec.name,
       alias: req.node_spec.name,
       runtime: req.node_spec.runtime,
-      model: req.node_spec.model,
+      ...(req.node_spec.model ? { model: req.node_spec.model } : {}),
       hub: deps.hubUrl,
       token: req.child_token,
       ...(Object.keys(flagsObj).length ? { flags: flagsObj } : {}),

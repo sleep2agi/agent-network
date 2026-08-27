@@ -1,0 +1,17 @@
+Test: create_node model optional
+Date: 2026-08-28
+Worktree: /tmp/wt-model-optional
+Branch: feat/create-node-model-optional
+
+Commands:
+- bun test src/runtime/create-node-daemon.test.ts
+- COMMHUB_DB=/tmp/anet-model-optional-test.db bun test src/create-node-validate.test.ts src/create-node-tool-schema.test.ts
+- sg docker -c 'docker build -t anet-qa-rfc026-create-node -f tests/qa-rfc026-create-node/Dockerfile . && docker run --rm anet-qa-rfc026-create-node'
+
+Results:
+- agent-node unit test: 35 pass, 0 fail, 75 expect calls.
+- server unit tests: 31 pass, 0 fail, 76 expect calls.
+- Docker qa-rfc026-create-node: failed on current main-adjacent suite expectations before any model-optional-specific failure:
+  - Suite 1 reported PASS=58 FAIL=1 SKIP=1; failure was cross-network rejection expecting the old error shape while hub returned access_denied.
+  - Suite 2 failed daemon startup with alias_identity_mismatch after login-state convergence.
+

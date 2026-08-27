@@ -169,6 +169,16 @@ describe("buildAnetArgs (§4.2.2 F2 — fully validated argv)", () => {
     expect(args).toContain("--permission-mode");
     expect(args[args.indexOf("--permission-mode") + 1]).toBe("plan");
   });
+  test("omitted model is allowed and does not emit --model", () => {
+    const args = buildAnetArgs({
+      name: "x", runtime: "codex-sdk",
+      flags: { permissionMode: "plan" },
+    });
+    expect(args).toEqual(["node", "create", "x", "--runtime", "codex-sdk", "--permission-mode", "plan"]);
+  });
+  test("empty model is still rejected", () => {
+    expect(() => buildAnetArgs({ name: "x", runtime: "codex-sdk", model: "" })).toThrow(ValidationError);
+  });
   test("rejects bad name with shell metachar", () => {
     expect(() => buildAnetArgs({ name: ";rm -rf /", runtime: "claude-agent-sdk", model: "x" })).toThrow(ValidationError);
   });

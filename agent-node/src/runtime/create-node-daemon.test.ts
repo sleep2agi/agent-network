@@ -101,6 +101,18 @@ describe("buildAnetArgsDaemon now reaches flag value validation", () => {
     expect(args[args.indexOf("--budget") + 1]).toBe("5.5");
     expect(args[args.indexOf("--permission-mode") + 1]).toBe("plan");
   });
+  test("omitted model is allowed and does not emit --model", () => {
+    const args = buildAnetArgsDaemon({
+      name: "x", runtime: "claude-agent-sdk",
+      flags: { maxTurns: 50 },
+    });
+    expect(args).toEqual(["node", "create", "x", "--runtime", "claude-agent-sdk", "--max-turns", "50"]);
+  });
+  test("empty model is still rejected", () => {
+    expect(() => buildAnetArgsDaemon({
+      name: "x", runtime: "claude-agent-sdk", model: "",
+    })).toThrow(/model_invalid/);
+  });
   test("smuggled string maxTurns rejected by daemon even if hub missed", () => {
     expect(() => buildAnetArgsDaemon({
       name: "x", runtime: "claude-agent-sdk", model: "x",
