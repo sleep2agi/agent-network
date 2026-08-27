@@ -1534,7 +1534,15 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   // ── V2/V3 reply primitives ──
   const replyToolSchema = {
-      alias: z.string().min(1).max(200).describe("Target session alias"),
+      // #1085 — alias is OPTIONAL: when omitted (or empty) and `in_reply_to`
+      // is set, the hub derives the target from the original task's
+      // `from_name` (it already SELECTs that task by in_reply_to below).
+      // The SDK-runtime bridge (agent-node/src/commhub-mcp.ts) exposes
+      // send_reply as (task_id, text, status) with NO alias, so before this
+      // it always sent alias=undefined → -32602 "expected string, received
+      // undefined at alias". The target was already knowable from the task,
+      // so requiring the caller to pass it was a redundant-param trap.
+      alias: z.string().min(1).max(200).optional().describe("Target session alias — optional; derived from in_reply_to's task sender when omitted"),
       text: z.string().min(1).max(10000).describe("Reply content"),
       in_reply_to: z.string().max(200).optional().describe("Original task/message ID"),
       status: z.enum(["replied", "failed", "cancelled"]).optional().default("replied").describe("Task outcome"),
@@ -1585,9 +1593,29 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         : meta;
       const metaJson = normalizeMetaJson(mergedMeta);
 
-      const canonicalReplyTarget = resolveCanonicalAlias(effectiveNetId, alias);
+      // #1085 — derive the reply target when the caller omitted `alias`.
+      // The original task's `from_name` IS the reply target; the hub knows
+      // it from `in_reply_to`. Without this, an SDK-runtime send_reply
+      // (schema has no alias) died with -32602 before reaching this handler.
+      let effectiveAlias: string | undefined =
+        (typeof alias === "string" && alias.trim()) ? alias : undefined;
+      if (!effectiveAlias) {
+        if (!in_reply_to) {
+          return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "reply_target_required", message: "alias omitted and no in_reply_to to derive it from" }) }] };
+        }
+        const derivParams: any[] = [in_reply_to];
+        let derivSql = "SELECT from_name FROM tasks WHERE task_id = ?1";
+        derivSql = addScope(derivSql, derivParams, effectiveNetId);
+        const derived = db.get<{ from_name: string }>(derivSql, ...derivParams);
+        if (!derived?.from_name) {
+          return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "reply_target_unresolved", message: `alias omitted and could not derive target from in_reply_to (${in_reply_to})` }) }] };
+        }
+        effectiveAlias = derived.from_name;
+      }
+
+      const canonicalReplyTarget = resolveCanonicalAlias(effectiveNetId, effectiveAlias);
       const replyTargetAlias = canonicalReplyTarget.alias;
-      console.log(`[${ts()}] ${from_session} → send_reply (${replyStatus}) → ${replyTargetAlias}: ${text.slice(0, 60)}${attachmentsResult.attachments.length ? ` [+${attachmentsResult.attachments.length} attachments]` : ""}${canonicalReplyTarget.renamed ? ` [renamed from ${alias}]` : ""}`);
+      console.log(`[${ts()}] ${from_session} → send_reply (${replyStatus}) → ${replyTargetAlias}: ${text.slice(0, 60)}${attachmentsResult.attachments.length ? ` [+${attachmentsResult.attachments.length} attachments]` : ""}${canonicalReplyTarget.renamed ? ` [renamed from ${effectiveAlias}]` : ""}`);
       const id = uuidv4();
       const replyTargetNodeId = resolveNodeIdForAlias(replyTargetAlias, effectiveNetId);
       // RFC-027 §2.3 inbox-enqueue lifecycle guard (PR1.1 site 3/6).
