@@ -11,10 +11,6 @@ set -euo pipefail
 ROOT=/workspace
 ARTIFACT_DIR="${ARTIFACT_DIR:-/artifacts}"
 REPORT="${REPORT:-$ARTIFACT_DIR/report-test626.txt}"
-mkdir -p "$ARTIFACT_DIR"
-# 产物要能自证跑的是哪个提交 —— 报告脱离仓库被人读到时,
-# 「哪个 SHA」是它唯一还剩的上下文。
-printf 'source_commit=%s\n' "$SOURCE_COMMIT" > "$REPORT"
 RUNTIME="$ROOT/agent-node/src/runtime/grok-copresence/runtime.ts"
 BACKUP=/tmp/test626-runtime.ts
 TARGET_TEST="src/runtime/grok-copresence/slash-gate.test.ts"
@@ -27,6 +23,13 @@ RELATED_TESTS=(
 mkdir -p "$ARTIFACT_DIR"
 : >"$REPORT"
 exec > >(tee -a "$REPORT") 2>&1
+
+# 🔴 必须放在 `: >"$REPORT"` 和 exec 之后。
+# 放在前面会被那一行截断抹掉 —— 我第一版就是这么写的,而且第一次探针
+# 只跑到第 26 行(截断在第 28 行),把要测的那件事排除在取值范围外,得到假绿。
+# 产物要能自证跑的是哪个提交:报告脱离仓库被人读到时,
+# 「哪个 SHA」是它唯一还剩的上下文。
+printf 'source_commit=%s\n' "$SOURCE_COMMIT"
 
 echo "# test626 - Grok /model hot switch with restart fallback"
 echo "date: $(date -Is)"
