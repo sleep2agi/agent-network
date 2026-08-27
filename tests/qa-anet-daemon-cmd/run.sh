@@ -71,8 +71,21 @@ anet daemon init "$DAEMON_NAME" 2>&1 | tee /tmp/init.log >/dev/null
 ROLE=$(jq -r '.role' "$WORK/.anet/nodes/$DAEMON_NAME/config.json")
 [[ "$ROLE" == "host_supervisor" ]] && ok "config.role == host_supervisor (no vim required)" || bad "role='$ROLE' expected host_supervisor"
 
-RUNTIMES=$(jq -r '.runtimes_supported | join(",")' "$WORK/.anet/nodes/$DAEMON_NAME/config.json")
-[[ "$RUNTIMES" == "claude-agent-sdk,codex-sdk,grok-build-acp" ]] && ok "runtimes_supported defaults set" || bad "runtimes_supported='$RUNTIMES'"
+# #1298 — 判据引用 canonical，不再把名字硬编码进测试。
+# 这条断言以前钉死 "claude-agent-sdk,codex-sdk,grok-build-acp"，于是把 daemon 能力
+# 声明锁在旧三元组上：三个 TUI 共存 runtime 一旦加进来，这里就红。把清单再抄一遍
+# 到测试里会造出第四份副本，下次加 runtime 仍要改两处 —— 所以直接问 canonical。
+CANONICAL_RUNTIMES=$(cd /app/agent-network && bun -e 'import("./src/normalize-runtime.ts").then((m)=>console.log([...m.SUPPORTED_RUNTIME_NAMES].sort().join(",")))' 2>/dev/null)
+RUNTIMES=$(jq -r '.runtimes_supported | sort | join(",")' "$WORK/.anet/nodes/$DAEMON_NAME/config.json")
+# 🔴 先断言 canonical 真的取到了：取不到会让下面变成 ""=="" 的恒真比较，
+#    那是一条永远绿、什么都不证明的断言。
+[[ -n "$CANONICAL_RUNTIMES" ]] && ok "canonical runtime list resolved ($CANONICAL_RUNTIMES)" \
+  || bad "could not read SUPPORTED_RUNTIME_NAMES from agent-network/src/normalize-runtime.ts"
+# 比较**集合**（两边都 sort 过）而不是书写顺序：顺序不是这条断言要守的性质，
+# 而按顺序比会让一次无害的重排变成假红。
+[[ -n "$CANONICAL_RUNTIMES" && "$RUNTIMES" == "$CANONICAL_RUNTIMES" ]] \
+  && ok "runtimes_supported defaults == canonical SUPPORTED_RUNTIME_NAMES" \
+  || bad "runtimes_supported='$RUNTIMES' != canonical='$CANONICAL_RUNTIMES'"
 
 ALLOWED=$(jq -r '.allowed_secret_keys | length' "$WORK/.anet/nodes/$DAEMON_NAME/config.json")
 [[ "$ALLOWED" == "0" ]] && ok "allowed_secret_keys fail-closed (empty by default per §9.7)" || bad "allowed_secret_keys length=$ALLOWED expected 0"
