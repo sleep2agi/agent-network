@@ -99,6 +99,7 @@ on:
       - 'tests/test679-task-trace/**'
       - 'tests/qa-daemon-lifecycle-e2e/**'
       - 'tests/qa-rfc024-config-apply/**'
+      - 'tests/qa-rfc027-stop-delete/**'
       - 'tests/lib/**'
       - 'docs-site/**'
       - 'docs/doc-source-pins-baseline.txt'
@@ -260,6 +261,7 @@ on:
       - 'tests/test679-task-trace/**'
       - 'tests/qa-daemon-lifecycle-e2e/**'
       - 'tests/qa-rfc024-config-apply/**'
+      - 'tests/qa-rfc027-stop-delete/**'
       - 'tests/lib/**'
       - 'docs-site/**'
       - 'docs/doc-source-pins-baseline.txt'
@@ -534,6 +536,28 @@ jobs:
           mkdir -p "$RUNNER_TEMP/suite-artifacts"
           docker run --rm anet-qa-rfc024-config-apply \
             2>&1 | tee "$RUNNER_TEMP/suite-artifacts/qa-rfc024-config-apply.log"
+
+      # RFC-027 stop/delete lifecycle. Was an orphan; 59 assertions, all green
+      # on today's main — no bit-rot. Wired here rather than left unrun because
+      # it already covers two things that were about to be written from scratch:
+      # sibling isolation asserted down to the grandchild PID (each child is
+      # detached:true, so the stop's pgid scope is the wrapper's, not the
+      # daemon's), and cross-tenant refusal (forbidden_cross_tenant /
+      # daemon_not_resolvable / per-network list_my_children).
+      # Exit-code semantics verified by mutation, not by reading: injecting one
+      # `bad` turns rc 0 -> 1.
+      - name: Build qa-rfc027-stop-delete
+        run: |
+          docker build \
+            -t anet-qa-rfc027-stop-delete \
+            -f tests/qa-rfc027-stop-delete/Dockerfile .
+
+      - name: Run qa-rfc027-stop-delete
+        run: |
+          set -o pipefail
+          mkdir -p "$RUNNER_TEMP/suite-artifacts"
+          docker run --rm anet-qa-rfc027-stop-delete \
+            2>&1 | tee "$RUNNER_TEMP/suite-artifacts/qa-rfc027-stop-delete.log"
 
       - name: Build test224-grok-preview-security
         run: |
