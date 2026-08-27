@@ -24,8 +24,8 @@ import {
 // Resolution order (first-match wins):
 //   1. `/etc/anet-daemon/path.conf` (KEY=VALUE format; install scripts
 //      write this on systemd-managed hosts)
-//   2. `ANET_BIN_ABS` env var (container / dev convenience —
-//      Dockerfile sets this at build time)
+//   2. `ANET_BIN_ABS` env var only when `ANET_DAEMON_ALLOW_ENV_BIN=1`
+//      (Docker/dev/manual-ops convenience, not a production trust root)
 //
 // Runtime fork ALWAYS uses the resolved path. Daemon NEVER calls
 // `which anet` or any other PATH lookup. CI lint guard greps
@@ -111,13 +111,19 @@ export function loadAndVerifyAnetBin(env: NodeJS.ProcessEnv = process.env): stri
   let pin: PathPin | null = null;
   const confPath = env.ANET_DAEMON_PATH_CONF || "/etc/anet-daemon/path.conf";
   pin = readPathConf(confPath);
-  if (!pin && env.ANET_BIN_ABS) {
+  if (!pin && env.ANET_BIN_ABS && env.ANET_DAEMON_ALLOW_ENV_BIN === "1") {
     pin = { abs: env.ANET_BIN_ABS, sha256: env.ANET_BIN_SHA256 };
+  }
+  if (!pin && env.ANET_BIN_ABS) {
+    throw unsafePathHelp(
+      "ANET_BIN_ABS env fallback disabled (set ANET_DAEMON_ALLOW_ENV_BIN=1 only for Docker/dev/manual ops; production trust root is /etc/anet-daemon/path.conf)",
+      "install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$(node -e \\\"console.log(require('fs').realpathSync(process.argv[1]))\\\" $(command -v anet))\" | sudo tee /etc/anet-daemon/path.conf >/dev/null",
+    );
   }
   if (!pin) {
     throw unsafePathHelp(
-      "no ANET_BIN_ABS resolved (neither /etc/anet-daemon/path.conf nor env)",
-      "restart with: ANET_BIN_ABS=$(node -e \"console.log(require('fs').realpathSync(process.argv[1]))\" $(command -v anet)) anet daemon start <name>",
+      "no ANET_BIN_ABS resolved from /etc/anet-daemon/path.conf; env fallback is Docker/dev/manual-ops convenience and requires ANET_DAEMON_ALLOW_ENV_BIN=1",
+      "install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$(node -e \\\"console.log(require('fs').realpathSync(process.argv[1]))\\\" $(command -v anet))\" | sudo tee /etc/anet-daemon/path.conf >/dev/null",
     );
   }
   // ① absolute

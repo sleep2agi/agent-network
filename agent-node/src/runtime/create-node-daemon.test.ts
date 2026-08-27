@@ -157,6 +157,7 @@ describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER 
     const got = loadAndVerifyAnetBin({
       ANET_BIN_ABS: p,
       ANET_BIN_SHA256: expectedHash,
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
       ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",  // test runs as non-root
     });
     expect(got).toBe(p);
@@ -169,10 +170,46 @@ describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER 
     })).toThrow(/anet_bin_unsafe_path.*no ANET_BIN_ABS/);
   });
 
+  test("REJECT: ANET_BIN_ABS env fallback without explicit opt-in", () => {
+    cleanup();
+    const p = setup("env-fallback-disabled");
+    expect(() => loadAndVerifyAnetBin({
+      ANET_BIN_ABS: p,
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+    })).toThrow(/ANET_BIN_ABS env fallback disabled.*ANET_DAEMON_ALLOW_ENV_BIN=1/);
+    cleanup();
+  });
+
+  test("ACCEPT: ANET_BIN_ABS env fallback when explicitly opted in", () => {
+    cleanup();
+    const p = setup("env-fallback-enabled");
+    expect(loadAndVerifyAnetBin({
+      ANET_BIN_ABS: p,
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+    })).toBe(p);
+    cleanup();
+  });
+
+  test("path.conf wins over ANET_BIN_ABS env fallback", () => {
+    cleanup();
+    const confBin = setup("conf-bin");
+    const envBin = setup("env-bin");
+    const conf = join(FIXTURE_DIR, "path.conf");
+    writeFileSync(conf, `ANET_BIN_ABS=${confBin}\n`);
+    expect(loadAndVerifyAnetBin({
+      ANET_DAEMON_PATH_CONF: conf,
+      ANET_BIN_ABS: envBin,
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
+    })).toBe(confBin);
+    cleanup();
+  });
+
   test("REJECT: relative path", () => {
     expect(() => loadAndVerifyAnetBin({
       ANET_BIN_ABS: "anet",
       ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
     })).toThrow(/anet_bin_unsafe_path.*not absolute/);
   });
 
@@ -185,6 +222,7 @@ describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER 
     expect(() => loadAndVerifyAnetBin({
       ANET_BIN_ABS: symlinkPath,
       ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
       ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
     })).toThrow(/anet_bin_unsafe_path.*symlink/);
     cleanup();
@@ -199,6 +237,7 @@ describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER 
     expect(() => loadAndVerifyAnetBin({
       ANET_BIN_ABS: p,
       ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
     })).toThrow(/anet_bin_unsafe_path.*not an anet package bin/);
     expect(statSync(p).mode & 0o777).toBe(0o777);
     cleanup();
@@ -211,6 +250,7 @@ describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER 
     expect(() => loadAndVerifyAnetBin({
       ANET_BIN_ABS: p,
       ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
     })).toThrow(/anet_bin_unsafe_path.*writable by group\/other/);
     expect(statSync(p).mode & 0o777).toBe(0o777);
     cleanup();
@@ -223,6 +263,7 @@ describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER 
     expect(() => loadAndVerifyAnetBin({
       ANET_BIN_ABS: p,
       ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
       ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
     })).toThrow(/anet_bin_unsafe_path.*writable by group\/other/);
     expect(statSync(p).mode & 0o777).toBe(0o777);
@@ -236,6 +277,7 @@ describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER 
     expect(() => loadAndVerifyAnetBin({
       ANET_BIN_ABS: p,
       ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
       ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
     })).toThrow(/anet_bin_unsafe_path.*writable by group\/other/);
     expect(statSync(p).mode & 0o777).toBe(0o775);
@@ -249,6 +291,7 @@ describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER 
     expect(() => loadAndVerifyAnetBin({
       ANET_BIN_ABS: p,
       ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
       ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
     })).toThrow(/anet_bin_unsafe_path.*not executable/);
     cleanup();
@@ -261,6 +304,7 @@ describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER 
     expect(() => loadAndVerifyAnetBin({
       ANET_BIN_ABS: p,
       ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
     })).not.toThrow();
     cleanup();
   });
@@ -271,6 +315,7 @@ describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER 
     expect(() => loadAndVerifyAnetBin({
       ANET_BIN_ABS: p,
       ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
       ANET_DAEMON_STRICT_ROOT_BIN: "1",
     })).toThrow(/anet_bin_unsafe_path.*owner not root/);
     cleanup();
@@ -284,6 +329,7 @@ describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER 
       ANET_BIN_ABS: p,
       ANET_BIN_SHA256: installTimeHash,
       ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
       ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
     })).toThrow(/anet_bin_unsafe_path.*sha256 mismatch/);
     cleanup();
