@@ -8126,6 +8126,10 @@ function prepareDaemonAnetBin(): void {
   }
 
   process.env.ANET_BIN_ABS = anetBin;
+  // #1299 — runtime 只在显式 opt-in 时才认 env 来源的 pin。CLI 正是用 env 把 pin
+  // 交给同进程的 daemon(`daemon start/up` 是 `prepareDaemonAnetBin(); await startCommand()`),
+  // 所以不声明的话,没有 /etc/anet-daemon/path.conf 的机器上 `anet daemon up` 会被自己拦下。
+  process.env.ANET_DAEMON_ALLOW_ENV_BIN = "1";
   process.env.ANET_DAEMON_ALLOW_NON_ROOT_BIN = "1";
   console.log(`[anet daemon] using anet binary: ${anetBin}`);
 }
