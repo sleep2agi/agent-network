@@ -16,7 +16,7 @@ if [[ "$inventory_rc" -eq 0 ]]; then
   echo "MUTATION_FALSE_GREEN: unreviewed tool escaped the explicit inventory" >&2
   exit 1
 fi
-grep -Fq "all 46 production MCP registrations are explicitly inventoried" /tmp/test629-inventory-red.log
+grep -Fq "all 47 production MCP registrations are explicitly inventoried" /tmp/test629-inventory-red.log
 echo "MUTATION_RED: unreviewed-tool-inventory rc=${inventory_rc}"
 
 # 第二条变异：registerTool 风格。

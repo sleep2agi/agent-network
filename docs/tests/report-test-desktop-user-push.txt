@@ -1,0 +1,22 @@
+Test: Desktop user-targeted SSE push
+Date: 2026-08-27
+Scope: Non-production local verification on clean worktree from origin/main.
+
+Commands:
+- sg docker -c 'docker build --build-arg SOURCE_COMMIT=$(git rev-parse HEAD) -t anet-test1280-desktop-user-push -f tests/test1280-desktop-user-push/Dockerfile . && docker run --rm anet-test1280-desktop-user-push'
+
+Results:
+- PASS: user-keyed SSE stream uses a separate \0user:<networkId>:<userId> key space.
+- PASS: same user + same network fan out reaches two live clients; after one reader cancels, the other still receives.
+- PASS: /events/users/me requires utok_, explicit network_id, and current network membership.
+- PASS: send_desktop_message succeeds for same-network user targets.
+- PASS: ntok caller cannot cross network via network_id/to_user_id; no audit or push is emitted before denial.
+- PASS: missing, conflicting, and unknown desktop targets fail closed before audit.
+- PASS: legacy /events/:alias and /events/network/:network_id paths remain live and isolated from the new user key space.
+- PASS: /api/messages?alias=... now filters to the requested inbox and returns pending_count from unacked rows.
+- PASS: Bun test reported 33 pass / 0 fail across observer-push, desktop-message, and observer-avatar-http.
+- PASS: anet-client-app production build completed.
+
+Notes:
+- This did not touch production Hub state.
+- Legacy /events/:alias client path is kept for backward compatibility.

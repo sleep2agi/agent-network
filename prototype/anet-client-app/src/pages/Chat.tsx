@@ -19,6 +19,7 @@ export function Chat() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showLog, setShowLog] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
   const streamRef = useRef<AbortController | null>(null);
 
   const refresh = useCallback(async () => {
@@ -38,6 +39,7 @@ export function Chat() {
       // Only include messages between me and target alias (filter by from/to via inbox semantics)
       // /api/messages?alias=<me> returns my inbox; for the prototype we just show everything received.
       setMessages(next);
+      setPendingCount(resp.pending_count ?? next.filter((m) => m.kind === "agent").length);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -56,6 +58,9 @@ export function Chat() {
       try {
         for await (const ev of streamEvents(myAlias, ntok, networkId, ctrl.signal)) {
           if (ev.type === "new_task") {
+            if (typeof ev.inbox_count === "number") {
+              setPendingCount(ev.inbox_count);
+            }
             await refresh();
           }
         }
@@ -115,7 +120,10 @@ export function Chat() {
       >
         <div>
           <strong>{targetAlias}</strong>
-          <div className="muted">chat as {myAlias}</div>
+          <div className="chat-subhead">
+            <span className="muted">chat as {myAlias}</span>
+            {pendingCount > 0 ? <span className="unread-badge">{pendingCount} new</span> : null}
+          </div>
         </div>
         <button className="secondary" onClick={() => navigate("/")}>← Nodes</button>
       </div>

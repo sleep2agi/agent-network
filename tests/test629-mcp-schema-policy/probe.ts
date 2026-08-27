@@ -13,7 +13,7 @@ const expectedTools = [
   "mark_tasks_runtime_submitted", "mark_tasks_consumed", "get_all_status", "get_session_status",
   "send_task", "send_message", "send_reply", "send_peer_reply",
   "send_ack", "retry_task", "get_task", "list_tasks",
-  "cancel_task", "reassign_task", "broadcast", "get_completions",
+  "cancel_task", "reassign_task", "send_desktop_message", "broadcast", "get_completions",
   "update_node_config", "get_config_update", "ack_config_update", "restart_node",
   "list_host_supervisors", "create_node", "get_create_request", "ack_create_request",
   "stop_node", "delete_node", "get_stop_request", "ack_stop_request",

@@ -6,7 +6,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
 import { db, logTaskEvent, logAudit, syncScheduledRunForTask } from "./db.js";
-import { createSSEStream, createNetworkObserverStream, pushEvent, pushNetworkObserverEvent, getSSEStats, PRINTABLE_OBSERVER_KEY_PREFIX } from "./push.js";
+import { createSSEStream, createNetworkObserverStream, createUserEventStream, pushEvent, pushNetworkObserverEvent, getSSEStats, PRINTABLE_OBSERVER_KEY_PREFIX } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { addNetworkScope, canRestWriteNetwork, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { validateAvatarUrl } from "./avatar-validate.js";
@@ -869,6 +869,32 @@ return Bun.serve({
         return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
       }
       return createNetworkObserverStream(observedNetId);
+    }
+
+    // GET /events/users/me?network_id=... → Desktop/user-client stream.
+    // This is intentionally keyed by authenticated user_id, not alias.
+    // Desktop must use its utok_; ntok_ is a node credential and cannot
+    // subscribe to user channels.
+    if (url.pathname === "/events/users/me" && req.method === "GET") {
+      const authErr = requireAuth(req);
+      if (authErr) return authErr;
+      const token = requestToken(req);
+      if (!token?.startsWith("utok_")) {
+        return withCors(req, Response.json({ ok: false, error: "user_token_required" }, { status: 403 }));
+      }
+      const authCtx = resolveRequestAuth(req);
+      if (!authCtx) {
+        return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 403 }));
+      }
+      const networkId = url.searchParams.get("network_id");
+      if (!networkId) {
+        return withCors(req, Response.json({ ok: false, error: "network_id required" }, { status: 400 }));
+      }
+      const role = getUserNetworkRole(authCtx.userId, networkId);
+      if (!role) {
+        return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
+      }
+      return createUserEventStream(networkId, authCtx.userId);
     }
 
     // ── SSE push: Agent 实时接收任务推送 ──
@@ -2599,13 +2625,27 @@ return Bun.serve({
     if (url.pathname === "/api/messages") {
       const limit = Math.min(Number(url.searchParams.get("limit")) || 100, 500);
       const since = url.searchParams.get("since") ?? new Date(Date.now() - 3600000).toISOString().replace("T", " ").slice(0, 19);
+      const alias = url.searchParams.get("alias")?.trim() || null;
       const params: any[] = [since];
-      let sql = "SELECT id, session_name as to_alias, from_session as from_alias, type, priority, content, created_at, network_id FROM inbox WHERE created_at >= ?1";
+      let sql = "SELECT id, session_name as to_alias, from_session as from_alias, type, priority, content, acked, created_at, network_id FROM inbox WHERE created_at >= ?1";
+      if (alias) {
+        params.push(alias);
+        sql += ` AND session_name = ?${params.length}`;
+      }
       sql = addNetworkScope(sql, params, restScope);
       sql += ` ORDER BY created_at DESC LIMIT ?${params.length + 1}`;
       params.push(limit);
       const rows = db.all(sql, ...params);
-      return withCors(req, Response.json({ ok: true, messages: rows }));
+
+      let pendingCount: number | undefined;
+      if (alias) {
+        const countParams: any[] = [alias];
+        let countSql = "SELECT COUNT(*) AS cnt FROM inbox WHERE session_name = ?1 AND acked = 0";
+        countSql = addNetworkScope(countSql, countParams, restScope);
+        pendingCount = db.get<{ cnt: number }>(countSql, ...countParams)?.cnt ?? 0;
+      }
+
+      return withCors(req, Response.json({ ok: true, messages: rows, ...(alias ? { pending_count: pendingCount ?? 0 } : {}) }));
     }
 
     // ── REST: stats summary ──

@@ -1,0 +1,222 @@
+// Desktop user push contract.
+//
+// Pins the new user-keyed SSE path and send_desktop_message MCP tool:
+// - user streams are keyed by networkId:userId, never alias
+// - ntok callers cannot cross network by supplying a foreign to_user_id/network_id
+// - target ambiguity/miss is fail-closed before audit/push
+
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { db } from "./db.js";
+import { registerTools } from "./tools.js";
+import {
+  __resetSSEClientsForTest,
+  createUserEventStream,
+  pushUserEvent,
+} from "./push.js";
+
+const NET_A = "net_desktop_a";
+const NET_B = "net_desktop_b";
+const NODE_USER = "u_desktop_node_owner";
+const SENDER_USER = "u_desktop_sender";
+const TARGET_A = "u_desktop_target_a";
+const TARGET_B = "u_desktop_target_b";
+const TARGET_BOTH = "u_desktop_target_both";
+const ALL_USERS = [NODE_USER, SENDER_USER, TARGET_A, TARGET_B, TARGET_BOTH];
+
+type ToolHandler = (args: any) => Promise<{ content: Array<{ type: "text"; text: string }> }>;
+
+function cleanup() {
+  try { db.run("DELETE FROM audit_log WHERE action = 'send_desktop_message' OR network_id IN (?1, ?2)", [NET_A, NET_B]); } catch {}
+  try { db.run("DELETE FROM network_members WHERE network_id IN (?1, ?2)", [NET_A, NET_B]); } catch {}
+  try { db.run("DELETE FROM networks WHERE network_id IN (?1, ?2)", [NET_A, NET_B]); } catch {}
+  for (const u of ALL_USERS) {
+    try { db.run("DELETE FROM users WHERE user_id = ?1", [u]); } catch {}
+  }
+}
+
+function seed() {
+  for (const u of ALL_USERS) {
+    db.run(
+      `INSERT INTO users (user_id, username, password_hash, role, created_at)
+       VALUES (?1, ?2, 'x', 'user', datetime('now'))`,
+      [u, `${u}_name`],
+    );
+  }
+  db.run(`INSERT INTO networks (network_id, network_name, owner_id, created_at) VALUES (?1, ?1, ?2, datetime('now'))`, [NET_A, SENDER_USER]);
+  db.run(`INSERT INTO networks (network_id, network_name, owner_id, created_at) VALUES (?1, ?1, ?2, datetime('now'))`, [NET_B, TARGET_B]);
+  const member = (userId: string, networkId: string, role: string) =>
+    db.run(`INSERT INTO network_members (user_id, network_id, role, joined_at) VALUES (?1, ?2, ?3, datetime('now'))`, [userId, networkId, role]);
+  member(NODE_USER, NET_A, "member");
+  member(SENDER_USER, NET_A, "owner");
+  member(TARGET_A, NET_A, "member");
+  member(TARGET_B, NET_B, "member");
+  member(TARGET_BOTH, NET_A, "member");
+  member(TARGET_BOTH, NET_B, "member");
+}
+
+beforeEach(() => { cleanup(); seed(); });
+afterEach(() => { __resetSSEClientsForTest(); });
+afterAll(cleanup);
+
+function buildHandlers(opts: { netId?: string | null; userId?: string | null; alias?: string | null; isNetwork?: boolean }) {
+  const server = new McpServer({ name: "test", version: "0" }) as any;
+  const tools: Record<string, ToolHandler> = {};
+  const origTool = server.tool.bind(server);
+  server.tool = (name: string, _desc: string, schema: any, handler: ToolHandler) => {
+    tools[name] = handler;
+    return origTool(name, _desc, schema, handler);
+  };
+  registerTools(
+    server,
+    undefined,
+    opts.netId ?? null,
+    opts.userId ?? null,
+    opts.alias ?? opts.userId ?? null,
+    opts.isNetwork ?? false,
+    "tok_desktop_test",
+  );
+  return tools;
+}
+
+async function call(handler: ToolHandler, args: any): Promise<Record<string, any>> {
+  const r = await handler(args);
+  return JSON.parse(r.content[0].text);
+}
+
+async function readFrame(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  timeoutMs = 2_000,
+): Promise<Record<string, any>> {
+  const decoder = new TextDecoder();
+  let buf = "";
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const result = await Promise.race([
+      reader.read(),
+      new Promise<never>((_, rej) =>
+        setTimeout(() => rej(new Error(`no SSE frame within ${timeoutMs}ms`)), deadline - Date.now()),
+      ),
+    ]);
+    if (result.done) throw new Error("SSE stream ended unexpectedly");
+    buf += decoder.decode(result.value, { stream: true });
+    const sep = buf.indexOf("\n\n");
+    if (sep === -1) continue;
+    const rawFrame = buf.slice(0, sep);
+    buf = buf.slice(sep + 2);
+    const dataLine = rawFrame.split("\n").find((l) => l.startsWith("data: "));
+    if (!dataLine) continue;
+    return JSON.parse(dataLine.slice(6));
+  }
+  throw new Error(`no SSE frame within ${timeoutMs}ms`);
+}
+
+function auditCount() {
+  return db.get<{ n: number }>("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'send_desktop_message'")?.n ?? 0;
+}
+
+describe("send_desktop_message", () => {
+  test("ntok caller can push to a user in the same bound network", async () => {
+    const stream = createUserEventStream(NET_A, TARGET_A);
+    const reader = stream.body!.getReader();
+    await readFrame(reader);
+
+    const tools = buildHandlers({ netId: NET_A, userId: NODE_USER, alias: "node-a", isNetwork: true });
+    const result = await call(tools.send_desktop_message, {
+      to_user_id: TARGET_A,
+      message: "desktop hello",
+      severity: "success",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.message_id).toStartWith("dm_");
+    expect(auditCount()).toBe(1);
+    const evt = await readFrame(reader);
+    expect(evt.type).toBe("desktop_message");
+    expect(evt.message_id).toBe(result.message_id);
+    expect(evt.message).toBe("desktop hello");
+    expect(evt.from).toBe("node-a");
+    expect(evt.network_id).toBe(NET_A);
+    expect(evt.user_id).toBe(TARGET_A);
+    expect(evt.scope).toBe("user");
+    await reader.cancel();
+  });
+
+  test("utok caller can push with explicit network_id to a member user", async () => {
+    const stream = createUserEventStream(NET_A, TARGET_A);
+    const reader = stream.body!.getReader();
+    await readFrame(reader);
+
+    const tools = buildHandlers({ userId: SENDER_USER, alias: "sender-user" });
+    const result = await call(tools.send_desktop_message, {
+      to_username: `${TARGET_A}_name`,
+      network_id: NET_A,
+      title: "Heads up",
+      message: "from user token",
+    });
+
+    expect(result.ok).toBe(true);
+    const evt = await readFrame(reader);
+    expect(evt.title).toBe("Heads up");
+    expect(evt.message).toBe("from user token");
+    expect(evt.network_id).toBe(NET_A);
+    await reader.cancel();
+  });
+
+  test("ntok caller cannot cross network with foreign network_id and to_user_id; no audit or push happens first", async () => {
+    const stream = createUserEventStream(NET_B, TARGET_B);
+    const reader = stream.body!.getReader();
+    await readFrame(reader);
+
+    const tools = buildHandlers({ netId: NET_A, userId: NODE_USER, alias: "node-a", isNetwork: true });
+    const result = await call(tools.send_desktop_message, {
+      to_user_id: TARGET_B,
+      network_id: NET_B,
+      message: "must not cross",
+    });
+
+    expect(result).toEqual({ ok: false, error: "desktop_target_not_in_network", network_id: NET_A });
+    expect(auditCount()).toBe(0);
+
+    pushUserEvent(NET_B, TARGET_B, { type: "desktop_message", message_id: "marker_after_denied" });
+    expect((await readFrame(reader)).message_id).toBe("marker_after_denied");
+    await reader.cancel();
+  });
+
+  test("missing target is fail-closed before audit", async () => {
+    const tools = buildHandlers({ netId: NET_A, userId: NODE_USER, alias: "node-a", isNetwork: true });
+    const result = await call(tools.send_desktop_message, { message: "nobody" });
+    expect(result).toEqual({
+      ok: false,
+      error: "desktop_target_required",
+      message: "to_user_id or to_username is required",
+    });
+    expect(auditCount()).toBe(0);
+  });
+
+  test("conflicting to_user_id and to_username is fail-closed before audit", async () => {
+    const tools = buildHandlers({ netId: NET_A, userId: NODE_USER, alias: "node-a", isNetwork: true });
+    const result = await call(tools.send_desktop_message, {
+      to_user_id: TARGET_A,
+      to_username: `${TARGET_BOTH}_name`,
+      message: "conflict",
+    });
+    expect(result).toEqual({
+      ok: false,
+      error: "desktop_target_mismatch",
+      to_user_id: TARGET_A,
+      to_username: `${TARGET_BOTH}_name`,
+    });
+    expect(auditCount()).toBe(0);
+  });
+
+  test("unknown target is fail-closed before audit", async () => {
+    const tools = buildHandlers({ netId: NET_A, userId: NODE_USER, alias: "node-a", isNetwork: true });
+    const result = await call(tools.send_desktop_message, {
+      to_username: "not_a_real_user",
+      message: "lost",
+    });
+    expect(result).toEqual({ ok: false, error: "desktop_target_not_found", field: "to_username" });
+    expect(auditCount()).toBe(0);
+  });
+});

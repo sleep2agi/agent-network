@@ -187,6 +187,81 @@ describe("#461 GET /events/network/:id — auth", () => {
   });
 });
 
+describe("GET /events/users/me — Desktop user stream auth", () => {
+  test("anonymous → 401", async () => {
+    const res = await fetch(`${BASE}/events/users/me?network_id=${encodeURIComponent(memberNetworkId)}`);
+    expect(res.status).toBe(401);
+  });
+
+  test("ntok is refused for user stream", async () => {
+    const minted = createNetworkTokenForNode(memberUserId, memberNetworkId, "desktop-ntok-probe");
+    expect(minted.ok).toBe(true);
+    const res = await fetch(`${BASE}/events/users/me?network_id=${encodeURIComponent(memberNetworkId)}`, { headers: auth(minted.token!) });
+    expect(res.status).toBe(403);
+    const body = await res.json() as any;
+    expect(body.error).toBe("user_token_required");
+  });
+
+  test("utok without network_id → 400", async () => {
+    const res = await fetch(`${BASE}/events/users/me`, { headers: auth(memberToken) });
+    expect(res.status).toBe(400);
+    const body = await res.json() as any;
+    expect(body.error).toBe("network_id required");
+  });
+
+  test("non-member utok → 403", async () => {
+    const res = await fetch(`${BASE}/events/users/me?network_id=${encodeURIComponent(memberNetworkId)}`, { headers: auth(outsiderToken) });
+    expect(res.status).toBe(403);
+    const body = await res.json() as any;
+    expect(body.error).toBe("not a member of this network");
+  });
+
+  test("member utok → user stream connected frame keyed to authenticated user", async () => {
+    const res = await fetch(`${BASE}/events/users/me?network_id=${encodeURIComponent(memberNetworkId)}`, { headers: auth(memberToken) });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type") || "").toContain("text/event-stream");
+    const reader = res.body!.getReader();
+    const connected = await readFrame(reader);
+    expect(connected.type).toBe("connected");
+    expect(connected.user).toBe(true);
+    expect(connected.network_id).toBe(memberNetworkId);
+    expect(connected.user_id).toBe(memberUserId);
+    await reader.cancel();
+  });
+});
+
+describe("GET /api/messages — client inbox count", () => {
+  test("alias filter returns only that inbox and pending_count for unacked rows", async () => {
+    const selfAlias = `user-${memberUserId}`;
+    db.run(
+      `INSERT INTO inbox (id, session_name, type, priority, content, from_session, acked, network_id, created_at)
+       VALUES (?1, ?2, 'task', 'normal', 'unread self', 'agent-a', 0, ?3, datetime('now'))`,
+      [`msg_self_unread_${Date.now()}`, selfAlias, memberNetworkId],
+    );
+    db.run(
+      `INSERT INTO inbox (id, session_name, type, priority, content, from_session, acked, network_id, created_at)
+       VALUES (?1, ?2, 'task', 'normal', 'read self', 'agent-a', 1, ?3, datetime('now'))`,
+      [`msg_self_read_${Date.now()}`, selfAlias, memberNetworkId],
+    );
+    db.run(
+      `INSERT INTO inbox (id, session_name, type, priority, content, from_session, acked, network_id, created_at)
+       VALUES (?1, 'other-alias', 'task', 'normal', 'other inbox', 'agent-b', 0, ?2, datetime('now'))`,
+      [`msg_other_${Date.now()}`, memberNetworkId],
+    );
+
+    const res = await fetch(`${BASE}/api/messages?alias=${encodeURIComponent(selfAlias)}&network_id=${encodeURIComponent(memberNetworkId)}&limit=20`, {
+      headers: auth(memberToken),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.ok).toBe(true);
+    expect(body.pending_count).toBe(1);
+    expect(body.messages.length).toBeGreaterThanOrEqual(2);
+    expect(body.messages.every((m: any) => m.to_alias === selfAlias)).toBe(true);
+    expect(body.messages.some((m: any) => m.content === "other inbox")).toBe(false);
+  });
+});
+
 describe("#461 observer receives third-party traffic summaries", () => {
   test("REST /api/task dispatch → observer gets new_task summary, no content", async () => {
     const res = await fetch(`${BASE}/events/network/${memberNetworkId}`, { headers: auth(memberToken) });

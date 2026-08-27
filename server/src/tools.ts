@@ -4,7 +4,7 @@ import { z } from "zod/v4";
 import { parseAliasFilter } from "./alias-filter.js";
 import { createHash } from "node:crypto";
 import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, generateNetworkToken, syncScheduledRunForTask } from "./db.js";
-import { getSSEStats, hasSubscribers, pushEvent, pushNetworkObserverEvent } from "./push.js";
+import { getSSEStats, hasSubscribers, pushEvent, pushNetworkObserverEvent, pushUserEvent } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { getUserNetworkRole, createNetworkTokenForNode } from "./auth.js";
 import { canRestWriteNetwork, getUserNetworkIds, singleNetworkId } from "./network-scope.js";
@@ -2179,6 +2179,97 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       pushNetworkObserverEvent(effectiveNetId ?? task.network_id ?? null, { type: "new_task", task_id, from: from_session, to: reassignedAlias, status: "delivered", priority: task.priority });
       return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, task_id, reassigned_from: oldAlias, reassigned_to: reassignedAlias, ...(canonical.renamed ? { renamed_from: new_alias, renamed_to: reassignedAlias } : {}) }) }] };
     }
+  );
+
+  server.tool(
+    "send_desktop_message",
+    "Push a message to a user's active Desktop/web clients in one network. Targets user identity, not node alias.",
+    {
+      to_user_id: z.string().min(1).max(200).optional().describe("Target user_id. Mutually checked with to_username when both are supplied."),
+      to_username: z.string().min(1).max(50).optional().describe("Target username. Mutually checked with to_user_id when both are supplied."),
+      title: z.string().max(200).optional(),
+      message: z.string().min(1).max(10000),
+      severity: z.enum(["info", "success", "warning", "error"]).optional().default("info"),
+      kind: z.string().min(1).max(80).optional().default("agent_message"),
+      meta: z.record(z.unknown()).optional(),
+      from_session: z.string().max(200).optional(),
+      network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens; ntok stays bound to its network)."),
+    },
+    async ({ to_user_id, to_username, title, message, severity, kind, meta, from_session: _fromIn, network_id: netId }) => {
+      const fromMismatch = fromIdentityMismatchReply(_fromIn);
+      if (fromMismatch) return fromMismatch;
+      const from_session = defaultFrom(_fromIn);
+      const effectiveNetId = getNetworkId(netId);
+      if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, "write");
+      if (!effectiveNetId) return writeDeniedReply(effectiveNetId, "write");
+
+      if (!to_user_id && !to_username) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "desktop_target_required", message: "to_user_id or to_username is required" }) }] };
+      }
+
+      const byId = to_user_id
+        ? db.get<{ user_id: string; username: string }>("SELECT user_id, username FROM users WHERE user_id = ?1", to_user_id)
+        : null;
+      const byName = to_username
+        ? db.get<{ user_id: string; username: string }>("SELECT user_id, username FROM users WHERE username = ?1", to_username)
+        : null;
+
+      if (to_user_id && !byId) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "desktop_target_not_found", field: "to_user_id" }) }] };
+      }
+      if (to_username && !byName) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "desktop_target_not_found", field: "to_username" }) }] };
+      }
+      if (byId && byName && byId.user_id !== byName.user_id) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "desktop_target_mismatch", to_user_id, to_username }) }] };
+      }
+
+      const target = byId ?? byName;
+      if (!target) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "desktop_target_not_found" }) }] };
+      }
+
+      const targetRole = getUserNetworkRole(target.user_id, effectiveNetId);
+      if (!targetRole) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "desktop_target_not_in_network", network_id: effectiveNetId }) }] };
+      }
+
+      const messageId = `dm_${uuidv4()}`;
+      const event = {
+        type: "desktop_message",
+        message_id: messageId,
+        kind,
+        from: from_session,
+        title: title || null,
+        message,
+        severity,
+        created_at: new Date().toISOString(),
+        ...(meta && Object.keys(meta).length ? { meta } : {}),
+      };
+
+      db.run(
+        `INSERT INTO audit_log (user_id, username, action, target_type, target_id, detail, network_id)
+         VALUES (?1, ?2, 'send_desktop_message', 'user', ?3, ?4, ?5)`,
+        [
+          enforceUserId || null,
+          callerAlias || null,
+          target.user_id,
+          JSON.stringify({
+            message_id: messageId,
+            to_username: target.username,
+            from: from_session,
+            severity,
+            kind,
+            title: title || null,
+            meta_keys: meta && typeof meta === "object" ? Object.keys(meta) : [],
+          }),
+          effectiveNetId,
+        ],
+      );
+      pushUserEvent(effectiveNetId, target.user_id, event);
+
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, message_id: messageId, delivered_to_user_id: target.user_id, network_id: effectiveNetId }) }] };
+    },
   );
 
   server.tool(
