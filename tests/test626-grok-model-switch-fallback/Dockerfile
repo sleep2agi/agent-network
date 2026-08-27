@@ -1,5 +1,10 @@
 FROM node:22-bookworm-slim
 
+# scripts/qa.sh 靠 grep `^ARG SOURCE_COMMIT` 决定传不传 --build-arg。
+# 没有这一行就**不传,而且不报错** —— 这次运行的输出无法被钉到任何提交上。
+ARG SOURCE_COMMIT=dev
+ENV SOURCE_COMMIT=$SOURCE_COMMIT
+
 RUN apt-get update \
   && apt-get install -y --no-install-recommends bash build-essential ca-certificates curl git python3 unzip util-linux \
   && rm -rf /var/lib/apt/lists/*

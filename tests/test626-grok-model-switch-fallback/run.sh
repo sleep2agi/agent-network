@@ -1,9 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 🔴 断言而非打印:拿不到完整 SHA 就 fail closed。
+# 打印的话,SOURCE_COMMIT 是 "dev" 时报告照样生成,读的人以为它钉在某个提交上。
+[[ "${SOURCE_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]] || {
+  echo 'FAIL: SOURCE_COMMIT must be one full lowercase Git SHA' >&2
+  exit 1
+}
+
 ROOT=/workspace
 ARTIFACT_DIR="${ARTIFACT_DIR:-/artifacts}"
 REPORT="${REPORT:-$ARTIFACT_DIR/report-test626.txt}"
+mkdir -p "$ARTIFACT_DIR"
+# 产物要能自证跑的是哪个提交 —— 报告脱离仓库被人读到时,
+# 「哪个 SHA」是它唯一还剩的上下文。
+printf 'source_commit=%s\n' "$SOURCE_COMMIT" > "$REPORT"
 RUNTIME="$ROOT/agent-node/src/runtime/grok-copresence/runtime.ts"
 BACKUP=/tmp/test626-runtime.ts
 TARGET_TEST="src/runtime/grok-copresence/slash-gate.test.ts"
