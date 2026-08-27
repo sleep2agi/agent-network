@@ -1,0 +1,34 @@
+Test: test1271 daemon-mediated start_node
+Date: 2026-08-27
+Base: 6d90b17ccaeb81ef534c2bdf54b3b56f2c01e532
+Product candidate: cbe083e5
+Environment: Docker only; no production DB, Hub, node config, process, or global npm mutation.
+
+Scope
+- Hub tools: start_node -> get_start_request -> ack_start_request.
+- Durable node_start_requests envelope and stopped -> starting -> active state.
+- Doorbell targets the authoritative creator daemon alias, never the stopped child.
+- Daemon revalidates authenticated envelope, exact local node_id/alias/private config,
+  and pinned anet binary before `anet node start <alias>`.
+- stop semantics confirmed: successful stop deletes childrenMap; disk config recovery is
+  therefore the authoritative stopped-node fallback.
+- Lost success ACK reuses the exact recorded live PID and never spawns twice.
+
+Results (source-bound product candidate before this evidence-only commit)
+- test1271 focused: daemon 6 pass / 0 fail; Hub 2 pass / 0 fail.
+- test1271 witnessed-red: removing local node_id binding => rc=1.
+- server aggregate test798: 79/79 files, 0 failed; mutation red.
+- agent-node aggregate test725: 1477 pass / 0 fail across 113/113 source
+  files; tests directory 6/6; mutation red.
+- agent-node production bundle: PASS.
+
+First-failure ledger
+1. Initial Docker invocation used the suite directory as build context; COPY of repo
+   packages failed before product execution. Corrected to repo-root context.
+2. The first L0 harness invoked `npx tsc` in a package without TypeScript CLI and npm
+   fetched the unrelated deprecated `tsc` package. Removed that non-authoritative gate;
+   server handlers are compiled/imported by Bun tests.
+3. First focused run had one fixture-order bug (verifier ran before config creation).
+   Four other tests passed. Fixture order was corrected; no product logic changed.
+
+Result: PASS
