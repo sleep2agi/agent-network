@@ -95,6 +95,7 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { decideReplyAlias, replyAliasArgs } from "./reply-originator.js";
 
 // ── Load ~/.anet/config.json for token fallback ──────
 function loadAnetConfig(): Record<string, string> {
@@ -355,9 +356,14 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req: any) => {
     // V2: terminal statuses use send_reply to close task lifecycle
     if (status === "completed" || status === "failed" || status === "cancelled") {
       const replyStatus = status === "completed" ? "replied" : status;
-      const originator = task_id ? (taskOriginators.get(task_id) || "hub") : "hub";
+      // #1185 / f015d9d6 — 映射未命中时不要编一个收件人。taskOriginators 是纯内存的，
+      // 进程重启会清空，任务在 SSE 推送到达之前被得知也不会写入。旧写法 `|| "hub"`
+      // 在这两种情况下都断言「发起方是 hub」，于是 hub 侧要么拒（reply_target_mismatch，
+      // 任务永远终结不了），要么在 from_name 恰好是 hub 时把回执静默投错频道。
+      // 省略 alias 让 hub 从 in_reply_to 反查 tasks.from_name（服务端 #1085 的推导路径）。
+      const aliasArgs = replyAliasArgs(decideReplyAlias(task_id, (id) => taskOriginators.get(id)));
       const result = await callCommHub("send_reply", {
-        alias: originator,
+        ...aliasArgs,
         text,
         in_reply_to: task_id || undefined,
         status: replyStatus,
