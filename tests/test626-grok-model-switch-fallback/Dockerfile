@@ -4,7 +4,19 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends bash build-essential ca-certificates curl git python3 unzip util-linux \
   && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL https://bun.sh/install | bash
+# 钉版本 + sha256,照 tests/test679-task-trace/Dockerfile 的样板。
+# `curl https://bun.sh/install | bash` 取的是「当时最新」的 bun ——
+# 同一个 Dockerfile 今天和下周构建出不同的运行时,红了无从复现。
+ARG BUN_VERSION=1.3.14
+ARG BUN_LINUX_X64_SHA256=951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f
+RUN curl --fail --silent --show-error --location --retry 3 --retry-delay 2 --retry-all-errors \
+      "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-x64.zip" -o /tmp/bun.zip \
+ && echo "${BUN_LINUX_X64_SHA256}  /tmp/bun.zip" | sha256sum -c - \
+ && unzip -q /tmp/bun.zip -d /tmp/bunx \
+ && mkdir -p /root/.bun/bin \
+ && mv /tmp/bunx/bun-linux-x64/bun /root/.bun/bin/bun \
+ && chmod 0755 /root/.bun/bin/bun \
+ && rm -rf /tmp/bun.zip /tmp/bunx
 ENV PATH="/root/.bun/bin:/usr/local/bin:/usr/bin:/bin"
 
 WORKDIR /workspace

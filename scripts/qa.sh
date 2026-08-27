@@ -58,6 +58,9 @@ L0_TESTS=(
   # 它的 CI 归属是会安装依赖的层级；本地跑法见该文件头注释的门禁命令。
 )
 L1_TESTS=(
+  # #1253 —— grok 换模型 hot→restart 回退路径。纯本地:跑 agent-node 源码的
+  # bun 测试,不需要 grok 二进制、不需要网络、不碰任何凭据。
+  "test626-grok-model-switch-fallback"
   # 这道闸门自己的回归。放在最前:它跑的是本脚本,若闸门坏了应当最先暴露。
   # (注册这一步不是可选的 —— 一个没被任何东西调用的套件等于不存在。)
   "test823-l1-concurrency-cap"

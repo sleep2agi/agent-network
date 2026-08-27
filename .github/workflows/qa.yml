@@ -177,6 +177,7 @@ on:
       - 'tests/test623-feishu-scrub-health/**'
       - 'tests/test30-v0.8-auth-deprecation/**'
       - 'deploy/hub/hub-daemon.sh'
+      - 'tests/test626-grok-model-switch-fallback/**'
   push:
     branches: [main]
     paths:
@@ -332,6 +333,7 @@ on:
       - 'tests/test623-feishu-scrub-health/**'
       - 'tests/test30-v0.8-auth-deprecation/**'
       - 'deploy/hub/hub-daemon.sh'
+      - 'tests/test626-grok-model-switch-fallback/**'
 
 # Older runs on the same ref get cancelled — saves minutes when a PR is
 # updated rapidly. main pushes run independently.
