@@ -475,6 +475,15 @@ ELAPSED=$(( $(date +%s) - START ))
 echo
 if [[ $FAILED -eq 0 ]]; then
   ok "ALL PASS in ${ELAPSED}s"
+  # 🔴 软预算 —— #1320。runaway 守卫从 15 分钟放到 30 分钟之后,「变慢」不再会撞墙,
+  #    而这个仓库**没有任何记时长比基线的机制**(在此之前唯一能发现变慢的就是它撞墙)。
+  #    所以在这里把「会说话」还回来:超过软预算只 warning,不改变退出码。
+  #    默认 900s ≈ 当前中位 828s(13.8 分钟)的 1.09 倍 —— 故意贴近,目的是**早说**,不是拦。
+  #    L1 每加一个套件约 +12s(串行 build,实测 790s/66);涨到 900s 说明又多了约 6 个。
+  : "${L1_SOFT_BUDGET_S:=900}"
+  if [[ "$L1_SOFT_BUDGET_S" != "0" && $ELAPSED -gt $L1_SOFT_BUDGET_S ]]; then
+    echo "::warning::L1 用了 ${ELAPSED}s,超过软预算 ${L1_SOFT_BUDGET_S}s —— 套件数或单套件耗时在涨。见 #1320（调守卫只买时间,并行化才是量级改变）"
+  fi
   exit 0
 else
   fail "$FAILED test(s) failed in ${ELAPSED}s"
