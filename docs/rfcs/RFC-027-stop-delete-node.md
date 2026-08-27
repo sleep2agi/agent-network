@@ -152,10 +152,20 @@ server.registerTool("delete_node", {
 [stopped] ──delete_node──▶ [deleting] ──daemon ack──▶ (DELETED, row gone)
 ```
 
+### 后续补充：从 stopped 重新启动
+
+`restart_node` 是发给节点自身的热重启 doorbell；节点已经 stopped 时没有消费者，
+不能用它拉起进程。`start_node` 因此走 Hub → host supervisor daemon 的独立 durable
+request：`stopped → starting → active`。stop 成功会删除内存 `childrenMap` 条目，boot
+rebuild 也只收录活进程；daemon 收到 start 时会从
+`~/.anet/nodes/<alias>/config.json` 恢复，并逐请求复核目录边界、私有文件权限、
+`node_id` 与 alias，之后才调用固定且校验过的 `anet node start <alias>`。
+
 `nodes.lifecycle_state` 字段 (新加 ALTER COLUMN, 同 RFC-024 模式幂等 try/catch):
 - `active` (默认 / 当前所有现存 row)
 - `stopping` — hub 已派 stop 给 daemon, 等 ack
 - `stopped` — daemon ack 完成, child 进程已死, config 保留
+- `starting` — hub 已派 start 给 daemon, 等待本地身份复核与进程启动 ack
 - `deleting` — hub 已派 delete 给 daemon, 等 ack
 - (deleted = DB row 不存在)
 

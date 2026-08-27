@@ -454,6 +454,13 @@ db.exec(`
 `);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_start_req_daemon ON node_start_requests(daemon_node_id, status)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_start_req_child ON node_start_requests(child_node_id)`);
+try {
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_start_req_child_inflight
+             ON node_start_requests(child_node_id)
+          WHERE status IN ('pending', 'delivered')`);
+} catch (e: any) {
+  if (!/unique constraint/i.test(e?.message || "")) throw e;
+}
 
 // `node_config_updates` — pending + history. One row per dashboard write.
 // At most one row per node may be in a non-terminal state at a time

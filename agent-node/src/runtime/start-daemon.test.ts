@@ -74,4 +74,22 @@ describe("handleStartDoorbell", () => {
     expect(calls).toEqual(["get_start_request", "ack_start_request"]);
     expect(getChildrenSnapshot()).toEqual([]);
   });
+
+  test("lost success ack replays existing pid without a second spawn", async () => {
+    writeConfig(); let spawns = 0; let firstAck = true;
+    const deps: any = {
+      workDir: root, nodesRoot: root, anetBin: () => "/trusted/anet",
+      spawnChild: () => { spawns++; return { pid: 8181, unref() {} }; },
+      signalProcess: () => {}, log: () => {}, warn: () => {},
+      callCommHub: async (tool: string) => {
+        if (tool === "get_start_request") return { ok: true, child_node_id: "node_child_a", child_alias: "child-a" };
+        if (tool === "ack_start_request" && firstAck) { firstAck = false; throw new Error("network lost"); }
+        return { ok: true };
+      },
+    };
+    await handleStartDoorbell({ request_id: "str_replay" }, deps);
+    await handleStartDoorbell({ request_id: "str_replay" }, deps);
+    expect(spawns).toBe(1);
+    expect(getChildrenSnapshot()[0].pid).toBe(8181);
+  });
 });

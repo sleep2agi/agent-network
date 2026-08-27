@@ -79,6 +79,7 @@ L1_TESTS=(
   # start/stop race plus ownership, socket-residue and KILL escalation gates.
   "test225-node-stop-convergence"
   "test1204-btw-production-wiring"
+  "test1271-daemon-start-node"
   "qa-cli-01-hub-start"
   "qa-cli-02-network-create"
   "qa-dash-07-auth-boundary"

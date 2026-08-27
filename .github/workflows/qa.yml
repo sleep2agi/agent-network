@@ -43,6 +43,7 @@ on:
       - 'tests/test1203-btw-production-e2e/**'
       - 'tests/test1181-codex-durable-poll/**'
       - 'tests/test1204-btw-production-wiring/**'
+      - 'tests/test1271-daemon-start-node/**'
       # A test directory belongs here exactly when CI executes it — otherwise
       # editing the test cannot re-run the gate that runs it. The four below are
       # reached through scripts/qa.sh L1_TESTS and the e2e workflow; the other
@@ -207,6 +208,7 @@ on:
       - '.github/workflows/windows-real-codex-gate.yml'
       - 'tests/test1191-windows-steer-contract/**'
       - 'tests/test1220-codex-tui-client-health/**'
+      - 'tests/test1271-daemon-start-node/**'
       # A test directory belongs here exactly when CI executes it — otherwise
       # editing the test cannot re-run the gate that runs it. The four below are
       # reached through scripts/qa.sh L1_TESTS and the e2e workflow; the other
@@ -1171,6 +1173,7 @@ jobs:
           - test750-codex-copresence-onecommand
           - test1191-windows-steer-contract
           - test1220-codex-tui-client-health
+          - test1271-daemon-start-node
           - test1178-codex-upgrade-recovery
           - test736-pm2-fleet-rebuild
     steps:

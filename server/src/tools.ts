@@ -4033,6 +4033,15 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (!row) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_found" }) }] };
       if (row.daemon_node_id !== callerDaemon.daemonNodeId) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "not_your_request" }) }] };
       if (row.network_id !== callerDaemon.networkId) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_request" }) }] };
+      if (row.status === "started" || row.status === "start_failed") {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, status: row.status, idempotent: true }) }] };
+      }
+      if (!['pending', 'delivered'].includes(row.status)) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_ackable", status: row.status }) }] };
+      }
+      if (status === "started" && !child_pid) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "child_pid_required" }) }] };
+      }
       const now = Date.now();
       try {
         db.transaction(() => {
