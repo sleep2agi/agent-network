@@ -199,6 +199,20 @@ ANET_BIN_ABS="$BIN" ANET_DAEMON_ALLOW_NON_ROOT_BIN=1 \
   `readPathConf` in `loadAndVerifyAnetBin`. For one more notch, include a `sha256`: a mismatch
   between install-time and run-time hashes refuses startup outright.
 
+🔴 **Windows cannot be configured to pass this today — it is not your setup**
+(measured 2026-08-27, see [#1290](https://github.com/sleep2agi/agent-network/issues/1290)):
+check ① is literally `pin.abs.startsWith("/")` — **POSIX-only** — and a Windows absolute path
+(`C:\...`) never starts with `/`, so any `ANET_BIN_ABS` yields
+`anet_bin_unsafe_path: not absolute:`. Even with ① relaxed, ③ and ④ do not hold on Windows
+(Node reports `uid` as 0 there ⇒ the owner check always passes; POSIX mode bits do not reflect
+ACLs ⇒ the permission check asserts nothing real).
+
+⚠️ **The symptom is deceptive**: such a daemon **registers, heartbeats and receives doorbells
+normally**; everything looks right hub-side, the Dashboard server picker lists it as selectable,
+and `create_node` even returns `ok:true` with a request_id — the failure is written only to the
+daemon's local log. **Until #1290 is fixed: a Windows box can run a daemon for heartbeat and
+telemetry, but do not expect it to fork child nodes.**
+
 **Criterion**: once pinned, issue one `create_node` from the hub; the daemon log must show
 `[create-node] spawned child '<name>' pid=…` plus `+5000ms capability check OK`, and the new
 node must register itself back to the hub. **Without those two lines it is not wired up** —
