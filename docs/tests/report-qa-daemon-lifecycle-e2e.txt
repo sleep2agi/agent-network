@@ -96,11 +96,12 @@ REFUSING: /.dockerenv absent — this suite boots a hub and kills pids; run it i
   run3: PASS=22  FAIL=0  TODO=1   (red gates witnessed: 3)
   run4: PASS=22  FAIL=0  TODO=1   (red gates witnessed: 3)
 run 耗时       11 s
-冷构建耗时    244 s  (三次 bun install + 混淆构建 + 两次 npm pack)
+冷构建耗时    206 s  (三次 bun install + 混淆构建 + 两次 npm pack;bun 已钉 1.3.14)
 
 归属决策:放 qa.yml 的 recovered-suites job(12 分钟预算),不放 qa.sh 的 L1_TESTS。
 理由是量出来的,不是估的:qa.sh 的 L1 build 是**串行**的,job 预算 5 分钟且
 现有已用掉 141-148s。只看 11s 的 run 时间会把它错放进快层 —— 那是量了错的那一半。
+(初测 244s 时 bun 装的是「构建时最新」;钉到 1.3.14 后 206s。结论不变,数字以钉版本后为准。)
 
 ════ 5. 注册门(前后计数,证明不是靠缩小范围变绿)════
 check-test-suite-registration.py
@@ -122,3 +123,13 @@ check-public-script-safety.py(本套件注释里含 pattern-kill 字面量,故�
    daemon 注册**之后**才上报的,存在真实 race(qa-rfc026 注释记录了同一 race)。
    先前写法读到空字符串,表现为「产品没设置 role」,实为判据取错字段 + 未等收敛。
 两条的共同点:红/绿都看起来完全正常,只有对照已跑通的同类套件才暴露。
+
+════ 7. 追加:check-bun-install-pin 的一颗真红(已修)════
+初版 Dockerfile 照抄了 tests/qa-anet-daemon-cmd 的 `curl -fsSL https://bun.sh/install | bash`。
+那是该棘轮门基线里的**存量**写法,照抄等于把它的债搬进一个新文件 —— 而门只对**新增**变红。
+修法沿用 tests/test679-task-trace/Dockerfile:钉 BUN_VERSION=1.3.14 + sha256sum -c 校验。
+跑那道门本身(不自造判据):
+  rc=0  scanned 255 tracked Dockerfile(s); 37 still install bun unpinned; baseline lists 37
+        no new unpinned bun installer.
+钉版本后重跑套件:PASS=22 FAIL=0 TODO=1(red gates witnessed: 3),容器内 `bun --version` = 1.3.14。
+教训:照抄一个能跑的现有文件,会连同它在棘轮基线里的存量一起抄过来,而这类门恰恰只罚新增者。
