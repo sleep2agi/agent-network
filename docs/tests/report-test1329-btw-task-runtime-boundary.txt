@@ -36,6 +36,12 @@ Final Docker evidence (source tree based on the exact Base above)
   witnessed red, including removal of the boundary projection.
 - test629 MCP schema policy: inventory 47; both inventory mutations witnessed
   red; SDK unknown-field observe-then-strip contract PASS.
+- test798 complete server unit domain, product commit
+  a8b73a686b4676eba14d47bec2efac754f6df31d: 84/84 files, 0 failed;
+  registration-password mutation witnessed red.
+- test725 complete agent-node unit domain, same product commit: 1488 pass / 0
+  fail across 113/113 source files; 6/6 tests files; readable-attachment
+  mutation witnessed red.
 - App main 62927cdd79189bc4691cbca955d82199dcd365de, authoritative
   test-btw-side-thread-ui Docker: focused parser/API/HTTP/controller/model/scope/UI
   12/12 + 21/21 + 7/7 + 4/4 + 16/16 + 4/4 + 30/30; typecheck PASS;
