@@ -111,6 +111,27 @@ echo "$OUT" | grep -q NODE_LIFECYCLE_LOCK_CORRUPT || fail "corrupt lock lacked t
 rm -rf .anet/nodes/a/.lifecycle-lock
 pass "lifecycle lock recovers dead identity and refuses corrupt receipt"
 
+# #1339: 收据「还没写出来」和「写坏了」必须报成两个不同的码。
+# 上面那一格喂的是 `{corrupt` —— 文件在、解析不了,那才叫 CORRUPT。
+# 这一格喂的是**锁目录存在但完全没有 owner.json**,也就是持锁者已 mkdir、
+# 还没写收据的那个窗口。以前它也报 CORRUPT,于是看到报错的人会去找一个
+# 根本不存在的损坏文件,查不出结果,然后很自然地把锁删掉 —— 绕过整套互斥。
+mkdir -p .anet/nodes/a/.lifecycle-lock
+OUT=$(anet node stop a 2>&1); RC=$?
+[ "$RC" -ne 0 ] || fail "missing lifecycle receipt was silently stolen"
+echo "$OUT" | grep -q NODE_LIFECYCLE_LOCK_RECEIPT_TIMEOUT \
+  || fail "missing receipt must not be reported as CORRUPT: $OUT"
+# 🔴 反向断言:这一格**不得**报成 CORRUPT。少了它,一个把新码和 CORRUPT 一起
+#    拼上去的实现照样能过上面那行。
+# 用 if 而不是 `grep -q X && fail`:本脚本目前是 set -uo pipefail(没有 -e),
+# 两种写法都对;但将来谁加上 -e,`&& fail` 那行在**不命中(即通过)**时整行 rc=1,
+# 会把脚本打死在一个正确的结果上。
+if echo "$OUT" | grep -q NODE_LIFECYCLE_LOCK_CORRUPT; then
+  fail "missing receipt was still reported as CORRUPT: $OUT"
+fi
+rm -rf .anet/nodes/a/.lifecycle-lock
+pass "lifecycle lock distinguishes a missing receipt from a corrupt one"
+
 # Deterministic exit-window fixture: a zombie still answers kill(0), but one
 # /proc stat snapshot identifies it as already gone. The parent must remain
 # untouched and stop must not misreport birth-unavailable.
