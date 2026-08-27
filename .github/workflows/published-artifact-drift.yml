@@ -151,10 +151,37 @@ jobs:
     name: docs-site-drift
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # 🔴 只给这一个 job、只给它要用的那一格权限。
+    #    通知需要开/更新 issue;它不需要写仓库内容。
+    permissions:
+      contents: read
+      issues: write
     steps:
       - uses: actions/checkout@v4
         with:
           # 需要历史才能取「最近新增的行」——指纹只从那里选,见脚本注释。
           fetch-depth: 80
       - run: python3 .github/scripts/check-docs-site-drift.py --selftest
-      - run: python3 .github/scripts/check-docs-site-drift.py
+      - name: check anet.sh against main
+        id: drift
+        run: |
+          set +e
+          python3 .github/scripts/check-docs-site-drift.py > drift.out 2>&1
+          rc=$?
+          set -e
+          # 🔴 退出码不穿管道:先落进变量,再写 output。
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          cat drift.out
+      # 方案 D:把结论送到人眼前。那道门连红 8 天没人动 ⇒
+      # 「Actions 里变红」已被实测证明不是一个通知渠道。
+      - name: open / update / close the tracking issue
+        if: always() && steps.drift.outputs.rc != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RC: ${{ steps.drift.outputs.rc }}
+          DRIFT_OUT: drift.out
+        run: bash .github/scripts/docs-site-drift-notify.sh
+      # 🔴 判定仍由脚本自己的退出码决定 —— 通知是附加的,不改红绿。
+      - name: re-raise the check's exit code
+        if: always()
+        run: exit ${{ steps.drift.outputs.rc }}
