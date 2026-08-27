@@ -1,80 +1,146 @@
+source_commit=151e85166fbd3418840bdaecae673084a0e293b9
 # test626 - Grok /model hot switch with restart fallback
-date: 2026-08-26T23:17:40+00:00
+date: 2026-08-27T01:52:04+00:00
 mode: pure-bun witnessed-red-green
 v22.23.2
-1.4.0
+1.3.14
 
 ## witnessed-red: fallback disabled mutation
-bun test v1.4.0 (34cbb9a40)
+bun test v1.3.14 (0d9b296a)
 
-src/runtime/grok-copresence/slash-gate.test.ts:
-killed 3 dangling processes
-(fail) Grok copresence human-side slash gate (2026-08-15 snapshot) > /model falls back to restart+resume when ACP reports incompatible-agent [5000.22ms]
-  ^ this test timed out after 5000ms.
+src/runtime/grok-copresence/runtime.test.ts:
+2368 |   }, 20_000);
+2369 | 
+2370 |   test("falls back to restart+resume when ACP reports incompatible-agent", async () => {
+2371 |     const fixture = new RuntimeFixture();
+2372 |     fixture.acpModelSwitch = async () => {
+2373 |       const error = new Error("incompatible-agent: model requires new session");
+                               ^
+error: incompatible-agent: model requires new session
+ code: -32000,
+
+      at /workspace/agent-node/src/runtime/grok-copresence/runtime.test.ts:2373:25
+      at acpModelSwitch (/workspace/agent-node/src/runtime/grok-copresence/runtime.test.ts:2052:15)
+      at switchModel (/workspace/agent-node/src/runtime/grok-copresence/runtime.ts:2535:13)
+      at /workspace/agent-node/src/runtime/grok-copresence/runtime.test.ts:1688:31
+      at processTicksAndRejections (unknown:7:39)
+(fail) out-of-band model switch (#879) > falls back to restart+resume when ACP reports incompatible-agent [675.55ms]
 
  0 pass
- 15 filtered out
+ 65 filtered out
  1 fail
-Ran 1 test across 1 file. [5.05s]
+ 3 expect() calls
+Ran 1 test across 1 file. [761.00ms]
 PASS: witnessed-red mutation failed as expected
 
 ## green: current source
-bun test v1.4.0 (34cbb9a40)
+bun test v1.3.14 (0d9b296a)
 
-src/runtime/grok-copresence/slash-gate.test.ts:
-(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > /model falls back to restart+resume when ACP reports incompatible-agent [500.75ms]
+src/runtime/grok-copresence/runtime.test.ts:
+(pass) out-of-band model switch (#879) > falls back to restart+resume when ACP reports incompatible-agent [1027.98ms]
 
  1 pass
- 15 filtered out
+ 65 filtered out
  0 fail
- 6 expect() calls
-Ran 1 test across 1 file. [557.00ms]
+ 10 expect() calls
+Ran 1 test across 1 file. [1133.00ms]
 PASS: green fallback test passed
 
 ## full related suite
-bun test v1.4.0 (34cbb9a40)
-
-src/runtime/grok-copresence/slash-gate.test.ts:
-(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > a leading-slash non-model command is cancelled with Ctrl-C and never reaches the TUI [601.94ms]
-(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > /model uses ACP hot switch and reports the actual route in status [463.52ms]
-(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > /model falls back to restart+resume when ACP reports incompatible-agent [429.05ms]
-(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > a tainted /model line is blocked before it can use ACP or restart [486.07ms]
-(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > a /always-approve submit is cancelled, warned about, and visible to the attached human [559.21ms]
-(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > plain text without a leading slash submits normally and raises no warning [464.16ms]
-(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > a slash in the middle of prose is not treated as a command and submits [461.47ms]
-(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > arrow keys are refused after a mid-prose slash, so the same text cannot be edited [584.04ms]
-(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > a cursor key taints plain text, and the refusal does not blame a slash command [694.30ms]
-(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > Left arrow taints plain text so the line can never be submitted [698.38ms]
-(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > Home taints plain text so the line can never be submitted [718.74ms]
-(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > End taints plain text so the line can never be submitted [701.31ms]
-(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > Delete taints plain text so the line can never be submitted [704.83ms]
-(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > an arrow key after any slash cancels the composer instead of moving the cursor [479.55ms]
-(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > Ctrl+O and Shift+Tab are swallowed and never reach the TUI [448.26ms]
-(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > a blocked slash submit releases the queued network turn (issue #880) [1136.21ms]
+bun test v1.3.14 (0d9b296a)
 
 src/runtime/grok-copresence/runtime.test.ts:
-(pass) Grok copresence launch and injection policy > locks the probed Grok TUI build exactly [0.24ms]
-(pass) Grok copresence launch and injection policy > uses interactive workspace tools without automatic approval [0.30ms]
-(pass) Grok copresence launch and injection policy > rejects terminal escape injection and reserved origin markup [0.24ms]
-(pass) Grok copresence launch and injection policy > rejects external permission sources and noninteractive modes [0.94ms]
-(pass) Grok copresence runtime integration > arbitrates a live PTY, settles final JSONL, attaches once, and resumes [3147.02ms]
-(pass) Grok copresence runtime integration > fails closed on automatic permission resolution without a human action [436.51ms]
-(pass) Grok copresence runtime integration > never replies with a tool-bearing assistant when the final log is delayed past settling [1710.93ms]
-(pass) Grok copresence runtime integration > rejects a completed turn that never resolved its approval [943.34ms]
-(pass) Grok copresence runtime integration > does not resume a TUI that crashed at an approval prompt [459.97ms]
-(pass) Grok copresence runtime integration > rejects a permission record that landed just before the crash poll [666.83ms]
-(pass) Grok copresence runtime integration > refuses process-level resume with a persisted unresolved approval [152.98ms]
-(pass) Grok copresence runtime integration > permits process-level resume after a persisted approval was resolved [413.41ms]
-(pass) Grok copresence runtime integration > arms both resume tails before spawn-time permission records can be skipped [151.52ms]
-(pass) Grok copresence runtime integration > discards spawn-time orphan completions before accepting the first new network task [976.97ms]
-(pass) Grok copresence runtime integration > drains more than one tail chunk before attach and fully cleans a startup rejection [645.71ms]
-(pass) Grok copresence runtime integration > latches any startup auto-approval transition even if a later event says normal [440.49ms]
-(pass) Grok copresence runtime integration > reruns the spawn audit and refuses recovery when it fails [661.11ms]
-(pass) Grok copresence runtime integration > audits recovery drain and rejects an auto phase before scheduling [924.78ms]
-(pass) Grok copresence runtime integration > jointly drains chat and events until both recovery cursors are stable [1685.84ms]
+(pass) Grok copresence launch and injection policy > keeps the fixed-tool auto-resolution exception exact and limited to active turns [0.93ms]
+(pass) Grok copresence launch and injection policy > admits exact automatic lifecycles only for the fixed preview tool boundary [0.27ms]
+(pass) Grok copresence launch and injection policy > exposes only reviewed value-free task failure codes and exact JSONL subcodes [0.66ms]
+(pass) Grok copresence launch and injection policy > keeps the JSONL subcode allowlist direct, frozen, and actual-path-only [0.31ms]
+(pass) Grok copresence launch and injection policy > admits only black-box verified Grok builds [0.74ms]
+(pass) Grok copresence launch and injection policy > fail-closes on the discovery surfaces grok 1.0.5 added [1.99ms]
+(pass) Grok copresence launch and injection policy > keeps the hidden toggle flags in argv on every verified build [0.87ms]
+(pass) Grok copresence launch and injection policy > records per-build Leader behaviour instead of assuming every build has one [0.12ms]
+(pass) Grok copresence launch and injection policy > pins one TUI-effective commhub-only agent profile and hard-denies fallback routes [1.31ms]
+(pass) Grok copresence launch and injection policy > rejects terminal escape injection and reserved origin markup [0.43ms]
+(pass) Grok copresence launch and injection policy > recognizes the pinned TUI composer footer across ANSI fragments [0.31ms]
+(pass) Grok copresence launch and injection policy > rejects external permission sources and noninteractive modes [2.19ms]
+(pass) Grok copresence runtime integration > terminates the independently persistent auto-Leader and its unchanged stale socket [642.61ms]
+(pass) Grok copresence runtime integration > cleans and hardens the exact pinned footprint only after confirmed close [522.68ms]
+(pass) Grok copresence runtime integration > cleans each exact sandbox placeholder at its confirmed recovery boundary [871.75ms]
+(pass) Grok copresence runtime integration > removes an old placeholder before a recovery generation reuses its PID [1126.06ms]
+(pass) Grok copresence runtime integration > queues network input until the pinned TUI composer is ready [1171.98ms]
+(pass) Grok copresence runtime integration > start reports attach=, injects a mapped reply, and a dead TUI is not idle [1120.93ms]
+(pass) Grok copresence runtime integration > a TUI child mid-recovery is not reported idle [864.49ms]
+(pass) Grok copresence runtime integration > maps keyless fake-writer file mutations to exact value-free tail subcodes [3708.17ms]
+(pass) Grok copresence runtime integration > continues exactly once across prefix-preserving atomic chat rewrites [2224.28ms]
+(pass) Grok copresence runtime integration > rejects an atomic replacement that preserves only the consumed prefix [673.12ms]
+(pass) Grok copresence runtime integration > rejects a same-inode shrink below the highest observed size even when offset remains valid [541.27ms]
+(pass) Grok copresence runtime integration > does not expose an intermediate atomic generation before its successor preserves it [1083.45ms]
+(pass) Grok copresence runtime integration > does not expose a pinned generation unlinked between path check and read [1075.21ms]
+(pass) Grok copresence runtime integration > maps chat and events reset callback failures and stops polling after fatal [1478.09ms]
+(pass) Grok copresence runtime integration > maps keyless reducer, lifecycle, and combined flush invariants at their boundaries [2442.93ms]
+(pass) Grok copresence runtime integration > close waits for and tears down a Leader spawned by in-flight recovery [871.11ms]
+(pass) Grok copresence runtime integration > retains containment and lifetime locks when a closing recovery PTY will not stop [2921.85ms]
+(pass) Grok copresence runtime integration > excludes a different runtime from the same canonical project for the full TUI lifetime [1046.46ms]
+(pass) Grok copresence runtime integration > contains an exited recovery generation before reusing its PID [1721.05ms]
+(pass) Grok copresence runtime integration > retains final-cleanup ownership after every failed recovery PID is consumed [876.56ms]
+(pass) Grok copresence runtime integration > reports exact submission and trusted consumption, never queued admission [1721.15ms]
+(pass) Grok copresence runtime integration > arbitrates a live PTY, settles final JSONL, attaches once, and resumes [4578.18ms]
+(pass) Grok copresence runtime integration > fails closed on automatic permission resolution without a human action [554.42ms]
+(pass) Grok copresence runtime integration > accepts only the pinned preview todo_write automatic resolution tuple [1848.77ms]
+(pass) Grok copresence runtime integration > keeps the shared TUI alive when the pinned preview auto-resolves todo_write in a human turn [1725.26ms]
+(pass) Grok copresence runtime integration > keeps the shared TUI alive across exact search_tool then use_tool in a human turn [1651.25ms]
+(pass) Grok copresence runtime integration > rejects every mutated preview todo_write automatic resolution tuple [3845.01ms]
+(pass) Grok copresence runtime integration > preserves exact permission lifecycle order across coalesced and split event reads [2292.51ms]
+(pass) Grok copresence runtime integration > fails closed on malformed or oversized permission lifecycle JSONL [1098.70ms]
+(pass) Grok copresence runtime integration > rejects terminal reordering around automatic permission lifecycles [1644.96ms]
+(pass) Grok copresence runtime integration > allows repeated fixed-tool automatic permission lifecycles in one network turn [1064.48ms]
+(pass) Grok copresence runtime integration > allows a pinned tool batch whose automatic resolutions are not request ordered [1116.30ms]
+(pass) Grok copresence runtime integration > never replies with a tool-bearing assistant when the final log is delayed past settling [1915.24ms]
+(pass) Grok copresence runtime integration > rejects a completed turn that never resolved its approval [570.55ms]
+(pass) Grok copresence runtime integration > does not resume a TUI that crashed at an approval prompt [568.72ms]
+(pass) Grok copresence runtime integration > rejects a permission record that landed just before the crash poll [859.75ms]
+(pass) Grok copresence runtime integration > refuses process-level resume with a persisted unresolved approval [191.50ms]
+(pass) Grok copresence runtime integration > permits process-level resume after a persisted approval was resolved [526.14ms]
+(pass) Grok copresence runtime integration > arms both resume tails before spawn-time permission records can be skipped [259.83ms]
+(pass) Grok copresence runtime integration > discards spawn-time orphan completions before accepting the first new network task [1099.94ms]
+(pass) Grok copresence runtime integration > drains more than one tail chunk before attach and fully cleans a startup rejection [916.77ms]
+(pass) Grok copresence runtime integration > accepts the pinned startup auto-approval transition [547.16ms]
+(pass) Grok copresence runtime integration > reruns the spawn audit and refuses recovery when it fails [793.33ms]
+(pass) Grok copresence runtime integration > keeps auto-approval across recovery before scheduling [1712.13ms]
+(pass) Grok copresence runtime integration > jointly drains chat and events until both recovery cursors are stable [1822.76ms]
+(pass) Grok copresence runtime integration > rejects a beforeSpawn callback that widens a controlled child setting [192.87ms]
+(pass) Grok copresence runtime integration > gives every real lifetime-lock holder only the exact helper environment [541.55ms]
+(pass) out-of-band model switch (#879) > tries ACP hot switch first and reports the hot route [638.79ms]
+(pass) out-of-band model switch (#879) > falls back to restart+resume when ACP reports incompatible-agent [858.92ms]
+(pass) out-of-band model switch (#879) > set-model status frames report the actual hot and restart routes [930.01ms]
+(pass) out-of-band model switch (#879) > 🔴 the re-spawn keeps the approval boundary exactly where it was [854.75ms]
+(pass) out-of-band model switch (#879) > 🔴 refuses while a network turn is running, and does not tear down the TUI [1076.94ms]
+(pass) out-of-band model switch (#879) > reports an unchanged model without restarting anything [642.12ms]
+(pass) out-of-band model switch (#879) > 🔴 an invalid model never reaches argv [645.24ms]
 
- 35 pass
+src/runtime/grok-copresence/model-switch.test.ts:
+(pass) decideGrokModelSwitch > always plans the ACP hot path without reading runtime turn state [0.18ms]
+(pass) decideGrokModelSwitch > restart fallback is explicit and preserves resume [0.07ms]
+(pass) normalizeGrokModelSwitchRequest > trims surrounding whitespace rather than refusing [0.07ms]
+(pass) normalizeGrokModelSwitchRequest > refuses an empty or non-string request [0.17ms]
+(pass) normalizeGrokModelSwitchRequest > refuses a leading dash because argv would read it as a flag [0.17ms]
+(pass) normalizeGrokModelSwitchRequest > refuses whitespace, control characters and NUL inside the id [0.11ms]
+(pass) normalizeGrokModelSwitchRequest > refuses an over-long id [0.08ms]
+(pass) normalizeGrokModelSwitchRequest > accepts the shapes real Grok model ids take [0.10ms]
+(pass) assertModelOnlyArgvDelta > the real argv carries the pinned safety flags, so this suite is guarding something [0.25ms]
+(pass) assertModelOnlyArgvDelta > passes when only the --model operand changed [0.17ms]
+(pass) assertModelOnlyArgvDelta > passes when the previous spawn had no --model at all [0.22ms]
+(pass) assertModelOnlyArgvDelta > refuses a rebuilt argv that dropped --always-approve [0.38ms]
+(pass) assertModelOnlyArgvDelta > refuses a rebuilt argv that moved the permission mode [0.36ms]
+(pass) assertModelOnlyArgvDelta > refuses a rebuilt argv that changed the sandbox profile [0.23ms]
+(pass) assertModelOnlyArgvDelta > refuses a switch that turned the resume into a fresh session [0.19ms]
+(pass) assertModelOnlyArgvDelta > refuses when the rebuilt argv carries no --model [0.14ms]
+(pass) assertModelOnlyArgvDelta > refuses when the rebuilt argv carries a different model than was requested [0.20ms]
+(pass) assertModelOnlyArgvDelta > refuses a duplicated --model flag [0.17ms]
+(pass) assertModelOnlyArgvDelta > refuses a trailing --model with no operand [0.15ms]
+(pass) assertModelOnlyArgvDelta > refuses a re-ordering that preserves the multiset [0.24ms]
+
+ 86 pass
  0 fail
- 144 expect() calls
-Ran 35 tests across 2 files. [23.11s]
+ 578 expect() calls
+Ran 86 tests across 2 files. [68.41s]
 PASS: full related suite passed

@@ -25,7 +25,12 @@ RUN curl --fail --silent --show-error --location --retry 3 --retry-delay 2 --ret
 ENV PATH="/root/.bun/bin:/usr/local/bin:/usr/bin:/bin"
 
 WORKDIR /workspace
-COPY agent-node/package.json agent-node/bun.lock ./agent-node/
+# 🔴 bun.lock 带星。agent-node/.gitignore 第 3 行忽略了 bun.lock ——
+# 作者本地有这个文件,干净检出没有。不带星时 COPY 直接失败:
+#   failed to compute cache key: "/agent-node/bun.lock": not found
+# 于是「本地构建通过、CI 构建失败」。
+# 仓里 test34 / test467 / test697 / test698 都是 `bun.lock*`,这里是唯一漏的。
+COPY agent-node/package.json agent-node/bun.lock* ./agent-node/
 
 RUN cd agent-node && bun install
 

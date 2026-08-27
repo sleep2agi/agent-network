@@ -13,11 +13,17 @@ ARTIFACT_DIR="${ARTIFACT_DIR:-/artifacts}"
 REPORT="${REPORT:-$ARTIFACT_DIR/report-test626.txt}"
 RUNTIME="$ROOT/agent-node/src/runtime/grok-copresence/runtime.ts"
 BACKUP=/tmp/test626-runtime.ts
-TARGET_TEST="src/runtime/grok-copresence/slash-gate.test.ts"
+# 🔴 目标必须是【已提交的】文件。第一版指向 slash-gate.test.ts ——
+# 那个文件只存在于共享脏树(未提交),`COPY . /workspace` 把脏树拷进镜像时
+# 它在,于是作者本地全绿;干净检出里它不存在。
+# `incompatible-agent` 的 fallback 断言实际住在 runtime.test.ts:2370。
+# 路径带 ./ :bun 1.3.14 把不带 ./ 的参数当 name filter,搜不到就整体退出 1,
+# 而那个退出码会被误读成 witnessed-red。
+TARGET_TEST="./src/runtime/grok-copresence/runtime.test.ts"
 TARGET_NAME="incompatible-agent"
 RELATED_TESTS=(
-  src/runtime/grok-copresence/runtime.test.ts
-  src/runtime/grok-copresence/slash-gate.test.ts
+  ./src/runtime/grok-copresence/runtime.test.ts
+  ./src/runtime/grok-copresence/model-switch.test.ts
 )
 
 mkdir -p "$ARTIFACT_DIR"
@@ -52,8 +58,18 @@ from pathlib import Path
 
 path = Path("/workspace/agent-node/src/runtime/grok-copresence/runtime.ts")
 text = path.read_text()
-needle = "      try {\n        const fallback = fallbackGrokModelSwitchRestart();"
-replacement = "      try {\n        throw error;\n        const fallback = fallbackGrokModelSwitchRestart();"
+# 🔴 needle 必须匹配【已提交的】runtime.ts。第一版的 needle 是
+#   "      try {\n        const fallback = ..."
+# 那个形状在本分支底(f94fa9d0 之后)的 runtime.ts 里不存在 —— 全文件唯一的
+# 调用点在 catch (error) 块里,前面是一行守卫。needle 不匹配时脚本直接
+# SystemExit("mutation target not found"),CI 构建后必红;
+# 而提交进仓的 report 写着 PASS —— 那份 report 是在别的(更旧的)检出上
+# 生成后搬进来的,不是在本分支底上跑出来的。证据要在被评对象上现跑。
+#
+# 变异语义不变:让 fallback 永远不被走到。原 needle 想在 try 里抢先 throw;
+# 这里改成把守卫行换成无条件 throw —— 同样把 fallback 变成死代码。
+needle = "      if (!isGrokModelSwitchFallbackError(error)) throw error;\n      const fallback = fallbackGrokModelSwitchRestart();"
+replacement = "      throw error;\n      const fallback = fallbackGrokModelSwitchRestart();"
 if needle not in text:
     raise SystemExit("mutation target not found")
 path.write_text(text.replace(needle, replacement, 1))
@@ -63,7 +79,10 @@ set +e
 bun test "$TARGET_TEST" -t "$TARGET_NAME" 2>&1 | tee /tmp/test626-red.log
 red_rc=$?
 set -e
-if grep -Fq "matched 0 tests" /tmp/test626-red.log; then
+# bun 换版本换措辞:1.4.x 是 "matched 0 tests",1.3.x 是
+# "did not match any test files"。守卫只认一种时,另一种的退出码 1
+# 会被当成变异红 —— 错误理由的红。两种都拦。
+if grep -qE "matched 0 tests|did not match any test files" /tmp/test626-red.log; then
   echo "FAIL: witnessed-red selector matched 0 tests"
   exit 1
 fi
