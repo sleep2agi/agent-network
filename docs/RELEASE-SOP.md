@@ -24,7 +24,12 @@
 > anet 会自动跟随，无需改 cli.ts。两者都属于 release management 数据，**不是业务逻辑**。
 
 ::: tip R261 校准：docs 已无 hardcoded npm 版本，移出 Live versions
-R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md` + `agent-node.md` + `sdk-deep-dive.md` + `upgrade.md` + `deploy/npm.md` + `faq.md` 等 user-facing doc 内的 hardcoded npm 版本号（`@2.1.7` / `@2.3.0` / `MiniMax-M2.7` / Bun `>= 1.0` 等）**全部清除**，改成「查 npm latest tag / npm 包页 dist-tags」或 vendor 名（无版本）。原 docs reference 两行（runtimes / agent-node + agent-network 跨 6 doc）已经不再需要 release sync。
+R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md` + `agent-node.md` + `sdk-deep-dive.md` + `upgrade.md` + `deploy/npm.md` + `faq.md` 等 user-facing doc 内的 hardcoded npm 版本号（`@2.1.7` / `@2.3.0` / `MiniMax-M2.7` / Bun `>= 1.0` 等）**全部清除**，改成「查 npm latest tag / npm 包页 dist-tags」或 vendor 名（无版本）。原 docs reference 两行（runtimes / agent-node + agent-network 跨 6 doc）当时不再需要 release sync。
+> 🔴 **2026-08-27 起 `runtimes.md`（中英）重新需要**：#1298 把「哪些 runtime 在哪个通道可用」的实测结论连同 npm `latest` 的**具体版本号**写回了那一页，
+> 因为不带版本的写法让旧结论比它描述的对象活得更久（`latest` 从 2.2.21 跳到 2.3.0-preview.47 之后，那页三条陈述同时变假而没有任何门发现）。
+> 两份已登记进下表，发版时按表逐条重核。
+> 注意这道门的判据是**整文件子串匹配**（`f not in sop`），所以「路径在本文里出现过」就算登记 ——
+> 中文那份此前正是靠上面这句散文被判为已登记的，而那句话说的恰恰是它不需要重核。**登记要落在表里，不要只靠正文提到过。**
 
 未来加新 doc 时**不要再写硬版本号**（reviewer 拦截，rationale：每 release drift 一次维护负担，让 doc 引导用户去 npm 包页查最新 latest 比 doc 自己钉死可靠）。
 
@@ -66,9 +71,11 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > | `docs-site/docs/en/guide/architecture.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/en/guide/feishu.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/en/guide/grok-copresence.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
+> | `docs-site/docs/en/guide/runtimes.md` | 见门输出 | 信道断言 —— 通道表钉了 npm `latest` 的**具体版本号**(#1298)，换 dist-tag 即失真 |
 > | `docs-site/docs/en/preview/index.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/en/troubleshooting/case-feishu-silent-deny.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/guide/architecture.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
+> | `docs-site/docs/guide/runtimes.md` | 见门输出 | 信道断言 —— 同上(中文) |
 > | `docs-site/docs/guide/feishu.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/guide/grok-copresence.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/preview/index.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |

@@ -6,15 +6,24 @@ Every Agent Node has a **Runtime** (engine kernel) that decides how the node cal
 
 > This table is the **single source of truth** for runtimes across the entire site. Other pages (`cli` / `agent-node` / `getting-started` / `clean-server`) reference it — they do not duplicate the full table.
 
-::: tip Which runtimes are available in which channel (real-machine verified)
-- **Stable** (`npm i -g @sleep2agi/agent-network`): **Production runtimes** — `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`. Follow npm's `latest` dist-tag for the exact version.
-- **Preview** (`@preview`): adds `codex-app-server` / `opencode-cli` on top of the 4 (**6 total**), and rejects unknown runtimes with an explicit error (stable **silently falls back** to the default runtime instead).
+::: tip Which runtimes are available in which channel (verified on a real install, 2026-08-27)
+Measured against that day's npm `latest` = **2.3.0-preview.47** (`preview` = 2.3.0-preview.51).
+After installing, the `anet node create` runtime picker lists **all seven**:
 
-Rows tagged `(preview)` below are **preview-only** and not selectable on stable.
+`claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `codex-app-server` / `grok-build-acp` / `grok-build-cli` / `opencode-cli`
+
+`anet daemon` and `anet grok attach` are present in that same version.
+
+🔴 **What this page said before — "codex-app-server / opencode-cli are preview-only", "grok-build-cli is in no package" — no longer holds for this version.** `latest` sat on 2.2.21 for a long time, and back then those statements were correct. **Read any behavioural claim together with its version**: change the dist-tag and the answer can invert.
 :::
 
-::: warning Grok TUI co-presence has not shipped
-`grok-build-cli` / `anet grok attach` are not in the current `latest` or `preview` packages, so they are not selectable runtimes in the table below. Use `grok-build-acp` for now; it does not support attach. See the [Grok TUI status page](/en/guide/grok-copresence).
+::: warning "Selectable in the picker" is neither "production-ready" nor "creatable by a daemon"
+Two things this page does not promise:
+
+- **Maturity**: `grok-build-cli` still describes itself in the picker as an experimental preview that only accepts trusted tasks. Listed is not stable.
+- **The daemon path**: when a node is created for you through `anet daemon`'s `create_node`, `grok-build-cli` / `codex-app-server` / `opencode-cli` are rejected by the daemon-side runtime gate ([#1298](https://github.com/sleep2agi/agent-network/issues/1298)). **Usable via a local `anet node create`, not usable via daemon** — until that fix reaches the version you have, the two paths give different answers.
+
+For the current state of Grok TUI co-presence see the [Grok TUI status page](/en/guide/grok-copresence); `grok-build-acp` does not support attach.
 :::
 
 | Runtime | npm package / engine | When to pick | Default models | Prereq auth | Wizard behavior (`anet node create`) |
