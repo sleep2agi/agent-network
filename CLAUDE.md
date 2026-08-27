@@ -57,6 +57,7 @@ commhub_get_all_status()
 - **所有测试在 Docker 里跑**：不碰本地环境，不改生产
 - **测试可以自己跑**（早期"测试1-3号"分工已撤销；新增套件必须注册进 CI，见 check-test-suite-registration）
 - **发版一律走 GitHub Actions**（Vincent 2026-08-27 定：本机只开发不发包）：`release-gate (v0)` 发 preview，`promote to latest` 升 latest（要 owner ACK）
+- **对外发布一律从 main 分支出**（Vincent 2026-08-27 定）：npm 包、exe/安装包等所有对外产物必须由 main 分支构建发布；其他分支只做测试验证、只出测试性产物，不得对外发布。（当日教训：latest 曾被一次本地手工 `npm publish` 未带 `--tag preview` 顶上去——工作流 + main-only 双约束堵住这类事故）
 - **测试结果保存**：docs/tests/report-testN.txt
 - **每个测试套件独立 Dockerfile**：可并行构建和运行
 
