@@ -462,3 +462,120 @@ describe("rebuildChildrenMapOnBoot — real subprocess primitive (no pgrep mocks
     }
   });
 });
+
+// ── #1286 — 「先 stop 后 delete」这条真实路径 ───────────────────────
+//
+// stop 成功之后条目会被移出 childrenMap（本文件设计如此），而 delete 复用
+// 同一张表 ⇒ 未命中是**必然**不是偶发。而未命中分支原本对两个 action 共用
+// 一个早返回，于是 delete 什么都不做却 ack 出去，调用方零信号。
+//
+// 拿进程表决定文件系统清理是范畴错误：childrenMap 记的是运行中的进程，
+// 配置目录是盘上的事实，两者生命周期不同。
+describe("#1286 handleStopDoorbell — stop 之后再 delete", () => {
+  function seedWorkdir(root: string, alias: string) {
+    const dir = join(root, alias);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "config.json"), JSON.stringify({ alias }), "utf8");
+    return dir;
+  }
+
+  test("🔴 stop 成功（条目已移除）后 delete：配置目录必须真的被移走，而不是静默 no-op", async () => {
+    const workdirRoot = join(scratch, "nodes");
+    const deletedRoot = join(scratch, "deleted");
+    const alias = "child-1286";
+    const childId = "node_child_1286";
+    seedWorkdir(workdirRoot, alias);
+
+    // 第一步：stop —— 走命中路径，结束后条目被移除
+    recordSpawnedChild(childId, alias, 4242);
+    const stopH = makeDeps({
+      workdirRoot, deletedRoot,
+      getStopReturn: {
+        ok: true, request_id: "req-stop", child_node_id: childId, child_alias: alias,
+        action: "stop", delete_config: false, grace_seconds: 10, force: false,
+      },
+    });
+    await handleStopDoorbell({ request_id: "req-stop" }, stopH.deps as any);
+    expect(stopH.acks.at(-1)!.args.status).toBe("stopped");
+    // 前提断言：这条路径确实把条目移除了 —— 否则下面测的就不是那个场景
+    expect(getChildrenSnapshot().length).toBe(0);
+
+    // 第二步：delete —— childrenMap 必然未命中
+    const delH = makeDeps({
+      workdirRoot, deletedRoot,
+      getStopReturn: {
+        ok: true, request_id: "req-del", child_node_id: childId, child_alias: alias,
+        action: "delete", delete_config: true, grace_seconds: 10, force: false,
+      },
+    });
+    await handleStopDoorbell({ request_id: "req-del" }, delH.deps as any);
+
+    const ack = delH.acks.at(-1)!.args;
+    expect(ack.status).toBe("stopped");                 // hub 才会收敛（行删除 + 撤 ntok）
+    expect(ack.backup_path).toBeTruthy();
+    // 判据落在字节上：源目录消失、备份目录里能读到原文件
+    expect(() => statSync(join(workdirRoot, alias))).toThrow();
+    const moved = readdirSync(deletedRoot);
+    expect(moved.length).toBe(1);
+    expect(readdirSync(join(deletedRoot, moved[0]))).toContain("config.json");
+  });
+
+  // 🔴 这条我一开始写成期望 noop_not_my_child，验 hub 侧才发现那会复现原 bug：
+  //    server/src/tools.ts 的 ack_stop_request 对 noop_not_my_child **没有分支**，
+  //    只更新 request 行，nodes.lifecycle_state 停在 'deleting' —— 正是上报的症状。
+  //    delete 的终态是「不在跑 + 配置不在」，盘上本来就没有时该终态已成立 ⇒ 必须收敛。
+  test("未命中 + 盘上也没有该目录 ⇒ 仍 ack stopped 让 hub 收敛，但不给 backup_path", async () => {
+    const workdirRoot = join(scratch, "nodes");
+    const deletedRoot = join(scratch, "deleted");
+    mkdirSync(workdirRoot, { recursive: true });
+    const h = makeDeps({
+      workdirRoot, deletedRoot,
+      getStopReturn: {
+        ok: true, request_id: "req-none", child_node_id: "node_absent", child_alias: "absent-1286",
+        action: "delete", delete_config: true, grace_seconds: 10, force: false,
+      },
+    });
+    await handleStopDoorbell({ request_id: "req-none" }, h.deps as any);
+    const ack = h.acks.at(-1)!.args;
+    expect(ack.status).toBe("stopped");
+    expect(ack.backup_path).toBeUndefined();   // 区分「搬走了」和「本来就没有」
+  });
+
+  // 🔴 这条同样修正过：命中路径对「移动失败」的既有立场是**不让 delete 失败**
+  //    （子进程已不在，行仍应收敛，本地回收站泄漏靠 warn 暴露）。新分支若更严，
+  //    同一个条件在两条路径上就会有两种行为 —— 比任一种单独选择都差。
+  test("未命中 + 移动失败 ⇒ 与命中路径同立场：仍 ack stopped、无 backup_path、warn 里有原因", async () => {
+    const workdirRoot = join(scratch, "nodes");
+    const deletedRoot = join(scratch, "deleted");
+    const alias = "child-mvfail-1286";
+    seedWorkdir(workdirRoot, alias);
+    const h = makeDeps({
+      workdirRoot, deletedRoot,
+      getStopReturn: {
+        ok: true, request_id: "req-mvfail", child_node_id: "node_mvfail", child_alias: alias,
+        action: "delete", delete_config: true, grace_seconds: 10, force: false,
+      },
+    });
+    const warns: string[] = [];
+    (h.deps as any).warn = (m: string) => warns.push(m);
+    (h.deps as any).renameDir = () => { throw new Error("EXDEV cross-device"); };
+    await handleStopDoorbell({ request_id: "req-mvfail" }, h.deps as any);
+    const ack = h.acks.at(-1)!.args;
+    expect(ack.status).toBe("stopped");
+    expect(ack.backup_path).toBeUndefined();
+    expect(warns.join("\n")).toContain("EXDEV");
+    // 目录没被搬走这件事必须仍然看得见，而不是被 ack 盖掉
+    expect(statSync(join(workdirRoot, alias)).isDirectory()).toBe(true);
+  });
+
+  test("回归钉：action=stop 未命中时行为不变，仍是 noop_not_my_child", async () => {
+    const h = makeDeps({
+      getStopReturn: {
+        ok: true, request_id: "req-stop-miss", child_node_id: "node_absent", child_alias: "absent-1286",
+        action: "stop", delete_config: false, grace_seconds: 10, force: false,
+      },
+    });
+    await handleStopDoorbell({ request_id: "req-stop-miss" }, h.deps as any);
+    expect(h.acks.at(-1)!.args.status).toBe("noop_not_my_child");
+  });
+});

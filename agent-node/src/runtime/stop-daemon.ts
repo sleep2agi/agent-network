@@ -126,6 +126,37 @@ async function waitForExit(
   return !isAlive(pid, signalProcess);
 }
 
+
+/** 把子节点的配置目录搬进回收站。命中与未命中两条 delete 路径共用它，
+ *  这样「移动失败怎么办」不会在两处各写一遍然后慢慢漂开。
+ *
+ *  立场沿用命中路径原有的选择：移动失败**不**让整个 delete 失败 —— 子进程
+ *  此时已经不在了，hub 侧的行应当收敛（删行 + 撤 ntok），本地回收站泄漏
+ *  通过 warn 暴露。调用方靠 backup_path 在与不在来区分「真搬走了」和
+ *  「盘上本来就没有」。 */
+function moveWorkdirToTrash(
+  child_alias: string,
+  workdirRoot: string,
+  deletedRoot: string,
+  deps: StopDoorbellDeps,
+  ensureDir: (p: string, mode: number) => void,
+  chmod: (p: string, mode: number) => void,
+  renameDir: (src: string, dst: string) => void,
+): string | null {
+  try {
+    ensureDir(deletedRoot, 0o700);
+    try { chmod(deletedRoot, 0o700); } catch { /* best-effort */ }
+    const dst = join(deletedRoot, `${Date.now()}-${child_alias}`);
+    renameDir(join(workdirRoot, child_alias), dst);
+    chmod(dst, 0o700);
+    deps.log(`[stop-daemon] backed up child workdir → ${dst} (chmod 700)`);
+    return dst;
+  } catch (e: any) {
+    deps.warn(`[stop-daemon] backup mv failed for ${child_alias}: ${e?.message || e}`);
+    return null;
+  }
+}
+
 export async function handleStopDoorbell(
   event: { request_id: string },
   deps: StopDoorbellDeps,
@@ -154,14 +185,50 @@ export async function handleStopDoorbell(
   const { child_node_id, child_alias, action, delete_config = true, grace_seconds = 10 } = req;
 
   const entry = childrenMap.get(child_node_id);
-  if (!entry) {
+  if (!entry && action !== "delete") {
     // §2.4 — degraded path, not an error. Daemon restart + pre-boot-
-    // rebuild scenario. Ack so hub can move on.
+    // rebuild scenario. Nothing to signal, so ack and let hub move on.
+    //
+    // 🔴 This early return is correct for `stop` and wrong for `delete`.
+    // childrenMap tracks RUNNING PROCESSES; a delete also has to remove an
+    // ON-DISK config directory, and those two have different lifetimes.
+    // Letting a process table decide a filesystem cleanup is a category
+    // error. See the delete branch below.
     deps.log(`[stop-daemon] child not in map (likely daemon-restarted): ${child_node_id}`);
     await deps.callCommHub("ack_stop_request", {
       request_id, status: "noop_not_my_child",
       error: "child not in children_map; daemon likely restarted before rebuild",
     }).catch(() => { /* ack failure → next sweeper picks up */ });
+    return;
+  }
+  if (!entry) {
+    // #1286 — delete without a map entry. This is not the rare
+    // daemon-restart case: a successful `stop` removes the entry, so
+    // stop-then-delete makes the miss GUARANTEED, not incidental.
+    //
+    // Nothing here needs the map. `child_alias` comes from the hub request
+    // (not from `entry`), and sweepOrphansForAlias finds processes by alias.
+    // The map only ever supplied `entry.pid`, which just the pgid signal in
+    // `stop` requires. So do the work instead of returning.
+    deps.log(`[stop-daemon] delete without map entry (expected after stop): ${child_node_id}`);
+    if (child_alias) {
+      await sweepOrphansForAlias(child_alias, signalProcess, deps, "delete without map entry");
+    }
+    const backup = (delete_config && child_alias)
+      ? moveWorkdirToTrash(child_alias, workdirRoot, deletedRoot, deps, ensureDir, chmod, renameDir)
+      : null;
+    // Ack `stopped` either way: the child is not running and its config is
+    // not in place, which IS delete's end state, so the hub must converge
+    // (row deleted + ntok revoked). Acking noop_not_my_child here would
+    // leave lifecycle_state stuck at 'deleting' — the reported symptom.
+    // `backup_path` present vs absent is what distinguishes "moved it" from
+    // "nothing was on disk"; a failed move is surfaced by warn, matching the
+    // stance the hit path already takes.
+    await deps.callCommHub("ack_stop_request", {
+      request_id, status: "stopped", ...(backup ? { backup_path: backup } : {}),
+    }).catch((e: any) => {
+      deps.warn(`[stop-daemon] ack failed: ${e?.message || e}`);
+    });
     return;
   }
 
@@ -241,26 +308,11 @@ export async function handleStopDoorbell(
   // §2.4 / §4.4 — for delete branch with delete_config=true, move the
   // child's workdir into the trash. chmod 700 on both the parent
   // (~/.anet/deleted) and the moved dir so secrets don't leak.
-  let backup_path: string | null = null;
-  if (action === "delete" && delete_config && child_alias) {
-    try {
-      ensureDir(deletedRoot, 0o700);
-      // chmod the parent too in case it pre-existed with looser perms.
-      try { chmod(deletedRoot, 0o700); } catch { /* best-effort */ }
-      backup_path = join(deletedRoot, `${Date.now()}-${child_alias}`);
-      const srcDir = join(workdirRoot, child_alias);
-      renameDir(srcDir, backup_path);
-      chmod(backup_path, 0o700);
-      deps.log(`[stop-daemon] backed up child workdir → ${backup_path} (chmod 700)`);
-    } catch (e: any) {
-      deps.warn(`[stop-daemon] backup mv failed for ${child_alias}: ${e?.message || e}`);
-      // Don't fail the whole stop — child process is already gone. Ack
-      // 'stopped' with backup_path=null so hub still finalizes; row is
-      // deleted, ntok revoked, and the daemon's local trash leak is
-      // surfaced via the warn log + next sweeper run.
-      backup_path = null;
-    }
-  }
+  // Shared with the no-map-entry delete branch above so the two paths cannot
+  // drift on "what happens when the move fails".
+  const backup_path: string | null = (action === "delete" && delete_config && child_alias)
+    ? moveWorkdirToTrash(child_alias, workdirRoot, deletedRoot, deps, ensureDir, chmod, renameDir)
+    : null;
 
   // PR1.2 e2e defense-in-depth: even after pgid signaling, sweep any
   // residual agent-node process matching this alias. Catches the case
