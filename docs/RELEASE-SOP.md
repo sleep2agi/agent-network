@@ -18,10 +18,20 @@
 |---|---|---|
 | `@sleep2agi/commhub-server` | `agent-network/bin/cli.ts` `PINNED_SERVER_VERSION` 常量 | code constant（钉死具体版本）|
 | `@sleep2agi/agent-network-dashboard` | `agent-network/bin/cli.ts` `dashboardReleaseTag()` 函数 | code function（默认返回 npm dist-tag `preview`，`ANET_DASHBOARD_VERSION` env 可覆盖）|
+| `@sleep2agi/commhub-server` | `tests/test766-bunx-preflight/run.sh` 里的 `grep -Fxq '@sleep2agi/commhub-server@<版本>'` | **test fixture**（字面量，漏改则 `L0 + L1` 红，且回显看起来像装包失败）|
 
 > commhub-server 走 `PINNED_SERVER_VERSION` 常量（钉死具体版本号，需随 release sync）；dashboard
 > **不钉版本** —— `dashboardReleaseTag()` 默认拉 `@preview` dist-tag，所以 dashboard 发新 preview 后
 > anet 会自动跟随，无需改 cli.ts。两者都属于 release management 数据，**不是业务逻辑**。
+
+> 🔴 **`test766-bunx-preflight` 这一行是 2026-08-27 发 `.33` 时被它拦下来才补进这张表的。**
+> 它验的是「CLI 实际传给 `bunx` 的包版本 == `PINNED_SERVER_VERSION`」，
+> **判据只能是字面量** —— 改成从源码读那个常量就变成同源比较，恒真。
+> 代价是它必须随每次 bump 手工同步；收益是它真的拦住了一次不一致。
+> 🔴 它红的时候**表象具有欺骗性**：CI 只回显 `--bun` 和 `@sleep2agi/commhub-server@<新版本>`
+> 两行（判定行被 `tail -60` 截掉），看起来像「新版本还没发布所以装不上」，
+> 实际是字符串比对不过。**别顺着「装包失败」那条线查。**
+
 
 ::: tip R261 校准：docs 已无 hardcoded npm 版本，移出 Live versions
 R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md` + `agent-node.md` + `sdk-deep-dive.md` + `upgrade.md` + `deploy/npm.md` + `faq.md` 等 user-facing doc 内的 hardcoded npm 版本号（`@2.1.7` / `@2.3.0` / `MiniMax-M2.7` / Bun `>= 1.0` 等）**全部清除**，改成「查 npm latest tag / npm 包页 dist-tags」或 vendor 名（无版本）。原 docs reference 两行（runtimes / agent-node + agent-network 跨 6 doc）当时不再需要 release sync。
