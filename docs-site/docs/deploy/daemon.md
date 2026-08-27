@@ -149,6 +149,49 @@ anet daemon start <name> >> C:\Users\<you>\daemon-<name>.log 2>&1
 2. **别拿启动输出当就绪判据**。判据是 hub 侧：`anet daemon list` 只读本机配置、
    列出来不等于 hub 认得它；要看 hub 的节点状态里 `last_seen_at` 在持续刷新。
 
+### 3.6 让 daemon 能真的创建节点：`ANET_BIN` 钉死 {#anet-bin-pin}
+
+🔴 **daemon 起来 ≠ 能干活。** 第一次通过 hub 让它创建节点时，很可能看到：
+
+```
+[create-node] anet_bin_unsafe_path: no ANET_BIN_ABS resolved
+              (neither /etc/anet-daemon/path.conf nor env)
+```
+
+这是**供应链保护**，不是 bug：daemon 会 fork 出真实进程，所以它拒绝走 `PATH` 去找
+`anet`（`PATH` 可被劫持），只接受一个**钉死并校验过**的绝对路径。校验五条，缺一不可：
+
+| # | 要求 | npm 标准安装下的实际情况 |
+|---|---|---|
+| ① | 绝对路径 | ✅ |
+| ② | 路径中**无 symlink**（`realpath` 等于自身） | ❌ `npm i -g` 装出来的 `bin/anet` 就是 symlink |
+| ③ | 属主 root | ❌ 装在用户目录（nvm / `--prefix ~`）时属主是你 |
+| ④ | **不可被 group/other 写**（`mode & 0o022 == 0`） | ❌ **umask 0002 的机器上 npm 产物是 `775`** |
+| ⑤ | 可执行 | ✅ |
+
+②③④ 三条在「用 nvm 装、机器 umask 0002」这种**很常见**的组合下会同时不满足。
+
+**配法**（先取真实路径，再收紧权限，最后钉死）：
+
+```bash
+BIN=$(readlink -f "$(command -v anet)")   # ② 解掉 symlink，拿到 dist/bin/anet.cjs
+chmod go-w "$BIN"                          # ④ 775 → 755
+stat -c '%a %U %n' "$BIN"                  # 复核：755，属主是你
+
+# 启动 daemon 时钉死它
+ANET_BIN_ABS="$BIN" ANET_DAEMON_ALLOW_NON_ROOT_BIN=1   nohup anet daemon start <name> >> ~/daemon-<name>.log 2>&1 &
+```
+
+- `ANET_DAEMON_ALLOW_NON_ROOT_BIN=1` 是③的显式豁免——**只在你确信该文件只有你能改时用**。
+  root 安装（`sudo npm i -g`）不需要它。
+- 也可以写进 `/etc/anet-daemon/path.conf`（daemon 优先读它），格式见
+  `loadAndVerifyAnetBin` 的 `readPathConf`。想再紧一档可以带 `sha256`：
+  安装时的哈希与运行时不一致会直接拒启动。
+
+**判据**：配好之后，从 hub 发一次 `create_node`，daemon 日志应出现
+`[create-node] spawned child '<name>' pid=…` 和 `+5000ms capability check OK`，
+且新节点自己注册回 hub。**看不到这两行就是没配对**——它不会重试。
+
 ### 4. 确认它真的起来了
 
 ```bash
