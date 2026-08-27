@@ -20,6 +20,28 @@
 | `@sleep2agi/agent-network-dashboard` | `agent-network/bin/cli.ts` `dashboardReleaseTag()` 函数 | code function（默认返回 npm dist-tag `preview`，`ANET_DASHBOARD_VERSION` env 可覆盖）|
 | `@sleep2agi/commhub-server` | `tests/test766-bunx-preflight/run.sh` 里的 `grep -Fxq '@sleep2agi/commhub-server@<版本>'` | **test fixture**（字面量，漏改则 `L0 + L1` 红，且回显看起来像装包失败）|
 
+
+🔴 **「需随 release sync」不等于「跟这次发版一起改」—— 顺序反了会把发版卡死。**
+
+`release-gate` 的 **gate 2** 会拿 `PINNED_SERVER_VERSION` 去 `npm view` 核对**是否已发布**，
+而 `publish` job 要求**四门全绿**（release.yml 的 `if:` 里逐个断言 success）。
+所以**本次要发的那个版本，不能提前写进这个常量** —— 否则发它的那个 run 会被自己的 pin 卡死。
+
+**正确顺序（两步，别合成一步）：**
+
+1. 先发 `commhub-server X`。此时 `PINNED_SERVER_VERSION` 必须仍指向**上一个已发布版本**。
+2. `X` 出现在 npm 上之后，再把常量改成 `X`，随 `agent-network` 一起发。
+
+**2026-08-27 实测代价**：把 `server/package.json` 和 `PINNED_SERVER_VERSION` 在同一个 PR 里
+都提到 `.33`，结果发 `.33` 的 run 挂在
+`gate 2 → PINNED_SERVER_VERSION=0.9.0-preview.33 not published on npm`，`publish` 直接 skipped。
+**tarball 已经构建成功也没用。** 之后要专门开一个 PR 把常量退回 `.32` 才解开。
+
+🔴 **顺带纠正一个当时看起来像缺陷的现象**：如果你发现 main 上
+`PINNED_SERVER_VERSION` 比 `server/package.json` **低一个版本**，
+**那通常是正确状态，不是漏改** —— 它就该滞后到目标版本发布之后。
+（当天有人把这个正常滞后报成了「静默回落」，并"修好"了它，然后被自己修出来的死锁挡住。）
+
 > commhub-server 走 `PINNED_SERVER_VERSION` 常量（钉死具体版本号，需随 release sync）；dashboard
 > **不钉版本** —— `dashboardReleaseTag()` 默认拉 `@preview` dist-tag，所以 dashboard 发新 preview 后
 > anet 会自动跟随，无需改 cli.ts。两者都属于 release management 数据，**不是业务逻辑**。
