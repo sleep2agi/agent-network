@@ -813,8 +813,32 @@ jobs:
           docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
             -t anet-${{ matrix.suite }} \
             -f tests/${{ matrix.suite }}/Dockerfile .
-          docker run --rm --network none -e ARTIFACT_DIR=/tmp/art \
-            anet-${{ matrix.suite }}
+          # #1324: 不用 `docker run --rm` 一行式 —— 本 step 在 set -e 下,docker run 一旦
+          #        非零就立刻中断,后面的 cp 根本不执行,而失败正是唯一需要 artifact 的时刻。
+          #        所以先把退出码收进 rc,取完再原样退出。
+          rc=0
+          docker run --name "run-anet-${{ matrix.suite }}" --network none -e ARTIFACT_DIR=/tmp/art \
+            anet-${{ matrix.suite }} || rc=$?
+          # 每个套件一个子目录:本 job 有多个套件,同名报告直接 cp 进同一层会静默互相覆盖。
+          mkdir -p "$RUNNER_TEMP/suite-artifacts/anet-${{ matrix.suite }}"
+          docker cp "run-anet-${{ matrix.suite }}:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-${{ matrix.suite }}/" 2>/dev/null \
+            || echo "::warning::no artifacts under /tmp/art in anet-${{ matrix.suite }}"
+          docker rm -f "run-anet-${{ matrix.suite }}" >/dev/null 2>&1 || true
+          exit $rc
+
+      # #1324: 本 job 的套件都往 $ARTIFACT_DIR 写报告,但容器带 --rm 时报告随容器一起
+      # 消失 —— 而失败恰恰是唯一需要这些报告的时刻。参照 test225 / hub-orphan-gates(#1328)。
+      - name: Upload artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          # 🔴 matrix job:artifact 名字必须带 matrix.suite。upload-artifact@v4 在
+          #    同一次 run 里遇到重名会**报错**,而本 step 是 `if: failure()` ——
+          #    两条矩阵腿同时红的那一刻,正是唯一需要它的时刻,它却会因为重名而失败。
+          name: artifacts-${{ matrix.suite }}
+          path: ${{ runner.temp }}/suite-artifacts/
+          if-no-files-found: ignore
+
   hub-daemon-gate:
     # 🔴 单独一个 job，不塞进 grok-green-suites —— 那个名字会对它包含的内容说谎。
     #    （改已有 job 的名字会动分支保护里的 required check，风险更高，所以新开。）
@@ -846,8 +870,28 @@ jobs:
           docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
             -t anet-test735-hub-daemon-rebuild \
             -f tests/test735-hub-daemon-rebuild/Dockerfile .
-          docker run --rm --network none -e ARTIFACT_DIR=/tmp/art \
-            anet-test735-hub-daemon-rebuild
+          # #1324: 不用 `docker run --rm` 一行式 —— 本 step 在 set -e 下,docker run 一旦
+          #        非零就立刻中断,后面的 cp 根本不执行,而失败正是唯一需要 artifact 的时刻。
+          #        所以先把退出码收进 rc,取完再原样退出。
+          rc=0
+          docker run --name "run-anet-test735-hub-daemon-rebuild" --network none -e ARTIFACT_DIR=/tmp/art \
+            anet-test735-hub-daemon-rebuild || rc=$?
+          # 每个套件一个子目录:本 job 有多个套件,同名报告直接 cp 进同一层会静默互相覆盖。
+          mkdir -p "$RUNNER_TEMP/suite-artifacts/anet-test735-hub-daemon-rebuild"
+          docker cp "run-anet-test735-hub-daemon-rebuild:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test735-hub-daemon-rebuild/" 2>/dev/null \
+            || echo "::warning::no artifacts under /tmp/art in anet-test735-hub-daemon-rebuild"
+          docker rm -f "run-anet-test735-hub-daemon-rebuild" >/dev/null 2>&1 || true
+          exit $rc
+
+      # #1324: 本 job 的套件都往 $ARTIFACT_DIR 写报告,但容器带 --rm 时报告随容器一起
+      # 消失 —— 而失败恰恰是唯一需要这些报告的时刻。参照 test225 / hub-orphan-gates(#1328)。
+      - name: Upload artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-hub-daemon-gate
+          path: ${{ runner.temp }}/suite-artifacts/
+          if-no-files-found: ignore
 
   private-config-gates:
     # 独立 job：这两个套件守的是**凭据落盘的私有写入边界**，和 grok / hub 都不是一回事，
@@ -869,8 +913,18 @@ jobs:
           docker build --build-arg TEST631_SOURCE_COMMIT="$GITHUB_SHA" \
             -t anet-test631-private-config-permissions \
             -f tests/test631-private-config-permissions/Dockerfile .
-          docker run --rm -e ARTIFACT_DIR=/tmp/art \
-            anet-test631-private-config-permissions
+          # #1324: 不用 `docker run --rm` 一行式 —— 本 step 在 set -e 下,docker run 一旦
+          #        非零就立刻中断,后面的 cp 根本不执行,而失败正是唯一需要 artifact 的时刻。
+          #        所以先把退出码收进 rc,取完再原样退出。
+          rc=0
+          docker run --name "run-anet-test631-private-config-permissions" -e ARTIFACT_DIR=/tmp/art \
+            anet-test631-private-config-permissions || rc=$?
+          # 每个套件一个子目录:本 job 有多个套件,同名报告直接 cp 进同一层会静默互相覆盖。
+          mkdir -p "$RUNNER_TEMP/suite-artifacts/anet-test631-private-config-permissions"
+          docker cp "run-anet-test631-private-config-permissions:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test631-private-config-permissions/" 2>/dev/null \
+            || echo "::warning::no artifacts under /tmp/art in anet-test631-private-config-permissions"
+          docker rm -f "run-anet-test631-private-config-permissions" >/dev/null 2>&1 || true
+          exit $rc
 
       # 自带见证红：MUTATION_RED: env-first-precedence
       - name: Build + run test646-config-node-id-precedence
@@ -878,8 +932,29 @@ jobs:
           docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
             -t anet-test646-config-node-id-precedence \
             -f tests/test646-config-node-id-precedence/Dockerfile .
-          docker run --rm --network none -e ARTIFACT_DIR=/tmp/art \
-            anet-test646-config-node-id-precedence
+          # #1324: 不用 `docker run --rm` 一行式 —— 本 step 在 set -e 下,docker run 一旦
+          #        非零就立刻中断,后面的 cp 根本不执行,而失败正是唯一需要 artifact 的时刻。
+          #        所以先把退出码收进 rc,取完再原样退出。
+          rc=0
+          docker run --name "run-anet-test646-config-node-id-precedence" --network none -e ARTIFACT_DIR=/tmp/art \
+            anet-test646-config-node-id-precedence || rc=$?
+          # 每个套件一个子目录:本 job 有多个套件,同名报告直接 cp 进同一层会静默互相覆盖。
+          mkdir -p "$RUNNER_TEMP/suite-artifacts/anet-test646-config-node-id-precedence"
+          docker cp "run-anet-test646-config-node-id-precedence:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test646-config-node-id-precedence/" 2>/dev/null \
+            || echo "::warning::no artifacts under /tmp/art in anet-test646-config-node-id-precedence"
+          docker rm -f "run-anet-test646-config-node-id-precedence" >/dev/null 2>&1 || true
+          exit $rc
+
+      # #1324: 本 job 的套件都往 $ARTIFACT_DIR 写报告,但容器带 --rm 时报告随容器一起
+      # 消失 —— 而失败恰恰是唯一需要这些报告的时刻。参照 test225 / hub-orphan-gates(#1328)。
+      - name: Upload artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-private-config-gates
+          path: ${{ runner.temp }}/suite-artifacts/
+          if-no-files-found: ignore
+
   security-orphan-gates:
     # 名字说得出它管什么：这四个套件守的是**鉴权 / 凭据下发 / 泄漏清洗**这一族。
     name: auth + secret hygiene (Docker)
@@ -895,7 +970,18 @@ jobs:
         run: |
           docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-test630 \
             -f tests/test630-file-download-header-auth/Dockerfile .
-          docker run --rm -e ARTIFACT_DIR=/tmp/art anet-test630
+          # #1324: 不用 `docker run --rm` 一行式 —— 本 step 在 set -e 下,docker run 一旦
+          #        非零就立刻中断,后面的 cp 根本不执行,而失败正是唯一需要 artifact 的时刻。
+          #        所以先把退出码收进 rc,取完再原样退出。
+          rc=0
+          docker run --name "run-anet-test630" -e ARTIFACT_DIR=/tmp/art \
+            anet-test630 || rc=$?
+          # 每个套件一个子目录:本 job 有多个套件,同名报告直接 cp 进同一层会静默互相覆盖。
+          mkdir -p "$RUNNER_TEMP/suite-artifacts/anet-test630"
+          docker cp "run-anet-test630:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test630/" 2>/dev/null \
+            || echo "::warning::no artifacts under /tmp/art in anet-test630"
+          docker rm -f "run-anet-test630" >/dev/null 2>&1 || true
+          exit $rc
 
       # 它的见证红做的正是 `sed 's/platform === "win32"/false/g'` ——
       # 「把 win32 分支改成恒假会不会被发现」这件事由它守着。
@@ -903,20 +989,63 @@ jobs:
         run: |
           docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-test634 \
             -f tests/test634-windows-secret-guidance/Dockerfile .
-          docker run --rm -e ARTIFACT_DIR=/tmp/art anet-test634
+          # #1324: 不用 `docker run --rm` 一行式 —— 本 step 在 set -e 下,docker run 一旦
+          #        非零就立刻中断,后面的 cp 根本不执行,而失败正是唯一需要 artifact 的时刻。
+          #        所以先把退出码收进 rc,取完再原样退出。
+          rc=0
+          docker run --name "run-anet-test634" -e ARTIFACT_DIR=/tmp/art \
+            anet-test634 || rc=$?
+          # 每个套件一个子目录:本 job 有多个套件,同名报告直接 cp 进同一层会静默互相覆盖。
+          mkdir -p "$RUNNER_TEMP/suite-artifacts/anet-test634"
+          docker cp "run-anet-test634:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test634/" 2>/dev/null \
+            || echo "::warning::no artifacts under /tmp/art in anet-test634"
+          docker rm -f "run-anet-test634" >/dev/null 2>&1 || true
+          exit $rc
 
       - name: Build + run test623-feishu-scrub-health
         run: |
           docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-test623 \
             -f tests/test623-feishu-scrub-health/Dockerfile .
-          docker run --rm -e ARTIFACT_DIR=/tmp/art anet-test623
+          # #1324: 不用 `docker run --rm` 一行式 —— 本 step 在 set -e 下,docker run 一旦
+          #        非零就立刻中断,后面的 cp 根本不执行,而失败正是唯一需要 artifact 的时刻。
+          #        所以先把退出码收进 rc,取完再原样退出。
+          rc=0
+          docker run --name "run-anet-test623" -e ARTIFACT_DIR=/tmp/art \
+            anet-test623 || rc=$?
+          # 每个套件一个子目录:本 job 有多个套件,同名报告直接 cp 进同一层会静默互相覆盖。
+          mkdir -p "$RUNNER_TEMP/suite-artifacts/anet-test623"
+          docker cp "run-anet-test623:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test623/" 2>/dev/null \
+            || echo "::warning::no artifacts under /tmp/art in anet-test623"
+          docker rm -f "run-anet-test623" >/dev/null 2>&1 || true
+          exit $rc
 
       # 它此前 rc=1，红在 Dockerfile 没拷 tests/lib/safe-rm.sh（本 PR 一并补上）。
       - name: Build + run test30-v0.8-auth-deprecation
         run: |
           docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-test30 \
             -f tests/test30-v0.8-auth-deprecation/Dockerfile .
-          docker run --rm -e ARTIFACT_DIR=/tmp/art anet-test30
+          # #1324: 不用 `docker run --rm` 一行式 —— 本 step 在 set -e 下,docker run 一旦
+          #        非零就立刻中断,后面的 cp 根本不执行,而失败正是唯一需要 artifact 的时刻。
+          #        所以先把退出码收进 rc,取完再原样退出。
+          rc=0
+          docker run --name "run-anet-test30" -e ARTIFACT_DIR=/tmp/art \
+            anet-test30 || rc=$?
+          # 每个套件一个子目录:本 job 有多个套件,同名报告直接 cp 进同一层会静默互相覆盖。
+          mkdir -p "$RUNNER_TEMP/suite-artifacts/anet-test30"
+          docker cp "run-anet-test30:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test30/" 2>/dev/null \
+            || echo "::warning::no artifacts under /tmp/art in anet-test30"
+          docker rm -f "run-anet-test30" >/dev/null 2>&1 || true
+          exit $rc
+
+      # #1324: 本 job 的套件都往 $ARTIFACT_DIR 写报告,但容器带 --rm 时报告随容器一起
+      # 消失 —— 而失败恰恰是唯一需要这些报告的时刻。参照 test225 / hub-orphan-gates(#1328)。
+      - name: Upload artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-security-orphan-gates
+          path: ${{ runner.temp }}/suite-artifacts/
+          if-no-files-found: ignore
 
   hub-boundary-gates:
     # 名字说得出它管什么：这三条守的是**生产 DB 边界与 hub 生命周期**。
@@ -950,7 +1079,30 @@ jobs:
           docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
             -t anet-${{ matrix.suite }} \
             -f tests/${{ matrix.suite }}/Dockerfile .
-          docker run --rm -e ARTIFACT_DIR=/tmp/art anet-${{ matrix.suite }}
+          # #1324: 不用 `docker run --rm` 一行式 —— 本 step 在 set -e 下,docker run 一旦
+          #        非零就立刻中断,后面的 cp 根本不执行,而失败正是唯一需要 artifact 的时刻。
+          #        所以先把退出码收进 rc,取完再原样退出。
+          rc=0
+          docker run --name "run-${{ matrix.suite }}" -e ARTIFACT_DIR=/tmp/art \
+            anet-${{ matrix.suite }} || rc=$?
+          mkdir -p "$RUNNER_TEMP/suite-artifacts/${{ matrix.suite }}"
+          docker cp "run-${{ matrix.suite }}:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/${{ matrix.suite }}/" 2>/dev/null \
+            || echo "::warning::no artifacts under /tmp/art in ${{ matrix.suite }}"
+          docker rm -f "run-${{ matrix.suite }}" >/dev/null 2>&1 || true
+          exit $rc
+
+      # #1324: 本 job 的套件都往 $ARTIFACT_DIR 写报告,但容器带 --rm 时报告随容器一起
+      # 消失 —— 而失败恰恰是唯一需要这些报告的时刻。参照 test225 / hub-orphan-gates(#1328)。
+      - name: Upload artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          # 🔴 matrix job:artifact 名字必须带 matrix.suite。upload-artifact@v4 在
+          #    同一次 run 里遇到重名会**报错**,而本 step 是 `if: failure()` ——
+          #    两条矩阵腿同时红的那一刻,正是唯一需要它的时刻,它却会因为重名而失败。
+          name: artifacts-${{ matrix.suite }}
+          path: ${{ runner.temp }}/suite-artifacts/
+          if-no-files-found: ignore
 
   hub-orphan-gates:
     # 名字说得出它管什么：改名规范化 / 登录闸 / daemon 私有状态 / 遗留修复 / 任务证据 / owner 门控调度。
