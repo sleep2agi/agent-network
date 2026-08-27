@@ -46,7 +46,8 @@ export function validateRuntime(s: unknown): asserts s is Runtime {
   }
 }
 
-export function validateModel(s: unknown): asserts s is string {
+export function validateModel(s: unknown): asserts s is string | undefined | null {
+  if (s === undefined || s === null) return;
   if (typeof s !== "string" || s.length === 0 || s.length > 100 || !MODEL_RE.test(s)) {
     throw new ValidationError("model_invalid", { value: typeof s === "string" ? s.slice(0, 80) : typeof s });
   }
@@ -173,7 +174,7 @@ export function validateChannelsP1(channels: unknown): void {
 export interface NodeSpec {
   name: string;
   runtime: Runtime;
-  model: string;
+  model?: string | null;
   flags?: Record<string, unknown>;
   channels?: unknown;
 }
@@ -192,7 +193,8 @@ export function buildAnetArgs(spec: NodeSpec): string[] {
   validateModel(spec.model);
   validateChannelsP1(spec.channels);
 
-  const args: string[] = ["node", "create", spec.name, "--runtime", spec.runtime, "--model", spec.model];
+  const args: string[] = ["node", "create", spec.name, "--runtime", spec.runtime];
+  if (spec.model) args.push("--model", spec.model);
   if (spec.flags && typeof spec.flags === "object") {
     for (const [k, v] of Object.entries(spec.flags)) {
       if (!(FLAG_KEYS as readonly string[]).includes(k)) {

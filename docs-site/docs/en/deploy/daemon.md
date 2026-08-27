@@ -48,6 +48,20 @@ If you need `anet daemon`, switch channels first:
 `npm i -g @sleep2agi/agent-network@preview`.
 :::
 
+### `anet daemon up` pins the anet path used by create_node
+
+When a `host_supervisor` receives `create_node`, it must fork the installed
+`anet` binary. Preview daemon commands resolve the current `anet` launcher to a
+real path and keep the source of that path explicit:
+
+- `/etc/anet-daemon/path.conf` has priority and is the production trust root.
+  If `ANET_BIN_SHA256` is present there, startup requires the current binary hash
+  to match, which catches post-install binary drift.
+- `ANET_BIN_ABS` from the environment is accepted only when
+  `ANET_DAEMON_ALLOW_ENV_BIN=1` is also set. That fallback is for Docker,
+  development, or manual operations convenience; it is not the production trust
+  root.
+
 ## Recommended entry point
 
 Supervise `anet hub start`; do not pin an old `commhub-server` preview in the

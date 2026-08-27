@@ -9,7 +9,7 @@
 // once they hit `anet node start`.
 
 import { execFileSync, spawn } from "node:child_process";
-import { statSync, realpathSync, readFileSync, mkdirSync } from "node:fs";
+import { chmodSync, statSync, realpathSync, readFileSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { isReservedEnvKey } from "../shared/reserved-env.js";
@@ -24,8 +24,8 @@ import {
 // Resolution order (first-match wins):
 //   1. `/etc/anet-daemon/path.conf` (KEY=VALUE format; install scripts
 //      write this on systemd-managed hosts)
-//   2. `ANET_BIN_ABS` env var (container / dev convenience —
-//      Dockerfile sets this at build time)
+//   2. `ANET_BIN_ABS` env var only when `ANET_DAEMON_ALLOW_ENV_BIN=1`
+//      (Docker/dev/manual-ops convenience, not a production trust root)
 //
 // Runtime fork ALWAYS uses the resolved path. Daemon NEVER calls
 // `which anet` or any other PATH lookup. CI lint guard greps
@@ -34,6 +34,14 @@ import {
 interface PathPin {
   abs: string;
   sha256?: string;
+}
+
+function quoteSh(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+function unsafePathHelp(reason: string, fix: string): Error {
+  return new Error(`anet_bin_unsafe_path: ${reason}. Fix: ${fix}`);
 }
 
 function readPathConf(path: string): PathPin | null {
@@ -52,42 +60,69 @@ function readPathConf(path: string): PathPin | null {
 /** §4.2.6 B2 hardened — install-time pin + 5-check (PR #299 BLOCKER #3).
  *  All five gates throw `anet_bin_unsafe_path:<reason>` and fail-fast
  *  the daemon on boot (RFC: better to lose 1 host than fork a poisoned
- *  binary). owner=root is enforced unless an explicit opt-out env var
- *  ANET_DAEMON_ALLOW_NON_ROOT_BIN=1 is set (containers/CI escape hatch
- *  for environments where the binary lives under /usr/local owned by
- *  a non-root user — must be deliberate, not silent). */
+ *  binary). Non-root owners are allowed by default because nvm/homebrew
+ *  installs intentionally place the user's own anet binary outside root
+ *  ownership. */
 export function loadAndVerifyAnetBin(env: NodeJS.ProcessEnv = process.env): string {
   let pin: PathPin | null = null;
   const confPath = env.ANET_DAEMON_PATH_CONF || "/etc/anet-daemon/path.conf";
   pin = readPathConf(confPath);
-  if (!pin && env.ANET_BIN_ABS) {
+  if (!pin && env.ANET_BIN_ABS && env.ANET_DAEMON_ALLOW_ENV_BIN === "1") {
     pin = { abs: env.ANET_BIN_ABS, sha256: env.ANET_BIN_SHA256 };
   }
+  if (!pin && env.ANET_BIN_ABS) {
+    throw unsafePathHelp(
+      "ANET_BIN_ABS env fallback disabled (set ANET_DAEMON_ALLOW_ENV_BIN=1 only for Docker/dev/manual ops; production trust root is /etc/anet-daemon/path.conf)",
+      "install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$(node -e \\\"console.log(require('fs').realpathSync(process.argv[1]))\\\" $(command -v anet))\" | sudo tee /etc/anet-daemon/path.conf >/dev/null",
+    );
+  }
   if (!pin) {
-    throw new Error("anet_bin_unsafe_path: no ANET_BIN_ABS resolved (neither /etc/anet-daemon/path.conf nor env)");
+    throw unsafePathHelp(
+      "no ANET_BIN_ABS resolved from /etc/anet-daemon/path.conf; env fallback is Docker/dev/manual-ops convenience and requires ANET_DAEMON_ALLOW_ENV_BIN=1",
+      "install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$(node -e \\\"console.log(require('fs').realpathSync(process.argv[1]))\\\" $(command -v anet))\" | sudo tee /etc/anet-daemon/path.conf >/dev/null",
+    );
   }
   // ① absolute
   if (!pin.abs.startsWith("/")) {
-    throw new Error(`anet_bin_unsafe_path: not absolute: ${pin.abs}`);
+    throw unsafePathHelp(
+      `not absolute: ${pin.abs}`,
+      `export ANET_BIN_ABS=$(node -e "console.log(require('fs').realpathSync(process.argv[1]))" ${quoteSh(pin.abs)})`,
+    );
   }
   // ② no symlink path component (realpath equals self)
   const real = realpathSync(pin.abs);
   if (real !== pin.abs) {
-    throw new Error(`anet_bin_unsafe_path: contains symlink: ${pin.abs} → ${real}`);
+    throw unsafePathHelp(
+      `contains symlink: ${pin.abs} -> ${real}`,
+      `export ANET_BIN_ABS=${quoteSh(real)}`,
+    );
   }
-  // ③ stat: owner=root (enforced unless explicit opt-out)
-  const st = statSync(pin.abs);
-  const allowNonRoot = env.ANET_DAEMON_ALLOW_NON_ROOT_BIN === "1";
-  if (st.uid !== 0 && !allowNonRoot) {
-    throw new Error(`anet_bin_unsafe_path: owner not root (uid=${st.uid}; set ANET_DAEMON_ALLOW_NON_ROOT_BIN=1 to bypass for non-root install)`);
+  // ③ stat: non-root owner is acceptable for nvm/homebrew/user installs.
+  let st = statSync(pin.abs);
+  if (st.uid !== 0 && env.ANET_DAEMON_STRICT_ROOT_BIN === "1") {
+    throw unsafePathHelp(
+      `owner not root (uid=${st.uid})`,
+      `sudo chown root:root ${quoteSh(pin.abs)} || unset ANET_DAEMON_STRICT_ROOT_BIN`,
+    );
   }
   // ④ not group/other writable
   if ((st.mode & 0o022) !== 0) {
-    throw new Error(`anet_bin_unsafe_path: writable by group/other (mode=${(st.mode & 0o777).toString(8)})`);
+    const before = (st.mode & 0o777).toString(8);
+    try {
+      console.warn(`[create-node] anet binary is group/other writable (mode=${before}); running chmod go-w ${pin.abs}`);
+      chmodSync(pin.abs, st.mode & ~0o022);
+      st = statSync(pin.abs);
+      console.warn(`[create-node] chmod go-w OK: mode=${(st.mode & 0o777).toString(8)}`);
+    } catch (e: any) {
+      throw unsafePathHelp(
+        `writable by group/other (mode=${before})`,
+        `chmod go-w ${quoteSh(pin.abs)}`,
+      );
+    }
   }
   // ⑤ executable
   if ((st.mode & 0o111) === 0) {
-    throw new Error(`anet_bin_unsafe_path: not executable`);
+    throw unsafePathHelp(`not executable`, `chmod +x ${quoteSh(pin.abs)}`);
   }
   // hash match install-time witness (when provided, REQUIRED to match)
   if (pin.sha256) {
@@ -205,7 +240,7 @@ export function validateFlagValueDaemon(k: string, v: unknown): void {
 export interface DaemonNodeSpec {
   name: string;
   runtime: string;
-  model: string;
+  model?: string | null;
   flags?: Record<string, unknown>;
   channels?: unknown;
 }
@@ -215,9 +250,11 @@ function kebab(k: string): string { return k.replace(/([A-Z])/g, "-$1").toLowerC
 export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
   if (!spec.name || !NAME_RE.test(spec.name)) throw new Error("node_name_invalid");
   if (!VALID_RUNTIMES.has(spec.runtime)) throw new Error("runtime_invalid");
-  if (!spec.model || spec.model.length > 100 || !MODEL_RE.test(spec.model)) throw new Error("model_invalid");
+  if (spec.model !== undefined && spec.model !== null &&
+      (spec.model.length === 0 || spec.model.length > 100 || !MODEL_RE.test(spec.model))) throw new Error("model_invalid");
   if (Array.isArray(spec.channels) && spec.channels.length > 0) throw new Error("channels_not_supported_in_p1");
-  const args: string[] = ["node", "create", spec.name, "--runtime", spec.runtime, "--model", spec.model];
+  const args: string[] = ["node", "create", spec.name, "--runtime", spec.runtime];
+  if (spec.model) args.push("--model", spec.model);
   for (const [k, v] of Object.entries(spec.flags || {})) {
     if (!["permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout"].includes(k)) {
       throw new Error(`flag_key_unknown:${k}`);
@@ -370,7 +407,7 @@ export async function handleCreateNodeDoorbell(
       node_name: req.node_spec.name,
       alias: req.node_spec.name,
       runtime: req.node_spec.runtime,
-      model: req.node_spec.model,
+      ...(req.node_spec.model ? { model: req.node_spec.model } : {}),
       hub: deps.hubUrl,
       token: req.child_token,
       ...(Object.keys(flagsObj).length ? { flags: flagsObj } : {}),
@@ -386,11 +423,14 @@ export async function handleCreateNodeDoorbell(
   }
   void args;     // args validated; we'll use them on Phase 2 follow-up if anet node create lands an --unattended flag
   if (req.env_blob && Object.keys(req.env_blob).length > 0) {
-    const envFile = join(deps.workDir, ".anet", "nodes", req.node_spec.name, ".env.local");
+    // `anet node start` sources per-node dotenv from `.anet/nodes/<name>/.env`.
+    // Keep daemon-created children on that same contract so restart respawns
+    // see the same env the daemon minted at create time.
+    const envFile = join(deps.workDir, ".anet", "nodes", req.node_spec.name, ".env");
     try {
       atomicWritePrivateText(envFile, deps.serializeEnvLocal(req.env_blob));
     } catch (e: any) {
-      deps.warn(`[create-node] env.local write failed: ${e?.message || e}`);
+      deps.warn(`[create-node] env write failed: ${e?.message || e}`);
       // not fatal — proceed to start; hub will see status=succeeded but
       // child might fail on first vendor call. Acceptable for P1.
     }

@@ -44,6 +44,36 @@ Unknown command "daemon". Did you mean: anet demo?
 需要 `anet daemon` 的话,先切到 preview 通道:`npm i -g @sleep2agi/agent-network@preview`。
 :::
 
+### `anet daemon up` 会自备 create_node 所需的 anet 路径
+
+`host_supervisor` 收到 `create_node` 后必须 fork 当前安装的 `anet`。从 preview 版本起,
+`anet daemon init` / `start` / `up` 会在启动时自动:
+
+1. 拒绝 Windows daemon 模式,避免 POSIX-only 路径和权限检查在创建节点时才失败。
+2. 把当前 `anet` 启动器 `realpath` 成实体文件,并写入 `/etc/anet-daemon/path.conf` 作为生产信任根。
+3. 分开诊断未解析、非绝对路径、symlink 路径、组/其他用户可写、不可执行等问题。
+4. 对 `npm i -g` 在 `umask 0002` 下常见的 `775`/组可写安装自动执行 `chmod go-w`。
+5. 默认接受 nvm/homebrew/npm 的非 root 用户安装,因为那就是用户自己的二进制。
+
+`anet` 路径来源有明确优先级:
+
+- `/etc/anet-daemon/path.conf` 优先,是生产 trust root。可选的 `ANET_BIN_SHA256`
+  如果写入,启动时必须匹配,用于防止安装后启动器被替换。
+- `ANET_BIN_ABS` 环境变量只在 `ANET_DAEMON_ALLOW_ENV_BIN=1` 时生效。它是
+  Docker、开发环境或手工运维的便利通道,不是生产 trust root；生产部署应写
+  `/etc/anet-daemon/path.conf`。
+
+因此干净机器的预期路径是:
+
+```bash
+npm i -g @sleep2agi/agent-network@preview
+anet login
+anet daemon up
+```
+
+如果安全检查仍失败,CLI 会打印一行可直接照敲的修复命令;不要手工编辑未入库的服务器
+启动文件来绕过它。
+
 ## 推荐入口
 
 守护 `anet hub start`，不要在配置里钉死 `commhub-server` 的 preview 版本。

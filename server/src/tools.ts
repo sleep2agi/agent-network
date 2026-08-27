@@ -2840,7 +2840,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       node_spec: z.object({
         name: z.string().min(1).max(64),
         runtime: z.string().min(1).max(64),
-        model: z.string().min(1).max(100),
+        model: z.string().min(1).max(100).optional().nullable(),
         flags: z.record(z.unknown()).optional(),
         env_refs: z.array(z.string().max(64)).optional(),
         channels: z.array(z.unknown()).optional(),
@@ -2996,7 +2996,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', ?9, ?10, ?11)`,
         [
           requestId, daemon_node_id, node_spec.name, networkIdForChild,
-          node_spec.runtime, node_spec.model, JSON.stringify(node_spec.flags || {}),
+          node_spec.runtime, node_spec.model ?? null, JSON.stringify(node_spec.flags || {}),
           JSON.stringify(envKeys), childTokenId, Date.now(), callerTokenId || "unknown",
         ],
       );
@@ -3016,7 +3016,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           daemon_node_id,
           child_name: node_spec.name,
           runtime: node_spec.runtime,
-          model: node_spec.model,
+          model: node_spec.model ?? null,
           flag_keys: Object.keys(node_spec.flags || {}),
           env_keys: envKeys,
         },
@@ -3080,7 +3080,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "env_blob_unavailable" }) }] };
       }
       // Hydrate spec from row.
-      const specRow = db.get<{ child_name: string; runtime: string; model: string; flags_json: string }>(
+      const specRow = db.get<{ child_name: string; runtime: string; model: string | null; flags_json: string }>(
         `SELECT child_name, runtime, model, flags_json FROM node_create_requests WHERE request_id = ?1`,
         request_id,
       );

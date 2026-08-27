@@ -6,9 +6,10 @@ import {
   loadAndVerifyAnetBin,
   ensureGlobalAnetConfig,
 } from "./create-node-daemon.js";
-import { writeFileSync, mkdirSync, symlinkSync, chmodSync, unlinkSync, rmSync, readFileSync, statSync } from "node:fs";
+import { writeFileSync, mkdirSync, symlinkSync, chmodSync, chownSync, unlinkSync, rmSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
+import { handleCreateNodeDoorbell } from "./create-node-daemon.js";
 
 describe("#633 daemon private state", () => {
   const fixture = "/tmp/anet-test633-daemon-private";
@@ -45,6 +46,92 @@ describe("#633 daemon private state", () => {
     expect(readFileSync(victim, "utf8")).toBe('{"sentinel":"unchanged"}\n');
     rmSync(fixture, { recursive: true, force: true });
   });
+});
+
+describe("daemon-created child config/env paths", () => {
+  const fixture = "/tmp/anet-daemon-child-path-test";
+
+  test("writes child config and dotenv into the directory anet node start resolves", async () => {
+    rmSync(fixture, { recursive: true, force: true });
+    const binDir = join(fixture, "bin");
+    const workDir = join(fixture, "work");
+    mkdirSync(binDir, { recursive: true, mode: 0o700 });
+    mkdirSync(workDir, { recursive: true, mode: 0o700 });
+
+    const anetBin = join(binDir, "anet");
+    const spawnLog = join(fixture, "spawn.log");
+    writeFileSync(
+      anetBin,
+      `#!/bin/sh\nprintf '%s\\n' "$PWD|$*" >> ${JSON.stringify(spawnLog)}\nsleep 10\n`,
+      { mode: 0o755 },
+    );
+
+    const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+    const prevAnetBinAbs = process.env.ANET_BIN_ABS;
+    const prevAllowEnvBin = process.env.ANET_DAEMON_ALLOW_ENV_BIN;
+    const prevAllowNonRoot = process.env.ANET_DAEMON_ALLOW_NON_ROOT_BIN;
+    process.env.ANET_BIN_ABS = anetBin;
+    process.env.ANET_DAEMON_ALLOW_ENV_BIN = "1";
+    process.env.ANET_DAEMON_ALLOW_NON_ROOT_BIN = "1";
+    try {
+      await handleCreateNodeDoorbell({ request_id: "cr_path_contract" }, {
+        workDir,
+        hubUrl: "http://hub.test",
+        log: () => {},
+        warn: () => {},
+        serializeEnvLocal: (env) => Object.entries(env).map(([k, v]) => `${k}="${v}"\n`).join(""),
+        callCommHub: async (tool, args) => {
+          calls.push({ tool, args });
+          if (tool === "get_create_request") {
+            return {
+              ok: true,
+              request_id: "cr_path_contract",
+              child_token: "ntok_child_path_contract",
+              node_spec: {
+                name: "child-path",
+                runtime: "claude-agent-sdk",
+                model: "claude-opus-path",
+                flags: { maxTurns: 7 },
+              },
+              env_blob: { ANTHROPIC_API_KEY: "secret-value" },
+            };
+          }
+          if (tool === "ack_create_request") return { ok: true };
+          throw new Error(`unexpected tool ${tool}`);
+        },
+      });
+    } finally {
+      if (prevAnetBinAbs === undefined) delete process.env.ANET_BIN_ABS;
+      else process.env.ANET_BIN_ABS = prevAnetBinAbs;
+      if (prevAllowEnvBin === undefined) delete process.env.ANET_DAEMON_ALLOW_ENV_BIN;
+      else process.env.ANET_DAEMON_ALLOW_ENV_BIN = prevAllowEnvBin;
+      if (prevAllowNonRoot === undefined) delete process.env.ANET_DAEMON_ALLOW_NON_ROOT_BIN;
+      else process.env.ANET_DAEMON_ALLOW_NON_ROOT_BIN = prevAllowNonRoot;
+    }
+
+    const nodeDir = join(workDir, ".anet", "nodes", "child-path");
+    const cfg = JSON.parse(readFileSync(join(nodeDir, "config.json"), "utf8"));
+    expect(cfg).toMatchObject({
+      node_id: "node_path_contract",
+      node_name: "child-path",
+      alias: "child-path",
+      runtime: "claude-agent-sdk",
+      model: "claude-opus-path",
+      hub: "http://hub.test",
+      token: "ntok_child_path_contract",
+      flags: { maxTurns: 7 },
+    });
+    expect(readFileSync(join(nodeDir, ".env"), "utf8")).toContain('ANTHROPIC_API_KEY="secret-value"');
+    expect(() => statSync(join(nodeDir, ".env.local"))).toThrow();
+    expect(readFileSync(spawnLog, "utf8")).toContain(`${workDir}|node start child-path`);
+    const ack = calls.find((c) => c.tool === "ack_create_request");
+    expect(ack?.args.status).toBe("started");
+    if (typeof ack?.args.child_pid === "number") {
+      try { process.kill(ack.args.child_pid, "SIGKILL"); } catch {}
+    }
+
+    rmSync(fixture, { recursive: true, force: true });
+  }, 12_000);
 });
 
 describe("§4.2.2 daemon-side flag VALUE validator (BLOCKER #2 — defense in depth)", () => {
@@ -101,6 +188,18 @@ describe("buildAnetArgsDaemon now reaches flag value validation", () => {
     expect(args[args.indexOf("--budget") + 1]).toBe("5.5");
     expect(args[args.indexOf("--permission-mode") + 1]).toBe("plan");
   });
+  test("omitted model is allowed and does not emit --model", () => {
+    const args = buildAnetArgsDaemon({
+      name: "x", runtime: "claude-agent-sdk",
+      flags: { maxTurns: 50 },
+    });
+    expect(args).toEqual(["node", "create", "x", "--runtime", "claude-agent-sdk", "--max-turns", "50"]);
+  });
+  test("empty model is still rejected", () => {
+    expect(() => buildAnetArgsDaemon({
+      name: "x", runtime: "claude-agent-sdk", model: "",
+    })).toThrow(/model_invalid/);
+  });
   test("smuggled string maxTurns rejected by daemon even if hub missed", () => {
     expect(() => buildAnetArgsDaemon({
       name: "x", runtime: "claude-agent-sdk", model: "x",
@@ -151,6 +250,7 @@ describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER 
     const got = loadAndVerifyAnetBin({
       ANET_BIN_ABS: p,
       ANET_BIN_SHA256: expectedHash,
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
       ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",  // test runs as non-root
     });
     expect(got).toBe(p);
@@ -163,10 +263,46 @@ describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER 
     })).toThrow(/anet_bin_unsafe_path.*no ANET_BIN_ABS/);
   });
 
+  test("REJECT: ANET_BIN_ABS env fallback without explicit opt-in", () => {
+    cleanup();
+    const p = setup("env-fallback-disabled");
+    expect(() => loadAndVerifyAnetBin({
+      ANET_BIN_ABS: p,
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+    })).toThrow(/ANET_BIN_ABS env fallback disabled.*ANET_DAEMON_ALLOW_ENV_BIN=1/);
+    cleanup();
+  });
+
+  test("ACCEPT: ANET_BIN_ABS env fallback when explicitly opted in", () => {
+    cleanup();
+    const p = setup("env-fallback-enabled");
+    expect(loadAndVerifyAnetBin({
+      ANET_BIN_ABS: p,
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+    })).toBe(p);
+    cleanup();
+  });
+
+  test("path.conf wins over ANET_BIN_ABS env fallback", () => {
+    cleanup();
+    const confBin = setup("conf-bin");
+    const envBin = setup("env-bin");
+    const conf = join(FIXTURE_DIR, "path.conf");
+    writeFileSync(conf, `ANET_BIN_ABS=${confBin}\n`);
+    expect(loadAndVerifyAnetBin({
+      ANET_DAEMON_PATH_CONF: conf,
+      ANET_BIN_ABS: envBin,
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
+    })).toBe(confBin);
+    cleanup();
+  });
+
   test("REJECT: relative path", () => {
     expect(() => loadAndVerifyAnetBin({
       ANET_BIN_ABS: "anet",
       ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
     })).toThrow(/anet_bin_unsafe_path.*not absolute/);
   });
 
@@ -179,32 +315,37 @@ describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER 
     expect(() => loadAndVerifyAnetBin({
       ANET_BIN_ABS: symlinkPath,
       ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
       ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
     })).toThrow(/anet_bin_unsafe_path.*symlink/);
     cleanup();
   });
 
-  test("REJECT: world-writable (mode 0o777)", () => {
+  test("REPAIR: world-writable (mode 0o777) via chmod go-w", () => {
     cleanup();
     const p = setup("world-writable");
     chmodSync(p, 0o777);
     expect(() => loadAndVerifyAnetBin({
       ANET_BIN_ABS: p,
       ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
       ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
-    })).toThrow(/anet_bin_unsafe_path.*writable by group\/other/);
+    })).not.toThrow();
+    expect(statSync(p).mode & 0o022).toBe(0);
     cleanup();
   });
 
-  test("REJECT: group-writable (mode 0o775)", () => {
+  test("REPAIR: group-writable (mode 0o775) via chmod go-w", () => {
     cleanup();
     const p = setup("group-writable");
     chmodSync(p, 0o775);
     expect(() => loadAndVerifyAnetBin({
       ANET_BIN_ABS: p,
       ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
       ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
-    })).toThrow(/anet_bin_unsafe_path.*writable by group\/other/);
+    })).not.toThrow();
+    expect(statSync(p).mode & 0o022).toBe(0);
     cleanup();
   });
 
@@ -215,31 +356,36 @@ describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER 
     expect(() => loadAndVerifyAnetBin({
       ANET_BIN_ABS: p,
       ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
       ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
     })).toThrow(/anet_bin_unsafe_path.*not executable/);
     cleanup();
   });
 
-  test("REJECT: owner not root (no opt-out)", () => {
+  test("ACCEPT: owner not root by default for nvm/homebrew/user installs", () => {
     cleanup();
     const p = setup("non-root-owner");
     // test runs as non-root by default; owner=current uid (not 0)
     expect(() => loadAndVerifyAnetBin({
       ANET_BIN_ABS: p,
       ANET_DAEMON_PATH_CONF: "/nonexistent",
-      // ANET_DAEMON_ALLOW_NON_ROOT_BIN intentionally NOT set
-    })).toThrow(/anet_bin_unsafe_path.*owner not root/);
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
+    })).not.toThrow();
     cleanup();
   });
 
-  test("ACCEPT: owner not root WHEN ANET_DAEMON_ALLOW_NON_ROOT_BIN=1 (explicit opt-out)", () => {
+  test("REJECT: owner not root only when strict root mode is explicitly requested", () => {
     cleanup();
-    const p = setup("explicit-non-root");
+    const p = setup("strict-non-root");
+    if (typeof process.getuid === "function" && process.getuid() === 0) {
+      chownSync(p, 65534, 65534);
+    }
     expect(() => loadAndVerifyAnetBin({
       ANET_BIN_ABS: p,
       ANET_DAEMON_PATH_CONF: "/nonexistent",
-      ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
-    })).not.toThrow();
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
+      ANET_DAEMON_STRICT_ROOT_BIN: "1",
+    })).toThrow(/anet_bin_unsafe_path.*owner not root/);
     cleanup();
   });
 
@@ -251,6 +397,7 @@ describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER 
       ANET_BIN_ABS: p,
       ANET_BIN_SHA256: installTimeHash,
       ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
       ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
     })).toThrow(/anet_bin_unsafe_path.*sha256 mismatch/);
     cleanup();
