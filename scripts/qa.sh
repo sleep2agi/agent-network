@@ -383,6 +383,7 @@ if [[ $RUN_L1 -eq 1 ]]; then
   # 这个洞是写完上面那段校验之后、跑对照表时才发现的(用例里放了 08)。
   QA_L1_MAX_PAR=$((10#$QA_L1_MAX_PAR))
   note "L1 并发上限 = ${QA_L1_MAX_PAR}(0 = 不限;用 QA_L1_MAX_PAR 覆盖)"
+  rm -f /tmp/qa-l1-timing.tsv
   pids=()
   declare -A pid_to_test
   for t in "${L1_TESTS[@]}"; do
@@ -453,22 +454,60 @@ if [[ $RUN_L1 -eq 1 ]]; then
       (( live < QA_L1_MAX_PAR )) && break
       sleep 0.2
     done
-    (dockerrun "docker run --rm anet-$t" >/tmp/qa-l1-$t-run.log 2>&1) &
+    # #1333: 每个套件记下**相对 L1 起点的开始/结束偏移**。
+    #
+    # 为什么记偏移而不只记时长:失败分析要回答的是「炸在第几分钟」——
+    # 实测同一个 job 内 L0 时刻 CI/本机 ≈5.6x,而 L2 时刻至少 8.8x
+    # (由「它撞了 5000ms hook 预算」反推)。也就是说**机器在一次 job 内越跑越慢**,
+    # 只看时长看不出这条曲线,只有偏移能。
+    #
+    # 🔴 由子进程自己记,不在 wait 处记:`wait` 按 pids 数组顺序返回、
+    #    **不按完成顺序**。在 wait 返回时取 date,先完成的套件会被记上
+    #    「它前面那个慢套件的结束时刻」—— 数字看起来完全正常,只是错的。
+    (
+      _s=$(( $(date +%s) - START ))
+      dockerrun "docker run --rm anet-$t" >/tmp/qa-l1-$t-run.log 2>&1
+      _rc=$?
+      printf '%s\t%s\t%s\n' "$t" "$_s" "$(( $(date +%s) - START ))" >> /tmp/qa-l1-timing.tsv
+      exit $_rc
+    ) &
     pid=$!
     pids+=("$pid")
     pid_to_test["$pid"]="$t"
   done
 
+  # #1333: 从子进程写的 TSV 里取每个套件的偏移。取不到就留空,不编数字。
+  _l1_window() {
+    local _t="$1" _line
+    # 🔴 用 awk 精确比字段,不用 `grep -P "^\Q…\E\t"`:
+    #    -P 和 \Q\E 是 GNU grep 扩展。本脚本会被 test823 在一个只装
+    #    bash/coreutils/procps 的容器里重放(见本文件上面那条注释),那里未必有。
+    #    退化行为是「安静地取不到时间」而不是报错,但那正是最难发现的一种坏 ——
+    #    输出少了一段,谁也不会注意到。awk 是字段比较,不涉及正则方言。
+    _line=$(awk -F'\t' -v t="$_t" '$1==t{last=$0} END{if(last)print last}' /tmp/qa-l1-timing.tsv 2>/dev/null || true)
+    [ -z "$_line" ] && return 0
+    local _a _b
+    _a=$(printf '%s' "$_line" | cut -f2); _b=$(printf '%s' "$_line" | cut -f3)
+    printf 'L1+%ss..%ss, %ss' "$_a" "$_b" "$(( _b - _a ))"
+  }
   for pid in "${pids[@]}"; do
     t="${pid_to_test[$pid]}"
+    _w=$(_l1_window "$t")
     if wait "$pid"; then
-      ok "L1 $t ($(tail -1 /tmp/qa-l1-$t-run.log))"
+      ok "L1 $t ($(tail -1 /tmp/qa-l1-$t-run.log))${_w:+ [$_w]}"
     else
-      fail "L1 $t — see /tmp/qa-l1-$t-run.log"
+      fail "L1 $t — see /tmp/qa-l1-$t-run.log${_w:+ [$_w]}"
       tail -10 /tmp/qa-l1-$t-run.log | sed 's/^/    /'
       FAILED=$((FAILED+1))
     fi
   done
+  # 汇总一张按开始偏移排序的表:红的时候一眼看出「它排在第几批、L1 跑了多久时炸的」。
+  if [ -s /tmp/qa-l1-timing.tsv ]; then
+    echo
+    echo "L1 时间线（相对 L1 起点，按开始偏移排序）— #1333"
+    sort -t$'\t' -k2,2n /tmp/qa-l1-timing.tsv \
+      | awk -F'\t' '{printf "  +%4ds .. +%4ds  (%3ds)  %s\n", $2, $3, $3-$2, $1}'
+  fi
 fi
 
 ELAPSED=$(( $(date +%s) - START ))
