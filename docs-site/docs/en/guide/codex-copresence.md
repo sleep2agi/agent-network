@@ -97,6 +97,10 @@ anet node stop codex-human
 
 The stop path uses a persistent identity marker to reap all three sessions and their children. Calling `stop` from inside the co-presence session fails closed so it cannot kill the caller's own shell.
 
+::: info macOS stop guarantee
+macOS uses the same startup, attachment, and TUI co-presence path as Linux, but P3 process-identity teardown depends on Linux `/proc`, so stopping on macOS degrades to the legacy sweep. The feature remains usable, but cleanup is less strongly guaranteed than on Linux. Run `anet node stop` outside the co-presence process tree and confirm that all three tmux sessions have exited.
+:::
+
 ::: danger Stop the old process tree before recovery
 The node profile remembers co-presence, so plain `anet node start codex-human` re-enters co-presence orchestration rather than downgrading to a headless node. Do not start again while an old bridge survives. From an external shell, stop the old tree, clear every `COMMHUB_*` variable, and restart with:
 

@@ -96,6 +96,10 @@ anet node stop codex-human
 
 停止流程会用持久身份标记收拢这三个 session 及其子进程；从共存 session 内调用 `stop` 会 fail closed，避免把当前 shell 一起杀掉。
 
+::: info macOS 的停止保障差异
+macOS 的启动、连接与 TUI 共存路径和 Linux 相同，但 P3 进程身份清理依赖 Linux `/proc`，因此 macOS 停止时会降级为 legacy sweep。功能仍可用，但清理保证弱于 Linux；请从共存进程树外运行 `anet node stop`，并确认三个 tmux session 都已退出。
+:::
+
 ::: danger 断线恢复要先停止旧进程树
 节点配置会记住共存模式，因此普通 `anet node start codex-human` 会重新进入共存编排，不会降级成无头节点。但在旧 bridge 仍存活时不要直接再启动；应在外部 shell 中先停止旧树、清空 `COMMHUB_*`，再运行：
 

@@ -45,7 +45,7 @@ cp /tmp/agent-node-cli.ts agent-node/src/cli.ts
 
 cp agent-network/bin/cli.ts /tmp/agent-network-cli.ts
 bun /mutate.ts agent-network/bin/cli.ts \
-  'if (!await waitForFileText(bridgeLog, "[codex-app-server] shared bridge ready", 25_000)) {' \
+  'if (!await waitForFileText(bridgeLog, bridgeReceipt, 25_000)) {' \
   'if (false) {'
 expect_red tui-cannot-open-before-bridge-ready bun test agent-network/src/windows-codex-copresence.test.ts
 cp /tmp/agent-network-cli.ts agent-network/bin/cli.ts

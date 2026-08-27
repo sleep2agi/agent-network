@@ -33,6 +33,7 @@ on:
       - 'tests/test1212-windows-real-codex-gate/**'
       - '.github/workflows/windows-real-codex-gate.yml'
       - 'tests/test1191-windows-steer-contract/**'
+      - 'tests/test1220-codex-tui-client-health/**'
       - 'tests/test1183-sync-pinned-dryrun/**'
       - 'tests/test1193-side-thread-contract/**'
       - 'tests/test1195-side-thread-hub-contract/**'
@@ -199,6 +200,7 @@ on:
       - 'tests/test1212-windows-real-codex-gate/**'
       - '.github/workflows/windows-real-codex-gate.yml'
       - 'tests/test1191-windows-steer-contract/**'
+      - 'tests/test1220-codex-tui-client-health/**'
       # A test directory belongs here exactly when CI executes it — otherwise
       # editing the test cannot re-run the gate that runs it. The four below are
       # reached through scripts/qa.sh L1_TESTS and the e2e workflow; the other
@@ -918,6 +920,7 @@ jobs:
           - test698-atomic-peer-reply
           - test750-codex-copresence-onecommand
           - test1191-windows-steer-contract
+          - test1220-codex-tui-client-health
           - test1178-codex-upgrade-recovery
           - test736-pm2-fleet-rebuild
     steps:

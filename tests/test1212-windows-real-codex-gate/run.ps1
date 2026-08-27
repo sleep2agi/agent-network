@@ -29,8 +29,11 @@ try {
   # Static resolution only: no package-controlled script may execute before
   # both the launcher and its one canonical vendor binary are allowlisted.
   $cmdText = Get-Content -LiteralPath $codexCmd -Raw
-  $cmdMatches = [regex]::Matches($cmdText, '(?i)%~?dp0\\\.\.\\@openai\\codex\\bin\\codex\.js')
-  $cmdTargets = @($cmdMatches | ForEach-Object { $_.Value.ToLowerInvariant().Replace('%~dp0', '%dp0') } | Sort-Object -Unique)
+  # npm cmd-shim historically emitted %~dp0 directly; current cmd-shim first
+  # stores it in dp0 and emits %dp0%. Accept only those two exact spellings,
+  # normalize them to one identity, and still reject zero/multiple launchers.
+  $cmdMatches = [regex]::Matches($cmdText, '(?i)(?:%~dp0|%dp0%)\\\.\.\\@openai\\codex\\bin\\codex\.js')
+  $cmdTargets = @($cmdMatches | ForEach-Object { $_.Value.ToLowerInvariant().Replace('%~dp0', '%dp0%') } | Sort-Object -Unique)
   if ($cmdTargets.Count -ne 1) { throw "codex.cmd does not name one canonical launcher" }
   $launcher = [IO.Path]::GetFullPath((Join-Path (Split-Path $codexCmd) "..\@openai\codex\bin\codex.js"))
   $expectedLauncher = [IO.Path]::GetFullPath((Join-Path $codexInstall "node_modules\@openai\codex\bin\codex.js"))

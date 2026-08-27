@@ -17,6 +17,7 @@ function audit(w, r, j, e) {
   const removeSecret = r.indexOf("Remove-Item Env:ANET_CODEX_AUTH_JSON"), npmInstall = r.indexOf("npm install --prefix"), writeAuth = r.indexOf("[IO.File]::WriteAllText"), gate = r.indexOf("Codex executable hash is outside trusted allowlist");
   requireContract(removeSecret >= 0 && removeSecret < npmInstall && npmInstall < writeAuth, "credential crosses npm boundary");
   requireContract(gate >= 0 && r.indexOf("& $codexCmd") > gate, "Codex executed before allowlist");
+  requireContract(r.includes("(?:%~dp0|%dp0%)"), "current npm cmd-shim canonical launcher form unsupported");
   requireContract(!/Get-ChildItem[^\n]+-Recurse|Select-Object -First/i.test(r), "vendor decoy accepted");
   requireContract(/thread\/read/.test(j) && /pollCompletedAssistant/.test(j), "authoritative bounded read missing");
   requireContract(!/output\.match\(new RegExp\(marker/.test(j), "ConPTY redraw accepted");
@@ -32,6 +33,7 @@ const mutations = [
   ["weak environment", replaceRequired(workflow, 'select(.type == "required_reviewers")', 'select(.type == "wait_timer")', "environment"), runner, journey, evidence],
   ["secret during npm", workflow, replaceRequired(runner, "Remove-Item Env:ANET_CODEX_AUTH_JSON", "# removed", "secret"), journey, evidence],
   ["prehash execution", workflow, replaceRequired(runner, "$codexInstall =", "& $codexCmd --version\n  $codexInstall =", "prehash"), journey, evidence],
+  ["new cmd-shim form", workflow, replaceRequired(runner, "(?:%~dp0|%dp0%)", "%~dp0", "cmd-shim"), journey, evidence],
   ["vendor decoy", workflow, replaceRequired(runner, "$vendorPath =", "Get-ChildItem $codexInstall -Recurse | Select-Object -First 1\n  $vendorPath =", "decoy"), journey, evidence],
   ["ConPTY redraw", workflow, runner, replaceRequired(journey, "if (!injected", "if ((output.match(new RegExp(marker, 'g')) || []).length >= 2) activeTurnId='redraw';\n if (!injected", "redraw"), evidence],
   ["no authoritative read", workflow, runner, replaceRequired(journey, "thread/read", "screen/read", "read"), evidence],

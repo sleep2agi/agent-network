@@ -13,9 +13,10 @@ export interface WindowsManagedProcess {
 }
 
 export interface WindowsCopresenceRecord {
-  version: 1;
+  version: 1 | 2;
   nodeId: string;
   createdAt: string;
+  marker?: string;
   processes: WindowsManagedProcess[];
 }
 
@@ -54,15 +55,48 @@ export function probeWindowsCreationDate(pid: number): string | null {
   } catch { return null; }
 }
 
+/**
+ * Attribute an ESTABLISHED loopback connection to the launched TUI process
+ * tree. This is deliberately stronger than counting listeners/connections:
+ * an unrelated local client cannot satisfy it.
+ */
+export function probeWindowsOwnedLoopbackConnection(
+  rootPid: number,
+  expectedCreationDate: string,
+  port: number,
+  runPowerShell: (script: string) => string = (script) => execFileSync(
+    "powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script],
+    { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true },
+  ),
+): boolean {
+  if (!Number.isInteger(rootPid) || rootPid <= 0 || !/^\d+$/.test(expectedCreationDate)
+    || !Number.isInteger(port) || port < 1 || port > 65535) return false;
+  try {
+    const script = [
+      `$birth='${expectedCreationDate}'`,
+      `$before=try{[Diagnostics.Process]::GetProcessById(${rootPid}).StartTime.ToUniversalTime().Ticks.ToString()}catch{''}`,
+      "if($before-ne$birth){'false';exit 0}",
+      `$ids=[Collections.Generic.HashSet[int]]::new();[void]$ids.Add(${rootPid})`,
+      "do{$n=0;Get-CimInstance Win32_Process|%{if($ids.Contains([int]$_.ParentProcessId)-and $ids.Add([int]$_.ProcessId)){$n++}}}while($n-gt 0)",
+      `$hit=Get-NetTCPConnection -State Established -RemoteAddress 127.0.0.1 -RemotePort ${port} -ErrorAction SilentlyContinue|?{$ids.Contains([int]$_.OwningProcess)}`,
+      `$after=try{[Diagnostics.Process]::GetProcessById(${rootPid}).StartTime.ToUniversalTime().Ticks.ToString()}catch{''}`,
+      "if($hit-and$after-eq$birth){'true'}else{'false'}",
+    ].join(";");
+    return runPowerShell(script).trim() === "true";
+  } catch { return false; }
+}
+
 export function writeWindowsCopresenceRecord(
   nodesDir: string,
   nodeId: string,
   processes: WindowsManagedProcess[],
+  marker?: string,
 ): void {
   atomicWritePrivateJson(windowsCopresenceRecordPath(nodesDir, nodeId), {
-    version: 1,
+    version: marker ? 2 : 1,
     nodeId,
     createdAt: new Date().toISOString(),
+    ...(marker ? { marker } : {}),
     processes,
   } satisfies WindowsCopresenceRecord);
 }
@@ -71,7 +105,8 @@ export function readWindowsCopresenceRecord(nodesDir: string, nodeId: string): W
   const path = windowsCopresenceRecordPath(nodesDir, nodeId);
   if (!existsSync(path)) return null;
   const value = JSON.parse(readFileSync(path, "utf8")) as Partial<WindowsCopresenceRecord>;
-  if (value.version !== 1 || value.nodeId !== nodeId || !Array.isArray(value.processes)) {
+  if (![1, 2].includes(value.version as number) || value.nodeId !== nodeId || !Array.isArray(value.processes)
+    || (value.version === 2 && (typeof value.marker !== "string" || !value.marker))) {
     throw new Error(`invalid Windows co-presence record: ${path}`);
   }
   for (const p of value.processes) {

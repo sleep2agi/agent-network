@@ -1,0 +1,132 @@
+# test1220 Codex TUI second-client health gate
+
+Base: c335e9ddc835e66265a901c3b448ba99f91884b0
+Evidence date: 2026-08-27
+
+## Claim boundary
+
+Success requires an exact bridge receipt and a PID-attributed TUI connection to
+the owned loopback app-server. It never sends a challenge, creates a health
+thread, or spends a model turn. Fresh startup is remote-only; the first real
+user message supplies the sole thread identity. A durable 0600 pending
+candidate binds version, server URL, and node generation marker before bounded
+exact-ID resume. There is no list guess, `thread/start`, or alternate fallback.
+Crash-window restart additionally binds the old candidate to the previous
+private marker and loopback URL, reaps/quiesces that generation, atomically
+migrates it to the new URL/marker, and waits for exact bridge promotion before
+launching either platform's TUI with `resume` for the same ID. Missing,
+mismatched, still-live, or incompletely promoted state fails before TUI launch.
+
+Linux real evidence proves app-server/TUI/bridge outcomes and RPC state, not
+raw-wire packet capture. macOS and Windows real execution is not inferred.
+
+## Final Docker gates
+
+- test1220: PASS — 77 pass, 3 native skips, 0 fail; all 15 mutations red.
+- test631: PASS — 93 pass, 0 fail; private-mode and startup-repair
+  mutations red. The deferred pending writer is pinned to the private atomic
+  config choke point.
+- test1178: PASS — 14 pass, 0 fail; typecheck and bundle PASS.
+- test1191: PASS — 75 pass, 3 native skips, 0 fail; Linux fake-TUI normal/high
+  entered one human turn with zero extra turn/start; live mutations red.
+- test745: PASS — 627 pass, 6 skip, 0 fail; 68/68 source and 19/19 tests files.
+  One earlier invocation omitted required source SHA and failed before tests.
+- test725: PASS — 1462 pass, 0 fail; 110/110 source and 6/6 tests files.
+
+## Protected Linux Codex 0.148
+
+The full 65-second A9 run plus A12 restart-only verification proved:
+
+- fixed Node 22, Bun 1.3.14 SHA, registry Codex 0.148.0;
+- isolated HOME, CODEX_HOME, Hub DB, alias, ports, and three roles;
+- fresh waiting receipt and PID-attributed exact socket health;
+- zero health turns; the first composer submission created the unique
+  user-owned thread; pending state was atomically promoted and removed;
+- normal and high work steered the same active human turn;
+- restart retained exact thread, non-empty history, unchanged turn count, one
+  bridge, exact node-log remote/thread receipt, and PID-attributed socket;
+- updater handling was fail-closed: the pane initially selected `Update now`;
+  the harness moved once, re-read `Skip` selected, then entered. Update never ran;
+- product stop converged while the container remained alive and left no owned
+  session or listener.
+
+## Attempt ledger
+
+- Static crash-window review: BLOCKED the prior head because a persisted
+  candidate could be promoted by the restarted bridge while the launcher
+  opened a remote-only TUI. The replacement gate now coordinates old-marker
+  migration, exact promotion, and resume-only TUI argv on POSIX and Windows.
+- Final static review: verified each POSIX role has exactly one marker env;
+  Windows TUI socket ownership now binds a non-null CreationDate and rechecks
+  the same birth before and after the native descendant/socket snapshot.
+- The old `8bfdfc32` QA Windows fake-contract run was RED before these final
+  socket fixes. The corrected fake-Codex/source contract passes with exact
+  PID+birth attribution; native Windows execution remains explicitly NOT-RUN.
+- The same old QA run exposed a stale private-write inventory: deferred Codex
+  pending state added a fifth `atomicWriteJson(configFilePath, cfg)` choke-point
+  call while test631 still required exactly four. The inventory now requires
+  five and separately pins the pending writer to that private atomic helper;
+  exact Docker test631 passes 93/0 with both permission mutations red.
+- Protected Windows run `33018461634` reached the credentialed Windows runner
+  and failed closed before executing Codex: npm's current `cmd-shim` emits the
+  canonical launcher through `%dp0%`, while the allowlist parser accepted only
+  the historical `%~dp0` spelling. The parser now accepts only those two exact
+  forms, normalizes both to one identity, and still hashes the canonical
+  launcher/vendor before execution. A tenth static mutation removes the new
+  form and must fail; real Windows rerun is required after this fix reaches
+  trusted main.
+- PR native Windows run `33018856354` then proved the product health gate was
+  fail-closed: the short fake TUI printed a pane and exited without owning an
+  app-server socket long enough to attest CreationDate. The fixture now opens
+  the exact WebSocket on every TUI path, lets a fresh TUI publish its user-owned
+  thread, and holds the short probes for five seconds; no product health check
+  was weakened. Native Windows rerun remains the authority for this correction.
+- PR native Windows run `33019271464` passed PID/birth/socket health on first
+  start and restart, then failed an obsolete wire-count assertion that still
+  expected the launcher to create a synthetic thread. Deferred startup now
+  requires `thread/start=0`, exactly one user-owned TUI identity notification,
+  and the measured three exact resume/read calls. This tightens the no-health-
+  turn invariant; a new native run remains required.
+- PR native Windows run `33019632278` passed the updated zero-start wire
+  contract and the first start/restart health checks. Its long-turn fake then
+  closed the exact WebSocket immediately after synthetic completion, before
+  the launcher's CreationDate/socket snapshot. The fixture now preserves the
+  same five-second observable PID/socket window after both short and long-turn
+  paths. The product gate remains unchanged; a new native run is required.
+
+- A1: locked dependencies absent; no product roles. A stale cleanup port caused
+  a harness false positive.
+- A2: node-pty lacked Python and a non-fail-fast shell continued; corrected to a
+  toolchain image plus `set -euo pipefail` and `&&`.
+- A3: app-server did not bind; direct diagnosis found Codex wrapper exit 127
+  because Node was absent.
+- A4: CLI preflight rejected missing `bunx` before roles.
+- A5: first stop saw one transient marker PID; container cleanup prevented leak.
+- A6: one TUI PID socket check failed closed; product stop converged.
+- A7: socket health passed; harness required a Unicode bridge spelling that tmux
+  normalized. Role validation now requires exactly one bridge; receipt remains
+  authoritative.
+- A8: user turn and both steers completed; stop hit a container reaping race,
+  then idempotent stop converged.
+- A9: full 65-second chain passed through stop; restart blocked on updater.
+- A10: no key was sent because Skip selection was unproven.
+- A11: Skip was safely selected; harness checked the wrong file-log string.
+- A12: exact receipt source/value corrected; restart/history/socket/turn-count
+  and cleanup passed.
+
+## Platform matrix
+
+| Platform | Contract / synthetic | Real 0.148 | Status |
+| --- | --- | --- | --- |
+| Linux | Docker focused/full/mutations + Hub fixture | Protected isolated run | PASS |
+| macOS | `lsof` fail-closed contract + mutation | NOT-RUN | NOT-RUN |
+| Windows | PID-descendant/native fake + mutation | NOT-RUN | NOT-RUN |
+
+## Production guard
+
+Fixed production Hub PID/birth on 9200, Codex app-server PID/birth on 24703,
+and node config SHA-256 were unchanged before/after. No production process,
+listener, config, auth, or global package changed. Earlier prototypes without a
+fixed pre-snapshot are not claimed as before/after evidence.
+
+RESULT: PASS
