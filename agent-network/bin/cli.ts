@@ -6558,11 +6558,30 @@ async function withLifecycleLock<T>(nodeId: string, fn: () => T | Promise<T>, op
       let owner: LifecycleLockOwner;
       try { owner = JSON.parse(readFileSync(lifecycleLockOwnerPath(nodeId), "utf-8")); }
       catch (readError: any) {
+        // 🔴 #1339: ENOENT 和「解析失败」是两种完全不同的处境,曾经共用 CORRUPT 一个码。
+        //
+        //   ENOENT  = 持锁者已经 mkdir 了锁目录,但还没写出 owner.json。
+        //             中间夹着 processBirth() —— 它读 /proc,机器吃紧时会变慢。
+        //             **没有任何东西损坏**,只是还没写完。
+        //   解析失败 = 文件在,内容不是合法 JSON。这个才名副其实。
+        //
+        // 报成 CORRUPT 的代价不是措辞不好看:看到它的人会去找一个损坏的文件,
+        // 而那个文件要么不存在、要么完全正确 —— 查不出结果,然后很自然地
+        // 「把这个坏掉的锁删掉」,于是绕过了这整套互斥。
+        // **一个措辞不准的报错会教用户做一件危险的事。**
         if (readError?.code === "ENOENT") {
           if (!missingReceiptSince) missingReceiptSince = Date.now();
-          if (Date.now() - missingReceiptSince < 250) { await new Promise(r => setTimeout(r, 10)); continue; }
+          // 宽限从固定 250ms 改为跟随本函数既有的 deadline(5s)。
+          // 理由:250ms 是「本机够、CI 不够」的典型值 —— CI 上 L1 跑到 800~1000s 时
+          // 实测撞过(见 #1339 里的 test225 现场)。而 5s 已经是这个函数对
+          // 「等一个活着的持锁者」定下的预算,等一份收据没有理由更苛刻。
+          // 代价:持锁者若恰好在 mkdir 和写收据之间崩掉,现在要等到 deadline 才报,
+          //      而不是 250ms。两者都会报,差的只是延迟;而「写得慢」有实测,
+          //      「刚好崩在那个窗口」目前只是假设。
+          if (Date.now() < deadline) { await new Promise(r => setTimeout(r, 10)); continue; }
+          throw new Error(`NODE_LIFECYCLE_LOCK_RECEIPT_TIMEOUT: ${lock} (持锁者已建锁但 ${Math.round((Date.now() - missingReceiptSince) / 1000)}s 内未写出 owner.json;锁本身没有损坏,不要删它)`);
         }
-        throw new Error(`NODE_LIFECYCLE_LOCK_CORRUPT: ${lock}`);
+        throw new Error(`NODE_LIFECYCLE_LOCK_CORRUPT: ${lock} (owner.json 存在但解析失败: ${readError?.message || readError})`);
       }
       if (owner.schema !== 1 || !Number.isSafeInteger(owner.pid) || !owner.birth) throw new Error(`NODE_LIFECYCLE_LOCK_CORRUPT: ${lock}`);
       const current = processIdentitySnapshot(owner.pid);
