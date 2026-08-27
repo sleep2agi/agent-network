@@ -19,7 +19,7 @@ import { opencodeOwnedPathModeIsSafe } from "./opencode-owner-mode";
 import { describeUnsafePath } from "./unsafe-package-path-reason";
 
 export const PAIRED_AGENT_NETWORK_VERSION = "2.3.0-preview.47";
-export const PAIRED_AGENT_NODE_VERSION = "2.5.0-preview.34";
+export const PAIRED_AGENT_NODE_VERSION = "2.5.0-preview.35";
 export const PAIRED_AGENT_NODE_SPEC = `@sleep2agi/agent-node@${PAIRED_AGENT_NODE_VERSION}`;
 // Backward-compatible names for the first consumer of the shared pair.
 export const OPENCODE_AGENT_NETWORK_VERSION = PAIRED_AGENT_NETWORK_VERSION;
