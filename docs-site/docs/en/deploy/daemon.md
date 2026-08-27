@@ -103,12 +103,59 @@ Real output:
 ```
 
 🔴 **`anet daemon up` holds the terminal** — a daemon is a long-running process.
-Use a second terminal, or supervise it with the PM2 setup in the rest of this page.
+To background it, see [Keeping a daemon alive](#keep-daemon-alive) below.
 
 ⚠️ Note the **Permission posture** block: a daemon runs with
 `dangerouslySkipPermissions` + `teammateMode` and can fork child nodes through the hub.
 **Only run one on a machine you trust to act on your behalf.** To tighten it, edit
 `.anet/nodes/daemon/config.json`.
+
+### 3.5 Keeping a daemon alive {#keep-daemon-alive}
+
+`anet daemon start` runs in the foreground. **If you started it over SSH, it dies with the
+session.** The three recipes below were each walked through on a real machine on 2026-08-27
+and verified the same way: **disconnect, then check that the hub-side heartbeat is still
+advancing** — never by trusting the startup banner.
+
+**Linux / macOS — `nohup`, then verify the heartbeat**
+
+```bash
+cd ~                       # daemon config is cwd-relative: start it where you ran init
+nohup anet daemon start <name> > ~/daemon-<name>.log 2>&1 &
+sleep 25 && tail -5 ~/daemon-<name>.log   # expect "registered to CommHub" + "SSE connected"
+```
+After disconnecting, wait 3+ minutes and re-read `last_seen_at` on the hub:
+**only a still-advancing heartbeat proves it survived.** For crash-restart, use the PM2
+setup in the rest of this page with `anet daemon start <name>` as the supervised command.
+
+**Windows — a PowerShell Job will not survive**
+
+```powershell
+# ✗ Start-Job: reclaimed together with the SSH session; the daemon vanishes silently
+# ✓ WMI process creation: detaches from the session tree
+Invoke-CimMethod -ClassName Win32_Process -MethodName Create `
+  -Arguments @{ CommandLine = "C:\Users\<you>\start-daemon.bat" }
+```
+`start-daemon.bat` (**wrap it in a .bat** — passing a long command line with quotes and
+redirection straight to WMI returns `ReturnValue=21`, "invalid parameter"):
+```bat
+@echo off
+cd /d C:\Users\<you>
+anet daemon start <name> >> C:\Users\<you>\daemon-<name>.log 2>&1
+```
+
+🔴 **Two traps hit for real:**
+
+1. **cwd decides whether the daemon can find itself.** `anet daemon init` writes the config
+   under the **working directory at that moment** (`.anet/nodes/<name>/`). Start it in the
+   background from somewhere else and you get
+   `Daemon "<name>" not found. Create it first:` — the config exists, it just isn't there.
+   So the background command must `cd` back to the init directory.
+   (Easy to hit on Windows: the SSH login cwd may not be `C:\Users\<username>` — the
+   account name and the profile directory name need not match.)
+2. **Startup output is not a readiness check.** `anet daemon list` only reads local config;
+   being listed does not mean the hub knows about it. The criterion is hub-side:
+   `last_seen_at` still advancing.
 
 ### 4. Confirm it actually came up
 
