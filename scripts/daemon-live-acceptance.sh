@@ -51,9 +51,14 @@ SSH_HOST=""             # resolved only when --ssh-verify is given
 
 # 🔴 Allow-list of daemons this script may target. A typo in --daemon must
 # not silently point the run at some other machine's supervisor.
-# daemon-vanisn (Windows host VANISN) is listed deliberately rather than left
-# undefined. Note its --ssh-verify support differs — see ssh_alias_for below.
-ALLOWED_DAEMONS=("daemon-relay" "daemon-macmini" "daemon-vanisn")
+# daemon-vanisn (Windows host VANISN) is deliberately NOT here. It is not
+# "unverified" — it is PROVEN not to work: issue #1290 shows
+# loadAndVerifyAnetBin's startsWith("/") is POSIX-only, so `C:\...` can never
+# satisfy it; and even if relaxed, uid is constantly 0 on Windows and POSIX
+# mode does not reflect ACLs, making the remaining checks false-positive or
+# vacuous. Listing it and refusing with a reason beats leaving it undefined.
+ALLOWED_DAEMONS=("daemon-relay" "daemon-macmini")
+KNOWN_UNSUPPORTED_DAEMONS=("daemon-vanisn")
 
 usage() {
   cat <<USAGE
@@ -117,6 +122,8 @@ ssh_alias_for() {
   case "$1" in
     daemon-relay)   echo "relay" ;;
     daemon-macmini) echo "mac" ;;
+    # kept so the mapping survives if #1290 is ever fixed; today the run is
+    # refused at the allow-list, well before this is consulted.
     daemon-vanisn)  echo "win" ;;
     *)              echo "" ;;
   esac
@@ -152,6 +159,7 @@ if [[ "$MODE" == "selftest" ]]; then
   st  daemon_is_allowed "daemon-macmini-old"     # prefix of an allowed name
   st  daemon_is_allowed ""                       # empty
   st  daemon_is_allowed "prod-hub"               # unrelated node
+  st  daemon_is_allowed "daemon-vanisn"          # Windows: proven unsupported (#1290)
   stn daemon_is_allowed "daemon-relay"           # the real thing must pass
   stn daemon_is_allowed "daemon-macmini"
 
@@ -198,6 +206,9 @@ note "guards"
 [[ -n "$HUB" ]] || refuse "--hub is required (no default: a default would let a typo hit production)"
 [[ "$HUB" =~ ^https?:// ]] || refuse "--hub must be a full URL, got '$HUB'"
 [[ -n "$DAEMON_NAME" ]] || refuse "--daemon is required"
+for _u in "${KNOWN_UNSUPPORTED_DAEMONS[@]}"; do
+  [[ "$DAEMON_NAME" == "$_u" ]] && refuse "daemon '$DAEMON_NAME' is a Windows host and is PROVEN unsupported (issue #1290: loadAndVerifyAnetBin's startsWith(\"/\") is POSIX-only; uid is constantly 0; POSIX mode does not reflect ACLs). This is not 'unverified' — do not --allow-daemon around it."
+done
 daemon_is_allowed "$DAEMON_NAME" || refuse "daemon '$DAEMON_NAME' is not in the allow-list (${ALLOWED_DAEMONS[*]}); pass --allow-daemon to extend deliberately"
 UTOK="${!TOKEN_ENV:-}"
 [[ -n "$UTOK" ]] || refuse "\$$TOKEN_ENV is empty — cannot authenticate"
@@ -225,6 +236,17 @@ ok "resolved $DAEMON_NAME → $DAEMON_NODE_ID"
 hub_role_is "$HUB" "$UTOK" "$DAEMON_NODE_ID" "host_supervisor" \
   || refuse "'$DAEMON_NAME' is not a host_supervisor — refusing to send create_node to a non-daemon node"
 ok "role=host_supervisor confirmed (config_snapshot.role)"
+# 🔴 A daemon being UP does not mean it can create nodes. Without ANET_BIN_ABS
+# at daemon start (plus ANET_DAEMON_ALLOW_NON_ROOT_BIN=1 when not root),
+# create_node fails with anet_bin_unsafe_path.
+# This cannot be checked ahead of time: the hub never learns the pin state
+# (capability() carries runtime/version/topology/evidenceRevision only), and
+# reading the daemon's environment over SSH is not portable — /proc/<pid>/environ
+# does not exist on the Mac host. Rather than assert something weaker and call
+# it a pre-check, P2 below recognises the error and attributes it precisely.
+echo "  · note: this script cannot pre-verify the daemon's ANET_BIN_ABS pin."
+echo "    If P2 fails with anet_bin_unsafe_path, that is a HOST CONFIG issue,"
+echo "    not a broken create_node — the message below will say which of the four."
 
 # ── P0.5 baseline snapshot — the ONLY way to later prove we left nothing ──
 note "P0.5 baseline node set"
@@ -290,7 +312,27 @@ ok "listed $BEFORE_N node(s) (read-only)"
 note "P2. 创建 — create_node (temp child only)"
 CREATE_RESP=$(mcp_call "create_node" "{\"daemon_node_id\":\"$DAEMON_NODE_ID\",\"node_spec\":{\"name\":\"$CHILD_NAME\",\"runtime\":\"claude-agent-sdk\",\"model\":\"claude-opus-original\",\"flags\":{\"maxTurns\":7}}$NET_ARG}")
 REQ_ID=$(echo "$CREATE_RESP" | jq -r '.request_id // empty')
-if [[ -z "$REQ_ID" ]]; then bad "create_node failed: $CREATE_RESP"; echo "RESULT: FAIL"; exit 1; fi
+if [[ -z "$REQ_ID" ]]; then
+  if echo "$CREATE_RESP" | grep -Fq "anet_bin_unsafe_path"; then
+    bad "create_node rejected by the daemon's binary pin — HOST CONFIG, not a create_node defect"
+    echo "    full error: $CREATE_RESP"
+    # 🔴 Four distinct causes share this one error string. Do NOT collapse them
+    # into \"the pin is missing\" — same text, same guard, different root cause.
+    cat <<'CAUSES'
+    anet_bin_unsafe_path has FOUR causes; the message above says which:
+      · "no ANET_BIN_ABS"            → daemon started without the env var
+      · "not absolute"               → ANET_BIN_ABS is a relative path
+      · "symlink"                    → the pinned path is a symlink
+      · "writable by group/other"    → mode & 0o022 != 0 (a umask of 0002 during
+                                       `npm install -g` produces exactly this)
+    Also required when the daemon does not run as root:
+      ANET_DAEMON_ALLOW_NON_ROOT_BIN=1
+CAUSES
+  else
+    bad "create_node failed: $CREATE_RESP"
+  fi
+  echo "RESULT: FAIL"; exit 1
+fi
 CHILD_NODE_ID="node_${REQ_ID#cr_}"; CREATED=1
 ok "dispatched; child node_id = $CHILD_NODE_ID"
 hub_wait_until 90 hub_node_exists "$HUB" "$UTOK" "$CHILD_NODE_ID" \
@@ -356,16 +398,38 @@ hub_wait_until 90 hub_lifecycle_is "$HUB" "$UTOK" "$CHILD_NODE_ID" "stopped" \
 note "P6. 删除 — delete_node"
 DEL=$(mcp_call "delete_node" "{\"node_id\":\"$CHILD_NODE_ID\",\"confirm_alias\":\"$CHILD_NAME\"$NET_ARG}")
 echo "$DEL" | jq -e '.ok == true' >/dev/null 2>&1 && ok "delete_node accepted" || bad "delete_node failed: $DEL"
-hub_wait_until 60 bash -c "! hub_node_exists '$HUB' '$UTOK' '$CHILD_NODE_ID'" \
-  && { ok "child row gone from hub"; CREATED=0; } || bad "child row still present after delete"
+# 🔴 KNOWN DEFECT #1286: delete_node returns ok:true on an already-stopped node
+# while doing nothing. So today this step is EXPECTED not to remove the row.
+# It is written to speak up in BOTH directions — a step that quietly turns
+# green once someone fixes #1286 teaches nobody anything, and a red with no
+# stated cause gets re-diagnosed from scratch by the next person.
+if hub_wait_until 60 bash -c "! hub_node_exists '$HUB' '$UTOK' '$CHILD_NODE_ID'"; then
+  ok "child row gone from hub"
+  CREATED=0
+  echo "  🔔 NOTE: this SUCCEEDED. #1286 (delete_node no-ops on a stopped node)"
+  echo "     may now be fixed — if so, delete this note and drop the expectation below."
+else
+  echo "  · EXPECTED FAILURE (#1286): delete_node reported ok but the row is still there."
+  echo "    Not counted as a regression of this run. Tracking: #1286 (SDK马 fixing)."
+  echo "    🔴 Consequence: cleanup below cannot remove it either — see P7."
+fi
 
 # ── P7. residue proof — the point of the whole guard design ───────────
 note "P7. 证明没留下任何东西"
 AFTER_SET=$(hub_node_id_set "$HUB" "$UTOK")
 EXTRA=$(comm -13 <(printf '%s\n' "$BEFORE_SET") <(printf '%s\n' "$AFTER_SET"))
 MISSING=$(comm -23 <(printf '%s\n' "$BEFORE_SET") <(printf '%s\n' "$AFTER_SET"))
-[[ -z "$EXTRA" ]] && ok "no node added that was not there before" \
-  || bad "LEFTOVER node(s): $(echo "$EXTRA" | tr '\n' ' ')"
+if [[ -z "$EXTRA" ]]; then
+  ok "no node added that was not there before"
+else
+  # Deliberately NOT relaxed for #1286. A leftover row on the production hub is
+  # a leftover row whatever caused it; softening this would make the check
+  # useless for the case it exists to catch.
+  bad "LEFTOVER node(s): $(echo "$EXTRA" | tr '\n' ' ')"
+  echo "    🔴 ACTION REQUIRED — remove manually; this run added it and could not take it back:"
+  echo "       node_id=$CHILD_NODE_ID  alias=$CHILD_NAME"
+  echo "    Likely cause while #1286 is open: delete_node no-ops on a stopped node."
+fi
 [[ -z "$MISSING" ]] && ok "no pre-existing node disappeared" \
   || bad "🔴 PRE-EXISTING node(s) VANISHED: $(echo "$MISSING" | tr '\n' ' ')"
 
