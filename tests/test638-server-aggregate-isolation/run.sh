@@ -30,6 +30,16 @@ cleanup() {
   rmdir server/src/test639 2>/dev/null || true
 }
 trap cleanup EXIT
+dump_agg_failure() {
+  # #1274: aggregate 失败时把诊断吐给 CI —— 否则 set -e 无声死，红无任何指名信息
+  local label="$1" output="$2" rc="$3"
+  echo "FAIL: $label aggregate exited rc=$rc — offending files:"
+  grep '^TEST_FILE_RESULT' "$output" \
+    | awk -F'\t' '{bad=0; for(i=1;i<=NF;i++){if($i=="timeout=true")bad=1; if($i ~ /^exit=/ && $i!="exit=0")bad=1}; if(bad)print}' || true
+  echo "--- last 40 lines of $output ---"
+  tail -40 "$output" || true
+}
+
 rm -rf -- /tmp/test638-run1 /tmp/test638-run2 /tmp/test638-run3
 rm -f -- "$OUT1" "$OUT2" "$OUT3" "$TRACE1" "$SHARED_DB" "$SHARED_DB-wal" "$SHARED_DB-shm"
 
@@ -43,9 +53,13 @@ run_one() {
 }
 
 echo "L1: normal order under strace"
+set +e
 NODE_ENV=test DATABASE_URL='postgres://must-not-be-inherited.invalid/prod' COMMHUB_DB="$SHARED_DB" \
   ANET_SERVER_TEST_ROOT="$RUN1" ANET_SERVER_TEST_KEEP_ROOT=1 \
   strace -f -e trace=openat -o "$TRACE1" bun run --cwd server test >"$OUT1" 2>&1
+rc1=$?
+set -e
+[[ $rc1 -eq 0 ]] || { dump_agg_failure "L1" "$OUT1" "$rc1"; exit 1; }
 
 echo "L2: concurrent normal + reverse order"
 set +e
@@ -54,6 +68,8 @@ run_one "$RUN3" "$OUT3" reverse & p3=$!
 wait "$p2"; rc2=$?
 wait "$p3"; rc3=$?
 set -e
+[[ $rc2 -eq 0 ]] || dump_agg_failure "L2-normal" "$OUT2" "$rc2"
+[[ $rc3 -eq 0 ]] || dump_agg_failure "L2-reverse" "$OUT3" "$rc3"
 [[ $rc2 -eq 0 && $rc3 -eq 0 ]] || { echo "FAIL: concurrent aggregate rc2=$rc2 rc3=$rc3"; exit 1; }
 
 summary_key() {
