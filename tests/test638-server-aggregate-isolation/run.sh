@@ -36,8 +36,35 @@ dump_agg_failure() {
   echo "FAIL: $label aggregate exited rc=$rc — offending files:"
   grep '^TEST_FILE_RESULT' "$output" \
     | awk -F'\t' '{bad=0; for(i=1;i<=NF;i++){if($i=="timeout=true")bad=1; if($i ~ /^exit=/ && $i!="exit=0")bad=1}; if(bad)print}' || true
+  # #1319: 上面那行能报出**是哪个文件**,但接着的 `tail -40` 吐的是整份聚合输出的
+  # 尾巴 —— 实测里那 40 行全是后续文件的 (pass),失败用例名根本不在范围内。
+  # 于是「文件名有了、用例名没了」,查的人只能猜。
+  #
+  # bun 把断言详情打在 `(fail)` 行**之前**,所以往前取上下文。实测(bun 1.3.14,
+  # 各造一份不同断言深度的失败输出):
+  #   源码上下文固定 6 行(断言在文件第 6 行和第 152 行,输出都是 6 行)
+  #   error: → (fail) 距离:toBe 断言 6 行;toEqual 对象断言 13 行
+  # 🔴 -B30 是「够用」,**不是保证**:变量是 diff 长度,而对象越大 diff 越长,
+  #    没有上限。真正的兜底是把整份 $output 传成 artifact(见 ARTIFACT_DIR 一段)。
+  echo "--- failing cases in $output ---"
+  if grep -q '^(fail)' "$output"; then
+    grep -B30 '^(fail)' "$output" || true
+  else
+    echo "  (没有 '(fail)' 行 —— 这次失败不是用例级断言,"
+    echo "   可能是文件级 crash / import 失败 / 进程被杀,看下面的 tail)"
+  fi
+  # 保留原有的 tail:两者互补 —— 上面给用例名,下面给文件级 crash 的现场。
   echo "--- last 40 lines of $output ---"
   tail -40 "$output" || true
+  # 兜底,不依赖任何输出格式假设。ARTIFACT_DIR 是本仓既有约定(test225/234/697
+  # 都在用)。⚠️ 目前 qa.yml 的 hub-semantics 矩阵是 `docker run --rm`,没有取出
+  # 步骤,所以这几份现在只落在容器里 —— 取出需要照 test225 的做法
+  # (`--name` + `docker cp` + `docker rm -f`,qa.yml:745-755)。先写,取出另议。
+  if [ -n "${ARTIFACT_DIR:-}" ]; then
+    mkdir -p "$ARTIFACT_DIR" 2>/dev/null || true
+    cp -- "$output" "$ARTIFACT_DIR/$(basename "$output")" 2>/dev/null \
+      && echo "--- saved full output to \$ARTIFACT_DIR/$(basename "$output") ---" || true
+  fi
 }
 
 rm -rf -- /tmp/test638-run1 /tmp/test638-run2 /tmp/test638-run3
