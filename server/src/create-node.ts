@@ -318,6 +318,8 @@ export function auditCreateNode(input: {
     // wider migration (see P1.1 issue).
     | "stop_node_dispatched"
     | "stop_node_completed"
+    | "start_node_dispatched"
+    | "start_node_completed"
     | "delete_node_dispatched"
     | "delete_node_completed"
     | "forced_stop_with_in_flight"
