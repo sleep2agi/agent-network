@@ -6,15 +6,24 @@
 
 > 本表是全站 runtime 信息的**单一权威来源**, 其他页面 (`cli` / `agent-node` / `getting-started` / `clean-server`) 都引用这里, 别在那些页面里重复整表.
 
-::: tip 哪些 runtime 在哪个版本可用（真机实测）
-- **正式版**（`npm i -g @sleep2agi/agent-network`）：**正式 runtime** —— `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`。具体版本以 npm `latest` dist-tag 为准。
-- **预览版**（`@preview`）：在正式版之外再加 `codex-app-server` / `opencode-cli`；且对未知 runtime 会明确报错拦截（正式版会**静默退化**成默认 runtime，不报错）。
+::: tip 哪些 runtime 在哪个通道可用（容器内真机实测，2026-08-27）
+实测对象是当天的 npm `latest` = **2.3.0-preview.47**（`preview` = 2.3.0-preview.51）。
+装好后跑 `anet node create` 的 runtime 选单，**7 个全部列出**：
 
-下表标 `(preview)` 的行**仅预览版可用**，正式版选不到。
+`claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `codex-app-server` / `grok-build-acp` / `grok-build-cli` / `opencode-cli`
+
+同一版本里 `anet daemon` 与 `anet grok attach` 也都存在。
+
+🔴 **本页此前写的「codex-app-server / opencode-cli 仅预览版」「grok-build-cli 不在任何包中」对这个版本都不再成立** —— `latest` 曾长期停在 2.2.21，那时的说法是对的。**行为类说法请连版本号一起读**：换一个 dist-tag 结论就可能反过来。
 :::
 
-::: warning Grok TUI 共存尚未发布
-`grok-build-cli` / `anet grok attach` 不在当前 `latest` 或 `preview` 包中，因此不属于下面的可选 runtime。当前请使用 `grok-build-acp`；它不支持 attach。详见 [Grok TUI 状态页](/guide/grok-copresence)。
+::: warning 「选单里能选到」不等于「已生产就绪」，也不等于「daemon 能创建」
+两件事本页不替你打包票：
+
+- **成熟度**：`grok-build-cli` 在选单里仍自称「实验性 preview，仅可接收可信任务」。列出 ≠ 稳定。
+- **daemon 路径**：经 `anet daemon` 的 `create_node` 代创节点时，`grok-build-cli` / `codex-app-server` / `opencode-cli` 会被 daemon 侧的 runtime 闸拒掉（[#1298](https://github.com/sleep2agi/agent-network/issues/1298)）。**本机 `anet node create` 可用，daemon 代创不可用** —— 修复未进入你手上那个版本之前，这两条路径的结论不同。
+
+Grok TUI 共存的当前状态见 [Grok TUI 状态页](/guide/grok-copresence)；`grok-build-acp` 不支持 attach。
 :::
 
 | Runtime | npm 包 / 内核 | 适用场景 | 主推模型 | 前置 auth | wizard 行为 (`anet node create`) |
