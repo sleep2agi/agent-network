@@ -44,7 +44,7 @@ html, body, #root { margin: 0; height: 100%; background: var(--bg); color: var(-
   margin-bottom: 12px;
 }
 label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-input, textarea {
+input, textarea, select {
   width: 100%;
   background: var(--bg);
   color: var(--text);
@@ -65,9 +65,19 @@ button {
   cursor: pointer;
 }
 button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
+button.secondary.danger { color: var(--bad); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 .error { color: var(--bad); font-size: 13px; margin: 8px 0; }
+.notice { color: var(--good); font-size: 13px; margin: 8px 0; }
 .muted { color: var(--muted); font-size: 12px; }
+
+.list-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
 
 .node-row {
   display: flex;
@@ -78,9 +88,25 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   border-radius: 10px;
   margin-bottom: 8px;
   background: var(--panel);
-  cursor: pointer;
 }
 .node-row:hover { border-color: var(--accent); }
+.node-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+.node-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.node-actions button {
+  padding: 7px 10px;
+  font-size: 12px;
+}
 .node-row .name { font-weight: 600; }
 .node-row .runtime { font-size: 11px; color: var(--muted); }
 
@@ -136,3 +162,13 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   margin-top: 12px;
 }
 .live-log-toggle { background: transparent; color: var(--accent); border: 1px solid var(--border); margin-top: 8px; }
+
+@media (max-width: 560px) {
+  .list-header, .node-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .node-actions button {
+    flex: 1;
+  }
+}

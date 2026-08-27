@@ -1,0 +1,22 @@
+Test: prototype anet client daemon CRUD chain
+Date: 2026-08-27
+Scope: Non-production local frontend validation for prototype/anet-client-app.
+
+Commands:
+- npm ci
+- npm run build
+- npm run dev -- --host 127.0.0.1 --port 5179
+
+Results:
+- PASS: Clean worktree dependencies installed from package-lock.json.
+- PASS: TypeScript + Vite production build completed.
+- PASS: Local Vite dev server served the app at http://127.0.0.1:5179/.
+- PASS: Local screenshot captured for PR evidence.
+
+Evidence:
+- docs/tests/anet-client-daemon-crud-local.png
+
+Notes:
+- This verification did not touch production Hub state.
+- The UI uses the logged-in utok_ for /mcp JSON-RPC initialize + tools/call.
+- Connected actions are create_node, restart_node, and stop_node only.

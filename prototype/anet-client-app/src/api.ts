@@ -25,6 +25,68 @@ async function call<T>(path: string, opts: FetchOpts = {}): Promise<T> {
   return (await res.json()) as T;
 }
 
+// ── Hub MCP — Streamable HTTP JSON-RPC helper ──
+
+type McpContentItem = { type: string; text?: string };
+type McpToolEnvelope = {
+  result?: { content?: McpContentItem[] };
+  error?: { message?: string; code?: number; data?: unknown };
+};
+
+let mcpRpcId = 1;
+
+async function mcpRpc<T>(token: string, method: string, params?: unknown): Promise<T> {
+  const headers = {
+    "content-type": "application/json",
+    accept: "application/json, text/event-stream",
+    authorization: `Bearer ${token}`
+  };
+  const res = await fetch(`${COMMHUB_URL}/mcp`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: mcpRpcId++,
+      method,
+      ...(params === undefined ? {} : { params })
+    })
+  });
+  const raw = await res.text();
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${raw}`);
+  const dataLine = raw.split("\n").find((line) => line.startsWith("data: "));
+  const json = dataLine ? JSON.parse(dataLine.slice(6)) : raw ? JSON.parse(raw) : {};
+  if (json.error) {
+    throw new Error(json.error.message || JSON.stringify(json.error));
+  }
+  return json as T;
+}
+
+function parseMcpToolPayload<T>(envelope: McpToolEnvelope): T {
+  if (envelope.error) {
+    throw new Error(envelope.error.message || JSON.stringify(envelope.error));
+  }
+  const text = envelope.result?.content?.find((item) => item.type === "text")?.text;
+  if (!text) throw new Error("MCP tool returned no text content");
+  return JSON.parse(text) as T;
+}
+
+export async function callMcpTool<T>(
+  token: string,
+  name: string,
+  args: Record<string, unknown> = {}
+): Promise<T> {
+  await mcpRpc(token, "initialize", {
+    protocolVersion: "2025-03-26",
+    capabilities: {},
+    clientInfo: { name: "anet-client-app", version: "0.0.1" }
+  });
+  const envelope = await mcpRpc<McpToolEnvelope>(token, "tools/call", {
+    name,
+    arguments: args
+  });
+  return parseMcpToolPayload<T>(envelope);
+}
+
 // ── Auth ──
 
 export type LoginResp = {
@@ -71,12 +133,14 @@ export function getNodeToken(
 // ── Sessions / nodes ──
 
 export type SessionRow = {
+  node_id?: string | null;
   alias: string;
   status: string;
   task?: string | null;
   runtime?: string | null;
   model?: string | null;
   updated_at?: string;
+  network_id?: string | null;
 };
 
 export type StatusResp = {
@@ -88,6 +152,95 @@ export type StatusResp = {
 export function getStatus(token: string, networkId?: string | null): Promise<StatusResp> {
   const qs = networkId ? `?network_id=${encodeURIComponent(networkId)}` : "";
   return call<StatusResp>(`/api/status${qs}`, { token });
+}
+
+export type HostSupervisor = {
+  daemon_node_id: string;
+  alias: string;
+  hostname?: string | null;
+  online: boolean;
+  last_seen_at?: string | null;
+  runtimes_supported: string[];
+  allowed_secret_keys: string[];
+  host_telemetry?: Record<string, unknown>;
+};
+
+export type ListHostSupervisorsResp = {
+  ok: boolean;
+  daemons: HostSupervisor[];
+  count: number;
+  error?: string;
+};
+
+export function listHostSupervisors(
+  token: string,
+  networkId?: string | null
+): Promise<ListHostSupervisorsResp> {
+  return callMcpTool<ListHostSupervisorsResp>(token, "list_host_supervisors", {
+    ...(networkId ? { network_id: networkId } : {})
+  });
+}
+
+export type CreateNodeResp = {
+  ok: boolean;
+  request_id?: string;
+  error?: string;
+  message?: string;
+};
+
+export function createNode(
+  token: string,
+  args: {
+    daemon_node_id: string;
+    name: string;
+    runtime: string;
+    model: string;
+    network_id?: string | null;
+  }
+): Promise<CreateNodeResp> {
+  return callMcpTool<CreateNodeResp>(token, "create_node", {
+    daemon_node_id: args.daemon_node_id,
+    node_spec: {
+      name: args.name,
+      runtime: args.runtime,
+      model: args.model,
+      flags: {},
+      channels: []
+    },
+    ...(args.network_id ? { network_id: args.network_id } : {})
+  });
+}
+
+export type NodeActionResp = {
+  ok: boolean;
+  update_id?: string;
+  request_id?: string;
+  apply_mode?: string;
+  lifecycle_state?: string;
+  error?: string;
+  message?: string;
+};
+
+export function restartNode(
+  token: string,
+  nodeId: string,
+  networkId?: string | null
+): Promise<NodeActionResp> {
+  return callMcpTool<NodeActionResp>(token, "restart_node", {
+    node_id: nodeId,
+    ...(networkId ? { network_id: networkId } : {})
+  });
+}
+
+export function stopNode(
+  token: string,
+  nodeId: string,
+  networkId?: string | null
+): Promise<NodeActionResp> {
+  return callMcpTool<NodeActionResp>(token, "stop_node", {
+    child_node_id: nodeId,
+    ...(networkId ? { network_id: networkId } : {})
+  });
 }
 
 // ── Send task / chat ──
