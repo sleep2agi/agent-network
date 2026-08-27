@@ -382,6 +382,17 @@ eventBus.on("rename-committed", (event: RenameCommittedEvent) => {
 });
 
 /** 推送事件给指定 session 的所有 SSE 连接 */
+/** 这个 alias 上此刻是否真的有活着的 SSE 订阅者。
+ *
+ *  这是投递可达性的**实测**，区别于 resolveDeliveryTarget 里那个基于
+ *  last_seen_at 的**猜测**。一个安静但连着的会话（例如遵守「停发心跳」
+ *  规则的 MCP 会话）在时间戳判据下是 offline，在这里是 true。 */
+export function hasSubscribers(sessionName: string, networkId?: string | null): boolean {
+  const arr = clients.get(clientKey(sessionName, networkId));
+  if (!arr) return false;
+  return arr.some((c) => !c.closed);
+}
+
 export function pushEvent(sessionName: string, event: Record<string, unknown>, networkId?: string | null): void {
   const key = clientKey(sessionName, networkId ?? (event.network_id as string | null | undefined));
   const arr = clients.get(key);
