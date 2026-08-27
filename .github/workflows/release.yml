@@ -159,8 +159,18 @@ jobs:
       - name: Install + build target package
         working-directory: ${{ steps.resolve.outputs.dir }}
         run: |
+          set -euo pipefail
           bun install --frozen-lockfile
-          bun run build
+          # 🔴 不是每个包都要编译。commhub-server 是**源码分发**
+          # (package.json: files=[src,bin]、main=src/index.ts、bin 指向 .ts —— bun 直接跑)，
+          # 它根本没有 build 脚本。2026-08-27 第一次发它时无条件跑 `bun run build` 得到：
+          #   error: Script not found "build"
+          # 判据取「package.json 里有没有这个脚本」，而不是按包名写死谁该编译。
+          if node -e 'process.exit(((require("./package.json").scripts)||{}).build?0:1)'; then
+            bun run build
+          else
+            echo "no build script in $(pwd)/package.json — source-distributed package, skipping build"
+          fi
 
       - name: Pack tarball
         id: pack
@@ -232,8 +242,9 @@ jobs:
                 [ "$v" = "$GATED_VER" ] || { echo "::error::version mismatch"; exit 1; }
                 # 判据取「能不能真的起 hub」，不取「装上了」——
                 # 一个装得上但起不来的 hub 包，对生产毫无意义。
-                command -v commhub > /dev/null \
-                  || { echo "::error::commhub bin not on PATH after global install"; exit 1; }
+                # bin 名取自 package.json 的 bin 键（commhub-server），不是包目录名
+                command -v commhub-server > /dev/null \
+                  || { echo "::error::commhub-server bin not on PATH after global install"; exit 1; }
                 echo "✅ commhub-server install-path smoke passed"
               '
           elif [ "${GATED_PKG}" = "agent-node" ]; then
