@@ -42,7 +42,7 @@
 set -uo pipefail
 export PATH="$HOME/.nvm/versions/node/v20.20.0/bin:$PATH"
 ANET="$(command -v anet)"
-TMUX="$(command -v tmux)"
+TMUX_BIN="$(command -v tmux)"
 
 STAGGER="${STAGGER:-3}"                        # 节点间 & project 间 delay
 HUB_PORT="${HUB_PORT:-9200}"
@@ -52,7 +52,42 @@ SKIP_PROJECTS="${SKIP_PROJECTS:-}"             # 逗号分隔，如 "agent-netwo
 log() { echo "[anet-nodes-boot $(date '+%F %T')] $*"; }
 
 [ -z "$ANET" ] && { log "🔴 anet 不在 PATH（PATH=$PATH）"; exit 2; }
-[ -z "$TMUX" ] && { log "🔴 tmux 不在 PATH"; exit 2; }
+[ -z "$TMUX_BIN" ] && { log "🔴 tmux 不在 PATH"; exit 2; }
+
+# --- v2.6 (2026-08-28 #1332)：判活谓词从「有没有同名 tmux 会话」拆成三格 ---
+#
+# 🔴 起因是一次实测：全机 118 个有 config.json 的节点里，**7 个进程真的在跑、
+#    但没有同名 tmux 会话** —— 6 个是 `anet node start` 起的（会话名不是 alias），
+#    1 个（opencode测试1号）是 pm2 直接起的 `agent-node --config`。
+#    旧谓词把这 7 个恒判为「缺」⇒ still_missing 恒 ≥ 7 ⇒ **这道门永远达不成、
+#    永远 exit 1**。它不是"08-18 红了一次"，是判据上就不可能绿。
+#    一道永远红的门，很快会被当成噪音关掉。
+#
+# 🔴 而且误判不只是多报一个数：它会驱动 `project up` 去启动一个**已经在跑**的节点。
+#
+# 三格的含义（顺序即优先级）：
+#   0 = up_in_tmux            有同名 tmux 会话 —— 理想态
+#   1 = running_outside_tmux  进程在跑但不在 tmux —— 不算缺、不触发 start，只 warning
+#   2 = truly_missing         进程也不在 —— 算缺
+#
+# 探针为什么按「进程」而不按「怎么起的」：要判的是"这个节点在不在跑"，
+# 而 `anet node start` / `agent-node --config` / pm2 只是**起法**。
+# 按起法探测，就会像旧谓词那样，换一种起法就瞎。
+# 这里按 **config.json 的绝对路径**匹配 —— 每个节点的 config 路径全局唯一，
+# 且不管谁起的、命令行长什么样，它都会出现在 cmdline 里。
+node_state() {
+  local al="$1" cfg="${2:-}"
+  "$TMUX_BIN" has-session -t "=$al" 2>/dev/null && return 0
+  # 精确匹配 config 路径（-F 关掉正则，路径里的 . 不当通配）
+  if [ -n "$cfg" ] && pgrep -f -- "$cfg" >/dev/null 2>&1; then
+    return 1
+  fi
+  # 退路：`anet node start <alias>` 这种不带 config 路径的起法
+  if pgrep -f -- "node start $al" >/dev/null 2>&1; then
+    return 1
+  fi
+  return 2
+}
 
 # 一层依赖：hub /health 语义级检查（端口 listen 不代表能用）
 HEALTH_RAW=$(curl -fsS --max-time 5 "http://127.0.0.1:$HUB_PORT/health" 2>&1) || {
@@ -210,12 +245,22 @@ for ((round=1; round<=MAX_ROUNDS; round++)); do
     [ "${#aliases[@]}" -eq 0 ] && continue
 
     missing=()
+    outside=()
     for al in "${aliases[@]}"; do
-      "$TMUX" has-session -t "=$al" 2>/dev/null || missing+=("$al")
+      _p="${ALIAS_PATHS[$al]:-}"; _cfg=""
+      [ -n "$_p" ] && _cfg="${_p%%|*}/config.json"
+      node_state "$al" "$_cfg"; case $? in
+        0) : ;;                      # 在 tmux
+        1) outside+=("$al") ;;       # 进程在跑但不在 tmux —— 不算缺，别去 start
+        2) missing+=("$al") ;;
+      esac
     done
+    if [ "${#outside[@]}" -gt 0 ] && [ "$round" -eq 1 ]; then
+      log "  ⚠ $proj_name: ${#outside[@]} 个节点进程在跑但不在 tmux（不算缺、不重启）: ${outside[*]:0:5}"
+    fi
 
     if [ "${#missing[@]}" -eq 0 ]; then
-      log "  $proj_name: ${#aliases[@]} 节点全部在 tmux → skip"
+      log "  $proj_name: ${#aliases[@]} 节点全部在跑 → skip"
       round_skip=$((round_skip+1)); continue
     fi
 
@@ -245,6 +290,8 @@ for ((round=1; round<=MAX_ROUNDS; round++)); do
   # --- post-flight 用独立 find 枚举（MUST-FIX 2：不复用 sweep 的 glob）---
   still_missing=0
   missing_examples=()
+  running_outside=0
+  outside_examples=()
   while IFS= read -r cfg; do
     nd="$(dirname "$cfg")"
     al="$(basename "$nd")"
@@ -255,14 +302,18 @@ for ((round=1; round<=MAX_ROUNDS; round++)); do
     [ -n "${CONFLICT_ALIASES[$al]:-}" ] && continue
     # v2.5 3 条件未过的节点从分母排除（不算缺）
     [ -n "${SKIP_NODES_MAP[$al]:-}" ] && continue
-    if ! "$TMUX" has-session -t "=$al" 2>/dev/null; then
-      still_missing=$((still_missing+1))
-      [ "${#missing_examples[@]}" -lt 8 ] && missing_examples+=("$al")
-    fi
+    node_state "$al" "$cfg"; case $? in
+      0) : ;;
+      1) running_outside=$((running_outside+1))
+         [ "${#outside_examples[@]}" -lt 8 ] && outside_examples+=("$al") ;;
+      2) still_missing=$((still_missing+1))
+         [ "${#missing_examples[@]}" -lt 8 ] && missing_examples+=("$al") ;;
+    esac
   done < <(find $HOME -maxdepth 5 -path '*/.anet/nodes/*/config.json' -type f 2>/dev/null)
 
-  log "round $round post-flight（独立 find 枚举）：still_missing=$still_missing"
-  [ "$still_missing" -gt 0 ] && log "  缺失示例（前 8）：${missing_examples[*]}"
+  log "round $round post-flight（独立 find 枚举）：still_missing=$still_missing running_outside=$running_outside"
+  [ "$still_missing" -gt 0 ] && log "  🔴 真缺（进程也不在，前 8）：${missing_examples[*]}"
+  [ "$running_outside" -gt 0 ] && log "  ⚠ 进程在跑但不在 tmux（不算缺，前 8）：${outside_examples[*]}"
 
   if [ "$still_missing" -eq 0 ] && [ "$fail_projects" -eq 0 ]; then
     log "round $round 已全达成，跳出重试"
