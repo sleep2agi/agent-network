@@ -352,6 +352,7 @@ on:
       - 'tests/test1200-side-thread-command-transport/**'
       - 'tests/test1203-btw-production-e2e/**'
       - 'tests/test1181-codex-durable-poll/**'
+      - 'tests/test1204-btw-production-wiring/**'
       - 'tests/test1210-actual-target-contract/**'
 
 # Older runs on the same ref get cancelled — saves minutes when a PR is
