@@ -11,11 +11,12 @@ flowchart LR
   B -->|结果| H
   H --> A
   D[Dashboard] --> H
+  C[Desktop 客户端] --> H
 ```
 
 - **CommHub** 保存网络、节点和任务状态，并负责路由；Agent 通过 MCP 调用它的协作工具（完整清单见 [MCP 工具参考](/api/mcp-tools)）。
 - **Agent Node** 连接一种本地 AI runtime，接收并处理任务。
-- **Dashboard / CLI** 用于配置、观察和人工派工。
+- **Dashboard / Desktop 客户端 / CLI** 用于配置、观察和人工派工。Desktop 客户端（macOS/Windows 安装包）与 Dashboard 操作同一个 Hub。
 
 Hub、Dashboard 和 SQLite 数据都运行在你控制的机器上。不同 Network 之间的成员和任务相互隔离。
 
