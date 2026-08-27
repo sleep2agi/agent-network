@@ -219,6 +219,8 @@ EOF
 cd "$WORK"
 export HOME="$WORK"   # ~/.anet/deleted will land under $WORK/.anet/deleted
 export ANET_BIN_ABS=$(realpath -e "$(which anet)")
+# 本套件绕过 `anet daemon`(用 `anet node start`),CLI 的自动声明到不了这里 —— 见 #1299
+export ANET_DAEMON_ALLOW_ENV_BIN=1
 nohup anet node start "$DAEMON_NAME" > /tmp/daemon-027.log 2>&1 &
 DAEMON_PID=$!
 REGISTERED=""

@@ -106,6 +106,8 @@ cat > "$WORK/.anet/nodes/$DAEMON_NAME/config.json" <<EOF
 EOF
 cd "$WORK"
 export ANET_BIN_ABS=$(realpath -e "$(which anet)")
+# 本套件绕过 `anet daemon`(用 `anet node start`),CLI 的自动声明到不了这里 —— 见 #1299
+export ANET_DAEMON_ALLOW_ENV_BIN=1
 nohup anet node start "$DAEMON_NAME" > /tmp/daemon.log 2>&1 &
 DAEMON_PID=$!
 REGISTERED=""
@@ -528,6 +530,7 @@ RESOLVED_BY_WHICH=$(PATH=/tmp/evil-bin:$PATH which anet)
 cd /app/agent-node
 RESOLVED=$(PATH=/tmp/evil-bin:$PATH \
   ANET_BIN_ABS="$REAL_ANET" \
+  ANET_DAEMON_ALLOW_ENV_BIN=1 \
   ANET_DAEMON_PATH_CONF=/nonexistent \
   ANET_DAEMON_ALLOW_NON_ROOT_BIN=1 \
   bun -e 'import("./src/runtime/create-node-daemon.ts").then(m => { console.log(m.loadAndVerifyAnetBin()); }).catch(e => { console.error("ERR:" + e.message); process.exit(2); });' 2>&1 | tail -1)
@@ -617,6 +620,7 @@ EOF2
   cd "$WORK"
   # Start nvm daemon under /opt/anet-nvm-sim/bin/node (process.execPath becomes that path)
   ANET_BIN_ABS=$(realpath -e "$(which anet)") \
+  ANET_DAEMON_ALLOW_ENV_BIN=1 \
     nohup /opt/anet-nvm-sim/bin/node "$AGENT_NODE_BIN" \
       --config "$WORK/.anet/nodes/$NVM_DAEMON_NAME/config.json" \
       --alias "$NVM_DAEMON_NAME" --runtime claude-agent-sdk \
