@@ -92,6 +92,13 @@ function runtimeSubmittedAt(taskId: string): string | null {
   )?.runtime_submitted_at ?? null;
 }
 
+function runtimeContext(taskId: string): { thread_id: string | null; turn_id: string | null } {
+  return db.get<{ thread_id: string | null; turn_id: string | null }>(
+    "SELECT thread_id, turn_id FROM tasks WHERE task_id = ?1",
+    taskId,
+  )!;
+}
+
 beforeEach(() => { cleanup(); seed(); });
 afterAll(cleanup);
 
@@ -216,6 +223,72 @@ describe("task consumed_at identity and lifecycle", () => {
     const listedTask = listed.tasks.find((task: any) => task.task_id === taskId);
     expect(listedTask?.runtime_submitted_at).toBe(runtimeSubmittedAt(taskId));
     expect(listedTask?.consumed_at).toBe(timestamp);
+  });
+
+  test("token-bound consumed evidence persists and exposes an exact BTW boundary", async () => {
+    const taskId = await createTask("runtime emitted exact Codex context");
+    const handler = toolsFor({ alias: NODE_A, nodeToken: true }).mark_tasks_consumed;
+    const context = { task_id: taskId, thread_id: "thread_btw_exact", turn_id: "turn_btw_exact" };
+
+    const first = await call(handler, { task_ids: [taskId], task_contexts: [context] });
+    expect(first.ok).toBe(true);
+    expect(first.tasks[0]).toMatchObject(context);
+    expect(runtimeContext(taskId)).toEqual({
+      thread_id: context.thread_id,
+      turn_id: context.turn_id,
+    });
+
+    const listed = await call(toolsFor().list_tasks, { alias: NODE_A, limit: 20 });
+    expect(listed.tasks.find((task: any) => task.task_id === taskId)).toMatchObject(context);
+
+    const replay = await call(handler, { task_ids: [taskId], task_contexts: [context] });
+    expect(replay.ok).toBe(true);
+    const conflict = await call(handler, {
+      task_ids: [taskId],
+      task_contexts: [{ ...context, turn_id: "turn_sibling" }],
+    });
+    expect(conflict).toEqual({
+      ok: false,
+      error: "task_runtime_context_conflict",
+      task_id: taskId,
+    });
+    expect(runtimeContext(taskId)).toEqual({
+      thread_id: context.thread_id,
+      turn_id: context.turn_id,
+    });
+  });
+
+  test("runtime context rejects user tokens, foreign tasks, and unrequested ids without partial writes", async () => {
+    const ownTask = await createTask("owned context", NODE_A);
+    const foreignTask = await createTask("foreign context", NODE_B);
+    const ownContext = { task_id: ownTask, thread_id: "thread_owned", turn_id: "turn_owned" };
+    const foreignContext = { task_id: foreignTask, thread_id: "thread_foreign", turn_id: "turn_foreign" };
+
+    expect(await call(toolsFor().mark_tasks_consumed, {
+      task_ids: [ownTask], task_contexts: [ownContext],
+    })).toEqual({ ok: false, error: "node_token_required" });
+    expect(await call(toolsFor({ alias: NODE_A, nodeToken: true }).mark_tasks_consumed, {
+      task_ids: [ownTask, foreignTask], task_contexts: [ownContext, foreignContext],
+    })).toEqual({ ok: false, error: "task_not_owned", task_id: foreignTask });
+    expect(await call(toolsFor({ alias: NODE_A, nodeToken: true }).mark_tasks_consumed, {
+      task_ids: [ownTask], task_contexts: [foreignContext],
+    })).toEqual({ ok: false, error: "task_context_not_requested", task_id: foreignTask });
+    expect(runtimeContext(ownTask)).toEqual({ thread_id: null, turn_id: null });
+    expect(runtimeContext(foreignTask)).toEqual({ thread_id: null, turn_id: null });
+  });
+
+  test("submitted evidence cannot smuggle a runtime context", async () => {
+    const taskId = await createTask("submission has no authoritative turn yet");
+    const result = await call(
+      toolsFor({ alias: NODE_A, nodeToken: true }).mark_tasks_runtime_submitted,
+      {
+        task_ids: [taskId],
+        task_contexts: [{ task_id: taskId, thread_id: "thread_early", turn_id: "turn_early" }],
+      },
+    );
+    expect(result).toEqual({ ok: false, error: "runtime_context_requires_consumed" });
+    expect(runtimeSubmittedAt(taskId)).toBeNull();
+    expect(runtimeContext(taskId)).toEqual({ thread_id: null, turn_id: null });
   });
 
   test("one runtime wake can mark an exact batch of owned tasks", async () => {

@@ -1,4 +1,4 @@
-# RFC-035 — Task runtime evidence (`runtime_submitted_at` / `consumed_at`)
+# RFC-035 — Task runtime evidence and exact context
 
 Status: implementation candidate for issue #520
 Scope: additive Hub schema/API first; agent-node runtime wiring follows after the concurrent image-delivery change lands
@@ -37,6 +37,13 @@ and a delayed callback from an earlier delivery must never overwrite or erase
 that fact. Existing lifecycle status, `delivered_at`, `started_at`, and
 `sessions.task` retain their old semantics for backward compatibility.
 
+SideThread-capable Codex app-server nodes additionally populate nullable
+`thread_id` and `turn_id` on the same logical task. The values come from the
+bridge's exact bound thread and its attributable `task_started` event. They are
+not parsed from task text, status output, logs, or client-supplied metadata.
+Together they define the source boundary used by BTW; either value missing
+means the client must fail closed rather than downgrade to an ordinary task.
+
 Transport-row identity is separate from logical-task identity. Initial
 deliveries historically used `inbox.id == tasks.task_id`; retry/reassign create
 a fresh `inbox.id`. The additive nullable `inbox.task_id` column links every
@@ -48,7 +55,7 @@ for task rows, while ACK/cancel/reassign use the same linkage.
 Two internal MCP tools accept batches of exact task IDs:
 
 - `mark_tasks_runtime_submitted({task_ids})`
-- `mark_tasks_consumed({task_ids})`
+- `mark_tasks_consumed({task_ids, task_contexts?})`
 
 Both tools:
 
@@ -62,6 +69,11 @@ Both tools:
    batch;
 5. keep identity preflight and all writes in one SQLite transaction, and write
    each logical-task field only once for its lifetime.
+
+`task_contexts` is accepted only on the consumed boundary. Every context must
+name a task in `task_ids`; duplicate, foreign, unowned, partial, or conflicting
+contexts reject without partial writes. Older nodes may omit it and retain the
+two timestamp semantics. A submitted-only report cannot manufacture a turn.
 
 The current synchronous PostgreSQL adapter cannot keep multiple statements on
 one backend connection. Until that adapter gains real transactions, both tools
@@ -91,7 +103,8 @@ write, heartbeat, or a different concurrent turn are forbidden substitutes.
 
 ## Read semantics
 
-REST task projections, `get_task`, and `list_tasks` expose both columns. The
+REST task projections, `get_task`, and `list_tasks` expose the timestamps plus
+the nullable exact `thread_id` / `turn_id` pair. The
 four useful states are:
 
 | submitted | consumed | Meaning |
@@ -130,3 +143,6 @@ license to weaken the database evidence: a toast or log line is not
 6. Mutating any identity check, logical-task linkage, monotonic preservation,
    or exact runtime callback must
    turn a behavioral test red.
+7. Exact Codex context must survive REST/MCP projection, while a user token,
+   foreign node, submitted-only report, sibling turn, or unrequested task ID
+   must never write or replace it.

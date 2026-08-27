@@ -67,6 +67,22 @@ describe("createTaskRuntimeEvidenceReporter", () => {
     expect(reported).toEqual(["consumed:task_late_proof_520"]);
   });
 
+  test("forwards one exact runtime context with the consumed boundary", async () => {
+    const reported: unknown[] = [];
+    const reporter = createTaskRuntimeEvidenceReporter({
+      taskId: "task_context_520",
+      report: async (level, taskId, context) => { reported.push({ level, taskId, context }); },
+    });
+    reporter.consumed({ threadId: "thread_exact", turnId: "turn_exact" });
+    reporter.consumed({ threadId: "thread_wrong", turnId: "turn_wrong" });
+    await Promise.resolve();
+    expect(reported).toEqual([{
+      level: "consumed",
+      taskId: "task_context_520",
+      context: { threadId: "thread_exact", turnId: "turn_exact" },
+    }]);
+  });
+
   test("missing logical task identity is a fail-closed no-op", async () => {
     let calls = 0;
     const reporter = createTaskRuntimeEvidenceReporter({
@@ -138,6 +154,18 @@ describe("agent-node inbox wiring", () => {
     ]) {
       expect(branch).toContain(call);
     }
+  });
+
+  test("codex app-server reports its exact thread and attributable turn", () => {
+    const cli = readFileSync(resolve(sourceDir, "cli.ts"), "utf8");
+    const start = cli.indexOf("async function processWithCodexAppServer(");
+    const end = cli.indexOf("async function processWithGrok(", start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const branch = cli.slice(start, end);
+    expect(branch).toContain("threadId: session.bridge.getThreadId()");
+    expect(branch).toContain("turnId: event.turnId");
+    expect(branch).not.toContain("threadId: task");
   });
 
   test("SDK and direct-stdio boundaries preserve their distinct evidence semantics", () => {

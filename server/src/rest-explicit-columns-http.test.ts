@@ -52,6 +52,7 @@ const GOLDEN_RESPONSE_KEYS = {
     "status", "content", "result", "in_reply_to", "requires_response", "scope",
     "created_at", "delivered_at", "started_at", "runtime_submitted_at", "consumed_at",
     "completed_at", "expires_at", "network_id", "parent_task_id", "meta_json",
+    "thread_id", "turn_id",
   ],
   audit: [
     "id", "user_id", "username", "action", "target_type", "target_id", "detail",

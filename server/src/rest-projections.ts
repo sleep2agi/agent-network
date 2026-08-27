@@ -36,7 +36,7 @@ export const TASK_REST_COLUMNS = [
   "task_id", "from_node_id", "from_name", "to_node_id", "to_name", "priority",
   "status", "content", "result", "in_reply_to", "requires_response", "scope",
   "created_at", "delivered_at", "started_at", "runtime_submitted_at", "consumed_at", "completed_at", "expires_at",
-  "network_id", "parent_task_id", "meta_json",
+  "network_id", "parent_task_id", "meta_json", "thread_id", "turn_id",
 ] as const;
 
 export const COMPLETION_REST_COLUMNS = [

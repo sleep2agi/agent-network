@@ -79,6 +79,22 @@ expect_mutation_red \
   'submission and many runtime events'
 
 expect_mutation_red \
+  reporter-context-forwarding \
+  src/task-runtime-evidence.ts \
+  'void opts.report(level, opts.taskId, context).catch' \
+  'void opts.report(level, opts.taskId).catch' \
+  src/task-runtime-evidence.test.ts \
+  'forwards one exact runtime context'
+
+expect_mutation_red \
+  codex-runtime-context \
+  src/cli.ts \
+  'threadId: session.bridge.getThreadId(),' \
+  'threadId: "",' \
+  src/task-runtime-evidence.test.ts \
+  'codex app-server reports its exact thread'
+
+expect_mutation_red \
   codex-appserver-consumed \
   src/runtime/codex-app-server/runtime.ts \
   'opts.onConsumed?.(ev);' \
@@ -149,10 +165,10 @@ expect_mutation_red \
   src/task-runtime-evidence.test.ts \
   'SDK and direct-stdio boundaries'
 
-if [[ $MUTATIONS -ne 11 ]]; then
-  echo "mutation denominator mismatch: $MUTATIONS/11" >&2
+if [[ $MUTATIONS -ne 13 ]]; then
+  echo "mutation denominator mismatch: $MUTATIONS/13" >&2
   exit 1
 fi
 
-echo "mutation_red=$MUTATIONS/11"
+echo "mutation_red=$MUTATIONS/13"
 echo "RESULT: PASS"

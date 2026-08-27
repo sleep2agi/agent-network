@@ -1,8 +1,17 @@
 export type TaskRuntimeEvidenceLevel = "submitted" | "consumed";
 
+export interface TaskRuntimeContext {
+  threadId: string;
+  turnId: string;
+}
+
 export interface TaskRuntimeEvidenceReporterOptions {
   taskId: string | null;
-  report: (level: TaskRuntimeEvidenceLevel, taskId: string) => Promise<unknown>;
+  report: (
+    level: TaskRuntimeEvidenceLevel,
+    taskId: string,
+    context?: TaskRuntimeContext,
+  ) => Promise<unknown>;
   debug?: (message: string) => void;
 }
 
@@ -10,7 +19,7 @@ export interface TaskRuntimeEvidenceReporter {
   /** The exact task body crossed the runtime adapter's submission boundary. */
   submitted(): void;
   /** Exact turn-start or attributable runtime activity was observed. */
-  consumed(): void;
+  consumed(context?: TaskRuntimeContext): void;
 }
 
 export function logicalTaskIdFromInbox(message: {
@@ -42,10 +51,10 @@ export function createTaskRuntimeEvidenceReporter(
 ): TaskRuntimeEvidenceReporter {
   const attempted = new Set<TaskRuntimeEvidenceLevel>();
 
-  const fire = (level: TaskRuntimeEvidenceLevel) => {
+  const fire = (level: TaskRuntimeEvidenceLevel, context?: TaskRuntimeContext) => {
     if (!opts.taskId || attempted.has(level)) return;
     attempted.add(level);
-    void opts.report(level, opts.taskId).catch((cause: unknown) => {
+    void opts.report(level, opts.taskId, context).catch((cause: unknown) => {
       // The tools are additive. Old Hubs and transient reporting failures
       // must not break the model turn; leaving a false-negative NULL is safer
       // than inventing a timestamp or retrying the model task.
@@ -58,6 +67,6 @@ export function createTaskRuntimeEvidenceReporter(
 
   return {
     submitted: () => fire("submitted"),
-    consumed: () => fire("consumed"),
+    consumed: (context) => fire("consumed", context),
   };
 }

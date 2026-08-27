@@ -200,6 +200,8 @@ db.exec(`
     started_at        TEXT,
     runtime_submitted_at TEXT,
     consumed_at       TEXT,
+    thread_id         TEXT,
+    turn_id           TEXT,
     completed_at      TEXT,
     expires_at        TEXT
   );
@@ -1157,6 +1159,11 @@ try { db.exec("ALTER TABLE tasks ADD COLUMN meta_json TEXT"); } catch {}
 // started_at (legacy report_status/content matching). Old binaries ignore them.
 try { db.exec("ALTER TABLE tasks ADD COLUMN runtime_submitted_at TEXT"); } catch {}
 try { db.exec("ALTER TABLE tasks ADD COLUMN consumed_at TEXT"); } catch {}
+// Exact vendor-runtime boundary for SideThread-capable clients. These values
+// are written only by the token-bound target node after attributable runtime
+// evidence; the Hub never derives them from task text or caller input.
+try { db.exec("ALTER TABLE tasks ADD COLUMN thread_id TEXT"); } catch {}
+try { db.exec("ALTER TABLE tasks ADD COLUMN turn_id TEXT"); } catch {}
 
 // #1181 durable outbound terminal cursor.  A task's created_at cannot be used
 // as a recovery watermark because an old task may become terminal after newer

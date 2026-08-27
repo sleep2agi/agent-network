@@ -991,6 +991,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   const markTaskRuntimeEvidence = (
     taskIds: string[],
     level: "submitted" | "consumed",
+    taskContexts: Array<{ task_id: string; thread_id: string; turn_id: string }> = [],
   ) => {
     const task_ids = taskIds;
     if (!callerTokenIsNetwork || !callerAlias || !enforceNetworkId) {
@@ -1017,6 +1018,24 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         };
       }
 
+      if (level !== "consumed" && taskContexts.length > 0) {
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "runtime_context_requires_consumed" }) }],
+        };
+      }
+      const contextByTaskId = new Map(taskContexts.map((context) => [context.task_id, context]));
+      if (contextByTaskId.size !== taskContexts.length) {
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "duplicate_task_context" }) }],
+        };
+      }
+      const foreignContext = taskContexts.find((context) => !uniqueTaskIds.includes(context.task_id));
+      if (foreignContext) {
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "task_context_not_requested", task_id: foreignContext.task_id }) }],
+        };
+      }
+
       const placeholders = uniqueTaskIds.map((_, i) => `?${i + 2}`).join(", ");
 
       // Keep ownership preflight and every stamp in one SQLite transaction.
@@ -1031,8 +1050,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           enforceNetworkId,
           canonicalCaller,
         );
-        const rows = db.all<{ task_id: string; to_node_id: string | null; to_name: string }>(
-          `SELECT task_id, to_node_id, to_name FROM tasks
+        const rows = db.all<{ task_id: string; to_node_id: string | null; to_name: string; thread_id: string | null; turn_id: string | null }>(
+          `SELECT task_id, to_node_id, to_name, thread_id, turn_id FROM tasks
            WHERE network_id = ?1 AND task_id IN (${placeholders})`,
           enforceNetworkId,
           ...uniqueTaskIds,
@@ -1050,6 +1069,16 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         if (rejectedTaskId) {
           return { ok: false as const, error: "task_not_owned", task_id: rejectedTaskId };
         }
+        const conflictingContext = uniqueTaskIds.find((taskId) => {
+          const context = contextByTaskId.get(taskId);
+          if (!context) return false;
+          const row = owned.get(taskId)!;
+          return (row.thread_id !== null && row.thread_id !== context.thread_id)
+            || (row.turn_id !== null && row.turn_id !== context.turn_id);
+        });
+        if (conflictingContext) {
+          return { ok: false as const, error: "task_runtime_context_conflict", task_id: conflictingContext };
+        }
 
         for (const taskId of uniqueTaskIds) {
           const row = owned.get(taskId)!;
@@ -1059,12 +1088,15 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           const ownerValue = row.to_node_id ?? row.to_name;
           let updateResult;
           if (level === "consumed") {
+            const context = contextByTaskId.get(taskId);
             updateResult = db.run(
               `UPDATE tasks SET
                  runtime_submitted_at = COALESCE(runtime_submitted_at, datetime('now')),
-                 consumed_at = COALESCE(consumed_at, datetime('now'))
+                 consumed_at = COALESCE(consumed_at, datetime('now')),
+                 thread_id = COALESCE(thread_id, ?4),
+                 turn_id = COALESCE(turn_id, ?5)
                WHERE network_id = ?1 AND task_id = ?2 AND ${ownershipSql}`,
-              [enforceNetworkId, taskId, ownerValue],
+              [enforceNetworkId, taskId, ownerValue, context?.thread_id ?? null, context?.turn_id ?? null],
             );
           } else {
             updateResult = db.run(
@@ -1083,8 +1115,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           task_id: string;
           runtime_submitted_at: string;
           consumed_at: string | null;
+          thread_id: string | null;
+          turn_id: string | null;
         }>(
-          `SELECT task_id, runtime_submitted_at, consumed_at FROM tasks
+          `SELECT task_id, runtime_submitted_at, consumed_at, thread_id, turn_id FROM tasks
            WHERE network_id = ?1 AND task_id IN (${placeholders})`,
           enforceNetworkId,
           ...uniqueTaskIds,
@@ -1102,20 +1136,25 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   const taskRuntimeEvidenceSchema = {
     task_ids: z.array(z.string().min(1).max(200)).min(1).max(100),
+    task_contexts: z.array(z.object({
+      task_id: z.string().min(1).max(200),
+      thread_id: z.string().min(1).max(500),
+      turn_id: z.string().min(1).max(500),
+    }).strict()).max(100).optional(),
   };
 
   server.tool(
     "mark_tasks_runtime_submitted",
     "Internal agent-node signal: exact task bodies were submitted to this token-bound node's vendor runtime.",
     taskRuntimeEvidenceSchema,
-    async ({ task_ids }) => markTaskRuntimeEvidence(task_ids, "submitted"),
+    async ({ task_ids, task_contexts }) => markTaskRuntimeEvidence(task_ids, "submitted", task_contexts),
   );
 
   server.tool(
     "mark_tasks_consumed",
     "Internal agent-node signal: exact tasks produced attributable turn-start/activity evidence in this token-bound node's runtime.",
     taskRuntimeEvidenceSchema,
-    async ({ task_ids }) => markTaskRuntimeEvidence(task_ids, "consumed"),
+    async ({ task_ids, task_contexts }) => markTaskRuntimeEvidence(task_ids, "consumed", task_contexts),
   );
 
   // ═══════════════════════════════════════════
@@ -2031,7 +2070,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         const tasks = db.all(
           `SELECT t.task_id, t.from_node_id, t.from_name, t.to_node_id, t.to_name, t.priority,
                   t.status, t.content, t.result, t.created_at, t.runtime_submitted_at,
-                  t.consumed_at, t.completed_at, e.terminal_seq
+                  t.consumed_at, t.thread_id, t.turn_id, t.completed_at, e.terminal_seq
              FROM task_terminal_events e
              JOIN tasks t ON t.task_id = e.task_id
             WHERE COALESCE(e.network_id, 'default') = COALESCE(?1, 'default')
@@ -2048,7 +2087,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           has_more: tasks.length === limit,
         }) }] };
       }
-      let sql = "SELECT task_id, from_node_id, from_name, to_node_id, to_name, priority, status, content, result, created_at, runtime_submitted_at, consumed_at, completed_at FROM tasks WHERE 1=1";
+      let sql = "SELECT task_id, from_node_id, from_name, to_node_id, to_name, priority, status, content, result, created_at, runtime_submitted_at, consumed_at, thread_id, turn_id, completed_at FROM tasks WHERE 1=1";
       const params: any[] = [];
       sql = addReadScope(sql, params, readScope);
       if (alias) { sql += ` AND to_name = ?${params.length + 1}`; params.push(alias); }
