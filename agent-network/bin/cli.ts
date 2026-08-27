@@ -2054,7 +2054,10 @@ interface Profile {
 import {
   normalizeRuntime,
   normalizeRuntimeStrict,
+  reusedLoginFor,
+  RUNTIME_REUSED_LOGIN,
   SUPPORTED_RUNTIME_NAMES,
+  type ReusedLogin,
   type RuntimeName,
 } from "../src/normalize-runtime";
 import { findEnvironAliasMatches } from "../src/environ-alias";
@@ -4666,7 +4669,7 @@ interface Vendor {
   baseUrl?: string;             // ANTHROPIC_BASE_URL value (omit = Anthropic-native / not applicable)
   envKey?: VendorEnvKey;        // which env var the API key goes into
   signupUrl?: string;           // "where to get a key" hint
-  requiresAuth?: "claude" | "codex"; // runtime needs an external login instead of an API key
+  requiresAuth?: ReusedLogin;   // 复用哪种外部登录（不是 API key）。单一来源见 RUNTIME_REUSED_LOGIN
   models: VendorModel[];        // [] = freeform: ask the user for a model id (custom), or none (claude-code)
   freeformBaseUrl?: boolean;    // custom only: ask the user for the base URL
 }
@@ -4757,13 +4760,13 @@ const VENDORS: Vendor[] = [
   },
   {
     key: "codex", label: "Codex / GPT (海外，需 codex login)",
-    runtime: "codex-sdk", requiresAuth: "codex",
+    runtime: "codex-sdk", requiresAuth: reusedLoginFor("codex-sdk"),
     models: [...CODEX_MODEL_CHOICES],
   },
   {
     // claude-code-cli uses the Claude Code subscription's model; no model picker.
     key: "claude-code", label: "Claude Code CLI (需 Claude Pro/Team/Max 订阅)",
-    runtime: "claude-code-cli", requiresAuth: "claude",
+    runtime: "claude-code-cli", requiresAuth: reusedLoginFor("claude-code-cli"),
     models: [],
   },
   {
@@ -4782,7 +4785,7 @@ interface VendorSelection {
   baseUrl?: string;
   envKey?: VendorEnvKey;
   signupUrl?: string;
-  requiresAuth?: "claude" | "codex";
+  requiresAuth?: ReusedLogin;
 }
 
 // Resolve a vendor + model selection from a known vendor key (used by both the
@@ -14295,17 +14298,19 @@ async function createBatchWizardCommand() {
   // can skip the ANTHROPIC_AUTH_TOKEN prompt for vendors that already login
   // through their own CLI (codex / claude-code-cli). For __custom__ runtime,
   // derive requiresAuth from the runtime choice.
-  let requiresAuth: "claude" | "codex" | undefined;
+  let requiresAuth: ReusedLogin | undefined;
   if (opts.preset === "__custom__") {
     const customRuntime = await ask("Runtime (claude-agent-sdk / codex-sdk / claude-code-cli)", "claude-agent-sdk");
-    runtime = runtimeForExecution(customRuntime, "create batch nodes");
+    const customCanonical = runtimeForExecution(customRuntime, "create batch nodes");
+    runtime = customCanonical;
     baseUrl = (await ask("ANTHROPIC_BASE_URL (空白=Anthropic default)", "")) || undefined;
     model = (await ask("Model id", "")) || undefined;
     presetLabel = `custom (${runtime}${model ? " + " + model : ""})`;
-    // Custom runtime auth inference: codex-sdk uses `codex login`, claude-
-    // code-cli uses `claude` subscription; the SDK path needs an API key.
-    if (runtime === "codex-sdk") requiresAuth = "codex";
-    else if (runtime === "claude-code-cli") requiresAuth = "claude";
+    // 🔴 这里曾经又手写了一遍 runtime → 登录 的映射（只覆盖 codex-sdk 与
+    //    claude-code-cli），于是 grok / codex-app-server 走到这条路径时被当成
+    //    「需要 API key」。改为问单一来源；不在表里的 runtime 返回 undefined，
+    //    含义仍然是「走 API key」，与原行为一致。
+    requiresAuth = reusedLoginFor(customCanonical);
   } else if (opts.preset) {
     const sel = findVendorByModel(opts.preset) || resolveVendorSelection(opts.preset);
     if (!sel) {
