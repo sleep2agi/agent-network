@@ -85,7 +85,11 @@ describe("Grok auto-Leader lifecycle identity", () => {
 
     await terminateOwnedGrokLeader(identity);
 
-    expect(existsSync(`/proc/${identity.pid}`)).toBe(false);
+    // 语义是「这一代进程没了」,不是「/proc 目录没了」—— 用与产品同一个谓词。
+    // SIGTERM 之后到父进程 reap 之前进程处于 Z,`/proc` 条目仍在(#1315)。
+    // 这条的 fixture 不是 TERM-resistant,但窗口与是否升级 SIGKILL 无关:
+    // 任何被 fork 的子进程退出后、父进程 wait 之前都是 Z。
+    expect(await waitGenerationGone(identity)).toBe(true);
     expect(existsSync(fixture.socket)).toBe(false);
   });
 

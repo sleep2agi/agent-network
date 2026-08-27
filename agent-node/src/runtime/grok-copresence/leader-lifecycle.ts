@@ -395,6 +395,18 @@ function sameRealPath(candidate: string, expected: string): boolean {
  * Measured: a forked child that exits without being waited on shows
  * `state=Z`, `existsSync(/proc/<pid>)=true`, and this function `true`.
  */
+/** Snapshot which generation a pid currently is, or null if it is not there.
+ *
+ * Companion to `processGenerationGone`: to later assert "that generation is
+ * gone" a caller must first be able to say which generation it meant. Without
+ * this, callers re-parse /proc/<pid>/stat themselves — and a re-implementation
+ * is exactly how the #1315 bug arose (the test's own predicate missed the `Z`
+ * case that the product handles).
+ */
+export function readProcessGeneration(pid: number): string | null {
+  try { return readProcessStat(pid).startTime; } catch { return null; }
+}
+
 export function processGenerationGone(pid: number, startTime: string): boolean {
   return !sameProcessGenerationExists(pid, startTime);
 }
