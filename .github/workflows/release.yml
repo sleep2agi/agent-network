@@ -291,6 +291,18 @@ jobs:
             exit 0
           fi
 
+          # 🔴 上面的 if/elif 只是**加了分支**，fi 之后这一整段是 agent-network
+          # 专属的（npm install -g、anet --version、anet hub start、anet login、
+          # expect 驱动的 node-create 向导）。2026-08-27 发 commhub-server 时，
+          # 我那条分支确实命中并通过了，然后**继续往下走**，撞在这里：
+          #   bash: line 21: anet: command not found
+          # 分支跑完就该结束这一步 —— 否则「加一条分支」实际变成了
+          # 「加一条分支，再跑一遍别人的检查」。
+          if [ "${GATED_PKG}" != "agent-network" ]; then
+            echo "✅ Gate 1 — ${GATED_PKG} 的安装路径冒烟已在上面的分支内完成"
+            exit 0
+          fi
+
           # Real TTY drive via `script -qc` — captures the wizard's interactive
           # prompts that a plain shell `< /dev/null` would silently skip.
           # The harness installs the tarball as the LOCAL agent-network into a
