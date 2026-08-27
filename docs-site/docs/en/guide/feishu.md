@@ -303,7 +303,32 @@ The worker path defaults to `dist/src/im/feishu/worker.js` (shipped with `@sleep
 export ANET_FEISHU_WORKER_PATH=/path/to/your/worker.js
 ```
 
-### 8.4 Trigger policy sanity-check
+### 8.4 Outbound transport mode (`direct` / `commhub`)
+
+Which path a reply takes is **declared explicitly** — it does not depend on whether a hub
+URL happens to be present in the environment.
+
+| mode | path | when |
+|---|---|---|
+| `direct` (**default**) | bridge → parent IPC → agent-node's `think()` → `adapter.send()` | Default. Feishu messages do **not** enter CommHub task dispatch and do **not** show up in Dashboard topology / Chat |
+| `commhub` | the inbound event becomes a CommHub task; replies carry `in_reply_to` and the correlation store tracks status | when Feishu conversations need to be traceable inside CommHub |
+
+```bash
+# unset = direct
+export ANET_FEISHU_BRIDGE_MODE=commhub   # opt in explicitly
+```
+
+🔴 **Three behaviours worth remembering:**
+
+- **Setting `COMMHUB_URL` / `ANET_HUB_URL` does not change the mode.** It used to ("a hub
+  URL present means commhub"), which left operators unable to tell which path they were on.
+  Only this variable decides now.
+- **In `commhub` mode, failing to build a CommHub client is a hard error — it does not
+  silently fall back to IPC.** A silent fallback would leave you believing messages go
+  through CommHub.
+- **An invalid value throws** (e.g. `comm-hub`, `banana`) rather than silently defaulting.
+
+### 8.5 Trigger policy sanity-check
 
 - **DM**: triggers only when `sender.open_id ∈ allowFrom`; off-whitelist senders log `[feishu:audit] deny from=...` on stderr and the IPC envelope is not dispatched
 - **Group**: requires both `chat_id ∈ allowChats` **and** an actual `@bot` mention; without the mention, silently ignored

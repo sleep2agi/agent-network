@@ -303,7 +303,29 @@ worker 路径默认 `dist/src/im/feishu/worker.js`（`@sleep2agi/agent-network` 
 export ANET_FEISHU_WORKER_PATH=/path/to/your/worker.js
 ```
 
-### 8.4 触发策略 sanity
+### 8.4 出站传输模式（`direct` / `commhub`）
+
+飞书消息进来之后，回复走哪条路是**显式声明**的，不看环境里有没有 hub 地址。
+
+| 模式 | 路径 | 何时用 |
+|---|---|---|
+| `direct`（**默认**） | bridge → parent IPC → agent-node 的 `think()` → `adapter.send()` | 默认行为。飞书消息**不进 CommHub 任务分发**，也**不出现在 Dashboard 拓扑 / Chat** 里 |
+| `commhub` | 入站事件变成一个 CommHub task，回复带 `in_reply_to`，correlation store 跟踪状态 | 需要飞书对话在 CommHub 里可追踪时 |
+
+```bash
+# 不设 = direct
+export ANET_FEISHU_BRIDGE_MODE=commhub   # 显式打开
+```
+
+🔴 **三条行为值得单独记住**：
+
+- **设了 `COMMHUB_URL` / `ANET_HUB_URL` 也不会改变模式。** 之前是"有 hub 地址就走 commhub"，
+  运维看不出自己在哪条路径上 —— 现在只有这个变量说了算。
+- **`commhub` 模式下拿不到 CommHub 客户端会直接报错退出，不会悄悄回落到 IPC。**
+  悄悄回落会让你以为消息在走 CommHub。
+- **写错值直接抛**（比如 `comm-hub`、`banana`），不会静默取默认。
+
+### 8.5 触发策略 sanity
 
 - **私聊**：`sender.open_id ∈ allowFrom` 才触发；不在白名单 → bridge stderr 出 `[feishu:audit] deny from=...`，不派 IPC
 - **群聊**：群 `chat_id ∈ allowChats` **且** 消息 @bot 才触发；不 @ bot → 静默忽略
