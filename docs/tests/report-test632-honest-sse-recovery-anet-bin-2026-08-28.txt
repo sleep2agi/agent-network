@@ -1,0 +1,40 @@
+# test632 — honest SSE abandon recovery guidance
+source_commit=unknown
+date=2026-08-27T17:53:26+00:00
+L0 helper behaviour + production wiring
+bun test v1.3.14 (0d9b296a)
+
+agent-node/src/sse-recovery-guidance.test.ts:
+(pass) sseAbandonGuidance > states that abandon leaves the current process alive [1.97ms]
+(pass) sseAbandonGuidance > requires stop-and-replace instead of starting a duplicate [0.19ms]
+(pass) sseAbandonGuidance > preserves the co-presence launch shape in recovery guidance [0.07ms]
+(pass) sseAbandonGuidance > the production SSE abandon hook uses the honest guidance [1.90ms]
+
+ 4 pass
+ 0 fail
+ 13 expect() calls
+Ran 4 tests across 1 file. [43.00ms]
+L1 real agent-node bundle
+Bundled 294 modules in 80ms
+
+  cli.js  2.17 MB  (entry point)
+
+L2 real supervisor abandon returns without killing the agent process
+L3 witnessed-red: restore the dangerous duplicate-start guidance
+MUTATION_RED: duplicate-start-guidance rc=1
+L4 witnessed-red: bypass the helper in the production abandon hook
+MUTATION_RED: production-hook-bypass rc=1
+L5 restored green
+bun test v1.3.14 (0d9b296a)
+
+agent-node/src/sse-recovery-guidance.test.ts:
+(pass) sseAbandonGuidance > states that abandon leaves the current process alive [1.49ms]
+(pass) sseAbandonGuidance > requires stop-and-replace instead of starting a duplicate [0.11ms]
+(pass) sseAbandonGuidance > preserves the co-presence launch shape in recovery guidance [0.07ms]
+(pass) sseAbandonGuidance > the production SSE abandon hook uses the honest guidance [3.98ms]
+
+ 4 pass
+ 0 fail
+ 13 expect() calls
+Ran 4 tests across 1 file. [59.00ms]
+RESULT: PASS

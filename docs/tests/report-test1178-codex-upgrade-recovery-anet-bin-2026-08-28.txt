@@ -1,0 +1,16 @@
+Test 1178 - Codex upgrade recovery and topology audit
+
+Date: 2026-08-28
+Worktree: /tmp/wt-anetbin-clean
+Branch: feat/daemon-anet-bin-auto-clean
+Command:
+  sg docker -c 'docker build -t anet-test1178-codex-upgrade-recovery -f tests/test1178-codex-upgrade-recovery/Dockerfile . && docker run --rm anet-test1178-codex-upgrade-recovery'
+
+Result: PASS
+
+Observed summary:
+- Layer 1 pure recovery + existing thread lifecycle: 14 pass, 0 fail.
+- Layer 2 production wiring invariants: PASS.
+- Layer 3 typecheck + production bundle: PASS.
+- Witnessed-red contract: mutation checks reported as proven.
+- Final suite result: RESULT: PASS.
