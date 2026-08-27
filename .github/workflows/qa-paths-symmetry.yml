@@ -1,0 +1,28 @@
+# qa.yml 的 pull_request.paths 与 push.paths 必须一致(#1062)。
+#
+# 2026-08-27 普查:仅 PR 有 11 条、仅 push 有 0 条 —— 单向差集说明是
+# 「新增条目时只加 PR 段」的系统性习惯。后果:改动那些目标,PR 绿、
+# 合进 main 后门失明(#1243 同形状,main 红了约 6 小时)。
+# #1265 已把存量清零;这道门建在零点上,只对新增不对称变红。
+#
+# 🔴 不设 paths 过滤,理由同 l1-paths-sync.yml:这道门看守的正是 paths 列表
+# 本身,若它自己被 path 过滤,一条只改 qa.yml 的 PR 可能恰好绕开它。
+
+name: lint (qa paths symmetry)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  scan:
+    # Unique across the repo — a check name is the only identifier a branch
+    # protection rule can name (#916).
+    name: qa-paths-symmetry
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # selftest 先行:解析器坏了时,下面的实跑会在空分母上打印计数并 exit 0。
+      - run: python3 .github/scripts/check-qa-paths-symmetry.py --selftest
+      - run: python3 .github/scripts/check-qa-paths-symmetry.py
