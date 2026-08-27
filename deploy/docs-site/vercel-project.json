@@ -1,0 +1,20 @@
+{
+  "_comment": [
+    "anet.sh 那个 Vercel 项目的关联信息。放在这里而不是 docs-site/.vercel/project.json,",
+    "是因为 .vercel/ 被 gitignore —— 那条 ignore 是一道安全属性(防止 vercel link 之后",
+    "把登录态之类的东西顺手提交进来),不应该为了这三个字段把它撤掉。",
+    "",
+    "这三个字段不是密钥:没有 Vercel token,它们不授予任何权限。",
+    "把它们入库是为了降 bus-factor —— 在此之前,项目关联只存在于某一台机器上,",
+    "跟『部署要靠某个人记得跑』是同一个单点。",
+    "",
+    "🔴 刻意只收录不透明 ID,不收录 CLI 输出里那个组织 slug:那个 slug 含人名,",
+    "而这两个 ID 不含。降 bus-factor 不需要以新增一处真实标识为代价。",
+    "(这条注释本身也不写出那个 slug —— 否则等于一边说不收录一边把它写进仓里。)",
+    "",
+    "用法见同目录 README.md 的『恢复项目关联』一节。"
+  ],
+  "projectId": "prj_1NXR34ug3vfHfAsykG4I2XIxsuk6",
+  "orgId": "team_3SDh1gZJ7SR2jSWEAsB6oXDq",
+  "projectName": "docs-site"
+}
