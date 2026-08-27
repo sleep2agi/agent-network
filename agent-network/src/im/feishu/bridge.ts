@@ -2,22 +2,36 @@
  * RFC-020 §2.5 / RFC-002 §2.2 — Feishu bridge worker.
  *
  * Entry point spawned by agent-node when a node profile has `channels.feishu`
- * enabled. Per Vincent 2026-06-24 decision, the first-cut is the simplified
- * "agent-node direct bridge" model, not the full commhub-gateway:
+ * enabled. This worker owns the FeishuAdapter and its WSClient connection.
  *
- *   - This worker owns the FeishuAdapter and its WSClient connection.
- *   - Inbound IM event → access whitelist gate → forward to agent-node's main
- *     `think()` via parent IPC.
- *   - think() result → adapter.send() back to the originating conversation.
+ * 🔴 There are TWO outbound paths, and which one runs is decided at line ~445:
  *
- * Differences vs RFC-020 §2.5 full commhub-gateway path:
+ *     const client = commhubClient ?? createEnvCommHubClient();
+ *     if (client) return createCommHubEventHandler(...);   // (A)
+ *     if (typeof process.send === "function") ...          // (B)
+ *
+ *   (A) CommHub task dispatch — **the default on any real node.**
+ *       `createEnvCommHubClient()` returns null only when neither COMMHUB_URL
+ *       nor ANET_HUB_URL is set, and every provisioned node has one. Replies
+ *       carry `in_reply_to`, and the correlation store tracks task status.
+ *   (B) parent IPC → agent-node's `think()` — the fallback when there is no
+ *       hub URL in env (standalone / test harness).
+ *
+ *   Both paths end at adapter.send() back to the originating conversation.
+ *
+ * 🔴 This block used to say the opposite —— verbatim:
+ *       "IM messages do NOT pass through commhub task dispatch."
+ *   That was true of the 2026-06-24 first cut, and stayed in the file after
+ *   the commhub path landed (#1252, merged 2026-08-27). It is the first thing
+ *   anyone reads in this file, so it mis-answered the question "does Feishu go
+ *   through CommHub" for at least one reader before being caught. If you change
+ *   which path is default, change these lines in the same commit.
+ *
+ * Still true of both paths (unchanged from the first cut):
  *   - No separate gateway ntok_ / dedicated commhub alias.
- *   - IM messages do NOT pass through commhub task dispatch.
- *   - Feishu messages do NOT appear in Dashboard topology / Chat.
  *
- * The full §2.9 path (meta_json columns, SSE passthrough, persisted
- * IMCorrelationStore) lands as the follow-up PR after this demo ships
- * — tracked in #182.
+ * The remaining §2.9 work (meta_json columns, SSE passthrough, Dashboard
+ * topology / Chat visibility for Feishu conversations) is tracked in #182.
  *
  * Milestones:
  *   M1: worker entry scaffold.
@@ -84,6 +98,8 @@ export interface FeishuBridgeOptions {
   commhubClient?: IMBridgeCommHubClient;
   /** Poll interval for CommHub replies. Defaults to 1500ms. */
   commhubPollMs?: number;
+  /** 出站传输模式。省略时按 ANET_FEISHU_BRIDGE_MODE,再省略则 "direct"。 */
+  bridgeMode?: FeishuBridgeMode;
 }
 
 // ── IPC contract with the agent-node parent (M3) ─────────────────────────
@@ -433,6 +449,38 @@ const RATE_LIMIT_GC_THRESHOLD = 50;
  *  open_ids / chat_ids each holding a short timestamp list. */
 const RATE_LIMIT_HARD_CAP = 10_000;
 
+/**
+ * 出站传输模式。**显式声明,不靠环境变量在场与否去猜。**
+ *
+ *   direct  — parent IPC → agent-node 的 think()。**默认。**
+ *             2026-06-24 的第一版路径,飞书消息不进 CommHub 任务分发,
+ *             也不出现在 Dashboard 拓扑 / Chat 里。
+ *   commhub — 入站事件变成一个 CommHub task,回复带 in_reply_to,
+ *             correlation store 跟踪状态。**必须显式打开。**
+ *
+ * 🔴 为什么要显式:在此之前是 `commhubClient ?? createEnvCommHubClient()` ——
+ * 有 COMMHUB_URL 就走 commhub、没有就悄悄回落 IPC。两条路径的可观测性、
+ * Dashboard 可见性、失败语义完全不同,而**运维看不出自己在哪条上**,
+ * 文件头注释也因此和代码说了相反的话长达一次发布。
+ */
+export type FeishuBridgeMode = "commhub" | "direct";
+
+export const DEFAULT_FEISHU_BRIDGE_MODE: FeishuBridgeMode = "direct";
+
+/** 解析模式。优先级:显式入参 > 环境变量 > 默认。非法值直接抛,不静默取默认。 */
+export function resolveFeishuBridgeMode(
+  explicit?: FeishuBridgeMode,
+  env: NodeJS.ProcessEnv = process.env,
+): FeishuBridgeMode {
+  if (explicit) return explicit;
+  const raw = (env.ANET_FEISHU_BRIDGE_MODE || "").trim().toLowerCase();
+  if (!raw) return DEFAULT_FEISHU_BRIDGE_MODE;
+  if (raw === "commhub" || raw === "direct") return raw;
+  throw new Error(
+    `ANET_FEISHU_BRIDGE_MODE=${raw} 不是合法模式;可选 "direct"(默认) 或 "commhub"`,
+  );
+}
+
 function selectDefaultEventHandler(
   nodeAlias: string,
   adapter: FeishuAdapter,
@@ -441,9 +489,21 @@ function selectDefaultEventHandler(
   correlationStore?: IMCorrelationStore,
   commhubClient?: IMBridgeCommHubClient,
   commhubPollMs?: number,
+  mode?: FeishuBridgeMode,
 ): (event: NormalizedIMEvent) => Promise<void> {
-  const client = commhubClient ?? createEnvCommHubClient();
-  if (client) {
+  const resolved = resolveFeishuBridgeMode(mode);
+
+  if (resolved === "commhub") {
+    const client = commhubClient ?? createEnvCommHubClient();
+    if (!client) {
+      // 🔴 不回落。commhub 模式下拿不到 client 是配置错误,
+      // 悄悄改走 IPC 会让运维以为消息在走 CommHub —— 那正是这次要根除的东西。
+      throw new Error(
+        "feishu bridge mode=commhub 但拿不到 CommHub 客户端:" +
+          "需要 COMMHUB_URL 或 ANET_HUB_URL。" +
+          '若确实要走旧的 parent IPC 路径,显式设 ANET_FEISHU_BRIDGE_MODE=direct。',
+      );
+    }
     return createCommHubEventHandler(
       nodeAlias,
       adapter,
@@ -454,6 +514,7 @@ function selectDefaultEventHandler(
       commhubPollMs,
     );
   }
+
   if (typeof process.send === "function") {
     return createIPCEventHandler(adapter, ttlMs, ackPlaceholder, correlationStore);
   }
