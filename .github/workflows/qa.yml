@@ -338,6 +338,20 @@ on:
       - 'tests/test30-v0.8-auth-deprecation/**'
       - 'deploy/hub/hub-daemon.sh'
       - 'tests/test626-grok-model-switch-fallback/**'
+      # 🔴 以下条目此前只在 pull_request 段登记(#1062 普查,2026-08-27):
+      # 新增条目时只加 PR 段的系统性习惯 —— 改动这些目标在 PR 上会触发门、
+      # 合进 main 后不触发,main 上那道门失明(#1243 同形状)。两段必须同步增删。
+      - 'scripts/sync-pinned-versions.sh'
+      - 'docs/qa/**'
+      - 'tests/test1183-sync-pinned-dryrun/**'
+      - 'tests/test1193-side-thread-contract/**'
+      - 'tests/test1195-side-thread-hub-contract/**'
+      - 'tests/test1195-side-thread-hub-security/**'
+      - 'tests/test1195-side-thread-hub-race/**'
+      - 'tests/test1200-side-thread-command-transport/**'
+      - 'tests/test1203-btw-production-e2e/**'
+      - 'tests/test1181-codex-durable-poll/**'
+      - 'tests/test1210-actual-target-contract/**'
 
 # Older runs on the same ref get cancelled — saves minutes when a PR is
 # updated rapidly. main pushes run independently.
