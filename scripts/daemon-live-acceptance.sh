@@ -45,10 +45,15 @@ DAEMON_NAME=""
 AUTHORIZED_BY=""
 NETWORK_ID=""
 EXTRA_ALLOWED_DAEMON=""
+SSH_VERIFY=0            # 🔴 default OFF — real-machine SSH is a separate authz surface
+SSH_HOST_OVERRIDE=""
+SSH_HOST=""             # resolved only when --ssh-verify is given
 
 # 🔴 Allow-list of daemons this script may target. A typo in --daemon must
 # not silently point the run at some other machine's supervisor.
-ALLOWED_DAEMONS=("daemon-relay" "daemon-macmini")
+# daemon-vanisn (Windows host VANISN) is listed deliberately rather than left
+# undefined. Note its --ssh-verify support differs — see ssh_alias_for below.
+ALLOWED_DAEMONS=("daemon-relay" "daemon-macmini" "daemon-vanisn")
 
 usage() {
   cat <<USAGE
@@ -64,6 +69,13 @@ Usage:
   --execute                  Perform writes. Without it NOTHING is written.
   --i-am-authorized-by <who> REQUIRED with --execute. Recorded in the report.
   --allow-daemon <name>      Extend the allow-list for this run (explicit).
+  --ssh-verify               ALSO read the child's config.json on the target
+                             machine over SSH, so "the patch reached disk" is
+                             proven rather than inferred from the hub. OFF by
+                             default: SSH to a real host is a separate authz
+                             surface from calling the hub API.
+  --ssh-host <alias>         Override the ssh alias (default: derived from
+                             --daemon; see ssh_alias_for).
   --selftest                 Verify the guards themselves. Contacts no hub.
 
   Token is read from \$$TOKEN_ENV (never a flag — flags land in shell history
@@ -79,6 +91,8 @@ while [[ $# -gt 0 ]]; do
     --execute) MODE="execute"; shift ;;
     --i-am-authorized-by) AUTHORIZED_BY="${2:-}"; shift 2 ;;
     --allow-daemon) EXTRA_ALLOWED_DAEMON="${2:-}"; shift 2 ;;
+    --ssh-verify) SSH_VERIFY=1; shift ;;
+    --ssh-host) SSH_HOST_OVERRIDE="${2:-}"; shift 2 ;;
     --selftest) MODE="selftest"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "::error::unknown argument: $1"; usage; exit 2 ;;
@@ -90,6 +104,29 @@ note() { printf "\n=== %s ===\n" "$*"; }
 ok()   { printf "  ✓ %s\n" "$*"; PASS=$((PASS+1)); }
 bad()  { printf "  ✗ %s\n" "$*"; FAIL=$((FAIL+1)); }
 refuse() { echo "::error::REFUSING — $*"; exit 2; }
+
+# Maps a daemon to the ssh alias for its host. Returns "" when there is no
+# known alias — callers must refuse rather than guess a hostname.
+#
+# 🔴 daemon-vanisn is a WINDOWS host. The remote lookup below is POSIX
+# (`find`/`cat` under $HOME); Windows path and shell semantics differ, and an
+# untested remote command that happens to exit 0 would look exactly like a
+# successful verification. So --ssh-verify against it is reported as
+# NOT PROVEN instead of being attempted. Implementing it is a separate task.
+ssh_alias_for() {
+  case "$1" in
+    daemon-relay)   echo "relay" ;;
+    daemon-macmini) echo "mac" ;;
+    daemon-vanisn)  echo "win" ;;
+    *)              echo "" ;;
+  esac
+}
+ssh_verify_supported() {
+  case "$1" in
+    daemon-relay|daemon-macmini) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 daemon_is_allowed() {
   local want="$1" d
@@ -117,6 +154,19 @@ if [[ "$MODE" == "selftest" ]]; then
   st  daemon_is_allowed "prod-hub"               # unrelated node
   stn daemon_is_allowed "daemon-relay"           # the real thing must pass
   stn daemon_is_allowed "daemon-macmini"
+
+  # ssh alias mapping: a wrong/absent alias must never fall back to a guess
+  for pair in "daemon-relay:relay" "daemon-macmini:mac" "daemon-vanisn:win"; do
+    d="${pair%%:*}"; want="${pair##*:}"; got=$(ssh_alias_for "$d")
+    [[ "$got" == "$want" ]] && { printf "  ✓ [ssh_alias_for %s] → %s\n" "$d" "$got"; SPASS=$((SPASS+1)); } \
+                            || { printf "  ✗ [ssh_alias_for %s] → '%s', expected '%s'\n" "$d" "$got" "$want"; SFAIL=$((SFAIL+1)); }
+  done
+  [[ -z "$(ssh_alias_for "some-other-node")" ]] \
+    && { printf "  ✓ [ssh_alias_for some-other-node] → empty (refuses to guess a hostname)\n"; SPASS=$((SPASS+1)); } \
+    || { printf "  ✗ [ssh_alias_for some-other-node] returned a hostname — would ssh somewhere unintended\n"; SFAIL=$((SFAIL+1)); }
+  st  ssh_verify_supported "daemon-vanisn"    # Windows: must NOT claim support
+  stn ssh_verify_supported "daemon-relay"
+  stn ssh_verify_supported "daemon-macmini"
 
   # temp child naming must be unique per run and carry the acceptance prefix,
   # because the cleanup step keys on that prefix as a second safety net.
@@ -154,6 +204,12 @@ UTOK="${!TOKEN_ENV:-}"
 [[ "$UTOK" == utok_* ]] || refuse "\$$TOKEN_ENV does not look like a user token"
 if [[ "$MODE" == "execute" ]]; then
   [[ -n "$AUTHORIZED_BY" ]] || refuse "--execute requires --i-am-authorized-by <who> (recorded in the report)"
+fi
+if [[ "$SSH_VERIFY" -eq 1 ]]; then
+  SSH_HOST="${SSH_HOST_OVERRIDE:-$(ssh_alias_for "$DAEMON_NAME")}"
+  [[ -n "$SSH_HOST" ]] || refuse "--ssh-verify: no ssh alias known for '$DAEMON_NAME' (pass --ssh-host explicitly; do not let it guess a hostname)"
+  ssh_verify_supported "$DAEMON_NAME" \
+    || refuse "--ssh-verify is not implemented for '$DAEMON_NAME' (Windows host: POSIX find/cat do not apply). Re-run without --ssh-verify, or implement it deliberately."
 fi
 ok "flags validated (mode=$MODE daemon=$DAEMON_NAME)"
 
@@ -253,7 +309,33 @@ else
   echo "    config_snapshot did not surface flags.maxTurns within 60s. That may mean"
   echo "    the hub does not mirror this flag, not that the patch failed."
   echo "    On-disk application is proven in tests/qa-daemon-lifecycle-e2e (container,"
-  echo "    same filesystem). Proving it HERE requires SSH to $DAEMON_NAME — out of scope."
+  echo "    same filesystem). Pass --ssh-verify to prove it here too."
+fi
+
+if [[ "$SSH_VERIFY" -eq 1 ]]; then
+  echo "  · --ssh-verify: reading the child's config.json on '$SSH_HOST' (read-only)"
+  # We do NOT guess the path. The daemon's workDir never reaches the hub
+  # (cli.ts's `nodeDir` feeds the grok MCP wiring, not a hub field), so the
+  # target machine is asked to locate the file under $HOME instead.
+  # BatchMode=yes so it can never sit waiting on a passphrase prompt;
+  # bounded depth; both commands are strictly read-only.
+  REMOTE_CFG=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_HOST" \
+    "find \"\$HOME\" -maxdepth 8 -path '*/.anet/nodes/$CHILD_NAME/config.json' -type f 2>/dev/null | head -1" 2>/dev/null)
+  if [[ -z "$REMOTE_CFG" ]]; then
+    # 🔴 NOT a failure. A different directory layout and a failed patch look
+    # identical from here, and calling this red would be asserting more than
+    # we measured. It is also not a pass — it is printed as unproven.
+    echo "  · NOT PROVEN: could not locate the child's config.json under \$HOME on '$SSH_HOST'."
+    echo "    That may be a different layout, not a failed patch. Not counted either way."
+  else
+    REMOTE_VAL=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_HOST" "cat '$REMOTE_CFG'" 2>/dev/null | jq -r '.flags.maxTurns // empty')
+    if [[ "$REMOTE_VAL" == "99" ]]; then
+      ok "ON-DISK on '$SSH_HOST': flags.maxTurns=99 — the patch reached the real machine ($REMOTE_CFG)"
+    else
+      # Found the file and the value is wrong: that IS a finding.
+      bad "on-disk value on '$SSH_HOST' is '${REMOTE_VAL:-<absent>}', expected 99 — file: $REMOTE_CFG"
+    fi
+  fi
 fi
 
 note "P4. 操作 — restart_node"
