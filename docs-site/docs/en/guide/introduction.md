@@ -11,11 +11,12 @@ flowchart LR
   B -->|result| H
   H --> A
   D[Dashboard] --> H
+  C[Desktop app] --> H
 ```
 
 - **CommHub** stores network, node, and task state and routes work; agents call its collaboration tools over MCP (full list in the [MCP tools reference](/en/api/mcp-tools)).
 - **Agent Node** connects one local AI runtime and processes incoming tasks.
-- **Dashboard / CLI** configure the system, show status, and dispatch work.
+- **Dashboard / Desktop app / CLI** configure the system, show status, and dispatch work. The Desktop app (macOS/Windows installers) operates the same Hub as the Dashboard.
 
 The Hub, Dashboard, and SQLite data run on hardware you control. Members and tasks are isolated between Networks.
 
