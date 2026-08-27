@@ -100,11 +100,54 @@ anet daemon up
 ```
 
 🔴 **`anet daemon up` 会一直占着这个终端**（daemon 是常驻进程）。
-要放后台就另开一个终端，或用本页下半部分的 PM2 方案守护它。
+要放后台见下面一节 [让 daemon 在后台活下去](#keep-daemon-alive)。
 
 ⚠️ 注意那段 **Permission posture**：daemon 默认带
 `dangerouslySkipPermissions` + `teammateMode`，并且能通过 hub 派生子节点。
 **只在你信得过的机器上跑它。** 要收紧就改 `.anet/nodes/daemon/config.json`。
+
+### 3.5 让 daemon 在后台活下去 {#keep-daemon-alive}
+
+`anet daemon start` 是前台常驻进程。**如果你是 SSH 上去起的，会话一断它就没了** ——
+下面三条是 2026-08-27 在三台真机上逐台踩通的（每条都用「断开会话后再查 hub 心跳」验过，
+不是靠启动横幅判断）。
+
+**Linux / macOS —— `nohup` 起，验心跳**
+
+```bash
+cd ~                       # daemon 配置是 cwd 相关的，起在 init 时的同一个目录
+nohup anet daemon start <name> > ~/daemon-<name>.log 2>&1 &
+sleep 25 && tail -5 ~/daemon-<name>.log      # 看到「已注册到 CommHub」+「SSE connected」
+```
+断开 SSH 后隔 3 分钟以上再查 hub 的 `last_seen_at`：**还在刷新才算真常驻**。
+要崩溃自动拉起，用本页下半部分的 PM2 方案（把 `anet daemon start <name>` 当作被守护的命令）。
+
+**Windows —— 不能用 PowerShell Job**
+
+```powershell
+# ✗ Start-Job：SSH 会话结束时连同 Job 一起被回收，daemon 静默消失
+# ✓ WMI 创建进程：脱离会话树
+Invoke-CimMethod -ClassName Win32_Process -MethodName Create `
+  -Arguments @{ CommandLine = "C:\Users\<you>\start-daemon.bat" }
+```
+`start-daemon.bat` 内容（**用 .bat 包装，别把长命令行直接塞给 WMI**——带引号和
+重定向的长命令行会返回 `ReturnValue=21`「参数非法」）：
+```bat
+@echo off
+cd /d C:\Users\<you>
+anet daemon start <name> >> C:\Users\<you>\daemon-<name>.log 2>&1
+```
+
+🔴 **两个真踩过的坑**：
+
+1. **cwd 决定 daemon 找不找得到自己**。`anet daemon init` 把配置写在**当时的工作目录**下的
+   `.anet/nodes/<name>/`。用后台方式启动时如果工作目录变了，会报
+   `Daemon "<name>" not found. Create it first:` —— 配置其实在，只是没在那儿找。
+   所以后台命令里要显式 `cd` 回 init 时的目录。
+   （Windows 上尤其容易中：SSH 登录的 cwd 可能不是 `C:\Users\<用户名>` ——
+   用户名和 profile 目录名不一定同名。）
+2. **别拿启动输出当就绪判据**。判据是 hub 侧：`anet daemon list` 只读本机配置、
+   列出来不等于 hub 认得它；要看 hub 的节点状态里 `last_seen_at` 在持续刷新。
 
 ### 4. 确认它真的起来了
 
