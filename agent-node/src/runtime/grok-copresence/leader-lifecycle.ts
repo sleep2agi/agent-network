@@ -378,6 +378,27 @@ function sameRealPath(candidate: string, expected: string): boolean {
   try { return realpathSync(candidate) === expected; } catch { return false; }
 }
 
+/** Has the exact process generation identified by (pid, startTime) gone?
+ *
+ * Exported for tests. It deliberately answers the QUESTION ("is it gone?")
+ * rather than exposing the internal predicate, so the export surface stays
+ * one function wide.
+ *
+ * 🔴 Why tests must call this instead of checking `existsSync(/proc/<pid>)`:
+ * between SIGKILL landing and the parent reaping, the process sits in state
+ * `Z`. Its `/proc/<pid>` entry still exists, so an existence check reports
+ * "still alive" while this predicate — which excludes `Z`/`X` — correctly
+ * reports "gone". On a fast machine the reap is near-instant and the two
+ * agree; under load the window widens and they disagree. That window is
+ * exactly what made leader-lifecycle.test.ts intermittently red (#1315).
+ *
+ * Measured: a forked child that exits without being waited on shows
+ * `state=Z`, `existsSync(/proc/<pid>)=true`, and this function `true`.
+ */
+export function processGenerationGone(pid: number, startTime: string): boolean {
+  return !sameProcessGenerationExists(pid, startTime);
+}
+
 function sameProcessGenerationExists(pid: number, startTime: string): boolean {
   try {
     const current = readProcessStat(pid);

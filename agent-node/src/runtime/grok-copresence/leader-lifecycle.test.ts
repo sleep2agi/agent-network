@@ -18,6 +18,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
   captureOwnedGrokLeader,
   assertGrokLeaderCommandIdentity,
+  processGenerationGone,
   terminateOwnedGrokLeader,
   type OwnedGrokLeaderIdentity,
 } from "./leader-lifecycle";
@@ -114,13 +115,80 @@ describe("Grok auto-Leader lifecycle identity", () => {
     expect(existsSync(fixture.socket)).toBe(true);
   });
 
+  /** Poll until the exact generation is gone, or the bound elapses.
+   *
+   * 🔴 Asserting `!existsSync(/proc/<pid>)` is wrong here: between SIGKILL
+   * landing and the parent reaping, the process is in state `Z` and its
+   * `/proc` entry still exists. `processGenerationGone` excludes `Z`/`X`, so
+   * it is the same question the product itself answers (#1315).
+   *
+   * The bound is generous on purpose — polling returns as soon as the
+   * condition holds, so a wide ceiling costs nothing when things are fast,
+   * and does not turn a slow machine into a false failure.
+   */
+  async function waitGenerationGone(id: { pid: number; startTime: string }, boundMs = 5_000): Promise<boolean> {
+    const deadline = Date.now() + boundMs;
+    while (Date.now() < deadline) {
+      if (processGenerationGone(id.pid, id.startTime)) return true;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    return processGenerationGone(id.pid, id.startTime);
+  }
+
+  // 🔴 This test pins the bug behind #1315 permanently: if anyone ever swaps
+  // processGenerationGone back for an `existsSync(/proc/<pid>)` existence
+  // check, this goes red. It asserts the two DISAGREE on a zombie — which is
+  // precisely the window that made the escalation test intermittently fail.
+  test("processGenerationGone reports a zombie as gone while /proc still exists", async () => {
+    // A child that exits while its parent never waits stays in state Z.
+    //
+    // 🔴 A shell CANNOT be used to build this: measured on this host, dash,
+    // bash and `setsid bash` all reap the background job before the next
+    // command runs, so `/proc/<pid>` is gone entirely rather than showing Z.
+    // A bare `fork()` whose parent never waits is the only form that holds —
+    // hence python3 (present in the agent-node test image).
+    const holder = spawn(
+      "python3",
+      ["-c", "import os,sys,time\npid=os.fork()\nif pid==0: os._exit(0)\nprint(pid, flush=True)\ntime.sleep(30)"],
+      { stdio: ["ignore", "pipe", "ignore"] },
+    );
+    try {
+      const zombiePid = await new Promise<number>((resolve, reject) => {
+        holder.stdout!.once("data", (d) => resolve(Number(String(d).trim())));
+        holder.once("error", reject);
+      });
+      // give the child time to exit and become a zombie
+      let state = "";
+      let startTime = "";
+      for (let i = 0; i < 100; i++) {
+        await new Promise((r) => setTimeout(r, 20));
+        const raw = readFileSync(`/proc/${zombiePid}/stat`, "utf8");
+        const fields = raw.slice(raw.lastIndexOf(")") + 2).trim().split(/\s+/);
+        state = fields[0] || "";
+        startTime = fields[19] || "";
+        if (state === "Z") break;
+      }
+      expect(state).toBe("Z");
+
+      // the existence check the test used to rely on: still true
+      expect(existsSync(`/proc/${zombiePid}`)).toBe(true);
+      // the predicate the product actually uses: already "gone"
+      expect(processGenerationGone(zombiePid, startTime)).toBe(true);
+    } finally {
+      holder.kill("SIGKILL");
+    }
+  });
+
   test("revalidates the exact identity before escalating a TERM-resistant Leader", async () => {
     const fixture = await startLeader(false, true);
     const identity = await capture(fixture);
 
     await terminateOwnedGrokLeader(identity, 500);
 
-    expect(existsSync(`/proc/${identity.pid}`)).toBe(false);
+    // Assert the CONDITION, not the clock. On timeout this still reports the
+    // predicate's value, so a failure reads "still not reaped after the bound"
+    // rather than "the sleep was too short".
+    expect(await waitGenerationGone(identity)).toBe(true);
     expect(existsSync(fixture.socket)).toBe(false);
   });
 
