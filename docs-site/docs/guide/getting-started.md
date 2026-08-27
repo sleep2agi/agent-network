@@ -6,7 +6,7 @@
      每一处需要改的行。改了正文也要改戳,反之亦然 —— 两边不一致时门同样会红。
      只标"现状"断言;讲历史的版本引用(如 `≤ 2.3.0-preview.37`)故意不标。 -->
 <!-- version-claim: package=agent-network channel=latest version=2.2.21 -->
-<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.43 -->
+<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.48 -->
 
 新用户首次跑通的最小路径——**5 步, 5 分钟**。每步一条命令 + 一句验证。
 
@@ -89,15 +89,25 @@ anet hub dashboard
    Store this password now; it will not be shown again.
 ```
 
-**那个串取决于你装的是哪个版本**(实测 2026-08-18):
+🔴 **不要照抄下面命令里的 `anethub`。** 现在 `latest` 和 `preview` 两条通道装到的版本
+**都会打印一个随机串**,照抄一定登不进去 —— 唯一可靠的做法是看你自己那次启动的输出。
 
-| 通道 | 打印出来的密码 |
+实测 2026-08-27(在干净容器里各起一次 `anet hub start`,不传 `--password`):
+
+| 装到的版本 | 打印出来的密码 |
 |---|---|
-| `latest` = `2.2.21` | 固定的 `anethub` |
-| `preview` = `2.3.0-preview.43` | **随机串**,形如 `anet-232412de5bb54c058cff32`,并提示首次登录后要改 |
+| `2.3.0-preview.47`(当时的 `latest`) | `anet-3ce2750defe04d9ab3baf0` —— **随机串**,并提示首次登录后要改 |
+| `2.3.0-preview.48`(当时的 `preview`) | `anet-25c07c8cba0740f4a005bf` —— **随机串**,同上 |
 
-所以下面命令里的 `anethub` **只在 stable 上成立**。**照抄这一页而不看自己那次启动输出的人,在 preview 上一定登不进去。**
-凭据也落在 `~/.anet/server/admin-utok.json`。
+两次都没有出现字面量 `anethub`。
+
+固定的 `anethub` 只存在于 `2.2.x` 及更早的版本。**这一行按版本写而不按通道写**是有原因的:
+`latest` 会移动 —— 2026-08 之前它指着 `2.2.21`(那时确实是固定密码),现在指着一个
+preview 构建。**"latest 上是固定密码"这句话不是过期,是会随通道移动而变成错的。**
+
+凭据也落在 `~/.anet/server/admin-utok.json`,里面只有
+`username` / `user_id` / `token` / `created_at` —— **密码不在里面**,所以错过了那次输出
+就只能重新 bootstrap。
 
 🔴 另外:**`anet login` 失败时目前仍然退出码 0**(`latest` 与 `preview` 都是,修复已在 main 上,见 #716 / #722)。
 ⇒ **不要用 `anet login && 下一步` 来判断登录成功** —— 它会在失败时继续往下走。用 `anet whoami` 确认。
