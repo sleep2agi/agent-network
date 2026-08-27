@@ -97,6 +97,7 @@ on:
       - 'tests/test224-grok-preview-security/**'
       - 'tests/test597-dashboard-slash-namespace/**'
       - 'tests/test679-task-trace/**'
+      - 'tests/qa-daemon-lifecycle-e2e/**'
       - 'tests/lib/**'
       - 'docs-site/**'
       - 'docs/doc-source-pins-baseline.txt'
@@ -256,6 +257,7 @@ on:
       - 'tests/test224-grok-preview-security/**'
       - 'tests/test597-dashboard-slash-namespace/**'
       - 'tests/test679-task-trace/**'
+      - 'tests/qa-daemon-lifecycle-e2e/**'
       - 'tests/lib/**'
       - 'docs-site/**'
       - 'docs/doc-source-pins-baseline.txt'
@@ -489,6 +491,27 @@ jobs:
           mkdir -p "$RUNNER_TEMP/suite-artifacts"
           docker run --rm anet-test679-task-trace \
             2>&1 | tee "$RUNNER_TEMP/suite-artifacts/test679.log"
+
+      # daemon full-chain lifecycle. Sits here, not in qa.sh's L1_TESTS:
+      # the suite RUNS in 11s but COLD-BUILDS in ~244s (three bun installs
+      # + obfuscated build + two npm packs), and qa.sh builds L1 serially
+      # inside a 5-minute job that already spends 141-148s. Measuring only
+      # the run time is measuring the wrong half.
+      # Placed before test224 so the security suite remains last.
+      - name: Build qa-daemon-lifecycle-e2e
+        run: |
+          docker build \
+            --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            --build-arg RUNSH_BLOB="$(git rev-parse HEAD:tests/qa-daemon-lifecycle-e2e/run.sh)" \
+            -t anet-qa-daemon-lifecycle-e2e \
+            -f tests/qa-daemon-lifecycle-e2e/Dockerfile .
+
+      - name: Run qa-daemon-lifecycle-e2e
+        run: |
+          set -o pipefail
+          mkdir -p "$RUNNER_TEMP/suite-artifacts"
+          docker run --rm anet-qa-daemon-lifecycle-e2e \
+            2>&1 | tee "$RUNNER_TEMP/suite-artifacts/qa-daemon-lifecycle-e2e.log"
 
       - name: Build test224-grok-preview-security
         run: |
