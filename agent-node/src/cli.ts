@@ -4879,8 +4879,15 @@ function isLowValueText(text: string, isReply = false): boolean {
   return false;
 }
 
-function shouldSkipMessage(from: string, content: string, msgType?: string): string | null {
-  if (from === ALIAS) return "self";
+function isIMBridgeMessage(msg: any): boolean {
+  const meta = msg?.meta || (() => {
+    try { return msg?.meta_json ? JSON.parse(msg.meta_json) : null; } catch { return null; }
+  })();
+  return meta?.im?.bridge === "feishu";
+}
+
+function shouldSkipMessage(from: string, content: string, msgType?: string, msg?: any): string | null {
+  if (from === ALIAS && !isIMBridgeMessage(msg)) return "self";
   if (content.startsWith(`[${ALIAS}]`)) return "own-prefix";
   const actionable = msgType === "task" || msgType === "broadcast" || msgType === "reply";
   // Don't cooldown explicit tasks — humans often send rapid follow-ups from
@@ -4966,6 +4973,11 @@ async function processInbox() {
         : ` ${content.slice(0, 100)}`;
       log(`← [${from}] (${msgType}/${msg.priority || "normal"})${images.length ? ` +${images.length} attachment(s)` : ""}${inboundLogSuffix}`);
 
+      if (msgType === "reply" && from === ALIAS) {
+        debug(`leave self reply unacked for channel bridge: ${msg.id.slice(0, 8)}`);
+        return;
+      }
+
       // Other non-task / non-broadcast messages retain their historical
       // ack-only behavior; send_message never implies an LLM response.
       if (!deliveryPolicy.deliverToRuntime) {
@@ -4979,7 +4991,7 @@ async function processInbox() {
         return;
       }
 
-      const skip = shouldSkipMessage(from, content, msgType);
+      const skip = shouldSkipMessage(from, content, msgType, msg);
       if (skip) {
         log(formatInboxSkipLog({
           sender: from,

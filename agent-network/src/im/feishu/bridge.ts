@@ -29,7 +29,8 @@
  *   M4: agent-node spawn integration (fork(this) wired by agent-node).
  *   M5: group @bot trigger refinement, image up/down, Docker smoke.
  */
-import type { NormalizedIMEvent } from "../types.js";
+import type { IMCorrelationStore, NormalizedIMEvent } from "../types.js";
+import { createJsonIMCorrelationStore } from "../correlation-store.js";
 import { FeishuAdapter } from "./adapter.js";
 import { loadFeishuChannelConfig } from "./config.js";
 import {
@@ -40,6 +41,27 @@ import {
 } from "./outbound-marker.js";
 import { feishuOutboundDir } from "./outbound-paths.js";
 import * as fs from "node:fs";
+
+export type IMBridgeCommHubInboxMessage = {
+  id: string;
+  type?: string;
+  content: string;
+  from_session?: string;
+  in_reply_to?: string;
+  meta?: unknown;
+};
+
+export interface IMBridgeCommHubClient {
+  sendTask(args: {
+    alias: string;
+    task: string;
+    priority?: "high" | "normal" | "low";
+    ttlSeconds?: number;
+    meta?: unknown;
+  }): Promise<{ taskId: string }>;
+  getInbox(alias: string): Promise<IMBridgeCommHubInboxMessage[]>;
+  ackInbox(alias: string, messageId: string): Promise<void>;
+}
 
 export interface FeishuBridgeOptions {
   /** Absolute path to `.anet/nodes/<node>/channels/feishu/`. */
@@ -56,6 +78,12 @@ export interface FeishuBridgeOptions {
   onEvent?: (event: NormalizedIMEvent) => Promise<void>;
   /** Fatal WS failure after initial readiness (for worker lifecycle ownership). */
   onTerminalError?: (error: Error) => void;
+  /** Persistent task/message correlation state. Defaults to channelDir/state.json. */
+  correlationStore?: IMCorrelationStore;
+  /** CommHub task transport. Defaults to COMMHUB_URL/COMMHUB_TOKEN when available. */
+  commhubClient?: IMBridgeCommHubClient;
+  /** Poll interval for CommHub replies. Defaults to 1500ms. */
+  commhubPollMs?: number;
 }
 
 // ── IPC contract with the agent-node parent (M3) ─────────────────────────
@@ -122,9 +150,19 @@ export async function startFeishuBridge(
   });
 
   const ttlMs = channelConfig.taskTimeoutMs || DEFAULT_REPLY_PENDING_TTL_MS;
+  const correlationStore =
+    opts.correlationStore ?? createJsonIMCorrelationStore(`${opts.channelDir}/state.json`);
   const onEvent =
     opts.onEvent ??
-    selectDefaultEventHandler(adapter, ttlMs, channelConfig.ackPlaceholder);
+    selectDefaultEventHandler(
+      opts.nodeAlias,
+      adapter,
+      ttlMs,
+      channelConfig.ackPlaceholder,
+      correlationStore,
+      opts.commhubClient,
+      opts.commhubPollMs,
+    );
   // Middleware order: dedup → rate-limit → think.
   // Dedup runs first so socket-replay events don't burn rate-limit quota.
   // Rate-limit runs before `onEvent` (IPC handoff to think) so over-limit
@@ -396,12 +434,28 @@ const RATE_LIMIT_GC_THRESHOLD = 50;
 const RATE_LIMIT_HARD_CAP = 10_000;
 
 function selectDefaultEventHandler(
+  nodeAlias: string,
   adapter: FeishuAdapter,
   ttlMs: number,
   ackPlaceholder: boolean,
+  correlationStore?: IMCorrelationStore,
+  commhubClient?: IMBridgeCommHubClient,
+  commhubPollMs?: number,
 ): (event: NormalizedIMEvent) => Promise<void> {
+  const client = commhubClient ?? createEnvCommHubClient();
+  if (client) {
+    return createCommHubEventHandler(
+      nodeAlias,
+      adapter,
+      ttlMs,
+      ackPlaceholder,
+      correlationStore,
+      client,
+      commhubPollMs,
+    );
+  }
   if (typeof process.send === "function") {
-    return createIPCEventHandler(adapter, ttlMs, ackPlaceholder);
+    return createIPCEventHandler(adapter, ttlMs, ackPlaceholder, correlationStore);
   }
   return defaultEventLogger;
 }
@@ -450,6 +504,7 @@ export function createIPCEventHandler(
   adapter: FeishuAdapter,
   ttlMs: number,
   ackPlaceholder: boolean,
+  correlationStore?: IMCorrelationStore,
 ): (event: NormalizedIMEvent) => Promise<void> {
   if (typeof process.send !== "function") {
     throw new Error(
@@ -458,6 +513,7 @@ export function createIPCEventHandler(
   }
 
   const pending = new Map<string, PendingEntry>();
+  const delivered = new Set<string>();
 
   process.on("message", (raw: unknown) => {
     if (!isReplyEnvelope(raw)) return;
@@ -465,160 +521,7 @@ export function createIPCEventHandler(
     if (!entry) return;
     pending.delete(raw.eventKey);
 
-    const replyText = raw.text;
-    const eventKey = raw.eventKey;
-    const { event, placeholderMessageId } = entry;
-    void (async () => {
-      // Vincent 2026-06-26 design lock — always send a NEW message for the
-      // reply (no adapter.edit). The placeholderMessageId is logged for
-      // traceability but is not used to mutate the placeholder. Users get
-      // a second push notification when the reply lands.
-      //
-      // RFC-020 §15 (Vincent UAT 2026-06-29 PDF case): parse outbound
-      // `[[send-file:/abs/path]]` markers, strip from visible text, validate
-      // paths per-conversation, and dispatch each file as its own message
-      // (text first if non-empty, then files in source order). adapter.send()
-      // takes one payload at a time — this loop is the multi-dispatch site.
-      const { cleanedText, files: markerRequests } = parseOutboundMarkers(replyText);
-      // convKey: open_chat_id for groups, open_id (sender) for DMs. The
-      // /work/feishu-attachments/<connection>/<convKey>/ directory is the
-      // single allowed outbound root the agent can write into.
-      // 2026-06-29 Vincent UAT path-unify fix: use the SAME directory
-      // helper as inbound downloads (adapter.ts → downloadImage) and the
-      // system-prompt path the agent is taught (cli.ts injection). One
-      // function, one input shape — eliminates the inbound/outbound
-      // divergence that rejected every PDF Vincent's bot produced.
-      //
-      // Inputs:
-      //   - connectionName: adapter.connectionName (raw, no `#feishu` suffix
-      //     — that suffix lives on the IDEMPOTENCY KEY, not the directory
-      //     name).
-      //   - rawConvId: event.conversation.conversationId — the open_chat_id
-      //     Feishu assigns. Present for both DMs and group chats. Always
-      //     used, NEVER the sender.id (sender.id is per-user, not per-
-      //     conversation, and inbound downloads never used it).
-      const connectionName = adapter.connectionName || "feishu";
-      const expectedDir = feishuOutboundDir(
-        connectionName,
-        event.conversation.conversationId,
-      );
-      // Validate every marker request; collect successes + failures.
-      const validFiles: Array<{ path: string; kind: "image" | "file" }> = [];
-      const failureReasons: string[] = [];
-      for (const req of markerRequests) {
-        const reason = validateOutboundPath({
-          p: req.normalized,
-          expectedDir,
-        });
-        if (reason) {
-          process.stderr.write(
-            `[feishu:bridge] outbound-marker rejected ${req.normalized} for ${eventKey}: ${reason}\n`,
-          );
-          failureReasons.push(reason);
-          continue;
-        }
-        // Read first 16 bytes to magic-byte sniff the kind.
-        let kind: "image" | "file" = "file";
-        try {
-          const fd = fs.openSync(req.normalized, "r");
-          try {
-            const head = Buffer.alloc(16);
-            const n = fs.readSync(fd, head, 0, 16, 0);
-            kind = sniffFileKind(head.subarray(0, n));
-          } finally {
-            fs.closeSync(fd);
-          }
-        } catch (e: any) {
-          process.stderr.write(
-            `[feishu:bridge] outbound-marker sniff failed for ${req.normalized}: ${e?.message ?? e}\n`,
-          );
-          failureReasons.push("[文件附件未发送] 读取文件失败");
-          continue;
-        }
-        validFiles.push({ path: req.normalized, kind });
-      }
-
-      const note = placeholderMessageId
-        ? ` (after placeholder=${placeholderMessageId})`
-        : "";
-
-      // If the agent produced ONLY markers + no surrounding text AND every
-      // marker failed validation, we still owe the user a friendly reply
-      // (silent drop is the worst outcome — user thinks bot is hung).
-      const haveAnyOutbound = validFiles.length > 0 || cleanedText.length > 0;
-      let textToSend = cleanedText;
-      if (!haveAnyOutbound) {
-        textToSend = failureReasons[0] || ALL_FILES_FAILED_FALLBACK;
-      } else if (
-        !cleanedText &&
-        validFiles.length > 0 &&
-        failureReasons.length > 0
-      ) {
-        // Some files dispatched, some failed — let the user know.
-        textToSend = `(${failureReasons[0]})`;
-      }
-
-      try {
-        // Send text first if non-empty (puts the file in context for the user).
-        // Caption-mode (RFC-020 §15.2): when there's at least one valid
-        // attachment in THIS dispatch, the text is a caption — skip the
-        // markdown→PNG renderer (looks like "the bot sent another image"
-        // instead of "the bot sent my file") + skip markdown-card render.
-        if (textToSend) {
-          const { messageId } = await adapter.send({
-            target: event.conversation,
-            text: textToSend,
-            replyToMessageId: event.messageId,
-            correlation: { taskId: eventKey },
-            forceTextOnly: validFiles.length > 0,
-          });
-          process.stderr.write(
-            `[feishu:bridge] reply text sent (messageId=${messageId})${note} for ${eventKey}\n`,
-          );
-        }
-        // Then each file as its own outbound message — magic-byte routing
-        // decides image_key vs file_key.
-        for (const f of validFiles) {
-          try {
-            const filename = f.path.split("/").pop() || "file";
-            const sendArgs: any = {
-              target: event.conversation,
-              replyToMessageId: event.messageId,
-              correlation: { taskId: eventKey },
-            };
-            if (f.kind === "image") {
-              sendArgs.imagePath = f.path;
-            } else {
-              sendArgs.files = [{ path: f.path, name: filename }];
-            }
-            const { messageId } = await adapter.send(sendArgs);
-            process.stderr.write(
-              `[feishu:bridge] outbound ${f.kind} sent (messageId=${messageId}, path=${f.path}) for ${eventKey}\n`,
-            );
-          } catch (e: any) {
-            const msg = e instanceof Error ? e.message : String(e);
-            process.stderr.write(
-              `[feishu:bridge] outbound file send failed (${f.path}): ${msg}\n`,
-            );
-            // Friendly fallback: don't surface the raw vendor error.
-            try {
-              await adapter.send({
-                target: event.conversation,
-                text: `[文件附件发送失败] ${f.path.split("/").pop()} — 稍后再试`,
-                replyToMessageId: event.messageId,
-                correlation: { taskId: eventKey },
-              });
-            } catch {
-              // If even the friendly fallback fails, give up silently;
-              // we've already logged the underlying error.
-            }
-          }
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        process.stderr.write(`[feishu:bridge] reply delivery failed: ${msg}\n`);
-      }
-    })();
+    void deliverFinalReplyOnce(adapter, delivered, raw.eventKey, entry, raw.text, correlationStore);
   });
 
   return async (event: NormalizedIMEvent) => {
@@ -627,7 +530,7 @@ export function createIPCEventHandler(
     pending.set(event.idempotencyKey, { event });
 
     // TTL — sends a NEW timeout notice (no edit, per Vincent 2026-06-26).
-    setTimeout(() => {
+    const timeout = setTimeout(() => {
       const entry = pending.get(event.idempotencyKey);
       if (!entry) return; // reply already arrived
       pending.delete(event.idempotencyKey);
@@ -654,6 +557,7 @@ export function createIPCEventHandler(
         }
       })();
     }, ttlMs);
+    timeout.unref?.();
 
     // Optional placeholder — gives the user an immediate push notification
     // ("bot saw my message"). Awaited so logs stay chronological. Failure
@@ -670,6 +574,20 @@ export function createIPCEventHandler(
         const entry = pending.get(event.idempotencyKey);
         if (entry) {
           entry.placeholderMessageId = messageId;
+          try {
+            await correlationStore?.putCorrelation(event.idempotencyKey, {
+              conversationRef: event.conversation,
+              sourceMessageId: event.messageId,
+              placeholderMessageId: messageId,
+              status: "pending",
+              createdAt: Date.now(),
+            });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            process.stderr.write(
+              `[feishu:bridge] placeholder correlation persist failed: ${msg}\n`,
+            );
+          }
           process.stderr.write(
             `[feishu:bridge] placeholder sent (messageId=${messageId}) for ${event.idempotencyKey}\n`,
           );
@@ -691,6 +609,355 @@ export function createIPCEventHandler(
     );
     const envelope: BridgeIncomingEnvelope = { type: "event", event, outboundDir };
     process.send!(envelope);
+  };
+}
+
+export function createCommHubEventHandler(
+  nodeAlias: string,
+  adapter: FeishuAdapter,
+  ttlMs: number,
+  ackPlaceholder: boolean,
+  correlationStore: IMCorrelationStore | undefined,
+  commhubClient: IMBridgeCommHubClient,
+  pollMs = 1500,
+): (event: NormalizedIMEvent) => Promise<void> {
+  const pending = new Map<string, PendingEntry>();
+  const delivered = new Set<string>();
+
+  const poll = setInterval(() => {
+    void (async () => {
+      const messages = await commhubClient.getInbox(nodeAlias);
+      for (const msg of messages) {
+        if (msg.type !== "reply" || !msg.in_reply_to) continue;
+        let entry = pending.get(msg.in_reply_to);
+        if (!entry) {
+          const persisted = await correlationStore?.getCorrelation(msg.in_reply_to);
+          if (!persisted) {
+            await sendOrphanReplyNotice(adapter, msg.in_reply_to, msg.content);
+            await commhubClient.ackInbox(nodeAlias, msg.id);
+            continue;
+          }
+          entry = {
+            event: {
+              platform: persisted.conversationRef.platform,
+              connectionId: `${nodeAlias}#feishu`,
+              conversation: persisted.conversationRef,
+              sender: { id: "unknown" },
+              messageId: persisted.sourceMessageId,
+              mentioned: true,
+              content: {},
+              receivedAt: persisted.createdAt,
+              idempotencyKey: msg.in_reply_to,
+            },
+            placeholderMessageId: persisted.placeholderMessageId,
+          };
+        }
+        pending.delete(msg.in_reply_to);
+        await deliverFinalReplyOnce(adapter, delivered, msg.in_reply_to, entry, msg.content, correlationStore);
+        await commhubClient.ackInbox(nodeAlias, msg.id);
+      }
+    })().catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`[feishu:bridge] commhub reply poll failed: ${msg}\n`);
+    });
+  }, pollMs);
+  poll.unref?.();
+
+  return async (event: NormalizedIMEvent) => {
+    pending.set(event.idempotencyKey, { event });
+    await sendPlaceholderIfNeeded(adapter, event, pending, ackPlaceholder, correlationStore);
+
+    let pendingKey = event.idempotencyKey;
+    const timeout = setTimeout(() => {
+      const entry = pending.get(pendingKey);
+      if (!entry) return;
+      pending.delete(pendingKey);
+      void sendTimeoutNotice(adapter, event, entry.placeholderMessageId, ttlMs, correlationStore);
+    }, ttlMs);
+    timeout.unref?.();
+
+    const outboundDir = feishuOutboundDir(
+      adapter.connectionName || "feishu",
+      event.conversation.conversationId,
+    );
+    const task = [
+      event.content.text || "",
+      outboundDir ? `\n\n[Feishu outbound directory]\n${outboundDir}` : "",
+    ].join("").trim();
+    const created = await commhubClient.sendTask({
+      alias: nodeAlias,
+      task,
+      priority: "normal",
+      ttlSeconds: Math.max(1, Math.ceil(ttlMs / 1000)),
+      meta: {
+        im: {
+          bridge: "feishu",
+          eventKey: event.idempotencyKey,
+          sourceMessageId: event.messageId,
+          conversation: event.conversation,
+        },
+        attachments: event.content.attachments,
+      },
+    });
+    await correlationStore?.recordSeen(event.idempotencyKey, created.taskId);
+    const existing = pending.get(event.idempotencyKey);
+    if (created.taskId !== event.idempotencyKey && existing) {
+      pending.delete(event.idempotencyKey);
+      pending.set(created.taskId, existing);
+      pendingKey = created.taskId;
+    }
+    await correlationStore?.putCorrelation(created.taskId, {
+      conversationRef: event.conversation,
+      sourceMessageId: event.messageId,
+      placeholderMessageId: existing?.placeholderMessageId,
+      status: "pending",
+      createdAt: Date.now(),
+    });
+  };
+}
+
+async function deliverFinalReplyOnce(
+  adapter: FeishuAdapter,
+  delivered: Set<string>,
+  eventKey: string,
+  entry: PendingEntry,
+  replyText: string,
+  correlationStore?: IMCorrelationStore,
+): Promise<void> {
+  if (delivered.has(eventKey)) {
+    process.stderr.write(`[feishu:bridge] duplicate final reply ignored for ${eventKey}\n`);
+    return;
+  }
+  delivered.add(eventKey);
+  await deliverFinalReply(adapter, eventKey, entry, replyText);
+  await correlationStore?.updateStatus(eventKey, "completed");
+}
+
+async function deliverFinalReply(
+  adapter: FeishuAdapter,
+  eventKey: string,
+  entry: PendingEntry,
+  replyText: string,
+): Promise<void> {
+  const { event, placeholderMessageId } = entry;
+  const { cleanedText, files: markerRequests } = parseOutboundMarkers(replyText);
+  const expectedDir = feishuOutboundDir(
+    adapter.connectionName || "feishu",
+    event.conversation.conversationId,
+  );
+  const validFiles: Array<{ path: string; kind: "image" | "file" }> = [];
+  const failureReasons: string[] = [];
+  for (const req of markerRequests) {
+    const reason = validateOutboundPath({ p: req.normalized, expectedDir });
+    if (reason) {
+      process.stderr.write(
+        `[feishu:bridge] outbound-marker rejected ${req.normalized} for ${eventKey}: ${reason}\n`,
+      );
+      failureReasons.push(reason);
+      continue;
+    }
+    let kind: "image" | "file" = "file";
+    try {
+      const fd = fs.openSync(req.normalized, "r");
+      try {
+        const head = Buffer.alloc(16);
+        const n = fs.readSync(fd, head, 0, 16, 0);
+        kind = sniffFileKind(head.subarray(0, n));
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch (e: any) {
+      process.stderr.write(
+        `[feishu:bridge] outbound-marker sniff failed for ${req.normalized}: ${e?.message ?? e}\n`,
+      );
+      failureReasons.push("[文件附件未发送] 读取文件失败");
+      continue;
+    }
+    validFiles.push({ path: req.normalized, kind });
+  }
+
+  const note = placeholderMessageId ? ` (after placeholder=${placeholderMessageId})` : "";
+  const haveAnyOutbound = validFiles.length > 0 || cleanedText.length > 0;
+  let textToSend = cleanedText;
+  if (!haveAnyOutbound) textToSend = failureReasons[0] || ALL_FILES_FAILED_FALLBACK;
+  else if (!cleanedText && validFiles.length > 0 && failureReasons.length > 0) {
+    textToSend = `(${failureReasons[0]})`;
+  }
+
+  try {
+    if (textToSend) {
+      const { messageId } = await adapter.send({
+        target: event.conversation,
+        text: textToSend,
+        replyToMessageId: event.messageId,
+        correlation: { taskId: eventKey },
+        forceTextOnly: validFiles.length > 0,
+      });
+      process.stderr.write(
+        `[feishu:bridge] reply text sent (messageId=${messageId})${note} for ${eventKey}\n`,
+      );
+    }
+    for (const f of validFiles) {
+      try {
+        const filename = f.path.split("/").pop() || "file";
+        const sendArgs: any = {
+          target: event.conversation,
+          replyToMessageId: event.messageId,
+          correlation: { taskId: eventKey },
+        };
+        if (f.kind === "image") sendArgs.imagePath = f.path;
+        else sendArgs.files = [{ path: f.path, name: filename }];
+        const { messageId } = await adapter.send(sendArgs);
+        process.stderr.write(
+          `[feishu:bridge] outbound ${f.kind} sent (messageId=${messageId}, path=${f.path}) for ${eventKey}\n`,
+        );
+      } catch (e: any) {
+        const msg = e instanceof Error ? e.message : String(e);
+        process.stderr.write(`[feishu:bridge] outbound file send failed (${f.path}): ${msg}\n`);
+        try {
+          await adapter.send({
+            target: event.conversation,
+            text: `[文件附件发送失败] ${f.path.split("/").pop()} — 稍后再试`,
+            replyToMessageId: event.messageId,
+            correlation: { taskId: eventKey },
+          });
+        } catch {}
+      }
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[feishu:bridge] reply delivery failed: ${msg}\n`);
+  }
+}
+
+async function sendPlaceholderIfNeeded(
+  adapter: FeishuAdapter,
+  event: NormalizedIMEvent,
+  pending: Map<string, PendingEntry>,
+  ackPlaceholder: boolean,
+  correlationStore?: IMCorrelationStore,
+): Promise<void> {
+  if (!ackPlaceholder) return;
+  try {
+    const { messageId } = await adapter.send({
+      target: event.conversation,
+      text: ACK_PLACEHOLDER_TEXT,
+      replyToMessageId: event.messageId,
+      correlation: { taskId: event.idempotencyKey },
+    });
+    const entry = pending.get(event.idempotencyKey);
+    if (!entry) return;
+    entry.placeholderMessageId = messageId;
+    await correlationStore?.putCorrelation(event.idempotencyKey, {
+      conversationRef: event.conversation,
+      sourceMessageId: event.messageId,
+      placeholderMessageId: messageId,
+      status: "pending",
+      createdAt: Date.now(),
+    });
+    process.stderr.write(
+      `[feishu:bridge] placeholder sent (messageId=${messageId}) for ${event.idempotencyKey}\n`,
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(
+      `[feishu:bridge] placeholder send failed: ${msg} — reply will still send as a new message\n`,
+    );
+  }
+}
+
+async function sendTimeoutNotice(
+  adapter: FeishuAdapter,
+  event: NormalizedIMEvent,
+  placeholderMessageId: string | undefined,
+  ttlMs: number,
+  correlationStore?: IMCorrelationStore,
+): Promise<void> {
+  try {
+    await adapter.send({
+      target: event.conversation,
+      text: TIMEOUT_NOTICE_TEXT,
+      replyToMessageId: event.messageId,
+      correlation: { taskId: event.idempotencyKey },
+    });
+    await correlationStore?.updateStatus(event.idempotencyKey, "timeout");
+    const note = placeholderMessageId ? ` (after placeholder=${placeholderMessageId})` : "";
+    process.stderr.write(
+      `[feishu:bridge] timeout-notify sent${note} for ${event.idempotencyKey} after ${ttlMs}ms\n`,
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[feishu:bridge] timeout-notify send failed: ${msg}\n`);
+  }
+}
+
+async function sendOrphanReplyNotice(
+  adapter: FeishuAdapter,
+  taskId: string,
+  text: string,
+): Promise<void> {
+  process.stderr.write(
+    `[feishu:bridge] orphan commhub reply for ${taskId}: ${text.slice(0, 120)}\n`,
+  );
+}
+
+function createEnvCommHubClient(): IMBridgeCommHubClient | null {
+  const url = (process.env.COMMHUB_URL || process.env.ANET_HUB_URL || "").replace(/\/$/, "");
+  const token =
+    process.env.ANET_HUB_TOKEN ||
+    process.env.COMMHUB_TOKEN ||
+    process.env.COMMHUB_AUTH_TOKEN ||
+    "";
+  if (!url) return null;
+
+  async function call(tool: string, args: Record<string, unknown>): Promise<any> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+    };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(`${url}/mcp`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: Date.now(),
+        method: "tools/call",
+        params: { name: tool, arguments: args },
+      }),
+    });
+    const raw = await res.text();
+    if (!res.ok) throw new Error(`CommHub ${tool} failed: HTTP ${res.status}`);
+    const match = raw.match(/data: (.+)/);
+    const data = match ? JSON.parse(match[1]) : JSON.parse(raw);
+    const textResult = data?.result?.content?.[0]?.text;
+    const parsed = textResult ? JSON.parse(textResult) : data;
+    if (parsed?.ok === false) {
+      throw new Error(parsed.message || parsed.error || `CommHub ${tool} rejected request`);
+    }
+    return parsed;
+  }
+
+  return {
+    async sendTask(args) {
+      const result = await call("send_task", {
+        alias: args.alias,
+        task: args.task,
+        priority: args.priority ?? "normal",
+        ttl_seconds: args.ttlSeconds,
+        meta: args.meta,
+      });
+      const taskId = result?.task_id || result?.message_id || result?.id;
+      if (!taskId) throw new Error("CommHub send_task returned no task_id");
+      return { taskId };
+    },
+    async getInbox(alias) {
+      const result = await call("get_inbox", { alias, limit: 20 });
+      return Array.isArray(result?.messages) ? result.messages : [];
+    },
+    async ackInbox(alias, messageId) {
+      await call("ack_inbox", { alias, message_id: messageId });
+    },
   };
 }
 

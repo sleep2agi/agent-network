@@ -288,6 +288,11 @@ L1_TESTS=(
   "test765-batch-runtime-gate"
   "test766-bunx-preflight"
   "test746-setup-bun-pin"
+  # 2026-08-27 补注册。Feishu CommHub route 是纯 mock/本地 Docker 验证：
+  # 不需要 FEISHU_APP_SECRET，不连接真实飞书，不往生产 IM 发探针。
+  # 它锁住三件事：legacy IPC + CommHub 双路径同时活着时 witnessed-red 为
+  # sendCount:2；CommHub reply 只发一次；orphan reply 明确日志+ack，不回落默认会话。
+  "test1241-feishu-commhub-routing"
   # 2026-08-13 扫出三个从没进 CI 的完整 Docker 门(test224 / test597 / test679),
   # 一度想加在这里,但 L1 是「~16s 并行」的快层、job 预算 5 分钟,实测在 CI 上
   # 已经用掉 141–148s;而 qa.sh 的 build 是**串行**的(只有 docker run 并行),
