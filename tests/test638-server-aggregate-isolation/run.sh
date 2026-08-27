@@ -34,7 +34,8 @@ dump_agg_failure() {
   # #1274: aggregate 失败时把诊断吐给 CI —— 否则 set -e 无声死，红无任何指名信息
   local label="$1" output="$2" rc="$3"
   echo "FAIL: $label aggregate exited rc=$rc — offending files:"
-  grep '^TEST_FILE_RESULT' "$output" | awk -F'\t' '$0 !~ /exit=0/ || $0 ~ /timeout=true/' || true
+  grep '^TEST_FILE_RESULT' "$output" \
+    | awk -F'\t' '{bad=0; for(i=1;i<=NF;i++){if($i=="timeout=true")bad=1; if($i ~ /^exit=/ && $i!="exit=0")bad=1}; if(bad)print}' || true
   echo "--- last 40 lines of $output ---"
   tail -40 "$output" || true
 }
