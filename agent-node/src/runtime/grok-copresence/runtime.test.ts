@@ -21,6 +21,27 @@ import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { basename, join, resolve } from "path";
 import { describe, expect, test } from "bun:test";
+import { processGenerationGone, readProcessGeneration } from "./leader-lifecycle";
+
+/** 轮询到「这一代进程没了」,或到上界为止;返回的是**条件**不是时间。
+ *
+ * 🔴 为什么不能用 `existsSync(/proc/<pid>)`:SIGTERM/SIGKILL 送达后、父进程
+ * reap 之前进程处于 `Z`,`/proc` 条目仍在,而产品侧 `sameProcessGenerationExists`
+ * 把 `Z`/`X` 当作「已消失」。两者在那个窗口里给出相反的答案(#1315)。
+ * 窗口与是否升级 SIGKILL 无关 —— 任何被 fork 的子进程退出后、父进程 wait
+ * 之前都是 `Z`。
+ *
+ * 与 leader-lifecycle.test.ts 里那份是同一个模式;这里保留一份局部实现,是
+ * 因为为八行代码新增一个共享文件、再让两个测试文件各 import 一次,反而更绕。
+ */
+async function waitGenerationGone(pid: number, startTime: string, boundMs = 5_000): Promise<boolean> {
+  const deadline = Date.now() + boundMs;
+  while (Date.now() < deadline) {
+    if (processGenerationGone(pid, startTime)) return true;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  return processGenerationGone(pid, startTime);
+}
 import { connectGrokAttach } from "../../../../agent-network/src/grok-attach-client";
 import {
   describeGrokCopresenceLiveness,
@@ -537,10 +558,13 @@ describe("Grok copresence runtime integration", () => {
       expect(leaderPid).toBeGreaterThan(1);
       expect(existsSync(`/proc/${leaderPid}`)).toBe(true);
       expect(existsSync(fixture.leaderSocket)).toBe(true);
+      // 先拍下「这一代」,close 之后才能断言正是这一代没了(#1315)。
+      const leaderGen = readProcessGeneration(leaderPid);
+      expect(leaderGen).not.toBeNull();
 
       await runtime.close();
       runtime = undefined;
-      expect(existsSync(`/proc/${leaderPid}`)).toBe(false);
+      expect(await waitGenerationGone(leaderPid, leaderGen!)).toBe(true);
       expect(existsSync(fixture.leaderSocket)).toBe(false);
     } finally {
       await runtime?.close();
@@ -1308,12 +1332,18 @@ describe("Grok copresence runtime integration", () => {
       runtime = await fixture.open();
       const footprint = seedPostStopFootprint(fixture);
       const firstLeader = fixture.currentLeaderPid();
+      // 必须在 crash 之前拍下这一代:之后它可能已是 Z、甚至已被 reap,
+      // 那时再读就分不清「拍的是哪一代」了。
+      const firstGen = readProcessGeneration(firstLeader);
+      expect(firstGen).not.toBeNull();
       await fixture.crashCurrent();
       await waitFor(() => fixture.recoverySpawnBlocked, 5_000);
       expect(existsSync(footprint.promptHistory)).toBe(true);
       const secondLeader = fixture.currentLeaderPid();
       expect(secondLeader).not.toBe(firstLeader);
       expect(existsSync(`/proc/${secondLeader}`)).toBe(true);
+      const secondGen = readProcessGeneration(secondLeader);
+      expect(secondGen).not.toBeNull();
 
       const closing = runtime.close();
       fixture.releaseRecoverySpawn();
@@ -1322,8 +1352,10 @@ describe("Grok copresence runtime integration", () => {
 
       for (const path of footprint.removedPaths) expect(existsSync(path), path).toBe(false);
 
-      expect(existsSync(`/proc/${firstLeader}`)).toBe(false);
-      expect(existsSync(`/proc/${secondLeader}`)).toBe(false);
+      // 断的是「那两代进程没了」,不是「/proc 目录没了」——
+      // crash / close 之后到父进程 reap 之前都是 Z,存在性检查会误判为「还在」。
+      expect(await waitGenerationGone(firstLeader, firstGen!)).toBe(true);
+      expect(await waitGenerationGone(secondLeader, secondGen!)).toBe(true);
       expect(existsSync(fixture.leaderSocket)).toBe(false);
     } finally {
       fixture.releaseRecoverySpawn();
