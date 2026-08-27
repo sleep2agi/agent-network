@@ -102,6 +102,32 @@ vercel promote <上一个部署的 URL>            # 或 vercel redeploy <URL>
 按 §19,在隔离环境演练并把证据记进 `docs/tests/` 之前,**不得宣称"可恢复"** ——
 当前地位是「已知正确的操作手册」。
 
-其中**登录态与项目关联**是最大的未覆盖项:`.vercel/project.json` 里的
-`projectId` / `orgId` 可以入库(不是密钥),但 CLI 的登录凭据不能,
+其中**登录态**仍是未覆盖项:CLI 的登录凭据不能入库,
 只记录"需要有权限的账号登录"这一事实与获取方式。
+
+**项目关联已经入库了**(2026-08-27),见下一节 —— 那一半的 bus-factor 已经消掉。
+
+## 恢复项目关联
+
+`docs-site/.vercel/` 被 gitignore(**那条 ignore 是安全属性,别为了这三个字段撤掉它** ——
+它挡的是 `vercel link` 之后把登录态之类的东西顺手提交进来)。
+所以项目关联单独存在 [`vercel-project.json`](./vercel-project.json):
+
+```bash
+mkdir -p docs-site/.vercel
+python3 - <<'EOF'
+import json
+src = json.load(open('deploy/docs-site/vercel-project.json'))
+json.dump({k: src[k] for k in ('projectId', 'orgId', 'projectName')},
+          open('docs-site/.vercel/project.json', 'w'), indent=2)
+EOF
+```
+
+之后 `vercel --prod --yes` 就能认到项目;**登录仍需一个有权限的账号**(`vercel login`)。
+
+🔴 **那三个字段不是密钥** —— 没有 Vercel token,它们不授予任何权限。
+入库的理由是降 bus-factor:在此之前**项目关联只存在于某一台机器上**,
+跟"部署要靠某个人记得跑"是同一个单点,而这一半**不需要任何 Vercel 权限就能修**。
+
+🔴 **只收录不透明 ID,不收录 CLI 输出里那个组织 slug** —— 那个 slug 含人名,
+两个 ID 不含。降 bus-factor 不必以新增一处真实标识为代价。
