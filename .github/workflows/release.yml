@@ -113,6 +113,7 @@ jobs:
     outputs:
       package: ${{ steps.resolve.outputs.package }}
       version: ${{ steps.resolve.outputs.version }}
+      dir: ${{ steps.resolve.outputs.dir }}
       tarball: ${{ steps.pack.outputs.tarball }}
     steps:
       - uses: actions/checkout@v4
@@ -139,24 +140,36 @@ jobs:
               *)                echo "::error::unknown tag shape: $tag"; exit 1 ;;
             esac
           fi
+          # 🔴 包名 ≠ 目录名。agent-network/ 和 agent-node/ 恰好同名，
+          # 于是 workflow 一直直接拿包名当 working-directory —— 而
+          # commhub-server 住在 server/。2026-08-27 第一次用本 workflow 发它时：
+          #   An error occurred trying to start process '/usr/bin/bash'
+          #   with working directory '/home/runner/work/.../commhub-server'
+          # 两个包碰巧同名，把这个区分隐藏了三个包那么久。
+          case "$pkg" in
+            commhub-server) dir=server ;;
+            *)              dir="$pkg" ;;
+          esac
+          [ -f "$dir/package.json" ] || { echo "::error::resolved dir '$dir' has no package.json (pkg=$pkg)"; exit 1; }
           echo "package=$pkg" >> "$GITHUB_OUTPUT"
           echo "version=$ver" >> "$GITHUB_OUTPUT"
-          echo "Gating $pkg @ $ver"
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+          echo "Gating $pkg @ $ver (dir=$dir)"
 
       - name: Install + build target package
-        working-directory: ${{ steps.resolve.outputs.package }}
+        working-directory: ${{ steps.resolve.outputs.dir }}
         run: |
           bun install --frozen-lockfile
           bun run build
 
       - name: Pack tarball
         id: pack
-        working-directory: ${{ steps.resolve.outputs.package }}
+        working-directory: ${{ steps.resolve.outputs.dir }}
         run: |
           set -euo pipefail
           # npm pack honors prepublishOnly + .npmignore, exactly what `npm publish` would ship
           tarball=$(npm pack --json | bun -e 'const a=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(a[0].filename)')
-          echo "tarball=${{ steps.resolve.outputs.package }}/$tarball" >> "$GITHUB_OUTPUT"
+          echo "tarball=${{ steps.resolve.outputs.dir }}/$tarball" >> "$GITHUB_OUTPUT"
           ls -la "$tarball"
 
       - name: Upload tarball
