@@ -63,6 +63,9 @@ try {
   $env:ANET_TEST1212_VENDOR_SHA256 = $vendorSha
   $env:ANET_TEST1212_PRIVATE = $privateRoot
   $env:ANET_TEST1212_ARTIFACTS = $artifacts
+  $bunExe = (Get-Command bun -CommandType Application -ErrorAction Stop).Source
+  if (-not $bunExe -or -not (Test-Path -LiteralPath $bunExe -PathType Leaf)) { throw "trusted Bun executable unavailable" }
+  $env:ANET_TEST1212_BUN = $bunExe
 
   Push-Location (Join-Path $repo "agent-network")
   bun install --frozen-lockfile
@@ -82,5 +85,6 @@ try {
   throw
 } finally {
   Remove-Item Env:ANET_TEST1212_CODEX -ErrorAction SilentlyContinue
+  Remove-Item Env:ANET_TEST1212_BUN -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $privateRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
