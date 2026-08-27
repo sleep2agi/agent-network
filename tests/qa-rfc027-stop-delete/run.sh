@@ -124,6 +124,31 @@ build_list_my_children_body() {
 JSON
 }
 
+# wait_child_in_daemon_map: block until the daemon has actually recorded the
+# child in its in-memory childrenMap.
+#
+# 🔴 Registering with the hub is NOT that moment. create-node-daemon.ts calls
+# recordSpawnedChild (:512) AFTER the +FAIL_FAST_MS capability check (:475),
+# so there is a ~5s window in which the hub knows the node and the daemon
+# cannot stop it — every stop/delete in that window acks noop_not_my_child.
+# That window is a separate defect from #1286; this helper keeps this suite
+# from silently testing it instead of what it means to test.
+#
+# The capability-check log line is emitted immediately before the record, so
+# waiting on it (for THIS child's pid) is tied to the real ordering rather
+# than to a guessed sleep.
+wait_child_in_daemon_map() {
+  local alias="$1" deadline=$(( $(date +%s) + ${2:-40} )) pid=""
+  while [[ $(date +%s) -lt $deadline ]]; do
+    pid=$(grep -oE "spawned child '$alias' pid=[0-9]+" /tmp/daemon-027.log 2>/dev/null | tail -1 | grep -oE '[0-9]+$')
+    if [[ -n "$pid" ]] && grep -q "capability check OK: pid=$pid " /tmp/daemon-027.log 2>/dev/null; then
+      echo "$pid"; return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 # wait_stop_request_done: poll until node_stop_requests.status terminal.
 wait_stop_request_done() {
   local req_id="$1" deadline=$(( $(date +%s) + ${2:-30} ))
@@ -536,6 +561,79 @@ fi
 # node_create_requests.daemon_node_id keyed by child_node_id.
 # 3 cases from 通信龙 #348 ack: L1 normal / L2 cross-tenant / L3 missing.
 # (CHILD_L1 was spawned at A.1.SIBLING; it survived A.3 — now we stop it.)
+note "A.7 (#1286) stop THEN delete the SAME child — the path that actually breaks"
+# A.5 deletes a child that was never stopped, so the daemon's childrenMap
+# still has it (hit path). In real use the client stops a node and then
+# deletes it, and a successful stop REMOVES the entry — so the delete arrives
+# with the map already empty. That made the miss guaranteed, not incidental,
+# and the old shared early-return acked without doing anything.
+# Assertions below are the A.5 ones reused verbatim, against a child that took
+# the stop-then-delete route.
+CHILD_SD="rfc027-child-stopdel"
+BODY=$(build_create_node_body "$DAEMON_NODE_ID" "$CHILD_SD" "claude-agent-sdk" "claude-opus-rfc027-sd" "$NET_ID")
+RESP=$(mcp_call "$UTOK" "$BODY")
+REQ_ID_SD=$(echo "$RESP" | jq -r .request_id 2>/dev/null)
+CHILD_SD_NODE_ID="node_${REQ_ID_SD#cr_}"
+CHILD_SD_REG=""
+for _ in $(seq 1 40); do
+  if curl -sS "$HUB_BASE/api/nodes?node_id=$CHILD_SD_NODE_ID" -H "Authorization: Bearer $UTOK" \
+       | jq -e ".nodes[0].node_id == \"$CHILD_SD_NODE_ID\"" >/dev/null 2>&1; then
+    CHILD_SD_REG=yes; break
+  fi
+  sleep 1
+done
+[[ -n "$CHILD_SD_REG" ]] && ok "A.7 child registered ($CHILD_SD / $CHILD_SD_NODE_ID)" \
+  || bad "A.7 child never registered"
+# Premise: the daemon must actually have this child in childrenMap before we
+# stop it, otherwise A.7.1 measures the ~5s record-after-capability-check
+# window instead of the stop-then-delete path this section is about.
+SD_PID=$(wait_child_in_daemon_map "$CHILD_SD" 40) \
+  && ok "A.7 daemon recorded child in childrenMap (pid=$SD_PID)" \
+  || bad "A.7 daemon never recorded child within 40s — stop/delete below would test the wrong thing"
+
+# --- step 1: stop it (this is what empties the daemon's childrenMap entry) ---
+BODY=$(build_stop_node_body "$CHILD_SD_NODE_ID" "$DAEMON_NODE_ID" "$NET_ID")
+RESP=$(mcp_call "$UTOK" "$BODY")
+SD_STOP_REQ=$(echo "$RESP" | jq -r .request_id 2>/dev/null)
+SD_STOP_STATUS=$(wait_stop_request_done "$SD_STOP_REQ" 40)
+[[ "$SD_STOP_STATUS" == "stopped" ]] && ok "A.7.1 stop_node finalized (status=stopped)" \
+  || bad "A.7.1 stop_node did not finalize (status='$SD_STOP_STATUS')"
+SD_STOPPED_COUNT=$(alias_pgrep_count "$CHILD_SD")
+[[ "$SD_STOPPED_COUNT" -eq 0 ]] && ok "A.7.1 pgrep $CHILD_SD = 0 after stop" \
+  || bad "A.7.1 pgrep $CHILD_SD = $SD_STOPPED_COUNT after stop"
+# Premise assertion: the config dir must still be there, otherwise the delete
+# below would pass for the wrong reason.
+[[ -d "$HOME/.anet/nodes/$CHILD_SD" ]] && ok "A.7.1 config dir still present after stop (delete has something to do)" \
+  || bad "A.7.1 config dir already gone after stop — A.7.2 would pass vacuously"
+
+# --- step 2: delete the same child; daemon's map no longer has it ---
+BODY=$(build_delete_node_body "$CHILD_SD_NODE_ID" "$DAEMON_NODE_ID" "$CHILD_SD" "$NET_ID")
+RESP=$(mcp_call "$UTOK" "$BODY")
+SD_DEL_REQ=$(echo "$RESP" | jq -r .request_id 2>/dev/null)
+SD_DEL_STATUS=$(wait_stop_request_done "$SD_DEL_REQ" 40)
+[[ "$SD_DEL_STATUS" == "stopped" ]] && ok "A.7.2 delete after stop finalized (status=stopped, not stuck in 'deleting')" \
+  || { bad "A.7.2 delete after stop did not finalize (status='$SD_DEL_STATUS')"; tail -30 /tmp/daemon-027.log; }
+
+SD_BACKUPS=( "$HOME/.anet/deleted"/*-"$CHILD_SD" )
+if [[ -d "${SD_BACKUPS[0]:-}" ]]; then
+  ok "A.7.2 backup dir present: ${SD_BACKUPS[0]}"
+  [[ -f "${SD_BACKUPS[0]}/config.json" ]] && ok "A.7.2 backup carries config.json (real move, not empty dir)" \
+    || bad "A.7.2 backup dir has no config.json"
+  SD_MODE=$(stat -c '%a' "${SD_BACKUPS[0]}")
+  [[ "$SD_MODE" == "700" ]] && ok "A.7.2 backup dir mode = 700" || bad "A.7.2 backup dir mode = $SD_MODE"
+else
+  bad "A.7.2 no backup dir for $CHILD_SD — delete did nothing (this is #1286)"
+  ls -la "$HOME/.anet/deleted" 2>/dev/null || true
+fi
+[[ ! -d "$HOME/.anet/nodes/$CHILD_SD" ]] && ok "A.7.2 original config dir gone (no residue on the target machine)" \
+  || bad "A.7.2 original config dir $HOME/.anet/nodes/$CHILD_SD still present after delete"
+
+SD_ROW=$(sqlite3 "$HUB_DB" "SELECT COUNT(*) FROM nodes WHERE node_id='$CHILD_SD_NODE_ID';" 2>/dev/null)
+[[ "$SD_ROW" == "0" ]] && ok "A.7.2 nodes row deleted (hub converged)" \
+  || bad "A.7.2 nodes row still present (count=$SD_ROW) — hub stuck"
+SD_NTOK=$(sqlite3 "$HUB_DB" "SELECT COUNT(*) FROM api_tokens WHERE name='node:$CHILD_SD' AND revoked_at IS NOT NULL;" 2>/dev/null)
+[[ "$SD_NTOK" -ge 1 ]] && ok "A.7.2 child ntok revoked" || bad "A.7.2 child ntok not revoked"
+
 note "L.1 stop_node with daemon_node_id OMITTED → hub auto-resolves"
 BODY=$(build_stop_node_body "$CHILD_L1_NODE_ID" "" "$NET_ID")
 RESP=$(mcp_call "$UTOK" "$BODY")
