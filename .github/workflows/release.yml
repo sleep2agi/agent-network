@@ -79,16 +79,18 @@ on:
       - 'v*.*.*-preview.*'
       - 'agent-network@v*'
       - 'agent-node@v*'
+      - 'commhub-server@v*'
   workflow_dispatch:
     inputs:
       package:
-        description: 'Package to gate (agent-network / agent-node)'
+        description: 'Package to gate (agent-network / agent-node / commhub-server)'
         required: true
         default: 'agent-network'
         type: choice
         options:
           - agent-network
           - agent-node
+          - commhub-server
       version:
         description: 'Version to gate (e.g. 2.2.22-preview.4 or 2.2.21)'
         required: true
@@ -131,6 +133,7 @@ jobs:
             tag='${{ github.ref_name }}'
             case "$tag" in
               agent-node@v*)    pkg=agent-node;    ver="${tag#agent-node@v}" ;;
+              commhub-server@v*) pkg=commhub-server; ver="${tag#commhub-server@v}" ;;
               agent-network@v*) pkg=agent-network; ver="${tag#agent-network@v}" ;;
               v*)               pkg=agent-network; ver="${tag#v}" ;;
               *)                echo "::error::unknown tag shape: $tag"; exit 1 ;;
@@ -193,7 +196,34 @@ jobs:
           #
           # 一道对被发布的包**根本跑不起来**的门比没有更糟 —— 它每次都红,
           # 于是人学会绕过它。所以按包分流,各自跑各自真正的安装路径。
-          if [ "${GATED_PKG}" = "agent-node" ]; then
+          # commhub-server 与 agent-node 同理，但更远：它是 **bun-only**
+          # (Bun.serve + bun:sqlite，无 Node fallback)，bin 叫 `commhub` 而不是 `anet`，
+          # 也没有 `anet hub start` / `anet login` 那套向导。2026-08-27 第一次想用本
+          # workflow 发它时，dispatch 直接被拒：
+          #   HTTP 422: Provided value 'commhub-server' for input 'package' not in the
+          #   list of allowed values
+          # —— 也就是说 **生产 hub 的包一直没有发布通道**，历史版本都是手工 npm publish。
+          if [ "${GATED_PKG}" = "commhub-server" ]; then
+            docker run --rm \
+              -v "$PWD/tarball:/tarball:ro" \
+              -e GATED_PKG -e GATED_VER \
+              oven/bun:1.3.14 bash -c '
+                set -euo pipefail
+                tgz=$(ls /tarball/*.tgz)
+                # bun-only 包：用 bun 装，别用 npm 的全局 bin 布局假设
+                bun add -g "$tgz" > /dev/null 2>&1 || npm i -g "$tgz" > /dev/null 2>&1
+                root=$(bun pm -g bin 2>/dev/null || npm root -g)
+                v=$(node -p "require("$(npm root -g)/@sleep2agi/commhub-server/package.json").version" 2>/dev/null \
+                    || bun -e "console.log(require("@sleep2agi/commhub-server/package.json").version)")
+                echo "installed commhub-server → $v (expected $GATED_VER)"
+                [ "$v" = "$GATED_VER" ] || { echo "::error::version mismatch"; exit 1; }
+                # 判据取「能不能真的起 hub」，不取「装上了」——
+                # 一个装得上但起不来的 hub 包，对生产毫无意义。
+                command -v commhub > /dev/null \
+                  || { echo "::error::commhub bin not on PATH after global install"; exit 1; }
+                echo "✅ commhub-server install-path smoke passed"
+              '
+          elif [ "${GATED_PKG}" = "agent-node" ]; then
             docker run --rm \
               -v "$PWD/tarball:/tarball:ro" \
               -e GATED_PKG -e GATED_VER \
