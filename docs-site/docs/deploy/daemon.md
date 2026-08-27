@@ -204,7 +204,7 @@ hub 侧一切看着都对，Dashboard 的「选服务器」也会把它列为可
 `[create-node] spawned child '<name>' pid=…` 和 `+5000ms capability check OK`，
 且新节点自己注册回 hub。**看不到这两行就是没配对**——它不会重试。
 
-### 4. 确认它真的起来了
+### 4. 确认它**进程**起来了
 
 ```bash
 anet daemon list
@@ -227,6 +227,9 @@ Hub 那一侧每 3 分钟能看到它的心跳：
 要确认「hub 真的看见了」，看上面那两行 `SSE ←` / `report_status`，
 或到 Dashboard 的节点列表里找 `daemon`。
 
+🔴 **但这一节确认的只是「进程活着、hub 看得见」，不是「它能替你干活」。**
+心跳正常的 daemon 仍然可能**创建不了任何节点** —— 见下一节的验收判据。
+
 ### 5. 从 Dashboard 远程操作它
 
 daemon 起来并连上 hub 之后，打开 Dashboard：
@@ -238,6 +241,31 @@ anet hub dashboard        # 默认 http://localhost:3000
 在节点列表里能看到 `daemon`（`role=host_supervisor`）。
 它与普通节点的区别是：**可以代你在这台机器上创建和启动别的节点** ——
 这正是「远程建节点」这条路径的落点，不必再 ssh 上机器敲 `anet node create`。
+
+::: danger 🔴 第一次创建节点：`ok:true` **不是**成功判据
+走到这一步时，所有你看得见的信号都会告诉你"成了"：daemon 在线、心跳正常、
+Dashboard 把它列进「选服务器」、点下去 `create_node` 返回 **`ok:true` + request_id**。
+
+**而节点可能根本没被创建**，失败只写在 **daemon 那台机器的本机日志**里
+（hub 不知情，Dashboard 也不会变红）。**不知道要去看那份日志的人，会卡在这里。**
+
+**所以第一次创建，请按日志验收，别按界面验收**：
+
+```bash
+# 在跑 daemon 的那台机器上
+tail -f ~/daemon-<name>.log        # 或你启动时重定向到的那个文件
+```
+
+| 看到 | 含义 |
+|---|---|
+| `[create-node] spawned child '<name>' pid=…`<br>`+5000ms capability check OK` | ✅ 真的创建了，新节点会自己注册回 hub |
+| `[create-node] anet_bin_unsafe_path: …` | ❌ `ANET_BIN` 没配对 → [3.6 节](#anet-bin-pin)。**它不会重试** |
+| 什么都没有 | ❌ doorbell 没到，检查 daemon 是否真的连着 hub（§4） |
+
+⚠️ **Windows 上这一步目前必失败**，且症状同样具有欺骗性（注册、心跳、`ok:true` 全正常）——
+见 [3.6 节末尾](#anet-bin-pin) 与 [#1290](https://github.com/sleep2agi/agent-network/issues/1290)。
+在 #1290 修好之前，Windows 机器可以跑 daemon，但**不要指望它 fork 出子节点**。
+:::
 
 ---
 

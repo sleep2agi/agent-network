@@ -218,7 +218,7 @@ telemetry, but do not expect it to fork child nodes.**
 node must register itself back to the hub. **Without those two lines it is not wired up** —
 it will not retry.
 
-### 4. Confirm it actually came up
+### 4. Confirm the **process** came up
 
 ```bash
 anet daemon list
@@ -241,6 +241,10 @@ On the Hub side you get a heartbeat every 3 minutes:
 hub knows about it. For that, look at the `SSE ←` / `report_status` lines above, or find
 `daemon` in the Dashboard node list.
 
+🔴 **But this section only confirms "the process is alive and the hub can see it" — not
+"it can do work for you."** A daemon with a healthy heartbeat can still be **unable to
+create any node**. The acceptance check for that is in the next section.
+
 ### 5. Drive it remotely from the Dashboard
 
 Once the daemon is up and connected, open the Dashboard:
@@ -253,6 +257,34 @@ anet hub dashboard        # http://localhost:3000 by default
 ordinary node: **it can create and start other nodes on that machine for you** — which is
 the point of remote node creation. You no longer need to ssh in and run `anet node create`
 by hand.
+
+::: danger 🔴 Your first node creation: `ok:true` is **not** the success criterion
+At this step every signal you can see says it worked: the daemon is online, the heartbeat
+is healthy, the Dashboard lists it under "choose a server", and clicking through makes
+`create_node` return **`ok:true` plus a request_id**.
+
+**And the node may not have been created at all.** The failure is written only to the
+**local log on the daemon's own machine** — the hub never learns about it and the
+Dashboard never turns red. **Anyone who does not know to open that log gets stuck here.**
+
+**So verify your first creation from the log, not from the UI:**
+
+```bash
+# on the machine running the daemon
+tail -f ~/daemon-<name>.log        # or whatever file you redirected to at startup
+```
+
+| What you see | Meaning |
+|---|---|
+| `[create-node] spawned child '<name>' pid=…`<br>`+5000ms capability check OK` | ✅ really created; the new node registers itself with the hub |
+| `[create-node] anet_bin_unsafe_path: …` | ❌ `ANET_BIN` is not pinned correctly → [§3.6](#anet-bin-pin). **It does not retry** |
+| nothing at all | ❌ the doorbell never arrived — check the daemon is really connected (§4) |
+
+⚠️ **On Windows this step currently always fails**, with the same deceptive symptoms
+(registration, heartbeat and `ok:true` all look fine) — see [the end of §3.6](#anet-bin-pin)
+and [#1290](https://github.com/sleep2agi/agent-network/issues/1290). Until #1290 is fixed a
+Windows machine can run a daemon, but **do not expect it to fork child nodes**.
+:::
 
 ---
 
