@@ -1,0 +1,7 @@
+Command: python3 scripts/check-doc-symbol-pins.py .
+SYMBOL-PIN: OK（扫到 15 个 pin，判定 5 个，跳过 10 个，取不到 ref 0 个，漂移 0 个）
+🔴 跳过的那些不是通过 —— 锚文本没点名符号，或符号在目标文件里一次都没出现，机器分不清「改名了」和「那个词本来就不是符号」。
+
+Command: python3 scripts/check-doc-symbol-pins.py . --doc-root docs-site
+SYMBOL-PIN: OK（扫到 28 个 pin，判定 8 个，跳过 20 个，取不到 ref 0 个，漂移 0 个）
+🔴 跳过的那些不是通过 —— 锚文本没点名符号，或符号在目标文件里一次都没出现，机器分不清「改名了」和「那个词本来就不是符号」。
