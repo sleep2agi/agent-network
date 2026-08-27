@@ -1701,7 +1701,7 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
 // refetch). A `latest` agent-network release must pin a *stable* server.
 // `anet upgrade` (#88) surfaces this constant in its plan output so users
 // understand global-install version != version anet hub start actually runs.
-const PINNED_SERVER_VERSION = "0.9.0-preview.31";
+const PINNED_SERVER_VERSION = "0.9.0-preview.33";
 
 // Canonical SkillHub URL: https://anet.sh/skillhub/catalog.json currently
 // returns 307 to this www host. Pin the direct 200 URL so catalog fetch
