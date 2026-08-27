@@ -1,0 +1,59 @@
+test1204 /btw production wiring
+Date: 2026-08-26
+Base: main 86f98166 (#1203/#1202/#1201/#1194 merged)
+
+Coverage:
+- Hub installs the SQLite durable SideThread port only behind COMMHUB_ENABLE_SIDE_THREADS=1
+- exact node capability comes from the bound node's strict masked snapshot
+- node-bound, network-bound, five-minute attachment grant; exact SHA/size; 404 on foreign/expired
+- agent-node creates a dedicated Codex adapter/consumer under its persistent CODEX_HOME
+- owned Codex 0.148.0 only; shared/unknown/version drift fails closed before polling
+- fork/start/terminal/cancel/archive/purge/bring-back stay outside tasks/inbox/FIFO/steer
+- verified image is materialized 0600 and serialized as localImage; non-image fails closed
+- journaled bring-back writes one labelled native turn and never falls back to send_task
+- restart restores derived-thread ownership from hashed durable fork evidence plus thread/read
+- Docker image is bound to an exact 40-character SOURCE_COMMIT revision
+- real Hub boot + real agent-node registration/startup + injected Codex RPC executes the production outbox/ACK/terminal/bring-back path
+- production Hub waits at most 2.5 seconds for the asynchronous durable node ACK; timeout remains ambiguous/fail-closed
+- a same-key create replays durable late fork/start receipts into coordinator state across restart/multiple coordinators, enqueues start once, and terminal reconciliation remains idempotent
+- late unsupported/failed ACKs preserve their typed result and atomically converge record/attempt/active ownership to a stable failed terminal
+- cancel/archive/purge/bring-back share one durable lifecycle reconciler; accepted, unsupported and failed receipts are replayed across restart and concurrent same-key calls without another command
+- slow lifecycle replay has fast-path parity for operation thread/turn identity and emits each archive/purge/bring-back domain event exactly once; cancel acceptance emits no misleading terminal event
+- event rows commit before fanout; observer failures are isolated per listener, durable cursor replay survives restart, and a SQLite CAS makes multi-coordinator lifecycle settlement/event emission single-winner
+- runtime receipt acquisition and local apply are separate phases: archive/bring-back local transaction failures remain ambiguous, survive coordinator restart, and replay the accepted receipt into one final event instead of falsifying a runtime failure
+- create fork/start accepted receipts use the same local-apply boundary; injected fork and start projection failures survive restart, reuse the durable receipt, create one stable start operation, and never enqueue duplicate native work
+- create recovery is driven by durable fork/start operation plus active-attempt state, including creating/starting with pending operations when both local apply and ambiguity marking fail consecutively
+
+Expected gates:
+- 58 targeted baseline tests
+- agent-node and server production bundles
+- witnessed-red: localImage downgrade
+- witnessed-red: ordinary task route substitution
+- witnessed-red: invalid SOURCE_COMMIT
+- witnessed-red: removed Hub production port/routes
+- witnessed-red: removed agent-node CLI consumer startup
+- witnessed-red: disabled late-ACK coordinator reconciliation
+- witnessed-red: narrowed authoritative failure settlement to starting-only
+- witnessed-red: removed the shared lifecycle receipt reconciler
+- witnessed-red: changed the slow-path lifecycle domain event
+- witnessed-red: removed per-listener observer exception isolation
+- witnessed-red: misclassified local apply failure as authoritative runtime failure
+- witnessed-red: misclassified accepted fork/start local apply as runtime failure
+
+Result:
+- PASS: 58/58 targeted tests (assertion count recorded by the exact-source Docker run)
+- PASS: agent-node CLI/upload helper and CommHub server bundles
+- PASS witnessed-red: localImage -> text mutation rejected
+- PASS witnessed-red: dedicated command route -> tasks mutation rejected
+- PASS: real two-process Hub + agent-node CLI registration/startup and injected-RPC consumer completed fork/start/terminal/bring-back
+- PASS witnessed-red: invalid source binding, removed Hub install, and removed CLI startup all rejected
+- PASS witnessed-red: same-key ambiguous early-return mutation strands the late fork ACK and is rejected
+- PASS witnessed-red: starting-only failure settlement leaves replay stuck reconciling and is rejected
+- PASS witnessed-red: deleting shared lifecycle reconciliation breaks late cancel recovery
+- PASS witnessed-red: changing the slow-path archive event breaks event parity
+- PASS witnessed-red: allowing a throwing observer to escape starves the next listener and is rejected
+- PASS witnessed-red: converting recoverable local apply ambiguity to runtime failure is rejected
+- PASS witnessed-red: converting create receipt apply ambiguity to runtime failure is rejected
+- PASS test1204 real Codex 0.148 attachment proof: marker absent from prompt,
+  observed in model answer and authoritative derived thread/read; materialized
+  image mode 0600; sanitized evidence only

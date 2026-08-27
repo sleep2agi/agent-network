@@ -408,6 +408,13 @@ export interface MaskedSnapshot {
   /** #698 protocol capability. The Hub stores this bit only when the
    * reporting ntok is immutably bound to this exact node_id. */
   peer_reply_inbox_capable: true;
+  /** Runtime-observed, fail-closed SideThread capability. No secrets or paths. */
+  side_thread_capability?: {
+    supported: boolean; runtime: string; runtimeVersion: string; topology: string;
+    evidenceRevision: string; mode?: "native-exact-fork";
+    exactBoundary?: { through: boolean; before: boolean };
+    reason?: "runtime" | "version" | "topology" | "experimental-api" | "exact-boundary";
+  };
   /** Node role surfaced to hub /api/nodes for daemon discovery (#337).
    * "host_supervisor" = anet daemon (receives create_node dispatches);
    * undefined / other values = regular agent-node. Read from config.json's

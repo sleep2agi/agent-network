@@ -1430,11 +1430,10 @@ const reportStatus = async (status: string, task?: string) => {
     // new child boots .prev → reports OLD snapshot → content-match
     // fails → update stays pending → reaper timeouts → dashboard sees
     // timeout (NOT false ✓).
-    config_snapshot: configApplyDraining ? undefined : buildConfigSnapshot(
-      fileConfig,
-      process.env.ANET_CONFIG_UPDATE_CAPABLE === "1",
-      currentConfigRevision,
-    ),
+    config_snapshot: configApplyDraining ? undefined : {
+      ...buildConfigSnapshot(fileConfig, process.env.ANET_CONFIG_UPDATE_CAPABLE === "1", currentConfigRevision),
+      ...(sideThreadCapabilitySnapshot ? { side_thread_capability: sideThreadCapabilitySnapshot } : {}),
+    },
   });
 };
 const getInbox = async () => {
@@ -1957,7 +1956,6 @@ if (rawCodexPending !== undefined) {
 const codexAppServerSessionManager = createCodexSessionManager<
   import("./runtime/codex-app-server/runtime").CodexAppServerRuntimeSession
 >();
-
 async function ensureCodexAppServerSession(): Promise<
   import("./runtime/codex-app-server/runtime").CodexAppServerRuntimeSession
 > {
@@ -1992,6 +1990,18 @@ async function ensureCodexAppServerSession(): Promise<
   writebackCodexThread(session.threadId);
   return session;
 }
+let sideThreadNodeRuntime: { enabled: boolean; capability: Record<string, unknown>; close(): void } | null = null;
+// Always publish an explicit closed capability. This is not merely cosmetic:
+// nodes.config_snapshot is durable, so omitting the field after a local flag
+// is turned off could leave a previously-supported node looking eligible.
+let sideThreadCapabilitySnapshot: Record<string, unknown> = {
+  supported: false,
+  runtime: RUNTIME_LABEL,
+  runtimeVersion: "unknown",
+  topology: "unknown",
+  evidenceRevision: "test1190-wire-v2",
+  reason: "runtime",
+};
 if (NEW_SESSION && RUNTIME === "grok" && GROK_EXECUTION_MODE === "cli") {
   clearGrokSession("--new-session requested");
 }
@@ -6262,6 +6272,46 @@ if (RUNTIME === "codex-app-server" && codexAppServerUrl) {
     process.exit(1);
   }
 }
+
+// `/btw` has a wholly separate command consumer and derived Codex threads.
+// It is opt-in, Codex-app-server-only, and never enters inbox/FIFO/steer.
+const sideThreadsEnabled = fileConfig?.flags?.sideThreads === true || process.env.ANET_ENABLE_SIDE_THREADS === "1";
+if (sideThreadsEnabled) {
+  if (RUNTIME !== "codex-app-server" || !NODE_ID || !process.env.CODEX_HOME) {
+    sideThreadCapabilitySnapshot = {
+      supported: false, runtime: RUNTIME_LABEL, runtimeVersion: "unknown", topology: "unknown",
+      evidenceRevision: "test1190-wire-v2", reason: "runtime",
+    };
+    warn("[side-thread] enable requested but codex-app-server, stable node_id, or dedicated CODEX_HOME is unavailable");
+  } else {
+    try {
+      const session = await ensureCodexAppServerSession();
+      const { startCliSideThreadConsumer, detectCodexRuntimeVersion } = await import("./runtime/side-thread/production");
+      sideThreadNodeRuntime = startCliSideThreadConsumer({
+        enabled: true,
+        client: session.client,
+        hubUrl: COMMHUB_URL,
+        nodeId: NODE_ID,
+        token: () => AUTH_TOKEN,
+        codexHome: process.env.CODEX_HOME!,
+        runtimeVersion: detectCodexRuntimeVersion(),
+        // An app-server spawned and owned by this exact node is the reviewed
+        // owned topology. A user-supplied remote is shared and fails closed.
+        topology: session.proc ? "owned-stdio" : "shared-websocket",
+        experimentalApi: fileConfig?.flags?.sideThreadExperimentalApi === true,
+        log,
+        warn,
+      });
+      sideThreadCapabilitySnapshot = sideThreadNodeRuntime.capability;
+    } catch (startupError: any) {
+      sideThreadCapabilitySnapshot = {
+        supported: false, runtime: "codex-app-server", runtimeVersion: "unknown", topology: "unknown",
+        evidenceRevision: "test1190-wire-v2", reason: "runtime",
+      };
+      warn(`[side-thread] startup failed closed: ${startupError?.message || startupError}`);
+    }
+  }
+}
 let ownerScheduleConsumer: OwnerScheduleConsumer | null = null;
 try {
   ownerScheduleConsumer = createOwnerScheduleConsumer({
@@ -6394,6 +6444,7 @@ const shutdown = async () => {
   if (shuttingDown) return;
   shuttingDown = true;
   ownerScheduleConsumer?.stop();
+  sideThreadNodeRuntime?.close();
   log("shutting down...");
   await closeOpencodeRuntime("signal shutdown");
   await grokCopresenceRuntimeSession?.close().catch((e: any) => {

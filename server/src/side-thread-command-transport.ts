@@ -225,6 +225,7 @@ export class DurableSideThreadCommandPort implements SideThreadExecutionPort {
     networkForNode: (nodeId: string) => string | null;
     capabilityForNode: (nodeId: string) => SideThreadCapability;
     grantAttachment: (nodeId: string, ref: SideThreadAttachmentRef) => Record<string, unknown>;
+    ackWaitMs?: number;
   }) {}
   capability(nodeId: string) { return this.opts.capabilityForNode(nodeId); }
   fork(input: Parameters<SideThreadExecutionPort["fork"]>[0]) { return this.issue(input, "fork", { sourceThreadId: input.sourceThreadId, boundary: input.boundary }, "threadId") as Promise<{threadId:string}>; }
@@ -261,10 +262,18 @@ export class DurableSideThreadCommandPort implements SideThreadExecutionPort {
       requestKey: input.requestKey ?? input.operationId, nodeId: input.nodeId, sideThreadId: input.sideChatId,
       attemptId: input.attemptId ?? null, kind, payload };
     this.opts.store.enqueue(command, { networkId, nodeId: input.nodeId });
-    const receipt = this.opts.store.receipt(input.operationId);
+    const deadline = Date.now() + (this.opts.ackWaitMs ?? 0);
+    let receipt = this.opts.store.receipt(input.operationId);
+    while (!receipt && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      receipt = this.opts.store.receipt(input.operationId);
+    }
     if (!receipt) throw new SideThreadError("SIDE_THREAD_AMBIGUOUS", "command durably queued; awaiting node ACK", 202, input.operationId, input.sideChatId, input.attemptId);
     if (receipt.state === "accepted") return resultKey ? { [resultKey]: object(receipt.result)[resultKey] } : undefined;
-    throw new SideThreadError(receipt.errorCode === "SIDE_THREAD_UNSUPPORTED" ? "SIDE_THREAD_UNSUPPORTED" : "SIDE_THREAD_AMBIGUOUS", "node command did not complete synchronously", receipt.errorCode === "SIDE_THREAD_UNSUPPORTED" ? 501 : 202, input.operationId, input.sideChatId, input.attemptId);
+    const code = receipt.state === "unsupported" ? "SIDE_THREAD_UNSUPPORTED"
+      : receipt.state === "failed" ? "SIDE_THREAD_CONFLICT" : "SIDE_THREAD_AMBIGUOUS";
+    const status = code === "SIDE_THREAD_UNSUPPORTED" ? 501 : code === "SIDE_THREAD_CONFLICT" ? 409 : 202;
+    throw new SideThreadError(code, "node command returned an authoritative result", status, input.operationId, input.sideChatId, input.attemptId);
   }
 }
 

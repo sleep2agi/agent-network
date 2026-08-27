@@ -526,6 +526,16 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         config_revision: z.number().int().min(0).optional(),
         config_update_capable: z.boolean().optional(),
         peer_reply_inbox_capable: z.literal(true).optional(),
+        side_thread_capability: z.object({
+          supported: z.boolean(),
+          runtime: z.string().max(64),
+          runtimeVersion: z.string().max(64),
+          topology: z.string().max(64),
+          evidenceRevision: z.string().max(100),
+          mode: z.literal("native-exact-fork").optional(),
+          exactBoundary: z.object({ through: z.boolean(), before: z.boolean() }).strict().optional(),
+          reason: z.enum(["runtime", "version", "topology", "experimental-api", "exact-boundary"]).optional(),
+        }).strict().optional(),
         // RFC-026 P2 / #338 — daemon role surfaced for hub /api/nodes
         // discovery (#337 extracts this field). "host_supervisor" =
         // anet daemon. Default-stripping zod would drop this otherwise.

@@ -177,9 +177,13 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
     return { derivedThreadId };
   }
 
-  async start(input: { sideThreadId: string; attemptId: string; derivedThreadId: string; prompt: string; operation?: SideThreadRuntimeOperation }): Promise<{ turnId: string }> {
+  async start(input: { sideThreadId: string; attemptId: string; derivedThreadId: string; prompt: string; attachments?: Array<{ path: string; mediaType: string; sha256: string; size: number }>; operation?: SideThreadRuntimeOperation }): Promise<{ turnId: string }> {
     this.assertOpen();
-    this.assertOwnedThread(input.derivedThreadId, input.sideThreadId);
+    if ((input.attachments ?? []).some((item) => !item.mediaType.startsWith("image/"))) {
+      throw new SideThreadUnsupportedError("runtime", "Codex SideThread accepts only verified local image attachments");
+    }
+    if (this.derivedThreads.get(input.derivedThreadId) !== input.sideThreadId)
+      await this.ensureOwnedThread(input.derivedThreadId, input.sideThreadId);
     const clientUserMessageId = `anet-side:${input.sideThreadId}:${input.attemptId}`;
     const identity = input.operation ?? this.defaultOperation(input.sideThreadId, "start", `start-${input.attemptId}`);
     this.pendingStartThreads.add(input.derivedThreadId);
@@ -202,11 +206,12 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
     finally { this.pendingStartThreads.delete(input.derivedThreadId); await claim.release(); }
   }
 
-  private async startClaimed(input: { sideThreadId: string; attemptId: string; derivedThreadId: string; prompt: string; operation?: SideThreadRuntimeOperation },
+  private async startClaimed(input: { sideThreadId: string; attemptId: string; derivedThreadId: string; prompt: string; attachments?: Array<{ path: string; mediaType: string; sha256: string; size: number }>; operation?: SideThreadRuntimeOperation },
     identity: SideThreadRuntimeOperation, clientUserMessageId: string): Promise<{ turnId: string }> {
     this.assertOpen();
     const operation = this.operation(identity, input.sideThreadId, "start", input.derivedThreadId,
-      JSON.stringify([input.sideThreadId, input.attemptId, input.derivedThreadId, operationHash(input.prompt)]));
+      JSON.stringify([input.sideThreadId, input.attemptId, input.derivedThreadId, operationHash(input.prompt),
+        ...(input.attachments ?? []).map((item) => [item.sha256, item.size, item.mediaType])]));
     const prior = this.existing(operation);
     if (prior && prior.state !== "prepared") return this.reconcileStart({ ...input, operation: identity }, clientUserMessageId, prior);
     if (!prior) this.put(operation);
@@ -235,7 +240,10 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
         const request = this.rpc<{ turn?: { id?: string }; turnId?: string }>("turn/start", {
         threadId: input.derivedThreadId,
         clientUserMessageId,
-        input: [{ type: "text", text: input.prompt }],
+        input: [
+          { type: "text", text: input.prompt },
+          ...(input.attachments ?? []).map((item) => ({ type: "localImage", path: item.path })),
+        ],
         });
         const abortOnIdentityFailure = identityEcho.then(
           () => new Promise<never>(() => {}),
@@ -272,18 +280,21 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
 
   async cancel(input: { sideThreadId?: string; derivedThreadId: string; turnId: string; operation?: SideThreadRuntimeOperation }): Promise<void> {
     this.assertOpen();
-    this.assertOwnedThread(input.derivedThreadId);
+    if (!input.sideThreadId) this.assertOwnedThread(input.derivedThreadId);
+    else await this.ensureOwnedThread(input.derivedThreadId, input.sideThreadId);
     const execution = this.byTurn.get(turnKey(input.derivedThreadId, input.turnId));
-    if (!execution) throw new SideThreadConflictError("refusing to cancel an unowned Codex turn");
-    const sideThreadId = input.sideThreadId ?? execution.sideThreadId;
-    await this.durableMutation(sideThreadId, "interrupt", input.operation ?? this.defaultOperation(sideThreadId, "interrupt", `cancel-${execution.attemptId}`), input.derivedThreadId,
+    const sideThreadId = input.sideThreadId ?? execution?.sideThreadId;
+    if (!sideThreadId || (!execution && !this.persistedTurnOwned(sideThreadId, input.derivedThreadId, input.turnId)))
+      throw new SideThreadConflictError("refusing to cancel an unowned Codex turn");
+    await this.durableMutation(sideThreadId, "interrupt", input.operation ?? this.defaultOperation(sideThreadId, "interrupt", `cancel-${input.turnId}`), input.derivedThreadId,
       JSON.stringify([input.derivedThreadId, input.turnId]), "turn/interrupt",
       { threadId: input.derivedThreadId, turnId: input.turnId });
   }
 
   async archive(input: { sideThreadId?: string; derivedThreadId: string; operation?: SideThreadRuntimeOperation }): Promise<void> {
     this.assertOpen();
-    this.assertOwnedThread(input.derivedThreadId);
+    if (!input.sideThreadId) this.assertOwnedThread(input.derivedThreadId);
+    else await this.ensureOwnedThread(input.derivedThreadId, input.sideThreadId);
     const sideThreadId = input.sideThreadId ?? this.derivedThreads.get(input.derivedThreadId)!;
     await this.durableMutation(sideThreadId, "archive", input.operation ?? this.defaultOperation(sideThreadId, "archive", `archive-${sideThreadId}`), input.derivedThreadId,
       JSON.stringify([input.derivedThreadId]), "thread/archive", { threadId: input.derivedThreadId });
@@ -291,7 +302,8 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
 
   async delete(input: { sideThreadId?: string; derivedThreadId: string; operation?: SideThreadRuntimeOperation }): Promise<void> {
     this.assertOpen();
-    this.assertOwnedThread(input.derivedThreadId);
+    if (!input.sideThreadId) this.assertOwnedThread(input.derivedThreadId);
+    else await this.ensureOwnedThread(input.derivedThreadId, input.sideThreadId);
     if (this.pendingStartThreads.has(input.derivedThreadId)
       || [...this.byTurn.values(), ...this.byClientId.values()].some((x) => x.threadId === input.derivedThreadId)) {
       throw new SideThreadConflictError("refusing to delete a thread with an active owned turn");
@@ -497,7 +509,7 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
       throw new SideThreadAmbiguousError(`Codex fork reconciliation failed; refusing duplicate thread/fork${cause ? " after response loss" : ""}`);
     }
   }
-  private async reconcileStart(input: { sideThreadId: string; attemptId: string; derivedThreadId: string; prompt: string; operation: SideThreadRuntimeOperation },
+  private async reconcileStart(input: { sideThreadId: string; attemptId: string; derivedThreadId: string; prompt: string; attachments?: Array<{ path: string; mediaType: string; sha256: string; size: number }>; operation: SideThreadRuntimeOperation },
     clientUserMessageId: string, prior: SideThreadOperation): Promise<{ turnId: string }> {
     const live = this.byClientId.get(clientUserMessageId);
     let turnId = live?.turnId;
@@ -606,6 +618,29 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
     this.assertSupported();
     const owner = this.derivedThreads.get(threadId);
     if (!owner || (sideThreadId && owner !== sideThreadId)) throw new SideThreadConflictError("refusing operation on an unowned Codex thread");
+  }
+  private async ensureOwnedThread(threadId: string, sideThreadId: string): Promise<void> {
+    const owner = this.derivedThreads.get(threadId);
+    if (owner) {
+      if (owner !== sideThreadId) throw new SideThreadConflictError("refusing operation on a foreign Codex thread");
+      return;
+    }
+    const fork = this.opts.operationLedger.list(this.opts.nodeId, sideThreadId).find((operation) =>
+      operation.method === "fork"
+      && (operation.state === "accepted" || operation.state === "reconciled")
+      && operation.result?.derivedThreadIdHash === operationHash(threadId));
+    if (!fork) throw new SideThreadConflictError("refusing operation on an unowned Codex thread");
+    const thread = await this.readThread(threadId);
+    if (!thread.forkedFromId || operationHash(thread.forkedFromId) !== fork.targetHash)
+      throw new SideThreadConflictError("persisted Codex fork ownership no longer matches runtime");
+    this.derivedThreads.set(threadId, sideThreadId);
+  }
+  private persistedTurnOwned(sideThreadId: string, threadId: string, turnId: string): boolean {
+    return this.opts.operationLedger.list(this.opts.nodeId, sideThreadId).some((operation) =>
+      operation.method === "start"
+      && (operation.state === "accepted" || operation.state === "reconciled")
+      && operation.targetHash === operationHash(threadId)
+      && operation.result?.turnIdHash === operationHash(turnId));
   }
   private dropped(reason: string): void { for (const listener of this.droppedListeners) listener(reason); }
 }
