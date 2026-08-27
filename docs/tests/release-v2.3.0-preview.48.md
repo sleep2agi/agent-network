@@ -1,6 +1,17 @@
 # @sleep2agi/agent-network 2.3.0-preview.48 — release notes
 
-这一版存在的唯一理由是**把配对指针挪到 `agent-node@2.5.0-preview.35`**。
+这一版有两件事：**一个新功能**，和**一个配对指针修复**。
+
+## 新增：`anet skill list` / `anet skill show`
+
+SkillHub 的技能可以从命令行列举和查看了。
+
+🔴 取到 `SKILL.md` 之后**强制校验 sha256** —— 目录里登记的哈希对不上就拒绝，
+不会把一份内容不明的技能文档交给你或交给 agent。
+
+（`f2d9ba79`，#1251。`agent-network@2.3.0-preview.47` 的用户拿不到这个功能。）
+
+## 修复：把配对指针挪到 `agent-node@2.5.0-preview.35`
 
 `2.3.0-preview.47` 内置的 `PAIRED_AGENT_NODE_VERSION` 是 `2.5.0-preview.34`。
 `agent-node@2.5.0-preview.35` 发出去之后，没有任何一个已发布的 agent-network
@@ -33,9 +44,15 @@ anet node start <name>
 
 ## 本版包含
 
-- `PAIRED_AGENT_NODE_VERSION` : `2.5.0-preview.34` → `2.5.0-preview.35`
-- `PAIRED_AGENT_NETWORK_VERSION` / `package.json` / `package-lock.json`
-  同步到 `2.3.0-preview.48`
+`agent-network@2.3.0-preview.47` 之后 main 上共 8 个提交碰过 `agent-network/`，
+其中**只有两个**改了用户会执行到的代码（其余是测试、版本号、发版工具链）：
+
+- `f2d9ba79` **feat(skillhub)**: `anet skill list` / `anet skill show`，
+  取 `SKILL.md` 后强制校验 sha256（#1251）
+- `aa1190b3` `PAIRED_AGENT_NODE_VERSION` : `2.5.0-preview.34` → `2.5.0-preview.35`
+
+本版另外把 `PAIRED_AGENT_NETWORK_VERSION` / `package.json` / `package-lock.json`
+同步到 `2.3.0-preview.48`（4 处，由 `scripts/sync-pinned-versions.sh` 一次改全）。
 
 ## Verification
 
