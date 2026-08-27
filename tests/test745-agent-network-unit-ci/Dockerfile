@@ -25,6 +25,10 @@ COPY agent-node/package.json ./agent-node/package.json
 # tests/feishu-envelope-compat.test.ts 跨包 import agent-node 的 runtime 源码。
 COPY agent-node/src ./agent-node/src
 COPY agent-network ./agent-network
+# channel-plugin-error-masking.test.ts 逐字节比对 channel/ 里的插件源码。
+# 没有这行时容器里不存在 channel/,那两条断言红的理由是「文件读不到」,
+# 而输出长得像「副本不一致」—— 修的是取集层,不是判据。(#1149 首航红因)
+COPY channel ./channel
 COPY tests/test745-agent-network-unit-ci/run.sh ./tests/test745-agent-network-unit-ci/run.sh
 
 ARG SOURCE_COMMIT

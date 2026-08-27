@@ -12,6 +12,7 @@
  *   COMMHUB_URL, COMMHUB_TOKEN
  */
 
+import { parseCommhubToolResult } from "./commhub-response.js";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { hostname } from "os";
@@ -231,7 +232,12 @@ async function callCommHub(toolName: string, args: Record<string, unknown>): Pro
     const dataLine = text.split("\n").find((l) => l.startsWith("data: "));
     if (dataLine) {
       const json = JSON.parse(dataLine.slice(6));
-      return json?.result?.content?.[0]?.text ? JSON.parse(json.result.content[0].text) : json;
+      // #1100 二份 — 这一行在 agent-network/src/node-server.ts 里已由 #1102 修掉,
+      // 而这份副本没有,于是修好的是开发者读的那份,留下的是节点真正跑的那份:
+      // TM智空马 连续四天只看到 `JSON Parse error: Unexpected identifier "MCP"`,
+      // 对 4 个不同 task_id、idem_ 与 UUID 两种来源全部失败,而真错误(hub 的
+      // Zod 参数校验拒绝)在这一行被销毁 —— 它让所有不同的错误长成同一个样子。
+      return parseCommhubToolResult(json);
     }
     return { ok: false, error: "no response" };
   } catch (e: any) {
