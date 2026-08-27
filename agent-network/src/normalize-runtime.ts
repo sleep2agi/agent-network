@@ -22,6 +22,32 @@ export type RuntimeName =
   | "opencode-cli"
   | "codex-app-server";
 
+/** 一个 runtime 复用的是哪种**外部登录态**，而不是 API key。 */
+export type ReusedLogin = "claude" | "codex" | "grok";
+
+/**
+ * runtime → 它复用的外部登录。**只有一处定义**，VENDORS 的 `requiresAuth`
+ * 与登录态探测都引用这里。
+ *
+ * 不在表里 = 该 runtime 走 API key，不复用任何登录：
+ *   · `claude-agent-sdk` —— 走 ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY
+ *   · `opencode-cli`     —— 走 ANTHROPIC_API_KEY / OPENAI_API_KEY（vendor preset 从 env 读，不 prompt）
+ * 这条区分是有意写下来的：Vincent 那句「复用会员登录状态、不用自己输 key 和 url」
+ * 点名的是 Claude Code / Codex / Grok 三家，opencode 不在其中，别顺手加进来。
+ */
+export const RUNTIME_REUSED_LOGIN: Readonly<Partial<Record<RuntimeName, ReusedLogin>>> = {
+  "claude-code-cli": "claude",   // claude auth login（订阅，无 model 选择器）
+  "codex-sdk": "codex",          // codex login
+  "codex-app-server": "codex",   // 同上；TUI 共存走同一个 codex 登录态
+  "grok-build-acp": "grok",      // grok login
+  "grok-build-cli": "grok",      // 同上；共存 TUI 走同一个 grok 登录态
+} as const;
+
+/** 该 runtime 复用哪种登录；返回 undefined 表示它用 API key。 */
+export function reusedLoginFor(runtime: RuntimeName): ReusedLogin | undefined {
+  return RUNTIME_REUSED_LOGIN[runtime];
+}
+
 /** Operator-facing default for a runtime slot that is empty or missing. */
 export const DEFAULT_RUNTIME: RuntimeName = "claude-agent-sdk";
 
