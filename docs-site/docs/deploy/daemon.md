@@ -2,12 +2,154 @@
 
 生产 Hub 需要进程守护；裸跑 `nohup ... &` 在崩溃、重启或误杀后不会自动恢复。
 
+::: tip 你要找的是哪个 daemon？这一页有两件事
+「daemon」在本项目里指两件**不同**的事，名字撞了 —— 先认领你的那件：
+
+| 你想做的 | 去哪 |
+|---|---|
+| **体验 `anet daemon`** —— 起一个能被 Dashboard 远程指挥、代你创建/管理其它节点的 `host_supervisor` 节点（RFC-026） | ⬇️ 下一节[「5 分钟体验 `anet daemon`」](#try-anet-daemon) |
+| **让 Hub 崩了能自己起来** —— 用 PM2 / systemd 守护 `anet hub start` 进程 | ⬇️ [「先决条件」](#hub-prereqs)往下的全部内容 |
+
+两者互不依赖，可以只做其中一件。
+:::
+
+## 5 分钟体验 `anet daemon` {#try-anet-daemon}
+
+> 🔴 **本节每条命令都在干净的 `node:22-bookworm-slim` 容器里实跑过**（2026-08-27），
+> 下面贴的都是真实输出，不是示意。实测版本：`anet v2.3.0-preview.47` +
+> `agent-node v2.5.0-preview.34` + `commhub-server v0.9.0-preview.30`。
+
+### 0. 装（`bun` 不能省）
+
+```bash
+npm i -g bun @sleep2agi/agent-network @sleep2agi/agent-node
+```
+
+🔴 **`bun` 是硬前提**，不是可选项。少了它第一条命令就会停在：
+
+```
+❌ anet hub start requires the Bun runtime
+   (commhub-server is bun-only — uses Bun.serve + bun:sqlite, no Node fallback)
+```
+
+🔴 **版本：直接裸装即可，不用手写版本号。** `latest` 现在已经带 `anet daemon`
+（实测 `2.3.0-preview.47`）。装完用 `anet -v` 核一眼；若你的版本敲 `anet daemon`
+得到 `Unknown command`，说明它早于 daemon 进入通道的那一版 —— 见下面的
+[版本对照](#which-versions)。
+
+### 1. 起 Hub
+
+```bash
+anet hub start
+```
+
+它会打印一段横幅，**里面有随机生成的管理员密码，只显示这一次**：
+
+```
+  ✅ Server running on http://127.0.0.1:9200 (commhub-server v0.9.0-preview.30)
+  ✅ Admin account created
+     username: admin
+     password: anet-90ddcdbe2b3f4f81a66ff5      ← 你的会不一样，当场复制
+     Store this password now; it will not be shown again.
+```
+
+🔴 横幅里那串密码**每台机器都不同**（随机 bootstrap 密码，自 `2.2.22-preview.4` 起）。
+别照抄本文的，用你自己那次输出里的。
+
+### 2. 登录
+
+横幅下面直接给了拼好的命令，照抄即可：
+
+```bash
+anet login --hub http://127.0.0.1:9200 --username admin --password <横幅里那串>
+```
+
+```
+✅ Logged in as admin
+⚠ Your password is the BOOTSTRAP DEFAULT and must be changed.
+   Change it now:  anet passwd
+   network: admin
+   token saved to ~/.anet/config.json
+```
+
+🔴 **顺序不能反**：没登录就跑 `anet daemon up`，会停在
+`未登录或缺少 network_id。请运行: anet login`（退出码 1）。
+
+### 3. 起 daemon —— 一条命令
+
+```bash
+anet daemon up
+```
+
+真实输出：
+
+```
+[anet daemon] ✓ created host_supervisor daemon "daemon"
+              config:     .anet/nodes/daemon/config.json
+              node_id:    node_daemon_8d94ac332abb
+
+[anet daemon] ⚠ Permission posture:
+              flags.dangerouslySkipPermissions = true  (no per-call confirmation)
+              flags.teammateMode = true
+              role = host_supervisor                   (can fork child agent-nodes via hub)
+              → Run daemons only on machines you trust to act on your behalf.
+
+[anet] Starting new session for "daemon" [claude-agent-sdk]...
+[daemon] 已注册到 CommHub
+[daemon] SSE connected
+```
+
+🔴 **`anet daemon up` 会一直占着这个终端**（daemon 是常驻进程）。
+要放后台就另开一个终端，或用本页下半部分的 PM2 方案守护它。
+
+⚠️ 注意那段 **Permission posture**：daemon 默认带
+`dangerouslySkipPermissions` + `teammateMode`，并且能通过 hub 派生子节点。
+**只在你信得过的机器上跑它。** 要收紧就改 `.anet/nodes/daemon/config.json`。
+
+### 4. 确认它真的起来了
+
+```bash
+anet daemon list
+```
+
+```
+Local host_supervisor daemons (1):
+  daemon   node_id=node_daemon_8d94ac332abb  runtimes=[claude-agent-sdk,codex-sdk,grok-build-acp]
+```
+
+Hub 那一侧每 3 分钟能看到它的心跳：
+
+```
+[08:36:00] SSE ← net_b84e736f347c:daemon connected (1 clients)
+[08:39:01] daemon (sdk-node) → report_status: idle [net]
+[08:42:01] daemon (sdk-node) → report_status: idle [net]
+```
+
+🔴 **`anet daemon list` 只读本机配置**，它列出来不等于 hub 认得它。
+要确认「hub 真的看见了」，看上面那两行 `SSE ←` / `report_status`，
+或到 Dashboard 的节点列表里找 `daemon`。
+
+### 5. 从 Dashboard 远程操作它
+
+daemon 起来并连上 hub 之后，打开 Dashboard：
+
+```bash
+anet hub dashboard        # 默认 http://localhost:3000
+```
+
+在节点列表里能看到 `daemon`（`role=host_supervisor`）。
+它与普通节点的区别是：**可以代你在这台机器上创建和启动别的节点** ——
+这正是「远程建节点」这条路径的落点，不必再 ssh 上机器敲 `anet node create`。
+
+---
+
+
 ::: warning 只允许一个守护者
 PM2、systemd、cron 看门狗不能同时管理同一个 Hub。多个守护者可能拉起两个进程，
 让它们争用同一个端口和 SQLite 数据库。
 :::
 
-## 先决条件(按顺序,每一道都会挡住你)
+## 先决条件(按顺序,每一道都会挡住你) {#hub-prereqs}
 
 在干净机器上实测出来的完整链条。三道门都是 fail-closed 且报错可执行,
 但文档此前没把它们连起来写,只能一次撞一个:
@@ -18,31 +160,38 @@ PM2、systemd、cron 看门狗不能同时管理同一个 Hub。多个守护者�
 | 2. **Hub 在跑** | `未找到 CommHub Server。请先运行: anet hub start` | `anet hub start`(约 3 秒起来) |
 | 3. **已登录且有 network_id** | `未登录或缺少 network_id。请运行: anet login` | `anet register` 建账号,或 `anet login` |
 
-::: warning `anet daemon` 和本文说的「守护」不是一回事
-本文讲的是**用 PM2 守护 `anet hub start`**(让 Hub 常驻)。
+::: warning `anet daemon` 和本页下半部分说的「守护」不是一回事
+本页**下半部分**讲的是**用 PM2 守护 `anet hub start`**（让 Hub 常驻）。
 
 而 `anet daemon init` / `up` 是**另一件事** —— 创建并启动一个
-`host_supervisor` 节点(RFC-026)。两者名字相近、做的事不同。
-
-🔴 **而且 `anet daemon` 只在 `preview` 通道上存在。** 按文档站首推的 `install.sh`
-装到的是 `latest`,在它上面敲这条命令得到的是:
-
-```
-$ anet daemon
-Unknown command "daemon". Did you mean: anet demo?
-（退出码 1）
-```
-
-实测 2026-08-18,用 npm 上真正的 `@sleep2agi/agent-network@2.2.21`(当时的 `latest`)
-跑二进制得到 —— 不是读 dist 猜的(那是字符串表混淆产物,grep 不作数)。
-`preview`(当时 `2.3.0-preview.39`)上同一条命令打印 `Usage: anet daemon <subcommand> …`。
-
-**所以下面这句只在 preview 上成立:** `anet daemon --help` 目前会打出全局帮助;
-要看子命令请直接敲 `anet daemon`(不带参数)。在 `latest` 上你会拿到上面那个
-`Unknown command` —— **那不是你装错了。**
-
-需要 `anet daemon` 的话,先切到 preview 通道:`npm i -g @sleep2agi/agent-network@preview`。
+`host_supervisor` 节点（RFC-026）。两者名字相近、做的事不同，
+体验步骤见上面的[「5 分钟体验 `anet daemon`」](#try-anet-daemon)。
 :::
+
+### `anet daemon` 在哪些版本上存在 {#which-versions}
+
+🔴 **这一格曾经写反过**，因为它被钉在了一个会漂的数字上：原文写
+「`anet daemon` 只在 `preview` 通道上存在，`latest` 会报 `Unknown command`」——
+那是 2026-08-18 对当时的 `latest`（`2.2.21`）量出来的，**今天两个前提都不成立了**。
+
+所以这里不写「哪个通道有」，只写**怎么自己判**：
+
+```bash
+anet -v                 # 你装的是哪一版
+anet daemon             # 有：打印 Usage: anet daemon <subcommand> …
+                        # 无：Unknown command "daemon". Did you mean: anet demo?（退出码 1）
+```
+
+| 版本 | `anet daemon` | 依据 |
+|---|---|---|
+| `2.2.21` | ❌ `Unknown command "daemon"` | 2026-08-18 实测（当时的 `latest`） |
+| `2.3.0-preview.39` | ✅ `Usage: anet daemon <subcommand> …` | 2026-08-18 实测（当时的 `preview`） |
+| `2.3.0-preview.47` | ✅ `Usage: anet daemon <subcommand> …` | 2026-08-27 实测，**且它就是当天的 `latest`** |
+
+⇒ **结论按下界写，不按通道写**：`2.3.0-preview.39` 及以后都有；`2.2.21` 没有。
+上表是**实测过的点**，不是完整边界 —— `.39` 与 `2.2.21` 之间的具体那一版没有逐个量。
+**别把「`latest` 有没有」写进文档**：`latest` 指向哪一版会变（2026-08-27 当天它已经是
+`2.3.0-preview.47`），把结论钉在通道上，几天后就要再改一次。
 
 ## 推荐入口
 
