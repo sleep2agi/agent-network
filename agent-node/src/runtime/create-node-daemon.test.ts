@@ -135,8 +135,14 @@ describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER 
   const FIXTURE_DIR = "/tmp/anet-bin-test-fixtures";
 
   function setup(name: string, body = "#!/bin/sh\necho real"): string {
-    mkdirSync(FIXTURE_DIR, { recursive: true });
-    const p = join(FIXTURE_DIR, name);
+    const pkgDir = join(FIXTURE_DIR, `${name}-pkg`);
+    const binDir = join(pkgDir, "dist", "bin");
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(join(pkgDir, "package.json"), JSON.stringify({
+      name: "@sleep2agi/agent-network",
+      bin: { anet: "dist/bin/anet.cjs" },
+    }));
+    const p = join(binDir, "anet.cjs");
     writeFileSync(p, body, { mode: 0o755 });
     return p;
   }
@@ -184,7 +190,33 @@ describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER 
     cleanup();
   });
 
-  test("REJECT: world-writable (mode 0o777)", () => {
+  test("REJECT: non-anet absolute path is not chmodded", () => {
+    cleanup();
+    mkdirSync(FIXTURE_DIR, { recursive: true });
+    const p = join(FIXTURE_DIR, "not-anet");
+    writeFileSync(p, "#!/bin/sh\necho nope", { mode: 0o777 });
+    chmodSync(p, 0o777);
+    expect(() => loadAndVerifyAnetBin({
+      ANET_BIN_ABS: p,
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+    })).toThrow(/anet_bin_unsafe_path.*not an anet package bin/);
+    expect(statSync(p).mode & 0o777).toBe(0o777);
+    cleanup();
+  });
+
+  test("REJECT: forged agent-network package bin is not chmodded", () => {
+    cleanup();
+    const p = setup("forged", "#!/usr/bin/env node\n// fake\n");
+    chmodSync(p, 0o777);
+    expect(() => loadAndVerifyAnetBin({
+      ANET_BIN_ABS: p,
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+    })).toThrow(/anet_bin_unsafe_path.*writable by group\/other/);
+    expect(statSync(p).mode & 0o777).toBe(0o777);
+    cleanup();
+  });
+
+  test("REJECT: world-writable (mode 0o777) without chmodding", () => {
     cleanup();
     const p = setup("world-writable");
     chmodSync(p, 0o777);
@@ -193,10 +225,11 @@ describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER 
       ANET_DAEMON_PATH_CONF: "/nonexistent",
       ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
     })).toThrow(/anet_bin_unsafe_path.*writable by group\/other/);
+    expect(statSync(p).mode & 0o777).toBe(0o777);
     cleanup();
   });
 
-  test("REJECT: group-writable (mode 0o775)", () => {
+  test("REJECT: group-writable (mode 0o775) without chmodding", () => {
     cleanup();
     const p = setup("group-writable");
     chmodSync(p, 0o775);
@@ -205,6 +238,7 @@ describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER 
       ANET_DAEMON_PATH_CONF: "/nonexistent",
       ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
     })).toThrow(/anet_bin_unsafe_path.*writable by group\/other/);
+    expect(statSync(p).mode & 0o777).toBe(0o775);
     cleanup();
   });
 
@@ -220,26 +254,25 @@ describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER 
     cleanup();
   });
 
-  test("REJECT: owner not root (no opt-out)", () => {
+  test("ACCEPT: owner not root by default for nvm/homebrew/user installs", () => {
     cleanup();
     const p = setup("non-root-owner");
     // test runs as non-root by default; owner=current uid (not 0)
     expect(() => loadAndVerifyAnetBin({
       ANET_BIN_ABS: p,
       ANET_DAEMON_PATH_CONF: "/nonexistent",
-      // ANET_DAEMON_ALLOW_NON_ROOT_BIN intentionally NOT set
-    })).toThrow(/anet_bin_unsafe_path.*owner not root/);
+    })).not.toThrow();
     cleanup();
   });
 
-  test("ACCEPT: owner not root WHEN ANET_DAEMON_ALLOW_NON_ROOT_BIN=1 (explicit opt-out)", () => {
+  test("REJECT: owner not root only when strict root mode is explicitly requested", () => {
     cleanup();
-    const p = setup("explicit-non-root");
+    const p = setup("strict-non-root");
     expect(() => loadAndVerifyAnetBin({
       ANET_BIN_ABS: p,
       ANET_DAEMON_PATH_CONF: "/nonexistent",
-      ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
-    })).not.toThrow();
+      ANET_DAEMON_STRICT_ROOT_BIN: "1",
+    })).toThrow(/anet_bin_unsafe_path.*owner not root/);
     cleanup();
   });
 

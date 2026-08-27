@@ -157,63 +157,33 @@ anet daemon start <name> >> C:\Users\<you>\daemon-<name>.log 2>&1
    being listed does not mean the hub knows about it. The criterion is hub-side:
    `last_seen_at` still advancing.
 
-### 3.6 Let the daemon actually create nodes: pin `ANET_BIN` {#anet-bin-pin}
+### 3.6 Let the daemon actually create nodes: auto-pin `ANET_BIN` {#anet-bin-pin}
 
-🔴 **A running daemon is not a working daemon.** The first time you ask it to create a node
-through the hub, you will likely see:
+When a daemon receives `create_node`, it must fork the currently installed `anet`. To avoid
+`PATH` hijacking, the runtime still accepts only a verified absolute path; but
+`anet daemon init` / `start` / `up` now prepares that path automatically. Users no longer need
+to manually run `readlink -f`, `chmod`, or export daemon-specific environment variables.
 
-```
-[create-node] anet_bin_unsafe_path: no ANET_BIN_ABS resolved
-              (neither /etc/anet-daemon/path.conf nor env)
-```
+Daemon startup now automatically:
 
-That is **supply-chain protection**, not a bug: the daemon forks real processes, so it
-refuses to resolve `anet` through `PATH` (hijackable) and only accepts a **pinned, verified**
-absolute path. Five checks, all required:
+1. Resolves the current `anet` launcher to its real file and injects `ANET_BIN_ABS`.
+2. Diagnoses missing, non-absolute, symlink, group/other-writable, and non-executable paths separately.
+3. Refuses to start for the common npm `775` / group-writable install produced under `umask 0002`, and prints the exact `chmod go-w` command to run.
+4. Allows non-root nvm/homebrew/npm installs by default, because the binary is the user's own file.
+5. Rejects daemon mode on Windows up front, instead of waiting for POSIX-only path and mode checks to fail during node creation.
 
-| # | Requirement | Reality under a standard npm install |
-|---|---|---|
-| ① | absolute path | ✅ |
-| ② | **no symlink** in the path (`realpath` equals itself) | ❌ `npm i -g` installs `bin/anet` as a symlink |
-| ③ | owned by root | ❌ not when installed under your home (nvm / `--prefix ~`) |
-| ④ | **not group/other-writable** (`mode & 0o022 == 0`) | ❌ **on a umask 0002 machine npm payloads are `775`** |
-| ⑤ | executable | ✅ |
-
-②③④ all fail together under the very common "installed via nvm, machine umask 0002" combo.
-
-**How to configure it** (resolve the real path, tighten the mode, then pin):
+The expected path is simply:
 
 ```bash
-BIN=$(readlink -f "$(command -v anet)")   # ② resolve the symlink to dist/bin/anet.cjs
-chmod go-w "$BIN"                          # ④ 775 → 755
-stat -c '%a %U %n' "$BIN"                  # verify: 755, owned by you
-
-# Pin it when starting the daemon
-ANET_BIN_ABS="$BIN" ANET_DAEMON_ALLOW_NON_ROOT_BIN=1 \
-  nohup anet daemon start <name> >> ~/daemon-<name>.log 2>&1 &
+npm i -g @sleep2agi/agent-network @sleep2agi/agent-node
+anet login
+anet daemon up
 ```
 
-- `ANET_DAEMON_ALLOW_NON_ROOT_BIN=1` is the explicit opt-out for ③ — **use it only when you
-  are sure nobody else can write that file.** A root install (`sudo npm i -g`) does not need it.
-- You can also write it into `/etc/anet-daemon/path.conf` (the daemon reads that first); see
-  `readPathConf` in `loadAndVerifyAnetBin`. For one more notch, include a `sha256`: a mismatch
-  between install-time and run-time hashes refuses startup outright.
+If a safety check fails, the CLI prints a one-line repair command that can be copied and run
+directly; do not work around it by editing untracked server startup files.
 
-🔴 **Windows cannot be configured to pass this today — it is not your setup**
-(measured 2026-08-27, see [#1290](https://github.com/sleep2agi/agent-network/issues/1290)):
-check ① is literally `pin.abs.startsWith("/")` — **POSIX-only** — and a Windows absolute path
-(`C:\...`) never starts with `/`, so any `ANET_BIN_ABS` yields
-`anet_bin_unsafe_path: not absolute:`. Even with ① relaxed, ③ and ④ do not hold on Windows
-(Node reports `uid` as 0 there ⇒ the owner check always passes; POSIX mode bits do not reflect
-ACLs ⇒ the permission check asserts nothing real).
-
-⚠️ **The symptom is deceptive**: such a daemon **registers, heartbeats and receives doorbells
-normally**; everything looks right hub-side, the Dashboard server picker lists it as selectable,
-and `create_node` even returns `ok:true` with a request_id — the failure is written only to the
-daemon's local log. **Until #1290 is fixed: a Windows box can run a daemon for heartbeat and
-telemetry, but do not expect it to fork child nodes.**
-
-**Criterion**: once pinned, issue one `create_node` from the hub; the daemon log must show
+**Criterion**: issue one `create_node` from the hub; the daemon log must show
 `[create-node] spawned child '<name>' pid=…` plus `+5000ms capability check OK`, and the new
 node must register itself back to the hub. **Without those two lines it is not wired up** —
 it will not retry.
