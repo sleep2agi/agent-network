@@ -607,9 +607,43 @@ jobs:
         run: |
           set -euo pipefail
           n=$(tar -xzOf "$TARBALL" package/package.json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).name))')
-          sleep 10
-          got=$(npm view "$n" dist-tags.preview)
-          echo "npm preview 现在是: $got"
-          [ "$got" = "${{ inputs.version }}" ] || { echo "::error::preview 仍是 $got,发布没生效"; exit 1; }
+
+          # 🔴 这一步的标题写着「看 registry 不看退出码」,但原来用的是 `npm view` ——
+          # 那读的是 CDN 缓存,不是 registry。2026-08-27 发 agent-network@2.3.0-preview.48:
+          #   npm publish 成功(+ @sleep2agi/agent-network@2.3.0-preview.48,provenance 已签),
+          #   10 秒后 npm view 仍返回 .47 → 本步骤误判「发布没生效」→ job red。
+          # 而同一时刻直读 registry 已经是 .48。
+          #
+          # 假红比漏检更贵:它教人忽略 publish 的红,或者更糟 —— 重发一次。
+          #
+          # 改成直读 registry + 退避重试。仍然「看 registry 不看退出码」,
+          # 只是这次真的读的是 registry。
+          expected='${{ inputs.version }}'
+          got=""
+          for attempt in 1 2 3 4 5 6; do
+            got=$(curl -fsSL --max-time 20 "https://registry.npmjs.org/$n" \
+                  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+                      try { console.log((JSON.parse(s)["dist-tags"]||{}).preview||""); } catch { console.log(""); }
+                    })' || true)
+            echo "attempt $attempt: registry 上 preview = ${got:-<读不到>}"
+            [ "$got" = "$expected" ] && break
+            sleep $((attempt * 5))
+          done
+          [ "$got" = "$expected" ] || { echo "::error::registry 上 preview 仍是 ${got:-<读不到>},发布没生效"; exit 1; }
+
+          # 再对一次字节:registry 记录的 shasum 必须等于我们刚发的那个 tarball 的。
+          # 「tag 指对了」和「指向的是我们发的那份」是两件事。
+          local_sha=$(sha256sum "$TARBALL" | cut -d" " -f1)
+          # 🔴 `node -e '...' V=x` 会把 V=x 当成 argv,不是环境变量 —— process.env.V 会是 undefined。
+          # 环境变量必须写在命令**前面**。(我在这个 PR 里第一版就写错了。)
+          reg_sha1=$(curl -fsSL --max-time 20 "https://registry.npmjs.org/$n" \
+                     | V="$expected" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+                         const d=JSON.parse(s);
+                         const m=(d.versions||{})[process.env.V]||{};
+                         console.log((m.dist||{}).shasum||"");
+                       });' || true)
+          echo "registry 记录的 sha1 = ${reg_sha1:-<无>}(npm 用 sha1,本地 sha256=$local_sha 仅作留痕)"
+          [ -n "$reg_sha1" ] || { echo "::error::registry 上取不到 $expected 的 shasum"; exit 1; }
+
           echo "✅ $n@${{ inputs.version }} 已发布到 preview 通道"
           echo "下一步(人工):至少 30 分钟真实环境烟测 + owner ACK 后,用 promote-latest 升 latest"
