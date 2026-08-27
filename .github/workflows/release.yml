@@ -185,6 +185,51 @@ jobs:
           tarball=$(ls ./tarball/*.tgz)
           echo "Gating tarball: $tarball"
 
+          # 🔴 这道门原来整套只对 agent-network 成立:它跑 `anet --version`、
+          # `anet hub start`、`anet login`、建节点向导。agent-node 没有 `anet` 这个 bin
+          # (它的 bin 叫 agent-node),也没有 hub。2026-08-27 第一次用本 workflow 发
+          # agent-node 时,门在第 21 行硬退:
+          #   bash: line 21: anet: command not found   (exit 127)
+          #
+          # 一道对被发布的包**根本跑不起来**的门比没有更糟 —— 它每次都红,
+          # 于是人学会绕过它。所以按包分流,各自跑各自真正的安装路径。
+          if [ "${GATED_PKG}" = "agent-node" ]; then
+            docker run --rm \
+              -v "$PWD/tarball:/tarball:ro" \
+              -e GATED_PKG -e GATED_VER \
+              node:24-slim bash -c '
+                set -euo pipefail
+                npm install -g /tarball/*.tgz > /tmp/install.log 2>&1 \
+                  || { echo "::error::npm install -g failed"; cat /tmp/install.log; exit 1; }
+
+                # case 1 — 装出来的版本就是被门审的那个版本
+                root=$(npm root -g)
+                v=$(node -p "require(\"$root/@sleep2agi/agent-node/package.json\").version")
+                echo "installed agent-node → $v (expected $GATED_VER)"
+                [ "$v" = "$GATED_VER" ] \
+                  || { echo "::error::version mismatch — installed $v, gating $GATED_VER"; exit 1; }
+
+                # case 2 — bin 真的可执行(不是只把文件铺进去了)
+                command -v agent-node > /dev/null \
+                  || { echo "::error::agent-node bin not on PATH after global install"; exit 1; }
+
+                # case 3 — help 广告的运行时能力。
+                # 判据不是我自造的:agent-network 在运行时就是这么判的
+                #   agentNodeHelpSupportsCodexAppServer(help) => help.includes("codex-app-server")
+                #   agentNodeHelpSupportsOpencode(help)       => help.includes("opencode-cli")
+                # 见 agent-network/src/opencode-agent-node-pair.ts。
+                # 发布的包若不广告这两项,配对启动会在用户机器上失败,
+                # 而失败信息是 "exact paired package lacks codex-app-server capability"。
+                help=$(agent-node --help 2>&1 || true)
+                for cap in codex-app-server opencode-cli; do
+                  printf "%s" "$help" | grep -q -- "$cap" \
+                    || { echo "::error::agent-node --help 不广告 $cap —— 配对启动会在用户机器上失败"; printf "%s\n" "$help" | head -30; exit 1; }
+                done
+                echo "✅ agent-node install-path smoke: version + bin + codex-app-server/opencode-cli 能力"
+              '
+            exit 0
+          fi
+
           # Real TTY drive via `script -qc` — captures the wizard's interactive
           # prompts that a plain shell `< /dev/null` would silently skip.
           # The harness installs the tarball as the LOCAL agent-network into a
@@ -310,8 +355,20 @@ jobs:
           # "missing PINNED_DASHBOARD" alarms.
           # If any *existing* pin points at a version that's not on npm,
           # anet hub start will silently hang (#194 class of bug). Fail loud.
-          cli="$GATED_PKG/bin/cli.ts"
-          [ -f "$cli" ] || { echo "::error::no $cli — cannot audit pins"; exit 1; }
+          # 🔴 PINNED_* 住在哪:全仓只有 agent-network/bin/cli.ts 一个文件有这些常量。
+          #
+          # 原来写的是 "$GATED_PKG/bin/cli.ts" —— 那是照 agent-network 的布局写的,
+          # 而 agent-node 的 CLI 在 src/cli.ts,根本没有 bin/cli.ts。
+          # 2026-08-27 第一次用本 workflow 发 agent-node 时这道门直接硬退:
+          #   ::error::no agent-node/bin/cli.ts — cannot audit pins
+          # 那句报错是准确的,但门的取值范围写错了 —— 它审的不是"被发布的那个包",
+          # 而是"仓里所有 PINNED_* 是否指向已发布的版本"。这个不变量与发哪个包无关:
+          # 发 agent-node 时,agent-network 里那些 pin 同样不能指向不存在的版本。
+          #
+          # 所以固定审 agent-network/bin/cli.ts。若哪天 PINNED_* 搬了家或多了一处,
+          # 下面的"审了 0 个就拒绝通过"会说话 —— 那正是它存在的理由。
+          cli="agent-network/bin/cli.ts"
+          [ -f "$cli" ] || { echo "::error::no $cli — cannot audit pins（PINNED_* 只住在这里；若已搬家，请同步本门）"; exit 1; }
 
           missing=0
           audited=0
