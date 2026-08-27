@@ -1,0 +1,24 @@
+# 禁止用 `existsSync(/proc/<pid>)` 断言「这一代进程没了」（#1315）。
+#
+# 🔴 **无 paths 过滤，故意的。** 同类门（doc-symbol-pins）原本挂在 qa.yml 里，
+#    因为 qa.yml 的 paths 没覆盖到真正会漂的那个文件，**跑不到该跑的时候** ——
+#    一道存在、挂上了、却从不被触发的门，和没有这道门在 PR 页面上长得一模一样。
+#    这道门要守的是**任何**新增测试断言，而新测试可以出现在任何目录，
+#    所以不设 paths：全跑，代价是几秒钟。
+name: proc-gone assertions
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  proc-gone:
+    name: proc-gone assertion ratchet
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      # 判据自检先跑：一道自己都没被证明会红的门，绿了也不能读。
+      - name: selftest (criterion)
+        run: python3 scripts/check-proc-gone-assertions.py --selftest
+      - name: scan repo
+        run: python3 scripts/check-proc-gone-assertions.py .
