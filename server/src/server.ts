@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { parseDbTimestampMs } from "./db-timestamp.js";
 import { resolvePort } from "./resolve-port.js";
 import { normalizeSessionRuntime } from "./runtime-label.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
@@ -3026,7 +3027,7 @@ return Bun.serve({
           let lastSeenAt: string | null = null;
           if (r.session_last_seen) {
             lastSeenAt = r.session_last_seen;
-            const t = Date.parse(r.session_last_seen);
+            const t = parseDbTimestampMs(r.session_last_seen);
             if (!isNaN(t)) online = (nowMs - t) <= ONLINE_MS;
           }
           let runtimes: string[] = [];

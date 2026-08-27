@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { parseDbTimestampMs } from "./db-timestamp.js";
 import { z } from "zod/v4";
 import { parseAliasFilter } from "./alias-filter.js";
 import { createHash } from "node:crypto";
@@ -2828,7 +2829,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           let lastSeenAt: string | null = null;
           if (r.session_last_seen) {
             lastSeenAt = r.session_last_seen;
-            const t = Date.parse(r.session_last_seen);
+            const t = parseDbTimestampMs(r.session_last_seen);
             if (!isNaN(t)) online = (nowMs - t) <= ONLINE_MS;
           }
           // Parse self-declare arrays (default to [] for pre-PR2 daemons)
