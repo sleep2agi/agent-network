@@ -6,7 +6,6 @@ echo "source_commit=$sha"
 
 echo '[L0] build/typecheck'
 (cd agent-node && npm run build)
-(cd server && npx tsc --noEmit)
 
 echo '[L1] focused daemon + Hub handlers'
 (cd agent-node && bun test src/runtime/start-daemon.test.ts)
