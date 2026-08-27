@@ -1044,8 +1044,33 @@ jobs:
           done < <(grep -oE '^ARG [A-Z0-9_]+' "$DF" | awk '{print $2}')
           echo "detected build args: ${BUILD_ARGS[*]:-(none)}"
           docker build "${BUILD_ARGS[@]}" -t "anet-${{ matrix.suite }}" -f "$DF" .
-          docker run --rm -e EXPECTED_SOURCE_COMMIT="$GITHUB_SHA" \
-            -e ARTIFACT_DIR=/tmp/art "anet-${{ matrix.suite }}"
+          # #1324: ARTIFACT_DIR 一直传进来,但容器带 --rm 直接删掉,套件写的报告
+          # 从没被取出过 —— 全仓只有 test225 那一处有 docker cp。这里补上取出。
+          #
+          # 🔴 不能沿用 `docker run --rm ... ` 一行式:本步骤在 set -euo pipefail 下,
+          #    docker run 一旦非零就立刻中断,后面的 cp 根本不执行 —— 而**失败恰恰是
+          #    唯一需要 artifact 的时刻**。所以先把退出码收进 rc,取完再原样退出。
+          # 参照实现:qa.yml 的 test225 那一步(--name → docker cp → docker rm -f)。
+          rc=0
+          docker run --name "run-${{ matrix.suite }}" \
+            -e EXPECTED_SOURCE_COMMIT="$GITHUB_SHA" \
+            -e ARTIFACT_DIR=/tmp/art "anet-${{ matrix.suite }}" || rc=$?
+          mkdir -p "$RUNNER_TEMP/suite-artifacts"
+          # 多数套件不写 ARTIFACT_DIR,取不到是正常的,只 warning 不改变判定。
+          docker cp "run-${{ matrix.suite }}:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/" 2>/dev/null \
+            || echo "::warning::no artifacts under /tmp/art in ${{ matrix.suite }}"
+          docker rm -f "run-${{ matrix.suite }}" >/dev/null 2>&1 || true
+          ls -la "$RUNNER_TEMP/suite-artifacts/" 2>/dev/null || true
+          exit $rc
+
+      # 只在失败时上传:成功的运行不需要现场,而失败时这是唯一的现场。
+      - name: Upload ${{ matrix.suite }} artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-${{ matrix.suite }}
+          path: ${{ runner.temp }}/suite-artifacts/
+          if-no-files-found: ignore
 
   windows-codex-copresence:
     name: Windows Codex co-presence native smoke
