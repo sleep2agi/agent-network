@@ -57,9 +57,14 @@ dump_agg_failure() {
   echo "--- last 40 lines of $output ---"
   tail -40 "$output" || true
   # 兜底,不依赖任何输出格式假设。ARTIFACT_DIR 是本仓既有约定(test225/234/697
-  # 都在用)。⚠️ 目前 qa.yml 的 hub-semantics 矩阵是 `docker run --rm`,没有取出
-  # 步骤,所以这几份现在只落在容器里 —— 取出需要照 test225 的做法
-  # (`--name` + `docker cp` + `docker rm -f`,qa.yml:745-755)。先写,取出另议。
+  # 都在用)。
+  #
+  # ✅ #1324/#1328 已补上取出:本套件跑在 qa.yml 的 `hub-orphan-gates` job
+  #    (**显示名是 `hub semantics + guards (Docker)`** —— key 和 name 不同,
+  #    上一版注释按显示名写成了「hub-semantics 矩阵」,查的人按那个名字在 qa.yml
+  #    里 grep 是找不到的),该 step 现在是 `--name` → `docker cp` → `docker rm -f`,
+  #    再由 `Upload ... artifacts`(`if: failure()`)传成 artifact。
+  #    ⇒ 红的时候,整份聚合输出可以从该 run 的 Artifacts 里下到,不再只剩 tail -40。
   if [ -n "${ARTIFACT_DIR:-}" ]; then
     mkdir -p "$ARTIFACT_DIR" 2>/dev/null || true
     cp -- "$output" "$ARTIFACT_DIR/$(basename "$output")" 2>/dev/null \
