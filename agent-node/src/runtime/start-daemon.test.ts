@@ -19,7 +19,8 @@ function writeConfig(alias = "child-a", nodeId = "node_child_a") {
 
 describe("verifyStoppedChildConfig", () => {
   test("accepts exact node id + alias from private config", () => {
-    expect(verifyStoppedChildConfig(root, "node_child_a", "child-a")).toBe(writeConfig());
+    const path = writeConfig();
+    expect(verifyStoppedChildConfig(root, "node_child_a", "child-a")).toBe(path);
   });
   test("rejects mismatched node id and alias", () => {
     writeConfig();
