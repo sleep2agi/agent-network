@@ -543,7 +543,7 @@ db.exec(`
     child_name        TEXT NOT NULL,
     network_id        TEXT NOT NULL,
     runtime           TEXT NOT NULL,
-    model             TEXT NOT NULL,
+    model             TEXT,
     flags_json        TEXT NOT NULL,
     env_keys          TEXT NOT NULL,
     status            TEXT NOT NULL,
@@ -556,6 +556,63 @@ db.exec(`
     child_node_id     TEXT
   );
 
+  CREATE INDEX IF NOT EXISTS idx_ncr_daemon_status ON node_create_requests(daemon_node_id, status);
+  CREATE INDEX IF NOT EXISTS idx_ncr_network ON node_create_requests(network_id);
+  CREATE INDEX IF NOT EXISTS idx_ncr_child_name ON node_create_requests(child_name);
+`);
+function migrateNodeCreateRequestsModelNullable() {
+  if (db.dialect === "postgres") {
+    try { db.exec("ALTER TABLE node_create_requests ALTER COLUMN model DROP NOT NULL"); } catch {}
+    return;
+  }
+
+  let needsRebuild = false;
+  try {
+    const createSql = db.get<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'node_create_requests'");
+    needsRebuild = !!createSql?.sql && /\bmodel\s+TEXT\s+NOT\s+NULL\b/i.test(createSql.sql);
+  } catch {}
+  if (!needsRebuild) return;
+
+  db.transaction(() => {
+    db.exec("DROP TABLE IF EXISTS node_create_requests_migrated");
+    db.exec(`
+      CREATE TABLE node_create_requests_migrated (
+        request_id        TEXT PRIMARY KEY,
+        daemon_node_id    TEXT NOT NULL,
+        child_name        TEXT NOT NULL,
+        network_id        TEXT NOT NULL,
+        runtime           TEXT NOT NULL,
+        model             TEXT,
+        flags_json        TEXT NOT NULL,
+        env_keys          TEXT NOT NULL,
+        status            TEXT NOT NULL,
+        error             TEXT,
+        child_token_id    TEXT,
+        created_at        INTEGER NOT NULL,
+        created_by_token  TEXT NOT NULL,
+        delivered_at      INTEGER,
+        acked_at          INTEGER,
+        child_node_id     TEXT
+      )
+    `);
+    db.exec(`
+      INSERT INTO node_create_requests_migrated (
+        request_id, daemon_node_id, child_name, network_id, runtime, model,
+        flags_json, env_keys, status, error, child_token_id, created_at,
+        created_by_token, delivered_at, acked_at, child_node_id
+      )
+      SELECT
+        request_id, daemon_node_id, child_name, network_id, runtime, model,
+        flags_json, env_keys, status, error, child_token_id, created_at,
+        created_by_token, delivered_at, acked_at, child_node_id
+      FROM node_create_requests
+    `);
+    db.exec("DROP TABLE node_create_requests");
+    db.exec("ALTER TABLE node_create_requests_migrated RENAME TO node_create_requests");
+  });
+}
+migrateNodeCreateRequestsModelNullable();
+db.exec(`
   CREATE INDEX IF NOT EXISTS idx_ncr_daemon_status ON node_create_requests(daemon_node_id, status);
   CREATE INDEX IF NOT EXISTS idx_ncr_network ON node_create_requests(network_id);
   CREATE INDEX IF NOT EXISTS idx_ncr_child_name ON node_create_requests(child_name);
