@@ -335,6 +335,45 @@ describe("resolveAttachmentToLocalPath — cache hit", () => {
   });
 });
 
+describe("mid-stream abort leaves no unhandled writer error", () => {
+  // 🔴 见证红:改这个测试之前,产品在中止路径上不挂 error 监听器 ⇒ 200 轮里 199 轮
+  //    抛出未处理的 ENOENT。修复后 0/200。
+  //
+  //    机制:小块写时 `open` 系统调用还挂着 write 就返回了;命中上限 → writer.destroy()
+  //    (异步,不取消 pending open) → 文件/目录被删 → open 之后才落到已消失的路径 → emit "error"。
+  //
+  //    🔴 为什么参数必须是**小块**:用 1 MiB 大块复现是 0/60 —— 背压会强制 open 先完成。
+  //    CHUNK/CAP 取的就是上面 "Content-Length lies" 那个用例的真值,不要随手调大。
+  test("abort under a cleanup that deletes the cache dir emits no unhandled error", async () => {
+    const N = 60, CHUNK = 80, CAP = 100;
+    const errs: string[] = [];
+    const onErr = (e: any) => errs.push(String(e?.message || e));
+    process.on("uncaughtException", onErr);
+    process.on("unhandledRejection", onErr);
+    try {
+      for (let i = 0; i < N; i++) {
+        const cacheDir = freshCacheDir();
+        let sent = 0;
+        const fakeFetch: typeof fetch = async () =>
+          new Response(new ReadableStream({
+            pull(c) { sent++; c.enqueue(new Uint8Array(CHUNK).fill(0x42)); if (sent >= 5) c.close(); },
+          }), { status: 200, headers: { "Content-Length": "1" } });
+        const r = await resolveAttachmentToLocalPath(
+          { file_id: "aborttest_xyz123" },
+          { hubUrl: "http://hub.test:9200", authToken: "ntok_x", cacheDir, maxBytes: CAP, fetch: fakeFetch },
+        );
+        expect(r.ok).toBe(false);
+        cleanupCacheRoot();   // 模拟 afterEach:在写者可能还活着时删掉整棵根
+      }
+      await new Promise(r => setTimeout(r, 300));
+    } finally {
+      process.off("uncaughtException", onErr);
+      process.off("unhandledRejection", onErr);
+    }
+    expect(errs.filter(e => e.includes("ENOENT"))).toEqual([]);
+  });
+});
+
 describe("sweepAttachmentCacheOnce", () => {
   test("purges files older than TTL, keeps fresh", () => {
     const cacheDir = freshCacheDir();

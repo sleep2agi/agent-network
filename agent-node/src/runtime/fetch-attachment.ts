@@ -237,6 +237,14 @@ async function fetchAndCache(
   try {
     const reader = res.body.getReader();
     const writer = createWriteStream(tmpPath, { mode: 0o600 });
+    // 🔴 挂 error 监听器,否则中止路径会留下一个**没人接的异步 ENOENT**。
+    //    机制(已确定性复现 199/200):小块写时 `open` 系统调用还挂着就 write 返回了;
+    //    命中体积上限 → `writer.destroy()`(异步,不取消 pending open)→ 目录/文件被删 →
+    //    那个 open 之后才落到已消失的路径上 → emit "error"。没有监听器 = 未处理异常。
+    //    大块写复现不出来,因为背压会强制 open 先完成 —— 这正是前三次复现失败的原因。
+    // 不吞掉错误:记下来,成功路径上仍然把它冒泡成 write_failed。
+    let writerErr: any = null;
+    writer.on("error", (e) => { writerErr = writerErr ?? e; });
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -260,6 +268,7 @@ async function fetchAndCache(
     await new Promise<void>((resolve, reject) => {
       writer.end((err?: any) => err ? reject(err) : resolve());
     });
+    if (writerErr) throw writerErr;   // 正常路径上的写错误照样冒泡,不被上面的监听器吞掉
   } catch (e: any) {
     try { rmSync(tmpPath, { force: true }); } catch { /* ok */ }
     return { ok: false, code: "fetch_failed", error: `stream-to-disk failed: ${e?.message || e}` };
