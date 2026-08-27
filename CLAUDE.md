@@ -4,14 +4,15 @@
 
 你已接入 CommHub 通信网络。用以下 MCP 工具和其他 Agent/指挥室通信：
 
-### 给别人发消息
+### 给别的 agent 发消息
 ```
-commhub_send_task(alias="指挥室", task="你要说的内容", priority="normal")
+commhub_send_task(alias="<用 get_all_status 查到的真实 alias>", task="内容", priority="normal")
 ```
+🔴 名册里**没有**叫「指挥室」或「admin」的会话；「总指挥」是一个 claude-code 协调 agent，**不是 Vincent 本人**。
 
 ### 发消息（无任务生命周期）
 ```
-commhub_send_message(alias="指挥室", message="纯消息")
+commhub_send_message(alias="<真实 alias>", message="纯消息")
 ```
 
 ### 回复任务
@@ -32,14 +33,19 @@ commhub_get_all_status()
 ## 收到消息
 
 来自 CommHub 的消息会以 `<channel source="commhub" sender="..." task_id="...">` 格式出现在对话中。收到后：
-1. 如果发送者是人类（指挥室/Vincent），用 commhub_send_task 回复确认收到
-2. 如果发送者是其他 agent（通信牛/SDK马/N站牛/测试牛等），不要回复确认，直接执行
-3. 执行任务
-4. 用 commhub_send_task 回复结果
+
+1. 🔴 **`sender="admin"` = Vincent 本人**（他从桌面端/Dashboard 聊天窗以 admin 用户身份发言，**没有对应的会话 alias**）。
+   回复他的**唯一**可达路径：
+   ```
+   commhub_reply(task_id="<他这条消息的 task_id>", text="...", status="completed")
+   ```
+   status 必须是终态 `completed` 才会推送进他的聊天线程；`send_task(alias="总指挥")` 发到的是协调 agent，**Vincent 看不到**（2026-08-27 实测教训：连续多轮回错收件人）。
+2. 发送者是其他 agent（通信牛/SDK马/N站牛/测试牛等）：不要回确认，直接执行，结果用 send_task 回给该 agent。
+3. 执行任务 → 汇报。
 
 ## 规则
 
-- 收到任务必须回应：确认→执行→汇报
+- 收到任务必须回应：确认→执行→汇报（对 admin/Vincent 的每一步回应都走终态 commhub_reply 回他的 task_id）
 - 回复指挥室/dashboard 要「对方立即收到」：commhub_reply **必须 status=completed（终态）** 才推送（→ send_reply → new_reply SSE → dashboard 聊天窗口实时显示），或用 commhub_send_task；**status=in_progress 等非终态走 report_status，不推、dashboard 收不到**（返回 ok 也白搭）。详见 [docs/agent-reply-to-dashboard.md](https://github.com/sleep2agi/agent-network/blob/main/docs/sop/agent-reply-to-dashboard.md)
 - 不要猜 alias，用 get_all_status 查
 - **send_ack / send_message / 非终态 reply 都不推送**（对方看不到，只写库）；要对方立刻看到一律 send_task 或终态 commhub_reply
@@ -49,8 +55,8 @@ commhub_get_all_status()
 - **分层测试，从简单到复杂**：环境→认证→单点通信→完整流程→多用户→安全
 - **前一层不过就不跑后面的**：被依赖的原子能力必须先验证可靠
 - **所有测试在 Docker 里跑**：不碰本地环境，不改生产
-- **不自己跑测试**：通信龙分配任务，测试1-3号执行，通信牛 review
-- **不频繁发 preview**：本地源码开发，大版本完成时统一发 npm
+- **测试可以自己跑**（早期"测试1-3号"分工已撤销；新增套件必须注册进 CI，见 check-test-suite-registration）
+- **发版一律走 GitHub Actions**（Vincent 2026-08-27 定：本机只开发不发包）：`release-gate (v0)` 发 preview，`promote to latest` 升 latest（要 owner ACK）
 - **测试结果保存**：docs/tests/report-testN.txt
 - **每个测试套件独立 Dockerfile**：可并行构建和运行
 
