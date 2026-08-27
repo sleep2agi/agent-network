@@ -3009,7 +3009,10 @@ return Bun.serve({
       `, effectiveNetId);
 
       const nowMs = Date.now();
-      const ONLINE_MS = 60_000;
+      // 心跳周期是 3 分钟（agent-node/src/cli.ts 的 report_status 定时器），
+      // 窗口必须大于它，否则每次心跳后的 60s~180s 之间必然抖成 offline
+      // （通信评审牛 #1279 独审④）。取 5min，与仓内既有 stale 口径一致。
+      const ONLINE_MS = 5 * 60_000;
       const daemons = sqlRows
         .map(r => {
           let snapRole: string | null = null;

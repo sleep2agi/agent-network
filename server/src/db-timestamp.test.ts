@@ -5,9 +5,10 @@ const NAIVE = "2026-08-27 11:23:54";
 const EXPECTED = Date.UTC(2026, 7, 27, 11, 23, 54);
 
 describe("parseDbTimestampMs", () => {
-  // ⚠ 这条在 `bun test` 下**没有分辨力**：bun test 进程的解析时区固定为 UTC
-  // （实测 Intl…resolvedOptions().timeZone === "UTC"，即便系统是 Asia/Shanghai），
-  // 裸 Date.parse 在那里恰好正确。真正的门是下面那条子进程断言。
+  // ⚠ 这条在 **TZ=UTC 的环境**下没有分辨力：裸 Date.parse 在 UTC 下恰好正确。
+  // CI runner 与容器默认就是 UTC（本仓 Docker 套件亦然），所以缺陷在常规跑法里
+  // 恒绿。（更正：Bun 是尊重 TZ 的，不存在"bun test 固定 UTC"——通信评审牛 #1279
+  // 独审③ 独立复跑证伪了我最初的说法。）真正稳定见红的门是下面那条强制子进程。
   it("treats a naive SQLite timestamp as UTC", () => {
     expect(parseDbTimestampMs(NAIVE)).toBe(EXPECTED);
   });
