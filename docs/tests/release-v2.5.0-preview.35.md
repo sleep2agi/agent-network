@@ -13,9 +13,14 @@
 ## Install
 
 ```bash
-npm install -g @sleep2agi/agent-network@2.3.0-preview.47 @sleep2agi/agent-node@2.5.0-preview.35
+npm install -g @sleep2agi/agent-network@2.3.0-preview.48 @sleep2agi/agent-node@2.5.0-preview.35
 anet node create
 ```
+
+🔴 **配对版本是 2.3.0-preview.48，不是 .47。** `.47` 内置的
+`PAIRED_AGENT_NODE_VERSION` 还是 `2.5.0-preview.34`，和本版配不上 ——
+会报 `exact paired package identity validation failed`。这一点是 `.35` 发到
+preview 后的真实环境烟测抓到的，本文首发时写的是 `.47`,已更正。
 
 🔴 **两个包都要装。** agent-node 的包里没有飞书桥的代码（它去 fork
 `@sleep2agi/agent-network` 的 `dist/src/im/feishu/worker.js`），单装 agent-node
