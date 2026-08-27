@@ -3,12 +3,158 @@
 A production Hub needs a process supervisor. A bare `nohup ... &` will not recover
 after a crash, reboot, or accidental kill.
 
+::: tip Which daemon are you after? This page covers two things
+"daemon" means two **different** things in this project — the names collide.
+Pick yours first:
+
+| What you want | Where |
+|---|---|
+| **Try `anet daemon`** — start a `host_supervisor` node (RFC-026) that the Dashboard can drive remotely and that can create/manage other nodes for you | ⬇️ next section, [Try `anet daemon` in 5 minutes](#try-anet-daemon) |
+| **Make the Hub survive a crash** — supervise the `anet hub start` process with PM2 / systemd | ⬇️ everything from [Prerequisites](#hub-prereqs) down |
+
+They are independent — doing one does not require the other.
+:::
+
+## Try `anet daemon` in 5 minutes {#try-anet-daemon}
+
+> 🔴 **Every command below was actually run in a clean `node:22-bookworm-slim`
+> container** (2026-08-27); the output shown is real, not illustrative.
+> Measured with `anet v2.3.0-preview.47` + `agent-node v2.5.0-preview.34` +
+> `commhub-server v0.9.0-preview.30`.
+
+### 0. Install (`bun` is not optional)
+
+```bash
+npm i -g bun @sleep2agi/agent-network @sleep2agi/agent-node
+```
+
+🔴 **`bun` is a hard prerequisite.** Without it the very first command stops at:
+
+```
+❌ anet hub start requires the Bun runtime
+   (commhub-server is bun-only — uses Bun.serve + bun:sqlite, no Node fallback)
+```
+
+🔴 **Versions: a plain install is enough — do not hand-copy a version number.**
+`latest` now ships `anet daemon` (measured: `2.3.0-preview.47`). Check yours with
+`anet -v`; if `anet daemon` prints `Unknown command`, your build predates the
+command — see [which versions have it](#which-versions).
+
+### 1. Start the Hub
+
+```bash
+anet hub start
+```
+
+It prints a banner containing a **randomly generated admin password, shown only once**:
+
+```
+  ✅ Server running on http://127.0.0.1:9200 (commhub-server v0.9.0-preview.30)
+  ✅ Admin account created
+     username: admin
+     password: anet-90ddcdbe2b3f4f81a66ff5      ← yours will differ; copy it now
+     Store this password now; it will not be shown again.
+```
+
+🔴 That password is **different on every machine** (random bootstrap password, since
+`2.2.22-preview.4`). Use the one from your own run, not the one above.
+
+### 2. Log in
+
+The banner hands you the assembled command — copy it:
+
+```bash
+anet login --hub http://127.0.0.1:9200 --username admin --password <from your banner>
+```
+
+```
+✅ Logged in as admin
+⚠ Your password is the BOOTSTRAP DEFAULT and must be changed.
+   Change it now:  anet passwd
+   network: admin
+   token saved to ~/.anet/config.json
+```
+
+🔴 **Order matters.** Running `anet daemon up` before logging in stops at
+`未登录或缺少 network_id。请运行: anet login` (exit code 1).
+
+### 3. Start the daemon — one command
+
+```bash
+anet daemon up
+```
+
+Real output:
+
+```
+[anet daemon] ✓ created host_supervisor daemon "daemon"
+              config:     .anet/nodes/daemon/config.json
+              node_id:    node_daemon_8d94ac332abb
+
+[anet daemon] ⚠ Permission posture:
+              flags.dangerouslySkipPermissions = true  (no per-call confirmation)
+              flags.teammateMode = true
+              role = host_supervisor                   (can fork child agent-nodes via hub)
+              → Run daemons only on machines you trust to act on your behalf.
+
+[anet] Starting new session for "daemon" [claude-agent-sdk]...
+[daemon] 已注册到 CommHub
+[daemon] SSE connected
+```
+
+🔴 **`anet daemon up` holds the terminal** — a daemon is a long-running process.
+Use a second terminal, or supervise it with the PM2 setup in the rest of this page.
+
+⚠️ Note the **Permission posture** block: a daemon runs with
+`dangerouslySkipPermissions` + `teammateMode` and can fork child nodes through the hub.
+**Only run one on a machine you trust to act on your behalf.** To tighten it, edit
+`.anet/nodes/daemon/config.json`.
+
+### 4. Confirm it actually came up
+
+```bash
+anet daemon list
+```
+
+```
+Local host_supervisor daemons (1):
+  daemon   node_id=node_daemon_8d94ac332abb  runtimes=[claude-agent-sdk,codex-sdk,grok-build-acp]
+```
+
+On the Hub side you get a heartbeat every 3 minutes:
+
+```
+[08:36:00] SSE ← net_b84e736f347c:daemon connected (1 clients)
+[08:39:01] daemon (sdk-node) → report_status: idle [net]
+[08:42:01] daemon (sdk-node) → report_status: idle [net]
+```
+
+🔴 **`anet daemon list` only reads local config** — being listed there does not mean the
+hub knows about it. For that, look at the `SSE ←` / `report_status` lines above, or find
+`daemon` in the Dashboard node list.
+
+### 5. Drive it remotely from the Dashboard
+
+Once the daemon is up and connected, open the Dashboard:
+
+```bash
+anet hub dashboard        # http://localhost:3000 by default
+```
+
+`daemon` appears in the node list with `role=host_supervisor`. What separates it from an
+ordinary node: **it can create and start other nodes on that machine for you** — which is
+the point of remote node creation. You no longer need to ssh in and run `anet node create`
+by hand.
+
+---
+
+
 ::: warning Use exactly one supervisor
 Do not let PM2, systemd, and a cron watchdog manage the same Hub. Competing
 supervisors can start two processes against one port and one SQLite database.
 :::
 
-## Prerequisites (in order — each one will stop you)
+## Prerequisites (in order — each one will stop you) {#hub-prereqs}
 
 Measured on a clean machine. All three fail closed with an actionable
 message, but the docs never showed them as one chain, so you hit them one at
@@ -20,33 +166,41 @@ a time:
 | 2. **Hub running** | `未找到 CommHub Server。请先运行: anet hub start` | `anet hub start` (up in ~3s) |
 | 3. **Logged in with a network_id** | `未登录或缺少 network_id。请运行: anet login` | `anet register`, or `anet login` |
 
-::: warning `anet daemon` is not what this page daemonizes
-This page is about **keeping the Hub alive with PM2** (`anet hub start`).
+::: warning `anet daemon` is not what the rest of this page daemonizes
+The **rest of this page** is about keeping the Hub alive with PM2 (`anet hub start`).
 
 `anet daemon init` / `up` is a different thing: it creates and starts a
-`host_supervisor` node (RFC-026). Similar names, different jobs.
-
-🔴 **`anet daemon` only exists on the `preview` channel.** The `install.sh` this site
-recommends installs `latest`, where the command prints:
-
-```
-$ anet daemon
-Unknown command "daemon". Did you mean: anet demo?
-(exit code 1)
-```
-
-Measured 2026-08-18 by running the binary from the real npm tarball of
-`@sleep2agi/agent-network@2.2.21` (`latest` at the time) — not by reading `dist`, which
-is string-array-obfuscated and cannot be grepped for this. On `preview`
-(`2.3.0-preview.39` at the time) the same command prints `Usage: anet daemon <subcommand> …`.
-
-**So the next sentence only holds on preview:** `anet daemon --help` currently prints the
-global help — run `anet daemon` with no arguments to see its subcommands. On `latest` you
-get the `Unknown command` above — **that is not a broken install.**
-
-If you need `anet daemon`, switch channels first:
-`npm i -g @sleep2agi/agent-network@preview`.
+`host_supervisor` node (RFC-026). Similar names, different jobs — for the walkthrough
+see [Try `anet daemon` in 5 minutes](#try-anet-daemon) above.
 :::
+
+### Which versions have `anet daemon` {#which-versions}
+
+🔴 **This box used to say the opposite**, because it was pinned to a number that drifts.
+It read: "`anet daemon` only exists on `preview`; `latest` prints `Unknown command`."
+That was measured on 2026-08-18 against the then-`latest` (`2.2.21`). **Both halves of
+that premise are false today.**
+
+So this section does not say *which channel* has it — only how to check for yourself:
+
+```bash
+anet -v                 # which build you have
+anet daemon             # present: prints  Usage: anet daemon <subcommand> …
+                        # absent:  Unknown command "daemon". Did you mean: anet demo? (exit 1)
+```
+
+| Version | `anet daemon` | Evidence |
+|---|---|---|
+| `2.2.21` | ❌ `Unknown command "daemon"` | measured 2026-08-18 (`latest` at the time) |
+| `2.3.0-preview.39` | ✅ `Usage: anet daemon <subcommand> …` | measured 2026-08-18 (`preview` at the time) |
+| `2.3.0-preview.47` | ✅ `Usage: anet daemon <subcommand> …` | measured 2026-08-27 — **and it was that day's `latest`** |
+
+⇒ **State a lower bound, not a channel**: `2.3.0-preview.39` and later have it; `2.2.21`
+does not. The table lists **measured points, not the exact boundary** — the individual
+release between `2.2.21` and `.39` was not bisected.
+**Do not write "whether `latest` has it" into docs**: what `latest` points at changes (on
+2026-08-27 it was already `2.3.0-preview.47`), so a conclusion pinned to a channel needs
+rewriting again within days.
 
 ## Recommended entry point
 
