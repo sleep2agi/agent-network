@@ -1,5 +1,11 @@
 # 更新日志
 
+## BTW 精确任务边界——Hub preview（2026-08-28）
+
+`commhub-server@0.9.0-preview.34` 为任务记录增加可选的 `thread_id` / `turn_id`，并在 REST 与 MCP 任务投影中返回它们。Hub 只接受节点对已消费任务上报的、归属一致且不冲突的边界；旧节点和历史任务继续兼容，缺失时明确保持为空，不做猜测或回填。配套的 `agent-node@2.5.0-preview.39` 与 `agent-network@2.3.0-preview.53` 将在 Hub 发布后按依赖顺序跟进。
+
+---
+
 ## Codex 共存 TUI 耐久化与安全停机——preview（2026-08-26）
 
 本轮 preview 三包配对发布：`agent-network@2.3.0-preview.46` / `agent-node@2.5.0-preview.34` / `commhub-server@0.9.0-preview.30`。Hub 增加不可变节点游标和终态序列，丢失 SSE 门铃后可耐久补偿；任务投递返回经 network 权限校验的 `actual_to`。Codex 共存路径保留单 bridge、共享 `CODEX_HOME` 与 thread/history，`node stop` 会收敛受管的 app-server / bridge / TUI 资源。Linux 与受保护 Windows Codex 0.148 门禁覆盖升级恢复、活跃 turn steer 和历史保留。
