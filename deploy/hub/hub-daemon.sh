@@ -61,7 +61,8 @@ set -uo pipefail
 # 2026-08-28: preview34 → preview36（跟随 PINNED_SERVER_VERSION;server .36 已发 npm）
 #   内容 = #1376 放开共存 runtime(Vincent 定) + #1372/#1374/#1360/#1377
 #   回滚目标 = 生产机器上当前值(以该机器为准)
-RUNTIME_DIR="$HOME/.commhub/runtime-v34-preview36"
+# 2026-08-28: preview36 → preview37（跟随 PINNED;#1381 卡死行出口）
+RUNTIME_DIR="$HOME/.commhub/runtime-v34-preview37"
 ENTRY="$RUNTIME_DIR/node_modules/@sleep2agi/commhub-server/bin/commhub.ts"
 ENV_FILE="${HUB_ENV_FILE:-$HOME/.commhub/hub.env}"
 # bun 解析：显式路径优先，其次走 PATH。
