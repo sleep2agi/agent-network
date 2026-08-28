@@ -1156,6 +1156,15 @@ const taskTraceLog = (line: string) => {
 // in ./reply-reliability.ts so it can be unit-tested without spinning up
 // agent-node. This wrapper drives the classifier through the actual HTTP
 // transport with exponential backoff.
+// #1357 — per-request timeout. Node's fetch has NO default timeout on an
+// established connection: a server that accepts the request but never
+// finishes the response leaves the promise unsettled forever — the retry
+// loop below never advances and the caller's .catch never fires (zero logs,
+// zero alerts). Same fix/value as commhub-mcp.ts COMMHUB_CALL_TIMEOUT_MS;
+// AbortSignal.timeout also aborts the res.text() body read, and the
+// resulting TimeoutError falls into the retryable catch branch below.
+const CALL_COMMHUB_TIMEOUT_MS = 30_000;
+
 async function callCommHub(method: string, params: Record<string, unknown>, retries = 3) {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -1175,6 +1184,7 @@ async function callCommHub(method: string, params: Record<string, unknown>, retr
           method: "tools/call",
           params: { name: method, arguments: params },
         }),
+        signal: AbortSignal.timeout(CALL_COMMHUB_TIMEOUT_MS),
       });
       if (!res.ok) {
         if (attempt < retries) {
