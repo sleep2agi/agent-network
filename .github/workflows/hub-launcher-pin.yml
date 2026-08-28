@@ -1,0 +1,37 @@
+# 仓库里的 hub 启动器,必须和仓库自己声明的 hub 版本对上。
+#
+# 2026-08-28 实测 origin/main:`deploy/hub/hub-daemon.sh` 起 `preview29`,
+# 而 `PINNED_SERVER_VERSION` 是 `preview.34` —— **差 5 个版本,而仓库里没有任何东西
+# 注意到**。照仓库部署会起一个和仓库声明不同的 hub。
+#
+# 这不是新问题:#735(2026-08-12)报的正是「仓库无法复现生产 hub 启动器」,
+# 当时的修法是**把文件拷进仓库**,同日关闭。16 天后它又落后了 ——
+# 🔴 **一次性拷贝没有配任何保持同步的机制,而不同步不会让任何东西变红。**
+# 这道门就是那个缺失的机制。
+#
+# 🔴 关于触发范围:**不加 paths 过滤**,和 doc-symbol-anchors.yml 同理。
+# 这道门的主要失效场景是「有人 bump 了 PINNED_SERVER_VERSION 而忘了启动器」——
+# 那是一个改 `agent-network/bin/cli.ts` 的 PR。若按 `deploy/**` 过滤,
+# 恰恰在最需要它的那类改动上永远不触发。脚本跑完不到一秒。
+#
+# 🔴 它管什么、不管什么(脚本里也写了,这里再说一遍因为分支保护看的是这个名字):
+#   管   —— 仓库内部两个值一致
+#   不管 —— 仓库与**生产机器**上那份一致。CI 看不到生产。
+#           (2026-08-28 生产实际在跑 preview.35,比仓库的 pin 还新一版。)
+#           别把这道门的绿读成「仓库和生产一致」。
+
+name: lint (hub launcher pin)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  scan:
+    # 这个 name 是分支保护里能写的唯一标识符,必须全仓唯一。
+    name: hub-launcher-pin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/check-hub-launcher-pin.py

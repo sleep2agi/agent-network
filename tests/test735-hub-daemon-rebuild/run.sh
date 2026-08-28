@@ -4,6 +4,23 @@ set -euo pipefail
 source /lib/safe-rm.sh
 
 SCRIPT=/app/deploy/hub/hub-daemon.sh
+
+# 🔴 2026-08-28:夹具原来把那个 runtime 目录名(当时是 v34-preview29)写死在 5 处。
+#    后果是**每一次合法的 hub 版本 bump 都会打破这个测试** ——
+#    而这很可能就是 deploy/hub/hub-daemon.sh 长期没人更新的原因:
+#    更新它会让这里变红,于是就没人更新,于是仓库与生产漂了 6 个版本(见 #735)。
+#
+#    改成从被测脚本自己读。这样:
+#      · 版本 bump 不再打破本套件
+#      · 夹具路径与脚本实际要用的路径**必然一致**(而不是"碰巧一致")
+#    取不到就退出 1,不静默用一个默认值 —— 一个用错路径的夹具会让
+#    后面每一条断言都在测别的东西,而它们照样能绿。
+RUNTIME_BASENAME=$(sed -n 's|^RUNTIME_DIR="\$HOME/\.commhub/\([^"]*\)"|\1|p' "$SCRIPT" | head -1)
+if [ -z "$RUNTIME_BASENAME" ]; then
+  echo "FAIL: 从 $SCRIPT 里取不到 RUNTIME_DIR 的目录名。改了那一行的写法就要同步改这里。" >&2
+  exit 1
+fi
+echo "runtime dir (从脚本读出): $RUNTIME_BASENAME"
 ROOT="/tmp/test735-$$"
 trap 'safe_rm_rf "$ROOT"' EXIT
 
@@ -12,9 +29,9 @@ new_fixture() {
   local dir="$ROOT/$name"
   safe_rm_rf "$dir"
   mkdir -p \
-    "$dir/home/.commhub/runtime-v34-preview29/node_modules/@sleep2agi/commhub-server/bin" \
+    "$dir/home/.commhub/$RUNTIME_BASENAME/node_modules/@sleep2agi/commhub-server/bin" \
     "$dir/fake-bin"
-  : > "$dir/home/.commhub/runtime-v34-preview29/node_modules/@sleep2agi/commhub-server/bin/commhub.ts"
+  : > "$dir/home/.commhub/$RUNTIME_BASENAME/node_modules/@sleep2agi/commhub-server/bin/commhub.ts"
   printf 'ANET_HUB_SECRET_VAULT_KEY=test-fixture-only\n' > "$dir/hub.env"
 
   cat > "$dir/fake-bin/bun" <<'EOF'
@@ -61,7 +78,7 @@ assert_success_path() {
   dir="$(new_fixture success)"
   invoke "$script" "$dir"
   test -s "$dir/bun.log"
-  grep -Fq "$dir/home/.commhub/runtime-v34-preview29/node_modules/@sleep2agi/commhub-server/bin/commhub.ts" "$dir/bun.log"
+  grep -Fq "$dir/home/.commhub/$RUNTIME_BASENAME/node_modules/@sleep2agi/commhub-server/bin/commhub.ts" "$dir/bun.log"
   grep -Fq '预检通过' "$dir/output.log"
   grep -Fq '监听 127.0.0.1:19299' "$dir/output.log"
 }
@@ -84,7 +101,7 @@ assert_missing_runtime_rejected() {
   local script="$1"
   local dir rc
   dir="$(new_fixture missing-runtime)"
-  safe_rm_rf "$dir/home/.commhub/runtime-v34-preview29"
+  safe_rm_rf "$dir/home/.commhub/$RUNTIME_BASENAME"
   set +e
   invoke "$script" "$dir"
   rc=$?
