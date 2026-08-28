@@ -66,9 +66,15 @@ bun /mutate.ts agent-node/src/runtime/codex-app-server/pending-thread.ts \
 expect_red pending-remote-binding bun test agent-node/src/runtime/codex-app-server/pending-thread.test.ts
 cp /tmp/test1220-pending.ts agent-node/src/runtime/codex-app-server/pending-thread.ts
 
+# #1342: 上面那个守卫被拆成了两个 if(「拿不到 pid」和「拿到了但没连接」原本
+# 折叠成同一条报错,指错排查方向)。变异的**意图不变** —— 让 pid 归属探测不再守门,
+# 确认 launch-readiness 会红;只是锚点跟着新形状走。
+# 🔴 这条锚 2026-08-28 因为产品拆 if 而 count=0 红过一次。变异测试锚的是**代码形状**,
+#    任何改动那几行的人都要同步这里 —— 门会说 `mutation anchor count=0, expected=1`,
+#    不会静默放过。
 bun /mutate.ts agent-network/bin/cli.ts \
-  'if (!tuiIdentity || !probePosixOwnedLoopbackConnection(tuiIdentity.pid, port)) {' \
-  'if (!tuiIdentity) {'
+  'if (!probePosixOwnedLoopbackConnection(tuiIdentity.pid, port)) {' \
+  'if (false) {'
 expect_red posix-pid-attribution bun test agent-network/src/codex-copresence-launch-readiness.test.ts
 cp /tmp/test1220-cli.ts agent-network/bin/cli.ts
 

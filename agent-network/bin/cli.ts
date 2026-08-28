@@ -912,9 +912,23 @@ async function startWindowsCodexCopresence(
     if (!tui.pid || !tuiCreationDate) {
       throw new Error("TUI second-client health failed: could not attest the launched TUI process birth");
     }
-    const tuiHealthDeadline = Date.now() + 25_000;
+    // #1342: 这个循环有**两个出口**,以前共用同一条报错。
+    //
+    //   出口①  25s 到点   → TUI 还活着,只是一直没连上
+    //   出口②  tui.exitCode !== null → **TUI 自己退了**,压根没活到能连
+    //
+    // 报成同一句「没有可归属的连接」时,出口②是**误诊**:查的人会去看端口、
+    // 防火墙、app-server,而真实情况是那个进程根本没起来。两个方向完全相反。
+    //
+    // 并且原文案不说它找的是什么 —— pid / birth / port 一个都没有。
+    // 一条只报结论、不报「比对的那两样东西」的报错,只能靠从头复现来查。
+    const TUI_HEALTH_MS = 25_000;
+    const tuiHealthStart = Date.now();
+    const tuiHealthDeadline = tuiHealthStart + TUI_HEALTH_MS;
     let tuiConnected = false;
+    let tuiProbes = 0;
     while (Date.now() < tuiHealthDeadline && tui.exitCode === null) {
+      tuiProbes++;
       if (probeWindowsOwnedLoopbackConnection(tui.pid, tuiCreationDate, port)) {
         tuiConnected = true;
         break;
@@ -922,7 +936,18 @@ async function startWindowsCodexCopresence(
       await new Promise((resolve) => setTimeout(resolve, 400));
     }
     if (!tuiConnected) {
-      throw new Error("TUI second-client health failed: launched TUI tree has no attributable connection to the exact app-server");
+      const waited = Date.now() - tuiHealthStart;
+      const looking = `pid=${tui.pid} birth=${tuiCreationDate} port=${port} probes=${tuiProbes} waited=${waited}ms`;
+      if (tui.exitCode !== null) {
+        throw new Error(
+          `TUI second-client health failed: the launched Codex TUI exited (code=${tui.exitCode}) before it connected — ` +
+          `这不是"连不上",是它没活到能连。先看 TUI 自己的输出,不要查端口/防火墙。[${looking}]`,
+        );
+      }
+      throw new Error(
+        `TUI second-client health failed: launched TUI tree has no attributable connection to the exact app-server ` +
+        `after ${TUI_HEALTH_MS}ms — TUI 仍在运行,只是没有一条回环连接能归属到它这一代。[${looking}]`,
+      );
     }
     console.log(freshDeferred
       ? `[anet] client-health role=bridge state=waiting-for-tui-thread`
@@ -1587,9 +1612,21 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     process.exit(1);
   }
 
+  // #1342 同族副本:这里原本也把**两种处境**折叠成同一句。
+  //   !tuiIdentity            → 连 TUI 的 pid 都没拿到(会话名对不上 / 会话刚没了)
+  //   !probePosixOwned…       → pid 拿到了,但没有一条回环连接能归属到它
+  // 前者要去看 tmux 会话,后者才该去看 CODEX_HOME / 端口。指错方向的代价是整整一轮排查。
   const tuiIdentity = harvestSession(tuiSession);
-  if (!tuiIdentity || !probePosixOwnedLoopbackConnection(tuiIdentity.pid, port)) {
+  if (!tuiIdentity) {
+    console.error(`[anet] ❌ TUI second-client health failed: 拿不到 TUI 会话 ${tuiSession} 的进程身份(pid)。`);
+    console.error(`[anet]    这不是"连不上",是**根本没找到那个 TUI** —— 先看 tmux 会话在不在、名字对不对,`);
+    console.error(`[anet]    不要去查 CODEX_HOME / 端口。`);
+    console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
+    process.exit(1);
+  }
+  if (!probePosixOwnedLoopbackConnection(tuiIdentity.pid, port)) {
     console.error(`[anet] ❌ TUI second-client health failed: managed TUI tree has no attributable connection to the exact app-server.`);
+    console.error(`[anet]    找的是: pid=${tuiIdentity.pid} port=${port} session=${tuiSession}`);
     console.error(`[anet]    CODEX_HOME/remote mismatch is possible; refusing to print success.`);
     console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
     process.exit(1);
