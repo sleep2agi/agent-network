@@ -1991,6 +1991,7 @@ async function ensureCodexAppServerSession(): Promise<
   return session;
 }
 let sideThreadNodeRuntime: { enabled: boolean; capability: Record<string, unknown>; close(): void } | null = null;
+let sideThreadOwnedSession: import("./runtime/codex-app-server/runtime").CodexAppServerRuntimeSession | null = null;
 // Always publish an explicit closed capability. This is not merely cosmetic:
 // nodes.config_snapshot is durable, so omitting the field after a local flag
 // is turned off could leave a previously-supported node looking eligible.
@@ -6297,7 +6298,26 @@ if (sideThreadsEnabled) {
     warn("[side-thread] enable requested but codex-app-server, stable node_id, or dedicated CODEX_HOME is unavailable");
   } else {
     try {
-      const session = await ensureCodexAppServerSession();
+      const sharedSession = await ensureCodexAppServerSession();
+      const { openCodexAppServerRuntime } = await import("./runtime/codex-app-server/runtime");
+      // The human-TUI bridge deliberately attaches to a shared WebSocket.
+      // Native BTW must not borrow that client: its reviewed fork boundary
+      // requires a process-owned app-server.  Resume the exact same source
+      // thread through a dedicated owned process and fail closed if Codex
+      // creates/falls back to any other identity.
+      const expectedThreadId = sharedSession.threadId;
+      const { selectOwnedSideThreadSession } = await import("./runtime/side-thread/owned-session");
+      const selected = await selectOwnedSideThreadSession(sharedSession, () => openCodexAppServerRuntime({
+        threadId: expectedThreadId,
+        approvalPolicy: (fileConfig.flags as { approvalPolicy?: string } | undefined)?.approvalPolicy,
+        sandboxMode: (fileConfig.flags as { sandboxMode?: string } | undefined)?.sandboxMode,
+        commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`,
+        commhubToken: AUTH_TOKEN || undefined,
+        log: (message) => log(`[side-thread-owned] ${message}`),
+        warn: (message) => warn(`[side-thread-owned] ${message}`),
+      }));
+      const session = selected.session;
+      if (selected.dedicated) sideThreadOwnedSession = session;
       const { startCliSideThreadConsumer, detectCodexRuntimeVersion } = await import("./runtime/side-thread/production");
       sideThreadNodeRuntime = startCliSideThreadConsumer({
         enabled: true,
@@ -6309,7 +6329,7 @@ if (sideThreadsEnabled) {
         runtimeVersion: detectCodexRuntimeVersion(),
         // An app-server spawned and owned by this exact node is the reviewed
         // owned topology. A user-supplied remote is shared and fails closed.
-        topology: session.proc ? "owned-stdio" : "shared-websocket",
+        topology: "owned-stdio",
         experimentalApi: fileConfig?.flags?.sideThreadExperimentalApi === true,
         log,
         warn,
@@ -6457,6 +6477,8 @@ const shutdown = async () => {
   shuttingDown = true;
   ownerScheduleConsumer?.stop();
   sideThreadNodeRuntime?.close();
+  sideThreadOwnedSession?.client.close();
+  sideThreadOwnedSession?.proc?.kill("SIGTERM");
   log("shutting down...");
   await closeOpencodeRuntime("signal shutdown");
   await grokCopresenceRuntimeSession?.close().catch((e: any) => {
