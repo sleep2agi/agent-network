@@ -2,7 +2,9 @@
 
 ## Reliability sprint: stop/delete convergence + node logs + timeout guard — preview (2026-08-28 evening)
 
-Coordinated release: `commhub-server@0.9.0-preview.36/.37`, `agent-node@2.5.0-preview.40/.42`, `agent-network@2.3.0-preview.54–.58`.
+Coordinated release: `commhub-server@0.9.0-preview.36–.38`, `agent-node@2.5.0-preview.40–.43`, `agent-network@2.3.0-preview.54–.59`.
+
+- **create_node doorbell compensation** (#1362, absorbing #1364): doorbells missed during an SSE outage are no longer lost forever — on reconnect the daemon calls the new hub tool `list_my_pending_create_requests` and replays them (`.38`/`.43` pair)
 
 - **stop/delete convergence** (#1286 trio): daemon-side ack tracing, hub-side six-exit instrumentation for `ack_stop_request`, stuck `deleting` rows re-dispatchable with `force` (5-minute staleness criterion)
 - **claude-code-cli node logs** (#1345): the stdio proxy now mirrors every log line into `.anet/nodes/<alias>/logs/` (UTC-dated files) — per-alias node logs exist for this runtime for the first time; includes a stop-race guard (a torn-down node dir is never resurrected)
