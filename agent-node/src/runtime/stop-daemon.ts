@@ -47,6 +47,19 @@ export function recordSpawnedChild(child_node_id: string, alias: string, pid: nu
   childrenMap.set(child_node_id, { pid, started_at: Date.now(), child_node_id, alias });
 }
 
+/** #1293 — undo a `recordSpawnedChild` when the spawn turns out not to
+ *  have produced a usable child (capability fail-fast tripped).
+ *
+ *  🔴 这个函数存在的唯一理由是让记录可以**提前**：子节点在 spawn 那一刻就对 hub 可见,
+ *     而记录原本排在 5 秒能力检查之后 —— 中间那段窗口里,hub 认识它、daemon 不认,
+ *     任何 stop/delete 都 ack `noop_not_my_child`,hub 侧不收敛(#1293 实测约 5s)。
+ *     提前记录必须配一个移除,否则能力检查失败时会在 map 里留一条**死条目**,
+ *     而 handleStopDoorbell 会照着它去 signal 一个已经不存在的 pid。
+ *  返回是否真的删掉了一条 —— 调用方可以据此判断「我记过吗」,而不是假设。 */
+export function forgetSpawnedChild(child_node_id: string): boolean {
+  return childrenMap.delete(child_node_id);
+}
+
 /** Test-only helper — clears the map so test suites can isolate. NOT
  *  exposed via cli; daemon runtime never wants to drop its tracking
  *  state mid-flight. */
