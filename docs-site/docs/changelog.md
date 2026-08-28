@@ -2,7 +2,9 @@
 
 ## 可靠性冲刺：删除收敛 + 节点日志 + 超时防线——preview（2026-08-28 晚）
 
-三包配套发布：`commhub-server@0.9.0-preview.36/.37`、`agent-node@2.5.0-preview.40/.42`、`agent-network@2.3.0-preview.54–.58`。
+三包配套发布：`commhub-server@0.9.0-preview.36–.38`、`agent-node@2.5.0-preview.40–.43`、`agent-network@2.3.0-preview.54–.59`。
+
+- **create_node 门铃补偿**（#1362，收编 #1364）：SSE 断连窗口内错过的 create_node 门铃不再永久丢失——daemon 重连后调用新 hub 工具 `list_my_pending_create_requests` 补偿派发（`.38`/`.43` 配对）
 
 - **stop/delete 收敛**（#1286 三件套）：daemon 侧 ack 全链路留痕、hub 侧 `ack_stop_request` 六出口埋点、卡死的 deleting 记录可 `force` 重派（>5 分钟陈旧判据）
 - **claude-code-cli 节点日志**（#1345）：stdio proxy 把日志双写进 `.anet/nodes/<alias>/logs/`（UTC 日期文件），该模式首次可按 alias 读节点日志；含 stop 竞态防护（节点目录被拆除后绝不复活）
