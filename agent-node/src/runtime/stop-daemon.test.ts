@@ -5,7 +5,7 @@ import {
   handleStopDoorbell,
   recordSpawnedChild,
 } from "./stop-daemon";
-import { mkdtempSync, mkdirSync, readdirSync, statSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, statSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -577,5 +577,68 @@ describe("#1286 handleStopDoorbell — stop 之后再 delete", () => {
     });
     await handleStopDoorbell({ request_id: "req-stop-miss" }, h.deps as any);
     expect(h.acks.at(-1)!.args.status).toBe("noop_not_my_child");
+  });
+});
+
+// ─── #1286 —— 备份到 ack 之间那段的可观测性 ────────────────────────────
+//
+// 真机复现（两次，行为一致）：新建子节点 → 直接 delete_node，daemon 日志**每次都停在**
+// `backed up child workdir`，之后 48 秒零输出，hub 行永远停在 lifecycle_state=deleting。
+// 那段里只有三步（residual sweep → childrenMap.delete → ack_stop_request），
+// 但三步在源码上都有 try/catch 或 .catch 保护，**静态读不出是哪一步**。
+//
+// 🔴 这两条测试不断言「#1286 已修好」—— 它没修好。它们断言的是：下一次复现能
+//    直接从日志读出停在哪一步，而不是又一次「停住了」。
+describe("#1286 — 备份到 ack 之间的每一步都要留痕", () => {
+  test("delete 路径按顺序打出 进入清扫 / 清扫返回 / 已出 map / ack 被接受", async () => {
+    const workdirRoot = join(scratch, "nodes");
+    const deletedRoot = join(scratch, "deleted");
+    mkdirSync(workdirRoot, { recursive: true });
+    mkdirSync(join(workdirRoot, "alias-obs"));
+
+    recordSpawnedChild("node_obs", "alias-obs", 5556);
+    const { acks, deps } = makeDeps({
+      workdirRoot, deletedRoot,
+      getStopReturn: {
+        ok: true, request_id: "sr_obs",
+        child_node_id: "node_obs", child_alias: "alias-obs",
+        action: "delete", delete_config: true, grace_seconds: 10, force: false,
+      },
+    });
+    const lines: string[] = [];
+    (deps as any).log = (m: string) => lines.push(m);
+    (deps as any).warn = (m: string) => lines.push(m);
+
+    await handleStopDoorbell({ request_id: "sr_obs" }, deps);
+    expect(acks.length).toBe(1);
+
+    const joined = lines.join("\n");
+    // 复现时日志停在这一行 —— 它是这段的起点，必须还在。
+    const iBackup = lines.findIndex(l => l.includes("backed up child workdir"));
+    const iEnter  = lines.findIndex(l => l.includes("entering residual sweep"));
+    const iReturn = lines.findIndex(l => l.includes("residual sweep returned"));
+    const iMap    = lines.findIndex(l => l.includes("dropped from children map"));
+    const iAck    = lines.findIndex(l => l.includes("ack accepted"));
+    for (const [name, i] of [["backup", iBackup], ["enter", iEnter], ["return", iReturn], ["map", iMap], ["ack", iAck]] as const) {
+      expect(`${name}=${i}\n${joined}`).not.toContain(`${name}=-1`);
+    }
+    // 顺序本身就是判据：只有严格递增，日志停在哪一行才等于停在哪一步。
+    expect(iBackup).toBeLessThan(iEnter);
+    expect(iEnter).toBeLessThan(iReturn);
+    expect(iReturn).toBeLessThan(iMap);
+    expect(iMap).toBeLessThan(iAck);
+  });
+
+  test("🔴 关键路径上的 execSync 必须带 timeout 和 maxBuffer", () => {
+    const src = readFileSync(new URL("./stop-daemon.ts", import.meta.url), "utf8");
+    // 正控：这一行确实在（否则下面的断言在文件被改名/重构后会空过）
+    expect(src).toContain("pgrep -af 'agent-node'");
+    const i = src.indexOf("pgrep -af 'agent-node'");
+    const call = src.slice(i, i + 240);
+    // 无 timeout ⇒ pgrep 卡住时 ack 永不发出，用户侧就是「删不掉」，且不报任何错。
+    expect(call).toContain("timeout:");
+    // 无 maxBuffer ⇒ 默认 1MB；`pgrep -af` 打完整命令行，进程多的机器会 ENOBUFS，
+    // 那条路径被 catch 住 ⇒ 清扫**静默失效**（ack 照发，所以不会自曝）。
+    expect(call).toContain("maxBuffer:");
   });
 });

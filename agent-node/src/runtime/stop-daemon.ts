@@ -334,12 +334,21 @@ export async function handleStopDoorbell(
   // path could change in the future and this assertion would still
   // hold). Verifies via /proc/<pid>/cmdline argv-adjacency to avoid
   // PR1.1's alias-substring footgun.
+  // #1286 埋点 —— 复现时 daemon 日志**每次都停在** `backed up child workdir`,
+  // 之后 48 秒零输出。备份到 ack 之间只有三步,但三步在源码上都有保护,静态读不出
+  // 是哪一步。这三行把那段变成可读的:下次复现直接看日志停在哪一行,就定位到哪一步。
+  // 🔴 它们不改变任何行为,唯一作用是让下一次复现能给出答案而不是又一次「停住了」。
+  deps.log(`[stop-daemon] entering residual sweep alias=${entry.alias}`);
   await sweepOrphansForAlias(entry.alias, signalProcess, deps, "post-pgid-signal residual sweep");
+  deps.log(`[stop-daemon] residual sweep returned alias=${entry.alias}`);
 
   childrenMap.delete(child_node_id);
+  deps.log(`[stop-daemon] dropped from children map child_node_id=${child_node_id}, sending ack action=${action}`);
 
   await deps.callCommHub("ack_stop_request", {
     request_id, status: "stopped", exit_signal, ...(backup_path ? { backup_path } : {}),
+  }).then(() => {
+    deps.log(`[stop-daemon] ack accepted request_id=${request_id} action=${action}`);
   }).catch((e: any) => {
     deps.warn(`[stop-daemon] ack failed: ${e?.message || e}`);
   });
@@ -378,7 +387,17 @@ async function sweepOrphansForAlias(
     // check to filter substring-collision false positives.
     let out: string;
     try {
-      out = execSync(`pgrep -af 'agent-node' || true`, { encoding: "utf8" });
+      // #1286 —— 🔴 这个 execSync 原来既没有 timeout 也没有 maxBuffer,而它坐在
+      // 「备份完 workdir」到「发 ack_stop_request」这条路径的正中间。两个后果:
+      //   · 无 timeout:pgrep 卡住 ⇒ 整个 doorbell 永不到达 ack ⇒ hub 行永远停在
+      //     lifecycle_state=deleting,用户侧表现为「删不掉」,而 daemon 日志最后一行
+      //     就停在 `backed up child workdir`,不报任何错。
+      //   · 无 maxBuffer:默认 1MB。`pgrep -af` 打印**完整命令行**,agent-node 的命令行
+      //     很长;进程多的机器上会 ENOBUFS 抛出 —— 那条路径是被 catch 住的(会 return,
+      //     ack 照发),所以它不是挂死的成因,但会让清扫**静默失效**。
+      // 🔴 我没有证据说这就是 #1286 的成因 —— 见本 PR 说明。这是独立成立的硬化:
+      //    daemon 关键路径上不该有无上限的同步子进程调用。
+      out = execSync(`pgrep -af 'agent-node' || true`, { encoding: "utf8", timeout: 10_000, maxBuffer: 32 * 1024 * 1024 });
     } catch {
       return;
     }
