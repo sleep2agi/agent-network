@@ -1,5 +1,17 @@
 # 更新日志
 
+## 可靠性冲刺：删除收敛 + 节点日志 + 超时防线——preview（2026-08-28 晚）
+
+三包配套发布：`commhub-server@0.9.0-preview.36/.37`、`agent-node@2.5.0-preview.40/.42`、`agent-network@2.3.0-preview.54–.58`。
+
+- **stop/delete 收敛**（#1286 三件套）：daemon 侧 ack 全链路留痕、hub 侧 `ack_stop_request` 六出口埋点、卡死的 deleting 记录可 `force` 重派（>5 分钟陈旧判据）
+- **claude-code-cli 节点日志**（#1345）：stdio proxy 把日志双写进 `.anet/nodes/<alias>/logs/`（UTC 日期文件），该模式首次可按 alias 读节点日志；含 stop 竞态防护（节点目录被拆除后绝不复活）
+- **callCommHub 超时**（#1357）：30s `AbortSignal.timeout`，hub 挂起不再静默吞掉 doorbell
+- **daemon 能力可见性**：`runtimes_supported` 放开到 7 种（#1376）、创建失败原因四类错误码上报（#1377）、hub `lifecycle_controllable` 标志（#1374）配合桌面端按钮置灰（app#197/#200——三个 TUI 共存 runtime 进入建节点向导，零 key 跟随宿主登录）
+- **agent 主动推送**：`send_desktop_message` 文档化（guide/channels）
+
+---
+
 ## BTW 精确任务边界——Hub preview（2026-08-28）
 
 `commhub-server@0.9.0-preview.34` 为任务记录增加可选的 `thread_id` / `turn_id`，并在 REST 与 MCP 任务投影中返回它们。Hub 只接受节点对已消费任务上报的、归属一致且不冲突的边界；旧节点和历史任务继续兼容，缺失时明确保持为空，不做猜测或回填。配套的 `agent-node@2.5.0-preview.39` 与 `agent-network@2.3.0-preview.53` 将在 Hub 发布后按依赖顺序跟进。
