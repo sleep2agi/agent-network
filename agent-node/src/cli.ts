@@ -182,8 +182,11 @@ import {
 //    realpathSync + statSync + 读文件哈希。每次心跳都跑一遍是纯浪费。
 //    代价是 daemon 运行期间修好了 pin 也要重启才会反映 —— 可接受,
 //    因为修 pin 的正规做法(写 /etc/anet-daemon/path.conf)本来就伴随重启。
-let _createCapCache: { ok: boolean; reason?: "anet_bin_pin_unresolved" } | null | undefined;
-function daemonCreateCapability(): { ok: boolean; reason?: "anet_bin_pin_unresolved" } | undefined {
+type CreateBlockedReason =
+  | "anet_bin_identity" | "anet_bin_source" | "anet_bin_shape"
+  | "anet_bin_permission" | "anet_bin_unknown";
+let _createCapCache: { ok: boolean; reason?: CreateBlockedReason } | null | undefined;
+function daemonCreateCapability(): { ok: boolean; reason?: CreateBlockedReason } | undefined {
   if (_createCapCache !== undefined) return _createCapCache ?? undefined;
   if (fileConfig?.role !== "host_supervisor") { _createCapCache = null; return undefined; }
   try {
@@ -192,11 +195,16 @@ function daemonCreateCapability(): { ok: boolean; reason?: "anet_bin_pin_unresol
     const mod = require("./runtime/create-node-daemon.js");
     mod.loadAndVerifyAnetBin();
     _createCapCache = { ok: true };
-  } catch {
+  } catch (e) {
     // 🔴 只报代码,**不报原始报错文本**。unsafePathHelp() 的消息里带完整机器路径,
     //    而这个字段会一路走到 hub 和 Dashboard —— 一条「哪台机器的哪个路径缺什么」
     //    本身就是一张地图。原文仍然进 daemon 自己的日志,那里是本地的。
-    _createCapCache = { ok: false, reason: "anet_bin_pin_unresolved" };
+    // 🔴 从 Error 上读机器可读的类别。拿不到就用 anet_bin_unknown,
+    //    **不猜一个具体类别** —— 猜错会让人按错的方向去修
+    //    (「要 sudo 改系统配置」和「一行 chmod go-w」是完全不同的两件事)。
+    const code = (e as any)?.anetBinCode;
+    const known = ["anet_bin_identity","anet_bin_source","anet_bin_shape","anet_bin_permission"];
+    _createCapCache = { ok: false, reason: known.includes(code) ? code : "anet_bin_unknown" };
   }
   return _createCapCache;
 }

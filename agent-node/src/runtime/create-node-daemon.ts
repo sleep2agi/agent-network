@@ -40,8 +40,34 @@ function quoteSh(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-function unsafePathHelp(reason: string, fix: string): Error {
-  return new Error(`anet_bin_unsafe_path: ${reason}. Fix: ${fix}`);
+/** #1353 —— 二进制 pin 校验失败的**机器可读**类别。
+ *
+ * 在此之前 11 个语义完全不同的失败全部汇成同一条 `anet_bin_unsafe_path`,而修法差得很远:
+ *   permission → 一行 `chmod go-w`
+ *   source     → 写 `/etc/anet-daemon/path.conf`(**要 sudo,改系统配置**)
+ *   identity   → 重装 anet 或 unset ANET_BIN_ABS
+ *   shape      → 换成 realpath
+ *
+ * 🔴 2026-08-28 一天里撞到其中两类(source 和 permission),看到的是**同一条错误**。
+ *    第一反应是去建 /etc/anet-daemon/path.conf —— 而那次实际只要 chmod。
+ *    **把"要 sudo 改系统"和"一行 chmod"盖成同一句话,会让人修错方向。**
+ */
+export type AnetBinFailureCode =
+  | "anet_bin_identity"
+  | "anet_bin_source"
+  | "anet_bin_shape"
+  | "anet_bin_permission";
+
+export interface AnetBinError extends Error { anetBinCode?: AnetBinFailureCode }
+
+/** 🔴 消息前缀 `anet_bin_unsafe_path:` **保持不变**。全仓 10 个文件依赖它,
+ *  其中 create-node-daemon.test.ts 有 6 条 `toThrow(/anet_bin_unsafe_path.*.../)`。
+ *  改前缀会把它们全打断,而那和本次要解决的问题无关。
+ *  **机器可读的类别挂在 Error 属性上,不动人读的那一句。** */
+function unsafePathHelp(code: AnetBinFailureCode, reason: string, fix: string): AnetBinError {
+  const e = new Error(`anet_bin_unsafe_path: ${reason}. Fix: ${fix}`) as AnetBinError;
+  e.anetBinCode = code;
+  return e;
 }
 
 function findPackageJsonDir(start: string): string | null {
@@ -61,16 +87,16 @@ function findPackageJsonDir(start: string): string | null {
 function verifyAnetBinIdentity(abs: string): void {
   const pkgDir = findPackageJsonDir(abs);
   if (!pkgDir) {
-    throw unsafePathHelp(`not an anet package bin: no package.json above ${abs}`, "re-run via the installed anet command: anet daemon up");
+    throw unsafePathHelp("anet_bin_identity", `not an anet package bin: no package.json above ${abs}`, "re-run via the installed anet command: anet daemon up");
   }
   let pkg: any;
   try {
     pkg = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf-8"));
   } catch (e: any) {
-    throw unsafePathHelp(`not an anet package bin: cannot read package.json (${e?.message || e})`, "reinstall anet: npm i -g @sleep2agi/agent-network@latest");
+    throw unsafePathHelp("anet_bin_identity", `not an anet package bin: cannot read package.json (${e?.message || e})`, "reinstall anet: npm i -g @sleep2agi/agent-network@latest");
   }
   if (pkg?.name !== "@sleep2agi/agent-network") {
-    throw unsafePathHelp(`not an anet package bin: package name is ${JSON.stringify(pkg?.name)}`, "unset ANET_BIN_ABS and re-run: anet daemon up");
+    throw unsafePathHelp("anet_bin_identity", `not an anet package bin: package name is ${JSON.stringify(pkg?.name)}`, "unset ANET_BIN_ABS and re-run: anet daemon up");
   }
 
   const binRel = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.anet;
@@ -85,7 +111,7 @@ function verifyAnetBinIdentity(abs: string): void {
   const body = readFileSync(abs, "utf-8");
   if (abs.endsWith("/anet.cjs") && body.includes("anet 的 bin 入口垫片") && body.includes("PARSE_FLOOR")) return;
 
-  throw unsafePathHelp(`not an anet package bin: package.json bin.anet does not point at ${abs}`, "unset ANET_BIN_ABS and re-run: anet daemon up");
+  throw unsafePathHelp("anet_bin_identity", `not an anet package bin: package.json bin.anet does not point at ${abs}`, "unset ANET_BIN_ABS and re-run: anet daemon up");
 }
 
 function readPathConf(path: string): PathPin | null {
@@ -115,20 +141,20 @@ export function loadAndVerifyAnetBin(env: NodeJS.ProcessEnv = process.env): stri
     pin = { abs: env.ANET_BIN_ABS, sha256: env.ANET_BIN_SHA256 };
   }
   if (!pin && env.ANET_BIN_ABS) {
-    throw unsafePathHelp(
+    throw unsafePathHelp("anet_bin_source", 
       "ANET_BIN_ABS env fallback disabled (set ANET_DAEMON_ALLOW_ENV_BIN=1 only for Docker/dev/manual ops; production trust root is /etc/anet-daemon/path.conf)",
       "install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$(node -e \\\"console.log(require('fs').realpathSync(process.argv[1]))\\\" $(command -v anet))\" | sudo tee /etc/anet-daemon/path.conf >/dev/null",
     );
   }
   if (!pin) {
-    throw unsafePathHelp(
+    throw unsafePathHelp("anet_bin_source", 
       "no ANET_BIN_ABS resolved from /etc/anet-daemon/path.conf; env fallback is Docker/dev/manual-ops convenience and requires ANET_DAEMON_ALLOW_ENV_BIN=1",
       "install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$(node -e \\\"console.log(require('fs').realpathSync(process.argv[1]))\\\" $(command -v anet))\" | sudo tee /etc/anet-daemon/path.conf >/dev/null",
     );
   }
   // ① absolute
   if (!pin.abs.startsWith("/")) {
-    throw unsafePathHelp(
+    throw unsafePathHelp("anet_bin_shape", 
       `not absolute: ${pin.abs}`,
       `export ANET_BIN_ABS=$(node -e "console.log(require('fs').realpathSync(process.argv[1]))" ${quoteSh(pin.abs)})`,
     );
@@ -136,7 +162,7 @@ export function loadAndVerifyAnetBin(env: NodeJS.ProcessEnv = process.env): stri
   // ② no symlink path component (realpath equals self)
   const real = realpathSync(pin.abs);
   if (real !== pin.abs) {
-    throw unsafePathHelp(
+    throw unsafePathHelp("anet_bin_shape", 
       `contains symlink: ${pin.abs} -> ${real}`,
       `export ANET_BIN_ABS=${quoteSh(real)}`,
     );
@@ -145,7 +171,7 @@ export function loadAndVerifyAnetBin(env: NodeJS.ProcessEnv = process.env): stri
   // ③ stat: non-root owner is acceptable for nvm/homebrew/user installs.
   const st = statSync(pin.abs);
   if (st.uid !== 0 && env.ANET_DAEMON_STRICT_ROOT_BIN === "1") {
-    throw unsafePathHelp(
+    throw unsafePathHelp("anet_bin_permission", 
       `owner not root (uid=${st.uid})`,
       `sudo chown root:root ${quoteSh(pin.abs)} || unset ANET_DAEMON_STRICT_ROOT_BIN`,
     );
@@ -153,14 +179,14 @@ export function loadAndVerifyAnetBin(env: NodeJS.ProcessEnv = process.env): stri
   // ④ not group/other writable
   if ((st.mode & 0o022) !== 0) {
     const before = (st.mode & 0o777).toString(8);
-    throw unsafePathHelp(
+    throw unsafePathHelp("anet_bin_permission", 
       `writable by group/other (mode=${before})`,
       `chmod go-w ${quoteSh(pin.abs)}`,
     );
   }
   // ⑤ executable
   if ((st.mode & 0o111) === 0) {
-    throw unsafePathHelp("not executable", `chmod +x ${quoteSh(pin.abs)}`);
+    throw unsafePathHelp("anet_bin_permission", "not executable", `chmod +x ${quoteSh(pin.abs)}`);
   }
   // hash match install-time witness (when provided, REQUIRED to match)
   if (pin.sha256) {

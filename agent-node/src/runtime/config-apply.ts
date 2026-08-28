@@ -414,7 +414,12 @@ export interface DaemonCapabilities {
    * 🔴 只报代码,**永远不报原始报错文本**。`unsafePathHelp()` 的消息里带
    *    完整的机器路径,而这个字段会一路走到 hub 和 Dashboard ——
    *    一条「哪台机器的哪个路径缺什么」本身就是一张地图。 */
-  create_nodes_blocked_reason?: "anet_bin_pin_unresolved";
+  create_nodes_blocked_reason?:
+    | "anet_bin_identity"     // 这个文件不是 anet 的 bin ⇒ 重装或 unset ANET_BIN_ABS
+    | "anet_bin_source"       // pin 从哪来 ⇒ 写 /etc/anet-daemon/path.conf（要 sudo）
+    | "anet_bin_shape"        // 路径形态 ⇒ 换成 realpath
+    | "anet_bin_permission"   // 权限 ⇒ 一行 chmod go-w
+    | "anet_bin_unknown";     // 拿不到类别时的兜底（见下）
 }
 
 export interface MaskedSnapshot {
