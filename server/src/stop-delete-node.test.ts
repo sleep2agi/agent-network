@@ -718,3 +718,60 @@ describe("RFC-027 PR1.2a — restart_node resets lifecycle_state to 'active'", (
     expect(readNode(CHILD_A_ID)?.lifecycle_state).toBe("active");
   });
 });
+
+// ── #1286 stale-deleting 重派出口 ──────────────────────────────────
+//
+// 修复前 daemon 丢 ack 会让行永远停在 deleting：重发被挡、force 也一样。
+// 2026-08-28 实测两行卡死（acc-…-3373 / probe-tl2），API 层面无解。
+// 出口三条件缺一不放行：force=true + 最近 delete 请求非终态 + 晾超 5 分钟。
+describe("delete_node — stale-deleting redispatch exit (#1286)", () => {
+  function seedDeletingChild() {
+    setupAlphaNetwork();
+    db.run(`UPDATE nodes SET lifecycle_state = 'deleting' WHERE node_id = ?1`, [CHILD_A_ID]);
+  }
+  function seedStopRequest(status: string, ageMs: number) {
+    db.run(
+      `INSERT INTO node_stop_requests (request_id, network_id, daemon_node_id, child_node_id,
+         child_alias, action, delete_config, created_by_token, status, created_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, 'delete', 1, 'tok_test', ?6, ?7)`,
+      [`sr_stale_${Date.now()}_${Math.floor(ageMs)}`, NET_A, DAEMON_A_ID, CHILD_A_ID,
+       CHILD_A_ALIAS, status, Date.now() - ageMs],
+    );
+  }
+  const base = { child_node_id: CHILD_A_ID, daemon_node_id: DAEMON_A_ID, network_id: NET_A, confirm_alias: CHILD_A_ALIAS };
+
+  test("无 force：仍拒，且带 hint 指出口（不是让人反复撞墙）", async () => {
+    seedDeletingChild(); seedStopRequest("pending", 10 * 60_000);
+    const r = await call(buildHandlers(USER_A_ID).delete_node, base);
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("node_already_deleting");
+    expect(typeof r.hint).toBe("string");
+  });
+
+  test("🔴 force 但请求还新鲜（1 分钟）：仍拒 —— force 不能变成竞态放大器", async () => {
+    seedDeletingChild(); seedStopRequest("pending", 60_000);
+    const r = await call(buildHandlers(USER_A_ID).delete_node, { ...base, force: true });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("node_already_deleting");
+  });
+
+  test("🔴 force 但上一条已终态（stopped）：仍拒 —— daemon 刚 ack 过，行马上会转移", async () => {
+    seedDeletingChild(); seedStopRequest("stopped", 10 * 60_000);
+    const r = await call(buildHandlers(USER_A_ID).delete_node, { ...base, force: true });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("node_already_deleting");
+  });
+
+  test("force + pending 晾超 5 分钟：放行，生成新 request_id", async () => {
+    seedDeletingChild(); seedStopRequest("pending", 10 * 60_000);
+    const r = await call(buildHandlers(USER_A_ID).delete_node, { ...base, force: true });
+    expect(r.ok).toBe(true);
+    expect((r.request_id as string).startsWith("sr_")).toBe(true);
+  });
+
+  test("force + dispatched 晾超 5 分钟：同样放行", async () => {
+    seedDeletingChild(); seedStopRequest("dispatched", 10 * 60_000);
+    const r = await call(buildHandlers(USER_A_ID).delete_node, { ...base, force: true });
+    expect(r.ok).toBe(true);
+  });
+});
