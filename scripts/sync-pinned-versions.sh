@@ -93,6 +93,11 @@ register "@sleep2agi/commhub-server" "json:server/package-lock.json:packages/\"\
 # @sleep2agi/commhub-server — agent-network CLI 内 PINNED_SERVER_VERSION 常量
 register "@sleep2agi/commhub-server" "agent-network/bin/cli.ts:PINNED_SERVER_VERSION"
 
+# test766 断言「CLI 传给 bunx 的包版本 == PINNED」,判据只能是字面量(它自己的注释写明
+# 每次 bump 必须同步改)。🔴 2026-08-28 一天内漏了**两次**(#1380 .34→.36、#1383 .36→.37),
+# 每次都是 L0+L1 红了才发现 —— 「必须记得」不是机制,登记进来才是。
+register "@sleep2agi/commhub-server" "tests/test766-bunx-preflight/run.sh"
+
 # @sleep2agi/agent-network-dashboard — agent-network CLI 内 PINNED_DASHBOARD_VERSION 常量
 register "@sleep2agi/agent-network-dashboard" "agent-network/bin/cli.ts:PINNED_DASHBOARD_VERSION"
 
