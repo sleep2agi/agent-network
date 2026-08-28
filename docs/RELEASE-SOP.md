@@ -103,6 +103,8 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > | `docs-site/docs/en/deploy/daemon.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/en/deploy/npm.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/en/guide/architecture.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
+> | `docs-site/docs/guide/channels.md` | 见门输出 | 信道断言 —— send_desktop_message 一节钉了 `commhub-server@0.9.0-preview.36`(工具引入版本) |
+> | `docs-site/docs/en/guide/channels.md` | 见门输出 | 同上(英文) |
 > | `docs-site/docs/en/guide/feishu.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/en/guide/grok-copresence.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/en/guide/runtimes.md` | 见门输出 | 信道断言 —— 通道表钉了 npm `latest` 的**具体版本号**(#1298)，换 dist-tag 即失真 |
