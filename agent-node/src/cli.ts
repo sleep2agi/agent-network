@@ -5907,6 +5907,7 @@ async function processRestartOnly(): Promise<void> {
 //      backoff double. Test `runOnce that returns cleanly without
 //      markStable → backoff doubles` in supervise-child.test.ts pins
 //      this contract so a future patch can't re-introduce the hot loop.
+const recentlyHandledCreateRequestIds = new Set<string>();
 async function connectSSE() {
   const sseUrl = `${COMMHUB_URL}/events/${encodeURIComponent(ALIAS)}`;
   const ABANDON_AFTER_MS = 60 * 60 * 1_000;  // 1h continuous failure → give up
@@ -5971,6 +5972,29 @@ async function connectSSE() {
               scheduleWorkInboxDrain();
               scheduleInformationalInboxDrain();
               commhubCompensation?.trigger("sse-reconnect");
+              if (fileConfig.role === "host_supervisor") {
+                import("./runtime/create-node-daemon.js").then(({ handleCreateNodeDoorbell, reconcilePendingCreateRequestsOnConnect, serializeEnvLocalDaemon }) => {
+                  reconcilePendingCreateRequestsOnConnect({
+                    callCommHub,
+                    recentlyHandledRequestIds: recentlyHandledCreateRequestIds,
+                    log: (m: string) => log(m),
+                    warn: (m: string) => warn(m),
+                    handleCreateNodeDoorbell: (event: { request_id: string }) => handleCreateNodeDoorbell(
+                      event,
+                      {
+                        callCommHub,
+                        workDir: process.cwd(),
+                        hubUrl: COMMHUB_URL,
+                        log: (m: string) => log(m),
+                        warn: (m: string) => warn(m),
+                        serializeEnvLocal: serializeEnvLocalDaemon,
+                        allowedRuntimes: Array.isArray(fileConfig.allowed_runtimes)
+                          ? fileConfig.allowed_runtimes : null,
+                      },
+                    ),
+                  }).catch((e: any) => warn(`create-node pending reconcile failed: ${e?.message || e}`));
+                }).catch((e: any) => warn(`create-node-daemon import for reconcile failed: ${e?.message || e}`));
+              }
               continue;
             }
             // Two defects were found independently on both sides on 2026-08-02,
@@ -6020,10 +6044,13 @@ async function connectSSE() {
             // RFC-026 P1 — daemon-only doorbell. host_supervisor nodes
             // process this; non-daemons silently ignore (config gate).
             if (ev.type === "create_node" && fileConfig.role === "host_supervisor") {
-              log(`← SSE create_node ${ev.request_id || ""}`);
+              const requestId = typeof ev.request_id === "string" ? ev.request_id : "";
+              if (!requestId || recentlyHandledCreateRequestIds.has(requestId)) continue;
+              recentlyHandledCreateRequestIds.add(requestId);
+              log(`← SSE create_node ${requestId}`);
               import("./runtime/create-node-daemon.js").then(({ handleCreateNodeDoorbell, serializeEnvLocalDaemon }) => {
                 handleCreateNodeDoorbell(
-                  { request_id: ev.request_id },
+                  { request_id: requestId },
                   {
                     callCommHub,
                     workDir: process.cwd(),
@@ -6037,8 +6064,14 @@ async function connectSSE() {
                     allowedRuntimes: Array.isArray(fileConfig.allowed_runtimes)
                       ? fileConfig.allowed_runtimes : null,
                   },
-                ).catch((e: any) => warn(`create-node-daemon failed: ${e?.message || e}`));
-              }).catch((e: any) => warn(`create-node-daemon import failed: ${e?.message || e}`));
+                ).catch((e: any) => {
+                  recentlyHandledCreateRequestIds.delete(requestId);
+                  warn(`create-node-daemon failed: ${e?.message || e}`);
+                });
+              }).catch((e: any) => {
+                recentlyHandledCreateRequestIds.delete(requestId);
+                warn(`create-node-daemon import failed: ${e?.message || e}`);
+              });
             }
             // RFC-027 §2.4 — stop/delete doorbell. host_supervisor daemons
             // process this; non-daemons silently ignore (config gate). The

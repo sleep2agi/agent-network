@@ -15,7 +15,7 @@ const expectedTools = [
   "send_ack", "retry_task", "get_task", "list_tasks",
   "cancel_task", "reassign_task", "broadcast", "get_completions",
   "update_node_config", "get_config_update", "ack_config_update", "restart_node",
-  "list_host_supervisors", "create_node", "get_create_request", "ack_create_request",
+  "list_host_supervisors", "create_node", "list_my_pending_create_requests", "get_create_request", "ack_create_request",
   "stop_node", "delete_node", "get_stop_request", "ack_stop_request",
   "list_my_children", "upsert_network_secret", "list_network_secrets", "upsert_provider",
   "update_provider", "list_providers", "probe_provider_model", "get_probe_results",

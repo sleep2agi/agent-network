@@ -36,6 +36,7 @@ interface Reply { ok?: boolean; error?: string; [k: string]: unknown; }
 function cleanup() {
   for (const n of [NET_A, NET_B]) {
     try { db.run("DELETE FROM node_stop_requests WHERE network_id = ?1", [n]); } catch {}
+    try { db.run("DELETE FROM node_create_requests WHERE network_id = ?1", [n]); } catch {}
     try { db.run("DELETE FROM audit_log WHERE network_id = ?1", [n]); } catch {}
     try { db.run("DELETE FROM inbox WHERE network_id = ?1", [n]); } catch {}
     // PR1.2a restart_node tests leave node_config_updates rows; clear
@@ -672,6 +673,60 @@ describe("list_my_children HANDLER (RFC-027 PR1.1)", () => {
     setupAlphaNetwork();
     const userTools = buildHandlers(USER_A_ID);   // utok, not daemon-bound
     const r = await call(userTools.list_my_children, {});
+    expect(r.ok).toBe(false);
+  });
+});
+
+describe("create_node audit wording (#1362)", () => {
+  test("create_node records a dispatch attempt, not guaranteed SSE delivery", async () => {
+    setupAlphaNetwork();
+    const tools = buildHandlers(USER_A_ID);
+    const r = await call(tools.create_node, {
+      daemon_node_id: DAEMON_A_ID,
+      node_spec: {
+        name: "sd-new-child",
+        runtime: "claude-agent-sdk",
+        model: "x",
+      },
+      network_id: NET_A,
+    });
+
+    expect(r.ok).toBe(true);
+    expect(typeof r.request_id).toBe("string");
+    expect(readAudit("create_node_dispatch_attempted", NET_A).length).toBe(1);
+    expect(readAudit("create_node_dispatched", NET_A).length).toBe(0);
+  });
+});
+
+describe("list_my_pending_create_requests HANDLER (#1362 SSE reconnect compensation)", () => {
+  test("daemon-bound caller gets only its own pending create requests", async () => {
+    setupAlphaNetwork();
+    const otherDaemonId = "node_sd_daemon_other";
+    seedDaemon(NET_A, otherDaemonId, "sd-daemon-other", USER_A_ID, "tok_sd_daemon_other");
+    db.run(
+      `INSERT INTO node_create_requests
+         (request_id, daemon_node_id, child_name, network_id, runtime, model, flags_json, env_keys, status, child_token_id, created_at, created_by_token)
+       VALUES
+         ('cr_pending_mine', ?1, 'child-pending-mine', ?2, 'claude-agent-sdk', 'x', '{}', '[]', 'pending', NULL, ?3, 'tok_test'),
+         ('cr_delivered_mine', ?1, 'child-delivered-mine', ?2, 'claude-agent-sdk', 'x', '{}', '[]', 'delivered', NULL, ?4, 'tok_test'),
+         ('cr_pending_other', ?5, 'child-pending-other', ?2, 'claude-agent-sdk', 'x', '{}', '[]', 'pending', NULL, ?6, 'tok_test')`,
+      [DAEMON_A_ID, NET_A, Date.now(), Date.now() + 1, otherDaemonId, Date.now() + 2],
+    );
+
+    const daemonTools = buildHandlers(USER_A_ID, true, DAEMON_A_TOK, NET_A);
+    const r = await call(daemonTools.list_my_pending_create_requests, {});
+
+    expect(r.ok).toBe(true);
+    expect(r.count).toBe(1);
+    expect(r.requests).toEqual([
+      expect.objectContaining({ request_id: "cr_pending_mine", child_name: "child-pending-mine" }),
+    ]);
+  });
+
+  test("non-daemon caller (utok) refused", async () => {
+    setupAlphaNetwork();
+    const userTools = buildHandlers(USER_A_ID);
+    const r = await call(userTools.list_my_pending_create_requests, {});
     expect(r.ok).toBe(false);
   });
 });

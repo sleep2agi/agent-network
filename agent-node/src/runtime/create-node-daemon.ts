@@ -301,6 +301,50 @@ export interface CreateNodeDeps {
   allowedRuntimes?: ReadonlyArray<string> | null;
 }
 
+interface PendingCreateRequest {
+  request_id?: unknown;
+}
+
+interface ListPendingCreateRequestsResult {
+  ok?: boolean;
+  error?: string;
+  requests?: PendingCreateRequest[];
+}
+
+export interface ReconcilePendingCreateRequestsDeps {
+  callCommHub: (tool: string, args: Record<string, unknown>) => Promise<any>;
+  handleCreateNodeDoorbell: (event: { request_id: string }) => Promise<void>;
+  recentlyHandledRequestIds?: Set<string>;
+  log: (msg: string) => void;
+  warn: (msg: string) => void;
+}
+
+export async function reconcilePendingCreateRequestsOnConnect(
+  deps: ReconcilePendingCreateRequestsDeps,
+): Promise<void> {
+  const res: ListPendingCreateRequestsResult = await deps.callCommHub("list_my_pending_create_requests", {});
+  if (!res?.ok) {
+    deps.warn(`[create-node] pending reconcile failed: ${res?.error || "unknown"}`);
+    return;
+  }
+  const requests = Array.isArray(res.requests) ? res.requests : [];
+  let handled = 0;
+  for (const row of requests) {
+    const requestId = typeof row?.request_id === "string" ? row.request_id : "";
+    if (!requestId) continue;
+    if (deps.recentlyHandledRequestIds?.has(requestId)) continue;
+    deps.recentlyHandledRequestIds?.add(requestId);
+    try {
+      await deps.handleCreateNodeDoorbell({ request_id: requestId });
+      handled += 1;
+    } catch (e: any) {
+      deps.recentlyHandledRequestIds?.delete(requestId);
+      deps.warn(`[create-node] pending reconcile handler failed for ${requestId}: ${e?.message || e}`);
+    }
+  }
+  if (handled > 0) deps.log(`[create-node] pending reconcile handled ${handled} request(s)`);
+}
+
 /** §2.5 step 3 helper — ensure $HOME/.anet/config.json carries the
  *  daemon's hub URL so the spawned `anet node create + start` doesn't
  *  bail with `未找到 CommHub Server`. Idempotent. */

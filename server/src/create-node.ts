@@ -306,6 +306,7 @@ export function auditCreateNodeStrict(input: {
 export function auditCreateNode(input: {
   action:
     | "create_node_dispatched"
+    | "create_node_dispatch_attempted"
     | "create_node_rejected"
     | "create_node_succeeded"
     | "create_node_sweeper_revoked"

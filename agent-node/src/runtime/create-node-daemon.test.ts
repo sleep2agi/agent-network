@@ -5,11 +5,61 @@ import {
   minimalEnv,
   loadAndVerifyAnetBin,
   ensureGlobalAnetConfig,
+  reconcilePendingCreateRequestsOnConnect,
 } from "./create-node-daemon.js";
 import { writeFileSync, mkdirSync, symlinkSync, chmodSync, chownSync, unlinkSync, rmSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { handleCreateNodeDoorbell } from "./create-node-daemon.js";
+
+describe("create_node pending reconciliation after SSE connect", () => {
+  test("pulls and handles pending requests that arrived while SSE was disconnected", async () => {
+    const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+    const handled: string[] = [];
+
+    await reconcilePendingCreateRequestsOnConnect({
+      callCommHub: async (tool, args) => {
+        calls.push({ tool, args });
+        if (tool === "list_my_pending_create_requests") {
+          return { ok: true, count: 1, requests: [{ request_id: "cr_missed_doorbell" }] };
+        }
+        throw new Error(`unexpected tool ${tool}`);
+      },
+      handleCreateNodeDoorbell: async (event) => {
+        handled.push(event.request_id);
+      },
+      log: () => {},
+      warn: () => {},
+    });
+
+    expect(calls.map((c) => c.tool)).toEqual(["list_my_pending_create_requests"]);
+    expect(handled).toEqual(["cr_missed_doorbell"]);
+  });
+
+  test("deduplicates request_ids already handled from the live SSE doorbell path", async () => {
+    const handled: string[] = [];
+
+    await reconcilePendingCreateRequestsOnConnect({
+      callCommHub: async () => ({
+        ok: true,
+        count: 3,
+        requests: [
+          { request_id: "cr_live" },
+          { request_id: "cr_live" },
+          { request_id: "cr_pending" },
+        ],
+      }),
+      handleCreateNodeDoorbell: async (event) => {
+        handled.push(event.request_id);
+      },
+      recentlyHandledRequestIds: new Set(["cr_live"]),
+      log: () => {},
+      warn: () => {},
+    });
+
+    expect(handled).toEqual(["cr_pending"]);
+  });
+});
 
 describe("#633 daemon private state", () => {
   const fixture = "/tmp/anet-test633-daemon-private";
