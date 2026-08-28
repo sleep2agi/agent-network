@@ -468,7 +468,14 @@ if [[ $RUN_L1 -eq 1 ]]; then
       _s=$(( $(date +%s) - START ))
       dockerrun "docker run --rm anet-$t" >/tmp/qa-l1-$t-run.log 2>&1
       _rc=$?
-      printf '%s\t%s\t%s\n' "$t" "$_s" "$(( $(date +%s) - START ))" >> /tmp/qa-l1-timing.tsv
+      _e=$(( $(date +%s) - START ))
+      printf '%s\t%s\t%s\n' "$t" "$_s" "$_e" >> /tmp/qa-l1-timing.tsv
+      # 🔴 **完成即打印**,不要只留给结尾的汇总。
+      #    2026-08-27 一次 L0+L1 顶到 30 分天花板被 kill(run 33126449082,1815s):
+      #    18 个 build 起来了,而时间线**一行都没有** —— 因为汇总只在所有 wait 结束后才跑,
+      #    而那一跑根本没走到那里。**唯一需要这条时间线的场合,正是它打不出来的场合。**
+      #    (被 kill 的观测本身也只是下界:1815s 不是它跑完要多久,是它被杀时已经跑了多久。)
+      printf '· L1 done %s  [L1+%ss..%ss, %ss] rc=%s\n' "$t" "$_s" "$_e" "$(( _e - _s ))" "$_rc"
       exit $_rc
     ) &
     pid=$!
