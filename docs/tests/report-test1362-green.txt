@@ -1,0 +1,229 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 728B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/oven/bun:1.3.14
+#2 DONE 0.0s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [ 1/11] FROM docker.io/oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4
+#4 resolve docker.io/oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 0.0s done
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 382.71kB 0.2s done
+#5 DONE 0.2s
+
+#6 [ 4/11] RUN cd /workspace/server && bun install --ignore-scripts
+#6 CACHED
+
+#7 [ 5/11] COPY agent-node/package.json agent-node/package-lock.json ./agent-node/
+#7 CACHED
+
+#8 [ 8/11] COPY agent-node ./agent-node
+#8 CACHED
+
+#9 [ 3/11] COPY server/package.json server/package-lock.json ./server/
+#9 CACHED
+
+#10 [ 6/11] RUN cd /workspace/agent-node && bun install --ignore-scripts
+#10 CACHED
+
+#11 [ 2/11] WORKDIR /workspace
+#11 CACHED
+
+#12 [ 7/11] COPY server ./server
+#12 CACHED
+
+#13 [ 9/11] COPY tests/test629-mcp-schema-policy ./tests/test629-mcp-schema-policy
+#13 CACHED
+
+#14 [10/11] COPY tests/test1362-create-node-pending/run.sh ./tests/test1362-create-node-pending/run.sh
+#14 DONE 0.0s
+
+#15 [11/11] RUN chmod 0755 ./tests/test1362-create-node-pending/run.sh
+#15 DONE 0.2s
+
+#16 exporting to image
+#16 exporting layers 0.1s done
+#16 exporting manifest sha256:3ed85b2073a4a9aba07566befd3e99e5d5f0d7cf7cc3f8bccad18653c23953be 0.0s done
+#16 exporting config sha256:19008b6360af880d1cf6c094f3d823d3b2a462fad5917ea2f1cb9090249bf455
+#16 exporting config sha256:19008b6360af880d1cf6c094f3d823d3b2a462fad5917ea2f1cb9090249bf455 0.0s done
+#16 exporting attestation manifest sha256:5ffae9dfbd7662b32860e3d35f432011aaecc813cbb6f882ba6611b13edd0528 0.0s done
+#16 exporting manifest list sha256:8bfb8fa60f0fa927c445e607ce76e1b67e0a7e92700ad2b5b6a92a5fc7740f78 0.0s done
+#16 naming to docker.io/library/anet-test1362-create-node-pending:latest done
+#16 unpacking to docker.io/library/anet-test1362-create-node-pending:latest 0.0s done
+#16 DONE 0.2s
+# test1362 — create_node missed-doorbell compensation
+source_commit=3c5254555f2b13f2640a2073be74691077f6f89a
+
+## agent-node build
+$ bun build src/cli.ts --outdir dist --entry-naming cli.js --target node --minify --external @anthropic-ai/claude-agent-sdk --external '@anthropic-ai/claude-agent-sdk-*' --external @openai/codex-sdk --external node-pty && bun build src/upload-file-mcp-stdio.ts --outdir dist --entry-naming upload-file-mcp-stdio.js --target node --minify
+Bundled 282 modules in 74ms
+
+  cli.js  1.19 MB  (entry point)
+
+Bundled 221 modules in 36ms
+
+  upload-file-mcp-stdio.js  0.27 MB  (entry point)
+
+
+## agent-node runtime: reconnect pulls pending and deduplicates live SSE
+bun test v1.3.14 (0d9b296a)
+
+agent-node/src/runtime/create-node-daemon.test.ts:
+(pass) create_node pending reconciliation after SSE connect > pulls and handles pending requests that arrived while SSE was disconnected [0.85ms]
+(pass) create_node pending reconciliation after SSE connect > deduplicates request_ids already handled from the live SSE doorbell path [0.22ms]
+(pass) #633 daemon private state > global config repair and replacement converge to private state [5.54ms]
+(pass) #633 daemon private state > global config read refuses a symlink without touching its target [0.92ms]
+(pass) daemon-created child config/env paths > writes child config and dotenv into the directory anet node start resolves [5024.16ms]
+(pass) §4.2.2 daemon-side flag VALUE validator (BLOCKER #2 — defense in depth) > permissionMode enum [0.25ms]
+(pass) §4.2.2 daemon-side flag VALUE validator (BLOCKER #2 — defense in depth) > dangerouslySkipPermissions boolean (string 'true' must be rejected) [0.15ms]
+(pass) §4.2.2 daemon-side flag VALUE validator (BLOCKER #2 — defense in depth) > maxTurns integer range — 'DROP TABLE' / float / out-of-range rejected [0.26ms]
+(pass) §4.2.2 daemon-side flag VALUE validator (BLOCKER #2 — defense in depth) > budget number with decimals allowed; out-of-range rejected [0.20ms]
+(pass) §4.2.2 daemon-side flag VALUE validator (BLOCKER #2 — defense in depth) > timeout integer range [0.15ms]
+(pass) §4.2.2 daemon-side flag VALUE validator (BLOCKER #2 — defense in depth) > unknown key rejected [0.10ms]
+(pass) buildAnetArgsDaemon now reaches flag value validation > happy path with mixed flags [0.33ms]
+(pass) buildAnetArgsDaemon now reaches flag value validation > omitted model is allowed and does not emit --model [0.10ms]
+(pass) buildAnetArgsDaemon now reaches flag value validation > empty model is still rejected [0.09ms]
+(pass) buildAnetArgsDaemon now reaches flag value validation > smuggled string maxTurns rejected by daemon even if hub missed [0.22ms]
+(pass) buildAnetArgsDaemon now reaches flag value validation > smuggled string dangerouslySkipPermissions rejected [0.12ms]
+(pass) buildAnetArgsDaemon now reaches flag value validation > name shell-metachar still rejected (existing validateName, F2) [0.34ms]
+(pass) buildAnetArgsDaemon now reaches flag value validation > runtime enum still enforced [0.12ms]
+(pass) buildAnetArgsDaemon now reaches flag value validation > channels non-empty rejected (P1 fail-closed) [0.15ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > happy path with hash witness [0.83ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > REJECT: no ANET_BIN_ABS at all [0.25ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > REJECT: ANET_BIN_ABS env fallback without explicit opt-in [0.44ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > ACCEPT: ANET_BIN_ABS env fallback when explicitly opted in [0.36ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > path.conf wins over ANET_BIN_ABS env fallback [1.04ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > REJECT: relative path [0.21ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > REJECT: symlink (contains symlink component) [0.50ms]
+[create-node] anet binary is group/other writable (mode=777); running chmod go-w /tmp/anet-bin-test-fixtures/world-writable
+[create-node] chmod go-w OK: mode=755
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > REPAIR: world-writable (mode 0o777) via chmod go-w [0.45ms]
+[create-node] anet binary is group/other writable (mode=775); running chmod go-w /tmp/anet-bin-test-fixtures/group-writable
+[create-node] chmod go-w OK: mode=755
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > REPAIR: group-writable (mode 0o775) via chmod go-w [0.45ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > REJECT: not executable (mode 0o644) [0.42ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > ACCEPT: owner not root by default for nvm/homebrew/user installs [0.33ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > REJECT: owner not root only when strict root mode is explicitly requested [0.40ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > REJECT: sha256 mismatch with install witness [0.44ms]
+(pass) minimalEnv defensive compose (BLOCKER #1+#2 lineage — kept stable) > happy path: no extra → PATH includes daemon's own node bin dir + SAFE_PATH (issue #301 nvm fix) [0.40ms]
+(pass) minimalEnv defensive compose (BLOCKER #1+#2 lineage — kept stable) > legitimate extra key passes + fixed PATH keeps execPath prepend (issue #301) [0.13ms]
+(pass) minimalEnv defensive compose (BLOCKER #1+#2 lineage — kept stable) > THROWS on reserved key in extra (LD_PRELOAD smuggled by attacker) [0.24ms]
+(pass) minimalEnv defensive compose (BLOCKER #1+#2 lineage — kept stable) > THROWS on fixed key in extra (PATH smuggled — caller cannot override the trust-root execPath prepend) [0.13ms]
+(pass) minimalEnv defensive compose (BLOCKER #1+#2 lineage — kept stable) > C1 invariant — issue #301 fix does NOT widen attacker surface: PATH source is process.execPath (daemon's already-resolved node), NOT env.PATH (attacker C1 surface) [0.35ms]
+(pass) FAIL_FAST_MS primitive — real subprocess kill-0 lifecycle > child that exits within window → process.kill(pid, 0) raises ESRCH after wait [501.33ms]
+(pass) FAIL_FAST_MS primitive — real subprocess kill-0 lifecycle > child that survives window → process.kill(pid, 0) succeeds [203.02ms]
+(pass) RFC-027 BLOCKER-1 — childrenMap key shape matches hub canonical node_id > derive key from request_id, not alias [0.17ms]
+(pass) RFC-027 BLOCKER-1 — childrenMap key shape matches hub canonical node_id > recordSpawnedChild end-to-end with the canonical key — stop-daemon can find it [0.75ms]
+
+ 41 pass
+ 0 fail
+ 87 expect() calls
+Ran 41 tests across 1 file. [5.79s]
+
+## server handlers: pending-list scope and create_node audit wording
+bun test v1.3.14 (0d9b296a)
+
+server/src/stop-delete-node.test.ts:
+[commhub] database: /tmp/anet-test1362-stop.db
+[commhub] 🎉 14-day free trial started!
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+(pass) stop_node — happy path (RFC-027 §5.2 A) > active child + no in-flight → dispatch + state→stopping [57.79ms]
+(pass) stop_node — in-flight default-refuse (RFC-027 §5.2 B) > inbox has 2 unacked tasks → error=node_busy_in_flight, count surfaced [45.80ms]
+(pass) stop_node — force=true with in-flight (RFC-027 §5.2 C) > force overrides + forced_stop_with_in_flight audit row written [46.13ms]
+(pass) stop_node — state machine guards > stop on already-stopped node → node_not_active [43.39ms]
+(pass) stop_node — state machine guards > stop on already-stopping node → node_already_stopping [40.64ms]
+(pass) delete_node — happy path (RFC-027 §5.2 D) > active child + correct confirm_alias → dispatch + state→deleting [44.13ms]
+(pass) delete_node — confirm_alias gate > wrong alias input → confirm_alias_mismatch [40.49ms]
+(pass) delete_node — D6 daemon-role-gate (RFC-027 §5.2 F) > delete targeting host_supervisor daemon → cannot_delete_daemon_via_delete_node [31.98ms]
+(pass) stop_node / delete_node — SEC-1 cross-tenant (RFC-027 §5.2 E) > user-B targeting user-A's child → forbidden_cross_tenant; netA node untouched [42.43ms]
+(pass) stop_node / delete_node — SEC-1 cross-tenant (RFC-027 §5.2 E) > user-B with no network_id arg still can't see/touch netA child [46.43ms]
+(pass) get_stop_request + ack_stop_request — daemon flow > daemon pulls request → ack 'stopped' → state machine finalizes (stop branch) [64.06ms]
+(pass) get_stop_request + ack_stop_request — daemon flow > daemon ack 'stopped' on delete branch → ntok revoked + node row DELETEd [58.43ms]
+(pass) get_stop_request + ack_stop_request — daemon flow > daemon ack 'stop_failed' → lifecycle_state=stop_failed, request error captured [63.73ms]
+(pass) get_stop_request + ack_stop_request — daemon flow > daemon B can't ack daemon A's request → not_your_request [49.72ms]
+(pass) SF-2 — audit in tx propagates failure (D8 atomicity真) > forced audit row written alongside dispatch in same tx (rollback if either fails) [37.05ms]
+(pass) SF-4 — D6 fail-CLOSED on ambiguous role > corrupt config_snapshot + node referenced as daemon → still refused [38.58ms]
+(pass) SF-4 — D6 fail-CLOSED on ambiguous role > corrupt snapshot + NO daemon evidence → can be deleted (no FP) [38.49ms]
+(pass) SF-5 — in-flight COALESCE for legacy inbox rows > inbox row with network_id=NULL but session_name matches → counted [38.65ms]
+(pass) SF-2 D8 atomicity — REAL failure injection forces ROLLBACK > audit_log table dropped → audit INSERT throws inside tx → ROLLBACK leaves nodes + request untouched [50.50ms]
+(pass) inbox-enqueue lifecycle_state guard (RFC-027 §2.3 race-free) > send_task to a stopping node → refused with node_not_active [37.05ms]
+(pass) list_my_children HANDLER (RFC-027 PR1.1) > daemon-bound caller gets its children list [39.69ms]
+(pass) list_my_children HANDLER (RFC-027 PR1.1) > non-daemon caller (utok) refused [35.97ms]
+(pass) create_node audit wording (#1362) > create_node records a dispatch attempt, not guaranteed SSE delivery [37.79ms]
+(pass) list_my_pending_create_requests HANDLER (#1362 SSE reconnect compensation) > daemon-bound caller gets only its own pending create requests [37.76ms]
+(pass) list_my_pending_create_requests HANDLER (#1362 SSE reconnect compensation) > non-daemon caller (utok) refused [40.76ms]
+(pass) RFC-027 PR1.2a — restart_node resets lifecycle_state to 'active' > restart_node on a stopped node → lifecycle_state flips back to 'active' + dispatch row created [34.14ms]
+(pass) RFC-027 PR1.2a — restart_node resets lifecycle_state to 'active' > restart_node on an active node → still resets to active (idempotent, no-op state-wise) [32.10ms]
+
+ 27 pass
+ 0 fail
+ 104 expect() calls
+Ran 27 tests across 1 file. [1.63s]
+
+## server create/ack regression
+bun test v1.3.14 (0d9b296a)
+
+server/src/create-node.test.ts:
+[commhub] database: /tmp/anet-test1362-create.db
+[commhub] 🎉 14-day free trial started!
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+(pass) §4.4 F1 mint-stream-evict — pendingEnvBlobs Map (covers H C2) > takePendingEnvBlob with WRONG daemon_node_id returns null (C2 cross-daemon guard) [4.28ms]
+(pass) §4.4 F1 mint-stream-evict — pendingEnvBlobs Map (covers H C2) > takePendingEnvBlob with RIGHT daemon_node_id evicts immediately (F1 one-shot consume) [1.99ms]
+(pass) §4.4 F1 mint-stream-evict — pendingEnvBlobs Map (covers H C2) > takePendingEnvBlob with unknown id returns null [1.78ms]
+(pass) §4.4 F1 mint-stream-evict — pendingEnvBlobs Map (covers H C2) > evictExpired drops entries past TTL [1.98ms]
+[commhub] ✓ create-node sweeper: swept 1 stale request(s), revoked 1 child-ntok(s)
+(pass) §4.4.8 C4 orphan sweeper — runOrphanSweepOnce (covers J F-1 + F-2) > F-1: status='pending' age > TTL → revoke child-ntok + mark status='failed' [9.79ms]
+[commhub] ✓ create-node sweeper: swept 1 stale request(s), revoked 1 child-ntok(s)
+(pass) §4.4.8 C4 orphan sweeper — runOrphanSweepOnce (covers J F-1 + F-2) > F-2: status='delivered' age > TTL → revoke child-ntok + mark status='expired' [10.68ms]
+(pass) §4.4.8 C4 orphan sweeper — runOrphanSweepOnce (covers J F-1 + F-2) > does NOT sweep recent pending/delivered rows (within TTL) [7.56ms]
+(pass) §4.4.8 C4 orphan sweeper — runOrphanSweepOnce (covers J F-1 + F-2) > does NOT sweep terminal rows (succeeded/failed/expired) [6.98ms]
+[commhub] ✓ create-node sweeper: swept 1 stale request(s), revoked 1 child-ntok(s)
+(pass) §4.4.8 C4 orphan sweeper — runOrphanSweepOnce (covers J F-1 + F-2) > sweeper is idempotent — second run on same stale row is a no-op [11.22ms]
+(pass) §4.1.4 C2 token-bound daemon resolution regression (PR #299 BLOCKER #1) > two daemons same alias different networks: helper resolves token to correct node [19.59ms]
+(pass) §4.1.4 C2 token-bound daemon resolution regression (PR #299 BLOCKER #1) > daemon B cannot take/ack daemon A's request even with same alias (Map-level guard) [2.10ms]
+[commhub] ✓ create-node finalize: request=cr_test_1787887218808_finalize child=child_finalize_test (node_child_real_F) daemon=node_daemon_F
+(pass) finalizeCreateOnFirstRegister — content-match on child register > matching child_name + network_id flips status='succeeded' + stamps child_node_id [7.51ms]
+(pass) finalizeCreateOnFirstRegister — content-match on child register > non-matching alias is a no-op [3.68ms]
+(pass) finalizeCreateOnFirstRegister — content-match on child register > cross-network: same child_name in different network is a no-op (network_id mismatch) [3.47ms]
+
+server/src/ack-create-request.test.ts:
+(pass) ack_create_request HANDLER — B1 schema accepts runtime_capability_check_failed > schema accepts runtime_capability_check_failed + runtime field (no zod reject) [55.09ms]
+(pass) ack_create_request HANDLER — B1 schema accepts runtime_capability_check_failed > request flips to terminal runtime_capability_check_failed status [44.07ms]
+(pass) ack_create_request HANDLER — B1 schema accepts runtime_capability_check_failed > child ntok is revoked on capability-check-failed (same teardown as 'failed') [47.03ms]
+(pass) ack_create_request HANDLER — B2 audit_log daemon_capability_lied > writes daemon_capability_lied audit row with runtime + daemon + error in detail [42.94ms]
+(pass) ack_create_request HANDLER — B2 audit_log daemon_capability_lied > does NOT write daemon_capability_lied on generic 'failed' ack (status discriminates) [43.36ms]
+(pass) ack_create_request HANDLER — B2 audit_log daemon_capability_lied > does NOT write daemon_capability_lied on 'started' (happy path silence) [48.46ms]
+(pass) ack_create_request HANDLER — B2 audit_log daemon_capability_lied > runtime field nullable if daemon omitted it (older daemon back-compat) [65.03ms]
+(pass) ack_create_request HANDLER — B2 audit_log daemon_capability_lied > error string is truncated to 500 chars in audit detail (defense vs giant payload) [39.72ms]
+(pass) ack_create_request HANDLER — pre-existing happy-path stays green (regression) > status='started' still flips acked_at without terminal teardown [36.17ms]
+(pass) ack_create_request HANDLER — pre-existing happy-path stays green (regression) > status='failed' still revokes child + flips to failed (no audit_log daemon_capability_lied) [34.86ms]
+
+ 24 pass
+ 0 fail
+ 77 expect() calls
+Ran 24 tests across 2 files. [1013.00ms]
+
+## MCP registration inventory
+PASS: real MCP SDK version is recorded (1.30.0)
+PASS: all 47 production MCP registrations are explicitly inventoried in source order
+PASS: real SDK accepts a call containing an unknown field
+PASS: real SDK silently strips the unknown field before the handler
+PASS: global strict mode would hard-fail an existing caller with an extra field
+PASS: telemetry wrapper can preserve unknown keys at the validation boundary
+PASS: telemetry records sorted key names
+PASS: telemetry never records unknown values
+PASS: second validation accepts the known payload
+PASS: telemetry wrapper preserves the current stripped handler contract
+inventory_count=47
+sdk_version=1.30.0
+recommended_policy=observe-key-shape-then-strip
+
+RESULT: PASS

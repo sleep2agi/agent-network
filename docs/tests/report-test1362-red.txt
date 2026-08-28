@@ -1,0 +1,14 @@
+bun test v1.3.14 (0d9b296a)
+
+agent-node/src/runtime/create-node-daemon.test.ts:
+
+# Unhandled error between tests
+-------------------------------
+SyntaxError: Export named 'reconcilePendingCreateRequestsOnConnect' not found in module '/home/vansin/agent-orchestra/.worktrees/issue-1362-create-node-pending/agent-node/src/runtime/create-node-daemon.ts'.
+-------------------------------
+
+
+ 0 pass
+ 1 fail
+ 1 error
+Ran 1 test across 1 file. [77.00ms]
