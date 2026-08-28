@@ -1,5 +1,8 @@
 # 节点 Runtime
 
+> 🔴 **这一页讲的是「怎么装、怎么认证」。想知道「哪个功能在哪个 runtime / 操作系统上能不能用」，看 [支持矩阵](/guide/support-matrix)** —— 那张表用三态（✅ 验过 / ❌ 验过不行 / ❓ 没验过），每一格都带证据链接。
+
+
 每个 Agent Node 都有一个 **Runtime**（运行时内核），决定这个节点用什么方式调用大模型 / 跑工具。Agent Network 内置多种 Runtime（正式版 4 种，预览版另加 2 种），**同一个 Hub 上可以混搭**——一个 Claude Code CLI agent 调任务给 MiniMax agent，再让 Codex agent 写代码，结果汇总回来。
 
 ## Runtime 对比（canonical 表） {#runtime-对比-canonical-表}

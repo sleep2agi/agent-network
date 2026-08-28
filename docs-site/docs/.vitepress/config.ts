@@ -79,6 +79,7 @@ export default withMermaid(defineConfig({
               { text: 'Agent Node', link: '/guide/agent-node' },
               { text: 'Goal 与 Loop', link: '/guide/goals-and-loops' },
               { text: '节点 Runtime', link: '/guide/runtimes' },
+              { text: '支持矩阵', link: '/guide/support-matrix' },
               { text: '多模型配置', link: '/guide/multi-model' },
               { text: '升级指南', link: '/guide/upgrade' },
             ]
@@ -182,6 +183,7 @@ export default withMermaid(defineConfig({
               { text: 'Agent Node', link: '/en/guide/agent-node' },
               { text: 'Goals and Loops', link: '/en/guide/goals-and-loops' },
               { text: 'Node Runtime', link: '/en/guide/runtimes' },
+              { text: 'Support Matrix', link: '/en/guide/support-matrix' },
               { text: 'Multi-Model Config', link: '/en/guide/multi-model' },
               { text: 'Upgrade Guide', link: '/en/guide/upgrade' },
             ]

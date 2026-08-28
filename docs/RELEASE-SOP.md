@@ -89,6 +89,8 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > | `docs-site/docs/guide/versioning.md` | 11 | `anet -v` 顶行示例 `anet v2.2.21` |
 > | `docs-site/docs/en/guide/versioning.md` | 11 | 同上(英文) |
 > | `docs-site/docs/guide/windows.md` | 102 | 跨盘 `anet --version` 崩溃是哪个通道的现状 |
+> | `docs-site/docs/guide/support-matrix.md` | 49 | 脚注 ^1^ 钉了「已在已发布产物 `@sleep2agi/agent-node@2.5.0-preview.34` 里 grep 复核」——**这是一次取证的时间戳，不是「当前通道版本」**；换版本时不要顺手改它，改了就等于把当时的证据改成另一个版本的 |
+> | `docs-site/docs/en/guide/support-matrix.md` | 49 | 同上(英文) |
 > | `docs-site/docs/en/guide/windows.md` | 102 | 同上(英文) |
 > | `docs-site/docs/guide/dashboard.md` | 313、328 | `anet -v` 应显示 `2.3.0-preview.N` / preview 不自动 promote |
 > | `docs-site/docs/en/guide/dashboard.md` | 314、329 | 同上(英文) |
