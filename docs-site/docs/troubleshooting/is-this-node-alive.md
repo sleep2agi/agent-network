@@ -88,3 +88,12 @@ commhub_send_task(alias="<节点>", task="收到请只回一句 `git rev-parse -
 [issue #534](https://github.com/sleep2agi/agent-network/issues/534)；
 「失败后仍报 idle」那一格见
 [issue #811](https://github.com/sleep2agi/agent-network/issues/811)。
+
+## `anet node start` 的 stdout ✅ 也不算数
+
+`exit 0` + 打印 `✅ node "…" started detached (tmux session live)` **不代表节点真起来**。
+含 [#895](https://github.com/sleep2agi/agent-network/pull/895) 之前的版本（`2.3.0-preview.40` 起已修）在 detached 场景可能假报。
+
+**真判据**：`tmux has-session -t "=<alias>"` 返回 0——**`=` 必须**，裸名字是前缀匹配，会在错误的会话上误报绿。
+
+批量场景用 `anet project up`，其退出码自 [#896](https://github.com/sleep2agi/agent-network/pull/896)（同随 `2.3.0-preview.40`）起可信。

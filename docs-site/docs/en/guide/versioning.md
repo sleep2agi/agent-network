@@ -35,3 +35,10 @@ Agent Network uses two parallel version-number schemes. First-time readers often
 
 - [Upgrade Guide](/en/guide/upgrade) — cross-version migration / breaking changes
 - [Changelog](/en/changelog) — full change log
+
+## Initial admin password by version
+
+- **preview `>= 2.2.22-preview.4`** (2026-06-28, PR [#264](https://github.com/sleep2agi/agent-network/pull/264) fixing [#261](https://github.com/sleep2agi/agent-network/issues/261)): the first `anet hub start` prints a **one-time random password** — shown once, save it right then; the first login forces a password change.
+- **stable `@latest` (`2.2.21`) and preview `<= 2.2.22-preview.3`**: fixed default `admin` / `anethub` — run `anet passwd` immediately after login.
+
+Any internet-facing deployment must run `anet passwd` right after login, regardless of version.

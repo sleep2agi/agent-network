@@ -43,15 +43,13 @@ anet node start my-bot
 
 验证 Hub 起来了：`curl http://127.0.0.1:9200/health` 返回的 JSON 应包含 `"ok":true`。
 
-> **⚠️ 判断节点真起来 —— 别只看 `anet node start` 的 stdout `✅`**：`exit 0` + 打印 `✅ node "…" started detached (tmux session live)` **不代表节点真起来**。**含 [#895](https://github.com/sleep2agi/agent-network/pull/895) 之前的版本**（**`2.3.0-preview.40` 起已修**；#895 于 2026-08-17 合入，随 preview.40 发布）在 detached 场景可能假报。真判据：`tmux has-session -t "=<alias>"` 返回 0（**`=` 必须**，裸名字是前缀匹配会误报绿）。批量场景用 `anet project up`，其退出码自 [#896](https://github.com/sleep2agi/agent-network/pull/896) 起可信（同样随 `2.3.0-preview.40` 发布）。
+> 节点是否**真的**起来了？判据表见 [这个节点还活着吗](https://anet.sh/troubleshooting/is-this-node-alive)。
 
 打开 `http://localhost:3000`，从 Dashboard 给 Agent 派任务。
 
 默认管理员用户名是 `admin`，初始密码是 `anethub`。**任何公网部署都必须登录后立即运行 `anet passwd` 改密**，否则被扫到端口就能进。
 
-> **自 `@sleep2agi/agent-network@2.2.22-preview.4`**（2026-06-28, PR [#264](https://github.com/sleep2agi/agent-network/pull/264) 修 [#261](https://github.com/sleep2agi/agent-network/issues/261) P0-2）**起**，预览版 `@preview` 首次 `anet hub start` 打印**一次性随机密码**（只显示这一次，请当场保存；首次登录会强制改密）。
->
-> **stable `@latest`（当前 `2.2.21`）与更早的 preview `≤ 2.2.22-preview.3` 仍是固定默认 `admin` / `anethub`** —— 登录后必须立即 `anet passwd`。
+> 各版本的初始密码差异见 [版本号体系](https://anet.sh/guide/versioning)。
 
 ## 能做什么
 

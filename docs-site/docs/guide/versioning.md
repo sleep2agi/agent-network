@@ -35,3 +35,10 @@ Agent Network 有两套版本号并行使用，第一次看可能困惑。这页
 
 - [升级指南](/guide/upgrade) —— 跨版本迁移 / 不兼容变更
 - [Changelog](/changelog) —— 完整变更日志
+
+## 初始管理员密码的版本差异
+
+- **preview `≥ 2.2.22-preview.4`**（2026-06-28，PR [#264](https://github.com/sleep2agi/agent-network/pull/264) 修 [#261](https://github.com/sleep2agi/agent-network/issues/261)）：首次 `anet hub start` 打印**一次性随机密码**，只显示这一次，请当场保存；首次登录强制改密。
+- **stable `@latest`（`2.2.21`）与 preview `≤ 2.2.22-preview.3`**：固定默认 `admin` / `anethub`，登录后必须立即 `anet passwd` 改密。
+
+任何公网部署，无论哪个版本，都必须登录后立即 `anet passwd`。

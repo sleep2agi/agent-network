@@ -43,15 +43,13 @@ anet node start my-bot
 
 Verify the Hub is up: `curl http://127.0.0.1:9200/health` should return JSON containing `"ok":true`.
 
-> **⚠️ Check that the node really started — don't rely on `anet node start`'s stdout `✅`**: `exit 0` plus a printed `✅ node "…" started detached (tmux session live)` does **not** mean the node came up. On **versions predating [#895](https://github.com/sleep2agi/agent-network/pull/895)** (**fixed as of `2.3.0-preview.40`**; #895 landed 2026-08-17 and ships in preview.40) the detached path can lie. Real check: `tmux has-session -t "=<alias>"` returns 0 (**the `=` is required** — a bare alias is a prefix match and can go green on the wrong session). For bulk launches use `anet project up`; its exit code is trustworthy since [#896](https://github.com/sleep2agi/agent-network/pull/896) (also shipping in `2.3.0-preview.40`).
+> Not sure the node **really** started? See the evidence table in [Is this node alive?](https://anet.sh/en/troubleshooting/is-this-node-alive).
 
 Open `http://localhost:3000` and dispatch work from the Dashboard.
 
 The default administrator account is `admin` / `anethub`. **Any public deployment must run `anet passwd` immediately after login** — otherwise anyone who scans the port can walk in.
 
-> **Since `@sleep2agi/agent-network@2.2.22-preview.4`** (2026-06-28, PR [#264](https://github.com/sleep2agi/agent-network/pull/264) fixing [#261](https://github.com/sleep2agi/agent-network/issues/261) P0-2), preview builds print a **one-time random password** on the first `anet hub start` — shown once (save it right then); the first login forces a password change.
->
-> **The stable `@latest` (currently `2.2.21`) and older `preview ≤ 2.2.22-preview.3` still ship with the fixed default `admin` / `anethub`** — run `anet passwd` right after logging in.
+> Initial-password differences across versions: see [Versioning](https://anet.sh/en/guide/versioning).
 
 ## What it does
 
