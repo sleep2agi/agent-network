@@ -46,6 +46,7 @@ import json
 import re
 import subprocess
 import sys
+import html as _html
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -247,6 +248,10 @@ def run() -> int:
         checked += 1
         # 渲染后会插入标签;比对时把标签去掉再找。
         text = re.sub(r"<[^>]+>", " ", html)
+        # 🔴 还要把 HTML 实体解回来:指纹句里的 `"<alias>"` / `"latest"` 在渲染页里是
+        # `&quot;&lt;alias&gt;&quot;` —— 不解码时子串永远配不上,这道门就会把
+        # 「已经部署好的页」报成 behind main(2026-08-29 两个英文页实测假阳性)。
+        text = _html.unescape(text)
         text = re.sub(r"\s+", " ", text)
         if re.sub(r"\s+", " ", fp) in text:
             print(f"  ok   {rel}  →  {md_to_url(rel)}   [{source}]")
@@ -348,6 +353,14 @@ def selftest() -> int:
     check("指纹跳过标题/列表/引用/链接,选中正文",
           fp == "这是一句普通正文,长度足够被选中,而且不含任何链接与强调符号。", f"got={fp!r}")
     check("全是结构行时返回 None", fingerprint("# a\n- b\n> c\n") is None)
+
+    # 🔴 实体解码红夹具(修复前 FAIL):指纹含引号/尖括号时,渲染页给的是实体。
+    ent_html = "<p>run [anet] &quot;&lt;alias&gt;&quot; is not running locally now ok</p>"
+    ent_text = re.sub(r"<[^>]+>", " ", ent_html)
+    ent_text = _html.unescape(ent_text)
+    ent_text = re.sub(r"\s+", " ", ent_text)
+    check("HTML 实体解码后指纹可命中",
+          "[anet] \"<alias>\" is not running locally" in ent_text, f"got={ent_text!r}")
     check("太短的行不被选中", fingerprint("短句。\n") is None)
 
     for name, ok, detail in cases:
