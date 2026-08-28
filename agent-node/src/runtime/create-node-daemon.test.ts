@@ -462,6 +462,52 @@ describe("RFC-027 BLOCKER-1 — childrenMap key shape matches hub canonical node
     // stop/delete will silently no-op.
   });
 
+  // #1293 —— 记录必须在 +5000ms 能力检查**之前**发生,否则 hub 认识子节点、
+  // daemon 不认,中间约 5 秒里 stop/delete 全部 ack `noop_not_my_child`。
+  // 提前记录必须配一次回滚,否则能力检查失败会留一条指向死 pid 的条目。
+  test("#1293 forgetSpawnedChild undoes an early record (capability-fail rollback)", async () => {
+    const { recordSpawnedChild, forgetSpawnedChild, getChildrenSnapshot, _resetChildrenMapForTest } =
+      await import("./stop-daemon");
+    _resetChildrenMapForTest();
+    const id = "node_cap_fail_rollback";
+    recordSpawnedChild(id, "doomed-child", 4242);
+    expect(getChildrenSnapshot().length).toBe(1);
+
+    // 回滚:返回 true 表示确实删掉了一条 —— 调用方据此判断「我记过吗」,不靠假设
+    expect(forgetSpawnedChild(id)).toBe(true);
+    expect(getChildrenSnapshot().length).toBe(0);
+
+    // 🔴 幂等 + 诚实:再删一次必须返回 false,而不是静默成功。
+    //    一个「删不存在的东西也说成功」的 API,会让调用方无法区分
+    //    「我记过并撤销了」和「我根本没记上」。
+    expect(forgetSpawnedChild(id)).toBe(false);
+
+    // 只删指定的那一条,不误伤兄弟
+    recordSpawnedChild("node_a", "a", 1);
+    recordSpawnedChild("node_b", "b", 2);
+    expect(forgetSpawnedChild("node_a")).toBe(true);
+    const rest = getChildrenSnapshot();
+    expect(rest.length).toBe(1);
+    expect(rest[0].child_node_id).toBe("node_b");
+    _resetChildrenMapForTest();
+  });
+
+  // 🔴 源码级断言:证明 record 真的排在能力检查之前。
+  //    上面那个用例只测 forgetSpawnedChild 这个零件 —— 它在旧代码上**照样会绿**,
+  //    因为顺序错不影响这个函数本身。顺序是这条 issue 的全部内容,必须单独钉。
+  test("#1293 recordSpawnedChild is invoked BEFORE the FAIL_FAST capability wait", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("./create-node-daemon.ts", import.meta.url), "utf8");
+    const iRecord = src.indexOf("recordSpawnedChild(child_node_id");
+    const iWait = src.indexOf("const FAIL_FAST_MS");
+    const iRollback = src.indexOf("forgetSpawnedChild(`node_${request_id");
+    expect(iRecord).toBeGreaterThan(-1);
+    expect(iWait).toBeGreaterThan(-1);
+    expect(iRollback).toBeGreaterThan(-1);
+    expect(iRecord).toBeLessThan(iWait);      // 记录在等待之前
+    expect(iRollback).toBeGreaterThan(iWait); // 回滚在等待之后的失败路径上
+  });
+
   test("recordSpawnedChild end-to-end with the canonical key — stop-daemon can find it", async () => {
     const { recordSpawnedChild, getChildrenSnapshot, _resetChildrenMapForTest } =
       await import("./stop-daemon");

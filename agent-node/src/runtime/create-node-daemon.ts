@@ -547,42 +547,16 @@ export async function handleCreateNodeDoorbell(
     return;
   }
 
-  // RFC-026 §9.3 D2 / #338 PR3 — capability fail-fast.
-  // Survives-5-seconds is the real "started" signal: the existing kill-0
-  // catches insta-die (binary missing / spawn-exec fail / SIGSEGV), but
-  // a daemon that declared `runtimes_supported: ["codex-sdk"]` without
-  // the codex binary or `OPENAI_API_KEY` configured produces a child
-  // that starts OK then dies mid-bootstrap (vendor adapter init throws).
-  // 通信龙 §9.3 nit: "declared ≠ guarantee" — declare is for dashboard
-  // candidate filtering, spawn is the truth check.
-  //
-  // Wait 5s + re-kill-0. Dashboard's create flow tolerates ≤30s.
-  // If dead → ack `runtime_capability_check_failed` so hub marks the
-  // request failed with the right reason (audit_log "daemon_capability_lied"
-  // surfaces the gap between declaration and reality).
-  const FAIL_FAST_MS = 5_000;
-  await new Promise<void>(resolve => setTimeout(resolve, FAIL_FAST_MS));
-  let stillAlive = false;
-  if (childPid > 0) {
-    try {
-      process.kill(childPid, 0);
-      stillAlive = true;
-      deps.log(`[create-node] +${FAIL_FAST_MS}ms capability check OK: pid=${childPid} still alive`);
-    } catch (kerr: any) {
-      const msg = `child died within ${FAIL_FAST_MS}ms post-spawn (likely missing runtime binary or auth for runtime='${req.node_spec.runtime}'): ${kerr?.message || kerr}`;
-      deps.warn(`[create-node] runtime_capability_check_failed: ${msg}`);
-      await deps.callCommHub("ack_create_request", {
-        request_id,
-        status: "runtime_capability_check_failed",
-        error: msg.slice(0, 800),
-        runtime: req.node_spec.runtime,
-      }).catch(() => {});
-      return;
-    }
-  }
-  void stillAlive;
-
   // RFC-027 §2.4 — record the spawned child in the daemon's children_map
+  //
+  // 🔴 #1293:这一块原本排在下面那个 +5000ms 能力检查**之后**。子节点在 spawn 的
+  //    那一刻就已经对 hub 可见,于是「hub 认识它」和「daemon 能操作它」之间有约 5 秒缺口——
+  //    这段时间内任何 stop_node / delete_node 都 ack `noop_not_my_child`,hub 侧不收敛。
+  //    真机实测:13:17:28 spawned → 13:17:30 stop 找不到 map 条目 → 13:17:33 才记上。
+  //
+  //    搬到能力检查之前,并在能力检查失败的那条 return 上配一次 forgetSpawnedChild ——
+  //    **只搬不配移除会留下死条目**,而 handleStopDoorbell 会照着它去 signal 一个不存在的 pid。
+  //    那正是记录原本排在后面的理由,不是疏忽。
   // so a later SSE stop_node doorbell knows which PID to signal.
   //
   // Lookup key MUST exactly match the hub's canonical child node_id.
@@ -609,6 +583,51 @@ export async function handleCreateNodeDoorbell(
       deps.warn(`[create-node] childrenMap record failed (stop-daemon won't see this child): ${e?.message || e}`);
     }
   }
+
+  // RFC-026 §9.3 D2 / #338 PR3 — capability fail-fast.
+  // Survives-5-seconds is the real "started" signal: the existing kill-0
+  // catches insta-die (binary missing / spawn-exec fail / SIGSEGV), but
+  // a daemon that declared `runtimes_supported: ["codex-sdk"]` without
+  // the codex binary or `OPENAI_API_KEY` configured produces a child
+  // that starts OK then dies mid-bootstrap (vendor adapter init throws).
+  // 通信龙 §9.3 nit: "declared ≠ guarantee" — declare is for dashboard
+  // candidate filtering, spawn is the truth check.
+  //
+  // Wait 5s + re-kill-0. Dashboard's create flow tolerates ≤30s.
+  // If dead → ack `runtime_capability_check_failed` so hub marks the
+  // request failed with the right reason (audit_log "daemon_capability_lied"
+  // surfaces the gap between declaration and reality).
+  const FAIL_FAST_MS = 5_000;
+  await new Promise<void>(resolve => setTimeout(resolve, FAIL_FAST_MS));
+  let stillAlive = false;
+  if (childPid > 0) {
+    try {
+      process.kill(childPid, 0);
+      stillAlive = true;
+      deps.log(`[create-node] +${FAIL_FAST_MS}ms capability check OK: pid=${childPid} still alive`);
+    } catch (kerr: any) {
+      const msg = `child died within ${FAIL_FAST_MS}ms post-spawn (likely missing runtime binary or auth for runtime='${req.node_spec.runtime}'): ${kerr?.message || kerr}`;
+      deps.warn(`[create-node] runtime_capability_check_failed: ${msg}`);
+      // #1293:记录已经提前到 spawn 之后,这条失败路径必须把它撤掉,
+      // 否则 map 里留一条指向已死 pid 的条目,stop doorbell 会去 signal 它。
+      try {
+        const { forgetSpawnedChild } = await import("./stop-daemon.js");
+        const removed = forgetSpawnedChild(`node_${request_id.replace(/^cr_/, "")}`);
+        deps.log(`[create-node] childrenMap rollback after capability failure: removed=${removed}`);
+      } catch (e: any) {
+        deps.warn(`[create-node] childrenMap rollback failed: ${e?.message || e}`);
+      }
+      await deps.callCommHub("ack_create_request", {
+        request_id,
+        status: "runtime_capability_check_failed",
+        error: msg.slice(0, 800),
+        runtime: req.node_spec.runtime,
+      }).catch(() => {});
+      return;
+    }
+  }
+  void stillAlive;
+
 
   // Step 4 — ack 'started' (success path; hub flips to 'succeeded' on
   // child's first report_status content-match)
