@@ -1,5 +1,8 @@
 # Node Runtime
 
+> 🔴 **This page covers install and auth. For "does feature F work on runtime R / OS O", see the [Support Matrix](/en/guide/support-matrix)** — that table is tri-state (✅ verified / ❌ verified broken / ❓ not verified) and every cell carries an evidence link.
+
+
 Every Agent Node has a **Runtime** (engine kernel) that decides how the node calls models and runs tools. Agent Network ships several Runtimes (4 in stable, plus 2 more in preview) — **and you can mix them on a single Hub**: a Claude Code CLI agent dispatches a translation task to a MiniMax agent, then asks a Codex agent to write code, and merges the results back.
 
 ## Runtimes — canonical table {#runtimes-—-canonical-table}
