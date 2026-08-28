@@ -14,7 +14,7 @@ RUN apt-get update \
 # 同一个 Dockerfile 今天和下周构建出不同的运行时,红了无从复现。
 ARG BUN_VERSION=1.3.14
 ARG BUN_LINUX_X64_SHA256=951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f
-RUN curl --fail --silent --show-error --location --retry 3 --retry-delay 2 --retry-all-errors \
+RUN curl --fail --silent --show-error --location --retry 5 --retry-delay 5 --retry-all-errors \
       "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-x64.zip" -o /tmp/bun.zip \
  && echo "${BUN_LINUX_X64_SHA256}  /tmp/bun.zip" | sha256sum -c - \
  && unzip -q /tmp/bun.zip -d /tmp/bunx \
