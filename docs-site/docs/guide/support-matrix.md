@@ -143,10 +143,61 @@
 
 ### macOS 上的 daemon（2026-08-28 实测）
 
-| | 状态 | 依据 |
+Mac Mini（macOS 26.3.1）+ `agent-node@2.5.0-preview.40` + 生产 hub，逐个跑完：
+
+| 操作 | 状态 | 判据（**不是** `create_node` 返回的 `ok:true`） |
 |---|---|---|
-| daemon **在线**（注册 / SSE connected） | **✅L2** | Mac Mini 升到 `agent-node@2.5.0-preview.40` 并重启，hub 侧 `11:34:27 SSE ← daemon-macmini connected` |
-| daemon 的**五个生命周期操作** | **❓** | **今天没在 macOS 上逐个跑过** |
+| daemon 在线（注册 / SSE connected） | **✅L2** | hub 侧 `11:34:27 SSE ← daemon-macmini connected` |
+| **创建** `create_node` | **✅L2** | daemon 日志四行：`wrote child config` → `spawned pid=79490` → `post-spawn kill-0 verify OK` → `+5000ms capability check OK`；hub 侧子节点注册报活 |
+| **编辑** `update_node_config` | **✅L2** | 🔴 判据是**节点侧真实文件**：`~/.anet/nodes/<alias>/config.json` 里 `model` 真的变了 —— 不是 hub 的 `config_revision` 0→1 |
+| **重启** `restart_node` | **✅L2** | `ok, apply_mode=restart_only` |
+| **停止** `stop_node` | **✅L2** | `12:30:32` 四行埋点 + 进程消失 |
+| **删除** `delete_node` | **✅L2** | `delete without map entry (expected after stop)` → `backed up child workdir` → hub 行 `node_not_found`，原目录已移走 |
+
+🔴 **删除这一格走的是「stop 之后再 delete」—— 正是 [#1286](https://github.com/sleep2agi/agent-network/issues/1286) 最初报的那条路径**，在 macOS + `.40` 上一次通过。
+（Linux 上的删除仍记 ⚠️，见上一节：那是「三次未复现，成因未定位」，不是同一件事。）
+
+🔴 **另一条读数**：`residual sweep` 埋点在 **macOS 上也正常打出**。这不理所当然 ——
+那段用 `pgrep -af` + `/proc/<pid>/cmdline`，而 **macOS 没有 `/proc`**。它没炸，
+说明那个函数的错误处理在 macOS 上是有效的（走 catch 后正常返回，不阻断 ack）。
+
+### macOS × Runtime（2026-08-28 实测，Vincent 定的 codex 优先）
+
+| runtime | daemon 创建节点 | 判据 |
+|---|---|---|
+| `claude-agent-sdk` | **✅L2** | 上表六步全通 |
+| `codex-sdk` | **✅L2** | spawn 四行验证 + hub 注册报活 + 删除全链走通（`ack accepted action=delete`） |
+| `codex-app-server` | **❌** | `{"ok":false,"error":"runtime_invalid","value":"codex-app-server"}`，**daemon 日志一行都没有** |
+
+🔴 **`codex-app-server` 被拦的位置和脚注 ^1^ 写的不是同一处。**
+`runtime_invalid` 在仓里有**两个来源**：
+
+| 位置 | 抛法 | 返回带 `value` 吗 |
+|---|---|---|
+| **hub** `server/src/create-node-validate.ts:45` | `ValidationError("runtime_invalid", { value })` | **带** |
+| daemon `agent-node/src/runtime/create-node-daemon.ts:310` | `throw new Error("runtime_invalid")` | 不带 |
+
+实测拿到的返回**带 `value`** ⇒ **是 hub 那道先响的，daemon 根本没收到这个请求**。
+**只修 `create-node-daemon.ts` 的 `VALID_RUNTIMES` 仍然过不去** —— 两道闸都要改。
+
+### daemon 重启会静默失去建节点能力（Linux + macOS 都复现）
+
+2026-08-28 在两个平台上各撞一次，形状完全相同：
+
+```
+← SSE create_node cr_…
+[WARN] anet_bin_unsafe_path: no ANET_BIN_ABS resolved from /etc/anet-daemon/path.conf
+```
+
+用干净的 `anet daemon start` 重启 daemon 后，它**照常注册、在线、收 doorbell、hub 返回 `ok:true`**，
+但**一个节点也建不出来** —— 因为它依赖的 `ANET_BIN_ABS` 等变量**没有落盘**，重启就丢。
+
+🔴 **「在线」和「能干活」是两件事。** 任何人重启一次 daemon 都会掉进去，
+而所有面向调用方的信号都说成功。
+
+**落盘的做法是 `/etc/anet-daemon/path.conf`**（跨重启存活）；
+`ANET_DAEMON_ALLOW_ENV_BIN=1` + `ANET_BIN_ABS=<realpath>` 是 Docker/dev/manual-ops 的便利路径，
+**重启不会自动带上**。
 
 🔴 **「daemon 在线」和「daemon 能干活」是两件事**，这两格必须分开。
 同一天在 Linux 上就栽过一次：daemon 注册成功、在线、收到 doorbell，
