@@ -6213,6 +6213,29 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
       : runtime === "grok-build-cli"
       ? buildGrokAgentNodeEnv(env)
       : { ...env, ANET_CONFIG_UPDATE_CAPABLE: "1" };
+
+    // #1353 —— 把 daemon 的 anet 二进制 pin 传给子进程。
+    //
+    // 🔴 这是我 #1299 那次改动的一个错误假设的修正。当时我在 `prepareDaemonAnetBin()`
+    //    里往 `process.env` 上写这三个变量,注释还写着「daemon start/up 是
+    //    `prepareDaemonAnetBin(); await startCommand()`,同进程」—— **同进程是对的,
+    //    但 startCommand 会 spawn 一个 agent-node 子进程,而 childEnv 是从窄的
+    //    `env` 变量组的,不是 `process.env`。** 于是子进程一个都拿不到。
+    //
+    // 2026-08-28 真机实测(两台机器):`nohup anet daemon start <name>` 起来的
+    // daemon 进程环境里只有 `ANET_CONFIG_UPDATE_CAPABLE`,随后 create_node 一律
+    // 报 `anet_bin_unsafe_path: no ANET_BIN_ABS resolved`。
+    //
+    // 🔴 症状具有欺骗性:daemon 照常注册、在线、收 doorbell,hub 返回 ok:true + request_id,
+    //    失败只出现在 daemon 自己的日志里。我因此把一台残废的 daemon 报成「上线成功」。
+    //    「在线」和「能干活」是两件事。
+    //
+    // 只在 process.env 里确实有的时候才传 —— 它们只由 prepareDaemonAnetBin() 设置,
+    // 也就是只在 daemon 路径上存在,普通 `anet node start` 不受影响。
+    for (const k of ["ANET_BIN_ABS", "ANET_BIN_SHA256", "ANET_DAEMON_ALLOW_ENV_BIN", "ANET_DAEMON_ALLOW_NON_ROOT_BIN", "ANET_DAEMON_PATH_CONF"]) {
+      const v = process.env[k];
+      if (v !== undefined && (childEnv as any)[k] === undefined) (childEnv as any)[k] = v;
+    }
     const pidFile = join(nodesDir(), nodeId, ".pid");
 
     // Sentinel code agent-node uses to request re-spawn. Must stay in
