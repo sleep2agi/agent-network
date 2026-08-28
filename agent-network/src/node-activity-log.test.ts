@@ -1,6 +1,6 @@
 // #1345 — the proxy's file log sink. Behavioral tests against a real fs.
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, readdirSync, chmodSync, mkdirSync } from "fs";
+import { mkdtempSync, readFileSync, readdirSync, chmodSync, mkdirSync, rmSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createActivityLogSink } from "./node-activity-log";
@@ -25,6 +25,22 @@ describe("#1345 createActivityLogSink", () => {
     const sink = createActivityLogSink(base, "a", () => new Date("2026-08-29T00:30:00.000Z"));
     sink.append("x");
     expect(readdirSync(join(base, ".anet", "nodes", "a", "logs"))).toEqual(["2026-08-29.log"]);
+  });
+
+  test("a torn-down node dir is NEVER recreated — sink goes permanently silent", () => {
+    // The race this guards: `anet node stop` removes .anet/nodes/<alias>/
+    // and then verifies nothing survived; the proxy's SSE-disconnect
+    // callbacks still log() during that window. Resurrecting the dir makes
+    // stop's cleanup verification fail (test225 CI red, 2026-08-28).
+    const base = mkdtempSync(join(tmpdir(), "nal-"));
+    const sink = createActivityLogSink(base, "c", () => new Date("2026-08-28T00:00:00.000Z"));
+    sink.append("before stop");
+    const nodeDir = join(base, ".anet", "nodes", "c");
+    rmSync(nodeDir, { recursive: true, force: true }); // stop tears the node dir down
+    sink.append("during stop teardown");
+    expect(existsSync(nodeDir)).toBe(false); // ← the actual invariant stop depends on
+    sink.append("after stop");
+    expect(existsSync(nodeDir)).toBe(false); // stays down: sink is permanently disabled
   });
 
   test("an unwritable destination is swallowed, then recovers when writable again", () => {
