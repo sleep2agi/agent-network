@@ -1,5 +1,17 @@
 # Changelog
 
+## Reliability sprint: stop/delete convergence + node logs + timeout guard — preview (2026-08-28 evening)
+
+Coordinated release: `commhub-server@0.9.0-preview.36/.37`, `agent-node@2.5.0-preview.40/.42`, `agent-network@2.3.0-preview.54–.58`.
+
+- **stop/delete convergence** (#1286 trio): daemon-side ack tracing, hub-side six-exit instrumentation for `ack_stop_request`, stuck `deleting` rows re-dispatchable with `force` (5-minute staleness criterion)
+- **claude-code-cli node logs** (#1345): the stdio proxy now mirrors every log line into `.anet/nodes/<alias>/logs/` (UTC-dated files) — per-alias node logs exist for this runtime for the first time; includes a stop-race guard (a torn-down node dir is never resurrected)
+- **callCommHub timeout** (#1357): 30s `AbortSignal.timeout` — a hung hub can no longer silently swallow doorbells
+- **daemon capability visibility**: `runtimes_supported` widened to 7 (#1376), four-class creation-failure codes (#1377), hub `lifecycle_controllable` flag (#1374) pairing with desktop button disabling (app#197/#200 — the three TUI co-presence runtimes join the create wizard, zero-key, following the host login)
+- **agent-initiated push**: `send_desktop_message` documented (guide/channels)
+
+---
+
 ## Exact BTW task boundary — Hub preview (2026-08-28)
 
 `commhub-server@0.9.0-preview.34` adds optional `thread_id` / `turn_id` fields to task records and returns them through REST and MCP task projections. The Hub accepts a boundary only when the consuming node reports it for an owned task without conflict. Older nodes and historical tasks remain compatible; absent boundaries stay explicitly absent and are never guessed or backfilled. The paired `agent-node@2.5.0-preview.39` and `agent-network@2.3.0-preview.53` will follow after the Hub is published, in dependency order.
