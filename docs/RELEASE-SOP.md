@@ -73,9 +73,9 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > 所以 R367 没有、也不该把它们清掉。代价是:**latest 或 preview 一发布,它们立刻变成假的**,
 > 而且是危险的那种假 —— 会告诉用户一道已经存在的安全 preflight 不存在。
 >
-> 逐次发版必须重新核对的位置(**12 个路径**,下表 12 行 = 12 个文件 ——
+> 逐次发版必须重新核对的位置(**14 个路径**,下表 14 行 = 14 个文件 ——
 > 不要把 zh/en 合成一行数,分母数错会漏核。
-> 这张表的分母被修正过两次:7 → 8 → 12。**加新的信道断言时,同时把它加进这张表**,
+> 这张表的分母被修正过三次:7 → 8 → 12 → 14。**加新的信道断言时,同时把它加进这张表**,
 > 否则下一个人照着一份"看起来完整"的清单去核,漏掉的那几页永远不会被发现):
 >
 > | 文件 | 行 | 断言 |
@@ -103,6 +103,8 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > | `docs-site/docs/en/deploy/daemon.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/en/deploy/npm.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/en/guide/architecture.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
+> | `docs-site/docs/guide/channels.md` | 见门输出 | 信道断言 —— send_desktop_message 一节钉了 `commhub-server@0.9.0-preview.36`(工具引入版本) |
+> | `docs-site/docs/en/guide/channels.md` | 见门输出 | 同上(英文) |
 > | `docs-site/docs/en/guide/feishu.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/en/guide/grok-copresence.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/en/guide/runtimes.md` | 见门输出 | 信道断言 —— 通道表钉了 npm `latest` 的**具体版本号**(#1298)，换 dist-tag 即失真 |
