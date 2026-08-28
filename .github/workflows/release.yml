@@ -21,9 +21,18 @@
 #     through that real-TTY drive caught
 #
 # This workflow encodes the manual SOP as automated gates that run on
-# every tag push and any workflow_dispatch invocation. It is **report-only
-# by design** (does not block `npm publish` itself) — the publisher decides
-# whether to proceed. The goal is to make the checks impossible to skip.
+# every tag push and any workflow_dispatch invocation.
+#
+# 🔴 它**是不是只报告、还是会真发布,取决于怎么触发的** —— 唯一的权威是
+#    `publish` job 的 if 条件(本文件下方):
+#
+#      if: github.event_name == 'workflow_dispatch' && inputs.publish && <四道门全 success>
+#
+#    · tag push            → 只跑门,**不发布**
+#    · workflow_dispatch   → 只跑门,**除非**显式勾了 `publish`
+#    · workflow_dispatch + publish:true + 四道门全绿 → **真的 `npm publish --tag preview`**
+#
+#    读这段说明的人不需要往下翻 500 行才知道自己会不会把包发出去。
 #
 # WHAT IT GATES
 # =============
@@ -59,9 +68,12 @@
 #
 # WHAT IT DOES NOT DO
 # ===================
-# - Does NOT publish to npm. Publishing remains a manual `npm publish` step
-#   on the maintainer's machine. This workflow runs against the locally
-#   built tarball + tag metadata, then reports verdict.
+# - **不会在 tag push 上发布**。tag push 只跑四道门然后出 verdict。
+#   🔴 这一条原来写的是「Does NOT publish to npm. Publishing remains a manual
+#   `npm publish` step」—— 那是本文件加上 `publish` job **之前**的事实,
+#   而 job 加进来之后这句没跟着改。同一个文件里,头部说不发、第 666 行是
+#   `npm publish "$TARBALL" --tag preview --provenance --access public`。
+#   **两种读法都能自圆其说,只有 `publish` job 的 if 条件是权威。**
 # - Does NOT run the full v0.11 onboarding 5-scenario suite from
 #   /tmp/p-v0.11-onboarding (that's the contract-test layer). Release gate
 #   is a smaller, faster confidence check focused on install-path + version
@@ -225,7 +237,13 @@ jobs:
           # workflow 发它时，dispatch 直接被拒：
           #   HTTP 422: Provided value 'commhub-server' for input 'package' not in the
           #   list of allowed values
-          # —— 也就是说 **生产 hub 的包一直没有发布通道**，历史版本都是手工 npm publish。
+          # —— 当时 **生产 hub 的包确实没有发布通道**,历史版本都是手工 npm publish。
+          #
+          # 🔴 那是 2026-08-27 的**记录**,不是现在的事实:`commhub-server` 现在已经在
+          #    本文件 workflow_dispatch 的 `package` options 里(与 agent-network /
+          #    agent-node 并列),422 不再复现。记录留着是因为它解释了这段分流为什么存在;
+          #    但**别再据此推论「hub 包发不了」** —— 这类「真前提 + 已经过期的结论」
+          #    读起来和完全正确一模一样。
           if [ "${GATED_PKG}" = "commhub-server" ]; then
             docker run --rm \
               -v "$PWD/tarball:/tarball:ro" \
