@@ -3737,6 +3737,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       error: z.string().max(1000).optional(),
     },
     async ({ request_id, status, exit_signal, backup_path, error: ackError }) => {
+      // #1358 —— 🔴 在此之前,这个工具的**每一条出口都是静默的**:到达不记、
+      // 三条拒绝不记、成功收尾也不记。而隔壁 create-node 的收尾**是记的**
+      // (`✓ create-node finalize`)。这种不对称最坑人:读日志的人看到 create 有、
+      // delete 没有,第一反应是「delete 没发生」—— 但两者的日志覆盖面本来就不同,
+      // 那条推论没有依据。排查 #1286 时我自己就差点这样读。
+      console.log(`[commhub] ← ack_stop_request request=${request_id} status=${status}${exit_signal ? ` exit_signal=${exit_signal}` : ""}`);
       const callerDaemon = resolveCallerDaemonTokenBound();
       if (!callerDaemon.ok) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: callerDaemon.error }) }] };
@@ -3748,11 +3754,16 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }>(`SELECT daemon_node_id, status, network_id, child_node_id, child_alias, action,
                  in_flight_at_dispatch, force
             FROM node_stop_requests WHERE request_id = ?1`, request_id);
-      if (!row) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_found" }) }] };
+      if (!row) {
+        console.warn(`[commhub] ✕ ack_stop_request rejected: request_not_found request=${request_id}`);
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_found" }) }] };
+      }
       if (row.daemon_node_id !== callerDaemon.daemonNodeId) {
+        console.warn(`[commhub] ✕ ack_stop_request rejected: not_your_request request=${request_id} row_daemon=${row.daemon_node_id} caller=${callerDaemon.daemonNodeId}`);
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "not_your_request" }) }] };
       }
       if (row.network_id !== callerDaemon.networkId) {
+        console.warn(`[commhub] ✕ ack_stop_request rejected: cross_network_request request=${request_id} row_net=${row.network_id} caller_net=${callerDaemon.networkId}`);
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_request" }) }] };
       }
       const now = Date.now();
@@ -3807,9 +3818,20 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           // sweeper / next reconciliation will pick it up. Don't transition.
         });
       } catch (e: any) {
+        console.warn(`[commhub] ✕ ack_stop_request finalize_tx_failed request=${request_id} action=${row.action} child=${row.child_alias}: ${e?.message || e}`);
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "finalize_tx_failed", message: e?.message || String(e) }) }] };
       }
 
+      // 🔴 关键的是最后那半句「据此做了什么」。#1286 里 hub 的代码路径经核对是
+      // 正确的,缺的正是「它到底走没走那条分支」—— 只说「收到了 ack」回答不了。
+      const did = status === "stopped" && row.action === "delete"
+        ? "revoked ntok + DELETE FROM nodes"
+        : status === "stopped" && row.action === "stop"
+        ? "lifecycle_state=stopped"
+        : status === "stop_failed"
+        ? "lifecycle_state=stop_failed"
+        : "no lifecycle transition (noop_not_my_child)";
+      console.log(`[commhub] ✓ ${row.action}-node finalize: request=${request_id} child=${row.child_alias} (${row.child_node_id}) status=${status} → ${did}`);
       return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, status }) }] };
     },
   );
