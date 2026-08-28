@@ -51,7 +51,14 @@ set -uo pipefail
 #   回滚目标 = runtime-v32-run-terminal-d5199bc9，目录仍在；hub-daemon 备份见 rollback-693-*
 # 2026-08-13 00:5x: runtime-v33 → runtime-v34-preview29(0.9.0-preview.29;含 #698 peer-reply 终结原任务、#697 model 注入)
 #   回滚目标 = runtime-v33-upload-bridge-17b8223f(0.9.0-preview.27),目录仍在
-RUNTIME_DIR="$HOME/.commhub/runtime-v34-preview29"
+# 2026-08-28: preview29 → preview34（对齐 PINNED_SERVER_VERSION）
+#   🔴 这一条不是一次真实的机器升级记录,是**把仓库这份对齐到仓库自己声明的版本**。
+#      在此之前仓库启动器写 preview29、PINNED_SERVER_VERSION 写 preview.34,
+#      差 5 个版本而没有任何东西变红 —— 见 #735 与 scripts/check-hub-launcher-pin.py。
+#   🔴 `runtime-v34-` 里的 v34 是**机器本地的升级序号**,不同机器必然不同,
+#      所以那道门只比 previewMM,不比 vNN。这里保留 v34 只是不改无关的东西。
+#   回滚目标 = 生产机器上那份的当前值(以该机器为准,不以本文件为准)
+RUNTIME_DIR="$HOME/.commhub/runtime-v34-preview34"
 ENTRY="$RUNTIME_DIR/node_modules/@sleep2agi/commhub-server/bin/commhub.ts"
 ENV_FILE="${HUB_ENV_FILE:-$HOME/.commhub/hub.env}"
 # bun 解析：显式路径优先，其次走 PATH。
