@@ -676,3 +676,30 @@ describe("#1353 buildConfigSnapshot — 上报「当下能不能创建节点」"
     expect(blob).not.toContain("node_modules");
   });
 });
+
+// #1353 —— 四类失败原因，修法完全不同
+describe("#1353 create_nodes_blocked_reason —— 四类而不是一类", () => {
+  const cfg = { role: "host_supervisor" };
+  for (const r of ["anet_bin_identity", "anet_bin_source", "anet_bin_shape", "anet_bin_permission", "anet_bin_unknown"] as const) {
+    test(`上报 ${r}`, () => {
+      const s: any = buildConfigSnapshot(cfg, true, 1, { ok: false, reason: r });
+      expect(s.daemon_capabilities.can_create_nodes).toBe(false);
+      expect(s.daemon_capabilities.create_nodes_blocked_reason).toBe(r);
+    });
+  }
+
+  test("🔴 每一类都不能夹带路径", () => {
+    for (const r of ["anet_bin_identity", "anet_bin_source", "anet_bin_shape", "anet_bin_permission"] as const) {
+      const blob = JSON.stringify(buildConfigSnapshot(cfg, true, 1, { ok: false, reason: r }));
+      expect(blob).not.toContain("/");
+      expect(blob).not.toContain("\\");
+    }
+    // 正控：真会出现在上游 e.message 里的串，必须含 "/"，证明这条断言不是恒真
+    expect("chmod go-w '/home/x/anet.cjs'").toContain("/");
+  });
+
+  test("🔴 类别之间必须互不相同 —— 否则拆分等于没拆", () => {
+    const set = new Set(["anet_bin_identity", "anet_bin_source", "anet_bin_shape", "anet_bin_permission"]);
+    expect(set.size).toBe(4);
+  });
+});

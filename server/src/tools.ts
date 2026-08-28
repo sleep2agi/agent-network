@@ -563,7 +563,27 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           // 只收**代码**,不收原始报错文本 —— 上游 unsafePathHelp() 的消息里带完整机器路径,
           // 而这个字段会走到 Dashboard。enum 而不是 string:一个自由文本字段等于给
           // 「把路径塞进来」留了口子。
-          create_nodes_blocked_reason: z.enum(["anet_bin_pin_unresolved"]).optional(),
+          // #1353 —— 四类失败,修法完全不同:
+          //   identity   重装 anet / unset ANET_BIN_ABS
+          //   source     写 /etc/anet-daemon/path.conf（**要 sudo**）
+          //   shape      换成 realpath
+          //   permission **一行 chmod go-w**
+          // 混成一条会让人修错方向 —— 2026-08-28 我一天里撞到其中两类,看到的是同一条错误。
+          //
+          // 🔴 `anet_bin_pin_unresolved` **必须留着**:已经在跑的 agent-node@2.5.0-preview.40
+          //    发的就是这个值。zod 对象里任何一个字段验证失败会让**整个 report_status 被拒**,
+          //    不只是丢掉这一格 —— 那会让所有 .40 daemon 在 hub 上变成失联。
+          //    删一个 enum 值的代价,远大于多留一个。
+          // 🔴 仍然是 enum 不是 string:自由文本字段就是给机器路径留的口子,
+          //    而上游 e.message 里带的正是完整路径。
+          create_nodes_blocked_reason: z.enum([
+            "anet_bin_pin_unresolved",   // 兼容:.40 及更早
+            "anet_bin_identity",
+            "anet_bin_source",
+            "anet_bin_shape",
+            "anet_bin_permission",
+            "anet_bin_unknown",
+          ]).optional(),
         }).optional(),
       }).optional().describe("RFC-024 — masked node config snapshot"),
     },
