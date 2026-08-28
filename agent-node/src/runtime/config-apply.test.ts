@@ -621,3 +621,58 @@ describe("buildConfigSnapshot — always emits channels for content-match finali
     expect(buildConfigSnapshot({ channels: null }, false, 0).channels).toEqual([]);
   });
 });
+
+// ─── #1353 —— daemon 把「我现在能不能创建节点」上报给 hub ──────────────
+//
+// 背景：创建子节点要用一个已验证的 anet 二进制 pin，它只来自
+// `/etc/anet-daemon/path.conf`（生产信任根）或显式开启的 ANET_BIN_ABS 环境变量。
+// 🔴 环境变量重启不带就会丢，而丢了之后 daemon 照常注册、在线、收 doorbell，
+//    hub 返回 ok:true —— 节点永远不出现。**「在线」和「能干活」是两件事。**
+//
+// 这几条测的是：那件事**说得出口**了没有。
+describe("#1353 buildConfigSnapshot — 上报「当下能不能创建节点」", () => {
+  const cfg = { role: "host_supervisor", runtimes_supported: ["claude-agent-sdk"] };
+
+  test("不传能力参数时，快照里完全不出现这两个字段（旧调用点行为逐字不变）", () => {
+    const s: any = buildConfigSnapshot(cfg, true, 3);
+    // 🔴 断言的是「键不存在」，不是「值为 undefined」——
+    //    一个恒为 undefined 的键照样会被 JSON.stringify 丢掉，两者在线上无法区分；
+    //    但在对象层面它们不同，而 hub 的 zod 对多余键的处理取决于键在不在。
+    expect("can_create_nodes" in (s.daemon_capabilities ?? {})).toBe(false);
+    expect("create_nodes_blocked_reason" in (s.daemon_capabilities ?? {})).toBe(false);
+    // 正控：既有字段仍然在，证明这个快照不是空的
+    expect(s.daemon_capabilities?.runtimes_supported).toEqual(["claude-agent-sdk"]);
+  });
+
+  test("能力可用时上报 can_create_nodes=true，且不带 reason", () => {
+    const s: any = buildConfigSnapshot(cfg, true, 3, { ok: true });
+    expect(s.daemon_capabilities.can_create_nodes).toBe(true);
+    expect("create_nodes_blocked_reason" in s.daemon_capabilities).toBe(false);
+  });
+
+  test("能力不可用时上报 false + 原因代码", () => {
+    const s: any = buildConfigSnapshot(cfg, true, 3, { ok: false, reason: "anet_bin_pin_unresolved" });
+    expect(s.daemon_capabilities.can_create_nodes).toBe(false);
+    expect(s.daemon_capabilities.create_nodes_blocked_reason).toBe("anet_bin_pin_unresolved");
+  });
+
+  test("🔴 上报的原因里不能出现任何路径", () => {
+    const s: any = buildConfigSnapshot(cfg, true, 3, { ok: false, reason: "anet_bin_pin_unresolved" });
+    const reason = String(s.daemon_capabilities.create_nodes_blocked_reason);
+    // unsafePathHelp() 的原始消息里带完整机器路径（/etc/anet-daemon/path.conf、
+    // /home/…/node_modules/…/anet.cjs）。这个字段会一路走到 Dashboard，
+    // 而一条「哪台机器的哪个路径缺什么」本身就是一张地图。
+    expect(reason).not.toContain("/");
+    expect(reason).not.toContain("\\");
+    // 正控：这条断言不是恒真 —— 拿真会出现在原始消息里的串喂进去，它必须判否
+    expect("no ANET_BIN_ABS resolved from /etc/anet-daemon/path.conf").toContain("/");
+  });
+
+  test("🔴 整个快照里不能夹带 anet 二进制的绝对路径", () => {
+    const s = buildConfigSnapshot(cfg, true, 3, { ok: false, reason: "anet_bin_pin_unresolved" });
+    const blob = JSON.stringify(s);
+    expect(blob).not.toContain("/etc/anet-daemon");
+    expect(blob).not.toContain("anet.cjs");
+    expect(blob).not.toContain("node_modules");
+  });
+});

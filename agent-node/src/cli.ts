@@ -166,6 +166,40 @@ import {
   type CompensationPoller,
 } from "./runtime/commhub-poll-compensator";
 
+
+// ── #1353 —— daemon 当下能不能创建节点,上报给 hub ──────────────────
+//
+// 背景:创建子节点要用一个**已验证的 anet 二进制 pin**,它只来自
+// `/etc/anet-daemon/path.conf`(生产信任根)或显式开启的 ANET_BIN_ABS 环境变量。
+// 🔴 环境变量**重启不带就会丢**,而丢了之后 daemon 照常注册、在线、收 doorbell,
+//    hub 返回 ok:true + request_id —— 节点永远不出现,失败只写在 daemon 自己的日志里。
+//    **「在线」和「能干活」是两件事。** 这个函数让 hub 看得见后者。
+//
+// 只对 host_supervisor 算。普通节点返回 undefined ⇒ 快照里完全不出现这两个字段,
+// 行为与改动前逐字相同。
+//
+// 🔴 算一次就缓存:report_status 是心跳路径,而 loadAndVerifyAnetBin() 会做
+//    realpathSync + statSync + 读文件哈希。每次心跳都跑一遍是纯浪费。
+//    代价是 daemon 运行期间修好了 pin 也要重启才会反映 —— 可接受,
+//    因为修 pin 的正规做法(写 /etc/anet-daemon/path.conf)本来就伴随重启。
+let _createCapCache: { ok: boolean; reason?: "anet_bin_pin_unresolved" } | null | undefined;
+function daemonCreateCapability(): { ok: boolean; reason?: "anet_bin_pin_unresolved" } | undefined {
+  if (_createCapCache !== undefined) return _createCapCache ?? undefined;
+  if (fileConfig?.role !== "host_supervisor") { _createCapCache = null; return undefined; }
+  try {
+    // 同步 require 而不是顶层 import:cli.ts 对 create-node-daemon 一直是按需加载的,
+    // 保持一致,也避免非 daemon 节点为这一个函数拉进整个模块。
+    const mod = require("./runtime/create-node-daemon.js");
+    mod.loadAndVerifyAnetBin();
+    _createCapCache = { ok: true };
+  } catch {
+    // 🔴 只报代码,**不报原始报错文本**。unsafePathHelp() 的消息里带完整机器路径,
+    //    而这个字段会一路走到 hub 和 Dashboard —— 一条「哪台机器的哪个路径缺什么」
+    //    本身就是一张地图。原文仍然进 daemon 自己的日志,那里是本地的。
+    _createCapCache = { ok: false, reason: "anet_bin_pin_unresolved" };
+  }
+  return _createCapCache;
+}
 const home = homedir();
 const peerReplyCapabilityCache = createPeerReplyCapabilityCache();
 
@@ -1431,7 +1465,7 @@ const reportStatus = async (status: string, task?: string) => {
     // fails → update stays pending → reaper timeouts → dashboard sees
     // timeout (NOT false ✓).
     config_snapshot: configApplyDraining ? undefined : {
-      ...buildConfigSnapshot(fileConfig, process.env.ANET_CONFIG_UPDATE_CAPABLE === "1", currentConfigRevision),
+      ...buildConfigSnapshot(fileConfig, process.env.ANET_CONFIG_UPDATE_CAPABLE === "1", currentConfigRevision, daemonCreateCapability()),
       ...(sideThreadCapabilitySnapshot ? { side_thread_capability: sideThreadCapabilitySnapshot } : {}),
     },
   });

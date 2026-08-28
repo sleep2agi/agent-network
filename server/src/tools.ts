@@ -551,6 +551,19 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           runtimes_supported: z.array(z.string().max(64)).max(16).optional(),
           allowed_secret_keys: z.array(z.string().max(64)).max(64).optional(),
           max_concurrent_children: z.number().int().min(1).max(1000).optional(),
+          // #1353 —— daemon **当下**能不能创建节点。与 runtimes_supported 不是一回事:
+          // 后者是声明(我支持哪些 runtime),这个是实际能力。一个 daemon 可以声明支持
+          // 三种 runtime,同时因为 ANET_BIN pin 解析不出来而一种也创建不了。
+          //
+          // 🔴 为什么 hub 需要看见它:pin 只存在于 /etc/anet-daemon/path.conf 或
+          //    显式开启的环境变量里,**重启不带环境就会丢**。丢了之后 daemon 照常注册、
+          //    在线、收 doorbell,hub 返回 ok:true + request_id —— 而节点永远不出现。
+          //    在此之前 hub 完全看不出区别,Dashboard 的「选服务器」还会把它列为可选。
+          can_create_nodes: z.boolean().optional(),
+          // 只收**代码**,不收原始报错文本 —— 上游 unsafePathHelp() 的消息里带完整机器路径,
+          // 而这个字段会走到 Dashboard。enum 而不是 string:一个自由文本字段等于给
+          // 「把路径塞进来」留了口子。
+          create_nodes_blocked_reason: z.enum(["anet_bin_pin_unresolved"]).optional(),
         }).optional(),
       }).optional().describe("RFC-024 — masked node config snapshot"),
     },

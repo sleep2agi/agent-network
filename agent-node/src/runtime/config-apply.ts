@@ -398,6 +398,23 @@ export interface DaemonCapabilities {
   /** RFC-026 §9 — hub backpressure cap (tools.ts daemon_max_children).
    * Daemon-side enforcement also uses this. Default 20 if unset. */
   max_concurrent_children?: number;
+  /** #1353 —— 这个 daemon **现在**能不能创建节点。
+   *
+   * 🔴 它和 `runtimes_supported` 不是一回事:后者是**声明**(我支持哪些 runtime),
+   *    这个是**当下的实际能力**。一个 daemon 可以声明支持三种 runtime,
+   *    同时因为 ANET_BIN pin 解析不出来而一种也创建不了。
+   *
+   * 为什么需要它:pin 只存在于 `/etc/anet-daemon/path.conf` 或(显式开启的)环境变量里,
+   * **重启不带环境就会丢**。丢了之后 daemon 照常注册、在线、收 doorbell,
+   * hub 返回 `ok:true` + request_id,而节点永远不出现 ——
+   * 失败只写在 daemon 自己的日志里。**「在线」和「能干活」是两件事。** */
+  can_create_nodes?: boolean;
+  /** #1353 —— `can_create_nodes === false` 时的原因**代码**。
+   *
+   * 🔴 只报代码,**永远不报原始报错文本**。`unsafePathHelp()` 的消息里带
+   *    完整的机器路径,而这个字段会一路走到 hub 和 Dashboard ——
+   *    一条「哪台机器的哪个路径缺什么」本身就是一张地图。 */
+  create_nodes_blocked_reason?: "anet_bin_pin_unresolved";
 }
 
 export interface MaskedSnapshot {
@@ -450,6 +467,15 @@ export function buildConfigSnapshot(
   fileConfig: any,
   configUpdateCapable: boolean,
   revision: number,
+  /** #1353 —— daemon 当下能不能创建节点。**由调用方算好传进来**,不在这里算。
+   *
+   * 🔴 为什么是依赖注入而不是直接 import:算这个要用
+   *    `create-node-daemon.ts` 的 `loadAndVerifyAnetBin()`,而**那个文件已经
+   *    import 了本文件**(`atomicWriteJson` 等)。反向 import 会成环。
+   *
+   * `undefined` = 调用方没算(非 daemon 节点,或旧调用点)⇒ 不上报这两格,
+   * 与改动前的行为逐字相同。 */
+  createCapability?: { ok: boolean; reason?: "anet_bin_pin_unresolved" },
 ): MaskedSnapshot {
   const out: MaskedSnapshot = {
     model: typeof fileConfig?.model === "string" ? fileConfig.model : null,
@@ -490,6 +516,14 @@ export function buildConfigSnapshot(
   const mc = fileConfig?.max_concurrent_children;
   if (typeof mc === "number" && Number.isFinite(mc) && mc > 0) {
     caps.max_concurrent_children = mc;
+  }
+  // #1353 —— 只在调用方真的算过的时候才上报。没算过就完全不出现这两个字段,
+  // 这样旧 hub 和旧调用点的行为逐字不变。
+  if (createCapability) {
+    caps.can_create_nodes = createCapability.ok;
+    if (!createCapability.ok && createCapability.reason) {
+      caps.create_nodes_blocked_reason = createCapability.reason;
+    }
   }
   if (Object.keys(caps).length > 0) {
     out.daemon_capabilities = caps;
