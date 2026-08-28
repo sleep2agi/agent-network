@@ -12,6 +12,7 @@
 ## 开发规则
 
 - **不频繁发 npm preview**：本地源码开发，大版本完成时统一发
+- **对外 npm 产物只从 main 发布**：功能分支可构建、打包和测试，但不得向 npm 发布包或 executable；release 变更必须先合入 `main`，再从该 `main` 精确提交发布
 - **不改本地全局 npm 包**：只改 git 仓库源码
 - **Docker 先验证**：所有改动 Docker E2E 通过后再合并
 - **向后兼容**：旧 atok_ token 仍然有效

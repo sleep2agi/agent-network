@@ -1,5 +1,11 @@
 # Changelog
 
+## Exact BTW task boundary — Hub preview (2026-08-28)
+
+`commhub-server@0.9.0-preview.34` adds optional `thread_id` / `turn_id` fields to task records and returns them through REST and MCP task projections. The Hub accepts a boundary only when the consuming node reports it for an owned task without conflict. Older nodes and historical tasks remain compatible; absent boundaries stay explicitly absent and are never guessed or backfilled. The paired `agent-node@2.5.0-preview.39` and `agent-network@2.3.0-preview.53` will follow after the Hub is published, in dependency order.
+
+---
+
 ## Durable Codex co-presence and safe teardown — preview (2026-08-26)
 
 This paired preview release is `agent-network@2.3.0-preview.46` / `agent-node@2.5.0-preview.34` / `commhub-server@0.9.0-preview.30`. The Hub adds immutable node cursors and a monotonic terminal journal for durable recovery after a missed SSE notification, while task delivery returns the network-authorized `actual_to`. Codex co-presence keeps one bridge and a shared `CODEX_HOME` plus thread/history; `node stop` now converges the managed app-server, bridge, and TUI resources. Linux and protected Windows Codex 0.148 gates cover upgrade recovery, active-turn steering, and history preservation.
