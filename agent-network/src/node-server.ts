@@ -22,6 +22,7 @@ import { hostname } from "os";
 import { execSync } from "child_process";
 import { encodeCwd } from "./project-key";
 import { loadOwnerOnlyEnvFile } from "./owner-env-file";
+import { createActivityLogSink } from "./node-activity-log";
 import {
   defaultControlledUploadRoots,
   uploadControlledLocalFile,
@@ -143,9 +144,16 @@ const AUTH_TOKEN = process.env.COMMHUB_TOKEN || ANET_CONFIG.token || "";
 // the default for Claude Code installations that launch this same artifact.
 const OUTBOUND_ONLY = process.env.ANET_COMMHUB_MODE === "outbound-only";
 
+// #1345 — claude-code-cli nodes have no agent-node process, so this proxy is
+// the only place a per-alias node log can come from. Mirror every log line
+// into .anet/nodes/<ALIAS>/logs/ (UTC-dated file, same as agent-node _log);
+// stderr remains the primary sink and file failures are swallowed inside.
+const activityLog = createActivityLogSink(process.cwd(), ALIAS);
 function log(msg: string) {
   const ts = new Date().toTimeString().slice(0, 8);
-  process.stderr.write(`[${ts}] [commhub] ${msg}\n`);
+  const line = `[${ts}] [commhub] ${msg}`;
+  process.stderr.write(`${line}\n`);
+  activityLog.append(line);
 }
 
 function sleep(ms: number): Promise<void> {
