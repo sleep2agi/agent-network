@@ -4,7 +4,7 @@ agent-node/src/runtime/create-node-daemon.test.ts:
 
 # Unhandled error between tests
 -------------------------------
-SyntaxError: Export named 'reconcilePendingCreateRequestsOnConnect' not found in module '/home/vansin/agent-orchestra/.worktrees/issue-1362-create-node-pending/agent-node/src/runtime/create-node-daemon.ts'.
+SyntaxError: Export named 'reconcilePendingCreateRequestsOnConnect' not found in module '/home/user/agent-orchestra/.worktrees/issue-1362-create-node-pending/agent-node/src/runtime/create-node-daemon.ts'.
 -------------------------------
 
 
