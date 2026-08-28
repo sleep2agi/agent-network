@@ -153,10 +153,62 @@ So this cell reads **⚠️ "three non-reproductions on `.40`, root cause not lo
 
 ### The daemon on macOS (measured 2026-08-28)
 
-| | Status | Evidence |
+Mac Mini (macOS 26.3.1) + `agent-node@2.5.0-preview.40` + production hub, run end to end:
+
+| Operation | Status | What was checked (**not** the `ok:true` that `create_node` returns) |
 |---|---|---|
-| daemon **online** (registers / SSE connected) | **✅L2** | Mac Mini upgraded to `agent-node@2.5.0-preview.40` and restarted; hub side shows `11:34:27 SSE ← daemon-macmini connected` |
-| the daemon's **five lifecycle operations** | **❓** | **not run on macOS today** |
+| daemon online (registers / SSE connected) | **✅L2** | hub side `11:34:27 SSE ← daemon-macmini connected` |
+| **Create** `create_node` | **✅L2** | four daemon log lines: `wrote child config` → `spawned pid=79490` → `post-spawn kill-0 verify OK` → `+5000ms capability check OK`; child registered and reporting on the hub |
+| **Edit** `update_node_config` | **✅L2** | 🔴 the check is the **node-side file**: `model` actually changed in `~/.anet/nodes/<alias>/config.json` — not the hub's `config_revision` going 0→1 |
+| **Restart** `restart_node` | **✅L2** | `ok, apply_mode=restart_only` |
+| **Stop** `stop_node` | **✅L2** | `12:30:32`, four instrumentation lines + process gone |
+| **Delete** `delete_node` | **✅L2** | `delete without map entry (expected after stop)` → `backed up child workdir` → hub row `node_not_found`, original dir moved away |
+
+🔴 **The delete row took the "stop, then delete" path — exactly the one first reported in [#1286](https://github.com/sleep2agi/agent-network/issues/1286)** — and it passed first try on macOS + `.40`.
+(Delete on Linux still reads ⚠️, see the section above: that is "three non-reproductions, root cause not located", which is a different claim.)
+
+🔴 **A second reading**: the `residual sweep` instrumentation also prints on **macOS**. That is not a given —
+that code uses `pgrep -af` + `/proc/<pid>/cmdline`, and **macOS has no `/proc`**. It did not blow up,
+which means the function's error handling holds on macOS (it falls into the catch, returns normally, and does not block the ack).
+
+### macOS × Runtime (measured 2026-08-28; codex family prioritized per Vincent)
+
+| runtime | daemon creates a node | Evidence |
+|---|---|---|
+| `claude-agent-sdk` | **✅L2** | all six steps above |
+| `codex-sdk` | **✅L2** | four spawn-verification lines + child registered on hub + full delete chain (`ack accepted action=delete`) |
+| `codex-app-server` | **❌** | `{"ok":false,"error":"runtime_invalid","value":"codex-app-server"}`, and **not a single line in the daemon log** |
+
+🔴 **`codex-app-server` is blocked somewhere other than what footnote ^1^ says.**
+`runtime_invalid` has **two sources** in this repo:
+
+| Location | How it throws | Does the response carry `value`? |
+|---|---|---|
+| **hub** `server/src/create-node-validate.ts:45` | `ValidationError("runtime_invalid", { value })` | **yes** |
+| daemon `agent-node/src/runtime/create-node-daemon.ts:310` | `throw new Error("runtime_invalid")` | no |
+
+The measured response **carries `value`** ⇒ **the hub gate fired first and the daemon never saw the request**.
+**Fixing only `VALID_RUNTIMES` in `create-node-daemon.ts` will still not get through** — both gates need changing.
+
+### Restarting a daemon silently costs it the ability to create nodes (reproduced on Linux and macOS)
+
+Hit once on each platform on 2026-08-28, identical shape:
+
+```
+← SSE create_node cr_…
+[WARN] anet_bin_unsafe_path: no ANET_BIN_ABS resolved from /etc/anet-daemon/path.conf
+```
+
+After a clean `anet daemon start` restart the daemon **registers, goes online, receives the doorbell,
+and the hub returns `ok:true`** — but **it cannot create a single node**, because the `ANET_BIN_ABS`
+family it depends on **is not persisted** and is lost on restart.
+
+🔴 **"Online" and "can do work" are two different things.** Anyone who restarts a daemon falls into this,
+and every signal facing the caller says success.
+
+**The persisted form is `/etc/anet-daemon/path.conf`** (survives restarts);
+`ANET_DAEMON_ALLOW_ENV_BIN=1` + `ANET_BIN_ABS=<realpath>` is the Docker/dev/manual-ops convenience path
+and **a restart will not carry it over**.
 
 🔴 **"the daemon is online" and "the daemon can do work" are two different things** — these rows stay separate.
 We were caught by exactly this on Linux the same day: the daemon registered, went online, received the
