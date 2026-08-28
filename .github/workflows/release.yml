@@ -474,6 +474,15 @@ jobs:
             echo "audit $var=$ver → $pkg"
             audited=$((audited+1))
             audited_names="$audited_names $var"
+            # 🔴 自发版豁免:pin 指向的恰好是**本次 run 正在发的那个包版本**时,
+            #    「还没上 npm」不是缺陷而是时序必然 —— 本 run 的 publish job 就是
+            #    要把它发出去。没有这条豁免,「bump 包版本 + 改 PINNED」放进同一个
+            #    PR 会让该包的发版 run 被自己的 pin 卡死(2026-08-29 server .38 实撞,
+            #    run 33187647703)。豁免范围极窄:包名与版本都必须精确等于本次发的。
+            if [ "$pkg" = "@sleep2agi/${{ needs.build-tarball.outputs.package }}" ] && [ "$ver" = "${{ needs.build-tarball.outputs.version }}" ]; then
+              echo "  ↳ self-release exemption: $pkg@$ver 正是本次 run 要发的 —— publish job 负责让它上 npm"
+              continue
+            fi
             if ! npm view "$pkg@$ver" version > /dev/null 2>&1; then
               echo "::error::$var=$ver not published on npm for $pkg"
               missing=$((missing+1))
