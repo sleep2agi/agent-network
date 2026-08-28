@@ -202,6 +202,10 @@ describe("buildAnetArgs (§4.2.2 F2 — fully validated argv)", () => {
 //   {"ok":false,"error":"runtime_invalid","value":"codex-app-server"}
 // 而目标机器的 daemon 日志里一行都没有 —— 请求被 hub 拦在最前面，
 // 用户无从知道①哪些允许②是不是打错了③有没有别的办法。
+// 🔴 2026-08-28:这一节原本拿 `codex-app-server` / `opencode-cli` 当"非法 runtime"的例子。
+//    #1298 把 hub 的 RUNTIMES 从 3 个放开到 7 个之后,那两个变成了合法值,这两条测试因此红了 ——
+//    **测试正确地抓到了行为变更**。修法是换例子,不是削弱断言:
+//    意图仍然是「非法 runtime 要给可操作的报错」,只是例子换成永远不会合法的字符串。
 describe("validateRuntime — 报错要可操作", () => {
   function thrown(v: unknown): any {
     try { validateRuntime(v); } catch (e: any) { return e; }
@@ -209,7 +213,7 @@ describe("validateRuntime — 报错要可操作", () => {
   }
 
   test("非法 runtime 的报错带上允许集合", () => {
-    const e = thrown("codex-app-server");
+    const e = thrown("definitely-not-a-runtime");
     expect(e.code).toBe("runtime_invalid");
     expect(Array.isArray(e.detail?.allowed)).toBe(true);
     // 🔴 断言它等于 RUNTIMES 本身,而不是等于一份手抄的清单 ——
@@ -218,7 +222,7 @@ describe("validateRuntime — 报错要可操作", () => {
   });
 
   test("报错带上一条出路提示", () => {
-    const e = thrown("opencode-cli");
+    const e = thrown("another-bogus-runtime");
     expect(typeof e.detail?.hint).toBe("string");
     expect(e.detail.hint.length).toBeGreaterThan(10);
     // 提示必须点名那条真实存在的路,否则它只是安慰话
@@ -237,5 +241,26 @@ describe("validateRuntime — 报错要可操作", () => {
     // 正控：非字符串必须仍然被拒 —— 否则上面那条循环全过也说明不了什么
     expect(() => validateRuntime(123 as any)).toThrow();
     expect(() => validateRuntime(undefined as any)).toThrow();
+  });
+});
+
+// #1298 —— daemon 远程创建放开到 7 个 runtime（Vincent 2026-08-28 定，
+// 理由是兜底排错：节点不动了，人要能进去跟 Codex / Claude Code 对话）。
+describe("#1298 RUNTIMES —— 七个都放行，且与 CLI 侧一致", () => {
+  test("三个共存 runtime 不再被拒", () => {
+    for (const r of ["codex-app-server", "grok-build-cli", "opencode-cli"]) {
+      expect(() => validateRuntime(r)).not.toThrow();
+    }
+  });
+  test("原有四个仍然放行（放开不该顺手改坏别的）", () => {
+    for (const r of ["claude-agent-sdk", "claude-code-cli", "codex-sdk", "grok-build-acp"]) {
+      expect(() => validateRuntime(r)).not.toThrow();
+    }
+  });
+  test("🔴 恰好七个 —— 多一个少一个都要有人解释", () => {
+    expect(RUNTIMES.length).toBe(7);
+    // 正控：不在名单里的仍然被拒，证明上面不是"什么都放行"
+    expect(() => validateRuntime("definitely-not-a-runtime")).toThrow();
+    expect(() => validateRuntime("")).toThrow();
   });
 });
