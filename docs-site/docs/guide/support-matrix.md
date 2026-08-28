@@ -56,9 +56,27 @@
 
 **脚注（每一条都是实测，不是读文档）**
 
-- **^1^** 三个 TUI 共存 runtime 在 daemon 上一个都创建不出来，卡在三道闸，其中
-  `create-node-daemon.ts` 里的 `VALID_RUNTIMES` 是**写死的常量**，运维改配置也绕不过。
-  已在已发布产物（`@sleep2agi/agent-node@2.5.0-preview.34`）里 grep 复核，不是只看源码。
+- **^1^** 🔴 **这条脚注 2026-08-28 更正过一次,原文已经不成立。**
+  原文说「卡在三道闸,其中 `create-node-daemon.ts` 里的 `VALID_RUNTIMES` 是**写死的常量**,
+  运维改配置也绕不过」。逐处读完 `origin/main`,实际是**四道,而且其中三道已经开了**:
+
+  | # | 位置 | 现在的内容 | 阻不阻这三个 |
+  |---|---|---|---|
+  | **①** | **`server/src/create-node-validate.ts:20` `RUNTIMES`** | **3 个** | 🔴 **阻,而且排最前** |
+  | ② | `agent-network/src/normalize-runtime.ts` `SUPPORTED_RUNTIME_NAMES` | **7 个全在** | 不阻 |
+  | ③ | `agent-node/src/runtime/create-node-daemon.ts` `VALID_RUNTIMES` | **7 个全在** | 不阻 |
+  | ④ | daemon 的 `allowedRuntimes`（来自 config） | 运维可配 | 取决于配置 |
+
+  2026-08-28 在 Mac Mini 的 daemon 上实测:`codex-app-server` 返回
+  `{"ok":false,"error":"runtime_invalid","value":"codex-app-server"}`,**目标机器 daemon 日志一行都没有**
+  ⇒ hub 那道先响,请求根本没到机器。判据是返回**带 `value` 字段** ——
+  `runtime_invalid` 在仓里有两个来源,只有 hub 那处带 `value`。
+  同一台机器上 `codex-sdk` 创建成功(spawn 四行验证 + hub 注册 + 删除全链)—— **有对照**。
+
+  ⚠️ 放开 hub 那个常量技术上是一行,但**放开之前要先回答一个产品问题**:
+  这三个 runtime 的本质是「人和 agent 共用一个 TUI 会话」,而 daemon 建出来的是
+  **无人值守**的后台进程。**建出来给谁用?** 放开常量只让请求走到 daemon,
+  **不等于那个节点能用**。
   → [#1298](https://github.com/sleep2agi/agent-network/issues/1298)
 - **^2^** `claude-code-cli` 模式下 Claude Code 自己以 in-process channel 承载 commhub，
   **`agent-node` 进程从来没有被启动过** —— 节点层日志是 agent-node 写的，那个进程不存在。

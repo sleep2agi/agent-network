@@ -59,10 +59,29 @@ The authoritative runtime list is the code (`OK_RUNTIMES`, see `deploy/fleet/ane
 
 **Footnotes (each one measured, not read from docs)**
 
-- **^1^** None of the three TUI co-presence runtimes can be created by a daemon. Three separate gates
-  block them; one of them, `VALID_RUNTIMES` in `create-node-daemon.ts`, is a **hard-coded constant** that
-  no operator config can work around. Verified by grepping the **published artifact**
-  (`@sleep2agi/agent-node@2.5.0-preview.34`), not just the source.
+- **^1^** 🔴 **This footnote was corrected on 2026-08-28; the original text no longer holds.**
+  It used to say "three separate gates block them; one of them, `VALID_RUNTIMES` in
+  `create-node-daemon.ts`, is a hard-coded constant that no operator config can work around."
+  Reading all four places on `origin/main`, it is **four gates, and three of them are already open**:
+
+  | # | Location | Current contents | Blocks the three? |
+  |---|---|---|---|
+  | **①** | **`server/src/create-node-validate.ts:20` `RUNTIMES`** | **3 entries** | 🔴 **yes — and it fires first** |
+  | ② | `agent-network/src/normalize-runtime.ts` `SUPPORTED_RUNTIME_NAMES` | **all 7** | no |
+  | ③ | `agent-node/src/runtime/create-node-daemon.ts` `VALID_RUNTIMES` | **all 7** | no |
+  | ④ | the daemon's `allowedRuntimes` (from config) | operator-configurable | depends on config |
+
+  Measured on the Mac Mini daemon, 2026-08-28: `codex-app-server` returns
+  `{"ok":false,"error":"runtime_invalid","value":"codex-app-server"}` and the target machine's
+  daemon log has **not a single line** ⇒ the hub gate fired first and the request never reached the machine.
+  The discriminator is that the response **carries `value`** — `runtime_invalid` has two sources in this
+  repo and only the hub one attaches `value`. On the same machine `codex-sdk` was created successfully
+  (four spawn-verification lines + hub registration + full delete chain) — **a control.**
+
+  ⚠️ Widening that hub constant is technically a one-liner, but **a product question comes first**:
+  these three runtimes exist so a **human and an agent share one TUI session**, while a daemon creates an
+  **unattended** background process. **Who would use the result?** Widening the constant only lets the
+  request reach the daemon; it does **not** mean the resulting node is usable.
   → [#1298](https://github.com/sleep2agi/agent-network/issues/1298)
 - **^2^** Under `claude-code-cli`, Claude Code itself hosts commhub as an in-process channel, so the
   **`agent-node` process is never started** — and node-level logs are written by `agent-node`. Its session
