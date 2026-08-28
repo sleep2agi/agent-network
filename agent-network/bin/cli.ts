@@ -9600,15 +9600,29 @@ Stop a running agent node.
     console.error(`[anet] could not confirm that "${displayName}" exited (pid ${stopResult.pid}); pidfile retained and PID was not signalled.`);
     process.exit(1);
   }
-  const socketDeadline = Date.now() + 3_000;
+  // #1385 — the 3s window red-flagged healthy-but-slow socket teardown on
+  // busy CI runners (4 distinct stop scenarios, all green on main, all red
+  // only under PR-peak load). 10s keeps the gate hard (a leaked listener
+  // still fails) while no longer punishing a runner for being slow; the
+  // per-residual age line below tells "slow teardown" apart from a real
+  // leak when it DOES fire.
+  const SOCKET_RESIDUAL_WINDOW_MS = 10_000;
+  const socketDeadline = Date.now() + SOCKET_RESIDUAL_WINDOW_MS;
   let socketResiduals = nodeSocketResiduals(resolved.profile);
   while (socketResiduals.length > 0 && Date.now() < socketDeadline) {
     await new Promise(r => setTimeout(r, 100));
     socketResiduals = nodeSocketResiduals(resolved.profile);
   }
   if (socketResiduals.length > 0) {
-    console.error(`[anet] STOP_TIMEOUT: authoritative local resources survived for "${displayName}"; hub was not notified offline.`);
-    for (const residual of socketResiduals) console.error(`[anet]    residual ${residual.kind}: ${residual.detail}`);
+    console.error(`[anet] STOP_TIMEOUT: authoritative local resources survived for "${displayName}" after ${SOCKET_RESIDUAL_WINDOW_MS}ms; hub was not notified offline.`);
+    for (const residual of socketResiduals) {
+      let age = "unknown-age";
+      try {
+        const m = residual.detail.match(/(\S+\.sock)/);
+        if (m) age = `${Math.round(Date.now() - lstatSync(m[1]).mtimeMs)}ms old`;
+      } catch {}
+      console.error(`[anet]    residual ${residual.kind}: ${residual.detail} (${age}) — an old-mtime socket that outlives the window is a real leak; a fresh one means teardown was still in flight.`);
+    }
     process.exit(1);
   }
   await withLifecycleLock(resolved.id, () => {
