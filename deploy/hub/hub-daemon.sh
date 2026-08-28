@@ -58,7 +58,10 @@ set -uo pipefail
 #   🔴 `runtime-v34-` 里的 v34 是**机器本地的升级序号**,不同机器必然不同,
 #      所以那道门只比 previewMM,不比 vNN。这里保留 v34 只是不改无关的东西。
 #   回滚目标 = 生产机器上那份的当前值(以该机器为准,不以本文件为准)
-RUNTIME_DIR="$HOME/.commhub/runtime-v34-preview34"
+# 2026-08-28: preview34 → preview36（跟随 PINNED_SERVER_VERSION;server .36 已发 npm）
+#   内容 = #1376 放开共存 runtime(Vincent 定) + #1372/#1374/#1360/#1377
+#   回滚目标 = 生产机器上当前值(以该机器为准)
+RUNTIME_DIR="$HOME/.commhub/runtime-v34-preview36"
 ENTRY="$RUNTIME_DIR/node_modules/@sleep2agi/commhub-server/bin/commhub.ts"
 ENV_FILE="${HUB_ENV_FILE:-$HOME/.commhub/hub.env}"
 # bun 解析：显式路径优先，其次走 PATH。
