@@ -1,6 +1,10 @@
-# Grok 人机共存 TUI（未发布）
+# Grok 人机共存 TUI
 
-::: danger 当前不可用
+::: tip 状态更新（2026-08-29 生产实测）
+下面的 danger 块记录的是 2026-08-18 的验收状态，**已过时**：`grok-build-cli` 共存路径现已端到端跑通 —— macmini 上用 npm 安装的 `anet 2.3.0-preview.43` + 全局 `agent-node`（grok `1.0.5 (5115b46bc909)`，验证清单内）创建节点、`anet grok attach` 进入共享 TUI、网络任务注入并 19 秒收到回答。当前用法见 [Grok 共存 TUI（grok-build-cli）](/guide/grok-tui)。历史告诫保留如下供追溯。
+:::
+
+::: danger 2026-08-18 时点的旧状态（保留存档）
 `grok-build-cli` 这条 runtime 路径**不要照旧文档使用** —— 不要执行 `anet node create ... --runtime grok-build-cli`。
 
 🔴 **更正(2026-08-18 实测)**:原文写「`anet grok attach` 尚未进入 `latest` 或 `preview`」,**后半句不成立**。用真包跑二进制:

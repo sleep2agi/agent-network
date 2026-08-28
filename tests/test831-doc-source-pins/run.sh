@@ -147,10 +147,15 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 # CI 上先红("预期扫 119 …,实际 121")我才来抬,顺序是对的:
 # 🔴 **先让它红,再抬分母**。反过来(先抬数再加文件)等于让门永远追不上,
 #    而那种「把数改小让门变绿」的动作按本文件已有的红线看待。
-[[ "$files" -eq 121 ]] || fail "预期扫 121 个文档文件(= git ls-files 的结果),实际 $files"
+# 2026-08-29:121 → 123。grok-tui 使用指南首次入库(中英各一份):
+#     docs-site/docs/guide/grok-tui.md
+#     docs-site/docs/en/guide/grok-tui.md
+# 仍然**只有 `files` 变了**,`uniq` 仍 11、`occ` 仍 28(两页都没有 #L 源码行号 pin)。
+# CI 上先红("预期扫 121 …,实际 123")我才来抬,顺序是对的。
+[[ "$files" -eq 123 ]] || fail "预期扫 123 个文档文件(= git ls-files 的结果),实际 $files"
 [[ "$uniq"  -eq 11  ]] || fail "预期 11 个唯一 pin,实际 $uniq"
 [[ "$occ"   -eq 28 ]] || fail "预期 28 处原始出现,实际 $occ"
-echo "  OK  walk 路径与 git 路径给出同一份清单(119 文件 / 11 唯一 pin / 28 处)"
+echo "  OK  walk 路径与 git 路径给出同一份清单($files 文件 / $uniq 唯一 pin / $occ 处)"
 
 # ---------------------------------------------------------------------------
 # L1 — 干净树上必须绿
