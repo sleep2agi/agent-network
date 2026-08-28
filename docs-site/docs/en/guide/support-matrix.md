@@ -15,6 +15,19 @@ This page answers two questions:
 | ❌ | **Verified not working** — measured evidence of failure, cause known |
 | ❓ | **Not verified** — we don't know. **Not "probably works", not "probably doesn't"** |
 
+### 🔴 A bare `✅` is a symbol that gets misread — it needs a strength
+
+Two cells can both say ✅ and differ by two orders of magnitude in reliability.
+So every ✅ carries a level:
+
+| Level | Meaning | How to read it |
+|---|---|---|
+| **✅L3** | Automated suite, **runs in CI**, a regression turns it red | Depend on it |
+| **✅L2** | **Verified on a real machine**, logs/report archived, **not in CI** | Works, but nothing guards the regression |
+| **✅L1** | Happy path only, **never fed a bad input** | Careful — it only proves "it doesn't break when used as intended" |
+
+A bare `✅` (no level) means nobody has annotated the strength of that cell yet — **read it as L1**.
+
 🔴 **`❓` is the most important cell in this table.** A table with only ✅/❌ reads as "everything was
 checked", when the reality is usually "some of it was checked". **Marking the unchecked cells ❓ is far
 more useful than guessing** — someone who reads ❓ knows to verify it themselves; someone who reads a
@@ -114,7 +127,41 @@ Result of `scripts/daemon-live-acceptance.sh --execute` on `daemon-relay` (Linux
 | Edit (`update_node_config`) | ✅ |
 | Operate (`restart_node`) | ✅ |
 | Stop (`stop_node`) | ✅ |
-| **Delete (`delete_node`)** | **❌** |
+| **Delete (`delete_node`)** | **⚠️ see below** |
+
+### Why delete is neither a plain ✅ nor a plain ❌
+
+**2026-08-28 morning** (`agent-node@2.5.0-preview.39`): reproduced 100% of the time — the daemon
+log stopped at `backed up child workdir` every single run, nothing after, and the hub row stayed
+at `lifecycle_state=deleting` forever.
+
+**2026-08-28 midday** (`agent-node@2.5.0-preview.40`, same machine): the same reproduction ran
+three times, **3/3 succeeded**, the full seven-line timeline completed, and every hub row disappeared.
+
+🔴 **That is not "fixed", because two variables moved at once:**
+
+| Variable | Change |
+|---|---|
+| Code | `.39` → `.40` (instrumentation + `timeout`/`maxBuffer` on the `execSync`) |
+| Process | the daemon was **restarted**, and the restart supplied `ANET_BIN_ABS` / `ANET_DAEMON_ALLOW_ENV_BIN` |
+
+And this is a **self-clearing symptom** — measuring after a restart is structurally biased toward green.
+**"Doesn't reproduce after a restart" and "the code change was correct" look identical in these three readings.**
+
+So this cell reads **⚠️ "three non-reproductions on `.40`, root cause not located"** — not ✅, not ❌.
+→ [#1286](https://github.com/sleep2agi/agent-network/issues/1286)
+
+### The daemon on macOS (measured 2026-08-28)
+
+| | Status | Evidence |
+|---|---|---|
+| daemon **online** (registers / SSE connected) | **✅L2** | Mac Mini upgraded to `agent-node@2.5.0-preview.40` and restarted; hub side shows `11:34:27 SSE ← daemon-macmini connected` |
+| the daemon's **five lifecycle operations** | **❓** | **not run on macOS today** |
+
+🔴 **"the daemon is online" and "the daemon can do work" are two different things** — these rows stay separate.
+We were caught by exactly this on Linux the same day: the daemon registered, went online, received the
+doorbell, and `create_node` failed every time, reporting only in the daemon's own log.
+**Do not read the ✅ on the first row as covering the second.**
 
 **Two independent causes, both located:**
 
