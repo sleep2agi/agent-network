@@ -124,6 +124,15 @@ else
 fi
 cp /tmp/test671-tools.orig server/src/tools.ts
 
+sed -i '/thread_id = COALESCE(thread_id, ?4),/d' server/src/tools.ts
+if cmp -s /tmp/test671-tools.orig server/src/tools.ts; then
+  bad "drop-runtime-context-persistence mutation did not change source"
+else
+  expect_red drop-runtime-context-persistence env COMMHUB_DB=/tmp/test671-mut-context.db \
+    bun test server/src/task-consumption.test.ts
+fi
+cp /tmp/test671-tools.orig server/src/tools.ts
+
 cp server/src/scheduled-tasks.ts /tmp/test671-scheduled.orig
 if [[ "$(grep -F "VALUES (?1, ?1, ?2, ?3, 'task'" server/src/scheduled-tasks.ts | wc -l)" -ne 1 ]]; then
   bad "scheduler task-id mutation anchor count changed"

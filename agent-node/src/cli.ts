@@ -3386,7 +3386,10 @@ async function processWithCodexAppServer(
       });
     },
     onSubmitted: evidence?.submitted,
-    onConsumed: evidence?.consumed,
+    onConsumed: (event) => evidence?.consumed({
+      threadId: session.bridge.getThreadId(),
+      turnId: event.turnId,
+    }),
   });
 
   // Throw failed outcomes into processTask's existing failure path so the Hub
@@ -4733,11 +4736,20 @@ async function processTask(
   let grokFailureSubcode: string | null = null;
   const runtimeEvidence = createTaskRuntimeEvidenceReporter({
     taskId,
-    report: (level, exactTaskId) => {
+    report: (level, exactTaskId, context) => {
       commhubCompensation?.recordLifecycle(exactTaskId, level);
       return callCommHub(
         level === "submitted" ? "mark_tasks_runtime_submitted" : "mark_tasks_consumed",
-        { task_ids: [exactTaskId] },
+        {
+          task_ids: [exactTaskId],
+          ...(context ? {
+            task_contexts: [{
+              task_id: exactTaskId,
+              thread_id: context.threadId,
+              turn_id: context.turnId,
+            }],
+          } : {}),
+        },
       );
     },
     debug,

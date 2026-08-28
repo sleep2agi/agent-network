@@ -1,0 +1,55 @@
+Test 1329 — BTW exact task runtime boundary
+Date: 2026-08-28
+Base: origin/main 43ef1602dd66dc887965a4981cfe41fb4bb990f4
+
+Scope
+- Carry the exact Codex app-server thread id and attributable turn id from the
+  target agent-node into the Hub task row.
+- Expose those optional fields through the existing MCP and REST task
+  projections consumed by the desktop/mobile BTW drawer.
+- Preserve compatibility: old Hubs/nodes and non-Codex runtimes leave both
+  fields null; neither Hub nor client infers a boundary from task text.
+
+Security and integrity
+- Only the token-bound target node may write runtime evidence.
+- Context is accepted only together with consumed evidence, only for a task in
+  the requested set, and only inside the ownership-checked SQLite transaction.
+- The first exact task-lifetime boundary is write-once; a conflicting replay is
+  rejected rather than overwriting the boundary.
+- User tokens, foreign tasks, duplicate contexts, and submitted-only context
+  smuggling are rejected.
+
+First observed failure
+- The first test671 run asserted the new fields through MCP list_tasks while
+  the initial implementation exposed them only through REST. The run failed
+  closed. Both normal and durable-terminal MCP projections were then updated;
+  the corrected suite passed. No result from the failed run is counted below.
+
+Final Docker evidence (source tree based on the exact Base above)
+- test520 task runtime evidence: 139 pass / 0 fail; Grok focused 1 / 0;
+  13/13 mutations witnessed red, including reporter context forwarding and
+  Codex bound-thread/attributable-turn wiring.
+- test671 Hub runtime evidence: task consumption 16 / 0; auth-origin 2 / 0;
+  server bundle PASS; 15 mutation/contract checks PASS, including dropping
+  context persistence witnessed red.
+- test647 REST explicit columns: REST shape 6 / 0 (twice); 4/4 mutations
+  witnessed red, including removal of the boundary projection.
+- test629 MCP schema policy: inventory 47; both inventory mutations witnessed
+  red; SDK unknown-field observe-then-strip contract PASS.
+- test798 complete server unit domain, product commit
+  a8b73a686b4676eba14d47bec2efac754f6df31d: 84/84 files, 0 failed;
+  registration-password mutation witnessed red.
+- test725 complete agent-node unit domain, same product commit: 1488 pass / 0
+  fail across 113/113 source files; 6/6 tests files; readable-attachment
+  mutation witnessed red.
+- App main 62927cdd79189bc4691cbca955d82199dcd365de, authoritative
+  test-btw-side-thread-ui Docker: focused parser/API/HTTP/controller/model/scope/UI
+  12/12 + 21/21 + 7/7 + 4/4 + 16/16 + 4/4 + 30/30; typecheck PASS;
+  full app 62/62 files PASS; Expo web export PASS (522 modules).
+
+Evidence boundary
+- This proves storage, authorization, projection, compatibility, and the
+  existing client consumption contract in Docker.
+- It is not a production deployment result. Historical tasks are intentionally
+  not backfilled because their exact vendor thread/turn boundary cannot be
+  reconstructed safely.

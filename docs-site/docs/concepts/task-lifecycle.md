@@ -58,6 +58,8 @@ stateDiagram-v2
 
 `runtime_submitted_at` 表示 agent-node 已把正文交给厂商 runtime（例如发出 prompt/turn 请求或写入受控共存会话），但尚不承诺模型已经开始推理。`consumed_at` 是更强的、只写一次的证据：agent-node 只有在当前 `task_id` 能归因到厂商运行时的 turn-start 或第一条活动事件后，才用自身 token-bound 身份上报。任务仍在 agent-node 本地队列中、仅完成 ACK、或进程在线但正文尚未交给 runtime 时，两个字段都保持 `null`；已经提交但尚无权威活动时只有 `runtime_submitted_at` 有值。两者是逻辑任务全生命周期的单调证据；重试或转派会保留已有值。新的 inbox 投递行通过 `task_id` 继续关联原逻辑任务，避免把延迟回调误认成另一个任务或丢掉已发生的事实。
 
+Codex app-server 节点在同一条权威消费证据上还会上报 `thread_id` 与 `turn_id`。这两个值由节点 token、不可变 node identity 和精确 `task_started` 事件共同约束，是 BTW 创建旁路线程的 source boundary；任一字段为空时客户端必须 fail-closed，不能改成普通发送、优先任务或 steer。旧 Hub/旧节点仍可执行普通任务，只是不具备该任务的 BTW 边界。
+
 不同运行时可提供的最早可靠信号不同；例如 Codex app-server 使用精确 `task_started`，Grok 共存桥使用精确匹配当前网络任务的 `network_user` 事件，而缺少可归因 start 事件的 OpenCode 共存模式要等到精确关联的 assistant response。后者更晚，但不会把“已入队”误报成“模型已接手”。
 
 ::: warning 不要用 `sessions.task` 判断模型是否已接手

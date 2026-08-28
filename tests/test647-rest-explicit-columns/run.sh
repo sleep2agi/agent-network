@@ -34,6 +34,7 @@ run_shape_test /tmp/test647-green.db
 cp server/src/server.ts /tmp/test647-server.ts
 cp server/src/auth.ts /tmp/test647-auth.ts
 cp server/src/scheduled-tasks.ts /tmp/test647-scheduled-tasks.ts
+cp server/src/rest-projections.ts /tmp/test647-rest-projections.ts
 
 # 🔴 2026-08-19（#1096）：原来这里是裸的 `test "$X_rc" -ne 0`。
 #    在 set -e 下，变异**存活**（rc=0）会让脚本当场终止，**一个字都不打** ——
@@ -84,6 +85,17 @@ mutation_must_be_red schedule-rest-select-star "$schedule_rc" /tmp/test647-mut-s
 grep -Fq 'future_internal_only' /tmp/test647-mut-schedule.log
 echo "MUTATION_RED: schedule-rest-select-star rc=$schedule_rc"
 cp /tmp/test647-scheduled-tasks.ts server/src/scheduled-tasks.ts
+
+echo "L3d witnessed-red: task runtime boundary removed from explicit projection"
+sed -i 's/, "thread_id", "turn_id"//' server/src/rest-projections.ts
+grep -Fq '"meta_json",' server/src/rest-projections.ts
+set +e
+run_shape_test /tmp/test647-mut-boundary.db >/tmp/test647-mut-boundary.log 2>&1
+boundary_rc=$?
+set -e
+mutation_must_be_red task-runtime-boundary-projection "$boundary_rc" /tmp/test647-mut-boundary.log
+echo "MUTATION_RED: task-runtime-boundary-projection rc=$boundary_rc"
+cp /tmp/test647-rest-projections.ts server/src/rest-projections.ts
 
 echo "L4: restored source remains green"
 run_shape_test /tmp/test647-restored.db
