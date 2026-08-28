@@ -17,7 +17,33 @@ export class ValidationError extends Error {
 }
 
 // §4.2.2 — structural enums.
-export const RUNTIMES = ["claude-agent-sdk", "codex-sdk", "grok-build-acp"] as const;
+// #1298 —— daemon 远程创建允许的 runtime。2026-08-28 从 3 个放开到 7 个。
+//
+// 放开之前挡着的问题是「daemon 建出来的是**无人值守**的后台进程,而三个共存 runtime
+// 的本质是人和 agent 共用一个 TUI 会话 —— 建出来给谁用?」
+//
+// Vincent 2026-08-28 定,理由是**兜底排错**:
+//   「某个节点突然不动了,人可以进去看。在 daemon 还没那么靠谱的情况下,
+//     这非常重要 —— 至少可以跟 Codex 和 Claude Code 对话。」
+// 🔴 关键在于 **attach 是「建好之后」的动作,不是「建的时候」的前提**。
+//
+// 支撑读数(2026-08-28 实测舰队):`通信牛` 跑 codex-app-server(共存 runtime),
+// **764 次成功完成任务**,当天仍在跑 —— 比两个普通 runtime 的节点(61 次 / 3 次)
+// 都多一个量级。⇒ 任务链路不需要人坐在屏幕前。
+//
+// 🔴 这七个名字与 `agent-network/src/normalize-runtime.ts` 的 `RuntimeName` 一致。
+//    那边是 CLI 侧的全集;两边分叉过一次(daemon 侧的 VALID_RUNTIMES 早就是 7 个,
+//    只有这里还是 3 个,而记录此事的 #1298 正文写的是「三道闸都关着」——
+//    **一份快照式的盘点,只在写下的那一刻是真的**)。
+export const RUNTIMES = [
+  "claude-agent-sdk",
+  "claude-code-cli",
+  "codex-sdk",
+  "codex-app-server",
+  "grok-build-acp",
+  "grok-build-cli",
+  "opencode-cli",
+] as const;
 export type Runtime = typeof RUNTIMES[number];
 
 export const FLAG_KEYS = ["permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout"] as const;
