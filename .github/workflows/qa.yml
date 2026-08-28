@@ -86,6 +86,7 @@ on:
       - 'tests/test765-batch-runtime-gate/**'
       - 'tests/test766-bunx-preflight/**'
       - 'tests/test1241-feishu-commhub-routing/**'
+      - 'tests/test1362-create-node-pending/**'
       # test823 是这道 L1 并发闸门自己的回归,跑的是真的 scripts/qa.sh
       # (把 docker/npm 换成 PATH 上的桩)。改它必须能重跑跑它的 workflow。
       - 'tests/test823-l1-concurrency-cap/**'
@@ -249,6 +250,7 @@ on:
       - 'tests/test765-batch-runtime-gate/**'
       - 'tests/test766-bunx-preflight/**'
       - 'tests/test1241-feishu-commhub-routing/**'
+      - 'tests/test1362-create-node-pending/**'
       # test823 是这道 L1 并发闸门自己的回归,跑的是真的 scripts/qa.sh
       # (把 docker/npm 换成 PATH 上的桩)。改它必须能重跑跑它的 workflow。
       - 'tests/test823-l1-concurrency-cap/**'

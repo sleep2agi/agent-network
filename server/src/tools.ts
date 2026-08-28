@@ -3215,9 +3215,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // SSE handler resolves the rest via MCP call.
       pushEvent(daemon.alias, { type: "create_node", request_id: requestId }, networkIdForChild);
 
-      // §4.5 audit — dispatch succeeded
+      // §4.5 audit — request queued and doorbell attempted. pushEvent is
+      // fire-and-forget, so actual SSE delivery is intentionally not claimed.
       auditCreateNode({
-        action: "create_node_dispatched",
+        action: "create_node_dispatch_attempted",
         user_id: enforceUserId,
         network_id: networkIdForChild,
         target_id: requestId,
@@ -3234,6 +3235,31 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request_id: requestId }) }],
       };
+    },
+  );
+
+  // #1362 — daemon-side compensation for missed SSE doorbells. pushEvent is
+  // intentionally best-effort; after a daemon connects or reconnects, it pulls
+  // any still-pending requests bound to its own daemon token.
+  server.tool(
+    "list_my_pending_create_requests",
+    "Daemon lists pending create-node requests bound to itself for SSE reconnect compensation. RFC-026/#1362.",
+    {},
+    async () => {
+      const callerDaemon = resolveCallerDaemonTokenBound();
+      if (!callerDaemon.ok) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: callerDaemon.error }) }] };
+      }
+      const rows = db.all<{ request_id: string; child_name: string; created_at: number }>(
+        `SELECT request_id, child_name, created_at
+           FROM node_create_requests
+          WHERE daemon_node_id = ?1
+            AND network_id = ?2
+            AND status = 'pending'
+          ORDER BY created_at ASC`,
+        callerDaemon.daemonNodeId, callerDaemon.networkId,
+      );
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, count: rows.length, requests: rows }) }] };
     },
   );
 

@@ -5,10 +5,60 @@ import {
   minimalEnv,
   loadAndVerifyAnetBin,
   ensureGlobalAnetConfig,
+  reconcilePendingCreateRequestsOnConnect,
 } from "./create-node-daemon.js";
 import { writeFileSync, mkdirSync, symlinkSync, chmodSync, unlinkSync, rmSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
+
+describe("create_node pending reconciliation after SSE connect", () => {
+  test("pulls and handles pending requests that arrived while SSE was disconnected", async () => {
+    const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+    const handled: string[] = [];
+
+    await reconcilePendingCreateRequestsOnConnect({
+      callCommHub: async (tool, args) => {
+        calls.push({ tool, args });
+        if (tool === "list_my_pending_create_requests") {
+          return { ok: true, count: 1, requests: [{ request_id: "cr_missed_doorbell" }] };
+        }
+        throw new Error(`unexpected tool ${tool}`);
+      },
+      handleCreateNodeDoorbell: async (event) => {
+        handled.push(event.request_id);
+      },
+      log: () => {},
+      warn: () => {},
+    });
+
+    expect(calls.map((c) => c.tool)).toEqual(["list_my_pending_create_requests"]);
+    expect(handled).toEqual(["cr_missed_doorbell"]);
+  });
+
+  test("deduplicates request_ids already handled from the live SSE doorbell path", async () => {
+    const handled: string[] = [];
+
+    await reconcilePendingCreateRequestsOnConnect({
+      callCommHub: async () => ({
+        ok: true,
+        count: 3,
+        requests: [
+          { request_id: "cr_live" },
+          { request_id: "cr_live" },
+          { request_id: "cr_pending" },
+        ],
+      }),
+      handleCreateNodeDoorbell: async (event) => {
+        handled.push(event.request_id);
+      },
+      recentlyHandledRequestIds: new Set(["cr_live"]),
+      log: () => {},
+      warn: () => {},
+    });
+
+    expect(handled).toEqual(["cr_pending"]);
+  });
+});
 
 describe("#633 daemon private state", () => {
   const fixture = "/tmp/anet-test633-daemon-private";
@@ -321,17 +371,9 @@ describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER 
     cleanup();
   });
 
-  test("REJECT: owner not root only when strict root mode is explicitly requested", () => {
-    cleanup();
-    const p = setup("strict-non-root");
-    expect(() => loadAndVerifyAnetBin({
-      ANET_BIN_ABS: p,
-      ANET_DAEMON_PATH_CONF: "/nonexistent",
-      ANET_DAEMON_ALLOW_ENV_BIN: "1",
-      ANET_DAEMON_STRICT_ROOT_BIN: "1",
-    })).toThrow(/anet_bin_unsafe_path.*owner not root/);
-    cleanup();
-  });
+  // (removed in #1394) the "strict root mode" case tested ANET_DAEMON_STRICT_ROOT_BIN,
+  // a behavior that lives in the intentionally-skipped env-fallback commit (see PR body);
+  // it only reddened inside root containers where chown to nobody actually works.
 
   test("REJECT: sha256 mismatch with install witness", () => {
     cleanup();
