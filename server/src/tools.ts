@@ -3561,7 +3561,39 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       return { ok: false, error: state === "stopping" ? "node_already_stopping" : "node_not_active", current_state: state };
     }
     if (args.action === "delete" && state === "deleting") {
-      return { ok: false, error: "node_already_deleting", current_state: state };
+      // #1286 —— stale-deleting 重派出口。
+      //
+      // 在 .40 埋点修复之前,daemon 丢失 ack 会让行**永远**停在 deleting:
+      // 重发 delete 被这里挡住,force=true 也一样 —— 状态机没有出口,
+      // 2026-08-28 实测两行卡死(acc-…-3373 / probe-tl2),API 层面无解。
+      //
+      // 出口的三个条件,缺一不放行:
+      //   ① 调用方显式 force=true(不改默认行为 —— 正常并发的重复 delete 仍被拒)
+      //   ② 该 child 最近一条 delete 请求不是终态(pending/dispatched)
+      //      —— 终态说明 daemon 刚 ack 过,行马上会转移,不该重派
+      //   ③ 那条请求已经晾了超过 STALE_DELETING_MS —— 🔴 不是"刚派发就能 force":
+      //      给正常的 doorbell→ack 往返留时间,否则 force 变成竞态放大器。
+      const STALE_DELETING_MS = 5 * 60_000;
+      const last = db.get<{ request_id: string; status: string; created_at: number }>(
+        `SELECT request_id, status, created_at FROM node_stop_requests
+          WHERE child_node_id = ?1 AND action = 'delete'
+          ORDER BY created_at DESC LIMIT 1`, node.node_id,
+      );
+      const lastIsStale = !!last
+        && (last.status === "pending" || last.status === "dispatched")
+        && (Date.now() - last.created_at) > STALE_DELETING_MS;
+      if (!(args.force === true && (lastIsStale || !last))) {
+        return {
+          ok: false, error: "node_already_deleting", current_state: state,
+          // 🔴 告诉调用方出口在哪,而不是让他反复撞同一面墙。
+          ...(last ? { last_request_id: last.request_id, last_request_status: last.status } : {}),
+          hint: last && (last.status === "pending" || last.status === "dispatched")
+            ? `再等一下;若超过 ${STALE_DELETING_MS / 60000} 分钟仍未收敛,带 force=true 重试可重新派发`
+            : "上一条请求已终态,行应即将转移;稍后重查",
+        };
+      }
+      // 放行:走正常派发路径,生成新 request_id。旧请求行保留(审计线索),
+      // daemon 侧对未知 request 的 get_stop_request 会拿到 request_not_found,无副作用。
     }
     if (args.action === "delete" && state === "stopping") {
       // Can't start delete while a stop is mid-flight — race-prone.
