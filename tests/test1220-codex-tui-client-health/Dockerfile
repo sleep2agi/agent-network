@@ -5,7 +5,7 @@ ENV BUN_VERSION=1.3.14
 ENV BUN_LINUX_X64_SHA256=951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl procps tmux unzip \
     && rm -rf /var/lib/apt/lists/*
-RUN curl --fail --silent --show-error --location --retry 3 --retry-delay 2 --retry-all-errors \
+RUN curl --fail --silent --show-error --location --retry 5 --retry-delay 5 --retry-all-errors \
       "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-x64.zip" \
       --output /tmp/bun.zip \
  && echo "${BUN_LINUX_X64_SHA256}  /tmp/bun.zip" | sha256sum --check --strict \
