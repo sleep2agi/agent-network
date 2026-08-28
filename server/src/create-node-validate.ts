@@ -42,7 +42,23 @@ export function validateName(s: unknown): asserts s is string {
 
 export function validateRuntime(s: unknown): asserts s is Runtime {
   if (typeof s !== "string" || !(RUNTIMES as readonly string[]).includes(s)) {
-    throw new ValidationError("runtime_invalid", { value: typeof s === "string" ? s.slice(0, 80) : typeof s });
+    // 🔴 原来只回一个 `runtime_invalid` + 用户传进来的那个值 —— **不说允许哪些,
+    //    也不说还有没有别的路**。2026-08-28 实测:从 Dashboard 建一个
+    //    `codex-app-server` 节点,用户拿到的就是
+    //      {"ok":false,"error":"runtime_invalid","value":"codex-app-server"}
+    //    而目标机器的 daemon 日志里一行都没有(请求根本没到)。
+    //    用户无从知道:①哪些是允许的 ②这个名字是不是打错了 ③有没有别的办法。
+    //
+    // `allowed` 直接由 RUNTIMES 展开,不是手写的第二份清单 ——
+    // 🔴 手写一份会漂移,而漂移之后报错会**理直气壮地告诉用户一组错的名字**。
+    throw new ValidationError("runtime_invalid", {
+      value: typeof s === "string" ? s.slice(0, 80) : typeof s,
+      allowed: [...RUNTIMES],
+      // 这句提示的前提是查过的:`agent-network/src/normalize-runtime.ts` 的
+      // `RuntimeName` / `SUPPORTED_RUNTIME_NAMES` 是 7 个,包含此处不放行的那几个,
+      // 所以「在目标机器上直接建」确实是一条真实存在的路,不是安慰话。
+      hint: "daemon 远程创建目前只放行以上 runtime；其余 runtime 可以在目标机器上直接 `anet node create --runtime <name>` 创建。",
+    });
   }
 }
 

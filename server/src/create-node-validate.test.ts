@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   ValidationError,
-  validateName, validateRuntime, validateModel, validateFlagValue,
+  validateName, validateRuntime, validateModel, validateFlagValue, RUNTIMES,
   validateEnvRefs, validateChannelsP1, serializeEnvLocal, buildAnetArgs,
   MAX_ENV_KEYS_PER_NODE,
 } from "./create-node-validate.js";
@@ -193,5 +193,49 @@ describe("buildAnetArgs (§4.2.2 F2 — fully validated argv)", () => {
       name: "x", runtime: "claude-agent-sdk", model: "x",
       channels: ["telegram"],
     } as any)).toThrow(ValidationError);
+  });
+});
+
+// ─── runtime_invalid 要说清「允许哪些」和「还有什么路」 ────────────────
+//
+// 2026-08-28 实测：从 Dashboard 建一个 codex-app-server 节点，用户拿到的是
+//   {"ok":false,"error":"runtime_invalid","value":"codex-app-server"}
+// 而目标机器的 daemon 日志里一行都没有 —— 请求被 hub 拦在最前面，
+// 用户无从知道①哪些允许②是不是打错了③有没有别的办法。
+describe("validateRuntime — 报错要可操作", () => {
+  function thrown(v: unknown): any {
+    try { validateRuntime(v); } catch (e: any) { return e; }
+    throw new Error("expected validateRuntime to throw");
+  }
+
+  test("非法 runtime 的报错带上允许集合", () => {
+    const e = thrown("codex-app-server");
+    expect(e.code).toBe("runtime_invalid");
+    expect(Array.isArray(e.detail?.allowed)).toBe(true);
+    // 🔴 断言它等于 RUNTIMES 本身,而不是等于一份手抄的清单 ——
+    //    手抄的那份会漂,漂了之后报错会理直气壮地告诉用户一组错的名字。
+    expect(e.detail.allowed).toEqual([...RUNTIMES]);
+  });
+
+  test("报错带上一条出路提示", () => {
+    const e = thrown("opencode-cli");
+    expect(typeof e.detail?.hint).toBe("string");
+    expect(e.detail.hint.length).toBeGreaterThan(10);
+    // 提示必须点名那条真实存在的路,否则它只是安慰话
+    expect(e.detail.hint).toContain("anet node create");
+  });
+
+  test("仍然回报用户传进来的那个值（便于识别是不是打错了）", () => {
+    const e = thrown("codex-app-servr");   // 故意少一个 e
+    expect(e.detail.value).toBe("codex-app-servr");
+  });
+
+  test("🔴 合法 runtime 一个都不能被这次改动误伤", () => {
+    for (const r of RUNTIMES) {
+      expect(() => validateRuntime(r)).not.toThrow();
+    }
+    // 正控：非字符串必须仍然被拒 —— 否则上面那条循环全过也说明不了什么
+    expect(() => validateRuntime(123 as any)).toThrow();
+    expect(() => validateRuntime(undefined as any)).toThrow();
   });
 });
