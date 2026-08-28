@@ -87,3 +87,12 @@ It does not say *why* something broke, and it offers no self-healing. There is c
 built-in crash recovery at the node level (the Hub has a watchdog; nodes do not) — see
 [issue #534](https://github.com/sleep2agi/agent-network/issues/534). The "still reports idle after
 failing" row is [issue #811](https://github.com/sleep2agi/agent-network/issues/811).
+
+## The stdout `✅` from `anet node start` doesn't count either
+
+`exit 0` plus a printed `✅ node "…" started detached (tmux session live)` does **not** mean the node came up.
+Versions predating [#895](https://github.com/sleep2agi/agent-network/pull/895) (fixed as of `2.3.0-preview.40`) can lie on the detached path.
+
+**Real check**: `tmux has-session -t "=<alias>"` returns 0 — **the `=` is required**; a bare alias is a prefix match and can go green on the wrong session.
+
+For bulk launches use `anet project up`; its exit code is trustworthy since [#896](https://github.com/sleep2agi/agent-network/pull/896) (also `2.3.0-preview.40`).

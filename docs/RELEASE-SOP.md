@@ -73,15 +73,17 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > 所以 R367 没有、也不该把它们清掉。代价是:**latest 或 preview 一发布,它们立刻变成假的**,
 > 而且是危险的那种假 —— 会告诉用户一道已经存在的安全 preflight 不存在。
 >
-> 逐次发版必须重新核对的位置(**14 个路径**,下表 14 行 = 14 个文件 ——
+> 逐次发版必须重新核对的位置(**38 个路径**,下表 38 行 = 38 个文件 ——
 > 不要把 zh/en 合成一行数,分母数错会漏核。
-> 这张表的分母被修正过三次:7 → 8 → 12 → 14。**加新的信道断言时,同时把它加进这张表**,
+> 这张表的分母被修正过三次:7 → 8 → 12 → 14 → 38。**加新的信道断言时,同时把它加进这张表**,
 > 否则下一个人照着一份"看起来完整"的清单去核,漏掉的那几页永远不会被发现):
 >
 > | 文件 | 行 | 断言 |
 > |---|---|---|
 > | `docs-site/docs/guide/getting-started.md` | 19–20 | latest `2.2.21` 裸崩 / preview `2.3.0-preview.x` 被拦 |
 > | `docs-site/docs/en/guide/getting-started.md` | 19–20 | 同上(英文) |
+> | `docs-site/docs/troubleshooting/is-this-node-alive.md` | 见门输出 | #895 stdout 假报「`2.3.0-preview.40` 起已修」——修复版本钉死在断言里,promote latest 时核对 latest 是否已含 #895 |
+> | `docs-site/docs/en/troubleshooting/is-this-node-alive.md` | 见门输出 | 同上(英文) |
 > | `docs-site/docs/deploy/clean-server.md` | 21–22 | 同上 |
 > | `docs-site/docs/en/deploy/clean-server.md` | 21–22 | 同上(英文) |
 > | `docs-site/docs/troubleshooting.md` | 29、37 | preview 有 preflight / latest 没有 |
