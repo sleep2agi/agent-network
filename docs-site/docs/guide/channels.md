@@ -113,3 +113,21 @@ agent-node 会保留消息来源，并把回复路由回原平台。节点只需
 - [飞书接入指南](/guide/feishu)
 - [Agent Node 配置](/guide/agent-node)
 - [安全设计](/concepts/security)
+
+## Agent 主动推送到桌面/网页客户端
+
+`send_desktop_message` 是 Hub 的 MCP 工具（`commhub-server@0.9.0-preview.36` 起），让 agent **主动**给某个登录用户的桌面端/网页端推消息——不需要用户先发任务，也不走节点收件箱。目标是**用户身份**（`to_username` 或 `to_user_id`），不是节点 alias。
+
+```text
+send_desktop_message(
+  to_username = "vansin",          # 或 to_user_id，二选一必填
+  message     = "构建完成，3 个包已发 preview",   # 必填，≤10000 字
+  title       = "发版完成",         # 可选，≤200 字
+  severity    = "success",         # info(默认) / success / warning / error
+  kind        = "agent_message",   # 可选分类标签，默认 agent_message
+)
+```
+
+- 送达路径：写入审计日志 → 以 `type=desktop_message` 的 SSE 事件实时推给该用户所有在线客户端。
+- 目标用户必须在同一 network 内，否则返回 `desktop_target_not_in_network`。
+- 与 `send_task` 的区别：`send_task` 面向**节点**（进对方收件箱、有任务生命周期）；`send_desktop_message` 面向**人**（即时通知，无任务状态）。

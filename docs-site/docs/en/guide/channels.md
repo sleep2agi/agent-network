@@ -113,3 +113,21 @@ agent-node preserves the message source and routes the response back to the orig
 - [Feishu guide](/en/guide/feishu)
 - [Agent Node configuration](/en/guide/agent-node)
 - [Security model](/en/concepts/security)
+
+## Agent-initiated push to Desktop/web clients
+
+`send_desktop_message` is a Hub MCP tool (since `commhub-server@0.9.0-preview.36`) that lets an agent **proactively** push a message to a logged-in user's desktop/web clients — no prior task from the user, no node inbox involved. It targets a **user identity** (`to_username` or `to_user_id`), not a node alias.
+
+```text
+send_desktop_message(
+  to_username = "vansin",          # or to_user_id — one of the two is required
+  message     = "Build done, 3 packages published to preview",  # required, ≤10000 chars
+  title       = "Release finished", # optional, ≤200 chars
+  severity    = "success",          # info (default) / success / warning / error
+  kind        = "agent_message",    # optional category label
+)
+```
+
+- Delivery: audit-logged, then pushed in real time as a `type=desktop_message` SSE event to every online client of that user.
+- The target user must belong to the same network, otherwise `desktop_target_not_in_network` is returned.
+- Versus `send_task`: `send_task` targets a **node** (inbox + task lifecycle); `send_desktop_message` targets a **person** (instant notification, no task state).
