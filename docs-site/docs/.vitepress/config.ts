@@ -108,6 +108,7 @@ export default withMermaid(defineConfig({
             items: [
               { text: 'Preview 说明', link: '/preview/' },
               { text: 'Grok 人机共存 TUI', link: '/guide/grok-copresence' },
+              { text: 'Grok 共存 TUI（grok-build-cli）', link: '/guide/grok-tui' },
               { text: 'Codex TUI 人机共存', link: '/guide/codex-copresence' },
             ]
           },
@@ -212,6 +213,7 @@ export default withMermaid(defineConfig({
             items: [
               { text: 'Preview overview', link: '/en/preview/' },
               { text: 'Grok Co-presence TUI', link: '/en/guide/grok-copresence' },
+              { text: 'Grok Co-presence TUI (grok-build-cli)', link: '/en/guide/grok-tui' },
               { text: 'Codex TUI Co-presence', link: '/en/guide/codex-copresence' },
             ]
           },

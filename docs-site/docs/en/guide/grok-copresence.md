@@ -1,6 +1,10 @@
-# Grok Co-presence TUI (not released)
+# Grok Co-presence TUI
 
-::: danger Not currently available
+::: tip Status update (verified in production, 2026-08-29)
+The danger block below captures the 2026-08-18 qualification state and is **outdated**: the `grok-build-cli` co-presence path now works end to end — on a Mac mini with npm-installed `anet 2.3.0-preview.43` + the global `agent-node` (grok `1.0.5 (5115b46bc909)`, on the verified list), creating the node, entering the shared TUI via `anet grok attach`, and receiving an answer to an injected network task in 19 seconds. For current usage see [Grok Co-presence TUI (grok-build-cli)](/en/guide/grok-tui). The historical warnings are preserved below for the record.
+:::
+
+::: danger Old state as of 2026-08-18 (archived)
 Do not follow older instructions for the `grok-build-cli` runtime path — do not run `anet node create ... --runtime grok-build-cli`.
 
 🔴 **Correction (measured 2026-08-18)**: this page used to say `anet grok attach` is "not included in npm `latest` or `preview`". The second half does not hold. Running the real published binaries:
