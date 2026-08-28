@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { parseDbTimestampMs } from "./db-timestamp.js";
+import { buildControllableMap, isLifecycleControllable } from "./node-lifecycle-controllable.js";
 import { resolvePort } from "./resolve-port.js";
 import { normalizeSessionRuntime } from "./runtime-label.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
@@ -3143,6 +3144,33 @@ return Bun.serve({
       // discovery (replacing the prior `node_daemon_` prefix heuristic).
       // RFC-026 P1 P2 §9 will supersede this REST proxy with the
       // `list_host_supervisors` MCP tool.
+      // app#196 —— 哪些节点能走 stop_node / restart_node / delete_node。
+      //
+      // 背景:那三个工具的 schema 是 `regex(/^node_[a-z0-9_-]+$/)`,而节点 id 有两种:
+      //   node_xxxx  daemon 建出来的子节点(+ daemon 自己)
+      //   n_xxxx     人手工 `anet node start` 起的
+      // 2026-08-28 对生产 hub 实测:218 个节点里 **207 个是 n_**,
+      // 在桌面端点「停止」只会看到一段 zod 正则原文。
+      //
+      // 🔴 这不是「正则写窄了」——那三个工具的做法是**让那台机器上的 daemon 去停它
+      //    自己建的子进程**。手工起的节点没有 daemon 可问,放宽正则只会把失败推到更深处。
+      //
+      // 所以这里给出一个显式标志,**让前端不必靠 id 前缀去猜**。判据不是前缀,
+      // 是 node_create_requests 里真的有对应的创建记录 ——
+      // 子节点 id 由 request_id 确定性推导:`node_${request_id.replace(/^cr_/,"")}`
+      // (2026-08-28 用真实一对验过:cr_59723b24-… → node_59723b24-…)。
+      const controllable = (() => {
+        try {
+          const crParams: any[] = [];
+          let crSql = "SELECT request_id, daemon_node_id FROM node_create_requests WHERE 1=1";
+          crSql = addNetworkScope(crSql, crParams, restScope);
+          return buildControllableMap(db.all<Record<string, any>>(crSql, ...crParams));
+        } catch {
+          // 表不存在/查询失败 ⇒ 全部按不可控处理,不让这一格拖垮整个列表
+          return new Map<string, string>();
+        }
+      })();
+
       const rows = rawRows.map(r => {
         let role: string | null = null;
         const snap = r.config_snapshot;
@@ -3155,11 +3183,17 @@ return Bun.serve({
         // it can map() without a guard, and normalise legacy/absent values
         // to [] rather than null. attrs_revision is normalised to a number
         // so pre-migration rows (NULL) read as 0.
+        // app#196 —— 显式告诉前端这个节点能不能走生命周期操作,以及该找哪个 daemon。
+        // daemon 自己(role=host_supervisor)也能被 restart/stop,它的 id 同样是 node_ 前缀
+        // 且在 node_create_requests 里没有记录,所以单独放行。
+        const lifecycle_controllable = isLifecycleControllable(r.node_id, role, controllable);
         return {
           ...rest,
           tags: parseStoredTags(r.tags),
           attrs_revision: Number(r.attrs_revision ?? 0),
           role,
+          lifecycle_controllable,
+          lifecycle_daemon_node_id: controllable.get(r.node_id) ?? null,
         };
       });
       return withCors(req, Response.json({ ok: true, nodes: rows, count: rows.length }));
