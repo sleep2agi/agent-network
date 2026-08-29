@@ -14,6 +14,7 @@ RUN cd /repo/agent-network && bun install --ignore-scripts \
 
 COPY agent-network /repo/agent-network
 COPY agent-node /repo/agent-node
+COPY tests/lib/mutation-guard.sh /repo/tests/lib/mutation-guard.sh
 COPY tests/test336-feishu-bridge-wire /repo/tests/test336-feishu-bridge-wire
 RUN chmod +x /repo/tests/test336-feishu-bridge-wire/run.sh
 

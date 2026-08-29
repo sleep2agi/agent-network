@@ -28,18 +28,12 @@ expect_red(){
 # 而真相是"这个变异从来没被注入过"。这两种结论指向完全相反的修法。
 #
 # 改成比对文件内容:变异前后必须不同。
-mutate(){
-  local name="$1" file="$2"; shift 2
-  local before after
-  before="$(sha256sum "$file" | cut -d" " -f1)"
-  "$@"
-  after="$(sha256sum "$file" | cut -d" " -f1)"
-  if [[ "$before" == "$after" ]]; then
-    bad "mutation $name NO-OP —— 模式没匹配到任何东西,变异从未注入($file 未改变)"
-    return 1
-  fi
-  return 0
-}
+# #1257:抽到 tests/lib/mutation-guard.sh 共享,行为不变。
+# 报告走本套件自己的 bad()(计入 FAIL),由 mutation_guard_report 注入 ——
+# 共享件不绑定任何一套计数约定。
+mutation_guard_report(){ bad "$@"; }
+# shellcheck disable=SC1091
+source "$ROOT/tests/lib/mutation-guard.sh"
 
 printf 'source_commit=%s\n' "${TEST336_SOURCE_COMMIT:-unknown}"
 cd "$ROOT"
