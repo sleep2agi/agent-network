@@ -33,6 +33,7 @@ function makeDeps(opts: {
   workdirRoot?: string;
   deletedRoot?: string;
   getStopReturn?: any;
+  readPgid?: (pid: number) => number | null;
 } = {}) {
   const acks = opts.acks ?? [];
   let aliveCalls = 0;
@@ -54,6 +55,7 @@ function makeDeps(opts: {
       warn: (_m: string) => { /* swallow */ },
       workdirRoot: opts.workdirRoot,
       deletedRoot: opts.deletedRoot,
+      readPgid: opts.readPgid,
       signalProcess: (pid: number, sig: NodeJS.Signals | 0) => {
         if (opts.signalThrows && sig !== 0) throw opts.signalThrows;
         fakeSignals.push({ pid, sig });
@@ -183,6 +185,44 @@ describe("handleStopDoorbell — SIGKILL escalation", () => {
     expect(acks[0].args.exit_signal).toBe("SIGKILL");
     expect(fakeSignals.filter(s => s.sig === "SIGTERM").length).toBe(1);
     expect(fakeSignals.filter(s => s.sig === "SIGKILL").length).toBe(1);
+  });
+});
+
+// #1474 finding-2 — 信号发给**解析出的真实 pgid**,不假设 pgid==pid。
+// live 记的是 wrapper(session leader,pgid==pid),但 boot rebuild 用 pgrep 记的是
+// agent-node 孙子(pgid=wrapper.pid≠孙子.pid)。对孙子 kill(-孙子pid) 命中不存在的组
+// → ESRCH 静默吞 → wrapper 逃生、可重生 child → daemon 重启后 stop/delete 不可靠。
+describe("#1474 finding-2 — signals resolved pgid, not kill(-recorded.pid)", () => {
+  test("grandchild pid (pgid≠pid) → SIGTERM goes to the resolved group, not -recorded.pid", async () => {
+    recordSpawnedChild("node_g", "alias-g", 5000);   // rebuild-recorded grandchild pid
+    const { acks, fakeSignals, deps } = makeDeps({
+      // 孙子 pid 5000 的真实 pgid = wrapper 4000(同组)
+      readPgid: (pid: number) => (pid === 5000 ? 4000 : null),
+      getStopReturn: {
+        ok: true, request_id: "sr_g", child_node_id: "node_g", child_alias: "alias-g",
+        action: "stop", delete_config: false, grace_seconds: 10, force: false,
+      },
+    });
+    await handleStopDoorbell({ request_id: "sr_g" }, deps);
+    expect(acks.at(-1)!.args.status).toBe("stopped");
+    // SIGTERM 落到解析出的组 -4000(wrapper+孙子一网打尽)
+    expect(fakeSignals.some(s => s.pid === -4000 && s.sig === "SIGTERM")).toBe(true);
+    // 绝不对孙子 pid 本身发组信号 -5000(改前:kill(-5000)→不存在的组→ESRCH→wrapper 逃生)
+    expect(fakeSignals.some(s => s.pid === -5000)).toBe(false);
+  });
+
+  test("pgid unresolvable (readPgid→null) → falls back to old pgid==pid assumption", async () => {
+    recordSpawnedChild("node_w", "alias-w", 7000);   // wrapper pid, pgid==pid
+    const { acks, fakeSignals, deps } = makeDeps({
+      readPgid: () => null,   // 解析不到 → 退回 kill(-pid)
+      getStopReturn: {
+        ok: true, request_id: "sr_w", child_node_id: "node_w", child_alias: "alias-w",
+        action: "stop", delete_config: false, grace_seconds: 10, force: false,
+      },
+    });
+    await handleStopDoorbell({ request_id: "sr_w" }, deps);
+    expect(acks.at(-1)!.args.status).toBe("stopped");
+    expect(fakeSignals.some(s => s.pid === -7000 && s.sig === "SIGTERM")).toBe(true);   // 退回 -pid
   });
 });
 
