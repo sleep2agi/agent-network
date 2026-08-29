@@ -100,6 +100,7 @@ import {
 } from "./runtime/grok-build-acp/resume-hint";
 import { CurrentAliasResolver } from "./runtime/current-alias";
 import { delegationTargetExists } from "./runtime/delegation-precheck";
+import { isDaemonPureProgramNode, daemonProgramReply } from "./runtime/daemon-program-node";
 import { grokCliDenyPaths } from "./runtime/grok-cli-deny-paths";
 import {
   isRateLimitOrQuotaError,
@@ -5094,6 +5095,21 @@ async function processInbox() {
           messageType: msgType,
         }));
         await ackAndRecordConsumed(msg, "skipped");
+        return;
+      }
+
+      // #1417 — A host_supervisor daemon is a pure-program node: node
+      // lifecycle (create/stop/restart/delete/probe) arrives as structured
+      // SSE doorbells handled without a model. A free-text task reaching the
+      // inbox means the daemon was addressed as if it were an agent. Answer
+      // deterministically and return BEFORE processTask, so the lazy
+      // claude-agent-sdk import inside processWithClaude is never reached —
+      // the daemon process stays model-free.
+      if (isDaemonPureProgramNode(fileConfig.role)) {
+        const replyText = daemonProgramReply(ALIAS);
+        log(`← [${from}] (host_supervisor: free-text task answered by program, no LLM turn) ${content.slice(0, 80)}`);
+        await deliverReplyReliably(from, replyText, logicalTaskId, false);
+        await ackAndRecordConsumed(msg, "daemon-program");
         return;
       }
 
