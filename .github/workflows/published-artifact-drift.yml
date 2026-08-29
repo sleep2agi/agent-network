@@ -162,6 +162,12 @@ jobs:
           # 需要历史才能取「最近新增的行」——指纹只从那里选,见脚本注释。
           fetch-depth: 80
       - run: python3 .github/scripts/check-docs-site-drift.py --selftest
+      # #1482 —— latest 戳从来没有被任何东西比对过(发版模式只比"正在发的通道"的戳),
+      # 于是它自 2.2.21 起一直漂,而正文照着它对 latest 用户说了假话。
+      # 放在这个 workflow 里:它已经要联网、已经是每日跑,而且红了会走上面那条
+      # tracker issue 通知 —— per-PR 不加网络依赖。
+      - name: latest 戳 vs npm dist-tags.latest (#1482)
+        run: python3 scripts/check-doc-version-claims.py --verify-latest-from-npm
       - name: check anet.sh against main
         id: drift
         run: |
