@@ -38,6 +38,7 @@ import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
 import { isSameIncarnation, processVanished, resolveOwnedRoots, type OwnedRootCandidate } from "../src/owned-roots";
 import { serializeProfileForConfigJson } from "../src/profile-serialize";
+import { parseAndValidateTools, validateModel } from "../src/tool-allowlist";
 import { createConnection as netCreateConnection, createServer as netCreateServer } from "net";
 import { PassThrough } from "stream";
 import { checkbox, confirm, select } from "@inquirer/prompts";
@@ -4122,8 +4123,18 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
     ...grokBuildCliCreationFields(runtime, nodeId, grokHeadless),
     ...(gc.network_id ? { network_id: gc.network_id } : {}),
     ...(opts.hub ? { hub } : {}),
-    ...(opts.model || defaultModel ? { model: opts.model || defaultModel } : {}),
-    ...(opts.tools ? { tools: opts.tools.split(",").map((s: string) => s.trim()) } : {}),
+    // #1469 finding-3 — validate opts.model / opts.tools loudly. Before,
+    // `--tools Bsh,Read` silently persisted the typo and dropped Bash from
+    // the agent's allowlist; `--model "  "` silently persisted whitespace.
+    // Mirrors what #478 did for --runtime via normalizeRuntimeStrict: at
+    // the profile boundary, an unrecognized value is a typo, not an
+    // unknown-future-thing. defaultModel comes from
+    // defaultCodexModelForRuntime and is validated at source, so only
+    // opts.model needs the check here.
+    ...((opts.model ? validateModel(opts.model) : undefined) || defaultModel
+      ? { model: (opts.model ? validateModel(opts.model) : undefined) || defaultModel }
+      : {}),
+    ...(opts.tools ? { tools: parseAndValidateTools(opts.tools, runtime) } : {}),
     channels: opts._channels.length > 0 ? opts._channels : ["server:commhub"],
     env: envMap,
     flags: {
@@ -5222,7 +5233,9 @@ async function createCommand(idOverride?: string) {
   } else if (opts.runtime === "grok-build-acp" || opts.runtime === "grok-build-cli") {
     console.log("[anet] 请确保已安装并登录 Grok Build CLI: grok login");
     if (opts.runtime === "grok-build-cli") {
-      const requestedTools = opts.tools ? opts.tools.split(",").map((tool) => tool.trim()) : undefined;
+      // #1469 finding-3 — validate here too so a typo fails at the interactive
+      // grok warning rather than passing through and only tripping at persist.
+      const requestedTools = opts.tools ? parseAndValidateTools(opts.tools, "grok-build-cli") : undefined;
       printGrokCopresenceWarning(id, requestedTools, "configured");
     }
   } else if (opts.runtime === "opencode-cli") {
