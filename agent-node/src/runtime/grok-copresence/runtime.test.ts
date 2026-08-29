@@ -1601,6 +1601,10 @@ describe("Grok copresence runtime integration", () => {
 
       const input = new PassThrough();
       const output = new PassThrough();
+      const terminalOutput: string[] = [];
+      output.on("data", (chunk) => {
+        terminalOutput.push(Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk));
+      });
       const attached = await connectGrokAttach({
         socketPath: fixture.attachSocket,
         input,
@@ -1618,6 +1622,9 @@ describe("Grok copresence runtime integration", () => {
 
       input.write("/model\r");
       await waitFor(() => runtime!.state.phase === "idle");
+      await waitFor(() => terminalOutput.join("").includes(
+        "[anet] 斜杠命令在共存会话被禁用；换模型请另开终端: anet grok model <node> <model>",
+      ));
       const afterBlockedSlash = await runtime.submit({
         taskId: "network-after-blocked-slash",
         from: "dashboard",

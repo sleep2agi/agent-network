@@ -1,0 +1,46 @@
+# test1244 - Grok copresence slash TUI notice
+date: 2026-08-29T00:07:46+00:00
+mode: docker bun regression
+v22.23.2
+1.4.0
+
+## related unit coverage
+bun test v1.4.0 (34cbb9a40)
+
+src/runtime/grok-copresence/slash-gate.test.ts:
+(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > a leading-slash non-model command is cancelled with Ctrl-C and never reaches the TUI [614.69ms]
+(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > /model is cancelled like other TUI slash commands and points to anet grok model [518.95ms]
+(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > /model never falls through to restart+resume from the TUI slash gate [484.99ms]
+(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > a tainted /model line is blocked before it can use ACP or restart [593.83ms]
+(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > a /always-approve submit is cancelled, warned about, and visible to the attached human [599.99ms]
+(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > plain text without a leading slash submits normally and raises no warning [483.17ms]
+(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > a slash in the middle of prose is not treated as a command and submits [470.68ms]
+(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > arrow keys are refused after a mid-prose slash, so the same text cannot be edited [596.20ms]
+(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > a cursor key taints plain text, and the refusal does not blame a slash command [718.45ms]
+(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > Left arrow taints plain text so the line can never be submitted [716.19ms]
+(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > Home taints plain text so the line can never be submitted [723.73ms]
+(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > End taints plain text so the line can never be submitted [725.76ms]
+(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > Delete taints plain text so the line can never be submitted [716.61ms]
+(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > an arrow key after any slash cancels the composer instead of moving the cursor [492.69ms]
+(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > Ctrl+O and Shift+Tab are swallowed and never reach the TUI [475.06ms]
+(pass) Grok copresence human-side slash gate (2026-08-15 snapshot) > a blocked slash submit releases the queued network turn (issue #880) [1158.54ms]
+
+src/runtime/grok-copresence/composer-tainted-diagnostics.test.ts:
+(pass) tainted composer diagnostics (issue #881) > navigation-tainted line is refused with a message that does not claim a slash command [487.22ms]
+
+src/runtime/grok-copresence/blocked-key-name.test.ts:
+(pass) describeBlockedKey > names the legacy control byte for Ctrl+P and says what Grok uses it for [0.27ms]
+(pass) describeBlockedKey > names Ctrl+P when it arrives CSI-u encoded [0.08ms]
+(pass) describeBlockedKey > names CSI-u Ctrl+M as the model picker [0.05ms]
+(pass) describeBlockedKey > does not call a plain Tab 'Ctrl+I' [0.06ms]
+(pass) describeBlockedKey > says Enter and Ctrl+M share one byte [0.03ms]
+(pass) describeBlockedKey > reads the CSI-u modifier as a bitmask plus one, not as a raw mask [0.06ms]
+(pass) describeBlockedKey > returns null rather than guessing [0.07ms]
+(pass) describeBlockedKey > names an undocumented control key without inventing a purpose [0.03ms]
+
+ 25 pass
+ 0 fail
+ 88 expect() calls
+Ran 25 tests across 3 files. [10.64s]
+
+PASS: slash command blocks render an attached-TUI notice and #881/#882 adjacent gates pass

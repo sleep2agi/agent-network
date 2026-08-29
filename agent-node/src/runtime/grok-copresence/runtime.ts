@@ -2119,12 +2119,15 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         // The text is already visible in Grok's editor. Cancel it locally
         // instead of submitting a slash command that would pre-authorize a
         // later network turn.
+        const blockRoute = this.humanComposerLeadingSlash
+          ? "slash command"
+          : "edited line (arrow/Home/End/Delete make the editor contents unverifiable; press Ctrl+U to clear and retype)";
         this.writeHumanBytes(Buffer.from("\x03", "binary"));
         this.resetHumanComposerAudit();
         if (this.arbitration.phase === "human_editing") {
           this.transition({ type: "human_input_cancelled" });
         }
-        this.warnBlockedPermissionModeChange("slash command");
+        this.warnBlockedPermissionModeChange(blockRoute);
         if (offset < input.length) {
           // Same-frame bytes are not a new, intentional composer action.
           this.attach?.broadcastStatus({
@@ -2219,6 +2222,11 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   private warnBlockedPermissionModeChange(route: string): void {
     const warning = `${route} was blocked: Grok co-presence keeps its runtime-owned always-approve policy immutable`;
     this.warn(`[grok-copresence] ${warning}`);
+    if (/slash/.test(route)) {
+      this.attach?.broadcastOutput(
+        "\r\n[anet] 斜杠命令在共存会话被禁用；换模型请另开终端: anet grok model <node> <model>\r\n",
+      );
+    }
     this.attach?.broadcastStatus({ ...this.attachStatus(), warning });
   }
 
