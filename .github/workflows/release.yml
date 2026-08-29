@@ -597,7 +597,8 @@ jobs:
         run: |
           python3 scripts/check-doc-version-claims.py \
             --package '${{ needs.build-tarball.outputs.package }}' \
-            --version '${{ needs.build-tarball.outputs.version }}'
+            --version '${{ needs.build-tarball.outputs.version }}' \
+            --verify-latest-from-npm
 
   verdict:
     name: verdict (aggregate)
