@@ -1,0 +1,113 @@
+# 变异注入守卫 —— 全仓真图(#1257)
+#
+# 判据:一个套件只要用了下面**四类等价写法之一**,就算「验了替换生效」。
+#   mutate      tests/lib/mutation-guard.sh 的 mutate 包裹(sha256 前后比对)
+#   cmp         cmp -s <orig-copy> <file>
+#   diff        diff -q
+#   sha256      直接 sha256sum 前后比对
+#   set-e-grep  在 set -e 下 grep【变异后】的特征串(no-op ⇒ 串不存在 ⇒ grep 失败 ⇒ 中断)
+#
+# 🔴 这张表存在的理由:本条 issue 的普查我数错过三次,三次方向一致地偏「无守卫」——
+#    v1 只认 mutate/NO-OP(数出 1 个) → v2 补 cmp/diff/sha256(25 个) → v3 补 set-e-grep。
+#    每一版都以为判据够了。**按写法数而不是按语义数,就会把已有守卫的算成没有**,
+#    后果是给它们重复加一层。这张表是给下一个人的护栏,别再从零数。
+#
+# ⚠️ 已知边界(set-e-grep 形态):若被 grep 的特征串在 sed 之前就已存在于目标文件,
+#    no-op 时 grep 照样命中,守卫失效。模式越裸越危险 —— 名单里就有实例:
+#    test1195-side-thread-hub-contract 用的是裸 `if (false)`,而 `if (false && prior)`
+#    这类带具体标识符的独特性高。**本表只标出可疑者,未逐个回源码实测。**
+#
+# 格式:<套件>\t<变异命令数>\t<守卫形态,逗号分隔;NONE=真无守卫>
+
+test688-owner-gated-schedule-hub	13	set-e-grep
+test1204-btw-production-wiring	11	NONE
+test671-task-runtime-evidence-hub	10	cmp,set-e-grep
+test1200-side-thread-command-transport	8	set-e-grep
+test1181-codex-durable-poll	7	NONE
+test601-hub-scheduled-tasks	7	set-e-grep
+test689-owner-schedule-agent	7	cmp,sha256
+test604-scheduled-task-edit	6	set-e-grep
+test624-task-cursor-pagination	5	set-e-grep
+test690-scheduled-run-terminal	5	cmp
+test698-atomic-peer-reply	5	sha256
+test292-e2e-hard-gate	4	cmp
+test336-feishu-bridge-wire	4	mutate
+test466-codex-copresence-p3	4	cmp
+test623-feishu-scrub-health	4	NONE
+test647-rest-explicit-columns	4	NONE
+test654-dashboard-managed-launch	4	cmp
+test813-grok-mcp-readiness	4	cmp
+lib	3	mutate,sha256
+test236-dashboard-codex-goal	3	sha256
+test292-e2e-agent-registration	3	cmp
+test292-e2e-identity-fixtures	3	cmp
+test292-e2e-residual-fixtures	3	cmp
+test30-mock-llm-smoke	3	cmp
+test467-headless-bootstrap	3	cmp,set-e-grep
+test617-feishu-ws-readiness	3	NONE
+test649-token-cli	3	NONE
+test659-codex-appserver-activity-timeout	3	NONE
+test660-explicit-prod-db-optin	3	set-e-grep
+test661-explicit-bootstrap-db	3	set-e-grep
+test765-batch-runtime-gate	3	set-e-grep
+test1193-side-thread-contract	2	NONE
+test1195-side-thread-hub-race	2	NONE
+test292-e2e-contract-drift	2	cmp
+test292-e2e-rename-command	2	cmp
+test313-test-all-v3-fixtures	2	NONE
+test344-ack-transport-zod	2	NONE
+test599-skillhub	2	NONE
+test605-grok-startup-model-label	2	NONE
+test611-cli-boolean-flags	2	NONE
+test612-visible-inbox-skip	2	NONE
+test613-codex-dead-endpoint	2	NONE
+test625-explicit-env-crlf	2	set-e-grep
+test630-file-download-header-auth	2	NONE
+test631-private-config-permissions	2	NONE
+test632-honest-sse-recovery	2	NONE
+test633-doctor-locale	2	NONE
+test634-windows-secret-guidance	2	set-e-grep
+test635-daemon-private-state	2	NONE
+test638-server-aggregate-isolation	2	NONE
+test648-probe-ip-pin	2	NONE
+test651-init-no-token-prompt	2	NONE
+test652-admin-network-list	2	NONE
+test653-batch-workdir	2	cmp
+test657-claude-native-version-pin	2	NONE
+test673-claude-image-attachment-block	2	cmp
+test736-pm2-fleet-rebuild	2	sha256
+test766-bunx-preflight	2	NONE
+test1183-sync-pinned-dryrun	1	NONE
+test1195-side-thread-hub-contract	1	set-e-grep
+test1195-side-thread-hub-security	1	NONE
+test225-grok-preview-package-live	1	sha256
+test234-grok-profile-disclosure	1	NONE
+test235-grok-mcp-outbound-only	1	NONE
+test292-e2e-ok-assertions	1	cmp
+test34-playwright-discovery	1	NONE
+test596-goal-loop-docs	1	NONE
+test600-public-skillhub	1	NONE
+test602-scheduled-misfire	1	set-e-grep
+test606-node-start-help	1	set-e-grep
+test607-health-upload-limits	1	NONE
+test608-claude-cli-dependency	1	set-e-grep
+test609-dashboard-chat-doc-path	1	NONE
+test610-opencode-clean-test-workspace	1	NONE
+test614-rest-single-network	1	NONE
+test615-network-name	1	NONE
+test618-claude-vendor-env	1	NONE
+test621-test384-layer-isolation	1	NONE
+test637-database-url-guard	1	NONE
+test643-transient-hub-legacy-repair	1	cmp
+test646-config-node-id-precedence	1	NONE
+test650-anet-attach	1	NONE
+test656-claude-sdk-tool-aliases	1	NONE
+test693-agent-local-upload	1	NONE
+test735-hub-daemon-rebuild	1	sha256
+
+# ── 汇总 ──
+# 用文本变异的套件: 85
+# 变异命令合计:     232
+# 已有守卫:         39
+# 真无守卫:         46
+# 形态可疑(模式过裸,可能假阳): test660-explicit-prod-db-optin, test661-explicit-bootstrap-db, test634-windows-secret-guidance, test1195-side-thread-hub-contract, test608-claude-cli-dependency
