@@ -76,7 +76,7 @@ The task management page displays the full lifecycle of all tasks:
 | From | Sender alias |
 | To | Recipient alias |
 | Priority | Priority level (high / normal / low) |
-| Status | Status (`created` / `delivered` / `acked` / `running` / `replied` / `failed` / `cancelled` / `expired` — **8 states total**; verified at [`server/src/db.ts:94`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L94) `status TEXT NOT NULL DEFAULT 'created'`; `cancel_task` covers 4 cancellable states including `created`; full state machine: [Task lifecycle](/en/concepts/task-lifecycle)) |
+| Status | Status (`created` / `delivered` / `acked` / `running` / `replied` / `failed` / `cancelled` / `expired` — **8 states total**; verified at [`server/src/db.ts` 的 `CREATE TABLE ... tasks` → `status` 列](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) `status TEXT NOT NULL DEFAULT 'created'`; `cancel_task` covers 4 cancellable states including `created`; full state machine: [Task lifecycle](/en/concepts/task-lifecycle)) |
 | Content | Task content preview |
 | Created | Creation time |
 | Duration | Time from creation to completion |
