@@ -106,6 +106,16 @@ anet daemon up
 `dangerouslySkipPermissions` + `teammateMode`，并且能通过 hub 派生子节点。
 **只在你信得过的机器上跑它。** 要收紧就改 `.anet/nodes/daemon/config.json`。
 
+::: info daemon 是**纯程序**守护节点，不是会聊天的 agent
+`host_supervisor` daemon 的职责是**确定性的节点生命周期**——创建 / 停止 / 重启 / 删除 / 探测
+其它节点，全部由 Hub 下发的结构化门铃驱动（RFC-026/027/028）。它是一个纯程序执行器，
+**不会用大模型去理解你发给它的自由文本任务**。启动横幅里的 `[claude-agent-sdk]` 只是它的
+默认 runtime 标签，daemon 处理生命周期命令时并不加载大模型。
+
+所以：**要 AI 干活，请把任务发给一个真正的 agent 节点**，而不是 daemon。把自然语言任务
+（`commhub_send_task` 一段话）发给 daemon 只会让它回你「我是程序节点，请用结构化命令」。
+:::
+
 ### 3.5 让 daemon 在后台活下去 {#keep-daemon-alive}
 
 `anet daemon start` 是前台常驻进程。**如果你是 SSH 上去起的，会话一断它就没了** ——

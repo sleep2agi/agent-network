@@ -100,6 +100,7 @@ import {
 } from "./runtime/grok-build-acp/resume-hint";
 import { CurrentAliasResolver } from "./runtime/current-alias";
 import { delegationTargetExists } from "./runtime/delegation-precheck";
+import { isDaemonPureProgramNode, daemonProgramReply } from "./runtime/daemon-program-node";
 import { grokCliDenyPaths } from "./runtime/grok-cli-deny-paths";
 import {
   isRateLimitOrQuotaError,
@@ -1904,6 +1905,14 @@ function buildCodexWakeDeps(): CodexWakeDeps {
 }
 
 async function runGoalSchedulerTick() {
+  // #1417 — A host_supervisor daemon is a pure-program node and must never run
+  // an LLM turn. A goal wake calls processTask (an LLM turn), so a daemon must
+  // not tick the scheduler — even if it was armed at boot as an agent and then
+  // hot-promoted to host_supervisor (RFC-024), or held active goals from before
+  // promotion. Checked live here (not just at boot) so promotion takes effect at
+  // once. The inbox guard blocks *new* daemon goals; this blocks *existing* ones
+  // from ever firing.
+  if (isDaemonPureProgramNode(fileConfig.role)) return;
   if (goalTickRunning) return;
   goalTickRunning = true;
   try {
@@ -5097,6 +5106,21 @@ async function processInbox() {
         return;
       }
 
+      // #1417 — A host_supervisor daemon is a pure-program node: node
+      // lifecycle (create/stop/restart/delete/probe) arrives as structured
+      // SSE doorbells handled without a model. A free-text task reaching the
+      // inbox means the daemon was addressed as if it were an agent. Answer
+      // deterministically and return BEFORE processTask, so the lazy
+      // claude-agent-sdk import inside processWithClaude is never reached —
+      // the daemon process stays model-free.
+      if (isDaemonPureProgramNode(fileConfig.role)) {
+        const replyText = daemonProgramReply(ALIAS);
+        log(`← [${from}] (host_supervisor: free-text task answered by program, no LLM turn) ${content.slice(0, 80)}`);
+        await deliverReplyReliably(from, replyText, logicalTaskId, false);
+        await ackAndRecordConsumed(msg, "daemon-program");
+        return;
+      }
+
       const persistenceSafeContent = GROK_EXECUTION_MODE === "cli"
         ? persistenceRedactor.redactText(content).text
         : content;
@@ -6505,9 +6529,12 @@ import("./runtime/fetch-attachment.js").then(({ startAttachmentCacheSweeper }) =
   log(`[attachment-cache] sweeper started (hourly tick, 24h TTL, dir=${cacheDir})`);
 }).catch((e: any) => warn(`attachment-cache sweeper import failed: ${e?.message || e}`));
 
-if (goalsSchedulerEnabled) {
+if (goalsSchedulerEnabled && !isDaemonPureProgramNode(fileConfig.role)) {
   setInterval(() => runGoalSchedulerTick().catch(() => {}), GOAL_TICK_MS);
   runGoalSchedulerTick().catch(() => {});
+} else if (goalsSchedulerEnabled && isDaemonPureProgramNode(fileConfig.role)) {
+  // host_supervisor daemon: pure-program node, scheduler intentionally not armed.
+  log(`[goals] scheduler suppressed — host_supervisor daemon runs no LLM turns`);
 }
 
 // RFC-025 M2/M3 — loops HTTP MCP server for codex-sdk + grok-build-acp.
