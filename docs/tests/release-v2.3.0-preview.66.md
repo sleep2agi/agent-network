@@ -15,8 +15,10 @@
 
   同一版还修了 Windows 上每一次 `chmod` 的失败路径。
 
-🔴 Windows 用户请连同 `@sleep2agi/agent-node@2.5.0-preview.51` 一起升 —— 那一版修的
-`anet_bin` 路径校验（#1290）是同一类 POSIX-only 假设，只修一个包在 Windows 上仍起不了节点。
+🔴 Windows 用户请连同 `@sleep2agi/agent-node@2.5.0-preview.51` 一起升。那一版有**两条**同类修复
+（`anet_bin` 路径校验 #1290、子进程 `HOME` 解析 #1490），都是「只在 POSIX 成立的假设跑在 Windows 上」。
+三条串联：本包让 `anet` 能调起外部启动器 → `.51` 让 daemon 能过路径检查 fork 出节点 →
+再让 fork 出的节点不立刻崩。**只升其中一个包，Windows 上仍然起不了节点。**
 
 ## Install
 
