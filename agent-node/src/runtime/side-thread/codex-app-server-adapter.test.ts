@@ -308,3 +308,72 @@ describe("CodexAppServerSideThreadAdapter", () => {
     expect(new PrivateFileOperationLedger(join(root, "operations")).get("node-1", "discard-side", operation.operationId)?.state).toBe("ambiguous");
   });
 });
+
+// #1449 finding 1 —— 一个 turn 发多条 agentMessage 时，终态取哪一条。
+//
+// onItem 对 agentMessage 用「赋值」，onDelta 用「追加」，共用同一个
+// execution.text。带工具调用的典型形状是「前言 → 工具 → 最终答案」，会发
+// 两条 agentMessage item；后一条覆盖前一条本身是对的，但**没有按 phase 过滤**
+// 意味着顺序一旦不是「前言在前」，答案就会被前言覆盖，且累积的 delta 也一起没了。
+//
+// 主任务路径（runtime/codex-app-server-bridge.ts:834、:844）早就按
+// `phase === "final_answer"` 过滤，并在没有 final 时回退到累积的 delta
+// （:1078 "Prefer the captured final_answer item; fall back to accumulated deltas"）。
+// 这里对齐它。
+describe("#1449 finding 1 — 多条 agentMessage 时的终态文本", () => {
+  const drive = async () => {
+    const { client, adapter } = make();
+    const { derivedThreadId } = await adapter.fork({ sideThreadId: "side", sourceThreadId: "main", boundary: { kind: "through", turnId: "done" } });
+    await adapter.start({ sideThreadId: "side", attemptId: "attempt", derivedThreadId, prompt: "question" });
+    const terminals: any[] = [];
+    adapter.subscribe((e) => terminals.push(e));
+    return { client, derivedThreadId, terminals };
+  };
+
+  test("🔴 前言 + final_answer（各带 delta）⇒ 终态只应是 final_answer", async () => {
+    const { client, derivedThreadId, terminals } = await drive();
+    // 前言（phase 明确不是 final_answer），带它自己的流式 delta
+    client.emit("item/agentMessage/delta", { threadId: derivedThreadId, turnId: "turn-1", delta: "我先看一下" });
+    client.emit("item/completed", { threadId: derivedThreadId, turnId: "turn-1", item: { type: "agentMessage", phase: "preamble", text: "我先看一下" } });
+    // 工具调用之后的最终答案
+    client.emit("item/agentMessage/delta", { threadId: derivedThreadId, turnId: "turn-1", delta: "磁盘 96%" });
+    client.emit("item/completed", { threadId: derivedThreadId, turnId: "turn-1", item: { type: "agentMessage", phase: "final_answer", text: "磁盘 96%" } });
+    client.emit("turn/completed", { threadId: derivedThreadId, turn: { id: "turn-1", status: "completed" } });
+    expect(terminals).toHaveLength(1);
+    // 既不是前言，也不是把两段拼起来 —— 就是 final_answer 本身
+    expect(terminals[0].text).toBe("磁盘 96%");
+  });
+
+  test("🔴 顺序反过来（final_answer 先到、前言后到）⇒ 答案不能被前言覆盖", async () => {
+    const { client, derivedThreadId, terminals } = await drive();
+    client.emit("item/completed", { threadId: derivedThreadId, turnId: "turn-1", item: { type: "agentMessage", phase: "final_answer", text: "答案" } });
+    client.emit("item/completed", { threadId: derivedThreadId, turnId: "turn-1", item: { type: "agentMessage", phase: "preamble", text: "过程文本" } });
+    client.emit("turn/completed", { threadId: derivedThreadId, turn: { id: "turn-1", status: "completed" } });
+    expect(terminals[0].text).toBe("答案");
+  });
+
+  test("🔴 一个 final_answer 都没有 ⇒ 回退到累积的 delta，绝不发空串", async () => {
+    const { client, derivedThreadId, terminals } = await drive();
+    client.emit("item/agentMessage/delta", { threadId: derivedThreadId, turnId: "turn-1", delta: "只有" });
+    client.emit("item/agentMessage/delta", { threadId: derivedThreadId, turnId: "turn-1", delta: "流式内容" });
+    client.emit("item/completed", { threadId: derivedThreadId, turnId: "turn-1", item: { type: "agentMessage", phase: "preamble", text: "前言" } });
+    client.emit("turn/completed", { threadId: derivedThreadId, turn: { id: "turn-1", status: "completed" } });
+    expect(terminals[0].text).toBe("只有流式内容");
+    expect(terminals[0].text.length).toBeGreaterThan(0);
+  });
+
+  test("回归钉：phase 缺失/为 null 的 agentMessage 仍然算最终答案", async () => {
+    // 线上 phase 是 `MessagePhase | null`（types/codex/v2/ThreadItem.ts）。
+    // 严格要求 === "final_answer" 会把 null 那种判成前言 ⇒ 终态变空串，
+    // 那正是「空串=误报失败」。缺失/null 一律按最终答案处理。
+    for (const item of [
+      { type: "agentMessage", text: "无 phase" },
+      { type: "agentMessage", phase: null, text: "null phase" },
+    ] as const) {
+      const { client, derivedThreadId, terminals } = await drive();
+      client.emit("item/completed", { threadId: derivedThreadId, turnId: "turn-1", item });
+      client.emit("turn/completed", { threadId: derivedThreadId, turn: { id: "turn-1", status: "completed" } });
+      expect(terminals[0].text).toBe(item.text);
+    }
+  });
+});

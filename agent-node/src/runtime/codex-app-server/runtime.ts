@@ -164,74 +164,87 @@ export async function openCodexAppServerRuntime(opts: {
   let proc: ChildProcess | null = null;
   let url = opts.serverUrl;
 
-  if (!url) {
-    // Owned-server topology: spawn `codex app-server --listen ws://…`.
-    const port = randomPort();
-    url = `ws://127.0.0.1:${port}`;
-    const binary = opts.binary ?? "codex";
-    const wireCommhub = !!(opts.commhubMcpUrl && opts.commhubToken);
-    const spawnArgs = buildOwnedAppServerArgs(url, {
-      approvalPolicy: opts.approvalPolicy,
-      sandboxMode: opts.sandboxMode,
-      commhubMcpUrl: wireCommhub ? opts.commhubMcpUrl : undefined,
-    });
-    // Token via env only (never in argv/config) so it can't leak through a
-    // process list or on-disk config.
-    const childEnv = wireCommhub
-      ? { ...process.env, [COMMHUB_MCP_TOKEN_ENV]: opts.commhubToken }
-      : process.env;
-    log(`[codex-app-server] spawning ${binary} ${spawnArgs.join(" ")}${wireCommhub ? " (+commhub MCP)" : ""}`);
-    proc = spawn(binary, spawnArgs, {
-      stdio: ["ignore", "pipe", "pipe"],
-      env: childEnv,
-    });
-    proc.stderr?.on("data", (d) =>
-      log(`[codex-app-server stderr] ${String(d).trim().slice(0, 300)}`),
-    );
-    if (opts.onExit) proc.on("exit", (code, signal) => opts.onExit!({ code, signal }));
-    await waitWs(url);
-  } else {
-    log(`[codex-app-server] attaching to shared server ${url}`);
-  }
-
-  const client = new CodexAppServerClient({ url, clientLabel: "anet_codex_bridge" });
-  client.on("error", (e) => warn(`[codex-app-server] client error: ${String(e).slice(0, 200)}`));
-  await client.connect();
-
-  const bridge = new CodexAppServerBridge({
-    client, threadId: opts.threadId, deferThreadUntilTui: opts.deferThreadUntilTui,
-    initialDeferredThreadId: opts.initialDeferredThreadId,
-    onDeferredCandidate: opts.onDeferredCandidate,
-  });
-  bridge.on("thread_waiting", () => log("[codex-app-server] client-health role=bridge state=waiting-for-tui-thread"));
-  bridge.on("thread_ready", (e: { threadId: string; created: boolean }) => {
-    if (e.created) {
-      log(`[codex-app-server] created thread ${e.threadId.slice(0, 12)}…`);
+  // #1449 — owned-server 分支必须自己收尸。spawn 之后的 waitWs / connect /
+  // bootstrap / recoverSharedTurnOnAttach 任何一步抛出，都会把这个我们**自己拥有**
+  // 的 app-server 子进程留在后台占着端口；onExit 只是通知，不会杀它。supervisor
+  // 每重试失败一次就攒一个僵尸，最终端口耗尽。
+  // 只对我们自己 spawn 的子进程负责：attach 到共享 server 时 proc 为 null，不碰。
+  try {
+    if (!url) {
+      // Owned-server topology: spawn `codex app-server --listen ws://…`.
+      const port = randomPort();
+      url = `ws://127.0.0.1:${port}`;
+      const binary = opts.binary ?? "codex";
+      const wireCommhub = !!(opts.commhubMcpUrl && opts.commhubToken);
+      const spawnArgs = buildOwnedAppServerArgs(url, {
+        approvalPolicy: opts.approvalPolicy,
+        sandboxMode: opts.sandboxMode,
+        commhubMcpUrl: wireCommhub ? opts.commhubMcpUrl : undefined,
+      });
+      // Token via env only (never in argv/config) so it can't leak through a
+      // process list or on-disk config.
+      const childEnv = wireCommhub
+        ? { ...process.env, [COMMHUB_MCP_TOKEN_ENV]: opts.commhubToken }
+        : process.env;
+      log(`[codex-app-server] spawning ${binary} ${spawnArgs.join(" ")}${wireCommhub ? " (+commhub MCP)" : ""}`);
+      proc = spawn(binary, spawnArgs, {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: childEnv,
+      });
+      proc.stderr?.on("data", (d) =>
+        log(`[codex-app-server stderr] ${String(d).trim().slice(0, 300)}`),
+      );
+      if (opts.onExit) proc.on("exit", (code, signal) => opts.onExit!({ code, signal }));
+      await waitWs(url);
     } else {
-      log(`[codex-app-server] resumed thread ${e.threadId.slice(0, 12)}…`);
+      log(`[codex-app-server] attaching to shared server ${url}`);
     }
-    if (opts.onThread) void opts.onThread(e.threadId, e.created);
-  });
-  bridge.on("waiting_human", () =>
-    warn(`[codex-app-server] turn is waiting on a human approval — bridge will NOT answer`),
-  );
-  await bridge.bootstrap();
-  if (opts.serverUrl) {
-    await recoverSharedTurnOnAttach(bridge, log, warn);
-  }
 
-  return {
-    client,
-    bridge,
-    proc,
-    threadId: bridge.getThreadId(),
-    get isRunning() {
-      // Owned server: the child must be alive. Shared server: rely on the
-      // ws client's connection state.
-      if (proc) return proc.exitCode === null && !proc.killed;
-      return client.isConnected;
-    },
-  };
+    const client = new CodexAppServerClient({ url, clientLabel: "anet_codex_bridge" });
+    client.on("error", (e) => warn(`[codex-app-server] client error: ${String(e).slice(0, 200)}`));
+    await client.connect();
+
+    const bridge = new CodexAppServerBridge({
+      client, threadId: opts.threadId, deferThreadUntilTui: opts.deferThreadUntilTui,
+      initialDeferredThreadId: opts.initialDeferredThreadId,
+      onDeferredCandidate: opts.onDeferredCandidate,
+    });
+    bridge.on("thread_waiting", () => log("[codex-app-server] client-health role=bridge state=waiting-for-tui-thread"));
+    bridge.on("thread_ready", (e: { threadId: string; created: boolean }) => {
+      if (e.created) {
+        log(`[codex-app-server] created thread ${e.threadId.slice(0, 12)}…`);
+      } else {
+        log(`[codex-app-server] resumed thread ${e.threadId.slice(0, 12)}…`);
+      }
+      if (opts.onThread) void opts.onThread(e.threadId, e.created);
+    });
+    bridge.on("waiting_human", () =>
+      warn(`[codex-app-server] turn is waiting on a human approval — bridge will NOT answer`),
+    );
+    await bridge.bootstrap();
+    if (opts.serverUrl) {
+      await recoverSharedTurnOnAttach(bridge, log, warn);
+    }
+
+    return {
+      client,
+      bridge,
+      proc,
+      threadId: bridge.getThreadId(),
+      get isRunning() {
+        // Owned server: the child must be alive. Shared server: rely on the
+        // ws client's connection state.
+        if (proc) return proc.exitCode === null && !proc.killed;
+        return client.isConnected;
+      },
+    };
+  } catch (e) {
+    if (proc) {
+      try { proc.kill(); } catch { /* 已经退出了就算了 */ }
+      warn(`[codex-app-server] startup failed, killed owned child pid=${proc.pid ?? "?"}`);
+    }
+    throw e;
+  }
 }
 
 export interface CodexAppServerThinkResult {

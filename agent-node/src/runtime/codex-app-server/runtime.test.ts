@@ -507,3 +507,63 @@ describe("codexAppServerReplyOrThrow", () => {
       .toBe("（无回复）");
   });
 });
+
+// #1449 finding 2 —— owned-server 分支必须自己收尸。
+//
+// spawn 之后的 waitWs / client.connect / bridge.bootstrap /
+// recoverSharedTurnOnAttach 任何一步抛出，原来都不会 kill 掉我们**自己拥有**的
+// app-server 子进程（onExit 只通知）。supervisor 每重试失败一次就攒一个僵尸，
+// 各自占着一个端口。
+//
+// 不加任何仅为测试存在的接缝：`opts.binary` 本来就可注入，指向一个「只睡、
+// 不监听」的假二进制，waitWs 就会失败，走的是真实启动路径。代价是要等满
+// waitWs 的重试预算（60 × 300ms），所以这条慢。
+//
+// 判据落在**进程表里还有没有它**，不是「kill 有没有被调用」—— 后者可以在
+// 什么都没死的情况下为真。假二进制路径是临时目录里的唯一串，只用来计数。
+describe("#1449 finding 2 — 启动失败时不留孤儿子进程", () => {
+  test("waitWs 失败 ⇒ 自己 spawn 的子进程被 kill，不留在后台占端口", async () => {
+    const { mkdtempSync, writeFileSync, chmodSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { execFileSync } = await import("node:child_process");
+    const { openCodexAppServerRuntime } = await import("./runtime");
+
+    const dir = mkdtempSync(join(tmpdir(), "f1449-orphan-"));
+    const fake = join(dir, "fake-codex");
+    // 🔴 不要用 `exec`：exec 会把进程 argv 换成 `sleep`，这条唯一路径就从 argv 里
+    //    消失，下面按路径计数的量具会恒读 0 —— 那样这条测试在「有孤儿」和
+    //    「没孤儿」两种情况下都绿。我第一版就是这么写的，变异掉 proc.kill()
+    //    之后仍然 24/24 全绿，是拿已知存活的进程去校准计数器才发现的。
+    //    sleep 取 45s：shell 被杀后即使 sleep 短暂残留也很快自退，不留垃圾。
+    writeFileSync(fake, "#!/bin/sh\nsleep 45\n", "utf8");
+    chmodSync(fake, 0o755);
+
+    const countAlive = (): number => {
+      try {
+        const out = execFileSync("/bin/sh", ["-c", `ps -eo args | grep -F ${JSON.stringify(fake)} | grep -v grep | wc -l`], { encoding: "utf8" });
+        return Number(out.trim()) || 0;
+      } catch { return 0; }
+    };
+
+    expect(countAlive()).toBe(0);   // 前提：这条唯一路径此刻没有任何进程
+
+    let threw = false;
+    try {
+      await openCodexAppServerRuntime({ binary: fake, log: () => {}, warn: () => {}, onExit: () => {} });
+    } catch { threw = true; }
+    expect(threw).toBe(true);
+
+    // 给 kill 一点落地时间；修复前这里会一直是 1
+    let alive = countAlive();
+    for (let i = 0; i < 20 && alive > 0; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      alive = countAlive();
+    }
+    if (alive > 0) {
+      // 兜底清理：只按这条唯一路径精确清，避免把孤儿留给后续测试
+      try { execFileSync("/bin/sh", ["-c", `pkill -f ${JSON.stringify(fake)} || true`]); } catch {}
+    }
+    expect(alive).toBe(0);
+  }, 60_000);
+});
