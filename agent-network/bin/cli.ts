@@ -5812,7 +5812,22 @@ async function grokCommand() {
   }
   const resolved = resolveNodeRef(ref);
   if (!resolved) {
-    console.error(`Node "${ref}" not found. Create it first: anet node create ${ref} --runtime grok-build-cli`);
+    // #1402 — attach resolves nodes by the CURRENT directory's .anet/nodes.
+    // The old message ("Create it first") was actively harmful: the node the
+    // user wants to attach is usually already created in its project directory
+    // and online, so following "create" builds a duplicate or collides on the
+    // tmux / attach session. Explain the cwd-scoped resolution instead, show
+    // what IS visible here, and only mention create as a guarded last resort.
+    const visibleHere = listProfileIds();
+    console.error(`[anet] 在当前目录找不到节点 "${ref}"。`);
+    console.error(`[anet] anet grok attach 按**当前目录**的 .anet/nodes 解析节点（cwd=${process.cwd()}）。`);
+    if (visibleHere.length) {
+      console.error(`[anet] 这里可见的节点：${visibleHere.join(", ")}`);
+    } else {
+      console.error(`[anet] 当前目录的 .anet/nodes 下没有任何节点。`);
+    }
+    console.error(`[anet] 若它是在别的项目目录创建的（attach 的常见情况），先 cd 到那个目录再 attach。`);
+    console.error(`[anet] 用 anet node ls 看当前目录能见的节点；只有确认它确实还不存在，才用：anet node create ${shellQuote(ref)} --runtime grok-build-cli`);
     process.exit(1);
   }
   const { id: nodeId, profile } = resolved;
