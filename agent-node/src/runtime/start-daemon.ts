@@ -5,7 +5,6 @@
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join, resolve, sep } from "node:path";
-import { homedir } from "node:os";
 import { getAnetBinAbs, minimalEnv } from "./create-node-daemon.js";
 import { getChildrenSnapshot, recordSpawnedChild } from "./stop-daemon.js";
 
@@ -90,7 +89,10 @@ export async function handleStartDoorbell(
     return;
   }
 
-  const nodesRoot = deps.nodesRoot ?? join(homedir(), ".anet", "nodes");
+  // #1474 finding-1 — 根从 create 用的 cwd 基准(deps.workDir=daemon process.cwd())派生,
+  // 不硬编码 homedir():create 写 $CWD/.anet/nodes(create-node-daemon:525),daemon 从非
+  // $HOME 目录跑时 homedir() 会指向错目录 → 找不到 config → 假 start_failed。
+  const nodesRoot = deps.nodesRoot ?? join(deps.workDir, ".anet", "nodes");
   try {
     verifyStoppedChildConfig(nodesRoot, req.child_node_id, req.child_alias);
   } catch (e: any) {

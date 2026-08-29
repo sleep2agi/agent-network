@@ -21,7 +21,6 @@
 
 import { chmodSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import { execFile } from "node:child_process";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
@@ -76,8 +75,12 @@ export interface StopDoorbellDeps {
   warn: (msg: string) => void;
   // Path roots. Defaulted from process.env.HOME in cli wiring; tests
   // can override to a temp dir.
-  workdirRoot?: string;       // <home>/.anet/nodes — where child config dirs live
-  deletedRoot?: string;       // <home>/.anet/deleted — backup target
+  // #1474 finding-1 — daemon 的 cwd 基准(= process.cwd(),与 create-node-daemon 写
+  // config 用的 deps.workDir 同源)。根从它派生,不硬编码 homedir()——daemon 从非 $HOME
+  // 目录跑时,create 落 $CWD/.anet/nodes 而按 homedir 去删/搬会扑空、密钥原地残留。
+  workDir?: string;
+  workdirRoot?: string;       // 默认 <workDir>/.anet/nodes — child config 目录
+  deletedRoot?: string;       // 默认 <workDir>/.anet/deleted — 回收站
   // Allow tests to inject a fake kill / sleep / rename / clock so we
   // can drive the state machine without burning real wall-clock or
   // spawning real subprocesses. Production wires these to node:process
@@ -181,8 +184,8 @@ export async function handleStopDoorbell(
   const renameDir = deps.renameDir ?? ((src, dst) => renameSync(src, dst));
   const ensureDir = deps.ensureDir ?? ((p, mode) => { mkdirSync(p, { recursive: true, mode }); });
   const chmod = deps.chmod ?? ((p, mode) => chmodSync(p, mode));
-  const workdirRoot = deps.workdirRoot ?? join(homedir(), ".anet", "nodes");
-  const deletedRoot = deps.deletedRoot ?? join(homedir(), ".anet", "deleted");
+  const workdirRoot = deps.workdirRoot ?? join(deps.workDir ?? process.cwd(), ".anet", "nodes");
+  const deletedRoot = deps.deletedRoot ?? join(deps.workDir ?? process.cwd(), ".anet", "deleted");
 
   let req: GetStopRequestResult;
   try {
