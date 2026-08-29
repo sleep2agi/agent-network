@@ -518,8 +518,16 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       node_name: z.string().max(200).optional().describe("Stable node display name (may differ from alias)"),
       network_id: z.string().max(200).optional().describe("Network this agent belongs to"),
       host: z.object({
-        hostname: z.string().max(200).optional(),
-        ip: z.string().max(200).optional(),
+        // 🔴 `.nullable()` 不是防御性冗余,是**发送方声明的类型**:agent-node 的
+        //    HostTelemetry 是 `ip: string | null`,`firstNonInternalIPv4()` 在没有
+        //    非回环 IPv4 的机器上返回 null(--network none 的容器、断网的笔记本、
+        //    部分 CI runner)。此前这里只有 `.optional()`,于是那台机器上的
+        //    agent-node 一启动就收到 MCP -32602,而 register() 是 await 且无人 catch
+        //    —— **整个节点进程当场死掉**,和 runtime 无关。
+        //    同一个对象里四个数值字段本来就写着 `.nullable().optional()`,
+        //    两个字符串字段是唯一的例外;正确写法一直在隔壁那一行。
+        hostname: z.string().max(200).nullable().optional(),
+        ip: z.string().max(200).nullable().optional(),
         cpu_load_1min: z.number().nullable().optional(),
         cpu_cores: z.number().nullable().optional(),
         mem_total_gb: z.number().nullable().optional(),
