@@ -81,6 +81,49 @@ function normalizeMetaJson(meta: unknown): string | null {
   try { return JSON.stringify(stripHostLocalPathsForCrossHostSafe(meta)); } catch { return null; }
 }
 
+// ── #1281 — 子节点生命周期工具的参数名统一 ────────────────────────────
+//
+// stop_node / start_node / delete_node 历史上用 `child_node_id`（RFC-027），
+// restart_node / update_node_config 用 `node_id`。同一个对象（子节点）两个名字，
+// 调用方按一个工具的习惯给另一个传就吃 -32602。两侧都已是**已发布契约**
+// （start_node 随 #1273 合入），且 hub API 在 RFC-030 混版滚动期老客户端还在
+// 发老名——所以不能硬改名，改为**两个名字都接受**：
+//   · canonical = `node_id`（= DB 列 nodes.node_id、= create_node 的输出、
+//     restart/update 历史用名；「建完节点→再操作它」用同一个名才是傻瓜式）。
+//   · `child_node_id` 作为**兼容 alias 保留** + deprecation 注释；不加运行时
+//     warning（老客户端是设计内兼容，不是错误，别刷屏）。
+// create_node 的 `daemon_node_id` 指宿主 daemon，是另一层语义，不在本次统一内。
+//
+// server.tool 收的是 ZodRawShape（裸对象），挂不了 .refine()，所以「至少一个
+// 必填」+「两个都传须相等」在 handler 侧用 resolveNodeIdArg 兜——返回结构化
+// ok:false 反而比 schema 层的 -32602 更友好。两个名字在 schema 层都做成
+// optional + 宽松 .min(1).max(200)（不带 regex），使命名与校验强度同时统一：
+// 对 restart/update 不变（本就宽松），对 stop/start/delete 是放宽（原 regex 会
+// 在 schema 层挡掉 alias/杂串，放宽后落到查表返回 node_not_found，对合法调用
+// 方无影响，只是错误形态更一致）。
+const NODE_ID_ALIAS_FIELDS = {
+  node_id: z.string().min(1).max(200).optional()
+    .describe("Target child node ID (canonical, #1281). The value create_node returns. Must be in caller's network."),
+  child_node_id: z.string().min(1).max(200).optional()
+    .describe("DEPRECATED alias for node_id (#1281): kept for back-compat with pre-unification clients; prefer node_id."),
+} as const;
+
+/** #1281 — 把 node_id / child_node_id 收敛成单一内部 id。两个都传且不等 ⇒
+ *  node_id_conflict（挡「node_id 填 A、child_node_id 填 B」的手滑，比单纯二选一强）；
+ *  都不传 ⇒ node_id_required。纯函数，模块级导出以便单测直接验解析逻辑。 */
+export function resolveNodeIdArg(a: { node_id?: string; child_node_id?: string }):
+  { ok: true; node_id: string } | { ok: false; error: string; message: string } {
+  const n = a.node_id, c = a.child_node_id;
+  if (n && c && n !== c) {
+    return { ok: false, error: "node_id_conflict", message: "node_id and child_node_id both provided but differ; send only one (they are aliases for the same child node)" };
+  }
+  const id = n ?? c;
+  if (!id) {
+    return { ok: false, error: "node_id_required", message: "one of node_id / child_node_id is required (child_node_id is a deprecated alias; prefer node_id)" };
+  }
+  return { ok: true, node_id: id };
+}
+
 export function registerTools(server: McpServer, clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false, callerTokenId?: string | null) {
   // Default from_session for outbound tools — extracted from the calling
   // token's binding (ntok_ → node alias, utok_ → username). Without this,
@@ -2491,7 +2534,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "update_node_config",
     "Set the desired per-node config (model + flags) and push a doorbell to the node. The node pulls + validates + applies (hot or restart per field tier). RFC-024.",
     {
-      node_id: z.string().min(1).max(200).describe("Target node ID (not alias). Must be in caller's network."),
+      ...NODE_ID_ALIAS_FIELDS,
       base_revision: z.number().int().min(0).describe("Current revision per the dashboard's last GET — 409 if hub's current revision differs."),
       patch: z.object({
         model: z.string().max(200).optional(),
@@ -2515,7 +2558,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }).describe("Fields to update. Empty patch → no-op (use restart_node for that)."),
       network_id: z.string().max(200).optional(),
     },
-    async ({ node_id: nodeId, base_revision: baseRev, patch, network_id: clientNetId }) => {
+    async ({ node_id, child_node_id, base_revision: baseRev, patch, network_id: clientNetId }) => {
+      const idArg = resolveNodeIdArg({ node_id, child_node_id });
+      if (!idArg.ok) return { content: [{ type: "text" as const, text: JSON.stringify(idArg) }] };
+      const nodeId = idArg.node_id;
       const effectiveNetId = getNetworkId(clientNetId);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, "write");
 
@@ -2824,10 +2870,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "restart_node",
     "Trigger a node restart without changing config. RFC-024 Vincent 2026-06-28 increment. Network-scoped (SEC-1); member+ role suffices (lifecycle ops are not privilege elevation).",
     {
-      node_id: z.string().min(1).max(200),
+      ...NODE_ID_ALIAS_FIELDS,
       network_id: z.string().max(200).optional(),
     },
-    async ({ node_id: nodeId, network_id: clientNetId }) => {
+    async ({ node_id, child_node_id, network_id: clientNetId }) => {
+      const idArg = resolveNodeIdArg({ node_id, child_node_id });
+      if (!idArg.ok) return { content: [{ type: "text" as const, text: JSON.stringify(idArg) }] };
+      const nodeId = idArg.node_id;
       const effectiveNetId = getNetworkId(clientNetId);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, "write");
 
@@ -3726,7 +3775,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "stop_node",
     "Stop the agent-node child process; keep config dir intact. Reversible via restart_node. RFC-027 §2.2. daemon_node_id is auto-resolved from child_node_id when omitted (looked up in node_create_requests).",
     {
-      child_node_id: z.string().min(1).max(200).regex(/^node_[a-z0-9_-]+$/),
+      ...NODE_ID_ALIAS_FIELDS,
       // PR2 prereq: dashboard rarely knows daemon_node_id directly.
       // When omitted, hub resolves from the original creation record
       // (node_create_requests.daemon_node_id keyed by this child).
@@ -3735,7 +3784,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       grace_seconds: z.number().int().min(5).max(60).optional().default(10),
       network_id: z.string().max(200).optional(),
     },
-    async ({ child_node_id, daemon_node_id, force, grace_seconds, network_id: clientNetId }) => {
+    async ({ node_id, child_node_id: child_node_id_arg, daemon_node_id, force, grace_seconds, network_id: clientNetId }) => {
+      const idArg = resolveNodeIdArg({ node_id, child_node_id: child_node_id_arg });
+      if (!idArg.ok) return { content: [{ type: "text" as const, text: JSON.stringify(idArg) }] };
+      const child_node_id = idArg.node_id;
       const resolved = daemon_node_id ?? resolveDaemonForChild(child_node_id);
       if (!resolved) {
         return { content: [{ type: "text" as const, text: JSON.stringify({
@@ -3756,7 +3808,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "delete_node",
     "Stop child + revoke ntok + delete hub row + (default) backup config to ~/.anet/deleted/<ts>-<alias>/ for 30d. confirm_alias must equal the node's alias. daemon_node_id is auto-resolved when omitted. RFC-027 §2.2.",
     {
-      child_node_id: z.string().min(1).max(200).regex(/^node_[a-z0-9_-]+$/),
+      ...NODE_ID_ALIAS_FIELDS,
       daemon_node_id: z.string().min(1).max(200).regex(/^node_[a-z0-9_-]+$/).optional(),
       confirm_alias: z.string().min(1).max(200),
       force: z.boolean().optional().default(false),
@@ -3764,7 +3816,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       delete_config: z.boolean().optional().default(true),
       network_id: z.string().max(200).optional(),
     },
-    async ({ child_node_id, daemon_node_id, confirm_alias, force, grace_seconds, delete_config, network_id: clientNetId }) => {
+    async ({ node_id, child_node_id: child_node_id_arg, daemon_node_id, confirm_alias, force, grace_seconds, delete_config, network_id: clientNetId }) => {
+      const idArg = resolveNodeIdArg({ node_id, child_node_id: child_node_id_arg });
+      if (!idArg.ok) return { content: [{ type: "text" as const, text: JSON.stringify(idArg) }] };
+      const child_node_id = idArg.node_id;
       const resolved = daemon_node_id ?? resolveDaemonForChild(child_node_id);
       if (!resolved) {
         return { content: [{ type: "text" as const, text: JSON.stringify({
@@ -3941,11 +3996,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "start_node",
     "Start a stopped child through its host supervisor daemon. daemon_node_id is auto-resolved from the original create request.",
     {
-      child_node_id: z.string().min(1).max(200).regex(/^node_[a-z0-9_-]+$/),
+      ...NODE_ID_ALIAS_FIELDS,
       daemon_node_id: z.string().min(1).max(200).regex(/^node_[a-z0-9_-]+$/).optional(),
       network_id: z.string().max(200).optional(),
     },
-    async ({ child_node_id, daemon_node_id, network_id: clientNetId }) => {
+    async ({ node_id, child_node_id: child_node_id_arg, daemon_node_id, network_id: clientNetId }) => {
+      const idArg = resolveNodeIdArg({ node_id, child_node_id: child_node_id_arg });
+      if (!idArg.ok) return { content: [{ type: "text" as const, text: JSON.stringify(idArg) }] };
+      const child_node_id = idArg.node_id;
       const resolvedDaemonId = daemon_node_id ?? resolveDaemonForChild(child_node_id);
       if (!resolvedDaemonId) {
         return { content: [{ type: "text" as const, text: JSON.stringify({
