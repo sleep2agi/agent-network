@@ -1,3 +1,4 @@
+import { redactMessageRow } from "./redact-tokens.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { parseDbTimestampMs } from "./db-timestamp.js";
 import { buildControllableMap, isLifecycleControllable } from "./node-lifecycle-controllable.js";
@@ -2627,6 +2628,50 @@ return Bun.serve({
       }
     }
 
+    // ── REST: per-user desktop inbox (#1459 ① P3) ──
+    // 🔴 只在 ?scope=user 时走这条；下面按 alias 寻址的既有分支一行未动
+    //    （dashboard 依赖那条 inbox 查询）。
+    if (url.pathname === "/api/messages" && url.searchParams.get("scope") === "user") {
+      // 🔴 收件人取自**鉴权上下文**，不接受 query 指定 —— 否则任何人都能
+      //    ?user_id=<别人> 读走别人的私信。
+      const callerUserId = restAuth?.userId ?? null;
+      if (!callerUserId) {
+        return withCors(req, Response.json({ ok: false, error: "auth_required" }, { status: 401 }));
+      }
+      const limit = Math.min(Number(url.searchParams.get("limit")) || 100, 500);
+      const unackedOnly = url.searchParams.get("unacked") === "1";
+
+      const params: any[] = [callerUserId];
+      let sql = `SELECT message_id, network_id, user_id, from_session, kind, title, content, severity,
+                        meta_json, acked, created_at, acked_at
+                 FROM user_inbox WHERE user_id = ?1`;
+      if (unackedOnly) sql += " AND acked = 0";
+      // 复用 alias 分支同一个 scope 助手：新读路径漏 scope 是已被审计证实的真风险。
+      sql = addNetworkScope(sql, params, restScope);
+      sql += ` ORDER BY created_at DESC LIMIT ?${params.length + 1}`;
+      params.push(limit);
+      const rows = db.all<any>(sql, ...params);
+
+      // 未读数与列表用同一个 user_id + 同一个 scope 助手算，避免两处口径漂开。
+      const countParams: any[] = [callerUserId];
+      let countSql = "SELECT COUNT(*) AS cnt FROM user_inbox WHERE user_id = ?1 AND acked = 0";
+      countSql = addNetworkScope(countSql, countParams, restScope);
+      const unread = db.get<{ cnt: number }>(countSql, ...countParams)?.cnt ?? 0;
+
+      // 🔴 redact-at-read：写入方是 agent，不受信任。存储侧已做跨主机路径脱敏，
+      //    这一层单独防"有人把凭据塞进正文/标题/meta"。
+      const messages = rows.map(redactMessageRow);
+
+      return withCors(req, Response.json({
+        ok: true,
+        messages,
+        unread,
+        // 同一个数的两个名字：`unread` 给角标读，`pending_count` 与 alias 分支
+        // 的字段名保持一致。**一处计算**，不是两处实现。
+        pending_count: unread,
+      }));
+    }
+
     // ── REST: recent messages (for Dashboard communication graph) ──
     if (url.pathname === "/api/messages") {
       const limit = Math.min(Number(url.searchParams.get("limit")) || 100, 500);
@@ -2652,6 +2697,34 @@ return Bun.serve({
       }
 
       return withCors(req, Response.json({ ok: true, messages: rows, ...(alias ? { pending_count: pendingCount ?? 0 } : {}) }));
+    }
+
+    // ── REST: ack per-user desktop messages (#1459 ① P3) ──
+    if (url.pathname === "/api/messages/ack" && req.method === "POST") {
+      const callerUserId = restAuth?.userId ?? null;
+      if (!callerUserId) {
+        return withCors(req, Response.json({ ok: false, error: "auth_required" }, { status: 401 }));
+      }
+      let body: any = null;
+      try { body = await req.json(); } catch { /* 下面按缺参处理 */ }
+      const ids: string[] = Array.isArray(body?.message_ids)
+        ? body.message_ids.filter((x: unknown) => typeof x === "string" && x.length > 0)
+        : (typeof body?.message_id === "string" && body.message_id ? [body.message_id] : []);
+      if (ids.length === 0) {
+        return withCors(req, Response.json({ ok: false, error: "message_id_required" }, { status: 400 }));
+      }
+      if (ids.length > 500) {
+        return withCors(req, Response.json({ ok: false, error: "too_many_ids", limit: 500 }, { status: 400 }));
+      }
+      // 🔴 `AND user_id = <ctx>`：只能 ack 自己的。别人的 message_id 传进来
+      //    也匹配不到行，所以既不会改到别人的状态，也不会因此泄漏它是否存在。
+      const params: any[] = [callerUserId, ...ids];
+      const placeholders = ids.map((_, i) => `?${i + 2}`).join(", ");
+      let sql = `UPDATE user_inbox SET acked = 1, acked_at = datetime('now')
+                 WHERE user_id = ?1 AND message_id IN (${placeholders}) AND acked = 0`;
+      sql = addNetworkScope(sql, params, restScope);
+      const res = db.run(sql, params);
+      return withCors(req, Response.json({ ok: true, acked: res.changes ?? 0 }));
     }
 
     // ── REST: stats summary ──

@@ -76,6 +76,15 @@ db.exec(`
     acked_at      TEXT
   );
 
+  -- #1459 ① P3 —— 现在有真实查询了才建索引（P1 刻意没建：没有查询就加索引是猜）。
+  -- 覆盖回读分支的两条：
+  --   列表  SELECT ... WHERE user_id = ? [AND acked = 0] ORDER BY created_at DESC
+  --   未读数 SELECT COUNT(*) WHERE user_id = ? AND acked = 0
+  -- 不是部分索引（不写 WHERE acked = 0）：列表在 unacked=0 时要读**含已 ack 的**
+  -- 近期消息，部分索引那时用不上。
+  CREATE INDEX IF NOT EXISTS idx_user_inbox_user_acked
+    ON user_inbox(user_id, acked, created_at);
+
   CREATE TABLE IF NOT EXISTS completions (
     id               TEXT PRIMARY KEY,
     session_name     TEXT NOT NULL,
