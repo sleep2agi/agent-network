@@ -36,6 +36,7 @@ import {
 } from "../src/copresence-identity";
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
+import { processVanished, resolveOwnedRoots } from "../src/owned-roots";
 import { createConnection as netCreateConnection, createServer as netCreateServer } from "net";
 import { PassThrough } from "stream";
 import { checkbox, confirm, select } from "@inquirer/prompts";
@@ -9443,18 +9444,31 @@ Stop a running agent node.
       const prior = readLifecycleOwner(resolved.id);
       stopGeneration = prior?.generation || randomUUID();
       let roots = prior?.processes || [];
-      if (roots.some(p => !p.birth)) throw new Error("NODE_OWNER_BIRTH_UNAVAILABLE");
+      // 🔴 这一条与下面 alias-fallback 支里的 NODE_OWNER_BIRTH_UNAVAILABLE 是**两件事**,
+      // 原先共用同一句错误 —— 于是 CI 上只看错误文本分不出是哪一种,#1422 的定位
+      // 因此走过弯路。两者的成因完全不同:
+      //   本条(RECEIPT):**收据里已记录**的某个 process 缺 birth 字段 —— 是持久化
+      //     记录不完整,与当前进程是否存活无关。
+      //   下面那条(带 `: pid=<n>`):ps 发现之后**现在读不到** /proc/<pid>/stat ——
+      //     多半是那个 pid 已经退出(#1422 的 TOCTOU)。
+      // 分开命名,让 CI 输出自身就能回答「是哪一种」。
+      const missingBirth = roots.filter(p => !p.birth).map(p => p.pid);
+      if (missingBirth.length > 0) {
+        throw new Error(`NODE_OWNER_BIRTH_UNAVAILABLE_RECEIPT: pids=${missingBirth.join(",")}`);
+      }
       // One-time migration for pre-receipt generations: discover by alias only
       // while holding stop-intent, then freeze exact identities. Reaping never
       // rescans by alias, so a later same-name generation cannot be adopted.
       if (roots.length === 0) {
         const legacy = findNodeProcessesByAlias(displayName);
         if (legacy === null) throw new Error("NODE_PROCESS_TABLE_UNAVAILABLE");
-        roots = legacy.map(pid => {
-          const birth = processBirth(pid);
-          if (!birth) throw new Error(`NODE_OWNER_BIRTH_UNAVAILABLE: pid=${pid}`);
-          return { pid, birth, role: "agent" as const };
-        });
+        // #1422 — `ps` 拿到 pid 与读 `/proc/<pid>/stat` 之间有一个窗口:进程可能
+        // 已经退出。旧代码把「读不到 birth」一律当致命错误,于是 `anet node stop`
+        // 以 exit(1) 结束(test225 报 `node stop failed for <X>`)。
+        // 🔴 那不是失败 —— **stop 的目的就是让进程没了**,「它在我读它之前先退了」
+        // 正是想要的结果。resolveOwnedRoots 只放过**确证已消失**的(processVanished
+        // 仅在 ESRCH 时为真),进程仍在却读不到 birth 依旧抛。
+        roots = resolveOwnedRoots(legacy, { birth: processBirth, vanished: (pid) => processVanished(pid) });
       }
       stopProcesses = snapshotOwnedProcessTree(roots);
       writeLifecycleOwner(resolved.id, {

@@ -160,6 +160,20 @@ fail_with_private_log() {
     mode=$(stat -c %a "$path" 2>/dev/null || printf unknown)
   fi
   log "diagnostic: private raw log retained until cleanup (bytes=$bytes mode=$mode)"
+  # 🔴 原始日志保持 600 私有;这里只多暴露**一个错误码**,因为 CI 上看不到那份
+  # 日志时,红话里只有 "node stop failed for <X>",既定位不到成因、也分不清是
+  # 同一族的哪一种(NODE_OWNER_BIRTH_UNAVAILABLE 在 cli.ts 里有三个产生点)。
+  #
+  # 白名单而非黑名单:只吃 anet 自己的错误码形状(全大写+下划线),其余一个
+  # 字节不打。凭据不是这个形状 —— utok_/ntok_ 是小写前缀,base64/hex 带混合
+  # 大小写或 /+= —— 都不匹配。
+  #
+  # ⚠️ pattern 故意保持通用,不收窄到几个已知码:**这一格的价值正在于它能打出
+  # 「意料之外的码」**。如果真凶根本不在我们猜的那一族里,只有通用 pattern 会说出来。
+  if [ -e "$path" ]; then
+    code=$(grep -oE '^\[anet\] [A-Z][A-Z0-9_]+' "$path" 2>/dev/null | head -1)
+    log "diagnostic: private log first anet error code: ${code:-<none matched>}"
+  fi
   fail "$message"
 }
 
