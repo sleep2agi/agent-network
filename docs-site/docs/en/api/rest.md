@@ -349,7 +349,7 @@ curl -X POST http://localhost:9200/api/auth/password \
 
 `revoked` is the number of utok\_/atok\_ tokens on **other devices** that were just revoked (it does **not** include the caller's own token — that one is revoked separately by `revokeToken(resolved.user.user_id, resolved.tokenId)` in the password-change handler in `server.ts`).
 
-**Key side effects** (verify [`auth.ts:267-282 changePassword + revokeOtherUserTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L417) + [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
+**Key side effects** (verify [`auth.ts` `changePassword` + `revokeOtherUserTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L417) + [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
 1. **The caller's `utok_`** (`resolved.tokenId`) is revoked immediately ([`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) `revokeToken(...)` explicit delete)
 2. **All other devices' `utok_` / `atok_`** are also revoked in one shot ([`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) — grep `network_id IS NULL AND token_id != ` `DELETE ... WHERE user_id=? AND network_id IS NULL AND token_id != ?currentTokenId`) — the count is returned in the `revoked` field
 3. **`ntok_` tokens are unaffected** (`revokeOtherUserTokens` filters on `network_id IS NULL`, so agent nodes using `ntok_` keep running through a password change; matches the [account-system / Change Password](/en/guide/account-system#change-password) narrative)
@@ -410,7 +410,7 @@ curl http://localhost:9200/api/networks \
 }
 ```
 
-Each row in `networks` has 10 fields: the 9 `networks` table columns ([`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) — grep `CREATE TABLE IF NOT EXISTS networks`, including the v3 migrations `visibility` + `max_members`) plus the joined `member_role` ([`auth.ts:382-388`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L382) joins `network_members`). Sort order: owner first, then by `created_at` (`ORDER BY nm.role = 'owner' DESC, n.created_at`). `settings` / `description` may be `null`. An `ntok_` caller sees only the bound network (not the full list); a `utok_` caller sees every network they belong to.
+Each row in `networks` has 10 fields: the 9 `networks` table columns ([`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) — grep `CREATE TABLE IF NOT EXISTS networks`, including the v3 migrations `visibility` + `max_members`) plus the joined `member_role` ([`auth.ts` `getUserNetworks`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L307) joins `network_members`). Sort order: owner first, then by `created_at` (`ORDER BY nm.role = 'owner' DESC, n.created_at`). `settings` / `description` may be `null`. An `ntok_` caller sees only the bound network (not the full list); a `utok_` caller sees every network they belong to.
 
 ---
 
@@ -1702,12 +1702,12 @@ curl -N "http://localhost:9200/events/coder-1?token=ntok_xxx"
 | `new_message` | New chat message (`send_message`) | `{inbox_count, from, message_id}` |
 | `new_reply` | Reply to a task (`send_reply`) | `{inbox_count, from, message_id, in_reply_to, status}` |
 | `broadcast` | Broadcast received (`broadcast` tool) | `{inbox_count}` |
-| `chained_reply` | Sub-task completion routed back to the parent task's originator ([`tools.ts:286/646`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts)) | `{parent_task_id, child_task_id, child_alias}` |
-| `node.renamed` | Broadcast on RFC-010 node-rename COMMIT ([`rename.ts:100-123`](https://github.com/sleep2agi/agent-network/blob/main/server/src/rename.ts#L100)); pushed to the old + new alias streams **plus every network member's user channel** (the dashboard subscribes to `/events/<username>`, not per-alias streams — #84 SSE channel fix) | `{txn_id, alias(=new_alias), network_id, data:{old_alias, new_alias, surfaces_updated[], history_policy:"preserve"}}` |
+| `chained_reply` | Sub-task completion routed back to the parent task's originator ([`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) — grep `chained_reply`) | `{parent_task_id, child_task_id, child_alias}` |
+| `node.renamed` | Broadcast on RFC-010 node-rename COMMIT ([`rename.ts` `renamedEvent`](https://github.com/sleep2agi/agent-network/blob/main/server/src/rename.ts#L195)); pushed to the old + new alias streams **plus every network member's user channel** (the dashboard subscribes to `/events/<username>`, not per-alias streams — #84 SSE channel fix) | `{txn_id, alias(=new_alias), network_id, data:{old_alias, new_alias, surfaces_updated[], history_policy:"preserve"}}` |
 
 > Earlier docs claimed `new_message` carried a `message` field and `broadcast` carried `{content, from}` — neither is correct. Verify [`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) for the actual payloads. **Since #1439/#1441, `new_message` / `new_reply` / `broadcast` / `new_task` (incl. retry/reassign) all carry the real `inbox_count` (recipient's unread count) — clients can use it directly to show the new-message count; `broadcast` is no longer a hardcoded 1.** Note: `new_task` / `new_message` additionally carry a `renamed_from` field (the old alias) when the target alias was just renamed — the `canonical.renamed` branch in `tools.ts`.
 >
-> **Correction**: the table previously listed a `heartbeat` event with `{time}` payload. No such JSON event is emitted. [`push.ts:38-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L38) sends an SSE **comment line** `: keepalive\n\n` every 30s purely to defeat proxy/LB idle timeouts — comments are NOT delivered to `EventSource.onmessage` / `addEventListener` and carry no payload. The real once-per-connection initial event is `connected` (agent-node handles it explicitly at [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)).
+> **Correction**: the table previously listed a `heartbeat` event with `{time}` payload. No such JSON event is emitted. [`push.ts` `KEEPALIVE_MS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L69) sends an SSE **comment line** `: keepalive\n\n` every 30s purely to defeat proxy/LB idle timeouts — comments are NOT delivered to `EventSource.onmessage` / `addEventListener` and carry no payload. The real once-per-connection initial event is `connected` (agent-node handles it explicitly at [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)).
 
 **Example SSE data stream**:
 
@@ -1835,7 +1835,7 @@ curl http://localhost:9200/api/auth/tokens \
 }
 ```
 
-The 6 fields per row map directly to [`auth.ts:209-213`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L209) `listTokens` SELECT: `token_id / name / scope / network_id / last_used_at / created_at`. `scope` is one of `user` (utok\_) / `network` (ntok\_) / `full` (legacy atok\_); `network_id` is only set for `network` / `full` scope. Sorted by `created_at DESC`. The plaintext `token` field is **not** returned here (only at POST creation).
+The 6 fields per row map directly to [`auth.ts` `listTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L347) `listTokens` SELECT: `token_id / name / scope / network_id / last_used_at / created_at`. `scope` is one of `user` (utok\_) / `network` (ntok\_) / `full` (legacy atok\_); `network_id` is only set for `network` / `full` scope. Sorted by `created_at DESC`. The plaintext `token` field is **not** returned here (only at POST creation).
 
 ### DELETE /api/auth/tokens/:id
 
@@ -1858,7 +1858,7 @@ curl -X DELETE http://localhost:9200/api/auth/tokens/tok_xxx \
 
 | Status | `error` value | Trigger |
 |------|------------|---------|
-| 404 | `token not found` | `token_id` does not exist or does not belong to the current user ([`auth.ts:252-254`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L252) `DELETE ... WHERE token_id=?1 AND user_id=?2` affects 0 rows) |
+| 404 | `token not found` | `token_id` does not exist or does not belong to the current user ([`auth.ts` `revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L395) `DELETE ... WHERE token_id=?1 AND user_id=?2` affects 0 rows) |
 
 Writes audit log `action='token_revoked'`. After revocation, the next request using that token returns 401 `invalid token`.
 
@@ -2041,7 +2041,7 @@ curl -X POST http://localhost:9200/api/networks/net_xxx/invite \
 | 403 | `not a member of this network` | Caller is not a member of the network ([`server.ts` callerRole gate](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)) |
 | 403 | `owner/admin required` | Caller is `member` / `viewer` — cannot issue invites |
 
-The recipient joins via `anet network join inv_abc123def456` or `POST /api/networks/join`. `invite_code` is `inv_` prefix + 12 characters (`auth.ts:346` `slice(0, 12)`).
+The recipient joins via `anet network join inv_abc123def456` or `POST /api/networks/join`. `invite_code` is `inv_` prefix + 12 characters (`auth.ts` `createInvite` `slice(0, 12)`).
 
 ### POST /api/networks/join
 

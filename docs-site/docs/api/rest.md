@@ -339,7 +339,7 @@ curl -X POST http://localhost:9200/api/auth/password \
 
 `revoked` 字段是**其他设备**上被撤销的 utok\_/atok\_ 数量（不含本次调用方自己的 token，那个由 `server.ts` 改密处理函数里的 `revokeToken(resolved.user.user_id, resolved.tokenId)` 单独撤销）。
 
-**关键副作用** (verify [`auth.ts:267-282 changePassword + revokeOtherUserTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L417) + [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
+**关键副作用** (verify [`auth.ts` `changePassword` + `revokeOtherUserTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L417) + [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
 1. **当前调用方的 `utok_`** (`resolved.tokenId`) 立即撤销（[`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) `revokeToken(...)` 显式删）
 2. **其他设备的所有 `utok_` / `atok_`** 同步撤销（[`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) 搜 `network_id IS NULL AND token_id != ` `DELETE ... WHERE user_id=? AND network_id IS NULL AND token_id != ?currentTokenId` 一锅端）—— 计数返回到 `revoked` 字段
 3. **`ntok_` 不受影响**（`revokeOtherUserTokens` 只删 `network_id IS NULL` 的 token，agent node 用 `ntok_` 跑着的不会被改密打断；跟 [account-system 改密码副作用](/guide/account-system#修改密码) ZH 描述一致）
@@ -400,7 +400,7 @@ curl http://localhost:9200/api/networks \
 }
 ```
 
-`networks` 数组每行 10 字段：9 个 `networks` 表字段 ([`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) 搜 `CREATE TABLE IF NOT EXISTS networks` 含 v3 migration `visibility` + `max_members`) + 1 个 join 字段 `member_role`（[`auth.ts:382-388`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L382) JOIN `network_members`）。排序：owner 在前，其余按 `created_at`（`ORDER BY nm.role = 'owner' DESC, n.created_at`）。`settings` / `description` 可为 `null`。`ntok_` 调用只返回当前 binding 那一个 network（不是全部）；`utok_` 返回所有所属网络。
+`networks` 数组每行 10 字段：9 个 `networks` 表字段 ([`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) 搜 `CREATE TABLE IF NOT EXISTS networks` 含 v3 migration `visibility` + `max_members`) + 1 个 join 字段 `member_role`（[`auth.ts` `getUserNetworks`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L307) JOIN `network_members`）。排序：owner 在前，其余按 `created_at`（`ORDER BY nm.role = 'owner' DESC, n.created_at`）。`settings` / `description` 可为 `null`。`ntok_` 调用只返回当前 binding 那一个 network（不是全部）；`utok_` 返回所有所属网络。
 
 ---
 
@@ -1762,12 +1762,12 @@ curl -N "http://localhost:9200/events/代码1号?token=ntok_xxx"
 | `new_message` | 收到新消息（`send_message`） | `{inbox_count, from, message_id}` |
 | `new_reply` | 收到 reply（`send_reply`） | `{inbox_count, from, message_id, in_reply_to, status}` |
 | `broadcast` | 收到广播（`broadcast` 工具） | `{inbox_count}` |
-| `chained_reply` | 子任务完成自动串回上游父任务发起者 ([`tools.ts:286/646`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts)) | `{parent_task_id, child_task_id, child_alias}` |
-| `node.renamed` | RFC-010 节点改名 COMMIT 时广播（[`rename.ts:100-123`](https://github.com/sleep2agi/agent-network/blob/main/server/src/rename.ts#L100)），推给 old + new 两个 alias 流 **+ 每个网络成员的 user channel**（dashboard 订阅的是 `/events/<username>` user channel、不是 per-alias 流，#84 SSE channel fix） | `{txn_id, alias(=new_alias), network_id, data:{old_alias, new_alias, surfaces_updated[], history_policy:"preserve"}}` |
+| `chained_reply` | 子任务完成自动串回上游父任务发起者 ([`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 搜 `chained_reply`) | `{parent_task_id, child_task_id, child_alias}` |
+| `node.renamed` | RFC-010 节点改名 COMMIT 时广播（[`rename.ts` `renamedEvent`](https://github.com/sleep2agi/agent-network/blob/main/server/src/rename.ts#L195)），推给 old + new 两个 alias 流 **+ 每个网络成员的 user channel**（dashboard 订阅的是 `/events/<username>` user channel、不是 per-alias 流，#84 SSE channel fix） | `{txn_id, alias(=new_alias), network_id, data:{old_alias, new_alias, surfaces_updated[], history_policy:"preserve"}}` |
 
 > 旧 doc 在 `new_message` 上写过 `message` 字段、`broadcast` 上写过 `{content, from}` —— 都不对。verify [`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 实际 payload 以上表为准。**自 #1439/#1441 起 `new_message` / `new_reply` / `broadcast` / `new_task`（含 retry/reassign）都带真实 `inbox_count`（收件人未读数），客户端可直接用它显示新消息数；`broadcast` 不再是硬编码 1。**另注：`new_task` / `new_message` 在目标 alias **刚被改名**时会额外带一个 `renamed_from` 字段（指向旧 alias，`tools.ts` 的 `canonical.renamed` 分支）。
 >
-> **校正**：原表列过 `heartbeat` event with `{time}` payload，源码不发这个事件。[`push.ts:38-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L38) 实际发 SSE **comment 行** `: keepalive\n\n`（每 30s 一次，纯粹是给 proxy / LB 防 idle timeout 用），不会被 EventSource `onmessage` / `addEventListener` 触发，也不带 JSON payload。`connected` event 才是真正每次连接发一次的初始事件（agent-node 在 [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) 显式处理它）。
+> **校正**：原表列过 `heartbeat` event with `{time}` payload，源码不发这个事件。[`push.ts` `KEEPALIVE_MS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L69) 实际发 SSE **comment 行** `: keepalive\n\n`（每 30s 一次，纯粹是给 proxy / LB 防 idle timeout 用），不会被 EventSource `onmessage` / `addEventListener` 触发，也不带 JSON payload。`connected` event 才是真正每次连接发一次的初始事件（agent-node 在 [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) 显式处理它）。
 
 **示例 SSE 数据流**：
 
@@ -1940,7 +1940,7 @@ curl http://localhost:9200/api/auth/tokens \
 }
 ```
 
-每行 6 字段对照 [`auth.ts:209-213`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L209) `listTokens` SELECT：`token_id / name / scope / network_id / last_used_at / created_at`。`scope` 取值 `user` (utok\_) / `network` (ntok\_) / `full` (legacy atok\_)；`network_id` 仅 `network` / `full` scope 有值。按 `created_at DESC` 排序。明文 Token 字段**不返回**（只能在 POST 创建时拿一次）。
+每行 6 字段对照 [`auth.ts` `listTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L347) `listTokens` SELECT：`token_id / name / scope / network_id / last_used_at / created_at`。`scope` 取值 `user` (utok\_) / `network` (ntok\_) / `full` (legacy atok\_)；`network_id` 仅 `network` / `full` scope 有值。按 `created_at DESC` 排序。明文 Token 字段**不返回**（只能在 POST 创建时拿一次）。
 
 ### DELETE /api/auth/tokens/:id
 
@@ -1963,7 +1963,7 @@ curl -X DELETE http://localhost:9200/api/auth/tokens/tok_xxx \
 
 | 状态 | `error` 值 | 触发条件 |
 |------|------------|---------|
-| 404 | `token not found` | `token_id` 不存在或不属于当前 user（[`auth.ts:252-254`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L252) `DELETE ... WHERE token_id=?1 AND user_id=?2` 受影响行 0） |
+| 404 | `token not found` | `token_id` 不存在或不属于当前 user（[`auth.ts` `revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L395) `DELETE ... WHERE token_id=?1 AND user_id=?2` 受影响行 0） |
 
 写 audit log `action='token_revoked'`。撤销后该 token 的下一次请求拿 401 `invalid token`。
 
@@ -2146,7 +2146,7 @@ curl -X POST http://localhost:9200/api/networks/net_xxx/invite \
 | 403 | `not a member of this network` | 调用者本身不在该网络（[`server.ts` callerRole gate](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)） |
 | 403 | `owner/admin required` | 调用者是 `member` / `viewer`，无权 issue 邀请码 |
 
-接收方用 `anet network join inv_abc123def456` 或 `POST /api/networks/join` 加入。`invite_code` 是 `inv_` 前缀 + 12 字符（`auth.ts:346` `slice(0, 12)`）。
+接收方用 `anet network join inv_abc123def456` 或 `POST /api/networks/join` 加入。`invite_code` 是 `inv_` 前缀 + 12 字符（`auth.ts` `createInvite` `slice(0, 12)`）。
 
 ### POST /api/networks/join
 
