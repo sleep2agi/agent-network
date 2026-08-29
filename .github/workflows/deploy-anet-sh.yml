@@ -1,0 +1,67 @@
+# Auto-deploy docs-site → anet.sh on merge to main.
+#
+# 🔴 anet.sh 一直不接 git 自动部署:合并进 main 不会更新站点,要有人手动
+#    `vercel --prod`(见 deploy/docs-site/README.md)。这个空档反复触发
+#    published-artifact-drift 的 docs-site-drift 红(#1421 一类),并且是纯重复劳动
+#    (一个 session 里手动重部署过 3 次)。本 workflow 把那步自动化。
+#
+# 前置(仓库 Settings → Secrets and variables → Actions,一次性):
+#   - VERCEL_TOKEN        Vercel 部署令牌(唯一真·密钥)
+#   - VERCEL_ORG_ID       docs-site/.vercel/project.json 的 orgId
+#   - VERCEL_PROJECT_ID   同上的 projectId
+# 未设 VERCEL_TOKEN 时本 workflow **优雅跳过**(打 warning、不判红),设好即生效。
+name: deploy-anet-sh
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs-site/**'
+      - '.github/workflows/deploy-anet-sh.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-anet-sh
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard — skip cleanly if VERCEL_TOKEN is not configured
+        id: guard
+        env:
+          TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::warning::VERCEL_TOKEN not set — skipping anet.sh deploy. Add VERCEL_TOKEN / VERCEL_ORG_ID / VERCEL_PROJECT_ID in repo secrets to enable."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.guard.outputs.skip == 'false'
+        with:
+          node-version: '24'
+
+      - name: Deploy to production (build fails closed on dead links)
+        if: steps.guard.outputs.skip == 'false'
+        working-directory: docs-site
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          npm ci
+          # vercel build 用 vitepress;ignoreDeadLinks 未设 ⇒ 有死链 build 失败,
+          # 死链不会被推上线(与手动流程一致)。
+          npx vercel@latest pull --yes --environment=production --token="$VERCEL_TOKEN"
+          npx vercel@latest build --prod --token="$VERCEL_TOKEN"
+          npx vercel@latest deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+          echo "✅ deployed docs-site → anet.sh"
