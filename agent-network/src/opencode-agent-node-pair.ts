@@ -18,8 +18,8 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } fro
 import { opencodeOwnedPathModeIsSafe } from "./opencode-owner-mode";
 import { describeUnsafePath } from "./unsafe-package-path-reason";
 
-export const PAIRED_AGENT_NETWORK_VERSION = "2.3.0-preview.65";
-export const PAIRED_AGENT_NODE_VERSION = "2.5.0-preview.50";
+export const PAIRED_AGENT_NETWORK_VERSION = "2.3.0-preview.66";
+export const PAIRED_AGENT_NODE_VERSION = "2.5.0-preview.51";
 export const PAIRED_AGENT_NODE_SPEC = `@sleep2agi/agent-node@${PAIRED_AGENT_NODE_VERSION}`;
 // Backward-compatible names for the first consumer of the shared pair.
 export const OPENCODE_AGENT_NETWORK_VERSION = PAIRED_AGENT_NETWORK_VERSION;
