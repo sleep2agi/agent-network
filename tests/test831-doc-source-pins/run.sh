@@ -428,40 +428,31 @@ echo "  MUTATION_RED write-baseline-refuses-new-failure rc=$rc12"
 # 🔴 `grep -c` 在计数为 0 时退出码是 1,而这一段 set -e 是开着的
 # ⇒ `VAR=$(grep -c …)` 会**静默**终止整个脚本(没有任何 FAIL 输出)。
 # 而计数为 0 恰恰是这道门**清干净了**才会出现的状态 —— 又一次「门赢了自己就坏」。
+#
+# 🔴 场景**自己造,不借用当时基线里恰好有的条目**。
+#    原来这里写 `target = base[0]` —— 于是 2026-08-30 基线被清空(#1502 那批文档
+#    引用改成符号锚、最后一条失效 pin 随之消失)之后,这一步直接
+#    `IndexError: list index out of range`,整个套件红,**而被测的行为完全正常**。
+#    一个"门赢了自己就坏"的新变种:这次坏的不是判据,是判据的**夹具依赖**了
+#    一个会归零的外部状态。现在造一条只属于本层的合成条目,基线空不空都能跑。
 BL_BEFORE=$(grep -cv '^\s*#\|^\s*$' "$BASELINE" || true)
-# 🔴 造场景用的 SHA 必须是**仓里不可能出现的**合成值,不能借用一个真实提交。
-#    原来这里用 22ed1886 —— 而 #834 之后 changelog 里**真的**有
-#    `blob/22ed1886/server/src/index.ts#L253`,于是下面的复原(全局把
-#    22ed1886 换回 main)会把那条真实的、有意为之的提交钉**改回会漂的 main 引用**,
-#    留下一个不在基线里的失效 pin,L7 末尾因此永远回不了绿。
-#    「合成值恰好不与真实数据相撞」是一个会过期的巧合,不是一条性质。
-#    另外把改过的文件名记下来,复原时只碰这些文件。
-python3 - "$ROOT" <<'PYX'
-import sys, pathlib
-root = pathlib.Path(sys.argv[1])
-FAKE = "0123456789abcdef0123456789abcdef01234567"   # 合成 SHA,仓里不会有
-base = [l.strip() for l in (root/'docs/doc-source-pins-baseline.txt').read_text(encoding='utf-8').splitlines()
-        if l.strip() and not l.lstrip().startswith('#')]
-target = base[0]
-old = f"blob/main/{target}"
-new = f"blob/{FAKE}/{target}"
-touched, n = [], 0
-for f in (root/'docs-site').rglob('*.md'):
-    t = f.read_text(encoding='utf-8')
-    if old in t:
-        n += t.count(old)
-        f.write_text(t.replace(old, new), encoding='utf-8')
-        touched.append(str(f))
-(root/'.l7-touched').write_text("\n".join(touched), encoding='utf-8')
-print(f"    (造场景:把 {target} 的 {n} 处引用改钉合成 SHA,涉及 {len(touched)} 个文件)")
-PYX
+SYNTH_PIN='server/src/index.ts#L99999'
+printf '\n[l7-synth](https://github.com/sleep2agi/agent-network/blob/main/%s)\n' "$SYNTH_PIN" >> "$VICTIM3"
+printf '%s\n' "$SYNTH_PIN" >> "$BASELINE"
+# 先确认这个"已知失效但已在基线里"的状态是绿的 —— 否则下面那步转绿说明不了什么。
+python3 "$CHECK" "$ROOT" >/dev/null || fail "③ 造场景之后门就该是绿的(失效 pin 在基线里)"
+# 现在让引用消失:基线里那条就成了该删的残留。
+cp /tmp/v7.bak "$VICTIM3"
+echo "    (造场景:合成 pin $SYNTH_PIN 进基线,再让文档里的引用消失)"
 out13=$(python3 "$CHECK" "$ROOT" --write-baseline) || fail "③ 有该删的条目时 --write-baseline 却非零"
 printf '%s' "$out13" | grep -qF "已改写基线" || fail "③ 没报告改写"
 BL_AFTER=$(grep -cv '^\s*#\|^\s*$' "$BASELINE" || true)
-[[ "$BL_AFTER" -lt "$BL_BEFORE" ]] || fail "③ 基线没有变小($BL_BEFORE → $BL_AFTER)"
+# 造场景时往基线加了 1 条,所以此处的比较基准是 BL_BEFORE+1。
+[[ "$BL_AFTER" -eq "$BL_BEFORE" ]] \
+  || fail "③ 基线没有把合成的那条删掉(造场景前 $BL_BEFORE,加 1 条之后应删回 $BL_BEFORE,实际 $BL_AFTER)"
 head -1 "$BASELINE" | grep -q '^#' || fail "③ 改写把表头注释弄丢了"
 python3 "$CHECK" "$ROOT" >/dev/null || fail "③ 改写之后门没有转绿"
-echo "  ③ 引用消失时删对了($BL_BEFORE → $BL_AFTER),表头保留,门转绿"
+echo "  ③ 引用消失时删对了($BL_BEFORE → +1 合成条目 → $BL_AFTER),表头保留,门转绿"
 
 # 复原:文档与基线都还原
 cd "$ROOT" && git status >/dev/null 2>&1 || true

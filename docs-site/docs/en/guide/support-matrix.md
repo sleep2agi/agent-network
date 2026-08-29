@@ -66,10 +66,16 @@ The authoritative runtime list is the code (`OK_RUNTIMES`, see `deploy/fleet/ane
 
   | # | Location | Current contents | Blocks the three? |
   |---|---|---|---|
-  | **①** | **`server/src/create-node-validate.ts:20` `RUNTIMES`** | **3 entries** | 🔴 **yes — and it fires first** |
+  | **①** | **`server/src/create-node-validate.ts` `RUNTIMES`** | **3 entries** | 🔴 **yes — and it fires first** |
   | ② | `agent-network/src/normalize-runtime.ts` `SUPPORTED_RUNTIME_NAMES` | **all 7** | no |
   | ③ | `agent-node/src/runtime/create-node-daemon.ts` `VALID_RUNTIMES` | **all 7** | no |
   | ④ | the daemon's `allowedRuntimes` (from config) | operator-configurable | depends on config |
+
+  🔴 **This table is a snapshot of 2026-08-28; row ① no longer holds**: #1298 opened
+  `RUNTIMES` in `create-node-validate.ts` from 3 entries to 7 (`opencode-cli` included),
+  and #1301 converged the three diverging runtime lists onto one. The table keeps the
+  original numbers on purpose — it records that day's diagnosis; this line is the
+  correction for today's reader.
 
   Measured on the Mac Mini daemon, 2026-08-28: `codex-app-server` returns
   `{"ok":false,"error":"runtime_invalid","value":"codex-app-server"}` and the target machine's
@@ -203,8 +209,8 @@ which means the function's error handling holds on macOS (it falls into the catc
 
 | Location | How it throws | Does the response carry `value`? |
 |---|---|---|
-| **hub** `server/src/create-node-validate.ts:45` | `ValidationError("runtime_invalid", { value })` | **yes** |
-| daemon `agent-node/src/runtime/create-node-daemon.ts:310` | `throw new Error("runtime_invalid")` | no |
+| **hub** `server/src/create-node-validate.ts` `validateRuntime` | `ValidationError("runtime_invalid", { value })` | **yes** |
+| daemon `agent-node/src/runtime/create-node-daemon.ts` `VALID_RUNTIMES` 检查 | `throw new Error("runtime_invalid")` | no |
 
 The measured response **carries `value`** ⇒ **the hub gate fired first and the daemon never saw the request**.
 **Fixing only `VALID_RUNTIMES` in `create-node-daemon.ts` will still not get through** — both gates need changing.

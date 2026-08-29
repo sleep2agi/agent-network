@@ -247,7 +247,7 @@ const hub = new CommHub({
 
 | 事件 | 参数 | 说明 |
 |------|------|------|
-| `task` | InboxMessage | 收到任务 —— SDK 已自动 `ack_inbox`（[`client.ts:265`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/src/client.ts#L265) 在 emit 前先 ACK），handler 里**不用**再手动 ack |
+| `task` | InboxMessage | 收到任务 —— SDK 已自动 `ack_inbox`（[`client.ts` `processInbox`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/src/client.ts#L262) 在 emit 前先 ACK），handler 里**不用**再手动 ack |
 | `message` | InboxMessage | 同 task（别名）—— 每条 inbox 消息同时 emit `task` + `message` 两个事件 |
 | `connected` | - | SSE 连接成功 |
 | `disconnected` | - | SSE 断开 |

@@ -62,10 +62,15 @@
 
   | # | 位置 | 现在的内容 | 阻不阻这三个 |
   |---|---|---|---|
-  | **①** | **`server/src/create-node-validate.ts:20` `RUNTIMES`** | **3 个** | 🔴 **阻,而且排最前** |
+  | **①** | **`server/src/create-node-validate.ts` `RUNTIMES`** | **3 个** | 🔴 **阻,而且排最前** |
   | ② | `agent-network/src/normalize-runtime.ts` `SUPPORTED_RUNTIME_NAMES` | **7 个全在** | 不阻 |
   | ③ | `agent-node/src/runtime/create-node-daemon.ts` `VALID_RUNTIMES` | **7 个全在** | 不阻 |
   | ④ | daemon 的 `allowedRuntimes`（来自 config） | 运维可配 | 取决于配置 |
+
+  🔴 **这张表是 2026-08-28 那天的快照，① 已经不再成立**：#1298 把
+  `create-node-validate.ts` 的 `RUNTIMES` 从 3 个放开到 7 个（`opencode-cli` 在内），
+  #1301 又把三处分叉的运行时清单收敛到同一份。表格保留当时的记述**不改数字** ——
+  它记的是那天的诊断；这一行是给今天的读者的更正。
 
   2026-08-28 在 Mac Mini 的 daemon 上实测:`codex-app-server` 返回
   `{"ok":false,"error":"runtime_invalid","value":"codex-app-server"}`,**目标机器 daemon 日志一行都没有**
@@ -192,8 +197,8 @@ Mac Mini（macOS 26.3.1）+ `agent-node@2.5.0-preview.40` + 生产 hub，逐个�
 
 | 位置 | 抛法 | 返回带 `value` 吗 |
 |---|---|---|
-| **hub** `server/src/create-node-validate.ts:45` | `ValidationError("runtime_invalid", { value })` | **带** |
-| daemon `agent-node/src/runtime/create-node-daemon.ts:310` | `throw new Error("runtime_invalid")` | 不带 |
+| **hub** `server/src/create-node-validate.ts` `validateRuntime` | `ValidationError("runtime_invalid", { value })` | **带** |
+| daemon `agent-node/src/runtime/create-node-daemon.ts` `VALID_RUNTIMES` 检查 | `throw new Error("runtime_invalid")` | 不带 |
 
 实测拿到的返回**带 `value`** ⇒ **是 hub 那道先响的，daemon 根本没收到这个请求**。
 **只修 `create-node-daemon.ts` 的 `VALID_RUNTIMES` 仍然过不去** —— 两道闸都要改。
