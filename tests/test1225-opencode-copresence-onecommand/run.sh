@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/safe-rm.sh"
 
 # test1225 — `anet node start <node> --copresence` 的**编排段**，以及它失败时说了什么。
 #
@@ -205,7 +206,7 @@ JS
 chmod 0755 "$PAIR_ROOT/dist/cli.js"
 export ANET_AGENT_NODE_BIN="$PAIR_ROOT/dist/cli.js"
 
-rm -rf "$NODE_DIR/logs"
+safe_rm_rf "$NODE_DIR/logs"
 set +e
 timeout 180s $CLI node start "$NODE" --copresence >/tmp/test1225-start-b.txt 2>&1
 START_B_RC=$?
@@ -237,7 +238,7 @@ assert t.count(old) == 1, f"落盘那一行应恰好出现 1 次,实际 {t.count
 p.write_text(t.replace(old, ""), encoding="utf-8")
 PYX
 cmp -s /tmp/cli.bak "$CLI_SRC" && fail "变异是 no-op（文件逐字未变），红了也什么都没证明"
-rm -rf "$WORK/.anet/nodes/$NODE/logs"
+safe_rm_rf "$WORK/.anet/nodes/$NODE/logs"
 set +e
 timeout 120s $CLI node start "$NODE" --copresence >/tmp/test1225-mut.txt 2>&1
 MUT_RC=$?
@@ -250,7 +251,7 @@ if [ -s "$BRIDGE_LOG" ]; then
 fi
 log "  MUTATION_RED bridge-log-not-persisted rc=$MUT_RC（日志缺失，判据④会红）"
 # 还原后必须回绿：否则上面那个红可能来自别的原因
-rm -rf "$WORK/.anet/nodes/$NODE/logs"
+safe_rm_rf "$WORK/.anet/nodes/$NODE/logs"
 set +e; timeout 120s $CLI node start "$NODE" --copresence >/dev/null 2>&1; set -e
 [ -s "$BRIDGE_LOG" ] || fail "还原之后 bridge 日志没有回来 —— 那个红不是这行变异造成的"
 pass "落盘那一行承重（拿掉→日志消失，还原→日志回来）"
