@@ -80,8 +80,17 @@ vercel deploy --prebuilt --prod --yes
 prebuilt 标记**,而每次日志都在眼前。照文档做的人不会知道自己在烧钱 ——
 所以这里把它写成明确的禁止,而不是只把正确写法放在上面。
 
-自动化版本见 `.github/workflows/docs-site-deploy.yml`(合并进 main 即自动部署,
-并把上面那条判据做成门)。
+**日常已经不需要手动部署**:`.github/workflows/deploy-anet-sh.yml`(#1435)在
+合并进 `main` 且改动命中 `docs-site/**` 时自动跑上面这套预构建流程,
+并把「日志里必须出现 `Using prebuilt build artifacts`」做成了门。
+
+⚠️ **目前只差一个开关**:repo secrets 里 `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID`
+已配好(它们不是密钥,值就在同目录 `vercel-project.json` 里),
+**只剩 `VERCEL_TOKEN` 待 owner 配** —— 在那之前该 workflow 会优雅跳过(打 warning、不判红),
+站点落后仍由 `docs-site-drift` 每日发现并开 tracker issue。
+配好 token 后无需改动任何代码即生效。
+
+本节的手动步骤此后只作**兜底**(workflow 挂了、或要临时验证某个构建)。
 :::
 
 ## 验证:验内容,不验状态码

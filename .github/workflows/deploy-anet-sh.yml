@@ -6,10 +6,11 @@
 #    (一个 session 里手动重部署过 3 次)。本 workflow 把那步自动化。
 #
 # 前置(仓库 Settings → Secrets and variables → Actions,一次性):
-#   - VERCEL_TOKEN        Vercel 部署令牌(唯一真·密钥)
-#   - VERCEL_ORG_ID       docs-site/.vercel/project.json 的 orgId
-#   - VERCEL_PROJECT_ID   同上的 projectId
+#   - VERCEL_TOKEN        Vercel 部署令牌(唯一真·密钥)—— ⚠️ 2026-08-30 仍待 owner 配
+#   - VERCEL_ORG_ID       ✅ 已配(非密钥,值见 deploy/docs-site/vercel-project.json)
+#   - VERCEL_PROJECT_ID   ✅ 已配(同上)
 # 未设 VERCEL_TOKEN 时本 workflow **优雅跳过**(打 warning、不判红),设好即生效。
+# 🔴 跳过期间不会造成盲区:站点落后仍由 docs-site-drift 每日发现并开 tracker issue。
 name: deploy-anet-sh
 
 on:
