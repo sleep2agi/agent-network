@@ -11,7 +11,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { statSync, realpathSync, readFileSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve, win32 } from "node:path";
 import { isReservedEnvKey } from "../shared/reserved-env.js";
 import {
   atomicWriteJson,
@@ -133,7 +133,57 @@ function readPathConf(path: string): PathPin | null {
  *  binary). Non-root owners are allowed by default because nvm/homebrew
  *  installs intentionally place the user's own anet binary outside root
  *  ownership. */
-export function loadAndVerifyAnetBin(env: NodeJS.ProcessEnv = process.env): string {
+/** Case-aware equality for a realpath round-trip.
+ *  POSIX: byte-exact equality (`realpathSync` returns the canonical form
+ *    and we require the input to already be that form).
+ *  Windows: filesystem is case-insensitive and paths flow through junctions
+ *    / short-name aliases, so `realpathSync` can return the same directory
+ *    with a different case or resolved junction target. Normalize both via
+ *    the win32 path helpers and compare case-folded — this preserves the
+ *    "no symlink component" invariant without a false-positive on `C:\Users`
+ *    vs `C:\users`. See #1290 for the realpath-on-Windows discussion.
+ */
+function realpathEquivalent(a: string, b: string, platform: NodeJS.Platform): boolean {
+  if (platform === "win32") {
+    return win32.normalize(a).toLowerCase() === win32.normalize(b).toLowerCase();
+  }
+  return a === b;
+}
+
+// #1290 — Windows `statSync().mode` is a value Node SYNTHESIZES from Windows
+// file attributes (ReadOnly bit + extension-based execute guess), not the
+// actual filesystem ACL. `mode & 0o022` and `mode & 0o111` therefore either
+// throw on files that are actually secure (a `.cjs` file that Node maps to
+// 0o666 fails the group/other-writable check even though ACLs restrict it
+// to Administrators + the current user), or silently accept files that
+// aren't (a script pushed there by an unprivileged user gets the same
+// 0o666 and passes). Neither direction expresses a real security property
+// on Windows.
+//
+// This flag makes that skip visible + shown once per process, so the fact
+// that Windows daemons are running WITHOUT the POSIX-mode supply-chain
+// gate is not a silent security regression. An ACL-based Windows
+// equivalent (icacls / SDDL check via the same `restrictWindowsAcl`
+// pattern that ships in agent-network/src/private-state.ts as of #1137)
+// is filed separately as a follow-up.
+let _windowsPosixModeCheckWarned = false;
+function warnOnceWindowsPosixModeSkipped(warn: (msg: string) => void = console.warn.bind(console)): void {
+  if (_windowsPosixModeCheckWarned) return;
+  _windowsPosixModeCheckWarned = true;
+  warn(
+    `[anet-daemon] #1290 — Windows POSIX-mode supply-chain checks ` +
+    `(group/other writability, executability) SKIPPED. Node's synthetic ` +
+    `st.mode does not reflect Windows filesystem ACLs; enforce with ` +
+    `icacls that ANET_BIN_ABS is owned + writable only by trusted principals.`,
+  );
+}
+/** Test-only: reset the once-per-process warning latch so a test can
+ *  observe the warning firing on the first Windows-platform call. */
+export function _resetWindowsPosixModeWarnLatchForTest(): void {
+  _windowsPosixModeCheckWarned = false;
+}
+
+export function loadAndVerifyAnetBin(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): string {
   let pin: PathPin | null = null;
   const confPath = env.ANET_DAEMON_PATH_CONF || "/etc/anet-daemon/path.conf";
   pin = readPathConf(confPath);
@@ -141,54 +191,69 @@ export function loadAndVerifyAnetBin(env: NodeJS.ProcessEnv = process.env): stri
     pin = { abs: env.ANET_BIN_ABS, sha256: env.ANET_BIN_SHA256 };
   }
   if (!pin && env.ANET_BIN_ABS) {
-    throw unsafePathHelp("anet_bin_source", 
+    throw unsafePathHelp("anet_bin_source",
       "ANET_BIN_ABS env fallback disabled (set ANET_DAEMON_ALLOW_ENV_BIN=1 only for Docker/dev/manual ops; production trust root is /etc/anet-daemon/path.conf)",
       "install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$(node -e \\\"console.log(require('fs').realpathSync(process.argv[1]))\\\" $(command -v anet))\" | sudo tee /etc/anet-daemon/path.conf >/dev/null",
     );
   }
   if (!pin) {
-    throw unsafePathHelp("anet_bin_source", 
+    throw unsafePathHelp("anet_bin_source",
       "no ANET_BIN_ABS resolved from /etc/anet-daemon/path.conf; env fallback is Docker/dev/manual-ops convenience and requires ANET_DAEMON_ALLOW_ENV_BIN=1",
       "install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$(node -e \\\"console.log(require('fs').realpathSync(process.argv[1]))\\\" $(command -v anet))\" | sudo tee /etc/anet-daemon/path.conf >/dev/null",
     );
   }
-  // ① absolute
-  if (!pin.abs.startsWith("/")) {
-    throw unsafePathHelp("anet_bin_shape", 
+  // ① absolute — cross-platform. Was `startsWith("/")` which returned
+  //    false for every Windows drive-letter path (`C:\...`), so the
+  //    Windows daemon could register + heartbeat + receive doorbells
+  //    but silently refused to fork any node. See #1290.
+  if (!isAbsolute(pin.abs)) {
+    throw unsafePathHelp("anet_bin_shape",
       `not absolute: ${pin.abs}`,
       `export ANET_BIN_ABS=$(node -e "console.log(require('fs').realpathSync(process.argv[1]))" ${quoteSh(pin.abs)})`,
     );
   }
-  // ② no symlink path component (realpath equals self)
+  // ② no symlink path component (realpath equals self). Case-aware on
+  //    Windows so a junction- or case-normalized `realpathSync` result
+  //    doesn't fail this check on an otherwise-correct absolute path.
   const real = realpathSync(pin.abs);
-  if (real !== pin.abs) {
-    throw unsafePathHelp("anet_bin_shape", 
+  if (!realpathEquivalent(real, pin.abs, platform)) {
+    throw unsafePathHelp("anet_bin_shape",
       `contains symlink: ${pin.abs} -> ${real}`,
       `export ANET_BIN_ABS=${quoteSh(real)}`,
     );
   }
   verifyAnetBinIdentity(pin.abs);
-  // ③ stat: non-root owner is acceptable for nvm/homebrew/user installs.
   const st = statSync(pin.abs);
-  if (st.uid !== 0 && env.ANET_DAEMON_STRICT_ROOT_BIN === "1") {
-    throw unsafePathHelp("anet_bin_permission", 
-      `owner not root (uid=${st.uid})`,
-      `sudo chown root:root ${quoteSh(pin.abs)} || unset ANET_DAEMON_STRICT_ROOT_BIN`,
-    );
+  if (platform === "win32") {
+    // Windows: st.mode is synthetic; POSIX bit checks don't apply. See
+    // the docblock on warnOnceWindowsPosixModeSkipped for the rationale +
+    // the ACL-based follow-up. Print the visible acknowledgement once
+    // and skip ③④⑤ entirely on Windows.
+    warnOnceWindowsPosixModeSkipped();
+  } else {
+    // ③ stat: non-root owner is acceptable for nvm/homebrew/user installs.
+    if (st.uid !== 0 && env.ANET_DAEMON_STRICT_ROOT_BIN === "1") {
+      throw unsafePathHelp("anet_bin_permission",
+        `owner not root (uid=${st.uid})`,
+        `sudo chown root:root ${quoteSh(pin.abs)} || unset ANET_DAEMON_STRICT_ROOT_BIN`,
+      );
+    }
+    // ④ not group/other writable
+    if ((st.mode & 0o022) !== 0) {
+      const before = (st.mode & 0o777).toString(8);
+      throw unsafePathHelp("anet_bin_permission",
+        `writable by group/other (mode=${before})`,
+        `chmod go-w ${quoteSh(pin.abs)}`,
+      );
+    }
+    // ⑤ executable
+    if ((st.mode & 0o111) === 0) {
+      throw unsafePathHelp("anet_bin_permission", "not executable", `chmod +x ${quoteSh(pin.abs)}`);
+    }
   }
-  // ④ not group/other writable
-  if ((st.mode & 0o022) !== 0) {
-    const before = (st.mode & 0o777).toString(8);
-    throw unsafePathHelp("anet_bin_permission", 
-      `writable by group/other (mode=${before})`,
-      `chmod go-w ${quoteSh(pin.abs)}`,
-    );
-  }
-  // ⑤ executable
-  if ((st.mode & 0o111) === 0) {
-    throw unsafePathHelp("anet_bin_permission", "not executable", `chmod +x ${quoteSh(pin.abs)}`);
-  }
-  // hash match install-time witness (when provided, REQUIRED to match)
+  // hash match install-time witness (when provided, REQUIRED to match).
+  // Runs on all platforms — sha256 is the strongest cross-platform
+  // integrity check we have and does not care about mode bits or ACLs.
   if (pin.sha256) {
     const actual = createHash("sha256").update(readFileSync(pin.abs)).digest("hex");
     if (actual !== pin.sha256) {
