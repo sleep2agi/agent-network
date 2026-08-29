@@ -304,14 +304,43 @@ async function waitUntilSessionIdle(
   throw new Error(`OpenCode session remained busy for ${timeoutMs}ms`);
 }
 
-function parseMessageReply(message: any): string {
-  const parts: string[] = [];
+// OpenCode 1.18.1 message parts are a 13-variant discriminated union (per its
+// OpenAPI /doc: TextPart, ToolPart, ReasoningPart, FilePart, PatchPart,
+// StepStartPart, StepFinishPart, SnapshotPart, AgentPart, RetryPart,
+// CompactionPart, SubtaskPart, FilePartSource[Text]). A completed assistant
+// turn can legitimately have zero TextParts — a pure tool-call turn is the
+// canonical example. Reporting that shape as a failure to CommHub (which is
+// what the caller used to do when this returned "") turned a valid outcome
+// into a false red on the fleet dashboard; see #1451.
+//
+// Contract now: always returns a non-empty string. If any TextPart is
+// present, returns the joined+trimmed text (unchanged behavior). Otherwise
+// returns a bracketed marker naming the non-text part types the model
+// emitted, so the network sees "assistant did work but did not reply in
+// text" rather than an empty reply that downstream layers might silently
+// drop.
+export function parseMessageReply(message: any): string {
+  const textOut: string[] = [];
+  const nonTextTypes: string[] = [];
   for (const part of message?.parts ?? []) {
     if (part?.type === "text" && typeof part.text === "string") {
-      parts.push(part.text);
+      textOut.push(part.text);
+      continue;
+    }
+    if (typeof part?.type === "string" && part.type !== "step-start" && part.type !== "step-finish") {
+      // step-{start,finish} are paired book-ends OpenCode emits around every
+      // reply. On their own they say nothing about what the model did, so
+      // they are omitted from the fallback marker to keep it informative.
+      nonTextTypes.push(part.type);
     }
   }
-  return parts.join("").trim();
+  const text = textOut.join("").trim();
+  if (text) return text;
+  if (nonTextTypes.length > 0) {
+    const unique = Array.from(new Set(nonTextTypes)).sort();
+    return `[opencode: assistant responded with ${unique.join(", ")} (no text)]`;
+  }
+  return "[opencode: assistant returned no reply]";
 }
 
 function parseModelRef(model: string | undefined): { providerID: string; modelID: string } | undefined {
@@ -534,10 +563,12 @@ export async function openVettedOpenCodeCopresence(
           // idle admission or before an unconfirmed POST.
           evidence?.onSubmitted?.();
           evidence?.onConsumed?.();
+          // parseMessageReply now always returns a non-empty string (either
+          // the joined text or a marker naming the non-text part types the
+          // model emitted). #1451: the old `if (!replyText) throw` here
+          // turned any pure tool-call turn — a valid completed opencode
+          // outcome — into a false failure report on CommHub. Removed.
           const replyText = parseMessageReply(message);
-          if (!replyText) {
-            throw new Error("OpenCode POST /session/:id/message returned no assistant text");
-          }
           return {
             replyText,
             stdout: JSON.stringify(message),
