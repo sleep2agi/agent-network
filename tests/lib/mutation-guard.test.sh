@@ -6,6 +6,11 @@
 #    所以这里必须**喂一个 no-op 变异,看它拒不拒**。
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 🔴 不用裸 `rm -rf "$VAR"` —— 2026-06-16 有过 `rm -rf $HOME` 抹掉真实项目的事故,
+# tests/ 下由 lint-no-bare-rm-rf.sh 一律拒。safe_rm_rf 只放行 /tmp/* 前缀,越界
+# 直接 exit 99 且不执行 rm。本脚本的 $WORK 来自 mktemp -d,落在 /tmp,符合。
+# shellcheck disable=SC1091
+source "$HERE/safe-rm.sh"
 
 PASS=0; FAIL=0
 ok(){ PASS=$((PASS+1)); printf '  PASS %s\n' "$*"; }
@@ -16,7 +21,7 @@ mutation_guard_report(){ REPORTED="$*"; }   # 捕获报告,验证它真的报了
 # shellcheck disable=SC1091
 source "$HERE/mutation-guard.sh"
 
-WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
+WORK="$(mktemp -d)"; trap 'safe_rm_rf "$WORK"' EXIT
 F="$WORK/target.txt"
 
 echo "== mutation-guard meta =="
