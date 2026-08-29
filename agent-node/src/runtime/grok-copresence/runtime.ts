@@ -1,6 +1,7 @@
 import { spawn as spawnChild, type ChildProcess } from "child_process";
 import { createHash, randomUUID } from "crypto";
 import {
+  chmodSync,
   closeSync,
   constants,
   existsSync,
@@ -14,6 +15,7 @@ import {
   type Stats,
 } from "fs";
 import { dirname, isAbsolute, join, resolve } from "path";
+import { createRequire } from "module";
 import {
   assertCopresenceSupported,
   copresenceCapabilities,
@@ -3689,11 +3691,40 @@ function waitForLock(holder: ChildProcess, path: string): Promise<void> {
   });
 }
 
+/**
+ * #1399 — npm 打包/解包会剥掉 node-pty prebuilds/darwin-* 里 spawn-helper 的
+ * 执行位（2026-08-29 全新安装实测**每次必现**），之后所有 PTY spawn 抛
+ * `posix_spawnp failed`，报错完全不指向根因。
+ *
+ * 修在这里而不是 package.json postinstall：postinstall 会让
+ * `bun install --frozen-lockfile` 判定 lockfile 变更而直接失败
+ * （Windows Codex smoke 于 PR #1406 首版实测炸在这），生命周期钩子还会被
+ * bun 的 untrusted 机制拦截。运行时自愈跟着 dist 走，任何安装方式都覆盖。
+ * best-effort：非 darwin / 路径不存在 / chmod 失败都静默放过，
+ * 让原本的 spawn 错误继续冒出来。
+ */
+export function ensurePtySpawnHelperExecutable(
+  resolvePkg: (id: string) => string = createRequire(import.meta.url).resolve,
+  chmod: (p: string, mode: number) => void = chmodSync,
+  exists: (p: string) => boolean = existsSync,
+): void {
+  try {
+    const ptyRoot = dirname(resolvePkg("node-pty/package.json"));
+    for (const arch of ["darwin-arm64", "darwin-x64"]) {
+      const helper = join(ptyRoot, "prebuilds", arch, "spawn-helper");
+      if (exists(helper)) {
+        try { chmod(helper, 0o755); } catch { /* best-effort */ }
+      }
+    }
+  } catch { /* node-pty 缺失时让下面的 import 错误负责报告 */ }
+}
+
 async function defaultPtySpawn(
   binary: string,
   args: string[],
   options: { name: string; cols: number; rows: number; cwd: string; env: Record<string, string> },
 ): Promise<GrokPtyLike> {
+  ensurePtySpawnHelperExecutable();
   let nodePty: typeof import("node-pty");
   try { nodePty = await import("node-pty"); } catch {
     throw new Error("grok copresence requires optional dependency node-pty; reinstall @sleep2agi/agent-node");
