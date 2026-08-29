@@ -3685,6 +3685,21 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       return { ok: false, error: "daemon_cross_tenant", message: "daemon and child are in different networks" };
     }
 
+    // #1448 finding-4 — daemon 必须是该 child 的**权威创建者**,镜像 start_node 的
+    // daemon_child_mismatch。此前 stop/delete 接受调用方传入的 daemon_node_id,只校验
+    // 它存在 + 同网,不验它真的创建了这个 child。同网调用方传错 daemon_node_id → 门铃
+    // 路由到错 daemon。🔴 f3(#1453) 合入后更糟:错 daemon 无该 child 的 map entry → 走
+    // 收敛分支 sweep(错机器 pgrep 空) + ack stopped → hub 假收敛 stopped、child 仍在
+    // 正确机器上跑(旧 noop 至少留下可见的卡死态)。网络 scope 只挡跨租户,网内是 footgun。
+    //
+    // 用「确定性不匹配」判据:authority 已知(child 有 create 记录)且不等 → 拒。不对
+    // authority==null(create 记录被裁剪的旧 child)加拒,避免给它们的 stop/delete 引入
+    // 新失败面——handler 的 daemon_node_id??resolveDaemonForChild 已兜住无法解析的情形。
+    const authoritativeDaemonId = resolveDaemonForChild(args.child_node_id);
+    if (authoritativeDaemonId && authoritativeDaemonId !== args.daemon_node_id) {
+      return { ok: false, error: "daemon_child_mismatch", message: "daemon_node_id is not this child's authoritative creator daemon" };
+    }
+
     // State machine gate.
     const state = node.lifecycle_state ?? "active";
     if (args.action === "stop" && state !== "active") {

@@ -409,6 +409,28 @@ describe("get_stop_request + ack_stop_request — daemon flow", () => {
     expect(JSON.parse(audits[0].detail).backup_path).toBe("/home/u/.anet/deleted/1719647200000-sd-child-a");
   });
 
+  // #1448 finding-4 — stop/delete 必须校验 daemon 是 child 的权威创建者(镜像 start)。
+  // 改前只校验 daemon 存在+同网 → 同网调用方传错 daemon_node_id,门铃路由到错 daemon。
+  // f3 合入后错 daemon 会 sweep 空 + ack stopped → hub 假收敛 stopped 而 child 仍在跑。
+  test("#1448 finding-4: stop/delete reject a wrong same-network daemon_node_id (daemon_child_mismatch)", async () => {
+    setupAlphaNetwork();
+    // authority: CHILD_A 由 DAEMON_A 创建(resolveDaemonForChild 读 node_create_requests)
+    db.run(
+      `INSERT INTO node_create_requests(request_id,daemon_node_id,child_name,network_id,runtime,model,flags_json,env_keys,status,created_at,created_by_token,child_node_id)
+       VALUES(?1,?2,?3,?4,'claude-agent-sdk','x','{}','[]','succeeded',1,'t',?5)`,
+      [`cr_${CHILD_A_ID.slice(5)}`, DAEMON_A_ID, CHILD_A_ALIAS, NET_A, CHILD_A_ID],
+    );
+    // 一个同网、存在、但没创建 CHILD_A 的 daemon
+    const DAEMON_B = "node_sd_daemon_b";
+    seedDaemon(NET_A, DAEMON_B, "sd-daemon-b", USER_A_ID, "tok_sd_daemon_b");
+    const u = buildHandlers(USER_A_ID);
+    // 错 daemon → mismatch(stop + delete 都拦)。改前会放行、路由到错 daemon。
+    expect((await call(u.stop_node, { child_node_id: CHILD_A_ID, daemon_node_id: DAEMON_B, network_id: NET_A })).error).toBe("daemon_child_mismatch");
+    expect((await call(u.delete_node, { child_node_id: CHILD_A_ID, daemon_node_id: DAEMON_B, confirm_alias: CHILD_A_ALIAS, network_id: NET_A })).error).toBe("daemon_child_mismatch");
+    // 正确 daemon → 放行(回归钉)
+    expect((await call(u.stop_node, { child_node_id: CHILD_A_ID, daemon_node_id: DAEMON_A_ID, network_id: NET_A })).ok).toBe(true);
+  });
+
   test("daemon ack 'stop_failed' → lifecycle_state=stop_failed, request error captured", async () => {
     setupAlphaNetwork();
     const userTools = buildHandlers(USER_A_ID);
