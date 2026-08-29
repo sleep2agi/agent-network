@@ -928,6 +928,88 @@ describe("Grok copresence runtime integration", () => {
     }
   }, 15_000);
 
+  // #1413 残留：窗口的**关闭条件**。issue 报告人审计时点出，#1416 的正确性押在
+  // 「轮转发生在 ack 之后 3000ms 内」这条没实测过的假设上；轮转迟到就照旧崩。
+  // 下面三条钉的是改动后的两条性质：①观察到轮转就立刻关窗（防篡改**更早**恢复）
+  // ②窗口外的截断仍然 fatal（防篡改语义一字未改）。
+  test("🔴 窗口内观察到轮转后，窗口立刻关闭 —— 紧接着的第二次截断必须仍然 fatal (#1413 残留)", async () => {
+    const fixture = new RuntimeFixture();
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await openGrokCopresenceRuntime({ ...fixture.options(), model: "grok-4.5" });
+      await waitFor(() => runtime!.tuiReady);
+      await runtime.submit({ taskId: "warm", from: "reviewer", text: "hi", timeoutMs: 4_000 });
+      const chatPath = join(
+        grokSessionDirectory(fixture.grokHome, fixture.cwd, SESSION),
+        "chat_history.jsonl",
+      );
+      await waitFor(() => existsSync(chatPath) && readFileSync(chatPath).length > 0);
+      await Bun.sleep(150);
+
+      const decision = await runtime.switchModel("grok-4.6");
+      expect(decision).toMatchObject({ ok: true, route: "hot" });
+
+      // 第一次轮转：窗口内，应当 re-arm 并存活。
+      truncateSync(chatPath, 0);
+      await Bun.sleep(300);
+      expect(runtime.isRunning).toBe(true);
+
+      // 🔴 承重：窗口此刻应该**已经关了**（轮转已被观察到），
+      //    所以再来一次截断就是**篡改**，必须 fatal。
+      //    改动前窗口会一直开到 grace 到期，这一条会红。
+      await runtime.submit({ taskId: "second", from: "reviewer", text: "hi again", timeoutMs: 4_000 });
+      await waitFor(() => readFileSync(chatPath).length > 0, 4_000);
+      await Bun.sleep(100);
+      truncateSync(chatPath, 0);
+      await waitFor(() => !runtime!.isRunning, 5_000);
+      expect(runtime.isRunning).toBe(false);
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 20_000);
+
+  test("🔴 从未开过窗口时截断 chat_history 仍然 fatal —— 防篡改语义没有被放宽", async () => {
+    const fixture = new RuntimeFixture();
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await openGrokCopresenceRuntime({ ...fixture.options(), model: "grok-4.5" });
+      await waitFor(() => runtime!.tuiReady);
+      await runtime.submit({ taskId: "warm", from: "reviewer", text: "hi", timeoutMs: 4_000 });
+      const chatPath = join(
+        grokSessionDirectory(fixture.grokHome, fixture.cwd, SESSION),
+        "chat_history.jsonl",
+      );
+      await waitFor(() => existsSync(chatPath) && readFileSync(chatPath).length > 0);
+      await Bun.sleep(150);
+      truncateSync(chatPath, 0);              // 没有任何换模型窗口
+      await waitFor(() => !runtime!.isRunning, 5_000);
+      expect(runtime.isRunning).toBe(false);  // 仍然 fatal
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 20_000);
+
+  test("switchModel 的每条提前返回路径都不会留下开着的窗口（防泄漏）", async () => {
+    const fixture = new RuntimeFixture();
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await openGrokCopresenceRuntime({ ...fixture.options(), model: "grok-4.5" });
+      await waitFor(() => runtime!.tuiReady);
+      const internals = runtime as unknown as { modelSwitchInFlight: string | null };
+
+      expect(await runtime.switchModel("grok-4.5")).toMatchObject({ ok: false, code: "unchanged" });
+      expect(internals.modelSwitchInFlight).toBeNull();
+
+      expect(await runtime.switchModel("")).toMatchObject({ ok: false });
+      expect(internals.modelSwitchInFlight).toBeNull();
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 15_000);
+
   test("continues exactly once across prefix-preserving atomic chat rewrites", async () => {
     const fixture = new RuntimeFixture();
     let runtime: GrokCopresenceRuntimeSession | undefined;

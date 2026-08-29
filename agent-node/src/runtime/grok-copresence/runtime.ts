@@ -93,10 +93,25 @@ const MAX_TAIL_READ_BYTES = 4 * 1024 * 1024;
 const MAX_LIFECYCLE_LINE_BYTES = 256 * 1024;
 const MAX_PENDING_AUTOMATIC_PERMISSIONS = 64;
 const MAX_RESUME_AUDIT_BYTES = 64 * 1024 * 1024;
-// #1416 review — bounded grace after a hot model-switch ack before the tail-
-// tamper window closes, so a rotation grok emits a few ms AFTER the ACP
-// set_model ack is still recovered-by-rearm instead of hitting failFatal.
-const MODEL_SWITCH_HOT_GRACE_MS = 3000;
+// 换模型窗口的**硬上限**（#1413 残留）。
+//
+// #1416 用一个固定 3000ms 的 grace 覆盖「grok ack 了 set_model、几毫秒后才轮转
+// chat_history」。但 issue 报告人自己在审计里点出：整条正确性押在
+// **「轮转发生在 ack 之后 3000ms 内」**这条**没有实测过**的假设上 ——
+// 大会话 / 忙碌 session / grok 慢的时候轮转迟到，窗口已关，boundary error
+// 走回原来的 failFatal，**#1413 的原始现象照旧复现**。
+//
+// 这里改的是窗口的**关闭条件**，不只是它的长度：
+//   • 观察到轮转就**立刻关**（见 pollLogs 的 boundary 分支）——
+//     典型窗口从"固定 3s"变成"毫秒级"，防篡改检查恢复得**更早**，
+//     这是安全性上的**收紧**，不是放松；
+//   • 只有在**始终没观察到轮转**时才走到这个上限。
+//
+// 🔴 上限仍然是个猜的数（真机 ack→轮转时延我拿不到：需要一台真 grok 节点，
+//    而生产节点和别人在用的 grok 测试节点都不能碰）。所以这里只做两件能确定
+//    的事：把典型暴露时间**缩短**，把尾部风险窗口**拉长**。要把这个数变成
+//    实测值，仍需 issue 里写的那条真机时延测量。
+const MODEL_SWITCH_ROTATION_WINDOW_CAP_MS = 30_000;
 const UNIX_SOCKET_PATH_MAX_BYTES = 100;
 const GROK_TUI_READY_TEXT = "Shift+Tab:mode";
 const GROK_TUI_SHORTCUTS_TEXT = "Ctrl+x:shortcuts";
@@ -1189,9 +1204,21 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     const timer = setTimeout(() => {
       this.modelSwitchWindowTimer = null;
       if (this.modelSwitchInFlight === token) this.modelSwitchInFlight = null;
-    }, MODEL_SWITCH_HOT_GRACE_MS);
+    }, MODEL_SWITCH_ROTATION_WINDOW_CAP_MS);
     timer.unref?.();
     this.modelSwitchWindowTimer = timer;
+  }
+
+  /**
+   * 立刻关闭换模型窗口（轮转已被观察到，窗口的目的达成）。
+   * 定时器和 flag 一起清 —— 只清 flag 会留下一个稍后把**新**窗口关掉的定时器。
+   */
+  private closeModelSwitchWindow(): void {
+    if (this.modelSwitchWindowTimer) {
+      clearTimeout(this.modelSwitchWindowTimer);
+      this.modelSwitchWindowTimer = null;
+    }
+    this.modelSwitchInFlight = null;
   }
 
   private rearmJsonlTailsAfterModelSwitch(): void {
@@ -2508,7 +2535,12 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       // === null) the original fatal path is unchanged: the tamper check holds.
       if (this.modelSwitchInFlight !== null && error instanceof GrokJsonlTailBoundaryError) {
         this.rearmJsonlTailsAfterModelSwitch();
-        this.log("[grok-copresence] re-armed JSONL tail after model-switch rotation (#1413)");
+        // 🔴 观察到轮转 = 这个窗口存在的理由已经兑现，**立刻关掉它**，
+        //    不要把它开满上限。窗口开着的每一毫秒,防篡改检查都是关掉的;
+        //    #1416 那版会一直开到 grace 到期,即便轮转早就发生过了。
+        //    早关是安全性上的收紧 —— 也正因为有它,上限才敢放宽到覆盖慢轮转。
+        this.closeModelSwitchWindow();
+        this.log("[grok-copresence] re-armed JSONL tail after model-switch rotation; window closed (#1413)");
         return;
       }
       const failureSubcode = error instanceof GrokJsonlTailBoundaryError
