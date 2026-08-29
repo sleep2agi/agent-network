@@ -36,6 +36,7 @@ import {
 } from "../src/copresence-identity";
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
+import { processVanished, resolveOwnedRoots } from "../src/owned-roots";
 import { createConnection as netCreateConnection, createServer as netCreateServer } from "net";
 import { PassThrough } from "stream";
 import { checkbox, confirm, select } from "@inquirer/prompts";
@@ -9450,11 +9451,13 @@ Stop a running agent node.
       if (roots.length === 0) {
         const legacy = findNodeProcessesByAlias(displayName);
         if (legacy === null) throw new Error("NODE_PROCESS_TABLE_UNAVAILABLE");
-        roots = legacy.map(pid => {
-          const birth = processBirth(pid);
-          if (!birth) throw new Error(`NODE_OWNER_BIRTH_UNAVAILABLE: pid=${pid}`);
-          return { pid, birth, role: "agent" as const };
-        });
+        // #1422 — `ps` 拿到 pid 与读 `/proc/<pid>/stat` 之间有一个窗口:进程可能
+        // 已经退出。旧代码把「读不到 birth」一律当致命错误,于是 `anet node stop`
+        // 以 exit(1) 结束(test225 报 `node stop failed for <X>`)。
+        // 🔴 那不是失败 —— **stop 的目的就是让进程没了**,「它在我读它之前先退了」
+        // 正是想要的结果。resolveOwnedRoots 只放过**确证已消失**的(processVanished
+        // 仅在 ESRCH 时为真),进程仍在却读不到 birth 依旧抛。
+        roots = resolveOwnedRoots(legacy, { birth: processBirth, vanished: (pid) => processVanished(pid) });
       }
       stopProcesses = snapshotOwnedProcessTree(roots);
       writeLifecycleOwner(resolved.id, {
