@@ -46,7 +46,7 @@ _actual=$( { printf 'blob %d\0' "$(wc -c < "$_self")"; cat "$_self"; } | sha1sum
   echo "FAIL: 镜像里的 run.sh 与 SOURCE_COMMIT=$SOURCE_COMMIT 声称的不是同一份" >&2
   echo "      期望 blob $RUNSH_BLOB,实际 $_actual" >&2; exit 1; }
 
-echo "# test831 — doc source-pin floor gate"
+echo "# test831 — doc source-pin gate (🔴 三个计数是 -eq 精确相等,不是下界;名字里的 floor 是历史遗留)"
 echo "source_commit=$SOURCE_COMMIT"
 echo "runsh_blob=$_actual"
 echo "python=$(python3 -V 2>&1)"
@@ -169,6 +169,8 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 #     docs-site/docs/troubleshooting/codex-tui-node-restart.md
 #     docs-site/docs/en/troubleshooting/codex-tui-node-restart.md
 #   抬分母(123 → 125),覆盖面变大;CI 先红("预期扫 123,实际 125")才来抬,顺序对。
+# 🔴 下面三条是 `-eq`(精确相等),**不是下界** —— job 名里的 "floor" 会误导。
+#    新增/删除文档都会让 files 变,必须回来按实际值更新,并写清变的是哪个数、为什么。
 [[ "$files" -eq 127 ]] || fail "预期扫 127 个文档文件(= git ls-files 的结果),实际 $files"
 [[ "$uniq"  -eq 11  ]] || fail "预期 11 个唯一 pin,实际 $uniq"
 [[ "$occ"   -eq 28 ]] || fail "预期 28 处原始出现,实际 $occ"
