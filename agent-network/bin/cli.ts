@@ -5397,6 +5397,19 @@ async function createCommand(idOverride?: string) {
         opts.session = picked;
         console.log(`[anet] 绑定已有 Claude session: ${picked.slice(0, 8)}…`);
       }
+    } else if (opts.resume === "true") {
+      // #1469 f4 —— 裸 `--resume`（无 id）在非 TTY 里没有任何拿到 id 的办法：
+      // 选单要 TTY，--resume-latest 没打。以前会一路走到底、建出一个带全新
+      // session 的节点 —— 用户打了 --resume 却没有 resume，且零警告。
+      //
+      // 只在**确实打了裸 --resume** 时报错：没打 resume 的 claude-code-cli
+      // 创建在非 TTY 下建新 session 是既有的正确行为，不能被这条波及。
+      console.error("[anet] ❌ --resume 没有给 session id，而当前不是交互终端，无法弹出选单");
+      console.error("[anet]    脚本里请二选一：");
+      console.error("[anet]      anet node create <name> --resume <session-id>");
+      console.error("[anet]      anet node create <name> --resume-latest");
+      console.error("[anet]    查看可用 session: anet session ls");
+      process.exit(1);
     }
   }
 
