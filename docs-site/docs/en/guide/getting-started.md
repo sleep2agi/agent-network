@@ -100,7 +100,7 @@ Measured 2026-08-27 (one `anet hub start` per version in a clean container, no `
 |---|---|
 | `2.3.0-preview.47` (`latest` at the time) | `anet-3ce2750defe04d9ab3baf0` — **random**, with a change-on-first-login notice |
 | `2.3.0-preview.49` (`preview` at the time) | `anet-7fe4eddb08f648dcbd7fcd` — **random**, same notice |
-| `2.3.0-preview.61` (current `preview`) | Also **random** — not re-measured per version: `server/src/auth.ts`, which generates it, has had **zero commits** since `.49` shipped (2026-08-27T02:25Z); the logic is byte-identical |
+| `2.3.0-preview.62` (current `preview`) | Also **random** — not re-measured per version: `server/src/auth.ts`, which generates it, has had **zero commits** since `.49` shipped (2026-08-27T02:25Z); the logic is byte-identical |
 
 Neither run printed the literal `anethub` anywhere.
 

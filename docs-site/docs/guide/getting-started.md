@@ -98,7 +98,7 @@ anet hub dashboard
 |---|---|
 | `2.3.0-preview.47`(当时的 `latest`) | `anet-3ce2750defe04d9ab3baf0` —— **随机串**,并提示首次登录后要改 |
 | `2.3.0-preview.49`(当时的 `preview`) | `anet-7fe4eddb08f648dcbd7fcd` —— **随机串**,同上 |
-| `2.3.0-preview.61`(当前 `preview`) | 同为**随机串** —— 未逐版本重测:生成密码的 `server/src/auth.ts` 自 `.49` 发布(2026-08-27T02:25Z)起**零提交**,逻辑逐字未变 |
+| `2.3.0-preview.62`(当前 `preview`) | 同为**随机串** —— 未逐版本重测:生成密码的 `server/src/auth.ts` 自 `.49` 发布(2026-08-27T02:25Z)起**零提交**,逻辑逐字未变 |
 
 两次都没有出现字面量 `anethub`。
 
