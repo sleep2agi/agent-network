@@ -1,7 +1,7 @@
 # Auto-deploy docs-site → anet.sh on merge to main.
 #
 # 🔴 anet.sh 一直不接 git 自动部署:合并进 main 不会更新站点,要有人手动
-#    `vercel --prod`(见 deploy/docs-site/README.md)。这个空档反复触发
+#    预构建部署(见 deploy/docs-site/README.md)。这个空档反复触发
 #    published-artifact-drift 的 docs-site-drift 红(#1421 一类),并且是纯重复劳动
 #    (一个 session 里手动重部署过 3 次)。本 workflow 把那步自动化。
 #
@@ -63,5 +63,17 @@ jobs:
           # 死链不会被推上线(与手动流程一致)。
           npx vercel@latest pull --yes --environment=production --token="$VERCEL_TOKEN"
           npx vercel@latest build --prod --token="$VERCEL_TOKEN"
-          npx vercel@latest deploy --prebuilt --prod --token="$VERCEL_TOKEN"
-          echo "✅ deployed docs-site → anet.sh"
+          # 🔴 退出码不穿管道:先落盘再看,否则 $? 抓的是 tee/grep 的。
+          npx vercel@latest deploy --prebuilt --prod --token="$VERCEL_TOKEN" > deploy.log 2>&1 || rc=$?
+          cat deploy.log
+          [ "${rc:-0}" -eq 0 ] || { echo "::error::部署失败(rc=$rc)"; exit "$rc"; }
+          # 🔴 #1163 是一条成本红线:绝不让 Vercel 远端构建(远端构建费用曾达 100 美元/月)。
+          #    这一行是它的放行判据 —— **做成断言,不是打印给人看**。
+          #    实测 2026-08-30:照旧 README 手工部署 4 次,4 次全走远端构建、0 次 prebuilt,
+          #    而每次日志都在眼前。「靠人看日志」在这件事上是 0/4。
+          grep -Fq 'Using prebuilt build artifacts' deploy.log || {
+            echo "::error::日志里没有 'Using prebuilt build artifacts' —— 这次很可能走了远端构建(#1163 成本红线)。"
+            echo "::error::检查 deploy 是否仍带 --prebuilt、以及 vercel build 是否真的产出了 .vercel/output。"
+            exit 1
+          }
+          echo "✅ deployed docs-site → anet.sh (prebuilt confirmed)"

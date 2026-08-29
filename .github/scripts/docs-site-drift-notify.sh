@@ -8,7 +8,7 @@
 # ⇒ 「Actions 里变红」**已被实测证明不是一个通知渠道**。
 #
 # 而这道门红了指向的动作是唯一且明确的(从 origin/main 的 worktree 跑
-# `vercel --prod`),所以它值得被送出来。
+# `vercel deploy --prebuilt --prod`),所以它值得被送出来。
 #
 # ## 判据:一条 tracker issue,开/更新/关,不刷屏
 #
@@ -59,7 +59,11 @@ cd /tmp/anet-site/docs-site
 cp -r <主checkout>/docs-site/.vercel .vercel
 ln -sfn <主checkout>/docs-site/node_modules node_modules
 npm run build          # ignoreDeadLinks 未设,有死链会 fail —— 别带着死链上线
-vercel --prod --yes    # 期望结尾 Aliased: https://www.anet.sh
+# 🔴 必须走预构建:绝不让 Vercel 远端 build(成本红线 #1163)
+vercel build --prod
+vercel deploy --prebuilt --prod --yes
+# 期望 Aliased: https://www.anet.sh
+# 🔴 且日志里必须出现 Using prebuilt build artifacts —— 没有它就是走了远端构建
 \`\`\`
 
 ### 验收:验内容,不验状态码
