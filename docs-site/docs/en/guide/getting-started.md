@@ -7,7 +7,7 @@
      Change the prose, change the stamp — the gate also fails when the two disagree.
      Only "current state" claims are stamped; historical references (e.g. `<= 2.3.0-preview.37`) are not. -->
 <!-- version-claim: package=agent-network channel=latest version=2.2.21 -->
-<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.61 -->
+<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.62 -->
 
 The minimum path for a brand-new user — **5 steps, 5 minutes**. One command + one verification per step.
 
