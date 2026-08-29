@@ -4930,7 +4930,65 @@ function createRuntimeChoices() {
   ];
 }
 
+/** #1469 f1 —— 「创建节点」的环境护栏，一处定义。
+ *
+ *  带名路径（`anet node create <name> --flags`）一直有这两道；而无名的交互向导
+ *  在 `createCommand` 里被 `if (!id) return createInteractiveCommand()` 提前短路，
+ *  从没走到它们。结果是**最傻瓜的新手入口反而设防最少**：起了 hub 但没跑过
+ *  `anet init` 的用户被挡在「Run 'anet init' first」，而带名路径本会自探 127.0.0.1:9200。
+ *
+ *  抽成函数而不是把交互向导重构成走带名路径：向导是一份独立的 ~170 行实现，
+ *  动它的流程风险远大于让两边共用同一道门。
+ *
+ *  带名路径的调用点保持在**原来的位置**，所以它的行为逐字不变。 */
+async function ensureHubConfigured(gc: ReturnType<typeof loadGlobal>): Promise<ReturnType<typeof loadGlobal>> {
+  if (!gc.hub) {
+    try {
+      const h = await fetch("http://127.0.0.1:9200/health").then(r => r.json() as any);
+      if (h.ok) {
+        gc.hub = "http://127.0.0.1:9200";
+        saveGlobal(gc);
+        console.log(`[anet] 检测到本地 CommHub: ${gc.hub}`);
+      }
+    } catch {}
+  }
+  if (!gc.hub) {
+    console.error("未找到 CommHub Server。请先运行:\n  anet hub start\n\n或手动配置:\n  anet init --hub http://YOUR_IP:9200");
+    process.exit(1);
+  }
+  return gc;
+}
+
+/** #1469 f1 —— 登录态 + 网络（#467 自选之后仍缺 network_id 的情形）。
+ *
+ *  交互路径以前会一路走到 `requestNodeToken`，那里是 `throw new Error("missing
+ *  network_id; run: anet login")` —— 一个未捕获错误，用户看到的是堆栈而不是下一步。
+ *  带名路径给的是可操作退出，这里让两边一致。 */
+function ensureLoginAndNetwork(gc: ReturnType<typeof loadGlobal>): void {
+  if (!gc.token) {
+    console.error(`[anet] ❌ Not logged in. Run: anet login   (or: anet register)`);
+    process.exit(1);
+  }
+  if (!gc.network_id) {
+    console.error(`[anet] ❌ Global config is missing network_id; no unique writable network could be selected.`);
+    console.error(`[anet]    Run: anet network ls`);
+    console.error(`[anet]    Then: anet network use <name>`);
+    process.exit(1);
+  }
+}
+
 async function createInteractiveCommand() {
+  // #1469 f1 —— 环境先验，再向用户要任何输入。
+  //
+  // 顺序是有意的，和带名路径同一条原则（那边的注释原话：「Check hub connection
+  // BEFORE asking for model/key」）：hub 不通时先问厂商和 API key，用户粘完 key
+  // 才被告知连不上，白费一轮输入。
+  //
+  // 这两道以前只有带名路径有 —— `if (!id) return createInteractiveCommand()`
+  // 在 createCommand 里短路得比它们早，于是最傻瓜的入口设防最少。
+  const gcPre = await ensureHubConfigured(loadGlobal());
+  ensureLoginAndNetwork(gcPre);
+
   console.log(`
 [anet] Create a node
 
@@ -5146,20 +5204,8 @@ async function createCommand(idOverride?: string) {
   }
 
   // ── Check hub connection BEFORE asking for model/key ──
-  if (!gc.hub) {
-    try {
-      const h = await fetch("http://127.0.0.1:9200/health").then(r => r.json() as any);
-      if (h.ok) {
-        gc.hub = "http://127.0.0.1:9200";
-        saveGlobal(gc);
-        console.log(`[anet] 检测到本地 CommHub: ${gc.hub}`);
-      }
-    } catch {}
-  }
-  if (!gc.hub) {
-    console.error("未找到 CommHub Server。请先运行:\n  anet hub start\n\n或手动配置:\n  anet init --hub http://YOUR_IP:9200");
-    process.exit(1);
-  }
+  // 同一道门现在也用在交互向导上（#1469 f1）；调用点位置未变。
+  await ensureHubConfigured(gc);
 
   // #133 runtime-first wizard (Vincent 5101 实测 catch): the old vendor-first
   // selector only enumerated claude-agent-sdk vendors, leaving users who want
@@ -5373,16 +5419,7 @@ async function createCommand(idOverride?: string) {
 
   // Request a network token (ntok_) for this node — agent-node REQUIRES ntok_ for SSE.
   // No silent fallback to utok_; that just defers the failure to runtime.
-  if (!gc.token) {
-    console.error(`[anet] ❌ Not logged in. Run: anet login   (or: anet register)`);
-    process.exit(1);
-  }
-  if (!gc.network_id) {
-    console.error(`[anet] ❌ Global config is missing network_id; no unique writable network could be selected.`);
-    console.error(`[anet]    Run: anet network ls`);
-    console.error(`[anet]    Then: anet network use <name>`);
-    process.exit(1);
-  }
+  ensureLoginAndNetwork(gc);   // #1469 f1 —— 与交互向导共用同一道门；调用点位置未变
   let nodeTokenRes: any;
   try {
     nodeTokenRes = await fetch(`${gc.hub}/api/auth/node-token`, {
