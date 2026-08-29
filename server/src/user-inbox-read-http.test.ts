@@ -16,6 +16,7 @@ let base = "";
 let adminToken = "", aToken = "", bToken = "";
 const MASTER_TOKEN = "legacy-master-token-for-test";
 let aUserId = "", bUserId = "", aNet = "", bNet = "";
+let adminUserId = "";
 
 const get = async (path: string, token: string) => {
   const r = await fetch(`${base}${path}`, { headers: { Authorization: `Bearer ${token}` } });
@@ -54,6 +55,7 @@ beforeAll(async () => {
   const admin = register(`ui_admin_${stamp}`, "UiAdmin-Strong-1!");
   expect(admin.ok).toBe(true);
   adminToken = admin.token!;
+  adminUserId = db.get<{ user_id: string }>("SELECT user_id FROM users WHERE username = ?1", `ui_admin_${stamp}`)!.user_id;
 
   const a = register(`ui_a_${stamp}`, "UiA-Strong-1!");
   const b = register(`ui_b_${stamp}`, "UiB-Strong-1!");
@@ -86,8 +88,12 @@ beforeAll(async () => {
   // A 自己的、但落在 A 不是成员的 network 上的行（例如 A 被移出该网后的遗留）。
   // 它是 addNetworkScope 这次调用的唯一 witnessed-red 对象：user_id 过滤对它无效。
   seedMessage("dm_a_foreign_net", aUserId, bNet, "A 在外网的遗留私信");
-  // network_id 为 NULL 的行：P2 写路径在 effectiveNetId 为空时会写出这种行。
+  // network_id 为 NULL 的行。**写路径产不出这种行** —— send_desktop_message 有
+  // 三道闸（canWrite / `if (!effectiveNetId)` / targetRole），拆掉任意一道都还有
+  // 别的挡着，见 desktop-message-seam.test.ts 的两条孤儿断言。这里是手写夹具，
+  // 用来钉「万一库里有这种行（历史数据、将来的第二个写入方），谁读得到」。
   seedMessage("dm_a_nonet", aUserId, null as any, "A 的无网络私信");
+  seedMessage("dm_admin_nonet", adminUserId, null as any, "admin 的无网络私信");
   seedMessage("dm_a_read", aUserId, aNet, "A 已读的一条", undefined, 1);
   seedMessage("dm_a_secret", aUserId, aNet,
     "凭据在正文里 ntok_abcdef123456", JSON.stringify({ k: "ghp_" + "A".repeat(24) }));
@@ -133,15 +139,20 @@ describe("#1459 ① P3 GET /api/messages?scope=user", () => {
     expect(row.meta_json).toContain("ghp_***redacted***");
   });
 
-  // 记录的是**当前行为**，不是我认为应该的行为：network_id 为 NULL 的行对
-  // 网络受限的调用者不可见（addNetworkScope 生成的是 `network_id IN (...)`，
-  // NULL 不匹配任何 IN 列表）。P2 写路径在 effectiveNetId 为空时会写出这种行，
-  // 于是它写得进去、读不出来。已在 PR 正文里点名，交 Hub马/通信龙 定夺，
-  // 这里先把行为钉住，免得日后无声改变。
-  test("network_id 为 NULL 的行不会回给受网络限制的调用者（当前行为）", async () => {
+  // NULL 网络行的可见性**取决于调用者的 scope，不取决于行本身**：
+  //   受网络限制的成员 → addNetworkScope 生成 `network_id IN (...)`，NULL 不匹配 ⇒ 读不到
+  //   admin（resolveRestNetworkScope 给 networkIds=null，助手是 no-op） ⇒ 读得到
+  // 两条一起才说明"NULL 读不到"是 scope 造成的，不是 user_id 过滤造成的。
+  test("NULL 网络行：受网络限制的成员读不到", async () => {
     const { body } = await get("/api/messages?scope=user", aToken);
+    expect(body.messages.map((m: any) => m.message_id)).not.toContain("dm_a_nonet");
+  });
+
+  test("NULL 网络行：scope 为 no-op 的调用者（admin）读得到自己的那条", async () => {
+    const { body } = await get("/api/messages?scope=user", adminToken);
     const ids = body.messages.map((m: any) => m.message_id);
-    expect(ids).not.toContain("dm_a_nonet");
+    expect(ids).toContain("dm_admin_nonet");
+    expect(ids).not.toContain("dm_a1");   // 仍然只读自己的：admin 不绕过 user_id 过滤
   });
 
   test("unread 是未读数而非总数（A：4 条里 3 条未读）", async () => {
