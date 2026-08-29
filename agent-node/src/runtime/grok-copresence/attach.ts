@@ -53,6 +53,16 @@ export interface GrokCopresenceAttachServerOptions {
   onInput: (data: Buffer) => void | Promise<void>;
   /** Receives validated dimensions. The arbiter remains the sole PTY owner. */
   onResize: (cols: number, rows: number) => void | Promise<void>;
+  /**
+   * Fires once, after a terminal client's `hello` is sent, before any of its
+   * input/resize frames (#1412). grok does not repaint its screen when a new
+   * client attaches, so a client that connects while the TUI is idle sees a
+   * blank screen. The runtime uses this to arm a one-shot redraw on the
+   * client's first resize (a resize jitter forces grok to repaint).
+   *
+   * Terminal role only: control connections never own the screen.
+   */
+  onTerminalAttached?: () => void | Promise<void>;
   onDetach?: (reason: GrokCopresenceAttachDetachReason) => void | Promise<void>;
   /**
    * Receives a requested model id (issue #879).
@@ -369,6 +379,14 @@ class AttachServer implements GrokCopresenceAttachServer {
       role: client.role,
     })) {
       this.releaseDisconnected(client);
+      return;
+    }
+
+    // Arm the one-shot redraw (#1412) through the same serialized arbiter
+    // queue as input/resize, so it lands before the client's first resize is
+    // processed — never on a control connection.
+    if (client.role === "terminal" && this.options.onTerminalAttached) {
+      this.enqueueCallback(client, () => this.options.onTerminalAttached!(), 0);
     }
   }
 

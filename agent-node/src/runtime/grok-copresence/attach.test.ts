@@ -150,6 +150,32 @@ describe("Grok co-presence local attach server", () => {
     expect(server.clientAttached).toBe(true);
   });
 
+  it("arms a one-shot redraw for a terminal client but never for a control connection (#1412)", async () => {
+    const { socketPath } = temporarySocket();
+    const events: string[] = [];
+    const resized = deferred<void>();
+    const server = await startServer(socketPath, {
+      onTerminalAttached: () => { events.push("terminal-attached"); },
+      onResize: (cols, rows) => { events.push(`resize:${cols}x${rows}`); resized.resolve(); },
+    });
+
+    // First client is the terminal: onTerminalAttached fires after hello and
+    // BEFORE its first resize (it rides the same serialized arbiter queue).
+    const terminal = await connect(socketPath);
+    await terminal.frames.next(); // hello
+    terminal.socket.write(`${JSON.stringify({ type: "resize", cols: 100, rows: 30 })}\n`);
+    await resized.promise;
+    expect(events).toEqual(["terminal-attached", "resize:100x30"]);
+
+    // Second client is a control connection: it must never arm a redraw.
+    const control = await connect(socketPath);
+    expect(await control.frames.next()).toMatchObject({ type: "hello", role: "control" });
+    await Bun.sleep(50);
+    expect(events.filter((e) => e === "terminal-attached")).toHaveLength(1);
+
+    void server;
+  });
+
   it("fails closed when an inbound frame exceeds the configured bound", async () => {
     const { socketPath } = temporarySocket();
     const server = await startServer(socketPath, {
