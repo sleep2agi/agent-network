@@ -278,6 +278,7 @@ docker compose logs --tail=200 <service>
 - [远端节点的 CLI 登录](/troubleshooting/remote-node-cli-login)
 - [案例：飞书静默拒绝](/troubleshooting/case-feishu-silent-deny)
 - [安全重启 Codex TUI 节点](/troubleshooting/codex-tui-node-restart) —— 重启共存节点不丢会话、不回退 rollout。
+- [节点卡在 stopping / starting](/troubleshooting/node-stuck-lifecycle) —— daemon 托管的节点操作没反应、或停在中间态时，先等一次重连。
 
 ## 仍未解决
 

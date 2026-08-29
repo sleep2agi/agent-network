@@ -46,7 +46,7 @@ _actual=$( { printf 'blob %d\0' "$(wc -c < "$_self")"; cat "$_self"; } | sha1sum
   echo "FAIL: 镜像里的 run.sh 与 SOURCE_COMMIT=$SOURCE_COMMIT 声称的不是同一份" >&2
   echo "      期望 blob $RUNSH_BLOB,实际 $_actual" >&2; exit 1; }
 
-echo "# test831 — doc source-pin floor gate"
+echo "# test831 — doc source-pin gate (🔴 三个计数是 -eq 精确相等,不是下界;名字里的 floor 是历史遗留)"
 echo "source_commit=$SOURCE_COMMIT"
 echo "runsh_blob=$_actual"
 echo "python=$(python3 -V 2>&1)"
@@ -93,6 +93,19 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 # `files` 仍是 106 —— **只有一个数变了,而且变的原因能逐条指出来**。这正是这道
 # 断言想逼出来的动作:数字变了要有人说清是进展还是扫漏,而不是把它改宽。
 #
+# 2026-08-30:files 125 → 127,`uniq`/`occ` 不变。新增 troubleshooting 两页
+# (`node-stuck-lifecycle.md` 中英各一)。逐条核过:
+#
+#     git diff --name-only --diff-filter=A origin/main...HEAD -- 'docs-site/docs/**/*.md'
+#       docs-site/docs/troubleshooting/node-stuck-lifecycle.md
+#       docs-site/docs/en/troubleshooting/node-stuck-lifecycle.md
+#     grep -c '#L[0-9]' <这两个文件>   →   0 / 0
+#
+# 两页都**没有**源码行号锚点,所以只有分母 +2,`uniq`(11)与 `occ`(28)一个没动 ——
+# 与 origin/main 上实测的 125/11/28 相比,**只有一个数变了,且变的原因能指名道姓**。
+# 🔴 方向也对:分母**变大**是"多了两个被扫的文件",不是覆盖面缩小。
+# 若哪天这三个数往**小**里走,那才是要停下来查的那种变化。
+
 # 2026-08-18(第二次):15 → 11,35 → 28。#810 把 docs-site 中英两版 api/rest.md 里
 # 4 个唯一 pin 的 `#L` 锚点去掉了(链接保留,只是不再钉行号),逐条数得出来:
 #
@@ -156,7 +169,9 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 #     docs-site/docs/troubleshooting/codex-tui-node-restart.md
 #     docs-site/docs/en/troubleshooting/codex-tui-node-restart.md
 #   抬分母(123 → 125),覆盖面变大;CI 先红("预期扫 123,实际 125")才来抬,顺序对。
-[[ "$files" -eq 125 ]] || fail "预期扫 125 个文档文件(= git ls-files 的结果),实际 $files"
+# 🔴 下面三条是 `-eq`(精确相等),**不是下界** —— job 名里的 "floor" 会误导。
+#    新增/删除文档都会让 files 变,必须回来按实际值更新,并写清变的是哪个数、为什么。
+[[ "$files" -eq 127 ]] || fail "预期扫 127 个文档文件(= git ls-files 的结果),实际 $files"
 [[ "$uniq"  -eq 11  ]] || fail "预期 11 个唯一 pin,实际 $uniq"
 [[ "$occ"   -eq 28 ]] || fail "预期 28 处原始出现,实际 $occ"
 echo "  OK  walk 路径与 git 路径给出同一份清单($files 文件 / $uniq 唯一 pin / $occ 处)"
