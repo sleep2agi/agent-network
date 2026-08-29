@@ -330,7 +330,7 @@ commhub_send_task(alias="通信文档马",
 ```
 
 🔴 **文档 PR 合进 `main` ≠ 文档上线。** `docs-site` 那个 Vercel 项目**没接 git 自动部署**，
-必须有人手动跑一次 `vercel --prod`，步骤见 [`deploy/docs-site/README.md`](../deploy/docs-site/README.md)。
+由 `deploy-anet-sh` workflow 自动部署(合入 main 即触发);手动补跑时**必须走预构建** `vercel build --prod && vercel deploy --prebuilt --prod`(绝不远端 build,成本红线 #1163),步骤见 [`deploy/docs-site/README.md`](../deploy/docs-site/README.md)。
 漏了不会报错，只会让 anet.sh 和 `main` 静默分叉——实测发生过停在 36 小时前、
 以及冻结近 14 天。所以 Step 9 的**终点是站点上线**，不是 PR 被合。
 

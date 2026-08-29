@@ -62,10 +62,36 @@ ln -sfn <主checkout>/docs-site/node_modules node_modules
 #    不要带着死链上线。
 npm run build
 
-# 部署(云端会重新跑 npm run build,含 prebuild 的 skillhub 生成)
-vercel --prod --yes
+# 🔴 产物必须在本地构建,再把**预构建产物**推上去。
+#    绝不让 Vercel 远端构建 —— 那是一条成本红线(远端构建费用一个月到过 100 美元,#1163)。
+vercel build --prod
+vercel deploy --prebuilt --prod --yes
+
 # 期望结尾: Aliased: https://www.anet.sh
+# 🔴 而且日志里**必须**出现这一行,它就是「没走远端 build」的判据:
+#      Building: Using prebuilt build artifacts from .vercel/output
+#    没有它 = 这次走了远端构建 = 撞红线,要停下来查。
 ```
+
+::: danger 不要用 `vercel --prod --yes`
+这条命令**会让 Vercel 在云端重新构建一次** —— 它正是 #1163 立案要修的那条。
+
+**实测 2026-08-30**:照本文件旧版本手工部署 4 次,**4 次全部走远端构建、0 次出现
+prebuilt 标记**,而每次日志都在眼前。照文档做的人不会知道自己在烧钱 ——
+所以这里把它写成明确的禁止,而不是只把正确写法放在上面。
+
+**日常已经不需要手动部署**:`.github/workflows/deploy-anet-sh.yml`(#1435)在
+合并进 `main` 且改动命中 `docs-site/**` 时自动跑上面这套预构建流程,
+并把「日志里必须出现 `Using prebuilt build artifacts`」做成了门。
+
+⚠️ **目前只差一个开关**:repo secrets 里 `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID`
+已配好(它们不是密钥,值就在同目录 `vercel-project.json` 里),
+**只剩 `VERCEL_TOKEN` 待 owner 配** —— 在那之前该 workflow 会优雅跳过(打 warning、不判红),
+站点落后仍由 `docs-site-drift` 每日发现并开 tracker issue。
+配好 token 后无需改动任何代码即生效。
+
+本节的手动步骤此后只作**兜底**(workflow 挂了、或要临时验证某个构建)。
+:::
 
 ## 验证:验内容,不验状态码
 
@@ -123,7 +149,7 @@ json.dump({k: src[k] for k in ('projectId', 'orgId', 'projectName')},
 EOF
 ```
 
-之后 `vercel --prod --yes` 就能认到项目;**登录仍需一个有权限的账号**(`vercel login`)。
+之后 `vercel build --prod` / `vercel deploy --prebuilt --prod` 就能认到项目;**登录仍需一个有权限的账号**(`vercel login`)。
 
 🔴 **那三个字段不是密钥** —— 没有 Vercel token,它们不授予任何权限。
 入库的理由是降 bus-factor:在此之前**项目关联只存在于某一台机器上**,
