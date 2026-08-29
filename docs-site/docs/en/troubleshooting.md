@@ -279,6 +279,7 @@ When the layer-by-layer pass above does not settle it, each of these targets one
 - [CLI login on a remote node](/en/troubleshooting/remote-node-cli-login)
 - [Case: Feishu silently denies](/en/troubleshooting/case-feishu-silent-deny)
 - [Restart a Codex TUI node safely](/en/troubleshooting/codex-tui-node-restart) — keep the session and never regress the rollout when restarting a co-presence node.
+- [Node stuck in stopping / starting](/en/troubleshooting/node-stuck-lifecycle) — when an action on a daemon-managed node does nothing, or the node sits in an intermediate state, wait for one reconnect first.
 
 ## Still unresolved
 
