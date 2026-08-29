@@ -45,4 +45,4 @@ cd ~/anodes && anet project restart
 | #1453 | #1286 同族 | stop 未命中 childrenMap 时收敛（与 delete 侧对称） |
 | #1457 | #1449 f1+f2 | 多条 agentMessage 时保住最终答案；启动失败不留孤儿子进程 |
 
-未包含：#1464（#1448 findings 4-6）在本版切版时尚未合入 main，走 fast-follow。
+包含：#1464（#1448 findings 4-6：F4 daemon 校验防静默假 stopped / F5 ntok 按 token_id 精撤 / F6 start replay cmdline 复验）—— 切版时(#1468 bump)已合入 main，产物含之。`npm pack` 实测确认 F5 `child_token_id`、F4 校验代码在 tarball 内。

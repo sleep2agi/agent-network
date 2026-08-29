@@ -45,4 +45,4 @@ curl -fsS http://127.0.0.1:9200/health
 | #1456 | — | start_node stale-starting reaper，对齐 config-apply |
 | #1460 | #1459 | `send_desktop_message` 返回真实投递态 |
 
-未包含：#1464（#1448 findings 4-6）在本版切版时尚未合入 main，走 fast-follow。
+包含：#1464（#1448 findings 4-6：F4 daemon 校验防静默假 stopped / F5 ntok 按 token_id 精撤 / F6 start replay cmdline 复验）—— 切版时(#1468 bump)已合入 main，产物含之。`npm pack` 实测确认 F5 `child_token_id`、F4 校验代码在 tarball 内。
