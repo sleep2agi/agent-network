@@ -2366,26 +2366,32 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
       const targets = db.all<{ alias: string; node_id: string | null; network_id: string | null }>(sql, ...params);
       const ids: string[] = [];
+      // #1440 ① — the push loop must walk the recipients that actually
+      // got an inbox row, not every candidate target. Walking `targets`
+      // announced a broadcast to nodes the lifecycle guard had just
+      // skipped, i.e. nodes with nothing to fetch.
+      const delivered: Array<{ alias: string; netId: string | null }> = [];
 
       for (const t of targets) {
         // RFC-027 §2.3 inbox-enqueue lifecycle guard (PR1.1 site 6/6).
         // Broadcast skips non-active recipients silently rather than
         // failing the entire send — broadcast semantics are best-effort
         // per-recipient and a stopped node simply gets nothing.
-        const lc = assertNodeActive(t.alias, effectiveNetId ?? t.network_id ?? null);
+        const netId = effectiveNetId ?? t.network_id ?? null;
+        const lc = assertNodeActive(t.alias, netId);
         if (!lc.ok) continue;
         const id = uuidv4();
         db.run(
           `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, network_id)
            VALUES (?1, ?2, ?3, 'broadcast', 'normal', ?4, 'hub', ?5)`,
-          [id, t.alias, t.node_id ?? null, message, effectiveNetId ?? t.network_id ?? null]
+          [id, t.alias, t.node_id ?? null, message, netId]
         );
         ids.push(id);
+        delivered.push({ alias: t.alias, netId });
       }
 
-      for (const t of targets) {
-        const netId = effectiveNetId ?? t.network_id ?? null;
-        pushEvent(t.alias, { type: "broadcast", inbox_count: pendingInboxCount(t.alias, netId) }, netId);
+      for (const d of delivered) {
+        pushEvent(d.alias, { type: "broadcast", inbox_count: pendingInboxCount(d.alias, d.netId) }, d.netId);
       }
 
       return {

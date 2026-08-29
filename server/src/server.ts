@@ -2550,6 +2550,9 @@ return Bun.serve({
       if (body.filter_status) { sql += " AND status = ?"; params.push(body.filter_status); }
       const targets = db.all<{ alias: string; node_id: string | null; network_id: string | null }>(sql, ...params);
       const ids: string[] = [];
+      // #1440 ① — mirrors the MCP handler: push to the recipients that
+      // actually got an inbox row, not to every candidate target.
+      const delivered: Array<{ alias: string; netId: string | null }> = [];
       for (const t of targets) {
         // RFC-027 §2.3 inbox-enqueue lifecycle guard (PR1.2a REST site
         // 2/2). Broadcast skips non-active recipients silently per its
@@ -2564,9 +2567,10 @@ return Bun.serve({
           [id, t.alias, t.node_id ?? null, body.message, t.network_id]
         );
         ids.push(id);
+        delivered.push({ alias: t.alias, netId: t.network_id });
       }
-      for (const t of targets) {
-        pushEvent(t.alias, { type: "broadcast", inbox_count: pendingInboxCount(t.alias, t.network_id) }, t.network_id);
+      for (const d of delivered) {
+        pushEvent(d.alias, { type: "broadcast", inbox_count: pendingInboxCount(d.alias, d.netId) }, d.netId);
       }
       return withCors(req, Response.json({ ok: true, recipients: targets.length, message_ids: ids }));
     }

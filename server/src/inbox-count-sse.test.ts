@@ -26,6 +26,8 @@ const OWNER = "u_inboxcount_owner";
 const RECV = "peer-inboxcount-recv";   // receives messages/replies
 const OTHER = "peer-inboxcount-other"; // second broadcast recipient
 const SENDER = "peer-inboxcount-send";
+// #1440 ① — a broadcast target the lifecycle guard skips.
+const STOPPED = "peer-inboxcount-stopped";
 const ALIASES = [RECV, OTHER, SENDER];
 
 type ToolHandler = (args: any, extra?: any) => Promise<{ content: Array<{ type: "text"; text: string }> }>;
@@ -61,6 +63,18 @@ function seed() {
       [`res_${alias}`, alias, `node_${alias}`, NET],
     );
   }
+  // A session that broadcast will select as a target, but whose node is
+  // NOT active — assertNodeActive skips it, so it gets no inbox row.
+  db.run(
+    `INSERT INTO nodes (node_id, node_name, alias, network_id, hostname, created_at, updated_at, lifecycle_state)
+     VALUES (?1, ?2, ?2, ?3, ?4, datetime('now'), datetime('now'), 'stopped')`,
+    [`node_${STOPPED}`, STOPPED, NET, `host-${STOPPED}`],
+  );
+  db.run(
+    `INSERT INTO sessions (resume_id, alias, status, node_id, network_id, updated_at, last_seen_at)
+     VALUES (?1, ?2, 'idle', ?3, ?4, datetime('now'), datetime('now'))`,
+    [`res_${STOPPED}`, STOPPED, `node_${STOPPED}`, NET],
+  );
 }
 
 beforeEach(() => { cleanup(); seed(); });
@@ -251,5 +265,40 @@ describe("#1440 new_task inbox_count on requeue paths", () => {
     // 2 seeded on the new assignee + the row reassign just wrote.
     expect(evt.inbox_count).toBe(3);
     expect(evt.inbox_count).toBe(pendingInboxCount(RECV, NET));
+  });
+});
+
+// #1440 ① — the broadcast push loop walked every candidate target,
+// including the ones assertNodeActive had just skipped. Those nodes
+// were told "you have a broadcast" while their inbox got no row for it.
+// Before #1439 the hardcoded `inbox_count: 1` hid this: everyone got
+// the same digit, so a spurious event was indistinguishable from a real
+// one.
+describe("#1440 broadcast delivery set", () => {
+  test("a lifecycle-skipped node gets no inbox row AND no broadcast event", async () => {
+    const activeReader = await subscribe(OTHER);
+    const stoppedReader = await subscribe(STOPPED);
+
+    const tools = buildHandlers(SENDER);
+    const res = await call(tools.broadcast, { message: "all hands", network_id: NET });
+
+    // The active recipient is served — this proves the broadcast ran, so
+    // the absence checked below is "not sent", not "not yet sent"
+    // (pushEvent is synchronous inside the handler).
+    const activeEvt = await readFrame(activeReader);
+    expect(activeEvt.type).toBe("broadcast");
+
+    // The skipped node has no row...
+    const rows = db.get<{ cnt: number }>(
+      "SELECT COUNT(*) AS cnt FROM inbox WHERE session_name = ?1 AND type = 'broadcast'",
+      STOPPED,
+    );
+    expect(rows?.cnt).toBe(0);
+    // ...and must therefore receive no event announcing one.
+    await expect(readFrame(stoppedReader, 300)).rejects.toThrow(/no SSE frame/);
+
+    // message_ids covers only the recipients that actually got a row:
+    // RECV + OTHER + SENDER, never STOPPED.
+    expect(res.message_ids).toHaveLength(3);
   });
 });
