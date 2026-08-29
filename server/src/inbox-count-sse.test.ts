@@ -131,12 +131,12 @@ function seedUnacked(alias: string, n: number, type = "message") {
   }
 }
 
-function makeTask(from: string, to: string, content: string): string {
+function makeTask(from: string, to: string, content: string, status = "delivered"): string {
   const id = uuidv4();
   db.run(
     `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at, network_id)
-     VALUES (?1, ?2, ?3, 'normal', 'delivered', ?4, 'reply', datetime('now'), ?5)`,
-    [id, from, to, content, NET],
+     VALUES (?1, ?2, ?3, 'normal', ?4, ?5, 'reply', datetime('now'), ?6)`,
+    [id, from, to, status, content, NET],
   );
   return id;
 }
@@ -211,5 +211,45 @@ describe("SSE inbox_count", () => {
     const evt = await readFrame(reader);
     // 3 acked rows contribute nothing; only the new one is outstanding.
     expect(evt.inbox_count).toBe(1);
+  });
+});
+
+// #1440 ② — `retry_task` and `reassign_task` re-queue a task and push
+// `new_task`, but both shipped a hardcoded `inbox_count: 1` while the
+// hub already knew the real number. Same defect family as the
+// `broadcast` case above; same gate discipline — the expected counts
+// here are 3, so a hardcoded 1 cannot satisfy them.
+describe("#1440 new_task inbox_count on requeue paths", () => {
+  test("retry_task carries the real unacked count, not a hardcoded 1", async () => {
+    seedUnacked(RECV, 2);
+    const taskId = makeTask(SENDER, RECV, "flaky job", "failed");
+    const reader = await subscribe(RECV);
+
+    const tools = buildHandlers(SENDER);
+    const res = await call(tools.retry_task, { task_id: taskId, network_id: NET });
+    expect(res.ok).toBe(true);
+
+    const evt = await readFrame(reader);
+    expect(evt.type).toBe("new_task");
+    // 2 seeded + the re-queued task row.
+    expect(evt.inbox_count).toBe(3);
+    expect(evt.inbox_count).toBe(pendingInboxCount(RECV, NET));
+  });
+
+  test("reassign_task carries the NEW assignee's real unacked count", async () => {
+    seedUnacked(RECV, 2);
+    const taskId = makeTask(SENDER, OTHER, "moved job");
+    const reader = await subscribe(RECV);
+
+    const tools = buildHandlers(SENDER);
+    const res = await call(tools.reassign_task, { task_id: taskId, new_alias: RECV, network_id: NET });
+    expect(res.ok).toBe(true);
+    expect(res.reassigned_to).toBe(RECV);
+
+    const evt = await readFrame(reader);
+    expect(evt.type).toBe("new_task");
+    // 2 seeded on the new assignee + the row reassign just wrote.
+    expect(evt.inbox_count).toBe(3);
+    expect(evt.inbox_count).toBe(pendingInboxCount(RECV, NET));
   });
 });

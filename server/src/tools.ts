@@ -2034,7 +2034,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       });
       logTaskEvent(task_id, task.status, "delivered", from_session, "retry");
       // SSE push (unconditional — channel is keyed by alias, not network)
-      pushEvent(task.to_name, { type: "new_task", inbox_count: 1, priority: task.priority, from: from_session }, effectiveNetId ?? task.network_id ?? null);
+      pushEvent(task.to_name, { type: "new_task", inbox_count: pendingInboxCount(task.to_name, effectiveNetId ?? task.network_id ?? null), priority: task.priority, from: from_session }, effectiveNetId ?? task.network_id ?? null);
       pushNetworkObserverEvent(effectiveNetId ?? task.network_id ?? null, { type: "new_task", task_id, from: from_session, to: task.to_name, status: "delivered", priority: task.priority });
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ ok: true, task_id, retried_to: task.to_name }) }],
@@ -2248,7 +2248,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           [newInboxId, task_id, reassignedAlias, newNodeId, task.priority, task.content, from_session, effectiveNetId ?? task.network_id ?? null]);
       });
       logTaskEvent(task_id, task.status, "delivered", from_session, `reassign: ${oldAlias} → ${reassignedAlias}`);
-      pushEvent(reassignedAlias, { type: "new_task", inbox_count: 1, priority: task.priority, from: from_session, ...(canonical.renamed ? { renamed_from: new_alias } : {}) }, effectiveNetId ?? task.network_id ?? null);
+      pushEvent(reassignedAlias, { type: "new_task", inbox_count: pendingInboxCount(reassignedAlias, effectiveNetId ?? task.network_id ?? null), priority: task.priority, from: from_session, ...(canonical.renamed ? { renamed_from: new_alias } : {}) }, effectiveNetId ?? task.network_id ?? null);
       pushNetworkObserverEvent(effectiveNetId ?? task.network_id ?? null, { type: "new_task", task_id, from: from_session, to: reassignedAlias, status: "delivered", priority: task.priority });
       return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, task_id, reassigned_from: oldAlias, reassigned_to: reassignedAlias, ...(canonical.renamed ? { renamed_from: new_alias, renamed_to: reassignedAlias } : {}) }) }] };
     }
