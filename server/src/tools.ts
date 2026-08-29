@@ -4019,8 +4019,43 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       );
       if (!child) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "forbidden_cross_tenant" }) }] };
       if (!canWrite(child.network_id)) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
-      if ((child.lifecycle_state ?? "active") !== "stopped") {
-        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "node_not_stopped", current_state: child.lifecycle_state ?? "active" }) }] };
+      // #1448 finding-2 — stale-starting reaper，对齐 update_node_config / restart_node
+      // 的 60s single-flight stale-supersede。start 只受理 'stopped';一旦卡 'starting'
+      // (门铃丢 / daemon 在 UPDATE 'starting' 后死),config/restart 有 reaper、delete 有
+      // 5min force,唯独 start 裸奔 → 下面的 gate 永远拦、也无人把节点拉回 stopped →
+      // 永久卡 'starting'。出口:'starting' 且最近一条 in-flight start 请求晾过阈值 → 标
+      // 旧请求 timeout 超越、放行重派;未过阈值则拒 node_already_starting(带 age)。
+      const priorState = child.lifecycle_state ?? "active";
+      if (priorState !== "stopped") {
+        if (priorState !== "starting") {
+          return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "node_not_stopped", current_state: priorState }) }] };
+        }
+        const STALE_STARTING_MS = 60_000;
+        const inFlight = db.get<{ request_id: string; created_at: number; delivered_at: number | null; acked_at: number | null }>(
+          `SELECT request_id, created_at, delivered_at, acked_at FROM node_start_requests
+             WHERE child_node_id = ?1 AND status IN ('pending', 'delivered')
+             ORDER BY created_at DESC LIMIT 1`, child.node_id,
+        );
+        if (inFlight) {
+          // Age anchor = COALESCE(acked_at, delivered_at, created_at)，同 config reaper:
+          // 已 pull/已 ack 的活着但慢的 start 会刷新存活时钟,不被误 reap。
+          const ageAnchor = inFlight.acked_at ?? inFlight.delivered_at ?? inFlight.created_at;
+          const age = Date.now() - ageAnchor;
+          if (age <= STALE_STARTING_MS) {
+            return { content: [{ type: "text" as const, text: JSON.stringify({
+              ok: false, error: "node_already_starting",
+              existing_request_id: inFlight.request_id, age_ms: age,
+              hint: `再等一下;超过 ${STALE_STARTING_MS / 1000}s 仍卡 starting,重试 start 会重新派发`,
+            }) }] };
+          }
+          // Stale — 标旧请求 timeout(autocommit,先于下面 tx 的新 INSERT,解除
+          // node_start_requests 对 pending/delivered 的 child 唯一约束),放行重派。
+          db.run(
+            `UPDATE node_start_requests SET status = 'timeout', acked_at = ?1, error = ?2 WHERE request_id = ?3`,
+            [Date.now(), `superseded by new start after ${age}ms stale (> ${STALE_STARTING_MS}ms threshold)`, inFlight.request_id],
+          );
+        }
+        // else: 'starting' 但无 in-flight 行(异常残留态)——照样放行重派以自愈。
       }
       // The caller may provide daemon_node_id, but it cannot override the
       // authoritative child->daemon relationship recorded at creation.
@@ -4046,12 +4081,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7)`,
             [requestId, child.network_id, daemon.node_id, child.node_id, child.alias, callerTokenId || "unknown", now],
           );
-          db.run(`UPDATE nodes SET lifecycle_state = 'starting' WHERE node_id = ?1 AND lifecycle_state = 'stopped'`, [child.node_id]);
+          // #1448 finding-2 — 也接受从 'starting' 重派(stale-supersede 后原态仍是
+          // starting);两种入态都合法地转/留到 'starting'。
+          db.run(`UPDATE nodes SET lifecycle_state = 'starting' WHERE node_id = ?1 AND lifecycle_state IN ('stopped', 'starting')`, [child.node_id]);
           auditCreateNodeStrict({
             action: "start_node_dispatched", user_id: enforceUserId,
             network_id: child.network_id, target_id: requestId,
             detail: { child_node_id: child.node_id, child_alias: child.alias, daemon_node_id: daemon.node_id,
-              lifecycle_state_before: "stopped", lifecycle_state_after: "starting", ts_request: now },
+              lifecycle_state_before: priorState, lifecycle_state_after: "starting", ts_request: now },
           });
         });
       } catch (e: any) {
