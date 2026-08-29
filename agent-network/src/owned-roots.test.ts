@@ -8,7 +8,7 @@
 // (ps 同一次快照里取的 lstart)和 probes.currentBirthSignature,让 resolve
 // 阶段能识别「pid 相同、进程不同」。见 #1438 tests below.
 import { describe, expect, test } from "bun:test";
-import { processVanished, resolveOwnedRoots, type OwnedRootCandidate, type OwnedRootProbes } from "./owned-roots";
+import { isSameIncarnation, processVanished, resolveOwnedRoots, type OwnedRootCandidate, type OwnedRootProbes } from "./owned-roots";
 
 const errno = (code: string) => Object.assign(new Error(code), { code });
 
@@ -199,5 +199,62 @@ describe("#1422 processVanished — 正向判定,不是『读失败就假设没�
 
   test("🔴 未知错误 ⇒ 保守当作存在", () => {
     expect(processVanished(64, () => { throw errno("EIO"); })).toBe(false);
+  });
+});
+
+// #1458 — the same pid-reuse family that resolveOwnedRoots catches for
+// lifecycle FREEZE, isSameIncarnation catches for pre-KILL. Different
+// timepoint, same primitive: compare the discovery-time lstart with the
+// current lstart via the caller-supplied probe.
+//
+// This helper's purpose is narrow — it's the guard the rename kill loop
+// wraps every process.kill() with. It stays pure so it can be unit-tested
+// without spawning real processes.
+describe("#1458 isSameIncarnation — 发信号前的 pid 回收保护", () => {
+  test("🔴 witnessed-red: discoveredBirth (lstart-A) vs current (lstart-B) ⇒ 拒 kill", () => {
+    // The scenario the rename kill loop must catch:
+    //   discovery ps captured (pid=700, lstart-A)  ← agent A
+    //   before we could kill pid 700, A exited and pid 700 was recycled to B
+    //   probe now returns lstart-B ≠ lstart-A
+    //   isSameIncarnation must return false → caller MUST skip process.kill(700)
+    const discovered = "Mon Aug 30 10:00:00 2026";
+    const probe = (_pid: number) => "Mon Aug 30 10:15:37 2026";  // B started 15 min later
+    expect(isSameIncarnation(700, discovered, probe)).toBe(false);
+  });
+
+  test("同代: 相等 ⇒ 允许 kill", () => {
+    const same = "Mon Aug 30 10:00:00 2026";
+    expect(isSameIncarnation(701, same, (_pid) => same)).toBe(true);
+  });
+
+  test("probe 返回 null (进程消失 or ps 读不到) ⇒ 拒 kill (fail-closed 方向对: 不要盲信号)", () => {
+    // 与 resolveOwnedRoots 里 "vanished ⇒ skip" 一致 — 没有确证是同代就不 kill
+    expect(isSameIncarnation(702, "Mon Aug 30 10:00:00 2026", (_pid) => null)).toBe(false);
+  });
+
+  test("多次调用同 pid, probe 每次都是同一个值 ⇒ 稳定 true", () => {
+    // 保证 isSameIncarnation 是纯函数,不带状态。多次 probe 一致就一致。
+    const same = "Mon Aug 30 10:00:00 2026";
+    let calls = 0;
+    const probe = (_pid: number) => { calls++; return same; };
+    expect(isSameIncarnation(703, same, probe)).toBe(true);
+    expect(isSameIncarnation(703, same, probe)).toBe(true);
+    expect(calls).toBe(2);
+  });
+
+  test("每次调用只读一次 probe (kill-time 决策不应放大 ps 抖动)", () => {
+    let calls = 0;
+    const probe = (_pid: number) => { calls++; return "Mon Aug 30 10:00:00 2026"; };
+    isSameIncarnation(704, "Mon Aug 30 10:00:00 2026", probe);
+    expect(calls).toBe(1);
+  });
+
+  test("字符串精确匹配 —— lstart 前后空格/大小写差异都算不同代 (安全侧)", () => {
+    // 判据要严: 任何差异都视为可能是回收。 ps -o lstart= 输出格式一致,
+    // 现实中不会出现只差空格的情况,但显式测这条免得后来人以为可以做
+    // "normalize compare" 的松匹配 —— 那会开一条新窗口。
+    const a = "Mon Aug 30 10:00:00 2026";
+    const b = "Mon Aug 30  10:00:00 2026";  // extra space
+    expect(isSameIncarnation(705, a, (_pid) => b)).toBe(false);
   });
 });

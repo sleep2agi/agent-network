@@ -36,7 +36,7 @@ import {
 } from "../src/copresence-identity";
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
-import { processVanished, resolveOwnedRoots, type OwnedRootCandidate } from "../src/owned-roots";
+import { isSameIncarnation, processVanished, resolveOwnedRoots, type OwnedRootCandidate } from "../src/owned-roots";
 import { createConnection as netCreateConnection, createServer as netCreateServer } from "net";
 import { PassThrough } from "stream";
 import { checkbox, confirm, select } from "@inquirer/prompts";
@@ -8681,17 +8681,21 @@ async function sweepMcpOrphansForAlias(force: boolean, ...aliases: string[]): Pr
 // #180 R3 caveat: alias tokenisation assumes node names conforming to
 // validateNodeName() (no whitespace/quotes) — the entire current node
 // population. A hand-edited legacy alias containing whitespace would not match.
-// #1438 — anet node stop alias fallback needs (pid, birth) from the SAME `ps`
-// snapshot to defeat pid-reuse: findNodeProcessesByAlias + processBirth are
-// two separate reads, and the pid can be recycled between them. This helper
-// captures both in one atomic `ps` call. lstart is a 24-char fixed-width
-// timestamp ("Www Mmm dd HH:MM:SS YYYY"), stable per process incarnation.
+// #1438 + #1458 — anet node stop AND anet node rename both need (pid, birth)
+// from the SAME `ps` snapshot to defeat pid-reuse. Two separate reads —
+// findNodeProcessesByAlias + processBirth (or subsequent process.kill) — leave
+// a window in which pid can be recycled to another process B; without a
+// captured discovery-time birth to compare against, the kill hits B.
 //
-// Kept separate from findNodeProcessesByAlias so the rename lane callers
-// (L8961/L9205) — which have the same class of bug but need their own audit
-// pass — are not silently rewired.
-function findNodeStopCandidates(alias: string): OwnedRootCandidate[] | null {
-  if (!alias) return [];
+// This helper captures both in one atomic `ps` invocation. lstart is a
+// 24-char fixed-width timestamp ("Www Mmm dd HH:MM:SS YYYY"), stable per
+// process incarnation, string-comparable.
+//
+// Widened signature (accepts multiple aliases) because rename passes both
+// the display name and the node id — either can match the argv.
+function findNodeStopCandidates(...aliases: string[]): OwnedRootCandidate[] | null {
+  const wanted = new Set(aliases.filter(Boolean));
+  if (wanted.size === 0) return [];
   let out = "";
   try {
     out = execFileSync("ps", ["-eww", "-o", "pid=", "-o", "lstart=", "-o", "args="], { encoding: "utf-8" }).toString();
@@ -8723,8 +8727,8 @@ function findNodeStopCandidates(alias: string): OwnedRootCandidate[] | null {
     if (!isAgentProc) continue;
     let aliasMatch = false;
     for (let i = 0; i < tok.length - 1; i++) {
-      if ((tok[i] === "-n" || tok[i] === "--alias") && tok[i + 1] === alias) { aliasMatch = true; break; }
-      if (tok[i] === "start" && tok[i - 1] === "node" && tok[i + 1] === alias) { aliasMatch = true; break; }
+      if ((tok[i] === "-n" || tok[i] === "--alias") && wanted.has(tok[i + 1])) { aliasMatch = true; break; }
+      if (tok[i] === "start" && tok[i - 1] === "node" && wanted.has(tok[i + 1])) { aliasMatch = true; break; }
     }
     if (!aliasMatch) continue;
     candidates.set(pid, { pid, discoveredBirth });
@@ -9022,13 +9026,19 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
   let oldSurvivors: number[] = [];  // #180 — set in C2: old agent pids that refused to die
   // #180 R2 — fail closed if the process table is unreadable: a rename that
   // cannot find/stop the old agent could ghost it or stop the wrong process.
-  const oldProcs = findNodeProcessesByAlias(oldDisplay, oldId);
-  if (oldProcs === null) {
+  //
+  // #1458 — capture (pid, discoveredBirth) atomically via findNodeStopCandidates
+  // so we can defeat pid-reuse at kill time (see rename kill loop below).
+  // The bare-pid `findNodeProcessesByAlias` was TOCTOU-vulnerable: between the
+  // ps snapshot and each terminateNodeProcess signal, an old pid could be
+  // recycled to an unrelated process B and this rename would kill B.
+  const oldCandidates = findNodeStopCandidates(oldDisplay, oldId);
+  if (oldCandidates === null) {
     console.error(`[anet] ❌ cannot inspect the process table (\`ps\` failed) — refusing the rename.`);
     console.error(`[anet]    Rename must locate + stop the old agent; without \`ps\` it risks a ghost or stopping the wrong process.`);
     process.exit(1);
   }
-  const running = oldProcs.length > 0;
+  const running = oldCandidates.length > 0;
   if (running && !force) {
     console.error(`Node "${oldId}" is running. Use --force to rename a running node (active rename, RFC-010 §4.4).`);
     process.exit(1);
@@ -9266,16 +9276,34 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
     // unrelated recycled pid). Each: SIGTERM → 8s wait → SIGKILL (--force) → 3s.
     // #180 R2 — re-scan; if `ps` now fails fall back to the detection-time set
     // (never silently treat the old node as already stopped).
-    const livePids = findNodeProcessesByAlias(oldDisplay, oldId) ?? oldProcs;
-    for (const pid of livePids) {
+    //
+    // #1458 — re-scan via findNodeStopCandidates so we have discoveredBirth
+    // for the fresh live set too. Fallback stays to the detection-time
+    // candidates (oldCandidates), NOT bare pids — otherwise the fallback
+    // path would silently drop the pid-reuse guard the primary path has.
+    // Before EACH kill, verify (pid, discoveredBirth) still names the same
+    // incarnation via isSameIncarnation. If pid was recycled, skip (agent A
+    // is already gone; B is unrelated and must not be signaled).
+    const livePidsCandidates = findNodeStopCandidates(oldDisplay, oldId) ?? oldCandidates;
+    for (const { pid, discoveredBirth } of livePidsCandidates) {
+      if (!isSameIncarnation(pid, discoveredBirth, probeCurrentBirthSignature)) {
+        // pid was recycled OR vanished between discovery/re-scan and this
+        // moment. Either way there is nothing of ours to signal here.
+        // Log so operators know a recycled-pid case actually fired in
+        // production (currently zero measured occurrences; this makes it
+        // observable). Do NOT push to oldSurvivors — the agent we wanted
+        // gone (A) is gone.
+        console.log(`[anet] pid ${pid} was recycled or vanished since discovery — not signaling (agent already gone).`);
+        continue;
+      }
       if (!(await terminateNodeProcess(pid, force))) {
         oldSurvivors.push(pid);
         console.error(`[anet] ✗ old agent process (pid ${pid}) did not exit after SIGTERM + SIGKILL.`);
       }
     }
     oldProcessConfirmedDead = oldSurvivors.length === 0;
-    if (oldProcessConfirmedDead && livePids.length > 0) {
-      console.log(`[anet] stopped old agent process(es): ${livePids.join(", ")}`);
+    if (oldProcessConfirmedDead && livePidsCandidates.length > 0) {
+      console.log(`[anet] stopped old agent process(es): ${livePidsCandidates.map(c => c.pid).join(", ")}`);
     }
 
     // #180 — sweep MCP bridge orphans. claude-code-cli spawns `.anet/node-

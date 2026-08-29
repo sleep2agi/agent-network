@@ -99,3 +99,26 @@ export function processVanished(pid: number, kill: (p: number, s: number) => voi
     return (error as NodeJS.ErrnoException)?.code === "ESRCH";
   }
 }
+
+/** 🔴 #1458 — kill 前的 pid 回收保护:发现阶段捕获的 discoveredBirth 与
+ *  **当前**probeCurrentSignature(pid) 相等 ⇒ 同一代,可以信号。
+ *
+ *  · currentSig === discoveredBirth ⇒ true(同代,可 kill)
+ *  · currentSig !== discoveredBirth ⇒ false(pid 被回收,现在这个 pid 是另一
+ *    个进程 B。**不要 kill** —— B 与我们要 stop 的 agent 无关)
+ *  · currentSig === null            ⇒ false(pid 已消失或读不到;caller 判
+ *    是消失就该 skip,权限问题应额外处理但不该 kill 未知对象)
+ *
+ *  与 resolveOwnedRoots 内嵌的同款比较**在语义上一致**,但在**时间点上不同**:
+ *    resolveOwnedRoots 用于「冻结」时刻(装进 lifecycle owner)
+ *    isSameIncarnation 用于「发信号」前那一瞬(rename 的 kill 循环)
+ *  两个时刻中间可能又有窗口,所以这个检查要**离 process.kill 越近越好**。 */
+export function isSameIncarnation(
+  pid: number,
+  discoveredBirth: string,
+  probeCurrentSignature: (pid: number) => string | null,
+): boolean {
+  const currentSig = probeCurrentSignature(pid);
+  if (currentSig === null) return false;
+  return currentSig === discoveredBirth;
+}
